@@ -137,8 +137,10 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   不得改写输入、选择 Runtime action、授予 credit 或裁决 terminal。
 - owner-fact acquisition 是同一 CWI 的有界前置 transaction，不是 terminal proof：manifest 必须同时保留 Definition 的
   terminal evidence kinds 与当前 acquisition evidence kinds。acquisition 成功只允许 SM-2 通过 owner-private event 重开
-  同一 CWI 并生成 terminal-proof successor；已有 sealed acquisition 时，LLM 的 `undeclared_prerequisite` 必须在 ticket 前
-  由 pure manifest admission 拒绝。
+  同一 CWI 并生成 terminal-proof successor。LLM 的 `undeclared_prerequisite` 必须携带按 CWI 绑定的 exact typed
+  `PrerequisiteClaims`；pure manifest admission 逐项区分 `already_satisfied | declared_with_acquisition |
+  genuinely_undeclared`。前两类以及已声明但 unresolved 的矛盾合同都只进入同 request 的 bounded semantic correction，只有
+  `genuinely_undeclared` 才允许形成 gap observation。
 - prospective acquisition 还必须用 pre-seal exact contract ref 组合 acquisition-owner hypothetical delta 与 required-owner
   dependency observation。pre-seal Definition 只封存 target policy、declaration selector/candidate refs 与 acquisition
   closure；由其编译的 generation-specific obligation/manifest 再封存 operation selector 与 current owner

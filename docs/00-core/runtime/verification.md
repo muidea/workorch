@@ -393,9 +393,18 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   `TestRuntimeMainlineSchemaCorrectionDocumentCASRestartMatrix` 必须共同证明 required container 的
   decoder→SM-3 witness→LLM C4→strict retry 闭环，并覆盖 exact null/type lineage、stable prefix、attempt budget、CAS
   before/after、fresh-load/duplicate、第二次拒绝 final 以及零 capability effect。
-- Definition-gap complete document 在 owner-private transition 前必须通过 pure manifest/expected-document admission；已有 sealed
-  acquisition 的 `undeclared_prerequisite` 只产生 attempt-0 typed correction，零 gap observation、governance、ticket、dispatch、
-  effect 或 Definition mutation；stale identity 同样不能越过 admission。
+- Definition-gap complete document 在 owner-private transition 前必须通过 pure manifest/expected-document admission；
+  `TestRuntimeDefinitionGapUndeclaredPrerequisiteRequiresExactTypedClaims`、
+  `TestEvaluateRuntimeDefinitionGapAdmissionRejectsSatisfiedDeclaredPrerequisite` 与
+  `TestEvaluateRuntimeDefinitionGapAdmissionRejectsUndeclaredPrerequisiteWithSealedOwnerFactAcquisition` 必须分别证明 typed claim
+  完整性、`already_satisfied` 和 `declared_with_acquisition` 都只产生 bounded typed correction 的 pure rejection；零 gap
+  observation、governance、ticket、dispatch、effect 或 Definition mutation。真正未声明由
+  `TestEvaluateRuntimeDefinitionGapAdmissionAcceptsManifestBoundGapWithoutDeclaredAcquisition` 证明可 admission；stale identity
+  同样不能越过 admission。`TestRuntimeSemanticPlanRequestSchemaRequiresTypedUndeclaredPrerequisiteClaims` 证明
+  JSONSchemaResponse on/off 共用的 closed wire 只在该 gap kind 要求 bounded typed claims，并将 proof-batch ref/claim 收窄到 exact
+  batch；`TestRuntimeDefinitionGapSourceRefClaimsCoverEveryDerivedCWI` 证明 shared source 全覆盖与 batch-escape fail closed；
+  `TestRuntimeSemanticFalseUndeclaredPrerequisiteUsesCorrectionAcrossRestart` 证明 ready owner fact 的错误 gap 在 aggregate reload 后
+  仍复用同一 correction generation 正向接受正常 semantic document，且零 clarification/governance/dispatch/capability effect。
 
 ### Capability And Receipt
 

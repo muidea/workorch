@@ -17,9 +17,10 @@ const (
 	RuntimeDefinitionClarificationSignatureVersionV1 = "v1"
 	RuntimeDefinitionClarificationRequiredOutputKind = "definition/clarification"
 
-	RuntimeDefinitionClarificationMaxOffendingRefs   = 64
-	RuntimeDefinitionClarificationMaxCanonicalBytes  = 64 * 1024
-	RuntimeDefinitionClarificationMaxDiagnosticBytes = 4 * 1024
+	RuntimeDefinitionClarificationMaxOffendingRefs      = 64
+	RuntimeDefinitionClarificationMaxPrerequisiteClaims = 64
+	RuntimeDefinitionClarificationMaxCanonicalBytes     = 64 * 1024
+	RuntimeDefinitionClarificationMaxDiagnosticBytes    = 4 * 1024
 )
 
 type RuntimeDefinitionGapKind string
@@ -35,18 +36,72 @@ const (
 // identity; the Orchestrator derives those values only after the complete
 // provider document has been persisted.
 type RuntimeDefinitionGapProviderDocument struct {
-	DocumentKind             RuntimeProviderDocumentKind `json:"documentKind"`
-	SchemaVersion            string                      `json:"schemaVersion"`
-	ManifestHash             string                      `json:"manifestHash"`
-	DefinitionSeedHash       string                      `json:"definitionSeedHash"`
-	ResultKind               string                      `json:"resultKind"`
-	PlanStep                 RuntimeSemanticPlanStep     `json:"planStep"`
-	BatchID                  string                      `json:"batchId,omitempty"`
-	BatchSequence            *int                        `json:"batchSequence,omitempty"`
-	BatchCoverageWorkItemIDs []common.CoverageWorkItemID `json:"batchCoverageWorkItemIds,omitempty"`
-	GapKind                  RuntimeDefinitionGapKind    `json:"gapKind"`
-	OffendingItemRefs        []string                    `json:"offendingItemRefs"`
-	DiagnosticMessage        string                      `json:"diagnosticMessage"`
+	DocumentKind             RuntimeProviderDocumentKind             `json:"documentKind"`
+	SchemaVersion            string                                  `json:"schemaVersion"`
+	ManifestHash             string                                  `json:"manifestHash"`
+	DefinitionSeedHash       string                                  `json:"definitionSeedHash"`
+	ResultKind               string                                  `json:"resultKind"`
+	PlanStep                 RuntimeSemanticPlanStep                 `json:"planStep"`
+	BatchID                  string                                  `json:"batchId,omitempty"`
+	BatchSequence            *int                                    `json:"batchSequence,omitempty"`
+	BatchCoverageWorkItemIDs []common.CoverageWorkItemID             `json:"batchCoverageWorkItemIds,omitempty"`
+	GapKind                  RuntimeDefinitionGapKind                `json:"gapKind"`
+	OffendingItemRefs        []string                                `json:"offendingItemRefs"`
+	PrerequisiteClaims       []RuntimeDefinitionGapPrerequisiteClaim `json:"prerequisiteClaims,omitempty"`
+	DiagnosticMessage        string                                  `json:"diagnosticMessage"`
+}
+
+// RuntimeDefinitionGapPrerequisiteClaim is the provider's bounded factual
+// assertion that one exact owner-fact requirement is absent from the sealed
+// Definition for one CWI. It is not authority: pure manifest admission must
+// prove the requirement is genuinely undeclared before any owner state can
+// observe the gap.
+type RuntimeDefinitionGapPrerequisiteClaim struct {
+	CoverageWorkItemID common.CoverageWorkItemID `json:"coverageWorkItemId"`
+	OwnerModuleID      string                    `json:"ownerModuleId"`
+	FactKind           RuntimeOwnerFactKind      `json:"factKind"`
+	OperationKind      string                    `json:"operationKind"`
+}
+
+func (c RuntimeDefinitionGapPrerequisiteClaim) Normalized() RuntimeDefinitionGapPrerequisiteClaim {
+	c.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(c.CoverageWorkItemID)))
+	requirement := c.Requirement().Normalized()
+	c.OwnerModuleID = requirement.OwnerModuleID
+	c.FactKind = requirement.FactKind
+	c.OperationKind = requirement.OperationKind
+	return c
+}
+
+func (c RuntimeDefinitionGapPrerequisiteClaim) Requirement() RuntimeOwnerFactRequirement {
+	return RuntimeOwnerFactRequirement{
+		OwnerModuleID: c.OwnerModuleID,
+		FactKind:      c.FactKind,
+		OperationKind: c.OperationKind,
+	}
+}
+
+func (c RuntimeDefinitionGapPrerequisiteClaim) Validate() error {
+	c = c.Normalized()
+	if c.CoverageWorkItemID == "" {
+		return fmt.Errorf("runtime Definition gap prerequisite claim requires a coverage work item")
+	}
+	return c.Requirement().Validate()
+}
+
+func normalizeRuntimeDefinitionGapPrerequisiteClaims(values []RuntimeDefinitionGapPrerequisiteClaim) []RuntimeDefinitionGapPrerequisiteClaim {
+	ret := append([]RuntimeDefinitionGapPrerequisiteClaim(nil), values...)
+	for idx := range ret {
+		ret[idx] = ret[idx].Normalized()
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		left := string(ret[i].CoverageWorkItemID) + "|" + RuntimeOwnerFactRequirementRef(ret[i].Requirement())
+		right := string(ret[j].CoverageWorkItemID) + "|" + RuntimeOwnerFactRequirementRef(ret[j].Requirement())
+		return left < right
+	})
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func (d RuntimeDefinitionGapProviderDocument) Normalized() RuntimeDefinitionGapProviderDocument {
@@ -60,6 +115,7 @@ func (d RuntimeDefinitionGapProviderDocument) Normalized() RuntimeDefinitionGapP
 	d.BatchCoverageWorkItemIDs = normalizeOrderedCoverageWorkItemIDs(d.BatchCoverageWorkItemIDs)
 	d.GapKind = RuntimeDefinitionGapKind(strings.TrimSpace(string(d.GapKind)))
 	d.OffendingItemRefs = normalizeStrings(d.OffendingItemRefs)
+	d.PrerequisiteClaims = normalizeRuntimeDefinitionGapPrerequisiteClaims(d.PrerequisiteClaims)
 	d.DiagnosticMessage = strings.TrimSpace(d.DiagnosticMessage)
 	return d
 }
@@ -68,6 +124,7 @@ func (d RuntimeDefinitionGapProviderDocument) Clone() RuntimeDefinitionGapProvid
 	d = d.Normalized()
 	d.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), d.BatchCoverageWorkItemIDs...)
 	d.OffendingItemRefs = append([]string(nil), d.OffendingItemRefs...)
+	d.PrerequisiteClaims = append([]RuntimeDefinitionGapPrerequisiteClaim(nil), d.PrerequisiteClaims...)
 	if d.BatchSequence != nil {
 		value := *d.BatchSequence
 		d.BatchSequence = &value
@@ -108,14 +165,71 @@ func (d RuntimeDefinitionGapProviderDocument) ValidateAgainst(manifest RuntimeSe
 	if err := validateRuntimeFeedbackSafeText("runtime Definition gap diagnostic", d.DiagnosticMessage); err != nil {
 		return err
 	}
-	allowedRefs := make(map[string]struct{}, len(manifest.CoverageItems)*2)
+	coverageByRef := make(map[string][]common.CoverageWorkItemID, len(manifest.CoverageItems)*2)
+	coverageIDRefs := make(map[string]struct{}, len(manifest.CoverageItems))
 	for _, item := range manifest.CoverageItems {
-		allowedRefs[string(item.ID)] = struct{}{}
-		allowedRefs[strings.TrimSpace(item.SourceID)] = struct{}{}
+		ref := string(item.ID)
+		coverageIDRefs[ref] = struct{}{}
+		coverageByRef[ref] = []common.CoverageWorkItemID{item.ID}
 	}
+	for _, item := range manifest.CoverageItems {
+		ref := strings.TrimSpace(item.SourceID)
+		if _, exactCoverageID := coverageIDRefs[ref]; exactCoverageID {
+			continue
+		}
+		duplicate := false
+		for _, current := range coverageByRef[ref] {
+			if current == item.ID {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			coverageByRef[ref] = append(coverageByRef[ref], item.ID)
+		}
+	}
+	offendingCoverage := make(map[common.CoverageWorkItemID]struct{}, len(d.OffendingItemRefs))
 	for _, ref := range d.OffendingItemRefs {
-		if _, ok := allowedRefs[ref]; !ok {
+		coverageIDs := coverageByRef[ref]
+		if len(coverageIDs) == 0 {
 			return fmt.Errorf("runtime Definition gap offending ref %q is outside the sealed manifest", ref)
+		}
+		for _, coverageID := range coverageIDs {
+			offendingCoverage[coverageID] = struct{}{}
+		}
+	}
+	switch d.GapKind {
+	case RuntimeDefinitionGapUndeclaredPrerequisite:
+		if len(d.PrerequisiteClaims) == 0 {
+			return fmt.Errorf("runtime Definition gap undeclared prerequisite requires exact typed prerequisite claims")
+		}
+		if len(d.PrerequisiteClaims) > RuntimeDefinitionClarificationMaxPrerequisiteClaims {
+			return fmt.Errorf("runtime Definition gap prerequisite claims exceed the bounded clarification budget")
+		}
+		claimedCoverage := make(map[common.CoverageWorkItemID]struct{}, len(d.PrerequisiteClaims))
+		seenClaims := make(map[string]struct{}, len(d.PrerequisiteClaims))
+		for _, claim := range d.PrerequisiteClaims {
+			if err := claim.Validate(); err != nil {
+				return err
+			}
+			if _, ok := offendingCoverage[claim.CoverageWorkItemID]; !ok {
+				return fmt.Errorf("runtime Definition gap prerequisite claim coverage %q is not an offending item", claim.CoverageWorkItemID)
+			}
+			claimRef := string(claim.CoverageWorkItemID) + "|" + RuntimeOwnerFactRequirementRef(claim.Requirement())
+			if _, duplicate := seenClaims[claimRef]; duplicate {
+				return fmt.Errorf("runtime Definition gap prerequisite claim %q is duplicated", claimRef)
+			}
+			seenClaims[claimRef] = struct{}{}
+			claimedCoverage[claim.CoverageWorkItemID] = struct{}{}
+		}
+		for coverageID := range offendingCoverage {
+			if _, ok := claimedCoverage[coverageID]; !ok {
+				return fmt.Errorf("runtime Definition gap offending coverage %q has no exact prerequisite claim", coverageID)
+			}
+		}
+	default:
+		if len(d.PrerequisiteClaims) != 0 {
+			return fmt.Errorf("runtime Definition gap kind %q cannot carry prerequisite claims", d.GapKind)
 		}
 	}
 	switch expected.PlanStep {
@@ -127,6 +241,15 @@ func (d RuntimeDefinitionGapProviderDocument) ValidateAgainst(manifest RuntimeSe
 		if d.BatchID != expected.BatchID || d.BatchSequence == nil || *d.BatchSequence != expected.BatchSequence ||
 			!sameCoverageIDsInOrder(d.BatchCoverageWorkItemIDs, expected.BatchCoverageWorkItemIDs) {
 			return fmt.Errorf("proof-batch Definition gap does not match the sealed batch identity")
+		}
+		batchCoverage := make(map[common.CoverageWorkItemID]struct{}, len(expected.BatchCoverageWorkItemIDs))
+		for _, coverageID := range expected.BatchCoverageWorkItemIDs {
+			batchCoverage[coverageID] = struct{}{}
+		}
+		for coverageID := range offendingCoverage {
+			if _, ok := batchCoverage[coverageID]; !ok {
+				return fmt.Errorf("proof-batch Definition gap offending coverage %q is outside the sealed batch", coverageID)
+			}
 		}
 	default:
 		return fmt.Errorf("runtime Definition gap has unsupported semantic plan step %q", expected.PlanStep)
@@ -169,7 +292,8 @@ func runtimeDefinitionGapAdmissionFailure(disposition RuntimeDefinitionGapAdmiss
 // expected-document and provider-document values. It owns no state, CAS,
 // EventHub, retry accounting or action selection. In particular, a provider
 // cannot classify a prerequisite as undeclared when the same sealed manifest
-// already carries an exact owner-fact acquisition for the offending CWI.
+// already declares, satisfies, or carries an exact acquisition for that owner
+// fact on the offending CWI.
 func EvaluateRuntimeDefinitionGapAdmission(manifest RuntimeSemanticPlanManifest, expected RuntimeExpectedDocumentContract, document RuntimeDefinitionGapProviderDocument) RuntimeDefinitionGapAdmissionDecision {
 	if err := manifest.Validate(); err != nil {
 		return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "manifest_invalid", err)
@@ -192,10 +316,31 @@ func EvaluateRuntimeDefinitionGapAdmission(manifest RuntimeSemanticPlanManifest,
 	}
 	normalizedDocument := document.Normalized()
 	if normalizedDocument.GapKind == RuntimeDefinitionGapUndeclaredPrerequisite {
-		for _, ref := range normalizedDocument.OffendingItemRefs {
-			if runtimeDefinitionGapRefHasOwnerFactAcquisition(normalizedManifest, ref) {
-				return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "owner_fact_acquisition_declared", fmt.Errorf("runtime Definition gap prerequisite %q already has a sealed owner-fact acquisition", ref))
+		obligations := make(map[common.CoverageWorkItemID]RuntimeSemanticProofObligation, len(normalizedManifest.ProofObligations))
+		for _, obligation := range normalizedManifest.ProofObligations {
+			obligations[obligation.CoverageWorkItemID] = obligation
+		}
+		catalogs := append(CloneRuntimeOperationAdmissibilities(normalizedManifest.OwnerCatalogs), normalizedManifest.OwnerFactDependencyCatalogs...)
+		for _, claim := range normalizedDocument.PrerequisiteClaims {
+			obligation := obligations[claim.CoverageWorkItemID]
+			requirement := claim.Requirement().Normalized()
+			declared := false
+			for _, current := range obligation.RequiredOwnerFacts {
+				if current.Normalized() == requirement {
+					declared = true
+					break
+				}
 			}
+			if !declared {
+				continue
+			}
+			if len(RuntimeMissingOwnerFactRequirements([]RuntimeOwnerFactRequirement{requirement}, catalogs)) == 0 {
+				return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "owner_fact_requirement_satisfied", fmt.Errorf("runtime Definition gap prerequisite %q is already satisfied by the sealed owner catalog", RuntimeOwnerFactRequirementRef(requirement)))
+			}
+			if obligation.OwnerFactAcquisition != nil && obligation.OwnerFactAcquisition.Requirement.Normalized() == requirement {
+				return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "owner_fact_acquisition_declared", fmt.Errorf("runtime Definition gap prerequisite %q already has a sealed owner-fact acquisition", RuntimeOwnerFactRequirementRef(requirement)))
+			}
+			return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "owner_fact_requirement_declared", fmt.Errorf("runtime Definition gap prerequisite %q is already declared by the sealed proof obligation", RuntimeOwnerFactRequirementRef(requirement)))
 		}
 	}
 	return RuntimeDefinitionGapAdmissionDecision{Disposition: RuntimeDefinitionGapAdmissionAdmitted, Code: "gap_admitted"}
@@ -218,26 +363,6 @@ func runtimeDefinitionGapDocumentMatchesExpectedIdentity(document RuntimeDefinit
 	default:
 		return false
 	}
-}
-
-func runtimeDefinitionGapRefHasOwnerFactAcquisition(manifest RuntimeSemanticPlanManifest, ref string) bool {
-	manifest = manifest.Normalized()
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return false
-	}
-	acquisitionByCoverage := make(map[common.CoverageWorkItemID]bool, len(manifest.ProofObligations))
-	for _, obligation := range manifest.ProofObligations {
-		acquisitionByCoverage[obligation.CoverageWorkItemID] = obligation.OwnerFactAcquisition != nil
-	}
-	for _, item := range manifest.CoverageItems {
-		if ref == string(item.ID) || ref == strings.TrimSpace(item.SourceID) {
-			if acquisitionByCoverage[item.ID] {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func sameCoverageIDsInOrder(left, right []common.CoverageWorkItemID) bool {
@@ -278,6 +403,10 @@ func StableRuntimeDefinitionGapProviderDocumentHash(document RuntimeDefinitionGa
 	}
 	writeHashString(h, string(document.GapKind))
 	writeHashStrings(h, document.OffendingItemRefs)
+	for _, claim := range document.PrerequisiteClaims {
+		writeHashString(h, string(claim.CoverageWorkItemID))
+		writeHashString(h, RuntimeOwnerFactRequirementRef(claim.Requirement()))
+	}
 	writeHashString(h, document.DiagnosticMessage)
 	return "runtime-definition-gap-document-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
@@ -597,8 +726,15 @@ func DecodeRuntimeDefinitionGapPayloadWithManifest(manifest RuntimeSemanticPlanM
 	if err := json.Unmarshal(payload, &envelope); err != nil {
 		return RuntimeDefinitionGapProviderDocument{}, err
 	}
-	allowed := []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "definitionSeedHash", "diagnosticMessage", "documentKind", "gapKind", "manifestHash", "offendingItemRefs", "planStep", "resultKind", "schemaVersion"}
+	allowed := []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "definitionSeedHash", "diagnosticMessage", "documentKind", "gapKind", "manifestHash", "offendingItemRefs", "planStep", "prerequisiteClaims", "resultKind", "schemaVersion"}
 	required := []string{"definitionSeedHash", "diagnosticMessage", "documentKind", "gapKind", "manifestHash", "offendingItemRefs", "planStep", "resultKind", "schemaVersion"}
+	var gapKind RuntimeDefinitionGapKind
+	if rawGapKind, found := envelope["gapKind"]; found {
+		_ = json.Unmarshal(rawGapKind, &gapKind)
+	}
+	if RuntimeDefinitionGapKind(strings.TrimSpace(string(gapKind))) == RuntimeDefinitionGapUndeclaredPrerequisite {
+		required = append(required, "prerequisiteClaims")
+	}
 	if expected.Normalized().PlanStep == RuntimeSemanticPlanStepProofBatch {
 		required = append(required, "batchCoverageWorkItemIds", "batchId", "batchSequence")
 	}

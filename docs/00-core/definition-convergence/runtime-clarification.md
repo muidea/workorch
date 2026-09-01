@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-24
+Last Verified: 2026-09-01
 
 ## Scope
 
@@ -21,9 +21,24 @@ command；LLM 不携带或生成 WorkspaceID、RunID、authority、ticket、repl
 
 该 provider document 只有经过 `EvaluateRuntimeDefinitionGapAdmission` 的 pure manifest-bound admission 才能成为 gap fact。
 admission 精确校验 manifest、expected-document、plan step/batch identity 与 offending CWI/source ref；`stale_conflict` 或
-`rejected` 都回到同 request 的 bounded typed semantic correction，不触发 owner state。尤其当 sealed proof obligation 已经
-包含 exact `OwnerFactAcquisition` 时，`undeclared_prerequisite` 必须以 `owner_fact_acquisition_declared` 拒绝：当前只是
-validation surface 尚未 ready，不是 Definition 缺声明，因而零 observation、`need_governance`、clarification dispatch 或 ticket。
+`rejected` 都回到同 request 的 bounded typed semantic correction，不触发 owner state。
+
+`undeclared_prerequisite` 不能只靠 diagnostic text 成立。document 必须携带 `PrerequisiteClaims[]`，每项固定为
+`CoverageWorkItemID + OwnerModuleID + FactKind + OperationKind`；每个 offending CWI 至少一项、同 CWI/requirement 不得重复、claim
+不得指向非 offending CWI，且其它 gap kind 禁止携带该字段。source ref 若派生多个 CWI，必须覆盖全部；proof-batch 的 ref/claim
+还必须完全位于 sealed batch，不能借当前 request 报告其它 CWI。claim 只是待核验事实，不是 prerequisite、acquisition 或
+transition authority。pure admission 对 exact claim 执行三值核对：
+
+1. sealed proof obligation 已声明 requirement，且当前 owner catalog 已提供 selectable fact：以
+   `owner_fact_requirement_satisfied` 拒绝；
+2. sealed proof obligation 已声明 requirement，当前 fact missing 但已有 exact `OwnerFactAcquisition`：以
+   `owner_fact_acquisition_declared` 拒绝；已声明但 manifest 内部仍 unresolved 的矛盾也以
+   `owner_fact_requirement_declared` fail closed；
+3. requirement 在该 CWI 的 sealed proof obligation 中确实不存在：`genuinely_undeclared`，才可 admission。
+
+一个 document 含多项 claim 时，任一项属于前两类或矛盾类都会拒绝整份 document。拒绝路径零 observation、
+`need_governance`、clarification dispatch、ticket、operation、effect 或 Definition mutation；attempt-1 继续复用同一
+manifest/expected-document/stable prefix，只在 C4 携带 typed correction。
 
 1. SM-3 先把 complete document 与 original diagnostic 持久化；pure admission 通过后，Orchestrator 才从 current aggregate 派生并绑定
    `WorkspaceID + RunID + DefinitionRevision + StartupInputHash + AuthoritySnapshotID + FocusRef + LogicalRequestID`，形成

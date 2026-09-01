@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "diagnosticMessage", "documentKind", "gapKind", "manifestHash", "offendingItemRefs", "planStep", "proposals", "resultKind", "schemaVersion"}
+	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "diagnosticMessage", "documentKind", "gapKind", "manifestHash", "offendingItemRefs", "planStep", "prerequisiteClaims", "proposals", "resultKind", "schemaVersion"}
 	runtimeSemanticProposalFields = []string{"coverageWorkItemId", "declarationRef", "operationKind", "operationVariantId", "ownerModuleId", "requiredEvidenceKinds", "target", "validationRecipeId"}
 	runtimeSemanticTargetFields   = []string{"exactTargetRefs", "ownerScopeTargetRefs", "ownerSelectorRefs", "policy", "prospectiveConstraintRefs", "prospectiveTargetRefs"}
 )
@@ -354,13 +354,26 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 		"type": "object", "additionalProperties": false,
 		"required": []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "proposals"},
 		"properties": map[string]any{
-			"documentKind":             map[string]any{"const": string(RuntimeProviderDocumentSemanticPlan)},
-			"schemaVersion":            map[string]any{"const": RuntimeSemanticPlanDocumentSchemaCurrent},
-			"manifestHash":             map[string]any{"const": manifest.Hash},
-			"definitionSeedHash":       map[string]any{"const": manifest.DefinitionSeedHash},
-			"resultKind":               map[string]any{"const": RuntimeDefinitionGapResultKind},
-			"gapKind":                  map[string]any{"type": "string", "enum": RuntimeDefinitionClarificationGapKinds()},
-			"offendingItemRefs":        stringEnumArraySchemaWithMaximum(definitionRefs, RuntimeDefinitionClarificationMaxOffendingRefs, 1),
+			"documentKind":       map[string]any{"const": string(RuntimeProviderDocumentSemanticPlan)},
+			"schemaVersion":      map[string]any{"const": RuntimeSemanticPlanDocumentSchemaCurrent},
+			"manifestHash":       map[string]any{"const": manifest.Hash},
+			"definitionSeedHash": map[string]any{"const": manifest.DefinitionSeedHash},
+			"resultKind":         map[string]any{"const": RuntimeDefinitionGapResultKind},
+			"gapKind":            map[string]any{"type": "string", "enum": RuntimeDefinitionClarificationGapKinds()},
+			"offendingItemRefs":  stringEnumArraySchemaWithMaximum(definitionRefs, RuntimeDefinitionClarificationMaxOffendingRefs, 1),
+			"prerequisiteClaims": map[string]any{
+				"type": "array", "minItems": 1, "maxItems": RuntimeDefinitionClarificationMaxPrerequisiteClaims, "uniqueItems": true,
+				"items": map[string]any{
+					"type": "object", "additionalProperties": false,
+					"required": []string{"coverageWorkItemId", "ownerModuleId", "factKind", "operationKind"},
+					"properties": map[string]any{
+						"coverageWorkItemId": map[string]any{"type": "string", "enum": coverageIDs},
+						"ownerModuleId":      map[string]any{"type": "string", "minLength": 1, "maxLength": 65536},
+						"factKind":           map[string]any{"const": string(RuntimeOwnerFactSelectableValidationSurface)},
+						"operationKind":      map[string]any{"type": "string", "minLength": 1, "maxLength": 65536},
+					},
+				},
+			},
 			"diagnosticMessage":        map[string]any{"type": "string", "minLength": 1, "maxLength": RuntimeDefinitionClarificationMaxDiagnosticBytes},
 			"planStep":                 map[string]any{"enum": []string{string(RuntimeSemanticPlanStepCoverageOrder), string(RuntimeSemanticPlanStepProofBatch)}},
 			"batchId":                  map[string]any{"type": "string"},
@@ -591,20 +604,52 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 		if batchID == "" || batchSequence < 0 || len(batchCoverageIDs) == 0 {
 			return "", fmt.Errorf("runtime semantic proof-batch schema requires batch identity and coverage")
 		}
-		manifestIDs := make(map[common.CoverageWorkItemID]struct{}, len(manifest.CoverageItems))
+		manifestItems := make(map[common.CoverageWorkItemID]RuntimeCoverageItem, len(manifest.CoverageItems))
 		for _, item := range manifest.CoverageItems {
-			manifestIDs[item.ID] = struct{}{}
+			manifestItems[item.ID] = item
+		}
+		batchCoverageSet := make(map[common.CoverageWorkItemID]struct{}, len(batchCoverageIDs))
+		for _, id := range batchCoverageIDs {
+			batchCoverageSet[id] = struct{}{}
+		}
+		sourceOutsideBatch := make(map[string]struct{})
+		for _, item := range manifest.CoverageItems {
+			if _, inBatch := batchCoverageSet[item.ID]; !inBatch {
+				sourceOutsideBatch[strings.TrimSpace(item.SourceID)] = struct{}{}
+			}
 		}
 		coverageIDs := make([]string, 0, len(batchCoverageIDs))
+		definitionRefs := make([]string, 0, len(batchCoverageIDs)*2)
 		for _, id := range batchCoverageIDs {
-			if _, found := manifestIDs[id]; !found {
+			item, found := manifestItems[id]
+			if !found {
 				return "", fmt.Errorf("runtime semantic proof-batch coverage %q is outside manifest", id)
 			}
 			coverageIDs = append(coverageIDs, string(id))
+			definitionRefs = append(definitionRefs, string(id))
+			sourceRef := strings.TrimSpace(item.SourceID)
+			_, collidesWithCoverageID := manifestItems[common.CoverageWorkItemID(sourceRef)]
+			if _, escapesBatch := sourceOutsideBatch[sourceRef]; !escapesBatch && !collidesWithCoverageID {
+				definitionRefs = append(definitionRefs, item.SourceID)
+			}
 		}
 		properties["batchId"] = map[string]any{"const": batchID}
 		properties["batchSequence"] = map[string]any{"const": batchSequence}
 		properties["batchCoverageWorkItemIds"] = map[string]any{"type": "array", "minItems": len(coverageIDs), "maxItems": len(coverageIDs), "uniqueItems": true, "items": map[string]any{"type": "string", "enum": coverageIDs}}
+		properties["offendingItemRefs"] = stringEnumArraySchemaWithMaximum(definitionRefs, RuntimeDefinitionClarificationMaxOffendingRefs, 1)
+		claims, ok := properties["prerequisiteClaims"].(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("runtime semantic proof-batch prerequisite claim schema is missing")
+		}
+		claimItems, ok := claims["items"].(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("runtime semantic proof-batch prerequisite claim items are missing")
+		}
+		claimProperties, ok := claimItems["properties"].(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("runtime semantic proof-batch prerequisite claim properties are missing")
+		}
+		claimProperties["coverageWorkItemId"] = map[string]any{"type": "string", "enum": coverageIDs}
 		delete(properties, "coverageOrder")
 		normalRequired := []string{"documentKind", "schemaVersion", "manifestHash", "definitionSeedHash", "planStep", "batchId", "batchSequence", "batchCoverageWorkItemIds", "proposals"}
 		proposals, ok := properties["proposals"].(map[string]any)
@@ -818,6 +863,16 @@ func attachRuntimeDefinitionGapSchemaForRequest(schema map[string]any, normalReq
 			}},
 		},
 	}
+	claimCondition := map[string]any{
+		"if": map[string]any{
+			"required":   []string{"gapKind"},
+			"properties": map[string]any{"gapKind": map[string]any{"const": string(RuntimeDefinitionGapUndeclaredPrerequisite)}},
+		},
+		"then": map[string]any{"required": []string{"prerequisiteClaims"}},
+		"else": map[string]any{"not": map[string]any{"required": []string{"prerequisiteClaims"}}},
+	}
+	allOf, _ := schema["allOf"].([]any)
+	schema["allOf"] = append(allOf, claimCondition)
 }
 
 func stringArraySchema() map[string]any {

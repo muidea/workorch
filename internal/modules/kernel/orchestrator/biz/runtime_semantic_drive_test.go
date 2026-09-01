@@ -1024,6 +1024,159 @@ func TestRuntimeSemanticDriveEmptyDocumentUsesBoundedSemanticCorrection(t *testi
 	}
 }
 
+func TestRuntimeSemanticFalseUndeclaredPrerequisiteUsesCorrectionAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(32)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	requirement := runtimecontract.RuntimeOwnerFactRequirement{
+		OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		FactKind:      runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+	}
+	bootstrap := runtimeBootstrap()
+	bootstrap.Definition.CapabilityContract = append(bootstrap.Definition.CapabilityContract, runtimecontract.RuntimeBlockKindManagedValidationSession)
+	bootstrap.DefinitionFocuses[0].RequiredOwnerFacts = []runtimecontract.RuntimeOwnerFactRequirement{requirement}
+	bootstrap.DefinitionFocuses[0].OwnerFactConvergences = []runtimecontract.RuntimeOwnerFactConvergence{{Requirement: requirement, RequirePreexisting: true}}
+	bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
+	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &runtimeDriveRepository{}
+	controller, err := runtime.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, err := runtimeTestControllerInitialize(controller, ctx, facts, bootstrap.Definition, bootstrap.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate.Facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+		Selection:           runtimecontract.ProviderInferenceSelection{Target: aggregate.Facts.Activation.ProviderSelection.Target},
+		ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048,
+		MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1",
+	}
+	shellCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "semantic-shell", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		TargetRefs:     []string{"workspace"}, ValidationRecipeRefs: []string{"recipe/managed-validation"},
+		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{{ID: "recipe/managed-validation", Command: "true"}},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: "recipe/managed-validation", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness:     runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "managed-validation-schema-v1",
+			InputBindingRef: "managed-validation-input-v1", CheckRefs: []string{"check/managed-validation"},
+			ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+			EffectScope:        runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}},
+		OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{{
+			ID: "managed-validation-policy", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			EffectScope:   runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}},
+		ObservedRevision: "shell-catalog-v1",
+	}
+	shellCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
+	fileCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.StepKindFileEdit}, TargetRefs: []string{"target.txt"}, ObservedRevision: "file-catalog-v1",
+	}
+	fileCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
+	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileCatalog, shellCatalog}
+	repository.aggregate = aggregate
+
+	providerCalls := 0
+	initialManifestHash, initialStablePrefixHash := "", ""
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		if command.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan || command.SemanticContext.PlanStep != runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
+			t.Errorf("false-gap test received unexpected provider command: %+v", command)
+			return
+		}
+		var payload []byte
+		var encodeErr error
+		if command.CandidateAttempt == 0 {
+			initialManifestHash, initialStablePrefixHash = command.SemanticManifest.Hash, command.StablePrefixHash
+			gap := runtimecontract.RuntimeDefinitionGapProviderDocument{
+				DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+				ManifestHash: command.SemanticManifest.Hash, DefinitionSeedHash: command.SemanticManifest.DefinitionSeedHash,
+				ResultKind: runtimecontract.RuntimeDefinitionGapResultKind, PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
+				GapKind:           runtimecontract.RuntimeDefinitionGapUndeclaredPrerequisite,
+				OffendingItemRefs: []string{string(command.SemanticManifest.CoverageItems[0].ID)},
+				PrerequisiteClaims: []runtimecontract.RuntimeDefinitionGapPrerequisiteClaim{{
+					CoverageWorkItemID: command.SemanticManifest.CoverageItems[0].ID, OwnerModuleID: requirement.OwnerModuleID,
+					FactKind: requirement.FactKind, OperationKind: requirement.OperationKind,
+				}},
+				DiagnosticMessage: "No selectable validation surface is currently published.",
+			}
+			payload, encodeErr = json.Marshal(gap)
+		} else {
+			if command.CandidateAttempt != 1 || command.SemanticCorrectionObservation == nil || command.SemanticCorrectionDirective == nil ||
+				command.SemanticManifest.Hash != initialManifestHash || command.StablePrefixHash != initialStablePrefixHash {
+				t.Errorf("false gap did not preserve one typed correction: %+v", command)
+				return
+			}
+			order := make([]common.CoverageWorkItemID, 0, len(command.SemanticManifest.CoverageItems))
+			for _, item := range command.SemanticManifest.CoverageItems {
+				order = append(order, item.ID)
+			}
+			payload, encodeErr = runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, runtimecontract.RuntimeSemanticPlanDocument{
+				SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
+				ManifestHash:  command.SemanticManifest.Hash, DefinitionSeedHash: command.SemanticManifest.DefinitionSeedHash,
+				PlanStep: runtimecontract.RuntimeSemanticPlanStepCoverageOrder, CoverageOrder: order,
+			})
+		}
+		if encodeErr != nil {
+			t.Errorf("encode false-gap provider document: %v", encodeErr)
+			return
+		}
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+			DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: command.ExpectedDocument.Hash, DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload),
+		}), nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+
+	module := newRuntimeGroundedTargetSequenceModule(t, hub, repository)
+	started, err := module.driveRuntimeSemanticPlanning(ctx, aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	correcting, err := module.driveRuntimeSemanticPlanning(ctx, started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls == 0 {
+		if correcting.SemanticPlanning.Failure != nil {
+			t.Fatalf("semantic fixture failed before provider: %+v", *correcting.SemanticPlanning.Failure)
+		}
+		t.Fatalf("semantic fixture stopped before provider without a typed failure: phase=%q", correcting.SemanticPlanning.Phase)
+	}
+	if providerCalls != 1 || correcting.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningCorrectionRequired ||
+		correcting.SemanticPlanning.Attempt != 1 || correcting.SemanticPlanning.CorrectionDirective == nil ||
+		len(correcting.SemanticPlanning.Rejections) != 1 || correcting.DefinitionClarification != nil ||
+		correcting.Decision.State == runtimecontract.ConvergenceStateNeedGovernance || len(correcting.GovernanceRequests) != 0 ||
+		correcting.ActiveDispatch != nil || len(correcting.CandidateAttempts) != 0 {
+		t.Fatalf("false undeclared prerequisite escaped pure correction admission: calls=%d aggregate=%+v", providerCalls, correcting)
+	}
+	reloaded, err := repository.Load(ctx, correcting.Facts.WorkspaceID, correcting.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := newRuntimeGroundedTargetSequenceModule(t, hub, repository).driveRuntimeSemanticPlanning(ctx, reloaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 2 || accepted.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningOrderAccepted ||
+		accepted.SemanticPlanning.Attempt != 1 || len(accepted.SemanticPlanning.Rejections) != 1 ||
+		accepted.DefinitionClarification != nil || accepted.Decision.State == runtimecontract.ConvergenceStateNeedGovernance ||
+		len(accepted.GovernanceRequests) != 0 || accepted.ActiveDispatch != nil || len(accepted.CandidateAttempts) != 0 {
+		t.Fatalf("false-gap correction did not resume the same semantic generation after restart: calls=%d aggregate=%+v", providerCalls, accepted)
+	}
+}
+
 func TestRuntimeSemanticDriveBodyIdleExhaustionReloadsWithoutProviderReplay(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)

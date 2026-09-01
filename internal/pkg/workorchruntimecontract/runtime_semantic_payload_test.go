@@ -17,7 +17,7 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(orderSchema, `"operationKind"`) || !strings.Contains(orderSchema, `"planStep":{"const":"coverage_order"}`) || !strings.Contains(orderSchema, `"maxItems":0`) {
+	if !strings.Contains(orderSchema, `"planStep":{"const":"coverage_order"}`) || !strings.Contains(orderSchema, `"maxItems":0`) {
 		t.Fatalf("coverage-order schema was not narrowed: %s", orderSchema)
 	}
 	var orderDecoded map[string]any
@@ -54,6 +54,11 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 	if len(coverageEnum) != 1 || coverageEnum[0] != "cwi-002" || proposals["minItems"] != float64(1) || properties["batchId"].(map[string]any)["const"] != "batch-1" {
 		t.Fatalf("proof-batch schema did not bind exact batch: %s", proofSchema)
 	}
+	claimCoverageEnum := properties["prerequisiteClaims"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)["coverageWorkItemId"].(map[string]any)["enum"].([]any)
+	offendingRefEnum := properties["offendingItemRefs"].(map[string]any)["items"].(map[string]any)["enum"].([]any)
+	if len(claimCoverageEnum) != 1 || claimCoverageEnum[0] != "cwi-002" || len(offendingRefEnum) != 2 || offendingRefEnum[0] != "cwi-002" || offendingRefEnum[1] != "dod-002" {
+		t.Fatalf("proof-batch gap schema escaped exact batch scope: %s", proofSchema)
+	}
 	for _, field := range []string{"requiredEvidenceKinds"} {
 		constraint := proposalProperties[field].(map[string]any)
 		if constraint["minItems"] != float64(1) || constraint["uniqueItems"] != true {
@@ -76,6 +81,40 @@ func TestRuntimeSemanticPlanRequestSchemaNarrowsOrderAndProofBatch(t *testing.T)
 	}
 	if strings.Contains(proofSchema, `"enum":null`) || strings.Contains(proofSchema, `requiredEffectScopes`) {
 		t.Fatalf("semantic schema emitted an invalid null enum: %s", proofSchema)
+	}
+}
+
+func TestRuntimeSemanticPlanRequestSchemaRequiresTypedUndeclaredPrerequisiteClaims(t *testing.T) {
+	manifest := semanticContractTestManifest(t)
+	schema, err := RuntimeSemanticPlanJSONSchemaForRequest(manifest, RuntimeSemanticPlanStepCoverageOrder, "", 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(schema), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	properties := decoded["properties"].(map[string]any)
+	claims := properties["prerequisiteClaims"].(map[string]any)
+	if claims["minItems"] != float64(1) || claims["maxItems"] != float64(RuntimeDefinitionClarificationMaxPrerequisiteClaims) || claims["uniqueItems"] != true {
+		t.Fatalf("prerequisite claim schema is not bounded and unique: %+v", claims)
+	}
+	items := claims["items"].(map[string]any)
+	if items["additionalProperties"] != false {
+		t.Fatalf("prerequisite claim schema accepts unknown fields: %+v", items)
+	}
+	claimProperties := items["properties"].(map[string]any)
+	if claimProperties["factKind"].(map[string]any)["const"] != string(RuntimeOwnerFactSelectableValidationSurface) {
+		t.Fatalf("prerequisite claim schema lost the typed fact kind: %+v", claimProperties)
+	}
+	conditions := decoded["allOf"].([]any)
+	if len(conditions) != 1 {
+		t.Fatalf("Definition gap claim conditional count = %d: %s", len(conditions), schema)
+	}
+	condition := conditions[0].(map[string]any)
+	if condition["then"].(map[string]any)["required"].([]any)[0] != "prerequisiteClaims" ||
+		condition["else"].(map[string]any)["not"].(map[string]any)["required"].([]any)[0] != "prerequisiteClaims" {
+		t.Fatalf("undeclared-prerequisite claim conditional is incomplete: %+v", condition)
 	}
 }
 

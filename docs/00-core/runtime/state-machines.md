@@ -299,10 +299,13 @@ current manifest 临时补全 scope；没有 matching sealed fallback 时按 typ
 - governance 只用于独立封存的真实权限、外部依赖或明确要求人工输入的配置/策略阻塞。capability infeasible、
   retry/repair budget exhaustion、候选/证据合同违规本身不能创建 ticket；只有对应 owner fact 同时携带 typed
   `ExternalDependency/GovernanceRequirement` 时才可进入 `need_governance`。
-- complete Definition-gap document 只是 LLM observation candidate。SM-2/SM-3 必须先执行 pure manifest admission；已有 sealed
-  acquisition 的 CWI 报 `undeclared_prerequisite` 时只能进入 bounded semantic correction，不能提交
-  `definition_gap_observed`、`need_governance` 或 ticket。只有 admitted gap 才能由 Orchestrator 的 owner-private event 选择
-  clarification transition。
+- complete Definition-gap document 只是 LLM observation candidate。`undeclared_prerequisite` 必须为每个 offending CWI 提供至少
+  一条唯一、bounded、typed `PrerequisiteClaim(CoverageWorkItemID, OwnerModuleID, FactKind, OperationKind)`；其它 gap kind 禁止携带
+  claim；shared source ref 必须覆盖其全部 CWI，proof-batch ref/claim 不得逃逸 sealed batch。SM-2/SM-3 在任何 owner-private
+  mutation 前用 sealed proof obligation、provider-selectable owner catalog 与 dependency
+  catalog 做 pure admission：exact requirement 已满足、已有 acquisition、已声明但 unresolved 或 claim/schema/stale 漂移都只能
+  进入同 request 的 bounded semantic correction，不能提交 `definition_gap_observed`、`need_governance` 或 ticket。只有所有 claim
+  都是 `genuinely_undeclared` 的 admitted gap 才能由 Orchestrator owner-private event 选择 clarification transition。
 - capability/provider unavailable、consumption unknown 或 owner dependency 暂时不可用时，只有已经存在 owner-defined typed
   recovery/reconciliation contract、明确 recovery condition、deadline/trigger 与可用 budget，SM-2 才可持久化
   `recoverable_runtime_wait` fact。缺少任一条件、guard/budget耗尽或owner明示不可恢复时必须形成typed terminal；
