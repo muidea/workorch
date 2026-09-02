@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-09-01
+Last Verified: 2026-09-02
 
 ## 四个协调状态机
 
@@ -73,6 +73,10 @@ load facts
   只有在 prerequisite、observation 与声明全部一致时，才能零 LLM fail-closed 为 `target_grounding_unresolved`；无 selection
   的 binding-free view 继续 pending，selected 或带 bounded candidates/exact mandatory set 的 empty scope 作为合法
   prospective creation 进入 semantic request。
+- semantic generation 的每个 proof batch 都必须重新通过该前置门禁。`EligibleFocusProjected` 推进 current CWI 后产生的
+  `TargetSelection` 或其它 semantic prerequisite，必须先经 typed owner acquisition 与 SM-2 private event/CAS 结算，再从 fresh
+  authority transaction 编译 batch 及 immutable `RequestLogicalID`。未结算期间可保留 accepted order/manifest，但不得创建
+  request session、调用 provider 或扣减 budget；duplicate、response loss 和 fresh restart 只允许重驱同一 owner fact transaction。
 - `need_validation` candidate 前，profile 声明的 validation discovery source 必须由 fresh owner resource 与 matching prerequisite observation 同时证明。
   缺失 `workspace_manifest | project_files | declared_commands | available_capabilities` 是 SM-2 prerequisite debt，不是
   capability unavailable feasibility：SM-2 必须用既有 typed requirement 返回 `need_prerequisite` 并重获 owner fact。

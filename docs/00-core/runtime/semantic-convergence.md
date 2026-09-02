@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-31
+Last Verified: 2026-09-02
 
 ## Runtime 生产主链
 
@@ -270,6 +270,14 @@ Shell 也不成为 File target owner。
 不得提前交付；`selected`，以及“empty scope 但 Definition 有 bounded selector candidates 或 exact owner-accepted mandatory
 constraint set”的合法 prospective creation则继续
 semantic planning。
+
+该前置条件必须在 accepted coverage order 的每个 proof batch 重新验证，而不只验证 semantic generation 的首个 batch。
+`EligibleFocusProjected` 推进到下一 CWI 后若投影出新的 focus-scoped `TargetSelection` 或其它 semantic prerequisite，SM-4 drive
+必须先调用既有 typed owner command/result，且只有 SM-2 owner-private CAS 可以将其结算；
+在 fresh aggregate 上仍有待办时，不得编译下一 proof batch、派生其 `RequestLogicalID`、创建 request session、调用 provider
+或扣减 provider budget。accepted order 与 manifest
+可以保持不变，但 batch identity 必须从包含 current owner observation 的 authority transaction 派生。结算后的 drive 只从 CAS
+返回的 aggregate 重新分派；duplicate、response loss 与 fresh restart 不得重复 owner effect 或 provider call。
 
 catalog retirement 可以在同一 Orchestrator owner-local CAS 中打开新的 semantic generation。若旧 generation 的 no-effect
 binding 尚为 current binding，SM-4 必须先投递既有 typed `CWIBindingRetired` internal fact，由 SM-2 唯一 reducer 退休旧

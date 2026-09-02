@@ -106,6 +106,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   terminal 不得生成 SM-4 drive result、startup classification 或 delivery request，旧 binding 也不得执行；restart/duplicate
   必须只退休一次并使 CWI 重新 eligible。已有 effect credit 的 binding 不得被 catalog refresh 退休；其它
   contract/budget/owner terminal 必须原样交付，administrative termination 继续使用独立 lane；
+- multi-batch target-grounding matrix 必须覆盖 accepted order 内 current CWI 推进后新投影的 TargetSelection：owner result 与
+  SM-2 CAS 必须先于下一 proof batch identity/request session/provider call；在 prerequisite pending 窗口保持零 attempt、零
+  provider budget debit。duplicate、response loss 与 fresh-worker restart 必须复用同一 owner fact transaction，且 terminal replay
+  不得重新取得已退役 selection 或产生额外 provider call；
 - Run/Workspace/Result 不解释 Orchestrator decision，只执行各自 owner-local typed outcome transition。
 
 ### Feedback Preservation
@@ -264,7 +268,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   `Facts.EvidenceRevision` 漂移；
 - semantic provider/owner preimage matrix 必须从 active/history accepted batch 的 exact manifest、batch generation
   `RequestLogicalID`、document hash/content 与 archived/retained feasibility facts重放 `CompileRuntimeSemanticBindings`，并覆盖
-  attempt-0 直接接受、attempt-1 correction→feasibility→seal、duplicate、multi-batch merge、response loss、fresh-load 与 settled-CWI
+  attempt-0 直接接受、attempt-1 correction→feasibility→seal、duplicate、multi-batch merge、batch rollover 前 prerequisite
+  结算、response loss、fresh-load 与 settled-CWI
   generation history。attempt-1 ledger request cursor 与 batch generation identity 必须明确不同；seal 使用 cursor、batch/document
   identity 漂移均须在 owner/provider/effect 前 fail closed。negative matrix 还必须分别及协调改写 Focus/binding、CWI current/history refs、reconciliation、session
   manifest bindings、accepted-attempt bindings 与 active/completed dispatch bindings；同步重算下游 hash 仍须因上游 preimage

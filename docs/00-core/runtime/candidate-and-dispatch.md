@@ -140,6 +140,11 @@ owner batch/observation set 与 sealed binding lineage hash；这些 identity �
 duplicate event 不增加 revision，scope/seed/request/batch 漂移必须拒绝，任何阶段都不得直接创建 dispatch、coverage、
 Decision 或 Approval。
 
+proof batch 只能在 current focus 的 semantic prerequisites 已持久化结算后打开。尤其 `EligibleFocusProjected` 在同一 accepted
+coverage order 中推进 CWI 时，新产生的 focus-scoped `TargetSelection` 必须先经 typed File owner result 和 SM-2 private CAS
+进入 fresh aggregate；不能先创建 batch/request session、再依赖 provider 前的最终 guard 补结算。否则 owner observation 会改变
+authority transaction，使已封存的 batch identity 失效。该窗口保持零 provider call、零 attempt、零 provider budget debit。
+
 proof batch 的 `RequestLogicalID` 是 batch 打开时即封存的 semantic generation identity；attempt 1 correction 只把 ledger
 当前 `LogicalRequestID` 推进为新的 provider request-session cursor，不得改写 batch identity。最终 accepted document 由同一
 batch 的 `DocumentHash` 独立封存，因此 SM-2 seal 与 fresh-load replay 都必须消费 `batch.RequestLogicalID + DocumentHash`，

@@ -390,6 +390,21 @@ func TestDriveRuntimeFileBackedRunExecutesDurableFileOwnerAndRestarts(t *testing
 // durable write changes workspace_tree. The next focus must not reactivate a
 // completed focus's target snapshot freshness authority.
 func TestRuntimeFileBackedFocusScopedTargetsStayRetiredAcrossDurableWrites(t *testing.T) {
+	testRuntimeFileBackedFocusScopedTargets(t, nil)
+}
+
+// TestRuntimeFileBackedNextProofBatchSettlesTargetSelectionBeforeProvider is
+// the deployed run-002 regression: a validation-only focus leaves the current
+// semantic generation and owner catalogs intact, so the next CWI advances to
+// another proof batch in that same generation. Its newly projected,
+// focus-scoped target selection must be acquired and CAS-persisted before SM-3
+// creates a request session or calls the provider.
+func TestRuntimeFileBackedNextProofBatchSettlesTargetSelectionBeforeProvider(t *testing.T) {
+	testRuntimeFileBackedFocusScopedTargets(t, map[common.CoverageWorkItemID]bool{"cwi-manager": true})
+}
+
+func testRuntimeFileBackedFocusScopedTargets(t *testing.T, validationOnly map[common.CoverageWorkItemID]bool) {
+	t.Helper()
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -418,6 +433,22 @@ func TestRuntimeFileBackedFocusScopedTargetsStayRetiredAcrossDurableWrites(t *te
 	}
 
 	bootstrap := runtimeFocusScopedSelectionBootstrap()
+	if len(validationOnly) != 0 {
+		for index := range bootstrap.DefinitionFocuses {
+			focus := &bootstrap.DefinitionFocuses[index]
+			if len(focus.CoverageWorkItemIDs) != 1 || !validationOnly[focus.CoverageWorkItemIDs[0]] {
+				continue
+			}
+			focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+			focus.RequireDirectEvidence = true
+			for sliceIndex := range bootstrap.Slices {
+				if bootstrap.Slices[sliceIndex].ID == focus.SliceID {
+					bootstrap.Slices[sliceIndex].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+				}
+			}
+		}
+		bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
+	}
 	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 	if err := runs.Create(ctx, &runmodel.Run{
 		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: bootstrap.Definition.GoalID, DoDID: bootstrap.Definition.DoDID,
@@ -519,22 +550,47 @@ func TestRuntimeFileBackedFocusScopedTargetsStayRetiredAcrossDurableWrites(t *te
 				document.BatchID = command.SemanticContext.BatchID
 				document.BatchSequence = command.SemanticContext.BatchSequence
 				document.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), command.SemanticContext.BatchCoverageWorkItemIDs...)
+				if len(command.SemanticContext.BatchCoverageWorkItemIDs) != 1 {
+					t.Errorf("focus-scoped proof batch coverage = %v, want one current CWI", command.SemanticContext.BatchCoverageWorkItemIDs)
+					return
+				}
+				currentCoverageID := command.SemanticContext.BatchCoverageWorkItemIDs[0]
+				persistedRun, loadErr := runs.GetByWorkspaceID(ctx, command.WorkspaceID, command.RunID)
+				if loadErr != nil || persistedRun.RuntimeState == nil {
+					t.Errorf("load proof-batch owner prerequisite state: run=%+v err=%v", persistedRun, loadErr)
+					return
+				}
+				selection := persistedRun.RuntimeState.Facts.Resources.TargetSelection
+				wantTarget := targets[currentCoverageID]
+				if selection == nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected ||
+					len(selection.TargetRefs) != 1 || selection.TargetRefs[0] != wantTarget {
+					t.Errorf("proof-batch provider preceded current target selection: coverage=%s selection=%+v want=%q", currentCoverageID, selection, wantTarget)
+					return
+				}
+				for _, pending := range persistedRun.RuntimeState.Facts.Prerequisites.Pending {
+					if pending.Kind == runtimecontract.PrerequisiteKindTargetSelection {
+						t.Errorf("proof-batch provider crossed pending target selection: coverage=%s prerequisite=%+v", currentCoverageID, pending)
+						return
+					}
+				}
 				for _, coverageID := range command.SemanticContext.BatchCoverageWorkItemIDs {
 					target, known := targets[coverageID]
 					if !known {
 						t.Errorf("semantic batch references unexpected coverage %q", coverageID)
 						return
 					}
-					document.Proposals = append(document.Proposals, runtimecontract.RuntimeSemanticProofProposal{
-						CoverageWorkItemID: coverageID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-						OperationKind: runtimecontract.StepKindFileEdit,
-						Target: runtimecontract.RuntimeOperationTargetAuthorization{
-							Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{target},
-						},
-						RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
-						RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-						DeclarationRef:        "focus-scoped-semantic/" + string(coverageID),
-					})
+					if !validationOnly[coverageID] {
+						document.Proposals = append(document.Proposals, runtimecontract.RuntimeSemanticProofProposal{
+							CoverageWorkItemID: coverageID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+							OperationKind: runtimecontract.StepKindFileEdit,
+							Target: runtimecontract.RuntimeOperationTargetAuthorization{
+								Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{target},
+							},
+							RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+							RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+							DeclarationRef:        "focus-scoped-semantic/" + string(coverageID),
+						})
+					}
 					// One canonical CWI may require both a durable change and a
 					// validation proof. They are independent owner facts, but SM-2
 					// compiles them into one CWI binding before any operation request.
@@ -668,8 +724,15 @@ func TestRuntimeFileBackedFocusScopedTargetsStayRetiredAcrossDurableWrites(t *te
 	if err != nil || completed.Terminal == nil || completed.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("focus-scoped sequence completion=%+v terminal=%+v err=%v", completed, completed.Terminal, err)
 	}
-	if providerCalls != 9 {
-		t.Fatalf("provider calls=%d, want three candidates for each of three focuses", providerCalls)
+	wantProviderCalls := 0
+	for coverageID := range targets {
+		wantProviderCalls += 2 // validation and assessment
+		if !validationOnly[coverageID] {
+			wantProviderCalls++ // durable state change
+		}
+	}
+	if providerCalls != wantProviderCalls {
+		t.Fatalf("provider calls=%d, want %d for focus-specific evidence requirements", providerCalls, wantProviderCalls)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil {
@@ -705,9 +768,26 @@ func TestRuntimeFileBackedFocusScopedTargetsStayRetiredAcrossDurableWrites(t *te
 	}
 	for coverageID, target := range targets {
 		content, readErr := os.ReadFile(filepath.Join(deliverable, target))
-		if readErr != nil || !strings.HasPrefix(string(content), "after-semantic-focus-") {
+		if validationOnly[coverageID] && (readErr != nil || string(content) != "before\n") {
+			t.Fatalf("%s validation-only content=%q err=%v", coverageID, content, readErr)
+		}
+		if !validationOnly[coverageID] && (readErr != nil || !strings.HasPrefix(string(content), "after-semantic-focus-")) {
 			t.Fatalf("%s durable write content=%q err=%v", coverageID, content, readErr)
 		}
+	}
+
+	// A fresh SM-4 worker must read the terminal aggregate as-is. It cannot
+	// reacquire a retired target selection, recreate a semantic request session,
+	// or consume provider budget across the process boundary.
+	providerCallsBeforeReplay := providerCalls
+	driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime)
+	restarted := newRuntimeGroundedTargetSequenceModule(t, hub, runtimeStateRepository{hub: hub})
+	restartedObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	restartedObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, restarted.handleRuntimeDrive)
+	t.Cleanup(func() { restartedObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
+	replayed, err := DriveRuntime(ctx, hub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
+	if err != nil || replayed.StateRevision != completed.StateRevision || replayed.State != completed.State || providerCalls != providerCallsBeforeReplay {
+		t.Fatalf("fresh-worker terminal replay=%+v completed=%+v providerCalls=%d/%d err=%v", replayed, completed, providerCalls, providerCallsBeforeReplay, err)
 	}
 }
 

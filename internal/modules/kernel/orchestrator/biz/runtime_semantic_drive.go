@@ -128,6 +128,14 @@ func (m *Biz) driveRuntimeSemanticOrderAccepted(ctx context.Context, aggregate r
 		runtimecontract.StableRuntimeSemanticPlanDocumentHash(*ledger.CoverageOrderDocument) != expectedOrderHash {
 		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic generation changed during eligible focus projection", common.ErrConflict)
 	}
+	// EligibleFocusProjected may advance the current CWI within an accepted
+	// order and project a new focus-scoped TargetSelection prerequisite. That
+	// owner fact is part of the authority transaction used to derive the next
+	// proof batch's immutable RequestLogicalID, so it must settle before batch
+	// compilation—not merely before the physical provider call.
+	if runtimeSemanticPrerequisitesPending(aggregate.Facts.Prerequisites.Pending) {
+		return m.prepareRuntimePrerequisites(ctx, aggregate)
+	}
 	batchRequestKey := fmt.Sprintf("semantic-proof-batch-%d", ledger.NextBatchSequence)
 	logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, batchRequestKey)
 	return m.compileRuntimeSemanticPlanBatch(ctx, aggregate, logicalRequestID, 4)
