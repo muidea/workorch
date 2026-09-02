@@ -146,7 +146,9 @@ func TestCoverageEvidenceBindingMultiTargetExactRejectsReceiptOperationTargetDri
 		ExecutionKey: execution.ExecutionKey, OperationID: execution.OperationID,
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
 		Changed: true, TargetRefs: []string{"semantic_test.go"},
-		Evidence: runtimecontract.RuntimeOperationEvidence{Summary: "owner reported the wrong exact target"},
+		Evidence: runtimecontract.RuntimeOperationEvidence{
+			Summary: "owner reported the wrong exact target", EvidenceReason: "owner observed a durable effect at its returned target",
+		},
 	}
 	if _, _, err := controller.commitOperationReceipt(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, driftedReceipt); err != nil {
 		t.Fatal(err)
@@ -170,7 +172,7 @@ func TestCoverageEvidenceBindingMultiTargetExactRejectsReceiptOperationTargetDri
 		t.Fatalf("receipt/operation target drift did not fail closed: %+v", failed)
 	}
 	if len(failed.Facts.Evidence.Accepted) != 1 || len(failed.Facts.Evidence.Accepted[0].CoverageWorkItemIDs) != 0 ||
-		!strings.Contains(failed.Facts.Evidence.Accepted[0].EvidenceReason, coverageBindingMismatchFailureCode) ||
+		failed.Facts.Evidence.Accepted[0].EvidenceReason != driftedReceipt.Evidence.EvidenceReason ||
 		len(failed.Facts.Coverage) != 1 || failed.Facts.Coverage[0].State == runtimecontract.RuntimeCoverageItemStateSatisfied {
 		t.Fatalf("receipt/operation target drift received coverage credit: %+v", failed)
 	}
@@ -377,7 +379,7 @@ func TestCoverageEvidenceBindingMissingProofCannotBeClaimedOrGovernedAway(t *tes
 		EventID: "evidence-c12-missing-proof", WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, DispatchID: sealed.ActiveDispatch.ID,
 		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: runtimeTestActiveOperationID(t, sealed, 0),
 		Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
-		Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
+		Evidence: runtimecontract.RuntimeOperationEvidence{EvidenceReason: "validation owner returned no proof for the required check", Validation: &runtimecontract.RuntimeValidationObservation{
 			RecipeID: runtimeManagedValidationEvidencePolicy().ID, ExecutedChecks: []string{"required-check"}, PassedChecks: nil,
 		}},
 	}
@@ -401,8 +403,8 @@ func TestCoverageEvidenceBindingMissingProofCannotBeClaimedOrGovernedAway(t *tes
 		committed.Aggregate.Facts.Failure.OriginalDiagnostic.OriginalCode != coverageBindingMismatchFailureCode {
 		t.Fatalf("binding mismatch was not retained as a runtime contract diagnostic: %+v", committed.Aggregate.Facts.Failure)
 	}
-	if got := committed.Aggregate.Facts.Evidence.Accepted[0].EvidenceReason; !strings.Contains(got, "coverage_binding_mismatch") {
-		t.Fatalf("original binding diagnostic was not retained: %q", got)
+	if got := committed.Aggregate.Facts.Evidence.Accepted[0].EvidenceReason; got != evidence.Receipt.Evidence.EvidenceReason {
+		t.Fatalf("owner receipt reason drifted during binding mismatch adjudication: fact=%q receipt=%q", got, evidence.Receipt.Evidence.EvidenceReason)
 	}
 	stateRevision := committed.Aggregate.StateRevision
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, facts.WorkspaceID, facts.RunID, 0, "assessment-c12-missing-proof"); err == nil {

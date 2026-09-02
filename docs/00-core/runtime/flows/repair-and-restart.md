@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-31
+Last Verified: 2026-09-02
 
 ## Purpose
 
@@ -181,6 +181,11 @@ immutable audit lineage，但只有 all-accepted completed receipt chain 可以�
 mandatory detector 还必须独立核对 same-focus exact rejected validation receipt/evidence、其 structured candidate surface 与
 single-`RepairOwnerModuleID` state-change seal；因此即使 manifest purpose 与三份 commitment projection 被协调清空，也不能把该
 transaction 降级成普通 dispatch。
+
+repair receipt、causation 与 terminal credit 必须保持分离：accepted owner receipt 的 payload（包括 `EvidenceReason`）原样进入
+`EvidenceFact`；source `BindingRefs` 原样保留。若该 validation source binding 没有 `state_change` proof，sealed repair
+commitment 将其分类为 causation-only，`CoverageWorkItemIDs` 保持为空且不产生 `coverage_binding_mismatch`。只有后续 fresh
+validation 的 matching proof 才能取得 terminal credit；无 exact repair commitment 的同形 binding/proof mismatch 不享受此例外。
 
 若 all-of confirmed validation repair 的未完成 member 返回 `governance_required`，pause 只提交该 operation 的 owner receipt、
 committed source dispatch 与 governance binding；repair owner 不拥有或保存 Runtime continuation。`continue` 由 Orchestrator 的同一个

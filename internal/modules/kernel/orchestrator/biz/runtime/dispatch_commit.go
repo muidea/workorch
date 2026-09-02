@@ -804,8 +804,8 @@ const coverageBindingMismatchFailureCode = "coverage_binding_mismatch"
 
 // coverageBindingMismatchFailure converts a completed exact-proof comparison
 // into the stable, owner-selected category consumed by the reducer. The full
-// matcher diagnostic is retained on EvidenceFact.EvidenceReason; it is not
-// parsed to choose a retry, target, or action.
+// matcher diagnostic is retained on FailureFact.OriginalDiagnostic; the
+// owner-authored EvidenceFact.EvidenceReason remains an exact receipt field.
 func coverageBindingMismatchFailure(focusID string, bindings []runtimecontract.CoverageEvidenceBinding, fact runtimecontract.EvidenceFact, diagnostic string) runtimecontract.FailureFact {
 	bindings = runtimecontract.NormalizeCoverageEvidenceBindings(bindings)
 	coverageIDs := make([]common.CoverageWorkItemID, 0, len(fact.BindingRefs))

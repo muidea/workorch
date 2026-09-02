@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-28
+Last Verified: 2026-09-02
 
 ## Purpose
 
@@ -59,9 +59,12 @@ evidence commit 必须同时满足：
 1. **Authority 一致**：workspace/run、definition revision、evidence revision、focus、
    authority snapshot 与当前 aggregate 决策一致
 2. **Dispatch 一致**：存在对应 `SealedDispatch`；candidate hash / transaction 匹配
-3. **Operation 一致**：evidence 来自 sealed operation（kind、id、coverage work item IDs、target refs）
-4. **Coverage 绑定**：execution evidence 必须携带 sealed operation 的 coverage work item IDs；
-   前序 focus evidence 不得关闭后续 focus
+3. **Operation 一致**：evidence 来自 sealed operation（kind、id、binding refs、target refs）；owner-authored receipt payload
+   必须 exact 投影到 `EvidenceFact`，SM-2 diagnostic 不得改写 `EvidenceReason`
+4. **Coverage 绑定**：`BindingRefs` 只保存 sealed operation causation；`CoverageWorkItemIDs` 只由 SM-2 exact proof matcher
+   产生，前序 focus evidence 不得关闭后续 focus。`confirmed_validation_repair` 可按 sealed commitment 保留一个不声明
+   `state_change` proof 的 source binding，此时 accepted repair fact 必须为零 CWI credit、不得生成 binding mismatch，并在
+   完成后固定进入 fresh validation；普通 binding/proof mismatch 仍 fail-closed
 5. **幂等**：duplicate event id / 已处理 resolution 不得二次改变 ledger；重复调用只返回一致结果
 6. **Definition 一致**：definition context revision 与 facts / transaction 一致，漂移 → conflict
 7. **Owner revision set 一致**：evidence只绑定binding/operation实际依赖的owner revision/snapshot/fence；其set/hash必须与

@@ -316,6 +316,94 @@ func TestConfirmedRepairValidationOnlyBindingManifestRetainsSourceLineage(t *tes
 	if err := sealed.Aggregate.Validate(); err != nil {
 		t.Fatalf("confirmed repair with validation-only source binding did not survive fresh load: %v", err)
 	}
+
+	coordinator, err := NewDispatchCoordinator(authority.repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := candidateRuntimeOperations(sealed.Aggregate.ActiveDispatch.Candidate)[0]
+	evidence := ExecutionEvidence{
+		EventID:     "confirmed-repair-validation-only-receipt",
+		WorkspaceID: sealed.Aggregate.Facts.WorkspaceID, RunID: sealed.Aggregate.Facts.RunID,
+		DispatchID: sealed.Aggregate.ActiveDispatch.ID, AuthoritySnapshotID: sealed.Aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		OperationID: operation.ID, Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		SourceRef: "workorch://runtime-operations/confirmed-repair-validation-only-receipt",
+		Evidence: runtimecontract.RuntimeOperationEvidence{
+			Summary: "confirmed repair owner committed durable state change", Quality: common.EvidenceQualityValid,
+			EvidenceReason: "file owner observed the sealed repair effect",
+		},
+	}
+	attachConfirmedRepairReceiptForTest(t, &authority.repository.aggregate, &evidence, "tree-v1", "tree-v2")
+	committed, err := coordinator.commitEvidence(ctx, evidence)
+	if err != nil {
+		t.Fatalf("commit confirmed repair receipt with validation-only source binding: %v", err)
+	}
+	assertConfirmedRepairFreshValidationForTest(t, committed.Aggregate, authority.closureID)
+	if len(committed.Aggregate.Facts.Evidence.Accepted) == 0 {
+		t.Fatal("confirmed repair receipt did not persist accepted evidence")
+	}
+	accepted := committed.Aggregate.Facts.Evidence.Accepted[len(committed.Aggregate.Facts.Evidence.Accepted)-1]
+	if !sameRuntimeStringSet(accepted.BindingRefs, operation.BindingRefs) || len(accepted.CoverageWorkItemIDs) != 0 {
+		t.Fatalf("confirmed repair receipt confused causation with terminal credit: %+v", accepted)
+	}
+	if accepted.EvidenceReason != evidence.Receipt.Evidence.EvidenceReason {
+		t.Fatalf("confirmed repair receipt reason drifted: fact=%q receipt=%q", accepted.EvidenceReason, evidence.Receipt.Evidence.EvidenceReason)
+	}
+	if committed.Aggregate.Facts.Failure != nil && committed.Aggregate.Facts.Failure.Code == coverageBindingMismatchFailureCode {
+		t.Fatalf("confirmed repair causation was classified as a coverage mismatch: %+v", committed.Aggregate.Facts.Failure)
+	}
+	if err := committed.Aggregate.Validate(); err != nil {
+		t.Fatalf("completed validation-only confirmed repair did not survive fresh load: %v", err)
+	}
+	for _, test := range []struct {
+		name      string
+		mutate    func(*runtimecontract.EvidenceFact)
+		wantError string
+	}{
+		{
+			name: "injected terminal credit",
+			mutate: func(value *runtimecontract.EvidenceFact) {
+				value.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), committed.Aggregate.Facts.Focus.CoverageWorkItemIDs...)
+			},
+			wantError: "causation-only evidence fact cannot carry coverage credit",
+		},
+		{
+			name: "owner reason drift",
+			mutate: func(value *runtimecontract.EvidenceFact) {
+				value.EvidenceReason = "coordinated reducer rewrite"
+			},
+			wantError: "reason does not match its exact owner receipt",
+		},
+	} {
+		t.Run("fresh-load "+test.name, func(t *testing.T) {
+			tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, committed.Aggregate)
+			for index := range tampered.Facts.Evidence.Accepted {
+				fact := &tampered.Facts.Evidence.Accepted[index]
+				if fact.ID != accepted.ID {
+					continue
+				}
+				test.mutate(fact)
+				runtimeTestRebindEvidenceFactHash(t, &tampered, fact.ID)
+				break
+			}
+			if err := validateRuntimeAggregateEvidenceCommitLedger(tampered); err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("confirmed repair evidence tamper error = %v, want containing %q", err, test.wantError)
+			}
+			if err := tampered.Validate(); err == nil {
+				t.Fatal("completed confirmed repair accepted coordinated evidence tamper")
+			}
+		})
+	}
+
+	stateRevision := committed.Aggregate.StateRevision
+	restarted, err := NewDispatchCoordinator(authority.repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate, err := restarted.commitEvidence(ctx, evidence)
+	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != stateRevision {
+		t.Fatalf("confirmed repair receipt duplicate changed settled authority: result=%+v err=%v", duplicate, err)
+	}
 }
 
 func TestConfirmedRepairCommitmentFreshLoadRejectsDeletionAndCoordinatedTamper(t *testing.T) {

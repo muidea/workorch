@@ -14,10 +14,18 @@ type executionEvidenceAdmission struct {
 	ExpectedScope runtimecontract.RuntimeEffectScope
 }
 
+type executionEvidenceCreditRole uint8
+
+const (
+	executionEvidenceCreditRoleProof executionEvidenceCreditRole = iota
+	executionEvidenceCreditRoleConfirmedRepairCausation
+)
+
 type executionEvidenceCreditFinding struct {
 	BindingRefs         []string
 	CoverageWorkItemIDs []common.CoverageWorkItemID
 	Diagnostic          string
+	Role                executionEvidenceCreditRole
 }
 
 func admitExecutionEvidenceIdentity(aggregate RuntimeAggregate, evidence ExecutionEvidence) (executionEvidenceAdmission, error) {
@@ -139,6 +147,16 @@ func deriveExecutionEvidenceFact(aggregate RuntimeAggregate, admission execution
 	}
 	finding := findExecutionEvidenceCredit(bindings, admission.Operation, evidenceKind, admission.Evidence.Receipt)
 	evidence := admission.Evidence
+	if evidence.Status == ExecutionEvidenceStatusAccepted && aggregate.ActiveDispatch != nil &&
+		confirmedRepairCausationOnlyBinding(*aggregate.ActiveDispatch, bindings, admission.Operation, evidenceKind) {
+		// A confirmed validation repair deliberately reuses the rejected
+		// validation binding as immutable causation. When that binding has no
+		// state-change proof, the absence is not a receipt mismatch and must not
+		// be converted into terminal CWI credit or a reducer diagnostic.
+		finding.CoverageWorkItemIDs = nil
+		finding.Diagnostic = ""
+		finding.Role = executionEvidenceCreditRoleConfirmedRepairCausation
+	}
 	if evidence.Status == ExecutionEvidenceStatusRejected {
 		// A rejected owner receipt can retain the sealed binding lineage for
 		// reverse proof, but it never receives reducer-derived CWI credit.
@@ -159,14 +177,10 @@ func deriveExecutionEvidenceFact(aggregate RuntimeAggregate, admission execution
 		Quality:             evidence.Evidence.Quality, ZeroWork: evidence.Evidence.ZeroWork,
 		EvidenceReason: evidence.Evidence.EvidenceReason, EvidenceTags: append([]string(nil), evidence.Evidence.EvidenceTags...),
 	}
-	// Rejected evidence remains an exact raw receipt projection because it can
-	// later be the immutable source of a capability-owner repair transaction.
-	// Coverage diagnostics describe accepted-credit adjudication only; appending
-	// one to a rejected fact would make fresh-load provenance depend on mutable
-	// current binding state instead of the persisted receipt.
-	if finding.Diagnostic != "" && evidence.Status == ExecutionEvidenceStatusAccepted {
-		fact.EvidenceReason = strings.TrimSpace(strings.Join([]string{fact.EvidenceReason, finding.Diagnostic}, "; "))
-	}
+	// EvidenceFact is an exact owner-receipt projection. Reducer diagnostics
+	// belong to FailureFact/OriginalDiagnostic and must never be appended to an
+	// owner-authored reason: doing so breaks receipt reverse proof and makes
+	// recovery depend on mutable credit adjudication.
 	if evidence.Evidence.Validation != nil {
 		observation := evidence.Evidence.Validation.Clone()
 		fact.Validation = &observation
@@ -189,4 +203,33 @@ func findExecutionEvidenceCredit(bindings []runtimecontract.CoverageEvidenceBind
 		CoverageWorkItemIDs: coverageIDs,
 		Diagnostic:          diagnostic,
 	}
+}
+
+// confirmedRepairCausationOnlyBinding recognizes the one legitimate case in
+// which a sealed operation retains a binding that does not authorize its
+// evidence kind. The immutable repair commitment requires that source binding
+// for validation-failure causation, while fresh validation remains the only
+// terminal proof. All other no-credit findings keep the ordinary mismatch
+// semantics.
+func confirmedRepairCausationOnlyBinding(
+	dispatch SealedDispatch,
+	bindings []runtimecontract.CoverageEvidenceBinding,
+	operation runtimecontract.RuntimeOperation,
+	evidenceKind string,
+) bool {
+	if dispatch.RepairCommitment == nil ||
+		dispatch.RepairCommitment.Normalized().Purpose != runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation ||
+		strings.TrimSpace(evidenceKind) != runtimecontract.EvidenceKindStateChange {
+		return false
+	}
+	operation = operation.Normalized()
+	if len(operation.BindingRefs) != 1 {
+		return false
+	}
+	binding, found := runtimecontract.CoverageEvidenceBindingForRef(bindings, operation.BindingRefs[0])
+	if !found || !coverageWorkItemIDIncluded(dispatch.RepairCommitment.Closure.CoverageWorkItemIDs, binding.CoverageWorkItemID) {
+		return false
+	}
+	_, grantsOperationKindCredit := runtimecontract.CoverageEvidenceProofForKind(binding, evidenceKind)
+	return !grantsOperationKindCredit
 }

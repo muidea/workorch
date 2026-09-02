@@ -786,6 +786,12 @@ func validateRuntimeAggregateEvidenceCommitFact(
 		return fmt.Errorf("evidence fact payload does not match its exact owner receipt")
 	}
 	credit := findExecutionEvidenceCredit(dispatch.CoverageBindings, operation, expectedKind, &receipt)
+	repairCausationOnly := !expectedRejected && confirmedRepairCausationOnlyBinding(
+		dispatch,
+		dispatch.CoverageBindings,
+		operation,
+		expectedKind,
+	)
 	if !sameRuntimeStringSet(fact.BindingRefs, operation.BindingRefs) {
 		return fmt.Errorf("evidence fact binding refs do not match its sealed operation")
 	}
@@ -793,15 +799,15 @@ func validateRuntimeAggregateEvidenceCommitFact(
 		if len(fact.CoverageWorkItemIDs) != 0 {
 			return fmt.Errorf("rejected evidence fact cannot carry coverage credit")
 		}
+	} else if repairCausationOnly {
+		if len(fact.CoverageWorkItemIDs) != 0 {
+			return fmt.Errorf("confirmed repair causation-only evidence fact cannot carry coverage credit")
+		}
 	} else if !sameCoverageIDs(fact.CoverageWorkItemIDs, credit.CoverageWorkItemIDs) {
 		return fmt.Errorf("accepted evidence fact coverage does not match its sealed binding/receipt projection")
 	}
-	expectedReason := receiptEvidence.EvidenceReason
-	if !expectedRejected && credit.Diagnostic != "" {
-		expectedReason = strings.TrimSpace(strings.Join([]string{expectedReason, credit.Diagnostic}, "; "))
-	}
-	if fact.EvidenceReason != expectedReason {
-		return fmt.Errorf("evidence fact reason does not match its exact owner receipt adjudication")
+	if fact.EvidenceReason != receiptEvidence.EvidenceReason {
+		return fmt.Errorf("evidence fact reason does not match its exact owner receipt")
 	}
 	if receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
 		receiptHash := runtimecontract.StableRuntimeOperationReceiptHash(receipt)

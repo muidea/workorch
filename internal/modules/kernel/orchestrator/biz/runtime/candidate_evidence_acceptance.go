@@ -22,7 +22,7 @@ func applyAcceptedExecutionEvidence(aggregate *RuntimeAggregate, admission execu
 			return err
 		}
 	}
-	if err := applyAcceptedEvidenceCoverageCredit(aggregate, fact, finding.Diagnostic, validationFailureRepair); err != nil {
+	if err := applyAcceptedEvidenceCoverageCredit(aggregate, fact, finding, validationFailureRepair); err != nil {
 		return err
 	}
 	if err := applyAcceptedEvidenceReopen(aggregate, fact); err != nil {
@@ -33,11 +33,18 @@ func applyAcceptedExecutionEvidence(aggregate *RuntimeAggregate, admission execu
 	return nil
 }
 
-func applyAcceptedEvidenceCoverageCredit(aggregate *RuntimeAggregate, fact runtimecontract.EvidenceFact, bindingDiagnostic string, retainIntermediateProofOpen bool) error {
+func applyAcceptedEvidenceCoverageCredit(aggregate *RuntimeAggregate, fact runtimecontract.EvidenceFact, finding executionEvidenceCreditFinding, retainIntermediateProofOpen bool) error {
+	if finding.Role == executionEvidenceCreditRoleConfirmedRepairCausation {
+		// The binding is an immutable pointer to the rejected validation proof,
+		// not authorization for this repair receipt to satisfy that proof. The
+		// completing transaction will derive its fresh-validation continuation
+		// from the sealed repair commitment.
+		return nil
+	}
 	// A sealed binding can close coverage only through its exact owner proof.
 	// A completed mismatch is deterministic and cannot be repaired by another
 	// provider request for the same immutable dispatch.
-	if len(fact.BindingRefs) != 0 && len(fact.CoverageWorkItemIDs) == 0 && bindingDiagnostic != "" {
+	if len(fact.BindingRefs) != 0 && len(fact.CoverageWorkItemIDs) == 0 && finding.Diagnostic != "" {
 		if aggregate.ActiveDispatch == nil {
 			return fmt.Errorf("coverage binding mismatch has no active sealed dispatch")
 		}
@@ -45,7 +52,7 @@ func applyAcceptedEvidenceCoverageCredit(aggregate *RuntimeAggregate, fact runti
 			aggregate.ActiveDispatch.Transaction.FocusID,
 			aggregate.ActiveDispatch.CoverageBindings,
 			fact,
-			bindingDiagnostic,
+			finding.Diagnostic,
 		)
 		if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
 			return err

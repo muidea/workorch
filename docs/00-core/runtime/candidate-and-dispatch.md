@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-09-01
+Last Verified: 2026-09-02
 
 ## 规范化候选合同
 
@@ -77,6 +77,12 @@ receipt-set 或独立 CWI `all_of` 明确表达，禁止只在 receipt 阶段把
 生成 target-free fresh-validation directive。若某个 repair 确实要求完整 surface 全部产生 effect，SM-2 必须事先编译显式
 `RequiredOperationSequence`/collective receipt-set；LLM candidate、commitment 派生或 receipt 校验均不得自行把 membership
 升级为 full-set equality，也不得把 closure 缩成 candidate 选择的子集。
+
+repair operation 的 source `BindingRefs` 是 immutable validation-failure causation，不自动成为该 state-change receipt 的
+coverage proof。若 matching source binding 没有 `state_change` proof，Orchestrator 必须从 sealed
+`RuntimeDispatchRepairCommitment` 将其分类为 causation-only：accepted fact 保留 binding、保持零
+`CoverageWorkItemIDs`，owner `EvidenceReason` 与 receipt exact-match，且不得生成 `coverage_binding_mismatch`。该例外不适用于
+普通 dispatch；不存在 exact repair commitment 的 binding/proof mismatch 仍按 SM-2 contract defect 收口。
 
 final SM-3 seal 必须把 candidate manifest hash 与每项 operation 的最小 target-policy preimage 一并封入
 `DispatchAuthorityHash`。该 preimage 只可由 final manifest seal 生成；Run 只 opaque 持久化，governance resume 只复制，
