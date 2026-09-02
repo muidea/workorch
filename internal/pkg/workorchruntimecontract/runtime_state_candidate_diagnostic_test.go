@@ -10,6 +10,9 @@ func TestRuntimeStateRecordClonePreservesCandidateFailureDiagnostic(t *testing.T
 	diagnostic := &RuntimeCandidateFailureDiagnostic{
 		OperationID: "operation", Path: "$.operations[id=operation].targetRefs", Actual: "directory",
 		Allowed: []string{"replacement"}, ManifestHash: "manifest", RejectedShapeHash: "shape",
+		WireRule: &RuntimeCandidateWireRuleIdentity{
+			WireContractHash: "wire-contract", OperationIndex: 0, OperationKind: RuntimeBlockKindPatchApply,
+		},
 		Objectives: []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionReplaceTarget},
 	}
 	state := RuntimeStateRecord{CandidateAttempts: []RuntimeCandidateAttemptRecord{{
@@ -17,12 +20,16 @@ func TestRuntimeStateRecordClonePreservesCandidateFailureDiagnostic(t *testing.T
 	}}}
 	clone := state.Clone()
 	got := clone.CandidateAttempts[0].Failure.Diagnostic
-	if got == nil || got == diagnostic || got.ManifestHash != "manifest" || got.RejectedShapeHash != "shape" || len(got.Allowed) != 1 || got.Allowed[0] != "replacement" {
+	if got == nil || got == diagnostic || got.WireRule == nil || got.WireRule == diagnostic.WireRule || got.ManifestHash != "manifest" || got.RejectedShapeHash != "shape" || len(got.Allowed) != 1 || got.Allowed[0] != "replacement" {
 		t.Fatalf("candidate diagnostic clone=%+v", got)
 	}
 	diagnostic.Allowed[0] = "mutated"
+	diagnostic.WireRule.WireContractHash = "mutated"
 	if got.Allowed[0] != "replacement" {
 		t.Fatalf("clone aliases candidate diagnostic: %+v", got)
+	}
+	if got.WireRule.WireContractHash != "wire-contract" {
+		t.Fatalf("clone aliases candidate diagnostic wire rule: %+v", got.WireRule)
 	}
 }
 

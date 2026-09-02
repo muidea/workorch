@@ -391,6 +391,14 @@ func StableRuntimeCandidateRequestCorrectionHash(observation *RuntimeCandidateCo
 			writeHashStrings(h, value.Allowed)
 			writeHashStrings(h, value.Required)
 			writeHashStrings(h, value.Forbidden)
+			if value.WireRule != nil {
+				writeHashString(h, "wire-rule")
+				writeHashString(h, value.WireRule.WireContractHash)
+				writeHashString(h, fmt.Sprintf("%d", value.WireRule.OperationIndex))
+				writeHashString(h, value.WireRule.RequiredOperationRef)
+				writeHashString(h, value.WireRule.OperationKind)
+				writeHashString(h, value.WireRule.VariantID)
+			}
 			writeHashString(h, string(value.ViolationKind))
 			writeHashRuntimeCandidateParameterEntryEncodings(h, value.ParameterEntryEncodings)
 			writeHashString(h, value.ConstraintRef)

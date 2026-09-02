@@ -46,6 +46,12 @@ decoder 不做本地补全、删除或 JSON repair；只有 SM-3 持久化同 pa
 attempt 1 重写一份完整 document。schema、instruction、strict compiler、fixture encoder 必须消费同一份 wire contract，
 禁止各自重新推导字段；JSONSchemaResponse on/off 不得改变最小文档或本地编译结果。
 
+strict compiler 一旦为 provider operation 选中 wire rule，任何后续 operation-scoped schema diagnostic 都必须携带
+`RuntimeCandidateWireRuleIdentity`：exact `wireContractHash`、provider `operationIndex`、`requiredOperationRef`（required slot）
+或 canonical `operationKind`（auxiliary rule）以及 `variantId`。该 identity 只是 diagnostic lineage，不授予 candidate、retry
+或 transition authority。SM-3 与 LLM correction preflight 都必须用同一 sealed manifest exact 重验它；禁止从 diagnostic
+`Actual`、数组顺序所暗示的业务含义或“manifest 只有一个 operation”推断 matching rule。
+
 wire contract 的 deterministic hash 必须绑定 operations `RuntimeExpectedDocumentContract`、request-session manifest
 identity 与 candidate attempt 前封存的 exact `CandidateManifest`。未进入 attempt 的 prepared/recovery session 在 restart
 时从 current sealed authority 重编译并与 persisted identity exact-match；已进入 attempt 后则还必须从 session 的
@@ -299,7 +305,7 @@ kind 层拒绝；可解析的 operation 可调用无副作用 owner probe，owne
 返回 wire/parameter/target 违例；只有结构性校验接受后，Orchestrator 才将 owner observation 作为独立后继处理。
 
 `CandidateRejection` 至少包含：原始安全 class/code/message、provider document operation index 与 matching manifest slot
-（若适用）、field path、actual、
+（若适用；strict wire rejection 使用 exact `RuntimeCandidateWireRuleIdentity`）、field path、actual、
 allowed/required/forbidden、manifest hash、rejected shape hash 与完整 scope/lineage。它是 evaluator 的事实输出，
 不得携带 retry、terminal、governance、Runtime action 或 `CorrectionDisposition`。
 
@@ -365,6 +371,11 @@ failed `CandidateAttempt` 的 durable invariant 必须在 CAS 前及 fresh load 
 objectives、field path、observed actual、parameter-entry encoding facts、适用 rejected shape 与 witness 必须一致；objective 还必须与 witness dimension 的 bounded
 兼容矩阵一致，不能由 diagnostic 与 directive 携带同一错误映射而共同越过校验。结构合法但与 diagnostic 不一致的 directive
 属于 `runtime_contract_defect`，不得进入 attempt-1 preflight/provider、dispatch 或 capability effect。
+
+任一 completed operations document，无论 local admission 最终 accepted 或 rejected，都必须在对应 attempt closure 的同一
+owner-private CAS 中把 exact `CandidateManifest` body 写入 request session。operation-scoped wire diagnostic 必须能由该 persisted
+body 重算 wire contract 并 exact 验证；缺失 body、hash/ref/kind/variant/index/path 任一漂移都是 `runtime_contract_defect`，不得
+通过 mutable authority 重建、单例推断或兼容升级继续执行。
 
 document-conformance、complete schema 与 semantic rejection 共享同一 candidate attempt 0/1，不是三套串联预算：例如
 attempt 0 empty 后的 attempt 1 即使成为完整 JSON，只要 strict decoder/evaluator 仍拒绝，也必须 final，不能再以“首次完整

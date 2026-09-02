@@ -35,6 +35,9 @@ func TestRuntimeCandidateCorrectionObservationIsClosedAndBounded(t *testing.T) {
 		"unknown objective": func(value *RuntimeCandidateCorrectionObservation) {
 			value.Diagnostic.Objectives = []RuntimeCandidateCorrectionObjective{"invent_retry"}
 		},
+		"unbound operation schema": func(value *RuntimeCandidateCorrectionObservation) {
+			value.Diagnostic.Path = "$.operations[0].parameters"
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := base.Clone()
@@ -51,6 +54,9 @@ func TestRuntimeCandidateRequiredFieldTypeCorrectionBindsExactDiagnostic(t *test
 	baseDiagnostic := RuntimeCandidateFailureDiagnostic{
 		Path: "$.operations[0].parameters", Actual: "null",
 		Allowed: []string{"array"}, Required: []string{"parameters"}, ManifestHash: "manifest-hash",
+		WireRule: &RuntimeCandidateWireRuleIdentity{
+			WireContractHash: "wire-contract-hash", OperationIndex: 0, OperationKind: RuntimeBlockKindPatchApply,
+		},
 		Objectives: []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionSupplyRequiredField},
 	}
 	if rejected, found := RuntimeCandidateRequiredFieldCorrectionRejectedValue(baseDiagnostic); !found || rejected != "null" {
@@ -94,6 +100,31 @@ func TestRuntimeCandidateRequiredFieldTypeCorrectionBindsExactDiagnostic(t *test
 			mutate(&changedFailure, &changedCorrection)
 			if err := ValidateRuntimeCandidateFailureCorrectionPair(&changedFailure, &changedCorrection); err == nil {
 				t.Fatal("drifted required-container correction was accepted")
+			}
+		})
+	}
+}
+
+func TestRuntimeCandidateFailureDiagnosticRequiresWireRuleOnlyAfterSelector(t *testing.T) {
+	t.Parallel()
+	for _, testCase := range []struct {
+		name  string
+		class RuntimeCandidateFailureClass
+		path  string
+		want  bool
+	}{
+		{name: "root", class: RuntimeCandidateFailureClassSchema, path: "$.operations", want: false},
+		{name: "operation object", class: RuntimeCandidateFailureClassSchema, path: "$.operations[0]", want: false},
+		{name: "auxiliary selector", class: RuntimeCandidateFailureClassSchema, path: "$.operations[0].kind", want: false},
+		{name: "required selector", class: RuntimeCandidateFailureClassSchema, path: "$.operations[0].requiredOperationRef", want: false},
+		{name: "parameters", class: RuntimeCandidateFailureClassSchema, path: "$.operations[0].parameters", want: true},
+		{name: "forbidden identity", class: RuntimeCandidateFailureClassSchema, path: "$.operations[0].id", want: true},
+		{name: "semantic", class: RuntimeCandidateFailureClassContract, path: "$.operations[0].parameters", want: false},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			diagnostic := &RuntimeCandidateFailureDiagnostic{Path: testCase.path}
+			if got := RuntimeCandidateFailureDiagnosticRequiresWireRule(testCase.class, diagnostic); got != testCase.want {
+				t.Fatalf("requires wire rule = %t, want %t", got, testCase.want)
 			}
 		})
 	}

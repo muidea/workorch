@@ -510,6 +510,17 @@ func validateRuntimeCandidateAttemptSessionBindings(attempts []runtimecontract.R
 			default:
 				return fmt.Errorf("runtime candidate attempt request-session binding does not match its complete document")
 			}
+			if attempt.Failure != nil && runtimecontract.RuntimeCandidateFailureDiagnosticRequiresWireRule(attempt.Failure.Class, attempt.Failure.Diagnostic) && attempt.Failure.Diagnostic.WireRule == nil {
+				return fmt.Errorf("runtime candidate rule-selected schema diagnostic is missing exact wire identity")
+			}
+			if attempt.Failure != nil && attempt.Failure.Diagnostic != nil && attempt.Failure.Diagnostic.WireRule != nil {
+				if session.CandidateManifest == nil {
+					return fmt.Errorf("runtime candidate wire diagnostic has no persisted manifest preimage")
+				}
+				if err := runtimecontract.ValidateRuntimeCandidateFailureDiagnosticWireRule(*session.CandidateManifest, attempt.Failure.Diagnostic); err != nil {
+					return fmt.Errorf("runtime candidate wire diagnostic lineage: %w", err)
+				}
+			}
 			matched = true
 			break
 		}

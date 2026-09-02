@@ -243,7 +243,8 @@ func TestRuntimeCandidateDocumentConformanceRestartClosesAttemptIdempotently(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(closed.CandidateAttempts) != 1 || !CandidateAttemptIsCorrectableOnce(closed.CandidateAttempts[0]) || closed.CandidateAttempts[0].Correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape {
+	if len(closed.CandidateAttempts) != 1 || !CandidateAttemptIsCorrectableOnce(closed.CandidateAttempts[0]) || closed.CandidateAttempts[0].Correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape ||
+		len(closed.CandidateRequestSessions) != 1 || closed.CandidateRequestSessions[0].CandidateManifest == nil || closed.CandidateRequestSessions[0].CandidateManifest.Hash != manifest.Hash {
 		t.Fatalf("restarted document rejection did not close attempt 0: %+v", closed.CandidateAttempts)
 	}
 	saves := repository.saves

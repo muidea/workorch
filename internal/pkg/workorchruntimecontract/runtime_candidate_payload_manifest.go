@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 )
 
@@ -21,6 +22,7 @@ type RuntimeCandidatePayloadDiagnostic struct {
 	Allowed                 []string
 	Required                []string
 	Forbidden               []string
+	WireRule                *RuntimeCandidateWireRuleIdentity
 	ViolationKind           RuntimeCandidatePayloadViolationKind
 	ParameterEntryEncodings []RuntimeCandidateParameterEntryEncodingViolation
 	SemanticViolations      []RuntimeSemanticContractViolation
@@ -73,6 +75,7 @@ func RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(value *RuntimeCandid
 		Allowed:                 append([]string(nil), value.Allowed...),
 		Required:                append([]string(nil), value.Required...),
 		Forbidden:               append([]string(nil), value.Forbidden...),
+		WireRule:                value.WireRule.Clone(),
 		ViolationKind:           value.ViolationKind,
 		ParameterEntryEncodings: cloneRuntimeCandidateParameterEntryEncodings(value.ParameterEntryEncodings),
 	}).Clone()
@@ -100,27 +103,28 @@ func DecodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 		return RuntimeCandidate{}, &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "invalid_operation_fields", Cause: err}
 	}
 	compiledPayload := payload
+	var selectedWireRules []RuntimeCandidateWireRuleIdentity
 	if manifest.State == ConvergenceStateNeedStateChange || manifest.State == ConvergenceStateNeedValidation {
 		var err error
-		compiledPayload, err = compileRuntimeCandidateProviderWirePayload(manifest, payload)
+		compiledPayload, selectedWireRules, err = compileRuntimeCandidateProviderWirePayload(manifest, payload)
 		if err != nil {
 			return RuntimeCandidate{}, err
 		}
 	}
 	candidate, err := DecodeRuntimeCandidatePayload(manifest.State, compiledPayload)
 	if err != nil {
-		return RuntimeCandidate{}, runtimeCandidatePayloadDecodeDiagnostic(manifest, compiledPayload, err)
+		return RuntimeCandidate{}, runtimeCandidatePayloadDiagnosticWithSelectedWireRule(runtimeCandidatePayloadDecodeDiagnostic(manifest, compiledPayload, err), selectedWireRules)
 	}
 	if err := validateRuntimeCandidatePayloadManifest(manifest, compiledPayload, candidate); err != nil {
 		// The strictly decoded value is returned together with the manifest
 		// diagnostic. Orchestrator may persist it only as a failed-attempt
 		// correction frontier; it is never admitted as proposal or dispatch
 		// authority until a later document passes this same boundary.
-		return candidate, err
+		return candidate, runtimeCandidatePayloadDiagnosticWithSelectedWireRule(err, selectedWireRules)
 	}
 	derived, err := DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
 	if err != nil {
-		return candidate, err
+		return candidate, runtimeCandidatePayloadDiagnosticWithSelectedWireRule(err, selectedWireRules)
 	}
 	return derived, nil
 }
@@ -131,42 +135,44 @@ func DecodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 // This is deterministic compilation, not JSON repair: malformed framing,
 // unknown fields and missing provider choices are rejected before any value is
 // added.
-func compileRuntimeCandidateProviderWirePayload(manifest RuntimeCandidateContractManifest, payload []byte) ([]byte, error) {
+func compileRuntimeCandidateProviderWirePayload(manifest RuntimeCandidateContractManifest, payload []byte) ([]byte, []RuntimeCandidateWireRuleIdentity, error) {
 	wire, err := BuildRuntimeCandidateWireContract(manifest)
 	if err != nil {
-		return nil, &RuntimeCandidatePayloadDiagnostic{Path: "$", Actual: "invalid_wire_contract", Cause: err}
+		return nil, nil, &RuntimeCandidatePayloadDiagnostic{Path: "$", Actual: "invalid_wire_contract", Cause: err}
 	}
 	var envelope runtimeCandidateProviderWireEnvelope
 	if err := strictDecodeRuntimeCandidatePayload(payload, &envelope); err != nil {
-		return nil, runtimeCandidatePayloadDecodeDiagnostic(manifest, payload, err)
+		return nil, nil, runtimeCandidatePayloadDecodeDiagnostic(manifest, payload, err)
 	}
 	var rawEnvelope map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &rawEnvelope); err != nil {
-		return nil, runtimeCandidatePayloadDecodeDiagnostic(manifest, payload, err)
+		return nil, nil, runtimeCandidatePayloadDecodeDiagnostic(manifest, payload, err)
 	}
 	rawOperations, present := rawEnvelope["operations"]
 	if !present {
-		return nil, &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "missing_operations", Required: []string{"operations"}, Allowed: append([]string(nil), manifest.AllowedTopLevelFields...)}
+		return nil, nil, &RuntimeCandidatePayloadDiagnostic{Path: "$.operations", Actual: "missing_operations", Required: []string{"operations"}, Allowed: append([]string(nil), manifest.AllowedTopLevelFields...)}
 	}
 	if value := bytes.TrimSpace(rawOperations); len(value) == 0 || value[0] != '[' {
-		return nil, runtimeCandidateRequiredArrayDiagnostic("$.operations", "operations", rawOperations)
+		return nil, nil, runtimeCandidateRequiredArrayDiagnostic("$.operations", "operations", rawOperations)
 	}
 	if len(envelope.Operations) > manifest.MaxOperationCount {
-		return nil, validateRuntimeCandidateOperationCount(manifest, len(envelope.Operations))
+		return nil, nil, validateRuntimeCandidateOperationCount(manifest, len(envelope.Operations))
 	}
 	compiled := runtimeCandidateCompiledWireEnvelope{Operations: make([]map[string]json.RawMessage, 0, len(envelope.Operations))}
+	selectedWireRules := make([]RuntimeCandidateWireRuleIdentity, 0, len(envelope.Operations))
 	for index, rawOperation := range envelope.Operations {
-		operation, err := compileRuntimeCandidateProviderWireOperation(manifest, wire, rawOperation, index)
+		operation, selectedWireRule, err := compileRuntimeCandidateProviderWireOperation(wire, rawOperation, index)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		compiled.Operations = append(compiled.Operations, operation)
+		selectedWireRules = append(selectedWireRules, *selectedWireRule)
 	}
 	encoded, err := json.Marshal(compiled)
 	if err != nil {
-		return nil, &RuntimeCandidatePayloadDiagnostic{Path: "$", Actual: "wire_compile_failed", Cause: err}
+		return nil, nil, &RuntimeCandidatePayloadDiagnostic{Path: "$", Actual: "wire_compile_failed", Cause: err}
 	}
-	return encoded, nil
+	return encoded, selectedWireRules, nil
 }
 
 type runtimeCandidateProviderWireEnvelope struct {
@@ -177,11 +183,11 @@ type runtimeCandidateCompiledWireEnvelope struct {
 	Operations []map[string]json.RawMessage `json:"operations"`
 }
 
-func compileRuntimeCandidateProviderWireOperation(manifest RuntimeCandidateContractManifest, wire RuntimeCandidateWireContract, rawOperation json.RawMessage, index int) (map[string]json.RawMessage, error) {
+func compileRuntimeCandidateProviderWireOperation(wire RuntimeCandidateWireContract, rawOperation json.RawMessage, index int) (map[string]json.RawMessage, *RuntimeCandidateWireRuleIdentity, error) {
 	path := fmt.Sprintf("$.operations[%d]", index)
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(rawOperation, &raw); err != nil || raw == nil {
-		return nil, &RuntimeCandidatePayloadDiagnostic{Path: path, Actual: "not_object", Cause: err}
+		return nil, nil, &RuntimeCandidatePayloadDiagnostic{Path: path, Actual: "not_object", Cause: err}
 	}
 	ref, hasRef := runtimeCandidateWireRawString(raw, "requiredOperationRef")
 	kind, hasKind := runtimeCandidateWireRawString(raw, "kind")
@@ -191,43 +197,47 @@ func compileRuntimeCandidateProviderWireOperation(manifest RuntimeCandidateContr
 	case hasRef && ref != "":
 		rule, found = RuntimeCandidateWireRuleForRequiredOperation(wire, ref)
 		if !found {
-			return nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".requiredOperationRef", Actual: ref, Allowed: runtimeCandidateWireRequiredRefs(wire)}
+			return nil, nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".requiredOperationRef", Actual: ref, Allowed: runtimeCandidateWireRequiredRefs(wire)}
 		}
 	case hasRef:
-		return nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".requiredOperationRef", Actual: "empty_requiredOperationRef", Required: []string{"non-empty requiredOperationRef"}}
+		return nil, nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".requiredOperationRef", Actual: "empty_requiredOperationRef", Required: []string{"non-empty requiredOperationRef"}}
 	case hasKind && kind != "":
 		rule, found = RuntimeCandidateWireRuleForAuxiliaryKind(wire, kind)
 		if !found {
 			if len(runtimeCandidateWireRequiredRefs(wire)) != 0 {
-				return nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".requiredOperationRef", Actual: "missing_requiredOperationRef", Required: runtimeCandidateWireRequiredRefs(wire)}
+				return nil, nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".requiredOperationRef", Actual: "missing_requiredOperationRef", Required: runtimeCandidateWireRequiredRefs(wire)}
 			}
-			return nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".kind", Actual: kind, Allowed: runtimeCandidateWireAuxiliaryKinds(wire)}
+			return nil, nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".kind", Actual: kind, Allowed: runtimeCandidateWireAuxiliaryKinds(wire)}
 		}
 	case hasKind:
-		return nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".kind", Actual: "empty_kind", Required: []string{"non-empty kind"}}
+		return nil, nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".kind", Actual: "empty_kind", Required: []string{"non-empty kind"}}
 	default:
 		if required := runtimeCandidateWireRequiredRefs(wire); len(required) != 0 {
-			return nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".requiredOperationRef", Actual: "missing_requiredOperationRef", Required: required, Allowed: rule.ProviderFields}
+			return nil, nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".requiredOperationRef", Actual: "missing_requiredOperationRef", Required: required, Allowed: rule.ProviderFields}
 		}
-		return nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".kind", Actual: "missing_kind", Required: []string{"kind"}, Allowed: runtimeCandidateWireAuxiliaryKinds(wire)}
+		return nil, nil, &RuntimeCandidatePayloadDiagnostic{Path: path + ".kind", Actual: "missing_kind", Required: []string{"kind"}, Allowed: runtimeCandidateWireAuxiliaryKinds(wire)}
 	}
 	rule = rule.Normalized()
+	wireRule, err := RuntimeCandidateWireRuleIdentityForOperation(wire, rule, index)
+	if err != nil {
+		return nil, nil, &RuntimeCandidatePayloadDiagnostic{Path: path, Actual: "invalid_wire_rule_identity", Cause: err}
+	}
 	for field := range raw {
 		if !runtimeCandidateWireContains(rule.ProviderFields, field) {
 			actual := field
 			if runtimeCandidateWireRuleDerivesField(rule, field) {
 				actual = "locally_derived_" + field
 			}
-			return nil, &RuntimeCandidatePayloadDiagnostic{
+			return nil, nil, runtimeCandidatePayloadDiagnosticWithWireRule(&RuntimeCandidatePayloadDiagnostic{
 				Path: path + "." + field, Actual: actual,
 				Allowed: append([]string(nil), rule.ProviderFields...), Forbidden: []string{field},
-			}
+			}, wireRule)
 		}
 	}
 	for _, field := range rule.RequiredProviderFields {
 		value, present := raw[field]
 		if !present || ((field == "kind" || field == "requiredOperationRef") && strings.TrimSpace(runtimeCandidatePayloadRawString(value)) == "") {
-			return nil, &RuntimeCandidatePayloadDiagnostic{Path: path + "." + field, Actual: "missing_" + field, Required: append([]string(nil), rule.RequiredProviderFields...), Allowed: append([]string(nil), rule.ProviderFields...)}
+			return nil, nil, runtimeCandidatePayloadDiagnosticWithWireRule(&RuntimeCandidatePayloadDiagnostic{Path: path + "." + field, Actual: "missing_" + field, Required: append([]string(nil), rule.RequiredProviderFields...), Allowed: append([]string(nil), rule.ProviderFields...)}, wireRule)
 		}
 	}
 
@@ -245,10 +255,10 @@ func compileRuntimeCandidateProviderWireOperation(manifest RuntimeCandidateContr
 	if len(rule.DerivedTargetRefs) != 0 {
 		compiled["targetRefs"] = runtimeCandidateWireJSONValue(rule.DerivedTargetRefs)
 	}
-	if err := compileRuntimeCandidateWireParameters(compiled, rule, path); err != nil {
-		return nil, err
+	if err := compileRuntimeCandidateWireParameters(compiled, rule, path, wireRule); err != nil {
+		return nil, nil, err
 	}
-	return compiled, nil
+	return compiled, wireRule, nil
 }
 
 func runtimeCandidateWireRuleDerivesField(rule RuntimeCandidateWireOperationRule, field string) bool {
@@ -264,7 +274,7 @@ func runtimeCandidateWireRuleDerivesField(rule RuntimeCandidateWireOperationRule
 	}
 }
 
-func compileRuntimeCandidateWireParameters(compiled map[string]json.RawMessage, rule RuntimeCandidateWireOperationRule, path string) error {
+func compileRuntimeCandidateWireParameters(compiled map[string]json.RawMessage, rule RuntimeCandidateWireOperationRule, path string, wireRule *RuntimeCandidateWireRuleIdentity) error {
 	derivedNames := make(map[string]struct{}, len(rule.DerivedParameters))
 	for _, parameter := range rule.DerivedParameters {
 		derivedNames[parameter.Name] = struct{}{}
@@ -272,26 +282,26 @@ func compileRuntimeCandidateWireParameters(compiled map[string]json.RawMessage, 
 	parameters := make([]json.RawMessage, 0, len(rule.DerivedParameters)+len(rule.ProviderParameterNames))
 	if raw, found := compiled["parameters"]; found {
 		if value := bytes.TrimSpace(raw); len(value) == 0 || value[0] != '[' {
-			return runtimeCandidateRequiredArrayDiagnostic(path+".parameters", "parameters", raw)
+			return runtimeCandidatePayloadDiagnosticWithWireRule(runtimeCandidateRequiredArrayDiagnostic(path+".parameters", "parameters", raw), wireRule)
 		}
 		if err := json.Unmarshal(raw, &parameters); err != nil {
-			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters", Actual: "array", Required: []string{"parameters"}, Allowed: []string{"array"}, Cause: err}
+			return runtimeCandidatePayloadDiagnosticWithWireRule(&RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters", Actual: "array", Required: []string{"parameters"}, Allowed: []string{"array"}, Cause: err}, wireRule)
 		}
 		seen := make(map[string]struct{}, len(parameters))
 		for parameterIndex, rawParameter := range parameters {
 			var parameter map[string]json.RawMessage
 			if err := json.Unmarshal(rawParameter, &parameter); err != nil || parameter == nil {
-				return &RuntimeCandidatePayloadDiagnostic{Path: fmt.Sprintf("%s.parameters[%d]", path, parameterIndex), Actual: "not_object", Cause: err}
+				return runtimeCandidatePayloadDiagnosticWithWireRule(&RuntimeCandidatePayloadDiagnostic{Path: fmt.Sprintf("%s.parameters[%d]", path, parameterIndex), Actual: "not_object", Cause: err}, wireRule)
 			}
 			name := strings.TrimSpace(runtimeCandidatePayloadRawString(parameter["name"]))
 			if _, fixed := derivedNames[name]; fixed {
-				return &RuntimeCandidatePayloadDiagnostic{
+				return runtimeCandidatePayloadDiagnosticWithWireRule(&RuntimeCandidatePayloadDiagnostic{
 					Path: fmt.Sprintf("%s.parameters[%d].name", path, parameterIndex), Actual: "locally_derived_parameter_" + name,
 					Allowed: append([]string(nil), rule.ProviderParameterNames...), Forbidden: []string{name},
-				}
+				}, wireRule)
 			}
 			if _, duplicate := seen[name]; duplicate && name != "" {
-				return &RuntimeCandidatePayloadDiagnostic{Path: fmt.Sprintf("%s.parameters[%d].name", path, parameterIndex), Actual: "duplicate_" + name, Allowed: append([]string(nil), rule.ProviderParameterNames...)}
+				return runtimeCandidatePayloadDiagnosticWithWireRule(&RuntimeCandidatePayloadDiagnostic{Path: fmt.Sprintf("%s.parameters[%d].name", path, parameterIndex), Actual: "duplicate_" + name, Allowed: append([]string(nil), rule.ProviderParameterNames...)}, wireRule)
 			}
 			seen[name] = struct{}{}
 		}
@@ -305,6 +315,50 @@ func compileRuntimeCandidateWireParameters(compiled map[string]json.RawMessage, 
 	}
 	compiled["parameters"] = runtimeCandidateWireJSONValue(parameters)
 	return nil
+}
+
+func runtimeCandidatePayloadDiagnosticWithWireRule(diagnostic *RuntimeCandidatePayloadDiagnostic, wireRule *RuntimeCandidateWireRuleIdentity) *RuntimeCandidatePayloadDiagnostic {
+	if diagnostic == nil || wireRule == nil {
+		return diagnostic
+	}
+	diagnostic.WireRule = wireRule.Clone()
+	return diagnostic
+}
+
+func runtimeCandidatePayloadDiagnosticWithSelectedWireRule(err error, wireRules []RuntimeCandidateWireRuleIdentity) error {
+	var diagnostic *RuntimeCandidatePayloadDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic == nil || diagnostic.WireRule != nil {
+		return err
+	}
+	operationIndex, found := runtimeCandidateDiagnosticOperationIndex(diagnostic.Path)
+	if !found {
+		return err
+	}
+	for index := range wireRules {
+		if wireRules[index].OperationIndex == operationIndex {
+			diagnostic.WireRule = wireRules[index].Clone()
+			return err
+		}
+	}
+	return err
+}
+
+func runtimeCandidateDiagnosticOperationIndex(path string) (int, bool) {
+	const marker = "$.operations["
+	path = strings.TrimSpace(path)
+	if !strings.HasPrefix(path, marker) {
+		return 0, false
+	}
+	value := path[len(marker):]
+	end := strings.Index(value, "]")
+	if end <= 0 {
+		return 0, false
+	}
+	operationIndex, err := strconv.Atoi(value[:end])
+	if err != nil || operationIndex < 0 {
+		return 0, false
+	}
+	return operationIndex, true
 }
 
 func runtimeCandidateRequiredArrayDiagnostic(path, field string, raw json.RawMessage) *RuntimeCandidatePayloadDiagnostic {

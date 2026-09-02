@@ -19,6 +19,9 @@ func TestRuntimeCandidateParameterEntryEncodingBindsCloneAndCorrectionHashes(t *
 	objectives := []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionReencodeParameterEntries}
 	diagnostic := (&RuntimeCandidateFailureDiagnostic{
 		Path: "$.operations[0].parameters[1].baseHash", Actual: "baseHash",
+		WireRule: &RuntimeCandidateWireRuleIdentity{
+			WireContractHash: "wire-contract-1", OperationIndex: 0, OperationKind: RuntimeBlockKindPatchApply,
+		},
 		ViolationKind:           RuntimeCandidatePayloadViolationParameterEntryEncoding,
 		ParameterEntryEncodings: encodings, ManifestHash: "manifest-1", Objectives: objectives,
 	}).Clone()

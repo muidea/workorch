@@ -66,6 +66,17 @@ func TestRuntimeCandidateRequestIdentityIsTotalAndDeterministic(t *testing.T) {
 	if StableRuntimeCandidateRequestCorrectionHash(&driftedSealedObservation, directive.ManifestHash, directive.Objectives, directive.Witness) == StableRuntimeCandidateRequestCorrectionHash(&sealedObservation, directive.ManifestHash, directive.Objectives, directive.Witness) {
 		t.Fatal("correction request hash ignored sealed correction drift")
 	}
+	wireObservation := sealedObservation.Clone()
+	wireObservation.Diagnostic.WireRule = &RuntimeCandidateWireRuleIdentity{
+		WireContractHash: "wire-contract-1", OperationIndex: 0, OperationKind: RuntimeBlockKindPatchApply,
+	}
+	wireHash := StableRuntimeCandidateRequestCorrectionHash(&wireObservation, directive.ManifestHash, directive.Objectives, directive.Witness)
+	driftedWireObservation := wireObservation.Clone()
+	driftedWireObservation.Diagnostic.WireRule.WireContractHash = "wire-contract-2"
+	if wireHash == StableRuntimeCandidateRequestCorrectionHash(&sealedObservation, directive.ManifestHash, directive.Objectives, directive.Witness) ||
+		wireHash == StableRuntimeCandidateRequestCorrectionHash(&driftedWireObservation, directive.ManifestHash, directive.Objectives, directive.Witness) {
+		t.Fatal("correction request hash did not bind exact wire-rule identity")
+	}
 	normalized := (RuntimeCandidateRequestIdentity{LogicalRequestID: "  candidate-request-1 ", Sequence: 1, PhysicalCallID: " candidate-call-1  "}).Normalized()
 	want := RuntimeCandidateRequestIdentity{LogicalRequestID: "candidate-request-1", Sequence: 1, PhysicalCallID: "candidate-call-1"}
 	if normalized != want || !SameRuntimeCandidateRequestIdentity(normalized, want) {

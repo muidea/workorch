@@ -632,15 +632,27 @@ func TestPreflightRuntimeCandidateRendersWithoutProviderSubmission(t *testing.T)
 		Disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce, ManifestHash: manifest.Hash,
 		Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField},
 		Witness: &runtimecontract.RuntimeCandidateCorrectionWitness{
-			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField, Path: "$.operations[0].targetRefs",
+			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField, Path: "$.operations[0].parameters",
 			RejectedValue: "field_absent", AlternativeValue: "field_present",
 		},
 	}).Clone()
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, found := runtimecontract.RuntimeCandidateWireRuleForAuxiliaryKind(wire, runtimecontract.RuntimeBlockKindPatchApply)
+	if !found {
+		t.Fatal("patch/apply wire rule is not sealed in candidate manifest")
+	}
+	wireRule, err := runtimecontract.RuntimeCandidateWireRuleIdentityForOperation(wire, rule, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	observation := &runtimecontract.RuntimeCandidateCorrectionObservation{
 		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
 		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-			Path: "$.operations[0].targetRefs", Actual: "missing_targetRefs", Required: []string{"targetRefs"},
-			ManifestHash: manifest.Hash, Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), directive.Objectives...),
+			Path: "$.operations[0].parameters", Actual: "missing_parameters", Required: []string{"parameters"},
+			ManifestHash: manifest.Hash, Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), directive.Objectives...), WireRule: wireRule,
 		},
 		SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(directive.ManifestHash, directive.Objectives, directive.Witness),
 	}

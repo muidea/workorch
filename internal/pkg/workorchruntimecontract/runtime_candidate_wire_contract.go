@@ -36,6 +36,177 @@ type RuntimeCandidateWireOperationRule struct {
 	DerivedParameters              []OperationParameter
 }
 
+// RuntimeCandidateWireRuleIdentity binds one provider operation position to
+// the exact manifest-derived wire rule selected before strict DTO decoding.
+// It is diagnostic lineage only: it carries no candidate value, retry policy,
+// aggregate state or transition authority.
+type RuntimeCandidateWireRuleIdentity struct {
+	WireContractHash     string `json:"wireContractHash"`
+	OperationIndex       int    `json:"operationIndex"`
+	RequiredOperationRef string `json:"requiredOperationRef,omitempty"`
+	OperationKind        string `json:"operationKind"`
+	VariantID            string `json:"variantId,omitempty"`
+}
+
+func (i RuntimeCandidateWireRuleIdentity) Normalized() RuntimeCandidateWireRuleIdentity {
+	i.WireContractHash = strings.TrimSpace(i.WireContractHash)
+	i.RequiredOperationRef = strings.TrimSpace(i.RequiredOperationRef)
+	i.OperationKind = CanonicalRuntimeBlockKind(i.OperationKind)
+	i.VariantID = strings.TrimSpace(i.VariantID)
+	return i
+}
+
+func (i *RuntimeCandidateWireRuleIdentity) Clone() *RuntimeCandidateWireRuleIdentity {
+	if i == nil {
+		return nil
+	}
+	value := i.Normalized()
+	return &value
+}
+
+func (i RuntimeCandidateWireRuleIdentity) Validate() error {
+	i = i.Normalized()
+	if i.WireContractHash == "" || i.OperationIndex < 0 || i.OperationIndex >= RuntimeCandidateOperationMaxCount || i.OperationKind == "" {
+		return fmt.Errorf("runtime candidate wire rule identity requires contract hash, operation index and kind")
+	}
+	return nil
+}
+
+// RuntimeCandidateWireRuleIdentityForOperation constructs an exact identity
+// only when rule is one of contract's sealed selectors. Callers cannot create
+// diagnostic authority from a kind-shaped value that is absent from the wire
+// contract.
+func RuntimeCandidateWireRuleIdentityForOperation(contract RuntimeCandidateWireContract, rule RuntimeCandidateWireOperationRule, operationIndex int) (*RuntimeCandidateWireRuleIdentity, error) {
+	contract = contract.Normalized()
+	rule = rule.Normalized()
+	if contract.Revision != RuntimeCandidateWireContractRevision || contract.Hash == "" ||
+		contract.Hash != StableRuntimeCandidateWireContractHash(contract) || operationIndex < 0 {
+		return nil, fmt.Errorf("runtime candidate wire rule identity requires a sealed wire contract")
+	}
+	selected, found := runtimeCandidateWireRuleForIdentitySelector(contract, rule.RequiredOperationRef, rule.Kind)
+	if !found || !reflect.DeepEqual(selected.Normalized(), rule) {
+		return nil, fmt.Errorf("runtime candidate wire rule identity does not select an exact contract rule")
+	}
+	identity := RuntimeCandidateWireRuleIdentity{
+		WireContractHash: contract.Hash, OperationIndex: operationIndex,
+		RequiredOperationRef: rule.RequiredOperationRef, OperationKind: rule.Kind, VariantID: rule.VariantID,
+	}.Normalized()
+	if err := identity.ValidateAgainstContract(contract); err != nil {
+		return nil, err
+	}
+	return identity.Clone(), nil
+}
+
+func (i RuntimeCandidateWireRuleIdentity) ValidateAgainstContract(contract RuntimeCandidateWireContract) error {
+	i = i.Normalized()
+	contract = contract.Normalized()
+	if err := i.Validate(); err != nil {
+		return err
+	}
+	if contract.Revision != RuntimeCandidateWireContractRevision || contract.Hash == "" ||
+		contract.Hash != StableRuntimeCandidateWireContractHash(contract) || i.WireContractHash != contract.Hash {
+		return fmt.Errorf("runtime candidate wire rule identity contract hash mismatch")
+	}
+	if contract.MaxOperationCount < 1 || i.OperationIndex >= contract.MaxOperationCount {
+		return fmt.Errorf("runtime candidate wire rule identity operation index exceeds contract cardinality")
+	}
+	selected, found := runtimeCandidateWireRuleForIdentitySelector(contract, i.RequiredOperationRef, i.OperationKind)
+	if !found {
+		return fmt.Errorf("runtime candidate wire rule identity selector is not sealed")
+	}
+	selected = selected.Normalized()
+	if selected.Kind != i.OperationKind || selected.RequiredOperationRef != i.RequiredOperationRef || selected.VariantID != i.VariantID {
+		return fmt.Errorf("runtime candidate wire rule identity differs from selected contract rule")
+	}
+	return nil
+}
+
+func (i RuntimeCandidateWireRuleIdentity) ValidateAgainstManifest(manifest RuntimeCandidateContractManifest) error {
+	_, err := i.RuleAgainstManifest(manifest)
+	return err
+}
+
+// RuleAgainstManifest resolves the exact sealed provider rule named by this
+// diagnostic identity. Consumers that authorize a correction must use this
+// rule rather than widen it back to a kind-level operation manifest.
+func (i RuntimeCandidateWireRuleIdentity) RuleAgainstManifest(manifest RuntimeCandidateContractManifest) (RuntimeCandidateWireOperationRule, error) {
+	if err := ValidateRuntimeCandidateContractManifestRawCanonical(manifest); err != nil {
+		return RuntimeCandidateWireOperationRule{}, fmt.Errorf("runtime candidate wire rule identity manifest: %w", err)
+	}
+	wire, err := BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		return RuntimeCandidateWireOperationRule{}, err
+	}
+	if err := i.ValidateAgainstContract(wire); err != nil {
+		return RuntimeCandidateWireOperationRule{}, err
+	}
+	rule, found := runtimeCandidateWireRuleForIdentitySelector(wire, i.RequiredOperationRef, i.OperationKind)
+	if !found {
+		return RuntimeCandidateWireOperationRule{}, fmt.Errorf("runtime candidate wire rule identity selector is not sealed")
+	}
+	return rule.Clone(), nil
+}
+
+// ValidateRuntimeCandidateFailureDiagnosticWireRule proves that a persisted
+// operation-scoped diagnostic still names the exact wire rule and provider
+// operation position from the manifest that rejected it. This is a pure
+// lineage check; only the Orchestrator owner decides what the rejection does.
+func ValidateRuntimeCandidateFailureDiagnosticWireRule(manifest RuntimeCandidateContractManifest, diagnostic *RuntimeCandidateFailureDiagnostic) error {
+	if diagnostic == nil || diagnostic.WireRule == nil {
+		return fmt.Errorf("runtime candidate failure diagnostic has no wire rule identity")
+	}
+	diagnostic = diagnostic.Clone()
+	if err := ValidateRuntimeCandidateContractManifestRawCanonical(manifest); err != nil {
+		return err
+	}
+	if diagnostic.ManifestHash == "" || diagnostic.ManifestHash != manifest.Hash {
+		return fmt.Errorf("runtime candidate failure diagnostic manifest identity mismatch")
+	}
+	if err := diagnostic.WireRule.ValidateAgainstManifest(manifest); err != nil {
+		return err
+	}
+	operationIndex, found := runtimeCandidateDiagnosticOperationIndex(diagnostic.Path)
+	if !found || operationIndex != diagnostic.WireRule.OperationIndex || operationIndex >= manifest.MaxOperationCount {
+		return fmt.Errorf("runtime candidate failure diagnostic wire rule does not match its operation path")
+	}
+	return nil
+}
+
+// RuntimeCandidateFailureDiagnosticRequiresWireRule reports whether a schema
+// observation is scoped to one provider operation whose exact manifest rule
+// must be carried across the correction boundary. Root/container diagnostics
+// occur before any operation rule can be selected and therefore remain
+// intentionally unbound.
+func RuntimeCandidateFailureDiagnosticRequiresWireRule(class RuntimeCandidateFailureClass, diagnostic *RuntimeCandidateFailureDiagnostic) bool {
+	if RuntimeCandidateFailureClass(strings.TrimSpace(string(class))) != RuntimeCandidateFailureClassSchema || diagnostic == nil {
+		return false
+	}
+	path := strings.TrimSpace(diagnostic.Path)
+	if _, found := runtimeCandidateDiagnosticOperationIndex(path); !found {
+		return false
+	}
+	end := strings.Index(path, "]")
+	if end < 0 {
+		return false
+	}
+	// The operation object and its two selectors can fail before an exact rule
+	// exists. Every other nested field is decoded only after rule selection and
+	// therefore requires the identity emitted at that boundary.
+	switch strings.TrimSpace(path[end+1:]) {
+	case "", ".kind", ".requiredOperationRef":
+		return false
+	default:
+		return true
+	}
+}
+
+func runtimeCandidateWireRuleForIdentitySelector(contract RuntimeCandidateWireContract, requiredOperationRef, operationKind string) (RuntimeCandidateWireOperationRule, bool) {
+	if strings.TrimSpace(requiredOperationRef) != "" {
+		return RuntimeCandidateWireRuleForRequiredOperation(contract, requiredOperationRef)
+	}
+	return RuntimeCandidateWireRuleForAuxiliaryKind(contract, operationKind)
+}
+
 func (r RuntimeCandidateWireOperationRule) Normalized() RuntimeCandidateWireOperationRule {
 	r.RequiredOperationRef = strings.TrimSpace(r.RequiredOperationRef)
 	r.Kind = CanonicalRuntimeBlockKind(r.Kind)

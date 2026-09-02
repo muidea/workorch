@@ -10,6 +10,77 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func TestRuntimeCandidateWireDiagnosticRequiresExactPersistedManifestPreimage(t *testing.T) {
+	t.Parallel()
+	aggregate, _ := aggregateWithActiveRejectedCandidate(t)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondOperation := manifest.Operations[0].Normalized()
+	secondOperation.Kind = runtimecontract.RuntimeBlockKindPatchPreview
+	manifest.Operations = append(manifest.Operations, secondOperation)
+	manifest.Hash = ""
+	manifest = manifest.Normalized()
+	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, found := runtimecontract.RuntimeCandidateWireRuleForAuxiliaryKind(wire, runtimecontract.RuntimeBlockKindPatchApply)
+	if !found {
+		t.Fatal("wire diagnostic fixture has no patch/apply rule")
+	}
+	wireRule, err := runtimecontract.RuntimeCandidateWireRuleIdentityForOperation(wire, rule, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := &runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "parameters must be an array",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations[0].parameters", Actual: "object", Allowed: []string{"array"}, Required: []string{"parameters"},
+			WireRule: wireRule, ManifestHash: manifest.Hash,
+		},
+	}
+	sealedFailure, correction, err := SealCandidateRejection(failure, manifest)
+	if err != nil || sealedFailure == nil || correction == nil || correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce {
+		t.Fatalf("wire diagnostic fixture did not seal: failure=%+v correction=%+v err=%v", sealedFailure, correction, err)
+	}
+	transaction := aggregate.Decision.AuthorityTransaction()
+	attempt := runtimecontract.RuntimeCandidateAttemptRecord{
+		Transaction: transaction, Attempt: 0, StablePrefixHash: "wire-prefix", ManifestHash: manifest.Hash,
+		LogicalRequestID: "wire-request", State: runtimecontract.RuntimeCandidateAttemptStateFailed,
+		Failure: sealedFailure, Correction: correction,
+	}
+	manifestCopy := manifest.Clone()
+	session := runtimecontract.RuntimeCandidateRequestSession{
+		LogicalRequestID: attempt.LogicalRequestID, Transaction: transaction, StablePrefixHash: attempt.StablePrefixHash,
+		ManifestHash: manifest.Hash, State: runtimecontract.RuntimeCandidateRequestSessionDocumentComplete, CandidateManifest: &manifestCopy,
+	}
+	if err := validateRuntimeCandidateAttemptSessionBindings([]runtimecontract.RuntimeCandidateAttemptRecord{attempt}, []runtimecontract.RuntimeCandidateRequestSession{session}); err != nil {
+		t.Fatalf("exact persisted wire diagnostic preimage was rejected: %v", err)
+	}
+
+	drifted := attempt.Clone()
+	drifted.Failure.Diagnostic.WireRule.WireContractHash = "wire-contract-drift"
+	if err := validateRuntimeCandidateAttemptSessionBindings([]runtimecontract.RuntimeCandidateAttemptRecord{drifted}, []runtimecontract.RuntimeCandidateRequestSession{session}); err == nil || !strings.Contains(err.Error(), "wire diagnostic lineage") {
+		t.Fatalf("wire diagnostic drift survived fresh-load binding: %v", err)
+	}
+	missingPreimage := session.Clone()
+	missingPreimage.CandidateManifest = nil
+	if err := validateRuntimeCandidateAttemptSessionBindings([]runtimecontract.RuntimeCandidateAttemptRecord{attempt}, []runtimecontract.RuntimeCandidateRequestSession{missingPreimage}); err == nil || !strings.Contains(err.Error(), "no persisted manifest preimage") {
+		t.Fatalf("wire diagnostic without manifest preimage survived fresh load: %v", err)
+	}
+	missingIdentity := attempt.Clone()
+	missingIdentity.Failure.Diagnostic.WireRule = nil
+	if err := validateRuntimeCandidateAttemptSessionBindings([]runtimecontract.RuntimeCandidateAttemptRecord{missingIdentity}, []runtimecontract.RuntimeCandidateRequestSession{session}); err == nil || !strings.Contains(err.Error(), "missing exact wire identity") {
+		t.Fatalf("rule-selected schema diagnostic without wire identity survived fresh load: %v", err)
+	}
+}
+
 func TestRuntimeAggregateEvidenceCommitLedgerRejectsAcceptedFactDriftAfterFreshLoad(t *testing.T) {
 	baseline := validationAggregate(t)
 	if err := baseline.Validate(); err != nil {

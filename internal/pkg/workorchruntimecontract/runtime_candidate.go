@@ -187,6 +187,7 @@ type RuntimeCandidateFailureDiagnostic struct {
 	Allowed                 []string                                          `json:"allowed,omitempty"`
 	Required                []string                                          `json:"required,omitempty"`
 	Forbidden               []string                                          `json:"forbidden,omitempty"`
+	WireRule                *RuntimeCandidateWireRuleIdentity                 `json:"wireRule,omitempty"`
 	ViolationKind           RuntimeCandidatePayloadViolationKind              `json:"violationKind,omitempty"`
 	ParameterEntryEncodings []RuntimeCandidateParameterEntryEncodingViolation `json:"parameterEntryEncodings,omitempty"`
 	ConstraintRef           string                                            `json:"constraintRef,omitempty"`
@@ -236,6 +237,7 @@ func (d RuntimeCandidateFailureDiagnostic) Normalized() RuntimeCandidateFailureD
 	d.Allowed = normalizeStrings(d.Allowed)
 	d.Required = normalizeStrings(d.Required)
 	d.Forbidden = normalizeStrings(d.Forbidden)
+	d.WireRule = d.WireRule.Clone()
 	seen := map[RuntimeCandidateCorrectionObjective]struct{}{}
 	objectives := make([]RuntimeCandidateCorrectionObjective, 0, len(d.Objectives))
 	for _, objective := range d.Objectives {

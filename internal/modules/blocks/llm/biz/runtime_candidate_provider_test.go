@@ -56,6 +56,31 @@ func runtimeCandidateCorrectionObservationForProviderTest(failure runtimecontrac
 	return &value
 }
 
+func runtimeCandidateWireRuleIdentityForProviderTest(t *testing.T, manifest runtimecontract.RuntimeCandidateContractManifest, operationIndex int, requiredOperationRef, operationKind string) *runtimecontract.RuntimeCandidateWireRuleIdentity {
+	t.Helper()
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var (
+		rule  runtimecontract.RuntimeCandidateWireOperationRule
+		found bool
+	)
+	if strings.TrimSpace(requiredOperationRef) != "" {
+		rule, found = runtimecontract.RuntimeCandidateWireRuleForRequiredOperation(wire, requiredOperationRef)
+	} else {
+		rule, found = runtimecontract.RuntimeCandidateWireRuleForAuxiliaryKind(wire, operationKind)
+	}
+	if !found {
+		t.Fatalf("candidate wire rule ref=%q kind=%q not found in manifest", requiredOperationRef, operationKind)
+	}
+	identity, err := runtimecontract.RuntimeCandidateWireRuleIdentityForOperation(wire, rule, operationIndex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return identity
+}
+
 func runtimeCandidateCorrectionPairForProviderTest(failure runtimecontract.RuntimeCandidateFailure, manifestHash, path, alternative string) (*runtimecontract.RuntimeCandidateCorrectionObservation, *llmmodels.RuntimeCandidateCorrectionInput) {
 	observation := runtimeCandidateCorrectionObservationForProviderTest(failure, path)
 	input := runtimeCandidateCorrectionInputForProviderTest(manifestHash, path, alternative)
@@ -1741,6 +1766,9 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 				if diagnostic.RejectedShapeHash == "" {
 					diagnostic.RejectedShapeHash = testCase.failure.Signature
 				}
+				if testCase.failure.Class == runtimecontract.RuntimeCandidateFailureClassSchema && strings.HasPrefix(diagnostic.Path, "$.operations[0]") {
+					diagnostic.WireRule = runtimeCandidateWireRuleIdentityForProviderTest(t, manifest, 0, "", runtimecontract.StepKindFileWrite)
+				}
 			}
 			observation, correction := runtimeCandidateCorrectionPairForProviderTest(testCase.failure, manifest.Hash, testCase.correctionPath, testCase.alternative)
 			retryRequest, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
@@ -2091,7 +2119,14 @@ func TestRuntimeProviderRequestProjectsManifestScopedC3AtRunScale(t *testing.T) 
 		t.Fatalf("manifest-scoped request did not shrink materially: projected=%d legacy=%d", initial.ContextBudget.ActualBytes, len(legacyWire))
 	}
 
-	retryFailure := runtimecontract.RuntimeCandidateFailure{Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "run-scale-retry"}
+	retryFailure := runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "run-scale-retry",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path:         "$.operations[0].parameters",
+			ManifestHash: manifest.Hash,
+			WireRule:     runtimeCandidateWireRuleIdentityForProviderTest(t, manifest, 0, "patch-required-00", ""),
+		},
+	}
 	retryObservation, retryCorrection := runtimeCandidateCorrectionPairForProviderTest(retryFailure, manifest.Hash, "$.operations[0].parameters", "field_present")
 	retry, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Decision: decision, Transaction: decision.AuthorityTransaction(), CandidateAttempt: 1,
@@ -2347,6 +2382,7 @@ func TestRuntimeCandidateRetryProjectsParameterEntryReencodeWithoutRawValues(t *
 		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
 			Path: "$.operations[0].parameters[1].baseHash", Actual: "baseHash",
 			Allowed:                 []string{"name", "string", "integer", "boolean", "stringList"},
+			WireRule:                runtimeCandidateWireRuleIdentityForProviderTest(t, manifest, 0, "", runtimecontract.RuntimeBlockKindPatchApply),
 			ViolationKind:           runtimecontract.RuntimeCandidatePayloadViolationParameterEntryEncoding,
 			ParameterEntryEncodings: encodings, ManifestHash: manifest.Hash,
 			Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReencodeParameterEntries},

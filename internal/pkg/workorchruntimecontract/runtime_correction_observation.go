@@ -90,11 +90,23 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 	if diagnostic.ManifestHash == "" || len(diagnostic.Objectives) == 0 {
 		return fmt.Errorf("runtime candidate correction observation requires manifest-bound diagnostic objectives")
 	}
+	if RuntimeCandidateFailureDiagnosticRequiresWireRule(o.Class, &diagnostic) && diagnostic.WireRule == nil {
+		return fmt.Errorf("runtime candidate operation-scoped schema correction requires exact wire rule identity")
+	}
 	if len(diagnostic.Allowed) > maxRuntimeCorrectionObservationItems || len(diagnostic.Required) > maxRuntimeCorrectionObservationItems || len(diagnostic.Forbidden) > maxRuntimeCorrectionObservationItems || len(diagnostic.Objectives) > maxRuntimeCorrectionObservationItems || len(diagnostic.ParameterEntryEncodings) > maxRuntimeCorrectionObservationItems {
 		return fmt.Errorf("runtime candidate correction diagnostic exceeds bounded values")
 	}
-	if diagnostic.OperationID == "" && diagnostic.Path == "" && diagnostic.Actual == "" && len(diagnostic.Allowed) == 0 && len(diagnostic.Required) == 0 && len(diagnostic.Forbidden) == 0 && diagnostic.ViolationKind == "" && len(diagnostic.ParameterEntryEncodings) == 0 && diagnostic.ConstraintRef == "" && diagnostic.RequiredShape == "" && diagnostic.ManifestHash == "" && diagnostic.RejectedShapeHash == "" && len(diagnostic.Objectives) == 0 {
+	if diagnostic.OperationID == "" && diagnostic.Path == "" && diagnostic.Actual == "" && len(diagnostic.Allowed) == 0 && len(diagnostic.Required) == 0 && len(diagnostic.Forbidden) == 0 && diagnostic.WireRule == nil && diagnostic.ViolationKind == "" && len(diagnostic.ParameterEntryEncodings) == 0 && diagnostic.ConstraintRef == "" && diagnostic.RequiredShape == "" && diagnostic.ManifestHash == "" && diagnostic.RejectedShapeHash == "" && len(diagnostic.Objectives) == 0 {
 		return fmt.Errorf("runtime candidate correction observation requires a non-empty typed diagnostic")
+	}
+	if diagnostic.WireRule != nil {
+		if err := diagnostic.WireRule.Validate(); err != nil {
+			return err
+		}
+		operationIndex, found := runtimeCandidateDiagnosticOperationIndex(diagnostic.Path)
+		if !found || operationIndex != diagnostic.WireRule.OperationIndex {
+			return fmt.Errorf("runtime candidate correction diagnostic wire rule does not match its operation path")
+		}
 	}
 	switch diagnostic.ViolationKind {
 	case "":
@@ -119,6 +131,18 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 	} {
 		if err := validateRuntimeCorrectionObservationText(value.name, value.text); err != nil {
 			return err
+		}
+	}
+	if diagnostic.WireRule != nil {
+		for _, value := range []struct{ name, text string }{
+			{"candidate correction wire contract hash", diagnostic.WireRule.WireContractHash},
+			{"candidate correction wire required operation ref", diagnostic.WireRule.RequiredOperationRef},
+			{"candidate correction wire operation kind", diagnostic.WireRule.OperationKind},
+			{"candidate correction wire variant id", diagnostic.WireRule.VariantID},
+		} {
+			if err := validateRuntimeCorrectionObservationText(value.name, value.text); err != nil {
+				return err
+			}
 		}
 	}
 	for _, values := range []struct {

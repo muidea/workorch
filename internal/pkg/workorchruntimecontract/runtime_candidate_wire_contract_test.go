@@ -45,6 +45,15 @@ func TestRuntimeCandidateWireContractCompilesRequiredVariantAuthorityLocally(t *
 		!reflect.DeepEqual(stage.DerivedParameters, []OperationParameter{{Name: "operation", String: &operation}}) {
 		t.Fatalf("stage wire rule = %+v", stage)
 	}
+	identity, err := RuntimeCandidateWireRuleIdentityForOperation(wire, stage, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outOfRange := *identity
+	outOfRange.OperationIndex = wire.MaxOperationCount
+	if err := outOfRange.ValidateAgainstContract(wire); err == nil {
+		t.Fatal("wire rule identity accepted an operation index outside contract cardinality")
+	}
 
 	drifted := wire.Clone()
 	drifted.OperationRules[0].ProviderFields = append(drifted.OperationRules[0].ProviderFields, "targetRefs")

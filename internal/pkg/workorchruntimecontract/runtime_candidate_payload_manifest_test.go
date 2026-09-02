@@ -130,6 +130,68 @@ func TestDecodeRuntimeCandidatePayloadWithManifestReportsTypedDynamicDiagnostics
 	}
 }
 
+func TestDecodeRuntimeCandidatePayloadWithManifestPreservesExactMultiOperationWireRule(t *testing.T) {
+	t.Parallel()
+	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+		State: ConvergenceStateNeedStateChange,
+		RequiredOutput: RequiredOutputContract{
+			AcceptedKinds:        []string{StepKindGitWrite},
+			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredOperationSequence: []RuntimeRequiredOperationVariant{
+				{RequirementID: "stage", Kind: StepKindGitWrite, VariantID: "add"},
+				{RequirementID: "commit", Kind: StepKindGitWrite, VariantID: "commit", DependsOnRequirementIDs: []string{"stage"}},
+			},
+		},
+	})
+	wire, err := BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, testCase := range []struct {
+		name    string
+		payload string
+		path    string
+		actual  string
+	}{
+		{
+			name: "wrong parameters container",
+			payload: `{"operations":[
+				{"requiredOperationRef":"stage","parameters":[{"name":"pathspecs","stringList":["."]}]},
+				{"requiredOperationRef":"commit","parameters":{"name":"message","string":"commit"}}
+			]}`,
+			path: "$.operations[1].parameters", actual: "object",
+		},
+		{
+			name: "wrong parameter scalar type after wire compilation",
+			payload: `{"operations":[
+				{"requiredOperationRef":"stage","parameters":[{"name":"pathspecs","stringList":["."]}]},
+				{"requiredOperationRef":"commit","parameters":[{"name":"message","integer":1}]}
+			]}`,
+			path: "$.operations[1].parameters[0]", actual: "integer",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, decodeErr := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(testCase.payload))
+			var diagnostic *RuntimeCandidatePayloadDiagnostic
+			if !errors.As(decodeErr, &diagnostic) || diagnostic.Path != testCase.path || diagnostic.Actual != testCase.actual || diagnostic.WireRule == nil {
+				t.Fatalf("multi-operation diagnostic=%+v err=%v", diagnostic, decodeErr)
+			}
+			identity := diagnostic.WireRule.Normalized()
+			if identity.WireContractHash != wire.Hash || identity.OperationIndex != 1 || identity.RequiredOperationRef != "commit" ||
+				identity.OperationKind != StepKindGitWrite || identity.VariantID != "commit" || identity.ValidateAgainstManifest(manifest) != nil {
+				t.Fatalf("selected wire rule identity=%+v", identity)
+			}
+			projected := RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(diagnostic)
+			projected.ManifestHash = manifest.Hash
+			if projected.WireRule == nil || projected.WireRule == diagnostic.WireRule ||
+				ValidateRuntimeCandidateFailureDiagnosticWireRule(manifest, projected) != nil {
+				t.Fatalf("provider-safe wire rule projection=%+v", projected)
+			}
+		})
+	}
+}
+
 func TestDecodeRuntimeCandidatePayloadWithManifestClassifiesMisnestedDeclaredParameterEntries(t *testing.T) {
 	manifest := mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
 		State: ConvergenceStateNeedStateChange,

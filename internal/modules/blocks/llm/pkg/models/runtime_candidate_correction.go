@@ -29,6 +29,11 @@ func (c RuntimeCandidateCorrectionInput) ValidateAgainstObservation(manifest run
 	if err := observation.Validate(); err != nil {
 		return err
 	}
+	if observation.Diagnostic.WireRule != nil {
+		if err := runtimecontract.ValidateRuntimeCandidateFailureDiagnosticWireRule(manifest, observation.Diagnostic); err != nil {
+			return fmt.Errorf("runtime candidate correction wire diagnostic: %w", err)
+		}
+	}
 	c = c.Normalized()
 	if err := c.Validate(manifest.Hash); err != nil {
 		return err
@@ -39,7 +44,7 @@ func (c RuntimeCandidateCorrectionInput) ValidateAgainstObservation(manifest run
 		return err
 	}
 	if c.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField {
-		return validateRuntimeCandidateSchemaWitnessManifest(manifest, c.Witness)
+		return validateRuntimeCandidateSchemaWitnessManifest(manifest, observation.Diagnostic, c.Witness)
 	}
 	if c.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding {
 		return runtimecontract.ValidateRuntimeCandidateParameterEntryEncodings(manifest, c.Witness.ParameterEntryEncodings)
@@ -53,19 +58,19 @@ func (c RuntimeCandidateCorrectionInput) ValidateAgainstObservation(manifest run
 	return nil
 }
 
-func validateRuntimeCandidateSchemaWitnessManifest(manifest runtimecontract.RuntimeCandidateContractManifest, witness runtimecontract.RuntimeCandidateCorrectionWitness) error {
+func validateRuntimeCandidateSchemaWitnessManifest(manifest runtimecontract.RuntimeCandidateContractManifest, diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic, witness runtimecontract.RuntimeCandidateCorrectionWitness) error {
 	field := runtimeCandidateCorrectionPathField(witness.Path)
 	switch {
 	case witness.AlternativeValue == runtimeCandidateCorrectionFieldPresent:
-		if !runtimeCandidateManifestRequiresCorrectionField(manifest, witness.Path, field) {
+		if !runtimeCandidateManifestRequiresCorrectionField(manifest, diagnostic, witness.Path, field) {
 			return fmt.Errorf("runtime candidate schema correction witness does not prove a required field")
 		}
 	case witness.AlternativeValue == runtimeCandidateCorrectionFieldAbsent:
-		if !runtimeCandidateManifestForbidsCorrectionField(manifest, witness.Path, field) {
+		if !runtimeCandidateManifestForbidsCorrectionField(manifest, diagnostic, witness.Path, field) {
 			return fmt.Errorf("runtime candidate schema correction witness does not prove a forbidden field")
 		}
 	case strings.HasPrefix(witness.AlternativeValue, "value_absent:"):
-		if !runtimeCandidateManifestForbidsCorrectionField(manifest, witness.Path, field) {
+		if !runtimeCandidateManifestForbidsCorrectionField(manifest, diagnostic, witness.Path, field) {
 			return fmt.Errorf("runtime candidate schema correction witness does not prove removed value")
 		}
 	}
@@ -96,7 +101,7 @@ func runtimeCandidateCorrectionPathField(path string) string {
 	return ""
 }
 
-func runtimeCandidateManifestRequiresCorrectionField(manifest runtimecontract.RuntimeCandidateContractManifest, path, field string) bool {
+func runtimeCandidateManifestRequiresCorrectionField(manifest runtimecontract.RuntimeCandidateContractManifest, diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic, path, field string) bool {
 	if strings.HasPrefix(path, "$.") && !strings.HasPrefix(path, "$.operations[") {
 		if runtimeCandidateCorrectionDiagnosticContains(manifest.RequiredTopLevelFields, field) {
 			return true
@@ -108,89 +113,49 @@ func runtimeCandidateManifestRequiresCorrectionField(manifest runtimecontract.Ru
 		return manifest.State == runtimecontract.ConvergenceStateNeedAssessment && field == "evidenceRefs" &&
 			runtimeCandidateCorrectionDiagnosticContains(manifest.AllowedTopLevelFields, field)
 	}
-	if len(manifest.Operations) == 0 {
+	rule, found := runtimeCandidateWireRuleForCorrectionDiagnostic(manifest, diagnostic)
+	if !found {
 		return false
 	}
-	// The bounded observation does not carry provider-authored operation
-	// identity. When more than one operation kind is authorized, a field is
-	// direct manifest proof only if every possible kind requires it; borrowing a
-	// requirement from one unrelated kind would let a forged pair cross C4.
-	for _, operation := range manifest.Operations {
-		operation = operation.Normalized()
-		required := false
-		if strings.Contains(path, ".parameters[name=") {
-			for _, parameter := range operation.Parameters {
-				if parameter.Name == field && runtimeCandidateManifestParameterMayBeRequired(operation, field, parameter.Required) {
-					required = true
-					break
-				}
-			}
-		} else {
-			required = runtimeCandidateCorrectionDiagnosticContains(operation.RequiredOperationFields, field) ||
-				(field == "targetRefs" && operation.RequireTargetRefs)
-		}
-		if !required {
-			return false
-		}
+	if strings.Contains(path, ".parameters[name=") {
+		return runtimeCandidateCorrectionDiagnosticContains(rule.RequiredProviderParameterNames, field) ||
+			runtimeCandidateCorrectionDiagnosticContains(rule.RequiredNonEmptyParameterNames, field) ||
+			runtimeCandidateCorrectionDiagnosticContains(rule.RequireOneOfProviderParameters, field)
 	}
-	return true
+	return runtimeCandidateCorrectionDiagnosticContains(rule.RequiredProviderFields, field)
 }
 
-func runtimeCandidateManifestParameterMayBeRequired(operation runtimecontract.RuntimeCandidateOperationManifest, field string, required bool) bool {
-	if required {
-		return true
-	}
-	if runtimeCandidateCorrectionDiagnosticContains(operation.RequireOneOfParameters, field) {
-		return true
-	}
-	for _, variant := range operation.Variants {
-		if runtimeCandidateCorrectionDiagnosticContains(variant.RequiredParameters, field) ||
-			runtimeCandidateCorrectionDiagnosticContains(variant.RequiredNonEmpty, field) {
-			return true
-		}
-	}
-	return false
-}
-
-func runtimeCandidateManifestForbidsCorrectionField(manifest runtimecontract.RuntimeCandidateContractManifest, path, field string) bool {
+func runtimeCandidateManifestForbidsCorrectionField(manifest runtimecontract.RuntimeCandidateContractManifest, diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic, path, field string) bool {
 	if strings.HasPrefix(path, "$.") && !strings.HasPrefix(path, "$.operations[") {
 		return runtimeCandidateCorrectionDiagnosticContains(manifest.ForbiddenTopLevelFields, field) ||
 			!runtimeCandidateCorrectionDiagnosticContains(manifest.AllowedTopLevelFields, field)
 	}
-	if len(manifest.Operations) == 0 {
+	rule, found := runtimeCandidateWireRuleForCorrectionDiagnostic(manifest, diagnostic)
+	if !found {
 		return false
 	}
-	if field == "id" || field == "dependsOn" || field == "coverageWorkItemIds" {
-		for _, operation := range manifest.Operations {
-			if runtimeCandidateCorrectionDiagnosticContains(operation.AllowedOperationFields, field) {
-				return false
-			}
+	if strings.Contains(path, ".parameters[name=") {
+		if runtimeCandidateCorrectionDiagnosticContains(rule.ProviderParameterNames, field) {
+			return false
+		}
+		if runtimeCandidateDynamicParameterAllowedForCorrection(field, rule.DynamicParameterPrefixes) {
+			return false
 		}
 		return true
 	}
-	for _, operation := range manifest.Operations {
-		operation = operation.Normalized()
-		if strings.Contains(path, ".parameters[name=") {
-			declared := false
-			for _, parameter := range operation.Parameters {
-				if parameter.Name == field {
-					declared = true
-					if !runtimeCandidateCorrectionDiagnosticContains(operation.ForbiddenParameters, field) {
-						return false
-					}
-					break
-				}
-			}
-			if !declared && operation.AllowsDynamicParameters && runtimeCandidateDynamicParameterAllowedForCorrection(field, operation.DynamicParameterPrefixes) {
-				return false
-			}
-			continue
-		}
-		if runtimeCandidateCorrectionDiagnosticContains(operation.AllowedOperationFields, field) {
-			return false
-		}
+	return !runtimeCandidateCorrectionDiagnosticContains(rule.ProviderFields, field)
+}
+
+func runtimeCandidateWireRuleForCorrectionDiagnostic(manifest runtimecontract.RuntimeCandidateContractManifest, diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic) (runtimecontract.RuntimeCandidateWireOperationRule, bool) {
+	if diagnostic == nil || diagnostic.WireRule == nil ||
+		runtimecontract.ValidateRuntimeCandidateFailureDiagnosticWireRule(manifest, diagnostic) != nil {
+		return runtimecontract.RuntimeCandidateWireOperationRule{}, false
 	}
-	return len(manifest.Operations) != 0
+	rule, err := diagnostic.WireRule.RuleAgainstManifest(manifest)
+	if err != nil {
+		return runtimecontract.RuntimeCandidateWireOperationRule{}, false
+	}
+	return rule, true
 }
 
 func runtimeCandidateDynamicParameterAllowedForCorrection(name string, prefixes []string) bool {

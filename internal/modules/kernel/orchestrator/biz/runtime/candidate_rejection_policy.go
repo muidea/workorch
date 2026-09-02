@@ -190,6 +190,14 @@ func sealCandidateRejectionWithFrontier(failure *runtimecontract.RuntimeCandidat
 	if sealed.Diagnostic != nil && sealed.Diagnostic.ManifestHash == "" && manifest.Hash != "" {
 		sealed.Diagnostic.ManifestHash = manifest.Hash
 	}
+	if runtimecontract.RuntimeCandidateFailureDiagnosticRequiresWireRule(sealed.Class, sealed.Diagnostic) && sealed.Diagnostic.WireRule == nil {
+		return candidateRejectionContractDefect(sealed, "operation-scoped schema diagnostic is missing exact wire rule identity"), rejectedFinalDirective(manifest.Hash, "runtime_contract_defect"), nil
+	}
+	if sealed.Diagnostic != nil && sealed.Diagnostic.WireRule != nil {
+		if err := runtimecontract.ValidateRuntimeCandidateFailureDiagnosticWireRule(manifest, sealed.Diagnostic); err != nil {
+			return candidateRejectionContractDefect(sealed, "candidate wire diagnostic identity is invalid: "+err.Error()), rejectedFinalDirective(manifest.Hash, "runtime_contract_defect"), nil
+		}
+	}
 	if sealed.Diagnostic != nil && len(sealed.Diagnostic.Objectives) == 0 {
 		sealed.Diagnostic.Objectives = CandidateCorrectionObjectivesForFailure(&sealed)
 		sealed.Diagnostic = sealed.Diagnostic.Clone()

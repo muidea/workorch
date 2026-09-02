@@ -683,6 +683,7 @@ func cloneRuntimeCandidateFailureRaw(in RuntimeCandidateFailure) RuntimeCandidat
 
 func cloneRuntimeCandidateFailureDiagnosticRaw(in RuntimeCandidateFailureDiagnostic) RuntimeCandidateFailureDiagnostic {
 	out := in
+	out.WireRule = cloneRuntimeStateRawPointer(in.WireRule, func(item RuntimeCandidateWireRuleIdentity) RuntimeCandidateWireRuleIdentity { return item })
 	out.Allowed = cloneRuntimeStateRawSlice(in.Allowed, func(item string) string { return item })
 	out.Required = cloneRuntimeStateRawSlice(in.Required, func(item string) string { return item })
 	out.Forbidden = cloneRuntimeStateRawSlice(in.Forbidden, func(item string) string { return item })

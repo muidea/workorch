@@ -630,16 +630,11 @@ func candidateCorrectionOperationManifest(manifest runtimecontract.RuntimeCandid
 }
 
 func candidateCorrectionDiagnosticOperationManifest(manifest runtimecontract.RuntimeCandidateContractManifest, diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic) (runtimecontract.RuntimeCandidateOperationManifest, bool) {
-	if diagnostic != nil {
-		actual := runtimecontract.CanonicalRuntimeBlockKind(diagnostic.Actual)
-		if value, found := candidateCorrectionOperationManifest(manifest, actual); found {
-			return value, true
-		}
+	if diagnostic == nil || diagnostic.WireRule == nil ||
+		runtimecontract.ValidateRuntimeCandidateFailureDiagnosticWireRule(manifest, diagnostic) != nil {
+		return runtimecontract.RuntimeCandidateOperationManifest{}, false
 	}
-	if len(manifest.Operations) == 1 {
-		return manifest.Operations[0].Normalized(), true
-	}
-	return runtimecontract.RuntimeCandidateOperationManifest{}, false
+	return candidateCorrectionOperationManifest(manifest, diagnostic.WireRule.OperationKind)
 }
 
 func candidateCorrectionParameterDeclared(manifest runtimecontract.RuntimeCandidateOperationManifest, name string) bool {

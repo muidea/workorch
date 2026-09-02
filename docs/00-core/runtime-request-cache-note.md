@@ -32,6 +32,10 @@ focused contract；本页不复制字段级正文。
   objectives 与 concrete document-shape/schema/semantic witness；failure 与该 input 的 normalized identity 进入 correction/request-session hash，
   persisted `Disposition`/`TerminalCode` 不跨 owner。LLM 只渲染该 detached fact，不能重新选择 alternative。缺失、漂移或
   无法由相同 manifest 重验的 witness 在 physical provider call 前 fail-closed。
+- rule-selected operation field schema correction 的 C4 lineage 必须包含 strict decoder 选中的 exact
+  `RuntimeCandidateWireRuleIdentity`（wire contract hash、operation index、required ref/canonical kind、variant），并进入
+  request-session correction hash。它只在 C4 证明该 field rule 的来源，不改变 C0～C3；LLM 不得从 `Actual` 或单 operation
+  manifest 猜测规则。
 - `owner_candidate_constraint` correction 的 C3 authority 保留 manifest-declared `candidateConstraints`；C4 只携带 exact
   constraint ref、parameter path、closed `actual_shape`/`required_shape` 与 objective，不得携带 rejected parameter、owner
   parser text 或普通 feasibility diagnostic。attempt 1 仍复用同一 C0～C3 与 `stablePrefixHash`；required shape 只能由

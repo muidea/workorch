@@ -19,6 +19,23 @@ func runtimeCorrectableMissingOperationsFailure(class runtimecontract.RuntimeCan
 	}
 }
 
+func runtimeTestCandidateAuxiliaryWireRuleIdentity(t testing.TB, manifest runtimecontract.RuntimeCandidateContractManifest, kind string, operationIndex int) *runtimecontract.RuntimeCandidateWireRuleIdentity {
+	t.Helper()
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, found := runtimecontract.RuntimeCandidateWireRuleForAuxiliaryKind(wire, kind)
+	if !found {
+		t.Fatalf("runtime test candidate manifest has no auxiliary wire rule for %q", kind)
+	}
+	identity, err := runtimecontract.RuntimeCandidateWireRuleIdentityForOperation(wire, rule, operationIndex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return identity
+}
+
 // The helpers in this file deliberately construct the same persisted complete
 // session used by production. They keep focused reducer/controller fixtures
 // concise without retaining an unbound production admission API.

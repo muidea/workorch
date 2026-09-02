@@ -119,6 +119,18 @@ func TestCandidateCorrectionFrontierPrioritizesMissingRequiredFieldOverSemanticT
 	manifest = manifest.Normalized()
 	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
 	candidate = runtimeTestMustDeriveCandidateForManifest(t, manifest, candidate)
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, found := runtimecontract.RuntimeCandidateWireRuleForAuxiliaryKind(wire, runtimecontract.RuntimeBlockKindPatchApply)
+	if !found {
+		t.Fatal("missing-target fixture has no patch/apply wire rule")
+	}
+	wireRule, err := runtimecontract.RuntimeCandidateWireRuleIdentityForOperation(wire, rule, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	partial := candidate
 	partial.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), candidate.StateChange.Operations...)}
 	partial.StateChange.Operations[0].Operation.TargetRefs = nil
@@ -127,7 +139,7 @@ func TestCandidateCorrectionFrontierPrioritizesMissingRequiredFieldOverSemanticT
 		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
 			Path: "$.operations[0].targetRefs", Actual: "missing_targetRefs",
 			Allowed:  []string{"bindingRefs", "kind", "parameters", "targetRefs"},
-			Required: []string{"bindingRefs", "kind", "parameters", "targetRefs"}, ManifestHash: manifest.Hash,
+			Required: []string{"bindingRefs", "kind", "parameters", "targetRefs"}, WireRule: wireRule, ManifestHash: manifest.Hash,
 		},
 	}
 	sealed, correction, err := sealCandidateRejectionWithFrontier(failure, manifest, candidateCorrectionFrontier{candidate: &partial})
@@ -163,6 +175,24 @@ func TestCandidateCorrectionFrontierSealsRequiredParametersContainerDefects(t *t
 	if len(manifest.Operations) != 1 || !containsCandidateCorrectionString(manifest.Operations[0].RequiredOperationFields, "parameters") {
 		t.Fatalf("required-parameters fixture manifest = %+v", manifest.Operations)
 	}
+	secondOperation := manifest.Operations[0].Normalized()
+	secondOperation.Kind = runtimecontract.RuntimeBlockKindPatchPreview
+	manifest.Operations = append(manifest.Operations, secondOperation)
+	manifest.Hash = ""
+	manifest = manifest.Normalized()
+	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, found := runtimecontract.RuntimeCandidateWireRuleForAuxiliaryKind(wire, runtimecontract.RuntimeBlockKindPatchApply)
+	if !found {
+		t.Fatal("required-parameters fixture has no patch/apply wire rule")
+	}
+	wireRule, err := runtimecontract.RuntimeCandidateWireRuleIdentityForOperation(wire, rule, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, testCase := range []struct {
 		name, actual, rejected string
@@ -177,7 +207,7 @@ func TestCandidateCorrectionFrontierSealsRequiredParametersContainerDefects(t *t
 				Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
 				Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
 					Path: "$.operations[0].parameters", Actual: testCase.actual,
-					Allowed: testCase.allowed, Required: []string{"parameters"}, ManifestHash: manifest.Hash,
+					Allowed: testCase.allowed, Required: []string{"parameters"}, WireRule: wireRule.Clone(), ManifestHash: manifest.Hash,
 				},
 			}
 			sealed, correction, sealErr := SealCandidateRejection(failure, manifest)
@@ -193,6 +223,61 @@ func TestCandidateCorrectionFrontierSealsRequiredParametersContainerDefects(t *t
 				t.Fatalf("required parameters correction lineage is invalid: %v", err)
 			}
 		})
+	}
+}
+
+func TestCandidateCorrectionFrontierRejectsUnboundOrDriftedMultiOperationWireRule(t *testing.T) {
+	t.Parallel()
+	aggregate, _ := aggregateWithActiveRejectedCandidate(t)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondOperation := manifest.Operations[0].Normalized()
+	secondOperation.Kind = runtimecontract.RuntimeBlockKindPatchPreview
+	manifest.Operations = append(manifest.Operations, secondOperation)
+	manifest.Hash = ""
+	manifest = manifest.Normalized()
+	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, found := runtimecontract.RuntimeCandidateWireRuleForAuxiliaryKind(wire, runtimecontract.RuntimeBlockKindPatchApply)
+	if !found {
+		t.Fatal("multi-operation fixture has no patch/apply wire rule")
+	}
+	wireRule, err := runtimecontract.RuntimeCandidateWireRuleIdentityForOperation(wire, rule, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newFailure := func() *runtimecontract.RuntimeCandidateFailure {
+		return &runtimecontract.RuntimeCandidateFailure{
+			Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+			Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+				Path: "$.operations[0].parameters", Actual: "object", Allowed: []string{"array"}, Required: []string{"parameters"},
+				ManifestHash: manifest.Hash,
+			},
+		}
+	}
+
+	unboundFailure := newFailure()
+	sealed, unbound, err := SealCandidateRejection(unboundFailure, manifest)
+	if err != nil || sealed == nil || sealed.Code != "runtime_contract_defect" || unbound == nil ||
+		unbound.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal || unbound.TerminalCode != "runtime_contract_defect" {
+		t.Fatalf("unbound multi-operation diagnostic did not fail closed: failure=%+v directive=%+v err=%v", sealed, unbound, err)
+	}
+
+	driftedFailure := newFailure()
+	driftedFailure.Diagnostic.WireRule = wireRule.Clone()
+	driftedFailure.Diagnostic.WireRule.OperationIndex = 1
+	sealed, drifted, err := SealCandidateRejection(driftedFailure, manifest)
+	if err != nil || sealed == nil || sealed.Code != "runtime_contract_defect" || drifted == nil ||
+		drifted.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal || drifted.TerminalCode != "runtime_contract_defect" {
+		t.Fatalf("drifted wire identity was not failed closed: failure=%+v directive=%+v err=%v", sealed, drifted, err)
 	}
 }
 
@@ -219,6 +304,7 @@ func TestCandidateCorrectionFrontierSealsDeclaredParameterEntryReencode(t *testi
 		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
 			Path: "$.operations[0].parameters[1].baseHash", Actual: "baseHash",
 			Allowed:                 []string{"name", "string", "integer", "boolean", "stringList"},
+			WireRule:                runtimeTestCandidateAuxiliaryWireRuleIdentity(t, manifest, runtimecontract.RuntimeBlockKindPatchApply, 0),
 			ViolationKind:           runtimecontract.RuntimeCandidatePayloadViolationParameterEntryEncoding,
 			ParameterEntryEncodings: encodings, ManifestHash: manifest.Hash,
 		},
@@ -370,7 +456,8 @@ func TestCandidateCorrectionFrontierSealsExactEvidenceBindingAlternative(t *test
 		Class: runtimecontract.RuntimeCandidateFailureClassSchema,
 		Code:  "candidate_schema_invalid", Signature: "candidate-schema-invalid", Reason: "binding is outside sealed manifest",
 		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-			Path: "$.operations[0].bindingRefs", Actual: "binding/wrong", Allowed: []string{allowed}, ManifestHash: manifest.Hash,
+			Path: "$.operations[0].bindingRefs", Actual: "binding/wrong", Allowed: []string{allowed},
+			WireRule: runtimeTestCandidateAuxiliaryWireRuleIdentity(t, manifest, operation.Kind, 0), ManifestHash: manifest.Hash,
 		},
 	}
 	frontier := candidateCorrectionFrontier{candidate: &wrong}

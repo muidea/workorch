@@ -22,6 +22,23 @@ func candidateCorrectionTestManifest() runtimecontract.RuntimeCandidateContractM
 	return manifest
 }
 
+func candidateCorrectionWireRuleIdentity(t testing.TB, manifest runtimecontract.RuntimeCandidateContractManifest, kind string, operationIndex int) *runtimecontract.RuntimeCandidateWireRuleIdentity {
+	t.Helper()
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, found := runtimecontract.RuntimeCandidateWireRuleForAuxiliaryKind(wire, kind)
+	if !found {
+		t.Fatalf("candidate correction fixture has no wire rule for %q", kind)
+	}
+	identity, err := runtimecontract.RuntimeCandidateWireRuleIdentityForOperation(wire, rule, operationIndex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return identity
+}
+
 func candidateSchemaCorrectionPair(manifest runtimecontract.RuntimeCandidateContractManifest) (RuntimeCandidateCorrectionInput, runtimecontract.RuntimeCandidateCorrectionObservation) {
 	input := RuntimeCandidateCorrectionInput{
 		ManifestHash: manifest.Hash,
@@ -84,6 +101,7 @@ func TestRuntimeCandidateCorrectionInputValidatesExactSealedObservation(t *testi
 func TestRuntimeCandidateCorrectionInputAcceptsExactNullRequiredContainer(t *testing.T) {
 	t.Parallel()
 	manifest, _, _ := candidateParameterEntryCorrectionPair(t)
+	wireRule := candidateCorrectionWireRuleIdentity(t, manifest, runtimecontract.RuntimeBlockKindPatchApply, 0)
 	input := RuntimeCandidateCorrectionInput{
 		ManifestHash: manifest.Hash,
 		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField},
@@ -96,7 +114,7 @@ func TestRuntimeCandidateCorrectionInputAcceptsExactNullRequiredContainer(t *tes
 		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
 		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
 			Path: input.Witness.Path, Actual: "null", Allowed: []string{"array"}, Required: []string{"parameters"},
-			ManifestHash: manifest.Hash, Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), input.Objectives...),
+			WireRule: wireRule, ManifestHash: manifest.Hash, Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), input.Objectives...),
 		},
 		SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(input.ManifestHash, input.Objectives, &input.Witness),
 	}.Normalized()
@@ -146,6 +164,7 @@ func candidateParameterEntryCorrectionPair(t *testing.T) (runtimecontract.Runtim
 	}
 	manifest = manifest.Normalized()
 	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	wireRule := candidateCorrectionWireRuleIdentity(t, manifest, runtimecontract.RuntimeBlockKindPatchApply, 0)
 	encodings := []runtimecontract.RuntimeCandidateParameterEntryEncodingViolation{{
 		OperationIndex: 0, ParameterIndex: 1, OperationKind: runtimecontract.RuntimeBlockKindPatchApply, ContainerParameterName: "content",
 		MisplacedParameters: []runtimecontract.RuntimeCandidateMisplacedParameter{
@@ -169,6 +188,7 @@ func candidateParameterEntryCorrectionPair(t *testing.T) (runtimecontract.Runtim
 		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
 			Path: "$.operations[0].parameters[1].baseHash", Actual: "baseHash",
 			Allowed:                 []string{"name", "string", "integer", "boolean", "stringList"},
+			WireRule:                wireRule,
 			ViolationKind:           runtimecontract.RuntimeCandidatePayloadViolationParameterEntryEncoding,
 			ParameterEntryEncodings: encodings, ManifestHash: manifest.Hash,
 			Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReencodeParameterEntries},
@@ -249,49 +269,117 @@ func TestRuntimeCandidateCorrectionInputRejectsAllowedButOptionalFieldAsRequired
 	}
 }
 
-func TestRuntimeCandidateManifestCorrectionProofIsFailClosedAcrossOperationKinds(t *testing.T) {
+func TestRuntimeCandidateManifestCorrectionProofUsesExactWireRuleAcrossOperationKinds(t *testing.T) {
 	operationA := runtimecontract.RuntimeCandidateOperationManifest{
 		Kind: "kind/a", AllowedOperationFields: []string{"kind", "parameters", "targetRefs"},
 		RequiredOperationFields: []string{"kind", "parameters", "targetRefs"}, RequireTargetRefs: true,
+		Target: runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"a", "b"},
+		},
 		Parameters: []runtimecontract.RuntimeOperationParameterContract{
-			{Name: "requiredValue", Required: true},
-			{Name: "optionalValue", Required: false},
+			{Name: "requiredValue", Type: runtimecontract.RuntimeOperationParameterTypeString, Required: true},
+			{Name: "optionalValue", Type: runtimecontract.RuntimeOperationParameterTypeString, Required: false},
 		},
 	}
 	operationB := runtimecontract.RuntimeCandidateOperationManifest{
 		Kind: "kind/b", AllowedOperationFields: []string{"kind", "parameters", "targetRefs", "optionalEnvelope"},
 		RequiredOperationFields: []string{"kind", "parameters"},
+		Target: runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"a", "b"},
+		},
 		Parameters: []runtimecontract.RuntimeOperationParameterContract{
-			{Name: "requiredValue", Required: true},
-			{Name: "optionalValue", Required: false},
+			{Name: "requiredValue", Type: runtimecontract.RuntimeOperationParameterTypeString, Required: true},
+			{Name: "optionalValue", Type: runtimecontract.RuntimeOperationParameterTypeString, Required: false},
 		},
 	}
-	manifest := runtimecontract.RuntimeCandidateContractManifest{Operations: []runtimecontract.RuntimeCandidateOperationManifest{operationA, operationB}}
-	if runtimeCandidateManifestForbidsCorrectionField(runtimecontract.RuntimeCandidateContractManifest{}, "$.operations[0].id", "id") {
+	manifest := runtimecontract.RuntimeCandidateContractManifest{
+		Revision: runtimecontract.RuntimeCandidateContractManifestRevision, State: runtimecontract.ConvergenceStateNeedStateChange,
+		MaxOperationCount: 2, Operations: []runtimecontract.RuntimeCandidateOperationManifest{operationA, operationB},
+	}
+	manifest = manifest.Normalized()
+	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	diagnostic := func(kind, path string) *runtimecontract.RuntimeCandidateFailureDiagnostic {
+		return &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: path, ManifestHash: manifest.Hash, WireRule: candidateCorrectionWireRuleIdentity(t, manifest, kind, 0),
+		}
+	}
+	if runtimeCandidateManifestForbidsCorrectionField(runtimecontract.RuntimeCandidateContractManifest{}, nil, "$.operations[0].id", "id") {
 		t.Fatal("manifest without an operation authorization proved a forbidden operation field")
 	}
-	if runtimeCandidateManifestRequiresCorrectionField(manifest, "$.operations[0].targetRefs", "targetRefs") {
-		t.Fatal("requirement from one operation kind crossed a multi-kind correction boundary")
+	if !runtimeCandidateManifestRequiresCorrectionField(manifest, diagnostic("kind/a", "$.operations[0].targetRefs"), "$.operations[0].targetRefs", "targetRefs") {
+		t.Fatal("selected kind/a target requirement lost correction authority")
 	}
-	if !runtimeCandidateManifestRequiresCorrectionField(manifest, "$.operations[0].parameters[name=requiredValue]", "requiredValue") {
-		t.Fatal("field required by every operation kind lost correction authority")
+	spoofedActual := diagnostic("kind/a", "$.operations[0].targetRefs")
+	spoofedActual.Actual = "kind/b"
+	if !runtimeCandidateManifestRequiresCorrectionField(manifest, spoofedActual, "$.operations[0].targetRefs", "targetRefs") {
+		t.Fatal("diagnostic actual text overrode the exact kind/a wire rule")
 	}
-	if runtimeCandidateManifestRequiresCorrectionField(manifest, "$.operations[0].parameters[name=optionalValue]", "optionalValue") {
+	if runtimeCandidateManifestRequiresCorrectionField(manifest, diagnostic("kind/b", "$.operations[0].targetRefs"), "$.operations[0].targetRefs", "targetRefs") {
+		t.Fatal("kind/a target requirement crossed the exact kind/b wire rule")
+	}
+	if !runtimeCandidateManifestRequiresCorrectionField(manifest, diagnostic("kind/a", "$.operations[0].parameters[name=requiredValue]"), "$.operations[0].parameters[name=requiredValue]", "requiredValue") {
+		t.Fatal("selected operation required parameter lost correction authority")
+	}
+	if runtimeCandidateManifestRequiresCorrectionField(manifest, diagnostic("kind/a", "$.operations[0].parameters[name=optionalValue]"), "$.operations[0].parameters[name=optionalValue]", "optionalValue") {
 		t.Fatal("declared optional parameter was accepted as required")
 	}
-	if runtimeCandidateManifestForbidsCorrectionField(manifest, "$.operations[0].parameters[name=optionalValue]", "optionalValue") {
+	if runtimeCandidateManifestForbidsCorrectionField(manifest, diagnostic("kind/a", "$.operations[0].parameters[name=optionalValue]"), "$.operations[0].parameters[name=optionalValue]", "optionalValue") {
 		t.Fatal("declared optional parameter was accepted as forbidden")
 	}
-	if runtimeCandidateManifestForbidsCorrectionField(manifest, "$.operations[0].optionalEnvelope", "optionalEnvelope") {
-		t.Fatal("operation field allowed by one authorized kind was treated as universally forbidden")
+	if runtimeCandidateManifestForbidsCorrectionField(manifest, diagnostic("kind/b", "$.operations[0].targetRefs"), "$.operations[0].targetRefs", "targetRefs") {
+		t.Fatal("selected kind/b provider field was treated as forbidden")
 	}
-	if !runtimeCandidateManifestForbidsCorrectionField(manifest, "$.operations[0].parameters[name=unknownValue]", "unknownValue") {
-		t.Fatal("undeclared parameter in every closed operation kind was not forbidden")
+	if !runtimeCandidateManifestForbidsCorrectionField(manifest, diagnostic("kind/b", "$.operations[0].optionalEnvelope"), "$.operations[0].optionalEnvelope", "optionalEnvelope") {
+		t.Fatal("kind-level field outside the selected wire rule gained correction authority")
+	}
+	if !runtimeCandidateManifestForbidsCorrectionField(manifest, diagnostic("kind/a", "$.operations[0].parameters[name=unknownValue]"), "$.operations[0].parameters[name=unknownValue]", "unknownValue") {
+		t.Fatal("undeclared parameter in selected closed operation kind was not forbidden")
+	}
+	input := RuntimeCandidateCorrectionInput{
+		ManifestHash: manifest.Hash,
+		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField},
+		Witness: runtimecontract.RuntimeCandidateCorrectionWitness{
+			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField, Path: "$.operations[0].targetRefs",
+			RejectedValue: runtimecontract.RuntimeCandidateCorrectionFieldAbsent, AlternativeValue: runtimecontract.RuntimeCandidateCorrectionFieldPresent,
+		},
+	}.Normalized()
+	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
+		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
+		Diagnostic: diagnostic("kind/a", input.Witness.Path),
+	}.Normalized()
+	observation.Diagnostic.Actual = "missing_targetRefs"
+	observation.Diagnostic.Required = []string{"targetRefs"}
+	observation.Diagnostic.Objectives = append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), input.Objectives...)
+	observation.SealedCorrectionHash = runtimecontract.StableRuntimeCandidateSealedCorrectionHash(input.ManifestHash, input.Objectives, &input.Witness)
+	if err := input.ValidateAgainstObservation(manifest, observation); err != nil {
+		t.Fatalf("exact kind/a C4 correction was rejected: %v", err)
+	}
+	driftedObservation := observation.Clone()
+	driftedObservation.Diagnostic.WireRule = candidateCorrectionWireRuleIdentity(t, manifest, "kind/b", 0)
+	if err := input.ValidateAgainstObservation(manifest, driftedObservation); err == nil {
+		t.Fatal("kind/a required-field correction crossed a valid but unrelated kind/b wire rule")
+	}
+	derivedTargetManifest := manifest.Clone()
+	derivedTargetManifest.Operations[0].TargetCardinality = runtimecontract.RuntimeOperationTargetCardinalityOne
+	derivedTargetManifest.Operations[0].Target.ExactTargetRefs = []string{"only"}
+	derivedTargetManifest = derivedTargetManifest.Normalized()
+	derivedTargetManifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(derivedTargetManifest)
+	derivedTargetDiagnostic := &runtimecontract.RuntimeCandidateFailureDiagnostic{
+		Path: "$.operations[0].targetRefs", ManifestHash: derivedTargetManifest.Hash,
+		WireRule: candidateCorrectionWireRuleIdentity(t, derivedTargetManifest, "kind/a", 0),
+	}
+	if runtimeCandidateManifestRequiresCorrectionField(derivedTargetManifest, derivedTargetDiagnostic, derivedTargetDiagnostic.Path, "targetRefs") {
+		t.Fatal("locally derived singleton target was exposed as a provider-required field")
+	}
+	if !runtimeCandidateManifestForbidsCorrectionField(derivedTargetManifest, derivedTargetDiagnostic, derivedTargetDiagnostic.Path, "targetRefs") {
+		t.Fatal("locally derived singleton target was not fenced from provider correction")
 	}
 	manifest.Operations[1].AllowsDynamicParameters = true
 	manifest.Operations[1].DynamicParameterPrefixes = []string{"dynamic."}
-	if runtimeCandidateManifestForbidsCorrectionField(manifest, "$.operations[0].parameters[name=dynamic.value]", "dynamic.value") {
-		t.Fatal("parameter authorized dynamically by one possible kind was treated as universally forbidden")
+	manifest = manifest.Normalized()
+	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	if runtimeCandidateManifestForbidsCorrectionField(manifest, diagnostic("kind/b", "$.operations[0].parameters[name=dynamic.value]"), "$.operations[0].parameters[name=dynamic.value]", "dynamic.value") {
+		t.Fatal("parameter authorized dynamically by the selected kind was treated as forbidden")
 	}
 }
 
@@ -435,7 +523,8 @@ func TestRuntimeCandidateCorrectionInputValidatesOwnerConstraintAgainstManifest(
 
 func TestRuntimeCandidateCorrectionInputRejectsSemanticWitnessForMissingRequiredFieldObservation(t *testing.T) {
 	t.Parallel()
-	manifest := candidateCorrectionTestManifest()
+	manifest, _, _ := candidateParameterEntryCorrectionPair(t)
+	wireRule := candidateCorrectionWireRuleIdentity(t, manifest, runtimecontract.RuntimeBlockKindPatchApply, 0)
 	input := RuntimeCandidateCorrectionInput{
 		ManifestHash: manifest.Hash,
 		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSupplyRequiredField},
@@ -449,7 +538,7 @@ func TestRuntimeCandidateCorrectionInputRejectsSemanticWitnessForMissingRequired
 		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "candidate-schema-invalid",
 		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
 			Path: "$.operations[0].targetRefs", Actual: "missing_targetRefs", Required: []string{"targetRefs"},
-			ManifestHash: manifest.Hash, Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), input.Objectives...),
+			WireRule: wireRule, ManifestHash: manifest.Hash, Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), input.Objectives...),
 		},
 		SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(input.ManifestHash, input.Objectives, &input.Witness),
 	}.Normalized()

@@ -219,6 +219,10 @@ func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx contex
 	if err := validateCandidateAttemptRejectionSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
 		return RuntimeAggregate{}, err
 	}
+	sessionIndex, err := candidateRequestSessionManifestBinding(aggregate, logicalRequestID, manifest)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
 	if !runtimeDecisionAcceptsCandidateDocument(aggregate.Decision.State) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
 	}
@@ -243,6 +247,11 @@ func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx contex
 		candidateCopy := *rejectedCandidate
 		aggregate.CandidateAttempts[idx].Proposal = &candidateCopy
 	}
+	// A rejected complete document is still an SM-3 attempt. Persist the same
+	// pre-attempt manifest body used by the accepted-proposal path in this
+	// owner-private CAS, so correction lineage can be proved after restart.
+	manifestCopy := manifest.Clone()
+	aggregate.CandidateRequestSessions[sessionIndex].CandidateManifest = &manifestCopy
 	if err := closeCandidateAttemptWithCorrection(&aggregate, idx, attempt, *sealedFailure, correction); err != nil {
 		return RuntimeAggregate{}, err
 	}

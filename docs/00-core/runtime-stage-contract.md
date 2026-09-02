@@ -163,8 +163,10 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   `schema_field(field_absent -> field_present)` witness；required field 已存在但为 `null` 或错误 JSON type 时，必须保留 strict
   decoder 观察到的 exact type，并形成同 path 的 `schema_field(<actual_type> -> field_present)` witness。两类 correction 都只授权
   attempt 1 重写一份完整 document，再由同一 strict decoder 证明 required typed shape；field/type vocabulary 不是
-  target/binding alternative。failed attempt 在 CAS 与
-  fresh load 都必须验证 diagnostic/correction 的 manifest、objectives、objective↔witness-dimension、path、actual/shape lineage；
+  target/binding alternative。operation rule 被选中后，diagnostic 必须携带 exact wire contract hash、operation index、required
+  ref/canonical kind 与 variant identity；SM-3/LLM 不得从 `Actual` 或单 operation manifest 推断 matching rule。failed attempt 在
+  CAS 与 fresh load 都必须验证 diagnostic/correction 的 manifest body、wire-rule identity、objectives、
+  objective↔witness-dimension、path、actual/shape lineage；
   条件必填 binding 缺失必须表达为 `Actual=missing_bindingRefs`、`Required=[bindingRefs]`，不得用人类 cardinality 文本充当
   Required，也不得同时创建 evidence-binding alternative。不一致时零 attempt-1
   provider、dispatch 与 capability effect。
@@ -181,6 +183,8 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
 - operations preflight 必须发生在 exact request-session CAS 之前；同一 transaction、stable prefix、manifest、correction hash 与
   expected-document attempt 的 persisted session 是 restart proof。document-complete 后 attempt-begin CAS 前中断或 CAS 后响应丢失
   只能恢复同一 local admission transaction，不能重发 preflight/provider、重复扣减 correction budget 或提前执行 capability。
+  completed document 一旦进入 attempt，无论 accepted/rejected，都必须在 attempt closure 的同一 owner-private CAS 保存 exact
+  CandidateManifest body；wire diagnostic 在 fresh load 时只能由该前像重验，不能从 current mutable authority 重建。
 - strict decoder 已得到 current wire 的完整 typed operation document、但 manifest semantic admission 因 exact
   `bindingRefs` 等字段失败时，SM-3 只可把该 typed value 保存在 failed `CandidateAttempt` 的 owner-private correction
   frontier；它从不成为 accepted candidate、feasibility input、dispatch 或 authority。manifest 为 exact operation slot 声明

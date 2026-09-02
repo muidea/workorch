@@ -233,15 +233,26 @@ func TestSealCandidateRejectionRequiresConcreteWitnessAndPreservesRequiredFieldC
 		t.Fatalf("manifest-required schema field lost correction witness: directive=%+v err=%v", correctable, err)
 	}
 
-	manifest.Operations = []runtimecontract.RuntimeCandidateOperationManifest{{
-		Kind:                    runtimecontract.RuntimeBlockKindPatchApply,
-		AllowedOperationFields:  []string{"bindingRefs", "kind", "parameters", "targetRefs"},
-		RequiredOperationFields: []string{"kind", "parameters", "targetRefs"},
-		RequireTargetRefs:       true,
-		Parameters: []runtimecontract.RuntimeOperationParameterContract{{
-			Name: "content", Type: runtimecontract.RuntimeOperationParameterTypeString, Required: true,
-		}},
-	}}
+	aggregate, _ := aggregateWithActiveRejectedCandidate(t)
+	manifest, err = runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := runtimecontract.BuildRuntimeCandidateWireContract(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, found := runtimecontract.RuntimeCandidateWireRuleForAuxiliaryKind(wire, runtimecontract.RuntimeBlockKindPatchApply)
+	if !found {
+		t.Fatal("required-field fixture has no patch/apply wire rule")
+	}
+	wireRule, err := runtimecontract.RuntimeCandidateWireRuleIdentityForOperation(wire, rule, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, testCase := range []struct {
 		path     string
 		actual   string
@@ -254,7 +265,7 @@ func TestSealCandidateRejectionRequiresConcreteWitnessAndPreservesRequiredFieldC
 		failure := &runtimecontract.RuntimeCandidateFailure{
 			Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "schema", Reason: "required candidate field is missing",
 			Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-				Path: testCase.path, Actual: testCase.actual, Required: []string{testCase.required}, ManifestHash: manifest.Hash,
+				Path: testCase.path, Actual: testCase.actual, Required: []string{testCase.required}, WireRule: wireRule.Clone(), ManifestHash: manifest.Hash,
 			},
 		}
 		sealed, directive, err := SealCandidateRejection(failure, manifest)
@@ -268,25 +279,36 @@ func TestSealCandidateRejectionRequiresConcreteWitnessAndPreservesRequiredFieldC
 }
 
 func TestSealCandidateRejectionUsesTypedDocumentAndRawRemovalWitnesses(t *testing.T) {
-	manifest := runtimecontract.RuntimeCandidateContractManifest{Hash: "manifest-hash"}
+	documentManifest := runtimecontract.RuntimeCandidateContractManifest{Hash: "manifest-hash"}
 	documentFailure := &runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_document_nonconformant", Signature: "document-shape", Reason: "one JSON object is required",
 		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-			Path: "$", Actual: runtimecontract.RuntimeCandidateDocumentShapeNonObjectJSONValue, ManifestHash: manifest.Hash,
+			Path: "$", Actual: runtimecontract.RuntimeCandidateDocumentShapeNonObjectJSONValue, ManifestHash: documentManifest.Hash,
 			Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument},
 		},
 	}
-	_, directive, err := SealCandidateRejection(documentFailure, manifest)
+	_, directive, err := SealCandidateRejection(documentFailure, documentManifest)
 	if err != nil || directive == nil || directive.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || directive.Witness == nil ||
 		directive.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape || directive.Witness.RejectedValue != runtimecontract.RuntimeCandidateDocumentShapeNonObjectJSONValue {
 		t.Fatalf("document-shape directive=%+v err=%v", directive, err)
 	}
 
+	aggregate, _ := aggregateWithActiveRejectedCandidate(t)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wireRule := runtimeTestCandidateAuxiliaryWireRuleIdentity(t, manifest, runtimecontract.RuntimeBlockKindPatchApply, 0)
+
 	for _, field := range []string{"id", "dependsOn"} {
 		failure := &runtimecontract.RuntimeCandidateFailure{
 			Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid", Signature: "raw-field", Reason: "raw canonical field is forbidden",
 			Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-				Path: "$.operations[0]." + field, Actual: field, Forbidden: []string{field}, ManifestHash: manifest.Hash,
+				Path: "$.operations[0]." + field, Actual: field, Forbidden: []string{field},
+				WireRule: wireRule.Clone(), ManifestHash: manifest.Hash,
 			},
 		}
 		_, correction, err := SealCandidateRejection(failure, manifest)
