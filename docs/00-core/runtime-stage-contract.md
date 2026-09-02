@@ -212,6 +212,11 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   correction，C4 只引用 manifest/CWI/违规 field，不复制 constraint。File/Shell 只拥有 factual
   feasibility/satisfaction，不触发 correction/terminal/SM-2 transition；该边不新增状态机、跨 owner transition 或可替代
   terminal 关系。
+- File `unified_diff` candidate conformance 必须在零 workspace I/O 下分别证明 single-file target identity 与 sealed target-policy
+  mode：prospective 只接受 add-file `/dev/null`，exact/existing 只接受 update 形态。资源 probe 若证明 prospective 已存在或
+  exact/existing 已缺失，必须返回 typed `sealed_target_authorization_contradicted`；Orchestrator 才能由 private SM-2 event退役
+  exact binding。validation-failure repair 的其它 owner infeasibility 必须在同一 private CAS 中失效 candidate、退役中间
+  binding 并 bounded-terminal 为 `repair_surface_unavailable`，禁止遗留 pending candidate 进入 SM-4 重复 re-drive。
 - Definition 修订不能被 Resume 吸收；需要新输入时必须显式 Restart，并遵守 replacement/delivery transaction。
 
 ## Four Coordinated Machines

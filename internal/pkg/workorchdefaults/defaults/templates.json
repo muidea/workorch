@@ -989,7 +989,6 @@
                 "triggerDiagnosticClasses": [
                   "implementation_gap_detected",
                   "validation_build_failed",
-                  "validation_dependency_mismatch",
                   "validation_test_failed"
                 ],
                 "repairEvidenceKind": "state_change",

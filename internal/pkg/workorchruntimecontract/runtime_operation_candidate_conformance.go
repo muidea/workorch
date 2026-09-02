@@ -24,7 +24,8 @@ const (
 type RuntimeOperationCandidateRequiredShape string
 
 const (
-	RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile RuntimeOperationCandidateRequiredShape = "unified_diff_single_file"
+	RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile           RuntimeOperationCandidateRequiredShape = "unified_diff_single_file"
+	RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode RuntimeOperationCandidateRequiredShape = "unified_diff_authorized_target_mode"
 )
 
 // RuntimeOperationCandidateActualShape is the bounded factual classification
@@ -33,8 +34,9 @@ const (
 type RuntimeOperationCandidateActualShape string
 
 const (
-	RuntimeOperationCandidateActualShapeInvalidSyntax  RuntimeOperationCandidateActualShape = "invalid_syntax"
-	RuntimeOperationCandidateActualShapeTargetMismatch RuntimeOperationCandidateActualShape = "target_mismatch"
+	RuntimeOperationCandidateActualShapeInvalidSyntax      RuntimeOperationCandidateActualShape = "invalid_syntax"
+	RuntimeOperationCandidateActualShapeTargetMismatch     RuntimeOperationCandidateActualShape = "target_mismatch"
+	RuntimeOperationCandidateActualShapeTargetModeMismatch RuntimeOperationCandidateActualShape = "target_mode_mismatch"
 )
 
 // RuntimeOperationCandidateConstraint is immutable executable-catalog data.
@@ -64,7 +66,8 @@ func (c RuntimeOperationCandidateConstraint) Validate() error {
 		return fmt.Errorf("runtime operation candidate constraint kind %q is not declared", c.Kind)
 	}
 	switch c.RequiredShape {
-	case RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile:
+	case RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile,
+		RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode:
 		return nil
 	default:
 		return fmt.Errorf("runtime operation candidate required shape %q is not declared", c.RequiredShape)
@@ -198,12 +201,15 @@ func (v RuntimeOperationCandidateConformanceViolation) Validate() error {
 		return fmt.Errorf("runtime operation candidate conformance violation requires constraint and parameter")
 	}
 	switch v.RequiredShape {
-	case RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile:
+	case RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile,
+		RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode:
 	default:
 		return fmt.Errorf("runtime operation candidate conformance violation required shape %q is not declared", v.RequiredShape)
 	}
 	switch v.ActualShape {
-	case RuntimeOperationCandidateActualShapeInvalidSyntax, RuntimeOperationCandidateActualShapeTargetMismatch:
+	case RuntimeOperationCandidateActualShapeInvalidSyntax,
+		RuntimeOperationCandidateActualShapeTargetMismatch,
+		RuntimeOperationCandidateActualShapeTargetModeMismatch:
 		return nil
 	default:
 		return fmt.Errorf("runtime operation candidate actual shape %q is not declared", v.ActualShape)

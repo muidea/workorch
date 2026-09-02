@@ -45,6 +45,30 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationCandidateConformance(operation run
 				}
 				return observation.Normalized()
 			}
+		case runtimecontract.RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode:
+			diff := runtimeOperationParameterString(operation, constraint.ParameterName)
+			patch, parseErr := parsePatchUnifiedDiff(diff)
+			if parseErr != nil {
+				observation.Outcome = runtimecontract.RuntimeOperationCandidateNonconformant
+				observation.Violation = &runtimecontract.RuntimeOperationCandidateConformanceViolation{
+					ConstraintRef: constraint.Ref, ParameterName: constraint.ParameterName,
+					RequiredShape: constraint.RequiredShape, ActualShape: runtimecontract.RuntimeOperationCandidateActualShapeInvalidSyntax,
+				}
+				return observation.Normalized()
+			}
+			policy := authorization.Normalized().Target.Policy
+			modeMatches := policy == runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget && patch.OldRef == "/dev/null"
+			if policy == runtimecontract.RuntimeOperationTargetPolicyExactTarget || policy == runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope {
+				modeMatches = patch.OldRef != "/dev/null"
+			}
+			if !modeMatches {
+				observation.Outcome = runtimecontract.RuntimeOperationCandidateNonconformant
+				observation.Violation = &runtimecontract.RuntimeOperationCandidateConformanceViolation{
+					ConstraintRef: constraint.Ref, ParameterName: constraint.ParameterName,
+					RequiredShape: constraint.RequiredShape, ActualShape: runtimecontract.RuntimeOperationCandidateActualShapeTargetModeMismatch,
+				}
+				return observation.Normalized()
+			}
 		default:
 			observation.Outcome = runtimecontract.RuntimeOperationCandidateContractDefect
 			return observation.Normalized()

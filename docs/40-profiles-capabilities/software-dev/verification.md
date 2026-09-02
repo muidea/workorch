@@ -27,10 +27,13 @@ and converges through the same neutral Runtime owner model. It must not make leg
 - DoD validation preparation seals the exact prospective-satisfaction contract ref; missing/extra/drifted ref or use on a
   non-prospective policy fails pre-seal and creates no Run/provider/capability work;
 - each repair-enabled DoD requirement seals one validation-failure convergence, never an alternative list: exact Shell trigger
-  and diagnostic classes (including `validation_dependency_mismatch` for the declared dependency-contract repair surface), File
-  state-change owner/kinds, separate declaration/operation selectors, prospective policy, fresh
+  and implementation/build/test diagnostic classes, File state-change owner/kinds, separate declaration/operation selectors,
+  prospective policy, fresh
   validation requirement and bounded cycles. Unknown diagnostics, cross-owner kinds, non-state-change evidence, incomplete
   selectors, disabled fresh validation or an out-of-range bound fail pre-seal and create no Run/provider/capability work;
+- `validation_dependency_mismatch + dependency_contract` is intentionally outside that prospective implementation convergence.
+  Until the Profile declares an exact dependency-contract owner/target policy, it must fail boundedly instead of proposing a new
+  implementation file or synthesizing `go.sum` content;
 - `source_change` uses the broad `workspace_delivery_change` role; wildcard DoD terminal validation and its repair surface retain
   the narrower `deliverable_implementation` role;
 - software-dev strings do not appear in Orchestrator reducer branches;
@@ -63,7 +66,8 @@ and converges through the same neutral Runtime owner model. It must not make leg
   replacement target or second provider request. Duplicate/restart neither repeats terminal delivery nor the same proposal's owner probe;
 - a validation entry is recipe lineage, not an implementation repair target; unstructured output yields no target candidate,
   while managed Go implementation diagnostics may report only actual `*.go:line[:column]` locations inside the fresh File manifest
-  scope. Missing `go.sum`/module-metadata output is instead a dependency-contract diagnostic with zero implementation candidates;
+  scope. Missing `go.sum`/module-metadata output is instead a dependency-contract diagnostic with zero implementation candidates and
+  cannot enter the Profile's prospective implementation repair generation;
 - a matching typed validation rejection without an exact owner-grounded target opens one
   `validation_failure_repair` semantic generation for the same CWI. The manifest preserves terminal `validation`, exposes only
   current File state-change authority, and binds the failure/convergence/catalog identities. File feasibility must confirm the
@@ -71,6 +75,9 @@ and converges through the same neutral Runtime owner model. It must not make leg
   dispatches. The complete repair receipt set retires the repair binding and requires fresh validation. Duplicate/restart is
   idempotent, stale catalog/failure lineage cannot seal, and the Profile/repair
   budgets terminate rather than loop;
+- owner candidate conformance must reject a unified diff whose add/update mode conflicts with sealed prospective/existing target
+  policy before ordinary feasibility. A later exact resource contradiction retires the binding; any other owner infeasibility on an
+  intermediate validation-repair binding atomically reaches `repair_surface_unavailable`, with no SM-4 recovery loop;
 - confirmed exact-surface repair reuses the rejected validation operation's unique current binding as immutable causation lineage;
   the operations manifest requires that `bindingRef` even when the source focus has validation proof only, while repair receipts
   still grant no terminal validation credit and fresh-load must reverse-prove the same source commitment;

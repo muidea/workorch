@@ -26,16 +26,23 @@ func ownerFeasibilityCategory(failure *runtimecontract.FailureFact) runtimecontr
 // sealed owner-neutral constraint they disprove.  The Orchestrator consumes
 // this typed fact; it never parses File codes or messages to choose an SM-2
 // transition.
-func ownerFeasibilityConstraintImpact(failure *runtimecontract.FailureFact) runtimecontract.RuntimeOwnerFeasibilityConstraintImpact {
+func ownerFeasibilityConstraintImpact(targetPolicy runtimecontract.RuntimeOperationTargetPolicy, failure *runtimecontract.FailureFact) runtimecontract.RuntimeOwnerFeasibilityConstraintImpact {
 	if failure == nil {
 		return ""
 	}
-	switch strings.TrimSpace(failure.Code) {
-	case "operation_target_exists":
-		return runtimecontract.RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted
-	default:
-		return ""
+	targetPolicy = runtimecontract.RuntimeOperationTargetPolicy(strings.TrimSpace(string(targetPolicy)))
+	code := strings.TrimSpace(failure.Code)
+	switch targetPolicy {
+	case runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		if code == "operation_target_exists" || code == "patch_target_exists" {
+			return runtimecontract.RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted
+		}
+	case runtimecontract.RuntimeOperationTargetPolicyExactTarget, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope:
+		if code == "operation_target_missing" || code == "patch_target_missing" {
+			return runtimecontract.RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted
+		}
 	}
+	return ""
 }
 
 var ownerFeasibilityCategories = map[string]runtimecontract.RuntimeOwnerFeasibilityCategory{

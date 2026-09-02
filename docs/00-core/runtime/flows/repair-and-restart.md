@@ -102,7 +102,13 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
 - capability-owner typed dependency/toolchain/environment diagnostics are not implementation-effect surfaces. For example, Shell
   classifies bounded Go missing-`go.sum`/module-metadata output as `validation_dependency_mismatch + dependency_contract` and emits
   zero implementation candidate refs; incidental compiler import locations cannot enter File confirmation. A Profile must declare
-  a concrete repair owner/vocabulary for that class before SM-2 can repair it, otherwise the failure terminates boundedly.
+  a concrete, target-policy-correct repair owner/vocabulary for that class before SM-2 can repair it, otherwise the failure terminates
+  boundedly. The current software-dev Profile deliberately does not map this class into its prospective
+  `deliverable_implementation` repair convergence; dependency metadata cannot be synthesized through that unrelated surface.
+- an ordinary capability-owner infeasibility after a `validation_failure_repair` binding is sealed cannot clear the exact repair
+  directive while retaining the intermediate binding. One Orchestrator-private CAS invalidates the candidate, retires that binding
+  with the persisted owner observation and seals `repair_surface_unavailable`; it neither opens an implicit semantic retry nor enters
+  SM-4 delayed recovery.
 - 需要外部信息 / 审批 / 依赖
   → sealed governance candidate → ticket → resolution commit
 - 存在owner-defined typed recovery/reconciliation合同的暂时不可用或consumption unknown

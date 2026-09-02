@@ -943,7 +943,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 					}
 					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "implementation_gap_detected")
 					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "validation_build_failed")
-					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "validation_dependency_mismatch")
+					assertStringListNotContains(t, repair["triggerDiagnosticClasses"].([]any), "validation_dependency_mismatch")
 					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "validation_test_failed")
 					assertStringListContains(t, repair["repairOperationKinds"].([]any), "file/write")
 					assertStringListContains(t, repair["repairOperationKinds"].([]any), "patch/apply")

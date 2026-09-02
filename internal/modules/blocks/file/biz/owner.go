@@ -570,7 +570,11 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 	operation := command.Operation.Normalized()
 	failure, stale, replayProof := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithReplayProof(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
 	prerequisiteRequest := fileOperationSnapshotPrerequisiteRequest(operation, failure, command.CurrentTargetSnapshot)
+	constraintImpact := ownerFeasibilityConstraintImpact(operationAuthorizationTargetPolicy(command.OperationAuthorization), failure)
 	category := ownerFeasibilityCategory(failure)
+	if constraintImpact != "" {
+		category = runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed
+	}
 	observation, err := fileevents.NewProbeRuntimeOperationFeasibilityResult(command, category, failure, stale, prerequisiteRequest, replayProof)
 	if err != nil {
 		setPrerequisiteError(result, err)
@@ -578,7 +582,7 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 	}
 	value := runtimecontract.RuntimeOperationFeasibilityObservation(observation)
 	value.OwnerPolicy = runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: ModuleID, PolicyRevision: fileOwnerFeasibilityPolicyRevision, CatalogSnapshotID: command.Admissibility.SnapshotID}
-	value.ConstraintImpact = ownerFeasibilityConstraintImpact(failure)
+	value.ConstraintImpact = constraintImpact
 	if value.ConstraintImpact != "" && value.Feedback != nil && value.Feedback.OriginalDiagnostic != nil {
 		value.Feedback.OriginalDiagnostic.ObservedRevision = command.Admissibility.ObservedRevision
 	}
@@ -588,6 +592,10 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		return
 	}
 	result.Set(fileevents.ProbeRuntimeOperationFeasibilityResult(value), nil)
+}
+
+func operationAuthorizationTargetPolicy(authorization runtimecontract.RuntimeCandidateOperationManifest) runtimecontract.RuntimeOperationTargetPolicy {
+	return authorization.Normalized().Target.Policy
 }
 
 func (m *Biz) handleRuntimeOperationCandidateConformance(event magicevent.Event, result magicevent.Result) {

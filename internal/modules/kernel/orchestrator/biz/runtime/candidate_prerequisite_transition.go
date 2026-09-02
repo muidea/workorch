@@ -183,9 +183,15 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForOwnerInfeasibi
 
 	expectedRevision := aggregate.StateRevision
 	contradiction := resolveOwnerBindingContradiction(aggregate, record, matchedFeasibility, observation)
+	repairInfeasibility, repairBound, repairErr := resolveOwnerValidationRepairInfeasibility(aggregate, record, matchedFeasibility, observation)
+	if repairErr != nil {
+		return RuntimeAggregate{}, repairErr
+	}
 	invalidateCandidateAttemptForOwnerObservation(&aggregate, idx, observation, contradiction.identity)
 	if contradiction.identity != nil {
 		err = applyOwnerBindingContradiction(&aggregate, contradiction)
+	} else if repairBound {
+		err = applyOwnerValidationRepairInfeasibility(&aggregate, observation, repairInfeasibility)
 	} else {
 		err = applyOwnerInfeasibilityFailure(&aggregate, observation, contradiction.unbound)
 	}
@@ -207,6 +213,16 @@ type ownerBindingContradiction struct {
 	coverageID common.CoverageWorkItemID
 	binding    runtimecontract.RuntimeCWIBindingRef
 	unbound    bool
+}
+
+// ownerValidationRepairInfeasibility scopes an ordinary owner rejection to
+// the exact intermediate validation-repair binding.  It is Orchestrator-local
+// transition input, not a capability instruction or a second owner fact.
+type ownerValidationRepairInfeasibility struct {
+	coverageID     common.CoverageWorkItemID
+	binding        runtimecontract.RuntimeCWIBindingRef
+	causationRef   string
+	contractDefect bool
 }
 
 func normalizeOwnerInfeasibilityInput(c *candidateDispatchComponent, workspaceID common.WorkspaceID, runID common.RunID, attempt int, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (runtimecontract.RuntimeOwnerFeasibilityObservation, error) {
@@ -248,6 +264,45 @@ func resolveOwnerBindingContradiction(aggregate RuntimeAggregate, record runtime
 		return ownerBindingContradiction{unbound: true}
 	}
 	return ownerBindingContradiction{identity: &identity, coverageID: coverageID, binding: binding}
+}
+
+// resolveOwnerValidationRepairInfeasibility prevents the generic candidate
+// infeasibility path from tearing down an exact validation-repair directive
+// while leaving its intermediate semantic binding current.  The capability
+// still reports only feasibility; Orchestrator classifies that fact against
+// its own current SM-2 purpose lineage.
+func resolveOwnerValidationRepairInfeasibility(aggregate RuntimeAggregate, record runtimecontract.RuntimeCandidateAttemptRecord, feasibility runtimecontract.RuntimeCandidateFeasibilityRecord, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (ownerValidationRepairInfeasibility, bool, error) {
+	if observation.SealedTargetAuthorizationContradicted() {
+		return ownerValidationRepairInfeasibility{}, false, nil
+	}
+	_, repairPurpose, err := currentRuntimeSemanticValidationFailureRepair(aggregate)
+	if err != nil || !repairPurpose {
+		return ownerValidationRepairInfeasibility{}, false, err
+	}
+	focus := aggregate.Facts.Focus.Normalized()
+	if len(focus.CoverageWorkItemIDs) != 1 {
+		return ownerValidationRepairInfeasibility{}, false, fmt.Errorf("%w: validation repair owner infeasibility has no unique current CWI", common.ErrConflict)
+	}
+	coverageID := focus.CoverageWorkItemIDs[0]
+	index := runtimeCWICoverageIndex(aggregate.Facts.Coverage, coverageID)
+	if index < 0 || aggregate.Facts.Coverage[index].CurrentBindingRef == nil {
+		return ownerValidationRepairInfeasibility{}, false, fmt.Errorf("%w: validation repair owner infeasibility has no current binding", common.ErrConflict)
+	}
+	result := ownerValidationRepairInfeasibility{
+		coverageID: coverageID,
+		binding:    aggregate.Facts.Coverage[index].CurrentBindingRef.Clone(),
+	}
+	diagnostic := observation.Feedback.Normalized().OriginalDiagnostic
+	if diagnostic == nil || strings.TrimSpace(diagnostic.Signature) == "" {
+		return ownerValidationRepairInfeasibility{}, false, fmt.Errorf("%w: validation repair owner infeasibility has no diagnostic identity", common.ErrConflict)
+	}
+	result.causationRef = "validation-repair-owner-infeasible/" + diagnostic.Signature
+	operation, operationFound := candidateOperationByID(*record.Proposal, feasibility.OperationID)
+	descriptor, descriptorFound := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	result.contractDefect = !operationFound || !descriptorFound || descriptor.OwnerModuleID != diagnostic.OwnerModuleID ||
+		!contains(operation.BindingRefs, result.binding.BindingID) ||
+		strings.TrimSpace(feasibility.CandidateManifestHash) == "" || feasibility.CandidateManifestHash != record.ManifestHash
+	return result, true, nil
 }
 
 func invalidateCandidateAttemptForOwnerObservation(aggregate *RuntimeAggregate, idx int, observation runtimecontract.RuntimeOwnerFeasibilityObservation, contradiction *runtimecontract.RuntimeBindingContradictionIdentity) {
@@ -292,6 +347,67 @@ func applyOwnerBindingContradiction(aggregate *RuntimeAggregate, contradiction o
 		return err
 	}
 	aggregate.Facts, aggregate.Decision = facts, decision
+	return nil
+}
+
+// applyOwnerValidationRepairInfeasibility is one private SM-2/SM-3 CAS.  A
+// repair-purpose binding is intermediate authority and cannot survive after
+// its exact operation set is owner-infeasible; retaining it without its repair
+// directive is invalid, while silently opening another generation would loop.
+// Retire the binding and terminate boundedly without dispatch or effect.
+func applyOwnerValidationRepairInfeasibility(aggregate *RuntimeAggregate, observation runtimecontract.RuntimeOwnerFeasibilityObservation, infeasibility ownerValidationRepairInfeasibility) error {
+	if aggregate == nil || infeasibility.coverageID == "" || strings.TrimSpace(infeasibility.causationRef) == "" {
+		return common.ErrInvalidArgument
+	}
+	facts := &aggregate.Facts
+	for index := range facts.Coverage {
+		item := &facts.Coverage[index]
+		if item.ID != infeasibility.coverageID || item.CurrentBindingRef == nil || !runtimecontract.SameRuntimeCWIBindingRef(*item.CurrentBindingRef, infeasibility.binding) {
+			continue
+		}
+		if len(item.BindingRetirementLineage) >= runtimecontract.RuntimeCWIBindingRetirementLineageLimit {
+			return fmt.Errorf("runtime CWI binding retirement lineage exhausted")
+		}
+		item.BindingRetirementLineage = append(item.BindingRetirementLineage, runtimecontract.RuntimeCWIBindingRetirementLineage{
+			RetiredBindingRef: infeasibility.binding, CausationRef: infeasibility.causationRef,
+			Reason: "validation-repair operation set was rejected by its capability owner before dispatch",
+		})
+		item.CurrentBindingRef = nil
+		item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStatePlanning
+	}
+	updated, err := replaceRuntimeCWIFocusProjection(*facts, []common.CoverageWorkItemID{infeasibility.coverageID})
+	if err != nil {
+		return err
+	}
+	contract, err := canonicalRuntimeCWIReconciliationContract(updated)
+	if err != nil {
+		return err
+	}
+	updated.ReconciliationContract = contract
+	aggregate.Facts = updated
+	if _, err := supersedeActiveReconciliationForCurrentContract(aggregate); err != nil {
+		return err
+	}
+	failure := ownerInfeasibilityFailure(observation, false)
+	if infeasibility.contractDefect {
+		failure.Class = runtimecontract.FailureClassRuntimeContractMisalignment
+		failure.Code = "runtime_owner_contract_defect"
+		failure.Signature = "validation-repair-owner-contract-defect/" + failure.Signature
+		failure.Message = "validation-repair owner infeasibility is not bound to its sealed operation authority"
+	} else {
+		failure.Class = runtimecontract.FailureClassCandidateInfeasible
+		failure.Code = "repair_surface_unavailable"
+		failure.Signature = "repair-surface-unavailable/" + failure.Signature
+		failure.Message = "sealed validation-repair operation set is not feasible: " + failure.Message
+	}
+	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+		return err
+	}
+	resolvedFacts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	if err != nil {
+		return err
+	}
+	aggregate.Facts, aggregate.Decision = resolvedFacts, decision
 	return nil
 }
 

@@ -151,6 +151,11 @@ func TestFileModuleSemanticAndOperationFeasibilityShareExistingTargetPolicy(t *t
 	semantic := runtimecontract.RuntimeSemanticProofFeasibilityObservation(semanticData.(fileevents.ProbeRuntimeSemanticProofFeasibilityResult))
 
 	authorization := mustRuntimeOperationAuthorizationIdentity(t, runtimecontract.StepKindFileWrite)
+	authorization.Target = runtimecontract.RuntimeOperationTargetAuthorization{
+		Policy:            runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		OwnerSelectorRefs: []string{"workspace-relative-new-file-target"}, ProspectiveTargetRefs: []string{targetRef},
+	}
+	authorization = authorization.Normalized()
 	content := "new\n"
 	operationResult := hub.Send(magicevent.NewEventWithContext(
 		fileevents.TopicProbeRuntimeOperationFeasibility, "kernel/orchestrator", ModuleID, magicevent.NewHeader(), ctx,

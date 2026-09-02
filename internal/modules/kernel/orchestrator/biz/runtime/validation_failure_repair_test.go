@@ -17,7 +17,7 @@ func runtimeValidationFailureRepairConvergenceForTest(maxAttempts int) runtimeco
 		ID:                                        "test-validation-failure-repair",
 		TriggerOwnerModuleID:                      runtimecontract.RuntimeModuleShell,
 		TriggerOperationKind:                      runtimecontract.RuntimeBlockKindManagedValidationSession,
-		TriggerDiagnosticClasses:                  []string{runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationDiagnosticDependencyMismatch, runtimecontract.ValidationDiagnosticTestFailed},
+		TriggerDiagnosticClasses:                  []string{runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationDiagnosticTestFailed},
 		RepairEvidenceKind:                        runtimecontract.EvidenceKindStateChange,
 		RepairOwnerModuleID:                       runtimecontract.RuntimeModuleFile,
 		RepairOperationKinds:                      []string{runtimecontract.StepKindFileWrite},
@@ -150,11 +150,10 @@ func TestRejectedTypedValidationWithoutFailureTargetOpensProfileRepairGeneration
 		t.Fatal(err)
 	}
 	sealed := sealCandidateForTest(t, repository, validationCandidate())
-	// Shell deliberately emits dependency mismatch without implementation
-	// target candidates for missing module metadata. The sealed Profile, not an
-	// Orchestrator capability-name branch, is the only authority that admits
-	// this target-free rejection into the generic repair generation.
-	evidence := runtimeRejectedValidationEvidenceForTest(t, sealed, "event-validation-profile-repair", runtimecontract.ValidationDiagnosticDependencyMismatch)
+	// The sealed Profile, not an Orchestrator capability-name branch, is the
+	// only authority that admits this target-free implementation rejection into
+	// the bounded repair generation.
+	evidence := runtimeRejectedValidationEvidenceForTest(t, sealed, "event-validation-profile-repair", runtimecontract.ValidationDiagnosticBuildFailed)
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 	committed, err := coordinator.commitEvidence(context.Background(), evidence)
 	if err != nil {
@@ -166,7 +165,7 @@ func TestRejectedTypedValidationWithoutFailureTargetOpensProfileRepairGeneration
 	}
 	if !required || input.CoverageWorkItemID != "cwi-1" || input.FailedFocusID != committed.Aggregate.Facts.DefinitionFocuses[0].ID ||
 		input.TriggerOwnerModuleID != runtimecontract.RuntimeModuleShell || input.TriggerOperationKind != runtimecontract.RuntimeBlockKindManagedValidationSession ||
-		input.TriggerDiagnosticClass != runtimecontract.ValidationDiagnosticDependencyMismatch {
+		input.TriggerDiagnosticClass != runtimecontract.ValidationDiagnosticBuildFailed {
 		t.Fatalf("persisted repair generation input = %+v required=%v", input, required)
 	}
 	item := committed.Aggregate.Facts.Coverage[0]
@@ -842,6 +841,9 @@ func TestValidationFailureRepairTriggerFailsClosedAndExactFailureTargetRetainsPr
 		{name: "raw diagnostic", mutate: func(value *runtimecontract.FailureFact) { value.ValidationDiagnostic = nil }},
 		{name: "unmatched class", mutate: func(value *runtimecontract.FailureFact) {
 			value.ValidationDiagnostic.Class = runtimecontract.ValidationDiagnosticTimeout
+		}},
+		{name: "dependency contract has no implementation repair mapping", mutate: func(value *runtimecontract.FailureFact) {
+			value.ValidationDiagnostic.Class = runtimecontract.ValidationDiagnosticDependencyMismatch
 		}},
 		{name: "unmatched owner", mutate: func(value *runtimecontract.FailureFact) {
 			value.OriginalDiagnostic.OwnerModuleID = runtimecontract.RuntimeModuleMCP

@@ -207,6 +207,155 @@ func TestOwnerInfeasibilityAtomicallyRetiresConfirmedRepairAuthority(t *testing.
 	}
 }
 
+func TestOwnerInfeasibilityAtomicallyTerminatesValidationRepairBinding(t *testing.T) {
+	prepared, event := prepareSemanticValidationRepairOwnerInfeasibility(t)
+	if _, repairPurpose, err := currentRuntimeSemanticValidationFailureRepair(prepared); err != nil || !repairPurpose {
+		t.Fatalf("fixture has no validation-repair semantic purpose: found=%v err=%v", repairPurpose, err)
+	}
+	before := cloneRuntimeAggregateForMCPProvenanceTest(t, prepared)
+	for _, testCase := range []struct {
+		name string
+		mode failureAuthorityCASMode
+	}{
+		{name: "normal", mode: failureAuthorityCASNormal},
+		{name: "CAS before write", mode: failureAuthorityCASFailBeforeWrite},
+		{name: "CAS response loss", mode: failureAuthorityCASLoseResponse},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repository := &failureAuthorityCASRepository{aggregate: cloneRuntimeAggregateForMCPProvenanceTest(t, prepared), mode: testCase.mode}
+			controller, err := NewRuntimeController(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, applyErr := controller.ApplyInternalEvent(context.Background(), event)
+			if testCase.mode == failureAuthorityCASFailBeforeWrite {
+				if !errors.Is(applyErr, errFailureAuthorityCASCut) || repository.saveAttempts != 1 ||
+					repository.aggregate.StateRevision != before.StateRevision ||
+					repository.aggregate.CandidateAttempts[len(repository.aggregate.CandidateAttempts)-1].State != runtimecontract.RuntimeCandidateAttemptStatePending {
+					t.Fatalf("CAS-before validation-repair result=%+v err=%v saves=%d aggregate=%+v", result, applyErr, repository.saveAttempts, repository.aggregate)
+				}
+				return
+			}
+			if testCase.mode == failureAuthorityCASLoseResponse {
+				if !errors.Is(applyErr, errFailureAuthorityCASCut) || repository.saveAttempts != 1 {
+					t.Fatalf("CAS-after validation-repair result=%+v err=%v saves=%d", result, applyErr, repository.saveAttempts)
+				}
+			} else if applyErr != nil {
+				t.Fatalf("validation-repair owner infeasibility: %v", applyErr)
+			}
+			got := repository.aggregate
+			if got.StateRevision != before.StateRevision+1 || repository.saveAttempts != 1 ||
+				got.Decision.State != runtimecontract.ConvergenceStateFailed || got.Decision.Terminal == nil || got.Decision.Terminal.Code != "repair_surface_unavailable" ||
+				got.Facts.Failure == nil || got.Facts.Failure.Code != "repair_surface_unavailable" || got.Facts.RepairDirective != nil ||
+				got.CandidateAttempts[len(got.CandidateAttempts)-1].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated ||
+				got.Facts.Coverage[0].CurrentBindingRef != nil || got.Facts.Coverage[0].CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStatePlanning ||
+				len(got.Facts.Coverage[0].BindingRetirementLineage) != len(before.Facts.Coverage[0].BindingRetirementLineage)+1 {
+				t.Fatalf("validation-repair owner infeasibility left torn authority: %+v", got)
+			}
+			if len(got.OperationReceipts) != len(before.OperationReceipts) || len(got.Facts.Evidence.Accepted) != len(before.Facts.Evidence.Accepted) ||
+				len(got.Facts.Evidence.Rejected) != len(before.Facts.Evidence.Rejected) || got.ActiveDispatch != nil ||
+				!reflect.DeepEqual(got.ExecutionBudget, before.ExecutionBudget) {
+				t.Fatalf("validation-repair owner infeasibility produced effects: before=%+v after=%+v", before, got)
+			}
+			if err := got.Validate(); err != nil {
+				t.Fatalf("terminal validation-repair aggregate is not fresh-load valid: %v", err)
+			}
+			restarted, err := NewRuntimeController(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := restarted.Load(context.Background(), got.Facts.WorkspaceID, got.Facts.RunID)
+			if err != nil {
+				t.Fatalf("fresh load rejected terminal validation-repair aggregate: %v", err)
+			}
+			revision, saves := loaded.StateRevision, repository.saveAttempts
+			duplicate, err := restarted.ApplyInternalEvent(context.Background(), event)
+			if err != nil || duplicate.Aggregate.StateRevision != revision || repository.saveAttempts != saves {
+				t.Fatalf("duplicate validation-repair infeasibility changed state: result=%+v err=%v saves=%d/%d", duplicate, err, repository.saveAttempts, saves)
+			}
+		})
+	}
+}
+
+func prepareSemanticValidationRepairOwnerInfeasibility(t *testing.T) (RuntimeAggregate, RuntimeInternalEvent) {
+	t.Helper()
+	aggregate := runtimeValidationFailureRepairAggregateForTest(t, runtimeValidationFailureRepairConvergenceForTest(1))
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, err := NewDispatchCoordinator(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealedValidation := sealCandidateForTest(t, repository, validationCandidate())
+	rejection := runtimeRejectedValidationEvidenceForTest(t, sealedValidation, "event-owner-infeasible-repair-open", runtimecontract.ValidationDiagnosticBuildFailed)
+	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &rejection)
+	opened, err := coordinator.commitEvidence(context.Background(), rejection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, proposal, semanticFeasibility := runtimeValidationFailureRepairProofForTest(t, opened.Aggregate, []string{"main.go"})
+	sealed := runtimeSealValidationFailureRepairSemanticProofForTest(t, repository, manifest, proposal, semanticFeasibility)
+	binding, found := coverageEvidenceBindingForCoverage(sealed.Facts.Focus, "cwi-1")
+	if !found {
+		t.Fatalf("validation-repair semantic seal has no binding: %+v", sealed.Facts.Focus)
+	}
+	sequence := sealed.Decision.RequiredOutput.RequiredOperationSequence
+	if len(sequence) != 1 {
+		t.Fatalf("validation-repair operation sequence = %+v, want one member", sequence)
+	}
+	operation := runtimecontract.RuntimeOperation{
+		ID: "owner-infeasible-validation-repair", Kind: runtimecontract.StepKindFileWrite,
+		BindingRefs: []string{binding.ID}, TargetRefs: []string{sequence[0].TargetRef},
+		RequiredOperationRef: sequence[0].RequirementID, Parameters: runtimeFileWriteParameters("repaired"),
+	}
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: operation}}}}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), sealed.Facts.WorkspaceID, sealed.Facts.RunID, 0, "owner-infeasible-validation-repair"); err != nil {
+		t.Fatal(err)
+	}
+	proposed, err := controller.recordCandidateProposal(context.Background(), sealed.Facts.WorkspaceID, sealed.Facts.RunID, 0, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operationID := runtimeTestCandidateOperationID(t, *proposed.CandidateAttempts[len(proposed.CandidateAttempts)-1].Proposal, 0)
+	catalog := runtimeValidationFailureRepairCatalogForOwnerTest(t, manifest, runtimecontract.RuntimeModuleFile)
+	failure := runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassCandidateContractFailure, Code: "patch_unified_diff_conflict",
+		Signature: "file/validation-repair-infeasible", Message: "candidate cannot be applied to the sealed repair surface", TargetRefs: []string{sequence[0].TargetRef},
+	}
+	feedback, err := runtimecontract.RuntimeFeedbackFromFailureFact(runtimecontract.RuntimeFeedbackScope{
+		WorkspaceID: proposed.Facts.WorkspaceID, RunID: proposed.Facts.RunID, AuthoritySnapshotID: proposed.Decision.AuthoritySnapshot.ID,
+	}, runtimecontract.RuntimeFeedbackDomainFeasibility, runtimecontract.RuntimeFeedbackCategory(runtimecontract.RuntimeOwnerFeasibilityCategoryObservationUnknown), runtimecontract.RuntimeModuleFile, failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feedback.OriginalDiagnostic.OperationID = operationID
+	observation := runtimecontract.RuntimeOwnerFeasibilityObservation{
+		Outcome: runtimecontract.RuntimeOwnerFeasibilityInfeasible, Feedback: &feedback,
+		OwnerPolicy: runtimecontract.RuntimeOwnerPolicyIdentity{
+			OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility-test", CatalogSnapshotID: catalog.SnapshotID,
+		},
+	}
+	if _, err := controller.recordCandidateFeasibility(context.Background(), proposed.Facts.WorkspaceID, proposed.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+		OperationID: operationID, AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
+		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, proposed.Facts.WorkspaceID, proposed.Facts.RunID, 0),
+		Observation:           &observation,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := controller.Load(context.Background(), proposed.Facts.WorkspaceID, proposed.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return prepared, RuntimeInternalEvent{
+		Kind:      RuntimeInternalEventOwnerFeasibilityObserved,
+		Scope:     RuntimeInternalEventScope{WorkspaceID: prepared.Facts.WorkspaceID, RunID: prepared.Facts.RunID},
+		Authority: &RuntimeInternalAuthorityPayload{Attempt: 0, OwnerFeasibility: &observation},
+	}
+}
+
 func prepareConfirmedRepairOwnerInfeasibility(t *testing.T) (RuntimeAggregate, RuntimeInternalEvent) {
 	t.Helper()
 	ctx := context.Background()

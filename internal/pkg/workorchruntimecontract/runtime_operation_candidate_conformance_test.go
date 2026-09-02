@@ -20,7 +20,9 @@ func TestRuntimeOperationCandidateConstraintsAreSealedAndOwnerNeutral(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if variantID != "unified_diff" || len(constraints) != 1 || constraints[0].Ref != "patch/unified_diff/diff/single_file" || constraints[0].ParameterName != "diff" {
+	if variantID != "unified_diff" || len(constraints) != 2 ||
+		constraints[0].Ref != "patch/unified_diff/diff/single_file" || constraints[0].ParameterName != "diff" ||
+		constraints[1].Ref != "patch/unified_diff/diff/target_mode" || constraints[1].RequiredShape != RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode {
 		t.Fatalf("sealed constraints = variant=%q values=%+v", variantID, constraints)
 	}
 	for _, kind := range []string{StepKindGitRead, StepKindGitWrite, StepKindShellCommand, StepKindSSHCommand, StepKindWebFetch, StepKindMCPToolCall} {

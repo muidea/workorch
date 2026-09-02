@@ -190,10 +190,16 @@ func runtimeOwnerConstraintConformanceRecord(t *testing.T, aggregate RuntimeAggr
 		t.Fatalf("candidate operation %q has no manifest authorization", operation.Kind)
 	}
 	variantID, constraints, err := runtimecontract.RuntimeOperationCandidateConstraintsForOperation(operation, authorization)
-	if err != nil || len(constraints) != 1 {
+	if err != nil || len(constraints) == 0 {
 		t.Fatalf("candidate operation constraints=%+v err=%v", constraints, err)
 	}
 	constraint := constraints[0]
+	for _, candidateConstraint := range constraints {
+		if candidateConstraint.RequiredShape == runtimecontract.RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile {
+			constraint = candidateConstraint
+			break
+		}
+	}
 	observation := runtimecontract.RuntimeOperationCandidateConformanceObservation{
 		OperationID: operation.ID, OperationKind: operation.Kind, VariantID: variantID,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, CandidateManifestHash: manifest.Hash,

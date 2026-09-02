@@ -71,8 +71,9 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 		!parsedRepair.RequireFreshValidation || parsedRepair.MaxAttempts != 2 {
 		t.Fatalf("builtin software-dev repair convergence was not parsed into the admission candidate: %+v", parsedRepair)
 	}
-	if !parsedRepair.MatchesTrigger(runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, runtimecontract.ValidationDiagnosticDependencyMismatch) {
-		t.Fatalf("builtin software-dev repair convergence does not admit the Shell dependency-contract diagnostic: %+v", parsedRepair)
+	if !parsedRepair.MatchesTrigger(runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, runtimecontract.ValidationDiagnosticBuildFailed) ||
+		parsedRepair.MatchesTrigger(runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, runtimecontract.ValidationDiagnosticDependencyMismatch) {
+		t.Fatalf("builtin software-dev repair convergence did not isolate implementation repair from dependency-contract diagnostics: %+v", parsedRepair)
 	}
 	result, err := definitionadmission.Compile(candidate)
 	if err != nil || result.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
@@ -88,21 +89,24 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 		t.Fatalf("compile admitted builtin software-dev bootstrap: %v", err)
 	}
 	compiledRepairFound := false
+	compiledDependencyMisroute := false
 	for _, focus := range bootstrap.DefinitionFocuses {
 		if focus.AssessmentScope != "dodItem" || focus.ValidationFailureRepairConvergence == nil {
 			continue
 		}
-		compiledRepairFound = focus.ValidationFailureRepairConvergence.MatchesTrigger(
+		compiledRepairFound = compiledRepairFound || focus.ValidationFailureRepairConvergence.MatchesTrigger(
+			runtimecontract.RuntimeModuleShell,
+			runtimecontract.RuntimeBlockKindManagedValidationSession,
+			runtimecontract.ValidationDiagnosticBuildFailed,
+		)
+		compiledDependencyMisroute = compiledDependencyMisroute || focus.ValidationFailureRepairConvergence.MatchesTrigger(
 			runtimecontract.RuntimeModuleShell,
 			runtimecontract.RuntimeBlockKindManagedValidationSession,
 			runtimecontract.ValidationDiagnosticDependencyMismatch,
 		)
-		if compiledRepairFound {
-			break
-		}
 	}
-	if !compiledRepairFound {
-		t.Fatalf("admitted software-dev bootstrap lost dependency-contract repair convergence: %+v", bootstrap.DefinitionFocuses)
+	if !compiledRepairFound || compiledDependencyMisroute {
+		t.Fatalf("admitted software-dev bootstrap lost the bounded implementation-only repair convergence: %+v", bootstrap.DefinitionFocuses)
 	}
 }
 

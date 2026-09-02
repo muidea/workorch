@@ -34,12 +34,20 @@ func assertOwnerFeasibilityCategories(t *testing.T, wantCodes []string) {
 		if !runtimecontract.ValidRuntimeOwnerFeasibilityCategory(category) || category == runtimecontract.RuntimeOwnerFeasibilityCategoryOwnerContractDefect {
 			t.Fatalf("declared code %q category=%q", code, category)
 		}
-		impact := ownerFeasibilityConstraintImpact(failure)
-		if code == "operation_target_exists" && impact != runtimecontract.RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted {
-			t.Fatalf("existing-target code impact=%q", impact)
-		}
-		if code != "operation_target_exists" && impact != "" {
-			t.Fatalf("candidate-local code %q unexpectedly contradicted sealed target authorization: %q", code, impact)
+		for _, policy := range []runtimecontract.RuntimeOperationTargetPolicy{
+			runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+			runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		} {
+			impact := ownerFeasibilityConstraintImpact(policy, failure)
+			wantImpact := (policy == runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget && (code == "operation_target_exists" || code == "patch_target_exists")) ||
+				(policy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget && (code == "operation_target_missing" || code == "patch_target_missing"))
+			if wantImpact && impact != runtimecontract.RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted {
+				t.Fatalf("policy=%q code=%q impact=%q, want contradiction", policy, code, impact)
+			}
+			if !wantImpact && impact != "" {
+				t.Fatalf("policy=%q code=%q unexpectedly contradicted sealed target authorization: %q", policy, code, impact)
+			}
 		}
 	}
 	for _, code := range []string{"", "shell_operation_invalid", "owner_new_unmapped_code"} {
@@ -47,7 +55,7 @@ func assertOwnerFeasibilityCategories(t *testing.T, wantCodes []string) {
 			t.Fatalf("undeclared or cross-owner code %q category=%q, want owner contract defect", code, category)
 		}
 	}
-	if impact := ownerFeasibilityConstraintImpact(nil); impact != "" {
+	if impact := ownerFeasibilityConstraintImpact(runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, nil); impact != "" {
 		t.Fatalf("nil failure impact=%q", impact)
 	}
 }
