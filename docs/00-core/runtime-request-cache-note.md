@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-08-31
+Last Verified: 2026-09-01
 
 ## Purpose
 
@@ -32,6 +32,10 @@ focused contract；本页不复制字段级正文。
   objectives 与 concrete document-shape/schema/semantic witness；failure 与该 input 的 normalized identity 进入 correction/request-session hash，
   persisted `Disposition`/`TerminalCode` 不跨 owner。LLM 只渲染该 detached fact，不能重新选择 alternative。缺失、漂移或
   无法由相同 manifest 重验的 witness 在 physical provider call 前 fail-closed。
+- `owner_candidate_constraint` correction 的 C3 authority 保留 manifest-declared `candidateConstraints`；C4 只携带 exact
+  constraint ref、parameter path、closed `actual_shape`/`required_shape` 与 objective，不得携带 rejected parameter、owner
+  parser text 或普通 feasibility diagnostic。attempt 1 仍复用同一 C0～C3 与 `stablePrefixHash`；required shape 只能由
+  capability owner 的后继 typed conformance result 证明。
 - required field missing/empty 的 schema witness 使用 `field_absent -> field_present`；required field 为 `null` 或错误 JSON type
   时，C4 必须携带 strict decoder 的 exact rejected type、同 path 与 expected schema rule，并使用
   `<actual_type> -> field_present`。两者都只要求重写完整 document，不改变 C0～C3、wire contract、stable-prefix hash 或

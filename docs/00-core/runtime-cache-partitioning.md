@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-31
+Last Verified: 2026-09-01
 
 ## Provider-Neutral Cache Model
 
@@ -42,6 +42,9 @@ Provider-facing 第一段必须是连续的 C0→C1→C2。C3→C4→C5 只能�
   witness 和 exact alternative；correction/request-session identity 只绑定 failure 与该 detached input，不携带 persisted
   `Disposition`/`TerminalCode`。C4 不得包含 owner raw diagnostic、Run/repair/recovery action、governance continuation、raw
   evidence summary 或未封存 allowed value；
+- operation variant 的 owner-defined `candidateConstraints` 属于 C3 sealed manifest authority。其 attempt-1 C4 只能引用 exact
+  constraint ref、parameter path、closed actual/required shape；rejected parameter、parser text 与 ordinary feasibility fact
+  不得进入任何 C0～C5 section。后继 owner conformance result 是 required shape 的唯一证明，不改变 C0～C3 section hash；
 - external capability receipt 只把 owner-normalized bounded summary/hash放入C4 evidence tail；raw payload只能作为
   opaque C5 ref，不能展开provider body、transport endpoint或diagnostic；
 - operation kind、variant 与 target policy 必须来自同一 owner fact；具体 owner/kind/target 只存在于 C3 manifest。

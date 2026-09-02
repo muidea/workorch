@@ -361,6 +361,78 @@ func TestRuntimeCandidateCorrectionInputUsesSealedHashForPrivateReplayFrontier(t
 	}
 }
 
+func TestRuntimeCandidateCorrectionInputValidatesOwnerConstraintAgainstManifest(t *testing.T) {
+	contract, found := runtimecontract.RuntimeOperationContractForKind(runtimecontract.RuntimeBlockKindPatchApply)
+	if !found {
+		t.Fatal("patch/apply contract is missing")
+	}
+	preview, found := runtimecontract.RuntimeOperationContractForKind(runtimecontract.RuntimeBlockKindPatchPreview)
+	if !found {
+		t.Fatal("patch/preview contract is missing")
+	}
+	manifest := runtimecontract.RuntimeCandidateContractManifest{
+		Revision:                  runtimecontract.RuntimeCandidateContractManifestRevision,
+		State:                     runtimecontract.ConvergenceStateNeedStateChange,
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		Operations: []runtimecontract.RuntimeCandidateOperationManifest{
+			{
+				Kind: contract.Kind, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				Parameters: contract.Parameters, Variants: contract.Variants,
+				TargetCardinality:         runtimecontract.RuntimeOperationTargetCardinalityOne,
+				OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+			},
+			{
+				Kind: preview.Kind, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				Parameters: preview.Parameters, Variants: preview.Variants,
+				TargetCardinality:         runtimecontract.RuntimeOperationTargetCardinalityOne,
+				OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+			},
+		},
+	}.Normalized()
+	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	input := RuntimeCandidateCorrectionInput{
+		ManifestHash: manifest.Hash,
+		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformOwnerConstraint},
+		Witness: runtimecontract.RuntimeCandidateCorrectionWitness{
+			Dimension:        runtimecontract.RuntimeCandidateCorrectionWitnessOwnerConstraint,
+			OperationKind:    runtimecontract.RuntimeBlockKindPatchApply,
+			Path:             "$.operations[0].parameters[name=diff]",
+			ConstraintRef:    "patch/unified_diff/diff/single_file",
+			RejectedValue:    string(runtimecontract.RuntimeOperationCandidateActualShapeInvalidSyntax),
+			AlternativeValue: string(runtimecontract.RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile),
+		},
+	}.Normalized()
+	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract,
+		Code:  "candidate_owner_constraint_nonconformant", Signature: "candidate-owner-constraint-nonconformant",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			OperationID: "patch-1", Path: input.Witness.Path, Actual: input.Witness.RejectedValue,
+			ConstraintRef: input.Witness.ConstraintRef, RequiredShape: input.Witness.AlternativeValue,
+			ManifestHash: manifest.Hash, Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), input.Objectives...),
+		},
+		SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(manifest.Hash, input.Objectives, &input.Witness),
+	}.Normalized()
+	if err := input.ValidateAgainstObservation(manifest, observation); err != nil {
+		t.Fatalf("owner constraint correction: %v", err)
+	}
+
+	drifted := manifest.Clone()
+	for operationIndex := range drifted.Operations {
+		for variantIndex := range drifted.Operations[operationIndex].Variants {
+			drifted.Operations[operationIndex].Variants[variantIndex].CandidateConstraints = nil
+		}
+	}
+	drifted.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(drifted)
+	driftedInput := input.Normalized()
+	driftedInput.ManifestHash = drifted.Hash
+	driftedObservation := observation.Clone()
+	driftedObservation.Diagnostic.ManifestHash = drifted.Hash
+	driftedObservation.SealedCorrectionHash = runtimecontract.StableRuntimeCandidateSealedCorrectionHash(drifted.Hash, driftedInput.Objectives, &driftedInput.Witness)
+	if err := driftedInput.ValidateAgainstObservation(drifted, driftedObservation); err == nil {
+		t.Fatal("owner constraint correction survived removal of its manifest constraint")
+	}
+}
+
 func TestRuntimeCandidateCorrectionInputRejectsSemanticWitnessForMissingRequiredFieldObservation(t *testing.T) {
 	t.Parallel()
 	manifest := candidateCorrectionTestManifest()

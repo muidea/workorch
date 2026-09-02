@@ -22,12 +22,14 @@ func CandidateRejectionCodeDisposition(code string) (runtimecontract.RuntimeCand
 		"candidate_action_evidence_mismatch",
 		"candidate_target_outside_grounding",
 		"candidate_creation_scope_missing_file_target",
-		"candidate_owner_target_effect_overlap":
+		"candidate_owner_target_effect_overlap",
+		"candidate_owner_constraint_nonconformant":
 		return runtimecontract.RuntimeCandidateCorrectionCorrectableOnce, true
 	case "candidate_replays_rejected_candidate_shape",
 		"candidate_authority_exhausted",
 		"candidate_retry_exhausted",
 		"workspace_resolution_failed",
+		"operation_candidate_conformance_probe_invalid",
 		"operation_feasibility_probe_invalid",
 		"provider",
 		"provider_transient",
@@ -52,7 +54,7 @@ func CandidateRejectionTerminalCode(code string) string {
 		return "candidate_retry_exhausted"
 	case "candidate_authority_exhausted":
 		return "candidate_authority_exhausted"
-	case "workspace_resolution_failed", "operation_feasibility_probe_invalid",
+	case "workspace_resolution_failed", "operation_candidate_conformance_probe_invalid", "operation_feasibility_probe_invalid",
 		"provider", "provider_transient", "provider_authentication", "provider_configuration", "runtime_contract_defect":
 		return strings.TrimSpace(code)
 	default:
@@ -73,6 +75,9 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 	}
 	if diagnostic.ViolationKind == runtimecontract.RuntimeCandidatePayloadViolationParameterEntryEncoding && len(diagnostic.ParameterEntryEncodings) != 0 {
 		return []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReencodeParameterEntries}
+	}
+	if strings.TrimSpace(failure.Code) == "candidate_owner_constraint_nonconformant" && diagnostic.ConstraintRef != "" && diagnostic.RequiredShape != "" {
+		return []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformOwnerConstraint}
 	}
 	// Provider-authored operation identity is forbidden at the strict wire.
 	// Its only legal correction is removal: dependency satisfaction and every

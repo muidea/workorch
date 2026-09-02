@@ -2392,6 +2392,84 @@ func TestRuntimeCandidateRetryProjectsParameterEntryReencodeWithoutRawValues(t *
 	}
 }
 
+func TestRuntimeCandidateRetryProjectsOwnerConstraintOnlyInC4WithoutStablePrefixDrift(t *testing.T) {
+	decision := runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds:             []string{runtimecontract.RuntimeBlockKindPatchApply},
+			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "unified_diff"}},
+			AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs:       []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		},
+	}
+	manifest := runtimeCandidateManifestForSchema(t, decision, nil)
+	outputBefore := runtimeCandidateOutputContractForTest(t, manifest)
+	definition := runtimecontract.RuntimeDefinitionContext{
+		StartupInputHash: "startup-input-owner-constraint", Revision: "definition-1",
+		GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod",
+	}
+	execution := runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce}
+	prefixBefore := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, execution)
+
+	objectives := []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformOwnerConstraint}
+	witness := runtimecontract.RuntimeCandidateCorrectionWitness{
+		Dimension:        runtimecontract.RuntimeCandidateCorrectionWitnessOwnerConstraint,
+		OperationKind:    runtimecontract.RuntimeBlockKindPatchApply,
+		Path:             "$.operations[0].parameters[name=diff]",
+		ConstraintRef:    "patch/unified_diff/diff/single_file",
+		RejectedValue:    string(runtimecontract.RuntimeOperationCandidateActualShapeInvalidSyntax),
+		AlternativeValue: string(runtimecontract.RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile),
+	}
+	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_owner_constraint_nonconformant",
+		Signature: "candidate-owner-constraint-nonconformant",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			OperationID: "patch-1", Path: witness.Path, Actual: witness.RejectedValue,
+			ConstraintRef: witness.ConstraintRef, RequiredShape: witness.AlternativeValue,
+			ManifestHash: manifest.Hash, Objectives: objectives,
+		},
+		SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(manifest.Hash, objectives, &witness),
+	}
+	correction := llmmodels.RuntimeCandidateCorrectionInput{ManifestHash: manifest.Hash, Objectives: objectives, Witness: witness}
+	if err := correction.ValidateAgainstObservation(manifest, observation); err != nil {
+		t.Fatal(err)
+	}
+	retry := runtimeCandidateRetryForManifest(1, &observation, manifest, &correction)
+	if retry == nil {
+		t.Fatal("owner-constraint retry projection is nil")
+	}
+	outputAfter := runtimeCandidateOutputContractForTest(t, manifest)
+	prefixAfter := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(definition, execution)
+	if !reflect.DeepEqual(outputBefore, outputAfter) || prefixBefore == "" || prefixBefore != prefixAfter {
+		t.Fatalf("owner-constraint C4 projection changed C3/stable prefix: before=%q after=%q", prefixBefore, prefixAfter)
+	}
+	payload, err := json.Marshal(struct {
+		C3 any                              `json:"c3"`
+		C4 *runtimeCandidateRetryProjection `json:"c4"`
+	}{C3: outputAfter, C4: retry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(payload)
+	for _, required := range []string{
+		`"candidateConstraints"`, `"constraintRef":"patch/unified_diff/diff/single_file"`,
+		`"dimension":"owner_candidate_constraint"`, `"rejectedValue":"invalid_syntax"`,
+		`"alternativeValue":"unified_diff_single_file"`, "capability owner rejected one parameter's representation",
+	} {
+		if !strings.Contains(encoded, required) {
+			t.Fatalf("owner-constraint C3/C4 projection lost %q: %s", required, encoded)
+		}
+	}
+	for _, forbidden := range []string{
+		"--- a/private-secret.go", "unified diff must include file header", "raw owner parser diagnostic", `"reason"`,
+	} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("owner-constraint C4 leaked %q: %s", forbidden, encoded)
+		}
+	}
+}
+
 func TestRuntimeCandidateExecutionTailOnlyRendersProviderSafeFacts(t *testing.T) {
 	secretParameter := "raw-operation-payload-must-not-reach-c4"
 	context := runtimecontract.RuntimeCandidateContext{

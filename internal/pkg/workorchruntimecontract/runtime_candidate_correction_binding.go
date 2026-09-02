@@ -173,6 +173,8 @@ func validateRuntimeCandidateCorrectionObjectiveWitnessCompatibility(objectives 
 		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionConformExpectedDocument
 	case RuntimeCandidateCorrectionWitnessParameterEntryEncoding:
 		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionReencodeParameterEntries
+	case RuntimeCandidateCorrectionWitnessOwnerConstraint:
+		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionConformOwnerConstraint
 	case RuntimeCandidateCorrectionWitnessSchemaField:
 		compatible = hasAny(RuntimeCandidateCorrectionSupplyRequiredField, RuntimeCandidateCorrectionRemoveForbiddenField) &&
 			allowsOnly(
@@ -289,6 +291,14 @@ func validateRuntimeCandidateCorrectionWitnessAgainstObservation(observation Run
 			witness.Path != "$.operations" ||
 			!sameRuntimeCandidateParameterEntryEncodings(diagnostic.ParameterEntryEncodings, witness.ParameterEntryEncodings) {
 			return fmt.Errorf("runtime candidate parameter-entry correction witness differs from observation")
+		}
+	case RuntimeCandidateCorrectionWitnessOwnerConstraint:
+		if observation.Code != "candidate_owner_constraint_nonconformant" ||
+			diagnostic.Path != witness.Path || diagnostic.Actual != witness.RejectedValue ||
+			diagnostic.ConstraintRef != witness.ConstraintRef || diagnostic.RequiredShape != witness.AlternativeValue ||
+			diagnostic.RejectedShapeHash != "" ||
+			!runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionConformOwnerConstraint) {
+			return fmt.Errorf("runtime candidate owner-constraint correction witness differs from observation")
 		}
 	default:
 		// Semantic alternatives come from the Orchestrator-private candidate

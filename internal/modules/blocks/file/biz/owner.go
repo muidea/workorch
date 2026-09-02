@@ -66,6 +66,7 @@ func (m *Biz) Start() error {
 	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", fileevents.PrerequisiteCommandDestination, fileevents.TopicConfirmRuntimeRepairSurface, m.handleConfirmRuntimeRepairSurface)
 	m.SubscribeFunc(fileevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
 	m.SubscribeFunc(fileevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
+	m.SubscribeFunc(fileevents.TopicValidateRuntimeOperationCandidateConformance, m.handleRuntimeOperationCandidateConformance)
 	m.SubscribeFunc(fileevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
 	m.SubscribeFunc(fileevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
 	m.SubscribeFunc(fileevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
@@ -95,6 +96,7 @@ func (m *Biz) Teardown(context.Context) {
 	m.UnsubscribeFunc(fileevents.TopicExecuteFileListOperation)
 	m.UnsubscribeFunc(fileevents.TopicAcquireRuntimeCapabilities)
 	m.UnsubscribeFunc(fileevents.TopicAcquireRuntimeOperationAdmissibility)
+	m.UnsubscribeFunc(fileevents.TopicValidateRuntimeOperationCandidateConformance)
 	m.UnsubscribeFunc(fileevents.TopicProbeRuntimeOperationFeasibility)
 	m.UnsubscribeFunc(fileevents.TopicProbeRuntimeSemanticProofFeasibility)
 	m.UnsubscribeFunc(fileevents.TopicQueryRuntimeCWIReconciliation)
@@ -586,6 +588,32 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		return
 	}
 	result.Set(fileevents.ProbeRuntimeOperationFeasibilityResult(value), nil)
+}
+
+func (m *Biz) handleRuntimeOperationCandidateConformance(event magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
+	if !requireOrchestratorRuntimeSource(event, result) {
+		return
+	}
+	command, ok := event.Data().(fileevents.ValidateRuntimeOperationCandidateConformanceCommand)
+	if !ok || m.runtimeAdapter == nil {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
+	if err := fileevents.ValidateRuntimeOperationCandidateConformanceCommandValue(command, ModuleID); err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	request := runtimecontract.RuntimeOperationCandidateConformanceRequest(command).Normalized()
+	observed := m.runtimeAdapter.ProbeRuntimeOperationCandidateConformance(request.Operation, request.OperationAuthorization)
+	response, err := fileevents.NewValidateRuntimeOperationCandidateConformanceResult(command, observed.Outcome, observed.Violation)
+	if err != nil {
+		setPrerequisiteError(result, err)
+		return
+	}
+	result.Set(response, nil)
 }
 
 func (m *Biz) handleRuntimeSemanticProofFeasibility(event magicevent.Event, result magicevent.Result) {

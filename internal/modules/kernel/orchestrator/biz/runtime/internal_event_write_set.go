@@ -134,6 +134,7 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 
 	case RuntimeInternalEventCandidateDocumentRejected,
 		RuntimeInternalEventCandidateProposalObserved,
+		RuntimeInternalEventCandidateConformanceObserved,
 		RuntimeInternalEventCandidatePrerequisiteObserved,
 		RuntimeInternalEventCandidateSealed,
 		RuntimeInternalEventCandidateRejected:

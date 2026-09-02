@@ -44,6 +44,12 @@ func (c RuntimeCandidateCorrectionInput) ValidateAgainstObservation(manifest run
 	if c.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding {
 		return runtimecontract.ValidateRuntimeCandidateParameterEntryEncodings(manifest, c.Witness.ParameterEntryEncodings)
 	}
+	if c.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOwnerConstraint {
+		constraint, found := runtimecontract.RuntimeCandidateConstraintForOperationRef(manifest, c.Witness.OperationKind, c.Witness.ConstraintRef)
+		if !found || constraint.ParameterName != runtimeCandidateCorrectionPathField(c.Witness.Path) || string(constraint.RequiredShape) != c.Witness.AlternativeValue {
+			return fmt.Errorf("runtime candidate owner-constraint witness is not sealed in the manifest")
+		}
+	}
 	return nil
 }
 

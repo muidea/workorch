@@ -194,6 +194,8 @@ JSON 的 local schema rejection 只引用 field path/rule 等 provider-safe fact
 另一个 `parameters[]` entry 的 sibling，C4 只可携带 `parameter_entry_encoding` 的 operation/entry index、operation kind、
 container name，以及每个 misplaced parameter 的 name、contract type 与由 type 确定的 wire value field；不得携带 attempt-0
 原值。该事实只授权 provider 重新生成完整文档，不授权 adapter 或 LLM owner 本地搬移并接受原文。
+manifest-declared owner candidate constraint 的 rejection 同样只携带 sealed constraint ref、parameter path 和 closed
+shape enums；raw diff/content、owner-private parser message 与 ordinary feasibility code 均不得进入 C4。
 
 LLM usage Eventstream/read projection 同样必须原样保留 `logicalRequestId`/`physicalCallId`（Runtime request）、
 `providerSubmitted` 与 `physicalResponseMode`；Runtime usage 的两级 identity 必须同时非空且
@@ -204,7 +206,8 @@ attempt 1 只允许改变 C4 中 provider-safe `CandidateRejection` 与 Orchestr
 `correctionInput` 投影。document-conformance witness 只表达 `$` 上的 `empty_document | invalid_provider_output ->
 one_complete_json_object`；schema witness 只表达 sealed local schema 的 field path/rule；parameter-entry witness 只表达
 declared logical parameter 从 inline sibling 到 independent named typed entry 的结构重编码；semantic witness 才表达具体合法
-alternative。该投影只有 manifest、objectives 与 concrete witness；persisted `Disposition`/`TerminalCode` 不进入
+alternative；`owner_candidate_constraint` witness 只表达 manifest-declared constraint ref、parameter path 与 closed
+`actual_shape -> required_shape`，不包含 raw parameter 或 owner parser text。该投影只有 manifest、objectives 与 concrete witness；persisted `Disposition`/`TerminalCode` 不进入
 LLM command/model/C4，LLM 也不能反构 directive。若修正需要改变 operation authorization、target policy、allowed
 targets、manifest 或 C0～C3，则必须终止 current transaction，等待 SM-2 以新 owner fact 建立新 authority。
 

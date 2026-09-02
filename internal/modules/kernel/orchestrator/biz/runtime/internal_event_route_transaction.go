@@ -29,6 +29,7 @@ func (c *RuntimeController) applyTransactionInternalEvent(ctx context.Context, e
 	case RuntimeInternalEventCandidateAttemptBegun,
 		RuntimeInternalEventCandidateDocumentRejected,
 		RuntimeInternalEventCandidateProposalObserved,
+		RuntimeInternalEventCandidateConformanceObserved,
 		RuntimeInternalEventCandidateFeasibilityObserved,
 		RuntimeInternalEventCandidatePrerequisiteStaleObserved,
 		RuntimeInternalEventCandidatePrerequisiteObserved,
@@ -186,6 +187,13 @@ func (c *RuntimeController) applyCandidateDispatchTransactionInternalEvent(ctx c
 		admission, err := c.candidateDispatch.admitCandidateProposal(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, *event.Transaction.Manifest, event.Transaction.LogicalRequestID, *event.Transaction.Candidate)
 		result.Aggregate = admission.Aggregate
 		result.Admission = &admission
+		return result, err
+	case RuntimeInternalEventCandidateConformanceObserved:
+		if event.Transaction.CandidateConformance == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, err := c.candidateDispatch.recordCandidateConformance(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.Attempt, *event.Transaction.CandidateConformance)
+		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateFeasibilityObserved:
 		if event.Transaction.CandidateFeasibility == nil {

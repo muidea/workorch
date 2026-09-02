@@ -9,13 +9,15 @@ Last Verified: 2026-09-01
 ## 规范化候选合同
 
 Runtime 不要求穷举所有模型输出组合。它要求把动态 owner 事实先编译成一份有限、可验证的
-`RuntimeCandidateContractManifest`，此后 renderer、decoder、candidate evaluator、owner feasibility 和
+`RuntimeCandidateContractManifest`，此后 renderer、decoder、candidate evaluator、owner candidate conformance、owner feasibility 和
 fixture 都只能消费这份封存合同，不能再次解释原始 profile、目录、错误文本或临时上下文。
 
 每个 manifest 由零到多个 `SealedOperationAuthorization` 组成。该名称表示 manifest 内的一条纯值授权记录，
 不是新的状态机或 owner；实现可在现有 manifest DTO 内表达。每条授权至少包含：
 
 - canonical operation kind、owner module、parameter/variant contract；
+- variant 可选的 `CandidateConstraints`：只允许 sealed ref、parameter name 与 closed required-shape vocabulary，且计入
+  operation-contract revision 与 manifest hash；不得携带 raw candidate、parser text 或 Runtime disposition；
 - accepted/required effect scope、dependency 与封存的 `CoverageEvidenceBinding` 引用；每个可关闭
   CWI 的 binding 必须精确绑定 CWI、proof shape、target/selector、validation recipe/check（适用时的 metric/artifact）
   与来源 declaration/snapshot，不能用 candidate 自报 CWI 代替；
@@ -261,8 +263,23 @@ manifest 驱动的 strict local decoder/schema admission；provider JSON Schema 
 通过 strict local admission 的完整 candidate document 只允许进入一个纯 `CandidateEvaluator`。它的输入是 persisted manifest、decoded
 candidate 和同一 authority contract 的 prior attempt fact；输出只能是 `accepted` 或一个完整的
 `CandidateRejection`。owner feasibility 是 capability owner 的独立 typed factual observation，不是
-`CandidateRejection` 的子类。decoder、admission 与 owner-feasibility adapter 可以提供 typed observation，但不能各自
+`CandidateRejection` 的子类。decoder、admission、owner-conformance 与 owner-feasibility adapter 可以提供 typed observation，但不能各自
 选择 retry、terminal、governance 或下一 action。
+
+普通 JSON/schema/manifest admission 接受 candidate 后，SM-3 必须先持久化完整 proposal，再处理 manifest 中当前 variant
+实际选择的 `CandidateConstraints`。每项 constraint 只允许通过 receiving owner 定义的 concrete typed read command/result
+取得 `conformant | nonconformant | owner_contract_defect`：owner 可以复用其执行路径的同一 parser/matcher，但不得读取或
+修改 workspace、生成 receipt/evidence、选择 retry/terminal 或返回 raw parameter/diagnostic。当前 File
+`patch/apply|patch/preview` 的 `unified_diff` 以该通道验证 single-file syntax 与 header/target 一致；Core 不解释 File code
+或 parser message。未声明 constraint 的 operation 不调用该通道，也不持久化占位 record。
+
+该 owner fact 与普通 resource feasibility 正交：前者证明 candidate representation 满足 immutable operation contract，后者才
+观察 current mutable resource、policy、base hash 与 replay prerequisite。`conformant` 以
+`LogicalRequestID + operation + manifest` 作为 pending attempt 的 restart fence；final seal 必须逐项 exact-match。若
+`nonconformant`，Orchestrator 以唯一 private SM-3 event 在同一 aggregate CAS 内同时持久化 bounded violation 与 attempt
+failure/correction，禁止出现“已有 owner fact、尚无 disposition”的中间态。attempt 0 只可产生一次同 manifest
+`owner_candidate_constraint` correction；attempt 1 再次不符合直接 `candidate_retry_exhausted`。owner
+`owner_contract_defect` 与 command/result identity 漂移均 final，不能降级为 `policy_disallowed` 或 ordinary feasibility。
 
 为取得 feasibility observation，Orchestrator 只可先用 operation kind 解析 manifest 中的 owner 和
 authorization identity；该步骤不做 candidate admission。无法解析的 kind 不调 owner，由 evaluator 在
@@ -299,6 +316,10 @@ misplaced parameter 的 name/contract type，并固定表达
 `inline_declared_parameter_siblings -> independent_named_typed_parameter_entries`；semantic witness 才要求
 rejected/alternative value、适用 operation kind 与不同 semantic-shape hash。parameter-entry witness 不得携带原始 content、
 hash、coverage、summary value 或其它可逆 provider 数据。
+`owner_candidate_constraint` witness 只携带 operation kind、exact parameter path、sealed constraint ref、closed
+`actual_shape` 与 `required_shape`。attempt 1 provider call 前只验证同 manifest/path 且 constrained parameter 确实发生变化；
+参数是否达到 required shape 仍只能由同一 capability owner 的后继 conformance read 证明，Orchestrator/LLM 不得复制 owner
+parser。该 correction 不修改 C0～C3、stable prefix 或 ordinary feasibility contract。
 strict decoder 报告 `missing_*`/`empty_*` required field 时，SM-3 必须先于 semantic frontier 封存同 path 的
 `schema_field` witness（`field_absent -> field_present`）；required field 已存在但为 `null` 或错误 JSON type 时，则封存
 `schema_field(<actual_type> -> field_present)`，其中 rejected value 必须等于 diagnostic 的 exact JSON type，且
@@ -359,8 +380,9 @@ provider dependency/governance 在进入 candidate pipeline 前单独处理。�
 | `request_terminal` | provider authentication/configuration/protocol/submission unknown 或 document recovery exhausted | 归一为唯一 owner-private fact，在同一次 Orchestrator aggregate CAS 中关闭 SM-3 session 并应用 exact SM-2 failure；CAS-before fresh reload 只从 submitted marker 封存 unknown，CAS-after/duplicate 复用 exact terminal；不创建 attempt、不重调 provider |
 | `document_conformance` | coherent completed 的 empty/non-JSON observation，或 complete JSON 的 strict local schema rejection | 结算并关闭当前 request session；SM-3 持久化 provider-safe shape/field rejection，并与 semantic rejection 共用 attempt 0/1 决定唯一 correction 或 typed final；不消费 SM-4 transport/whole-document recovery，不携带 raw 到 C4 |
 | `candidate_rejection` | CandidateEvaluator 的 complete typed rejection | 先持久化 original diagnostic；由 SM-3 owner-local reducer 决定唯一 correction 或 typed terminal |
+| `owner_candidate_conformance` | capability owner 对 manifest-declared immutable parameter representation 的 `conformant | nonconformant | owner_contract_defect` factual observation | proposal 持久化后、ordinary feasibility 前，以 Orchestrator private SM-3 event/CAS 持久化；nonconformant 与唯一 correction/final 原子关闭 attempt，零 workspace I/O、effect、receipt 与独立预算 |
 | `owner_feasibility` | capability owner 的 `stale`、`prerequisite_required` 或 `infeasible` factual observation | 先转为 Orchestrator internal event，再由SM-2退休prerequisite、取得新authority；只有独立typed recovery condition/trigger/deadline/budget完整时形成recoverable wait，否则typed terminal；零correction attempt。它不与 provider request terminal 共用结果或 transition |
-| `accepted` | evaluator 接受且 owner feasibility 为 feasible | persist sealed dispatch 后才可执行 |
+| `accepted` | evaluator 接受、全部声明的 owner candidate constraints 为 conformant，且 owner feasibility 为 feasible | persist sealed dispatch 后才可执行 |
 
 `requestBytes>0`、selected streaming mode、错误文本或 reservation 都不证明 physical submission。exact unsubmitted audit
 必须在对应 session transition CAS 中 release reservations；缺失/篡改 audit 只能结算为 unknown 并终止当前 request，禁止

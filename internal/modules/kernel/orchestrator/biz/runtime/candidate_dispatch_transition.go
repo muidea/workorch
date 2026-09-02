@@ -172,6 +172,7 @@ func applyCandidateAttemptBegin(aggregate *RuntimeAggregate, plan candidateAttem
 	recycled.LogicalRequestID = logicalRequestID
 	recycled.State = runtimecontract.RuntimeCandidateAttemptStatePending
 	recycled.Proposal = nil
+	recycled.Conformances = nil
 	recycled.Feasibilities = nil
 	recycled.Failure = nil
 	recycled.Correction = nil
@@ -551,6 +552,9 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 		}
 		return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 	}
+	if err := validateCandidateConformanceAdmission(record, manifest, candidate); err != nil {
+		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate conformance admission: %v", common.ErrConflict, err)
+	}
 	repairCommitment, err := deriveConfirmedRepairAdmissionCommitment(aggregate, manifest, candidate)
 	if err != nil {
 		return CandidateAdmissionCommitResult{}, err
@@ -598,6 +602,7 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 	expectedRevision := aggregate.StateRevision
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateAccepted
 	aggregate.CandidateAttempts[idx].Proposal = nil
+	aggregate.CandidateAttempts[idx].Conformances = nil
 	aggregate.CandidateAttempts[idx].Feasibilities = nil
 	aggregate.CandidateAttempts[idx].CandidateHash = dispatch.CandidateHash
 	aggregate.CandidateAttempts[idx].DispatchID = dispatch.ID

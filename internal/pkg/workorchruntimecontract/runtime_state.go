@@ -170,7 +170,11 @@ type RuntimeCandidateAttemptRecord struct {
 	// provider generation. A failed attempt may retain a manifest-rejected value
 	// solely as its finite correction frontier; only a pending proposal may be
 	// replayed into feasibility, and neither form is dispatch authority.
-	Proposal      *RuntimeCandidate
+	Proposal *RuntimeCandidate
+	// Conformances are side-effect-free capability-owner facts for sealed
+	// candidate parameter constraints. They are independent of ordinary
+	// feasibility and cannot authorize dispatch or choose retry policy.
+	Conformances  []RuntimeCandidateConformanceRecord
 	Feasibilities []RuntimeCandidateFeasibilityRecord
 	Failure       *RuntimeCandidateFailure
 	// Correction is the manifest-bound SM-3 disposition sealed together with a
@@ -234,6 +238,11 @@ func (r RuntimeCandidateAttemptRecord) Clone() RuntimeCandidateAttemptRecord {
 		r.Proposal = &proposal
 	}
 	r.Feasibilities = cloneRuntimeCandidateFeasibilities(r.Feasibilities)
+	conformances := make([]RuntimeCandidateConformanceRecord, 0, len(r.Conformances))
+	for _, value := range r.Conformances {
+		conformances = append(conformances, value.Clone())
+	}
+	r.Conformances = conformances
 	if r.Failure != nil {
 		failure := *r.Failure
 		failure.TargetRefs = append([]string(nil), r.Failure.TargetRefs...)
@@ -743,6 +752,16 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if value.State == RuntimeCandidateAttemptStateAccepted && len(value.Feasibilities) > 0 {
 				return fmt.Errorf("accepted runtime candidate attempt %s cannot retain unsealed feasibility records", key)
 			}
+			if value.State == RuntimeCandidateAttemptStateAccepted && len(value.Conformances) > 0 {
+				return fmt.Errorf("accepted runtime candidate attempt %s cannot retain candidate conformance records", key)
+			}
+			if value.State == RuntimeCandidateAttemptStatePending {
+				for _, conformance := range value.Conformances {
+					if conformance.Observation.Normalized().Outcome != RuntimeOperationCandidateConformant {
+						return fmt.Errorf("pending runtime candidate attempt %s cannot retain a rejected conformance fact", key)
+					}
+				}
+			}
 			if value.State == RuntimeCandidateAttemptStateAccepted {
 				if strings.TrimSpace(value.CandidateHash) == "" || strings.TrimSpace(value.DispatchID) == "" ||
 					strings.TrimSpace(value.TargetAuthorizationHash) == "" || strings.TrimSpace(value.AdmissionCoverageBindingHash) == "" || strings.TrimSpace(value.DispatchAuthorityHash) == "" {
@@ -800,6 +819,15 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if value.Attempt == 1 && value.Correction.Disposition == RuntimeCandidateCorrectionCorrectableOnce {
 				return fmt.Errorf("runtime candidate attempt %s cannot authorize a third candidate attempt", key)
 			}
+			for _, conformance := range value.Conformances {
+				outcome := conformance.Observation.Normalized().Outcome
+				if outcome == RuntimeOperationCandidateNonconformant && value.Failure.Code != "candidate_owner_constraint_nonconformant" {
+					return fmt.Errorf("failed runtime candidate attempt %s has an unbound owner candidate conformance rejection", key)
+				}
+				if outcome == RuntimeOperationCandidateContractDefect && value.Failure.Code != "runtime_contract_defect" {
+					return fmt.Errorf("failed runtime candidate attempt %s has an unbound owner candidate contract defect", key)
+				}
+			}
 		case RuntimeCandidateAttemptStateInvalidated:
 			if value.CandidateHash != "" || value.DispatchID != "" || value.TargetAuthorizationHash != "" || len(value.AdmissionTargetAuthorizations) != 0 || value.AdmissionCoverageBindingHash != "" || len(value.AdmissionCoverageBindings) != 0 || value.ValidationRecipeHash != "" || len(value.AdmissionValidationRecipes) != 0 || value.RepairCommitmentHash != "" || value.AdmissionRepairCommitment != nil || value.DispatchAuthorityHash != "" {
 				return fmt.Errorf("invalidated runtime candidate attempt %s cannot carry dispatch authority", key)
@@ -814,7 +842,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if value.OwnerFeasibility != nil {
 				reasonCount++
 			}
-			if value.Failure != nil || value.Correction != nil || value.Proposal != nil || len(value.Feasibilities) != 0 || reasonCount != 1 {
+			if value.Failure != nil || value.Correction != nil || value.Proposal != nil || len(value.Conformances) != 0 || len(value.Feasibilities) != 0 || reasonCount != 1 {
 				return fmt.Errorf("invalidated runtime candidate attempt %s requires exactly one typed invalidation reason", key)
 			}
 			if value.Stale != nil {
@@ -840,6 +868,14 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 		}
 		if err := ValidateRuntimeCandidateFeasibilityRecords(value.Feasibilities); err != nil {
 			return fmt.Errorf("runtime candidate attempt %s feasibility records: %w", key, err)
+		}
+		if err := ValidateRuntimeCandidateConformanceRecords(value.Conformances); err != nil {
+			return fmt.Errorf("runtime candidate attempt %s conformance records: %w", key, err)
+		}
+		for _, conformance := range value.Conformances {
+			if conformance.LogicalRequestID != value.LogicalRequestID || conformance.CandidateManifestHash != value.ManifestHash {
+				return fmt.Errorf("runtime candidate attempt %s conformance request-session binding mismatch", key)
+			}
 		}
 	}
 	for snapshotID, attempts := range bySnapshot {

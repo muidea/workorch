@@ -48,6 +48,7 @@ type RuntimeInternalTransactionPayload struct {
 	Manifest             *runtimecontract.RuntimeCandidateContractManifest
 	Candidate            *runtimecontract.RuntimeCandidate
 	CandidateFailure     *runtimecontract.RuntimeCandidateFailure
+	CandidateConformance *runtimecontract.RuntimeCandidateConformanceRecord
 	CandidateFeasibility *runtimecontract.RuntimeCandidateFeasibilityRecord
 	PrerequisiteRequest  *runtimecontract.RuntimeOperationPrerequisiteRequest
 	Stale                *runtimecontract.RuntimePrerequisiteStale
@@ -109,6 +110,7 @@ const (
 	RuntimeInternalEventCandidateAttemptBegun                    RuntimeInternalEventKind = "candidate_attempt_begun"
 	RuntimeInternalEventCandidateDocumentRejected                RuntimeInternalEventKind = "candidate_document_rejected"
 	RuntimeInternalEventCandidateProposalObserved                RuntimeInternalEventKind = "candidate_proposal_observed"
+	RuntimeInternalEventCandidateConformanceObserved             RuntimeInternalEventKind = "candidate_conformance_observed"
 	RuntimeInternalEventCandidateFeasibilityObserved             RuntimeInternalEventKind = "candidate_feasibility_observed"
 	RuntimeInternalEventCandidatePrerequisiteStaleObserved       RuntimeInternalEventKind = "candidate_prerequisite_stale_observed"
 	RuntimeInternalEventCandidatePrerequisiteObserved            RuntimeInternalEventKind = "candidate_prerequisite_observed"

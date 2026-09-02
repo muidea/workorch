@@ -39,6 +39,7 @@ const (
 	RuntimeCandidateCorrectionWitnessSchemaField            RuntimeCandidateCorrectionWitnessDimension = "schema_field"
 	RuntimeCandidateCorrectionWitnessDocumentShape          RuntimeCandidateCorrectionWitnessDimension = "document_shape"
 	RuntimeCandidateCorrectionWitnessParameterEntryEncoding RuntimeCandidateCorrectionWitnessDimension = "parameter_entry_encoding"
+	RuntimeCandidateCorrectionWitnessOwnerConstraint        RuntimeCandidateCorrectionWitnessDimension = "owner_candidate_constraint"
 )
 
 // RuntimeCandidateCorrectionConformExpectedDocument is the bounded objective
@@ -74,6 +75,7 @@ type RuntimeCandidateCorrectionWitness struct {
 	AlternativeValue        string
 	RejectedShapeHash       string
 	AlternativeShapeHash    string
+	ConstraintRef           string
 	ParameterEntryEncodings []RuntimeCandidateParameterEntryEncodingViolation
 }
 
@@ -85,6 +87,7 @@ func (w RuntimeCandidateCorrectionWitness) Normalized() RuntimeCandidateCorrecti
 	w.AlternativeValue = strings.TrimSpace(w.AlternativeValue)
 	w.RejectedShapeHash = strings.TrimSpace(w.RejectedShapeHash)
 	w.AlternativeShapeHash = strings.TrimSpace(w.AlternativeShapeHash)
+	w.ConstraintRef = strings.TrimSpace(w.ConstraintRef)
 	w.ParameterEntryEncodings = cloneRuntimeCandidateParameterEntryEncodings(w.ParameterEntryEncodings)
 	return w
 }
@@ -140,8 +143,25 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 		if err := validateRuntimeCandidateParameterEntryEncodingFacts(w.ParameterEntryEncodings); err != nil {
 			return err
 		}
+	case RuntimeCandidateCorrectionWitnessOwnerConstraint:
+		if w.OperationKind == "" || w.Path == "" || w.ConstraintRef == "" || w.RejectedValue == "" || w.AlternativeValue == "" || w.RejectedValue == w.AlternativeValue || w.RejectedShapeHash != "" || w.AlternativeShapeHash != "" {
+			return fmt.Errorf("owner-constraint candidate correction witness requires kind, path, constraint and a bounded different shape")
+		}
+		switch RuntimeOperationCandidateActualShape(w.RejectedValue) {
+		case RuntimeOperationCandidateActualShapeInvalidSyntax, RuntimeOperationCandidateActualShapeTargetMismatch:
+		default:
+			return fmt.Errorf("owner-constraint candidate correction witness has undeclared actual shape %q", w.RejectedValue)
+		}
+		switch RuntimeOperationCandidateRequiredShape(w.AlternativeValue) {
+		case RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile:
+		default:
+			return fmt.Errorf("owner-constraint candidate correction witness has undeclared required shape %q", w.AlternativeValue)
+		}
 	default:
 		return fmt.Errorf("candidate correction witness dimension %q is not declared", w.Dimension)
+	}
+	if w.Dimension != RuntimeCandidateCorrectionWitnessOwnerConstraint && w.ConstraintRef != "" {
+		return fmt.Errorf("candidate correction witness dimension %q cannot carry an owner constraint ref", w.Dimension)
 	}
 	return nil
 }

@@ -41,7 +41,7 @@ Workspace owner seals admitted startup input
   -> Run owner seals SM-1 activation
   -> Orchestrator SM-4 drives persisted aggregate
   -> SM-2 seals authority, semantic contract, ready focus and evidence binding
-  -> SM-3 requests/evaluates candidate and seals dispatch
+  -> SM-3 persists/evaluates candidate, obtains any manifest-declared owner candidate-conformance facts, then seals dispatch
   -> capability owner returns factual result/receipt
   -> SM-2 credits evidence, settles/reopens CWI or seals terminal
   -> SM-4 delivers Result -> Workspace -> Run; Result acknowledgement relays the exact owner-derived ResultID
@@ -172,6 +172,12 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   declared name/type、entry/container、operation kind/index 均无歧义时封存一次 `parameter_entry_encoding` witness，要求
   attempt 1 重新生成全部独立 named typed entries。它不得本地搬移并接受原值，不得把合法 parameter 当作 forbidden field
   删除，也不改变 SM-2 authority 或 SM-4 recovery；mixed unknown/type/duplicate、lineage 漂移或 attempt 1 再拒绝均 final。
+- executable operation variant 可在 manifest 中声明 owner-defined、provider-safe 的 `CandidateConstraints`，仅描述普通
+  JSON schema 无法完整表达的参数 representation。candidate proposal 必须先持久化，随后 receiving capability owner 才通过
+  concrete typed read command 返回 `conformant | nonconformant | owner_contract_defect`；该查询不得读取/修改 workspace、执行
+  operation 或选择 correction。Orchestrator 只以 private SM-3 event/CAS 持久化事实并决定一次 correction/final；final seal
+  必须证明每个受约束 operation 都有 matching logical request、manifest 与 `conformant` fact。未声明 constraint 的 variant
+  不得生成占位 fact 或额外 owner call。
 - operations preflight 必须发生在 exact request-session CAS 之前；同一 transaction、stable prefix、manifest、correction hash 与
   expected-document attempt 的 persisted session 是 restart proof。document-complete 后 attempt-begin CAS 前中断或 CAS 后响应丢失
   只能恢复同一 local admission transaction，不能重发 preflight/provider、重复扣减 correction budget 或提前执行 capability。

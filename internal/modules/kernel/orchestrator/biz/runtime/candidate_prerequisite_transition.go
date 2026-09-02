@@ -43,6 +43,7 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForPrerequisiteSt
 	facts.Recovery = ledger
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateInvalidated
 	aggregate.CandidateAttempts[idx].Proposal = nil
+	aggregate.CandidateAttempts[idx].Conformances = nil
 	aggregate.CandidateAttempts[idx].Feasibilities = nil
 	aggregate.CandidateAttempts[idx].Failure = nil
 	staleCopy := stale
@@ -124,6 +125,7 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForFeasibilityPre
 	facts := addFeasibilityPrerequisite(factsWithoutTargetSnapshot(aggregate.Facts, request), request)
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateInvalidated
 	aggregate.CandidateAttempts[idx].Proposal = nil
+	aggregate.CandidateAttempts[idx].Conformances = nil
 	aggregate.CandidateAttempts[idx].Feasibilities = nil
 	aggregate.CandidateAttempts[idx].Failure = nil
 	aggregate.CandidateAttempts[idx].Stale = nil
@@ -252,6 +254,7 @@ func invalidateCandidateAttemptForOwnerObservation(aggregate *RuntimeAggregate, 
 	record := &aggregate.CandidateAttempts[idx]
 	record.State = runtimecontract.RuntimeCandidateAttemptStateInvalidated
 	record.Proposal = nil
+	record.Conformances = nil
 	record.Feasibilities = nil
 	record.Failure = nil
 	record.Stale = nil

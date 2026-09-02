@@ -569,6 +569,7 @@ func cloneRuntimeCandidateOperationManifestRaw(in RuntimeCandidateOperationManif
 		value.RequiredNonEmpty = cloneRuntimeStateRawSlice(item.RequiredNonEmpty, func(value string) string { return value })
 		value.ForbiddenParameters = cloneRuntimeStateRawSlice(item.ForbiddenParameters, func(value string) string { return value })
 		value.DistinctParameterPairs = cloneRuntimeStateRawSlice(item.DistinctParameterPairs, func(value RuntimeOperationParameterPair) RuntimeOperationParameterPair { return value })
+		value.CandidateConstraints = cloneRuntimeStateRawSlice(item.CandidateConstraints, func(value RuntimeOperationCandidateConstraint) RuntimeOperationCandidateConstraint { return value })
 		return value
 	})
 	out.Rules = cloneRuntimeStateRawSlice(in.Rules, func(item string) string { return item })
@@ -610,6 +611,14 @@ func cloneRuntimeCandidateAttemptRecordRaw(in RuntimeCandidateAttemptRecord) Run
 		return cloneRuntimeDispatchRepairCommitmentRaw(item)
 	})
 	out.Proposal = cloneRuntimeStateRawPointer(in.Proposal, func(item RuntimeCandidate) RuntimeCandidate { return cloneRuntimeCandidateRaw(item) })
+	out.Conformances = cloneRuntimeStateRawSlice(in.Conformances, func(item RuntimeCandidateConformanceRecord) RuntimeCandidateConformanceRecord {
+		value := item
+		value.Observation = item.Observation
+		value.Observation.Violation = cloneRuntimeStateRawPointer(item.Observation.Violation, func(violation RuntimeOperationCandidateConformanceViolation) RuntimeOperationCandidateConformanceViolation {
+			return violation
+		})
+		return value
+	})
 	out.Feasibilities = cloneRuntimeStateRawSlice(in.Feasibilities, func(item RuntimeCandidateFeasibilityRecord) RuntimeCandidateFeasibilityRecord {
 		return cloneRuntimeCandidateFeasibilityRecordRaw(item)
 	})

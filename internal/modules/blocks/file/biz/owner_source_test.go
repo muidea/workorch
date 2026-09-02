@@ -34,6 +34,7 @@ func TestFileRuntimeOwnerCommandsRejectUntrustedSources(t *testing.T) {
 	}{
 		{fileevents.TopicAcquireRuntimeCapabilities, fileevents.AcquireRuntimeCapabilitiesCommand{}, owner.handleRuntimeCapabilities},
 		{fileevents.TopicAcquireRuntimeOperationAdmissibility, fileevents.AcquireRuntimeOperationAdmissibilityCommand{}, owner.handleRuntimeOperationAdmissibility},
+		{fileevents.TopicValidateRuntimeOperationCandidateConformance, fileevents.ValidateRuntimeOperationCandidateConformanceCommand{}, owner.handleRuntimeOperationCandidateConformance},
 		{fileevents.TopicProbeRuntimeOperationFeasibility, fileevents.ProbeRuntimeOperationFeasibilityCommand{}, owner.handleRuntimeOperationFeasibility},
 		{fileevents.TopicProbeRuntimeSemanticProofFeasibility, fileevents.ProbeRuntimeSemanticProofFeasibilityCommand{}, owner.handleRuntimeSemanticProofFeasibility},
 		{fileevents.TopicQueryRuntimeCWIReconciliation, fileevents.QueryRuntimeCWIReconciliationCommand{}, owner.handleRuntimeCWIReconciliationQuery},
@@ -106,7 +107,7 @@ func TestFileOwnerStartIsIdempotentAndTeardownClearsLifecycle(t *testing.T) {
 	}
 }
 
-func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllFifteenTopics(t *testing.T) {
+func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllSixteenTopics(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -123,6 +124,7 @@ func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllFifteenTopics(t *testing.T)
 	}{
 		{fileevents.TopicAcquireRuntimeCapabilities, ModuleID},
 		{fileevents.TopicAcquireRuntimeOperationAdmissibility, ModuleID},
+		{fileevents.TopicValidateRuntimeOperationCandidateConformance, ModuleID},
 		{fileevents.TopicProbeRuntimeOperationFeasibility, ModuleID},
 		{fileevents.TopicProbeRuntimeSemanticProofFeasibility, ModuleID},
 		{fileevents.TopicQueryRuntimeCWIReconciliation, ModuleID},

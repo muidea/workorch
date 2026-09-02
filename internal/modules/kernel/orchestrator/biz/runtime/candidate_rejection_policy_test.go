@@ -22,10 +22,12 @@ func TestCandidateRejectionCodeDispositionMatrixIsTotal(t *testing.T) {
 		{code: "candidate_action_evidence_mismatch", disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce},
 		{code: "candidate_target_outside_grounding", disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce},
 		{code: "candidate_creation_scope_missing_file_target", disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce},
+		{code: "candidate_owner_constraint_nonconformant", disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce},
 		{code: "candidate_replays_rejected_candidate_shape", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "candidate_retry_exhausted"},
 		{code: "candidate_authority_exhausted", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "candidate_authority_exhausted"},
 		{code: "candidate_retry_exhausted", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "candidate_retry_exhausted"},
 		{code: "workspace_resolution_failed", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "workspace_resolution_failed"},
+		{code: "operation_candidate_conformance_probe_invalid", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "operation_candidate_conformance_probe_invalid"},
 		{code: "operation_feasibility_probe_invalid", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "operation_feasibility_probe_invalid"},
 		{code: "runtime_contract_defect", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "runtime_contract_defect"},
 	}

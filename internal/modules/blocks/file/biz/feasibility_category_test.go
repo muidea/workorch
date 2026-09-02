@@ -13,15 +13,20 @@ func TestOwnerFeasibilityCategoriesAreTotal(t *testing.T) {
 		"operation_admissibility_stale", "operation_replay_proof_invalid", "operation_replay_proof_unavailable", "operation_base_hash_mismatch",
 		"operation_base_hash_required", "patch_basehash_mismatch", "patch_text_replace_conflict", "patch_unified_diff_conflict", "unified_diff_apply_conflict", "unified_diff_infeasible",
 		"operation_target_invalid", "operation_target_not_admissible", "patch_invalid_path", "patch_type_unsupported", "patch_target_exists",
-		"operation_target_exists", "patch_invalid_input", "unified_diff_invalid", "unified_diff_target_mismatch",
+		"operation_target_exists", "patch_invalid_input",
 	}
 	assertOwnerFeasibilityCategories(t, wantCodes)
+	for _, code := range []string{"unified_diff_invalid", "unified_diff_target_mismatch"} {
+		if category := ownerFeasibilityCategory(&runtimecontract.FailureFact{Code: code}); category != runtimecontract.RuntimeOwnerFeasibilityCategoryOwnerContractDefect {
+			t.Fatalf("conformance-fenced code %q category=%q, want owner contract defect", code, category)
+		}
+	}
 }
 
 func assertOwnerFeasibilityCategories(t *testing.T, wantCodes []string) {
 	t.Helper()
-	if len(ownerFeasibilityCategories) != len(wantCodes) {
-		t.Fatalf("owner feasibility registry size=%d want=%d", len(ownerFeasibilityCategories), len(wantCodes))
+	if len(ownerFeasibilityCategories) != len(wantCodes)+2 {
+		t.Fatalf("owner feasibility registry size=%d want=%d", len(ownerFeasibilityCategories), len(wantCodes)+2)
 	}
 	for _, code := range wantCodes {
 		failure := &runtimecontract.FailureFact{Code: code}

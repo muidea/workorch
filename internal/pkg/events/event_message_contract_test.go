@@ -64,9 +64,12 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// Orchestrator's generic Runtime governance-resolution command is absent:
 	// the concrete Decision/Approval result adapters now reload their exact
 	// persisted binding before invoking the owner-private SM-2 transition.
-	const expectedProductionTopicCount = 282
+	// File adds one SM-3 read/query topic for manifest-declared operation
+	// candidate conformance. It returns an owner fact only; the Orchestrator
+	// private reducer remains the sole candidate/retry transition authority.
+	const expectedProductionTopicCount = 283
 	if len(contracts) != expectedProductionTopicCount {
-		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the active component contract closure plan", len(contracts), expectedProductionTopicCount)
+		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}
 	if len(contracts) != len(messages) {
 		t.Fatalf("delivery contract count %d differs from message contract count %d", len(contracts), len(messages))

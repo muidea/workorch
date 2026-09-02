@@ -164,6 +164,17 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 			return aggregate, nil
 		}
 	}
+	var candidateClosed bool
+	var conformanceErr error
+	aggregate, candidateClosed, conformanceErr = m.validateRuntimeCandidateConformance(ctx, aggregate, candidate, manifest, candidateAttempt)
+	if conformanceErr != nil {
+		return m.runtimeRejectCandidate(ctx, aggregate, candidateAttempt, runtimecontract.RuntimeCandidateFailure{
+			Class: runtimecontract.RuntimeCandidateFailureClassInternal, Code: "operation_candidate_conformance_probe_invalid", Reason: conformanceErr.Error(),
+		})
+	}
+	if candidateClosed {
+		return aggregate, nil
+	}
 	if len(aggregate.Facts.Resources.OperationAdmissibilities) > 0 {
 		workspace, workspaceErr := (workspaceSnapshotReader{hub: m.EventHub()}).Read(ctx, aggregate.Facts.WorkspaceID)
 		if workspaceErr != nil {
@@ -194,6 +205,88 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 		return runtime.RuntimeAggregate{}, sealErr
 	}
 	return sealed.Aggregate, nil
+}
+
+// validateRuntimeCandidateConformance obtains only sealed owner parameter-shape
+// facts. It runs before mutable-resource feasibility and persists each result
+// through the Orchestrator-private SM-3 reducer.
+func (m *Biz) validateRuntimeCandidateConformance(ctx context.Context, aggregate runtime.RuntimeAggregate, candidate runtimecontract.RuntimeCandidate, manifest runtimecontract.RuntimeCandidateContractManifest, candidateAttempt int) (runtime.RuntimeAggregate, bool, error) {
+	if m == nil || m.EventHub() == nil {
+		return aggregate, false, common.ErrInvalidArgument
+	}
+	if candidate.StateChange == nil && candidate.Validation == nil {
+		return aggregate, false, nil
+	}
+	operations, err := orderedRuntimeCandidateOperations(candidate)
+	if err != nil {
+		return aggregate, false, err
+	}
+	attemptRecord, bound := runtimeCandidateAttemptRecord(aggregate, candidateAttempt)
+	if !bound || strings.TrimSpace(attemptRecord.LogicalRequestID) == "" {
+		return aggregate, false, fmt.Errorf("candidate conformance has no persisted request-session binding")
+	}
+	for _, operation := range operations {
+		authorization, found := runtimeOperationAuthorizationForKind(manifest, operation.Kind)
+		if !found {
+			return aggregate, false, fmt.Errorf("candidate operation %q has no sealed operation authorization", operation.Kind)
+		}
+		_, constraints, constraintErr := runtimecontract.RuntimeOperationCandidateConstraintsForOperation(operation, authorization)
+		if constraintErr != nil {
+			return aggregate, false, constraintErr
+		}
+		if len(constraints) == 0 {
+			continue
+		}
+		if persisted, found := runtimeCandidateConformanceForOperation(aggregate, candidateAttempt, operation.ID); found {
+			if persisted.LogicalRequestID != attemptRecord.LogicalRequestID || persisted.CandidateManifestHash != manifest.Hash {
+				return aggregate, false, fmt.Errorf("candidate operation %q conformance manifest is stale", operation.ID)
+			}
+			if persisted.Observation.Outcome == runtimecontract.RuntimeOperationCandidateConformant {
+				continue
+			}
+			return aggregate, true, nil
+		}
+		observation, observeErr := ValidateRuntimeOperationCandidateConformance(ctx, m.EventHub(), runtimecontract.RuntimeOperationCandidateConformanceRequest{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			Transaction: aggregate.Decision.AuthorityTransaction(), CandidateManifestHash: manifest.Hash,
+			Operation: operation, OperationAuthorization: authorization,
+		})
+		if observeErr != nil {
+			return aggregate, false, observeErr
+		}
+		record := runtimecontract.RuntimeCandidateConformanceRecord{
+			OperationID: operation.ID, LogicalRequestID: attemptRecord.LogicalRequestID,
+			CandidateManifestHash: manifest.Hash, Observation: observation,
+		}
+		result, recordErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			Kind:        runtime.RuntimeInternalEventCandidateConformanceObserved,
+			Scope:       runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+			Transaction: &runtime.RuntimeInternalTransactionPayload{Attempt: candidateAttempt, CandidateConformance: &record},
+		})
+		if recordErr != nil {
+			return aggregate, false, recordErr
+		}
+		aggregate = result.Aggregate
+		if observation.Outcome != runtimecontract.RuntimeOperationCandidateConformant {
+			return aggregate, true, nil
+		}
+	}
+	return aggregate, false, nil
+}
+
+func runtimeCandidateConformanceForOperation(aggregate runtime.RuntimeAggregate, attempt int, operationID string) (runtimecontract.RuntimeCandidateConformanceRecord, bool) {
+	transaction := aggregate.Decision.AuthorityTransaction()
+	for _, candidateAttempt := range aggregate.CandidateAttempts {
+		if candidateAttempt.Attempt != attempt || candidateAttempt.Transaction != transaction {
+			continue
+		}
+		for _, record := range candidateAttempt.Conformances {
+			if strings.TrimSpace(record.OperationID) == strings.TrimSpace(operationID) {
+				return record.Clone(), true
+			}
+		}
+	}
+	return runtimecontract.RuntimeCandidateConformanceRecord{}, false
 }
 
 // requestRuntimeCandidateDocument owns the provider-I/O part of one sealed

@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-08-21
+Last Verified: 2026-09-01
 
 ## Purpose
 
@@ -172,6 +172,9 @@ session/recovery/terminal transition 同一 aggregate CAS，不能先记账再�
 - candidate attempt 只由 SM-3 对 settled document result 创建：coherent empty/non-JSON document-conformance rejection，或
   complete document 的 strict local schema/contract/semantic admission。transport/EOF recovery 与 provider terminal 不消费
   candidate attempt；document-conformance、schema 与 semantic rejection 共用同一 attempt 0/1 上限。
+- manifest-declared owner candidate-conformance 是已存在 attempt 内的 side-effect-free read/restart fence，不分配独立
+  provider、capability、repair 或 recovery budget；`nonconformant` 只消费该 attempt 已有的唯一 correction slot，duplicate/restart
+  复用 exact `LogicalRequestID + operation + manifest` fact 且零重复消费。
 - capability consumption绑定 sealed dispatch、operation、ExecutionKey/Fence 和 receipt；duplicate receipt不重复扣减。
 - outcome unknown 保留为 reserved/unknown，不能假定未消费，也不能无条件按 confirmed 重复扣减。
 - accepted owner resource change、projection refresh、duplicate drive、stale diagnostic 和纯 CAS reload不消费业务执行预算。

@@ -67,6 +67,9 @@ func candidateCorrectionWitness(
 	if witness := candidateParameterEntryEncodingCorrectionWitness(failure, manifest); witness != nil {
 		return witness
 	}
+	if witness := candidateOwnerConstraintCorrectionWitness(failure, manifest, frontier.candidate); witness != nil {
+		return witness
+	}
 	// A strict required-field absence or exact JSON-type mismatch describes the
 	// rejected wire shape, not an operation-semantic alternative. Seal that
 	// directly observable fact before consulting the decoded candidate frontier;
@@ -144,6 +147,32 @@ func candidateCorrectionWitness(
 		}
 	}
 	return candidateSchemaCorrectionWitness(failure.Diagnostic, manifest, frontier.candidate)
+}
+
+func candidateOwnerConstraintCorrectionWitness(failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest, candidate *runtimecontract.RuntimeCandidate) *runtimecontract.RuntimeCandidateCorrectionWitness {
+	if failure == nil || strings.TrimSpace(failure.Code) != "candidate_owner_constraint_nonconformant" || failure.Diagnostic == nil || candidate == nil {
+		return nil
+	}
+	diagnostic := failure.Diagnostic.Normalized()
+	operationIndex, found := candidateCorrectionOperationIndex(diagnostic.Path)
+	operations := candidateadmission.Operations(*candidate)
+	if !found || operationIndex < 0 || operationIndex >= len(operations) {
+		return nil
+	}
+	operation := operations[operationIndex].Normalized()
+	constraint, found := runtimecontract.RuntimeCandidateConstraintForOperationRef(manifest, operation.Kind, diagnostic.ConstraintRef)
+	if !found || diagnostic.OperationID != operation.ID || constraint.ParameterName != candidateCorrectionPathField(diagnostic.Path) || string(constraint.RequiredShape) != diagnostic.RequiredShape || diagnostic.Actual == "" || diagnostic.RejectedShapeHash != "" {
+		return nil
+	}
+	witness := &runtimecontract.RuntimeCandidateCorrectionWitness{
+		Dimension:     runtimecontract.RuntimeCandidateCorrectionWitnessOwnerConstraint,
+		OperationKind: operation.Kind, Path: diagnostic.Path, ConstraintRef: diagnostic.ConstraintRef,
+		RejectedValue: diagnostic.Actual, AlternativeValue: diagnostic.RequiredShape,
+	}
+	if witness.Validate() != nil {
+		return nil
+	}
+	return witness.Clone()
 }
 
 func candidateParameterEntryEncodingCorrectionWitness(failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest) *runtimecontract.RuntimeCandidateCorrectionWitness {
@@ -824,10 +853,66 @@ func validateAttemptCandidateCrossesPersistedWitness(aggregate RuntimeAggregate,
 	if directive.Witness.AlternativeShapeHash != "" && shape != directive.Witness.AlternativeShapeHash {
 		return fmt.Errorf("attempt 1 does not match the sealed alternative semantic shape")
 	}
+	if directive.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOwnerConstraint {
+		if first.Proposal == nil || !candidateCrossesOwnerConstraintWitness(*first.Proposal, candidate, manifest, *directive.Witness) {
+			return fmt.Errorf("attempt 1 does not revise the sealed owner constraint %q at %s", directive.Witness.ConstraintRef, directive.Witness.Path)
+		}
+		// Only the capability owner can prove that the revised opaque parameter
+		// has the required representation. The later conformance read lane is
+		// therefore the exact alternative-value fence; this pre-owner gate proves
+		// only same manifest/path plus a real change to the constrained value.
+		return nil
+	}
 	if !candidateCrossesCorrectionWitness(candidate, manifest, *directive.Witness) {
 		return fmt.Errorf("attempt 1 does not use sealed correction alternative %q at %s", directive.Witness.AlternativeValue, directive.Witness.Path)
 	}
 	return nil
+}
+
+func candidateCrossesOwnerConstraintWitness(previous runtimecontract.RuntimeCandidate, candidate runtimecontract.RuntimeCandidate, manifest runtimecontract.RuntimeCandidateContractManifest, witness runtimecontract.RuntimeCandidateCorrectionWitness) bool {
+	witness = witness.Normalized()
+	if witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessOwnerConstraint || witness.Validate() != nil {
+		return false
+	}
+	operationIndex, found := candidateCorrectionOperationIndex(witness.Path)
+	if !found {
+		return false
+	}
+	previousOperations := candidateadmission.Operations(previous)
+	operations := candidateadmission.Operations(candidate)
+	if operationIndex < 0 || operationIndex >= len(previousOperations) || operationIndex >= len(operations) {
+		return false
+	}
+	previousOperation := previousOperations[operationIndex].Normalized()
+	operation := operations[operationIndex].Normalized()
+	kind := runtimecontract.CanonicalRuntimeBlockKind(witness.OperationKind)
+	constraint, found := runtimecontract.RuntimeCandidateConstraintForOperationRef(manifest, kind, witness.ConstraintRef)
+	if !found || operation.Kind != kind || previousOperation.Kind != kind ||
+		witness.Path != fmt.Sprintf("$.operations[%d].parameters[name=%s]", operationIndex, constraint.ParameterName) ||
+		witness.AlternativeValue != string(constraint.RequiredShape) {
+		return false
+	}
+	authorization, found := candidateCorrectionOperationManifest(manifest, operation.Kind)
+	if !found {
+		return false
+	}
+	_, constraints, err := runtimecontract.RuntimeOperationCandidateConstraintsForOperation(operation, authorization)
+	if err != nil {
+		return false
+	}
+	constraintSealed := false
+	for _, selected := range constraints {
+		if selected == constraint {
+			constraintSealed = true
+			break
+		}
+	}
+	if !constraintSealed {
+		return false
+	}
+	previousValue, previousFound := candidateCorrectionStringParameter(previousOperation.Parameters, constraint.ParameterName)
+	value, valueFound := candidateCorrectionStringParameter(operation.Parameters, constraint.ParameterName)
+	return previousFound && valueFound && previousValue != value
 }
 
 func candidateCrossesCorrectionWitness(candidate runtimecontract.RuntimeCandidate, manifest runtimecontract.RuntimeCandidateContractManifest, witness runtimecontract.RuntimeCandidateCorrectionWitness) bool {

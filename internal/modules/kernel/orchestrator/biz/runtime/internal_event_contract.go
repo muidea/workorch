@@ -67,6 +67,7 @@ func runtimeInternalFactPayloadClass(kind RuntimeInternalEventKind) (runtimeInte
 		RuntimeInternalEventCandidateAttemptBegun,
 		RuntimeInternalEventCandidateDocumentRejected,
 		RuntimeInternalEventCandidateProposalObserved,
+		RuntimeInternalEventCandidateConformanceObserved,
 		RuntimeInternalEventCandidateFeasibilityObserved,
 		RuntimeInternalEventCandidatePrerequisiteStaleObserved,
 		RuntimeInternalEventCandidatePrerequisiteObserved,
@@ -338,6 +339,7 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventCandidateAttemptBegun,
 		RuntimeInternalEventCandidateDocumentRejected,
 		RuntimeInternalEventCandidateProposalObserved,
+		RuntimeInternalEventCandidateConformanceObserved,
 		RuntimeInternalEventCandidateFeasibilityObserved,
 		RuntimeInternalEventCandidatePrerequisiteStaleObserved,
 		RuntimeInternalEventCandidatePrerequisiteObserved,
@@ -394,6 +396,7 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventCandidateRequestStaleObserved,
 		RuntimeInternalEventCandidateDocumentRejected,
 		RuntimeInternalEventCandidateProposalObserved,
+		RuntimeInternalEventCandidateConformanceObserved,
 		RuntimeInternalEventCandidateFeasibilityObserved,
 		RuntimeInternalEventCandidatePrerequisiteStaleObserved,
 		RuntimeInternalEventCandidatePrerequisiteObserved,
@@ -423,6 +426,7 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventDefinitionClarificationDispatchSealed:
 		metadata.IdentityPolicy = eventcontract.IdentityPolicyRuntimeDispatch
 	case RuntimeInternalEventOperationReceiptObserved,
+		RuntimeInternalEventCandidateConformanceObserved,
 		RuntimeInternalEventOperationEvidenceObserved,
 		RuntimeInternalEventOperationPrerequisiteStaleObserved,
 		RuntimeInternalEventOperationGovernanceRequiredObserved,

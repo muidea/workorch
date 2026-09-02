@@ -103,6 +103,12 @@ func RuntimeOperationContractRevision() string {
 				writeHashString(h, pair.Left)
 				writeHashString(h, pair.Right)
 			}
+			for _, constraint := range NormalizeRuntimeOperationCandidateConstraints(v.CandidateConstraints) {
+				writeHashString(h, constraint.Ref)
+				writeHashString(h, string(constraint.Kind))
+				writeHashString(h, constraint.ParameterName)
+				writeHashString(h, string(constraint.RequiredShape))
+			}
 			writeHashString(h, string(v.EffectScope))
 			writeHashString(h, string(v.IdempotencyClass))
 		}
@@ -153,6 +159,7 @@ type RuntimeOperationVariantContract struct {
 	RequiredNonEmpty       []string
 	ForbiddenParameters    []string
 	DistinctParameterPairs []RuntimeOperationParameterPair
+	CandidateConstraints   []RuntimeOperationCandidateConstraint
 	EffectScope            RuntimeEffectScope
 	IdempotencyClass       RuntimeOperationIdempotencyClass
 }
@@ -298,7 +305,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			Variants: []RuntimeOperationVariantContract{
 				{ID: "file_write", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "file_write"}}, RequiredParameters: []string{"content"}, ForbiddenParameters: []string{"diff", "oldText", "newText", "occurrence"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
 				{ID: "text_replace", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "text_replace"}}, RequiredParameters: []string{"oldText", "newText"}, RequiredNonEmpty: []string{"oldText"}, ForbiddenParameters: []string{"content", "diff"}, DistinctParameterPairs: []RuntimeOperationParameterPair{{Left: "oldText", Right: "newText"}}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
-				{ID: "unified_diff", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "unified_diff"}}, RequiredParameters: []string{"diff"}, RequiredNonEmpty: []string{"diff"}, ForbiddenParameters: []string{"content", "oldText", "newText", "occurrence"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
+				{ID: "unified_diff", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "unified_diff"}}, RequiredParameters: []string{"diff"}, RequiredNonEmpty: []string{"diff"}, ForbiddenParameters: []string{"content", "oldText", "newText", "occurrence"}, CandidateConstraints: []RuntimeOperationCandidateConstraint{{Ref: "patch/unified_diff/diff/single_file", Kind: RuntimeOperationCandidateConstraintParameterShape, ParameterName: "diff", RequiredShape: RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile}}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
 			},
 			Rules: []string{
 				"file_write must provide content",

@@ -63,24 +63,25 @@ type runtimeCandidateEffectPolicyProjection struct {
 }
 
 type runtimeCandidateOperationContractProjection struct {
-	Kind                        string                                            `json:"kind"`
-	OwnerModuleID               string                                            `json:"ownerModuleId,omitempty"`
-	AllowedOperationFields      []string                                          `json:"allowedOperationFields,omitempty"`
-	RequiredOperationFields     []string                                          `json:"requiredOperationFields,omitempty"`
-	AllowedVariantIDs           []string                                          `json:"allowedVariantIds,omitempty"`
-	Parameters                  []runtimeCandidateOperationParameterProjection    `json:"parameters"`
-	RequireOneOfParameters      []string                                          `json:"requireOneOfParameters,omitempty"`
-	TargetCardinality           runtimecontract.RuntimeOperationTargetCardinality `json:"targetCardinality,omitempty"`
-	RequireTargetRefs           bool                                              `json:"requireTargetRefs,omitempty"`
-	ForbiddenParameters         []string                                          `json:"forbiddenParameters,omitempty"`
-	Variants                    []runtimeCandidateOperationVariantProjection      `json:"variants,omitempty"`
-	Rules                       []string                                          `json:"rules,omitempty"`
-	AllowsDynamicParameters     bool                                              `json:"allowsDynamicParameters,omitempty"`
-	DynamicParameterPrefixes    []string                                          `json:"dynamicParameterPrefixes,omitempty"`
-	RequiredOperationReferences []string                                          `json:"requiredOperationReferences,omitempty"`
-	BindingAuthorizations       []runtimeCandidateBindingAuthorizationProjection  `json:"bindingAuthorizations,omitempty"`
-	AcceptedEffectScopes        []runtimecontract.RuntimeEffectScope              `json:"acceptedEffectScopes,omitempty"`
-	RequiredEffectScopes        []runtimecontract.RuntimeEffectScope              `json:"requiredEffectScopes,omitempty"`
+	Kind                        string                                                `json:"kind"`
+	OwnerModuleID               string                                                `json:"ownerModuleId,omitempty"`
+	AllowedOperationFields      []string                                              `json:"allowedOperationFields,omitempty"`
+	RequiredOperationFields     []string                                              `json:"requiredOperationFields,omitempty"`
+	AllowedVariantIDs           []string                                              `json:"allowedVariantIds,omitempty"`
+	Parameters                  []runtimeCandidateOperationParameterProjection        `json:"parameters"`
+	RequireOneOfParameters      []string                                              `json:"requireOneOfParameters,omitempty"`
+	TargetCardinality           runtimecontract.RuntimeOperationTargetCardinality     `json:"targetCardinality,omitempty"`
+	RequireTargetRefs           bool                                                  `json:"requireTargetRefs,omitempty"`
+	ForbiddenParameters         []string                                              `json:"forbiddenParameters,omitempty"`
+	CandidateConstraints        []runtimecontract.RuntimeOperationCandidateConstraint `json:"candidateConstraints,omitempty"`
+	Variants                    []runtimeCandidateOperationVariantProjection          `json:"variants,omitempty"`
+	Rules                       []string                                              `json:"rules,omitempty"`
+	AllowsDynamicParameters     bool                                                  `json:"allowsDynamicParameters,omitempty"`
+	DynamicParameterPrefixes    []string                                              `json:"dynamicParameterPrefixes,omitempty"`
+	RequiredOperationReferences []string                                              `json:"requiredOperationReferences,omitempty"`
+	BindingAuthorizations       []runtimeCandidateBindingAuthorizationProjection      `json:"bindingAuthorizations,omitempty"`
+	AcceptedEffectScopes        []runtimecontract.RuntimeEffectScope                  `json:"acceptedEffectScopes,omitempty"`
+	RequiredEffectScopes        []runtimecontract.RuntimeEffectScope                  `json:"requiredEffectScopes,omitempty"`
 	// Target is the sealed TargetPolicy authorization compiled by the single
 	// manifest compiler. Renderer/schema/instruction must consume it instead of
 	// re-deriving owner inventory or inventing a second allow-list.
@@ -121,13 +122,14 @@ type runtimeCandidateOperationParameterProjection struct {
 }
 
 type runtimeCandidateOperationVariantProjection struct {
-	ID                  string                                               `json:"id"`
-	Discriminators      []runtimecontract.RuntimeOperationParameterPredicate `json:"discriminators"`
-	RequiredParameters  []string                                             `json:"requiredParameters,omitempty"`
-	RequiredNonEmpty    []string                                             `json:"requiredNonEmpty,omitempty"`
-	ForbiddenParameters []string                                             `json:"forbiddenParameters,omitempty"`
-	EffectScope         runtimecontract.RuntimeEffectScope                   `json:"effectScope"`
-	IdempotencyClass    runtimecontract.RuntimeOperationIdempotencyClass     `json:"idempotencyClass"`
+	ID                   string                                                `json:"id"`
+	Discriminators       []runtimecontract.RuntimeOperationParameterPredicate  `json:"discriminators"`
+	RequiredParameters   []string                                              `json:"requiredParameters,omitempty"`
+	RequiredNonEmpty     []string                                              `json:"requiredNonEmpty,omitempty"`
+	ForbiddenParameters  []string                                              `json:"forbiddenParameters,omitempty"`
+	CandidateConstraints []runtimecontract.RuntimeOperationCandidateConstraint `json:"candidateConstraints,omitempty"`
+	EffectScope          runtimecontract.RuntimeEffectScope                    `json:"effectScope"`
+	IdempotencyClass     runtimecontract.RuntimeOperationIdempotencyClass      `json:"idempotencyClass"`
 }
 
 type runtimeCandidateRetryProjection struct {
@@ -150,6 +152,7 @@ type runtimeCandidateCorrectionWitnessProjection struct {
 	AlternativeValue        string                                                     `json:"alternativeValue"`
 	RejectedShapeHash       string                                                     `json:"rejectedShapeHash,omitempty"`
 	AlternativeShapeHash    string                                                     `json:"alternativeShapeHash,omitempty"`
+	ConstraintRef           string                                                     `json:"constraintRef,omitempty"`
 	ParameterEntryEncodings []runtimeCandidateParameterEntryEncodingProjection         `json:"parameterEntryEncodings,omitempty"`
 }
 
@@ -350,6 +353,7 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 			TargetCardinality:           operation.TargetCardinality,
 			RequireTargetRefs:           runtimeStringIn(requiredWireFields, "targetRefs"),
 			ForbiddenParameters:         append([]string(nil), operation.ForbiddenParameters...),
+			CandidateConstraints:        runtimeCandidateOperationConstraints(operation.Variants),
 			Rules:                       append([]string(nil), operation.Rules...),
 			AllowsDynamicParameters:     operation.AllowsDynamicParameters,
 			DynamicParameterPrefixes:    append([]string(nil), operation.DynamicParameterPrefixes...),
@@ -400,13 +404,21 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 				projection.Variants = append(projection.Variants, runtimeCandidateOperationVariantProjection{
 					ID: variant.ID, Discriminators: append([]runtimecontract.RuntimeOperationParameterPredicate(nil), variant.Discriminators...),
 					RequiredParameters: append([]string(nil), variant.RequiredParameters...), RequiredNonEmpty: append([]string(nil), variant.RequiredNonEmpty...),
-					ForbiddenParameters: append([]string(nil), variant.ForbiddenParameters...), EffectScope: variant.EffectScope, IdempotencyClass: variant.IdempotencyClass,
+					ForbiddenParameters: append([]string(nil), variant.ForbiddenParameters...), CandidateConstraints: append([]runtimecontract.RuntimeOperationCandidateConstraint(nil), variant.CandidateConstraints...), EffectScope: variant.EffectScope, IdempotencyClass: variant.IdempotencyClass,
 				})
 			}
 		}
 		ret = append(ret, projection)
 	}
 	return ret
+}
+
+func runtimeCandidateOperationConstraints(variants []runtimecontract.RuntimeOperationVariantContract) []runtimecontract.RuntimeOperationCandidateConstraint {
+	ret := make([]runtimecontract.RuntimeOperationCandidateConstraint, 0)
+	for _, variant := range variants {
+		ret = append(ret, variant.CandidateConstraints...)
+	}
+	return runtimecontract.NormalizeRuntimeOperationCandidateConstraints(ret)
 }
 
 func runtimeCandidateWireParameterNamesForKind(wire runtimecontract.RuntimeCandidateWireContract, kind string) []string {
@@ -680,6 +692,8 @@ func runtimeCandidateRetryForManifest(attempt int, observation *runtimecontract.
 		instruction += " The previous document closed an operation or the root object before all operation fields were complete, then emitted operation fields as trailing content. Rebuild the entire document from outputContract.schema and, when present, outputContract.canonicalWireLayout: keep parameters last inside each operation, close each operation exactly once after parameters, and close the root exactly once after the operations array. Do not append requiredOperationRef, kind, bindingRefs, targetRefs, or parameters after a closing brace."
 	} else if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField && input.Witness.AlternativeValue == runtimecontract.RuntimeCandidateCorrectionFieldPresent {
 		instruction += " The previous document omitted, emptied, set null, or used the wrong JSON type for a required field. Rebuild the entire document and emit that field exactly once with the type and nested shape required by outputContract.schema; field presence without schema conformance is still invalid."
+	} else if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOwnerConstraint {
+		instruction += " The capability owner rejected one parameter's representation against a constraint already sealed in outputContract.candidateConstraints. Rebuild that parameter from the sealed required shape; do not copy the rejected value, parser output, or diagnostic text."
 	} else if previous.Class == runtimecontract.RuntimeCandidateFailureClassSchema || previous.Class == runtimecontract.RuntimeCandidateFailureClassContract {
 		instruction += " The previous candidate shape was rejected. Remove every field or value not permitted by that sealed manifest instead of adding a wrapper, narrative, summary, explanation or convenience parameter."
 	}
@@ -695,6 +709,7 @@ func runtimeCandidateRetryForManifest(attempt int, observation *runtimecontract.
 			Dimension: witness.Dimension, OperationKind: witness.OperationKind, Path: witness.Path,
 			RejectedValue: witness.RejectedValue, AlternativeValue: witness.AlternativeValue,
 			RejectedShapeHash: witness.RejectedShapeHash, AlternativeShapeHash: witness.AlternativeShapeHash,
+			ConstraintRef:           witness.ConstraintRef,
 			ParameterEntryEncodings: runtimeCandidateParameterEntryEncodingProjections(witness.ParameterEntryEncodings),
 		},
 	}

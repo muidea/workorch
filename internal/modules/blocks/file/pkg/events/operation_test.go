@@ -11,16 +11,17 @@ import (
 
 func TestContractsDeclareFileAsQueryAndExecutionReceiver(t *testing.T) {
 	contracts := Contracts()
-	if len(contracts) != 15 {
-		t.Fatalf("contract count = %d, want 15", len(contracts))
+	if len(contracts) != 16 {
+		t.Fatalf("contract count = %d, want 16", len(contracts))
 	}
 	queryTopics := map[string]struct{}{
-		TopicAcquireRuntimeCapabilities:           {},
-		TopicAcquireRuntimeOperationAdmissibility: {},
-		TopicProbeRuntimeOperationFeasibility:     {},
-		TopicProbeRuntimeSemanticProofFeasibility: {},
-		TopicQueryRuntimeCWIReconciliation:        {},
-		TopicAcquireTargetSnapshot:                {}, TopicAcquireRuntimeTargetSelection: {},
+		TopicAcquireRuntimeCapabilities:                   {},
+		TopicAcquireRuntimeOperationAdmissibility:         {},
+		TopicValidateRuntimeOperationCandidateConformance: {},
+		TopicProbeRuntimeOperationFeasibility:             {},
+		TopicProbeRuntimeSemanticProofFeasibility:         {},
+		TopicQueryRuntimeCWIReconciliation:                {},
+		TopicAcquireTargetSnapshot:                        {}, TopicAcquireRuntimeTargetSelection: {},
 		TopicAcquireWorkspaceManifest: {}, TopicConfirmRuntimeRepairSurface: {},
 	}
 	for _, contract := range contracts {

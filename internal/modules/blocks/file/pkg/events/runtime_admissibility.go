@@ -12,6 +12,10 @@ type ProbeRuntimeOperationFeasibilityCommand runtimecontract.RuntimeOperationFea
 
 type ProbeRuntimeOperationFeasibilityResult runtimecontract.RuntimeOperationFeasibilityObservation
 
+type ValidateRuntimeOperationCandidateConformanceCommand runtimecontract.RuntimeOperationCandidateConformanceRequest
+
+type ValidateRuntimeOperationCandidateConformanceResult runtimecontract.RuntimeOperationCandidateConformanceObservation
+
 type ProbeRuntimeSemanticProofFeasibilityCommand runtimecontract.RuntimeSemanticProofFeasibilityRequest
 
 type ProbeRuntimeSemanticProofFeasibilityResult runtimecontract.RuntimeSemanticProofFeasibilityObservation
@@ -42,6 +46,27 @@ func NewRuntimeSemanticProofFeasibilityOwnerResult(c ProbeRuntimeSemanticProofFe
 
 func ValidateRuntimeOperationFeasibilityCommand(c ProbeRuntimeOperationFeasibilityCommand, owner string) error {
 	return runtimecontract.ValidateRuntimeOperationFeasibilityRequest(runtimecontract.RuntimeOperationFeasibilityRequest(c), owner)
+}
+
+func ValidateRuntimeOperationCandidateConformanceCommandValue(c ValidateRuntimeOperationCandidateConformanceCommand, owner string) error {
+	return runtimecontract.ValidateRuntimeOperationCandidateConformanceRequest(runtimecontract.RuntimeOperationCandidateConformanceRequest(c), owner)
+}
+
+func NewValidateRuntimeOperationCandidateConformanceResult(c ValidateRuntimeOperationCandidateConformanceCommand, outcome runtimecontract.RuntimeOperationCandidateConformanceOutcome, violation *runtimecontract.RuntimeOperationCandidateConformanceViolation) (ValidateRuntimeOperationCandidateConformanceResult, error) {
+	request := runtimecontract.RuntimeOperationCandidateConformanceRequest(c).Normalized()
+	variantID, _, err := runtimecontract.RuntimeOperationCandidateConstraintsForOperation(request.Operation, request.OperationAuthorization)
+	if err != nil {
+		return ValidateRuntimeOperationCandidateConformanceResult{}, err
+	}
+	observation := runtimecontract.RuntimeOperationCandidateConformanceObservation{
+		OperationID: request.Operation.ID, OperationKind: request.Operation.Kind, VariantID: variantID,
+		OwnerModuleID: request.OperationAuthorization.OwnerModuleID, CandidateManifestHash: request.CandidateManifestHash,
+		Outcome: outcome, Violation: violation,
+	}.Normalized()
+	if err := observation.ValidateForRequest(request, request.OperationAuthorization.OwnerModuleID); err != nil {
+		return ValidateRuntimeOperationCandidateConformanceResult{}, err
+	}
+	return ValidateRuntimeOperationCandidateConformanceResult(observation), nil
 }
 
 func NewProbeRuntimeOperationFeasibilityResult(c ProbeRuntimeOperationFeasibilityCommand, category runtimecontract.RuntimeOwnerFeasibilityCategory, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale, prerequisiteRequest *runtimecontract.RuntimeOperationPrerequisiteRequest, replayProof *runtimecontract.RuntimeOperationReplayProof) (ProbeRuntimeOperationFeasibilityResult, error) {

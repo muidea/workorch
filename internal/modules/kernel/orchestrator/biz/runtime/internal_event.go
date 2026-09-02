@@ -125,6 +125,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		RuntimeInternalEventCandidateAttemptBegun,
 		RuntimeInternalEventCandidateDocumentRejected,
 		RuntimeInternalEventCandidateProposalObserved,
+		RuntimeInternalEventCandidateConformanceObserved,
 		RuntimeInternalEventCandidateFeasibilityObserved,
 		RuntimeInternalEventCandidatePrerequisiteStaleObserved,
 		RuntimeInternalEventCandidatePrerequisiteObserved,

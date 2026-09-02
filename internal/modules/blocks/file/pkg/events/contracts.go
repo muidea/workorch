@@ -6,6 +6,7 @@ func Contracts() []eventcontract.Contract {
 	ret := eventcontract.Build("file", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
 		TopicAcquireRuntimeCapabilities,
 		TopicAcquireRuntimeOperationAdmissibility,
+		TopicValidateRuntimeOperationCandidateConformance,
 		TopicProbeRuntimeOperationFeasibility, TopicProbeRuntimeSemanticProofFeasibility, TopicQueryRuntimeCWIReconciliation,
 		TopicAcquireTargetSnapshot,
 		TopicAcquireRuntimeTargetSelection,
@@ -24,6 +25,9 @@ func Contracts() []eventcontract.Contract {
 		TopicAcquireRuntimeCapabilities, TopicAcquireRuntimeOperationAdmissibility, TopicProbeRuntimeOperationFeasibility,
 		TopicProbeRuntimeSemanticProofFeasibility, TopicQueryRuntimeCWIReconciliation, TopicAcquireTargetSnapshot,
 		TopicAcquireRuntimeTargetSelection, TopicAcquireWorkspaceManifest, TopicConfirmRuntimeRepairSurface,
+	)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM3, eventcontract.ScopePolicyWorkspaceRunStep, eventcontract.IdentityPolicyRuntimeOperation, true),
+		TopicValidateRuntimeOperationCandidateConformance,
 	)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassExecute, eventcontract.StateMachineSM3, eventcontract.ScopePolicyWorkspaceRunStep, eventcontract.IdentityPolicyRuntimeOperation, true),
 		TopicExecuteFileListOperation, TopicExecuteFileReadOperation, TopicExecuteFileEditOperation,

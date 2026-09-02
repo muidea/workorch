@@ -14,7 +14,7 @@ import (
 // correction renderer. It is deliberately separate from the executable
 // operation-contract revision: this value tracks the candidate wire shape,
 // while RuntimeOperationContractRevision tracks executable owner semantics.
-const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest/v4"
+const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest/v5"
 
 // RuntimeCandidateOperationMaxCount is the compiler ceiling for one complete
 // provider candidate document. The compiled manifest copies this value into
@@ -801,6 +801,12 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 			for _, pair := range variant.DistinctParameterPairs {
 				writeHashString(h, pair.Left)
 				writeHashString(h, pair.Right)
+			}
+			for _, constraint := range NormalizeRuntimeOperationCandidateConstraints(variant.CandidateConstraints) {
+				writeHashString(h, constraint.Ref)
+				writeHashString(h, string(constraint.Kind))
+				writeHashString(h, constraint.ParameterName)
+				writeHashString(h, string(constraint.RequiredShape))
 			}
 			writeHashString(h, string(variant.EffectScope))
 			writeHashString(h, string(variant.IdempotencyClass))
@@ -1591,6 +1597,7 @@ func cloneRuntimeOperationVariantContract(value RuntimeOperationVariantContract)
 	value.RequiredNonEmpty = cloneRuntimeCandidateContractStrings(value.RequiredNonEmpty)
 	value.ForbiddenParameters = cloneRuntimeCandidateContractStrings(value.ForbiddenParameters)
 	value.DistinctParameterPairs = append([]RuntimeOperationParameterPair(nil), value.DistinctParameterPairs...)
+	value.CandidateConstraints = append([]RuntimeOperationCandidateConstraint(nil), NormalizeRuntimeOperationCandidateConstraints(value.CandidateConstraints)...)
 	return value
 }
 

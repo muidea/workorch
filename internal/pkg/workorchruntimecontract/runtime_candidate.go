@@ -189,6 +189,8 @@ type RuntimeCandidateFailureDiagnostic struct {
 	Forbidden               []string                                          `json:"forbidden,omitempty"`
 	ViolationKind           RuntimeCandidatePayloadViolationKind              `json:"violationKind,omitempty"`
 	ParameterEntryEncodings []RuntimeCandidateParameterEntryEncodingViolation `json:"parameterEntryEncodings,omitempty"`
+	ConstraintRef           string                                            `json:"constraintRef,omitempty"`
+	RequiredShape           string                                            `json:"requiredShape,omitempty"`
 	ManifestHash            string                                            `json:"manifestHash,omitempty"`
 	RejectedShapeHash       string                                            `json:"rejectedShapeHash,omitempty"`
 	Objectives              []RuntimeCandidateCorrectionObjective             `json:"objectives,omitempty"`
@@ -210,6 +212,7 @@ const (
 	RuntimeCandidateCorrectionSatisfyDependency        RuntimeCandidateCorrectionObjective = "satisfy_dependency_binding"
 	RuntimeCandidateCorrectionSelectEvidenceBinding    RuntimeCandidateCorrectionObjective = "select_allowed_evidence_binding"
 	RuntimeCandidateCorrectionReencodeParameterEntries RuntimeCandidateCorrectionObjective = "reencode_parameter_entries"
+	RuntimeCandidateCorrectionConformOwnerConstraint   RuntimeCandidateCorrectionObjective = "conform_owner_candidate_constraint"
 )
 
 func (d *RuntimeCandidateFailureDiagnostic) Clone() *RuntimeCandidateFailureDiagnostic {
@@ -226,6 +229,8 @@ func (d RuntimeCandidateFailureDiagnostic) Normalized() RuntimeCandidateFailureD
 	d.Actual = strings.TrimSpace(d.Actual)
 	d.ViolationKind = RuntimeCandidatePayloadViolationKind(strings.TrimSpace(string(d.ViolationKind)))
 	d.ParameterEntryEncodings = cloneRuntimeCandidateParameterEntryEncodings(d.ParameterEntryEncodings)
+	d.ConstraintRef = strings.TrimSpace(d.ConstraintRef)
+	d.RequiredShape = strings.TrimSpace(d.RequiredShape)
 	d.ManifestHash = strings.TrimSpace(d.ManifestHash)
 	d.RejectedShapeHash = strings.TrimSpace(d.RejectedShapeHash)
 	d.Allowed = normalizeStrings(d.Allowed)

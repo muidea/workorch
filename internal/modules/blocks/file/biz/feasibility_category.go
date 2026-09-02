@@ -66,6 +66,10 @@ var ownerFeasibilityCategories = map[string]runtimecontract.RuntimeOwnerFeasibil
 	"patch_type_unsupported":              runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed,
 	"patch_target_exists":                 runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed,
 	"patch_invalid_input":                 runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed,
-	"unified_diff_invalid":                runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed,
-	"unified_diff_target_mismatch":        runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed,
+	// Candidate syntax and target-header conformance are checked on the
+	// dedicated SM-3 read lane before ordinary feasibility. Seeing either code
+	// here means the owner violated that persisted conformance fence; it is not
+	// a mutable-resource policy observation.
+	"unified_diff_invalid":         runtimecontract.RuntimeOwnerFeasibilityCategoryOwnerContractDefect,
+	"unified_diff_target_mismatch": runtimecontract.RuntimeOwnerFeasibilityCategoryOwnerContractDefect,
 }

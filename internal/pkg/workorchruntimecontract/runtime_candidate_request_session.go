@@ -393,6 +393,8 @@ func StableRuntimeCandidateRequestCorrectionHash(observation *RuntimeCandidateCo
 			writeHashStrings(h, value.Forbidden)
 			writeHashString(h, string(value.ViolationKind))
 			writeHashRuntimeCandidateParameterEntryEncodings(h, value.ParameterEntryEncodings)
+			writeHashString(h, value.ConstraintRef)
+			writeHashString(h, value.RequiredShape)
 			writeHashString(h, value.ManifestHash)
 			writeHashString(h, value.RejectedShapeHash)
 			for _, objective := range value.Objectives {
@@ -414,6 +416,7 @@ func StableRuntimeCandidateRequestCorrectionHash(observation *RuntimeCandidateCo
 			writeHashString(h, value.AlternativeValue)
 			writeHashString(h, value.RejectedShapeHash)
 			writeHashString(h, value.AlternativeShapeHash)
+			writeHashString(h, value.ConstraintRef)
 			writeHashRuntimeCandidateParameterEntryEncodings(h, value.ParameterEntryEncodings)
 		}
 	}
