@@ -718,6 +718,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	if cmd, handled := m.handleGlobalExitKey(msg); handled {
+		return m, cmd
+	}
 	if m.modelSelectMode {
 		return m.handleModelSelectionKey(msg)
 	}
@@ -845,6 +848,57 @@ func (m *AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// handleGlobalExitKey owns the sole process-exit command before any modal can
+// consume its key events. Normal input continues through handleKey unchanged;
+// input-blocking overlays accept only the incremental /exit sequence.
+func (m *AppModel) handleGlobalExitKey(msg tea.KeyMsg) (tea.Cmd, bool) {
+	if msg.String() == KeyEnter && isExitSlashCommand(m.input) {
+		m.addInputHistory(m.input)
+		m.mode = modeQuit
+		return tea.Quit, true
+	}
+	if !m.helpOpen && !m.modelSelectMode {
+		return nil, false
+	}
+	if msg.Type == tea.KeyRunes {
+		value := string(msg.Runes)
+		candidate := m.input + value
+		if isExitSlashCommandPrefix(candidate) {
+			m.insertInput(value)
+			return nil, true
+		}
+		// A modal may have been opened while ordinary input was present. A
+		// fresh slash starts the process-level command without leaking that
+		// hidden input into the exit matcher.
+		if isExitSlashCommandPrefix(value) {
+			m.setInput(value)
+			return nil, true
+		}
+	}
+	if msg.String() == "backspace" && isExitSlashCommandPrefix(m.input) {
+		m.deleteBeforeCursor()
+		return nil, true
+	}
+	return nil, false
+}
+
+func isExitSlashCommand(input string) bool {
+	input = strings.TrimSpace(input)
+	if !strings.HasPrefix(input, "/") {
+		return false
+	}
+	command := strings.TrimSpace(strings.TrimPrefix(input, "/"))
+	if command == "" {
+		return false
+	}
+	return strings.EqualFold(strings.Fields(command)[0], "exit")
+}
+
+func isExitSlashCommandPrefix(input string) bool {
+	input = strings.ToLower(strings.TrimSpace(input))
+	return input != "" && strings.HasPrefix("/exit", input)
+}
+
 func (m *AppModel) submitInput() (tea.Model, tea.Cmd) {
 	text := strings.TrimSpace(m.input)
 	if text == "" {
@@ -943,10 +997,6 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 	}
 	name := strings.ToLower(strings.Fields(cmd)[0])
 	switch name {
-	case "exit":
-		m.addInputHistory(text)
-		m.mode = modeQuit
-		return m, tea.Quit, true
 	case "help", "h", "?":
 		m.addInputHistory(text)
 		m.clearInput()

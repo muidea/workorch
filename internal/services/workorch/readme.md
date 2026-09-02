@@ -4,7 +4,7 @@ Status: active
 
 Type: process-service-contract
 
-Last Verified: 2026-08-16
+Last Verified: 2026-09-02
 
 ## 功能说明
 
@@ -21,6 +21,11 @@ error object 都不得进入 EventHub command/data/result。Shutdown 先取消 o
 TUI/CLI 只依赖 `internal/pkg/workorchport` 的稳定 contract；embedded backend 通过
 typed EventHub command/result，remote backend 通过 client，不直接调用 owner `biz`、
 `service` 或 repository。
+
+`/exit` 是 TUI 唯一显式进程退出命令，由根按键入口在 Help、model-selection 等 modal
+分流之前统一识别。modal 只能暂存该完整命令，不得各自复制退出语义或吞掉它的按键；
+Bubble Tea 返回后再有界地取消 projection observer，最后交由 process service 执行 framework Shutdown。
+相关验收覆盖普通界面、Help、model-selection、真实 Bubble Tea 程序循环以及 observer 取消超时。
 
 ## 非职责
 

@@ -343,6 +343,39 @@ func TestModelExitCommandWorksDuringModelSelection(t *testing.T) {
 	}
 }
 
+func TestModelExitCommandWorksDuringHelp(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.setInput("preserved input")
+	m.helpOpen = true
+	for _, char := range "/exit" {
+		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{char}})
+		m = asModel(next)
+		if cmd != nil {
+			t.Fatal("quit should wait for enter")
+		}
+		if !m.helpOpen {
+			t.Fatal("typing the global exit command should not close help before enter")
+		}
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if asModel(next).mode != modeQuit || cmd == nil {
+		t.Fatal("/exit should quit even while help is active")
+	}
+}
+
+func TestModelExitCommandIsCaseInsensitiveInModal(t *testing.T) {
+	m := NewAppModel(newFake(t), "ws-1", "")
+	m.helpOpen = true
+	for _, char := range "/EXIT" {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{char}})
+		m = asModel(next)
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if asModel(next).mode != modeQuit || cmd == nil {
+		t.Fatal("global /exit command should be case-insensitive")
+	}
+}
+
 func TestCloseProjectionSubscriptionHasBoundedWait(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-1", "")
 	release := make(chan struct{})
