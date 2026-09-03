@@ -239,6 +239,44 @@ func TestRuntimeAggregateRejectsValidationFailureObservationWithoutExactShellRec
 	}
 }
 
+func TestRuntimeAggregateFreshLoadRejectsCoordinatedValidationRouteDiagnosticTamper(t *testing.T) {
+	aggregate, observation := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("6", 64))
+	tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, aggregate)
+	var changedObservation runtimecontract.RuntimeValidationFailureObservation
+	found := false
+	for index := range tampered.OperationReceipts {
+		receipt := &tampered.OperationReceipts[index]
+		if receipt.Feedback == nil || receipt.Feedback.OriginalDiagnostic == nil ||
+			receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic == nil ||
+			receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation == nil ||
+			!runtimecontract.SameRuntimeValidationFailureObservation(*receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation, observation) {
+			continue
+		}
+		receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic.OwnerCode = "tampered_owner_code"
+		changedObservation = receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation.Clone()
+		changedObservation.DiagnosticHash = runtimecontract.StableRuntimeValidationFailureObservationDiagnosticHash(
+			*receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic,
+			changedObservation.ValidationScopeTargetRefs,
+		)
+		receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation = &changedObservation
+		found = true
+		break
+	}
+	if !found || tampered.Facts.Failure == nil || tampered.Facts.Failure.ValidationDiagnostic == nil || tampered.Facts.Failure.OriginalDiagnostic == nil || tampered.Facts.Failure.OriginalDiagnostic.ValidationDiagnostic == nil {
+		t.Fatal("validation repair fixture omitted exact diagnostic receipt lineage")
+	}
+	// Coordinate every semantic copy so only the persisted receipt hash/fence
+	// can expose the mutation after a JSON-shaped fresh load.
+	tampered.Facts.Failure.ValidationDiagnostic.OwnerCode = "tampered_owner_code"
+	tampered.Facts.Failure.OriginalDiagnostic.ValidationDiagnostic.OwnerCode = "tampered_owner_code"
+	tampered.Facts.Failure.ValidationFailureObservation = &changedObservation
+	tampered.Facts.Failure.OriginalDiagnostic.ValidationFailureObservation = &changedObservation
+	fresh := cloneRuntimeAggregateForMCPProvenanceTest(t, tampered)
+	if err := fresh.Validate(); err == nil || !strings.Contains(err.Error(), "has no exact committed execution projection") {
+		t.Fatalf("fresh load accepted coordinated repair-route diagnostic tamper: %v", err)
+	}
+}
+
 func TestRuntimeAggregateRequiresCanonicalValidationFailureReceiptCopies(t *testing.T) {
 	aggregate, _ := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("8", 64))
 	tests := []struct {
@@ -409,6 +447,7 @@ func validationRepairSurfaceObservedAggregateForTest(t *testing.T, requireTarget
 	evidence := runtimeRejectedValidationEvidenceForTest(t, sealed, "event-validation-repair-surface/"+diagnosticHash[:8], observation.DiagnosticClass)
 	evidence.Failure.Signature = observation.FailureSignature
 	evidence.Failure.ValidationDiagnostic.TargetRefs = append([]string(nil), observation.CandidateTargetRefs...)
+	observation.DiagnosticHash = runtimecontract.StableRuntimeValidationFailureObservationDiagnosticHash(*evidence.Failure.ValidationDiagnostic, observation.ValidationScopeTargetRefs)
 	evidence.Failure.ValidationFailureObservation = &observation
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 	committed, err := coordinator.commitEvidence(context.Background(), evidence)

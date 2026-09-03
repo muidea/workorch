@@ -474,6 +474,83 @@ func TestRuntimeBootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 	t.Fatal("activation bootstrap has no validation scratch prerequisite")
 }
 
+func TestRuntimeBootstrapAcquiresRepairRouteCapabilityWithoutWideningTerminalProof(t *testing.T) {
+	repair := runtimecontract.RuntimeValidationFailureRepairConvergence{
+		ID: "dod-validation-repair",
+		Routes: []runtimecontract.RuntimeValidationFailureRepairRoute{{
+			ID:                   "build-failure-to-file-write",
+			TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell, TriggerOperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			TriggerDiagnosticClass:     runtimecontract.ValidationDiagnosticBuildFailed,
+			TriggerEvidenceTargetType:  runtimecontract.ValidationEvidenceTargetFailureSurface,
+			TriggerOwnerDiagnosticCode: "shell_exit_nonzero",
+			RepairEvidenceKind:         runtimecontract.EvidenceKindStateChange, RepairOwnerModuleID: runtimecontract.RuntimeModuleFile,
+			RepairOperationKinds: []string{runtimecontract.StepKindFileWrite},
+			RepairTargetPolicy:   runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, RepairTargetRole: "deliverable_implementation",
+			RepairDeclarationTargetSelectorRef:      "profile/deliverable",
+			RepairDeclarationTargetSelectorOwnerRef: "test-profile", RepairDeclarationTargetSelectorSubjectRef: "dodItem_repair",
+			RepairOperationTargetSelectorRef: "workspace-relative-new-file-target",
+		}},
+		RequireFreshValidation: true, MaxAttempts: 2,
+	}
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "test-profile",
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+					ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+					AcceptedStepKinds:                  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+					ValidationFailureRepairConvergence: &repair,
+				}},
+			}},
+		},
+	}
+	bootstrap, err := runtimeBootstrapWithTestProof(
+		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
+		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"validate"}},
+		"definition-1", nil, activation,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(bootstrap.Definition.CapabilityContract, runtimecontract.StepKindFileWrite) {
+		t.Fatalf("repair operation missing from Definition capability contract: %+v", bootstrap.Definition.CapabilityContract)
+	}
+	if !containsBootstrapCapability(bootstrap.Requirements, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeCapabilityClassStateChange, runtimecontract.StepKindFileWrite) {
+		t.Fatalf("repair operation missing from File capability prerequisites: %+v", bootstrap.Requirements)
+	}
+	admissibilityFound := false
+	for _, requirement := range bootstrap.Requirements {
+		if requirement.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility &&
+			requirement.OwnerModuleID == runtimecontract.RuntimeModuleFile &&
+			containsString(requirement.RequiredCapabilities, runtimecontract.StepKindFileWrite) {
+			admissibilityFound = true
+		}
+	}
+	if !admissibilityFound {
+		t.Fatalf("repair operation cannot reach File admissibility acquisition: %+v", bootstrap.Requirements)
+	}
+	if len(bootstrap.DefinitionFocuses) != 1 || len(bootstrap.DefinitionFocuses[0].RequiredEvidenceKinds) != 1 ||
+		bootstrap.DefinitionFocuses[0].RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation {
+		t.Fatalf("repair operation widened terminal evidence semantics: %+v", bootstrap.DefinitionFocuses)
+	}
+	profiles := bootstrap.Activation.ExecutionContract.ProfileContracts
+	if len(profiles) == 0 || len(profiles[0].EvidenceRequirements) == 0 ||
+		containsString(profiles[0].EvidenceRequirements[0].AcceptedStepKinds, runtimecontract.StepKindFileWrite) {
+		t.Fatalf("repair operation widened Profile terminal proof vocabulary: %+v", profiles)
+	}
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func containsBootstrapOperationAdmissibility(requirements []runtimecontract.RuntimeRequirement, owner string, kinds ...string) bool {
 	for _, requirement := range requirements {
 		if requirement.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility || requirement.OwnerModuleID != owner || len(requirement.RequiredCapabilities) != len(kinds) {

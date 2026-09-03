@@ -224,12 +224,20 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   resource/effect owner confirmation。expected scope 必须按
   exact `OperationID` + operation hash 从 completed dispatch 读取 `Target.AllowedTargetRefs()`，不得从 mutable manifest、current
   focus、owner inventory 或 operation entry 重建；
+- Definition admission 必须无损解析 validation-repair route 数组；`null`、scalar、empty object、unknown/missing field、重复 route
+  ID 与重复完整 trigger 均须在 pre-seal 阻塞，不能被 normalization 丢弃或去重。每条 route 的 repair kinds 必须属于同一 owner
+  且共同声明一个非 `none`、已有 concrete typed adapter 的 confirmation protocol；缺失协议不能创建 Run，也不能推迟到首次
+  failure 时才暴露；
 - operation entry cardinality 必须分别覆盖 sealed per-operation `RequireTargets=true|false`：前者 empty entry 在 owner call 前拒绝，
   后者不因 empty entry 单独失败；finite allowed set 存在时，任何非空 entry member 都必须属于该 set。structured validation
   negative matrix 还必须覆盖：observation scope 缺项/附加项，entry/candidate 任一越界或 candidate 为空，
   missing/duplicate target authorization，wrong operation hash，wrong dispatch/authority/operation/`FocusTargetRole`，以及 persisted
   authorization/observation tamper。所有分支在 repair-owner query、provider call、repair transition、budget consumption 前
   fail closed；
+- validation observation diagnostic hash 必须覆盖 schema version、diagnostic class、owner code、evidence target type、stage、
+  operation、diagnostic target refs 与 sealed validation scope。producer/consumer parity、owner-code/target-type 单字段漂移，以及
+  同时协调修改 promoted/nested diagnostic 与 observation hash 但未修改 immutable receipt execution projection 的 fresh-load
+  tamper 均须有回归；
 - dispatch execution 必须证明 `dispatch_execution_requested` 只做单次 SM-3 preparation/claim CAS 并返回 immutable call
   handoff，`ApplyInternalEvent` 内零 capability call/callback；owner receipt 之后由 evidence/stale/governance 三个互斥 private event
   或独立 outcome-unknown event 收口，并逐项验证 declared write-set、pre/post-CAS、duplicate/stale 与 fresh restart；
@@ -242,6 +250,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   `RuntimeValidationFailureObservation`，且必须继续等待 sealed repair-owner confirmation 与 SM-2 transition。missing/multiple/unknown-field、
   role/class mismatch、越界 marker 均不能形成 candidate authority；tool diagnostic 与 marker 的 canonical union 必须仍为
   1～8 项，`8+1`/`8+8` 越界 union 整组失效；
+- exact route transition matrix 必须覆盖：structured observation + exact route 等待一次 matching owner confirmation；structured
+  observation + 无 route 与 target-free typed diagnostic + 无 route 均在 rejected receipt 的同一 CAS 封存
+  `validation_failure_repair_route_unavailable`；target-free typed diagnostic + exact route 才进入 bounded semantic fallback。
+  terminal 分支在 duplicate/restart 后保持零额外 CAS、owner query、provider、effect、governance、budget 与 SM-4 wait；
 - managed-validation receipt matrix 必须在 commit 与 fresh-load 同时拒绝 direct diagnostic `TargetRefs`（即使它等于 current
   focus、operation entry 或 sealed scope member）、direct/cross-owner `TargetObservation`、出现在 File/MCP/durable Shell receipt
   中的 VFO，以及 workspace/run/actual dispatch/authority/operation/signature/role/class/candidate/scope 任一漂移。顶层与 nested

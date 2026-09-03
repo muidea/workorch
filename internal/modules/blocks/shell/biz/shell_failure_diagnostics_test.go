@@ -69,25 +69,25 @@ func TestExecuteOperationNonzeroExitSetsStructuredFailure(t *testing.T) {
 }
 
 func TestShellValidationDiagnosticPrioritizesNonzeroExitOverStaleZeroWork(t *testing.T) {
-	class, targetType := shellValidationDiagnosticClassAndTarget(RuntimeCommandResult{
+	class, targetType, ownerCode := shellValidationDiagnosticClassAndTarget(RuntimeCommandResult{
 		ExitCode:        1,
+		FailureCode:     "shell_exit_nonzero",
 		ZeroWork:        true,
 		EvidenceQuality: string(common.EvidenceQualityInconclusive),
 	}, runtimecontract.RuntimeValidationEvidence{}, "go", false, false, errors.New("exit status 1"))
-	if class != runtimecontract.ValidationDiagnosticBuildFailed || targetType != runtimecontract.ValidationEvidenceTargetFailureSurface {
-		t.Fatalf("diagnostic = (%q, %q), want (%q, %q)", class, targetType,
+	if class != runtimecontract.ValidationDiagnosticBuildFailed || targetType != runtimecontract.ValidationEvidenceTargetFailureSurface || ownerCode != "shell_exit_nonzero" {
+		t.Fatalf("diagnostic = (%q, %q, %q), want (%q, %q, shell_exit_nonzero)", class, targetType, ownerCode,
 			runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface)
 	}
 }
 
 func TestShellValidationDiagnosticClassifiesGoDependencyMetadataBeforeGenericBuildFailure(t *testing.T) {
 	output := RuntimeCommandResult{
-		Command:  "go",
-		ExitCode: 1,
+		Command: "go", ExitCode: 1, WorkingDirectory: t.TempDir(),
 		Stderr: "internal/lsp/client.go:12:2: missing go.sum entry for module providing package github.com/sourcegraph/jsonrpc2 " +
 			"(imported by example/internal/lsp); to add:\n\tgo get example/internal/lsp",
 	}
-	class, targetType := shellValidationDiagnosticClassAndTarget(
+	class, targetType, ownerCode := shellValidationDiagnosticClassAndTarget(
 		output,
 		runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed},
 		"go",
@@ -96,8 +96,9 @@ func TestShellValidationDiagnosticClassifiesGoDependencyMetadataBeforeGenericBui
 		errors.New("exit status 1"),
 	)
 	if class != runtimecontract.ValidationDiagnosticDependencyMismatch ||
-		targetType != runtimecontract.ValidationEvidenceTargetDependencyContract {
-		t.Fatalf("diagnostic = (%q, %q), want dependency-contract mismatch", class, targetType)
+		targetType != runtimecontract.ValidationEvidenceTargetDependencyContract ||
+		ownerCode != runtimecontract.ValidationDiagnosticDependencyMismatch {
+		t.Fatalf("diagnostic = (%q, %q, %q), want dependency mismatch", class, targetType, ownerCode)
 	}
 
 	request := RuntimeCommandRequest{
@@ -115,7 +116,7 @@ func TestShellValidationDiagnosticClassifiesGoDependencyMetadataBeforeGenericBui
 
 	nonGo := output
 	nonGo.Command = "custom-validator"
-	class, _ = shellValidationDiagnosticClassAndTarget(
+	class, _, _ = shellValidationDiagnosticClassAndTarget(
 		nonGo, runtimecontract.RuntimeValidationEvidence{}, "custom-validator", false, false, errors.New("exit status 1"),
 	)
 	if class != runtimecontract.ValidationDiagnosticBuildFailed {

@@ -182,6 +182,15 @@ func sealedValidationFailureObservationMatchesDispatch(dispatch SealedDispatch, 
 // descriptor, rather than a profile-specific owner constant, identifies the
 // capability owner whose diagnostic may be admitted.
 func runtimeValidationFailureObservationHasPersistedReceipt(aggregate RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) bool {
+	_, found := runtimeValidationFailurePersistedDiagnostic(aggregate, observation)
+	return found
+}
+
+// runtimeValidationFailurePersistedDiagnostic resolves the exact immutable
+// validation-owner fact behind an observation. Historical repair confirmation
+// invariants must use this receipt lineage: the mutable SM-2 Failure is
+// intentionally retired after repair and therefore cannot remain provenance.
+func runtimeValidationFailurePersistedDiagnostic(aggregate RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) (runtimecontract.ValidationFailureDiagnostic, bool) {
 	var completed *SealedDispatch
 	for idx := range aggregate.CompletedDispatches {
 		dispatch := &aggregate.CompletedDispatches[idx]
@@ -192,19 +201,19 @@ func runtimeValidationFailureObservationHasPersistedReceipt(aggregate RuntimeAgg
 		}
 	}
 	if completed == nil || !sealedValidationFailureObservationMatchesDispatch(*completed, observation) {
-		return false
+		return runtimecontract.ValidationFailureDiagnostic{}, false
 	}
 	operation, found := candidateOperationForEvidence(completed.Candidate, observation.OperationID)
 	if !found {
-		return false
+		return runtimecontract.ValidationFailureDiagnostic{}, false
 	}
 	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 	if !found || descriptor.FailureTargetProtocol != runtimecontract.RuntimeFailureTargetProtocolValidationCandidates {
-		return false
+		return runtimecontract.ValidationFailureDiagnostic{}, false
 	}
 	execution, found := operationExecutionRecord(completed.OperationExecutions, observation.OperationID)
 	if !found || execution.State != runtimecontract.OperationExecutionEvidenceCommitted || execution.Fence == 0 {
-		return false
+		return runtimecontract.ValidationFailureDiagnostic{}, false
 	}
 	receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, execution.ExecutionKey, execution.Fence)
 	if !found || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.OperationID != observation.OperationID ||
@@ -212,8 +221,15 @@ func runtimeValidationFailureObservationHasPersistedReceipt(aggregate RuntimeAgg
 		receipt.Feedback == nil || receipt.Feedback.WorkspaceID != observation.WorkspaceID || receipt.Feedback.RunID != observation.RunID ||
 		receipt.Feedback.DispatchID != observation.DispatchID || receipt.Feedback.AuthoritySnapshotID != observation.AuthoritySnapshotID ||
 		receipt.Feedback.OriginalDiagnostic == nil || receipt.Feedback.OriginalDiagnostic.OwnerModuleID != descriptor.OwnerModuleID ||
-		receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation == nil {
-		return false
+		receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation == nil || receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic == nil {
+		return runtimecontract.ValidationFailureDiagnostic{}, false
 	}
-	return runtimecontract.SameRuntimeValidationFailureObservation(*receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation, observation)
+	if !runtimecontract.SameRuntimeValidationFailureObservation(*receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation, observation) {
+		return runtimecontract.ValidationFailureDiagnostic{}, false
+	}
+	diagnostic := receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic.Clone()
+	if runtimecontract.StableRuntimeValidationFailureObservationDiagnosticHash(diagnostic, observation.ValidationScopeTargetRefs) != observation.DiagnosticHash {
+		return runtimecontract.ValidationFailureDiagnostic{}, false
+	}
+	return diagnostic, true
 }

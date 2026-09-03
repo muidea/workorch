@@ -1809,6 +1809,7 @@ func newConfirmedRepairAuthorityFixtureWithBindingProofs(t *testing.T, targets [
 	rejected.SourceRef = orchestratorevents.RuntimeOperationSourceRef(sealed.ActiveDispatch.ID, operationID)
 	rejected.Failure.Signature = observation.FailureSignature
 	rejected.Failure.ValidationDiagnostic.TargetRefs = append([]string(nil), targets...)
+	observation.DiagnosticHash = runtimecontract.StableRuntimeValidationFailureObservationDiagnosticHash(*rejected.Failure.ValidationDiagnostic, observation.ValidationScopeTargetRefs)
 	rejected.Failure.ValidationFailureObservation = &observation
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &rejected)
 	committed, err := coordinator.commitEvidence(ctx, rejected)

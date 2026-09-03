@@ -12,14 +12,19 @@ import (
 
 func TestCompileRuntimeCoverageFocusesAppliesDodItemWildcard(t *testing.T) {
 	repair := runtimecontract.RuntimeValidationFailureRepairConvergence{
-		ID: "dod-validation-repair", TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell,
-		TriggerOperationKind:     runtimecontract.RuntimeBlockKindManagedValidationSession,
-		TriggerDiagnosticClasses: []string{runtimecontract.ValidationDiagnosticBuildFailed},
-		RepairEvidenceKind:       runtimecontract.EvidenceKindStateChange, RepairOwnerModuleID: runtimecontract.RuntimeModuleFile,
-		RepairOperationKinds: []string{runtimecontract.StepKindFileWrite}, RepairTargetPolicy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
-		RepairTargetRole: "deliverable_implementation", RepairDeclarationTargetSelectorRef: "file/workspace_deliverable",
-		RepairDeclarationTargetSelectorOwnerRef: "software-dev", RepairDeclarationTargetSelectorSubjectRef: "dodItem_repair",
-		RepairOperationTargetSelectorRef: "workspace-relative-new-file-target", RequireFreshValidation: true, MaxAttempts: 2,
+		ID: "dod-validation-repair",
+		Routes: []runtimecontract.RuntimeValidationFailureRepairRoute{{
+			ID: "build-failure-to-file", TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell,
+			TriggerOperationKind:   runtimecontract.RuntimeBlockKindManagedValidationSession,
+			TriggerDiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed, TriggerEvidenceTargetType: runtimecontract.ValidationEvidenceTargetFailureSurface,
+			TriggerOwnerDiagnosticCode: "shell_exit_nonzero", RepairEvidenceKind: runtimecontract.EvidenceKindStateChange,
+			RepairOwnerModuleID: runtimecontract.RuntimeModuleFile, RepairOperationKinds: []string{runtimecontract.StepKindFileWrite},
+			RepairTargetPolicy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			RepairTargetRole:   "deliverable_implementation", RepairDeclarationTargetSelectorRef: "file/workspace_deliverable",
+			RepairDeclarationTargetSelectorOwnerRef: "software-dev", RepairDeclarationTargetSelectorSubjectRef: "dodItem_repair",
+			RepairOperationTargetSelectorRef: "workspace-relative-new-file-target",
+		}},
+		RequireFreshValidation: true, MaxAttempts: 2,
 	}
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
@@ -81,12 +86,15 @@ func TestCompileRuntimeCoverageFocusesAppliesDodItemWildcard(t *testing.T) {
 
 func TestResolveCoverageEvidencePolicyRejectsConflictingRepairConvergences(t *testing.T) {
 	base := runtimecontract.RuntimeValidationFailureRepairConvergence{
-		ID: "repair", TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell, TriggerOperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-		TriggerDiagnosticClasses: []string{runtimecontract.ValidationDiagnosticTestFailed}, RepairEvidenceKind: runtimecontract.EvidenceKindStateChange,
-		RepairOwnerModuleID: runtimecontract.RuntimeModuleFile, RepairOperationKinds: []string{runtimecontract.StepKindFileWrite},
-		RepairTargetPolicy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, RepairTargetRole: "implementation",
-		RepairDeclarationTargetSelectorRef: "file/workspace_deliverable", RepairDeclarationTargetSelectorOwnerRef: "profile",
-		RepairDeclarationTargetSelectorSubjectRef: "repair", RepairOperationTargetSelectorRef: "workspace-relative-new-file-target",
+		ID: "repair", Routes: []runtimecontract.RuntimeValidationFailureRepairRoute{{
+			ID: "test-failure-to-file", TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell, TriggerOperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			TriggerDiagnosticClass: runtimecontract.ValidationDiagnosticTestFailed, TriggerEvidenceTargetType: runtimecontract.ValidationEvidenceTargetBehaviorEvidence,
+			TriggerOwnerDiagnosticCode: "shell_exit_nonzero", RepairEvidenceKind: runtimecontract.EvidenceKindStateChange,
+			RepairOwnerModuleID: runtimecontract.RuntimeModuleFile, RepairOperationKinds: []string{runtimecontract.StepKindFileWrite},
+			RepairTargetPolicy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, RepairTargetRole: "implementation",
+			RepairDeclarationTargetSelectorRef: "file/workspace_deliverable", RepairDeclarationTargetSelectorOwnerRef: "profile",
+			RepairDeclarationTargetSelectorSubjectRef: "repair", RepairOperationTargetSelectorRef: "workspace-relative-new-file-target",
+		}},
 		RequireFreshValidation: true, MaxAttempts: 2,
 	}
 	changed := base.Clone()

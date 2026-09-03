@@ -10,10 +10,25 @@ import (
 
 func testValidationFailureRepairConvergence() RuntimeValidationFailureRepairConvergence {
 	return RuntimeValidationFailureRepairConvergence{
-		ID:                                        "dod-validation-repair",
+		ID: "dod-validation-repair",
+		Routes: []RuntimeValidationFailureRepairRoute{
+			testValidationFailureRepairRoute("implementation-gap-to-file", ValidationDiagnosticImplementationGap, ValidationEvidenceTargetFailureSurface),
+			testValidationFailureRepairRoute("build-failure-to-file", ValidationDiagnosticBuildFailed, ValidationEvidenceTargetFailureSurface),
+			testValidationFailureRepairRoute("test-failure-to-file", ValidationDiagnosticTestFailed, ValidationEvidenceTargetBehaviorEvidence),
+		},
+		RequireFreshValidation: true,
+		MaxAttempts:            2,
+	}
+}
+
+func testValidationFailureRepairRoute(id, diagnosticClass, targetType string) RuntimeValidationFailureRepairRoute {
+	return RuntimeValidationFailureRepairRoute{
+		ID:                                        id,
 		TriggerOwnerModuleID:                      RuntimeModuleShell,
 		TriggerOperationKind:                      RuntimeBlockKindManagedValidationSession,
-		TriggerDiagnosticClasses:                  []string{ValidationDiagnosticImplementationGap, ValidationDiagnosticBuildFailed, ValidationDiagnosticTestFailed},
+		TriggerDiagnosticClass:                    diagnosticClass,
+		TriggerEvidenceTargetType:                 targetType,
+		TriggerOwnerDiagnosticCode:                "shell_exit_nonzero",
 		RepairEvidenceKind:                        EvidenceKindStateChange,
 		RepairOwnerModuleID:                       RuntimeModuleFile,
 		RepairOperationKinds:                      []string{StepKindFileWrite, RuntimeBlockKindPatchApply},
@@ -23,28 +38,30 @@ func testValidationFailureRepairConvergence() RuntimeValidationFailureRepairConv
 		RepairDeclarationTargetSelectorOwnerRef:   "software-dev",
 		RepairDeclarationTargetSelectorSubjectRef: "dodItem_repair",
 		RepairOperationTargetSelectorRef:          "workspace-relative-new-file-target",
-		RequireFreshValidation:                    true,
-		MaxAttempts:                               2,
 	}
 }
 
 func TestRuntimeValidationFailureRepairConvergenceIsOrderedAllOfAndStable(t *testing.T) {
 	value := testValidationFailureRepairConvergence()
-	value.TriggerDiagnosticClasses = append(value.TriggerDiagnosticClasses, ValidationDiagnosticBuildFailed)
+	value.Routes = []RuntimeValidationFailureRepairRoute{value.Routes[2], value.Routes[0], value.Routes[1]}
 	if err := value.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	normalized := value.Normalized()
-	if len(normalized.TriggerDiagnosticClasses) != 3 || !normalized.MatchesTrigger(RuntimeModuleShell, RuntimeBlockKindManagedValidationSession, ValidationDiagnosticBuildFailed) {
+	route, found := normalized.RouteForTrigger(RuntimeModuleShell, RuntimeBlockKindManagedValidationSession, ValidationDiagnosticBuildFailed, ValidationEvidenceTargetFailureSurface, "shell_exit_nonzero")
+	if len(normalized.Routes) != 3 || !found || route.ID != "build-failure-to-file" {
 		t.Fatalf("normalized convergence = %+v", normalized)
 	}
 	clone := normalized.Clone()
-	clone.TriggerDiagnosticClasses[0] = ValidationDiagnosticCommandInvalid
-	if normalized.TriggerDiagnosticClasses[0] == clone.TriggerDiagnosticClasses[0] {
-		t.Fatal("convergence clone shares diagnostic storage")
+	clone.Routes[0].TriggerOwnerDiagnosticCode = "different-owner-code"
+	if normalized.Routes[0].TriggerOwnerDiagnosticCode == clone.Routes[0].TriggerOwnerDiagnosticCode {
+		t.Fatal("convergence clone shares route storage")
 	}
 	if StableRuntimeValidationFailureRepairConvergenceHash(normalized) == StableRuntimeValidationFailureRepairConvergenceHash(clone) {
-		t.Fatal("convergence hash ignored diagnostic drift")
+		t.Fatal("convergence hash ignored exact route drift")
+	}
+	if _, found := normalized.RouteForTrigger(RuntimeModuleShell, RuntimeBlockKindManagedValidationSession, ValidationDiagnosticBuildFailed, ValidationEvidenceTargetFailureSurface, "another-code"); found {
+		t.Fatal("convergence accepted a non-exact owner diagnostic code")
 	}
 }
 
@@ -55,24 +72,46 @@ func TestRuntimeValidationFailureRepairConvergenceRejectsIncompletePresealContra
 		want string
 		edit func(*RuntimeValidationFailureRepairConvergence)
 	}{
-		{name: "missing diagnostic", want: "typed trigger", edit: func(v *RuntimeValidationFailureRepairConvergence) { v.TriggerDiagnosticClasses = nil }},
+		{name: "missing routes", want: "unique exact routes", edit: func(v *RuntimeValidationFailureRepairConvergence) { v.Routes = nil }},
+		{name: "missing diagnostic", want: "exact typed trigger", edit: func(v *RuntimeValidationFailureRepairConvergence) { v.Routes[0].TriggerDiagnosticClass = "" }},
 		{name: "unknown diagnostic", want: "unknown diagnostic", edit: func(v *RuntimeValidationFailureRepairConvergence) {
-			v.TriggerDiagnosticClasses = []string{"free_form_failure"}
+			v.Routes[0].TriggerDiagnosticClass = "free_form_failure"
 		}},
 		{name: "non validation trigger", want: "not validation proof", edit: func(v *RuntimeValidationFailureRepairConvergence) {
-			v.TriggerOwnerModuleID = RuntimeModuleFile
-			v.TriggerOperationKind = StepKindFileWrite
+			v.Routes[0].TriggerOwnerModuleID = RuntimeModuleFile
+			v.Routes[0].TriggerOperationKind = StepKindFileWrite
 		}},
-		{name: "non state repair", want: "state_change", edit: func(v *RuntimeValidationFailureRepairConvergence) { v.RepairEvidenceKind = EvidenceKindValidation }},
+		{name: "non state repair", want: "state_change", edit: func(v *RuntimeValidationFailureRepairConvergence) {
+			v.Routes[0].RepairEvidenceKind = EvidenceKindValidation
+		}},
 		{name: "cross owner repair", want: "not state-change proof", edit: func(v *RuntimeValidationFailureRepairConvergence) {
-			v.RepairOperationKinds = []string{StepKindShellCommand}
+			v.Routes[0].RepairOperationKinds = []string{StepKindShellCommand}
 		}},
 		{name: "exact policy", want: "selector-backed", edit: func(v *RuntimeValidationFailureRepairConvergence) {
-			v.RepairTargetPolicy = RuntimeOperationTargetPolicyExactTarget
+			v.Routes[0].RepairTargetPolicy = RuntimeOperationTargetPolicyExactTarget
 		}},
-		{name: "missing operation selector", want: "complete selector", edit: func(v *RuntimeValidationFailureRepairConvergence) { v.RepairOperationTargetSelectorRef = "" }},
+		{name: "missing operation selector", want: "complete selector", edit: func(v *RuntimeValidationFailureRepairConvergence) { v.Routes[0].RepairOperationTargetSelectorRef = "" }},
 		{name: "aliased declaration and operation selectors", want: "distinct declaration and operation selector", edit: func(v *RuntimeValidationFailureRepairConvergence) {
-			v.RepairOperationTargetSelectorRef = v.RepairDeclarationTargetSelectorRef
+			v.Routes[0].RepairOperationTargetSelectorRef = v.Routes[0].RepairDeclarationTargetSelectorRef
+		}},
+		{name: "duplicate exact trigger", want: "duplicate exact trigger", edit: func(v *RuntimeValidationFailureRepairConvergence) {
+			duplicate := v.Routes[0].Clone()
+			duplicate.ID = "duplicate-trigger"
+			v.Routes = append(v.Routes, duplicate)
+		}},
+		{name: "duplicate route identity", want: "duplicate route identity", edit: func(v *RuntimeValidationFailureRepairConvergence) {
+			duplicate := v.Routes[0].Clone()
+			duplicate.TriggerDiagnosticClass = ValidationDiagnosticEnvironmentMissing
+			duplicate.TriggerEvidenceTargetType = ValidationEvidenceTargetEnvironment
+			duplicate.TriggerOwnerDiagnosticCode = "command_not_found"
+			v.Routes = append(v.Routes, duplicate)
+		}},
+		{name: "empty route entry", want: "non-empty unique route identities", edit: func(v *RuntimeValidationFailureRepairConvergence) {
+			v.Routes = append(v.Routes, RuntimeValidationFailureRepairRoute{})
+		}},
+		{name: "owner without confirmation protocol", want: "confirmation protocol", edit: func(v *RuntimeValidationFailureRepairConvergence) {
+			v.Routes[0].RepairOwnerModuleID = RuntimeModuleGit
+			v.Routes[0].RepairOperationKinds = []string{StepKindGitWrite}
 		}},
 		{name: "no fresh validation", want: "fresh validation", edit: func(v *RuntimeValidationFailureRepairConvergence) { v.RequireFreshValidation = false }},
 		{name: "zero attempts", want: "max attempts", edit: func(v *RuntimeValidationFailureRepairConvergence) { v.MaxAttempts = 0 }},

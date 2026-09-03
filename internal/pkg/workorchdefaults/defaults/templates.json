@@ -990,25 +990,29 @@
               ],
               "validationFailureRepairConvergence": {
                 "id": "dod-validation-rejected-implementation-repair",
-                "triggerOwnerModuleId": "blocks/shell",
-                "triggerOperationKind": "validation/managed_session",
-                "triggerDiagnosticClasses": [
-                  "implementation_gap_detected",
-                  "validation_build_failed",
-                  "validation_test_failed"
+                "routes": [
+                  {
+                    "id": "build-failure-to-file",
+                    "triggerOwnerModuleId": "blocks/shell",
+                    "triggerOperationKind": "validation/managed_session",
+                    "triggerDiagnosticClass": "validation_build_failed",
+                    "triggerEvidenceTargetType": "failure_surface",
+                    "triggerOwnerDiagnosticCode": "shell_exit_nonzero",
+                    "repairEvidenceKind": "state_change",
+                    "repairOwnerModuleId": "blocks/file",
+                    "repairOperationKinds": [
+                      "file/write",
+                      "patch/apply"
+                    ],
+                    "repairTargetPolicy": "prospective_owner_target",
+                    "repairTargetRole": "deliverable_implementation",
+                    "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
+                    "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+                    "repairDeclarationTargetSelectorSubjectRef": "dodItem_repair",
+                    "repairDeclarationTargetSelectorCandidateRefs": [],
+                    "repairOperationTargetSelectorRef": "workspace-relative-new-file-target"
+                  }
                 ],
-                "repairEvidenceKind": "state_change",
-                "repairOwnerModuleId": "blocks/file",
-                "repairOperationKinds": [
-                  "file/write",
-                  "patch/apply"
-                ],
-                "repairTargetPolicy": "prospective_owner_target",
-                "repairTargetRole": "deliverable_implementation",
-                "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
-                "repairDeclarationTargetSelectorOwnerRef": "software-dev",
-                "repairDeclarationTargetSelectorSubjectRef": "dodItem_repair",
-                "repairOperationTargetSelectorRef": "workspace-relative-new-file-target",
                 "requireFreshValidation": true,
                 "maxAttempts": 2
               },

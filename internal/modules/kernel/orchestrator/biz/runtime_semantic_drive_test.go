@@ -213,21 +213,20 @@ func TestRuntimeSemanticOrderAcceptedRetirementHandsRequiredPhaseBackToOuterDriv
 func TestRuntimeSemanticOrderAcceptedValidationRepairIgnoresUnrelatedEligibleClosureOnRedrive(t *testing.T) {
 	ctx := context.Background()
 	convergence := runtimecontract.RuntimeValidationFailureRepairConvergence{
-		ID:                                        "incident-validation-repair",
-		TriggerOwnerModuleID:                      runtimecontract.RuntimeModuleShell,
-		TriggerOperationKind:                      runtimecontract.RuntimeBlockKindManagedValidationSession,
-		TriggerDiagnosticClasses:                  []string{runtimecontract.ValidationDiagnosticBuildFailed},
-		RepairEvidenceKind:                        runtimecontract.EvidenceKindStateChange,
-		RepairOwnerModuleID:                       runtimecontract.RuntimeModuleFile,
-		RepairOperationKinds:                      []string{runtimecontract.StepKindFileWrite},
-		RepairTargetPolicy:                        runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
-		RepairTargetRole:                          "implementation",
-		RepairDeclarationTargetSelectorRef:        "profile/workspace-deliverable",
-		RepairDeclarationTargetSelectorOwnerRef:   "incident-profile",
-		RepairDeclarationTargetSelectorSubjectRef: "dodItem/cwi-001",
-		RepairOperationTargetSelectorRef:          "file/workspace-relative-new-target",
-		RequireFreshValidation:                    true,
-		MaxAttempts:                               2,
+		ID: "incident-validation-repair",
+		Routes: []runtimecontract.RuntimeValidationFailureRepairRoute{{
+			ID: "build-failure-to-file", TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell,
+			TriggerOperationKind:   runtimecontract.RuntimeBlockKindManagedValidationSession,
+			TriggerDiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed, TriggerEvidenceTargetType: runtimecontract.ValidationEvidenceTargetFailureSurface,
+			TriggerOwnerDiagnosticCode: "shell_exit_nonzero", RepairEvidenceKind: runtimecontract.EvidenceKindStateChange,
+			RepairOwnerModuleID: runtimecontract.RuntimeModuleFile, RepairOperationKinds: []string{runtimecontract.StepKindFileWrite},
+			RepairTargetPolicy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			RepairTargetRole:   "implementation", RepairDeclarationTargetSelectorRef: "profile/workspace-deliverable",
+			RepairDeclarationTargetSelectorOwnerRef: "incident-profile", RepairDeclarationTargetSelectorSubjectRef: "dodItem/cwi-001",
+			RepairOperationTargetSelectorRef: "file/workspace-relative-new-target",
+		}},
+		RequireFreshValidation: true,
+		MaxAttempts:            2,
 	}
 	if err := convergence.Validate(); err != nil {
 		t.Fatal(err)
@@ -337,7 +336,9 @@ func TestRuntimeSemanticOrderAcceptedValidationRepairIgnoresUnrelatedEligibleClo
 	repairInput := runtimecontract.RuntimeValidationFailureRepairGenerationInput{
 		CoverageWorkItemID: "cwi-001", FailedFocusID: "incident-focus-cwi-001", FailureSignature: "incident-validation-failure",
 		TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell, TriggerOperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-		TriggerDiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed,
+		TriggerDiagnosticClass:     runtimecontract.ValidationDiagnosticBuildFailed,
+		TriggerEvidenceTargetType:  runtimecontract.ValidationEvidenceTargetFailureSurface,
+		TriggerOwnerDiagnosticCode: "shell_exit_nonzero",
 	}
 	manifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverageWithValidationFailureRepair(
 		aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Definition, aggregate.Facts.DefinitionSeed,

@@ -702,25 +702,29 @@ func (m RuntimeSemanticPlanManifest) Validate() error {
 			)
 		} else {
 			repair := obligation.ValidationFailureRepair.Normalized()
-			base := obligation.Clone()
-			base.ValidationFailureRepair = nil
-			active, _, compileErr := compileRuntimeSemanticValidationFailureRepairObligation(
-				base,
-				runtimeSemanticProofObligationDefinitionSource(obligation),
-				coverageItems[obligation.CoverageWorkItemID],
-				reproductionCatalogs,
-				RuntimeValidationFailureRepairGenerationInput{
-					CoverageWorkItemID:     obligation.CoverageWorkItemID,
-					FailedFocusID:          repair.FailedFocusID,
-					FailureSignature:       repair.FailureSignature,
-					TriggerOwnerModuleID:   repair.TriggerOwnerModuleID,
-					TriggerOperationKind:   repair.TriggerOperationKind,
-					TriggerDiagnosticClass: repair.TriggerDiagnosticClass,
-				},
-			)
-			err = compileErr
-			if compileErr == nil {
-				recompiled = []RuntimeSemanticProofObligation{active}
+			var catalog RuntimeOperationAdmissibility
+			for _, candidate := range reproductionCatalogs {
+				if candidate.OwnerModuleID == repair.RepairOwnerModuleID {
+					catalog = candidate.Normalized()
+					break
+				}
+			}
+			if catalog.OwnerModuleID == "" || catalog.SnapshotID != repair.OwnerCatalogSnapshotID || catalog.ObservedRevision != repair.OwnerCatalogObservedRevision {
+				err = fmt.Errorf("validation failure repair owner catalog identity mismatch")
+			} else {
+				operationKinds, constraintRefs, surfaceErr := runtimeSemanticValidationRepairCatalogSurface(repair.route(), catalog)
+				if surfaceErr != nil {
+					err = surfaceErr
+				} else if !sameStrings(operationKinds, repair.RepairOperationKinds) || !sameStrings(constraintRefs, repair.RepairConstraintRefs) {
+					err = fmt.Errorf("validation failure repair owner catalog surface mismatch")
+				} else {
+					// ConvergenceHash identifies the complete Definition/Profile route
+					// table. The manifest intentionally carries only the selected exact
+					// route, so it is validated against the full Definition again by
+					// the Orchestrator at semantic seal rather than reconstructed from
+					// an incomplete alternative set here.
+					recompiled = []RuntimeSemanticProofObligation{obligation.Clone()}
+				}
 			}
 		}
 		if err != nil {

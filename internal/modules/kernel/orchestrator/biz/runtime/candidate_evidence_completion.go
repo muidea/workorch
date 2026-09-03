@@ -107,9 +107,7 @@ func completeEvidenceDispatch(
 	}
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
-	repairSurfaceConfirmationPending := !invalidated && admission.Evidence.Status == ExecutionEvidenceStatusRejected &&
-		fact.Kind == runtimecontract.EvidenceKindValidation &&
-		aggregate.Facts.Failure != nil && aggregate.Facts.Failure.ValidationFailureObservation != nil
+	repairSurfaceConfirmationPending := false
 	if admission.Evidence.Status == ExecutionEvidenceStatusAccepted && !invalidated {
 		if repair, found, err := currentRuntimeSemanticValidationFailureRepair(*aggregate); err != nil {
 			return err
@@ -129,14 +127,27 @@ func completeEvidenceDispatch(
 		}
 	}
 	if admission.Evidence.Status == ExecutionEvidenceStatusRejected && !invalidated {
-		// A structured validation observation already carries one bounded owner
-		// diagnostic surface. Preserve the completed dispatch/focus causation and
-		// let the next drive obtain the resource owner's read-only confirmation before any new
-		// semantic/provider work. Only a target-free typed failure may enter the
-		// Profile-declared prospective repair generation.
+		// A structured observation waits for owner confirmation only when its exact
+		// diagnostic tuple has a sealed Profile route. A complete but unmatched
+		// tuple is terminal in this receipt CAS just like a target-free unmatched
+		// diagnostic; it must never leak into SM-4 as an unfulfillable handoff.
+		if fact.Kind == runtimecontract.EvidenceKindValidation && aggregate.Facts.Failure != nil &&
+			aggregate.Facts.Failure.ValidationFailureObservation != nil {
+			_, matched, matchErr := matchRuntimeValidationFailureRepairTrigger(*aggregate, fact, admission.Operation)
+			if matchErr != nil {
+				return matchErr
+			}
+			repairSurfaceConfirmationPending = matched
+		}
 		if !repairSurfaceConfirmationPending {
-			if _, err := openRuntimeValidationFailureRepairGeneration(aggregate, fact, admission.Operation); err != nil {
+			opened, err := openRuntimeValidationFailureRepairGeneration(aggregate, fact, admission.Operation)
+			if err != nil {
 				return err
+			}
+			if !opened {
+				if _, err := markRuntimeValidationFailureRepairRouteUnavailable(aggregate, fact, admission.Operation); err != nil {
+					return err
+				}
 			}
 		}
 	}

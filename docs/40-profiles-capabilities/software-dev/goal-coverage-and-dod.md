@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-30
+Last Verified: 2026-09-03
 
 ## Scope
 
@@ -113,11 +113,12 @@ the Runtime must not manufacture a generic CWI without an exact proof declaratio
 
 ## Repair And Restart
 
-The built-in wildcard `dodItem/*` requirement seals exactly one
-`ValidationFailureRepairConvergence`. It is an ordered, conjunctive contract:
+The built-in wildcard `dodItem/*` requirement seals one
+`ValidationFailureRepairConvergence` with an exact-trigger lookup table. The routes are repair specializations, not alternative
+terminal requirements; every DoD CWI still closes through its original `all_of` proof contract:
 
 ```text
-Shell validation/managed_session rejected with a declared implementation/build/test diagnostic
+Shell validation/managed_session rejected with the owner-produced build-failure diagnostic
   -> one File-owned state_change repair generation
   -> a fresh validation generation for the same CWI
 ```
@@ -125,18 +126,26 @@ Shell validation/managed_session rejected with a declared implementation/build/t
 The declaration is sealed only in the immutable `RuntimeDefinitionFocus`. Mutable generation `CoverageFocus` values never
 copy or override it; SM-2 consumes the manifest obligation compiled from that definition snapshot.
 
-The declaration binds the Shell trigger, accepted diagnostic classes, File repair owner, `file/write | patch/apply` operation
-vocabulary, `prospective_owner_target` policy, independent Definition selector
-`file/workspace_deliverable`, File operation selector `workspace-relative-new-file-target`, maximum repair cycles and mandatory
-fresh validation. The operation vocabulary is a bounded owner capability set; it is not a Goal/DoD `one_of` terminal relation.
-The CWI terminal requirement remains exactly `validation`, and an accepted repair receipt cannot itself satisfy the DoD item.
+Each route binds one exact `(trigger owner, operation kind, diagnostic class, evidence target type, owner diagnostic code)` tuple
+to one repair owner and surface. The built-in executable route binds Shell's deterministic build-failure tuple to File
+`file/write | patch/apply`, the independent Definition selector `file/workspace_deliverable` and File operation selector
+`workspace-relative-new-file-target`. Duplicate trigger tuples or cross-owner operations fail pre-seal. The operation vocabulary is
+a bounded owner capability set; it is not a Goal/DoD `one_of` terminal relation, and an accepted repair receipt cannot itself
+satisfy the DoD validation requirement.
 
-The pre-seal declaration contains no exact repair path. After a matching typed validation rejection with no owner-grounded
-failure target, SM-2 may reopen only that CWI for a `validation_failure_repair` semantic generation. The generation is bound to
-the exact failure, Profile convergence hash and current File catalog. A semantic proposal supplies one bounded prospective
-target set within both independent selectors; File feasibility confirms every member, and only the resulting SM-2
-`CoverageEvidenceBinding` grants exact all-of operation authority. The complete same-dispatch repair receipt set atomically
-retires that repair binding and reopens the same CWI for fresh validation.
+The built-in managed-validation wire contains only the sealed `recipeId`; it does not carry a caller-selected failure class.
+Therefore `implementation_gap_detected` and `validation_test_failed` are not declared as default routes while Shell cannot produce
+those exact tuples from the production operation contract. A project Profile may add a route only after its producing owner and
+repair owner publish the complete typed diagnostic and surface-confirmation contracts.
+
+The routes contain no exact repair path. Their semantic proposal supplies one bounded prospective target set within both
+independent selectors; File confirms every member, and only SM-2 seals the resulting `CoverageEvidenceBinding`. The complete repair
+receipt atomically retires that binding and reopens the same CWI for fresh validation.
+
+Dependency/toolchain/environment diagnostics deliberately have no built-in software-dev route. An unmatched exact tuple seals
+`validation_failure_repair_route_unavailable` in the same owner-private CAS as the rejected receipt; no semantic provider request,
+generic File fallback, command synthesis, governance ticket, or SM-4 retry is allowed. Project-specific dependency remediation
+requires a separately declared typed owner capability and Profile extension; it is not a central default-template behavior.
 
 Missing, ambiguous or invalid Profile convergence is a pre-seal Template/Profile defect: admission opens a blocking Definition
 clarification ticket and creates no Run until the declaration is corrected. By contrast, a sealed convergence whose current owner

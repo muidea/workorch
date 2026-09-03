@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-08-31
+Last Verified: 2026-09-03
 
 ## Purpose
 
@@ -158,8 +158,9 @@ For example, the software-dev Profile may specialize the neutral owner contract 
 - retrying the equivalent create-only operation is not progress and must be rejected before side effect;
 - stale catalog/target revision cannot be hidden by changing prose or operation identity.
 
-Generally, the LLM proposes only within the sealed vocabulary; the resource/effect owner selected by the sealed Profile or operation
-descriptor checks current feasibility/admissibility, SM-3 seals the exact owner in
+Generally, the LLM proposes only within the sealed vocabulary; the resource/effect owner selected by the sealed Profile exact route
+or operation descriptor checks current feasibility/admissibility. Every admitted repair route also names operation kinds which share
+one concrete typed confirmation protocol; a missing adapter is a pre-seal blocker, not a runtime fallback. SM-3 seals the exact owner in
 `RuntimeDispatchRepairCommitment.RepairOwnerModuleID`, and SM-2 alone decides the post-receipt convergence state. A confirmed
 validation repair uses purpose `confirmed_validation_repair`. File is only the concrete owner in the example above; no component may
 patch CWI/focus state to force closure.

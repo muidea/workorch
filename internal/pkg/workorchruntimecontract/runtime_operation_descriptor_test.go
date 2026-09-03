@@ -16,7 +16,7 @@ func TestRuntimeOperationDescriptorsAreStableCompleteAndUnique(t *testing.T) {
 	kinds := make([]string, 0, len(descriptors))
 	seen := map[string]struct{}{}
 	for _, descriptor := range descriptors {
-		if descriptor.Kind == "" || descriptor.OwnerModuleID == "" || descriptor.DefaultEffectScope == "" || descriptor.CapabilityClass == "" || descriptor.FailureTargetProtocol == "" {
+		if descriptor.Kind == "" || descriptor.OwnerModuleID == "" || descriptor.DefaultEffectScope == "" || descriptor.CapabilityClass == "" || descriptor.FailureTargetProtocol == "" || descriptor.RepairSurfaceConfirmationProtocol == "" {
 			t.Fatalf("descriptor incomplete: %+v", descriptor)
 		}
 		if len(descriptor.AllowedStates) == 0 {
@@ -25,6 +25,9 @@ func TestRuntimeOperationDescriptorsAreStableCompleteAndUnique(t *testing.T) {
 		if !RuntimeFailureTargetProtocolSupported(descriptor.FailureTargetProtocol) ||
 			(descriptor.RequiresOwnerReceipt && descriptor.FailureTargetProtocol == RuntimeFailureTargetProtocolNone) {
 			t.Fatalf("descriptor %q has invalid failure target protocol %q", descriptor.Kind, descriptor.FailureTargetProtocol)
+		}
+		if !RuntimeRepairSurfaceConfirmationProtocolSupported(descriptor.RepairSurfaceConfirmationProtocol) {
+			t.Fatalf("descriptor %q has invalid repair surface confirmation protocol %q", descriptor.Kind, descriptor.RepairSurfaceConfirmationProtocol)
 		}
 		if _, ok := seen[descriptor.Kind]; ok {
 			t.Fatalf("duplicate descriptor kind %q", descriptor.Kind)
@@ -93,6 +96,13 @@ func TestRuntimeOperationDescriptorForKindCanonicalAndUnknown(t *testing.T) {
 	git, ok := RuntimeOperationDescriptorForKind(StepKindGitWrite)
 	if !ok || git.OwnerModuleID != RuntimeModuleGit {
 		t.Fatalf("git/write descriptor = %+v", git)
+	}
+	protocol, supported := RuntimeRepairSurfaceConfirmationProtocolForOperationKinds(RuntimeModuleFile, []string{StepKindFileWrite, RuntimeBlockKindPatchApply})
+	if !supported || protocol != RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets {
+		t.Fatalf("File repair operation confirmation protocol = %q supported=%v", protocol, supported)
+	}
+	if protocol, supported := RuntimeRepairSurfaceConfirmationProtocolForOperationKinds(RuntimeModuleGit, []string{StepKindGitWrite}); supported || protocol != RuntimeRepairSurfaceConfirmationProtocolNone {
+		t.Fatalf("Git repair route was exposed without a concrete owner confirmation adapter: protocol=%q supported=%v", protocol, supported)
 	}
 }
 

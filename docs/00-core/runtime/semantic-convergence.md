@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-09-02
+Last Verified: 2026-09-03
 
 ## Runtime 生产主链
 
@@ -296,8 +296,10 @@ generation。因而无关 CWI 变为 eligible 不能退休 repair-local manifest
 规划。该 scope 是 SM-2 authority，不由 LLM document、capability result 或 SM-4 推断。
 
 该 repair generation 的 provider C3 必须投影 sealed `ValidationFailureRepair` 的 failed focus、stable failure signature、
-typed trigger owner/operation/diagnostic class、convergence ID、repair owner/operation vocabulary、target policy、declaration
-candidate scope、operation selector/constraints 与 fresh-validation bound。repair owner 来自 sealed Profile convergence；若该
+typed trigger owner/operation/diagnostic class/evidence target type/owner code、convergence ID/hash、matching route ID/hash、
+repair owner/operation vocabulary、target policy、declaration candidate scope、operation selector/constraints 与
+fresh-validation bound。repair owner 来自 sealed Profile exact route；该 route 的 operation descriptor 必须共同声明一个已接线的
+typed confirmation protocol。若该
 declaration 不适用，则只能由 source binding 中 state-change operation descriptor 的唯一 owner 确定，不能按 capability 名称或
 diagnostic 文本推断。不得投影 raw diagnostic、owner message、receipt、Runtime action、retry 或 terminal disposition。provider
 只能提出一份结构匹配且与 typed failure 相关的 `state_change` proposal；每个 prospective target 都必须对修复该 failure 有

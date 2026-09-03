@@ -34,7 +34,7 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 	if output == nil {
 		return
 	}
-	class, targetType := shellValidationDiagnosticClassAndTarget(*output, request.ValidationEvidence, execCommand, timedOut, policyViolation, err)
+	class, targetType, ownerCode := shellValidationDiagnosticClassAndTarget(*output, request.ValidationEvidence, execCommand, timedOut, policyViolation, err)
 	if class == "" {
 		return
 	}
@@ -47,10 +47,11 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 	diagnostic := &runtimemodel.ValidationFailureDiagnostic{
 		SchemaVersion:                 runtimemodel.ValidationFailureDiagnosticSchemaVersion,
 		Class:                         class,
+		OwnerCode:                     ownerCode,
 		Reason:                        firstNonEmptyShellString(output.Reason, output.FailureReason, errorString(err), output.EvidenceReason),
 		RecommendedEvidenceTargetType: targetType,
 		Stage:                         firstNonEmptyShellString(output.Stage, "shell_command_failed"),
-		Operation:                     "shell/command",
+		Operation:                     shellDiagnosticOperationKind(request),
 		CommandKind:                   strings.TrimSpace(filepath.Base(execCommand)),
 		ExitCode:                      exitCode, TimedOut: timedOut, CommandPolicyViolation: policyViolation,
 		UnavailableCommand: output.UnavailableCommand,
@@ -69,15 +70,18 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 	}
 }
 
-func shellValidationDiagnosticClassAndTarget(output RuntimeCommandResult, validationEvidence runtimemodel.RuntimeValidationEvidence, execCommand string, timedOut bool, policyViolation bool, err error) (string, string) {
+func shellValidationDiagnosticClassAndTarget(output RuntimeCommandResult, validationEvidence runtimemodel.RuntimeValidationEvidence, execCommand string, timedOut bool, policyViolation bool, err error) (string, string, string) {
+	ownerCode := func(fallback string) string {
+		return firstNonEmptyShellString(output.FailureCode, output.FailureReason, fallback)
+	}
 	if policyViolation {
-		return runtimemodel.ValidationDiagnosticCommandInvalid, runtimemodel.ValidationEvidenceTargetCommandContract
+		return runtimemodel.ValidationDiagnosticCommandInvalid, runtimemodel.ValidationEvidenceTargetCommandContract, ownerCode(runtimemodel.ValidationDiagnosticCommandInvalid)
 	}
 	if timedOut || strings.EqualFold(output.Status, "timeout") {
-		return runtimemodel.ValidationDiagnosticTimeout, runtimemodel.ValidationEvidenceTargetValidationOutput
+		return runtimemodel.ValidationDiagnosticTimeout, runtimemodel.ValidationEvidenceTargetValidationOutput, ownerCode(runtimemodel.ValidationDiagnosticTimeout)
 	}
 	if output.FailureReason == "command_not_found" || output.CapabilityMissing {
-		return runtimemodel.ValidationDiagnosticEnvironmentMissing, runtimemodel.ValidationEvidenceTargetEnvironment
+		return runtimemodel.ValidationDiagnosticEnvironmentMissing, runtimemodel.ValidationEvidenceTargetEnvironment, "command_not_found"
 	}
 	// The managed recipe may carry a generic build/test classification, but a
 	// bounded Go tool diagnostic can identify a narrower dependency-contract
@@ -85,34 +89,34 @@ func shellValidationDiagnosticClassAndTarget(output RuntimeCommandResult, valida
 	// hint so incidental importing .go locations never become File repair
 	// candidates for missing module metadata.
 	if output.ExitCode != 0 && shellGoDependencyMetadataMismatch(output, execCommand) {
-		return runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationEvidenceTargetDependencyContract
+		return runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationEvidenceTargetDependencyContract, ownerCode(runtimemodel.ValidationDiagnosticDependencyMismatch)
 	}
 	if class := allowedShellValidationDiagnosticClass(firstNonEmptyShellString(
 		validationEvidence.DiagnosticClass, validationEvidence.FailureClass, validationEvidence.ExpectedFailureClass,
 	)); class != "" {
-		return class, firstNonEmptyShellString(validationEvidence.RecommendedEvidenceTargetType, defaultShellValidationDiagnosticTargetType(class))
+		return class, firstNonEmptyShellString(validationEvidence.RecommendedEvidenceTargetType, defaultShellValidationDiagnosticTargetType(class)), ownerCode(class)
 	}
 	// Preserve the process failure even if a stale or malformed owner-private
 	// result also carries a zero-work marker from an unrelated subpackage.
 	if output.ExitCode != 0 {
 		switch strings.TrimSpace(firstNonEmptyShellString(validationEvidence.ObservationType, validationEvidence.Observation)) {
 		case "dependency_resolution", "dependency_check", "dependency_contract":
-			return runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationEvidenceTargetDependencyContract
+			return runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationEvidenceTargetDependencyContract, ownerCode(runtimemodel.ValidationDiagnosticDependencyMismatch)
 		case "toolchain_resolution", "toolchain_check", "toolchain_contract":
-			return runtimemodel.ValidationDiagnosticToolchainMismatch, runtimemodel.ValidationEvidenceTargetToolchainContract
+			return runtimemodel.ValidationDiagnosticToolchainMismatch, runtimemodel.ValidationEvidenceTargetToolchainContract, ownerCode(runtimemodel.ValidationDiagnosticToolchainMismatch)
 		case "test_result", "assertion_result", "behavior_test_result":
-			return runtimemodel.ValidationDiagnosticTestFailed, runtimemodel.ValidationEvidenceTargetBehaviorEvidence
+			return runtimemodel.ValidationDiagnosticTestFailed, runtimemodel.ValidationEvidenceTargetBehaviorEvidence, ownerCode(runtimemodel.ValidationDiagnosticTestFailed)
 		default:
-			return runtimemodel.ValidationDiagnosticBuildFailed, runtimemodel.ValidationEvidenceTargetFailureSurface
+			return runtimemodel.ValidationDiagnosticBuildFailed, runtimemodel.ValidationEvidenceTargetFailureSurface, ownerCode(runtimemodel.ValidationDiagnosticBuildFailed)
 		}
 	}
 	if output.ZeroWork || strings.TrimSpace(output.EvidenceQuality) == string(common.EvidenceQualityInconclusive) {
-		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput
+		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput, ownerCode(runtimemodel.ValidationDiagnosticOutputInconclusive)
 	}
 	if err != nil {
-		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput
+		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput, ownerCode(runtimemodel.ValidationDiagnosticOutputInconclusive)
 	}
-	return "", ""
+	return "", "", ""
 }
 
 func shellGoDependencyMetadataMismatch(output RuntimeCommandResult, execCommand string) bool {
@@ -136,6 +140,13 @@ func shellGoDependencyMetadataMismatch(output RuntimeCommandResult, execCommand 
 		}
 	}
 	return false
+}
+
+func shellDiagnosticOperationKind(request RuntimeCommandRequest) string {
+	if shellInputHasManagedValidation(request) {
+		return runtimemodel.RuntimeBlockKindManagedValidationSession
+	}
+	return runtimemodel.StepKindShellCommand
 }
 
 func allowedShellValidationDiagnosticClass(value string) string {

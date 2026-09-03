@@ -76,6 +76,7 @@ func RuntimeOperationContractRevision() string {
 		writeHashString(h, fmt.Sprintf("%t", descriptor.RequiresOwnerReceipt))
 		writeHashString(h, string(descriptor.TargetCardinality))
 		writeHashString(h, string(descriptor.FailureTargetProtocol))
+		writeHashString(h, string(descriptor.RepairSurfaceConfirmationProtocol))
 		for _, state := range descriptor.AllowedStates {
 			writeHashString(h, string(state))
 		}

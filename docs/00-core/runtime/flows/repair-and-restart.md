@@ -80,11 +80,11 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
   SM-2 对照 sealed Profile convergence 决定 repair 或 terminal
 - assessment 返回 repairable gap
   → 结构化 gap 进入 facts；按 missing evidence kind 回 state change / validation，不能直接 terminal
-- Profile-declared typed validation rejection without an exact failure target
+- Profile-declared typed validation rejection without a structured observation and with one exact matching route
   → SM-2 reopens the same CWI for one `validation_failure_repair` semantic generation
   → that generation's eligible closure is the exact current CWI; unrelated globally eligible CWIs remain outside it
   → C3 exposes only the typed failure signature/class and exact Profile repair vocabulary; no raw diagnostic or Runtime disposition
-  → the resource/effect owner named by sealed `ValidationFailureRepairConvergence.RepairOwnerModuleID` confirms the complete
+  → the resource/effect owner named by that route confirms the complete
   prospective all-of target set without applying the effect, and SM-2 seals a generation binding
   → accepted repair state change retires that binding and requires fresh validation; it never grants terminal validation credit
 - validation-owner-recognized structured locations are bounded candidate surfaces rather than failure-target authority; the
@@ -93,18 +93,24 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
   → Orchestrator resolves the exact matching `CompletedDispatch.OperationTargetAuthorizations` member by `OperationID` and
   operation hash; its non-empty canonical `Target.AllowedTargetRefs()` is the finite full validation scope, and only an
   `existing_owner_scope` authorization maps that value to canonical `OwnerScopeTargetRefs`
-  → before any semantic/candidate provider call, the unique repair owner selected by sealed Profile convergence or source binding
-  descriptors confirms the current surface through typed command/result and SM-2 internal events
+  → the observation diagnostic hash binds its complete typed route tuple plus the sealed validation scope; receipt commit and
+  fresh-load recompute the same hash instead of trusting coordinated copies
+  → when the exact route matches, its repair operations must share one non-`none` owner confirmation protocol admitted at pre-seal;
+  before any semantic/candidate provider call, the selected repair owner confirms the current surface through that concrete typed
+  command/result and SM-2 internal events
   → confirmed becomes an owner-grounded `FailureTarget`; stale reacquires owner prerequisites; rejected becomes typed infeasibility
-  → only a rejection without that structured observation may enter the Profile-declared semantic fallback above
-  the validation owner does not choose the repair transition, and Orchestrator never derives targets from free text, mutable current
+  → a complete structured observation with no exact route seals `validation_failure_repair_route_unavailable` in the same rejected-
+  receipt CAS, with zero owner query/provider/effect/governance/wait; only a rejection without that structured observation and with
+  an exact route may enter the Profile-declared semantic fallback above
+  → the validation owner does not choose the repair transition, and Orchestrator never derives targets from free text, mutable current
   Focus or a current manifest that was not part of the completed dispatch seal
 - capability-owner typed dependency/toolchain/environment diagnostics are not implementation-effect surfaces. For example, Shell
-  classifies bounded Go missing-`go.sum`/module-metadata output as `validation_dependency_mismatch + dependency_contract` and emits
-  zero implementation candidate refs; incidental compiler import locations cannot enter File confirmation. A Profile must declare
-  a concrete, target-policy-correct repair owner/vocabulary for that class before SM-2 can repair it, otherwise the failure terminates
-  boundedly. The current software-dev Profile deliberately does not map this class into its prospective
-  `deliverable_implementation` repair convergence; dependency metadata cannot be synthesized through that unrelated surface.
+  may classify bounded dependency metadata output as `validation_dependency_mismatch + dependency_contract` and emits zero
+  implementation candidate refs; incidental compiler locations cannot enter File confirmation. The built-in software-dev Profile
+  deliberately declares no dependency/toolchain/environment repair route. The unmatched exact tuple makes SM-2 seal
+  `validation_failure_repair_route_unavailable` in the same rejected-receipt CAS, with no LLM command synthesis, File fallback,
+  governance ticket or retry loop. A future project-specific extension must introduce an explicit owner capability and typed route;
+  it cannot be encoded as a central default recipe.
 - an ordinary capability-owner infeasibility after a `validation_failure_repair` binding is sealed cannot clear the exact repair
   directive while retaining the intermediate binding. One Orchestrator-private CAS invalidates the candidate, retires that binding
   with the persisted owner observation and seals `repair_surface_unavailable`; it neither opens an implicit semantic retry nor enters
@@ -141,8 +147,9 @@ per-operation authorization 全量绑定；reducer copy 与
 nested owner-diagnostic copy 必须 presence-parity 且 exact-match。只有 completed/committed dispatch 中
 `evidence_committed` execution 的 exact key/fence/ref/hash receipt 可进入该交接；owner-committed-only、invalidated dispatch 与
 generic failure ingress 全部 fail closed。pending VFO 不产生
-concrete `RepairDirective`。confirmation 的唯一 owner 由 sealed Profile convergence 或 source binding 中 state-change descriptor
-确定；SM-2 只有在 confirmation 的 `OwnerModuleID`、candidate/receipt descriptor owner 与该 owner exact-match，且 exact confirmed
+concrete `RepairDirective`。confirmation 的唯一 owner 与 concrete query protocol 由 sealed Profile exact route 或 source binding
+中 state-change descriptor 确定；route 的 operation descriptor 在 pre-seal 必须共同声明同一个非 `none` protocol。SM-2 只有在
+confirmation 的 `OwnerModuleID`、candidate/receipt descriptor owner 与该 owner exact-match，且 exact confirmed
 record 与 exact validation-owner receipt 同时存在时，才能发布 owner-grounded `TargetObservation`/`FailureTarget`。fresh-load
 也按此反向证明，不接受 generic failure event、capability-name branch 或协调篡改。
 同一 VFO 允许 stale revision refresh；首条 confirmed/rejected 终止 confirmation 序列，延迟响应不能覆盖其结果，Runtime 只从

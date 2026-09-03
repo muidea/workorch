@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-09-02
+Last Verified: 2026-09-03
 
 ## 四个协调状态机
 
@@ -127,8 +127,11 @@ load facts
   effect、命中 active repair directive 的 owner-grounded target，且 ordered all-of 仍缺声明内 validation，SM-2 可将
   `ValidationOnlyRetries` 重开为 `0` 以执行 fresh validation；无 credit、错 target 或无需 validation 的 receipt 保持原窗口。
 - validation-only CWI 只有在 immutable Profile 已封存单一 `ValidationFailureRepairConvergence`、实际 rejected receipt
-  精确匹配 trigger owner/operation/diagnostic 且 repair cycle 未耗尽时，才可进入无 exact failure target 的 repair semantic
-  generation。该 generation 的 current evidence 是 convergence 所声明 `RepairOwnerModuleID` 的 `state_change`，terminal
+  精确匹配某条 route 的 `(trigger owner, operation kind, diagnostic class, evidence target type, owner code)` 且 repair cycle
+  未耗尽时，才可进入无 exact failure target 的 repair semantic generation。route 的全部 repair operation 必须属于同一
+  owner，并在 pre-seal 共同声明一个非 `none` 的 typed confirmation protocol；缺失或混用协议属于 Definition admission
+  blocker，不是 Runtime fallback。该 generation 的 current evidence 是 matching route 所声明 repair owner 的
+  `state_change`，terminal
   evidence 仍是原 Definition 的 `validation`；它绑定原 failure、convergence hash 和 matching repair-owner catalog，但不在
   pre-seal 或 reducer 中发明 target。只有该 resource/effect owner 的 feasibility 与 SM-2 binding 封存 exact prospective
   target 后才可进入 SM-3。accepted repair 必须在同一 SM-2 CAS 中退休 repair binding、重开同一 CWI并固定进入 fresh
@@ -154,11 +157,15 @@ load facts
   sealed-scope-bounded candidate target；无结构化位置时不得回填 command/input target。结构化 observation 必须匹配
   completed sealed dispatch 中不可变的 `FocusTargetRole + authority snapshot + operation + validation scope`，不得读取已经变化的
   current `Focus.TargetRole`。
-  receipt commit 必须保留原 focus/binding，并在任何 semantic/candidate provider call 前由 sealed Profile convergence 或 source
-  binding descriptor 确定的唯一 resource/effect owner confirmation 与 SM-2 freshness gate 封存 failure target；此路径不得提前
-  开启 semantic repair generation 或记一次 validation-only retry。
-  无 observation 时才可进入 Profile 已封存的 bounded `validation_failure_repair` fallback。原始 observation 必须完整保留，
-  但不得反向选择 action、retry、ticket 或 terminal。
+  observation 的 `DiagnosticHash` 必须绑定 typed diagnostic 的 class、owner code、evidence target type、stage、operation、target
+  refs 与 sealed validation scope；producer、receipt commit 和 fresh-load 使用同一个 canonical hash。receipt commit 必须保留原
+  focus/binding。若 observation 的完整五元组命中 sealed Profile route，则在任何 semantic/candidate provider call 前，由该
+  route 或 source binding descriptor 确定的唯一 resource/effect owner confirmation 与 SM-2 freshness gate 封存 failure
+  target；此路径不得提前开启 semantic repair generation或记一次 validation-only retry。完整 structured observation 未命中
+  exact route 时，SM-2 必须在 rejected receipt 的同一 private event/CAS 退休 repair authority并封存
+  `validation_failure_repair_route_unavailable`，零 owner query、provider、capability effect、governance 或 SM-4 wait。
+  只有无 observation 且 exact route 匹配时，才可进入 Profile 已封存的 bounded `validation_failure_repair` semantic fallback。
+  原始 observation 必须完整保留，但不得反向选择 action、retry、ticket 或其它 terminal。
   canonical managed-validation rejected receipt 的 `receipt.TargetRefs` 仅保留 execution/entry lineage；
   `OriginalDiagnostic.TargetRefs` 与 `TargetObservation` 必须为空，candidate 只能位于最多八项的
   `ValidationFailureObservation.CandidateTargetRefs`。该 nested observation 只允许出现在 operation descriptor 声明
@@ -416,7 +423,7 @@ sealed authority + preflight ready
   operation rejected/stale 后，SM-3 才结算自身 transaction 并交回 SM-2 reduce；后两类 transaction 结算不等于 CWI
   successful settlement，也不能提供 collective completion proof。
 - exact owner-confirmed validation repair 是上述规则的窄化事务：manifest purpose 必须为
-  `confirmed_validation_repair`，`RuntimeDispatchRepairCommitment.RepairOwnerModuleID` 必须等于 sealed Profile convergence 或
+  `confirmed_validation_repair`，`RuntimeDispatchRepairCommitment.RepairOwnerModuleID` 必须等于 sealed Profile exact route 或
   source binding descriptor 确定的唯一 resource/effect owner。accepted matching-owner receipt 必须是 target-bound durable change，
   每个 operation descriptor/target/producer 属于同一 owner 与 confirmed surface，并携带 exact target resource changes 与唯一 workspace-tree
   `beforeRevision -> afterRevision` edge。多 operation all-of 的 partial CAS 只可继续同一 active sealed dispatch；generic

@@ -14,12 +14,14 @@ import (
 // generation to the exact rejected validation fact. It is a pure compiler
 // input, not a state transition or retry decision.
 type RuntimeValidationFailureRepairGenerationInput struct {
-	CoverageWorkItemID     common.CoverageWorkItemID
-	FailedFocusID          string
-	FailureSignature       string
-	TriggerOwnerModuleID   string
-	TriggerOperationKind   string
-	TriggerDiagnosticClass string
+	CoverageWorkItemID         common.CoverageWorkItemID
+	FailedFocusID              string
+	FailureSignature           string
+	TriggerOwnerModuleID       string
+	TriggerOperationKind       string
+	TriggerDiagnosticClass     string
+	TriggerEvidenceTargetType  string
+	TriggerOwnerDiagnosticCode string
 }
 
 func (i RuntimeValidationFailureRepairGenerationInput) Normalized() RuntimeValidationFailureRepairGenerationInput {
@@ -29,17 +31,23 @@ func (i RuntimeValidationFailureRepairGenerationInput) Normalized() RuntimeValid
 	i.TriggerOwnerModuleID = strings.TrimSpace(i.TriggerOwnerModuleID)
 	i.TriggerOperationKind = CanonicalRuntimeBlockKind(i.TriggerOperationKind)
 	i.TriggerDiagnosticClass = strings.TrimSpace(i.TriggerDiagnosticClass)
+	i.TriggerEvidenceTargetType = strings.TrimSpace(i.TriggerEvidenceTargetType)
+	i.TriggerOwnerDiagnosticCode = strings.TrimSpace(i.TriggerOwnerDiagnosticCode)
 	return i
 }
 
 func (i RuntimeValidationFailureRepairGenerationInput) Validate() error {
 	i = i.Normalized()
 	if i.CoverageWorkItemID == "" || i.FailedFocusID == "" || i.FailureSignature == "" ||
-		i.TriggerOwnerModuleID == "" || i.TriggerOperationKind == "" || i.TriggerDiagnosticClass == "" {
-		return fmt.Errorf("validation failure repair generation requires coverage, failed focus, failure signature and typed trigger")
+		i.TriggerOwnerModuleID == "" || i.TriggerOperationKind == "" || i.TriggerDiagnosticClass == "" ||
+		i.TriggerEvidenceTargetType == "" || i.TriggerOwnerDiagnosticCode == "" {
+		return fmt.Errorf("validation failure repair generation requires coverage, failed focus, failure signature and exact typed trigger")
 	}
 	if !runtimeValidationDiagnosticClassKnown(i.TriggerDiagnosticClass) {
 		return fmt.Errorf("validation failure repair generation has unknown diagnostic class %q", i.TriggerDiagnosticClass)
+	}
+	if !runtimeValidationEvidenceTargetTypeKnown(i.TriggerEvidenceTargetType) {
+		return fmt.Errorf("validation failure repair generation has unknown evidence target type %q", i.TriggerEvidenceTargetType)
 	}
 	return nil
 }
@@ -52,14 +60,17 @@ func (i RuntimeValidationFailureRepairGenerationInput) Validate() error {
 // a provider proposal, confirmed by repair-owner feasibility, and sealed only in the
 // resulting CoverageEvidenceBinding.
 type RuntimeSemanticValidationFailureRepair struct {
-	FailedFocusID            string
-	ConvergenceID            string
-	ConvergenceHash          string
-	FailureSignature         string
-	TriggerOwnerModuleID     string
-	TriggerOperationKind     string
-	TriggerDiagnosticClasses []string
-	TriggerDiagnosticClass   string
+	FailedFocusID              string
+	ConvergenceID              string
+	ConvergenceHash            string
+	RouteID                    string
+	RouteHash                  string
+	FailureSignature           string
+	TriggerOwnerModuleID       string
+	TriggerOperationKind       string
+	TriggerDiagnosticClass     string
+	TriggerEvidenceTargetType  string
+	TriggerOwnerDiagnosticCode string
 
 	RepairEvidenceKind                           string
 	RepairOwnerModuleID                          string
@@ -82,11 +93,14 @@ func (r RuntimeSemanticValidationFailureRepair) Normalized() RuntimeSemanticVali
 	r.FailedFocusID = strings.TrimSpace(r.FailedFocusID)
 	r.ConvergenceID = strings.TrimSpace(r.ConvergenceID)
 	r.ConvergenceHash = strings.TrimSpace(r.ConvergenceHash)
+	r.RouteID = strings.TrimSpace(r.RouteID)
+	r.RouteHash = strings.TrimSpace(r.RouteHash)
 	r.FailureSignature = strings.TrimSpace(r.FailureSignature)
 	r.TriggerOwnerModuleID = strings.TrimSpace(r.TriggerOwnerModuleID)
 	r.TriggerOperationKind = CanonicalRuntimeBlockKind(r.TriggerOperationKind)
-	r.TriggerDiagnosticClasses = normalizeStrings(r.TriggerDiagnosticClasses)
 	r.TriggerDiagnosticClass = strings.TrimSpace(r.TriggerDiagnosticClass)
+	r.TriggerEvidenceTargetType = strings.TrimSpace(r.TriggerEvidenceTargetType)
+	r.TriggerOwnerDiagnosticCode = strings.TrimSpace(r.TriggerOwnerDiagnosticCode)
 	r.RepairEvidenceKind = strings.TrimSpace(r.RepairEvidenceKind)
 	r.RepairOwnerModuleID = strings.TrimSpace(r.RepairOwnerModuleID)
 	r.RepairOperationKinds = canonicalizeOperationKinds(r.RepairOperationKinds)
@@ -105,7 +119,6 @@ func (r RuntimeSemanticValidationFailureRepair) Normalized() RuntimeSemanticVali
 
 func (r RuntimeSemanticValidationFailureRepair) Clone() RuntimeSemanticValidationFailureRepair {
 	r = r.Normalized()
-	r.TriggerDiagnosticClasses = append([]string(nil), r.TriggerDiagnosticClasses...)
 	r.RepairOperationKinds = append([]string(nil), r.RepairOperationKinds...)
 	r.RepairDeclarationTargetSelectorCandidateRefs = append([]string(nil), r.RepairDeclarationTargetSelectorCandidateRefs...)
 	r.RepairConstraintRefs = append([]string(nil), r.RepairConstraintRefs...)
@@ -115,28 +128,42 @@ func (r RuntimeSemanticValidationFailureRepair) Clone() RuntimeSemanticValidatio
 func (r RuntimeSemanticValidationFailureRepair) convergence() RuntimeValidationFailureRepairConvergence {
 	r = r.Normalized()
 	return RuntimeValidationFailureRepairConvergence{
-		ID:                                           r.ConvergenceID,
-		TriggerOwnerModuleID:                         r.TriggerOwnerModuleID,
-		TriggerOperationKind:                         r.TriggerOperationKind,
-		TriggerDiagnosticClasses:                     append([]string(nil), r.TriggerDiagnosticClasses...),
-		RepairEvidenceKind:                           r.RepairEvidenceKind,
-		RepairOwnerModuleID:                          r.RepairOwnerModuleID,
-		RepairOperationKinds:                         append([]string(nil), r.RepairOperationKinds...),
-		RepairTargetPolicy:                           r.RepairTargetPolicy,
-		RepairTargetRole:                             r.RepairTargetRole,
-		RepairDeclarationTargetSelectorRef:           r.RepairDeclarationTargetSelectorRef,
-		RepairDeclarationTargetSelectorOwnerRef:      r.RepairDeclarationTargetSelectorOwnerRef,
-		RepairDeclarationTargetSelectorSubjectRef:    r.RepairDeclarationTargetSelectorSubjectRef,
-		RepairDeclarationTargetSelectorCandidateRefs: append([]string(nil), r.RepairDeclarationTargetSelectorCandidateRefs...),
-		RepairOperationTargetSelectorRef:             r.RepairOperationTargetSelectorRef,
-		RequireFreshValidation:                       r.RequireFreshValidation,
-		MaxAttempts:                                  r.MaxAttempts,
+		ID: r.ConvergenceID,
+		Routes: []RuntimeValidationFailureRepairRoute{{
+			ID:                                           r.RouteID,
+			TriggerOwnerModuleID:                         r.TriggerOwnerModuleID,
+			TriggerOperationKind:                         r.TriggerOperationKind,
+			TriggerDiagnosticClass:                       r.TriggerDiagnosticClass,
+			TriggerEvidenceTargetType:                    r.TriggerEvidenceTargetType,
+			TriggerOwnerDiagnosticCode:                   r.TriggerOwnerDiagnosticCode,
+			RepairEvidenceKind:                           r.RepairEvidenceKind,
+			RepairOwnerModuleID:                          r.RepairOwnerModuleID,
+			RepairOperationKinds:                         append([]string(nil), r.RepairOperationKinds...),
+			RepairTargetPolicy:                           r.RepairTargetPolicy,
+			RepairTargetRole:                             r.RepairTargetRole,
+			RepairDeclarationTargetSelectorRef:           r.RepairDeclarationTargetSelectorRef,
+			RepairDeclarationTargetSelectorOwnerRef:      r.RepairDeclarationTargetSelectorOwnerRef,
+			RepairDeclarationTargetSelectorSubjectRef:    r.RepairDeclarationTargetSelectorSubjectRef,
+			RepairDeclarationTargetSelectorCandidateRefs: append([]string(nil), r.RepairDeclarationTargetSelectorCandidateRefs...),
+			RepairOperationTargetSelectorRef:             r.RepairOperationTargetSelectorRef,
+		}},
+		RequireFreshValidation: r.RequireFreshValidation,
+		MaxAttempts:            r.MaxAttempts,
 	}.Normalized()
+}
+
+func (r RuntimeSemanticValidationFailureRepair) route() RuntimeValidationFailureRepairRoute {
+	convergence := r.convergence()
+	if len(convergence.Routes) != 1 {
+		return RuntimeValidationFailureRepairRoute{}
+	}
+	return convergence.Routes[0].Clone()
 }
 
 func (r RuntimeSemanticValidationFailureRepair) Validate() error {
 	r = r.Normalized()
-	if r.FailedFocusID == "" || r.FailureSignature == "" || r.TriggerDiagnosticClass == "" ||
+	if r.FailedFocusID == "" || r.ConvergenceID == "" || r.ConvergenceHash == "" || r.RouteID == "" || r.RouteHash == "" ||
+		r.FailureSignature == "" || r.TriggerDiagnosticClass == "" ||
 		r.OwnerCatalogSnapshotID == "" || r.OwnerCatalogObservedRevision == "" {
 		return fmt.Errorf("runtime semantic validation repair requires failed focus, failure signature, diagnostic and owner catalog identity")
 	}
@@ -144,10 +171,11 @@ func (r RuntimeSemanticValidationFailureRepair) Validate() error {
 	if err := convergence.Validate(); err != nil {
 		return err
 	}
-	if r.ConvergenceHash != StableRuntimeValidationFailureRepairConvergenceHash(convergence) {
-		return fmt.Errorf("runtime semantic validation repair convergence hash does not match declaration")
+	route := r.route()
+	if r.RouteHash != StableRuntimeValidationFailureRepairRouteHash(route) {
+		return fmt.Errorf("runtime semantic validation repair route hash does not match declaration")
 	}
-	if !convergence.MatchesTrigger(r.TriggerOwnerModuleID, r.TriggerOperationKind, r.TriggerDiagnosticClass) {
+	if !route.MatchesTrigger(r.TriggerOwnerModuleID, r.TriggerOperationKind, r.TriggerDiagnosticClass, r.TriggerEvidenceTargetType, r.TriggerOwnerDiagnosticCode) {
 		return fmt.Errorf("runtime semantic validation repair trigger does not match convergence")
 	}
 	if r.RepairTargetPolicy == RuntimeOperationTargetPolicyProspectiveOwnerTarget && len(r.RepairConstraintRefs) == 0 {
@@ -163,11 +191,14 @@ func StableRuntimeSemanticValidationFailureRepairHash(value RuntimeSemanticValid
 	writeHashString(h, value.FailedFocusID)
 	writeHashString(h, value.ConvergenceID)
 	writeHashString(h, value.ConvergenceHash)
+	writeHashString(h, value.RouteID)
+	writeHashString(h, value.RouteHash)
 	writeHashString(h, value.FailureSignature)
 	writeHashString(h, value.TriggerOwnerModuleID)
 	writeHashString(h, value.TriggerOperationKind)
-	writeHashStrings(h, value.TriggerDiagnosticClasses)
 	writeHashString(h, value.TriggerDiagnosticClass)
+	writeHashString(h, value.TriggerEvidenceTargetType)
+	writeHashString(h, value.TriggerOwnerDiagnosticCode)
 	writeHashString(h, value.RepairEvidenceKind)
 	writeHashString(h, value.RepairOwnerModuleID)
 	writeHashStrings(h, value.RepairOperationKinds)
@@ -228,23 +259,24 @@ func compileRuntimeSemanticValidationFailureRepairObligation(
 	if err := convergence.Validate(); err != nil {
 		return RuntimeSemanticProofObligation{}, RuntimeOperationAdmissibility{}, err
 	}
-	if !convergence.MatchesTrigger(input.TriggerOwnerModuleID, input.TriggerOperationKind, input.TriggerDiagnosticClass) {
+	route, found := convergence.RouteForTrigger(input.TriggerOwnerModuleID, input.TriggerOperationKind, input.TriggerDiagnosticClass, input.TriggerEvidenceTargetType, input.TriggerOwnerDiagnosticCode)
+	if !found {
 		return RuntimeSemanticProofObligation{}, RuntimeOperationAdmissibility{}, fmt.Errorf("validation failure repair trigger does not match coverage %q Profile convergence", item.ID)
 	}
 	var catalog RuntimeOperationAdmissibility
 	for _, raw := range NormalizeRuntimeOperationAdmissibilities(catalogs) {
-		if raw.OwnerModuleID == convergence.RepairOwnerModuleID {
+		if raw.OwnerModuleID == route.RepairOwnerModuleID {
 			catalog = raw
 			break
 		}
 	}
 	if catalog.OwnerModuleID == "" {
-		return RuntimeSemanticProofObligation{}, RuntimeOperationAdmissibility{}, fmt.Errorf("validation failure repair owner %q has no sealed catalog", convergence.RepairOwnerModuleID)
+		return RuntimeSemanticProofObligation{}, RuntimeOperationAdmissibility{}, fmt.Errorf("validation failure repair owner %q has no sealed catalog", route.RepairOwnerModuleID)
 	}
 	if err := catalog.Validate(); err != nil {
 		return RuntimeSemanticProofObligation{}, RuntimeOperationAdmissibility{}, err
 	}
-	operationKinds, constraintRefs, err := runtimeSemanticValidationRepairCatalogSurface(convergence, catalog)
+	operationKinds, constraintRefs, err := runtimeSemanticValidationRepairCatalogSurface(route, catalog)
 	if err != nil {
 		return RuntimeSemanticProofObligation{}, RuntimeOperationAdmissibility{}, err
 	}
@@ -252,21 +284,24 @@ func compileRuntimeSemanticValidationFailureRepairObligation(
 		FailedFocusID:                                input.FailedFocusID,
 		ConvergenceID:                                convergence.ID,
 		ConvergenceHash:                              StableRuntimeValidationFailureRepairConvergenceHash(convergence),
+		RouteID:                                      route.ID,
+		RouteHash:                                    StableRuntimeValidationFailureRepairRouteHash(route),
 		FailureSignature:                             input.FailureSignature,
-		TriggerOwnerModuleID:                         convergence.TriggerOwnerModuleID,
-		TriggerOperationKind:                         convergence.TriggerOperationKind,
-		TriggerDiagnosticClasses:                     append([]string(nil), convergence.TriggerDiagnosticClasses...),
+		TriggerOwnerModuleID:                         route.TriggerOwnerModuleID,
+		TriggerOperationKind:                         route.TriggerOperationKind,
 		TriggerDiagnosticClass:                       input.TriggerDiagnosticClass,
-		RepairEvidenceKind:                           convergence.RepairEvidenceKind,
-		RepairOwnerModuleID:                          convergence.RepairOwnerModuleID,
+		TriggerEvidenceTargetType:                    input.TriggerEvidenceTargetType,
+		TriggerOwnerDiagnosticCode:                   input.TriggerOwnerDiagnosticCode,
+		RepairEvidenceKind:                           route.RepairEvidenceKind,
+		RepairOwnerModuleID:                          route.RepairOwnerModuleID,
 		RepairOperationKinds:                         operationKinds,
-		RepairTargetPolicy:                           convergence.RepairTargetPolicy,
-		RepairTargetRole:                             convergence.RepairTargetRole,
-		RepairDeclarationTargetSelectorRef:           convergence.RepairDeclarationTargetSelectorRef,
-		RepairDeclarationTargetSelectorOwnerRef:      convergence.RepairDeclarationTargetSelectorOwnerRef,
-		RepairDeclarationTargetSelectorSubjectRef:    convergence.RepairDeclarationTargetSelectorSubjectRef,
-		RepairDeclarationTargetSelectorCandidateRefs: append([]string(nil), convergence.RepairDeclarationTargetSelectorCandidateRefs...),
-		RepairOperationTargetSelectorRef:             convergence.RepairOperationTargetSelectorRef,
+		RepairTargetPolicy:                           route.RepairTargetPolicy,
+		RepairTargetRole:                             route.RepairTargetRole,
+		RepairDeclarationTargetSelectorRef:           route.RepairDeclarationTargetSelectorRef,
+		RepairDeclarationTargetSelectorOwnerRef:      route.RepairDeclarationTargetSelectorOwnerRef,
+		RepairDeclarationTargetSelectorSubjectRef:    route.RepairDeclarationTargetSelectorSubjectRef,
+		RepairDeclarationTargetSelectorCandidateRefs: append([]string(nil), route.RepairDeclarationTargetSelectorCandidateRefs...),
+		RepairOperationTargetSelectorRef:             route.RepairOperationTargetSelectorRef,
 		RepairConstraintRefs:                         constraintRefs,
 		OwnerCatalogSnapshotID:                       catalog.SnapshotID,
 		OwnerCatalogObservedRevision:                 catalog.ObservedRevision,
@@ -285,11 +320,11 @@ func compileRuntimeSemanticValidationFailureRepairObligation(
 	return base, catalog, nil
 }
 
-func runtimeSemanticValidationRepairCatalogSurface(convergence RuntimeValidationFailureRepairConvergence, catalog RuntimeOperationAdmissibility) ([]string, []string, error) {
-	convergence = convergence.Normalized()
+func runtimeSemanticValidationRepairCatalogSurface(route RuntimeValidationFailureRepairRoute, catalog RuntimeOperationAdmissibility) ([]string, []string, error) {
+	route = route.Normalized()
 	catalog = catalog.Normalized()
 	var expectedConstraints []string
-	for _, kind := range convergence.RepairOperationKinds {
+	for _, kind := range route.RepairOperationKinds {
 		if !runtimeOperationKindsContain(catalog.OperationKinds, kind) {
 			return nil, nil, fmt.Errorf("validation failure repair operation %q is absent from owner catalog", kind)
 		}
@@ -298,8 +333,8 @@ func runtimeSemanticValidationRepairCatalogSurface(convergence RuntimeValidation
 		if hasContract && len(contract.Variants) != 0 {
 			for _, raw := range catalog.OperationVariants {
 				variant := raw.Normalized()
-				if variant.Kind != kind || !runtimeOperationAdmissibilityVariantAllowsTargetPolicy(variant, convergence.RepairTargetPolicy) ||
-					!containsString(variant.SelectorRefs, convergence.RepairOperationTargetSelectorRef) {
+				if variant.Kind != kind || !runtimeOperationAdmissibilityVariantAllowsTargetPolicy(variant, route.RepairTargetPolicy) ||
+					!containsString(variant.SelectorRefs, route.RepairOperationTargetSelectorRef) {
 					continue
 				}
 				if matched && !sameStrings(expectedConstraints, variant.ConstraintRefs) {
@@ -313,11 +348,11 @@ func runtimeSemanticValidationRepairCatalogSurface(convergence RuntimeValidation
 				matched = true
 			}
 		} else {
-			allowed, selectors, constraints, _, lookupErr := RuntimeOperationAdmissibilityAllowsTargetPolicy(catalog, kind, "", convergence.RepairTargetPolicy)
+			allowed, selectors, constraints, _, lookupErr := RuntimeOperationAdmissibilityAllowsTargetPolicy(catalog, kind, "", route.RepairTargetPolicy)
 			if lookupErr != nil {
 				return nil, nil, lookupErr
 			}
-			if allowed && containsString(selectors, convergence.RepairOperationTargetSelectorRef) {
+			if allowed && containsString(selectors, route.RepairOperationTargetSelectorRef) {
 				if expectedConstraints == nil {
 					expectedConstraints = append([]string(nil), constraints...)
 				} else if !sameStrings(expectedConstraints, constraints) {
@@ -330,7 +365,7 @@ func runtimeSemanticValidationRepairCatalogSurface(convergence RuntimeValidation
 			return nil, nil, fmt.Errorf("validation failure repair operation %q lacks matching owner policy and selector facts", kind)
 		}
 	}
-	return append([]string(nil), convergence.RepairOperationKinds...), normalizeStrings(expectedConstraints), nil
+	return append([]string(nil), route.RepairOperationKinds...), normalizeStrings(expectedConstraints), nil
 }
 
 func containsCoverageWorkItemID(values []common.CoverageWorkItemID, wanted common.CoverageWorkItemID) bool {

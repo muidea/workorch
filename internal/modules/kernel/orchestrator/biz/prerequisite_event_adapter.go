@@ -117,7 +117,7 @@ func AcquireRuntimeTargetSelectionPrerequisite(ctx context.Context, hub magiceve
 	return response, nil
 }
 
-func ConfirmRuntimeRepairSurface(ctx context.Context, hub magicevent.Hub, command fileevents.ConfirmRuntimeRepairSurfaceCommand) (fileevents.ConfirmRuntimeRepairSurfaceResult, error) {
+func ConfirmFileRuntimeRepairSurface(ctx context.Context, hub magicevent.Hub, command fileevents.ConfirmRuntimeRepairSurfaceCommand) (fileevents.ConfirmRuntimeRepairSurfaceResult, error) {
 	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" || command.Observation.Validate() != nil || command.Observation.WorkspaceID != command.WorkspaceID || command.Observation.RunID != command.RunID {
 		return fileevents.ConfirmRuntimeRepairSurfaceResult{}, common.ErrInvalidArgument
 	}

@@ -952,22 +952,36 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 					if !ok {
 						t.Fatalf("dodItem validationFailureRepairConvergence = %+v, want object", item["validationFailureRepairConvergence"])
 					}
-					if repair["triggerOwnerModuleId"] != "blocks/shell" || repair["triggerOperationKind"] != "validation/managed_session" ||
-						repair["repairEvidenceKind"] != "state_change" || repair["repairOwnerModuleId"] != "blocks/file" ||
-						repair["repairTargetPolicy"] != "prospective_owner_target" || repair["repairTargetRole"] != "deliverable_implementation" ||
-						repair["repairDeclarationTargetSelectorRef"] != "file/workspace_deliverable" ||
-						repair["repairDeclarationTargetSelectorOwnerRef"] != "software-dev" ||
-						repair["repairDeclarationTargetSelectorSubjectRef"] != "dodItem_repair" ||
-						repair["repairOperationTargetSelectorRef"] != "workspace-relative-new-file-target" ||
-						repair["requireFreshValidation"] != true || repair["maxAttempts"] != float64(2) {
+					if repair["requireFreshValidation"] != true || repair["maxAttempts"] != float64(2) {
 						t.Fatalf("dodItem validation failure repair convergence = %+v", repair)
 					}
-					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "implementation_gap_detected")
-					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "validation_build_failed")
-					assertStringListNotContains(t, repair["triggerDiagnosticClasses"].([]any), "validation_dependency_mismatch")
-					assertStringListContains(t, repair["triggerDiagnosticClasses"].([]any), "validation_test_failed")
-					assertStringListContains(t, repair["repairOperationKinds"].([]any), "file/write")
-					assertStringListContains(t, repair["repairOperationKinds"].([]any), "patch/apply")
+					routes, ok := repair["routes"].([]any)
+					if !ok || len(routes) != 1 {
+						t.Fatalf("dodItem validation failure repair routes = %+v", repair["routes"])
+					}
+					routesByID := make(map[string]map[string]any, len(routes))
+					for _, rawRoute := range routes {
+						route, ok := rawRoute.(map[string]any)
+						if !ok {
+							t.Fatalf("dodItem validation failure repair route = %+v", rawRoute)
+						}
+						id, _ := route["id"].(string)
+						routesByID[id] = route
+					}
+					for _, routeID := range []string{"build-failure-to-file"} {
+						route := routesByID[routeID]
+						if route["triggerOwnerModuleId"] != "blocks/shell" || route["triggerOperationKind"] != "validation/managed_session" ||
+							route["triggerDiagnosticClass"] != "validation_build_failed" || route["triggerEvidenceTargetType"] != "failure_surface" ||
+							route["triggerOwnerDiagnosticCode"] != "shell_exit_nonzero" || route["repairEvidenceKind"] != "state_change" ||
+							route["repairOwnerModuleId"] != "blocks/file" || route["repairTargetPolicy"] != "prospective_owner_target" ||
+							route["repairTargetRole"] != "deliverable_implementation" || route["repairDeclarationTargetSelectorRef"] != "file/workspace_deliverable" ||
+							route["repairDeclarationTargetSelectorOwnerRef"] != "software-dev" || route["repairDeclarationTargetSelectorSubjectRef"] != "dodItem_repair" ||
+							route["repairOperationTargetSelectorRef"] != "workspace-relative-new-file-target" {
+							t.Fatalf("dodItem File repair route %q = %+v", routeID, route)
+						}
+						assertStringListContains(t, route["repairOperationKinds"].([]any), "file/write")
+						assertStringListContains(t, route["repairOperationKinds"].([]any), "patch/apply")
+					}
 					ownerFacts, ok := item["requiredOwnerFacts"].([]any)
 					if !ok || len(ownerFacts) != 1 {
 						t.Fatalf("dodItem validation readiness owner facts = %+v, want one Shell postcondition", item["requiredOwnerFacts"])

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -13,21 +14,35 @@ import (
 //
 //	typed validation rejection -> state-change repair -> fresh validation
 //
-// It intentionally has no alternative/one-of relation field. The repair
-// target surface is independent from the terminal validation surface, and a
-// selector or candidate bound never grants an exact prospective target. A
-// resource-owner observation must still confirm the concrete target before an
-// operation can be sealed.
+// Routes is a deterministic lookup table, not an alternative terminal
+// relation. Every route has one exact trigger tuple and one repair surface;
+// duplicate trigger tuples are rejected at pre-seal admission.
 type RuntimeValidationFailureRepairConvergence struct {
-	ID                       string
-	TriggerOwnerModuleID     string
-	TriggerOperationKind     string
-	TriggerDiagnosticClasses []string
-	RepairEvidenceKind       string
-	RepairOwnerModuleID      string
-	RepairOperationKinds     []string
-	RepairTargetPolicy       RuntimeOperationTargetPolicy
-	RepairTargetRole         string
+	ID                     string
+	Routes                 []RuntimeValidationFailureRepairRoute
+	RequireFreshValidation bool
+	// MaxAttempts bounds matching rejection-to-repair-to-revalidation cycles
+	// for one CWI. Cycle one includes the rejection which opens the first repair;
+	// it is not an additional charge on top of that repair cycle.
+	MaxAttempts int
+}
+
+// RuntimeValidationFailureRepairRoute binds one exact owner diagnostic to one
+// owner-backed state-change repair surface. Diagnostic prose, stdout/stderr and
+// target guesses never participate in route selection.
+type RuntimeValidationFailureRepairRoute struct {
+	ID                         string
+	TriggerOwnerModuleID       string
+	TriggerOperationKind       string
+	TriggerDiagnosticClass     string
+	TriggerEvidenceTargetType  string
+	TriggerOwnerDiagnosticCode string
+
+	RepairEvidenceKind   string
+	RepairOwnerModuleID  string
+	RepairOperationKinds []string
+	RepairTargetPolicy   RuntimeOperationTargetPolicy
+	RepairTargetRole     string
 	// RepairDeclarationTargetSelector* is the Profile-owned semantic target
 	// declaration. RepairOperationTargetSelectorRef is the capability owner's
 	// concrete operation authorization. They are independent identities and are
@@ -37,74 +52,53 @@ type RuntimeValidationFailureRepairConvergence struct {
 	RepairDeclarationTargetSelectorSubjectRef    string
 	RepairDeclarationTargetSelectorCandidateRefs []string
 	RepairOperationTargetSelectorRef             string
-	RequireFreshValidation                       bool
-	// MaxAttempts bounds matching rejection-to-repair-to-revalidation cycles
-	// for one CWI. Cycle one includes the rejection which opens the first repair;
-	// it is not an additional charge on top of that repair cycle.
-	MaxAttempts int
 }
 
 func (c RuntimeValidationFailureRepairConvergence) Normalized() RuntimeValidationFailureRepairConvergence {
 	c.ID = strings.TrimSpace(c.ID)
-	c.TriggerOwnerModuleID = strings.TrimSpace(c.TriggerOwnerModuleID)
-	c.TriggerOperationKind = CanonicalRuntimeBlockKind(c.TriggerOperationKind)
-	c.TriggerDiagnosticClasses = normalizeStrings(c.TriggerDiagnosticClasses)
-	c.RepairEvidenceKind = strings.TrimSpace(c.RepairEvidenceKind)
-	c.RepairOwnerModuleID = strings.TrimSpace(c.RepairOwnerModuleID)
-	c.RepairOperationKinds = canonicalizeOperationKinds(c.RepairOperationKinds)
-	c.RepairTargetPolicy = RuntimeOperationTargetPolicy(strings.TrimSpace(string(c.RepairTargetPolicy)))
-	c.RepairTargetRole = strings.TrimSpace(c.RepairTargetRole)
-	c.RepairDeclarationTargetSelectorRef = strings.TrimSpace(c.RepairDeclarationTargetSelectorRef)
-	c.RepairDeclarationTargetSelectorOwnerRef = strings.TrimSpace(c.RepairDeclarationTargetSelectorOwnerRef)
-	c.RepairDeclarationTargetSelectorSubjectRef = strings.TrimSpace(c.RepairDeclarationTargetSelectorSubjectRef)
-	c.RepairDeclarationTargetSelectorCandidateRefs = normalizeStrings(c.RepairDeclarationTargetSelectorCandidateRefs)
-	c.RepairOperationTargetSelectorRef = strings.TrimSpace(c.RepairOperationTargetSelectorRef)
+	routes := make([]RuntimeValidationFailureRepairRoute, len(c.Routes))
+	for index, raw := range c.Routes {
+		routes[index] = raw.Normalized()
+	}
+	// Routes are an authority declaration, so normalization must never erase an
+	// empty item or collapse duplicate identities before Validate can reject the
+	// original pre-seal shape. Valid routes have unique IDs, which makes this
+	// ordering deterministic; invalid equal-ID entries retain their source order
+	// only until the mandatory validation fence rejects them.
+	sort.SliceStable(routes, func(i, j int) bool { return routes[i].ID < routes[j].ID })
+	c.Routes = nilIfEmpty(routes)
 	return c
 }
 
 func (c RuntimeValidationFailureRepairConvergence) Clone() RuntimeValidationFailureRepairConvergence {
 	c = c.Normalized()
-	c.TriggerDiagnosticClasses = append([]string(nil), c.TriggerDiagnosticClasses...)
-	c.RepairOperationKinds = append([]string(nil), c.RepairOperationKinds...)
-	c.RepairDeclarationTargetSelectorCandidateRefs = append([]string(nil), c.RepairDeclarationTargetSelectorCandidateRefs...)
+	c.Routes = cloneRuntimeValidationFailureRepairRoutes(c.Routes)
 	return c
 }
 
 func (c RuntimeValidationFailureRepairConvergence) Validate() error {
 	c = c.Normalized()
-	if c.ID == "" || c.TriggerOwnerModuleID == "" || c.TriggerOperationKind == "" || len(c.TriggerDiagnosticClasses) == 0 {
-		return fmt.Errorf("validation failure repair convergence requires identity and a typed trigger owner, operation and diagnostic class")
+	if c.ID == "" || len(c.Routes) == 0 {
+		return fmt.Errorf("validation failure repair convergence requires identity and unique exact routes")
 	}
-	trigger, found := RuntimeOperationDescriptorForKind(c.TriggerOperationKind)
-	if !found || trigger.OwnerModuleID != c.TriggerOwnerModuleID || !RuntimeOperationKindSupportsCoverageEvidence(c.TriggerOperationKind, EvidenceKindValidation) {
-		return fmt.Errorf("validation failure repair convergence trigger operation %q is not validation proof owned by %q", c.TriggerOperationKind, c.TriggerOwnerModuleID)
-	}
-	for _, diagnosticClass := range c.TriggerDiagnosticClasses {
-		if !runtimeValidationDiagnosticClassKnown(diagnosticClass) {
-			return fmt.Errorf("validation failure repair convergence %q has unknown diagnostic class %q", c.ID, diagnosticClass)
+	seenIDs := make(map[string]struct{}, len(c.Routes))
+	seenTriggers := make(map[string]string, len(c.Routes))
+	for _, route := range c.Routes {
+		if route.ID == "" {
+			return fmt.Errorf("validation failure repair convergence %q requires non-empty unique route identities", c.ID)
 		}
-	}
-	if c.RepairEvidenceKind != EvidenceKindStateChange || c.RepairOwnerModuleID == "" || len(c.RepairOperationKinds) == 0 {
-		return fmt.Errorf("validation failure repair convergence %q requires owner-backed state_change repair operations", c.ID)
-	}
-	for _, kind := range c.RepairOperationKinds {
-		descriptor, found := RuntimeOperationDescriptorForKind(kind)
-		if !found || descriptor.OwnerModuleID != c.RepairOwnerModuleID || !RuntimeOperationKindSupportsCoverageEvidence(kind, EvidenceKindStateChange) {
-			return fmt.Errorf("validation failure repair convergence %q operation %q is not state-change proof owned by %q", c.ID, kind, c.RepairOwnerModuleID)
+		if _, duplicate := seenIDs[route.ID]; duplicate {
+			return fmt.Errorf("validation failure repair convergence %q has duplicate route identity %q", c.ID, route.ID)
 		}
-	}
-	if c.RepairTargetRole == "" || c.RepairDeclarationTargetSelectorRef == "" || c.RepairDeclarationTargetSelectorOwnerRef == "" || c.RepairDeclarationTargetSelectorSubjectRef == "" || c.RepairOperationTargetSelectorRef == "" {
-		return fmt.Errorf("validation failure repair convergence %q requires an independent repair target role and complete selector identity", c.ID)
-	}
-	if c.RepairDeclarationTargetSelectorRef == c.RepairOperationTargetSelectorRef {
-		return fmt.Errorf("validation failure repair convergence %q requires distinct declaration and operation selector identities", c.ID)
-	}
-	switch c.RepairTargetPolicy {
-	case RuntimeOperationTargetPolicyExistingOwnerScope, RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		// Both policies are selector-backed. Exact prospective targets are
-		// deliberately absent from this pre-seal declaration.
-	default:
-		return fmt.Errorf("validation failure repair convergence %q requires a selector-backed repair target policy, got %q", c.ID, c.RepairTargetPolicy)
+		seenIDs[route.ID] = struct{}{}
+		if err := route.Validate(); err != nil {
+			return fmt.Errorf("validation failure repair convergence %q route %q: %w", c.ID, route.ID, err)
+		}
+		key := route.TriggerKey()
+		if previous, found := seenTriggers[key]; found {
+			return fmt.Errorf("validation failure repair convergence %q routes %q and %q duplicate exact trigger", c.ID, previous, route.ID)
+		}
+		seenTriggers[key] = route.ID
 	}
 	if !c.RequireFreshValidation {
 		return fmt.Errorf("validation failure repair convergence %q must require fresh validation after repair", c.ID)
@@ -115,27 +109,157 @@ func (c RuntimeValidationFailureRepairConvergence) Validate() error {
 	return nil
 }
 
-// MatchesTrigger compares only the typed producer identity sealed by the
-// Profile. It does not inspect diagnostic text, select a repair target or
-// choose a Runtime transition.
-func (c RuntimeValidationFailureRepairConvergence) MatchesTrigger(ownerModuleID, operationKind, diagnosticClass string) bool {
-	c = c.Normalized()
-	if c.Validate() != nil {
+func (r RuntimeValidationFailureRepairRoute) Normalized() RuntimeValidationFailureRepairRoute {
+	r.ID = strings.TrimSpace(r.ID)
+	r.TriggerOwnerModuleID = strings.TrimSpace(r.TriggerOwnerModuleID)
+	r.TriggerOperationKind = CanonicalRuntimeBlockKind(r.TriggerOperationKind)
+	r.TriggerDiagnosticClass = strings.TrimSpace(r.TriggerDiagnosticClass)
+	r.TriggerEvidenceTargetType = strings.TrimSpace(r.TriggerEvidenceTargetType)
+	r.TriggerOwnerDiagnosticCode = strings.TrimSpace(r.TriggerOwnerDiagnosticCode)
+	r.RepairEvidenceKind = strings.TrimSpace(r.RepairEvidenceKind)
+	r.RepairOwnerModuleID = strings.TrimSpace(r.RepairOwnerModuleID)
+	r.RepairOperationKinds = canonicalizeOperationKinds(r.RepairOperationKinds)
+	r.RepairTargetPolicy = RuntimeOperationTargetPolicy(strings.TrimSpace(string(r.RepairTargetPolicy)))
+	r.RepairTargetRole = strings.TrimSpace(r.RepairTargetRole)
+	r.RepairDeclarationTargetSelectorRef = strings.TrimSpace(r.RepairDeclarationTargetSelectorRef)
+	r.RepairDeclarationTargetSelectorOwnerRef = strings.TrimSpace(r.RepairDeclarationTargetSelectorOwnerRef)
+	r.RepairDeclarationTargetSelectorSubjectRef = strings.TrimSpace(r.RepairDeclarationTargetSelectorSubjectRef)
+	r.RepairDeclarationTargetSelectorCandidateRefs = normalizeStrings(r.RepairDeclarationTargetSelectorCandidateRefs)
+	r.RepairOperationTargetSelectorRef = strings.TrimSpace(r.RepairOperationTargetSelectorRef)
+	return r
+}
+
+func (r RuntimeValidationFailureRepairRoute) Clone() RuntimeValidationFailureRepairRoute {
+	r = r.Normalized()
+	r.RepairOperationKinds = append([]string(nil), r.RepairOperationKinds...)
+	r.RepairDeclarationTargetSelectorCandidateRefs = append([]string(nil), r.RepairDeclarationTargetSelectorCandidateRefs...)
+	return r
+}
+
+func (r RuntimeValidationFailureRepairRoute) Validate() error {
+	r = r.Normalized()
+	if r.ID == "" || r.TriggerOwnerModuleID == "" || r.TriggerOperationKind == "" ||
+		r.TriggerDiagnosticClass == "" || r.TriggerEvidenceTargetType == "" || r.TriggerOwnerDiagnosticCode == "" {
+		return fmt.Errorf("requires identity and exact typed trigger owner, operation, diagnostic class, evidence target type and owner code")
+	}
+	trigger, found := RuntimeOperationDescriptorForKind(r.TriggerOperationKind)
+	if !found || trigger.OwnerModuleID != r.TriggerOwnerModuleID || !RuntimeOperationKindSupportsCoverageEvidence(r.TriggerOperationKind, EvidenceKindValidation) {
+		return fmt.Errorf("trigger operation %q is not validation proof owned by %q", r.TriggerOperationKind, r.TriggerOwnerModuleID)
+	}
+	if !runtimeValidationDiagnosticClassKnown(r.TriggerDiagnosticClass) {
+		return fmt.Errorf("has unknown diagnostic class %q", r.TriggerDiagnosticClass)
+	}
+	if !runtimeValidationEvidenceTargetTypeKnown(r.TriggerEvidenceTargetType) {
+		return fmt.Errorf("has unknown evidence target type %q", r.TriggerEvidenceTargetType)
+	}
+	if r.RepairEvidenceKind != EvidenceKindStateChange || r.RepairOwnerModuleID == "" || len(r.RepairOperationKinds) == 0 {
+		return fmt.Errorf("requires owner-backed state_change repair operations")
+	}
+	for _, kind := range r.RepairOperationKinds {
+		descriptor, found := RuntimeOperationDescriptorForKind(kind)
+		if !found || descriptor.OwnerModuleID != r.RepairOwnerModuleID || !RuntimeOperationKindSupportsCoverageEvidence(kind, EvidenceKindStateChange) {
+			return fmt.Errorf("operation %q is not state-change proof owned by %q", kind, r.RepairOwnerModuleID)
+		}
+	}
+	if _, ok := RuntimeRepairSurfaceConfirmationProtocolForOperationKinds(r.RepairOwnerModuleID, r.RepairOperationKinds); !ok {
+		return fmt.Errorf("repair owner %q operations do not publish one shared repair-surface confirmation protocol", r.RepairOwnerModuleID)
+	}
+	if r.RepairTargetRole == "" || r.RepairDeclarationTargetSelectorRef == "" || r.RepairDeclarationTargetSelectorOwnerRef == "" || r.RepairDeclarationTargetSelectorSubjectRef == "" || r.RepairOperationTargetSelectorRef == "" {
+		return fmt.Errorf("requires an independent repair target role and complete selector identity")
+	}
+	if r.RepairDeclarationTargetSelectorRef == r.RepairOperationTargetSelectorRef {
+		return fmt.Errorf("requires distinct declaration and operation selector identities")
+	}
+	switch r.RepairTargetPolicy {
+	case RuntimeOperationTargetPolicyExistingOwnerScope, RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		// Both policies are selector-backed. Exact targets are confirmed after seal.
+	default:
+		return fmt.Errorf("requires a selector-backed repair target policy, got %q", r.RepairTargetPolicy)
+	}
+	return nil
+}
+
+// RuntimeRepairSurfaceConfirmationProtocolForOperationKinds returns the one
+// concrete owner protocol shared by every operation in a repair route. It is a
+// pure descriptor lookup: it neither selects a Runtime action nor dispatches a
+// cross-owner command.
+func RuntimeRepairSurfaceConfirmationProtocolForOperationKinds(ownerModuleID string, operationKinds []string) (RuntimeRepairSurfaceConfirmationProtocol, bool) {
+	ownerModuleID = strings.TrimSpace(ownerModuleID)
+	kinds := canonicalizeOperationKinds(operationKinds)
+	if ownerModuleID == "" || len(kinds) == 0 {
+		return RuntimeRepairSurfaceConfirmationProtocolNone, false
+	}
+	protocol := RuntimeRepairSurfaceConfirmationProtocolNone
+	for _, kind := range kinds {
+		descriptor, found := RuntimeOperationDescriptorForKind(kind)
+		if !found || descriptor.OwnerModuleID != ownerModuleID ||
+			descriptor.RepairSurfaceConfirmationProtocol == RuntimeRepairSurfaceConfirmationProtocolNone ||
+			!RuntimeRepairSurfaceConfirmationProtocolSupported(descriptor.RepairSurfaceConfirmationProtocol) {
+			return RuntimeRepairSurfaceConfirmationProtocolNone, false
+		}
+		if protocol != RuntimeRepairSurfaceConfirmationProtocolNone && protocol != descriptor.RepairSurfaceConfirmationProtocol {
+			return RuntimeRepairSurfaceConfirmationProtocolNone, false
+		}
+		protocol = descriptor.RepairSurfaceConfirmationProtocol
+	}
+	return protocol, protocol != RuntimeRepairSurfaceConfirmationProtocolNone
+}
+
+func (r RuntimeValidationFailureRepairRoute) TriggerKey() string {
+	r = r.Normalized()
+	return strings.Join([]string{r.TriggerOwnerModuleID, r.TriggerOperationKind, r.TriggerDiagnosticClass, r.TriggerEvidenceTargetType, r.TriggerOwnerDiagnosticCode}, "|")
+}
+
+func (r RuntimeValidationFailureRepairRoute) MatchesTrigger(ownerModuleID, operationKind, diagnosticClass, evidenceTargetType, ownerDiagnosticCode string) bool {
+	r = r.Normalized()
+	if r.Validate() != nil {
 		return false
 	}
-	return c.TriggerOwnerModuleID == strings.TrimSpace(ownerModuleID) &&
-		c.TriggerOperationKind == CanonicalRuntimeBlockKind(operationKind) &&
-		containsString(c.TriggerDiagnosticClasses, strings.TrimSpace(diagnosticClass))
+	return r.TriggerOwnerModuleID == strings.TrimSpace(ownerModuleID) &&
+		r.TriggerOperationKind == CanonicalRuntimeBlockKind(operationKind) &&
+		r.TriggerDiagnosticClass == strings.TrimSpace(diagnosticClass) &&
+		r.TriggerEvidenceTargetType == strings.TrimSpace(evidenceTargetType) &&
+		r.TriggerOwnerDiagnosticCode == strings.TrimSpace(ownerDiagnosticCode)
+}
+
+// RouteForTrigger returns the unique exact route. Validate rejects duplicate
+// keys, so callers never choose between alternatives.
+func (c RuntimeValidationFailureRepairConvergence) RouteForTrigger(ownerModuleID, operationKind, diagnosticClass, evidenceTargetType, ownerDiagnosticCode string) (RuntimeValidationFailureRepairRoute, bool) {
+	c = c.Normalized()
+	if c.Validate() != nil {
+		return RuntimeValidationFailureRepairRoute{}, false
+	}
+	for _, route := range c.Routes {
+		if route.MatchesTrigger(ownerModuleID, operationKind, diagnosticClass, evidenceTargetType, ownerDiagnosticCode) {
+			return route.Clone(), true
+		}
+	}
+	return RuntimeValidationFailureRepairRoute{}, false
 }
 
 func StableRuntimeValidationFailureRepairConvergenceHash(value RuntimeValidationFailureRepairConvergence) string {
 	value = value.Normalized()
 	h := sha256.New()
-	writeHashString(h, "runtime-validation-failure-repair-convergence")
+	writeHashString(h, "runtime-validation-failure-repair-convergence-v2")
+	writeHashString(h, value.ID)
+	for _, route := range value.Routes {
+		writeHashString(h, StableRuntimeValidationFailureRepairRouteHash(route))
+	}
+	writeHashString(h, fmt.Sprintf("%t", value.RequireFreshValidation))
+	writeHashString(h, fmt.Sprintf("%d", value.MaxAttempts))
+	return "runtime-validation-failure-repair-" + hex.EncodeToString(h.Sum(nil))[:20]
+}
+
+func StableRuntimeValidationFailureRepairRouteHash(value RuntimeValidationFailureRepairRoute) string {
+	value = value.Normalized()
+	h := sha256.New()
+	writeHashString(h, "runtime-validation-failure-repair-route")
 	writeHashString(h, value.ID)
 	writeHashString(h, value.TriggerOwnerModuleID)
 	writeHashString(h, value.TriggerOperationKind)
-	writeHashStrings(h, value.TriggerDiagnosticClasses)
+	writeHashString(h, value.TriggerDiagnosticClass)
+	writeHashString(h, value.TriggerEvidenceTargetType)
+	writeHashString(h, value.TriggerOwnerDiagnosticCode)
 	writeHashString(h, value.RepairEvidenceKind)
 	writeHashString(h, value.RepairOwnerModuleID)
 	writeHashStrings(h, value.RepairOperationKinds)
@@ -146,26 +270,14 @@ func StableRuntimeValidationFailureRepairConvergenceHash(value RuntimeValidation
 	writeHashString(h, value.RepairDeclarationTargetSelectorSubjectRef)
 	writeHashStrings(h, value.RepairDeclarationTargetSelectorCandidateRefs)
 	writeHashString(h, value.RepairOperationTargetSelectorRef)
-	writeHashString(h, fmt.Sprintf("%t", value.RequireFreshValidation))
-	writeHashString(h, fmt.Sprintf("%d", value.MaxAttempts))
-	return "runtime-validation-failure-repair-" + hex.EncodeToString(h.Sum(nil))[:20]
+	return "runtime-validation-failure-repair-route-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
 func SameRuntimeValidationFailureRepairConvergence(left, right *RuntimeValidationFailureRepairConvergence) bool {
 	if left == nil || right == nil {
 		return left == right
 	}
-	l := left.Normalized()
-	r := right.Normalized()
-	return l.ID == r.ID && l.TriggerOwnerModuleID == r.TriggerOwnerModuleID && l.TriggerOperationKind == r.TriggerOperationKind &&
-		sameStrings(l.TriggerDiagnosticClasses, r.TriggerDiagnosticClasses) && l.RepairEvidenceKind == r.RepairEvidenceKind &&
-		l.RepairOwnerModuleID == r.RepairOwnerModuleID && sameStrings(l.RepairOperationKinds, r.RepairOperationKinds) &&
-		l.RepairTargetPolicy == r.RepairTargetPolicy && l.RepairTargetRole == r.RepairTargetRole &&
-		l.RepairDeclarationTargetSelectorRef == r.RepairDeclarationTargetSelectorRef && l.RepairDeclarationTargetSelectorOwnerRef == r.RepairDeclarationTargetSelectorOwnerRef &&
-		l.RepairDeclarationTargetSelectorSubjectRef == r.RepairDeclarationTargetSelectorSubjectRef &&
-		sameStrings(l.RepairDeclarationTargetSelectorCandidateRefs, r.RepairDeclarationTargetSelectorCandidateRefs) &&
-		l.RepairOperationTargetSelectorRef == r.RepairOperationTargetSelectorRef &&
-		l.RequireFreshValidation == r.RequireFreshValidation && l.MaxAttempts == r.MaxAttempts
+	return StableRuntimeValidationFailureRepairConvergenceHash(*left) == StableRuntimeValidationFailureRepairConvergenceHash(*right)
 }
 
 func cloneRuntimeValidationFailureRepairConvergence(value *RuntimeValidationFailureRepairConvergence) *RuntimeValidationFailureRepairConvergence {
@@ -174,6 +286,17 @@ func cloneRuntimeValidationFailureRepairConvergence(value *RuntimeValidationFail
 	}
 	clone := value.Clone()
 	return &clone
+}
+
+func cloneRuntimeValidationFailureRepairRoutes(values []RuntimeValidationFailureRepairRoute) []RuntimeValidationFailureRepairRoute {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]RuntimeValidationFailureRepairRoute, len(values))
+	for index, value := range values {
+		ret[index] = value.Clone()
+	}
+	return ret
 }
 
 func runtimeValidationDiagnosticClassKnown(value string) bool {
@@ -199,6 +322,22 @@ func runtimeValidationDiagnosticClassKnown(value string) bool {
 		ValidationDiagnosticExternalDependency,
 		ValidationDiagnosticProviderTransient,
 		ValidationDiagnosticRuntimeMisalignment:
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeValidationEvidenceTargetTypeKnown(value string) bool {
+	switch strings.TrimSpace(value) {
+	case ValidationEvidenceTargetCommandContract,
+		ValidationEvidenceTargetEnvironment,
+		ValidationEvidenceTargetDependencyContract,
+		ValidationEvidenceTargetToolchainContract,
+		ValidationEvidenceTargetValidationOutput,
+		ValidationEvidenceTargetBehaviorEvidence,
+		ValidationEvidenceTargetCoverageBinding,
+		ValidationEvidenceTargetFailureSurface:
 		return true
 	default:
 		return false

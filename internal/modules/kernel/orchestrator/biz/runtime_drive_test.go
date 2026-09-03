@@ -11428,21 +11428,19 @@ func runtimeOuterValidationRepairAggregate(
 		t.Fatal("repair fixture validation operation has no candidate-target owner descriptor")
 	}
 	convergence := runtimecontract.RuntimeValidationFailureRepairConvergence{
-		ID:                                        "outer-validation-repair",
-		TriggerOwnerModuleID:                      triggerDescriptor.OwnerModuleID,
-		TriggerOperationKind:                      triggerDescriptor.Kind,
-		TriggerDiagnosticClasses:                  []string{runtimecontract.ValidationDiagnosticBuildFailed},
-		RepairEvidenceKind:                        runtimecontract.EvidenceKindStateChange,
-		RepairOwnerModuleID:                       repairDescriptor.OwnerModuleID,
-		RepairOperationKinds:                      []string{repairDescriptor.Kind},
-		RepairTargetPolicy:                        runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
-		RepairTargetRole:                          "implementation",
-		RepairDeclarationTargetSelectorRef:        "profile/workspace-deliverable",
-		RepairDeclarationTargetSelectorOwnerRef:   "outer-validation-repair-profile",
-		RepairDeclarationTargetSelectorSubjectRef: "dodItem/cwi-v2",
-		RepairOperationTargetSelectorRef:          "owner/workspace-deliverable",
-		RequireFreshValidation:                    true,
-		MaxAttempts:                               2,
+		ID: "outer-validation-repair",
+		Routes: []runtimecontract.RuntimeValidationFailureRepairRoute{{
+			ID: "build-failure-to-owner", TriggerOwnerModuleID: triggerDescriptor.OwnerModuleID,
+			TriggerOperationKind: triggerDescriptor.Kind, TriggerDiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed,
+			TriggerEvidenceTargetType: runtimecontract.ValidationEvidenceTargetFailureSurface, TriggerOwnerDiagnosticCode: "build_failed",
+			RepairEvidenceKind: runtimecontract.EvidenceKindStateChange, RepairOwnerModuleID: repairDescriptor.OwnerModuleID,
+			RepairOperationKinds: []string{repairDescriptor.Kind}, RepairTargetPolicy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			RepairTargetRole: "implementation", RepairDeclarationTargetSelectorRef: "profile/workspace-deliverable",
+			RepairDeclarationTargetSelectorOwnerRef: "outer-validation-repair-profile", RepairDeclarationTargetSelectorSubjectRef: "dodItem/cwi-v2",
+			RepairOperationTargetSelectorRef: "owner/workspace-deliverable",
+		}},
+		RequireFreshValidation: true,
+		MaxAttempts:            2,
 	}
 	if err := convergence.Validate(); err != nil {
 		t.Fatalf("sealed repair Profile convergence: %v", err)
@@ -11485,16 +11483,17 @@ func runtimeOuterValidationRepairAggregate(
 		CapabilityRevision:       "capability-1",
 		ConfigurationRevision:    "config-1",
 	}
+	route := convergence.Routes[0].Normalized()
 	repairCatalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "admissibility-repair-owner", OwnerModuleID: repairDescriptor.OwnerModuleID,
 		OperationKinds: []string{repairDescriptor.Kind}, TargetRefs: []string{"implementation.go", "main.go"},
-		SelectorRefs: []string{convergence.RepairOperationTargetSelectorRef},
+		SelectorRefs: []string{route.RepairOperationTargetSelectorRef},
 		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{{
 			Kind: repairDescriptor.Kind,
 			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
 				runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
 			},
-			SelectorRefs: []string{convergence.RepairOperationTargetSelectorRef},
+			SelectorRefs: []string{route.RepairOperationTargetSelectorRef},
 		}},
 		ObservedRevision: "repair-owner-catalog-v1",
 	}
@@ -11831,6 +11830,7 @@ func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T
 func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing.T) {
 	ctx := context.Background()
 	aggregate, repairConvergence, _ := runtimeOuterValidationRepairAggregate(t, 1)
+	repairRoute := repairConvergence.Routes[0].Normalized()
 	aggregate.Facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	aggregate.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	aggregate.Facts.Focus.ValidationRecipeID = "repair-surface-validation"
@@ -11914,12 +11914,18 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 				FailureSignature: "repair-surface-build-failure", TargetRole: request.TargetRole,
 				DiagnosticClass:           runtimecontract.ValidationDiagnosticBuildFailed,
 				CandidateTargetRefs:       []string{"implementation.go"},
-				ValidationScopeTargetRefs: []string{"validation-entry.go", "implementation.go"}, DiagnosticHash: strings.Repeat("e", 64),
+				ValidationScopeTargetRefs: []string{"validation-entry.go", "implementation.go"},
 			}
+			diagnostic := &runtimecontract.ValidationFailureDiagnostic{
+				Class: observation.DiagnosticClass, OwnerCode: "build_failed",
+				RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetFailureSurface,
+				TargetRefs:                    append([]string(nil), observation.CandidateTargetRefs...),
+			}
+			observation.DiagnosticHash = runtimecontract.StableRuntimeValidationFailureObservationDiagnosticHash(*diagnostic, observation.ValidationScopeTargetRefs)
 			failure := runtimecontract.FailureFact{
 				Class: runtimecontract.FailureClassBuildFailure, Code: "build_failed", Signature: observation.FailureSignature,
 				Message:                      "managed validation identified a bounded repair surface",
-				ValidationDiagnostic:         &runtimecontract.ValidationFailureDiagnostic{Class: observation.DiagnosticClass, TargetRefs: append([]string(nil), observation.CandidateTargetRefs...)},
+				ValidationDiagnostic:         diagnostic,
 				ValidationFailureObservation: &observation,
 			}
 			receipt := runtimecontract.RuntimeOperationReceipt{
@@ -11974,7 +11980,7 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 			fileObservationMismatch = true
 		}
 		result.Set(fileevents.ConfirmRuntimeRepairSurfaceResult{Confirmation: runtimecontract.RuntimeRepairSurfaceConfirmation{
-			Observation: command.Observation, OwnerModuleID: repairConvergence.RepairOwnerModuleID, SubjectRef: "workspace_deliverable",
+			Observation: command.Observation, OwnerModuleID: repairRoute.RepairOwnerModuleID, SubjectRef: "workspace_deliverable",
 			Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"implementation.go"}, ObservedRevision: "tree-confirmed-v1",
 		}}, nil)
 	})
@@ -12018,8 +12024,8 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 	if !reflect.DeepEqual(next.Facts.Resources.FailureTarget.TargetRefs, []string{"implementation.go"}) {
 		t.Fatalf("owner confirmation did not seal only the diagnostic candidate: %+v", next.Facts.Resources.FailureTarget)
 	}
-	if next.Facts.Resources.FailureTarget.TargetObservation == nil || next.Facts.Resources.FailureTarget.TargetObservation.OwnerModuleID != repairConvergence.RepairOwnerModuleID {
-		t.Fatalf("confirmed repair target lost sealed Profile owner %q: %+v", repairConvergence.RepairOwnerModuleID, next.Facts.Resources.FailureTarget)
+	if next.Facts.Resources.FailureTarget.TargetObservation == nil || next.Facts.Resources.FailureTarget.TargetObservation.OwnerModuleID != repairRoute.RepairOwnerModuleID {
+		t.Fatalf("confirmed repair target lost sealed Profile owner %q: %+v", repairRoute.RepairOwnerModuleID, next.Facts.Resources.FailureTarget)
 	}
 }
 

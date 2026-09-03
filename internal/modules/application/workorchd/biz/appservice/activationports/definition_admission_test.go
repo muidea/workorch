@@ -66,14 +66,28 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 			}
 		}
 	}
-	if parsedRepair == nil || parsedRepair.TriggerOperationKind != runtimecontract.RuntimeBlockKindManagedValidationSession ||
-		parsedRepair.RepairOwnerModuleID != runtimecontract.RuntimeModuleFile || parsedRepair.RepairOperationTargetSelectorRef != "workspace-relative-new-file-target" ||
-		!parsedRepair.RequireFreshValidation || parsedRepair.MaxAttempts != 2 {
+	if parsedRepair == nil || len(parsedRepair.Routes) != 1 || !parsedRepair.RequireFreshValidation || parsedRepair.MaxAttempts != 2 {
 		t.Fatalf("builtin software-dev repair convergence was not parsed into the admission candidate: %+v", parsedRepair)
 	}
-	if !parsedRepair.MatchesTrigger(runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, runtimecontract.ValidationDiagnosticBuildFailed) ||
-		parsedRepair.MatchesTrigger(runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, runtimecontract.ValidationDiagnosticDependencyMismatch) {
-		t.Fatalf("builtin software-dev repair convergence did not isolate implementation repair from dependency-contract diagnostics: %+v", parsedRepair)
+	buildRoute, buildFound := parsedRepair.RouteForTrigger(
+		runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
+		runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "shell_exit_nonzero",
+	)
+	_, dependencyMisrouted := parsedRepair.RouteForTrigger(
+		runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
+		runtimecontract.ValidationDiagnosticDependencyMismatch, runtimecontract.ValidationEvidenceTargetDependencyContract,
+		runtimecontract.ValidationDiagnosticDependencyMismatch,
+	)
+	_, implementationMisrouted := parsedRepair.RouteForTrigger(
+		runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
+		runtimecontract.ValidationDiagnosticImplementationGap, runtimecontract.ValidationEvidenceTargetFailureSurface, "shell_exit_nonzero",
+	)
+	_, testMisrouted := parsedRepair.RouteForTrigger(
+		runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
+		runtimecontract.ValidationDiagnosticTestFailed, runtimecontract.ValidationEvidenceTargetBehaviorEvidence, "shell_exit_nonzero",
+	)
+	if !buildFound || buildRoute.RepairOwnerModuleID != runtimecontract.RuntimeModuleFile || dependencyMisrouted || implementationMisrouted || testMisrouted {
+		t.Fatalf("builtin software-dev repair convergence did not preserve exact owner routes: %+v", parsedRepair)
 	}
 	result, err := definitionadmission.Compile(candidate)
 	if err != nil || result.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf {
@@ -94,20 +108,55 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 		if focus.AssessmentScope != "dodItem" || focus.ValidationFailureRepairConvergence == nil {
 			continue
 		}
-		compiledRepairFound = compiledRepairFound || focus.ValidationFailureRepairConvergence.MatchesTrigger(
+		if route, found := focus.ValidationFailureRepairConvergence.RouteForTrigger(
 			runtimecontract.RuntimeModuleShell,
 			runtimecontract.RuntimeBlockKindManagedValidationSession,
 			runtimecontract.ValidationDiagnosticBuildFailed,
-		)
-		compiledDependencyMisroute = compiledDependencyMisroute || focus.ValidationFailureRepairConvergence.MatchesTrigger(
-			runtimecontract.RuntimeModuleShell,
-			runtimecontract.RuntimeBlockKindManagedValidationSession,
+			runtimecontract.ValidationEvidenceTargetFailureSurface,
+			"shell_exit_nonzero",
+		); found && route.RepairOwnerModuleID == runtimecontract.RuntimeModuleFile {
+			compiledRepairFound = true
+		}
+		_, compiledDependencyMisroute = focus.ValidationFailureRepairConvergence.RouteForTrigger(
+			runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
+			runtimecontract.ValidationDiagnosticDependencyMismatch, runtimecontract.ValidationEvidenceTargetDependencyContract,
 			runtimecontract.ValidationDiagnosticDependencyMismatch,
 		)
 	}
 	if !compiledRepairFound || compiledDependencyMisroute {
-		t.Fatalf("admitted software-dev bootstrap lost the bounded implementation-only repair convergence: %+v", bootstrap.DefinitionFocuses)
+		t.Fatalf("admitted software-dev bootstrap lost its exact bounded repair routes: %+v", bootstrap.DefinitionFocuses)
 	}
+	if !containsActivationString(bootstrap.Definition.CapabilityContract, runtimecontract.StepKindFileWrite) ||
+		!containsActivationString(bootstrap.Definition.CapabilityContract, runtimecontract.RuntimeBlockKindPatchApply) {
+		t.Fatalf("repair operation missing from bootstrap capability contract: %+v", bootstrap.Definition.CapabilityContract)
+	}
+	capabilityFound := false
+	admissibilityFound := false
+	for _, requirement := range bootstrap.Requirements {
+		if requirement.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
+			(!containsActivationString(requirement.RequiredCapabilities, runtimecontract.StepKindFileWrite) &&
+				!containsActivationString(requirement.RequiredCapabilities, runtimecontract.RuntimeBlockKindPatchApply)) {
+			continue
+		}
+		switch requirement.Kind {
+		case runtimecontract.PrerequisiteKindCapability:
+			capabilityFound = requirement.CapabilityClass == runtimecontract.RuntimeCapabilityClassStateChange
+		case runtimecontract.PrerequisiteKindOperationAdmissibility:
+			admissibilityFound = true
+		}
+	}
+	if !capabilityFound || !admissibilityFound {
+		t.Fatalf("repair operation did not compile into File startup prerequisites: %+v", bootstrap.Requirements)
+	}
+}
+
+func containsActivationString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDefinitionAdmissionBlocksIncompleteValidationRepairContractBeforeRun(t *testing.T) {
@@ -126,12 +175,14 @@ func TestDefinitionAdmissionBlocksIncompleteValidationRepairContractBeforeRun(t 
 		return map[string]any{"evidenceRequirements": []any{map[string]any{
 			"id": "*", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"},
 			"validationFailureRepairConvergence": map[string]any{
-				"id": "dod-validation-repair", "triggerOwnerModuleId": "blocks/shell", "triggerOperationKind": "validation/managed_session",
-				"triggerDiagnosticClasses": []any{"implementation_gap_detected", "validation_build_failed", "validation_test_failed"},
-				"repairEvidenceKind":       "state_change", "repairOwnerModuleId": "blocks/file", "repairOperationKinds": []any{"file/write", "patch/apply"},
-				"repairTargetPolicy": "prospective_owner_target", "repairTargetRole": "deliverable_implementation",
-				"repairDeclarationTargetSelectorRef": "file/workspace_deliverable", "repairDeclarationTargetSelectorOwnerRef": "software-dev",
-				"repairDeclarationTargetSelectorSubjectRef": "dodItem_repair", "repairOperationTargetSelectorRef": "workspace-relative-new-file-target",
+				"id": "dod-validation-repair", "routes": []any{map[string]any{
+					"id": "build-failure-to-file", "triggerOwnerModuleId": "blocks/shell", "triggerOperationKind": "validation/managed_session",
+					"triggerDiagnosticClass": "validation_build_failed", "triggerEvidenceTargetType": "failure_surface", "triggerOwnerDiagnosticCode": "shell_exit_nonzero",
+					"repairEvidenceKind": "state_change", "repairOwnerModuleId": "blocks/file", "repairOperationKinds": []any{"file/write", "patch/apply"},
+					"repairTargetPolicy": "prospective_owner_target", "repairTargetRole": "deliverable_implementation",
+					"repairDeclarationTargetSelectorRef": "file/workspace_deliverable", "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+					"repairDeclarationTargetSelectorSubjectRef": "dodItem_repair", "repairOperationTargetSelectorRef": "workspace-relative-new-file-target",
+				}},
 				"requireFreshValidation": true, "maxAttempts": 2,
 			},
 		}}}
@@ -150,18 +201,26 @@ func TestDefinitionAdmissionBlocksIncompleteValidationRepairContractBeforeRun(t 
 		name string
 		edit func(map[string]any)
 	}{
-		{name: "missing diagnostic class", edit: func(v map[string]any) { delete(v, "triggerDiagnosticClasses") }},
-		{name: "unknown diagnostic class", edit: func(v map[string]any) { v["triggerDiagnosticClasses"] = []any{"free_form_failure"} }},
-		{name: "non validation trigger", edit: func(v map[string]any) {
-			v["triggerOwnerModuleId"] = "blocks/file"
-			v["triggerOperationKind"] = "file/write"
+		{name: "missing diagnostic class", edit: func(v map[string]any) { delete(v["routes"].([]any)[0].(map[string]any), "triggerDiagnosticClass") }},
+		{name: "unknown diagnostic class", edit: func(v map[string]any) {
+			v["routes"].([]any)[0].(map[string]any)["triggerDiagnosticClass"] = "free_form_failure"
 		}},
-		{name: "non state change repair", edit: func(v map[string]any) { v["repairEvidenceKind"] = "validation" }},
-		{name: "cross owner repair kind", edit: func(v map[string]any) { v["repairOperationKinds"] = []any{"shell/command"} }},
-		{name: "non selector backed policy", edit: func(v map[string]any) { v["repairTargetPolicy"] = "exact_target" }},
-		{name: "missing operation selector", edit: func(v map[string]any) { delete(v, "repairOperationTargetSelectorRef") }},
+		{name: "non validation trigger", edit: func(v map[string]any) {
+			route := v["routes"].([]any)[0].(map[string]any)
+			route["triggerOwnerModuleId"] = "blocks/file"
+			route["triggerOperationKind"] = "file/write"
+		}},
+		{name: "non state change repair", edit: func(v map[string]any) { v["routes"].([]any)[0].(map[string]any)["repairEvidenceKind"] = "validation" }},
+		{name: "cross owner repair kind", edit: func(v map[string]any) {
+			v["routes"].([]any)[0].(map[string]any)["repairOperationKinds"] = []any{"shell/command"}
+		}},
+		{name: "non selector backed policy", edit: func(v map[string]any) { v["routes"].([]any)[0].(map[string]any)["repairTargetPolicy"] = "exact_target" }},
+		{name: "missing operation selector", edit: func(v map[string]any) {
+			delete(v["routes"].([]any)[0].(map[string]any), "repairOperationTargetSelectorRef")
+		}},
 		{name: "aliased declaration and operation selectors", edit: func(v map[string]any) {
-			v["repairOperationTargetSelectorRef"] = v["repairDeclarationTargetSelectorRef"]
+			route := v["routes"].([]any)[0].(map[string]any)
+			route["repairOperationTargetSelectorRef"] = route["repairDeclarationTargetSelectorRef"]
 		}},
 		{name: "fresh validation disabled", edit: func(v map[string]any) { v["requireFreshValidation"] = false }},
 		{name: "attempt budget zero", edit: func(v map[string]any) { v["maxAttempts"] = 0 }},
@@ -209,12 +268,14 @@ func TestDefinitionAdmissionBlocksIncompleteValidationRepairContractBeforeRun(t 
 func TestDefinitionAdmissionRejectsValidationRepairNonObjectAlternativeAndDuplicateShapesBeforeRuntimeWork(t *testing.T) {
 	validRepair := func() map[string]any {
 		return map[string]any{
-			"id": "dod-validation-repair", "triggerOwnerModuleId": "blocks/shell", "triggerOperationKind": "validation/managed_session",
-			"triggerDiagnosticClasses": []any{"validation_test_failed"},
-			"repairEvidenceKind":       "state_change", "repairOwnerModuleId": "blocks/file", "repairOperationKinds": []any{"file/write"},
-			"repairTargetPolicy": "prospective_owner_target", "repairTargetRole": "deliverable_implementation",
-			"repairDeclarationTargetSelectorRef": "file/workspace_deliverable", "repairDeclarationTargetSelectorOwnerRef": "software-dev",
-			"repairDeclarationTargetSelectorSubjectRef": "dodItem_repair", "repairOperationTargetSelectorRef": "workspace-relative-new-file-target",
+			"id": "dod-validation-repair", "routes": []any{map[string]any{
+				"id": "test-failure-to-file", "triggerOwnerModuleId": "blocks/shell", "triggerOperationKind": "validation/managed_session",
+				"triggerDiagnosticClass": "validation_test_failed", "triggerEvidenceTargetType": "behavior_evidence", "triggerOwnerDiagnosticCode": "shell_exit_nonzero",
+				"repairEvidenceKind": "state_change", "repairOwnerModuleId": "blocks/file", "repairOperationKinds": []any{"file/write"},
+				"repairTargetPolicy": "prospective_owner_target", "repairTargetRole": "deliverable_implementation",
+				"repairDeclarationTargetSelectorRef": "file/workspace_deliverable", "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+				"repairDeclarationTargetSelectorSubjectRef": "dodItem_repair", "repairOperationTargetSelectorRef": "workspace-relative-new-file-target",
+			}},
 			"requireFreshValidation": true, "maxAttempts": 2,
 		}
 	}
@@ -258,6 +319,24 @@ func TestDefinitionAdmissionRejectsValidationRepairNonObjectAlternativeAndDuplic
 		repair[key] = value
 		return repair
 	}
+	withRouteValue := func(key string, value any) map[string]any {
+		repair := validRepair()
+		repair["routes"].([]any)[0].(map[string]any)[key] = value
+		return repair
+	}
+	withAdditionalRoute := func(route any) map[string]any {
+		repair := validRepair()
+		repair["routes"] = append(repair["routes"].([]any), route)
+		return repair
+	}
+	duplicateRouteIdentity := func() map[string]any {
+		repair := validRepair()
+		route := cloneMap(repair["routes"].([]any)[0].(map[string]any))
+		route["triggerDiagnosticClass"] = "validation_build_failed"
+		route["triggerEvidenceTargetType"] = "failure_surface"
+		repair["routes"] = append(repair["routes"].([]any), route)
+		return repair
+	}
 
 	for _, tc := range []struct {
 		name  string
@@ -273,8 +352,11 @@ func TestDefinitionAdmissionRejectsValidationRepairNonObjectAlternativeAndDuplic
 		{name: "alternative relation", value: withUnknown("alternative", validRepair())},
 		{name: "legacy alias", value: withUnknown("repairTargetSelectorRef", "workspace-relative-new-file-target")},
 		{name: "fractional attempt budget", value: withUnknown("maxAttempts", 1.5)},
-		{name: "mixed diagnostic list", value: withUnknown("triggerDiagnosticClasses", []any{"validation_test_failed", 1})},
-		{name: "scalar optional selector candidates", value: withUnknown("repairDeclarationTargetSelectorCandidateRefs", "src/main.go")},
+		{name: "mixed null route", value: withAdditionalRoute(nil)},
+		{name: "mixed scalar route", value: withAdditionalRoute("build-route")},
+		{name: "duplicate route identity", value: duplicateRouteIdentity()},
+		{name: "diagnostic class array", value: withRouteValue("triggerDiagnosticClass", []any{"validation_test_failed", 1})},
+		{name: "scalar optional selector candidates", value: withRouteValue("repairDeclarationTargetSelectorCandidateRefs", "src/main.go")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := compile(t, []any{newRequirement(tc.value)})
@@ -301,11 +383,15 @@ func TestDefinitionAdmissionSealsValidationRepairBudgetIntoStartupInputHash(t *t
 		return map[string]any{"profileContracts": map[string]any{"software-dev": map[string]any{"evidenceRequirements": []any{map[string]any{
 			"id": "*", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"},
 			"validationFailureRepairConvergence": map[string]any{
-				"id": "repair", "triggerOwnerModuleId": "blocks/shell", "triggerOperationKind": "validation/managed_session", "triggerDiagnosticClasses": []any{"validation_test_failed"},
-				"repairEvidenceKind": "state_change", "repairOwnerModuleId": "blocks/file", "repairOperationKinds": []any{"file/write"},
-				"repairTargetPolicy": "prospective_owner_target", "repairTargetRole": "implementation",
-				"repairDeclarationTargetSelectorRef": "file/workspace_deliverable", "repairDeclarationTargetSelectorOwnerRef": "software-dev", "repairDeclarationTargetSelectorSubjectRef": "dodItem_repair",
-				"repairOperationTargetSelectorRef": "workspace-relative-new-file-target", "requireFreshValidation": true, "maxAttempts": maxAttempts,
+				"id": "repair", "routes": []any{map[string]any{
+					"id": "test-failure-to-file", "triggerOwnerModuleId": "blocks/shell", "triggerOperationKind": "validation/managed_session",
+					"triggerDiagnosticClass": "validation_test_failed", "triggerEvidenceTargetType": "behavior_evidence", "triggerOwnerDiagnosticCode": "shell_exit_nonzero",
+					"repairEvidenceKind": "state_change", "repairOwnerModuleId": "blocks/file", "repairOperationKinds": []any{"file/write"},
+					"repairTargetPolicy": "prospective_owner_target", "repairTargetRole": "implementation",
+					"repairDeclarationTargetSelectorRef": "file/workspace_deliverable", "repairDeclarationTargetSelectorOwnerRef": "software-dev", "repairDeclarationTargetSelectorSubjectRef": "dodItem_repair",
+					"repairOperationTargetSelectorRef": "workspace-relative-new-file-target",
+				}},
+				"requireFreshValidation": true, "maxAttempts": maxAttempts,
 			},
 		}}}}}
 	}

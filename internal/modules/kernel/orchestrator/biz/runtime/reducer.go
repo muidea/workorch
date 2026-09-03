@@ -524,6 +524,12 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 	if strings.TrimSpace(failure.Code) == "semantic_contract_failed" {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "semantic_contract_failed", failure.Message), true, nil
 	}
+	// An exact Profile route miss is already a complete, deterministic SM-2
+	// outcome. Preserve that owner-local reason instead of collapsing it into
+	// the generic repair-budget terminal used for attempted repairs.
+	if strings.TrimSpace(failure.Code) == "validation_failure_repair_route_unavailable" {
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "validation_failure_repair_route_unavailable", failure.Message), true, nil
+	}
 	if FailureClassDisposition(failure.Class) == FailureDispositionSameFocusRepair &&
 		(facts.Repair.Exhausted || facts.Repair.RepairAttempts >= facts.ConvergencePolicy.MaxRepairAttemptsPerFocus) {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "no_progress_exhausted", failure.Message), true, nil

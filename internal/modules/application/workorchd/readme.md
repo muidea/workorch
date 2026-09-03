@@ -4,7 +4,7 @@ Status: active
 
 Type: application-module-contract
 
-Last Verified: 2026-08-30
+Last Verified: 2026-09-03
 
 ## 功能范围与边界
 
@@ -63,7 +63,11 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
 ### Bootstrap and projection
 
 - bootstrap compiler 无损封存 definition/profile、provider、Soul、Skill、MCP、Memory、evidence policy、budget 与 directory
-  snapshot；所有 current-shape admission binding 由 Workspace owner pure compiler 重验。
+  snapshot；所有 current-shape admission binding 由 Workspace owner pure compiler 重验。capability requirement 必须是终态证明
+  kinds 与 Profile validation-repair route kinds 的并集，因此 repair-only owner operation 可被启动时采集，但不得被加入终态
+  `AcceptedStepKinds`。authority-bearing route 数组按原 cardinality 严格解析；`null`/scalar/empty/unknown、重复 identity 或
+  duplicate exact trigger 不能被过滤、折叠或默认补全，且 repair kinds 未共同声明 concrete owner confirmation protocol 时
+  必须阻塞 pre-seal。
 - Application 可以定义 profile 到 typed focus/proof declaration 的映射，但不得把 profile-specific action 逻辑下沉到
   kernel reducer。required source 缺 exact executable proof 时必须在 pre-seal admission 阻塞。
 - projection 只保存 bounded immutable public DTO。canonical Workspace/Run state、active Run 与 exact blocker ref 原样投影；

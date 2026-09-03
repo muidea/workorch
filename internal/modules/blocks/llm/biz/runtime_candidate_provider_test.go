@@ -986,22 +986,21 @@ func TestRuntimeSemanticProviderProjectsTypedValidationFailureRepairOnlyInC3(t *
 	}
 
 	convergence := runtimecontract.RuntimeValidationFailureRepairConvergence{
-		ID:                                           "dod-validation-repair",
-		TriggerOwnerModuleID:                         runtimecontract.RuntimeModuleShell,
-		TriggerOperationKind:                         runtimecontract.RuntimeBlockKindManagedValidationSession,
-		TriggerDiagnosticClasses:                     []string{runtimecontract.ValidationDiagnosticBuildFailed},
-		RepairEvidenceKind:                           runtimecontract.EvidenceKindStateChange,
-		RepairOwnerModuleID:                          runtimecontract.RuntimeModuleFile,
-		RepairOperationKinds:                         []string{runtimecontract.StepKindFileWrite},
-		RepairTargetPolicy:                           runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
-		RepairTargetRole:                             "deliverable_implementation",
-		RepairDeclarationTargetSelectorRef:           "file/workspace_deliverable",
-		RepairDeclarationTargetSelectorOwnerRef:      "software-dev",
-		RepairDeclarationTargetSelectorSubjectRef:    "dodItem_repair",
-		RepairDeclarationTargetSelectorCandidateRefs: []string{"docs/lsp_tools.md", "lsp_tools.go"},
-		RepairOperationTargetSelectorRef:             "workspace-relative-new-file-target",
-		RequireFreshValidation:                       true,
-		MaxAttempts:                                  2,
+		ID: "dod-validation-repair",
+		Routes: []runtimecontract.RuntimeValidationFailureRepairRoute{{
+			ID: "build-failure-to-file", TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell,
+			TriggerOperationKind:   runtimecontract.RuntimeBlockKindManagedValidationSession,
+			TriggerDiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed, TriggerEvidenceTargetType: runtimecontract.ValidationEvidenceTargetFailureSurface,
+			TriggerOwnerDiagnosticCode: "shell_exit_nonzero", RepairEvidenceKind: runtimecontract.EvidenceKindStateChange,
+			RepairOwnerModuleID: runtimecontract.RuntimeModuleFile, RepairOperationKinds: []string{runtimecontract.StepKindFileWrite},
+			RepairTargetPolicy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+			RepairTargetRole:   "deliverable_implementation", RepairDeclarationTargetSelectorRef: "file/workspace_deliverable",
+			RepairDeclarationTargetSelectorOwnerRef: "software-dev", RepairDeclarationTargetSelectorSubjectRef: "dodItem_repair",
+			RepairDeclarationTargetSelectorCandidateRefs: []string{"docs/lsp_tools.md", "lsp_tools.go"},
+			RepairOperationTargetSelectorRef:             "workspace-relative-new-file-target",
+		}},
+		RequireFreshValidation: true,
+		MaxAttempts:            2,
 	}
 	focuses := runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{{
 		ID: "focus-repair", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-001",
@@ -1052,10 +1051,12 @@ func TestRuntimeSemanticProviderProjectsTypedValidationFailureRepairOnlyInC3(t *
 		"ws-1", "run-1", definition, seed, focuses, request.SemanticContext.Activation.ExecutionContract,
 		catalogs, []common.CoverageWorkItemID{"cwi-001"}, runtimecontract.RuntimeValidationFailureRepairGenerationInput{
 			CoverageWorkItemID: "cwi-001", FailedFocusID: "focus-repair",
-			FailureSignature:       "validation-failure/package-conflict/1",
-			TriggerOwnerModuleID:   runtimecontract.RuntimeModuleShell,
-			TriggerOperationKind:   runtimecontract.RuntimeBlockKindManagedValidationSession,
-			TriggerDiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed,
+			FailureSignature:           "validation-failure/package-conflict/1",
+			TriggerOwnerModuleID:       runtimecontract.RuntimeModuleShell,
+			TriggerOperationKind:       runtimecontract.RuntimeBlockKindManagedValidationSession,
+			TriggerDiagnosticClass:     runtimecontract.ValidationDiagnosticBuildFailed,
+			TriggerEvidenceTargetType:  runtimecontract.ValidationEvidenceTargetFailureSurface,
+			TriggerOwnerDiagnosticCode: "shell_exit_nonzero",
 		},
 	)
 	if err != nil {

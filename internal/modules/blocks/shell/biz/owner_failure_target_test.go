@@ -169,7 +169,10 @@ func TestShellManagedGoDiagnosticReportsActualManifestScopedFailureTarget(t *tes
 	}
 	authorization := shellevents.RuntimeExecutionAuthorization{TargetRole: "implementation", ValidationScopeTargetRefs: request.ValidationScopeTargetRefs}
 	diagnostic := runtimecontract.ValidationFailureDiagnostic{
-		Class: runtimecontract.ValidationDiagnosticBuildFailed, Stage: "shell_command_failed", Operation: "shell/command", TargetRefs: targets,
+		SchemaVersion: runtimecontract.ValidationFailureDiagnosticSchemaVersion,
+		Class:         runtimecontract.ValidationDiagnosticBuildFailed, OwnerCode: "shell_exit_nonzero",
+		RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetFailureSurface,
+		Stage:                         "shell_command_failed", Operation: runtimecontract.RuntimeBlockKindManagedValidationSession, TargetRefs: targets,
 	}
 	observation := shellValidationFailureObservation(executionContext, authorization, diagnostic)
 	if observation == nil || !reflect.DeepEqual(observation.CandidateTargetRefs, []string{"cmd/lsp-bridge/main.go"}) ||
@@ -178,6 +181,18 @@ func TestShellManagedGoDiagnosticReportsActualManifestScopedFailureTarget(t *tes
 	}
 	if reflect.DeepEqual(observation.CandidateTargetRefs, request.TargetRefs) {
 		t.Fatalf("validation entry became failure target: %+v", observation)
+	}
+	drifted := diagnostic.Clone()
+	drifted.OwnerCode = "different_owner_code"
+	ownerCodeObservation := shellValidationFailureObservation(executionContext, authorization, drifted)
+	if ownerCodeObservation == nil || ownerCodeObservation.DiagnosticHash == observation.DiagnosticHash {
+		t.Fatal("validation observation hash ignored exact repair-route owner code")
+	}
+	drifted = diagnostic.Clone()
+	drifted.RecommendedEvidenceTargetType = runtimecontract.ValidationEvidenceTargetBehaviorEvidence
+	targetTypeObservation := shellValidationFailureObservation(executionContext, authorization, drifted)
+	if targetTypeObservation == nil || targetTypeObservation.DiagnosticHash == observation.DiagnosticHash {
+		t.Fatal("validation observation hash ignored exact repair-route evidence target type")
 	}
 }
 

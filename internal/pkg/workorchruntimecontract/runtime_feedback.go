@@ -366,6 +366,7 @@ func writeRuntimeOriginalDiagnosticTypedFactsHash(h interface{ Write([]byte) (in
 		value := diagnostic.ValidationDiagnostic
 		writeHashString(h, value.SchemaVersion)
 		writeHashString(h, value.Class)
+		writeHashString(h, value.OwnerCode)
 		writeHashString(h, value.Reason)
 		writeHashString(h, value.RecommendedEvidenceTargetType)
 		writeHashString(h, value.Stage)

@@ -66,15 +66,21 @@ successor。
 Recovery is idempotent re-drive from the Run-owned opaque aggregate. Projection、Eventstream、provider text、process-local cache
 和历史 event sequence 都不能重建或替代 authority。
 
-validation failure repair 也必须保持 core owner-neutral：sealed Profile convergence 或 source binding 的 operation descriptor
-先确定唯一 resource/effect owner，confirmation、candidate operations 与 receipts 必须逐项匹配该 owner。只有
+validation failure repair 也必须保持 core owner-neutral：sealed Profile 的 exact
+`(trigger owner, operation kind, diagnostic class, evidence target type, owner code)` route，或 source binding 的 operation
+descriptor，先确定唯一 resource/effect owner；该 route 的全部 repair operation 还必须在 pre-seal 共同声明一个可执行的
+typed confirmation protocol，否则 Definition admission 直接阻塞。validation-owner observation 的 diagnostic hash 必须绑定上述
+route 字段和 sealed validation scope；有 observation 且 route 匹配时才可发起 owner confirmation，无 exact route 时必须在
+rejected receipt 的同一 Orchestrator-private CAS 封存 `validation_failure_repair_route_unavailable`。confirmation、candidate
+operations 与 receipts 必须逐项匹配该 owner。只有
 `need_state_change` repair-effect pre-seal manifest 的 purpose 固定为 `confirmed_validation_repair`，
 `RuntimeDispatchRepairCommitment` 必须显式封存
 `RepairOwnerModuleID` 及 origin/confirmation/rejected receipt/evidence/closure lineage；fresh-load 不得依据 capability 名称或
 current mutable facts重选 owner。repair receipts 全部接受后，target-free fresh validation 保留同一 closure ID，但 purpose 必须
 为空并按普通 Definition validation 生成 manifest；它不得再次要求 repair commitment。若该 continuation 发生确定性内部失败，
 同一个 Orchestrator-private CAS 必须退休 directive 并封存 SM-2 failed terminal，SM-4 不得生成重复
-`persisted_pending` successor。software-dev Profile 可将该 owner specialization 为 File，但 File 不是 Core repair 常量。
+`persisted_pending` successor。software-dev Profile 的 exact route 可将 owner specialization 为 File；任何具体
+owner、diagnostic 或 repair vocabulary 都不是 Core repair 常量。
 
 Workspace 删除不是第五个 Runtime 状态机。Workspace owner 持久化唯一 deletion coordinator aggregate；Application
 只提交一次 typed 删除意图。初次发现 active Run 时必须零删除意图返回 conflict。准入后，Run owner 先在自身

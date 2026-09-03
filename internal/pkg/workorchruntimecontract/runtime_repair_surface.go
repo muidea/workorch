@@ -75,6 +75,26 @@ func SameRuntimeValidationFailureObservation(left, right RuntimeValidationFailur
 		sameStrings(l.CandidateTargetRefs, r.CandidateTargetRefs) && sameStrings(l.ValidationScopeTargetRefs, r.ValidationScopeTargetRefs)
 }
 
+// StableRuntimeValidationFailureObservationDiagnosticHash binds the canonical
+// typed diagnostic fields that establish repair-route identity to the sealed
+// validation scope. Raw stdout/stderr is deliberately excluded. Producers and
+// consumers use this same pure function so an owner-code or evidence-target
+// drift cannot preserve an otherwise valid observation.
+func StableRuntimeValidationFailureObservationDiagnosticHash(diagnostic ValidationFailureDiagnostic, validationScopeTargetRefs []string) string {
+	diagnostic = diagnostic.Normalized()
+	h := sha256.New()
+	writeHashString(h, "workorch.validation-failure-observation-diagnostic.v2")
+	writeHashString(h, diagnostic.SchemaVersion)
+	writeHashString(h, diagnostic.Class)
+	writeHashString(h, diagnostic.OwnerCode)
+	writeHashString(h, diagnostic.RecommendedEvidenceTargetType)
+	writeHashString(h, diagnostic.Stage)
+	writeHashString(h, diagnostic.Operation)
+	writeHashStrings(h, diagnostic.TargetRefs)
+	writeHashStrings(h, normalizeStrings(validationScopeTargetRefs))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 type RuntimeRepairSurfaceDisposition string
 
 const (

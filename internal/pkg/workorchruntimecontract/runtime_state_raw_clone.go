@@ -1873,7 +1873,6 @@ func cloneRuntimeSemanticProofProposalRaw(in RuntimeSemanticProofProposal) Runti
 
 func cloneRuntimeSemanticValidationFailureRepairRaw(in RuntimeSemanticValidationFailureRepair) RuntimeSemanticValidationFailureRepair {
 	out := in
-	out.TriggerDiagnosticClasses = cloneRuntimeStateRawSlice(in.TriggerDiagnosticClasses, func(item string) string { return item })
 	out.RepairOperationKinds = cloneRuntimeStateRawSlice(in.RepairOperationKinds, func(item string) string { return item })
 	out.RepairDeclarationTargetSelectorCandidateRefs = cloneRuntimeStateRawSlice(in.RepairDeclarationTargetSelectorCandidateRefs, func(item string) string { return item })
 	out.RepairConstraintRefs = cloneRuntimeStateRawSlice(in.RepairConstraintRefs, func(item string) string { return item })
@@ -2048,9 +2047,12 @@ func cloneRuntimeValidationFailureObservationRaw(in RuntimeValidationFailureObse
 
 func cloneRuntimeValidationFailureRepairConvergenceRaw(in RuntimeValidationFailureRepairConvergence) RuntimeValidationFailureRepairConvergence {
 	out := in
-	out.TriggerDiagnosticClasses = cloneRuntimeStateRawSlice(in.TriggerDiagnosticClasses, func(item string) string { return item })
-	out.RepairOperationKinds = cloneRuntimeStateRawSlice(in.RepairOperationKinds, func(item string) string { return item })
-	out.RepairDeclarationTargetSelectorCandidateRefs = cloneRuntimeStateRawSlice(in.RepairDeclarationTargetSelectorCandidateRefs, func(item string) string { return item })
+	out.Routes = cloneRuntimeStateRawSlice(in.Routes, func(item RuntimeValidationFailureRepairRoute) RuntimeValidationFailureRepairRoute {
+		value := item
+		value.RepairOperationKinds = cloneRuntimeStateRawSlice(item.RepairOperationKinds, func(kind string) string { return kind })
+		value.RepairDeclarationTargetSelectorCandidateRefs = cloneRuntimeStateRawSlice(item.RepairDeclarationTargetSelectorCandidateRefs, func(ref string) string { return ref })
+		return value
+	})
 	return out
 }
 

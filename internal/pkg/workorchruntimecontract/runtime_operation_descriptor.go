@@ -22,6 +22,28 @@ const (
 // this technical policy; it does not branch on a concrete capability owner.
 type RuntimeFailureTargetProtocol string
 
+// RuntimeRepairSurfaceConfirmationProtocol identifies one concrete,
+// receiver-owned read protocol that can turn validation target candidates into
+// an owner observation. Empty/none means the operation owner has not published
+// such a protocol and therefore cannot be admitted as a structured repair
+// route. Adding another owner requires both a descriptor declaration and its
+// concrete typed EventHub adapter before pre-seal admission can succeed.
+type RuntimeRepairSurfaceConfirmationProtocol string
+
+const (
+	RuntimeRepairSurfaceConfirmationProtocolNone                        RuntimeRepairSurfaceConfirmationProtocol = "none"
+	RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets RuntimeRepairSurfaceConfirmationProtocol = "file_workspace_regular_targets"
+)
+
+func RuntimeRepairSurfaceConfirmationProtocolSupported(protocol RuntimeRepairSurfaceConfirmationProtocol) bool {
+	switch RuntimeRepairSurfaceConfirmationProtocol(strings.TrimSpace(string(protocol))) {
+	case RuntimeRepairSurfaceConfirmationProtocolNone, RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets:
+		return true
+	default:
+		return false
+	}
+}
+
 const (
 	// RuntimeFailureTargetProtocolSealedOperation permits only a canonical
 	// subset of the operation targets already sealed by SM-3. It cannot discover
@@ -51,15 +73,16 @@ func RuntimeFailureTargetProtocolSupported(protocol RuntimeFailureTargetProtocol
 // DefaultEffectScope is the conservative kind-level default; concrete
 // ExpectedEffectScope may be replaced only by a capability-owner policy fact.
 type RuntimeOperationDescriptor struct {
-	Kind                  string
-	OwnerModuleID         string
-	DefaultEffectScope    RuntimeEffectScope
-	AllowedStates         []ConvergenceState
-	CapabilityClass       RuntimeCapabilityClass
-	IdempotencyClass      RuntimeOperationIdempotencyClass
-	RequiresOwnerReceipt  bool
-	TargetCardinality     RuntimeOperationTargetCardinality
-	FailureTargetProtocol RuntimeFailureTargetProtocol
+	Kind                              string
+	OwnerModuleID                     string
+	DefaultEffectScope                RuntimeEffectScope
+	AllowedStates                     []ConvergenceState
+	CapabilityClass                   RuntimeCapabilityClass
+	IdempotencyClass                  RuntimeOperationIdempotencyClass
+	RequiresOwnerReceipt              bool
+	TargetCardinality                 RuntimeOperationTargetCardinality
+	FailureTargetProtocol             RuntimeFailureTargetProtocol
+	RepairSurfaceConfirmationProtocol RuntimeRepairSurfaceConfirmationProtocol
 }
 
 // RuntimeOperationDescriptors returns the complete normalized, stably sorted descriptor inventory.
@@ -229,6 +252,10 @@ func cloneRuntimeOperationDescriptor(value RuntimeOperationDescriptor) RuntimeOp
 	if value.FailureTargetProtocol == "" {
 		value.FailureTargetProtocol = RuntimeFailureTargetProtocolNone
 	}
+	value.RepairSurfaceConfirmationProtocol = RuntimeRepairSurfaceConfirmationProtocol(strings.TrimSpace(string(value.RepairSurfaceConfirmationProtocol)))
+	if value.RepairSurfaceConfirmationProtocol == "" {
+		value.RepairSurfaceConfirmationProtocol = RuntimeRepairSurfaceConfirmationProtocolNone
+	}
 	if len(value.AllowedStates) > 0 {
 		value.AllowedStates = append([]ConvergenceState(nil), value.AllowedStates...)
 	}
@@ -261,6 +288,7 @@ func init() {
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
 			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
+			RepairSurfaceConfirmationProtocol: RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets,
 		},
 		{
 			// Historical durable file mutation kind used by fixtures/capability contracts.
@@ -268,12 +296,14 @@ func init() {
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
 			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
+			RepairSurfaceConfirmationProtocol: RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets,
 		},
 		{
 			Kind: RuntimeBlockKindPatchApply, OwnerModuleID: RuntimeModuleFile,
 			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
 			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
+			RepairSurfaceConfirmationProtocol: RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets,
 		},
 		{
 			Kind: RuntimeBlockKindPatchPreview, OwnerModuleID: RuntimeModuleFile,
@@ -396,6 +426,9 @@ func init() {
 	for _, descriptor := range inventory {
 		if !RuntimeFailureTargetProtocolSupported(descriptor.FailureTargetProtocol) {
 			panic("unsupported runtime failure target protocol: " + string(descriptor.FailureTargetProtocol))
+		}
+		if !RuntimeRepairSurfaceConfirmationProtocolSupported(descriptor.RepairSurfaceConfirmationProtocol) {
+			panic("unsupported runtime repair surface confirmation protocol: " + string(descriptor.RepairSurfaceConfirmationProtocol))
 		}
 		if descriptor.RequiresOwnerReceipt && descriptor.FailureTargetProtocol == RuntimeFailureTargetProtocolNone {
 			panic("owner-receipt runtime descriptor requires an explicit failure target protocol: " + descriptor.Kind)

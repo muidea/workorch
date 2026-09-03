@@ -236,6 +236,22 @@ func runtimeProfileCapabilityKinds(profiles []runtimecontract.RuntimeProfileCont
 				seen[canonical] = struct{}{}
 				ret = append(ret, canonical)
 			}
+			if requirement.ValidationFailureRepairConvergence != nil {
+				for _, route := range requirement.ValidationFailureRepairConvergence.Normalized().Routes {
+					for _, kind := range route.RepairOperationKinds {
+						canonical := runtimecontract.CanonicalRuntimeBlockKind(kind)
+						descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(canonical)
+						if !ok || descriptor.OwnerModuleID != route.RepairOwnerModuleID {
+							return nil, fmt.Errorf("profile repair operation kind %q has no matching runtime owner descriptor", kind)
+						}
+						if _, ok := seen[canonical]; ok {
+							continue
+						}
+						seen[canonical] = struct{}{}
+						ret = append(ret, canonical)
+					}
+				}
+			}
 		}
 		for _, recipe := range profile.BootstrapRecipes {
 			for _, artifact := range recipe.Artifacts {
@@ -361,6 +377,27 @@ func runtimeProfileCapabilityRequirements(profiles []runtimecontract.RuntimeProf
 					Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: descriptor.OwnerModuleID, CapabilityClass: capabilityClass,
 					RequiredCapabilities: []string{canonical}, Reason: "profile evidence capability required",
 				})
+			}
+			if requirement.ValidationFailureRepairConvergence != nil {
+				for _, route := range requirement.ValidationFailureRepairConvergence.Normalized().Routes {
+					for _, kind := range route.RepairOperationKinds {
+						canonical := runtimecontract.CanonicalRuntimeBlockKind(kind)
+						descriptor, ok := runtimecontract.RuntimeOperationDescriptorForKind(canonical)
+						if !ok || descriptor.OwnerModuleID != route.RepairOwnerModuleID {
+							return nil, fmt.Errorf("profile repair operation kind %q has no matching runtime owner descriptor", kind)
+						}
+						key := descriptor.OwnerModuleID + "|" + string(runtimecontract.RuntimeCapabilityClassStateChange) + "|" + canonical
+						if _, exists := seen[key]; exists {
+							continue
+						}
+						seen[key] = struct{}{}
+						ret = append(ret, runtimecontract.RuntimeRequirement{
+							Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: descriptor.OwnerModuleID,
+							CapabilityClass:      runtimecontract.RuntimeCapabilityClassStateChange,
+							RequiredCapabilities: []string{canonical}, Reason: "profile validation-repair capability required",
+						})
+					}
+				}
 			}
 		}
 		for _, recipe := range profile.BootstrapRecipes {

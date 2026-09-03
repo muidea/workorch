@@ -14,10 +14,24 @@ import (
 
 func runtimeValidationFailureRepairConvergenceForTest(maxAttempts int) runtimecontract.RuntimeValidationFailureRepairConvergence {
 	return runtimecontract.RuntimeValidationFailureRepairConvergence{
-		ID:                                        "test-validation-failure-repair",
+		ID: "test-validation-failure-repair",
+		Routes: []runtimecontract.RuntimeValidationFailureRepairRoute{
+			runtimeValidationFailureRepairRouteForTest("build-failure-to-file", runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface),
+			runtimeValidationFailureRepairRouteForTest("test-failure-to-file", runtimecontract.ValidationDiagnosticTestFailed, runtimecontract.ValidationEvidenceTargetBehaviorEvidence),
+		},
+		RequireFreshValidation: true,
+		MaxAttempts:            maxAttempts,
+	}
+}
+
+func runtimeValidationFailureRepairRouteForTest(id, diagnosticClass, targetType string) runtimecontract.RuntimeValidationFailureRepairRoute {
+	return runtimecontract.RuntimeValidationFailureRepairRoute{
+		ID:                                        id,
 		TriggerOwnerModuleID:                      runtimecontract.RuntimeModuleShell,
 		TriggerOperationKind:                      runtimecontract.RuntimeBlockKindManagedValidationSession,
-		TriggerDiagnosticClasses:                  []string{runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationDiagnosticTestFailed},
+		TriggerDiagnosticClass:                    diagnosticClass,
+		TriggerEvidenceTargetType:                 targetType,
+		TriggerOwnerDiagnosticCode:                "shell_exit_nonzero",
 		RepairEvidenceKind:                        runtimecontract.EvidenceKindStateChange,
 		RepairOwnerModuleID:                       runtimecontract.RuntimeModuleFile,
 		RepairOperationKinds:                      []string{runtimecontract.StepKindFileWrite},
@@ -27,8 +41,6 @@ func runtimeValidationFailureRepairConvergenceForTest(maxAttempts int) runtimeco
 		RepairDeclarationTargetSelectorOwnerRef:   "test-profile",
 		RepairDeclarationTargetSelectorSubjectRef: "dodItem",
 		RepairOperationTargetSelectorRef:          "file/workspace-relative-new-target",
-		RequireFreshValidation:                    true,
-		MaxAttempts:                               maxAttempts,
 	}
 }
 
@@ -131,13 +143,19 @@ func runtimeValidationFailureRepairShellCatalogForTest() runtimecontract.Runtime
 func runtimeRejectedValidationEvidenceForTest(t *testing.T, sealed RuntimeAggregate, eventID string, diagnosticClass string) ExecutionEvidence {
 	t.Helper()
 	operationID := runtimeTestCandidateOperationID(t, sealed.ActiveDispatch.Candidate, 0)
+	targetType := runtimecontract.ValidationEvidenceTargetFailureSurface
+	if diagnosticClass == runtimecontract.ValidationDiagnosticTestFailed {
+		targetType = runtimecontract.ValidationEvidenceTargetBehaviorEvidence
+	}
 	return ExecutionEvidence{
 		EventID: eventID, WorkspaceID: sealed.Facts.WorkspaceID, RunID: sealed.Facts.RunID,
 		DispatchID: sealed.ActiveDispatch.ID, AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
 		OperationID: operationID, Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected,
 		Failure: &runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassBuildFailure, Code: "validation_failed", Signature: "validation-failure/typed/1", Message: "typed validation failed",
-			ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: diagnosticClass},
+			ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
+				Class: diagnosticClass, RecommendedEvidenceTargetType: targetType, OwnerCode: "shell_exit_nonzero",
+			},
 		},
 	}
 }
@@ -165,7 +183,8 @@ func TestRejectedTypedValidationWithoutFailureTargetOpensProfileRepairGeneration
 	}
 	if !required || input.CoverageWorkItemID != "cwi-1" || input.FailedFocusID != committed.Aggregate.Facts.DefinitionFocuses[0].ID ||
 		input.TriggerOwnerModuleID != runtimecontract.RuntimeModuleShell || input.TriggerOperationKind != runtimecontract.RuntimeBlockKindManagedValidationSession ||
-		input.TriggerDiagnosticClass != runtimecontract.ValidationDiagnosticBuildFailed {
+		input.TriggerDiagnosticClass != runtimecontract.ValidationDiagnosticBuildFailed || input.TriggerEvidenceTargetType != runtimecontract.ValidationEvidenceTargetFailureSurface ||
+		input.TriggerOwnerDiagnosticCode != "shell_exit_nonzero" {
 		t.Fatalf("persisted repair generation input = %+v required=%v", input, required)
 	}
 	item := committed.Aggregate.Facts.Coverage[0]
@@ -194,6 +213,98 @@ func TestRejectedTypedValidationWithoutFailureTargetOpensProfileRepairGeneration
 	reloadedInput, reloadedRequired, err := CurrentRuntimeValidationFailureRepairGenerationInput(reloaded)
 	if err != nil || !reloadedRequired || reloadedInput != input {
 		t.Fatalf("restart repair generation input = %+v required=%v err=%v", reloadedInput, reloadedRequired, err)
+	}
+}
+
+func TestRejectedTypedValidationWithoutExactProfileRouteTerminatesWithoutRetry(t *testing.T) {
+	aggregate := runtimeValidationFailureRepairAggregateForTest(t, runtimeValidationFailureRepairConvergenceForTest(2))
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, err := NewDispatchCoordinator(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed := sealCandidateForTest(t, repository, validationCandidate())
+	evidence := runtimeRejectedValidationEvidenceForTest(
+		t, sealed, "event-validation-route-unavailable", runtimecontract.ValidationDiagnosticDependencyMismatch,
+	)
+	evidence.Failure.ValidationDiagnostic.RecommendedEvidenceTargetType = runtimecontract.ValidationEvidenceTargetDependencyContract
+	evidence.Failure.ValidationDiagnostic.OwnerCode = "dependency_catalog_missing"
+	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
+
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || committed.Aggregate.Decision.Terminal == nil ||
+		committed.Aggregate.Decision.Terminal.Code != "validation_failure_repair_route_unavailable" ||
+		committed.Aggregate.Facts.Failure == nil || committed.Aggregate.Facts.Failure.Class != runtimecontract.FailureClassNoProgressExhausted ||
+		committed.Aggregate.Facts.Failure.Code != "validation_failure_repair_route_unavailable" || !committed.Aggregate.Facts.Repair.Exhausted ||
+		committed.Aggregate.Facts.Repair.RepairAttempts != 1 || committed.Aggregate.Facts.Repair.ValidationOnlyRetries != 0 ||
+		len(committed.Aggregate.Facts.Coverage[0].ReopenLineage) != 0 || committed.Aggregate.DefinitionClarification != nil {
+		t.Fatalf("unroutable owner diagnostic did not terminate in its receipt CAS: %+v", committed.Aggregate)
+	}
+	if _, required, inputErr := CurrentRuntimeValidationFailureRepairGenerationInput(committed.Aggregate); inputErr != nil || required {
+		t.Fatalf("unroutable diagnostic opened semantic repair generation: required=%v err=%v", required, inputErr)
+	}
+
+	revision := committed.Aggregate.StateRevision
+	restarted, err := NewDispatchCoordinator(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate, err := restarted.commitEvidence(context.Background(), evidence)
+	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != revision ||
+		duplicate.Aggregate.Facts.Repair.RepairAttempts != 1 || duplicate.Aggregate.Facts.Repair.ValidationOnlyRetries != 0 {
+		t.Fatalf("duplicate unroutable rejection changed terminal authority: result=%+v err=%v", duplicate, err)
+	}
+}
+
+func TestRejectedStructuredValidationWithoutExactProfileRouteTerminatesInReceiptCAS(t *testing.T) {
+	aggregate := runtimeValidationFailureRepairAggregateForTest(t, runtimeValidationFailureRepairConvergenceForTest(2))
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, err := NewDispatchCoordinator(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed := sealCandidateForTest(t, repository, validationCandidate())
+	operationID := runtimeTestCandidateOperationID(t, sealed.ActiveDispatch.Candidate, 0)
+	observation := runtimecontract.RuntimeValidationFailureObservation{
+		WorkspaceID: sealed.Facts.WorkspaceID, RunID: sealed.Facts.RunID,
+		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
+		DispatchID:          sealed.ActiveDispatch.ID, OperationID: operationID,
+		FailureSignature:    "validation-failure/structured-no-route/1",
+		TargetRole:          sealed.ActiveDispatch.FocusTargetRole,
+		DiagnosticClass:     runtimecontract.ValidationDiagnosticBuildFailed,
+		CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"},
+		DiagnosticHash: strings.Repeat("7", 64),
+	}
+	evidence := runtimeRejectedValidationEvidenceForTest(t, sealed, "event-validation-structured-route-unavailable", runtimecontract.ValidationDiagnosticBuildFailed)
+	evidence.Failure.Signature = observation.FailureSignature
+	evidence.Failure.ValidationDiagnostic.OwnerCode = "unmapped_owner_code"
+	evidence.Failure.ValidationDiagnostic.TargetRefs = append([]string(nil), observation.CandidateTargetRefs...)
+	observation.DiagnosticHash = runtimecontract.StableRuntimeValidationFailureObservationDiagnosticHash(*evidence.Failure.ValidationDiagnostic, observation.ValidationScopeTargetRefs)
+	evidence.Failure.ValidationFailureObservation = &observation
+	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
+
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || committed.Aggregate.Decision.Terminal == nil ||
+		committed.Aggregate.Decision.Terminal.Code != "validation_failure_repair_route_unavailable" ||
+		committed.Aggregate.Facts.Resources.FailureTarget != nil || committed.Aggregate.Facts.RepairDirective != nil ||
+		len(committed.Aggregate.RepairSurfaceConfirmations) != 0 || !committed.Aggregate.Facts.Repair.Exhausted {
+		t.Fatalf("structured unroutable diagnostic escaped same-CAS terminal closure: %+v", committed.Aggregate)
+	}
+	revision := committed.Aggregate.StateRevision
+	restarted, err := NewDispatchCoordinator(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate, err := restarted.commitEvidence(context.Background(), evidence)
+	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != revision ||
+		len(duplicate.Aggregate.RepairSurfaceConfirmations) != 0 {
+		t.Fatalf("structured unroutable duplicate changed terminal authority: result=%+v err=%v", duplicate, err)
 	}
 }
 
@@ -226,6 +337,7 @@ func TestRejectedValidationObservationWaitsForFileConfirmationBeforeSemanticRepa
 	evidence := runtimeRejectedValidationEvidenceForTest(t, sealed, "event-validation-owner-observation", runtimecontract.ValidationDiagnosticBuildFailed)
 	evidence.Failure.Signature = observation.FailureSignature
 	evidence.Failure.ValidationDiagnostic.TargetRefs = append([]string(nil), observation.CandidateTargetRefs...)
+	observation.DiagnosticHash = runtimecontract.StableRuntimeValidationFailureObservationDiagnosticHash(*evidence.Failure.ValidationDiagnostic, observation.ValidationScopeTargetRefs)
 	evidence.Failure.ValidationFailureObservation = &observation
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 	committed, err := coordinator.commitEvidence(context.Background(), evidence)
@@ -822,7 +934,10 @@ func TestValidationFailureRepairTriggerFailsClosedAndExactFailureTargetRetainsPr
 	}
 	typedFailure := runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassBuildFailure, Code: "validation_failed", Signature: fact.FailureSignature, Message: "failed",
-		OriginalDiagnostic: &original, ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticBuildFailed},
+		OriginalDiagnostic: &original, ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
+			Class: runtimecontract.ValidationDiagnosticBuildFailed, RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetFailureSurface,
+			OwnerCode: "shell_exit_nonzero",
+		},
 	}
 
 	t.Run("exact owner target", func(t *testing.T) {
@@ -948,20 +1063,32 @@ func TestValidationFailureRepairMultiTargetSettlementUsesOneCompletedAllOfDispat
 
 func runtimeSemanticValidationFailureRepairForTest(operationKind string, maxAttempts int) runtimecontract.RuntimeSemanticValidationFailureRepair {
 	convergence := runtimeValidationFailureRepairConvergenceForTest(maxAttempts)
-	convergence.RepairOperationKinds = []string{operationKind}
+	for index := range convergence.Routes {
+		if convergence.Routes[index].TriggerDiagnosticClass == runtimecontract.ValidationDiagnosticBuildFailed {
+			convergence.Routes[index].RepairOperationKinds = []string{operationKind}
+		}
+	}
+	route, found := convergence.RouteForTrigger(
+		runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
+		runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "shell_exit_nonzero",
+	)
+	if !found {
+		panic("test validation repair route is invalid")
+	}
 	return runtimecontract.RuntimeSemanticValidationFailureRepair{
 		FailedFocusID: "definition-validation-repair/cwi-1", ConvergenceID: convergence.ID,
-		ConvergenceHash:  runtimecontract.StableRuntimeValidationFailureRepairConvergenceHash(convergence),
-		FailureSignature: "validation-failure/typed/1", TriggerOwnerModuleID: convergence.TriggerOwnerModuleID,
-		TriggerOperationKind: convergence.TriggerOperationKind, TriggerDiagnosticClasses: append([]string(nil), convergence.TriggerDiagnosticClasses...),
-		TriggerDiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed,
-		RepairEvidenceKind:     convergence.RepairEvidenceKind, RepairOwnerModuleID: convergence.RepairOwnerModuleID,
-		RepairOperationKinds: append([]string(nil), convergence.RepairOperationKinds...), RepairTargetPolicy: convergence.RepairTargetPolicy,
-		RepairTargetRole:                          convergence.RepairTargetRole,
-		RepairDeclarationTargetSelectorRef:        convergence.RepairDeclarationTargetSelectorRef,
-		RepairDeclarationTargetSelectorOwnerRef:   convergence.RepairDeclarationTargetSelectorOwnerRef,
-		RepairDeclarationTargetSelectorSubjectRef: convergence.RepairDeclarationTargetSelectorSubjectRef,
-		RepairOperationTargetSelectorRef:          convergence.RepairOperationTargetSelectorRef,
+		ConvergenceHash: runtimecontract.StableRuntimeValidationFailureRepairConvergenceHash(convergence),
+		RouteID:         route.ID, RouteHash: runtimecontract.StableRuntimeValidationFailureRepairRouteHash(route),
+		FailureSignature: "validation-failure/typed/1", TriggerOwnerModuleID: route.TriggerOwnerModuleID,
+		TriggerOperationKind: route.TriggerOperationKind, TriggerDiagnosticClass: route.TriggerDiagnosticClass,
+		TriggerEvidenceTargetType: route.TriggerEvidenceTargetType, TriggerOwnerDiagnosticCode: route.TriggerOwnerDiagnosticCode,
+		RepairEvidenceKind: route.RepairEvidenceKind, RepairOwnerModuleID: route.RepairOwnerModuleID,
+		RepairOperationKinds: append([]string(nil), route.RepairOperationKinds...), RepairTargetPolicy: route.RepairTargetPolicy,
+		RepairTargetRole:                          route.RepairTargetRole,
+		RepairDeclarationTargetSelectorRef:        route.RepairDeclarationTargetSelectorRef,
+		RepairDeclarationTargetSelectorOwnerRef:   route.RepairDeclarationTargetSelectorOwnerRef,
+		RepairDeclarationTargetSelectorSubjectRef: route.RepairDeclarationTargetSelectorSubjectRef,
+		RepairOperationTargetSelectorRef:          route.RepairOperationTargetSelectorRef,
 		RepairConstraintRefs:                      []string{"workspace-relative-path"}, OwnerCatalogSnapshotID: "file-repair-catalog",
 		OwnerCatalogObservedRevision: "file-repair-revision", RequireFreshValidation: true, MaxAttempts: maxAttempts,
 	}.Normalized()
@@ -980,7 +1107,9 @@ func installRuntimeValidationFailureRepairDirectiveForTest(
 	}
 	failure := runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassBuildFailure, Code: "validation_failed", Signature: repair.FailureSignature, Message: "typed validation failed",
-		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{Class: repair.TriggerDiagnosticClass},
+		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
+			Class: repair.TriggerDiagnosticClass, RecommendedEvidenceTargetType: repair.TriggerEvidenceTargetType, OwnerCode: repair.TriggerOwnerDiagnosticCode,
+		},
 	}
 	closure := runtimecontract.RuntimeRepairClosure{
 		GapSignature: repair.FailureSignature, BaselineEvidenceRevision: baselineRevision,

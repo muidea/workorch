@@ -1646,6 +1646,14 @@ func runtimeExpectedRepairSurfaceOwner(a RuntimeAggregate, observation runtimeco
 	}
 	profileOwner := ""
 	profileMatches := 0
+	diagnostic, diagnosticFound := runtimeValidationFailurePersistedDiagnostic(a, observation)
+	if !diagnosticFound {
+		return "", fmt.Errorf("validation failure repair owner has no exact persisted typed diagnostic")
+	}
+	diagnostic = diagnostic.Normalized()
+	if diagnostic.Class != observation.DiagnosticClass {
+		return "", fmt.Errorf("validation failure repair owner diagnostic conflicts with observation")
+	}
 	for _, coverageID := range coverageIDs {
 		declaration, found, err := runtimeDefinitionFocusForCoverage(a.Facts.DefinitionFocuses, coverageID)
 		if err != nil {
@@ -1655,13 +1663,20 @@ func runtimeExpectedRepairSurfaceOwner(a RuntimeAggregate, observation runtimeco
 			continue
 		}
 		convergence := declaration.ValidationFailureRepairConvergence.Normalized()
-		if !convergence.MatchesTrigger(triggerDescriptor.OwnerModuleID, operation.Kind, observation.DiagnosticClass) {
+		route, matched := convergence.RouteForTrigger(
+			triggerDescriptor.OwnerModuleID,
+			operation.Kind,
+			diagnostic.Class,
+			diagnostic.RecommendedEvidenceTargetType,
+			diagnostic.OwnerCode,
+		)
+		if !matched {
 			return "", fmt.Errorf("validation failure repair owner does not match sealed Profile trigger")
 		}
-		if profileOwner != "" && profileOwner != convergence.RepairOwnerModuleID {
+		if profileOwner != "" && profileOwner != route.RepairOwnerModuleID {
 			return "", fmt.Errorf("validation failure repair owner is ambiguous across sealed Profile declarations")
 		}
-		profileOwner = convergence.RepairOwnerModuleID
+		profileOwner = route.RepairOwnerModuleID
 		profileMatches++
 	}
 	if profileMatches != 0 {
@@ -1702,6 +1717,117 @@ func runtimeExpectedRepairSurfaceOwner(a RuntimeAggregate, observation runtimeco
 		return "", fmt.Errorf("validation failure repair owner has incomplete binding provenance")
 	}
 	return bindingOwner, nil
+}
+
+// CurrentRuntimeRepairSurfaceConfirmationContract resolves the exact
+// receiver-owned read protocol for a persisted validation observation. The
+// owner still comes from the sealed Profile route (or its exact source binding
+// fallback); the operation descriptor only proves that this owner has a
+// concrete confirmation adapter. No capability name is selected by SM-2.
+func CurrentRuntimeRepairSurfaceConfirmationContract(a RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) (string, runtimecontract.RuntimeRepairSurfaceConfirmationProtocol, error) {
+	ownerModuleID, err := runtimeExpectedRepairSurfaceOwner(a, observation)
+	if err != nil {
+		return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, err
+	}
+	observation = observation.Normalized()
+	var sourceDispatch *SealedDispatch
+	for index := range a.CompletedDispatches {
+		dispatch := &a.CompletedDispatches[index]
+		if dispatch.ID != observation.DispatchID || dispatch.State != DispatchStateCommitted ||
+			!containsString(dispatch.CompletedOperationIDs, observation.OperationID) {
+			continue
+		}
+		if sourceDispatch != nil {
+			return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, fmt.Errorf("validation failure repair confirmation has multiple source dispatches")
+		}
+		sourceDispatch = dispatch
+	}
+	if sourceDispatch == nil {
+		return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, fmt.Errorf("validation failure repair confirmation has no exact sealed source")
+	}
+	operation, found := candidateOperationByID(sourceDispatch.Candidate, observation.OperationID)
+	if !found {
+		return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, fmt.Errorf("validation failure repair confirmation source operation is not sealed")
+	}
+	diagnostic, found := runtimeValidationFailurePersistedDiagnostic(a, observation)
+	if !found {
+		return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, fmt.Errorf("validation failure repair confirmation has no exact persisted typed diagnostic")
+	}
+	diagnostic = diagnostic.Normalized()
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !found {
+		return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, fmt.Errorf("validation failure repair confirmation source operation is unknown")
+	}
+
+	bindingIDs := normalizeRuntimeTargetRefs(operation.BindingRefs)
+	sourceBindings := make([]runtimecontract.CoverageEvidenceBinding, 0, len(bindingIDs))
+	coverageIDs := append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...)
+	for _, bindingID := range bindingIDs {
+		matches := 0
+		var binding runtimecontract.CoverageEvidenceBinding
+		for index := range sourceDispatch.CoverageBindings {
+			candidate := sourceDispatch.CoverageBindings[index].Normalized()
+			if candidate.ID == bindingID {
+				binding, matches = candidate, matches+1
+			}
+		}
+		if matches != 1 {
+			return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, fmt.Errorf("validation failure repair confirmation binding %q does not have one exact source projection", bindingID)
+		}
+		sourceBindings = append(sourceBindings, binding)
+		if len(operation.CoverageWorkItemIDs) == 0 {
+			coverageIDs = append(coverageIDs, binding.CoverageWorkItemID)
+		}
+	}
+	coverageIDs = normalizeCoverageIDs(coverageIDs)
+	profileMatches := 0
+	protocol := runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone
+	for _, coverageID := range coverageIDs {
+		declaration, declarationFound, declarationErr := runtimeDefinitionFocusForCoverage(a.Facts.DefinitionFocuses, coverageID)
+		if declarationErr != nil {
+			return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, declarationErr
+		}
+		if !declarationFound || declaration.ValidationFailureRepairConvergence == nil {
+			continue
+		}
+		route, matched := declaration.ValidationFailureRepairConvergence.RouteForTrigger(
+			descriptor.OwnerModuleID,
+			operation.Kind,
+			diagnostic.Class,
+			diagnostic.RecommendedEvidenceTargetType,
+			diagnostic.OwnerCode,
+		)
+		if !matched || route.RepairOwnerModuleID != ownerModuleID {
+			return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, fmt.Errorf("validation failure repair confirmation does not match sealed Profile route")
+		}
+		candidate, supported := runtimecontract.RuntimeRepairSurfaceConfirmationProtocolForOperationKinds(route.RepairOwnerModuleID, route.RepairOperationKinds)
+		if !supported || (protocol != runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone && protocol != candidate) {
+			return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, fmt.Errorf("validation failure repair confirmation route has no unique owner protocol")
+		}
+		protocol = candidate
+		profileMatches++
+	}
+	if profileMatches != 0 {
+		if profileMatches != len(coverageIDs) || protocol == runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone {
+			return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, fmt.Errorf("validation failure repair confirmation has incomplete sealed Profile coverage")
+		}
+		return ownerModuleID, protocol, nil
+	}
+
+	operationKinds := make([]string, 0)
+	for _, binding := range sourceBindings {
+		for _, proof := range binding.Proofs {
+			proof = proof.Normalized()
+			if proof.EvidenceKind == runtimecontract.EvidenceKindStateChange {
+				operationKinds = append(operationKinds, proof.AllowedOperationKinds...)
+			}
+		}
+	}
+	protocol, supported := runtimecontract.RuntimeRepairSurfaceConfirmationProtocolForOperationKinds(ownerModuleID, operationKinds)
+	if !supported {
+		return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, fmt.Errorf("validation failure repair owner %q has no concrete repair-surface confirmation protocol", ownerModuleID)
+	}
+	return ownerModuleID, protocol, nil
 }
 
 func runtimeLatestRepairSurfaceConfirmation(a RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) (runtimecontract.RuntimeRepairSurfaceConfirmation, bool) {

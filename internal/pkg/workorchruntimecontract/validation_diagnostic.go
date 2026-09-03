@@ -40,6 +40,7 @@ const (
 type ValidationFailureDiagnostic struct {
 	SchemaVersion                 string   `json:"schemaVersion,omitempty"`
 	Class                         string   `json:"class,omitempty"`
+	OwnerCode                     string   `json:"ownerCode,omitempty"`
 	Reason                        string   `json:"reason,omitempty"`
 	RecommendedEvidenceTargetType string   `json:"recommendedEvidenceTargetType,omitempty"`
 	Stage                         string   `json:"stage,omitempty"`
@@ -59,6 +60,7 @@ type ValidationFailureDiagnostic struct {
 func (d ValidationFailureDiagnostic) Normalized() ValidationFailureDiagnostic {
 	d.SchemaVersion = strings.TrimSpace(d.SchemaVersion)
 	d.Class = strings.TrimSpace(d.Class)
+	d.OwnerCode = strings.TrimSpace(d.OwnerCode)
 	d.Reason = strings.TrimSpace(d.Reason)
 	d.RecommendedEvidenceTargetType = strings.TrimSpace(d.RecommendedEvidenceTargetType)
 	d.Stage = strings.TrimSpace(d.Stage)
@@ -88,7 +90,7 @@ func sameValidationFailureDiagnostic(left, right *ValidationFailureDiagnostic) b
 	}
 	l := left.Normalized()
 	r := right.Normalized()
-	return l.SchemaVersion == r.SchemaVersion && l.Class == r.Class && l.Reason == r.Reason &&
+	return l.SchemaVersion == r.SchemaVersion && l.Class == r.Class && l.OwnerCode == r.OwnerCode && l.Reason == r.Reason &&
 		l.RecommendedEvidenceTargetType == r.RecommendedEvidenceTargetType && l.Stage == r.Stage &&
 		l.Operation == r.Operation && l.CommandKind == r.CommandKind && l.ExitCode == r.ExitCode &&
 		l.TimedOut == r.TimedOut && l.CommandPolicyViolation == r.CommandPolicyViolation &&

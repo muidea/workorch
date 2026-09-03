@@ -47,7 +47,6 @@ func TestRuntimeOperationCorrectionMetadataIsDescriptorAndContractDeclared(t *te
 	if err != nil || !found || recipe.Source != RuntimeOperationCorrectionFieldParameter || recipe.WitnessDimension() != RuntimeCandidateCorrectionWitnessValidationRecipe || recipe.CandidatePath(1) != "$.operations[1].parameters[name=recipeId]" {
 		t.Fatalf("contract-declared recipe metadata=%+v found=%v", recipe, found)
 	}
-
 	bindingManifest := RuntimeCandidateOperationManifest{
 		Kind: StepKindFileRead,
 		BindingAuthorizations: []RuntimeOperationBindingAuthorization{{

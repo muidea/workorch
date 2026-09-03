@@ -139,6 +139,25 @@ func TestStableRuntimeFeedbackHashIncludesOriginalOrder(t *testing.T) {
 	}
 }
 
+func TestStableRuntimeFeedbackHashIncludesExactValidationRepairRouteFields(t *testing.T) {
+	left := validRuntimeFeedback()
+	left.OriginalDiagnostic.ValidationDiagnostic = &ValidationFailureDiagnostic{
+		SchemaVersion: ValidationFailureDiagnosticSchemaVersion,
+		Class:         ValidationDiagnosticBuildFailed, OwnerCode: "shell_exit_nonzero",
+		RecommendedEvidenceTargetType: ValidationEvidenceTargetFailureSurface,
+	}
+	right := left.CloneOriginal()
+	right.OriginalDiagnostic.ValidationDiagnostic.OwnerCode = "different_owner_code"
+	if StableRuntimeFeedbackHash(left) == StableRuntimeFeedbackHash(right) {
+		t.Fatal("feedback hash ignored validation owner code used by exact repair routing")
+	}
+	right = left.CloneOriginal()
+	right.OriginalDiagnostic.ValidationDiagnostic.RecommendedEvidenceTargetType = ValidationEvidenceTargetBehaviorEvidence
+	if StableRuntimeFeedbackHash(left) == StableRuntimeFeedbackHash(right) {
+		t.Fatal("feedback hash ignored validation evidence target type used by exact repair routing")
+	}
+}
+
 func TestRuntimeFeedbackConversionsPreserveSafeSourceDetail(t *testing.T) {
 	scope := RuntimeFeedbackScope{WorkspaceID: "ws-1", RunID: "run-1", AuthoritySnapshotID: "authority-1", DispatchID: "dispatch-1"}
 	candidate, err := RuntimeFeedbackFromCandidateFailure(scope, "candidate_payload", "schema_invalid", "blocks/llm", RuntimeCandidateFailure{

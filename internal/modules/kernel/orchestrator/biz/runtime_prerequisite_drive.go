@@ -72,8 +72,8 @@ func runtimePendingPrerequisiteExists(values []runtimecontract.RuntimePrerequisi
 }
 
 // confirmRuntimeRepairSurface implements the owner handoff after a rejected
-// validation receipt. The File command is a query; only the resulting internal
-// event may change SM-2 authority.
+// validation receipt. The sealed route first resolves a receiver-owned query
+// protocol; only the resulting internal event may change SM-2 authority.
 func (m *Biz) confirmRuntimeRepairSurface(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, bool, error) {
 	if m == nil || m.EventHub() == nil || aggregate.Facts.Failure == nil || aggregate.Facts.Failure.ValidationFailureObservation == nil || aggregate.Facts.Resources.FailureTarget != nil {
 		return aggregate, false, nil
@@ -81,6 +81,10 @@ func (m *Biz) confirmRuntimeRepairSurface(ctx context.Context, aggregate runtime
 	observation := aggregate.Facts.Failure.ValidationFailureObservation.Clone()
 	if observation.Validate() != nil {
 		return runtime.RuntimeAggregate{}, false, common.ErrInvalidArgument
+	}
+	ownerModuleID, protocol, err := runtime.CurrentRuntimeRepairSurfaceConfirmationContract(aggregate, observation)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, false, err
 	}
 	// Keep the receipt-to-confirmation handoff explicit in the owner-local
 	// vocabulary. This identity event deliberately does not mutate aggregate
@@ -95,11 +99,24 @@ func (m *Biz) confirmRuntimeRepairSurface(ctx context.Context, aggregate runtime
 	if err != nil {
 		return runtime.RuntimeAggregate{}, false, err
 	}
-	confirmation, err := ConfirmRuntimeRepairSurface(ctx, m.EventHub(), fileevents.ConfirmRuntimeRepairSurfaceCommand{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, WorkspaceDeliverableDirectory: workspace.DeliverableDirectory, Observation: observation})
-	if err != nil {
-		return runtime.RuntimeAggregate{}, false, err
+	var confirmation runtimecontract.RuntimeRepairSurfaceConfirmation
+	switch protocol {
+	case runtimecontract.RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets:
+		if ownerModuleID != runtimecontract.RuntimeModuleFile {
+			return runtime.RuntimeAggregate{}, false, fmt.Errorf("%w: repair-surface protocol owner mismatch", common.ErrConflict)
+		}
+		response, confirmErr := ConfirmFileRuntimeRepairSurface(ctx, m.EventHub(), fileevents.ConfirmRuntimeRepairSurfaceCommand{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			WorkspaceDeliverableDirectory: workspace.DeliverableDirectory, Observation: observation,
+		})
+		if confirmErr != nil {
+			return runtime.RuntimeAggregate{}, false, confirmErr
+		}
+		confirmation = response.Confirmation
+	default:
+		return runtime.RuntimeAggregate{}, false, fmt.Errorf("%w: unsupported repair-surface confirmation protocol %q", common.ErrInvalidArgument, protocol)
 	}
-	updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventRepairSurfaceConfirmationObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{RepairSurfaceConfirmation: &confirmation.Confirmation}})
+	updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventRepairSurfaceConfirmationObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{RepairSurfaceConfirmation: &confirmation}})
 	return updated.Aggregate, true, err
 }
 

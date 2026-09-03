@@ -25,6 +25,7 @@ type runtimeValidationFailureRepairTrigger struct {
 	failure     runtimecontract.FailureFact
 	operation   runtimecontract.RuntimeOperation
 	convergence runtimecontract.RuntimeValidationFailureRepairConvergence
+	route       runtimecontract.RuntimeValidationFailureRepairRoute
 }
 
 type runtimeValidationFailureRepairSealContinuation struct {
@@ -43,6 +44,9 @@ func (t runtimeValidationFailureRepairTrigger) validate() error {
 	if err := t.convergence.Validate(); err != nil {
 		return err
 	}
+	if err := t.route.Validate(); err != nil {
+		return err
+	}
 	if t.failure.OriginalDiagnostic == nil || t.failure.ValidationDiagnostic == nil {
 		return fmt.Errorf("validation failure repair trigger requires typed owner diagnostics")
 	}
@@ -50,8 +54,12 @@ func (t runtimeValidationFailureRepairTrigger) validate() error {
 	original := t.failure.OriginalDiagnostic.Normalized()
 	operation := t.operation.Normalized()
 	if original == nil || original.OperationID != t.fact.OperationID || operation.ID != t.fact.OperationID ||
-		!t.convergence.MatchesTrigger(original.OwnerModuleID, operation.Kind, diagnostic.Class) {
+		!t.route.MatchesTrigger(original.OwnerModuleID, operation.Kind, diagnostic.Class, diagnostic.RecommendedEvidenceTargetType, diagnostic.OwnerCode) {
 		return fmt.Errorf("validation failure repair trigger does not match its Profile convergence")
+	}
+	matched, found := t.convergence.RouteForTrigger(original.OwnerModuleID, operation.Kind, diagnostic.Class, diagnostic.RecommendedEvidenceTargetType, diagnostic.OwnerCode)
+	if !found || runtimecontract.StableRuntimeValidationFailureRepairRouteHash(matched) != runtimecontract.StableRuntimeValidationFailureRepairRouteHash(t.route) {
+		return fmt.Errorf("validation failure repair trigger route is not sealed by its Profile convergence")
 	}
 	// A rejected receipt cannot receive terminal CWI credit, so its derived
 	// CoverageWorkItemIDs are normally empty. If a producer does supply them,
@@ -176,12 +184,27 @@ func matchRuntimeValidationFailureRepairTrigger(aggregate RuntimeAggregate, fact
 	if err != nil || !found || declaration.ValidationFailureRepairConvergence == nil {
 		return runtimeValidationFailureRepairTrigger{}, false, err
 	}
+	if facts.Failure.ValidationDiagnostic == nil || facts.Failure.OriginalDiagnostic == nil {
+		return runtimeValidationFailureRepairTrigger{}, false, nil
+	}
+	diagnostic := facts.Failure.ValidationDiagnostic.Normalized()
+	original := facts.Failure.OriginalDiagnostic.Normalized()
+	if original == nil {
+		return runtimeValidationFailureRepairTrigger{}, false, nil
+	}
+	route, routeFound := declaration.ValidationFailureRepairConvergence.RouteForTrigger(
+		original.OwnerModuleID, operation.Kind, diagnostic.Class, diagnostic.RecommendedEvidenceTargetType, diagnostic.OwnerCode,
+	)
+	if !routeFound {
+		return runtimeValidationFailureRepairTrigger{}, false, nil
+	}
 	trigger := runtimeValidationFailureRepairTrigger{
 		coverageID:  coverageID,
 		fact:        fact,
 		failure:     facts.Failure.Clone(),
 		operation:   operation,
 		convergence: declaration.ValidationFailureRepairConvergence.Clone(),
+		route:       route,
 	}
 	if err := trigger.validate(); err != nil {
 		// Missing/raw/mismatched typed diagnostics are an ordinary fail-closed
@@ -189,6 +212,95 @@ func matchRuntimeValidationFailureRepairTrigger(aggregate RuntimeAggregate, fact
 		return runtimeValidationFailureRepairTrigger{}, false, nil
 	}
 	return trigger, true, nil
+}
+
+// markRuntimeValidationFailureRepairRouteUnavailable is the private SM-2
+// terminal transition for a complete owner diagnostic which is intentionally
+// outside the Profile's exact repair table. Once the owner has classified the
+// same deterministic validation failure, re-running that validation cannot
+// discover a different repair authority. Failing in the receipt CAS prevents
+// SM-4 from dispatching an identical validation or asking an LLM to invent a
+// cross-owner repair.
+func markRuntimeValidationFailureRepairRouteUnavailable(aggregate *RuntimeAggregate, fact runtimecontract.EvidenceFact, operation runtimecontract.RuntimeOperation) (bool, error) {
+	if aggregate == nil {
+		return false, common.ErrInvalidArgument
+	}
+	facts := aggregate.Facts.Normalized()
+	operation = operation.Normalized()
+	if aggregate.ActiveDispatch != nil || fact.Kind != runtimecontract.EvidenceKindValidation || facts.Failure == nil ||
+		facts.Resources.FailureTarget != nil || needsStateChangeForOwnerGroundedFailure(facts) || len(facts.Focus.CoverageWorkItemIDs) != 1 {
+		return false, nil
+	}
+	coverageID := facts.Focus.CoverageWorkItemIDs[0]
+	binding, bindingFound := coverageEvidenceBindingForCoverage(facts.Focus, coverageID)
+	if !bindingFound || !contains(operation.BindingRefs, binding.ID) || !contains(fact.BindingRefs, binding.ID) {
+		return false, nil
+	}
+	declaration, found, err := runtimeDefinitionFocusForCoverage(facts.DefinitionFocuses, coverageID)
+	if err != nil || !found || declaration.ValidationFailureRepairConvergence == nil {
+		return false, err
+	}
+	convergence := declaration.ValidationFailureRepairConvergence.Normalized()
+	if err := convergence.Validate(); err != nil {
+		return false, err
+	}
+	failure := facts.Failure.Clone()
+	if failure.ValidationDiagnostic == nil || failure.OriginalDiagnostic == nil {
+		return false, nil
+	}
+	diagnostic := failure.ValidationDiagnostic.Normalized()
+	original := failure.OriginalDiagnostic.Normalized()
+	if original == nil || original.OperationID != fact.OperationID || operation.ID != fact.OperationID || fact.FailureSignature == "" ||
+		failure.Signature == "" || fact.FailureSignature != failure.Signature {
+		return false, nil
+	}
+	trigger := runtimecontract.RuntimeValidationFailureRepairGenerationInput{
+		CoverageWorkItemID:         coverageID,
+		FailedFocusID:              declaration.ID,
+		FailureSignature:           failure.Signature,
+		TriggerOwnerModuleID:       original.OwnerModuleID,
+		TriggerOperationKind:       operation.Kind,
+		TriggerDiagnosticClass:     diagnostic.Class,
+		TriggerEvidenceTargetType:  diagnostic.RecommendedEvidenceTargetType,
+		TriggerOwnerDiagnosticCode: diagnostic.OwnerCode,
+	}.Normalized()
+	if err := trigger.Validate(); err != nil {
+		// An incomplete diagnostic is not silently promoted into a different
+		// terminal fact; the ordinary bounded failure policy remains responsible.
+		return false, nil
+	}
+	if _, found := convergence.RouteForTrigger(
+		trigger.TriggerOwnerModuleID,
+		trigger.TriggerOperationKind,
+		trigger.TriggerDiagnosticClass,
+		trigger.TriggerEvidenceTargetType,
+		trigger.TriggerOwnerDiagnosticCode,
+	); found {
+		return false, nil
+	}
+
+	repair := facts.Repair.Normalized()
+	if repair.FocusID != facts.Focus.ID {
+		repair = runtimecontract.RuntimeRepairLedger{FocusID: facts.Focus.ID, SliceID: facts.Focus.SliceID}
+	}
+	repair.Exhausted = true
+	facts.Repair = repair.Normalized()
+	failure.Class = runtimecontract.FailureClassNoProgressExhausted
+	failure.Code = "validation_failure_repair_route_unavailable"
+	failure.Message = fmt.Sprintf(
+		"validation failure repair convergence %q has no exact route for owner=%q operation=%q diagnostic=%q targetType=%q ownerCode=%q",
+		convergence.ID,
+		trigger.TriggerOwnerModuleID,
+		trigger.TriggerOperationKind,
+		trigger.TriggerDiagnosticClass,
+		trigger.TriggerEvidenceTargetType,
+		trigger.TriggerOwnerDiagnosticCode,
+	)
+	if err := replaceRuntimeFailureAuthority(&facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+		return false, err
+	}
+	aggregate.Facts = facts.Normalized()
+	return true, nil
 }
 
 func runtimeDefinitionFocusForCoverage(values []runtimecontract.RuntimeDefinitionFocus, coverageID common.CoverageWorkItemID) (runtimecontract.RuntimeDefinitionFocus, bool, error) {
@@ -218,7 +330,7 @@ func runtimeValidationFailureRepairPendingDirective(facts runtimecontract.Runtim
 		RequiredState:              runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredEffectScopes:       []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 		RequiredEvidenceKinds:      []string{runtimecontract.EvidenceKindStateChange},
-		AllowedOperationKinds:      append([]string(nil), trigger.convergence.RepairOperationKinds...),
+		AllowedOperationKinds:      append([]string(nil), trigger.route.RepairOperationKinds...),
 		NoProgressOperationShapes:  append([]runtimecontract.RuntimeRejectedOperationShape(nil), facts.Repair.NoProgressOperationShapes...),
 		CoverageWorkItemIDs:        []common.CoverageWorkItemID{trigger.coverageID},
 		SupersedesEvidenceRevision: trigger.fact.Revision,
@@ -366,25 +478,37 @@ func CurrentRuntimeValidationFailureRepairGenerationInput(aggregate RuntimeAggre
 		coverageID: coverageID, fact: *rejected, failure: facts.Failure.Clone(), operation: operation,
 		convergence: declaration.ValidationFailureRepairConvergence.Clone(),
 	}
+	diagnostic := trigger.failure.ValidationDiagnostic.Normalized()
+	original := trigger.failure.OriginalDiagnostic.Normalized()
+	if original == nil {
+		return runtimecontract.RuntimeValidationFailureRepairGenerationInput{}, false, fmt.Errorf("%w: persisted validation failure repair trigger lacks owner diagnostic", common.ErrConflict)
+	}
+	route, routeFound := trigger.convergence.RouteForTrigger(
+		original.OwnerModuleID, operation.Kind, diagnostic.Class, diagnostic.RecommendedEvidenceTargetType, diagnostic.OwnerCode,
+	)
+	if !routeFound {
+		return runtimecontract.RuntimeValidationFailureRepairGenerationInput{}, false, fmt.Errorf("%w: persisted validation failure repair trigger has no exact Profile route", common.ErrConflict)
+	}
+	trigger.route = route
 	if err := trigger.validate(); err != nil {
 		return runtimecontract.RuntimeValidationFailureRepairGenerationInput{}, false, fmt.Errorf("%w: persisted validation failure repair trigger is invalid: %v", common.ErrConflict, err)
 	}
 	if facts.Repair.Exhausted || facts.Repair.RepairAttempts < 1 || facts.Repair.RepairAttempts > trigger.convergence.MaxAttempts ||
 		facts.RepairDirective.SupersedesEvidenceRevision != rejected.Revision ||
-		!sameRuntimeStringSet(facts.RepairDirective.AllowedOperationKinds, trigger.convergence.RepairOperationKinds) {
+		!sameRuntimeStringSet(facts.RepairDirective.AllowedOperationKinds, trigger.route.RepairOperationKinds) {
 		return runtimecontract.RuntimeValidationFailureRepairGenerationInput{}, false, fmt.Errorf("%w: validation failure repair generation exceeds or conflicts with its sealed budget", common.ErrConflict)
 	}
-	diagnostic := trigger.failure.ValidationDiagnostic.Normalized()
-	original := trigger.failure.OriginalDiagnostic.Normalized()
 	input := runtimecontract.RuntimeValidationFailureRepairGenerationInput{
 		CoverageWorkItemID: coverageID,
 		// The shared compiler intentionally binds this identity to the immutable
 		// Definition declaration, not the retired generation-specific focus ID.
-		FailedFocusID:          declaration.ID,
-		FailureSignature:       trigger.failure.Signature,
-		TriggerOwnerModuleID:   original.OwnerModuleID,
-		TriggerOperationKind:   operation.Kind,
-		TriggerDiagnosticClass: diagnostic.Class,
+		FailedFocusID:              declaration.ID,
+		FailureSignature:           trigger.failure.Signature,
+		TriggerOwnerModuleID:       original.OwnerModuleID,
+		TriggerOperationKind:       operation.Kind,
+		TriggerDiagnosticClass:     diagnostic.Class,
+		TriggerEvidenceTargetType:  diagnostic.RecommendedEvidenceTargetType,
+		TriggerOwnerDiagnosticCode: diagnostic.OwnerCode,
 	}.Normalized()
 	if err := input.Validate(); err != nil {
 		return runtimecontract.RuntimeValidationFailureRepairGenerationInput{}, false, err
@@ -485,6 +609,24 @@ func applyRuntimeValidationFailureRepairSemanticSeal(facts runtimecontract.Runti
 			return runtimecontract.RuntimeFacts{}, fmt.Errorf("%w: validation failure repair binding has wrong semantic purpose", common.ErrConflict)
 		}
 		repair := obligation.ValidationFailureRepair.Normalized()
+		declaration, definitionFound, definitionErr := runtimeDefinitionFocusForCoverage(facts.DefinitionFocuses, continuation.coverageID)
+		if definitionErr != nil || !definitionFound || declaration.ValidationFailureRepairConvergence == nil {
+			return runtimecontract.RuntimeFacts{}, fmt.Errorf("%w: validation failure repair semantic seal has no Definition convergence", common.ErrConflict)
+		}
+		convergence := declaration.ValidationFailureRepairConvergence.Normalized()
+		if runtimecontract.StableRuntimeValidationFailureRepairConvergenceHash(convergence) != repair.ConvergenceHash {
+			return runtimecontract.RuntimeFacts{}, fmt.Errorf("%w: validation failure repair semantic seal convergence drifted from Definition", common.ErrConflict)
+		}
+		routeMatched := false
+		for _, route := range convergence.Routes {
+			if route.ID == repair.RouteID && runtimecontract.StableRuntimeValidationFailureRepairRouteHash(route) == repair.RouteHash {
+				routeMatched = true
+				break
+			}
+		}
+		if !routeMatched {
+			return runtimecontract.RuntimeFacts{}, fmt.Errorf("%w: validation failure repair semantic seal route drifted from Definition", common.ErrConflict)
+		}
 		if facts.Repair.Exhausted || facts.Repair.RepairAttempts < 1 || facts.Repair.RepairAttempts > repair.MaxAttempts ||
 			len(binding.ProspectiveTargetRefs) == 0 {
 			return runtimecontract.RuntimeFacts{}, fmt.Errorf("%w: validation failure repair binding exceeds budget or lacks exact prospective targets", common.ErrConflict)

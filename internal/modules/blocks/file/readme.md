@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-09-02
+Last Verified: 2026-09-03
 
 ## 功能范围与边界
 
@@ -40,6 +40,9 @@ operation。
 - path 必须是 canonical workspace-relative regular-file target；absolute path、`..` escape、symlink escape、binary edit、
   ambiguous replace、stale base hash 和越界 inventory 均 fail-closed、零 effect。
 - preview、catalog、selection、manifest、feasibility、repair confirmation 与 reconciliation 都是只读事实，不得创建目录/文件。
+- `file/write`、`file/edit`、`patch/apply` descriptor 共同声明 File-owned regular-target confirmation protocol；File 只按 concrete
+  typed command 对 observation candidates 做 current manifest/revision 检查并返回事实，不选择 Profile route、repair action、
+  retry 或 SM-2 transition。未声明该协议的 owner operation 不能被 pre-seal 为 validation-repair route。
 - candidate constraint 分两阶段。conformance 必须复用 effect owner 的 exact parser/matcher，在零 workspace I/O 下验证 unified
   diff 的 single-file/target identity，以及 add-file (`/dev/null`) 或 existing-update 形态是否匹配 sealed target policy，只返回
   manifest-bound 的 `conformant | nonconformant | owner_contract_defect` 静态事实。feasibility 对合法但无法应用到 current
@@ -68,7 +71,7 @@ operation。
 | stale/freshness / manifest revision | `TestRuntimeAdapterProbeRejectsStaleAdmissibilitySnapshotWithoutMutation`、`TestRuntimeAdapterProbeReportsTypedStaleAfterExternalWorkspaceMutation`、`TestRuntimeAdapterEditRejectsBaseHashMismatch`、`TestAcquireWorkspaceManifestRevisionTracksContent`、`TestOwnerFeasibilityCategoriesAreTotal` | 覆盖 stale、resource state 与 sealed target policy contradiction 的完备分类 |
 | duplicate/idempotency/receipt loss | `TestFileOwnerStateChangingReceiptReplaysWithoutSecondWrite`、`TestRuntimeAdapterPatchApplyFileWriteConfirmsSealedReplayAfterReceiptLoss`、`TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure` | 覆盖 |
 | reconciliation / restart | [`biz/owner_reconciliation_test.go`](biz/owner_reconciliation_test.go) | fresh owner restart、changed/deleted target 覆盖 |
-| repair confirmation | [`biz/repair_surface_confirmation_test.go`](biz/repair_surface_confirmation_test.go) | current regular target normal/reject 覆盖 |
+| repair confirmation | [`biz/repair_surface_confirmation_test.go`](biz/repair_surface_confirmation_test.go)、`workorchruntimecontract::TestRuntimeOperationDescriptorForKindCanonicalAndUnknown` | current regular target normal/reject、descriptor protocol 及 cross-owner/unsupported 拒绝覆盖 |
 | lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestFileOwnerStartIsIdempotentAndTeardownClearsLifecycle`、`TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllSixteenTopics` | 覆盖 16 topic 的重复 Start 单次投递与 Stop 后零 payload/effect |
 | wrong DTO matrix | `TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllSixteenTopics` | 覆盖全部 16 topic 的 wrong concrete command，并校验每次恰有一个 owner subscription |
 | provider / external network | 不适用 | 不适用 |

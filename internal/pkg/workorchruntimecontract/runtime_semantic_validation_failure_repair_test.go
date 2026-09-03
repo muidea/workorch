@@ -22,7 +22,9 @@ func TestCompileRuntimeSemanticValidationFailureRepairSealsOneFileProofAndFreshV
 		t.Fatal(err)
 	}
 	convergence := testValidationFailureRepairConvergence()
-	convergence.RepairDeclarationTargetSelectorCandidateRefs = []string{"internal/main.go", "main.go"}
+	for index := range convergence.Routes {
+		convergence.Routes[index].RepairDeclarationTargetSelectorCandidateRefs = []string{"internal/main.go", "main.go"}
+	}
 	definitionFocuses := CompileRuntimeDefinitionFocuses([]CoverageFocus{{
 		ID: "definition-focus-repair", SliceID: "slice-repair", AssessmentScope: "dodItem", AssessmentID: "dod-item-repair", AssessmentText: "behavior passes validation",
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-repair"}, RequiredEvidenceKinds: []string{EvidenceKindValidation},
@@ -40,7 +42,8 @@ func TestCompileRuntimeSemanticValidationFailureRepairSealsOneFileProofAndFreshV
 	input := RuntimeValidationFailureRepairGenerationInput{
 		CoverageWorkItemID: "cwi-repair", FailedFocusID: "definition-focus-repair", FailureSignature: "failure/build/1",
 		TriggerOwnerModuleID: RuntimeModuleShell, TriggerOperationKind: RuntimeBlockKindManagedValidationSession,
-		TriggerDiagnosticClass: ValidationDiagnosticBuildFailed,
+		TriggerDiagnosticClass: ValidationDiagnosticBuildFailed, TriggerEvidenceTargetType: ValidationEvidenceTargetFailureSurface,
+		TriggerOwnerDiagnosticCode: "shell_exit_nonzero",
 	}
 	manifest, err := CompileRuntimeSemanticPlanManifestForCoverageWithValidationFailureRepair(
 		"ws-repair", "run-repair", definition, seed, definitionFocuses, execution,
@@ -153,7 +156,9 @@ func TestCompileRuntimeSemanticValidationFailureRepairRejectsWrongFocusAndCovera
 		t.Fatal(err)
 	}
 	convergence := testValidationFailureRepairConvergence()
-	convergence.RepairOperationKinds = []string{StepKindFileWrite}
+	for index := range convergence.Routes {
+		convergence.Routes[index].RepairOperationKinds = []string{StepKindFileWrite}
+	}
 	focuses := CompileRuntimeDefinitionFocuses([]CoverageFocus{{
 		ID: "focus-exact", SliceID: "slice", AssessmentScope: "dodItem", AssessmentID: "item", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi"},
 		RequiredEvidenceKinds: []string{EvidenceKindValidation}, RequireAssessment: true,
@@ -167,7 +172,12 @@ func TestCompileRuntimeSemanticValidationFailureRepairRejectsWrongFocusAndCovera
 	shellCatalog := semanticTestOwnerCatalog("shell", RuntimeModuleShell, []string{RuntimeBlockKindManagedValidationSession})
 	shellCatalog.ValidationRecipes = []RuntimeValidationRecipe{{ID: "recipe", Command: "go", Args: []string{"test"}}}
 	shellCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
-	input := RuntimeValidationFailureRepairGenerationInput{CoverageWorkItemID: "cwi", FailedFocusID: "wrong-focus", FailureSignature: "failure", TriggerOwnerModuleID: RuntimeModuleShell, TriggerOperationKind: RuntimeBlockKindManagedValidationSession, TriggerDiagnosticClass: ValidationDiagnosticTestFailed}
+	input := RuntimeValidationFailureRepairGenerationInput{
+		CoverageWorkItemID: "cwi", FailedFocusID: "wrong-focus", FailureSignature: "failure",
+		TriggerOwnerModuleID: RuntimeModuleShell, TriggerOperationKind: RuntimeBlockKindManagedValidationSession,
+		TriggerDiagnosticClass: ValidationDiagnosticTestFailed, TriggerEvidenceTargetType: ValidationEvidenceTargetBehaviorEvidence,
+		TriggerOwnerDiagnosticCode: "shell_exit_nonzero",
+	}
 	_, err = CompileRuntimeSemanticPlanManifestForCoverageWithValidationFailureRepair("ws", "run", definition, seed, focuses, execution, []RuntimeOperationAdmissibility{fileCatalog, shellCatalog}, []common.CoverageWorkItemID{"cwi"}, input)
 	if err == nil || !strings.Contains(err.Error(), "does not match Definition focus") {
 		t.Fatalf("wrong focus err=%v", err)

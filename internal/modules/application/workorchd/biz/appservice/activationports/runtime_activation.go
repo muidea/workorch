@@ -442,23 +442,43 @@ func runtimeValidationFailureRepairConvergence(input map[string]any) *runtimecon
 		return &runtimecontract.RuntimeValidationFailureRepairConvergence{}
 	}
 	return &runtimecontract.RuntimeValidationFailureRepairConvergence{
-		ID:                                           runtimeString(raw["id"]),
-		TriggerOwnerModuleID:                         runtimeString(raw["triggerOwnerModuleId"]),
-		TriggerOperationKind:                         runtimeString(raw["triggerOperationKind"]),
-		TriggerDiagnosticClasses:                     runtimeStrings(raw["triggerDiagnosticClasses"]),
-		RepairEvidenceKind:                           runtimeString(raw["repairEvidenceKind"]),
-		RepairOwnerModuleID:                          runtimeString(raw["repairOwnerModuleId"]),
-		RepairOperationKinds:                         runtimeStrings(raw["repairOperationKinds"]),
-		RepairTargetPolicy:                           runtimecontract.RuntimeOperationTargetPolicy(runtimeString(raw["repairTargetPolicy"])),
-		RepairTargetRole:                             runtimeString(raw["repairTargetRole"]),
-		RepairDeclarationTargetSelectorRef:           runtimeString(raw["repairDeclarationTargetSelectorRef"]),
-		RepairDeclarationTargetSelectorOwnerRef:      runtimeString(raw["repairDeclarationTargetSelectorOwnerRef"]),
-		RepairDeclarationTargetSelectorSubjectRef:    runtimeString(raw["repairDeclarationTargetSelectorSubjectRef"]),
-		RepairDeclarationTargetSelectorCandidateRefs: runtimeStrings(raw["repairDeclarationTargetSelectorCandidateRefs"]),
-		RepairOperationTargetSelectorRef:             runtimeString(raw["repairOperationTargetSelectorRef"]),
-		RequireFreshValidation:                       runtimeBool(raw["requireFreshValidation"]),
-		MaxAttempts:                                  runtimeInt(raw["maxAttempts"]),
+		ID:                     runtimeString(raw["id"]),
+		Routes:                 runtimeValidationFailureRepairRoutes(raw["routes"]),
+		RequireFreshValidation: runtimeBool(raw["requireFreshValidation"]),
+		MaxAttempts:            runtimeInt(raw["maxAttempts"]),
 	}
+}
+
+func runtimeValidationFailureRepairRoutes(value any) []runtimecontract.RuntimeValidationFailureRepairRoute {
+	items, exact := runtimeObjectSliceExact(value)
+	if !exact {
+		return []runtimecontract.RuntimeValidationFailureRepairRoute{{}}
+	}
+	ret := make([]runtimecontract.RuntimeValidationFailureRepairRoute, 0, len(items))
+	for _, raw := range items {
+		if !runtimeValidationFailureRepairRouteHasExactShape(raw) {
+			return []runtimecontract.RuntimeValidationFailureRepairRoute{{}}
+		}
+		ret = append(ret, runtimecontract.RuntimeValidationFailureRepairRoute{
+			ID:                                           runtimeString(raw["id"]),
+			TriggerOwnerModuleID:                         runtimeString(raw["triggerOwnerModuleId"]),
+			TriggerOperationKind:                         runtimeString(raw["triggerOperationKind"]),
+			TriggerDiagnosticClass:                       runtimeString(raw["triggerDiagnosticClass"]),
+			TriggerEvidenceTargetType:                    runtimeString(raw["triggerEvidenceTargetType"]),
+			TriggerOwnerDiagnosticCode:                   runtimeString(raw["triggerOwnerDiagnosticCode"]),
+			RepairEvidenceKind:                           runtimeString(raw["repairEvidenceKind"]),
+			RepairOwnerModuleID:                          runtimeString(raw["repairOwnerModuleId"]),
+			RepairOperationKinds:                         runtimeStrings(raw["repairOperationKinds"]),
+			RepairTargetPolicy:                           runtimecontract.RuntimeOperationTargetPolicy(runtimeString(raw["repairTargetPolicy"])),
+			RepairTargetRole:                             runtimeString(raw["repairTargetRole"]),
+			RepairDeclarationTargetSelectorRef:           runtimeString(raw["repairDeclarationTargetSelectorRef"]),
+			RepairDeclarationTargetSelectorOwnerRef:      runtimeString(raw["repairDeclarationTargetSelectorOwnerRef"]),
+			RepairDeclarationTargetSelectorSubjectRef:    runtimeString(raw["repairDeclarationTargetSelectorSubjectRef"]),
+			RepairDeclarationTargetSelectorCandidateRefs: runtimeStrings(raw["repairDeclarationTargetSelectorCandidateRefs"]),
+			RepairOperationTargetSelectorRef:             runtimeString(raw["repairOperationTargetSelectorRef"]),
+		})
+	}
+	return ret
 }
 
 func runtimeValidationFailureRepairConvergenceHasExactShape(raw map[string]any) bool {
@@ -467,23 +487,19 @@ func runtimeValidationFailureRepairConvergenceHasExactShape(raw map[string]any) 
 	}
 	for key, value := range raw {
 		switch key {
-		case "id",
-			"triggerOwnerModuleId",
-			"triggerOperationKind",
-			"repairEvidenceKind",
-			"repairOwnerModuleId",
-			"repairTargetPolicy",
-			"repairTargetRole",
-			"repairDeclarationTargetSelectorRef",
-			"repairDeclarationTargetSelectorOwnerRef",
-			"repairDeclarationTargetSelectorSubjectRef",
-			"repairOperationTargetSelectorRef":
+		case "id":
 			if _, ok := value.(string); !ok {
 				return false
 			}
-		case "triggerDiagnosticClasses", "repairOperationKinds", "repairDeclarationTargetSelectorCandidateRefs":
-			if !runtimeStringListHasExactShape(value) {
+		case "routes":
+			items, exact := runtimeObjectSliceExact(value)
+			if !exact || len(items) == 0 {
 				return false
+			}
+			for _, item := range items {
+				if !runtimeValidationFailureRepairRouteHasExactShape(item) {
+					return false
+				}
 			}
 		case "requireFreshValidation":
 			if _, ok := value.(bool); !ok {
@@ -491,6 +507,51 @@ func runtimeValidationFailureRepairConvergenceHasExactShape(raw map[string]any) 
 			}
 		case "maxAttempts":
 			if !runtimeIntegerHasExactShape(value) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// runtimeObjectSliceExact is used for authority-bearing pre-seal lists. Unlike
+// runtimeMapSlice, it preserves cardinality as a validation fact and rejects a
+// mixed list instead of silently dropping null/scalar elements.
+func runtimeObjectSliceExact(value any) ([]map[string]any, bool) {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return append([]map[string]any(nil), typed...), true
+	case []any:
+		ret := make([]map[string]any, len(typed))
+		for index, item := range typed {
+			mapped, ok := item.(map[string]any)
+			if !ok {
+				return nil, false
+			}
+			ret[index] = mapped
+		}
+		return ret, true
+	default:
+		return nil, false
+	}
+}
+
+func runtimeValidationFailureRepairRouteHasExactShape(raw map[string]any) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	for key, value := range raw {
+		switch key {
+		case "id", "triggerOwnerModuleId", "triggerOperationKind", "triggerDiagnosticClass", "triggerEvidenceTargetType", "triggerOwnerDiagnosticCode",
+			"repairEvidenceKind", "repairOwnerModuleId", "repairTargetPolicy", "repairTargetRole",
+			"repairDeclarationTargetSelectorRef", "repairDeclarationTargetSelectorOwnerRef", "repairDeclarationTargetSelectorSubjectRef", "repairOperationTargetSelectorRef":
+			if _, ok := value.(string); !ok {
+				return false
+			}
+		case "repairOperationKinds", "repairDeclarationTargetSelectorCandidateRefs":
+			if !runtimeStringListHasExactShape(value) {
 				return false
 			}
 		default:

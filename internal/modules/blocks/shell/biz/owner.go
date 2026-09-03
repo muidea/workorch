@@ -2,8 +2,6 @@ package shell
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -348,7 +346,7 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		// it cannot create RuntimeFailureTargetObservation authority directly.
 		// The candidate must fit the SM-3 sealed validation scope, then pass the
 		// RuntimeValidationFailureObservation + File confirmation path below.
-		failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, runtimecontract.StepKindShellCommand, operationResult.FailureCode, operationResult.FailureMessage, nil, nil)
+		failure = orchestratorevents.RuntimeOperationFailureWithTargetObservation(command.Transaction, operation.Kind, operationResult.FailureCode, operationResult.FailureMessage, nil, nil)
 		if operationResult.ValidationFailureDiagnostic != nil {
 			diagnostic := operationResult.ValidationFailureDiagnostic.Clone()
 			candidateTargetRefs, candidateValid := shellFailureTargetCandidateUnion(operationResult, authorization.TargetRole, authorization.ValidationScopeTargetRefs)
@@ -523,14 +521,14 @@ func shellValidationFailureObservation(context runtimecontract.RuntimeOperationE
 	if !shellTargetRefsSubset(diagnostic.TargetRefs, authorization.ValidationScopeTargetRefs) {
 		return nil
 	}
-	// The deterministic bounded digest permits File/Orchestrator causation
-	// checks without passing raw stdout/stderr across owner boundaries.
-	hash := sha256.Sum256([]byte(strings.Join([]string{diagnostic.Class, diagnostic.Stage, diagnostic.Operation, strings.Join(diagnostic.TargetRefs, ","), strings.Join(authorization.ValidationScopeTargetRefs, ",")}, "\x00")))
+	// The deterministic bounded digest binds every typed field used by exact
+	// repair-route selection. It permits the resource owner and Orchestrator to
+	// verify causation without passing raw stdout/stderr across owner boundaries.
 	value := runtimecontract.RuntimeValidationFailureObservation{
 		WorkspaceID: context.WorkspaceID, RunID: context.RunID, AuthoritySnapshotID: context.Transaction.AuthoritySnapshotID,
 		DispatchID: context.DispatchID, OperationID: context.OperationID, TargetRole: authorization.TargetRole,
 		DiagnosticClass: diagnostic.Class, CandidateTargetRefs: diagnostic.TargetRefs, ValidationScopeTargetRefs: authorization.ValidationScopeTargetRefs,
-		DiagnosticHash: hex.EncodeToString(hash[:]),
+		DiagnosticHash: runtimecontract.StableRuntimeValidationFailureObservationDiagnosticHash(diagnostic, authorization.ValidationScopeTargetRefs),
 	}.Normalized()
 	// The failure signature is added by RuntimeOperationFailure below; do not
 	// validate this transient value before the caller binds that causation key.
