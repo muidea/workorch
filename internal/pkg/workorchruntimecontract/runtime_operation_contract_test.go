@@ -223,7 +223,9 @@ func TestRuntimeOperationRequiresCurrentTargetSnapshot(t *testing.T) {
 		{name: "file edit", operation: RuntimeOperation{Kind: StepKindFileEdit}, want: true},
 		{name: "text replace", operation: patchOperationWithType("text_replace"), want: true},
 		{name: "unified diff", operation: patchOperationWithType("unified_diff"), want: true},
+		{name: "preview unified diff", operation: RuntimeOperation{Kind: RuntimeBlockKindPatchPreview, Parameters: patchOperationWithType("unified_diff").Parameters}, want: true},
 		{name: "file write", operation: patchOperationWithType("file_write"), want: false},
+		{name: "preview file write", operation: RuntimeOperation{Kind: RuntimeBlockKindPatchPreview, Parameters: patchOperationWithType("file_write").Parameters}, want: false},
 		{name: "validation", operation: RuntimeOperation{Kind: RuntimeBlockKindManagedValidationSession}, want: false},
 	}
 	for _, tt := range tests {

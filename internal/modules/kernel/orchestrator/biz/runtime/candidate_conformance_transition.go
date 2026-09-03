@@ -199,7 +199,7 @@ func validateCandidateConformanceAdmission(attempt runtimecontract.RuntimeCandid
 		if !found {
 			return fmt.Errorf("operation %q has no sealed authorization", operation.Kind)
 		}
-		_, constraints, err := runtimecontract.RuntimeOperationCandidateConstraintsForOperation(operation, authorization)
+		_, constraints, err := runtimecontract.RuntimeOperationCandidateConformanceConstraintsForOperation(operation, authorization)
 		if err != nil {
 			return err
 		}

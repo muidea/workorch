@@ -11,7 +11,7 @@ import (
 // choose a retry, or create execution evidence.
 func (a *RuntimeAdapter) ProbeRuntimeOperationCandidateConformance(operation runtimecontract.RuntimeOperation, authorization runtimecontract.RuntimeCandidateOperationManifest) runtimecontract.RuntimeOperationCandidateConformanceObservation {
 	operation = operation.Normalized()
-	variantID, constraints, err := runtimecontract.RuntimeOperationCandidateConstraintsForOperation(operation, authorization)
+	variantID, constraints, err := runtimecontract.RuntimeOperationCandidateConformanceConstraintsForOperation(operation, authorization)
 	observation := runtimecontract.RuntimeOperationCandidateConformanceObservation{
 		OperationID: operation.ID, OperationKind: operation.Kind, VariantID: variantID,
 		OwnerModuleID: ModuleID, Outcome: runtimecontract.RuntimeOperationCandidateConformant,
@@ -27,7 +27,7 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationCandidateConformance(operation run
 			patch, parseErr := parsePatchUnifiedDiff(diff)
 			if parseErr != nil {
 				observation.Outcome = runtimecontract.RuntimeOperationCandidateNonconformant
-				observation.Violation = &runtimecontract.RuntimeOperationCandidateConformanceViolation{
+				observation.Violation = &runtimecontract.RuntimeOperationCandidateConstraintViolation{
 					ConstraintRef: constraint.Ref, ParameterName: constraint.ParameterName,
 					RequiredShape: constraint.RequiredShape, ActualShape: runtimecontract.RuntimeOperationCandidateActualShapeInvalidSyntax,
 				}
@@ -39,7 +39,7 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationCandidateConformance(operation run
 			}
 			if targetRef == "" || !patchDiffTargetMatches(targetRef, patch) {
 				observation.Outcome = runtimecontract.RuntimeOperationCandidateNonconformant
-				observation.Violation = &runtimecontract.RuntimeOperationCandidateConformanceViolation{
+				observation.Violation = &runtimecontract.RuntimeOperationCandidateConstraintViolation{
 					ConstraintRef: constraint.Ref, ParameterName: constraint.ParameterName,
 					RequiredShape: constraint.RequiredShape, ActualShape: runtimecontract.RuntimeOperationCandidateActualShapeTargetMismatch,
 				}
@@ -50,7 +50,7 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationCandidateConformance(operation run
 			patch, parseErr := parsePatchUnifiedDiff(diff)
 			if parseErr != nil {
 				observation.Outcome = runtimecontract.RuntimeOperationCandidateNonconformant
-				observation.Violation = &runtimecontract.RuntimeOperationCandidateConformanceViolation{
+				observation.Violation = &runtimecontract.RuntimeOperationCandidateConstraintViolation{
 					ConstraintRef: constraint.Ref, ParameterName: constraint.ParameterName,
 					RequiredShape: constraint.RequiredShape, ActualShape: runtimecontract.RuntimeOperationCandidateActualShapeInvalidSyntax,
 				}
@@ -63,7 +63,7 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationCandidateConformance(operation run
 			}
 			if !modeMatches {
 				observation.Outcome = runtimecontract.RuntimeOperationCandidateNonconformant
-				observation.Violation = &runtimecontract.RuntimeOperationCandidateConformanceViolation{
+				observation.Violation = &runtimecontract.RuntimeOperationCandidateConstraintViolation{
 					ConstraintRef: constraint.Ref, ParameterName: constraint.ParameterName,
 					RequiredShape: constraint.RequiredShape, ActualShape: runtimecontract.RuntimeOperationCandidateActualShapeTargetModeMismatch,
 				}

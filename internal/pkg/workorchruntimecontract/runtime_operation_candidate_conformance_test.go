@@ -20,10 +20,15 @@ func TestRuntimeOperationCandidateConstraintsAreSealedAndOwnerNeutral(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if variantID != "unified_diff" || len(constraints) != 2 ||
-		constraints[0].Ref != "patch/unified_diff/diff/single_file" || constraints[0].ParameterName != "diff" ||
-		constraints[1].Ref != "patch/unified_diff/diff/target_mode" || constraints[1].RequiredShape != RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode {
+	if variantID != "unified_diff" || len(constraints) != 3 ||
+		constraints[0].Ref != "patch/unified_diff/diff/observed_target" || constraints[0].RequiredShape != RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget ||
+		constraints[1].Ref != "patch/unified_diff/diff/single_file" || constraints[1].ParameterName != "diff" ||
+		constraints[2].Ref != "patch/unified_diff/diff/target_mode" || constraints[2].RequiredShape != RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode {
 		t.Fatalf("sealed constraints = variant=%q values=%+v", variantID, constraints)
+	}
+	_, conformanceConstraints, err := RuntimeOperationCandidateConformanceConstraintsForOperation(operation, authorization)
+	if err != nil || len(conformanceConstraints) != 2 {
+		t.Fatalf("representation constraints = %+v err=%v", conformanceConstraints, err)
 	}
 	for _, kind := range []string{StepKindGitRead, StepKindGitWrite, StepKindShellCommand, StepKindSSHCommand, StepKindWebFetch, StepKindMCPToolCall} {
 		contract, ok := RuntimeOperationContractForKind(kind)
@@ -47,7 +52,7 @@ func TestRuntimeOperationCandidateConformanceObservationRejectsTamperedConstrain
 		Operation:              RuntimeOperation{ID: "patch-1", Kind: RuntimeBlockKindPatchApply, TargetRefs: []string{"main.go"}, Parameters: []OperationParameter{{Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}}},
 		OperationAuthorization: RuntimeCandidateOperationManifest{Kind: patch.Kind, OwnerModuleID: RuntimeModuleFile, Parameters: patch.Parameters, Variants: patch.Variants, OperationContractRevision: RuntimeOperationContractRevision()}.Normalized(),
 	}
-	violation := &RuntimeOperationCandidateConformanceViolation{
+	violation := &RuntimeOperationCandidateConstraintViolation{
 		ConstraintRef: "patch/unified_diff/diff/single_file", ParameterName: "diff",
 		RequiredShape: RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile, ActualShape: RuntimeOperationCandidateActualShapeInvalidSyntax,
 	}
@@ -67,6 +72,46 @@ func TestRuntimeOperationCandidateConformanceObservationRejectsTamperedConstrain
 	tampered.CandidateManifestHash = "manifest-2"
 	if err := tampered.ValidateForRequest(request, RuntimeModuleFile); err == nil {
 		t.Fatal("tampered manifest identity crossed the owner boundary")
+	}
+}
+
+func TestRuntimeOperationCandidateApplicabilityViolationIsManifestAndObservationBound(t *testing.T) {
+	patch, _ := RuntimeOperationContractForKind(RuntimeBlockKindPatchApply)
+	patchType := "unified_diff"
+	diff := "--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new\n"
+	inventory, err := NewRuntimeOperationAdmissibility("admissibility-file", RuntimeModuleFile, []string{RuntimeBlockKindPatchApply}, []string{"main.go"}, nil, nil, "tree-v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := RuntimeOperationFeasibilityRequest{
+		WorkspaceID: "ws-1", RunID: "run-1", Transaction: AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
+		WorkspaceDeliverableDirectory: t.TempDir(), CandidateManifestHash: "manifest-1", Admissibility: inventory,
+		Operation: RuntimeOperation{ID: "patch-1", Kind: RuntimeBlockKindPatchApply, TargetRefs: []string{"main.go"}, Parameters: []OperationParameter{{Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}}},
+		OperationAuthorization: RuntimeCandidateOperationManifest{
+			Kind: patch.Kind, OwnerModuleID: RuntimeModuleFile, Parameters: patch.Parameters, Variants: patch.Variants,
+			Target:                    RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"main.go"}},
+			OperationContractRevision: RuntimeOperationContractRevision(),
+		}.Normalized(),
+	}
+	violation := RuntimeOperationCandidateConstraintViolation{
+		ConstraintRef: "patch/unified_diff/diff/observed_target", ParameterName: "diff",
+		RequiredShape: RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget,
+		ActualShape:   RuntimeOperationCandidateActualShapeObservedTargetContextMismatch,
+		TargetRef:     "main.go", ObservedRevision: inventory.ObservedRevision,
+	}
+	result, err := NewRuntimeOperationCandidateConstraintViolationObservation(request, violation)
+	if err != nil || result.Outcome != RuntimeOwnerFeasibilityCandidateConstraintViolated || result.CandidateConstraintViolation == nil || result.Feedback != nil {
+		t.Fatalf("candidate applicability result = %+v err=%v", result, err)
+	}
+	tampered := violation
+	tampered.ObservedRevision = "tree-v2"
+	if _, err := NewRuntimeOperationCandidateConstraintViolationObservation(request, tampered); err == nil {
+		t.Fatal("candidate applicability violation with a foreign owner revision was accepted")
+	}
+	tampered = violation
+	tampered.ConstraintRef = "patch/unified_diff/diff/single_file"
+	if _, err := NewRuntimeOperationCandidateConstraintViolationObservation(request, tampered); err == nil {
+		t.Fatal("target applicability fact crossed a representation-only constraint")
 	}
 }
 

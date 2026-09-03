@@ -41,7 +41,7 @@ Workspace owner seals admitted startup input
   -> Run owner seals SM-1 activation
   -> Orchestrator SM-4 drives persisted aggregate
   -> SM-2 seals authority, semantic contract, ready focus and evidence binding
-  -> SM-3 persists/evaluates candidate, obtains any manifest-declared owner candidate-conformance facts, then seals dispatch
+  -> SM-3 persists/evaluates candidate, obtains manifest-declared static conformance and dynamic applicability facts, then seals dispatch
   -> capability owner returns factual result/receipt
   -> SM-2 credits evidence, settles/reopens CWI or seals terminal
   -> SM-4 delivers Result -> Workspace -> Run; Result acknowledgement relays the exact owner-derived ResultID
@@ -174,12 +174,16 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   declared name/type、entry/container、operation kind/index 均无歧义时封存一次 `parameter_entry_encoding` witness，要求
   attempt 1 重新生成全部独立 named typed entries。它不得本地搬移并接受原值，不得把合法 parameter 当作 forbidden field
   删除，也不改变 SM-2 authority 或 SM-4 recovery；mixed unknown/type/duplicate、lineage 漂移或 attempt 1 再拒绝均 final。
-- executable operation variant 可在 manifest 中声明 owner-defined、provider-safe 的 `CandidateConstraints`，仅描述普通
-  JSON schema 无法完整表达的参数 representation。candidate proposal 必须先持久化，随后 receiving capability owner 才通过
-  concrete typed read command 返回 `conformant | nonconformant | owner_contract_defect`；该查询不得读取/修改 workspace、执行
-  operation 或选择 correction。Orchestrator 只以 private SM-3 event/CAS 持久化事实并决定一次 correction/final；final seal
-  必须证明每个受约束 operation 都有 matching logical request、manifest 与 `conformant` fact。未声明 constraint 的 variant
-  不得生成占位 fact 或额外 owner call。
+- executable operation variant 可在 manifest 中声明 owner-defined、provider-safe 的 `CandidateConstraints`，描述普通 JSON schema
+  无法完整表达的参数 shape 或 owner-observed target applicability。candidate proposal 必须先持久化；`parameter_shape` 由 receiving
+  capability owner 通过 concrete typed conformance command 在零 workspace I/O 下返回
+  `conformant | nonconformant | owner_contract_defect`，`target_applicability` 则只能在 ordinary typed feasibility 中以只读方式绑定
+  current target/revision，并返回 `candidate_constraint_violated` 或正常 feasibility outcome。两类 owner fact 都必须精确绑定
+  `attempt + LogicalRequestID + operation + manifest constraint`，owner 不得执行 operation、选择 correction 或推进 terminal。
+  Orchestrator 只通过 private SM-3 event/CAS 持久化 fact 与 disposition；尤其 `CandidateFeasibilityObserved` 必须在同一 CAS 中同时
+  保存 applicability violation 并关闭 attempt 0 为唯一 correction，attempt 1 重复违反直接
+  `candidate_retry_exhausted`。final seal 必须证明每个 static constraint 有 matching `conformant` fact，且 dynamic applicability
+  已由 current feasibility observation 接受。未声明相应 constraint 的 variant 不得生成占位 fact、额外 owner call 或 correction。
 - operations preflight 必须发生在 exact request-session CAS 之前；同一 transaction、stable prefix、manifest、correction hash 与
   expected-document attempt 的 persisted session 是 restart proof。document-complete 后 attempt-begin CAS 前中断或 CAS 后响应丢失
   只能恢复同一 local admission transaction，不能重发 preflight/provider、重复扣减 correction budget 或提前执行 capability。
@@ -209,7 +213,8 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   全部 target member 对每个 required evidence kind 齐全时，Orchestrator SM-2 private event 才能 exactly-once 认可
   collective proof；只有其它 quality/effect/assessment gate 也满足时，SM-2 才能通过 aggregate CAS 授予 CWI
   credit/settlement。capability owner、LLM、Application 与 projection 均无此 authority。
-  typed stale 只走 bounded fact refresh，不消耗 semantic correction。已通过 typed constraint 的 proposal 若仍得到
+  typed stale 只走 bounded fact refresh，不消耗 semantic correction。除显式且 manifest-bound 的
+  `candidate_constraint_violated` 外，owner feasibility 不进入 candidate correction。已通过 typed constraint 的 proposal 若仍得到
   exact-current full-composite `would_not_satisfy`，该事实表示 required-owner published contract 与 owner judgment 自相矛盾；
   Orchestrator 直接记录 `prospective_satisfaction_contract_violated` 并收口为 `semantic_contract_failed`，不得打开
   replacement-target correction、再次请求 provider 或创建 ticket。attempt 1 仅保留普通完整文档/schema
@@ -217,10 +222,13 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   feasibility/satisfaction，不触发 correction/terminal/SM-2 transition；该边不新增状态机、跨 owner transition 或可替代
   terminal 关系。
 - File `unified_diff` candidate conformance 必须在零 workspace I/O 下分别证明 single-file target identity 与 sealed target-policy
-  mode：prospective 只接受 add-file `/dev/null`，exact/existing 只接受 update 形态。资源 probe 若证明 prospective 已存在或
-  exact/existing 已缺失，必须返回 typed `sealed_target_authorization_contradicted`；Orchestrator 才能由 private SM-2 event退役
-  exact binding。validation-failure repair 的其它 owner infeasibility 必须在同一 private CAS 中失效 candidate、退役中间
-  binding 并 bounded-terminal 为 `repair_surface_unavailable`，禁止遗留 pending candidate 进入 SM-4 重复 re-drive。
+  mode：prospective 只接受 add-file `/dev/null`，exact/existing 只接受 update 形态。对 current owner-observed target 无法应用的合法
+  diff，File feasibility 必须返回 manifest-declared `target_applicability` constraint 的 typed
+  `candidate_constraint_violated`，绑定 exact target/revision；不得将其压平为普通 infeasible、binding contradiction 或私有
+  diagnostic correction。资源 probe 若证明 prospective 已存在或 exact/existing 已缺失，必须返回 typed
+  `sealed_target_authorization_contradicted`；Orchestrator 才能由 private SM-2 event退役 exact binding。validation-failure repair 的
+  其它 owner infeasibility 必须在同一 private CAS 中失效 candidate、退役中间 binding 并 bounded-terminal 为
+  `repair_surface_unavailable`，禁止遗留 pending candidate 进入 SM-4 重复 re-drive。
 - Definition 修订不能被 Resume 吸收；需要新输入时必须显式 Restart，并遵守 replacement/delivery transaction。
 
 ## Four Coordinated Machines

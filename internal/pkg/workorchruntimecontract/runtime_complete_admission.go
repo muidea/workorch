@@ -283,6 +283,8 @@ func evaluateRuntimeCompleteAdmissionFeasibility(facts RuntimeFacts, manifestHas
 			return completeAdmissionFailure(RuntimeCompleteAdmissionOwnerStale, "owner_stale", fmt.Errorf("candidate operation %q owner fact is stale", operation.ID))
 		case RuntimeOwnerFeasibilityPrerequisiteRequired:
 			return completeAdmissionFailure(RuntimeCompleteAdmissionOwnerPrerequisite, "owner_prerequisite_required", fmt.Errorf("candidate operation %q requires an owner prerequisite", operation.ID))
+		case RuntimeOwnerFeasibilityCandidateConstraintViolated:
+			return completeAdmissionFailure(RuntimeCompleteAdmissionOwnerInfeasible, "candidate_constraint_violated", fmt.Errorf("candidate operation %q violates a sealed owner candidate constraint", operation.ID))
 		case RuntimeOwnerFeasibilityInfeasible:
 			return completeAdmissionFailure(RuntimeCompleteAdmissionOwnerInfeasible, "owner_infeasible", fmt.Errorf("candidate operation %q is not owner-feasible", operation.ID))
 		case RuntimeOwnerFeasibilityContractDefect:

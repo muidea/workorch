@@ -2568,6 +2568,17 @@ func TestRuntimeAdapterRuntimeFeasibilityRejectsStaleUnifiedDiff(t *testing.T) {
 	if failure == nil || failure.Code != "unified_diff_apply_conflict" {
 		t.Fatalf("failure = %+v, want unified_diff_apply_conflict", failure)
 	}
+	authorization := fileCandidateConformanceAuthorization(t, runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeOperationTargetPolicyExactTarget, target)
+	violation := fileOperationCandidateApplicabilityViolation(runtimecontract.RuntimeOperation{
+		ID: "stale-diff", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{target},
+		Parameters: []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "diff", String: &diff}},
+	}, authorization, inventory, failure)
+	if violation == nil || violation.ConstraintRef != "patch/unified_diff/diff/observed_target" ||
+		violation.RequiredShape != runtimecontract.RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget ||
+		violation.ActualShape != runtimecontract.RuntimeOperationCandidateActualShapeObservedTargetContextMismatch ||
+		violation.TargetRef != target || violation.ObservedRevision != inventory.ObservedRevision {
+		t.Fatalf("candidate applicability violation = %+v", violation)
+	}
 	content, err := os.ReadFile(filepath.Join(workspace, "main.txt"))
 	if err != nil || string(content) != "one\nchanged\nthree\n" {
 		t.Fatalf("read-only feasibility changed file content=%q err=%v", string(content), err)

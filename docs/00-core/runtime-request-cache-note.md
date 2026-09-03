@@ -39,9 +39,10 @@ focused contract；本页不复制字段级正文。
   request-session correction hash。它只在 C4 证明该 field rule 的来源，不改变 C0～C3；LLM 不得从 `Actual` 或单 operation
   manifest 猜测规则。
 - `owner_candidate_constraint` correction 的 C3 authority 保留 manifest-declared `candidateConstraints`；C4 只携带 exact
-  constraint ref、parameter path、closed `actual_shape`/`required_shape` 与 objective，不得携带 rejected parameter、owner
-  parser text 或普通 feasibility diagnostic。attempt 1 仍复用同一 C0～C3 与 `stablePrefixHash`；required shape 只能由
-  capability owner 的后继 typed conformance result 证明。
+  constraint ref、parameter path、closed `actual_shape`/`required_shape`、bounded target observation 与 objective，不得携带 rejected
+  parameter、owner parser text 或普通 feasibility diagnostic。attempt 1 仍复用同一 C0～C3 与 `stablePrefixHash`；静态 required
+  shape 只能由 capability owner 的后继 typed conformance result 证明，target applicability 则只能由后继 typed feasibility 对
+  current target/revision 的 observation 证明。两类结果都不授权 LLM 改写 C0～C3 或自行判断 owner constraint。
 - required field missing/empty 的 schema witness 使用 `field_absent -> field_present`；required field 为 `null` 或错误 JSON type
   时，C4 必须携带 strict decoder 的 exact rejected type、同 path 与 expected schema rule，并使用
   `<actual_type> -> field_present`。两者都只要求重写完整 document，不改变 C0～C3、wire contract、stable-prefix hash 或

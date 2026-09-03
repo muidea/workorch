@@ -431,7 +431,7 @@ func TestRuntimeAggregateRejectsPendingCandidateFeasibilityBindingDriftAfterFres
 			wantErr: "owner policy does not match",
 		},
 		{
-			name: "feedback scope and owner drift",
+			name: "non-feasible fact cannot survive as pending half-state",
 			mutate: func(record *runtimecontract.RuntimeCandidateFeasibilityRecord) {
 				failure := runtimecontract.FailureFact{
 					Class: runtimecontract.FailureClassCandidateInfeasible, Code: "owner_infeasible",
@@ -451,7 +451,7 @@ func TestRuntimeAggregateRejectsPendingCandidateFeasibilityBindingDriftAfterFres
 				record.Observation.Feedback = &feedback
 				record.ReplayProof = nil
 			},
-			wantErr: "feedback does not match aggregate scope and owner",
+			wantErr: "cannot retain an undecided owner feasibility fact",
 		},
 		{
 			name: "replay proof target drift",

@@ -113,9 +113,10 @@ type RuntimeCandidateFeasibilityRecord struct {
 	// copied from the owner response and cannot be reconstructed from current
 	// catalog state during restart.
 	CandidateManifestHash string
-	// Observation is the sole owner-authored factual result. It is separate from the
-	// CandidateAttempt Failure field so an owner infeasibility cannot enter the
-	// SM-3 correction matrix.
+	// Observation is the sole owner-authored factual result. It is separate from
+	// CandidateAttempt.Failure: only the explicit, manifest-bound
+	// candidate_constraint_violated member may be projected by Orchestrator into
+	// the bounded SM-3 correction matrix; resource infeasibility never may.
 	Observation *RuntimeOwnerFeasibilityObservation
 	// ReplayProof is optional owner preflight output. When present it is sealed
 	// into the execution record for same-key/fence receipt recovery; it is never
@@ -761,6 +762,11 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 						return fmt.Errorf("pending runtime candidate attempt %s cannot retain a rejected conformance fact", key)
 					}
 				}
+				for _, feasibility := range value.Feasibilities {
+					if feasibility.Observation == nil || feasibility.Observation.Normalized().Outcome != RuntimeOwnerFeasibilityFeasible {
+						return fmt.Errorf("pending runtime candidate attempt %s cannot retain an undecided owner feasibility fact", key)
+					}
+				}
 			}
 			if value.State == RuntimeCandidateAttemptStateAccepted {
 				if strings.TrimSpace(value.CandidateHash) == "" || strings.TrimSpace(value.DispatchID) == "" ||
@@ -826,6 +832,11 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 				}
 				if outcome == RuntimeOperationCandidateContractDefect && value.Failure.Code != "runtime_contract_defect" {
 					return fmt.Errorf("failed runtime candidate attempt %s has an unbound owner candidate contract defect", key)
+				}
+			}
+			for _, feasibility := range value.Feasibilities {
+				if feasibility.Observation != nil && feasibility.Observation.Normalized().Outcome == RuntimeOwnerFeasibilityCandidateConstraintViolated && value.Failure.Code != "candidate_owner_constraint_nonconformant" {
+					return fmt.Errorf("failed runtime candidate attempt %s has an unbound owner candidate applicability rejection", key)
 				}
 			}
 		case RuntimeCandidateAttemptStateInvalidated:

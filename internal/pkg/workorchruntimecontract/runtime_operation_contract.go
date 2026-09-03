@@ -308,6 +308,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{ID: "unified_diff", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "unified_diff"}}, RequiredParameters: []string{"diff"}, RequiredNonEmpty: []string{"diff"}, ForbiddenParameters: []string{"content", "oldText", "newText", "occurrence"}, CandidateConstraints: []RuntimeOperationCandidateConstraint{
 					{Ref: "patch/unified_diff/diff/single_file", Kind: RuntimeOperationCandidateConstraintParameterShape, ParameterName: "diff", RequiredShape: RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile},
 					{Ref: "patch/unified_diff/diff/target_mode", Kind: RuntimeOperationCandidateConstraintParameterShape, ParameterName: "diff", RequiredShape: RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode},
+					{Ref: "patch/unified_diff/diff/observed_target", Kind: RuntimeOperationCandidateConstraintTargetApplicability, ParameterName: "diff", RequiredShape: RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget},
 				}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
 			},
 			Rules: []string{
@@ -315,6 +316,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				"file_write replacing an existing target must provide the owner-observed baseHash",
 				"text_replace must provide non-empty oldText and a distinct newText",
 				"unified_diff must provide non-empty diff",
+				"unified_diff must apply to the current owner-observed target content",
 				"targetRefs must contain exactly one workspace-relative target",
 			},
 		}, true
@@ -775,7 +777,7 @@ func RuntimeOperationRequiresCurrentTargetSnapshot(operation RuntimeOperation) b
 	switch operation.Kind {
 	case StepKindFileEdit:
 		return true
-	case RuntimeBlockKindPatchApply:
+	case RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview:
 		patchType := operationStringParameter(operation.Parameters, "patchType")
 		return patchType == "text_replace" || patchType == "unified_diff"
 	default:

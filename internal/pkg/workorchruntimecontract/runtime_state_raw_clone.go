@@ -614,7 +614,7 @@ func cloneRuntimeCandidateAttemptRecordRaw(in RuntimeCandidateAttemptRecord) Run
 	out.Conformances = cloneRuntimeStateRawSlice(in.Conformances, func(item RuntimeCandidateConformanceRecord) RuntimeCandidateConformanceRecord {
 		value := item
 		value.Observation = item.Observation
-		value.Observation.Violation = cloneRuntimeStateRawPointer(item.Observation.Violation, func(violation RuntimeOperationCandidateConformanceViolation) RuntimeOperationCandidateConformanceViolation {
+		value.Observation.Violation = cloneRuntimeStateRawPointer(item.Observation.Violation, func(violation RuntimeOperationCandidateConstraintViolation) RuntimeOperationCandidateConstraintViolation {
 			return violation
 		})
 		return value
@@ -1419,6 +1419,9 @@ func cloneRuntimeOwnerFactRequirementRaw(in RuntimeOwnerFactRequirement) Runtime
 func cloneRuntimeOwnerFeasibilityObservationRaw(in RuntimeOwnerFeasibilityObservation) RuntimeOwnerFeasibilityObservation {
 	out := in
 	out.OwnerPolicy = cloneRuntimeOwnerPolicyIdentityRaw(in.OwnerPolicy)
+	out.CandidateConstraintViolation = cloneRuntimeStateRawPointer(in.CandidateConstraintViolation, func(item RuntimeOperationCandidateConstraintViolation) RuntimeOperationCandidateConstraintViolation {
+		return item
+	})
 	out.Feedback = cloneRuntimeStateRawPointer(in.Feedback, func(item RuntimeFeedback) RuntimeFeedback { return cloneRuntimeFeedbackRaw(item) })
 	out.Stale = cloneRuntimeStateRawPointer(in.Stale, func(item RuntimePrerequisiteStale) RuntimePrerequisiteStale {
 		return cloneRuntimePrerequisiteStaleRaw(item)

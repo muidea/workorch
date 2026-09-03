@@ -571,11 +571,21 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 	failure, stale, replayProof := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithReplayProof(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
 	prerequisiteRequest := fileOperationSnapshotPrerequisiteRequest(operation, failure, command.CurrentTargetSnapshot)
 	constraintImpact := ownerFeasibilityConstraintImpact(operationAuthorizationTargetPolicy(command.OperationAuthorization), failure)
-	category := ownerFeasibilityCategory(failure)
-	if constraintImpact != "" {
-		category = runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed
+	var violation *runtimecontract.RuntimeOperationCandidateConstraintViolation
+	if prerequisiteRequest == nil {
+		violation = fileOperationCandidateApplicabilityViolation(operation, command.OperationAuthorization, command.Admissibility, failure)
 	}
-	observation, err := fileevents.NewProbeRuntimeOperationFeasibilityResult(command, category, failure, stale, prerequisiteRequest, replayProof)
+	var observation fileevents.ProbeRuntimeOperationFeasibilityResult
+	var err error
+	if violation != nil {
+		observation, err = fileevents.NewProbeRuntimeOperationCandidateConstraintViolationResult(command, *violation)
+	} else {
+		category := ownerFeasibilityCategory(failure)
+		if constraintImpact != "" {
+			category = runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed
+		}
+		observation, err = fileevents.NewProbeRuntimeOperationFeasibilityResult(command, category, failure, stale, prerequisiteRequest, replayProof)
+	}
 	if err != nil {
 		setPrerequisiteError(result, err)
 		return

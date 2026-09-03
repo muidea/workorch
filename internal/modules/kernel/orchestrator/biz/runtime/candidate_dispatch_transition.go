@@ -420,9 +420,10 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 	return CandidateAdmissionCommitResult{Aggregate: aggregate, Admission: admission}, nil
 }
 
-// recordCandidateFeasibility persists one completed, side-effect-free owner
-// probe. The operation must belong to the already persisted proposal, making
-// this ledger a restart fence rather than a second candidate authority.
+// recordCandidateFeasibility is the sole SM-2/SM-3 commit for one completed,
+// side-effect-free owner probe. The same CAS persists the factual result and,
+// for every non-feasible outcome, its Orchestrator-owned disposition. Restart
+// therefore cannot observe a pending candidate with an undecided owner fact.
 func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, attempt int, record runtimecontract.RuntimeCandidateFeasibilityRecord) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || (attempt != 0 && attempt != 1) {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
@@ -435,18 +436,38 @@ func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Cont
 		return RuntimeAggregate{}, err
 	}
 	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
+		if duplicateCandidateFeasibilityDisposition(aggregate.CandidateAttempts, attempt, record) {
+			return aggregate, nil
+		}
 		return RuntimeAggregate{}, err
 	}
 	contractID := runtimecontract.StableAuthorityContractID(workspaceID, runID, aggregate.Decision.AuthorityTransaction())
 	idx, attemptRecord, ok := pendingCandidateAttempt(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
-	if !ok || attemptRecord.Proposal == nil {
+	if !ok {
+		// Only a late delivery may match historical disposition. Never let an
+		// identical record from an older authority shadow a current pending
+		// attempt that must receive its own fact and CAS disposition.
+		if duplicateCandidateFeasibilityDisposition(aggregate.CandidateAttempts, attempt, record) {
+			return aggregate, nil
+		}
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d has no pending proposal", common.ErrConflict, attempt)
 	}
-	if !candidateProposalContainsOperation(*attemptRecord.Proposal, record.OperationID) {
+	if attemptRecord.Proposal == nil {
+		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d has no pending proposal", common.ErrConflict, attempt)
+	}
+	operation, operationIndex, operationFound := candidateOperationAndIndexByID(*attemptRecord.Proposal, record.OperationID)
+	if !operationFound {
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility operation %q is absent from the persisted proposal", common.ErrConflict, record.OperationID)
 	}
 	if record.CandidateManifestHash != attemptRecord.ManifestHash {
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate feasibility operation %q does not match the pending manifest", common.ErrConflict, record.OperationID)
+	}
+	manifest, err := persistedCandidateAttemptManifest(aggregate, attemptRecord)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := validateCandidateFeasibilityObservationBinding(aggregate, operation, record, manifest); err != nil {
+		return RuntimeAggregate{}, err
 	}
 	for _, persisted := range attemptRecord.Feasibilities {
 		if strings.TrimSpace(persisted.OperationID) != strings.TrimSpace(record.OperationID) {
@@ -468,6 +489,38 @@ func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Cont
 		copyRecord.ReplayProof = &proof
 	}
 	aggregate.CandidateAttempts[idx].Feasibilities = append(aggregate.CandidateAttempts[idx].Feasibilities, copyRecord)
+	observation := copyRecord.Observation.Clone()
+	switch observation.Outcome {
+	case runtimecontract.RuntimeOwnerFeasibilityFeasible:
+		// The persisted fact is the restart fence for final admission.
+	case runtimecontract.RuntimeOwnerFeasibilityStale:
+		if err := applyCandidatePrerequisiteStale(&aggregate, idx, *observation.Stale); err != nil {
+			return RuntimeAggregate{}, err
+		}
+	case runtimecontract.RuntimeOwnerFeasibilityPrerequisiteRequired:
+		if err := validateCandidateFeasibilityPrerequisiteDisposition(aggregate, aggregate.CandidateAttempts[idx], operation, *observation.PrerequisiteRequest); err != nil {
+			return RuntimeAggregate{}, err
+		}
+		if err := applyCandidateFeasibilityPrerequisite(&aggregate, idx, *observation.PrerequisiteRequest); err != nil {
+			return RuntimeAggregate{}, err
+		}
+	case runtimecontract.RuntimeOwnerFeasibilityCandidateConstraintViolated:
+		failure := candidateApplicabilityConstraintFailure(operation, operationIndex, manifest, *observation.CandidateConstraintViolation)
+		sealed, correction, sealErr := sealCandidateRejectionWithFrontier(&failure, manifest, candidateCorrectionFrontier{candidate: attemptRecord.Proposal})
+		if sealErr != nil || sealed == nil || correction == nil {
+			return RuntimeAggregate{}, fmt.Errorf("%w: seal owner candidate applicability rejection: %v", common.ErrConflict, sealErr)
+		}
+		if err := closeCandidateAttemptWithCorrection(&aggregate, idx, attempt, *sealed, correction); err != nil {
+			return RuntimeAggregate{}, err
+		}
+	case runtimecontract.RuntimeOwnerFeasibilityInfeasible, runtimecontract.RuntimeOwnerFeasibilityContractDefect:
+		currentAttempt := aggregate.CandidateAttempts[idx]
+		if err := applyCandidateOwnerInfeasibility(&aggregate, idx, currentAttempt, copyRecord, observation); err != nil {
+			return RuntimeAggregate{}, err
+		}
+	default:
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
@@ -476,6 +529,103 @@ func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Cont
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+func duplicateCandidateFeasibilityDisposition(attempts []runtimecontract.RuntimeCandidateAttemptRecord, attempt int, record runtimecontract.RuntimeCandidateFeasibilityRecord) bool {
+	for _, historical := range attempts {
+		if historical.Attempt != attempt {
+			continue
+		}
+		for _, persisted := range historical.Feasibilities {
+			if reflect.DeepEqual(persisted, record) {
+				return true
+			}
+		}
+		if record.Observation == nil {
+			continue
+		}
+		observation := record.Observation.Clone()
+		if historical.State != runtimecontract.RuntimeCandidateAttemptStateInvalidated {
+			continue
+		}
+		switch observation.Outcome {
+		case runtimecontract.RuntimeOwnerFeasibilityStale:
+			if historical.Stale != nil && reflect.DeepEqual(historical.Stale.Normalized(), observation.Stale.Normalized()) {
+				return true
+			}
+		case runtimecontract.RuntimeOwnerFeasibilityPrerequisiteRequired:
+			if historical.PrerequisiteRequest != nil && historical.PrerequisiteRequest.Same(*observation.PrerequisiteRequest) {
+				return true
+			}
+		case runtimecontract.RuntimeOwnerFeasibilityInfeasible, runtimecontract.RuntimeOwnerFeasibilityContractDefect:
+			if historical.OwnerFeasibility != nil && reflect.DeepEqual(historical.OwnerFeasibility.Clone(), observation) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func validateCandidateFeasibilityObservationBinding(aggregate RuntimeAggregate, operation runtimecontract.RuntimeOperation, record runtimecontract.RuntimeCandidateFeasibilityRecord, manifest runtimecontract.RuntimeCandidateContractManifest) error {
+	if record.Observation == nil || record.Observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityCandidateConstraintViolated {
+		return nil
+	}
+	observation := record.Observation.Clone()
+	violation := observation.CandidateConstraintViolation
+	if violation == nil {
+		return fmt.Errorf("%w: candidate applicability observation has no violation", common.ErrConflict)
+	}
+	constraint, found := runtimecontract.RuntimeCandidateConstraintForOperationRef(manifest, operation.Kind, violation.ConstraintRef)
+	if !found || constraint.Kind != runtimecontract.RuntimeOperationCandidateConstraintTargetApplicability ||
+		constraint.ParameterName != violation.ParameterName || constraint.RequiredShape != violation.RequiredShape {
+		return fmt.Errorf("%w: candidate applicability violation is absent from the sealed manifest", common.ErrConflict)
+	}
+	if !runtimeOperationTargetsRef(operation, violation.TargetRef) {
+		return fmt.Errorf("%w: candidate applicability violation target does not match the proposed operation", common.ErrConflict)
+	}
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !found || descriptor.OwnerModuleID == "" || observation.OwnerPolicy.OwnerModuleID != descriptor.OwnerModuleID {
+		return fmt.Errorf("%w: candidate applicability violation owner does not match the proposed operation", common.ErrConflict)
+	}
+	for _, inventory := range aggregate.Facts.Resources.OperationAdmissibilities {
+		inventory = inventory.Normalized()
+		if inventory.SnapshotID == record.AdmissibilitySnapshotID && inventory.AcquisitionBinding == record.AcquisitionBinding &&
+			inventory.OwnerModuleID == descriptor.OwnerModuleID && inventory.ObservedRevision == violation.ObservedRevision {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: candidate applicability violation is not bound to the current owner observation", common.ErrConflict)
+}
+
+func validateCandidateFeasibilityPrerequisiteDisposition(aggregate RuntimeAggregate, attemptRecord runtimecontract.RuntimeCandidateAttemptRecord, operation runtimecontract.RuntimeOperation, request runtimecontract.RuntimeOperationPrerequisiteRequest) error {
+	if !runtimecontract.RuntimeOperationRequiresCurrentTargetSnapshot(operation) || !runtimeOperationTargetsRef(operation, request.SubjectRef) {
+		return fmt.Errorf("%w: prerequisite request is not bound to the pending candidate operation", common.ErrConflict)
+	}
+	descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
+	if !known || descriptor.OwnerModuleID != request.OwnerModuleID {
+		return fmt.Errorf("%w: prerequisite request owner does not match candidate operation", common.ErrConflict)
+	}
+	feasibility, found := candidateAttemptFeasibilityForOperation(attemptRecord.Feasibilities, request.OperationID)
+	if !found || feasibility.Observation == nil || feasibility.Observation.PrerequisiteRequest == nil || !feasibility.Observation.PrerequisiteRequest.Same(request) {
+		return fmt.Errorf("%w: prerequisite request has no matching persisted owner feasibility fact", common.ErrConflict)
+	}
+	return nil
+}
+
+func candidateApplicabilityConstraintFailure(operation runtimecontract.RuntimeOperation, operationIndex int, manifest runtimecontract.RuntimeCandidateContractManifest, violation runtimecontract.RuntimeOperationCandidateConstraintViolation) runtimecontract.RuntimeCandidateFailure {
+	return runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract,
+		Code:  "candidate_owner_constraint_nonconformant", Signature: "candidate-owner-constraint-nonconformant",
+		Reason:     "candidate parameter does not apply to the owner-observed target under its sealed constraint",
+		TargetRefs: []string{violation.TargetRef},
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			OperationID: operation.ID,
+			Path:        fmt.Sprintf("$.operations[%d].parameters[name=%s]", operationIndex, violation.ParameterName),
+			Actual:      string(violation.ActualShape), ConstraintRef: violation.ConstraintRef,
+			RequiredShape: string(violation.RequiredShape), ManifestHash: manifest.Hash,
+			Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformOwnerConstraint},
+		},
+	}
 }
 
 func candidateProposalContainsOperation(candidate runtimecontract.RuntimeCandidate, wanted string) bool {

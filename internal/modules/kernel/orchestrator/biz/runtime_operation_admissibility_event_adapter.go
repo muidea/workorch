@@ -209,10 +209,14 @@ func ProbeRuntimeOperationFeasibility(ctx context.Context, hub magicevent.Hub, c
 	if err := validateRuntimeOperationFeasibilityFeedback(command, descriptor, response); err != nil {
 		return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
 	}
-	if response.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible {
+	switch response.Outcome {
+	case runtimecontract.RuntimeOwnerFeasibilityFeasible:
 		return normalizeFeasibleRuntimeOperationObservation(command, descriptor, response)
+	case runtimecontract.RuntimeOwnerFeasibilityCandidateConstraintViolated:
+		return normalizeCandidateConstraintRuntimeOperationObservation(command, descriptor, response)
+	default:
+		return normalizeInfeasibleRuntimeOperationObservation(command, descriptor, response)
 	}
-	return normalizeInfeasibleRuntimeOperationObservation(command, descriptor, response)
 }
 
 func normalizeRuntimeOperationFeasibilityRequest(command runtimecontract.RuntimeOperationFeasibilityRequest) (runtimecontract.RuntimeOperationFeasibilityRequest, runtimecontract.RuntimeOperationDescriptor, error) {
@@ -342,6 +346,24 @@ func normalizeFeasibleRuntimeOperationObservation(command runtimecontract.Runtim
 		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility probe returned mismatched replay proof")
 	}
 	response.ReplayProof = &proof
+	return response, nil
+}
+
+func normalizeCandidateConstraintRuntimeOperationObservation(command runtimecontract.RuntimeOperationFeasibilityRequest, descriptor runtimecontract.RuntimeOperationDescriptor, response runtimecontract.RuntimeOperationFeasibilityObservation) (runtimecontract.RuntimeOperationFeasibilityObservation, error) {
+	if response.CandidateConstraintViolation == nil {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("candidate-constraint runtime operation probe has no bounded violation")
+	}
+	policy := response.OwnerPolicy.Normalized()
+	if err := policy.Validate(); err != nil || policy.OwnerModuleID != descriptor.OwnerModuleID || policy.CatalogSnapshotID != command.Admissibility.SnapshotID {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("candidate-constraint runtime operation probe returned mismatched owner policy")
+	}
+	expected, err := runtimecontract.NewRuntimeOperationCandidateConstraintViolationObservation(command, *response.CandidateConstraintViolation)
+	if err != nil {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, err
+	}
+	if expected.CandidateConstraintViolation == nil || *expected.CandidateConstraintViolation != *response.CandidateConstraintViolation {
+		return runtimecontract.RuntimeOperationFeasibilityObservation{}, fmt.Errorf("candidate-constraint runtime operation probe returned mismatched violation")
+	}
 	return response, nil
 }
 

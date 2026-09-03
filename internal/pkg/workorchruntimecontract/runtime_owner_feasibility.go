@@ -15,7 +15,12 @@ const (
 	RuntimeOwnerFeasibilityFeasible             RuntimeOwnerFeasibilityOutcome = "feasible"
 	RuntimeOwnerFeasibilityStale                RuntimeOwnerFeasibilityOutcome = "stale"
 	RuntimeOwnerFeasibilityPrerequisiteRequired RuntimeOwnerFeasibilityOutcome = "prerequisite_required"
-	RuntimeOwnerFeasibilityInfeasible           RuntimeOwnerFeasibilityOutcome = "infeasible"
+	// RuntimeOwnerFeasibilityCandidateConstraintViolated reports that the
+	// candidate document is well-formed but does not satisfy one manifest-
+	// sealed constraint against the exact owner observation. The owner does not
+	// choose whether Orchestrator retries or terminates.
+	RuntimeOwnerFeasibilityCandidateConstraintViolated RuntimeOwnerFeasibilityOutcome = "candidate_constraint_violated"
+	RuntimeOwnerFeasibilityInfeasible                  RuntimeOwnerFeasibilityOutcome = "infeasible"
 	// RuntimeOwnerFeasibilityContractDefect is a typed owner-boundary fact:
 	// the capability emitted a failure code that is absent from its own total
 	// registry. It is not an ordinary infeasibility and must never enter
@@ -64,8 +69,8 @@ type RuntimeOwnerFeasibilityConstraintImpact string
 const (
 	// RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted
 	// means the owner's current resource observation disproves the target
-	// authorization sealed for the proposed operation. Candidate-local failures
-	// such as an ineffective patch leave ConstraintImpact empty.
+	// authorization sealed for the proposed operation. Candidate applicability
+	// uses CandidateConstraintViolation instead of this SM-2 impact field.
 	RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted RuntimeOwnerFeasibilityConstraintImpact = "sealed_target_authorization_contradicted"
 )
 
@@ -81,18 +86,23 @@ func ValidRuntimeOwnerFeasibilityConstraintImpact(impact RuntimeOwnerFeasibility
 // RuntimeOwnerFeasibilityObservation is a pure persisted value. It carries no
 // Runtime action, retry, terminal, governance or aggregate mutation fields.
 type RuntimeOwnerFeasibilityObservation struct {
-	Outcome             RuntimeOwnerFeasibilityOutcome
-	OwnerPolicy         RuntimeOwnerPolicyIdentity
-	ConstraintImpact    RuntimeOwnerFeasibilityConstraintImpact
-	Feedback            *RuntimeFeedback
-	Stale               *RuntimePrerequisiteStale
-	PrerequisiteRequest *RuntimeOperationPrerequisiteRequest
+	Outcome                      RuntimeOwnerFeasibilityOutcome
+	OwnerPolicy                  RuntimeOwnerPolicyIdentity
+	ConstraintImpact             RuntimeOwnerFeasibilityConstraintImpact
+	CandidateConstraintViolation *RuntimeOperationCandidateConstraintViolation
+	Feedback                     *RuntimeFeedback
+	Stale                        *RuntimePrerequisiteStale
+	PrerequisiteRequest          *RuntimeOperationPrerequisiteRequest
 }
 
 func (o RuntimeOwnerFeasibilityObservation) Normalized() RuntimeOwnerFeasibilityObservation {
 	o.Outcome = RuntimeOwnerFeasibilityOutcome(strings.TrimSpace(string(o.Outcome)))
 	o.OwnerPolicy = o.OwnerPolicy.Normalized()
 	o.ConstraintImpact = RuntimeOwnerFeasibilityConstraintImpact(strings.TrimSpace(string(o.ConstraintImpact)))
+	if o.CandidateConstraintViolation != nil {
+		value := o.CandidateConstraintViolation.Normalized()
+		o.CandidateConstraintViolation = &value
+	}
 	if o.Feedback != nil {
 		feedback := o.Feedback.CloneOriginal()
 		o.Feedback = &feedback
@@ -120,29 +130,36 @@ func (o RuntimeOwnerFeasibilityObservation) Validate() error {
 	}
 	switch o.Outcome {
 	case RuntimeOwnerFeasibilityFeasible:
-		if o.Feedback != nil || o.Stale != nil || o.PrerequisiteRequest != nil {
+		if o.CandidateConstraintViolation != nil || o.Feedback != nil || o.Stale != nil || o.PrerequisiteRequest != nil {
 			return fmt.Errorf("feasible owner feasibility observation cannot carry failure detail")
 		}
 	case RuntimeOwnerFeasibilityStale:
-		if o.Stale == nil || o.Feedback != nil || o.PrerequisiteRequest != nil {
+		if o.Stale == nil || o.CandidateConstraintViolation != nil || o.Feedback != nil || o.PrerequisiteRequest != nil {
 			return fmt.Errorf("stale owner feasibility observation requires only stale detail")
 		}
 		if err := o.Stale.Validate(); err != nil {
 			return err
 		}
 	case RuntimeOwnerFeasibilityPrerequisiteRequired:
-		if o.PrerequisiteRequest == nil || o.Feedback == nil || o.Stale != nil {
+		if o.PrerequisiteRequest == nil || o.CandidateConstraintViolation != nil || o.Feedback == nil || o.Stale != nil {
 			return fmt.Errorf("prerequisite-required owner feasibility observation requires category, failure identity and prerequisite")
 		}
 		if err := o.PrerequisiteRequest.Validate(); err != nil {
 			return err
 		}
+	case RuntimeOwnerFeasibilityCandidateConstraintViolated:
+		if o.CandidateConstraintViolation == nil || o.Feedback != nil || o.Stale != nil || o.PrerequisiteRequest != nil {
+			return fmt.Errorf("candidate-constraint-violated owner feasibility observation requires only a bounded violation")
+		}
+		if err := o.CandidateConstraintViolation.Validate(); err != nil {
+			return err
+		}
 	case RuntimeOwnerFeasibilityInfeasible:
-		if o.Feedback == nil || o.Stale != nil || o.PrerequisiteRequest != nil {
+		if o.CandidateConstraintViolation != nil || o.Feedback == nil || o.Stale != nil || o.PrerequisiteRequest != nil {
 			return fmt.Errorf("infeasible owner feasibility observation requires category and failure identity")
 		}
 	case RuntimeOwnerFeasibilityContractDefect:
-		if o.Feedback == nil || o.Stale != nil || o.PrerequisiteRequest != nil {
+		if o.CandidateConstraintViolation != nil || o.Feedback == nil || o.Stale != nil || o.PrerequisiteRequest != nil {
 			return fmt.Errorf("owner-contract-defect feasibility observation requires original failure identity and feedback")
 		}
 	default:

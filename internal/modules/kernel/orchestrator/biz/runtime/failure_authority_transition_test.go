@@ -338,21 +338,17 @@ func prepareSemanticValidationRepairOwnerInfeasibility(t *testing.T) (RuntimeAgg
 			OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility-test", CatalogSnapshotID: catalog.SnapshotID,
 		},
 	}
-	if _, err := controller.recordCandidateFeasibility(context.Background(), proposed.Facts.WorkspaceID, proposed.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+	feasibility := runtimecontract.RuntimeCandidateFeasibilityRecord{
 		OperationID: operationID, AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, proposed.Facts.WorkspaceID, proposed.Facts.RunID, 0),
 		Observation:           &observation,
-	}); err != nil {
-		t.Fatal(err)
 	}
-	prepared, err := controller.Load(context.Background(), proposed.Facts.WorkspaceID, proposed.Facts.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return prepared, RuntimeInternalEvent{
-		Kind:      RuntimeInternalEventOwnerFeasibilityObserved,
-		Scope:     RuntimeInternalEventScope{WorkspaceID: prepared.Facts.WorkspaceID, RunID: prepared.Facts.RunID},
-		Authority: &RuntimeInternalAuthorityPayload{Attempt: 0, OwnerFeasibility: &observation},
+	return proposed, RuntimeInternalEvent{
+		Kind:  RuntimeInternalEventCandidateFeasibilityObserved,
+		Scope: RuntimeInternalEventScope{WorkspaceID: proposed.Facts.WorkspaceID, RunID: proposed.Facts.RunID},
+		Transaction: &RuntimeInternalTransactionPayload{
+			Attempt: 0, CandidateFeasibility: &feasibility,
+		},
 	}
 }
 
@@ -396,21 +392,17 @@ func prepareConfirmedRepairOwnerInfeasibility(t *testing.T) (RuntimeAggregate, R
 			OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility-v1", CatalogSnapshotID: inventory.SnapshotID,
 		},
 	}
-	if _, err := fixture.controller.recordCandidateFeasibility(ctx, proposed.Facts.WorkspaceID, proposed.Facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+	feasibility := runtimecontract.RuntimeCandidateFeasibilityRecord{
 		OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, fixture.controller, proposed.Facts.WorkspaceID, proposed.Facts.RunID, 0),
 		Observation:           &observation,
-	}); err != nil {
-		t.Fatal(err)
 	}
-	prepared, err := fixture.controller.Load(ctx, proposed.Facts.WorkspaceID, proposed.Facts.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return prepared, RuntimeInternalEvent{
-		Kind:      RuntimeInternalEventOwnerFeasibilityObserved,
-		Scope:     RuntimeInternalEventScope{WorkspaceID: prepared.Facts.WorkspaceID, RunID: prepared.Facts.RunID},
-		Authority: &RuntimeInternalAuthorityPayload{Attempt: 0, OwnerFeasibility: &observation},
+	return proposed, RuntimeInternalEvent{
+		Kind:  RuntimeInternalEventCandidateFeasibilityObserved,
+		Scope: RuntimeInternalEventScope{WorkspaceID: proposed.Facts.WorkspaceID, RunID: proposed.Facts.RunID},
+		Transaction: &RuntimeInternalTransactionPayload{
+			Attempt: 0, CandidateFeasibility: &feasibility,
+		},
 	}
 }
 

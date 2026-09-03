@@ -16,6 +16,11 @@ type RuntimeOperationCandidateConstraintKind string
 
 const (
 	RuntimeOperationCandidateConstraintParameterShape RuntimeOperationCandidateConstraintKind = "parameter_shape"
+	// RuntimeOperationCandidateConstraintTargetApplicability is evaluated only
+	// by the capability owner's read-only feasibility lane against the exact
+	// observed target. It is still sealed in the candidate manifest, but it must
+	// never make the zero-I/O representation check claim a mutable-resource fact.
+	RuntimeOperationCandidateConstraintTargetApplicability RuntimeOperationCandidateConstraintKind = "target_applicability"
 )
 
 // RuntimeOperationCandidateRequiredShape is a closed, provider-safe shape
@@ -24,8 +29,9 @@ const (
 type RuntimeOperationCandidateRequiredShape string
 
 const (
-	RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile           RuntimeOperationCandidateRequiredShape = "unified_diff_single_file"
-	RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode RuntimeOperationCandidateRequiredShape = "unified_diff_authorized_target_mode"
+	RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile                 RuntimeOperationCandidateRequiredShape = "unified_diff_single_file"
+	RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode       RuntimeOperationCandidateRequiredShape = "unified_diff_authorized_target_mode"
+	RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget RuntimeOperationCandidateRequiredShape = "unified_diff_applicable_to_observed_target"
 )
 
 // RuntimeOperationCandidateActualShape is the bounded factual classification
@@ -34,9 +40,10 @@ const (
 type RuntimeOperationCandidateActualShape string
 
 const (
-	RuntimeOperationCandidateActualShapeInvalidSyntax      RuntimeOperationCandidateActualShape = "invalid_syntax"
-	RuntimeOperationCandidateActualShapeTargetMismatch     RuntimeOperationCandidateActualShape = "target_mismatch"
-	RuntimeOperationCandidateActualShapeTargetModeMismatch RuntimeOperationCandidateActualShape = "target_mode_mismatch"
+	RuntimeOperationCandidateActualShapeInvalidSyntax                 RuntimeOperationCandidateActualShape = "invalid_syntax"
+	RuntimeOperationCandidateActualShapeTargetMismatch                RuntimeOperationCandidateActualShape = "target_mismatch"
+	RuntimeOperationCandidateActualShapeTargetModeMismatch            RuntimeOperationCandidateActualShape = "target_mode_mismatch"
+	RuntimeOperationCandidateActualShapeObservedTargetContextMismatch RuntimeOperationCandidateActualShape = "observed_target_context_mismatch"
 )
 
 // RuntimeOperationCandidateConstraint is immutable executable-catalog data.
@@ -62,16 +69,21 @@ func (c RuntimeOperationCandidateConstraint) Validate() error {
 	if c.Ref == "" || c.ParameterName == "" {
 		return fmt.Errorf("runtime operation candidate constraint requires ref and parameter")
 	}
-	if c.Kind != RuntimeOperationCandidateConstraintParameterShape {
+	switch c.Kind {
+	case RuntimeOperationCandidateConstraintParameterShape:
+		switch c.RequiredShape {
+		case RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile,
+			RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode:
+			return nil
+		}
+	case RuntimeOperationCandidateConstraintTargetApplicability:
+		if c.RequiredShape == RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget {
+			return nil
+		}
+	default:
 		return fmt.Errorf("runtime operation candidate constraint kind %q is not declared", c.Kind)
 	}
-	switch c.RequiredShape {
-	case RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile,
-		RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode:
-		return nil
-	default:
-		return fmt.Errorf("runtime operation candidate required shape %q is not declared", c.RequiredShape)
-	}
+	return fmt.Errorf("runtime operation candidate required shape %q is not declared for kind %q", c.RequiredShape, c.Kind)
 }
 
 func NormalizeRuntimeOperationCandidateConstraints(values []RuntimeOperationCandidateConstraint) []RuntimeOperationCandidateConstraint {
@@ -126,6 +138,23 @@ func RuntimeOperationCandidateConstraintsForOperation(operation RuntimeOperation
 	return strings.TrimSpace(variant.ID), constraints, nil
 }
 
+// RuntimeOperationCandidateConformanceConstraintsForOperation returns only
+// constraints that can be decided from the provider document and sealed
+// authorization without reading owner resources.
+func RuntimeOperationCandidateConformanceConstraintsForOperation(operation RuntimeOperation, authorization RuntimeCandidateOperationManifest) (string, []RuntimeOperationCandidateConstraint, error) {
+	variantID, constraints, err := RuntimeOperationCandidateConstraintsForOperation(operation, authorization)
+	if err != nil {
+		return "", nil, err
+	}
+	ret := make([]RuntimeOperationCandidateConstraint, 0, len(constraints))
+	for _, constraint := range constraints {
+		if constraint.Kind == RuntimeOperationCandidateConstraintParameterShape {
+			ret = append(ret, constraint)
+		}
+	}
+	return variantID, ret, nil
+}
+
 // RuntimeCandidateConstraintForOperationRef resolves one unique sealed
 // constraint within an exact operation kind. Constraint refs describe an owner
 // rule and may therefore be reused by multiple operation kinds; operation kind
@@ -177,42 +206,57 @@ const (
 	RuntimeOperationCandidateContractDefect RuntimeOperationCandidateConformanceOutcome = "owner_contract_defect"
 )
 
-// RuntimeOperationCandidateConformanceViolation is the only bounded rejection
-// fact that may leave the capability owner. It contains no raw parameter,
-// parser message, correction disposition, or next-action choice.
-type RuntimeOperationCandidateConformanceViolation struct {
-	ConstraintRef string
-	ParameterName string
-	RequiredShape RuntimeOperationCandidateRequiredShape
-	ActualShape   RuntimeOperationCandidateActualShape
+// RuntimeOperationCandidateConstraintViolation is the only bounded candidate
+// constraint rejection fact that may leave the capability owner. Static
+// representation violations omit TargetRef/ObservedRevision; target-
+// applicability violations require both. It contains no raw parameter, parser
+// message, correction disposition, or next-action choice.
+type RuntimeOperationCandidateConstraintViolation struct {
+	ConstraintRef    string
+	ParameterName    string
+	RequiredShape    RuntimeOperationCandidateRequiredShape
+	ActualShape      RuntimeOperationCandidateActualShape
+	TargetRef        string
+	ObservedRevision string
 }
 
-func (v RuntimeOperationCandidateConformanceViolation) Normalized() RuntimeOperationCandidateConformanceViolation {
+func (v RuntimeOperationCandidateConstraintViolation) Normalized() RuntimeOperationCandidateConstraintViolation {
 	v.ConstraintRef = strings.TrimSpace(v.ConstraintRef)
 	v.ParameterName = strings.TrimSpace(v.ParameterName)
 	v.RequiredShape = RuntimeOperationCandidateRequiredShape(strings.TrimSpace(string(v.RequiredShape)))
 	v.ActualShape = RuntimeOperationCandidateActualShape(strings.TrimSpace(string(v.ActualShape)))
+	v.TargetRef = strings.TrimSpace(v.TargetRef)
+	v.ObservedRevision = strings.TrimSpace(v.ObservedRevision)
 	return v
 }
 
-func (v RuntimeOperationCandidateConformanceViolation) Validate() error {
+func (v RuntimeOperationCandidateConstraintViolation) Validate() error {
 	v = v.Normalized()
 	if v.ConstraintRef == "" || v.ParameterName == "" {
-		return fmt.Errorf("runtime operation candidate conformance violation requires constraint and parameter")
+		return fmt.Errorf("runtime operation candidate constraint violation requires constraint and parameter")
 	}
 	switch v.RequiredShape {
 	case RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile,
 		RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode:
-	default:
-		return fmt.Errorf("runtime operation candidate conformance violation required shape %q is not declared", v.RequiredShape)
-	}
-	switch v.ActualShape {
-	case RuntimeOperationCandidateActualShapeInvalidSyntax,
-		RuntimeOperationCandidateActualShapeTargetMismatch,
-		RuntimeOperationCandidateActualShapeTargetModeMismatch:
+		if v.TargetRef != "" || v.ObservedRevision != "" {
+			return fmt.Errorf("runtime operation candidate representation violation cannot carry target observation")
+		}
+		if v.ActualShape != RuntimeOperationCandidateActualShapeInvalidSyntax &&
+			v.ActualShape != RuntimeOperationCandidateActualShapeTargetMismatch &&
+			v.ActualShape != RuntimeOperationCandidateActualShapeTargetModeMismatch {
+			return fmt.Errorf("runtime operation candidate actual shape %q is not declared for representation conformance", v.ActualShape)
+		}
+		return nil
+	case RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget:
+		if v.TargetRef == "" || v.ObservedRevision == "" {
+			return fmt.Errorf("runtime operation candidate applicability violation requires target and observed revision")
+		}
+		if v.ActualShape != RuntimeOperationCandidateActualShapeObservedTargetContextMismatch {
+			return fmt.Errorf("runtime operation candidate actual shape %q is not declared for target applicability", v.ActualShape)
+		}
 		return nil
 	default:
-		return fmt.Errorf("runtime operation candidate actual shape %q is not declared", v.ActualShape)
+		return fmt.Errorf("runtime operation candidate constraint violation required shape %q is not declared", v.RequiredShape)
 	}
 }
 
@@ -248,7 +292,7 @@ func ValidateRuntimeOperationCandidateConformanceRequest(r RuntimeOperationCandi
 	if err := ValidateRuntimeOperationContract(r.Operation); err != nil {
 		return fmt.Errorf("runtime operation candidate conformance operation contract: %w", err)
 	}
-	_, constraints, err := RuntimeOperationCandidateConstraintsForOperation(r.Operation, r.OperationAuthorization)
+	_, constraints, err := RuntimeOperationCandidateConformanceConstraintsForOperation(r.Operation, r.OperationAuthorization)
 	if err != nil {
 		return err
 	}
@@ -265,7 +309,7 @@ type RuntimeOperationCandidateConformanceObservation struct {
 	OwnerModuleID         string
 	CandidateManifestHash string
 	Outcome               RuntimeOperationCandidateConformanceOutcome
-	Violation             *RuntimeOperationCandidateConformanceViolation
+	Violation             *RuntimeOperationCandidateConstraintViolation
 }
 
 func (o RuntimeOperationCandidateConformanceObservation) Normalized() RuntimeOperationCandidateConformanceObservation {
@@ -327,7 +371,7 @@ func (o RuntimeOperationCandidateConformanceObservation) ValidateForRequest(r Ru
 	if err := o.Validate(); err != nil {
 		return err
 	}
-	variantID, constraints, err := RuntimeOperationCandidateConstraintsForOperation(r.Operation, r.OperationAuthorization)
+	variantID, constraints, err := RuntimeOperationCandidateConformanceConstraintsForOperation(r.Operation, r.OperationAuthorization)
 	if err != nil {
 		return err
 	}

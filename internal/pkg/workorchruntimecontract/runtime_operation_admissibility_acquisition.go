@@ -166,17 +166,18 @@ type RuntimeOperationFeasibilityRequest struct {
 // returned by a capability owner. Outcome is the single factual authority;
 // stale, prerequisite and failure values are outcome-specific detail only.
 type RuntimeOperationFeasibilityObservation struct {
-	OperationID             string
-	AdmissibilitySnapshotID string
-	CapabilityStateBinding  string
-	CandidateManifestHash   string
-	OwnerPolicy             RuntimeOwnerPolicyIdentity
-	ConstraintImpact        RuntimeOwnerFeasibilityConstraintImpact
-	Outcome                 RuntimeOwnerFeasibilityOutcome
-	Feedback                *RuntimeFeedback
-	ReplayProof             *RuntimeOperationReplayProof
-	Stale                   *RuntimePrerequisiteStale
-	PrerequisiteRequest     *RuntimeOperationPrerequisiteRequest
+	OperationID                  string
+	AdmissibilitySnapshotID      string
+	CapabilityStateBinding       string
+	CandidateManifestHash        string
+	OwnerPolicy                  RuntimeOwnerPolicyIdentity
+	ConstraintImpact             RuntimeOwnerFeasibilityConstraintImpact
+	Outcome                      RuntimeOwnerFeasibilityOutcome
+	CandidateConstraintViolation *RuntimeOperationCandidateConstraintViolation
+	Feedback                     *RuntimeFeedback
+	ReplayProof                  *RuntimeOperationReplayProof
+	Stale                        *RuntimePrerequisiteStale
+	PrerequisiteRequest          *RuntimeOperationPrerequisiteRequest
 }
 
 // ValidateRuntimeOperationFeasibilityRequest performs only pure schema,
@@ -244,6 +245,10 @@ func NormalizeRuntimeOperationFeasibilityObservation(result RuntimeOperationFeas
 	result.OwnerPolicy = result.OwnerPolicy.Normalized()
 	result.ConstraintImpact = RuntimeOwnerFeasibilityConstraintImpact(strings.TrimSpace(string(result.ConstraintImpact)))
 	result.Outcome = RuntimeOwnerFeasibilityOutcome(strings.TrimSpace(string(result.Outcome)))
+	if result.CandidateConstraintViolation != nil {
+		value := result.CandidateConstraintViolation.Normalized()
+		result.CandidateConstraintViolation = &value
+	}
 	if result.OperationID == "" || result.AdmissibilitySnapshotID == "" {
 		return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility result requires operation and admissibility identity")
 	}
@@ -260,7 +265,7 @@ func NormalizeRuntimeOperationFeasibilityObservation(result RuntimeOperationFeas
 	}
 	switch result.Outcome {
 	case RuntimeOwnerFeasibilityFeasible:
-		if result.Stale != nil || result.Feedback != nil {
+		if result.Stale != nil || result.CandidateConstraintViolation != nil || result.Feedback != nil {
 			return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility feasible result cannot carry stale or failure")
 		}
 		if result.PrerequisiteRequest != nil {
@@ -271,7 +276,7 @@ func NormalizeRuntimeOperationFeasibilityObservation(result RuntimeOperationFeas
 		if result.Stale == nil {
 			return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility stale outcome requires stale detail")
 		}
-		if result.Feedback != nil {
+		if result.CandidateConstraintViolation != nil || result.Feedback != nil {
 			return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility stale result cannot also carry failure")
 		}
 		if result.PrerequisiteRequest != nil || result.ReplayProof != nil {
@@ -282,11 +287,19 @@ func NormalizeRuntimeOperationFeasibilityObservation(result RuntimeOperationFeas
 		}
 		return result, nil
 	case RuntimeOwnerFeasibilityPrerequisiteRequired:
-		if result.PrerequisiteRequest == nil || result.Feedback == nil || result.Stale != nil || result.ReplayProof != nil {
+		if result.PrerequisiteRequest == nil || result.CandidateConstraintViolation != nil || result.Feedback == nil || result.Stale != nil || result.ReplayProof != nil {
 			return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility prerequisite outcome requires feedback and prerequisite detail")
 		}
+	case RuntimeOwnerFeasibilityCandidateConstraintViolated:
+		if result.CandidateConstraintViolation == nil || result.Feedback != nil || result.Stale != nil || result.PrerequisiteRequest != nil || result.ReplayProof != nil {
+			return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility candidate-constraint outcome requires only a bounded violation")
+		}
+		if err := result.CandidateConstraintViolation.Validate(); err != nil {
+			return RuntimeOperationFeasibilityObservation{}, err
+		}
+		return result, nil
 	case RuntimeOwnerFeasibilityInfeasible, RuntimeOwnerFeasibilityContractDefect:
-		if result.Feedback == nil || result.Stale != nil || result.PrerequisiteRequest != nil || result.ReplayProof != nil {
+		if result.CandidateConstraintViolation != nil || result.Feedback == nil || result.Stale != nil || result.PrerequisiteRequest != nil || result.ReplayProof != nil {
 			return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation feasibility infeasible outcome requires only feedback detail")
 		}
 	default:
@@ -338,9 +351,59 @@ func RuntimeOwnerFeasibilityObservationFromOperation(result RuntimeOperationFeas
 	observation := RuntimeOwnerFeasibilityObservation{
 		Outcome: result.Outcome, OwnerPolicy: result.OwnerPolicy,
 		ConstraintImpact: result.ConstraintImpact, Feedback: result.Feedback,
-		Stale: result.Stale, PrerequisiteRequest: result.PrerequisiteRequest,
+		CandidateConstraintViolation: result.CandidateConstraintViolation,
+		Stale:                        result.Stale, PrerequisiteRequest: result.PrerequisiteRequest,
 	}
 	return observation, observation.Validate()
+}
+
+// NewRuntimeOperationCandidateConstraintViolationObservation seals one
+// owner-observed candidate applicability fact against the exact request
+// manifest, operation target and admissibility revision. It carries no owner
+// failure category because the resource itself remains feasible.
+func NewRuntimeOperationCandidateConstraintViolationObservation(request RuntimeOperationFeasibilityRequest, violation RuntimeOperationCandidateConstraintViolation) (RuntimeOperationFeasibilityObservation, error) {
+	operation := request.Operation.Normalized()
+	violation = violation.Normalized()
+	if err := ValidateRuntimeOperationFeasibilityRequest(request, request.OperationAuthorization.Normalized().OwnerModuleID); err != nil {
+		return RuntimeOperationFeasibilityObservation{}, err
+	}
+	if err := violation.Validate(); err != nil {
+		return RuntimeOperationFeasibilityObservation{}, err
+	}
+	_, constraints, err := RuntimeOperationCandidateConstraintsForOperation(operation, request.OperationAuthorization)
+	if err != nil {
+		return RuntimeOperationFeasibilityObservation{}, err
+	}
+	matched := false
+	for _, constraint := range constraints {
+		if constraint.Kind == RuntimeOperationCandidateConstraintTargetApplicability &&
+			constraint.Ref == violation.ConstraintRef && constraint.ParameterName == violation.ParameterName && constraint.RequiredShape == violation.RequiredShape {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation candidate applicability violation is not sealed in the operation authorization")
+	}
+	if violation.ObservedRevision != request.Admissibility.Normalized().ObservedRevision || !containsRuntimeString(operation.TargetRefs, violation.TargetRef) {
+		return RuntimeOperationFeasibilityObservation{}, fmt.Errorf("runtime operation candidate applicability violation does not match the owner observation")
+	}
+	result := RuntimeOperationFeasibilityObservation{
+		OperationID: operation.ID, AdmissibilitySnapshotID: request.Admissibility.SnapshotID,
+		CapabilityStateBinding: request.Admissibility.AcquisitionBinding, CandidateManifestHash: request.CandidateManifestHash,
+		Outcome: RuntimeOwnerFeasibilityCandidateConstraintViolated, CandidateConstraintViolation: &violation,
+	}
+	return NormalizeRuntimeOperationFeasibilityObservation(result)
+}
+
+func containsRuntimeString(values []string, wanted string) bool {
+	wanted = strings.TrimSpace(wanted)
+	for _, value := range values {
+		if strings.TrimSpace(value) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func NewRuntimeOperationFeasibilityObservation(request RuntimeOperationFeasibilityRequest, category RuntimeOwnerFeasibilityCategory, failure *FailureFact, stale *RuntimePrerequisiteStale, prerequisiteRequest *RuntimeOperationPrerequisiteRequest, replayProof *RuntimeOperationReplayProof) (RuntimeOperationFeasibilityObservation, error) {

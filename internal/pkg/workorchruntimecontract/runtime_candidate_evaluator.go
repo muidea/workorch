@@ -125,13 +125,15 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 		switch RuntimeOperationCandidateActualShape(w.RejectedValue) {
 		case RuntimeOperationCandidateActualShapeInvalidSyntax,
 			RuntimeOperationCandidateActualShapeTargetMismatch,
-			RuntimeOperationCandidateActualShapeTargetModeMismatch:
+			RuntimeOperationCandidateActualShapeTargetModeMismatch,
+			RuntimeOperationCandidateActualShapeObservedTargetContextMismatch:
 		default:
 			return fmt.Errorf("owner-constraint candidate correction witness has undeclared actual shape %q", w.RejectedValue)
 		}
 		switch RuntimeOperationCandidateRequiredShape(w.AlternativeValue) {
 		case RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile,
-			RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode:
+			RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode,
+			RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget:
 		default:
 			return fmt.Errorf("owner-constraint candidate correction witness has undeclared required shape %q", w.AlternativeValue)
 		}

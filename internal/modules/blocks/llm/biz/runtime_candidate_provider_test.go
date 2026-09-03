@@ -2484,9 +2484,9 @@ func TestRuntimeCandidateRetryProjectsOwnerConstraintOnlyInC4WithoutStablePrefix
 		Dimension:        runtimecontract.RuntimeCandidateCorrectionWitnessOwnerConstraint,
 		OperationKind:    runtimecontract.RuntimeBlockKindPatchApply,
 		Path:             "$.operations[0].parameters[name=diff]",
-		ConstraintRef:    "patch/unified_diff/diff/single_file",
-		RejectedValue:    string(runtimecontract.RuntimeOperationCandidateActualShapeInvalidSyntax),
-		AlternativeValue: string(runtimecontract.RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile),
+		ConstraintRef:    "patch/unified_diff/diff/observed_target",
+		RejectedValue:    string(runtimecontract.RuntimeOperationCandidateActualShapeObservedTargetContextMismatch),
+		AlternativeValue: string(runtimecontract.RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget),
 	}
 	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_owner_constraint_nonconformant",
@@ -2520,9 +2520,9 @@ func TestRuntimeCandidateRetryProjectsOwnerConstraintOnlyInC4WithoutStablePrefix
 	}
 	encoded := string(payload)
 	for _, required := range []string{
-		`"candidateConstraints"`, `"constraintRef":"patch/unified_diff/diff/single_file"`,
-		`"dimension":"owner_candidate_constraint"`, `"rejectedValue":"invalid_syntax"`,
-		`"alternativeValue":"unified_diff_single_file"`, "capability owner rejected one parameter's representation",
+		`"candidateConstraints"`, `"constraintRef":"patch/unified_diff/diff/observed_target"`,
+		`"dimension":"owner_candidate_constraint"`, `"rejectedValue":"observed_target_context_mismatch"`,
+		`"alternativeValue":"unified_diff_applicable_to_observed_target"`, "capability owner rejected one candidate parameter",
 	} {
 		if !strings.Contains(encoded, required) {
 			t.Fatalf("owner-constraint C3/C4 projection lost %q: %s", required, encoded)

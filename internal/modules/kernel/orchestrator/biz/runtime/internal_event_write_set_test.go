@@ -51,6 +51,7 @@ func TestRuntimeInternalCoordinatedTransactionsDeclareExactMachineFamilies(t *te
 		{name: "binding contradiction", kind: RuntimeInternalEventSemanticBindingContradictionObserved, primary: eventcontract.StateMachineSM2, writes: runtimeInternalWriteSM2 | runtimeInternalWriteSM3},
 		{name: "candidate rejected", kind: RuntimeInternalEventCandidateRejected, primary: eventcontract.StateMachineSM3, writes: runtimeInternalWriteSM2 | runtimeInternalWriteSM3},
 		{name: "candidate stale", kind: RuntimeInternalEventCandidatePrerequisiteStaleObserved, primary: eventcontract.StateMachineSM3, writes: runtimeInternalWriteSM2 | runtimeInternalWriteSM3 | runtimeInternalWriteSM4},
+		{name: "candidate feasibility", kind: RuntimeInternalEventCandidateFeasibilityObserved, primary: eventcontract.StateMachineSM3, writes: runtimeInternalWriteSM2 | runtimeInternalWriteSM3 | runtimeInternalWriteSM4},
 		{name: "operation receipt retires replay authorization", kind: RuntimeInternalEventOperationReceiptObserved, primary: eventcontract.StateMachineSM3, writes: runtimeInternalWriteSM3 | runtimeInternalWriteSM4},
 		{name: "operation recovery budget", kind: RuntimeInternalEventRecoveryBudgetConsumed, primary: eventcontract.StateMachineSM4, writes: runtimeInternalWriteSM4},
 		{name: "recoverable wait exhaustion", kind: RuntimeInternalEventRecoverableWaitExhausted, primary: eventcontract.StateMachineSM4, writes: runtimeInternalWriteSM2 | runtimeInternalWriteSM4},

@@ -61,9 +61,10 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
   name/type；C4 仅渲染由 contract type 推导的 `{name, wireValueField}` 结构提示，不携带 attempt-0 value，也不把合法 parameter
   错写为删除指令。该投影与 `JSONSchemaResponse` capability 无关，只改变 C4，不改变 C0～C3/stable prefix。
 - `owner_candidate_constraint` correction 必须在 C3 保留 manifest-declared `candidateConstraints`，在 C4 仅投影 exact
-  operation/parameter path、constraint ref、封闭 actual shape 与 required shape；不得投影 raw parameter、parser diagnostic 或
-  owner 私有实现，也不得改变 C0～C3/stable prefix。attempt 1 的值是否满足 required shape 仍只由 capability owner 的 typed
-  conformance result 证明，LLM block 不自行判定。
+  operation/parameter path、constraint ref、封闭 actual shape/required shape 与 bounded target observation；不得投影 raw parameter、
+  parser diagnostic 或 owner 私有实现，也不得改变 C0～C3/stable prefix。attempt 1 的 static shape 只由 capability owner 的 typed
+  conformance result证明，dynamic target applicability 只由 owner 对 current target/revision 的 typed feasibility result证明，LLM
+  block 不自行判定。
 - `operation_set_cardinality` correction 只投影 manifest v6 封存的 exact owner/target、operation kind/index violation 与
   `one_operation_per_owner_target` objective；不得让模型通过修改 operation ID、顺序、依赖或 target 规避。attempt 1 不得改变
   原 owner/target 覆盖或非冲突 operation，必须合并为一个 ordinary durable operation，除非 manifest 的 exact required sequence

@@ -138,34 +138,6 @@ func (m *Biz) runtimeRejectCandidate(ctx context.Context, aggregate runtime.Runt
 	return result.Aggregate, err
 }
 
-func (m *Biz) runtimeCandidateStale(ctx context.Context, aggregate runtime.RuntimeAggregate, attempt int, stale runtimecontract.RuntimePrerequisiteStale) (runtime.RuntimeAggregate, error) {
-	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventCandidatePrerequisiteStaleObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{Attempt: attempt, Stale: &stale},
-	})
-	return result.Aggregate, err
-}
-
-func (m *Biz) runtimeCandidatePrerequisite(ctx context.Context, aggregate runtime.RuntimeAggregate, attempt int, request runtimecontract.RuntimeOperationPrerequisiteRequest) (runtime.RuntimeAggregate, error) {
-	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventCandidatePrerequisiteObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{Attempt: attempt, PrerequisiteRequest: &request},
-	})
-	return result.Aggregate, err
-}
-
-func (m *Biz) runtimeOwnerFeasibility(ctx context.Context, aggregate runtime.RuntimeAggregate, attempt int, observation runtimecontract.RuntimeOwnerFeasibilityObservation) (runtime.RuntimeAggregate, error) {
-	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtimeOwnerFeasibilityInternalEventKind(observation), Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{Attempt: attempt, OwnerFeasibility: &observation},
-	})
-	return result.Aggregate, err
-}
-
-func runtimeOwnerFeasibilityInternalEventKind(observation runtimecontract.RuntimeOwnerFeasibilityObservation) runtime.RuntimeInternalEventKind {
-	if observation.SealedTargetAuthorizationContradicted() {
-		return runtime.RuntimeInternalEventSemanticBindingContradictionObserved
-	}
-	return runtime.RuntimeInternalEventOwnerFeasibilityObserved
-}
-
 func (m *Biz) runtimeEnsureCandidateRequestWithExpected(ctx context.Context, aggregate runtime.RuntimeAggregate, documentKind runtimecontract.RuntimeProviderDocumentKind, stablePrefixHash, manifestHash, correctionHash string, expected runtimecontract.RuntimeExpectedDocumentContract) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidateRequestSession, error) {
 	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind: runtime.RuntimeInternalEventCandidateRequestEnsured, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{DocumentKind: documentKind, StablePrefixHash: stablePrefixHash, ManifestHash: manifestHash, CorrectionHash: correctionHash, ExpectedDocument: &expected},

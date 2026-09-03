@@ -32,13 +32,34 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForPrerequisiteSt
 		return RuntimeAggregate{}, fmt.Errorf("%w: candidate attempt %d is not pending", common.ErrConflict, attempt)
 	}
 	expectedRevision := aggregate.StateRevision
+	if err := applyCandidatePrerequisiteStale(&aggregate, idx, stale); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+// applyCandidatePrerequisiteStale is the mutation half shared by the legacy
+// focused transition tests and CandidateFeasibilityObserved. Its caller owns
+// the single aggregate CAS.
+func applyCandidatePrerequisiteStale(aggregate *RuntimeAggregate, idx int, stale runtimecontract.RuntimePrerequisiteStale) error {
+	if aggregate == nil || idx < 0 || idx >= len(aggregate.CandidateAttempts) {
+		return common.ErrInvalidArgument
+	}
+	signature := runtimecontract.StableRuntimePrerequisiteStaleSignature(stale)
 	facts, affectedPrerequisites, affectedObservations, invalidatedDependencies, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)
 	if err != nil {
-		return RuntimeAggregate{}, err
+		return err
 	}
 	ledger, consumed, err := consumeRecoveryBudget(facts.Recovery, runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
 	if err != nil {
-		return RuntimeAggregate{}, err
+		return err
 	}
 	facts.Recovery = ledger
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateInvalidated
@@ -58,23 +79,16 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForPrerequisiteSt
 			Signature: signature, Message: "prerequisite refresh budget exhausted: " + stale.Reason,
 		}
 		if err := replaceRuntimeFailureAuthority(&facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
-			return RuntimeAggregate{}, err
+			return err
 		}
 	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
 	if err != nil {
-		return RuntimeAggregate{}, err
+		return err
 	}
 	aggregate.Facts = facts
 	aggregate.Decision = decision
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
+	return nil
 }
 
 // invalidateCandidateAttemptForFeasibilityPrerequisite abandons an unsealed
@@ -122,6 +136,23 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForFeasibilityPre
 	}
 
 	expectedRevision := aggregate.StateRevision
+	if err := applyCandidateFeasibilityPrerequisite(&aggregate, idx, request); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	aggregate.StateRevision++
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+func applyCandidateFeasibilityPrerequisite(aggregate *RuntimeAggregate, idx int, request runtimecontract.RuntimeOperationPrerequisiteRequest) error {
+	if aggregate == nil || idx < 0 || idx >= len(aggregate.CandidateAttempts) {
+		return common.ErrInvalidArgument
+	}
 	facts := addFeasibilityPrerequisite(factsWithoutTargetSnapshot(aggregate.Facts, request), request)
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateInvalidated
 	aggregate.CandidateAttempts[idx].Proposal = nil
@@ -133,18 +164,11 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForFeasibilityPre
 	aggregate.CandidateAttempts[idx].PrerequisiteRequest = &requestCopy
 	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {
-		return RuntimeAggregate{}, err
+		return err
 	}
 	aggregate.Facts = facts
 	aggregate.Decision = decision
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
+	return nil
 }
 
 // invalidateCandidateAttemptForOwnerInfeasibility is the SM-2/SM-3 handoff
@@ -182,20 +206,7 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForOwnerInfeasibi
 	}
 
 	expectedRevision := aggregate.StateRevision
-	contradiction := resolveOwnerBindingContradiction(aggregate, record, matchedFeasibility, observation)
-	repairInfeasibility, repairBound, repairErr := resolveOwnerValidationRepairInfeasibility(aggregate, record, matchedFeasibility, observation)
-	if repairErr != nil {
-		return RuntimeAggregate{}, repairErr
-	}
-	invalidateCandidateAttemptForOwnerObservation(&aggregate, idx, observation, contradiction.identity)
-	if contradiction.identity != nil {
-		err = applyOwnerBindingContradiction(&aggregate, contradiction)
-	} else if repairBound {
-		err = applyOwnerValidationRepairInfeasibility(&aggregate, observation, repairInfeasibility)
-	} else {
-		err = applyOwnerInfeasibilityFailure(&aggregate, observation, contradiction.unbound)
-	}
-	if err != nil {
+	if err := applyCandidateOwnerInfeasibility(&aggregate, idx, record, matchedFeasibility, observation); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
@@ -206,6 +217,27 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForOwnerInfeasibi
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+func applyCandidateOwnerInfeasibility(aggregate *RuntimeAggregate, idx int, record runtimecontract.RuntimeCandidateAttemptRecord, matchedFeasibility runtimecontract.RuntimeCandidateFeasibilityRecord, observation runtimecontract.RuntimeOwnerFeasibilityObservation) error {
+	if aggregate == nil || idx < 0 || idx >= len(aggregate.CandidateAttempts) {
+		return common.ErrInvalidArgument
+	}
+	contradiction := resolveOwnerBindingContradiction(*aggregate, record, matchedFeasibility, observation)
+	repairInfeasibility, repairBound, repairErr := resolveOwnerValidationRepairInfeasibility(*aggregate, record, matchedFeasibility, observation)
+	if repairErr != nil {
+		return repairErr
+	}
+	invalidateCandidateAttemptForOwnerObservation(aggregate, idx, observation, contradiction.identity)
+	var err error
+	if contradiction.identity != nil {
+		err = applyOwnerBindingContradiction(aggregate, contradiction)
+	} else if repairBound {
+		err = applyOwnerValidationRepairInfeasibility(aggregate, observation, repairInfeasibility)
+	} else {
+		err = applyOwnerInfeasibilityFailure(aggregate, observation, contradiction.unbound)
+	}
+	return err
 }
 
 type ownerBindingContradiction struct {

@@ -329,7 +329,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   rejection/directive/request identity 幂等：相同 observation 只结算一次，attempt1 最多提交一次，provider/attempt/token budget
   不重复消费；schema/semantic correction 不借用 whole-document/transport/repair/governance budget，no-candidate framing 只使用
   whole-document recovery；
-- owner feasibility 不进入 candidate correction 或 attempt ledger。
+- ordinary owner feasibility 不进入 candidate correction 或 attempt ledger；唯一例外是 manifest-declared、provider-safe 且 typed 为
+  `candidate_constraint_violated` 的 candidate applicability fact。它必须与 attempt disposition 由同一个
+  `CandidateFeasibilityObserved` CAS 原子提交，attempt 0 只开启一次现有 candidate correction，attempt 1 重复违反直接 final。
 - request session + authority transaction + canonical state/RequiredOutput + DocumentKind/ExpectedDocument + provider
   ceiling/reasoning/budget/stable prefix构成唯一purpose-bound semantic invocation seal；不得出现独立SemanticActivation
   repository/lifecycle或assessment通过operations envelope升级role。
@@ -425,7 +427,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - Web execute必须校验Orchestrator producer、完整sealed operation、current claimed receipt fence与exact grant；payload/execution/
   grant drift保持零network call。search redirect同origin，fetch DNS绑定actual dial并在redirect前重验；两者`at_most_once`且
   receipt loss不重复external request；
-- feasibility 只返回 feasible/stale/prerequisite_required/infeasible factual result；
+- feasibility 只返回
+  feasible/stale/prerequisite_required/candidate_constraint_violated/infeasible/owner_contract_defect closed factual result；
+  `candidate_constraint_violated` 必须精确匹配 manifest-declared dynamic constraint、current target 与 observed revision，并由
+  Orchestrator 在同一 owner-private event/CAS 中同时记录事实和 attempt disposition，禁止先存半状态再由第二事件推进；
   `prerequisite_required` 仅在接收 owner 已定义对应 typed prerequisite acquisition command/result 时合法。
   当前没有该合同的 semantic proof owner 必须保留完整 original diagnostic 并 fail-closed（通常为
   `infeasible`/`unverifiable`），不得把它伪装成 revision stale、退休有效 catalog 或消耗 refresh budget；只有

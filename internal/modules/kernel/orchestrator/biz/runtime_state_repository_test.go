@@ -4282,9 +4282,9 @@ func TestRuntimeCandidateAdmissionSkipsOwnerProbeForAssessment(t *testing.T) {
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	module := newTestBiz(newRuntimeTestOwner(), hub, nil)
 	candidate := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{FocusID: "focus-v2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, Disposition: runtimecontract.AssessmentDispositionRepairableGap, Summary: "assessment-only"}}
-	failure, stale, prerequisiteRequest, err := module.probeRuntimeCandidateFeasibility(ctx, runtime.RuntimeAggregate{}, t.TempDir(), candidate, runtimecontract.RuntimeCandidateContractManifest{}, 0)
-	if err != nil || failure != nil || stale != nil || prerequisiteRequest != nil {
-		t.Fatalf("assessment candidate should not enter owner operation probe: failure=%+v stale=%+v prerequisite=%+v err=%v", failure, stale, prerequisiteRequest, err)
+	observed, closed, err := module.probeRuntimeCandidateFeasibility(ctx, runtime.RuntimeAggregate{}, t.TempDir(), candidate, runtimecontract.RuntimeCandidateContractManifest{}, 0)
+	if err != nil || closed || observed.Facts.WorkspaceID != "" {
+		t.Fatalf("assessment candidate should not enter owner operation probe: aggregate=%+v closed=%t err=%v", observed, closed, err)
 	}
 }
 

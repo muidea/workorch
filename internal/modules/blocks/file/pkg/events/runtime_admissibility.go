@@ -52,7 +52,7 @@ func ValidateRuntimeOperationCandidateConformanceCommandValue(c ValidateRuntimeO
 	return runtimecontract.ValidateRuntimeOperationCandidateConformanceRequest(runtimecontract.RuntimeOperationCandidateConformanceRequest(c), owner)
 }
 
-func NewValidateRuntimeOperationCandidateConformanceResult(c ValidateRuntimeOperationCandidateConformanceCommand, outcome runtimecontract.RuntimeOperationCandidateConformanceOutcome, violation *runtimecontract.RuntimeOperationCandidateConformanceViolation) (ValidateRuntimeOperationCandidateConformanceResult, error) {
+func NewValidateRuntimeOperationCandidateConformanceResult(c ValidateRuntimeOperationCandidateConformanceCommand, outcome runtimecontract.RuntimeOperationCandidateConformanceOutcome, violation *runtimecontract.RuntimeOperationCandidateConstraintViolation) (ValidateRuntimeOperationCandidateConformanceResult, error) {
 	request := runtimecontract.RuntimeOperationCandidateConformanceRequest(c).Normalized()
 	variantID, _, err := runtimecontract.RuntimeOperationCandidateConstraintsForOperation(request.Operation, request.OperationAuthorization)
 	if err != nil {
@@ -71,6 +71,14 @@ func NewValidateRuntimeOperationCandidateConformanceResult(c ValidateRuntimeOper
 
 func NewProbeRuntimeOperationFeasibilityResult(c ProbeRuntimeOperationFeasibilityCommand, category runtimecontract.RuntimeOwnerFeasibilityCategory, failure *runtimecontract.FailureFact, stale *runtimecontract.RuntimePrerequisiteStale, prerequisiteRequest *runtimecontract.RuntimeOperationPrerequisiteRequest, replayProof *runtimecontract.RuntimeOperationReplayProof) (ProbeRuntimeOperationFeasibilityResult, error) {
 	v, err := runtimecontract.NewRuntimeOperationFeasibilityObservation(runtimecontract.RuntimeOperationFeasibilityRequest(c), category, failure, stale, prerequisiteRequest, replayProof)
+	if err != nil {
+		return ProbeRuntimeOperationFeasibilityResult{}, err
+	}
+	return ProbeRuntimeOperationFeasibilityResult(v), nil
+}
+
+func NewProbeRuntimeOperationCandidateConstraintViolationResult(c ProbeRuntimeOperationFeasibilityCommand, violation runtimecontract.RuntimeOperationCandidateConstraintViolation) (ProbeRuntimeOperationFeasibilityResult, error) {
+	v, err := runtimecontract.NewRuntimeOperationCandidateConstraintViolationObservation(runtimecontract.RuntimeOperationFeasibilityRequest(c), violation)
 	if err != nil {
 		return ProbeRuntimeOperationFeasibilityResult{}, err
 	}

@@ -181,6 +181,76 @@ func TestFileModuleSemanticAndOperationFeasibilityShareExistingTargetPolicy(t *t
 	}
 }
 
+func TestFileModuleReportsUnifiedDiffTargetApplicabilityAsTypedCandidateConstraint(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := New()
+	if err := module.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = module.Stop(ctx) })
+
+	workspace := t.TempDir()
+	targetRef := "main.txt"
+	current := "one\nchanged\nthree\n"
+	if err := os.WriteFile(filepath.Join(workspace, targetRef), []byte(current), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspaceManifest, err := filebiz.NewRuntimeAdapter().AcquireWorkspaceManifest(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := runtimecontract.NewRuntimeOperationAdmissibility(
+		"operation-admissibility:file", runtimecontract.RuntimeModuleFile, []string{runtimecontract.RuntimeBlockKindPatchApply}, []string{targetRef}, nil, nil, workspaceManifest.Revision,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract, found := runtimecontract.RuntimeOperationContractForKind(runtimecontract.RuntimeBlockKindPatchApply)
+	if !found {
+		t.Fatal("patch/apply operation contract is missing")
+	}
+	authorization := runtimecontract.RuntimeCandidateOperationManifest{
+		Kind: contract.Kind, OwnerModuleID: runtimecontract.RuntimeModuleFile, Parameters: contract.Parameters, Variants: contract.Variants,
+		Target: runtimecontract.RuntimeOperationTargetAuthorization{
+			Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{targetRef},
+		},
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+	}.Normalized()
+	patchType := "unified_diff"
+	diff := "--- a/main.txt\n+++ b/main.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+updated\n three\n"
+	result := hub.Send(magicevent.NewEventWithContext(
+		fileevents.TopicProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx,
+		fileevents.ProbeRuntimeOperationFeasibilityCommand(runtimecontract.RuntimeOperationFeasibilityRequest{
+			WorkspaceID: "ws-1", RunID: "run-1", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
+			WorkspaceDeliverableDirectory: workspace, Admissibility: inventory, CandidateManifestHash: "candidate-manifest-1", OperationAuthorization: authorization,
+			Operation: runtimecontract.RuntimeOperation{ID: "patch-main", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{targetRef}, Parameters: []runtimecontract.OperationParameter{
+				{Name: "patchType", String: &patchType}, {Name: "diff", String: &diff},
+			}},
+			CurrentTargetSnapshot: &runtimecontract.TargetSnapshot{TargetRef: targetRef, Content: current, ContentHash: "target-v2", ContentState: runtimecontract.SnapshotContentStateComplete},
+		}),
+	))
+	data, resultErr := result.Get()
+	if resultErr != nil {
+		t.Fatal(resultErr)
+	}
+	observed := runtimecontract.RuntimeOperationFeasibilityObservation(data.(fileevents.ProbeRuntimeOperationFeasibilityResult))
+	if observed.Outcome != runtimecontract.RuntimeOwnerFeasibilityCandidateConstraintViolated || observed.CandidateConstraintViolation == nil ||
+		observed.CandidateConstraintViolation.ConstraintRef != "patch/unified_diff/diff/observed_target" ||
+		observed.CandidateConstraintViolation.TargetRef != targetRef || observed.CandidateConstraintViolation.ObservedRevision != inventory.ObservedRevision ||
+		observed.Feedback != nil || observed.OwnerPolicy.OwnerModuleID != runtimecontract.RuntimeModuleFile {
+		t.Fatalf("File candidate applicability observation = %+v", observed)
+	}
+	content, err := os.ReadFile(filepath.Join(workspace, targetRef))
+	if err != nil || string(content) != current {
+		t.Fatalf("read-only applicability probe changed target: content=%q err=%v", string(content), err)
+	}
+}
+
 func TestFileModuleExecutesConcreteFileEditEventAndWritesState(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

@@ -184,6 +184,34 @@ func (a *RuntimeAdapter) probePatchFeasibility(workspaceDirectory string, operat
 	return fileOperationInfeasible(operation, code, message, []string{targetRef})
 }
 
+// fileOperationCandidateApplicabilityViolation translates only the File-
+// private in-memory unified-diff context miss into the manifest-declared,
+// provider-safe owner fact. It deliberately carries no retry or terminal
+// choice; those belong to Orchestrator's private SM-3 transition.
+func fileOperationCandidateApplicabilityViolation(operation runtimemodel.RuntimeOperation, authorization runtimemodel.RuntimeCandidateOperationManifest, inventory runtimemodel.RuntimeOperationAdmissibility, failure *runtimemodel.FailureFact) *runtimemodel.RuntimeOperationCandidateConstraintViolation {
+	operation = operation.Normalized()
+	if failure == nil || strings.TrimSpace(failure.Code) != "unified_diff_apply_conflict" {
+		return nil
+	}
+	_, constraints, err := runtimemodel.RuntimeOperationCandidateConstraintsForOperation(operation, authorization)
+	if err != nil {
+		return nil
+	}
+	for _, constraint := range constraints {
+		if constraint.Kind != runtimemodel.RuntimeOperationCandidateConstraintTargetApplicability ||
+			constraint.RequiredShape != runtimemodel.RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget {
+			continue
+		}
+		return &runtimemodel.RuntimeOperationCandidateConstraintViolation{
+			ConstraintRef: constraint.Ref, ParameterName: constraint.ParameterName,
+			RequiredShape: constraint.RequiredShape,
+			ActualShape:   runtimemodel.RuntimeOperationCandidateActualShapeObservedTargetContextMismatch,
+			TargetRef:     fileOperationTargetRef(operation), ObservedRevision: inventory.Normalized().ObservedRevision,
+		}
+	}
+	return nil
+}
+
 func runtimeOperationParameterString(operation runtimemodel.RuntimeOperation, name string) string {
 	for _, parameter := range operation.Parameters {
 		if parameter.Name == name && parameter.String != nil {
@@ -348,7 +376,7 @@ func fileOperationSnapshotPrerequisiteRequest(operation runtimemodel.RuntimeOper
 		return nil
 	}
 	switch strings.TrimSpace(failure.Code) {
-	case "operation_replay_proof_unavailable", "patch_text_replace_conflict", "patch_unified_diff_conflict", "patch_basehash_mismatch", "operation_base_hash_mismatch":
+	case "operation_replay_proof_unavailable", "patch_text_replace_conflict", "patch_unified_diff_conflict", "unified_diff_apply_conflict", "patch_basehash_mismatch", "operation_base_hash_mismatch":
 		// These codes are emitted by the File owner only after it has compared a
 		// content-bound operation against the current regular-file content.
 	default:

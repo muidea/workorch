@@ -783,21 +783,17 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 		OwnerPolicy:      runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility", CatalogSnapshotID: inventory.SnapshotID},
 		ConstraintImpact: runtimecontract.RuntimeOwnerFeasibilityConstraintImpactSealedTargetAuthorizationContradicted,
 	}
-	if _, err := controller.recordCandidateFeasibility(ctx, facts.WorkspaceID, facts.RunID, 0, runtimecontract.RuntimeCandidateFeasibilityRecord{
+	feasibilityRecord := runtimecontract.RuntimeCandidateFeasibilityRecord{
 		OperationID: operationID, AdmissibilitySnapshotID: inventory.SnapshotID,
 		CandidateManifestHash: runtimeTestPendingCandidateManifestHash(t, controller, facts.WorkspaceID, facts.RunID, 0), Observation: &ownerObservation,
-	}); err != nil {
-		t.Fatal(err)
 	}
-	preContradiction, err := controller.Load(ctx, facts.WorkspaceID, facts.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	preContradiction := proposed
 	contractID := runtimecontract.StableAuthorityContractID(facts.WorkspaceID, facts.RunID, preContradiction.Decision.AuthorityTransaction())
 	_, pendingRecord, found := pendingCandidateAttempt(preContradiction.CandidateAttempts, facts.WorkspaceID, facts.RunID, contractID, 0)
-	if !found || len(pendingRecord.Feasibilities) != 1 {
+	if !found || len(pendingRecord.Feasibilities) != 0 {
 		t.Fatalf("binding contradiction fixture has no exact persisted feasibility: %+v", pendingRecord)
 	}
+	pendingRecord.Feasibilities = []runtimecontract.RuntimeCandidateFeasibilityRecord{feasibilityRecord}
 	// run-003 kept the cwi-027 binding's semantic manifest in immutable history
 	// while the active ledger had advanced to a different CWI generation. Exact
 	// correlation must use the binding's persisted generation, not the unrelated
@@ -810,13 +806,13 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 	currentManifest.Hash = "runtime-semantic-manifest-unrelated-current"
 	historicalAggregate.SemanticPlanning.Manifest = &currentManifest
 	identity, historicalCoverageID, historicalBinding, identityErr := runtimeBindingContradictionIdentity(
-		historicalAggregate, pendingRecord, pendingRecord.Feasibilities[0], ownerObservation,
+		historicalAggregate, pendingRecord, feasibilityRecord, ownerObservation,
 	)
 	if identityErr != nil || historicalCoverageID != facts.Coverage[0].ID || !runtimecontract.SameRuntimeCWIBindingRef(historicalBinding, binding) ||
 		identity.AuthorityInputID != pendingRecord.Transaction.AuthorityInputID {
 		t.Fatalf("historical semantic generation did not correlate exact contradiction: identity=%+v coverage=%q binding=%+v err=%v transaction=%+v currentBinding=%+v reconciliation=%+v currentManifest=%+v historyManifest=%+v feasibility=%+v",
 			identity, historicalCoverageID, historicalBinding, identityErr, pendingRecord.Transaction, binding, historicalAggregate.Facts.ReconciliationContract,
-			historicalAggregate.SemanticPlanning.Manifest, historicalAggregate.SemanticPlanning.History[0].Snapshot.Manifest, pendingRecord.Feasibilities[0])
+			historicalAggregate.SemanticPlanning.Manifest, historicalAggregate.SemanticPlanning.History[0].Snapshot.Manifest, feasibilityRecord)
 	}
 	unknownGeneration := historicalAggregate
 	unknownGeneration.Facts.Coverage = append([]runtimecontract.RuntimeCoverageItemFact(nil), historicalAggregate.Facts.Coverage...)
@@ -828,11 +824,11 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 		unknownRef.SemanticManifestHash = "runtime-semantic-manifest-unknown"
 		unknownGeneration.Facts.Coverage[index].CurrentBindingRef = &unknownRef
 	}
-	if _, _, _, err := runtimeBindingContradictionIdentity(unknownGeneration, pendingRecord, pendingRecord.Feasibilities[0], ownerObservation); err == nil {
+	if _, _, _, err := runtimeBindingContradictionIdentity(unknownGeneration, pendingRecord, feasibilityRecord, ownerObservation); err == nil {
 		t.Fatal("binding contradiction accepted an unknown semantic generation")
 	}
 	committed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventSemanticBindingContradictionObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{Attempt: 0, OwnerFeasibility: &ownerObservation},
+		Kind: RuntimeInternalEventCandidateFeasibilityObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Transaction: &RuntimeInternalTransactionPayload{Attempt: 0, CandidateFeasibility: &feasibilityRecord},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -917,7 +913,7 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 	}
 	saves := repository.saves
 	duplicate, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind: RuntimeInternalEventSemanticBindingContradictionObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{Attempt: 0, OwnerFeasibility: &ownerObservation},
+		Kind: RuntimeInternalEventCandidateFeasibilityObserved, Scope: RuntimeInternalEventScope{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID}, Transaction: &RuntimeInternalTransactionPayload{Attempt: 0, CandidateFeasibility: &feasibilityRecord},
 	})
 	if err != nil || duplicate.Aggregate.StateRevision != retired.StateRevision || repository.saves != saves {
 		t.Fatalf("duplicate binding contradiction was not a no-op: %+v err=%v saves=%d", duplicate.Aggregate, err, repository.saves)

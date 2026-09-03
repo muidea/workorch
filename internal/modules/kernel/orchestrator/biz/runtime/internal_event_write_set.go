@@ -106,7 +106,6 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 		RuntimeInternalEventCandidateRequestSubmitted,
 		RuntimeInternalEventCandidateDocumentObserved,
 		RuntimeInternalEventCandidateAttemptBegun,
-		RuntimeInternalEventCandidateFeasibilityObserved,
 		RuntimeInternalEventGovernanceDispatchSealed,
 		RuntimeInternalEventDispatchExecutionRequested,
 		RuntimeInternalEventDefinitionClarificationDispatchSealed,
@@ -141,6 +140,7 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 		return runtimeInternalTransitionDescriptor{Primary: eventcontract.StateMachineSM3, WriteSet: runtimeInternalWriteSM2 | runtimeInternalWriteSM3}, true
 
 	case RuntimeInternalEventCandidateRequestStaleObserved,
+		RuntimeInternalEventCandidateFeasibilityObserved,
 		RuntimeInternalEventCandidatePrerequisiteStaleObserved:
 		return runtimeInternalTransitionDescriptor{Primary: eventcontract.StateMachineSM3, WriteSet: runtimeInternalWriteSM2 | runtimeInternalWriteSM3 | runtimeInternalWriteSM4}, true
 

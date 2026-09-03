@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -136,6 +137,110 @@ func TestOwnerCandidateConformantFactSurvivesRestartAndAllowsDispatchSeal(t *tes
 	}
 }
 
+func TestOwnerCandidateApplicabilityViolationClosesFactAndCorrectionInOneCAS(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeOwnerConstraintAggregate(t)
+	repository := &controllerRepository{aggregate: &aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, "owner-applicability-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	firstCandidate := runtimeUnifiedDiffCandidate("--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+first\n")
+	proposal, err := controller.AdmitCandidateProposalForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, firstCandidate)
+	if err != nil || !proposal.Admission.Accepted() {
+		t.Fatalf("persist first applicability proposal: admission=%+v err=%v", proposal.Admission, err)
+	}
+	firstRecord := runtimeOwnerApplicabilityViolationRecord(t, proposal.Aggregate, 0)
+	revisionBefore := proposal.Aggregate.StateRevision
+	savesBefore := repository.saves
+	closed, err := controller.candidateDispatch.recordCandidateFeasibility(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, firstRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstAttempt := runtimeCandidateAttemptForNumber(t, closed, 0)
+	if closed.StateRevision != revisionBefore+1 || repository.saves != savesBefore+1 || firstAttempt.State != runtimecontract.RuntimeCandidateAttemptStateFailed ||
+		len(firstAttempt.Feasibilities) != 1 || firstAttempt.Failure == nil || firstAttempt.Failure.Code != "candidate_owner_constraint_nonconformant" ||
+		firstAttempt.Correction == nil || firstAttempt.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce ||
+		firstAttempt.Correction.Witness == nil || firstAttempt.Correction.Witness.ConstraintRef != "patch/unified_diff/diff/observed_target" ||
+		closed.ActiveDispatch != nil || closed.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("applicability fact and correction were not one atomic transition: attempt=%+v decision=%+v", firstAttempt, closed.Decision)
+	}
+	reloaded := runtimeTestEvidenceAggregateRoundTrip(t, closed)
+	if err := reloaded.Validate(); err != nil {
+		t.Fatalf("fresh-load applicability lineage: %v", err)
+	}
+	tampered := runtimeTestEvidenceAggregateRoundTrip(t, closed)
+	tamperedAttempt := runtimeCandidateAttemptForNumber(t, tampered, 0)
+	for idx := range tampered.CandidateAttempts {
+		if tampered.CandidateAttempts[idx].Attempt != tamperedAttempt.Attempt {
+			continue
+		}
+		tampered.CandidateAttempts[idx].Feasibilities[0].Observation.CandidateConstraintViolation.ObservedRevision = "forged-owner-revision"
+		break
+	}
+	if err := tampered.Validate(); err == nil || !strings.Contains(err.Error(), "current owner observation") {
+		t.Fatalf("fresh-load applicability revision drift err=%v", err)
+	}
+	savesAfter := repository.saves
+	duplicate, err := controller.candidateDispatch.recordCandidateFeasibility(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 0, firstRecord)
+	if err != nil || duplicate.StateRevision != closed.StateRevision || repository.saves != savesAfter {
+		t.Fatalf("applicability duplicate was not idempotent: revision=%d saves=%d err=%v", duplicate.StateRevision, repository.saves, err)
+	}
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, "owner-applicability-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	secondCandidate := runtimeUnifiedDiffCandidate("--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+second\n")
+	secondProposal, err := controller.AdmitCandidateProposalForTest(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, secondCandidate)
+	if err != nil || !secondProposal.Admission.Accepted() {
+		t.Fatalf("persist corrected applicability proposal: admission=%+v err=%v", secondProposal.Admission, err)
+	}
+	terminal, err := controller.candidateDispatch.recordCandidateFeasibility(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, 1, runtimeOwnerApplicabilityViolationRecord(t, secondProposal.Aggregate, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondAttempt := runtimeCandidateAttemptForNumber(t, terminal, 1)
+	if secondAttempt.State != runtimecontract.RuntimeCandidateAttemptStateFailed || secondAttempt.Correction == nil ||
+		secondAttempt.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal || secondAttempt.Correction.TerminalCode != "candidate_retry_exhausted" ||
+		terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil || terminal.Decision.Terminal.Code != "candidate_retry_exhausted" || terminal.ActiveDispatch != nil {
+		t.Fatalf("attempt-1 applicability violation did not exhaust atomically: attempt=%+v decision=%+v", secondAttempt, terminal.Decision)
+	}
+}
+
+func runtimeOwnerApplicabilityViolationRecord(t *testing.T, aggregate RuntimeAggregate, attempt int) runtimecontract.RuntimeCandidateFeasibilityRecord {
+	t.Helper()
+	attemptRecord := runtimeCandidateAttemptForNumber(t, aggregate, attempt)
+	manifest, err := persistedCandidateAttemptManifest(aggregate, attemptRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations := candidateRuntimeOperations(*attemptRecord.Proposal)
+	if len(operations) != 1 {
+		t.Fatalf("applicability fixture operations=%+v inventories=%+v", operations, aggregate.Facts.Resources.OperationAdmissibilities)
+	}
+	operation := operations[0].Normalized()
+	inventory, found := runtimeOperationAdmissibilityForKind(aggregate.Facts.Resources.OperationAdmissibilities, runtimecontract.RuntimeModuleFile, operation.Kind)
+	if !found {
+		t.Fatalf("applicability fixture has no File inventory for %q", operation.Kind)
+	}
+	observation := runtimecontract.RuntimeOwnerFeasibilityObservation{
+		Outcome:     runtimecontract.RuntimeOwnerFeasibilityCandidateConstraintViolated,
+		OwnerPolicy: runtimecontract.RuntimeOwnerPolicyIdentity{OwnerModuleID: runtimecontract.RuntimeModuleFile, PolicyRevision: "file-owner-feasibility/v1", CatalogSnapshotID: inventory.SnapshotID},
+		CandidateConstraintViolation: &runtimecontract.RuntimeOperationCandidateConstraintViolation{
+			ConstraintRef: "patch/unified_diff/diff/observed_target", ParameterName: "diff",
+			RequiredShape: runtimecontract.RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget,
+			ActualShape:   runtimecontract.RuntimeOperationCandidateActualShapeObservedTargetContextMismatch,
+			TargetRef:     operation.TargetRefs[0], ObservedRevision: inventory.ObservedRevision,
+		},
+	}
+	return runtimecontract.RuntimeCandidateFeasibilityRecord{
+		OperationID: operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID, AcquisitionBinding: inventory.AcquisitionBinding,
+		CandidateManifestHash: manifest.Hash, Observation: &observation,
+	}
+}
+
 func runtimeOwnerConstraintAggregate(t *testing.T) RuntimeAggregate {
 	t.Helper()
 	return stateChangeAggregateWithPreparation(t, func(initial *RuntimeAggregate) {
@@ -206,7 +311,7 @@ func runtimeOwnerConstraintConformanceRecord(t *testing.T, aggregate RuntimeAggr
 		Outcome: outcome,
 	}
 	if outcome == runtimecontract.RuntimeOperationCandidateNonconformant {
-		observation.Violation = &runtimecontract.RuntimeOperationCandidateConformanceViolation{
+		observation.Violation = &runtimecontract.RuntimeOperationCandidateConstraintViolation{
 			ConstraintRef: constraint.Ref, ParameterName: constraint.ParameterName,
 			RequiredShape: constraint.RequiredShape, ActualShape: runtimecontract.RuntimeOperationCandidateActualShapeInvalidSyntax,
 		}

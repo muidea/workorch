@@ -290,25 +290,31 @@ sealed activation 的 parameter bound、variant 与 owner-published effect polic
 kind 生效：该 kind 的合法集合是 `AcceptedOperationVariants` 与 exact `RequiredOperationSequence` variants 的并集；未在
 二者中声明 variant 限制的另一 accepted kind 仍保持合法，不能被全局 variant 集误伤。
 
-普通 JSON/schema/manifest admission 接受 candidate 后，SM-3 必须先持久化完整 proposal，再处理 manifest 中当前 variant
-实际选择的 `CandidateConstraints`。每项 constraint 只允许通过 receiving owner 定义的 concrete typed read command/result
-取得 `conformant | nonconformant | owner_contract_defect`：owner 可以复用其执行路径的同一 parser/matcher，但不得读取或
-修改 workspace、生成 receipt/evidence、选择 retry/terminal 或返回 raw parameter/diagnostic。当前 File
-`patch/apply|patch/preview` 的 `unified_diff` 以该通道验证 single-file syntax 与 header/target 一致；Core 不解释 File code
-或 parser message。未声明 constraint 的 operation 不调用该通道，也不持久化占位 record。
+普通 JSON/schema/manifest admission 接受 candidate 后，SM-3 必须先持久化完整 proposal，再按 manifest 中当前 variant
+实际选择的 `CandidateConstraints` 取得 exact owner fact。`parameter_shape` 只允许通过 receiving owner 定义的 concrete typed
+conformance command/result 取得 `conformant | nonconformant | owner_contract_defect`：owner 可以复用其执行路径的同一
+parser/matcher，但不得读取或修改 workspace。`target_applicability` 则只能在 ordinary typed feasibility 中以只读方式观察 current
+target/revision，并返回 `candidate_constraint_violated` 或正常 feasibility outcome。owner 在两条路径都不得生成 effect/receipt、
+选择 retry/terminal，或返回 raw parameter/parser diagnostic。当前 File `patch/apply|patch/preview` 的 `unified_diff` 通过 static
+conformance 验证 single-file syntax 与 header/target 一致，通过 dynamic feasibility 验证 diff 可应用到 owner-observed target；
+`patch/preview` 的 content-sensitive variant 同样必须先取得 current target snapshot。Core 不解释 File code 或 parser message。
+未声明相应 constraint 的 operation 不调用对应通道，也不持久化占位 record。
 
-该 owner fact 与普通 resource feasibility 正交：前者证明 candidate representation 满足 immutable operation contract，后者才
-观察 current mutable resource、policy、base hash 与 replay prerequisite。`conformant` 以
-`LogicalRequestID + operation + manifest` 作为 pending attempt 的 restart fence；final seal 必须逐项 exact-match。若
-`nonconformant`，Orchestrator 以唯一 private SM-3 event 在同一 aggregate CAS 内同时持久化 bounded violation 与 attempt
-failure/correction，禁止出现“已有 owner fact、尚无 disposition”的中间态。attempt 0 只可产生一次同 manifest
-`owner_candidate_constraint` correction；attempt 1 再次不符合直接 `candidate_retry_exhausted`。owner
-`owner_contract_defect` 与 command/result identity 漂移均 final，不能降级为 `policy_disallowed` 或 ordinary feasibility。
+两类 owner fact 与普通 resource infeasibility 正交：static conformance 证明 candidate representation 满足 immutable operation
+contract，dynamic applicability 证明同一 candidate 满足 manifest-declared、provider-safe 的 current target constraint；其它
+feasibility 才描述 resource、policy、base hash 与 replay prerequisite。它们都以
+`LogicalRequestID + operation + manifest constraint` 作为 pending attempt 的 restart fence；final seal 必须逐项 exact-match。若
+static `nonconformant` 或 dynamic `candidate_constraint_violated`，Orchestrator 以唯一 private SM-3 event 在同一 aggregate CAS 内同时
+持久化 bounded violation 与 attempt failure/correction，禁止出现“已有 owner fact、尚无 disposition”的中间态。attempt 0 只可
+产生一次同 manifest `owner_candidate_constraint` correction；attempt 1 再次违反直接 `candidate_retry_exhausted`。owner
+`owner_contract_defect` 与 command/result identity 漂移均 final，不能降级为 `policy_disallowed` 或普通 resource infeasibility。
 
 为取得 feasibility observation，Orchestrator 只可先用 operation kind 解析 manifest 中的 owner 和
 authorization identity；该步骤不做 candidate admission。无法解析的 kind 不调 owner，由 evaluator 在
 kind 层拒绝；可解析的 operation 可调用无副作用 owner probe，owner 只返回
-`feasible | stale | prerequisite_required | infeasible` observation。候选的结构性 evaluator 必须先按固定顺序
+`feasible | stale | prerequisite_required | candidate_constraint_violated | infeasible | owner_contract_defect` closed observation。
+其中只有 exact manifest-bound 的 `candidate_constraint_violated` 进入上述 candidate correction；其它 feasibility outcome 不进入
+attempt correction ledger。候选的结构性 evaluator 必须先按固定顺序
 返回 wire/parameter/target 违例；只有结构性校验接受后，Orchestrator 才将 owner observation 作为独立后继处理。
 
 `CandidateRejection` 至少包含：原始安全 class/code/message、provider document operation index 与 matching manifest slot
@@ -415,9 +421,9 @@ provider dependency/governance 在进入 candidate pipeline 前单独处理。�
 | `request_recoverable` | incomplete/empty/invalid framing、output limit、timeout、429/5xx 或其它 recoverable transport | 仅接受 LLM owner 已确认 physical submission 的 fact；同一次 Orchestrator CAS 结算本次调用、推进 SM-3 session，并按 typed outcome 消费 whole-document 或适用的 SM-4 transport budget，在耗尽时应用 SM-2 failure；随后才可用新 PhysicalCallID 做同一 sealed expected-document 的 whole-document 有界恢复；不创建 attempt、不拼接 raw suffix |
 | `request_terminal` | provider authentication/configuration/protocol/submission unknown 或 document recovery exhausted | 归一为唯一 owner-private fact，在同一次 Orchestrator aggregate CAS 中关闭 SM-3 session 并应用 exact SM-2 failure；CAS-before fresh reload 只从 submitted marker 封存 unknown，CAS-after/duplicate 复用 exact terminal；不创建 attempt、不重调 provider |
 | `candidate_rejection` | 单一 complete JSON object 的 strict schema 或 CandidateEvaluator typed rejection | 先持久化 provider-safe original diagnostic；由 SM-3 owner-local reducer 在共享 attempt 0/1 内决定唯一 correction 或 typed terminal |
-| `owner_candidate_conformance` | capability owner 对 manifest-declared immutable parameter representation 的 `conformant | nonconformant | owner_contract_defect` factual observation | proposal 持久化后、ordinary feasibility 前，以 Orchestrator private SM-3 event/CAS 持久化；nonconformant 与唯一 correction/final 原子关闭 attempt，零 workspace I/O、effect、receipt 与独立预算 |
-| `owner_feasibility` | capability owner 的 `stale`、`prerequisite_required` 或 `infeasible` factual observation | 先转为 Orchestrator internal event，再由SM-2退休prerequisite、取得新authority；只有独立typed recovery condition/trigger/deadline/budget完整时形成recoverable wait，否则typed terminal；零correction attempt。它不与 provider request terminal 共用结果或 transition |
-| `accepted` | evaluator 接受、全部声明的 owner candidate constraints 为 conformant，且 owner feasibility 为 feasible | persist sealed dispatch 后才可执行 |
+| `owner_candidate_constraint` | capability owner 对 manifest-declared parameter shape 的 static conformance，或对 current target/revision 的 dynamic `candidate_constraint_violated` factual observation | proposal 持久化后，以 Orchestrator private SM-3 event/CAS 持久化；static nonconformant 或 dynamic violation 与唯一 correction/final 原子关闭 attempt。static lane 零 workspace I/O；dynamic lane 只读且两者均零 effect、receipt 与独立预算 |
+| `owner_feasibility` | capability owner 的 ordinary `stale`、`prerequisite_required`、`infeasible` 或 `owner_contract_defect` factual observation | 同一个 `CandidateFeasibilityObserved` owner-private event/CAS 同时保存事实并由 SM-2/SM-3/SM-4 协调归约：退休 prerequisite、取得新 authority、形成 typed terminal 或进入有合同的 recovery；不得先存半状态再发第二事件，且零 candidate correction attempt。它不与 provider request terminal 共用结果或 transition |
+| `accepted` | evaluator 接受、全部 static constraints 有 conformant fact，dynamic applicability 被 current feasibility 接受，且 ordinary owner feasibility 为 feasible | persist sealed dispatch 后才可执行 |
 
 `requestBytes>0`、selected streaming mode、错误文本或 reservation 都不证明 physical submission。exact unsubmitted audit
 必须在对应 session transition CAS 中 release reservations；缺失/篡改 audit 只能结算为 unknown 并终止当前 request，禁止

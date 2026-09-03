@@ -347,7 +347,7 @@ func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate) error {
 	if err := validateRuntimeCandidateAttemptSessionBindings(a.CandidateAttempts, a.CandidateRequestSessions); err != nil {
 		return err
 	}
-	if err := validateRuntimePendingCandidateFeasibilityBindings(a); err != nil {
+	if err := validateRuntimeCandidateFeasibilityBindings(a); err != nil {
 		return err
 	}
 	if (isTerminalConvergenceState(a.Decision.State) || a.Decision.Terminal != nil) && hasPendingCandidateAttempt(a.CandidateAttempts) {
@@ -379,63 +379,74 @@ func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate) error {
 	return runtimecontract.ValidateRuntimeAcceptedAssessmentPurposePreimages(a.SemanticPlanning, active, completed, a.CandidateAttempts, a.CandidateRequestSessions)
 }
 
-// validateRuntimePendingCandidateFeasibilityBindings is the fresh-load reverse
-// proof for the mutable pre-seal owner probe ledger. Shape validation alone is
+// validateRuntimeCandidateFeasibilityBindings is the fresh-load reverse proof
+// for every retained pre-seal owner probe fact. Shape validation alone is
 // insufficient: after restart each result must still belong to the exact
 // proposal, manifest, operation owner and current owner-authored catalog that
-// the live admission path checked before persisting it.
-func validateRuntimePendingCandidateFeasibilityBindings(a RuntimeAggregate) error {
+// the live admission path checked before persisting it. Feasible facts may
+// remain on a pending attempt; a candidate-constraint violation remains on its
+// atomically failed attempt as correction lineage.
+func validateRuntimeCandidateFeasibilityBindings(a RuntimeAggregate) error {
 	for _, attempt := range a.CandidateAttempts {
-		if attempt.State != runtimecontract.RuntimeCandidateAttemptStatePending || len(attempt.Feasibilities) == 0 {
+		if len(attempt.Feasibilities) == 0 {
 			continue
 		}
 		if attempt.Proposal == nil {
-			return fmt.Errorf("pending runtime candidate feasibility ledger has no persisted proposal")
+			return fmt.Errorf("runtime candidate feasibility ledger has no persisted proposal")
 		}
 		for _, feasibility := range attempt.Feasibilities {
 			operation, found := candidateOperationByID(*attempt.Proposal, feasibility.OperationID)
 			if !found {
-				return fmt.Errorf("pending runtime candidate feasibility operation %q is absent from its proposal", feasibility.OperationID)
+				return fmt.Errorf("runtime candidate feasibility operation %q is absent from its proposal", feasibility.OperationID)
 			}
 			operation = operation.Normalized()
 			if feasibility.CandidateManifestHash != attempt.ManifestHash {
-				return fmt.Errorf("pending runtime candidate feasibility operation %q has stale manifest identity", operation.ID)
+				return fmt.Errorf("runtime candidate feasibility operation %q has stale manifest identity", operation.ID)
 			}
 			descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 			if !known || descriptor.OwnerModuleID == "" {
-				return fmt.Errorf("pending runtime candidate feasibility operation %q has no canonical owner", operation.ID)
+				return fmt.Errorf("runtime candidate feasibility operation %q has no canonical owner", operation.ID)
 			}
 			if !runtimecontract.RuntimeOperationAdmissibilityRequiredForOperation(a.Facts.Prerequisites, descriptor.OwnerModuleID, operation.Kind) {
-				return fmt.Errorf("pending runtime candidate feasibility operation %q has no current admissibility requirement", operation.ID)
+				return fmt.Errorf("runtime candidate feasibility operation %q has no current admissibility requirement", operation.ID)
 			}
 			inventory, found := runtimeOperationAdmissibilityForKind(a.Facts.Resources.OperationAdmissibilities, descriptor.OwnerModuleID, operation.Kind)
 			if !found || inventory.SnapshotID != feasibility.AdmissibilitySnapshotID || inventory.AcquisitionBinding != feasibility.AcquisitionBinding {
-				return fmt.Errorf("pending runtime candidate feasibility operation %q does not match current owner admissibility", operation.ID)
+				return fmt.Errorf("runtime candidate feasibility operation %q does not match current owner admissibility", operation.ID)
 			}
 			if feasibility.Observation == nil {
-				return fmt.Errorf("pending runtime candidate feasibility operation %q has no owner observation", operation.ID)
+				return fmt.Errorf("runtime candidate feasibility operation %q has no owner observation", operation.ID)
 			}
 			observation := feasibility.Observation.Normalized()
 			ownerPolicy := observation.OwnerPolicy.Normalized()
 			if ownerPolicy.OwnerModuleID != "" || ownerPolicy.PolicyRevision != "" || ownerPolicy.CatalogSnapshotID != "" {
 				if err := ownerPolicy.Validate(); err != nil || ownerPolicy.OwnerModuleID != descriptor.OwnerModuleID || ownerPolicy.CatalogSnapshotID != inventory.SnapshotID {
-					return fmt.Errorf("pending runtime candidate feasibility operation %q owner policy does not match its descriptor and catalog", operation.ID)
+					return fmt.Errorf("runtime candidate feasibility operation %q owner policy does not match its descriptor and catalog", operation.ID)
 				}
 			}
 			if observation.Feedback != nil {
 				feedback := observation.Feedback.Normalized()
 				if feedback.WorkspaceID != a.Facts.WorkspaceID || feedback.RunID != a.Facts.RunID || feedback.OriginalDiagnostic == nil ||
 					feedback.OriginalDiagnostic.OwnerModuleID != descriptor.OwnerModuleID {
-					return fmt.Errorf("pending runtime candidate feasibility operation %q feedback does not match aggregate scope and owner", operation.ID)
+					return fmt.Errorf("runtime candidate feasibility operation %q feedback does not match aggregate scope and owner", operation.ID)
 				}
 			}
 			if observation.Stale != nil && observation.Stale.Normalized().OwnerModuleID != descriptor.OwnerModuleID {
-				return fmt.Errorf("pending runtime candidate feasibility operation %q stale fact has the wrong owner", operation.ID)
+				return fmt.Errorf("runtime candidate feasibility operation %q stale fact has the wrong owner", operation.ID)
 			}
 			if observation.PrerequisiteRequest != nil {
 				request := observation.PrerequisiteRequest.Normalized()
 				if request.OwnerModuleID != descriptor.OwnerModuleID || request.OperationID != operation.ID {
-					return fmt.Errorf("pending runtime candidate feasibility operation %q prerequisite request has the wrong identity", operation.ID)
+					return fmt.Errorf("runtime candidate feasibility operation %q prerequisite request has the wrong identity", operation.ID)
+				}
+			}
+			if observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityCandidateConstraintViolated {
+				manifest, err := persistedCandidateAttemptManifest(a, attempt)
+				if err != nil {
+					return fmt.Errorf("runtime candidate applicability feasibility manifest: %w", err)
+				}
+				if err := validateCandidateFeasibilityObservationBinding(a, operation, feasibility, manifest); err != nil {
+					return err
 				}
 			}
 			if feasibility.ReplayProof != nil {
@@ -443,7 +454,7 @@ func validateRuntimePendingCandidateFeasibilityBindings(a RuntimeAggregate) erro
 				if proof.OwnerModuleID != descriptor.OwnerModuleID || proof.OperationID != operation.ID ||
 					proof.AdmissibilitySnapshotID != inventory.SnapshotID || proof.AcquisitionBinding != inventory.AcquisitionBinding ||
 					!sameStringSet(proof.TargetRefs, operation.TargetRefs) {
-					return fmt.Errorf("pending runtime candidate feasibility operation %q replay proof does not match sealed owner facts", operation.ID)
+					return fmt.Errorf("runtime candidate feasibility operation %q replay proof does not match sealed owner facts", operation.ID)
 				}
 			}
 		}
