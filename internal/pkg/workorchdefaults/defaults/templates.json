@@ -867,6 +867,12 @@
                 "file/write",
                 "patch/apply"
               ],
+              "acceptedOperationVariants": [
+                {
+                  "kind": "patch/apply",
+                  "variantId": "unified_diff"
+                }
+              ],
               "rejectedStepKinds": [
                 "file/read",
                 "file/list",

@@ -167,16 +167,32 @@ func (m *Biz) markRuntimeCandidateRequestContentFailedGuarded(ctx context.Contex
 }
 
 func loadRuntimeCandidateRequestDocument(ctx context.Context, repo repository.ArtifactContinuationRepository, logicalRequestID string) ([]byte, error) {
+	return loadRuntimeCandidateRequestDocumentForAuthority(ctx, repo, logicalRequestID, "", "", runtimecontract.AuthorityTransaction{})
+}
+
+func loadRuntimeCandidateRequestDocumentForAuthority(ctx context.Context, repo repository.ArtifactContinuationRepository, logicalRequestID string, workspaceID common.WorkspaceID, runID common.RunID, transaction runtimecontract.AuthorityTransaction) ([]byte, error) {
 	if repo == nil || logicalRequestID == "" {
 		return nil, common.ErrInvalidArgument
 	}
 	id := runtimecontract.StableRuntimeCandidateRequestContentID(logicalRequestID)
+	carrier, err := repo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	metadata, content, err := repo.GetAssembled(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if metadata.RollingHash != runtimeCandidateOutputHash(content) || metadata.Bytes != int64(len(content)) {
+	if carrier.ArtifactID != logicalRequestID || carrier.TargetRef != runtimeCandidateRequestContentTargetRef ||
+		carrier.OutputMode != runtimeCandidateRequestContentMode || carrier.State != common.ArtifactContinuationStateApplied ||
+		!carrier.FinalReceived || carrier.BytesWritten <= 0 || carrier.RollingHash == "" ||
+		metadata.ContinuationID != carrier.ID || metadata.TargetRef != carrier.TargetRef ||
+		metadata.RollingHash != carrier.RollingHash || metadata.Bytes != carrier.BytesWritten ||
+		metadata.RollingHash != runtimeCandidateOutputHash(content) || metadata.Bytes != int64(len(content)) {
 		return nil, fmt.Errorf("%w: candidate request complete document hash is invalid", common.ErrConflict)
+	}
+	if workspaceID != "" && (carrier.WorkspaceID != workspaceID || carrier.RunID != runID || carrier.AuthorityTransaction != transaction) {
+		return nil, fmt.Errorf("%w: candidate request complete document authority is invalid", common.ErrConflict)
 	}
 	return []byte(content), nil
 }
@@ -194,7 +210,7 @@ func loadCompletedRuntimeCandidateRequestDocument(ctx context.Context, repo repo
 		if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentComplete {
 			return nil, fmt.Errorf("%w: runtime candidate request document is not complete", common.ErrConflict)
 		}
-		return loadRuntimeCandidateRequestDocument(ctx, repo, logicalRequestID)
+		return loadRuntimeCandidateRequestDocumentForAuthority(ctx, repo, logicalRequestID, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.Transaction)
 	}
 	return nil, fmt.Errorf("%w: runtime candidate request session not found", common.ErrNotFound)
 }

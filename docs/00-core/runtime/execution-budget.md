@@ -169,9 +169,10 @@ session/recovery/terminal transition 同一 aggregate CAS，不能先记账再�
 ## Consumption And Duplicate Semantics
 
 - confirmed provider usage 绑定 `LogicalRequestID + PhysicalCallID + usage hash`；duplicate result不重复扣减。
-- candidate attempt 只由 SM-3 对 settled document result 创建：coherent empty/non-JSON document-conformance rejection，或
-  complete document 的 strict local schema/contract/semantic admission。transport/EOF recovery 与 provider terminal 不消费
-  candidate attempt；document-conformance、schema 与 semantic rejection 共用同一 attempt 0/1 上限。
+- candidate attempt 只由 SM-3 对已结算且 framing 为 one complete JSON object 的 document 创建，再执行 strict local
+  schema/contract/semantic admission。incomplete/empty/invalid framing、transport recovery 与 provider terminal 均不消费
+  candidate attempt；no-candidate framing 只消费 activation-sealed whole-document recovery，complete-object rejection 共用
+  同一 attempt 0/1 上限。
 - manifest-declared owner candidate-conformance 是已存在 attempt 内的 side-effect-free read/restart fence，不分配独立
   provider、capability、repair 或 recovery budget；`nonconformant` 只消费该 attempt 已有的唯一 correction slot，duplicate/restart
   复用 exact `LogicalRequestID + operation + manifest` fact 且零重复消费。

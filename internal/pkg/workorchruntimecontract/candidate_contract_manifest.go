@@ -14,7 +14,7 @@ import (
 // correction renderer. It is deliberately separate from the executable
 // operation-contract revision: this value tracks the candidate wire shape,
 // while RuntimeOperationContractRevision tracks executable owner semantics.
-const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest/v5"
+const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest/v6"
 
 // RuntimeCandidateOperationMaxCount is the compiler ceiling for one complete
 // provider candidate document. The compiled manifest copies this value into
@@ -79,7 +79,11 @@ type RuntimeCandidateContractManifest struct {
 	// MaxOperationCount is the single sealed cardinality source for an
 	// operation-bearing candidate document. It is zero for non-operation
 	// convergence states.
-	MaxOperationCount       int
+	MaxOperationCount int
+	// OperationSetPolicy is the sole candidate-wide authorization rule. It is
+	// compiled before provider I/O and prevents consumers from reconstructing
+	// owner/target cardinality from mutable facts or global descriptors.
+	OperationSetPolicy      RuntimeCandidateOperationSetPolicy
 	RequiredTopLevelFields  []string
 	AllowedTopLevelFields   []string
 	ForbiddenTopLevelFields []string
@@ -94,6 +98,34 @@ type RuntimeCandidateContractManifest struct {
 	AssessmentPurposeManifestHash string
 	RequiredOperationSequence     []RuntimeRequiredOperationVariant
 	Operations                    []RuntimeCandidateOperationManifest
+}
+
+// RuntimeCandidateOperationSetPolicy is the closed, owner-neutral policy for
+// relations between operations in one candidate. NeedStateChange operations
+// are already required by EffectPolicy to be durable, so the owner/target
+// cardinality below cannot accidentally classify an operation by importing an
+// owner catalog at admission time.
+type RuntimeCandidateOperationSetPolicy struct {
+	MaxOperationsPerOwnerTarget           int
+	AllowRequiredOperationSequenceOverlap bool
+}
+
+func runtimeCandidateOperationSetPolicyForState(state ConvergenceState) RuntimeCandidateOperationSetPolicy {
+	if state == ConvergenceStateNeedStateChange {
+		return RuntimeCandidateOperationSetPolicy{
+			MaxOperationsPerOwnerTarget:           1,
+			AllowRequiredOperationSequenceOverlap: true,
+		}
+	}
+	return RuntimeCandidateOperationSetPolicy{}
+}
+
+func (p RuntimeCandidateOperationSetPolicy) Validate(state ConvergenceState) error {
+	expected := runtimeCandidateOperationSetPolicyForState(state)
+	if p != expected {
+		return fmt.Errorf("candidate manifest state %q has invalid operation-set policy", state)
+	}
+	return nil
 }
 
 // RuntimeCandidateOperationManifest is the sealed operation authorization for
@@ -291,6 +323,7 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 		State:                     decision.State,
 		EffectPolicy:              mustRuntimeConvergenceEffectPolicy(decision.State),
 		OperationContractRevision: contractRevision,
+		OperationSetPolicy:        runtimeCandidateOperationSetPolicyForState(decision.State),
 		TargetRefs:                append([]string(nil), required.TargetRefs...),
 		RepairClosureID:           required.RepairClosureID,
 		RepairPurpose:             required.RepairPurpose,
@@ -408,6 +441,7 @@ func ValidateRuntimeCandidateContractManifestForSealedDecision(manifest RuntimeC
 	required := decision.RequiredOutput.Normalized()
 	if manifest.State != decision.State || manifest.OperationContractRevision != RuntimeOperationContractRevision() ||
 		!reflect.DeepEqual(manifest.EffectPolicy, mustRuntimeConvergenceEffectPolicy(decision.State)) ||
+		manifest.OperationSetPolicy != runtimeCandidateOperationSetPolicyForState(decision.State) ||
 		!sameStrings(manifest.TargetRefs, required.TargetRefs) || manifest.RepairClosureID != required.RepairClosureID ||
 		manifest.RepairPurpose != required.RepairPurpose ||
 		!reflect.DeepEqual(manifest.RequiredOperationSequence, cloneRuntimeRequiredOperationVariants(required.RequiredOperationSequence)) {
@@ -717,6 +751,9 @@ func validateRuntimeConfirmedRepairManifestBindingLineage(manifest RuntimeCandid
 // bound on manifests and is not a parallel per-consumer cardinality source.
 func ValidateRuntimeCandidateManifestOperationCardinality(manifest RuntimeCandidateContractManifest) error {
 	manifest = manifest.Normalized()
+	if err := manifest.OperationSetPolicy.Validate(manifest.State); err != nil {
+		return err
+	}
 	switch manifest.State {
 	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation:
 		if manifest.MaxOperationCount < 1 || manifest.MaxOperationCount > RuntimeCandidateOperationMaxCount {
@@ -752,6 +789,8 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 	}
 	writeHashString(h, manifest.OperationContractRevision)
 	writeHashString(h, fmt.Sprintf("%d", manifest.MaxOperationCount))
+	writeHashString(h, fmt.Sprintf("%d", manifest.OperationSetPolicy.MaxOperationsPerOwnerTarget))
+	writeHashString(h, fmt.Sprintf("%t", manifest.OperationSetPolicy.AllowRequiredOperationSequenceOverlap))
 	writeHashStrings(h, manifest.RequiredTopLevelFields)
 	writeHashStrings(h, manifest.AllowedTopLevelFields)
 	writeHashStrings(h, manifest.ForbiddenTopLevelFields)

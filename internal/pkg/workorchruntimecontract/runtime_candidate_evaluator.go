@@ -30,36 +30,21 @@ const (
 type RuntimeCandidateCorrectionWitnessDimension string
 
 const (
-	RuntimeCandidateCorrectionWitnessOperationKind          RuntimeCandidateCorrectionWitnessDimension = "operation_kind"
-	RuntimeCandidateCorrectionWitnessTarget                 RuntimeCandidateCorrectionWitnessDimension = "target"
-	RuntimeCandidateCorrectionWitnessVariant                RuntimeCandidateCorrectionWitnessDimension = "variant"
-	RuntimeCandidateCorrectionWitnessValidationRecipe       RuntimeCandidateCorrectionWitnessDimension = "validation_recipe"
-	RuntimeCandidateCorrectionWitnessClosedParameter        RuntimeCandidateCorrectionWitnessDimension = "closed_semantic_parameter"
-	RuntimeCandidateCorrectionWitnessEvidenceBinding        RuntimeCandidateCorrectionWitnessDimension = "evidence_binding"
-	RuntimeCandidateCorrectionWitnessSchemaField            RuntimeCandidateCorrectionWitnessDimension = "schema_field"
-	RuntimeCandidateCorrectionWitnessDocumentShape          RuntimeCandidateCorrectionWitnessDimension = "document_shape"
-	RuntimeCandidateCorrectionWitnessParameterEntryEncoding RuntimeCandidateCorrectionWitnessDimension = "parameter_entry_encoding"
-	RuntimeCandidateCorrectionWitnessOwnerConstraint        RuntimeCandidateCorrectionWitnessDimension = "owner_candidate_constraint"
+	RuntimeCandidateCorrectionWitnessOperationKind           RuntimeCandidateCorrectionWitnessDimension = "operation_kind"
+	RuntimeCandidateCorrectionWitnessTarget                  RuntimeCandidateCorrectionWitnessDimension = "target"
+	RuntimeCandidateCorrectionWitnessVariant                 RuntimeCandidateCorrectionWitnessDimension = "variant"
+	RuntimeCandidateCorrectionWitnessValidationRecipe        RuntimeCandidateCorrectionWitnessDimension = "validation_recipe"
+	RuntimeCandidateCorrectionWitnessClosedParameter         RuntimeCandidateCorrectionWitnessDimension = "closed_semantic_parameter"
+	RuntimeCandidateCorrectionWitnessEvidenceBinding         RuntimeCandidateCorrectionWitnessDimension = "evidence_binding"
+	RuntimeCandidateCorrectionWitnessSchemaField             RuntimeCandidateCorrectionWitnessDimension = "schema_field"
+	RuntimeCandidateCorrectionWitnessParameterEntryEncoding  RuntimeCandidateCorrectionWitnessDimension = "parameter_entry_encoding"
+	RuntimeCandidateCorrectionWitnessOwnerConstraint         RuntimeCandidateCorrectionWitnessDimension = "owner_candidate_constraint"
+	RuntimeCandidateCorrectionWitnessOperationSetCardinality RuntimeCandidateCorrectionWitnessDimension = "operation_set_cardinality"
 )
-
-// RuntimeCandidateCorrectionConformExpectedDocument is the bounded objective
-// for replacing an empty/invalid/trailing provider body with exactly one
-// manifest-conformant JSON document. It grants no operation authority.
-const RuntimeCandidateCorrectionConformExpectedDocument RuntimeCandidateCorrectionObjective = "conform_expected_document"
 
 const (
 	RuntimeCandidateParameterEncodingInlineSiblings = "inline_declared_parameter_siblings"
 	RuntimeCandidateParameterEncodingNamedEntries   = "independent_named_typed_parameter_entries"
-)
-
-const (
-	RuntimeCandidateDocumentShapeEmpty                   = "empty_document"
-	RuntimeCandidateDocumentShapeInvalid                 = "invalid_provider_output"
-	RuntimeCandidateDocumentShapeTrailingContent         = "trailing_content"
-	RuntimeCandidateDocumentShapeTrailingOperationFields = "trailing_operation_fields"
-	RuntimeCandidateDocumentShapeMultipleJSONValues      = "multiple_json_values"
-	RuntimeCandidateDocumentShapeNonObjectJSONValue      = "non_object_json_value"
-	RuntimeCandidateDocumentShapeConformant              = "single_manifest_conformant_json_object"
 )
 
 // RuntimeCandidateCorrectionWitness is the bounded proof carried by a
@@ -77,6 +62,7 @@ type RuntimeCandidateCorrectionWitness struct {
 	AlternativeShapeHash    string
 	ConstraintRef           string
 	ParameterEntryEncodings []RuntimeCandidateParameterEntryEncodingViolation
+	OperationSetViolation   *RuntimeCandidateOperationSetViolation
 }
 
 func (w RuntimeCandidateCorrectionWitness) Normalized() RuntimeCandidateCorrectionWitness {
@@ -89,6 +75,7 @@ func (w RuntimeCandidateCorrectionWitness) Normalized() RuntimeCandidateCorrecti
 	w.AlternativeShapeHash = strings.TrimSpace(w.AlternativeShapeHash)
 	w.ConstraintRef = strings.TrimSpace(w.ConstraintRef)
 	w.ParameterEntryEncodings = cloneRuntimeCandidateParameterEntryEncodings(w.ParameterEntryEncodings)
+	w.OperationSetViolation = w.OperationSetViolation.Clone()
 	return w
 }
 
@@ -96,6 +83,9 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 	w = w.Normalized()
 	if w.Dimension != RuntimeCandidateCorrectionWitnessParameterEntryEncoding && len(w.ParameterEntryEncodings) != 0 {
 		return fmt.Errorf("candidate correction witness dimension %q cannot carry parameter-entry encoding facts", w.Dimension)
+	}
+	if w.Dimension != RuntimeCandidateCorrectionWitnessOperationSetCardinality && w.OperationSetViolation != nil {
+		return fmt.Errorf("candidate correction witness dimension %q cannot carry an operation-set violation", w.Dimension)
 	}
 	switch w.Dimension {
 	case RuntimeCandidateCorrectionWitnessOperationKind,
@@ -117,21 +107,6 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 		if (w.RejectedShapeHash == "") != (w.AlternativeShapeHash == "") ||
 			(w.RejectedShapeHash != "" && w.RejectedShapeHash == w.AlternativeShapeHash) {
 			return fmt.Errorf("schema-field candidate correction witness shape hashes must be absent together or present and distinct")
-		}
-	case RuntimeCandidateCorrectionWitnessDocumentShape:
-		if w.OperationKind != "" || w.Path != "$" || w.AlternativeValue != RuntimeCandidateDocumentShapeConformant ||
-			w.RejectedShapeHash != "" || w.AlternativeShapeHash != "" {
-			return fmt.Errorf("document-shape candidate correction witness requires only the root path and conformant-document alternative")
-		}
-		switch w.RejectedValue {
-		case RuntimeCandidateDocumentShapeEmpty,
-			RuntimeCandidateDocumentShapeInvalid,
-			RuntimeCandidateDocumentShapeTrailingContent,
-			RuntimeCandidateDocumentShapeTrailingOperationFields,
-			RuntimeCandidateDocumentShapeMultipleJSONValues,
-			RuntimeCandidateDocumentShapeNonObjectJSONValue:
-		default:
-			return fmt.Errorf("document-shape candidate correction witness has undeclared rejected shape %q", w.RejectedValue)
 		}
 	case RuntimeCandidateCorrectionWitnessParameterEntryEncoding:
 		if w.OperationKind != "" || w.Path != "$.operations" ||
@@ -159,6 +134,15 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 			RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode:
 		default:
 			return fmt.Errorf("owner-constraint candidate correction witness has undeclared required shape %q", w.AlternativeValue)
+		}
+	case RuntimeCandidateCorrectionWitnessOperationSetCardinality:
+		if w.OperationKind != "" || w.Path != "$.operations" || w.AlternativeValue != "one_operation_per_owner_target" ||
+			w.RejectedValue == "" || w.RejectedShapeHash == "" || w.AlternativeShapeHash != "" || w.ConstraintRef != "" ||
+			w.OperationSetViolation == nil {
+			return fmt.Errorf("operation-set candidate correction witness requires the exact owner/target violation and consolidation alternative")
+		}
+		if err := w.OperationSetViolation.Validate(); err != nil || w.RejectedValue != w.OperationSetViolation.OwnerModuleID+"|"+w.OperationSetViolation.TargetRef {
+			return fmt.Errorf("operation-set candidate correction witness differs from its typed violation")
 		}
 	default:
 		return fmt.Errorf("candidate correction witness dimension %q is not declared", w.Dimension)

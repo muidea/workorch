@@ -49,7 +49,7 @@ Runtime 可接受的文档，二者不能互相替代。
 schema format；未声明或为 false 时必须省略。无论 provider 是否接受该 format，每个返回文档都必须通过同一份 sealed
 manifest 驱动的 strict local framing、decoder、schema 与 evaluator admission。adapter 不得因 structured-output
 unsupported/failure 自行 fallback 或发起第二次 physical call；只有 Orchestrator SM-3 在持久化 typed rejection 后才可
-对 coherent document-conformance、local schema 或 semantic rejection 使用共享 attempt 0/1 合同授权一次独立 correction；
+对 one complete JSON object 的 local schema/contract 或 semantic rejection 使用共享 attempt 0/1 合同授权一次独立 correction；
 provider format unsupported/failure 本身不产生 correction authority。
 
 ## Mode-Specific Provider Response Guard
@@ -114,18 +114,21 @@ CandidateManifest body。duplicate/restart 按 session 阶段从 current sealed 
 provider-facing instruction 仍严格要求裸 JSON。当前 wire normalization 最多只可移除一层完整、独占响应的精确 JSON code fence；
 raw bytes/hash 保留原始 identity，任何 prose、其他语言标签、缺失 closing fence、多 fence 或
 多 JSON value 都不得由该 normalization 放宽。
-对 operations，`operations:null`、`parameters:null`、required container 的其它错误 JSON type、本地派生字段回显、operation
-object 结束后的 trailing 字段与 root 提前闭合都必须形成精确 typed shape rejection。required container rejection 必须保留
-exact observed type，并以 `Required`/expected JSON type 证明 schema rule；missing/empty 使用
+LLM owner 必须在 candidate attempt 前把 empty、incomplete、non-JSON、scalar/array root、multiple JSON roots、trailing bytes
+和 root 提前闭合归类为 no-candidate framing fact；只有恰好一个完整 JSON object 可作为 opaque content 进入 Orchestrator。
+对已经形成单一 object 的 operations，`operations:null`、`parameters:null`、required container 的其它错误 JSON type与本地
+派生字段回显必须形成精确 typed schema rejection。required container rejection 必须保留 exact observed type，并以
+`Required`/expected JSON type 证明 schema rule；missing/empty 使用
 `field_absent -> field_present` witness，`null`/wrong-type 使用 `<actual_type> -> field_present` witness。attempt 1 可根据
 persisted witness 要求重写整份文档，但不得由 decoder 对 attempt 0 做局部拼接或容错，也不得改变 C0～C3、manifest 或
 wire contract。
 
-- incomplete/EOF、output limit、timeout、429/5xx 与允许恢复的 transport failure 只进入 request-session recovery；
+- incomplete/EOF、empty、invalid framing、output limit、timeout、429/5xx 与允许恢复的 transport failure 只进入
+  request-session whole-document recovery；
 - 401/403、configuration/protocol failure、submission-unknown 和 document recovery exhausted 形成 typed request fact；
 - provider API/envelope/SSE/media/framing 协议破损形成 `Feedback(provider_protocol)`；coherent completed response 的
   empty final output 或 non-JSON final output 分别形成 `DocumentOutcome(empty_document | invalid_provider_output)`。
-  后两者是 model document-conformance observation，不得降格、改写或投影为 provider-protocol failure；
+  后两者是 model no-candidate framing observation，不得降格、改写或投影为 provider-protocol failure；
 - document disposition/code/signature 是闭集事实：empty 只能绑定
   `provider_final_output_missing/provider-final-output-missing`，invalid 只能绑定
   `provider_final_output_invalid/provider-final-output-invalid`；unknown/mixed pair 在 EventHub ingress fail-closed，
@@ -136,7 +139,7 @@ wire contract。
 - provider 返回 coherent `completed` terminal 但没有 final output 时，LLM owner 必须发布
   `empty_document/provider_final_output_missing`，不得降格为 provider-protocol `Feedback`，也不得把 reasoning text
   当作 document content。该 submitted transaction 的 provider-native usage 与 completed audit 必须原样保留，供
-  Orchestrator 精确结算；empty/invalid 不授权 whole-document recovery，也不自行决定 Runtime terminal；
+  Orchestrator 精确结算；empty/invalid 只授权 activation-sealed whole-document recovery，不自行决定 Runtime terminal；
 - 每个 result 必须携带 LLM-owner sealed audit，并逐项匹配 workspace/run、logical request、physical call、document kind、
   target、stable prefix 与 context budget。`providerSubmitted` 只由 protocol adapter 在调用 physical client 的边界写入；
   `requestBytes` 只是序列化计量，不能推断 submission。`DocumentOutcome` 必须 submitted，stale 必须 unsubmitted，
@@ -144,27 +147,28 @@ wire contract。
 - Orchestrator 把 audit 归一为 owner-private `confirmed | released | unknown` settlement，并在同一次 aggregate CAS 中与
   request-session transition 一起结算全部 physical-call allocations。unsubmitted exact fact 才 release；submitted fact
   confirm physical call，缺失/不可信 fact 只能 unknown 并封存 submission-unknown，不能重放；
-- recoverable incomplete/transient observation 必须在一次 Orchestrator CAS 中同时完成 settlement、SM-3 session推进、
+- recoverable no-candidate/transient observation 必须在一次 Orchestrator CAS 中同时完成 settlement、SM-3 session推进、
   必要的 SM-4 transport budget 消费与耗尽时的 SM-2 failure。body-idle 使用同一 transient path；只有 confirmed
   submission 可恢复，released/unknown 均不得进入 retry；
-- coherent empty/invalid observation 先在一个 Orchestrator owner-private CAS 中结算 confirmed physical call并关闭当前
-  request session；SM-3 再以一个可重入、幂等的 owner-private attempt CAS 保存 typed document-conformance rejection 与其
-  correction/final 结果。任一 CAS 后重启都只恢复缺失后继，不重调 provider、不重复结算。它与
-  complete JSON 的 strict local schema/contract rejection 共用 candidate attempt 0/1：attempt 0 最多封存一次
-  `correctable_once`，attempt 1 再次出现任何 document-conformance/schema/semantic rejection 即 final，禁止 attempt 2。
-  SM-4 只结算、幂等 re-drive 与恢复 persisted result，不选择 correction，不把 empty/invalid 计入 transport 或
-  whole-document recovery budget；
+- coherent empty/incomplete/invalid observation 必须在一个 Orchestrator owner-private CAS 中结算 confirmed physical call并
+  推进同一 request session 的 `DocumentRecoveryOutcomes`；不创建 candidate attempt、不创建 correction witness、不进入 C4。
+  未耗尽时以新 `PhysicalCallID` 重取整份 document，耗尽时关闭 session 并应用 typed
+  `candidate_document_recovery_exhausted | semantic_document_recovery_exhausted` failure。任一 CAS 后重启都只恢复 exact session
+  后继，不重调已结算 physical call、不重复消费预算；
 - authentication/configuration/protocol/submission-unknown/document-recovery-exhausted 先归一为一个 Orchestrator owner-private
   terminal fact，再在同一次 aggregate CAS 中同时关闭 SM-3 request session 并应用其确定性的 SM-2 failure。CAS 写入前
   中断只留下 submitted marker，fresh reload 必须封存 submission-unknown 且零 provider replay；CAS 已写入但响应丢失时
   fresh reload 复用 exact terminal/failure，duplicate 零写入；
-- provider request failure 与 incomplete recovery 不创建 candidate attempt；document-conformance rejection 只消费上述共享
-  candidate attempt，不得另建 format/schema retry budget。不得跨 physical call 拼接 partial output 或把 raw suffix 注入下一次 prompt；
+- provider request failure 与全部 no-candidate document recovery 都不创建 candidate attempt。不得跨 physical call 拼接
+  partial output 或把 raw suffix 注入下一次 prompt；
 - 每个 request-session recovery retry 使用新的 `PhysicalCallID`，但保持 logical request、ExpectedDocument、C0～C3、
   transaction、batch 与 stable prefix；SM-3 correction attempt 使用 correction hash 绑定的独立 logical/physical request identity，
   同样保持 ExpectedDocument shape、C0～C3、transaction、manifest/batch 与 stable prefix；
-- complete document 必须通过 strict local admission 且只进入一个 evaluator；candidate attempt 0/1 与 physical-call recovery
-  是独立预算，但 empty/invalid、complete schema rejection 与 semantic rejection 共用同一个 attempt 0/1 上限。
+- complete document 必须先满足“恰好一个 JSON object”，再通过 strict local admission且只进入一个 evaluator；candidate
+  attempt 0/1 与 physical-call recovery 是独立预算。只有 complete-object schema/contract/semantic rejection 使用 attempt
+  0/1；empty/incomplete/invalid 始终为零 attempt。`document_complete` 后若 opaque assembled content 与其 Orchestrator-private
+  carrier event 的 byte/hash/final-state 不一致，则是 storage integrity mismatch，直接 typed terminal，仍为零 attempt；
+  Orchestrator 不重新判定 LLM owner 已发布的 provider framing。
 - provider call allocation、usage、unknown consumption和duplicate accounting遵守
   [Execution Budget](runtime/execution-budget.md)；physical retry不能重置或借用candidate/repair budget。
 
@@ -185,12 +189,12 @@ raw request/response body、credential、endpoint 与未脱敏内容只记录允
 bytes、disposition 和 redacted/omitted metadata。
 
 LLM owner 如保留 raw request、非 complete body 或 provider-private framing，只能放在其 owner-private audit carrier，并以
-hash/ref 绑定上述公共 audit。唯一跨 owner raw-content 例外是 coherent complete document：它可通过同步、volatile、typed
+hash/ref 绑定上述公共 audit。唯一跨 owner raw-content 例外是 framing 已证明恰好一个 JSON object 的 complete document：它可通过同步、volatile、typed
 `DocumentOutcome.Content` nested EventHub Result（`json:"-"`）传给 Orchestrator 做当次 SM-3 decode；若为 crash recovery 持久化，
 只能进入 Orchestrator-private restart-content carrier。该 content 不得进入 EventHub JSON、durable audit、aggregate、eventstream、
-projection、memory 或 C4 prompt。其余 raw、reasoning、decoder message 或可逆片段一律不得跨 owner。empty/invalid 的 attempt-1
-C4 只可引用 sealed manifest/expected-document identity、source observation hash 与 `document_shape` typed witness；complete
-JSON 的 local schema rejection 只引用 field path/rule 等 provider-safe fact。若 fixed declared logical parameter 被错误编码为
+projection、memory 或 C4 prompt。其余 raw、reasoning、decoder message 或可逆片段一律不得跨 owner。empty/incomplete/invalid
+只形成零 content 的 no-candidate framing fact并推进 whole-document recovery，不能产生 attempt-1 C4。complete-object 的 local
+schema rejection 只引用 field path/rule 等 provider-safe fact。若 fixed declared logical parameter 被错误编码为
 另一个 `parameters[]` entry 的 sibling，C4 只可携带 `parameter_entry_encoding` 的 operation/entry index、operation kind、
 container name，以及每个 misplaced parameter 的 name、contract type 与由 type 确定的 wire value field；不得携带 attempt-0
 原值。该事实只授权 provider 重新生成完整文档，不授权 adapter 或 LLM owner 本地搬移并接受原文。
@@ -203,15 +207,16 @@ LLM usage Eventstream/read projection 同样必须原样保留 `logicalRequestId
 不得从 `RequestID`、request bytes 或 streaming 隐含/补造 logical identity。
 
 attempt 1 只允许改变 C4 中 provider-safe `CandidateRejection` 与 Orchestrator persisted `CorrectionDirective` 的 detached
-`correctionInput` 投影。document-conformance witness 只表达 `$` 上的 `empty_document | invalid_provider_output ->
-one_complete_json_object`；schema witness 只表达 sealed local schema 的 field path/rule；parameter-entry witness 只表达
+`correctionInput` 投影。schema witness 只表达 sealed local schema 的 field path/rule；parameter-entry witness 只表达
 declared logical parameter 从 inline sibling 到 independent named typed entry 的结构重编码；semantic witness 才表达具体合法
 alternative；`owner_candidate_constraint` witness 只表达 manifest-declared constraint ref、parameter path 与 closed
-`actual_shape -> required_shape`，不包含 raw parameter 或 owner parser text。该投影只有 manifest、objectives 与 concrete witness；persisted `Disposition`/`TerminalCode` 不进入
+`actual_shape -> required_shape`；`operation_set_cardinality` witness 只表达 exact owner/target、冲突 operation kind/index 与
+合并为一项的静态要求，不包含 owner-derived operation ID/dependency、raw parameter、owner parser text 或 mutable owner fact。
+该投影只有 manifest、objectives 与 concrete witness；persisted `Disposition`/`TerminalCode` 不进入
 LLM command/model/C4，LLM 也不能反构 directive。若修正需要改变 operation authorization、target policy、allowed
 targets、manifest 或 C0～C3，则必须终止 current transaction，等待 SM-2 以新 owner fact 建立新 authority。
 
-prospective target 的 required-owner typed `all_of` constraint 只进入 C3 authority；document/schema mismatch 的普通
+prospective target 的 required-owner typed `all_of` constraint 只进入 C3 authority；schema mismatch 的普通
 attempt-1 correction 保持 C0～C3、manifest、semantic batch/order 与 stable prefix 不变，C4 只引用
 manifest/CWI/违规 field 或 parameter-entry typed encoding fact，不复制 constraint。`JSONSchemaResponse` on/off 必须得到完全
 相同的 C0～C4 correction content；capability 只决定 adapter 是否另发 provider schema format。exact-current File+Shell

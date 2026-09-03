@@ -216,7 +216,7 @@ func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx contex
 	if duplicate {
 		return aggregate, nil
 	}
-	if err := validateCandidateAttemptRejectionSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
+	if err := validateCandidateAttemptSessionBinding(aggregate, stablePrefixHash, manifest, logicalRequestID); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	sessionIndex, err := candidateRequestSessionManifestBinding(aggregate, logicalRequestID, manifest)

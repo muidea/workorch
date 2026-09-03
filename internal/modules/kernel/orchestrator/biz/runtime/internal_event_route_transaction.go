@@ -135,13 +135,7 @@ func (c *RuntimeController) applyPlanningTransactionInternalEvent(ctx context.Co
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateDocumentObserved:
-		var aggregate RuntimeAggregate
-		var err error
-		if event.Transaction.ProviderDocumentFraming != nil {
-			aggregate, err = c.planning.rejectCandidateRequestDocumentConformance(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, *event.Transaction.ProviderDocumentFraming, event.Transaction.ProviderBudgetSettlement)
-		} else {
-			aggregate, err = c.planning.completeCandidateRequestDocument(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, event.Transaction.ProviderBudgetSettlement)
-		}
+		aggregate, err := c.planning.completeCandidateRequestDocument(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Transaction.LogicalRequestID, event.Transaction.PhysicalCallID, event.Transaction.ProviderBudgetSettlement)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventCandidateRequestStaleObserved:

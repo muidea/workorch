@@ -11,8 +11,8 @@ import (
 
 // RuntimeProviderRequestRecoveryInput is an Orchestrator-private projection
 // of one LLM-owner recoverable result. Exactly one transport outcome or
-// incomplete-document framing is allowed. It contains no provider body and no
-// requested Runtime action.
+// no-candidate-document framing is allowed. It contains no provider body and
+// no requested Runtime action.
 type RuntimeProviderRequestRecoveryInput struct {
 	DocumentKind       runtimecontract.RuntimeProviderDocumentKind
 	TransportOutcome   *runtimecontract.RuntimeCandidateRequestOutcome
@@ -69,18 +69,18 @@ func NormalizeRuntimeProviderRequestRecovery(input RuntimeProviderRequestRecover
 		terminalInput.OriginalDiagnostic = diagnostic
 	} else {
 		framing := input.DocumentFraming.Normalized()
-		if err := framing.Validate(); err != nil || framing.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete {
+		if err := framing.Validate(); err != nil || !runtimecontract.RuntimeProviderDocumentDispositionNeedsRecovery(framing.Disposition) {
 			return RuntimeProviderRequestRecoveryFact{}, common.ErrInvalidArgument
 		}
 		fact.DocumentFraming = &framing
 		terminalInput.OutcomeClass = runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted
 		terminalInput.TerminalCode = "candidate_document_recovery_exhausted"
 		terminalInput.TerminalSignature = "candidate-document-recovery-exhausted"
-		terminalInput.Message = "provider candidate output remained incomplete after its activation-sealed complete-document recovery budget was exhausted"
+		terminalInput.Message = "provider output did not produce one complete candidate object within its activation-sealed document recovery budget"
 		if input.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 			terminalInput.TerminalCode = "semantic_document_recovery_exhausted"
 			terminalInput.TerminalSignature = "semantic-document-recovery-exhausted"
-			terminalInput.Message = "semantic document remained incomplete after its sealed whole-document recovery budget"
+			terminalInput.Message = "provider output did not produce one complete semantic object within its sealed document recovery budget"
 		}
 	}
 	terminal, err := NormalizeRuntimeProviderRequestTerminal(terminalInput)
@@ -122,7 +122,7 @@ func (f RuntimeProviderRequestRecoveryFact) Validate() error {
 		return nil
 	}
 	framing := f.DocumentFraming.Normalized()
-	if err := framing.Validate(); err != nil || framing.Disposition != runtimecontract.RuntimeProviderDocumentIncomplete || f.Terminal.RequestOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted {
+	if err := framing.Validate(); err != nil || !runtimecontract.RuntimeProviderDocumentDispositionNeedsRecovery(framing.Disposition) || f.Terminal.RequestOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted {
 		return common.ErrInvalidArgument
 	}
 	expectedCode := "candidate_document_recovery_exhausted"
@@ -192,14 +192,14 @@ func (c *planningTransactionComponent) coordinateProviderRequestRecovery(ctx con
 	if err := validateCurrentCandidateRequestSession(aggregate, session); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected {
+	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
 		return RuntimeAggregate{}, fmt.Errorf("%w: complete provider request cannot accept recovery", common.ErrConflict)
 	}
 	if !session.ProviderSubmitted || session.LastPhysicalCallID != physicalCallID {
 		return RuntimeAggregate{}, fmt.Errorf("%w: provider recovery does not match submitted call", common.ErrConflict)
 	}
 	if fact.DocumentFraming != nil && (session.ExpectedDocument == nil || fact.DocumentFraming.ExpectedDocumentHash != session.ExpectedDocument.Hash) {
-		return RuntimeAggregate{}, fmt.Errorf("%w: incomplete provider document does not match submitted expected document", common.ErrConflict)
+		return RuntimeAggregate{}, fmt.Errorf("%w: recoverable provider document does not match submitted expected document", common.ErrConflict)
 	}
 
 	expectedRevision := aggregate.StateRevision
@@ -228,11 +228,11 @@ func (c *planningTransactionComponent) coordinateProviderRequestRecovery(ctx con
 	} else {
 		framing := fact.DocumentFraming.Normalized()
 		updated.State = runtimecontract.RuntimeCandidateRequestSessionRecoveryPending
-		updated.LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete, Code: framing.Code, Signature: framing.Signature}.Normalized()
+		updated.LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecovery, Code: framing.Code, Signature: framing.Signature}.Normalized()
 		updated.LastDocumentFraming = &framing
 		updated.NextSequence++
-		updated.IncompleteOutcomes++
-		terminal = updated.ExpectedDocument == nil || updated.IncompleteOutcomes > updated.ExpectedDocument.MaxRecoveryAttempts
+		updated.DocumentRecoveryOutcomes++
+		terminal = updated.ExpectedDocument == nil || updated.DocumentRecoveryOutcomes > updated.ExpectedDocument.MaxRecoveryAttempts
 	}
 	if terminal {
 		aggregate, err = applyProviderRequestTerminalToAggregate(aggregate, idx, fact.Terminal)
@@ -328,7 +328,7 @@ func providerRequestRecoveryDuplicateApplied(aggregate RuntimeAggregate, session
 			return false
 		}
 		if fact.DocumentFraming != nil {
-			return session.LastDocumentFraming != nil && session.LastDocumentFraming.Normalized() == fact.DocumentFraming.Normalized() && session.ExpectedDocument != nil && session.IncompleteOutcomes > session.ExpectedDocument.MaxRecoveryAttempts
+			return session.LastDocumentFraming != nil && session.LastDocumentFraming.Normalized() == fact.DocumentFraming.Normalized() && session.ExpectedDocument != nil && session.DocumentRecoveryOutcomes > session.ExpectedDocument.MaxRecoveryAttempts
 		}
 		return session.TransportOutcomes > 0 && aggregate.Facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetProviderTransport) >= aggregate.Facts.RecoveryPolicy.Limit(runtimecontract.RuntimeRecoveryBudgetProviderTransport)
 	}

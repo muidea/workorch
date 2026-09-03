@@ -148,8 +148,8 @@ func TestRuntimeCandidateRequestOutcomeRequiresClosedIdentity(t *testing.T) {
 	valid := []RuntimeCandidateRequestOutcome{
 		{},
 		{Class: RuntimeCandidateRequestOutcomeDocumentComplete},
-		{Class: RuntimeCandidateRequestOutcomeDocumentIncomplete, Code: RuntimeProviderDocumentCodeIncompleteJSON, Signature: RuntimeProviderDocumentSignatureIncompleteJSON},
-		{Class: RuntimeCandidateRequestOutcomeDocumentConformanceRejected, Code: RuntimeProviderDocumentCodeFinalOutputInvalid, Signature: RuntimeProviderDocumentSignatureOutputInvalid},
+		{Class: RuntimeCandidateRequestOutcomeDocumentRecovery, Code: RuntimeProviderDocumentCodeIncompleteJSON, Signature: RuntimeProviderDocumentSignatureIncompleteJSON},
+		{Class: RuntimeCandidateRequestOutcomeDocumentRecovery, Code: RuntimeProviderDocumentCodeFinalOutputInvalid, Signature: RuntimeProviderDocumentSignatureOutputInvalid},
 	}
 	for _, outcome := range valid {
 		if err := outcome.Validate(); err != nil {
@@ -159,8 +159,8 @@ func TestRuntimeCandidateRequestOutcomeRequiresClosedIdentity(t *testing.T) {
 	invalid := []RuntimeCandidateRequestOutcome{
 		{Code: "stray"},
 		{Class: RuntimeCandidateRequestOutcomeDocumentComplete, Code: "stray", Signature: "stray"},
-		{Class: RuntimeCandidateRequestOutcomeDocumentIncomplete, Code: RuntimeProviderDocumentCodeIncompleteJSON},
-		{Class: RuntimeCandidateRequestOutcomeDocumentConformanceRejected, Signature: RuntimeProviderDocumentSignatureOutputInvalid},
+		{Class: RuntimeCandidateRequestOutcomeDocumentRecovery, Code: RuntimeProviderDocumentCodeIncompleteJSON},
+		{Class: RuntimeCandidateRequestOutcomeDocumentRecovery, Signature: RuntimeProviderDocumentSignatureOutputInvalid},
 	}
 	for _, outcome := range invalid {
 		if err := outcome.Validate(); err == nil {
@@ -169,7 +169,7 @@ func TestRuntimeCandidateRequestOutcomeRequiresClosedIdentity(t *testing.T) {
 	}
 }
 
-func TestRuntimeCandidateRequestSessionRecoveryExhaustedRequiresExactIncompleteFraming(t *testing.T) {
+func TestRuntimeCandidateRequestSessionRecoveryExhaustedRequiresRecoverableFraming(t *testing.T) {
 	expected := RuntimeExpectedDocumentContract{
 		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentOperations,
 		ManifestHash: "manifest-1", WireContractHash: "wire-1", LogicalRequestID: "logical-1", StablePrefixHash: "prefix-1",
@@ -184,7 +184,7 @@ func TestRuntimeCandidateRequestSessionRecoveryExhaustedRequiresExactIncompleteF
 	session := RuntimeCandidateRequestSession{
 		LogicalRequestID: expected.LogicalRequestID, DocumentKind: expected.DocumentKind, ExpectedDocument: &expected,
 		Transaction: AuthorityTransaction{AuthoritySnapshotID: "authority-1"}, StablePrefixHash: expected.StablePrefixHash, ManifestHash: expected.ManifestHash,
-		State: RuntimeCandidateRequestSessionTerminal, NextSequence: 3, IncompleteOutcomes: 2,
+		State: RuntimeCandidateRequestSessionTerminal, NextSequence: 3, DocumentRecoveryOutcomes: 2,
 		LastDocumentFraming: &framing, LastPhysicalCallID: "physical-2",
 		LastOutcome: RuntimeCandidateRequestOutcome{
 			Class: RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted,
@@ -200,8 +200,8 @@ func TestRuntimeCandidateRequestSessionRecoveryExhaustedRequiresExactIncompleteF
 		t.Fatalf("recovery-exhausted session without framing err=%v, want invalid argument", err)
 	}
 	premature := session.Clone()
-	premature.IncompleteOutcomes = expected.MaxRecoveryAttempts
-	premature.NextSequence = premature.IncompleteOutcomes + 1
+	premature.DocumentRecoveryOutcomes = expected.MaxRecoveryAttempts
+	premature.NextSequence = premature.DocumentRecoveryOutcomes + 1
 	if err := premature.Validate(); !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("premature recovery-exhausted session err=%v, want invalid argument", err)
 	}

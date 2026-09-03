@@ -11,13 +11,68 @@ import (
 // strict JSON diagnostic. It describes a decoded candidate that is outside the
 // sealed manifest; it owns no aggregate state and cannot select a retry.
 type RuntimeCandidateContractDiagnostic struct {
-	OperationID string
-	Path        string
-	Actual      string
-	Allowed     []string
-	Required    []string
-	Forbidden   []string
-	Cause       error
+	OperationID           string
+	Path                  string
+	Actual                string
+	Allowed               []string
+	Required              []string
+	Forbidden             []string
+	OperationSetViolation *RuntimeCandidateOperationSetViolation
+	Cause                 error
+}
+
+// RuntimeCandidateOperationSetViolation identifies the exact candidate-wide
+// owner/target cardinality conflict. It is bounded correction evidence, not a
+// request to mutate Runtime state or an instruction to a capability owner.
+type RuntimeCandidateOperationSetViolation struct {
+	OwnerModuleID    string   `json:"ownerModuleId"`
+	TargetRef        string   `json:"targetRef"`
+	OperationKinds   []string `json:"operationKinds"`
+	OperationIndexes []int    `json:"operationIndexes"`
+	Maximum          int      `json:"maximum"`
+}
+
+func (v RuntimeCandidateOperationSetViolation) Normalized() RuntimeCandidateOperationSetViolation {
+	v.OwnerModuleID = strings.TrimSpace(v.OwnerModuleID)
+	v.TargetRef = strings.TrimSpace(v.TargetRef)
+	operationKinds := append([]string(nil), v.OperationKinds...)
+	v.OperationKinds = make([]string, len(operationKinds))
+	for index, kind := range operationKinds {
+		v.OperationKinds[index] = CanonicalRuntimeBlockKind(kind)
+	}
+	v.OperationIndexes = append([]int(nil), v.OperationIndexes...)
+	return v
+}
+
+func (v RuntimeCandidateOperationSetViolation) Validate() error {
+	v = v.Normalized()
+	if v.OwnerModuleID == "" || v.TargetRef == "" || v.Maximum != 1 || len(v.OperationKinds) < 2 || len(v.OperationKinds) != len(v.OperationIndexes) {
+		return fmt.Errorf("runtime candidate operation-set violation is incomplete")
+	}
+	seenIndexes := make(map[int]struct{}, len(v.OperationIndexes))
+	previousIndex := -1
+	for index, kind := range v.OperationKinds {
+		if kind == "" || v.OperationIndexes[index] < 0 {
+			return fmt.Errorf("runtime candidate operation-set violation has invalid operation identity")
+		}
+		if v.OperationIndexes[index] <= previousIndex {
+			return fmt.Errorf("runtime candidate operation-set violation indexes are not strictly increasing")
+		}
+		if _, duplicate := seenIndexes[v.OperationIndexes[index]]; duplicate {
+			return fmt.Errorf("runtime candidate operation-set violation repeats operation index %d", v.OperationIndexes[index])
+		}
+		seenIndexes[v.OperationIndexes[index]] = struct{}{}
+		previousIndex = v.OperationIndexes[index]
+	}
+	return nil
+}
+
+func (v *RuntimeCandidateOperationSetViolation) Clone() *RuntimeCandidateOperationSetViolation {
+	if v == nil {
+		return nil
+	}
+	value := v.Normalized()
+	return &value
 }
 
 func (d *RuntimeCandidateContractDiagnostic) Error() string {
@@ -63,19 +118,26 @@ func RuntimeCandidateFailureDiagnosticFromContractDiagnostic(value *RuntimeCandi
 	if value == nil {
 		return nil
 	}
-	return (&RuntimeCandidateFailureDiagnostic{
-		OperationID: value.OperationID,
-		Path:        value.Path,
-		Actual:      value.Actual,
-		Allowed:     append([]string(nil), value.Allowed...),
-		Required:    append([]string(nil), value.Required...),
-		Forbidden:   append([]string(nil), value.Forbidden...),
-	}).Clone()
+	diagnostic := &RuntimeCandidateFailureDiagnostic{
+		OperationID:           value.OperationID,
+		Path:                  value.Path,
+		Actual:                value.Actual,
+		Allowed:               append([]string(nil), value.Allowed...),
+		Required:              append([]string(nil), value.Required...),
+		Forbidden:             append([]string(nil), value.Forbidden...),
+		OperationSetViolation: value.OperationSetViolation.Clone(),
+	}
+	if value.OperationSetViolation != nil {
+		diagnostic.Objectives = []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionConsolidateOperationSet}
+	}
+	return diagnostic.Clone()
 }
 
-// ValidateRuntimeCandidateAgainstManifest checks only decoded candidate fields
-// that are directly projected by the sealed manifest. State/effect policy and
-// aggregate-local target grounding remain with their existing authorities.
+// ValidateRuntimeCandidateAgainstManifest is the complete static admission for
+// one decoded candidate. It consumes only the sealed manifest; mutable Runtime
+// facts and global operation descriptors cannot add a second interpretation.
+// Dynamic freshness, owner feasibility and aggregate-local replay remain with
+// their respective owner transactions.
 func ValidateRuntimeCandidateAgainstManifest(manifest RuntimeCandidateContractManifest, candidate RuntimeCandidate) error {
 	manifest = manifest.Normalized()
 	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" || manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
@@ -96,8 +158,36 @@ func ValidateRuntimeCandidateAgainstManifest(manifest RuntimeCandidateContractMa
 	if err := manifest.EffectPolicy.Validate(); err != nil {
 		return &RuntimeCandidateContractDiagnostic{Path: "$.effectPolicy", Actual: "invalid", Cause: err}
 	}
-	if manifest.State != ConvergenceStateNeedStateChange && manifest.State != ConvergenceStateNeedValidation {
+	candidateKinds := 0
+	for _, present := range []bool{candidate.StateChange != nil, candidate.Validation != nil, candidate.Assessment != nil, candidate.Governance != nil} {
+		if present {
+			candidateKinds++
+		}
+	}
+	if candidateKinds != 1 {
+		return &RuntimeCandidateContractDiagnostic{Path: "$", Actual: fmt.Sprintf("candidate_kind_count_%d", candidateKinds), Required: []string{"exactly_one_candidate_kind"}, Cause: fmt.Errorf("runtime candidate requires exactly one candidate kind")}
+	}
+	switch manifest.State {
+	case ConvergenceStateNeedStateChange:
+		if candidate.StateChange == nil {
+			return &RuntimeCandidateContractDiagnostic{Path: "$.operations", Actual: "non_state_change_candidate", Required: []string{"state_change_candidate"}}
+		}
+	case ConvergenceStateNeedValidation:
+		if candidate.Validation == nil {
+			return &RuntimeCandidateContractDiagnostic{Path: "$.operations", Actual: "non_validation_candidate", Required: []string{"validation_candidate"}}
+		}
+	case ConvergenceStateNeedAssessment:
+		return validateRuntimeAssessmentCandidateAgainstManifest(manifest, candidate.Assessment)
+	case ConvergenceStateNeedGovernance:
+		if candidate.Governance == nil {
+			return &RuntimeCandidateContractDiagnostic{Path: "$.externalDependency", Actual: "non_governance_candidate", Required: []string{"governance_candidate"}}
+		}
+		if err := candidate.Governance.ExternalDependency.Validate(); err != nil {
+			return &RuntimeCandidateContractDiagnostic{Path: "$.externalDependency", Actual: "invalid_external_dependency", Cause: err}
+		}
 		return nil
+	default:
+		return &RuntimeCandidateContractDiagnostic{Path: "$", Actual: string(manifest.State), Cause: fmt.Errorf("convergence state cannot admit an LLM candidate")}
 	}
 	operations, err := runtimeCandidatePayloadOperations(candidate)
 	if err != nil {
@@ -106,9 +196,12 @@ func ValidateRuntimeCandidateAgainstManifest(manifest RuntimeCandidateContractMa
 	if len(operations) > manifest.MaxOperationCount {
 		return &RuntimeCandidateContractDiagnostic{
 			Path: "$.operations", Actual: fmt.Sprintf("operation_count_%d", len(operations)),
-			Allowed: []string{fmt.Sprintf("0..%d operations", manifest.MaxOperationCount)},
+			Allowed: []string{fmt.Sprintf("1..%d operations", manifest.MaxOperationCount)},
 			Cause:   fmt.Errorf("candidate operation count exceeds sealed maxOperationCount"),
 		}
+	}
+	if len(operations) == 0 {
+		return &RuntimeCandidateContractDiagnostic{Path: "$.operations", Actual: "operation_count_0", Required: []string{"at_least_one_operation"}, Cause: fmt.Errorf("candidate requires at least one operation")}
 	}
 	expectedCandidate, err := DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
 	if err != nil {
@@ -152,6 +245,108 @@ func ValidateRuntimeCandidateAgainstManifest(manifest RuntimeCandidateContractMa
 				}
 				return runtimeCandidateContractDiagnostic(operation.ID, fmt.Sprintf("$.operations[%d].dependsOn", index), dependency, allowed, nil, nil, fmt.Errorf("operation dependency is absent from candidate"))
 			}
+		}
+	}
+	if violation := RuntimeCandidateOperationSetViolationForManifest(manifest, operations); violation != nil {
+		operationID := ""
+		if last := len(violation.OperationIndexes) - 1; last >= 0 && violation.OperationIndexes[last] < len(operations) {
+			operationID = operations[violation.OperationIndexes[last]].Normalized().ID
+		}
+		return &RuntimeCandidateContractDiagnostic{
+			OperationID:           operationID,
+			Path:                  "$.operations",
+			Actual:                violation.OwnerModuleID + "|" + violation.TargetRef,
+			Required:              []string{"one_operation_per_owner_target"},
+			OperationSetViolation: violation,
+			Cause:                 fmt.Errorf("candidate operations exceed the sealed owner/target cardinality"),
+		}
+	}
+	return nil
+}
+
+func validateRuntimeAssessmentCandidateAgainstManifest(manifest RuntimeCandidateContractManifest, candidate *AssessmentCandidate) error {
+	if candidate == nil {
+		return &RuntimeCandidateContractDiagnostic{Path: "$.focusId", Actual: "non_assessment_candidate", Required: []string{"assessment_candidate"}}
+	}
+	assessment := candidate.Normalized()
+	if assessment.FocusID == "" || assessment.Summary == "" {
+		return &RuntimeCandidateContractDiagnostic{Path: "$", Actual: "incomplete_assessment", Required: []string{"focusId", "summary"}}
+	}
+	focusIDs := make(map[string]struct{})
+	requiredCoverage := make(map[common.CoverageWorkItemID]struct{})
+	for _, binding := range manifest.Bindings {
+		binding = binding.Normalized()
+		focusIDs[binding.FocusID] = struct{}{}
+		requiredCoverage[binding.CoverageWorkItemID] = struct{}{}
+	}
+	if _, found := focusIDs[assessment.FocusID]; !found {
+		allowed := make([]string, 0, len(focusIDs))
+		for focusID := range focusIDs {
+			allowed = append(allowed, focusID)
+		}
+		return &RuntimeCandidateContractDiagnostic{Path: "$.focusId", Actual: assessment.FocusID, Allowed: allowed, Cause: fmt.Errorf("assessment candidate is not bound to the manifest focus")}
+	}
+	if len(requiredCoverage) != 0 && !coverageIDsIntersect(requiredCoverage, assessment.CoverageWorkItemIDs) {
+		required := make([]string, 0, len(requiredCoverage))
+		for id := range requiredCoverage {
+			required = append(required, string(id))
+		}
+		return &RuntimeCandidateContractDiagnostic{Path: "$.coverageWorkItemIds", Actual: "outside_manifest_bindings", Required: required, Cause: fmt.Errorf("assessment candidate is not bound to manifest coverage")}
+	}
+	if _, err := ValidateAssessmentDisposition(assessment.Disposition, assessment.Items, assessment.Gap); err != nil {
+		return &RuntimeCandidateContractDiagnostic{Path: "$.disposition", Actual: string(assessment.Disposition), Cause: err}
+	}
+	return nil
+}
+
+// RuntimeCandidateOperationSetViolationForManifest evaluates only the
+// candidate-wide policy sealed in the manifest. It must not consult Runtime
+// facts, owner catalogs, operation descriptors, or activation policies.
+func RuntimeCandidateOperationSetViolationForManifest(manifest RuntimeCandidateContractManifest, operations []RuntimeOperation) *RuntimeCandidateOperationSetViolation {
+	manifest = manifest.Normalized()
+	policy := manifest.OperationSetPolicy
+	if policy.MaxOperationsPerOwnerTarget <= 0 {
+		return nil
+	}
+	requiredRefs := make(map[string]struct{}, len(manifest.RequiredOperationSequence))
+	for _, requirement := range manifest.RequiredOperationSequence {
+		if requirement.RequirementID != "" {
+			requiredRefs[requirement.RequirementID] = struct{}{}
+		}
+	}
+	type ownerTarget struct {
+		owner  string
+		target string
+	}
+	type observed struct {
+		kind     string
+		index    int
+		required bool
+	}
+	seen := make(map[ownerTarget]observed)
+	for index, raw := range operations {
+		operation := raw.Normalized()
+		authorization, found := runtimeCandidatePayloadOperationManifest(manifest, operation.Kind)
+		if !found {
+			continue
+		}
+		_, required := requiredRefs[operation.RequiredOperationRef]
+		for _, target := range operation.TargetRefs {
+			key := ownerTarget{owner: authorization.OwnerModuleID, target: strings.TrimSpace(target)}
+			if key.owner == "" || key.target == "" {
+				continue
+			}
+			if previous, duplicate := seen[key]; duplicate {
+				if policy.AllowRequiredOperationSequenceOverlap && previous.required && required {
+					continue
+				}
+				return (&RuntimeCandidateOperationSetViolation{
+					OwnerModuleID: key.owner, TargetRef: key.target,
+					OperationKinds: []string{previous.kind, operation.Kind}, OperationIndexes: []int{previous.index, index},
+					Maximum: policy.MaxOperationsPerOwnerTarget,
+				}).Clone()
+			}
+			seen[key] = observed{kind: operation.Kind, index: index, required: required}
 		}
 	}
 	return nil
@@ -207,8 +402,8 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".targetRefs", actual, allowed, required, nil, err)
 	}
 	// Whether the renderer emits the optional dependsOn field is a wire-schema
-	// concern. The decoded graph is instead checked by ValidateWithActivation,
-	// which owns the candidate-wide operation-ID/dependency relation.
+	// concern. The decoded graph is checked above against the exact dependency
+	// relation derived from the manifest-required operation sequence.
 	if operation.RequiredOperationRef != "" && !runtimeCandidatePayloadContains(operationManifest.RequiredOperationReferences, operation.RequiredOperationRef) {
 		return runtimeCandidateContractDiagnostic(operation.ID, path+".requiredOperationRef", operation.RequiredOperationRef, operationManifest.RequiredOperationReferences, nil, nil, nil)
 	}

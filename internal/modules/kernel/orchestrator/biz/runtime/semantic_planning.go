@@ -1762,7 +1762,7 @@ func semanticFailureClassForFailureCode(code string, _ runtimecontract.RuntimeOr
 		return runtimecontract.FailureClassCapabilityUnavailable
 	case "runtime_contract_defect", "semantic_context_integrity", "semantic_manifest_invalid", "semantic_request_context_invalid",
 		"semantic_expected_document_invalid", "semantic_request_identity_invalid", "semantic_request_session_mismatch",
-		"semantic_request_terminal", "semantic_expected_document_missing", "semantic_correction_lineage_invalid",
+		"semantic_request_terminal", "semantic_expected_document_missing", "semantic_correction_lineage_invalid", "semantic_document_framing_mismatch",
 		"semantic_feasibility_context_invalid", "semantic_batch_identity_missing", "semantic_batch_document_missing",
 		"semantic_owner_probe_invalid", "semantic_probe_proposal_invalid", "prospective_satisfaction_contract_violated":
 		return runtimecontract.FailureClassRuntimeContractMisalignment

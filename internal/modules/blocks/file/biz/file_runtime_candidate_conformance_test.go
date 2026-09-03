@@ -8,6 +8,7 @@ import (
 
 func TestFileRuntimeCandidateConformanceClassifiesUnifiedDiffWithoutWorkspaceIO(t *testing.T) {
 	valid := "--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new\n"
+	validMultiHunk := "--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new\n@@ -4 +4 @@\n-before\n+after\n"
 	validCreate := "--- /dev/null\n+++ b/main.go\n@@ -0,0 +1 @@\n+new\n"
 	missingHeaders := "@@ -1 +1 @@\n-old\n+new\n"
 	targetMismatch := "--- a/other.go\n+++ b/other.go\n@@ -1 +1 @@\n-old\n+new\n"
@@ -20,6 +21,7 @@ func TestFileRuntimeCandidateConformanceClassifiesUnifiedDiffWithoutWorkspaceIO(
 		constraint string
 	}{
 		{name: "existing target update", diff: valid, policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, outcome: runtimecontract.RuntimeOperationCandidateConformant},
+		{name: "existing target consolidated multi-hunk update", diff: validMultiHunk, policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, outcome: runtimecontract.RuntimeOperationCandidateConformant},
 		{name: "prospective target create", diff: validCreate, policy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, outcome: runtimecontract.RuntimeOperationCandidateConformant},
 		{name: "invalid syntax", diff: missingHeaders, policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, outcome: runtimecontract.RuntimeOperationCandidateNonconformant, actual: runtimecontract.RuntimeOperationCandidateActualShapeInvalidSyntax, constraint: "patch/unified_diff/diff/single_file"},
 		{name: "target mismatch", diff: targetMismatch, policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, outcome: runtimecontract.RuntimeOperationCandidateNonconformant, actual: runtimecontract.RuntimeOperationCandidateActualShapeTargetMismatch, constraint: "patch/unified_diff/diff/single_file"},

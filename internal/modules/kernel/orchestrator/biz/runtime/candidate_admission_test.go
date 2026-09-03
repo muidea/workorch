@@ -36,7 +36,11 @@ func TestEvaluateCandidateAdmissionClassifiesFullAndPartialReplay(t *testing.T) 
 	partialCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{
 		candidate.StateChange.Operations[0], {Operation: second},
 	}}}
-	partial := EvaluateCandidateAdmission(aggregate, partialCandidate)
+	// The complete admission boundary now rejects this same-owner/same-target
+	// pair before replay analysis. Exercise the replay detector directly so its
+	// partial-set classification remains covered without treating the prohibited
+	// operation set as an admissible candidate shape.
+	partial := rejectCandidateReplay(aggregate, partialCandidate)
 	if partial.Disposition != CandidateAdmissionRejectedContract || partial.Failure == nil || partial.Failure.Code != candidateAdmissionCodePartiallyReplaysRejected {
 		t.Fatalf("partial replay admission = %+v", partial)
 	}

@@ -59,8 +59,20 @@ func Evaluate(input EvaluationInput) *runtimecontract.RuntimeCandidateFailure {
 		return completeCandidateFailure(input.Manifest, input.Candidate, contractFailure(CodeInvalid, InvalidSignature(input.Candidate), fmt.Sprintf("runtime candidate manifest contract: %v", err)))
 	}
 	if err := runtimecontract.ValidateRuntimeCandidateAgainstManifest(input.Manifest, input.Candidate); err != nil {
-		return completeCandidateFailure(input.Manifest, input.Candidate, diagnosticFailure(CodeInvalid, InvalidSignature(input.Candidate), err))
+		code, signature := CodeInvalid, InvalidSignature(input.Candidate)
+		var diagnostic *runtimecontract.RuntimeCandidateContractDiagnostic
+		if errors.As(err, &diagnostic) && diagnostic.OperationSetViolation != nil {
+			code, signature = CodeOwnerTargetEffectOverlap, SignatureOwnerTargetOverlap
+		}
+		return completeCandidateFailure(input.Manifest, input.Candidate, diagnosticFailure(code, signature, err))
 	}
+	// The manifest owns every provider-selectable static field. The activation
+	// fence additionally checks executable parameter bounds and exact
+	// owner-published effect policy. Keep it in this pre-probe admission path as
+	// the same defense repeated by final dispatch sealing; otherwise a proposal
+	// can be persisted and probed only to fail later as an uncorrectable seal
+	// conflict. This check is pure and reads only facts already captured by the
+	// current Orchestrator authority transaction.
 	if err := input.Candidate.ValidateWithActivation(input.Decision, runtimecontract.RuntimeActivationForFacts(input.Facts)); err != nil {
 		return completeCandidateFailure(input.Manifest, input.Candidate, contractFailure(CodeInvalid, InvalidSignature(input.Candidate), err.Error()))
 	}
@@ -83,72 +95,6 @@ func Evaluate(input EvaluationInput) *runtimecontract.RuntimeCandidateFailure {
 	}
 	if finding, found := NoProgressReplay(input.Candidate, input.NoProgressOperationShapes); found {
 		return completeCandidateFailure(input.Manifest, input.Candidate, failureFromFinding(finding))
-	}
-	if failure := OwnerTargetEffectOverlapFailure(input.Facts, input.Decision, input.Candidate); failure != nil {
-		return completeCandidateFailure(input.Manifest, input.Candidate, failure)
-	}
-	return nil
-}
-
-// OwnerTargetEffectOverlapFailure enforces one durable operation transaction
-// per canonical owner/target in a dispatch. Every replay proof is sealed before
-// any effect executes, so an ordinary DependsOn edge cannot make a second
-// operation against the same resource safe. The sole exception is an exact
-// owner-published RequiredOperationSequence: those operations are already
-// bound to distinct required refs/variants and must remain executable as the
-// capability owner's atomic protocol (for example, repository init/add/commit).
-func OwnerTargetEffectOverlapFailure(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate) *runtimecontract.RuntimeCandidateFailure {
-	operationPolicies := runtimecontract.RuntimeActivationForFacts(facts.Normalized()).OperationPolicies
-	requiredSequenceRefs := make(map[string]struct{}, len(decision.RequiredOutput.RequiredOperationSequence))
-	for _, requirement := range decision.RequiredOutput.Normalized().RequiredOperationSequence {
-		if requirement.RequirementID != "" {
-			requiredSequenceRefs[requirement.RequirementID] = struct{}{}
-		}
-	}
-	type ownerTarget struct {
-		owner  string
-		target string
-	}
-	type seenOperation struct {
-		id               string
-		requiredSequence bool
-	}
-	seen := make(map[ownerTarget]seenOperation)
-	for _, operation := range Operations(candidate) {
-		operation = operation.Normalized()
-		if !runtimecontract.RuntimeEffectIsDurable(runtimecontract.ResolveExpectedEffectScope(operation, operationPolicies)) {
-			continue
-		}
-		descriptor, known := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
-		if !known {
-			continue
-		}
-		_, requiredSequence := requiredSequenceRefs[operation.RequiredOperationRef]
-		for _, target := range operation.TargetRefs {
-			key := ownerTarget{owner: strings.TrimSpace(descriptor.OwnerModuleID), target: strings.TrimSpace(target)}
-			if key.owner == "" || key.target == "" {
-				continue
-			}
-			if previous, found := seen[key]; found && previous.id != operation.ID {
-				if previous.requiredSequence && requiredSequence {
-					continue
-				}
-				failure := contractFailure(
-					CodeOwnerTargetEffectOverlap,
-					SignatureOwnerTargetOverlap,
-					fmt.Sprintf("durable operations %q and %q target the same owner resource %s|%s outside an owner-required operation sequence; consolidate them into one operation", previous.id, operation.ID, key.owner, key.target),
-				)
-				failure.Diagnostic = &runtimecontract.RuntimeCandidateFailureDiagnostic{
-					OperationID: operation.ID,
-					Path:        "$.operations",
-					Actual:      key.owner + "|" + key.target,
-					Required:    []string{"one_durable_operation_per_owner_target"},
-					Objectives:  []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionChangeReplayedShape},
-				}
-				return failure
-			}
-			seen[key] = seenOperation{id: operation.ID, requiredSequence: requiredSequence}
-		}
 	}
 	return nil
 }

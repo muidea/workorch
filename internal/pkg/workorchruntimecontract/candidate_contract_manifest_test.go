@@ -662,6 +662,39 @@ func TestBuildRuntimeCandidateContractManifestRejectsUnknownSealedVariant(t *tes
 	}
 }
 
+func TestRuntimeCandidateManifestVariantsRestrictsOnlyMatchingKind(t *testing.T) {
+	required := RequiredOutputContract{
+		AcceptedKinds: []string{StepKindFileWrite, RuntimeBlockKindPatchApply},
+		AcceptedOperationVariants: []RuntimeOperationVariantRef{{
+			Kind: RuntimeBlockKindPatchApply, VariantID: "unified_diff",
+		}},
+	}.Normalized()
+
+	fileWrite, found := RuntimeOperationContractForKind(StepKindFileWrite)
+	if !found {
+		t.Fatal("file/write contract is missing")
+	}
+	variants, variantIDs, err := runtimeCandidateManifestVariants(fileWrite, required)
+	if err != nil {
+		t.Fatalf("compile unrestricted file/write manifest variants: %v", err)
+	}
+	if len(variants) != 0 || len(variantIDs) != 0 {
+		t.Fatalf("patch/apply restriction leaked into file/write: variants=%+v ids=%v", variants, variantIDs)
+	}
+
+	patchApply, found := RuntimeOperationContractForKind(RuntimeBlockKindPatchApply)
+	if !found {
+		t.Fatal("patch/apply contract is missing")
+	}
+	variants, variantIDs, err = runtimeCandidateManifestVariants(patchApply, required)
+	if err != nil {
+		t.Fatalf("compile restricted patch/apply manifest variants: %v", err)
+	}
+	if len(variants) != 1 || variants[0].ID != "unified_diff" || !reflect.DeepEqual(variantIDs, []string{"unified_diff"}) {
+		t.Fatalf("patch/apply manifest variant restriction = variants=%+v ids=%v", variants, variantIDs)
+	}
+}
+
 func TestBuildRuntimeCandidateContractManifestSealsManagedValidationRecipes(t *testing.T) {
 	decision := RuntimeDecision{
 		State: ConvergenceStateNeedValidation,
@@ -779,12 +812,8 @@ func TestBuildRuntimeCandidateContractManifestRestrictsManagedRecipeToCurrentBin
 	if len(manifest.Operations) != 1 || !reflect.DeepEqual(manifest.Operations[0].ValidationRecipes, []RuntimeValidationRecipe{current}) {
 		t.Fatalf("managed validation recipes = %+v, want only current binding recipe", manifest.Operations)
 	}
-	candidate, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"validation/managed_session","parameters":[{"name":"recipeId","string":"recipe/other-cwi"}]}]}`))
-	if err != nil {
-		t.Fatalf("decode foreign recipe candidate: %v", err)
-	}
-	if err := ValidateRuntimeCandidateAgainstManifest(manifest, candidate); err == nil {
-		t.Fatal("candidate selected a recipe outside the current binding")
+	if _, err := DecodeRuntimeCandidatePayloadWithManifest(manifest, []byte(`{"operations":[{"kind":"validation/managed_session","parameters":[{"name":"recipeId","string":"recipe/other-cwi"}]}]}`)); err == nil {
+		t.Fatal("strict manifest decoder admitted a recipe outside the current binding")
 	}
 }
 

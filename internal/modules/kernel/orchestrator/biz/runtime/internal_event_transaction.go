@@ -33,11 +33,6 @@ type RuntimeInternalTransactionPayload struct {
 	// consumes the SM-4 transport guard when applicable, and applies an
 	// exhausted SM-2 successor. It never crosses EventHub.
 	ProviderRequestRecovery *RuntimeProviderRequestRecoveryFact
-	// ProviderDocumentFraming is present on CandidateDocumentObserved only for
-	// an empty/invalid physical response. The LLM owner supplied this bounded
-	// fact; the Orchestrator-private transition settles it without carrying the
-	// raw provider body across another boundary.
-	ProviderDocumentFraming *runtimecontract.RuntimeProviderDocumentFraming
 	// ProviderBudgetSettlement is the exact Orchestrator-private settlement
 	// derived from the LLM audit fact. It is reduced in the same aggregate CAS as
 	// the request outcome and never crosses EventHub.

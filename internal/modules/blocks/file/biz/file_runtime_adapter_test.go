@@ -2488,6 +2488,44 @@ func TestRuntimeAdapterPatchApplyUnifiedDiffSuccess(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterPatchApplyUnifiedDiffConsolidatesMultipleHunks(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "main.txt")
+	before := "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n"
+	if err := os.WriteFile(path, []byte(before), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	diff := "--- a/main.txt\n+++ b/main.txt\n" +
+		"@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n" +
+		"@@ -6,3 +6,3 @@\n six\n-seven\n+SEVEN\n eight\n"
+
+	adapter := NewRuntimeAdapter()
+	preview, err := adapter.PreviewPatch(PatchApplyRequest{
+		WorkspaceDirectory: workspace, PatchType: "unified_diff", TargetRef: "main.txt", Diff: diff,
+		BaseHash: sha256Hex([]byte(before)),
+	})
+	if err != nil {
+		t.Fatalf("preview multi-hunk unified diff: %v", err)
+	}
+	if preview.AddedLines != 2 || preview.DeletedLines != 2 || preview.BeforeHash == preview.AfterHash {
+		t.Fatalf("multi-hunk preview = %+v", preview)
+	}
+	result, err := adapter.ApplyPatch(PatchApplyRequest{
+		WorkspaceDirectory: workspace, PatchType: "unified_diff", TargetRef: "main.txt", Diff: diff,
+		BaseHash: sha256Hex([]byte(before)),
+	})
+	if err != nil {
+		t.Fatalf("apply multi-hunk unified diff: %v", err)
+	}
+	if result.AddedLines != 2 || result.DeletedLines != 2 || result.AfterHash != preview.AfterHash {
+		t.Fatalf("multi-hunk apply = %+v, preview=%+v", result, preview)
+	}
+	content, readErr := os.ReadFile(path)
+	if readErr != nil || string(content) != "one\nTWO\nthree\nfour\nfive\nsix\nSEVEN\neight\n" {
+		t.Fatalf("multi-hunk content = %q err=%v", string(content), readErr)
+	}
+}
+
 func TestRuntimeAdapterPatchApplyUnifiedDiffRejectsStaleContext(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "main.txt"), []byte("one\nchanged\nthree\n"), 0o644); err != nil {

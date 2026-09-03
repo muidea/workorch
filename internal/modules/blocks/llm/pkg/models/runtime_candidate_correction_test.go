@@ -383,34 +383,6 @@ func TestRuntimeCandidateManifestCorrectionProofUsesExactWireRuleAcrossOperation
 	}
 }
 
-func TestRuntimeCandidateCorrectionInputDirectlyProvesDocumentShape(t *testing.T) {
-	t.Parallel()
-	manifest := candidateCorrectionTestManifest()
-	input := RuntimeCandidateCorrectionInput{
-		ManifestHash: manifest.Hash,
-		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument},
-		Witness: runtimecontract.RuntimeCandidateCorrectionWitness{
-			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape, Path: "$",
-			RejectedValue: runtimecontract.RuntimeCandidateDocumentShapeInvalid, AlternativeValue: runtimecontract.RuntimeCandidateDocumentShapeConformant,
-		},
-	}.Normalized()
-	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
-		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_document_nonconformant", Signature: "candidate-document-nonconformant",
-		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-			Path: "$", Actual: runtimecontract.RuntimeCandidateDocumentShapeInvalid, ManifestHash: manifest.Hash,
-			Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), input.Objectives...),
-		},
-		SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(input.ManifestHash, input.Objectives, &input.Witness),
-	}.Normalized()
-	if err := input.ValidateAgainstObservation(manifest, observation); err != nil {
-		t.Fatal(err)
-	}
-	observation.Diagnostic.Actual = runtimecontract.RuntimeCandidateDocumentShapeEmpty
-	if err := input.ValidateAgainstObservation(manifest, observation); err == nil || !strings.Contains(err.Error(), "differs") {
-		t.Fatalf("document witness mismatch error = %v", err)
-	}
-}
-
 func TestRuntimeCandidateCorrectionInputUsesSealedHashForPrivateReplayFrontier(t *testing.T) {
 	t.Parallel()
 	manifest := candidateCorrectionTestManifest()

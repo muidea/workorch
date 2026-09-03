@@ -126,6 +126,9 @@ func DecodeRuntimeCandidatePayloadWithManifest(manifest RuntimeCandidateContract
 	if err != nil {
 		return candidate, runtimeCandidatePayloadDiagnosticWithSelectedWireRule(err, selectedWireRules)
 	}
+	if err := ValidateRuntimeCandidateAgainstManifest(manifest, derived); err != nil {
+		return derived, err
+	}
 	return derived, nil
 }
 
@@ -598,7 +601,7 @@ func validateRuntimeCandidateOperationCount(manifest RuntimeCandidateContractMan
 	}
 	return &RuntimeCandidatePayloadDiagnostic{
 		Path: "$.operations", Actual: fmt.Sprintf("operation_count_%d", count),
-		Allowed: []string{fmt.Sprintf("0..%d operations", manifest.MaxOperationCount)},
+		Allowed: []string{fmt.Sprintf("1..%d operations", manifest.MaxOperationCount)},
 		Cause:   fmt.Errorf("candidate operation count exceeds sealed maxOperationCount"),
 	}
 }

@@ -2311,45 +2311,6 @@ func TestRuntimeCandidateRetryExplainsOperationShapeReplayWithoutChangingStableP
 	}
 }
 
-func TestRuntimeCandidateRetryExplainsTrailingOperationFieldsFromTypedWitness(t *testing.T) {
-	manifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{
-		State: runtimecontract.ConvergenceStateNeedStateChange,
-		RequiredOutput: runtimecontract.RequiredOutputContract{
-			AcceptedKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: []string{"go.mod"},
-			RequiredOperationSequence: []runtimecontract.RuntimeRequiredOperationVariant{{
-				RequirementID: "create-module", Kind: runtimecontract.StepKindFileWrite, TargetRef: "go.mod",
-			}},
-		},
-	}, nil)
-	objectives := []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument}
-	witness := runtimecontract.RuntimeCandidateCorrectionWitness{
-		Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape,
-		Path:      "$", RejectedValue: runtimecontract.RuntimeCandidateDocumentShapeTrailingOperationFields,
-		AlternativeValue: runtimecontract.RuntimeCandidateDocumentShapeConformant,
-	}
-	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
-		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_document_nonconformant", Signature: "candidate-document-nonconformant",
-		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-			Path: "$", Actual: runtimecontract.RuntimeCandidateDocumentShapeTrailingOperationFields,
-			Required: []string{runtimecontract.RuntimeCandidateDocumentShapeConformant}, ManifestHash: manifest.Hash, Objectives: objectives,
-		},
-		SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(manifest.Hash, objectives, &witness),
-	}
-	correction := llmmodels.RuntimeCandidateCorrectionInput{ManifestHash: manifest.Hash, Objectives: objectives, Witness: witness}
-	if err := correction.ValidateAgainstObservation(manifest, observation); err != nil {
-		t.Fatal(err)
-	}
-	retry := runtimeCandidateRetryForManifest(1, &observation, manifest, &correction)
-	if retry == nil {
-		t.Fatal("trailing-operation correction projection is nil")
-	}
-	for _, want := range []string{"canonicalWireLayout", "parameters last", "close each operation exactly once", "Do not append requiredOperationRef"} {
-		if !strings.Contains(retry.Instruction, want) {
-			t.Fatalf("trailing-operation correction lost %q: %s", want, retry.Instruction)
-		}
-	}
-}
-
 func TestRuntimeCandidateRetryProjectsParameterEntryReencodeWithoutRawValues(t *testing.T) {
 	manifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange,
@@ -2424,6 +2385,76 @@ func TestRuntimeCandidateRetryProjectsParameterEntryReencodeWithoutRawValues(t *
 	for _, raw := range []string{"secret complete file content", "secret-owner-hash", "secret change summary"} {
 		if strings.Contains(string(encoded), raw) {
 			t.Fatalf("C4 parameter-entry projection leaked raw provider value %q: %s", raw, encoded)
+		}
+	}
+}
+
+func TestRuntimeCandidateRetryProjectsTypedOperationSetConsolidation(t *testing.T) {
+	manifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds:        []string{runtimecontract.RuntimeBlockKindPatchApply},
+			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs:  []common.CoverageWorkItemID{"cwi-1"},
+			TargetRefs:           []string{"main.go"},
+		},
+	}, nil)
+	violation := &runtimecontract.RuntimeCandidateOperationSetViolation{
+		OwnerModuleID:    runtimecontract.RuntimeModuleFile,
+		TargetRef:        "main.go",
+		OperationKinds:   []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindPatchApply},
+		OperationIndexes: []int{0, 1},
+		Maximum:          1,
+	}
+	witness := runtimecontract.RuntimeCandidateCorrectionWitness{
+		Dimension:             runtimecontract.RuntimeCandidateCorrectionWitnessOperationSetCardinality,
+		Path:                  "$.operations",
+		RejectedValue:         runtimecontract.RuntimeModuleFile + "|main.go",
+		AlternativeValue:      "one_operation_per_owner_target",
+		RejectedShapeHash:     "candidate-shape-overlap",
+		OperationSetViolation: violation,
+	}
+	objectives := []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConsolidateOperationSet}
+	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract,
+		Code:  "candidate_owner_target_effect_overlap", Signature: "candidate-owner-target-effect-overlap",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			OperationID: "op-second", Path: "$.operations", Actual: runtimecontract.RuntimeModuleFile + "|main.go",
+			ManifestHash: manifest.Hash, RejectedShapeHash: witness.RejectedShapeHash,
+			OperationSetViolation: violation, Objectives: objectives,
+		},
+		SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(manifest.Hash, objectives, &witness),
+	}
+	correction := llmmodels.RuntimeCandidateCorrectionInput{ManifestHash: manifest.Hash, Objectives: objectives, Witness: witness}
+	if err := correction.ValidateAgainstObservation(manifest, observation); err != nil {
+		t.Fatal(err)
+	}
+	retry := runtimeCandidateRetryForManifest(1, &observation, manifest, &correction)
+	if retry == nil || retry.CorrectionInput.Witness.OperationSetViolation == nil ||
+		!reflect.DeepEqual(retry.CorrectionInput.Witness.OperationSetViolation.Normalized(), violation.Normalized()) {
+		t.Fatalf("typed operation-set retry projection = %+v", retry)
+	}
+	encoded, err := json.Marshal(retry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"dimension":"operation_set_cardinality"`,
+		`"ownerModuleId":"blocks/file"`,
+		`"targetRef":"main.go"`,
+		`"operationKinds":["patch/apply","patch/apply"]`,
+		`"operationIndexes":[0,1]`,
+		"Consolidate every required change",
+		"do not use dependsOn",
+	} {
+		if !strings.Contains(string(encoded), want) {
+			t.Fatalf("operation-set C4 projection lost %q: %s", want, encoded)
+		}
+	}
+	for _, forbidden := range []string{`"operationIds"`, "op-first", "op-second"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("operation-set C4 projection leaked owner-derived operation identity %q: %s", forbidden, encoded)
 		}
 	}
 }

@@ -63,15 +63,22 @@ func TestDecodeRuntimeCandidatePayloadClassifiesIncompleteAndEmptyDocuments(t *t
 	}
 }
 
-func TestInspectRuntimeCandidateDocumentFramingSeparatesNonJSONFromIncompleteJSON(t *testing.T) {
+func TestInspectRuntimeCandidateDocumentFramingAdmitsOnlyOneCompleteObject(t *testing.T) {
 	for name, testCase := range map[string]struct {
 		payload []byte
 		want    RuntimeCandidateDocumentDisposition
 	}{
-		"complete":       {payload: []byte(`{"operations":[]}`), want: RuntimeCandidateDocumentComplete},
-		"incomplete":     {payload: []byte(`{"operations":[`), want: RuntimeCandidateDocumentIncomplete},
-		"empty":          {payload: []byte(" \n\t"), want: RuntimeCandidateDocumentEmpty},
-		"provider prose": {payload: []byte("The user wants a semantic plan."), want: RuntimeCandidateDocumentInvalid},
+		"complete object":       {payload: []byte(`{"operations":[]}`), want: RuntimeCandidateDocumentComplete},
+		"schema-invalid object": {payload: []byte(`{"operations":null}`), want: RuntimeCandidateDocumentComplete},
+		"incomplete":            {payload: []byte(`{"operations":[`), want: RuntimeCandidateDocumentIncomplete},
+		"empty":                 {payload: []byte(" \n\t"), want: RuntimeCandidateDocumentEmpty},
+		"provider prose":        {payload: []byte("The user wants a semantic plan."), want: RuntimeCandidateDocumentInvalid},
+		"scalar":                {payload: []byte(`"text"`), want: RuntimeCandidateDocumentInvalid},
+		"null":                  {payload: []byte(`null`), want: RuntimeCandidateDocumentInvalid},
+		"array":                 {payload: []byte(`[]`), want: RuntimeCandidateDocumentInvalid},
+		"multiple roots":        {payload: []byte(`{} {}`), want: RuntimeCandidateDocumentInvalid},
+		"trailing prose":        {payload: []byte(`{} explanation`), want: RuntimeCandidateDocumentInvalid},
+		"invalid syntax":        {payload: []byte(`{]`), want: RuntimeCandidateDocumentInvalid},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := InspectRuntimeCandidateDocumentFraming(testCase.payload); got != testCase.want {

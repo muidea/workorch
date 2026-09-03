@@ -539,14 +539,14 @@ func TestRuntimeCandidateAuxiliaryOperationIDsUseCanonicalSemanticKey(t *testing
 		RequiredOutput: RequiredOutputContract{
 			AcceptedKinds:        []string{StepKindFileWrite, RuntimeBlockKindPatchApply},
 			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
-			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go", "support.go"},
 		},
 	})
 	fileOperation := func(content string) string {
-		return `{"kind":"file/write","parameters":[{"name":"content","string":"` + content + `"}]}`
+		return `{"kind":"file/write","targetRefs":["main.go"],"parameters":[{"name":"content","string":"` + content + `"}]}`
 	}
 	patchOperation := func(content string) string {
-		return `{"kind":"patch/apply","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"` + content + `"}]}`
+		return `{"kind":"patch/apply","targetRefs":["support.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"` + content + `"}]}`
 	}
 	decodeOperations := func(left, right string) map[string]RuntimeOperation {
 		t.Helper()
@@ -614,7 +614,7 @@ func TestRuntimeCandidateOperationCardinalityUsesManifestSourceOfTruth(t *testin
 		RequiredOutput: RequiredOutputContract{
 			AcceptedKinds:        []string{RuntimeBlockKindPatchApply},
 			AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
-			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go", "support.go"},
 		},
 	})
 	if manifest.MaxOperationCount != RuntimeCandidateOperationMaxCount {
@@ -626,8 +626,8 @@ func TestRuntimeCandidateOperationCardinalityUsesManifestSourceOfTruth(t *testin
 	if limited.Hash == manifest.Hash {
 		t.Fatal("maxOperationCount did not participate in manifest identity")
 	}
-	first := `{"kind":"patch/apply","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"first"}]}`
-	second := `{"kind":"patch/apply","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"second"}]}`
+	first := `{"kind":"patch/apply","targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"first"}]}`
+	second := `{"kind":"patch/apply","targetRefs":["support.go"],"parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"second"}]}`
 	payload := []byte(`{"operations":[` + first + `,` + second + `]}`)
 	_, err := DecodeRuntimeCandidatePayloadWithManifest(limited, payload)
 	var payloadDiagnostic *RuntimeCandidatePayloadDiagnostic
@@ -695,7 +695,7 @@ func TestEncodeRuntimeCandidatePayloadWithManifestRoundTripsAllCandidateShapes(t
 		{
 			name:     "assessment",
 			manifest: mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{State: ConvergenceStateNeedAssessment, RequiredOutput: RequiredOutputContract{CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}}),
-			candidate: RuntimeCandidate{Assessment: &AssessmentCandidate{FocusID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Disposition: AssessmentDispositionRepairableGap,
+			candidate: RuntimeCandidate{Assessment: &AssessmentCandidate{FocusID: "focus-candidate-test", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Disposition: AssessmentDispositionRepairableGap,
 				Items: []RuntimeAssessmentItemFact{{CoverageWorkItemID: "cwi-1", Satisfied: false, Reason: "missing validation"}}, Summary: "validation is required"}},
 		},
 		{

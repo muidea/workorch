@@ -1723,9 +1723,9 @@ func TestRuntimeSemanticRetirementClearsPriorProviderDocumentFraming(t *testing.
 		LogicalRequestID: expected.LogicalRequestID, DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		ExpectedDocument: &expected, Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-old"},
 		StablePrefixHash: expected.StablePrefixHash, ManifestHash: expected.ManifestHash,
-		State: runtimecontract.RuntimeCandidateRequestSessionRecoveryPending, NextSequence: 2, IncompleteOutcomes: 1,
+		State: runtimecontract.RuntimeCandidateRequestSessionRecoveryPending, NextSequence: 2, DocumentRecoveryOutcomes: 1,
 		LastDocumentFraming: &outcome, LastOutcome: runtimecontract.RuntimeCandidateRequestOutcome{
-			Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete, Code: outcome.Code, Signature: outcome.Signature,
+			Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecovery, Code: outcome.Code, Signature: outcome.Signature,
 		},
 	}}
 	if err := retireSemanticPlanningGeneration(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated, []RuntimeSemanticCatalogFreshnessGap{{PrerequisiteID: prerequisite.ID}}); err != nil {

@@ -53,8 +53,8 @@ func TestCorrectionObservationsExcludeOwnerPrivateAuditFieldsBeforeEventHub(t *t
 
 	diagnostic := &runtimecontract.RuntimeOriginalDiagnostic{
 		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
-		OwnerModuleID: runtimecontract.RuntimeModuleLLM, OriginalClass: "schema", OriginalCode: "semantic_document_nonconformant",
-		OriginalMessage: "private provider document", Signature: "semantic-document-nonconformant",
+		OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator, OriginalClass: "schema", OriginalCode: "semantic_plan_invalid",
+		OriginalMessage: "private provider document", Signature: "semantic-plan/invalid-document",
 		DetailsRef: "artifact://diagnostic/1", DetailsHash: strings.Repeat("a", 64), DetailsBytes: 10,
 		SemanticViolations: []runtimecontract.RuntimeSemanticContractViolation{{
 			Kind: runtimecontract.RuntimeSemanticContractViolationCoverageOrderDocument, Path: "$.coverageOrder",

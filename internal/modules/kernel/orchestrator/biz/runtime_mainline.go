@@ -3,12 +3,9 @@ package orchestrator
 // Runtime mainline is owned by Biz.
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 
@@ -379,14 +376,6 @@ func (m *Biz) resumeRuntimeCandidateDocumentSession(ctx context.Context, aggrega
 		updated, candidate, ready, err := m.admitRuntimeCompletedCandidateDocument(ctx, aggregate, manifest, session.LogicalRequestID, candidateAttempt)
 		return runtimeCandidateDocumentProgress{aggregate: updated, candidate: candidate, ready: ready, handled: true}, err
 	}
-	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected {
-		if session.LastDocumentFraming == nil {
-			return runtimeCandidateDocumentProgress{handled: true}, fmt.Errorf("%w: document-conformance session has no framing fact", common.ErrConflict)
-		}
-		failure := runtimeCandidateDocumentConformanceFailure(string(session.LastDocumentFraming.Disposition))
-		failed, err := m.runtimeCandidateDocument(ctx, aggregate, runtime.RuntimeInternalEventCandidateDocumentRejected, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, nil, &failure)
-		return runtimeCandidateDocumentProgress{aggregate: failed.Aggregate, handled: true}, err
-	}
 	if session.State == runtimecontract.RuntimeCandidateRequestSessionTerminal {
 		if !runtime.ProviderRequestTerminalSessionApplied(aggregate, session) {
 			return runtimeCandidateDocumentProgress{handled: true}, fmt.Errorf("%w: operations provider request is terminal without its coordinated SM-2 failure", common.ErrConflict)
@@ -476,7 +465,7 @@ func (m *Biz) handleRuntimeCandidateTransientFeedback(ctx context.Context, aggre
 func (m *Biz) handleRuntimeCandidateDocumentOutcome(ctx context.Context, aggregate runtime.RuntimeAggregate, manifest runtimecontract.RuntimeCandidateContractManifest, session runtimecontract.RuntimeCandidateRequestSession, response llmevents.RequestRuntimeCandidateResult, candidateAttempt, sequence int, physicalCallID string, settlement *runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, runtimecontract.RuntimeCandidate, bool, error) {
 	framing := response.DocumentOutcome.Framing
 	switch framing.Disposition {
-	case runtimecontract.RuntimeProviderDocumentIncomplete:
+	case runtimecontract.RuntimeProviderDocumentIncomplete, runtimecontract.RuntimeProviderDocumentInvalid, runtimecontract.RuntimeProviderDocumentEmpty:
 		updated, recoveryErr := m.runtimeCoordinateProviderRequestRecovery(ctx, aggregate, session.LogicalRequestID, physicalCallID, runtime.RuntimeProviderRequestRecoveryInput{
 			DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, DocumentFraming: &framing,
 		}, settlement)
@@ -493,17 +482,6 @@ func (m *Biz) handleRuntimeCandidateDocumentOutcome(ctx context.Context, aggrega
 			}
 		}
 		return updated, runtimecontract.RuntimeCandidate{}, false, nil
-	case runtimecontract.RuntimeProviderDocumentInvalid, runtimecontract.RuntimeProviderDocumentEmpty:
-		rejected, rejectErr := m.runtimeRejectCandidateRequestDocumentConformance(ctx, aggregate, session.LogicalRequestID, physicalCallID, framing, settlement)
-		if rejectErr != nil {
-			return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, rejectErr
-		}
-		persisted, found := runtimeCandidateRequestSession(rejected, session.LogicalRequestID)
-		if !found {
-			return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, fmt.Errorf("runtime candidate conformance session disappeared")
-		}
-		progress, progressErr := m.resumeRuntimeCandidateDocumentSession(ctx, rejected, manifest, persisted, candidateAttempt)
-		return progress.aggregate, progress.candidate, progress.ready, progressErr
 	case runtimecontract.RuntimeProviderDocumentComplete:
 		if len(response.DocumentOutcome.Content) == 0 {
 			return m.terminateRuntimeCandidateRequestProtocol(ctx, aggregate, session.LogicalRequestID, "provider_document_missing", "complete candidate response did not carry its raw document", nil, settlement)
@@ -560,7 +538,6 @@ func (m *Biz) admitRuntimeCompletedCandidateDocument(ctx context.Context, aggreg
 		})
 		return failed, runtimecontract.RuntimeCandidate{}, false, failureErr
 	}
-	candidateContext := runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, runtime.ActiveRejectedOperationShapes(aggregate))
 	if err := runtime.ValidateRuntimeCandidateContractManifestForAggregate(aggregate, manifest); err != nil {
 		return runtime.RuntimeAggregate{}, runtimecontract.RuntimeCandidate{}, false, err
 	}
@@ -579,18 +556,7 @@ func (m *Biz) admitRuntimeCompletedCandidateDocument(ctx context.Context, aggreg
 			candidateCopy := candidate
 			rejectedCandidate = &candidateCopy
 		}
-		if shape, nonconformant := runtimeCompletedCandidateDocumentShape(decodedDocument); nonconformant {
-			failure = runtimeCandidateDocumentConformanceFailure(shape)
-			rejectedCandidate = nil
-		}
 		failed, failureErr := m.runtimeCandidateDocument(ctx, aggregate, runtime.RuntimeInternalEventCandidateDocumentRejected, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, rejectedCandidate, &failure)
-		return failed.Aggregate, runtimecontract.RuntimeCandidate{}, false, failureErr
-	}
-	if validateErr := candidate.ValidateWithActivation(aggregate.Decision, candidateContext.Activation); validateErr != nil {
-		failure := runtimecontract.RuntimeCandidateFailure{
-			Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_contract_invalid", Signature: "candidate-contract-invalid", Reason: validateErr.Error(),
-		}
-		failed, failureErr := m.runtimeCandidateDocument(ctx, aggregate, runtime.RuntimeInternalEventCandidateDocumentRejected, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, &candidate, &failure)
 		return failed.Aggregate, runtimecontract.RuntimeCandidate{}, false, failureErr
 	}
 	pendingEvent, err := m.runtimeCandidateDocument(ctx, aggregate, runtime.RuntimeInternalEventCandidateAttemptBegun, candidateAttempt, session.StablePrefixHash, manifest, session.LogicalRequestID, nil, nil)
@@ -1024,73 +990,22 @@ func runtimeCandidateSchemaFailure(decodeErr error) *runtimecontract.RuntimeCand
 	return failure
 }
 
-func runtimeCandidateDocumentConformanceFailure(shape string) runtimecontract.RuntimeCandidateFailure {
-	shape = strings.TrimSpace(shape)
-	return runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassSchema,
-		Code:  "candidate_document_nonconformant", Signature: "candidate-document-nonconformant/" + strings.ReplaceAll(shape, "_", "-"),
-		Reason: "provider response must contain exactly one manifest-conformant JSON document",
-		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-			Path: "$", Actual: shape, Required: []string{runtimecontract.RuntimeCandidateDocumentShapeConformant},
-			Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument},
-		},
-	}
-}
-
-// runtimeCompletedCandidateDocumentShape classifies only defects after the
-// first complete JSON value. Empty/non-JSON framing remains an LLM-owner fact;
-// this pure SM-3 helper never reclassifies those raw outcomes.
-func runtimeCompletedCandidateDocumentShape(document []byte) (string, bool) {
-	decoder := json.NewDecoder(bytes.NewReader(document))
-	var first json.RawMessage
-	if err := decoder.Decode(&first); err != nil {
-		return "", false
-	}
-	firstEnd := decoder.InputOffset()
-	root := bytes.TrimSpace(first)
-	if len(root) == 0 || root[0] != '{' {
-		return runtimecontract.RuntimeCandidateDocumentShapeNonObjectJSONValue, true
-	}
-	var trailing json.RawMessage
-	err := decoder.Decode(&trailing)
-	switch {
-	case err == nil:
-		return runtimecontract.RuntimeCandidateDocumentShapeMultipleJSONValues, true
-	case errors.Is(err, io.EOF):
-		return "", false
-	default:
-		if runtimeCandidateTrailingOperationFields(document, firstEnd) {
-			return runtimecontract.RuntimeCandidateDocumentShapeTrailingOperationFields, true
-		}
-		return runtimecontract.RuntimeCandidateDocumentShapeTrailingContent, true
-	}
-}
-
-func runtimeCandidateTrailingOperationFields(document []byte, firstEnd int64) bool {
-	if firstEnd < 0 || firstEnd >= int64(len(document)) {
-		return false
-	}
-	tail := bytes.TrimSpace(document[firstEnd:])
-	if len(tail) == 0 || tail[0] != ',' {
-		return false
-	}
-	for _, field := range [][]byte{
-		[]byte(`"requiredOperationRef"`), []byte(`"kind"`), []byte(`"bindingRefs"`),
-		[]byte(`"targetRefs"`), []byte(`"parameters"`),
-	} {
-		if bytes.Contains(tail, field) {
-			return true
-		}
-	}
-	return false
-}
-
 func (m *Biz) requestAndSealRuntimeCandidateWithRetry(
 	ctx context.Context,
 	aggregate runtime.RuntimeAggregate,
 	stablePrefixHash string,
 ) (runtime.RuntimeAggregate, error) {
-	for range 2 {
+	// A provider response that contains no candidate object advances only the
+	// request-session recovery ledger. It must be allowed to consume its own
+	// activation-sealed physical-call budget without consuming either of the two
+	// candidate attempts. Reserve one additional mainline turn per attempt for
+	// local admission/seal after a complete document arrives.
+	documentRecoveries := aggregate.Facts.Activation.ExecutionContract.CandidateDocumentRecovery.MaxAttempts
+	if documentRecoveries <= 0 {
+		documentRecoveries = 1
+	}
+	mainlineTurns := 2 * (documentRecoveries + 2)
+	for range mainlineTurns {
 		if aggregate.ActiveDispatch != nil {
 			if aggregate.ActiveDispatch.Candidate.Governance != nil {
 				return m.prepareRuntimeGovernanceRequest(ctx, aggregate)

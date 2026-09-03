@@ -69,7 +69,7 @@ func RuntimeCandidateCorrectionObservationForEventTest() runtimecontract.Runtime
 func RuntimeSemanticCorrectionObservationForEventTest() runtimecontract.RuntimeSemanticCorrectionObservation {
 	return runtimecontract.RuntimeSemanticCorrectionObservation{
 		SchemaVersion: runtimecontract.RuntimeSemanticCorrectionObservationSchemaCurrent,
-		OwnerModuleID: runtimecontract.RuntimeModuleLLM, Class: "schema", Code: "semantic_document_nonconformant", Signature: "semantic-document-nonconformant",
+		OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator, Class: "schema", Code: "semantic_plan_invalid", Signature: "semantic-plan/invalid-document",
 		SemanticViolations: []runtimecontract.RuntimeSemanticContractViolation{{
 			Kind: runtimecontract.RuntimeSemanticContractViolationCoverageOrderDocument, Path: "$.coverageOrder",
 			RequiredCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},

@@ -29,9 +29,11 @@ focused contract；本页不复制字段级正文。
   wire layout 和 per-slot rules。attempt 1/restart 只能重算同一 hash；wire 规则漂移属于请求身份缺陷，不是
   provider correction input，且不得通过改写 C4 绕过。
 - operations attempt 1 的 C4 必须携带 attempt 0 persisted directive 的 provider-safe detached correction input：manifest、
-  objectives 与 concrete document-shape/schema/semantic witness；failure 与该 input 的 normalized identity 进入 correction/request-session hash，
-  persisted `Disposition`/`TerminalCode` 不跨 owner。LLM 只渲染该 detached fact，不能重新选择 alternative。缺失、漂移或
-  无法由相同 manifest 重验的 witness 在 physical provider call 前 fail-closed。
+  objectives 与 concrete schema/parameter-entry/owner-constraint/operation-set/semantic witness；failure 与该 input 的 normalized
+  identity 进入 correction/request-session hash，persisted `Disposition`/`TerminalCode` 不跨 owner。LLM 只渲染该 detached fact，
+  不能重新选择 alternative。缺失、漂移或无法由相同 manifest 重验的 witness 在 physical provider call 前 fail-closed。
+- incomplete、empty、invalid framing（含 non-JSON、scalar/array、multiple roots、trailing bytes）没有 candidate document，
+  因此不进入 C4、不创建 attempt，也不进入 cache-visible correction identity；仅 request-session sequence 与恢复结果变化。
 - rule-selected operation field schema correction 的 C4 lineage 必须包含 strict decoder 选中的 exact
   `RuntimeCandidateWireRuleIdentity`（wire contract hash、operation index、required ref/canonical kind、variant），并进入
   request-session correction hash。它只在 C4 证明该 field rule 的来源，不改变 C0～C3；LLM 不得从 `Actual` 或单 operation

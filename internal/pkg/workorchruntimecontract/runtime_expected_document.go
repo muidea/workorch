@@ -151,6 +151,19 @@ const (
 	RuntimeProviderDocumentSignatureOutputInvalid  = "provider-final-output-invalid"
 )
 
+// RuntimeProviderDocumentDispositionNeedsRecovery reports whether the LLM
+// owner observed no candidate object at the physical-response boundary. These
+// framing outcomes stay in the request-session recovery ledger and cannot be
+// converted into a candidate or semantic correction attempt.
+func RuntimeProviderDocumentDispositionNeedsRecovery(disposition RuntimeProviderDocumentDisposition) bool {
+	switch RuntimeProviderDocumentDisposition(strings.TrimSpace(string(disposition))) {
+	case RuntimeProviderDocumentIncomplete, RuntimeProviderDocumentEmpty, RuntimeProviderDocumentInvalid:
+		return true
+	default:
+		return false
+	}
+}
+
 // RuntimeProviderDocumentFraming is an owner-neutral, pure DTO describing the
 // bounded framing of a physical provider response. Only the LLM owner may
 // produce its disposition from raw provider bytes; shared placement does not

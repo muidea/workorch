@@ -106,20 +106,6 @@ func TestCandidateCorrectionObjectivesKeepMissingFieldsSchemaOnly(t *testing.T) 
 	}
 }
 
-func TestCandidateCorrectionObjectivesDoNotTreatDocumentRequirementAsMissingField(t *testing.T) {
-	t.Parallel()
-	failure := runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_document_nonconformant", Signature: "candidate-document-nonconformant",
-		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-			Path: "$", Actual: runtimecontract.RuntimeCandidateDocumentShapeNonObjectJSONValue,
-			Required: []string{runtimecontract.RuntimeCandidateDocumentShapeConformant},
-		},
-	}
-	if objectives := CandidateCorrectionObjectivesForFailure(&failure); !reflect.DeepEqual(objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument}) {
-		t.Fatalf("document requirement was projected as a missing field: %+v", objectives)
-	}
-}
-
 func TestCandidateCorrectionObjectivesRemoveForbiddenProviderIdentityOnly(t *testing.T) {
 	t.Parallel()
 	for _, field := range []string{"id", "dependsOn"} {
@@ -278,21 +264,7 @@ func TestSealCandidateRejectionRequiresConcreteWitnessAndPreservesRequiredFieldC
 	}
 }
 
-func TestSealCandidateRejectionUsesTypedDocumentAndRawRemovalWitnesses(t *testing.T) {
-	documentManifest := runtimecontract.RuntimeCandidateContractManifest{Hash: "manifest-hash"}
-	documentFailure := &runtimecontract.RuntimeCandidateFailure{
-		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_document_nonconformant", Signature: "document-shape", Reason: "one JSON object is required",
-		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
-			Path: "$", Actual: runtimecontract.RuntimeCandidateDocumentShapeNonObjectJSONValue, ManifestHash: documentManifest.Hash,
-			Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument},
-		},
-	}
-	_, directive, err := SealCandidateRejection(documentFailure, documentManifest)
-	if err != nil || directive == nil || directive.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || directive.Witness == nil ||
-		directive.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape || directive.Witness.RejectedValue != runtimecontract.RuntimeCandidateDocumentShapeNonObjectJSONValue {
-		t.Fatalf("document-shape directive=%+v err=%v", directive, err)
-	}
-
+func TestSealCandidateRejectionUsesTypedRawRemovalWitnesses(t *testing.T) {
 	aggregate, _ := aggregateWithActiveRejectedCandidate(t)
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
 		aggregate.Decision,

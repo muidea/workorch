@@ -334,7 +334,9 @@ current manifest 临时补全 scope；没有 matching sealed fallback 时按 typ
 ```text
 sealed authority + preflight ready
   -> persisted request session
-  -> typed document result -> strict local admission or document-conformance rejection
+  -> typed document result
+       -> no-candidate framing -> bounded whole-document recovery
+       -> one complete JSON object -> strict local admission
   -> candidate attempt 0 -> optional attempt 1
   -> accepted candidate -> persist sealed dispatch
   -> claimed operation -> owner receipt -> evidence commit -> close dispatch
@@ -354,15 +356,22 @@ sealed authority + preflight ready
 - request session、authority transaction、canonical state/required output、`DocumentKind`、ExpectedDocument、provider
   ceiling、reasoning effort、budget和stable-prefix identity共同构成purpose-bound semantic invocation seal。它实现产品层
   semantic activation要求，但不是新owner、第五状态机或`RuntimeBootstrap.Activation`替代物。
-- incomplete/transport/provider-terminal 不得创建 candidate attempt。coherent completed 的 empty/non-JSON document-conformance
-  rejection 与 complete document 的 schema/contract/semantic rejection 共用 attempt 0/1；attempt 0/1 必须使用同一
-  transaction 与 stable prefix，第二次任一可纠错 rejection 形成 typed `candidate_retry_exhausted`，不存在 attempt 2。
+- incomplete/empty/invalid framing、transport 与 provider-terminal 不得创建 candidate attempt；前述 document framing 只推进
+  bounded request-session recovery。只有 one complete JSON object 的 schema/contract/semantic rejection 共用 attempt 0/1；
+  attempt 0/1 必须使用同一 transaction 与 stable prefix，第二次任一可纠错 rejection 形成 typed
+  `candidate_retry_exhausted`，不存在 attempt 2。
 - required field missing/empty 与已存在但为 `null`/wrong JSON type 共享同一 SM-3 correction ledger：前者封存
   `field_absent -> field_present`，后者封存 exact `<actual_type> -> field_present`，且都只授权 attempt 1 重写完整 document。
   strict decoder 不本地 repair；attempt 1 必须重新通过同一 typed admission，不新增 correction、transport 或 recovery budget。
 - renderer、wire DTO、strict decoder、admission、owner feasibility 与 fixture 对同一
   `CandidateContractManifest` 给出一致解释；候选只能选择 manifest 已封存的 `bindingRefs`。未知字段、参数、
   target、effect、dependency、operation kind、未知 binding 或裸 `coverageWorkItemIds` 不得由第二解析路径静默放宽。
+- manifest 静态 operation-set policy 对普通 durable proposal 强制每个 `(OwnerModuleID, canonical TargetRef)` 最多一项；
+  只有 manifest 内 exact `RequiredOperationSequence` 可声明例外。decoder、evaluator、attempt-1 witness 与 final seal 必须共享
+  同一纯校验，不得从 mutable owner facts 重新推导。
+- single evaluator 还必须在 owner probe 前执行 sealed activation 的 executable parameter/variant/effect fence；final seal 只重复
+  同一 manifest + activation 校验，不能首次发现一个已持久化 proposal 的可执行合同违例。variant restriction 以 kind 为域，
+  exact required-sequence variant 与普通 accepted variant 取并集，不能限制未声明 variant 的其它 accepted kind。
 - semantic-plan document 可以为 `prospective_owner_target` 提出一份含 1～8 个 exact `ProspectiveTargetRefs` 的 bounded
   all-of proposal，但在 File/Shell fact 完整且 SM-2 封存 binding 前不得生成 operations request/dispatch。operations
   document 只能选择 binding ref；封存的 `RequiredOperationSequence` 必须为每个 target 编译一项 exact-singleton

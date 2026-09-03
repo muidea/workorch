@@ -9977,7 +9977,7 @@ func TestDriveRuntimeCompleteSchemaFailureStopsAfterSameContractRetry(t *testing
 	}
 }
 
-func TestRequestAndSealRuntimeCandidateEmptyDocumentUsesBoundedDocumentCorrection(t *testing.T) {
+func TestRequestAndSealRuntimeCandidateNoDocumentUsesBoundedRequestRecovery(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -10007,9 +10007,8 @@ func TestRequestAndSealRuntimeCandidateEmptyDocumentUsesBoundedDocumentCorrectio
 		if command.DocumentKind != runtimecontract.RuntimeProviderDocumentOperations {
 			t.Errorf("operations empty-document request kind = %q", command.DocumentKind)
 		}
-		if providerCalls == 2 && (command.CandidateCorrectionObservation == nil || command.CandidateCorrection == nil ||
-			command.CandidateCorrection.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape) {
-			t.Errorf("operations C4 correction lost bounded document failure: observation=%+v correction=%+v", command.CandidateCorrectionObservation, command.CandidateCorrection)
+		if command.CandidateAttempt != 0 || command.CandidateCorrectionObservation != nil || command.CandidateCorrection != nil {
+			t.Errorf("no-document recovery crossed into candidate correction: attempt=%d observation=%+v correction=%+v", command.CandidateAttempt, command.CandidateCorrectionObservation, command.CandidateCorrection)
 		}
 		outcome := runtimeProviderFinalOutputMissingOutcome(command.ExpectedDocument)
 		if providerCalls == 1 {
@@ -10027,39 +10026,23 @@ func TestRequestAndSealRuntimeCandidateEmptyDocumentUsesBoundedDocumentCorrectio
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 2 || terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil ||
-		terminal.Decision.Terminal.Code != "candidate_retry_exhausted" || terminal.Facts.Failure == nil ||
-		terminal.Facts.Failure.Class != runtimecontract.FailureClassCandidateExhausted || terminal.Facts.Failure.Code != "candidate_retry_exhausted" ||
-		len(terminal.CandidateAttempts) != 2 || terminal.ActiveDispatch != nil || terminal.Facts.Repair.RepairAttempts != 0 ||
+	if providerCalls != 3 || terminal.Decision.State != runtimecontract.ConvergenceStateFailed || terminal.Decision.Terminal == nil ||
+		terminal.Decision.Terminal.Code != "candidate_document_recovery_exhausted" || terminal.Facts.Failure == nil ||
+		terminal.Facts.Failure.Code != "candidate_document_recovery_exhausted" ||
+		len(terminal.CandidateAttempts) != 0 || terminal.ActiveDispatch != nil || terminal.Facts.Repair.RepairAttempts != 0 ||
 		terminal.Facts.Recovery != initialized.Facts.Recovery || len(terminal.GovernanceRequests) != 0 {
-		t.Fatalf("operations empty document did not use bounded attempt 0/1 correction: calls=%d aggregate=%+v", providerCalls, terminal)
+		t.Fatalf("operations no-document response did not use request recovery: calls=%d aggregate=%+v", providerCalls, terminal)
 	}
-	first := terminal.CandidateAttempts[0]
-	second := terminal.CandidateAttempts[1]
-	if first.State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.Failure == nil || first.Failure.Code != "candidate_document_nonconformant" ||
-		first.Correction == nil || first.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || first.Correction.Witness == nil ||
-		first.Correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape || first.Correction.Witness.RejectedValue != runtimecontract.RuntimeCandidateDocumentShapeInvalid ||
-		second.State != runtimecontract.RuntimeCandidateAttemptStateFailed || second.Correction == nil || second.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal || second.Correction.TerminalCode != "candidate_retry_exhausted" {
-		t.Fatalf("operations document-conformance attempts = %+v", terminal.CandidateAttempts)
-	}
-	if len(terminal.CandidateRequestSessions) != 2 {
+	if len(terminal.CandidateRequestSessions) != 1 {
 		t.Fatalf("operations empty-document sessions = %+v", terminal.CandidateRequestSessions)
 	}
-	for index, session := range terminal.CandidateRequestSessions {
-		expectedCode := runtimecontract.RuntimeProviderDocumentCodeFinalOutputMissing
-		expectedDisposition := runtimecontract.RuntimeProviderDocumentEmpty
-		if index == 0 {
-			expectedCode = runtimecontract.RuntimeProviderDocumentCodeFinalOutputInvalid
-			expectedDisposition = runtimecontract.RuntimeProviderDocumentInvalid
-		}
-		if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected || !session.ProviderSubmitted ||
-			session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentConformanceRejected ||
-			session.LastOutcome.Code != expectedCode ||
-			session.IncompleteOutcomes != 0 || session.NextSequence != 1 || session.LastDocumentFraming == nil ||
-			session.LastDocumentFraming.Disposition != expectedDisposition ||
-			session.ExpectedDocument == nil || session.ExpectedDocument.MaxRecoveryAttempts != 2 {
-			t.Fatalf("operations empty-document correction session = %+v", session)
-		}
+	session := terminal.CandidateRequestSessions[0]
+	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.ProviderSubmitted ||
+		session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted ||
+		session.DocumentRecoveryOutcomes != 3 || session.NextSequence != 4 || session.LastDocumentFraming == nil ||
+		session.LastDocumentFraming.Disposition != runtimecontract.RuntimeProviderDocumentEmpty ||
+		session.ExpectedDocument == nil || session.ExpectedDocument.MaxRecoveryAttempts != 2 {
+		t.Fatalf("operations no-document recovery session = %+v", session)
 	}
 
 	reloaded, err := state.Load(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
@@ -10070,7 +10053,7 @@ func TestRequestAndSealRuntimeCandidateEmptyDocumentUsesBoundedDocumentCorrectio
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 2 || replayed.StateRevision != terminal.StateRevision || replayed.Facts.Recovery != terminal.Facts.Recovery {
+	if providerCalls != 3 || replayed.StateRevision != terminal.StateRevision || replayed.Facts.Recovery != terminal.Facts.Recovery {
 		t.Fatalf("operations empty-document terminal replayed provider or entered recovery: calls=%d aggregate=%+v", providerCalls, replayed)
 	}
 }
@@ -10315,7 +10298,7 @@ func TestRequestAndSealRuntimeCandidateRecoversProviderLimitedOutputWithComplete
 	if calls != 2 || completed.ActiveDispatch == nil || len(completed.CandidateAttempts) != 1 || completed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
 		t.Fatalf("candidate document recovery completion = %+v calls=%d", completed, calls)
 	}
-	if len(completed.CandidateRequestSessions) != 1 || completed.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || completed.CandidateRequestSessions[0].NextSequence != 2 || completed.CandidateRequestSessions[0].IncompleteOutcomes != 1 {
+	if len(completed.CandidateRequestSessions) != 1 || completed.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || completed.CandidateRequestSessions[0].NextSequence != 2 || completed.CandidateRequestSessions[0].DocumentRecoveryOutcomes != 1 {
 		t.Fatalf("persisted C4 request session = %+v", completed.CandidateRequestSessions)
 	}
 	id := runtimecontract.StableRuntimeCandidateRequestContentID(completed.CandidateRequestSessions[0].LogicalRequestID)
@@ -10595,7 +10578,7 @@ func TestRequestAndSealRuntimeCandidateRestartsFromPersistedIncompleteOutcome(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 1 || completed.ActiveDispatch == nil || len(completed.CandidateAttempts) != 1 || completed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || len(completed.CandidateRequestSessions) != 1 || completed.CandidateRequestSessions[0].NextSequence != 2 || completed.CandidateRequestSessions[0].IncompleteOutcomes != 1 {
+	if calls != 1 || completed.ActiveDispatch == nil || len(completed.CandidateAttempts) != 1 || completed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || len(completed.CandidateRequestSessions) != 1 || completed.CandidateRequestSessions[0].NextSequence != 2 || completed.CandidateRequestSessions[0].DocumentRecoveryOutcomes != 1 {
 		var attemptFailure *runtimecontract.RuntimeCandidateFailure
 		if len(completed.CandidateAttempts) != 0 {
 			attemptFailure = completed.CandidateAttempts[0].Failure
@@ -11121,7 +11104,7 @@ func TestRequestAndSealRuntimeCandidateFailsWhenDocumentRecoveryBudgetExhausted(
 	session := failed.CandidateRequestSessions[0]
 	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal ||
 		session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted ||
-		session.LastOutcome.Code != "candidate_document_recovery_exhausted" || session.IncompleteOutcomes != 2 {
+		session.LastOutcome.Code != "candidate_document_recovery_exhausted" || session.DocumentRecoveryOutcomes != 2 {
 		t.Fatalf("terminal document recovery session = %+v", session)
 	}
 	id := runtimeCandidateRequestContentID(t, initialized, prefix, 0)

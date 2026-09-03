@@ -223,7 +223,7 @@
     "allowedToolKinds": [
       "file/list",
       "file/read",
-      "file/edit",
+      "file/write",
       "git/read",
       "git/write",
       "shell/command",

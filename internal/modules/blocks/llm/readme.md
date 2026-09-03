@@ -47,6 +47,9 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
   cardinality-one singleton target 和 fixed parameter 由 Runtime 本地派生，provider 回显必须拒绝；unreachable variant
   authorization 不得重新暴露 binding。
   JSONSchemaResponse on/off 不改变该最小 wire 或 local admission；LLM block 不做 JSON repair，不选择 correction/retry。
+- LLM owner 在输出边界将 incomplete、empty、non-JSON、scalar/array root、multiple JSON roots 与 trailing bytes 归一为
+  no-candidate `DocumentOutcome`，不携带 content。只有恰好一个完整 JSON object 能作为 opaque content 返回；framing outcome
+  不创建 candidate correction，后续 whole-document recovery/terminal 只由 Orchestrator 的 sealed request session 决定。
 - Runtime logical/physical identity 在 owner guard 内执行 concurrent/duplicate at-most-once；provider outcome 不选择 caller retry。
 - attempt-1 correction 通过共享纯合同核对 observation 的 manifest/objectives、objective↔witness-dimension、path/actual/shape 与 sealed witness，再独立核对
   manifest field authorization。已选中 operation rule 后产生的 field-level schema observation 必须携带由 strict decoder 生成的 exact
@@ -61,6 +64,12 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
   operation/parameter path、constraint ref、封闭 actual shape 与 required shape；不得投影 raw parameter、parser diagnostic 或
   owner 私有实现，也不得改变 C0～C3/stable prefix。attempt 1 的值是否满足 required shape 仍只由 capability owner 的 typed
   conformance result 证明，LLM block 不自行判定。
+- `operation_set_cardinality` correction 只投影 manifest v6 封存的 exact owner/target、operation kind/index violation 与
+  `one_operation_per_owner_target` objective；不得让模型通过修改 operation ID、顺序、依赖或 target 规避。attempt 1 不得改变
+  原 owner/target 覆盖或非冲突 operation，必须合并为一个 ordinary durable operation，除非 manifest 的 exact required sequence
+  明确授权例外。
+- operation variant schema/instruction 必须按 kind 投影 manifest 已编译的 allowlist；exact required-sequence variant 与普通
+  accepted variant 已由 Runtime 取并集。某 accepted kind 没有 variant restriction 时，不能因另一 kind 有 allowlist 而被删除。
 - generic completion、embedding 与 Runtime I/O 均有 token/byte/wire/SSE/event/line 上限；成功 result 不能是同类型空值或漂移
   target。raw request、response、credential、
   endpoint 和未脱敏 diagnostic 不得进入 aggregate 或 audit notification。
@@ -84,7 +93,7 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
 | Runtime result exhaustive union / audit identity | [`pkg/events/runtime_provider_test.go`](pkg/events/runtime_provider_test.go) | 覆盖 normal、invalid、tamper |
 | Runtime exact source / duplicate / concurrent | [`biz/runtime_owner_guard_test.go`](biz/runtime_owner_guard_test.go) | 覆盖 |
 | provider protocol、output bound、stream/non-stream、embedding | [`biz/http_provider_test.go`](biz/http_provider_test.go)、[`biz/http_provider_security_matrix_test.go`](biz/http_provider_security_matrix_test.go) | 本地覆盖 wire success/negative edges、stream idle/hard deadline、持续进展与 reasoning-only terminal；不证明真实 ai-proxy、credential 或 upstream 模型兼容性 |
-| candidate framing、schema、gap claim、correction、cache hash | `biz/runtime_candidate_*_test.go`（含 `TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext`、`TestRuntimeCandidateAuxiliarySingletonWireIsMinimalWithJSONSchemaResponseOnOrOff`、`TestRuntimeCandidateRetryProjectsOwnerConstraintOnlyInC4WithoutStablePrefixDrift`）、`biz/runtime_semantic_prompt_test.go`、`pkg/models/runtime_candidate_correction_test.go`（含 `TestRuntimeCandidateCorrectionInputAcceptsExactNullRequiredContainer`、`TestRuntimeCandidateManifestCorrectionProofUsesExactWireRuleAcrossOperationKinds`、owner constraint manifest-binding matrix）、`biz/provider_prompt_projection_test.go` | 覆盖 required/auxiliary 最小 wire、multi-operation exact rule identity、typed undeclared-prerequisite claim instruction、JSONSchemaResponse on/off、missing/empty/null/wrong-type schema witness 与 semantic witness 分离、owner constraint C3 declaration/C4 bounded witness、failure/correction exact binding、manifest-scoped C3 与 C0～C5 identity |
+| candidate framing、schema、gap claim、correction、cache hash | `biz/runtime_candidate_*_test.go`（含 `TestRequestCandidateClassifiesNonObjectProviderOutputsAsNoDocument`、`TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext`、`TestRuntimeCandidateAuxiliarySingletonWireIsMinimalWithJSONSchemaResponseOnOrOff`、`TestRuntimeCandidateRetryProjectsOwnerConstraintOnlyInC4WithoutStablePrefixDrift`）、`biz/runtime_semantic_prompt_test.go`、`pkg/models/runtime_candidate_correction_test.go`（含 `TestRuntimeCandidateCorrectionInputAcceptsExactNullRequiredContainer`、`TestRuntimeCandidateManifestCorrectionProofUsesExactWireRuleAcrossOperationKinds`、owner constraint/operation-set manifest-binding matrix）、`biz/provider_prompt_projection_test.go` | 覆盖 no-candidate framing 零 content、required/auxiliary 最小 wire、multi-operation exact rule identity、typed undeclared-prerequisite claim instruction、JSONSchemaResponse on/off、missing/empty/null/wrong-type schema witness 与 semantic witness 分离、owner constraint/operation-set C3 declaration与C4 bounded witness、failure/correction exact binding、manifest-scoped C3 与 C0～C5 identity |
 | active configuration freeze | `TestBizStartFreezesLLMConfigurationForCatalogAndStatus` | 覆盖 |
 | catalog cache/key/concurrent refresh | [`biz/catalog_cache_test.go`](biz/catalog_cache_test.go) | 覆盖 merge、key、auth rotation、capability mapping，以及本地 HTTP transport 的 network/5xx 有界 retry、4xx no-retry、oversize/malformed body、same/cross-origin redirect、fresh→stale→expired LKG |
 | lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestLLMOwnerStartIsIdempotentAndTeardownClearsLifecycle`、`TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall` | 覆盖重复 Start、Stop 清理，以及 Stop 后 completion/embedding/catalog 零 physical call |

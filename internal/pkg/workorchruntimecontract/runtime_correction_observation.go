@@ -93,10 +93,11 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 	if RuntimeCandidateFailureDiagnosticRequiresWireRule(o.Class, &diagnostic) && diagnostic.WireRule == nil {
 		return fmt.Errorf("runtime candidate operation-scoped schema correction requires exact wire rule identity")
 	}
-	if len(diagnostic.Allowed) > maxRuntimeCorrectionObservationItems || len(diagnostic.Required) > maxRuntimeCorrectionObservationItems || len(diagnostic.Forbidden) > maxRuntimeCorrectionObservationItems || len(diagnostic.Objectives) > maxRuntimeCorrectionObservationItems || len(diagnostic.ParameterEntryEncodings) > maxRuntimeCorrectionObservationItems {
+	if len(diagnostic.Allowed) > maxRuntimeCorrectionObservationItems || len(diagnostic.Required) > maxRuntimeCorrectionObservationItems || len(diagnostic.Forbidden) > maxRuntimeCorrectionObservationItems || len(diagnostic.Objectives) > maxRuntimeCorrectionObservationItems || len(diagnostic.ParameterEntryEncodings) > maxRuntimeCorrectionObservationItems ||
+		(diagnostic.OperationSetViolation != nil && len(diagnostic.OperationSetViolation.OperationKinds) > maxRuntimeCorrectionObservationItems) {
 		return fmt.Errorf("runtime candidate correction diagnostic exceeds bounded values")
 	}
-	if diagnostic.OperationID == "" && diagnostic.Path == "" && diagnostic.Actual == "" && len(diagnostic.Allowed) == 0 && len(diagnostic.Required) == 0 && len(diagnostic.Forbidden) == 0 && diagnostic.WireRule == nil && diagnostic.ViolationKind == "" && len(diagnostic.ParameterEntryEncodings) == 0 && diagnostic.ConstraintRef == "" && diagnostic.RequiredShape == "" && diagnostic.ManifestHash == "" && diagnostic.RejectedShapeHash == "" && len(diagnostic.Objectives) == 0 {
+	if diagnostic.OperationID == "" && diagnostic.Path == "" && diagnostic.Actual == "" && len(diagnostic.Allowed) == 0 && len(diagnostic.Required) == 0 && len(diagnostic.Forbidden) == 0 && diagnostic.WireRule == nil && diagnostic.ViolationKind == "" && len(diagnostic.ParameterEntryEncodings) == 0 && diagnostic.OperationSetViolation == nil && diagnostic.ConstraintRef == "" && diagnostic.RequiredShape == "" && diagnostic.ManifestHash == "" && diagnostic.RejectedShapeHash == "" && len(diagnostic.Objectives) == 0 {
 		return fmt.Errorf("runtime candidate correction observation requires a non-empty typed diagnostic")
 	}
 	if diagnostic.WireRule != nil {
@@ -122,6 +123,26 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 		}
 	default:
 		return fmt.Errorf("runtime candidate correction diagnostic has unsupported violation kind %q", diagnostic.ViolationKind)
+	}
+	if diagnostic.OperationSetViolation != nil {
+		violation := diagnostic.OperationSetViolation.Normalized()
+		if err := violation.Validate(); err != nil {
+			return err
+		}
+		if !runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionConsolidateOperationSet) {
+			return fmt.Errorf("runtime candidate operation-set diagnostic requires consolidation objective")
+		}
+		if err := validateRuntimeCorrectionObservationText("candidate correction operation-set owner", violation.OwnerModuleID); err != nil {
+			return err
+		}
+		if err := validateRuntimeCorrectionObservationText("candidate correction operation-set target", violation.TargetRef); err != nil {
+			return err
+		}
+		if err := validateRuntimeCorrectionObservationTexts("candidate correction operation-set kind", violation.OperationKinds); err != nil {
+			return err
+		}
+	} else if runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionConsolidateOperationSet) {
+		return fmt.Errorf("runtime candidate consolidation objective requires an operation-set violation")
 	}
 	for _, value := range []struct{ name, text string }{
 		{"candidate correction operation id", diagnostic.OperationID}, {"candidate correction path", diagnostic.Path},
@@ -166,7 +187,7 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 			RuntimeCandidateCorrectionSelectEvidenceBinding,
 			RuntimeCandidateCorrectionReencodeParameterEntries,
 			RuntimeCandidateCorrectionConformOwnerConstraint,
-			RuntimeCandidateCorrectionConformExpectedDocument:
+			RuntimeCandidateCorrectionConsolidateOperationSet:
 		default:
 			return fmt.Errorf("runtime candidate correction observation has unsupported objective %q", objective)
 		}
@@ -191,7 +212,7 @@ func StableRuntimeCandidateSealedCorrectionHash(manifestHash string, objectives 
 		return ""
 	}
 	h := sha256.New()
-	writeHashString(h, "runtime-candidate-sealed-correction/v3")
+	writeHashString(h, "runtime-candidate-sealed-correction/v4")
 	writeHashString(h, manifestHash)
 	for _, objective := range objectives {
 		writeHashString(h, string(objective))
@@ -205,6 +226,7 @@ func StableRuntimeCandidateSealedCorrectionHash(manifestHash string, objectives 
 	writeHashString(h, witnessValue.AlternativeShapeHash)
 	writeHashString(h, witnessValue.ConstraintRef)
 	writeHashRuntimeCandidateParameterEntryEncodings(h, witnessValue.ParameterEntryEncodings)
+	writeHashRuntimeCandidateOperationSetViolation(h, witnessValue.OperationSetViolation)
 	return hex.EncodeToString(h.Sum(nil))
 }
 

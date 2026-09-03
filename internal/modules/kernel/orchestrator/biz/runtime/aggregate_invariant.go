@@ -501,13 +501,7 @@ func validateRuntimeCandidateAttemptSessionBindings(attempts []runtimecontract.R
 			if session.Transaction != attempt.Transaction || session.StablePrefixHash != attempt.StablePrefixHash || session.ManifestHash != attempt.ManifestHash {
 				return fmt.Errorf("runtime candidate attempt request-session binding does not match its complete document")
 			}
-			switch session.State {
-			case runtimecontract.RuntimeCandidateRequestSessionDocumentComplete:
-			case runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected:
-				if attempt.State != runtimecontract.RuntimeCandidateAttemptStateFailed || attempt.Proposal != nil || attempt.Failure == nil || attempt.Failure.Code != "candidate_document_nonconformant" || session.LastDocumentFraming == nil {
-					return fmt.Errorf("runtime candidate document-conformance session is not bound to its exact failed attempt")
-				}
-			default:
+			if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
 				return fmt.Errorf("runtime candidate attempt request-session binding does not match its complete document")
 			}
 			if attempt.Failure != nil && runtimecontract.RuntimeCandidateFailureDiagnosticRequiresWireRule(attempt.Failure.Class, attempt.Failure.Diagnostic) && attempt.Failure.Diagnostic.WireRule == nil {

@@ -144,7 +144,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - `JSONSchemaResponse=true` 只允许 adapter 发送可选 provider format；false/未声明必须省略。两条路径返回相同文档时，
   strict local decoder/schema/evaluator 结果必须完全相同；structured-output unsupported/failure 不得触发 adapter-local
   fallback/second physical call，也不能跳过本地 admission或直接产生 correction authority；
-- incomplete document、fragment/EOF 与 transient transport 只使用 request-session recovery，不创建 attempt；
+- incomplete/empty/invalid framing（含 fragment/EOF、non-JSON、scalar/array、multiple roots、trailing bytes）与 transient
+  transport 只使用 request-session recovery，不创建 attempt；
 - streaming `response.incomplete/max_output_tokens` 是唯一 terminal fact；必须继续校验剩余 wire framing，拒绝 late event、
   第二个 terminal 与重复 `[DONE]`，且 partial bytes 只进入 bounded framing/audit；
 - authentication/configuration/protocol/submission-unknown/document-recovery-exhausted 形成 factual result，不创建
@@ -155,8 +156,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - stream/non-stream 的 coherent `completed` + empty final output（包括 reasoning-only response）必须形成唯一
   `empty_document/provider_final_output_missing`；coherent non-JSON 必须形成
   `invalid_provider_output/provider_final_output_invalid`。二者均零 content、零 `Feedback(provider_protocol)`，验证 native usage、
-  completed audit 与一次 usage event 无损保留，且不消耗 whole-document recovery。LLM owner/adapter 对本次 observation 零
-  fallback/replay；只有 SM-3 持久化 typed rejection 后才可用新 request/physical identity 授权唯一 attempt 1；
+  completed audit 与一次 usage event 无损保留，并只消费 whole-document recovery。LLM owner/adapter 对本次 observation 零
+  fallback/replay；只有 SM-3 持久化 request-session recovery 后才可用新 PhysicalCallID 请求同一完整 document；
 - result audit 必须逐项匹配 workspace/run/logical/physical identity、target、kind、stable prefix 与 context budget；覆盖
   before-Do、Do error、response error、stream/non-stream/embed，并证明 request bytes 不推断 submission；DocumentOutcome、
   stale、transient/auth/config/protocol 的 submitted 矩阵与 unsubmitted 零 physical fact 必须穷尽；
@@ -165,14 +166,15 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   request bytes 或 response mode 推断；
 - provider settlement 必须覆盖 confirmed/released/unknown、duplicate/stale/tamper。验证 stale/unsubmitted terminal release
   全部 reservation；submitted usage 精确 confirm；无可靠 audit 进入 unknown 且零 provider replay；
-- incomplete、transient 与 body-idle 必须覆盖同 CAS 的 physical settlement + SM-3 session + SM-4 transport budget + optional
-  SM-2 terminal，以及 CAS-before/CAS-after/fresh reload；released/unknown 不得进入 recovery；
+- incomplete/empty/invalid framing、transient 与 body-idle 必须覆盖同 CAS 的 physical settlement + SM-3 session + 对应
+  whole-document/SM-4 transport budget + optional SM-2 terminal，以及 CAS-before/CAS-after/fresh reload；released/unknown
+  不得进入 recovery；
 - provider terminal 必须用一次 owner-private aggregate CAS 原子完成 SM-3 session close 与 exact SM-2 failure；验证
   normal、duplicate、stale、CAS-before、CAS-after response loss 与 fresh reload，并断言这些 terminal crash/reload 分支
   零 provider replay；允许恢复的 incomplete/transient 分支仍以新 `PhysicalCallID` 请求同一完整 document；
-- empty/invalid 的 submitted settlement、request-session close、typed document-shape rejection 与 correction/final 必须在
-  owner-private CAS 中保持一致；SM-4 只能 settlement/re-drive，不能把该 observation 改写为 protocol terminal 或选择 correction；
-- complete document 无论 provider 是否使用 JSON Schema 都必须经过 strict local admission 且只进入一个 evaluator，
+- empty/invalid 的 submitted settlement、request-session recovery 或 exhausted terminal 必须在 owner-private CAS 中保持一致；
+  SM-4 只能 settlement/re-drive，不能把该 observation 改写为 protocol terminal、candidate rejection 或 correction；
+- framing 为 one complete JSON object 的 document 无论 provider 是否使用 JSON Schema 都必须经过 strict local admission 且只进入一个 evaluator，
   first-failure 顺序稳定；
 - evaluator 只返回 accepted 或完整 typed rejection，不返回 correction/retry/terminal disposition；
 - evaluator 拒绝同一 candidate 内重复的 durable `(OwnerModuleID, TargetRef)`；普通依赖边不能豁免，只有 owner-sealed
@@ -181,10 +183,11 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - SM-3 持久化 rejection 后才可形成 typed terminal 或唯一 `correctable_once` internal result；
 - manifest semantic rejection 若保留严格解码 candidate，必须只存在于 failed attempt 的 private correction frontier；验证它不进入
   feasibility/accepted attempt/dispatch/authority。`bindingRefs` matrix 必须覆盖 exact operation slot/path、wrong binding、唯一
-  allowed alternative、不同 semantic-shape hash、attempt-1/restart重验、无 alternative直接 authority exhausted，以及 framing/
-  closed-schema rejection 保持零 persisted candidate；
-- empty/non-JSON document shape、complete schema 与 semantic rejection 共用 candidate attempt 0/1；attempt 1 复用
-  transaction、manifest、C0～C3 与 stable prefix，任意第二次 rejection terminal，零 attempt 2/第三次请求；
+  allowed alternative、不同 semantic-shape hash、attempt-1/restart重验、无 alternative直接 authority exhausted，以及
+  closed-schema rejection 保持零 persisted candidate preimage；
+- empty/incomplete/invalid framing 必须保持零 candidate attempt/correction/C4；complete-object schema 与 semantic rejection
+  共用 candidate attempt 0/1。attempt 1 复用 transaction、manifest、C0～C3 与 stable prefix，任意第二次 rejection terminal，
+  零 attempt 2/第三次 candidate 请求；
 - operations provider schema/instruction/decoder 必须禁止 `id`、`dependsOn` 与 dependency graph；transaction 先执行 exact-match
   gate，strict local compiler 再从 manifest hash 与 manifest-owned authorization slot 确定性派生 identity/edges。required proposal
   按 requirement ref 唯一匹配 normalized required-sequence slot，auxiliary proposal 按 canonical execution-semantic key 派生 identity；
@@ -193,9 +196,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - manifest→wire matrix 必须分别覆盖 required 与 auxiliary rule 的有/无 variant、reachable singleton binding、required
   cardinality-one singleton target 与仍可选多值；证明 unreachable variant authorization 不扩大 wire，schema、instruction、
   fixture encoder 与 strict compiler 共享同一 `RuntimeCandidateWireContract`，provider 只提供真实选择。
-  JSONSchemaResponse on/off 必须接受同一最小文档；本地 kind/variant/binding/target/fixed parameter 回显、null/wrong-type
-  container、unknown/trailing 字段、提前闭合 root 都精确拒绝且零 local repair/effect；required container 的 exact type
-  rejection 只可通过 persisted schema witness 授权一次完整 document rewrite；
+  JSONSchemaResponse on/off 必须接受同一最小文档；单一 object 内的本地 kind/variant/binding/target/fixed parameter 回显、
+  null/wrong-type container 与 unknown field 必须作为 attempt 内 schema rejection；multiple roots、trailing bytes 与提前闭合
+  root 必须作为 attempt 前 no-candidate recovery。全部分支零 local repair/effect；required container 的 exact type rejection
+  只可通过 persisted schema witness 授权一次完整 document rewrite；
 - 条件必填 operation field 的 semantic diagnostic 必须以 `missing_<field>` 与 `Required=[<field>]` 表达；缺失
   `bindingRefs` 只能形成 `schema_field/supply_required_field`，不能同时形成 `evidence_binding/select_allowed_evidence_binding`。
   required field 已存在但为 `null`/wrong JSON type 时，diagnostic 必须保留 exact observed type，schema witness 必须绑定同
@@ -318,12 +322,13 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   matching semantic fallback；fallback 缺失时 typed fail closed；
 - invalid/empty raw、reasoning、decoder message 与可逆片段不得进入 EventHub durable payload、aggregate、eventstream、projection、
   memory 或 C4；只允许 owner-private audit carrier 与 bounded hash/bytes/ref。attempt-1 C4 仅包含 manifest-bound
-  document-shape/schema/parameter-entry/semantic witness，不含 raw、Disposition、TerminalCode 或 retry 选择；parameter-entry
+  schema/parameter-entry/owner-constraint/operation-set/semantic witness，不含 raw、Disposition、TerminalCode 或 retry 选择；parameter-entry
   attempt 0 必须零 probe/dispatch/effect且不扣 correction budget，fresh-load attempt 1 仅提交一次 provider/probe并只扣一次 budget，
   corrected document 仍须通过完整 strict admission；
 - duplicate result、stale transaction、CAS-before/CAS-after response loss、fresh-process reload 与普通 Resume 必须覆盖 attempt0
   rejection/directive/request identity 幂等：相同 observation 只结算一次，attempt1 最多提交一次，provider/attempt/token budget
-  不重复消费；document correction 不借用 whole-document/transport/repair/governance budget；
+  不重复消费；schema/semantic correction 不借用 whole-document/transport/repair/governance budget，no-candidate framing 只使用
+  whole-document recovery；
 - owner feasibility 不进入 candidate correction 或 attempt ledger。
 - request session + authority transaction + canonical state/RequiredOutput + DocumentKind/ExpectedDocument + provider
   ceiling/reasoning/budget/stable prefix构成唯一purpose-bound semantic invocation seal；不得出现独立SemanticActivation
@@ -387,7 +392,7 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   partial/forged/stale/mismatched proposal hash/target 均不得 terminal。完整结果因与 admission 已验证的 published constraint
   矛盾，必须一次性记录 `prospective_satisfaction_contract_violated` 并形成 `semantic_contract_failed`；不得生成
   replacement target、`Allowed`、第二 provider request 或第二 owner probe。
-- attempt 1 同时覆盖 document-shape、普通完整 document/schema 与 semantic correction：复用
+- attempt 1 同时覆盖普通 complete-object schema/contract 与 semantic correction：复用
   transaction/manifest/C0～C3/stable prefix，C4 只携带 manifest/CWI/field-path-bound typed violation，不复制 constraint
   或 raw provider content；第二次任意 rejection 仍为
   `candidate_retry_exhausted`。duplicate composite、CAS-before/CAS-after response loss 与 fresh-process reload 必须证明
@@ -434,7 +439,7 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - durable effect 使用稳定 ExecutionKey/Fence/owner receipt，restart/duplicate 不重复副作用或改变 diagnostic hash；
 - File/Shell/Git fresh chain 必须使用 owner catalog 的 exact kind/variant/target policy；File effect 退休 catalog 后，Shell
   从 fresh File-owner inventory 重获 target vocabulary，不把空 scope 当创建授权；
-- software-dev specialization 的 MCP owner failure-target + File repair receipt 矩阵至少覆盖 `file_write|text_replace|unified_diff` × CAS-before/
+- File capability 的 MCP owner failure-target + File repair receipt 矩阵至少覆盖 `file_write|text_replace|unified_diff` × CAS-before/
   CAS-after-response-loss；重启复用 exact owner receipt，MCP remote call 与 File durable effect 均不重复；
 - stale/resource revision 独立于 failure/candidate budget；accepted resource change 不消耗 recovery budget。
 - `need_validation` 前的 validation discovery 缺失必须恢复为 matching typed prerequisite，而不是 capability-unavailable feasibility；局部 target、
@@ -582,8 +587,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   均必须在进程重启后收敛到同一 successor，重复 recovery 不得再次创建或激活；
 - unknown/retired field、当前路径之外的旧目录或当前不变量缺失不能进入持久化读取主线；当前路径上的 decode/validate
   错误直接失败，不写 owner transition/replacement intent，不调用 provider/capability，也不投影替代状态；
-- 首次 `file/write` 创建成功后若同 CWI reopen，latest owner catalog 必须使 correction 选择 revision-bound
-  `file/edit`/`patch/apply`；重复 create-only write 在副作用前拒绝且不能形成无限 revision/等价操作循环。
+- 首次 `file/write` 创建成功后若 software-dev 的同一 CWI reopen，latest owner catalog 与 Profile 必须使 correction 选择
+  revision-bound `patch/apply:unified_diff`；重复 create-only write 或 `file/edit` 在副作用前拒绝，且不能形成无限
+  revision/等价操作循环。
 - owner-fact postcondition、owner-fact acquisition settlement、validation-failure repair required/settled 四类 semantic reopen
   必须把 current cursor 投影为 immutable Definition 的 exact `RuntimeFocusSeed()`（仅 ID 固定为
   `semantic-pending/<cwi>`）；predecessor all-of/grounding/selector/operation/recipe 任一字段泄漏、Definition 缺失或重复均

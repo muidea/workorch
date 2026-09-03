@@ -15,7 +15,6 @@ func CandidateRejectionCodeDisposition(code string) (runtimecontract.RuntimeCand
 	switch strings.TrimSpace(code) {
 	case "candidate_contract_invalid",
 		"candidate_schema_invalid",
-		"candidate_document_nonconformant",
 		"candidate_replays_rejected_shape",
 		"candidate_partially_replays_rejected_shape",
 		"candidate_replays_no_progress_shape",
@@ -129,8 +128,6 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 		}
 	}
 	switch strings.TrimSpace(failure.Code) {
-	case "candidate_document_nonconformant":
-		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionConformExpectedDocument)
 	case "candidate_contract_invalid", "candidate_schema_invalid":
 		switch {
 		case diagnostic.Path == "", diagnostic.Path == "$", diagnostic.Path == "$.operations",
@@ -147,7 +144,7 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 	case "candidate_action_evidence_mismatch":
 		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionSatisfyCoverage)
 	case "candidate_owner_target_effect_overlap":
-		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionChangeReplayedShape)
+		objectives = append(objectives, runtimecontract.RuntimeCandidateCorrectionConsolidateOperationSet)
 	}
 	return (&runtimecontract.RuntimeCandidateFailureDiagnostic{Objectives: objectives}).Normalized().Objectives
 }

@@ -38,10 +38,12 @@ Provider-facing 第一段必须是连续的 C0→C1→C2。C3→C4→C5 只能�
   前 fail closed，不能把静默省略后的 C3 发送给 provider；
 - active rejected shape、failure lineage、current owner readiness 与 admissible operation set 属于 C3/C4，不得回写 C2；
 - C4 correction 只包含 provider-safe rejection 与 Orchestrator persisted `CorrectionDirective` 的 detached
-  `correctionInput` 投影。`correctable_once` 必须投影 manifest、objectives、concrete document-shape/schema/semantic
-  witness 和 exact alternative；correction/request-session identity 只绑定 failure 与该 detached input，不携带 persisted
-  `Disposition`/`TerminalCode`。C4 不得包含 owner raw diagnostic、Run/repair/recovery action、governance continuation、raw
-  evidence summary 或未封存 allowed value；
+  `correctionInput` 投影。`correctable_once` 必须投影 manifest、objectives、concrete schema/parameter-entry/
+  owner-constraint/operation-set/semantic witness 和 exact alternative；correction/request-session identity 只绑定 failure 与该
+  detached input，不携带 persisted `Disposition`/`TerminalCode`。C4 不得包含 owner raw diagnostic、Run/repair/recovery action、
+  governance continuation、raw evidence summary 或未封存 allowed value；
+- incomplete、empty、non-JSON、scalar/array root、multiple JSON roots 与 trailing bytes 都是 attempt 前的 no-candidate
+  document framing；它们只推进相同 C0～C3 的 request-session whole-document recovery，不产生 C4 correction；
 - operation variant 的 owner-defined `candidateConstraints` 属于 C3 sealed manifest authority。其 attempt-1 C4 只能引用 exact
   constraint ref、parameter path、closed actual/required shape；rejected parameter、parser text 与 ordinary feasibility fact
   不得进入任何 C0～C5 section。后继 owner conformance result 是 required shape 的唯一证明，不改变 C0～C3 section hash；

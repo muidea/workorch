@@ -23,18 +23,86 @@ func TestRuntimeCandidateRequiresAcceptedOperationWhenDeclared(t *testing.T) {
 	candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
 		ID: "git-add", Kind: "git/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Parameters: []OperationParameter{{Name: "operation", String: &add}, {Name: "pathspecs", StringList: pathspecs}},
 	}}}}}
-	if err := candidate.Validate(decision); err == nil || !strings.Contains(err.Error(), "requires one accepted operation variant") {
-		t.Fatalf("candidate error = %v, want accepted operation variant requirement", err)
+	if err := candidate.Validate(decision); err == nil || !strings.Contains(err.Error(), `variant "add" is not accepted`) {
+		t.Fatalf("candidate error = %v, want accepted operation variant restriction", err)
 	}
 
 	commit := "commit"
 	message := "commit change"
-	candidate.StateChange.Operations = append(candidate.StateChange.Operations, StateChangingOperation{Operation: RuntimeOperation{
-		ID: "git-commit", Kind: "git/write", DependsOn: []string{"git-add"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+	candidate.StateChange.Operations = []StateChangingOperation{{Operation: RuntimeOperation{
+		ID: "git-commit", Kind: "git/write", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 		Parameters: []OperationParameter{{Name: "operation", String: &commit}, {Name: "message", String: &message}},
-	}})
+	}}}
 	if err := candidate.Validate(decision); err != nil {
 		t.Fatalf("candidate with commit was rejected: %v", err)
+	}
+}
+
+func TestRuntimeCandidateVariantRestrictionKeepsVariantFreeAlternativeKind(t *testing.T) {
+	decision := validDecisionForState(ConvergenceStateNeedStateChange)
+	decision.RequiredOutput = RequiredOutputContract{
+		AcceptedKinds:             []string{StepKindFileWrite, RuntimeBlockKindPatchApply},
+		AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: RuntimeBlockKindPatchApply, VariantID: "unified_diff"}},
+		AcceptedEffectScopes:      []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+		RequiredEffectScopes:      []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+		CoverageWorkItemIDs:       []common.CoverageWorkItemID{"cwi-1"},
+	}.Normalized()
+	decision.AuthoritySnapshot.RequiredOutputHash = StableRequiredOutputHash(decision.RequiredOutput)
+	decision.AuthoritySnapshot.ID = stableAuthoritySnapshotID(decision.AuthoritySnapshot)
+
+	content := "package example\n"
+	create := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
+		ID: "file-create", Kind: StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"new.go"},
+		Parameters: []OperationParameter{{Name: "content", String: &content}},
+	}}}}}
+	if err := create.Validate(decision); err != nil {
+		t.Fatalf("variant-free accepted alternative was rejected: %v", err)
+	}
+
+	patchType := "text_replace"
+	oldText := "before"
+	newText := "after"
+	modify := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: RuntimeOperation{
+		ID: "patch-edit", Kind: RuntimeBlockKindPatchApply, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
+		Parameters: []OperationParameter{{Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}},
+	}}}}}
+	if err := modify.Validate(decision); err == nil || !strings.Contains(err.Error(), `variant "text_replace" is not accepted`) {
+		t.Fatalf("restricted patch variant error = %v", err)
+	}
+}
+
+func TestRuntimeCandidateVariantRestrictionIncludesExactRequiredSequence(t *testing.T) {
+	decision := validDecisionForState(ConvergenceStateNeedStateChange)
+	decision.RequiredOutput = RequiredOutputContract{
+		AcceptedKinds:             []string{StepKindGitWrite},
+		AcceptedOperationVariants: []RuntimeOperationVariantRef{{Kind: StepKindGitWrite, VariantID: "commit"}},
+		AcceptedEffectScopes:      []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+		RequiredEffectScopes:      []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+		CoverageWorkItemIDs:       []common.CoverageWorkItemID{"cwi-1"},
+		RequiredOperationSequence: []RuntimeRequiredOperationVariant{
+			{RequirementID: "stage", Kind: StepKindGitWrite, VariantID: "add"},
+			{RequirementID: "commit", Kind: StepKindGitWrite, VariantID: "commit", DependsOnRequirementIDs: []string{"stage"}},
+		},
+	}.Normalized()
+	decision.AuthoritySnapshot.RequiredOutputHash = StableRequiredOutputHash(decision.RequiredOutput)
+	decision.AuthoritySnapshot.ID = stableAuthoritySnapshotID(decision.AuthoritySnapshot)
+
+	add, commit, message := "add", "commit", "commit change"
+	pathspecs := []string{"main.go"}
+	candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{
+		{Operation: RuntimeOperation{
+			ID: "git-add", Kind: StepKindGitWrite, RequiredOperationRef: "stage",
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			Parameters:          []OperationParameter{{Name: "operation", String: &add}, {Name: "pathspecs", StringList: pathspecs}},
+		}},
+		{Operation: RuntimeOperation{
+			ID: "git-commit", Kind: StepKindGitWrite, RequiredOperationRef: "commit", DependsOn: []string{"git-add"},
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			Parameters:          []OperationParameter{{Name: "operation", String: &commit}, {Name: "message", String: &message}},
+		}},
+	}}}
+	if err := candidate.Validate(decision); err != nil {
+		t.Fatalf("exact required sequence variant was rejected: %v", err)
 	}
 }
 

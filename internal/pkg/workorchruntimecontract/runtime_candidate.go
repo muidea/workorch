@@ -190,6 +190,7 @@ type RuntimeCandidateFailureDiagnostic struct {
 	WireRule                *RuntimeCandidateWireRuleIdentity                 `json:"wireRule,omitempty"`
 	ViolationKind           RuntimeCandidatePayloadViolationKind              `json:"violationKind,omitempty"`
 	ParameterEntryEncodings []RuntimeCandidateParameterEntryEncodingViolation `json:"parameterEntryEncodings,omitempty"`
+	OperationSetViolation   *RuntimeCandidateOperationSetViolation            `json:"operationSetViolation,omitempty"`
 	ConstraintRef           string                                            `json:"constraintRef,omitempty"`
 	RequiredShape           string                                            `json:"requiredShape,omitempty"`
 	ManifestHash            string                                            `json:"manifestHash,omitempty"`
@@ -214,6 +215,7 @@ const (
 	RuntimeCandidateCorrectionSelectEvidenceBinding    RuntimeCandidateCorrectionObjective = "select_allowed_evidence_binding"
 	RuntimeCandidateCorrectionReencodeParameterEntries RuntimeCandidateCorrectionObjective = "reencode_parameter_entries"
 	RuntimeCandidateCorrectionConformOwnerConstraint   RuntimeCandidateCorrectionObjective = "conform_owner_candidate_constraint"
+	RuntimeCandidateCorrectionConsolidateOperationSet  RuntimeCandidateCorrectionObjective = "consolidate_owner_target_operations"
 )
 
 func (d *RuntimeCandidateFailureDiagnostic) Clone() *RuntimeCandidateFailureDiagnostic {
@@ -230,6 +232,7 @@ func (d RuntimeCandidateFailureDiagnostic) Normalized() RuntimeCandidateFailureD
 	d.Actual = strings.TrimSpace(d.Actual)
 	d.ViolationKind = RuntimeCandidatePayloadViolationKind(strings.TrimSpace(string(d.ViolationKind)))
 	d.ParameterEntryEncodings = cloneRuntimeCandidateParameterEntryEncodings(d.ParameterEntryEncodings)
+	d.OperationSetViolation = d.OperationSetViolation.Clone()
 	d.ConstraintRef = strings.TrimSpace(d.ConstraintRef)
 	d.RequiredShape = strings.TrimSpace(d.RequiredShape)
 	d.ManifestHash = strings.TrimSpace(d.ManifestHash)
@@ -683,11 +686,20 @@ func validateRuntimeOperations(decision RuntimeDecision, operations []RuntimeOpe
 		return fmt.Errorf("runtime candidate requires at least one operation")
 	}
 	accepted := stringSet(canonicalizeOperationKinds(required.AcceptedKinds))
-	acceptedVariants := make(map[string]struct{}, len(required.AcceptedOperationVariants))
+	allowedVariants := make(map[string]struct{}, len(required.AcceptedOperationVariants)+len(required.RequiredOperationSequence))
 	for _, variant := range required.AcceptedOperationVariants {
-		acceptedVariants[variant.Kind+"|"+variant.VariantID] = struct{}{}
+		key := CanonicalRuntimeBlockKind(variant.Kind) + "|" + strings.TrimSpace(variant.VariantID)
+		allowedVariants[key] = struct{}{}
 	}
-	acceptedVariantObserved := len(acceptedVariants) == 0
+	for _, requirement := range required.RequiredOperationSequence {
+		key := CanonicalRuntimeBlockKind(requirement.Kind) + "|" + strings.TrimSpace(requirement.VariantID)
+		allowedVariants[key] = struct{}{}
+	}
+	variantRestrictedKinds := make(map[string]struct{}, len(allowedVariants))
+	for key := range allowedVariants {
+		kind, _, _ := strings.Cut(key, "|")
+		variantRestrictedKinds[kind] = struct{}{}
+	}
 	requiredCoverage := coverageIDSet(required.CoverageWorkItemIDs)
 	ids := make(map[string]struct{}, len(operations))
 	for idx := range operations {
@@ -716,7 +728,7 @@ func validateRuntimeOperations(decision RuntimeDecision, operations []RuntimeOpe
 		if err := ValidateRuntimeOperationContract(operation); err != nil {
 			return fmt.Errorf("runtime candidate operation %q: %w", operation.ID, err)
 		}
-		if len(acceptedVariants) > 0 {
+		if _, restricted := variantRestrictedKinds[operation.Kind]; restricted {
 			contract, known := RuntimeOperationContractForKind(operation.Kind)
 			if !known {
 				return fmt.Errorf("runtime candidate operation %q has no variant contract", operation.ID)
@@ -725,8 +737,8 @@ func validateRuntimeOperations(decision RuntimeDecision, operations []RuntimeOpe
 			if err != nil {
 				return fmt.Errorf("runtime candidate operation %q: %w", operation.ID, err)
 			}
-			if _, ok := acceptedVariants[operation.Kind+"|"+variant.ID]; ok {
-				acceptedVariantObserved = true
+			if _, ok := allowedVariants[operation.Kind+"|"+variant.ID]; !ok {
+				return fmt.Errorf("runtime candidate operation %q variant %q is not accepted", operation.ID, variant.ID)
 			}
 		}
 		operations[idx] = operation
@@ -740,9 +752,6 @@ func validateRuntimeOperations(decision RuntimeDecision, operations []RuntimeOpe
 	}
 	if err := ValidateRequiredOperationBindings(operations, required.RequiredOperationSequence); err != nil {
 		return err
-	}
-	if !acceptedVariantObserved {
-		return fmt.Errorf("runtime candidate requires one accepted operation variant")
 	}
 	// Forward/reverse effect gate before seal (INV-02). Failures here must not
 	// consume execution/repair budget — they are candidate contract failures.

@@ -55,6 +55,22 @@ func (c RuntimeCandidateCorrectionInput) ValidateAgainstObservation(manifest run
 			return fmt.Errorf("runtime candidate owner-constraint witness is not sealed in the manifest")
 		}
 	}
+	if c.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOperationSetCardinality {
+		violation := c.Witness.OperationSetViolation
+		if manifest.OperationSetPolicy.MaxOperationsPerOwnerTarget != 1 || violation == nil || violation.Validate() != nil || violation.Maximum != manifest.OperationSetPolicy.MaxOperationsPerOwnerTarget {
+			return fmt.Errorf("runtime candidate operation-set witness is not sealed in the manifest")
+		}
+		ownerKnown := false
+		for _, operation := range manifest.Operations {
+			if operation.OwnerModuleID == violation.OwnerModuleID {
+				ownerKnown = true
+				break
+			}
+		}
+		if !ownerKnown {
+			return fmt.Errorf("runtime candidate operation-set witness names an unknown owner")
+		}
+	}
 	return nil
 }
 

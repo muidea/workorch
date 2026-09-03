@@ -310,7 +310,6 @@ func TestRequestCandidateForwardsCompleteSchemaInvalidDocuments(t *testing.T) {
 		{name: "missing required operations", payload: `{}`},
 		{name: "wrong operations container", payload: `{"operations":{}}`},
 		{name: "wrong target refs container", payload: `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":"main.go","parameters":[{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`},
-		{name: "trailing json", payload: `{"operations":[` + validOperation + `]} {}`},
 		{name: "field alias", payload: `{"operations":[{"kind":"patch/apply","bindingRefs":["binding/test/cwi-1"],"targetRefs":["main.go"],"parameters":[{"name":"filePath","string":"main.go"},{"name":"patchType","string":"file_write"},{"name":"content","string":"package main\n"}]}]}`},
 	}
 	for _, testCase := range cases {
@@ -328,17 +327,27 @@ func TestRequestCandidateForwardsCompleteSchemaInvalidDocuments(t *testing.T) {
 	}
 }
 
-func TestRequestCandidateClassifiesProviderProseAsProtocolOutcome(t *testing.T) {
-	request := semanticBoundaryRequest(t)
-	provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
-		return generationResult([]byte("The user wants me to generate a semantic plan."), nil)
-	})
-	response, err := RequestCandidate(context.Background(), provider, request)
-	if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentInvalid || response.DocumentOutcome.Framing.Code != "provider_final_output_invalid" {
-		t.Fatalf("provider prose outcome: response=%+v err=%v", response, err)
-	}
-	if len(response.DocumentOutcome.Content) != 0 {
-		t.Fatalf("provider prose leaked into candidate response: %+v", response)
+func TestRequestCandidateClassifiesNonObjectProviderOutputsAsNoDocument(t *testing.T) {
+	for name, payload := range map[string][]byte{
+		"provider prose": []byte("The user wants me to generate a semantic plan."),
+		"scalar":         []byte(`"text"`),
+		"array":          []byte(`[]`),
+		"multiple roots": []byte(`{} {}`),
+		"trailing prose": []byte(`{} explanation`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := semanticBoundaryRequest(t)
+			provider := candidateProviderFunc(func(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {
+				return generationResult(payload, nil)
+			})
+			response, err := RequestCandidate(context.Background(), provider, request)
+			if err != nil || response.DocumentOutcome == nil || response.DocumentOutcome.Framing.Disposition != runtimecontract.RuntimeProviderDocumentInvalid || response.DocumentOutcome.Framing.Code != "provider_final_output_invalid" {
+				t.Fatalf("no-document outcome: response=%+v err=%v", response, err)
+			}
+			if len(response.DocumentOutcome.Content) != 0 {
+				t.Fatalf("invalid framing leaked into candidate response: %+v", response)
+			}
+		})
 	}
 }
 
@@ -707,6 +716,17 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 				CommandName: "true", RecipeDeclared: true, RecipeArgs: []string{"workorch-validation"},
 			}},
 		},
+	}
+	if state == runtimecontract.ConvergenceStateNeedValidation {
+		recipes := runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(facts.Activation.EvidencePolicies)
+		catalog := runtimecontract.RuntimeOperationAdmissibility{
+			PrerequisiteID: "test-managed-validation-catalog", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKinds:       []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+			ValidationRecipeRefs: []string{"test-managed-validation"}, ValidationRecipes: recipes,
+			ObservedRevision: "test-managed-validation-catalog-v1",
+		}
+		catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+		facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	}
 	assessmentPurpose := runtimecontract.RuntimeAssessmentPurposePreimage{}
 	if state == runtimecontract.ConvergenceStateNeedAssessment {

@@ -129,7 +129,7 @@ func TestProviderRequestIncompleteRecoveryCoordinatesPendingAndExhaustedTerminal
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repository.saves != 1 || pending.StateRevision != aggregate.StateRevision+1 || pending.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionRecoveryPending || pending.CandidateRequestSessions[0].IncompleteOutcomes != 1 || pending.Facts.Failure != nil {
+	if repository.saves != 1 || pending.StateRevision != aggregate.StateRevision+1 || pending.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionRecoveryPending || pending.CandidateRequestSessions[0].DocumentRecoveryOutcomes != 1 || pending.Facts.Failure != nil {
 		t.Fatalf("first incomplete recovery was not one pending CAS: saves=%d aggregate=%+v", repository.saves, pending)
 	}
 	duplicate, err := controller.coordinateProviderRequestRecovery(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, session.LastPhysicalCallID, firstFact, firstSettlement)
@@ -138,7 +138,7 @@ func TestProviderRequestIncompleteRecoveryCoordinatesPendingAndExhaustedTerminal
 	}
 
 	current := pending.CandidateRequestSessions[0]
-	if current.ExpectedDocument == nil || current.IncompleteOutcomes > current.ExpectedDocument.MaxRecoveryAttempts {
+	if current.ExpectedDocument == nil || current.DocumentRecoveryOutcomes > current.ExpectedDocument.MaxRecoveryAttempts {
 		t.Fatalf("first incomplete unexpectedly exhausted sealed recovery: %+v", current)
 	}
 	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(current.LogicalRequestID, current.NextSequence)
@@ -155,7 +155,7 @@ func TestProviderRequestIncompleteRecoveryCoordinatesPendingAndExhaustedTerminal
 		t.Fatal(err)
 	}
 	stored := terminal.CandidateRequestSessions[0]
-	if repository.saves != beforeSaves+1 || terminal.StateRevision != submitted.StateRevision+1 || stored.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted || stored.IncompleteOutcomes != 2 || terminal.Facts.Failure == nil || terminal.Facts.Failure.Code != "candidate_document_recovery_exhausted" || len(terminal.CandidateAttempts) != 0 {
+	if repository.saves != beforeSaves+1 || terminal.StateRevision != submitted.StateRevision+1 || stored.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || stored.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted || stored.DocumentRecoveryOutcomes != 2 || terminal.Facts.Failure == nil || terminal.Facts.Failure.Code != "candidate_document_recovery_exhausted" || len(terminal.CandidateAttempts) != 0 {
 		t.Fatalf("exhausted incomplete recovery was not one terminal CAS: saves=%d/%d aggregate=%+v", repository.saves, beforeSaves, terminal)
 	}
 }
@@ -199,7 +199,7 @@ func TestProviderRequestZeroByteOutputLimitUsesOwnerPrivateWholeDocumentRecovery
 				t.Fatal(err)
 			}
 			current := pending.CandidateRequestSessions[0]
-			if repository.saves != 1 || current.State != runtimecontract.RuntimeCandidateRequestSessionRecoveryPending || current.IncompleteOutcomes != 1 || current.ProviderSubmitted || current.LogicalRequestID != session.LogicalRequestID {
+			if repository.saves != 1 || current.State != runtimecontract.RuntimeCandidateRequestSessionRecoveryPending || current.DocumentRecoveryOutcomes != 1 || current.ProviderSubmitted || current.LogicalRequestID != session.LogicalRequestID {
 				t.Fatalf("zero-byte output limit did not enter one owner-private recovery CAS: saves=%d session=%+v", repository.saves, current)
 			}
 			if current.ExpectedDocument == nil || current.ExpectedDocument.Hash != expected.Hash || runtimecontract.StableRuntimeExpectedDocumentHash(*current.ExpectedDocument) != runtimecontract.StableRuntimeExpectedDocumentHash(expected) {

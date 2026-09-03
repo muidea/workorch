@@ -3022,6 +3022,43 @@ $raw_provider_framing_reclassifiers
 EOF
   exit 1
 fi
+
+# Provider framing and candidate admission are two different SM-3 ledgers.
+# Empty, incomplete, non-JSON, scalar/array, multiple-root and trailing-content
+# outputs remain no-candidate request-session facts. Only one complete object
+# may reach attempt 0/1, and all executable contract checks must happen in the
+# single evaluator before an owner probe as well as at final seal.
+for regression in \
+  'TestInspectRuntimeCandidateDocumentFramingAdmitsOnlyOneCompleteObject' \
+  'TestRuntimeCandidateRequestContentBridgeCompletesDocumentWithoutCandidateAttempt' \
+  'TestEvaluateAppliesExecutableContractBeforeOwnerProbe' \
+  'TestCandidateCorrectionFrontierSealsAndCrossesOperationSetConsolidation' \
+  'TestRuntimeCandidateSealedCorrectionHashBindsOperationSetViolation' \
+  'TestRuntimeCandidateManifestVariantsRestrictsOnlyMatchingKind' \
+  'TestRuntimeCandidateVariantRestrictionKeepsVariantFreeAlternativeKind' \
+  'TestRuntimeCandidateVariantRestrictionIncludesExactRequiredSequence'; do
+  if ! grep -R -q -F --include='*_test.go' -- "$regression" internal; then
+    echo "boundary contract violation: candidate framing/admission regression is missing ($regression)" >&2
+    exit 1
+  fi
+done
+legacy_candidate_document_states="$({
+  grep -R -Hn -E --include='*.go' -- \
+    'RuntimeCandidateRequestSessionDocumentConformanceRejected|RuntimeCandidateCorrectionWitnessDocumentShape|candidate_document_nonconformant|document_conformance_rejected' \
+    internal || true
+} | sed '/^[[:space:]]*$/d')"
+if [[ -n "$legacy_candidate_document_states" ]]; then
+  echo "boundary contract violation: no-candidate framing regained a candidate correction/attempt state" >&2
+  echo "$legacy_candidate_document_states" >&2
+  exit 1
+fi
+operation_set_violation_shape="$(sed -n '/^type RuntimeCandidateOperationSetViolation struct {/,/^}/p' internal/pkg/workorchruntimecontract/candidate_contract_manifest_semantics.go)"
+if ! grep -q -E -- 'OperationKinds[[:space:]]+\[\]string' <<<"$operation_set_violation_shape" ||
+   ! grep -q -E -- 'OperationIndexes[[:space:]]+\[\]int' <<<"$operation_set_violation_shape" ||
+   grep -q -E -- 'OperationIDs|operationIds' <<<"$operation_set_violation_shape"; then
+  echo "boundary contract violation: operation-set correction witness must expose only operation kind/index identities, never owner-derived operation IDs" >&2
+  exit 1
+fi
 llm_candidate_command_shape="$(sed -n '/^type RequestRuntimeCandidateCommand struct {/,/^}/p' internal/modules/blocks/llm/pkg/events/messages.go)"
 llm_candidate_model_request_shape="$(sed -n '/^type RuntimeCandidateRequest struct {/,/^}/p' internal/modules/blocks/llm/pkg/models/runtime_candidate.go)"
 llm_candidate_model_response_shape="$(sed -n '/^type RuntimeCandidateResponse struct {/,/^}/p' internal/modules/blocks/llm/pkg/models/runtime_candidate.go)"

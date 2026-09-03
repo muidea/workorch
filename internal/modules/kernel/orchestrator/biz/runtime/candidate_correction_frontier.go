@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -61,7 +62,7 @@ func candidateCorrectionWitness(
 	if strings.TrimSpace(manifest.Hash) == "" {
 		return nil
 	}
-	if witness := candidateDocumentShapeCorrectionWitness(failure); witness != nil {
+	if witness := candidateOperationSetCorrectionWitness(failure, manifest, frontier.candidate); witness != nil {
 		return witness
 	}
 	if witness := candidateParameterEntryEncodingCorrectionWitness(failure, manifest); witness != nil {
@@ -149,6 +150,33 @@ func candidateCorrectionWitness(
 	return candidateSchemaCorrectionWitness(failure.Diagnostic, manifest, frontier.candidate)
 }
 
+func candidateOperationSetCorrectionWitness(failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest, candidate *runtimecontract.RuntimeCandidate) *runtimecontract.RuntimeCandidateCorrectionWitness {
+	if failure == nil || strings.TrimSpace(failure.Code) != candidateadmission.CodeOwnerTargetEffectOverlap || failure.Diagnostic == nil || candidate == nil {
+		return nil
+	}
+	diagnostic := failure.Diagnostic.Normalized()
+	if diagnostic.Path != "$.operations" || diagnostic.OperationSetViolation == nil || diagnostic.RejectedShapeHash == "" ||
+		!runtimecontract.RuntimeCandidateCorrectionObjectivesEqual(diagnostic.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConsolidateOperationSet}) {
+		return nil
+	}
+	observed := runtimecontract.RuntimeCandidateOperationSetViolationForManifest(manifest, candidateadmission.Operations(*candidate))
+	if observed == nil || !reflect.DeepEqual(observed.Normalized(), diagnostic.OperationSetViolation.Normalized()) {
+		return nil
+	}
+	witness := &runtimecontract.RuntimeCandidateCorrectionWitness{
+		Dimension:             runtimecontract.RuntimeCandidateCorrectionWitnessOperationSetCardinality,
+		Path:                  "$.operations",
+		RejectedValue:         observed.OwnerModuleID + "|" + observed.TargetRef,
+		AlternativeValue:      "one_operation_per_owner_target",
+		RejectedShapeHash:     diagnostic.RejectedShapeHash,
+		OperationSetViolation: observed.Clone(),
+	}
+	if witness.Validate() != nil {
+		return nil
+	}
+	return witness.Clone()
+}
+
 func candidateOwnerConstraintCorrectionWitness(failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest, candidate *runtimecontract.RuntimeCandidate) *runtimecontract.RuntimeCandidateCorrectionWitness {
 	if failure == nil || strings.TrimSpace(failure.Code) != "candidate_owner_constraint_nonconformant" || failure.Diagnostic == nil || candidate == nil {
 		return nil
@@ -196,25 +224,6 @@ func candidateParameterEntryEncodingCorrectionWitness(failure *runtimecontract.R
 		return nil
 	}
 	return witness.Clone()
-}
-
-func candidateDocumentShapeCorrectionWitness(failure *runtimecontract.RuntimeCandidateFailure) *runtimecontract.RuntimeCandidateCorrectionWitness {
-	if failure == nil || strings.TrimSpace(failure.Code) != "candidate_document_nonconformant" || failure.Diagnostic == nil {
-		return nil
-	}
-	diagnostic := failure.Diagnostic.Normalized()
-	if diagnostic.Path != "$" {
-		return nil
-	}
-	witness := &runtimecontract.RuntimeCandidateCorrectionWitness{
-		Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape,
-		Path:      "$", RejectedValue: diagnostic.Actual,
-		AlternativeValue: runtimecontract.RuntimeCandidateDocumentShapeConformant,
-	}
-	if witness.Validate() != nil {
-		return nil
-	}
-	return witness
 }
 
 // candidateCorrectionAllowsOperationWitness keeps a legal manifest mutation
@@ -848,6 +857,12 @@ func validateAttemptCandidateCrossesPersistedWitness(aggregate RuntimeAggregate,
 	if directive.Witness.AlternativeShapeHash != "" && shape != directive.Witness.AlternativeShapeHash {
 		return fmt.Errorf("attempt 1 does not match the sealed alternative semantic shape")
 	}
+	if directive.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOperationSetCardinality {
+		if first.Proposal == nil || !candidateCrossesOperationSetCorrectionWitness(*first.Proposal, candidate, manifest, *directive.Witness) {
+			return fmt.Errorf("attempt 1 does not consolidate the sealed owner/target operation set at %s", directive.Witness.Path)
+		}
+		return nil
+	}
 	if directive.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOwnerConstraint {
 		if first.Proposal == nil || !candidateCrossesOwnerConstraintWitness(*first.Proposal, candidate, manifest, *directive.Witness) {
 			return fmt.Errorf("attempt 1 does not revise the sealed owner constraint %q at %s", directive.Witness.ConstraintRef, directive.Witness.Path)
@@ -862,6 +877,86 @@ func validateAttemptCandidateCrossesPersistedWitness(aggregate RuntimeAggregate,
 		return fmt.Errorf("attempt 1 does not use sealed correction alternative %q at %s", directive.Witness.AlternativeValue, directive.Witness.Path)
 	}
 	return nil
+}
+
+// candidateCrossesOperationSetCorrectionWitness constrains attempt 1 to the
+// exact structural repair authorized by the typed violation. It may merge the
+// conflicting operations (or retain an exact manifest-required sequence), but
+// it cannot create/remove owner-target coverage or mutate an unrelated
+// operation to manufacture a different candidate shape.
+func candidateCrossesOperationSetCorrectionWitness(previous runtimecontract.RuntimeCandidate, candidate runtimecontract.RuntimeCandidate, manifest runtimecontract.RuntimeCandidateContractManifest, witness runtimecontract.RuntimeCandidateCorrectionWitness) bool {
+	witness = witness.Normalized()
+	if witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessOperationSetCardinality || witness.Validate() != nil || witness.OperationSetViolation == nil {
+		return false
+	}
+	previousOperations := candidateadmission.Operations(previous)
+	operations := candidateadmission.Operations(candidate)
+	observed := runtimecontract.RuntimeCandidateOperationSetViolationForManifest(manifest, previousOperations)
+	if observed == nil || !reflect.DeepEqual(observed.Normalized(), witness.OperationSetViolation.Normalized()) ||
+		runtimecontract.RuntimeCandidateOperationSetViolationForManifest(manifest, operations) != nil ||
+		runtimecontract.StableRuntimeCandidateSemanticShape(candidate) == witness.RejectedShapeHash {
+		return false
+	}
+	if !reflect.DeepEqual(candidateCorrectionOwnerTargetSet(manifest, previousOperations), candidateCorrectionOwnerTargetSet(manifest, operations)) {
+		return false
+	}
+	if !reflect.DeepEqual(
+		candidateCorrectionUnaffectedOperationShapes(manifest, previousOperations, *witness.OperationSetViolation),
+		candidateCorrectionUnaffectedOperationShapes(manifest, operations, *witness.OperationSetViolation),
+	) {
+		return false
+	}
+	matching := 0
+	for _, operation := range operations {
+		operation = operation.Normalized()
+		authorization, found := candidateCorrectionOperationManifest(manifest, operation.Kind)
+		if found && authorization.OwnerModuleID == witness.OperationSetViolation.OwnerModuleID &&
+			containsCandidateCorrectionString(operation.TargetRefs, witness.OperationSetViolation.TargetRef) {
+			matching++
+		}
+	}
+	// The manifest-only policy check above proves that any remaining overlap is
+	// an exact RequiredOperationSequence exception. At least one operation must
+	// remain on the original owner target, so deletion cannot masquerade as
+	// consolidation.
+	return matching >= witness.OperationSetViolation.Maximum
+}
+
+type candidateCorrectionOwnerTarget struct {
+	ownerModuleID string
+	target        string
+}
+
+func candidateCorrectionOwnerTargetSet(manifest runtimecontract.RuntimeCandidateContractManifest, operations []runtimecontract.RuntimeOperation) map[candidateCorrectionOwnerTarget]struct{} {
+	ret := make(map[candidateCorrectionOwnerTarget]struct{})
+	for _, operation := range operations {
+		operation = operation.Normalized()
+		authorization, found := candidateCorrectionOperationManifest(manifest, operation.Kind)
+		if !found {
+			continue
+		}
+		for _, target := range operation.TargetRefs {
+			target = strings.TrimSpace(target)
+			if authorization.OwnerModuleID != "" && target != "" {
+				ret[candidateCorrectionOwnerTarget{ownerModuleID: authorization.OwnerModuleID, target: target}] = struct{}{}
+			}
+		}
+	}
+	return ret
+}
+
+func candidateCorrectionUnaffectedOperationShapes(manifest runtimecontract.RuntimeCandidateContractManifest, operations []runtimecontract.RuntimeOperation, violation runtimecontract.RuntimeCandidateOperationSetViolation) []string {
+	ret := make([]string, 0, len(operations))
+	for _, operation := range operations {
+		operation = operation.Normalized()
+		authorization, found := candidateCorrectionOperationManifest(manifest, operation.Kind)
+		if found && authorization.OwnerModuleID == violation.OwnerModuleID && containsCandidateCorrectionString(operation.TargetRefs, violation.TargetRef) {
+			continue
+		}
+		ret = append(ret, runtimecontract.StableRuntimeOperationShape(operation))
+	}
+	sort.Strings(ret)
+	return ret
 }
 
 func candidateCrossesOwnerConstraintWitness(previous runtimecontract.RuntimeCandidate, candidate runtimecontract.RuntimeCandidate, manifest runtimecontract.RuntimeCandidateContractManifest, witness runtimecontract.RuntimeCandidateCorrectionWitness) bool {
@@ -925,11 +1020,6 @@ func candidateCrossesCorrectionWitness(candidate runtimecontract.RuntimeCandidat
 		operation = operations[operationIndex].Normalized()
 	}
 	switch witness.Dimension {
-	case runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape:
-		// This function is reached only after strict decoding against the same
-		// sealed manifest. That admission boundary is the proof that attempt 1
-		// crossed from an empty/invalid/trailing body to one conformant document.
-		return witness.Path == "$" && witness.AlternativeValue == runtimecontract.RuntimeCandidateDocumentShapeConformant
 	case runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding:
 		return candidateCrossesParameterEntryEncodingWitness(operations, manifest, witness)
 	case runtimecontract.RuntimeCandidateCorrectionWitnessOperationKind:

@@ -276,7 +276,7 @@ func (c *planningTransactionComponent) coordinateProviderRequestTerminal(ctx con
 	if err := validateCurrentCandidateRequestSession(aggregate, session); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected {
+	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
 		return RuntimeAggregate{}, fmt.Errorf("%w: complete provider request cannot accept a terminal failure", common.ErrConflict)
 	}
 	expectedRevision := aggregate.StateRevision

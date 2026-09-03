@@ -105,6 +105,35 @@ func TestRuntimeCandidateRequiredFieldTypeCorrectionBindsExactDiagnostic(t *test
 	}
 }
 
+func TestRuntimeCandidateSealedCorrectionHashBindsOperationSetViolation(t *testing.T) {
+	violation := &RuntimeCandidateOperationSetViolation{
+		OwnerModuleID: RuntimeModuleFile, TargetRef: "main.go",
+		OperationKinds: []string{RuntimeBlockKindPatchApply, RuntimeBlockKindPatchApply}, OperationIndexes: []int{0, 1}, Maximum: 1,
+	}
+	witness := RuntimeCandidateCorrectionWitness{
+		Dimension: RuntimeCandidateCorrectionWitnessOperationSetCardinality,
+		Path:      "$.operations", RejectedValue: RuntimeModuleFile + "|main.go",
+		AlternativeValue: "one_operation_per_owner_target", RejectedShapeHash: "shape-overlap",
+		OperationSetViolation: violation,
+	}
+	objectives := []RuntimeCandidateCorrectionObjective{RuntimeCandidateCorrectionConsolidateOperationSet}
+	base := StableRuntimeCandidateSealedCorrectionHash("manifest-hash", objectives, &witness)
+	if base == "" {
+		t.Fatal("operation-set correction hash is empty")
+	}
+	changed := witness.Normalized()
+	changed.OperationSetViolation.TargetRef = "other.go"
+	changed.RejectedValue = RuntimeModuleFile + "|other.go"
+	if got := StableRuntimeCandidateSealedCorrectionHash("manifest-hash", objectives, &changed); got == "" || got == base {
+		t.Fatalf("operation-set correction hash did not bind typed target: base=%q changed=%q", base, got)
+	}
+	invalid := witness.Normalized()
+	invalid.OperationSetViolation.OperationIndexes = []int{1, 0}
+	if got := StableRuntimeCandidateSealedCorrectionHash("manifest-hash", objectives, &invalid); got != "" {
+		t.Fatalf("noncanonical operation-set witness remained hashable: %q", got)
+	}
+}
+
 func TestRuntimeCandidateFailureDiagnosticRequiresWireRuleOnlyAfterSelector(t *testing.T) {
 	t.Parallel()
 	for _, testCase := range []struct {
@@ -217,7 +246,7 @@ func TestRuntimeSemanticCorrectionObservationEnforcesNestedBoundsAndSafeText(t *
 func TestRuntimeSemanticCorrectionObservationHashBindsOnlyTypedObservation(t *testing.T) {
 	observation := RuntimeSemanticCorrectionObservation{
 		SchemaVersion: RuntimeSemanticCorrectionObservationSchemaCurrent,
-		OwnerModuleID: RuntimeModuleLLM, Class: "schema", Code: "semantic_document_nonconformant", Signature: "semantic-document-nonconformant",
+		OwnerModuleID: RuntimeModuleOrchestrator, Class: "schema", Code: "semantic_plan_invalid", Signature: "semantic-plan/invalid-document",
 		FieldViolations: []RuntimeFieldViolation{{Path: "$", Actual: "invalid", Required: []string{"conformant"}}},
 		SemanticViolations: []RuntimeSemanticContractViolation{{
 			Kind: RuntimeSemanticContractViolationCoverageOrderDocument, Path: "$.coverageOrder",

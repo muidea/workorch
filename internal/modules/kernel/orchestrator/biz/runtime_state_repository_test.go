@@ -634,10 +634,10 @@ func TestRuntimeStateRepositoryPersistsAndLoadsThroughRunOwner(t *testing.T) {
 	transaction := aggregate.Decision.AuthorityTransaction()
 	requestSession := runtimecontract.RuntimeCandidateRequestSession{
 		DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Transaction: transaction, StablePrefixHash: "stable-prefix-v2", ManifestHash: "candidate-manifest-v2",
-		State: runtimecontract.RuntimeCandidateRequestSessionRecoveryPending, NextSequence: 2, IncompleteOutcomes: 1,
+		State: runtimecontract.RuntimeCandidateRequestSessionRecoveryPending, NextSequence: 2, DocumentRecoveryOutcomes: 1,
 		LastPhysicalCallID: "physical-call-1", ProviderSubmitted: false,
 		LastOutcome: runtimecontract.RuntimeCandidateRequestOutcome{
-			Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentIncomplete,
+			Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecovery,
 			Code:  runtimecontract.RuntimeProviderDocumentCodeIncompleteJSON, Signature: runtimecontract.RuntimeProviderDocumentSignatureIncompleteJSON,
 		},
 	}
@@ -4660,7 +4660,7 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 		ID: "test-partial-replay-concrete-alternatives",
 		EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
 			ID: "cwi-v2", Scope: "test", TargetRole: "deliverable",
-			TargetRefs:            []string{"replacement.txt", "target.txt"},
+			TargetRefs:            []string{"replacement.txt", "target.txt", "third.txt"},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 			AcceptedStepKinds:     []string{runtimecontract.StepKindFileEdit},
 		}},
@@ -4713,7 +4713,7 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 			Kind:                  runtimecontract.StepKindFileEdit,
 			AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
 		}},
-		TargetRefs:       []string{"replacement.txt", "target.txt"},
+		TargetRefs:       []string{"replacement.txt", "target.txt", "third.txt"},
 		ObservedRevision: "test-semantic-revision-" + runtimecontract.RuntimeModuleFile,
 	}
 	fileCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
@@ -4724,6 +4724,7 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 	facts.Resources.TargetSnapshots = []runtimecontract.TargetSnapshot{
 		{TargetRef: "target.txt", ContentHash: "partial-replay-target-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
 		{TargetRef: "replacement.txt", ContentHash: "partial-replay-replacement-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
+		{TargetRef: "third.txt", ContentHash: "partial-replay-third-v1", ContentState: runtimecontract.SnapshotContentStateComplete},
 	}
 	initialized := runtimeTestInitializeOperationFixture(t, ctx, biz, repository, facts, bootstrap.Definition, bootstrap.Requirements)
 	if len(initialized.Facts.Focus.CoverageEvidenceBindings) != 1 {
@@ -4754,7 +4755,8 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 		newOperation := replayedOperation
 		newOperation.ID = "new-edit"
 		newText := "corrected"
-		newOperation.Parameters = runtimeFileEditParameters("target.txt")
+		newOperation.TargetRefs = []string{"replacement.txt"}
+		newOperation.Parameters = runtimeFileEditParameters("replacement.txt")
 		newOperation.Parameters[1].String = &newText
 		if command.CandidateAttempt == 0 {
 			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: replayedOperation}, {Operation: newOperation}}}
@@ -4764,8 +4766,8 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 			}
 			corrected := replayedOperation
 			corrected.ID = "corrected-edit"
-			corrected.TargetRefs = []string{"replacement.txt"}
-			corrected.Parameters = runtimeFileEditParameters("replacement.txt")
+			corrected.TargetRefs = []string{"third.txt"}
+			corrected.Parameters = runtimeFileEditParameters("third.txt")
 			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: corrected}, {Operation: newOperation}}}
 		}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
@@ -4775,12 +4777,12 @@ func TestRuntimeMainlinePartialReplayClosesAttemptThenSealsCorrectedRetry(t *tes
 	module := newTestBiz(biz, hub, nil)
 	first, err := module.requestAndSealRuntimeCandidate(ctx, seeded, "partial-replay-prefix", 0)
 	if err != nil || len(requests) != 1 || len(first.CandidateAttempts) != 2 || first.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || first.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateFailed || first.CandidateAttempts[1].Failure == nil || first.CandidateAttempts[1].Failure.Code != "candidate_partially_replays_rejected_shape" || first.Decision.State == runtimecontract.ConvergenceStateFailed {
-		t.Fatalf("partial replay did not atomically close attempt 0 before restart: aggregate=%+v err=%v requests=%+v", first, err, requests)
+		t.Fatalf("partial replay did not atomically close attempt 0 before restart: state=%s terminal=%+v failure=%+v attempts=%+v err=%v requests=%d", first.Decision.State, first.Decision.Terminal, first.Facts.Failure, first.CandidateAttempts, err, len(requests))
 	}
 	correction := first.CandidateAttempts[1].Correction
 	if correction == nil || correction.Witness == nil ||
 		correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessTarget ||
-		correction.Witness.RejectedValue != "target.txt" || correction.Witness.AlternativeValue != "replacement.txt" ||
+		correction.Witness.RejectedValue != "target.txt" || correction.Witness.AlternativeValue != "third.txt" ||
 		correction.Witness.RejectedShapeHash == correction.Witness.AlternativeShapeHash {
 		t.Fatalf("partial replay did not seal the manifest's concrete target alternative: %+v", correction)
 	}

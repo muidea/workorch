@@ -918,7 +918,7 @@ func TestRuntimeSemanticProviderTerminalUsesOnlyStableCategory(t *testing.T) {
 	}
 }
 
-func TestRuntimeSemanticDriveEmptyDocumentUsesBoundedSemanticCorrection(t *testing.T) {
+func TestRuntimeSemanticDriveNoDocumentUsesBoundedRequestRecovery(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -954,10 +954,8 @@ func TestRuntimeSemanticDriveEmptyDocumentUsesBoundedSemanticCorrection(t *testi
 		if command.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan {
 			t.Errorf("semantic empty-document request kind = %q", command.DocumentKind)
 		}
-		if providerCalls == 2 && (command.SemanticCorrectionObservation == nil || command.SemanticCorrectionDirective == nil ||
-			len(command.SemanticCorrectionObservation.FieldViolations) != 1 ||
-			command.SemanticCorrectionObservation.FieldViolations[0].Actual != string(runtimecontract.RuntimeProviderDocumentInvalid)) {
-			t.Errorf("semantic C4 correction lost bounded document failure: observation=%+v directive=%+v", command.SemanticCorrectionObservation, command.SemanticCorrectionDirective)
+		if command.SemanticCorrectionObservation != nil || command.SemanticCorrectionDirective != nil {
+			t.Errorf("no-document recovery crossed into semantic correction: observation=%+v directive=%+v", command.SemanticCorrectionObservation, command.SemanticCorrectionDirective)
 		}
 		outcome := runtimeProviderFinalOutputMissingOutcome(command.ExpectedDocument)
 		if providerCalls == 1 {
@@ -975,40 +973,37 @@ func TestRuntimeSemanticDriveEmptyDocumentUsesBoundedSemanticCorrection(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	correcting, err := module.driveRuntimeSemanticPlanning(ctx, started)
+	recovering, err := module.driveRuntimeSemanticPlanning(ctx, started)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if providerCalls != 1 || correcting.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningCorrectionRequired || correcting.SemanticPlanning.Attempt != 1 || correcting.SemanticPlanning.CorrectionDirective == nil || len(correcting.SemanticPlanning.Rejections) != 1 {
-		t.Fatalf("semantic empty document did not open exact attempt 1: calls=%d aggregate=%+v", providerCalls, correcting)
+	if providerCalls != 1 || recovering.SemanticPlanning.Attempt != 0 || recovering.SemanticPlanning.CorrectionDirective != nil || len(recovering.SemanticPlanning.Rejections) != 0 {
+		t.Fatalf("semantic no-document response entered semantic correction: calls=%d aggregate=%+v", providerCalls, recovering)
 	}
-	failed, err := module.driveRuntimeSemanticPlanning(ctx, correcting)
+	failed, err := module.driveRuntimeSemanticPlanning(ctx, recovering)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if providerCalls != 2 || failed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed ||
 		failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil ||
 		failed.Decision.Terminal.Code != "semantic_contract_failed" || failed.Facts.Failure == nil ||
-		failed.Facts.Failure.OriginalDiagnostic == nil || failed.Facts.Failure.OriginalDiagnostic.OriginalCode != "semantic_document_nonconformant" ||
+		failed.Facts.Failure.Class != runtimecontract.FailureClassCandidateDocumentRecoveryExhausted ||
+		failed.Facts.Failure.Code != "semantic_contract_failed" || failed.Facts.Failure.OriginalDiagnostic == nil ||
+		failed.Facts.Failure.OriginalDiagnostic.OriginalCode != "semantic_document_recovery_exhausted" ||
 		len(failed.CandidateAttempts) != 0 || failed.ActiveDispatch != nil || failed.Facts.Recovery != aggregate.Facts.Recovery {
-		t.Fatalf("semantic empty document did not exhaust bounded attempt 0/1: calls=%d aggregate=%+v", providerCalls, failed)
+		t.Fatalf("semantic no-document response did not exhaust request recovery: calls=%d phase=%s decision=%s terminal=%+v failure=%+v attempts=%d activeDispatch=%t recoveryChanged=%t sessions=%+v",
+			providerCalls, failed.SemanticPlanning.Phase, failed.Decision.State, failed.Decision.Terminal, failed.Facts.Failure,
+			len(failed.CandidateAttempts), failed.ActiveDispatch != nil, failed.Facts.Recovery != aggregate.Facts.Recovery, failed.CandidateRequestSessions)
 	}
-	if len(failed.CandidateRequestSessions) != 2 {
+	if len(failed.CandidateRequestSessions) != 1 {
 		t.Fatalf("semantic empty-document sessions = %+v", failed.CandidateRequestSessions)
 	}
-	for index, session := range failed.CandidateRequestSessions {
-		expectedCode := runtimecontract.RuntimeProviderDocumentCodeFinalOutputMissing
-		expectedDisposition := runtimecontract.RuntimeProviderDocumentEmpty
-		if index == 0 {
-			expectedCode = runtimecontract.RuntimeProviderDocumentCodeFinalOutputInvalid
-			expectedDisposition = runtimecontract.RuntimeProviderDocumentInvalid
-		}
-		if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected || !session.ProviderSubmitted ||
-			session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentConformanceRejected ||
-			session.LastOutcome.Code != expectedCode || session.IncompleteOutcomes != 0 || session.NextSequence != 1 ||
-			session.LastDocumentFraming == nil || session.LastDocumentFraming.Disposition != expectedDisposition || session.ExpectedDocument == nil || session.ExpectedDocument.MaxRecoveryAttempts <= 0 {
-			t.Fatalf("semantic empty-document correction session = %+v", session)
-		}
+	session := failed.CandidateRequestSessions[0]
+	if session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal || session.ProviderSubmitted ||
+		session.LastOutcome.Class != runtimecontract.RuntimeCandidateRequestOutcomeDocumentRecoveryExhausted ||
+		session.DocumentRecoveryOutcomes != 2 || session.NextSequence != 3 || session.LastDocumentFraming == nil ||
+		session.LastDocumentFraming.Disposition != runtimecontract.RuntimeProviderDocumentEmpty || session.ExpectedDocument == nil || session.ExpectedDocument.MaxRecoveryAttempts != 1 {
+		t.Fatalf("semantic no-document recovery session = %+v", session)
 	}
 
 	reloaded, err := repository.Load(ctx, failed.Facts.WorkspaceID, failed.Facts.RunID)

@@ -315,9 +315,6 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
 		return m.admitRuntimeCompletedSemanticPlanDocument(ctx, aggregate, session)
 	}
-	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected {
-		return m.resumeRuntimeSemanticDocumentConformance(ctx, aggregate, session)
-	}
 	if session.State == runtimecontract.RuntimeCandidateRequestSessionTerminal {
 		if !runtime.ProviderRequestTerminalSessionApplied(aggregate, session) {
 			return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic provider request is terminal without its coordinated SM-2 failure", common.ErrConflict)
@@ -476,7 +473,7 @@ func runtimeSemanticProviderTerminal(category runtimecontract.RuntimeFeedbackCat
 func (m *Biz) handleRuntimeSemanticDocumentOutcome(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, response llmevents.RequestRuntimeCandidateResult, sequence int, physicalCallID string, settlement *runtime.RuntimeProviderBudgetSettlement) (runtime.RuntimeAggregate, error) {
 	framing := response.DocumentOutcome.Framing
 	switch framing.Disposition {
-	case runtimecontract.RuntimeProviderDocumentIncomplete:
+	case runtimecontract.RuntimeProviderDocumentIncomplete, runtimecontract.RuntimeProviderDocumentInvalid, runtimecontract.RuntimeProviderDocumentEmpty:
 		updated, recoveryErr := m.runtimeCoordinateProviderRequestRecovery(ctx, aggregate, session.LogicalRequestID, physicalCallID, runtime.RuntimeProviderRequestRecoveryInput{
 			DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, DocumentFraming: &framing,
 		}, settlement)
@@ -488,16 +485,6 @@ func (m *Biz) handleRuntimeSemanticDocumentOutcome(ctx context.Context, aggregat
 			return runtime.RuntimeAggregate{}, fmt.Errorf("semantic request session disappeared after recovery fact")
 		}
 		return updated, nil
-	case runtimecontract.RuntimeProviderDocumentInvalid, runtimecontract.RuntimeProviderDocumentEmpty:
-		rejected, rejectErr := m.runtimeRejectCandidateRequestDocumentConformance(ctx, aggregate, session.LogicalRequestID, physicalCallID, framing, settlement)
-		if rejectErr != nil {
-			return runtime.RuntimeAggregate{}, rejectErr
-		}
-		persisted, found := runtimeCandidateRequestSession(rejected, session.LogicalRequestID)
-		if !found {
-			return runtime.RuntimeAggregate{}, fmt.Errorf("semantic document-conformance session disappeared")
-		}
-		return m.resumeRuntimeSemanticDocumentConformance(ctx, rejected, persisted)
 	case runtimecontract.RuntimeProviderDocumentComplete:
 		if len(response.DocumentOutcome.Content) == 0 {
 			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_document_missing", "complete semantic outcome did not carry its document", nil, settlement)
@@ -593,9 +580,6 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 	}
 	semanticDocumentHash := runtimecontract.StableRuntimeProviderResponseHash(payload)
 	payload, _ = runtimecontract.NormalizeRuntimeCandidatePayloadDocument(payload)
-	if shape, nonconformant := runtimeCompletedCandidateDocumentShape(payload); nonconformant {
-		return m.handleRuntimeSemanticDocumentDiagnostic(ctx, aggregate, session, ledger, runtimeSemanticDocumentShapeDiagnostic(shape))
-	}
 	if runtimecontract.RuntimeSemanticPayloadIsDefinitionGap(payload) {
 		if session.ExpectedDocument == nil {
 			return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_expected_document_missing", "Definition gap document has no sealed expected document", nil)
@@ -642,28 +626,6 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 func (m *Biz) handleRuntimeSemanticDocumentDecodeFailure(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, ledger runtimecontract.RuntimeSemanticPlanningLedger, decodeErr error) (runtime.RuntimeAggregate, error) {
 	diagnostic := runtimeSemanticPayloadDiagnostic(decodeErr)
 	return m.handleRuntimeSemanticDocumentDiagnostic(ctx, aggregate, session, ledger, diagnostic)
-}
-
-func (m *Biz) resumeRuntimeSemanticDocumentConformance(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession) (runtime.RuntimeAggregate, error) {
-	if session.LastDocumentFraming == nil {
-		return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic document-conformance session has no framing fact", common.ErrConflict)
-	}
-	framing := session.LastDocumentFraming.Normalized()
-	return m.handleRuntimeSemanticDocumentDiagnostic(ctx, aggregate, session, aggregate.SemanticPlanning.Clone(), runtimeSemanticDocumentShapeDiagnostic(string(framing.Disposition)))
-}
-
-func runtimeSemanticDocumentShapeDiagnostic(shape string) runtimecontract.RuntimeOriginalDiagnostic {
-	shape = strings.TrimSpace(shape)
-	return runtimecontract.RuntimeOriginalDiagnostic{
-		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
-		OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator,
-		OriginalClass: "semantic_plan_rejection", OriginalCode: "semantic_document_nonconformant",
-		OriginalMessage: "semantic provider response must contain exactly one manifest-conformant JSON document",
-		Signature:       "semantic-document-nonconformant/" + strings.ReplaceAll(shape, "_", "-"),
-		FieldViolations: []runtimecontract.RuntimeFieldViolation{{
-			Path: "$", Actual: shape, Required: []string{runtimecontract.RuntimeCandidateDocumentShapeConformant},
-		}},
-	}
 }
 
 func (m *Biz) handleRuntimeSemanticDocumentDiagnostic(ctx context.Context, aggregate runtime.RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession, ledger runtimecontract.RuntimeSemanticPlanningLedger, diagnostic runtimecontract.RuntimeOriginalDiagnostic) (runtime.RuntimeAggregate, error) {
@@ -1004,8 +966,7 @@ func (m *Biz) failRuntimeSemanticContract(ctx context.Context, aggregate runtime
 	if logicalRequestID := strings.TrimSpace(aggregate.SemanticPlanning.LogicalRequestID); logicalRequestID != "" {
 		if session, found := runtimeCandidateRequestSession(aggregate, logicalRequestID); found {
 			switch session.State {
-			case runtimecontract.RuntimeCandidateRequestSessionDocumentComplete,
-				runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected:
+			case runtimecontract.RuntimeCandidateRequestSessionDocumentComplete:
 				// The provider transaction is complete; semantic decode/admission may
 				// still seal a semantic-contract failure through the ordinary SM-2 event.
 			case runtimecontract.RuntimeCandidateRequestSessionTerminal:

@@ -16,12 +16,18 @@ type runtimeCandidateOutputContractProjection struct {
 	ManifestHash                string                                        `json:"manifestHash,omitempty"`
 	WireContractHash            string                                        `json:"wireContractHash,omitempty"`
 	MaxOperationCount           int                                           `json:"maxOperationCount,omitempty"`
+	OperationSetPolicy          runtimeCandidateOperationSetPolicyProjection  `json:"operationSetPolicy,omitempty"`
 	Schema                      json.RawMessage                               `json:"schema"`
 	StructuredOutputInstruction string                                        `json:"structuredOutputInstruction"`
 	CanonicalWireLayout         string                                        `json:"canonicalWireLayout,omitempty"`
 	WireRules                   []runtimeCandidateWireRuleProjection          `json:"wireRules,omitempty"`
 	ForbiddenTopLevelFields     []string                                      `json:"forbiddenTopLevelFields"`
 	OperationContracts          []runtimeCandidateOperationContractProjection `json:"operationContracts,omitempty"`
+}
+
+type runtimeCandidateOperationSetPolicyProjection struct {
+	MaxOperationsPerOwnerTarget           int  `json:"maxOperationsPerOwnerTarget,omitempty"`
+	AllowRequiredOperationSequenceOverlap bool `json:"allowRequiredOperationSequenceOverlap,omitempty"`
 }
 
 type runtimeCandidateWireRuleProjection struct {
@@ -154,6 +160,7 @@ type runtimeCandidateCorrectionWitnessProjection struct {
 	AlternativeShapeHash    string                                                     `json:"alternativeShapeHash,omitempty"`
 	ConstraintRef           string                                                     `json:"constraintRef,omitempty"`
 	ParameterEntryEncodings []runtimeCandidateParameterEntryEncodingProjection         `json:"parameterEntryEncodings,omitempty"`
+	OperationSetViolation   *runtimecontract.RuntimeCandidateOperationSetViolation     `json:"operationSetViolation,omitempty"`
 }
 
 type runtimeCandidateParameterEntryEncodingProjection struct {
@@ -220,9 +227,13 @@ func runtimeCandidateOutputContractForManifest(manifest runtimecontract.RuntimeC
 			AllowedOperationEffects:       append([]runtimecontract.RuntimeEffectScope(nil), manifest.EffectPolicy.AllowedOperationEffects...),
 			AllowedAcceptedReceiptEffects: append([]runtimecontract.RuntimeEffectScope(nil), manifest.EffectPolicy.AllowedAcceptedReceiptEffects...),
 		},
-		ManifestHash:                manifest.Hash,
-		WireContractHash:            wire.Hash,
-		MaxOperationCount:           manifest.MaxOperationCount,
+		ManifestHash:      manifest.Hash,
+		WireContractHash:  wire.Hash,
+		MaxOperationCount: manifest.MaxOperationCount,
+		OperationSetPolicy: runtimeCandidateOperationSetPolicyProjection{
+			MaxOperationsPerOwnerTarget:           manifest.OperationSetPolicy.MaxOperationsPerOwnerTarget,
+			AllowRequiredOperationSequenceOverlap: manifest.OperationSetPolicy.AllowRequiredOperationSequenceOverlap,
+		},
 		Schema:                      json.RawMessage(runtimeCandidateSchemaForManifest(manifest)),
 		StructuredOutputInstruction: runtimeCandidateStructuredOutputInstruction(manifest, wire),
 		CanonicalWireLayout:         runtimeCandidateCanonicalWireLayout(manifest, wire),
@@ -541,6 +552,9 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 	if manifest.MaxOperationCount > 0 {
 		lines = append(lines, fmt.Sprintf("Emit at most %d operations in this complete candidate document.", manifest.MaxOperationCount))
 	}
+	if manifest.OperationSetPolicy.MaxOperationsPerOwnerTarget > 0 {
+		lines = append(lines, fmt.Sprintf("Emit at most %d operation for the same ownerModuleId and targetRef. Consolidate multiple edits to one owner target into one atomic operation; only distinct slots in requiredOperationSequence may overlap.", manifest.OperationSetPolicy.MaxOperationsPerOwnerTarget))
+	}
 	if runtimeManifestHasAllowedBindingRefs(manifest) {
 		lines = append(lines, "Emit bindingRefs only when the matching wire rule lists it as a provider field. Runtime compiles a singleton sealed binding locally; echoing that fixed binding is forbidden. When bindingRefs remains selectable, choose exactly one listed value. Never emit coverageWorkItemIds.")
 	}
@@ -680,20 +694,26 @@ func runtimeCandidateRetryForManifest(attempt int, observation *runtimecontract.
 		return nil
 	}
 	previous := observation.Clone()
+	input := correction.Normalized()
+	// Operation identities are derived after provider decoding and are not part
+	// of the provider wire. The operation-set witness uses stable kind/index
+	// coordinates, so its C4 projection must not expose the local diagnostic ID.
+	if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOperationSetCardinality && previous.Diagnostic != nil {
+		previous.Diagnostic.OperationID = ""
+	}
 	instruction := "Retry the exact same sealed authority contract. Return only the legal top-level object for the requested action."
 	manifest = manifest.Normalized()
 	if manifest.Hash != "" {
 		instruction += " Re-read outputContract.structuredOutputInstruction and schema in the C3 current runtime authority for sealed manifest hash " + manifest.Hash + "; they are the only source of allowed fields, kinds, variants, parameters, targets, coverage and dependencies."
 	}
-	input := correction.Normalized()
 	if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessParameterEntryEncoding {
 		instruction += " The previous candidate encoded manifest-declared logical parameters as sibling keys inside another parameters[] entry. Re-emit a fresh complete document: every listed logical parameter must be its own parameters[] item containing exactly name plus the listed typed wireValueField. Keep the container parameter as its own item; do not place logical parameter names beside its value field. Re-generate values from C3 authority and do not copy this diagnostic as output data."
-	} else if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessDocumentShape && input.Witness.RejectedValue == runtimecontract.RuntimeCandidateDocumentShapeTrailingOperationFields {
-		instruction += " The previous document closed an operation or the root object before all operation fields were complete, then emitted operation fields as trailing content. Rebuild the entire document from outputContract.schema and, when present, outputContract.canonicalWireLayout: keep parameters last inside each operation, close each operation exactly once after parameters, and close the root exactly once after the operations array. Do not append requiredOperationRef, kind, bindingRefs, targetRefs, or parameters after a closing brace."
 	} else if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessSchemaField && input.Witness.AlternativeValue == runtimecontract.RuntimeCandidateCorrectionFieldPresent {
 		instruction += " The previous document omitted, emptied, set null, or used the wrong JSON type for a required field. Rebuild the entire document and emit that field exactly once with the type and nested shape required by outputContract.schema; field presence without schema conformance is still invalid."
 	} else if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOwnerConstraint {
 		instruction += " The capability owner rejected one parameter's representation against a constraint already sealed in outputContract.candidateConstraints. Rebuild that parameter from the sealed required shape; do not copy the rejected value, parser output, or diagnostic text."
+	} else if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOperationSetCardinality {
+		instruction += " The previous candidate contained multiple ordinary durable operations for the same capability owner and canonical target. Consolidate every required change for that exact target into one operation; do not use dependsOn, a new operation ID, or a cosmetic parameter change to preserve the duplicate effect."
 	} else if previous.Class == runtimecontract.RuntimeCandidateFailureClassSchema || previous.Class == runtimecontract.RuntimeCandidateFailureClassContract {
 		instruction += " The previous candidate shape was rejected. Remove every field or value not permitted by that sealed manifest instead of adding a wrapper, narrative, summary, explanation or convenience parameter."
 	}
@@ -711,6 +731,7 @@ func runtimeCandidateRetryForManifest(attempt int, observation *runtimecontract.
 			RejectedShapeHash: witness.RejectedShapeHash, AlternativeShapeHash: witness.AlternativeShapeHash,
 			ConstraintRef:           witness.ConstraintRef,
 			ParameterEntryEncodings: runtimeCandidateParameterEntryEncodingProjections(witness.ParameterEntryEncodings),
+			OperationSetViolation:   witness.OperationSetViolation.Clone(),
 		},
 	}
 	return &runtimeCandidateRetryProjection{PreviousFailure: previous, CorrectionInput: projection, Instruction: instruction}

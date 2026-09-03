@@ -2,6 +2,7 @@ package workorchruntimecontract
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -169,12 +170,12 @@ func validateRuntimeCandidateCorrectionObjectiveWitnessCompatibility(objectives 
 	}
 	compatible := false
 	switch witness.Dimension {
-	case RuntimeCandidateCorrectionWitnessDocumentShape:
-		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionConformExpectedDocument
 	case RuntimeCandidateCorrectionWitnessParameterEntryEncoding:
 		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionReencodeParameterEntries
 	case RuntimeCandidateCorrectionWitnessOwnerConstraint:
 		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionConformOwnerConstraint
+	case RuntimeCandidateCorrectionWitnessOperationSetCardinality:
+		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionConsolidateOperationSet
 	case RuntimeCandidateCorrectionWitnessSchemaField:
 		compatible = hasAny(RuntimeCandidateCorrectionSupplyRequiredField, RuntimeCandidateCorrectionRemoveForbiddenField) &&
 			allowsOnly(
@@ -276,12 +277,6 @@ func validateRuntimeCandidateCorrectionWitnessAgainstObservation(observation Run
 		return fmt.Errorf("runtime candidate correction witness rejected shape %q differs from observation %q", witness.RejectedShapeHash, diagnostic.RejectedShapeHash)
 	}
 	switch witness.Dimension {
-	case RuntimeCandidateCorrectionWitnessDocumentShape:
-		if observation.Code != "candidate_document_nonconformant" || diagnostic.Path != "$" ||
-			diagnostic.Actual != witness.RejectedValue ||
-			!runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionConformExpectedDocument) {
-			return fmt.Errorf("runtime candidate document correction witness differs from observation")
-		}
 	case RuntimeCandidateCorrectionWitnessSchemaField:
 		return validateRuntimeCandidateSchemaWitnessAgainstObservation(diagnostic, witness)
 	case RuntimeCandidateCorrectionWitnessParameterEntryEncoding:
@@ -299,6 +294,14 @@ func validateRuntimeCandidateCorrectionWitnessAgainstObservation(observation Run
 			diagnostic.RejectedShapeHash != "" ||
 			!runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionConformOwnerConstraint) {
 			return fmt.Errorf("runtime candidate owner-constraint correction witness differs from observation")
+		}
+	case RuntimeCandidateCorrectionWitnessOperationSetCardinality:
+		if observation.Code != "candidate_owner_target_effect_overlap" || diagnostic.Path != "$.operations" ||
+			diagnostic.OperationSetViolation == nil || witness.OperationSetViolation == nil ||
+			!reflect.DeepEqual(diagnostic.OperationSetViolation.Normalized(), witness.OperationSetViolation.Normalized()) ||
+			diagnostic.Actual != witness.RejectedValue ||
+			!runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionConsolidateOperationSet) {
+			return fmt.Errorf("runtime candidate operation-set correction witness differs from observation")
 		}
 	default:
 		// Semantic alternatives come from the Orchestrator-private candidate

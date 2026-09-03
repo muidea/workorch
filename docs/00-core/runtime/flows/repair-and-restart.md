@@ -35,13 +35,13 @@ repair 与 restart/replacement 的边界不得由 application queue、自动 suc
 ## Flow
 
 ```text
-failure / missing prerequisite / document-conformance or complete candidate rejection / operation failure / repairable assessment / typed governance dependency
+failure / missing prerequisite / no-candidate framing / complete candidate rejection / operation failure / repairable assessment / typed governance dependency
   -> producer factual result becomes Orchestrator internal event
   -> reducer updates typed facts / diagnostics / prerequisites / canonical ConvergenceState
   -> same-run reconverge:
        need_prerequisite
-       | empty/non-JSON/strict-schema/semantic rejection -> persisted typed diagnostic -> at most one shared correction (same transaction + stable prefix)
-       | incomplete/transport request  -> request-session bounded recovery, no candidate attempt
+       | incomplete/empty/invalid framing -> request-session bounded whole-document recovery, no candidate attempt
+       | complete-object strict-schema/semantic rejection -> persisted typed diagnostic -> at most one shared correction (same transaction + stable prefix)
        | repairable implementation gap -> need_state_change
        | repairable evidence gap       -> need_validation
        | need_assessment -> partial/satisfied/repairable/governance/terminal disposition
@@ -68,11 +68,11 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
 
 - 缺失 manifest / existing-target snapshot / capability / validation scratch / provider ceiling
   → `need_prerequisite`（确定性，非 LLM）
-- coherent completed empty/non-JSON observation，或 complete candidate schema / contract rejection
-  → SM-3 先持久化 provider-safe document-shape/field/semantic diagnostic，再决定 typed terminal 或同一 authority 上唯一
-  correction（复用 transaction + stable prefix）。provider protocol failure 仍走 request terminal；SM-4 只结算/重驱，不决定 correction
-- incomplete document / provider transport failure
-  → request-session 有界 continuation/recovery，不创建 candidate attempt
+- incomplete/empty/invalid framing（含 non-JSON、scalar/array、multiple roots、trailing bytes）
+  → request-session 有界 whole-document recovery，不创建 candidate attempt、不创建 correction witness
+- one complete JSON object 的 candidate schema / contract rejection
+  → SM-3 先持久化 provider-safe field/semantic diagnostic，再决定 typed terminal 或同一 authority 上唯一 correction（复用
+  transaction + stable prefix）。provider protocol failure 仍走 request terminal；SM-4 只结算/重驱，不决定 correction
 - operation 失败 evidence
   → typed operation feedback 进入 internal event；reducer 决定下一 canonical state
 - software-dev Profile specialization 中，managed validation 的 zero-work 只表示 exit-zero command 未执行匹配检查；aggregate command 非零退出时，无关 package 的
@@ -209,17 +209,16 @@ fresh-validation authority。single/multi-operation、partial-before-pause、dup
 
 - attempt 0 与 attempt 1 状态随 aggregate 持久化
 - attempt 1 必须复用相同 `AuthorityTransaction` 与 `StablePrefixHash`
-- coherent empty/non-JSON、complete JSON strict-schema rejection 与 semantic rejection 只共用这一份 attempt 0/1，禁止为
-  format、schema 或 evaluator 分别建立预算；attempt 0 empty 后，attempt 1 即使首次形成 complete JSON，也没有第二轮 correction
-- attempt 0 的 `document_shape` witness 只证明 `$` 必须从 `empty_document | invalid_provider_output` 变为
-  `one_complete_json_object`；schema witness 只引用 sealed manifest 的 field/rule；semantic correction 才要求有限 frontier 中的
-  concrete alternative。raw provider output、decoder message、summary 或 reason-only delta 均无效
+- incomplete/empty/invalid framing 不进入 attempt ledger，只消费 whole-document recovery；只有 complete JSON object 的
+  strict-schema/contract/semantic rejection 共用 attempt 0/1，禁止为 schema 或 evaluator 分别建立预算
+- attempt 0 witness 只允许引用 sealed manifest 的 schema/parameter-entry/owner-constraint/operation-set rule 或有限 semantic
+  frontier 中的 concrete alternative。raw provider output、decoder message、summary、document shape 或 reason-only delta 均无效
 - operations provider wire 禁止 `id`/`dependsOn`；operation ID 与 dependency graph 由 strict local admission 根据
   normalized manifest required-sequence slot 或 manifest-bound auxiliary execution-semantic key 确定性派生；
   `AuthorityTransaction` 只做 exact-match gate，不能把 provider identity/order 变化当作 correction progress
 - attempt 1 在 provider call 前重验 persisted manifest/witness，返回结果重新通过完整 strict local admission；semantic
   correction 还必须实际使用 sealed alternative
-- attempt 1 的任意再次 document-conformance、schema 或 semantic rejection 都生成 structured candidate exhaustion fact，
+- attempt 1 的任意再次 complete-object schema/contract 或 semantic rejection 都生成 structured candidate exhaustion fact，
   由 SM-3 形成 typed candidate terminal；不得发起第三次 same-contract candidate。governance 只能来自独立的 typed external dependency
 - SM-4 只能从 persisted SM-3 result 幂等 re-drive；duplicate result、CAS response loss、普通 Resume 与进程重启均不增加
   attempt、physical call 或预算消费，只加载已有 `CandidateAttempts`/directive/request identity

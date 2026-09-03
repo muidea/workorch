@@ -155,4 +155,44 @@ func TestRuntimeCandidateRequestContentBridgeCompletesDocumentWithoutCandidateAt
 	if len(completed.CandidateAttempts) != 0 || completed.Facts.Repair.RepairAttempts != 0 || completed.ActiveDispatch != nil || len(completed.CandidateRequestSessions) != 1 || completed.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete {
 		t.Fatalf("complete document allocated candidate state: %+v", completed)
 	}
+	carrier, err := contents.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	carrier.WorkspaceID = "other-workspace"
+	if err := contents.Update(ctx, carrier); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadCompletedRuntimeCandidateRequestDocument(ctx, contents, completed, session.LogicalRequestID); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("cross-authority complete carrier error = %v, want conflict", err)
+	}
+	carrier.WorkspaceID = completed.Facts.WorkspaceID
+	if err := contents.Update(ctx, carrier); err != nil {
+		t.Fatal(err)
+	}
+
+	// A document_complete aggregate is an owner-contract assertion, not
+	// permission to reinterpret corrupt carrier bytes as an SM-3 candidate.
+	// Simulate assembled-storage corruption while leaving the owner-private
+	// carrier event intact: admission must detect the two-record mismatch and
+	// terminal without allocating candidate attempt 0.
+	metadata, _, err := contents.GetAssembled(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrupt := `{} {}`
+	metadata.Bytes = int64(len(corrupt))
+	metadata.RollingHash = runtimeCandidateOutputHash(corrupt)
+	if err := contents.SaveAssembled(ctx, metadata, corrupt); err != nil {
+		t.Fatal(err)
+	}
+	failed, _, accepted, err := module.admitRuntimeCompletedCandidateDocument(ctx, completed, manifest, session.LogicalRequestID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted || len(failed.CandidateAttempts) != 0 || failed.Decision.State != runtimecontract.ConvergenceStateFailed ||
+		failed.Facts.Failure == nil || failed.Facts.Failure.Code != "provider_document_content_invalid" ||
+		failed.Facts.Failure.Class != runtimecontract.FailureClassRuntimeContractMisalignment {
+		t.Fatalf("corrupt complete carrier crossed into candidate admission: accepted=%t failure=%+v attempts=%+v", accepted, failed.Facts.Failure, failed.CandidateAttempts)
+	}
 }

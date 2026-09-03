@@ -319,7 +319,8 @@ func TestEmbeddedSoftwareDevSoulsUseCurrentRuntimeDocuments(t *testing.T) {
 	assertSoulContains(t, planning.SoulMD, "semantic_plan")
 	assertSoulContains(t, planning.SoulMD, "DefinitionFocuses")
 	assertSoulContains(t, planning.SoulMD, "每个 required CWI")
-	assertSoulContains(t, planning.SoulMD, "revision-bound replacement")
+	assertSoulContains(t, planning.SoulMD, "patch/apply:unified_diff")
+	assertSoulNotContains(t, planning.SoulMD, "text_replace")
 	assertSoulContains(t, planning.SoulMD, "file/write")
 	assertSoulContains(t, planning.SoulMD, "bounded implementation slice")
 	assertSoulContains(t, planning.SoulMD, "workspace 文件清单为空不等于缺少源码")
@@ -328,12 +329,20 @@ func TestEmbeddedSoftwareDevSoulsUseCurrentRuntimeDocuments(t *testing.T) {
 
 	assertStringSliceContains(t, execution.AllowedToolKinds, "git/read")
 	assertStringSliceContains(t, execution.AllowedToolKinds, "git/write")
+	assertStringSliceContains(t, execution.AllowedToolKinds, "file/write")
+	assertStringSliceContains(t, execution.AllowedToolKinds, "patch/apply")
+	for _, kind := range execution.AllowedToolKinds {
+		if kind == "file/edit" {
+			t.Fatal("software-dev execution Soul still permits file/edit outside the canonical patch/apply:unified_diff profile")
+		}
+	}
 	assertSoulContains(t, execution.SoulMD, "operations")
 	assertSoulContains(t, execution.SoulMD, "sealed manifest")
 	assertSoulContains(t, execution.SoulMD, "bindingRefs")
 	assertSoulContains(t, execution.SoulMD, "patch/apply")
-	assertSoulContains(t, execution.SoulMD, "text_replace")
-	assertSoulContains(t, execution.SoulMD, "不得重复选择 create-only")
+	assertSoulContains(t, execution.SoulMD, "patch/apply:unified_diff")
+	assertSoulNotContains(t, execution.SoulMD, "text_replace")
+	assertSoulContains(t, execution.SoulMD, "create-only `file/write`")
 	assertSoulContains(t, execution.SoulMD, "owner snapshot")
 	assertSoulContains(t, execution.SoulMD, "真实 root cause")
 	assertSoulContains(t, execution.SoulMD, "保护 workspace 中已有有效内容")
@@ -832,6 +841,14 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			}
 			assertStringListContains(t, accepted, "patch/apply")
 			assertStringListContains(t, accepted, "file/write")
+			variants, ok := item["acceptedOperationVariants"].([]any)
+			if !ok || len(variants) != 1 {
+				t.Fatalf("source_change acceptedOperationVariants = %+v, want one canonical patch variant", item["acceptedOperationVariants"])
+			}
+			variant, ok := variants[0].(map[string]any)
+			if !ok || variant["kind"] != "patch/apply" || variant["variantId"] != "unified_diff" {
+				t.Fatalf("source_change acceptedOperationVariants = %+v, want patch/apply unified_diff", variants)
+			}
 			assertStringListContains(t, rejected, "file/read")
 			assertStringListContains(t, rejected, "file/list")
 			assertStringListContains(t, rejected, "mcp/resource_read")
@@ -926,6 +943,10 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 					t.Fatalf("%s wildcard acceptedStepKinds = %+v, want list", scope, item["acceptedStepKinds"])
 				}
 				assertStringListContains(t, accepted, "file/write")
+				assertStringListContains(t, accepted, "patch/apply")
+				if variants, present := item["acceptedOperationVariants"]; present {
+					t.Fatalf("%s wildcard must remain validation-only and cannot declare state-change variants: %+v", scope, variants)
+				}
 				if scope == "dodItem" {
 					repair, ok := item["validationFailureRepairConvergence"].(map[string]any)
 					if !ok {

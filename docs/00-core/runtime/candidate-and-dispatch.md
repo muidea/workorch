@@ -272,16 +272,23 @@ endpoint。唯一当前例外是 pre-seal 已声明 `ProspectiveSatisfactionCont
 
 ### 单一 candidate evaluator
 
-所有 provider output 先经过 LLM owner 的 typed framing observation。coherent completed response 的 empty final output
-或 non-JSON final output 是 `document_conformance` observation，不是 provider protocol failure；它们不进入
-decoder/evaluator，而由 SM-3 以 typed `document_shape` rejection 消费共享 attempt 0/1。完整 JSON 则无条件经过 sealed
-manifest 驱动的 strict local decoder/schema admission；provider JSON Schema 仅可提前减少坏输出，不能跳过或改变本地裁决。
+所有 provider output 先经过 LLM owner 的 typed framing observation。coherent completed response 的 empty final output、
+non-JSON、scalar/array root、multiple JSON roots或trailing bytes 是 no-candidate observation，不是 provider protocol failure；
+它们不进入 decoder/evaluator，而由 SM-3 的 request session 使用 bounded whole-document recovery，始终为零 candidate attempt。
+恰好一个完整 JSON object 则无条件经过 sealed manifest 驱动的 strict local decoder/schema admission；provider JSON Schema
+仅可提前减少坏输出，不能跳过或改变本地裁决。
 
 通过 strict local admission 的完整 candidate document 只允许进入一个纯 `CandidateEvaluator`。它的输入是 persisted manifest、decoded
 candidate 和同一 authority contract 的 prior attempt fact；输出只能是 `accepted` 或一个完整的
 `CandidateRejection`。owner feasibility 是 capability owner 的独立 typed factual observation，不是
 `CandidateRejection` 的子类。decoder、admission、owner-conformance 与 owner-feasibility adapter 可以提供 typed observation，但不能各自
 选择 retry、terminal、governance 或下一 action。
+
+该 evaluator 必须先执行 manifest-only 的 provider-selectable 字段、binding、target、依赖与 operation-set 校验，再执行
+sealed activation 的 parameter bound、variant 与 owner-published effect policy 校验；两层都必须在任何 owner probe 前完成，
+并由 final dispatch admission 原样重复。final seal 不得成为某项可执行合同的首次拒绝点。variant restriction 按 operation
+kind 生效：该 kind 的合法集合是 `AcceptedOperationVariants` 与 exact `RequiredOperationSequence` variants 的并集；未在
+二者中声明 variant 限制的另一 accepted kind 仍保持合法，不能被全局 variant 集误伤。
 
 普通 JSON/schema/manifest admission 接受 candidate 后，SM-3 必须先持久化完整 proposal，再处理 manifest 中当前 variant
 实际选择的 `CandidateConstraints`。每项 constraint 只允许通过 receiving owner 定义的 concrete typed read command/result
@@ -311,8 +318,9 @@ allowed/required/forbidden、manifest hash、rejected shape hash 与完整 scope
 
 strict decoder 若已得到 current wire 的完整 typed candidate、但同一次 manifest semantic admission 拒绝它，可以把该
 detached typed value随 failed `CandidateAttempt` 保存为 correction frontier 的前像。该值只服务于同 owner 的有限差异证明，
-不得进入 accepted proposal、owner feasibility、sealed dispatch、projection 或任何 authority hash；framing/closed-schema
-尚未形成 current typed candidate 时必须保持为空。fresh-load 只能重验这份 persisted failed-attempt preimage，不能从 raw
+不得进入 accepted proposal、owner feasibility、sealed dispatch、projection 或任何 authority hash；framing 尚未形成单一
+JSON object 时根本不存在 `CandidateAttempt`，closed-schema 尚未形成 current typed candidate 时 preimage 必须为空。fresh-load
+只能重验这份 persisted failed-attempt preimage，不能从 raw
 provider body、diagnostic 或 mutable manifest 重建。
 
 SM-3 在收到 rejection 后，必须先把它转换为 owner-local internal event 并持久化；随后只能根据 current
@@ -320,19 +328,25 @@ manifest、attempt ledger、rejected shape 与 typed field violations 决定：
 
 | SM-3 owner-local result | 语义 | 唯一行为 |
 | --- | --- | --- |
-| `correctable_once` | 同一 manifest 下存在可验证的 document-shape/schema correction，或有限 frontier 中存在已封存的合法语义差异 witness，且尚未使用 correction attempt | 将 manifest hash、目标 delta 和 witness 随 attempt 0 持久化，只允许 attempt 1 |
+| `correctable_once` | 单一 JSON object 在同一 manifest 下存在可验证的 schema/parameter-entry/owner-constraint/operation-set correction，或有限 frontier 中存在已封存的合法语义差异 witness，且尚未使用 correction attempt | 将 manifest hash、目标 delta 和 witness 随 attempt 0 持久化，只允许 attempt 1 |
 | `rejected_final` | 没有可证明的同合同语义差异，或 correction attempt 已用尽 | 形成 typed candidate terminal，零额外 provider call |
 
 `CorrectionDirective` 是 Orchestrator persisted state，不是 evaluator/LLM/capability feedback。它只描述 candidate
-delta，例如把 `$` 上的 empty/invalid shape 修正为 one complete JSON object、删除 forbidden field、补 provider wire 的
-required proposal field、把错误内嵌的 declared parameter 重编码为独立 named typed entries、选择 allowed kind、为 exact operation slot 选择 allowed evidence binding、替换为 allowed target或改变 rejected semantic shape；它不修改 authority，也不
-包含 raw provider/decoder/owner 错误文本。`correctable_once` 还必须携带 `RuntimeCandidateCorrectionWitness`：
-document-shape witness 只携带 path、closed rejected shape 与 required complete shape；schema witness 携带 manifest-bound
-field/rule；`parameter_entry_encoding` witness 只携带 operation/parameter index、operation kind、container parameter name 与
+delta，例如删除 forbidden field、补 provider wire 的 required proposal field、把错误内嵌的 declared parameter 重编码为独立
+named typed entries、把同 owner/canonical target 的普通重复 durable operation 合并为一项、选择 allowed kind、为 exact
+operation slot 选择 allowed evidence binding、替换为 allowed target或改变 rejected semantic shape；它不修改 authority，也不
+包含 raw provider/decoder/owner 错误文本。empty/incomplete/invalid framing 没有 candidate，因此不能产生 directive。
+`correctable_once` 还必须携带 `RuntimeCandidateCorrectionWitness`：schema witness 携带 manifest-bound field/rule；
+`parameter_entry_encoding` witness 只携带 operation/parameter index、operation kind、container parameter name 与
 misplaced parameter 的 name/contract type，并固定表达
 `inline_declared_parameter_siblings -> independent_named_typed_parameter_entries`；semantic witness 才要求
 rejected/alternative value、适用 operation kind 与不同 semantic-shape hash。parameter-entry witness 不得携带原始 content、
 hash、coverage、summary value 或其它可逆 provider 数据。
+`operation_set_cardinality` witness 必须携带 manifest-derived exact owner、canonical target、冲突 operation index/kind 集与
+rejected candidate semantic-shape hash，并固定要求 `one_operation_per_owner_target`；attempt 1 必须消除该 typed violation，且
+不得增加或删除原候选的 owner/target 覆盖，也不得修改非冲突 operation；冲突 owner/target 只能保留一项。该 typed violation
+必须同时进入 sealed correction hash 与 provider-safe C4 projection，任一字段
+漂移都不能复用 correction。只有 manifest 已封存的 exact required sequence 可合法保留同 owner/target 多项 operation。
 `owner_candidate_constraint` witness 只携带 operation kind、exact parameter path、sealed constraint ref、closed
 `actual_shape` 与 `required_shape`。attempt 1 provider call 前只验证同 manifest/path 且 constrained parameter 确实发生变化；
 参数是否达到 required shape 仍只能由同一 capability owner 的后继 conformance read 证明，Orchestrator/LLM 不得复制 owner
@@ -372,14 +386,14 @@ objectives、field path、observed actual、parameter-entry encoding facts、适
 兼容矩阵一致，不能由 diagnostic 与 directive 携带同一错误映射而共同越过校验。结构合法但与 diagnostic 不一致的 directive
 属于 `runtime_contract_defect`，不得进入 attempt-1 preflight/provider、dispatch 或 capability effect。
 
-任一 completed operations document，无论 local admission 最终 accepted 或 rejected，都必须在对应 attempt closure 的同一
+任一满足单一 JSON object framing 的 completed operations document，无论 local admission 最终 accepted 或 rejected，都必须在对应 attempt closure 的同一
 owner-private CAS 中把 exact `CandidateManifest` body 写入 request session。operation-scoped wire diagnostic 必须能由该 persisted
 body 重算 wire contract 并 exact 验证；缺失 body、hash/ref/kind/variant/index/path 任一漂移都是 `runtime_contract_defect`，不得
 通过 mutable authority 重建、单例推断或兼容升级继续执行。
 
-document-conformance、complete schema 与 semantic rejection 共享同一 candidate attempt 0/1，不是三套串联预算：例如
-attempt 0 empty 后的 attempt 1 即使成为完整 JSON，只要 strict decoder/evaluator 仍拒绝，也必须 final，不能再以“首次完整
-candidate”为由打开另一轮 correction。SM-3 是唯一 correction/final owner；SM-4 只结算 physical call、调度并幂等
+只有 complete-object schema 与 semantic rejection 共享同一 candidate attempt 0/1。empty/incomplete/invalid framing（包含
+non-JSON、scalar/array、multiple roots 与 trailing bytes）发生在 attempt 前，只使用 request-session whole-document recovery；
+它们不能创建任何 framing correction witness 或减少 attempt 0/1。SM-3 是唯一 correction/final owner；SM-4 只结算 physical call、调度并幂等
 re-drive persisted result，不解释 framing/schema diagnostic，也不选择 attempt 1。
 
 semantic coverage-order 的完整文档
@@ -398,10 +412,9 @@ provider dependency/governance 在进入 candidate pipeline 前单独处理。�
 
 | 结果 | 来源 | 状态机行为 |
 | --- | --- | --- |
-| `request_recoverable` | EOF、output limit、timeout、429/5xx、未完成 document | 仅接受 LLM owner 已确认 physical submission 的 fact；同一次 Orchestrator CAS 结算本次调用、推进 SM-3 session、消费适用的 SM-4 transport budget，并在耗尽时应用 SM-2 failure；随后才可用新 PhysicalCallID 做同一 sealed expected-document 的 whole-document 有界恢复；不创建 attempt、不拼接 raw suffix |
+| `request_recoverable` | incomplete/empty/invalid framing、output limit、timeout、429/5xx 或其它 recoverable transport | 仅接受 LLM owner 已确认 physical submission 的 fact；同一次 Orchestrator CAS 结算本次调用、推进 SM-3 session，并按 typed outcome 消费 whole-document 或适用的 SM-4 transport budget，在耗尽时应用 SM-2 failure；随后才可用新 PhysicalCallID 做同一 sealed expected-document 的 whole-document 有界恢复；不创建 attempt、不拼接 raw suffix |
 | `request_terminal` | provider authentication/configuration/protocol/submission unknown 或 document recovery exhausted | 归一为唯一 owner-private fact，在同一次 Orchestrator aggregate CAS 中关闭 SM-3 session 并应用 exact SM-2 failure；CAS-before fresh reload 只从 submitted marker 封存 unknown，CAS-after/duplicate 复用 exact terminal；不创建 attempt、不重调 provider |
-| `document_conformance` | coherent completed 的 empty/non-JSON observation，或 complete JSON 的 strict local schema rejection | 结算并关闭当前 request session；SM-3 持久化 provider-safe shape/field rejection，并与 semantic rejection 共用 attempt 0/1 决定唯一 correction 或 typed final；不消费 SM-4 transport/whole-document recovery，不携带 raw 到 C4 |
-| `candidate_rejection` | CandidateEvaluator 的 complete typed rejection | 先持久化 original diagnostic；由 SM-3 owner-local reducer 决定唯一 correction 或 typed terminal |
+| `candidate_rejection` | 单一 complete JSON object 的 strict schema 或 CandidateEvaluator typed rejection | 先持久化 provider-safe original diagnostic；由 SM-3 owner-local reducer 在共享 attempt 0/1 内决定唯一 correction 或 typed terminal |
 | `owner_candidate_conformance` | capability owner 对 manifest-declared immutable parameter representation 的 `conformant | nonconformant | owner_contract_defect` factual observation | proposal 持久化后、ordinary feasibility 前，以 Orchestrator private SM-3 event/CAS 持久化；nonconformant 与唯一 correction/final 原子关闭 attempt，零 workspace I/O、effect、receipt 与独立预算 |
 | `owner_feasibility` | capability owner 的 `stale`、`prerequisite_required` 或 `infeasible` factual observation | 先转为 Orchestrator internal event，再由SM-2退休prerequisite、取得新authority；只有独立typed recovery condition/trigger/deadline/budget完整时形成recoverable wait，否则typed terminal；零correction attempt。它不与 provider request terminal 共用结果或 transition |
 | `accepted` | evaluator 接受、全部声明的 owner candidate constraints 为 conformant，且 owner feasibility 为 feasible | persist sealed dispatch 后才可执行 |

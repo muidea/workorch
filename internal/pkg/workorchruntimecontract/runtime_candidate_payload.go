@@ -22,15 +22,17 @@ const (
 	RuntimeCandidateDocumentComplete   RuntimeCandidateDocumentDisposition = "complete_document"
 	RuntimeCandidateDocumentIncomplete RuntimeCandidateDocumentDisposition = "incomplete_document"
 	RuntimeCandidateDocumentEmpty      RuntimeCandidateDocumentDisposition = "empty_document"
-	// RuntimeCandidateDocumentInvalid is a coherent non-JSON provider body. It
-	// is a document-conformance observation, not a provider protocol failure;
-	// only the Orchestrator may bind it to the bounded SM-3 attempt policy.
+	// RuntimeCandidateDocumentInvalid means the provider body does not frame
+	// exactly one JSON object. It is a no-candidate outcome and therefore may
+	// consume only the bounded whole-document recovery budget, never an SM-3
+	// candidate attempt.
 	RuntimeCandidateDocumentInvalid RuntimeCandidateDocumentDisposition = "invalid_document"
 )
 
 // RuntimeCandidatePayloadIncompleteError means the JSON decoder reached the
 // end of the provider stream while decoding the first candidate document.  It
-// is distinct from a complete-but-invalid document (including trailing JSON).
+// is distinct from the other no-candidate framing classes and from a complete
+// single object that later fails strict schema admission.
 // Callers must not use error strings or provider usage to infer this state.
 type RuntimeCandidatePayloadIncompleteError struct {
 	Cause error
@@ -51,8 +53,8 @@ func (e *RuntimeCandidatePayloadIncompleteError) Unwrap() error {
 }
 
 // RuntimeCandidatePayloadEmptyError is a successful provider response with no
-// candidate document. It is only a factual document-shape classification;
-// callers do not gain retry authority from this error by itself.
+// candidate document. It is only a factual no-candidate classification;
+// callers do not gain recovery authority from this error by itself.
 type RuntimeCandidatePayloadEmptyError struct{}
 
 func (*RuntimeCandidatePayloadEmptyError) Error() string {
@@ -77,16 +79,18 @@ func RuntimeCandidateDocumentDispositionForError(err error) RuntimeCandidateDocu
 }
 
 // InspectRuntimeCandidateDocumentFraming classifies provider bytes without
-// decoding a Runtime candidate. A syntactically complete JSON value remains a
-// complete document even when its schema is invalid: SM-3 must persist and
-// adjudicate it. A coherent non-JSON body is a document-conformance
-// observation, not a provider-protocol failure; only a first JSON value cut
-// off at EOF is eligible for whole-document recovery.
+// decoding a Runtime candidate. Only exactly one complete JSON object can
+// enter candidate/semantic admission. Empty output, non-JSON text, a scalar or
+// array root, multiple JSON roots, and trailing non-whitespace bytes all mean
+// that no candidate document exists and remain eligible for bounded
+// whole-document recovery. A single JSON object is complete even when its
+// schema is invalid; that later defect belongs to candidate admission.
 func InspectRuntimeCandidateDocumentFraming(payload []byte) RuntimeCandidateDocumentDisposition {
-	if len(bytes.TrimSpace(payload)) == 0 {
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) == 0 {
 		return RuntimeCandidateDocumentEmpty
 	}
-	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
 	var value json.RawMessage
 	if err := decoder.Decode(&value); err != nil {
 		if errors.Is(err, io.ErrUnexpectedEOF) {
@@ -96,10 +100,16 @@ func InspectRuntimeCandidateDocumentFraming(payload []byte) RuntimeCandidateDocu
 		if errors.As(err, &syntaxErr) {
 			return RuntimeCandidateDocumentInvalid
 		}
-		return RuntimeCandidateDocumentComplete
+		return RuntimeCandidateDocumentInvalid
 	}
-	// Once the first value is complete, trailing bytes are a completed
-	// document defect for the SM-3 evaluator, never request recovery.
+	value = bytes.TrimSpace(value)
+	if len(value) == 0 || value[0] != '{' {
+		return RuntimeCandidateDocumentInvalid
+	}
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return RuntimeCandidateDocumentInvalid
+	}
 	return RuntimeCandidateDocumentComplete
 }
 

@@ -2,6 +2,7 @@ package candidateadmission
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -152,31 +153,58 @@ func TestEvaluateRejectsDistinctDurableOperationsForSameOwnerTarget(t *testing.T
 	failure := Evaluate(EvaluationInput{Manifest: manifest, Decision: decision, Facts: facts, Candidate: candidate})
 	if failure == nil || failure.Code != CodeOwnerTargetEffectOverlap || failure.Diagnostic == nil ||
 		failure.Diagnostic.OperationID != secondOperationID || failure.Diagnostic.Actual != runtimecontract.RuntimeModuleFile+"|main.go" ||
-		!reflect.DeepEqual(failure.Diagnostic.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionChangeReplayedShape}) {
+		failure.Diagnostic.OperationSetViolation == nil ||
+		!reflect.DeepEqual(failure.Diagnostic.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConsolidateOperationSet}) {
 		t.Fatalf("same owner/target durable overlap = %+v", failure)
 	}
 }
 
-func TestOwnerTargetEffectOverlapAllowsDistinctTargetsAndNonDurableOperations(t *testing.T) {
-	facts, _, _, candidate := evaluatorFixture(t)
+func TestEvaluateAppliesExecutableContractBeforeOwnerProbe(t *testing.T) {
+	facts, decision, manifest, candidate := evaluatorFixture(t)
+	patchType := "text_replace"
+	unchanged := "same"
+	operation := candidate.StateChange.Operations[0].Operation
+	operation.Parameters = []runtimecontract.OperationParameter{
+		{Name: "patchType", String: &patchType},
+		{Name: "oldText", String: &unchanged},
+		{Name: "newText", String: &unchanged},
+	}
+	candidate.StateChange.Operations[0].Operation = operation
+	var err error
+	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, candidate); err != nil {
+		t.Fatalf("fixture must cross the provider-selectable manifest fence first: %v", err)
+	}
+
+	failure := Evaluate(EvaluationInput{Manifest: manifest, Decision: decision, Facts: facts, Candidate: candidate})
+	if failure == nil || failure.Code != CodeInvalid || !strings.Contains(failure.Reason, "distinct") {
+		t.Fatalf("executable contract defect escaped pre-probe admission: %+v", failure)
+	}
+}
+
+func TestManifestOperationSetPolicyAllowsDistinctTargetsAndNonStateChangeDocuments(t *testing.T) {
+	_, _, manifest, candidate := evaluatorFixture(t)
 	first := candidate.StateChange.Operations[0].Operation
 	second := first
 	second.ID = "patch-2"
 	second.TargetRefs = []string{"other.go"}
-	candidate.StateChange.Operations = append(candidate.StateChange.Operations, runtimecontract.StateChangingOperation{Operation: second})
-	if failure := OwnerTargetEffectOverlapFailure(facts, runtimecontract.RuntimeDecision{}, candidate); failure != nil {
-		t.Fatalf("distinct durable targets rejected: %+v", failure)
+	operations := []runtimecontract.RuntimeOperation{first, second}
+	if violation := runtimecontract.RuntimeCandidateOperationSetViolationForManifest(manifest, operations); violation != nil {
+		t.Fatalf("distinct durable targets rejected: %+v", violation)
 	}
 
-	validation := runtimecontract.RuntimeOperation{ID: "validate-1", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, TargetRefs: []string{"main.go"}}
-	candidate.StateChange.Operations = append(candidate.StateChange.Operations, runtimecontract.StateChangingOperation{Operation: validation})
-	if failure := OwnerTargetEffectOverlapFailure(facts, runtimecontract.RuntimeDecision{}, candidate); failure != nil {
-		t.Fatalf("non-durable operation collided with durable target: %+v", failure)
+	manifest.State = runtimecontract.ConvergenceStateNeedValidation
+	manifest.OperationSetPolicy = runtimecontract.RuntimeCandidateOperationSetPolicy{}
+	if violation := runtimecontract.RuntimeCandidateOperationSetViolationForManifest(manifest, []runtimecontract.RuntimeOperation{first, first}); violation != nil {
+		t.Fatalf("non-state-change document applied durable operation-set policy: %+v", violation)
 	}
 }
 
-func TestOwnerTargetEffectOverlapAllowsExactOwnerRequiredSequence(t *testing.T) {
-	facts, decision, _, candidate := evaluatorFixture(t)
+func TestManifestOperationSetPolicyAllowsExactOwnerRequiredSequence(t *testing.T) {
+	_, _, manifest, candidate := evaluatorFixture(t)
 	first := candidate.StateChange.Operations[0].Operation
 	first.RequiredOperationRef = "prepare"
 	second := first
@@ -184,18 +212,19 @@ func TestOwnerTargetEffectOverlapAllowsExactOwnerRequiredSequence(t *testing.T) 
 	second.RequiredOperationRef = "finalize"
 	second.DependsOn = []string{first.ID}
 	candidate.StateChange.Operations = []runtimecontract.StateChangingOperation{{Operation: first}, {Operation: second}}
-	decision.RequiredOutput.RequiredOperationSequence = []runtimecontract.RuntimeRequiredOperationVariant{
+	manifest.RequiredOperationSequence = []runtimecontract.RuntimeRequiredOperationVariant{
 		{RequirementID: "prepare", Kind: first.Kind, VariantID: "text_replace"},
 		{RequirementID: "finalize", Kind: second.Kind, VariantID: "text_replace", DependsOnRequirementIDs: []string{"prepare"}},
 	}
-	if failure := OwnerTargetEffectOverlapFailure(facts, decision, candidate); failure != nil {
-		t.Fatalf("owner-required same-target sequence rejected: %+v", failure)
+	operations := Operations(candidate)
+	if violation := runtimecontract.RuntimeCandidateOperationSetViolationForManifest(manifest, operations); violation != nil {
+		t.Fatalf("owner-required same-target sequence rejected: %+v", violation)
 	}
 
 	second.RequiredOperationRef = ""
 	candidate.StateChange.Operations[1].Operation = second
-	if failure := OwnerTargetEffectOverlapFailure(facts, decision, candidate); failure == nil || failure.Code != CodeOwnerTargetEffectOverlap {
-		t.Fatalf("optional same-target operation escaped overlap gate: %+v", failure)
+	if violation := runtimecontract.RuntimeCandidateOperationSetViolationForManifest(manifest, Operations(candidate)); violation == nil {
+		t.Fatal("optional same-target operation escaped manifest operation-set gate")
 	}
 }
 

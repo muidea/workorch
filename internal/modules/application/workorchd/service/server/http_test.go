@@ -617,6 +617,15 @@ func TestHTTPServerShutdownForceClosesAfterDeadline(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("shutdown context did not reach its forced-close deadline")
 	}
+	// Context expiry and handler release may otherwise race inside
+	// net/http.Shutdown: wait until the forced Close has reached the client
+	// before allowing the handler to return. This proves that Drain observed
+	// the deadline instead of accepting either side of that race.
+	select {
+	case <-clientDone:
+	case <-time.After(time.Second):
+		t.Fatal("client connection was not force-closed after the shutdown deadline")
+	}
 	select {
 	case err := <-shutdownDone:
 		t.Fatalf("shutdown returned before the force-closed handler exited: %v", err)
@@ -643,11 +652,6 @@ func TestHTTPServerShutdownForceClosesAfterDeadline(t *testing.T) {
 	case <-state.backgroundCtx.Done():
 	default:
 		t.Fatal("handler dependencies were not closed after transport drain")
-	}
-	select {
-	case <-clientDone:
-	case <-time.After(time.Second):
-		t.Fatal("client request did not finish after releasing handler")
 	}
 }
 

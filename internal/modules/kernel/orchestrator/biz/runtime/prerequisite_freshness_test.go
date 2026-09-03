@@ -2003,7 +2003,8 @@ func TestCandidateRequestClosedDocumentStateRejectsStaleWithoutCAS(t *testing.T)
 		Disposition: runtimecontract.RuntimeProviderDocumentEmpty, ExpectedDocumentHash: session.ExpectedDocument.Hash,
 		Code: runtimecontract.RuntimeProviderDocumentCodeFinalOutputMissing, Signature: runtimecontract.RuntimeProviderDocumentSignatureOutputMissing,
 	}
-	if _, err := controller.planning.rejectCandidateRequestDocumentConformance(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-empty", framing, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-empty", nil)); err != nil {
+	recovery := runtimeProviderDocumentRecoveryFactForTest(t, runtimecontract.RuntimeProviderDocumentOperations, framing)
+	if _, err := controller.planning.coordinateProviderRequestRecovery(ctx, "ws-1", "run-1", session.LogicalRequestID, "physical-empty", recovery, runtimeProviderConfirmedBudgetSettlementForTest(t, session.LogicalRequestID, "physical-empty", nil)); err != nil {
 		t.Fatal(err)
 	}
 	saves := repository.saves

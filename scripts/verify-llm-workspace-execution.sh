@@ -829,7 +829,7 @@ def decision_payload(request):
         # nor infer a sealed operation contract.
         return probe_validation_ops()
 
-    # Document-conformance scenario intentionally returns coherent non-JSON for assessment.
+    # No-candidate framing scenario intentionally returns coherent non-JSON for assessment.
     if scenario == 7 and action == "produce_assessment":
         return "not-json"
 
@@ -1847,8 +1847,9 @@ activate_workspace_execution_without_memory "$TMP_DIR/schema-failure-activation.
 schema_run_id="$(wait_activation_run "$TMP_DIR/schema-failure-activation.json" "$TMP_DIR/schema-failure-activation-run.json")"
 wait_run_state_any "$schema_run_id" "$TMP_DIR/schema-failure-status.json" "failed" "superseded" "blocked_on_decision" "completed"
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs/$schema_run_id/snapshot" >"$TMP_DIR/schema-failure-snapshot.json"
-# V2 may surface schema failures as candidate_retry_exhausted / unknown field / failed status.
-grep -EEi 'llm_schema_invalid|unknown field|candidate_retry_exhausted|schema|not-json|failed' "$TMP_DIR/schema-failure-snapshot.json" "$TMP_DIR/schema-failure-status.json" >/dev/null
+# The non-JSON response never opens a candidate attempt; bounded whole-document
+# recovery eventually surfaces document-recovery exhaustion or a failed status.
+grep -EEi 'candidate_document_recovery_exhausted|semantic_document_recovery_exhausted|document.recovery|not-json|failed' "$TMP_DIR/schema-failure-snapshot.json" "$TMP_DIR/schema-failure-status.json" >/dev/null
 schema_run_state="$(json_path "$TMP_DIR/schema-failure-status.json" "status.state")"
 if [[ "$schema_run_state" == "blocked_on_decision" ]]; then
   schema_ticket_id="$(json_path "$TMP_DIR/schema-failure-status.json" "status.blockingTicketId")"

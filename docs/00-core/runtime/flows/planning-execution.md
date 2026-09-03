@@ -153,8 +153,8 @@ category and safe diagnostic before the one allowed correction.
 For example, the software-dev Profile may specialize the neutral owner contract as follows:
 
 - `file/write` is create-only and may target only an absent/prospective owner target;
-- when the target already exists, correction must choose an admitted revision-bound replacement such as `file/edit` or
-  `patch/apply`;
+- when the target already exists, the current software-dev Profile requires one admitted, revision-bound
+  `patch/apply:unified_diff` containing all hunks for that target;
 - retrying the equivalent create-only operation is not progress and must be rejected before side effect;
 - stale catalog/target revision cannot be hidden by changing prose or operation identity.
 

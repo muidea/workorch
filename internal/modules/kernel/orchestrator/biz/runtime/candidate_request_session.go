@@ -204,77 +204,6 @@ func (c *planningTransactionComponent) completeCandidateRequestDocument(ctx cont
 	return aggregate, nil
 }
 
-// rejectCandidateRequestDocumentConformance settles one authoritative LLM
-// framing fact without turning an empty/invalid body into a provider protocol
-// terminal. The durable session is the restart fence; the existing SM-3
-// candidate/semantic attempt 0/1 ledger decides correction versus exhaustion.
-func (c *planningTransactionComponent) rejectCandidateRequestDocumentConformance(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, logicalRequestID, physicalCallID string, framing runtimecontract.RuntimeProviderDocumentFraming, budgetSettlement ...*RuntimeProviderBudgetSettlement) (RuntimeAggregate, error) {
-	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(logicalRequestID) == "" || strings.TrimSpace(physicalCallID) == "" {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	framing = framing.Normalized()
-	if err := framing.Validate(); err != nil || (framing.Disposition != runtimecontract.RuntimeProviderDocumentInvalid && framing.Disposition != runtimecontract.RuntimeProviderDocumentEmpty) {
-		return RuntimeAggregate{}, common.ErrInvalidArgument
-	}
-	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	idx, session, found := runtimeCandidateRequestSessionByID(aggregate.CandidateRequestSessions, logicalRequestID)
-	if !found {
-		return RuntimeAggregate{}, fmt.Errorf("%w: runtime candidate request session not found", common.ErrNotFound)
-	}
-	physicalCallID = strings.TrimSpace(physicalCallID)
-	settlement, err := candidateRequestBudgetSettlementForIdentity(session, budgetSettlement...)
-	if err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if settlement.Status != RuntimeProviderBudgetSettlementConfirmed {
-		return RuntimeAggregate{}, fmt.Errorf("%w: document conformance result requires confirmed physical submission", common.ErrConflict)
-	}
-	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected {
-		if session.LastPhysicalCallID == physicalCallID && session.LastDocumentFraming != nil && session.LastDocumentFraming.Normalized() == framing && providerRequestBudgetSettlementApplied(aggregate, settlement) {
-			return aggregate, nil
-		}
-		return RuntimeAggregate{}, fmt.Errorf("%w: conflicting candidate document conformance fact", common.ErrConflict)
-	}
-	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := candidateRequestSessionActionAllowed(aggregate, session.DocumentKind); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := validateCurrentCandidateRequestSession(aggregate, session); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || session.State == runtimecontract.RuntimeCandidateRequestSessionTerminal {
-		return RuntimeAggregate{}, fmt.Errorf("%w: closed provider request cannot accept a document conformance rejection", common.ErrConflict)
-	}
-	if !session.ProviderSubmitted || session.LastPhysicalCallID != physicalCallID || session.ExpectedDocument == nil || framing.ExpectedDocumentHash != session.ExpectedDocument.Hash {
-		return RuntimeAggregate{}, fmt.Errorf("%w: document conformance result does not match submitted expected document", common.ErrConflict)
-	}
-	expectedRevision := aggregate.StateRevision
-	if _, err := applyCandidateRequestBudgetSettlement(&aggregate, settlement); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	updated := &aggregate.CandidateRequestSessions[idx]
-	updated.State = runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected
-	updated.LastOutcome = runtimecontract.RuntimeCandidateRequestOutcome{
-		Class: runtimecontract.RuntimeCandidateRequestOutcomeDocumentConformanceRejected,
-		Code:  framing.Code, Signature: framing.Signature,
-	}.Normalized()
-	updated.LastDocumentFraming = &framing
-	updated.ProviderSubmitted = true
-	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
-		return RuntimeAggregate{}, err
-	}
-	return aggregate, nil
-}
-
 func firstRuntimeProviderBudgetSettlement(values []*RuntimeProviderBudgetSettlement) *RuntimeProviderBudgetSettlement {
 	if len(values) == 0 {
 		return nil
@@ -367,14 +296,6 @@ func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKi
 // pure authority projection; this function only proves that the caller is
 // using the persisted document/session that carried that exact projection.
 func validateCandidateAttemptSessionBinding(aggregate RuntimeAggregate, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string) error {
-	return validateCandidateAttemptSessionBindingState(aggregate, stablePrefixHash, manifest, logicalRequestID, false)
-}
-
-func validateCandidateAttemptRejectionSessionBinding(aggregate RuntimeAggregate, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string) error {
-	return validateCandidateAttemptSessionBindingState(aggregate, stablePrefixHash, manifest, logicalRequestID, true)
-}
-
-func validateCandidateAttemptSessionBindingState(aggregate RuntimeAggregate, stablePrefixHash string, manifest runtimecontract.RuntimeCandidateContractManifest, logicalRequestID string, allowConformanceRejected bool) error {
 	expectedManifest, buildErr := BuildRuntimeCandidateContractManifestForAggregate(aggregate)
 	if buildErr != nil {
 		return fmt.Errorf("%w: candidate manifest preimage is unavailable: %v", common.ErrConflict, buildErr)
@@ -389,16 +310,8 @@ func validateCandidateAttemptSessionBindingState(aggregate RuntimeAggregate, sta
 	if err := validateCurrentCandidateRequestSession(aggregate, session); err != nil {
 		return err
 	}
-	stateAllowed := session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentComplete
-	if allowConformanceRejected {
-		stateAllowed = stateAllowed || session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected
-	}
-	if !stateAllowed || session.ManifestHash != manifest.Hash || (strings.TrimSpace(stablePrefixHash) != "" && session.StablePrefixHash != strings.TrimSpace(stablePrefixHash)) {
+	if session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || session.ManifestHash != manifest.Hash || (strings.TrimSpace(stablePrefixHash) != "" && session.StablePrefixHash != strings.TrimSpace(stablePrefixHash)) {
 		return fmt.Errorf("%w: candidate request session is not the complete document for this manifest", common.ErrConflict)
-	}
-	if session.State == runtimecontract.RuntimeCandidateRequestSessionDocumentConformanceRejected &&
-		(session.DocumentKind != runtimecontract.RuntimeProviderDocumentOperations || session.LastDocumentFraming == nil) {
-		return fmt.Errorf("%w: candidate request session has no operations document-conformance fact", common.ErrConflict)
 	}
 	return nil
 }

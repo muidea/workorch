@@ -661,6 +661,12 @@ func cloneRuntimeCandidateCorrectionWitnessRaw(in RuntimeCandidateCorrectionWitn
 		})
 		return cloned
 	})
+	out.OperationSetViolation = cloneRuntimeStateRawPointer(in.OperationSetViolation, func(item RuntimeCandidateOperationSetViolation) RuntimeCandidateOperationSetViolation {
+		value := item
+		value.OperationKinds = cloneRuntimeStateRawSlice(item.OperationKinds, func(kind string) string { return kind })
+		value.OperationIndexes = cloneRuntimeStateRawSlice(item.OperationIndexes, func(index int) int { return index })
+		return value
+	})
 	return out
 }
 
@@ -693,6 +699,12 @@ func cloneRuntimeCandidateFailureDiagnosticRaw(in RuntimeCandidateFailureDiagnos
 			return parameter
 		})
 		return cloned
+	})
+	out.OperationSetViolation = cloneRuntimeStateRawPointer(in.OperationSetViolation, func(item RuntimeCandidateOperationSetViolation) RuntimeCandidateOperationSetViolation {
+		value := item
+		value.OperationKinds = cloneRuntimeStateRawSlice(item.OperationKinds, func(kind string) string { return kind })
+		value.OperationIndexes = cloneRuntimeStateRawSlice(item.OperationIndexes, func(index int) int { return index })
+		return value
 	})
 	out.Objectives = cloneRuntimeStateRawSlice(in.Objectives, func(item RuntimeCandidateCorrectionObjective) RuntimeCandidateCorrectionObjective { return item })
 	return out

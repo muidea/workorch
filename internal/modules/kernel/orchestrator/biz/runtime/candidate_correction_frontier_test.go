@@ -4,8 +4,82 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/candidateadmission"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestCandidateCorrectionFrontierSealsAndCrossesOperationSetConsolidation(t *testing.T) {
+	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate = runtimeTestMustDeriveCandidateForManifest(t, manifest, candidate)
+	second := candidate.StateChange.Operations[0].Operation
+	second.ID = ""
+	second.Parameters = append([]runtimecontract.OperationParameter(nil), second.Parameters...)
+	for index := range second.Parameters {
+		if second.Parameters[index].Name == "content" && second.Parameters[index].String != nil {
+			content := "second independent update\n"
+			second.Parameters[index].String = &content
+		}
+	}
+	candidate.StateChange.Operations = append(candidate.StateChange.Operations, runtimecontract.StateChangingOperation{Operation: second})
+	candidate = runtimeTestMustDeriveCandidateForManifest(t, manifest, candidate)
+
+	result := EvaluateCandidateAdmission(aggregate, candidate)
+	if result.Failure == nil || result.Failure.Code != candidateAdmissionCodeOwnerTargetEffectOverlap || result.Correction == nil ||
+		result.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce || result.Correction.Witness == nil ||
+		result.Correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessOperationSetCardinality ||
+		result.Correction.Witness.OperationSetViolation == nil || result.Correction.Witness.OperationSetViolation.Maximum != 1 {
+		t.Fatalf("operation-set correction: failure=%+v diagnostic=%+v correction=%+v", result.Failure, func() any {
+			if result.Failure == nil {
+				return nil
+			}
+			return result.Failure.Diagnostic
+		}(), result.Correction)
+	}
+
+	consolidated := candidate
+	consolidated.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{candidate.StateChange.Operations[0]}}
+	if !candidateCrossesOperationSetCorrectionWitness(candidate, consolidated, manifest, *result.Correction.Witness) {
+		t.Fatal("single owner/target operation did not cross the consolidation witness")
+	}
+	retargetedAway := consolidated
+	retargetedAway.StateChange.Operations[0].Operation.TargetRefs = []string{"other.go"}
+	if candidateCrossesOperationSetCorrectionWitness(candidate, retargetedAway, manifest, *result.Correction.Witness) {
+		t.Fatal("removing the offending owner/target entirely crossed a consolidation witness")
+	}
+	retargetedDuplicate := candidate
+	retargetedDuplicate.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), candidate.StateChange.Operations...)}
+	retargetedDuplicate.StateChange.Operations[1].Operation.TargetRefs = []string{"other.go"}
+	if candidateCrossesOperationSetCorrectionWitness(candidate, retargetedDuplicate, manifest, *result.Correction.Witness) {
+		t.Fatal("retargeting one duplicate escaped the exact consolidation witness")
+	}
+	requiredManifest := manifest.Clone()
+	requiredManifest.RequiredOperationSequence = []runtimecontract.RuntimeRequiredOperationVariant{
+		{RequirementID: "required-first", Kind: candidate.StateChange.Operations[0].Operation.Kind},
+		{RequirementID: "required-second", Kind: candidate.StateChange.Operations[1].Operation.Kind},
+	}
+	requiredCandidate := candidate
+	requiredCandidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), candidate.StateChange.Operations...)}
+	requiredCandidate.StateChange.Operations[0].Operation.RequiredOperationRef = "required-first"
+	requiredCandidate.StateChange.Operations[1].Operation.RequiredOperationRef = "required-second"
+	if violation := runtimecontract.RuntimeCandidateOperationSetViolationForManifest(requiredManifest, candidateadmission.Operations(requiredCandidate)); violation != nil {
+		t.Fatalf("exact required sequence remained an operation-set violation: %+v", violation)
+	}
+	if !candidateCrossesOperationSetCorrectionWitness(candidate, requiredCandidate, requiredManifest, *result.Correction.Witness) {
+		t.Fatal("exact required-sequence exception did not cross consolidation witness")
+	}
+	drifted := result.Correction.Clone()
+	drifted.Witness.OperationSetViolation.TargetRef = "other.go"
+	if err := runtimecontract.ValidateRuntimeCandidateFailureCorrectionPair(result.Failure, drifted); err == nil {
+		t.Fatal("drifted operation-set witness retained rejection authority")
+	}
+}
 
 func TestCandidateCorrectionFrontierExhaustsSingleTargetAndSealsConcreteAlternative(t *testing.T) {
 	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)

@@ -731,47 +731,11 @@ func TestCoordinatorRestartRecoversPersistedDispatchWithoutProcessState(t *testi
 }
 
 func TestDispatchCoordinatorCommitsMultiOperationDispatchOnlyAfterAllOperations(t *testing.T) {
-	// This dispatch has two CWI-crediting state changes. Each owner receipt is an
-	// immutable proof input, but neither may bypass the separately owned
-	// assessment transition. SM-3 also keeps the dispatch active until every
-	// sealed operation has committed its owner receipt.
-	facts := baseDispatchFacts()
-	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
-	facts.Focus.SliceID = "slice-1"
-	facts.Focus.AssessmentScope = "dodItem"
-	facts.Focus.AssessmentID = "dod-1"
-	facts.Focus.AssessmentText = "deliver cwi 1"
-	facts.Coverage[0].SliceID = facts.Focus.SliceID
-	facts.Coverage[0].SourceScope = facts.Focus.AssessmentScope
-	facts.Coverage[0].SourceID = facts.Focus.AssessmentID
-	facts.Coverage[0].TargetText = facts.Focus.AssessmentText
-	facts.DefinitionSeed = runtimecontract.RuntimeDefinitionSeed{
-		SchemaVersion: runtimecontract.RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: facts.DefinitionRevision, PolicyHash: "policy-test",
-		CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "deliver cwi 1"}},
-		Slices:        []runtimecontract.RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}}},
-	}
-	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
-	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
-	aggregate := RuntimeAggregate{StateRevision: 1, Definition: dispatchDefinition(), Facts: facts}
-	runtimeTestEnsureCurrentFocusBindings(t, &aggregate)
-	repository := &durableRuntimeStateRepository{aggregate: aggregate}
-	coordinator, _ := NewDispatchCoordinator(repository)
-	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{
-		{Operation: patchApplyTestOperation("write-1", "main.go")},
-		{Operation: func() runtimecontract.RuntimeOperation {
-			operation := patchApplyTestOperation("write-2", "main.go")
-			// Give the second sealed operation a distinct execution shape while
-			// retaining the exact proof binding required by the manifest.
-			otherContent := "second update\n"
-			for index := range operation.Parameters {
-				if operation.Parameters[index].Name == "content" {
-					operation.Parameters[index].String = &otherContent
-				}
-			}
-			return operation
-		}()},
-	}}}
-	sealed := sealCandidateForTest(t, repository, candidate)
+	// Use an activation-sealed required sequence: it is the explicit exception
+	// to the one-operation-per-owner/target policy and therefore the canonical
+	// legal multi-operation dispatch fixture.
+	repository, coordinator, _ := prospectiveAllOfDispatchFixture(t, true)
+	sealed := repository.aggregate
 	firstOperationID := runtimeTestActiveOperationID(t, sealed, 0)
 	secondOperationID := runtimeTestActiveOperationID(t, sealed, 1)
 	firstEvidence := ExecutionEvidence{
