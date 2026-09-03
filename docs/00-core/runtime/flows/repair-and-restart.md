@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-09-02
+Last Verified: 2026-09-03
 
 ## Purpose
 
@@ -166,6 +166,9 @@ workspace-tree revision edge 延续前一 receipt；链从 confirmation revision
 restart 只从 active dispatch、receipt/evidence/processed-event、exact invalidation 与 current pending prerequisite 全链重验。
 最终 accepted member 才在 completing CAS 内从 rejected validation-owner receipt、repair-owner confirmation 与 sealed Decision/dispatch 重算原
 closure，并直接生成新的 target-free `need_validation RepairDirective`；该新 directive 不保留旧 `CurrentFailure` target copy。
+它保留同一 closure ID，但 `Purpose` 必须为空；后续 pre-seal manifest 是普通 Definition validation，不得再次触发
+`RuntimeDispatchRepairCommitment`。`confirmed_validation_repair` 只属于前一项 `need_state_change` repair-effect transaction，
+不能同时表示“修复动作”和“修复后验证”两个相位。
 rejected、refresh-exhausted 或其它 dispatch invalidation 均不恢复旧 revision authority。
 
 confirmed validation state-change 在 pre-seal manifest 中还必须携带 exact purpose `confirmed_validation_repair` 与 closure
@@ -181,6 +184,11 @@ immutable audit lineage，但只有 all-accepted completed receipt chain 可以�
 mandatory detector 还必须独立核对 same-focus exact rejected validation receipt/evidence、其 structured candidate surface 与
 single-`RepairOwnerModuleID` state-change seal；因此即使 manifest purpose 与三份 commitment projection 被协调清空，也不能把该
 transaction 降级成普通 dispatch。
+
+fresh-validation continuation 尚未取得 matching proof 时，合法非终态 aggregate 必须保留上述 exact target-free directive；但
+Orchestrator-private failure transition 可以在同一个 CAS 中以 exact failure fact 退休它并封存 SM-2 failed terminal。该原子
+terminal closure 不删除 completed repair audit lineage，也不授权 SM-4 重建 authority；SM-4 必须进入 terminal delivery，不能因
+continuation 已退休而循环创建 `persisted_pending` lease。
 
 repair receipt、causation 与 terminal credit 必须保持分离：accepted owner receipt 的 payload（包括 `EvidenceReason`）原样进入
 `EvidenceFact`；source `BindingRefs` 原样保留。若该 validation source binding 没有 `state_change` proof，sealed repair

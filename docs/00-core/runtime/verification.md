@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification
 
-Last Verified: 2026-09-02
+Last Verified: 2026-09-03
 
 ## Purpose
 
@@ -301,7 +301,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   与 resource change owner exact-match。accepted durable changed receipt 的每个 operation target、target resource change、sealed
   target authorization 与 confirmed surface exact binding；workspace-tree revision chain 从
   confirmation revision 唯一连续推进，禁止按 operation ID 排序。首项 partial CAS、fresh-process reload、首/末 receipt duplicate 与
-  final accepted→fresh-validation 都必须保留 closure 且不重复 effect；validation-only source binding 还必须覆盖 accepted
+  final accepted→fresh-validation 都必须保留 closure、清空 `RepairPurpose`、生成普通 validation manifest 且不重复 effect；
+  `confirmed_validation_repair` 必须在 directive、RequiredOutput 和 manifest 三层均只允许 `need_state_change`。fresh-validation
+  上的 exact internal failure 还必须证明同一 private CAS 原子退休 directive、封存 failed terminal，且零
+  `persisted_pending` generation；validation-only source binding 还必须覆盖 accepted
   repair receipt 的 binding causation保留、零 `CoverageWorkItemIDs`、owner `EvidenceReason` exact-match、零
   `coverage_binding_mismatch`，以及协调注入 credit/rewrite reason 的 fresh-load rejection；普通 binding/proof mismatch 仍须
   bounded fail-closed。首项 partial CAS 后 mutable `FailureTarget` 与旧

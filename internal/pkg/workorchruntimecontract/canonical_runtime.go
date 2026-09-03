@@ -1532,9 +1532,10 @@ type RequiredOutputContract struct {
 	// RepairClosureID binds this action-level output to the persisted SM-2
 	// repair objective. It is empty for ordinary, non-repair decisions.
 	RepairClosureID string
-	// RepairPurpose is the typed SM-2 purpose copied into the pre-seal
-	// candidate manifest. It makes an admission-time repair commitment
-	// mandatory without consulting a later mutable directive.
+	// RepairPurpose is the typed SM-2 purpose copied into a need_state_change
+	// pre-seal candidate manifest. It makes an admission-time repair commitment
+	// mandatory without consulting a later mutable directive. The subsequent
+	// fresh-validation phase retains RepairClosureID and clears RepairPurpose.
 	RepairPurpose             RuntimeDispatchRepairPurpose
 	PrerequisiteIDs           []string
 	RequiredOperationSequence []RuntimeRequiredOperationVariant
@@ -2279,6 +2280,9 @@ func ValidateRequiredOutputForState(state ConvergenceState, contract RequiredOut
 		return err
 	}
 	contract = contract.Normalized()
+	if contract.RepairPurpose != "" && state != ConvergenceStateNeedStateChange {
+		return fmt.Errorf("required output repair purpose %q requires need_state_change", contract.RepairPurpose)
+	}
 	empty := len(contract.AcceptedKinds)+len(contract.AcceptedOperationVariants)+len(contract.RequiredEvidenceKinds)+len(contract.CoverageWorkItemIDs)+len(contract.TargetRefs)+len(contract.PrerequisiteIDs)+len(contract.RequiredOperationSequence)+len(contract.AcceptedEffectScopes)+len(contract.RequiredEffectScopes) == 0 && contract.RepairClosureID == "" && contract.RepairPurpose == ""
 	switch state {
 	case ConvergenceStateComplete, ConvergenceStateFailed:

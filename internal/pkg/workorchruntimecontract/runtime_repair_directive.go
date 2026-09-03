@@ -240,9 +240,11 @@ const (
 // RuntimeRepairDirective is the single persisted canonical-state authority for a focus (INV-05).
 // Candidate renderer, anti-replay, and owners must obey RequiredState; they cannot switch it.
 type RuntimeRepairDirective struct {
-	ID                        string
-	FocusID                   string
-	Trigger                   RuntimeRepairTrigger
+	ID      string
+	FocusID string
+	Trigger RuntimeRepairTrigger
+	// Purpose is present only while dispatching the durable repair effect.
+	// Its mandatory fresh validation retains Closure but clears Purpose.
 	Purpose                   RuntimeDispatchRepairPurpose
 	CurrentFailure            *FailureFact
 	RequiredState             ConvergenceState
@@ -253,8 +255,9 @@ type RuntimeRepairDirective struct {
 	NoProgressOperationShapes []RuntimeRejectedOperationShape
 	CoverageWorkItemIDs       []common.CoverageWorkItemID
 	TargetRefs                []string
-	// Closure is optional only for persisted directives created before repair
-	// closure support. New SM-2 repair directives must carry it.
+	// Closure is nil only while SM-2 is acquiring the semantic binding needed
+	// to seal the exact repair objective. Every dispatchable repair continuation
+	// carries the immutable closure through its mandatory fresh validation.
 	Closure                    *RuntimeRepairClosure
 	SupersedesEvidenceRevision string
 	RepairAttempt              int
@@ -310,6 +313,9 @@ func (d RuntimeRepairDirective) Validate() error {
 	}
 	if d.Purpose != "" && d.Purpose != RuntimeDispatchRepairPurposeConfirmedValidation {
 		return fmt.Errorf("repair directive has invalid purpose %q", d.Purpose)
+	}
+	if d.Purpose != "" && d.RequiredState != ConvergenceStateNeedStateChange {
+		return fmt.Errorf("repair directive purpose %q requires need_state_change", d.Purpose)
 	}
 	switch d.RequiredState {
 	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation, ConvergenceStateNeedGovernance:

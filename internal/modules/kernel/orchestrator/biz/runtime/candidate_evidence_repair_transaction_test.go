@@ -254,6 +254,8 @@ func TestConfirmedRepairValidationOnlyBindingManifestRetainsSourceLineage(t *tes
 	ctx := context.Background()
 	authority := newConfirmedRepairValidationOnlyAuthorityFixture(t, []string{"main.go"})
 	confirmed := authority.aggregate
+	preRepairCatalogs := runtimecontract.NormalizeRuntimeOperationAdmissibilities(confirmed.Facts.Resources.OperationAdmissibilities)
+	preRepairObservations := runtimecontract.NormalizeRuntimePrerequisiteObservations(confirmed.Facts.Resources.PrerequisiteObservations)
 	bindingID := confirmed.Facts.Focus.CoverageEvidenceBindings[0].ID
 
 	pending, err := authority.controller.BeginCandidateAttemptForTest(
@@ -403,6 +405,57 @@ func TestConfirmedRepairValidationOnlyBindingManifestRetainsSourceLineage(t *tes
 	duplicate, err := restarted.commitEvidence(ctx, evidence)
 	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != stateRevision {
 		t.Fatalf("confirmed repair receipt duplicate changed settled authority: result=%+v err=%v", duplicate, err)
+	}
+
+	controller, err := NewRuntimeController(authority.repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshValidation := satisfyConfirmedRepairFreshValidationPrerequisitesForTest(
+		t, ctx, controller, duplicate.Aggregate, preRepairCatalogs, preRepairObservations, "tree-v2",
+	)
+	if freshValidation.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
+		t.Fatalf("confirmed repair did not reopen ordinary validation: %+v", freshValidation.Decision)
+	}
+	freshManifest, err := BuildRuntimeCandidateContractManifestForAggregate(freshValidation)
+	if err != nil {
+		t.Fatalf("build confirmed repair fresh-validation manifest: %v", err)
+	}
+	if freshManifest.State != runtimecontract.ConvergenceStateNeedValidation ||
+		freshManifest.RepairClosureID != authority.closureID || freshManifest.RepairPurpose != "" {
+		t.Fatalf("confirmed repair fresh-validation manifest = %+v", freshManifest)
+	}
+	failure := runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassRuntimeContractMisalignment,
+		Code:  "fresh_validation_contract_defect", Signature: "fresh-validation-contract-defect",
+		Message: "injected deterministic failure after repair completion",
+	}
+	failed, err := controller.recordDriveFailureFact(
+		ctx, freshValidation.Facts.WorkspaceID, freshValidation.Facts.RunID, failure,
+	)
+	if err != nil {
+		t.Fatalf("atomically close failed fresh-validation continuation: %v", err)
+	}
+	if failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil ||
+		failed.Facts.RepairDirective != nil || failed.Facts.Failure == nil ||
+		failed.Facts.Failure.Signature != failure.Signature || failed.DriveLease != nil {
+		t.Fatalf("fresh-validation terminal closure = %+v", failed)
+	}
+	terminalRevision := failed.StateRevision
+	duplicateFailure, err := controller.recordDriveFailureFact(
+		ctx, freshValidation.Facts.WorkspaceID, freshValidation.Facts.RunID, failure,
+	)
+	if err != nil || duplicateFailure.StateRevision != terminalRevision || duplicateFailure.DriveLease != nil {
+		t.Fatalf("duplicate fresh-validation terminal closure = %+v err=%v", duplicateFailure, err)
+	}
+	restartedController, err := NewRuntimeController(authority.repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloadedFailure, err := restartedController.Load(ctx, freshValidation.Facts.WorkspaceID, freshValidation.Facts.RunID)
+	if err != nil || reloadedFailure.StateRevision != terminalRevision ||
+		reloadedFailure.Decision.State != runtimecontract.ConvergenceStateFailed || reloadedFailure.DriveLease != nil {
+		t.Fatalf("fresh process lost fresh-validation terminal closure: aggregate=%+v err=%v", reloadedFailure, err)
 	}
 }
 
@@ -1645,6 +1698,7 @@ func assertConfirmedRepairFreshValidationForTest(t *testing.T, aggregate Runtime
 	t.Helper()
 	if aggregate.ActiveDispatch != nil || aggregate.Facts.Resources.FailureTarget != nil || aggregate.Facts.RepairDirective == nil ||
 		aggregate.Facts.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedValidation ||
+		aggregate.Facts.RepairDirective.Purpose != "" ||
 		aggregate.Facts.RepairDirective.CurrentFailure != nil || len(aggregate.Facts.RepairDirective.TargetRefs) != 0 ||
 		aggregate.Facts.RepairDirective.Closure == nil || aggregate.Facts.RepairDirective.Closure.ID != closureID {
 		t.Fatalf("confirmed owner repair did not close into target-free fresh validation: %+v", aggregate)
@@ -1886,6 +1940,76 @@ func satisfyConfirmedRepairTargetSnapshotsForTest(
 		})
 		if err != nil {
 			t.Fatalf("commit confirmed owner repair target snapshot: %v", err)
+		}
+	}
+	return current
+}
+
+func satisfyConfirmedRepairFreshValidationPrerequisitesForTest(
+	t *testing.T,
+	ctx context.Context,
+	controller *RuntimeController,
+	current RuntimeAggregate,
+	preRepairCatalogs []runtimecontract.RuntimeOperationAdmissibility,
+	preRepairObservations []runtimecontract.RuntimePrerequisiteObservation,
+	treeRevision string,
+) RuntimeAggregate {
+	t.Helper()
+	for step := 0; step < 12 && current.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite; step++ {
+		if len(current.Facts.Prerequisites.Pending) == 0 {
+			t.Fatalf("confirmed repair fresh validation has no pending prerequisite: %+v", current.Decision)
+		}
+		prerequisite := current.Facts.Prerequisites.Pending[0]
+		var result PrerequisiteResult
+		switch prerequisite.Kind {
+		case runtimecontract.PrerequisiteKindTargetSnapshot:
+			snapshot := runtimecontract.TargetSnapshot{
+				TargetRef: prerequisite.SubjectRef, Content: "after " + prerequisite.SubjectRef,
+				ContentHash: "content-after/" + prerequisite.SubjectRef, ContentState: runtimecontract.SnapshotContentStateComplete,
+			}
+			observation := runtimecontract.RuntimePrerequisiteObservation{
+				PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+				ContentHash: snapshot.ContentHash,
+				Dependencies: []runtimecontract.RuntimeFreshnessDependency{
+					{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: prerequisite.OwnerModuleID, SubjectRef: snapshot.TargetRef, Revision: snapshot.ContentHash},
+					{Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: prerequisite.OwnerModuleID, SubjectRef: "workspace_deliverable", Revision: treeRevision},
+				},
+			}
+			observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+			result = PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot, Observation: &observation}
+		case runtimecontract.PrerequisiteKindOperationAdmissibility:
+			var catalog runtimecontract.RuntimeOperationAdmissibility
+			for _, candidate := range preRepairCatalogs {
+				if candidate.PrerequisiteID == prerequisite.ID && candidate.OwnerModuleID == prerequisite.OwnerModuleID {
+					catalog = candidate.Normalized()
+					break
+				}
+			}
+			observation, found := runtimecontract.RuntimePrerequisiteObservationForID(preRepairObservations, prerequisite.ID)
+			if catalog.PrerequisiteID == "" || !found || observation.OwnerModuleID != prerequisite.OwnerModuleID {
+				t.Fatalf("confirmed repair cannot reacquire exact owner catalog %q/%q", prerequisite.OwnerModuleID, prerequisite.ID)
+			}
+			for index := range observation.Dependencies {
+				dependency := &observation.Dependencies[index]
+				if dependency.Domain == runtimecontract.RuntimeResourceWorkspaceTree &&
+					dependency.OwnerModuleID == prerequisite.OwnerModuleID {
+					dependency.Revision = treeRevision
+					catalog.ObservedRevision = treeRevision
+				}
+			}
+			catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+			observation.ContentHash = catalog.SnapshotID
+			observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+			result = PrerequisiteResult{PrerequisiteID: prerequisite.ID, OperationAdmissibility: &catalog, Observation: &observation}
+		default:
+			t.Fatalf("unexpected confirmed repair fresh-validation prerequisite: %+v", prerequisite)
+		}
+		var err error
+		current, err = controller.commitPrerequisite(
+			ctx, current.Facts.WorkspaceID, current.Facts.RunID, result,
+		)
+		if err != nil {
+			t.Fatalf("commit confirmed repair fresh-validation prerequisite %q: %v", prerequisite.ID, err)
 		}
 	}
 	return current

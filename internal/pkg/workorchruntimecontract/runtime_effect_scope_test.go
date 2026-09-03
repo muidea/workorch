@@ -394,6 +394,44 @@ func TestRuntimeRepairDirectiveRoundTrip(t *testing.T) {
 	}
 }
 
+func TestConfirmedValidationRepairPurposeIsStateChangeOnly(t *testing.T) {
+	closure := RuntimeRepairClosure{
+		GapSignature: "validation-gap", BaselineEvidenceRevision: "runtime-evidence-1",
+		CoverageWorkItemIDs:   []common.CoverageWorkItemID{"cwi-1"},
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange, EvidenceKindValidation},
+		GroundedTargetRefs:    []string{"main.go"}, RequireValidationAfterStateChange: true,
+	}
+	closure.ID = StableRuntimeRepairClosureID(closure)
+	directive := RuntimeRepairDirective{
+		ID: "repair-1", FocusID: "focus-1", Trigger: RuntimeRepairTriggerRejectedValidation,
+		Purpose: RuntimeDispatchRepairPurposeConfirmedValidation, RequiredState: ConvergenceStateNeedValidation,
+		RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, RequiredEvidenceKinds: []string{EvidenceKindValidation},
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, Closure: &closure,
+	}
+	if err := directive.Validate(); err == nil || !strings.Contains(err.Error(), "requires need_state_change") {
+		t.Fatalf("fresh-validation directive retained repair purpose: %v", err)
+	}
+
+	requiredOutput := RequiredOutputContract{
+		AcceptedKinds:        []string{RuntimeBlockKindManagedValidationSession},
+		AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
+		RequiredEvidenceKinds: []string{EvidenceKindValidation}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+		RepairClosureID: closure.ID, RepairPurpose: RuntimeDispatchRepairPurposeConfirmedValidation,
+	}
+	if err := ValidateRequiredOutputForState(ConvergenceStateNeedValidation, requiredOutput); err == nil ||
+		!strings.Contains(err.Error(), "requires need_state_change") {
+		t.Fatalf("fresh-validation required output retained repair purpose: %v", err)
+	}
+
+	directive.RequiredState = ConvergenceStateNeedStateChange
+	directive.RequiredEffectScopes = []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}
+	directive.RequiredEvidenceKinds = []string{EvidenceKindStateChange}
+	directive.TargetRefs = []string{"main.go"}
+	if err := directive.Validate(); err != nil {
+		t.Fatalf("state-change repair directive rejected: %v", err)
+	}
+}
+
 func TestRuntimeTerminationRecordAdministrativeHandoffSchema(t *testing.T) {
 	term := RuntimeTerminationRecord{
 		Kind: RuntimeTerminationCancelled, RequestedBy: "blocks/run", Reason: "operator cancel", Revision: 3,

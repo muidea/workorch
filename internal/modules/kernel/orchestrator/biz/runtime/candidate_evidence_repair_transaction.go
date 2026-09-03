@@ -1414,7 +1414,6 @@ func (t confirmedRepairTransaction) freshValidationDirective(facts runtimecontra
 		ID:                    fmt.Sprintf("confirmed-repair/%s/%s/fresh-validation", facts.Focus.ID, closure.ID),
 		FocusID:               facts.Focus.ID,
 		Trigger:               runtimecontract.RuntimeRepairTriggerRejectedValidation,
-		Purpose:               runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation,
 		RequiredState:         runtimecontract.ConvergenceStateNeedValidation,
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
@@ -1443,7 +1442,7 @@ func runtimeConfirmedRepairOwnsFreshValidationDirective(facts runtimecontract.Ru
 	closure := directive.Closure.Normalized()
 	if directive.ID != fmt.Sprintf("confirmed-repair/%s/%s/fresh-validation", facts.Focus.ID, closure.ID) ||
 		directive.FocusID != facts.Focus.ID || directive.Trigger != runtimecontract.RuntimeRepairTriggerRejectedValidation ||
-		directive.CurrentFailure != nil || directive.RequiredState != runtimecontract.ConvergenceStateNeedValidation ||
+		directive.Purpose != "" || directive.CurrentFailure != nil || directive.RequiredState != runtimecontract.ConvergenceStateNeedValidation ||
 		len(directive.TargetRefs) != 0 || !sameCoverageIDs(directive.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs) ||
 		!sameCoverageIDs(closure.CoverageWorkItemIDs, facts.Focus.CoverageWorkItemIDs) ||
 		!closure.RequireValidationAfterStateChange || len(closure.GroundedTargetRefs) == 0 ||
@@ -1464,14 +1463,17 @@ func runtimeConfirmedRepairOwnsFreshValidationDirective(facts runtimecontract.Ru
 // validateConfirmedRepairFreshValidationContinuation is the fresh-load
 // reverse proof for the target-free NeedValidation handoff. Every applicable
 // completed transaction must either have fresh validation newer than its final
-// repair-owner receipt or retain exactly one canonical target-free directive. A stale,
-// renamed, target-restored, or lineage-free projection fails closed.
+// repair-owner receipt, retain exactly one canonical target-free directive, or
+// be atomically retired by an exact SM-2 failed terminal. A stale, renamed,
+// target-restored, or lineage-free nonterminal projection fails closed.
 func validateConfirmedRepairFreshValidationContinuation(aggregate RuntimeAggregate) error {
 	transactions, err := completedConfirmedRepairTransactions(aggregate)
 	if err != nil {
 		return err
 	}
 	facts := aggregate.Facts.Normalized()
+	terminalFailureClosed := aggregate.Decision.State == runtimecontract.ConvergenceStateFailed &&
+		aggregate.Decision.Terminal != nil && facts.Failure != nil
 	matchedDirective := false
 	outstanding := 0
 	applicable := 0
@@ -1486,6 +1488,12 @@ func validateConfirmedRepairFreshValidationContinuation(aggregate RuntimeAggrega
 		if repairDirectiveEvidenceSatisfied(facts, expected, aggregate.CoverageProofLineage) {
 			if facts.RepairDirective != nil && runtimecontract.SameRuntimeRepairClosure(facts.RepairDirective.Closure, expected.Closure) {
 				return fmt.Errorf("runtime aggregate settled confirmed owner repair retained a satisfied fresh-validation directive")
+			}
+			continue
+		}
+		if terminalFailureClosed {
+			if facts.RepairDirective != nil {
+				return fmt.Errorf("runtime aggregate failed terminal retained confirmed owner repair fresh-validation authority")
 			}
 			continue
 		}

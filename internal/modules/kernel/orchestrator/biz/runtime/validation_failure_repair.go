@@ -518,6 +518,10 @@ func applyRuntimeValidationFailureRepairSemanticSeal(facts runtimecontract.Runti
 			return runtimecontract.RuntimeFacts{}, fmt.Errorf("%w: repair successor Definition proof has no fresh validation", common.ErrConflict)
 		}
 		directive.ID = fmt.Sprintf("validation-failure-repair/%s/%d/fresh-validation", facts.Focus.ID, facts.Repair.RepairAttempts)
+		// The repair-purpose commitment applies only to the durable state-change
+		// effect. Fresh validation preserves the closure lineage but is an
+		// ordinary Definition-proof operation.
+		directive.Purpose = ""
 		directive.RequiredState = runtimecontract.ConvergenceStateNeedValidation
 		directive.RequiredEffectScopes = append([]runtimecontract.RuntimeEffectScope(nil), proof.RequiredEffectScopes...)
 		directive.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
@@ -793,6 +797,9 @@ func settleRuntimeValidationFailureRepair(
 	updated.Repair = carriedRepair.Normalized()
 	carriedDirective.ID = fmt.Sprintf("validation-failure-repair/%s/%d/fresh-validation", updated.Focus.ID, updated.Repair.RepairAttempts)
 	carriedDirective.FocusID = updated.Focus.ID
+	// Retain the repair closure across phases, but never carry the state-change
+	// repair-purpose commitment into its fresh-validation successor.
+	carriedDirective.Purpose = ""
 	carriedDirective.RequiredState = runtimecontract.ConvergenceStateNeedValidation
 	carriedDirective.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession}
 	carriedDirective.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}

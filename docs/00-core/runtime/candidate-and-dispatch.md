@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-09-02
+Last Verified: 2026-09-03
 
 ## 规范化候选合同
 
@@ -80,7 +80,9 @@ receipt-set 或独立 CWI `all_of` 明确表达，禁止只在 receipt 阶段把
 `RuntimeRepairSurfaceConfirmation.ConfirmedTargetRefs` 与 repair commitment 的 `Closure.GroundedTargetRefs` 必须精确保存
 同一份完整 confirmed surface；它是 state-change candidate 的有限授权集合，不是“每个 target 都必须修改”的隐式 operation
 清单。candidate 必须选择该 surface 内的非空 target 子集，所有已封存 operation/receipt 仍按 `all_of` 完成，最后一项后才可
-生成 target-free fresh-validation directive。若某个 repair 确实要求完整 surface 全部产生 effect，SM-2 必须事先编译显式
+生成 target-free fresh-validation directive。`confirmed_validation_repair` 只标记前一项 `need_state_change` repair-effect
+manifest；fresh-validation manifest 必须保留 closure ID、清空 purpose，并作为普通 Definition validation 编译，不得要求第二份
+repair commitment。若某个 repair 确实要求完整 surface 全部产生 effect，SM-2 必须事先编译显式
 `RequiredOperationSequence`/collective receipt-set；LLM candidate、commitment 派生或 receipt 校验均不得自行把 membership
 升级为 full-set equality，也不得把 closure 缩成 candidate 选择的子集。
 

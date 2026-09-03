@@ -925,6 +925,7 @@ func TestValidationFailureRepairMultiTargetSettlementUsesOneCompletedAllOfDispat
 		completed.Aggregate.Facts.Coverage[0].CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened ||
 		runtimeValidationFailureRepairReopenReason(completed.Aggregate.Facts.Coverage[0]) != runtimeCWIReopenReasonValidationFailureRepairSettled ||
 		completed.Aggregate.Facts.RepairDirective == nil || completed.Aggregate.Facts.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedValidation ||
+		completed.Aggregate.Facts.RepairDirective.Purpose != "" ||
 		completed.Aggregate.Facts.RepairDirective.Closure == nil || len(completed.Aggregate.Facts.RepairDirective.TargetRefs) != 0 ||
 		completed.Aggregate.Facts.Repair.LastProgressRevision != "" {
 		t.Fatalf("complete repair all-of set did not reopen for fresh validation: %+v", completed.Aggregate.Facts)
