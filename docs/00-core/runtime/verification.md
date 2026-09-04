@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification
 
-Last Verified: 2026-09-03
+Last Verified: 2026-09-04
 
 ## Purpose
 
@@ -252,7 +252,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   1～8 项，`8+1`/`8+8` 越界 union 整组失效；
 - exact route transition matrix 必须覆盖：structured observation + exact route 等待一次 matching owner confirmation；structured
   observation + 无 route 与 target-free typed diagnostic + 无 route 均在 rejected receipt 的同一 CAS 封存
-  `validation_failure_repair_route_unavailable`；target-free typed diagnostic + exact route 才进入 bounded semantic fallback。
+  `validation_failure_repair_route_unavailable`；target-free typed diagnostic + exact `prospective_owner_target` route 才进入 bounded
+  semantic fallback；target-free + exact `existing_owner_scope` route 直接封存 `repair_surface_unavailable`。repair-purpose
+  Definition gap 同样必须终止且零 clarification ticket。confirmed directive 的 operation kinds 必须精确等于 route 声明。
   terminal 分支在 duplicate/restart 后保持零额外 CAS、owner query、provider、effect、governance、budget 与 SM-4 wait；
 - managed-validation receipt matrix 必须在 commit 与 fresh-load 同时拒绝 direct diagnostic `TargetRefs`（即使它等于 current
   focus、operation entry 或 sealed scope member）、direct/cross-owner `TargetObservation`、出现在 File/MCP/durable Shell receipt

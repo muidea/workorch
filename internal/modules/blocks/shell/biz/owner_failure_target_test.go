@@ -225,6 +225,20 @@ func TestShellManagedGoPackageConflictReportsBothManifestScopedTargets(t *testin
 	}
 }
 
+func TestShellManagedGoModuleDiagnosticReportsOnlyManifestScopedModuleTarget(t *testing.T) {
+	request := RuntimeCommandRequest{
+		ManagedValidation:         runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationScopeTargetRefs: []string{"go.mod", "main.go"},
+	}
+	output := RuntimeCommandResult{
+		WorkingDirectory: "/tmp/workorch-shell-validation/workspace",
+		Stderr:           "go: errors parsing go.mod:\ngo.mod:3: unknown directive: package\noutside/go.mod:1: unknown directive: invalid",
+	}
+	if targets := shellValidationDiagnosticTargetRefs(output, request, "go"); !reflect.DeepEqual(targets, []string{"go.mod"}) {
+		t.Fatalf("managed Go module targets = %v", targets)
+	}
+}
+
 func TestShellOwnerEmitsOnlySealedScopeValidationFailureObservation(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

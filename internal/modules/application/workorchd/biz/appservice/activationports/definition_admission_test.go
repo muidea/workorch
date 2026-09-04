@@ -66,27 +66,44 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 			}
 		}
 	}
-	if parsedRepair == nil || len(parsedRepair.Routes) != 1 || !parsedRepair.RequireFreshValidation || parsedRepair.MaxAttempts != 2 {
+	if parsedRepair == nil || len(parsedRepair.Routes) != 3 || !parsedRepair.RequireFreshValidation || parsedRepair.MaxAttempts != 2 {
 		t.Fatalf("builtin software-dev repair convergence was not parsed into the admission candidate: %+v", parsedRepair)
 	}
-	buildRoute, buildFound := parsedRepair.RouteForTrigger(
-		runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
-		runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "shell_exit_nonzero",
-	)
+	expectedRoutes := []struct {
+		class      string
+		targetType string
+		ownerCode  string
+	}{
+		{runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "go_module_parse_failed"},
+		{runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "go_source_compile_failed"},
+		{runtimecontract.ValidationDiagnosticTestFailed, runtimecontract.ValidationEvidenceTargetBehaviorEvidence, "go_test_failed"},
+	}
+	for _, expected := range expectedRoutes {
+		route, found := parsedRepair.RouteForTrigger(
+			runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
+			expected.class, expected.targetType, expected.ownerCode,
+		)
+		if !found || route.RepairOwnerModuleID != runtimecontract.RuntimeModuleFile ||
+			route.RepairTargetPolicy != runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope ||
+			len(route.RepairOperationKinds) != 1 || route.RepairOperationKinds[0] != runtimecontract.StepKindFileEdit ||
+			route.RepairOperationTargetSelectorRef != "workspace-relative-existing-file-target" {
+			t.Fatalf("builtin software-dev exact repair route %q = %+v found=%v", expected.ownerCode, route, found)
+		}
+	}
 	_, dependencyMisrouted := parsedRepair.RouteForTrigger(
 		runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
 		runtimecontract.ValidationDiagnosticDependencyMismatch, runtimecontract.ValidationEvidenceTargetDependencyContract,
 		runtimecontract.ValidationDiagnosticDependencyMismatch,
 	)
-	_, implementationMisrouted := parsedRepair.RouteForTrigger(
+	_, genericBuildMisrouted := parsedRepair.RouteForTrigger(
 		runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
-		runtimecontract.ValidationDiagnosticImplementationGap, runtimecontract.ValidationEvidenceTargetFailureSurface, "shell_exit_nonzero",
+		runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "shell_exit_nonzero",
 	)
-	_, testMisrouted := parsedRepair.RouteForTrigger(
+	_, genericTestMisrouted := parsedRepair.RouteForTrigger(
 		runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
 		runtimecontract.ValidationDiagnosticTestFailed, runtimecontract.ValidationEvidenceTargetBehaviorEvidence, "shell_exit_nonzero",
 	)
-	if !buildFound || buildRoute.RepairOwnerModuleID != runtimecontract.RuntimeModuleFile || dependencyMisrouted || implementationMisrouted || testMisrouted {
+	if dependencyMisrouted || genericBuildMisrouted || genericTestMisrouted {
 		t.Fatalf("builtin software-dev repair convergence did not preserve exact owner routes: %+v", parsedRepair)
 	}
 	result, err := definitionadmission.Compile(candidate)
@@ -102,20 +119,22 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 	if err != nil {
 		t.Fatalf("compile admitted builtin software-dev bootstrap: %v", err)
 	}
-	compiledRepairFound := false
+	compiledRepairRoutes := 0
 	compiledDependencyMisroute := false
 	for _, focus := range bootstrap.DefinitionFocuses {
 		if focus.AssessmentScope != "dodItem" || focus.ValidationFailureRepairConvergence == nil {
 			continue
 		}
-		if route, found := focus.ValidationFailureRepairConvergence.RouteForTrigger(
-			runtimecontract.RuntimeModuleShell,
-			runtimecontract.RuntimeBlockKindManagedValidationSession,
-			runtimecontract.ValidationDiagnosticBuildFailed,
-			runtimecontract.ValidationEvidenceTargetFailureSurface,
-			"shell_exit_nonzero",
-		); found && route.RepairOwnerModuleID == runtimecontract.RuntimeModuleFile {
-			compiledRepairFound = true
+		for _, expected := range expectedRoutes {
+			if route, found := focus.ValidationFailureRepairConvergence.RouteForTrigger(
+				runtimecontract.RuntimeModuleShell,
+				runtimecontract.RuntimeBlockKindManagedValidationSession,
+				expected.class,
+				expected.targetType,
+				expected.ownerCode,
+			); found && route.RepairOwnerModuleID == runtimecontract.RuntimeModuleFile {
+				compiledRepairRoutes++
+			}
 		}
 		_, compiledDependencyMisroute = focus.ValidationFailureRepairConvergence.RouteForTrigger(
 			runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
@@ -123,10 +142,11 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 			runtimecontract.ValidationDiagnosticDependencyMismatch,
 		)
 	}
-	if !compiledRepairFound || compiledDependencyMisroute {
+	if compiledRepairRoutes != len(expectedRoutes) || compiledDependencyMisroute {
 		t.Fatalf("admitted software-dev bootstrap lost its exact bounded repair routes: %+v", bootstrap.DefinitionFocuses)
 	}
-	if !containsActivationString(bootstrap.Definition.CapabilityContract, runtimecontract.StepKindFileWrite) ||
+	if !containsActivationString(bootstrap.Definition.CapabilityContract, runtimecontract.StepKindFileEdit) ||
+		!containsActivationString(bootstrap.Definition.CapabilityContract, runtimecontract.StepKindFileWrite) ||
 		!containsActivationString(bootstrap.Definition.CapabilityContract, runtimecontract.RuntimeBlockKindPatchApply) {
 		t.Fatalf("repair operation missing from bootstrap capability contract: %+v", bootstrap.Definition.CapabilityContract)
 	}
@@ -134,7 +154,8 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 	admissibilityFound := false
 	for _, requirement := range bootstrap.Requirements {
 		if requirement.OwnerModuleID != runtimecontract.RuntimeModuleFile ||
-			(!containsActivationString(requirement.RequiredCapabilities, runtimecontract.StepKindFileWrite) &&
+			(!containsActivationString(requirement.RequiredCapabilities, runtimecontract.StepKindFileEdit) &&
+				!containsActivationString(requirement.RequiredCapabilities, runtimecontract.StepKindFileWrite) &&
 				!containsActivationString(requirement.RequiredCapabilities, runtimecontract.RuntimeBlockKindPatchApply)) {
 			continue
 		}

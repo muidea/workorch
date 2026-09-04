@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-09-03
+Last Verified: 2026-09-04
 
 ## 功能范围与边界
 
@@ -53,6 +53,9 @@ operation。
   patch conflict 不得冒充 binding contradiction。
 - `workspace-relative-new-file-target` 是 create-only selector：prospective path 缺失时返回 `create`；File effect 后相同 path
   已存在时必须返回 `unsupported`，不能把它重解释为普通 existing-target `selected`。
+- `workspace-relative-existing-file-target` 是 `file/edit` 的 existing/exact owner authorization；它只授权 manifest 中已列出的
+  current regular file，不能创建路径。该 selector 只提供 capability fact，repair target 仍须来自 validation observation 与
+  File confirmation，File 不选择 repair transition。
 - workspace manifest/revision 对 deliverable topology/content 变化敏感；admissibility/target snapshot 漂移返回 typed stale，
   不自行刷新 authority。
 - state-changing effect 返回 exact before/after revision 和 bounded evidence。execution key 已有 committed receipt 时返回 replay
@@ -63,7 +66,7 @@ operation。
 
 | 维度 | 可执行证据 | 覆盖结论 |
 | --- | --- | --- |
-| normal list/read/write/edit/preview/apply | [`module_test.go`](module_test.go)、[`biz/file_runtime_adapter_test.go`](biz/file_runtime_adapter_test.go) | 覆盖 |
+| normal list/read/write/edit/preview/apply | [`module_test.go`](module_test.go)、[`biz/file_runtime_adapter_test.go`](biz/file_runtime_adapter_test.go) | 覆盖 create-only 与 existing-target selector、读写编辑及 patch 主路径 |
 | typed contract / sealed identity | [`pkg/events/operation_test.go`](pkg/events/operation_test.go)、`kernel/orchestrator/biz/prerequisite_event_adapter_test.go::TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract` | 16 topic inventory、payload/scope binding、create-only selector effect 前 `create`/effect 后 `unsupported` 覆盖 |
 | candidate constraints | [`biz/file_runtime_candidate_conformance_test.go`](biz/file_runtime_candidate_conformance_test.go)、`biz/file_runtime_adapter_test.go::TestRuntimeAdapterRuntimeFeasibilityRejectsStaleUnifiedDiff`、`module_test.go::TestFileModuleReportsUnifiedDiffTargetApplicabilityAsTypedCandidateConstraint`、[`pkg/events/operation_test.go`](pkg/events/operation_test.go) | static valid/invalid unified diff、target/target-policy mode、零 workspace I/O conformance，以及真实 owner EventHub 路径中 current target conflict 的 manifest/revision-bound typed applicability violation 与零 effect 覆盖 |
 | exact source | `TestFileRuntimeOwnerCommandsRejectUntrustedSources`、`TestFileWorkspaceManifestAllowsGitOwnerSource`、`TestFileModuleRejectsDriftedSealedOperationBeforeEffect` | 10 个 read topic 的 producer matrix 与 execute wrong-source 覆盖 |

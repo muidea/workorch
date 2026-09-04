@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-09-03
+Last Verified: 2026-09-04
 
 ## 四个协调状态机
 
@@ -164,14 +164,18 @@ load facts
   target；此路径不得提前开启 semantic repair generation或记一次 validation-only retry。完整 structured observation 未命中
   exact route 时，SM-2 必须在 rejected receipt 的同一 private event/CAS 退休 repair authority并封存
   `validation_failure_repair_route_unavailable`，零 owner query、provider、capability effect、governance 或 SM-4 wait。
-  只有无 observation 且 exact route 匹配时，才可进入 Profile 已封存的 bounded `validation_failure_repair` semantic fallback。
+  只有无 observation 且 exact `prospective_owner_target` route 匹配时，才可进入 Profile 已封存的 bounded
+  `validation_failure_repair` semantic fallback。exact `existing_owner_scope` route 缺少 observation 时必须在同一 receipt CAS
+  封存 `repair_surface_unavailable`；repair-purpose provider document 返回 Definition gap 时也进入相同 private terminal，不能
+  创建 clarification authority。
   原始 observation 必须完整保留，但不得反向选择 action、retry、ticket 或其它 terminal。
   canonical managed-validation rejected receipt 的 `receipt.TargetRefs` 仅保留 execution/entry lineage；
   `OriginalDiagnostic.TargetRefs` 与 `TargetObservation` 必须为空，candidate 只能位于最多八项的
   `ValidationFailureObservation.CandidateTargetRefs`。该 nested observation 只允许出现在 operation descriptor 声明
   `validation_failure_candidates` protocol 的 validation receipt，并须与 receipt 的
   workspace/run/actual dispatch/authority/operation/signature、typed
-  diagnostic class/candidates 及 matching sealed per-operation scope 完整一致；顶层 reducer copy 与 nested owner-diagnostic copy
+  diagnostic operation kind/class/candidates 及 matching sealed per-operation scope 完整一致；其中 diagnostic operation kind 必须
+  exact-match sealed operation kind，不能让首次路由匹配与 confirmation 后的 directive 重建使用不同 tuple；顶层 reducer copy 与 nested owner-diagnostic copy
   必须同时存在并 canonical exact-match。commit 与 fresh-load 使用同一校验，且只有 `committed` dispatch 中已标记完成、
   execution 为 `evidence_committed`、`ExecutionKey + Fence + receipt ref/hash` exact-match 的 receipt 才形成 SM-2 fact；
   `owner_committed`、invalidated dispatch 或 generic failure event 均不得提前交接。等待 repair-owner confirmation 时不得保留或

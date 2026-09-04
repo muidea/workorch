@@ -177,6 +177,9 @@ func TestManagedValidationReceiptRejectsForeignOrMismatchedValidationFailureObse
 		{name: "class", mutate: func(value *runtimecontract.RuntimeValidationFailureObservation, _ *runtimecontract.ValidationFailureDiagnostic) {
 			value.DiagnosticClass = runtimecontract.ValidationDiagnosticTestFailed
 		}},
+		{name: "diagnostic operation", mutate: func(_ *runtimecontract.RuntimeValidationFailureObservation, diagnostic *runtimecontract.ValidationFailureDiagnostic) {
+			diagnostic.Operation = runtimecontract.StepKindFileWrite
+		}},
 		{name: "candidate", mutate: func(value *runtimecontract.RuntimeValidationFailureObservation, _ *runtimecontract.ValidationFailureDiagnostic) {
 			value.CandidateTargetRefs = []string{"support.go"}
 			value.ValidationScopeTargetRefs = []string{"main.go", "support.go"}
@@ -380,7 +383,10 @@ func claimedManagedValidationReceiptForTest(t *testing.T) (*durableRuntimeStateR
 	failure := runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassBuildFailure, Code: "managed_validation_failed",
 		Signature: observation.FailureSignature, Message: "managed validation failed",
-		ValidationDiagnostic:         &runtimecontract.ValidationFailureDiagnostic{Class: observation.DiagnosticClass, TargetRefs: append([]string(nil), observation.CandidateTargetRefs...)},
+		ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
+			Class: observation.DiagnosticClass, Operation: runtimecontract.StepKindShellCommand,
+			TargetRefs: append([]string(nil), observation.CandidateTargetRefs...),
+		},
 		ValidationFailureObservation: &observation,
 	}
 	return repository, controller, claimed, execution, runtimecontract.RuntimeOperationReceipt{

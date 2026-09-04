@@ -11917,7 +11917,7 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 				ValidationScopeTargetRefs: []string{"validation-entry.go", "implementation.go"},
 			}
 			diagnostic := &runtimecontract.ValidationFailureDiagnostic{
-				Class: observation.DiagnosticClass, OwnerCode: "build_failed",
+				Class: observation.DiagnosticClass, OwnerCode: "build_failed", Operation: request.Operation.Kind,
 				RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetFailureSurface,
 				TargetRefs:                    append([]string(nil), observation.CandidateTargetRefs...),
 			}

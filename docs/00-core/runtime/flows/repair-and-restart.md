@@ -4,7 +4,7 @@ Status: normative
 
 Type: runtime-flow
 
-Last Verified: 2026-09-03
+Last Verified: 2026-09-04
 
 ## Purpose
 
@@ -80,7 +80,8 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
   SM-2 对照 sealed Profile convergence 决定 repair 或 terminal
 - assessment 返回 repairable gap
   → 结构化 gap 进入 facts；按 missing evidence kind 回 state change / validation，不能直接 terminal
-- Profile-declared typed validation rejection without a structured observation and with one exact matching route
+- Profile-declared typed validation rejection without a structured observation and with one exact matching
+  `prospective_owner_target` route
   → SM-2 reopens the same CWI for one `validation_failure_repair` semantic generation
   → that generation's eligible closure is the exact current CWI; unrelated globally eligible CWIs remain outside it
   → C3 exposes only the typed failure signature/class and exact Profile repair vocabulary; no raw diagnostic or Runtime disposition
@@ -100,8 +101,9 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
   command/result and SM-2 internal events
   → confirmed becomes an owner-grounded `FailureTarget`; stale reacquires owner prerequisites; rejected becomes typed infeasibility
   → a complete structured observation with no exact route seals `validation_failure_repair_route_unavailable` in the same rejected-
-  receipt CAS, with zero owner query/provider/effect/governance/wait; only a rejection without that structured observation and with
-  an exact route may enter the Profile-declared semantic fallback above
+  receipt CAS, with zero owner query/provider/effect/governance/wait; a rejection without that structured observation may enter the
+  Profile-declared semantic fallback only for an exact `prospective_owner_target` route. An exact `existing_owner_scope` route with
+  no structured observation instead seals `repair_surface_unavailable` in the receipt CAS
   → the validation owner does not choose the repair transition, and Orchestrator never derives targets from free text, mutable current
   Focus or a current manifest that was not part of the completed dispatch seal
 - capability-owner typed dependency/toolchain/environment diagnostics are not implementation-effect surfaces. For example, Shell
@@ -115,6 +117,9 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
   directive while retaining the intermediate binding. One Orchestrator-private CAS invalidates the candidate, retires that binding
   with the persisted owner observation and seals `repair_surface_unavailable`; it neither opens an implicit semantic retry nor enters
   SM-4 delayed recovery.
+- a repair-purpose semantic document cannot redefine the problem as a Definition gap. The manifest-only admission rejects that
+  branch, and one Orchestrator-private semantic-failure event seals `repair_surface_unavailable`; no clarification ticket, restart
+  request or second provider attempt is created.
 - 需要外部信息 / 审批 / 依赖
   → sealed governance candidate → ticket → resolution commit
 - 存在owner-defined typed recovery/reconciliation合同的暂时不可用或consumption unknown

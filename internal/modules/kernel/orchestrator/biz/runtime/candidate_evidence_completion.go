@@ -145,8 +145,14 @@ func completeEvidenceDispatch(
 				return err
 			}
 			if !opened {
-				if _, err := markRuntimeValidationFailureRepairRouteUnavailable(aggregate, fact, admission.Operation); err != nil {
+				terminated, err := markRuntimeValidationFailureRepairSurfaceUnavailable(aggregate, fact, admission.Operation)
+				if err != nil {
 					return err
+				}
+				if !terminated {
+					if _, err := markRuntimeValidationFailureRepairRouteUnavailable(aggregate, fact, admission.Operation); err != nil {
+						return err
+					}
 				}
 			}
 		}

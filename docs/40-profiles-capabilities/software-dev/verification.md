@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-09-03
+Last Verified: 2026-09-04
 
 ## Purpose
 
@@ -27,13 +27,13 @@ and converges through the same neutral Runtime owner model. It must not make leg
 - DoD validation preparation seals the exact prospective-satisfaction contract ref; missing/extra/drifted ref or use on a
   non-prospective policy fails pre-seal and creates no Run/provider/capability work;
 - each repair-enabled DoD requirement seals one validation-failure convergence whose routes form an exact-trigger lookup table,
-  never a terminal alternative list. The built-in production-reachable build-failure tuple binds File state-change kinds and its
+  never a terminal alternative list. The built-in Go module/source/test tuples bind File `file/edit`, `existing_owner_scope` and
   separate declaration/operation selectors. A route whose repair operations do not publish one concrete owner confirmation protocol
   fails pre-seal. Duplicate/partial triggers, cross-owner kinds, non-state-change evidence, incomplete selectors, disabled fresh validation or an
   out-of-range bound fail pre-seal and create no Run/provider/capability work;
-- the default managed-validation wire contains only `recipeId`; default Profile admission therefore does not advertise
-  `implementation_gap_detected` or `validation_test_failed` routes until the producing owner can deterministically emit those exact
-  tuples from the production contract;
+- the default managed-validation wire contains only `recipeId`; Shell alone emits exact `go_module_parse_failed`,
+  `go_source_compile_failed` or `go_test_failed` owner facts from bounded tool output. Generic `shell_exit_nonzero` has no default
+  repair route;
 - dependency/toolchain/environment diagnostics have no built-in repair route and must fail boundedly; project-specific remediation
   requires an explicit typed owner capability and Profile extension rather than a central default recipe;
 - `source_change` uses the broad `workspace_delivery_change` role; wildcard DoD terminal validation and its repair surface retain
@@ -70,16 +70,18 @@ and converges through the same neutral Runtime owner model. It must not make leg
   while managed Go implementation diagnostics may report only actual `*.go:line[:column]` locations inside the fresh File manifest
   scope. Dependency metadata diagnostics carry zero implementation candidates, have no built-in route and cannot enter the
   prospective implementation repair generation;
-- a matching typed validation rejection without an exact owner-grounded target opens one
-  `validation_failure_repair` semantic generation for the same CWI. The manifest preserves terminal `validation`, exposes only the
-  exact route owner's state-change authority, and binds failure/convergence/route/catalog identities. File feasibility must confirm
-  the bounded prospective set. Repair receipts grant no DoD credit and always require fresh validation;
+- a built-in matching typed validation rejection must include a structured manifest-scoped candidate target. File confirms that
+  existing regular-file surface before SM-2 seals repair authority; a missing observation reaches `repair_surface_unavailable`
+  without semantic target generation. Confirmed directive operation kinds are exactly the route's `file/edit`; repair receipts
+  grant no DoD credit and always require fresh validation;
 - an exact diagnostic with no exact route atomically reaches `validation_failure_repair_route_unavailable` in the rejected-receipt
   CAS, with zero semantic/candidate provider call, capability effect, governance ticket or delayed recovery. Duplicate/restart is
   idempotent, stale catalog/failure lineage cannot seal, and Profile/repair budgets terminate rather than loop;
 - owner candidate conformance must reject a unified diff whose add/update mode conflicts with sealed prospective/existing target
   policy before ordinary feasibility. A later exact resource contradiction retires the binding; any other owner infeasibility on an
   intermediate validation-repair binding atomically reaches `repair_surface_unavailable`, with no SM-4 recovery loop;
+- a provider Definition-gap branch is invalid for `validation_failure_repair` purpose and reaches `repair_surface_unavailable`
+  without correction, clarification ticket or restart authority;
 - confirmed exact-surface repair reuses the rejected validation operation's unique current binding as immutable causation lineage;
   the operations manifest requires that `bindingRef` even when the source focus has validation proof only, while repair receipts
   still grant no terminal validation credit and fresh-load must reverse-prove the same source commitment;

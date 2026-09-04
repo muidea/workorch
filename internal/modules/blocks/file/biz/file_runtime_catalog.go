@@ -55,13 +55,24 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 }
 
 func fileAdmissibilitySelectorRefs(operationKinds []string) []string {
+	newTarget := false
+	existingTarget := false
 	for _, kind := range operationKinds {
 		switch runtimemodel.CanonicalRuntimeBlockKind(kind) {
 		case runtimemodel.StepKindFileWrite, runtimemodel.RuntimeBlockKindPatchApply, runtimemodel.RuntimeBlockKindPatchPreview:
-			return []string{runtimeFileSelectorWorkspaceRelativeNewTarget}
+			newTarget = true
+		case runtimemodel.StepKindFileEdit, runtimemodel.StepKindFileRead, runtimemodel.RuntimeBlockKindPatchRevert:
+			existingTarget = true
 		}
 	}
-	return nil
+	ret := make([]string, 0, 2)
+	if existingTarget {
+		ret = append(ret, runtimeFileSelectorWorkspaceRelativeExistingTarget)
+	}
+	if newTarget {
+		ret = append(ret, runtimeFileSelectorWorkspaceRelativeNewTarget)
+	}
+	return ret
 }
 
 // fileAdmissibilityOperationVariants is the File owner's sole declaration of
@@ -75,8 +86,14 @@ func fileAdmissibilityOperationVariants(operationKinds []string) []runtimemodel.
 		runtimemodel.RuntimeOperationTargetPolicyExistingOwnerScope,
 	}
 	policiesCreate := append(append([]runtimemodel.RuntimeOperationTargetPolicy(nil), policiesExisting...), runtimemodel.RuntimeOperationTargetPolicyProspectiveOwnerTarget)
-	selector := []string{runtimeFileSelectorWorkspaceRelativeNewTarget}
-	constraints := runtimeFileProspectiveTargetAllOfConstraintRefs()
+	newTargetSelector := []string{runtimeFileSelectorWorkspaceRelativeNewTarget}
+	newTargetConstraints := runtimeFileProspectiveTargetAllOfConstraintRefs()
+	existingTargetSelector := []string{runtimeFileSelectorWorkspaceRelativeExistingTarget}
+	existingTargetConstraints := []string{
+		runtimeFileConstraintWorkspaceRelativePath,
+		runtimeFileConstraintExistingTargetListed,
+		runtimeFileConstraintRegularExistingTarget,
+	}
 	ret := make([]runtimemodel.RuntimeOperationAdmissibilityVariant, 0)
 	for _, raw := range operationKinds {
 		kind := runtimemodel.CanonicalRuntimeBlockKind(raw)
@@ -92,10 +109,13 @@ func fileAdmissibilityOperationVariants(operationKinds []string) []runtimemodel.
 				AllowedTargetPolicies: []runtimemodel.RuntimeOperationTargetPolicy{
 					runtimemodel.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 				},
-				SelectorRefs: selector, ConstraintRefs: constraints,
+				SelectorRefs: newTargetSelector, ConstraintRefs: newTargetConstraints,
 			})
 		case runtimemodel.StepKindFileEdit:
-			ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{Kind: kind, AllowedTargetPolicies: policiesExisting})
+			ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{
+				Kind: kind, AllowedTargetPolicies: policiesExisting,
+				SelectorRefs: existingTargetSelector, ConstraintRefs: existingTargetConstraints,
+			})
 		case runtimemodel.RuntimeBlockKindPatchApply:
 			for _, variantID := range []string{patchTypeFileWrite, patchTypeTextReplace, patchTypeUnifiedDiff} {
 				policies := policiesExisting
@@ -103,8 +123,8 @@ func fileAdmissibilityOperationVariants(operationKinds []string) []runtimemodel.
 				variantConstraints := []string{runtimeFileConstraintWorkspaceRelativePath, runtimeFileConstraintExistingTargetListed}
 				if variantID == patchTypeFileWrite || variantID == patchTypeUnifiedDiff {
 					policies = policiesCreate
-					variantSelectors = selector
-					variantConstraints = constraints
+					variantSelectors = newTargetSelector
+					variantConstraints = newTargetConstraints
 				}
 				ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{Kind: kind, VariantID: variantID, AllowedTargetPolicies: policies, SelectorRefs: variantSelectors, ConstraintRefs: variantConstraints})
 			}
@@ -115,8 +135,8 @@ func fileAdmissibilityOperationVariants(operationKinds []string) []runtimemodel.
 				variantConstraints := []string{runtimeFileConstraintWorkspaceRelativePath, runtimeFileConstraintExistingTargetListed}
 				if variantID == patchTypeFileWrite || variantID == patchTypeUnifiedDiff {
 					policies = policiesCreate
-					variantSelectors = selector
-					variantConstraints = constraints
+					variantSelectors = newTargetSelector
+					variantConstraints = newTargetConstraints
 				}
 				ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{Kind: kind, VariantID: variantID, AllowedTargetPolicies: policies, SelectorRefs: variantSelectors, ConstraintRefs: variantConstraints})
 			}

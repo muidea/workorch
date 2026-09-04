@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -71,14 +72,14 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 }
 
 func shellValidationDiagnosticClassAndTarget(output RuntimeCommandResult, validationEvidence runtimemodel.RuntimeValidationEvidence, execCommand string, timedOut bool, policyViolation bool, err error) (string, string, string) {
-	ownerCode := func(fallback string) string {
-		return firstNonEmptyShellString(output.FailureCode, output.FailureReason, fallback)
+	ownerCode := func(class, fallback string) string {
+		return shellValidationOwnerDiagnosticCode(output, validationEvidence, execCommand, class, fallback)
 	}
 	if policyViolation {
-		return runtimemodel.ValidationDiagnosticCommandInvalid, runtimemodel.ValidationEvidenceTargetCommandContract, ownerCode(runtimemodel.ValidationDiagnosticCommandInvalid)
+		return runtimemodel.ValidationDiagnosticCommandInvalid, runtimemodel.ValidationEvidenceTargetCommandContract, ownerCode(runtimemodel.ValidationDiagnosticCommandInvalid, runtimemodel.ValidationDiagnosticCommandInvalid)
 	}
 	if timedOut || strings.EqualFold(output.Status, "timeout") {
-		return runtimemodel.ValidationDiagnosticTimeout, runtimemodel.ValidationEvidenceTargetValidationOutput, ownerCode(runtimemodel.ValidationDiagnosticTimeout)
+		return runtimemodel.ValidationDiagnosticTimeout, runtimemodel.ValidationEvidenceTargetValidationOutput, ownerCode(runtimemodel.ValidationDiagnosticTimeout, runtimemodel.ValidationDiagnosticTimeout)
 	}
 	if output.FailureReason == "command_not_found" || output.CapabilityMissing {
 		return runtimemodel.ValidationDiagnosticEnvironmentMissing, runtimemodel.ValidationEvidenceTargetEnvironment, "command_not_found"
@@ -89,34 +90,64 @@ func shellValidationDiagnosticClassAndTarget(output RuntimeCommandResult, valida
 	// hint so incidental importing .go locations never become File repair
 	// candidates for missing module metadata.
 	if output.ExitCode != 0 && shellGoDependencyMetadataMismatch(output, execCommand) {
-		return runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationEvidenceTargetDependencyContract, ownerCode(runtimemodel.ValidationDiagnosticDependencyMismatch)
+		return runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationEvidenceTargetDependencyContract, ownerCode(runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationDiagnosticDependencyMismatch)
+	}
+	if output.ExitCode != 0 && shellGoTestExecutionFailure(output, execCommand) {
+		return runtimemodel.ValidationDiagnosticTestFailed, runtimemodel.ValidationEvidenceTargetBehaviorEvidence, ownerCode(runtimemodel.ValidationDiagnosticTestFailed, runtimemodel.ValidationDiagnosticTestFailed)
 	}
 	if class := allowedShellValidationDiagnosticClass(firstNonEmptyShellString(
 		validationEvidence.DiagnosticClass, validationEvidence.FailureClass, validationEvidence.ExpectedFailureClass,
 	)); class != "" {
-		return class, firstNonEmptyShellString(validationEvidence.RecommendedEvidenceTargetType, defaultShellValidationDiagnosticTargetType(class)), ownerCode(class)
+		return class, firstNonEmptyShellString(validationEvidence.RecommendedEvidenceTargetType, defaultShellValidationDiagnosticTargetType(class)), ownerCode(class, class)
 	}
 	// Preserve the process failure even if a stale or malformed owner-private
 	// result also carries a zero-work marker from an unrelated subpackage.
 	if output.ExitCode != 0 {
 		switch strings.TrimSpace(firstNonEmptyShellString(validationEvidence.ObservationType, validationEvidence.Observation)) {
 		case "dependency_resolution", "dependency_check", "dependency_contract":
-			return runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationEvidenceTargetDependencyContract, ownerCode(runtimemodel.ValidationDiagnosticDependencyMismatch)
+			return runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationEvidenceTargetDependencyContract, ownerCode(runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationDiagnosticDependencyMismatch)
 		case "toolchain_resolution", "toolchain_check", "toolchain_contract":
-			return runtimemodel.ValidationDiagnosticToolchainMismatch, runtimemodel.ValidationEvidenceTargetToolchainContract, ownerCode(runtimemodel.ValidationDiagnosticToolchainMismatch)
+			return runtimemodel.ValidationDiagnosticToolchainMismatch, runtimemodel.ValidationEvidenceTargetToolchainContract, ownerCode(runtimemodel.ValidationDiagnosticToolchainMismatch, runtimemodel.ValidationDiagnosticToolchainMismatch)
 		case "test_result", "assertion_result", "behavior_test_result":
-			return runtimemodel.ValidationDiagnosticTestFailed, runtimemodel.ValidationEvidenceTargetBehaviorEvidence, ownerCode(runtimemodel.ValidationDiagnosticTestFailed)
+			return runtimemodel.ValidationDiagnosticTestFailed, runtimemodel.ValidationEvidenceTargetBehaviorEvidence, ownerCode(runtimemodel.ValidationDiagnosticTestFailed, runtimemodel.ValidationDiagnosticTestFailed)
 		default:
-			return runtimemodel.ValidationDiagnosticBuildFailed, runtimemodel.ValidationEvidenceTargetFailureSurface, ownerCode(runtimemodel.ValidationDiagnosticBuildFailed)
+			return runtimemodel.ValidationDiagnosticBuildFailed, runtimemodel.ValidationEvidenceTargetFailureSurface, ownerCode(runtimemodel.ValidationDiagnosticBuildFailed, runtimemodel.ValidationDiagnosticBuildFailed)
 		}
 	}
 	if output.ZeroWork || strings.TrimSpace(output.EvidenceQuality) == string(common.EvidenceQualityInconclusive) {
-		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput, ownerCode(runtimemodel.ValidationDiagnosticOutputInconclusive)
+		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput, ownerCode(runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationDiagnosticOutputInconclusive)
 	}
 	if err != nil {
-		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput, ownerCode(runtimemodel.ValidationDiagnosticOutputInconclusive)
+		return runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationEvidenceTargetValidationOutput, ownerCode(runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationDiagnosticOutputInconclusive)
 	}
 	return "", "", ""
+}
+
+func shellValidationOwnerDiagnosticCode(output RuntimeCommandResult, validationEvidence runtimemodel.RuntimeValidationEvidence, execCommand, class, fallback string) string {
+	current := firstNonEmptyShellString(output.FailureCode, output.FailureReason)
+	if current != "" && current != "shell_exit_nonzero" {
+		return current
+	}
+	command := strings.TrimSpace(filepath.Base(execCommand))
+	if command == "" {
+		command = strings.TrimSpace(filepath.Base(output.Command))
+	}
+	if command != "go" || output.ExitCode == 0 {
+		return firstNonEmptyShellString(current, fallback)
+	}
+	text := output.Stdout + "\n" + output.Stderr
+	if class == runtimemodel.ValidationDiagnosticBuildFailed && shellGoModuleDiagnosticPattern.MatchString(text) {
+		return shellcommon.ValidationDiagnosticCodeGoModuleParseFailed
+	}
+	if class == runtimemodel.ValidationDiagnosticBuildFailed &&
+		(shellGoDiagnosticTargetPattern.MatchString(text) || shellGoPackageConflictPattern.MatchString(text)) {
+		return shellcommon.ValidationDiagnosticCodeGoSourceCompileFailed
+	}
+	observation := strings.TrimSpace(firstNonEmptyShellString(validationEvidence.ObservationType, validationEvidence.Observation))
+	if class == runtimemodel.ValidationDiagnosticTestFailed || observation == "test_result" || observation == "assertion_result" || observation == "behavior_test_result" {
+		return shellcommon.ValidationDiagnosticCodeGoTestFailed
+	}
+	return firstNonEmptyShellString(current, fallback)
 }
 
 func shellGoDependencyMetadataMismatch(output RuntimeCommandResult, execCommand string) bool {
@@ -140,6 +171,18 @@ func shellGoDependencyMetadataMismatch(output RuntimeCommandResult, execCommand 
 		}
 	}
 	return false
+}
+
+func shellGoTestExecutionFailure(output RuntimeCommandResult, execCommand string) bool {
+	command := strings.TrimSpace(filepath.Base(execCommand))
+	if command == "" {
+		command = strings.TrimSpace(filepath.Base(output.Command))
+	}
+	if command != "go" || len(output.Args) == 0 || strings.TrimSpace(output.Args[0]) != "test" {
+		return false
+	}
+	text := output.Stdout + "\n" + output.Stderr
+	return strings.Contains(text, "--- FAIL:")
 }
 
 func shellDiagnosticOperationKind(request RuntimeCommandRequest) string {
@@ -179,6 +222,8 @@ func defaultShellValidationDiagnosticTargetType(class string) string {
 		return runtimemodel.ValidationEvidenceTargetToolchainContract
 	case runtimemodel.ValidationDiagnosticEvidenceBindingMissing:
 		return runtimemodel.ValidationEvidenceTargetCoverageBinding
+	case runtimemodel.ValidationDiagnosticTestFailed:
+		return runtimemodel.ValidationEvidenceTargetBehaviorEvidence
 	case runtimemodel.ValidationDiagnosticOutputInconclusive, runtimemodel.ValidationDiagnosticTimeout:
 		return runtimemodel.ValidationEvidenceTargetValidationOutput
 	default:
@@ -188,6 +233,7 @@ func defaultShellValidationDiagnosticTargetType(class string) string {
 
 var (
 	shellGoDiagnosticTargetPattern = regexp.MustCompile(`(?:^|[[:space:]])((?:\./)?[[:alnum:]_./-]+\.go):[0-9]+(?::[0-9]+)?:`)
+	shellGoModuleDiagnosticPattern = regexp.MustCompile(`(?:^|[[:space:]])((?:\./)?(?:go\.mod|go\.work|go\.sum)):[0-9]+(?::[0-9]+)?:`)
 	// go test/go list report a package-name conflict without line/column
 	// locations. The two parenthesized file names and the directory are still
 	// structured tool output and can be safely intersected with the File-owner
@@ -224,20 +270,22 @@ func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, requ
 		return nil, true
 	}
 	seen := make(map[string]struct{})
-	for _, match := range shellGoDiagnosticTargetPattern.FindAllStringSubmatch(output.Stdout+"\n"+output.Stderr, -1) {
-		if len(match) != 2 {
-			continue
-		}
-		value, ok := normalizeShellDiagnosticTargetRef(match[1], output.WorkingDirectory)
-		if !ok {
-			continue
-		}
-		if _, allowed := scope[value]; !allowed {
-			continue
-		}
-		seen[value] = struct{}{}
-		if len(seen) > shellValidationDiagnosticMaxTargetRefs {
-			return nil, false
+	for _, pattern := range []*regexp.Regexp{shellGoDiagnosticTargetPattern, shellGoModuleDiagnosticPattern} {
+		for _, match := range pattern.FindAllStringSubmatch(output.Stdout+"\n"+output.Stderr, -1) {
+			if len(match) != 2 {
+				continue
+			}
+			value, ok := normalizeShellDiagnosticTargetRef(match[1], output.WorkingDirectory)
+			if !ok {
+				continue
+			}
+			if _, allowed := scope[value]; !allowed {
+				continue
+			}
+			seen[value] = struct{}{}
+			if len(seen) > shellValidationDiagnosticMaxTargetRefs {
+				return nil, false
+			}
 		}
 	}
 	for _, match := range shellGoPackageConflictPattern.FindAllStringSubmatch(output.Stdout+"\n"+output.Stderr, -1) {

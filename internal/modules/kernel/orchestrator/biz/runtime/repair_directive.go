@@ -250,6 +250,11 @@ func buildRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimeco
 	}
 	if decision.State == runtimecontract.ConvergenceStateNeedStateChange && confirmedRepairDirectivePurpose(facts, required) {
 		directive.Purpose = runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation
+		if route, found := confirmedValidationRepairRoute(facts); found {
+			// The exact Profile route, not the broader current binding or owner
+			// capability inventory, is the operation authority for this repair.
+			directive.AllowedOperationKinds = append([]string(nil), route.RepairOperationKinds...)
+		}
 	}
 	if facts.Failure != nil {
 		failure := *facts.Failure
@@ -317,6 +322,30 @@ func confirmedRepairDirectivePurpose(facts runtimecontract.RuntimeFacts, require
 		ownerObservation.TargetRole == observation.TargetRole &&
 		sameRuntimeTargetRefs(ownerObservation.TargetRefs, observation.CandidateTargetRefs) &&
 		sameRuntimeTargetRefs(target.TargetRefs, observation.CandidateTargetRefs)
+}
+
+func confirmedValidationRepairRoute(facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeValidationFailureRepairRoute, bool) {
+	facts = facts.Normalized()
+	if facts.Failure == nil || facts.Failure.ValidationDiagnostic == nil || facts.Failure.OriginalDiagnostic == nil ||
+		len(facts.Focus.CoverageWorkItemIDs) != 1 {
+		return runtimecontract.RuntimeValidationFailureRepairRoute{}, false
+	}
+	declaration, found, err := runtimeDefinitionFocusForCoverage(facts.DefinitionFocuses, facts.Focus.CoverageWorkItemIDs[0])
+	if err != nil || !found || declaration.ValidationFailureRepairConvergence == nil {
+		return runtimecontract.RuntimeValidationFailureRepairRoute{}, false
+	}
+	diagnostic := facts.Failure.ValidationDiagnostic.Normalized()
+	original := facts.Failure.OriginalDiagnostic.Normalized()
+	if original == nil {
+		return runtimecontract.RuntimeValidationFailureRepairRoute{}, false
+	}
+	return declaration.ValidationFailureRepairConvergence.RouteForTrigger(
+		original.OwnerModuleID,
+		diagnostic.Operation,
+		diagnostic.Class,
+		diagnostic.RecommendedEvidenceTargetType,
+		diagnostic.OwnerCode,
+	)
 }
 
 // repairClosureRequiredEvidenceKinds is canonical SM-2 repair sequencing. It

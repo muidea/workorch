@@ -309,6 +309,9 @@ func validateOperationReceiptDiagnosticOwner(aggregate RuntimeAggregate, dispatc
 		return fmt.Errorf("managed-validation failure observation requires a validation diagnostic")
 	}
 	validationDiagnostic := normalized.ValidationDiagnostic.Normalized()
+	if validationDiagnostic.Operation != operation.Kind {
+		return fmt.Errorf("managed-validation failure diagnostic operation does not match sealed operation kind")
+	}
 	if validationDiagnostic.Class != observation.DiagnosticClass || !sameRuntimeTargetRefs(validationDiagnostic.TargetRefs, observation.CandidateTargetRefs) {
 		return fmt.Errorf("managed-validation failure observation does not match its diagnostic candidates")
 	}

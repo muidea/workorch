@@ -755,6 +755,11 @@ func TestRuntimeAdapterAdmissibilityPublishesCreateOnlyWriteAndRevisionBoundRepl
 	if len(write.AllowedTargetPolicies) != 1 || write.AllowedTargetPolicies[0] != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget {
 		t.Fatalf("file/write owner fact is not create-only: %+v", write)
 	}
+	edit, found, err := runtimecontract.RuntimeOperationAdmissibilityVariantForProposal(inventory, runtimecontract.StepKindFileEdit, "")
+	if err != nil || !found || !containsString(edit.SelectorRefs, runtimeFileSelectorWorkspaceRelativeExistingTarget) ||
+		!containsString(inventory.SelectorRefs, runtimeFileSelectorWorkspaceRelativeExistingTarget) {
+		t.Fatalf("file/edit owner fact lacks existing-target authorization: edit=%+v inventory=%+v err=%v", edit, inventory, err)
+	}
 	for _, policy := range []runtimecontract.RuntimeOperationTargetPolicy{
 		runtimecontract.RuntimeOperationTargetPolicyExactTarget,
 		runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,

@@ -959,6 +959,7 @@
                 "validation/managed_session",
                 "shell/command",
                 "file/write",
+                "file/edit",
                 "patch/apply",
                 "mcp/tool_call"
               ],
@@ -992,25 +993,64 @@
                 "id": "dod-validation-rejected-implementation-repair",
                 "routes": [
                   {
-                    "id": "build-failure-to-file",
+                    "id": "go-module-parse-to-file-edit",
                     "triggerOwnerModuleId": "blocks/shell",
                     "triggerOperationKind": "validation/managed_session",
                     "triggerDiagnosticClass": "validation_build_failed",
                     "triggerEvidenceTargetType": "failure_surface",
-                    "triggerOwnerDiagnosticCode": "shell_exit_nonzero",
+                    "triggerOwnerDiagnosticCode": "go_module_parse_failed",
                     "repairEvidenceKind": "state_change",
                     "repairOwnerModuleId": "blocks/file",
                     "repairOperationKinds": [
-                      "file/write",
-                      "patch/apply"
+                      "file/edit"
                     ],
-                    "repairTargetPolicy": "prospective_owner_target",
+                    "repairTargetPolicy": "existing_owner_scope",
                     "repairTargetRole": "deliverable_implementation",
                     "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
                     "repairDeclarationTargetSelectorOwnerRef": "software-dev",
                     "repairDeclarationTargetSelectorSubjectRef": "dodItem_repair",
                     "repairDeclarationTargetSelectorCandidateRefs": [],
-                    "repairOperationTargetSelectorRef": "workspace-relative-new-file-target"
+                    "repairOperationTargetSelectorRef": "workspace-relative-existing-file-target"
+                  },
+                  {
+                    "id": "go-source-build-to-file-edit",
+                    "triggerOwnerModuleId": "blocks/shell",
+                    "triggerOperationKind": "validation/managed_session",
+                    "triggerDiagnosticClass": "validation_build_failed",
+                    "triggerEvidenceTargetType": "failure_surface",
+                    "triggerOwnerDiagnosticCode": "go_source_compile_failed",
+                    "repairEvidenceKind": "state_change",
+                    "repairOwnerModuleId": "blocks/file",
+                    "repairOperationKinds": [
+                      "file/edit"
+                    ],
+                    "repairTargetPolicy": "existing_owner_scope",
+                    "repairTargetRole": "deliverable_implementation",
+                    "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
+                    "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+                    "repairDeclarationTargetSelectorSubjectRef": "dodItem_repair",
+                    "repairDeclarationTargetSelectorCandidateRefs": [],
+                    "repairOperationTargetSelectorRef": "workspace-relative-existing-file-target"
+                  },
+                  {
+                    "id": "go-test-failure-to-file-edit",
+                    "triggerOwnerModuleId": "blocks/shell",
+                    "triggerOperationKind": "validation/managed_session",
+                    "triggerDiagnosticClass": "validation_test_failed",
+                    "triggerEvidenceTargetType": "behavior_evidence",
+                    "triggerOwnerDiagnosticCode": "go_test_failed",
+                    "repairEvidenceKind": "state_change",
+                    "repairOwnerModuleId": "blocks/file",
+                    "repairOperationKinds": [
+                      "file/edit"
+                    ],
+                    "repairTargetPolicy": "existing_owner_scope",
+                    "repairTargetRole": "deliverable_implementation",
+                    "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
+                    "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+                    "repairDeclarationTargetSelectorSubjectRef": "dodItem_repair",
+                    "repairDeclarationTargetSelectorCandidateRefs": [],
+                    "repairOperationTargetSelectorRef": "workspace-relative-existing-file-target"
                   }
                 ],
                 "requireFreshValidation": true,

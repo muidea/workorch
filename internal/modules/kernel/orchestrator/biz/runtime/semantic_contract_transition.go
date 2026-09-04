@@ -446,16 +446,24 @@ func applySemanticContractFailureToAggregate(aggregate RuntimeAggregate, termina
 	}
 	aggregate.Facts = facts
 	aggregate.Decision = decision
-	if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "semantic_contract_failed" {
+	expectedTerminalCode := "semantic_contract_failed"
+	if strings.TrimSpace(terminalCode) == "repair_surface_unavailable" {
+		expectedTerminalCode = "repair_surface_unavailable"
+	}
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != expectedTerminalCode {
 		return RuntimeAggregate{}, fmt.Errorf("runtime semantic failure did not seal a terminal decision")
 	}
 	return aggregate, nil
 }
 
 func semanticContractFailureFact(terminalCode string, failure runtimecontract.RuntimeOriginalDiagnostic) runtimecontract.FailureFact {
+	code := "semantic_contract_failed"
+	if strings.TrimSpace(terminalCode) == "repair_surface_unavailable" {
+		code = "repair_surface_unavailable"
+	}
 	return runtimecontract.FailureFact{
 		Class:              semanticFailureClassForFailureCode(terminalCode, failure),
-		Code:               "semantic_contract_failed",
+		Code:               code,
 		Signature:          failure.Signature,
 		Message:            failure.OriginalMessage,
 		OriginalDiagnostic: failure.CloneOriginal(),

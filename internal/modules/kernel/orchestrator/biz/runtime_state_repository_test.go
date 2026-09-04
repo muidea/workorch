@@ -2298,7 +2298,10 @@ func TestRuntimeStateRepositoryValidationFailureObservationReceiptCrashRestartIs
 			observedFailure := runtimecontract.FailureFact{
 				Class: runtimecontract.FailureClassBuildFailure, Code: "implementation_check_failed",
 				Signature: observation.FailureSignature, Message: "capability observed implementation failure",
-				ValidationDiagnostic:         &runtimecontract.ValidationFailureDiagnostic{Class: runtimecontract.ValidationDiagnosticBuildFailed, TargetRefs: append([]string(nil), observation.CandidateTargetRefs...)},
+				ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
+					Class: runtimecontract.ValidationDiagnosticBuildFailed, Operation: request.Operation.Kind,
+					TargetRefs: append([]string(nil), observation.CandidateTargetRefs...),
+				},
 				ValidationFailureObservation: &observation,
 			}
 			receipt := runtimecontract.RuntimeOperationReceipt{
@@ -5227,7 +5230,7 @@ func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueRe
 				CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"},
 			}
 			diagnostic := &runtimecontract.ValidationFailureDiagnostic{
-				Class: validationObservation.DiagnosticClass, OwnerCode: "build_failed",
+				Class: validationObservation.DiagnosticClass, OwnerCode: "build_failed", Operation: request.Operation.Kind,
 				RecommendedEvidenceTargetType: runtimecontract.ValidationEvidenceTargetFailureSurface,
 				TargetRefs:                    append([]string(nil), validationObservation.CandidateTargetRefs...),
 			}

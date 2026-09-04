@@ -82,8 +82,10 @@ func runtimeValidationFailureRepairAggregateForTest(t *testing.T, convergence ru
 		aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, prerequisite)
 		aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, observation)
 	}
-	aggregate.Facts.Capabilities.StateChangeKinds = append(aggregate.Facts.Capabilities.StateChangeKinds, runtimecontract.StepKindFileWrite)
-	aggregate.Definition.CapabilityContract = append(aggregate.Definition.CapabilityContract, runtimecontract.StepKindFileWrite)
+	for _, route := range convergence.Routes {
+		aggregate.Facts.Capabilities.StateChangeKinds = append(aggregate.Facts.Capabilities.StateChangeKinds, route.RepairOperationKinds...)
+		aggregate.Definition.CapabilityContract = append(aggregate.Definition.CapabilityContract, route.RepairOperationKinds...)
+	}
 	aggregate.Facts = aggregate.Facts.Normalized()
 	decision, err := ReduceRuntimeState(aggregate.Facts, nil, aggregate.CoverageProofLineage)
 	if err != nil {
@@ -96,9 +98,9 @@ func runtimeValidationFailureRepairAggregateForTest(t *testing.T, convergence ru
 func runtimeValidationFailureRepairFileCatalogForTest() runtimecontract.RuntimeOperationAdmissibility {
 	catalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "file-repair-catalog", OwnerModuleID: runtimecontract.RuntimeModuleFile,
-		OperationKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply},
-		SelectorRefs:   []string{"file/workspace-relative-new-target"},
-		ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+		OperationKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindPatchApply},
+		SelectorRefs:   []string{"file/workspace-relative-existing-target", "file/workspace-relative-new-target"},
+		ConstraintRefs: []string{"workspace-relative-path", "existing-target-must-be-listed", "new-target-requires-owner-selector"},
 		OperationVariants: []runtimecontract.RuntimeOperationAdmissibilityVariant{
 			{
 				Kind: runtimecontract.StepKindFileWrite,
@@ -106,6 +108,15 @@ func runtimeValidationFailureRepairFileCatalogForTest() runtimecontract.RuntimeO
 					runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 				},
 				SelectorRefs: []string{"file/workspace-relative-new-target"}, ConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+			},
+			{
+				Kind: runtimecontract.StepKindFileEdit,
+				AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+					runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+					runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+				},
+				SelectorRefs:   []string{"file/workspace-relative-existing-target"},
+				ConstraintRefs: []string{"workspace-relative-path", "existing-target-must-be-listed"},
 			},
 			{
 				Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "file_write",
@@ -155,6 +166,7 @@ func runtimeRejectedValidationEvidenceForTest(t *testing.T, sealed RuntimeAggreg
 			Class: runtimecontract.FailureClassBuildFailure, Code: "validation_failed", Signature: "validation-failure/typed/1", Message: "typed validation failed",
 			ValidationDiagnostic: &runtimecontract.ValidationFailureDiagnostic{
 				Class: diagnosticClass, RecommendedEvidenceTargetType: targetType, OwnerCode: "shell_exit_nonzero",
+				Operation: runtimecontract.RuntimeBlockKindManagedValidationSession,
 			},
 		},
 	}
@@ -213,6 +225,37 @@ func TestRejectedTypedValidationWithoutFailureTargetOpensProfileRepairGeneration
 	reloadedInput, reloadedRequired, err := CurrentRuntimeValidationFailureRepairGenerationInput(reloaded)
 	if err != nil || !reloadedRequired || reloadedInput != input {
 		t.Fatalf("restart repair generation input = %+v required=%v err=%v", reloadedInput, reloadedRequired, err)
+	}
+}
+
+func TestRejectedTypedValidationWithoutStructuredTargetTerminatesExistingScopeRoute(t *testing.T) {
+	convergence := runtimeValidationFailureRepairConvergenceForTest(2)
+	convergence.Routes = convergence.Routes[:1]
+	convergence.Routes[0].RepairOperationKinds = []string{runtimecontract.StepKindFileEdit}
+	convergence.Routes[0].RepairTargetPolicy = runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope
+	convergence.Routes[0].RepairOperationTargetSelectorRef = "file/workspace-relative-existing-target"
+	aggregate := runtimeValidationFailureRepairAggregateForTest(t, convergence)
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	coordinator, err := NewDispatchCoordinator(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed := sealCandidateForTest(t, repository, validationCandidate())
+	evidence := runtimeRejectedValidationEvidenceForTest(t, sealed, "event-validation-existing-scope-no-target", runtimecontract.ValidationDiagnosticBuildFailed)
+	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
+	committed, err := coordinator.commitEvidence(context.Background(), evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || committed.Aggregate.Decision.Terminal == nil ||
+		committed.Aggregate.Decision.Terminal.Code != "repair_surface_unavailable" || committed.Aggregate.Facts.Failure == nil ||
+		committed.Aggregate.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible ||
+		committed.Aggregate.Facts.Failure.Code != "repair_surface_unavailable" || committed.Aggregate.Facts.Repair.Exhausted ||
+		committed.Aggregate.DefinitionClarification != nil || committed.Aggregate.Facts.RepairDirective != nil {
+		t.Fatalf("existing-scope rejection without owner target was not closed in receipt CAS: %+v", committed.Aggregate)
+	}
+	if _, required, inputErr := CurrentRuntimeValidationFailureRepairGenerationInput(committed.Aggregate); inputErr != nil || required {
+		t.Fatalf("existing-scope rejection opened semantic target selection: required=%v err=%v", required, inputErr)
 	}
 }
 
@@ -401,6 +444,22 @@ func TestRejectedValidationObservationWaitsForFileConfirmationBeforeSemanticRepa
 	if _, required, inputErr := CurrentRuntimeValidationFailureRepairGenerationInput(reloaded); inputErr != nil || required ||
 		!sealedValidationFailureObservationMatches(reloaded, observation) {
 		t.Fatalf("restart changed pending owner confirmation: required=%v err=%v aggregate=%+v", required, inputErr, reloaded)
+	}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmed, err := controller.recordRepairSurfaceConfirmation(context.Background(), reloaded.Facts.WorkspaceID, reloaded.Facts.RunID, runtimecontract.RuntimeRepairSurfaceConfirmation{
+		Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
+		Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"main.go"}, ObservedRevision: "tree-v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmed = satisfyConfirmedRepairTargetSnapshotsForTest(t, context.Background(), controller, confirmed, "tree-v1")
+	if confirmed.Facts.RepairDirective == nil || confirmed.Facts.RepairDirective.Purpose != runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation ||
+		!reflect.DeepEqual(confirmed.Facts.RepairDirective.AllowedOperationKinds, []string{runtimecontract.StepKindFileWrite}) {
+		t.Fatalf("confirmed repair directive escaped exact Profile operation route: %+v", confirmed.Facts.RepairDirective)
 	}
 }
 

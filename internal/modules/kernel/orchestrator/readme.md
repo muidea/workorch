@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-09-03
+Last Verified: 2026-09-04
 
 ## 功能范围与边界
 
@@ -79,9 +79,11 @@ capability resource state。
   `(owner, operation, diagnostic class, evidence target type, owner code)` 查唯一 route；匹配后只编译该 route 的唯一 owner
   catalog/surface。无 route 时，在提交 rejected receipt 的同一个 private event/CAS 中退休 repair authority并封存
   `validation_failure_repair_route_unavailable`，零 semantic/candidate provider、capability effect、governance 或 SM-4 wait。
-  structured observation 只有匹配 route 才进入 owner confirmation；无 observation 且匹配 route 才进入 bounded semantic
-  repair fallback。observation diagnostic hash 绑定完整 route 字段与 sealed validation scope，并在 receipt admission/fresh-load
-  从 immutable owner receipt 重算。
+  structured observation 只有匹配 route 才进入 owner confirmation；`existing_owner_scope` route 缺少 observation 时在同一 receipt
+  CAS 封存 `repair_surface_unavailable`，不得调用 semantic provider。只有 `prospective_owner_target` exact route 可在无 observation
+  时进入 bounded semantic repair fallback。repair-purpose provider document 返回 Definition gap 时同样走
+  `repair_surface_unavailable` private terminal，不得创建 Definition clarification ticket。observation diagnostic hash 绑定完整
+  route 字段与 sealed validation scope，并在 receipt admission/fresh-load 从 immutable owner receipt 重算。
 - candidate proposal 持久化后，SM-3 必须按 manifest-declared `CandidateConstraints` 的 kind 获取 exact owner fact。
   `parameter_shape` 在 ordinary feasibility 前通过 typed conformance command 完成，owner 只复用自身 parser/matcher 返回封闭
   outcome/shape且不读写 workspace；`target_applicability` 只能由 ordinary typed feasibility 对 current target/revision 返回
@@ -161,7 +163,8 @@ capability resource state。
   `RuntimeRepairSurfaceConfirmation.OwnerModuleID`、candidate 中每个 state-change descriptor owner 与后续 receipt producer 必须
   exact-match。route 的全部 operation descriptor 必须在 Definition pre-seal 共同声明同一个非 `none` confirmation protocol；
   Biz adapter 只按该 technical protocol 发送对应 owner 的 concrete typed command/result。其它 owner 的 catalog/diagnostic 即使
-  同时存在也不能进入该 repair manifest。
+  同时存在也不能进入该 repair manifest。confirmation 后的 repair directive 只能携带 exact route 的 operation kinds，不能继承
+  同 owner catalog、current binding 或 capability inventory 中的其它 state-change kinds。
 - validation failure target 必须来自 sealed finite scope 内的 structured owner observation，再由上述 resource/effect owner 执行
   read-only confirmation；pending/stale/rejected confirmation 均无 concrete repair authority。只有 `need_state_change`
   repair-effect pre-seal manifest 必须将 purpose 固定为 `confirmed_validation_repair`，并在

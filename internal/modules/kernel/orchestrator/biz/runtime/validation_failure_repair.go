@@ -87,6 +87,12 @@ func openRuntimeValidationFailureRepairGeneration(aggregate *RuntimeAggregate, f
 	if err != nil || !matched {
 		return false, err
 	}
+	if trigger.route.RequiresStructuredObservation() {
+		// Existing owner resources are never selected by a target-free LLM
+		// generation. The validation owner must publish an exact bounded
+		// observation and the resource owner must confirm it first.
+		return false, nil
+	}
 	if aggregate.Facts.Repair.Exhausted || aggregate.Facts.Repair.RepairAttempts > trigger.convergence.MaxAttempts {
 		if err := markRuntimeValidationFailureRepairExhausted(&aggregate.Facts, trigger); err != nil {
 			return false, err
@@ -212,6 +218,41 @@ func matchRuntimeValidationFailureRepairTrigger(aggregate RuntimeAggregate, fact
 		return runtimeValidationFailureRepairTrigger{}, false, nil
 	}
 	return trigger, true, nil
+}
+
+// markRuntimeValidationFailureRepairSurfaceUnavailable is the private SM-2
+// terminal transition for an exact existing-scope Profile route whose owner
+// receipt did not contain a structured repair-surface observation. The route
+// exists, but its mandatory owner-fact precondition does not; semantic fallback
+// is therefore forbidden and cannot create Definition clarification authority.
+func markRuntimeValidationFailureRepairSurfaceUnavailable(aggregate *RuntimeAggregate, fact runtimecontract.EvidenceFact, operation runtimecontract.RuntimeOperation) (bool, error) {
+	if aggregate == nil {
+		return false, common.ErrInvalidArgument
+	}
+	trigger, matched, err := matchRuntimeValidationFailureRepairTrigger(*aggregate, fact, operation)
+	if err != nil || !matched || !trigger.route.RequiresStructuredObservation() {
+		return false, err
+	}
+	if trigger.failure.ValidationFailureObservation != nil {
+		return false, nil
+	}
+	facts := aggregate.Facts.Normalized()
+	failure := trigger.failure.Clone()
+	failure.Class = runtimecontract.FailureClassCandidateInfeasible
+	failure.Code = "repair_surface_unavailable"
+	failure.Message = fmt.Sprintf(
+		"validation failure repair route %q requires a structured owner target observation for existing scope",
+		trigger.route.ID,
+	)
+	failure.TargetRefs = nil
+	failure.TargetObservation = nil
+	if err := replaceRuntimeFailureAuthority(&facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+		return false, err
+	}
+	facts.Resources.TargetSelection = nil
+	facts.Resources.TargetSnapshots = nil
+	aggregate.Facts = facts.Normalized()
+	return true, nil
 }
 
 // markRuntimeValidationFailureRepairRouteUnavailable is the private SM-2

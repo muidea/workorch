@@ -956,7 +956,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 						t.Fatalf("dodItem validation failure repair convergence = %+v", repair)
 					}
 					routes, ok := repair["routes"].([]any)
-					if !ok || len(routes) != 1 {
+					if !ok || len(routes) != 3 {
 						t.Fatalf("dodItem validation failure repair routes = %+v", repair["routes"])
 					}
 					routesByID := make(map[string]map[string]any, len(routes))
@@ -968,19 +968,31 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 						id, _ := route["id"].(string)
 						routesByID[id] = route
 					}
-					for _, routeID := range []string{"build-failure-to-file"} {
+					expectedRoutes := map[string]struct {
+						diagnosticClass string
+						targetType      string
+						ownerCode       string
+					}{
+						"go-module-parse-to-file-edit": {diagnosticClass: "validation_build_failed", targetType: "failure_surface", ownerCode: "go_module_parse_failed"},
+						"go-source-build-to-file-edit": {diagnosticClass: "validation_build_failed", targetType: "failure_surface", ownerCode: "go_source_compile_failed"},
+						"go-test-failure-to-file-edit": {diagnosticClass: "validation_test_failed", targetType: "behavior_evidence", ownerCode: "go_test_failed"},
+					}
+					for routeID, expected := range expectedRoutes {
 						route := routesByID[routeID]
 						if route["triggerOwnerModuleId"] != "blocks/shell" || route["triggerOperationKind"] != "validation/managed_session" ||
-							route["triggerDiagnosticClass"] != "validation_build_failed" || route["triggerEvidenceTargetType"] != "failure_surface" ||
-							route["triggerOwnerDiagnosticCode"] != "shell_exit_nonzero" || route["repairEvidenceKind"] != "state_change" ||
-							route["repairOwnerModuleId"] != "blocks/file" || route["repairTargetPolicy"] != "prospective_owner_target" ||
+							route["triggerDiagnosticClass"] != expected.diagnosticClass || route["triggerEvidenceTargetType"] != expected.targetType ||
+							route["triggerOwnerDiagnosticCode"] != expected.ownerCode || route["repairEvidenceKind"] != "state_change" ||
+							route["repairOwnerModuleId"] != "blocks/file" || route["repairTargetPolicy"] != "existing_owner_scope" ||
 							route["repairTargetRole"] != "deliverable_implementation" || route["repairDeclarationTargetSelectorRef"] != "file/workspace_deliverable" ||
 							route["repairDeclarationTargetSelectorOwnerRef"] != "software-dev" || route["repairDeclarationTargetSelectorSubjectRef"] != "dodItem_repair" ||
-							route["repairOperationTargetSelectorRef"] != "workspace-relative-new-file-target" {
+							route["repairOperationTargetSelectorRef"] != "workspace-relative-existing-file-target" {
 							t.Fatalf("dodItem File repair route %q = %+v", routeID, route)
 						}
-						assertStringListContains(t, route["repairOperationKinds"].([]any), "file/write")
-						assertStringListContains(t, route["repairOperationKinds"].([]any), "patch/apply")
+						operationKinds := route["repairOperationKinds"].([]any)
+						if len(operationKinds) != 1 {
+							t.Fatalf("dodItem File repair route %q operations = %+v", routeID, operationKinds)
+						}
+						assertStringListContains(t, operationKinds, "file/edit")
 					}
 					ownerFacts, ok := item["requiredOwnerFacts"].([]any)
 					if !ok || len(ownerFacts) != 1 {

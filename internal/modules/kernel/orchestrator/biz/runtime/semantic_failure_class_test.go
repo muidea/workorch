@@ -14,6 +14,7 @@ func TestSemanticFailureClassForFailureCodePreservesBoundedTerminalCategories(t 
 		want runtimecontract.FailureClass
 	}{
 		{name: "owner infeasible", code: "semantic_owner_feasibility_infeasible", want: runtimecontract.FailureClassCandidateInfeasible},
+		{name: "repair surface unavailable", code: "repair_surface_unavailable", want: runtimecontract.FailureClassCandidateInfeasible},
 		{name: "prospective satisfaction contract violated", code: "prospective_satisfaction_contract_violated", want: runtimecontract.FailureClassRuntimeContractMisalignment},
 		{name: "catalog refresh exhausted", code: "semantic_catalog_refresh_exhausted", want: runtimecontract.FailureClassPrerequisiteRefreshExhausted},
 		{name: "candidate correction exhausted", code: "semantic_plan_retry_exhausted", want: runtimecontract.FailureClassCandidateExhausted},
@@ -36,6 +37,30 @@ func TestSemanticFailureClassForFailureCodePreservesBoundedTerminalCategories(t 
 				t.Fatal("semantic terminal must not infer no-progress exhaustion")
 			}
 		})
+	}
+}
+
+func TestFailSemanticContractSealsRepairSurfaceUnavailableTerminal(t *testing.T) {
+	controller, _, aggregate := newSemanticPlanningController(t)
+	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{
+		SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
+		OwnerModuleID: runtimecontract.RuntimeModuleLLM, OriginalClass: runtimecontract.RuntimeDefinitionGapResultKind,
+		OriginalCode:    string(runtimecontract.RuntimeDefinitionGapSemanticAmbiguity),
+		OriginalMessage: "repair target cannot be selected from the sealed owner facts",
+		Signature:       "repair-definition-gap/1", TargetRefs: []string{"cwi-1"},
+	}
+	failed, err := controller.failSemanticContract(
+		context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "repair_surface_unavailable", diagnostic,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Decision.State != runtimecontract.ConvergenceStateFailed || failed.Decision.Terminal == nil ||
+		failed.Decision.Terminal.Code != "repair_surface_unavailable" || failed.Facts.Failure == nil ||
+		failed.Facts.Failure.Class != runtimecontract.FailureClassCandidateInfeasible || failed.Facts.Failure.Code != "repair_surface_unavailable" ||
+		failed.Facts.Failure.OriginalDiagnostic == nil || failed.Facts.Failure.OriginalDiagnostic.OriginalCode != diagnostic.OriginalCode ||
+		failed.DefinitionClarification != nil {
+		t.Fatalf("repair-purpose semantic gap did not close as owner-local terminal: %+v", failed)
 	}
 }
 

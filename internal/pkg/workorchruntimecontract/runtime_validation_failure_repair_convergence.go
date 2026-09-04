@@ -222,6 +222,15 @@ func (r RuntimeValidationFailureRepairRoute) MatchesTrigger(ownerModuleID, opera
 		r.TriggerOwnerDiagnosticCode == strings.TrimSpace(ownerDiagnosticCode)
 }
 
+// RequiresStructuredObservation reports whether the route can only repair an
+// already-existing owner resource. Such a route cannot ask a semantic provider
+// to invent or select a target: the validation owner must publish bounded
+// candidates and the resource owner must confirm them first.
+func (r RuntimeValidationFailureRepairRoute) RequiresStructuredObservation() bool {
+	r = r.Normalized()
+	return r.RepairTargetPolicy == RuntimeOperationTargetPolicyExistingOwnerScope
+}
+
 // RouteForTrigger returns the unique exact route. Validate rejects duplicate
 // keys, so callers never choose between alternatives.
 func (c RuntimeValidationFailureRepairConvergence) RouteForTrigger(ownerModuleID, operationKind, diagnosticClass, evidenceTargetType, ownerDiagnosticCode string) (RuntimeValidationFailureRepairRoute, bool) {

@@ -266,6 +266,8 @@ const (
 	RuntimeDefinitionGapAdmissionAdmitted      RuntimeDefinitionGapAdmissionDisposition = "admitted"
 	RuntimeDefinitionGapAdmissionRejected      RuntimeDefinitionGapAdmissionDisposition = "rejected"
 	RuntimeDefinitionGapAdmissionStaleConflict RuntimeDefinitionGapAdmissionDisposition = "stale_conflict"
+
+	RuntimeDefinitionGapAdmissionValidationRepairForbidden = "validation_failure_repair_gap_forbidden"
 )
 
 // RuntimeDefinitionGapAdmissionDecision carries a stable classification code;
@@ -313,6 +315,19 @@ func EvaluateRuntimeDefinitionGapAdmission(manifest RuntimeSemanticPlanManifest,
 	}
 	if err := document.ValidateAgainst(normalizedManifest, normalizedExpected); err != nil {
 		return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "document_invalid", err)
+	}
+	for _, obligation := range normalizedManifest.ProofObligations {
+		evidence, err := ResolveRuntimeSemanticEvidenceObligation(obligation)
+		if err != nil {
+			return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "manifest_invalid", err)
+		}
+		if evidence.Purpose == RuntimeSemanticEvidenceObligationValidationFailureRepair {
+			return runtimeDefinitionGapAdmissionFailure(
+				RuntimeDefinitionGapAdmissionRejected,
+				RuntimeDefinitionGapAdmissionValidationRepairForbidden,
+				fmt.Errorf("runtime validation-failure repair cannot be reclassified as a Definition gap"),
+			)
+		}
 	}
 	normalizedDocument := document.Normalized()
 	if normalizedDocument.GapKind == RuntimeDefinitionGapUndeclaredPrerequisite {

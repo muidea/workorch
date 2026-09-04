@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability-index
 
-Last Verified: 2026-09-03
+Last Verified: 2026-09-04
 
 | Topic | Contract |
 | --- | --- |
@@ -20,7 +20,7 @@ The built-in Profile also seals the File-to-Shell prospective-satisfaction contr
 File owns the hypothetical workspace-manifest delta, Shell owns managed-validation applicability, and Orchestrator only joins
 their typed facts inside SM-2; none of the three may transition a sibling owner's state.
 
-Its validation-failure convergence is an exact route table, not terminal `one_of`. The built-in Profile exposes only the
-production-reachable Shell build-failure tuple and binds it to File; it does not advertise implementation/test or
-dependency/toolchain/environment routes that the current typed operation path cannot produce or confirm. Additional remediation
-requires an explicit project-specific owner capability and Profile extension.
+Its validation-failure convergence is an exact route table, not terminal `one_of`. The built-in Profile exposes only three
+Shell-owned, production-reachable Go tuples—module parse, source compile and typed test failure—and binds each to an existing File
+target confirmed by File before `file/edit`. Generic `shell_exit_nonzero` and dependency/toolchain/environment tuples have no
+default repair route. Additional remediation requires an explicit project-specific owner capability and Profile extension.

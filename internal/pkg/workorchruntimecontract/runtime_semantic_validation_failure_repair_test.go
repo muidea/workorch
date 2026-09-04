@@ -56,6 +56,26 @@ func TestCompileRuntimeSemanticValidationFailureRepairSealsOneFileProofAndFreshV
 		len(manifest.AllowedOwnerModuleIDs) != 1 || manifest.AllowedOwnerModuleIDs[0] != RuntimeModuleFile {
 		t.Fatalf("repair manifest was not narrowed to one File proof: %+v", manifest)
 	}
+	batchSequence := 0
+	expectedGap := RuntimeExpectedDocumentContract{
+		SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentSemanticPlan,
+		PlanStep: RuntimeSemanticPlanStepProofBatch, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
+		LogicalRequestID: "repair-gap-request", StablePrefixHash: "repair-gap-prefix", BatchID: "repair-batch", BatchSequence: batchSequence,
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-repair"}, CoverageOrderHash: "repair-order",
+		MaxOutputTokens: 4096, MaxRecoveryAttempts: 1,
+	}
+	expectedGap.Hash = StableRuntimeExpectedDocumentHash(expectedGap)
+	gap := RuntimeDefinitionGapProviderDocument{
+		DocumentKind: RuntimeProviderDocumentSemanticPlan, SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent,
+		ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, ResultKind: RuntimeDefinitionGapResultKind,
+		PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: expectedGap.BatchID, BatchSequence: &batchSequence,
+		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-repair"}, GapKind: RuntimeDefinitionGapSemanticAmbiguity,
+		OffendingItemRefs: []string{"cwi-repair"}, DiagnosticMessage: "The repair target is not clear enough to propose a state change.",
+	}
+	if admission := EvaluateRuntimeDefinitionGapAdmission(manifest, expectedGap, gap); admission.Disposition != RuntimeDefinitionGapAdmissionRejected ||
+		admission.Code != RuntimeDefinitionGapAdmissionValidationRepairForbidden {
+		t.Fatalf("repair-purpose Definition gap admission = %+v", admission)
+	}
 	obligation := manifest.ProofObligations[0]
 	if len(obligation.RequiredEvidenceKinds) != 1 || obligation.RequiredEvidenceKinds[0] != EvidenceKindValidation || obligation.ValidationFailureRepair == nil {
 		t.Fatalf("terminal validation obligation was weakened: %+v", obligation)

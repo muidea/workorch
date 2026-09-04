@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -121,6 +122,54 @@ func TestShellValidationDiagnosticClassifiesGoDependencyMetadataBeforeGenericBui
 	)
 	if class != runtimecontract.ValidationDiagnosticBuildFailed {
 		t.Fatalf("non-Go output borrowed Go dependency classification: %q", class)
+	}
+}
+
+func TestShellValidationDiagnosticPublishesExactGoOwnerCodes(t *testing.T) {
+	tests := []struct {
+		name       string
+		stderr     string
+		evidence   runtimecontract.RuntimeValidationEvidence
+		wantClass  string
+		wantTarget string
+		wantCode   string
+	}{
+		{
+			name: "module parse", stderr: "go: errors parsing go.mod:\ngo.mod:3: unknown directive: package",
+			evidence:  runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed},
+			wantClass: runtimecontract.ValidationDiagnosticBuildFailed, wantTarget: runtimecontract.ValidationEvidenceTargetFailureSurface,
+			wantCode: shellcommon.ValidationDiagnosticCodeGoModuleParseFailed,
+		},
+		{
+			name: "source compile", stderr: "cmd/server/main.go:17:2: undefined: server",
+			evidence:  runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed},
+			wantClass: runtimecontract.ValidationDiagnosticBuildFailed, wantTarget: runtimecontract.ValidationEvidenceTargetFailureSurface,
+			wantCode: shellcommon.ValidationDiagnosticCodeGoSourceCompileFailed,
+		},
+		{
+			name: "test failure", stderr: "--- FAIL: TestServer (0.00s)\n    server_test.go:12: mismatch",
+			wantClass: runtimecontract.ValidationDiagnosticTestFailed, wantTarget: runtimecontract.ValidationEvidenceTargetBehaviorEvidence,
+			wantCode: shellcommon.ValidationDiagnosticCodeGoTestFailed,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			class, target, code := shellValidationDiagnosticClassAndTarget(RuntimeCommandResult{
+				Command: "go", Args: []string{"test", "./..."}, ExitCode: 1, FailureCode: "shell_exit_nonzero", FailureReason: "shell_exit_nonzero", Stderr: test.stderr,
+			}, test.evidence, "go", false, false, errors.New("exit status 1"))
+			if class != test.wantClass || target != test.wantTarget || code != test.wantCode {
+				t.Fatalf("diagnostic = (%q, %q, %q), want (%q, %q, %q)", class, target, code, test.wantClass, test.wantTarget, test.wantCode)
+			}
+		})
+	}
+}
+
+func TestShellValidationDiagnosticKeepsGenericCodeWithoutBoundedGoClassification(t *testing.T) {
+	class, target, code := shellValidationDiagnosticClassAndTarget(RuntimeCommandResult{
+		Command: "go", ExitCode: 1, FailureCode: "shell_exit_nonzero", Stderr: "exit status 1",
+	}, runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed}, "go", false, false, errors.New("exit status 1"))
+	if class != runtimecontract.ValidationDiagnosticBuildFailed || target != runtimecontract.ValidationEvidenceTargetFailureSurface || code != "shell_exit_nonzero" {
+		t.Fatalf("generic diagnostic = (%q, %q, %q)", class, target, code)
 	}
 }
 

@@ -65,6 +65,18 @@ func TestRuntimeValidationFailureRepairConvergenceIsOrderedAllOfAndStable(t *tes
 	}
 }
 
+func TestRuntimeValidationFailureRepairRouteRequiresObservationOnlyForExistingScope(t *testing.T) {
+	prospective := testValidationFailureRepairRoute("prospective", ValidationDiagnosticBuildFailed, ValidationEvidenceTargetFailureSurface)
+	if prospective.RequiresStructuredObservation() {
+		t.Fatal("prospective owner target unexpectedly requires a preexisting observation")
+	}
+	existing := prospective.Clone()
+	existing.RepairTargetPolicy = RuntimeOperationTargetPolicyExistingOwnerScope
+	if !existing.RequiresStructuredObservation() {
+		t.Fatal("existing owner scope did not require a structured owner observation")
+	}
+}
+
 func TestRuntimeValidationFailureRepairConvergenceRejectsIncompletePresealContract(t *testing.T) {
 	valid := testValidationFailureRepairConvergence()
 	for _, tc := range []struct {

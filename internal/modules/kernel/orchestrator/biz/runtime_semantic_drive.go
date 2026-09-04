@@ -588,6 +588,10 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 		if gapErr == nil {
 			admission := runtimecontract.EvaluateRuntimeDefinitionGapAdmission(*ledger.Manifest, *session.ExpectedDocument, gap)
 			if !admission.Admitted() {
+				if admission.Code == runtimecontract.RuntimeDefinitionGapAdmissionValidationRepairForbidden {
+					diagnostic := runtimecontract.RuntimeOriginalDiagnosticFromDefinitionGap(gap)
+					return m.failRuntimeSemanticContract(ctx, aggregate, "repair_surface_unavailable", admission.Message, &diagnostic)
+				}
 				gapErr = fmt.Errorf("runtime Definition gap admission %s (%s): %s", admission.Disposition, admission.Code, admission.Message)
 				return m.handleRuntimeSemanticDocumentDecodeFailure(ctx, aggregate, session, ledger, gapErr)
 			}

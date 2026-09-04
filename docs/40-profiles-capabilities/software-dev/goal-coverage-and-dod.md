@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-09-03
+Last Verified: 2026-09-04
 
 ## Scope
 
@@ -127,20 +127,23 @@ The declaration is sealed only in the immutable `RuntimeDefinitionFocus`. Mutabl
 copy or override it; SM-2 consumes the manifest obligation compiled from that definition snapshot.
 
 Each route binds one exact `(trigger owner, operation kind, diagnostic class, evidence target type, owner diagnostic code)` tuple
-to one repair owner and surface. The built-in executable route binds Shell's deterministic build-failure tuple to File
-`file/write | patch/apply`, the independent Definition selector `file/workspace_deliverable` and File operation selector
-`workspace-relative-new-file-target`. Duplicate trigger tuples or cross-owner operations fail pre-seal. The operation vocabulary is
-a bounded owner capability set; it is not a Goal/DoD `one_of` terminal relation, and an accepted repair receipt cannot itself
-satisfy the DoD validation requirement.
+to one repair owner and surface. The built-in executable routes bind Shell's `go_module_parse_failed`,
+`go_source_compile_failed` and `go_test_failed` facts to File `file/edit`, the independent Definition selector
+`file/workspace_deliverable` and File operation selector `workspace-relative-existing-file-target`. Their target policy is
+`existing_owner_scope`: Shell must publish manifest-scoped structured candidates and File must confirm them before SM-2 creates
+repair authority. Duplicate trigger tuples or cross-owner operations fail pre-seal. The operation vocabulary is a bounded owner
+capability set; it is not a Goal/DoD `one_of` terminal relation, and an accepted repair receipt cannot itself satisfy the DoD
+validation requirement.
 
 The built-in managed-validation wire contains only the sealed `recipeId`; it does not carry a caller-selected failure class.
-Therefore `implementation_gap_detected` and `validation_test_failed` are not declared as default routes while Shell cannot produce
-those exact tuples from the production operation contract. A project Profile may add a route only after its producing owner and
-repair owner publish the complete typed diagnostic and surface-confirmation contracts.
+Shell classifies only its bounded Go tool grammar, while unrecognized failures retain `shell_exit_nonzero` and cannot match a
+default route. A project Profile may add a route only after its producing owner and repair owner publish the complete typed
+diagnostic and surface-confirmation contracts.
 
-The routes contain no exact repair path. Their semantic proposal supplies one bounded prospective target set within both
-independent selectors; File confirms every member, and only SM-2 seals the resulting `CoverageEvidenceBinding`. The complete repair
-receipt atomically retires that binding and reopens the same CWI for fresh validation.
+The built-in routes contain no prospective target selection. Shell's structured candidates remain non-authoritative until File
+confirms the exact current regular-file set; SM-2 then seals a `confirmed_validation_repair` directive whose allowed operation set
+is exactly `file/edit`. Missing structured candidates or rejected File confirmation terminate as `repair_surface_unavailable`.
+The complete repair receipt reopens the same CWI for fresh validation.
 
 Dependency/toolchain/environment diagnostics deliberately have no built-in software-dev route. An unmatched exact tuple seals
 `validation_failure_repair_route_unavailable` in the same owner-private CAS as the rejected receipt; no semantic provider request,

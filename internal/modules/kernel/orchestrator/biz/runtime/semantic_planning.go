@@ -1758,6 +1758,8 @@ func semanticFailureClassForFailureCode(code string, _ runtimecontract.RuntimeOr
 		return runtimecontract.FailureClassProviderProtocol
 	case "semantic_owner_feasibility_infeasible":
 		return runtimecontract.FailureClassCandidateInfeasible
+	case "repair_surface_unavailable":
+		return runtimecontract.FailureClassCandidateInfeasible
 	case "semantic_provider_ceiling_missing", "semantic_catalog_stale", "semantic_owner_catalog_missing", "semantic_owner_prerequisite_required":
 		return runtimecontract.FailureClassCapabilityUnavailable
 	case "runtime_contract_defect", "semantic_context_integrity", "semantic_manifest_invalid", "semantic_request_context_invalid",

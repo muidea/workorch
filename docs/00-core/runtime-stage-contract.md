@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-09-03
+Last Verified: 2026-09-04
 
 ## Purpose
 
@@ -70,9 +70,14 @@ validation failure repair 也必须保持 core owner-neutral：sealed Profile �
 `(trigger owner, operation kind, diagnostic class, evidence target type, owner code)` route，或 source binding 的 operation
 descriptor，先确定唯一 resource/effect owner；该 route 的全部 repair operation 还必须在 pre-seal 共同声明一个可执行的
 typed confirmation protocol，否则 Definition admission 直接阻塞。validation-owner observation 的 diagnostic hash 必须绑定上述
-route 字段和 sealed validation scope；有 observation 且 route 匹配时才可发起 owner confirmation，无 exact route 时必须在
+route 字段和 sealed validation scope，且 receipt admission 必须验证 diagnostic operation kind exact-match sealed operation kind；
+有 observation 且 route 匹配时才可发起 owner confirmation，无 exact route 时必须在
 rejected receipt 的同一 Orchestrator-private CAS 封存 `validation_failure_repair_route_unavailable`。confirmation、candidate
-operations 与 receipts 必须逐项匹配该 owner。只有
+operations 与 receipts 必须逐项匹配该 owner；confirmed repair directive 的 operation kinds 必须精确等于 route 声明，不能从
+同 owner 的宽泛 capability/binding 集合扩张。`existing_owner_scope` route 必须先取得 structured validation observation；缺失时
+同一 receipt CAS 直接封存 `repair_surface_unavailable`，禁止 target-free semantic fallback。只有
+`prospective_owner_target` exact route 才能在无 observation 时开启 bounded semantic target generation。repair-purpose provider
+document 若返回 Definition gap，也必须封存 `repair_surface_unavailable`，不能创建 clarification ticket。只有
 `need_state_change` repair-effect pre-seal manifest 的 purpose 固定为 `confirmed_validation_repair`，
 `RuntimeDispatchRepairCommitment` 必须显式封存
 `RepairOwnerModuleID` 及 origin/confirmation/rejected receipt/evidence/closure lineage；fresh-load 不得依据 capability 名称或
