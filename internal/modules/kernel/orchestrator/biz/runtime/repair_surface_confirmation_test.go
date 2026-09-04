@@ -10,6 +10,26 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func bindRuntimeRepairSurfaceConfirmationRequestForTest(t testing.TB, aggregate RuntimeAggregate, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) runtimecontract.RuntimeRepairSurfaceConfirmation {
+	t.Helper()
+	plan, err := CurrentRuntimeRepairSurfaceConfirmationPlan(aggregate)
+	if err != nil || !plan.Required() {
+		t.Fatalf("repair-surface confirmation test plan = %+v err=%v", plan, err)
+	}
+	confirmation.RequestID = plan.RequestID
+	confirmation.IssuedAtStateRevision = plan.IssuedAtStateRevision
+	confirmation.ExpectedSubjectRevision = plan.ExpectedSubjectRevision
+	switch confirmation.Disposition {
+	case runtimecontract.RuntimeRepairSurfaceConfirmed, runtimecontract.RuntimeRepairSurfaceRejected:
+		confirmation.ObservedRevision = plan.ExpectedSubjectRevision
+	case runtimecontract.RuntimeRepairSurfaceStale:
+		if strings.TrimSpace(confirmation.ObservedRevision) == "" || confirmation.ObservedRevision == plan.ExpectedSubjectRevision {
+			confirmation.ObservedRevision = plan.ExpectedSubjectRevision + "-stale"
+		}
+	}
+	return confirmation
+}
+
 func TestRepairSurfaceConfirmationCreatesFreshStateChangeAuthority(t *testing.T) {
 	aggregate, observation := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("a", 64))
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
@@ -21,7 +41,7 @@ func TestRepairSurfaceConfirmationCreatesFreshStateChangeAuthority(t *testing.T)
 	if _, err := controller.recordValidationFailureObservation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, observation); err != nil {
 		t.Fatalf("validation fact identity: %v", err)
 	}
-	confirmation := runtimecontract.RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"main.go"}, ObservedRevision: "tree-v1"}
+	confirmation := bindRuntimeRepairSurfaceConfirmationRequestForTest(t, aggregate, runtimecontract.RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"main.go"}, ObservedRevision: "tree-v1"})
 	confirmed, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, confirmation)
 	if err != nil {
 		t.Fatalf("confirm repair surface: %v", err)
@@ -47,6 +67,123 @@ func TestRepairSurfaceConfirmationCreatesFreshStateChangeAuthority(t *testing.T)
 	}
 }
 
+func TestRuntimeAggregateRejectsCoordinatedRepairSurfaceRequestFenceTamper(t *testing.T) {
+	aggregate, observation := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("5", 64))
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmation := bindRuntimeRepairSurfaceConfirmationRequestForTest(t, aggregate, runtimecontract.RuntimeRepairSurfaceConfirmation{
+		Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef:  runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef,
+		Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: append([]string(nil), observation.CandidateTargetRefs...),
+		ObservedRevision: "tree-fence-v1",
+	})
+	confirmed, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, confirmation)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("self-consistent request hash cannot change the issued lineage", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, confirmed)
+		record := &tampered.RepairSurfaceConfirmations[0]
+		record.Confirmation.RequestID = stableRuntimeRepairSurfaceConfirmationRequestID(
+			record.Confirmation.Observation,
+			record.Confirmation.OwnerModuleID,
+			runtimecontract.RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets,
+			record.Confirmation.SubjectRef,
+			record.Confirmation.ExpectedSubjectRevision,
+			record.Confirmation.IssuedAtStateRevision,
+			"forged-refresh-lineage",
+		)
+		record.Signature = runtimecontract.StableRuntimeRepairSurfaceConfirmationHash(record.Confirmation)
+		record.IdentitySignature = runtimecontract.StableRuntimeRepairSurfaceConfirmationIdentityHash(record.Confirmation)
+		if err := tampered.Validate(); err == nil || !strings.Contains(err.Error(), "request fence does not match its persisted window") {
+			t.Fatalf("fresh load accepted coordinated request-id/hash tamper: %v", err)
+		}
+	})
+
+	t.Run("issued and recorded revisions cannot move beyond the owner CAS", func(t *testing.T) {
+		tampered := cloneRuntimeAggregateForMCPProvenanceTest(t, confirmed)
+		record := &tampered.RepairSurfaceConfirmations[0]
+		record.Confirmation.IssuedAtStateRevision++
+		record.RecordedAtStateRevision = record.Confirmation.IssuedAtStateRevision + 1
+		record.Confirmation.RequestID = stableRuntimeRepairSurfaceConfirmationRequestID(
+			record.Confirmation.Observation,
+			record.Confirmation.OwnerModuleID,
+			runtimecontract.RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets,
+			record.Confirmation.SubjectRef,
+			record.Confirmation.ExpectedSubjectRevision,
+			record.Confirmation.IssuedAtStateRevision,
+			"initial",
+		)
+		record.Signature = runtimecontract.StableRuntimeRepairSurfaceConfirmationHash(record.Confirmation)
+		record.IdentitySignature = runtimecontract.StableRuntimeRepairSurfaceConfirmationIdentityHash(record.Confirmation)
+		if err := tampered.Validate(); err == nil || !strings.Contains(err.Error(), "recorded after the current state revision") {
+			t.Fatalf("fresh load accepted coordinated request revision/hash tamper: %v", err)
+		}
+	})
+}
+
+func TestRuntimeRepairSurfaceConfirmationChronologyIsGlobalAcrossObservations(t *testing.T) {
+	first := runtimeRepairSurfaceConfirmationChronologyRecordForTest(t, "first", 10)
+	second := runtimeRepairSurfaceConfirmationChronologyRecordForTest(t, "second", 12)
+	if err := validateRuntimeRepairSurfaceConfirmationChronology(13, []runtimecontract.RuntimeRepairSurfaceConfirmationRecord{first, second}); err != nil {
+		t.Fatalf("valid global confirmation chronology: %v", err)
+	}
+
+	for name, records := range map[string][]runtimecontract.RuntimeRepairSurfaceConfirmationRecord{
+		"duplicate recorded revision": {
+			first,
+			runtimeRepairSurfaceConfirmationChronologyRecordForTest(t, "second-same-revision", 10),
+		},
+		"reverse append order": {
+			runtimeRepairSurfaceConfirmationChronologyRecordForTest(t, "first-later", 20),
+			runtimeRepairSurfaceConfirmationChronologyRecordForTest(t, "second-earlier", 10),
+		},
+		"overlapping request window": {
+			first,
+			runtimeRepairSurfaceConfirmationChronologyRecordForTest(t, "second-overlap", first.RecordedAtStateRevision),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateRuntimeRepairSurfaceConfirmationChronology(64, records); err == nil ||
+				!strings.Contains(err.Error(), "does not follow the global confirmation history") {
+				t.Fatalf("invalid cross-observation chronology was accepted: %v", err)
+			}
+		})
+	}
+
+	if err := validateRuntimeRepairSurfaceConfirmationChronology(second.RecordedAtStateRevision-1, []runtimecontract.RuntimeRepairSurfaceConfirmationRecord{first, second}); err == nil ||
+		!strings.Contains(err.Error(), "recorded after the current state revision") {
+		t.Fatalf("future confirmation record was accepted: %v", err)
+	}
+}
+
+func runtimeRepairSurfaceConfirmationChronologyRecordForTest(t testing.TB, sequence string, issuedAt uint64) runtimecontract.RuntimeRepairSurfaceConfirmationRecord {
+	t.Helper()
+	observation := runtimecontract.RuntimeValidationFailureObservation{
+		WorkspaceID: "ws-confirmation-chronology", RunID: "run-confirmation-chronology",
+		AuthoritySnapshotID: "authority-" + sequence, DispatchID: "dispatch-" + sequence,
+		OperationID: "operation-" + sequence, FailureSignature: "failure-" + sequence,
+		TargetRole: "implementation", DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed,
+		CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"},
+		DiagnosticHash: strings.Repeat("a", 64),
+	}
+	record, err := runtimecontract.NewRuntimeRepairSurfaceConfirmationRecord(runtimecontract.RuntimeRepairSurfaceConfirmation{
+		RequestID: "request-" + sequence, IssuedAtStateRevision: issuedAt, ExpectedSubjectRevision: "tree-expected-" + sequence,
+		Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		SubjectRef:       runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef,
+		Disposition:      runtimecontract.RuntimeRepairSurfaceStale,
+		ObservedRevision: "tree-observed-" + sequence,
+	})
+	if err != nil {
+		t.Fatalf("build confirmation chronology record: %v", err)
+	}
+	return record
+}
+
 func TestRejectedRepairSurfaceFailsBeforeAnotherValidationCandidate(t *testing.T) {
 	aggregate, observation := validationRepairSurfaceObservedAggregateForTest(t, false, strings.Repeat("b", 64))
 	beforeRepairAttempts := aggregate.Facts.Repair.RepairAttempts
@@ -55,7 +192,8 @@ func TestRejectedRepairSurfaceFailsBeforeAnotherValidationCandidate(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: runtimecontract.RuntimeRepairSurfaceRejected, ObservedRevision: "tree-v1", Reason: "not a regular file"})
+	confirmation := bindRuntimeRepairSurfaceConfirmationRequestForTest(t, aggregate, runtimecontract.RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: runtimecontract.RuntimeRepairSurfaceRejected, ObservedRevision: "tree-v1", Reason: "not a regular file"})
+	failed, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, confirmation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,11 +204,14 @@ func TestRejectedRepairSurfaceFailsBeforeAnotherValidationCandidate(t *testing.T
 		t.Fatalf("rejected repair surface consumed or misclassified repair budget: failure=%+v repair=%+v", failed.Facts.Failure, failed.Facts.Repair)
 	}
 	beforeRevision := failed.StateRevision
-	replayed, err := controller.recordRepairSurfaceConfirmation(context.Background(), failed.Facts.WorkspaceID, failed.Facts.RunID, runtimecontract.RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: runtimecontract.RuntimeRepairSurfaceRejected, ObservedRevision: "tree-v1", Reason: "not a regular file"})
+	replayed, err := controller.recordRepairSurfaceConfirmation(context.Background(), failed.Facts.WorkspaceID, failed.Facts.RunID, confirmation)
 	if err != nil || replayed.StateRevision != beforeRevision || len(replayed.RepairSurfaceConfirmations) != 1 {
 		t.Fatalf("exact rejected confirmation replay changed state: err=%v revision=%d want=%d records=%+v", err, replayed.StateRevision, beforeRevision, replayed.RepairSurfaceConfirmations)
 	}
-	_, err = controller.recordRepairSurfaceConfirmation(context.Background(), failed.Facts.WorkspaceID, failed.Facts.RunID, runtimecontract.RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"main.go"}, ObservedRevision: "tree-v1", Reason: "not a regular file"})
+	conflicting := confirmation
+	conflicting.Disposition = runtimecontract.RuntimeRepairSurfaceConfirmed
+	conflicting.ConfirmedTargetRefs = []string{"main.go"}
+	_, err = controller.recordRepairSurfaceConfirmation(context.Background(), failed.Facts.WorkspaceID, failed.Facts.RunID, conflicting)
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("conflicting rejected confirmation was accepted: %v", err)
 	}
@@ -84,11 +225,11 @@ func TestStaleRepairSurfaceReacquiresOwnerPrerequisiteWithoutTerminal(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	stale, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID,
-		runtimecontract.RuntimeRepairSurfaceConfirmation{
-			Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
-			Disposition: runtimecontract.RuntimeRepairSurfaceStale, ObservedRevision: "tree-v2", Reason: "workspace revision changed",
-		})
+	confirmation := bindRuntimeRepairSurfaceConfirmationRequestForTest(t, aggregate, runtimecontract.RuntimeRepairSurfaceConfirmation{
+		Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
+		Disposition: runtimecontract.RuntimeRepairSurfaceStale, ObservedRevision: "tree-v2", Reason: "workspace revision changed",
+	})
+	stale, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, confirmation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,11 +253,14 @@ func TestStaleRepairSurfaceReacquiresOwnerPrerequisiteWithoutTerminal(t *testing
 		t.Fatalf("stale repair surface did not schedule target refresh: %+v", stale.Facts.Prerequisites.Pending)
 	}
 	beforeRevision := stale.StateRevision
-	replayed, err := controller.recordRepairSurfaceConfirmation(context.Background(), stale.Facts.WorkspaceID, stale.Facts.RunID, runtimecontract.RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: runtimecontract.RuntimeRepairSurfaceStale, ObservedRevision: "tree-v2", Reason: "workspace revision changed"})
+	replayed, err := controller.recordRepairSurfaceConfirmation(context.Background(), stale.Facts.WorkspaceID, stale.Facts.RunID, confirmation)
 	if err != nil || replayed.StateRevision != beforeRevision || len(replayed.RepairSurfaceConfirmations) != 1 {
 		t.Fatalf("exact stale confirmation replay changed state: err=%v revision=%d want=%d records=%+v", err, replayed.StateRevision, beforeRevision, replayed.RepairSurfaceConfirmations)
 	}
-	_, err = controller.recordRepairSurfaceConfirmation(context.Background(), stale.Facts.WorkspaceID, stale.Facts.RunID, runtimecontract.RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: runtimecontract.RuntimeRepairSurfaceRejected, ObservedRevision: "tree-v2", Reason: "workspace revision changed"})
+	conflicting := confirmation
+	conflicting.Disposition = runtimecontract.RuntimeRepairSurfaceRejected
+	conflicting.ObservedRevision = conflicting.ExpectedSubjectRevision
+	_, err = controller.recordRepairSurfaceConfirmation(context.Background(), stale.Facts.WorkspaceID, stale.Facts.RunID, conflicting)
 	if !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("conflicting stale confirmation was accepted: %v", err)
 	}
@@ -134,6 +278,7 @@ func TestRepairSurfaceConfirmationRequiresSealedOwnerAtCommitAndFreshLoad(t *tes
 		SubjectRef: "foreign-repair-surface", Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed,
 		ConfirmedTargetRefs: append([]string(nil), observation.CandidateTargetRefs...), ObservedRevision: "mcp-v1",
 	}.Normalized()
+	invalid = bindRuntimeRepairSurfaceConfirmationRequestForTest(t, aggregate, invalid)
 	beforeRevision := repository.aggregate.StateRevision
 	if _, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, invalid); !errors.Is(err, common.ErrConflict) ||
 		!strings.Contains(err.Error(), "owner does not match sealed repair provenance") {
@@ -142,15 +287,37 @@ func TestRepairSurfaceConfirmationRequiresSealedOwnerAtCommitAndFreshLoad(t *tes
 	if repository.aggregate.StateRevision != beforeRevision || len(repository.aggregate.RepairSurfaceConfirmations) != 0 || repository.aggregate.Facts.Resources.FailureTarget != nil {
 		t.Fatalf("non-owner confirmation changed Runtime authority: %+v", repository.aggregate)
 	}
+	wrongSubject := invalid
+	wrongSubject.OwnerModuleID = runtimecontract.RuntimeModuleFile
+	wrongSubject.SubjectRef = "workspace_other"
+	wrongSubject = bindRuntimeRepairSurfaceConfirmationRequestForTest(t, aggregate, wrongSubject)
+	if _, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, wrongSubject); !errors.Is(err, common.ErrConflict) ||
+		!strings.Contains(err.Error(), "subject does not match current protocol") {
+		t.Fatalf("wrong-subject confirmation commit error = %v", err)
+	}
+	if repository.aggregate.StateRevision != beforeRevision || len(repository.aggregate.RepairSurfaceConfirmations) != 0 || repository.aggregate.Facts.Resources.FailureTarget != nil {
+		t.Fatalf("wrong-subject confirmation changed Runtime authority: %+v", repository.aggregate)
+	}
 
+	invalidRecord, err := runtimecontract.NewRuntimeRepairSurfaceConfirmationRecord(invalid)
+	if err != nil {
+		t.Fatal(err)
+	}
 	tampered := aggregate
-	tampered.RepairSurfaceConfirmations = append(tampered.RepairSurfaceConfirmations, runtimecontract.RuntimeRepairSurfaceConfirmationRecord{
-		Confirmation:      invalid,
-		Signature:         runtimecontract.StableRuntimeRepairSurfaceConfirmationHash(invalid),
-		IdentitySignature: runtimecontract.StableRuntimeRepairSurfaceConfirmationIdentityHash(invalid),
-	})
+	tampered.RepairSurfaceConfirmations = append(tampered.RepairSurfaceConfirmations, invalidRecord)
+	tampered.StateRevision = invalidRecord.RecordedAtStateRevision
 	if err := tampered.Validate(); err == nil || !strings.Contains(err.Error(), "owner does not match sealed repair provenance") {
 		t.Fatalf("fresh-load wrong-owner confirmation error = %v", err)
+	}
+	wrongSubjectRecord, err := runtimecontract.NewRuntimeRepairSurfaceConfirmationRecord(wrongSubject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tamperedSubject := aggregate
+	tamperedSubject.RepairSurfaceConfirmations = append(tamperedSubject.RepairSurfaceConfirmations, wrongSubjectRecord)
+	tamperedSubject.StateRevision = wrongSubjectRecord.RecordedAtStateRevision
+	if err := tamperedSubject.Validate(); err == nil || !strings.Contains(err.Error(), "subject does not match sealed owner protocol") {
+		t.Fatalf("fresh-load wrong-subject confirmation error = %v", err)
 	}
 }
 
@@ -165,6 +332,7 @@ func TestRepairSurfaceConfirmationTerminalResponseFencesLaterRevisions(t *testin
 		Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
 		Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: append([]string(nil), observation.CandidateTargetRefs...), ObservedRevision: "tree-v1",
 	}
+	confirmed = bindRuntimeRepairSurfaceConfirmationRequestForTest(t, aggregate, confirmed)
 	resolved, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, confirmed)
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +341,7 @@ func TestRepairSurfaceConfirmationTerminalResponseFencesLaterRevisions(t *testin
 	lateRejected := confirmed
 	lateRejected.Disposition = runtimecontract.RuntimeRepairSurfaceRejected
 	lateRejected.ConfirmedTargetRefs = nil
-	lateRejected.ObservedRevision = "tree-v2"
+	lateRejected.ObservedRevision = lateRejected.ExpectedSubjectRevision
 	lateRejected.Reason = "late owner response"
 	if _, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, lateRejected); !errors.Is(err, common.ErrConflict) ||
 		!strings.Contains(err.Error(), "already has terminal target authority") {
@@ -190,15 +358,76 @@ func TestRepairSurfaceConfirmationTerminalResponseFencesLaterRevisions(t *testin
 	}
 	tampered.RepairSurfaceConfirmations = append(tampered.RepairSurfaceConfirmations, lateRecord)
 	if err := tampered.Validate(); err == nil || (!strings.Contains(err.Error(), "follows terminal response") &&
+		!strings.Contains(err.Error(), "conflict for issued request") &&
 		!strings.Contains(err.Error(), "exact confirmed owner repair surface") &&
 		!strings.Contains(err.Error(), "no exact owner-confirmed failure authority")) {
 		t.Fatalf("fresh-load post-terminal confirmation error = %v", err)
 	}
 }
 
-func TestRepairSurfaceConfirmationStaleRevisionMayRefreshBeforeTerminalResponse(t *testing.T) {
-	aggregate, observation := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("6", 64))
+func TestRepairSurfaceConfirmationFencesInFlightResponseAfterAdministrativeTermination(t *testing.T) {
+	aggregate, observation := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("8", 64))
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminated, err := controller.requestTermination(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID,
+		runtimecontract.RuntimeTerminationCancelled, "blocks/run", "operator cancelled the run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmation := runtimecontract.RuntimeRepairSurfaceConfirmation{
+		Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
+		Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: append([]string(nil), observation.CandidateTargetRefs...),
+		ObservedRevision: "tree-after-cancel-v1",
+	}
+	confirmation = bindRuntimeRepairSurfaceConfirmationRequestForTest(t, aggregate, confirmation)
+	if _, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, confirmation); !errors.Is(err, common.ErrConflict) ||
+		!strings.Contains(err.Error(), "administrative termination") {
+		t.Fatalf("in-flight confirmation after termination error = %v", err)
+	}
+	if repository.aggregate.StateRevision != terminated.StateRevision || len(repository.aggregate.RepairSurfaceConfirmations) != 0 {
+		t.Fatalf("in-flight confirmation changed terminated authority: %+v", repository.aggregate)
+	}
+}
+
+func TestRepairSurfaceConfirmationExactReplayRemainsNoOpAfterAdministrativeTermination(t *testing.T) {
+	aggregate, observation := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("9", 64))
+	repository := &durableRuntimeStateRepository{aggregate: aggregate}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmation := runtimecontract.RuntimeRepairSurfaceConfirmation{
+		Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
+		Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: append([]string(nil), observation.CandidateTargetRefs...),
+		ObservedRevision: "tree-before-cancel-v1",
+	}
+	confirmation = bindRuntimeRepairSurfaceConfirmationRequestForTest(t, aggregate, confirmation)
+	confirmed, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, confirmation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminated, err := controller.requestTermination(context.Background(), confirmed.Facts.WorkspaceID, confirmed.Facts.RunID,
+		runtimecontract.RuntimeTerminationCancelled, "blocks/run", "operator cancelled the run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, confirmation)
+	if err != nil {
+		t.Fatalf("exact persisted confirmation replay after termination: %v", err)
+	}
+	if replayed.StateRevision != terminated.StateRevision || replayed.Termination == nil || len(replayed.RepairSurfaceConfirmations) != 1 {
+		t.Fatalf("exact replay changed terminated authority: %+v", replayed)
+	}
+}
+
+func TestRepairSurfaceConfirmationStaleRevisionRequiresPrerequisiteReplanBeforeFreshResponse(t *testing.T) {
+	aggregate, observation := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("6", 64), func(aggregate *RuntimeAggregate) {
+		aggregate.Facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus = 2
+	})
+	repository := &controllerRepository{aggregate: &aggregate}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
 		t.Fatal(err)
@@ -207,21 +436,100 @@ func TestRepairSurfaceConfirmationStaleRevisionMayRefreshBeforeTerminalResponse(
 		Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
 		Disposition: runtimecontract.RuntimeRepairSurfaceStale, ObservedRevision: "tree-v1", Reason: "workspace changed during observation",
 	}
-	if _, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, stale); err != nil {
-		t.Fatal(err)
-	}
-	confirmed := stale
-	confirmed.Disposition = runtimecontract.RuntimeRepairSurfaceConfirmed
-	confirmed.ConfirmedTargetRefs = append([]string(nil), observation.CandidateTargetRefs...)
-	confirmed.ObservedRevision = "tree-v2"
-	confirmed.Reason = ""
-	refreshed, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, confirmed)
+	stale = bindRuntimeRepairSurfaceConfirmationRequestForTest(t, aggregate, stale)
+	staleCommitted, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, stale)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(refreshed.RepairSurfaceConfirmations) != 2 || refreshed.Facts.Resources.FailureTarget == nil ||
-		!sameRuntimeTargetRefs(refreshed.Facts.Resources.FailureTarget.TargetRefs, observation.CandidateTargetRefs) {
-		t.Fatalf("stale-to-confirmed sequence did not establish current authority: %+v", refreshed)
+	if staleCommitted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(staleCommitted.Facts.Prerequisites.Pending) == 0 {
+		t.Fatalf("stale confirmation did not enter prerequisite reacquisition: %+v", staleCommitted)
+	}
+
+	// This response belongs to a read that was already in flight when the stale
+	// response committed. Its different observed revision used to bypass the
+	// response-identity fence and establish repair authority before SM-2 had
+	// reacquired its prerequisite.
+	lateOldConfirmed := stale
+	lateOldConfirmed.Disposition = runtimecontract.RuntimeRepairSurfaceConfirmed
+	lateOldConfirmed.ConfirmedTargetRefs = append([]string(nil), observation.CandidateTargetRefs...)
+	lateOldConfirmed.ObservedRevision = lateOldConfirmed.ExpectedSubjectRevision
+	lateOldConfirmed.Reason = ""
+	beforeLateRevision, beforeLateSaves := repository.aggregate.StateRevision, repository.saves
+	if _, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, lateOldConfirmed); !errors.Is(err, common.ErrConflict) ||
+		!strings.Contains(err.Error(), "does not require repair surface confirmation") {
+		t.Fatalf("late pre-replan confirmation error = %v", err)
+	}
+	if repository.saves != beforeLateSaves || repository.aggregate.StateRevision != beforeLateRevision ||
+		len(repository.aggregate.RepairSurfaceConfirmations) != 1 || repository.aggregate.Facts.Resources.FailureTarget != nil {
+		t.Fatalf("late pre-replan confirmation changed authority: saves=%d/%d aggregate=%+v", repository.saves, beforeLateSaves, repository.aggregate)
+	}
+
+	var snapshotPrerequisiteID string
+	for _, prerequisite := range staleCommitted.Facts.Prerequisites.Pending {
+		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && prerequisite.SubjectRef == "main.go" {
+			snapshotPrerequisiteID = prerequisite.ID
+			break
+		}
+	}
+	if snapshotPrerequisiteID == "" {
+		t.Fatalf("stale confirmation did not request a fresh target snapshot: %+v", staleCommitted.Facts.Prerequisites.Pending)
+	}
+	refreshed, err := controller.commitPrerequisite(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{
+		PrerequisiteID: snapshotPrerequisiteID,
+		TargetSnapshot: &runtimecontract.TargetSnapshot{
+			TargetRef: "main.go", Content: "package main", ContentHash: "content-current-v3", ContentState: runtimecontract.SnapshotContentStateComplete,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshed = commitRefreshedFileRepairSurfaceCatalogForTest(t, controller, aggregate, refreshed, "tree-current-v3")
+	plan, err := CurrentRuntimeRepairSurfaceConfirmationPlan(refreshed)
+	if err != nil || !plan.Required() || plan.Protocol != runtimecontract.RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets ||
+		plan.OwnerModuleID != runtimecontract.RuntimeModuleFile || !runtimecontract.SameRuntimeValidationFailureObservation(plan.Observation, observation) {
+		t.Fatalf("reacquired prerequisite did not reopen the exact current confirmation plan: plan=%+v err=%v aggregate=%+v", plan, err, refreshed)
+	}
+	if plan.RequestID == stale.RequestID || plan.IssuedAtStateRevision == stale.IssuedAtStateRevision {
+		t.Fatalf("reopened confirmation window reused stale request fence: stale=%+v current=%+v", stale, plan)
+	}
+	beforeReopenLateRevision, beforeReopenLateSaves := repository.aggregate.StateRevision, repository.saves
+	if _, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, lateOldConfirmed); !errors.Is(err, common.ErrConflict) ||
+		!strings.Contains(err.Error(), "does not match current confirmation window") {
+		t.Fatalf("late response crossed reopened confirmation window: %v", err)
+	}
+	if repository.saves != beforeReopenLateSaves || repository.aggregate.StateRevision != beforeReopenLateRevision ||
+		len(repository.aggregate.RepairSurfaceConfirmations) != 1 || repository.aggregate.Facts.Resources.FailureTarget != nil {
+		t.Fatalf("late reopened-window response changed authority: saves=%d/%d aggregate=%+v", repository.saves, beforeReopenLateSaves, repository.aggregate)
+	}
+
+	currentConfirmed := lateOldConfirmed
+	currentConfirmed.RequestID = plan.RequestID
+	currentConfirmed.IssuedAtStateRevision = plan.IssuedAtStateRevision
+	currentConfirmed.ExpectedSubjectRevision = plan.ExpectedSubjectRevision
+	currentConfirmed.ObservedRevision = plan.ExpectedSubjectRevision
+	confirmed, err := controller.recordRepairSurfaceConfirmation(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, currentConfirmed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(confirmed.RepairSurfaceConfirmations) != 2 || confirmed.Facts.Resources.FailureTarget == nil ||
+		!sameRuntimeTargetRefs(confirmed.Facts.Resources.FailureTarget.TargetRefs, observation.CandidateTargetRefs) {
+		t.Fatalf("post-replan current confirmation did not establish authority: %+v", confirmed)
+	}
+	reopenedTamper := cloneRuntimeAggregateForMCPProvenanceTest(t, confirmed)
+	reopenedRecord := &reopenedTamper.RepairSurfaceConfirmations[1]
+	reopenedRecord.Confirmation.RequestID = stableRuntimeRepairSurfaceConfirmationRequestID(
+		reopenedRecord.Confirmation.Observation,
+		reopenedRecord.Confirmation.OwnerModuleID,
+		runtimecontract.RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets,
+		reopenedRecord.Confirmation.SubjectRef,
+		reopenedRecord.Confirmation.ExpectedSubjectRevision,
+		reopenedRecord.Confirmation.IssuedAtStateRevision,
+		"initial",
+	)
+	reopenedRecord.Signature = runtimecontract.StableRuntimeRepairSurfaceConfirmationHash(reopenedRecord.Confirmation)
+	reopenedRecord.IdentitySignature = runtimecontract.StableRuntimeRepairSurfaceConfirmationIdentityHash(reopenedRecord.Confirmation)
+	if err := reopenedTamper.Validate(); err == nil || !strings.Contains(err.Error(), "request fence does not match its persisted window") {
+		t.Fatalf("fresh load accepted reopened confirmation with erased stale lineage: %v", err)
 	}
 }
 
@@ -419,17 +727,22 @@ func TestValidationFailureRepairAuthorityRequiresExactOwnerConfirmationAtCommitA
 	}
 }
 
-func validationRepairSurfaceAggregateForTest(t *testing.T, requireTargetGrounding bool) RuntimeAggregate {
+func validationRepairSurfaceAggregateForTest(t *testing.T, requireTargetGrounding bool, prepare ...func(*RuntimeAggregate)) RuntimeAggregate {
 	t.Helper()
 	return validationAggregateWithPreparation(t, func(aggregate *RuntimeAggregate) {
 		aggregate.Facts.Focus.TargetRole = "implementation"
 		aggregate.Facts.Focus.RequireTargetGrounding = requireTargetGrounding
+		for _, apply := range prepare {
+			if apply != nil {
+				apply(aggregate)
+			}
+		}
 	})
 }
 
-func validationRepairSurfaceObservedAggregateForTest(t *testing.T, requireTargetGrounding bool, diagnosticHash string) (RuntimeAggregate, runtimecontract.RuntimeValidationFailureObservation) {
+func validationRepairSurfaceObservedAggregateForTest(t *testing.T, requireTargetGrounding bool, diagnosticHash string, prepare ...func(*RuntimeAggregate)) (RuntimeAggregate, runtimecontract.RuntimeValidationFailureObservation) {
 	t.Helper()
-	repository := &durableRuntimeStateRepository{aggregate: validationRepairSurfaceAggregateForTest(t, requireTargetGrounding)}
+	repository := &durableRuntimeStateRepository{aggregate: validationRepairSurfaceAggregateForTest(t, requireTargetGrounding, prepare...)}
 	coordinator, err := NewDispatchCoordinator(repository)
 	if err != nil {
 		t.Fatal(err)
@@ -460,4 +773,50 @@ func validationRepairSurfaceObservedAggregateForTest(t *testing.T, requireTarget
 	// of reusing the semantic-seal fixture snapshot.
 	committed.Aggregate.Facts.Resources.TargetSnapshots = nil
 	return committed.Aggregate, observation
+}
+
+func commitRefreshedFileRepairSurfaceCatalogForTest(t testing.TB, controller *RuntimeController, source, current RuntimeAggregate, observedRevision string) RuntimeAggregate {
+	t.Helper()
+	var prerequisite runtimecontract.RuntimePrerequisite
+	for _, candidate := range current.Facts.Prerequisites.Pending {
+		if candidate.Kind == runtimecontract.PrerequisiteKindOperationAdmissibility && candidate.OwnerModuleID == runtimecontract.RuntimeModuleFile {
+			prerequisite = candidate
+			break
+		}
+	}
+	if prerequisite.ID == "" {
+		t.Fatalf("repair-surface refresh has no pending File catalog: %+v", current.Facts.Prerequisites.Pending)
+	}
+	var catalog runtimecontract.RuntimeOperationAdmissibility
+	for _, candidate := range source.Facts.Resources.OperationAdmissibilities {
+		if candidate.PrerequisiteID == prerequisite.ID && candidate.OwnerModuleID == prerequisite.OwnerModuleID {
+			catalog = candidate.Normalized()
+			break
+		}
+		if catalog.PrerequisiteID == "" && candidate.OwnerModuleID == prerequisite.OwnerModuleID {
+			catalog = candidate.Normalized()
+		}
+	}
+	if catalog.PrerequisiteID == "" {
+		t.Fatalf("repair-surface refresh source has no File catalog %q: catalogs=%+v observations=%+v", prerequisite.ID, source.Facts.Resources.OperationAdmissibilities, source.Facts.Resources.PrerequisiteObservations)
+	}
+	catalog.PrerequisiteID = prerequisite.ID
+	catalog.ObservedRevision = strings.TrimSpace(observedRevision)
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
+		ContentHash: catalog.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef, Revision: catalog.ObservedRevision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+	updated, err := controller.commitPrerequisite(context.Background(), current.Facts.WorkspaceID, current.Facts.RunID, PrerequisiteResult{
+		PrerequisiteID: prerequisite.ID, OperationAdmissibility: &catalog, Observation: &observation,
+	})
+	if err != nil {
+		t.Fatalf("commit refreshed File repair-surface catalog: %v", err)
+	}
+	return updated
 }

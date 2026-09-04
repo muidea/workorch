@@ -184,7 +184,21 @@ load facts
   record 与 exact validation-owner receipt，generic failure ingress 不得旁路该事务。
   同一 VFO 的 repair-owner confirmation 可在不同 revision 上形成零到多条 `stale`，但首条 `confirmed | rejected` 是该序列的终端
   response；其后的延迟/冲突响应必须 fail closed。concrete target authority 只认该 VFO 的 latest valid confirmation，不能从
-  任意历史 confirmed record 恢复。
+  任意历史 confirmed record 恢复。是否允许下一次 read-only owner query 只能由 SM-2 owner-private confirmation plan 从当前
+  persisted aggregate、该 VFO 的 exact sequence 与 repair transaction lineage 一次性计算；`FailureTarget == nil` 不是 phase
+  pointer。SM-4 delayed drive 必须 reload 后重新计算，不能用调用方携带的旧 projection 继续 query。
+  同一个 plan 同时约束 query admission 与 confirmation writer 的 fresh-load CAS admission，并封存
+  `RequestID + IssuedAtStateRevision + protocol-bound SubjectRef + ExpectedSubjectRevision`。protocol descriptor 只声明 owner-neutral
+  resource domain/subject；expected revision 必须来自 matching current owner prerequisite observation，Runtime core 不得按 concrete owner
+  或 prerequisite kind 分支。`RequestID` 必须绑定 observation、owner、protocol、subject、expected subject revision、current revision 与
+  stale refresh lineage。owner actual revision 与 expected 不同时只能返回 `stale`；相同时才允许 `confirmed | rejected`。SM-2 接受
+  `stale` 的同一 CAS 必须退休 exact dependency 上的旧 owner facts、追加 invalidation lineage 并结算 prerequisite-refresh budget，不得建立
+  target authority或消耗 validation-only/repair budget；成功 writer CAS 的 record 必须满足
+  `RecordedAtStateRevision == IssuedAtStateRevision + 1 == resulting StateRevision`。opaque reload 必须重验该 revision chain、request
+  identity 与同一 VFO 的 subject continuity；全部 observation 共用一条 append-only revision 时间线，后一 request window 的
+  `IssuedAtStateRevision` 必须严格晚于前一 record 的 `RecordedAtStateRevision`，不同 observation 也不得复用 revision、逆序或重叠。
+  stale→prerequisite refresh→reopen 后旧 lineage response 即使再次遇到
+  `need_validation` 也必须 conflict 且零写。
 
 非 VFO direct-target 使用 descriptor-authorized owner-fact 路径。只有 descriptor 声明 `receipt_evidence_observation` 时，
 rejected owner receipt 才可保留 response 显式观察到的 bounded
@@ -437,6 +451,9 @@ sealed authority + preflight ready
   workspace-tree edges 必须从 confirmation revision 形成唯一连续链，operation ID 排序没有 revision authority。最后一项
   accepted 时，SM-2 在同一 CAS 从 immutable validation-owner receipt + repair-owner confirmation + sealed Decision/dispatch 重算 closure，并生成新的
   target-free fresh-validation directive；任一 rejected/dispatch-invalidated member 均禁止恢复 stale target/directive。
+  active partial dispatch、上述 target-free fresh-validation continuation 与 administrative termination 都必须使 confirmation plan
+  为空；它们不能因 mutable `FailureTarget` 已退休而再次触发 resource-owner query。termination 后的新 confirmation response 不得
+  改写 SM-2；termination 前已持久化的 exact response duplicate 仍是零写 replay。
 - duplicate 结果幂等，stale 只进 diagnostic lineage。已存在 exact receipt 时重启只提交后续 evidence，
   不得重放副作用；未知、非安全重放的副作用进入 typed outcome-unknown/failure 路由。
 - effect/evidence 类型由 sealed `RequiredOutput`、sealed expected effect、sealed binding 与 owner observed effect
@@ -469,8 +486,38 @@ sealed authority + preflight ready
   `RuntimeDriveLease` successor。owner worker 的 panic 必须在 Orchestrator 边界恢复为稳定 owner-local failure，并沿既有
   private event/lease 路径持久化 recovery successor；panic 文本不是 authority，Application、Run、projection 与外部 watchdog
   均不得代为续驱。若 successor CAS 或本地 timer mount 基础设施失败，当前 gate 必须与已有 scheduled/running authority
-  一同保留，由 fresh startup 恢复 exact generation；此时不得虚报 live timer，也不能以 `retry=nil` 或 generation zero
-  释放为 active orphan。
+  一同保留，并登记 lifecycle/epoch/gate-token fenced 的本地 settlement wake；本进程持续 fresh-load/reconcile，进程崩溃后再由
+  fresh startup 恢复 exact generation。此时不得虚报 live timer，也不能以 `retry=nil` 或 generation zero 释放为 active orphan。
+- scheduled worker 收到任意非 terminal-delivery drive error 时，必须在统一 SM-4 error boundary reload current aggregate；若并发
+  owner-private transition 已封存 convergence terminal 或 administrative termination，则该 durable terminal 优先于在途旧 error，
+  worker 只进入既有 terminal delivery lane，不得再分类 semantic failure、消费 operation/provider recovery budget或生成另一份
+  `persisted_pending` successor。已经属于 terminal delivery lane 的 error 先 reload：若 final acknowledgement CAS 已完整持久化则
+  零预算结束，否则进入其 bounded retry；不能先 eager 重投一次 delivery。
+  error classifier 必须显式区分“已处理且无需 retry”与“未处理”，防止 panic/preflight 调用点在 terminal 已交付后补造 fallback lease。
+- administrative termination 的 owner-private CAS 可以退休当时 exact running lease `G`。该 worker 随后只可在 terminal delivery
+  尚未完整 acknowledgement 时，以 canonical `delivery_retry/terminal-delivery` 通过同一调度 CAS 建立 `G+1` successor；普通
+  stale scheduler、其它 failure signature 或非终态不得使用此例外。`G+1` 必须覆盖本地 registration，使旧 timer 的 `end(G)`
+  无法删除 successor。若 final acknowledgement 在 recovery-budget 或 lease CAS 前完成，两者均须返回零写 completion；exact
+  running `G` 仍存在时必须在 lease CAS 原子退休，worker 根据显式 terminal-complete disposition 释放 gate，不得留下无 timer 的
+  running zombie 或 fully-acknowledged terminal 上的无意义 lease。acknowledgement 与 budget/lease CAS 冲突时，owner 必须 bounded
+  fresh-load/retry：partial acknowledgement 后仍要只消费一次 budget 并建立 successor，final acknowledgement 后直接 complete；
+  budget CAS、new scheduled-successor CAS 或 exact-running cleanup CAS 已提交但返回普通 response-loss error 时，必须从 current
+  ledger/lease 分别识别已消费、exact scheduled lease 或 terminal-complete，不能重复 budget、generation 或 timer。无法线性化 budget
+  时只能保留当前 process gate，
+  不得释放 gate 或创建未获预算授权的 lease。administrative termination 下任何 retained lease 只能是 exact
+  `delivery_retry/terminal-delivery`，fresh load 必须拒绝其它 signature。retired running marker 只证明 termination 的首个 `G -> G+1`
+  handoff；后续 terminal recovery 的 current exact request `R(F)` 可以在 scheduled `F+1` 因 revision drift 退休后重物化同一代，历史
+  marker 不得把当前 request 错配回首代或迫使再次消费 budget。
+- synchronous `DriveRuntime` EventHub ingress 与 scheduled worker 必须共用同一 workspace/run singleflight gate；两者在 owner work 前
+  都检查 Run-owner durable retirement fence，同步入口在持 gate 后还必须 fresh-load，current persisted lease 存在时不得旁路其
+  authority。同步退出也必须执行 persisted-lease latch handoff：并发 governance continuation 已封存的 lifecycle-delivery lease 要用
+  module lifecycle context 挂载 exact timer 并继续持有同一 gate，不能被 caller cancellation 丢失。
+- 除 Stop/epoch teardown 外，run gate 的所有退出只允许经过一个 fresh-load settlement reconciler。process-local settlement 只保存
+  wake hint，不保存或推导 Runtime phase；只有存在 pending active settlement 时，lifecycle-fenced one-shot timer 才向 framework
+  `BackgroundRoutine` 提交短任务，提交拒绝或瞬时 load/CAS/mount 失败必须按 exact epoch/token 重新 arm，空闲时没有轮询任务。
+  dormant handoff 只允许等待 exact 当前 gate owner 退出；gate release 与 handoff 注册/激活必须在同一 `driveMu` 临界区线性化，已经
+  active 的 settlement 不得被后到的 termination/governance handoff 重新置为 dormant。wakeup、gate、timer、latch 均非业务 authority，
+  每次执行仍须从 Run owner aggregate 重建并只调用 Orchestrator-private SM-4 event。
 - singleflight key 必须包含 workspace/run。重复 Start、Resume 和 governance continuation 只合并到
   同一 drive。
 - recoverable runtime wait必须持久化exact wait identity、reason、recovery condition、next eligible drive/deadline、trigger
@@ -480,6 +527,15 @@ sealed authority + preflight ready
   `RuntimeState.StateRevision` 上重载并 rebase 无关模型写入；只有 aggregate revision 漂移才返回给
   Orchestrator 作为语义 CAS conflict。CAS recovery ledger 耗尽不改变业务 Run 为 terminal，也不得留下
   `active + nonterminal + no scheduled drive`：SM-4 必须保留 owner-local、退避的 reload/re-drive 后继。
+- generic nonterminal recovery 只接受 scoped typed `RuntimeCASConflictError`，或携带 exact Run persistence
+  `owner_transient` feedback 的 `RuntimeOwnerTransientError`。普通 `common.ErrConflict`、任意实现 `Temporary/Timeout` 的 error、provider
+  transient 与未定位 operation timeout 均不得取得该权限。Orchestrator 由 fresh aggregate revision 和 failed lease generation 派生稳定
+  `RuntimeNonTerminalRecoveryRequest`；唯一 `nonterminal_recovery_scheduled` private event 必须在同一 CAS 中写入 latest request/预算
+  disposition并建立唯一 request-bound `scheduled` successor。response-loss/duplicate 只按 RequestID 重读既有 record/lease，不能再消费
+  budget或另发 `DriveLeaseScheduled`。CAS 与 Run-owner transient 共用 owner-local CAS-reload guard，但后者不得冒充 operation/provider
+  recovery；guard exhausted 只使用 capped backoff successor，不能把业务 Runtime 终态化或留下无 successor active aggregate。fresh-load
+  还必须证明 `StateRevision >= record.RecordedAtStateRevision`；二者相等时 current lease 必须 normalized exact 等于 record 内嵌 successor，
+  防止将撕裂的 record-only 或被替换 lease 状态误认成原子事务结果。
 - operation-recovery counter 与 authorization ledger 必须等长且按全局 attempt 连续；每项 identity 必须唯一，并反向匹配
   current/completed sealed dispatch 中 exact execution。fresh-process reload 若发现缺项、重复、顺序漂移、wrong key/fence、
   orphan dispatch 或伪造 `issued/in_flight/uncertain/settled/retired` state，必须在任何 owner query/effect 前 fail closed。
@@ -524,8 +580,9 @@ sealed authority + preflight ready
   让提交者接管。gate owner 退出后不得留下既无 mount latch、也无 timer/gate successor 的 scheduled lease；不得以
   watchdog/queue/timer 并发 drive 补洞。旧 timer 的所有失败/not-claimed 退出必须原子消费 authoritative newer generation
   或不同 signature 的 persisted mount；adopt newer generation 时必须清理不晚于它的 latch。running renewal CAS 失败时旧
-  generation 不得 release；fallback recovery 仍失败则保留本地 gate并等待 Stop/fresh startup，普通 Start/Resume 即使到达也
-  不得以 generation zero 绕过 persisted running authority。Stop cancel 点必须与 `closing + lifecycle epoch` 原子发布；其后
+  generation 不得 release；fallback recovery 仍失败则保留本地 gate并登记 exact settlement wake，本进程持续 fresh reconcile，
+  crash 后由 startup recovery 接管。普通 Start/Resume 即使到达也不得以 generation zero 绕过 persisted running authority。
+  Stop cancel 点必须与 `closing + lifecycle epoch` 原子发布；其后
   尚持 lifecycle read lock 的 handler、已捕获旧 context 的 timer defer 都不得创建新 context/background timer、挂载 zombie
   successor或删除新 epoch gate。BackgroundRoutine submission不得持 `driveMu` 或另一 Stop fence；queued/already-due callback
   在 observe与claim前必须重验 captured cancellation和exact epoch。write fence 内必须二次 cancel并清空全部本地 hint，

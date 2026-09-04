@@ -887,7 +887,7 @@ func (m *Biz) handleConfirmRuntimeRepairSurface(event magicevent.Event, result m
 		return
 	}
 	command, ok := event.Data().(fileevents.ConfirmRuntimeRepairSurfaceCommand)
-	if !ok || m.runtimeAdapter == nil || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" {
+	if !ok || m.runtimeAdapter == nil || strings.TrimSpace(command.RequestID) == "" || strings.TrimSpace(command.RequestID) != command.RequestID || command.IssuedAtStateRevision == 0 || strings.TrimSpace(command.ExpectedSubjectRevision) == "" || strings.TrimSpace(command.ExpectedSubjectRevision) != command.ExpectedSubjectRevision || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" {
 		setPrerequisiteError(result, common.ErrInvalidArgument)
 		return
 	}
@@ -912,10 +912,14 @@ func (m *Biz) handleConfirmRuntimeRepairSurface(event magicevent.Event, result m
 		}
 	}
 	confirmation := runtimecontract.RuntimeRepairSurfaceConfirmation{
-		Observation: observation, OwnerModuleID: ModuleID, SubjectRef: "workspace_deliverable", ObservedRevision: manifest.Revision,
+		RequestID: command.RequestID, IssuedAtStateRevision: command.IssuedAtStateRevision, ExpectedSubjectRevision: command.ExpectedSubjectRevision,
+		Observation: observation, OwnerModuleID: ModuleID, SubjectRef: runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef, ObservedRevision: manifest.Revision,
 		Disposition: runtimecontract.RuntimeRepairSurfaceRejected, Reason: "candidate target is not a current regular workspace file",
 	}
-	if confirmed {
+	if manifest.Revision != command.ExpectedSubjectRevision {
+		confirmation.Disposition = runtimecontract.RuntimeRepairSurfaceStale
+		confirmation.Reason = "workspace tree revision changed before repair-surface confirmation"
+	} else if confirmed {
 		confirmation.Disposition = runtimecontract.RuntimeRepairSurfaceConfirmed
 		confirmation.ConfirmedTargetRefs = append([]string(nil), observation.CandidateTargetRefs...)
 		confirmation.Reason = ""

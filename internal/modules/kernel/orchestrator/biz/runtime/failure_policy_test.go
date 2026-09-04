@@ -13,6 +13,10 @@ func TestFailureClassDispositionTaxonomy(t *testing.T) {
 	if FailureClassIsBusinessTerminal(runtimecontract.FailureClassCASConflict) {
 		t.Fatal("CAS conflict must not terminal business run")
 	}
+	if FailureClassDisposition(runtimecontract.FailureClassOwnerTransientUnavailable) != FailureDispositionOwnerTransient ||
+		FailureClassIsBusinessTerminal(runtimecontract.FailureClassOwnerTransientUnavailable) {
+		t.Fatal("persistence owner transient must remain nonterminal and distinct from operation recovery")
+	}
 	if FailureClassDisposition(runtimecontract.FailureClassProviderAuthentication) != FailureDispositionConfigurationGov {
 		t.Fatal("provider auth must be configuration governance")
 	}

@@ -6,10 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestRuntimeControllerPersistsIndependentRecoveryBudget(t *testing.T) {
+func TestRuntimeControllerRejectsSplitCASRecoveryBudget(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, _ := NewRuntimeController(repository)
 	facts := controllerFacts()
@@ -23,12 +24,13 @@ func TestRuntimeControllerPersistsIndependentRecoveryBudget(t *testing.T) {
 	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
 		t.Fatal(err)
 	}
+	initialSaves := repository.saves
 	first, consumed, err := controller.consumeRecoveryBudget(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetCASReload)
-	if err != nil || !consumed || first.Facts.Recovery.CASReloadAttempts != 1 {
-		t.Fatalf("CAS budget = %+v consumed=%v err=%v", first.Facts.Recovery, consumed, err)
+	if !errors.Is(err, common.ErrInvalidArgument) || consumed || repository.saves != initialSaves || first.StateRevision != 0 {
+		t.Fatalf("split CAS budget crossed the atomic recovery boundary: aggregate=%+v consumed=%v saves=%d/%d err=%v", first, consumed, repository.saves, initialSaves, err)
 	}
 	scheduled, consumed, err := controller.consumeRecoveryBudget(context.Background(), "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetDriveSchedule)
-	if err != nil || !consumed || scheduled.Facts.Recovery.DriveScheduleAttempts != 1 || scheduled.Facts.Recovery.CASReloadAttempts != 1 {
+	if err != nil || !consumed || scheduled.Facts.Recovery.DriveScheduleAttempts != 1 || scheduled.Facts.Recovery.CASReloadAttempts != 0 {
 		t.Fatalf("schedule budget = %+v consumed=%v err=%v", scheduled.Facts.Recovery, consumed, err)
 	}
 }

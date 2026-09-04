@@ -70,8 +70,14 @@ type AcquireWorkspaceManifestResult struct {
 
 // ConfirmRuntimeRepairSurfaceCommand asks File to verify a bounded validation
 // observation against its current workspace inventory without choosing a
-// Runtime action or mutating Runtime authority.
+// Runtime action or mutating Runtime authority. RequestID,
+// IssuedAtStateRevision and ExpectedSubjectRevision are opaque Orchestrator
+// fences that File must echo. File compares the expected revision with its
+// newly acquired workspace manifest before classifying target availability.
 type ConfirmRuntimeRepairSurfaceCommand struct {
+	RequestID                     string
+	IssuedAtStateRevision         uint64
+	ExpectedSubjectRevision       string
 	WorkspaceID                   common.WorkspaceID
 	RunID                         common.RunID
 	WorkspaceDeliverableDirectory string

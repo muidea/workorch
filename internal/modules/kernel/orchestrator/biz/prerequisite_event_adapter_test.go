@@ -257,6 +257,64 @@ func TestAcquireRuntimeTargetSelectionPrerequisiteRejectsUnboundSelectionObserva
 	}
 }
 
+func TestConfirmFileRuntimeRepairSurfaceRequiresExactRequestFence(t *testing.T) {
+	ctx := context.Background()
+	observation := runtimecontract.RuntimeValidationFailureObservation{
+		WorkspaceID: "ws-repair", RunID: "run-repair", AuthoritySnapshotID: "authority-repair", DispatchID: "dispatch-repair", OperationID: "validate-repair",
+		FailureSignature: "failure-repair", TargetRole: "implementation", DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed,
+		CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("a", 64),
+	}
+	command := fileevents.ConfirmRuntimeRepairSurfaceCommand{
+		RequestID: "repair-request-current", IssuedAtStateRevision: 9, ExpectedSubjectRevision: "tree-v1",
+		WorkspaceID: observation.WorkspaceID, RunID: observation.RunID, WorkspaceDeliverableDirectory: t.TempDir(), Observation: observation,
+	}
+	missing := command
+	missing.RequestID = ""
+	invalidHub := magicevent.NewHub(1)
+	t.Cleanup(func() { invalidHub.Terminate(ctx) })
+	if _, err := ConfirmFileRuntimeRepairSurface(ctx, invalidHub, missing); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("missing request fence error = %v", err)
+	}
+	missing = command
+	missing.ExpectedSubjectRevision = ""
+	if _, err := ConfirmFileRuntimeRepairSurface(ctx, invalidHub, missing); !errors.Is(err, common.ErrInvalidArgument) {
+		t.Fatalf("missing expected subject revision error = %v", err)
+	}
+
+	for _, testCase := range []struct {
+		name   string
+		mutate func(*runtimecontract.RuntimeRepairSurfaceConfirmation)
+	}{
+		{name: "missing request id", mutate: func(value *runtimecontract.RuntimeRepairSurfaceConfirmation) { value.RequestID = "" }},
+		{name: "wrong request id", mutate: func(value *runtimecontract.RuntimeRepairSurfaceConfirmation) { value.RequestID = "repair-request-old" }},
+		{name: "wrong issued revision", mutate: func(value *runtimecontract.RuntimeRepairSurfaceConfirmation) { value.IssuedAtStateRevision-- }},
+		{name: "wrong expected revision", mutate: func(value *runtimecontract.RuntimeRepairSurfaceConfirmation) {
+			value.ExpectedSubjectRevision = "tree-old"
+		}},
+		{name: "wrong protocol subject", mutate: func(value *runtimecontract.RuntimeRepairSurfaceConfirmation) { value.SubjectRef = "workspace_other" }},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			hub := magicevent.NewHub(4)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			observer := magicevent.NewSimpleObserver(fileevents.PrerequisiteCommandDestination, hub)
+			observer.Subscribe(fileevents.TopicConfirmRuntimeRepairSurface, func(event magicevent.Event, result magicevent.Result) {
+				request := event.Data().(fileevents.ConfirmRuntimeRepairSurfaceCommand)
+				confirmation := runtimecontract.RuntimeRepairSurfaceConfirmation{
+					RequestID: request.RequestID, IssuedAtStateRevision: request.IssuedAtStateRevision, ExpectedSubjectRevision: request.ExpectedSubjectRevision,
+					Observation: request.Observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
+					Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: append([]string(nil), request.Observation.CandidateTargetRefs...), ObservedRevision: "tree-v1",
+				}
+				testCase.mutate(&confirmation)
+				result.Set(fileevents.ConfirmRuntimeRepairSurfaceResult{Confirmation: confirmation}, nil)
+			})
+			t.Cleanup(func() { observer.Unsubscribe(fileevents.TopicConfirmRuntimeRepairSurface) })
+			if _, err := ConfirmFileRuntimeRepairSurface(ctx, hub, command); err == nil || !strings.Contains(err.Error(), "invalid result") {
+				t.Fatalf("adapter accepted %s: %v", testCase.name, err)
+			}
+		})
+	}
+}
+
 func TestFilePrerequisiteObservationBindingsRejectMissingOrStaleFacts(t *testing.T) {
 	snapshot := runtimecontract.TargetSnapshot{
 		TargetRef: "implementation.txt", Content: "implementation\n", ContentHash: "content-v1", ContentState: runtimecontract.SnapshotContentStateComplete,

@@ -118,7 +118,7 @@ func AcquireRuntimeTargetSelectionPrerequisite(ctx context.Context, hub magiceve
 }
 
 func ConfirmFileRuntimeRepairSurface(ctx context.Context, hub magicevent.Hub, command fileevents.ConfirmRuntimeRepairSurfaceCommand) (fileevents.ConfirmRuntimeRepairSurfaceResult, error) {
-	if hub == nil || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" || command.Observation.Validate() != nil || command.Observation.WorkspaceID != command.WorkspaceID || command.Observation.RunID != command.RunID {
+	if hub == nil || strings.TrimSpace(command.RequestID) == "" || strings.TrimSpace(command.RequestID) != command.RequestID || command.IssuedAtStateRevision == 0 || strings.TrimSpace(command.ExpectedSubjectRevision) == "" || strings.TrimSpace(command.ExpectedSubjectRevision) != command.ExpectedSubjectRevision || command.WorkspaceID == "" || command.RunID == "" || strings.TrimSpace(command.WorkspaceDeliverableDirectory) == "" || command.Observation.Validate() != nil || command.Observation.WorkspaceID != command.WorkspaceID || command.Observation.RunID != command.RunID {
 		return fileevents.ConfirmRuntimeRepairSurfaceResult{}, common.ErrInvalidArgument
 	}
 	if ctx == nil {
@@ -136,7 +136,7 @@ func ConfirmFileRuntimeRepairSurface(ctx context.Context, hub magicevent.Hub, co
 		return fileevents.ConfirmRuntimeRepairSurfaceResult{}, prerequisiteMagicError(magicErr)
 	}
 	response, ok := data.(fileevents.ConfirmRuntimeRepairSurfaceResult)
-	if !ok || response.Confirmation.Validate() != nil || response.Confirmation.OwnerModuleID != runtimecontract.RuntimeModuleFile || !runtimecontract.SameRuntimeValidationFailureObservation(response.Confirmation.Observation, command.Observation) {
+	if !ok || response.Confirmation.Validate() != nil || response.Confirmation.RequestID != command.RequestID || response.Confirmation.IssuedAtStateRevision != command.IssuedAtStateRevision || response.Confirmation.ExpectedSubjectRevision != command.ExpectedSubjectRevision || response.Confirmation.OwnerModuleID != runtimecontract.RuntimeModuleFile || response.Confirmation.SubjectRef != runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef || !runtimecontract.SameRuntimeValidationFailureObservation(response.Confirmation.Observation, command.Observation) {
 		return fileevents.ConfirmRuntimeRepairSurfaceResult{}, fmt.Errorf("repair surface confirmation returned an invalid result")
 	}
 	return response, nil

@@ -472,6 +472,15 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - 只有 repository expected/observed revision 不一致产生 typed concurrent-state conflict 并消费 CAS reload；
 - semantic reject、stale identity、candidate session conflict、duplicate/no-op 不得借 `common.ErrConflict` 进入 CAS；
 - provider transport、operation outcome recovery、delivery retry 使用独立 persisted ledger；
+- generic nonterminal recovery 必须覆盖 typed CAS 与带 exact Run persistence feedback 的 owner transient；两者都只走 stable
+  `RuntimeNonTerminalRecoveryRequest` 和单一 owner-private event，在一次 CAS 中同时写 latest record、CAS-reload guard outcome 与
+  request-bound scheduled lease。验证 generation-zero/running generation、duplicate、restart、budget exhausted capped successor、CAS
+  commit 后普通 response-loss，断言 counter/record/lease只推进一次且 outer 不再发 lease event；owner transient 的
+  `OperationRecoveryAttempts` 保持零。普通 conflict、任意 Temporary/Timeout、provider/operation error及 failure-fact writer 的旧临时
+  `cas_reload` 拼装路径必须 fail closed或回到这一 typed transaction。`RecoveryBudgetConsumed(CASReload)` 必须在 event admission、generic
+  writer 与 pure ledger mutator 三层被拒绝；fresh-load invariant 必须反向拒绝“`CASReloadAttempts > 0` 但无 matching atomic
+  nonterminal recovery record”，并拒绝 future record、同 recorded revision 缺 lease、同 revision 被不相关 lease 替换，避免旧
+  budget-CAS + lease-CAS 两阶段路径或撕裂原子写重新获得 authority。
 - failure-authority matrix 必须覆盖唯一 `replaceRuntimeFailureAuthority` production writer 与三种显式 policy：bounded interlude
   exact保留；retire 同时清空旧 `FailureTarget + RepairDirective`；replace-from-exact-owner-fact 要求新 failure/target 的
   signature、canonical targets、observation逐字段一致并清空旧 directive。至少覆盖 owner infeasibility、targetless rejected
@@ -559,6 +568,11 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   duplicate ingress、Stop 与 fresh-process restart；证明 panic 只形成稳定 typed owner-local failure，
   exact successor 至多一个，provider/owner durable effect 零重复，且任何 active nonterminal 退出都不会同时失去 gate、timer、
   persisted wait/handoff 与 `RuntimeDriveLease`。panic 原文不得进入 authority identity。
+- gate settlement 必须覆盖：successor Save pre/post-commit error、timer/BackgroundRoutine 首次提交拒绝、claim 前后 response-loss、
+  Stop→Start epoch 与 same-epoch gate token ABA、旧 generation callback 对新 generation，以及 fresh no-lease release 与并发
+  termination/governance handoff。每个未解决 entry 仅 arm 一个 one-shot wake并提交短 framework task，提交拒绝 exact re-arm，空闲
+  不轮询；Stop 清理旧 epoch wake但不删 durable lease。测试必须用 barrier 证明 release 与 dormant handoff 在同一锁内线性化、owner
+  exit 激活 exact entry、active+dormant merge 仍 active，以及 stale gate snapshot 后 finalizer 能接管新 gate。
 - bound governance request 已持久化、Run wait fact 尚未送达这一 cut point 重启后必须自动收敛到 exact blocked Run；不得
   依赖人工 Resume，且整个非终态 handoff 的 `TerminalDeliveryAttempts` 保持不变；
 - 任意非终态 aggregate 携带非零 `TerminalDeliveryAttempts` 或 terminal acknowledgement 必须以
@@ -632,6 +646,44 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   authorization 恢复 scope 并重验 subset/exact invariants，不能读取 current manifest 补 scope；payload 漂移 conflict 且零
   repair/provider/effect/budget。stale/rejected repair-owner disposition 分别只进入 prerequisite/typed terminal，confirmed 只由 SM-2
   private event 封存 `FailureTarget`。
+- confirmation-plan matrix 必须覆盖 pending 与 stale-refresh required、confirmed/rejected terminal、active partial repair、target-free
+  fresh-validation、restart-before/after confirmation CAS 及 administrative termination。外层 drive 回归必须统计 owner call：用旧
+  pre-confirmation aggregate 重放时先 reload/re-plan，File 等 repair owner 的总 query 次数保持一次，candidate/provider/repair budget
+  与 state revision 不变；confirmation CAS 前允许同一 read-only query at-least-once，CAS 后必须 zero-query。termination 在 workspace
+  read、owner query 或 confirmation event 在途期间先提交时，adapter 必须 reload 并返回 terminated current aggregate，不生成
+  semantic failure/recovery lease；termination 后新 response conflict，termination 前 exact persisted response replay 仍为零 CAS。
+  query 与 writer CAS 必须共同校验 plan 派生的
+  `RequestID + IssuedAtStateRevision + protocol-bound SubjectRef + ExpectedSubjectRevision`；`RequestID` 覆盖
+  observation/owner/protocol/subject/expected subject revision/current revision/refresh lineage。测试必须证明 descriptor 提供的
+  resource domain/subject 被 plan 使用，Runtime core 没有 File/prerequisite-kind specialization；真实 File EventHub 路径必须覆盖同 revision
+  confirmed/rejected、workspace mutation 后 stale+零 targets、stale 同 CAS invalidation+独立 refresh budget、owner prerequisite 重获后的新 fence、
+  旧 response 越窗 conflict，以及新 revision 再确认。成功 record 的
+  `RecordedAtStateRevision == IssuedAtStateRevision + 1 == resulting StateRevision`。两条并发 read 中一条先提交 stale、完成
+  prerequisite refresh 并 reopen 后，另一条旧 confirmed 即使延迟到新 plan 已 required 也必须 conflict、零 revision/ledger/target
+  变化；只有携带 reopen 后 exact fence 的 fresh response 可提交。opaque reload 前后同一 plan fence 必须稳定，并拒绝
+  request/revision/recorded-revision/subject 的协调篡改。跨 observation history 还必须覆盖合法严格追加，以及重复 recorded revision、
+  逆序 append、与前一 record 重叠的 request window 和超出 current aggregate revision，全部 fail closed。
+- scheduled-worker error boundary 必须覆盖“跨 owner 调用返回旧 error、current aggregate 已 durable terminal”的竞态：统一 reload 后
+  直接幂等交付 current terminal，零新 failure/recovery budget/lease；terminal-delivery 自身的 error 不得被 eager 重投，而只进入
+  fresh-load：final ack 已完整持久化时零预算结束，否则进入原有 bounded delivery retry。preflight error 与 panic 必须覆盖完整
+  worker/gate 路径，并证明 terminal 已完整 ack 时显式 handled
+  结果不会触发 fallback lease、预算或滞留 process gate。
+- administrative-termination/lease matrix 必须覆盖：claimed `G` 被 termination CAS 退休、delivery failure 只生成 canonical `G+1`、
+  old timer `end(G)` 后 `G+1` registration/claim 仍有效；Run draining admission 与 internal-event admission 使用同一窄规则。
+  首代 retired marker 消费后只能作为历史审计；后续 current exact terminal request `R(F)` 的 scheduled `F+1` 因 revision drift 退休时，
+  同进程 reconciliation 与 fresh startup 都必须重物化同一 exact generation，不能被历史 marker 阻断、绑定回首代 request、重复预算或
+  递增 generation。还必须覆盖 stale claim 在 restart 后按 current authority 重物化，以及 recovery-request lease 的窄 legality matrix。
+  final ack 在 retry classification 后、schedule CAS 前完成时，generation-zero 与 retired-generation 两路均须零 lease、零额外预算并
+  释放 gate；final ack 时 exact running `G` 尚在则同一 CAS 清除，wrong generation/current scheduled authority 不得被 stale worker 删除。
+  还必须注入 acknowledgement 在 budget/lease Load 与 Save 之间赢得 CAS：partial ack 后 budget 只消费一次且 successor 不丢，final ack
+  后零 successor并释放 gate；budget commit、new scheduled-successor commit 与 exact-running cleanup commit 后返回普通 error 时，
+  fresh reload 必须分别识别已消费 ledger、已持久化 exact lease 与 terminal-complete，且 revision/generation/timer 只推进一次。
+  budget 无法确定时只能保留 gate，不能生成未获授权的 lease。tampered administrative-terminal aggregate 若携带非 exact
+  `delivery_retry/terminal-delivery` lease，commit 与 opaque reload 均须 fail closed。
+- 同步 `DriveRuntime` 与 scheduled worker 的 singleflight 回归必须证明：已有 scheduled/running lease 时同步入口零 provider/owner call；
+  durable draining/retired fence 在 owner work 前拒绝同步入口；一个同步 drive 阻塞在 owner query 时，第二入口 conflict 且 owner query
+  总数仍为一。并发 governance continuation 在同步 gate 后 latch persisted lifecycle-delivery lease 时，即使请求 context 随后取消，
+  退出路径也必须用 module lifecycle context 挂载 exact timer并保留 gate。
 
 ## Verification Entry
 

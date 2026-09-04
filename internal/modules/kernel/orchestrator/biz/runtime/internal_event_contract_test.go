@@ -297,7 +297,14 @@ func TestRuntimeInternalEventEnvelopeRejectsMalformedPayloadBeforeLoadOrCAS(t *t
 			},
 		},
 		{
-			name: "non-operation recovery budget carries operation identity",
+			name: "split CAS reload budget event",
+			event: RuntimeInternalEvent{
+				Kind: RuntimeInternalEventRecoveryBudgetConsumed, Scope: scope,
+				Delivery: &RuntimeInternalDeliveryPayload{RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetCASReload},
+			},
+		},
+		{
+			name: "split CAS reload budget event also carries operation identity",
 			event: RuntimeInternalEvent{
 				Kind: RuntimeInternalEventRecoveryBudgetConsumed, Scope: scope,
 				Delivery: &RuntimeInternalDeliveryPayload{RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetCASReload, RecoveryOperationID: "op-recovery"},

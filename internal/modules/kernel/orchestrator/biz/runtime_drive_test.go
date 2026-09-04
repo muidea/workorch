@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,7 +28,9 @@ import (
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
+	magictask "github.com/muidea/magicCommon/task"
 	decisionmodule "github.com/muidea/workorch/internal/modules/blocks/decision"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
@@ -38,6 +41,7 @@ import (
 	resultmodule "github.com/muidea/workorch/internal/modules/blocks/result"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
+	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
@@ -52,6 +56,7 @@ import (
 	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -9324,11 +9329,11 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	}
 	t.Cleanup(func() { _ = resultOwner.Stop(ctx) })
 
-	candidateCount := 0
+	var candidateCount atomic.Int64
 	providerTransientInjected := false
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
-		candidateCount++
+		candidateCount.Add(1)
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 			response, responseErr := runtimeTwoFocusSemanticResult(command)
@@ -9417,22 +9422,58 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	if err := moduleBiz.ConfigureRuntimeRepository(casRepository); err != nil {
 		t.Fatal(err)
 	}
-	module := newTestBiz(moduleBiz, hub, nil)
+	background := magictask.NewBackgroundRoutine(2)
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if !background.Shutdown(shutdownCtx) {
+			t.Error("two-focus background routine did not shut down")
+		}
+	})
+	module := newTestBiz(moduleBiz, hub, background)
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
 	command := orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}
 	if err := module.scheduleRuntimeDrive(ctx, "ws-v2", "run-v2", "cas-conflict-injection"); err != nil {
 		t.Fatal(err)
 	}
-	casRecovered, err := module.loadRuntime(ctx, "ws-v2", "run-v2")
-	if err != nil || casRecovered.Facts.Recovery.CASReloadAttempts != 1 || casRecovered.Facts.Failure != nil {
-		t.Fatalf("CAS recovery aggregate=%+v err=%v", casRecovered, err)
+	var casRecovered runtime.RuntimeAggregate
+	casLeaseDeadline := time.Now().Add(5 * time.Second)
+	for {
+		var err error
+		casRecovered, err = module.loadRuntime(ctx, "ws-v2", "run-v2")
+		if err != nil {
+			t.Fatalf("load CAS recovery aggregate: %v", err)
+		}
+		if casRecovered.DriveLease != nil && casRecovered.DriveLease.Reason == runtimecontract.RuntimeDriveLeaseReasonCASReload {
+			break
+		}
+		if time.Now().After(casLeaseDeadline) {
+			t.Fatalf("CAS retry lease was not persisted: revision=%d state=%s recovery=%+v", casRecovered.StateRevision, casRecovered.Decision.State, casRecovered.Facts.Recovery)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	completed, err := DriveRuntime(ctx, hub, command)
-	if err != nil {
-		t.Fatal(err)
+	if casRecovered.Facts.Recovery.CASReloadAttempts != 1 || casRecovered.Facts.Failure != nil {
+		t.Fatalf("CAS recovery aggregate=%+v", casRecovered)
 	}
-	if completed.State != runtimecontract.ConvergenceStateComplete || completed.Terminal == nil || candidateCount != 9 {
+	var completedAggregate runtime.RuntimeAggregate
+	completionDeadline := time.Now().Add(2 * time.Minute)
+	for {
+		var err error
+		completedAggregate, err = module.loadRuntime(ctx, "ws-v2", "run-v2")
+		if err != nil {
+			t.Fatalf("load asynchronously recovered two-focus aggregate: %v", err)
+		}
+		if completedAggregate.DriveLease == nil && runtimeTerminalDeliveryFullyAcknowledged(completedAggregate) {
+			break
+		}
+		if time.Now().After(completionDeadline) {
+			t.Fatalf("two-focus background retry did not converge: revision=%d state=%s lease=%+v recovery=%+v candidates=%d", completedAggregate.StateRevision, completedAggregate.Decision.State, completedAggregate.DriveLease, completedAggregate.Facts.Recovery, candidateCount.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	completed := runtimeTerminalDriveResult(completedAggregate)
+	if completed.State != runtimecontract.ConvergenceStateComplete || completed.Terminal == nil || candidateCount.Load() != 9 {
 		persisted, persistErr := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 		var failure *runtimecontract.FailureFact
 		var semanticPlanning runtimecontract.RuntimeSemanticPlanningLedger
@@ -9446,7 +9487,7 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 			eligible = runtimecontract.RuntimeCWIsEligibleForPlanning(persisted.RuntimeState.Facts)
 			semanticReady = runtime.SemanticOperationAuthorityReady(runtimeAggregateFromRecord(*persisted.RuntimeState))
 		}
-		t.Fatalf("two-focus state=%s terminal=%+v failure=%+v semanticPlanning=%+v eligible=%v semanticReady=%t candidates=%d persistErr=%v", completed.State, completed.Terminal, failure, semanticPlanning, eligible, semanticReady, candidateCount, persistErr)
+		t.Fatalf("two-focus state=%s terminal=%+v failure=%+v semanticPlanning=%+v eligible=%v semanticReady=%t candidates=%d persistErr=%v", completed.State, completed.Terminal, failure, semanticPlanning, eligible, semanticReady, candidateCount.Load(), persistErr)
 	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil {
@@ -9477,41 +9518,15 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, restarted.handleRuntimeDrive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
 	replayed, err := DriveRuntime(ctx, hub, command)
-	if err != nil || replayed.StateRevision != completed.StateRevision || candidateCount != 9 {
-		t.Fatalf("two-focus restart=%+v completed=%+v candidates=%d err=%v", replayed, completed, candidateCount, err)
+	if err != nil || replayed.StateRevision != completed.StateRevision || candidateCount.Load() != 9 {
+		t.Fatalf("two-focus restart=%+v completed=%+v candidates=%d err=%v", replayed, completed, candidateCount.Load(), err)
 	}
 	aggregate, err := restarted.loadRuntime(ctx, "ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	deliveryBiz := newRuntimeTestOwner()
-	if err := deliveryBiz.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
-		t.Fatal(err)
-	}
-	deliveryModule := newTestBiz(deliveryBiz, hub, nil)
-	if err := deliveryModule.deliverRuntimeTerminal(ctx, aggregate); err == nil {
-		t.Fatal("first terminal delivery must fail before Result persistence")
-	}
-	if _, err := results.Get(ctx, "ws-v2/run-v2/result/dod-assessment"); !errors.Is(err, common.ErrNotFound) {
-		t.Fatalf("failed terminal delivery unexpectedly persisted Result: %v", err)
-	}
-	recoveryAggregate, consumed, err := restarted.ConsumeRuntimeRecoveryBudget(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
-	if err != nil || !consumed || recoveryAggregate.Facts.Recovery.TerminalDeliveryAttempts != 1 {
-		t.Fatalf("terminal delivery recovery budget aggregate=%+v consumed=%v err=%v", recoveryAggregate, consumed, err)
-	}
-	if err := resultOwner.Stop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	restartedResultOwner := resultmodule.New()
-	if err := restartedResultOwner.Configure(resultbiz.Dependencies{OwnerRepositories: testResultOwnerRepositories(results, artifacts, memory.NewResultWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
-		t.Fatal(err)
-	}
-	if err := restartedResultOwner.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = restartedResultOwner.Stop(ctx) })
-	if err := deliveryModule.deliverRuntimeTerminal(ctx, recoveryAggregate); err != nil {
-		t.Fatal(err)
+	if aggregate.Facts.Recovery.TerminalDeliveryAttempts != 1 || aggregate.DriveLease != nil || !runtimeTerminalDeliveryFullyAcknowledged(aggregate) {
+		t.Fatalf("two-focus background terminal-delivery recovery=%+v lease=%+v", aggregate.Facts.Recovery, aggregate.DriveLease)
 	}
 	resultItem, err := results.Get(ctx, "ws-v2/run-v2/result/dod-assessment")
 	if err != nil || resultItem.State != common.ResultStateAccepted || resultItem.RuntimeCloseout == nil || len(resultItem.RuntimeCloseout.SatisfiedCoverageWorkItemIDs) != 2 {
@@ -11412,10 +11427,9 @@ func runtimeDriveCommitTargetSnapshotsForFixture(t *testing.T, aggregate runtime
 	return aggregate
 }
 
-func runtimeOuterValidationRepairAggregate(
+func runtimeOuterValidationRepairBootstrap(
 	t *testing.T,
-	revision uint64,
-) (runtime.RuntimeAggregate, runtimecontract.RuntimeValidationFailureRepairConvergence, runtimecontract.RuntimeOperationAdmissibility) {
+) (runtimecontract.RuntimeBootstrap, runtimecontract.RuntimeValidationFailureRepairConvergence, runtimecontract.RuntimeOperationDescriptor, runtimecontract.RuntimeOperationDescriptor) {
 	t.Helper()
 
 	const repairOperationKind = runtimecontract.StepKindFileEdit
@@ -11465,6 +11479,16 @@ func runtimeOuterValidationRepairAggregate(
 		}},
 	}}
 	bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
+	return bootstrap, convergence, repairDescriptor, triggerDescriptor
+}
+
+func runtimeOuterValidationRepairAggregate(
+	t *testing.T,
+	revision uint64,
+) (runtime.RuntimeAggregate, runtimecontract.RuntimeValidationFailureRepairConvergence, runtimecontract.RuntimeOperationAdmissibility) {
+	t.Helper()
+
+	bootstrap, convergence, repairDescriptor, triggerDescriptor := runtimeOuterValidationRepairBootstrap(t)
 	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
 	if err != nil {
 		t.Fatalf("initialize sealed repair Profile fixture: %v", err)
@@ -11827,10 +11851,32 @@ func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T
 	}
 }
 
-func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing.T) {
+type runtimeRepairSurfacePendingConfirmationFixture struct {
+	bootstrap   runtimecontract.RuntimeBootstrap
+	aggregate   runtime.RuntimeAggregate
+	repairRoute runtimecontract.RuntimeValidationFailureRepairRoute
+	repository  *runtimeDriveRepository
+	controller  *runtime.RuntimeController
+}
+
+func newRuntimeRepairSurfacePendingConfirmationFixture(t *testing.T) runtimeRepairSurfacePendingConfirmationFixture {
+	t.Helper()
 	ctx := context.Background()
+	bootstrap, _, _, _ := runtimeOuterValidationRepairBootstrap(t)
 	aggregate, repairConvergence, _ := runtimeOuterValidationRepairAggregate(t, 1)
 	repairRoute := repairConvergence.Routes[0].Normalized()
+	for index := range aggregate.Facts.Resources.PrerequisiteObservations {
+		observation := aggregate.Facts.Resources.PrerequisiteObservations[index].Normalized()
+		if observation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility || observation.OwnerModuleID != repairRoute.RepairOwnerModuleID {
+			continue
+		}
+		observation.Dependencies = append(observation.Dependencies, runtimecontract.RuntimeFreshnessDependency{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: repairRoute.RepairOwnerModuleID,
+			SubjectRef: runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef, Revision: "repair-workspace-v1",
+		})
+		observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+		aggregate.Facts.Resources.PrerequisiteObservations[index] = observation
+	}
 	aggregate.Facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	aggregate.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	aggregate.Facts.Focus.ValidationRecipeID = "repair-surface-validation"
@@ -11961,6 +12007,17 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 	if failed.Facts.Failure == nil || failed.Facts.Failure.ValidationFailureObservation == nil || failed.Facts.Resources.FailureTarget != nil || runtimeSemanticAuthorityPending(failed) {
 		t.Fatalf("rejected receipt did not persist one pre-confirmation authority: %+v", failed)
 	}
+	return runtimeRepairSurfacePendingConfirmationFixture{
+		bootstrap: bootstrap, aggregate: failed, repairRoute: repairRoute,
+		repository: repository, controller: controller,
+	}
+}
+
+func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRuntimeRepairSurfacePendingConfirmationFixture(t)
+	failed, repairRoute := fixture.aggregate, fixture.repairRoute
+	repository, controller := fixture.repository, fixture.controller
 
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -11971,6 +12028,8 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
 	fileCalls := 0
 	fileObservationMismatch := false
+	terminateDuringFileQuery := false
+	var terminationErr error
 	fileObserver := magicevent.NewSimpleObserver(fileevents.PrerequisiteCommandDestination, hub)
 	fileObserver.Subscribe(fileevents.TopicConfirmRuntimeRepairSurface, func(event magicevent.Event, result magicevent.Result) {
 		fileCalls++
@@ -11979,9 +12038,21 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 			!reflect.DeepEqual(command.Observation.ValidationScopeTargetRefs, []string{"implementation.go", "validation-entry.go"}) {
 			fileObservationMismatch = true
 		}
+		if terminateDuringFileQuery {
+			_, terminationErr = controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+				Kind:  runtime.RuntimeInternalEventTerminationRequested,
+				Scope: runtime.RuntimeInternalEventScope{WorkspaceID: command.WorkspaceID, RunID: command.RunID},
+				Delivery: &runtime.RuntimeInternalDeliveryPayload{
+					TerminationKind: runtimecontract.RuntimeTerminationCancelled,
+					RequestedBy:     "blocks/run",
+					Reason:          "operator cancelled during repair-surface query",
+				},
+			})
+		}
 		result.Set(fileevents.ConfirmRuntimeRepairSurfaceResult{Confirmation: runtimecontract.RuntimeRepairSurfaceConfirmation{
+			RequestID: command.RequestID, IssuedAtStateRevision: command.IssuedAtStateRevision, ExpectedSubjectRevision: command.ExpectedSubjectRevision,
 			Observation: command.Observation, OwnerModuleID: repairRoute.RepairOwnerModuleID, SubjectRef: "workspace_deliverable",
-			Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"implementation.go"}, ObservedRevision: "tree-confirmed-v1",
+			Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"implementation.go"}, ObservedRevision: command.ExpectedSubjectRevision,
 		}}, nil)
 	})
 	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicConfirmRuntimeRepairSurface) })
@@ -11993,6 +12064,7 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
 		t.Fatal(err)
 	}
+	module := newTestBiz(owner, hub, nil)
 	tampered := failed
 	tamperedFailure := failed.Facts.Failure.Clone()
 	tamperedObservation := tamperedFailure.ValidationFailureObservation.Clone()
@@ -12007,13 +12079,13 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 		t.Fatalf("fresh-load invariant accepted tampered validation scope: %v", invariantErr)
 	}
 	repository.aggregate = tampered
-	if _, tamperErr := newTestBiz(owner, hub, nil).driveRuntimeDecision(ctx, tampered, "unused-prefix"); tamperErr == nil ||
+	if _, tamperErr := module.driveRuntimeDecision(ctx, tampered, "unused-prefix"); tamperErr == nil ||
 		fileCalls != 0 || providerCalls != 0 || repository.aggregate.StateRevision != failed.StateRevision ||
 		repository.aggregate.Facts.Repair.RepairAttempts != failed.Facts.Repair.RepairAttempts {
 		t.Fatalf("tampered validation scope crossed the pre-owner fence: err=%v fileCalls=%d providerCalls=%d aggregate=%+v", tamperErr, fileCalls, providerCalls, repository.aggregate)
 	}
 	repository.aggregate = failed
-	next, err := newTestBiz(owner, hub, nil).driveRuntimeDecision(ctx, failed, "unused-prefix")
+	next, err := module.driveRuntimeDecision(ctx, failed, "unused-prefix")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -12027,10 +12099,557 @@ func TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider(t *testing
 	if next.Facts.Resources.FailureTarget.TargetObservation == nil || next.Facts.Resources.FailureTarget.TargetObservation.OwnerModuleID != repairRoute.RepairOwnerModuleID {
 		t.Fatalf("confirmed repair target lost sealed Profile owner %q: %+v", repairRoute.RepairOwnerModuleID, next.Facts.Resources.FailureTarget)
 	}
+
+	// A delayed SM-4 drive may still carry the pre-confirmation aggregate after
+	// the confirmation event has committed. It must rebase to the current
+	// Orchestrator aggregate before any cross-owner query; otherwise the stale
+	// FailureTarget=nil projection sends File a second request for an already
+	// terminal validation observation.
+	beforeReplayRevision := next.StateRevision
+	replayed, err := module.driveRuntimeDecision(ctx, failed, "unused-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fileCalls != 1 || providerCalls != 0 || replayed.StateRevision != beforeReplayRevision ||
+		len(replayed.RepairSurfaceConfirmations) != 1 || replayed.Facts.Resources.FailureTarget == nil ||
+		len(replayed.CandidateAttempts) != len(next.CandidateAttempts) ||
+		replayed.Facts.Repair.RepairAttempts != next.Facts.Repair.RepairAttempts {
+		t.Fatalf("stale drive repeated terminal repair-surface confirmation: aggregate=%+v fileCalls=%d providerCalls=%d", replayed, fileCalls, providerCalls)
+	}
+
+	// The confirmation CAS can commit even when its response is lost. The
+	// adapter must reload that committed ledger entry and return it as current
+	// authority; replay of the pre-confirmation aggregate remains zero-query.
+	repository.aggregate = failed
+	responseLossRepository := &runtimeSaveResponseLossRepository{
+		delegate: repository,
+		match: func(candidate runtime.RuntimeAggregate) bool {
+			return len(candidate.RepairSurfaceConfirmations) == 1
+		},
+	}
+	responseLossOwner := newRuntimeTestOwner()
+	if err := responseLossOwner.ConfigureRuntimeRepository(responseLossRepository); err != nil {
+		t.Fatal(err)
+	}
+	responseLossModule := newTestBiz(responseLossOwner, hub, nil)
+	responseLost, err := responseLossModule.driveRuntimeDecision(ctx, failed, "unused-prefix")
+	if err != nil || !responseLossRepository.fired || fileCalls != 2 || providerCalls != 0 ||
+		len(responseLost.RepairSurfaceConfirmations) != 1 || responseLost.Facts.Resources.FailureTarget == nil {
+		t.Fatalf("confirmation response-loss rebase failed: aggregate=%+v fired=%v fileCalls=%d providerCalls=%d err=%v", responseLost, responseLossRepository.fired, fileCalls, providerCalls, err)
+	}
+	responseLossReplay, err := responseLossModule.driveRuntimeDecision(ctx, failed, "unused-prefix")
+	if err != nil || fileCalls != 2 || responseLossReplay.StateRevision != responseLost.StateRevision ||
+		len(responseLossReplay.RepairSurfaceConfirmations) != 1 {
+		t.Fatalf("confirmation response-loss replay repeated owner query: aggregate=%+v fileCalls=%d err=%v", responseLossReplay, fileCalls, err)
+	}
+
+	// Administrative termination can win while the read-only File query is in
+	// flight. The late confirmation is correctly rejected by SM-2, but the
+	// adapter must rebase that conflict to the newer terminated aggregate rather
+	// than turn it into a second drive-failure state transition.
+	repository.aggregate = failed
+	terminateDuringFileQuery = true
+	terminated, err := module.driveRuntimeDecision(ctx, failed, "unused-prefix")
+	if err != nil || terminationErr != nil {
+		t.Fatalf("in-flight termination rebase: driveErr=%v terminationErr=%v", err, terminationErr)
+	}
+	if terminated.Termination == nil || terminated.Termination.Kind != runtimecontract.RuntimeTerminationCancelled ||
+		fileCalls != 3 || providerCalls != 0 || len(terminated.RepairSurfaceConfirmations) != 0 ||
+		len(terminated.CandidateAttempts) != len(failed.CandidateAttempts) ||
+		terminated.Facts.Repair.RepairAttempts != failed.Facts.Repair.RepairAttempts {
+		t.Fatalf("in-flight termination was not returned as current authority: aggregate=%+v fileCalls=%d providerCalls=%d", terminated, fileCalls, providerCalls)
+	}
+}
+
+func TestRuntimeSynchronousIngressRejectsPersistedDriveLeaseBeforeOwnerCalls(t *testing.T) {
+	for _, leaseState := range []runtimecontract.RuntimeDriveLeaseState{
+		runtimecontract.RuntimeDriveLeaseScheduled,
+		runtimecontract.RuntimeDriveLeaseRunning,
+	} {
+		t.Run(string(leaseState), func(t *testing.T) {
+			ctx := context.Background()
+			aggregate := runtimeAggregate(t, 7)
+			aggregate.DriveLease = &runtimecontract.RuntimeDriveLease{
+				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+				AggregateRevision: aggregate.StateRevision, RecoveryGeneration: 3,
+				Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: "persisted-owner-gate",
+				DueAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano), State: leaseState,
+			}
+			if err := aggregate.Validate(); err != nil {
+				t.Fatalf("persisted %s lease fixture: %v", leaseState, err)
+			}
+			repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+			owner := newRuntimeTestOwner()
+			if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+				t.Fatal(err)
+			}
+			hub := magicevent.NewHub(16)
+			t.Cleanup(func() { hub.Terminate(context.Background()) })
+			module := newTestBiz(owner, hub, nil)
+			driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+			driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
+			t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
+
+			runCalls, fileCalls, providerCalls, operationCalls := 0, 0, 0, 0
+			runObserver := magicevent.NewSimpleObserver(runevents.CommandDestination, hub)
+			runObserver.Subscribe(runevents.TopicRunCommandGet, func(_ magicevent.Event, _ magicevent.Result) { runCalls++ })
+			t.Cleanup(func() { runObserver.Unsubscribe(runevents.TopicRunCommandGet) })
+			fileObserver := magicevent.NewSimpleObserver(fileevents.PrerequisiteCommandDestination, hub)
+			fileObserver.Subscribe(fileevents.TopicConfirmRuntimeRepairSurface, func(_ magicevent.Event, _ magicevent.Result) { fileCalls++ })
+			t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicConfirmRuntimeRepairSurface) })
+			providerObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+			providerObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
+			t.Cleanup(func() { providerObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+			fileOperationObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+			for _, topic := range []string{
+				fileevents.TopicExecuteFileListOperation,
+				fileevents.TopicExecuteFileReadOperation,
+				fileevents.TopicExecuteFileEditOperation,
+				fileevents.TopicExecuteFileWriteOperation,
+				fileevents.TopicExecutePatchApplyOperation,
+				fileevents.TopicExecutePatchPreviewOperation,
+			} {
+				topic := topic
+				fileOperationObserver.Subscribe(topic, func(_ magicevent.Event, _ magicevent.Result) { operationCalls++ })
+				t.Cleanup(func() { fileOperationObserver.Unsubscribe(topic) })
+			}
+			shellOperationObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleShell, hub)
+			shellOperationObserver.Subscribe(shellevents.TopicExecuteOperation, func(_ magicevent.Event, _ magicevent.Result) { operationCalls++ })
+			t.Cleanup(func() { shellOperationObserver.Unsubscribe(shellevents.TopicExecuteOperation) })
+
+			_, err := DriveRuntime(ctx, hub, orchestratorevents.DriveRuntimeCommand{
+				WorkspaceID: aggregate.Facts.WorkspaceID,
+				RunID:       aggregate.Facts.RunID,
+			})
+			if !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("synchronous ingress with persisted %s lease error = %v, want conflict", leaseState, err)
+			}
+			if runCalls != 0 || fileCalls != 0 || providerCalls != 0 || operationCalls != 0 {
+				t.Fatalf("persisted %s lease crossed owner preflight: run=%d file=%d provider=%d operation=%d", leaseState, runCalls, fileCalls, providerCalls, operationCalls)
+			}
+			persisted, err := repository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			if err != nil || persisted.StateRevision != aggregate.StateRevision || persisted.DriveLease == nil ||
+				persisted.DriveLease.State != leaseState || !runtimecontract.SameRuntimeDriveLeaseIdentity(*persisted.DriveLease, *aggregate.DriveLease) {
+				t.Fatalf("synchronous rejection rewrote persisted %s lease: persisted=%+v err=%v", leaseState, persisted.DriveLease, err)
+			}
+			key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			if module.beginRuntimeDrive(key) {
+				t.Fatal("synchronous persisted-lease rejection reopened the gate before durable authority was mounted or reconciled")
+			}
+			if epoch, token := module.runtimeDriveGateSettlementIdentity(key); epoch == 0 || token == 0 {
+				t.Fatal("synchronous persisted-lease rejection retained no lifecycle settlement wakeup")
+			}
+		})
+	}
+}
+
+func TestRuntimeSynchronousIngressOwnerReadFailurePersistsSuccessorBeforeGateReopens(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeAggregate(t, 7)
+	baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	faultRepository := &failOnceRuntimeLoadRepository{delegate: baseRepository}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(faultRepository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	_, err := module.driveRuntime(ctx, orchestratorevents.DriveRuntimeCommand{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+	})
+	if err == nil || !faultRepository.fired {
+		t.Fatalf("synchronous owner read failure err=%v fired=%v", err, faultRepository.fired)
+	}
+	persisted, loadErr := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if loadErr != nil || persisted.DriveLease == nil ||
+		persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		persisted.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonPersistedPending ||
+		background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
+		t.Fatalf("owner read failure successor=%+v callbacks=%d loadErr=%v", persisted.DriveLease, background.asyncFunctionCalls, loadErr)
+	}
+	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	module.driveMu.Lock()
+	registration, timerMounted := module.retryLeaseTimers[key]
+	_, gateHeld := module.drivingRuns[key]
+	module.driveMu.Unlock()
+	if !timerMounted || registration.Generation != persisted.DriveLease.RecoveryGeneration || !gateHeld || module.beginRuntimeDrive(key) {
+		t.Fatalf("owner read failure reopened gate: registration=%+v mounted=%v gate=%v", registration, timerMounted, gateHeld)
+	}
+}
+
+func TestRuntimeSynchronousIngressSingleGateBlocksDuplicateRepairSurfaceQuery(t *testing.T) {
+	fixture := newRuntimeRepairSurfacePendingConfirmationFixture(t)
+	failed, repairRoute := fixture.aggregate, fixture.repairRoute
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(fixture.repository); err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(owner, hub, nil)
+	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
+	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
+	// magicCommon serializes callbacks addressed to one observer. A second
+	// ingress Hub models two concurrent transports reaching the same Biz and
+	// keeps this regression focused on the Orchestrator's run-scoped gate rather
+	// than relying on EventHub callback scheduling as an authority fence.
+	parallelIngressHub := magicevent.NewHub(4)
+	t.Cleanup(func() { parallelIngressHub.Terminate(context.Background()) })
+	parallelDriveObserver := magicevent.NewSimpleObserver(ModuleID, parallelIngressHub)
+	parallelDriveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
+	t.Cleanup(func() { parallelDriveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
+
+	run := runtimeRunForTestBootstrap(common.RunStateActive, fixture.bootstrap)
+	record := runtimeStateRecordFromAggregate(failed)
+	run.RuntimeState = &record
+	runObserver := magicevent.NewSimpleObserver(runevents.CommandDestination, hub)
+	runObserver.Subscribe(runevents.TopicRunCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(runevents.GetRunResult{Run: run}, nil)
+	})
+	t.Cleanup(func() { runObserver.Unsubscribe(runevents.TopicRunCommandGet) })
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
+			ID: failed.Facts.WorkspaceID, DeliverableDirectory: t.TempDir(),
+		}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+
+	fileEntered := make(chan struct{})
+	releaseFile := make(chan struct{})
+	fileCalls := 0
+	fileObserver := magicevent.NewSimpleObserver(fileevents.PrerequisiteCommandDestination, hub)
+	fileObserver.Subscribe(fileevents.TopicConfirmRuntimeRepairSurface, func(event magicevent.Event, result magicevent.Result) {
+		fileCalls++
+		command := event.Data().(fileevents.ConfirmRuntimeRepairSurfaceCommand)
+		close(fileEntered)
+		<-releaseFile
+		if err := event.Context().Err(); err != nil {
+			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+			return
+		}
+		result.Set(fileevents.ConfirmRuntimeRepairSurfaceResult{Confirmation: runtimecontract.RuntimeRepairSurfaceConfirmation{
+			RequestID: command.RequestID, IssuedAtStateRevision: command.IssuedAtStateRevision, ExpectedSubjectRevision: command.ExpectedSubjectRevision,
+			Observation: command.Observation, OwnerModuleID: repairRoute.RepairOwnerModuleID,
+			SubjectRef:          runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef,
+			Disposition:         runtimecontract.RuntimeRepairSurfaceConfirmed,
+			ConfirmedTargetRefs: []string{"implementation.go"}, ObservedRevision: command.ExpectedSubjectRevision,
+		}}, nil)
+	})
+	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicConfirmRuntimeRepairSurface) })
+	providerObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	providerObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) {})
+	t.Cleanup(func() { providerObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+
+	command := orchestratorevents.DriveRuntimeCommand{WorkspaceID: failed.Facts.WorkspaceID, RunID: failed.Facts.RunID}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := DriveRuntime(ctx, hub, command)
+		firstDone <- err
+	}()
+	select {
+	case <-fileEntered:
+	case <-time.After(5 * time.Second):
+		close(releaseFile)
+		t.Fatal("first synchronous ingress did not reach the blocking File query")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := DriveRuntime(context.Background(), parallelIngressHub, command)
+		secondDone <- err
+	}()
+	select {
+	case err := <-secondDone:
+		if !errors.Is(err, common.ErrConflict) {
+			cancel()
+			close(releaseFile)
+			t.Fatalf("second synchronous ingress error = %v, want conflict", err)
+		}
+	case <-time.After(5 * time.Second):
+		cancel()
+		close(releaseFile)
+		t.Fatal("second synchronous ingress blocked behind the active File query")
+	}
+	cancel()
+	close(releaseFile)
+	select {
+	case <-firstDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first synchronous ingress did not exit after releasing File query")
+	}
+	if fileCalls != 1 {
+		t.Fatalf("concurrent synchronous ingresses issued %d File repair-surface queries, want 1", fileCalls)
+	}
+	persisted, err := fixture.repository.Load(context.Background(), failed.Facts.WorkspaceID, failed.Facts.RunID)
+	key := runtimeDriveKey(failed.Facts.WorkspaceID, failed.Facts.RunID)
+	module.driveMu.Lock()
+	_, gateHeld := module.drivingRuns[key]
+	_, settlementRetained := module.runtimeDriveGateSettlements[key]
+	module.driveMu.Unlock()
+	if err != nil || persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		!gateHeld || !settlementRetained || module.beginRuntimeDrive(key) {
+		t.Fatalf("canceled synchronous ingress lost successor: lease=%+v gate=%v settlement=%v err=%v", persisted.DriveLease, gateHeld, settlementRetained, err)
+	}
+}
+
+type runtimeSynchronousIngressLifecycleContextKey struct{}
+
+type runtimeSynchronousIngressRetirementObservation struct {
+	lifecycle bool
+	canceled  bool
+}
+
+func TestRuntimeSynchronousIngressCanceledExitMountsLatchedLifecycleLease(t *testing.T) {
+	fixture := newRuntimeRepairSurfacePendingConfirmationFixture(t)
+	failed, repairRoute := fixture.aggregate, fixture.repairRoute
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	defer cancelRequest()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(fixture.repository); err != nil {
+		t.Fatal(err)
+	}
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	lifecycleCtx, cancelLifecycle := context.WithCancel(context.WithValue(
+		context.Background(), runtimeSynchronousIngressLifecycleContextKey{}, true,
+	))
+	t.Cleanup(cancelLifecycle)
+	module.driveMu.Lock()
+	module.lifecycleCtx, module.lifecycleCancel = lifecycleCtx, cancelLifecycle
+	module.driveMu.Unlock()
+	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
+	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
+
+	run := runtimeRunForTestBootstrap(common.RunStateActive, fixture.bootstrap)
+	record := runtimeStateRecordFromAggregate(failed)
+	run.RuntimeState = &record
+	retirementObservations := make(chan runtimeSynchronousIngressRetirementObservation, 16)
+	runObserver := magicevent.NewSimpleObserver(runevents.CommandDestination, hub)
+	runObserver.Subscribe(runevents.TopicRunCommandGet, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(runevents.GetRunResult{Run: run}, nil)
+	})
+	runObserver.Subscribe(runevents.TopicRunCommandWorkspaceRetirementFact, func(event magicevent.Event, result magicevent.Result) {
+		retirementObservations <- runtimeSynchronousIngressRetirementObservation{
+			lifecycle: event.Context().Value(runtimeSynchronousIngressLifecycleContextKey{}) == true,
+			canceled:  event.Context().Err() != nil,
+		}
+		result.Set(nil, &cd.Error{Code: cd.NotFound, Message: common.ErrNotFound.Error(), Cause: common.ErrNotFound})
+	})
+	t.Cleanup(func() {
+		runObserver.Unsubscribe(runevents.TopicRunCommandGet)
+		runObserver.Unsubscribe(runevents.TopicRunCommandWorkspaceRetirementFact)
+	})
+	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(event magicevent.Event, result magicevent.Result) {
+		if err := event.Context().Err(); err != nil {
+			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+			return
+		}
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{
+			ID: failed.Facts.WorkspaceID, DeliverableDirectory: t.TempDir(),
+		}}, nil)
+	})
+	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
+
+	fileEntered := make(chan struct{})
+	releaseFile := make(chan struct{})
+	fileCalls := 0
+	fileObserver := magicevent.NewSimpleObserver(fileevents.PrerequisiteCommandDestination, hub)
+	fileObserver.Subscribe(fileevents.TopicConfirmRuntimeRepairSurface, func(event magicevent.Event, result magicevent.Result) {
+		fileCalls++
+		command := event.Data().(fileevents.ConfirmRuntimeRepairSurfaceCommand)
+		if fileCalls == 1 {
+			close(fileEntered)
+			<-releaseFile
+		}
+		result.Set(fileevents.ConfirmRuntimeRepairSurfaceResult{Confirmation: runtimecontract.RuntimeRepairSurfaceConfirmation{
+			RequestID: command.RequestID, IssuedAtStateRevision: command.IssuedAtStateRevision, ExpectedSubjectRevision: command.ExpectedSubjectRevision,
+			Observation: command.Observation, OwnerModuleID: repairRoute.RepairOwnerModuleID,
+			SubjectRef:          runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef,
+			Disposition:         runtimecontract.RuntimeRepairSurfaceConfirmed,
+			ConfirmedTargetRefs: []string{"implementation.go"}, ObservedRevision: command.ExpectedSubjectRevision,
+		}}, nil)
+	})
+	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicConfirmRuntimeRepairSurface) })
+
+	command := orchestratorevents.DriveRuntimeCommand{WorkspaceID: failed.Facts.WorkspaceID, RunID: failed.Facts.RunID}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := DriveRuntime(requestCtx, hub, command)
+		firstDone <- err
+	}()
+	select {
+	case <-fileEntered:
+	case <-time.After(5 * time.Second):
+		close(releaseFile)
+		t.Fatal("synchronous ingress did not reach the blocking File query")
+	}
+
+	handoff := runtimeGovernanceLifecycleHandoff{
+		Kind: runtimeGovernanceLifecycleContinuationDecision, AuthoritySnapshotID: failed.Decision.AuthoritySnapshot.ID,
+		DefinitionRevision: failed.Facts.DefinitionRevision, EvidenceRevision: failed.Facts.EvidenceRevision,
+		DispatchID: "dispatch-canceled-sync-exit", TicketID: "ticket-canceled-sync-exit", ResolutionID: "resolution-canceled-sync-exit",
+	}
+	deliveryErr := &runtimeLifecycleOwnerDeliveryError{handoff: handoff, cause: common.ErrConflict}
+	if err := module.scheduleRuntimeLifecycleOwnerDeliveryRetry(
+		context.Background(), failed.Facts.WorkspaceID, failed.Facts.RunID, "governance_resolution_canceled_sync_exit", deliveryErr,
+	); err != nil {
+		cancelRequest()
+		close(releaseFile)
+		t.Fatalf("persist governance lifecycle successor behind synchronous gate: %v", err)
+	}
+	persisted, err := owner.runtimeController.Load(context.Background(), failed.Facts.WorkspaceID, failed.Facts.RunID)
+	if err != nil || persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		persisted.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || background.asyncFunctionCalls != 0 {
+		cancelRequest()
+		close(releaseFile)
+		t.Fatalf("latched governance lifecycle successor=%+v timers=%d err=%v", persisted.DriveLease, background.asyncFunctionCalls, err)
+	}
+	lease := persisted.DriveLease.Clone()
+	key := runtimeDriveKey(failed.Facts.WorkspaceID, failed.Facts.RunID)
+	module.driveMu.Lock()
+	latched, latchExists := module.persistedLeaseMounts[key]
+	_, gateHeld := module.drivingRuns[key]
+	module.driveMu.Unlock()
+	if !latchExists || !gateHeld || !runtimecontract.SameRuntimeDriveLeaseIdentity(latched, lease) {
+		cancelRequest()
+		close(releaseFile)
+		t.Fatalf("governance lifecycle successor was not latched behind synchronous gate: latch=%+v exists=%v gate=%v", latched, latchExists, gateHeld)
+	}
+	for len(retirementObservations) != 0 {
+		<-retirementObservations
+	}
+
+	cancelRequest()
+	close(releaseFile)
+	select {
+	case <-firstDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled synchronous ingress did not exit after releasing File query")
+	}
+	module.driveMu.Lock()
+	registration, timerMounted := module.retryLeaseTimers[key]
+	_, latchExists = module.persistedLeaseMounts[key]
+	_, gateHeld = module.drivingRuns[key]
+	module.driveMu.Unlock()
+	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil || !timerMounted ||
+		registration.Generation != lease.RecoveryGeneration || latchExists || !gateHeld || module.beginRuntimeDrive(key) {
+		t.Fatalf("canceled synchronous exit did not mount exact lifecycle timer: calls=%d registration=%+v mounted=%v latch=%v gate=%v", background.asyncFunctionCalls, registration, timerMounted, latchExists, gateHeld)
+	}
+	current, err := owner.runtimeController.Load(context.Background(), failed.Facts.WorkspaceID, failed.Facts.RunID)
+	if err != nil || current.DriveLease == nil || current.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		!runtimecontract.SameRuntimeDriveLeaseIdentity(*current.DriveLease, lease) {
+		t.Fatalf("canceled synchronous exit changed durable lifecycle lease: current=%+v want=%+v err=%v", current.DriveLease, lease, err)
+	}
+	lifecycleAdmissionObserved := false
+	for len(retirementObservations) != 0 {
+		observation := <-retirementObservations
+		if observation.lifecycle {
+			lifecycleAdmissionObserved = true
+			if observation.canceled {
+				t.Fatal("gate-exit timer admission inherited the canceled request context")
+			}
+		}
+	}
+	if !lifecycleAdmissionObserved {
+		t.Fatal("gate-exit timer admission did not use the module lifecycle context")
+	}
+	if fileCalls != 1 {
+		t.Fatalf("canceled synchronous handoff repeated File query: calls=%d", fileCalls)
+	}
+}
+
+func TestRuntimeSynchronousIngressRejectsDrainingWorkspaceBeforeOwnerWork(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeAggregate(t, 7)
+	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	module := newTestBiz(owner, hub, nil)
+	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
+	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
+	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
+
+	runGets, fileCalls, providerCalls, operationCalls := 0, 0, 0, 0
+	runObserver := magicevent.NewSimpleObserver(runevents.CommandDestination, hub)
+	runObserver.Subscribe(runevents.TopicRunCommandWorkspaceRetirementFact, func(_ magicevent.Event, result magicevent.Result) {
+		result.Set(runevents.QueryWorkspaceRetirementFactResult{Fence: runevents.RunWorkspaceRetirementFence{
+			WorkspaceID: aggregate.Facts.WorkspaceID, DeletionID: "deletion-sync-drive-draining", DeletionGeneration: 1,
+			DataDispositionIntent: deletioncontract.ModeRetain, WorkspaceIntentHash: "workspace-intent-sync-drive-draining",
+			Phase: runmodel.WorkspaceRetirementPhaseDraining, FenceRevision: 1, WorkspaceRunGeneration: 1,
+		}}, nil)
+	})
+	runObserver.Subscribe(runevents.TopicRunCommandGet, func(_ magicevent.Event, _ magicevent.Result) { runGets++ })
+	t.Cleanup(func() {
+		runObserver.Unsubscribe(runevents.TopicRunCommandWorkspaceRetirementFact)
+		runObserver.Unsubscribe(runevents.TopicRunCommandGet)
+	})
+	fileObserver := magicevent.NewSimpleObserver(fileevents.PrerequisiteCommandDestination, hub)
+	fileObserver.Subscribe(fileevents.TopicConfirmRuntimeRepairSurface, func(_ magicevent.Event, _ magicevent.Result) { fileCalls++ })
+	t.Cleanup(func() { fileObserver.Unsubscribe(fileevents.TopicConfirmRuntimeRepairSurface) })
+	providerObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	providerObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { providerCalls++ })
+	t.Cleanup(func() { providerObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+	fileOperationObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
+	fileOperationObserver.Subscribe(fileevents.TopicExecuteFileEditOperation, func(_ magicevent.Event, _ magicevent.Result) { operationCalls++ })
+	t.Cleanup(func() { fileOperationObserver.Unsubscribe(fileevents.TopicExecuteFileEditOperation) })
+	shellOperationObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleShell, hub)
+	shellOperationObserver.Subscribe(shellevents.TopicExecuteOperation, func(_ magicevent.Event, _ magicevent.Result) { operationCalls++ })
+	t.Cleanup(func() { shellOperationObserver.Unsubscribe(shellevents.TopicExecuteOperation) })
+
+	_, err := DriveRuntime(ctx, hub, orchestratorevents.DriveRuntimeCommand{
+		WorkspaceID: aggregate.Facts.WorkspaceID,
+		RunID:       aggregate.Facts.RunID,
+	})
+	if !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("synchronous ingress under durable draining fence error = %v, want conflict", err)
+	}
+	if runGets != 0 || fileCalls != 0 || providerCalls != 0 || operationCalls != 0 {
+		t.Fatalf("draining workspace crossed synchronous owner fence: runGet=%d file=%d provider=%d operation=%d", runGets, fileCalls, providerCalls, operationCalls)
+	}
+	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("draining-workspace rejection retained the process gate")
+	}
+	module.endRuntimeDrive(key)
 }
 
 type runtimeDriveRepository struct {
 	aggregate runtime.RuntimeAggregate
+}
+
+type runtimeSaveResponseLossRepository struct {
+	delegate runtime.RuntimeStateRepository
+	match    func(runtime.RuntimeAggregate) bool
+	fired    bool
+}
+
+func (r *runtimeSaveResponseLossRepository) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtime.RuntimeAggregate, error) {
+	return r.delegate.Load(ctx, workspaceID, runID)
+}
+
+func (r *runtimeSaveResponseLossRepository) Save(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
+	if err := r.delegate.Save(ctx, aggregate, expectedRevision); err != nil {
+		return err
+	}
+	if !r.fired && r.match != nil && r.match(aggregate) {
+		r.fired = true
+		return errors.New("injected Runtime CAS response loss")
+	}
+	return nil
 }
 
 func (r *runtimeDriveRepository) Load(_ context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtime.RuntimeAggregate, error) {

@@ -73,10 +73,18 @@ func runtimeValidationFailureRepairAggregateForTest(t *testing.T, convergence ru
 		}
 		observation := runtimecontract.RuntimePrerequisiteObservation{
 			PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
-			ContentHash: catalog.SnapshotID, Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			ContentHash: catalog.SnapshotID,
+		}
+		if catalog.OwnerModuleID == runtimecontract.RuntimeModuleFile {
+			observation.Dependencies = []runtimecontract.RuntimeFreshnessDependency{{
+				Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+				SubjectRef: runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef, Revision: catalog.ObservedRevision,
+			}}
+		} else {
+			observation.Dependencies = []runtimecontract.RuntimeFreshnessDependency{{
 				Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: catalog.OwnerModuleID,
 				SubjectRef: catalog.PrerequisiteID, Revision: catalog.ObservedRevision,
-			}},
+			}}
 		}
 		observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
 		aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, prerequisite)
@@ -449,10 +457,11 @@ func TestRejectedValidationObservationWaitsForFileConfirmationBeforeSemanticRepa
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirmed, err := controller.recordRepairSurfaceConfirmation(context.Background(), reloaded.Facts.WorkspaceID, reloaded.Facts.RunID, runtimecontract.RuntimeRepairSurfaceConfirmation{
+	confirmation := bindRuntimeRepairSurfaceConfirmationRequestForTest(t, reloaded, runtimecontract.RuntimeRepairSurfaceConfirmation{
 		Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
 		Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"main.go"}, ObservedRevision: "tree-v1",
 	})
+	confirmed, err := controller.recordRepairSurfaceConfirmation(context.Background(), reloaded.Facts.WorkspaceID, reloaded.Facts.RunID, confirmation)
 	if err != nil {
 		t.Fatal(err)
 	}

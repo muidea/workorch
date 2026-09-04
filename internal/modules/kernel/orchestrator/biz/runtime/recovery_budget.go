@@ -10,14 +10,32 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (c *driveDeliveryComponent) consumeRecoveryBudget(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, kind runtimecontract.RuntimeRecoveryBudgetKind, recoveryOperationID, observedAt string) (RuntimeAggregate, bool, error) {
+func (c *driveDeliveryComponent) consumeRecoveryBudget(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, kind runtimecontract.RuntimeRecoveryBudgetKind, recoveryOperationID, observedAt string, terminalRequests ...runtimecontract.RuntimeTerminalDeliveryRecoveryRequest) (RuntimeAggregate, bool, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
+		return RuntimeAggregate{}, false, common.ErrInvalidArgument
+	}
+	// CAS reload and Run-owner transient recovery use the dedicated atomic
+	// nonterminal transaction. Letting this generic budget event increment the
+	// shared counter without its request record and successor lease would restore
+	// the retired two-CAS recovery path.
+	if kind == runtimecontract.RuntimeRecoveryBudgetCASReload {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}
 	recoveryOperationID = strings.TrimSpace(recoveryOperationID)
 	observedAt = strings.TrimSpace(observedAt)
-	if (kind == runtimecontract.RuntimeRecoveryBudgetOperationRecovery) != (recoveryOperationID != "") ||
+	if len(terminalRequests) > 1 || (kind == runtimecontract.RuntimeRecoveryBudgetOperationRecovery) != (recoveryOperationID != "") ||
 		(kind == runtimecontract.RuntimeRecoveryBudgetOperationRecovery) != (observedAt != "") {
+		return RuntimeAggregate{}, false, common.ErrInvalidArgument
+	}
+	var terminalRequest runtimecontract.RuntimeTerminalDeliveryRecoveryRequest
+	if len(terminalRequests) == 1 {
+		terminalRequest = terminalRequests[0].Normalized()
+	}
+	if kind == runtimecontract.RuntimeRecoveryBudgetTerminalDelivery {
+		if terminalRequest.Validate() != nil {
+			return RuntimeAggregate{}, false, common.ErrInvalidArgument
+		}
+	} else if terminalRequest.RequestID != "" || terminalRequest.TerminalDeliveryID != "" || terminalRequest.FailedLeaseGeneration != 0 {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}
 	var recoveryNow time.Time
@@ -31,6 +49,59 @@ func (c *driveDeliveryComponent) consumeRecoveryBudget(ctx context.Context, work
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, false, err
+	}
+	if kind == runtimecontract.RuntimeRecoveryBudgetTerminalDelivery && TerminalDeliveryFullyAcknowledged(aggregate) {
+		// The last owner acknowledgement can commit after the caller's initial
+		// failure observation. Budget consumption shares the same fresh-load
+		// linearization rule as terminal-delivery lease scheduling.
+		return aggregate, false, nil
+	}
+	if kind == runtimecontract.RuntimeRecoveryBudgetTerminalDelivery {
+		outcome, terminal, outcomeErr := DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
+		if outcomeErr != nil || !terminal {
+			return RuntimeAggregate{}, false, fmt.Errorf("%w: terminal delivery recovery requires sealed terminal authority", common.ErrConflict)
+		}
+		expectedDeliveryID := runtimecontract.StableTerminalDeliveryID(workspaceID, runID, aggregate.Decision.AuthoritySnapshot.ID, outcome)
+		if terminalRequest.TerminalDeliveryID != expectedDeliveryID {
+			return RuntimeAggregate{}, false, fmt.Errorf("%w: terminal delivery recovery request does not match current terminal", common.ErrConflict)
+		}
+		currentIntervention := aggregate.Facts.Recovery.Normalized().TerminalDeliveryIntervention
+		if currentIntervention.RequestID != "" {
+			if currentIntervention != terminalRequest {
+				return RuntimeAggregate{}, false, fmt.Errorf("%w: a different terminal delivery intervention is already sealed", common.ErrConflict)
+			}
+			return aggregate, false, nil
+		}
+		currentRequest := aggregate.Facts.Recovery.Normalized().TerminalDeliveryRequest
+		if currentRequest.RequestID == terminalRequest.RequestID {
+			if currentRequest != terminalRequest {
+				return RuntimeAggregate{}, false, fmt.Errorf("%w: terminal delivery recovery request identity conflicts", common.ErrConflict)
+			}
+			return aggregate, false, nil
+		}
+		if currentRequest.RequestID != "" && terminalRequest.FailedLeaseGeneration <= currentRequest.FailedLeaseGeneration {
+			return RuntimeAggregate{}, false, fmt.Errorf("%w: terminal delivery recovery request generation is stale", common.ErrConflict)
+		}
+		if terminalRequest.FailedLeaseGeneration == 0 {
+			recovery := aggregate.Facts.Recovery.Normalized()
+			if aggregate.DriveLease != nil ||
+				recovery.TerminalDeliveryRequest != (runtimecontract.RuntimeTerminalDeliveryRecoveryRequest{}) ||
+				recovery.TerminalDeliveryIntervention != (runtimecontract.RuntimeTerminalDeliveryRecoveryRequest{}) ||
+				runtimecontract.RuntimeDriveLeasePresent(recovery.RetiredTerminalDeliveryLease) ||
+				recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != "" {
+				return RuntimeAggregate{}, false, fmt.Errorf("%w: initial terminal delivery recovery cannot replace persisted lease authority", common.ErrConflict)
+			}
+		} else {
+			runningMatches := aggregate.DriveLease != nil && aggregate.DriveLease.State == runtimecontract.RuntimeDriveLeaseRunning &&
+				aggregate.DriveLease.RecoveryGeneration == terminalRequest.FailedLeaseGeneration
+			retired := aggregate.Facts.Recovery.Normalized().RetiredTerminalDeliveryLease
+			retiredMatches := aggregate.DriveLease == nil && aggregate.Termination != nil && retired.Validate() == nil &&
+				retired.State == runtimecontract.RuntimeDriveLeaseRunning && retired.RecoveryGeneration == terminalRequest.FailedLeaseGeneration &&
+				aggregate.Facts.Recovery.Normalized().RetiredTerminalDeliveryLeaseRecoveryRequestID == ""
+			if !runningMatches && !retiredMatches {
+				return RuntimeAggregate{}, false, fmt.Errorf("%w: terminal delivery recovery request has no exact failed running authority", common.ErrConflict)
+			}
+		}
 	}
 	expectedRevision := aggregate.StateRevision
 	authorizationExpired := false
@@ -88,6 +159,34 @@ func (c *driveDeliveryComponent) consumeRecoveryBudget(ctx context.Context, work
 		return RuntimeAggregate{}, false, err
 	}
 	if !consumed {
+		if kind == runtimecontract.RuntimeRecoveryBudgetTerminalDelivery {
+			currentIntervention := aggregate.Facts.Recovery.Normalized().TerminalDeliveryIntervention
+			if currentIntervention.RequestID != "" {
+				if currentIntervention != terminalRequest {
+					return RuntimeAggregate{}, false, fmt.Errorf("%w: a different terminal delivery intervention is already sealed", common.ErrConflict)
+				}
+				return aggregate, false, nil
+			}
+			// Exhaustion is itself a durable SM-4 disposition. Retire only the exact
+			// failed running generation; a marker-backed administrative handoff has
+			// already retired that generation in the termination CAS.
+			if aggregate.DriveLease != nil {
+				if aggregate.DriveLease.State != runtimecontract.RuntimeDriveLeaseRunning ||
+					aggregate.DriveLease.RecoveryGeneration != terminalRequest.FailedLeaseGeneration {
+					return RuntimeAggregate{}, false, fmt.Errorf("%w: terminal delivery intervention cannot retire a different lease", common.ErrConflict)
+				}
+				aggregate.DriveLease = nil
+			}
+			aggregate.Facts.Recovery.TerminalDeliveryIntervention = terminalRequest
+			aggregate.StateRevision++
+			if err := aggregate.Validate(); err != nil {
+				return RuntimeAggregate{}, false, fmt.Errorf("seal terminal delivery intervention: %w", err)
+			}
+			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+				return RuntimeAggregate{}, false, err
+			}
+			return aggregate, false, nil
+		}
 		if authorizationExpired {
 			aggregate.StateRevision++
 			if err := aggregate.Validate(); err != nil {
@@ -100,6 +199,9 @@ func (c *driveDeliveryComponent) consumeRecoveryBudget(ctx context.Context, work
 		return aggregate, false, nil
 	}
 	aggregate.Facts.Recovery = ledger
+	if kind == runtimecontract.RuntimeRecoveryBudgetTerminalDelivery {
+		aggregate.Facts.Recovery.TerminalDeliveryRequest = terminalRequest
+	}
 	if kind == runtimecontract.RuntimeRecoveryBudgetOperationRecovery {
 		authorization := runtimecontract.RuntimeOperationRecoveryAuthorization{
 			WorkspaceID: workspaceID, RunID: runID, DispatchID: aggregate.ActiveDispatch.ID,

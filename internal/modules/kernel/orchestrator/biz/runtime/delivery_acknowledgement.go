@@ -84,24 +84,54 @@ func validateDeliveryAcknowledgementAgainstAggregate(aggregate RuntimeAggregate,
 }
 
 func deliveryOwnerPredecessorsAcknowledged(aggregate RuntimeAggregate, deliveryID string, owner runtimecontract.RuntimeDeliveryOwner) bool {
-	has := func(required runtimecontract.RuntimeDeliveryOwner) bool {
-		for _, acknowledgement := range aggregate.DeliveryAcknowledgements {
-			if acknowledgement.TerminalDeliveryID == deliveryID && acknowledgement.Owner == required {
-				return true
-			}
-		}
-		return false
-	}
 	switch owner {
 	case runtimecontract.RuntimeDeliveryOwnerResult:
 		return true
 	case runtimecontract.RuntimeDeliveryOwnerWorkspace:
-		return has(runtimecontract.RuntimeDeliveryOwnerResult)
+		return terminalDeliveryOwnerAcknowledged(aggregate, deliveryID, runtimecontract.RuntimeDeliveryOwnerResult)
 	case runtimecontract.RuntimeDeliveryOwnerRun:
-		return has(runtimecontract.RuntimeDeliveryOwnerResult) && has(runtimecontract.RuntimeDeliveryOwnerWorkspace)
+		return terminalDeliveryOwnerAcknowledged(aggregate, deliveryID, runtimecontract.RuntimeDeliveryOwnerResult) &&
+			terminalDeliveryOwnerAcknowledged(aggregate, deliveryID, runtimecontract.RuntimeDeliveryOwnerWorkspace)
 	default:
 		return false
 	}
+}
+
+func terminalDeliveryOwnerAcknowledged(aggregate RuntimeAggregate, deliveryID string, owner runtimecontract.RuntimeDeliveryOwner) bool {
+	for _, acknowledgement := range aggregate.DeliveryAcknowledgements {
+		if acknowledgement.TerminalDeliveryID == deliveryID && acknowledgement.Owner == owner {
+			return true
+		}
+	}
+	return false
+}
+
+// TerminalDeliveryFullyAcknowledged is the canonical pure SM-4 completion
+// predicate shared by the reducer package and its owner adapters. It derives
+// the delivery identity from sealed terminal authority; unrelated or malformed
+// acknowledgement rows can never make the predicate true.
+func TerminalDeliveryFullyAcknowledged(aggregate RuntimeAggregate) bool {
+	outcome, terminal, err := DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
+	if err != nil || !terminal {
+		return false
+	}
+	deliveryID := runtimecontract.StableTerminalDeliveryID(
+		aggregate.Facts.WorkspaceID,
+		aggregate.Facts.RunID,
+		aggregate.Decision.AuthoritySnapshot.ID,
+		outcome,
+	)
+	return terminalDeliveryOwnerAcknowledged(aggregate, deliveryID, runtimecontract.RuntimeDeliveryOwnerResult) &&
+		terminalDeliveryOwnerAcknowledged(aggregate, deliveryID, runtimecontract.RuntimeDeliveryOwnerWorkspace) &&
+		terminalDeliveryOwnerAcknowledged(aggregate, deliveryID, runtimecontract.RuntimeDeliveryOwnerRun)
+}
+
+// AdministrativeTerminationAwaitsTerminalDelivery identifies the sole legal
+// reason a claimed SM-4 worker may continue after its running lease was
+// atomically retired. It never creates terminal authority and becomes false as
+// soon as the complete owner acknowledgement sequence is durable.
+func AdministrativeTerminationAwaitsTerminalDelivery(aggregate RuntimeAggregate) bool {
+	return aggregate.Termination != nil && !TerminalDeliveryFullyAcknowledged(aggregate)
 }
 
 // sameDeliveryAcknowledgementIdentity deliberately excludes

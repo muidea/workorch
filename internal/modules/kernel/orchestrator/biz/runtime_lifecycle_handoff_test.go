@@ -23,6 +23,27 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func runtimeTerminalRecoveryRequestForTest(delivery orchestratorevents.RuntimeTerminalDeliveryRequestData, failedGeneration uint64) runtimecontract.RuntimeTerminalDeliveryRecoveryRequest {
+	request := runtimecontract.RuntimeTerminalDeliveryRecoveryRequest{
+		TerminalDeliveryID: delivery.TerminalDeliveryID, FailedLeaseGeneration: failedGeneration,
+	}
+	request.RequestID = runtimecontract.StableRuntimeTerminalDeliveryRecoveryRequestID(request.TerminalDeliveryID, failedGeneration)
+	return request
+}
+
+func bindRuntimeTerminalLeaseForTest(t *testing.T, aggregate *runtime.RuntimeAggregate, lease *runtimecontract.RuntimeDriveLease) runtimecontract.RuntimeTerminalDeliveryRecoveryRequest {
+	t.Helper()
+	if aggregate == nil || lease == nil || lease.RecoveryGeneration == 0 {
+		t.Fatal("terminal lease fixture requires aggregate and nonzero generation")
+	}
+	delivery := mustTerminalDeliveryRequest(t, *aggregate)
+	request := runtimeTerminalRecoveryRequestForTest(delivery, lease.RecoveryGeneration-1)
+	aggregate.Facts.Recovery.TerminalDeliveryAttempts++
+	aggregate.Facts.Recovery.TerminalDeliveryRequest = request
+	lease.RecoveryRequestID = request.RequestID
+	return request
+}
+
 type failRuntimeLeaseRenewalRepository struct {
 	delegate                 runtime.RuntimeStateRepository
 	remainingRenewalFailures int
@@ -191,6 +212,170 @@ func (r *failRuntimeLeaseRenewalRepository) Save(ctx context.Context, aggregate 
 	return r.delegate.Save(ctx, aggregate, expectedRevision)
 }
 
+func scheduledRuntimeDriveRequestAtCurrentGate(t *testing.T, module *Biz, workspaceID common.WorkspaceID, runID common.RunID, source string) scheduledRuntimeDriveRequest {
+	t.Helper()
+	key := runtimeDriveKey(workspaceID, runID)
+	gate, ok := module.currentRuntimeDriveGate(key)
+	if !ok {
+		t.Fatal("scheduled Runtime drive test request has no owned gate")
+	}
+	return scheduledRuntimeDriveRequest{
+		workspaceID: workspaceID, runID: runID, source: source, driveKey: key,
+		gateEpoch: gate.Epoch, gateToken: gate.Token,
+	}
+}
+
+func TestRuntimeDriveGateSettlementCycleRestoresClaimAndWakeAfterPanic(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeAggregate(t, 1)
+	baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	faultRepository := &scheduledDrivePanicRepository{delegate: baseRepository, marker: "settlement-reconcile-load-panic"}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(faultRepository); err != nil {
+		t.Fatal(err)
+	}
+	background := &recordingBackgroundRoutine{}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	module := newTestBiz(owner, hub, background)
+	lifecycleCtx, cancel := context.WithCancel(ctx)
+	if err := module.openRuntimeLifecycle(lifecycleCtx); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.startRuntimeDriveGateSettlementPump(module.runtimeLifecycleContext()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		module.rollbackRuntimeStart()
+	})
+
+	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("settlement panic fixture did not acquire gate")
+	}
+	gate, _ := module.currentRuntimeDriveGate(key)
+	request := runtimeDriveGateSettlementRequest{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, DriveKey: key,
+		GateEpoch: gate.Epoch, GateToken: gate.Token, Source: "settlement_reconcile_panic", ReleaseWhenNoLease: true,
+	}
+	if !module.retainRuntimeDriveGateSettlement(request) {
+		t.Fatal("settlement panic fixture did not retain initial wake")
+	}
+
+	// Submit the lifecycle-fenced wake synchronously so the test observes the
+	// pump's recovery boundary without racing a real one-second callback.
+	module.driveMu.Lock()
+	initialWake := module.runtimeDriveGateSettlementWake
+	if initialWake.Timer != nil {
+		initialWake.Timer.Stop()
+	}
+	initialWake.Timer = nil
+	initialWake.Submitted = true
+	module.runtimeDriveGateSettlementWake = initialWake
+	module.driveMu.Unlock()
+	if initialWake.Epoch != gate.Epoch || initialWake.Token == 0 {
+		t.Fatalf("invalid initial settlement wake: %+v gate=%+v", initialWake, gate)
+	}
+
+	faultRepository.panicOnFirstLoad = true
+	module.runRuntimeDriveGateSettlementPumpCycle(initialWake.Epoch, initialWake.Token)
+	if !faultRepository.loadPanicFired {
+		t.Fatal("settlement reconciler did not reach injected owner load panic")
+	}
+
+	module.driveMu.Lock()
+	restored, pending := module.runtimeDriveGateSettlements[key]
+	restoredGate, gateHeld := module.drivingRuns[key]
+	rearmedWake := module.runtimeDriveGateSettlementWake
+	rearmedTimer := rearmedWake.Timer
+	if rearmedTimer != nil {
+		rearmedTimer.Stop()
+	}
+	if rearmedWake.Epoch != 0 && rearmedWake.Token != 0 {
+		submittedWake := rearmedWake
+		submittedWake.Timer = nil
+		submittedWake.Submitted = true
+		module.runtimeDriveGateSettlementWake = submittedWake
+	}
+	module.driveMu.Unlock()
+	if !pending || restored.Epoch != gate.Epoch || restored.GateToken != gate.Token ||
+		restored.Request.WorkspaceID != request.WorkspaceID || restored.Request.RunID != request.RunID ||
+		restored.Request.DriveKey != request.DriveKey || restored.Request.Source != request.Source ||
+		!restored.Request.ReleaseWhenNoLease || restored.Request.AwaitGateOwnerExit ||
+		!gateHeld || restoredGate != gate {
+		t.Fatalf("panic lost exact settlement/gate: pending=%v settlement=%+v gate=%+v held=%v wantGate=%+v", pending, restored, restoredGate, gateHeld, gate)
+	}
+	if rearmedWake.Epoch != gate.Epoch || rearmedWake.Token == 0 || rearmedWake.Token == initialWake.Token ||
+		rearmedTimer == nil || rearmedWake.Submitted {
+		t.Fatalf("pump panic did not re-arm a fresh lifecycle wake: initial=%+v rearmed=%+v", initialWake, rearmedWake)
+	}
+
+	// The next exact cycle must consume the restored claim and make the ordinary
+	// fresh no-lease decision; no second recovery path is involved.
+	module.runRuntimeDriveGateSettlementPumpCycle(rearmedWake.Epoch, rearmedWake.Token)
+	module.driveMu.Lock()
+	_, pending = module.runtimeDriveGateSettlements[key]
+	_, gateHeld = module.drivingRuns[key]
+	finalWake := module.runtimeDriveGateSettlementWake
+	if finalWake.Timer != nil {
+		finalWake.Timer.Stop()
+	}
+	module.driveMu.Unlock()
+	if pending || gateHeld || finalWake.Epoch != 0 {
+		t.Fatalf("next settlement cycle did not complete restored claim: pending=%v gateHeld=%v wake=%+v", pending, gateHeld, finalWake)
+	}
+}
+
+// scheduleRuntimeLifecycleOwnerDeliveryRetry is intentionally test-only. The
+// production governance path persists its continuation lease atomically with
+// the resolution event; this helper constructs the same already-authoritative
+// lease shape for gate/timer handoff tests without exposing a second ingress.
+func (m *Biz) scheduleRuntimeLifecycleOwnerDeliveryRetry(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, source string, deliveryErr *runtimeLifecycleOwnerDeliveryError) error {
+	if m == nil || deliveryErr == nil || workspaceID == "" || runID == "" {
+		return common.ErrInvalidArgument
+	}
+	request := runtimeDeliveryRecoveryLease(source, deliveryErr.leaseSignature())
+	if request == nil {
+		return common.ErrInvalidArgument
+	}
+	lease, _, err := m.runtimeScheduleDriveLease(ctx, workspaceID, runID, runtimecontract.RuntimeDriveLease{
+		WorkspaceID: workspaceID, RunID: runID, Reason: request.Reason, FailureSignature: request.FailureSignature,
+		DueAt: time.Now().UTC().Add(request.Delay).Format(time.RFC3339Nano),
+	}, 0)
+	if err != nil {
+		return err
+	}
+	return m.mountPersistedRuntimeLifecycleOwnerDeliveryLease(ctx, lease, source, request.FailureSignature)
+}
+
+func (m *Biz) recoverRuntimeDriveLease(ctx context.Context, aggregate runtime.RuntimeAggregate, _ string) (runtimecontract.RuntimeDriveLease, error) {
+	if aggregate.DriveLease == nil {
+		return runtimecontract.RuntimeDriveLease{}, common.ErrNotFound
+	}
+	lease := aggregate.DriveLease.Clone()
+	if lease.State == runtimecontract.RuntimeDriveLeaseRunning {
+		var err error
+		lease, _, err = m.runtimeRecoverDriveLease(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, time.Now().UTC().Format(time.RFC3339Nano))
+		if err != nil {
+			return runtimecontract.RuntimeDriveLease{}, err
+		}
+	}
+	if lease.State != runtimecontract.RuntimeDriveLeaseScheduled {
+		return runtimecontract.RuntimeDriveLease{}, common.ErrInvalidArgument
+	}
+	return lease, nil
+}
+
+func (m *Biz) endRuntimeDrive(key string) {
+	if m == nil || key == "" {
+		return
+	}
+	m.driveMu.Lock()
+	delete(m.drivingRuns, key)
+	m.driveMu.Unlock()
+}
+
 func TestScheduledRuntimeDrivePanicPersistsSingleOwnerSuccessorAndRestartMountsOnce(t *testing.T) {
 	for _, testCase := range []struct {
 		name          string
@@ -236,10 +421,7 @@ func TestScheduledRuntimeDrivePanicPersistsSingleOwnerSuccessorAndRestartMountsO
 			if !module.beginRuntimeDrive(key) {
 				t.Fatal("scheduled drive did not acquire its sole process gate")
 			}
-			request := scheduledRuntimeDriveRequest{
-				workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID,
-				source: "panic_fence_test", driveKey: key,
-			}
+			request := scheduledRuntimeDriveRequestAtCurrentGate(t, module, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "panic_fence_test")
 			// The panic must not escape to magicCommon's process-level routine
 			// recovery. The Orchestrator owner converts it into persisted SM-4
 			// successor authority before this call returns.
@@ -261,9 +443,21 @@ func TestScheduledRuntimeDrivePanicPersistsSingleOwnerSuccessorAndRestartMountsO
 			}
 			lease := persisted.DriveLease.Clone()
 			wantTimerCalls := 1
+			wantReason := runtimecontract.RuntimeDriveLeaseReasonPersistedPending
+			wantSignature := runtimeScheduledDrivePanicLeaseRequest("", panicRevision, true).FailureSignature
+			if testCase.panicAfterCAS {
+				// The CAS preceding this injected panic sealed terminal authority.
+				// The scheduled-worker error boundary must prefer that current
+				// authority and enter terminal delivery; the missing Result owner in
+				// this fixture then creates the one canonical delivery successor.
+				if !runtimeTerminalDeliveryReady(persisted) {
+					t.Fatalf("after-CAS panic did not retain terminal authority: %+v", persisted)
+				}
+				wantReason = runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry
+				wantSignature = "terminal-delivery"
+			}
 			if lease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
-				lease.Reason != runtimecontract.RuntimeDriveLeaseReasonPersistedPending ||
-				lease.FailureSignature != runtimeScheduledDrivePanicLeaseRequest("", panicRevision, true).FailureSignature ||
+				lease.Reason != wantReason || lease.FailureSignature != wantSignature ||
 				lease.AggregateRevision != persisted.StateRevision || background.asyncFunctionCalls != wantTimerCalls ||
 				(wantTimerCalls != 0 && background.lastAsyncFunction == nil) {
 				t.Fatalf("panic successor lease=%+v stateRevision=%d timers=%d", lease, persisted.StateRevision, background.asyncFunctionCalls)
@@ -342,10 +536,7 @@ func TestScheduledRuntimeDriveTimerSubmissionPanicClearsRegistrationAndRemountsE
 	if !module.beginRuntimeDrive(key) {
 		t.Fatal("timer submission panic fixture did not acquire gate")
 	}
-	module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
-		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID,
-		source: "timer_submission_panic", driveKey: key,
-	})
+	module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequestAtCurrentGate(t, module, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "timer_submission_panic"))
 	persisted, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	if err != nil || !faultRepository.loadPanicFired || persisted.DriveLease == nil ||
 		persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
@@ -385,10 +576,7 @@ func TestNormalDrivePersistedLeasePreflightFailureNeverReleasesActiveGate(t *tes
 		if !module.beginRuntimeDrive(key) {
 			t.Fatal("preflight load fixture did not acquire gate")
 		}
-		module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
-			workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID,
-			source: "preflight_load_failure", driveKey: key,
-		})
+		module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequestAtCurrentGate(t, module, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "preflight_load_failure"))
 		persisted, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 		if err != nil || !faultRepository.fired || persisted.DriveLease == nil ||
 			persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
@@ -437,10 +625,7 @@ func TestNormalDrivePersistedLeasePreflightFailureNeverReleasesActiveGate(t *tes
 		if !module.beginRuntimeDrive(key) {
 			t.Fatal("running preflight fixture did not acquire gate")
 		}
-		module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
-			workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID,
-			source: "preflight_running_recover_failure", driveKey: key,
-		})
+		module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequestAtCurrentGate(t, module, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "preflight_running_recover_failure"))
 		persisted, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 		if err != nil || faultRepository.renewalFailures != 1 || persisted.DriveLease == nil ||
 			persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
@@ -485,10 +670,7 @@ func TestNormalDrivePersistedLeasePreflightFailureNeverReleasesActiveGate(t *tes
 		if !module.beginRuntimeDrive(key) {
 			t.Fatal("scheduled preflight fixture did not acquire gate")
 		}
-		module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
-			workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID,
-			source: "preflight_scheduled_mount_failure", driveKey: key,
-		})
+		module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequestAtCurrentGate(t, module, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "preflight_scheduled_mount_failure"))
 		persisted, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 		if err != nil || persisted.StateRevision != lease.AggregateRevision || persisted.DriveLease == nil ||
 			!runtimecontract.SameRuntimeDriveLeaseIdentity(*persisted.DriveLease, lease) || background.asyncFunctionCalls != 2 {
@@ -972,6 +1154,835 @@ func TestRuntimeStartupRecoveryRedrivesPersistedDefinitionClarificationHandoff(t
 	}
 }
 
+func TestScheduledRuntimeDriveFailureRebasesToPersistedTerminalAuthority(t *testing.T) {
+	ctx := context.Background()
+	aggregate, _, _ := adversarialTerminalRun(t, true)
+	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := newTestBiz(owner, hub, &recordingBackgroundRoutine{})
+	beforeRevision := aggregate.StateRevision
+	beforeRecovery := aggregate.Facts.Recovery
+
+	retry, handled := module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{
+		workspaceID: aggregate.Facts.WorkspaceID,
+		runID:       aggregate.Facts.RunID,
+		source:      "concurrent_terminal_rebase",
+		driveKey:    runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID),
+	}, errors.New("stale owner handoff failed after terminal authority was persisted"))
+	if !handled || retry != nil {
+		t.Fatalf("persisted terminal authority failure disposition: handled=%v retry=%+v", handled, retry)
+	}
+	persisted, err := owner.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.StateRevision != beforeRevision || persisted.Facts.Recovery != beforeRecovery ||
+		!runtimeTerminalDeliveryFullyAcknowledged(persisted) {
+		t.Fatalf("terminal rebase mutated authority: revision=%d/%d recovery=%+v/%+v acknowledgements=%+v", persisted.StateRevision, beforeRevision, persisted.Facts.Recovery, beforeRecovery, persisted.DeliveryAcknowledgements)
+	}
+	retry, handled = module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{
+		workspaceID: aggregate.Facts.WorkspaceID,
+		runID:       aggregate.Facts.RunID,
+		source:      "terminal_ack_response_loss",
+	}, runtimeTerminalDeliveryFailure(errors.New("injected final acknowledgement CAS response loss")))
+	if !handled || retry != nil {
+		t.Fatalf("fully acknowledged terminal response loss disposition: handled=%v retry=%+v", handled, retry)
+	}
+	afterResponseLoss, err := owner.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil || afterResponseLoss.StateRevision != beforeRevision || afterResponseLoss.Facts.Recovery != beforeRecovery {
+		t.Fatalf("fully acknowledged terminal response loss spent recovery authority: aggregate=%+v err=%v", afterResponseLoss, err)
+	}
+}
+
+func TestScheduledRuntimeDriveTerminalRebasePreventsFallbackLease(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		repository func(runtime.RuntimeStateRepository) runtime.RuntimeStateRepository
+	}{
+		{
+			name: "preflight load error",
+			repository: func(delegate runtime.RuntimeStateRepository) runtime.RuntimeStateRepository {
+				return &failOnceRuntimeLoadRepository{delegate: delegate}
+			},
+		},
+		{
+			name: "panic before drive load",
+			repository: func(delegate runtime.RuntimeStateRepository) runtime.RuntimeStateRepository {
+				return &scheduledDrivePanicRepository{delegate: delegate, panicOnFirstLoad: true, marker: "terminal-rebase-panic"}
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			aggregate, _, _ := adversarialTerminalRun(t, true)
+			baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+			owner := newRuntimeTestOwner()
+			if err := owner.ConfigureRuntimeRepository(testCase.repository(baseRepository)); err != nil {
+				t.Fatal(err)
+			}
+			hub := magicevent.NewHub(8)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			background := &recordingBackgroundRoutine{}
+			module := newTestBiz(owner, hub, background)
+			key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			if !module.beginRuntimeDrive(key) {
+				t.Fatal("terminal rebase fixture did not acquire drive gate")
+			}
+			beforeRevision := aggregate.StateRevision
+			beforeRecovery := aggregate.Facts.Recovery
+			module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequestAtCurrentGate(t, module, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "terminal_rebase_fallback_fence"))
+
+			persisted, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.StateRevision != beforeRevision || persisted.DriveLease != nil ||
+				persisted.Facts.Recovery != beforeRecovery || background.asyncFunctionCalls != 0 {
+				t.Fatalf("terminal rebase created fallback authority: revision=%d/%d lease=%+v recovery=%+v/%+v timers=%d", persisted.StateRevision, beforeRevision, persisted.DriveLease, persisted.Facts.Recovery, beforeRecovery, background.asyncFunctionCalls)
+			}
+			if !module.beginRuntimeDrive(key) {
+				t.Fatal("handled terminal rebase retained the old process gate")
+			}
+			module.endRuntimeDrive(key)
+		})
+	}
+}
+
+func TestScheduledRuntimeDriveTerminalRebaseAdoptsExistingPersistedLease(t *testing.T) {
+	for _, faultCase := range []struct {
+		name       string
+		repository func(runtime.RuntimeStateRepository) runtime.RuntimeStateRepository
+	}{
+		{
+			name: "preflight load error",
+			repository: func(delegate runtime.RuntimeStateRepository) runtime.RuntimeStateRepository {
+				return &failOnceRuntimeLoadRepository{delegate: delegate}
+			},
+		},
+		{
+			name: "panic before drive load",
+			repository: func(delegate runtime.RuntimeStateRepository) runtime.RuntimeStateRepository {
+				return &scheduledDrivePanicRepository{delegate: delegate, panicOnFirstLoad: true, marker: "terminal-rebase-existing-lease-panic"}
+			},
+		},
+	} {
+		for _, leaseState := range []runtimecontract.RuntimeDriveLeaseState{
+			runtimecontract.RuntimeDriveLeaseScheduled,
+			runtimecontract.RuntimeDriveLeaseRunning,
+		} {
+			t.Run(faultCase.name+"/"+string(leaseState), func(t *testing.T) {
+				ctx := context.Background()
+				aggregate, _, _ := adversarialTerminalRun(t, true)
+				const initialGeneration uint64 = 7
+				aggregate.DriveLease = &runtimecontract.RuntimeDriveLease{
+					WorkspaceID:        aggregate.Facts.WorkspaceID,
+					RunID:              aggregate.Facts.RunID,
+					AggregateRevision:  aggregate.StateRevision,
+					RecoveryGeneration: initialGeneration,
+					Reason:             runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry,
+					FailureSignature:   "terminal-delivery",
+					DueAt:              time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
+					State:              leaseState,
+				}
+				bindRuntimeTerminalLeaseForTest(t, &aggregate, aggregate.DriveLease)
+				if err := aggregate.Validate(); err != nil {
+					t.Fatalf("terminal aggregate with existing lease: %v", err)
+				}
+				baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+				owner := newRuntimeTestOwner()
+				if err := owner.ConfigureRuntimeRepository(faultCase.repository(baseRepository)); err != nil {
+					t.Fatal(err)
+				}
+				hub := magicevent.NewHub(8)
+				t.Cleanup(func() { hub.Terminate(context.Background()) })
+				background := &recordingBackgroundRoutine{}
+				module := newTestBiz(owner, hub, background)
+				key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+				if !module.beginRuntimeDrive(key) {
+					t.Fatal("terminal rebase existing-lease fixture did not acquire drive gate")
+				}
+				beforeRevision := aggregate.StateRevision
+				beforeRecovery := aggregate.Facts.Recovery
+				beforeAcknowledgements := len(aggregate.DeliveryAcknowledgements)
+				module.runScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequestAtCurrentGate(t, module, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "terminal_rebase_existing_lease"))
+
+				persisted, err := baseRepository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantRevision := beforeRevision + 1
+				if persisted.StateRevision != wantRevision || persisted.DriveLease != nil ||
+					persisted.Facts.Recovery != beforeRecovery ||
+					len(persisted.DeliveryAcknowledgements) != beforeAcknowledgements ||
+					!runtimeTerminalDeliveryFullyAcknowledged(persisted) {
+					t.Fatalf("terminal rebase did not retire fully acknowledged authority: revision=%d/%d lease=%+v recovery=%+v/%+v acknowledgements=%d/%d", persisted.StateRevision, wantRevision, persisted.DriveLease, persisted.Facts.Recovery, beforeRecovery, len(persisted.DeliveryAcknowledgements), beforeAcknowledgements)
+				}
+				if background.asyncFunctionCalls != 0 || background.lastAsyncFunction != nil {
+					t.Fatalf("fully acknowledged terminal remounted timer submissions=%d callback=%v", background.asyncFunctionCalls, background.lastAsyncFunction != nil)
+				}
+				if !module.beginRuntimeDrive(key) {
+					t.Fatal("fully acknowledged terminal retained the old process gate")
+				}
+				module.endRuntimeDrive(key)
+			})
+		}
+	}
+}
+
+func TestRuntimeDriveGateSettlementReleasesAfterTerminalDeliveryBudgetIntervention(t *testing.T) {
+	ctx := context.Background()
+	aggregate, _, _ := adversarialTerminalRun(t, false)
+	aggregate.Facts.RecoveryPolicy.MaxTerminalDeliveryAttempts = 1
+	aggregate.Facts.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(
+		aggregate.Facts.ConvergencePolicy,
+		aggregate.Facts.RecoveryPolicy,
+	)
+	aggregate.Facts.Recovery.TerminalDeliveryAttempts = 1
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("terminal exhaustion fixture: %v", err)
+	}
+	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	gateToken, accepted := module.beginRuntimeDriveWithToken(key)
+	if !accepted {
+		t.Fatal("terminal exhaustion fixture did not acquire gate")
+	}
+	gate, ok := module.currentRuntimeDriveGate(key)
+	if !ok || gate.Token != gateToken {
+		t.Fatalf("terminal exhaustion gate=%+v present=%v token=%d", gate, ok, gateToken)
+	}
+	settled := module.settleRuntimeDriveGateOrRetain(ctx, runtimeDriveGateSettlementRequest{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, DriveKey: key,
+		GateEpoch: gate.Epoch, GateToken: gate.Token, Source: "terminal_budget_exhausted", ReleaseWhenNoLease: false,
+	})
+	if !settled {
+		t.Fatal("terminal budget exhaustion did not reach durable intervention settlement")
+	}
+	persisted, err := owner.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intervention := persisted.Facts.Recovery.Normalized().TerminalDeliveryIntervention
+	if intervention.Validate() != nil || intervention.FailedLeaseGeneration != 0 || persisted.DriveLease != nil {
+		t.Fatalf("terminal intervention=%+v lease=%+v", intervention, persisted.DriveLease)
+	}
+	module.driveMu.Lock()
+	_, gateRetained := module.drivingRuns[key]
+	_, settlementRetained := module.runtimeDriveGateSettlements[key]
+	module.driveMu.Unlock()
+	if gateRetained || settlementRetained || background.asyncFunctionCalls != 0 {
+		t.Fatalf("terminal intervention retained local retry: gate=%v settlement=%v callbacks=%d", gateRetained, settlementRetained, background.asyncFunctionCalls)
+	}
+}
+
+func TestRuntimeTerminationHandoffWaitsForExactGateOwnerExit(t *testing.T) {
+	ctx := context.Background()
+	aggregate, delivery, _ := adversarialTerminalRun(t, false)
+	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runDeliveries := 0
+	runObserver := magicevent.NewSimpleObserver(runevents.CommandDestination, hub)
+	runObserver.Subscribe(runevents.TopicRunFactTerminalDelivery, func(event magicevent.Event, result magicevent.Result) {
+		runDeliveries++
+		ack := adversarialTerminalAcknowledgement(delivery, runtimecontract.RuntimeDeliveryOwnerRun)
+		result.Set(runevents.RunLifecycleCommandResult{DeliveryAck: &ack}, nil)
+	})
+	t.Cleanup(func() { runObserver.Unsubscribe(runevents.TopicRunFactTerminalDelivery) })
+	module := newTestBiz(owner, hub, &recordingBackgroundRoutine{})
+	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("old Runtime worker did not acquire gate")
+	}
+	gate, _ := module.currentRuntimeDriveGate(key)
+	handoff := runtimeDriveGateSettlementRequest{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, DriveKey: key,
+		GateEpoch: gate.Epoch, GateToken: gate.Token, Source: "termination_handoff",
+		AwaitGateOwnerExit: true,
+	}
+	if !module.retainRuntimeDriveGateSettlement(handoff) {
+		t.Fatal("termination handoff was not retained behind old gate owner")
+	}
+	module.reconcilePendingRuntimeDriveGateSettlements()
+	if runDeliveries != 0 {
+		t.Fatalf("settlement pump delivered terminal beside old gate owner: deliveries=%d", runDeliveries)
+	}
+	module.driveMu.Lock()
+	wake := module.runtimeDriveGateSettlementWake
+	module.driveMu.Unlock()
+	if wake.Epoch != 0 || wake.Token != 0 || wake.Timer != nil || wake.Submitted {
+		t.Fatalf("dormant termination handoff armed lifecycle wake before owner exit: %+v", wake)
+	}
+	if !module.settleRuntimeDriveGateAtOwnerExit(ctx, runtimeDriveGateSettlementRequest{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, DriveKey: key,
+		GateEpoch: gate.Epoch, GateToken: gate.Token, Source: "old_worker_exit", ReleaseWhenNoLease: true,
+	}) {
+		t.Fatal("old gate owner exit did not activate termination handoff")
+	}
+	persisted, err := owner.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil || !runtimeTerminalDeliveryFullyAcknowledged(persisted) || persisted.DriveLease != nil || runDeliveries != 1 {
+		t.Fatalf("termination handoff settlement aggregate=%+v deliveries=%d err=%v", persisted, runDeliveries, err)
+	}
+	if _, stillHeld := module.currentRuntimeDriveGate(key); stillHeld {
+		t.Fatal("completed termination handoff retained old gate")
+	}
+}
+
+func TestRuntimeTerminationCASResponseLossEntersCanonicalDeliverySettlement(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeAggregate(t, 1)
+	base := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	responseLoss := &runtimePostCommitResponseLossRepository{
+		delegate: base,
+		match: func(candidate runtime.RuntimeAggregate) bool {
+			return candidate.Termination != nil
+		},
+		err: errors.New("injected termination CAS response loss"),
+	}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(responseLoss); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	command := orchestratorevents.RequestRuntimeTerminationCommand{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		Kind: runtimecontract.RuntimeTerminationCancelled, RequestedBy: "blocks/run", Reason: "operator cancellation",
+	}
+	event := magicevent.NewEventWithContext(
+		orchestratorevents.TopicOrchestratorRequestRuntimeTermination,
+		"blocks/run", ModuleID, magicevent.NewHeader(), ctx, command,
+	)
+	result := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
+	module.handleRuntimeTerminationRequest(event, result)
+	_, resultErr := result.Get()
+	if resultErr == nil {
+		t.Fatal("missing terminal delivery owners unexpectedly completed termination")
+	}
+	persisted, err := owner.runtimeController.Load(ctx, command.WorkspaceID, command.RunID)
+	recovery := persisted.Facts.Recovery.Normalized()
+	if err != nil || !responseLoss.fired || !runtimeTerminationCommandMatchesAggregate(command, persisted) ||
+		recovery.TerminalDeliveryRequest.Validate() != nil || recovery.TerminalDeliveryAttempts != 1 ||
+		persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		persisted.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry ||
+		persisted.DriveLease.FailureSignature != "terminal-delivery" ||
+		persisted.DriveLease.RecoveryRequestID != recovery.TerminalDeliveryRequest.RequestID || background.asyncFunctionCalls != 1 {
+		t.Fatalf("termination response-loss settlement aggregate=%+v recovery=%+v timers=%d fired=%v err=%v resultErr=%v",
+			persisted, recovery, background.asyncFunctionCalls, responseLoss.fired, err, resultErr)
+	}
+}
+
+func TestRuntimeTerminalBudgetUnknownIdentityIsFreshlyDerivedBySettlement(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		prepare func(*testing.T) (runtime.RuntimeAggregate, uint64)
+	}{
+		{
+			name: "generation zero",
+			prepare: func(t *testing.T) (runtime.RuntimeAggregate, uint64) {
+				return runtimeTerminalAggregate(t), 0
+			},
+		},
+		{
+			name: "administratively retired running generation",
+			prepare: func(t *testing.T) (runtime.RuntimeAggregate, uint64) {
+				repository, delivery, generation := runtimeAdministrativeTerminalPartialAckFixture(t, true)
+				aggregate, err := repository.Load(context.Background(), delivery.WorkspaceID, delivery.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return aggregate, generation
+			},
+		},
+		{
+			name: "canonical terminal running generation",
+			prepare: func(t *testing.T) (runtime.RuntimeAggregate, uint64) {
+				aggregate, _, _ := adversarialTerminalRun(t, false)
+				lease := runtimecontract.RuntimeDriveLease{
+					WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+					AggregateRevision: aggregate.StateRevision, RecoveryGeneration: 1,
+					Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery",
+					DueAt: time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano), State: runtimecontract.RuntimeDriveLeaseRunning,
+				}
+				bindRuntimeTerminalLeaseForTest(t, &aggregate, &lease)
+				aggregate.DriveLease = &lease
+				if err := aggregate.Validate(); err != nil {
+					t.Fatal(err)
+				}
+				return aggregate, lease.RecoveryGeneration
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			aggregate, failedGeneration := testCase.prepare(t)
+			beforeAttempts := aggregate.Facts.Recovery.TerminalDeliveryAttempts
+			base := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+			fault := &failOnceRuntimeLoadRepository{delegate: base}
+			owner := newRuntimeTestOwner()
+			if err := owner.ConfigureRuntimeRepository(fault); err != nil {
+				t.Fatal(err)
+			}
+			hub := magicevent.NewHub(8)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			background := &recordingBackgroundRoutine{}
+			module := newTestBiz(owner, hub, background)
+			driveRequest := scheduledRuntimeDriveRequest{
+				workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID,
+				source: "terminal_budget_unknown_identity", driveKey: runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID),
+				leaseGeneration: failedGeneration,
+			}
+			unknown, consumed, settled := module.consumeRuntimeDeliveryRetryBudget(ctx, driveRequest)
+			if unknown.Validate() == nil || consumed || settled {
+				t.Fatalf("faulted baseline unexpectedly produced authority: request=%+v consumed=%v settled=%v", unknown, consumed, settled)
+			}
+			if !module.beginRuntimeDrive(driveRequest.driveKey) {
+				t.Fatal("failed to acquire settlement gate")
+			}
+			gate, _ := module.currentRuntimeDriveGate(driveRequest.driveKey)
+			driveRequest.gateEpoch, driveRequest.gateToken = gate.Epoch, gate.Token
+			retry := runtimeTerminalDeliveryBudgetPendingGate(driveRequest.source, unknown, failedGeneration)
+			if !module.settleRuntimeDriveGateOrRetain(ctx, runtimeDriveGateSettlementForScheduledRequest(driveRequest, retry, false)) {
+				t.Fatal("fresh terminal settlement did not recover unknown request identity")
+			}
+			persisted, err := owner.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			expected, deriveErr := runtimeTerminalDeliveryRecoveryRequestFromAggregate(persisted, failedGeneration)
+			if err != nil || deriveErr != nil || persisted.DriveLease == nil ||
+				persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+				persisted.DriveLease.RecoveryGeneration != failedGeneration+1 ||
+				persisted.DriveLease.RecoveryRequestID != expected.RequestID ||
+				persisted.Facts.Recovery.TerminalDeliveryRequest != expected ||
+				persisted.Facts.Recovery.TerminalDeliveryAttempts != beforeAttempts+1 || background.asyncFunctionCalls != 1 {
+				t.Fatalf("unknown identity recovery aggregate=%+v expected=%+v timers=%d err=%v deriveErr=%v", persisted, expected, background.asyncFunctionCalls, err, deriveErr)
+			}
+		})
+	}
+}
+
+func TestRuntimeTerminalSettlementSupersedesStaleRetryAndPerformsFirstDeliveryBeforeBudget(t *testing.T) {
+	ctx := context.Background()
+	aggregate, delivery, _ := adversarialTerminalRun(t, false)
+	aggregate.Facts.RecoveryPolicy.MaxTerminalDeliveryAttempts = 1
+	aggregate.Facts.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(
+		aggregate.Facts.ConvergencePolicy, aggregate.Facts.RecoveryPolicy,
+	)
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("terminal retry budget fixture: %v", err)
+	}
+	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runDeliveries := 0
+	runObserver := magicevent.NewSimpleObserver(runevents.CommandDestination, hub)
+	runObserver.Subscribe(runevents.TopicRunFactTerminalDelivery, func(event magicevent.Event, result magicevent.Result) {
+		runDeliveries++
+		if _, ok := event.Data().(runevents.RuntimeTerminalDeliveryFact); !ok {
+			t.Errorf("unexpected Run terminal delivery payload %T", event.Data())
+			result.Set(nil, nil)
+			return
+		}
+		ack := adversarialTerminalAcknowledgement(delivery, runtimecontract.RuntimeDeliveryOwnerRun)
+		result.Set(runevents.RunLifecycleCommandResult{DeliveryAck: &ack}, nil)
+	})
+	t.Cleanup(func() { runObserver.Unsubscribe(runevents.TopicRunFactTerminalDelivery) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("failed to acquire terminal settlement gate")
+	}
+	gate, _ := module.currentRuntimeDriveGate(key)
+	settlement := runtimeDriveGateSettlementRequest{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, DriveKey: key,
+		GateEpoch: gate.Epoch, GateToken: gate.Token, Source: "stale_nonterminal_retry_after_terminal", ReleaseWhenNoLease: false,
+		HasRetry: true,
+		Retry: runtimeRecoveryLeaseRequest{
+			Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: "stale-before-terminal/1/2",
+			Delay: time.Second, Source: "stale_nonterminal_retry_after_terminal",
+		},
+	}
+	if !module.reconcileRuntimeDriveGateSettlement(ctx, settlement) {
+		t.Fatal("fresh terminal did not supersede stale local retry")
+	}
+	persisted, err := owner.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil || !runtimeTerminalDeliveryFullyAcknowledged(persisted) || persisted.DriveLease != nil ||
+		persisted.Facts.Recovery.TerminalDeliveryAttempts != 0 || runDeliveries != 1 || background.asyncFunctionCalls != 0 {
+		t.Fatalf("first delivery/budget separation failed: aggregate=%+v runDeliveries=%d timers=%d err=%v", persisted, runDeliveries, background.asyncFunctionCalls, err)
+	}
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("successful first terminal delivery retained process gate")
+	}
+	module.endRuntimeDrive(key)
+}
+
+func TestRuntimeDriveLeaseSupersededTimerCallbackPreservesNewGenerationGate(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeAggregate(t, 1)
+	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	dueAt := time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano)
+	first, _, err := module.runtimeScheduleDriveLease(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeDriveLease{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: "superseded-timer",
+		DueAt: dueAt,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	gateToken, accepted := module.beginRuntimeDriveWithToken(key)
+	if !accepted || !module.enqueueRuntimeDriveLeaseTimer(ctx, first, "old_generation") || background.lastAsyncFunction == nil {
+		t.Fatalf("mount old timer accepted=%v calls=%d callback=%v", accepted, background.asyncFunctionCalls, background.lastAsyncFunction != nil)
+	}
+	gate, ok := module.currentRuntimeDriveGate(key)
+	if !ok || gate.Token != gateToken {
+		t.Fatalf("old timer gate=%+v present=%v token=%d", gate, ok, gateToken)
+	}
+	oldCallback := background.lastAsyncFunction
+	running, claimed, err := module.runtimeClaimDriveLease(ctx, first, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil || !claimed {
+		t.Fatalf("claim old generation=%+v claimed=%v err=%v", running, claimed, err)
+	}
+	second, _, err := module.runtimeScheduleDriveLease(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeDriveLease{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: "superseded-timer",
+		DueAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
+	}, running.RecoveryGeneration)
+	if err != nil || second.RecoveryGeneration != first.RecoveryGeneration+1 {
+		t.Fatalf("persist successor=%+v err=%v", second, err)
+	}
+	if !module.retainPendingRuntimeDriveLeaseMount(key, second) {
+		t.Fatal("successor generation was not latched behind the old timer gate")
+	}
+	oldCallback()
+	module.driveMu.Lock()
+	registration, registered := module.retryLeaseTimers[key]
+	currentGate, gateRetained := module.drivingRuns[key]
+	module.driveMu.Unlock()
+	if !registered || !runtimecontract.SameRuntimeDriveLeaseIdentity(registration.Lease, second) ||
+		!gateRetained || currentGate != gate || background.asyncFunctionCalls != 2 || background.lastAsyncFunction == nil {
+		t.Fatalf("old callback damaged successor: registration=%+v registered=%v gate=%+v/%v calls=%d", registration, registered, currentGate, gateRetained, background.asyncFunctionCalls)
+	}
+}
+
+func TestRuntimeDriveLeaseStaleTerminalTimerExitSettlesByAcknowledgementPhase(t *testing.T) {
+	for _, testCase := range []struct {
+		name              string
+		fullyAcknowledged bool
+		wantSuccessor     bool
+	}{
+		{name: "partial acknowledgement rematerializes successor", wantSuccessor: true},
+		{name: "final acknowledgement releases gate", fullyAcknowledged: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			aggregate, _, _ := adversarialTerminalRun(t, testCase.fullyAcknowledged)
+			lease := runtimecontract.RuntimeDriveLease{
+				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+				AggregateRevision: aggregate.StateRevision, RecoveryGeneration: 1,
+				Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery",
+				DueAt: time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano), State: runtimecontract.RuntimeDriveLeaseScheduled,
+			}
+			bindRuntimeTerminalLeaseForTest(t, &aggregate, &lease)
+			aggregate.DriveLease = &lease
+			// The owner acknowledgement CAS happened after the scheduled lease was
+			// created, so claim must first clear the revision-stale generation.
+			aggregate.StateRevision++
+			if err := aggregate.Validate(); err != nil {
+				t.Fatalf("stale terminal timer fixture: %v", err)
+			}
+			repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+			owner := newRuntimeTestOwner()
+			if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+				t.Fatal(err)
+			}
+			hub := magicevent.NewHub(8)
+			t.Cleanup(func() { hub.Terminate(context.Background()) })
+			background := &recordingBackgroundRoutine{}
+			module := newTestBiz(owner, hub, background)
+			key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			if !module.beginRuntimeDrive(key) || !module.enqueueRuntimeDriveLeaseTimer(ctx, lease, "stale_terminal_timer") || background.lastAsyncFunction == nil {
+				t.Fatalf("mount stale terminal timer calls=%d callback=%v", background.asyncFunctionCalls, background.lastAsyncFunction != nil)
+			}
+			background.lastAsyncFunction()
+			persisted, err := repository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			module.driveMu.Lock()
+			registration, timerMounted := module.retryLeaseTimers[key]
+			_, gateHeld := module.drivingRuns[key]
+			module.driveMu.Unlock()
+			if testCase.wantSuccessor {
+				if persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+					persisted.DriveLease.RecoveryGeneration != lease.RecoveryGeneration ||
+					persisted.DriveLease.RecoveryRequestID != lease.RecoveryRequestID ||
+					!timerMounted || registration.Generation != lease.RecoveryGeneration || !gateHeld || background.asyncFunctionCalls != 2 {
+					t.Fatalf("partial acknowledgement lost exact terminal successor: lease=%+v registration=%+v mounted=%v gate=%v callbacks=%d", persisted.DriveLease, registration, timerMounted, gateHeld, background.asyncFunctionCalls)
+				}
+				return
+			}
+			if persisted.DriveLease != nil || timerMounted || gateHeld || background.asyncFunctionCalls != 1 {
+				t.Fatalf("final acknowledgement retained retry authority: lease=%+v registration=%+v mounted=%v gate=%v callbacks=%d", persisted.DriveLease, registration, timerMounted, gateHeld, background.asyncFunctionCalls)
+			}
+		})
+	}
+}
+
+func TestQueuedScheduledRuntimeDriveFromPriorEpochCannotTouchReacquiredGate(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeAggregate(t, 1)
+	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	if err := module.scheduleRuntimeDrive(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "prior_epoch"); err != nil || background.lastAsyncFunction == nil {
+		t.Fatalf("queue old drive calls=%d err=%v", background.asyncFunctionCalls, err)
+	}
+	oldCallback := background.lastAsyncFunction
+	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	oldGate, ok := module.currentRuntimeDriveGate(key)
+	if !ok {
+		t.Fatal("queued old drive has no gate")
+	}
+	// Model Stop's atomic epoch/map reset followed by Start reopening the
+	// lifecycle. The queued callback was accepted before it entered lifecycleMu
+	// and therefore is intentionally outside Stop's reader wait set.
+	module.driveMu.Lock()
+	module.runtimeLeaseTimerClosing = true
+	module.runtimeLeaseTimerEpoch++
+	delete(module.drivingRuns, key)
+	delete(module.persistedLeaseMounts, key)
+	delete(module.retryLeaseTimers, key)
+	delete(module.runtimeDriveGateSettlements, key)
+	module.runtimeLeaseTimerClosing = false
+	module.driveMu.Unlock()
+	newToken, accepted := module.beginRuntimeDriveWithToken(key)
+	if !accepted {
+		t.Fatal("restarted epoch did not reacquire gate")
+	}
+	newGate, ok := module.currentRuntimeDriveGate(key)
+	if !ok || newGate.Token != newToken || newGate == oldGate {
+		t.Fatalf("reacquired gate=%+v old=%+v present=%v token=%d", newGate, oldGate, ok, newToken)
+	}
+	oldCallback()
+	after, ok := module.currentRuntimeDriveGate(key)
+	persisted, err := repository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if !ok || after != newGate || err != nil || persisted.StateRevision != aggregate.StateRevision || persisted.DriveLease != nil {
+		t.Fatalf("prior-epoch callback touched new lifecycle: gate=%+v/%v want=%+v aggregate=%+v err=%v", after, ok, newGate, persisted, err)
+	}
+}
+
+func TestRuntimeStartupRecoveryActionsIsolateFirstFailureAndReleaseLaterRun(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeAggregate(t, 1)
+	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	missingWorkspaceID := common.WorkspaceID("ws-startup-missing")
+	missingRunID := common.RunID("run-startup-missing")
+	actions := []runtimeStartupRecoveryAction{
+		{
+			Kind:   runtimeStartupRecoveryActionRecoverLease,
+			Item:   runevents.RuntimeRecoveryInventoryItem{WorkspaceID: missingWorkspaceID, RunID: missingRunID, HasRuntimeState: true},
+			Source: "startup_first_load_failure",
+		},
+		{
+			Kind: runtimeStartupRecoveryActionDrive,
+			Item: runevents.RuntimeRecoveryInventoryItem{
+				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+				State: common.RunStateActive, HasRuntimeState: true,
+			},
+			Source: "startup_later_run",
+		},
+	}
+	if err := module.releaseRuntimeStartupRecoveryActions(ctx, actions); err != nil {
+		t.Fatalf("isolated startup actions returned aggregate failure: %v", err)
+	}
+	missingKey := runtimeDriveKey(missingWorkspaceID, missingRunID)
+	if epoch, token := module.runtimeDriveGateSettlementIdentity(missingKey); epoch == 0 || token == 0 {
+		t.Fatal("first failed startup action retained no lifecycle settlement")
+	}
+	validKey := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil || module.beginRuntimeDrive(validKey) {
+		t.Fatalf("later startup run was not independently released: calls=%d callback=%v", background.asyncFunctionCalls, background.lastAsyncFunction != nil)
+	}
+}
+
+func TestGovernanceDuplicateRunningTerminalSuccessorUsesBudgetedSettlement(t *testing.T) {
+	ctx := context.Background()
+	aggregate, _, _ := adversarialTerminalRun(t, false)
+	running := runtimecontract.RuntimeDriveLease{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		AggregateRevision: aggregate.StateRevision, RecoveryGeneration: 1,
+		Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery",
+		DueAt: time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano), State: runtimecontract.RuntimeDriveLeaseRunning,
+	}
+	bindRuntimeTerminalLeaseForTest(t, &aggregate, &running)
+	aggregate.DriveLease = &running
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("governance duplicate running terminal fixture: %v", err)
+	}
+	beforeAttempts := aggregate.Facts.Recovery.TerminalDeliveryAttempts
+	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	if err := module.mountCurrentRuntimeTerminalDeliverySuccessor(ctx, running, "governance_duplicate_test"); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := repository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if err != nil || persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		persisted.DriveLease.RecoveryGeneration != running.RecoveryGeneration+1 ||
+		persisted.Facts.Recovery.TerminalDeliveryRequest.FailedLeaseGeneration != running.RecoveryGeneration ||
+		persisted.DriveLease.RecoveryRequestID != persisted.Facts.Recovery.TerminalDeliveryRequest.RequestID ||
+		persisted.Facts.Recovery.TerminalDeliveryAttempts != beforeAttempts+1 || background.asyncFunctionCalls != 1 {
+		t.Fatalf("governance duplicate bypassed budgeted settlement: lease=%+v recovery=%+v callbacks=%d err=%v", persisted.DriveLease, persisted.Facts.Recovery, background.asyncFunctionCalls, err)
+	}
+}
+
+func TestScheduledRuntimeDriveTerminationRetiresClaimedLeaseBeforeDeliveryRetry(t *testing.T) {
+	ctx := context.Background()
+	initial := runtimeAggregate(t, 1)
+	repository := &inMemoryRuntimeStateRepository{aggregate: &initial}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+
+	scheduled, _, err := module.runtimeScheduleDriveLease(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, runtimecontract.RuntimeDriveLease{
+		WorkspaceID:      initial.Facts.WorkspaceID,
+		RunID:            initial.Facts.RunID,
+		Reason:           runtimecontract.RuntimeDriveLeaseReasonPersistedPending,
+		FailureSignature: "claimed-before-administrative-termination",
+		DueAt:            time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano),
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, claimed, err := module.runtimeClaimDriveLease(ctx, scheduled, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil || !claimed || running.State != runtimecontract.RuntimeDriveLeaseRunning {
+		t.Fatalf("claim pre-termination lease=%+v claimed=%v err=%v", running, claimed, err)
+	}
+	key := runtimeDriveKey(initial.Facts.WorkspaceID, initial.Facts.RunID)
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("claimed pre-termination lease did not own the process gate")
+	}
+	registered, accepted, oldTimerEpoch, oldGateToken := module.beginRuntimeLeaseTimer(key, scheduled)
+	if !registered || !accepted || oldTimerEpoch == 0 {
+		t.Fatalf("pre-termination timer registration: registered=%v accepted=%v epoch=%d", registered, accepted, oldTimerEpoch)
+	}
+
+	terminated, err := runtimeTestControllerRequestTermination(owner.runtimeController, ctx,
+		initial.Facts.WorkspaceID, initial.Facts.RunID,
+		runtimecontract.RuntimeTerminationCancelled, "blocks/run", "operator cancelled the active run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminated.Termination == nil || terminated.DriveLease != nil || !runtimeTerminalDeliveryReady(terminated) {
+		t.Fatalf("administrative termination did not retire running authority: termination=%+v lease=%+v decision=%+v", terminated.Termination, terminated.DriveLease, terminated.Decision)
+	}
+
+	request := scheduledRuntimeDriveRequest{
+		workspaceID:     initial.Facts.WorkspaceID,
+		runID:           initial.Facts.RunID,
+		source:          "terminated_claimed_worker",
+		driveKey:        key,
+		leaseGeneration: running.RecoveryGeneration,
+	}
+	retry, handled := module.handleScheduledRuntimeDriveFailure(ctx, request, errors.New("stale worker returned after administrative termination"))
+	if !handled || retry == nil || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || retry.FailureSignature != "terminal-delivery" {
+		t.Fatalf("administrative terminal delivery failure disposition: handled=%v retry=%+v", handled, retry)
+	}
+	module.finishScheduledRuntimeDrive(ctx, request, &retry)
+
+	persisted, err := owner.runtimeController.Load(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Termination == nil || persisted.DriveLease == nil ||
+		persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		persisted.DriveLease.RecoveryGeneration != running.RecoveryGeneration+1 ||
+		persisted.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry ||
+		persisted.DriveLease.FailureSignature != "terminal-delivery" ||
+		persisted.Facts.Recovery.TerminalDeliveryAttempts != terminated.Facts.Recovery.TerminalDeliveryAttempts+1 ||
+		background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
+		t.Fatalf("retired generation lost terminal-delivery successor: lease=%+v recovery=%+v/%+v timers=%d err=%v", persisted.DriveLease, persisted.Facts.Recovery, terminated.Facts.Recovery, background.asyncFunctionCalls, err)
+	}
+	module.driveMu.Lock()
+	registration, timerMounted := module.retryLeaseTimers[key]
+	_, gateRetained := module.drivingRuns[key]
+	module.driveMu.Unlock()
+	if !timerMounted || registration.Generation != persisted.DriveLease.RecoveryGeneration || !gateRetained {
+		t.Fatalf("terminal-delivery successor was not mounted behind the sole gate: registration=%+v mounted=%v gate=%v", registration, timerMounted, gateRetained)
+	}
+	// The retiring timer callback still runs its deferred cleanup. A G+1
+	// successor must survive that old end(G) so the durable lease cannot become
+	// an unmounted ABA orphan.
+	module.endRuntimeLeaseTimerExact(key, scheduled, oldTimerEpoch, oldGateToken)
+	module.driveMu.Lock()
+	afterOldTimerExit, successorTimerRemains := module.retryLeaseTimers[key]
+	module.driveMu.Unlock()
+	if !successorTimerRemains || afterOldTimerExit.Generation != persisted.DriveLease.RecoveryGeneration {
+		t.Fatalf("old timer cleanup removed terminal successor: registration=%+v remains=%v", afterOldTimerExit, successorTimerRemains)
+	}
+	claimedSuccessor, claimed, err := module.runtimeClaimDriveLease(ctx, persisted.DriveLease.Clone(), time.Now().UTC().Add(2*time.Second).Format(time.RFC3339Nano))
+	if err != nil || !claimed || claimedSuccessor.State != runtimecontract.RuntimeDriveLeaseRunning ||
+		claimedSuccessor.RecoveryGeneration != running.RecoveryGeneration+1 {
+		t.Fatalf("terminal successor was not claimable after old timer exit: lease=%+v claimed=%v err=%v", claimedSuccessor, claimed, err)
+	}
+}
+
 func TestRuntimeLifecycleOwnerDeliveryUsesPersistedLeaseWithoutTerminalBudget(t *testing.T) {
 	ctx := context.Background()
 	aggregate := runtimeBoundDefinitionClarificationAggregate(t)
@@ -993,11 +2004,15 @@ func TestRuntimeLifecycleOwnerDeliveryUsesPersistedLeaseWithoutTerminalBudget(t 
 		t.Fatal(err)
 	}
 	deliveryFailure := runtimeLifecycleOwnerDeliveryFailure(result, common.ErrConflict)
-	retry := module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{
+	retry, handled := module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID, source: "test", driveKey: runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID),
 	}, deliveryFailure)
-	if retry == nil || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry {
-		t.Fatalf("lifecycle retry=%+v", retry)
+	if !handled || retry == nil || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry {
+		t.Fatalf("lifecycle handled=%v retry=%+v", handled, retry)
+	}
+	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("lifecycle retry fixture did not acquire drive gate")
 	}
 	if !module.scheduleRuntimeRecoveryLease(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, *retry) {
 		t.Fatal("lifecycle retry lease was not persisted")
@@ -1023,16 +2038,12 @@ func TestRuntimeLifecycleOwnerDeliveryUsesPersistedLeaseWithoutTerminalBudget(t 
 	if err != nil || !claimedOK || claimed.State != runtimecontract.RuntimeDriveLeaseRunning {
 		t.Fatalf("claim lifecycle retry=%+v claimed=%v err=%v", claimed, claimedOK, err)
 	}
-	secondRetry := module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{
+	secondRetry, handled := module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID, source: "test", driveKey: runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID),
 		leaseGeneration: claimed.RecoveryGeneration,
 	}, deliveryFailure)
-	if secondRetry == nil {
-		t.Fatalf("second lifecycle retry=%+v", secondRetry)
-	}
-	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
-	if !module.beginRuntimeDrive(key) {
-		t.Fatal("second lifecycle retry did not acquire its drive gate")
+	if !handled || secondRetry == nil {
+		t.Fatalf("second lifecycle handled=%v retry=%+v", handled, secondRetry)
 	}
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID, source: "test", driveKey: key,
@@ -1118,13 +2129,13 @@ func TestRuntimeBusinessFailureFactCommitFailureRetainsPersistedSM4Successor(t *
 	}
 }
 
-func TestRuntimeFailureFactPendingLeaseUsesCASReloadForTypedConflict(t *testing.T) {
+func TestRuntimeFailureFactPendingLeaseUsesStablePersistedPendingAuthority(t *testing.T) {
 	retry := runtimeFailureFactPendingLeaseRequest("test", runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassRuntimeContractMisalignment,
 		Code:  "runtime_drive_failed", Signature: "assessment-double-entry", Message: "failed",
-	}, &runtime.RuntimeCASConflictError{ExpectedRevision: 11, ObservedRevision: 12})
-	if retry == nil || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonCASReload ||
-		retry.FailureSignature != "failure-fact-cas/11/12" || retry.Source != "test" {
+	})
+	if retry == nil || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonPersistedPending ||
+		retry.FailureSignature != "failure-fact-pending/runtime_internal_contract_misalignment/assessment-double-entry" || retry.Source != "test" {
 		t.Fatalf("typed failure-fact CAS retry=%+v", retry)
 	}
 }
@@ -1144,6 +2155,10 @@ func TestRuntimeLifecycleLeasePersistedBehindDriveGateIsMountedByOwnerExit(t *te
 	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	if !module.beginRuntimeDrive(key) {
 		t.Fatal("old drive did not acquire gate")
+	}
+	oldGate, ownsOldGate := module.currentRuntimeDriveGate(key)
+	if !ownsOldGate {
+		t.Fatal("old drive gate identity is unavailable")
 	}
 	handoff := runtimeGovernanceLifecycleHandoff{
 		Kind: runtimeGovernanceLifecycleContinuationDecision, AuthoritySnapshotID: "authority-gate",
@@ -1170,6 +2185,7 @@ func TestRuntimeLifecycleLeasePersistedBehindDriveGateIsMountedByOwnerExit(t *te
 	var retry *runtimeRecoveryLeaseRequest
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID, source: "old_drive_success", driveKey: key,
+		gateEpoch: oldGate.Epoch, gateToken: oldGate.Token,
 	}, &retry)
 	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
 		t.Fatalf("gate owner did not mount persisted lease: calls=%d", background.asyncFunctionCalls)
@@ -1231,7 +2247,7 @@ func (r *blockFirstScheduledLeaseSaveRepository) Save(ctx context.Context, aggre
 	return r.delegate.Save(ctx, aggregate, expectedRevision)
 }
 
-func TestRuntimeLifecycleLeaseSubmitterTakesGateWhenOldOwnerExitsBeforeLeaseCAS(t *testing.T) {
+func TestRuntimeLifecycleSuccessorWinsConcurrentCleanDriveExit(t *testing.T) {
 	ctx := context.Background()
 	aggregate := runtimeAggregate(t, 1)
 	baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
@@ -1250,6 +2266,10 @@ func TestRuntimeLifecycleLeaseSubmitterTakesGateWhenOldOwnerExitsBeforeLeaseCAS(
 	if !module.beginRuntimeDrive(key) {
 		t.Fatal("old drive did not acquire gate")
 	}
+	gate, ok := module.currentRuntimeDriveGate(key)
+	if !ok || gate.Epoch == 0 || gate.Token == 0 {
+		t.Fatalf("old drive gate identity = %+v, found=%v", gate, ok)
+	}
 	handoff := runtimeGovernanceLifecycleHandoff{
 		Kind: runtimeGovernanceLifecycleContinuationDecision, AuthoritySnapshotID: "authority-cas-race",
 		DefinitionRevision: aggregate.Facts.DefinitionRevision, EvidenceRevision: aggregate.Facts.EvidenceRevision,
@@ -1266,10 +2286,11 @@ func TestRuntimeLifecycleLeaseSubmitterTakesGateWhenOldOwnerExitsBeforeLeaseCAS(
 	var retry *runtimeRecoveryLeaseRequest
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID, source: "old_drive_success_before_lease_cas", driveKey: key,
+		gateEpoch: gate.Epoch, gateToken: gate.Token,
 	}, &retry)
 	close(repository.release)
 	if err := <-done; err != nil {
-		t.Fatalf("lifecycle submitter did not take released gate: %v", err)
+		t.Fatalf("concurrent lifecycle successor: %v", err)
 	}
 	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
 		t.Fatalf("lifecycle submitter did not mount its persisted lease: calls=%d", background.asyncFunctionCalls)
@@ -1279,6 +2300,8 @@ func TestRuntimeLifecycleLeaseSubmitterTakesGateWhenOldOwnerExitsBeforeLeaseCAS(
 	}
 	persisted, err := owner.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	if err != nil || persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		persisted.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry ||
+		persisted.DriveLease.FailureSignature != deliveryErr.leaseSignature() ||
 		persisted.Facts.Recovery.TerminalDeliveryAttempts != 0 {
 		t.Fatalf("CAS-race successor=%+v recovery=%+v err=%v", persisted.DriveLease, persisted.Facts.Recovery, err)
 	}
@@ -1316,7 +2339,7 @@ func TestRuntimeLifecycleLeaseWinsWhenOldDriveAlsoRequestsRetry(t *testing.T) {
 	lifecycleSignature := beforeFinish.DriveLease.FailureSignature
 	lifecycleGeneration := beforeFinish.DriveLease.RecoveryGeneration
 	oldDriveRetry := &runtimeRecoveryLeaseRequest{
-		Reason: runtimecontract.RuntimeDriveLeaseReasonCASReload, FailureSignature: "old-drive/cas-retry",
+		Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: "old-drive/cas-retry",
 		Delay: time.Second, Source: "old_drive_retry",
 	}
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
@@ -1439,13 +2462,17 @@ func TestRuntimeDriveLeaseRenewalCASFailureCannotReleaseOrBypassRunningAuthority
 	if !module.beginRuntimeDrive(key) {
 		t.Fatal("running generation did not own local gate")
 	}
+	gate, ownsGate := module.currentRuntimeDriveGate(key)
+	if !ownsGate {
+		t.Fatal("running generation gate identity is unavailable")
+	}
 	retry := &runtimeRecoveryLeaseRequest{
 		Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "replacement-after-delivery-failure",
 		Delay: time.Second, Source: "renewal_fault",
 	}
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: initial.Facts.WorkspaceID, runID: initial.Facts.RunID, source: "renewal_fault",
-		driveKey: key, leaseGeneration: running.RecoveryGeneration,
+		driveKey: key, leaseGeneration: running.RecoveryGeneration, gateEpoch: gate.Epoch, gateToken: gate.Token,
 	}, &retry)
 	afterFailures, err := baseRepository.Load(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID)
 	module.driveMu.Lock()
@@ -1881,6 +2908,10 @@ func TestRuntimeGovernanceContinuationSuccessHandoffRetainsDurableSingleSuccesso
 	if !module.beginRuntimeDrive(driveKey) {
 		t.Fatal("old drive did not acquire gate")
 	}
+	oldGate, ownsOldGate := module.currentRuntimeDriveGate(driveKey)
+	if !ownsOldGate {
+		t.Fatal("old drive gate identity is unavailable")
+	}
 	resolution := runtimecontract.RuntimeGovernanceResolution{
 		ResolutionID: "resolution-success-handoff", TicketID: request.TicketID,
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
@@ -1888,13 +2919,28 @@ func TestRuntimeGovernanceContinuationSuccessHandoffRetainsDurableSingleSuccesso
 		DependencyKind: request.DependencyKind, SubjectRef: request.SubjectRef,
 		Outcome: runtimecontract.RuntimeGovernanceResolutionOutcomeContinue, Summary: "continue with durable successor",
 	}
+	responseLossRepository := &runtimePostCommitResponseLossRepository{
+		delegate: runtimeStateRepository{hub: hub},
+		match: func(candidate runtime.RuntimeAggregate) bool {
+			for _, record := range candidate.GovernanceResolutions {
+				if record.ResolutionID == resolution.ResolutionID {
+					return true
+				}
+			}
+			return false
+		},
+		err: errors.New("injected governance continuation CAS response loss"),
+	}
+	if err := owner.ConfigureRuntimeRepository(responseLossRepository); err != nil {
+		t.Fatal(err)
+	}
 	result := commitRuntimeGovernanceResolutionForTest(module, ctx, decisioncommon.ModuleID, resolution)
 	data, magicErr := result.Get()
 	if magicErr != nil {
 		t.Fatalf("commit exact governance continuation: %v", magicErr)
 	}
 	response, ok := data.(orchestratorevents.CommitRuntimeGovernanceResolutionResult)
-	if !ok || response.Disposition != orchestratorevents.RuntimeGovernanceResolutionDispositionCommitted {
+	if !ok || response.Disposition != orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate || !responseLossRepository.fired {
 		t.Fatalf("governance continuation response=%+v", data)
 	}
 	continued, err := baseRuns.GetByWorkspaceID(ctx, facts.WorkspaceID, facts.RunID)
@@ -1957,6 +3003,7 @@ func TestRuntimeGovernanceContinuationSuccessHandoffRetainsDurableSingleSuccesso
 	var retry *runtimeRecoveryLeaseRequest
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: facts.WorkspaceID, runID: facts.RunID, source: "old_wait_ack_success", driveKey: driveKey,
+		gateEpoch: oldGate.Epoch, gateToken: oldGate.Token,
 	}, &retry)
 	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
 		t.Fatalf("old gate exit did not mount the durable successor: calls=%d", background.asyncFunctionCalls)
@@ -2248,7 +3295,7 @@ func TestRuntimeGovernanceFailureUsesAtomicTerminalSuccessorAcrossPartialAckAndR
 	}
 	oldLease, _, err := module.runtimeScheduleDriveLease(ctx, facts.WorkspaceID, facts.RunID, runtimecontract.RuntimeDriveLease{
 		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID,
-		Reason: runtimecontract.RuntimeDriveLeaseReasonCASReload, FailureSignature: "old-pre-resolution-lease",
+		Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: "old-pre-resolution-lease",
 		DueAt: time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano),
 	}, 0)
 	if err != nil {
@@ -2277,6 +3324,10 @@ func TestRuntimeGovernanceFailureUsesAtomicTerminalSuccessorAcrossPartialAckAndR
 	driveKey := runtimeDriveKey(facts.WorkspaceID, facts.RunID)
 	if !module.beginRuntimeDrive(driveKey) {
 		t.Fatal("old governance-wait drive did not acquire gate")
+	}
+	oldGate, ownsOldGate := module.currentRuntimeDriveGate(driveKey)
+	if !ownsOldGate {
+		t.Fatal("old governance-wait gate identity is unavailable")
 	}
 	resolution := runtimecontract.RuntimeGovernanceResolution{
 		ResolutionID: "resolution-terminal-successor", TicketID: request.TicketID,
@@ -2319,6 +3370,7 @@ func TestRuntimeGovernanceFailureUsesAtomicTerminalSuccessorAcrossPartialAckAndR
 	var retry *runtimeRecoveryLeaseRequest
 	module.finishScheduledRuntimeDrive(ctx, scheduledRuntimeDriveRequest{
 		workspaceID: facts.WorkspaceID, runID: facts.RunID, source: "old_governance_wait_terminal", driveKey: driveKey,
+		gateEpoch: oldGate.Epoch, gateToken: oldGate.Token,
 	}, &retry)
 	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
 		t.Fatalf("old gate exit did not mount terminal successor: calls=%d", background.asyncFunctionCalls)
@@ -2617,4 +3669,917 @@ func TestRuntimeStartupRecoveryDeliversPersistedGovernanceContinuationToBlockedR
 		loaded.Facts.Recovery.TerminalDeliveryAttempts != 0 || len(loaded.GovernanceResolutions) != 1 {
 		t.Fatalf("fresh restart continuation aggregate lease=%+v recovery=%+v resolutions=%d err=%v", loaded.DriveLease, loaded.Facts.Recovery, len(loaded.GovernanceResolutions), err)
 	}
+}
+
+// runtimePostCommitResponseLossRepository persists a matching CAS and then
+// returns an ordinary storage/transport error. It models the generic
+// post-commit response-loss boundary without granting the caller a typed CAS
+// rebase signal.
+type runtimePostCommitResponseLossRepository struct {
+	delegate runtime.RuntimeStateRepository
+	match    func(runtime.RuntimeAggregate) bool
+	err      error
+	fired    bool
+}
+
+func (r *runtimePostCommitResponseLossRepository) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtime.RuntimeAggregate, error) {
+	return r.delegate.Load(ctx, workspaceID, runID)
+}
+
+func (r *runtimePostCommitResponseLossRepository) Save(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
+	matched := !r.fired && r.match != nil && r.match(aggregate)
+	if err := r.delegate.Save(ctx, aggregate, expectedRevision); err != nil {
+		return err
+	}
+	if matched {
+		r.fired = true
+		if r.err != nil {
+			return r.err
+		}
+		return errors.New("injected Runtime post-commit response loss")
+	}
+	return nil
+}
+
+// runtimeAcknowledgementCASWinnerRepository injects the exact SM-4 race in
+// which an owner acknowledgement commits after the tested transition loads
+// its aggregate but before that transition reaches Save. The stale writer sees
+// the same typed conflict as the production Run-backed repository.
+type runtimeAcknowledgementCASWinnerRepository struct {
+	delegate        *inMemoryRuntimeStateRepository
+	match           func(runtime.RuntimeAggregate) bool
+	acknowledgement runtimecontract.RuntimeDeliveryAcknowledgement
+	fired           bool
+	conflicts       int
+	winnerErr       error
+}
+
+func (r *runtimeAcknowledgementCASWinnerRepository) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtime.RuntimeAggregate, error) {
+	return r.delegate.Load(ctx, workspaceID, runID)
+}
+
+func (r *runtimeAcknowledgementCASWinnerRepository) Save(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
+	if !r.fired && r.match != nil && r.match(aggregate) {
+		r.fired = true
+		winner, err := runtimeCommitTerminalAcknowledgementForCASTest(ctx, r.delegate, r.acknowledgement)
+		if err != nil {
+			r.winnerErr = err
+			return err
+		}
+		r.conflicts++
+		return &runtime.RuntimeCASConflictError{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			ExpectedRevision: expectedRevision, ObservedRevision: winner.StateRevision, Cause: common.ErrConflict,
+		}
+	}
+	return r.delegate.Save(ctx, aggregate, expectedRevision)
+}
+
+func runtimeCommitTerminalAcknowledgementForCASTest(
+	ctx context.Context,
+	repository runtime.RuntimeStateRepository,
+	acknowledgement runtimecontract.RuntimeDeliveryAcknowledgement,
+) (runtime.RuntimeAggregate, error) {
+	controller, err := runtime.NewRuntimeController(repository)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, err
+	}
+	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind:  runtime.RuntimeInternalEventTerminalDeliveryAcknowledged,
+		Scope: runtime.RuntimeInternalEventScope{WorkspaceID: acknowledgement.WorkspaceID, RunID: acknowledgement.RunID},
+		Delivery: &runtime.RuntimeInternalDeliveryPayload{
+			DeliveryAcknowledgement: &acknowledgement,
+		},
+	})
+	return result.Aggregate, err
+}
+
+func runtimeAdministrativeTerminalPartialAckFixture(
+	t *testing.T,
+	retireRunningLease bool,
+) (*inMemoryRuntimeStateRepository, orchestratorevents.RuntimeTerminalDeliveryRequestData, uint64) {
+	t.Helper()
+	ctx := context.Background()
+	initial := runtimeAggregate(t, 1)
+	repository := &inMemoryRuntimeStateRepository{aggregate: &initial}
+	controller, err := runtime.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retiredGeneration := uint64(0)
+	if retireRunningLease {
+		dueAt := time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano)
+		scheduled, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			Kind:  runtime.RuntimeInternalEventDriveLeaseScheduled,
+			Scope: runtime.RuntimeInternalEventScope{WorkspaceID: initial.Facts.WorkspaceID, RunID: initial.Facts.RunID},
+			Delivery: &runtime.RuntimeInternalDeliveryPayload{DriveLease: &runtimecontract.RuntimeDriveLease{
+				WorkspaceID: initial.Facts.WorkspaceID, RunID: initial.Facts.RunID,
+				Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: "retired-before-terminal-schedule-cas",
+				DueAt: dueAt,
+			}},
+		})
+		if err != nil || scheduled.DriveLease == nil {
+			t.Fatalf("prepare scheduled lease: result=%+v err=%v", scheduled, err)
+		}
+		claimed, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			Kind:  runtime.RuntimeInternalEventDriveLeaseClaimed,
+			Scope: runtime.RuntimeInternalEventScope{WorkspaceID: initial.Facts.WorkspaceID, RunID: initial.Facts.RunID},
+			Delivery: &runtime.RuntimeInternalDeliveryPayload{
+				DriveLease: scheduled.DriveLease,
+				LeaseNow:   time.Now().UTC().Format(time.RFC3339Nano),
+			},
+		})
+		if err != nil || !claimed.LeaseClaimed || claimed.DriveLease == nil || claimed.DriveLease.State != runtimecontract.RuntimeDriveLeaseRunning {
+			t.Fatalf("prepare running lease: result=%+v err=%v", claimed, err)
+		}
+		retiredGeneration = claimed.DriveLease.RecoveryGeneration
+	}
+	terminated, err := runtimeTestControllerRequestTermination(controller, ctx,
+		initial.Facts.WorkspaceID, initial.Facts.RunID,
+		runtimecontract.RuntimeTerminationCancelled, "blocks/run", "retire worker before terminal schedule CAS")
+	if err != nil || !runtime.AdministrativeTerminationAwaitsTerminalDelivery(terminated) || terminated.DriveLease != nil {
+		t.Fatalf("prepare administrative terminal: aggregate=%+v err=%v", terminated, err)
+	}
+	delivery := mustTerminalDeliveryRequest(t, terminated)
+	for _, deliveryOwner := range []runtimecontract.RuntimeDeliveryOwner{
+		runtimecontract.RuntimeDeliveryOwnerResult,
+		runtimecontract.RuntimeDeliveryOwnerWorkspace,
+	} {
+		acknowledgement := adversarialTerminalAcknowledgement(delivery, deliveryOwner)
+		terminated, err = runtimeCommitTerminalAcknowledgementForCASTest(ctx, repository, acknowledgement)
+		if err != nil {
+			t.Fatalf("prepare partial terminal acknowledgement %q: %v", deliveryOwner, err)
+		}
+	}
+	if runtimeTerminalDeliveryFullyAcknowledged(terminated) || len(terminated.DeliveryAcknowledgements) != 2 {
+		t.Fatalf("partial terminal fixture acknowledgements=%+v", terminated.DeliveryAcknowledgements)
+	}
+	return repository, delivery, retiredGeneration
+}
+
+func TestTerminalDeliveryLeaseScheduleCASRebasesFinalAcknowledgementAndReleasesGate(t *testing.T) {
+	for _, testCase := range []struct {
+		name               string
+		retireRunningLease bool
+	}{
+		{name: "generation zero"},
+		{name: "retired running generation", retireRunningLease: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			baseRepository, delivery, retiredGeneration := runtimeAdministrativeTerminalPartialAckFixture(t, testCase.retireRunningLease)
+			recoveryRequest := runtimeTerminalRecoveryRequestForTest(delivery, retiredGeneration)
+			controller, err := runtime.NewRuntimeController(baseRepository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			budget, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+				Kind:  runtime.RuntimeInternalEventRecoveryBudgetConsumed,
+				Scope: runtime.RuntimeInternalEventScope{WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID},
+				Delivery: &runtime.RuntimeInternalDeliveryPayload{
+					RecoveryBudgetKind:              runtimecontract.RuntimeRecoveryBudgetTerminalDelivery,
+					TerminalDeliveryRecoveryRequest: &recoveryRequest,
+				},
+			})
+			if err != nil || !budget.BudgetConsumed {
+				t.Fatalf("prepare terminal delivery authorization: result=%+v err=%v", budget, err)
+			}
+			before, err := baseRepository.Load(ctx, delivery.WorkspaceID, delivery.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			repository := &runtimeAcknowledgementCASWinnerRepository{
+				delegate:        baseRepository,
+				acknowledgement: adversarialTerminalAcknowledgement(delivery, runtimecontract.RuntimeDeliveryOwnerRun),
+				match: func(candidate runtime.RuntimeAggregate) bool {
+					return candidate.DriveLease != nil &&
+						candidate.DriveLease.State == runtimecontract.RuntimeDriveLeaseScheduled &&
+						candidate.DriveLease.Reason == runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry &&
+						candidate.DriveLease.FailureSignature == "terminal-delivery"
+				},
+			}
+			owner := newRuntimeTestOwner()
+			if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+				t.Fatal(err)
+			}
+			hub := magicevent.NewHub(8)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			background := &recordingBackgroundRoutine{}
+			module := newTestBiz(owner, hub, background)
+			key := runtimeDriveKey(delivery.WorkspaceID, delivery.RunID)
+			if !module.beginRuntimeDrive(key) {
+				t.Fatal("terminal scheduling fixture did not acquire drive gate")
+			}
+			gate, ownsGate := module.currentRuntimeDriveGate(key)
+			if !ownsGate {
+				t.Fatal("terminal scheduling gate identity is unavailable")
+			}
+			request := scheduledRuntimeDriveRequest{
+				workspaceID: delivery.WorkspaceID, runID: delivery.RunID,
+				source: "terminal_schedule_final_ack_cas", driveKey: key, leaseGeneration: retiredGeneration,
+				gateEpoch: gate.Epoch, gateToken: gate.Token,
+			}
+			retry := runtimeDeliveryRecoveryLease(request.source, "terminal-delivery", recoveryRequest.RequestID)
+			module.finishScheduledRuntimeDrive(ctx, request, &retry)
+
+			persisted, err := baseRepository.Load(ctx, delivery.WorkspaceID, delivery.RunID)
+			if err != nil || repository.winnerErr != nil || !repository.fired || repository.conflicts != 1 ||
+				!runtimeTerminalDeliveryFullyAcknowledged(persisted) || len(persisted.DeliveryAcknowledgements) != 3 ||
+				persisted.StateRevision != before.StateRevision+1 || persisted.Facts.Recovery != before.Facts.Recovery ||
+				persisted.DriveLease != nil || background.asyncFunctionCalls != 0 {
+				t.Fatalf("final acknowledgement did not win scheduling CAS exactly once: aggregate=%+v beforeRevision=%d conflicts=%d fired=%v winnerErr=%v timers=%d loadErr=%v", persisted, before.StateRevision, repository.conflicts, repository.fired, repository.winnerErr, background.asyncFunctionCalls, err)
+			}
+			if !module.beginRuntimeDrive(key) {
+				t.Fatal("completed terminal scheduling CAS retained the stale process gate")
+			}
+			module.endRuntimeDrive(key)
+		})
+	}
+}
+
+func TestTerminalDeliveryRecoveryBudgetCASRebasesPartialAcknowledgementOnce(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeTerminalAggregate(t)
+	delivery := mustTerminalDeliveryRequest(t, aggregate)
+	baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	beforeRecovery := aggregate.Facts.Recovery
+	repository := &runtimeAcknowledgementCASWinnerRepository{
+		delegate:        baseRepository,
+		acknowledgement: adversarialTerminalAcknowledgement(delivery, runtimecontract.RuntimeDeliveryOwnerResult),
+		match: func(candidate runtime.RuntimeAggregate) bool {
+			return candidate.DriveLease == nil &&
+				candidate.Facts.Recovery.TerminalDeliveryAttempts == beforeRecovery.TerminalDeliveryAttempts+1
+		},
+	}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	key := runtimeDriveKey(delivery.WorkspaceID, delivery.RunID)
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("terminal budget fixture did not acquire drive gate")
+	}
+	request := scheduledRuntimeDriveRequest{
+		workspaceID: delivery.WorkspaceID, runID: delivery.RunID,
+		source: "terminal_budget_partial_ack_cas", driveKey: key,
+	}
+	retry := module.handleRuntimeTerminalDeliveryRetry(ctx, request, runtimeTerminalDeliveryFailure(errors.New("injected partial acknowledgement race")))
+	if retry == nil || retry.AwaitingTerminalDeliveryBudget || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || retry.FailureSignature != "terminal-delivery" {
+		t.Fatalf("partial acknowledgement CAS retry=%+v", retry)
+	}
+	module.finishScheduledRuntimeDrive(ctx, request, &retry)
+
+	persisted, err := baseRepository.Load(ctx, delivery.WorkspaceID, delivery.RunID)
+	if err != nil || repository.winnerErr != nil || !repository.fired || repository.conflicts != 1 ||
+		len(persisted.DeliveryAcknowledgements) != 1 || persisted.DeliveryAcknowledgements[0].Owner != runtimecontract.RuntimeDeliveryOwnerResult ||
+		persisted.Facts.Recovery.TerminalDeliveryAttempts != beforeRecovery.TerminalDeliveryAttempts+1 ||
+		persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		persisted.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry ||
+		persisted.DriveLease.FailureSignature != "terminal-delivery" ||
+		persisted.DriveLease.AggregateRevision != persisted.StateRevision || background.asyncFunctionCalls != 1 {
+		t.Fatalf("partial acknowledgement CAS did not spend once and persist one successor: aggregate=%+v conflicts=%d fired=%v winnerErr=%v timers=%d loadErr=%v", persisted, repository.conflicts, repository.fired, repository.winnerErr, background.asyncFunctionCalls, err)
+	}
+	if module.beginRuntimeDrive(key) {
+		t.Fatal("persisted terminal successor did not retain the sole process gate")
+	}
+}
+
+func TestTerminalDeliveryRecoveryBudgetCASRebasesFinalAcknowledgementWithoutSpend(t *testing.T) {
+	ctx := context.Background()
+	aggregate, delivery, _ := adversarialTerminalRun(t, false)
+	baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	beforeRevision := aggregate.StateRevision
+	beforeRecovery := aggregate.Facts.Recovery
+	repository := &runtimeAcknowledgementCASWinnerRepository{
+		delegate:        baseRepository,
+		acknowledgement: adversarialTerminalAcknowledgement(delivery, runtimecontract.RuntimeDeliveryOwnerRun),
+		match: func(candidate runtime.RuntimeAggregate) bool {
+			return candidate.DriveLease == nil &&
+				candidate.Facts.Recovery.TerminalDeliveryAttempts == beforeRecovery.TerminalDeliveryAttempts+1
+		},
+	}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	key := runtimeDriveKey(delivery.WorkspaceID, delivery.RunID)
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("terminal budget fixture did not acquire drive gate")
+	}
+	gate, ownsGate := module.currentRuntimeDriveGate(key)
+	if !ownsGate {
+		t.Fatal("terminal budget gate identity is unavailable")
+	}
+	request := scheduledRuntimeDriveRequest{
+		workspaceID: delivery.WorkspaceID, runID: delivery.RunID,
+		source: "terminal_budget_final_ack_cas", driveKey: key, gateEpoch: gate.Epoch, gateToken: gate.Token,
+	}
+	retry := module.handleRuntimeTerminalDeliveryRetry(ctx, request, runtimeTerminalDeliveryFailure(errors.New("injected final acknowledgement race")))
+	if retry != nil {
+		t.Fatalf("final acknowledgement CAS created retry=%+v", retry)
+	}
+	module.finishScheduledRuntimeDrive(ctx, request, &retry)
+
+	persisted, err := baseRepository.Load(ctx, delivery.WorkspaceID, delivery.RunID)
+	if err != nil || repository.winnerErr != nil || !repository.fired || repository.conflicts != 1 ||
+		!runtimeTerminalDeliveryFullyAcknowledged(persisted) || len(persisted.DeliveryAcknowledgements) != 3 ||
+		persisted.StateRevision != beforeRevision+1 || persisted.Facts.Recovery != beforeRecovery ||
+		persisted.DriveLease != nil || background.asyncFunctionCalls != 0 {
+		t.Fatalf("final acknowledgement CAS spent budget or persisted successor: aggregate=%+v beforeRevision=%d conflicts=%d fired=%v winnerErr=%v timers=%d loadErr=%v", persisted, beforeRevision, repository.conflicts, repository.fired, repository.winnerErr, background.asyncFunctionCalls, err)
+	}
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("final acknowledgement budget rebase retained the stale process gate")
+	}
+	module.endRuntimeDrive(key)
+}
+
+func TestTerminalDeliveryRecoveryBudgetPostCommitResponseLossPersistsSuccessor(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeTerminalAggregate(t)
+	delivery := mustTerminalDeliveryRequest(t, aggregate)
+	baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	beforeRevision := aggregate.StateRevision
+	beforeRecovery := aggregate.Facts.Recovery
+	repository := &runtimePostCommitResponseLossRepository{
+		delegate: baseRepository,
+		err:      errors.New("injected terminal budget response loss after commit"),
+		match: func(candidate runtime.RuntimeAggregate) bool {
+			return candidate.DriveLease == nil &&
+				candidate.Facts.Recovery.TerminalDeliveryAttempts == beforeRecovery.TerminalDeliveryAttempts+1
+		},
+	}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	key := runtimeDriveKey(delivery.WorkspaceID, delivery.RunID)
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("terminal budget response-loss fixture did not acquire drive gate")
+	}
+	request := scheduledRuntimeDriveRequest{
+		workspaceID: delivery.WorkspaceID, runID: delivery.RunID,
+		source: "terminal_budget_post_commit_response_loss", driveKey: key,
+	}
+	retry := module.handleRuntimeTerminalDeliveryRetry(ctx, request, runtimeTerminalDeliveryFailure(errors.New("injected terminal owner delivery failure")))
+	if retry == nil || retry.AwaitingTerminalDeliveryBudget || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || retry.FailureSignature != "terminal-delivery" {
+		t.Fatalf("post-commit budget response loss retry=%+v", retry)
+	}
+	module.finishScheduledRuntimeDrive(ctx, request, &retry)
+
+	persisted, err := baseRepository.Load(ctx, delivery.WorkspaceID, delivery.RunID)
+	if err != nil || !repository.fired ||
+		persisted.StateRevision != beforeRevision+2 ||
+		persisted.Facts.Recovery.TerminalDeliveryAttempts != beforeRecovery.TerminalDeliveryAttempts+1 ||
+		persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		persisted.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry ||
+		persisted.DriveLease.FailureSignature != "terminal-delivery" ||
+		persisted.DriveLease.AggregateRevision != persisted.StateRevision || background.asyncFunctionCalls != 1 {
+		t.Fatalf("post-commit budget response loss lost settled spend or successor: aggregate=%+v beforeRevision=%d fired=%v timers=%d loadErr=%v", persisted, beforeRevision, repository.fired, background.asyncFunctionCalls, err)
+	}
+	if module.beginRuntimeDrive(key) {
+		t.Fatal("post-commit budget successor did not retain the sole process gate")
+	}
+}
+
+func TestTerminalDeliveryExactRunningLeaseCleanupPostCommitResponseLossReleasesGate(t *testing.T) {
+	ctx := context.Background()
+	aggregate, delivery, _ := adversarialTerminalRun(t, true)
+	const runningGeneration = uint64(7)
+	aggregate.StateRevision++
+	aggregate.DriveLease = &runtimecontract.RuntimeDriveLease{
+		WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+		AggregateRevision: aggregate.StateRevision, RecoveryGeneration: runningGeneration,
+		Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery",
+		DueAt: time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano), State: runtimecontract.RuntimeDriveLeaseRunning,
+	}
+	bindRuntimeTerminalLeaseForTest(t, &aggregate, aggregate.DriveLease)
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("fully acknowledged exact-running fixture: %v", err)
+	}
+	baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	beforeRevision := aggregate.StateRevision
+	beforeRecovery := aggregate.Facts.Recovery
+	repository := &runtimePostCommitResponseLossRepository{
+		delegate: baseRepository,
+		err:      errors.New("injected exact-running cleanup response loss after commit"),
+		match: func(candidate runtime.RuntimeAggregate) bool {
+			return candidate.DriveLease == nil && candidate.StateRevision == beforeRevision+1
+		},
+	}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	key := runtimeDriveKey(delivery.WorkspaceID, delivery.RunID)
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("exact-running response-loss fixture did not acquire drive gate")
+	}
+	gate, ownsGate := module.currentRuntimeDriveGate(key)
+	if !ownsGate {
+		t.Fatal("exact-running response-loss gate identity is unavailable")
+	}
+	request := scheduledRuntimeDriveRequest{
+		workspaceID: delivery.WorkspaceID, runID: delivery.RunID,
+		source: "terminal_running_cleanup_post_commit_response_loss", driveKey: key, leaseGeneration: runningGeneration,
+		gateEpoch: gate.Epoch, gateToken: gate.Token,
+	}
+	retry := runtimeDeliveryRecoveryLease(request.source, "terminal-delivery")
+	module.finishScheduledRuntimeDrive(ctx, request, &retry)
+
+	persisted, err := baseRepository.Load(ctx, delivery.WorkspaceID, delivery.RunID)
+	if err != nil || !repository.fired || !runtimeTerminalDeliveryFullyAcknowledged(persisted) ||
+		persisted.StateRevision != beforeRevision+1 || persisted.Facts.Recovery != beforeRecovery ||
+		persisted.DriveLease != nil || background.asyncFunctionCalls != 0 {
+		t.Fatalf("exact-running cleanup response loss did not converge terminal completion: aggregate=%+v beforeRevision=%d fired=%v timers=%d loadErr=%v", persisted, beforeRevision, repository.fired, background.asyncFunctionCalls, err)
+	}
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("post-commit exact-running cleanup retained the stale process gate")
+	}
+	module.endRuntimeDrive(key)
+}
+
+func TestTerminalDeliveryLeaseSchedulePostCommitResponseLossMountsExactSuccessor(t *testing.T) {
+	ctx := context.Background()
+	aggregate := runtimeTerminalAggregate(t)
+	delivery := mustTerminalDeliveryRequest(t, aggregate)
+	baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	controller, err := runtime.NewRuntimeController(baseRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoveryRequest := runtimeTerminalRecoveryRequestForTest(delivery, 0)
+	budget, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind:  runtime.RuntimeInternalEventRecoveryBudgetConsumed,
+		Scope: runtime.RuntimeInternalEventScope{WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID},
+		Delivery: &runtime.RuntimeInternalDeliveryPayload{
+			RecoveryBudgetKind:              runtimecontract.RuntimeRecoveryBudgetTerminalDelivery,
+			TerminalDeliveryRecoveryRequest: &recoveryRequest,
+		},
+	})
+	if err != nil || !budget.BudgetConsumed {
+		t.Fatalf("prepare terminal delivery budget: result=%+v err=%v", budget, err)
+	}
+	before := budget.Aggregate
+	repository := &runtimePostCommitResponseLossRepository{
+		delegate: baseRepository,
+		err:      errors.New("injected terminal successor response loss after commit"),
+		match: func(candidate runtime.RuntimeAggregate) bool {
+			return candidate.DriveLease != nil &&
+				candidate.DriveLease.State == runtimecontract.RuntimeDriveLeaseScheduled &&
+				candidate.DriveLease.Reason == runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry &&
+				candidate.DriveLease.FailureSignature == "terminal-delivery"
+		},
+	}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	key := runtimeDriveKey(delivery.WorkspaceID, delivery.RunID)
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("terminal successor response-loss fixture did not acquire drive gate")
+	}
+	request := scheduledRuntimeDriveRequest{
+		workspaceID: delivery.WorkspaceID, runID: delivery.RunID,
+		source: "terminal_successor_post_commit_response_loss", driveKey: key,
+	}
+	retry := runtimeDeliveryRecoveryLease(request.source, "terminal-delivery", recoveryRequest.RequestID)
+	module.finishScheduledRuntimeDrive(ctx, request, &retry)
+
+	persisted, err := baseRepository.Load(ctx, delivery.WorkspaceID, delivery.RunID)
+	module.driveMu.Lock()
+	registration, timerMounted := module.retryLeaseTimers[key]
+	_, gateRetained := module.drivingRuns[key]
+	module.driveMu.Unlock()
+	if err != nil || !repository.fired ||
+		persisted.StateRevision != before.StateRevision+1 || persisted.Facts.Recovery != before.Facts.Recovery ||
+		persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		persisted.DriveLease.RecoveryGeneration != 1 || persisted.DriveLease.AggregateRevision != persisted.StateRevision ||
+		persisted.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry ||
+		persisted.DriveLease.FailureSignature != "terminal-delivery" ||
+		background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil ||
+		!timerMounted || registration.Generation != persisted.DriveLease.RecoveryGeneration || !gateRetained {
+		t.Fatalf("post-commit successor response loss did not mount exact durable lease: aggregate=%+v beforeRevision=%d fired=%v timers=%d registration=%+v mounted=%v gate=%v loadErr=%v", persisted, before.StateRevision, repository.fired, background.asyncFunctionCalls, registration, timerMounted, gateRetained, err)
+	}
+	if module.beginRuntimeDrive(key) {
+		t.Fatal("post-commit terminal successor released its sole process gate")
+	}
+}
+
+func TestRuntimeStartupRecoveryTerminalRunningLeaseConsumesExactGenerationBeforeSuccessor(t *testing.T) {
+	for _, budgetAlreadyCommitted := range []bool{false, true} {
+		name := "crash_before_budget_cas"
+		if budgetAlreadyCommitted {
+			name = "crash_after_budget_cas"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			aggregate := runtimeTerminalAggregate(t)
+			delivery := mustTerminalDeliveryRequest(t, aggregate)
+			repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+			controller, err := runtime.NewRuntimeController(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			creator := runtimeTerminalRecoveryRequestForTest(delivery, 0)
+			budget, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+				Kind:  runtime.RuntimeInternalEventRecoveryBudgetConsumed,
+				Scope: runtime.RuntimeInternalEventScope{WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID},
+				Delivery: &runtime.RuntimeInternalDeliveryPayload{
+					RecoveryBudgetKind:              runtimecontract.RuntimeRecoveryBudgetTerminalDelivery,
+					TerminalDeliveryRecoveryRequest: &creator,
+				},
+			})
+			if err != nil || !budget.BudgetConsumed {
+				t.Fatalf("prepare creator budget=%+v err=%v", budget, err)
+			}
+			scheduled, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+				Kind:  runtime.RuntimeInternalEventDriveLeaseScheduled,
+				Scope: runtime.RuntimeInternalEventScope{WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID},
+				Delivery: &runtime.RuntimeInternalDeliveryPayload{DriveLease: &runtimecontract.RuntimeDriveLease{
+					WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID,
+					Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery",
+					RecoveryRequestID: creator.RequestID, DueAt: time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano),
+				}},
+			})
+			if err != nil || scheduled.DriveLease == nil {
+				t.Fatalf("prepare terminal lease=%+v err=%v", scheduled, err)
+			}
+			claimed, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+				Kind:  runtime.RuntimeInternalEventDriveLeaseClaimed,
+				Scope: runtime.RuntimeInternalEventScope{WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID},
+				Delivery: &runtime.RuntimeInternalDeliveryPayload{
+					DriveLease: scheduled.DriveLease, LeaseNow: time.Now().UTC().Format(time.RFC3339Nano),
+				},
+			})
+			if err != nil || !claimed.LeaseClaimed || claimed.DriveLease == nil {
+				t.Fatalf("prepare running terminal lease=%+v err=%v", claimed, err)
+			}
+			failedGeneration := claimed.DriveLease.RecoveryGeneration
+			retryRequest := runtimeTerminalRecoveryRequestForTest(delivery, failedGeneration)
+			beforeAttempts := claimed.Aggregate.Facts.Recovery.TerminalDeliveryAttempts
+			if budgetAlreadyCommitted {
+				committed, consumeErr := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+					Kind:  runtime.RuntimeInternalEventRecoveryBudgetConsumed,
+					Scope: runtime.RuntimeInternalEventScope{WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID},
+					Delivery: &runtime.RuntimeInternalDeliveryPayload{
+						RecoveryBudgetKind:              runtimecontract.RuntimeRecoveryBudgetTerminalDelivery,
+						TerminalDeliveryRecoveryRequest: &retryRequest,
+					},
+				})
+				if consumeErr != nil || !committed.BudgetConsumed {
+					t.Fatalf("prepare post-budget crash=%+v err=%v", committed, consumeErr)
+				}
+				beforeAttempts++
+			}
+
+			owner := newRuntimeTestOwner()
+			if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+				t.Fatal(err)
+			}
+			hub := magicevent.NewHub(8)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			background := &recordingBackgroundRoutine{}
+			module := newTestBiz(owner, hub, background)
+			action := runtimeStartupRecoveryAction{
+				Kind: runtimeStartupRecoveryActionRecoverLease, Source: "startup_terminal_running",
+				Item: runevents.RuntimeRecoveryInventoryItem{WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID},
+			}
+			if err := module.releaseRuntimeStartupRecoveryAction(ctx, action); err != nil {
+				t.Fatalf("release terminal running recovery: %v", err)
+			}
+			persisted, err := owner.runtimeController.Load(ctx, delivery.WorkspaceID, delivery.RunID)
+			wantAttempts := beforeAttempts
+			if !budgetAlreadyCommitted {
+				wantAttempts++
+			}
+			if err != nil || persisted.Facts.Recovery.TerminalDeliveryAttempts != wantAttempts ||
+				persisted.Facts.Recovery.TerminalDeliveryRequest != retryRequest || persisted.DriveLease == nil ||
+				persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+				persisted.DriveLease.RecoveryGeneration != failedGeneration+1 ||
+				persisted.DriveLease.RecoveryRequestID != retryRequest.RequestID || background.asyncFunctionCalls != 1 {
+				t.Fatalf("startup terminal running settlement aggregate=%+v attempts=%d/%d timers=%d err=%v", persisted, persisted.Facts.Recovery.TerminalDeliveryAttempts, wantAttempts, background.asyncFunctionCalls, err)
+			}
+		})
+	}
+}
+
+func TestRuntimeStartupRecoveryAdministrativeRetiredMarkerMaterializesExactSuccessor(t *testing.T) {
+	for _, budgetAlreadyCommitted := range []bool{false, true} {
+		name := "termination_cas_before_budget"
+		if budgetAlreadyCommitted {
+			name = "budget_cas_before_successor"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			repository, delivery, retiredGeneration := runtimeAdministrativeTerminalPartialAckFixture(t, true)
+			recoveryRequest := runtimeTerminalRecoveryRequestForTest(delivery, retiredGeneration)
+			if budgetAlreadyCommitted {
+				controller, err := runtime.NewRuntimeController(repository)
+				if err != nil {
+					t.Fatal(err)
+				}
+				budget, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+					Kind:  runtime.RuntimeInternalEventRecoveryBudgetConsumed,
+					Scope: runtime.RuntimeInternalEventScope{WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID},
+					Delivery: &runtime.RuntimeInternalDeliveryPayload{
+						RecoveryBudgetKind:              runtimecontract.RuntimeRecoveryBudgetTerminalDelivery,
+						TerminalDeliveryRecoveryRequest: &recoveryRequest,
+					},
+				})
+				if err != nil || !budget.BudgetConsumed {
+					t.Fatalf("prepare retired budget=%+v err=%v", budget, err)
+				}
+			}
+			owner := newRuntimeTestOwner()
+			if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+				t.Fatal(err)
+			}
+			hub := magicevent.NewHub(8)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			background := &recordingBackgroundRoutine{}
+			module := newTestBiz(owner, hub, background)
+			action := runtimeStartupRecoveryAction{
+				Kind: runtimeStartupRecoveryActionMaterializeTerminalLease, Source: "startup_admin_retired",
+				Item: runevents.RuntimeRecoveryInventoryItem{WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID},
+			}
+			if err := module.releaseRuntimeStartupRecoveryAction(ctx, action); err != nil {
+				t.Fatalf("release retired marker recovery: %v", err)
+			}
+			persisted, err := owner.runtimeController.Load(ctx, delivery.WorkspaceID, delivery.RunID)
+			if err != nil || persisted.Facts.Recovery.TerminalDeliveryAttempts != 1 ||
+				persisted.Facts.Recovery.TerminalDeliveryRequest != recoveryRequest ||
+				persisted.Facts.Recovery.RetiredTerminalDeliveryLease.RecoveryGeneration != retiredGeneration ||
+				persisted.Facts.Recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != recoveryRequest.RequestID ||
+				persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+				persisted.DriveLease.RecoveryGeneration != retiredGeneration+1 || persisted.DriveLease.RecoveryRequestID != recoveryRequest.RequestID ||
+				background.asyncFunctionCalls != 1 {
+				t.Fatalf("startup retired marker settlement aggregate=%+v timers=%d err=%v", persisted, background.asyncFunctionCalls, err)
+			}
+		})
+	}
+}
+
+func TestRuntimeStartupRecoveryRematerializesStaleAdministrativeTerminalSuccessor(t *testing.T) {
+	ctx := context.Background()
+	repository, delivery, retiredGeneration := runtimeAdministrativeTerminalPartialAckFixture(t, true)
+	controller, err := runtime.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoveryRequest := runtimeTerminalRecoveryRequestForTest(delivery, retiredGeneration)
+	budget, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind:  runtime.RuntimeInternalEventRecoveryBudgetConsumed,
+		Scope: runtime.RuntimeInternalEventScope{WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID},
+		Delivery: &runtime.RuntimeInternalDeliveryPayload{
+			RecoveryBudgetKind:              runtimecontract.RuntimeRecoveryBudgetTerminalDelivery,
+			TerminalDeliveryRecoveryRequest: &recoveryRequest,
+		},
+	})
+	if err != nil || !budget.BudgetConsumed {
+		t.Fatalf("prepare administrative terminal budget=%+v err=%v", budget, err)
+	}
+	scheduled, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind:  runtime.RuntimeInternalEventDriveLeaseScheduled,
+		Scope: runtime.RuntimeInternalEventScope{WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID},
+		Delivery: &runtime.RuntimeInternalDeliveryPayload{DriveLease: &runtimecontract.RuntimeDriveLease{
+			WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID,
+			Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery",
+			RecoveryRequestID: recoveryRequest.RequestID,
+			DueAt:             time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano),
+		}, LeaseGeneration: retiredGeneration},
+	})
+	if err != nil || scheduled.DriveLease == nil || scheduled.DriveLease.RecoveryGeneration != retiredGeneration+1 {
+		t.Fatalf("prepare administrative terminal successor=%+v err=%v", scheduled, err)
+	}
+	stale := scheduled.Aggregate
+	stale.StateRevision++ // an owner acknowledgement/other durable terminal fact won after schedule
+	if err := stale.Validate(); err != nil {
+		t.Fatalf("stale administrative terminal successor fixture: %v", err)
+	}
+	repository.aggregate = &stale
+
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(owner, hub, background)
+	action := runtimeStartupRecoveryAction{
+		Kind: runtimeStartupRecoveryActionRecoverLease, Source: "startup_admin_stale_terminal_successor",
+		Item: runevents.RuntimeRecoveryInventoryItem{WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID},
+	}
+	if err := module.releaseRuntimeStartupRecoveryAction(ctx, action); err != nil || background.lastAsyncFunction == nil {
+		t.Fatalf("mount stale administrative terminal successor timers=%d err=%v", background.asyncFunctionCalls, err)
+	}
+	staleTimer := background.lastAsyncFunction
+	staleTimer()
+	persisted, err := owner.runtimeController.Load(ctx, delivery.WorkspaceID, delivery.RunID)
+	key := runtimeDriveKey(delivery.WorkspaceID, delivery.RunID)
+	module.driveMu.Lock()
+	registration, timerMounted := module.retryLeaseTimers[key]
+	_, gateHeld := module.drivingRuns[key]
+	module.driveMu.Unlock()
+	if err != nil || persisted.DriveLease == nil || persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		persisted.DriveLease.RecoveryGeneration != retiredGeneration+1 || persisted.DriveLease.RecoveryRequestID != recoveryRequest.RequestID ||
+		persisted.Facts.Recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != recoveryRequest.RequestID ||
+		!timerMounted || registration.Generation != retiredGeneration+1 || !gateHeld || background.asyncFunctionCalls != 2 {
+		t.Fatalf("restart did not rematerialize stale administrative successor: aggregate=%+v registration=%+v mounted=%v gate=%v timers=%d err=%v",
+			persisted, registration, timerMounted, gateHeld, background.asyncFunctionCalls, err)
+	}
+}
+
+func TestRuntimeDriveGateFreshNoLeaseReleaseActivatesConcurrentDormantHandoff(t *testing.T) {
+	for _, testCase := range []struct {
+		name               string
+		source             string
+		releaseWhenNoLease bool
+	}{
+		{name: "administrative termination", source: "administrative_termination_handoff", releaseWhenNoLease: false},
+		{name: "governance finalizer", source: "governance_resolution_handoff_incomplete", releaseWhenNoLease: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			aggregate := runtimeAggregate(t, 1)
+			baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+			repository := &blockingRuntimeLeaseClaimLoadRepository{
+				delegate: baseRepository,
+				entered:  make(chan struct{}),
+				release:  make(chan struct{}),
+				block:    true,
+			}
+			owner := newRuntimeTestOwner()
+			if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+				t.Fatal(err)
+			}
+			hub := magicevent.NewHub(8)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			module := newTestBiz(owner, hub, &recordingBackgroundRoutine{})
+			key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			gateToken, accepted := module.beginRuntimeDriveWithToken(key)
+			if !accepted {
+				t.Fatal("old Runtime worker did not acquire gate")
+			}
+			gate, ok := module.currentRuntimeDriveGate(key)
+			if !ok || gate.Token != gateToken {
+				t.Fatalf("old Runtime gate=%+v present=%v token=%d", gate, ok, gateToken)
+			}
+
+			releaseOnce := sync.Once{}
+			releaseLoad := func() { releaseOnce.Do(func() { close(repository.release) }) }
+			t.Cleanup(releaseLoad)
+			settled := make(chan bool, 1)
+			go func() {
+				settled <- module.settleRuntimeDriveGateAtOwnerExit(ctx, runtimeDriveGateSettlementRequest{
+					WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, DriveKey: key,
+					GateEpoch: gate.Epoch, GateToken: gate.Token, Source: "old_worker_clean_exit", ReleaseWhenNoLease: true,
+				})
+			}()
+			select {
+			case <-repository.entered:
+			case <-time.After(time.Second):
+				t.Fatal("old owner did not reach the fresh no-lease load")
+			}
+
+			// This is the exact local handoff shape installed after a termination CAS
+			// or a governance finalizer observes the older gate owner. It must remain
+			// dormant until that owner's fresh decision reaches the release lock.
+			if !module.retainRuntimeDriveGateSettlement(runtimeDriveGateSettlementRequest{
+				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, DriveKey: key,
+				GateEpoch: gate.Epoch, GateToken: gate.Token, Source: testCase.source,
+				ReleaseWhenNoLease: testCase.releaseWhenNoLease, AwaitGateOwnerExit: true,
+			}) {
+				t.Fatal("concurrent dormant lifecycle handoff was not retained")
+			}
+			releaseLoad()
+			select {
+			case completed := <-settled:
+				if completed {
+					t.Fatal("fresh no-lease exit released a gate with a concurrent lifecycle handoff")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("old owner exit did not finish after the fresh load was released")
+			}
+
+			module.driveMu.Lock()
+			retainedGate, gateHeld := module.drivingRuns[key]
+			registration, handoffHeld := module.runtimeDriveGateSettlements[key]
+			module.driveMu.Unlock()
+			if !gateHeld || retainedGate != gate || !handoffHeld || registration.Epoch != gate.Epoch ||
+				registration.GateToken != gate.Token || registration.Request.AwaitGateOwnerExit ||
+				registration.Request.ReleaseWhenNoLease != testCase.releaseWhenNoLease {
+				t.Fatalf("fresh no-lease handoff gate=%+v/%v settlement=%+v/%v", retainedGate, gateHeld, registration, handoffHeld)
+			}
+			if _, claimed := module.takeRuntimeDriveGateSettlementForReconcile(key, gate.Epoch, gate.Token); !claimed {
+				t.Fatal("owner exit retained the handoff but did not activate it")
+			}
+			module.endRuntimeDriveExact(key, gate.Epoch, gate.Token)
+		})
+	}
+}
+
+func TestRuntimeDriveGateSettlementMergeCannotRedormantActiveSettlement(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := newTestBiz(newRuntimeTestOwner(), hub, &recordingBackgroundRoutine{})
+	workspaceID := common.WorkspaceID("ws-active-settlement-merge")
+	runID := common.RunID("run-active-settlement-merge")
+	key := runtimeDriveKey(workspaceID, runID)
+	gateToken, accepted := module.beginRuntimeDriveWithToken(key)
+	if !accepted {
+		t.Fatal("active settlement fixture did not acquire gate")
+	}
+	gate, ok := module.currentRuntimeDriveGate(key)
+	if !ok || gate.Token != gateToken {
+		t.Fatalf("active settlement gate=%+v present=%v token=%d", gate, ok, gateToken)
+	}
+	if !module.retainRuntimeDriveGateSettlement(runtimeDriveGateSettlementRequest{
+		WorkspaceID: workspaceID, RunID: runID, DriveKey: key,
+		GateEpoch: gate.Epoch, GateToken: gate.Token, Source: "governance_resolution_commit_unknown",
+		ReleaseWhenNoLease: true,
+	}) {
+		t.Fatal("failed to retain active governance settlement")
+	}
+	if !module.retainRuntimeDriveGateSettlement(runtimeDriveGateSettlementRequest{
+		WorkspaceID: workspaceID, RunID: runID, DriveKey: key,
+		GateEpoch: gate.Epoch, GateToken: gate.Token, Source: "administrative_termination_handoff",
+		ReleaseWhenNoLease: false, AwaitGateOwnerExit: true,
+	}) {
+		t.Fatal("failed to merge dormant termination handoff")
+	}
+	pending, claimed := module.takeRuntimeDriveGateSettlementForReconcile(key, gate.Epoch, gate.Token)
+	if !claimed || pending.AwaitGateOwnerExit || pending.ReleaseWhenNoLease {
+		t.Fatalf("dormant handoff put active settlement back to sleep: claimed=%v request=%+v", claimed, pending)
+	}
+	if current, held := module.currentRuntimeDriveGate(key); !held || current != gate {
+		t.Fatalf("claiming merged settlement changed gate=%+v held=%v", current, held)
+	}
+	module.endRuntimeDriveExact(key, gate.Epoch, gate.Token)
+}
+
+func TestRetainOrAcquireRuntimeDriveGateSettlementTakesGateAfterStaleSnapshotRelease(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	module := newTestBiz(newRuntimeTestOwner(), hub, &recordingBackgroundRoutine{})
+	workspaceID := common.WorkspaceID("ws-stale-settlement-snapshot")
+	runID := common.RunID("run-stale-settlement-snapshot")
+	key := runtimeDriveKey(workspaceID, runID)
+	oldToken, accepted := module.beginRuntimeDriveWithToken(key)
+	if !accepted {
+		t.Fatal("old Runtime worker did not acquire gate")
+	}
+	oldGate, ok := module.currentRuntimeDriveGate(key)
+	if !ok || oldGate.Token != oldToken {
+		t.Fatalf("old gate=%+v present=%v token=%d", oldGate, ok, oldToken)
+	}
+
+	// The finalizer carries the gate snapshot observed before owner I/O. Model
+	// the old worker releasing immediately before retain; retainOrAcquire must
+	// reject that stale token, acquire a distinct gate, and activate its wake.
+	module.endRuntimeDriveExact(key, oldGate.Epoch, oldGate.Token)
+	if !module.retainOrAcquireRuntimeDriveGateSettlement(runtimeDriveGateSettlementRequest{
+		WorkspaceID: workspaceID, RunID: runID, DriveKey: key,
+		GateEpoch: oldGate.Epoch, GateToken: oldGate.Token, Source: "governance_resolution_handoff_incomplete",
+		ReleaseWhenNoLease: true, AwaitGateOwnerExit: true,
+	}) {
+		t.Fatal("stale finalizer snapshot did not take over a new settlement gate")
+	}
+	newGate, held := module.currentRuntimeDriveGate(key)
+	module.driveMu.Lock()
+	registration, registered := module.runtimeDriveGateSettlements[key]
+	module.driveMu.Unlock()
+	if !held || newGate.Epoch != oldGate.Epoch || newGate.Token == 0 || newGate.Token == oldGate.Token ||
+		!registered || registration.Epoch != newGate.Epoch || registration.GateToken != newGate.Token ||
+		registration.Request.GateEpoch != newGate.Epoch || registration.Request.GateToken != newGate.Token ||
+		registration.Request.AwaitGateOwnerExit {
+		t.Fatalf("stale snapshot takeover old=%+v new=%+v/%v settlement=%+v/%v", oldGate, newGate, held, registration, registered)
+	}
+	if module.beginRuntimeDrive(key) {
+		t.Fatal("stale snapshot takeover left the new gate unowned")
+	}
+	module.clearRuntimeDriveGateSettlement(key, registration.Epoch, registration.Token)
+	module.endRuntimeDriveExact(key, newGate.Epoch, newGate.Token)
 }

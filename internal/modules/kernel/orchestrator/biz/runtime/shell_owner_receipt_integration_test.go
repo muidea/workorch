@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -78,6 +79,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	shellSelectorRef := shellCatalog.SelectorRefs[0]
 	aggregate := validationAggregateWithPreparation(t, func(aggregate *RuntimeAggregate) {
 		aggregate.Facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{policy}
+		aggregate.Facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus = 2
 		aggregate.Definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindManagedValidationSession}
 		aggregate.Facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 		aggregate.Facts.Focus.TargetRefs = nil
@@ -214,16 +216,79 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	// fixture snapshots as repair authority.
 	repository.aggregate.Facts.Resources.TargetSnapshots = nil
 	persisted.Facts.Resources.TargetSnapshots = nil
-	confirmationResult := hub.Send(magicevent.NewEventWithContext(
+	confirmationPlan, err := CurrentRuntimeRepairSurfaceConfirmationPlan(persisted)
+	if err != nil || !confirmationPlan.Required() {
+		t.Fatalf("repair-surface confirmation plan = %+v err=%v", confirmationPlan, err)
+	}
+	confirmationCommand := fileevents.ConfirmRuntimeRepairSurfaceCommand{
+		RequestID: confirmationPlan.RequestID, IssuedAtStateRevision: confirmationPlan.IssuedAtStateRevision, ExpectedSubjectRevision: confirmationPlan.ExpectedSubjectRevision,
+		WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID,
+		WorkspaceDeliverableDirectory: workspaceDirectory, Observation: failureObservation,
+	}
+	oldConfirmationResult := hub.Send(magicevent.NewEventWithContext(
 		fileevents.TopicConfirmRuntimeRepairSurface, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination,
-		magicevent.NewHeader(), ctx, fileevents.ConfirmRuntimeRepairSurfaceCommand{
-			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID,
-			WorkspaceDeliverableDirectory: workspaceDirectory, Observation: failureObservation,
-		},
+		magicevent.NewHeader(), ctx, confirmationCommand,
 	))
-	if confirmationResult == nil {
+	if oldConfirmationResult == nil {
 		t.Fatal("File owner returned no repair-surface confirmation")
 	}
+	oldConfirmationData, oldConfirmationErr := oldConfirmationResult.Get()
+	if oldConfirmationErr != nil {
+		t.Fatalf("File current repair-surface confirmation error: %v", oldConfirmationErr)
+	}
+	oldConfirmationResponse, ok := oldConfirmationData.(fileevents.ConfirmRuntimeRepairSurfaceResult)
+	if !ok || oldConfirmationResponse.Confirmation.Disposition != runtimecontract.RuntimeRepairSurfaceConfirmed ||
+		oldConfirmationResponse.Confirmation.ObservedRevision != confirmationPlan.ExpectedSubjectRevision {
+		t.Fatalf("File current repair-surface confirmation = %#v", oldConfirmationData)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDirectory, "concurrent-change.go"), []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleConfirmationResult := hub.Send(magicevent.NewEventWithContext(
+		fileevents.TopicConfirmRuntimeRepairSurface, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination,
+		magicevent.NewHeader(), ctx, confirmationCommand,
+	))
+	if staleConfirmationResult == nil {
+		t.Fatal("File owner returned no stale repair-surface confirmation")
+	}
+	staleConfirmationData, staleConfirmationErr := staleConfirmationResult.Get()
+	if staleConfirmationErr != nil {
+		t.Fatalf("File stale repair-surface confirmation error: %v", staleConfirmationErr)
+	}
+	staleConfirmationResponse, ok := staleConfirmationData.(fileevents.ConfirmRuntimeRepairSurfaceResult)
+	if !ok || staleConfirmationResponse.Confirmation.Disposition != runtimecontract.RuntimeRepairSurfaceStale ||
+		staleConfirmationResponse.Confirmation.ExpectedSubjectRevision != confirmationPlan.ExpectedSubjectRevision ||
+		staleConfirmationResponse.Confirmation.ObservedRevision == confirmationPlan.ExpectedSubjectRevision ||
+		len(staleConfirmationResponse.Confirmation.ConfirmedTargetRefs) != 0 {
+		t.Fatalf("File stale repair-surface confirmation = %#v", staleConfirmationData)
+	}
+	persisted, err = controller.recordRepairSurfaceConfirmation(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, staleConfirmationResponse.Confirmation)
+	if err != nil || persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite || len(persisted.PrerequisiteInvalidations) == 0 || persisted.Facts.Recovery.PrerequisiteRefreshes == 0 {
+		t.Fatalf("stale File confirmation did not atomically reopen owner prerequisites: aggregate=%+v err=%v", persisted, err)
+	}
+	persisted = reacquireObservedShellRepairPrerequisites(t, ctx, hub, controller, persisted, workspaceDirectory)
+	if persisted.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
+		t.Fatalf("stale File prerequisite refresh did not return to validation: %+v", persisted.Decision)
+	}
+	reopenedPlan, err := CurrentRuntimeRepairSurfaceConfirmationPlan(persisted)
+	if err != nil || !reopenedPlan.Required() || reopenedPlan.RequestID == confirmationPlan.RequestID ||
+		reopenedPlan.ExpectedSubjectRevision == confirmationPlan.ExpectedSubjectRevision {
+		t.Fatalf("stale File refresh did not issue a new revision-bound plan: old=%+v new=%+v err=%v", confirmationPlan, reopenedPlan, err)
+	}
+	beforeLateRevision := persisted.StateRevision
+	if _, err := controller.recordRepairSurfaceConfirmation(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, oldConfirmationResponse.Confirmation); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("old File confirmation crossed reopened request window: %v", err)
+	}
+	if repository.aggregate.StateRevision != beforeLateRevision || len(repository.aggregate.RepairSurfaceConfirmations) != 1 {
+		t.Fatalf("old File confirmation changed reopened authority: %+v", repository.aggregate)
+	}
+	confirmationCommand.RequestID = reopenedPlan.RequestID
+	confirmationCommand.IssuedAtStateRevision = reopenedPlan.IssuedAtStateRevision
+	confirmationCommand.ExpectedSubjectRevision = reopenedPlan.ExpectedSubjectRevision
+	confirmationResult := hub.Send(magicevent.NewEventWithContext(
+		fileevents.TopicConfirmRuntimeRepairSurface, runtimecontract.RuntimeModuleOrchestrator, orchestratorevents.PrerequisiteCommandDestination,
+		magicevent.NewHeader(), ctx, confirmationCommand,
+	))
 	confirmationData, confirmationErr := confirmationResult.Get()
 	if confirmationErr != nil {
 		t.Fatalf("File repair-surface confirmation error: %v", confirmationErr)
@@ -236,25 +301,18 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	persisted, err = controller.recordRepairSurfaceConfirmation(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, confirmationResponse.Confirmation)
 	if err != nil || persisted.Facts.Resources.FailureTarget == nil || persisted.Facts.Resources.FailureTarget.TargetObservation == nil ||
 		!slices.Equal(persisted.Facts.Resources.FailureTarget.TargetRefs, []string{"implementation.go"}) ||
-		persisted.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
-		t.Fatalf("owner confirmation did not CAS-bind failure target before snapshot acquisition: aggregate=%+v err=%v", persisted, err)
+		persisted.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("owner confirmation did not CAS-bind the refreshed failure target: aggregate=%+v err=%v", persisted, err)
 	}
-	var snapshotPrerequisite runtimecontract.RuntimePrerequisite
-	for _, pending := range persisted.Facts.Prerequisites.Pending {
-		if pending.Kind == runtimecontract.PrerequisiteKindTargetSnapshot && pending.OwnerModuleID == runtimecontract.RuntimeModuleFile && pending.SubjectRef == "implementation.go" {
-			snapshotPrerequisite = pending
+	var refreshedTargetSnapshot runtimecontract.TargetSnapshot
+	for _, snapshot := range persisted.Facts.Resources.TargetSnapshots {
+		if snapshot.TargetRef == "implementation.go" {
+			refreshedTargetSnapshot = snapshot
 			break
 		}
 	}
-	if snapshotPrerequisite.ID == "" {
-		t.Fatalf("observed Shell target did not request File snapshot: %+v", persisted.Facts.Prerequisites.Pending)
-	}
-	snapshot := sendObservedTargetSnapshot(t, ctx, hub, persisted, snapshotPrerequisite, workspaceDirectory)
-	persisted, err = controller.commitPrerequisite(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, PrerequisiteResult{
-		PrerequisiteID: snapshotPrerequisite.ID, TargetSnapshot: &snapshot.Snapshot, Observation: &snapshot.Observation,
-	})
-	if err != nil || len(persisted.Facts.Resources.TargetSnapshots) != 1 || persisted.Facts.Resources.TargetSnapshots[0].TargetRef != "implementation.go" {
-		t.Fatalf("File snapshot was not CAS-bound after observed Shell target: aggregate=%+v err=%v", persisted, err)
+	if !refreshedTargetSnapshot.Complete() {
+		t.Fatalf("owner confirmation did not reuse the current File snapshot acquired by stale refresh: %+v", persisted.Facts.Resources.TargetSnapshots)
 	}
 
 	// A fresh controller can only see the committed owner observation and
@@ -287,8 +345,8 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 		t.Fatalf("completed Shell operations = %+v err=%v", operations, err)
 	}
 	operation := operations[0]
-	catalog := runtimeOwnerCatalogForOperation(loaded.Facts.Resources.OperationAdmissibilities, loaded.Facts.Resources.PrerequisiteObservations, operation, execution.AdmissibilitySnapshotID, execution.AcquisitionBinding)
-	observation := runtimeOwnerCatalogObservationForOperation(loaded.Facts.Resources.PrerequisiteObservations, catalog)
+	catalog := runtimeOwnerCatalogForOperation(dispatch.OperationAdmissibilities, dispatch.OperationAdmissibilityObservations, operation, execution.AdmissibilitySnapshotID, execution.AcquisitionBinding)
+	observation := runtimeOwnerCatalogObservationForOperation(dispatch.OperationAdmissibilityObservations, catalog)
 	if catalog == nil || observation == nil {
 		t.Fatalf("completed Shell dispatch lost owner catalog binding: %+v", loaded.Facts.Resources)
 	}
@@ -653,13 +711,13 @@ func TestShellOwnerSelectorOnlyValidationNeverCreatesRepairObservation(t *testin
 		t.Fatalf("restart supplemented selector-only scope from current manifest: scope=%v err=%v", reloadedScope, err)
 	}
 	execution := dispatch.OperationExecutions[0]
-	catalog := runtimeOwnerCatalogForOperation(loaded.Facts.Resources.OperationAdmissibilities, loaded.Facts.Resources.PrerequisiteObservations, operation, execution.AdmissibilitySnapshotID, execution.AcquisitionBinding)
+	catalog := runtimeOwnerCatalogForOperation(dispatch.OperationAdmissibilities, dispatch.OperationAdmissibilityObservations, operation, execution.AdmissibilitySnapshotID, execution.AcquisitionBinding)
 	if catalog == nil {
-		t.Fatalf("selector-only completed dispatch lost Shell catalog: %+v", loaded.Facts.Resources.OperationAdmissibilities)
+		t.Fatalf("selector-only completed dispatch lost Shell catalog: %+v", dispatch.OperationAdmissibilities)
 	}
-	catalogObservation := runtimeOwnerCatalogObservationForOperation(loaded.Facts.Resources.PrerequisiteObservations, catalog)
+	catalogObservation := runtimeOwnerCatalogObservationForOperation(dispatch.OperationAdmissibilityObservations, catalog)
 	if catalogObservation == nil {
-		t.Fatalf("selector-only completed dispatch lost Shell catalog observation: %+v", loaded.Facts.Resources.PrerequisiteObservations)
+		t.Fatalf("selector-only completed dispatch lost Shell catalog observation: %+v", dispatch.OperationAdmissibilityObservations)
 	}
 	sealedOperation, err := shellevents.SealRuntimeOperation(operation, *catalog, shellevents.RuntimeExecutionSealInput{
 		CatalogObservation: *catalogObservation, TargetRole: dispatch.FocusTargetRole,
@@ -783,7 +841,14 @@ func runtimeTestInstallObservedShellPreflight(aggregate *RuntimeAggregate, obser
 		}
 	}
 	catalog = catalog.Normalized()
-	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
+	fileCatalog := runtimeValidationFailureRepairFileCatalogForTest()
+	fileCatalog.PrerequisiteID = "operation_admissibility:file-observed-workspace"
+	if aggregate.Facts.Resources.Manifest != nil {
+		fileCatalog.ObservedRevision = aggregate.Facts.Resources.Manifest.Revision
+		fileCatalog.TargetRefs = append([]string(nil), aggregate.Facts.Resources.Manifest.TargetRefs...)
+	}
+	fileCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
+	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog, fileCatalog}
 	aggregate.Facts.Resources.PrerequisiteObservations = nil
 	for _, rawObservation := range observed.Facts.Resources.PrerequisiteObservations {
 		observation := rawObservation.Normalized()
@@ -792,6 +857,16 @@ func runtimeTestInstallObservedShellPreflight(aggregate *RuntimeAggregate, obser
 			aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, observation)
 		}
 	}
+	fileObservation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: fileCatalog.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, ContentHash: fileCatalog.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			SubjectRef: runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef, Revision: fileCatalog.ObservedRevision,
+		}},
+	}
+	fileObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(fileObservation)
+	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, fileObservation)
 	aggregate.Facts.Prerequisites.Satisfied = nil
 	for _, prerequisite := range observed.Facts.Prerequisites.Satisfied {
 		if prerequisite.ID == catalog.PrerequisiteID ||
@@ -799,6 +874,11 @@ func runtimeTestInstallObservedShellPreflight(aggregate *RuntimeAggregate, obser
 			aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, prerequisite)
 		}
 	}
+	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, runtimecontract.RuntimePrerequisite{
+		ID: fileCatalog.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		Scope: runtimecontract.RuntimePrerequisiteScopeGlobal, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		RequiredCapabilities: append([]string(nil), fileCatalog.OperationKinds...), Reason: "real File workspace preflight fixture",
+	})
 }
 
 func addSelectorOnlyShellFailureTargetFreshness(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate *RuntimeAggregate, workspaceDirectory string) runtimecontract.RuntimeOperationAdmissibility {

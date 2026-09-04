@@ -84,22 +84,37 @@ func (m *Biz) validateRuntimeInternalEventWorkspaceRetirementAdmission(ctx conte
 		}
 		return nil
 	case runtime.RuntimeInternalEventRecoveryBudgetConsumed:
-		if delivery.RecoveryBudgetKind != runtimecontract.RuntimeRecoveryBudgetTerminalDelivery || runtimeTerminalDeliveryFullyAcknowledged(aggregate) {
+		if delivery.RecoveryBudgetKind != runtimecontract.RuntimeRecoveryBudgetTerminalDelivery {
 			return common.ErrConflict
 		}
+		// A final acknowledgement can commit after the retry classifier but
+		// before this internal event reaches the reducer. Admit the exact
+		// terminal-delivery budget event; the SM-4 reducer fresh-loads the
+		// aggregate and returns a zero-write, not-consumed result when delivery is
+		// already complete.
 		return nil
 	case runtime.RuntimeInternalEventDriveLeaseScheduled:
 		lease := delivery.DriveLease
-		if lease == nil || lease.WorkspaceID != event.Scope.WorkspaceID || lease.RunID != event.Scope.RunID || lease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || lease.FailureSignature == "" || lease.DueAt == "" || runtimeTerminalDeliveryFullyAcknowledged(aggregate) {
+		if lease == nil || lease.WorkspaceID != event.Scope.WorkspaceID || lease.RunID != event.Scope.RunID ||
+			lease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || lease.FailureSignature != "terminal-delivery" ||
+			lease.DueAt == "" {
 			return common.ErrConflict
 		}
 		if aggregate.DriveLease == nil {
-			if delivery.LeaseGeneration != 0 {
+			// A claimed worker may arrive after administrative termination has
+			// retired its running generation. Admit only the same canonical
+			// terminal-delivery successor that the scheduling CAS recognizes;
+			// all other missing-generation events remain stale.
+			if delivery.LeaseGeneration != 0 && !runtime.AdministrativeTerminationAwaitsTerminalDelivery(aggregate) &&
+				!runtimeTerminalDeliveryFullyAcknowledged(aggregate) {
 				return common.ErrConflict
 			}
 			return nil
 		}
-		if aggregate.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || aggregate.DriveLease.State != runtimecontract.RuntimeDriveLeaseRunning || delivery.LeaseGeneration != aggregate.DriveLease.RecoveryGeneration {
+		if aggregate.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry ||
+			aggregate.DriveLease.FailureSignature != "terminal-delivery" ||
+			aggregate.DriveLease.State != runtimecontract.RuntimeDriveLeaseRunning ||
+			delivery.LeaseGeneration != aggregate.DriveLease.RecoveryGeneration {
 			return common.ErrConflict
 		}
 		return nil
@@ -212,15 +227,19 @@ func (m *Biz) runtimeRecordCandidateFeasibility(ctx context.Context, aggregate r
 	return result.Aggregate, err
 }
 
-func (m *Biz) runtimeConsumeRecoveryBudget(ctx context.Context, aggregate runtime.RuntimeAggregate, kind runtimecontract.RuntimeRecoveryBudgetKind, recoveryOperationIDs ...string) (runtime.RuntimeAggregate, bool, error) {
-	if len(recoveryOperationIDs) > 1 {
+func (m *Biz) runtimeConsumeTerminalDeliveryRecoveryBudget(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, request runtimecontract.RuntimeTerminalDeliveryRecoveryRequest) (runtime.RuntimeAggregate, bool, error) {
+	if request.Validate() != nil {
 		return runtime.RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}
-	recoveryOperationID := ""
-	if len(recoveryOperationIDs) == 1 {
-		recoveryOperationID = recoveryOperationIDs[0]
-	}
-	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventRecoveryBudgetConsumed, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{RecoveryBudgetKind: kind, RecoveryOperationID: recoveryOperationID}})
+	value := request.Normalized()
+	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind:  runtime.RuntimeInternalEventRecoveryBudgetConsumed,
+		Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
+		Delivery: &runtime.RuntimeInternalDeliveryPayload{
+			RecoveryBudgetKind:              runtimecontract.RuntimeRecoveryBudgetTerminalDelivery,
+			TerminalDeliveryRecoveryRequest: &value,
+		},
+	})
 	return result.Aggregate, result.BudgetConsumed, err
 }
 
@@ -228,13 +247,21 @@ func (m *Biz) runtimeConsumeRecoveryBudget(ctx context.Context, aggregate runtim
 // internal-event dispatcher. The persisted lease is the retry authority;
 // callers receive only its immutable identity, never repository/CAS access.
 func (m *Biz) runtimeScheduleDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, lease runtimecontract.RuntimeDriveLease, expectedRunningGeneration uint64) (runtimecontract.RuntimeDriveLease, bool, error) {
-	result, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventDriveLeaseScheduled, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{DriveLease: &lease, LeaseGeneration: expectedRunningGeneration},
-	})
+	result, err := m.applyRuntimeDriveLeaseSchedule(ctx, workspaceID, runID, lease, expectedRunningGeneration)
 	if result.DriveLease == nil {
 		return runtimecontract.RuntimeDriveLease{}, result.LeaseChanged, err
 	}
 	return result.DriveLease.Clone(), result.LeaseChanged, err
+}
+
+// applyRuntimeDriveLeaseSchedule preserves the fresh owner aggregate alongside
+// the lease result. Most callers need only immutable lease identity; the sole
+// worker-exit caller also needs the explicit fully-acknowledged/no-successor
+// disposition so it can release its process-local gate without a second load.
+func (m *Biz) applyRuntimeDriveLeaseSchedule(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, lease runtimecontract.RuntimeDriveLease, expectedRunningGeneration uint64) (runtime.RuntimeInternalEventResult, error) {
+	return m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventDriveLeaseScheduled, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{DriveLease: &lease, LeaseGeneration: expectedRunningGeneration},
+	})
 }
 
 func (m *Biz) runtimeClaimDriveLease(ctx context.Context, lease runtimecontract.RuntimeDriveLease, now string) (runtimecontract.RuntimeDriveLease, bool, error) {

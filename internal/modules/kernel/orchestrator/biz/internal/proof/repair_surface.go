@@ -33,7 +33,7 @@ func RepairSurfaceConfirmationExists(records []runtimecontract.RuntimeRepairSurf
 }
 
 // RepairSurfaceConfirmationIdentityConflict detects a different response for
-// the same owner observation/revision identity. It never decides how Runtime
+// the same Orchestrator-issued owner query. It never decides how Runtime
 // handles that conflict.
 func RepairSurfaceConfirmationIdentityConflict(records []runtimecontract.RuntimeRepairSurfaceConfirmationRecord, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) bool {
 	identity := runtimecontract.StableRuntimeRepairSurfaceConfirmationIdentityHash(confirmation)

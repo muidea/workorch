@@ -9,6 +9,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -161,7 +162,11 @@ func (m *Biz) validateWorkspaceRetirementDriveAdmission(ctx context.Context, wor
 		return common.ErrConflict
 	}
 	if aggregate.DriveLease == nil {
-		if leaseGeneration != 0 {
+		// Administrative termination atomically retires an in-flight running
+		// generation. That already-claimed worker may still enter only the
+		// terminal-delivery path while exact owner acknowledgements are pending;
+		// every other generation without persisted lease authority is stale.
+		if leaseGeneration != 0 && !runtime.AdministrativeTerminationAwaitsTerminalDelivery(aggregate) {
 			return common.ErrConflict
 		}
 		return nil

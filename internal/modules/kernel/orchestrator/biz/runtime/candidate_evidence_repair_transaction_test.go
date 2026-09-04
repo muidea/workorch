@@ -1820,6 +1820,7 @@ func newConfirmedRepairAuthorityFixtureWithBindingProofs(t *testing.T, targets [
 		Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
 		Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: append([]string(nil), targets...), ObservedRevision: "tree-v1",
 	}
+	confirmation = bindRuntimeRepairSurfaceConfirmationRequestForTest(t, committed.Aggregate, confirmation)
 	confirmed, err := controller.recordRepairSurfaceConfirmation(ctx, committed.Aggregate.Facts.WorkspaceID, committed.Aggregate.Facts.RunID, confirmation)
 	if err != nil {
 		t.Fatalf("confirm multi-target repair surface: %v", err)

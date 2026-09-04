@@ -194,6 +194,9 @@ func noteRepairNoProgress(ledger runtimecontract.RuntimeRepairLedger) runtimecon
 }
 
 func consumeRecoveryBudget(ledger runtimecontract.RuntimeRecoveryLedger, kind runtimecontract.RuntimeRecoveryBudgetKind, policy runtimecontract.RuntimeRecoveryPolicy) (runtimecontract.RuntimeRecoveryLedger, bool, error) {
+	if kind == runtimecontract.RuntimeRecoveryBudgetCASReload {
+		return ledger, false, fmt.Errorf("CAS reload budget requires atomic nonterminal recovery")
+	}
 	if policy.Limit(kind) == 0 {
 		return ledger, false, fmt.Errorf("unknown runtime recovery budget %q", kind)
 	}
@@ -205,8 +208,6 @@ func consumeRecoveryBudget(ledger runtimecontract.RuntimeRecoveryLedger, kind ru
 		ledger.ProviderTransportAttempts++
 	case runtimecontract.RuntimeRecoveryBudgetOperationRecovery:
 		ledger.OperationRecoveryAttempts++
-	case runtimecontract.RuntimeRecoveryBudgetCASReload:
-		ledger.CASReloadAttempts++
 	case runtimecontract.RuntimeRecoveryBudgetTerminalDelivery:
 		ledger.TerminalDeliveryAttempts++
 	case runtimecontract.RuntimeRecoveryBudgetDriveSchedule:

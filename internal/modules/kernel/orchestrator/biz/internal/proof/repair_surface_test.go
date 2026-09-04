@@ -14,6 +14,7 @@ func TestRepairSurfaceFactsFenceExactReplayConflictAndCausation(t *testing.T) {
 		CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("a", 64),
 	}
 	confirmation := runtimecontract.RuntimeRepairSurfaceConfirmation{
+		RequestID: "repair-request-1", IssuedAtStateRevision: 7, ExpectedSubjectRevision: "tree-1",
 		Observation: observation, OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "workspace_deliverable",
 		Disposition: runtimecontract.RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"main.go"}, ObservedRevision: "tree-1",
 	}

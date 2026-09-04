@@ -541,10 +541,10 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		}
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "provider_transport_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassOwnerTransientUnavailable:
-		if facts.Recovery.OperationRecoveryAttempts < facts.RecoveryPolicy.MaxOperationRecoveryAttempts {
-			return runtimecontract.RuntimeDecision{}, false, nil
-		}
-		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "operation_recovery_exhausted", failure.Message), true, nil
+		// Persistence-owner availability is SM-4 re-drive state. It never spends
+		// or exhausts replay authority for a claimed capability operation, and it
+		// cannot select a business terminal here.
+		return runtimecontract.RuntimeDecision{}, false, nil
 	case runtimecontract.FailureClassGovernanceDependency, runtimecontract.FailureClassGovernanceRequired,
 		runtimecontract.FailureClassProviderAuthentication, runtimecontract.FailureClassProviderConfiguration:
 		decision, err := governanceDecision(base, facts, failure.Message)

@@ -10,7 +10,7 @@ import (
 
 func TestRuntimeRepairSurfaceOwnerRequiresConcreteOwnerConfirmationProtocol(t *testing.T) {
 	aggregate, observation := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("a", 64))
-	owner, protocol, err := CurrentRuntimeRepairSurfaceConfirmationContract(aggregate, observation)
+	owner, protocol, err := currentRuntimeRepairSurfaceConfirmationContract(aggregate, observation)
 	if err != nil {
 		t.Fatalf("resolve sealed File repair confirmation contract: %v", err)
 	}

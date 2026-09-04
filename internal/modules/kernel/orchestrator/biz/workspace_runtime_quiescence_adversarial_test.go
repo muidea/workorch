@@ -120,11 +120,18 @@ func TestWorkspaceRuntimeQuiescencePendingTerminalAckDrainsBeforeFreeze(t *testi
 }
 
 func TestWorkspaceRuntimeQuiescencePendingDeliveryLeaseMustDrainBeforeFreeze(t *testing.T) {
-	fixture := newAdversarialRuntimeQuiescenceFixture(t, true)
+	fixture := newAdversarialRuntimeQuiescenceFixture(t, false)
+	recoveryRequest := runtimeTerminalRecoveryRequestForTest(fixture.request, 0)
+	if _, consumed, err := fixture.owner.runtimeConsumeTerminalDeliveryRecoveryBudget(
+		fixture.ctx, fixture.workspaceID, fixture.runID, recoveryRequest,
+	); err != nil || !consumed {
+		t.Fatalf("persist pre-draining terminal delivery authorization consumed=%v err=%v", consumed, err)
+	}
 	requested := runtimecontract.RuntimeDriveLease{
 		WorkspaceID: fixture.workspaceID, RunID: fixture.runID,
 		Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery",
-		DueAt: "2026-08-26T00:00:00Z",
+		RecoveryRequestID: recoveryRequest.RequestID,
+		DueAt:             "2026-08-26T00:00:00Z",
 	}
 	scheduled, changed, err := fixture.owner.runtimeScheduleDriveLease(fixture.ctx, fixture.workspaceID, fixture.runID, requested, 0)
 	if err != nil || !changed {
@@ -138,10 +145,6 @@ func TestWorkspaceRuntimeQuiescencePendingDeliveryLeaseMustDrainBeforeFreeze(t *
 	if _, err := fixture.deletions.Get(fixture.ctx, fixture.workspaceID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("pending lease installed durable gate: %v", err)
 	}
-	if err := fixture.owner.scheduleRuntimeDrive(fixture.ctx, fixture.workspaceID, fixture.runID, "ordinary-post-terminal-drive"); !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("Run draining admitted ordinary fully-acknowledged drive: %v", err)
-	}
-
 	claimed, claimedLease, err := fixture.owner.runtimeClaimDriveLease(fixture.ctx, scheduled, "2026-08-26T00:00:01Z")
 	if err != nil || !claimedLease {
 		t.Fatalf("claim draining terminal lease = %+v claimed=%v err=%v", claimed, claimedLease, err)
@@ -149,8 +152,191 @@ func TestWorkspaceRuntimeQuiescencePendingDeliveryLeaseMustDrainBeforeFreeze(t *
 	if released, err := fixture.owner.runtimeReleaseDriveLease(fixture.ctx, fixture.workspaceID, fixture.runID, claimed.RecoveryGeneration); err != nil || !released {
 		t.Fatalf("release draining terminal lease released=%v err=%v", released, err)
 	}
+	runAcknowledgement := adversarialTerminalAcknowledgement(fixture.request, runtimecontract.RuntimeDeliveryOwnerRun)
+	if err := fixture.owner.recordRuntimeDeliveryAcknowledgement(fixture.ctx, &runAcknowledgement); err != nil {
+		t.Fatalf("complete terminal delivery after draining lease release: %v", err)
+	}
+	if err := fixture.owner.scheduleRuntimeDrive(fixture.ctx, fixture.workspaceID, fixture.runID, "ordinary-post-terminal-drive"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("Run draining admitted ordinary fully-acknowledged drive: %v", err)
+	}
 	if _, err := fixture.owner.beginWorkspaceRuntimeQuiescence(fixture.ctx, command); err != nil {
 		t.Fatalf("begin after exact terminal lease drain: %v", err)
+	}
+}
+
+func TestWorkspaceRuntimeQuiescenceAdministrativeTerminationAdmitsRetiredClaimedDeliverySuccessor(t *testing.T) {
+	const retiredGeneration = uint64(7)
+	fixture := newDrainingAdministrativeTerminationFixture(t, retiredGeneration)
+	if err := fixture.module.validateWorkspaceRetirementDriveAdmission(fixture.ctx, fixture.item.WorkspaceID, fixture.item.ID, retiredGeneration); err != nil {
+		t.Fatalf("draining admission rejected claimed administrative terminal worker: %v", err)
+	}
+	key := runtimeDriveKey(fixture.item.WorkspaceID, fixture.item.ID)
+	if !fixture.module.beginRuntimeDrive(key) {
+		t.Fatal("administrative terminal fixture did not acquire process gate")
+	}
+	driveRequest := scheduledRuntimeDriveRequest{
+		workspaceID:     fixture.item.WorkspaceID,
+		runID:           fixture.item.ID,
+		source:          "draining_administrative_terminal_worker",
+		driveKey:        key,
+		leaseGeneration: retiredGeneration,
+	}
+	retry, handled := fixture.module.handleScheduledRuntimeDriveFailure(fixture.ctx, driveRequest, errors.New("claimed worker returned after Run entered draining"))
+	if !handled || retry == nil || retry.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || retry.FailureSignature != "terminal-delivery" {
+		t.Fatalf("draining administrative terminal disposition: handled=%v retry=%+v", handled, retry)
+	}
+	fixture.module.finishScheduledRuntimeDrive(fixture.ctx, driveRequest, &retry)
+	persisted, err := fixture.runtimeOwner.runtimeController.Load(fixture.ctx, fixture.item.WorkspaceID, fixture.item.ID)
+	if err != nil || persisted.DriveLease == nil ||
+		persisted.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled ||
+		persisted.DriveLease.RecoveryGeneration != retiredGeneration+1 ||
+		persisted.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry ||
+		persisted.DriveLease.FailureSignature != "terminal-delivery" ||
+		fixture.background.asyncFunctionCalls != 1 {
+		t.Fatalf("draining internal-event admission lost terminal successor: aggregate=%+v timers=%d err=%v", persisted, fixture.background.asyncFunctionCalls, err)
+	}
+}
+
+func TestWorkspaceRuntimeQuiescenceFinalAckBeforeRetiredGenerationScheduleReleasesGate(t *testing.T) {
+	for _, retiredGeneration := range []uint64{0, 9} {
+		name := "generation_zero"
+		if retiredGeneration != 0 {
+			name = "retired_running_generation"
+		}
+		t.Run(name, func(t *testing.T) {
+			fixture := newDrainingAdministrativeTerminationFixture(t, retiredGeneration)
+			key := runtimeDriveKey(fixture.item.WorkspaceID, fixture.item.ID)
+			if !fixture.module.beginRuntimeDrive(key) {
+				t.Fatal("administrative terminal fixture did not acquire process gate")
+			}
+			gate, ownsGate := fixture.module.currentRuntimeDriveGate(key)
+			if !ownsGate {
+				t.Fatal("administrative terminal process gate identity is unavailable")
+			}
+			driveRequest := scheduledRuntimeDriveRequest{
+				workspaceID: fixture.item.WorkspaceID, runID: fixture.item.ID,
+				source: "draining_terminal_final_ack_race", driveKey: key, leaseGeneration: retiredGeneration,
+				gateEpoch: gate.Epoch, gateToken: gate.Token,
+			}
+			retry, handled := fixture.module.handleScheduledRuntimeDriveFailure(fixture.ctx, driveRequest, errors.New("claimed worker returned before final acknowledgement"))
+			if !handled || retry == nil || retry.FailureSignature != "terminal-delivery" {
+				t.Fatalf("pre-ack terminal disposition: handled=%v retry=%+v", handled, retry)
+			}
+			afterFailure, err := fixture.runtimeOwner.runtimeController.Load(fixture.ctx, fixture.item.WorkspaceID, fixture.item.ID)
+			if err != nil || afterFailure.Facts.Recovery.TerminalDeliveryAttempts != fixture.terminated.Facts.Recovery.TerminalDeliveryAttempts+1 {
+				t.Fatalf("terminal delivery failure budget=%+v initial=%+v err=%v", afterFailure.Facts.Recovery, fixture.terminated.Facts.Recovery, err)
+			}
+			for _, owner := range []runtimecontract.RuntimeDeliveryOwner{
+				runtimecontract.RuntimeDeliveryOwnerResult,
+				runtimecontract.RuntimeDeliveryOwnerWorkspace,
+				runtimecontract.RuntimeDeliveryOwnerRun,
+			} {
+				acknowledgement := adversarialTerminalAcknowledgement(fixture.request, owner)
+				if err := fixture.module.recordRuntimeDeliveryAcknowledgement(fixture.ctx, &acknowledgement); err != nil {
+					t.Fatalf("record final-ack race owner %q: %v", owner, err)
+				}
+			}
+			fullyAcknowledged, err := fixture.runtimeOwner.runtimeController.Load(fixture.ctx, fixture.item.WorkspaceID, fixture.item.ID)
+			if err != nil || !runtimeTerminalDeliveryFullyAcknowledged(fullyAcknowledged) || fullyAcknowledged.DriveLease != nil {
+				t.Fatalf("prepare fully acknowledged terminal=%+v err=%v", fullyAcknowledged, err)
+			}
+			beforeFinishRevision := fullyAcknowledged.StateRevision
+			beforeFinishRecovery := fullyAcknowledged.Facts.Recovery
+			fixture.module.finishScheduledRuntimeDrive(fixture.ctx, driveRequest, &retry)
+			afterFinish, err := fixture.runtimeOwner.runtimeController.Load(fixture.ctx, fixture.item.WorkspaceID, fixture.item.ID)
+			if err != nil || afterFinish.StateRevision != beforeFinishRevision || afterFinish.Facts.Recovery != beforeFinishRecovery ||
+				afterFinish.DriveLease != nil || fixture.background.asyncFunctionCalls != 0 {
+				t.Fatalf("final-ack scheduling no-op changed SM-4 authority: aggregate=%+v revision=%d recovery=%+v timers=%d err=%v", afterFinish, beforeFinishRevision, beforeFinishRecovery, fixture.background.asyncFunctionCalls, err)
+			}
+			if !fixture.module.beginRuntimeDrive(key) {
+				t.Fatal("fully acknowledged terminal retained stale process gate")
+			}
+			fixture.module.endRuntimeDrive(key)
+		})
+	}
+}
+
+type drainingAdministrativeTerminationFixture struct {
+	ctx          context.Context
+	item         *runmodel.Run
+	request      orchestratorevents.RuntimeTerminalDeliveryRequestData
+	terminated   runtime.RuntimeAggregate
+	runtimeOwner *Biz
+	module       *Biz
+	background   *recordingBackgroundRoutine
+}
+
+func newDrainingAdministrativeTerminationFixture(t *testing.T, retiredGenerations ...uint64) *drainingAdministrativeTerminationFixture {
+	t.Helper()
+	if len(retiredGenerations) > 1 {
+		t.Fatal("administrative termination fixture accepts at most one retired generation")
+	}
+	ctx := context.Background()
+	initial := runtimeAggregate(t, 1)
+	if len(retiredGenerations) == 1 && retiredGenerations[0] != 0 {
+		initial.DriveLease = &runtimecontract.RuntimeDriveLease{
+			WorkspaceID: initial.Facts.WorkspaceID, RunID: initial.Facts.RunID,
+			AggregateRevision: initial.StateRevision, RecoveryGeneration: retiredGenerations[0],
+			Reason: runtimecontract.RuntimeDriveLeaseReasonProviderRetry, FailureSignature: "provider/retry",
+			DueAt: "2026-08-26T00:00:00Z", State: runtimecontract.RuntimeDriveLeaseRunning,
+		}
+		if err := initial.Validate(); err != nil {
+			t.Fatalf("prepare retired running authority: %v", err)
+		}
+	}
+	seedRepository := &inMemoryRuntimeStateRepository{aggregate: &initial}
+	seedController, err := runtime.NewRuntimeController(seedRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminated, err := runtimeTestControllerRequestTermination(seedController, ctx,
+		initial.Facts.WorkspaceID, initial.Facts.RunID,
+		runtimecontract.RuntimeTerminationCancelled, "blocks/run", "operator cancelled the active run")
+	if err != nil || !runtime.AdministrativeTerminationAwaitsTerminalDelivery(terminated) {
+		t.Fatalf("prepare administrative terminal aggregate=%+v err=%v", terminated, err)
+	}
+	request := mustTerminalDeliveryRequest(t, terminated)
+	item := runtimeRunForTest(common.RunStateCancelled, terminated.Definition)
+	record := runtimeStateRecordFromAggregate(terminated)
+	item.RuntimeState = &record
+	item.RuntimeLifecycleFence = mustRuntimeLifecycleFence(t, item)
+	identity := request.RuntimeTerminalDeliveryIdentity
+	item.TerminalDelivery = &identity
+	item.TerminalResultID = runtimecontract.RuntimeTerminalResultID(terminated.Facts.WorkspaceID, terminated.Facts.RunID)
+
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	runs := memoryrepo.NewRunRepository()
+	if err := runs.Create(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	runOwner := runmodule.New()
+	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
+		t.Fatal(err)
+	}
+	if err := runOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	runtimeOwner := newRuntimeTestOwner()
+	if err := runtimeOwner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	background := &recordingBackgroundRoutine{}
+	module := newTestBiz(runtimeOwner, hub, background)
+	fence, err := runs.PrepareWorkspaceRetirement(ctx, runmodel.WorkspaceRetirementIntent{
+		WorkspaceID:           item.WorkspaceID,
+		DeletionID:            "deletion-administrative-terminal-running-worker",
+		DeletionGeneration:    1,
+		DataDispositionIntent: deletioncontract.ModeRetain,
+		WorkspaceIntentHash:   "workspace-intent:administrative-terminal-running-worker",
+	})
+	if err != nil || !fence.IsDraining() {
+		t.Fatalf("prepare Run draining fence=%+v err=%v", fence, err)
+	}
+	return &drainingAdministrativeTerminationFixture{
+		ctx: ctx, item: item, request: request, terminated: terminated,
+		runtimeOwner: runtimeOwner, module: module, background: background,
 	}
 }
 
@@ -216,6 +402,7 @@ func TestWorkspaceRuntimeQuiescenceStartupSetupFactsClassifyPendingDeliveryLease
 		Reason: runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry, FailureSignature: "terminal-delivery",
 		DueAt: "2030-01-01T00:00:00Z", State: runtimecontract.RuntimeDriveLeaseScheduled,
 	}
+	bindRuntimeTerminalLeaseForTest(t, &aggregate, aggregate.DriveLease)
 	if err := aggregate.Validate(); err != nil {
 		t.Fatalf("terminal aggregate with persisted delivery lease: %v", err)
 	}

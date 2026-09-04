@@ -46,6 +46,7 @@ func TestModuleRunBindsFrameworkContextToOwnerLifecycle(t *testing.T) {
 	if err := module.Run(runCtx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
+	baselineAsyncCalls := background.asyncCalls.Load()
 	cancelRun()
 
 	data := runevents.RunStateChangedData{
@@ -57,8 +58,8 @@ func TestModuleRunBindsFrameworkContextToOwnerLifecycle(t *testing.T) {
 		runevents.TopicRunStateChanged, runevents.CommandDestination, runevents.NotificationDestination,
 		magicevent.NewHeader(), context.Background(), data,
 	))
-	if calls := background.asyncCalls.Load(); calls != 0 {
-		t.Fatalf("cancelled framework lifecycle accepted %d background drives", calls)
+	if calls := background.asyncCalls.Load(); calls != baselineAsyncCalls {
+		t.Fatalf("cancelled framework lifecycle accepted %d new background drives", calls-baselineAsyncCalls)
 	}
 
 	module.Teardown(context.Background())

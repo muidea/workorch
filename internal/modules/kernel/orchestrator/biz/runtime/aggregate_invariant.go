@@ -942,8 +942,17 @@ func validateRuntimeAggregateSM2RepairLedgers(a RuntimeAggregate) error {
 	if err := runtimecontract.ValidateRuntimeRepairSurfaceConfirmationRecords(a.RepairSurfaceConfirmations); err != nil {
 		return fmt.Errorf("runtime aggregate repair surface confirmations: %w", err)
 	}
-	for _, confirmation := range a.RepairSurfaceConfirmations {
-		value := confirmation.Confirmation.Normalized()
+	if err := validateRuntimeRepairSurfaceConfirmationChronology(a.StateRevision, a.RepairSurfaceConfirmations); err != nil {
+		return err
+	}
+	type confirmationSequenceState struct {
+		refreshLineage       string
+		lastRecordedRevision uint64
+	}
+	confirmationSequences := make(map[string]confirmationSequenceState, len(a.RepairSurfaceConfirmations))
+	for index, rawConfirmation := range a.RepairSurfaceConfirmations {
+		confirmation := rawConfirmation.Normalized()
+		value := confirmation.Confirmation
 		if value.Observation.WorkspaceID != a.Facts.WorkspaceID || value.Observation.RunID != a.Facts.RunID {
 			return fmt.Errorf("runtime aggregate repair surface confirmation scope mismatch")
 		}
@@ -953,10 +962,42 @@ func validateRuntimeAggregateSM2RepairLedgers(a RuntimeAggregate) error {
 		if !runtimeValidationFailureObservationHasPersistedReceipt(a, value.Observation) {
 			return fmt.Errorf("runtime aggregate repair surface confirmation has no exact persisted owner receipt")
 		}
-		expectedOwner, err := runtimeExpectedRepairSurfaceOwner(a, value.Observation)
+		expectedOwner, protocol, err := currentRuntimeRepairSurfaceConfirmationContract(a, value.Observation)
 		if err != nil || value.OwnerModuleID != expectedOwner {
 			return fmt.Errorf("runtime aggregate repair surface confirmation owner does not match sealed repair provenance")
 		}
+		descriptor, subjectFound := runtimecontract.RuntimeRepairSurfaceConfirmationDescriptorForProtocol(protocol)
+		expectedSubject := descriptor.SubjectRef
+		if !subjectFound || value.SubjectRef != expectedSubject {
+			return fmt.Errorf("runtime aggregate repair surface confirmation subject does not match sealed owner protocol")
+		}
+		if !runtimeRepairSurfaceExpectedRevisionHasOwnerLineage(a, value.OwnerModuleID, descriptor.ResourceDomain, value.SubjectRef, value.ExpectedSubjectRevision) {
+			return fmt.Errorf("runtime aggregate repair surface confirmation expected revision has no persisted owner lineage")
+		}
+		sequenceID := stableRuntimeRepairSurfaceObservationSequenceID(value.Observation)
+		sequence, found := confirmationSequences[sequenceID]
+		if !found {
+			sequence.refreshLineage = "initial"
+		} else if value.IssuedAtStateRevision <= sequence.lastRecordedRevision {
+			return fmt.Errorf("runtime aggregate repair surface confirmation %d request window does not follow its prior response", index)
+		}
+		expectedRequestID := stableRuntimeRepairSurfaceConfirmationRequestID(
+			value.Observation,
+			expectedOwner,
+			protocol,
+			expectedSubject,
+			value.ExpectedSubjectRevision,
+			value.IssuedAtStateRevision,
+			sequence.refreshLineage,
+		)
+		if value.RequestID != expectedRequestID {
+			return fmt.Errorf("runtime aggregate repair surface confirmation %d request fence does not match its persisted window", index)
+		}
+		sequence.lastRecordedRevision = confirmation.RecordedAtStateRevision
+		if value.Disposition == runtimecontract.RuntimeRepairSurfaceStale {
+			sequence.refreshLineage = confirmation.Signature
+		}
+		confirmationSequences[sequenceID] = sequence
 	}
 	if err := validateRuntimeFailureTargetObservationOwnerAuthorities(a); err != nil {
 		return err
@@ -1001,6 +1042,79 @@ func validateRuntimeAggregateSM2RepairLedgers(a RuntimeAggregate) error {
 		return err
 	}
 	return nil
+}
+
+// validateRuntimeRepairSurfaceConfirmationChronology replays the append-only
+// owner transition order independently of an observation sequence. Production
+// writes append exactly one confirmation after incrementing StateRevision, so a
+// later request window must be issued strictly after the preceding record's
+// CAS. Per-observation lineage alone is insufficient: two different
+// observations must not be reordered or assigned the same historical revision
+// by a coordinated persisted-state rewrite.
+func validateRuntimeRepairSurfaceConfirmationChronology(
+	stateRevision uint64,
+	values []runtimecontract.RuntimeRepairSurfaceConfirmationRecord,
+) error {
+	var lastRecordedRevision uint64
+	for index, raw := range values {
+		record := raw.Normalized()
+		if record.RecordedAtStateRevision > stateRevision {
+			return fmt.Errorf("runtime aggregate repair surface confirmation %d was recorded after the current state revision", index)
+		}
+		if index != 0 && record.Confirmation.IssuedAtStateRevision <= lastRecordedRevision {
+			return fmt.Errorf("runtime aggregate repair surface confirmation %d request window does not follow the global confirmation history", index)
+		}
+		lastRecordedRevision = record.RecordedAtStateRevision
+	}
+	return nil
+}
+
+func runtimeRepairSurfaceExpectedRevisionHasOwnerLineage(a RuntimeAggregate, ownerModuleID string, subjectDomain runtimecontract.RuntimeResourceDomain, subjectRef, revision string) bool {
+	ownerModuleID = strings.TrimSpace(ownerModuleID)
+	subjectRef = strings.TrimSpace(subjectRef)
+	revision = strings.TrimSpace(revision)
+	matchesObservation := func(rawObservation runtimecontract.RuntimePrerequisiteObservation) bool {
+		observation := rawObservation.Normalized()
+		if observation.OwnerModuleID != ownerModuleID {
+			return false
+		}
+		for _, rawDependency := range observation.Dependencies {
+			dependency := rawDependency.Normalized()
+			if dependency.Domain == subjectDomain && dependency.OwnerModuleID == ownerModuleID &&
+				dependency.SubjectRef == subjectRef && dependency.Revision == revision {
+				return true
+			}
+		}
+		return false
+	}
+	for _, observation := range a.Facts.Resources.PrerequisiteObservations {
+		if matchesObservation(observation) {
+			return true
+		}
+	}
+	for _, observation := range a.Facts.Resources.RetiredPrerequisiteObservations {
+		if matchesObservation(observation) {
+			return true
+		}
+	}
+	for _, rawInvalidation := range a.PrerequisiteInvalidations {
+		invalidation := rawInvalidation.Normalized()
+		if invalidation.Stale != nil {
+			stale := invalidation.Stale.Normalized()
+			if stale.Domain == subjectDomain && stale.OwnerModuleID == ownerModuleID &&
+				stale.SubjectRef == subjectRef && stale.ExpectedRevision == revision {
+				return true
+			}
+		}
+		for _, rawDependency := range invalidation.InvalidatedDependencies {
+			dependency := rawDependency.Normalized()
+			if dependency.Domain == subjectDomain && dependency.OwnerModuleID == ownerModuleID &&
+				dependency.SubjectRef == subjectRef && dependency.Revision == revision {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // validateRuntimeUnobservedFailureTargetAuthority proves the two legitimate
@@ -1535,7 +1649,7 @@ func validateRuntimeFailureObservationReceiptAuthority(a RuntimeAggregate, subje
 	}
 	observation := runtimeValidationFailureObservationFromFailure(&normalizedFailure)
 	if observation != nil {
-		if latest, found := runtimeLatestRepairSurfaceConfirmation(a, *observation); found && latest.Disposition == runtimecontract.RuntimeRepairSurfaceConfirmed {
+		if latest, _, found := runtimeLatestRepairSurfaceConfirmation(a, *observation); found && latest.Disposition == runtimecontract.RuntimeRepairSurfaceConfirmed {
 			if len(normalizedFailure.TargetRefs) == 0 || !runtimeTargetObservationMatchesConfirmation(normalizedFailure.TargetObservation, latest) {
 				return fmt.Errorf("runtime aggregate %s does not retain the latest confirmed owner repair surface", subject)
 			}
@@ -1573,7 +1687,7 @@ func runtimeValidationFailureObservationFromFailure(failure *runtimecontract.Fai
 }
 
 func runtimeConfirmedRepairSurfaceForTargets(a RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation, targetRefs []string) (runtimecontract.RuntimeRepairSurfaceConfirmation, error) {
-	confirmation, found := runtimeLatestRepairSurfaceConfirmation(a, observation)
+	confirmation, _, found := runtimeLatestRepairSurfaceConfirmation(a, observation)
 	expectedOwner, ownerErr := runtimeExpectedRepairSurfaceOwner(a, observation)
 	if ownerErr == nil && found && confirmation.OwnerModuleID == expectedOwner &&
 		confirmation.Disposition == runtimecontract.RuntimeRepairSurfaceConfirmed &&
@@ -1719,12 +1833,12 @@ func runtimeExpectedRepairSurfaceOwner(a RuntimeAggregate, observation runtimeco
 	return bindingOwner, nil
 }
 
-// CurrentRuntimeRepairSurfaceConfirmationContract resolves the exact
+// currentRuntimeRepairSurfaceConfirmationContract resolves the exact
 // receiver-owned read protocol for a persisted validation observation. The
 // owner still comes from the sealed Profile route (or its exact source binding
 // fallback); the operation descriptor only proves that this owner has a
 // concrete confirmation adapter. No capability name is selected by SM-2.
-func CurrentRuntimeRepairSurfaceConfirmationContract(a RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) (string, runtimecontract.RuntimeRepairSurfaceConfirmationProtocol, error) {
+func currentRuntimeRepairSurfaceConfirmationContract(a RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) (string, runtimecontract.RuntimeRepairSurfaceConfirmationProtocol, error) {
 	ownerModuleID, err := runtimeExpectedRepairSurfaceOwner(a, observation)
 	if err != nil {
 		return "", runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone, err
@@ -1830,7 +1944,7 @@ func CurrentRuntimeRepairSurfaceConfirmationContract(a RuntimeAggregate, observa
 	return ownerModuleID, protocol, nil
 }
 
-func runtimeLatestRepairSurfaceConfirmation(a RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) (runtimecontract.RuntimeRepairSurfaceConfirmation, bool) {
+func runtimeLatestRepairSurfaceConfirmation(a RuntimeAggregate, observation runtimecontract.RuntimeValidationFailureObservation) (runtimecontract.RuntimeRepairSurfaceConfirmation, string, bool) {
 	for idx := len(a.RepairSurfaceConfirmations) - 1; idx >= 0; idx-- {
 		record := a.RepairSurfaceConfirmations[idx]
 		if record.Validate() != nil {
@@ -1838,10 +1952,10 @@ func runtimeLatestRepairSurfaceConfirmation(a RuntimeAggregate, observation runt
 		}
 		confirmation := record.Confirmation.Normalized()
 		if runtimecontract.SameRuntimeValidationFailureObservation(confirmation.Observation, observation) {
-			return confirmation, true
+			return confirmation, record.Normalized().Signature, true
 		}
 	}
-	return runtimecontract.RuntimeRepairSurfaceConfirmation{}, false
+	return runtimecontract.RuntimeRepairSurfaceConfirmation{}, "", false
 }
 
 func runtimeTargetObservationMatchesConfirmation(observation *runtimecontract.RuntimeFailureTargetObservation, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) bool {
@@ -1856,6 +1970,27 @@ func runtimeTargetObservationMatchesConfirmation(observation *runtimecontract.Ru
 }
 
 func validateRuntimeAggregateSM4DriveLease(a RuntimeAggregate) error {
+	recovery := a.Facts.Recovery.Normalized()
+	if err := runtimecontract.ValidateRuntimeNonTerminalRecoveryLinearization(recovery, a.StateRevision, a.DriveLease); err != nil {
+		return fmt.Errorf("runtime aggregate recovery: %w", err)
+	}
+	if recovery.TerminalDeliveryIntervention.Validate() == nil && a.DriveLease != nil {
+		return fmt.Errorf("runtime aggregate terminal delivery intervention cannot retain automatic drive authority")
+	}
+	retired := recovery.RetiredTerminalDeliveryLease
+	retiredPresent := runtimecontract.RuntimeDriveLeasePresent(retired)
+	if retiredPresent {
+		requestBoundNonterminal := runtimecontract.RuntimeDriveLeaseBindsNonTerminalRecovery(retired) &&
+			runtimecontract.ValidateRuntimeNonTerminalRecoveryLeaseBinding(recovery, retired) == nil
+		if a.Termination == nil || retired.Validate() != nil || retired.State != runtimecontract.RuntimeDriveLeaseRunning ||
+			retired.WorkspaceID != a.Facts.WorkspaceID || retired.RunID != a.Facts.RunID || retired.AggregateRevision >= a.Termination.Revision ||
+			(retired.RecoveryRequestID != "" && !requestBoundNonterminal) ||
+			(retired.Reason == runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry && retired.FailureSignature == "terminal-delivery") {
+			return fmt.Errorf("runtime aggregate retired terminal-delivery lease does not match administrative termination")
+		}
+	} else if recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != "" {
+		return fmt.Errorf("runtime aggregate retired terminal-delivery handoff request has no exact lease")
+	}
 	if a.DriveLease == nil {
 		return nil
 	}
@@ -1865,8 +2000,41 @@ func validateRuntimeAggregateSM4DriveLease(a RuntimeAggregate) error {
 	if a.DriveLease.WorkspaceID != a.Facts.WorkspaceID || a.DriveLease.RunID != a.Facts.RunID {
 		return fmt.Errorf("runtime aggregate drive lease scope mismatch")
 	}
-	if a.Termination != nil && a.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry {
-		return fmt.Errorf("administratively terminated runtime aggregate can retain only a delivery-retry lease")
+	canonicalTerminalDelivery := a.DriveLease.Reason == runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry &&
+		a.DriveLease.FailureSignature == "terminal-delivery"
+	if canonicalTerminalDelivery {
+		authorization := recovery.TerminalDeliveryRequest
+		outcome, terminal, outcomeErr := DeriveTerminalOutcome(a.Decision, a.Termination)
+		if outcomeErr != nil || !terminal {
+			return fmt.Errorf("runtime aggregate terminal-delivery lease has no sealed terminal")
+		}
+		deliveryID := runtimecontract.StableTerminalDeliveryID(a.Facts.WorkspaceID, a.Facts.RunID, a.Decision.AuthoritySnapshot.ID, outcome)
+		creatorGeneration := a.DriveLease.RecoveryGeneration - 1
+		creatorRequestID := runtimecontract.StableRuntimeTerminalDeliveryRecoveryRequestID(deliveryID, creatorGeneration)
+		phaseMatches := authorization.Validate() == nil && authorization.TerminalDeliveryID == deliveryID &&
+			((authorization.FailedLeaseGeneration == creatorGeneration && authorization.RequestID == creatorRequestID) ||
+				(a.DriveLease.State == runtimecontract.RuntimeDriveLeaseRunning && authorization.FailedLeaseGeneration == a.DriveLease.RecoveryGeneration &&
+					authorization.RequestID == runtimecontract.StableRuntimeTerminalDeliveryRecoveryRequestID(deliveryID, a.DriveLease.RecoveryGeneration)))
+		if a.DriveLease.RecoveryRequestID != creatorRequestID || !phaseMatches {
+			return fmt.Errorf("runtime aggregate terminal-delivery lease does not match its persisted recovery request")
+		}
+	} else if runtimecontract.RuntimeDriveLeaseBindsNonTerminalRecovery(*a.DriveLease) {
+		if a.Termination != nil || isTerminalConvergenceState(a.Decision.State) {
+			return fmt.Errorf("runtime aggregate terminal state cannot retain nonterminal recovery authority")
+		}
+		if err := runtimecontract.ValidateRuntimeNonTerminalRecoveryLeaseBinding(recovery, *a.DriveLease); err != nil {
+			return fmt.Errorf("runtime aggregate drive lease: %w", err)
+		}
+	} else if a.DriveLease.RecoveryRequestID != "" {
+		return fmt.Errorf("runtime aggregate non-terminal lease carries terminal recovery request")
+	}
+	if retiredPresent && a.DriveLease.RecoveryGeneration == retired.RecoveryGeneration+1 &&
+		recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != a.DriveLease.RecoveryRequestID {
+		return fmt.Errorf("runtime aggregate retired terminal-delivery successor is not bound to its handoff request")
+	}
+	if a.Termination != nil && (a.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry ||
+		a.DriveLease.FailureSignature != "terminal-delivery") {
+		return fmt.Errorf("administratively terminated runtime aggregate can retain only the canonical terminal-delivery retry lease")
 	}
 	return nil
 }

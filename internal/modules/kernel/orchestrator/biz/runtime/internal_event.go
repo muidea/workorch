@@ -41,21 +41,22 @@ type RuntimeInternalEventKind string
 // A caller receives the post-transition aggregate (and, where applicable, an
 // immutable receipt/admission result); it never gains repository/CAS access.
 type RuntimeInternalEventResult struct {
-	Aggregate               RuntimeAggregate
-	CandidateSession        runtimecontract.RuntimeCandidateRequestSession
-	PendingAuthorityFailure *runtimecontract.FailureFact
-	Admission               *CandidateAdmissionCommitResult
-	Evidence                *EvidenceCommitResult
-	Receipt                 *runtimecontract.RuntimeOperationReceipt
-	OperationCall           *RuntimeOperationExecutionCallHandoff
-	DispatchExecution       *RuntimeDispatchExecutionHandoff
-	Found                   bool
-	BudgetConsumed          bool
-	RecoveryClaimChanged    bool
-	RecoveryClaimID         string
-	DriveLease              *runtimecontract.RuntimeDriveLease
-	LeaseChanged            bool
-	LeaseClaimed            bool
+	Aggregate                 RuntimeAggregate
+	CandidateSession          runtimecontract.RuntimeCandidateRequestSession
+	PendingAuthorityFailure   *runtimecontract.FailureFact
+	Admission                 *CandidateAdmissionCommitResult
+	Evidence                  *EvidenceCommitResult
+	Receipt                   *runtimecontract.RuntimeOperationReceipt
+	OperationCall             *RuntimeOperationExecutionCallHandoff
+	DispatchExecution         *RuntimeDispatchExecutionHandoff
+	Found                     bool
+	BudgetConsumed            bool
+	NonTerminalRecoveryRecord *runtimecontract.RuntimeNonTerminalRecoveryRecord
+	RecoveryClaimChanged      bool
+	RecoveryClaimID           string
+	DriveLease                *runtimecontract.RuntimeDriveLease
+	LeaseChanged              bool
+	LeaseClaimed              bool
 }
 
 // ApplyInternalEvent is the only mutation entry point exposed by the
@@ -147,6 +148,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		RuntimeInternalEventDriveFailureObserved,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
 		RuntimeInternalEventRecoveryBudgetConsumed,
+		RuntimeInternalEventNonTerminalRecoveryScheduled,
 		RuntimeInternalEventOperationRecoveryClaimed,
 		RuntimeInternalEventOperationRecoveryCallReturned,
 		RuntimeInternalEventDriveLeaseScheduled,

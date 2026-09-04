@@ -28,7 +28,7 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 	if facts.RepairDirective != nil && facts.RepairDirective.FocusID != focusID {
 		facts.RepairDirective = nil
 	}
-	if runtimeValidationFailureObservationAwaitsRepairConfirmation(facts) {
+	if runtimeValidationFailureObservationIsTargetless(facts) {
 		// A validation-owner observation is not yet a repair continuation. The resource owner must first
 		// confirm the exact current resource surface; retaining or rebuilding a
 		// directive here would expose focus/gap targets as premature authority.
@@ -103,7 +103,11 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 	return facts
 }
 
-func runtimeValidationFailureObservationAwaitsRepairConfirmation(facts runtimecontract.RuntimeFacts) bool {
+// runtimeValidationFailureObservationIsTargetless classifies only the shape of
+// the current validation fact. It deliberately does not decide whether an
+// owner query is eligible; that phase decision belongs exclusively to
+// CurrentRuntimeRepairSurfaceConfirmationPlan.
+func runtimeValidationFailureObservationIsTargetless(facts runtimecontract.RuntimeFacts) bool {
 	facts = facts.Normalized()
 	if facts.Failure == nil || facts.Failure.ValidationFailureObservation == nil {
 		return false

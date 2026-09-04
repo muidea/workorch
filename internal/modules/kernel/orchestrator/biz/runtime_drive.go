@@ -190,7 +190,73 @@ func (m *Biz) driveRuntime(ctx context.Context, command orchestratorevents.Drive
 	}
 	m.lifecycleMu.RLock()
 	defer m.lifecycleMu.RUnlock()
-	return m.driveRuntimeLocked(ctx, command)
+	if m.runtimeController == nil {
+		return orchestratorevents.DriveRuntimeResult{}, common.ErrInvalidArgument
+	}
+	// The synchronous EventHub ingress observes the same durable Run-owner
+	// retirement fence as generation-zero scheduled work. Process-local gate
+	// state is only an optimization and cannot admit work after a restart has
+	// forgotten a draining/retired workspace locally.
+	if err := m.validateWorkspaceRetirementDriveAdmission(ctx, command.WorkspaceID, command.RunID, 0); err != nil {
+		return orchestratorevents.DriveRuntimeResult{}, err
+	}
+	// The synchronous EventHub ingress and the scheduled SM-4 worker share one
+	// run-scoped execution gate. Without this fence, two owner queries could be
+	// live at once and an old repair-surface response could cross a later
+	// prerequisite-refresh/reopen window. Persisted leases remain exclusive to
+	// their timer worker and cannot be bypassed by this synchronous entry.
+	driveKey := runtimeDriveKey(command.WorkspaceID, command.RunID)
+	gateToken, accepted := m.beginRuntimeDriveWithToken(driveKey)
+	if !accepted {
+		return orchestratorevents.DriveRuntimeResult{}, fmt.Errorf("%w: Runtime drive is already active", common.ErrConflict)
+	}
+	gate, ownsGate := m.currentRuntimeDriveGate(driveKey)
+	if !ownsGate || gate.Token != gateToken {
+		return orchestratorevents.DriveRuntimeResult{}, fmt.Errorf("%w: Runtime drive gate identity was lost", common.ErrConflict)
+	}
+	// A caller cancellation ends this synchronous request, but it cannot cancel
+	// mounting a successor that another owner transition already persisted and
+	// latched behind this gate. Use the module lifecycle context for that exit
+	// handoff, matching scheduled-worker semantics.
+	exitCtx := m.orchestratorBackgroundContext(ctx, command.WorkspaceID)
+	var entranceLease *runtimecontract.RuntimeDriveLease
+	driveAttempted := false
+	driveSucceeded := false
+	defer func() {
+		settlement := runtimeDriveGateSettlementRequest{
+			WorkspaceID: command.WorkspaceID, RunID: command.RunID, DriveKey: driveKey,
+			GateEpoch: gate.Epoch, GateToken: gate.Token, Source: "synchronous_drive",
+			ReleaseWhenNoLease: driveAttempted && driveSucceeded,
+		}
+		if entranceLease != nil {
+			settlement.LeaseHint, settlement.HasLeaseHint = entranceLease.Clone(), true
+			if entranceLease.State == runtimecontract.RuntimeDriveLeaseScheduled &&
+				m.mountScheduledRuntimeDriveLeaseAtOwnedGate(exitCtx, settlement, entranceLease.Clone(), "synchronous_drive:existing_scheduled") {
+				return
+			}
+			// The synchronous ingress is not authority to recover an already-running
+			// generation. Retain only a lifecycle wake hint; the one-shot owner
+			// settlement will fresh-load and recover it after this ingress returns.
+			m.retainPendingRuntimeDriveLeaseMount(driveKey, entranceLease.Clone())
+			m.retainRuntimeDriveGateSettlement(settlement)
+			m.activateRuntimeDriveGateSettlementAtOwnerExit(settlement)
+			return
+		}
+		m.settleRuntimeDriveGateAtOwnerExit(exitCtx, settlement)
+	}()
+	current, loadErr := m.runtimeController.Load(ctx, command.WorkspaceID, command.RunID)
+	if loadErr == nil && current.DriveLease != nil {
+		lease := current.DriveLease.Clone()
+		entranceLease = &lease
+		return orchestratorevents.DriveRuntimeResult{}, fmt.Errorf("%w: persisted Runtime drive lease owns execution", common.ErrConflict)
+	}
+	if loadErr != nil && !errors.Is(loadErr, common.ErrNotFound) {
+		return orchestratorevents.DriveRuntimeResult{}, loadErr
+	}
+	driveAttempted = true
+	result, driveErr := m.driveRuntimeLocked(ctx, command)
+	driveSucceeded = driveErr == nil
+	return result, driveErr
 }
 
 // driveRuntimeLocked is called either by the synchronous EventHub handler
@@ -479,8 +545,12 @@ func (m *Biz) driveRuntimeDecision(ctx context.Context, aggregate runtime.Runtim
 		// surface. Before any next provider request, obtain File's current
 		// read-only confirmation and feed it back through the Orchestrator's
 		// internal-event/CAS boundary.
-		if aggregate.Facts.Failure != nil && aggregate.Facts.Failure.ValidationFailureObservation != nil && aggregate.Facts.Resources.FailureTarget == nil {
-			updated, handled, handoffErr := m.confirmRuntimeRepairSurface(ctx, aggregate)
+		confirmationPlan, planErr := runtime.CurrentRuntimeRepairSurfaceConfirmationPlan(aggregate)
+		if planErr != nil {
+			return runtime.RuntimeAggregate{}, planErr
+		}
+		if confirmationPlan.Required() {
+			updated, handled, handoffErr := m.confirmRuntimeRepairSurface(ctx, aggregate, confirmationPlan)
 			if handoffErr != nil {
 				return runtime.RuntimeAggregate{}, handoffErr
 			}

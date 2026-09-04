@@ -1,6 +1,7 @@
 package workorchruntimecontract
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -14,9 +15,24 @@ func TestRuntimeRepairSurfaceObservationIsFactOnlyAndBounded(t *testing.T) {
 	if err := observation.Validate(); err != nil {
 		t.Fatalf("observation: %v", err)
 	}
-	confirmation := RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"a.go", "b.go"}, ObservedRevision: "workspace-v1"}
+	confirmation := RuntimeRepairSurfaceConfirmation{RequestID: "repair-request-1", IssuedAtStateRevision: 7, ExpectedSubjectRevision: "workspace-v1", Observation: observation, OwnerModuleID: RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"a.go", "b.go"}, ObservedRevision: "workspace-v1"}
 	if err := confirmation.Validate(); err != nil {
 		t.Fatalf("confirmation: %v", err)
+	}
+	missingFence := confirmation
+	missingFence.RequestID = ""
+	if err := missingFence.Validate(); err == nil {
+		t.Fatal("confirmation accepted a missing request fence")
+	}
+	missingExpectedRevision := confirmation
+	missingExpectedRevision.ExpectedSubjectRevision = ""
+	if err := missingExpectedRevision.Validate(); err == nil {
+		t.Fatal("confirmation accepted a missing expected subject revision")
+	}
+	driftedConfirmedRevision := confirmation
+	driftedConfirmedRevision.ObservedRevision = "workspace-v2"
+	if err := driftedConfirmedRevision.Validate(); err == nil {
+		t.Fatal("confirmation accepted confirmed targets from a different subject revision")
 	}
 	syntheticOwner := confirmation
 	syntheticOwner.OwnerModuleID = "blocks/synthetic-repair-owner"
@@ -51,13 +67,24 @@ func TestRuntimeRepairSurfaceObservationIsFactOnlyAndBounded(t *testing.T) {
 	}
 }
 
+func TestRuntimeRepairSurfaceConfirmationSubjectIsProtocolBound(t *testing.T) {
+	descriptor, found := RuntimeRepairSurfaceConfirmationDescriptorForProtocol(RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets)
+	if !found || descriptor.Protocol != RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets ||
+		descriptor.ResourceDomain != RuntimeResourceWorkspaceTree || descriptor.SubjectRef != RuntimeRepairSurfaceFileWorkspaceSubjectRef {
+		t.Fatalf("File repair-surface protocol descriptor = %+v found=%v", descriptor, found)
+	}
+	if descriptor, found := RuntimeRepairSurfaceConfirmationDescriptorForProtocol(RuntimeRepairSurfaceConfirmationProtocolNone); found || descriptor != (RuntimeRepairSurfaceConfirmationProtocolDescriptor{}) {
+		t.Fatalf("none repair-surface protocol unexpectedly selected descriptor = %+v found=%v", descriptor, found)
+	}
+}
+
 func TestRuntimeRepairSurfaceConfirmationRecordProvidesTypedReplayFence(t *testing.T) {
 	observation := RuntimeValidationFailureObservation{
 		WorkspaceID: "ws", RunID: "run", AuthoritySnapshotID: "authority", DispatchID: "dispatch", OperationID: "validate",
 		FailureSignature: "build-failure", TargetRole: "implementation", DiagnosticClass: ValidationDiagnosticBuildFailed,
 		CandidateTargetRefs: []string{"main.go"}, ValidationScopeTargetRefs: []string{"main.go"}, DiagnosticHash: strings.Repeat("b", 64),
 	}
-	confirmed := RuntimeRepairSurfaceConfirmation{Observation: observation, OwnerModuleID: RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"main.go"}, ObservedRevision: "tree-v1", Reason: "same observation"}
+	confirmed := RuntimeRepairSurfaceConfirmation{RequestID: "repair-request-1", IssuedAtStateRevision: 7, ExpectedSubjectRevision: "tree-v1", Observation: observation, OwnerModuleID: RuntimeModuleFile, SubjectRef: "workspace_deliverable", Disposition: RuntimeRepairSurfaceConfirmed, ConfirmedTargetRefs: []string{"main.go"}, ObservedRevision: "tree-v1", Reason: "same observation"}
 	record, err := NewRuntimeRepairSurfaceConfirmationRecord(confirmed)
 	if err != nil {
 		t.Fatal(err)
@@ -65,9 +92,28 @@ func TestRuntimeRepairSurfaceConfirmationRecordProvidesTypedReplayFence(t *testi
 	if err := record.Validate(); err != nil {
 		t.Fatalf("record validation: %v", err)
 	}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded RuntimeRepairSurfaceConfirmationRecord
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if validateErr := decoded.Validate(); decoded.Confirmation.RequestID != confirmed.RequestID ||
+		decoded.Confirmation.IssuedAtStateRevision != confirmed.IssuedAtStateRevision ||
+		decoded.RecordedAtStateRevision != confirmed.IssuedAtStateRevision+1 || validateErr != nil {
+		t.Fatalf("confirmation request fence did not survive JSON round-trip: decoded=%+v err=%v", decoded, validateErr)
+	}
+	driftedRecordRevision := decoded.Clone()
+	driftedRecordRevision.RecordedAtStateRevision++
+	if err := driftedRecordRevision.Validate(); err == nil || !strings.Contains(err.Error(), "immediately following Runtime state revision") {
+		t.Fatalf("confirmation record accepted a detached owner-transition revision: %v", err)
+	}
 	stale := confirmed
 	stale.Disposition = RuntimeRepairSurfaceStale
 	stale.ConfirmedTargetRefs = nil
+	stale.ObservedRevision = "tree-v2"
 	if StableRuntimeRepairSurfaceConfirmationHash(confirmed) == StableRuntimeRepairSurfaceConfirmationHash(stale) {
 		t.Fatal("different dispositions share exact replay signature")
 	}
@@ -78,6 +124,17 @@ func TestRuntimeRepairSurfaceConfirmationRecordProvidesTypedReplayFence(t *testi
 	changedReason.Reason = "different owner explanation"
 	if StableRuntimeRepairSurfaceConfirmationIdentityHash(confirmed) != StableRuntimeRepairSurfaceConfirmationIdentityHash(changedReason) {
 		t.Fatal("response reason changed the owner-observation identity")
+	}
+	changedOwnerRevision := confirmed
+	changedOwnerRevision.ObservedRevision = "tree-v2"
+	if StableRuntimeRepairSurfaceConfirmationIdentityHash(confirmed) != StableRuntimeRepairSurfaceConfirmationIdentityHash(changedOwnerRevision) {
+		t.Fatal("owner response revision changed an issued-request identity")
+	}
+	changedRequest := confirmed
+	changedRequest.RequestID = "repair-request-2"
+	changedRequest.IssuedAtStateRevision++
+	if StableRuntimeRepairSurfaceConfirmationIdentityHash(confirmed) == StableRuntimeRepairSurfaceConfirmationIdentityHash(changedRequest) {
+		t.Fatal("different confirmation windows share an identity signature")
 	}
 	if err := ValidateRuntimeRepairSurfaceConfirmationRecords([]RuntimeRepairSurfaceConfirmationRecord{record, record}); err == nil {
 		t.Fatal("duplicate confirmation records were accepted")
@@ -101,11 +158,17 @@ func TestRuntimeRepairSurfaceConfirmationSequenceEndsAtTerminalDisposition(t *te
 	}
 	makeRecord := func(disposition RuntimeRepairSurfaceDisposition, revision string) RuntimeRepairSurfaceConfirmationRecord {
 		value := RuntimeRepairSurfaceConfirmation{
+			RequestID: "repair-request-" + revision, IssuedAtStateRevision: uint64(len(revision)),
 			Observation: observation, OwnerModuleID: RuntimeModuleFile, SubjectRef: "workspace_deliverable",
 			Disposition: disposition, ObservedRevision: revision,
 		}
 		if disposition == RuntimeRepairSurfaceConfirmed {
+			value.ExpectedSubjectRevision = revision
 			value.ConfirmedTargetRefs = []string{"main.go"}
+		} else if disposition == RuntimeRepairSurfaceRejected {
+			value.ExpectedSubjectRevision = revision
+		} else {
+			value.ExpectedSubjectRevision = revision + "-expected"
 		}
 		record, err := NewRuntimeRepairSurfaceConfirmationRecord(value)
 		if err != nil {

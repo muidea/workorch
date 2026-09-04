@@ -62,9 +62,23 @@ func TestClassifyRuntimeDriveFailureUsesTypedRecoveryOutcomes(t *testing.T) {
 	if unknown.Class != runtimecontract.FailureClassOperationOutcomeUnknown {
 		t.Fatalf("typed outcome-unknown classification = %+v", unknown)
 	}
-	transient := classifyRuntimeDriveFailure(context.DeadlineExceeded)
-	if transient.Class != runtimecontract.FailureClassOwnerTransientUnavailable {
-		t.Fatalf("typed timeout classification = %+v", transient)
+	typedTransient := classifyRuntimeDriveFailure(&runtime.RuntimeOwnerTransientError{
+		WorkspaceID: "ws-v2", RunID: "run-v2", ExpectedRevision: 4, ObservedRevision: 4,
+		Feedback: runtimecontract.RuntimeFeedback{
+			Domain: runtimecontract.RuntimeFeedbackDomainPersistence, StableCategory: runtimecontract.RuntimeFeedbackCategoryOwnerTransient,
+			WorkspaceID: "ws-v2", RunID: "run-v2", OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
+				SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: "blocks/run",
+				OriginalClass: "owner_transient", OriginalCode: "runtime_store_unavailable", OriginalMessage: "runtime store is temporarily unavailable",
+				Signature: "runtime-state-update/ws-v2/run-v2/4/4/owner-transient",
+			},
+		},
+	})
+	if typedTransient.Class != runtimecontract.FailureClassOwnerTransientUnavailable {
+		t.Fatalf("typed owner-transient classification = %+v", typedTransient)
+	}
+	untypedTimeout := classifyRuntimeDriveFailure(context.DeadlineExceeded)
+	if untypedTimeout.Class != runtimecontract.FailureClassRuntimeContractMisalignment || untypedTimeout.Code != "runtime_owner_outcome_untyped" {
+		t.Fatalf("untyped timeout acquired recovery classification = %+v", untypedTimeout)
 	}
 	textOnly := classifyRuntimeDriveFailure(errors.New("owner timeout outcome_unknown projection"))
 	if textOnly.Class != runtimecontract.FailureClassRuntimeContractMisalignment {

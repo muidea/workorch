@@ -19,6 +19,7 @@ const (
 	FailureDispositionGovernance        FailureDisposition = "governance"
 	FailureDispositionSameFocusRepair   FailureDisposition = "same_focus_repair"
 	FailureDispositionOperationRecovery FailureDisposition = "operation_recovery"
+	FailureDispositionOwnerTransient    FailureDisposition = "owner_transient_recovery"
 	FailureDispositionCASReload         FailureDisposition = "cas_reload"
 	FailureDispositionDeliveryRetry     FailureDisposition = "delivery_retry"
 	FailureDispositionBoundedFail       FailureDisposition = "bounded_fail"
@@ -41,7 +42,7 @@ func FailureClassDisposition(class runtimecontract.FailureClass) FailureDisposit
 		runtimecontract.FailureClassGovernanceDependency, runtimecontract.FailureClassGovernanceRejected:
 		return FailureDispositionGovernance
 	case runtimecontract.FailureClassOwnerTransientUnavailable:
-		return FailureDispositionOperationRecovery
+		return FailureDispositionOwnerTransient
 	case runtimecontract.FailureClassCandidateInfeasible, runtimecontract.FailureClassExecutionRejected, runtimecontract.FailureClassExecutionFailure,
 		runtimecontract.FailureClassBuildFailure, runtimecontract.FailureClassEffectMismatch:
 		return FailureDispositionSameFocusRepair
@@ -68,7 +69,7 @@ func FailureClassDisposition(class runtimecontract.FailureClass) FailureDisposit
 func FailureClassIsBusinessTerminal(class runtimecontract.FailureClass) bool {
 	switch FailureClassDisposition(class) {
 	case FailureDispositionCASReload, FailureDispositionDeliveryRetry,
-		FailureDispositionProviderRetry, FailureDispositionOperationRecovery:
+		FailureDispositionProviderRetry, FailureDispositionOperationRecovery, FailureDispositionOwnerTransient:
 		return false
 	default:
 		return true

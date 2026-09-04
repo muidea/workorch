@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 // applyDeliveryInternalEvent reduces the SM-4 payload family without gaining
@@ -34,9 +35,30 @@ func (c *RuntimeController) applyDeliveryInternalEvent(ctx context.Context, even
 		result.BudgetConsumed = changed
 		return result, err
 	case RuntimeInternalEventRecoveryBudgetConsumed:
-		aggregate, consumed, err := c.driveDelivery.consumeRecoveryBudget(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Delivery.RecoveryBudgetKind, event.Delivery.RecoveryOperationID, event.Delivery.LeaseNow)
+		var terminalRequests []runtimecontract.RuntimeTerminalDeliveryRecoveryRequest
+		if event.Delivery.TerminalDeliveryRecoveryRequest != nil {
+			terminalRequests = append(terminalRequests, event.Delivery.TerminalDeliveryRecoveryRequest.Normalized())
+		}
+		aggregate, consumed, err := c.driveDelivery.consumeRecoveryBudget(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Delivery.RecoveryBudgetKind, event.Delivery.RecoveryOperationID, event.Delivery.LeaseNow, terminalRequests...)
 		result.Aggregate = aggregate
 		result.BudgetConsumed = consumed
+		return result, err
+	case RuntimeInternalEventNonTerminalRecoveryScheduled:
+		if event.Delivery.NonTerminalRecoveryRequest == nil {
+			return result, common.ErrInvalidArgument
+		}
+		aggregate, record, lease, changed, consumed, err := c.driveDelivery.scheduleNonTerminalRecovery(
+			ctx, event.Delivery.NonTerminalRecoveryRequest.Normalized(), event.Delivery.NonTerminalRecoveryCause,
+		)
+		result.Aggregate, result.LeaseChanged, result.BudgetConsumed = aggregate, changed, consumed
+		if runtimecontract.RuntimeNonTerminalRecoveryRecordPresent(record) {
+			value := record.Normalized()
+			result.NonTerminalRecoveryRecord = &value
+		}
+		if lease.WorkspaceID != "" {
+			value := lease.Clone()
+			result.DriveLease = &value
+		}
 		return result, err
 	case RuntimeInternalEventOperationRecoveryClaimed:
 		aggregate, claimID, changed, err := c.driveDelivery.claimOperationRecoveryAuthorization(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Delivery.RecoveryOperationID, event.Delivery.RecoveryAuthorizationID, event.Delivery.LeaseNow)

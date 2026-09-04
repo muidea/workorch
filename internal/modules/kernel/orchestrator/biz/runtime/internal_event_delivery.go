@@ -9,8 +9,14 @@ type RuntimeInternalDeliveryPayload struct {
 	ReconciliationRequest *runtimecontract.RuntimeCWIReconciliationRequest
 	FailureFact           *runtimecontract.FailureFact
 
-	DeliveryAcknowledgement        *runtimecontract.RuntimeDeliveryAcknowledgement
-	RecoveryBudgetKind             runtimecontract.RuntimeRecoveryBudgetKind
+	DeliveryAcknowledgement         *runtimecontract.RuntimeDeliveryAcknowledgement
+	RecoveryBudgetKind              runtimecontract.RuntimeRecoveryBudgetKind
+	TerminalDeliveryRecoveryRequest *runtimecontract.RuntimeTerminalDeliveryRecoveryRequest
+	NonTerminalRecoveryRequest      *runtimecontract.RuntimeNonTerminalRecoveryRequest
+	// NonTerminalRecoveryCause is invocation-local proof of the exact typed
+	// persistence outcome. It is validated before aggregate I/O and is never
+	// persisted or sent through EventHub.
+	NonTerminalRecoveryCause       error
 	RecoveryOperationID            string
 	RecoveryAuthorizationID        string
 	RecoveryClaimID                string
@@ -32,6 +38,7 @@ const (
 	RuntimeInternalEventDriveFailureObserved          RuntimeInternalEventKind = "drive_failure_observed"
 	RuntimeInternalEventTerminalDeliveryAcknowledged  RuntimeInternalEventKind = "terminal_delivery_ack_observed"
 	RuntimeInternalEventRecoveryBudgetConsumed        RuntimeInternalEventKind = "recovery_budget_consumed"
+	RuntimeInternalEventNonTerminalRecoveryScheduled  RuntimeInternalEventKind = "nonterminal_recovery_scheduled"
 	RuntimeInternalEventOperationRecoveryClaimed      RuntimeInternalEventKind = "operation_recovery_claimed"
 	RuntimeInternalEventOperationRecoveryCallReturned RuntimeInternalEventKind = "operation_recovery_call_returned"
 	RuntimeInternalEventDriveLeaseScheduled           RuntimeInternalEventKind = "drive_lease_scheduled"

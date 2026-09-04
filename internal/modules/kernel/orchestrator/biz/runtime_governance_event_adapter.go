@@ -115,10 +115,18 @@ func (m *Biz) commitRuntimeGovernanceResolutionLocked(ctx context.Context, sourc
 		Kind: runtime.RuntimeInternalEventGovernanceResolutionObserved, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID}, Transaction: transaction,
 	})
 	if err != nil {
+		if recovered, recoverErr := m.completeOrRetainPersistedRuntimeGovernanceResolution(ctx, resolution, "governance_resolution_commit_unknown"); recoverErr == nil {
+			setRuntimeGovernanceResult(result, recovered, nil)
+			return
+		}
 		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
 		return
 	}
 	if commitEvent.Evidence == nil {
+		if recovered, recoverErr := m.completeOrRetainPersistedRuntimeGovernanceResolution(ctx, resolution, "governance_resolution_commit_result_missing"); recoverErr == nil {
+			setRuntimeGovernanceResult(result, recovered, nil)
+			return
+		}
 		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument)
 		return
 	}
@@ -135,16 +143,112 @@ func (m *Biz) commitRuntimeGovernanceResolutionLocked(ctx context.Context, sourc
 		Terminal:            commit.Aggregate.Decision.Terminal,
 	}
 	if err := response.Validate(); err != nil {
+		if recovered, recoverErr := m.completeOrRetainPersistedRuntimeGovernanceResolution(ctx, resolution, "governance_resolution_response_invalid"); recoverErr == nil {
+			setRuntimeGovernanceResult(result, recovered, nil)
+			return
+		}
 		setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
 		return
 	}
 	if commit.Disposition == runtime.CommitDispositionCommitted || commit.Disposition == runtime.CommitDispositionDuplicate {
 		if err := m.continueRuntimeGovernance(ctx, response, resolution, commitEvent.DriveLease); err != nil {
+			if recovered, recoverErr := m.completeOrRetainPersistedRuntimeGovernanceResolution(ctx, resolution, "governance_resolution_handoff_incomplete"); recoverErr == nil {
+				setRuntimeGovernanceResult(result, recovered, nil)
+				return
+			}
 			setRuntimeGovernanceResult(result, orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err)
 			return
 		}
 	}
 	setRuntimeGovernanceResult(result, response, nil)
+}
+
+// completeOrRetainPersistedRuntimeGovernanceResolution is the post-CAS exit
+// fence. The command context may be canceled after the owner CAS commits, so
+// completion runs on the module lifecycle context. If persistence or owner
+// handoff is still indeterminate, an exact run gate settlement remains armed;
+// the settlement wake fresh-loads the aggregate and mounts any atomic
+// continuation lease without treating this process-local hint as authority.
+func (m *Biz) completeOrRetainPersistedRuntimeGovernanceResolution(
+	ctx context.Context,
+	resolution runtimecontract.RuntimeGovernanceResolution,
+	source string,
+) (orchestratorevents.CommitRuntimeGovernanceResolutionResult, error) {
+	if m == nil {
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
+	}
+	finalizerCtx := m.orchestratorBackgroundContext(ctx, resolution.WorkspaceID)
+	response, err := m.completePersistedRuntimeGovernanceResolution(finalizerCtx, resolution)
+	if err == nil {
+		return response, nil
+	}
+	key := runtimeDriveKey(resolution.WorkspaceID, resolution.RunID)
+	gateToken, acquired := m.beginRuntimeDriveWithToken(key)
+	gate, ownsGate := m.currentRuntimeDriveGate(key)
+	request := runtimeDriveGateSettlementRequest{
+		WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID, DriveKey: key,
+		Source: source, ReleaseWhenNoLease: true,
+	}
+	if ownsGate && gate.Token != 0 && (!acquired || gate.Token == gateToken) {
+		request.GateEpoch, request.GateToken = gate.Epoch, gate.Token
+		request.AwaitGateOwnerExit = !acquired
+	}
+	m.retainOrAcquireRuntimeDriveGateSettlement(request)
+	return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err
+}
+
+// completePersistedRuntimeGovernanceResolution is the single post-CAS
+// finalizer for an exact resolution. Repository adapters may return an
+// ordinary error after the owner CAS committed, and any later load/derive/Run
+// handoff can fail independently. Fresh state, not the ambiguous response,
+// decides whether the exact record and its successor exist; continuation is
+// then replayed idempotently and the durable lease is mounted or latched behind
+// the sole run gate.
+func (m *Biz) completePersistedRuntimeGovernanceResolution(
+	ctx context.Context,
+	resolution runtimecontract.RuntimeGovernanceResolution,
+) (orchestratorevents.CommitRuntimeGovernanceResolutionResult, error) {
+	if m == nil || m.runtimeController == nil {
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
+	}
+	aggregate, err := m.runtimeController.Load(ctx, resolution.WorkspaceID, resolution.RunID)
+	if err != nil {
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err
+	}
+	wantRecord := runtimecontract.RuntimeGovernanceResolutionRecordFromResolution(resolution)
+	matched := false
+	for _, record := range aggregate.GovernanceResolutions {
+		if runtimecontract.SameRuntimeGovernanceResolutionRecord(record, wantRecord) {
+			matched = true
+			break
+		}
+	}
+	if !matched || !governancecheck.RequestsBindResolution(aggregate.GovernanceRequests, resolution) {
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, fmt.Errorf("%w: exact governance resolution did not reach persistence", common.ErrConflict)
+	}
+	response := orchestratorevents.CommitRuntimeGovernanceResolutionResult{
+		WorkspaceID: resolution.WorkspaceID, RunID: resolution.RunID, ResolutionID: resolution.ResolutionID,
+		Disposition:   orchestratorevents.RuntimeGovernanceResolutionDispositionDuplicate,
+		StateRevision: aggregate.StateRevision, EvidenceRevision: aggregate.Facts.EvidenceRevision,
+		AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, State: aggregate.Decision.State, Terminal: aggregate.Decision.Terminal,
+	}
+	if err := response.Validate(); err != nil {
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err
+	}
+	var lease *runtimecontract.RuntimeDriveLease
+	signature, signatureErr := runtime.RuntimeGovernanceResolutionDriveLeaseSignature(resolution)
+	if signatureErr != nil {
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, signatureErr
+	}
+	if aggregate.DriveLease != nil && aggregate.DriveLease.Reason == runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry &&
+		aggregate.DriveLease.FailureSignature == signature {
+		value := aggregate.DriveLease.Clone()
+		lease = &value
+	}
+	if err := m.continueRuntimeGovernance(ctx, response, resolution, lease); err != nil {
+		return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, err
+	}
+	return response, nil
 }
 
 func runtimeGovernanceResolutionSourceMatchesOwner(source string, resolution runtimecontract.RuntimeGovernanceResolution) bool {
@@ -378,17 +482,30 @@ func runtimeTerminalDeliverySuccessorLease(aggregate runtime.RuntimeAggregate) (
 func (m *Biz) mountCurrentRuntimeTerminalDeliverySuccessor(ctx context.Context, lease runtimecontract.RuntimeDriveLease, source string) error {
 	if lease.State == runtimecontract.RuntimeDriveLeaseRunning {
 		key := runtimeDriveKey(lease.WorkspaceID, lease.RunID)
-		m.driveMu.Lock()
-		_, locallyRunning := m.drivingRuns[key]
-		m.driveMu.Unlock()
-		if locallyRunning {
+		gateToken, accepted := m.beginRuntimeDriveWithToken(key)
+		if !accepted {
+			if _, locallyRunning := m.currentRuntimeDriveGate(key); locallyRunning {
+				return nil
+			}
+			return fmt.Errorf("%w: terminal delivery successor gate is unavailable", common.ErrConflict)
+		}
+		gate, ownsGate := m.currentRuntimeDriveGate(key)
+		if !ownsGate || gate.Token != gateToken {
+			m.endRuntimeDriveExact(key, gate.Epoch, gateToken)
+			return fmt.Errorf("%w: terminal delivery successor gate identity was lost", common.ErrConflict)
+		}
+		settlement := runtimeDriveGateSettlementRequest{
+			WorkspaceID: lease.WorkspaceID, RunID: lease.RunID, DriveKey: key,
+			GateEpoch: gate.Epoch, GateToken: gate.Token, Source: source + ":running_successor",
+			LeaseHint: lease.Clone(), HasLeaseHint: true, ReleaseWhenNoLease: false,
+		}
+		if m.settleRuntimeDriveGateOrRetain(ctx, settlement) {
 			return nil
 		}
-		var err error
-		lease, _, err = m.runtimeRecoverDriveLease(ctx, lease.WorkspaceID, lease.RunID, time.Now().UTC().Format(time.RFC3339Nano))
-		if err != nil {
-			return err
-		}
+		// A false result retained the exact gate and registered lifecycle-owned
+		// reconciliation. The persisted running lease remains the sole authority;
+		// surfacing a command failure here would invite a duplicate ingress.
+		return nil
 	}
 	return m.mountPersistedRuntimeLifecycleOwnerDeliveryLease(ctx, lease, source, "terminal-delivery")
 }

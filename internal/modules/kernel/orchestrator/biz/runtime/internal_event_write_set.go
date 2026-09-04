@@ -152,6 +152,7 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 
 	case RuntimeInternalEventReconciliationRequested,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
+		RuntimeInternalEventNonTerminalRecoveryScheduled,
 		RuntimeInternalEventDriveLeaseScheduled,
 		RuntimeInternalEventDriveLeaseClaimed,
 		RuntimeInternalEventDriveLeaseReleased,

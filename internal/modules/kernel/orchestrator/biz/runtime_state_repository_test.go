@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -5098,6 +5099,18 @@ func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueRe
 	ctx := context.Background()
 	aggregate, repairConvergence, repairCatalog := runtimeOuterValidationRepairAggregate(t, 7)
 	repairRoute := repairConvergence.Routes[0].Normalized()
+	for index := range aggregate.Facts.Resources.PrerequisiteObservations {
+		observation := aggregate.Facts.Resources.PrerequisiteObservations[index].Normalized()
+		if observation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility || observation.OwnerModuleID != repairRoute.RepairOwnerModuleID {
+			continue
+		}
+		observation.Dependencies = append(observation.Dependencies, runtimecontract.RuntimeFreshnessDependency{
+			Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: repairRoute.RepairOwnerModuleID,
+			SubjectRef: runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef, Revision: "repair-surface-reload-tree-v1",
+		})
+		observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+		aggregate.Facts.Resources.PrerequisiteObservations[index] = observation
+	}
 	aggregate.Facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	aggregate.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	aggregate.Facts.Focus.ValidationRecipeID = "repair-surface-reload"
@@ -5279,6 +5292,13 @@ func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueRe
 		OwnerModuleID: repairRoute.RepairOwnerModuleID, SubjectRef: "workspace_deliverable",
 		Disposition: runtimecontract.RuntimeRepairSurfaceStale, ObservedRevision: "tree-v2", Reason: "changed",
 	}
+	confirmationPlan, err := runtime.CurrentRuntimeRepairSurfaceConfirmationPlan(failed)
+	if err != nil || !confirmationPlan.Required() {
+		t.Fatalf("repair-surface confirmation plan = %+v err=%v", confirmationPlan, err)
+	}
+	confirmation.RequestID = confirmationPlan.RequestID
+	confirmation.IssuedAtStateRevision = confirmationPlan.IssuedAtStateRevision
+	confirmation.ExpectedSubjectRevision = confirmationPlan.ExpectedSubjectRevision
 	confirmedEvent, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind:      runtime.RuntimeInternalEventRepairSurfaceConfirmationObserved,
 		Scope:     runtime.RuntimeInternalEventScope{WorkspaceID: failed.Facts.WorkspaceID, RunID: failed.Facts.RunID},
@@ -5305,25 +5325,30 @@ func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueRe
 	if reloaded.RepairSurfaceConfirmations[0].Confirmation.OwnerModuleID != repairRoute.RepairOwnerModuleID {
 		t.Fatalf("repair confirmation owner drifted across reload: got=%q want=%q", reloaded.RepairSurfaceConfirmations[0].Confirmation.OwnerModuleID, repairRoute.RepairOwnerModuleID)
 	}
-	var reloadedPrerequisite runtimecontract.RuntimePrerequisite
-	for _, satisfied := range reloaded.Facts.Prerequisites.Satisfied {
-		if satisfied.ID == repairPrerequisite.ID && satisfied.OwnerModuleID == repairPrerequisite.OwnerModuleID {
-			reloadedPrerequisite = satisfied
-			break
+	if reloaded.RepairSurfaceConfirmations[0].Confirmation.RequestID != confirmationPlan.RequestID ||
+		reloaded.RepairSurfaceConfirmations[0].Confirmation.IssuedAtStateRevision != confirmationPlan.IssuedAtStateRevision ||
+		reloaded.RepairSurfaceConfirmations[0].RecordedAtStateRevision != confirmationPlan.IssuedAtStateRevision+1 {
+		t.Fatalf("repair confirmation request fence drifted across reload: got=%+v want=%+v", reloaded.RepairSurfaceConfirmations[0], confirmationPlan)
+	}
+	if _, current := runtimecontract.RuntimePrerequisiteObservationForID(reloaded.Facts.Resources.PrerequisiteObservations, repairPrerequisite.ID); current {
+		t.Fatalf("stale repair owner observation remained current across reload: %+v", reloaded.Facts.Resources.PrerequisiteObservations)
+	}
+	var reloadedInvalidation runtimecontract.RuntimePrerequisiteInvalidationRecord
+	for _, invalidation := range reloaded.PrerequisiteInvalidations {
+		for _, observationID := range invalidation.ObservationIDs {
+			if observationID == repairPrerequisiteObservation.ObservationID {
+				reloadedInvalidation = invalidation
+				break
+			}
 		}
 	}
-	if reloadedPrerequisite.ID == "" || reloadedPrerequisite.Kind != repairPrerequisite.Kind || !reflect.DeepEqual(reloadedPrerequisite.RequiredCapabilities, repairPrerequisite.RequiredCapabilities) {
-		t.Fatalf("repair owner prerequisite identity drifted across reload: got=%+v want=%+v", reloadedPrerequisite, repairPrerequisite)
-	}
-	var reloadedObservation runtimecontract.RuntimePrerequisiteObservation
-	for _, observed := range reloaded.Facts.Resources.PrerequisiteObservations {
-		if observed.ObservationID == repairPrerequisiteObservation.ObservationID {
-			reloadedObservation = observed
-			break
-		}
-	}
-	if reloadedObservation.ObservationID == "" || reloadedObservation.PrerequisiteID != repairPrerequisiteObservation.PrerequisiteID || reloadedObservation.ContentHash != repairPrerequisiteObservation.ContentHash || !reflect.DeepEqual(reloadedObservation.Dependencies, repairPrerequisiteObservation.Dependencies) {
-		t.Fatalf("repair owner prerequisite observation drifted across reload: got=%+v want=%+v", reloadedObservation, repairPrerequisiteObservation)
+	expectedInvalidatedDependencies := []runtimecontract.RuntimeFreshnessDependency{{
+		Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: repairRoute.RepairOwnerModuleID,
+		SubjectRef: runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef, Revision: "repair-surface-reload-tree-v1",
+	}}
+	if reloadedInvalidation.Signature == "" || !slices.Contains(reloadedInvalidation.PrerequisiteIDs, repairPrerequisite.ID) ||
+		!reflect.DeepEqual(reloadedInvalidation.InvalidatedDependencies, expectedInvalidatedDependencies) {
+		t.Fatalf("repair owner prerequisite invalidation drifted across reload: got=%+v observation=%+v", reloadedInvalidation, repairPrerequisiteObservation)
 	}
 	reloaded.RepairSurfaceConfirmations[0].Confirmation.Observation.CandidateTargetRefs[0] = "mutated.go"
 	if persisted.RepairSurfaceConfirmations[0].Confirmation.Observation.CandidateTargetRefs[0] == "mutated.go" {

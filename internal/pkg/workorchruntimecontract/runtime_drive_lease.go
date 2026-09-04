@@ -25,6 +25,7 @@ type RuntimeDriveLeaseReason string
 const (
 	RuntimeDriveLeaseReasonPersistedPending RuntimeDriveLeaseReason = "persisted_pending"
 	RuntimeDriveLeaseReasonCASReload        RuntimeDriveLeaseReason = "cas_reload"
+	RuntimeDriveLeaseReasonOwnerTransient   RuntimeDriveLeaseReason = "owner_transient"
 	RuntimeDriveLeaseReasonProviderRetry    RuntimeDriveLeaseReason = "provider_retry"
 	RuntimeDriveLeaseReasonOperationRetry   RuntimeDriveLeaseReason = "operation_retry"
 	RuntimeDriveLeaseReasonDeliveryRetry    RuntimeDriveLeaseReason = "delivery_retry"
@@ -42,12 +43,18 @@ type RuntimeDriveLease struct {
 	RecoveryGeneration uint64
 	Reason             RuntimeDriveLeaseReason
 	FailureSignature   string
-	DueAt              string
-	State              RuntimeDriveLeaseState
+	// RecoveryRequestID binds a budget-authorized successor back to the exact
+	// persisted recovery record that created it. Canonical terminal-delivery,
+	// CAS-reload and owner-transient successors require it; unrelated technical
+	// lease reasons leave it empty.
+	RecoveryRequestID string
+	DueAt             string
+	State             RuntimeDriveLeaseState
 }
 
 func (l RuntimeDriveLease) Normalized() RuntimeDriveLease {
 	l.FailureSignature = strings.TrimSpace(l.FailureSignature)
+	l.RecoveryRequestID = strings.TrimSpace(l.RecoveryRequestID)
 	l.DueAt = strings.TrimSpace(l.DueAt)
 	return l
 }
@@ -60,6 +67,7 @@ func (l RuntimeDriveLease) Validate() error {
 	switch l.Reason {
 	case RuntimeDriveLeaseReasonPersistedPending,
 		RuntimeDriveLeaseReasonCASReload,
+		RuntimeDriveLeaseReasonOwnerTransient,
 		RuntimeDriveLeaseReasonProviderRetry,
 		RuntimeDriveLeaseReasonOperationRetry,
 		RuntimeDriveLeaseReasonDeliveryRetry,
@@ -73,6 +81,14 @@ func (l RuntimeDriveLease) Validate() error {
 	default:
 		return fmt.Errorf("runtime drive lease has unsupported state %q", l.State)
 	}
+	canonicalTerminalDelivery := l.Reason == RuntimeDriveLeaseReasonDeliveryRetry && l.FailureSignature == "terminal-delivery"
+	nonterminalRecovery := l.Reason == RuntimeDriveLeaseReasonCASReload || l.Reason == RuntimeDriveLeaseReasonOwnerTransient
+	if l.RecoveryRequestID != "" && !canonicalTerminalDelivery && !nonterminalRecovery {
+		return fmt.Errorf("runtime drive lease recovery request has unsupported reason")
+	}
+	if nonterminalRecovery && l.RecoveryRequestID == "" {
+		return fmt.Errorf("runtime nonterminal recovery drive lease requires recovery request")
+	}
 	if _, err := time.Parse(time.RFC3339Nano, l.DueAt); err != nil {
 		return fmt.Errorf("runtime drive lease dueAt must be RFC3339: %w", err)
 	}
@@ -80,6 +96,13 @@ func (l RuntimeDriveLease) Validate() error {
 }
 
 func (l RuntimeDriveLease) Clone() RuntimeDriveLease { return l.Normalized() }
+
+// RuntimeDriveLeasePresent is the canonical full-struct presence test for an
+// embedded (non-pointer) lease marker. Checking only selected fields can make
+// a partially populated retired authority disappear from validation.
+func RuntimeDriveLeasePresent(lease RuntimeDriveLease) bool {
+	return lease.Normalized() != (RuntimeDriveLease{})
+}
 
 // SameRuntimeDriveLeaseIdentity compares the immutable retry identity used by
 // a timer before it may claim the persisted lease. State is intentionally not
@@ -93,5 +116,6 @@ func SameRuntimeDriveLeaseIdentity(left, right RuntimeDriveLease) bool {
 		left.RecoveryGeneration == right.RecoveryGeneration &&
 		left.Reason == right.Reason &&
 		left.FailureSignature == right.FailureSignature &&
+		left.RecoveryRequestID == right.RecoveryRequestID &&
 		left.DueAt == right.DueAt
 }

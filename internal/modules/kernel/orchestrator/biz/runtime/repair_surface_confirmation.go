@@ -47,19 +47,56 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 	if repairSurfaceConfirmationExists(aggregate, confirmation) {
 		return aggregate, nil
 	}
+	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
+		return RuntimeAggregate{}, err
+	}
+	plan, err := CurrentRuntimeRepairSurfaceConfirmationPlan(aggregate)
+	if err != nil {
+		return RuntimeAggregate{}, err
+	}
+	if !plan.Required() {
+		// Preserve the existing terminal diagnostics while making the current
+		// owner-private plan the admission authority for every new response.
+		// In particular, a response from an earlier read cannot cross a stale
+		// confirmation's prerequisite-reacquisition interlude.
+		if aggregate.Facts.Resources.FailureTarget != nil {
+			return RuntimeAggregate{}, fmt.Errorf("%w: repair surface observation already has terminal target authority", common.ErrConflict)
+		}
+		if aggregate.Decision.State == runtimecontract.ConvergenceStateComplete || aggregate.Decision.State == runtimecontract.ConvergenceStateFailed {
+			return RuntimeAggregate{}, fmt.Errorf("%w: terminal runtime cannot accept a new repair surface confirmation", common.ErrConflict)
+		}
+		return RuntimeAggregate{}, fmt.Errorf("%w: current runtime authority does not require repair surface confirmation", common.ErrConflict)
+	}
+	// The concrete typed adapter selected by plan.Protocol binds the response
+	// protocol before this owner-private event is submitted. Re-deriving that
+	// protocol from the fresh aggregate here prevents a delayed response from
+	// crossing a changed sealed route without adding protocol state to the
+	// confirmation DTO.
+	if plan.Protocol == runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone ||
+		!runtimecontract.RuntimeRepairSurfaceConfirmationProtocolSupported(plan.Protocol) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation has no current protocol", common.ErrConflict)
+	}
+	if !runtimecontract.SameRuntimeValidationFailureObservation(plan.Observation, confirmation.Observation) {
+		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation does not match current observation", common.ErrConflict)
+	}
+	if confirmation.RequestID != plan.RequestID || confirmation.IssuedAtStateRevision != plan.IssuedAtStateRevision {
+		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation request does not match current confirmation window", common.ErrConflict)
+	}
+	if confirmation.OwnerModuleID != plan.OwnerModuleID {
+		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation owner does not match sealed repair provenance", common.ErrConflict)
+	}
+	if confirmation.SubjectRef != plan.SubjectRef {
+		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation subject does not match current protocol", common.ErrConflict)
+	}
+	if confirmation.ExpectedSubjectRevision != plan.ExpectedSubjectRevision {
+		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation expected revision does not match current owner fact", common.ErrConflict)
+	}
 	if repairSurfaceConfirmationIdentityConflict(aggregate, confirmation) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation conflicts with persisted disposition", common.ErrConflict)
-	}
-	if aggregate.Decision.State == runtimecontract.ConvergenceStateComplete || aggregate.Decision.State == runtimecontract.ConvergenceStateFailed {
-		return RuntimeAggregate{}, fmt.Errorf("%w: terminal runtime cannot accept a new repair surface confirmation", common.ErrConflict)
 	}
 	failure := aggregate.Facts.Failure
 	if failure == nil || failure.ValidationFailureObservation == nil || !runtimecontract.SameRuntimeValidationFailureObservation(*failure.ValidationFailureObservation, confirmation.Observation) || !sealedValidationFailureObservationMatches(aggregate, confirmation.Observation) || !runtimeValidationFailureObservationHasPersistedReceipt(aggregate, confirmation.Observation) {
 		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation does not match persisted validation failure", common.ErrConflict)
-	}
-	expectedOwner, ownerErr := runtimeExpectedRepairSurfaceOwner(aggregate, confirmation.Observation)
-	if ownerErr != nil || confirmation.OwnerModuleID != expectedOwner {
-		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation owner does not match sealed repair provenance", common.ErrConflict)
 	}
 	if aggregate.Facts.Resources.FailureTarget != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface observation already has terminal target authority", common.ErrConflict)
@@ -81,6 +118,33 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 		aggregate.Facts.Resources.TargetSelection = nil
 		aggregate.Facts.Resources.TargetSnapshots = nil
 	} else if confirmation.Disposition == runtimecontract.RuntimeRepairSurfaceStale {
+		staleObservation, found := currentRuntimeRepairSurfaceSubjectObservation(
+			aggregate,
+			confirmation.OwnerModuleID,
+			plan.SubjectDomain,
+			confirmation.SubjectRef,
+			confirmation.ExpectedSubjectRevision,
+		)
+		if !found {
+			return RuntimeAggregate{}, fmt.Errorf("%w: stale repair surface has no exact current prerequisite observation", common.ErrConflict)
+		}
+		stale := runtimecontract.RuntimePrerequisiteStale{
+			PrerequisiteID:   staleObservation.PrerequisiteID,
+			ObservationID:    staleObservation.ObservationID,
+			Domain:           plan.SubjectDomain,
+			OwnerModuleID:    confirmation.OwnerModuleID,
+			SubjectRef:       confirmation.SubjectRef,
+			ExpectedRevision: confirmation.ExpectedSubjectRevision,
+			ObservedRevision: confirmation.ObservedRevision,
+			Reason: firstNonEmpty(
+				strings.TrimSpace(confirmation.Reason),
+				"resource subject changed before repair-surface confirmation",
+			),
+		}
+		stale = stale.Normalized()
+		if err := stale.Validate(); err != nil {
+			return RuntimeAggregate{}, err
+		}
 		updatedFailure := failure.Clone()
 		// Stale owner scope is a freshness fact. Retire every current target
 		// pointer and let the normal SM-2 prerequisite compiler reacquire the
@@ -92,7 +156,35 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 		}
 		aggregate.Facts.Resources.TargetSelection = nil
 		aggregate.Facts.Resources.TargetSnapshots = nil
-		aggregate.Facts = preflightRuntimeFactsPreservingPending(aggregate.Facts, runtimeTargetGroundingRequirements(aggregate.Facts))
+		facts, prerequisiteIDs, observationIDs, invalidatedDependencies, err := invalidatePrerequisiteObservationsForStale(aggregate.Facts, stale)
+		if err != nil {
+			return RuntimeAggregate{}, err
+		}
+		recovery, consumed, err := consumeRecoveryBudget(facts.Recovery, runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh, facts.RecoveryPolicy)
+		if err != nil {
+			return RuntimeAggregate{}, err
+		}
+		facts.Recovery = recovery
+		staleCopy := stale
+		aggregate.PrerequisiteInvalidations = append(aggregate.PrerequisiteInvalidations, runtimecontract.RuntimePrerequisiteInvalidationRecord{
+			Signature:       runtimecontract.StableRuntimePrerequisiteStaleSignature(stale),
+			PrerequisiteIDs: prerequisiteIDs, ObservationIDs: observationIDs,
+			InvalidatedDependencies: invalidatedDependencies, Stale: &staleCopy,
+		})
+		if !consumed {
+			exhausted := runtimecontract.FailureFact{
+				Class:     runtimecontract.FailureClassPrerequisiteRefreshExhausted,
+				Code:      "prerequisite_refresh_exhausted",
+				Signature: runtimecontract.StableRuntimePrerequisiteStaleSignature(stale),
+				Message:   "prerequisite refresh budget exhausted: " + stale.Reason,
+			}
+			if err := replaceRuntimeFailureAuthority(&facts, exhausted, runtimeFailureAuthorityRetire, nil); err != nil {
+				return RuntimeAggregate{}, err
+			}
+		} else {
+			facts = preflightRuntimeFactsPreservingPending(facts, runtimeTargetGroundingRequirements(facts))
+		}
+		aggregate.Facts = facts
 	} else {
 		updatedFailure := failure.Clone()
 		updatedFailure.TargetRefs = append([]string(nil), confirmation.ConfirmedTargetRefs...)
@@ -115,6 +207,9 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
+	if record.RecordedAtStateRevision != aggregate.StateRevision {
+		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation record revision does not match its owner transition", common.ErrConflict)
+	}
 	aggregate.RepairSurfaceConfirmations = append(aggregate.RepairSurfaceConfirmations, record)
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err
@@ -123,6 +218,37 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+// currentRuntimeRepairSurfaceSubjectObservation resolves a deterministic
+// current prerequisite observation for the exact owner revision named by the
+// read-only plan. invalidatePrerequisiteObservationsForStale uses that one
+// identity to retire every current observation sharing the dependency.
+func currentRuntimeRepairSurfaceSubjectObservation(aggregate RuntimeAggregate, ownerModuleID string, subjectDomain runtimecontract.RuntimeResourceDomain, subjectRef, revision string) (runtimecontract.RuntimePrerequisiteObservation, bool) {
+	ownerModuleID = strings.TrimSpace(ownerModuleID)
+	subjectRef = strings.TrimSpace(subjectRef)
+	revision = strings.TrimSpace(revision)
+	var selected runtimecontract.RuntimePrerequisiteObservation
+	for _, rawObservation := range aggregate.Facts.Resources.PrerequisiteObservations {
+		observation := rawObservation.Normalized()
+		if observation.OwnerModuleID != ownerModuleID {
+			continue
+		}
+		matched := false
+		for _, rawDependency := range observation.Dependencies {
+			dependency := rawDependency.Normalized()
+			if dependency.Domain == subjectDomain && dependency.OwnerModuleID == ownerModuleID &&
+				dependency.SubjectRef == subjectRef && dependency.Revision == revision {
+				matched = true
+				break
+			}
+		}
+		if !matched || (selected.PrerequisiteID != "" && selected.PrerequisiteID <= observation.PrerequisiteID) {
+			continue
+		}
+		selected = observation
+	}
+	return selected, selected.PrerequisiteID != ""
 }
 
 func repairSurfaceConfirmationExists(aggregate RuntimeAggregate, confirmation runtimecontract.RuntimeRepairSurfaceConfirmation) bool {

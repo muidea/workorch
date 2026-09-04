@@ -89,6 +89,7 @@ func runtimeInternalFactPayloadClass(kind RuntimeInternalEventKind) (runtimeInte
 		RuntimeInternalEventDriveFailureObserved,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
 		RuntimeInternalEventRecoveryBudgetConsumed,
+		RuntimeInternalEventNonTerminalRecoveryScheduled,
 		RuntimeInternalEventOperationRecoveryClaimed,
 		RuntimeInternalEventOperationRecoveryCallReturned,
 		RuntimeInternalEventDriveLeaseScheduled,
@@ -242,10 +243,32 @@ func (event RuntimeInternalEvent) validateRecoveryAuthorization() error {
 	operationID := strings.TrimSpace(event.Delivery.RecoveryOperationID)
 	authorizationID := strings.TrimSpace(event.Delivery.RecoveryAuthorizationID)
 	claimID := strings.TrimSpace(event.Delivery.RecoveryClaimID)
+	terminalRequest := event.Delivery.TerminalDeliveryRecoveryRequest
+	nonterminalRequest := event.Delivery.NonTerminalRecoveryRequest
+	nonterminalCause := event.Delivery.NonTerminalRecoveryCause
+	if event.Kind == RuntimeInternalEventNonTerminalRecoveryScheduled {
+		if nonterminalRequest == nil || nonterminalRequest.WorkspaceID != event.Scope.WorkspaceID || nonterminalRequest.RunID != event.Scope.RunID ||
+			event.Delivery.ReconciliationRequest != nil || event.Delivery.FailureFact != nil || event.Delivery.DeliveryAcknowledgement != nil ||
+			event.Delivery.RecoveryBudgetKind != "" || terminalRequest != nil || operationID != "" || authorizationID != "" || claimID != "" ||
+			event.Delivery.DriveLease != nil || event.Delivery.RecoverableWait != nil || strings.TrimSpace(event.Delivery.RecoverableWaitID) != "" ||
+			strings.TrimSpace(event.Delivery.RecoverableWaitProbeResultHash) != "" || event.Delivery.LeaseGeneration != 0 ||
+			strings.TrimSpace(event.Delivery.LeaseNow) != "" || event.Delivery.TerminationKind != "" ||
+			strings.TrimSpace(event.Delivery.RequestedBy) != "" || strings.TrimSpace(event.Delivery.Reason) != "" ||
+			validateRuntimeNonTerminalRecoveryCause(nonterminalRequest.Normalized(), nonterminalCause) != nil {
+			return fmt.Errorf("%w: nonterminal recovery event requires only an exact typed persistence outcome", common.ErrInvalidArgument)
+		}
+		return nil
+	}
+	if nonterminalRequest != nil || nonterminalCause != nil {
+		return fmt.Errorf("%w: runtime internal event %q cannot carry nonterminal recovery identity", common.ErrInvalidArgument, event.Kind)
+	}
 	switch event.Kind {
 	case RuntimeInternalEventRecoveryBudgetConsumed:
+		if event.Delivery.RecoveryBudgetKind == runtimecontract.RuntimeRecoveryBudgetCASReload {
+			return fmt.Errorf("%w: CAS reload budget is owned by the atomic nonterminal recovery event", common.ErrInvalidArgument)
+		}
 		if event.Delivery.RecoveryBudgetKind == runtimecontract.RuntimeRecoveryBudgetOperationRecovery {
-			if operationID == "" || authorizationID != "" || claimID != "" || strings.TrimSpace(event.Delivery.LeaseNow) == "" {
+			if operationID == "" || authorizationID != "" || claimID != "" || strings.TrimSpace(event.Delivery.LeaseNow) == "" || terminalRequest != nil {
 				return fmt.Errorf("%w: operation recovery budget requires exact operation identity only", common.ErrInvalidArgument)
 			}
 			return nil
@@ -253,16 +276,23 @@ func (event RuntimeInternalEvent) validateRecoveryAuthorization() error {
 		if operationID != "" || authorizationID != "" || claimID != "" {
 			return fmt.Errorf("%w: non-operation recovery budget cannot carry operation authorization", common.ErrInvalidArgument)
 		}
+		if event.Delivery.RecoveryBudgetKind == runtimecontract.RuntimeRecoveryBudgetTerminalDelivery {
+			if terminalRequest == nil || terminalRequest.Validate() != nil {
+				return fmt.Errorf("%w: terminal delivery recovery budget requires exact request identity", common.ErrInvalidArgument)
+			}
+		} else if terminalRequest != nil {
+			return fmt.Errorf("%w: non-terminal recovery budget cannot carry terminal request identity", common.ErrInvalidArgument)
+		}
 	case RuntimeInternalEventOperationRecoveryClaimed:
-		if operationID == "" || authorizationID == "" || claimID != "" || event.Delivery.RecoveryBudgetKind != "" || strings.TrimSpace(event.Delivery.LeaseNow) == "" {
+		if operationID == "" || authorizationID == "" || claimID != "" || event.Delivery.RecoveryBudgetKind != "" || strings.TrimSpace(event.Delivery.LeaseNow) == "" || terminalRequest != nil {
 			return fmt.Errorf("%w: operation recovery claim requires operation, authorization and observed-at identity", common.ErrInvalidArgument)
 		}
 	case RuntimeInternalEventOperationRecoveryCallReturned:
-		if operationID == "" || authorizationID == "" || claimID == "" || event.Delivery.RecoveryBudgetKind != "" || event.Delivery.LeaseNow != "" {
+		if operationID == "" || authorizationID == "" || claimID == "" || event.Delivery.RecoveryBudgetKind != "" || event.Delivery.LeaseNow != "" || terminalRequest != nil {
 			return fmt.Errorf("%w: operation recovery return requires operation, authorization and claim identity", common.ErrInvalidArgument)
 		}
 	default:
-		if operationID != "" || authorizationID != "" || claimID != "" {
+		if operationID != "" || authorizationID != "" || claimID != "" || terminalRequest != nil {
 			return fmt.Errorf("%w: runtime internal event %q cannot carry operation recovery identity", common.ErrInvalidArgument, event.Kind)
 		}
 	}
@@ -359,6 +389,7 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventDriveFailureObserved,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
 		RuntimeInternalEventRecoveryBudgetConsumed,
+		RuntimeInternalEventNonTerminalRecoveryScheduled,
 		RuntimeInternalEventOperationRecoveryClaimed,
 		RuntimeInternalEventOperationRecoveryCallReturned,
 		RuntimeInternalEventDriveLeaseScheduled,

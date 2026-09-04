@@ -104,6 +104,42 @@ func TestGMMR1SM4OrchestratorStartFailsWithoutRecoveryInventory(t *testing.T) {
 	}
 }
 
+func TestRuntimeDriveGateSettlementPumpRearmsAfterFrameworkTickRejection(t *testing.T) {
+	background := &rejectRuntimeSettlementTicksBackground{rejection: errors.New("settlement tick rejected")}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	module := newTestBiz(newRuntimeTestOwner(), hub, background)
+	lifecycleCtx, cancel := context.WithCancel(context.Background())
+	if err := module.openRuntimeLifecycle(lifecycleCtx); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.startRuntimeDriveGateSettlementPump(module.runtimeLifecycleContext()); err != nil {
+		t.Fatal(err)
+	}
+	workspaceID := common.WorkspaceID("ws-settlement-wake-rejection")
+	runID := common.RunID("run-settlement-wake-rejection")
+	key := runtimeDriveKey(workspaceID, runID)
+	if !module.beginRuntimeDrive(key) {
+		t.Fatal("failed to acquire settlement wake gate")
+	}
+	gate, _ := module.currentRuntimeDriveGate(key)
+	if !module.retainRuntimeDriveGateSettlement(runtimeDriveGateSettlementRequest{
+		WorkspaceID: workspaceID, RunID: runID, DriveKey: key,
+		GateEpoch: gate.Epoch, GateToken: gate.Token, Source: "test_wake_rejection", ReleaseWhenNoLease: false,
+	}) {
+		t.Fatal("failed to register settlement wake")
+	}
+	deadline := time.Now().Add(3500 * time.Millisecond)
+	for background.callCount() < 2 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	module.rollbackRuntimeStart()
+	if calls := background.callCount(); calls < 2 {
+		t.Fatalf("one rejected framework tick permanently stopped settlement pump: calls=%d", calls)
+	}
+}
+
 func TestFailedStartRemovesAllIngressAndCancelsLifecycle(t *testing.T) {
 	deps := moduleContractDependencies()
 	background := &recordingBackgroundRoutine{}
@@ -326,18 +362,84 @@ func TestScheduleRuntimeDriveCoalescesDuplicateRunRequests(t *testing.T) {
 	}
 }
 
-func TestScheduleRuntimeDriveReleasesKeyWhenSchedulingFails(t *testing.T) {
+func TestScheduleRuntimeDriveRetainsGateAndDefersRejectedSubmissionToSettlementPump(t *testing.T) {
 	background := &recordingBackgroundRoutine{err: errors.New("scheduler unavailable")}
 	hub := magicevent.NewHub(8)
 	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	module := newTestBiz(newRuntimeTestOwner(), hub, background)
-	for attempt := 0; attempt < 2; attempt++ {
-		if err := module.scheduleRuntimeDrive(context.Background(), "ws-drive-retry", "run-drive-retry", "retry"); !errors.Is(err, background.err) {
-			t.Fatalf("attempt %d err = %v, want scheduler error", attempt, err)
-		}
+	aggregate := runtimeAggregate(t, 1)
+	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
 	}
-	if background.asyncFunctionCalls != 2 {
-		t.Fatalf("background calls = %d, want scheduling retried after key release", background.asyncFunctionCalls)
+	module := newTestBiz(owner, hub, background)
+	if err := module.scheduleRuntimeDrive(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "retry"); !errors.Is(err, background.err) || !runtimeDriveScheduleSettlementWasRetained(err) {
+		t.Fatalf("first scheduling err = %v, want retained scheduler error", err)
+	}
+	if err := module.scheduleRuntimeDrive(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "duplicate"); err != nil {
+		t.Fatalf("duplicate scheduling should coalesce behind retained gate: %v", err)
+	}
+	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	if background.asyncFunctionCalls != 1 || module.beginRuntimeDrive(key) {
+		t.Fatalf("rejected submission did not retain one gate: calls=%d", background.asyncFunctionCalls)
+	}
+	if epoch, token := module.runtimeDriveGateSettlementIdentity(key); epoch == 0 || token == 0 {
+		t.Fatal("rejected submission retained no lifecycle settlement wakeup")
+	}
+	background.err = nil
+	module.reconcilePendingRuntimeDriveGateSettlements()
+	if background.asyncFunctionCalls != 2 || repository.aggregate.DriveLease == nil ||
+		repository.aggregate.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled {
+		t.Fatalf("settlement pump did not persist and mount one successor: calls=%d lease=%+v", background.asyncFunctionCalls, repository.aggregate.DriveLease)
+	}
+}
+
+func TestRuntimeDriveGateSettlementPumpSurvivesOneShotSubmissionRejection(t *testing.T) {
+	aggregate := runtimeAggregate(t, 1)
+	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	owner := newRuntimeTestOwner()
+	if err := owner.ConfigureRuntimeRepository(repository); err != nil {
+		t.Fatal(err)
+	}
+	background := &rejectFirstRuntimeOneShotBackground{
+		rejection: errors.New("first one-shot submission rejected"), remaining: 1, acceptedSignal: make(chan struct{}, 1),
+	}
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	module := newTestBiz(owner, hub, background)
+	lifecycleCtx, cancel := context.WithCancel(context.Background())
+	if err := module.openRuntimeLifecycle(lifecycleCtx); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.startRuntimeDriveGateSettlementPump(module.runtimeLifecycleContext()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		module.rollbackRuntimeStart()
+	})
+
+	err := module.scheduleRuntimeDrive(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "one_shot_reject")
+	if !errors.Is(err, background.rejection) || !runtimeDriveScheduleSettlementWasRetained(err) {
+		t.Fatalf("schedule err = %v, want retained one-shot rejection", err)
+	}
+	select {
+	case <-background.acceptedSignal:
+	case <-time.After(3 * time.Second):
+		calls, _ := background.snapshot()
+		t.Fatalf("lifecycle settlement pump did not retry after one-shot rejection: calls=%d lease=%+v", calls, repository.aggregate.DriveLease)
+	}
+	calls, callback := background.snapshot()
+	key := runtimeDriveKey(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	module.driveMu.Lock()
+	registration, mounted := module.retryLeaseTimers[key]
+	gate, gateHeld := module.drivingRuns[key]
+	module.driveMu.Unlock()
+	if calls != 2 || callback == nil || repository.aggregate.DriveLease == nil ||
+		repository.aggregate.DriveLease.State != runtimecontract.RuntimeDriveLeaseScheduled || !mounted ||
+		registration.Generation != repository.aggregate.DriveLease.RecoveryGeneration || !gateHeld || gate.Token == 0 {
+		t.Fatalf("pump retry did not mount exact durable successor: calls=%d callback=%v lease=%+v registration=%+v mounted=%v gate=%+v/%v",
+			calls, callback != nil, repository.aggregate.DriveLease, registration, mounted, gate, gateHeld)
 	}
 }
 
@@ -359,7 +461,7 @@ func TestPersistedRuntimeRecoveryLeaseCoalescesResumeAndTimerChains(t *testing.T
 		t.Fatal("expected initial drive gate")
 	}
 	request := runtimeRecoveryLeaseRequest{
-		Reason: runtimecontract.RuntimeDriveLeaseReasonCASReload, FailureSignature: "cas/1/2", Delay: time.Hour, Source: "test",
+		Reason: runtimecontract.RuntimeDriveLeaseReasonPersistedPending, FailureSignature: "persisted-pending/test", Delay: time.Hour, Source: "test",
 	}
 	if !module.scheduleRuntimeRecoveryLease(ctx, initial.Facts.WorkspaceID, initial.Facts.RunID, request) {
 		t.Fatal("initial persisted recovery lease was not scheduled")
@@ -819,6 +921,60 @@ type recordingBackgroundRoutine struct {
 	executeAsync       bool
 }
 
+type rejectFirstRuntimeOneShotBackground struct {
+	recordingBackgroundRoutine
+	mu             sync.Mutex
+	rejection      error
+	remaining      int
+	oneShotCalls   int
+	acceptedSignal chan struct{}
+}
+
+type rejectRuntimeSettlementTicksBackground struct {
+	recordingBackgroundRoutine
+	mu        sync.Mutex
+	rejection error
+	calls     int
+}
+
+func (b *rejectRuntimeSettlementTicksBackground) AsyncTask(task magictask.Task) error {
+	if _, ok := task.(*runtimeDriveGateSettlementTask); ok {
+		b.mu.Lock()
+		b.calls++
+		b.mu.Unlock()
+		return b.rejection
+	}
+	return b.recordingBackgroundRoutine.AsyncTask(task)
+}
+
+func (b *rejectRuntimeSettlementTicksBackground) callCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls
+}
+
+func (b *rejectFirstRuntimeOneShotBackground) AsyncFunction(function func()) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.oneShotCalls++
+	if b.remaining > 0 {
+		b.remaining--
+		return b.rejection
+	}
+	b.lastAsyncFunction = function
+	select {
+	case b.acceptedSignal <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (b *rejectFirstRuntimeOneShotBackground) snapshot() (int, func()) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.oneShotCalls, b.lastAsyncFunction
+}
+
 // startupReadyRecordingBackgroundRoutine observes scheduling without running
 // the drive. It makes the startup handoff test independent from capability
 // owner setup and avoids a test-local second recovery path.
@@ -839,6 +995,13 @@ func (r *startupReadyRecordingBackgroundRoutine) AsyncFunction(function func()) 
 }
 
 func (r *recordingBackgroundRoutine) AsyncTask(task magictask.Task) error {
+	if _, ok := task.(*runtimeDriveGateSettlementTask); ok {
+		if r.err != nil {
+			return r.err
+		}
+		go task.Run()
+		return nil
+	}
 	return r.AsyncFunction(task.Run)
 }
 

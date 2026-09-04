@@ -12,6 +12,33 @@ import (
 
 const RuntimeValidationFailureObservationMaxCandidateTargetRefs = 8
 
+// RuntimeRepairSurfaceFileWorkspaceSubjectRef is the protocol-bound File
+// subject for current regular workspace targets. It is request authority
+// selected by Orchestrator, not a response field that File may choose.
+const RuntimeRepairSurfaceFileWorkspaceSubjectRef = "workspace_deliverable"
+
+// RuntimeRepairSurfaceConfirmationProtocolDescriptor is the resource identity
+// selected by one concrete confirmation protocol. Runtime core consumes this
+// metadata without branching on a capability owner or resource kind.
+type RuntimeRepairSurfaceConfirmationProtocolDescriptor struct {
+	Protocol       RuntimeRepairSurfaceConfirmationProtocol
+	ResourceDomain RuntimeResourceDomain
+	SubjectRef     string
+}
+
+func RuntimeRepairSurfaceConfirmationDescriptorForProtocol(protocol RuntimeRepairSurfaceConfirmationProtocol) (RuntimeRepairSurfaceConfirmationProtocolDescriptor, bool) {
+	switch RuntimeRepairSurfaceConfirmationProtocol(strings.TrimSpace(string(protocol))) {
+	case RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets:
+		return RuntimeRepairSurfaceConfirmationProtocolDescriptor{
+			Protocol:       RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets,
+			ResourceDomain: RuntimeResourceWorkspaceTree,
+			SubjectRef:     RuntimeRepairSurfaceFileWorkspaceSubjectRef,
+		}, true
+	default:
+		return RuntimeRepairSurfaceConfirmationProtocolDescriptor{}, false
+	}
+}
+
 // RuntimeValidationFailureObservation is the bounded fact emitted by a
 // validation capability.  CandidateTargetRefs are deliberately only a
 // candidate repair surface: they do not grant an operation or a Runtime
@@ -103,30 +130,41 @@ const (
 	RuntimeRepairSurfaceRejected  RuntimeRepairSurfaceDisposition = "rejected"
 )
 
-// RuntimeRepairSurfaceConfirmation is the resource owner's read-only reply. It
-// contains no action or retry instruction; Orchestrator alone maps a confirmed
-// fact to a new authority transaction.
+// RuntimeRepairSurfaceConfirmation is the resource owner's read-only reply.
+// RequestID, IssuedAtStateRevision and ExpectedSubjectRevision are echoed
+// opaque fences, not owner state. ExpectedSubjectRevision lets the resource
+// owner distinguish a genuinely absent target from a resource revision that
+// changed while the read-only query was in flight. The reply contains no
+// action or retry instruction; Orchestrator alone maps a confirmed fact to a
+// new authority transaction.
 type RuntimeRepairSurfaceConfirmation struct {
-	Observation         RuntimeValidationFailureObservation
-	OwnerModuleID       string
-	SubjectRef          string
-	Disposition         RuntimeRepairSurfaceDisposition
-	ConfirmedTargetRefs []string
-	ObservedRevision    string
-	Reason              string
+	RequestID               string
+	IssuedAtStateRevision   uint64
+	ExpectedSubjectRevision string
+	Observation             RuntimeValidationFailureObservation
+	OwnerModuleID           string
+	SubjectRef              string
+	Disposition             RuntimeRepairSurfaceDisposition
+	ConfirmedTargetRefs     []string
+	ObservedRevision        string
+	Reason                  string
 }
 
 // RuntimeRepairSurfaceConfirmationRecord is the Orchestrator-owned replay
 // fence for one resource-owner confirmation.  The complete normalized
 // confirmation is retained so a duplicate can be recognized without relying
 // on an event-id index or reconstructing the owner fact from mutable state.
-// IdentitySignature deliberately excludes response-specific disposition,
-// confirmed targets and reason so a conflicting response for the same owner
-// observation is detected; Signature is the exact response identity.
+// RecordedAtStateRevision binds the issued request window to the immediately
+// following Orchestrator-private CAS; later fresh-load invariants replay that
+// sequence together with any stale-refresh lineage.
+// IdentitySignature deliberately excludes every response-specific fact so a
+// conflicting response for the same issued request is detected; Signature is
+// the exact response identity.
 type RuntimeRepairSurfaceConfirmationRecord struct {
-	Confirmation      RuntimeRepairSurfaceConfirmation `json:"confirmation"`
-	Signature         string                           `json:"signature"`
-	IdentitySignature string                           `json:"identitySignature"`
+	Confirmation            RuntimeRepairSurfaceConfirmation `json:"confirmation"`
+	RecordedAtStateRevision uint64                           `json:"recordedAtStateRevision"`
+	Signature               string                           `json:"signature"`
+	IdentitySignature       string                           `json:"identitySignature"`
 }
 
 func (r RuntimeRepairSurfaceConfirmationRecord) Normalized() RuntimeRepairSurfaceConfirmationRecord {
@@ -140,6 +178,10 @@ func (r RuntimeRepairSurfaceConfirmationRecord) Validate() error {
 	r = r.Normalized()
 	if err := r.Confirmation.Validate(); err != nil {
 		return fmt.Errorf("repair surface confirmation record: %w", err)
+	}
+	if r.Confirmation.IssuedAtStateRevision == ^uint64(0) ||
+		r.RecordedAtStateRevision != r.Confirmation.IssuedAtStateRevision+1 {
+		return fmt.Errorf("repair surface confirmation record must bind the immediately following Runtime state revision")
 	}
 	if r.Signature == "" || r.IdentitySignature == "" {
 		return fmt.Errorf("repair surface confirmation record requires exact and identity signatures")
@@ -177,7 +219,7 @@ func ValidateRuntimeRepairSurfaceConfirmationRecords(values []RuntimeRepairSurfa
 			return fmt.Errorf("runtime repair surface confirmations duplicate exact response %q", record.Signature)
 		}
 		if _, duplicate := identity[record.IdentitySignature]; duplicate {
-			return fmt.Errorf("runtime repair surface confirmations conflict for owner observation %q", record.IdentitySignature)
+			return fmt.Errorf("runtime repair surface confirmations conflict for issued request %q", record.IdentitySignature)
 		}
 		sequenceKey := runtimeRepairSurfaceObservationSequenceKey(record.Confirmation.Observation)
 		if subject, found := sequenceSubjects[sequenceKey]; found && subject != record.Confirmation.SubjectRef {
@@ -212,21 +254,25 @@ func StableRuntimeRepairSurfaceConfirmationHash(value RuntimeRepairSurfaceConfir
 	return hex.EncodeToString(digest[:])
 }
 
-// StableRuntimeRepairSurfaceConfirmationIdentityHash identifies the owner
-// observation/revision and response context while intentionally omitting the
-// response-specific disposition, confirmed target list and reason. A
-// different response for the same observation is therefore a conflict, while
-// a new owner revision is a new observation that can be processed normally.
+// StableRuntimeRepairSurfaceConfirmationIdentityHash identifies one exact
+// Orchestrator-issued owner query while intentionally omitting every
+// response-specific fact, including the owner's observed revision. A
+// different response for the same request is therefore a conflict; a reopened
+// confirmation window receives a new RequestID.
 func StableRuntimeRepairSurfaceConfirmationIdentityHash(value RuntimeRepairSurfaceConfirmation) string {
 	value = value.Normalized()
 	identity := struct {
-		Observation      RuntimeValidationFailureObservation `json:"observation"`
-		OwnerModuleID    string                              `json:"ownerModuleId"`
-		SubjectRef       string                              `json:"subjectRef"`
-		ObservedRevision string                              `json:"observedRevision"`
+		RequestID               string                              `json:"requestId"`
+		IssuedAtRevision        uint64                              `json:"issuedAtStateRevision"`
+		ExpectedSubjectRevision string                              `json:"expectedSubjectRevision"`
+		Observation             RuntimeValidationFailureObservation `json:"observation"`
+		OwnerModuleID           string                              `json:"ownerModuleId"`
+		SubjectRef              string                              `json:"subjectRef"`
 	}{
-		Observation: value.Observation, OwnerModuleID: value.OwnerModuleID,
-		SubjectRef: value.SubjectRef, ObservedRevision: value.ObservedRevision,
+		RequestID: value.RequestID, IssuedAtRevision: value.IssuedAtStateRevision,
+		ExpectedSubjectRevision: value.ExpectedSubjectRevision,
+		Observation:             value.Observation, OwnerModuleID: value.OwnerModuleID,
+		SubjectRef: value.SubjectRef,
 	}
 	encoded, _ := json.Marshal(identity)
 	digest := sha256.Sum256(encoded)
@@ -238,8 +284,12 @@ func NewRuntimeRepairSurfaceConfirmationRecord(value RuntimeRepairSurfaceConfirm
 	if err := value.Validate(); err != nil {
 		return RuntimeRepairSurfaceConfirmationRecord{}, err
 	}
+	if value.IssuedAtStateRevision == ^uint64(0) {
+		return RuntimeRepairSurfaceConfirmationRecord{}, fmt.Errorf("repair surface confirmation state revision exhausted")
+	}
 	return RuntimeRepairSurfaceConfirmationRecord{
-		Confirmation: value, Signature: StableRuntimeRepairSurfaceConfirmationHash(value),
+		Confirmation: value, RecordedAtStateRevision: value.IssuedAtStateRevision + 1,
+		Signature:         StableRuntimeRepairSurfaceConfirmationHash(value),
 		IdentitySignature: StableRuntimeRepairSurfaceConfirmationIdentityHash(value),
 	}, nil
 }
@@ -257,6 +307,8 @@ func SameRuntimeRepairSurfaceConfirmationIdentity(left, right RuntimeRepairSurfa
 }
 
 func (c RuntimeRepairSurfaceConfirmation) Normalized() RuntimeRepairSurfaceConfirmation {
+	c.RequestID = strings.TrimSpace(c.RequestID)
+	c.ExpectedSubjectRevision = strings.TrimSpace(c.ExpectedSubjectRevision)
 	c.Observation = c.Observation.Normalized()
 	c.OwnerModuleID = strings.TrimSpace(c.OwnerModuleID)
 	c.SubjectRef = strings.TrimSpace(c.SubjectRef)
@@ -268,20 +320,34 @@ func (c RuntimeRepairSurfaceConfirmation) Normalized() RuntimeRepairSurfaceConfi
 }
 
 func (c RuntimeRepairSurfaceConfirmation) Validate() error {
+	rawRequestID := c.RequestID
 	rawOwnerModuleID := c.OwnerModuleID
 	c = c.Normalized()
 	if err := c.Observation.Validate(); err != nil {
 		return err
 	}
-	if c.OwnerModuleID == "" || rawOwnerModuleID != c.OwnerModuleID || c.SubjectRef == "" || c.Disposition == "" || c.ObservedRevision == "" {
-		return fmt.Errorf("repair surface confirmation requires canonical owner, subject, disposition and revision")
+	if c.RequestID == "" || rawRequestID != c.RequestID || c.IssuedAtStateRevision == 0 || c.ExpectedSubjectRevision == "" || c.OwnerModuleID == "" || rawOwnerModuleID != c.OwnerModuleID || c.SubjectRef == "" || c.Disposition == "" || c.ObservedRevision == "" {
+		return fmt.Errorf("repair surface confirmation requires request fence, expected resource revision, canonical owner, subject, disposition and observed revision")
 	}
 	switch c.Disposition {
 	case RuntimeRepairSurfaceConfirmed:
+		if c.ObservedRevision != c.ExpectedSubjectRevision {
+			return fmt.Errorf("confirmed repair surface must observe the expected subject revision")
+		}
 		if len(c.ConfirmedTargetRefs) == 0 || !sameStrings(c.ConfirmedTargetRefs, c.Observation.CandidateTargetRefs) {
 			return fmt.Errorf("confirmed repair surface must exactly bind validation candidates")
 		}
-	case RuntimeRepairSurfaceStale, RuntimeRepairSurfaceRejected:
+	case RuntimeRepairSurfaceRejected:
+		if c.ObservedRevision != c.ExpectedSubjectRevision {
+			return fmt.Errorf("rejected repair surface must observe the expected subject revision")
+		}
+		if len(c.ConfirmedTargetRefs) != 0 {
+			return fmt.Errorf("non-confirmed repair surface cannot contain targets")
+		}
+	case RuntimeRepairSurfaceStale:
+		if c.ObservedRevision == c.ExpectedSubjectRevision {
+			return fmt.Errorf("stale repair surface must observe a different subject revision")
+		}
 		if len(c.ConfirmedTargetRefs) != 0 {
 			return fmt.Errorf("non-confirmed repair surface cannot contain targets")
 		}

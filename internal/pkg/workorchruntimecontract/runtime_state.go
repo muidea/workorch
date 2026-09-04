@@ -496,6 +496,10 @@ func (r RuntimeStateRecord) Validate() error {
 			return fmt.Errorf("runtime repair surface confirmation scope mismatch")
 		}
 	}
+	recovery := r.Facts.Recovery.Normalized()
+	if err := ValidateRuntimeNonTerminalRecoveryLinearization(recovery, r.StateRevision, r.DriveLease); err != nil {
+		return fmt.Errorf("runtime state recovery: %w", err)
+	}
 	if r.DriveLease != nil {
 		if err := r.DriveLease.Validate(); err != nil {
 			return fmt.Errorf("runtime state drive lease: %w", err)
@@ -503,6 +507,66 @@ func (r RuntimeStateRecord) Validate() error {
 		if r.DriveLease.WorkspaceID != r.Facts.WorkspaceID || r.DriveLease.RunID != r.Facts.RunID {
 			return fmt.Errorf("runtime state drive lease scope mismatch")
 		}
+		canonicalTerminalDelivery := r.DriveLease.Reason == RuntimeDriveLeaseReasonDeliveryRetry && r.DriveLease.FailureSignature == "terminal-delivery"
+		if canonicalTerminalDelivery {
+			authorization := r.Facts.Recovery.Normalized().TerminalDeliveryRequest
+			outcome, terminal, outcomeErr := DeriveRuntimeTerminalOutcome(r.Decision, r.Termination)
+			if outcomeErr != nil || !terminal {
+				return fmt.Errorf("runtime state terminal-delivery lease has no sealed terminal")
+			}
+			deliveryID := StableTerminalDeliveryID(r.Facts.WorkspaceID, r.Facts.RunID, r.Decision.AuthoritySnapshot.ID, outcome)
+			creatorGeneration := r.DriveLease.RecoveryGeneration - 1
+			creatorRequestID := StableRuntimeTerminalDeliveryRecoveryRequestID(deliveryID, creatorGeneration)
+			phaseMatches := authorization.Validate() == nil && authorization.TerminalDeliveryID == deliveryID &&
+				((authorization.FailedLeaseGeneration == creatorGeneration && authorization.RequestID == creatorRequestID) ||
+					(r.DriveLease.State == RuntimeDriveLeaseRunning && authorization.FailedLeaseGeneration == r.DriveLease.RecoveryGeneration &&
+						authorization.RequestID == StableRuntimeTerminalDeliveryRecoveryRequestID(deliveryID, r.DriveLease.RecoveryGeneration)))
+			if r.DriveLease.RecoveryRequestID != creatorRequestID || !phaseMatches {
+				return fmt.Errorf("runtime state terminal-delivery lease does not match persisted recovery request")
+			}
+		} else if RuntimeDriveLeaseBindsNonTerminalRecovery(*r.DriveLease) {
+			if r.Termination != nil || isTerminalRuntimeDecision(r.Decision) {
+				return fmt.Errorf("runtime state terminal cannot retain nonterminal recovery authority")
+			}
+			if err := ValidateRuntimeNonTerminalRecoveryLeaseBinding(r.Facts.Recovery, *r.DriveLease); err != nil {
+				return fmt.Errorf("runtime state drive lease: %w", err)
+			}
+		} else if r.DriveLease.RecoveryRequestID != "" {
+			return fmt.Errorf("runtime state non-terminal lease carries terminal recovery request")
+		}
+	}
+	if recovery.TerminalDeliveryIntervention.Validate() == nil && r.DriveLease != nil {
+		return fmt.Errorf("runtime state terminal delivery intervention cannot retain automatic drive authority")
+	}
+	retiredLease := recovery.RetiredTerminalDeliveryLease
+	retiredLeasePresent := RuntimeDriveLeasePresent(retiredLease)
+	if retiredLeasePresent {
+		requestBoundNonterminal := RuntimeDriveLeaseBindsNonTerminalRecovery(retiredLease) &&
+			ValidateRuntimeNonTerminalRecoveryLeaseBinding(recovery, retiredLease) == nil
+		if r.Termination == nil || retiredLease.Validate() != nil || retiredLease.State != RuntimeDriveLeaseRunning ||
+			retiredLease.WorkspaceID != r.Facts.WorkspaceID || retiredLease.RunID != r.Facts.RunID ||
+			retiredLease.AggregateRevision >= r.Termination.Revision || (retiredLease.RecoveryRequestID != "" && !requestBoundNonterminal) ||
+			(retiredLease.Reason == RuntimeDriveLeaseReasonDeliveryRetry && retiredLease.FailureSignature == "terminal-delivery") {
+			return fmt.Errorf("runtime state retired terminal-delivery lease does not match administrative termination")
+		}
+		if recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != "" {
+			outcome, terminal, err := DeriveRuntimeTerminalOutcome(r.Decision, r.Termination)
+			if err != nil || !terminal {
+				return fmt.Errorf("runtime state retired terminal-delivery lease has no terminal authority")
+			}
+			deliveryID := StableTerminalDeliveryID(r.Facts.WorkspaceID, r.Facts.RunID, r.Decision.AuthoritySnapshot.ID, outcome)
+			expectedRequestID := StableRuntimeTerminalDeliveryRecoveryRequestID(deliveryID, retiredLease.RecoveryGeneration)
+			if recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != expectedRequestID {
+				return fmt.Errorf("runtime state retired terminal-delivery lease handoff request mismatch")
+			}
+		}
+		if r.DriveLease != nil && r.DriveLease.Reason == RuntimeDriveLeaseReasonDeliveryRetry && r.DriveLease.FailureSignature == "terminal-delivery" &&
+			r.DriveLease.RecoveryGeneration == retiredLease.RecoveryGeneration+1 &&
+			recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != r.DriveLease.RecoveryRequestID {
+			return fmt.Errorf("runtime state retired terminal-delivery successor is not bound to its handoff request")
+		}
+	} else if recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != "" {
+		return fmt.Errorf("runtime state retired terminal-delivery handoff request has no exact lease")
 	}
 	for _, rawBinding := range r.OperationGovernanceBindings {
 		binding := rawBinding.Normalized()
@@ -648,14 +712,23 @@ func ValidateRuntimeStateTerminalDeliveryLedger(
 		return fmt.Errorf("runtime state cannot carry both convergence and administrative terminals")
 	}
 	terminal := convergenceTerminal || termination != nil
+	normalizedRecovery := recovery.Normalized()
+	retiredLease := normalizedRecovery.RetiredTerminalDeliveryLease
+	retiredLeasePresent := RuntimeDriveLeasePresent(retiredLease)
 	if !terminal {
-		if recovery.Normalized().TerminalDeliveryAttempts != 0 {
+		if normalizedRecovery.TerminalDeliveryAttempts != 0 {
 			return fmt.Errorf("non-terminal runtime state cannot consume terminal delivery budget")
+		}
+		if retiredLeasePresent || normalizedRecovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != "" {
+			return fmt.Errorf("non-terminal runtime state cannot retain an administrative terminal lease handoff")
 		}
 		if len(acknowledgements) != 0 {
 			return fmt.Errorf("non-terminal runtime state cannot retain terminal delivery acknowledgements")
 		}
 		return nil
+	}
+	if convergenceTerminal && (retiredLeasePresent || normalizedRecovery.RetiredTerminalDeliveryLeaseRecoveryRequestID != "") {
+		return fmt.Errorf("convergence terminal cannot retain an administrative terminal lease handoff")
 	}
 	outcome, terminalOutcome, err := DeriveRuntimeTerminalOutcome(decision, termination)
 	if err != nil || !terminalOutcome {
@@ -667,6 +740,24 @@ func ValidateRuntimeStateTerminalDeliveryLedger(
 	workspaceID := decision.AuthoritySnapshot.WorkspaceID
 	runID := decision.AuthoritySnapshot.RunID
 	expectedDeliveryID := StableTerminalDeliveryID(workspaceID, runID, decision.AuthoritySnapshot.ID, outcome)
+	recoveryRequest := normalizedRecovery.TerminalDeliveryRequest
+	if recoveryRequest.RequestID != "" {
+		if err := recoveryRequest.Validate(); err != nil {
+			return fmt.Errorf("runtime state terminal delivery recovery request: %w", err)
+		}
+		if recoveryRequest.TerminalDeliveryID != expectedDeliveryID {
+			return fmt.Errorf("runtime state terminal delivery recovery request does not match sealed terminal")
+		}
+	}
+	intervention := normalizedRecovery.TerminalDeliveryIntervention
+	if intervention.RequestID != "" {
+		if err := intervention.Validate(); err != nil {
+			return fmt.Errorf("runtime state terminal delivery intervention: %w", err)
+		}
+		if intervention.TerminalDeliveryID != expectedDeliveryID {
+			return fmt.Errorf("runtime state terminal delivery intervention does not match sealed terminal")
+		}
+	}
 	expectedResultID := RuntimeTerminalResultID(workspaceID, runID)
 	expectedOwners := []RuntimeDeliveryOwner{RuntimeDeliveryOwnerResult, RuntimeDeliveryOwnerWorkspace, RuntimeDeliveryOwnerRun}
 	if len(acknowledgements) > len(expectedOwners) {

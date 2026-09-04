@@ -19,6 +19,10 @@ import (
 // attempt. This generation fence prevents a stale worker (or an unrelated
 // duplicate scheduler) from replacing a newer lease while still allowing the
 // same retry identity to advance running -> scheduled without a release gap.
+// Administrative termination is the one transition that owner-locally
+// retires a running lease before that worker returns. If its stale in-flight
+// owner delivery then fails, the same scheduling CAS may create only the
+// canonical terminal-delivery successor from the already-persisted terminal.
 func (c *driveDeliveryComponent) scheduleDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, requested runtimecontract.RuntimeDriveLease, expectedRunningGeneration uint64) (RuntimeAggregate, runtimecontract.RuntimeDriveLease, bool, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, common.ErrInvalidArgument
@@ -30,6 +34,38 @@ func (c *driveDeliveryComponent) scheduleDriveLease(ctx context.Context, workspa
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, err
+	}
+	terminalDelivery := requested.Reason == runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry && requested.FailureSignature == "terminal-delivery"
+	if terminalDelivery && TerminalDeliveryFullyAcknowledged(aggregate) {
+		// Completion retires only an exact running caller. It neither needs nor
+		// mints another recovery authorization, and a stale generation cannot clear
+		// a scheduled/newer successor.
+		if aggregate.DriveLease == nil {
+			return aggregate, runtimecontract.RuntimeDriveLease{}, false, nil
+		}
+		if aggregate.DriveLease.State == runtimecontract.RuntimeDriveLeaseRunning &&
+			aggregate.DriveLease.RecoveryGeneration == expectedRunningGeneration {
+			expectedRevision := aggregate.StateRevision
+			aggregate.DriveLease = nil
+			aggregate.StateRevision++
+			if err := aggregate.Validate(); err != nil {
+				return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, fmt.Errorf("retire fully acknowledged runtime drive lease: %w", err)
+			}
+			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+				return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, err
+			}
+			return aggregate, runtimecontract.RuntimeDriveLease{}, true, nil
+		}
+		return aggregate, aggregate.DriveLease.Clone(), false, nil
+	}
+	if requested.Reason == runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry && requested.FailureSignature == "terminal-delivery" {
+		authorization := aggregate.Facts.Recovery.Normalized().TerminalDeliveryRequest
+		if requested.RecoveryRequestID == "" || authorization.RequestID != requested.RecoveryRequestID ||
+			authorization.FailedLeaseGeneration != expectedRunningGeneration {
+			return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, fmt.Errorf("%w: terminal delivery lease requires exact persisted recovery request", common.ErrConflict)
+		}
+	} else if requested.RecoveryRequestID != "" {
+		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, fmt.Errorf("%w: request-bound nonterminal lease requires its atomic recovery event", common.ErrConflict)
 	}
 	if current := aggregate.DriveLease; current != nil {
 		if current.State == runtimecontract.RuntimeDriveLeaseRunning {
@@ -51,13 +87,23 @@ func (c *driveDeliveryComponent) scheduleDriveLease(ctx context.Context, workspa
 				return aggregate, current.Clone(), false, nil
 			}
 		}
-	} else if expectedRunningGeneration != 0 {
+	}
+	retiredRunningGeneration := aggregate.DriveLease == nil && expectedRunningGeneration != 0 &&
+		retiredRunningLeaseMayScheduleTerminalDeliverySuccessor(aggregate, requested, expectedRunningGeneration)
+	authorizedMissingTerminalGeneration := aggregate.DriveLease == nil && expectedRunningGeneration != 0 &&
+		missingTerminalDeliveryLeaseMayBeMaterialized(aggregate, requested, expectedRunningGeneration)
+	if aggregate.DriveLease == nil && expectedRunningGeneration != 0 && !retiredRunningGeneration && !authorizedMissingTerminalGeneration {
 		return aggregate, runtimecontract.RuntimeDriveLease{}, false, nil
 	}
 	expectedRevision := aggregate.StateRevision
 	generation := uint64(1)
 	if aggregate.DriveLease != nil {
 		generation = aggregate.DriveLease.RecoveryGeneration + 1
+	} else if retiredRunningGeneration || authorizedMissingTerminalGeneration {
+		generation = expectedRunningGeneration + 1
+		if generation == 0 {
+			return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, fmt.Errorf("%w: Runtime drive lease generation exhausted", common.ErrConflict)
+		}
 	}
 	aggregate.StateRevision++
 	lease := requested
@@ -65,6 +111,9 @@ func (c *driveDeliveryComponent) scheduleDriveLease(ctx context.Context, workspa
 	lease.RecoveryGeneration = generation
 	lease.State = runtimecontract.RuntimeDriveLeaseScheduled
 	aggregate.DriveLease = &lease
+	if retiredRunningGeneration {
+		aggregate.Facts.Recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID = requested.RecoveryRequestID
+	}
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, fmt.Errorf("schedule runtime drive lease: %w", err)
 	}
@@ -72,6 +121,57 @@ func (c *driveDeliveryComponent) scheduleDriveLease(ctx context.Context, workspa
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, err
 	}
 	return aggregate, lease.Clone(), true, nil
+}
+
+// missingTerminalDeliveryLeaseMayBeMaterialized covers the crash/stale-claim
+// cut after a scheduled terminal generation G=F+1 was cleared because another
+// owner acknowledgement advanced the aggregate revision. The current stable
+// request R(F), pending delivery and absence of an intervention are sufficient
+// durable proof to recreate that same generation; no new budget is consumed.
+// The administrative retired-running marker remains a separate authorization
+// for creating G+1 after termination retired a running G.
+func missingTerminalDeliveryLeaseMayBeMaterialized(aggregate RuntimeAggregate, requested runtimecontract.RuntimeDriveLease, expectedFailedGeneration uint64) bool {
+	if aggregate.DriveLease != nil || expectedFailedGeneration == 0 || TerminalDeliveryFullyAcknowledged(aggregate) ||
+		requested.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry || requested.FailureSignature != "terminal-delivery" ||
+		aggregate.Facts.Recovery.Normalized().TerminalDeliveryIntervention.Validate() == nil {
+		return false
+	}
+	recovery := aggregate.Facts.Recovery.Normalized()
+	authorization := recovery.TerminalDeliveryRequest
+	if authorization.Validate() != nil || authorization.FailedLeaseGeneration != expectedFailedGeneration ||
+		authorization.RequestID != requested.RecoveryRequestID {
+		return false
+	}
+	retired := recovery.RetiredTerminalDeliveryLease
+	if !runtimecontract.RuntimeDriveLeasePresent(retired) {
+		return true
+	}
+	if retired.Validate() != nil || retired.State != runtimecontract.RuntimeDriveLeaseRunning ||
+		expectedFailedGeneration < retired.RecoveryGeneration {
+		return false
+	}
+	// The retired authority is an exact one-time handoff only for its first
+	// successor. Once that marker was consumed, it becomes historical lineage:
+	// a later durable request R(G) may rematerialize G+1 after a crash or a
+	// concurrent acknowledgement cleared the lease, without pretending the old
+	// retired generation itself failed again.
+	firstRequestID := runtimecontract.StableRuntimeTerminalDeliveryRecoveryRequestID(authorization.TerminalDeliveryID, retired.RecoveryGeneration)
+	return recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID == firstRequestID
+}
+
+// retiredRunningLeaseMayScheduleTerminalDeliverySuccessor is deliberately
+// narrower than general terminal detection. Only administrative termination
+// clears a concurrently running generation as part of its owner-private CAS;
+// the returning worker may therefore replace that retired authority solely
+// with the bounded terminal-delivery identity. All other missing-generation
+// requests remain stale no-ops.
+func retiredRunningLeaseMayScheduleTerminalDeliverySuccessor(aggregate RuntimeAggregate, requested runtimecontract.RuntimeDriveLease, expectedRunningGeneration uint64) bool {
+	retired := aggregate.Facts.Recovery.Normalized().RetiredTerminalDeliveryLease
+	return aggregate.DriveLease == nil && AdministrativeTerminationAwaitsTerminalDelivery(aggregate) && expectedRunningGeneration != 0 &&
+		requested.Reason == runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry &&
+		requested.FailureSignature == "terminal-delivery" && retired.Validate() == nil &&
+		retired.State == runtimecontract.RuntimeDriveLeaseRunning && retired.RecoveryGeneration == expectedRunningGeneration &&
+		aggregate.Facts.Recovery.Normalized().RetiredTerminalDeliveryLeaseRecoveryRequestID == ""
 }
 
 // claimDriveLease consumes a due persisted schedule. A timer never creates a
@@ -142,8 +242,9 @@ func (c *driveDeliveryComponent) claimDriveLease(ctx context.Context, workspaceI
 	return aggregate, claimed.Clone(), true, nil
 }
 
-// releaseDriveLease clears the running lease after its drive returned. It is
-// generation-fenced, so an old worker cannot remove a newer retry schedule.
+// releaseDriveLease clears the exact scheduled or running lease after its
+// authority is no longer actionable. It is generation-fenced, so an old
+// worker or timer cannot remove a newer retry schedule.
 func (c *driveDeliveryComponent) releaseDriveLease(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, generation uint64) (RuntimeAggregate, bool, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || generation == 0 {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
@@ -152,7 +253,7 @@ func (c *driveDeliveryComponent) releaseDriveLease(ctx context.Context, workspac
 	if err != nil {
 		return RuntimeAggregate{}, false, err
 	}
-	if aggregate.DriveLease == nil || aggregate.DriveLease.State != runtimecontract.RuntimeDriveLeaseRunning || aggregate.DriveLease.RecoveryGeneration != generation {
+	if aggregate.DriveLease == nil || aggregate.DriveLease.RecoveryGeneration != generation {
 		return aggregate, false, nil
 	}
 	expectedRevision := aggregate.StateRevision

@@ -4388,6 +4388,491 @@ for regression in \
 	fi
 done
 
+# The Orchestrator owns one repair-confirmation phase classifier. Drive and its
+# protocol adapter must consume the same current-aggregate plan; mutable target
+# absence is not an independent progress state and cannot reopen a terminal VFO.
+runtime_repair_confirmation_plan="$(sed -n '/^func CurrentRuntimeRepairSurfaceConfirmationPlan(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/repair_surface_confirmation_plan.go)"
+for marker in \
+	'aggregate.Termination != nil' \
+	'aggregate.ActiveDispatch != nil' \
+	'runtimeValidationFailureObservationIsTargetless' \
+	'runtimeLatestRepairSurfaceConfirmation' \
+	'RuntimeRepairSurfaceConfirmed, runtimecontract.RuntimeRepairSurfaceRejected' \
+	'stableRuntimeRepairSurfaceConfirmationRequestID' \
+	'runtimecontract.RuntimeRepairSurfaceConfirmationDescriptorForProtocol' \
+	'currentRuntimeRepairSurfaceSubjectRevision' \
+	'IssuedAtStateRevision: aggregate.StateRevision' \
+	'SubjectRef: descriptor.SubjectRef' \
+	'ExpectedSubjectRevision: expectedSubjectRevision' \
+	'currentRuntimeRepairSurfaceConfirmationContract'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_repair_confirmation_plan"; then
+		echo "boundary contract violation: canonical repair-confirmation plan lost $marker" >&2
+		exit 1
+	fi
+done
+runtime_repair_confirmation_subject_revision="$(sed -n '/^func currentRuntimeRepairSurfaceSubjectRevision(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/repair_surface_confirmation_plan.go)"
+for forbidden in \
+	'RuntimeModuleFile' \
+	'PrerequisiteKindManifest' \
+	'Facts.Resources.Manifest'; do
+	if grep -q -F -- "$forbidden" <<<"$runtime_repair_confirmation_subject_revision"; then
+		echo "boundary contract violation: repair-confirmation plan hard-coded a concrete owner/resource projection ($forbidden)" >&2
+		exit 1
+	fi
+done
+runtime_repair_confirmation_request_id="$(sed -n '/^func stableRuntimeRepairSurfaceConfirmationRequestID(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/repair_surface_confirmation_plan.go)"
+runtime_repair_confirmation_request_id_compact="$(tr -s '[:space:]' ' ' <<<"$runtime_repair_confirmation_request_id")"
+for marker in \
+	'Observation runtimecontract.RuntimeValidationFailureObservation' \
+	'OwnerModuleID string' \
+	'Protocol runtimecontract.RuntimeRepairSurfaceConfirmationProtocol' \
+	'SubjectRef string' \
+	'ExpectedSubjectRevision string' \
+	'StateRevision uint64' \
+	'RefreshLineage string' \
+	'{observation.Normalized(), ownerModuleID, protocol, subjectRef, expectedSubjectRevision, stateRevision, refreshLineage}'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_repair_confirmation_request_id_compact"; then
+		echo "boundary contract violation: repair-confirmation RequestID lost exact plan input ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_repair_confirmation_adapter="$(sed -n '/^func (m \*Biz) confirmRuntimeRepairSurface(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_prerequisite_drive.go)"
+for marker in \
+	'm.runtimeController.Load' \
+	'CurrentRuntimeRepairSurfaceConfirmationPlan(current)' \
+	'currentPlan.SubjectRef != planned.SubjectRef' \
+	'currentPlan.SubjectDomain != planned.SubjectDomain' \
+	'currentPlan.ExpectedSubjectRevision != planned.ExpectedSubjectRevision' \
+	'current = observed.Aggregate' \
+	'RequestID: currentPlan.RequestID' \
+	'IssuedAtStateRevision: currentPlan.IssuedAtStateRevision' \
+	'ExpectedSubjectRevision: currentPlan.ExpectedSubjectRevision' \
+	'Observation: currentPlan.Observation' \
+	'rebaseRuntimeRepairSurfaceHandoffError'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_repair_confirmation_adapter"; then
+		echo "boundary contract violation: repair-confirmation adapter no longer reloads and re-plans current authority ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_file_confirmation_adapter="$(sed -n '/^func ConfirmFileRuntimeRepairSurface(/,/^}/p' internal/modules/kernel/orchestrator/biz/prerequisite_event_adapter.go)"
+for marker in \
+	'strings.TrimSpace(command.RequestID)' \
+	'command.IssuedAtStateRevision == 0' \
+	'strings.TrimSpace(command.ExpectedSubjectRevision)' \
+	'response.Confirmation.RequestID != command.RequestID' \
+	'response.Confirmation.IssuedAtStateRevision != command.IssuedAtStateRevision' \
+	'response.Confirmation.ExpectedSubjectRevision != command.ExpectedSubjectRevision' \
+	'response.Confirmation.SubjectRef != runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_file_confirmation_adapter"; then
+		echo "boundary contract violation: concrete repair-confirmation adapter lost request-fence validation ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_repair_confirmation_writer="$(sed -n '/^func (c \*authorityComponent) recordRepairSurfaceConfirmation(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/repair_surface_confirmation.go)"
+for marker in \
+	'repairSurfaceConfirmationExists(aggregate, confirmation)' \
+	'CurrentRuntimeRepairSurfaceConfirmationPlan(aggregate)' \
+	'confirmation.RequestID != plan.RequestID' \
+	'confirmation.IssuedAtStateRevision != plan.IssuedAtStateRevision' \
+	'confirmation.ExpectedSubjectRevision != plan.ExpectedSubjectRevision' \
+	'confirmation.OwnerModuleID != plan.OwnerModuleID' \
+	'confirmation.SubjectRef != plan.SubjectRef' \
+	'record.RecordedAtStateRevision != aggregate.StateRevision'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_repair_confirmation_writer"; then
+		echo "boundary contract violation: repair-confirmation writer bypassed current-plan admission ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_file_confirmation_owner="$(sed -n '/^func (m \*Biz) handleConfirmRuntimeRepairSurface(/,/^}/p' internal/modules/blocks/file/biz/owner.go)"
+for marker in \
+	'RequestID: command.RequestID, IssuedAtStateRevision: command.IssuedAtStateRevision, ExpectedSubjectRevision: command.ExpectedSubjectRevision' \
+	'manifest.Revision != command.ExpectedSubjectRevision' \
+	'confirmation.Disposition = runtimecontract.RuntimeRepairSurfaceStale' \
+	'SubjectRef: runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_file_confirmation_owner"; then
+		echo "boundary contract violation: File repair confirmation lost opaque fence/protocol subject echo ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_repair_confirmation_record_constructor="$(sed -n '/^func NewRuntimeRepairSurfaceConfirmationRecord(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_repair_surface.go)"
+if ! grep -q -F -- 'RecordedAtStateRevision: value.IssuedAtStateRevision + 1' <<<"$runtime_repair_confirmation_record_constructor"; then
+	echo "boundary contract violation: repair-confirmation record lost issued-to-recorded revision chain" >&2
+	exit 1
+fi
+runtime_repair_confirmation_record_validation="$(sed -n '/^func (r RuntimeRepairSurfaceConfirmationRecord) Validate(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_repair_surface.go)"
+if ! grep -q -F -- 'r.RecordedAtStateRevision != r.Confirmation.IssuedAtStateRevision+1' <<<"$runtime_repair_confirmation_record_validation"; then
+	echo "boundary contract violation: repair-confirmation record no longer validates its immediate revision" >&2
+	exit 1
+fi
+runtime_repair_confirmation_drive="$(sed -n '/^func (m \*Biz) driveRuntimeDecision(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_drive.go)"
+for marker in \
+	'CurrentRuntimeRepairSurfaceConfirmationPlan(aggregate)' \
+	'confirmationPlan.Required()' \
+	'confirmRuntimeRepairSurface(ctx, aggregate, confirmationPlan)'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_repair_confirmation_drive"; then
+		echo "boundary contract violation: Runtime drive bypassed the canonical repair-confirmation plan ($marker)" >&2
+		exit 1
+	fi
+done
+repair_confirmation_rebase_calls="$(grep -o -F -- 'rebaseRuntimeRepairSurfaceHandoffError' <<<"$runtime_repair_confirmation_adapter" | wc -l | tr -d ' ')"
+if ((repair_confirmation_rebase_calls < 4)); then
+	echo "boundary contract violation: repair-confirmation adapter no longer rebases every in-flight handoff error" >&2
+	exit 1
+fi
+if grep -R -n -F --include='*.go' --exclude='*_test.go' -- \
+	'ValidationFailureObservation != nil && aggregate.Facts.Resources.FailureTarget == nil' \
+	internal/modules/kernel/orchestrator/biz >/dev/null; then
+	echo "boundary contract violation: repair-confirmation drive restored FailureTarget absence as a phase pointer" >&2
+	exit 1
+fi
+if grep -R -n -F --include='*.go' --exclude='*_test.go' -- \
+	'func CurrentRuntimeRepairSurfaceConfirmationContract' \
+	internal/modules/kernel/orchestrator >/dev/null; then
+	echo "boundary contract violation: low-level repair-confirmation contract escaped the owner-private plan" >&2
+	exit 1
+fi
+runtime_scheduled_failure_boundary="$(sed -n '/^func (m \*Biz) handleScheduledRuntimeDriveFailure(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+if ! grep -q -F -- 'rebaseScheduledRuntimeDriveFailureToCurrentTerminal' <<<"$runtime_scheduled_failure_boundary"; then
+	echo "boundary contract violation: scheduled Runtime failure handling lost its current-terminal rebase" >&2
+	exit 1
+fi
+runtime_scheduled_worker="$(sed -n '/^func (m \*Biz) runScheduledRuntimeDrive(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+for marker in \
+	'retry, handled = m.handleScheduledRuntimeDriveFailure' \
+	'if !handled {' \
+	'retry, failureHandled = m.handleScheduledRuntimeDriveFailure' \
+	'if !failureHandled {'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_scheduled_worker"; then
+		echo "boundary contract violation: scheduled Runtime worker lost explicit handled/fallback separation ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_terminal_error_rebase="$(sed -n '/^func (m \*Biz) rebaseScheduledRuntimeDriveFailureToCurrentTerminal(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+for marker in \
+	'm.runtimeController.Load' \
+	'runtimeTerminalDeliveryReady(aggregate)' \
+	'm.deliverRuntimeTerminal(ctx, aggregate)' \
+	'm.handleRuntimeTerminalDeliveryRetry'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_terminal_error_rebase"; then
+		echo "boundary contract violation: scheduled Runtime terminal-error rebase lost $marker" >&2
+		exit 1
+	fi
+done
+runtime_terminal_delivery_retry="$(sed -n '/^func (m \*Biz) handleRuntimeTerminalDeliveryRetry(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+for marker in \
+	'm.runtimeController.Load' \
+	'runtimeTerminalDeliveryFullyAcknowledged(aggregate)' \
+	'm.consumeRuntimeDeliveryRetryBudget'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_terminal_delivery_retry"; then
+		echo "boundary contract violation: terminal-delivery response-loss classifier lost $marker" >&2
+		exit 1
+	fi
+done
+runtime_terminal_delivery_budget="$(sed -n '/^func (m \*Biz) consumeRuntimeDeliveryRetryBudget(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+for marker in \
+	'runtimeTerminalDeliveryCASRebaseLimit' \
+	'runtimeTerminalDeliveryRecoveryRequestFromAggregate' \
+	'current.Facts.Recovery.Normalized().TerminalDeliveryRequest == recoveryRequest' \
+	'm.runtimeController.Load' \
+	'runtimeTerminalDeliveryFullyAcknowledged(current)' \
+	'errors.As(err, &cas)'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_terminal_delivery_budget"; then
+		echo "boundary contract violation: terminal-delivery budget lost acknowledgement-CAS rebase ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_drive_lease_schedule="$(sed -n '/^func (c \*driveDeliveryComponent) scheduleDriveLease(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/drive_lease.go)"
+for marker in \
+	'TerminalDeliveryFullyAcknowledged(aggregate)' \
+	'retiredRunningLeaseMayScheduleTerminalDeliverySuccessor' \
+	'generation = expectedRunningGeneration + 1' \
+	'aggregate.DriveLease.RecoveryGeneration == expectedRunningGeneration' \
+	'aggregate.DriveLease = nil'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_drive_lease_schedule"; then
+		echo "boundary contract violation: Runtime drive-lease CAS lost retired-generation/final-ack fence ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_recovery_budget_consume="$(sed -n '/^func (c \*driveDeliveryComponent) consumeRecoveryBudget(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/recovery_budget.go)"
+if ! grep -q -F -- 'kind == runtimecontract.RuntimeRecoveryBudgetTerminalDelivery && TerminalDeliveryFullyAcknowledged(aggregate)' <<<"$runtime_recovery_budget_consume"; then
+	echo "boundary contract violation: terminal-delivery budget lost final-ack fresh-load no-op" >&2
+	exit 1
+fi
+runtime_drive_finish="$(sed -n '/^func (m \*Biz) finishScheduledRuntimeDrive(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+for marker in \
+	'AwaitingNonTerminalRecovery' \
+	'AwaitingTerminalDeliveryBudget' \
+	'settleRuntimeDriveGateAtOwnerExit' \
+	'scheduleRuntimeRecoveryLeaseDisposition' \
+	'runtimeRecoveryLeaseScheduleTerminalComplete'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_drive_finish"; then
+		echo "boundary contract violation: scheduled Runtime exit lost explicit terminal-complete disposition ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_recovery_lease_disposition="$(sed -n '/^func (m \*Biz) scheduleRuntimeRecoveryLeaseDisposition(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+for marker in \
+	'runtimeTerminalDeliveryCASRebaseLimit' \
+	'm.runtimeController.Load' \
+	'runtimeTerminalDeliveryFullyAcknowledged(current)' \
+	'current.DriveLease.State == runtimecontract.RuntimeDriveLeaseScheduled' \
+	'result = runtime.RuntimeInternalEventResult{Aggregate: current, DriveLease: &lease}' \
+	'm.enqueueRuntimeDriveLeaseTimer' \
+	'errors.As(err, &cas)'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_recovery_lease_disposition"; then
+		echo "boundary contract violation: terminal-delivery lease scheduling lost acknowledgement-CAS rebase ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_drive_lease_invariant="$(sed -n '/^func validateRuntimeAggregateSM4DriveLease(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/aggregate_invariant.go)"
+for marker in \
+	'a.Termination != nil' \
+	'a.DriveLease.Reason != runtimecontract.RuntimeDriveLeaseReasonDeliveryRetry' \
+	'a.DriveLease.FailureSignature != "terminal-delivery"'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_drive_lease_invariant"; then
+		echo "boundary contract violation: administrative terminal retained a non-canonical drive lease ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_synchronous_drive="$(sed -n '/^func (m \*Biz) driveRuntime(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_drive.go)"
+for marker in \
+	'm.validateWorkspaceRetirementDriveAdmission' \
+	'm.beginRuntimeDriveWithToken(driveKey)' \
+	'm.runtimeController.Load' \
+	'current.DriveLease != nil' \
+	'm.orchestratorBackgroundContext' \
+	'entranceLease' \
+	'm.settleRuntimeDriveGateAtOwnerExit'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_synchronous_drive"; then
+		echo "boundary contract violation: synchronous Runtime ingress bypassed singleflight/lease handoff ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_scheduled_drive_admission="$(sed -n '/^func (m \*Biz) scheduleRuntimeDriveWithLeaseAndReconciliation(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+for marker in \
+	'm.validateWorkspaceRetirementDriveAdmission' \
+	'driveKey := runtimeDriveKey(workspaceID, runID)' \
+	'gateToken, accepted = m.beginRuntimeDriveWithToken(driveKey)' \
+	'bgCtx := m.orchestratorBackgroundContext(ctx, workspaceID)' \
+	'm.retainRuntimeDriveGateSettlement'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_scheduled_drive_admission"; then
+		echo "boundary contract violation: scheduled Runtime ingress diverged from durable retirement/singleflight admission ($marker)" >&2
+		exit 1
+	fi
+done
+
+# Generic persistence recovery has one owner-private atomic writer. The typed
+# outcome, shared technical budget record and request-bound successor lease are
+# committed together; outer drive may only mount that already-persisted lease.
+runtime_nonterminal_request="$(sed -n '/^func NewRuntimeNonTerminalRecoveryRequest(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/nonterminal_recovery.go)"
+for marker in \
+	'errors.As(cause, &cas)' \
+	'errors.As(cause, &ownerTransient)' \
+	'feedback.Domain != runtimecontract.RuntimeFeedbackDomainPersistence' \
+	'feedback.StableCategory != runtimecontract.RuntimeFeedbackCategoryOwnerTransient' \
+	'IssuedAtStateRevision: issuedAtStateRevision' \
+	'StableRuntimeNonTerminalRecoveryRequestID'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_nonterminal_request"; then
+		echo "boundary contract violation: typed nonterminal recovery request lost $marker" >&2
+		exit 1
+	fi
+done
+runtime_nonterminal_writer="$(sed -n '/^func (c \*driveDeliveryComponent) scheduleNonTerminalRecovery(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/nonterminal_recovery.go)"
+for marker in \
+	'validateRuntimeNonTerminalRecoveryCause(request, cause)' \
+	'aggregate.StateRevision != request.IssuedAtStateRevision' \
+	'aggregate.Facts.Recovery.CASReloadAttempts' \
+	'aggregate.Facts.Recovery.NonTerminalRecovery = record' \
+	'aggregate.DriveLease = &lease' \
+	'c.transitions.Commit(ctx, aggregate, expectedRevision)'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_nonterminal_writer"; then
+		echo "boundary contract violation: atomic nonterminal recovery writer lost $marker" >&2
+		exit 1
+	fi
+done
+runtime_nonterminal_outer="$(sed -n '/^func (m \*Biz) handleRuntimeNonTerminalRetry(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+for marker in \
+	'runtime.NewRuntimeNonTerminalRecoveryRequest' \
+	'RuntimeInternalEventNonTerminalRecoveryScheduled' \
+	'NonTerminalRecoveryRequest: &recoveryRequest' \
+	'runtimeNonTerminalRecoveryAggregateMatches'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_nonterminal_outer"; then
+		echo "boundary contract violation: outer drive bypassed atomic nonterminal recovery ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_nonterminal_lease_validate="$(sed -n '/^func (l RuntimeDriveLease) Validate(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_drive_lease.go)"
+if ! grep -q -F -- 'if nonterminalRecovery && l.RecoveryRequestID == ""' <<<"$runtime_nonterminal_lease_validate"; then
+	echo "boundary contract violation: generic nonterminal lease no longer requires persisted request authority" >&2
+	exit 1
+fi
+# CAS-reload recovery cannot be split back into a generic budget event followed
+# by a separately persisted lease. Reject that kind at every generic writer
+# boundary, and require fresh-load validation to prove the reverse direction:
+# a consumed counter is invalid without its atomic request/record authority.
+for marker in \
+	'if kind == runtimecontract.RuntimeRecoveryBudgetCASReload' \
+	'return RuntimeAggregate{}, false, common.ErrInvalidArgument'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_recovery_budget_consume"; then
+		echo "boundary contract violation: generic recovery-budget writer accepts split CAS reload recovery ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_recovery_budget_ledger_mutator="$(sed -n '/^func consumeRecoveryBudget(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/runtime_ledger.go)"
+for marker in \
+	'if kind == runtimecontract.RuntimeRecoveryBudgetCASReload' \
+	'CAS reload budget requires atomic nonterminal recovery'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_recovery_budget_ledger_mutator"; then
+		echo "boundary contract violation: recovery ledger restored a split CAS reload mutation ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_internal_recovery_authorization="$(sed -n '/^func (event RuntimeInternalEvent) validateRecoveryAuthorization(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/internal_event_contract.go)"
+for marker in \
+	'case RuntimeInternalEventRecoveryBudgetConsumed:' \
+	'event.Delivery.RecoveryBudgetKind == runtimecontract.RuntimeRecoveryBudgetCASReload' \
+	'CAS reload budget is owned by the atomic nonterminal recovery event'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_internal_recovery_authorization"; then
+		echo "boundary contract violation: recovery_budget_consumed admits the retired two-stage CAS writer ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_recovery_ledger_validation="$(sed -n '/^func (l RuntimeRecoveryLedger) Validate(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_recovery_budget.go)"
+for marker in \
+	'} else if l.CASReloadAttempts != 0 {' \
+	'CAS reload attempts require an atomic nonterminal recovery record'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_recovery_ledger_validation"; then
+		echo "boundary contract violation: recovery ledger lost inverse atomic CAS reload proof ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_nonterminal_linearization="$(sed -n '/^func ValidateRuntimeNonTerminalRecoveryLinearization(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_nonterminal_recovery.go)"
+for marker in \
+	'record.RecordedAtStateRevision > stateRevision' \
+	'record.RecordedAtStateRevision != stateRevision' \
+	'current == nil || current.Normalized() != record.SuccessorLease.Normalized()'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_nonterminal_linearization"; then
+		echo "boundary contract violation: atomic nonterminal recovery lost record-to-lease linearization proof ($marker)" >&2
+		exit 1
+	fi
+done
+for validator in \
+	'internal/pkg/workorchruntimecontract/runtime_state.go' \
+	'internal/modules/kernel/orchestrator/biz/runtime/aggregate_invariant.go'; do
+	if ! grep -q -F -- 'ValidateRuntimeNonTerminalRecoveryLinearization' "$validator"; then
+		echo "boundary contract violation: persisted Runtime validator bypasses nonterminal recovery linearization ($validator)" >&2
+		exit 1
+	fi
+done
+if grep -R -n -F --include='*.go' --exclude='*_test.go' -- \
+	'RecoveryBudgetKind: runtimecontract.RuntimeRecoveryBudgetCASReload' internal/modules/kernel/orchestrator/biz >/dev/null; then
+	echo "boundary contract violation: production code constructs the retired RecoveryBudgetConsumed+CASReload two-stage writer" >&2
+	exit 1
+fi
+if grep -R -n -F --include='*.go' --exclude='*_test.go' -- \
+	'RuntimeDriveLeaseReasonCASReload' internal/modules/kernel/orchestrator/biz | grep -v '/runtime/nonterminal_recovery.go:' | grep -q .; then
+	echo "boundary contract violation: production drive assembled CAS-reload lease outside atomic nonterminal recovery" >&2
+	exit 1
+fi
+
+# Process-local settlement is a lifecycle-fenced wake only. It uses a one-shot
+# timer to submit short framework work, exact-rearms rejection, and linearizes
+# dormant handoff activation with the final gate release.
+runtime_gate_settlement_merge="$(sed -n '/^func mergeRuntimeDriveGateSettlementRequest(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+if ! grep -q -F -- 'merged.AwaitGateOwnerExit = current.AwaitGateOwnerExit && next.AwaitGateOwnerExit' <<<"$runtime_gate_settlement_merge"; then
+	echo "boundary contract violation: active Runtime gate settlement can become dormant again" >&2
+	exit 1
+fi
+runtime_gate_settlement_wake="$(sed -n '/^func (m \*Biz) armRuntimeDriveGateSettlementWakeLocked(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+if ! grep -q -F -- 'time.AfterFunc' <<<"$runtime_gate_settlement_wake"; then
+	echo "boundary contract violation: Runtime gate settlement lost lifecycle one-shot wake" >&2
+	exit 1
+fi
+runtime_gate_settlement_submit="$(sed -n '/^func (m \*Biz) submitRuntimeDriveGateSettlementWake(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+for marker in \
+	'background.AsyncTask(&runtimeDriveGateSettlementTask' \
+	'm.armRuntimeDriveGateSettlementWakeLocked(runtimeDriveGateSettlementWakeDelay)'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_gate_settlement_submit"; then
+		echo "boundary contract violation: Runtime gate settlement wake lost framework short-task rearm ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_gate_release="$(sed -n '/^func (m \*Biz) takePersistedRuntimeDriveLeaseMountExact(/,/^}/p' internal/modules/kernel/orchestrator/biz/owner.go)"
+for marker in \
+	'm.runtimeDriveGateSettlements[key]' \
+	'settlement.Request.AwaitGateOwnerExit = false' \
+	'm.armRuntimeDriveGateSettlementWakeLocked' \
+	'delete(m.drivingRuns, key)'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_gate_release"; then
+		echo "boundary contract violation: Runtime gate release lost atomic handoff settlement ($marker)" >&2
+		exit 1
+	fi
+done
+runtime_retirement_internal_admission="$(sed -n '/^func (m \*Biz) validateRuntimeInternalEventWorkspaceRetirementAdmission(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime_internal_events.go)"
+for marker in \
+	'lease.FailureSignature != "terminal-delivery"' \
+	'runtime.AdministrativeTerminationAwaitsTerminalDelivery(aggregate)' \
+	'runtimeTerminalDeliveryFullyAcknowledged(aggregate)'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_retirement_internal_admission"; then
+		echo "boundary contract violation: draining Runtime admission lost canonical retired-generation rule ($marker)" >&2
+		exit 1
+	fi
+done
+for regression in \
+	'TestConfirmFileRuntimeRepairSurfaceRequiresExactRequestFence' \
+	'TestFileOwnerConfirmsOnlyCurrentRegularRepairSurface' \
+	'TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot' \
+	'TestCurrentRuntimeRepairSurfaceConfirmationPlanEligibilityMatrix' \
+	'TestRuntimeRepairSurfaceConfirmationRequestIDBindsRevisionAndRefreshLineage' \
+	'TestRuntimeAggregateRejectsCoordinatedRepairSurfaceRequestFenceTamper' \
+	'TestRuntimeRepairSurfaceConfirmationChronologyIsGlobalAcrossObservations' \
+	'TestRuntimeDecisionConfirmsValidationRepairSurfaceBeforeProvider' \
+	'TestRuntimeSynchronousIngressRejectsPersistedDriveLeaseBeforeOwnerCalls' \
+	'TestRuntimeSynchronousIngressSingleGateBlocksDuplicateRepairSurfaceQuery' \
+	'TestRuntimeSynchronousIngressCanceledExitMountsLatchedLifecycleLease' \
+	'TestRuntimeSynchronousIngressRejectsDrainingWorkspaceBeforeOwnerWork' \
+	'TestRepairSurfaceConfirmationStaleRevisionRequiresPrerequisiteReplanBeforeFreshResponse' \
+	'TestScheduledRuntimeDriveFailureRebasesToPersistedTerminalAuthority' \
+	'TestScheduledRuntimeDriveTerminalRebasePreventsFallbackLease' \
+	'TestScheduledRuntimeDriveTerminalRebaseAdoptsExistingPersistedLease' \
+	'TestRuntimeDriveLeaseAdministrativeTerminationReissuesRetiredGenerationOnlyWhileDeliveryPending' \
+	'TestScheduledRuntimeDriveTerminationRetiresClaimedLeaseBeforeDeliveryRetry' \
+	'TestWorkspaceRuntimeQuiescenceAdministrativeTerminationAdmitsRetiredClaimedDeliverySuccessor' \
+	'TestWorkspaceRuntimeQuiescenceFinalAckBeforeRetiredGenerationScheduleReleasesGate' \
+	'TestTerminalDeliveryLeaseScheduleCASRebasesFinalAcknowledgementAndReleasesGate' \
+	'TestTerminalDeliveryRecoveryBudgetCASRebasesPartialAcknowledgementOnce' \
+	'TestTerminalDeliveryRecoveryBudgetCASRebasesFinalAcknowledgementWithoutSpend' \
+	'TestTerminalDeliveryRecoveryBudgetPostCommitResponseLossPersistsSuccessor' \
+	'TestTerminalDeliveryLeaseSchedulePostCommitResponseLossMountsExactSuccessor' \
+	'TestTerminalDeliveryExactRunningLeaseCleanupPostCommitResponseLossReleasesGate' \
+	'TestRuntimeDriveGateSettlementPumpRearmsAfterFrameworkTickRejection' \
+	'TestRuntimeDriveGateSettlementPumpSurvivesOneShotSubmissionRejection' \
+	'TestRuntimeDriveGateFreshNoLeaseReleaseActivatesConcurrentDormantHandoff' \
+	'TestRuntimeDriveGateSettlementMergeCannotRedormantActiveSettlement' \
+	'TestRetainOrAcquireRuntimeDriveGateSettlementTakesGateAfterStaleSnapshotRelease' \
+	'TestRuntimeTerminationHandoffWaitsForExactGateOwnerExit' \
+	'TestRuntimeTerminationCASResponseLossEntersCanonicalDeliverySettlement' \
+	'TestRuntimeControllerRejectsSplitCASRecoveryBudget' \
+	'TestRuntimeNonTerminalRecoveryTypedOutcomeGateRejectsGenericErrors' \
+	'TestRuntimeNonTerminalRecoveryAtomicallyPersistsBudgetRecordAndUniqueLease' \
+	'TestRuntimeNonTerminalRecoveryResponseLossReloadsPersistedRecordAndLease' \
+	'TestRuntimeNonTerminalRecoveryExhaustionKeepsDurableCappedSuccessor' \
+	'TestRuntimeNonTerminalRecoveryOuterCASGenerationZeroCommitsOneAtomicSuccessor' \
+	'TestRuntimeNonTerminalRecoveryOuterOwnerTransientUsesSharedCASBudgetOnly' \
+	'TestRuntimeNonTerminalRecoveryOuterPostCommitResponseLossReloadsWithoutSecondCAS' \
+	'TestRuntimeNonTerminalRecoveryOuterExhaustionKeepsCappedDurableSuccessor' \
+	'TestRuntimeNonTerminalRecoveryOuterRejectsUntypedRetryAuthority' \
+	'TestRuntimeNonTerminalRecoveryAtomicLinearizationRejectsTornPersistence' \
+	'TestRuntimeBusinessFailureFactTypedCASUsesAtomicNonTerminalRecovery' \
+	'TestRuntimeTerminalDeliveryHistoricalRetiredGenerationDoesNotBlockLaterRematerialization' \
+	'TestRepairSurfaceConfirmationFencesInFlightResponseAfterAdministrativeTermination' \
+	'TestRepairSurfaceConfirmationExactReplayRemainsNoOpAfterAdministrativeTermination'; do
+	if ! grep -R -q -F --include='*_test.go' -- "$regression" internal; then
+		echo "boundary contract violation: Runtime confirmation/recovery regression is missing ($regression)" >&2
+		exit 1
+	fi
+done
+
 # SM-2 seals one exact bounded target surface into both CoverageEvidenceBinding and its
 # focus. Selector identity, candidate bounds, and the accepted prospective
 # target must all match; partial equality would let either value become a

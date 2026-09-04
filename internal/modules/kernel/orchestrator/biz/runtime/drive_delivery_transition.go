@@ -39,8 +39,16 @@ func (c *driveDeliveryComponent) requestTermination(ctx context.Context, workspa
 		return RuntimeAggregate{}, err
 	}
 	// Any prior scheduled/running drive is superseded by this administrative
-	// delivery handoff. Its stale worker is generation-fenced and may only
-	// observe that the lease has already been retired.
+	// delivery handoff. Its stale worker is generation-fenced; if its in-flight
+	// owner delivery subsequently fails, only the canonical terminal-delivery
+	// path may replace the retired generation with G+1.
+	if aggregate.DriveLease != nil && aggregate.DriveLease.State == runtimecontract.RuntimeDriveLeaseRunning {
+		aggregate.Facts.Recovery.RetiredTerminalDeliveryLease = aggregate.DriveLease.Clone()
+		aggregate.Facts.Recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID = ""
+	} else {
+		aggregate.Facts.Recovery.RetiredTerminalDeliveryLease = runtimecontract.RuntimeDriveLease{}
+		aggregate.Facts.Recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID = ""
+	}
 	aggregate.DriveLease = nil
 	for idx := range aggregate.OperationRecoveryAuthorizations {
 		if aggregate.OperationRecoveryAuthorizations[idx].State == runtimecontract.RuntimeOperationRecoveryAuthorizationIssued {

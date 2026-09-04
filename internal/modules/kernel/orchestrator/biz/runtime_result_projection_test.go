@@ -922,10 +922,12 @@ func assertAdministrativeSupersedeAuthority(t *testing.T, aggregate runtime.Runt
 	}
 }
 
-// Terminal delivery recovery is scheduling metadata only. Its bounded ledger
-// must never mutate the already-sealed terminal authority; startup first gets
-// only the Run-owned opaque record and classifies terminal delivery after load.
-func TestRuntimeTerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventory(t *testing.T) {
+// Terminal delivery recovery is scheduling metadata only. Reaching its bounded
+// limit must never mutate the already-sealed terminal authority; startup first
+// gets only the Run-owned opaque record and classifies terminal delivery after
+// load. A later real failed generation, not a duplicate budget call, seals the
+// intervention disposition.
+func TestRuntimeTerminalDeliveryBudgetLimitRetainsStartupRecoveryInventory(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	runs := filerepository.NewRunRepository(root + "/runs.json")
@@ -965,13 +967,14 @@ func TestRuntimeTerminalDeliveryBudgetExhaustionRetainsStartupRecoveryInventory(
 	if err := firstOrchestrator.ConfigureRuntimeRepository(runtimeStateRepository{hub: firstHub}); err != nil {
 		t.Fatal(err)
 	}
-	charged, consumed, err := firstOrchestrator.ConsumeRuntimeRecoveryBudget(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
+	delivery := mustTerminalDeliveryRequest(t, aggregate)
+	recoveryRequest := runtimeTerminalRecoveryRequestForTest(delivery, 0)
+	charged, consumed, err := firstOrchestrator.runtimeConsumeTerminalDeliveryRecoveryBudget(ctx, "ws-v2", "run-v2", recoveryRequest)
 	if err != nil || !consumed || charged.Facts.Recovery.TerminalDeliveryAttempts != 1 || !sameTerminalDecision(charged.Decision) {
 		t.Fatalf("first delivery charge aggregate=%+v consumed=%v err=%v", charged, consumed, err)
 	}
-	exhausted, consumed, err := firstOrchestrator.ConsumeRuntimeRecoveryBudget(ctx, "ws-v2", "run-v2", runtimecontract.RuntimeRecoveryBudgetTerminalDelivery)
-	if err != nil || consumed || exhausted.StateRevision != charged.StateRevision || !sameTerminalDecision(exhausted.Decision) || exhausted.Facts.Recovery.TerminalDeliveryAttempts != 1 {
-		t.Fatalf("exhausted delivery charge aggregate=%+v consumed=%v err=%v", exhausted, consumed, err)
+	if charged.Facts.Recovery.TerminalDeliveryRequest != recoveryRequest {
+		t.Fatalf("terminal delivery budget limit lost stable request: recovery=%+v", charged.Facts.Recovery)
 	}
 	if err := firstRunOwner.Stop(ctx); err != nil {
 		t.Fatal(err)

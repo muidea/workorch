@@ -1,6 +1,10 @@
 package workorchruntimecontract
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
 
 const (
 	DefaultMaxProviderTransportAttempts = 3
@@ -40,10 +44,58 @@ type RuntimeRecoveryLedger struct {
 	ProviderTransportAttempts int
 	OperationRecoveryAttempts int
 	CASReloadAttempts         int
-	TerminalDeliveryAttempts  int
-	DriveScheduleAttempts     int
+	// NonTerminalRecovery is the latest owner-private atomic budget/successor
+	// record. FailedLeaseGeneration makes older callbacks stale without an
+	// unbounded history ledger.
+	NonTerminalRecovery      RuntimeNonTerminalRecoveryRecord
+	TerminalDeliveryAttempts int
+	// TerminalDeliveryRequest is the most recent durable idempotency fence for
+	// terminal-delivery budget consumption. FailedLeaseGeneration is monotonic,
+	// so an older callback remains recognizable after later attempts without a
+	// second unbounded history ledger.
+	TerminalDeliveryRequest RuntimeTerminalDeliveryRecoveryRequest
+	// TerminalDeliveryIntervention is the exact failed delivery for which the
+	// bounded automatic budget was exhausted. It is a durable, observable
+	// manual-intervention disposition; no local gate/pump may keep auto-retrying
+	// after this fact is sealed.
+	TerminalDeliveryIntervention RuntimeTerminalDeliveryRecoveryRequest
+	// RetiredTerminalDeliveryLease preserves the exact running authority that an
+	// administrative termination retired in its CAS. Only one matching,
+	// budget-authorized terminal successor may consume this handoff marker.
+	RetiredTerminalDeliveryLease                  RuntimeDriveLease
+	RetiredTerminalDeliveryLeaseRecoveryRequestID string
+	DriveScheduleAttempts                         int
 	// PrerequisiteRefreshes tracks stale/no-progress recovery only.
 	PrerequisiteRefreshes int
+}
+
+type RuntimeTerminalDeliveryRecoveryRequest struct {
+	RequestID             string
+	TerminalDeliveryID    string
+	FailedLeaseGeneration uint64
+}
+
+func (r RuntimeTerminalDeliveryRecoveryRequest) Normalized() RuntimeTerminalDeliveryRecoveryRequest {
+	r.RequestID = strings.TrimSpace(r.RequestID)
+	r.TerminalDeliveryID = strings.TrimSpace(r.TerminalDeliveryID)
+	return r
+}
+
+func (r RuntimeTerminalDeliveryRecoveryRequest) Validate() error {
+	r = r.Normalized()
+	if r.RequestID == "" || r.TerminalDeliveryID == "" ||
+		r.RequestID != StableRuntimeTerminalDeliveryRecoveryRequestID(r.TerminalDeliveryID, r.FailedLeaseGeneration) {
+		return fmt.Errorf("terminal delivery recovery request requires exact stable identity")
+	}
+	return nil
+}
+
+func StableRuntimeTerminalDeliveryRecoveryRequestID(terminalDeliveryID string, failedLeaseGeneration uint64) string {
+	fence := "initial"
+	if failedLeaseGeneration != 0 {
+		fence = "lease-" + strconv.FormatUint(failedLeaseGeneration, 10)
+	}
+	return "terminal-delivery-recovery:" + strings.TrimSpace(terminalDeliveryID) + "/" + fence
 }
 
 func DefaultRuntimeRecoveryPolicy() RuntimeRecoveryPolicy {
@@ -96,10 +148,75 @@ func (l RuntimeRecoveryLedger) Validate(policy RuntimeRecoveryPolicy) error {
 			return fmt.Errorf("%s cannot be negative", name)
 		}
 	}
+	nonterminal := l.NonTerminalRecovery.Normalized()
+	if RuntimeNonTerminalRecoveryRecordPresent(nonterminal) {
+		if err := nonterminal.Validate(policy); err != nil {
+			return fmt.Errorf("runtime nonterminal recovery: %w", err)
+		}
+		used := l.CASReloadAttempts
+		if used != nonterminal.Attempt {
+			return fmt.Errorf("runtime nonterminal recovery record does not match consumed counter")
+		}
+		if nonterminal.Disposition == RuntimeNonTerminalRecoveryDispositionBudgetExhausted && used != policy.MaxCASReloadAttempts {
+			return fmt.Errorf("runtime nonterminal recovery exhaustion does not match consumed limit")
+		}
+	} else if l.CASReloadAttempts != 0 {
+		return fmt.Errorf("CAS reload attempts require an atomic nonterminal recovery record")
+	}
+	request := l.TerminalDeliveryRequest.Normalized()
+	if request.RequestID != "" || request.TerminalDeliveryID != "" || request.FailedLeaseGeneration != 0 {
+		if err := request.Validate(); err != nil {
+			return err
+		}
+		if l.TerminalDeliveryAttempts == 0 {
+			return fmt.Errorf("terminal delivery recovery request requires a consumed attempt")
+		}
+	}
+	intervention := l.TerminalDeliveryIntervention.Normalized()
+	if intervention.RequestID != "" || intervention.TerminalDeliveryID != "" || intervention.FailedLeaseGeneration != 0 {
+		if err := intervention.Validate(); err != nil {
+			return fmt.Errorf("terminal delivery intervention: %w", err)
+		}
+		if l.TerminalDeliveryAttempts < policy.MaxTerminalDeliveryAttempts {
+			return fmt.Errorf("terminal delivery intervention requires exhausted automatic budget")
+		}
+		if request.RequestID != "" && (request.TerminalDeliveryID != intervention.TerminalDeliveryID || request.FailedLeaseGeneration > intervention.FailedLeaseGeneration) {
+			return fmt.Errorf("terminal delivery intervention precedes latest consumed request")
+		}
+	}
+	retired := l.RetiredTerminalDeliveryLease.Normalized()
+	if RuntimeDriveLeasePresent(retired) {
+		if err := retired.Validate(); err != nil {
+			return fmt.Errorf("retired terminal delivery lease: %w", err)
+		}
+		if retired.State != RuntimeDriveLeaseRunning {
+			return fmt.Errorf("retired terminal delivery lease must be running")
+		}
+		requestBoundNonterminal := RuntimeDriveLeaseBindsNonTerminalRecovery(retired) &&
+			ValidateRuntimeNonTerminalRecoveryLeaseBinding(l, retired) == nil
+		if (retired.RecoveryRequestID != "" && !requestBoundNonterminal) ||
+			(retired.Reason == RuntimeDriveLeaseReasonDeliveryRetry && retired.FailureSignature == "terminal-delivery") {
+			return fmt.Errorf("retired terminal delivery lease must preserve pre-terminal running authority")
+		}
+	} else if l.RetiredTerminalDeliveryLeaseRecoveryRequestID != "" {
+		return fmt.Errorf("retired terminal delivery lease consumed marker requires exact lease")
+	}
+	retiredRequestID := strings.TrimSpace(l.RetiredTerminalDeliveryLeaseRecoveryRequestID)
+	if retiredRequestID != "" {
+		expected := StableRuntimeTerminalDeliveryRecoveryRequestID(request.TerminalDeliveryID, retired.RecoveryGeneration)
+		if request.Validate() != nil || retiredRequestID != expected {
+			return fmt.Errorf("retired terminal delivery lease handoff requires exact recovery request")
+		}
+	}
 	return nil
 }
 
 func (l RuntimeRecoveryLedger) Normalized() RuntimeRecoveryLedger {
+	l.NonTerminalRecovery = l.NonTerminalRecovery.Normalized()
+	l.TerminalDeliveryRequest = l.TerminalDeliveryRequest.Normalized()
+	l.TerminalDeliveryIntervention = l.TerminalDeliveryIntervention.Normalized()
+	l.RetiredTerminalDeliveryLease = l.RetiredTerminalDeliveryLease.Normalized()
+	l.RetiredTerminalDeliveryLeaseRecoveryRequestID = strings.TrimSpace(l.RetiredTerminalDeliveryLeaseRecoveryRequestID)
 	return l
 }
 
