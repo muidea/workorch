@@ -367,6 +367,15 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - ordinary owner feasibility 不进入 candidate correction 或 attempt ledger；唯一例外是 manifest-declared、provider-safe 且 typed 为
   `candidate_constraint_violated` 的 candidate applicability fact。它必须与 attempt disposition 由同一个
   `CandidateFeasibilityObserved` CAS 原子提交，attempt 0 只开启一次现有 candidate correction，attempt 1 重复违反直接 final。
+- File `file/edit` 与 `patch/apply|patch/preview` 的 `text_replace` 必须共用 owner 的执行匹配规则做零写入 probe：
+  exact/byte-exact、空 replacement、occurrence、缺失/歧义/越界分别验证；baseHash、binary、path 与 stale 不得冒充
+  candidate constraint。operation-level 与 selected-variant constraints 必须共同进入 manifest/hash/C3，无 variant 的
+  `file/edit` 不得构造虚假 variant；缺少 required owner catalog 时不得使用 static complete-admission seal 绕过 probe。
+- failed attempt 保留 feasibility fact 时，必须在同一失败 CAS 保留当时的 owner catalog preimage；fresh load 校验其
+  self hash、manifest snapshot ref、operation/owner/acquisition/observed revision，禁止使用后续 current catalog 重建历史。
+  missing/duplicate/篡改/协调重封存 preimage 必须失败；pending attempt 仍只接受 current catalog。覆盖 CAS-before、
+  response loss、restart/duplicate，以及真实 Shell rejection→File confirmation→candidate correction→File effect→fresh Shell
+  validation 全链路，证明历史拒绝不阻断新事实推进、edit receipt 不提前获得 validation credit。
 - request session + authority transaction + canonical state/RequiredOutput + DocumentKind/ExpectedDocument + provider
   ceiling/reasoning/budget/stable prefix构成唯一purpose-bound semantic invocation seal；不得出现独立SemanticActivation
   repository/lifecycle或assessment通过operations envelope升级role。
@@ -478,6 +487,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - operation 以 `RuntimeOperationReceipt.Outcome` 为唯一结果，不存在跨 EventHub `Status + Outcome` 双权威；
 - live response 与 restart receipt recovery 使用同一 outcome-first judgment；rejected receipt 的 owner diagnostic 不得被
   `ObservedEffectScope=unknown` 覆盖为 effect mismatch，accepted/no-op 仍必须通过 effect 与 quality gate；
+- 已封存 validation-repair 的 owner rejected receipt 必须在同一 SM-3/SM-2 CAS 完成 dispatch、退休 mutable
+  target/directive 与 intermediate repair binding，保留原始 diagnostic/immutable causation，并以 `repair_surface_unavailable`
+  有界终止。覆盖 first-member/partial-effect、CAS-before/response-loss、restart duplicate；不得开启 successor repair、
+  复用旧 target authority、补发副作用或追加 proof credit。stale/governance/unknown 仍各走原 typed lane。
 - durable no-op 使用 `Outcome=no_op`，删除重复 `NoOp bool`；read-only/validation 的正常零 durable effect 仍为
   accepted，`Changed` 只作 observed effect metadata；
 - accepted receipt 不携带 failure，rejected/unknown outcome 保留完整 safe original diagnostic；

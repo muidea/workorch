@@ -1,6 +1,80 @@
 package workorchruntimecontract
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
+
+func TestTextEditConstraintsAreOperationScopedSealedAndDetached(t *testing.T) {
+	var authorizations []RuntimeCandidateOperationManifest
+	for _, kind := range []string{StepKindFileEdit, RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview} {
+		contract, _ := RuntimeOperationContractForKind(kind)
+		authorization := RuntimeCandidateOperationManifest{Kind: kind, OwnerModuleID: RuntimeModuleFile,
+			Parameters: contract.Parameters, Variants: contract.Variants, CandidateConstraints: contract.CandidateConstraints,
+			OperationContractRevision: RuntimeOperationContractRevision()}.Normalized()
+		authorizations = append(authorizations, authorization)
+		old, replacement, patchType := "old", "new", "text_replace"
+		operation := RuntimeOperation{ID: "edit", Kind: kind, TargetRefs: []string{"target"},
+			Parameters: []OperationParameter{{Name: "oldText", String: &old}, {Name: "newText", String: &replacement}}}
+		expectedVariant := ""
+		if kind != StepKindFileEdit {
+			expectedVariant = patchType
+			operation.Parameters = append(operation.Parameters, OperationParameter{Name: "patchType", String: &patchType})
+		}
+		variant, constraints, err := RuntimeOperationCandidateConstraintsForOperation(operation, authorization)
+		if err != nil || variant != expectedVariant || !reflect.DeepEqual(constraints, runtimeTextReplacementCandidateConstraints()) {
+			t.Fatalf("%s constraints=%+v variant=%q err=%v", kind, constraints, variant, err)
+		}
+		_, static, err := RuntimeOperationCandidateConformanceConstraintsForOperation(operation, authorization)
+		if err != nil || len(static) != 0 {
+			t.Fatalf("%s created a placeholder static probe: %+v err=%v", kind, static, err)
+		}
+	}
+	manifest := RuntimeCandidateContractManifest{Revision: RuntimeCandidateContractManifestRevision, Operations: authorizations}.Normalized()
+	for _, kind := range []string{StepKindFileEdit, RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview} {
+		if constraint, found := RuntimeCandidateConstraintForOperationRef(manifest, kind, runtimeTextReplacementCandidateConstraints()[0].Ref); !found ||
+			constraint.RequiredShape != RuntimeOperationCandidateRequiredShapeTextReplaceApplicableToObservedTarget {
+			t.Fatalf("%s lookup lost its own constraint: %+v", kind, constraint)
+		}
+	}
+	with := StableRuntimeCandidateContractManifestHash(manifest)
+	detached := manifest.Clone()
+	for index := range detached.Operations {
+		if detached.Operations[index].Kind == StepKindFileEdit {
+			detached.Operations[index].CandidateConstraints[0].Ref = "tampered"
+		}
+	}
+	if with == StableRuntimeCandidateContractManifestHash(detached) || with != StableRuntimeCandidateContractManifestHash(manifest) {
+		t.Fatal("operation-level constraints are not detached/hash-bound")
+	}
+	witness := RuntimeCandidateCorrectionWitness{Dimension: RuntimeCandidateCorrectionWitnessOwnerConstraint, OperationKind: StepKindFileEdit,
+		Path: "$.operations[0].parameters[name=oldText]", ConstraintRef: runtimeTextReplacementCandidateConstraints()[0].Ref,
+		RejectedValue:    string(RuntimeOperationCandidateActualShapeObservedTargetContextMismatch),
+		AlternativeValue: string(RuntimeOperationCandidateRequiredShapeTextReplaceApplicableToObservedTarget)}
+	if err := witness.Validate(); err != nil {
+		t.Fatalf("declared edit constraint cannot form bounded correction: %v", err)
+	}
+}
+
+func TestDynamicEditConstraintCannotBypassOwnerFeasibilityWithStaticSeal(t *testing.T) {
+	for _, kind := range []string{StepKindFileEdit, RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview} {
+		contract, _ := RuntimeOperationContractForKind(kind)
+		old, replacement, patchType := "old", "new", "text_replace"
+		operation := RuntimeOperation{ID: "edit", Kind: kind, TargetRefs: []string{"target"},
+			Parameters: []OperationParameter{{Name: "oldText", String: &old}, {Name: "newText", String: &replacement}}}
+		if kind != StepKindFileEdit {
+			operation.Parameters = append(operation.Parameters, OperationParameter{Name: "patchType", String: &patchType})
+		}
+		manifest := RuntimeCandidateContractManifest{Hash: "manifest", Operations: []RuntimeCandidateOperationManifest{{
+			Kind: kind, OwnerModuleID: RuntimeModuleFile, Parameters: contract.Parameters, Variants: contract.Variants, CandidateConstraints: contract.CandidateConstraints,
+		}}}.Normalized()
+		candidate := RuntimeCandidate{StateChange: &StateChangeCandidate{Operations: []StateChangingOperation{{Operation: operation}}}}
+		decision := evaluateRuntimeCompleteAdmissionFeasibility(RuntimeFacts{}, manifest, candidate, nil)
+		if decision.Admitted() || decision.Code != "owner_catalog_missing" {
+			t.Fatalf("%s bypassed dynamic constraint: %+v", kind, decision)
+		}
+	}
+}
 
 func TestRuntimeOperationCandidateConstraintsAreSealedAndOwnerNeutral(t *testing.T) {
 	patch, found := RuntimeOperationContractForKind(RuntimeBlockKindPatchApply)

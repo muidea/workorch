@@ -155,27 +155,20 @@ func verifyFileWriteReplayPrecondition(target string, operation runtimemodel.Run
 }
 
 // probePatchFeasibility uses the same patch parser and in-memory apply path as
-// execution, but never writes or creates a receipt. This lets the File owner
-// reject an invalid unified diff before SM-3 seals a durable dispatch.
+// execution for every File edit/patch form, but never writes or creates a
+// receipt. Candidate applicability and resource failure remain separate facts.
 func (a *RuntimeAdapter) probePatchFeasibility(workspaceDirectory string, operation runtimemodel.RuntimeOperation, targetRef string) *runtimemodel.FailureFact {
-	if operation.Kind != runtimemodel.RuntimeBlockKindPatchApply && operation.Kind != runtimemodel.RuntimeBlockKindPatchPreview {
+	request, ok := patchApplyRequestFromRuntimeOperation(workspaceDirectory, operation)
+	if !ok {
 		return nil
 	}
-	patchType := runtimeOperationParameterString(operation, "patchType")
-	if patchType != patchTypeUnifiedDiff {
-		return nil
-	}
-	preview, err := a.PreviewPatch(PatchApplyRequest{
-		WorkspaceDirectory: workspaceDirectory, TargetRef: targetRef, PatchType: patchType,
-		Diff: runtimeOperationParameterString(operation, "diff"), BaseHash: runtimeOperationParameterString(operation, "baseHash"),
-		Summary: runtimeOperationParameterString(operation, "summary"),
-	})
+	preview, err := a.PreviewPatch(request)
 	if err == nil {
 		return nil
 	}
 	code := strings.TrimSpace(preview.FailureCode)
 	if code == "" {
-		code = "unified_diff_infeasible"
+		code = "patch_infeasible"
 	}
 	message := strings.TrimSpace(preview.FailureMessage)
 	if message == "" {
@@ -185,12 +178,21 @@ func (a *RuntimeAdapter) probePatchFeasibility(workspaceDirectory string, operat
 }
 
 // fileOperationCandidateApplicabilityViolation translates only the File-
-// private in-memory unified-diff context miss into the manifest-declared,
+// private in-memory edit/patch context miss into the manifest-declared,
 // provider-safe owner fact. It deliberately carries no retry or terminal
 // choice; those belong to Orchestrator's private SM-3 transition.
 func fileOperationCandidateApplicabilityViolation(operation runtimemodel.RuntimeOperation, authorization runtimemodel.RuntimeCandidateOperationManifest, inventory runtimemodel.RuntimeOperationAdmissibility, failure *runtimemodel.FailureFact) *runtimemodel.RuntimeOperationCandidateConstraintViolation {
 	operation = operation.Normalized()
-	if failure == nil || strings.TrimSpace(failure.Code) != "unified_diff_apply_conflict" {
+	if failure == nil {
+		return nil
+	}
+	var requiredShape runtimemodel.RuntimeOperationCandidateRequiredShape
+	switch strings.TrimSpace(failure.Code) {
+	case "unified_diff_apply_conflict":
+		requiredShape = runtimemodel.RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget
+	case "patch_text_replace_conflict":
+		requiredShape = runtimemodel.RuntimeOperationCandidateRequiredShapeTextReplaceApplicableToObservedTarget
+	default:
 		return nil
 	}
 	_, constraints, err := runtimemodel.RuntimeOperationCandidateConstraintsForOperation(operation, authorization)
@@ -199,7 +201,7 @@ func fileOperationCandidateApplicabilityViolation(operation runtimemodel.Runtime
 	}
 	for _, constraint := range constraints {
 		if constraint.Kind != runtimemodel.RuntimeOperationCandidateConstraintTargetApplicability ||
-			constraint.RequiredShape != runtimemodel.RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget {
+			constraint.RequiredShape != requiredShape {
 			continue
 		}
 		return &runtimemodel.RuntimeOperationCandidateConstraintViolation{
@@ -248,11 +250,14 @@ func runtimeOperationHasStringParameter(operation runtimemodel.RuntimeOperation,
 
 func patchApplyRequestFromRuntimeOperation(workspaceDirectory string, operation runtimemodel.RuntimeOperation) (PatchApplyRequest, bool) {
 	operation = operation.Normalized()
-	if operation.Kind != runtimemodel.RuntimeBlockKindPatchApply {
+	if operation.Kind != runtimemodel.RuntimeBlockKindPatchApply && operation.Kind != runtimemodel.RuntimeBlockKindPatchPreview && operation.Kind != runtimemodel.StepKindFileEdit {
 		return PatchApplyRequest{}, false
 	}
 	targetRef := fileOperationTargetRef(operation)
 	patchType := runtimeOperationParameterString(operation, "patchType")
+	if operation.Kind == runtimemodel.StepKindFileEdit {
+		patchType = patchTypeTextReplace
+	}
 	if targetRef == "" || patchType == "" {
 		return PatchApplyRequest{}, false
 	}

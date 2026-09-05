@@ -118,6 +118,12 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
   directive while retaining the intermediate binding. One Orchestrator-private CAS invalidates the candidate, retires that binding
   with the persisted owner observation and seals `repair_surface_unavailable`; it neither opens an implicit semantic retry nor enters
   SM-4 delayed recovery.
+- File edit/patch candidate-local content mismatch is checked before dispatch through the same owner matcher used for execution.
+  Operation-level and selected variant constraints share the same bounded SM-3 correction ledger. A current revision with an
+  incorrect oldText is not a stale-resource fact. If an already-sealed validation-repair effect instead produces a rejected owner
+  receipt, the completing SM-3/SM-2 CAS retires executable target/directive and any intermediate semantic repair binding, preserves
+  immutable receipt/confirmation/commitment causation, and seals `repair_surface_unavailable`. It cannot resurrect predecessor
+  authority or open an implicit retry. Typed stale, governance and unknown outcomes retain their own event lanes.
 - a repair-purpose semantic document cannot redefine the problem as a Definition gap. The manifest-only admission rejects that
   branch, and one Orchestrator-private semantic-failure event seals `repair_surface_unavailable`; no clarification ticket, restart
   request or second provider attempt is created.

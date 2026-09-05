@@ -65,6 +65,8 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
   parser diagnostic 或 owner 私有实现，也不得改变 C0～C3/stable prefix。attempt 1 的 static shape 只由 capability owner 的 typed
   conformance result证明，dynamic target applicability 只由 owner 对 current target/revision 的 typed feasibility result证明，LLM
   block 不自行判定。
+  declaration 投影同时保留 operation-level 与 variant-level constraints；`file/edit` 等无 variant operation 仍使用
+  原有 correction 合同。相同规则可被不同 operation 引用，lookup 必须绑定 exact operation kind，不能按 ref 跨 kind 推断。
 - `operation_set_cardinality` correction 只投影 manifest v6 封存的 exact owner/target、operation kind/index violation 与
   `one_operation_per_owner_target` objective；不得让模型通过修改 operation ID、顺序、依赖或 target 规避。attempt 1 不得改变
   原 owner/target 覆盖或非冲突 operation，必须合并为一个 ordinary durable operation，除非 manifest 的 exact required sequence

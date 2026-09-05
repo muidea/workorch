@@ -89,6 +89,12 @@ func RuntimeOperationContractRevision() string {
 		writeHashStrings(h, contract.RequireOneOfParameters)
 		writeHashString(h, fmt.Sprintf("%t", contract.RequireTargetRefs))
 		writeHashStrings(h, contract.ForbiddenParameters)
+		for _, constraint := range NormalizeRuntimeOperationCandidateConstraints(contract.CandidateConstraints) {
+			writeHashString(h, constraint.Ref)
+			writeHashString(h, string(constraint.Kind))
+			writeHashString(h, constraint.ParameterName)
+			writeHashString(h, string(constraint.RequiredShape))
+		}
 		writeHashString(h, runtimeOperationDynamicParameterPolicy(contract.Kind))
 		writeHashString(h, runtimeOperationValidationPolicy(contract.Kind))
 		for _, v := range contract.Variants {
@@ -232,6 +238,7 @@ type RuntimeOperationContract struct {
 	RequireTargetRefs      bool
 	ForbiddenParameters    []string
 	Variants               []RuntimeOperationVariantContract
+	CandidateConstraints   []RuntimeOperationCandidateConstraint
 	Rules                  []string
 }
 
@@ -273,7 +280,8 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 		}, true
 	case StepKindFileEdit:
 		return RuntimeOperationContract{
-			Kind: StepKindFileEdit,
+			Kind:                 StepKindFileEdit,
+			CandidateConstraints: runtimeTextReplacementCandidateConstraints(),
 			Parameters: []RuntimeOperationParameterContract{
 				{Name: "oldText", Type: RuntimeOperationParameterTypeString, Required: true, Description: "exact current text to replace"},
 				{Name: "newText", Type: RuntimeOperationParameterTypeString, Required: true, Description: "replacement text; an empty string is allowed"},
@@ -305,7 +313,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			ForbiddenParameters: []string{"filePath", "fileContent", "path", "targetRef", "targetRefs"},
 			Variants: []RuntimeOperationVariantContract{
 				{ID: "file_write", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "file_write"}}, RequiredParameters: []string{"content"}, ForbiddenParameters: []string{"diff", "oldText", "newText", "occurrence"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
-				{ID: "text_replace", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "text_replace"}}, RequiredParameters: []string{"oldText", "newText"}, RequiredNonEmpty: []string{"oldText"}, ForbiddenParameters: []string{"content", "diff"}, DistinctParameterPairs: []RuntimeOperationParameterPair{{Left: "oldText", Right: "newText"}}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
+				{ID: "text_replace", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "text_replace"}}, RequiredParameters: []string{"oldText", "newText"}, RequiredNonEmpty: []string{"oldText"}, ForbiddenParameters: []string{"content", "diff"}, DistinctParameterPairs: []RuntimeOperationParameterPair{{Left: "oldText", Right: "newText"}}, CandidateConstraints: runtimeTextReplacementCandidateConstraints(), EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
 				{ID: "unified_diff", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "unified_diff"}}, RequiredParameters: []string{"diff"}, RequiredNonEmpty: []string{"diff"}, ForbiddenParameters: []string{"content", "oldText", "newText", "occurrence"}, CandidateConstraints: []RuntimeOperationCandidateConstraint{
 					{Ref: "patch/unified_diff/diff/single_file", Kind: RuntimeOperationCandidateConstraintParameterShape, ParameterName: "diff", RequiredShape: RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile},
 					{Ref: "patch/unified_diff/diff/target_mode", Kind: RuntimeOperationCandidateConstraintParameterShape, ParameterName: "diff", RequiredShape: RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode},

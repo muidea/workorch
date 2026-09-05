@@ -12,7 +12,13 @@ if [[ -n "$TMP_DIR" ]]; then
   mkdir -p "$TMP_DIR"
 fi
 if [[ -z "$TMP_DIR" ]]; then
-  TMP_DIR="$(mktemp -d)"
+  if [[ -n "${WORKORCH_VERIFY_TMP_ROOT:-}" ]]; then
+    mkdir -p "$WORKORCH_VERIFY_TMP_ROOT"
+    TMP_DIR="$(mktemp -d "$WORKORCH_VERIFY_TMP_ROOT/llm.XXXXXX")"
+    TMP_DIR="$(realpath "$TMP_DIR")"
+  else
+    TMP_DIR="$(mktemp -d)"
+  fi
 fi
 KEEP_TMP="${WORKORCH_VERIFY_KEEP_TMP:-0}"
 MOCK_ADDR="${WORKORCH_LLM_VERIFY_MOCK_ADDR:-127.0.0.1:18181}"
@@ -83,18 +89,15 @@ report_failure() {
     return
   fi
   echo "workorch LLM workspace execution verification failed for deployed workorch service $BASE_URL" >&2
+  echo "verification evidence retained at $TMP_DIR (JSON responses and mock log)" >&2
   if [[ -f "$MOCK_LOG" ]]; then
     echo "--- llm-mock.log ---" >&2
     tail -n 200 "$MOCK_LOG" >&2 || true
   fi
-  for file in "$TMP_DIR"/*.json; do
-    [[ -f "$file" ]] || continue
-    echo "--- $file ---" >&2
-    python3 -m json.tool "$file" >&2 || cat "$file" >&2
-  done
 }
 
 cleanup() {
+  local status=$?
   if [[ -n "$WATCHDOG_PID" ]]; then
     kill "$WATCHDOG_PID" >/dev/null 2>&1 || true
     wait "$WATCHDOG_PID" >/dev/null 2>&1 || true
@@ -108,7 +111,7 @@ cleanup() {
     kill "$MOCK_PID" >/dev/null 2>&1 || true
     wait "$MOCK_PID" >/dev/null 2>&1 || true
   fi
-  if [[ -n "${WORKORCH_LLM_VERIFY_ARTIFACT_DIR:-}" || "$KEEP_TMP" == "1" || "$KEEP_TMP" == "true" ]]; then
+  if [[ $status -ne 0 || -n "${WORKORCH_LLM_VERIFY_ARTIFACT_DIR:-}" || "$KEEP_TMP" == "1" || "$KEEP_TMP" == "true" ]]; then
     echo "keeping verification temp dir: $TMP_DIR" >&2
   else
     rm -rf "$TMP_DIR"
@@ -1437,35 +1440,8 @@ wait_activation_run() {
   local run_id=""
   local deadline=$((SECONDS + ACTIVATION_RUN_WAIT_SECONDS))
 
-python3 - "$activation_file" <<'PY'
-import json
-import os
-import sys
-
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-errors = []
-if data.get("accepted") is not True:
-    errors.append(f"accepted is {data.get('accepted')!r}, want true")
-expected_intent = os.environ.get("WORKORCH_LLM_VERIFY_ACTIVATION_INTENT", "restart")
-if data.get("intent") != expected_intent:
-    errors.append(f"intent is {data.get('intent')!r}, want {expected_intent}")
-if not str(data.get("requestId") or "").strip():
-    errors.append("requestId is empty")
-valid_admissions = {
-    "reconciliation_requested": {"current_run_continuation_accepted", "pending_run_activated", "new_run_activated"},
-    "replacement_pending": {"duplicate_restart", "predecessor_supersede_requested"},
-}
-outcome = data.get("outcome")
-owner_reason = data.get("reason")
-if owner_reason not in valid_admissions.get(outcome, set()):
-    errors.append(f"owner admission outcome/reason is {outcome!r}/{owner_reason!r}")
-if data.get("state") != "accepted":
-    errors.append(f"state is {data.get('state')!r}, want accepted")
-if data.get("requestReason") != "e2e_restart":
-    errors.append(f"requestReason is {data.get('requestReason')!r}, want e2e_restart")
-if errors:
-    raise SystemExit("\n".join(errors))
-PY
+  python3 "$ROOT_DIR/scripts/verify_execution_activation.py" "$activation_file" \
+    --intent "$ACTIVATION_INTENT" --workspace-id "$workspace_id" --request-reason e2e_restart || return 1
 
   while (( SECONDS <= deadline )); do
     if curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$snapshot_file"; then

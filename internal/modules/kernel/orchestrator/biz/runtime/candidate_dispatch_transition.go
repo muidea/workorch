@@ -174,6 +174,7 @@ func applyCandidateAttemptBegin(aggregate *RuntimeAggregate, plan candidateAttem
 	recycled.Proposal = nil
 	recycled.Conformances = nil
 	recycled.Feasibilities = nil
+	recycled.FeasibilityCatalogs = nil
 	recycled.Failure = nil
 	recycled.Correction = nil
 	recycled.Stale = nil
@@ -466,7 +467,7 @@ func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Cont
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := validateCandidateFeasibilityObservationBinding(aggregate, operation, record, manifest); err != nil {
+	if err := validateCandidateFeasibilityObservationBinding(aggregate.Facts.Resources.OperationAdmissibilities, operation, record, manifest); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	for _, persisted := range attemptRecord.Feasibilities {
@@ -566,7 +567,7 @@ func duplicateCandidateFeasibilityDisposition(attempts []runtimecontract.Runtime
 	return false
 }
 
-func validateCandidateFeasibilityObservationBinding(aggregate RuntimeAggregate, operation runtimecontract.RuntimeOperation, record runtimecontract.RuntimeCandidateFeasibilityRecord, manifest runtimecontract.RuntimeCandidateContractManifest) error {
+func validateCandidateFeasibilityObservationBinding(catalogs []runtimecontract.RuntimeOperationAdmissibility, operation runtimecontract.RuntimeOperation, record runtimecontract.RuntimeCandidateFeasibilityRecord, manifest runtimecontract.RuntimeCandidateContractManifest) error {
 	if record.Observation == nil || record.Observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityCandidateConstraintViolated {
 		return nil
 	}
@@ -580,6 +581,24 @@ func validateCandidateFeasibilityObservationBinding(aggregate RuntimeAggregate, 
 		constraint.ParameterName != violation.ParameterName || constraint.RequiredShape != violation.RequiredShape {
 		return fmt.Errorf("%w: candidate applicability violation is absent from the sealed manifest", common.ErrConflict)
 	}
+	selected := false
+	for _, authorization := range manifest.Operations {
+		if authorization.Kind != operation.Kind {
+			continue
+		}
+		_, constraints, err := runtimecontract.RuntimeOperationCandidateConstraintsForOperation(operation, authorization)
+		if err != nil {
+			return err
+		}
+		for _, value := range constraints {
+			if value == constraint {
+				selected = true
+			}
+		}
+	}
+	if !selected {
+		return fmt.Errorf("%w: candidate applicability violation does not match the selected operation variant", common.ErrConflict)
+	}
 	if !runtimeOperationTargetsRef(operation, violation.TargetRef) {
 		return fmt.Errorf("%w: candidate applicability violation target does not match the proposed operation", common.ErrConflict)
 	}
@@ -587,14 +606,14 @@ func validateCandidateFeasibilityObservationBinding(aggregate RuntimeAggregate, 
 	if !found || descriptor.OwnerModuleID == "" || observation.OwnerPolicy.OwnerModuleID != descriptor.OwnerModuleID {
 		return fmt.Errorf("%w: candidate applicability violation owner does not match the proposed operation", common.ErrConflict)
 	}
-	for _, inventory := range aggregate.Facts.Resources.OperationAdmissibilities {
+	for _, inventory := range catalogs {
 		inventory = inventory.Normalized()
 		if inventory.SnapshotID == record.AdmissibilitySnapshotID && inventory.AcquisitionBinding == record.AcquisitionBinding &&
 			inventory.OwnerModuleID == descriptor.OwnerModuleID && inventory.ObservedRevision == violation.ObservedRevision {
 			return nil
 		}
 	}
-	return fmt.Errorf("%w: candidate applicability violation is not bound to the current owner observation", common.ErrConflict)
+	return fmt.Errorf("%w: candidate applicability violation is not bound to its sealed owner observation", common.ErrConflict)
 }
 
 func validateCandidateFeasibilityPrerequisiteDisposition(aggregate RuntimeAggregate, attemptRecord runtimecontract.RuntimeCandidateAttemptRecord, operation runtimecontract.RuntimeOperation, request runtimecontract.RuntimeOperationPrerequisiteRequest) error {
@@ -1061,6 +1080,9 @@ func closeCandidateAttempt(aggregate *RuntimeAggregate, idx, attempt int, failur
 func closeCandidateAttemptWithCorrection(aggregate *RuntimeAggregate, idx, attempt int, failure runtimecontract.RuntimeCandidateFailure, correction *runtimecontract.RuntimeCandidateCorrectionDirective) error {
 	if aggregate == nil || idx < 0 || idx >= len(aggregate.CandidateAttempts) || failure.Class == "" || strings.TrimSpace(failure.Reason) == "" {
 		return common.ErrInvalidArgument
+	}
+	if err := retainFailedCandidateFeasibilityCatalogs(aggregate, idx); err != nil {
+		return err
 	}
 	failure, correction = normalizeCandidateAttemptFailure(*aggregate, idx, attempt, failure, correction)
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateFailed

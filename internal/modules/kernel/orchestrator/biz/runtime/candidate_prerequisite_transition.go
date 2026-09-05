@@ -391,33 +391,8 @@ func applyOwnerValidationRepairInfeasibility(aggregate *RuntimeAggregate, observ
 	if aggregate == nil || infeasibility.coverageID == "" || strings.TrimSpace(infeasibility.causationRef) == "" {
 		return common.ErrInvalidArgument
 	}
-	facts := &aggregate.Facts
-	for index := range facts.Coverage {
-		item := &facts.Coverage[index]
-		if item.ID != infeasibility.coverageID || item.CurrentBindingRef == nil || !runtimecontract.SameRuntimeCWIBindingRef(*item.CurrentBindingRef, infeasibility.binding) {
-			continue
-		}
-		if len(item.BindingRetirementLineage) >= runtimecontract.RuntimeCWIBindingRetirementLineageLimit {
-			return fmt.Errorf("runtime CWI binding retirement lineage exhausted")
-		}
-		item.BindingRetirementLineage = append(item.BindingRetirementLineage, runtimecontract.RuntimeCWIBindingRetirementLineage{
-			RetiredBindingRef: infeasibility.binding, CausationRef: infeasibility.causationRef,
-			Reason: "validation-repair operation set was rejected by its capability owner before dispatch",
-		})
-		item.CurrentBindingRef = nil
-		item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStatePlanning
-	}
-	updated, err := replaceRuntimeCWIFocusProjection(*facts, []common.CoverageWorkItemID{infeasibility.coverageID})
-	if err != nil {
-		return err
-	}
-	contract, err := canonicalRuntimeCWIReconciliationContract(updated)
-	if err != nil {
-		return err
-	}
-	updated.ReconciliationContract = contract
-	aggregate.Facts = updated
-	if _, err := supersedeActiveReconciliationForCurrentContract(aggregate); err != nil {
+	if err := retireRuntimeValidationRepairBinding(aggregate, infeasibility.coverageID, infeasibility.binding, infeasibility.causationRef,
+		"validation-repair operation set was rejected by its capability owner before dispatch"); err != nil {
 		return err
 	}
 	failure := ownerInfeasibilityFailure(observation, false)

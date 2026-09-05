@@ -12,11 +12,16 @@ Runtime 不要求穷举所有模型输出组合。它要求把动态 owner 事�
 `RuntimeCandidateContractManifest`，此后 renderer、decoder、candidate evaluator、owner candidate conformance、owner feasibility 和
 fixture 都只能消费这份封存合同，不能再次解释原始 profile、目录、错误文本或临时上下文。
 
+failed attempt 保留 owner feasibility fact 时，Orchestrator 必须在同一失败 internal-event/CAS 内保留其 exact owner
+catalog preimage。它仅用于按 sealed manifest snapshot ref、自身内容 hash、operation owner、acquisition 与 observed
+revision 反证历史，不构成 current admissibility；pending attempt 仍必须匹配当前 owner catalog。后续 effect 或
+prerequisite refresh 不得用新 catalog 重建历史拒绝，也不得因历史 catalog 已退休而否定合法的成功修复。
+
 每个 manifest 由零到多个 `SealedOperationAuthorization` 组成。该名称表示 manifest 内的一条纯值授权记录，
 不是新的状态机或 owner；实现可在现有 manifest DTO 内表达。每条授权至少包含：
 
 - canonical operation kind、owner module、parameter/variant contract；
-- variant 可选的 `CandidateConstraints`：只允许 sealed ref、parameter name 与 closed required-shape vocabulary，且计入
+- operation 及 variant 可选的 `CandidateConstraints`：两级合并，只允许 sealed ref、parameter name 与 closed required-shape vocabulary，且计入
   operation-contract revision 与 manifest hash；不得携带 raw candidate、parser text 或 Runtime disposition；
 - accepted/required effect scope、dependency 与封存的 `CoverageEvidenceBinding` 引用；每个可关闭
   CWI 的 binding 必须精确绑定 CWI、proof shape、target/selector、validation recipe/check（适用时的 metric/artifact）
@@ -311,6 +316,11 @@ target/revision，并返回 `candidate_constraint_violated` 或正常 feasibilit
 conformance 验证 single-file syntax 与 header/target 一致，通过 dynamic feasibility 验证 diff 可应用到 owner-observed target；
 `patch/preview` 的 content-sensitive variant 同样必须先取得 current target snapshot。Core 不解释 File code 或 parser message。
 未声明相应 constraint 的 operation 不调用对应通道，也不持久化占位 record。
+
+`file/edit` 的 operation-level 与 patch `text_replace` variant-level 均声明 exact `oldText` applicability；
+File 复用同一只读执行 matcher 检查匹配、歧义与 occurrence。当前 revision 下不适用只返回 typed constraint violation；
+baseHash/resource 错误保持 ordinary feasibility。final seal 不得因缺少 prerequisite 而跳过已声明 dynamic constraint，
+也不得为了 variant-less operation 新增伪 variant。纠正仍只允许同一 manifest 的 attempt 1，且不能改变 File effect replay class。
 
 两类 owner fact 与普通 resource infeasibility 正交：static conformance 证明 candidate representation 满足 immutable operation
 contract，dynamic applicability 证明同一 candidate 满足 manifest-declared、provider-safe 的 current target constraint；其它

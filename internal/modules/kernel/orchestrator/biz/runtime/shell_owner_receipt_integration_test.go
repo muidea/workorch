@@ -77,7 +77,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 		t.Fatalf("Shell observed-target catalog has no owner selector: %+v", shellCatalog)
 	}
 	shellSelectorRef := shellCatalog.SelectorRefs[0]
-	aggregate := validationAggregateWithPreparation(t, func(aggregate *RuntimeAggregate) {
+	aggregate := validationOnlyAggregateWithPreparation(t, func(aggregate *RuntimeAggregate) {
 		aggregate.Facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{policy}
 		aggregate.Facts.Focus.RequiredCheckRefs = []string{"workorch-cwi-check-observedfailuretarget"}
 		aggregate.Facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus = 2
@@ -95,11 +95,18 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 		aggregate.Facts.Focus.TargetSelectorCandidateRefs = []string{"implementation.go"}
 		aggregate.Facts.Focus.RequireTargetGrounding = true
 		runtimeTestInstallObservedShellPreflight(aggregate, ownerPreflight, shellCatalog)
+		route := runtimeValidationFailureRepairRouteForTest("observed-build-repair", runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface)
+		route.TriggerOwnerDiagnosticCode = "source_compile_failed"
+		route.RepairOperationKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+		route.RepairTargetPolicy = runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope
+		route.RepairOperationTargetSelectorRef = "workspace-relative-existing-file-target"
+		convergence := runtimecontract.RuntimeValidationFailureRepairConvergence{ID: "observed-validation-repair", Routes: []runtimecontract.RuntimeValidationFailureRepairRoute{route}, RequireFreshValidation: true, MaxAttempts: 2}
+		declaration := runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{aggregate.Facts.Focus})[0]
+		declaration.ValidationFailureRepairConvergence = &convergence
+		aggregate.Facts.DefinitionFocuses = []runtimecontract.RuntimeDefinitionFocus{declaration}
 	})
 	shellCatalog = runtimeTestOperationAdmissibilityForOwner(t, aggregate.Facts, runtimecontract.RuntimeModuleShell)
-	// The synthetic state-change receipt closes its File catalog generation.
-	// Keep that immutable preimage on the completed dispatch, while the current
-	// resource view is refreshed solely from the real File owner below.
+	// Replace synthetic File preflight with current facts from the real owner.
 	currentCatalogs := aggregate.Facts.Resources.OperationAdmissibilities[:0]
 	for _, catalog := range aggregate.Facts.Resources.OperationAdmissibilities {
 		if catalog.Normalized().OwnerModuleID != runtimecontract.RuntimeModuleFile {
@@ -129,6 +136,12 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	aggregate.Facts.Resources.Manifest = &postStateManifest.Manifest
 	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, postStateManifest.Observation)
 	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, postStateManifestPrerequisite)
+	filePrerequisite := runtimecontract.RuntimePrerequisite{ID: "confirmed-edit-admissibility", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindPatchApply}}
+	initialFileCatalog := sendObservedShellFileAdmissibility(t, ctx, hub, aggregate, filePrerequisite, workspaceDirectory)
+	aggregate.Facts.Resources.OperationAdmissibilities = append(aggregate.Facts.Resources.OperationAdmissibilities, initialFileCatalog.Acquisition.Admissibility)
+	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, initialFileCatalog.Acquisition.Observation)
+	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, filePrerequisite)
 	if err := aggregate.Validate(); err != nil {
 		t.Fatalf("install post-state-change File manifest: %v", err)
 	}
@@ -344,7 +357,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	if err != nil || persisted.Facts.Resources.FailureTarget == nil || persisted.Facts.Resources.FailureTarget.TargetObservation == nil ||
 		!slices.Equal(persisted.Facts.Resources.FailureTarget.TargetRefs, []string{"implementation.go"}) ||
 		persisted.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
-		t.Fatalf("owner confirmation did not CAS-bind the refreshed failure target: aggregate=%+v err=%v", persisted, err)
+		t.Fatalf("owner confirmation did not CAS-bind the refreshed failure target: state=%s terminal=%+v target=%+v err=%v", persisted.Decision.State, persisted.Decision.Terminal, persisted.Facts.Resources.FailureTarget, err)
 	}
 	var refreshedTargetSnapshot runtimecontract.TargetSnapshot
 	for _, snapshot := range persisted.Facts.Resources.TargetSnapshots {
@@ -447,7 +460,13 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	if !currentSnapshot.Complete() {
 		t.Fatalf("confirmed repair target has no current File snapshot: %+v", loaded.Facts.Resources.TargetSnapshots)
 	}
-	patchType := "file_write"
+	fileCatalog := runtimeTestOperationAdmissibilityForOwner(t, loaded.Facts, runtimecontract.RuntimeModuleFile)
+	fileObservation, found := runtimecontract.RuntimePrerequisiteObservationForID(loaded.Facts.Resources.PrerequisiteObservations, fileCatalog.PrerequisiteID)
+	if !found {
+		t.Fatal("confirmed repair lost current File observation")
+	}
+	patchType := "text_replace"
+	oldText := currentSnapshot.Content
 	repairedContent := "package fixture\n// repaired through confirmed surface\n"
 	baseHash := currentSnapshot.ContentHash
 	repairCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
@@ -456,11 +475,14 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 		TargetRefs:          []string{"implementation.go"},
 		Parameters: []runtimecontract.OperationParameter{
 			{Name: "patchType", String: &patchType},
-			{Name: "content", String: &repairedContent},
+			{Name: "oldText", String: &oldText},
+			{Name: "newText", String: &repairedContent},
 			{Name: "baseHash", String: &baseHash},
 		},
 	}}}}}
 	repairCandidate = runtimeTestBindCandidateToCurrentFocus(t, loaded, repairCandidate)
+	repairCandidate.StateChange.Operations[0].Operation.BindingRefs = []string{loaded.Facts.Focus.CoverageEvidenceBindings[0].ID}
+	repairCandidate.StateChange.Operations[0].Operation.CoverageWorkItemIDs = nil
 	repairManifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
 		loaded.Decision,
 		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
@@ -474,13 +496,89 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	repairOperation := repairCandidate.StateChange.Operations[0].Operation
-	// patch/apply has a static File-owner convergence declaration, so this
-	// fixture exercises the legal static seal path instead of inventing a
-	// mutable File catalog that SM-2 did not request. The actual effect and
-	// receipt still cross the real File/EventHub boundary below.
-	sealedRepair := sealCandidateWithFeasibilitiesForTest(t, repository, repairCandidate, nil)
-	repairOperation = sealedRepair.ActiveDispatch.Candidate.StateChange.Operations[0].Operation
+	// Reproduce a model that supplies already-corrected text as oldText while
+	// the owner revision is unchanged. It must be corrected before dispatch,
+	// without retiring the confirmed surface or creating a File receipt.
+	badCandidate := runtimecontract.CanonicalRuntimeCandidate(repairCandidate)
+	badOldText := "package fixture\nvar _ = alreadyCorrectedImplementation\n"
+	for index := range badCandidate.StateChange.Operations[0].Operation.Parameters {
+		if badCandidate.StateChange.Operations[0].Operation.Parameters[index].Name == "oldText" {
+			badCandidate.StateChange.Operations[0].Operation.Parameters[index].String = &badOldText
+		}
+	}
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, loaded.Facts.WorkspaceID, loaded.Facts.RunID, 0, "confirmed-edit-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := controller.AdmitCandidateProposalForTest(ctx, loaded.Facts.WorkspaceID, loaded.Facts.RunID, 0, badCandidate)
+	if err != nil || !proposal.Admission.Accepted() {
+		t.Fatalf("bad-text proposal: failure=%+v correction=%+v err=%v", proposal.Admission.Failure, proposal.Admission.Correction, err)
+	}
+	probe := func(aggregate RuntimeAggregate, attempt int) runtimecontract.RuntimeCandidateFeasibilityRecord {
+		t.Helper()
+		record := aggregate.CandidateAttempts[len(aggregate.CandidateAttempts)-1]
+		if record.Attempt != attempt || record.Proposal == nil {
+			t.Fatal("repair probe has no current persisted proposal")
+		}
+		operation := record.Proposal.StateChange.Operations[0].Operation
+		var authorization runtimecontract.RuntimeCandidateOperationManifest
+		for _, value := range repairManifest.Operations {
+			if value.Kind == operation.Kind {
+				authorization = value
+			}
+		}
+		response := hub.Send(magicevent.NewEventWithContext(fileevents.TopicProbeRuntimeOperationFeasibility,
+			runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx,
+			fileevents.ProbeRuntimeOperationFeasibilityCommand(runtimecontract.RuntimeOperationFeasibilityRequest{
+				WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, Transaction: record.Transaction,
+				WorkspaceDeliverableDirectory: workspaceDirectory, Operation: operation, CandidateManifestHash: repairManifest.Hash,
+				OperationAuthorization: authorization, Admissibility: fileCatalog,
+				Observation: &fileObservation, CurrentTargetSnapshot: &currentSnapshot,
+			})))
+		data, err := response.Get()
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner := runtimecontract.RuntimeOperationFeasibilityObservation(data.(fileevents.ProbeRuntimeOperationFeasibilityResult))
+		fact, factErr := runtimecontract.RuntimeOwnerFeasibilityObservationFromOperation(owner)
+		if factErr != nil {
+			t.Fatal(factErr)
+		}
+		return runtimecontract.RuntimeCandidateFeasibilityRecord{OperationID: operation.ID, CandidateManifestHash: repairManifest.Hash,
+			AdmissibilitySnapshotID: owner.AdmissibilitySnapshotID, AcquisitionBinding: owner.CapabilityStateBinding,
+			Observation: &fact, ReplayProof: owner.ReplayProof}
+	}
+	firstOwnerFact := probe(proposal.Aggregate, 0)
+	closed, err := controller.candidateDispatch.recordCandidateFeasibility(ctx, loaded.Facts.WorkspaceID, loaded.Facts.RunID, 0, firstOwnerFact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstAttempt := closed.CandidateAttempts[len(closed.CandidateAttempts)-1]
+	if firstAttempt.Correction == nil || firstAttempt.Correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce ||
+		closed.ActiveDispatch != nil || len(closed.OperationReceipts) != len(loaded.OperationReceipts) ||
+		closed.Facts.RepairDirective == nil || closed.Facts.RepairDirective.Closure.ID != repairClosureID ||
+		closed.Facts.Repair.RepairAttempts != loaded.Facts.Repair.RepairAttempts {
+		t.Fatalf("candidate mismatch escaped bounded SM-3 repair correction: %+v", firstAttempt)
+	}
+	controller, err = NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, loaded.Facts.WorkspaceID, loaded.Facts.RunID, 1, "confirmed-edit-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	corrected, err := controller.AdmitCandidateProposalForTest(ctx, loaded.Facts.WorkspaceID, loaded.Facts.RunID, 1, repairCandidate)
+	if err != nil || !corrected.Admission.Accepted() {
+		t.Fatalf("corrected edit proposal: %+v err=%v", corrected.Admission, err)
+	}
+	secondOwnerFact := probe(corrected.Aggregate, 1)
+	if _, err := controller.candidateDispatch.recordCandidateFeasibility(ctx, loaded.Facts.WorkspaceID, loaded.Facts.RunID, 1, secondOwnerFact); err != nil {
+		t.Fatal(err)
+	}
+	sealedRepair, err := controller.AcceptCandidateAttempt(ctx, loaded.Facts.WorkspaceID, loaded.Facts.RunID, 1, repairCandidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repairOperation := sealedRepair.ActiveDispatch.Candidate.StateChange.Operations[0].Operation
 	controller, err = NewRuntimeController(repository)
 	if err != nil {
 		t.Fatal(err)
@@ -585,6 +683,41 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 		restartedFinal.Facts.RepairDirective.CurrentFailure != nil || len(restartedFinal.Facts.RepairDirective.TargetRefs) != 0 ||
 		restartedFinal.Facts.RepairDirective.Closure == nil || restartedFinal.Facts.RepairDirective.Closure.ID != repairClosureID {
 		t.Fatalf("restart resurrected confirmed File target authority: aggregate=%+v err=%v", restartedFinal, err)
+	}
+	// The edit receipt is causation-only. Only a new real Shell validation may
+	// satisfy the original validation binding after owner facts are refreshed.
+	for _, fact := range restartedFinal.Facts.Evidence.Accepted {
+		if fact.DispatchID == repairDispatch.ID && len(fact.CoverageWorkItemIDs) != 0 {
+			t.Fatal("repair edit acquired terminal validation credit")
+		}
+	}
+	freshCandidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
+		Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, TargetRefs: []string{"implementation.go"},
+		BindingRefs: []string{restartedFinal.Facts.Focus.CoverageEvidenceBindings[0].ID},
+		Parameters:  []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
+	}}}}}
+	freshCandidate = runtimeTestMustDeriveCandidateAuthority(t, restartedFinal, freshCandidate)
+	freshCatalog := runtimeTestOperationAdmissibilityForOwner(t, restartedFinal.Facts, runtimecontract.RuntimeModuleShell)
+	freshOperation := freshCandidate.Validation.Operations[0].Operation
+	freshSeal := sealCandidateWithFeasibilitiesForTest(t, repository, freshCandidate, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
+		OperationID: freshOperation.ID, AdmissibilitySnapshotID: freshCatalog.SnapshotID, AcquisitionBinding: freshCatalog.AcquisitionBinding,
+		Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
+	}})
+	validated, err := controller.executeActiveDispatch(ctx, final.Facts.WorkspaceID, final.Facts.RunID, runtimeObservedShellExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acceptedValidation := false
+	for _, fact := range validated.Facts.Evidence.Accepted {
+		if fact.DispatchID == freshSeal.ActiveDispatch.ID && fact.Kind == runtimecontract.EvidenceKindValidation && len(fact.CoverageWorkItemIDs) == 1 {
+			acceptedValidation = true
+		}
+	}
+	if !acceptedValidation {
+		t.Fatalf("fresh real validation did not prove the original CWI: state=%s failure=%+v", validated.Decision.State, validated.Facts.Failure)
+	}
+	if err := validated.Validate(); err != nil {
+		t.Fatalf("fresh validation reload: %v", err)
 	}
 }
 

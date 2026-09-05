@@ -181,36 +181,9 @@ validate_command_response() {
   local intent="$3"
   local request_id="$4"
   local reason="$5"
-  python3 - "$path" "$workspace_id" "$intent" "$request_id" "$reason" <<'PY'
-import json
-import sys
-
-path, workspace_id, intent, request_id, reason = sys.argv[1:]
-with open(path, "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-if data.get("accepted") is not True:
-    raise SystemExit(f"response accepted=false: {data}")
-if data.get("workspaceId") != workspace_id:
-    raise SystemExit(f"response workspaceId={data.get('workspaceId')!r}, want {workspace_id!r}: {data}")
-if data.get("intent") != intent:
-    raise SystemExit(f"response intent={data.get('intent')!r}, want {intent!r}: {data}")
-if data.get("requestId") != request_id:
-    raise SystemExit(f"response requestId={data.get('requestId')!r}, want {request_id!r}: {data}")
-valid_admissions = {
-    "reconciliation_requested": {"current_run_continuation_accepted", "pending_run_activated", "new_run_activated"},
-    "replacement_pending": {"duplicate_restart", "predecessor_supersede_requested"},
-}
-outcome = data.get("outcome")
-owner_reason = data.get("reason")
-if owner_reason not in valid_admissions.get(outcome, set()):
-    raise SystemExit(f"response owner admission outcome/reason={outcome!r}/{owner_reason!r}: {data}")
-if data.get("state") != "accepted":
-    raise SystemExit(f"response state={data.get('state')!r}, want accepted: {data}")
-if data.get("requestReason") != reason:
-    raise SystemExit(f"response requestReason={data.get('requestReason')!r}, want {reason!r}: {data}")
-if not data.get("source"):
-    raise SystemExit(f"response source missing: {data}")
-PY
+  python3 "$ROOT_DIR/scripts/verify_execution_activation.py" "$path" \
+    --intent "$intent" --workspace-id "$workspace_id" --request-id "$request_id" \
+    --request-reason "$reason" --require-source
 }
 
 wait_command_projection() {

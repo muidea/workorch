@@ -182,6 +182,16 @@ Temporary evidence is removed on success. Set `WORKORCH_VERIFY_KEEP_ARTIFACTS=1`
 It is the deployed CI-safe baseline: no real provider credentials, weather network dependency or implicit service process
 management. The `-file` aliases target the same deployed-instance contract; backend identity is discovered from the service.
 
+验证适配器必须遵守同一份 owner admission 合同：成功响应统一由 `verify_execution_activation.py` 校验，
+`replacement_pending / terminal_predecessor_successor_requested` 是合法的显式 Restart 准入事实，不等于 successor
+已经创建。无效响应必须在继续轮询前返回非零，包括 Bash 命令替换与条件调用场景；不得由脚本改写 Run 状态。
+MCP semantic mock 只从当前 `C3.semantic-authority` 的逐 CWI proof obligation 复制 `declarationRef`，拒绝缺失、重复及
+跨 batch obligation；不得从 CWI ID、原始 Definition 或诊断文本重建引用。相关回归纳入 `verify-boundary-contract`。
+
+Managed runner 的失败摘要保留步骤日志头尾，LLM/MCP verifier 不向终端倾倒完整 snapshot。JSON response 与 mock log
+在失败时保留于 managed artifact root 下的独立 verifier 目录，随 CI artifact 一同收集；成功时由
+`WORKORCH_VERIFY_KEEP_TMP=1` 控制保留。独立运行 verifier 的失败证据保留于其输出的临时目录。
+
 `verify-ci-mvp-file`只证明上述基础组合，不自动等于PRD Runtime收敛发布gate。多drive、crash-window、wait、budget、
 governance、revalidation、restart、三轴closeout和双Workspace隔离必须逐行满足
 [Deployed Runtime Convergence Scenario Matrix](deployed-convergence-scenarios.md)。

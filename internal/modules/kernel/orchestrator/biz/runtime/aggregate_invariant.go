@@ -495,10 +495,9 @@ func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate) error {
 // validateRuntimeCandidateFeasibilityBindings is the fresh-load reverse proof
 // for every retained pre-seal owner probe fact. Shape validation alone is
 // insufficient: after restart each result must still belong to the exact
-// proposal, manifest, operation owner and current owner-authored catalog that
-// the live admission path checked before persisting it. Feasible facts may
-// remain on a pending attempt; a candidate-constraint violation remains on its
-// atomically failed attempt as correction lineage.
+// proposal, manifest and operation owner. Pending facts require the current
+// owner catalog; failed attempts use the immutable preimages sealed in their
+// failed exit, so a later successful effect cannot rewrite rejection lineage.
 func validateRuntimeCandidateFeasibilityBindings(a RuntimeAggregate) error {
 	for _, attempt := range a.CandidateAttempts {
 		if len(attempt.Feasibilities) == 0 {
@@ -506,6 +505,15 @@ func validateRuntimeCandidateFeasibilityBindings(a RuntimeAggregate) error {
 		}
 		if attempt.Proposal == nil {
 			return fmt.Errorf("runtime candidate feasibility ledger has no persisted proposal")
+		}
+		manifest, err := persistedCandidateAttemptManifest(a, attempt)
+		if err != nil {
+			return fmt.Errorf("runtime candidate feasibility manifest: %w", err)
+		}
+		catalogs := a.Facts.Resources.OperationAdmissibilities
+		historical := attempt.State == runtimecontract.RuntimeCandidateAttemptStateFailed
+		if historical {
+			catalogs = attempt.FeasibilityCatalogs
 		}
 		for _, feasibility := range attempt.Feasibilities {
 			operation, found := candidateOperationByID(*attempt.Proposal, feasibility.OperationID)
@@ -520,12 +528,18 @@ func validateRuntimeCandidateFeasibilityBindings(a RuntimeAggregate) error {
 			if !known || descriptor.OwnerModuleID == "" {
 				return fmt.Errorf("runtime candidate feasibility operation %q has no canonical owner", operation.ID)
 			}
-			if !runtimecontract.RuntimeOperationAdmissibilityRequiredForOperation(a.Facts.Prerequisites, descriptor.OwnerModuleID, operation.Kind) {
+			if !historical && !runtimecontract.RuntimeOperationAdmissibilityRequiredForOperation(a.Facts.Prerequisites, descriptor.OwnerModuleID, operation.Kind) {
 				return fmt.Errorf("runtime candidate feasibility operation %q has no current admissibility requirement", operation.ID)
 			}
-			inventory, found := runtimeOperationAdmissibilityForKind(a.Facts.Resources.OperationAdmissibilities, descriptor.OwnerModuleID, operation.Kind)
+			inventory, found := runtimeOperationAdmissibilityForKind(catalogs, descriptor.OwnerModuleID, operation.Kind)
 			if !found || inventory.SnapshotID != feasibility.AdmissibilitySnapshotID || inventory.AcquisitionBinding != feasibility.AcquisitionBinding {
+				if historical {
+					return fmt.Errorf("runtime candidate feasibility operation %q does not match historical owner admissibility", operation.ID)
+				}
 				return fmt.Errorf("runtime candidate feasibility operation %q does not match current owner admissibility", operation.ID)
+			}
+			if !candidateManifestBindsFeasibilityCatalog(manifest, operation.Kind, inventory.SnapshotID) {
+				return fmt.Errorf("runtime candidate feasibility operation %q catalog is absent from its sealed manifest", operation.ID)
 			}
 			if feasibility.Observation == nil {
 				return fmt.Errorf("runtime candidate feasibility operation %q has no owner observation", operation.ID)
@@ -554,11 +568,7 @@ func validateRuntimeCandidateFeasibilityBindings(a RuntimeAggregate) error {
 				}
 			}
 			if observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityCandidateConstraintViolated {
-				manifest, err := persistedCandidateAttemptManifest(a, attempt)
-				if err != nil {
-					return fmt.Errorf("runtime candidate applicability feasibility manifest: %w", err)
-				}
-				if err := validateCandidateFeasibilityObservationBinding(a, operation, feasibility, manifest); err != nil {
+				if err := validateCandidateFeasibilityObservationBinding(catalogs, operation, feasibility, manifest); err != nil {
 					return err
 				}
 			}

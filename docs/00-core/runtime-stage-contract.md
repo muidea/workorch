@@ -191,7 +191,7 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   declared name/type、entry/container、operation kind/index 均无歧义时封存一次 `parameter_entry_encoding` witness，要求
   attempt 1 重新生成全部独立 named typed entries。它不得本地搬移并接受原值，不得把合法 parameter 当作 forbidden field
   删除，也不改变 SM-2 authority 或 SM-4 recovery；mixed unknown/type/duplicate、lineage 漂移或 attempt 1 再拒绝均 final。
-- executable operation variant 可在 manifest 中声明 owner-defined、provider-safe 的 `CandidateConstraints`，描述普通 JSON schema
+- executable operation 及其 variant 可在 manifest 中声明 owner-defined、provider-safe 的 `CandidateConstraints`，描述普通 JSON schema
   无法完整表达的参数 shape 或 owner-observed target applicability。candidate proposal 必须先持久化；`parameter_shape` 由 receiving
   capability owner 通过 concrete typed conformance command 在零 workspace I/O 下返回
   `conformant | nonconformant | owner_contract_defect`，`target_applicability` 则只能在 ordinary typed feasibility 中以只读方式绑定
@@ -200,7 +200,9 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   Orchestrator 只通过 private SM-3 event/CAS 持久化 fact 与 disposition；尤其 `CandidateFeasibilityObserved` 必须在同一 CAS 中同时
   保存 applicability violation 并关闭 attempt 0 为唯一 correction，attempt 1 重复违反直接
   `candidate_retry_exhausted`。final seal 必须证明每个 static constraint 有 matching `conformant` fact，且 dynamic applicability
-  已由 current feasibility observation 接受。未声明相应 constraint 的 variant 不得生成占位 fact、额外 owner call 或 correction。
+  已由 current feasibility observation 接受。operation-level 与 selected variant-level constraints 合并后共同验收；
+  variant-less operation 不得漏检，dynamic constraint 缺少 owner admissibility 时不得走 static seal。
+  未声明相应 constraint 的 operation 不得生成占位 fact、额外 owner call 或 correction。
 - operations preflight 必须发生在 exact request-session CAS 之前；同一 transaction、stable prefix、manifest、correction hash 与
   expected-document attempt 的 persisted session 是 restart proof。document-complete 后 attempt-begin CAS 前中断或 CAS 后响应丢失
   只能恢复同一 local admission transaction，不能重发 preflight/provider、重复扣减 correction budget 或提前执行 capability。

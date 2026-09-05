@@ -15,6 +15,43 @@ const (
 	runtimeValidationFailureRepairSealFreshValidation     = "fresh_validation"
 )
 
+// Both pre-dispatch infeasibility and a rejected repair receipt retire the same
+// intermediate SM-2 binding. This helper is private to the owner's atomic event
+// transaction; it never emits another event or writes a sibling aggregate.
+func retireRuntimeValidationRepairBinding(aggregate *RuntimeAggregate, coverageID common.CoverageWorkItemID, binding runtimecontract.RuntimeCWIBindingRef, causationRef, reason string) error {
+	if aggregate == nil || coverageID == "" || strings.TrimSpace(causationRef) == "" || strings.TrimSpace(reason) == "" {
+		return common.ErrInvalidArgument
+	}
+	facts := &aggregate.Facts
+	index := runtimeCWICoverageIndex(facts.Coverage, coverageID)
+	if index < 0 || facts.Coverage[index].CurrentBindingRef == nil || !runtimecontract.SameRuntimeCWIBindingRef(*facts.Coverage[index].CurrentBindingRef, binding) {
+		return fmt.Errorf("%w: validation-repair retirement requires its exact current binding", common.ErrConflict)
+	}
+	item := &facts.Coverage[index]
+	if len(item.BindingRetirementLineage) >= runtimecontract.RuntimeCWIBindingRetirementLineageLimit {
+		return fmt.Errorf("runtime CWI binding retirement lineage exhausted")
+	}
+	item.BindingRetirementLineage = append(item.BindingRetirementLineage, runtimecontract.RuntimeCWIBindingRetirementLineage{
+		RetiredBindingRef: binding, CausationRef: causationRef, Reason: reason,
+	})
+	item.CurrentBindingRef = nil
+	item.CWIConvergenceState = runtimecontract.RuntimeCWIConvergenceStatePlanning
+	updated, err := replaceRuntimeCWIFocusProjection(*facts, []common.CoverageWorkItemID{coverageID})
+	if err != nil {
+		return err
+	}
+	contract, err := canonicalRuntimeCWIReconciliationContract(updated)
+	if err != nil {
+		return err
+	}
+	updated.ReconciliationContract = contract
+	aggregate.Facts = updated
+	if _, err := supersedeActiveReconciliationForCurrentContract(aggregate); err != nil {
+		return err
+	}
+	return nil
+}
+
 // runtimeValidationFailureRepairTrigger is a detached view of the typed,
 // already-persisted rejection and its immutable Profile declaration. It is
 // descriptive only: the SM-2 transition below remains the sole owner of CWI

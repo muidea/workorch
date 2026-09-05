@@ -98,11 +98,16 @@ capability resource state。
   matching operation execution 的 `AdmissibilitySnapshotID + AcquisitionBinding` 所绑定、已随 dispatch 封存的完整 Shell-owner
   catalog `TargetRefs`；per-operation target authorization 只裁决 validation entry，不能代替 diagnostic scope。
 - candidate proposal 持久化后，SM-3 必须按 manifest-declared `CandidateConstraints` 的 kind 获取 exact owner fact。
+  constraints 是 operation-level 与 selected variant-level 的合并合同；无 variant 的 operation 同样受约束，不能创建虚拟 variant。
+  已声明 dynamic constraint 的 operation 在缺少 owner admissibility 时禁止走 static capability seal lane。
   `parameter_shape` 在 ordinary feasibility 前通过 typed conformance command 完成，owner 只复用自身 parser/matcher 返回封闭
   outcome/shape且不读写 workspace；`target_applicability` 只能由 ordinary typed feasibility 对 current target/revision 返回
   `candidate_constraint_violated`。两者均以 `attempt + LogicalRequestID + operation + manifest constraint` 持久化 restart fence；
   `nonconformant` 或 applicability violation 与 attempt closure 必须在同一个 private event/CAS 中原子提交，
   `owner_contract_defect` 直接 fail closed。没有声明相应 constraint 的 operation 不发 placeholder call或开启 correction。
+- failed attempt 保留 feasibility fact 时，同一失败 CAS 必须保存 exact owner catalog preimage。历史 reverse proof 使用
+  sealed manifest snapshot ref + catalog self hash + operation/owner/acquisition/revision；不得读取新 catalog 重建旧拒绝。
+  pending attempt 仍只认 current catalog；历史 preimage 不进入 admission、provider projection 或 dispatch authority。
 - ordinary owner infeasibility 在当前 binding purpose 为 `validation_failure_repair` 时不得走会清空 directive、保留 binding 的
   通用 failure 路径。Orchestrator 必须在同一个 private event/CAS 中 invalidates candidate、以 exact owner observation 退役该
   intermediate binding，并形成有界 `repair_surface_unavailable` terminal；duplicate/restart 不得重复退役或消耗 effect/budget。
@@ -151,6 +156,11 @@ capability resource state。
   preimage 反证，不从 current mutable facts重编译。
 
 ### Receipt, evidence and repair
+
+- 已封存 validation-repair effect 的 rejected owner receipt 必须在完成 dispatch 的同一次 private SM-3/SM-2 CAS 中
+  退休 target/directive，并封存 `repair_surface_unavailable`；若持有 semantic repair intermediate binding，同步退休该 binding。
+  receipt 原诊断、confirmation、commitment 与 evidence lineage 保持不可变；普通拒绝不授权恢复旧修复范围或自动 successor。
+  candidate-local applicability 在 dispatch 前使用唯一 attempt 0/1；typed stale、governance 与 unknown effect 仍各走既有独立事件。
 
 - capability owner 只返回 factual catalog/feasibility/receipt。receipt 必须绑定 exact dispatch、operation、execution key/fence、
   target authorization、effect、binding 与 recipe/check；只有 SM-2 private event 可以裁决 evidence kind、credit、CWI settlement
@@ -302,6 +312,7 @@ capability resource state。
 
 | 验收面 | 自动化证据 | 必需维度 |
 | --- | --- | --- |
+| repair rejection / historical probe lineage | `biz/runtime/repair_rejection_closure_test.go`、`biz/runtime/candidate_owner_conformance_test.go`、`biz/runtime/shell_owner_receipt_integration_test.go::TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot` | first-member/partial-effect rejected repair 同 CAS 退役；candidate correction 的 exact catalog preimage、tamper/协调重封存拒绝、CAS-before/response-loss/restart duplicate；真实 Shell→File correction→effect→fresh validation，历史拒绝不阻塞 current owner fact 推进 |
 | Module lifecycle/core dependencies | `plugin_test.go::TestModuleRunBindsFrameworkContextToOwnerLifecycle`、`plugin_test.go::TestModuleSetupRejectsMissingBackgroundRoutine`、`biz/owner_test.go::TestModuleIdentityConfigureStartStopContract`、`biz/owner_test.go::TestModuleConfigureRequiresCoreDependencies`、`biz/owner_test.go::TestFailedStartRemovesAllIngressAndCancelsLifecycle` | identity、Configure/Start/Stop、framework context、required BackgroundRoutine、startup rollback、deadline-aware Stop、canonical evidence repository bundle 与 EventHub dependency fail-fast |
 | owner-private dispatcher/CAS/aggregate | `biz/runtime/internal_event_*_test.go`、`biz/runtime/component_facades_test.go`、`biz/runtime/aggregate_invariant_test.go`、`biz/runtime/structure_contract_test.go`、`biz/runtime/failure_authority_transition_test.go`（含 `TestOwnerInfeasibilityAtomicallyTerminatesValidationRepairBinding`）、`biz/runtime/candidate_owner_conformance_test.go::TestOwnerCandidateApplicabilityViolationClosesFactAndCorrectionInOneCAS` | exactly-one payload、primary SM 与 coordinated write-set、single mutation root/CAS、三种 failure-authority policy、candidate feasibility fact+disposition 单 CAS、validation-repair infeasibility 原子退役/terminal、旧 target/directive 不泄漏、duplicate/fresh-load 与 pre/post-CAS failure |
 | SM-2 semantic/CWI/binding | `biz/runtime/semantic_*_test.go`、`biz/runtime/cwi_*_test.go`、`biz/runtime/coverage_*_test.go`、`biz/runtime/assessment_*_test.go`（含 prospective effect 后 File `unsupported`、Definition-seeded owner-fact successor、restart/duplicate）、`biz/prerequisite_event_adapter_test.go::TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract`、`biz/runtime_drive_test.go::TestRuntimeFileBackedNextProofBatchSettlesTargetSelectionBeforeProvider`、`biz/runtime_state_repository_test.go::TestRuntimeStateRepositoryTargetSelectionCommitCrashRestartIsAtomic`、`biz/runtime/cwi_ledger_schema_test.go::TestValidationFailureRepairSemanticRebindingClearsExecutionAuthorityThroughFocusReducer`、`biz/runtime_semantic_drive_test.go::TestRuntimeSemanticFalseUndeclaredPrerequisiteUsesCorrectionAcrossRestart` | all-of、owner fact、typed gap claim 的 satisfied/acquisition/genuinely-undeclared admission、duplicate/stale/ABA、reopen/settle、semantic-pending exact `RuntimeFocusSeed`、batch rollover 的 owner prerequisite→CAS→request identity 顺序与零额外 provider/budget、predecessor execution-authority purge、attempt-1 correction→feasibility→batch-generation seal、proof preimage/fresh-load、false gap 零 governance/effect |

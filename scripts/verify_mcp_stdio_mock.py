@@ -134,6 +134,25 @@ def semantic_plan_payload(user_content: str, expected_server_id: str) -> dict[st
     ])
     if set(manifest_coverage) != set(batch_coverage):
         raise MockContractError("semantic proof manifest does not match bounded batch coverage")
+    obligations = _object(manifest, "proofObligations", "ProofObligations")
+    if not isinstance(obligations, list):
+        raise MockContractError("semantic proof manifest has no proof obligations")
+    declarations: dict[str, str] = {}
+    for obligation in obligations:
+        coverage_id = _object(obligation, "coverageWorkItemId", "CoverageWorkItemID")
+        declaration_ref = _object(obligation, "declarationRef", "DeclarationRef")
+        if not isinstance(coverage_id, str) or coverage_id not in batch_coverage:
+            raise MockContractError("semantic proof obligation is outside current batch")
+        if coverage_id in declarations:
+            raise MockContractError(f"duplicate semantic proof obligation for {coverage_id!r}")
+        if not isinstance(declaration_ref, str) or not declaration_ref.strip():
+            raise MockContractError(f"semantic proof obligation has no declarationRef for {coverage_id!r}")
+        # The LLM owner already projects the current declaration (including
+        # repair convergence identity). Never reconstruct it from a CWI, an
+        # original proof requirement, DefinitionSeed or correction diagnostics.
+        declarations[coverage_id] = declaration_ref
+    if set(declarations) != set(batch_coverage):
+        raise MockContractError("semantic proof obligations do not cover the exact current batch")
     catalog = None
     for candidate in _object(manifest, "ownerCatalogs", "OwnerCatalogs") or []:
         if isinstance(candidate, dict) and _object(candidate, "ownerModuleId", "OwnerModuleID") == "blocks/mcp":
@@ -158,7 +177,7 @@ def semantic_plan_payload(user_content: str, expected_server_id: str) -> dict[st
             "target": {"policy": "existing_owner_scope", "ownerSelectorRefs": [expected_server_id]},
             "requiredEvidenceKinds": ["validation"],
             "validationRecipeId": recipes[0],
-            "declarationRef": f"mock-semantic/{coverage_id}",
+            "declarationRef": declarations[coverage_id],
         })
     document["batchId"] = batch_id
     document["batchSequence"] = batch_sequence
@@ -409,6 +428,7 @@ def self_test() -> None:
 
     semantic_manifest = {
         "Hash": "manifest-test", "DefinitionSeedHash": "seed-test", "CoverageItems": [{"ID": "cwi-test"}],
+        "ProofObligations": [{"CoverageWorkItemID": "cwi-test", "DeclarationRef": "definition/dodItem/dod-test"}],
         "OwnerCatalogs": [{
             "OwnerModuleID": "blocks/mcp", "SelectorRefs": ["mcp-test"],
             "ValidationRecipeRefs": ["mcp/tool_call/mcp-test/repo.summary"],
@@ -425,6 +445,8 @@ def self_test() -> None:
     })), "mcp-test")
     if "coverageOrder" in semantic or semantic.get("batchCoverageWorkItemIds") != ["cwi-test"] or semantic["proposals"][0].get("validationRecipeId") != "mcp/tool_call/mcp-test/repo.summary":
         raise AssertionError(f"MCP semantic plan lost owner recipe identity: {semantic}")
+    if semantic["proposals"][0].get("declarationRef") != "definition/dodItem/dod-test":
+        raise AssertionError(f"MCP semantic plan lost the sealed CWI declaration: {semantic}")
 
     validation = decision_payload(_prompt(("C3.runtime-authority", _authority("need_validation"))), "mcp-test")
     operation = validation["operations"][0]

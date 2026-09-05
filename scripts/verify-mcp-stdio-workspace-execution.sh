@@ -13,7 +13,14 @@ fi
 BASE_URL="${WORKORCH_MCP_STDIO_VERIFY_BASE_URL:-${WORKORCH_BASE_URL:-}}"
 source "$ROOT_DIR/scripts/lib/verify-isolated-runtime.sh"
 workorch_verify_require_isolated_runtime "$BASE_URL" "verify-mcp-stdio-workspace-execution"
-TMP_DIR="$(mktemp -d)"
+if [[ -n "${WORKORCH_VERIFY_TMP_ROOT:-}" ]]; then
+  mkdir -p "$WORKORCH_VERIFY_TMP_ROOT"
+  TMP_DIR="$(mktemp -d "$WORKORCH_VERIFY_TMP_ROOT/mcp-stdio.XXXXXX")"
+  TMP_DIR="$(realpath "$TMP_DIR")"
+else
+  TMP_DIR="$(mktemp -d)"
+fi
+KEEP_TMP="${WORKORCH_VERIFY_KEEP_TMP:-0}"
 MOCK_ADDR="${WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR:-127.0.0.1:18181}"
 MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 VERIFY_SUFFIX="${WORKORCH_MCP_STDIO_VERIFY_SUFFIX:-$$}"
@@ -38,18 +45,15 @@ report_failure() {
     return
   fi
   echo "workorch MCP stdio verification failed for deployed workorch service $BASE_URL" >&2
+  echo "verification evidence retained at $TMP_DIR (JSON responses and mock log)" >&2
   if [[ -f "$MOCK_LOG" ]]; then
     echo "--- llm-mock.log ---" >&2
     tail -n 200 "$MOCK_LOG" >&2 || true
   fi
-  for file in "$TMP_DIR"/*.json; do
-    [[ -f "$file" ]] || continue
-    echo "--- $file ---" >&2
-    python3 -m json.tool "$file" >&2 || cat "$file" >&2
-  done
 }
 
 cleanup() {
+  local status=$?
   if [[ -f "$TMP_DIR/original-llm-update.json" ]]; then
     curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -fsS -H "Content-Type: application/json" -X PUT \
       "$BASE_URL/api/v1/workorch/configuration/llm" \
@@ -59,7 +63,11 @@ cleanup() {
     kill "$MOCK_PID" >/dev/null 2>&1 || true
     wait "$MOCK_PID" >/dev/null 2>&1 || true
   fi
-  rm -rf "$TMP_DIR"
+  if [[ $status -ne 0 || "$KEEP_TMP" == "1" || "$KEEP_TMP" == "true" ]]; then
+    echo "keeping verification temp dir: $TMP_DIR" >&2
+  else
+    rm -rf "$TMP_DIR"
+  fi
 }
 
 json_path() {
@@ -212,33 +220,8 @@ wait_activation_run() {
   local run_id=""
   local deadline=$((SECONDS + 120))
 
-  python3 - "$activation_file" <<'PY'
-import json
-import sys
-
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-errors = []
-if data.get("accepted") is not True:
-    errors.append(f"accepted is {data.get('accepted')!r}, want true")
-if data.get("intent") != "restart":
-    errors.append(f"intent is {data.get('intent')!r}, want restart")
-if not str(data.get("requestId") or "").strip():
-    errors.append("requestId is empty")
-valid_admissions = {
-    "reconciliation_requested": {"current_run_continuation_accepted", "pending_run_activated", "new_run_activated"},
-    "replacement_pending": {"duplicate_restart", "predecessor_supersede_requested"},
-}
-outcome = data.get("outcome")
-owner_reason = data.get("reason")
-if owner_reason not in valid_admissions.get(outcome, set()):
-    errors.append(f"owner admission outcome/reason is {outcome!r}/{owner_reason!r}")
-if data.get("state") != "accepted":
-    errors.append(f"state is {data.get('state')!r}, want accepted")
-if data.get("requestReason") != "e2e_restart":
-    errors.append(f"requestReason is {data.get('requestReason')!r}, want e2e_restart")
-if errors:
-    raise SystemExit("\n".join(errors))
-PY
+  python3 "$ROOT_DIR/scripts/verify_execution_activation.py" "$activation_file" \
+    --intent restart --workspace-id "$workspace_id" --request-reason e2e_restart || return 1
 
   while (( SECONDS <= deadline )); do
     if get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" "$runs_file"; then

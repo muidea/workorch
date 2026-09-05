@@ -1,11 +1,54 @@
 package runtime
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+// A rejected sealed validation-repair effect cannot inherit its predecessor's
+// executable authority. Candidate-local correction belongs before dispatch;
+// stale, governance and unknown outcomes have their own typed event lanes.
+// This receipt lane closes the exact repair in the same SM-3/SM-2 transaction,
+// retaining immutable causation without inventing another repair permission.
+func closeRejectedValidationRepairExecution(aggregate *RuntimeAggregate, dispatch SealedDispatch, admission executionEvidenceAdmission, fact runtimecontract.EvidenceFact) (bool, error) {
+	if admission.Evidence.Status != ExecutionEvidenceStatusRejected || fact.Kind != runtimecontract.EvidenceKindStateChange ||
+		admission.Evidence.Receipt == nil || admission.Evidence.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected {
+		return false, nil
+	}
+	_, semanticRepair, err := currentRuntimeSemanticValidationFailureRepair(*aggregate)
+	if err != nil {
+		return false, err
+	}
+	confirmedRepair := dispatch.RepairCommitment != nil && dispatch.RepairCommitment.Purpose == runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation
+	if !semanticRepair && !confirmedRepair {
+		return false, nil
+	}
+	if aggregate.Facts.Failure == nil {
+		return false, fmt.Errorf("%w: rejected validation repair requires its receipt-derived failure", common.ErrConflict)
+	}
+	failure := aggregate.Facts.Failure.Clone()
+	if semanticRepair {
+		coverageID := aggregate.Facts.Focus.CoverageWorkItemIDs[0]
+		index := runtimeCWICoverageIndex(aggregate.Facts.Coverage, coverageID)
+		binding := aggregate.Facts.Coverage[index].CurrentBindingRef.Clone()
+		if err := retireRuntimeValidationRepairBinding(aggregate, coverageID, binding, string(fact.ID),
+			"validation-repair operation set was rejected by its capability owner during execution"); err != nil {
+			return false, err
+		}
+	}
+	failure.Class = runtimecontract.FailureClassCandidateInfeasible
+	failure.Code = "repair_surface_unavailable"
+	failure.Message = "sealed validation-repair execution was rejected; no successor repair authority is sealed"
+	failure.TargetRefs = nil
+	failure.TargetObservation = nil
+	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+		return false, err
+	}
+	return true, nil
+}
 
 func applyRejectedExecutionEvidence(aggregate *RuntimeAggregate, admission executionEvidenceAdmission, fact runtimecontract.EvidenceFact) error {
 	evidence := admission.Evidence

@@ -116,6 +116,10 @@ func completeEvidenceDispatch(
 	}
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
+	repairRejected, err := closeRejectedValidationRepairExecution(aggregate, dispatch, admission, fact)
+	if err != nil {
+		return err
+	}
 	repairSurfaceConfirmationPending := false
 	if admission.Evidence.Status == ExecutionEvidenceStatusAccepted && !invalidated {
 		if repair, found, err := currentRuntimeSemanticValidationFailureRepair(*aggregate); err != nil {
@@ -135,7 +139,7 @@ func completeEvidenceDispatch(
 			}
 		}
 	}
-	if admission.Evidence.Status == ExecutionEvidenceStatusRejected && !invalidated {
+	if admission.Evidence.Status == ExecutionEvidenceStatusRejected && !invalidated && !repairRejected {
 		// A structured observation waits for owner confirmation only when its exact
 		// diagnostic tuple has a sealed Profile route. A complete but unmatched
 		// tuple is terminal in this receipt CAS just like a target-free unmatched

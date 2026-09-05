@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="${WORKORCH_MANAGED_VERIFY_ARTIFACT_DIR:-$(mktemp -d)}"
 KEEP_ARTIFACTS="${WORKORCH_MANAGED_VERIFY_KEEP_ARTIFACTS:-0}"
 VERBOSE_LOGS="${WORKORCH_MANAGED_VERIFY_VERBOSE_LOGS:-0}"
+FAILURE_LOG_HEAD_LINES="${WORKORCH_MANAGED_VERIFY_FAILURE_LOG_HEAD_LINES:-80}"
 FAILURE_LOG_TAIL_LINES="${WORKORCH_MANAGED_VERIFY_FAILURE_LOG_TAIL_LINES:-400}"
 SERVER_PID=""
 SERVER_LOG="$TMP_DIR/workorch-server.log"
@@ -117,6 +118,8 @@ run_step() {
     echo "command failed: $label" >&2
     echo "command log: $log_file" >&2
     if [[ -f "$log_file" ]]; then
+      echo "--- command output head ---" >&2
+      head -n "$FAILURE_LOG_HEAD_LINES" "$log_file" >&2 || true
       echo "--- command output tail ---" >&2
       tail -n "$FAILURE_LOG_TAIL_LINES" "$log_file" >&2 || true
     fi
@@ -334,6 +337,7 @@ precreate_observation_workspaces
 
 export WORKORCH_BASE_URL="$BASE_URL"
 export WORKORCH_VERIFY_ISOLATION_STATE_FILE="$TMP_DIR/managed-runtime-state.json"
+export WORKORCH_VERIFY_TMP_ROOT="${WORKORCH_VERIFY_TMP_ROOT:-$TMP_DIR/verifiers}"
 export WORKORCH_VERIFY_BASE_URL="${WORKORCH_VERIFY_BASE_URL:-$BASE_URL}"
 export WORKORCH_MCP_ENDPOINT_DIR="${WORKORCH_MCP_ENDPOINT_DIR:-$DATA_DIR/system/mcp-endpoints}"
 export WORKORCH_OBSERVE_ARTIFACT_DIR="${WORKORCH_OBSERVE_ARTIFACT_DIR:-$TMP_DIR/observe-runtime-closure}"

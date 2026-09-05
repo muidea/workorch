@@ -176,7 +176,7 @@ func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) Runtime
 		}
 		return completeAdmissionFailure(RuntimeCompleteAdmissionStaleConflict, "active_dispatch_conflict", fmt.Errorf("runtime authority already has a different active dispatch"))
 	}
-	if feasibility := evaluateRuntimeCompleteAdmissionFeasibility(input.Facts, input.Manifest.Hash, input.Candidate, input.Attempt.Feasibilities); !feasibility.Admitted() {
+	if feasibility := evaluateRuntimeCompleteAdmissionFeasibility(input.Facts, input.Manifest, input.Candidate, input.Attempt.Feasibilities); !feasibility.Admitted() {
 		return feasibility
 	}
 	if err := ValidateRuntimeCWIBindingRetirementsAgainstExecution(input.Facts, input.ActiveDispatch, input.CompletedDispatches, input.OperationReceipts); err != nil {
@@ -238,7 +238,7 @@ func runtimeCurrentFocusBlockedPrerequisites(facts RuntimeFacts) []string {
 	return normalizeStrings(blocked)
 }
 
-func evaluateRuntimeCompleteAdmissionFeasibility(facts RuntimeFacts, manifestHash string, candidate RuntimeCandidate, values []RuntimeCandidateFeasibilityRecord) RuntimeCompleteAdmissionDecision {
+func evaluateRuntimeCompleteAdmissionFeasibility(facts RuntimeFacts, manifest RuntimeCandidateContractManifest, candidate RuntimeCandidate, values []RuntimeCandidateFeasibilityRecord) RuntimeCompleteAdmissionDecision {
 	if err := ValidateRuntimeCandidateFeasibilityRecords(values); err != nil {
 		return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "owner_feasibility_invalid", err)
 	}
@@ -253,6 +253,22 @@ func evaluateRuntimeCompleteAdmissionFeasibility(facts RuntimeFacts, manifestHas
 		}
 		inventory, required := runtimeAdmissionAdmissibilityForOperation(facts, descriptor.OwnerModuleID, operation.Kind)
 		if !required {
+			// A declared dynamic constraint cannot silently take the static
+			// capability seal lane when the owner prerequisite is absent.
+			for _, authorization := range manifest.Operations {
+				if authorization.Kind != operation.Kind {
+					continue
+				}
+				_, constraints, err := RuntimeOperationCandidateConstraintsForOperation(operation, authorization)
+				if err != nil {
+					return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "owner_constraint_invalid", err)
+				}
+				for _, constraint := range constraints {
+					if constraint.Kind == RuntimeOperationCandidateConstraintTargetApplicability {
+						return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "owner_catalog_missing", fmt.Errorf("candidate operation %q has dynamic constraints without owner admissibility", operation.ID))
+					}
+				}
+			}
 			continue
 		}
 		if inventory.SnapshotID == "" {
@@ -262,7 +278,7 @@ func evaluateRuntimeCompleteAdmissionFeasibility(facts RuntimeFacts, manifestHas
 		if !found || observation.AdmissibilitySnapshotID != inventory.SnapshotID || observation.Observation == nil {
 			return completeAdmissionFailure(RuntimeCompleteAdmissionOwnerInfeasible, "owner_feasibility_incomplete", fmt.Errorf("candidate operation %q has no current persisted feasibility result", operation.ID))
 		}
-		if observation.CandidateManifestHash != strings.TrimSpace(manifestHash) {
+		if observation.CandidateManifestHash != strings.TrimSpace(manifest.Hash) {
 			return completeAdmissionFailure(RuntimeCompleteAdmissionOwnerStale, "owner_feasibility_manifest_stale", fmt.Errorf("candidate operation %q feasibility manifest identity is stale", operation.ID))
 		}
 		if observation.AcquisitionBinding != inventory.AcquisitionBinding {

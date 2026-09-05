@@ -234,6 +234,12 @@ authority-shaped target。
 任何绕过该 writer 的直接非空 `Facts.Failure` 写入、保留旧 target 但替换 failure lineage、或用 current manifest/diagnostic 文本
 重建 replacement target，都属于 torn SM-2 authority，必须在静态门禁、transaction test 与 fresh-load invariant 中失败。
 
+已封存 validation-repair effect 的 rejected receipt 在完成 dispatch 的同一次 owner-private SM-3/SM-2 CAS 中退休
+target/directive，并封存 `repair_surface_unavailable`；semantic repair intermediate binding 同步退休，Definition source binding
+只保留其原 proof 语义。原 receipt diagnostic、confirmation、repair commitment 与 evidence lineage 不改写，禁止由新 failure
+继承旧可执行授权。candidate-local constraint correction 必须在 dispatch 前完成；此边不增加 retry、owner 或状态机，
+也不接管 typed stale/governance/unknown effect 的独立事件。
+
 validation failure 因果中的三类 target 是相互独立的 immutable fact：
 
 | Target | 唯一来源 | 约束 |

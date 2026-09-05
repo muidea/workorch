@@ -177,7 +177,12 @@ type RuntimeCandidateAttemptRecord struct {
 	// feasibility and cannot authorize dispatch or choose retry policy.
 	Conformances  []RuntimeCandidateConformanceRecord
 	Feasibilities []RuntimeCandidateFeasibilityRecord
-	Failure       *RuntimeCandidateFailure
+	// FeasibilityCatalogs are the exact owner catalog preimages retained by the
+	// Orchestrator when a failed attempt keeps probe facts. They prove historical
+	// rejection lineage after current resources change; they are never current
+	// feasibility or dispatch authority and cannot be supplied by a probe result.
+	FeasibilityCatalogs []RuntimeOperationAdmissibility
+	Failure             *RuntimeCandidateFailure
 	// Correction is the manifest-bound SM-3 disposition sealed together with a
 	// failed attempt. A correctable_once value must carry a concrete semantic
 	// witness; attempt 1 may never be inferred again from Failure reason text.
@@ -239,6 +244,7 @@ func (r RuntimeCandidateAttemptRecord) Clone() RuntimeCandidateAttemptRecord {
 		r.Proposal = &proposal
 	}
 	r.Feasibilities = cloneRuntimeCandidateFeasibilities(r.Feasibilities)
+	r.FeasibilityCatalogs = cloneRuntimeStateRawSlice(r.FeasibilityCatalogs, cloneRuntimeOperationAdmissibilityRaw)
 	conformances := make([]RuntimeCandidateConformanceRecord, 0, len(r.Conformances))
 	for _, value := range r.Conformances {
 		conformances = append(conformances, value.Clone())
@@ -973,6 +979,32 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 		}
 		if err := ValidateRuntimeCandidateFeasibilityRecords(value.Feasibilities); err != nil {
 			return fmt.Errorf("runtime candidate attempt %s feasibility records: %w", key, err)
+		}
+		if value.State != RuntimeCandidateAttemptStateFailed && len(value.FeasibilityCatalogs) != 0 {
+			return fmt.Errorf("runtime candidate attempt %s only failed attempts may retain historical feasibility catalogs", key)
+		}
+		catalogRefs := make(map[string]bool, len(value.FeasibilityCatalogs))
+		for _, catalog := range value.FeasibilityCatalogs {
+			if err := catalog.Validate(); err != nil {
+				return fmt.Errorf("runtime candidate attempt %s historical feasibility catalog: %w", key, err)
+			}
+			if _, duplicate := catalogRefs[catalog.SnapshotID]; duplicate {
+				return fmt.Errorf("runtime candidate attempt %s duplicates historical feasibility catalog", key)
+			}
+			catalogRefs[catalog.SnapshotID] = false
+		}
+		if value.State == RuntimeCandidateAttemptStateFailed {
+			for _, feasibility := range value.Feasibilities {
+				if _, found := catalogRefs[feasibility.AdmissibilitySnapshotID]; !found {
+					return fmt.Errorf("runtime candidate attempt %s missing historical feasibility catalog", key)
+				}
+				catalogRefs[feasibility.AdmissibilitySnapshotID] = true
+			}
+		}
+		for _, used := range catalogRefs {
+			if !used {
+				return fmt.Errorf("runtime candidate attempt %s has an unreferenced historical feasibility catalog", key)
+			}
 		}
 		if err := ValidateRuntimeCandidateConformanceRecords(value.Conformances); err != nil {
 			return fmt.Errorf("runtime candidate attempt %s conformance records: %w", key, err)

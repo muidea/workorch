@@ -365,7 +365,7 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 			TargetCardinality:           operation.TargetCardinality,
 			RequireTargetRefs:           runtimeStringIn(requiredWireFields, "targetRefs"),
 			ForbiddenParameters:         append([]string(nil), operation.ForbiddenParameters...),
-			CandidateConstraints:        runtimeCandidateOperationConstraints(operation.Variants),
+			CandidateConstraints:        runtimeCandidateOperationConstraints(operation),
 			Rules:                       append([]string(nil), operation.Rules...),
 			AllowsDynamicParameters:     operation.AllowsDynamicParameters,
 			DynamicParameterPrefixes:    append([]string(nil), operation.DynamicParameterPrefixes...),
@@ -425,9 +425,9 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 	return ret
 }
 
-func runtimeCandidateOperationConstraints(variants []runtimecontract.RuntimeOperationVariantContract) []runtimecontract.RuntimeOperationCandidateConstraint {
-	ret := make([]runtimecontract.RuntimeOperationCandidateConstraint, 0)
-	for _, variant := range variants {
+func runtimeCandidateOperationConstraints(operation runtimecontract.RuntimeCandidateOperationManifest) []runtimecontract.RuntimeOperationCandidateConstraint {
+	ret := append([]runtimecontract.RuntimeOperationCandidateConstraint(nil), operation.CandidateConstraints...)
+	for _, variant := range operation.Variants {
 		ret = append(ret, variant.CandidateConstraints...)
 	}
 	return runtimecontract.NormalizeRuntimeOperationCandidateConstraints(ret)

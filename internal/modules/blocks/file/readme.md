@@ -52,6 +52,11 @@ operation。
   manifest-bound 的 `conformant | nonconformant | owner_contract_defect` 静态事实。feasibility 对合法但无法应用到 current
   owner-observed target 的 diff 返回 manifest-bound `candidate_constraint_violated`，携带 exact target/revision 与封闭 shape。
   File 在两阶段都不选择 correction、retry、terminal 或 Runtime state transition。
+- `file/edit` 的 operation-level constraint 与 `patch/apply|patch/preview:text_replace` 的 variant-level constraint 共享
+  `oldText` applicability 合同。feasibility 复用 execution 的 text replacement/patch parser 与 matcher 做只读应用；
+  current revision 下缺失/歧义/occurrence 越界的匹配返回 bounded applicability violation，不能冒充 stale 或扩大 target。
+  baseHash、binary/path/resource failure 保持普通 owner infeasibility；无 current snapshot 时仅返回既有 typed prerequisite。
+  `file/edit` 仍是 at-most-once effect，不因新增预检而取得 patch replay authority。
 - feasibility 必须按 sealed target policy 对资源事实进行完备分类：prospective target 已存在，以及 exact/existing target
   已缺失，返回 `policy_disallowed + sealed_target_authorization_contradicted` 和 exact owner policy/revision；candidate-local
   patch conflict 不得冒充 binding contradiction。
@@ -71,6 +76,7 @@ operation。
 | 维度 | 可执行证据 | 覆盖结论 |
 | --- | --- | --- |
 | normal list/read/write/edit/preview/apply | [`module_test.go`](module_test.go)、[`biz/file_runtime_adapter_test.go`](biz/file_runtime_adapter_test.go) | 覆盖 create-only 与 existing-target selector、读写编辑及 patch 主路径 |
+| text edit applicability | [`edit_applicability_test.go`](edit_applicability_test.go) | `file/edit` 与 `patch/apply|patch/preview` text_replace 的真实 EventHub 矩阵：exact/byte-exact、空 replacement、occurrence、缺失/歧义/越界、baseHash/binary 与 duplicate；probe 零写入/receipt，owner constraint 不含执行或纠正权限 |
 | typed contract / sealed identity | [`pkg/events/operation_test.go`](pkg/events/operation_test.go)、`kernel/orchestrator/biz/prerequisite_event_adapter_test.go::TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract` | 16 topic inventory、payload/scope binding、create-only selector effect 前 `create`/effect 后 `unsupported` 覆盖 |
 | candidate constraints | [`biz/file_runtime_candidate_conformance_test.go`](biz/file_runtime_candidate_conformance_test.go)、`biz/file_runtime_adapter_test.go::TestRuntimeAdapterRuntimeFeasibilityRejectsStaleUnifiedDiff`、`module_test.go::TestFileModuleReportsUnifiedDiffTargetApplicabilityAsTypedCandidateConstraint`、[`pkg/events/operation_test.go`](pkg/events/operation_test.go) | static valid/invalid unified diff、target/target-policy mode、零 workspace I/O conformance，以及真实 owner EventHub 路径中 current target conflict 的 manifest/revision-bound typed applicability violation 与零 effect 覆盖 |
 | exact source | `TestFileRuntimeOwnerCommandsRejectUntrustedSources`、`TestFileWorkspaceManifestAllowsGitOwnerSource`、`TestFileModuleRejectsDriftedSealedOperationBeforeEffect` | 10 个 read topic 的 producer matrix 与 execute wrong-source 覆盖 |

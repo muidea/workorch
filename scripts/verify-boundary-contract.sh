@@ -1579,6 +1579,8 @@ fi
 # production: providers propose semantics only; Orchestrator derives identity,
 # dependency edges and coverage credit from the sealed manifest.
 python3 scripts/verify_runtime_candidate_wire_scripts.py --self-test
+python3 -m unittest discover -s scripts -p 'test_verify_mcp_stdio_mock.py'
+python3 -m unittest discover -s scripts -p 'test_verify_execution_activation.py'
 
 # SM-3 owns the persisted candidate correction disposition/terminal state.
 # The LLM owner receives only a detached, manifest-bound witness needed to

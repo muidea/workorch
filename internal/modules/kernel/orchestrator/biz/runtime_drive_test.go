@@ -255,6 +255,12 @@ func TestDriveRuntimeFileBackedRunExecutesDurableFileOwnerAndRestarts(t *testing
 	root := t.TempDir()
 	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 	bootstrap := runtimeBootstrap()
+	// Dynamic edit applicability must be decided by the real File owner before
+	// dispatch, including when the test starts from a pre-sealed semantic fixture.
+	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{
+		Kind: runtimecontract.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		RequiredCapabilities: []string{runtimecontract.StepKindFileEdit}, Reason: "File edit applicability catalog",
+	})
 	runtimeTestDeclareExistingWorkspaceTarget(&bootstrap, "target.txt")
 	bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
 	if err := runs.Create(ctx, &runmodel.Run{

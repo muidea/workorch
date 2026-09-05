@@ -565,6 +565,7 @@ func cloneRuntimeCandidateContractManifestRaw(in RuntimeCandidateContractManifes
 
 func cloneRuntimeCandidateOperationManifestRaw(in RuntimeCandidateOperationManifest) RuntimeCandidateOperationManifest {
 	out := in
+	out.CandidateConstraints = cloneRuntimeStateRawSlice(in.CandidateConstraints, func(value RuntimeOperationCandidateConstraint) RuntimeOperationCandidateConstraint { return value })
 	out.AllowedOperationFields = cloneRuntimeStateRawSlice(in.AllowedOperationFields, func(item string) string { return item })
 	out.RequiredOperationFields = cloneRuntimeStateRawSlice(in.RequiredOperationFields, func(item string) string { return item })
 	out.AllowedVariantIDs = cloneRuntimeStateRawSlice(in.AllowedVariantIDs, func(item string) string { return item })
@@ -631,6 +632,7 @@ func cloneRuntimeCandidateAttemptRecordRaw(in RuntimeCandidateAttemptRecord) Run
 	out.Feasibilities = cloneRuntimeStateRawSlice(in.Feasibilities, func(item RuntimeCandidateFeasibilityRecord) RuntimeCandidateFeasibilityRecord {
 		return cloneRuntimeCandidateFeasibilityRecordRaw(item)
 	})
+	out.FeasibilityCatalogs = cloneRuntimeStateRawSlice(in.FeasibilityCatalogs, cloneRuntimeOperationAdmissibilityRaw)
 	out.Failure = cloneRuntimeStateRawPointer(in.Failure, func(item RuntimeCandidateFailure) RuntimeCandidateFailure {
 		return cloneRuntimeCandidateFailureRaw(item)
 	})

@@ -133,7 +133,8 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 		switch RuntimeOperationCandidateRequiredShape(w.AlternativeValue) {
 		case RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile,
 			RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode,
-			RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget:
+			RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget,
+			RuntimeOperationCandidateRequiredShapeTextReplaceApplicableToObservedTarget:
 		default:
 			return fmt.Errorf("owner-constraint candidate correction witness has undeclared required shape %q", w.AlternativeValue)
 		}

@@ -156,6 +156,7 @@ type RuntimeCandidateOperationManifest struct {
 	RequireTargetRefs           bool
 	ForbiddenParameters         []string
 	Variants                    []RuntimeOperationVariantContract
+	CandidateConstraints        []RuntimeOperationCandidateConstraint
 	Rules                       []string
 	AllowsDynamicParameters     bool
 	DynamicParameterPrefixes    []string
@@ -583,6 +584,7 @@ func (m RuntimeCandidateOperationManifest) Normalized() RuntimeCandidateOperatio
 	m.TargetCardinality = RuntimeOperationTargetCardinality(strings.TrimSpace(string(m.TargetCardinality)))
 	m.ForbiddenParameters = cloneRuntimeCandidateContractStrings(m.ForbiddenParameters)
 	m.Variants = cloneRuntimeOperationVariantContracts(m.Variants)
+	m.CandidateConstraints = append([]RuntimeOperationCandidateConstraint(nil), NormalizeRuntimeOperationCandidateConstraints(m.CandidateConstraints)...)
 	m.Rules = cloneRuntimeCandidateContractStrings(m.Rules)
 	m.DynamicParameterPrefixes = normalizeStrings(m.DynamicParameterPrefixes)
 	m.RequiredOperationReferences = normalizeStrings(m.RequiredOperationReferences)
@@ -831,6 +833,12 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashString(h, string(operation.TargetCardinality))
 		writeHashString(h, fmt.Sprintf("%t", operation.RequireTargetRefs))
 		writeHashStrings(h, operation.ForbiddenParameters)
+		for _, constraint := range operation.CandidateConstraints {
+			writeHashString(h, constraint.Ref)
+			writeHashString(h, string(constraint.Kind))
+			writeHashString(h, constraint.ParameterName)
+			writeHashString(h, string(constraint.RequiredShape))
+		}
 		for _, variant := range operation.Variants {
 			writeHashString(h, variant.ID)
 			for _, discriminator := range variant.Discriminators {
@@ -980,6 +988,7 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		RequireTargetRefs:           requireTargetRefs,
 		ForbiddenParameters:         append([]string(nil), contract.ForbiddenParameters...),
 		Variants:                    variants,
+		CandidateConstraints:        contract.CandidateConstraints,
 		Rules:                       append([]string(nil), contract.Rules...),
 		AllowsDynamicParameters:     runtimeCandidateManifestAllowsDynamicParameters(contract.Kind),
 		DynamicParameterPrefixes:    runtimeCandidateManifestDynamicParameterPrefixes(contract.Kind),

@@ -2538,11 +2538,26 @@ func TestRuntimeCandidateRetryProjectsTypedOperationSetConsolidation(t *testing.
 }
 
 func TestRuntimeCandidateRetryProjectsOwnerConstraintOnlyInC4WithoutStablePrefixDrift(t *testing.T) {
+	for _, tc := range []struct {
+		kind, variant, parameter, ref string
+		shape                         runtimecontract.RuntimeOperationCandidateRequiredShape
+	}{
+		{runtimecontract.RuntimeBlockKindPatchApply, "unified_diff", "diff", "patch/unified_diff/diff/observed_target", runtimecontract.RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget},
+		{runtimecontract.RuntimeBlockKindPatchApply, "text_replace", "oldText", "file/text_replace/oldText/observed_target", runtimecontract.RuntimeOperationCandidateRequiredShapeTextReplaceApplicableToObservedTarget},
+		{runtimecontract.StepKindFileEdit, "", "oldText", "file/text_replace/oldText/observed_target", runtimecontract.RuntimeOperationCandidateRequiredShapeTextReplaceApplicableToObservedTarget},
+	} {
+		t.Run(tc.kind+"/"+tc.variant, func(t *testing.T) {
+			testRuntimeCandidateOwnerConstraintProjection(t, tc.kind, tc.variant, tc.parameter, tc.ref, tc.shape)
+		})
+	}
+}
+
+func testRuntimeCandidateOwnerConstraintProjection(t *testing.T, kind, variant, parameter, ref string, shape runtimecontract.RuntimeOperationCandidateRequiredShape) {
 	decision := runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange,
 		RequiredOutput: runtimecontract.RequiredOutputContract{
-			AcceptedKinds:             []string{runtimecontract.RuntimeBlockKindPatchApply},
-			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "unified_diff"}},
+			AcceptedKinds:             []string{kind},
+			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{Kind: kind, VariantID: variant}},
 			AcceptedEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 			RequiredEffectScopes:      []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
 			CoverageWorkItemIDs:       []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"main.go"},
@@ -2560,11 +2575,11 @@ func TestRuntimeCandidateRetryProjectsOwnerConstraintOnlyInC4WithoutStablePrefix
 	objectives := []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformOwnerConstraint}
 	witness := runtimecontract.RuntimeCandidateCorrectionWitness{
 		Dimension:        runtimecontract.RuntimeCandidateCorrectionWitnessOwnerConstraint,
-		OperationKind:    runtimecontract.RuntimeBlockKindPatchApply,
-		Path:             "$.operations[0].parameters[name=diff]",
-		ConstraintRef:    "patch/unified_diff/diff/observed_target",
+		OperationKind:    kind,
+		Path:             "$.operations[0].parameters[name=" + parameter + "]",
+		ConstraintRef:    ref,
 		RejectedValue:    string(runtimecontract.RuntimeOperationCandidateActualShapeObservedTargetContextMismatch),
-		AlternativeValue: string(runtimecontract.RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget),
+		AlternativeValue: string(shape),
 	}
 	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_owner_constraint_nonconformant",
@@ -2598,9 +2613,9 @@ func TestRuntimeCandidateRetryProjectsOwnerConstraintOnlyInC4WithoutStablePrefix
 	}
 	encoded := string(payload)
 	for _, required := range []string{
-		`"candidateConstraints"`, `"constraintRef":"patch/unified_diff/diff/observed_target"`,
+		`"candidateConstraints"`, `"constraintRef":"` + ref + `"`,
 		`"dimension":"owner_candidate_constraint"`, `"rejectedValue":"observed_target_context_mismatch"`,
-		`"alternativeValue":"unified_diff_applicable_to_observed_target"`, "capability owner rejected one candidate parameter",
+		`"alternativeValue":"` + string(shape) + `"`, "capability owner rejected one candidate parameter",
 	} {
 		if !strings.Contains(encoded, required) {
 			t.Fatalf("owner-constraint C3/C4 projection lost %q: %s", required, encoded)

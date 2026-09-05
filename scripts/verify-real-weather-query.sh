@@ -69,35 +69,8 @@ validate_activation_command_response() {
   local response_file="$1"
   local expected_request_id="$2"
   local expected_reason="$3"
-  python3 - "$response_file" "$expected_request_id" "$expected_reason" <<'PY'
-import json
-import sys
-
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-expected_request_id = sys.argv[2]
-expected_reason = sys.argv[3]
-errors = []
-if data.get("accepted") is not True:
-    errors.append(f"accepted is {data.get('accepted')!r}, want true")
-if data.get("intent") != "restart":
-    errors.append(f"intent is {data.get('intent')!r}, want restart")
-if data.get("requestId") != expected_request_id:
-    errors.append(f"requestId is {data.get('requestId')!r}, want {expected_request_id!r}")
-valid_admissions = {
-    "reconciliation_requested": {"current_run_continuation_accepted", "pending_run_activated", "new_run_activated"},
-    "replacement_pending": {"duplicate_restart", "predecessor_supersede_requested"},
-}
-outcome = data.get("outcome")
-owner_reason = data.get("reason")
-if owner_reason not in valid_admissions.get(outcome, set()):
-    errors.append(f"owner admission outcome/reason is {outcome!r}/{owner_reason!r}")
-if data.get("state") != "accepted":
-    errors.append(f"state is {data.get('state')!r}, want accepted")
-if data.get("requestReason") != expected_reason:
-    errors.append(f"requestReason is {data.get('requestReason')!r}, want {expected_reason!r}")
-if errors:
-    raise SystemExit("\n".join(errors))
-PY
+  python3 "$ROOT_DIR/scripts/verify_execution_activation.py" "$response_file" \
+    --intent restart --request-id "$expected_request_id" --request-reason "$expected_reason"
 }
 
 wait_activation_run() {

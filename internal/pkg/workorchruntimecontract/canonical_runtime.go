@@ -996,6 +996,10 @@ func runtimeOperationAdmissibilityVariantAllowsTargetPolicy(variant RuntimeOpera
 	return false
 }
 
+func (a RuntimeOperationAdmissibility) Clone() RuntimeOperationAdmissibility {
+	return cloneRuntimeOperationAdmissibilityRaw(a)
+}
+
 func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibility {
 	a.PrerequisiteID = strings.TrimSpace(a.PrerequisiteID)
 	a.SnapshotID = strings.TrimSpace(a.SnapshotID)

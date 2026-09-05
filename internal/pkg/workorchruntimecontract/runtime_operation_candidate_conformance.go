@@ -32,7 +32,17 @@ const (
 	RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile                 RuntimeOperationCandidateRequiredShape = "unified_diff_single_file"
 	RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode       RuntimeOperationCandidateRequiredShape = "unified_diff_authorized_target_mode"
 	RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget RuntimeOperationCandidateRequiredShape = "unified_diff_applicable_to_observed_target"
+	RuntimeOperationCandidateRequiredShapeTextReplaceApplicableToObservedTarget RuntimeOperationCandidateRequiredShape = "text_replace_applicable_to_observed_target"
 )
+
+// Both the variant-less file/edit and patch text_replace use this File-owned
+// rule. The operation kind remains part of every observation/witness identity.
+func runtimeTextReplacementCandidateConstraints() []RuntimeOperationCandidateConstraint {
+	return []RuntimeOperationCandidateConstraint{{
+		Ref: "file/text_replace/oldText/observed_target", Kind: RuntimeOperationCandidateConstraintTargetApplicability,
+		ParameterName: "oldText", RequiredShape: RuntimeOperationCandidateRequiredShapeTextReplaceApplicableToObservedTarget,
+	}}
+}
 
 // RuntimeOperationCandidateActualShape is the bounded factual classification
 // returned by a capability owner. It never contains the rejected parameter
@@ -77,7 +87,8 @@ func (c RuntimeOperationCandidateConstraint) Validate() error {
 			return nil
 		}
 	case RuntimeOperationCandidateConstraintTargetApplicability:
-		if c.RequiredShape == RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget {
+		if c.RequiredShape == RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget ||
+			c.RequiredShape == RuntimeOperationCandidateRequiredShapeTextReplaceApplicableToObservedTarget {
 			return nil
 		}
 	default:
@@ -107,7 +118,7 @@ func NormalizeRuntimeOperationCandidateConstraints(values []RuntimeOperationCand
 }
 
 // RuntimeOperationCandidateConstraintsForOperation returns the exact sealed
-// constraints selected by the operation variant. It performs no owner call and
+// operation-level constraints plus those selected by its variant. It performs no owner call and
 // never reads mutable resources.
 func RuntimeOperationCandidateConstraintsForOperation(operation RuntimeOperation, authorization RuntimeCandidateOperationManifest) (string, []RuntimeOperationCandidateConstraint, error) {
 	operation = operation.Normalized()
@@ -119,10 +130,8 @@ func RuntimeOperationCandidateConstraintsForOperation(operation RuntimeOperation
 	if err != nil {
 		return "", nil, err
 	}
-	if strings.TrimSpace(variant.ID) == "" {
-		return "", nil, nil
-	}
-	constraints := NormalizeRuntimeOperationCandidateConstraints(variant.CandidateConstraints)
+	constraints := append([]RuntimeOperationCandidateConstraint(nil), authorization.CandidateConstraints...)
+	constraints = NormalizeRuntimeOperationCandidateConstraints(append(constraints, variant.CandidateConstraints...))
 	parameterTypes := make(map[string]RuntimeOperationParameterType, len(authorization.Parameters))
 	for _, parameter := range authorization.Parameters {
 		parameterTypes[strings.TrimSpace(parameter.Name)] = parameter.Type
@@ -174,8 +183,12 @@ func RuntimeCandidateConstraintForOperationRef(manifest RuntimeCandidateContract
 		if operation.Kind != operationKind {
 			continue
 		}
+		constraintSets := [][]RuntimeOperationCandidateConstraint{operation.CandidateConstraints}
 		for _, variant := range operation.Variants {
-			for _, constraint := range NormalizeRuntimeOperationCandidateConstraints(variant.CandidateConstraints) {
+			constraintSets = append(constraintSets, variant.CandidateConstraints)
+		}
+		for _, constraints := range constraintSets {
+			for _, constraint := range NormalizeRuntimeOperationCandidateConstraints(constraints) {
 				if constraint.Ref != ref {
 					continue
 				}
@@ -247,7 +260,8 @@ func (v RuntimeOperationCandidateConstraintViolation) Validate() error {
 			return fmt.Errorf("runtime operation candidate actual shape %q is not declared for representation conformance", v.ActualShape)
 		}
 		return nil
-	case RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget:
+	case RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget,
+		RuntimeOperationCandidateRequiredShapeTextReplaceApplicableToObservedTarget:
 		if v.TargetRef == "" || v.ObservedRevision == "" {
 			return fmt.Errorf("runtime operation candidate applicability violation requires target and observed revision")
 		}
