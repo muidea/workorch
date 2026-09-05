@@ -59,6 +59,11 @@ func TestShellSealCoversOperationRecipeScopeRoleAndEvidencePolicy(t *testing.T) 
 	if _, err := SealRuntimeOperation(operation, wrongCatalog, input); err == nil {
 		t.Fatal("Shell seal accepted another owner's catalog")
 	}
+	mismatchedScope := input
+	mismatchedScope.ValidationScopeTargetRefs = []string{"outside-owner-catalog.go"}
+	if _, err := SealRuntimeOperation(operation, catalog, mismatchedScope); err == nil || !strings.Contains(err.Error(), "diagnostic scope") {
+		t.Fatalf("Shell seal accepted diagnostic scope outside its owner catalog: %v", err)
+	}
 
 	for name, mutate := range map[string]func(*SealedRuntimeOperation){
 		"runtime_operation": func(value *SealedRuntimeOperation) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -42,7 +43,7 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 	var targetRefs []string
 	targetCandidatesValid := true
 	if shellValidationDiagnosticMayIdentifyImplementationEffect(class) {
-		targetRefs, targetCandidatesValid = shellValidationDiagnosticTargetCandidates(*output, request, execCommand)
+		targetRefs, targetCandidatesValid = shellValidationDiagnosticTargetCandidates(*output, request, execCommand, class)
 	}
 	output.validationFailureTargetCandidatesInvalid = !targetCandidatesValid
 	diagnostic := &runtimemodel.ValidationFailureDiagnostic{
@@ -92,6 +93,14 @@ func shellValidationDiagnosticClassAndTarget(output RuntimeCommandResult, valida
 	if output.ExitCode != 0 && shellGoDependencyMetadataMismatch(output, execCommand) {
 		return runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationEvidenceTargetDependencyContract, ownerCode(runtimemodel.ValidationDiagnosticDependencyMismatch, runtimemodel.ValidationDiagnosticDependencyMismatch)
 	}
+	// A single `go test ./...` process can report package build failures and
+	// ordinary test failures together. Build output blocks every affected
+	// package from producing trustworthy behavior evidence, so the Shell owner
+	// deterministically reports the build surface first. This is a tool-protocol
+	// rule local to Shell, not Runtime/profile policy.
+	if output.ExitCode != 0 && shellGoBuildFailure(output, execCommand) {
+		return runtimemodel.ValidationDiagnosticBuildFailed, runtimemodel.ValidationEvidenceTargetFailureSurface, ownerCode(runtimemodel.ValidationDiagnosticBuildFailed, runtimemodel.ValidationDiagnosticBuildFailed)
+	}
 	if output.ExitCode != 0 && shellGoTestExecutionFailure(output, execCommand) {
 		return runtimemodel.ValidationDiagnosticTestFailed, runtimemodel.ValidationEvidenceTargetBehaviorEvidence, ownerCode(runtimemodel.ValidationDiagnosticTestFailed, runtimemodel.ValidationDiagnosticTestFailed)
 	}
@@ -135,7 +144,7 @@ func shellValidationOwnerDiagnosticCode(output RuntimeCommandResult, validationE
 	if command != "go" || output.ExitCode == 0 {
 		return firstNonEmptyShellString(current, fallback)
 	}
-	text := shellValidationDiagnosticOutput(output, execCommand)
+	text := shellValidationDiagnosticTextForClass(output, execCommand, class)
 	if class == runtimemodel.ValidationDiagnosticBuildFailed && shellGoModuleDiagnosticPattern.MatchString(text) {
 		return shellcommon.ValidationDiagnosticCodeModuleManifestParseFailed
 	}
@@ -158,7 +167,7 @@ func shellGoDependencyMetadataMismatch(output RuntimeCommandResult, execCommand 
 	if command != "go" {
 		return false
 	}
-	text := strings.ToLower(shellValidationDiagnosticOutput(output, execCommand))
+	text := strings.ToLower(shellGoBuildDiagnosticOutput(output, execCommand))
 	for _, marker := range []string{
 		"missing go.sum entry for module providing package",
 		"missing go.sum entry needed to verify package",
@@ -185,6 +194,51 @@ func shellGoTestExecutionFailure(output RuntimeCommandResult, execCommand string
 	return strings.Contains(text, "--- FAIL:")
 }
 
+func shellGoBuildFailure(output RuntimeCommandResult, execCommand string) bool {
+	command := strings.TrimSpace(filepath.Base(execCommand))
+	if command == "" {
+		command = strings.TrimSpace(filepath.Base(output.Command))
+	}
+	if command != "go" {
+		return false
+	}
+	if facts, ok := shellGoTestJSONFactsForOutput(output, execCommand); ok {
+		if facts.HasBuildOutput {
+			return true
+		}
+		for _, record := range facts.DiagnosticRecords {
+			if record.Action == "" && shellGoDiagnosticChunkIsBuild(record.Output) {
+				return true
+			}
+		}
+		return false
+	}
+	text := shellValidationDiagnosticOutput(output, execCommand)
+	if shellGoModuleDiagnosticPattern.MatchString(text) || shellGoPackageConflictPattern.MatchString(text) {
+		return true
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if shellGoDiagnosticTargetPattern.MatchString(line) && shellGoCompilerDiagnosticLine(line) {
+			return true
+		}
+	}
+	return false
+}
+
+func shellGoCompilerDiagnosticLine(line string) bool {
+	line = strings.ToLower(strings.TrimSpace(line))
+	for _, marker := range []string{
+		"undefined:", "syntax error", "cannot use ", "declared and not used", "imported and not used",
+		"assignment mismatch", "not enough arguments", "too many arguments", "invalid operation",
+		"missing return", "redeclared in this block", "too many errors",
+	} {
+		if strings.Contains(line, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // shellValidationDiagnosticOutput is the sole owner-private normalization of
 // command output used by diagnostic classification and target extraction. A
 // managed `go test -json` transcript contributes only its bounded,
@@ -197,9 +251,24 @@ func shellValidationDiagnosticOutput(output RuntimeCommandResult, execCommand st
 		command = strings.TrimSpace(filepath.Base(output.Command))
 	}
 	if command == "go" && len(output.Args) > 0 && strings.TrimSpace(output.Args[0]) == "test" && shellGoTestJSONEnabled(output.Args[1:]) {
-		text += "\n" + goTestJSONDiagnosticOutput(output.Stdout, output.Stderr)
+		facts, _ := shellGoTestJSONFactsForOutput(output, execCommand)
+		return facts.DiagnosticOutput
 	}
 	return text
+}
+
+func shellGoTestJSONFactsForOutput(output RuntimeCommandResult, execCommand string) (shellGoTestJSONFacts, bool) {
+	command := strings.TrimSpace(filepath.Base(execCommand))
+	if command == "" {
+		command = strings.TrimSpace(filepath.Base(output.Command))
+	}
+	if command != "go" || len(output.Args) == 0 || strings.TrimSpace(output.Args[0]) != "test" || !shellGoTestJSONEnabled(output.Args[1:]) {
+		return shellGoTestJSONFacts{}, false
+	}
+	if output.goTestJSONFacts != nil {
+		return *output.goTestJSONFacts, true
+	}
+	return parseGoTestJSONFacts(output.Stdout, output.Stderr), true
 }
 
 func shellDiagnosticOperationKind(request RuntimeCommandRequest) string {
@@ -265,7 +334,7 @@ var (
 // promoted: when output has no supported location, the result is deliberately
 // empty and no repair-surface observation is emitted.
 func shellValidationDiagnosticTargetRefs(output RuntimeCommandResult, request RuntimeCommandRequest, execCommand string) []string {
-	refs, _ := shellValidationDiagnosticTargetCandidates(output, request, execCommand)
+	refs, _ := shellValidationDiagnosticTargetCandidates(output, request, execCommand, "")
 	return refs
 }
 
@@ -273,11 +342,10 @@ func shellValidationDiagnosticTargetRefs(output RuntimeCommandResult, request Ru
 // parser result from a bounded-protocol overflow. The caller carries that bit
 // alongside the owner-private command result so a valid marker cannot revive a
 // transaction whose structured-output half already exceeded the bound.
-func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, request RuntimeCommandRequest, execCommand string) ([]string, bool) {
+func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, request RuntimeCommandRequest, execCommand, diagnosticClass string) ([]string, bool) {
 	if !shellInputHasManagedValidation(request) || strings.TrimSpace(filepath.Base(execCommand)) != "go" || len(request.ValidationScopeTargetRefs) == 0 {
 		return nil, true
 	}
-	diagnosticOutput := shellValidationDiagnosticOutput(output, execCommand)
 	scope := make(map[string]struct{}, len(request.ValidationScopeTargetRefs))
 	for _, value := range request.ValidationScopeTargetRefs {
 		if normalized, ok := normalizeShellDiagnosticTargetRef(value, output.WorkingDirectory); ok {
@@ -288,44 +356,40 @@ func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, requ
 		return nil, true
 	}
 	seen := make(map[string]struct{})
-	for _, pattern := range []*regexp.Regexp{shellGoDiagnosticTargetPattern, shellGoModuleDiagnosticPattern} {
-		for _, match := range pattern.FindAllStringSubmatch(diagnosticOutput, -1) {
-			if len(match) != 2 {
-				continue
-			}
-			value, ok := normalizeShellDiagnosticTargetRef(match[1], output.WorkingDirectory)
-			if !ok {
-				continue
-			}
-			if _, allowed := scope[value]; !allowed {
-				continue
-			}
-			seen[value] = struct{}{}
-			if len(seen) > shellValidationDiagnosticMaxTargetRefs {
-				return nil, false
+	for _, record := range shellValidationDiagnosticRecords(output, execCommand, diagnosticClass) {
+		for _, pattern := range []*regexp.Regexp{shellGoDiagnosticTargetPattern, shellGoModuleDiagnosticPattern} {
+			for _, match := range pattern.FindAllStringSubmatch(record.Output, -1) {
+				if len(match) != 2 {
+					continue
+				}
+				value, ok := shellDiagnosticTargetInScope(match[1], record.Package, record.ImportPath, output.WorkingDirectory, scope)
+				if !ok {
+					continue
+				}
+				seen[value] = struct{}{}
+				if len(seen) > shellValidationDiagnosticMaxTargetRefs {
+					return nil, false
+				}
 			}
 		}
-	}
-	for _, match := range shellGoPackageConflictPattern.FindAllStringSubmatch(diagnosticOutput, -1) {
-		if len(match) != 4 {
-			continue
-		}
-		directory := strings.TrimSpace(match[3])
-		for _, fileName := range match[1:3] {
-			candidate := strings.TrimSpace(fileName)
-			if directory != "" {
-				candidate = filepath.Join(directory, candidate)
-			}
-			value, ok := normalizeShellDiagnosticTargetRef(candidate, output.WorkingDirectory)
-			if !ok {
+		for _, match := range shellGoPackageConflictPattern.FindAllStringSubmatch(record.Output, -1) {
+			if len(match) != 4 {
 				continue
 			}
-			if _, allowed := scope[value]; !allowed {
-				continue
-			}
-			seen[value] = struct{}{}
-			if len(seen) > shellValidationDiagnosticMaxTargetRefs {
-				return nil, false
+			directory := strings.TrimSpace(match[3])
+			for _, fileName := range match[1:3] {
+				candidate := strings.TrimSpace(fileName)
+				if directory != "" {
+					candidate = filepath.Join(directory, candidate)
+				}
+				value, ok := shellDiagnosticTargetInScope(candidate, record.Package, record.ImportPath, output.WorkingDirectory, scope)
+				if !ok {
+					continue
+				}
+				seen[value] = struct{}{}
+				if len(seen) > shellValidationDiagnosticMaxTargetRefs {
+					return nil, false
+				}
 			}
 		}
 	}
@@ -335,6 +399,108 @@ func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, requ
 	}
 	sort.Strings(ret)
 	return ret, true
+}
+
+func shellValidationDiagnosticRecords(output RuntimeCommandResult, execCommand, diagnosticClass string) []shellGoTestJSONDiagnosticRecord {
+	if facts, ok := shellGoTestJSONFactsForOutput(output, execCommand); ok {
+		ret := make([]shellGoTestJSONDiagnosticRecord, 0, len(facts.DiagnosticRecords))
+		for _, record := range facts.DiagnosticRecords {
+			switch strings.TrimSpace(diagnosticClass) {
+			case runtimemodel.ValidationDiagnosticBuildFailed:
+				// Output records belong to the test process and can contain arbitrary
+				// text. Only the Go tool's build-output action (plus bounded
+				// unframed stderr) may identify a build repair surface.
+				if record.Action != "build-output" && record.Action != "" {
+					continue
+				}
+			case runtimemodel.ValidationDiagnosticTestFailed:
+				if record.Action == "build-output" {
+					continue
+				}
+			}
+			ret = append(ret, record)
+		}
+		return ret
+	}
+	return []shellGoTestJSONDiagnosticRecord{{Output: shellValidationDiagnosticOutput(output, execCommand)}}
+}
+
+func shellValidationDiagnosticTextForClass(output RuntimeCommandResult, execCommand, diagnosticClass string) string {
+	var text strings.Builder
+	for _, record := range shellValidationDiagnosticRecords(output, execCommand, diagnosticClass) {
+		text.WriteString(record.Output)
+		if !strings.HasSuffix(record.Output, "\n") {
+			text.WriteByte('\n')
+		}
+	}
+	return text.String()
+}
+
+func shellGoBuildDiagnosticOutput(output RuntimeCommandResult, execCommand string) string {
+	return shellValidationDiagnosticTextForClass(output, execCommand, runtimemodel.ValidationDiagnosticBuildFailed)
+}
+
+func shellGoDiagnosticChunkIsBuild(value string) bool {
+	if shellGoModuleDiagnosticPattern.MatchString(value) || shellGoPackageConflictPattern.MatchString(value) {
+		return true
+	}
+	for _, line := range strings.Split(value, "\n") {
+		if shellGoDiagnosticTargetPattern.MatchString(line) && shellGoCompilerDiagnosticLine(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// shellDiagnosticTargetInScope resolves an owner-tool location only against
+// the finite File-owner target set sealed into the Shell catalog. Go's JSON
+// protocol may report a package-relative file (for example `server_test.go`);
+// Package/ImportPath disambiguates that basename without reading go.mod or the
+// workspace from another component.
+func shellDiagnosticTargetInScope(value, packageRef, importPath, workingDirectory string, scope map[string]struct{}) (string, bool) {
+	normalized, ok := normalizeShellDiagnosticTargetRef(value, workingDirectory)
+	if !ok {
+		return "", false
+	}
+	if _, allowed := scope[normalized]; allowed {
+		return normalized, true
+	}
+	if filepath.IsAbs(strings.TrimSpace(value)) {
+		return "", false
+	}
+	packageIDs := normalizeShellStrings([]string{packageRef, importPath})
+	if len(packageIDs) == 0 {
+		return "", false
+	}
+	matches := make([]string, 0, 1)
+	for candidate := range scope {
+		if candidate != normalized && !strings.HasSuffix(candidate, "/"+normalized) {
+			continue
+		}
+		directory := path.Dir(candidate)
+		if directory == "." || !shellPackageIdentityMatchesDirectory(packageIDs, directory) {
+			continue
+		}
+		matches = append(matches, candidate)
+	}
+	if len(matches) != 1 {
+		return "", false
+	}
+	return matches[0], true
+}
+
+func shellPackageIdentityMatchesDirectory(packageIDs []string, directory string) bool {
+	directory = strings.Trim(strings.TrimSpace(filepath.ToSlash(directory)), "/")
+	if directory == "" || directory == "." {
+		return false
+	}
+	for _, packageID := range packageIDs {
+		packageID = strings.Trim(strings.TrimSpace(filepath.ToSlash(packageID)), "/")
+		if packageID == directory || strings.HasSuffix(packageID, "/"+directory) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeShellDiagnosticTargetRef(value, workingDirectory string) (string, bool) {

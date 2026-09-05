@@ -81,7 +81,7 @@ func TestShellOwnerZeroWorkValidationReceiptReplaysQualityWithoutReexecution(t *
 			RuntimeManaged: true,
 			Kind:           runtimecontract.RuntimeBlockKindManagedValidationSession,
 		},
-	}, "", recipes, nil)
+	}, "", recipes, []string{"fixture_test.go"})
 	first := sendShellStateChangingReceiptCommand(t, ctx, hub, command)
 	if first.Receipt.Evidence.Quality != "inconclusive" || !first.Receipt.Evidence.ZeroWork ||
 		first.Receipt.Evidence.Validation == nil || first.Receipt.Evidence.EvidenceReason != "no matching validation checks" {

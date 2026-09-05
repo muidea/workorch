@@ -220,6 +220,61 @@ func TestShellManagedGoJSONDiagnosticReportsActualManifestScopedFailureTarget(t 
 	}
 }
 
+func TestShellManagedGoJSONMixedFailurePrioritizesBuildSurface(t *testing.T) {
+	request := RuntimeCommandRequest{
+		ManagedValidation: runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+		Args:              []string{"test", "-json", "./..."},
+		ValidationScopeTargetRefs: []string{
+			"internal/lsp/server.go",
+			"workorch_validation/cwi_workspace_validation_test.go",
+		},
+		ValidationEvidence: runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticTestFailed},
+	}
+	output := RuntimeCommandResult{
+		WorkingDirectory: "/tmp/workorch-shell-validation/workspace", Command: "go", Args: append([]string(nil), request.Args...),
+		ExitCode: 1, FailureCode: "shell_exit_nonzero",
+		Stdout: strings.Join([]string{
+			`{"ImportPath":"github.com/muidea/workorch/internal/lsp","Action":"build-output","Output":"internal/lsp/server.go:211:10: undefined: protocol\\n"}`,
+			`{"Package":"github.com/muidea/workorch/workorch_validation","Action":"output","Test":"TestWorkOrchCWI","Output":"    cwi_workspace_validation_test.go:43: validation failed\\n"}`,
+			`{"Package":"github.com/muidea/workorch/workorch_validation","Action":"output","Test":"TestWorkOrchCWI","Output":"--- FAIL: TestWorkOrchCWI (0.00s)\\n"}`,
+			`{"Package":"github.com/muidea/workorch/workorch_validation","Action":"fail","Test":"TestWorkOrchCWI"}`,
+		}, "\n"),
+	}
+	attachShellValidationObservation(&output, "go", request.Args, "project-native-validation", true)
+	attachShellValidationFailureDiagnostic(&output, request, "go", 1, false, false, fmt.Errorf("exit status 1"))
+	diagnostic := output.ValidationFailureDiagnostic
+	if diagnostic == nil || diagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed ||
+		diagnostic.OwnerCode != modulecommon.ValidationDiagnosticCodeSourceCompileFailed ||
+		!reflect.DeepEqual(diagnostic.TargetRefs, []string{"internal/lsp/server.go"}) {
+		t.Fatalf("mixed Go validation diagnostic = %+v", diagnostic)
+	}
+}
+
+func TestShellManagedGoJSONResolvesPackageRelativeTestTarget(t *testing.T) {
+	request := RuntimeCommandRequest{
+		ManagedValidation:         runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+		Args:                      []string{"test", "-json", "./..."},
+		ValidationScopeTargetRefs: []string{"workorch_validation/cwi_workspace_validation_test.go", "other/cwi_workspace_validation_test.go"},
+	}
+	output := RuntimeCommandResult{
+		WorkingDirectory: "/tmp/workorch-shell-validation/workspace", Command: "go", Args: append([]string(nil), request.Args...),
+		ExitCode: 1, FailureCode: "shell_exit_nonzero",
+		Stdout: strings.Join([]string{
+			`{"Package":"github.com/muidea/workorch/workorch_validation","Action":"output","Test":"TestWorkOrchCWI","Output":"    cwi_workspace_validation_test.go:43: validation failed\\n"}`,
+			`{"Package":"github.com/muidea/workorch/workorch_validation","Action":"output","Test":"TestWorkOrchCWI","Output":"--- FAIL: TestWorkOrchCWI (0.00s)\\n"}`,
+			`{"Package":"github.com/muidea/workorch/workorch_validation","Action":"fail","Test":"TestWorkOrchCWI"}`,
+		}, "\n"),
+	}
+	attachShellValidationObservation(&output, "go", request.Args, "project-native-validation", true)
+	attachShellValidationFailureDiagnostic(&output, request, "go", 1, false, false, fmt.Errorf("exit status 1"))
+	diagnostic := output.ValidationFailureDiagnostic
+	if diagnostic == nil || diagnostic.Class != runtimecontract.ValidationDiagnosticTestFailed ||
+		diagnostic.OwnerCode != modulecommon.ValidationDiagnosticCodeTestFailed ||
+		!reflect.DeepEqual(diagnostic.TargetRefs, []string{"workorch_validation/cwi_workspace_validation_test.go"}) {
+		t.Fatalf("package-relative Go test diagnostic = %+v", diagnostic)
+	}
+}
+
 func TestShellManagedGoPackageConflictReportsBothManifestScopedTargets(t *testing.T) {
 	workingDirectory := "/tmp/workorch-shell-validation/workspace"
 	request := RuntimeCommandRequest{

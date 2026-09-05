@@ -68,14 +68,32 @@ func TestRuntimeOperationReceiptJudgmentStillRejectsAcceptedEffectMismatch(t *te
 
 func TestRuntimeValidationScopeTargetsOnlyUseSealedManagedValidationAuthority(t *testing.T) {
 	managed := runtimecontract.RuntimeOperation{ID: "validate", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, TargetRefs: []string{"internal/lspbridge/validation_surface_test.go"}}
+	catalog := runtimeTestManagedValidationInventory("shell-validation-scope")
+	catalog.TargetRefs = []string{"cmd/lsp-bridge/main.go", "internal/lspbridge/validation_surface_test.go"}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	observation := runtimecontract.RuntimePrerequisiteObservation{
+		PrerequisiteID: catalog.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
+		OwnerModuleID: runtimecontract.RuntimeModuleShell, ContentHash: catalog.SnapshotID,
+		Dependencies: []runtimecontract.RuntimeFreshnessDependency{{
+			Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			SubjectRef: "shell_runtime_policy", Revision: catalog.ObservedRevision,
+		}},
+	}
+	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
 	dispatch := SealedDispatch{
 		Candidate: runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: managed}}}},
 		OperationTargetAuthorizations: []runtimecontract.RuntimeDispatchOperationTargetAuthorization{{
 			OperationID: managed.ID, OperationHash: runtimecontract.StableRuntimeOperationHash(managed), RequireTargets: true,
 			Target: runtimecontract.RuntimeOperationTargetAuthorization{
-				Policy:               runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
-				OwnerScopeTargetRefs: []string{"cmd/lsp-bridge/main.go", "internal/lspbridge/validation_surface_test.go"},
+				Policy:          runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+				ExactTargetRefs: []string{"internal/lspbridge/validation_surface_test.go"},
 			},
+		}},
+		OperationAdmissibilities:           []runtimecontract.RuntimeOperationAdmissibility{catalog},
+		OperationAdmissibilityObservations: []runtimecontract.RuntimePrerequisiteObservation{observation},
+		OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{
+			OperationID: managed.ID, OperationHash: runtimecontract.StableRuntimeOperationHash(managed),
+			AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
 		}},
 	}
 	got, err := runtimeValidationScopeTargetRefs(dispatch, managed)
@@ -89,9 +107,23 @@ func TestRuntimeValidationScopeTargetsOnlyUseSealedManagedValidationAuthority(t 
 
 	selectorOnly := dispatch
 	selectorOnly.OperationTargetAuthorizations = runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(dispatch.OperationTargetAuthorizations)
-	selectorOnly.OperationTargetAuthorizations[0].Target.OwnerScopeTargetRefs = nil
+	selectorOnly.OperationTargetAuthorizations[0].RequireTargets = false
+	selectorOnly.OperationTargetAuthorizations[0].Target = runtimecontract.RuntimeOperationTargetAuthorization{
+		Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+	}
 	selectorOnly.OperationTargetAuthorizations[0].Target.OwnerSelectorRefs = []string{"workspace-validation-target"}
-	got, err = runtimeValidationScopeTargetRefs(selectorOnly, managed)
+	selectorCatalog := catalog.Normalized()
+	selectorCatalog.TargetRefs = nil
+	selectorCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(selectorCatalog)
+	selectorOnly.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{selectorCatalog}
+	selectorOnly.OperationAdmissibilityObservations[0].ContentHash = selectorCatalog.SnapshotID
+	selectorOnly.OperationAdmissibilityObservations[0].ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(selectorOnly.OperationAdmissibilityObservations[0])
+	selectorOnly.OperationExecutions[0].AdmissibilitySnapshotID = selectorCatalog.SnapshotID
+	selectorOnly.Candidate.Validation.Operations[0].Operation.TargetRefs = nil
+	selectorOnly.OperationTargetAuthorizations[0].OperationHash = runtimecontract.StableRuntimeOperationHash(selectorOnly.Candidate.Validation.Operations[0].Operation)
+	managedSelectorOnly := selectorOnly.Candidate.Validation.Operations[0].Operation
+	selectorOnly.OperationExecutions[0].OperationHash = runtimecontract.StableRuntimeOperationHash(managedSelectorOnly)
+	got, err = runtimeValidationScopeTargetRefs(selectorOnly, managedSelectorOnly)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("selector-only managed validation invented a finite diagnostic scope: scope=%v err=%v", got, err)
 	}

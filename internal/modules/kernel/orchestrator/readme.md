@@ -94,7 +94,9 @@ capability resource state。
   CAS 封存 `repair_surface_unavailable`，不得调用 semantic provider。只有 `prospective_owner_target` exact route 可在无 observation
   时进入 bounded semantic repair fallback。repair-purpose provider document 返回 Definition gap 时同样走
   `repair_surface_unavailable` private terminal，不得创建 Definition clarification ticket。observation diagnostic hash 绑定完整
-  route 字段与 sealed validation scope，并在 receipt admission/fresh-load 从 immutable owner receipt 重算。
+  route 字段与 sealed validation scope，并在 receipt admission/fresh-load 从 immutable owner receipt 重算。该 scope 只能来自
+  matching operation execution 的 `AdmissibilitySnapshotID + AcquisitionBinding` 所绑定、已随 dispatch 封存的完整 Shell-owner
+  catalog `TargetRefs`；per-operation target authorization 只裁决 validation entry，不能代替 diagnostic scope。
 - candidate proposal 持久化后，SM-3 必须按 manifest-declared `CandidateConstraints` 的 kind 获取 exact owner fact。
   `parameter_shape` 在 ordinary feasibility 前通过 typed conformance command 完成，owner 只复用自身 parser/matcher 返回封闭
   outcome/shape且不读写 workspace；`target_applicability` 只能由 ordinary typed feasibility 对 current target/revision 返回

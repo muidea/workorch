@@ -238,8 +238,8 @@ validation failure 因果中的三类 target 是相互独立的 immutable fact�
 
 | Target | 唯一来源 | 约束 |
 | --- | --- | --- |
-| validation operation entry `TargetRefs` | completed dispatch 中 exact validation operation | 是本次 recipe/validation entry，不是 full scope；只有 matching sealed per-operation authorization 的 `RequireTargets=true` 时才强制非空。finite `Target.AllowedTargetRefs()` 存在时，每个 entry member 必须属于该集合 |
-| finite full validation scope | `CompletedDispatch.OperationTargetAuthorizations` 中 matching `OperationID`/operation hash 的 sealed per-operation authorization 的 canonical `Target.AllowedTargetRefs()` | 只有 `existing_owner_scope` policy 时才等于 canonical `OwnerScopeTargetRefs`；structured observation 的 `ValidationScopeTargetRefs` 必须与该 finite set canonical exact-match。execution、receipt causation 与 restart 均不得从 mutable manifest、current focus 或 owner inventory 重建 |
+| validation operation entry `TargetRefs` | completed dispatch 中 exact validation operation | 是本次 recipe/validation entry，不是 full scope；只有 matching sealed per-operation authorization 的 `RequireTargets=true` 时才强制非空。matching Shell-owner catalog 存在 finite `TargetRefs` 时，每个 entry member 必须属于该集合 |
+| finite full validation scope | matching completed-dispatch `OperationExecution.AdmissibilitySnapshotID + AcquisitionBinding` 所绑定的完整 Shell-owner `OperationAdmissibility.TargetRefs` | per-operation target authorization 只裁决 validation entry；structured observation 的 `ValidationScopeTargetRefs` 必须与 owner catalog finite set canonical exact-match。execution、receipt causation 与 restart 均不得从 mutable manifest、current focus 或 fresh owner inventory 重建 |
 | structured diagnostic candidate targets | validation owner 支持的结构化诊断位置 | observation 存在时必须是 full validation scope 的 1～8 项子集，随后仍由 sealed Profile/descriptor 指定的 resource/effect owner 按其 current manifest 独立确认 |
 
 在 finite scope 的 structured-observation 路径中，operation entry 与 diagnostic candidate 各自只需满足其 scope-subset
@@ -248,8 +248,8 @@ operation entry 覆写 diagnostic candidate，operation entry 也不得被自动
 freshness confirmation，不能改写 completed dispatch 已封存的 validation scope 或历史 observation causation。
 software-dev Profile 中 Shell 的 closed `WORKORCH_FAILURE_TARGET` marker 也只是 owner-supported bounded diagnostic candidate；它不得直接填充或生成
 `RuntimeFailureTargetObservation` authority，只能在通过 sealed finite scope gate 后进入 `RuntimeValidationFailureObservation`，再由
-Profile 指定的 repair-owner confirmation 与 SM-2 private event 封存真实 repair surface。selector-only authorization 的
-`Target.AllowedTargetRefs()` 为空，没有 finite diagnostic scope；无论 operation 是否因 `RequireTargets`/owner feasibility 而可执行，
+Profile 指定的 repair-owner confirmation 与 SM-2 private event 封存真实 repair surface。sealed Shell-owner catalog 的
+`TargetRefs` 为空时没有 finite diagnostic scope；无论 operation 是否因 `RequireTargets`/owner feasibility 而可执行，
 Shell 都必须保持零 scope-bound structured observation。失败只可进入已封存的 Profile semantic fallback，任何组件都不得用
 current manifest 临时补全 scope；没有 matching sealed fallback 时按 typed contract fail closed。
 - assessment evidence gate 只验证 current-run/focus、binding-matched owner receipt、effect、quality 与封存的

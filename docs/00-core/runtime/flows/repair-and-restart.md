@@ -91,9 +91,10 @@ repair 在 Runtime 中不是独立 stage 对象，而是 **drive/reducer 在当�
 - validation-owner-recognized structured locations are bounded candidate surfaces rather than failure-target authority; the
   software-dev Profile's Shell/Go package-conflict diagnostic is one concrete specialization
   → the rejected receipt retains the original focus/binding and the completed dispatch's sealed `FocusTargetRole`
-  → Orchestrator resolves the exact matching `CompletedDispatch.OperationTargetAuthorizations` member by `OperationID` and
-  operation hash; its non-empty canonical `Target.AllowedTargetRefs()` is the finite full validation scope, and only an
-  `existing_owner_scope` authorization maps that value to canonical `OwnerScopeTargetRefs`
+  → Orchestrator first validates the exact matching `CompletedDispatch.OperationTargetAuthorizations` member by `OperationID`
+  and operation hash, then resolves that operation's `OperationExecution.AdmissibilitySnapshotID + AcquisitionBinding` to the
+  complete Shell-owner catalog retained in the same dispatch; the catalog's canonical non-empty `TargetRefs` is the finite full
+  validation scope
   → the observation diagnostic hash binds its complete typed route tuple plus the sealed validation scope; receipt commit and
   fresh-load recompute the same hash instead of trusting coordinated copies
   → when the exact route matches, its repair operations must share one non-`none` owner confirmation protocol admitted at pre-seal;
@@ -129,8 +130,8 @@ structured validation failure 的 target 关系固定为：
 
 | Target | 含义 | 合法关系 |
 | --- | --- | --- |
-| validation operation entry `TargetRefs` | 选择本次 validation recipe/entry 的 operation target | 只有 sealed per-operation `RequireTargets=true` 才要求非空；finite allowed set 存在时，`operation entry ⊆ sealed full validation scope` |
-| sealed finite full validation scope | matching completed-dispatch per-operation authorization 的 canonical `Target.AllowedTargetRefs()` | 只有 `existing_owner_scope` 时才等于 `OwnerScopeTargetRefs`；structured observation scope 必须 canonical exact-match，执行、duplicate 与 restart 原样复用 |
+| validation operation entry `TargetRefs` | 选择本次 validation recipe/entry 的 operation target | 只有 sealed per-operation `RequireTargets=true` 才要求非空；Shell owner catalog 存在 finite `TargetRefs` 时，`operation entry ⊆ sealed full validation scope` |
+| sealed finite full validation scope | matching completed-dispatch operation execution 所绑定的完整 Shell-owner `OperationAdmissibility.TargetRefs` | operation target authorization 只裁决 entry，不能代替 diagnostic scope；structured observation scope 必须 canonical exact-match，执行、duplicate 与 restart 原样复用 |
 | diagnostic candidate targets | validation owner 从自身支持的 structured diagnostic 得到的 actual locations | observation 存在时为 1～8 项且 `candidate ⊆ sealed full validation scope`；仍需 sealed Profile/descriptor 指定的 resource/effect owner current-manifest confirmation |
 
 operation entry 与 diagnostic candidate 没有 equality 或 overlap 要求；例如 entry `A`、scope `{A,B}`、candidate `B` 是正常
@@ -341,9 +342,10 @@ operator
 - replacement recovery 只加载 Run owner 的 `ReplacementIntent.Recovery` 与 terminal lineage；already-terminal predecessor
   从 successor-materialization lease继续，不重新请求 Orchestrator delivery，且 successor 的 predecessor Run/Result 双引用
   必须与 owner record exact-match
-- active/completed dispatch 必须原样恢复 per-operation `OperationTargetAuthorizations`、operation hash 与
-  `DispatchAuthorityHash`；validation failure causation 只从 matching sealed authorization 恢复 full scope，不从
-  `Facts.Resources.Manifest`、current `Focus` 或 fresh owner inventory 重建
+- active/completed dispatch 必须原样恢复 per-operation `OperationTargetAuthorizations`、operation hash、matching
+  `OperationExecution`、完整 `OperationAdmissibilities` 与 `DispatchAuthorityHash`；validation failure causation 只从 operation
+  execution 所绑定的 sealed Shell-owner catalog 恢复 full scope，不从 `Facts.Resources.Manifest`、current `Focus` 或 fresh owner
+  inventory 重建
 - exact observation/confirmation duplicate 复用同一 causation identity，不新建 repair authority、provider request、effect 或
   budget consumption；若 sealed repair owner 的 read-only confirmation 尚未持久化，只能以完全相同 observation 重试该 query
 - scope 缺项/附加项、operation/candidate 越界、missing/duplicate authorization、operation hash 漂移或 observation identity

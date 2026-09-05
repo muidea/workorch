@@ -212,19 +212,54 @@ func (p runtimeTargetAuthorityPlan) grounded() bool {
 }
 
 // runtimeValidationScopeTargetRefs projects the diagnostic scope from the
-// exact SM-3 dispatch seal. A selector-only authorization deliberately has no
-// finite diagnostic scope: execution remains legal, but the validation owner cannot
-// publish a structured repair observation for it. Neither shape may substitute
-// the current workspace manifest, focus, or owner inventory after seal/restart.
+// complete Shell-owner catalog retained by the exact SM-3 dispatch seal. The
+// operation target authorization still proves which validation entry may run;
+// it is deliberately not reused as the set of workspace files that the recipe
+// may diagnose. A selector-only catalog has no finite diagnostic scope, so the
+// validation owner cannot publish a structured repair observation for it.
+// Current workspace facts and owner inventories never participate after seal.
 func runtimeValidationScopeTargetRefs(dispatch SealedDispatch, operation runtimecontract.RuntimeOperation) ([]string, error) {
 	if runtimecontract.CanonicalRuntimeBlockKind(operation.Kind) != runtimecontract.RuntimeBlockKindManagedValidationSession {
 		return nil, nil
 	}
-	authorization, err := runtimeValidationTargetAuthorization(dispatch, operation)
-	if err != nil {
+	if _, err := runtimeValidationTargetAuthorization(dispatch, operation); err != nil {
 		return nil, err
 	}
-	return authorization.Target.AllowedTargetRefs(), nil
+	execution, found := operationExecutionRecord(dispatch.OperationExecutions, operation.ID)
+	if !found || execution.OperationHash != runtimecontract.StableRuntimeOperationHash(operation) || execution.AdmissibilitySnapshotID == "" {
+		return nil, fmt.Errorf("sealed managed-validation operation %q has no exact owner catalog authority", operation.ID)
+	}
+	catalog := runtimeOwnerCatalogForOperation(
+		dispatch.OperationAdmissibilities,
+		dispatch.OperationAdmissibilityObservations,
+		operation,
+		execution.AdmissibilitySnapshotID,
+		execution.AcquisitionBinding,
+	)
+	if catalog == nil {
+		return nil, fmt.Errorf("sealed managed-validation operation %q has no complete owner catalog preimage", operation.ID)
+	}
+	scope := append([]string(nil), catalog.Normalized().TargetRefs...)
+	if !runtimeValidationTargetsWithinScope(operation.TargetRefs, scope) {
+		return nil, fmt.Errorf("sealed managed-validation operation %q target is outside owner diagnostic scope", operation.ID)
+	}
+	return scope, nil
+}
+
+func runtimeValidationTargetsWithinScope(values, scope []string) bool {
+	allowed := make(map[string]struct{}, len(scope))
+	for _, value := range scope {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			allowed[value] = struct{}{}
+		}
+	}
+	for _, value := range values {
+		if _, found := allowed[strings.TrimSpace(value)]; !found {
+			return false
+		}
+	}
+	return true
 }
 
 func runtimeValidationTargetAuthorization(dispatch SealedDispatch, operation runtimecontract.RuntimeOperation) (runtimecontract.RuntimeDispatchOperationTargetAuthorization, error) {

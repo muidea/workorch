@@ -70,7 +70,9 @@ validation failure repair 也必须保持 core owner-neutral：sealed Profile �
 `(trigger owner, operation kind, diagnostic class, evidence target type, owner code)` route，或 source binding 的 operation
 descriptor，先确定唯一 resource/effect owner；该 route 的全部 repair operation 还必须在 pre-seal 共同声明一个可执行的
 typed confirmation protocol，否则 Definition admission 直接阻塞。validation-owner observation 的 diagnostic hash 必须绑定上述
-route 字段和 sealed validation scope，且 receipt admission 必须验证 diagnostic operation kind exact-match sealed operation kind；
+route 字段和 sealed validation scope；该 scope 只能取自 matching operation execution 所绑定、随 dispatch 封存的完整
+validation-owner admissibility catalog，不能用 per-operation entry target authorization 或 current manifest 替代。receipt admission
+必须验证 diagnostic operation kind exact-match sealed operation kind；
 有 observation 且 route 匹配时才可发起 owner confirmation，无 exact route 时必须在
 rejected receipt 的同一 Orchestrator-private CAS 封存 `validation_failure_repair_route_unavailable`。confirmation、candidate
 operations 与 receipts 必须逐项匹配该 owner；confirmed repair directive 的 operation kinds 必须精确等于 route 声明，不能从

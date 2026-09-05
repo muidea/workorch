@@ -660,7 +660,8 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   `RuntimeFailureTargetObservation` authority。
   repair owner 的 current manifest 只确认 candidate freshness，不重定义 completed-dispatch full scope。software-dev specialization
   可用 File manifest 作 fixture。回归还必须覆盖：dispatch
-  seal/持久化保留 `FocusTargetRole`、per-operation target authorization 与 operation hash；current Focus/manifest 漂移不改变
+  seal/持久化保留 `FocusTargetRole`、per-operation target authorization、operation hash，以及 operation execution 所绑定的完整
+  Shell-owner catalog；validation entry 是单文件时仍从该 catalog 恢复完整 diagnostic scope，current Focus/manifest 漂移不改变
   completed-dispatch causation；observation receipt 到 repair-owner confirmation 之间零 CWI reopen、零 repair semantic input、零
   validation-only retry 和零 provider call；
 - duplicate/restart matrix 必须覆盖 observation persist 前后、repair-owner query 前后、confirmation CAS 前后与 response loss。exact

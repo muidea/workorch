@@ -159,7 +159,7 @@ func TestBuiltinSoftwareDevAllManagedCWIsCloseThroughTypedNativeProofPipeline(t 
 
 	observedManifest := sendObservedManifest(t, ctx, hub, aggregate, manifestPrerequisite, workspaceDirectory)
 	reobserved := acquireObservedShellValidationCatalog(
-		t, ctx, hub, aggregate, shellPrerequisite, workspaceDirectory, observedManifest, nil, requirements,
+		t, ctx, hub, aggregate, shellPrerequisite, workspaceDirectory, observedManifest, observedManifest.Manifest.TargetRefs, requirements,
 	)
 	catalog := reobserved.Acquisition.Admissibility.Normalized()
 	if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogApplicability(
@@ -205,7 +205,7 @@ func TestBuiltinSoftwareDevAllManagedCWIsCloseThroughTypedNativeProofPipeline(t 
 		sealed, err := shellevents.SealRuntimeOperation(operation, catalog, shellevents.RuntimeExecutionSealInput{
 			CatalogObservation:        reobserved.Acquisition.Observation,
 			TargetRole:                semanticFocus.TargetRole,
-			ValidationScopeTargetRefs: []string{preparedTarget},
+			ValidationScopeTargetRefs: append([]string(nil), catalog.TargetRefs...),
 			EvidencePolicies:          bootstrap.Activation.EvidencePolicies,
 			ValidationProofBinding:    ownerBinding,
 		})

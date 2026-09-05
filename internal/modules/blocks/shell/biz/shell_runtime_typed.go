@@ -70,6 +70,11 @@ type RuntimeCommandResult struct {
 	ValidationResources         []runtimecontract.RuntimeValidationResource
 	RuntimeDiagnostics          runtimecontract.RuntimeDiagnostics
 	ValidationFailureDiagnostic *runtimecontract.ValidationFailureDiagnostic
+	// goTestJSONFacts is the single owner-private decode of a bounded
+	// `go test -json` transcript. Observation, classification and target
+	// extraction share this immutable parse so they cannot disagree about the
+	// same tool output. It never crosses the Shell owner boundary.
+	goTestJSONFacts *shellGoTestJSONFacts
 	// validationFailureTargetCandidatesInvalid records that the owner-private
 	// structured-output parser observed more candidates than the bounded
 	// validation-failure protocol permits. An empty TargetRefs slice alone cannot

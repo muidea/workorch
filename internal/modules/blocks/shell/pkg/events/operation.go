@@ -137,6 +137,14 @@ func SealRuntimeOperation(operation runtimecontract.RuntimeOperation, catalog ru
 	if catalog.OwnerModuleID != runtimecontract.RuntimeModuleShell || !containsOperationKind(catalog.OperationKinds, operation.Kind) {
 		return SealedRuntimeOperation{}, fmt.Errorf("Shell owner catalog does not contain operation kind %q", operation.Kind)
 	}
+	if operation.Kind == runtimecontract.RuntimeBlockKindManagedValidationSession &&
+		!sameExecutionStrings(input.ValidationScopeTargetRefs, catalog.TargetRefs) {
+		return SealedRuntimeOperation{}, fmt.Errorf("Shell managed-validation diagnostic scope does not match sealed owner catalog")
+	}
+	if operation.Kind == runtimecontract.RuntimeBlockKindManagedValidationSession &&
+		!executionStringsSubset(operation.TargetRefs, catalog.TargetRefs) {
+		return SealedRuntimeOperation{}, fmt.Errorf("Shell managed-validation entry target is outside sealed owner catalog")
+	}
 	policy, found := runtimecontract.RuntimeOperationPolicyForOperation(operation, catalog.OperationPolicies)
 	if !found {
 		return SealedRuntimeOperation{}, fmt.Errorf("Shell owner catalog has no exact operation policy")
@@ -304,6 +312,20 @@ func sameExecutionStrings(left, right []string) bool {
 	}
 	for index := range left {
 		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func executionStringsSubset(values, scope []string) bool {
+	values, scope = normalizeExecutionStrings(values), normalizeExecutionStrings(scope)
+	allowed := make(map[string]struct{}, len(scope))
+	for _, value := range scope {
+		allowed[value] = struct{}{}
+	}
+	for _, value := range values {
+		if _, found := allowed[value]; !found {
 			return false
 		}
 	}

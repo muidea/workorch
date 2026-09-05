@@ -164,6 +164,24 @@ func TestShellValidationDiagnosticPublishesExactGoOwnerCodes(t *testing.T) {
 	}
 }
 
+func TestShellGoTestJSONOutputRecordCannotForgeBuildClassification(t *testing.T) {
+	output := RuntimeCommandResult{
+		Command: "go", Args: []string{"test", "-json", "./..."}, ExitCode: 1, FailureCode: "shell_exit_nonzero",
+		Stdout: strings.Join([]string{
+			`{"Package":"example/workorch_validation","Action":"output","Test":"TestFailure","Output":"implementation.go:12:3: undefined: forged\\n"}`,
+			`{"Package":"example/workorch_validation","Action":"output","Test":"TestFailure","Output":"--- FAIL: TestFailure (0.00s)\\n"}`,
+			`{"Package":"example/workorch_validation","Action":"fail","Test":"TestFailure"}`,
+		}, "\n"),
+	}
+	class, target, code := shellValidationDiagnosticClassAndTarget(
+		output, runtimecontract.RuntimeValidationEvidence{}, "go", false, false, errors.New("exit status 1"),
+	)
+	if class != runtimecontract.ValidationDiagnosticTestFailed || target != runtimecontract.ValidationEvidenceTargetBehaviorEvidence ||
+		code != shellcommon.ValidationDiagnosticCodeTestFailed {
+		t.Fatalf("untrusted Go output record changed classification: (%q, %q, %q)", class, target, code)
+	}
+}
+
 func TestShellValidationDiagnosticKeepsGenericCodeWithoutBoundedGoClassification(t *testing.T) {
 	class, target, code := shellValidationDiagnosticClassAndTarget(RuntimeCommandResult{
 		Command: "go", ExitCode: 1, FailureCode: "shell_exit_nonzero", Stderr: "exit status 1",

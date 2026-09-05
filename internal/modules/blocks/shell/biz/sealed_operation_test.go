@@ -50,6 +50,7 @@ func sealedShellTestCommand(t *testing.T, adapter *RuntimeAdapter, executionCont
 		TargetRole: targetRole, ValidationScopeTargetRefs: validationScope, EvidencePolicies: executionContext.EvidencePolicies,
 	}
 	if kind == runtimecontract.RuntimeBlockKindManagedValidationSession {
+		catalog.TargetRefs = append([]string(nil), validationScope...)
 		requirement := shellValidationProofRequirementForTest(t, data.ValidationRecipeID, "cwi-shell-seal-test")
 		attestations := shellValidationCheckAttestationsForTest(requirement.RequiredCheckRefs)
 		proofBinding, bindErr := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(requirement, data.ValidationRecipeID, attestations...)

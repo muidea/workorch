@@ -11,9 +11,18 @@ import (
 )
 
 type shellGoTestJSONEvent struct {
-	Action string `json:"Action"`
-	Test   string `json:"Test"`
-	Output string `json:"Output"`
+	Action     string `json:"Action"`
+	Package    string `json:"Package"`
+	ImportPath string `json:"ImportPath"`
+	Test       string `json:"Test"`
+	Output     string `json:"Output"`
+}
+
+type shellGoTestJSONDiagnosticRecord struct {
+	Action     string
+	Package    string
+	ImportPath string
+	Output     string
 }
 
 // shellGoTestJSONFacts is the single owner-private decoding result for one
@@ -23,8 +32,10 @@ type shellGoTestJSONEvent struct {
 // classification saw only the JSON envelope and fell back to a generic exit
 // code.
 type shellGoTestJSONFacts struct {
-	Observation      runtimecontract.RuntimeValidationObservation
-	DiagnosticOutput string
+	Observation       runtimecontract.RuntimeValidationObservation
+	DiagnosticOutput  string
+	DiagnosticRecords []shellGoTestJSONDiagnosticRecord
+	HasBuildOutput    bool
 }
 
 // attachShellValidationObservation records the owner fact that a sealed
@@ -45,7 +56,9 @@ func attachShellValidationObservation(output *RuntimeCommandResult, command stri
 	isGoTestJSON := isGoTest && shellGoTestJSONEnabled(args[1:])
 	observation := shellValidationObservation(output.Stdout, output.Stderr, isGoTest && !isGoTestJSON)
 	if isGoTestJSON {
-		observation = goTestJSONValidationObservation(output.Stdout, output.Stderr)
+		facts := parseGoTestJSONFacts(output.Stdout, output.Stderr)
+		output.goTestJSONFacts = &facts
+		observation = facts.Observation
 	}
 	observation.RecipeID = strings.TrimSpace(recipeID)
 	if isGoTestJSON {
@@ -113,17 +126,30 @@ func goTestJSONValidationObservation(stdout, stderr string) runtimecontract.Runt
 
 func parseGoTestJSONFacts(stdout, stderr string) shellGoTestJSONFacts {
 	observation := runtimecontract.RuntimeValidationObservation{}
+	diagnosticRecords := make([]shellGoTestJSONDiagnosticRecord, 0)
+	hasBuildOutput := false
 	var diagnosticOutput strings.Builder
 	scanner := bufio.NewScanner(strings.NewReader(strings.Join([]string{stdout, stderr}, "\n")))
 	scanner.Buffer(make([]byte, 4096), 2*MaxCommandOutputBytes+1024)
 	for scanner.Scan() {
+		line := scanner.Text()
 		var event shellGoTestJSONEvent
-		if json.Unmarshal([]byte(strings.TrimSpace(scanner.Text())), &event) != nil {
+		if json.Unmarshal([]byte(strings.TrimSpace(line)), &event) != nil {
+			if strings.TrimSpace(line) != "" {
+				diagnosticRecords = append(diagnosticRecords, shellGoTestJSONDiagnosticRecord{Output: line})
+				diagnosticOutput.WriteString(line)
+				diagnosticOutput.WriteByte('\n')
+			}
 			continue
 		}
 		switch strings.TrimSpace(event.Action) {
 		case "output", "build-output":
 			if strings.TrimSpace(event.Output) != "" {
+				diagnosticRecords = append(diagnosticRecords, shellGoTestJSONDiagnosticRecord{
+					Action: strings.TrimSpace(event.Action), Package: strings.TrimSpace(event.Package),
+					ImportPath: strings.TrimSpace(event.ImportPath), Output: event.Output,
+				})
+				hasBuildOutput = hasBuildOutput || strings.TrimSpace(event.Action) == "build-output"
 				diagnosticOutput.WriteString(event.Output)
 				if !strings.HasSuffix(event.Output, "\n") {
 					diagnosticOutput.WriteByte('\n')
@@ -146,19 +172,11 @@ func parseGoTestJSONFacts(stdout, stderr string) shellGoTestJSONFacts {
 		}
 	}
 	return shellGoTestJSONFacts{
-		Observation:      observation.Normalized(),
-		DiagnosticOutput: diagnosticOutput.String(),
+		Observation:       observation.Normalized(),
+		DiagnosticOutput:  diagnosticOutput.String(),
+		DiagnosticRecords: diagnosticRecords,
+		HasBuildOutput:    hasBuildOutput,
 	}
-}
-
-// goTestJSONDiagnosticOutput extracts only the bounded, tool-owned Output
-// records emitted by `go test -json`. Compiler and package-loader diagnostics
-// are wrapped in these records, so scanning the raw JSON envelope cannot find
-// their file locations reliably. The command runner already bounds stdout and
-// stderr independently; the scanner limit covers their largest possible line
-// without creating a second unbounded protocol.
-func goTestJSONDiagnosticOutput(stdout, stderr string) string {
-	return parseGoTestJSONFacts(stdout, stderr).DiagnosticOutput
 }
 
 // goTestObservationIsExplicitZeroWork recognizes the tool-level zero-work

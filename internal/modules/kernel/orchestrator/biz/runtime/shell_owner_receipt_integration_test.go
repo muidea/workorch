@@ -1001,7 +1001,7 @@ func acquireObservedShellValidationCatalog(
 			WorkspaceManifestBinding: runtimecontract.RuntimeWorkspaceManifestBinding{
 				Manifest: manifest.Manifest, Observation: manifest.Observation,
 			},
-			MaxItems: 8,
+			MaxItems: runtimecontract.DefaultRuntimeOwnerInventoryBudget().MaxItems,
 		},
 	))
 	if result == nil {
