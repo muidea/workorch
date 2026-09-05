@@ -209,18 +209,19 @@ type RuntimeCandidateFailureDiagnostic struct {
 type RuntimeCandidateCorrectionObjective string
 
 const (
-	RuntimeCandidateCorrectionRemoveForbiddenField     RuntimeCandidateCorrectionObjective = "remove_forbidden_field"
-	RuntimeCandidateCorrectionSupplyRequiredField      RuntimeCandidateCorrectionObjective = "supply_required_field"
-	RuntimeCandidateCorrectionReplaceTarget            RuntimeCandidateCorrectionObjective = "replace_target_with_allowed_target"
-	RuntimeCandidateCorrectionSelectOperationKind      RuntimeCandidateCorrectionObjective = "select_allowed_operation_kind"
-	RuntimeCandidateCorrectionSelectDurableEffect      RuntimeCandidateCorrectionObjective = "select_durable_effect"
-	RuntimeCandidateCorrectionChangeReplayedShape      RuntimeCandidateCorrectionObjective = "change_replayed_shape"
-	RuntimeCandidateCorrectionSatisfyCoverage          RuntimeCandidateCorrectionObjective = "satisfy_required_coverage"
-	RuntimeCandidateCorrectionSatisfyDependency        RuntimeCandidateCorrectionObjective = "satisfy_dependency_binding"
-	RuntimeCandidateCorrectionSelectEvidenceBinding    RuntimeCandidateCorrectionObjective = "select_allowed_evidence_binding"
-	RuntimeCandidateCorrectionReencodeParameterEntries RuntimeCandidateCorrectionObjective = "reencode_parameter_entries"
-	RuntimeCandidateCorrectionConformOwnerConstraint   RuntimeCandidateCorrectionObjective = "conform_owner_candidate_constraint"
-	RuntimeCandidateCorrectionConsolidateOperationSet  RuntimeCandidateCorrectionObjective = "consolidate_owner_target_operations"
+	RuntimeCandidateCorrectionRemoveForbiddenField      RuntimeCandidateCorrectionObjective = "remove_forbidden_field"
+	RuntimeCandidateCorrectionSupplyRequiredField       RuntimeCandidateCorrectionObjective = "supply_required_field"
+	RuntimeCandidateCorrectionReplaceTarget             RuntimeCandidateCorrectionObjective = "replace_target_with_allowed_target"
+	RuntimeCandidateCorrectionSelectOperationKind       RuntimeCandidateCorrectionObjective = "select_allowed_operation_kind"
+	RuntimeCandidateCorrectionSelectDurableEffect       RuntimeCandidateCorrectionObjective = "select_durable_effect"
+	RuntimeCandidateCorrectionChangeReplayedShape       RuntimeCandidateCorrectionObjective = "change_replayed_shape"
+	RuntimeCandidateCorrectionSatisfyCoverage           RuntimeCandidateCorrectionObjective = "satisfy_required_coverage"
+	RuntimeCandidateCorrectionSatisfyDependency         RuntimeCandidateCorrectionObjective = "satisfy_dependency_binding"
+	RuntimeCandidateCorrectionSelectEvidenceBinding     RuntimeCandidateCorrectionObjective = "select_allowed_evidence_binding"
+	RuntimeCandidateCorrectionReencodeParameterEntries  RuntimeCandidateCorrectionObjective = "reencode_parameter_entries"
+	RuntimeCandidateCorrectionConformOwnerConstraint    RuntimeCandidateCorrectionObjective = "conform_owner_candidate_constraint"
+	RuntimeCandidateCorrectionSatisfyOperationValueRule RuntimeCandidateCorrectionObjective = "satisfy_operation_value_rule"
+	RuntimeCandidateCorrectionConsolidateOperationSet   RuntimeCandidateCorrectionObjective = "consolidate_owner_target_operations"
 )
 
 func (d *RuntimeCandidateFailureDiagnostic) Clone() *RuntimeCandidateFailureDiagnostic {

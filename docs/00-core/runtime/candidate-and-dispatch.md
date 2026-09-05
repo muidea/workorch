@@ -21,6 +21,9 @@ prerequisite refresh 不得用新 catalog 重建历史拒绝，也不得因历�
 不是新的状态机或 owner；实现可在现有 manifest DTO 内表达。每条授权至少包含：
 
 - canonical operation kind、owner module、parameter/variant contract；
+- operation 及 selected variant 的 executable `ValueRules`：只包含 sealed ref、parameter names、closed rule kind/bounds，计入
+  operation-contract revision 与 manifest hash；strict decoder、semantic evaluator 和 final validator 共用同一纯实现，不携带
+  raw candidate value，也不触发 capability owner I/O；
 - operation 及 variant 可选的 `CandidateConstraints`：两级合并，只允许 sealed ref、parameter name 与 closed required-shape vocabulary，且计入
   operation-contract revision 与 manifest hash；不得携带 raw candidate、parser text 或 Runtime disposition；
 - accepted/required effect scope、dependency 与封存的 `CoverageEvidenceBinding` 引用；每个可关闭
@@ -356,7 +359,7 @@ manifest、attempt ledger、rejected shape 与 typed field violations 决定：
 
 | SM-3 owner-local result | 语义 | 唯一行为 |
 | --- | --- | --- |
-| `correctable_once` | 单一 JSON object 在同一 manifest 下存在可验证的 schema/parameter-entry/owner-constraint/operation-set correction，或有限 frontier 中存在已封存的合法语义差异 witness，且尚未使用 correction attempt | 将 manifest hash、目标 delta 和 witness 随 attempt 0 持久化，只允许 attempt 1 |
+| `correctable_once` | 单一 JSON object 在同一 manifest 下存在可验证的 schema/parameter-entry/operation-value-rule/owner-constraint/operation-set correction，或有限 frontier 中存在已封存的合法语义差异 witness，且尚未使用 correction attempt | 将 manifest hash、目标 delta 和 witness 随 attempt 0 持久化，只允许 attempt 1 |
 | `rejected_final` | 没有可证明的同合同语义差异，或 correction attempt 已用尽 | 形成 typed candidate terminal，零额外 provider call |
 
 `CorrectionDirective` 是 Orchestrator persisted state，不是 evaluator/LLM/capability feedback。它只描述 candidate
@@ -379,6 +382,10 @@ rejected candidate semantic-shape hash，并固定要求 `one_operation_per_owne
 `actual_shape` 与 `required_shape`。attempt 1 provider call 前只验证同 manifest/path 且 constrained parameter 确实发生变化；
 参数是否达到 required shape 仍只能由同一 capability owner 的后继 conformance read 证明，Orchestrator/LLM 不得复制 owner
 parser。该 correction 不修改 C0～C3、stable prefix 或 ordinary feasibility contract。
+`operation_value_rule` witness 只携带 actual candidate 已选中 operation/variant 中的 exact rule ref、末端 parameter path 和
+closed `actual_shape -> required_shape`，不携带 raw value、owner diagnostic 或可逆 hash。attempt 1 只允许该 parameter 发生
+execution-semantic 变化；SM-3 必须用相同 manifest 证明原值确实命中该 violation、修正后 selected operation/variant 未漂移且全部
+`ValueRules` 通过。该 pure gate 在 capability owner I/O 前完成，不创建 owner fact、EventHub 事件或新的 correction budget。
 strict decoder 报告 `missing_*`/`empty_*` required field 时，SM-3 必须先于 semantic frontier 封存同 path 的
 `schema_field` witness（`field_absent -> field_present`）；required field 已存在但为 `null` 或错误 JSON type 时，则封存
 `schema_field(<actual_type> -> field_present)`，其中 rejected value 必须等于 diagnostic 的 exact JSON type，且
@@ -409,6 +416,9 @@ retry tail；该 input 仅包含 manifest、objectives 与 witness，不含 pers
 据此渲染 exact alternative，但不能选择、修改或持久化 correction。failure 与 detached input 共同参与
 correction/request-session identity，且不得改变 C0～C3 或 `stablePrefixHash`。duplicate/restart 复用 attempt 0 的 exact
 directive 并重新投影相同 input，不重新推导或重新分配预算。
+`candidate_authority_exhausted` 与 `candidate_retry_exhausted` 必须保持不同 terminal failure class：前者证明 attempt 0 后不存在
+合法 correction authority，可能从未发起 correction provider call；后者才证明已消费唯一 attempt 1。projection 必须优先按
+terminal code 保持该区别，并兼容旧记录中 authority code 曾落入 retry class 的数据，不能把零纠正调用展示为“重试无效”。
 failed `CandidateAttempt` 的 durable invariant 必须在 CAS 前及 fresh load 时共同校验 failure/correction pair：manifest、normalized
 objectives、field path、observed actual、parameter-entry encoding facts、适用 rejected shape 与 witness 必须一致；objective 还必须与 witness dimension 的 bounded
 兼容矩阵一致，不能由 diagnostic 与 directive 携带同一错误映射而共同越过校验。结构合法但与 diagnostic 不一致的 directive

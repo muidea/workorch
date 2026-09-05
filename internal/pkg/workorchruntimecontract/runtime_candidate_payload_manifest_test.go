@@ -740,6 +740,75 @@ func TestEncodeRuntimeCandidatePayloadWithManifestRejectsCandidateOutsideManifes
 	}
 }
 
+func TestDecodeRuntimeCandidatePayloadWithManifestRejectsDeclaredValueRulesBeforeOwnerIO(t *testing.T) {
+	stateChangeManifest := func(kind string) RuntimeCandidateContractManifest {
+		return mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+			State: ConvergenceStateNeedStateChange,
+			RequiredOutput: RequiredOutputContract{
+				AcceptedKinds: []string{kind}, AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
+				RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+				TargetRefs: []string{"main.go", "other.go"},
+			},
+		})
+	}
+	validationManifest := func(kind string, targets ...string) RuntimeCandidateContractManifest {
+		return mustRuntimeCandidatePayloadManifest(t, RuntimeDecision{
+			State: ConvergenceStateNeedValidation,
+			RequiredOutput: RequiredOutputContract{
+				AcceptedKinds: []string{kind, RuntimeBlockKindManagedValidationSession}, AcceptedEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
+				RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone}, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+				TargetRefs: append([]string(nil), targets...),
+			},
+		})
+	}
+
+	fileEdit := stateChangeManifest(StepKindFileEdit)
+	patchApply := stateChangeManifest(RuntimeBlockKindPatchApply)
+	patchPreview := validationManifest(RuntimeBlockKindPatchPreview, "main.go", "other.go")
+	fileList := validationManifest(StepKindFileList)
+	fileRead := validationManifest(StepKindFileRead, "main.go", "other.go")
+	gitRead := validationManifest(StepKindGitRead)
+	cases := []struct {
+		name, payload, path, actual string
+		manifest                    RuntimeCandidateContractManifest
+		required                    RuntimeOperationValueRequiredShape
+	}{
+		{name: "file edit equal replacement", manifest: fileEdit, path: "$.operations[0].parameters[name=newText]", actual: string(RuntimeOperationValueActualShapeEqualParameters), required: RuntimeOperationValueRequiredShapeDistinct,
+			payload: `{"operations":[{"kind":"file/edit","targetRefs":["main.go"],"parameters":[{"name":"oldText","string":"same"},{"name":"newText","string":"same"}]}]}`},
+		{name: "file edit empty source", manifest: fileEdit, path: "$.operations[0].parameters[name=oldText]", actual: string(RuntimeOperationValueActualShapeEmpty), required: RuntimeOperationValueRequiredShapeNonEmpty,
+			payload: `{"operations":[{"kind":"file/edit","targetRefs":["main.go"],"parameters":[{"name":"oldText","string":""},{"name":"newText","string":"after"}]}]}`},
+		{name: "patch apply equal replacement", manifest: patchApply, path: "$.operations[0].parameters[name=newText]", actual: string(RuntimeOperationValueActualShapeEqualParameters), required: RuntimeOperationValueRequiredShapeDistinct,
+			payload: `{"operations":[{"kind":"patch/apply","targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"text_replace"},{"name":"oldText","string":"same"},{"name":"newText","string":"same"}]}]}`},
+		{name: "patch preview equal replacement", manifest: patchPreview, path: "$.operations[0].parameters[name=newText]", actual: string(RuntimeOperationValueActualShapeEqualParameters), required: RuntimeOperationValueRequiredShapeDistinct,
+			payload: `{"operations":[{"kind":"patch/preview","targetRefs":["main.go"],"parameters":[{"name":"patchType","string":"text_replace"},{"name":"oldText","string":"same"},{"name":"newText","string":"same"}]}]}`},
+		{name: "file list count above maximum", manifest: fileList, path: "$.operations[0].parameters[name=maxEntries]", actual: string(RuntimeOperationValueActualShapeAboveMaximum), required: RuntimeOperationValueRequiredShapeIntegerRange,
+			payload: `{"operations":[{"kind":"file/list","parameters":[{"name":"maxEntries","integer":501}]}]}`},
+		{name: "file read bytes above maximum", manifest: fileRead, path: "$.operations[0].parameters[name=maxBytes]", actual: string(RuntimeOperationValueActualShapeAboveMaximum), required: RuntimeOperationValueRequiredShapeIntegerRange,
+			payload: `{"operations":[{"kind":"file/read","targetRefs":["main.go"],"parameters":[{"name":"maxBytes","integer":65537}]}]}`},
+		{name: "file read reversed lines", manifest: fileRead, path: "$.operations[0].parameters[name=endLine]", actual: string(RuntimeOperationValueActualShapeUnorderedIntegers), required: RuntimeOperationValueRequiredShapeIntegerOrdered,
+			payload: `{"operations":[{"kind":"file/read","targetRefs":["main.go"],"parameters":[{"name":"startLine","integer":20},{"name":"endLine","integer":10}]}]}`},
+		{name: "git read non-positive limit", manifest: gitRead, path: "$.operations[0].parameters[name=limit]", actual: string(RuntimeOperationValueActualShapeBelowMinimum), required: RuntimeOperationValueRequiredShapeIntegerRange,
+			payload: `{"operations":[{"kind":"git/read","parameters":[{"name":"operation","string":"log"},{"name":"limit","integer":0}]}]}`},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			candidate, err := DecodeRuntimeCandidatePayloadWithManifest(testCase.manifest, []byte(testCase.payload))
+			var diagnostic *RuntimeCandidatePayloadDiagnostic
+			if !errors.As(err, &diagnostic) {
+				t.Fatalf("decode error = %v, want typed value-rule diagnostic", err)
+			}
+			if diagnostic.Path != testCase.path || diagnostic.Actual != testCase.actual || diagnostic.RequiredShape != string(testCase.required) ||
+				!strings.HasPrefix(diagnostic.ConstraintRef, "operation_value/") || diagnostic.WireRule == nil {
+				t.Fatalf("value-rule diagnostic = %+v", diagnostic)
+			}
+			operations, operationsErr := runtimeCandidatePayloadOperations(candidate)
+			if operationsErr != nil || len(operations) != 1 {
+				t.Fatalf("rejected correction frontier = %+v err=%v", candidate, operationsErr)
+			}
+		})
+	}
+}
+
 func stringPtr(value string) *string { return &value }
 
 func mustRuntimeCandidatePayloadManifest(t *testing.T, decision RuntimeDecision) RuntimeCandidateContractManifest {

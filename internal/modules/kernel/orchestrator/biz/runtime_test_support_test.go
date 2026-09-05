@@ -844,6 +844,10 @@ func runtimeCandidateSealExactFileEditTargetsFacts(t *testing.T, targetRefs []st
 // scope, while the File owner returns the operation-scoped feasibility fact;
 // neither observer manufactures or bypasses candidate authority.
 func startRuntimeCandidateFileEditAdmissionOwners(t *testing.T, hub magicevent.Hub) {
+	startRuntimeCandidateFileEditAdmissionOwnersWithProbeObserver(t, hub, nil)
+}
+
+func startRuntimeCandidateFileEditAdmissionOwnersWithProbeObserver(t *testing.T, hub magicevent.Hub, probeObserved func()) {
 	t.Helper()
 	deliverableDirectory, internalDirectory := t.TempDir(), t.TempDir()
 	workspaceObserver := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
@@ -856,6 +860,9 @@ func startRuntimeCandidateFileEditAdmissionOwners(t *testing.T, hub magicevent.H
 
 	probeObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleFile, hub)
 	probeObserver.Subscribe(fileevents.TopicProbeRuntimeOperationFeasibility, func(event magicevent.Event, result magicevent.Result) {
+		if probeObserved != nil {
+			probeObserved()
+		}
 		command := event.Data().(fileevents.ProbeRuntimeOperationFeasibilityCommand)
 		response, responseErr := fileevents.NewProbeRuntimeOperationFeasibilityResult(command, "", nil, nil, nil, nil)
 		if responseErr != nil {

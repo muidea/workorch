@@ -566,6 +566,10 @@ func cloneRuntimeCandidateContractManifestRaw(in RuntimeCandidateContractManifes
 func cloneRuntimeCandidateOperationManifestRaw(in RuntimeCandidateOperationManifest) RuntimeCandidateOperationManifest {
 	out := in
 	out.CandidateConstraints = cloneRuntimeStateRawSlice(in.CandidateConstraints, func(value RuntimeOperationCandidateConstraint) RuntimeOperationCandidateConstraint { return value })
+	out.ValueRules = cloneRuntimeStateRawSlice(in.ValueRules, func(value RuntimeOperationValueRule) RuntimeOperationValueRule {
+		value.ParameterNames = cloneRuntimeStateRawSlice(value.ParameterNames, func(name string) string { return name })
+		return value
+	})
 	out.AllowedOperationFields = cloneRuntimeStateRawSlice(in.AllowedOperationFields, func(item string) string { return item })
 	out.RequiredOperationFields = cloneRuntimeStateRawSlice(in.RequiredOperationFields, func(item string) string { return item })
 	out.AllowedVariantIDs = cloneRuntimeStateRawSlice(in.AllowedVariantIDs, func(item string) string { return item })
@@ -579,6 +583,10 @@ func cloneRuntimeCandidateOperationManifestRaw(in RuntimeCandidateOperationManif
 		value.RequiredNonEmpty = cloneRuntimeStateRawSlice(item.RequiredNonEmpty, func(value string) string { return value })
 		value.ForbiddenParameters = cloneRuntimeStateRawSlice(item.ForbiddenParameters, func(value string) string { return value })
 		value.DistinctParameterPairs = cloneRuntimeStateRawSlice(item.DistinctParameterPairs, func(value RuntimeOperationParameterPair) RuntimeOperationParameterPair { return value })
+		value.ValueRules = cloneRuntimeStateRawSlice(item.ValueRules, func(rule RuntimeOperationValueRule) RuntimeOperationValueRule {
+			rule.ParameterNames = cloneRuntimeStateRawSlice(rule.ParameterNames, func(name string) string { return name })
+			return rule
+		})
 		value.CandidateConstraints = cloneRuntimeStateRawSlice(item.CandidateConstraints, func(value RuntimeOperationCandidateConstraint) RuntimeOperationCandidateConstraint { return value })
 		return value
 	})

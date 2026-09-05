@@ -150,7 +150,7 @@ func TestValidateRuntimeOperationContractSSHUsesOnlyOpaqueOwnerRefs(t *testing.T
 	oversized := strings.Repeat("x", 16*1024+1)
 	withOversizedCommand := valid
 	withOversizedCommand.Parameters = []OperationParameter{{Name: "sessionRef", String: &sessionRef}, {Name: "credentialRef", String: &credentialRef}, {Name: "command", String: &oversized}}
-	if err := ValidateRuntimeOperationContract(withOversizedCommand); err == nil || !strings.Contains(err.Error(), "bounded command") {
+	if err := ValidateRuntimeOperationContract(withOversizedCommand); err == nil || !strings.Contains(err.Error(), "at most 16384 bytes") {
 		t.Fatalf("SSH oversized command error = %v", err)
 	}
 }

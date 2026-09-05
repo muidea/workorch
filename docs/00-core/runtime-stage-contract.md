@@ -191,6 +191,15 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   declared name/type、entry/container、operation kind/index 均无歧义时封存一次 `parameter_entry_encoding` witness，要求
   attempt 1 重新生成全部独立 named typed entries。它不得本地搬移并接受原值，不得把合法 parameter 当作 forbidden field
   删除，也不改变 SM-2 authority 或 SM-4 recovery；mixed unknown/type/duplicate、lineage 漂移或 attempt 1 再拒绝均 final。
+- executable operation contract 可在 manifest v7 的 operation/variant 上声明 owner-neutral、provider-safe 的 executable
+  `ValueRules`，只表达非空、整数/字符串字节范围、布尔定值、同类型参数不同值和整数参数顺序。它们是声明者拥有的纯值合同，
+  不是 capability owner fact、EventHub topic 或第五个状态机。strict decoder、manifest semantic evaluator 与 final operation
+  validator 必须消费同一规则；在任何 owner I/O 前返回 exact rule ref、parameter path 与封闭
+  `actual_shape -> required_shape`，raw value 不得进入 aggregate diagnostic 或 C4。SM-3 只能封存一次
+  `operation_value_rule` witness，并只授权 attempt 1 修改规则点名的末端参数；还原该参数后完整 candidate 的 execution-semantic
+  shape 必须与 attempt 0 相同，且修正结果须重新通过 selected operation/variant 的全部 `ValueRules`。没有实际变化、夹带
+  target/binding/其它参数变化、rule/variant 漂移或 attempt 1 再拒绝均 final；该路径零 capability owner call、零独立预算，
+  不改变 SM-2 authority，SM-4 只按 persisted result 幂等 re-drive。
 - executable operation 及其 variant 可在 manifest 中声明 owner-defined、provider-safe 的 `CandidateConstraints`，描述普通 JSON schema
   无法完整表达的参数 shape 或 owner-observed target applicability。candidate proposal 必须先持久化；`parameter_shape` 由 receiving
   capability owner 通过 concrete typed conformance command 在零 workspace I/O 下返回

@@ -55,6 +55,13 @@ func (c RuntimeCandidateCorrectionInput) ValidateAgainstObservation(manifest run
 			return fmt.Errorf("runtime candidate owner-constraint witness is not sealed in the manifest")
 		}
 	}
+	if c.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOperationValueRule {
+		rule, found := runtimecontract.RuntimeOperationValueRuleForManifestRef(manifest, c.Witness.OperationKind, c.Witness.ConstraintRef)
+		if !found || len(rule.ParameterNames) == 0 || rule.ParameterNames[len(rule.ParameterNames)-1] != runtimeCandidateCorrectionPathField(c.Witness.Path) ||
+			!rule.AcceptsViolationShapes(runtimecontract.RuntimeOperationValueActualShape(c.Witness.RejectedValue), runtimecontract.RuntimeOperationValueRequiredShape(c.Witness.AlternativeValue)) {
+			return fmt.Errorf("runtime candidate operation-value-rule witness is not sealed in the manifest")
+		}
+	}
 	if c.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOperationSetCardinality {
 		violation := c.Witness.OperationSetViolation
 		if manifest.OperationSetPolicy.MaxOperationsPerOwnerTarget != 1 || violation == nil || violation.Validate() != nil || violation.Maximum != manifest.OperationSetPolicy.MaxOperationsPerOwnerTarget {

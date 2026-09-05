@@ -144,6 +144,11 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 	} else if runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionConsolidateOperationSet) {
 		return fmt.Errorf("runtime candidate consolidation objective requires an operation-set violation")
 	}
+	if runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionSatisfyOperationValueRule) &&
+		(diagnostic.ConstraintRef == "" || diagnostic.RequiredShape == "" ||
+			!runtimeOperationValueShapesCompatible(RuntimeOperationValueActualShape(diagnostic.Actual), RuntimeOperationValueRequiredShape(diagnostic.RequiredShape))) {
+		return fmt.Errorf("runtime candidate value-rule objective requires compatible typed rule shapes")
+	}
 	for _, value := range []struct{ name, text string }{
 		{"candidate correction operation id", diagnostic.OperationID}, {"candidate correction path", diagnostic.Path},
 		{"candidate correction actual", diagnostic.Actual}, {"candidate correction manifest hash", diagnostic.ManifestHash},
@@ -187,6 +192,7 @@ func (o RuntimeCandidateCorrectionObservation) Validate() error {
 			RuntimeCandidateCorrectionSelectEvidenceBinding,
 			RuntimeCandidateCorrectionReencodeParameterEntries,
 			RuntimeCandidateCorrectionConformOwnerConstraint,
+			RuntimeCandidateCorrectionSatisfyOperationValueRule,
 			RuntimeCandidateCorrectionConsolidateOperationSet:
 		default:
 			return fmt.Errorf("runtime candidate correction observation has unsupported objective %q", objective)

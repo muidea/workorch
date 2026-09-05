@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"strings"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -220,6 +221,7 @@ func runtimeOperationParameterSchemaForWireRule(operation runtimecontract.Runtim
 	}
 	providerOperation := operation
 	providerOperation.Parameters = providerParameters
+	providerOperation.ValueRules = runtimeOperationValueRulesForSchema(operation, rule)
 	parameterSchema := map[string]any{
 		"type": "array", "maxItems": len(providerParameters) + runtimeProviderStringListMaxItems,
 		"items": runtimeOperationParameterItemSchemaForManifest(providerOperation),
@@ -309,7 +311,7 @@ func runtimeOperationParameterItemSchemaForManifest(operation runtimecontract.Ru
 			branches = append(branches, runtimeValidationRecipeIDParameterSchema(operation.ValidationRecipes))
 			continue
 		}
-		branches = append(branches, runtimeNamedOperationParameterSchema(parameter.Name, parameter.Type))
+		branches = append(branches, runtimeNamedOperationParameterSchema(parameter.Name, parameter.Type, operation.ValueRules))
 	}
 	if operation.AllowsDynamicParameters {
 		branches = append(branches, runtimeMCPDynamicParameterSchemas(operation.Kind)...)
@@ -333,8 +335,37 @@ func runtimeValidationRecipeIDParameterSchema(recipes []runtimecontract.RuntimeV
 	}
 }
 
-func runtimeNamedOperationParameterSchema(name string, parameterType runtimecontract.RuntimeOperationParameterType) map[string]any {
+func runtimeNamedOperationParameterSchema(name string, parameterType runtimecontract.RuntimeOperationParameterType, rules []runtimecontract.RuntimeOperationValueRule) map[string]any {
 	valueField, valueSchema := runtimeOperationParameterValueSchema(parameterType)
+	for _, rule := range runtimecontract.NormalizeRuntimeOperationValueRules(rules) {
+		if len(rule.ParameterNames) != 1 || rule.ParameterNames[0] != name {
+			continue
+		}
+		switch rule.Kind {
+		case runtimecontract.RuntimeOperationValueRuleNonEmpty:
+			if parameterType == runtimecontract.RuntimeOperationParameterTypeString {
+				valueSchema["minLength"] = 1
+			} else if parameterType == runtimecontract.RuntimeOperationParameterTypeStringList {
+				valueSchema["minItems"] = 1
+			}
+		case runtimecontract.RuntimeOperationValueRuleIntegerRange:
+			if rule.HasMinimum {
+				valueSchema["minimum"] = rule.Minimum
+			}
+			if rule.HasMaximum {
+				valueSchema["maximum"] = rule.Maximum
+			}
+		case runtimecontract.RuntimeOperationValueRuleStringByteRange:
+			if rule.HasMinimum {
+				valueSchema["minLength"] = rule.Minimum
+			}
+			if rule.HasMaximum {
+				valueSchema["maxLength"] = rule.Maximum
+			}
+		case runtimecontract.RuntimeOperationValueRuleBooleanEquals:
+			valueSchema["const"] = rule.ExpectedBoolean == "true"
+		}
+	}
 	return map[string]any{
 		"type": "object", "additionalProperties": false,
 		"required": []string{"name", valueField},
@@ -343,6 +374,16 @@ func runtimeNamedOperationParameterSchema(name string, parameterType runtimecont
 			valueField: valueSchema,
 		},
 	}
+}
+
+func runtimeOperationValueRulesForSchema(operation runtimecontract.RuntimeCandidateOperationManifest, rule runtimecontract.RuntimeCandidateWireOperationRule) []runtimecontract.RuntimeOperationValueRule {
+	rules := append([]runtimecontract.RuntimeOperationValueRule(nil), operation.ValueRules...)
+	for _, variant := range operation.Variants {
+		if rule.VariantID == "" || strings.TrimSpace(rule.VariantID) == strings.TrimSpace(variant.ID) {
+			rules = append(rules, variant.ValueRules...)
+		}
+	}
+	return runtimecontract.NormalizeRuntimeOperationValueRules(rules)
 }
 
 func runtimeOperationParameterValueSchema(parameterType runtimecontract.RuntimeOperationParameterType) (string, map[string]any) {

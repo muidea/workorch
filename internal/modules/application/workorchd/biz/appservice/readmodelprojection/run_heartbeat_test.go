@@ -115,6 +115,25 @@ func TestMapRunHeartbeatMarksRuntimeNoProgressTerminalAsIneffectiveRetry(t *test
 	}
 }
 
+func TestRuntimeAuthorityExhaustionIsNotProjectedAsIneffectiveRetry(t *testing.T) {
+	for _, failureClass := range []runtimecontract.FailureClass{
+		runtimecontract.FailureClassCandidateAuthorityExhausted,
+		// Compatibility with aggregates persisted before the class split.
+		runtimecontract.FailureClassCandidateExhausted,
+	} {
+		if runtimeRetryExhausted(&projectioncontract.RuntimeProgress{
+			FailureClass: string(failureClass), TerminalCode: "candidate_authority_exhausted",
+		}) {
+			t.Fatalf("zero-retry authority exhaustion %q was projected as ineffective retry", failureClass)
+		}
+	}
+	if !runtimeRetryExhausted(&projectioncontract.RuntimeProgress{
+		FailureClass: string(runtimecontract.FailureClassCandidateExhausted), TerminalCode: "candidate_retry_exhausted",
+	}) {
+		t.Fatal("actual candidate retry exhaustion lost its ineffective-retry projection")
+	}
+}
+
 func TestMapRunHeartbeatDoesNotTreatAssessmentActionAsBudgetEscalation(t *testing.T) {
 	got := mapRunHeartbeat(readmodelcore.WorkspaceSnapshotState{
 		Workspace: appmodelcore.Workspace{ID: "ws-a", ActiveRunID: "run-a"},

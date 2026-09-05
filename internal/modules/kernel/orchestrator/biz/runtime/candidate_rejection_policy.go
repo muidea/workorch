@@ -22,7 +22,8 @@ func CandidateRejectionCodeDisposition(code string) (runtimecontract.RuntimeCand
 		"candidate_target_outside_grounding",
 		"candidate_creation_scope_missing_file_target",
 		"candidate_owner_target_effect_overlap",
-		"candidate_owner_constraint_nonconformant":
+		"candidate_owner_constraint_nonconformant",
+		"candidate_operation_value_rule_nonconformant":
 		return runtimecontract.RuntimeCandidateCorrectionCorrectableOnce, true
 	case "candidate_replays_rejected_candidate_shape",
 		"candidate_authority_exhausted",
@@ -77,6 +78,9 @@ func CandidateCorrectionObjectivesForFailure(failure *runtimecontract.RuntimeCan
 	}
 	if strings.TrimSpace(failure.Code) == "candidate_owner_constraint_nonconformant" && diagnostic.ConstraintRef != "" && diagnostic.RequiredShape != "" {
 		return []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionConformOwnerConstraint}
+	}
+	if strings.TrimSpace(failure.Code) == "candidate_operation_value_rule_nonconformant" && diagnostic.ConstraintRef != "" && diagnostic.RequiredShape != "" {
+		return []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSatisfyOperationValueRule}
 	}
 	// Provider-authored operation identity is forbidden at the strict wire.
 	// Its only legal correction is removal: dependency satisfaction and every

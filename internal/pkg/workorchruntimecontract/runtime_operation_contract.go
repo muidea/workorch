@@ -95,6 +95,9 @@ func RuntimeOperationContractRevision() string {
 			writeHashString(h, constraint.ParameterName)
 			writeHashString(h, string(constraint.RequiredShape))
 		}
+		for _, rule := range NormalizeRuntimeOperationValueRules(contract.ValueRules) {
+			writeHashStrings(h, runtimeOperationValueRuleHashStrings(rule))
+		}
 		writeHashString(h, runtimeOperationDynamicParameterPolicy(contract.Kind))
 		writeHashString(h, runtimeOperationValidationPolicy(contract.Kind))
 		for _, v := range contract.Variants {
@@ -115,6 +118,9 @@ func RuntimeOperationContractRevision() string {
 				writeHashString(h, string(constraint.Kind))
 				writeHashString(h, constraint.ParameterName)
 				writeHashString(h, string(constraint.RequiredShape))
+			}
+			for _, rule := range NormalizeRuntimeOperationValueRules(v.ValueRules) {
+				writeHashStrings(h, runtimeOperationValueRuleHashStrings(rule))
 			}
 			writeHashString(h, string(v.EffectScope))
 			writeHashString(h, string(v.IdempotencyClass))
@@ -166,6 +172,7 @@ type RuntimeOperationVariantContract struct {
 	RequiredNonEmpty       []string
 	ForbiddenParameters    []string
 	DistinctParameterPairs []RuntimeOperationParameterPair
+	ValueRules             []RuntimeOperationValueRule
 	CandidateConstraints   []RuntimeOperationCandidateConstraint
 	EffectScope            RuntimeEffectScope
 	IdempotencyClass       RuntimeOperationIdempotencyClass
@@ -238,6 +245,7 @@ type RuntimeOperationContract struct {
 	RequireTargetRefs      bool
 	ForbiddenParameters    []string
 	Variants               []RuntimeOperationVariantContract
+	ValueRules             []RuntimeOperationValueRule
 	CandidateConstraints   []RuntimeOperationCandidateConstraint
 	Rules                  []string
 }
@@ -252,6 +260,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "recursive", Type: RuntimeOperationParameterTypeBoolean, CorrectionRole: RuntimeOperationCorrectionRoleClosedParameter, Description: "recursively enumerate descendants"},
 				{Name: "maxEntries", Type: RuntimeOperationParameterTypeInteger, Description: "bounded maximum entry count"},
 			},
+			ValueRules:          []RuntimeOperationValueRule{runtimeIntegerRangeValueRule(StepKindFileList, "", "maxEntries", 1, 500, true)},
 			ForbiddenParameters: []string{"input", "output", "payload"},
 			Rules:               []string{"maxEntries must be between 1 and 500 when provided"},
 		}, true
@@ -263,6 +272,12 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "maxBytes", Type: RuntimeOperationParameterTypeInteger, Description: "bounded maximum returned content bytes"},
 				{Name: "startLine", Type: RuntimeOperationParameterTypeInteger, Description: "optional 1-based inclusive start line"},
 				{Name: "endLine", Type: RuntimeOperationParameterTypeInteger, Description: "optional 1-based inclusive end line"},
+			},
+			ValueRules: []RuntimeOperationValueRule{
+				runtimeIntegerRangeValueRule(StepKindFileRead, "", "maxBytes", 1, 65536, true),
+				runtimeIntegerRangeValueRule(StepKindFileRead, "", "startLine", 1, 0, false),
+				runtimeIntegerRangeValueRule(StepKindFileRead, "", "endLine", 1, 0, false),
+				runtimeIntegerOrderedValueRule(StepKindFileRead, "", "startLine", "endLine"),
 			},
 			RequireTargetRefs:   true,
 			ForbiddenParameters: []string{"input", "output", "payload", "path", "targetRef", "targetRefs"},
@@ -287,6 +302,11 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "newText", Type: RuntimeOperationParameterTypeString, Required: true, Description: "replacement text; an empty string is allowed"},
 				{Name: "baseHash", Type: RuntimeOperationParameterTypeString, Description: "optional current content hash"},
 				{Name: "occurrence", Type: RuntimeOperationParameterTypeInteger, Description: "1-based match index when oldText is not unique"},
+			},
+			ValueRules: []RuntimeOperationValueRule{
+				runtimeNonEmptyValueRule(StepKindFileEdit, "", "oldText"),
+				runtimeDistinctValueRule(StepKindFileEdit, "", "oldText", "newText"),
+				runtimeIntegerRangeValueRule(StepKindFileEdit, "", "occurrence", 1, 0, false),
 			},
 			RequireTargetRefs:   true,
 			ForbiddenParameters: []string{"filePath", "fileContent", "path", "targetRef", "targetRefs"},
@@ -313,13 +333,19 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			ForbiddenParameters: []string{"filePath", "fileContent", "path", "targetRef", "targetRefs"},
 			Variants: []RuntimeOperationVariantContract{
 				{ID: "file_write", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "file_write"}}, RequiredParameters: []string{"content"}, ForbiddenParameters: []string{"diff", "oldText", "newText", "occurrence"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
-				{ID: "text_replace", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "text_replace"}}, RequiredParameters: []string{"oldText", "newText"}, RequiredNonEmpty: []string{"oldText"}, ForbiddenParameters: []string{"content", "diff"}, DistinctParameterPairs: []RuntimeOperationParameterPair{{Left: "oldText", Right: "newText"}}, CandidateConstraints: runtimeTextReplacementCandidateConstraints(), EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
-				{ID: "unified_diff", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "unified_diff"}}, RequiredParameters: []string{"diff"}, RequiredNonEmpty: []string{"diff"}, ForbiddenParameters: []string{"content", "oldText", "newText", "occurrence"}, CandidateConstraints: []RuntimeOperationCandidateConstraint{
+				{ID: "text_replace", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "text_replace"}}, RequiredParameters: []string{"oldText", "newText"}, ForbiddenParameters: []string{"content", "diff"}, ValueRules: []RuntimeOperationValueRule{
+					runtimeNonEmptyValueRule(RuntimeBlockKindPatchApply, "text_replace", "oldText"),
+					runtimeDistinctValueRule(RuntimeBlockKindPatchApply, "text_replace", "oldText", "newText"),
+				}, CandidateConstraints: runtimeTextReplacementCandidateConstraints(), EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
+				{ID: "unified_diff", Discriminators: []RuntimeOperationParameterPredicate{{Name: "patchType", EqualsString: "unified_diff"}}, RequiredParameters: []string{"diff"}, ForbiddenParameters: []string{"content", "oldText", "newText", "occurrence"}, ValueRules: []RuntimeOperationValueRule{
+					runtimeNonEmptyValueRule(RuntimeBlockKindPatchApply, "unified_diff", "diff"),
+				}, CandidateConstraints: []RuntimeOperationCandidateConstraint{
 					{Ref: "patch/unified_diff/diff/single_file", Kind: RuntimeOperationCandidateConstraintParameterShape, ParameterName: "diff", RequiredShape: RuntimeOperationCandidateRequiredShapeUnifiedDiffSingleFile},
 					{Ref: "patch/unified_diff/diff/target_mode", Kind: RuntimeOperationCandidateConstraintParameterShape, ParameterName: "diff", RequiredShape: RuntimeOperationCandidateRequiredShapeUnifiedDiffAuthorizedTargetMode},
 					{Ref: "patch/unified_diff/diff/observed_target", Kind: RuntimeOperationCandidateConstraintTargetApplicability, ParameterName: "diff", RequiredShape: RuntimeOperationCandidateRequiredShapeUnifiedDiffApplicableToObservedTarget},
 				}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
 			},
+			ValueRules: []RuntimeOperationValueRule{runtimeIntegerRangeValueRule(RuntimeBlockKindPatchApply, "", "occurrence", 1, 0, false)},
 			Rules: []string{
 				"file_write must provide content",
 				"file_write replacing an existing target must provide the owner-observed baseHash",
@@ -332,7 +358,9 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 	case RuntimeBlockKindPatchPreview:
 		contract, _ := RuntimeOperationContractForKind(RuntimeBlockKindPatchApply)
 		contract.Kind = RuntimeBlockKindPatchPreview
+		contract.ValueRules = rebindRuntimeOperationValueRules(contract.Kind, "", contract.ValueRules)
 		for idx := range contract.Variants {
+			contract.Variants[idx].ValueRules = rebindRuntimeOperationValueRules(contract.Kind, contract.Variants[idx].ID, contract.Variants[idx].ValueRules)
 			contract.Variants[idx].EffectScope = RuntimeEffectNone
 		}
 		return contract, true
@@ -347,6 +375,11 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "verificationScope", Type: RuntimeOperationParameterTypeString, Description: "bounded verification scope"},
 				{Name: "boundedReason", Type: RuntimeOperationParameterTypeString, Description: "reason the command is bounded"},
 			},
+			ValueRules: []RuntimeOperationValueRule{
+				runtimeNonEmptyValueRule(StepKindShellCommand, "", "command"),
+				runtimeIntegerRangeValueRule(StepKindShellCommand, "", "timeoutMillis", 1000, 600000, true),
+				runtimeBooleanEqualsValueRule(StepKindShellCommand, "", "stateChanging", true),
+			},
 			ForbiddenParameters: []string{"input", "output", "payload", "targetRef", "targetRefs"},
 			Rules: []string{
 				"command must be non-empty",
@@ -360,6 +393,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			Parameters: []RuntimeOperationParameterContract{
 				{Name: "recipeId", Type: RuntimeOperationParameterTypeString, Required: true, CorrectionRole: RuntimeOperationCorrectionRoleValidationRecipe, Description: "activation-sealed Shell validation recipe identity"},
 			},
+			ValueRules:          []RuntimeOperationValueRule{runtimeNonEmptyValueRule(RuntimeBlockKindManagedValidationSession, "", "recipeId")},
 			ForbiddenParameters: []string{"input", "output", "payload", "command", "args", "timeoutMillis", "stateChanging", "targetRef", "targetRefs", "verificationScope", "boundedReason", "validationScratchDir", "validationScratchAutoCleanup"},
 			Rules:               []string{"recipeId must select an activation-sealed owner-confirmed validation recipe"},
 		}, true
@@ -383,6 +417,10 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				"add requires pathspecs and commit requires message",
 			},
 		}
+		contract.ValueRules = []RuntimeOperationValueRule{
+			runtimeIntegerRangeValueRule(contract.Kind, "", "timeoutMillis", 1000, 600000, true),
+			runtimeIntegerRangeValueRule(contract.Kind, "", "limit", 1, 0, false),
+		}
 		if contract.Kind == StepKindGitRead {
 			contract.Variants = []RuntimeOperationVariantContract{
 				{ID: "status", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "status"}}, ForbiddenParameters: []string{"ref", "baseRef", "limit", "message", "expectedHead"}, EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
@@ -394,13 +432,13 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 		} else {
 			contract.Variants = []RuntimeOperationVariantContract{
 				{ID: "init", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "init"}}, ForbiddenParameters: []string{"pathspecs", "message", "ref", "baseRef", "limit", "expectedHead"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyOwnerManaged},
-				{ID: "add", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "add"}}, RequiredParameters: []string{"pathspecs"}, RequiredNonEmpty: []string{"pathspecs"}, ForbiddenParameters: []string{"message", "ref", "baseRef", "limit", "expectedHead"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
-				{ID: "commit", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "commit"}}, RequiredParameters: []string{"message"}, RequiredNonEmpty: []string{"message"}, ForbiddenParameters: []string{"pathspecs", "ref", "baseRef", "limit"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce},
+				{ID: "add", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "add"}}, RequiredParameters: []string{"pathspecs"}, ValueRules: []RuntimeOperationValueRule{runtimeNonEmptyValueRule(contract.Kind, "add", "pathspecs")}, ForbiddenParameters: []string{"message", "ref", "baseRef", "limit", "expectedHead"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
+				{ID: "commit", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "commit"}}, RequiredParameters: []string{"message"}, ValueRules: []RuntimeOperationValueRule{runtimeNonEmptyValueRule(contract.Kind, "commit", "message")}, ForbiddenParameters: []string{"pathspecs", "ref", "baseRef", "limit"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce},
 			}
 		}
 		return contract, true
 	case StepKindMCPToolCall, StepKindMCPResourceRead, StepKindMCPPromptGet:
-		return RuntimeOperationContract{
+		contract := RuntimeOperationContract{
 			Kind: CanonicalRuntimeBlockKind(kind),
 			Parameters: []RuntimeOperationParameterContract{
 				{Name: "serverId", Type: RuntimeOperationParameterTypeString, Required: true, Description: "configured MCP server identity"},
@@ -412,13 +450,35 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "summary", Type: RuntimeOperationParameterTypeString, Description: "bounded operation summary"},
 				{Name: "stream", Type: RuntimeOperationParameterTypeBoolean, CorrectionRole: RuntimeOperationCorrectionRoleClosedParameter, Description: "requests streaming external protocol handling"},
 			},
+			ValueRules: []RuntimeOperationValueRule{
+				runtimeStringByteRangeValueRule(CanonicalRuntimeBlockKind(kind), "", "serverId", 1, 256),
+				runtimeStringByteRangeValueRule(CanonicalRuntimeBlockKind(kind), "", "summary", 0, 4096),
+			},
 			ForbiddenParameters: []string{"input", "arguments", "payload"},
 			Rules: []string{
 				"tool calls require tool and may use scalar input.<name> fields",
 				"resource reads require uri or resourceUri",
 				"prompt gets require prompt or name and may use scalar arguments.<name> fields",
 			},
-		}, true
+		}
+		switch contract.Kind {
+		case StepKindMCPToolCall:
+			contract.RequireOneOfParameters = []string{"tool"}
+			contract.ValueRules = append(contract.ValueRules, runtimeStringByteRangeValueRule(contract.Kind, "", "tool", 1, 256))
+		case StepKindMCPResourceRead:
+			contract.RequireOneOfParameters = []string{"uri", "resourceUri"}
+			contract.ValueRules = append(contract.ValueRules,
+				runtimeStringByteRangeValueRule(contract.Kind, "", "uri", 0, 4096),
+				runtimeStringByteRangeValueRule(contract.Kind, "", "resourceUri", 0, 4096),
+			)
+		case StepKindMCPPromptGet:
+			contract.RequireOneOfParameters = []string{"prompt", "name"}
+			contract.ValueRules = append(contract.ValueRules,
+				runtimeStringByteRangeValueRule(contract.Kind, "", "prompt", 0, 256),
+				runtimeStringByteRangeValueRule(contract.Kind, "", "name", 0, 256),
+			)
+		}
+		return contract, true
 	case StepKindSSHCommand:
 		return RuntimeOperationContract{
 			Kind: StepKindSSHCommand,
@@ -427,6 +487,12 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "credentialRef", Type: RuntimeOperationParameterTypeString, Required: true, Description: "opaque SSH owner credential identity selected from the same ssh-binding constraint fact"},
 				{Name: "command", Type: RuntimeOperationParameterTypeString, Required: true, Description: "bounded remote command"},
 				{Name: "timeoutMillis", Type: RuntimeOperationParameterTypeInteger, Description: "bounded timeout in milliseconds"},
+			},
+			ValueRules: []RuntimeOperationValueRule{
+				runtimeNonEmptyValueRule(StepKindSSHCommand, "", "sessionRef"),
+				runtimeNonEmptyValueRule(StepKindSSHCommand, "", "credentialRef"),
+				runtimeStringByteRangeValueRule(StepKindSSHCommand, "", "command", 1, 16*1024),
+				runtimeIntegerRangeValueRule(StepKindSSHCommand, "", "timeoutMillis", 1000, 300000, true),
 			},
 			ForbiddenParameters: []string{"args", "host", "input", "password", "payload", "port", "privateKey", "privateKeyPath", "username"},
 			Rules:               []string{"targetRefs carries one opaque owner target ref", "targetRef/sessionRef/credentialRef must match one owner-published ssh-binding/<targetRef>/<sessionRef>/<credentialRef> constraint", "command is bounded to 16384 bytes", "timeoutMillis must be between 1000 and 300000"},
@@ -444,6 +510,10 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "maxResults", Type: RuntimeOperationParameterTypeInteger, Description: "bounded search result count"},
 				{Name: "safeSearch", Type: RuntimeOperationParameterTypeBoolean, CorrectionRole: RuntimeOperationCorrectionRoleClosedParameter, Description: "safe search policy"},
 			},
+			ValueRules: []RuntimeOperationValueRule{
+				runtimeStringByteRangeValueRule(StepKindWebSearch, "", "query", 1, 4096),
+				runtimeIntegerRangeValueRule(StepKindWebSearch, "", "maxResults", 1, 20, true),
+			},
 			ForbiddenParameters: []string{"approvalId", "extractMode", "input", "maxBytes", "payload", "result", "url"},
 			Rules: []string{
 				"query is bounded to 4096 bytes",
@@ -459,6 +529,10 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				{Name: "url", Type: RuntimeOperationParameterTypeString, Required: true, Description: "fetch URL"},
 				{Name: "maxBytes", Type: RuntimeOperationParameterTypeInteger, Description: "bounded fetch bytes"},
 				{Name: "extractMode", Type: RuntimeOperationParameterTypeString, Description: "bounded owner extraction mode"},
+			},
+			ValueRules: []RuntimeOperationValueRule{
+				runtimeStringByteRangeValueRule(StepKindWebFetch, "", "url", 1, 4096),
+				runtimeIntegerRangeValueRule(StepKindWebFetch, "", "maxBytes", 1, 1024*1024, true),
 			},
 			ForbiddenParameters: []string{"approvalId", "domains", "excludeDomains", "input", "locale", "maxResults", "payload", "query", "recency", "result", "safeSearch"},
 			Rules: []string{
@@ -478,6 +552,9 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 	contract, known := RuntimeOperationContractForKind(operation.Kind)
 	if !known {
 		return nil
+	}
+	if err := validateRuntimeOperationValueRuleDeclarations(contract.Kind, contract.Parameters, contract.ValueRules, contract.Variants); err != nil {
+		return fmt.Errorf("kind %q has an invalid executable value-rule catalog: %w", operation.Kind, err)
 	}
 	if descriptor, found := RuntimeOperationDescriptorForKind(operation.Kind); found {
 		if err := validateRuntimeOperationTargetCardinality(operation, descriptor.TargetCardinality); err != nil {
@@ -522,109 +599,35 @@ func ValidateRuntimeOperationContract(operation RuntimeOperation) error {
 			return err
 		}
 	}
+	variantID, valueRules, err := runtimeOperationSelectedValueRules(operation, contract.Kind, contract.ValueRules, contract.Variants)
+	if err != nil {
+		return err
+	}
+	if violation := runtimeOperationValueRuleViolation(operation, variantID, valueRules); violation != nil {
+		return violation
+	}
 	switch operation.Kind {
-	case StepKindFileList:
-		if limit, ok := parameterInteger(values["maxEntries"]); ok && (limit <= 0 || limit > 500) {
-			return fmt.Errorf("kind %q maxEntries must be between 1 and 500", operation.Kind)
-		}
-	case StepKindFileRead:
-		if limit, ok := parameterInteger(values["maxBytes"]); ok && (limit <= 0 || limit > 65536) {
-			return fmt.Errorf("kind %q maxBytes must be between 1 and 65536", operation.Kind)
-		}
-		start, hasStart := parameterInteger(values["startLine"])
-		end, hasEnd := parameterInteger(values["endLine"])
-		if (hasStart && start <= 0) || (hasEnd && end <= 0) || (hasStart && hasEnd && end < start) {
-			return fmt.Errorf("kind %q requires positive ordered line bounds", operation.Kind)
-		}
-	case StepKindFileWrite:
-	case StepKindFileEdit:
-		oldText := parameterRawString(values["oldText"])
-		newText := parameterRawString(values["newText"])
-		if oldText == "" || oldText == newText {
-			return fmt.Errorf("kind %q requires non-empty oldText with a distinct newText", operation.Kind)
-		}
-		if occurrence, ok := parameterInteger(values["occurrence"]); ok && occurrence <= 0 {
-			return fmt.Errorf("kind %q occurrence must be positive", operation.Kind)
-		}
-	case RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview:
-		if occurrence, ok := parameterInteger(values["occurrence"]); ok && occurrence <= 0 {
-			return fmt.Errorf("kind %q occurrence must be positive", operation.Kind)
-		}
 	case StepKindShellCommand:
-		if parameterString(values["command"]) == "" {
-			return fmt.Errorf("kind %q requires a non-empty command", operation.Kind)
-		}
-		if timeout, ok := parameterInteger(values["timeoutMillis"]); ok && (timeout < 1000 || timeout > 600000) {
-			return fmt.Errorf("kind %q timeoutMillis must be between 1000 and 600000", operation.Kind)
-		}
-		stateChanging, present := parameterBoolean(values["stateChanging"])
-		if !present || !stateChanging {
-			return fmt.Errorf("kind %q requires stateChanging=true; use managed validation for non-mutating execution", operation.Kind)
-		}
 		if len(operation.TargetRefs) == 0 {
 			return fmt.Errorf("kind %q state-changing command requires target refs", operation.Kind)
 		}
-	case RuntimeBlockKindManagedValidationSession:
-		if parameterString(values["recipeId"]) == "" {
-			return fmt.Errorf("kind %q requires a non-empty recipeId", operation.Kind)
-		}
-	case StepKindGitRead, StepKindGitWrite:
-		if timeout, ok := parameterInteger(values["timeoutMillis"]); ok && (timeout < 1000 || timeout > 600000) {
-			return fmt.Errorf("kind %q timeoutMillis must be between 1000 and 600000", operation.Kind)
-		}
-		if limit, ok := parameterInteger(values["limit"]); ok && limit <= 0 {
-			return fmt.Errorf("kind %q limit must be positive", operation.Kind)
-		}
 	case StepKindMCPToolCall, StepKindMCPResourceRead, StepKindMCPPromptGet:
-		if parameterString(values["serverId"]) == "" {
-			return fmt.Errorf("kind %q requires serverId", operation.Kind)
-		}
 		if err := validateRuntimeMCPParameters(operation, values); err != nil {
 			return err
-		}
-		switch operation.Kind {
-		case StepKindMCPToolCall:
-			if parameterString(values["tool"]) == "" {
-				return fmt.Errorf("kind %q requires tool", operation.Kind)
-			}
-		case StepKindMCPResourceRead:
-			if parameterString(values["uri"]) == "" && parameterString(values["resourceUri"]) == "" {
-				return fmt.Errorf("kind %q requires uri", operation.Kind)
-			}
-		case StepKindMCPPromptGet:
-			if parameterString(values["prompt"]) == "" && parameterString(values["name"]) == "" {
-				return fmt.Errorf("kind %q requires prompt", operation.Kind)
-			}
 		}
 	case StepKindSSHCommand:
 		sessionRef := parameterString(values["sessionRef"])
 		credentialRef := parameterString(values["credentialRef"])
-		command := parameterString(values["command"])
-		if !validRuntimeOpaqueSSHRef(sessionRef) || !validRuntimeOpaqueSSHRef(credentialRef) || len(command) == 0 || len(command) > 16*1024 || !validRuntimeOpaqueSSHRef(operation.TargetRefs[0]) {
+		if !validRuntimeOpaqueSSHRef(sessionRef) || !validRuntimeOpaqueSSHRef(credentialRef) || !validRuntimeOpaqueSSHRef(operation.TargetRefs[0]) {
 			return fmt.Errorf("kind %q requires canonical owner refs and a bounded command", operation.Kind)
 		}
-		if timeout, ok := parameterInteger(values["timeoutMillis"]); ok && (timeout < 1000 || timeout > 300000) {
-			return fmt.Errorf("kind %q timeoutMillis must be between 1000 and 300000", operation.Kind)
-		}
 	case StepKindWebSearch:
-		if query := parameterString(values["query"]); query == "" || len(query) > 4096 {
-			return fmt.Errorf("kind %q requires a query of at most 4096 bytes", operation.Kind)
-		}
 		if err := validateRuntimeWebCommonParameters(operation.Kind, values); err != nil {
 			return err
-		}
-		if limit, ok := parameterInteger(values["maxResults"]); ok && (limit <= 0 || limit > 20) {
-			return fmt.Errorf("kind %q maxResults must be between 1 and 20", operation.Kind)
 		}
 	case StepKindWebFetch:
-		if rawURL := parameterString(values["url"]); rawURL == "" || len(rawURL) > 4096 {
-			return fmt.Errorf("kind %q requires a URL of at most 4096 bytes", operation.Kind)
-		}
 		if err := validateRuntimeWebCommonParameters(operation.Kind, values); err != nil {
 			return err
-		}
-		if limit, ok := parameterInteger(values["maxBytes"]); ok && (limit <= 0 || limit > 1024*1024) {
-			return fmt.Errorf("kind %q maxBytes must be between 1 and 1048576", operation.Kind)
 		}
 	}
 	return nil

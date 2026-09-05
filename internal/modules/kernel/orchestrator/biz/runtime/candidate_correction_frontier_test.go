@@ -8,6 +8,99 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func TestCandidateCorrectionFrontierSealsCrossesAndRecoversOperationValueRule(t *testing.T) {
+	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
+		aggregate.Decision,
+		runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchContract, _ := runtimecontract.RuntimeOperationContractForKind(runtimecontract.RuntimeBlockKindPatchApply)
+	manifest.Operations[0].Variants = patchContract.Variants
+	manifest.Operations[0].AllowedVariantIDs = []string{"file_write", "text_replace", "unified_diff"}
+	manifest.Operations[0].ValueRules = patchContract.ValueRules
+	manifest.Hash = ""
+	manifest = manifest.Normalized()
+	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	if candidate.StateChange == nil || len(candidate.StateChange.Operations) != 1 {
+		t.Fatalf("value-rule fixture candidate = %+v", candidate)
+	}
+	operation := candidate.StateChange.Operations[0].Operation.Normalized()
+	patchType, same := "text_replace", "same"
+	operation.Parameters = []runtimecontract.OperationParameter{
+		{Name: "patchType", String: &patchType}, {Name: "oldText", String: &same}, {Name: "newText", String: &same},
+	}
+	rejected := candidate
+	rejected.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: operation}}}
+	authorization, found := candidateCorrectionOperationManifest(manifest, operation.Kind)
+	if !found {
+		t.Fatal("value-rule fixture operation authorization is missing")
+	}
+	violation, err := runtimecontract.RuntimeOperationValueRuleViolationForOperation(operation, authorization)
+	if err != nil || violation == nil {
+		t.Fatalf("value-rule fixture violation = %+v err=%v", violation, err)
+	}
+	path := "$.operations[0].parameters[name=" + violation.ParameterName + "]"
+	failure := &runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract,
+		Code:  "candidate_operation_value_rule_nonconformant", Signature: "candidate-operation-value-rule-nonconformant",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			OperationID: operation.ID, Path: path, Actual: string(violation.ActualShape),
+			ConstraintRef: violation.RuleRef, RequiredShape: string(violation.RequiredShape), ManifestHash: manifest.Hash,
+		},
+	}
+	sealed, correction, err := sealCandidateRejectionWithFrontier(failure, manifest, candidateCorrectionFrontier{candidate: &rejected})
+	if err != nil || sealed == nil || correction == nil || correction.Witness == nil ||
+		correction.Disposition != runtimecontract.RuntimeCandidateCorrectionCorrectableOnce ||
+		correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessOperationValueRule ||
+		correction.Witness.ConstraintRef != violation.RuleRef ||
+		!runtimecontract.RuntimeCandidateCorrectionObjectivesEqual(correction.Objectives, []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSatisfyOperationValueRule}) {
+		t.Fatalf("value-rule correction = failure=%+v correction=%+v err=%v", sealed, correction, err)
+	}
+	if err := runtimecontract.ValidateRuntimeCandidateFailureCorrectionPair(sealed, correction); err != nil {
+		t.Fatalf("value-rule failure/correction lineage: %v", err)
+	}
+
+	corrected := rejected
+	corrected.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), rejected.StateChange.Operations...)}
+	after := "after"
+	corrected.StateChange.Operations[0].Operation.Parameters = candidateCorrectionSetStringParameter(corrected.StateChange.Operations[0].Operation.Parameters, "newText", after)
+	if !candidateCrossesOperationValueRuleWitness(rejected, corrected, manifest, *correction.Witness) {
+		t.Fatal("candidate that satisfies the exact value rule did not cross its witness")
+	}
+	driftedTarget := corrected
+	driftedTarget.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), corrected.StateChange.Operations...)}
+	driftedTarget.StateChange.Operations[0].Operation.TargetRefs = []string{"other.go"}
+	if candidateCrossesOperationValueRuleWitness(rejected, driftedTarget, manifest, *correction.Witness) {
+		t.Fatal("target drift crossed an operation value-rule witness")
+	}
+	unrelated := rejected
+	unrelated.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), rejected.StateChange.Operations...)}
+	unrelated.StateChange.Operations[0].Operation.Parameters = candidateCorrectionSetStringParameter(unrelated.StateChange.Operations[0].Operation.Parameters, "summary", "cosmetic")
+	if candidateCrossesOperationValueRuleWitness(rejected, unrelated, manifest, *correction.Witness) {
+		t.Fatal("unrelated parameter change crossed an operation value-rule witness")
+	}
+
+	transaction := aggregate.Decision.AuthorityTransaction()
+	aggregate.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{{
+		AuthorityContractID: runtimecontract.StableAuthorityContractID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, transaction),
+		Transaction:         transaction, Attempt: 0, ManifestHash: manifest.Hash,
+		State: runtimecontract.RuntimeCandidateAttemptStateFailed, Failure: sealed, Correction: correction, Proposal: &rejected,
+	}}
+	if err := validatePersistedCandidateCorrection(aggregate, manifest); err != nil {
+		t.Fatalf("persisted value-rule correction did not survive restart validation: %v", err)
+	}
+	tampered := aggregate
+	tampered.CandidateAttempts = append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), aggregate.CandidateAttempts...)
+	tampered.CandidateAttempts[0] = tampered.CandidateAttempts[0].Clone()
+	tampered.CandidateAttempts[0].Correction.Witness.ConstraintRef += "/drift"
+	if err := validatePersistedCandidateCorrection(tampered, manifest); err == nil {
+		t.Fatal("drifted persisted value-rule witness survived restart validation")
+	}
+}
+
 func TestCandidateCorrectionFrontierSealsAndCrossesOperationSetConsolidation(t *testing.T) {
 	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
@@ -251,6 +344,9 @@ func TestCandidateCorrectionFrontierSealsRequiredParametersContainerDefects(t *t
 	}
 	secondOperation := manifest.Operations[0].Normalized()
 	secondOperation.Kind = runtimecontract.RuntimeBlockKindPatchPreview
+	previewContract, _ := runtimecontract.RuntimeOperationContractForKind(runtimecontract.RuntimeBlockKindPatchPreview)
+	secondOperation.ValueRules = previewContract.ValueRules
+	secondOperation.Variants = previewContract.Variants
 	manifest.Operations = append(manifest.Operations, secondOperation)
 	manifest.Hash = ""
 	manifest = manifest.Normalized()
@@ -312,6 +408,9 @@ func TestCandidateCorrectionFrontierRejectsUnboundOrDriftedMultiOperationWireRul
 	}
 	secondOperation := manifest.Operations[0].Normalized()
 	secondOperation.Kind = runtimecontract.RuntimeBlockKindPatchPreview
+	previewContract, _ := runtimecontract.RuntimeOperationContractForKind(runtimecontract.RuntimeBlockKindPatchPreview)
+	secondOperation.ValueRules = previewContract.ValueRules
+	secondOperation.Variants = previewContract.Variants
 	manifest.Operations = append(manifest.Operations, secondOperation)
 	manifest.Hash = ""
 	manifest = manifest.Normalized()
@@ -688,6 +787,9 @@ func TestCandidateCorrectionFrontierSealsOperationKindFromTypedDimension(t *test
 	}
 	alternativeAuthorization := manifest.Operations[0]
 	alternativeAuthorization.Kind = runtimecontract.RuntimeBlockKindPatchPreview
+	previewContract, _ := runtimecontract.RuntimeOperationContractForKind(runtimecontract.RuntimeBlockKindPatchPreview)
+	alternativeAuthorization.ValueRules = previewContract.ValueRules
+	alternativeAuthorization.Variants = previewContract.Variants
 	manifest.Operations = append(manifest.Operations, alternativeAuthorization)
 	manifest.Hash = ""
 	manifest = manifest.Normalized()
@@ -753,6 +855,7 @@ func TestCandidateCorrectionFrontierSealsOnlyContractDeclaredClosedParameter(t *
 	fileListAuthorization.BindingAuthorizations = []runtimecontract.RuntimeOperationBindingAuthorization{{}}
 	fileListAuthorization.ForbiddenParameters = contract.ForbiddenParameters
 	fileListAuthorization.Variants = contract.Variants
+	fileListAuthorization.ValueRules = contract.ValueRules
 	fileListAuthorization.ValidationRecipes = nil
 	manifest.Operations = append(manifest.Operations, fileListAuthorization)
 	manifest.Hash = ""

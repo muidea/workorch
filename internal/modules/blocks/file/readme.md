@@ -57,6 +57,9 @@ operation。
   current revision 下缺失/歧义/occurrence 越界的匹配返回 bounded applicability violation，不能冒充 stale 或扩大 target。
   baseHash、binary/path/resource failure 保持普通 owner infeasibility；无 current snapshot 时仅返回既有 typed prerequisite。
   `file/edit` 仍是 at-most-once effect，不因新增预检而取得 patch replay authority。
+- `oldText` 非空、`oldText != newText` 与 `occurrence >= 1` 属于 manifest v7 的纯 `ValueRules`，由 shared strict admission 在任何
+  File I/O 前判断；File 不保存该结果、不发布对应 EventHub fact，也不触发 correction。File 只拥有上述依赖 parser/current
+  target 的 conformance/applicability 事实及自身 effect/receipt 状态。
 - feasibility 必须按 sealed target policy 对资源事实进行完备分类：prospective target 已存在，以及 exact/existing target
   已缺失，返回 `policy_disallowed + sealed_target_authorization_contradicted` 和 exact owner policy/revision；candidate-local
   patch conflict 不得冒充 binding contradiction。

@@ -3998,6 +3998,94 @@ func TestRuntimeCandidateSchemaRestrictsVariantsToSealedAuthority(t *testing.T) 
 	}
 }
 
+func TestRuntimeCandidateOutputProjectsExecutableValueRulesIntoC3AndSchema(t *testing.T) {
+	t.Parallel()
+	commitManifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.StepKindGitWrite},
+			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{
+				Kind: runtimecontract.StepKindGitWrite, VariantID: "commit",
+			}},
+		},
+	}, nil)
+	commitOutput := runtimeCandidateOutputContractForTest(t, commitManifest)
+	if len(commitOutput.OperationContracts) != 1 {
+		t.Fatalf("commit operation contracts = %+v", commitOutput.OperationContracts)
+	}
+	messageRuleRef := runtimecontract.RuntimeOperationValueRuleID(
+		runtimecontract.StepKindGitWrite, "commit", runtimecontract.RuntimeOperationValueRuleNonEmpty, "message",
+	)
+	if !runtimeCandidateProjectionHasValueRule(commitOutput.OperationContracts[0].ValueRules, messageRuleRef) {
+		t.Fatalf("fixed commit C3 projection lost message value rule: %+v", commitOutput.OperationContracts[0].ValueRules)
+	}
+	var schema any
+	if err := json.Unmarshal(commitOutput.Schema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	messageSchema, found := runtimeCandidateSchemaParameterValue(schema, "message", "string")
+	if !found || messageSchema["minLength"] != float64(1) {
+		t.Fatalf("commit message schema = %#v, want minLength 1", messageSchema)
+	}
+
+	patchManifest := runtimeCandidateManifestForSchema(t, runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange,
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+		},
+	}, nil)
+	patchOutput := runtimeCandidateOutputContractForTest(t, patchManifest)
+	if len(patchOutput.OperationContracts) != 1 {
+		t.Fatalf("patch operation contracts = %+v", patchOutput.OperationContracts)
+	}
+	distinctRuleRef := runtimecontract.RuntimeOperationValueRuleID(
+		runtimecontract.RuntimeBlockKindPatchApply, "text_replace", runtimecontract.RuntimeOperationValueRuleDistinct, "oldText", "newText",
+	)
+	variantFound, ruleFound := false, false
+	for _, variant := range patchOutput.OperationContracts[0].Variants {
+		if variant.ID == "text_replace" {
+			variantFound = true
+			ruleFound = runtimeCandidateProjectionHasValueRule(variant.ValueRules, distinctRuleRef)
+		}
+	}
+	if !variantFound || !ruleFound {
+		t.Fatalf("selectable text_replace projection lost distinct rule: %+v", patchOutput.OperationContracts[0].Variants)
+	}
+}
+
+func runtimeCandidateProjectionHasValueRule(rules []runtimecontract.RuntimeOperationValueRule, ref string) bool {
+	for _, rule := range rules {
+		if rule.Ref == ref {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeCandidateSchemaParameterValue(value any, parameterName, valueField string) (map[string]any, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		if properties, ok := typed["properties"].(map[string]any); ok {
+			if name, ok := properties["name"].(map[string]any); ok && name["const"] == parameterName {
+				field, found := properties[valueField].(map[string]any)
+				return field, found
+			}
+		}
+		for _, nested := range typed {
+			if field, found := runtimeCandidateSchemaParameterValue(nested, parameterName, valueField); found {
+				return field, true
+			}
+		}
+	case []any:
+		for _, nested := range typed {
+			if field, found := runtimeCandidateSchemaParameterValue(nested, parameterName, valueField); found {
+				return field, true
+			}
+		}
+	}
+	return nil, false
+}
+
 func TestRuntimeAssessmentRequestPublishesCanonicalEvidenceRefContract(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
 		Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},

@@ -1237,7 +1237,9 @@ func TestReduceRuntimeStateDeterminedTerminalFailureOverridesPendingPrerequisite
 		terminalCode string
 	}{
 		{name: "candidate retry exhausted", failureClass: runtimecontract.FailureClassCandidateExhausted, failureCode: "candidate_retry_exhausted", terminalCode: "candidate_retry_exhausted"},
-		{name: "candidate authority exhausted", failureClass: runtimecontract.FailureClassCandidateExhausted, failureCode: "candidate_authority_exhausted", terminalCode: "candidate_authority_exhausted"},
+		{name: "candidate authority exhausted", failureClass: runtimecontract.FailureClassCandidateAuthorityExhausted, failureCode: "candidate_authority_exhausted", terminalCode: "candidate_authority_exhausted"},
+		{name: "legacy candidate authority exhausted", failureClass: runtimecontract.FailureClassCandidateExhausted, failureCode: "candidate_authority_exhausted", terminalCode: "candidate_authority_exhausted"},
+		{name: "candidate authority class rejects another code", failureClass: runtimecontract.FailureClassCandidateAuthorityExhausted, failureCode: "candidate_other_exhaustion", terminalCode: "runtime_contract_defect"},
 		{name: "candidate exhaustion code is undeclared", failureClass: runtimecontract.FailureClassCandidateExhausted, failureCode: "candidate_other_exhaustion", terminalCode: "runtime_contract_defect"},
 		{name: "runtime contract defect", failureClass: runtimecontract.FailureClassRuntimeContractMisalignment, terminalCode: "runtime_contract_defect"},
 		{name: "governance rejected", failureClass: runtimecontract.FailureClassGovernanceRejected, terminalCode: "governance_rejected"},

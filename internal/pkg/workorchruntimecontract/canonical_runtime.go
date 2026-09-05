@@ -283,6 +283,7 @@ const (
 	FailureClassExecutionFailure                   FailureClass = "execution_failure"
 	FailureClassNoProgressExhausted                FailureClass = "no_progress_exhausted"
 	FailureClassCandidateExhausted                 FailureClass = "candidate_retry_exhausted"
+	FailureClassCandidateAuthorityExhausted        FailureClass = "candidate_authority_exhausted"
 	FailureClassCandidateDocumentRecoveryExhausted FailureClass = "candidate_document_recovery_exhausted"
 	FailureClassProviderProtocol                   FailureClass = "provider_protocol_failure"
 	FailureClassProviderSubmissionUnknown          FailureClass = "provider_submission_unknown"

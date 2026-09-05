@@ -529,7 +529,8 @@ func runtimeCandidateWireParameterRule(
 		if parameter.Required || (variant != nil && (runtimeCandidateWireContains(variant.RequiredParameters, parameter.Name) || runtimeCandidateWireContains(variant.RequiredNonEmpty, parameter.Name))) {
 			required = append(required, parameter.Name)
 		}
-		if variant != nil && runtimeCandidateWireContains(variant.RequiredNonEmpty, parameter.Name) {
+		if runtimeOperationValueRulesRequireNonEmpty(operation.ValueRules, variant, parameter.Name) ||
+			(variant != nil && runtimeCandidateWireContains(variant.RequiredNonEmpty, parameter.Name)) {
 			requiredNonEmpty = append(requiredNonEmpty, parameter.Name)
 		}
 	}
@@ -550,6 +551,23 @@ func runtimeCandidateWireParameterRule(
 		}
 	}
 	return derived, provider, required, requiredNonEmpty, requireOneOf, nil
+}
+
+func runtimeOperationValueRulesRequireNonEmpty(operationRules []RuntimeOperationValueRule, variant *RuntimeOperationVariantContract, parameterName string) bool {
+	rules := append([]RuntimeOperationValueRule(nil), operationRules...)
+	if variant != nil {
+		rules = append(rules, variant.ValueRules...)
+	}
+	for _, rule := range NormalizeRuntimeOperationValueRules(rules) {
+		if len(rule.ParameterNames) != 1 || rule.ParameterNames[0] != parameterName {
+			continue
+		}
+		if rule.Kind == RuntimeOperationValueRuleNonEmpty ||
+			(rule.Kind == RuntimeOperationValueRuleStringByteRange && rule.HasMinimum && rule.Minimum > 0) {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeCandidateWireAuxiliaryBindingAuthorizations(operation RuntimeCandidateOperationManifest) ([]RuntimeOperationBindingAuthorization, error) {

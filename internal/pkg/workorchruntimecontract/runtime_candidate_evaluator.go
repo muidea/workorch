@@ -39,6 +39,7 @@ const (
 	RuntimeCandidateCorrectionWitnessSchemaField             RuntimeCandidateCorrectionWitnessDimension = "schema_field"
 	RuntimeCandidateCorrectionWitnessParameterEntryEncoding  RuntimeCandidateCorrectionWitnessDimension = "parameter_entry_encoding"
 	RuntimeCandidateCorrectionWitnessOwnerConstraint         RuntimeCandidateCorrectionWitnessDimension = "owner_candidate_constraint"
+	RuntimeCandidateCorrectionWitnessOperationValueRule      RuntimeCandidateCorrectionWitnessDimension = "operation_value_rule"
 	RuntimeCandidateCorrectionWitnessOperationSetCardinality RuntimeCandidateCorrectionWitnessDimension = "operation_set_cardinality"
 )
 
@@ -138,6 +139,13 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 		default:
 			return fmt.Errorf("owner-constraint candidate correction witness has undeclared required shape %q", w.AlternativeValue)
 		}
+	case RuntimeCandidateCorrectionWitnessOperationValueRule:
+		if w.OperationKind == "" || w.Path == "" || w.ConstraintRef == "" || w.RejectedValue == "" || w.AlternativeValue == "" || w.RejectedValue == w.AlternativeValue || w.RejectedShapeHash != "" || w.AlternativeShapeHash != "" {
+			return fmt.Errorf("operation-value-rule correction witness requires kind, path, rule and bounded value shapes")
+		}
+		if !runtimeOperationValueShapesCompatible(RuntimeOperationValueActualShape(w.RejectedValue), RuntimeOperationValueRequiredShape(w.AlternativeValue)) {
+			return fmt.Errorf("operation-value-rule correction witness has incompatible shapes %q -> %q", w.RejectedValue, w.AlternativeValue)
+		}
 	case RuntimeCandidateCorrectionWitnessOperationSetCardinality:
 		if w.OperationKind != "" || w.Path != "$.operations" || w.AlternativeValue != "one_operation_per_owner_target" ||
 			w.RejectedValue == "" || w.RejectedShapeHash == "" || w.AlternativeShapeHash != "" || w.ConstraintRef != "" ||
@@ -150,8 +158,8 @@ func (w RuntimeCandidateCorrectionWitness) Validate() error {
 	default:
 		return fmt.Errorf("candidate correction witness dimension %q is not declared", w.Dimension)
 	}
-	if w.Dimension != RuntimeCandidateCorrectionWitnessOwnerConstraint && w.ConstraintRef != "" {
-		return fmt.Errorf("candidate correction witness dimension %q cannot carry an owner constraint ref", w.Dimension)
+	if w.Dimension != RuntimeCandidateCorrectionWitnessOwnerConstraint && w.Dimension != RuntimeCandidateCorrectionWitnessOperationValueRule && w.ConstraintRef != "" {
+		return fmt.Errorf("candidate correction witness dimension %q cannot carry a constraint ref", w.Dimension)
 	}
 	return nil
 }

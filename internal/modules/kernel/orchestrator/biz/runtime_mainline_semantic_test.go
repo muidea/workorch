@@ -8,6 +8,33 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func TestRuntimeCandidateSchemaFailureClassifiesManifestValueRule(t *testing.T) {
+	violation := &runtimecontract.RuntimeOperationValueRuleViolation{
+		RuleRef: "operation_value/file/edit/distinct_parameters/oldText/newText", OperationKind: runtimecontract.StepKindFileEdit,
+		ParameterName: "newText", ActualShape: runtimecontract.RuntimeOperationValueActualShapeEqualParameters,
+		RequiredShape: runtimecontract.RuntimeOperationValueRequiredShapeDistinct,
+	}
+	failure := runtimeCandidateSchemaFailure(&runtimecontract.RuntimeCandidatePayloadDiagnostic{
+		Path: "$.operations[0].parameters[name=newText]", Actual: string(runtimecontract.RuntimeOperationValueActualShapeEqualParameters),
+		ConstraintRef: violation.RuleRef,
+		RequiredShape: string(runtimecontract.RuntimeOperationValueRequiredShapeDistinct),
+		Cause:         violation,
+	})
+	if failure == nil || failure.Class != runtimecontract.RuntimeCandidateFailureClassContract ||
+		failure.Code != "candidate_operation_value_rule_nonconformant" || failure.Diagnostic == nil ||
+		failure.Diagnostic.ConstraintRef == "" || failure.Diagnostic.RequiredShape != string(runtimecontract.RuntimeOperationValueRequiredShapeDistinct) {
+		t.Fatalf("value-rule failure classification = %+v", failure)
+	}
+
+	spoofed := runtimeCandidateSchemaFailure(&runtimecontract.RuntimeCandidatePayloadDiagnostic{
+		Path: "$.operations[0].parameters[name=newText]", Actual: string(runtimecontract.RuntimeOperationValueActualShapeEqualParameters),
+		ConstraintRef: violation.RuleRef, RequiredShape: string(runtimecontract.RuntimeOperationValueRequiredShapeDistinct),
+	})
+	if spoofed.Class != runtimecontract.RuntimeCandidateFailureClassSchema || spoofed.Code != "candidate_schema_invalid" {
+		t.Fatalf("untyped value-rule-shaped diagnostic gained correction authority: %+v", spoofed)
+	}
+}
+
 func TestRuntimeOperationAdmissibilityTargetsExposeFileCatalogOnlyToShellCatalog(t *testing.T) {
 	aggregate := runtime.RuntimeAggregate{
 		Facts: runtimecontract.RuntimeFacts{

@@ -493,6 +493,81 @@ func TestRuntimeCandidateCorrectionInputValidatesOwnerConstraintAgainstManifest(
 	}
 }
 
+func TestRuntimeCandidateCorrectionInputValidatesOperationValueRuleAgainstManifest(t *testing.T) {
+	t.Parallel()
+	contract, found := runtimecontract.RuntimeOperationContractForKind(runtimecontract.StepKindFileEdit)
+	if !found {
+		t.Fatal("file/edit contract is missing")
+	}
+	manifest := runtimecontract.RuntimeCandidateContractManifest{
+		Revision:                  runtimecontract.RuntimeCandidateContractManifestRevision,
+		State:                     runtimecontract.ConvergenceStateNeedStateChange,
+		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		Operations: []runtimecontract.RuntimeCandidateOperationManifest{{
+			Kind: contract.Kind, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			Parameters: contract.Parameters, Variants: contract.Variants, ValueRules: contract.ValueRules,
+			TargetCardinality:         runtimecontract.RuntimeOperationTargetCardinalityOne,
+			OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
+		}},
+	}.Normalized()
+	manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+	ruleRef := runtimecontract.RuntimeOperationValueRuleID(
+		runtimecontract.StepKindFileEdit, "", runtimecontract.RuntimeOperationValueRuleDistinct, "oldText", "newText",
+	)
+	input := RuntimeCandidateCorrectionInput{
+		ManifestHash: manifest.Hash,
+		Objectives:   []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionSatisfyOperationValueRule},
+		Witness: runtimecontract.RuntimeCandidateCorrectionWitness{
+			Dimension: runtimecontract.RuntimeCandidateCorrectionWitnessOperationValueRule, OperationKind: runtimecontract.StepKindFileEdit,
+			Path: "$.operations[0].parameters[name=newText]", ConstraintRef: ruleRef,
+			RejectedValue:    string(runtimecontract.RuntimeOperationValueActualShapeEqualParameters),
+			AlternativeValue: string(runtimecontract.RuntimeOperationValueRequiredShapeDistinct),
+		},
+	}.Normalized()
+	observation := runtimecontract.RuntimeCandidateCorrectionObservation{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract,
+		Code:  "candidate_operation_value_rule_nonconformant", Signature: "candidate-operation-value-rule-nonconformant",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: input.Witness.Path, Actual: input.Witness.RejectedValue, ConstraintRef: ruleRef,
+			RequiredShape: input.Witness.AlternativeValue, ManifestHash: manifest.Hash,
+			Objectives: append([]runtimecontract.RuntimeCandidateCorrectionObjective(nil), input.Objectives...),
+		},
+		SealedCorrectionHash: runtimecontract.StableRuntimeCandidateSealedCorrectionHash(manifest.Hash, input.Objectives, &input.Witness),
+	}.Normalized()
+	if err := input.ValidateAgainstObservation(manifest, observation); err != nil {
+		t.Fatalf("operation value-rule correction: %v", err)
+	}
+	impossible := input.Normalized()
+	impossible.Witness.Path = "$.operations[0].parameters[name=occurrence]"
+	impossible.Witness.ConstraintRef = runtimecontract.RuntimeOperationValueRuleID(
+		runtimecontract.StepKindFileEdit, "", runtimecontract.RuntimeOperationValueRuleIntegerRange, "occurrence",
+	)
+	impossible.Witness.RejectedValue = string(runtimecontract.RuntimeOperationValueActualShapeAboveMaximum)
+	impossible.Witness.AlternativeValue = string(runtimecontract.RuntimeOperationValueRequiredShapeIntegerRange)
+	impossibleObservation := observation.Clone()
+	impossibleObservation.Diagnostic.Path = impossible.Witness.Path
+	impossibleObservation.Diagnostic.Actual = impossible.Witness.RejectedValue
+	impossibleObservation.Diagnostic.ConstraintRef = impossible.Witness.ConstraintRef
+	impossibleObservation.Diagnostic.RequiredShape = impossible.Witness.AlternativeValue
+	impossibleObservation.SealedCorrectionHash = runtimecontract.StableRuntimeCandidateSealedCorrectionHash(manifest.Hash, impossible.Objectives, &impossible.Witness)
+	if err := impossible.ValidateAgainstObservation(manifest, impossibleObservation); err == nil {
+		t.Fatal("minimum-only rule accepted an impossible above-maximum correction witness")
+	}
+
+	drifted := manifest.Clone()
+	drifted.Operations[0].ValueRules = nil
+	drifted = drifted.Normalized()
+	drifted.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(drifted)
+	driftedInput := input.Normalized()
+	driftedInput.ManifestHash = drifted.Hash
+	driftedObservation := observation.Clone()
+	driftedObservation.Diagnostic.ManifestHash = drifted.Hash
+	driftedObservation.SealedCorrectionHash = runtimecontract.StableRuntimeCandidateSealedCorrectionHash(drifted.Hash, driftedInput.Objectives, &driftedInput.Witness)
+	if err := driftedInput.ValidateAgainstObservation(drifted, driftedObservation); err == nil {
+		t.Fatal("operation value-rule correction survived removal of its manifest rule")
+	}
+}
+
 func TestRuntimeCandidateCorrectionInputRejectsSemanticWitnessForMissingRequiredFieldObservation(t *testing.T) {
 	t.Parallel()
 	manifest, _, _ := candidateParameterEntryCorrectionPair(t)

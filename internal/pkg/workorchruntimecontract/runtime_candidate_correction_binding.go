@@ -174,6 +174,8 @@ func validateRuntimeCandidateCorrectionObjectiveWitnessCompatibility(objectives 
 		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionReencodeParameterEntries
 	case RuntimeCandidateCorrectionWitnessOwnerConstraint:
 		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionConformOwnerConstraint
+	case RuntimeCandidateCorrectionWitnessOperationValueRule:
+		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionSatisfyOperationValueRule
 	case RuntimeCandidateCorrectionWitnessOperationSetCardinality:
 		compatible = len(objectives) == 1 && objectives[0] == RuntimeCandidateCorrectionConsolidateOperationSet
 	case RuntimeCandidateCorrectionWitnessSchemaField:
@@ -294,6 +296,14 @@ func validateRuntimeCandidateCorrectionWitnessAgainstObservation(observation Run
 			diagnostic.RejectedShapeHash != "" ||
 			!runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionConformOwnerConstraint) {
 			return fmt.Errorf("runtime candidate owner-constraint correction witness differs from observation")
+		}
+	case RuntimeCandidateCorrectionWitnessOperationValueRule:
+		if observation.Code != "candidate_operation_value_rule_nonconformant" ||
+			diagnostic.Path != witness.Path || diagnostic.Actual != witness.RejectedValue ||
+			diagnostic.ConstraintRef != witness.ConstraintRef || diagnostic.RequiredShape != witness.AlternativeValue ||
+			diagnostic.RejectedShapeHash != "" ||
+			!runtimeCandidateCorrectionHasObjective(diagnostic.Objectives, RuntimeCandidateCorrectionSatisfyOperationValueRule) {
+			return fmt.Errorf("runtime candidate operation-value-rule correction witness differs from observation")
 		}
 	case RuntimeCandidateCorrectionWitnessOperationSetCardinality:
 		if observation.Code != "candidate_owner_target_effect_overlap" || diagnostic.Path != "$.operations" ||

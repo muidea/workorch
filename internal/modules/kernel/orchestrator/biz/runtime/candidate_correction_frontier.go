@@ -68,6 +68,9 @@ func candidateCorrectionWitness(
 	if witness := candidateParameterEntryEncodingCorrectionWitness(failure, manifest); witness != nil {
 		return witness
 	}
+	if witness := candidateOperationValueRuleCorrectionWitness(failure, manifest, frontier.candidate); witness != nil {
+		return witness
+	}
 	if witness := candidateOwnerConstraintCorrectionWitness(failure, manifest, frontier.candidate); witness != nil {
 		return witness
 	}
@@ -148,6 +151,40 @@ func candidateCorrectionWitness(
 		}
 	}
 	return candidateSchemaCorrectionWitness(failure.Diagnostic, manifest, frontier.candidate)
+}
+
+func candidateOperationValueRuleCorrectionWitness(failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest, candidate *runtimecontract.RuntimeCandidate) *runtimecontract.RuntimeCandidateCorrectionWitness {
+	if failure == nil || strings.TrimSpace(failure.Code) != "candidate_operation_value_rule_nonconformant" || failure.Diagnostic == nil || candidate == nil {
+		return nil
+	}
+	diagnostic := failure.Diagnostic.Normalized()
+	operationIndex, found := candidateCorrectionOperationIndex(diagnostic.Path)
+	operations := candidateadmission.Operations(*candidate)
+	if !found || operationIndex < 0 || operationIndex >= len(operations) {
+		return nil
+	}
+	operation := operations[operationIndex].Normalized()
+	authorization, found := candidateCorrectionOperationManifest(manifest, operation.Kind)
+	if !found {
+		return nil
+	}
+	rule, found := runtimecontract.RuntimeOperationValueRuleForOperationRef(operation, authorization, diagnostic.ConstraintRef)
+	if !found || len(rule.ParameterNames) == 0 || rule.ParameterNames[len(rule.ParameterNames)-1] != candidateCorrectionPathField(diagnostic.Path) {
+		return nil
+	}
+	violation, err := runtimecontract.RuntimeOperationValueRuleViolationForOperation(operation, authorization)
+	if err != nil || violation == nil || violation.RuleRef != rule.Ref || string(violation.ActualShape) != diagnostic.Actual || string(violation.RequiredShape) != diagnostic.RequiredShape {
+		return nil
+	}
+	witness := &runtimecontract.RuntimeCandidateCorrectionWitness{
+		Dimension:     runtimecontract.RuntimeCandidateCorrectionWitnessOperationValueRule,
+		OperationKind: operation.Kind, Path: diagnostic.Path, ConstraintRef: rule.Ref,
+		RejectedValue: diagnostic.Actual, AlternativeValue: diagnostic.RequiredShape,
+	}
+	if witness.Validate() != nil {
+		return nil
+	}
+	return witness.Clone()
 }
 
 func candidateOperationSetCorrectionWitness(failure *runtimecontract.RuntimeCandidateFailure, manifest runtimecontract.RuntimeCandidateContractManifest, candidate *runtimecontract.RuntimeCandidate) *runtimecontract.RuntimeCandidateCorrectionWitness {
@@ -873,10 +910,101 @@ func validateAttemptCandidateCrossesPersistedWitness(aggregate RuntimeAggregate,
 		// only same manifest/path plus a real change to the constrained value.
 		return nil
 	}
+	if directive.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOperationValueRule {
+		if first.Proposal == nil || !candidateCrossesOperationValueRuleWitness(*first.Proposal, candidate, manifest, *directive.Witness) {
+			return fmt.Errorf("attempt 1 does not satisfy operation value rule %q at %s", directive.Witness.ConstraintRef, directive.Witness.Path)
+		}
+		return nil
+	}
 	if !candidateCrossesCorrectionWitness(candidate, manifest, *directive.Witness) {
 		return fmt.Errorf("attempt 1 does not use sealed correction alternative %q at %s", directive.Witness.AlternativeValue, directive.Witness.Path)
 	}
 	return nil
+}
+
+func candidateCrossesOperationValueRuleWitness(previous runtimecontract.RuntimeCandidate, candidate runtimecontract.RuntimeCandidate, manifest runtimecontract.RuntimeCandidateContractManifest, witness runtimecontract.RuntimeCandidateCorrectionWitness) bool {
+	witness = witness.Normalized()
+	if witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessOperationValueRule || witness.Validate() != nil {
+		return false
+	}
+	index, found := candidateCorrectionOperationIndex(witness.Path)
+	previousOperations := candidateadmission.Operations(previous)
+	operations := candidateadmission.Operations(candidate)
+	if !found || index < 0 || index >= len(previousOperations) || index >= len(operations) {
+		return false
+	}
+	before := previousOperations[index].Normalized()
+	after := operations[index].Normalized()
+	if before.Kind != witness.OperationKind || after.Kind != witness.OperationKind {
+		return false
+	}
+	authorization, found := candidateCorrectionOperationManifest(manifest, witness.OperationKind)
+	if !found {
+		return false
+	}
+	rule, found := runtimecontract.RuntimeOperationValueRuleForOperationRef(before, authorization, witness.ConstraintRef)
+	if !found || len(rule.ParameterNames) == 0 {
+		return false
+	}
+	parameterName := rule.ParameterNames[len(rule.ParameterNames)-1]
+	if parameterName != candidateCorrectionPathField(witness.Path) {
+		return false
+	}
+	beforeValue, beforeFound := candidateCorrectionOperationParameter(before.Parameters, parameterName)
+	afterValue, afterFound := candidateCorrectionOperationParameter(after.Parameters, parameterName)
+	if beforeFound == afterFound && reflect.DeepEqual(beforeValue, afterValue) {
+		return false
+	}
+	restored, restoredOK := candidateCorrectionRestoreOperationParameter(candidate, index, parameterName, beforeValue, beforeFound)
+	if !restoredOK || runtimecontract.StableRuntimeCandidateSemanticShape(restored) != runtimecontract.StableRuntimeCandidateSemanticShape(previous) {
+		return false
+	}
+	if _, found := runtimecontract.RuntimeOperationValueRuleForOperationRef(after, authorization, witness.ConstraintRef); !found {
+		return false
+	}
+	beforeViolation, beforeErr := runtimecontract.RuntimeOperationValueRuleViolationForOperation(before, authorization)
+	afterViolation, afterErr := runtimecontract.RuntimeOperationValueRuleViolationForOperation(after, authorization)
+	return beforeErr == nil && beforeViolation != nil && beforeViolation.RuleRef == witness.ConstraintRef &&
+		string(beforeViolation.ActualShape) == witness.RejectedValue && string(beforeViolation.RequiredShape) == witness.AlternativeValue &&
+		afterErr == nil && afterViolation == nil
+}
+
+func candidateCorrectionRestoreOperationParameter(candidate runtimecontract.RuntimeCandidate, operationIndex int, parameterName string, value runtimecontract.OperationParameter, present bool) (runtimecontract.RuntimeCandidate, bool) {
+	candidate = runtimecontract.CanonicalRuntimeCandidate(candidate)
+	restore := func(operation *runtimecontract.RuntimeOperation) bool {
+		if operation == nil {
+			return false
+		}
+		parameters := make([]runtimecontract.OperationParameter, 0, len(operation.Parameters)+1)
+		for _, parameter := range operation.Parameters {
+			if strings.TrimSpace(parameter.Name) != parameterName {
+				parameters = append(parameters, parameter)
+			}
+		}
+		if present {
+			parameters = append(parameters, value)
+		}
+		operation.Parameters = parameters
+		return true
+	}
+	switch {
+	case candidate.StateChange != nil && operationIndex >= 0 && operationIndex < len(candidate.StateChange.Operations):
+		return candidate, restore(&candidate.StateChange.Operations[operationIndex].Operation)
+	case candidate.Validation != nil && operationIndex >= 0 && operationIndex < len(candidate.Validation.Operations):
+		return candidate, restore(&candidate.Validation.Operations[operationIndex].Operation)
+	default:
+		return runtimecontract.RuntimeCandidate{}, false
+	}
+}
+
+func candidateCorrectionOperationParameter(parameters []runtimecontract.OperationParameter, name string) (runtimecontract.OperationParameter, bool) {
+	name = strings.TrimSpace(name)
+	for _, parameter := range parameters {
+		if strings.TrimSpace(parameter.Name) == name {
+			return parameter, true
+		}
+	}
+	return runtimecontract.OperationParameter{}, false
 }
 
 // candidateCrossesOperationSetCorrectionWitness constrains attempt 1 to the

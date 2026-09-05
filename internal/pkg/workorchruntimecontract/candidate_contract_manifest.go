@@ -14,7 +14,7 @@ import (
 // correction renderer. It is deliberately separate from the executable
 // operation-contract revision: this value tracks the candidate wire shape,
 // while RuntimeOperationContractRevision tracks executable owner semantics.
-const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest/v6"
+const RuntimeCandidateContractManifestRevision = "candidate-contract-manifest/v7"
 
 // RuntimeCandidateOperationMaxCount is the compiler ceiling for one complete
 // provider candidate document. The compiled manifest copies this value into
@@ -156,6 +156,7 @@ type RuntimeCandidateOperationManifest struct {
 	RequireTargetRefs           bool
 	ForbiddenParameters         []string
 	Variants                    []RuntimeOperationVariantContract
+	ValueRules                  []RuntimeOperationValueRule
 	CandidateConstraints        []RuntimeOperationCandidateConstraint
 	Rules                       []string
 	AllowsDynamicParameters     bool
@@ -584,6 +585,7 @@ func (m RuntimeCandidateOperationManifest) Normalized() RuntimeCandidateOperatio
 	m.TargetCardinality = RuntimeOperationTargetCardinality(strings.TrimSpace(string(m.TargetCardinality)))
 	m.ForbiddenParameters = cloneRuntimeCandidateContractStrings(m.ForbiddenParameters)
 	m.Variants = cloneRuntimeOperationVariantContracts(m.Variants)
+	m.ValueRules = append([]RuntimeOperationValueRule(nil), NormalizeRuntimeOperationValueRules(m.ValueRules)...)
 	m.CandidateConstraints = append([]RuntimeOperationCandidateConstraint(nil), NormalizeRuntimeOperationCandidateConstraints(m.CandidateConstraints)...)
 	m.Rules = cloneRuntimeCandidateContractStrings(m.Rules)
 	m.DynamicParameterPrefixes = normalizeStrings(m.DynamicParameterPrefixes)
@@ -695,6 +697,11 @@ func ValidateRuntimeCandidateContractManifestRawCanonical(manifest RuntimeCandid
 	canonical := manifest.Normalized()
 	if !reflect.DeepEqual(manifest, canonical) {
 		return fmt.Errorf("runtime candidate contract manifest is not raw-canonical")
+	}
+	for _, operation := range manifest.Operations {
+		if err := validateRuntimeOperationValueRuleDeclarations(operation.Kind, operation.Parameters, operation.ValueRules, operation.Variants); err != nil {
+			return fmt.Errorf("runtime candidate contract manifest operation %q value rules: %w", operation.Kind, err)
+		}
 	}
 	if err := ValidateCoverageEvidenceBindingProjection(manifest.Bindings); err != nil {
 		return fmt.Errorf("runtime candidate contract manifest bindings: %w", err)
@@ -839,6 +846,9 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 			writeHashString(h, constraint.ParameterName)
 			writeHashString(h, string(constraint.RequiredShape))
 		}
+		for _, rule := range operation.ValueRules {
+			writeHashStrings(h, runtimeOperationValueRuleHashStrings(rule))
+		}
 		for _, variant := range operation.Variants {
 			writeHashString(h, variant.ID)
 			for _, discriminator := range variant.Discriminators {
@@ -857,6 +867,9 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 				writeHashString(h, string(constraint.Kind))
 				writeHashString(h, constraint.ParameterName)
 				writeHashString(h, string(constraint.RequiredShape))
+			}
+			for _, rule := range NormalizeRuntimeOperationValueRules(variant.ValueRules) {
+				writeHashStrings(h, runtimeOperationValueRuleHashStrings(rule))
 			}
 			writeHashString(h, string(variant.EffectScope))
 			writeHashString(h, string(variant.IdempotencyClass))
@@ -923,6 +936,9 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 	if !ok {
 		return RuntimeCandidateOperationManifest{}, fmt.Errorf("candidate manifest operation kind %q has no operation contract", kind)
 	}
+	if err := validateRuntimeOperationValueRuleDeclarations(contract.Kind, contract.Parameters, contract.ValueRules, contract.Variants); err != nil {
+		return RuntimeCandidateOperationManifest{}, fmt.Errorf("candidate manifest operation kind %q value rules: %w", kind, err)
+	}
 	descriptor, ok := RuntimeOperationDescriptorForKind(kind)
 	if !ok {
 		return RuntimeCandidateOperationManifest{}, fmt.Errorf("candidate manifest operation kind %q has no operation descriptor", kind)
@@ -988,6 +1004,7 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		RequireTargetRefs:           requireTargetRefs,
 		ForbiddenParameters:         append([]string(nil), contract.ForbiddenParameters...),
 		Variants:                    variants,
+		ValueRules:                  contract.ValueRules,
 		CandidateConstraints:        contract.CandidateConstraints,
 		Rules:                       append([]string(nil), contract.Rules...),
 		AllowsDynamicParameters:     runtimeCandidateManifestAllowsDynamicParameters(contract.Kind),
@@ -1002,6 +1019,9 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		ValidationRecipes:           runtimeCandidateManifestValidationRecipes(contract.Kind, ownerFacts.ValidationRecipes, bindings, allowedBindingRefs),
 		OperationContractRevision:   contractRevision,
 	}.Normalized()
+	if err := validateRuntimeOperationValueRuleDeclarations(operationManifest.Kind, operationManifest.Parameters, operationManifest.ValueRules, operationManifest.Variants); err != nil {
+		return RuntimeCandidateOperationManifest{}, fmt.Errorf("candidate manifest operation kind %q value rules: %w", kind, err)
+	}
 	operationManifest.RequiredOperationFields = runtimeCandidateRequiredOperationFields(operationManifest)
 	if _, err := RuntimeOperationCorrectionFields(operationManifest); err != nil {
 		return RuntimeCandidateOperationManifest{}, fmt.Errorf("candidate manifest operation kind %q correction metadata: %w", kind, err)
@@ -1648,6 +1668,7 @@ func cloneRuntimeOperationVariantContract(value RuntimeOperationVariantContract)
 	value.RequiredNonEmpty = cloneRuntimeCandidateContractStrings(value.RequiredNonEmpty)
 	value.ForbiddenParameters = cloneRuntimeCandidateContractStrings(value.ForbiddenParameters)
 	value.DistinctParameterPairs = append([]RuntimeOperationParameterPair(nil), value.DistinctParameterPairs...)
+	value.ValueRules = append([]RuntimeOperationValueRule(nil), NormalizeRuntimeOperationValueRules(value.ValueRules)...)
 	value.CandidateConstraints = append([]RuntimeOperationCandidateConstraint(nil), NormalizeRuntimeOperationCandidateConstraints(value.CandidateConstraints)...)
 	return value
 }

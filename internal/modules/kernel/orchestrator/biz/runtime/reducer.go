@@ -583,12 +583,20 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		// being reinterpreted from diagnostic text as a retry exhaustion.
 		switch strings.TrimSpace(failure.Code) {
 		case "candidate_authority_exhausted":
+			// Backward-compatible replay for aggregates persisted before the
+			// authority/retry failure-class split. New producers use the dedicated
+			// FailureClassCandidateAuthorityExhausted class below.
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_authority_exhausted", failure.Message), true, nil
 		case "candidate_retry_exhausted":
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_retry_exhausted", failure.Message), true, nil
 		default:
 			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "runtime_contract_defect", failure.Message), true, nil
 		}
+	case runtimecontract.FailureClassCandidateAuthorityExhausted:
+		if strings.TrimSpace(failure.Code) != "candidate_authority_exhausted" {
+			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "runtime_contract_defect", failure.Message), true, nil
+		}
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_authority_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassCandidateDocumentRecoveryExhausted:
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "candidate_document_recovery_exhausted", failure.Message), true, nil
 	case runtimecontract.FailureClassCandidateInfeasible:

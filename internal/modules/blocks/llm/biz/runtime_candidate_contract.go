@@ -79,6 +79,7 @@ type runtimeCandidateOperationContractProjection struct {
 	TargetCardinality           runtimecontract.RuntimeOperationTargetCardinality     `json:"targetCardinality,omitempty"`
 	RequireTargetRefs           bool                                                  `json:"requireTargetRefs,omitempty"`
 	ForbiddenParameters         []string                                              `json:"forbiddenParameters,omitempty"`
+	ValueRules                  []runtimecontract.RuntimeOperationValueRule           `json:"valueRules,omitempty"`
 	CandidateConstraints        []runtimecontract.RuntimeOperationCandidateConstraint `json:"candidateConstraints,omitempty"`
 	Variants                    []runtimeCandidateOperationVariantProjection          `json:"variants,omitempty"`
 	Rules                       []string                                              `json:"rules,omitempty"`
@@ -128,14 +129,16 @@ type runtimeCandidateOperationParameterProjection struct {
 }
 
 type runtimeCandidateOperationVariantProjection struct {
-	ID                   string                                                `json:"id"`
-	Discriminators       []runtimecontract.RuntimeOperationParameterPredicate  `json:"discriminators"`
-	RequiredParameters   []string                                              `json:"requiredParameters,omitempty"`
-	RequiredNonEmpty     []string                                              `json:"requiredNonEmpty,omitempty"`
-	ForbiddenParameters  []string                                              `json:"forbiddenParameters,omitempty"`
-	CandidateConstraints []runtimecontract.RuntimeOperationCandidateConstraint `json:"candidateConstraints,omitempty"`
-	EffectScope          runtimecontract.RuntimeEffectScope                    `json:"effectScope"`
-	IdempotencyClass     runtimecontract.RuntimeOperationIdempotencyClass      `json:"idempotencyClass"`
+	ID                     string                                                `json:"id"`
+	Discriminators         []runtimecontract.RuntimeOperationParameterPredicate  `json:"discriminators"`
+	RequiredParameters     []string                                              `json:"requiredParameters,omitempty"`
+	RequiredNonEmpty       []string                                              `json:"requiredNonEmpty,omitempty"`
+	ForbiddenParameters    []string                                              `json:"forbiddenParameters,omitempty"`
+	DistinctParameterPairs []runtimecontract.RuntimeOperationParameterPair       `json:"distinctParameterPairs,omitempty"`
+	ValueRules             []runtimecontract.RuntimeOperationValueRule           `json:"valueRules,omitempty"`
+	CandidateConstraints   []runtimecontract.RuntimeOperationCandidateConstraint `json:"candidateConstraints,omitempty"`
+	EffectScope            runtimecontract.RuntimeEffectScope                    `json:"effectScope"`
+	IdempotencyClass       runtimecontract.RuntimeOperationIdempotencyClass      `json:"idempotencyClass"`
 }
 
 type runtimeCandidateRetryProjection struct {
@@ -365,6 +368,7 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 			TargetCardinality:           operation.TargetCardinality,
 			RequireTargetRefs:           runtimeStringIn(requiredWireFields, "targetRefs"),
 			ForbiddenParameters:         append([]string(nil), operation.ForbiddenParameters...),
+			ValueRules:                  runtimeCandidateOperationValueRulesForWire(operation, wire),
 			CandidateConstraints:        runtimeCandidateOperationConstraints(operation),
 			Rules:                       append([]string(nil), operation.Rules...),
 			AllowsDynamicParameters:     operation.AllowsDynamicParameters,
@@ -416,13 +420,30 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 				projection.Variants = append(projection.Variants, runtimeCandidateOperationVariantProjection{
 					ID: variant.ID, Discriminators: append([]runtimecontract.RuntimeOperationParameterPredicate(nil), variant.Discriminators...),
 					RequiredParameters: append([]string(nil), variant.RequiredParameters...), RequiredNonEmpty: append([]string(nil), variant.RequiredNonEmpty...),
-					ForbiddenParameters: append([]string(nil), variant.ForbiddenParameters...), CandidateConstraints: append([]runtimecontract.RuntimeOperationCandidateConstraint(nil), variant.CandidateConstraints...), EffectScope: variant.EffectScope, IdempotencyClass: variant.IdempotencyClass,
+					ForbiddenParameters: append([]string(nil), variant.ForbiddenParameters...), DistinctParameterPairs: append([]runtimecontract.RuntimeOperationParameterPair(nil), variant.DistinctParameterPairs...),
+					ValueRules: append([]runtimecontract.RuntimeOperationValueRule(nil), variant.ValueRules...), CandidateConstraints: append([]runtimecontract.RuntimeOperationCandidateConstraint(nil), variant.CandidateConstraints...), EffectScope: variant.EffectScope, IdempotencyClass: variant.IdempotencyClass,
 				})
 			}
 		}
 		ret = append(ret, projection)
 	}
 	return ret
+}
+
+func runtimeCandidateOperationValueRulesForWire(operation runtimecontract.RuntimeCandidateOperationManifest, wire runtimecontract.RuntimeCandidateWireContract) []runtimecontract.RuntimeOperationValueRule {
+	rules := append([]runtimecontract.RuntimeOperationValueRule(nil), operation.ValueRules...)
+	selectedVariants := map[string]struct{}{}
+	for _, rule := range wire.OperationRules {
+		if runtimecontract.CanonicalRuntimeBlockKind(rule.Kind) == operation.Kind && strings.TrimSpace(rule.VariantID) != "" {
+			selectedVariants[strings.TrimSpace(rule.VariantID)] = struct{}{}
+		}
+	}
+	for _, variant := range operation.Variants {
+		if _, selected := selectedVariants[variant.ID]; selected {
+			rules = append(rules, variant.ValueRules...)
+		}
+	}
+	return runtimecontract.NormalizeRuntimeOperationValueRules(rules)
 }
 
 func runtimeCandidateOperationConstraints(operation runtimecontract.RuntimeCandidateOperationManifest) []runtimecontract.RuntimeOperationCandidateConstraint {
@@ -713,6 +734,8 @@ func runtimeCandidateRetryForManifest(attempt int, observation *runtimecontract.
 		instruction += " The previous document omitted, emptied, set null, or used the wrong JSON type for a required field. Rebuild the entire document and emit that field exactly once with the type and nested shape required by outputContract.schema; field presence without schema conformance is still invalid."
 	} else if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOwnerConstraint {
 		instruction += " The capability owner rejected one candidate parameter against a constraint already sealed in outputContract.candidateConstraints. Rebuild that parameter from the sealed required shape and the current C3 owner observation; do not copy the rejected value, parser output, or diagnostic text."
+	} else if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOperationValueRule {
+		instruction += " The previous candidate violated one pure value rule sealed in outputContract.valueRules. Change only the parameter named by the correction path so the same rule is satisfied; do not copy the rejected value or diagnostic text, and keep the compiled kind and variant unchanged."
 	} else if input.Witness.Dimension == runtimecontract.RuntimeCandidateCorrectionWitnessOperationSetCardinality {
 		instruction += " The previous candidate contained multiple ordinary durable operations for the same capability owner and canonical target. Consolidate every required change for that exact target into one operation; do not use dependsOn, a new operation ID, or a cosmetic parameter change to preserve the duplicate effect."
 	} else if previous.Class == runtimecontract.RuntimeCandidateFailureClassSchema || previous.Class == runtimecontract.RuntimeCandidateFailureClassContract {

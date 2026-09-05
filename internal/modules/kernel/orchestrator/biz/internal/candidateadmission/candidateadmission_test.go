@@ -161,26 +161,19 @@ func TestEvaluateRejectsDistinctDurableOperationsForSameOwnerTarget(t *testing.T
 
 func TestEvaluateAppliesExecutableContractBeforeOwnerProbe(t *testing.T) {
 	facts, decision, manifest, candidate := evaluatorFixture(t)
-	patchType := "text_replace"
-	unchanged := "same"
-	operation := candidate.StateChange.Operations[0].Operation
-	operation.Parameters = []runtimecontract.OperationParameter{
-		{Name: "patchType", String: &patchType},
-		{Name: "oldText", String: &unchanged},
-		{Name: "newText", String: &unchanged},
-	}
-	candidate.StateChange.Operations[0].Operation = operation
-	var err error
-	candidate, err = runtimecontract.DeriveRuntimeCandidateOperationAuthority(manifest, candidate)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := runtimecontract.ValidateRuntimeCandidateAgainstManifest(manifest, candidate); err != nil {
 		t.Fatalf("fixture must cross the provider-selectable manifest fence first: %v", err)
 	}
+	patchType := "file_write"
+	facts.Activation.OperationPolicies = []runtimecontract.RuntimeOperationPolicyFact{{
+		ID: "file-write-observed-read-only", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKind:    runtimecontract.RuntimeBlockKindPatchApply,
+		ParameterMatches: []runtimecontract.RuntimeOperationParameterMatch{{Name: "patchType", String: &patchType}},
+		EffectScope:      runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+	}}
 
 	failure := Evaluate(EvaluationInput{Manifest: manifest, Decision: decision, Facts: facts, Candidate: candidate})
-	if failure == nil || failure.Code != CodeInvalid || !strings.Contains(failure.Reason, "distinct") {
+	if failure == nil || failure.Code != CodeInvalid || !strings.Contains(failure.Reason, "durable effect") {
 		t.Fatalf("executable contract defect escaped pre-probe admission: %+v", failure)
 	}
 }

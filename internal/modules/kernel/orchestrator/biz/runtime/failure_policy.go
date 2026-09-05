@@ -56,7 +56,8 @@ func FailureClassDisposition(class runtimecontract.FailureClass) FailureDisposit
 		return FailureDispositionDeliveryRetry
 	case runtimecontract.FailureClassRuntimeInvariantDefect, runtimecontract.FailureClassRuntimeContractMisalignment:
 		return FailureDispositionTerminalDefect
-	case runtimecontract.FailureClassNoProgressExhausted, runtimecontract.FailureClassCoverageAssessmentIncomplete:
+	case runtimecontract.FailureClassNoProgressExhausted, runtimecontract.FailureClassCandidateAuthorityExhausted,
+		runtimecontract.FailureClassCoverageAssessmentIncomplete:
 		return FailureDispositionBoundedFail
 	default:
 		return FailureDispositionBoundedFail

@@ -22,6 +22,8 @@ type RuntimeCandidatePayloadDiagnostic struct {
 	Allowed                 []string
 	Required                []string
 	Forbidden               []string
+	ConstraintRef           string
+	RequiredShape           string
 	WireRule                *RuntimeCandidateWireRuleIdentity
 	ViolationKind           RuntimeCandidatePayloadViolationKind
 	ParameterEntryEncodings []RuntimeCandidateParameterEntryEncodingViolation
@@ -75,6 +77,8 @@ func RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(value *RuntimeCandid
 		Allowed:                 append([]string(nil), value.Allowed...),
 		Required:                append([]string(nil), value.Required...),
 		Forbidden:               append([]string(nil), value.Forbidden...),
+		ConstraintRef:           value.ConstraintRef,
+		RequiredShape:           value.RequiredShape,
 		WireRule:                value.WireRule.Clone(),
 		ViolationKind:           value.ViolationKind,
 		ParameterEntryEncodings: cloneRuntimeCandidateParameterEntryEncodings(value.ParameterEntryEncodings),
@@ -1098,6 +1102,17 @@ func validateRuntimeCandidatePayloadOperation(manifest RuntimeCandidateContractM
 	}
 	if err := validateRuntimeCandidatePayloadVariant(operationManifest, operation, path); err != nil {
 		return err
+	}
+	violation, err := RuntimeOperationValueRuleViolationForOperation(operation, operationManifest)
+	if err != nil {
+		return &RuntimeCandidatePayloadDiagnostic{Path: path + ".parameters", Actual: "invalid_value_rule_catalog", Cause: err}
+	}
+	if violation != nil {
+		return &RuntimeCandidatePayloadDiagnostic{
+			Path: path + ".parameters[name=" + violation.ParameterName + "]", Actual: string(violation.ActualShape),
+			Required: []string{string(violation.RequiredShape)}, ConstraintRef: violation.RuleRef,
+			RequiredShape: string(violation.RequiredShape), Cause: violation,
+		}
 	}
 	authorization, err := RuntimeCandidateOperationBindingAuthorizationFor(operationManifest, operation)
 	if err != nil {

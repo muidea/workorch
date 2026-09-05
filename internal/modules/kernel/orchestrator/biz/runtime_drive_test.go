@@ -10471,6 +10471,112 @@ func TestRequestAndSealRuntimeCandidateRemovesForbiddenRawIDOnAttemptOne(t *test
 	}
 }
 
+func TestRequestAndSealRuntimeCandidateRepairsDeclaredValueRuleOnceAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	probeCalls := 0
+	startRuntimeCandidateFileEditAdmissionOwnersWithProbeObserver(t, hub, func() { probeCalls++ })
+	facts := runtimeCandidateSealFileEditFacts(t)
+	state := &inMemoryRuntimeStateRepository{}
+	controller, err := runtime.NewRuntimeController(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialized = runtimeTestPersistSealedSemanticAuthority(t, ctx, state, initialized)
+	owner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	if err := owner.ConfigureRuntimeRepository(state); err != nil {
+		t.Fatal(err)
+	}
+	module := newTestBiz(owner, hub, nil)
+	prefix := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(initialized.Definition, initialized.Facts.Activation.ExecutionContract)
+	rejectedDocument := []byte(`{"operations":[{"kind":"file/edit","targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"same"},{"name":"newText","string":"same"}]}]}`)
+	correctedDocument := []byte(`{"operations":[{"kind":"file/edit","targetRefs":["target.txt"],"parameters":[{"name":"oldText","string":"same"},{"name":"newText","string":"after"}]}]}`)
+	beforeBudget, err := runtimecontract.RuntimeBudgetRemaining(initialized.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerCalls := 0
+	var commands []llmevents.RequestRuntimeCandidateCommand
+	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
+	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
+		providerCalls++
+		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		commands = append(commands, command)
+		document := rejectedDocument
+		if providerCalls == 2 {
+			document = correctedDocument
+		}
+		result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+			Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+			ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument),
+			DocumentOutcome:      runtimeCompleteDocumentOutcome(command.ExpectedDocument, document),
+		}), nil)
+	})
+	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
+
+	failed, err := module.requestAndSealRuntimeCandidate(ctx, initialized, prefix, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterRejectedBudget, err := runtimecontract.RuntimeBudgetRemaining(failed.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 1 || failed.ActiveDispatch != nil || failed.Decision.State == runtimecontract.ConvergenceStateFailed ||
+		afterRejectedBudget != beforeBudget || len(failed.CandidateAttempts) != 1 ||
+		failed.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateFailed ||
+		probeCalls != 0 || len(failed.CandidateAttempts[0].Feasibilities) != 0 || failed.CandidateAttempts[0].Failure == nil ||
+		failed.CandidateAttempts[0].Failure.Code != "candidate_operation_value_rule_nonconformant" ||
+		failed.CandidateAttempts[0].Correction == nil || failed.CandidateAttempts[0].Correction.Witness == nil ||
+		failed.CandidateAttempts[0].Correction.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessOperationValueRule {
+		t.Fatalf("attempt 0 value-rule boundary: calls=%d budget=%d->%d aggregate=%+v", providerCalls, beforeBudget, afterRejectedBudget, failed)
+	}
+	witness := failed.CandidateAttempts[0].Correction.Witness
+	if witness.Path != "$.operations[0].parameters[name=newText]" ||
+		witness.RejectedValue != string(runtimecontract.RuntimeOperationValueActualShapeEqualParameters) ||
+		witness.AlternativeValue != string(runtimecontract.RuntimeOperationValueRequiredShapeDistinct) ||
+		witness.ConstraintRef != runtimecontract.RuntimeOperationValueRuleID(runtimecontract.StepKindFileEdit, "", runtimecontract.RuntimeOperationValueRuleDistinct, "oldText", "newText") {
+		t.Fatalf("attempt 0 value-rule witness = %+v", witness)
+	}
+
+	reloaded, err := state.Load(ctx, initialized.Facts.WorkspaceID, initialized.Facts.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedOwner := newRuntimeTestOwnerWithEvidence(RuntimeEvidenceRepositories{ArtifactContinuations: memory.NewArtifactContinuationRepository()})
+	if err := restartedOwner.ConfigureRuntimeRepository(state); err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, reloaded, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterAcceptedBudget, err := runtimecontract.RuntimeBudgetRemaining(sealed.ExecutionBudget, runtimecontract.RuntimeBudgetDimensionCandidateCorrection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls != 2 || len(commands) != 2 || commands[1].CandidateAttempt != 1 ||
+		commands[0].StablePrefixHash != commands[1].StablePrefixHash || commands[0].CandidateManifest.Hash != commands[1].CandidateManifest.Hash ||
+		commands[1].CandidateCorrectionObservation == nil || commands[1].CandidateCorrectionObservation.Diagnostic == nil ||
+		commands[1].CandidateCorrectionObservation.Diagnostic.Actual != string(runtimecontract.RuntimeOperationValueActualShapeEqualParameters) ||
+		commands[1].CandidateCorrectionObservation.Diagnostic.RequiredShape != string(runtimecontract.RuntimeOperationValueRequiredShapeDistinct) ||
+		commands[1].CandidateCorrection == nil || commands[1].CandidateCorrection.Witness.Dimension != runtimecontract.RuntimeCandidateCorrectionWitnessOperationValueRule ||
+		afterAcceptedBudget != beforeBudget-1 || sealed.ActiveDispatch == nil || len(sealed.CandidateAttempts) != 2 ||
+		sealed.CandidateAttempts[1].State != runtimecontract.RuntimeCandidateAttemptStateAccepted || probeCalls == 0 {
+		t.Fatalf("value-rule correction did not seal across restart: calls=%d budget=%d->%d commands=%+v aggregate=%+v", providerCalls, beforeBudget, afterAcceptedBudget, commands, sealed)
+	}
+	revision := sealed.StateRevision
+	replayed, err := newTestBiz(restartedOwner, hub, nil).requestAndSealRuntimeCandidateWithRetry(ctx, sealed, prefix)
+	if err != nil || providerCalls != 2 || replayed.StateRevision != revision || len(replayed.CandidateAttempts) != 2 {
+		t.Fatalf("value-rule correction duplicate replayed provider or state: calls=%d aggregate=%+v err=%v", providerCalls, replayed, err)
+	}
+}
+
 func TestRequestAndSealRuntimeCandidateReencodesDeclaredParameterEntriesOnAttemptOne(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)

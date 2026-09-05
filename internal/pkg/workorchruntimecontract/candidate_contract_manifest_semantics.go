@@ -17,6 +17,8 @@ type RuntimeCandidateContractDiagnostic struct {
 	Allowed               []string
 	Required              []string
 	Forbidden             []string
+	ConstraintRef         string
+	RequiredShape         string
 	OperationSetViolation *RuntimeCandidateOperationSetViolation
 	Cause                 error
 }
@@ -125,6 +127,8 @@ func RuntimeCandidateFailureDiagnosticFromContractDiagnostic(value *RuntimeCandi
 		Allowed:               append([]string(nil), value.Allowed...),
 		Required:              append([]string(nil), value.Required...),
 		Forbidden:             append([]string(nil), value.Forbidden...),
+		ConstraintRef:         value.ConstraintRef,
+		RequiredShape:         value.RequiredShape,
 		OperationSetViolation: value.OperationSetViolation.Clone(),
 	}
 	if value.OperationSetViolation != nil {
@@ -466,6 +470,17 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 	}
 	if err := validateRuntimeCandidateVariantAgainstManifest(operationManifest, operation, values, path); err != nil {
 		return err
+	}
+	violation, err := RuntimeOperationValueRuleViolationForOperation(operation, operationManifest)
+	if err != nil {
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".parameters", "invalid_value_rule_catalog", nil, nil, nil, err)
+	}
+	if violation != nil {
+		return &RuntimeCandidateContractDiagnostic{
+			OperationID: operation.ID, Path: path + ".parameters[name=" + violation.ParameterName + "]",
+			Actual: string(violation.ActualShape), Required: []string{string(violation.RequiredShape)},
+			ConstraintRef: violation.RuleRef, RequiredShape: string(violation.RequiredShape), Cause: violation,
+		}
 	}
 	bindingAuthorization, err := RuntimeCandidateOperationBindingAuthorizationFor(operationManifest, operation)
 	if err != nil {

@@ -26,7 +26,7 @@ focused contract；本页不复制字段级正文。
 - provider-facing token 值只有 LLM owner 的 sealed `ProviderCeiling` 一个权威；submission 前任何不一致均零 physical call。
 - attempt 0 与 same-contract attempt 1 复用同一 C0～C3、authority transaction、manifest 与 `stablePrefixHash`。
 - operations C3 的 output contract 必须携带从 sealed manifest 纯编译的 exact `wireContractHash`、canonical
-  wire layout 和 per-slot rules。attempt 1/restart 只能重算同一 hash；wire 规则漂移属于请求身份缺陷，不是
+  wire layout、per-slot rules 与适用 operation/selected-variant `valueRules`。attempt 1/restart 只能重算同一 hash；wire 规则漂移属于请求身份缺陷，不是
   provider correction input，且不得通过改写 C4 绕过。
 - operations attempt 1 的 C4 必须携带 attempt 0 persisted directive 的 provider-safe detached correction input：manifest、
   objectives 与 concrete schema/parameter-entry/owner-constraint/operation-set/semantic witness；failure 与该 input 的 normalized
@@ -38,6 +38,11 @@ focused contract；本页不复制字段级正文。
   `RuntimeCandidateWireRuleIdentity`（wire contract hash、operation index、required ref/canonical kind、variant），并进入
   request-session correction hash。它只在 C4 证明该 field rule 的来源，不改变 C0～C3；LLM 不得从 `Actual` 或单 operation
   manifest 猜测规则。
+- `operation_value_rule` correction 的 C4 只携带 C3 已声明的 exact rule ref、parameter path、closed
+  `actual_shape -> required_shape` 与 objective；不得携带 rejected/corrected raw value。attempt 1 保持 C0～C3、manifest、wire
+  contract 与 `stablePrefixHash` 不变，并且只可修改规则点名参数；selected variant 或其它 execution-semantic 字段漂移必须在
+  physical call/owner I/O 前 fail-closed。JSON Schema 仅可做 unary rule 的 transport acceleration，local manifest evaluator 才是
+  字节范围和跨参数关系的最终权威。
 - `owner_candidate_constraint` correction 的 C3 authority 保留 manifest-declared `candidateConstraints`；C4 只携带 exact
   constraint ref、parameter path、closed `actual_shape`/`required_shape`、bounded target observation 与 objective，不得携带 rejected
   parameter、owner parser text 或普通 feasibility diagnostic。attempt 1 仍复用同一 C0～C3 与 `stablePrefixHash`；静态 required

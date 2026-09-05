@@ -86,6 +86,12 @@ func runtimeRetryExhausted(summary *projectioncontract.RuntimeProgress) bool {
 	if summary == nil {
 		return false
 	}
+	// The terminal code is the authoritative SM-3 outcome. Check the zero-retry
+	// authority exhaustion first so records persisted before the failure-class
+	// split are not displayed as ineffective retries.
+	if strings.TrimSpace(summary.TerminalCode) == "candidate_authority_exhausted" {
+		return false
+	}
 	switch strings.TrimSpace(summary.FailureClass) {
 	case string(runtimecontract.FailureClassNoProgressExhausted), string(runtimecontract.FailureClassCandidateExhausted):
 		return true

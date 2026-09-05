@@ -22,6 +22,9 @@ func TestRuntimeCandidateWireDiagnosticRequiresExactPersistedManifestPreimage(t 
 	}
 	secondOperation := manifest.Operations[0].Normalized()
 	secondOperation.Kind = runtimecontract.RuntimeBlockKindPatchPreview
+	previewContract, _ := runtimecontract.RuntimeOperationContractForKind(runtimecontract.RuntimeBlockKindPatchPreview)
+	secondOperation.ValueRules = previewContract.ValueRules
+	secondOperation.Variants = previewContract.Variants
 	manifest.Operations = append(manifest.Operations, secondOperation)
 	manifest.Hash = ""
 	manifest = manifest.Normalized()

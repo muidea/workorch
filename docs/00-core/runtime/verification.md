@@ -136,6 +136,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - provider-safe correction projection 与 audit-safe original diagnostic 分开生成，互不覆盖；
 - parameter-entry malformed corpus 必须覆盖 fixed declared parameter 被内嵌为 sibling 的聚合识别，以及 undeclared、wrong-type、
   duplicate/mixed ambiguity 不获得 re-encode authority；diagnostic/C4/aggregate 只保留 index/kind/name/type，不保留原值；
+- operation `ValueRules` matrix 必须覆盖 operation/variant declaration、非空/范围/布尔/不同值/有序关系、重复或冲突 catalog、
+  strict decoder 与 semantic evaluator 同一 typed diagnostic、owner-I/O-before rejection、C3/JSON Schema 投影、C4 无 raw value、
+  attempt 1 仅目标参数变化、夹带 target/binding/其它参数拒绝、single budget、duplicate/CAS/fresh restart 与 final seal；
 - credential、endpoint、raw prompt/provider body/stream、未脱敏文件内容只允许记录 hash/bytes 与
   redacted/omitted metadata，不得进入 aggregate、eventstream、projection、memory 或下一次 candidate context。
 

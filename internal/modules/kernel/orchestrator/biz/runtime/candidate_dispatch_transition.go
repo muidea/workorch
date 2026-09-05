@@ -1190,8 +1190,10 @@ func candidateAttemptTerminalFailureFact(attempt int, failure runtimecontract.Ru
 			message = "complete candidate rejection is rejected_final under the sealed manifest"
 		}
 		class := runtimecontract.FailureClassRuntimeContractMisalignment
-		if code == "candidate_retry_exhausted" || code == "candidate_authority_exhausted" {
+		if code == "candidate_retry_exhausted" {
 			class = runtimecontract.FailureClassCandidateExhausted
+		} else if code == "candidate_authority_exhausted" {
+			class = runtimecontract.FailureClassCandidateAuthorityExhausted
 		}
 		return &runtimecontract.FailureFact{
 			Class: class, Code: code, Signature: code, Message: message,

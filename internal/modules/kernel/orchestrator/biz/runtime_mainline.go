@@ -75,7 +75,7 @@ func (m *Biz) requestAndSealRuntimeCandidate(
 	if candidateAttempt == 1 {
 		if err := runtime.ValidatePersistedCandidateCorrection(aggregate, manifest); err != nil {
 			return m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{
-				Class: runtimecontract.FailureClassCandidateExhausted, Code: "candidate_authority_exhausted",
+				Class: runtimecontract.FailureClassCandidateAuthorityExhausted, Code: "candidate_authority_exhausted",
 				Signature: "candidate-authority-exhausted", Message: err.Error(),
 			})
 		}
@@ -950,14 +950,29 @@ func runtimeCandidateSchemaFailure(decodeErr error) *runtimecontract.RuntimeCand
 		Class: runtimecontract.RuntimeCandidateFailureClassSchema, Code: "candidate_schema_invalid",
 		Signature: "candidate-schema-invalid", Reason: decodeErr.Error(),
 	}
+	var valueRuleViolation *runtimecontract.RuntimeOperationValueRuleViolation
+	valueRuleRejected := errors.As(decodeErr, &valueRuleViolation) && valueRuleViolation != nil && valueRuleViolation.Validate() == nil
+	classifyValueRule := func(diagnostic *runtimecontract.RuntimeCandidateFailureDiagnostic) {
+		if !valueRuleRejected || diagnostic == nil ||
+			diagnostic.ConstraintRef != valueRuleViolation.RuleRef ||
+			diagnostic.Actual != string(valueRuleViolation.ActualShape) ||
+			diagnostic.RequiredShape != string(valueRuleViolation.RequiredShape) {
+			return
+		}
+		failure.Class = runtimecontract.RuntimeCandidateFailureClassContract
+		failure.Code = "candidate_operation_value_rule_nonconformant"
+		failure.Signature = "candidate-operation-value-rule-nonconformant"
+	}
 	var payloadDiagnostic *runtimecontract.RuntimeCandidatePayloadDiagnostic
 	if errors.As(decodeErr, &payloadDiagnostic) {
 		failure.Diagnostic = runtimecontract.RuntimeCandidateFailureDiagnosticFromPayloadDiagnostic(payloadDiagnostic)
+		classifyValueRule(failure.Diagnostic)
 		return failure
 	}
 	var contractDiagnostic *runtimecontract.RuntimeCandidateContractDiagnostic
 	if errors.As(decodeErr, &contractDiagnostic) {
 		failure.Diagnostic = runtimecontract.RuntimeCandidateFailureDiagnosticFromContractDiagnostic(contractDiagnostic)
+		classifyValueRule(failure.Diagnostic)
 	}
 	return failure
 }
@@ -1027,8 +1042,10 @@ func (m *Biz) requestAndSealRuntimeCandidateWithRetry(
 					message = first.Failure.Reason
 				}
 				class := runtimecontract.FailureClassRuntimeContractMisalignment
-				if code == "candidate_retry_exhausted" || code == "candidate_authority_exhausted" {
+				if code == "candidate_retry_exhausted" {
 					class = runtimecontract.FailureClassCandidateExhausted
+				} else if code == "candidate_authority_exhausted" {
+					class = runtimecontract.FailureClassCandidateAuthorityExhausted
 				}
 				return m.runtimeRecordFailure(ctx, aggregate, runtimecontract.FailureFact{
 					Class: class, Code: code, Signature: code, Message: message,
