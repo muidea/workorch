@@ -16,6 +16,17 @@ type shellGoTestJSONEvent struct {
 	Output string `json:"Output"`
 }
 
+// shellGoTestJSONFacts is the single owner-private decoding result for one
+// bounded `go test -json` transcript. Check outcomes and compiler/package
+// diagnostics must be decoded together: separate scanners previously allowed
+// target extraction to recognize build-output while owner diagnostic
+// classification saw only the JSON envelope and fell back to a generic exit
+// code.
+type shellGoTestJSONFacts struct {
+	Observation      runtimecontract.RuntimeValidationObservation
+	DiagnosticOutput string
+}
+
 // attachShellValidationObservation records the owner fact that a sealed
 // managed-validation recipe was actually run. A recipe may be a generic
 // command (for example a deterministic file-presence assertion), in which
@@ -97,13 +108,27 @@ func shellGoTestJSONEnabled(args []string) bool {
 }
 
 func goTestJSONValidationObservation(stdout, stderr string) runtimecontract.RuntimeValidationObservation {
+	return parseGoTestJSONFacts(stdout, stderr).Observation
+}
+
+func parseGoTestJSONFacts(stdout, stderr string) shellGoTestJSONFacts {
 	observation := runtimecontract.RuntimeValidationObservation{}
+	var diagnosticOutput strings.Builder
 	scanner := bufio.NewScanner(strings.NewReader(strings.Join([]string{stdout, stderr}, "\n")))
 	scanner.Buffer(make([]byte, 4096), 2*MaxCommandOutputBytes+1024)
 	for scanner.Scan() {
 		var event shellGoTestJSONEvent
 		if json.Unmarshal([]byte(strings.TrimSpace(scanner.Text())), &event) != nil {
 			continue
+		}
+		switch strings.TrimSpace(event.Action) {
+		case "output", "build-output":
+			if strings.TrimSpace(event.Output) != "" {
+				diagnosticOutput.WriteString(event.Output)
+				if !strings.HasSuffix(event.Output, "\n") {
+					diagnosticOutput.WriteByte('\n')
+				}
+			}
 		}
 		name := topLevelGoTestCheck(event.Test)
 		if name == "" {
@@ -120,7 +145,10 @@ func goTestJSONValidationObservation(stdout, stderr string) runtimecontract.Runt
 			observation.SkippedChecks = append(observation.SkippedChecks, name)
 		}
 	}
-	return observation.Normalized()
+	return shellGoTestJSONFacts{
+		Observation:      observation.Normalized(),
+		DiagnosticOutput: diagnosticOutput.String(),
+	}
 }
 
 // goTestJSONDiagnosticOutput extracts only the bounded, tool-owned Output
@@ -130,27 +158,7 @@ func goTestJSONValidationObservation(stdout, stderr string) runtimecontract.Runt
 // stderr independently; the scanner limit covers their largest possible line
 // without creating a second unbounded protocol.
 func goTestJSONDiagnosticOutput(stdout, stderr string) string {
-	var output strings.Builder
-	for _, stream := range []string{stdout, stderr} {
-		scanner := bufio.NewScanner(strings.NewReader(stream))
-		scanner.Buffer(make([]byte, 4096), 2*MaxCommandOutputBytes+1024)
-		for scanner.Scan() {
-			var event shellGoTestJSONEvent
-			if json.Unmarshal([]byte(strings.TrimSpace(scanner.Text())), &event) != nil || strings.TrimSpace(event.Output) == "" {
-				continue
-			}
-			switch strings.TrimSpace(event.Action) {
-			case "output", "build-output":
-			default:
-				continue
-			}
-			output.WriteString(event.Output)
-			if !strings.HasSuffix(event.Output, "\n") {
-				output.WriteByte('\n')
-			}
-		}
-	}
-	return output.String()
+	return parseGoTestJSONFacts(stdout, stderr).DiagnosticOutput
 }
 
 // goTestObservationIsExplicitZeroWork recognizes the tool-level zero-work

@@ -138,18 +138,18 @@ func TestShellValidationDiagnosticPublishesExactGoOwnerCodes(t *testing.T) {
 			name: "module parse", stderr: "go: errors parsing go.mod:\ngo.mod:3: unknown directive: package",
 			evidence:  runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed},
 			wantClass: runtimecontract.ValidationDiagnosticBuildFailed, wantTarget: runtimecontract.ValidationEvidenceTargetFailureSurface,
-			wantCode: shellcommon.ValidationDiagnosticCodeGoModuleParseFailed,
+			wantCode: shellcommon.ValidationDiagnosticCodeModuleManifestParseFailed,
 		},
 		{
 			name: "source compile", stderr: "cmd/server/main.go:17:2: undefined: server",
 			evidence:  runtimecontract.RuntimeValidationEvidence{DiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed},
 			wantClass: runtimecontract.ValidationDiagnosticBuildFailed, wantTarget: runtimecontract.ValidationEvidenceTargetFailureSurface,
-			wantCode: shellcommon.ValidationDiagnosticCodeGoSourceCompileFailed,
+			wantCode: shellcommon.ValidationDiagnosticCodeSourceCompileFailed,
 		},
 		{
 			name: "test failure", stderr: "--- FAIL: TestServer (0.00s)\n    server_test.go:12: mismatch",
 			wantClass: runtimecontract.ValidationDiagnosticTestFailed, wantTarget: runtimecontract.ValidationEvidenceTargetBehaviorEvidence,
-			wantCode: shellcommon.ValidationDiagnosticCodeGoTestFailed,
+			wantCode: shellcommon.ValidationDiagnosticCodeTestFailed,
 		},
 	}
 	for _, test := range tests {

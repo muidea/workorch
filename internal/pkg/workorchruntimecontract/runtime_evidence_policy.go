@@ -13,7 +13,12 @@ type RuntimeEvidencePolicy struct {
 	Rule        string
 	AppliesTo   string
 	CommandName string
-	ArgsContain []string
+	// RecipeAdapterRef names an owner-local validation recipe resolver. A
+	// profile may seal this neutral reference instead of a language/tool
+	// command; only the addressed capability owner may resolve it from fresh
+	// owner facts into an executable RuntimeValidationRecipe.
+	RecipeAdapterRef string
+	ArgsContain      []string
 	// RecipeArgs declares a profile validation recipe. The ordered command line
 	// is sealed at activation, then must be preflight-confirmed by the Shell
 	// owner before it becomes selectable by an LLM; an LLM may never reconstruct
@@ -125,6 +130,7 @@ func (p RuntimeEvidencePolicy) Normalized() RuntimeEvidencePolicy {
 	p.Rule = strings.TrimSpace(p.Rule)
 	p.AppliesTo = strings.TrimSpace(p.AppliesTo)
 	p.CommandName = strings.TrimSpace(p.CommandName)
+	p.RecipeAdapterRef = strings.TrimSpace(p.RecipeAdapterRef)
 	p.ArgsContain = normalizeStrings(p.ArgsContain)
 	p.RecipeArgs = normalizeOrderedStrings(p.RecipeArgs)
 	p.RequiredArgs = normalizeStrings(p.RequiredArgs)
@@ -163,10 +169,16 @@ func (p RuntimeEvidencePolicy) Validate() error {
 	if len(p.RequiredArgs) > 0 && (p.AppliesTo != StepKindShellCommand || p.CommandName == "") {
 		return fmt.Errorf("runtime evidence policy required args require a shell command name")
 	}
-	if p.RecipeDeclared && (p.AppliesTo != StepKindShellCommand || p.CommandName == "") {
-		return fmt.Errorf("runtime evidence policy validation recipe requires a shell command name")
+	if p.RecipeDeclared && (p.AppliesTo != StepKindShellCommand || (p.CommandName == "" && p.RecipeAdapterRef == "")) {
+		return fmt.Errorf("runtime evidence policy validation recipe requires a shell command name or owner adapter ref")
 	}
-	if !p.RecipeDeclared && (len(p.RecipeArgs) > 0 || p.RecipeTimeoutMillis != 0) {
+	if p.RecipeDeclared && p.CommandName != "" && p.RecipeAdapterRef != "" {
+		return fmt.Errorf("runtime evidence policy validation recipe cannot declare both command and owner adapter")
+	}
+	if p.RecipeDeclared && p.CommandName == "" && len(p.RecipeArgs) != 0 {
+		return fmt.Errorf("runtime evidence policy owner-adapted recipe cannot declare command args")
+	}
+	if !p.RecipeDeclared && (p.RecipeAdapterRef != "" || len(p.RecipeArgs) > 0 || p.RecipeTimeoutMillis != 0) {
 		return fmt.Errorf("runtime evidence policy recipe fields require an explicit recipe declaration")
 	}
 	if p.RecipeTimeoutMillis != 0 && (p.RecipeTimeoutMillis < 1000 || p.RecipeTimeoutMillis > 600000) {
@@ -209,7 +221,11 @@ func (p RuntimeEvidencePolicy) Validate() error {
 // Orchestrator authority and observing/executing this recipe remains Shell
 // owner authority.
 type RuntimeValidationRecipe struct {
-	ID            string
+	ID string
+	// AdapterRef is empty for a fixed profile command. For an owner-adapted
+	// declaration it is the only executable-selection input; the capability
+	// owner preserves it on the concrete recipe it publishes.
+	AdapterRef    string
 	Command       string
 	Args          []string
 	TimeoutMillis int64
@@ -217,6 +233,7 @@ type RuntimeValidationRecipe struct {
 
 func (r RuntimeValidationRecipe) Normalized() RuntimeValidationRecipe {
 	r.ID = strings.TrimSpace(r.ID)
+	r.AdapterRef = strings.TrimSpace(r.AdapterRef)
 	r.Command = strings.TrimSpace(r.Command)
 	r.Args = normalizeOrderedStrings(r.Args)
 	return r
@@ -233,6 +250,23 @@ func (r RuntimeValidationRecipe) Validate() error {
 	return nil
 }
 
+// ValidateDeclaration accepts either a fixed executable recipe or an opaque
+// owner-adapter reference. It does not resolve the adapter and therefore
+// cannot grant execution authority.
+func (r RuntimeValidationRecipe) ValidateDeclaration() error {
+	r = r.Normalized()
+	if r.ID == "" || (r.Command == "" && r.AdapterRef == "") {
+		return fmt.Errorf("runtime validation recipe declaration requires id and command or owner adapter ref")
+	}
+	if r.Command == "" && len(r.Args) != 0 {
+		return fmt.Errorf("runtime validation recipe adapter declaration cannot contain command args")
+	}
+	if r.TimeoutMillis != 0 && (r.TimeoutMillis < 1000 || r.TimeoutMillis > 600000) {
+		return fmt.Errorf("runtime validation recipe timeout must be between 1000 and 600000")
+	}
+	return nil
+}
+
 // RuntimeValidationRecipeDeclarationsFromEvidencePolicies derives the profile
 // declarations that the Orchestrator submits to the Shell owner for preflight.
 // The result is not executable authority and must not be exposed to a provider
@@ -240,15 +274,49 @@ func (r RuntimeValidationRecipe) Validate() error {
 func RuntimeValidationRecipeDeclarationsFromEvidencePolicies(policies []RuntimeEvidencePolicy) []RuntimeValidationRecipe {
 	ret := make([]RuntimeValidationRecipe, 0, len(policies))
 	for _, policy := range NormalizeRuntimeEvidencePolicies(policies) {
-		if !policy.RecipeDeclared || policy.AppliesTo != StepKindShellCommand || policy.CommandName == "" {
+		if !policy.RecipeDeclared || policy.AppliesTo != StepKindShellCommand || (policy.CommandName == "" && policy.RecipeAdapterRef == "") {
 			continue
 		}
-		recipe := RuntimeValidationRecipe{ID: policy.ID, Command: policy.CommandName, Args: append([]string(nil), policy.RecipeArgs...), TimeoutMillis: policy.RecipeTimeoutMillis}.Normalized()
-		if recipe.Validate() == nil {
+		recipe := RuntimeValidationRecipe{ID: policy.ID, AdapterRef: policy.RecipeAdapterRef, Command: policy.CommandName, Args: append([]string(nil), policy.RecipeArgs...), TimeoutMillis: policy.RecipeTimeoutMillis}.Normalized()
+		if recipe.ValidateDeclaration() == nil {
 			ret = append(ret, recipe)
 		}
 	}
-	return NormalizeRuntimeValidationRecipes(ret)
+	return NormalizeRuntimeValidationRecipeDeclarations(ret)
+}
+
+// NormalizeRuntimeValidationRecipeDeclarations preserves valid adapter-only
+// declarations. Executable catalogs and dispatch snapshots continue to use
+// NormalizeRuntimeValidationRecipes, which rejects recipes without commands.
+func NormalizeRuntimeValidationRecipeDeclarations(values []RuntimeValidationRecipe) []RuntimeValidationRecipe {
+	byID := make(map[string]RuntimeValidationRecipe, len(values))
+	for _, value := range values {
+		value = value.Normalized()
+		if value.ValidateDeclaration() != nil {
+			continue
+		}
+		byID[value.ID] = value
+	}
+	keys := make([]string, 0, len(byID))
+	for id := range byID {
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+	ret := make([]RuntimeValidationRecipe, 0, len(keys))
+	for _, id := range keys {
+		ret = append(ret, byID[id])
+	}
+	return nilIfEmpty(ret)
+}
+
+func RuntimeValidationRecipeDeclarationForID(recipes []RuntimeValidationRecipe, id string) (RuntimeValidationRecipe, bool) {
+	id = strings.TrimSpace(id)
+	for _, recipe := range NormalizeRuntimeValidationRecipeDeclarations(recipes) {
+		if recipe.ID == id {
+			return recipe, true
+		}
+	}
+	return RuntimeValidationRecipe{}, false
 }
 
 // RuntimeValidationRecipeForID selects one already-sealed recipe by stable
@@ -476,7 +544,7 @@ func sameRuntimeEvidencePolicy(left RuntimeEvidencePolicy, right RuntimeEvidence
 	left = left.Normalized()
 	right = right.Normalized()
 	if left.ID != right.ID || left.Profile != right.Profile || left.Rule != right.Rule || left.AppliesTo != right.AppliesTo ||
-		left.CommandName != right.CommandName || left.RecipeTimeoutMillis != right.RecipeTimeoutMillis || left.QualityOnZeroWork != right.QualityOnZeroWork || left.MarksZeroWork != right.MarksZeroWork ||
+		left.CommandName != right.CommandName || left.RecipeAdapterRef != right.RecipeAdapterRef || left.RecipeTimeoutMillis != right.RecipeTimeoutMillis || left.QualityOnZeroWork != right.QualityOnZeroWork || left.MarksZeroWork != right.MarksZeroWork ||
 		left.EvidenceReason != right.EvidenceReason || left.Description != right.Description ||
 		left.RecipeDeclared != right.RecipeDeclared ||
 		!sameStrings(left.ArgsContain, right.ArgsContain) || !sameStrings(left.RecipeArgs, right.RecipeArgs) || !sameStrings(left.RequiredArgs, right.RequiredArgs) || !sameStrings(left.ZeroWorkMarkers, right.ZeroWorkMarkers) ||

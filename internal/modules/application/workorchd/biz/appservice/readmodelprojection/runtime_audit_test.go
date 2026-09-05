@@ -137,7 +137,7 @@ func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *test
 	}}, OperationReceipts: []runtimecontract.RuntimeOperationReceipt{{
 		ExecutionKey: "exec/ws-audit/run-audit/original-dispatch/validate-audit", Fence: 2, OperationID: "validate-audit",
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectNone, TargetRefs: []string{"main.go"},
-		Evidence: runtimecontract.RuntimeOperationEvidence{EvidenceRefs: []string{"artifact/audit"}, EvidenceTags: []string{"metric/audit"}, Validation: observation},
+		Evidence: runtimecontract.RuntimeOperationEvidence{Quality: common.EvidenceQualityValid, EvidenceReason: "owner validation passed", EvidenceRefs: []string{"artifact/audit"}, EvidenceTags: []string{"metric/audit"}, Validation: observation},
 	}}}
 
 	audit := mapRuntimeAudit(&state)
@@ -161,7 +161,8 @@ func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *test
 		t.Fatalf("derived credit projection = %+v", evidence)
 	}
 	receipt := audit.OperationReceipts[0]
-	if receipt.ObservedEffectScope != string(runtimecontract.RuntimeEffectNone) || receipt.ValidationRecipeID != "recipe/audit" || receipt.ObservationProtocolRef != "shell/audit/v1" || len(receipt.PassedChecks) != 1 || len(receipt.EvidenceTags) != 1 {
+	if receipt.ObservedEffectScope != string(runtimecontract.RuntimeEffectNone) || receipt.Quality != string(common.EvidenceQualityValid) || receipt.EvidenceReason != "owner validation passed" ||
+		receipt.ValidationRecipeID != "recipe/audit" || receipt.ObservationProtocolRef != "shell/audit/v1" || len(receipt.PassedChecks) != 1 || len(receipt.EvidenceTags) != 1 {
 		t.Fatalf("owner receipt projection = %+v", receipt)
 	}
 	dispatch := audit.Dispatches[0]

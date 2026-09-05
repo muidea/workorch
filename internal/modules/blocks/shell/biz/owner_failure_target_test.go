@@ -201,6 +201,10 @@ func TestShellManagedGoJSONDiagnosticReportsActualManifestScopedFailureTarget(t 
 	}
 	output := RuntimeCommandResult{
 		WorkingDirectory: "/tmp/workorch-shell-validation/workspace",
+		Command:          "go",
+		Args:             append([]string(nil), request.Args...),
+		ExitCode:         1,
+		FailureCode:      "shell_exit_nonzero",
 		Stdout: strings.Join([]string{
 			`{"Time":"2026-09-04T12:00:00Z","Action":"start","Package":"example.test"}`,
 			`{"ImportPath":"example.test","Action":"build-output","Output":"cmd/lsp-bridge/main.go:178:23: undefined: context\\n"}`,
@@ -210,6 +214,9 @@ func TestShellManagedGoJSONDiagnosticReportsActualManifestScopedFailureTarget(t 
 	}
 	if targets := shellValidationDiagnosticTargetRefs(output, request, "go"); !reflect.DeepEqual(targets, []string{"cmd/lsp-bridge/main.go"}) {
 		t.Fatalf("managed Go JSON failure targets = %v", targets)
+	}
+	if code := shellValidationOwnerDiagnosticCode(output, runtimecontract.RuntimeValidationEvidence{}, "go", runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationDiagnosticBuildFailed); code != modulecommon.ValidationDiagnosticCodeSourceCompileFailed {
+		t.Fatalf("managed Go JSON owner diagnostic code = %q, want %q", code, modulecommon.ValidationDiagnosticCodeSourceCompileFailed)
 	}
 }
 

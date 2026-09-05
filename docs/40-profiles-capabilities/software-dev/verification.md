@@ -31,13 +31,14 @@ and converges through the same neutral Runtime owner model. It must not make leg
 - DoD validation preparation seals the exact prospective-satisfaction contract ref; missing/extra/drifted ref or use on a
   non-prospective policy fails pre-seal and creates no Run/provider/capability work;
 - each repair-enabled DoD requirement seals one validation-failure convergence whose routes form an exact-trigger lookup table,
-  never a terminal alternative list. The built-in Go module/source/test tuples bind File `file/edit`, `existing_owner_scope` and
+  never a terminal alternative list. The built-in module/source/test tuples bind File `file/edit`, `existing_owner_scope` and
   separate declaration/operation selectors. A route whose repair operations do not publish one concrete owner confirmation protocol
   fails pre-seal. Duplicate/partial triggers, cross-owner kinds, non-state-change evidence, incomplete selectors, disabled fresh validation or an
   out-of-range bound fail pre-seal and create no Run/provider/capability work;
-- the default managed-validation wire contains only `recipeId`; Shell alone emits exact `go_module_parse_failed`,
-  `go_source_compile_failed` or `go_test_failed` owner facts from bounded tool output. Generic `shell_exit_nonzero` has no default
-  repair route;
+- the template validation declaration contains only `shell/project-native-validation/v1`, with no language command, arguments or
+  environment, and its validation-environment policy contains no language profile. Shell resolves the declaration from the exact File manifest, and the default managed-validation wire contains
+  only `recipeId`. Shell alone emits exact `module_manifest_parse_failed`, `source_compile_failed` or `test_failed` owner facts
+  from bounded tool output. Generic `shell_exit_nonzero` has no default repair route;
 - dependency/toolchain/environment diagnostics have no built-in repair route and must fail boundedly; project-specific remediation
   requires an explicit typed owner capability and Profile extension rather than a central default recipe;
 - `source_change` uses the broad `workspace_delivery_change` role; wildcard DoD terminal validation and its repair surface retain

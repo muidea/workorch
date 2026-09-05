@@ -383,8 +383,9 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 - composite prospective probe必须覆盖：File outer feasibility生成exact base-workspace-tree-revision-bound immutable delta且
   零文件/目录写入；同一 complete manifest revision 上 1～8 个 prospective refs 的规范化、去重、路径逃逸、已存在、
   parent/child 冲突、excluded tree 和 aggregate capacity 任一违例都必须零 delta/零写入；Shell 只消费该 delta、
-  activation-sealed recipes 和自身 dependency catalog/observation，逐 surface 校验 recipe command/ordered args/timeout schema
-  identity，并只基于 resulting manifest 判定，全程零 workspace read/process/session/effect；Orchestrator 不解释 path/recipe。
+  activation-sealed recipe declarations（fixed command 或 owner-adapter ref）和自身 dependency catalog/observation；capability
+  owner 以 exact File manifest 解析 adapter，并逐 surface 校验 owner-resolved command/ordered args/timeout schema identity，只基于
+  resulting manifest 判定，全程零 workspace read/process/session/effect；Orchestrator 不解释 path/recipe。
 - observation CAS与semantic seal分别重验manifest/batch/request/contract ref、delta、File catalog/observation与Shell dependency
   catalog/observation；probe→CAS、persist→seal任一漂移均零binding/dispatch/effect。duplicate/restart使用full composite hash
   幂等，冲突payload拒绝。
@@ -457,6 +458,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   仍复用同一 correction generation 正向接受正常 semantic document，且零 clarification/governance/dispatch/capability effect。
 
 ### Capability And Receipt
+
+- deployed audit 对 `CWI -> binding -> sealed operation -> accepted owner receipt -> accepted evidence` 的核对必须调用
+  `internal/tools/runtimeauditcheck`；该 stateless 工具复用 `workorchruntimecontract.MatchCoverageEvidenceBindingReceiptIdentity`。
+  Python live verifier只负责投影传输，不得复制 target subset、variant、validation attestation、metric 或 artifact proof 语义；
 
 - File/Git/Shell/MCP/SSH/Web 各自拥有 emitted-code total mapping，共享 pkg 不维护全 owner code taxonomy；
 - Web execute必须校验Orchestrator producer、完整sealed operation、current claimed receipt fence与exact grant；payload/execution/

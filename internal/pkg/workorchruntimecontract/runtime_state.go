@@ -1381,6 +1381,7 @@ func StableRuntimeValidationRecipeSnapshotHash(values []RuntimeValidationRecipe)
 	writeHashString(h, fmt.Sprintf("%d", len(recipes)))
 	for _, recipe := range recipes {
 		writeHashString(h, recipe.ID)
+		writeHashString(h, recipe.AdapterRef)
 		writeHashString(h, recipe.Command)
 		writeHashStrings(h, recipe.Args)
 		writeHashString(h, fmt.Sprintf("%d", recipe.TimeoutMillis))

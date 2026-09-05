@@ -132,35 +132,16 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 		t.Fatalf("software-dev evidencePolicies missing")
 	}
 	policy := item.EvidencePolicies[0]
-	if _, ok := policy["workEvidenceMarkers"]; !ok {
-		t.Fatalf("software-dev evidence policy missing workEvidenceMarkers: %+v", policy)
+	if policy["recipeAdapterRef"] != "shell/project-native-validation/v1" {
+		t.Fatalf("software-dev evidence policy recipeAdapterRef = %v, want neutral Shell adapter", policy["recipeAdapterRef"])
 	}
-	if policy["commandName"] != "go" {
-		t.Fatalf("software-dev evidence policy commandName = %v, want go", policy["commandName"])
+	for _, forbidden := range []string{"commandName", "recipeArgs", "requiredArgs", "argsContain", "workEvidenceMarkers"} {
+		if _, exists := policy[forbidden]; exists {
+			t.Fatalf("software-dev evidence policy embeds adapter-specific %s: %+v", forbidden, policy)
+		}
 	}
 	if declared, ok := policy["recipeDeclared"].(bool); !ok || !declared {
 		t.Fatalf("software-dev evidence policy recipeDeclared = %v, want true", policy["recipeDeclared"])
-	}
-	recipeArgs, ok := policy["recipeArgs"].([]any)
-	if !ok {
-		t.Fatalf("software-dev evidence policy recipeArgs = %+v, want list", policy["recipeArgs"])
-	}
-	assertStringListContains(t, recipeArgs, "test")
-	assertStringListContains(t, recipeArgs, "-v")
-	assertStringListContains(t, recipeArgs, "./...")
-	requiredArgs, ok := policy["requiredArgs"].([]any)
-	if !ok {
-		t.Fatalf("software-dev evidence policy requiredArgs = %+v, want list", policy["requiredArgs"])
-	}
-	assertStringListContains(t, requiredArgs, "test")
-	assertStringListContains(t, requiredArgs, "-v")
-	markers := policy["workEvidenceMarkers"].([]any)
-	assertStringListContains(t, markers, "=== RUN")
-	assertStringListContains(t, markers, "--- PASS:")
-	for _, raw := range markers {
-		if marker, _ := raw.(string); strings.TrimSpace(marker) == "ok" {
-			t.Fatalf("software-dev workEvidenceMarkers contains overly broad marker %q", marker)
-		}
 	}
 	requirements, ok := policy["coverageRequirements"].([]any)
 	if !ok || len(requirements) < 2 {
@@ -774,17 +755,12 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 	if validationPolicy["scratchIsolationRequired"] != true || validationPolicy["boundedForegroundOnly"] != true {
 		t.Fatalf("validationEnvironmentPolicy = %+v, want scratch isolation and bounded foreground", validationPolicy)
 	}
-	languageProfiles, ok := validationPolicy["languageProfiles"].(map[string]any)
-	if !ok {
-		t.Fatalf("validationEnvironmentPolicy.languageProfiles = %+v, want map", validationPolicy["languageProfiles"])
+	if _, exists := validationPolicy["languageProfiles"]; exists {
+		t.Fatalf("software-dev validationEnvironmentPolicy embeds language profile: %+v", validationPolicy["languageProfiles"])
 	}
-	goProfile, ok := languageProfiles["go"].(map[string]any)
-	if !ok {
-		t.Fatalf("validationEnvironmentPolicy.languageProfiles.go = %+v, want map", languageProfiles["go"])
-	}
-	env, ok := goProfile["scratchBuildEnv"].(map[string]any)
-	if !ok || env["GOFLAGS"] != "-buildvcs=false" {
-		t.Fatalf("go scratchBuildEnv = %+v, want GOFLAGS=-buildvcs=false", goProfile["scratchBuildEnv"])
+	guidance, _ := json.Marshal(validationPolicy["guidance"])
+	if strings.Contains(strings.ToLower(string(guidance)), "go scratch") || strings.Contains(string(guidance), "GOFLAGS") {
+		t.Fatalf("software-dev validation guidance embeds Go adapter policy: %s", guidance)
 	}
 	requirements, ok := softwareDev["evidenceRequirements"].([]any)
 	if !ok || len(requirements) < 4 {
@@ -993,9 +969,9 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 						targetType      string
 						ownerCode       string
 					}{
-						"go-module-parse-to-file-edit": {diagnosticClass: "validation_build_failed", targetType: "failure_surface", ownerCode: "go_module_parse_failed"},
-						"go-source-build-to-file-edit": {diagnosticClass: "validation_build_failed", targetType: "failure_surface", ownerCode: "go_source_compile_failed"},
-						"go-test-failure-to-file-edit": {diagnosticClass: "validation_test_failed", targetType: "behavior_evidence", ownerCode: "go_test_failed"},
+						"module-manifest-parse-to-file-edit": {diagnosticClass: "validation_build_failed", targetType: "failure_surface", ownerCode: "module_manifest_parse_failed"},
+						"source-compile-to-file-edit":        {diagnosticClass: "validation_build_failed", targetType: "failure_surface", ownerCode: "source_compile_failed"},
+						"test-failure-to-file-edit":          {diagnosticClass: "validation_test_failed", targetType: "behavior_evidence", ownerCode: "test_failed"},
 					}
 					for routeID, expected := range expectedRoutes {
 						route := routesByID[routeID]

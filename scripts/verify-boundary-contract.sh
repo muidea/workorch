@@ -2929,6 +2929,33 @@ EOF
   exit 1
 fi
 
+# Runtime proof semantics have one pure implementation in
+# workorchruntimecontract. Deployed Python verifiers may check transport and
+# projection shape, but must delegate binding/target/validation proof matching
+# to the Go audit tool that imports the production matcher.
+if ! grep -q -F -- '["go", "run", "./internal/tools/runtimeauditcheck"]' scripts/verify_runtime_live_contract.py; then
+	cat >&2 <<'EOF'
+Boundary contract violation: the Runtime live verifier does not delegate
+coverage proof matching to internal/tools/runtimeauditcheck.
+
+Keep receipt-credit semantics in workorchruntimecontract and reuse them from
+the stateless Go audit tool; do not copy target or validation matching into
+Python.
+EOF
+	exit 1
+fi
+if grep -q -E -- '^def (_validation_receipt_matches_proof|_receipt_matches_sealed_operation|_same_validation_observation)|binding exact target refs' scripts/verify_runtime_live_contract.py; then
+	cat >&2 <<'EOF'
+Boundary contract violation: the Runtime live verifier reimplements coverage
+proof semantics owned by workorchruntimecontract.
+
+Python may transport an audit projection only. Target authorization,
+validation attestation, operation variant, metric and artifact matching must
+flow through internal/tools/runtimeauditcheck.
+EOF
+	exit 1
+fi
+
 # Every one of the declared 22 runtime units has the same pkg purity rule.
 # In addition to infrastructure imports checked above, a pkg value/helper may
 # not implement an owner transition, retry, lifecycle continuation, scheduler
@@ -4904,7 +4931,7 @@ candidate_payload_target_matcher="$(sed -n '/^func validateRuntimeCandidatePaylo
 candidate_semantic_target_matcher="$(sed -n '/^func validateRuntimeCandidateOperationAgainstManifest(/,/^}/p' internal/pkg/workorchruntimecontract/candidate_contract_manifest_semantics.go)"
 operation_feasibility_target_matcher="$(sed -n '/^func ValidateRuntimeOperationFeasibilityRequest(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_operation_admissibility_acquisition.go)"
 dispatch_target_matcher="$(sed -n '/^func ValidateRuntimeDispatchOperationTargetAuthorizations(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_dispatch_target_authorization.go)"
-receipt_target_matcher="$(sed -n '/^func MatchCoverageEvidenceBindingReceipt(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_coverage_evidence_binding.go)"
+receipt_target_matcher="$(sed -n '/^func MatchCoverageEvidenceBindingReceiptIdentity(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_coverage_evidence_binding.go)"
 for matcher_name in \
 	candidate_payload_target_matcher \
 	candidate_semantic_target_matcher \
@@ -5694,6 +5721,35 @@ if ! grep -q -F '"name": "软件开发"' internal/pkg/workorchdefaults/defaults/
 	! grep -q -F '支持项目声明的构建工具、测试框架和原生验证能力。' internal/pkg/workorchdefaults/defaults/templates.json ||
 	grep -q -F '软件开发（Go 原生验证）' internal/pkg/workorchdefaults/defaults/templates.json; then
 	echo "boundary contract violation: software-dev template presentation leaked a framework-specific validation adapter" >&2
+	exit 1
+fi
+if ! python3 - <<'PY'
+import json
+from pathlib import Path
+
+templates = json.loads(Path("internal/pkg/workorchdefaults/defaults/templates.json").read_text())
+template = next((item for item in templates if item.get("id") == "software-dev"), None)
+if template is None:
+    raise SystemExit(1)
+policies = template.get("evidencePolicies", [])
+if len(policies) != 1:
+    raise SystemExit(1)
+policy = policies[0]
+if policy.get("recipeAdapterRef") != "shell/project-native-validation/v1":
+    raise SystemExit(1)
+if any(key in policy for key in ("commandName", "recipeArgs", "requiredArgs", "argsContain", "workEvidenceMarkers")):
+    raise SystemExit(1)
+validation_environment = template.get("contextHints", {}).get("profileContracts", {}).get("software-dev", {}).get("validationEnvironmentPolicy", {})
+if "languageProfiles" in validation_environment:
+    raise SystemExit(1)
+PY
+then
+	echo "boundary contract violation: software-dev template embeds a language-specific validation recipe instead of the Shell owner adapter" >&2
+	exit 1
+fi
+if ! grep -q -F 'ValidationRecipeAdapterProjectNative = "shell/project-native-validation/v1"' internal/modules/blocks/shell/pkg/common/common.go ||
+	! grep -q -F 'resolveRuntimeValidationRecipeDeclarations(command.ValidationRecipes, command.WorkspaceManifestBinding.Manifest)' internal/modules/blocks/shell/biz/owner.go; then
+	echo "boundary contract violation: project-native validation recipe is not resolved solely inside the Shell owner from the bound File manifest" >&2
 	exit 1
 fi
 if ! grep -q -F 'shell/go-test-json/v1' docs/40-profiles-capabilities/software-dev/goal-coverage-and-dod.md; then

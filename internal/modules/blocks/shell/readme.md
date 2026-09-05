@@ -26,7 +26,8 @@ Last Verified: 2026-09-04
 | File owner | 经 Orchestrator fact 输入 | persisted workspace manifest/observation；Shell 不直接读取 File service/repository |
 | OS process | Shell-private | command argv、workspace/scratch、timeout、process-group、bounded output 与 filesystem effect observation |
 
-Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一个 activation-sealed recipe 在给定 resulting manifest 上
+Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一个 activation-sealed recipe declaration 经 owner adapter
+按 exact File manifest 解析后的 recipe 在给定 resulting manifest 上
 是否满足 owner 声明的 bounded `all_of` target constraint，不选择 target、action、retry 或 Runtime 状态。
 
 ## 不变量与非职责
@@ -34,7 +35,9 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
 - `shell/command` 不得伪装成 `effect=none` validation；managed validation 不能退化为任意命令字符串。
 - execute 前必须验证 producer、同步 Result、sealed payload、owner catalog、target scope、execution key/fence 和 receipt authority。
 - managed validation 必须在隔离副本中运行；临时 effect 不得写回 deliverable，scratch 和进程组必须按策略释放。
-- activation-declared recipe 只表示可执行 transport。Shell 只有在 Orchestrator request 携带 exact Definition-owned
+- activation-declared recipe 可以是固定 transport 或 `shell/project-native-validation/v1` owner-adapter ref；模板不得携带
+  语言 command/args/env。Shell 只依据同一 request 绑定的 File-owner manifest 解析具体 recipe，且该解析只产生 owner fact，
+  不触发 Runtime 状态。Shell 只有在 Orchestrator request 携带 exact Definition-owned
   `RuntimeValidationProofRequirement` 时，才可对 matching recipe 发布逐 CWI applicability binding；recipe ID、进程 exit 0、
   zero-work marker 或 surface-wide check union 都不能自行成为 CWI proof。
 - applicability binding 必须把每个 Definition check 映射到 Shell-owner 的 exact observation protocol 与 native check
@@ -54,9 +57,9 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
   `validation_dependency_mismatch + dependency_contract`，即使 sealed recipe 只携带 generic build hint；incidental
   `*.go:line` 不得成为 implementation repair candidate。Shell 只发布事实；当前默认 Profile 没有该类自动 repair route，
   由 SM-2 有界终止。
-- managed Go validation 只在 bounded tool grammar 命中时发布可路由 owner code：`go_module_parse_failed` 对应 manifest-scoped
-  `go.mod|go.work|go.sum:line`，`go_source_compile_failed` 对应 manifest-scoped `*.go:line[:column]`/package conflict，
-  `go_test_failed` 对应 typed test observation。无法精确分类的非零退出保留 `shell_exit_nonzero`，不得借 generic code 进入
+- managed Go validation 只在 bounded tool grammar 命中时发布领域中立的可路由 owner code：`module_manifest_parse_failed` 对应
+  manifest-scoped `go.mod|go.work|go.sum:line`，`source_compile_failed` 对应 manifest-scoped `*.go:line[:column]`/package conflict，
+  `test_failed` 对应 typed test observation。无法精确分类的非零退出保留 `shell_exit_nonzero`，不得借 generic code 进入
   software-dev repair route。`go test -json` 的编译诊断只从有界 `output|build-output` 事件的 `Output` 字段解码，再与
   sealed File manifest scope 求交；JSON envelope、任意外部路径和未封存 target 都不能形成 repair candidate。
 - structured validation observation 的 diagnostic hash 必须使用共享 canonical contract，绑定 schema/class、owner code、

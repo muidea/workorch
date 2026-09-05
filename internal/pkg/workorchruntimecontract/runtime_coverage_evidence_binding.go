@@ -599,6 +599,50 @@ func CoverageEvidenceBindingRefsForOperationEvidenceKind(values []CoverageEviden
 	return normalizeStrings(ret)
 }
 
+// RuntimeOperationProofIdentity is the immutable, non-executable portion of a
+// sealed operation needed to replay one coverage-proof decision. It exists so
+// audit projections can reuse the exact production matcher without exposing
+// operation parameters or implementing target/variant semantics again.
+//
+// This value never grants execution authority and never changes Runtime state.
+// The executable RuntimeOperation remains the SM-3 authority.
+type RuntimeOperationProofIdentity struct {
+	Kind       string
+	VariantID  string
+	TargetRefs []string
+}
+
+func (i RuntimeOperationProofIdentity) Normalized() RuntimeOperationProofIdentity {
+	i.Kind = CanonicalRuntimeBlockKind(i.Kind)
+	i.VariantID = strings.TrimSpace(i.VariantID)
+	i.TargetRefs = normalizeStrings(i.TargetRefs)
+	return i
+}
+
+// RuntimeOperationProofIdentityForOperation derives audit-safe proof identity
+// from one executable sealed operation. Variant selection stays centralized in
+// the operation contract; callers must not reimplement discriminator rules.
+func RuntimeOperationProofIdentityForOperation(operation RuntimeOperation) (RuntimeOperationProofIdentity, error) {
+	operation = operation.Normalized()
+	identity := RuntimeOperationProofIdentity{
+		Kind:       operation.Kind,
+		TargetRefs: append([]string(nil), operation.TargetRefs...),
+	}.Normalized()
+	if identity.Kind == "" {
+		return RuntimeOperationProofIdentity{}, fmt.Errorf("runtime operation proof identity requires operation kind")
+	}
+	contract, found := RuntimeOperationContractForKind(identity.Kind)
+	if !found || len(contract.Variants) == 0 {
+		return identity, nil
+	}
+	variant, err := MatchRuntimeOperationVariant(operation, contract)
+	if err != nil {
+		return RuntimeOperationProofIdentity{}, err
+	}
+	identity.VariantID = strings.TrimSpace(variant.ID)
+	return identity, nil
+}
+
 // MatchCoverageEvidenceBindingReceipt is a pure exact-proof matcher. It
 // compares only a sealed binding, observed evidence kind, sealed operation and
 // owner receipt fact. It deliberately does not examine Goal/DoD text,
@@ -608,6 +652,32 @@ func CoverageEvidenceBindingRefsForOperationEvidenceKind(values []CoverageEviden
 // applies only to its validation receipt; requiring it on a state-change
 // receipt would make that declarative conjunction impossible to satisfy.
 func MatchCoverageEvidenceBindingReceipt(binding CoverageEvidenceBinding, evidenceKind string, operation RuntimeOperation, receipt RuntimeOperationReceipt) error {
+	binding = binding.Normalized()
+	operation = operation.Normalized()
+	evidenceKind = strings.TrimSpace(evidenceKind)
+	identity := RuntimeOperationProofIdentity{Kind: operation.Kind, TargetRefs: append([]string(nil), operation.TargetRefs...)}.Normalized()
+	// Preserve the original receipt matcher boundary: variant discrimination is
+	// required only when the sealed proof restricts variants. Audit projection
+	// may still derive the canonical variant for every fully sealed operation.
+	if proof, found := CoverageEvidenceProofForKind(binding, evidenceKind); found && len(proof.AllowedOperationVariants) != 0 {
+		contract, known := RuntimeOperationContractForKind(operation.Kind)
+		if !known {
+			return fmt.Errorf("runtime operation proof identity has unknown kind %q", operation.Kind)
+		}
+		variant, err := MatchRuntimeOperationVariant(operation, contract)
+		if err != nil {
+			return err
+		}
+		identity.VariantID = strings.TrimSpace(variant.ID)
+	}
+	return MatchCoverageEvidenceBindingReceiptIdentity(binding, evidenceKind, identity, receipt)
+}
+
+// MatchCoverageEvidenceBindingReceiptIdentity is the single pure proof
+// evaluator shared by the SM-2 receipt-credit path and read-only audit tools.
+// An audit caller supplies only identity projected from an already sealed SM-3
+// operation; it cannot execute that operation or trigger a state transition.
+func MatchCoverageEvidenceBindingReceiptIdentity(binding CoverageEvidenceBinding, evidenceKind string, operation RuntimeOperationProofIdentity, receipt RuntimeOperationReceipt) error {
 	binding = binding.Normalized()
 	operation = operation.Normalized()
 	receipt = receipt.Normalized()
@@ -642,23 +712,15 @@ func MatchCoverageEvidenceBindingReceipt(binding CoverageEvidenceBinding, eviden
 		return fmt.Errorf("binding %q state-change proof requires a changed owner receipt", binding.ID)
 	}
 	if len(proof.AllowedOperationVariants) != 0 {
-		contract, found := RuntimeOperationContractForKind(operation.Kind)
-		if !found {
-			return fmt.Errorf("binding %q operation kind %q has no variant contract", binding.ID, operation.Kind)
-		}
-		variant, err := MatchRuntimeOperationVariant(operation, contract)
-		if err != nil {
-			return fmt.Errorf("binding %q operation variant: %w", binding.ID, err)
-		}
 		matched := false
 		for _, allowed := range proof.AllowedOperationVariants {
-			if allowed.Kind == operation.Kind && allowed.VariantID == variant.ID {
+			if allowed.Kind == operation.Kind && allowed.VariantID == operation.VariantID {
 				matched = true
 				break
 			}
 		}
 		if !matched {
-			return fmt.Errorf("binding %q does not allow operation variant %q", binding.ID, variant.ID)
+			return fmt.Errorf("binding %q does not allow operation variant %q", binding.ID, operation.VariantID)
 		}
 	}
 	if !runtimeEffectScopeIncluded(proof.RequiredEffectScopes, receipt.ObservedEffectScope) {

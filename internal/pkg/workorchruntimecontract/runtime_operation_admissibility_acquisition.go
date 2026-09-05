@@ -115,18 +115,18 @@ func (a RuntimeOperationAdmissibilityAcquisition) ValidateForRequest(request Run
 	if !binding.Empty() && !runtimeObservationDependsOnWorkspaceTreeRevision(observation, binding.Observation.OwnerModuleID, binding.Manifest.Revision) {
 		return fmt.Errorf("runtime operation admissibility acquisition omitted workspace manifest freshness")
 	}
-	declarations := NormalizeRuntimeValidationRecipes(request.ValidationRecipes)
+	declarations := NormalizeRuntimeValidationRecipeDeclarations(request.ValidationRecipes)
 	for _, recipe := range inventory.ValidationRecipes {
-		declared, found := RuntimeValidationRecipeForID(declarations, recipe.ID)
-		if !found || !sameRuntimeValidationRecipe(declared, recipe) {
+		declared, found := RuntimeValidationRecipeDeclarationForID(declarations, recipe.ID)
+		if !found || !runtimeValidationRecipeConfirmsDeclaration(declared, recipe) {
 			return fmt.Errorf("runtime operation admissibility acquisition published undeclared validation recipe %q", recipe.ID)
 		}
 	}
 	if inventory.OwnerModuleID == RuntimeModuleShell && runtimeOperationAdmissibilityKindsContain(inventory.OperationKinds, RuntimeBlockKindManagedValidationSession) {
 		for _, recipeRef := range inventory.ValidationRecipeRefs {
-			declared, declaredFound := RuntimeValidationRecipeForID(declarations, recipeRef)
+			declared, declaredFound := RuntimeValidationRecipeDeclarationForID(declarations, recipeRef)
 			confirmed, confirmedFound := RuntimeValidationRecipeForID(inventory.ValidationRecipes, recipeRef)
-			if !declaredFound || !confirmedFound || !sameRuntimeValidationRecipe(declared, confirmed) {
+			if !declaredFound || !confirmedFound || !runtimeValidationRecipeConfirmsDeclaration(declared, confirmed) {
 				return fmt.Errorf("runtime Shell admissibility published unconfirmed validation recipe ref %q", recipeRef)
 			}
 		}
@@ -223,7 +223,20 @@ func runtimeObservationDependsOnWorkspaceTreeRevision(observation RuntimePrerequ
 func sameRuntimeValidationRecipe(left, right RuntimeValidationRecipe) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	return left.ID == right.ID && left.Command == right.Command && left.TimeoutMillis == right.TimeoutMillis && sameStrings(left.Args, right.Args)
+	return left.ID == right.ID && left.AdapterRef == right.AdapterRef && left.Command == right.Command && left.TimeoutMillis == right.TimeoutMillis && sameStrings(left.Args, right.Args)
+}
+
+func runtimeValidationRecipeConfirmsDeclaration(declared, confirmed RuntimeValidationRecipe) bool {
+	declared = declared.Normalized()
+	confirmed = confirmed.Normalized()
+	if declared.ValidateDeclaration() != nil || confirmed.Validate() != nil || declared.ID != confirmed.ID ||
+		declared.AdapterRef != confirmed.AdapterRef || declared.TimeoutMillis != confirmed.TimeoutMillis {
+		return false
+	}
+	if declared.Command == "" {
+		return declared.AdapterRef != ""
+	}
+	return declared.Command == confirmed.Command && sameStrings(declared.Args, confirmed.Args)
 }
 
 // RuntimeOperationFeasibilityRequest is the owner-neutral value from which
@@ -601,8 +614,8 @@ func ValidateRuntimeOperationAdmissibilityRequest(request RuntimeOperationAdmiss
 	seen := make(map[string]struct{}, len(request.ValidationRecipes))
 	for _, recipe := range request.ValidationRecipes {
 		recipe = recipe.Normalized()
-		if err := recipe.Validate(); err != nil {
-			return fmt.Errorf("runtime validation recipe: %w", err)
+		if err := recipe.ValidateDeclaration(); err != nil {
+			return fmt.Errorf("runtime validation recipe declaration: %w", err)
 		}
 		if _, duplicate := seen[recipe.ID]; duplicate {
 			return fmt.Errorf("runtime validation recipe %q is duplicated", recipe.ID)

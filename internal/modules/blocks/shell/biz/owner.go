@@ -674,7 +674,8 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 	}
 	inventory.TargetRefs = normalizeShellStrings(command.RequiredTargetRefs)
 	if runtimeShellManagedValidationRequested(command.RequiredKinds) && len(command.ValidationRecipes) != 0 {
-		staticallyReady, preflightErr := m.runtimeAdapter.PreflightRuntimeValidationRecipes(command.WorkspaceDeliverableDirectory, command.ValidationRecipes)
+		resolved := resolveRuntimeValidationRecipeDeclarations(command.ValidationRecipes, command.WorkspaceManifestBinding.Manifest)
+		staticallyReady, preflightErr := m.runtimeAdapter.PreflightRuntimeValidationRecipes(command.WorkspaceDeliverableDirectory, resolved)
 		if preflightErr != nil {
 			setCapabilityError(result, preflightErr)
 			return

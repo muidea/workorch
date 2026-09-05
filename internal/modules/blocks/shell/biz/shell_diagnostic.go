@@ -135,17 +135,17 @@ func shellValidationOwnerDiagnosticCode(output RuntimeCommandResult, validationE
 	if command != "go" || output.ExitCode == 0 {
 		return firstNonEmptyShellString(current, fallback)
 	}
-	text := output.Stdout + "\n" + output.Stderr
+	text := shellValidationDiagnosticOutput(output, execCommand)
 	if class == runtimemodel.ValidationDiagnosticBuildFailed && shellGoModuleDiagnosticPattern.MatchString(text) {
-		return shellcommon.ValidationDiagnosticCodeGoModuleParseFailed
+		return shellcommon.ValidationDiagnosticCodeModuleManifestParseFailed
 	}
 	if class == runtimemodel.ValidationDiagnosticBuildFailed &&
 		(shellGoDiagnosticTargetPattern.MatchString(text) || shellGoPackageConflictPattern.MatchString(text)) {
-		return shellcommon.ValidationDiagnosticCodeGoSourceCompileFailed
+		return shellcommon.ValidationDiagnosticCodeSourceCompileFailed
 	}
 	observation := strings.TrimSpace(firstNonEmptyShellString(validationEvidence.ObservationType, validationEvidence.Observation))
 	if class == runtimemodel.ValidationDiagnosticTestFailed || observation == "test_result" || observation == "assertion_result" || observation == "behavior_test_result" {
-		return shellcommon.ValidationDiagnosticCodeGoTestFailed
+		return shellcommon.ValidationDiagnosticCodeTestFailed
 	}
 	return firstNonEmptyShellString(current, fallback)
 }
@@ -158,7 +158,7 @@ func shellGoDependencyMetadataMismatch(output RuntimeCommandResult, execCommand 
 	if command != "go" {
 		return false
 	}
-	text := strings.ToLower(output.Stdout + "\n" + output.Stderr)
+	text := strings.ToLower(shellValidationDiagnosticOutput(output, execCommand))
 	for _, marker := range []string{
 		"missing go.sum entry for module providing package",
 		"missing go.sum entry needed to verify package",
@@ -181,8 +181,25 @@ func shellGoTestExecutionFailure(output RuntimeCommandResult, execCommand string
 	if command != "go" || len(output.Args) == 0 || strings.TrimSpace(output.Args[0]) != "test" {
 		return false
 	}
-	text := output.Stdout + "\n" + output.Stderr
+	text := shellValidationDiagnosticOutput(output, execCommand)
 	return strings.Contains(text, "--- FAIL:")
+}
+
+// shellValidationDiagnosticOutput is the sole owner-private normalization of
+// command output used by diagnostic classification and target extraction. A
+// managed `go test -json` transcript contributes only its bounded,
+// tool-authored output/build-output records; other commands retain their raw
+// bounded stdout/stderr.
+func shellValidationDiagnosticOutput(output RuntimeCommandResult, execCommand string) string {
+	text := output.Stdout + "\n" + output.Stderr
+	command := strings.TrimSpace(filepath.Base(execCommand))
+	if command == "" {
+		command = strings.TrimSpace(filepath.Base(output.Command))
+	}
+	if command == "go" && len(output.Args) > 0 && strings.TrimSpace(output.Args[0]) == "test" && shellGoTestJSONEnabled(output.Args[1:]) {
+		text += "\n" + goTestJSONDiagnosticOutput(output.Stdout, output.Stderr)
+	}
+	return text
 }
 
 func shellDiagnosticOperationKind(request RuntimeCommandRequest) string {
@@ -260,10 +277,7 @@ func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, requ
 	if !shellInputHasManagedValidation(request) || strings.TrimSpace(filepath.Base(execCommand)) != "go" || len(request.ValidationScopeTargetRefs) == 0 {
 		return nil, true
 	}
-	diagnosticOutput := output.Stdout + "\n" + output.Stderr
-	if len(request.Args) > 0 && strings.TrimSpace(request.Args[0]) == "test" && shellGoTestJSONEnabled(request.Args[1:]) {
-		diagnosticOutput += "\n" + goTestJSONDiagnosticOutput(output.Stdout, output.Stderr)
-	}
+	diagnosticOutput := shellValidationDiagnosticOutput(output, execCommand)
 	scope := make(map[string]struct{}, len(request.ValidationScopeTargetRefs))
 	for _, value := range request.ValidationScopeTargetRefs {
 		if normalized, ok := normalizeShellDiagnosticTargetRef(value, output.WorkingDirectory); ok {

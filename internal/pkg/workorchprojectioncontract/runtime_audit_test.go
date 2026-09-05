@@ -20,7 +20,9 @@ func TestCloneRuntimeAuditEvidenceDetachesCollections(t *testing.T) {
 
 func TestCloneRuntimeAuditCoverageBindingsDetachesNestedProofs(t *testing.T) {
 	input := []RuntimeAuditCoverageBinding{{
-		ID: "binding-1", TargetRefs: []string{"a.go"}, PrerequisiteRefs: []string{"manifest-1"},
+		ID: "binding-1", TargetRefs: []string{"a.go"}, TargetSelectorCandidateRefs: []string{"candidate.go"},
+		ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRefs: []string{"new.go"},
+		PrerequisiteRefs: []string{"manifest-1"},
 		Proofs: []RuntimeAuditCoverageProof{{
 			RequiredCheckRefs: []string{"test-a"}, ArtifactRefs: []string{"artifact-a"},
 			ValidationCheckAttestations: []RuntimeAuditValidationCheckAttestation{{
@@ -30,11 +32,16 @@ func TestCloneRuntimeAuditCoverageBindingsDetachesNestedProofs(t *testing.T) {
 	}}
 	cloned := CloneRuntimeAuditCoverageBindings(input)
 	cloned[0].TargetRefs[0] = "b.go"
+	cloned[0].TargetSelectorCandidateRefs[0] = "other-candidate.go"
+	cloned[0].ProspectiveTargetAllOfConstraintRefs[0] = "other-constraint"
+	cloned[0].ProspectiveTargetRefs[0] = "other-new.go"
 	cloned[0].PrerequisiteRefs[0] = "manifest-2"
 	cloned[0].Proofs[0].RequiredCheckRefs[0] = "test-b"
 	cloned[0].Proofs[0].ValidationCheckAttestations[0].NativeCheckRef = "native-b"
 	cloned[0].Proofs[0].ArtifactRefs[0] = "artifact-b"
-	if input[0].TargetRefs[0] != "a.go" || input[0].PrerequisiteRefs[0] != "manifest-1" ||
+	if input[0].TargetRefs[0] != "a.go" || input[0].TargetSelectorCandidateRefs[0] != "candidate.go" ||
+		input[0].ProspectiveTargetAllOfConstraintRefs[0] != "workspace-relative-path" || input[0].ProspectiveTargetRefs[0] != "new.go" ||
+		input[0].PrerequisiteRefs[0] != "manifest-1" ||
 		input[0].Proofs[0].RequiredCheckRefs[0] != "test-a" ||
 		input[0].Proofs[0].ValidationCheckAttestations[0].NativeCheckRef != "native-a" ||
 		input[0].Proofs[0].ArtifactRefs[0] != "artifact-a" {

@@ -118,8 +118,11 @@ func runtimeAuditCoverageBindings(values []runtimecontract.CoverageEvidenceBindi
 			ID: binding.ID, CoverageWorkItemID: string(binding.CoverageWorkItemID), FocusID: binding.FocusID,
 			DefinitionRevision: binding.DefinitionRevision, Hash: binding.Hash, TargetRefs: append([]string(nil), binding.TargetRefs...),
 			TargetSelectorRef: binding.TargetSelectorRef, TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef,
-			TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef, ProspectiveTargetRefs: append([]string(nil), binding.ProspectiveTargetRefs...),
-			DeclarationRef: binding.DeclarationRef, PrerequisiteRefs: append([]string(nil), binding.PrerequisiteRefs...),
+			TargetSelectorSubjectRef:             binding.TargetSelectorSubjectRef,
+			TargetSelectorCandidateRefs:          append([]string(nil), binding.TargetSelectorCandidateRefs...),
+			ProspectiveTargetAllOfConstraintRefs: append([]string(nil), binding.ProspectiveTargetAllOfConstraintRefs...),
+			ProspectiveTargetRefs:                append([]string(nil), binding.ProspectiveTargetRefs...),
+			DeclarationRef:                       binding.DeclarationRef, PrerequisiteRefs: append([]string(nil), binding.PrerequisiteRefs...),
 		}
 		for _, rawProof := range binding.Proofs {
 			proof := rawProof.Normalized()
@@ -305,7 +308,8 @@ func runtimeAuditOperationReceipts(values []runtimecontract.RuntimeOperationRece
 		item := projectioncontract.RuntimeAuditOperationReceipt{
 			ExecutionKey: value.ExecutionKey, Fence: value.Fence, OperationID: value.OperationID,
 			Outcome: string(value.Outcome), ObservedEffectScope: string(value.ObservedEffectScope), Changed: value.Changed,
-			TargetRefs: append([]string(nil), value.TargetRefs...), EvidenceRefs: append([]string(nil), value.Evidence.EvidenceRefs...),
+			TargetRefs: append([]string(nil), value.TargetRefs...), Quality: string(value.Evidence.Quality), ZeroWork: value.Evidence.ZeroWork,
+			EvidenceReason: value.Evidence.EvidenceReason, EvidenceRefs: append([]string(nil), value.Evidence.EvidenceRefs...),
 			EvidenceTags: append([]string(nil), value.Evidence.EvidenceTags...),
 		}
 		if value.Evidence.Validation != nil {
@@ -406,6 +410,9 @@ func runtimeAuditSealedOperations(candidate runtimecontract.RuntimeCandidate, ex
 		item := projectioncontract.RuntimeAuditSealedOperation{
 			ID: operation.ID, Kind: operation.Kind, BindingRefs: append([]string(nil), operation.BindingRefs...),
 			TargetRefs: append([]string(nil), operation.TargetRefs...),
+		}
+		if identity, err := runtimecontract.RuntimeOperationProofIdentityForOperation(operation); err == nil {
+			item.VariantID = identity.VariantID
 		}
 		if execution, found := executionByOperationID[operation.ID]; found {
 			item.ExecutionKey = execution.ExecutionKey

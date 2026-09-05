@@ -167,7 +167,7 @@ func (c RuntimeProspectiveTargetClause) Validate() error {
 
 // RuntimeProspectiveTargetSatisfactionConstraint is one immutable all-of-only
 // owner fact. It binds generic target predicates to the exact validation
-// surface, activation-sealed recipe schema and owner catalog revision that
+// surface, owner-resolved recipe schema and owner catalog revision that
 // authored them. An exact-path predicate may state an owner-required input
 // identity (for example a root manifest), but the contract contains no
 // proposal-selected target, retry, action or state.

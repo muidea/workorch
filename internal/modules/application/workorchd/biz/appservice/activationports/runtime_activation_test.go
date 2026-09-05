@@ -15,6 +15,23 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
+func TestCompileRuntimeEvidencePoliciesPreservesOwnerAdapterDeclaration(t *testing.T) {
+	policies, err := compileRuntimeEvidencePolicies("software-dev", []workorcheventpayload.Payload{workorcheventpayload.New(
+		workorcheventpayload.StringField("id", "project-native"),
+		workorcheventpayload.StringField("appliesTo", runtimecontract.StepKindShellCommand),
+		workorcheventpayload.StringField("recipeAdapterRef", "shell/project-native-validation/v1"),
+		workorcheventpayload.BoolField("recipeDeclared", true),
+		workorcheventpayload.IntField("recipeTimeoutMillis", 60_000),
+	)})
+	if err != nil {
+		t.Fatalf("compile owner-adapter evidence policy: %v", err)
+	}
+	if len(policies) != 1 || policies[0].RecipeAdapterRef != "shell/project-native-validation/v1" ||
+		policies[0].CommandName != "" || len(policies[0].RecipeArgs) != 0 {
+		t.Fatalf("compiled owner-adapter evidence policy = %+v", policies)
+	}
+}
+
 func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 	defaultSoul := &soulmodel.Soul{ID: "soul-default", Revision: 1, ContentHash: "soul-default-hash", SourceProvenance: "test", Name: "default", SoulMD: "default instructions"}
 	executionSoul := &soulmodel.Soul{ID: "soul-execution", Revision: 1, ContentHash: "soul-execution-hash", SourceProvenance: "test", Name: "execution", SoulMD: "execution instructions"}

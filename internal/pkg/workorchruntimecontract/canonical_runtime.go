@@ -1245,6 +1245,7 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 	}
 	for _, recipe := range value.ValidationRecipes {
 		writeHashString(h, recipe.ID)
+		writeHashString(h, recipe.AdapterRef)
 		writeHashString(h, recipe.Command)
 		writeHashStrings(h, recipe.Args)
 		writeHashString(h, fmt.Sprintf("%d", recipe.TimeoutMillis))

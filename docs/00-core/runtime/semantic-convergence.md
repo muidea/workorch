@@ -150,11 +150,12 @@ selector/candidate refs 与 current operation selector/owner constraints 的交�
 schema/document admission 必须在 owner probe 前验证整个 target set 的合取完整性。它在 SM-2 seal 前只是
 proposal，不是 Definition 或 operation authority。proposal 通过 File owner 只读 feasibility 后，File 对同一 current complete
 manifest 执行整组 path、absence、parent 与 aggregate capacity admission，仅生成 exact base-revision-bound
-`RuntimeProspectiveWorkspaceManifestDelta`；不创建任何文件或目录。Orchestrator 再把该 immutable delta、activation-sealed recipe declarations 和
+`RuntimeProspectiveWorkspaceManifestDelta`；不创建任何文件或目录。Orchestrator 再把该 immutable delta、activation-sealed recipe declarations（固定
+command 或 owner-adapter ref）和
 required-owner current dependency catalog/observation 交给 required owner 的 concrete typed pure query。semantic manifest
 必须把 provider-selectable `OwnerCatalogs` 与 `OwnerFactDependencyCatalogs` 分开：后者进入 manifest/hash/freshness/CAS/seal，
 但不进入 LLM C3 owner catalog、allowed operation/surface、schema enum 或 correction choice。required owner 逐项重验
-contract ref、recipe command/ordered args/timeout schema identity、catalog/observation 与 delta lineage，只返回 nested
+contract ref、owner-resolved recipe command/ordered args/timeout schema identity、catalog/observation 与 delta lineage，只返回 nested
 `would_satisfy | would_not_satisfy | typed stale` factual observation；它不访问 File/workspace、不执行 operation、不选择
 Runtime state。Orchestrator 必须在 owner-private observation CAS 与 semantic seal 前重验 File outer feasibility/delta、
 required-owner nested observation，以及 manifest/batch/request 和两组 catalog/observation identity。required owner 只对 delta 中的

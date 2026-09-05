@@ -199,19 +199,21 @@ type RuntimeAuditTerminal struct {
 // RuntimeAuditCoverageBinding is immutable activation-declaration metadata.
 // It contains no coverage state and grants no operation authority.
 type RuntimeAuditCoverageBinding struct {
-	ID                       string                      `json:"id,omitempty"`
-	CoverageWorkItemID       string                      `json:"coverageWorkItemId,omitempty"`
-	FocusID                  string                      `json:"focusId,omitempty"`
-	DefinitionRevision       string                      `json:"definitionRevision,omitempty"`
-	Hash                     string                      `json:"hash,omitempty"`
-	Proofs                   []RuntimeAuditCoverageProof `json:"proofs,omitempty"`
-	TargetRefs               []string                    `json:"targetRefs,omitempty"`
-	TargetSelectorRef        string                      `json:"targetSelectorRef,omitempty"`
-	TargetSelectorOwnerRef   string                      `json:"targetSelectorOwnerRef,omitempty"`
-	TargetSelectorSubjectRef string                      `json:"targetSelectorSubjectRef,omitempty"`
-	ProspectiveTargetRefs    []string                    `json:"prospectiveTargetRefs,omitempty"`
-	DeclarationRef           string                      `json:"declarationRef,omitempty"`
-	PrerequisiteRefs         []string                    `json:"prerequisiteRefs,omitempty"`
+	ID                                   string                      `json:"id,omitempty"`
+	CoverageWorkItemID                   string                      `json:"coverageWorkItemId,omitempty"`
+	FocusID                              string                      `json:"focusId,omitempty"`
+	DefinitionRevision                   string                      `json:"definitionRevision,omitempty"`
+	Hash                                 string                      `json:"hash,omitempty"`
+	Proofs                               []RuntimeAuditCoverageProof `json:"proofs,omitempty"`
+	TargetRefs                           []string                    `json:"targetRefs,omitempty"`
+	TargetSelectorRef                    string                      `json:"targetSelectorRef,omitempty"`
+	TargetSelectorOwnerRef               string                      `json:"targetSelectorOwnerRef,omitempty"`
+	TargetSelectorSubjectRef             string                      `json:"targetSelectorSubjectRef,omitempty"`
+	TargetSelectorCandidateRefs          []string                    `json:"targetSelectorCandidateRefs,omitempty"`
+	ProspectiveTargetAllOfConstraintRefs []string                    `json:"prospectiveTargetAllOfConstraintRefs,omitempty"`
+	ProspectiveTargetRefs                []string                    `json:"prospectiveTargetRefs,omitempty"`
+	DeclarationRef                       string                      `json:"declarationRef,omitempty"`
+	PrerequisiteRefs                     []string                    `json:"prerequisiteRefs,omitempty"`
 }
 
 type RuntimeAuditCoverageProof struct {
@@ -250,6 +252,7 @@ type RuntimeAuditDispatch struct {
 type RuntimeAuditSealedOperation struct {
 	ID           string   `json:"id,omitempty"`
 	Kind         string   `json:"kind,omitempty"`
+	VariantID    string   `json:"variantId,omitempty"`
 	ExecutionKey string   `json:"executionKey,omitempty"`
 	Fence        uint64   `json:"fence,omitempty"`
 	BindingRefs  []string `json:"bindingRefs,omitempty"`
@@ -269,6 +272,9 @@ type RuntimeAuditOperationReceipt struct {
 	StableCategory         string                                     `json:"stableCategory,omitempty"`
 	OriginalDiagnostic     *runtimecontract.RuntimeOriginalDiagnostic `json:"originalDiagnostic,omitempty"`
 	TargetRefs             []string                                   `json:"targetRefs,omitempty"`
+	Quality                string                                     `json:"quality,omitempty"`
+	ZeroWork               bool                                       `json:"zeroWork,omitempty"`
+	EvidenceReason         string                                     `json:"evidenceReason,omitempty"`
 	EvidenceRefs           []string                                   `json:"evidenceRefs,omitempty"`
 	EvidenceTags           []string                                   `json:"evidenceTags,omitempty"`
 	ValidationRecipeID     string                                     `json:"validationRecipeId,omitempty"`
@@ -497,6 +503,9 @@ func CloneRuntimeAuditCoverageBindings(values []RuntimeAuditCoverageBinding) []R
 	ret := make([]RuntimeAuditCoverageBinding, len(values))
 	for index, value := range values {
 		value.TargetRefs = append([]string(nil), value.TargetRefs...)
+		value.TargetSelectorCandidateRefs = append([]string(nil), value.TargetSelectorCandidateRefs...)
+		value.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), value.ProspectiveTargetAllOfConstraintRefs...)
+		value.ProspectiveTargetRefs = append([]string(nil), value.ProspectiveTargetRefs...)
 		value.PrerequisiteRefs = append([]string(nil), value.PrerequisiteRefs...)
 		value.Proofs = cloneRuntimeAuditCoverageProofs(value.Proofs)
 		ret[index] = value

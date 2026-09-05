@@ -92,9 +92,9 @@ func assertBuiltinSoftwareDevCandidateAndBootstrap(
 		targetType string
 		ownerCode  string
 	}{
-		{runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "go_module_parse_failed"},
-		{runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "go_source_compile_failed"},
-		{runtimecontract.ValidationDiagnosticTestFailed, runtimecontract.ValidationEvidenceTargetBehaviorEvidence, "go_test_failed"},
+		{runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "module_manifest_parse_failed"},
+		{runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface, "source_compile_failed"},
+		{runtimecontract.ValidationDiagnosticTestFailed, runtimecontract.ValidationEvidenceTargetBehaviorEvidence, "test_failed"},
 	}
 	for _, expected := range expectedRoutes {
 		route, found := parsedRepair.RouteForTrigger(

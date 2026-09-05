@@ -24,6 +24,35 @@ const (
 	shellGoTestObservationProtocolRef            = "shell/go-test-json/v1"
 )
 
+// resolveRuntimeValidationRecipeDeclarations is the Shell-owner adapter
+// boundary. It is a pure interpretation of activation declarations plus the
+// exact File-owner manifest bound to the admissibility request. The returned
+// commands are owner facts, not Runtime state transitions.
+func resolveRuntimeValidationRecipeDeclarations(recipes []runtimemodel.RuntimeValidationRecipe, manifest runtimemodel.WorkspaceManifest) []runtimemodel.RuntimeValidationRecipe {
+	manifest.TargetRefs = normalizeShellStrings(manifest.TargetRefs)
+	resolved := make([]runtimemodel.RuntimeValidationRecipe, 0, len(recipes))
+	for _, declaration := range runtimemodel.NormalizeRuntimeValidationRecipeDeclarations(recipes) {
+		if declaration.Command != "" {
+			resolved = append(resolved, declaration)
+			continue
+		}
+		switch declaration.AdapterRef {
+		case modulecommon.ValidationRecipeAdapterProjectNative:
+			// An empty workspace has no competing project fact. The currently
+			// registered owner implementation may therefore publish its bounded
+			// prerequisite contract; once any project files exist, resolution is
+			// strictly manifest-driven.
+			if len(manifest.TargetRefs) != 0 && !shellManifestHasGoProjectSignal(manifest.TargetRefs) {
+				continue
+			}
+			declaration.Command = "go"
+			declaration.Args = []string{"test", "-v", "./..."}
+			resolved = append(resolved, declaration)
+		}
+	}
+	return runtimemodel.NormalizeRuntimeValidationRecipes(resolved)
+}
+
 // PreflightRuntimeValidationRecipes returns the deterministic subset of
 // activation-declared recipes that this Shell owner can execute under its
 // current static environment and command policy. It deliberately does not
@@ -78,7 +107,8 @@ func (a *RuntimeAdapter) PreflightRuntimeValidationRecipesForManifest(workspaceD
 	if manifest.Revision == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	confirmed, err := a.PreflightRuntimeValidationRecipes(workspaceDirectory, recipes)
+	resolved := resolveRuntimeValidationRecipeDeclarations(recipes, manifest)
+	confirmed, err := a.PreflightRuntimeValidationRecipes(workspaceDirectory, resolved)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +138,11 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 	staticIDs := shellValidationRecipeIDs(staticallyReady)
 	readyIDs := shellValidationRecipeIDs(ready)
 	ret := make([]runtimemodel.RuntimeValidationSurface, 0, len(declared))
-	for _, recipe := range runtimemodel.NormalizeRuntimeValidationRecipes(declared) {
+	for _, declaration := range runtimemodel.NormalizeRuntimeValidationRecipeDeclarations(declared) {
+		recipe := declaration
+		if resolved, found := runtimemodel.RuntimeValidationRecipeForID(staticallyReady, declaration.ID); found {
+			recipe = resolved
+		}
 		schemaHash := shellValidationRecipeSchemaHash(recipe)
 		bindings := make([]runtimemodel.RuntimeValidationProofRequirementBinding, 0)
 		checks := make([]string, 0)
@@ -379,7 +413,7 @@ func instrumentManagedValidationNativeChecks(request *RuntimeCommandRequest) err
 }
 
 // shellProspectiveTargetSatisfactionConstraint publishes one mandatory clause
-// for each missing input of the exact activation-sealed recipe. A bounded set
+// for each missing input of the exact owner-resolved recipe. A bounded set
 // may cover several clauses, but every clause is required; Shell never
 // publishes an alternative aggregation.
 func shellProspectiveTargetSatisfactionConstraint(recipe runtimemodel.RuntimeValidationRecipe, currentTargetRefs []string, catalogObservedRevision string, requiredNativeTargetRefs ...string) (runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint, bool) {
@@ -461,7 +495,7 @@ func shellValidationRecipeIDs(recipes []runtimemodel.RuntimeValidationRecipe) ma
 func shellValidationRecipeSchemaHash(recipe runtimemodel.RuntimeValidationRecipe) string {
 	recipe = recipe.Normalized()
 	digest := sha256.New()
-	_, _ = fmt.Fprintf(digest, "%s\x00%s\x00%d\x00", recipe.ID, recipe.Command, recipe.TimeoutMillis)
+	_, _ = fmt.Fprintf(digest, "%s\x00%s\x00%s\x00%d\x00", recipe.ID, recipe.AdapterRef, recipe.Command, recipe.TimeoutMillis)
 	for _, arg := range recipe.Args {
 		_, _ = fmt.Fprintf(digest, "%s\x00", arg)
 	}
@@ -535,6 +569,16 @@ func shellManifestHasApplicableGoTestTarget(targetRefs []string) bool {
 func shellManifestHasGoModule(targetRefs []string) bool {
 	for _, ref := range normalizeShellStrings(targetRefs) {
 		if filepath.ToSlash(filepath.Clean(ref)) == "go.mod" {
+			return true
+		}
+	}
+	return false
+}
+
+func shellManifestHasGoProjectSignal(targetRefs []string) bool {
+	for _, ref := range normalizeShellStrings(targetRefs) {
+		clean := filepath.ToSlash(filepath.Clean(ref))
+		if clean == "go.mod" || clean == "go.work" || (!shellManifestPathExcluded(clean) && strings.HasSuffix(clean, ".go")) {
 			return true
 		}
 	}

@@ -8,12 +8,12 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func applyShellEvidencePolicies(policies []runtimecontract.RuntimeEvidencePolicy, command string, args []string, output *RuntimeCommandResult) {
+func applyShellEvidencePolicies(policies []runtimecontract.RuntimeEvidencePolicy, command string, args []string, recipeID string, output *RuntimeCommandResult) {
 	if output == nil {
 		return
 	}
 	for _, policy := range runtimecontract.NormalizeRuntimeEvidencePolicies(policies) {
-		if !shellEvidencePolicyApplies(policy, command, args) {
+		if !shellEvidencePolicyApplies(policy, command, args, recipeID) {
 			continue
 		}
 		if shellEvidencePolicyZeroWork(policy, output) {
@@ -28,9 +28,12 @@ func applyShellEvidencePolicies(policies []runtimecontract.RuntimeEvidencePolicy
 	}
 }
 
-func shellEvidencePolicyApplies(policy runtimecontract.RuntimeEvidencePolicy, command string, args []string) bool {
+func shellEvidencePolicyApplies(policy runtimecontract.RuntimeEvidencePolicy, command string, args []string, recipeID string) bool {
 	appliesTo := strings.TrimSpace(policy.AppliesTo)
 	if appliesTo != "" && appliesTo != "shell/command" {
+		return false
+	}
+	if policy.RecipeAdapterRef != "" && strings.TrimSpace(recipeID) != policy.ID {
 		return false
 	}
 	if expected := strings.TrimSpace(policy.CommandName); expected != "" {
@@ -61,6 +64,12 @@ func shellEvidencePolicyZeroWork(policy runtimecontract.RuntimeEvidencePolicy, o
 	// owner fact.
 	if output == nil || output.ExitCode != 0 {
 		return false
+	}
+	if output.ValidationObservation != nil {
+		observation := output.ValidationObservation.Normalized()
+		if len(observation.ExecutedChecks) != 0 || len(observation.PassedChecks) != 0 || len(observation.FailedChecks) != 0 || len(observation.SkippedChecks) != 0 {
+			return false
+		}
 	}
 	text := strings.ToLower(strings.Join([]string{
 		strings.TrimSpace(output.Stdout),

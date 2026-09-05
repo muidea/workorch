@@ -698,17 +698,8 @@
             ],
             "boundedForegroundOnly": true,
             "cleanupRequired": true,
-            "languageProfiles": {
-              "go": {
-                "scratchBuildEnv": {
-                  "GOFLAGS": "-buildvcs=false"
-                },
-                "reason": "Scratch validation copies may not contain a complete VCS checkout; disabling VCS stamping avoids false-negative build failures."
-              }
-            },
             "guidance": [
               "Run validation from an isolated scratch directory or managed validation session when the check needs temporary files, generated harnesses, ports, or subprocess cleanup.",
-              "For Go scratch builds, set GOFLAGS=-buildvcs=false unless the validation is intentionally checking VCS stamping behavior.",
               "Prefer validation/managed_session for service, proxy, streaming, long-running, temporary-port, or cleanup-sensitive checks when that capability is available.",
               "Use bounded foreground commands or project test harnesses when managed validation is unavailable; do not use detached background processes as validation evidence."
             ]
@@ -1084,12 +1075,12 @@
                 "id": "dod-validation-rejected-implementation-repair",
                 "routes": [
                   {
-                    "id": "go-module-parse-to-file-edit",
+                    "id": "module-manifest-parse-to-file-edit",
                     "triggerOwnerModuleId": "blocks/shell",
                     "triggerOperationKind": "validation/managed_session",
                     "triggerDiagnosticClass": "validation_build_failed",
                     "triggerEvidenceTargetType": "failure_surface",
-                    "triggerOwnerDiagnosticCode": "go_module_parse_failed",
+                    "triggerOwnerDiagnosticCode": "module_manifest_parse_failed",
                     "repairEvidenceKind": "state_change",
                     "repairOwnerModuleId": "blocks/file",
                     "repairOperationKinds": [
@@ -1104,12 +1095,12 @@
                     "repairOperationTargetSelectorRef": "workspace-relative-existing-file-target"
                   },
                   {
-                    "id": "go-source-build-to-file-edit",
+                    "id": "source-compile-to-file-edit",
                     "triggerOwnerModuleId": "blocks/shell",
                     "triggerOperationKind": "validation/managed_session",
                     "triggerDiagnosticClass": "validation_build_failed",
                     "triggerEvidenceTargetType": "failure_surface",
-                    "triggerOwnerDiagnosticCode": "go_source_compile_failed",
+                    "triggerOwnerDiagnosticCode": "source_compile_failed",
                     "repairEvidenceKind": "state_change",
                     "repairOwnerModuleId": "blocks/file",
                     "repairOperationKinds": [
@@ -1124,12 +1115,12 @@
                     "repairOperationTargetSelectorRef": "workspace-relative-existing-file-target"
                   },
                   {
-                    "id": "go-test-failure-to-file-edit",
+                    "id": "test-failure-to-file-edit",
                     "triggerOwnerModuleId": "blocks/shell",
                     "triggerOperationKind": "validation/managed_session",
                     "triggerDiagnosticClass": "validation_test_failed",
                     "triggerEvidenceTargetType": "behavior_evidence",
-                    "triggerOwnerDiagnosticCode": "go_test_failed",
+                    "triggerOwnerDiagnosticCode": "test_failed",
                     "repairEvidenceKind": "state_change",
                     "repairOwnerModuleId": "blocks/file",
                     "repairOperationKinds": [
@@ -1228,31 +1219,12 @@
         "profile": "software-dev",
         "rule": "software_dev_test_zero_work_is_inconclusive",
         "appliesTo": "shell/command",
-        "commandName": "go",
-        "argsContain": [
-          "test"
-        ],
-        "requiredArgs": [
-          "test",
-          "-v"
-        ],
+        "recipeAdapterRef": "shell/project-native-validation/v1",
         "recipeDeclared": true,
-        "recipeArgs": [
-          "test",
-          "-v",
-          "./..."
-        ],
         "recipeTimeoutMillis": 60000,
         "zeroWorkMarkers": [
-          "testing: warning: no tests to run",
-          "[no tests to run]",
           "no tests to run",
-          "[no test files]",
           "0 tests"
-        ],
-        "workEvidenceMarkers": [
-          "=== RUN",
-          "--- PASS:"
         ],
         "qualityOnZeroWork": "inconclusive",
         "zeroWork": true,

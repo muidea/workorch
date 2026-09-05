@@ -72,7 +72,7 @@ selector/candidate refs and the current File operation selector/constraints. The
 Goal target-grounding declarations. Both refs are mandatory, File must echo/accept the exact set before semantic planning, and
 the proof-batch proposal must return the exact same `prospectiveConstraintRefs`; this declaration has no exact path and no
 alternative branch. Shell separately publishes a provider-safe typed `all_of`
-target-clause constraint derived from the activation-sealed recipe applicability rule; every clause is mandatory and each clause's
+target-clause constraint derived from the owner-resolved recipe applicability rule; every clause is mandatory and each clause's
 predicates are conjunctive. The acquisition/manifest seals it into C3; no clause or target has a `one_of`/`any_of` escape. For the
 default `go test -v ./...` recipe, current readiness requires both root `go.mod` and a non-excluded test input. If either is
 missing, Shell publishes a corresponding mandatory clause: root module uses exact path `go.mod`, test input uses `_test.go` plus
@@ -83,7 +83,7 @@ partial, duplicate or extra-target proposal is rejected by JSON Schema/document 
 only an ordinary complete-document correction may replace it. File validates every path, absence/parent relation and aggregate
 manifest capacity against one complete current-tree revision, then returns an immutable side-effect-free hypothetical manifest
 delta. Shell evaluates the resulting manifest against its exact non-selectable dependency catalog/observation plus the
-activation-sealed recipe identity. A Shell `would_not_satisfy` result is
+owner-resolved recipe identity. A Shell `would_not_satisfy` result is
 persisted with the File delta as one exact-current composite and never becomes a binding; because the proposal already satisfied
 the published constraint, it is an owner contract contradiction and directly reaches
 `prospective_satisfaction_contract_violated -> semantic_contract_failed`, with no replacement-target correction. Shell typed
@@ -148,18 +148,20 @@ The declaration is sealed only in the immutable `RuntimeDefinitionFocus`. Mutabl
 copy or override it; SM-2 consumes the manifest obligation compiled from that definition snapshot.
 
 Each route binds one exact `(trigger owner, operation kind, diagnostic class, evidence target type, owner diagnostic code)` tuple
-to one repair owner and surface. The built-in executable routes bind Shell's `go_module_parse_failed`,
-`go_source_compile_failed` and `go_test_failed` facts to File `file/edit`, the independent Definition selector
+to one repair owner and surface. The built-in executable routes bind Shell's domain-neutral
+`module_manifest_parse_failed`, `source_compile_failed` and `test_failed` facts to File `file/edit`, the independent Definition selector
 `file/workspace_deliverable` and File operation selector `workspace-relative-existing-file-target`. Their target policy is
 `existing_owner_scope`: Shell must publish manifest-scoped structured candidates and File must confirm them before SM-2 creates
 repair authority. Duplicate trigger tuples or cross-owner operations fail pre-seal. The operation vocabulary is a bounded owner
 capability set; it is not a Goal/DoD `one_of` terminal relation, and an accepted repair receipt cannot itself satisfy the DoD
 validation requirement.
 
-The built-in managed-validation wire contains only the sealed `recipeId`; it does not carry a caller-selected failure class.
-Shell classifies only its bounded Go tool grammar, while unrecognized failures retain `shell_exit_nonzero` and cannot match a
-default route. A project Profile may add a route only after its producing owner and repair owner publish the complete typed
-diagnostic and surface-confirmation contracts.
+The software-dev template seals `shell/project-native-validation/v1`, not a language command, argument vector or environment.
+Shell alone resolves that declaration against the exact File-owner manifest and publishes the concrete executable recipe; the
+current Shell adapter can recognize Go project facts and keeps all Go grammar private to the owner. The managed-validation wire
+then contains only the sealed `recipeId`; it does not carry a caller-selected command or failure class. Unrecognized failures
+retain `shell_exit_nonzero` and cannot match a default route. A project Profile may add a route only after its producing owner and
+repair owner publish the complete typed diagnostic and surface-confirmation contracts.
 
 The built-in routes contain no prospective target selection. Shell's structured candidates remain non-authoritative until File
 confirms the exact current regular-file set; SM-2 then seals a `confirmed_validation_repair` directive whose allowed operation set

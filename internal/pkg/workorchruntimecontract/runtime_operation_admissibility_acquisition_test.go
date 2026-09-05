@@ -139,3 +139,61 @@ func TestShellValidationAdmissibilityRequiresAndPreservesFileManifestBinding(t *
 		t.Fatal("Shell acquisition published an unconfirmed recipe ref")
 	}
 }
+
+func TestShellValidationAdmissibilityAcceptsOnlyOwnerResolutionOfAdapterDeclaration(t *testing.T) {
+	manifestObservation := RuntimePrerequisiteObservation{
+		PrerequisiteID: "manifest-adapter", Kind: PrerequisiteKindManifest, OwnerModuleID: RuntimeModuleFile,
+		ContentHash: "tree-adapter", Dependencies: []RuntimeFreshnessDependency{{
+			Domain: RuntimeResourceWorkspaceTree, OwnerModuleID: RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: "tree-adapter",
+		}},
+	}
+	manifestObservation.ObservationID = StableRuntimePrerequisiteObservationID(manifestObservation)
+	binding := RuntimeWorkspaceManifestBinding{
+		Manifest:    WorkspaceManifest{Revision: "tree-adapter", TargetRefs: []string{"go.mod", "main.go", "main_test.go"}},
+		Observation: manifestObservation,
+	}
+	declaration := RuntimeValidationRecipe{ID: "project-native", AdapterRef: "shell/project-native-validation/v1", TimeoutMillis: 60_000}
+	confirmed := RuntimeValidationRecipe{ID: declaration.ID, AdapterRef: declaration.AdapterRef, Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: declaration.TimeoutMillis}
+	request := RuntimeOperationAdmissibilityRequest{
+		WorkspaceID: "ws-adapter", RunID: "run-adapter", AuthoritySnapshotID: "authority-adapter",
+		PrerequisiteID: "admissibility-adapter", OwnerModuleID: RuntimeModuleShell,
+		WorkspaceDeliverableDirectory: t.TempDir(), RequiredKinds: []string{RuntimeBlockKindManagedValidationSession},
+		ValidationRecipes: []RuntimeValidationRecipe{declaration}, WorkspaceManifestBinding: binding, MaxItems: 4,
+	}
+	inventory := RuntimeOperationAdmissibility{
+		PrerequisiteID: request.PrerequisiteID, OwnerModuleID: RuntimeModuleShell,
+		OperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipes: []RuntimeValidationRecipe{confirmed},
+		ValidationSurfaces: []RuntimeValidationSurface{{
+			ID: confirmed.ID, OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
+			Readiness: RuntimeValidationSurfaceReady, InputSchemaHash: "schema/project-native", InputBindingRef: "input/project-native/tree-adapter",
+			ProofApplicability: RuntimeValidationProofAuxiliary, EffectScope: RuntimeEffectEphemeralSession,
+			IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+		}},
+		ObservedRevision: "shell-policy-adapter",
+	}
+	inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+	observation := RuntimePrerequisiteObservation{
+		PrerequisiteID: request.PrerequisiteID, Kind: PrerequisiteKindOperationAdmissibility, OwnerModuleID: RuntimeModuleShell,
+		ContentHash: inventory.SnapshotID, Dependencies: []RuntimeFreshnessDependency{
+			{Domain: RuntimeResourceOwnerCatalog, OwnerModuleID: RuntimeModuleShell, SubjectRef: "shell_runtime_policy", Revision: inventory.ObservedRevision},
+			{Domain: RuntimeResourceWorkspaceTree, OwnerModuleID: RuntimeModuleFile, SubjectRef: "workspace_deliverable", Revision: binding.Manifest.Revision},
+		},
+	}
+	observation.ObservationID = StableRuntimePrerequisiteObservationID(observation)
+	acquisition := RuntimeOperationAdmissibilityAcquisition{
+		WorkspaceID: request.WorkspaceID, RunID: request.RunID, AuthoritySnapshotID: request.AuthoritySnapshotID,
+		Admissibility: inventory, Observation: observation,
+	}
+	if err := acquisition.ValidateForRequest(request); err != nil {
+		t.Fatalf("owner-resolved adapter recipe rejected: %v", err)
+	}
+
+	drifted := acquisition
+	drifted.Admissibility.ValidationRecipes[0].AdapterRef = "shell/foreign-adapter/v1"
+	drifted.Admissibility.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(drifted.Admissibility)
+	drifted.Observation.ContentHash = drifted.Admissibility.SnapshotID
+	drifted.Observation.ObservationID = StableRuntimePrerequisiteObservationID(drifted.Observation)
+	if err := drifted.ValidateForRequest(request); err == nil {
+		t.Fatal("Shell acquisition accepted a recipe resolved by a different adapter")
+	}
+}

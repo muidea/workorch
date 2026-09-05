@@ -290,7 +290,7 @@ func (r RuntimeOwnerFactProspectiveSatisfactionRequest) Normalized() RuntimeOwne
 		value := r.CatalogObservation.Normalized()
 		r.CatalogObservation = &value
 	}
-	r.ValidationRecipes = NormalizeRuntimeValidationRecipes(r.ValidationRecipes)
+	r.ValidationRecipes = NormalizeRuntimeValidationRecipeDeclarations(r.ValidationRecipes)
 	r.ProspectiveWorkspaceManifestDelta = r.ProspectiveWorkspaceManifestDelta.Normalized()
 	return r
 }
@@ -373,7 +373,7 @@ func (r RuntimeOwnerFactProspectiveSatisfactionRequest) Validate() error {
 	}
 	contractRecipes := runtimeProspectiveSatisfactionContractRecipeRefs(r.OwnerCatalog, r.Requirement, r.ProspectiveSatisfactionContractRef)
 	if len(contractRecipes) == 0 || !runtimeValidationRecipesContainAll(r.ValidationRecipes, contractRecipes) {
-		return fmt.Errorf("%w: runtime owner-fact prospective satisfaction contract is missing an activation-sealed validation recipe", common.ErrConflict)
+		return fmt.Errorf("%w: runtime owner-fact prospective satisfaction contract is missing an owner-confirmed validation recipe", common.ErrConflict)
 	}
 	return nil
 }
@@ -397,6 +397,7 @@ func StableRuntimeOwnerFactProspectiveSatisfactionRequestHash(value RuntimeOwner
 	}
 	for _, recipe := range value.ValidationRecipes {
 		writeHashString(h, recipe.ID)
+		writeHashString(h, recipe.AdapterRef)
 		writeHashString(h, recipe.Command)
 		writeHashStrings(h, recipe.Args)
 		writeHashString(h, fmt.Sprintf("%d", recipe.TimeoutMillis))
@@ -694,7 +695,7 @@ func runtimeProspectiveSatisfactionContractRecipeRefs(catalog RuntimeOperationAd
 }
 
 func cloneRuntimeValidationRecipesForProspectiveSatisfaction(values []RuntimeValidationRecipe) []RuntimeValidationRecipe {
-	values = NormalizeRuntimeValidationRecipes(values)
+	values = NormalizeRuntimeValidationRecipeDeclarations(values)
 	ret := make([]RuntimeValidationRecipe, 0, len(values))
 	for _, value := range values {
 		value.Args = append([]string(nil), value.Args...)
@@ -705,7 +706,7 @@ func cloneRuntimeValidationRecipesForProspectiveSatisfaction(values []RuntimeVal
 
 func runtimeValidationRecipesContainAll(recipes []RuntimeValidationRecipe, refs []string) bool {
 	for _, ref := range refs {
-		if _, found := RuntimeValidationRecipeForID(recipes, ref); !found {
+		if _, found := RuntimeValidationRecipeDeclarationForID(recipes, ref); !found {
 			return false
 		}
 	}

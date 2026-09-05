@@ -96,6 +96,35 @@ func TestRuntimeValidationRecipeDeclarationIsExplicitAndAllowsNoArguments(t *tes
 	}
 }
 
+func TestRuntimeValidationRecipeDeclarationAllowsOwnerAdapterWithoutExecutableAuthority(t *testing.T) {
+	policy := RuntimeEvidencePolicy{
+		ID: "project-native", AppliesTo: StepKindShellCommand,
+		RecipeDeclared: true, RecipeAdapterRef: "shell/project-native-validation/v1", RecipeTimeoutMillis: 60_000,
+	}
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("owner-adapted validation declaration rejected: %v", err)
+	}
+	declarations := RuntimeValidationRecipeDeclarationsFromEvidencePolicies([]RuntimeEvidencePolicy{policy})
+	if len(declarations) != 1 || declarations[0].ID != policy.ID || declarations[0].AdapterRef != policy.RecipeAdapterRef || declarations[0].Command != "" {
+		t.Fatalf("owner-adapted recipe declaration = %+v", declarations)
+	}
+	if err := declarations[0].ValidateDeclaration(); err != nil {
+		t.Fatalf("owner-adapted recipe declaration became invalid: %v", err)
+	}
+	if err := declarations[0].Validate(); err == nil {
+		t.Fatal("unresolved owner adapter unexpectedly became executable authority")
+	}
+	if recipes := NormalizeRuntimeValidationRecipes(declarations); len(recipes) != 0 {
+		t.Fatalf("unresolved owner adapter leaked into executable recipes: %+v", recipes)
+	}
+
+	ambiguous := policy
+	ambiguous.CommandName = "go"
+	if err := ambiguous.Validate(); err == nil {
+		t.Fatal("evidence policy accepted both fixed command and owner adapter")
+	}
+}
+
 func TestRuntimeActivationRejectsAmbiguousRawEvidencePolicyProjection(t *testing.T) {
 	base := RuntimeEvidencePolicy{
 		ID: "managed", AppliesTo: StepKindShellCommand, CommandName: "go",

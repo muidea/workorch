@@ -6,16 +6,22 @@ const ModuleID = runtimemodel.RuntimeModuleShell
 
 const StepKindCommand = runtimemodel.StepKindShellCommand
 
+// ValidationRecipeAdapterProjectNative is the Shell-owned resolver contract
+// for a project-native validation command. Profiles may name this adapter,
+// but only Shell may translate it from File-owner manifest facts into an
+// executable recipe.
+const ValidationRecipeAdapterProjectNative = "shell/project-native-validation/v1"
+
 // Validation owner diagnostic codes are Shell-owned, stable facts. Profiles
 // may match these exact values; Runtime core must not infer them from stderr.
 const (
-	ValidationDiagnosticCodeGoModuleParseFailed   = "go_module_parse_failed"
-	ValidationDiagnosticCodeGoSourceCompileFailed = "go_source_compile_failed"
-	ValidationDiagnosticCodeGoTestFailed          = "go_test_failed"
+	ValidationDiagnosticCodeModuleManifestParseFailed = "module_manifest_parse_failed"
+	ValidationDiagnosticCodeSourceCompileFailed       = "source_compile_failed"
+	ValidationDiagnosticCodeTestFailed                = "test_failed"
 )
 
 // ProspectiveSatisfactionContractRef identifies the Shell-owner pure query
-// that evaluates whether an activation-sealed validation recipe would become
+// that evaluates whether an owner-resolved validation recipe would become
 // selectable under a prospective workspace manifest.
 const ProspectiveSatisfactionContractRef = "shell/selectable-validation-surface/prospective-workspace-manifest/v1"
 

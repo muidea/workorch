@@ -13,7 +13,7 @@ import (
 const shellProspectiveValidationNotSatisfiedReason = "prospective workspace manifest does not make an activation-sealed Shell validation recipe selectable"
 
 // handleRuntimeOwnerFactProspectiveSatisfaction is a pure Shell-owner query.
-// It evaluates only activation-sealed recipes against the File-authored
+// It resolves only activation-sealed recipe declarations against the File-authored
 // prospective target-ref value carried by the request. It does not call File,
 // inspect the workspace, start a process, or mutate owner/Runtime state.
 func (m *Biz) handleRuntimeOwnerFactProspectiveSatisfaction(event magicevent.Event, result magicevent.Result) {
@@ -66,7 +66,7 @@ func (m *Biz) handleRuntimeOwnerFactProspectiveSatisfaction(event magicevent.Eve
 
 // validateShellProspectiveValidationRecipeIdentities proves that every Shell
 // prerequisite surface covered by the prospective-satisfaction contract still
-// names the exact activation-sealed recipe from which the owner published its
+// names the exact owner-confirmed recipe from which the owner published its
 // input schema. An ID-only match is insufficient: command, ordered args and
 // timeout are all part of shellValidationRecipeSchemaHash. This is a pure
 // fail-closed check and performs no workspace inspection or owner-state write.
@@ -78,9 +78,13 @@ func validateShellProspectiveValidationRecipeIdentities(request runtimecontract.
 	if err != nil {
 		return fmt.Errorf("%w: %v", common.ErrConflict, err)
 	}
-	recipe, found := runtimecontract.RuntimeValidationRecipeForID(request.ValidationRecipes, constraint.ValidationRecipeID)
+	resolved := resolveRuntimeValidationRecipeDeclarations(request.ValidationRecipes, runtimecontract.WorkspaceManifest{
+		Revision:   request.ProspectiveWorkspaceManifestDelta.BaseWorkspaceManifestRevision,
+		TargetRefs: shellProspectiveBaseTargetRefs(request.ProspectiveWorkspaceManifestDelta),
+	})
+	recipe, found := runtimecontract.RuntimeValidationRecipeForID(resolved, constraint.ValidationRecipeID)
 	if !found {
-		return fmt.Errorf("%w: prospective Shell validation surface %q has no exact activation-sealed recipe", common.ErrConflict, constraint.ValidationRecipeID)
+		return fmt.Errorf("%w: prospective Shell validation surface %q has no exact owner-confirmed recipe", common.ErrConflict, constraint.ValidationRecipeID)
 	}
 	if schemaHash := shellValidationRecipeSchemaHash(recipe); schemaHash != constraint.InputSchemaHash {
 		return fmt.Errorf("%w: prospective Shell validation surface %q recipe identity drift", common.ErrConflict, constraint.ValidationRecipeID)
@@ -104,8 +108,12 @@ func shellProspectiveSelectableValidationRecipeRefs(request runtimecontract.Runt
 	) {
 		return nil
 	}
+	resolved := resolveRuntimeValidationRecipeDeclarations(request.ValidationRecipes, runtimecontract.WorkspaceManifest{
+		Revision:   request.ProspectiveWorkspaceManifestDelta.BaseWorkspaceManifestRevision,
+		TargetRefs: shellProspectiveBaseTargetRefs(request.ProspectiveWorkspaceManifestDelta),
+	})
 	applicable := runtimeValidationRecipesApplicableToManifest(
-		request.ValidationRecipes,
+		resolved,
 		request.ProspectiveWorkspaceManifestDelta.ResultingTargetRefs,
 	)
 	ret := make([]string, 0, len(applicable))
@@ -115,4 +123,19 @@ func shellProspectiveSelectableValidationRecipeRefs(request runtimecontract.Runt
 		}
 	}
 	return ret
+}
+
+func shellProspectiveBaseTargetRefs(delta runtimecontract.RuntimeProspectiveWorkspaceManifestDelta) []string {
+	delta = delta.Normalized()
+	prospective := make(map[string]struct{}, len(delta.ProspectiveTargetRefs))
+	for _, ref := range delta.ProspectiveTargetRefs {
+		prospective[ref] = struct{}{}
+	}
+	ret := make([]string, 0, len(delta.ResultingTargetRefs))
+	for _, ref := range delta.ResultingTargetRefs {
+		if _, added := prospective[ref]; !added {
+			ret = append(ret, ref)
+		}
+	}
+	return normalizeShellStrings(ret)
 }

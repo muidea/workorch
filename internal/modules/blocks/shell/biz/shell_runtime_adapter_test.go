@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -58,6 +59,24 @@ func TestRuntimeAdapterPreflightValidationRecipesFiltersUnavailableCommandsWitho
 	content, err := os.ReadFile(marker)
 	if err != nil || string(content) != "unchanged\n" {
 		t.Fatalf("preflight executed a recipe: content=%q err=%v", content, err)
+	}
+}
+
+func TestShellOwnerResolvesProjectNativeAdapterFromFileManifestFact(t *testing.T) {
+	declaration := runtimemodel.RuntimeValidationRecipe{
+		ID: "project-native", AdapterRef: modulecommon.ValidationRecipeAdapterProjectNative, TimeoutMillis: 60_000,
+	}
+	resolved := resolveRuntimeValidationRecipeDeclarations([]runtimemodel.RuntimeValidationRecipe{declaration}, runtimemodel.WorkspaceManifest{
+		Revision: "tree-go", TargetRefs: []string{"go.mod", "main.go"},
+	})
+	if len(resolved) != 1 || resolved[0].ID != declaration.ID || resolved[0].AdapterRef != declaration.AdapterRef ||
+		resolved[0].Command != "go" || !reflect.DeepEqual(resolved[0].Args, []string{"test", "-v", "./..."}) {
+		t.Fatalf("Shell owner resolved project-native adapter = %+v", resolved)
+	}
+	if got := resolveRuntimeValidationRecipeDeclarations([]runtimemodel.RuntimeValidationRecipe{declaration}, runtimemodel.WorkspaceManifest{
+		Revision: "tree-python", TargetRefs: []string{"pyproject.toml", "main.py"},
+	}); len(got) != 0 {
+		t.Fatalf("Shell owner inferred unsupported language recipe: %+v", got)
 	}
 }
 
