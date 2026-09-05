@@ -1210,10 +1210,12 @@ func runtimeAuditCoverageBindingEqual(a, b projectioncontract.RuntimeAuditCovera
 	for idx := range a.Proofs {
 		left, right := a.Proofs[idx], b.Proofs[idx]
 		if left.EvidenceKind != right.EvidenceKind || left.ValidationRecipeID != right.ValidationRecipeID ||
+			left.ValidationProofRequirementHash != right.ValidationProofRequirementHash ||
 			!stringSliceEqualDisplay(left.RequiredEffectScopes, right.RequiredEffectScopes) ||
 			!stringSliceEqualDisplay(left.AllowedOperationKinds, right.AllowedOperationKinds) ||
 			!stringSliceEqualDisplay(left.AllowedOperationVariants, right.AllowedOperationVariants) ||
 			!stringSliceEqualDisplay(left.RequiredCheckRefs, right.RequiredCheckRefs) ||
+			!reflect.DeepEqual(left.ValidationCheckAttestations, right.ValidationCheckAttestations) ||
 			!stringSliceEqualDisplay(left.MetricConstraints, right.MetricConstraints) ||
 			!stringSliceEqualDisplay(left.ArtifactRefs, right.ArtifactRefs) {
 			return false
@@ -1227,7 +1229,7 @@ func runtimeAuditEvidenceEqual(a, b projectioncontract.RuntimeAuditEvidence) boo
 		a.DispatchID == b.DispatchID && a.OperationID == b.OperationID && a.Revision == b.Revision &&
 		a.FailureClass == b.FailureClass && a.FailureCode == b.FailureCode && a.FailureSignature == b.FailureSignature &&
 		a.Quality == b.Quality && a.ZeroWork == b.ZeroWork && a.EvidenceReason == b.EvidenceReason &&
-		a.ValidationRecipeID == b.ValidationRecipeID &&
+		a.ValidationRecipeID == b.ValidationRecipeID && a.ObservationProtocolRef == b.ObservationProtocolRef &&
 		stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs) && stringSliceEqualDisplay(a.BindingRefs, b.BindingRefs) &&
 		stringSliceEqualDisplay(a.CoverageWorkItemIDs, b.CoverageWorkItemIDs) && stringSliceEqualDisplay(a.EvidenceRefs, b.EvidenceRefs) &&
 		stringSliceEqualDisplay(a.EvidenceTags, b.EvidenceTags) && stringSliceEqualDisplay(a.ExecutedChecks, b.ExecutedChecks) &&
@@ -1240,6 +1242,7 @@ func runtimeAuditOperationReceiptEqual(a, b projectioncontract.RuntimeAuditOpera
 		a.Outcome == b.Outcome && a.ObservedEffectScope == b.ObservedEffectScope && a.Changed == b.Changed &&
 		a.FeedbackDomain == b.FeedbackDomain && a.StableCategory == b.StableCategory &&
 		reflect.DeepEqual(a.OriginalDiagnostic, b.OriginalDiagnostic) && a.ValidationRecipeID == b.ValidationRecipeID &&
+		a.ObservationProtocolRef == b.ObservationProtocolRef &&
 		stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs) &&
 		stringSliceEqualDisplay(a.EvidenceRefs, b.EvidenceRefs) && stringSliceEqualDisplay(a.EvidenceTags, b.EvidenceTags) &&
 		stringSliceEqualDisplay(a.ExecutedChecks, b.ExecutedChecks) && stringSliceEqualDisplay(a.PassedChecks, b.PassedChecks) &&

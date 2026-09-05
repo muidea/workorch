@@ -215,14 +215,25 @@ type RuntimeAuditCoverageBinding struct {
 }
 
 type RuntimeAuditCoverageProof struct {
-	EvidenceKind             string   `json:"evidenceKind,omitempty"`
-	RequiredEffectScopes     []string `json:"requiredEffectScopes,omitempty"`
-	AllowedOperationKinds    []string `json:"allowedOperationKinds,omitempty"`
-	AllowedOperationVariants []string `json:"allowedOperationVariants,omitempty"`
-	ValidationRecipeID       string   `json:"validationRecipeId,omitempty"`
-	RequiredCheckRefs        []string `json:"requiredCheckRefs,omitempty"`
-	MetricConstraints        []string `json:"metricConstraints,omitempty"`
-	ArtifactRefs             []string `json:"artifactRefs,omitempty"`
+	EvidenceKind                   string                                   `json:"evidenceKind,omitempty"`
+	RequiredEffectScopes           []string                                 `json:"requiredEffectScopes,omitempty"`
+	AllowedOperationKinds          []string                                 `json:"allowedOperationKinds,omitempty"`
+	AllowedOperationVariants       []string                                 `json:"allowedOperationVariants,omitempty"`
+	ValidationRecipeID             string                                   `json:"validationRecipeId,omitempty"`
+	ValidationProofRequirementHash string                                   `json:"validationProofRequirementHash,omitempty"`
+	RequiredCheckRefs              []string                                 `json:"requiredCheckRefs,omitempty"`
+	ValidationCheckAttestations    []RuntimeAuditValidationCheckAttestation `json:"validationCheckAttestations,omitempty"`
+	MetricConstraints              []string                                 `json:"metricConstraints,omitempty"`
+	ArtifactRefs                   []string                                 `json:"artifactRefs,omitempty"`
+}
+
+// RuntimeAuditValidationCheckAttestation exposes the immutable, owner-opaque
+// mapping needed to audit a managed validation receipt. It is display-only and
+// cannot be submitted as an owner attestation or operation command.
+type RuntimeAuditValidationCheckAttestation struct {
+	RequiredCheckRef       string `json:"requiredCheckRef,omitempty"`
+	ObservationProtocolRef string `json:"observationProtocolRef,omitempty"`
+	NativeCheckRef         string `json:"nativeCheckRef,omitempty"`
 }
 
 // RuntimeAuditDispatch contains only sealed SM-3 identity required by audit
@@ -248,23 +259,24 @@ type RuntimeAuditSealedOperation struct {
 // RuntimeAuditOperationReceipt is structured, already-judged capability-owner
 // feedback. It cannot issue a command or mutate Runtime state.
 type RuntimeAuditOperationReceipt struct {
-	ExecutionKey        string                                     `json:"executionKey,omitempty"`
-	Fence               uint64                                     `json:"fence,omitempty"`
-	OperationID         string                                     `json:"operationId,omitempty"`
-	Outcome             string                                     `json:"outcome,omitempty"`
-	ObservedEffectScope string                                     `json:"observedEffectScope,omitempty"`
-	Changed             bool                                       `json:"changed,omitempty"`
-	FeedbackDomain      string                                     `json:"feedbackDomain,omitempty"`
-	StableCategory      string                                     `json:"stableCategory,omitempty"`
-	OriginalDiagnostic  *runtimecontract.RuntimeOriginalDiagnostic `json:"originalDiagnostic,omitempty"`
-	TargetRefs          []string                                   `json:"targetRefs,omitempty"`
-	EvidenceRefs        []string                                   `json:"evidenceRefs,omitempty"`
-	EvidenceTags        []string                                   `json:"evidenceTags,omitempty"`
-	ValidationRecipeID  string                                     `json:"validationRecipeId,omitempty"`
-	ExecutedChecks      []string                                   `json:"executedChecks,omitempty"`
-	PassedChecks        []string                                   `json:"passedChecks,omitempty"`
-	FailedChecks        []string                                   `json:"failedChecks,omitempty"`
-	SkippedChecks       []string                                   `json:"skippedChecks,omitempty"`
+	ExecutionKey           string                                     `json:"executionKey,omitempty"`
+	Fence                  uint64                                     `json:"fence,omitempty"`
+	OperationID            string                                     `json:"operationId,omitempty"`
+	Outcome                string                                     `json:"outcome,omitempty"`
+	ObservedEffectScope    string                                     `json:"observedEffectScope,omitempty"`
+	Changed                bool                                       `json:"changed,omitempty"`
+	FeedbackDomain         string                                     `json:"feedbackDomain,omitempty"`
+	StableCategory         string                                     `json:"stableCategory,omitempty"`
+	OriginalDiagnostic     *runtimecontract.RuntimeOriginalDiagnostic `json:"originalDiagnostic,omitempty"`
+	TargetRefs             []string                                   `json:"targetRefs,omitempty"`
+	EvidenceRefs           []string                                   `json:"evidenceRefs,omitempty"`
+	EvidenceTags           []string                                   `json:"evidenceTags,omitempty"`
+	ValidationRecipeID     string                                     `json:"validationRecipeId,omitempty"`
+	ObservationProtocolRef string                                     `json:"observationProtocolRef,omitempty"`
+	ExecutedChecks         []string                                   `json:"executedChecks,omitempty"`
+	PassedChecks           []string                                   `json:"passedChecks,omitempty"`
+	FailedChecks           []string                                   `json:"failedChecks,omitempty"`
+	SkippedChecks          []string                                   `json:"skippedChecks,omitempty"`
 }
 
 type RuntimeAuditRepair struct {
@@ -502,6 +514,7 @@ func cloneRuntimeAuditCoverageProofs(values []RuntimeAuditCoverageProof) []Runti
 		value.AllowedOperationKinds = append([]string(nil), value.AllowedOperationKinds...)
 		value.AllowedOperationVariants = append([]string(nil), value.AllowedOperationVariants...)
 		value.RequiredCheckRefs = append([]string(nil), value.RequiredCheckRefs...)
+		value.ValidationCheckAttestations = append([]RuntimeAuditValidationCheckAttestation(nil), value.ValidationCheckAttestations...)
 		value.MetricConstraints = append([]string(nil), value.MetricConstraints...)
 		value.ArtifactRefs = append([]string(nil), value.ArtifactRefs...)
 		ret[index] = value
@@ -549,28 +562,29 @@ func cloneRuntimeAuditAssessmentItems(values []RuntimeAuditAssessmentItem) []Run
 // already-judged Runtime evidence fact. It carries no reducer instruction or
 // evidence-admission authority.
 type RuntimeAuditEvidence struct {
-	ID                  string   `json:"id,omitempty"`
-	Kind                string   `json:"kind,omitempty"`
-	AuthoritySnapshotID string   `json:"authoritySnapshotId,omitempty"`
-	DispatchID          string   `json:"dispatchId,omitempty"`
-	OperationID         string   `json:"operationId,omitempty"`
-	Revision            string   `json:"revision,omitempty"`
-	FailureClass        string   `json:"failureClass,omitempty"`
-	FailureCode         string   `json:"failureCode,omitempty"`
-	FailureSignature    string   `json:"failureSignature,omitempty"`
-	TargetRefs          []string `json:"targetRefs,omitempty"`
-	BindingRefs         []string `json:"bindingRefs,omitempty"`
-	CoverageWorkItemIDs []string `json:"coverageWorkItemIds,omitempty"`
-	Quality             string   `json:"quality,omitempty"`
-	ZeroWork            bool     `json:"zeroWork,omitempty"`
-	EvidenceReason      string   `json:"evidenceReason,omitempty"`
-	EvidenceRefs        []string `json:"evidenceRefs,omitempty"`
-	EvidenceTags        []string `json:"evidenceTags,omitempty"`
-	ValidationRecipeID  string   `json:"validationRecipeId,omitempty"`
-	ExecutedChecks      []string `json:"executedChecks,omitempty"`
-	PassedChecks        []string `json:"passedChecks,omitempty"`
-	FailedChecks        []string `json:"failedChecks,omitempty"`
-	SkippedChecks       []string `json:"skippedChecks,omitempty"`
+	ID                     string   `json:"id,omitempty"`
+	Kind                   string   `json:"kind,omitempty"`
+	AuthoritySnapshotID    string   `json:"authoritySnapshotId,omitempty"`
+	DispatchID             string   `json:"dispatchId,omitempty"`
+	OperationID            string   `json:"operationId,omitempty"`
+	Revision               string   `json:"revision,omitempty"`
+	FailureClass           string   `json:"failureClass,omitempty"`
+	FailureCode            string   `json:"failureCode,omitempty"`
+	FailureSignature       string   `json:"failureSignature,omitempty"`
+	TargetRefs             []string `json:"targetRefs,omitempty"`
+	BindingRefs            []string `json:"bindingRefs,omitempty"`
+	CoverageWorkItemIDs    []string `json:"coverageWorkItemIds,omitempty"`
+	Quality                string   `json:"quality,omitempty"`
+	ZeroWork               bool     `json:"zeroWork,omitempty"`
+	EvidenceReason         string   `json:"evidenceReason,omitempty"`
+	EvidenceRefs           []string `json:"evidenceRefs,omitempty"`
+	EvidenceTags           []string `json:"evidenceTags,omitempty"`
+	ValidationRecipeID     string   `json:"validationRecipeId,omitempty"`
+	ObservationProtocolRef string   `json:"observationProtocolRef,omitempty"`
+	ExecutedChecks         []string `json:"executedChecks,omitempty"`
+	PassedChecks           []string `json:"passedChecks,omitempty"`
+	FailedChecks           []string `json:"failedChecks,omitempty"`
+	SkippedChecks          []string `json:"skippedChecks,omitempty"`
 }
 
 func CloneRuntimeAuditEvidence(values []RuntimeAuditEvidence) []RuntimeAuditEvidence {

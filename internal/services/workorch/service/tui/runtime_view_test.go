@@ -1036,18 +1036,25 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 	audit.Acceptance.Audit = &projectioncontract.RuntimeAudit{
 		CoverageBindings: []projectioncontract.RuntimeAuditCoverageBinding{{
 			ID: "binding/cwi-fr02", CoverageWorkItemID: "cwi-fr02", TargetRefs: []string{"target.go"},
-			Proofs: []projectioncontract.RuntimeAuditCoverageProof{{EvidenceKind: "validation", ValidationRecipeID: "recipe-fr02", RequiredCheckRefs: []string{"check-fr02"}}},
+			Proofs: []projectioncontract.RuntimeAuditCoverageProof{{
+				EvidenceKind: "validation", ValidationRecipeID: "recipe-fr02", ValidationProofRequirementHash: "runtime-validation-proof-requirement-fr02",
+				RequiredCheckRefs: []string{"check-fr02"}, ValidationCheckAttestations: []projectioncontract.RuntimeAuditValidationCheckAttestation{{
+					RequiredCheckRef: "check-fr02", ObservationProtocolRef: "protocol-fr02", NativeCheckRef: "native-fr02",
+				}},
+			}},
 		}},
 		Dispatches: []projectioncontract.RuntimeAuditDispatch{{
 			ID: "dispatch-fr02", AuthoritySnapshotID: "authority-fr02", State: "committed",
 			Operations: []projectioncontract.RuntimeAuditSealedOperation{{ID: "validate-fr02", Kind: "validation/managed_session", BindingRefs: []string{"binding/cwi-fr02"}, TargetRefs: []string{"target.go"}}},
 		}},
 		AcceptedEvidence: []projectioncontract.RuntimeAuditEvidence{{
-			ID: "evidence-fr02", OperationID: "validate-fr02", BindingRefs: []string{"binding/cwi-fr02"}, CoverageWorkItemIDs: []string{"cwi-fr02"}, PassedChecks: []string{"check-fr02"},
+			ID: "evidence-fr02", OperationID: "validate-fr02", BindingRefs: []string{"binding/cwi-fr02"}, CoverageWorkItemIDs: []string{"cwi-fr02"},
+			ObservationProtocolRef: "protocol-fr02", PassedChecks: []string{"native-fr02"},
 		}},
 		OperationReceipts: []projectioncontract.RuntimeAuditOperationReceipt{{
 			ExecutionKey: "exec/ws-fr02/run-1/dispatch/validate-fr02", OperationID: "validate-fr02", Outcome: "accepted", ObservedEffectScope: "none", StableCategory: "accepted",
-			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/shell", OriginalMessage: "safe owner fact"}, PassedChecks: []string{"check-fr02"},
+			OriginalDiagnostic:     &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/shell", OriginalMessage: "safe owner fact"},
+			ObservationProtocolRef: "protocol-fr02", PassedChecks: []string{"native-fr02"},
 		}},
 	}
 	m.applyWorkspaceRuntimeView(audit, false)
@@ -1056,6 +1063,14 @@ func TestEqualRevisionFieldMutationsAreNotNoOp(t *testing.T) {
 		m.acceptance.Audit.Dispatches[0].Operations[0].BindingRefs[0] != "binding/cwi-fr02" ||
 		len(m.acceptance.Audit.AcceptedEvidence) != 1 || len(m.acceptance.Audit.OperationReceipts) != 1 {
 		t.Fatalf("C12 audit-only mutation treated as no-op: %+v", m.acceptance.Audit)
+	}
+	exactProof := projectioncontract.CloneWorkspaceRuntimeView(audit)
+	exactProof.Acceptance.Audit.CoverageBindings[0].Proofs[0].ValidationCheckAttestations[0].NativeCheckRef = "native-fr02-v2"
+	exactProof.Acceptance.Audit.AcceptedEvidence[0].ObservationProtocolRef = "protocol-fr02-v2"
+	exactProof.Acceptance.Audit.OperationReceipts[0].ObservationProtocolRef = "protocol-fr02-v2"
+	m.applyWorkspaceRuntimeView(exactProof, false)
+	if got := m.acceptance.Audit.CoverageBindings[0].Proofs[0].ValidationCheckAttestations[0].NativeCheckRef; got != "native-fr02-v2" {
+		t.Fatalf("exact proof audit-only mutation treated as no-op: got native check %q", got)
 	}
 
 	// Mutate RunHeartbeat.Summary

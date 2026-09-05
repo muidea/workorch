@@ -1381,9 +1381,17 @@ export type RuntimeAuditCoverageProof = {
   allowedOperationKinds?: string[];
   allowedOperationVariants?: string[];
   validationRecipeId?: string;
+  validationProofRequirementHash?: string;
   requiredCheckRefs?: string[];
+  validationCheckAttestations?: RuntimeAuditValidationCheckAttestation[];
   metricConstraints?: string[];
   artifactRefs?: string[];
+};
+
+export type RuntimeAuditValidationCheckAttestation = {
+  requiredCheckRef?: string;
+  observationProtocolRef?: string;
+  nativeCheckRef?: string;
 };
 
 // A bounded, read-only view of the SM-3 sealed operation authorization. It
@@ -1426,6 +1434,7 @@ export type RuntimeAuditEvidence = {
   evidenceRefs?: string[];
   evidenceTags?: string[];
   validationRecipeId?: string;
+  observationProtocolRef?: string;
   executedChecks?: string[];
   passedChecks?: string[];
   failedChecks?: string[];
@@ -1446,6 +1455,7 @@ export type RuntimeAuditOperationReceipt = {
   evidenceRefs?: string[];
   evidenceTags?: string[];
   validationRecipeId?: string;
+  observationProtocolRef?: string;
   executedChecks?: string[];
   passedChecks?: string[];
   failedChecks?: string[];

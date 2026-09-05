@@ -74,6 +74,7 @@ func runtimeAuditEvidence(values []runtimecontract.EvidenceFact) []projectioncon
 		if value.Validation != nil {
 			observation := value.Validation.Normalized()
 			item.ValidationRecipeID = observation.RecipeID
+			item.ObservationProtocolRef = observation.ObservationProtocolRef
 			item.ExecutedChecks = append([]string(nil), observation.ExecutedChecks...)
 			item.PassedChecks = append([]string(nil), observation.PassedChecks...)
 			item.FailedChecks = append([]string(nil), observation.FailedChecks...)
@@ -126,10 +127,18 @@ func runtimeAuditCoverageBindings(values []runtimecontract.CoverageEvidenceBindi
 			for _, variant := range proof.AllowedOperationVariants {
 				variants = append(variants, variant.Kind+":"+variant.VariantID)
 			}
+			attestations := make([]projectioncontract.RuntimeAuditValidationCheckAttestation, 0, len(proof.ValidationCheckAttestations))
+			for _, attestation := range proof.ValidationCheckAttestations {
+				attestations = append(attestations, projectioncontract.RuntimeAuditValidationCheckAttestation{
+					RequiredCheckRef: attestation.RequiredCheckRef, ObservationProtocolRef: attestation.ObservationProtocolRef,
+					NativeCheckRef: attestation.NativeCheckRef,
+				})
+			}
 			item.Proofs = append(item.Proofs, projectioncontract.RuntimeAuditCoverageProof{
 				EvidenceKind: proof.EvidenceKind, RequiredEffectScopes: runtimecontract.RuntimeEffectScopesAsStrings(proof.RequiredEffectScopes),
 				AllowedOperationKinds: append([]string(nil), proof.AllowedOperationKinds...), AllowedOperationVariants: variants,
-				ValidationRecipeID: proof.ValidationRecipeID, RequiredCheckRefs: append([]string(nil), proof.RequiredCheckRefs...),
+				ValidationRecipeID: proof.ValidationRecipeID, ValidationProofRequirementHash: proof.ValidationProofRequirementHash,
+				RequiredCheckRefs: append([]string(nil), proof.RequiredCheckRefs...), ValidationCheckAttestations: attestations,
 				MetricConstraints: append([]string(nil), proof.MetricConstraints...), ArtifactRefs: append([]string(nil), proof.ArtifactRefs...),
 			})
 		}
@@ -302,6 +311,7 @@ func runtimeAuditOperationReceipts(values []runtimecontract.RuntimeOperationRece
 		if value.Evidence.Validation != nil {
 			observation := value.Evidence.Validation.Normalized()
 			item.ValidationRecipeID = observation.RecipeID
+			item.ObservationProtocolRef = observation.ObservationProtocolRef
 			item.ExecutedChecks = append([]string(nil), observation.ExecutedChecks...)
 			item.PassedChecks = append([]string(nil), observation.PassedChecks...)
 			item.FailedChecks = append([]string(nil), observation.FailedChecks...)

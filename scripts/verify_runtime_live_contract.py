@@ -93,6 +93,72 @@ def _receipt_matches_sealed_operation(receipt: dict[str, Any], operation: dict[s
     return receipt.get("executionKey") == execution_key and receipt.get("fence") == fence
 
 
+def _same_validation_observation(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """Match the bounded validation facts copied from one immutable receipt."""
+
+    if left.get("validationRecipeId") != right.get("validationRecipeId"):
+        return False
+    if left.get("observationProtocolRef") != right.get("observationProtocolRef"):
+        return False
+    return all(
+        _same_string_set(left.get(field), right.get(field))
+        for field in ("executedChecks", "passedChecks", "failedChecks", "skippedChecks")
+    )
+
+
+def _validation_receipt_matches_proof(
+    receipt: dict[str, Any], proof: dict[str, Any], operation_kind: Any
+) -> bool:
+    """Apply the same logical-to-native validation proof rule as Runtime.
+
+    Managed validation receipts report owner-native check identities.  Their
+    immutable coverage proof carries the exact Definition-check mapping; a
+    verifier must not compare the two vocabularies directly.
+    """
+
+    if receipt.get("validationRecipeId") != proof.get("validationRecipeId"):
+        return False
+    passed = _string_set(receipt.get("passedChecks"))
+    failed = _string_set(receipt.get("failedChecks"))
+    skipped = _string_set(receipt.get("skippedChecks"))
+    if (passed & failed) or (passed & skipped) or (failed & skipped):
+        return False
+
+    required = _string_set(proof.get("requiredCheckRefs"))
+    if operation_kind != "validation/managed_session":
+        return bool(required) and required.issubset(passed)
+
+    requirement_hash = proof.get("validationProofRequirementHash")
+    attestations = proof.get("validationCheckAttestations")
+    if not isinstance(requirement_hash, str) or not requirement_hash:
+        return False
+    if not isinstance(attestations, list) or not attestations:
+        return False
+
+    mapped_required: set[str] = set()
+    native_identities: set[tuple[str, str]] = set()
+    protocol = receipt.get("observationProtocolRef")
+    for attestation in attestations:
+        if not isinstance(attestation, dict):
+            return False
+        required_check = attestation.get("requiredCheckRef")
+        observation_protocol = attestation.get("observationProtocolRef")
+        native_check = attestation.get("nativeCheckRef")
+        if not all(
+            isinstance(value, str) and value
+            for value in (required_check, observation_protocol, native_check)
+        ):
+            return False
+        native_identity = (observation_protocol, native_check)
+        if required_check in mapped_required or native_identity in native_identities:
+            return False
+        mapped_required.add(required_check)
+        native_identities.add(native_identity)
+        if protocol != observation_protocol or native_check not in passed:
+            return False
+    return bool(required) and mapped_required == required
+
+
 def coverage_binding_chain_errors(audit: Any, require_complete: bool) -> list[str]:
     """Verify the C12 CWI -> binding -> sealed operation -> receipt -> evidence chain.
 
@@ -240,10 +306,11 @@ def coverage_binding_chain_errors(audit: Any, require_complete: bool) -> list[st
                     continue
                 if not _same_string_set(receipt.get("evidenceTags"), value.get("evidenceTags")):
                     continue
-                if proof.get("validationRecipeId") and receipt.get("validationRecipeId") != proof.get("validationRecipeId"):
-                    continue
-                if not _includes_all(receipt.get("passedChecks"), proof.get("requiredCheckRefs")):
-                    continue
+                if proof.get("validationRecipeId"):
+                    if not _same_validation_observation(receipt, value):
+                        continue
+                    if not _validation_receipt_matches_proof(receipt, proof, operation.get("kind")):
+                        continue
                 if not _includes_all(receipt.get("evidenceTags"), proof.get("metricConstraints")):
                     continue
                 if not _includes_all(receipt.get("evidenceRefs"), proof.get("artifactRefs")):
@@ -534,6 +601,43 @@ def _self_test() -> None:
     }
     if errors := runtime_audit_errors(valid_audit, "ws-1", "run-1", True):
         raise AssertionError(f"valid Runtime audit rejected: {errors}")
+    managed_audit = json.loads(json.dumps(valid_audit))
+    managed_proof = managed_audit["coverageBindings"][0]["proofs"][1]
+    managed_proof["allowedOperationKinds"] = ["validation/managed_session"]
+    managed_proof["validationProofRequirementHash"] = "runtime-validation-proof-requirement-check-1"
+    managed_proof["validationCheckAttestations"] = [{
+        "requiredCheckRef": "check-1",
+        "observationProtocolRef": "shell/go-test-json/v1",
+        "nativeCheckRef": "TestCheck1",
+    }]
+    managed_audit["dispatches"][0]["operations"][1]["kind"] = "validation/managed_session"
+    for observation in (
+        managed_audit["acceptedEvidence"][1],
+        managed_audit["operationReceipts"][1],
+    ):
+        observation["observationProtocolRef"] = "shell/go-test-json/v1"
+        observation["executedChecks"] = ["TestCheck1"]
+        observation["passedChecks"] = ["TestCheck1"]
+    if errors := runtime_audit_errors(managed_audit, "ws-1", "run-1", True):
+        raise AssertionError(f"valid managed-validation audit rejected: {errors}")
+    logical_check_receipt = json.loads(json.dumps(managed_audit))
+    for observation in (
+        logical_check_receipt["acceptedEvidence"][1],
+        logical_check_receipt["operationReceipts"][1],
+    ):
+        observation["executedChecks"] = ["check-1"]
+        observation["passedChecks"] = ["check-1"]
+    if not runtime_audit_errors(logical_check_receipt, "ws-1", "run-1", True):
+        raise AssertionError("managed receipt bypassed its native check attestation")
+    missing_attestation = json.loads(json.dumps(managed_audit))
+    missing_attestation["coverageBindings"][0]["proofs"][1]["validationCheckAttestations"] = []
+    if not runtime_audit_errors(missing_attestation, "ws-1", "run-1", True):
+        raise AssertionError("managed receipt without projected check attestation was accepted")
+    wrong_protocol = json.loads(json.dumps(managed_audit))
+    wrong_protocol["acceptedEvidence"][1]["observationProtocolRef"] = "shell/plain-output/v1"
+    wrong_protocol["operationReceipts"][1]["observationProtocolRef"] = "shell/plain-output/v1"
+    if not runtime_audit_errors(wrong_protocol, "ws-1", "run-1", True):
+        raise AssertionError("managed receipt with a drifted observation protocol was accepted")
     governed_audit = json.loads(json.dumps(valid_audit))
     governed_operation = governed_audit["dispatches"][0]["operations"][1]
     governed_operation["executionKey"] = "exec/ws-1/run-1/original-dispatch/validate-1"

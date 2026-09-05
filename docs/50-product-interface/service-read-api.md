@@ -4,7 +4,7 @@ Status: normative
 
 Type: product-interface
 
-Last Verified: 2026-08-23
+Last Verified: 2026-09-05
 
 ## Purpose
 
@@ -56,6 +56,11 @@ Acceptance 的 `budget` 只包含 SM-2 convergence/repair 与 prerequisite refre
 CAS reload 和 terminal delivery 计数只在独立 `recoveryBudget`。`RuntimeAuditRepair` 不得包含
 `terminalDeliveryAttempts`；该计数仅在 sealed terminal audit 中出现。nonterminal aggregate 携带 terminal delivery 计数属于
 当前 owner shape 违规，owner load 必须失败，不由 projection 清零、隐藏或转换成兼容状态。
+
+`RuntimeAudit.coverageBindings` 对 managed validation 必须只读保留 exact proof-requirement hash、Definition check refs 与
+owner-opaque `validationCheckAttestations`；matching evidence/receipt 必须保留 `observationProtocolRef` 和 owner-native check
+outcome。审计消费者通过该映射核对 Definition check 与 native outcome，不能直接把两种检查标识作字符串比较，也不能把该
+投影回放为 receipt、operation 或 coverage authority。
 
 Workspace `snapshot.runCommand` 只保存最新 immutable Workspace-owner admission observation：request/workspace/run/intent
 identity、separate caller `requestReason`、`source`、exact `outcome`、`admissionReason`、derived `diagnostic` 与

@@ -97,7 +97,11 @@ func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *test
 		Proofs: []runtimecontract.CoverageEvidenceProof{{
 			EvidenceKind: runtimecontract.EvidenceKindValidation, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 			AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe/audit",
-			RequiredCheckRefs: []string{"check/audit"}, MetricConstraints: []string{"metric/audit"}, ArtifactRefs: []string{"artifact/audit"},
+			ValidationProofRequirementHash: "runtime-validation-proof-requirement-audit", RequiredCheckRefs: []string{"check/audit"},
+			ValidationCheckAttestations: []runtimecontract.RuntimeValidationCheckAttestationBinding{{
+				RequiredCheckRef: "check/audit", ObservationProtocolRef: "shell/audit/v1", NativeCheckRef: "native/check/audit",
+			}},
+			MetricConstraints: []string{"metric/audit"}, ArtifactRefs: []string{"artifact/audit"},
 		}}, TargetRefs: []string{"main.go"}, DeclarationRef: "profile/audit",
 	}.Normalized()
 	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
@@ -107,7 +111,10 @@ func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *test
 	completedBinding.FocusID = "focus-prior"
 	completedBinding.TargetRefs = []string{"prior.go"}
 	completedBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(completedBinding)
-	observation := &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe/audit", ExecutedChecks: []string{"check/audit"}, PassedChecks: []string{"check/audit"}}
+	observation := &runtimecontract.RuntimeValidationObservation{
+		RecipeID: "recipe/audit", ObservationProtocolRef: "shell/audit/v1",
+		ExecutedChecks: []string{"native/check/audit"}, PassedChecks: []string{"native/check/audit"},
+	}
 	state := runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-audit", RunID: "run-audit", DefinitionRevision: "definition-audit", EvidenceRevision: "evidence-audit",
 		Focus: runtimecontract.CoverageFocus{ID: "focus-current", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-audit"}, CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{binding}},
@@ -138,15 +145,23 @@ func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *test
 		t.Fatalf("binding audit missing chain: %+v", audit)
 	}
 	projectedBinding := audit.CoverageBindings[0]
-	if projectedBinding.ID != binding.ID || projectedBinding.Hash != binding.Hash || len(projectedBinding.Proofs) != 1 || projectedBinding.Proofs[0].ValidationRecipeID != "recipe/audit" || len(projectedBinding.Proofs[0].RequiredCheckRefs) != 1 {
+	if projectedBinding.ID != binding.ID || projectedBinding.Hash != binding.Hash || len(projectedBinding.Proofs) != 1 {
+		t.Fatalf("binding declaration projection = %+v", projectedBinding)
+	}
+	projectedProof := projectedBinding.Proofs[0]
+	if projectedProof.ValidationRecipeID != "recipe/audit" || projectedProof.ValidationProofRequirementHash != "runtime-validation-proof-requirement-audit" ||
+		len(projectedProof.RequiredCheckRefs) != 1 || len(projectedProof.ValidationCheckAttestations) != 1 ||
+		projectedProof.ValidationCheckAttestations[0].RequiredCheckRef != "check/audit" ||
+		projectedProof.ValidationCheckAttestations[0].ObservationProtocolRef != "shell/audit/v1" ||
+		projectedProof.ValidationCheckAttestations[0].NativeCheckRef != "native/check/audit" {
 		t.Fatalf("binding declaration projection = %+v", projectedBinding)
 	}
 	evidence := audit.AcceptedEvidence[0]
-	if len(evidence.BindingRefs) != 1 || evidence.BindingRefs[0] != binding.ID || len(evidence.CoverageWorkItemIDs) != 1 || evidence.CoverageWorkItemIDs[0] != "cwi-audit" || evidence.ValidationRecipeID != "recipe/audit" || len(evidence.PassedChecks) != 1 {
+	if len(evidence.BindingRefs) != 1 || evidence.BindingRefs[0] != binding.ID || len(evidence.CoverageWorkItemIDs) != 1 || evidence.CoverageWorkItemIDs[0] != "cwi-audit" || evidence.ValidationRecipeID != "recipe/audit" || evidence.ObservationProtocolRef != "shell/audit/v1" || len(evidence.PassedChecks) != 1 {
 		t.Fatalf("derived credit projection = %+v", evidence)
 	}
 	receipt := audit.OperationReceipts[0]
-	if receipt.ObservedEffectScope != string(runtimecontract.RuntimeEffectNone) || receipt.ValidationRecipeID != "recipe/audit" || len(receipt.PassedChecks) != 1 || len(receipt.EvidenceTags) != 1 {
+	if receipt.ObservedEffectScope != string(runtimecontract.RuntimeEffectNone) || receipt.ValidationRecipeID != "recipe/audit" || receipt.ObservationProtocolRef != "shell/audit/v1" || len(receipt.PassedChecks) != 1 || len(receipt.EvidenceTags) != 1 {
 		t.Fatalf("owner receipt projection = %+v", receipt)
 	}
 	dispatch := audit.Dispatches[0]
