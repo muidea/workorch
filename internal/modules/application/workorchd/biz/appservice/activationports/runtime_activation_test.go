@@ -57,6 +57,7 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 			workorcheventpayload.StringField("qualityOnZeroWork", "inconclusive"),
 			workorcheventpayload.Field{Name: "coverageRequirements", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueArray, Array: []workorcheventpayload.Value{{Kind: workorcheventpayload.ValueObject, Object: workorcheventpayload.New(
 				workorcheventpayload.StringField("id", "*"), workorcheventpayload.StringField("scope", "dod_item"),
+				workorcheventpayload.StringArrayField("requiredEvidenceKinds", []string{"validation"}),
 				workorcheventpayload.StringField("targetRole", "verification_target"), workorcheventpayload.StringArrayField("targetRefs", []string{"runtime-validation-source.txt"}),
 				workorcheventpayload.StringField("targetSelectorRef", "file/workspace_deliverable"), workorcheventpayload.StringField("targetSelectorOwnerRef", "software-dev"), workorcheventpayload.StringField("targetSelectorSubjectRef", "dod_item"),
 				workorcheventpayload.StringArrayField("prospectiveTargetAllOfConstraintRefs", []string{"workspace-relative-path", "new-target-requires-owner-selector"}),

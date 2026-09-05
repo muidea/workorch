@@ -2,10 +2,8 @@ package workorchrepo
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	resultcommon "github.com/muidea/workorch/internal/modules/blocks/result/pkg/common"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
@@ -14,10 +12,8 @@ import (
 )
 
 type artifactStorageRepository struct {
-	base       repository.ArtifactRepository
-	dataRoot   string
-	dirCacheMu sync.Mutex
-	dirCache   map[string]struct{}
+	base     repository.ArtifactRepository
+	dataRoot string
 }
 
 func NewArtifactStorageRepository(base repository.ArtifactRepository, dataRoot string) repository.ArtifactRepository {
@@ -94,10 +90,7 @@ func (r *artifactStorageRepository) prepareStoredArtifact(item *resultmodel.Arti
 	}
 	fileName := artifactFileName(item)
 	dir := filepath.Join(r.dataRoot, "internal", "workspaces", string(item.WorkspaceID), "artifacts", string(item.RunID))
-	if err := r.ensureArtifactDir(dir); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, fileName), []byte(strings.TrimSpace(item.Summary)+"\n"), 0o644); err != nil {
+	if err := publishRepositoryFile(filepath.Join(dir, fileName), []byte(strings.TrimSpace(item.Summary)+"\n"), 0o644); err != nil {
 		return err
 	}
 	item.URI = "workorch://workspaces/" + string(item.WorkspaceID) + "/artifacts/" + string(item.RunID) + "/" + fileName
@@ -106,32 +99,6 @@ func (r *artifactStorageRepository) prepareStoredArtifact(item *resultmodel.Arti
 	}
 	return nil
 }
-
-func (r *artifactStorageRepository) ensureArtifactDir(dir string) error {
-	dir = filepath.Clean(strings.TrimSpace(dir))
-	if dir == "" || dir == "." {
-		return common.ErrInvalidArgument
-	}
-	r.dirCacheMu.Lock()
-	if r.dirCache != nil {
-		if _, ok := r.dirCache[dir]; ok {
-			r.dirCacheMu.Unlock()
-			return nil
-		}
-	}
-	r.dirCacheMu.Unlock()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	r.dirCacheMu.Lock()
-	if r.dirCache == nil {
-		r.dirCache = map[string]struct{}{}
-	}
-	r.dirCache[dir] = struct{}{}
-	r.dirCacheMu.Unlock()
-	return nil
-}
-
 func artifactFileName(item *resultmodel.Artifact) string {
 	if item == nil {
 		return "artifact.txt"

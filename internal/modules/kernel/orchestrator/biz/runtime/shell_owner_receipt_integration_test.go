@@ -29,15 +29,20 @@ import (
 // candidate; the resulting target must then be snapshotted before it can enter
 // another candidate authority.
 func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh is not available")
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not available")
 	}
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 
 	workspaceDirectory := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspaceDirectory, "implementation.go"), []byte("package fixture\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDirectory, "go.mod"), []byte("module example.com/workorch-observed-target\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The Shell owner derives the repair candidate from its native Go
+	// diagnostic. Raw stdout markers are deliberately not proof authority.
+	if err := os.WriteFile(filepath.Join(workspaceDirectory, "implementation.go"), []byte("package fixture\n\nvar _ = workorchMissingImplementation\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(workspaceDirectory, "validation-entry.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
@@ -60,36 +65,73 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}
 	t.Cleanup(func() { shellOwner.Teardown(ctx) })
 
-	record := `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed"}`
-	script := "printf '%s\\n' '" + record + "' '? github.com/user/lsp-bridge/internal/config [no test files]'; exit 7"
 	policy := runtimeManagedValidationEvidencePolicy()
-	policy.CommandName = "sh"
-	policy.RecipeArgs = []string{"-c", script}
-	policy.ZeroWorkMarkers = []string{"[no test files]"}
-	policy.WorkEvidenceMarkers = []string{"=== RUN", "--- PASS:", "ok  "}
-	policy.QualityOnZeroWork = string(common.EvidenceQualityInconclusive)
-	policy.EvidenceReason = "configured zero-work marker matched"
-	policy.EvidenceTags = []string{"validation", "zero_work"}
-	ownerPreflight := validationAggregate(t)
+	policy.CommandName = "go"
+	policy.RecipeArgs = []string{"test", "-v", "./..."}
+	ownerPreflight := validationOnlyAggregateWithPreparation(t, func(aggregate *RuntimeAggregate) {
+		aggregate.Facts.Focus.RequiredCheckRefs = []string{"workorch-cwi-check-observedfailuretarget"}
+	})
 	ownerPreflight.Facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{policy}
-	shellCatalog := addObservedShellFailureTargetFreshness(t, ctx, hub, &ownerPreflight, workspaceDirectory)
+	shellCatalog := addObservedShellFailureTargetFreshness(t, ctx, hub, &ownerPreflight, workspaceDirectory, false)
 	if len(shellCatalog.SelectorRefs) == 0 {
 		t.Fatalf("Shell observed-target catalog has no owner selector: %+v", shellCatalog)
 	}
 	shellSelectorRef := shellCatalog.SelectorRefs[0]
 	aggregate := validationAggregateWithPreparation(t, func(aggregate *RuntimeAggregate) {
 		aggregate.Facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{policy}
+		aggregate.Facts.Focus.RequiredCheckRefs = []string{"workorch-cwi-check-observedfailuretarget"}
 		aggregate.Facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus = 2
 		aggregate.Definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindManagedValidationSession}
 		aggregate.Facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+		aggregate.Facts.Focus.AcceptedStepKinds = []string{
+			runtimecontract.RuntimeBlockKindPatchApply,
+			runtimecontract.RuntimeBlockKindManagedValidationSession,
+		}
 		aggregate.Facts.Focus.TargetRefs = nil
 		aggregate.Facts.Focus.TargetRole = "implementation"
 		aggregate.Facts.Focus.TargetSelectorRef = shellSelectorRef
 		aggregate.Facts.Focus.TargetSelectorOwnerRef = runtimecontract.RuntimeModuleShell
 		aggregate.Facts.Focus.TargetSelectorSubjectRef = "implementation"
+		aggregate.Facts.Focus.TargetSelectorCandidateRefs = []string{"implementation.go"}
 		aggregate.Facts.Focus.RequireTargetGrounding = true
 		runtimeTestInstallObservedShellPreflight(aggregate, ownerPreflight, shellCatalog)
 	})
+	shellCatalog = runtimeTestOperationAdmissibilityForOwner(t, aggregate.Facts, runtimecontract.RuntimeModuleShell)
+	// The synthetic state-change receipt closes its File catalog generation.
+	// Keep that immutable preimage on the completed dispatch, while the current
+	// resource view is refreshed solely from the real File owner below.
+	currentCatalogs := aggregate.Facts.Resources.OperationAdmissibilities[:0]
+	for _, catalog := range aggregate.Facts.Resources.OperationAdmissibilities {
+		if catalog.Normalized().OwnerModuleID != runtimecontract.RuntimeModuleFile {
+			currentCatalogs = append(currentCatalogs, catalog)
+		}
+	}
+	aggregate.Facts.Resources.OperationAdmissibilities = currentCatalogs
+	currentObservations := aggregate.Facts.Resources.PrerequisiteObservations[:0]
+	for _, observation := range aggregate.Facts.Resources.PrerequisiteObservations {
+		if observation.Normalized().OwnerModuleID != runtimecontract.RuntimeModuleFile || observation.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility {
+			currentObservations = append(currentObservations, observation)
+		}
+	}
+	aggregate.Facts.Resources.PrerequisiteObservations = currentObservations
+	currentSatisfied := aggregate.Facts.Prerequisites.Satisfied[:0]
+	for _, prerequisite := range aggregate.Facts.Prerequisites.Satisfied {
+		if strings.TrimSpace(prerequisite.OwnerModuleID) != runtimecontract.RuntimeModuleFile || prerequisite.Kind != runtimecontract.PrerequisiteKindOperationAdmissibility {
+			currentSatisfied = append(currentSatisfied, prerequisite)
+		}
+	}
+	aggregate.Facts.Prerequisites.Satisfied = currentSatisfied
+	postStateManifestPrerequisite := runtimecontract.RuntimePrerequisite{
+		ID: "manifest:shell-observed-target-post-state-change", Kind: runtimecontract.PrerequisiteKindManifest,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile,
+	}
+	postStateManifest := sendObservedManifest(t, ctx, hub, aggregate, postStateManifestPrerequisite, workspaceDirectory)
+	aggregate.Facts.Resources.Manifest = &postStateManifest.Manifest
+	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, postStateManifest.Observation)
+	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, postStateManifestPrerequisite)
+	if err := aggregate.Validate(); err != nil {
+		t.Fatalf("install post-state-change File manifest: %v", err)
+	}
 	decision, err := runtimecontract.SealRuntimeDecision(aggregate.Facts, runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedValidation,
 		Focus: aggregate.Facts.Focus,
@@ -116,7 +158,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "validate-with-observed-target", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		TargetRefs:          []string{"validation-entry.sh"},
+		TargetRefs:          []string{"implementation.go"},
 		Parameters:          []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}}}}}
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
@@ -145,9 +187,9 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}
 	sealedOperation := sealedOperations[0]
 	sealedValidationScope, err := runtimeValidationScopeTargetRefs(*sealedAggregate.ActiveDispatch, sealedOperation)
-	if err != nil || len(sealedValidationScope) != 2 || !slices.Contains(sealedValidationScope, "implementation.go") || !slices.Contains(sealedValidationScope, "validation-entry.sh") ||
-		len(sealedOperation.TargetRefs) != 1 || sealedOperation.TargetRefs[0] != "validation-entry.sh" {
-		t.Fatalf("asymmetric validation seal = entry=%v scope=%v err=%v", sealedOperation.TargetRefs, sealedValidationScope, err)
+	if err != nil || !slices.Equal(sealedValidationScope, []string{"implementation.go"}) ||
+		len(sealedOperation.TargetRefs) != 1 || sealedOperation.TargetRefs[0] != "implementation.go" {
+		t.Fatalf("exact validation seal = entry=%v scope=%v err=%v", sealedOperation.TargetRefs, sealedValidationScope, err)
 	}
 	if selected := runtimeOwnerCatalogForOperation(
 		sealedAggregate.Facts.Resources.OperationAdmissibilities,
@@ -164,7 +206,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}
 	if persisted.Facts.Failure == nil || persisted.Facts.Failure.ValidationFailureObservation == nil ||
 		persisted.Facts.Resources.FailureTarget != nil {
-		t.Fatalf("validation-owner receipt bypassed File repair-surface confirmation: %+v", persisted)
+		t.Fatalf("validation-owner receipt bypassed File repair-surface confirmation: failure=%+v target=%+v", persisted.Facts.Failure, persisted.Facts.Resources.FailureTarget)
 	}
 	receipt := runtimecontract.RuntimeOperationReceipt{}
 	found := false
@@ -205,8 +247,8 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}
 	failureObservation := persisted.Facts.Failure.ValidationFailureObservation.Clone()
 	if !slices.Equal(failureObservation.CandidateTargetRefs, []string{"implementation.go"}) ||
-		!slices.Equal(failureObservation.ValidationScopeTargetRefs, []string{"implementation.go", "validation-entry.sh"}) {
-		t.Fatalf("Shell observation lost asymmetric sealed scope: %+v", failureObservation)
+		!slices.Equal(failureObservation.ValidationScopeTargetRefs, []string{"implementation.go"}) {
+		t.Fatalf("Shell observation lost exact sealed scope: %+v", failureObservation)
 	}
 	if _, err := controller.recordValidationFailureObservation(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, failureObservation); err != nil {
 		t.Fatalf("validation observation identity fence: %v", err)
@@ -354,10 +396,15 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	validationProofBinding, err := runtimeValidationProofBindingForOperation(dispatch, operation, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
 	sealed, err := shellevents.SealRuntimeOperation(operation, *catalog, shellevents.RuntimeExecutionSealInput{
 		CatalogObservation: *observation, TargetRole: dispatch.FocusTargetRole,
 		ValidationScopeTargetRefs: validationScopeTargetRefs,
 		EvidencePolicies:          loaded.Facts.Activation.EvidencePolicies,
+		ValidationProofBinding:    validationProofBinding,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -375,7 +422,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	if replayed.Receipt.ExecutionKey != execution.ExecutionKey || diagnostic == nil || diagnostic.TargetObservation != nil ||
 		diagnostic.ValidationFailureObservation == nil ||
 		!slices.Equal(diagnostic.ValidationFailureObservation.CandidateTargetRefs, []string{"implementation.go"}) ||
-		!slices.Equal(diagnostic.ValidationFailureObservation.ValidationScopeTargetRefs, []string{"implementation.go", "validation-entry.sh"}) {
+		!slices.Equal(diagnostic.ValidationFailureObservation.ValidationScopeTargetRefs, []string{"implementation.go"}) {
 		t.Fatalf("duplicate Shell execution did not replay the committed receipt: %+v", replayed)
 	}
 
@@ -547,14 +594,17 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 // authorization has no finite scope; neither first delivery nor receipt replay
 // may turn the current File manifest into historical repair authority.
 func TestShellOwnerSelectorOnlyValidationNeverCreatesRepairObservation(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh is not available")
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not available")
 	}
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 
 	workspaceDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspaceDirectory, "go.mod"), []byte("module example.com/workorch-selector-only\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	fileOwner, err := filebiz.New(hub, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -572,15 +622,17 @@ func TestShellOwnerSelectorOnlyValidationNeverCreatesRepairObservation(t *testin
 	}
 	t.Cleanup(func() { shellOwner.Teardown(ctx) })
 
-	record := `WORKORCH_FAILURE_TARGET={"schemaVersion":"workorch.shell.failure_target","targetRole":"implementation","targetRefs":["implementation.go"],"diagnosticClass":"validation_build_failed"}`
 	policy := runtimeManagedValidationEvidencePolicy()
-	policy.CommandName = "sh"
-	policy.RecipeArgs = []string{"-c", "printf '%s\\n' '" + record + "'; exit 7"}
-	ownerPreflight := validationAggregate(t)
+	policy.CommandName = "go"
+	policy.RecipeArgs = []string{"test", "-v", "./..."}
+	ownerPreflight := validationAggregateWithPreparation(t, func(aggregate *RuntimeAggregate) {
+		aggregate.Facts.Focus.RequiredCheckRefs = []string{"workorch-cwi-check-selectoronly"}
+	})
 	ownerPreflight.Facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{policy}
 	shellCatalog := addSelectorOnlyShellFailureTargetFreshness(t, ctx, hub, &ownerPreflight, workspaceDirectory)
 	aggregate := validationOnlyAggregateWithPreparation(t, func(aggregate *RuntimeAggregate) {
 		aggregate.Facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{policy}
+		aggregate.Facts.Focus.RequiredCheckRefs = []string{"workorch-cwi-check-selectoronly"}
 		aggregate.Definition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindManagedValidationSession}
 		aggregate.Facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 		aggregate.Facts.Focus.TargetRefs = nil
@@ -591,6 +643,7 @@ func TestShellOwnerSelectorOnlyValidationNeverCreatesRepairObservation(t *testin
 		aggregate.Facts.Focus.RequireTargetGrounding = true
 		runtimeTestInstallObservedShellPreflight(aggregate, ownerPreflight, shellCatalog)
 	})
+	shellCatalog = runtimeTestOperationAdmissibilityForOwner(t, aggregate.Facts, runtimecontract.RuntimeModuleShell)
 	repository := &durableRuntimeStateRepository{aggregate: aggregate}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
@@ -719,9 +772,14 @@ func TestShellOwnerSelectorOnlyValidationNeverCreatesRepairObservation(t *testin
 	if catalogObservation == nil {
 		t.Fatalf("selector-only completed dispatch lost Shell catalog observation: %+v", dispatch.OperationAdmissibilityObservations)
 	}
+	validationProofBinding, err := runtimeValidationProofBindingForOperation(dispatch, operation, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
 	sealedOperation, err := shellevents.SealRuntimeOperation(operation, *catalog, shellevents.RuntimeExecutionSealInput{
 		CatalogObservation: *catalogObservation, TargetRole: dispatch.FocusTargetRole,
 		ValidationScopeTargetRefs: reloadedScope, EvidencePolicies: loaded.Facts.Activation.EvidencePolicies,
+		ValidationProofBinding: validationProofBinding,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -773,45 +831,28 @@ func TestRuntimeAggregateRejectsDirectShellFailureTargetAuthority(t *testing.T) 
 	}
 }
 
-func addObservedShellFailureTargetFreshness(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate *RuntimeAggregate, workspaceDirectory string) runtimecontract.RuntimeOperationAdmissibility {
+func addObservedShellFailureTargetFreshness(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate *RuntimeAggregate, workspaceDirectory string, nativeCheckFails bool) runtimecontract.RuntimeOperationAdmissibility {
 	t.Helper()
 	manifestPrerequisite := runtimecontract.RuntimePrerequisite{
 		ID: "manifest:shell-observed-target", Kind: runtimecontract.PrerequisiteKindManifest,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile,
 	}
-	manifest := sendObservedManifest(t, ctx, hub, *aggregate, manifestPrerequisite, workspaceDirectory)
-	aggregate.Facts.Resources.Manifest = &manifest.Manifest
-	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, manifest.Observation)
-	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, manifestPrerequisite)
 	prerequisite := runtimecontract.RuntimePrerequisite{
 		ID: "operation_admissibility:shell-observed-target", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
-	result := hub.Send(magicevent.NewEventWithContext(
-		shellevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell,
-		magicevent.NewHeader(), ctx, shellevents.AcquireRuntimeOperationAdmissibilityCommand{
-			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
-			PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID, WorkspaceDeliverableDirectory: workspaceDirectory,
-			RequiredKinds:      prerequisite.RequiredCapabilities,
-			RequiredTargetRefs: append([]string(nil), manifest.Manifest.TargetRefs...),
-			ValidationRecipes: runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(
-				aggregate.Facts.Activation.EvidencePolicies,
-			),
-			WorkspaceManifestBinding: runtimecontract.RuntimeWorkspaceManifestBinding{Manifest: manifest.Manifest, Observation: manifest.Observation},
-			MaxItems:                 4,
-		},
-	))
-	if result == nil {
-		t.Fatal("Shell owner returned no operation admissibility result")
-	}
-	data, err := result.Get()
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, ok := data.(shellevents.AcquireRuntimeOperationAdmissibilityResult)
-	if !ok || response.Acquisition.Observation.ObservationID == "" || response.Acquisition.Admissibility.ObservedRevision == "" {
-		t.Fatalf("Shell operation admissibility response = %#v", data)
-	}
+	requirements := runtimeTestShellValidationProofRequirements(t, aggregate.Facts)
+	initialManifest := sendObservedManifest(t, ctx, hub, *aggregate, manifestPrerequisite, workspaceDirectory)
+	initial := acquireObservedShellValidationCatalog(
+		t, ctx, hub, *aggregate, prerequisite, workspaceDirectory, initialManifest,
+		[]string{"implementation.go"}, requirements,
+	)
+	runtimeTestInstallShellNativeValidationChecks(t, workspaceDirectory, initial.Acquisition.Admissibility, requirements, nativeCheckFails)
+	manifest := sendObservedManifest(t, ctx, hub, *aggregate, manifestPrerequisite, workspaceDirectory)
+	response := acquireObservedShellValidationCatalog(
+		t, ctx, hub, *aggregate, prerequisite, workspaceDirectory, manifest,
+		[]string{"implementation.go"}, requirements,
+	)
 	for _, recipe := range runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(aggregate.Facts.Activation.EvidencePolicies) {
 		if !slices.Contains(response.Acquisition.Admissibility.ValidationRecipeRefs, recipe.ID) {
 			t.Fatalf("Shell operation admissibility did not seal recipe %q: %+v", recipe.ID, response.Acquisition.Admissibility)
@@ -887,38 +928,16 @@ func addSelectorOnlyShellFailureTargetFreshness(t *testing.T, ctx context.Contex
 		ID: "manifest:shell-selector-only", Kind: runtimecontract.PrerequisiteKindManifest,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile,
 	}
-	manifest := sendObservedManifest(t, ctx, hub, *aggregate, manifestPrerequisite, workspaceDirectory)
-	aggregate.Facts.Resources.Manifest = &manifest.Manifest
-	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, manifest.Observation)
-	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, manifestPrerequisite)
 	prerequisite := runtimecontract.RuntimePrerequisite{
 		ID: "operation_admissibility:shell-selector-only", Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	}
-	result := hub.Send(magicevent.NewEventWithContext(
-		shellevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell,
-		magicevent.NewHeader(), ctx, shellevents.AcquireRuntimeOperationAdmissibilityCommand{
-			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
-			PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID, WorkspaceDeliverableDirectory: workspaceDirectory,
-			RequiredKinds: prerequisite.RequiredCapabilities,
-			ValidationRecipes: runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(
-				aggregate.Facts.Activation.EvidencePolicies,
-			),
-			WorkspaceManifestBinding: runtimecontract.RuntimeWorkspaceManifestBinding{Manifest: manifest.Manifest, Observation: manifest.Observation},
-			MaxItems:                 4,
-		},
-	))
-	if result == nil {
-		t.Fatal("Shell owner returned no selector-only operation admissibility result")
-	}
-	data, err := result.Get()
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, ok := data.(shellevents.AcquireRuntimeOperationAdmissibilityResult)
-	if !ok || response.Acquisition.Observation.ObservationID == "" || response.Acquisition.Admissibility.ObservedRevision == "" {
-		t.Fatalf("Shell selector-only operation admissibility response = %#v", data)
-	}
+	requirements := runtimeTestShellValidationProofRequirements(t, aggregate.Facts)
+	initialManifest := sendObservedManifest(t, ctx, hub, *aggregate, manifestPrerequisite, workspaceDirectory)
+	initial := acquireObservedShellValidationCatalog(t, ctx, hub, *aggregate, prerequisite, workspaceDirectory, initialManifest, nil, requirements)
+	runtimeTestInstallShellNativeValidationChecks(t, workspaceDirectory, initial.Acquisition.Admissibility, requirements, true)
+	manifest := sendObservedManifest(t, ctx, hub, *aggregate, manifestPrerequisite, workspaceDirectory)
+	response := acquireObservedShellValidationCatalog(t, ctx, hub, *aggregate, prerequisite, workspaceDirectory, manifest, nil, requirements)
 	catalog := response.Acquisition.Admissibility.Normalized()
 	if len(catalog.TargetRefs) != 0 || !slices.Contains(catalog.SelectorRefs, "workspace-validation-target") {
 		t.Fatalf("Shell owner did not retain selector-only admissibility: %+v", catalog)
@@ -932,6 +951,111 @@ func addSelectorOnlyShellFailureTargetFreshness(t *testing.T, ctx context.Contex
 	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, response.Acquisition.Observation)
 	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, prerequisite)
 	return catalog
+}
+
+func runtimeTestShellValidationProofRequirements(t *testing.T, facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeValidationProofRequirement {
+	t.Helper()
+	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(
+		facts.DefinitionRevision,
+		facts.DefinitionSeed.CoverageItems,
+		facts.DefinitionFocuses,
+	)
+	if err != nil {
+		t.Fatalf("compile exact Shell proof requirements: %v", err)
+	}
+	if len(requirements) == 0 {
+		t.Fatal("managed-validation integration fixture has no exact CWI proof requirement")
+	}
+	return requirements
+}
+
+func acquireObservedShellValidationCatalog(
+	t *testing.T,
+	ctx context.Context,
+	hub magicevent.Hub,
+	aggregate RuntimeAggregate,
+	prerequisite runtimecontract.RuntimePrerequisite,
+	workspaceDirectory string,
+	manifest fileevents.AcquireWorkspaceManifestResult,
+	requiredTargetRefs []string,
+	requirements []runtimecontract.RuntimeValidationProofRequirement,
+) shellevents.AcquireRuntimeOperationAdmissibilityResult {
+	t.Helper()
+	result := hub.Send(magicevent.NewEventWithContext(
+		shellevents.TopicAcquireRuntimeOperationAdmissibility,
+		runtimecontract.RuntimeModuleOrchestrator,
+		runtimecontract.RuntimeModuleShell,
+		magicevent.NewHeader(),
+		ctx,
+		shellevents.AcquireRuntimeOperationAdmissibilityCommand{
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID,
+			PrerequisiteID:      prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID,
+			WorkspaceDeliverableDirectory: workspaceDirectory,
+			RequiredKinds:                 prerequisite.RequiredCapabilities,
+			RequiredTargetRefs:            append([]string(nil), requiredTargetRefs...),
+			ValidationRecipes: runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(
+				aggregate.Facts.Activation.EvidencePolicies,
+			),
+			ValidationProofRequirements: runtimecontract.NormalizeRuntimeValidationProofRequirements(requirements),
+			WorkspaceManifestBinding: runtimecontract.RuntimeWorkspaceManifestBinding{
+				Manifest: manifest.Manifest, Observation: manifest.Observation,
+			},
+			MaxItems: 8,
+		},
+	))
+	if result == nil {
+		t.Fatal("Shell owner returned no operation admissibility result")
+	}
+	data, err := result.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, ok := data.(shellevents.AcquireRuntimeOperationAdmissibilityResult)
+	if !ok || response.Acquisition.Observation.ObservationID == "" || response.Acquisition.Admissibility.ObservedRevision == "" {
+		t.Fatalf("Shell operation admissibility response = %#v", data)
+	}
+	return response
+}
+
+func runtimeTestInstallShellNativeValidationChecks(
+	t *testing.T,
+	workspaceDirectory string,
+	catalog runtimecontract.RuntimeOperationAdmissibility,
+	requirements []runtimecontract.RuntimeValidationProofRequirement,
+	fail bool,
+) {
+	t.Helper()
+	preparationByRequirement := make(map[string]runtimecontract.RuntimeValidationProofPreparation)
+	for _, surface := range catalog.ValidationSurfaces {
+		for _, preparation := range surface.ProofRequirementPreparations {
+			preparationByRequirement[preparation.RequirementHash] = preparation
+		}
+	}
+	for _, requirement := range requirements {
+		preparation, found := preparationByRequirement[requirement.Hash]
+		if !found || preparation.TargetRef == "" || len(preparation.CheckAttestations) == 0 {
+			t.Fatalf("Shell catalog has no exact native preparation for requirement %q: %+v", requirement.Hash, catalog)
+		}
+		var source strings.Builder
+		source.WriteString("package workorch_validation\n\nimport \"testing\"\n\n")
+		for _, attestation := range preparation.CheckAttestations {
+			fmt.Fprintf(&source, "func %s(t *testing.T) {\n", attestation.NativeCheckRef)
+			if fail {
+				source.WriteString("\tt.Fatal(\"owner-native validation assertion failed\")\n")
+			} else {
+				source.WriteString("\tif 2+2 != 4 { t.Fatal(\"owner-native validation assertion failed\") }\n")
+			}
+			source.WriteString("}\n\n")
+		}
+		path := filepath.Join(workspaceDirectory, filepath.FromSlash(preparation.TargetRef))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(source.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func reacquireObservedShellRepairPrerequisites(t *testing.T, ctx context.Context, hub magicevent.Hub, controller *RuntimeController, aggregate RuntimeAggregate, workspaceDirectory string) RuntimeAggregate {
@@ -975,6 +1099,7 @@ func reacquireObservedShellRepairPrerequisites(t *testing.T, ctx context.Context
 			if aggregate.Facts.Resources.Manifest == nil {
 				t.Fatalf("Shell admissibility refresh has no current File manifest: %+v", aggregate.Facts.Prerequisites.Pending)
 			}
+			requirements := runtimeTestShellValidationProofRequirements(t, aggregate.Facts)
 			var manifestObservation *runtimecontract.RuntimePrerequisiteObservation
 			for index := range aggregate.Facts.Resources.PrerequisiteObservations {
 				candidate := aggregate.Facts.Resources.PrerequisiteObservations[index]
@@ -1003,6 +1128,7 @@ func reacquireObservedShellRepairPrerequisites(t *testing.T, ctx context.Context
 					ValidationRecipes: runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(
 						aggregate.Facts.Activation.EvidencePolicies,
 					),
+					ValidationProofRequirements: runtimecontract.NormalizeRuntimeValidationProofRequirements(requirements),
 					WorkspaceManifestBinding: runtimecontract.RuntimeWorkspaceManifestBinding{
 						Manifest: *aggregate.Facts.Resources.Manifest, Observation: *manifestObservation,
 					},
@@ -1111,9 +1237,10 @@ func (e runtimeObservedShellExecutor) ExecuteRuntimeOperation(ctx context.Contex
 	sealed, err := shellevents.SealRuntimeOperation(request.Operation, *request.OwnerCatalog, shellevents.RuntimeExecutionSealInput{
 		CatalogObservation: *request.OwnerCatalogObservation, TargetRole: request.TargetRole,
 		ValidationScopeTargetRefs: request.ValidationScopeTargetRefs, EvidencePolicies: request.EvidencePolicies,
+		ValidationProofBinding: request.ValidationProofBinding,
 	})
 	if err != nil {
-		return RuntimeOperationExecutionResult{}, err
+		return RuntimeOperationExecutionResult{}, fmt.Errorf("seal observed Shell operation: catalog=%s observation=%s content=%s: %w", request.OwnerCatalog.SnapshotID, request.OwnerCatalogObservation.ObservationID, request.OwnerCatalogObservation.ContentHash, err)
 	}
 	result := e.hub.Send(magicevent.NewEventWithContext(
 		shellevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell,

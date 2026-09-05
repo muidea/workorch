@@ -48,6 +48,9 @@ type RuntimeOperationExecutionContext struct {
 // validation cannot prove ResumeDispatchID because the dispatch identity lives
 // on this outer context.
 func ValidateRuntimeOperationExecutionContextScope(value RuntimeOperationExecutionContext) error {
+	if err := ValidateRuntimeEvidencePolicies(value.EvidencePolicies); err != nil {
+		return fmt.Errorf("runtime operation execution context evidence policies: %w", err)
+	}
 	if value.WorkspaceID == "" || value.RunID == "" || strings.TrimSpace(value.DispatchID) == "" || strings.TrimSpace(value.OperationID) == "" {
 		return fmt.Errorf("runtime operation execution context requires workspace, run, dispatch and operation scope")
 	}

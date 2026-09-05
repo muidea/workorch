@@ -11,6 +11,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 type replacementInternalEventKind string
@@ -138,6 +139,11 @@ func normalizeReplacementInternalEvent(event replacementInternalEvent) (replacem
 			strings.TrimSpace(event.Requested.ConflictingReplacementIntentID) != "" || strings.TrimSpace(event.Requested.ConflictingReplacementIntentHash) != "" ||
 			event.Requested.SuccessorRunID != "" || strings.TrimSpace(event.Requested.TerminalDeliveryID) != "" || event.Requested.RuntimeStateRevision != 0 || strings.TrimSpace(event.Requested.AcknowledgedAt) != "" {
 			return replacementInternalEvent{}, common.ErrInvalidArgument
+		}
+		if event.Requested.Bootstrap != nil {
+			if err := runtimecontract.ValidateRuntimeBootstrapRaw(*event.Requested.Bootstrap); err != nil {
+				return replacementInternalEvent{}, err
+			}
 		}
 		intent := runmodel.CloneReplacementIntent(*event.Requested)
 		event.Requested = &intent

@@ -95,6 +95,9 @@ func cloneCoverageEvidenceProofRaw(in CoverageEvidenceProof) CoverageEvidencePro
 		return cloneRuntimeOperationVariantRefRaw(item)
 	})
 	out.RequiredCheckRefs = cloneRuntimeStateRawSlice(in.RequiredCheckRefs, func(item string) string { return item })
+	out.ValidationCheckAttestations = cloneRuntimeStateRawSlice(in.ValidationCheckAttestations, func(item RuntimeValidationCheckAttestationBinding) RuntimeValidationCheckAttestationBinding {
+		return item
+	})
 	out.MetricConstraints = cloneRuntimeStateRawSlice(in.MetricConstraints, func(item string) string { return item })
 	out.ArtifactRefs = cloneRuntimeStateRawSlice(in.ArtifactRefs, func(item string) string { return item })
 	return out
@@ -110,6 +113,9 @@ func cloneCoverageEvidenceProofIdentityRaw(in CoverageEvidenceProofIdentity) Cov
 	out.ProspectiveTargetRefs = cloneRuntimeStateRawSlice(in.ProspectiveTargetRefs, func(item string) string { return item })
 	out.RequiredEffectScopes = cloneRuntimeStateRawSlice(in.RequiredEffectScopes, func(item RuntimeEffectScope) RuntimeEffectScope { return item })
 	out.RequiredCheckRefs = cloneRuntimeStateRawSlice(in.RequiredCheckRefs, func(item string) string { return item })
+	out.ValidationCheckAttestations = cloneRuntimeStateRawSlice(in.ValidationCheckAttestations, func(item RuntimeValidationCheckAttestationBinding) RuntimeValidationCheckAttestationBinding {
+		return item
+	})
 	out.MetricConstraints = cloneRuntimeStateRawSlice(in.MetricConstraints, func(item string) string { return item })
 	out.ArtifactRefs = cloneRuntimeStateRawSlice(in.ArtifactRefs, func(item string) string { return item })
 	return out
@@ -122,12 +128,12 @@ func cloneCoverageFocusRaw(in CoverageFocus) CoverageFocus {
 		return cloneCoverageEvidenceBindingRaw(item)
 	})
 	out.RequiredEvidenceKinds = cloneRuntimeStateRawSlice(in.RequiredEvidenceKinds, func(item string) string { return item })
+	out.AcceptedStepKinds = cloneRuntimeStateRawSlice(in.AcceptedStepKinds, func(item string) string { return item })
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
 	out.TargetDiscoverySources = cloneRuntimeStateRawSlice(in.TargetDiscoverySources, func(item string) string { return item })
 	out.TargetSelectorCandidateRefs = cloneRuntimeStateRawSlice(in.TargetSelectorCandidateRefs, func(item string) string { return item })
 	out.ProspectiveTargetAllOfConstraintRefs = cloneRuntimeStateRawSlice(in.ProspectiveTargetAllOfConstraintRefs, func(item string) string { return item })
 	out.ProspectiveTargetRefs = cloneRuntimeStateRawSlice(in.ProspectiveTargetRefs, func(item string) string { return item })
-	out.AcceptedStepKinds = cloneRuntimeStateRawSlice(in.AcceptedStepKinds, func(item string) string { return item })
 	out.AcceptedOperationVariants = cloneRuntimeStateRawSlice(in.AcceptedOperationVariants, func(item RuntimeOperationVariantRef) RuntimeOperationVariantRef {
 		return cloneRuntimeOperationVariantRefRaw(item)
 	})
@@ -440,6 +446,9 @@ func cloneRuntimeCWIReconciliationBindingRefRaw(in RuntimeCWIReconciliationBindi
 	out.ProspectiveTargetRefs = cloneRuntimeStateRawSlice(in.ProspectiveTargetRefs, func(item string) string { return item })
 	out.ValidationRecipeIDs = cloneRuntimeStateRawSlice(in.ValidationRecipeIDs, func(item string) string { return item })
 	out.RequiredCheckRefs = cloneRuntimeStateRawSlice(in.RequiredCheckRefs, func(item string) string { return item })
+	out.ValidationCheckAttestations = cloneRuntimeStateRawSlice(in.ValidationCheckAttestations, func(item RuntimeValidationCheckAttestationBinding) RuntimeValidationCheckAttestationBinding {
+		return item
+	})
 	out.MetricConstraints = cloneRuntimeStateRawSlice(in.MetricConstraints, func(item string) string { return item })
 	out.ArtifactRefs = cloneRuntimeStateRawSlice(in.ArtifactRefs, func(item string) string { return item })
 	return out
@@ -939,6 +948,7 @@ func cloneRuntimeDefinitionFocusRaw(in RuntimeDefinitionFocus) RuntimeDefinition
 	out := in
 	out.CoverageWorkItemIDs = cloneRuntimeStateRawSlice(in.CoverageWorkItemIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
 	out.RequiredEvidenceKinds = cloneRuntimeStateRawSlice(in.RequiredEvidenceKinds, func(item string) string { return item })
+	out.AcceptedStepKinds = cloneRuntimeStateRawSlice(in.AcceptedStepKinds, func(item string) string { return item })
 	out.TargetDiscoverySources = cloneRuntimeStateRawSlice(in.TargetDiscoverySources, func(item string) string { return item })
 	out.TargetSelectorCandidateRefs = cloneRuntimeStateRawSlice(in.TargetSelectorCandidateRefs, func(item string) string { return item })
 	out.ProspectiveTargetAllOfConstraintRefs = cloneRuntimeStateRawSlice(in.ProspectiveTargetAllOfConstraintRefs, func(item string) string { return item })
@@ -948,6 +958,7 @@ func cloneRuntimeDefinitionFocusRaw(in RuntimeDefinitionFocus) RuntimeDefinition
 	out.OwnerFactConvergences = cloneRuntimeStateRawSlice(in.OwnerFactConvergences, func(item RuntimeOwnerFactConvergence) RuntimeOwnerFactConvergence {
 		return cloneRuntimeOwnerFactConvergenceRaw(item)
 	})
+	out.RequiredCheckRefs = cloneRuntimeStateRawSlice(in.RequiredCheckRefs, func(item string) string { return item })
 	out.ValidationFailureRepairConvergence = cloneRuntimeStateRawPointer(in.ValidationFailureRepairConvergence, func(item RuntimeValidationFailureRepairConvergence) RuntimeValidationFailureRepairConvergence {
 		return cloneRuntimeValidationFailureRepairConvergenceRaw(item)
 	})
@@ -1549,6 +1560,15 @@ func cloneRuntimeProspectiveTargetSatisfactionConstraintRaw(in RuntimeProspectiv
 	return out
 }
 
+func cloneRuntimeValidationProofPreparationRaw(in RuntimeValidationProofPreparation) RuntimeValidationProofPreparation {
+	out := in
+	out.CheckAttestations = cloneRuntimeStateRawSlice(in.CheckAttestations, func(value RuntimeValidationCheckAttestationBinding) RuntimeValidationCheckAttestationBinding {
+		return value
+	})
+	out.ProspectiveTargetSatisfactionConstraint = cloneRuntimeProspectiveTargetSatisfactionConstraintRaw(in.ProspectiveTargetSatisfactionConstraint)
+	return out
+}
+
 func cloneRuntimeProspectiveWorkspaceManifestDeltaRaw(in RuntimeProspectiveWorkspaceManifestDelta) RuntimeProspectiveWorkspaceManifestDelta {
 	out := in
 	out.ProspectiveTargetRefs = cloneRuntimeStateRawSlice(in.ProspectiveTargetRefs, func(item string) string { return item })
@@ -1841,7 +1861,12 @@ func cloneRuntimeSemanticProofFeasibilityRaw(in RuntimeSemanticProofFeasibility)
 
 func cloneRuntimeSemanticProofObligationRaw(in RuntimeSemanticProofObligation) RuntimeSemanticProofObligation {
 	out := in
+	out.ValidationProofRequirement = cloneRuntimeStateRawPointer(in.ValidationProofRequirement, func(item RuntimeValidationProofRequirement) RuntimeValidationProofRequirement {
+		item.RequiredCheckRefs = cloneRuntimeStateRawSlice(item.RequiredCheckRefs, func(value string) string { return value })
+		return item
+	})
 	out.RequiredEvidenceKinds = cloneRuntimeStateRawSlice(in.RequiredEvidenceKinds, func(item string) string { return item })
+	out.DeclarationAcceptedStepKinds = cloneRuntimeStateRawSlice(in.DeclarationAcceptedStepKinds, func(item string) string { return item })
 	out.DeclarationTargetDiscoverySources = cloneRuntimeStateRawSlice(in.DeclarationTargetDiscoverySources, func(item string) string { return item })
 	out.DeclarationTargetSelectorCandidateRefs = cloneRuntimeStateRawSlice(in.DeclarationTargetSelectorCandidateRefs, func(item string) string { return item })
 	out.DeclarationProspectiveTargetAllOfConstraintRefs = cloneRuntimeStateRawSlice(in.DeclarationProspectiveTargetAllOfConstraintRefs, func(item string) string { return item })
@@ -2087,6 +2112,16 @@ func cloneRuntimeValidationSurfaceRaw(in RuntimeValidationSurface) RuntimeValida
 		return cloneRuntimeProspectiveTargetSatisfactionConstraintRaw(item)
 	})
 	out.CheckRefs = cloneRuntimeStateRawSlice(in.CheckRefs, func(item string) string { return item })
+	out.ProofRequirementBindings = cloneRuntimeStateRawSlice(in.ProofRequirementBindings, func(item RuntimeValidationProofRequirementBinding) RuntimeValidationProofRequirementBinding {
+		item.RequiredCheckRefs = cloneRuntimeStateRawSlice(item.RequiredCheckRefs, func(value string) string { return value })
+		item.CheckAttestations = cloneRuntimeStateRawSlice(item.CheckAttestations, func(value RuntimeValidationCheckAttestationBinding) RuntimeValidationCheckAttestationBinding {
+			return value
+		})
+		return item
+	})
+	out.ProofRequirementPreparations = cloneRuntimeStateRawSlice(in.ProofRequirementPreparations, func(item RuntimeValidationProofPreparation) RuntimeValidationProofPreparation {
+		return cloneRuntimeValidationProofPreparationRaw(item)
+	})
 	return out
 }
 

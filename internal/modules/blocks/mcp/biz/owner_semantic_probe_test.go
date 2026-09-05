@@ -436,7 +436,7 @@ func semanticProbeCommandFromSnapshot(t *testing.T, snapshot runtimeMCPAdmissibi
 		CoverageItems:             []runtimecontract.RuntimeCoverageItem{{ID: "cwi-mcp-semantic-probe", SliceID: "slice-mcp-semantic-probe", SourceScope: "dodItem", SourceID: "dod-mcp-semantic-probe", TargetText: "probe", Order: 1}},
 		AllowedOwnerModuleIDs:     []string{ModuleID}, AllowedOperationKinds: []string{runtimecontract.StepKindMCPToolCall}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
 		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
-			CoverageWorkItemID: "cwi-mcp-semantic-probe", RequiredEvidenceKinds: []string{evidenceKind},
+			CoverageWorkItemID: "cwi-mcp-semantic-probe", DeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-mcp-semantic-probe"), RequiredEvidenceKinds: []string{evidenceKind},
 		}},
 		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
@@ -444,7 +444,7 @@ func semanticProbeCommandFromSnapshot(t *testing.T, snapshot runtimeMCPAdmissibi
 	proposal := runtimecontract.RuntimeSemanticProofProposal{
 		CoverageWorkItemID: "cwi-mcp-semantic-probe", OwnerModuleID: ModuleID, OperationKind: runtimecontract.StepKindMCPToolCall,
 		Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{serverID}},
-		RequiredEvidenceKinds: []string{evidenceKind}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{sealedEffect}, ValidationRecipeID: recipeID, DeclarationRef: "dod/cwi-mcp-semantic-probe",
+		RequiredEvidenceKinds: []string{evidenceKind}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{sealedEffect}, ValidationRecipeID: recipeID, DeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-mcp-semantic-probe"),
 	}
 	return mcpevents.ProbeRuntimeSemanticProofFeasibilityCommand(runtimecontract.RuntimeSemanticProofFeasibilityRequest{
 		WorkspaceID: manifest.WorkspaceID, RunID: manifest.RunID, FeasibilityBatchID: "batch-mcp-semantic-probe", WorkspaceDeliverableDirectory: t.TempDir(), Manifest: manifest, Proposal: proposal, OwnerCatalog: catalog,

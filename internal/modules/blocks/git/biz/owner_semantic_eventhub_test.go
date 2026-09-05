@@ -48,7 +48,7 @@ func TestGitOwnerSemanticProofEventHubReportsFeasibleThenStale(t *testing.T) {
 			Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{gitWorkspaceRepositorySelector},
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-		DeclarationRef: "dod/cwi-git-semantic",
+		DeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-git-semantic"),
 	}
 	manifest := runtimecontract.RuntimeSemanticPlanManifest{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent,
@@ -60,7 +60,7 @@ func TestGitOwnerSemanticProofEventHubReportsFeasibleThenStale(t *testing.T) {
 		AllowedOwnerModuleIDs: []string{ModuleID}, AllowedOperationKinds: []string{StepKindWrite},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
 		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
-			CoverageWorkItemID: "cwi-git-semantic", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			CoverageWorkItemID: "cwi-git-semantic", DeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-git-semantic"), RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		}},
 		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{acquisition.Admissibility},
 	}

@@ -339,7 +339,7 @@ func TestRuntimeSemanticPlanRejectsDynamicOperationVariant(t *testing.T) {
 		OperationVariantID: "mcp/tool_call/server/tool", Target: RuntimeOperationTargetAuthorization{
 			Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"server"},
 		}, RequiredEvidenceKinds: []string{EvidenceKindValidation}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession},
-		ValidationRecipeID: "mcp/tool_call/server/tool", RequiredCheckRefs: []string{"configured-mcp-server"}, DeclarationRef: "dod/cwi-001",
+		ValidationRecipeID: "mcp/tool_call/server/tool", DeclarationRef: "dod/cwi-001",
 	}
 	var constraint *RuntimeSemanticProposalConstraintError
 	if err := proposal.Validate(); !errors.As(err, &constraint) || constraint.Field != "operationVariantId" {

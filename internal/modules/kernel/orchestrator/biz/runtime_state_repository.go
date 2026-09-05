@@ -87,19 +87,42 @@ func (r runtimeStateRepository) Save(ctx context.Context, aggregate runtime.Runt
 	if err := aggregate.Validate(); err != nil {
 		return err
 	}
-	run, err := (runSnapshotReader{hub: r.hub}).Read(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
-	if err != nil {
-		return err
+	return r.SaveValidated(ctx, aggregate, expectedRevision)
+}
+
+// SaveValidated is used only by RuntimeTransitionCoordinator after the
+// Orchestrator owner has validated the complete cross-SM aggregate. Keeping
+// this separate from Save avoids repeating that expensive validation while
+// preserving Save as a safe repository trust boundary for direct callers.
+func (r runtimeStateRepository) SaveValidated(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
+	if r.hub == nil {
+		return common.ErrInvalidArgument
 	}
 	record := runtimeStateRecordFromAggregate(aggregate)
-	run.RuntimeState = &record
-	command, err := storeRuntimeStateRecordCommandFromModel(run)
+	revision := expectedRevision
+	command := runevents.StoreRuntimeStateRecordCommand{
+		RunID:                        aggregate.Facts.RunID,
+		WorkspaceID:                  aggregate.Facts.WorkspaceID,
+		RuntimeState:                 &record,
+		ExpectedRuntimeStateRevision: &revision,
+	}
+	needsFence, err := runtimeStateRequiresLifecycleFence(&record)
 	if err != nil {
 		return err
 	}
-	command.ExpectedRuntimeStateRevision = &expectedRevision
+	if needsFence {
+		run, readErr := (runSnapshotReader{hub: r.hub}).Read(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+		if readErr != nil {
+			return readErr
+		}
+		run.RuntimeState = &record
+		command.LifecycleFence, err = runtimeLifecycleFenceFromModel(run)
+		if err != nil {
+			return err
+		}
+	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunCommandStoreRuntimeStateRecord, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandStoreRuntimeStateRecord, "run", string(run.ID), run.WorkspaceID, run.ID)
+	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandStoreRuntimeStateRecord, "run", string(command.RunID), command.WorkspaceID, command.RunID)
 	response, err := runCommandResponse[runevents.StoreRuntimeStateRecordResult](r.hub.Send(event), runevents.TopicRunCommandStoreRuntimeStateRecord)
 	if err != nil {
 		return err

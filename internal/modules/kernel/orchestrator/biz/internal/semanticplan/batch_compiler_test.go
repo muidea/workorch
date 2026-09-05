@@ -126,7 +126,13 @@ func batchCompilerTestManifest(t *testing.T, items []runtimecontract.RuntimeCove
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	obligations := make([]runtimecontract.RuntimeSemanticProofObligation, 0, len(items))
 	for _, item := range items {
-		obligations = append(obligations, runtimecontract.RuntimeSemanticProofObligation{CoverageWorkItemID: item.ID, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}})
+		obligations = append(obligations, runtimecontract.RuntimeSemanticProofObligation{
+			CoverageWorkItemID: item.ID,
+			DeclarationRef:     runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(item.SourceScope, item.SourceID),
+			RequiredEvidenceKinds: []string{
+				runtimecontract.EvidenceKindStateChange,
+			},
+		})
 	}
 	manifest := runtimecontract.RuntimeSemanticPlanManifest{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanManifestSchemaCurrent,

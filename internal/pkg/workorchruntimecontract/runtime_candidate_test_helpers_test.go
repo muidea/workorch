@@ -43,37 +43,46 @@ func runtimeCandidateTestDecisionWithBindings(t testing.TB, decision RuntimeDeci
 	if decision.State == ConvergenceStateNeedAssessment {
 		acceptedKinds = []string{RuntimeBlockKindManagedValidationSession}
 	}
-	proofs := make([]CoverageEvidenceProof, 0, len(decision.Focus.RequiredEvidenceKinds))
-	for _, evidenceKind := range decision.Focus.RequiredEvidenceKinds {
-		proof := CoverageEvidenceProof{EvidenceKind: evidenceKind}
-		for _, kind := range acceptedKinds {
-			if RuntimeOperationKindSupportsCoverageEvidence(kind, evidenceKind) {
-				proof.AllowedOperationKinds = append(proof.AllowedOperationKinds, kind)
-			}
-		}
-		if len(proof.AllowedOperationKinds) == 0 {
-			t.Fatalf("test fixture has no owner-verifiable %s proof operation in %v", evidenceKind, acceptedKinds)
-		}
-		switch evidenceKind {
-		case EvidenceKindStateChange:
-			proof.RequiredEffectScopes = durableCandidateTestEffectScopes(required.RequiredEffectScopes)
-		case EvidenceKindValidation:
-			proof.RequiredEffectScopes = nonDurableCandidateTestEffectScopes(required.RequiredEffectScopes)
-			proof.ValidationRecipeID = "recipe/candidate-test"
-		default:
-			t.Fatalf("unsupported required evidence kind %q", evidenceKind)
-		}
-		proofs = append(proofs, proof)
-	}
 	bindings := make([]CoverageEvidenceBinding, 0, len(required.CoverageWorkItemIDs))
 	for _, coverageID := range required.CoverageWorkItemIDs {
+		proofs := make([]CoverageEvidenceProof, 0, len(decision.Focus.RequiredEvidenceKinds))
+		declarationRef := CanonicalRuntimeDefinitionEvidenceDeclarationRef("test", string(coverageID))
+		for _, evidenceKind := range decision.Focus.RequiredEvidenceKinds {
+			proof := CoverageEvidenceProof{EvidenceKind: evidenceKind}
+			for _, kind := range acceptedKinds {
+				if RuntimeOperationKindSupportsCoverageEvidence(kind, evidenceKind) {
+					proof.AllowedOperationKinds = append(proof.AllowedOperationKinds, kind)
+				}
+			}
+			if len(proof.AllowedOperationKinds) == 0 {
+				t.Fatalf("test fixture has no owner-verifiable %s proof operation in %v", evidenceKind, acceptedKinds)
+			}
+			switch evidenceKind {
+			case EvidenceKindStateChange:
+				proof.RequiredEffectScopes = durableCandidateTestEffectScopes(required.RequiredEffectScopes)
+			case EvidenceKindValidation:
+				proof.RequiredEffectScopes = nonDurableCandidateTestEffectScopes(required.RequiredEffectScopes)
+				proof.ValidationRecipeID = "recipe/candidate-test"
+				if runtimeOperationKindsContain(proof.AllowedOperationKinds, RuntimeBlockKindManagedValidationSession) {
+					item := RuntimeCoverageItem{ID: coverageID, SourceScope: "test", SourceID: string(coverageID), TargetText: "candidate test proof"}
+					requirement := runtimeValidationProofRequirementForTest(t, definitionRevision, item, declarationRef, proof.ValidationRecipeID, nil)
+					proof.ValidationProofRequirementHash = requirement.Hash
+					proof.RequiredCheckRefs = append([]string(nil), requirement.RequiredCheckRefs...)
+					proof.ValidationCheckAttestations = runtimeValidationCheckAttestationsForTest(requirement.RequiredCheckRefs)
+					declarationRef = requirement.DeclarationRef
+				}
+			default:
+				t.Fatalf("unsupported required evidence kind %q", evidenceKind)
+			}
+			proofs = append(proofs, proof)
+		}
 		binding := CoverageEvidenceBinding{
 			ID:                 fmt.Sprintf("binding/test/%s", coverageID),
 			CoverageWorkItemID: coverageID,
 			FocusID:            decision.Focus.ID,
 			DefinitionRevision: definitionRevision,
 			Proofs:             append([]CoverageEvidenceProof(nil), proofs...),
-			DeclarationRef:     fmt.Sprintf("declaration/test/%s", coverageID),
+			DeclarationRef:     declarationRef,
 		}
 		if len(required.TargetRefs) != 0 {
 			binding.TargetRefs = append([]string(nil), required.TargetRefs...)

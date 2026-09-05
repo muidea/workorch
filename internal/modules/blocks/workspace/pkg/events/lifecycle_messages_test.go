@@ -2,11 +2,26 @@ package events
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestWorkspaceExecutionIntentRejectsDuplicateBootstrapAuthorityBeforeNormalization(t *testing.T) {
+	policy := runtimecontract.RuntimeEvidencePolicy{ID: "policy-1", AppliesTo: runtimecontract.StepKindFileWrite}.Normalized()
+	bootstrap := runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{policy, policy}}}
+	cmd := WorkspaceExecutionIntentCommand{
+		WorkspaceID: "ws-1", RequestID: "request-1", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap,
+	}
+	if err := cmd.Validate(); err == nil || !strings.Contains(err.Error(), "evidence polic") {
+		t.Fatalf("restart intent accepted duplicate bootstrap authority: %v", err)
+	}
+	if got := cmd.Normalized(); len(got.Bootstrap.Activation.EvidencePolicies) != 2 {
+		t.Fatalf("command normalization laundered duplicate bootstrap authority: %+v", got.Bootstrap.Activation.EvidencePolicies)
+	}
+}
 
 func TestWorkspaceExecutionIntentResultUsesTypedAdmissionWithoutInventedRun(t *testing.T) {
 	result := WorkspaceExecutionIntentResult{

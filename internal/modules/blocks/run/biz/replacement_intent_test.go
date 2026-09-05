@@ -265,6 +265,7 @@ func restartTestBootstrapWithDefinition(t *testing.T, workspaceID common.Workspa
 		DefinitionFocuses: []runtimecontract.RuntimeDefinitionFocus{{
 			ID: "focus-1", SliceID: item.SliceID, AssessmentScope: item.SourceScope, AssessmentID: item.SourceID, AssessmentText: item.TargetText,
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{item.ID}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			EvidenceDeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(item.SourceScope, item.SourceID),
 		}},
 		Slices: []runtimecontract.RuntimeAcceptanceSlice{slice}, CoverageItems: []runtimecontract.RuntimeCoverageItem{item},
 		ConvergencePolicy: runtimecontract.DefaultRuntimeConvergencePolicy(), RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),

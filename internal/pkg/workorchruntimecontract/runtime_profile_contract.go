@@ -316,6 +316,15 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 				return fmt.Errorf("runtime profile %q has duplicate evidence requirement scope+id %q", profile.ID, sourceRef)
 			}
 			seenEvidenceRequirementRefs[sourceRef] = struct{}{}
+			if item.ValidationRecipeID != "" && !containsString(item.RequiredEvidenceKinds, EvidenceKindValidation) {
+				return fmt.Errorf("runtime profile evidence requirement %q validation recipe requires validation evidence", item.ID)
+			}
+			if len(item.RequiredCheckRefs) != 0 && !containsString(item.RequiredEvidenceKinds, EvidenceKindValidation) {
+				return fmt.Errorf("runtime profile evidence requirement %q checks require validation evidence", item.ID)
+			}
+			if duplicate := duplicateRuntimeValidationProofCheckRef(item.RequiredCheckRefs); duplicate != "" {
+				return fmt.Errorf("runtime profile evidence requirement %q duplicates check %q", item.ID, duplicate)
+			}
 			if err := ValidateRuntimeTargetGrounding(item.RequireTargetGrounding, item.TargetRole, item.TargetRefs, item.TargetDiscoverySources, item.TargetSelectorRef); err != nil {
 				return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
 			}
@@ -637,7 +646,7 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 		value.AcceptedStepKinds = normalizeStrings(value.AcceptedStepKinds)
 		value.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(value.AcceptedOperationVariants)
 		value.ValidationRecipeID = strings.TrimSpace(value.ValidationRecipeID)
-		value.RequiredCheckRefs = normalizeStrings(value.RequiredCheckRefs)
+		value.RequiredCheckRefs = normalizeRuntimeValidationProofCheckRefs(value.RequiredCheckRefs)
 		value.MetricConstraints = normalizeStrings(value.MetricConstraints)
 		value.ArtifactRefs = normalizeStrings(value.ArtifactRefs)
 		value.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(value.RequiredOwnerFacts)

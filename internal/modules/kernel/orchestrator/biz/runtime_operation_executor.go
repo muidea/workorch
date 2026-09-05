@@ -216,6 +216,7 @@ func (e eventRuntimeOperationExecutor) executeShell(ctx context.Context, request
 		TargetRole:                request.TargetRole,
 		ValidationScopeTargetRefs: append([]string(nil), request.ValidationScopeTargetRefs...),
 		EvidencePolicies:          append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
+		ValidationProofBinding:    request.ValidationProofBinding.Clone(),
 	})
 	if err != nil {
 		return runtime.RuntimeOperationExecutionResult{}, err

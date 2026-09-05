@@ -778,6 +778,7 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 	} else {
 		observation := receipt.Evidence.Validation.Normalized()
 		writeHashString(h, observation.RecipeID)
+		writeHashString(h, observation.ObservationProtocolRef)
 		writeHashStrings(h, observation.ExecutedChecks)
 		writeHashStrings(h, observation.PassedChecks)
 		writeHashStrings(h, observation.FailedChecks)

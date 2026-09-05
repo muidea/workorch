@@ -342,13 +342,42 @@ func prospectiveCompositeDriveAggregateWithCandidatesAndExisting(t *testing.T, c
 	facts.Focus.RequireTargetGrounding = true
 	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite}
 	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
-	facts.DefinitionFocuses = runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{facts.Focus})
 
 	recipePolicy := runtimecontract.RuntimeEvidencePolicy{
 		ID: "test-prospective-validation-recipe", AppliesTo: runtimecontract.StepKindShellCommand,
 		CommandName: "true", RecipeDeclared: true, RecipeArgs: []string{"--prospective"}, RecipeTimeoutMillis: 5_000,
 	}
 	facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{recipePolicy}
+	// This aggregate-only fixture specializes the immutable Definition before
+	// SM-3 starts. Build the declaration from the exact admitted CWI source;
+	// the mutable focus intentionally carries no declarationRef authority.
+	if len(facts.DefinitionSeed.CoverageItems) != 1 {
+		t.Fatalf("prospective drive fixture requires one admitted CWI: %+v", facts.DefinitionSeed.CoverageItems)
+	}
+	coverageItem := facts.DefinitionSeed.CoverageItems[0].Normalized()
+	declaration := facts.Focus.Normalized()
+	declaration.AssessmentScope = coverageItem.SourceScope
+	declaration.AssessmentID = coverageItem.SourceID
+	declaration.AssessmentText = coverageItem.TargetText
+	declaration.EvidenceDeclarationRef = runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(coverageItem.SourceScope, coverageItem.SourceID)
+	declaration.ValidationRecipeID = recipePolicy.ID
+	declaration.RequiredCheckRefs = []string{"check/prospective-validation"}
+	facts.DefinitionFocuses = runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{declaration})
+	proofRequirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(
+		facts.DefinitionRevision,
+		facts.DefinitionSeed.CoverageItems,
+		facts.DefinitionFocuses,
+	)
+	if err != nil || len(proofRequirements) != 1 {
+		t.Fatalf("compile prospective validation proof requirement: requirements=%+v err=%v", proofRequirements, err)
+	}
+	proofRequirement := proofRequirements[0]
+	convergence.Requirement.ValidationProofRequirementHash = proofRequirement.Hash
+	facts.Focus.RequiredOwnerFacts = []runtimecontract.RuntimeOwnerFactRequirement{convergence.Requirement}
+	facts.Focus.OwnerFactConvergences = []runtimecontract.RuntimeOwnerFactConvergence{convergence}
+	declaration.RequiredOwnerFacts = []runtimecontract.RuntimeOwnerFactRequirement{convergence.Requirement}
+	declaration.OwnerFactConvergences = []runtimecontract.RuntimeOwnerFactConvergence{convergence}
+	facts.DefinitionFocuses = runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{declaration})
 	fileCatalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "prospective-file-admissibility", OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		OperationKinds: []string{runtimecontract.StepKindFileWrite}, TargetRefs: append([]string(nil), existingTargets...),
@@ -379,6 +408,24 @@ func prospectiveCompositeDriveAggregateWithCandidatesAndExisting(t *testing.T, c
 		CheckRefs: []string{"check/prospective-validation"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
 		EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 	}
+	attestations := make([]runtimecontract.RuntimeValidationCheckAttestationBinding, 0, len(proofRequirement.RequiredCheckRefs))
+	for _, checkRef := range proofRequirement.RequiredCheckRefs {
+		attestations = append(attestations, runtimecontract.RuntimeValidationCheckAttestationBinding{
+			RequiredCheckRef: checkRef, ObservationProtocolRef: "test/opaque-validation-observation/v1",
+			NativeCheckRef: "test/native/prospective/" + checkRef,
+		})
+	}
+	preparation := runtimecontract.RuntimeValidationProofPreparation{
+		RequirementHash: proofRequirement.Hash, DefinitionRevision: proofRequirement.DefinitionRevision,
+		CoverageWorkItemID: proofRequirement.CoverageWorkItemID, DeclarationRef: proofRequirement.DeclarationRef,
+		ValidationRecipeID: shellSurface.ID, CheckAttestations: attestations,
+		ProspectiveTargetSatisfactionConstraint: shellSurface.ProspectiveTargetSatisfactionConstraint.Clone(),
+	}.Normalized()
+	if err := preparation.Validate(); err != nil {
+		t.Fatalf("build prospective validation proof preparation: %v", err)
+	}
+	shellSurface.CheckRefs = append([]string(nil), proofRequirement.RequiredCheckRefs...)
+	shellSurface.ProofRequirementPreparations = []runtimecontract.RuntimeValidationProofPreparation{preparation}
 	shellCatalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "prospective-shell-admissibility", OwnerModuleID: runtimecontract.RuntimeModuleShell,
 		OperationKinds:     []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
@@ -433,7 +480,7 @@ func prospectiveCompositeDriveAggregateWithCandidatesAndExisting(t *testing.T, c
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-		DeclarationRef:        "semantic/prospective-drive-regression",
+		DeclarationRef:        manifest.ProofObligations[0].DeclarationRef,
 	}
 	order := runtimecontract.RuntimeSemanticPlanDocument{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,

@@ -456,7 +456,7 @@ func TestRuntimeStateRecordRejectsTerminalDecisionWithPendingCandidateAttempt(t 
 	facts.DefinitionSeed.Hash = StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
 	facts.DefinitionFocuses = []RuntimeDefinitionFocus{{
 		ID: facts.Focus.ID, SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-1", AssessmentText: "deliver", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+		RequiredEvidenceKinds: []string{EvidenceKindStateChange}, EvidenceDeclarationRef: CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-1"),
 	}}
 	reconciliation, err := CompileRuntimeCWIReconciliationContract(facts.DefinitionRevision, []CoverageFocus{facts.Focus})
 	if err != nil {

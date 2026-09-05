@@ -303,7 +303,7 @@ func runtimeEvidenceSequenceFixture(t *testing.T) (uint64, RuntimeFacts, *Runtim
 	facts := RuntimeFacts{
 		EvidenceRevision:  runtimeEvidenceRevisionForSequence(3),
 		DefinitionSeed:    RuntimeDefinitionSeed{CoverageItems: []RuntimeCoverageItem{{ID: "cwi-1", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "must work"}}},
-		DefinitionFocuses: []RuntimeDefinitionFocus{{ID: assessmentCandidate.FocusID, SliceID: assessmentCandidate.SliceID, AssessmentScope: "dodItem", AssessmentID: "dod-1", AssessmentText: "must work", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}}},
+		DefinitionFocuses: []RuntimeDefinitionFocus{{ID: assessmentCandidate.FocusID, SliceID: assessmentCandidate.SliceID, AssessmentScope: "dodItem", AssessmentID: "dod-1", AssessmentText: "must work", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}, EvidenceDeclarationRef: CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-1")}},
 		Focus: CoverageFocus{
 			ID: assessmentCandidate.FocusID, SliceID: assessmentCandidate.SliceID,
 			CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), assessmentCandidate.CoverageWorkItemIDs...),

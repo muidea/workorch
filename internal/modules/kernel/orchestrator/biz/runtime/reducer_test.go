@@ -978,6 +978,7 @@ func TestReduceRuntimeStateKeepsValidationGapAsValidationWithoutOwnerTarget(t *t
 func TestReduceRuntimeStateUsesOwnerGroundedFailureForStateChangeRepair(t *testing.T) {
 	base := validationFacts()
 	base.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
+	base.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	base.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
 	base.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	base.Evidence.Accepted = []runtimecontract.EvidenceFact{{
@@ -1292,7 +1293,15 @@ func validationFacts() runtimecontract.RuntimeFacts {
 	facts.ConvergencePolicy = runtimecontract.DefaultRuntimeConvergencePolicy()
 	facts.RecoveryPolicy = runtimecontract.DefaultRuntimeRecoveryPolicy()
 	facts.ExecutionBudgetPolicy = runtimecontract.DefaultRuntimeExecutionBudgetPolicy()
-	return runtimeTestFactsWithManagedValidationOwnerPreflight(facts)
+	facts = runtimeTestFactsWithManagedValidationOwnerPreflight(facts)
+	// Keep the shared reducer seed pre-semantic: individual fixtures frequently
+	// switch this focus between state-change and validation. The canonical test
+	// lifecycle helper below reselects the managed recipe/check and accepted kind
+	// only when the resulting exact Definition still requires Shell validation.
+	facts.Focus.AcceptedStepKinds = nil
+	facts.Focus.ValidationRecipeID = ""
+	facts.Focus.RequiredCheckRefs = nil
+	return facts
 }
 
 func TestReduceRuntimeStateRequiresRunLevelStateChangeBeforeComplete(t *testing.T) {

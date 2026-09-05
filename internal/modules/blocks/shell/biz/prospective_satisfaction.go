@@ -72,43 +72,37 @@ func (m *Biz) handleRuntimeOwnerFactProspectiveSatisfaction(event magicevent.Eve
 // fail-closed check and performs no workspace inspection or owner-state write.
 func validateShellProspectiveValidationRecipeIdentities(request runtimecontract.RuntimeOwnerFactProspectiveSatisfactionRequest) error {
 	request = request.Normalized()
-	for _, surface := range request.OwnerCatalog.ValidationSurfaces {
-		surface = surface.Normalized()
-		if !shellProspectiveSatisfactionSurfaceMatches(request, surface) {
-			continue
-		}
-		recipe, found := runtimecontract.RuntimeValidationRecipeForID(request.ValidationRecipes, surface.ID)
-		if !found {
-			return fmt.Errorf("%w: prospective Shell validation surface %q has no exact activation-sealed recipe", common.ErrConflict, surface.ID)
-		}
-		if schemaHash := shellValidationRecipeSchemaHash(recipe); schemaHash != surface.InputSchemaHash {
-			return fmt.Errorf("%w: prospective Shell validation surface %q recipe identity drift", common.ErrConflict, surface.ID)
-		}
-		if surface.ProspectiveTargetSatisfactionConstraint == nil ||
-			!runtimecontract.RuntimeProspectiveTargetsSatisfyConstraint(
-				request.ProspectiveWorkspaceManifestDelta.ProspectiveTargetRefs,
-				*surface.ProspectiveTargetSatisfactionConstraint,
-			) {
-			return fmt.Errorf("%w: prospective Shell validation surface %q target violates its owner-authored all-of constraint", common.ErrConflict, surface.ID)
-		}
+	constraint, err := runtimecontract.ResolveRuntimeProspectiveTargetSatisfactionConstraint(
+		request.OwnerCatalog, request.Requirement, modulecommon.ProspectiveSatisfactionContractRef,
+	)
+	if err != nil {
+		return fmt.Errorf("%w: %v", common.ErrConflict, err)
+	}
+	recipe, found := runtimecontract.RuntimeValidationRecipeForID(request.ValidationRecipes, constraint.ValidationRecipeID)
+	if !found {
+		return fmt.Errorf("%w: prospective Shell validation surface %q has no exact activation-sealed recipe", common.ErrConflict, constraint.ValidationRecipeID)
+	}
+	if schemaHash := shellValidationRecipeSchemaHash(recipe); schemaHash != constraint.InputSchemaHash {
+		return fmt.Errorf("%w: prospective Shell validation surface %q recipe identity drift", common.ErrConflict, constraint.ValidationRecipeID)
+	}
+	if !runtimecontract.RuntimeProspectiveTargetsSatisfyConstraint(
+		request.ProspectiveWorkspaceManifestDelta.ProspectiveTargetRefs,
+		constraint,
+	) {
+		return fmt.Errorf("%w: prospective Shell validation surface %q target violates its owner-authored all-of constraint", common.ErrConflict, constraint.ValidationRecipeID)
 	}
 	return nil
 }
 
-func shellProspectiveSatisfactionSurfaceMatches(request runtimecontract.RuntimeOwnerFactProspectiveSatisfactionRequest, surface runtimecontract.RuntimeValidationSurface) bool {
-	return surface.OwnerModuleID == ModuleID && surface.OperationKind == request.Requirement.OperationKind &&
-		surface.Readiness == runtimecontract.RuntimeValidationSurfacePrerequisiteRequired &&
-		surface.ProspectiveSatisfactionContractRef == modulecommon.ProspectiveSatisfactionContractRef
-}
-
 func shellProspectiveSelectableValidationRecipeRefs(request runtimecontract.RuntimeOwnerFactProspectiveSatisfactionRequest) []string {
 	request = request.Normalized()
-	contractSurfaceIDs := make(map[string]struct{})
-	for _, surface := range request.OwnerCatalog.ValidationSurfaces {
-		surface = surface.Normalized()
-		if shellProspectiveSatisfactionSurfaceMatches(request, surface) {
-			contractSurfaceIDs[surface.ID] = struct{}{}
-		}
+	constraint, err := runtimecontract.ResolveRuntimeProspectiveTargetSatisfactionConstraint(
+		request.OwnerCatalog, request.Requirement, modulecommon.ProspectiveSatisfactionContractRef,
+	)
+	if err != nil || !runtimecontract.RuntimeProspectiveTargetsSatisfyConstraint(
+		request.ProspectiveWorkspaceManifestDelta.ProspectiveTargetRefs, constraint,
+	) {
+		return nil
 	}
 	applicable := runtimeValidationRecipesApplicableToManifest(
 		request.ValidationRecipes,
@@ -116,7 +110,7 @@ func shellProspectiveSelectableValidationRecipeRefs(request runtimecontract.Runt
 	)
 	ret := make([]string, 0, len(applicable))
 	for _, recipe := range applicable {
-		if _, found := contractSurfaceIDs[recipe.ID]; found {
+		if recipe.ID == constraint.ValidationRecipeID {
 			ret = append(ret, recipe.ID)
 		}
 	}

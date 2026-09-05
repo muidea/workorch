@@ -24,6 +24,7 @@ import (
 	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestWorkspaceDeletionFileFenceSerializesIndependentRepositorySets(t *testing.T) {
@@ -492,6 +493,40 @@ func TestWorkspaceScopedRunGenerationAndIDSurviveConcurrentCreateDeletePurgeAndR
 	}
 	if last.WorkspaceRunGeneration != 4 || last.ID != "run-004" {
 		t.Fatalf("Run identity was reused after delete/restart: %+v", last)
+	}
+}
+
+func TestWorkspaceScopedRunRejectsRawBootstrapBeforeAllocatingGeneration(t *testing.T) {
+	dataRoot := t.TempDir()
+	workspaceID := common.WorkspaceID("ws-invalid-bootstrap-generation")
+	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), workspaceID)
+	repos := NewWorkspaceScopedFileRepositorySet(dataRoot)
+	policy := runtimecontract.RuntimeEvidencePolicy{
+		ID: "policy-1", AppliesTo: runtimecontract.StepKindFileWrite,
+		CoverageRequirements: []runtimecontract.RuntimeCoverageEvidenceRequirement{{
+			ID: "dod-1", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+			ValidationRecipeID: "recipe-1", RequiredCheckRefs: []string{"check-1", "check-1"},
+		}},
+	}
+	bootstrap := runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{policy}}}
+	invalid := &runmodel.Run{WorkspaceID: workspaceID, State: common.RunStatePending, RuntimeBootstrap: &bootstrap}
+	if err := repos.Runs.CreateNextWorkspaceRun(ctx, invalid); err == nil || !strings.Contains(err.Error(), "evidence polic") {
+		t.Fatalf("workspace-scoped Run accepted noncanonical bootstrap: %v", err)
+	}
+	if invalid.ID != "" || invalid.WorkspaceRunGeneration != 0 {
+		t.Fatalf("rejected Run consumed identity: id=%q generation=%d", invalid.ID, invalid.WorkspaceRunGeneration)
+	}
+	headPath := filepath.Join(dataRoot, "system", workspaceScopedRunGenerationDir, string(workspaceID)+".json")
+	if _, err := os.Stat(headPath); !os.IsNotExist(err) {
+		t.Fatalf("rejected Run persisted generation head: %v", err)
+	}
+
+	valid := &runmodel.Run{WorkspaceID: workspaceID, State: common.RunStatePending}
+	if err := repos.Runs.CreateNextWorkspaceRun(ctx, valid); err != nil {
+		t.Fatalf("create valid Run after rejected bootstrap: %v", err)
+	}
+	if valid.ID != "run-001" || valid.WorkspaceRunGeneration != 1 {
+		t.Fatalf("rejected bootstrap consumed generation: %+v", valid)
 	}
 }
 

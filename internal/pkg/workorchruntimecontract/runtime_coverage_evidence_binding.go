@@ -20,14 +20,16 @@ import (
 // This is a pure immutable DTO. It does not identify a CWI by itself and it
 // cannot grant coverage credit.
 type CoverageEvidenceProof struct {
-	EvidenceKind             string
-	RequiredEffectScopes     []RuntimeEffectScope
-	AllowedOperationKinds    []string
-	AllowedOperationVariants []RuntimeOperationVariantRef
-	ValidationRecipeID       string
-	RequiredCheckRefs        []string
-	MetricConstraints        []string
-	ArtifactRefs             []string
+	EvidenceKind                   string
+	RequiredEffectScopes           []RuntimeEffectScope
+	AllowedOperationKinds          []string
+	AllowedOperationVariants       []RuntimeOperationVariantRef
+	ValidationRecipeID             string
+	ValidationProofRequirementHash string
+	RequiredCheckRefs              []string
+	ValidationCheckAttestations    []RuntimeValidationCheckAttestationBinding
+	MetricConstraints              []string
+	ArtifactRefs                   []string
 }
 
 func (p CoverageEvidenceProof) Normalized() CoverageEvidenceProof {
@@ -36,7 +38,9 @@ func (p CoverageEvidenceProof) Normalized() CoverageEvidenceProof {
 	p.AllowedOperationKinds = canonicalizeOperationKinds(p.AllowedOperationKinds)
 	p.AllowedOperationVariants = NormalizeRuntimeOperationVariantRefs(p.AllowedOperationVariants)
 	p.ValidationRecipeID = strings.TrimSpace(p.ValidationRecipeID)
+	p.ValidationProofRequirementHash = strings.TrimSpace(p.ValidationProofRequirementHash)
 	p.RequiredCheckRefs = normalizeStrings(p.RequiredCheckRefs)
+	p.ValidationCheckAttestations = NormalizeRuntimeValidationCheckAttestationBindings(p.ValidationCheckAttestations)
 	p.MetricConstraints = normalizeStrings(p.MetricConstraints)
 	p.ArtifactRefs = normalizeStrings(p.ArtifactRefs)
 	return p
@@ -48,12 +52,16 @@ func (p CoverageEvidenceProof) Clone() CoverageEvidenceProof {
 	p.AllowedOperationKinds = append([]string(nil), p.AllowedOperationKinds...)
 	p.AllowedOperationVariants = append([]RuntimeOperationVariantRef(nil), p.AllowedOperationVariants...)
 	p.RequiredCheckRefs = append([]string(nil), p.RequiredCheckRefs...)
+	p.ValidationCheckAttestations = CloneRuntimeValidationCheckAttestationBindings(p.ValidationCheckAttestations)
 	p.MetricConstraints = append([]string(nil), p.MetricConstraints...)
 	p.ArtifactRefs = append([]string(nil), p.ArtifactRefs...)
 	return p
 }
 
 func (p CoverageEvidenceProof) Validate() error {
+	if duplicate := duplicateRuntimeValidationProofCheckRef(p.RequiredCheckRefs); duplicate != "" {
+		return fmt.Errorf("coverage evidence proof duplicates check %q", duplicate)
+	}
 	p = p.Normalized()
 	if p.EvidenceKind != EvidenceKindStateChange && p.EvidenceKind != EvidenceKindValidation {
 		return fmt.Errorf("coverage evidence proof has unsupported evidence kind %q", p.EvidenceKind)
@@ -84,11 +92,25 @@ func (p CoverageEvidenceProof) Validate() error {
 		}
 	}
 	if p.EvidenceKind != EvidenceKindValidation &&
-		(p.ValidationRecipeID != "" || len(p.RequiredCheckRefs) != 0) {
+		(p.ValidationRecipeID != "" || p.ValidationProofRequirementHash != "" || len(p.RequiredCheckRefs) != 0 || len(p.ValidationCheckAttestations) != 0) {
 		return fmt.Errorf("coverage evidence proof %q cannot carry validation recipe/check facts", p.EvidenceKind)
 	}
 	if p.EvidenceKind == EvidenceKindValidation && p.ValidationRecipeID == "" {
 		return fmt.Errorf("validation proof requires a validation recipe")
+	}
+	if p.EvidenceKind == EvidenceKindValidation {
+		managed := runtimeOperationKindsContain(p.AllowedOperationKinds, RuntimeBlockKindManagedValidationSession)
+		if managed && (p.ValidationProofRequirementHash == "" || len(p.RequiredCheckRefs) == 0 || len(p.ValidationCheckAttestations) == 0) {
+			return fmt.Errorf("managed validation proof requires an exact CWI proof requirement and native check attestations")
+		}
+		if managed {
+			if err := ValidateRuntimeValidationCheckAttestationBindings(p.ValidationCheckAttestations, p.RequiredCheckRefs); err != nil {
+				return err
+			}
+		}
+		if !managed && (p.ValidationProofRequirementHash != "" || len(p.ValidationCheckAttestations) != 0) {
+			return fmt.Errorf("non-managed validation proof cannot carry a Shell CWI proof requirement")
+		}
 	}
 	return nil
 }
@@ -126,6 +148,36 @@ func RuntimeOperationKindSupportsCoverageEvidence(kind, evidenceKind string) boo
 	}
 }
 
+// RuntimeValidationObservationSatisfiesCoverageProof matches one owner
+// observation against the immutable validation proof. Shell managed
+// validation resolves Definition checks only through the exact owner-native
+// attestation mapping; raw output and semantic check names cannot attest
+// themselves. Other typed validation owners retain their direct check
+// vocabulary.
+func RuntimeValidationObservationSatisfiesCoverageProof(proof CoverageEvidenceProof, observation RuntimeValidationObservation) bool {
+	proof = proof.Normalized()
+	observation = observation.Normalized()
+	if proof.Validate() != nil || proof.EvidenceKind != EvidenceKindValidation ||
+		observation.RecipeID != proof.ValidationRecipeID || len(RuntimeValidationConflictingChecks(observation)) != 0 {
+		return false
+	}
+	if proof.ValidationProofRequirementHash != "" {
+		for _, attestation := range proof.ValidationCheckAttestations {
+			if observation.ObservationProtocolRef != attestation.ObservationProtocolRef ||
+				!RuntimeValidationCheckPassed(observation, attestation.NativeCheckRef) {
+				return false
+			}
+		}
+		return len(proof.ValidationCheckAttestations) != 0
+	}
+	for _, required := range proof.RequiredCheckRefs {
+		if !RuntimeValidationCheckPassed(observation, required) {
+			return false
+		}
+	}
+	return len(proof.RequiredCheckRefs) != 0
+}
+
 // RuntimeMCPToolValidationRecipeID is the exact, owner-attested validation
 // proof identity for one MCP tool invocation. It is intentionally derived
 // only from the sealed MCP server/tool pair: summary text, input values,
@@ -143,23 +195,15 @@ func RuntimeMCPToolValidationRecipeID(serverID, tool string) string {
 }
 
 func NormalizeCoverageEvidenceProofs(values []CoverageEvidenceProof) []CoverageEvidenceProof {
-	byKind := make(map[string]CoverageEvidenceProof, len(values))
-	for _, value := range values {
-		value = value.Normalized()
+	ret := make([]CoverageEvidenceProof, 0, len(values))
+	for _, raw := range values {
+		value := raw.Clone()
 		if value.EvidenceKind == "" {
 			continue
 		}
-		byKind[value.EvidenceKind] = value
+		ret = append(ret, value)
 	}
-	kinds := make([]string, 0, len(byKind))
-	for kind := range byKind {
-		kinds = append(kinds, kind)
-	}
-	sort.Strings(kinds)
-	ret := make([]CoverageEvidenceProof, 0, len(kinds))
-	for _, kind := range kinds {
-		ret = append(ret, byKind[kind].Clone())
-	}
+	sort.SliceStable(ret, func(i, j int) bool { return ret[i].EvidenceKind < ret[j].EvidenceKind })
 	return nilIfEmpty(ret)
 }
 
@@ -228,17 +272,26 @@ func (b CoverageEvidenceBinding) Clone() CoverageEvidenceBinding {
 }
 
 func (b CoverageEvidenceBinding) Validate() error {
+	seenProofKinds := make(map[string]struct{}, len(b.Proofs))
+	for _, proof := range b.Proofs {
+		kind := strings.TrimSpace(proof.EvidenceKind)
+		if kind == "" {
+			return fmt.Errorf("coverage evidence binding %q has a proof without evidence kind", strings.TrimSpace(b.ID))
+		}
+		if _, duplicate := seenProofKinds[kind]; duplicate {
+			return fmt.Errorf("coverage evidence binding %q duplicates evidence proof %q", strings.TrimSpace(b.ID), kind)
+		}
+		seenProofKinds[kind] = struct{}{}
+		if err := proof.Validate(); err != nil {
+			return fmt.Errorf("coverage evidence binding %q: %w", strings.TrimSpace(b.ID), err)
+		}
+	}
 	b = b.Normalized()
 	if b.ID == "" || b.CoverageWorkItemID == "" || b.FocusID == "" || b.DefinitionRevision == "" || b.DeclarationRef == "" {
 		return fmt.Errorf("coverage evidence binding requires identity, coverage item, focus, definition and declaration")
 	}
 	if len(b.Proofs) == 0 {
 		return fmt.Errorf("coverage evidence binding %q requires at least one evidence proof", b.ID)
-	}
-	for _, proof := range b.Proofs {
-		if err := proof.Validate(); err != nil {
-			return fmt.Errorf("coverage evidence binding %q: %w", b.ID, err)
-		}
 	}
 	if len(b.TargetRefs) == 0 && b.TargetSelectorRef == "" && len(b.ProspectiveTargetRefs) == 0 {
 		return fmt.Errorf("coverage evidence binding %q requires an exact target, selector or prospective target", b.ID)
@@ -295,7 +348,13 @@ func StableCoverageEvidenceBindingHash(binding CoverageEvidenceBinding) string {
 			writeHashString(h, variant.VariantID)
 		}
 		writeHashString(h, proof.ValidationRecipeID)
+		writeHashString(h, proof.ValidationProofRequirementHash)
 		writeHashStrings(h, proof.RequiredCheckRefs)
+		for _, attestation := range proof.ValidationCheckAttestations {
+			writeHashString(h, attestation.RequiredCheckRef)
+			writeHashString(h, attestation.ObservationProtocolRef)
+			writeHashString(h, attestation.NativeCheckRef)
+		}
 		writeHashStrings(h, proof.MetricConstraints)
 		writeHashStrings(h, proof.ArtifactRefs)
 	}
@@ -312,24 +371,18 @@ func StableCoverageEvidenceBindingHash(binding CoverageEvidenceBinding) string {
 }
 
 func NormalizeCoverageEvidenceBindings(values []CoverageEvidenceBinding) []CoverageEvidenceBinding {
-	byID := make(map[string]CoverageEvidenceBinding, len(values))
+	ret := make([]CoverageEvidenceBinding, 0, len(values))
 	for _, value := range values {
 		value = value.Normalized()
 		if value.ID == "" {
 			continue
 		}
 		value.Hash = StableCoverageEvidenceBindingHash(value)
-		byID[value.ID] = value
+		ret = append(ret, value)
 	}
-	ids := make([]string, 0, len(byID))
-	for id := range byID {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	ret := make([]CoverageEvidenceBinding, 0, len(ids))
-	for _, id := range ids {
-		ret = append(ret, byID[id].Clone())
-	}
+	// Preserve duplicate identities until an authority validator can reject
+	// them. A normalizer must never choose which sealed CWI binding wins.
+	sort.SliceStable(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })
 	return nilIfEmpty(ret)
 }
 
@@ -382,6 +435,17 @@ func RuntimeCoverageEvidenceBindingProjectionsEqual(left, right []CoverageEviden
 // ValidateCoverageEvidenceBindingsForFocus verifies the static declaration
 // only. It never receives a receipt and cannot grant credit.
 func ValidateCoverageEvidenceBindingsForFocus(focus CoverageFocus, definitionRevision string) error {
+	seenRawIDs := make(map[string]struct{}, len(focus.CoverageEvidenceBindings))
+	for _, binding := range focus.CoverageEvidenceBindings {
+		if err := binding.Validate(); err != nil {
+			return err
+		}
+		id := strings.TrimSpace(binding.ID)
+		if _, duplicate := seenRawIDs[id]; duplicate {
+			return fmt.Errorf("coverage binding projection duplicates %q", id)
+		}
+		seenRawIDs[id] = struct{}{}
+	}
 	focus = focus.Normalized()
 	definitionRevision = strings.TrimSpace(definitionRevision)
 	// A presentation slice may contain several CWI, but validation, executable
@@ -619,14 +683,8 @@ func MatchCoverageEvidenceBindingReceipt(binding CoverageEvidenceBinding, eviden
 		if receipt.Evidence.Validation == nil {
 			return fmt.Errorf("binding %q requires validation observation", binding.ID)
 		}
-		observation := receipt.Evidence.Validation.Normalized()
-		if observation.RecipeID != proof.ValidationRecipeID {
-			return fmt.Errorf("binding %q requires recipe %q", binding.ID, proof.ValidationRecipeID)
-		}
-		for _, required := range proof.RequiredCheckRefs {
-			if !RuntimeValidationCheckPassed(observation, required) {
-				return fmt.Errorf("binding %q requires passed check %q", binding.ID, required)
-			}
+		if !RuntimeValidationObservationSatisfiesCoverageProof(proof, *receipt.Evidence.Validation) {
+			return fmt.Errorf("binding %q validation observation does not satisfy sealed proof", binding.ID)
 		}
 	}
 	for _, metric := range proof.MetricConstraints {

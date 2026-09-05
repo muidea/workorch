@@ -29,7 +29,8 @@ type RuntimeCommandRequest struct {
 	EvidencePolicies                []runtimecontract.RuntimeEvidencePolicy
 	// ValidationRecipes is the Shell-owner-confirmed admissibility recipe set
 	// carried with a sealed managed-validation dispatch.
-	ValidationRecipes []runtimecontract.RuntimeValidationRecipe
+	ValidationRecipes           []runtimecontract.RuntimeValidationRecipe
+	ValidationCheckAttestations []runtimecontract.RuntimeValidationCheckAttestationBinding
 }
 
 type RuntimeCommandResult struct {

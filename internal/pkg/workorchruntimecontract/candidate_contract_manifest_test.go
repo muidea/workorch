@@ -1020,7 +1020,9 @@ func TestBuildRuntimeCandidateContractManifestCompilesOperationAdmissibility(t *
 		recipeID := RuntimeMCPToolValidationRecipeID("server-a", "repo.summary")
 		proof.AllowedOperationKinds = []string{StepKindMCPToolCall}
 		proof.ValidationRecipeID = recipeID
+		proof.ValidationProofRequirementHash = ""
 		proof.RequiredCheckRefs = []string{recipeID}
+		proof.ValidationCheckAttestations = nil
 		binding.Proofs = []CoverageEvidenceProof{proof}
 		binding.Hash = StableCoverageEvidenceBindingHash(binding)
 		decision.Focus.CoverageEvidenceBindings = []CoverageEvidenceBinding{binding}

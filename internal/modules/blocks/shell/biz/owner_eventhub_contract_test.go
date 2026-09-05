@@ -102,7 +102,8 @@ func TestShellOwnerFeasibilityAndSemanticProofHappyPathsUseTypedEventHub(t *test
 		AllowedOwnerModuleIDs: []string{ModuleID}, AllowedOperationKinds: []string{runtimecontract.StepKindShellCommand},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
 		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
-			CoverageWorkItemID: "cwi-shell-eventhub", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			CoverageWorkItemID: "cwi-shell-eventhub", DeclarationRef: proposal.DeclarationRef,
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		}},
 		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}

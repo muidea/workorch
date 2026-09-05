@@ -25,6 +25,7 @@ func semanticDefinitionFocuses(items []RuntimeCoverageItem) []RuntimeDefinitionF
 			AssessmentScope: item.SourceScope, AssessmentID: item.SourceID, AssessmentText: item.TargetText,
 			CoverageWorkItemIDs:   []common.CoverageWorkItemID{item.ID},
 			RequiredEvidenceKinds: []string{EvidenceKindStateChange}, RequireAssessment: true,
+			EvidenceDeclarationRef: CanonicalRuntimeDefinitionEvidenceDeclarationRef(item.SourceScope, item.SourceID),
 		})
 	}
 	return CompileRuntimeDefinitionFocuses(ret)
@@ -135,6 +136,11 @@ func TestCompileRuntimeSemanticPlanManifestUsesOnlySealedCapabilityVocabulary(t 
 	}
 	if !containsSemanticTargetPolicy(manifest.AllowedTargetPolicies, RuntimeOperationTargetPolicyProspectiveOwnerTarget) {
 		t.Fatalf("file/write did not expose prospective owner target: %v", manifest.AllowedTargetPolicies)
+	}
+	duplicateOwnerCatalogs := append([]RuntimeOperationAdmissibility(nil), catalogs...)
+	duplicateOwnerCatalogs = append(duplicateOwnerCatalogs, semanticTestOwnerCatalog("file-catalog-other-prerequisite", RuntimeModuleFile, []string{StepKindFileWrite}))
+	if _, err := CompileRuntimeSemanticPlanManifest("ws-1", "run-1", definition, seed, semanticDefinitionFocuses(items), activation.ExecutionContract, duplicateOwnerCatalogs); err == nil || !strings.Contains(err.Error(), "duplicate owner") {
+		t.Fatalf("same-owner semantic catalogs were resolved by order: %v", err)
 	}
 	withoutApplicableRecipe := append([]RuntimeOperationAdmissibility(nil), catalogs...)
 	withoutApplicableRecipe[1].ValidationRecipeRefs = nil
@@ -261,37 +267,7 @@ func TestRuntimeSemanticDocumentRequiresOneBoundedProofPerEvidenceKind(t *testin
 }
 
 func TestRuntimeSemanticDocumentAllowsIndependentProofsForOneCWI(t *testing.T) {
-	manifest := semanticContractTestManifest(t)
-	shellCatalog := semanticTestOwnerCatalog("semantic-shell-catalog", RuntimeModuleShell, []string{StepKindShellCommand, RuntimeBlockKindManagedValidationSession})
-	shellCatalog.SelectorRefs = []string{"file/workspace-relative-create"}
-	shellCatalog.ValidationRecipeRefs = []string{"recipe/validate"}
-	shellCatalog.OperationVariants = []RuntimeOperationAdmissibilityVariant{{
-		Kind: StepKindShellCommand,
-		AllowedTargetPolicies: []RuntimeOperationTargetPolicy{
-			RuntimeOperationTargetPolicyExactTarget,
-			RuntimeOperationTargetPolicyExistingOwnerScope,
-		},
-	}}
-	shellCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
-	manifest.AllowedOwnerModuleIDs = append(manifest.AllowedOwnerModuleIDs, RuntimeModuleShell)
-	manifest.AllowedOperationKinds = append(manifest.AllowedOperationKinds, StepKindShellCommand, RuntimeBlockKindManagedValidationSession)
-	manifest.AllowedTargetPolicies = append(manifest.AllowedTargetPolicies, RuntimeOperationTargetPolicyExistingOwnerScope)
-	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, shellCatalog)
-	manifest.ProofObligations[0].RequiredEvidenceKinds = []string{EvidenceKindStateChange, EvidenceKindValidation}
-	manifest = sealSemanticTestManifest(t, manifest)
-
-	stateChange := semanticContractTestProposal("cwi-001")
-	validation := RuntimeSemanticProofProposal{
-		CoverageWorkItemID: "cwi-001", OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
-		Target:                RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"file/workspace-relative-create"}},
-		RequiredEvidenceKinds: []string{EvidenceKindValidation}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession},
-		ValidationRecipeID: "recipe/validate", DeclarationRef: stateChange.DeclarationRef,
-	}
-	document := RuntimeSemanticPlanDocument{
-		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,
-		PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchSequence: 0,
-		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"}, Proposals: []RuntimeSemanticProofProposal{stateChange, validation},
-	}
+	manifest, document, _, _ := semanticIndependentProofSetFixture(t)
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
 		t.Fatalf("independent state-change and validation proofs for one CWI must be valid: %v", err)
 	}
@@ -317,7 +293,7 @@ func TestRuntimeSemanticDocumentRejectsValidationOnOwnerWithoutRecipe(t *testing
 		CoverageWorkItemID: "cwi-002", OwnerModuleID: RuntimeModuleGit, OperationKind: StepKindGitWrite, OperationVariantID: "commit",
 		Target:                RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExistingOwnerScope, OwnerSelectorRefs: []string{"workspace-repository"}},
 		RequiredEvidenceKinds: []string{EvidenceKindValidation}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession},
-		ValidationRecipeID: "software-dev-validation-evidence", RequiredCheckRefs: []string{"check"}, DeclarationRef: "dod-002",
+		ValidationRecipeID: "software-dev-validation-evidence", DeclarationRef: "dod-002",
 	}
 	document := RuntimeSemanticPlanDocument{SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, PlanStep: RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-002"}, Proposals: []RuntimeSemanticProofProposal{proposal}}
 	if err := document.ValidateAgainstManifest(manifest); err == nil || !strings.Contains(err.Error(), "operationKind") {
@@ -330,7 +306,6 @@ func TestRuntimeSemanticProposalRejectsDurableValidationEffect(t *testing.T) {
 	proposal.RequiredEvidenceKinds = []string{EvidenceKindValidation}
 	proposal.RequiredEffectScopes = []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}
 	proposal.ValidationRecipeID = "recipe/validation"
-	proposal.RequiredCheckRefs = []string{"check"}
 	if err := proposal.Validate(); err == nil || !strings.Contains(err.Error(), "requiredEffectScopes") {
 		t.Fatalf("durable validation effect error = %v", err)
 	}
@@ -343,7 +318,6 @@ func TestRuntimeSemanticProposalRejectsShellCommandAsValidationProof(t *testing.
 	proposal.RequiredEvidenceKinds = []string{EvidenceKindValidation}
 	proposal.RequiredEffectScopes = []RuntimeEffectScope{RuntimeEffectEphemeralSession}
 	proposal.ValidationRecipeID = "recipe/validation"
-	proposal.RequiredCheckRefs = []string{"check"}
 	if err := proposal.Validate(); err == nil || !strings.Contains(err.Error(), "operationKind") {
 		t.Fatalf("shell command validation proof error = %v", err)
 	}
@@ -691,7 +665,8 @@ func semanticContractTestManifest(t *testing.T) RuntimeSemanticPlanManifest {
 		AllowedOwnerModuleIDs:     []string{RuntimeModuleFile}, AllowedOperationKinds: []string{StepKindFileWrite},
 		AllowedTargetPolicies: []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyProspectiveOwnerTarget},
 		ProofObligations: []RuntimeSemanticProofObligation{{
-			CoverageWorkItemID: "cwi-001", RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+			CoverageWorkItemID: "cwi-001", DeclarationRef: semanticTestDeclarationRef("cwi-001"),
+			RequiredEvidenceKinds: []string{EvidenceKindStateChange},
 		}},
 		OwnerCatalogs: []RuntimeOperationAdmissibility{catalog},
 	}
@@ -705,11 +680,22 @@ func semanticContractTestManifest(t *testing.T) RuntimeSemanticPlanManifest {
 func sealSemanticTestManifestWithSource(t *testing.T, manifest RuntimeSemanticPlanManifest, source CoverageFocus) RuntimeSemanticPlanManifest {
 	t.Helper()
 	manifest = manifest.Normalized()
+	if source.EvidenceDeclarationRef == "" && len(source.CoverageWorkItemIDs) == 1 {
+		source.EvidenceDeclarationRef = semanticTestDeclarationRef(source.CoverageWorkItemIDs[0])
+	}
+	if len(source.CoverageWorkItemIDs) == 1 {
+		if item, found := runtimeCoverageItemForID(manifest.CoverageItems, source.CoverageWorkItemIDs[0]); found {
+			source.SliceID = item.SliceID
+			source.AssessmentScope = item.SourceScope
+			source.AssessmentID = item.SourceID
+			source.AssessmentText = item.TargetText
+		}
+	}
 	for index := range manifest.OwnerCatalogs {
 		manifest.OwnerCatalogs[index].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(manifest.OwnerCatalogs[index])
 	}
 	manifest = manifest.Normalized()
-	obligations, err := compileRuntimeSemanticProofObligations(CompileRuntimeDefinitionFocuses([]CoverageFocus{source}), manifest.CoverageItems, manifest.OwnerCatalogs)
+	obligations, err := compileRuntimeSemanticProofObligations(manifest.DefinitionRevision, CompileRuntimeDefinitionFocuses([]CoverageFocus{source}), manifest.CoverageItems, manifest.OwnerCatalogs)
 	if err != nil {
 		t.Fatalf("compile semantic test obligations: %v", err)
 	}
@@ -734,7 +720,12 @@ func sealSemanticTestManifest(t *testing.T, manifest RuntimeSemanticPlanManifest
 	for _, item := range manifest.CoverageItems {
 		obligation, found := byCoverage[item.ID]
 		if !found {
-			obligation = RuntimeSemanticProofObligation{CoverageWorkItemID: item.ID, RequiredEvidenceKinds: []string{EvidenceKindStateChange}}
+			obligation = RuntimeSemanticProofObligation{
+				CoverageWorkItemID: item.ID, DeclarationRef: semanticTestDeclarationRef(item.ID),
+				RequiredEvidenceKinds: []string{EvidenceKindStateChange},
+			}
+		} else if obligation.DeclarationRef == "" {
+			obligation.DeclarationRef = semanticTestDeclarationRef(item.ID)
 		}
 		manifest.ProofObligations = append(manifest.ProofObligations, obligation)
 	}
@@ -773,7 +764,102 @@ func semanticContractTestProposal(id common.CoverageWorkItemID) RuntimeSemanticP
 			ProspectiveConstraintRefs: []string{"workspace-relative-path"}, ProspectiveTargetRefs: []string{"new-file.go"},
 		},
 		RequiredEvidenceKinds: []string{EvidenceKindStateChange}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
-		DeclarationRef: "semantic-plan/dod-001",
+		DeclarationRef: semanticTestDeclarationRef(id),
+	}
+}
+
+func TestRuntimeSemanticProofProposalRejectsProviderAuthoredCheckAuthority(t *testing.T) {
+	proposal := semanticContractTestProposal("cwi-provider-check")
+	if err := proposal.Validate(); err != nil {
+		t.Fatalf("valid proposal: %v", err)
+	}
+	forged := proposal
+	forged.RequiredCheckRefs = []string{"workorch-cwi-check-provider-forged"}
+	err := forged.Validate()
+	constraint, ok := err.(*RuntimeSemanticProposalConstraintError)
+	if !ok || constraint.Field != "requiredCheckRefs" || constraint.Rule != RuntimeSemanticConstraintRelational {
+		t.Fatalf("provider-authored check error = %#v", err)
+	}
+	if StableRuntimeSemanticProofProposalHash(forged) == StableRuntimeSemanticProofProposalHash(proposal) {
+		t.Fatal("provider-authored checks were omitted from proposal identity")
+	}
+}
+
+func TestRuntimeSemanticManifestReverseValidatesImmutableDefinitionAndRawCatalogs(t *testing.T) {
+	manifest, _, _, source := semanticIndependentProofSetFixture(t)
+	item := manifest.CoverageItems[0]
+	seed := RuntimeDefinitionSeed{
+		SchemaVersion: RuntimeDefinitionSeedSchemaCurrent, DefinitionRevision: manifest.DefinitionRevision,
+		PolicyHash: "policy/reverse-validation", CoverageItems: append([]RuntimeCoverageItem(nil), manifest.CoverageItems...),
+		Slices: []RuntimeAcceptanceSlice{{ID: item.SliceID, CoverageWorkItemIDs: []common.CoverageWorkItemID{item.ID}}},
+	}.Normalized()
+	seed.Hash = StableRuntimeDefinitionSeedHash(seed)
+	manifest.DefinitionSeedHash = seed.Hash
+	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
+	source.SliceID = item.SliceID
+	source.AssessmentScope = item.SourceScope
+	source.AssessmentID = item.SourceID
+	source.AssessmentText = item.TargetText
+	definitionFocuses := CompileRuntimeDefinitionFocuses([]CoverageFocus{source})
+	if err := ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest, seed, definitionFocuses); err != nil {
+		t.Fatalf("production-shaped manifest failed immutable Definition reverse validation: %v", err)
+	}
+	driftedManifestBody := manifest.Clone()
+	driftedManifestBody.CoverageItems[0].Order++
+	driftedManifestBody.Hash = StableRuntimeSemanticPlanManifestHash(driftedManifestBody)
+	if err := ValidateRuntimeSemanticPlanManifestAgainstDefinition(driftedManifestBody, seed, definitionFocuses); err == nil || !strings.Contains(err.Error(), "Definition seed body") {
+		t.Fatalf("Definition seed body drift error = %v", err)
+	}
+	driftedSeed := seed.Clone()
+	driftedSeed.PolicyHash = "policy/reverse-validation-drifted"
+	driftedSeed.Hash = StableRuntimeDefinitionSeedHash(driftedSeed)
+	if err := ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest, driftedSeed, definitionFocuses); err == nil || !strings.Contains(err.Error(), "Definition seed identity") {
+		t.Fatalf("Definition seed identity drift error = %v", err)
+	}
+	driftedSource := definitionFocuses[0].Clone()
+	driftedSource.EvidenceDeclarationRef = "semantic-plan/dod-other"
+	if err := ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest, seed, []RuntimeDefinitionFocus{driftedSource}); err == nil {
+		t.Fatalf("Definition declaration drift error = %v", err)
+	}
+
+	duplicateSurface := manifest.Clone()
+	for index := range duplicateSurface.OwnerCatalogs {
+		if duplicateSurface.OwnerCatalogs[index].OwnerModuleID != RuntimeModuleShell {
+			continue
+		}
+		catalog := duplicateSurface.OwnerCatalogs[index].Normalized()
+		catalog.ValidationSurfaces = append(catalog.ValidationSurfaces, catalog.ValidationSurfaces[0].Clone())
+		catalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+		duplicateSurface.OwnerCatalogs[index] = catalog
+	}
+	duplicateSurface.Hash = StableRuntimeSemanticPlanManifestHash(duplicateSurface)
+	if err := duplicateSurface.Validate(); err == nil || !strings.Contains(err.Error(), "duplicates validation surface") {
+		t.Fatalf("duplicate persisted semantic surface error = %v", err)
+	}
+}
+
+func semanticTestDeclarationRef(id common.CoverageWorkItemID) string {
+	return CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", strings.Replace(string(id), "cwi-", "dod-", 1))
+}
+
+func TestRuntimeSemanticManifestHashBindsOwnerFactValidationRequirement(t *testing.T) {
+	manifest, _, _ := semanticMissingOwnerFactAcquisitionFixture(t)
+	if len(manifest.ProofObligations) != 1 || len(manifest.ProofObligations[0].RequiredOwnerFacts) != 1 {
+		t.Fatalf("owner-fact manifest fixture = %+v", manifest.ProofObligations)
+	}
+	changed := manifest.Clone()
+	const drifted = "runtime-validation-proof-requirement-drifted"
+	changed.ProofObligations[0].RequiredOwnerFacts[0].ValidationProofRequirementHash = drifted
+	changed.ProofObligations[0].OwnerFactConvergences[0].Requirement.ValidationProofRequirementHash = drifted
+	if changed.ProofObligations[0].OwnerFactAcquisition != nil {
+		changed.ProofObligations[0].OwnerFactAcquisition.Requirement.ValidationProofRequirementHash = drifted
+	}
+	if StableRuntimeSemanticPlanManifestHash(changed) == manifest.Hash {
+		t.Fatal("semantic manifest hash ignored owner-fact validation requirement")
+	}
+	changed.Hash = manifest.Hash
+	if err := changed.Validate(); err == nil {
+		t.Fatalf("stale semantic manifest hash accepted owner-fact requirement drift: %v", err)
 	}
 }
 
@@ -808,7 +894,7 @@ func semanticSealedLedgerFixture(t *testing.T) RuntimeSemanticPlanningLedger {
 		CoverageWorkItemID: "cwi-history", OwnerModuleID: RuntimeModuleFile, OperationKind: StepKindFileWrite,
 		Target:                RuntimeOperationTargetAuthorization{Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"main.go"}},
 		RequiredEvidenceKinds: []string{EvidenceKindStateChange}, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable},
-		DeclarationRef: "semantic-history/cwi-history",
+		DeclarationRef: RuntimeSemanticCurrentDeclarationRef(manifest.ProofObligations[0]),
 	}
 	order := RuntimeSemanticPlanDocument{
 		SchemaVersion: RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash,

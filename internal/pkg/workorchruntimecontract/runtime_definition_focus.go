@@ -9,7 +9,9 @@ import (
 
 // RuntimeDefinitionFocus is the immutable activation declaration for exactly
 // one coverage work item. It intentionally cannot carry generation-specific
-// target resolutions, operations, recipes, checks or proof bindings. A
+// target resolutions, operations or proof bindings. Profile-declared recipe
+// and check constraints remain immutable inputs and are compiled into an exact
+// per-CWI proof requirement before owner admissibility acquisition. A
 // prospective target is selected only by a bounded semantic proposal and does
 // not become Runtime authority until SM-2 seals its evidence binding.
 type RuntimeDefinitionFocus struct {
@@ -20,6 +22,7 @@ type RuntimeDefinitionFocus struct {
 	AssessmentText                       string
 	CoverageWorkItemIDs                  []common.CoverageWorkItemID
 	RequiredEvidenceKinds                []string
+	AcceptedStepKinds                    []string
 	EvidenceRole                         string
 	TargetRole                           string
 	TargetDiscoverySources               []string
@@ -36,9 +39,29 @@ type RuntimeDefinitionFocus struct {
 	RequireAssessment                    bool
 	RequiredOwnerFacts                   []RuntimeOwnerFactRequirement
 	OwnerFactConvergences                []RuntimeOwnerFactConvergence
-	ValidationFailureRepairConvergence   *RuntimeValidationFailureRepairConvergence
-	MetricConstraints                    []string
-	ArtifactRefs                         []string
+	// These values are immutable Profile declaration inputs, not a selected
+	// operation. EvidenceDeclarationRef is the Application-authored exact
+	// identity of this admitted CWI; wildcard Profile declarations are quality
+	// gates only and may not be copied here as semantic proof authority.
+	EvidenceDeclarationRef             string
+	ValidationRecipeID                 string
+	RequiredCheckRefs                  []string
+	ValidationFailureRepairConvergence *RuntimeValidationFailureRepairConvergence
+	MetricConstraints                  []string
+	ArtifactRefs                       []string
+}
+
+// CanonicalRuntimeDefinitionEvidenceDeclarationRef returns the sole
+// Definition-owned declaration identity for one admitted source item. Profile
+// wildcard declarations are intentionally not accepted as Runtime authority;
+// the Application must project the exact admitted source through this helper.
+func CanonicalRuntimeDefinitionEvidenceDeclarationRef(sourceScope, sourceID string) string {
+	sourceScope = strings.TrimSpace(sourceScope)
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceScope == "" || sourceID == "" {
+		return ""
+	}
+	return "definition/" + sourceScope + "/" + sourceID
 }
 
 func (f RuntimeDefinitionFocus) Normalized() RuntimeDefinitionFocus {
@@ -49,6 +72,7 @@ func (f RuntimeDefinitionFocus) Normalized() RuntimeDefinitionFocus {
 	f.AssessmentText = strings.TrimSpace(f.AssessmentText)
 	f.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(f.CoverageWorkItemIDs)
 	f.RequiredEvidenceKinds = normalizeStrings(f.RequiredEvidenceKinds)
+	f.AcceptedStepKinds = canonicalizeOperationKinds(f.AcceptedStepKinds)
 	f.EvidenceRole = strings.TrimSpace(f.EvidenceRole)
 	f.TargetRole = strings.TrimSpace(f.TargetRole)
 	f.TargetDiscoverySources = normalizeStrings(f.TargetDiscoverySources)
@@ -59,6 +83,9 @@ func (f RuntimeDefinitionFocus) Normalized() RuntimeDefinitionFocus {
 	f.ProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(f.ProspectiveTargetAllOfConstraintRefs)
 	f.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(f.RequiredOwnerFacts)
 	f.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(f.OwnerFactConvergences)
+	f.EvidenceDeclarationRef = strings.TrimSpace(f.EvidenceDeclarationRef)
+	f.ValidationRecipeID = strings.TrimSpace(f.ValidationRecipeID)
+	f.RequiredCheckRefs = normalizeRuntimeValidationProofCheckRefs(f.RequiredCheckRefs)
 	f.ValidationFailureRepairConvergence = cloneRuntimeValidationFailureRepairConvergence(f.ValidationFailureRepairConvergence)
 	f.MetricConstraints = normalizeStrings(f.MetricConstraints)
 	f.ArtifactRefs = normalizeStrings(f.ArtifactRefs)
@@ -69,11 +96,13 @@ func (f RuntimeDefinitionFocus) Clone() RuntimeDefinitionFocus {
 	f = f.Normalized()
 	f.CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), f.CoverageWorkItemIDs...)
 	f.RequiredEvidenceKinds = append([]string(nil), f.RequiredEvidenceKinds...)
+	f.AcceptedStepKinds = append([]string(nil), f.AcceptedStepKinds...)
 	f.TargetDiscoverySources = append([]string(nil), f.TargetDiscoverySources...)
 	f.TargetSelectorCandidateRefs = append([]string(nil), f.TargetSelectorCandidateRefs...)
 	f.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), f.ProspectiveTargetAllOfConstraintRefs...)
 	f.RequiredOwnerFacts = append([]RuntimeOwnerFactRequirement(nil), f.RequiredOwnerFacts...)
 	f.OwnerFactConvergences = CloneRuntimeOwnerFactConvergences(f.OwnerFactConvergences)
+	f.RequiredCheckRefs = append([]string(nil), f.RequiredCheckRefs...)
 	f.ValidationFailureRepairConvergence = cloneRuntimeValidationFailureRepairConvergence(f.ValidationFailureRepairConvergence)
 	f.MetricConstraints = append([]string(nil), f.MetricConstraints...)
 	f.ArtifactRefs = append([]string(nil), f.ArtifactRefs...)
@@ -91,6 +120,7 @@ func (f RuntimeDefinitionFocus) CoverageFocusDeclaration() CoverageFocus {
 		AssessmentID: f.AssessmentID, AssessmentText: f.AssessmentText,
 		CoverageWorkItemIDs:                  append([]common.CoverageWorkItemID(nil), f.CoverageWorkItemIDs...),
 		RequiredEvidenceKinds:                append([]string(nil), f.RequiredEvidenceKinds...),
+		AcceptedStepKinds:                    append([]string(nil), f.AcceptedStepKinds...),
 		EvidenceRole:                         f.EvidenceRole,
 		TargetRole:                           f.TargetRole,
 		TargetDiscoverySources:               append([]string(nil), f.TargetDiscoverySources...),
@@ -107,6 +137,9 @@ func (f RuntimeDefinitionFocus) CoverageFocusDeclaration() CoverageFocus {
 		RequireAssessment:                    f.RequireAssessment,
 		RequiredOwnerFacts:                   append([]RuntimeOwnerFactRequirement(nil), f.RequiredOwnerFacts...),
 		OwnerFactConvergences:                CloneRuntimeOwnerFactConvergences(f.OwnerFactConvergences),
+		EvidenceDeclarationRef:               f.EvidenceDeclarationRef,
+		ValidationRecipeID:                   f.ValidationRecipeID,
+		RequiredCheckRefs:                    append([]string(nil), f.RequiredCheckRefs...),
 		MetricConstraints:                    append([]string(nil), f.MetricConstraints...),
 		ArtifactRefs:                         append([]string(nil), f.ArtifactRefs...),
 	}.Normalized()
@@ -146,6 +179,7 @@ func CompileRuntimeDefinitionFocuses(values []CoverageFocus) []RuntimeDefinition
 			AssessmentText:                       value.AssessmentText,
 			CoverageWorkItemIDs:                  append([]common.CoverageWorkItemID(nil), value.CoverageWorkItemIDs...),
 			RequiredEvidenceKinds:                append([]string(nil), value.RequiredEvidenceKinds...),
+			AcceptedStepKinds:                    append([]string(nil), value.AcceptedStepKinds...),
 			EvidenceRole:                         value.EvidenceRole,
 			TargetRole:                           value.TargetRole,
 			TargetDiscoverySources:               append([]string(nil), value.TargetDiscoverySources...),
@@ -162,6 +196,9 @@ func CompileRuntimeDefinitionFocuses(values []CoverageFocus) []RuntimeDefinition
 			RequireAssessment:                    value.RequireAssessment,
 			RequiredOwnerFacts:                   append([]RuntimeOwnerFactRequirement(nil), value.RequiredOwnerFacts...),
 			OwnerFactConvergences:                CloneRuntimeOwnerFactConvergences(value.OwnerFactConvergences),
+			EvidenceDeclarationRef:               value.EvidenceDeclarationRef,
+			ValidationRecipeID:                   value.ValidationRecipeID,
+			RequiredCheckRefs:                    append([]string(nil), value.RequiredCheckRefs...),
 			MetricConstraints:                    append([]string(nil), value.MetricConstraints...),
 			ArtifactRefs:                         append([]string(nil), value.ArtifactRefs...),
 		}.Normalized())
@@ -201,6 +238,14 @@ func RuntimeFocusSeedsFromDefinitionFocuses(values []RuntimeDefinitionFocus) []C
 // ValidateRuntimeDefinitionFocuses verifies the immutable activation
 // declaration inventory and its exact owner-fact acquisition bindings.
 func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus) error {
+	for _, raw := range focuses {
+		if duplicate := duplicateRuntimeValidationProofCheckRef(raw.RequiredCheckRefs); duplicate != "" {
+			return fmt.Errorf("runtime definition focus %q duplicates check %q", strings.TrimSpace(raw.ID), duplicate)
+		}
+		if len(raw.CoverageWorkItemIDs) != len(normalizeCoverageWorkItemIDs(raw.CoverageWorkItemIDs)) {
+			return fmt.Errorf("runtime definition focus %q has duplicate or empty coverage identity", strings.TrimSpace(raw.ID))
+		}
+	}
 	seed = seed.Clone()
 	focuses = NormalizeRuntimeDefinitionFocuses(focuses)
 	if len(focuses) == 0 {
@@ -215,6 +260,10 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Runt
 	for _, focus := range focuses {
 		if focus.ID == "" || focus.SliceID == "" || len(focus.CoverageWorkItemIDs) != 1 || (len(focus.RequiredEvidenceKinds) == 0 && !focus.RequireAssessment) {
 			return fmt.Errorf("runtime definition focus requires identity, slice, one coverage item and evidence or assessment")
+		}
+		canonicalDeclarationRef := CanonicalRuntimeDefinitionEvidenceDeclarationRef(focus.AssessmentScope, focus.AssessmentID)
+		if focus.EvidenceDeclarationRef != canonicalDeclarationRef {
+			return fmt.Errorf("runtime definition focus %q declaration %q does not match canonical admitted-CWI declaration %q", focus.ID, focus.EvidenceDeclarationRef, canonicalDeclarationRef)
 		}
 		if _, duplicate := seenIDs[focus.ID]; duplicate {
 			return fmt.Errorf("runtime definition focus %q is duplicated", focus.ID)
@@ -274,6 +323,12 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Runt
 				return fmt.Errorf("runtime definition focus %q: %w", focus.ID, err)
 			}
 		}
+		if focus.ValidationRecipeID != "" && !containsString(focus.RequiredEvidenceKinds, EvidenceKindValidation) {
+			return fmt.Errorf("runtime definition focus %q recipe requires validation evidence", focus.ID)
+		}
+		if !containsString(focus.RequiredEvidenceKinds, EvidenceKindValidation) && len(focus.RequiredCheckRefs) != 0 {
+			return fmt.Errorf("runtime definition focus %q carries validation-only declarations without validation evidence", focus.ID)
+		}
 		for _, convergence := range focus.OwnerFactConvergences {
 			if convergence.RequirePreexisting {
 				continue
@@ -297,7 +352,7 @@ func sameRuntimeDefinitionFocus(left, right RuntimeDefinitionFocus) bool {
 	return left.ID == right.ID && left.SliceID == right.SliceID &&
 		left.AssessmentScope == right.AssessmentScope && left.AssessmentID == right.AssessmentID && left.AssessmentText == right.AssessmentText &&
 		sameCoverageWorkItemIDs(left.CoverageWorkItemIDs, right.CoverageWorkItemIDs) &&
-		sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) && left.EvidenceRole == right.EvidenceRole &&
+		sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) && sameStrings(left.AcceptedStepKinds, right.AcceptedStepKinds) && left.EvidenceRole == right.EvidenceRole &&
 		left.TargetRole == right.TargetRole && sameStrings(left.TargetDiscoverySources, right.TargetDiscoverySources) &&
 		left.TargetSelectorRef == right.TargetSelectorRef && left.TargetSelectorOwnerRef == right.TargetSelectorOwnerRef &&
 		left.TargetSelectorSubjectRef == right.TargetSelectorSubjectRef && sameStrings(left.TargetSelectorCandidateRefs, right.TargetSelectorCandidateRefs) && SameRuntimeProspectiveTargetAllOfConstraintRefs(left.ProspectiveTargetAllOfConstraintRefs, right.ProspectiveTargetAllOfConstraintRefs) &&
@@ -306,6 +361,7 @@ func sameRuntimeDefinitionFocus(left, right RuntimeDefinitionFocus) bool {
 		left.RequireCoverageTargets == right.RequireCoverageTargets && left.RequireAssessment == right.RequireAssessment &&
 		sameRuntimeOwnerFactRequirements(left.RequiredOwnerFacts, right.RequiredOwnerFacts) &&
 		SameRuntimeOwnerFactConvergences(left.OwnerFactConvergences, right.OwnerFactConvergences) &&
+		left.EvidenceDeclarationRef == right.EvidenceDeclarationRef && left.ValidationRecipeID == right.ValidationRecipeID && sameStrings(left.RequiredCheckRefs, right.RequiredCheckRefs) &&
 		SameRuntimeValidationFailureRepairConvergence(left.ValidationFailureRepairConvergence, right.ValidationFailureRepairConvergence) &&
 		sameStrings(left.MetricConstraints, right.MetricConstraints) && sameStrings(left.ArtifactRefs, right.ArtifactRefs)
 }

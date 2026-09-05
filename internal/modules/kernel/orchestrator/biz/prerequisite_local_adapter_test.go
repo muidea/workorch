@@ -204,14 +204,20 @@ func TestRuntimePrerequisiteResolverInventoryUsesProductionRequirementSources(t 
 					// intentionally only the shared quality/grounding rule.
 					ID: "dod-001", Scope: "dodItem", EvidenceRole: "primary_state_change",
 					TargetRefs:            []string{"workspace_deliverable"},
-					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "git-state-validation", RequiredCheckRefs: []string{"check/git-state"},
+					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "git-state-validation", RequiredCheckRefs: []string{"check/git-state"},
+					RequiredOwnerFacts: []runtimecontract.RuntimeOwnerFactRequirement{{
+						OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+					}},
+					OwnerFactConvergences: []runtimecontract.RuntimeOwnerFactConvergence{{
+						Requirement: runtimecontract.RuntimeOwnerFactRequirement{OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession}, RequirePreexisting: true,
+					}},
 					CapabilityStateRequirements: []runtimecontract.RuntimeProfileCapabilityStateRequirement{{
 						OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable",
 					}},
 				}, {
 					ID: "*", Scope: "dodItem", EvidenceRole: "primary_state_change",
 					TargetRefs:            []string{"workspace_deliverable"},
-					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "git-state-validation", RequiredCheckRefs: []string{"check/git-state"},
+					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "git-state-validation", RequiredCheckRefs: []string{"check/git-state"},
 					CapabilityStateRequirements: []runtimecontract.RuntimeProfileCapabilityStateRequirement{{
 						OwnerModuleID: runtimecontract.RuntimeModuleGit, CapabilityStateKind: "repository_state", SubjectRef: "workspace_deliverable",
 					}},

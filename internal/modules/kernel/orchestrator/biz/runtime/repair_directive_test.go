@@ -309,7 +309,10 @@ func TestRepairDirectiveStateChangeEvidenceCanAdvanceBeforeRequiredAssessment(t 
 		ID: "changed-target", Kind: runtimecontract.EvidenceKindStateChange, Revision: "runtime-evidence-00000000000000000001", TargetRefs: []string{"implementation.go"},
 		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	})
+	persistedDirective := facts.RepairDirective.Clone()
 	facts = repairDirectiveFactsWithCanonicalCWI(t, facts)
+	persistedDirective.FocusID = facts.Focus.ID
+	facts.RepairDirective = &persistedDirective
 	updated := syncRepairDirective(facts, runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedAssessment, Focus: facts.Focus})
 	if updated.RepairDirective == nil || updated.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedValidation ||
 		updated.RepairDirective.SupersedesEvidenceRevision != "runtime-evidence-00000000000000000001" {
@@ -380,7 +383,17 @@ func TestAssessmentGapRepairClosureBindsGroundedTargetsAndFollowupValidation(t *
 		Revision: "runtime-evidence-00000000000000000002", TargetRefs: []string{"implementation.go"},
 		CoverageWorkItemIDs: facts.Focus.CoverageWorkItemIDs,
 	}}
+	groundedTargets := append([]string(nil), facts.Focus.TargetRefs...)
+	// The semantic proposal contract binds one exact target per operation. This
+	// unit exercises the reducer's multi-target repair closure, so construct its
+	// CWI lineage with one exact operation target and then restore the already
+	// sealed closure target set before evaluating the hand-off.
+	facts.Focus.TargetRefs = []string{groundedTargets[0]}
 	facts = repairDirectiveFactsWithCanonicalCWI(t, facts)
+	facts.Focus.TargetRefs = groundedTargets
+	persistedDirective := directive.Clone()
+	persistedDirective.FocusID = facts.Focus.ID
+	facts.RepairDirective = &persistedDirective
 	next := syncRepairDirective(facts, decision)
 	if next.RepairDirective == nil || next.RepairDirective.RequiredState != runtimecontract.ConvergenceStateNeedValidation ||
 		next.RepairDirective.Closure == nil || next.RepairDirective.Closure.ID != directive.Closure.ID {
@@ -390,10 +403,10 @@ func TestAssessmentGapRepairClosureBindsGroundedTargetsAndFollowupValidation(t *
 
 func repairDirectiveFactsWithCanonicalCWI(t *testing.T, facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
 	t.Helper()
-	aggregate := RuntimeAggregate{Facts: facts}
-	runtimeTestSealCurrentFocusBindings(t, &aggregate)
-	runtimeTestSynchronizeCanonicalCWILedger(t, &aggregate)
-	return aggregate.Facts
+	return runtimeTestFactsWithCurrentFocusBindings(t, facts, runtimecontract.RuntimeDefinitionContext{
+		StartupInputHash: "startup-input-test",
+		Revision:         facts.DefinitionRevision,
+	})
 }
 
 func TestRejectedValidationWithNoFeasibleRecipeTerminals(t *testing.T) {

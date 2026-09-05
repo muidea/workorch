@@ -1337,7 +1337,32 @@ func addObservedMCPOperationAdmissibilityFixture(
 		response.Acquisition.Admissibility.ObservedRevision != expectedRevision {
 		t.Fatalf("MCP operation admissibility response = %#v", data)
 	}
-	aggregate.Facts.Resources.OperationAdmissibilities = append(aggregate.Facts.Resources.OperationAdmissibilities, response.Acquisition.Admissibility)
+	retiredPrerequisites := make(map[string]struct{})
+	catalogs := aggregate.Facts.Resources.OperationAdmissibilities[:0]
+	for _, catalog := range aggregate.Facts.Resources.OperationAdmissibilities {
+		if catalog.OwnerModuleID == runtimecontract.RuntimeModuleMCP {
+			retiredPrerequisites[catalog.PrerequisiteID] = struct{}{}
+			continue
+		}
+		catalogs = append(catalogs, catalog)
+	}
+	aggregate.Facts.Resources.OperationAdmissibilities = append(catalogs, response.Acquisition.Admissibility)
+	observations := aggregate.Facts.Resources.PrerequisiteObservations[:0]
+	for _, observation := range aggregate.Facts.Resources.PrerequisiteObservations {
+		if _, retired := retiredPrerequisites[observation.PrerequisiteID]; retired {
+			continue
+		}
+		observations = append(observations, observation)
+	}
+	aggregate.Facts.Resources.PrerequisiteObservations = observations
+	satisfied := aggregate.Facts.Prerequisites.Satisfied[:0]
+	for _, prerequisite := range aggregate.Facts.Prerequisites.Satisfied {
+		if _, retired := retiredPrerequisites[prerequisite.ID]; retired {
+			continue
+		}
+		satisfied = append(satisfied, prerequisite)
+	}
+	aggregate.Facts.Prerequisites.Satisfied = satisfied
 	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, response.Acquisition.Observation)
 	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, runtimecontract.RuntimePrerequisite{
 		ID: prerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,

@@ -10,7 +10,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestCompileRuntimeCoverageFocusesAppliesDodItemWildcard(t *testing.T) {
+func TestCompileRuntimeCoverageFocusesKeepsWildcardQualityWithoutPromotingAuthority(t *testing.T) {
 	repair := runtimecontract.RuntimeValidationFailureRepairConvergence{
 		ID: "dod-validation-repair",
 		Routes: []runtimecontract.RuntimeValidationFailureRepairRoute{{
@@ -40,8 +40,19 @@ func TestCompileRuntimeCoverageFocusesAppliesDodItemWildcard(t *testing.T) {
 						runtimecontract.RuntimeValidationDiscoverySourceProjectFiles,
 					}, TargetSelectorRef: "file/unique_workspace_entry", RequireTargetGrounding: true,
 					RequireDirectEvidence: true, RequireClaimEvidence: true, RequireExecutableBehaviorEvidence: true,
-					AcceptedStepKinds:                  []string{"shell/command", "patch/apply", "mcp/tool_call", runtimecontract.RuntimeBlockKindManagedValidationSession},
-					RejectedStepKinds:                  []string{"file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"},
+					AcceptedStepKinds: []string{"shell/command", "patch/apply", "mcp/tool_call", runtimecontract.RuntimeBlockKindManagedValidationSession},
+					RejectedStepKinds: []string{"file/read", "file/list", "mcp/resource_read", "mcp/prompt_get"},
+					RequiredOwnerFacts: []runtimecontract.RuntimeOwnerFactRequirement{{
+						OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+						OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+					}},
+					OwnerFactConvergences: []runtimecontract.RuntimeOwnerFactConvergence{{
+						Requirement: runtimecontract.RuntimeOwnerFactRequirement{
+							OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+							OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+						},
+						RequirePreexisting: true,
+					}},
 					ValidationFailureRepairConvergence: &repair,
 				}},
 			}},
@@ -73,13 +84,16 @@ func TestCompileRuntimeCoverageFocusesAppliesDodItemWildcard(t *testing.T) {
 		if len(focus.RequiredEvidenceKinds) != 1 || focus.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation {
 			t.Fatalf("required evidence kinds = %v, want validation only", focus.RequiredEvidenceKinds)
 		}
-		if focus.TargetRole != "deliverable_implementation" || focus.TargetSelectorRef != "file/unique_workspace_entry" || !focus.RequireTargetGrounding ||
-			len(focus.TargetRefs) != 0 || len(focus.TargetDiscoverySources) != 2 {
-			t.Fatalf("dod focus target contract not compiled: %+v", focus)
+		if focus.EvidenceDeclarationRef != runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-00"+fmt.Sprint(index+1)) ||
+			focus.TargetRole != "deliverable_implementation" || focus.TargetSelectorRef != "file/unique_workspace_entry" ||
+			!focus.RequireTargetGrounding || len(focus.TargetRefs) != 0 || len(focus.TargetDiscoverySources) != 2 {
+			t.Fatalf("wildcard declaration template was not instantiated on the exact CWI: %+v", focus)
 		}
 		definition := compiled.DefinitionFocuses[index]
-		if definition.ValidationFailureRepairConvergence == nil || definition.ValidationFailureRepairConvergence.ID != repair.ID || definition.ValidationFailureRepairConvergence.MaxAttempts != 2 {
-			t.Fatalf("immutable Definition focus lost repair convergence: %+v", definition)
+		if definition.ValidationFailureRepairConvergence == nil || definition.ValidationFailureRepairConvergence.ID != repair.ID ||
+			len(definition.RequiredOwnerFacts) != 1 || len(definition.OwnerFactConvergences) != 1 ||
+			definition.ValidationRecipeID != "" || len(definition.RequiredCheckRefs) != 0 {
+			t.Fatalf("wildcard declarative constraints or recipe-neutral proof identity drifted: %+v", definition)
 		}
 	}
 }
@@ -102,7 +116,7 @@ func TestResolveCoverageEvidencePolicyRejectsConflictingRepairConvergences(t *te
 	activation := runtimecontract.RuntimeActivationContext{ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 		ID: "profile", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
 			{ID: "item-1", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationFailureRepairConvergence: &changed},
-			{ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationFailureRepairConvergence: &base},
+			{ID: "item-1", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationFailureRepairConvergence: &base},
 		},
 	}}}}
 	_, err := resolveCoverageEvidencePolicy("dodItem", "item-1", activation, false)
@@ -118,7 +132,7 @@ func TestCompileRuntimeCoverageDefersTargetSelectionToFileOwner(t *testing.T) {
 			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), StateChangePolicy: runtimecontract.RuntimeStateChangeMustProduce,
 			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 				ID: "profile", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
-					ID: "*", Scope: "dodItem", TargetRole: "deliverable_implementation",
+					ID: "dod-001", Scope: "dodItem", TargetRole: "deliverable_implementation",
 					TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 					TargetSelectorRef:      "file/unique_workspace_entry", RequireTargetGrounding: true,
 					AcceptedStepKinds: []string{"patch/apply"},
@@ -302,7 +316,7 @@ func TestRuntimeBootstrapCompilesBroadDoDIntoSemanticPlanningSeed(t *testing.T) 
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "build a gopls service"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: dodItems},
-		"definition-1", "startup-input-test", nil, activation,
+		"definition-1", "startup-input-test", nil, withTestManagedValidationOwnerFactClosure(activation),
 	)
 	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 31 {
 		t.Fatalf("broad semantic planning seed bootstrap=%+v err=%v", bootstrap, err)
@@ -350,7 +364,7 @@ func TestCompileRuntimeCoverageCarriesProspectiveTargetCandidatesIntoLeadingDoDF
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: testAcceptanceSlicePolicy(), ProfileContracts: []runtimecontract.RuntimeProfileContract{{
 			ID: "profile", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
 				{
-					ID: "*", Scope: "dodItem", RequireTargetGrounding: true, TargetRole: "deliverable_implementation",
+					ID: "dod-001", Scope: "dodItem", RequireTargetGrounding: true, TargetRole: "deliverable_implementation",
 					TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest},
 					TargetSelectorRef:      "file/workspace_deliverable", TargetSelectorOwnerRef: runtimecontract.RuntimeModuleFile,
 					TargetSelectorSubjectRef: "dod-deliverable", TargetSelectorCandidateRefs: []string{"workorch-deliverable.md"},
@@ -414,12 +428,12 @@ func TestResolveCoverageEvidencePolicyCompilesGroundedDirectEvidenceScopes(t *te
 				ID: "software-dev",
 				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{
 					{
-						ID: "*", Scope: "dodItem", TargetRole: "deliverable_implementation",
+						ID: "any-item", Scope: "dodItem", TargetRole: "deliverable_implementation",
 						TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles},
 						TargetSelectorRef:      "file/unique_workspace_entry", RequireTargetGrounding: true,
 					},
 					{
-						ID: "*", Scope: "goalCoverage", TargetRole: "deliverable_implementation",
+						ID: "any-item", Scope: "goalCoverage", TargetRole: "deliverable_implementation",
 						TargetDiscoverySources: []string{runtimecontract.RuntimeValidationDiscoverySourceWorkspaceManifest, runtimecontract.RuntimeValidationDiscoverySourceProjectFiles},
 						TargetSelectorRef:      "file/unique_workspace_entry", RequireTargetGrounding: true,
 					},
@@ -524,7 +538,7 @@ func TestCompileRuntimeCoverageFocusesUsesEvidencePolicyCoverageRequirements(t *
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 			ID: "policy-1", AppliesTo: "shell/command",
 			CoverageRequirements: []runtimecontract.RuntimeCoverageEvidenceRequirement{{
-				ID: "*", Scope: "dod_item",
+				ID: "dod-001", Scope: "dod_item",
 				TargetRole:                        "verification_target",
 				TargetRefs:                        []string{"runtime-validation-source.txt"},
 				RequireTargetGrounding:            true,

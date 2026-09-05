@@ -15,6 +15,15 @@ type RuntimeTransitionCoordinator struct {
 	repository RuntimeStateRepository
 }
 
+// validatedRuntimeStateRepository is an optional persistence fast path for the
+// production adapter. Commit is the only caller: it has already validated the
+// complete aggregate immediately before invoking SaveValidated. Direct
+// repository callers continue through Save and retain the repository-boundary
+// validation.
+type validatedRuntimeStateRepository interface {
+	SaveValidated(context.Context, RuntimeAggregate, uint64) error
+}
+
 func NewRuntimeTransitionCoordinator(repository RuntimeStateRepository) (*RuntimeTransitionCoordinator, error) {
 	if repository == nil {
 		return nil, common.ErrInvalidArgument
@@ -34,7 +43,13 @@ func (c *RuntimeTransitionCoordinator) Commit(ctx context.Context, aggregate Run
 	if err := aggregate.Validate(); err != nil {
 		return fmt.Errorf("runtime transition invariant: %w", err)
 	}
-	if err := c.repository.Save(ctx, aggregate, expectedRevision); err != nil {
+	var err error
+	if repository, ok := c.repository.(validatedRuntimeStateRepository); ok {
+		err = repository.SaveValidated(ctx, aggregate, expectedRevision)
+	} else {
+		err = c.repository.Save(ctx, aggregate, expectedRevision)
+	}
+	if err != nil {
 		var typed *RuntimeCASConflictError
 		if errors.As(err, &typed) {
 			return typed

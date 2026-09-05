@@ -260,6 +260,10 @@ func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, requ
 	if !shellInputHasManagedValidation(request) || strings.TrimSpace(filepath.Base(execCommand)) != "go" || len(request.ValidationScopeTargetRefs) == 0 {
 		return nil, true
 	}
+	diagnosticOutput := output.Stdout + "\n" + output.Stderr
+	if len(request.Args) > 0 && strings.TrimSpace(request.Args[0]) == "test" && shellGoTestJSONEnabled(request.Args[1:]) {
+		diagnosticOutput += "\n" + goTestJSONDiagnosticOutput(output.Stdout, output.Stderr)
+	}
 	scope := make(map[string]struct{}, len(request.ValidationScopeTargetRefs))
 	for _, value := range request.ValidationScopeTargetRefs {
 		if normalized, ok := normalizeShellDiagnosticTargetRef(value, output.WorkingDirectory); ok {
@@ -271,7 +275,7 @@ func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, requ
 	}
 	seen := make(map[string]struct{})
 	for _, pattern := range []*regexp.Regexp{shellGoDiagnosticTargetPattern, shellGoModuleDiagnosticPattern} {
-		for _, match := range pattern.FindAllStringSubmatch(output.Stdout+"\n"+output.Stderr, -1) {
+		for _, match := range pattern.FindAllStringSubmatch(diagnosticOutput, -1) {
 			if len(match) != 2 {
 				continue
 			}
@@ -288,7 +292,7 @@ func shellValidationDiagnosticTargetCandidates(output RuntimeCommandResult, requ
 			}
 		}
 	}
-	for _, match := range shellGoPackageConflictPattern.FindAllStringSubmatch(output.Stdout+"\n"+output.Stderr, -1) {
+	for _, match := range shellGoPackageConflictPattern.FindAllStringSubmatch(diagnosticOutput, -1) {
 		if len(match) != 4 {
 			continue
 		}

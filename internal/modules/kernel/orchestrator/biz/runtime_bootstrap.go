@@ -14,6 +14,9 @@ func (m *Biz) initializeRuntimeFromRun(ctx context.Context, run *runmodel.Run) (
 	if m == nil || m.runtimeController == nil || run == nil || run.ID == "" || run.WorkspaceID == "" || run.RuntimeBootstrap == nil {
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
+	if err := runtimecontract.ValidateRuntimeBootstrapRaw(*run.RuntimeBootstrap); err != nil {
+		return runtime.RuntimeAggregate{}, err
+	}
 	bootstrap := run.RuntimeBootstrap.Clone()
 	// A first Runtime aggregate may only be created from an activation that
 	// already sealed this binary's executable operation catalog. Do not repair

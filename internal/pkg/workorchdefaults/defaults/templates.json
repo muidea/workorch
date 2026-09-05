@@ -160,8 +160,8 @@
   },
   {
     "id": "software-dev",
-    "name": "软件开发",
-    "description": "编码实现、运行测试、修复缺陷的完整软件开发流程。支持 git、构建工具和测试框架。",
+    "name": "软件开发（Go 原生验证）",
+    "description": "编码实现、运行测试、修复缺陷的完整软件开发流程。当前内置证明闭环使用由 Shell owner 持有的 Go 原生测试协议；其他框架原生或 MCP-only 验证需选择对应的显式 Profile。",
     "goalText": "根据需求完成软件开发任务：编码实现、运行测试、修复缺陷、产出交付物。",
     "defaultSoulId": "soul-software-dev-execution",
     "doDItems": [
@@ -842,6 +842,57 @@
               "description": "Quantified performance, resource, compression, throughput, latency, or budget claims must cite executed measurement evidence with actual numeric output and threshold comparison."
             },
             {
+              "id": "*",
+              "scope": "acceptanceDimension",
+              "requiredEvidenceKinds": [
+                "validation"
+              ],
+              "targetRole": "deliverable_implementation",
+              "targetDiscoverySources": [
+                "workspace_manifest",
+                "project_files"
+              ],
+              "targetSelectorRef": "file/workspace_deliverable",
+              "targetSelectorOwnerRef": "software-dev",
+              "targetSelectorSubjectRef": "acceptanceDimension",
+              "prospectiveTargetAllOfConstraintRefs": [
+                "workspace-relative-path",
+                "new-target-requires-owner-selector"
+              ],
+              "requireTargetGrounding": true,
+              "acceptedStepKinds": [
+                "validation/managed_session",
+                "file/write"
+              ],
+              "requiredOwnerFacts": [
+                {
+                  "ownerModuleId": "blocks/shell",
+                  "factKind": "selectable_validation_surface",
+                  "operationKind": "validation/managed_session"
+                }
+              ],
+              "ownerFactConvergences": [
+                {
+                  "ownerModuleId": "blocks/shell",
+                  "factKind": "selectable_validation_surface",
+                  "operationKind": "validation/managed_session",
+                  "missingTrigger": "owner_fact_missing",
+                  "acquisitionOwnerModuleId": "blocks/file",
+                  "acquisitionOperationKind": "file/write",
+                  "acquisitionTargetPolicy": "prospective_owner_target",
+                  "acquisitionTargetSelectorRef": "workspace-relative-new-file-target",
+                  "prospectiveSatisfactionContractRef": "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+                  "targetSelectorRef": "file/workspace_deliverable",
+                  "targetSelectorOwnerRef": "software-dev",
+                  "targetSelectorSubjectRef": "acceptanceDimension",
+                  "reobserveOwnerModuleId": "blocks/shell",
+                  "reobserveFactKind": "selectable_validation_surface",
+                  "maxAcquisitionAttempts": 1
+                }
+              ],
+              "description": "Software-development acceptance dimensions that admit managed validation require an explicit, profile-owned path for preparing and re-observing their exact owner-native assertion."
+            },
+            {
               "id": "source_change",
               "scope": "deliverable",
               "evidenceRole": "primary_state_change",
@@ -888,9 +939,49 @@
               "requiredEvidenceKinds": [
                 "validation"
               ],
+              "targetRole": "validation_evidence",
+              "targetDiscoverySources": [
+                "workspace_manifest",
+                "project_files"
+              ],
+              "targetSelectorRef": "file/workspace_deliverable",
+              "targetSelectorOwnerRef": "software-dev",
+              "targetSelectorSubjectRef": "validation_report",
+              "prospectiveTargetAllOfConstraintRefs": [
+                "workspace-relative-path",
+                "new-target-requires-owner-selector"
+              ],
+              "requireTargetGrounding": true,
               "requireDirectEvidence": true,
               "acceptedStepKinds": [
-                "validation/managed_session"
+                "validation/managed_session",
+                "file/write"
+              ],
+              "requiredOwnerFacts": [
+                {
+                  "ownerModuleId": "blocks/shell",
+                  "factKind": "selectable_validation_surface",
+                  "operationKind": "validation/managed_session"
+                }
+              ],
+              "ownerFactConvergences": [
+                {
+                  "ownerModuleId": "blocks/shell",
+                  "factKind": "selectable_validation_surface",
+                  "operationKind": "validation/managed_session",
+                  "missingTrigger": "owner_fact_missing",
+                  "acquisitionOwnerModuleId": "blocks/file",
+                  "acquisitionOperationKind": "file/write",
+                  "acquisitionTargetPolicy": "prospective_owner_target",
+                  "acquisitionTargetSelectorRef": "workspace-relative-new-file-target",
+                  "prospectiveSatisfactionContractRef": "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+                  "targetSelectorRef": "file/workspace_deliverable",
+                  "targetSelectorOwnerRef": "software-dev",
+                  "targetSelectorSubjectRef": "validation_report",
+                  "reobserveOwnerModuleId": "blocks/shell",
+                  "reobserveFactKind": "selectable_validation_surface",
+                  "maxAcquisitionAttempts": 1
+                }
               ],
               "rejectedStepKinds": [
                 "file/read",
@@ -1092,6 +1183,32 @@
                 "file/write",
                 "patch/apply",
                 "mcp/tool_call"
+              ],
+              "requiredOwnerFacts": [
+                {
+                  "ownerModuleId": "blocks/shell",
+                  "factKind": "selectable_validation_surface",
+                  "operationKind": "validation/managed_session"
+                }
+              ],
+              "ownerFactConvergences": [
+                {
+                  "ownerModuleId": "blocks/shell",
+                  "factKind": "selectable_validation_surface",
+                  "operationKind": "validation/managed_session",
+                  "missingTrigger": "owner_fact_missing",
+                  "acquisitionOwnerModuleId": "blocks/file",
+                  "acquisitionOperationKind": "file/write",
+                  "acquisitionTargetPolicy": "prospective_owner_target",
+                  "acquisitionTargetSelectorRef": "workspace-relative-new-file-target",
+                  "prospectiveSatisfactionContractRef": "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+                  "targetSelectorRef": "file/workspace_deliverable",
+                  "targetSelectorOwnerRef": "software-dev",
+                  "targetSelectorSubjectRef": "goalCoverage",
+                  "reobserveOwnerModuleId": "blocks/shell",
+                  "reobserveFactKind": "selectable_validation_surface",
+                  "maxAcquisitionAttempts": 1
+                }
               ],
               "rejectedStepKinds": [
                 "file/read",

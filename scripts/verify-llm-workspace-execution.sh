@@ -32,7 +32,7 @@ SKILL_ID="skill-llm-acceptance-$VERIFY_SUFFIX"
 SOUL_ID="soul-llm-acceptance-$VERIFY_SUFFIX"
 MEMORY_ID="memory-context-seed-$VERIFY_SUFFIX"
 C12_TEMPLATE_ID="runtime-c12-live-$VERIFY_SUFFIX"
-C12_VALIDATION_RECIPE_ID="runtime-c12-source-present"
+C12_VALIDATION_RECIPE_ID="runtime-c12-native-go"
 MOCK_PID=""
 WATCHDOG_PID=""
 MOCK_LOG="$TMP_DIR/llm-mock.log"
@@ -293,6 +293,14 @@ def operation_contracts(authority):
     output_contract = object_value(authority, "outputContract", "OutputContract")
     return object_value(output_contract, "operationContracts", "OperationContracts") or []
 
+def operation_wire_rules(authority):
+    output_contract = object_value(authority, "outputContract", "OutputContract")
+    return object_value(output_contract, "wireRules", "WireRules") or []
+
+def operation_output_instruction(authority):
+    output_contract = object_value(authority, "outputContract", "OutputContract") or {}
+    return object_value(output_contract, "structuredOutputInstruction", "StructuredOutputInstruction") or ""
+
 def select_operation_contract(request, *kinds):
     contracts = request.get("operationContracts") or []
     for kind in kinds:
@@ -357,6 +365,44 @@ def provider_operation(contract, kind, parameters):
         selected = [parameter for parameter in parameters if parameter.get("name") in provider_names]
         if selected or "parameters" in required:
             operation["parameters"] = selected
+    return operation
+
+def provider_required_operation(rule, parameters):
+    # Required-operation wire rules are the exact provider DTO contract for a
+    # locally compiled SM-3 sequence slot.  In particular, File targetRefs,
+    # kind, binding and dependency are owner/Runtime values and must not be
+    # echoed back by this fixture when the rule marks them locally derived.
+    required_ref = object_value(rule, "requiredOperationRef", "RequiredOperationRef") or ""
+    compiled_kind = object_value(rule, "compiledKind", "CompiledKind") or ""
+    allowed = set(string_list(object_value(rule, "providerFields", "ProviderFields")))
+    required = set(string_list(object_value(rule, "requiredProviderFields", "RequiredProviderFields")))
+    if not required_ref or compiled_kind != "file/write":
+        raise ValueError("fixture supports only sealed File-write required sequence slots")
+    if not required.issubset(allowed):
+        raise ValueError("required-operation wire rule requires a forbidden provider field")
+    operation = {}
+    if "requiredOperationRef" in allowed:
+        operation["requiredOperationRef"] = required_ref
+    if "kind" in allowed:
+        operation["kind"] = compiled_kind
+    unsupported = allowed.difference({"requiredOperationRef", "kind", "parameters"})
+    if unsupported:
+        raise ValueError("fixture cannot safely supply required-operation provider fields %r" % sorted(unsupported))
+    if "parameters" in allowed:
+        provider_names = set(string_list(object_value(rule, "providerParameterNames", "ProviderParameterNames")))
+        required_names = set(string_list(object_value(rule, "requiredProviderParameterNames", "RequiredProviderParameterNames")))
+        non_empty_names = set(string_list(object_value(rule, "requiredNonEmptyParameterNames", "RequiredNonEmptyParameterNames")))
+        selected = [parameter for parameter in parameters if parameter.get("name") in provider_names]
+        selected_names = {parameter.get("name") for parameter in selected}
+        if not required_names.issubset(selected_names):
+            raise ValueError("required-operation parameters do not satisfy the sealed wire rule")
+        for parameter in selected:
+            if parameter.get("name") in non_empty_names and not str(parameter.get("string") or "").strip():
+                raise ValueError("required-operation parameter %r must be non-empty" % parameter.get("name"))
+        if selected or "parameters" in required:
+            operation["parameters"] = selected
+    if not required.issubset(operation):
+        raise ValueError("required-operation payload is missing sealed provider fields")
     return operation
 
 def operation_validation_recipe_id(contract):
@@ -449,6 +495,14 @@ def provider_request_from_payload(payload):
             execution_tail = leading_section_json("C4.execution-tail", sections["C4.execution-tail"], dict)
         evidence_refs = current_focus_evidence_refs(context, execution_tail, coverage)
         sealed_operation_contracts = operation_contracts(authority)
+        sealed_wire_rules = operation_wire_rules(authority)
+        output_instruction = operation_output_instruction(authority)
+        validation_proof_preparations = object_value(
+            context, "validationProofPreparations", "ValidationProofPreparations"
+        ) or []
+        prospective_target_refs = unique_strings(string_list(object_value(
+            focus, "prospectiveTargetRefs", "ProspectiveTargetRefs"
+        )))
     else:
         # Compatibility for provider probes and the older acceptance scenarios
         # in this verifier.  This branch is intentionally unavailable once C3
@@ -461,6 +515,10 @@ def provider_request_from_payload(payload):
         coverage = unique_strings(re.findall(r'"(cwi-[A-Za-z0-9._-]+)"', content)) or ["cwi-001"]
         evidence_refs = unique_strings(re.findall(r'"(workorch://[^"]+|run-[^"]+/validation/[^"]+|run-[^"]+/graph-[^"]+)"', content))
         sealed_operation_contracts = []
+        sealed_wire_rules = []
+        output_instruction = ""
+        validation_proof_preparations = []
+        prospective_target_refs = []
     if not evidence_refs:
         evidence_refs = ["workorch://workspace/runtime-validation-source.txt"]
     return {
@@ -475,6 +533,10 @@ def provider_request_from_payload(payload):
         "coverage": coverage[:4],
         "evidenceRefs": evidence_refs[:4],
         "operationContracts": sealed_operation_contracts,
+        "wireRules": sealed_wire_rules,
+        "structuredOutputInstruction": output_instruction,
+        "validationProofPreparations": validation_proof_preparations,
+        "prospectiveTargetRefs": prospective_target_refs,
     }
 
 def semantic_catalogs_by_owner(manifest):
@@ -485,14 +547,69 @@ def semantic_catalogs_by_owner(manifest):
             catalogs[owner] = catalog
     return catalogs
 
-def semantic_required_evidence(seed, coverage_id):
-    values = []
-    for slice_value in object_value(seed, "slices", "Slices") or []:
-        coverage = string_list(object_value(slice_value, "coverageWorkItemIds", "CoverageWorkItemIDs"))
-        if coverage_id in coverage:
-            values.extend(string_list(object_value(slice_value, "requiredEvidenceKinds", "RequiredEvidenceKinds")))
-    values = unique_strings(values)
-    return values or ["validation"]
+def semantic_proof_obligation(manifest, coverage_id):
+    matches = [
+        value for value in object_value(manifest, "proofObligations", "ProofObligations") or []
+        if object_value(value, "coverageWorkItemId", "CoverageWorkItemID") == coverage_id
+    ]
+    if len(matches) != 1:
+        raise ValueError("semantic manifest must expose exactly one proof obligation for %s" % coverage_id)
+    obligation = matches[0]
+    declaration_ref = object_value(obligation, "declarationRef", "DeclarationRef") or ""
+    current_evidence = unique_strings(string_list(object_value(
+        obligation, "currentRequiredEvidenceKinds", "CurrentRequiredEvidenceKinds"
+    )))
+    if not declaration_ref or not current_evidence:
+        raise ValueError("semantic proof obligation %s is incomplete" % coverage_id)
+    return obligation
+
+def semantic_target_predicate_matches(target_ref, predicate):
+    kind = object_value(predicate, "kind", "Kind") or ""
+    value = object_value(predicate, "value", "Value") or ""
+    if not value:
+        return False
+    if kind == "target_ref_path_exact":
+        return target_ref == value
+    if kind == "target_ref_path_suffix":
+        return target_ref.endswith(value)
+    if kind == "target_ref_path_prefix":
+        return target_ref.startswith(value)
+    if kind == "target_ref_path_segment_not_equals":
+        return value not in target_ref.split("/")
+    raise ValueError("unsupported prospective target predicate %r" % kind)
+
+def semantic_prospective_targets(obligation):
+    acquisition = object_value(obligation, "ownerFactAcquisition", "OwnerFactAcquisition") or {}
+    constraint = object_value(acquisition, "prospectiveTargetConstraint", "ProspectiveTargetConstraint") or {}
+    clauses = object_value(constraint, "allOf", "AllOf") or []
+    if not clauses:
+        raise ValueError("owner-fact acquisition has no typed prospective all-of constraint")
+
+    # The Shell owner publishes the exact native CWI test target as a proof
+    # preparation. Exact-path clauses additionally name recipe inputs such as
+    # the root go.mod. Use only those owner-authored paths; never invent a path
+    # merely because it would happen to match a suffix/prefix predicate.
+    targets = []
+    for preparation in object_value(constraint, "validationProofPreparations", "ValidationProofPreparations") or []:
+        target_ref = object_value(preparation, "targetRef", "TargetRef") or ""
+        if target_ref:
+            targets.append(target_ref)
+    for clause in clauses:
+        for predicate in object_value(clause, "allOf", "AllOf") or []:
+            if object_value(predicate, "kind", "Kind") == "target_ref_path_exact":
+                targets.append(object_value(predicate, "value", "Value") or "")
+    targets = sorted(unique_strings(targets))
+    if not targets or len(targets) > 8:
+        raise ValueError("owner-fact acquisition did not publish a bounded exact preparation target set")
+    for target_ref in targets:
+        segments = target_ref.split("/")
+        if target_ref.startswith("/") or "\\" in target_ref or any(part in ("", ".", "..") for part in segments):
+            raise ValueError("owner-fact acquisition published a non-canonical target %r" % target_ref)
+    for clause in clauses:
+        predicates = object_value(clause, "allOf", "AllOf") or []
+        if not predicates or not any(all(semantic_target_predicate_matches(target, predicate) for predicate in predicates) for target in targets):
+            raise ValueError("owner-authored prospective target set does not satisfy clause %r" % (object_value(clause, "id", "ID") or ""))
+    return targets
 
 def semantic_exact_target(catalog):
     targets = string_list(object_value(catalog, "targetRefs", "TargetRefs"))
@@ -503,26 +620,46 @@ def semantic_exact_target(catalog):
         return {"policy": "existing_owner_scope", "ownerSelectorRefs": [selectors[0]]}
     raise ValueError("semantic owner catalog has no bounded target or selector")
 
-def semantic_validation_proposal(coverage_id, catalogs):
+def semantic_validation_proposal(coverage_id, catalogs, obligation):
+    requirement = object_value(obligation, "validationProofRequirement", "ValidationProofRequirement") or {}
+    declaration_ref = object_value(obligation, "declarationRef", "DeclarationRef") or ""
+    selectable_recipes = unique_strings(string_list(object_value(
+        requirement, "selectableValidationRecipeIds", "SelectableValidationRecipeIDs"
+    )))
+    attestations = object_value(requirement, "ownerNativeCheckAttestations", "OwnerNativeCheckAttestations") or []
     for owner, catalog in catalogs.items():
         kinds = string_list(object_value(catalog, "operationKinds", "OperationKinds"))
         recipe_refs = unique_strings(string_list(
             object_value(catalog, "validationRecipeRefs", "ValidationRecipeRefs")
         ))
-        if "validation/managed_session" not in kinds or not recipe_refs:
+        recipe_candidates = [recipe_id for recipe_id in selectable_recipes if recipe_id in recipe_refs]
+        if "validation/managed_session" not in kinds or len(recipe_candidates) != 1:
             continue
+        recipe_id = recipe_candidates[0]
+        native_targets = unique_strings([
+            object_value(attestation, "targetRef", "TargetRef") or ""
+            for attestation in attestations
+            if object_value(attestation, "validationRecipeId", "ValidationRecipeID") == recipe_id
+        ])
+        target = semantic_exact_target(catalog)
+        if native_targets:
+            catalog_targets = set(string_list(object_value(catalog, "targetRefs", "TargetRefs")))
+            if any(target_ref not in catalog_targets for target_ref in native_targets):
+                raise ValueError("native CWI attestation target is outside the Shell catalog")
+            target = {"policy": "exact_target", "exactTargetRefs": native_targets}
         return {
             "coverageWorkItemId": coverage_id,
             "ownerModuleId": owner,
             "operationKind": "validation/managed_session",
-            "target": semantic_exact_target(catalog),
+            "target": target,
             "requiredEvidenceKinds": ["validation"],
-            "validationRecipeId": recipe_refs[0],
-            "declarationRef": "mock-semantic/" + coverage_id,
+            "validationRecipeId": recipe_id,
+            "declarationRef": declaration_ref,
         }
     raise ValueError("semantic manifest has no bounded managed-validation catalog")
 
-def semantic_state_change_proposal(coverage_id, catalogs):
+def semantic_state_change_proposal(coverage_id, catalogs, obligation):
+    declaration_ref = object_value(obligation, "declarationRef", "DeclarationRef") or ""
     preferred = ["file/edit", "patch/apply", "file/write", "git/write"]
     for kind in preferred:
         for owner, catalog in catalogs.items():
@@ -534,9 +671,37 @@ def semantic_state_change_proposal(coverage_id, catalogs):
                 "operationKind": kind,
                 "target": semantic_exact_target(catalog),
                 "requiredEvidenceKinds": ["state_change"],
-                "declarationRef": "mock-semantic/" + coverage_id,
+                "declarationRef": declaration_ref,
             }
     raise ValueError("semantic manifest has no bounded state-change catalog")
+
+def semantic_owner_fact_acquisition_proposal(coverage_id, obligation):
+    acquisition = object_value(obligation, "ownerFactAcquisition", "OwnerFactAcquisition") or {}
+    proposal = {
+        "coverageWorkItemId": coverage_id,
+        "ownerModuleId": object_value(acquisition, "acquisitionOwnerModuleId", "AcquisitionOwnerModuleID") or "",
+        "operationKind": object_value(acquisition, "acquisitionOperationKind", "AcquisitionOperationKind") or "",
+        "target": {
+            "policy": object_value(acquisition, "acquisitionTargetPolicy", "AcquisitionTargetPolicy") or "",
+            "ownerSelectorRefs": [object_value(acquisition, "acquisitionTargetSelectorRef", "AcquisitionTargetSelectorRef") or ""],
+            "prospectiveConstraintRefs": string_list(object_value(
+                acquisition, "acquisitionConstraintRefs", "AcquisitionConstraintRefs"
+            )),
+            "prospectiveTargetRefs": semantic_prospective_targets(obligation),
+        },
+        "requiredEvidenceKinds": unique_strings(string_list(object_value(
+            obligation, "currentRequiredEvidenceKinds", "CurrentRequiredEvidenceKinds"
+        ))),
+        "declarationRef": object_value(obligation, "declarationRef", "DeclarationRef") or "",
+    }
+    variant_id = object_value(acquisition, "acquisitionOperationVariantId", "AcquisitionOperationVariantID") or ""
+    if variant_id:
+        proposal["operationVariantId"] = variant_id
+    if not proposal["ownerModuleId"] or not proposal["operationKind"] or not proposal["target"]["policy"] or not proposal["target"]["ownerSelectorRefs"][0] or not proposal["target"]["prospectiveConstraintRefs"]:
+        raise ValueError("semantic owner-fact acquisition projection is incomplete")
+    if proposal["requiredEvidenceKinds"] != ["state_change"]:
+        raise ValueError("semantic owner-fact acquisition must require exact state-change evidence")
+    return proposal
 
 def semantic_coverage_order(request):
     schema = request.get("semanticSchema") or {}
@@ -592,11 +757,17 @@ def semantic_plan_payload(request):
     if set(manifest_coverage) != set(batch_coverage):
         raise ValueError("semantic proof manifest does not match bounded batch coverage")
     for coverage_id in batch_coverage:
-        for evidence_kind in semantic_required_evidence(seed, coverage_id):
+        obligation = semantic_proof_obligation(manifest, coverage_id)
+        if object_value(obligation, "ownerFactAcquisition", "OwnerFactAcquisition") is not None:
+            proposals.append(semantic_owner_fact_acquisition_proposal(coverage_id, obligation))
+            continue
+        for evidence_kind in unique_strings(string_list(object_value(
+            obligation, "currentRequiredEvidenceKinds", "CurrentRequiredEvidenceKinds"
+        ))):
             if evidence_kind == "validation":
-                proposals.append(semantic_validation_proposal(coverage_id, catalogs))
+                proposals.append(semantic_validation_proposal(coverage_id, catalogs, obligation))
             elif evidence_kind == "state_change":
-                proposals.append(semantic_state_change_proposal(coverage_id, catalogs))
+                proposals.append(semantic_state_change_proposal(coverage_id, catalogs, obligation))
             else:
                 raise ValueError("mock semantic planner has no bounded owner operation for evidence %r" % evidence_kind)
     document["batchId"] = request["batchId"]
@@ -635,6 +806,19 @@ def provider_request_parser_self_test():
     }, "validation/managed_session", [{"name": "recipeId", "string": "recipe-current"}])
     if set(minimal) != {"kind", "parameters"} or minimal["parameters"] != [{"name": "recipeId", "string": "recipe-current"}]:
         raise AssertionError("provider fixture re-exposed locally derived binding/target authority: %r" % minimal)
+    preparation_request = provider_request_from_payload({"input": """### C3.runtime-authority
+{"transaction":{"authoritySnapshotId":"authority-preparation"},"outputContract":{"structuredOutputInstruction":"Required operation sequence references: prospective-binding-target-01=file/write/@go.mod, prospective-binding-target-02=file/write/@workorch_validation/cwi_native_test.go[requires=prospective-binding-target-01]. Select each slot only by requiredOperationRef; locally-derived fields are omitted.","wireRules":[{"requiredOperationRef":"prospective-binding-target-01","compiledKind":"file/write","providerFields":["requiredOperationRef","parameters"],"requiredProviderFields":["requiredOperationRef","parameters"],"providerParameterNames":["content"],"requiredProviderParameterNames":["content"],"requiredNonEmptyParameterNames":["content"]},{"requiredOperationRef":"prospective-binding-target-02","compiledKind":"file/write","providerFields":["requiredOperationRef","parameters"],"requiredProviderFields":["requiredOperationRef","parameters"],"providerParameterNames":["content"],"requiredProviderParameterNames":["content"],"requiredNonEmptyParameterNames":["content"]}],"operationContracts":[{"kind":"file/write","allowedOperationFields":["parameters","requiredOperationRef"],"requiredOperationFields":["parameters","requiredOperationRef"],"parameters":[{"name":"content"}],"target":{"prospectiveTargetRefs":["go.mod","workorch_validation/cwi_native_test.go"]}}]},"context":{"workspaceId":"ws-preparation","runId":"run-preparation","requiredState":"need_state_change","focus":{"id":"focus-preparation","coverageWorkItemIds":["cwi-preparation"],"prospectiveTargetRefs":["go.mod","workorch_validation/cwi_native_test.go"]},"validationProofPreparations":[{"validationRecipeId":"recipe-native","requiredCheckRef":"workorch-cwi-check-deadbeef","observationProtocolRef":"shell/go-test-json/v1","nativeCheckRef":"TestWorkOrchCWI_DEADBEEF","targetRef":"workorch_validation/cwi_native_test.go"}]}}
+"""})
+    preparation_candidate = state_change_ops(preparation_request)
+    preparation_operations = preparation_candidate.get("operations") or []
+    if len(preparation_operations) != 2 or [value.get("requiredOperationRef") for value in preparation_operations] != ["prospective-binding-target-01", "prospective-binding-target-02"]:
+        raise AssertionError("native proof preparation did not preserve the complete required File sequence: %r" % preparation_candidate)
+    preparation_contents = [
+        next((parameter.get("string") for parameter in value.get("parameters") or [] if parameter.get("name") == "content"), "")
+        for value in preparation_operations
+    ]
+    if not preparation_contents[0].startswith("module workorch.fixture\n") or "func TestWorkOrchCWI_DEADBEEF(t *testing.T)" not in preparation_contents[1]:
+        raise AssertionError("native proof preparation did not produce the owner-attested Go inputs: %r" % preparation_contents)
     semantic_order = provider_request_from_payload({"input": """### C3.semantic-authority
 {"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-first"},{"id":"cwi-semantic"}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"},"coverageOrder":{"items":{"enum":["cwi-first","cwi-semantic"]}}}},"planStep":"coverage_order"}
 """})
@@ -642,16 +826,16 @@ def provider_request_parser_self_test():
     if order_document.get("planStep") != "coverage_order" or order_document.get("coverageOrder") != ["cwi-first", "cwi-semantic"] or order_document.get("proposals") != []:
         raise AssertionError("semantic order parser did not produce a bounded order: %r" % order_document)
     semantic_batch = provider_request_from_payload({"input": """### C3.semantic-authority
-{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"ownerCatalogs":[{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["fixture.txt"],"validationRecipeRefs":["recipe-semantic"]}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"}}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"proofObligations":[{"coverageWorkItemId":"cwi-semantic","declarationRef":"definition/dodItem/dod-001","evidencePurpose":"terminal_proof","terminalRequiredEvidenceKinds":["validation"],"currentRequiredEvidenceKinds":["validation"],"validationProofRequirement":{"requirementHash":"proof-semantic","coverageWorkItemId":"cwi-semantic","declarationRef":"definition/dodItem/dod-001","selectableValidationRecipeIds":["recipe-semantic"],"requiredCheckRefs":["workorch-cwi-check-deadbeef"],"ownerNativeCheckAttestations":[{"validationRecipeId":"recipe-semantic","requiredCheckRef":"workorch-cwi-check-deadbeef","observationProtocolRef":"shell/go-test-json/v1","nativeCheckRef":"TestWorkOrchCWI_DEADBEEF","targetRef":"workorch_validation/cwi_native_test.go"}]}}],"ownerCatalogs":[{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["go.mod","workorch_validation/cwi_native_test.go"],"validationRecipeRefs":["recipe-semantic"]}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"}}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
 
 ### C5.acceptance-slices
 [{"coverageWorkItemIds":["cwi-semantic"],"requiredEvidenceKinds":["validation"]}]"""})
     semantic_document = semantic_plan_payload(semantic_batch)
     proposals = semantic_document.get("proposals") or []
-    if "coverageOrder" in semantic_document or semantic_document.get("planStep") != "proof_batch" or semantic_document.get("batchCoverageWorkItemIds") != ["cwi-semantic"] or len(proposals) != 1 or proposals[0].get("coverageWorkItemId") != "cwi-semantic" or proposals[0].get("validationRecipeId") != "recipe-semantic":
+    if "coverageOrder" in semantic_document or semantic_document.get("planStep") != "proof_batch" or semantic_document.get("batchCoverageWorkItemIds") != ["cwi-semantic"] or len(proposals) != 1 or proposals[0].get("coverageWorkItemId") != "cwi-semantic" or proposals[0].get("validationRecipeId") != "recipe-semantic" or proposals[0].get("declarationRef") != "definition/dodItem/dod-001" or proposals[0].get("target", {}).get("exactTargetRefs") != ["workorch_validation/cwi_native_test.go"]:
         raise AssertionError("semantic authority parser did not produce a bounded proof batch: %r" % semantic_document)
     independent_proofs = provider_request_from_payload({"input": """### C3.semantic-authority
-{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"ownerCatalogs":[{"ownerModuleId":"blocks/file","operationKinds":["file/edit"],"targetRefs":["fixture.txt"]},{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["fixture.txt"],"validationRecipeRefs":["recipe-semantic"]}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"}}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"proofObligations":[{"coverageWorkItemId":"cwi-semantic","declarationRef":"definition/dodItem/dod-001","evidencePurpose":"terminal_proof","terminalRequiredEvidenceKinds":["state_change","validation"],"currentRequiredEvidenceKinds":["state_change","validation"],"validationProofRequirement":{"requirementHash":"proof-semantic","coverageWorkItemId":"cwi-semantic","declarationRef":"definition/dodItem/dod-001","selectableValidationRecipeIds":["recipe-semantic"],"requiredCheckRefs":["workorch-cwi-check-deadbeef"],"ownerNativeCheckAttestations":[{"validationRecipeId":"recipe-semantic","requiredCheckRef":"workorch-cwi-check-deadbeef","observationProtocolRef":"shell/go-test-json/v1","nativeCheckRef":"TestWorkOrchCWI_DEADBEEF","targetRef":"fixture.txt"}]}}],"ownerCatalogs":[{"ownerModuleId":"blocks/file","operationKinds":["file/edit"],"targetRefs":["fixture.txt"]},{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["fixture.txt"],"validationRecipeRefs":["recipe-semantic"]}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"}}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
 
 ### C5.acceptance-slices
 [{"coverageWorkItemIds":["cwi-semantic"],"requiredEvidenceKinds":["state_change","validation"]}]"""})
@@ -662,8 +846,15 @@ def provider_request_parser_self_test():
     ]
     if independent_kinds != [("cwi-semantic", ("state_change",)), ("cwi-semantic", ("validation",))]:
         raise AssertionError("semantic authority parser did not emit one independent proof per evidence kind: %r" % independent_document)
+    acquisition_request = provider_request_from_payload({"input": """### C3.semantic-authority
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"proofObligations":[{"coverageWorkItemId":"cwi-semantic","declarationRef":"definition/dodItem/dod-001","evidencePurpose":"owner_fact_acquisition","terminalRequiredEvidenceKinds":["validation"],"currentRequiredEvidenceKinds":["state_change"],"validationProofRequirement":{"requirementHash":"proof-semantic","coverageWorkItemId":"cwi-semantic","declarationRef":"definition/dodItem/dod-001","selectableValidationRecipeIds":[],"requiredCheckRefs":["workorch-cwi-check-deadbeef"]},"ownerFactAcquisition":{"definitionPrerequisiteDeclared":true,"terminalEvidenceCredit":false,"requiredOwnerModuleId":"blocks/shell","requiredFactKind":"selectable_validation_surface","requiredOperationKind":"validation/managed_session","acquisitionOwnerModuleId":"blocks/file","acquisitionOperationKind":"file/write","acquisitionTargetPolicy":"prospective_owner_target","acquisitionTargetSelectorRef":"workspace-relative-new-file-target","acquisitionConstraintRefs":["new-target-requires-owner-selector","workspace-relative-path"],"prospectiveSatisfactionContractRef":"shell/selectable-validation-surface/prospective-workspace-manifest/v1","prospectiveTargetConstraint":{"schemaVersion":"workorch.runtime.prospective-target-satisfaction-constraint.v2","ownerModuleId":"blocks/shell","prospectiveSatisfactionContractRef":"shell/selectable-validation-surface/prospective-workspace-manifest/v1","inputSchemaHash":"shell-validation-recipe-deadbeef","catalogObservedRevision":"shell-v1","allOf":[{"id":"native-check-target","allOf":[{"kind":"target_ref_path_exact","value":"workorch_validation/cwi_native_test.go"}]},{"id":"go-module-root","allOf":[{"kind":"target_ref_path_exact","value":"go.mod"}]},{"id":"go-test-input","allOf":[{"kind":"target_ref_path_suffix","value":"_test.go"},{"kind":"target_ref_path_segment_not_equals","value":"vendor"}]}],"validationProofPreparations":[{"validationRecipeId":"recipe-semantic","requiredCheckRef":"workorch-cwi-check-deadbeef","observationProtocolRef":"shell/go-test-json/v1","nativeCheckRef":"TestWorkOrchCWI_DEADBEEF","targetRef":"workorch_validation/cwi_native_test.go"}]},"ownerCatalogSnapshotId":"shell-catalog-v1","ownerCatalogObservedRevision":"shell-v1","reobserveOwnerModuleId":"blocks/shell","reobserveFactKind":"selectable_validation_surface","maxAcquisitionAttempts":1}}],"ownerCatalogs":[{"ownerModuleId":"blocks/file","operationKinds":["file/write"],"selectorRefs":["workspace-relative-new-file-target"],"constraintRefs":["new-target-requires-owner-selector","workspace-relative-path"]}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"}}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
+"""})
+    acquisition_document = semantic_plan_payload(acquisition_request)
+    acquisition_proposals = acquisition_document.get("proposals") or []
+    if len(acquisition_proposals) != 1 or acquisition_proposals[0].get("ownerModuleId") != "blocks/file" or acquisition_proposals[0].get("operationKind") != "file/write" or acquisition_proposals[0].get("requiredEvidenceKinds") != ["state_change"] or acquisition_proposals[0].get("declarationRef") != "definition/dodItem/dod-001" or acquisition_proposals[0].get("target", {}).get("prospectiveTargetRefs") != ["go.mod", "workorch_validation/cwi_native_test.go"] or "validationRecipeId" in acquisition_proposals[0]:
+        raise AssertionError("semantic owner-fact acquisition did not preserve exact File preparation authority: %r" % acquisition_document)
     responses_wrapped = provider_request_from_payload({"input": """### C3.semantic-authority
-{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"ownerCatalogs":[{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["fixture.txt"],"validationRecipeRefs":["recipe-semantic"]}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"}}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
+{"workspaceId":"ws-semantic","runId":"run-semantic","definitionSeed":{"hash":"seed-semantic"},"manifest":{"hash":"manifest-semantic","definitionSeedHash":"seed-semantic","coverageItems":[{"id":"cwi-semantic"}],"proofObligations":[{"coverageWorkItemId":"cwi-semantic","declarationRef":"definition/dodItem/dod-001","evidencePurpose":"terminal_proof","terminalRequiredEvidenceKinds":["validation"],"currentRequiredEvidenceKinds":["validation"],"validationProofRequirement":{"requirementHash":"proof-semantic","coverageWorkItemId":"cwi-semantic","declarationRef":"definition/dodItem/dod-001","selectableValidationRecipeIds":["recipe-semantic"],"requiredCheckRefs":["workorch-cwi-check-deadbeef"],"ownerNativeCheckAttestations":[{"validationRecipeId":"recipe-semantic","requiredCheckRef":"workorch-cwi-check-deadbeef","observationProtocolRef":"shell/go-test-json/v1","nativeCheckRef":"TestWorkOrchCWI_DEADBEEF","targetRef":"workorch_validation/cwi_native_test.go"}]}}],"ownerCatalogs":[{"ownerModuleId":"blocks/shell","operationKinds":["validation/managed_session"],"targetRefs":["go.mod","workorch_validation/cwi_native_test.go"],"validationRecipeRefs":["recipe-semantic"]}]},"schema":{"properties":{"schemaVersion":{"const":"workorch.runtime_semantic_plan_document.v2"}}},"planStep":"proof_batch","batchId":"batch-semantic","batchSequence":1,"batchCoverageWorkItemIds":["cwi-semantic"]}
 
 [user]
 ### C4.semantic-tail
@@ -681,6 +872,9 @@ def provider_request_parser_self_test():
                 "targetRefs": ["fixture.txt"],
                 "validationRecipes": [{"id": "recipe-legacy"}],
             },
+        }, {
+            "declarationRef": "definition/dodItem/dod-legacy",
+            "validationProofRequirement": {"selectableValidationRecipeIds": ["recipe-legacy"]},
         })
     except ValueError:
         pass
@@ -751,7 +945,106 @@ def probe_validation_ops():
         }]
     }
 
+def required_operation_target_map(request):
+    rules = [
+        rule for rule in request.get("wireRules") or []
+        if object_value(rule, "requiredOperationRef", "RequiredOperationRef")
+    ]
+    if not rules:
+        raise ValueError("prospective preparation has no required-operation wire rules")
+    instruction = request.get("structuredOutputInstruction") or ""
+    marker = "Required operation sequence references: "
+    suffix = ". Select each slot only by requiredOperationRef"
+    start = instruction.find(marker)
+    if start < 0:
+        raise ValueError("candidate output contract omits the sealed required-operation sequence")
+    start += len(marker)
+    end = instruction.find(suffix, start)
+    if end < 0:
+        raise ValueError("candidate output contract has an unreadable required-operation sequence")
+    entries = instruction[start:end].split(", ")
+    mapping = {}
+    for entry in entries:
+        required_ref, separator, compiled = entry.partition("=")
+        if not separator or "@" not in compiled:
+            raise ValueError("fixture required-operation sequence entry has no exact target")
+        _, target = compiled.split("@", 1)
+        target = target.split("[requires=", 1)[0]
+        if not required_ref or not target or required_ref in mapping:
+            raise ValueError("fixture required-operation sequence entry is ambiguous")
+        mapping[required_ref] = target
+    rule_refs = [object_value(rule, "requiredOperationRef", "RequiredOperationRef") for rule in rules]
+    if set(mapping) != set(rule_refs):
+        raise ValueError("required-operation instruction and wire rules do not identify the same slots")
+    prospective_targets = sorted(unique_strings(request.get("prospectiveTargetRefs") or []))
+    if prospective_targets and sorted(mapping.values()) != prospective_targets:
+        raise ValueError("required-operation targets do not match the sealed prospective focus")
+    return rules, mapping
+
+def native_go_test_content(attestations):
+    native_checks = sorted(unique_strings([
+        object_value(attestation, "nativeCheckRef", "NativeCheckRef") or ""
+        for attestation in attestations
+    ]))
+    if not native_checks:
+        raise ValueError("native Go proof preparation has no attested check")
+    for attestation in attestations:
+        if object_value(attestation, "observationProtocolRef", "ObservationProtocolRef") != "shell/go-test-json/v1":
+            raise ValueError("fixture received an unsupported native proof observation protocol")
+    for native_check in native_checks:
+        if not re.fullmatch(r"TestWorkOrchCWI_[A-F0-9]+", native_check):
+            raise ValueError("fixture received an invalid owner-native Go check %r" % native_check)
+    functions = []
+    for native_check in native_checks:
+        functions.append('''func %s(t *testing.T) {
+\tcontent, err := os.ReadFile("../runtime-validation-source.txt")
+\tif err != nil {
+\t\tt.Fatalf("read bounded fixture result: %%v", err)
+\t}
+\tif !bytes.Contains(content, []byte("verified by llm e2e")) {
+\t\tt.Fatalf("bounded fixture result does not contain the expected durable evidence")
+\t}
+}''' % native_check)
+    return '''package workorch_validation
+
+import (
+\t"bytes"
+\t"os"
+\t"testing"
+)
+
+%s
+''' % "\n\n".join(functions)
+
+def validation_preparation_ops(request):
+    preparations = request.get("validationProofPreparations") or []
+    if not preparations:
+        raise ValueError("prospective File transaction has no owner-native proof preparation")
+    rules, target_by_ref = required_operation_target_map(request)
+    attestations_by_target = {}
+    for attestation in preparations:
+        target_ref = object_value(attestation, "targetRef", "TargetRef") or ""
+        if target_ref:
+            attestations_by_target.setdefault(target_ref, []).append(attestation)
+    operation_targets = set(target_by_ref.values())
+    if any(target_ref not in operation_targets for target_ref in attestations_by_target):
+        raise ValueError("owner-native proof preparation target is outside the required File transaction")
+    operations = []
+    for rule in rules:
+        required_ref = object_value(rule, "requiredOperationRef", "RequiredOperationRef") or ""
+        target_ref = target_by_ref[required_ref]
+        if target_ref == "go.mod":
+            content = "module workorch.fixture\n\ngo 1.26\n"
+        elif target_ref in attestations_by_target and target_ref.endswith("_test.go"):
+            content = native_go_test_content(attestations_by_target[target_ref])
+        else:
+            raise ValueError("fixture has no owner-authored content contract for prospective target %r" % target_ref)
+        operations.append(provider_required_operation(rule, [{"name": "content", "string": content}]))
+    return {"operations": operations}
+
 def state_change_ops(request):
+    if request.get("validationProofPreparations"):
+        return validation_preparation_ops(request)
     focus = request["focusId"]
     contract = select_operation_contract(request, "file/edit", "patch/apply", "file/write")
     kind = object_value(contract, "kind", "Kind")
@@ -1258,8 +1551,9 @@ create_acceptance_workspace() {
 create_c12_verification_template() {
   # generic-governed intentionally has no semantic proof declaration. C12
   # rejects it at activation rather than inferring coverage from file/read.
-  # The live verifier supplies one explicit, immutable managed-validation
-  # declaration whose exact target is seeded below before activation.
+  # The live verifier supplies an explicit Profile-owned owner-fact convergence:
+  # File prepares the exact CWI Go test inputs, Shell re-observes its selectable
+  # surface, and only the owner-native go test -json attestation earns credit.
   cat >"$TMP_DIR/c12-template.json" <<JSON
 {
   "id": "$C12_TEMPLATE_ID",
@@ -1282,29 +1576,57 @@ create_c12_verification_template() {
         "maxWorkItems": 1,
         "match": {"all": true}
       }]
+    },
+    "profileContracts": {
+      "runtime-c12-native-proof": {
+        "evidenceRequirements": [{
+          "id": "*",
+          "scope": "dodItem",
+          "requiredEvidenceKinds": ["validation"],
+          "targetRole": "managed_validation_subject",
+          "targetDiscoverySources": ["workspace_manifest", "project_files"],
+          "targetSelectorRef": "file/workspace_deliverable",
+          "targetSelectorOwnerRef": "runtime-c12-native-proof",
+          "targetSelectorSubjectRef": "dodItem",
+          "prospectiveTargetAllOfConstraintRefs": ["workspace-relative-path", "new-target-requires-owner-selector"],
+          "requireTargetGrounding": true,
+          "requireDirectEvidence": true,
+          "acceptedStepKinds": ["validation/managed_session", "file/write"],
+          "rejectedStepKinds": ["file/read"],
+          "requiredOwnerFacts": [{
+            "ownerModuleId": "blocks/shell",
+            "factKind": "selectable_validation_surface",
+            "operationKind": "validation/managed_session"
+          }],
+          "ownerFactConvergences": [{
+            "ownerModuleId": "blocks/shell",
+            "factKind": "selectable_validation_surface",
+            "operationKind": "validation/managed_session",
+            "missingTrigger": "owner_fact_missing",
+            "acquisitionOwnerModuleId": "blocks/file",
+            "acquisitionOperationKind": "file/write",
+            "acquisitionTargetPolicy": "prospective_owner_target",
+            "acquisitionTargetSelectorRef": "workspace-relative-new-file-target",
+            "prospectiveSatisfactionContractRef": "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+            "targetSelectorRef": "file/workspace_deliverable",
+            "targetSelectorOwnerRef": "runtime-c12-native-proof",
+            "targetSelectorSubjectRef": "dodItem",
+            "reobserveOwnerModuleId": "blocks/shell",
+            "reobserveFactKind": "selectable_validation_surface",
+            "maxAcquisitionAttempts": 1
+          }],
+          "description": "Each admitted DoD CWI requires its own Shell-attested native Go check."
+        }]
+      }
     }
   },
   "evidencePolicies": [{
     "id": "$C12_VALIDATION_RECIPE_ID",
     "appliesTo": "shell/command",
-    "commandName": "sh",
+    "commandName": "go",
     "recipeDeclared": true,
-    "recipeArgs": ["-c", "test -f runtime-validation-source.txt && printf 'WORKORCH_CHECK_PASSED=$C12_VALIDATION_RECIPE_ID\\n'"],
-    "recipeTimeoutMillis": 10000,
-    "coverageRequirements": [{
-      "id": "*",
-      "scope": "dod_item",
-      "requiredEvidenceKinds": ["validation"],
-      "requireDirectEvidence": true,
-      "acceptedStepKinds": ["validation/managed_session"],
-      "rejectedStepKinds": ["file/read"],
-      "validationRecipeId": "$C12_VALIDATION_RECIPE_ID",
-      "requiredCheckRefs": ["$C12_VALIDATION_RECIPE_ID"],
-      "targetRole": "managed_validation_subject",
-      "targetRefs": ["runtime-validation-source.txt"],
-      "requireTargetGrounding": true,
-      "description": "managed recipe proves the seeded verification target exists"
-    }]
+    "recipeArgs": ["test", "-v", "./..."],
+    "recipeTimeoutMillis": 10000
   }]
 }
 JSON

@@ -85,3 +85,32 @@ func TestShellValidationRecipesParticipateInAdmissibilitySnapshotIdentity(t *tes
 		t.Fatal("admissibility snapshot identity ignored recipe removal")
 	}
 }
+
+func TestRuntimeOperationAdmissibilityRejectsRawValidationRecipeDuplicatesBeforeNormalization(t *testing.T) {
+	base := RuntimeOperationAdmissibility{
+		PrerequisiteID: "admissibility-shell-raw-recipes", OwnerModuleID: RuntimeModuleShell,
+		OperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ObservedRevision: "shell-policy-raw-recipes-v1",
+	}
+	for name, recipes := range map[string][]RuntimeValidationRecipe{
+		"conflicting duplicate identity": {
+			{ID: "recipe-a", Command: "go", Args: []string{"test", "./..."}},
+			{ID: "recipe-a", Command: "go", Args: []string{"test", "./changed/..."}},
+		},
+		"whitespace alias": {
+			{ID: "recipe-a", Command: "go", Args: []string{"test", "./..."}},
+			{ID: " recipe-a ", Command: "go", Args: []string{"test", "./..."}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			inventory := base
+			inventory.ValidationRecipes = recipes
+			// The stable hash canonicalizes for deterministic identity, but Validate
+			// must still inspect the raw collection and reject ambiguity instead of
+			// laundering it through the ID-keyed normalizer.
+			inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)
+			if err := inventory.Validate(); err == nil {
+				t.Fatal("raw validation recipe ambiguity was normalized away")
+			}
+		})
+	}
+}

@@ -107,7 +107,7 @@ func reduceRuntimeStateWithDirectiveAndOwnerEvent(
 	// hint. Restrict this to the boundary between acquisition batches so an
 	// existing persisted owner acquisition can never be erased.
 	if len(facts.Prerequisites.Pending) == 0 {
-		facts = preflightRuntimeFactsPreservingPending(facts, runtimeTargetGroundingRequirements(facts))
+		facts = preflightRuntimeFactsPreservingPending(facts, runtimeTargetGroundingRequirements(facts, proofLineages...))
 	}
 	decision, eventHandled, err := reduceAndSealRuntimeState(facts, previous, ownerEvent, runtimeCoverageProofLineageArgument(proofLineages))
 	if err != nil {
@@ -402,6 +402,20 @@ func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.R
 		return runtimecontract.RuntimeDecision{}, err
 	} else if ok {
 		return decision, nil
+	}
+	// Once assessment has observed the current bound proof, a missing owner
+	// postcondition whose single declared acquisition is no longer resolvable
+	// or has already been consumed is the authoritative outcome. Do this before
+	// the generic prospective-target gate: retrying the acquisition target would
+	// cross the Profile's one-shot convergence boundary and mislabel exhaustion
+	// as target grounding failure.
+	if _, observed := assessmentForCurrentFocus(facts, proofLineage); observed {
+		if missing := runtimecontract.RuntimeMissingOwnerFactRequirements(facts.Focus.RequiredOwnerFacts, facts.Resources.OperationAdmissibilities); len(missing) != 0 {
+			acquisition, ready := runtimecontract.ResolveRuntimeOwnerFactAcquisition(facts.Focus.RequiredOwnerFacts, facts.Focus.OwnerFactConvergences, facts.Resources.OperationAdmissibilities)
+			if !ready || runtimeOwnerFactReplanBudgetExhausted(facts, acquisition) {
+				return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "owner_fact_convergence_exhausted", "required capability-owner fact remained unavailable after the bounded semantic replan budget"), nil
+			}
+		}
 	}
 	// An owner create observation is stronger than the ordinary focus
 	// evidence ordering: the selected target is absent, so an initial validation

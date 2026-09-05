@@ -337,6 +337,7 @@ func TestFileOwnerSemanticFeasibilityLeavesOrdinaryProspectiveProposalUnchanged(
 	manifest := command.Manifest.Clone()
 	manifest.ProofObligations = []runtimecontract.RuntimeSemanticProofObligation{{
 		CoverageWorkItemID:    fileProspectiveDeltaCoverageID,
+		DeclarationRef:        runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-owner-fact-acquisition"),
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 	}}
 	manifest.OwnerFactDependencyCatalogs = nil
@@ -487,6 +488,7 @@ func fileProspectiveDeltaCommandForTargets(t *testing.T, workspace string, targe
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
 		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
 			CoverageWorkItemID:                     fileProspectiveDeltaCoverageID,
+			DeclarationRef:                         runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-owner-fact-acquisition"),
 			RequiredEvidenceKinds:                  []string{runtimecontract.EvidenceKindValidation},
 			DeclarationTargetSelectorRef:           convergence.TargetSelectorRef,
 			DeclarationTargetSelectorOwnerRef:      convergence.TargetSelectorOwnerRef,
@@ -511,7 +513,7 @@ func fileProspectiveDeltaCommandForTargets(t *testing.T, workspace string, targe
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-		DeclarationRef:        "profile/test/validation-input",
+		DeclarationRef:        runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-owner-fact-acquisition"),
 	}
 	catalogObservation := runtimecontract.RuntimePrerequisiteObservation{
 		PrerequisiteID: catalog.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,

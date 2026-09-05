@@ -73,13 +73,22 @@ func (m *Biz) applyRunProjection(ctx context.Context, cmd workspaceRunProjection
 			return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(current), Transitioned: false}, nil
 		}
 		next := applyWorkspaceProjection(current, transition)
+		publicProjectionChanged := !sameWorkspaceChangedNotification(
+			workspaceChangedNotification(current),
+			workspaceChangedNotification(next),
+		)
 		if err := m.workspaces.CompareAndSwap(ctx, next, current.Revision); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue
 			}
 			return workspaceevents.WorkspaceLifecycleCommandResult{}, err
 		}
-		m.publishWorkspaceUpdated(ctx, next)
+		// RunProjectionCursor is an owner-private delivery fence. Persist every
+		// accepted cursor advance, but do not turn an unchanged public Workspace
+		// projection into another /workspace/state/changed notification.
+		if publicProjectionChanged {
+			m.publishWorkspaceUpdated(ctx, next)
+		}
 		return workspaceevents.WorkspaceLifecycleCommandResult{Workspace: workspaceeventmapping.WorkspaceDTO(next), Transitioned: true}, nil
 	}
 	return workspaceevents.WorkspaceLifecycleCommandResult{}, common.ErrConflict

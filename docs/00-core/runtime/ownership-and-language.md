@@ -74,6 +74,8 @@ Goal/DoD、Template/Profile 和 Definition seed 是 declaration，不是 credit 
 document 与 capability-owner feasibility 封存的 `CoverageEvidenceBinding` 才是 canonical binding；capability receipt
 只是 owner fact。CWI credit、coverage ledger 与 terminal gate只能由 SM-2 从 declaration、binding 和 matching owner
 fact 派生。candidate 自报 CWI、assessment claim、PassedChecks、exit code、summary 与 projection 均不能写入 credit。
+managed-validation 的 check credit 还必须来自 capability owner catalog 所封存 observation protocol/native identity 的 matching
+typed receipt attestation；process stdout/stderr marker 不是 owner attestation。
 
 Provider ceiling、ExpectedDocument 与 cache section 规则见
 [Runtime Request Provider Contract](../runtime-request-provider-contract.md) 和

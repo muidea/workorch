@@ -66,6 +66,11 @@ owner fact / owner read
 - terminal/status display is derived from owner facts and cannot submit reverse repair、Resume or state setter；
 - mutable slices/maps and sensitive/raw content are detached、redacted or represented by allowlisted ref。
 
+Owner repository 的单文件物理发布不构成额外状态机，但必须共享同一 crash-safe durability contract：canonical path
+只能通过 same-directory temp、完整写入、file `Sync`、close、atomic rename 和 parent-directory `Sync` 更新。rename 前失败
+保留旧 generation；rename 后目录同步失败属于已发布但耐久确认不确定，任何 read cache 必须更新或失效。`.tmp` 文件、
+Eventstream 和 projection 都不能在 canonical JSON 损坏时反向重建 owner authority。
+
 ## Delete And Purge
 
 Workspace owner 持久化唯一 deletion aggregate 并编排 Workspace delete/retain/purge。Application 只发送

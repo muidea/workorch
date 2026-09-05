@@ -1,6 +1,8 @@
 package workorchruntimecontract
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -72,7 +74,10 @@ func TestCoverageEvidenceProofIdentityDetectsEverySemanticProofChange(t *testing
 		},
 		{
 			name: "required checks", evidence: EvidenceKindValidation,
-			mutate: func(binding *CoverageEvidenceBinding) { binding.Proofs[1].RequiredCheckRefs = []string{"unit/other"} }, expected: "required_checks",
+			mutate: func(binding *CoverageEvidenceBinding) {
+				binding.Proofs[1].RequiredCheckRefs = []string{"unit/other"}
+				binding.Proofs[1].ValidationCheckAttestations = runtimeValidationCheckAttestationsForTest(binding.Proofs[1].RequiredCheckRefs)
+			}, expected: "required_checks",
 		},
 		{
 			name: "metrics", evidence: EvidenceKindValidation,
@@ -153,6 +158,39 @@ func TestRuntimeCoverageProofLineageValidatesSourceResolutionAndBounds(t *testin
 	}
 	if err := ValidateRuntimeCoverageProofLineage(make([]RuntimeCoverageProofLineage, RuntimeCoverageProofLineageLimit+1)); err == nil {
 		t.Fatal("lineage overflow accepted")
+	}
+}
+
+func TestRuntimeCoverageProofLineageOpaqueReloadRejectsAliasedProofChecks(t *testing.T) {
+	binding := testCoverageEvidenceBinding()
+	identity, err := DeriveCoverageEvidenceProofIdentity(binding, EvidenceKindValidation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := RuntimeCoverageProofLineage{
+		Kind: RuntimeCoverageProofLineageKindSource, WorkspaceID: "workspace-lineage", RunID: "run-lineage",
+		CoverageWorkItemID: binding.CoverageWorkItemID, EvidenceKind: EvidenceKindValidation,
+		SourceEvidenceID: "evidence-validation-lineage", SourceDispatchID: "dispatch-lineage",
+		SourceOperationID: "operation-lineage", SourceExecutionKey: "execution-lineage", SourceFence: 1,
+		SourceReceiptHash: "receipt-lineage", SourceBindingRef: binding.ID, SourceBindingHash: binding.Hash,
+		SourceManifestHash: "manifest-lineage", SourceLogicalRequestID: "request-lineage", SourceProofIdentity: identity,
+	}
+	row.ID = StableRuntimeCoverageProofLineageSourceID(row.SourceReceiptHash, row.SourceEvidenceID, row.SourceBindingHash, row.SourceProofIdentity.Hash)
+	if err := row.Validate(); err != nil {
+		t.Fatalf("valid validation lineage fixture: %v", err)
+	}
+	checkRef := row.SourceProofIdentity.RequiredCheckRefs[0]
+	row.SourceProofIdentity.RequiredCheckRefs = append(row.SourceProofIdentity.RequiredCheckRefs, " "+checkRef+" ")
+	payload, err := json.Marshal([]RuntimeCoverageProofLineage{row})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reloaded []RuntimeCoverageProofLineage
+	if err := json.Unmarshal(payload, &reloaded); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateRuntimeCoverageProofLineage(reloaded); err == nil || !strings.Contains(err.Error(), "duplicates check") {
+		t.Fatalf("opaque lineage reload accepted aliased duplicate proof check: %v", err)
 	}
 }
 

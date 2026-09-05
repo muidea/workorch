@@ -56,16 +56,7 @@ func ValidationEvidenceShowsExecutableBehavior(binding runtimecontract.CoverageE
 	if !found {
 		return false
 	}
-	observation := evidence.Validation.Normalized()
-	if observation.RecipeID != proof.ValidationRecipeID || len(proof.RequiredCheckRefs) == 0 {
-		return false
-	}
-	for _, required := range proof.RequiredCheckRefs {
-		if !runtimecontract.RuntimeValidationCheckPassed(observation, required) {
-			return false
-		}
-	}
-	return true
+	return runtimecontract.RuntimeValidationObservationSatisfiesCoverageProof(proof, *evidence.Validation)
 }
 
 func SameProofLineageResolution(

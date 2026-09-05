@@ -132,8 +132,18 @@ semantic-plan document 与 matching owner feasibility 编译出 deterministic、
 `CoverageEvidenceBinding`，并封存其 binding set/hash。binding 是 DTO/合同，不是新的状态机：它至少含
 `BindingID`、exact CWI ID、definition/focus identity、required evidence kind/effect scope、允许 operation
 kind/variant、exact target set 或 sealed selector、recipe/check、适用 metric/artifact 与 declaration/snapshot lineage。
+managed-validation proof 还必须保存 Definition-owned、recipe-neutral 的 `RuntimeValidationProofRequirement.Hash`，并与
+Shell-owner surface 为当前 ready recipe 返回的 exact per-CWI applicability binding 一致；recipe ID、surface-wide check
+union 或成功退出均不构成该关系。该 owner binding 还必须逐 check 封存 opaque observation protocol/native check mapping，
+并进入 dispatch execution seal；只有 owner receipt 的 matching typed attestation 可以满足 required check，raw process
+marker 只能作为诊断。
+若 exact native check 或 recipe input 尚不存在，capability owner 可为该 requirement 发布独立
+`ProofRequirementPreparation`。它只允许经 Profile 已声明的 owner-fact acquisition closure 进入 prospective all-of
+transaction；candidate 可见 exact target 与 opaque native identity，但不得把它当作 proof。receiving owner 完成后必须
+重新取得 capability catalog 并由 SM-2 seal 新 binding，不能由 receiving owner、provider 或 Application 直接把
+preparation 升级为 credit。
 当前 Runtime 对 validation proof 采用一 focus 一 CWI 的保守形状；共享 recipe 只有在每个 CWI 具有独立
-check/target 并编译为独立 focus/binding 时才允许。focus 级泛化 recipe/check 不得由一个 owner receipt 扇出关闭
+requirement/check/target 并编译为独立 focus/binding 时才允许。Profile wildcard 或 focus 级泛化 recipe/check 不得由一个 owner receipt 扇出关闭
 多个异构 CWI。缺 binding、binding 不能被 owner 独立验证或 binding set 与 current definition 不一致时，
 SM-2 不得进入 operation provider/dispatch；它只能继续有界 semantic planning/owner prerequisite，或以完整 typed
 diagnostic 终态化。该失败零 operation、Decision、Approval 或替代执行路径。Goal/DoD、TargetText、LLM semantic-plan

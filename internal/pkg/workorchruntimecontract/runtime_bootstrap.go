@@ -41,6 +41,9 @@ func (b RuntimeBootstrap) Normalized() RuntimeBootstrap {
 }
 
 func (b RuntimeBootstrap) Validate() error {
+	if err := ValidateRuntimeBootstrapRaw(b); err != nil {
+		return err
+	}
 	b = b.Normalized()
 	if err := b.Definition.Validate(); err != nil {
 		return err
@@ -178,6 +181,17 @@ func (b RuntimeBootstrap) Validate() error {
 	return nil
 }
 
+// ValidateRuntimeBootstrapRaw rejects ambiguous nested authority before any
+// clone or normalization can transform the ingress or persisted representation.
+// It intentionally validates only raw-shape invariants; RuntimeBootstrap.Validate
+// remains the complete semantic validator.
+func ValidateRuntimeBootstrapRaw(b RuntimeBootstrap) error {
+	if err := ValidateRuntimeEvidencePolicies(b.Activation.EvidencePolicies); err != nil {
+		return fmt.Errorf("runtime bootstrap activation evidence policies: %w", err)
+	}
+	return nil
+}
+
 func coverageWorkItemIDsContain(container, contained []common.CoverageWorkItemID) bool {
 	if len(contained) == 0 || len(container) < len(contained) {
 		return false
@@ -195,9 +209,11 @@ func coverageWorkItemIDsContain(container, contained []common.CoverageWorkItemID
 }
 
 func (b RuntimeBootstrap) Clone() RuntimeBootstrap {
+	rawEvidencePolicies := CloneRuntimeEvidencePolicies(b.Activation.EvidencePolicies)
 	b = b.Normalized()
 	b.Definition = b.Definition.Clone()
 	b.Activation = b.Activation.Clone()
+	b.Activation.EvidencePolicies = rawEvidencePolicies
 	b.DefinitionSeed = b.DefinitionSeed.Clone()
 	b.DefinitionFocuses = CloneRuntimeDefinitionFocuses(b.DefinitionFocuses)
 	b.Slices = append([]RuntimeAcceptanceSlice(nil), b.Slices...)
@@ -217,6 +233,9 @@ func (b RuntimeBootstrap) Clone() RuntimeBootstrap {
 }
 
 func (b RuntimeBootstrap) InitialFacts(workspaceID common.WorkspaceID, runID common.RunID) (RuntimeFacts, error) {
+	if err := ValidateRuntimeBootstrapRaw(b); err != nil {
+		return RuntimeFacts{}, err
+	}
 	b = b.Clone()
 	if workspaceID == "" || runID == "" {
 		return RuntimeFacts{}, common.ErrInvalidArgument

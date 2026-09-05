@@ -46,61 +46,32 @@ func runtimeValidationFailureRepairRouteForTest(id, diagnosticClass, targetType 
 
 func runtimeValidationFailureRepairAggregateForTest(t *testing.T, convergence runtimecontract.RuntimeValidationFailureRepairConvergence) RuntimeAggregate {
 	t.Helper()
-	aggregate := validationAggregate(t)
-	if len(aggregate.Facts.DefinitionSeed.CoverageItems) != 1 {
-		t.Fatalf("validation repair fixture Definition seed = %+v", aggregate.Facts.DefinitionSeed)
-	}
-	declaration := aggregate.Facts.Focus.Normalized()
-	declaration.ID = "definition-validation-repair/cwi-1"
-	declaration.SliceID = aggregate.Facts.DefinitionSeed.CoverageItems[0].SliceID
-	declaration.AssessmentScope = "dodItem"
-	declaration.AssessmentID = "dod-item-1"
-	declaration.AssessmentText = aggregate.Facts.DefinitionSeed.CoverageItems[0].TargetText
-	declaration.AssessmentText = "validation succeeds"
-	declaration.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
-	aggregate.Facts.DefinitionFocuses = runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{declaration})
-	aggregate.Facts.DefinitionFocuses[0].ValidationFailureRepairConvergence = &convergence
-	aggregate.Facts.DefinitionFocuses = runtimecontract.NormalizeRuntimeDefinitionFocuses(aggregate.Facts.DefinitionFocuses)
-	fileCatalog := runtimeValidationFailureRepairFileCatalogForTest()
-	shellCatalog := runtimeValidationFailureRepairShellCatalogForTest()
-	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileCatalog, shellCatalog}
-	aggregate.Facts.Prerequisites.Satisfied = nil
-	aggregate.Facts.Resources.PrerequisiteObservations = nil
-	for _, catalog := range aggregate.Facts.Resources.OperationAdmissibilities {
-		prerequisite := runtimecontract.RuntimePrerequisite{
-			ID: catalog.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
-			OwnerModuleID: catalog.OwnerModuleID, RequiredCapabilities: append([]string(nil), catalog.OperationKinds...),
+	// Install the repair policy and owner catalogs before the baseline SM-2
+	// generation is sealed. Rewriting immutable Definition inputs after the
+	// baseline state-change dispatch would leave its request/dispatch copies
+	// without the exact provider/owner semantic preimage required on restart.
+	return validationOnlyAggregateWithPreparation(t, func(aggregate *RuntimeAggregate) {
+		focus := aggregate.Facts.Focus.Normalized()
+		focus.ID = "definition-validation-repair/cwi-1"
+		focus.AssessmentScope = "dodItem"
+		focus.AssessmentID = "dod-item-1"
+		focus.AssessmentText = "validation succeeds"
+		focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+		focus.ValidationRecipeID = "test-managed-validation"
+		aggregate.Facts.Focus = focus
+		declaration := runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{focus})[0]
+		declaration.EvidenceDeclarationRef = runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-item-1")
+		declaration.ValidationFailureRepairConvergence = &convergence
+		aggregate.Facts.DefinitionFocuses = []runtimecontract.RuntimeDefinitionFocus{declaration}
+		aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{
+			runtimeValidationFailureRepairFileCatalogForTest(),
+			runtimeValidationFailureRepairShellCatalogForTest(),
 		}
-		observation := runtimecontract.RuntimePrerequisiteObservation{
-			PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID,
-			ContentHash: catalog.SnapshotID,
+		for _, route := range convergence.Routes {
+			aggregate.Facts.Capabilities.StateChangeKinds = append(aggregate.Facts.Capabilities.StateChangeKinds, route.RepairOperationKinds...)
+			aggregate.Definition.CapabilityContract = append(aggregate.Definition.CapabilityContract, route.RepairOperationKinds...)
 		}
-		if catalog.OwnerModuleID == runtimecontract.RuntimeModuleFile {
-			observation.Dependencies = []runtimecontract.RuntimeFreshnessDependency{{
-				Domain: runtimecontract.RuntimeResourceWorkspaceTree, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-				SubjectRef: runtimecontract.RuntimeRepairSurfaceFileWorkspaceSubjectRef, Revision: catalog.ObservedRevision,
-			}}
-		} else {
-			observation.Dependencies = []runtimecontract.RuntimeFreshnessDependency{{
-				Domain: runtimecontract.RuntimeResourceOwnerCatalog, OwnerModuleID: catalog.OwnerModuleID,
-				SubjectRef: catalog.PrerequisiteID, Revision: catalog.ObservedRevision,
-			}}
-		}
-		observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
-		aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, prerequisite)
-		aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, observation)
-	}
-	for _, route := range convergence.Routes {
-		aggregate.Facts.Capabilities.StateChangeKinds = append(aggregate.Facts.Capabilities.StateChangeKinds, route.RepairOperationKinds...)
-		aggregate.Definition.CapabilityContract = append(aggregate.Definition.CapabilityContract, route.RepairOperationKinds...)
-	}
-	aggregate.Facts = aggregate.Facts.Normalized()
-	decision, err := ReduceRuntimeState(aggregate.Facts, nil, aggregate.CoverageProofLineage)
-	if err != nil {
-		t.Fatalf("reduce validation repair fixture: %v", err)
-	}
-	aggregate.Decision = decision
-	return aggregate
+	})
 }
 
 func runtimeValidationFailureRepairFileCatalogForTest() runtimecontract.RuntimeOperationAdmissibility {
@@ -152,7 +123,7 @@ func runtimeValidationFailureRepairShellCatalogForTest() runtimecontract.Runtime
 			InputBindingRef: "test-validation-input", CheckRefs: []string{"check/test-validation"},
 			ProofApplicability: runtimecontract.RuntimeValidationProofDirect, EffectScope: runtimecontract.RuntimeEffectEphemeralSession,
 			IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
-		}},
+		}, runtimeTestUnavailableAlternativeValidationSurface()},
 		ObservedRevision: "shell-validation-revision",
 	}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
@@ -657,8 +628,19 @@ func runtimeValidationFailureFreshValidationProofForTest(
 	if err != nil {
 		t.Fatal(err)
 	}
+	obligation, found, err := runtimeSemanticObligationForCoverage(manifest, "cwi-1")
+	if err != nil || !found {
+		t.Fatalf("fresh validation obligation found=%t err=%v", found, err)
+	}
 	catalog := runtimeValidationFailureRepairCatalogForOwnerTest(t, manifest, runtimecontract.RuntimeModuleShell)
 	const recipeID = "test-managed-validation"
+	if obligation.ValidationProofRequirement == nil {
+		t.Fatal("fresh validation obligation has no exact proof requirement")
+	}
+	_, exactBinding, exact := runtimecontract.RuntimeValidationSurfaceForProofRequirement(catalog.ValidationSurfaces, *obligation.ValidationProofRequirement)
+	if !exact || exactBinding.ValidationRecipeID != recipeID {
+		t.Fatalf("fresh validation catalog has no exact recipe binding: %+v", catalog.ValidationSurfaces)
+	}
 	proposal := runtimecontract.RuntimeSemanticProofProposal{
 		CoverageWorkItemID: "cwi-1", OwnerModuleID: runtimecontract.RuntimeModuleShell,
 		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
@@ -667,7 +649,7 @@ func runtimeValidationFailureFreshValidationProofForTest(
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession},
-		ValidationRecipeID:    recipeID, DeclarationRef: "definition/cwi-1",
+		ValidationRecipeID:    recipeID, DeclarationRef: obligation.DeclarationRef,
 	}.Normalized()
 	feasibility := runtimecontract.RuntimeSemanticProofFeasibility{
 		SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent,
@@ -676,7 +658,7 @@ func runtimeValidationFailureFreshValidationProofForTest(
 		OwnerModuleID: catalog.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID,
 		CatalogObservationID: runtimeValidationFailureRepairCatalogObservationForTest(t, aggregate, catalog),
 		Status:               runtimecontract.RuntimeSemanticFeasibilityFeasible, ObservedRevision: catalog.ObservedRevision,
-		TargetRefs: []string{"main.go"}, ValidationRecipeID: recipeID, RequiredCheckRefs: []string{"check/test-validation"},
+		TargetRefs: []string{"main.go"}, ValidationRecipeID: recipeID, RequiredCheckRefs: append([]string(nil), exactBinding.RequiredCheckRefs...),
 	}.Normalized()
 	return manifest, proposal, feasibility
 }

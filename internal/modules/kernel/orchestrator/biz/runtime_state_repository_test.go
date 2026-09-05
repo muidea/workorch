@@ -99,13 +99,61 @@ const (
 	runtimeFileBackedValidationCheck    = "repair-validation"
 )
 
+// runtimeStateTestSpecializeCurrentDefinitionFocus makes an explicit
+// pre-activation test declaration from the current one-CWI focus. These
+// persistence fixtures deliberately specialize runtimeBootstrap immediately
+// before initialization; keeping the immutable Definition inventory in sync
+// avoids treating the mutable generation cursor as a second authority.
+func runtimeStateTestSpecializeCurrentDefinitionFocus(t *testing.T, facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
+	t.Helper()
+	focus := facts.Focus.Normalized()
+	if len(focus.CoverageWorkItemIDs) != 1 {
+		t.Fatalf("specialized runtime state fixture requires one CWI focus: %+v", focus)
+	}
+	coverageID := focus.CoverageWorkItemIDs[0]
+	var item runtimecontract.RuntimeCoverageItem
+	for _, candidate := range facts.DefinitionSeed.CoverageItems {
+		if candidate.ID == coverageID {
+			item = candidate.Normalized()
+			break
+		}
+	}
+	if item.ID == "" {
+		t.Fatalf("specialized runtime state fixture has no Definition item for %q", coverageID)
+	}
+	focus.SliceID = item.SliceID
+	focus.AssessmentScope = item.SourceScope
+	focus.AssessmentID = item.SourceID
+	focus.AssessmentText = item.TargetText
+	focus.EvidenceDeclarationRef = runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(item.SourceScope, item.SourceID)
+	declaration := runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{focus})[0]
+	replaced := false
+	for index, existing := range facts.DefinitionFocuses {
+		if slices.Contains(existing.CoverageWorkItemIDs, coverageID) {
+			// CoverageFocus intentionally has no Profile repair convergence field;
+			// retain that immutable declaration while specializing the proof shape.
+			declaration.ValidationFailureRepairConvergence = existing.Clone().ValidationFailureRepairConvergence
+			facts.DefinitionFocuses[index] = declaration
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		facts.DefinitionFocuses = append(facts.DefinitionFocuses, declaration)
+	}
+	facts.DefinitionFocuses = runtimecontract.NormalizeRuntimeDefinitionFocuses(facts.DefinitionFocuses)
+	return facts
+}
+
 // runtimeFactsWithFileBackedManagedValidationContract models the complete
 // C11/C12 owner-confirmed validation path used by the file-backed restart
 // tests.  The recipe declaration is activation input; the admissibility
 // snapshot is the independent Shell-owner fact from which SM-2 may build a
 // sealed validation authorization.  A file/read capability is not a
 // substitute for either of these facts.
-func runtimeFactsWithFileBackedManagedValidationContract(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
+func runtimeFactsWithFileBackedManagedValidationContract(t *testing.T, facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
+	t.Helper()
+	facts = runtimeStateTestSpecializeCurrentDefinitionFocus(t, facts)
 	policy := runtimeFileBackedManagedValidationEvidencePolicy()
 	const targetRef = "target.txt"
 	prerequisite := runtimecontract.RuntimePrerequisite{
@@ -140,8 +188,60 @@ func runtimeFactsWithFileBackedManagedValidationContract(facts runtimecontract.R
 		}},
 		ObservedRevision: "shell-policy-file-backed-v1",
 	}
+	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(
+		facts.DefinitionRevision,
+		facts.DefinitionSeed.CoverageItems,
+		facts.DefinitionFocuses,
+	)
+	if err != nil {
+		panic(fmt.Sprintf("compile file-backed managed-validation proof requirements: %v", err))
+	}
+	bindings := make([]runtimecontract.RuntimeValidationProofRequirementBinding, 0, len(requirements))
+	checks := make([]string, 0)
+	for _, requirement := range requirements {
+		if requirement.ValidationRecipeID != runtimeFileBackedValidationRecipeID {
+			continue
+		}
+		attestations := make([]runtimecontract.RuntimeValidationCheckAttestationBinding, 0, len(requirement.RequiredCheckRefs))
+		for index, checkRef := range requirement.RequiredCheckRefs {
+			attestations = append(attestations, runtimecontract.RuntimeValidationCheckAttestationBinding{
+				RequiredCheckRef: checkRef, ObservationProtocolRef: "test/file-backed-validation/v1",
+				NativeCheckRef: fmt.Sprintf("test/file-backed-check/%d", index),
+			})
+		}
+		binding, bindErr := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(
+			requirement,
+			runtimeFileBackedValidationRecipeID,
+			attestations...,
+		)
+		if bindErr != nil {
+			panic(fmt.Sprintf("bind file-backed managed-validation proof requirement: %v", bindErr))
+		}
+		bindings = append(bindings, binding)
+		for _, checkRef := range requirement.RequiredCheckRefs {
+			if !slices.Contains(checks, checkRef) {
+				checks = append(checks, checkRef)
+			}
+		}
+	}
+	if len(bindings) != 0 {
+		inventory.ValidationSurfaces[0].ProofRequirementBindings = bindings
+		inventory.ValidationSurfaces[0].CheckRefs = checks
+	}
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
-	facts.Activation.EvidencePolicies = append(facts.Activation.EvidencePolicies, policy)
+	policyPresent := false
+	for _, existing := range facts.Activation.EvidencePolicies {
+		if existing.ID != policy.ID {
+			continue
+		}
+		if !reflect.DeepEqual(existing, policy) {
+			t.Fatalf("file-backed managed-validation policy drift: existing=%+v expected=%+v", existing, policy)
+		}
+		policyPresent = true
+	}
+	if !policyPresent {
+		facts.Activation.EvidencePolicies = append(facts.Activation.EvidencePolicies, policy)
+	}
 	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, prerequisite)
 	facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, inventory)
 	facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, runtimeFileAdmissibilityObservation(inventory))
@@ -230,15 +330,28 @@ func executeRuntimeFreshValidationForAssessment(t *testing.T, ctx context.Contex
 		t.Fatalf("fresh validation seal=%+v err=%v", sealed, err)
 	}
 	executor := runtimeOperationExecutorFunc(func(ctx context.Context, request runtime.RuntimeOperationExecutionRequest) (runtime.RuntimeOperationExecutionResult, error) {
+		if err := request.ValidationProofBinding.Validate(); err != nil {
+			return runtime.RuntimeOperationExecutionResult{}, fmt.Errorf("fresh validation proof binding: %w", err)
+		}
+		nativeChecks := make([]string, 0, len(request.ValidationProofBinding.CheckAttestations))
+		observationProtocolRef := ""
+		for _, attestation := range request.ValidationProofBinding.CheckAttestations {
+			if observationProtocolRef == "" {
+				observationProtocolRef = attestation.ObservationProtocolRef
+			}
+			if attestation.ObservationProtocolRef != observationProtocolRef {
+				return runtime.RuntimeOperationExecutionResult{}, errors.New("fresh validation proof binding mixes observation protocols")
+			}
+			nativeChecks = append(nativeChecks, attestation.NativeCheckRef)
+		}
 		receipt := runtimecontract.RuntimeOperationReceipt{
 			ExecutionKey: request.Execution.ExecutionKey, OperationID: request.Operation.ID, Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
 			ObservedEffectScope: runtimecontract.RuntimeEffectEphemeralSession, TargetRefs: append([]string(nil), request.Operation.TargetRefs...),
 			Evidence: runtimecontract.RuntimeOperationEvidence{
 				Summary: "fresh repair validation", Quality: common.EvidenceQualityValid,
 				Validation: &runtimecontract.RuntimeValidationObservation{
-					RecipeID:       runtimeFileBackedValidationRecipeID,
-					ExecutedChecks: []string{runtimeFileBackedValidationCheck},
-					PassedChecks:   []string{runtimeFileBackedValidationCheck},
+					RecipeID: runtimeFileBackedValidationRecipeID, ObservationProtocolRef: observationProtocolRef,
+					ExecutedChecks: append([]string(nil), nativeChecks...), PassedChecks: append([]string(nil), nativeChecks...),
 				},
 			},
 		}
@@ -946,6 +1059,66 @@ func TestRuntimeStateRepositoryRejectsInvalidDuplicateCWILedgerWithoutRewriting(
 	}
 	if stored.RuntimeState == nil || stored.RuntimeState.StateRevision != record.StateRevision || len(stored.RuntimeState.Facts.CompletedFocuses) != 1 {
 		t.Fatalf("load rewrote opaque invalid record: %+v", stored.RuntimeState)
+	}
+}
+
+func TestRuntimeStateRepositoryRejectsAmbiguousRawActivationEvidencePoliciesWithoutRewriting(t *testing.T) {
+	for name, mutate := range map[string]func(*runtimecontract.RuntimeStateRecord){
+		"duplicate policy identity": func(record *runtimecontract.RuntimeStateRecord) {
+			base := runtimecontract.RuntimeEvidencePolicy{
+				ID: "managed", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go",
+				RecipeDeclared: true, RecipeArgs: []string{"test", "-v", "./..."},
+			}.Normalized()
+			changed := base
+			changed.CommandName = "other"
+			record.Facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{base, changed}
+		},
+		"duplicate nested coverage identity": func(record *runtimecontract.RuntimeStateRecord) {
+			base := runtimecontract.RuntimeEvidencePolicy{
+				ID: "managed", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go",
+				RecipeDeclared: true, RecipeArgs: []string{"test", "-v", "./..."},
+				CoverageRequirements: []runtimecontract.RuntimeCoverageEvidenceRequirement{{
+					ID: "validation", Scope: "deliverable", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+				}},
+			}.Normalized()
+			base.CoverageRequirements = append(base.CoverageRequirements, base.CoverageRequirements[0])
+			record.Facts.Activation.EvidencePolicies = []runtimecontract.RuntimeEvidencePolicy{base}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			runs := filerepository.NewRunRepository(filepath.Join(t.TempDir(), "runs.json"))
+			run := runtimeRunForTest(common.RunStateActive, runtimeDefinition())
+			record := runtimeStateRecordFromAggregate(runtimeAggregate(t, 9))
+			mutate(&record)
+			run.RuntimeState = &record
+			if err := runs.Create(ctx, run); err != nil {
+				t.Fatal(err)
+			}
+
+			hub := magicevent.NewHub(16)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			module := runmodule.New()
+			if err := module.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
+				t.Fatal(err)
+			}
+			if err := module.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = module.Stop(ctx) })
+
+			_, err := (runtimeStateRepository{hub: hub}).Load(ctx, run.WorkspaceID, run.ID)
+			if err == nil || !strings.Contains(err.Error(), "evidence polic") {
+				t.Fatalf("ambiguous raw evidence policies were accepted: %v", err)
+			}
+			stored, err := runs.GetByWorkspaceID(ctx, run.WorkspaceID, run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.RuntimeState == nil || !reflect.DeepEqual(stored.RuntimeState.Facts.Activation.EvidencePolicies, record.Facts.Activation.EvidencePolicies) {
+				t.Fatalf("load rewrote ambiguous raw evidence policies: got=%+v want=%+v", stored.RuntimeState, record.Facts.Activation.EvidencePolicies)
+			}
+		})
 	}
 }
 
@@ -2248,7 +2421,13 @@ func TestRuntimeStateRepositoryValidationFailureObservationReceiptCrashRestartIs
 		RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "Shell validation inventory",
 	}}
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{validationInventory}
-	facts.Resources.PrerequisiteObservations = nil
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{runtimeFileAdmissibilityObservation(validationInventory)}
+	facts = runtimeStateTestSpecializeCurrentDefinitionFocus(t, facts)
+	boundFacts, bindErr := runtimeTestBindExactManagedValidationProofFacts(facts)
+	if bindErr != nil {
+		t.Fatalf("bind failure-observation validation proof requirement: %v", bindErr)
+	}
+	facts = boundFacts
 
 	repository := runtimeStateRepository{hub: hub}
 	controller, err := runtime.NewRuntimeController(repository)
@@ -2354,8 +2533,8 @@ func TestRuntimeStateRepositoryValidationFailureObservationReceiptCrashRestartIs
 				t.Fatalf("unexpected receipt crash marker: %v", recovered)
 			}
 		}()
-		_, _ = runtimeTestControllerExecuteDispatch(beforeCommitController, ctx, "ws-v2", "run-v2", newExecutor(beforeCommitController, true))
-		t.Fatal("expected injected failure-observation receipt crash")
+		_, executeErr := runtimeTestControllerExecuteDispatch(beforeCommitController, ctx, "ws-v2", "run-v2", newExecutor(beforeCommitController, true))
+		t.Fatalf("expected injected failure-observation receipt crash; execute err=%v", executeErr)
 	}()
 	if !beforeCommitRepository.failed {
 		t.Fatal("failure-observation receipt CAS crash point was not reached")
@@ -2861,8 +3040,8 @@ func TestRuntimeStateRepositoryClaimedSameGapAssessmentCrashRestartUsesCanonical
 	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, fileOwnerFacts.Prerequisites.Satisfied...)
 	facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, fileOwnerFacts.Resources.OperationAdmissibilities...)
 	facts.Resources.PrerequisiteObservations = append(facts.Resources.PrerequisiteObservations, fileOwnerFacts.Resources.PrerequisiteObservations...)
-	facts = runtimeFactsWithFileBackedManagedValidationContract(facts)
-	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, runtimeDefinition(), nil)
+	facts = runtimeFactsWithFileBackedManagedValidationContract(t, facts)
+	initialized, err := runtimeTestControllerInitialize(controller, ctx, facts, bootstrap.Definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5144,6 +5323,19 @@ func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueRe
 		OwnerModuleID: runtimecontract.RuntimeModuleShell, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 	})
 	aggregate.Facts.Resources.OperationAdmissibilities = append(aggregate.Facts.Resources.OperationAdmissibilities, inventory)
+	aggregate.Facts.Resources.PrerequisiteObservations = append(aggregate.Facts.Resources.PrerequisiteObservations, runtimeFileAdmissibilityObservation(inventory))
+	aggregate.Facts = runtimeStateTestSpecializeCurrentDefinitionFocus(t, aggregate.Facts)
+	boundFacts, bindErr := runtimeTestBindExactManagedValidationProofFacts(aggregate.Facts)
+	if bindErr != nil {
+		t.Fatalf("bind repair-surface validation proof requirement: %v", bindErr)
+	}
+	aggregate.Facts = boundFacts
+	for _, catalog := range aggregate.Facts.Resources.OperationAdmissibilities {
+		if catalog.PrerequisiteID == inventory.PrerequisiteID {
+			inventory = catalog
+			break
+		}
+	}
 	aggregate = runtimeTestAggregateWithSemanticPlanning(t, aggregate)
 	var repairPrerequisite runtimecontract.RuntimePrerequisite
 	for _, satisfied := range aggregate.Facts.Prerequisites.Satisfied {
@@ -5218,12 +5410,18 @@ func TestRuntimeStateRecordPreservesRepairSurfaceConfirmationFenceAcrossOpaqueRe
 	if err != nil {
 		t.Fatal(err)
 	}
-	dispatch, err := runtime.SealDispatchWithManifestAndFeasibilities(
+	feasibilities := []runtimecontract.RuntimeCandidateFeasibilityRecord{{
+		OperationID: candidate.Validation.Operations[0].Operation.ID, AdmissibilitySnapshotID: inventory.SnapshotID,
+		CandidateManifestHash: manifest.Hash, Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
+	}}
+	dispatch, err := runtime.SealDispatchWithManifestAndOwnerAuthority(
 		aggregate.Decision,
 		candidate,
 		aggregate.Facts.Activation,
 		manifest,
-		nil,
+		feasibilities,
+		aggregate.Facts.Resources.OperationAdmissibilities,
+		aggregate.Facts.Resources.PrerequisiteObservations,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -5584,6 +5782,7 @@ func runtimeBootstrap() runtimecontract.RuntimeBootstrap {
 // from the activation it persisted for the Run.
 func runtimeFileBackedAssessmentBootstrap(coverageIDs []common.CoverageWorkItemID) runtimecontract.RuntimeBootstrap {
 	bootstrap := runtimeBootstrap()
+	bootstrap.Definition.CapabilityContract = []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	bootstrap.DefinitionFocuses = make([]runtimecontract.RuntimeDefinitionFocus, 0, len(coverageIDs))
 	bootstrap.Slices[0].CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), coverageIDs...)
 	bootstrap.Slices[0].RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation}
@@ -5591,9 +5790,12 @@ func runtimeFileBackedAssessmentBootstrap(coverageIDs []common.CoverageWorkItemI
 	for idx, coverageID := range coverageIDs {
 		bootstrap.DefinitionFocuses = append(bootstrap.DefinitionFocuses, runtimecontract.RuntimeDefinitionFocus{
 			ID: fmt.Sprintf("focus-v2-%03d", idx+1), SliceID: bootstrap.Slices[0].ID,
-			CoverageWorkItemIDs:   []common.CoverageWorkItemID{coverageID},
-			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
-			RequireAssessment:     true,
+			CoverageWorkItemIDs:    []common.CoverageWorkItemID{coverageID},
+			RequiredEvidenceKinds:  []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
+			EvidenceDeclarationRef: "test/validation/dodItem/*",
+			ValidationRecipeID:     runtimeFileBackedValidationRecipeID,
+			RequiredCheckRefs:      []string{runtimeFileBackedValidationCheck},
+			RequireAssessment:      true,
 		})
 		bootstrap.CoverageItems = append(bootstrap.CoverageItems, runtimecontract.RuntimeCoverageItem{ID: coverageID, SliceID: bootstrap.Slices[0].ID})
 	}

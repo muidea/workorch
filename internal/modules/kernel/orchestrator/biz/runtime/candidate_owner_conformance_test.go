@@ -244,6 +244,13 @@ func runtimeOwnerApplicabilityViolationRecord(t *testing.T, aggregate RuntimeAgg
 func runtimeOwnerConstraintAggregate(t *testing.T) RuntimeAggregate {
 	t.Helper()
 	return stateChangeAggregateWithPreparation(t, func(initial *RuntimeAggregate) {
+		// Seal the same patch/apply capability that this fixture proposes. The
+		// semantic manifest is compiled from immutable capability facts before
+		// candidate admission; changing only the Focus variant would leave the
+		// owner catalog correctly sealed for file/write and make the patch
+		// candidate an unrelated operation.
+		initial.Facts.Capabilities.StateChangeKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
+		initial.Facts.Focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindPatchApply}
 		initial.Facts.Focus.AcceptedOperationVariants = []runtimecontract.RuntimeOperationVariantRef{{
 			Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "unified_diff",
 		}}

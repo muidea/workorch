@@ -44,6 +44,15 @@ func finalizeExecutionEvidence(
 		if err != nil {
 			return false, err
 		}
+		if prerequisitesInvalidated {
+			// The exact acquisition receipt consumes its create-only target
+			// selection. Other invalidated owner facts remain pending so the
+			// required owner is still freshly re-observed before SM-2 settles.
+			aggregate.Facts, _ = retireConsumedProspectiveTargetSelection(
+				aggregate.Facts,
+				aggregate.CoverageProofLineage,
+			)
+		}
 		// Once an accepted repair-owner receipt has been admitted to an exact confirmed
 		// repair transaction, the pre-change target and directive are superseded
 		// regardless of whether their mutable catalog observations happen to

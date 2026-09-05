@@ -152,6 +152,12 @@ func (c RuntimeActivationContext) Validate() error {
 	if err := ValidateRuntimeSkillContexts(c.Skills, c.SkillContextBudget); err != nil {
 		return fmt.Errorf("runtime activation skills: %w", err)
 	}
+	// Evidence policies are immutable activation authority. Validate the raw
+	// projection before Normalized can collapse duplicate policy or nested
+	// coverage identities into a last-writer value.
+	if err := ValidateRuntimeEvidencePolicies(c.EvidencePolicies); err != nil {
+		return err
+	}
 	c = c.Normalized()
 	if err := c.ProviderSelection.Validate(); err != nil {
 		return fmt.Errorf("runtime activation provider selection: %w", err)
@@ -195,9 +201,6 @@ func (c RuntimeActivationContext) Validate() error {
 			}
 		}
 	}
-	if err := ValidateRuntimeEvidencePolicies(c.EvidencePolicies); err != nil {
-		return err
-	}
 	if err := c.ExecutionContract.Validate(); err != nil {
 		return err
 	}
@@ -208,7 +211,13 @@ func (c RuntimeActivationContext) Validate() error {
 }
 
 func (c RuntimeActivationContext) Clone() RuntimeActivationContext {
-	return c.Normalized()
+	rawEvidencePolicies := CloneRuntimeEvidencePolicies(c.EvidencePolicies)
+	c = c.Normalized()
+	// Clone must detach data without laundering malformed authority. Valid
+	// policies are already canonical; invalid raw fields remain visible to the
+	// next ingress or persistence validator.
+	c.EvidencePolicies = rawEvidencePolicies
+	return c
 }
 
 func SameRuntimeActivationContext(left RuntimeActivationContext, right RuntimeActivationContext) bool {

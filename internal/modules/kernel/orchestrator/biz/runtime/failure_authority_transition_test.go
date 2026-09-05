@@ -292,7 +292,7 @@ func prepareSemanticValidationRepairOwnerInfeasibility(t *testing.T) (RuntimeAgg
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, proposal, semanticFeasibility := runtimeValidationFailureRepairProofForTest(t, opened.Aggregate, []string{"main.go"})
+	manifest, proposal, semanticFeasibility := runtimeValidationFailureRepairProofForTest(t, opened.Aggregate, []string{"repair-main.go"})
 	sealed := runtimeSealValidationFailureRepairSemanticProofForTest(t, repository, manifest, proposal, semanticFeasibility)
 	binding, found := coverageEvidenceBindingForCoverage(sealed.Facts.Focus, "cwi-1")
 	if !found {

@@ -357,15 +357,7 @@ func (m *goalDoDManager) publishWorkspaceEvent(ctx context.Context, topic string
 	if m.publish == nil || workspace == nil {
 		return nil
 	}
-	data := workspaceevents.WorkspaceChangedData{
-		WorkspaceID:          workspace.ID,
-		Title:                workspace.Title,
-		Description:          workspace.Description,
-		DeliverableDirectory: workspace.DeliverableDirectory,
-		InternalDirectory:    workspace.InternalDirectory,
-		State:                workspace.State,
-		ActiveRunID:          workspace.ActiveRunID,
-	}
+	data := workspaceChangedNotification(workspace)
 	event := magicevent.NewEventWithContext(topic, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, data)
 	event.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), topic, eventcontract.LaneScope{SubjectType: "workspace", SubjectID: string(workspace.ID), WorkspaceID: string(workspace.ID)}))
 	m.publish(event)

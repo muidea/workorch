@@ -17,6 +17,8 @@ func TestCoverageEvidenceProofValidateRejectsCrossKindProofShapes(t *testing.T) 
 	validValidation := CoverageEvidenceProof{
 		EvidenceKind: EvidenceKindValidation, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
 		AllowedOperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe/test",
+		ValidationProofRequirementHash: "runtime-validation-proof-requirement-test", RequiredCheckRefs: []string{"workorch-cwi-check-test"},
+		ValidationCheckAttestations: runtimeValidationCheckAttestationsForTest([]string{"workorch-cwi-check-test"}),
 	}
 	cases := []struct {
 		name  string
@@ -36,12 +38,63 @@ func TestCoverageEvidenceProofValidateRejectsCrossKindProofShapes(t *testing.T) 
 	if err := validValidation.Validate(); err != nil {
 		t.Fatalf("valid validation proof rejected: %v", err)
 	}
+	oldSynthetic := validValidation
+	oldSynthetic.ValidationProofRequirementHash = ""
+	oldSynthetic.RequiredCheckRefs = []string{"recipe/test"}
+	if err := oldSynthetic.Validate(); err == nil || !strings.Contains(err.Error(), "exact CWI proof requirement") {
+		t.Fatalf("old recipe-level synthetic proof error = %v", err)
+	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.proof.Validate(); err == nil {
 				t.Fatalf("invalid proof accepted: %+v", tc.proof)
 			}
 		})
+	}
+}
+
+func TestCoverageEvidenceBindingRejectsDuplicateProofBeforeNormalization(t *testing.T) {
+	binding := testCoverageEvidenceBinding()
+	binding.Proofs = append(binding.Proofs, binding.Proofs[1].Clone())
+	binding.Hash = StableCoverageEvidenceBindingHash(binding)
+	if err := binding.Validate(); err == nil || !strings.Contains(err.Error(), "duplicates evidence proof") {
+		t.Fatalf("duplicate evidence proof error = %v", err)
+	}
+
+	aliasedKind := testCoverageEvidenceBinding()
+	duplicateProof := aliasedKind.Proofs[1].Clone()
+	duplicateProof.EvidenceKind = " " + duplicateProof.EvidenceKind + " "
+	aliasedKind.Proofs = append(aliasedKind.Proofs, duplicateProof)
+	aliasedKind.Hash = StableCoverageEvidenceBindingHash(aliasedKind)
+	if err := aliasedKind.Validate(); err == nil || !strings.Contains(err.Error(), "duplicates evidence proof") {
+		t.Fatalf("whitespace-aliased evidence proof error = %v", err)
+	}
+
+	aliasedCheck := testCoverageEvidenceBinding()
+	checkRef := aliasedCheck.Proofs[1].RequiredCheckRefs[0]
+	aliasedCheck.Proofs[1].RequiredCheckRefs = append(aliasedCheck.Proofs[1].RequiredCheckRefs, " "+checkRef+" ")
+	aliasedCheck.Hash = StableCoverageEvidenceBindingHash(aliasedCheck)
+	if err := aliasedCheck.Validate(); err == nil || !strings.Contains(err.Error(), "duplicates check") {
+		t.Fatalf("whitespace-aliased proof check error = %v", err)
+	}
+}
+
+func TestCoverageEvidenceBindingCollectionPreservesDuplicateAuthorityUntilValidation(t *testing.T) {
+	binding := testCoverageEvidenceBinding()
+	duplicate := binding.Clone()
+	duplicate.ID = " " + binding.ID + " "
+	values := NormalizeCoverageEvidenceBindings([]CoverageEvidenceBinding{binding, duplicate})
+	if len(values) != 2 {
+		t.Fatalf("normalization laundered duplicate binding authority: %+v", values)
+	}
+	focus := CoverageFocus{
+		ID: binding.FocusID, SliceID: "slice-main", EvidenceDeclarationRef: binding.DeclarationRef,
+		CoverageWorkItemIDs:   []common.CoverageWorkItemID{binding.CoverageWorkItemID},
+		RequiredEvidenceKinds: binding.EvidenceKinds(), CoverageEvidenceBindings: []CoverageEvidenceBinding{binding, duplicate},
+		TargetRefs: append([]string(nil), binding.TargetRefs...),
+	}
+	if err := ValidateCoverageEvidenceBindingsForFocus(focus, binding.DefinitionRevision); err == nil || !strings.Contains(err.Error(), "duplicates") {
+		t.Fatalf("whitespace-aliased duplicate binding error = %v", err)
 	}
 }
 
@@ -280,6 +333,10 @@ func TestMCPToolCoverageEvidenceBindingRequiresExactOwnerRecipe(t *testing.T) {
 
 func TestCoverageEvidenceBindingReceiptMatchDoesNotBorrowAcrossProofKinds(t *testing.T) {
 	binding := testCoverageEvidenceBinding()
+	validationProof, found := CoverageEvidenceProofForKind(binding, EvidenceKindValidation)
+	if !found {
+		t.Fatal("validation proof is missing")
+	}
 	stateOperation := RuntimeOperation{ID: "write-main", Kind: StepKindFileWrite, TargetRefs: []string{"main.go"}}
 	stateReceipt := RuntimeOperationReceipt{
 		ExecutionKey: "exec/ws/run/dispatch/write-main", Fence: 1, OperationID: "write-main", Outcome: RuntimeOperationOutcomeAccepted,
@@ -296,7 +353,12 @@ func TestCoverageEvidenceBindingReceiptMatchDoesNotBorrowAcrossProofKinds(t *tes
 		ObservedEffectScope: RuntimeEffectEphemeralSession, TargetRefs: []string{"main.go"},
 		Evidence: RuntimeOperationEvidence{
 			Summary: "validated main.go", EvidenceRefs: []string{"artifact/test-log"}, EvidenceTags: []string{"metric/tests-pass"},
-			Validation: &RuntimeValidationObservation{RecipeID: "recipe/test-main", ExecutedChecks: []string{"unit/main"}, PassedChecks: []string{"unit/main"}},
+			Validation: &RuntimeValidationObservation{
+				RecipeID:               "recipe/test-main",
+				ObservationProtocolRef: validationProof.ValidationCheckAttestations[0].ObservationProtocolRef,
+				ExecutedChecks:         []string{validationProof.ValidationCheckAttestations[0].NativeCheckRef, validationProof.ValidationCheckAttestations[1].NativeCheckRef},
+				PassedChecks:           []string{validationProof.ValidationCheckAttestations[0].NativeCheckRef, validationProof.ValidationCheckAttestations[1].NativeCheckRef},
+			},
 		},
 	}
 	if err := MatchCoverageEvidenceBindingReceipt(binding, EvidenceKindValidation, validationOperation, validationReceipt); err != nil {
@@ -310,16 +372,16 @@ func TestCoverageEvidenceBindingReceiptMatchDoesNotBorrowAcrossProofKinds(t *tes
 	}{
 		{name: "target", mutate: func(receipt *RuntimeOperationReceipt) { receipt.TargetRefs = []string{"other.go"} }, message: "targets"},
 		{name: "effect", mutate: func(receipt *RuntimeOperationReceipt) { receipt.ObservedEffectScope = RuntimeEffectNone }, message: "effect"},
-		{name: "recipe", mutate: func(receipt *RuntimeOperationReceipt) { receipt.Evidence.Validation.RecipeID = "recipe/other" }, message: "recipe"},
+		{name: "recipe", mutate: func(receipt *RuntimeOperationReceipt) { receipt.Evidence.Validation.RecipeID = "recipe/other" }, message: "does not satisfy sealed proof"},
 		{name: "check", mutate: func(receipt *RuntimeOperationReceipt) {
 			receipt.Evidence.Validation.PassedChecks = []string{"unit/other"}
-		}, message: "passed check"},
+		}, message: "does not satisfy sealed proof"},
 		{name: "passed and failed check", mutate: func(receipt *RuntimeOperationReceipt) {
-			receipt.Evidence.Validation.FailedChecks = []string{"unit/main"}
-		}, message: "passed check"},
+			receipt.Evidence.Validation.FailedChecks = []string{validationProof.ValidationCheckAttestations[0].NativeCheckRef}
+		}, message: "does not satisfy sealed proof"},
 		{name: "passed and skipped check", mutate: func(receipt *RuntimeOperationReceipt) {
-			receipt.Evidence.Validation.SkippedChecks = []string{"unit/main"}
-		}, message: "passed check"},
+			receipt.Evidence.Validation.SkippedChecks = []string{validationProof.ValidationCheckAttestations[0].NativeCheckRef}
+		}, message: "does not satisfy sealed proof"},
 		{name: "metric", mutate: func(receipt *RuntimeOperationReceipt) { receipt.Evidence.EvidenceTags = nil }, message: "metric constraint"},
 		{name: "artifact", mutate: func(receipt *RuntimeOperationReceipt) { receipt.Evidence.EvidenceRefs = nil }, message: "artifact ref"},
 		{name: "zero work", mutate: func(receipt *RuntimeOperationReceipt) { receipt.Evidence.ZeroWork = true }, message: "zero-work"},
@@ -506,11 +568,19 @@ func TestCoverageEvidenceAttributionRequiresBindingForCurrentSchemaEvidence(t *t
 }
 
 func testCoverageEvidenceBinding() CoverageEvidenceBinding {
+	item := RuntimeCoverageItem{ID: "cwi-main", SourceScope: "dodItem", SourceID: "dod-main", TargetText: "main works"}
+	requirement := RuntimeValidationProofRequirement{
+		SchemaVersion: RuntimeValidationProofRequirementSchemaCurrent, DefinitionRevision: "definition-main",
+		CoverageWorkItemID: item.ID, SourceScope: item.SourceScope, SourceID: item.SourceID,
+		SourceTextHash: stableRuntimeValidationSourceTextHash(item.TargetText), DeclarationRef: "test/profile/main",
+		ValidationRecipeID: "recipe/test-main", RequiredCheckRefs: []string{"unit/main", StableRuntimeCWIValidationCheckRef("definition-main", item)},
+	}.Normalized()
+	requirement.Hash = StableRuntimeValidationProofRequirementHash(requirement)
 	binding := CoverageEvidenceBinding{
 		ID: "binding/cwi-main", CoverageWorkItemID: "cwi-main", FocusID: "focus-main", DefinitionRevision: "definition-main",
 		Proofs: []CoverageEvidenceProof{
 			{EvidenceKind: EvidenceKindStateChange, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectWorkspaceDurable}, AllowedOperationKinds: []string{StepKindFileWrite}},
-			{EvidenceKind: EvidenceKindValidation, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession}, AllowedOperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe/test-main", RequiredCheckRefs: []string{"unit/main"}, MetricConstraints: []string{"metric/tests-pass"}, ArtifactRefs: []string{"artifact/test-log"}},
+			{EvidenceKind: EvidenceKindValidation, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession}, AllowedOperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe/test-main", ValidationProofRequirementHash: requirement.Hash, RequiredCheckRefs: append([]string(nil), requirement.RequiredCheckRefs...), ValidationCheckAttestations: runtimeValidationCheckAttestationsForTest(requirement.RequiredCheckRefs), MetricConstraints: []string{"metric/tests-pass"}, ArtifactRefs: []string{"artifact/test-log"}},
 		},
 		TargetRefs: []string{"main.go"}, DeclarationRef: "test/profile/main",
 	}.Normalized()

@@ -16,7 +16,10 @@ Last Verified: 2026-09-04
 These documents specialize Template/Profile/Soul/capability behavior without adding a Runtime state machine or hard-coded
 software-development branch to Orchestrator.
 
-The built-in Profile also seals the File-to-Shell prospective-satisfaction contract for one-shot DoD validation preparation.
+The built-in Profile keeps the stable `software-dev` ID but is the current **Go-native validation** specialization. It also
+seals the File-to-Shell prospective-satisfaction contract for one-shot DoD validation preparation. Other framework-native or
+MCP-only proof closures require a distinct explicit typed Profile; Application and Orchestrator never infer one from workspace
+contents.
 File owns the hypothetical workspace-manifest delta, Shell owns managed-validation applicability, and Orchestrator only joins
 their typed facts inside SM-2; none of the three may transition a sibling owner's state.
 

@@ -172,13 +172,21 @@ func TestRuntimeProspectiveCompositeRetiresGenerationWhenDependencyCatalogDrifts
 	advancedCatalog := fixture.shellCatalog.Normalized()
 	advancedCatalog.ObservedRevision = "shell-policy-v2"
 	for idx := range advancedCatalog.ValidationSurfaces {
-		constraint := advancedCatalog.ValidationSurfaces[idx].ProspectiveTargetSatisfactionConstraint
+		surface := &advancedCatalog.ValidationSurfaces[idx]
+		constraint := surface.ProspectiveTargetSatisfactionConstraint
 		if constraint == nil {
-			continue
+			// Per-CWI preparation constraints still carry the catalog revision
+			// even when no recipe-wide prospective constraint is exposed.
+		} else {
+			value := constraint.Clone()
+			value.CatalogObservedRevision = advancedCatalog.ObservedRevision
+			surface.ProspectiveTargetSatisfactionConstraint = &value
 		}
-		value := constraint.Clone()
-		value.CatalogObservedRevision = advancedCatalog.ObservedRevision
-		advancedCatalog.ValidationSurfaces[idx].ProspectiveTargetSatisfactionConstraint = &value
+		for preparationIndex := range surface.ProofRequirementPreparations {
+			value := surface.ProofRequirementPreparations[preparationIndex].ProspectiveTargetSatisfactionConstraint.Clone()
+			value.CatalogObservedRevision = advancedCatalog.ObservedRevision
+			surface.ProofRequirementPreparations[preparationIndex].ProspectiveTargetSatisfactionConstraint = value
+		}
 	}
 	advancedCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(advancedCatalog)
 	advancedObservation := prospectiveSemanticCatalogObservation(advancedCatalog, fixture.delta.BaseWorkspaceManifestRevision)
@@ -336,6 +344,18 @@ func newProspectiveSemanticTransitionFixture(t *testing.T) *prospectiveSemanticT
 	facts.Prerequisites.Satisfied = []runtimecontract.RuntimePrerequisite{filePrerequisite, shellPrerequisite}
 	facts.DefinitionFocuses = nil
 	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
+	facts, err = runtimeTestBindManagedValidationProofRequirements(facts)
+	if err != nil {
+		t.Fatalf("bind prospective validation proof preparation: %v", err)
+	}
+	for _, catalog := range facts.Resources.OperationAdmissibilities {
+		if catalog.OwnerModuleID == runtimecontract.RuntimeModuleShell {
+			shellCatalog = catalog
+			break
+		}
+	}
+	shellObservation = prospectiveSemanticCatalogObservation(shellCatalog, fileCatalog.ObservedRevision)
+	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{fileObservation, shellObservation}
 	definition := controllerDefinition()
 	definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	aggregate, err := controller.initialize(ctx, facts, definition, nil)
@@ -366,7 +386,7 @@ func newProspectiveSemanticTransitionFixture(t *testing.T) *prospectiveSemanticT
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-		DeclarationRef:        "semantic/prospective-composite-regression",
+		DeclarationRef:        runtimeTestSemanticDeclarationRef(manifest, manifest.CoverageItems[0].ID),
 	}
 	proof := runtimecontract.RuntimeSemanticPlanDocument{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,

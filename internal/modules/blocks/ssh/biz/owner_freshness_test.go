@@ -130,13 +130,13 @@ func TestSSHSemanticProofProbeReturnsTypedStaleWithoutNetworkOperation(t *testin
 		AllowedOwnerModuleIDs:     []string{ModuleID}, AllowedOperationKinds: []string{StepKindCommand},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget},
 		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
-			CoverageWorkItemID: "cwi-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			CoverageWorkItemID: "cwi-1", DeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-1"), RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		}},
 	}
 	proposal := runtimecontract.RuntimeSemanticProofProposal{
 		CoverageWorkItemID: "cwi-1", OwnerModuleID: ModuleID, OperationKind: StepKindCommand,
 		Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"remote-host"}},
-		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectRemoteDurable}, DeclarationRef: "semantic/dod-1",
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectRemoteDurable}, DeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-1"),
 	}
 	catalog, err := runtimecontract.NewRuntimeOperationAdmissibility("semantic-ssh", ModuleID, []string{StepKindCommand}, []string{"remote-host"}, nil, []string{"remote-host-parameter", "owner-execution-policy"}, adapter.admissibilityRevision())
 	if err != nil {

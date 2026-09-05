@@ -25,6 +25,7 @@ func TestRuntimeMutationOwnerStructureIsUnique(t *testing.T) {
 		file     string
 		receiver string
 		method   string
+		callee   string
 	}
 	var repositorySaveCalls []saveCall
 
@@ -63,11 +64,12 @@ func TestRuntimeMutationOwnerStructureIsUnique(t *testing.T) {
 					return true
 				}
 				selector, selectorOK := call.Fun.(*ast.SelectorExpr)
-				if selectorOK && selector.Sel.Name == "Save" {
+				if selectorOK && (selector.Sel.Name == "Save" || selector.Sel.Name == "SaveValidated") {
 					repositorySaveCalls = append(repositorySaveCalls, saveCall{
 						file:     filepath.Base(filename),
 						receiver: receiver,
 						method:   function.Name.Name,
+						callee:   selector.Sel.Name,
 					})
 				}
 				return true
@@ -91,12 +93,18 @@ func TestRuntimeMutationOwnerStructureIsUnique(t *testing.T) {
 	})
 	assertRuntimeExportedMethods(t, methods, "RuntimeTransitionCoordinator", []string{"Commit"})
 
-	if len(repositorySaveCalls) != 1 {
-		t.Fatalf("production repository Save call sites = %d, want exactly 1 through RuntimeTransitionCoordinator.Commit: %+v", len(repositorySaveCalls), repositorySaveCalls)
+	if len(repositorySaveCalls) != 2 {
+		t.Fatalf("production repository Save call sites = %d, want the validated production path and guarded fallback only through RuntimeTransitionCoordinator.Commit: %+v", len(repositorySaveCalls), repositorySaveCalls)
 	}
-	call := repositorySaveCalls[0]
-	if call.file != "transition_coordinator.go" || call.receiver != "RuntimeTransitionCoordinator" || call.method != "Commit" {
-		t.Fatalf("repository Save bypasses the sole CAS coordinator: %+v", call)
+	wantCallees := map[string]bool{"Save": true, "SaveValidated": true}
+	for _, call := range repositorySaveCalls {
+		if call.file != "transition_coordinator.go" || call.receiver != "RuntimeTransitionCoordinator" || call.method != "Commit" || !wantCallees[call.callee] {
+			t.Fatalf("repository Save bypasses the sole CAS coordinator: %+v", call)
+		}
+		delete(wantCallees, call.callee)
+	}
+	if len(wantCallees) != 0 {
+		t.Fatalf("runtime transition coordinator save paths are incomplete: %+v", wantCallees)
 	}
 }
 

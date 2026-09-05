@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 func TestRuntimeProspectiveTargetSatisfactionConstraintMatchesBoundedAllOfTargetSet(t *testing.T) {
@@ -63,14 +65,15 @@ func TestResolveRuntimeProspectiveTargetSatisfactionConstraintRejectsImplicitAny
 		OperationKind: RuntimeBlockKindManagedValidationSession,
 	}
 	newSurface := func(id, suffix string) RuntimeValidationSurface {
-		surface := RuntimeValidationSurface{
+		surface := bindRuntimeValidationSurfaceForTest(RuntimeValidationSurface{
 			ID: id, OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
 			Readiness: RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "workspace input required",
 			InputSchemaHash: "schema/" + id, PrerequisiteRef: "workspace/validation-input",
 			ProspectiveSatisfactionContractRef: contractRef,
-			CheckRefs:                          []string{"check/" + id}, ProofApplicability: RuntimeValidationProofDirect,
-			EffectScope: RuntimeEffectEphemeralSession, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
-		}
+			EffectScope:                        RuntimeEffectEphemeralSession, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+		}, runtimeValidationProofRequirementForTest(t, "definition-"+id, RuntimeCoverageItem{
+			ID: common.CoverageWorkItemID("cwi-" + id), SourceScope: "dodItem", SourceID: "dod-" + id, TargetText: "validate " + id,
+		}, "definition/dodItem/dod-"+id, id, []string{"check/" + id}))
 		constraint := RuntimeProspectiveTargetSatisfactionConstraint{
 			SchemaVersion: RuntimeProspectiveTargetSatisfactionConstraintSchemaCurrent,
 			OwnerModuleID: RuntimeModuleShell, ProspectiveSatisfactionContractRef: contractRef,
@@ -81,7 +84,7 @@ func TestResolveRuntimeProspectiveTargetSatisfactionConstraintRejectsImplicitAny
 			}}}},
 		}
 		surface.ProspectiveTargetSatisfactionConstraint = &constraint
-		return surface
+		return prepareRuntimeValidationSurfaceForTest(t, surface, constraint)
 	}
 	newCatalog := func(surfaces ...RuntimeValidationSurface) RuntimeOperationAdmissibility {
 		catalog := RuntimeOperationAdmissibility{

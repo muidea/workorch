@@ -19,6 +19,10 @@ func (x *activeDispatchExecution) operationExecutionCallHandoff(operation runtim
 		prepared.execution.AdmissibilitySnapshotID,
 		prepared.execution.AcquisitionBinding,
 	)
+	validationProofBinding, err := runtimeValidationProofBindingForOperation(x.dispatch, operation, ownerCatalog)
+	if err != nil {
+		return nil, err
+	}
 	handoff := &RuntimeOperationExecutionCallHandoff{Request: RuntimeOperationExecutionRequest{
 		WorkspaceID: x.workspaceID, RunID: x.runID, DispatchID: x.dispatch.ID,
 		Transaction: x.dispatch.Transaction, Operation: operation, Execution: prepared.execution,
@@ -28,6 +32,7 @@ func (x *activeDispatchExecution) operationExecutionCallHandoff(operation runtim
 		EvidencePolicies:                   x.aggregate.Facts.Activation.EvidencePolicies,
 		ValidationRecipes:                  runtimecontract.NormalizeRuntimeValidationRecipes(x.dispatch.ValidationRecipes),
 		ValidationScopeTargetRefs:          validationScopeTargetRefs,
+		ValidationProofBinding:             validationProofBinding,
 		CapabilityStates:                   append([]runtimecontract.RuntimeCapabilityStateSnapshot(nil), x.aggregate.Facts.Resources.CapabilityStates...),
 		WorkspaceTreeObservation:           runtimeWorkspaceManifestObservation(x.aggregate),
 		CompletedRequiredOperationReceipts: completedRequiredOperationReceiptBindings(*x.aggregate.ActiveDispatch, x.aggregate.OperationReceipts, x.completed),
@@ -42,6 +47,81 @@ func (x *activeDispatchExecution) operationExecutionCallHandoff(operation runtim
 		return nil, err
 	}
 	return handoff, nil
+}
+
+// runtimeValidationProofBindingForOperation selects the immutable Shell proof
+// mapping needed by one managed-validation execution. The persisted semantic
+// binding and the exact owner-catalog binding must agree byte-for-byte on all
+// owner-neutral identities before the latter may cross EventHub. Native check
+// and protocol values remain opaque here.
+func runtimeValidationProofBindingForOperation(dispatch SealedDispatch, operation runtimecontract.RuntimeOperation, catalog *runtimecontract.RuntimeOperationAdmissibility) (runtimecontract.RuntimeValidationProofRequirementBinding, error) {
+	if runtimecontract.CanonicalRuntimeBlockKind(operation.Kind) != runtimecontract.RuntimeBlockKindManagedValidationSession {
+		return runtimecontract.RuntimeValidationProofRequirementBinding{}, nil
+	}
+	if catalog == nil {
+		return runtimecontract.RuntimeValidationProofRequirementBinding{}, fmt.Errorf("managed-validation execution requires persisted owner catalog")
+	}
+	if len(operation.BindingRefs) != 1 || strings.TrimSpace(operation.BindingRefs[0]) == "" || operation.BindingRefs[0] != strings.TrimSpace(operation.BindingRefs[0]) {
+		return runtimecontract.RuntimeValidationProofRequirementBinding{}, fmt.Errorf("managed-validation execution requires exactly one persisted CWI binding")
+	}
+	operation = operation.Normalized()
+	coverageBinding, found := runtimecontract.CoverageEvidenceBindingForRef(dispatch.CoverageBindings, operation.BindingRefs[0])
+	if !found {
+		return runtimecontract.RuntimeValidationProofRequirementBinding{}, fmt.Errorf("managed-validation execution binding %q is absent from sealed dispatch", operation.BindingRefs[0])
+	}
+	proof, found := runtimecontract.CoverageEvidenceProofForKind(coverageBinding, runtimecontract.EvidenceKindValidation)
+	if !found || proof.ValidationRecipeID == "" || proof.ValidationProofRequirementHash == "" || len(proof.ValidationCheckAttestations) == 0 {
+		return runtimecontract.RuntimeValidationProofRequirementBinding{}, fmt.Errorf("managed-validation execution binding %q has no exact native validation proof", coverageBinding.ID)
+	}
+	wanted := runtimecontract.RuntimeValidationProofRequirementBinding{
+		RequirementHash:    proof.ValidationProofRequirementHash,
+		DefinitionRevision: coverageBinding.DefinitionRevision,
+		CoverageWorkItemID: coverageBinding.CoverageWorkItemID,
+		DeclarationRef:     coverageBinding.DeclarationRef,
+		ValidationRecipeID: proof.ValidationRecipeID,
+		RequiredCheckRefs:  append([]string(nil), proof.RequiredCheckRefs...),
+		CheckAttestations:  runtimecontract.CloneRuntimeValidationCheckAttestationBindings(proof.ValidationCheckAttestations),
+	}.Clone()
+	if err := wanted.Validate(); err != nil {
+		return runtimecontract.RuntimeValidationProofRequirementBinding{}, fmt.Errorf("managed-validation persisted CWI proof: %w", err)
+	}
+
+	if err := catalog.Validate(); err != nil {
+		return runtimecontract.RuntimeValidationProofRequirementBinding{}, fmt.Errorf("managed-validation persisted owner catalog: %w", err)
+	}
+	ownerCatalog := catalog.Normalized()
+	surface, found := runtimecontract.RuntimeValidationSurfaceForID(ownerCatalog.ValidationSurfaces, wanted.ValidationRecipeID)
+	if !found || surface.Readiness != runtimecontract.RuntimeValidationSurfaceReady || surface.ProofApplicability != runtimecontract.RuntimeValidationProofDirect {
+		return runtimecontract.RuntimeValidationProofRequirementBinding{}, fmt.Errorf("managed-validation recipe %q has no ready exact owner surface", wanted.ValidationRecipeID)
+	}
+	var selected *runtimecontract.RuntimeValidationProofRequirementBinding
+	for _, raw := range surface.ProofRequirementBindings {
+		binding := raw.Clone()
+		if binding.RequirementHash != wanted.RequirementHash || binding.CoverageWorkItemID != wanted.CoverageWorkItemID {
+			continue
+		}
+		if selected != nil {
+			return runtimecontract.RuntimeValidationProofRequirementBinding{}, fmt.Errorf("managed-validation owner surface duplicates exact CWI proof binding")
+		}
+		value := binding
+		selected = &value
+	}
+	if selected == nil || !sameRuntimeValidationExecutionProofBinding(*selected, wanted) {
+		return runtimecontract.RuntimeValidationProofRequirementBinding{}, fmt.Errorf("managed-validation persisted CWI proof does not match exact owner surface binding")
+	}
+	return selected.Clone(), nil
+}
+
+func sameRuntimeValidationExecutionProofBinding(left, right runtimecontract.RuntimeValidationProofRequirementBinding) bool {
+	left = left.Clone()
+	right = right.Clone()
+	return left.RequirementHash == right.RequirementHash &&
+		left.DefinitionRevision == right.DefinitionRevision &&
+		left.CoverageWorkItemID == right.CoverageWorkItemID &&
+		left.DeclarationRef == right.DeclarationRef &&
+		left.ValidationRecipeID == right.ValidationRecipeID &&
+		sameRuntimeStrings(left.RequiredCheckRefs, right.RequiredCheckRefs) &&
+		runtimecontract.SameRuntimeValidationCheckAttestationBindings(left.CheckAttestations, right.CheckAttestations)
 }
 
 func runtimeOwnerCatalogObservationForOperation(values []runtimecontract.RuntimePrerequisiteObservation, catalog *runtimecontract.RuntimeOperationAdmissibility) *runtimecontract.RuntimePrerequisiteObservation {

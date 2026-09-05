@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -49,6 +50,8 @@ type runtimeSemanticManifestProjection struct {
 
 type runtimeSemanticProofObligationProjection struct {
 	CoverageWorkItemID                              common.CoverageWorkItemID                                `json:"coverageWorkItemId"`
+	DeclarationRef                                  string                                                   `json:"declarationRef"`
+	ValidationProofRequirement                      *runtimeSemanticValidationProofRequirementProjection     `json:"validationProofRequirement,omitempty"`
 	EvidencePurpose                                 runtimecontract.RuntimeSemanticEvidenceObligationPurpose `json:"evidencePurpose"`
 	TerminalRequiredEvidenceKinds                   []string                                                 `json:"terminalRequiredEvidenceKinds"`
 	CurrentRequiredEvidenceKinds                    []string                                                 `json:"currentRequiredEvidenceKinds"`
@@ -59,6 +62,24 @@ type runtimeSemanticProofObligationProjection struct {
 	DeclarationProspectiveTargetAllOfConstraintRefs []string                                                 `json:"declarationProspectiveTargetAllOfConstraintRefs,omitempty"`
 	OwnerFactAcquisition                            *runtimeSemanticOwnerFactAcquisitionProjection           `json:"ownerFactAcquisition,omitempty"`
 	ValidationFailureRepair                         *runtimeSemanticValidationFailureRepairProjection        `json:"validationFailureRepair,omitempty"`
+}
+
+type runtimeSemanticValidationProofRequirementProjection struct {
+	RequirementHash               string                                            `json:"requirementHash"`
+	CoverageWorkItemID            common.CoverageWorkItemID                         `json:"coverageWorkItemId"`
+	DeclarationRef                string                                            `json:"declarationRef"`
+	ValidationRecipeID            string                                            `json:"validationRecipeId,omitempty"`
+	SelectableValidationRecipeIDs []string                                          `json:"selectableValidationRecipeIds,omitempty"`
+	RequiredCheckRefs             []string                                          `json:"requiredCheckRefs"`
+	OwnerNativeCheckAttestations  []runtimeSemanticNativeCheckAttestationProjection `json:"ownerNativeCheckAttestations,omitempty"`
+}
+
+type runtimeSemanticNativeCheckAttestationProjection struct {
+	ValidationRecipeID     string `json:"validationRecipeId"`
+	RequiredCheckRef       string `json:"requiredCheckRef"`
+	ObservationProtocolRef string `json:"observationProtocolRef"`
+	NativeCheckRef         string `json:"nativeCheckRef"`
+	TargetRef              string `json:"targetRef,omitempty"`
 }
 
 // runtimeSemanticValidationFailureRepairProjection is the provider-safe C3
@@ -121,6 +142,7 @@ type runtimeSemanticProspectiveTargetConstraintProjection struct {
 	InputSchemaHash                    string                                             `json:"inputSchemaHash"`
 	CatalogObservedRevision            string                                             `json:"catalogObservedRevision"`
 	AllOf                              []runtimeSemanticProspectiveTargetClauseProjection `json:"allOf"`
+	ValidationProofPreparations        []runtimeSemanticNativeCheckAttestationProjection  `json:"validationProofPreparations,omitempty"`
 }
 
 type runtimeSemanticProspectiveTargetClauseProjection struct {
@@ -194,7 +216,7 @@ func runtimeSemanticManifestForProvider(manifest runtimecontract.RuntimeSemantic
 		projection.AllowedOperationKinds = append([]string(nil), manifest.AllowedOperationKinds...)
 		projection.AllowedTargetPolicies = append([]runtimecontract.RuntimeOperationTargetPolicy(nil), manifest.AllowedTargetPolicies...)
 		var err error
-		projection.ProofObligations, err = runtimeSemanticProofObligationsForProvider(manifest.ProofObligations, batchCoverageIDs)
+		projection.ProofObligations, err = runtimeSemanticProofObligationsForProvider(manifest.ProofObligations, manifest.OwnerCatalogs, manifest.OwnerFactDependencyCatalogs, batchCoverageIDs)
 		if err != nil {
 			return runtimeSemanticManifestProjection{}, err
 		}
@@ -203,7 +225,7 @@ func runtimeSemanticManifestForProvider(manifest runtimecontract.RuntimeSemantic
 	return projection, nil
 }
 
-func runtimeSemanticProofObligationsForProvider(values []runtimecontract.RuntimeSemanticProofObligation, visibleCoverageIDs []common.CoverageWorkItemID) ([]runtimeSemanticProofObligationProjection, error) {
+func runtimeSemanticProofObligationsForProvider(values []runtimecontract.RuntimeSemanticProofObligation, ownerCatalogs, dependencyCatalogs []runtimecontract.RuntimeOperationAdmissibility, visibleCoverageIDs []common.CoverageWorkItemID) ([]runtimeSemanticProofObligationProjection, error) {
 	selected := make(map[common.CoverageWorkItemID]struct{}, len(visibleCoverageIDs))
 	for _, id := range visibleCoverageIDs {
 		selected[id] = struct{}{}
@@ -220,6 +242,7 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 		}
 		projection := runtimeSemanticProofObligationProjection{
 			CoverageWorkItemID:                              value.CoverageWorkItemID,
+			DeclarationRef:                                  runtimecontract.RuntimeSemanticCurrentDeclarationRef(value),
 			EvidencePurpose:                                 evidenceObligation.Purpose,
 			TerminalRequiredEvidenceKinds:                   append([]string(nil), evidenceObligation.TerminalRequiredEvidenceKinds...),
 			CurrentRequiredEvidenceKinds:                    append([]string(nil), evidenceObligation.CurrentRequiredEvidenceKinds...),
@@ -229,9 +252,34 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 			DeclarationTargetSelectorCandidates:             append([]string(nil), value.DeclarationTargetSelectorCandidateRefs...),
 			DeclarationProspectiveTargetAllOfConstraintRefs: append([]string(nil), value.DeclarationProspectiveTargetAllOfConstraintRefs...),
 		}
+		if value.ValidationProofRequirement != nil {
+			requirement := value.ValidationProofRequirement.Normalized()
+			projection.ValidationProofRequirement = &runtimeSemanticValidationProofRequirementProjection{
+				RequirementHash: requirement.Hash, CoverageWorkItemID: requirement.CoverageWorkItemID,
+				DeclarationRef: requirement.DeclarationRef, ValidationRecipeID: requirement.ValidationRecipeID,
+				SelectableValidationRecipeIDs: runtimecontract.RuntimeSelectableValidationRecipeRefsForProofRequirementInCatalogs(ownerCatalogs, requirement),
+				RequiredCheckRefs:             append([]string(nil), requirement.RequiredCheckRefs...),
+				OwnerNativeCheckAttestations:  runtimeSemanticNativeCheckAttestationsForRequirement(ownerCatalogs, requirement),
+			}
+		}
 		if value.OwnerFactAcquisition != nil {
 			acquisition := value.OwnerFactAcquisition.Normalized()
-			prospectiveConstraint, err := runtimeSemanticProspectiveTargetConstraintForProvider(acquisition.ProspectiveTargetSatisfactionConstraint)
+			var preparation *runtimecontract.RuntimeValidationProofPreparation
+			if acquisition.Requirement.ValidationProofRequirementHash != "" {
+				for _, catalog := range runtimecontract.NormalizeRuntimeOperationAdmissibilities(dependencyCatalogs) {
+					if catalog.OwnerModuleID != acquisition.Requirement.OwnerModuleID {
+						continue
+					}
+					resolved, resolveErr := runtimecontract.ResolveRuntimeValidationProofPreparation(catalog, acquisition.Requirement, acquisition.ProspectiveSatisfactionContractRef)
+					if resolveErr != nil {
+						return nil, resolveErr
+					}
+					resolved = resolved.Clone()
+					preparation = &resolved
+					break
+				}
+			}
+			prospectiveConstraint, err := runtimeSemanticProspectiveTargetConstraintForProvider(acquisition.ProspectiveTargetSatisfactionConstraint, preparation)
 			if err != nil {
 				return nil, err
 			}
@@ -287,7 +335,7 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 	return ret, nil
 }
 
-func runtimeSemanticProspectiveTargetConstraintForProvider(value *runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint) (*runtimeSemanticProspectiveTargetConstraintProjection, error) {
+func runtimeSemanticProspectiveTargetConstraintForProvider(value *runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint, preparation *runtimecontract.RuntimeValidationProofPreparation) (*runtimeSemanticProspectiveTargetConstraintProjection, error) {
 	if value == nil {
 		return nil, nil
 	}
@@ -314,7 +362,60 @@ func runtimeSemanticProspectiveTargetConstraintForProvider(value *runtimecontrac
 		}
 		projection.AllOf = append(projection.AllOf, clauseProjection)
 	}
+	if preparation != nil {
+		preparationValue := preparation.Clone()
+		if err := preparationValue.Validate(); err != nil {
+			return nil, err
+		}
+		if runtimecontract.StableRuntimeProspectiveTargetSatisfactionConstraintHash(preparationValue.ProspectiveTargetSatisfactionConstraint) !=
+			runtimecontract.StableRuntimeProspectiveTargetSatisfactionConstraintHash(constraint) {
+			return nil, fmt.Errorf("runtime semantic validation proof preparation does not match prospective constraint")
+		}
+		for _, attestation := range preparationValue.CheckAttestations {
+			projection.ValidationProofPreparations = append(projection.ValidationProofPreparations, runtimeSemanticNativeCheckAttestationProjection{
+				ValidationRecipeID: preparationValue.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
+				ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef,
+				TargetRef: preparationValue.TargetRef,
+			})
+		}
+	}
 	return projection, nil
+}
+
+func runtimeSemanticNativeCheckAttestationsForRequirement(catalogs []runtimecontract.RuntimeOperationAdmissibility, requirement runtimecontract.RuntimeValidationProofRequirement) []runtimeSemanticNativeCheckAttestationProjection {
+	ret := make([]runtimeSemanticNativeCheckAttestationProjection, 0)
+	for _, catalog := range runtimecontract.NormalizeRuntimeOperationAdmissibilities(catalogs) {
+		if catalog.OwnerModuleID != runtimecontract.RuntimeModuleShell {
+			continue
+		}
+		for _, surface := range catalog.ValidationSurfaces {
+			_, binding, found := runtimecontract.RuntimeValidationSurfaceDeclaringProofRequirement([]runtimecontract.RuntimeValidationSurface{surface}, requirement)
+			if found {
+				for _, attestation := range binding.CheckAttestations {
+					ret = append(ret, runtimeSemanticNativeCheckAttestationProjection{
+						ValidationRecipeID: binding.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
+						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef,
+					})
+				}
+			}
+			for _, preparation := range surface.ProofRequirementPreparations {
+				if preparation.RequirementHash != requirement.Hash {
+					continue
+				}
+				for _, attestation := range preparation.CheckAttestations {
+					ret = append(ret, runtimeSemanticNativeCheckAttestationProjection{
+						ValidationRecipeID: preparation.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
+						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef,
+						TargetRef: preparation.TargetRef,
+					})
+				}
+			}
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
 }
 
 func runtimeSemanticOwnerCatalogsForProvider(values []runtimecontract.RuntimeOperationAdmissibility) []runtimeSemanticOwnerCatalogProjection {

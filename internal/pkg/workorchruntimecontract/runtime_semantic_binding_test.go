@@ -24,7 +24,8 @@ func TestCompileRuntimeSemanticBindingsCombinesIndependentProofsForOneCWI(t *tes
 		t.Fatalf("binding did not retain both independent proofs: %+v", binding)
 	}
 	validation, found := CoverageEvidenceProofForKind(binding, EvidenceKindValidation)
-	if !found || validation.ValidationRecipeID != "recipe/validate" || !sameStrings(validation.RequiredCheckRefs, []string{"check/validate"}) {
+	if !found || validation.ValidationRecipeID != "recipe/validate" || validation.ValidationProofRequirementHash == "" ||
+		!containsString(validation.RequiredCheckRefs, "check/validate") || len(validation.RequiredCheckRefs) != 2 {
 		t.Fatalf("binding lost validation proof detail: %+v", binding)
 	}
 }
@@ -245,6 +246,8 @@ func semanticMissingOwnerFactAcquisitionFixture(t *testing.T) (RuntimeSemanticPl
 				".sh",
 			)
 			surface.ProspectiveTargetSatisfactionConstraint = &constraint
+			prepared := prepareRuntimeValidationSurfaceForTest(t, *surface, constraint)
+			*surface = prepared
 		}
 		manifest.OwnerCatalogs[index].SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(manifest.OwnerCatalogs[index])
 	}
@@ -292,12 +295,12 @@ func TestCompileRuntimeSemanticBindingsCombinesProspectiveCreationAndExactValida
 	manifest = sealSemanticTestManifest(t, manifest)
 	document.ManifestHash = manifest.Hash
 	facts[0] = semanticFeasibilityForTest(t, manifest, document.Proposals[0], []string{"new-file.go"}, "", nil)
-	facts[1] = semanticFeasibilityForTest(t, manifest, document.Proposals[1], []string{"new-file.go"}, "recipe/validate", []string{"check/validate"})
+	facts[1] = semanticFeasibilityForTest(t, manifest, document.Proposals[1], []string{"new-file.go"}, "recipe/validate", runtimeSemanticValidationRequirementForTest(t, manifest, "cwi-001").RequiredCheckRefs)
 
 	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
 	document.ManifestHash = manifest.Hash
 	facts[0] = semanticFeasibilityForTest(t, manifest, document.Proposals[0], []string{"new-file.go"}, "", nil)
-	facts[1] = semanticFeasibilityForTest(t, manifest, document.Proposals[1], []string{"new-file.go"}, "recipe/validate", []string{"check/validate"})
+	facts[1] = semanticFeasibilityForTest(t, manifest, document.Proposals[1], []string{"new-file.go"}, "recipe/validate", runtimeSemanticValidationRequirementForTest(t, manifest, "cwi-001").RequiredCheckRefs)
 	focuses, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, document, facts)
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +313,7 @@ func TestCompileRuntimeSemanticBindingsCombinesProspectiveCreationAndExactValida
 	mismatched.Proposals[1].Target = RuntimeOperationTargetAuthorization{
 		Policy: RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"other.go"},
 	}
-	mismatchedFact := semanticFeasibilityForTest(t, manifest, mismatched.Proposals[1], []string{"other.go"}, "recipe/validate", []string{"check/validate"})
+	mismatchedFact := semanticFeasibilityForTest(t, manifest, mismatched.Proposals[1], []string{"other.go"}, "recipe/validate", runtimeSemanticValidationRequirementForTest(t, manifest, "cwi-001").RequiredCheckRefs)
 	if _, _, err := CompileRuntimeSemanticBindings(manifest, runtimeSemanticBindingTestRequestID, mismatched, []RuntimeSemanticProofFeasibility{facts[0], mismatchedFact}); err == nil {
 		t.Fatalf("mismatched creation and validation targets were accepted: %v", err)
 	}
@@ -334,7 +337,7 @@ func TestCompileRuntimeSemanticBindingsUsesDeclaredSelectorOwnerAcrossProofOwner
 	for _, proposal := range document.Proposals {
 		checks := proposal.RequiredCheckRefs
 		if proposal.ValidationRecipeID != "" && len(checks) == 0 {
-			checks = []string{"check/validate"}
+			checks = runtimeSemanticValidationRequirementForTest(t, manifest, proposal.CoverageWorkItemID).RequiredCheckRefs
 		}
 		facts = append(facts, semanticFeasibilityForTest(t, manifest, proposal, nil, proposal.ValidationRecipeID, checks))
 	}
@@ -346,7 +349,7 @@ func TestCompileRuntimeSemanticBindingsUsesDeclaredSelectorOwnerAcrossProofOwner
 	for index := range facts {
 		checks := document.Proposals[index].RequiredCheckRefs
 		if document.Proposals[index].ValidationRecipeID != "" && len(checks) == 0 {
-			checks = []string{"check/validate"}
+			checks = runtimeSemanticValidationRequirementForTest(t, manifest, document.Proposals[index].CoverageWorkItemID).RequiredCheckRefs
 		}
 		facts[index] = semanticFeasibilityForTest(t, manifest, document.Proposals[index], nil, document.Proposals[index].ValidationRecipeID, checks)
 	}
@@ -594,12 +597,23 @@ func semanticIndependentProofSetFixture(t *testing.T) (RuntimeSemanticPlanManife
 	shellCatalog := semanticTestOwnerCatalog("semantic-shell-catalog", RuntimeModuleShell, []string{RuntimeBlockKindManagedValidationSession})
 	shellCatalog.TargetRefs = []string{"main.go"}
 	shellCatalog.ValidationRecipeRefs = []string{"recipe/validate"}
-	shellCatalog.ValidationSurfaces = []RuntimeValidationSurface{{
+	source := CoverageFocus{
+		ID: "source-independent-proofs", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+		RequiredEvidenceKinds:  []string{EvidenceKindStateChange, EvidenceKindValidation},
+		AcceptedStepKinds:      []string{StepKindFileWrite, RuntimeBlockKindManagedValidationSession},
+		EvidenceDeclarationRef: semanticTestDeclarationRef("cwi-001"), ValidationRecipeID: "recipe/validate",
+		RequiredCheckRefs: []string{"check/validate"},
+	}
+	requirement := runtimeValidationProofRequirementForTest(
+		t, manifest.DefinitionRevision, manifest.CoverageItems[0], source.EvidenceDeclarationRef,
+		source.ValidationRecipeID, source.RequiredCheckRefs,
+	)
+	shellSurface := bindRuntimeValidationSurfaceForTest(RuntimeValidationSurface{
 		ID: "recipe/validate", OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
 		Readiness: RuntimeValidationSurfaceReady, InputSchemaHash: "semantic-binding-input-schema", InputBindingRef: "semantic-binding-input",
-		CheckRefs: []string{"check/validate"}, ProofApplicability: RuntimeValidationProofDirect,
 		EffectScope: RuntimeEffectEphemeralSession, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
-	}}
+	}, requirement)
+	shellCatalog.ValidationSurfaces = []RuntimeValidationSurface{shellSurface}
 	shellCatalog.OperationPolicies = []RuntimeOperationPolicyFact{{
 		ID: "semantic-binding-managed-validation", OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
 		EffectScope: RuntimeEffectEphemeralSession, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
@@ -611,10 +625,6 @@ func semanticIndependentProofSetFixture(t *testing.T) (RuntimeSemanticPlanManife
 		RuntimeOperationTargetPolicyExistingOwnerScope,
 	)
 	manifest.OwnerCatalogs = append(manifest.OwnerCatalogs, shellCatalog)
-	source := CoverageFocus{
-		ID: "source-independent-proofs", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
-		RequiredEvidenceKinds: []string{EvidenceKindStateChange, EvidenceKindValidation}, ValidationRecipeID: "recipe/validate",
-	}
 	manifest = sealSemanticTestManifestWithSource(t, manifest, source)
 
 	stateChange := semanticContractTestProposal("cwi-001")
@@ -636,7 +646,7 @@ func semanticIndependentProofSetFixture(t *testing.T) (RuntimeSemanticPlanManife
 	}
 	facts := []RuntimeSemanticProofFeasibility{
 		semanticFeasibilityForTest(t, manifest, stateChange, []string{"main.go"}, "", nil),
-		semanticFeasibilityForTest(t, manifest, validation, []string{"main.go"}, "recipe/validate", []string{"check/validate"}),
+		semanticFeasibilityForTest(t, manifest, validation, []string{"main.go"}, "recipe/validate", requirement.RequiredCheckRefs),
 	}
 	return manifest, document, facts, source
 }

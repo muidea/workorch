@@ -91,6 +91,9 @@ func (i ReplacementIntent) ValidFor(predecessor *Run) bool {
 	if predecessor == nil || strings.TrimSpace(i.RequestID) == "" || i.WorkspaceID == "" || i.WorkspaceID != predecessor.WorkspaceID || i.GoalID == "" || i.DoDID == "" || strings.TrimSpace(i.DefinitionRevision) == "" || strings.TrimSpace(i.StartupInputHash) == "" || i.Bootstrap == nil || !runtimecontract.ValidRuntimeTerminationKind(i.Kind) || strings.TrimSpace(i.Reason) == "" {
 		return false
 	}
+	if runtimecontract.ValidateRuntimeBootstrapRaw(*i.Bootstrap) != nil {
+		return false
+	}
 	if i.Kind != runtimecontract.RuntimeTerminationSuperseded || i.ReconciliationScope != runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull {
 		return false
 	}
@@ -340,4 +343,37 @@ func CloneRuns(items []*Run) []*Run {
 		ret = append(ret, CloneRun(item))
 	}
 	return ret
+}
+
+// ValidateRunRuntimeBootstrapsRaw is the Run aggregate persistence guard for
+// immutable bootstrap authority. Repositories call it before cloning a write
+// and before cloning a read so malformed current data cannot be normalized
+// into an admissible aggregate by a storage adapter.
+func ValidateRunRuntimeBootstrapsRaw(item *Run) error {
+	if item == nil {
+		return common.ErrInvalidArgument
+	}
+	validate := func(label string, bootstrap *runtimecontract.RuntimeBootstrap) error {
+		if bootstrap == nil {
+			return nil
+		}
+		if err := runtimecontract.ValidateRuntimeBootstrapRaw(*bootstrap); err != nil {
+			return fmt.Errorf("Run %s: %w", label, err)
+		}
+		return nil
+	}
+	if err := validate("runtime bootstrap", item.RuntimeBootstrap); err != nil {
+		return err
+	}
+	if item.ReplacementIntent != nil {
+		if err := validate("replacement bootstrap", item.ReplacementIntent.Bootstrap); err != nil {
+			return err
+		}
+	}
+	for idx := range item.RetiredReplacementIntents {
+		if err := validate(fmt.Sprintf("retired replacement bootstrap %d", idx), item.RetiredReplacementIntents[idx].Bootstrap); err != nil {
+			return err
+		}
+	}
+	return nil
 }

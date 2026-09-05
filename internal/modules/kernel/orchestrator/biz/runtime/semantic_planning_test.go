@@ -1883,7 +1883,7 @@ func TestRuntimeSemanticCrossOwnerPartialBatchIsOrderIndependentAndRecoversAfter
 			Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"first.txt"}},
 			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 			RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-			DeclarationRef:        "semantic/" + string(manifest.CoverageItems[0].ID),
+			DeclarationRef:        runtimeTestSemanticDeclarationRef(manifest, manifest.CoverageItems[0].ID),
 		},
 	}
 	activeProposal := proposals[0]
@@ -2420,11 +2420,11 @@ func newTwoItemSemanticBatchFixture(t *testing.T) (*RuntimeController, *controll
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseProposal := runtimecontract.RuntimeSemanticProofProposal{CoverageWorkItemID: manifest.CoverageItems[0].ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite, Target: runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"}}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, DeclarationRef: "semantic/" + string(manifest.CoverageItems[0].ID)}
+	baseProposal := runtimecontract.RuntimeSemanticProofProposal{CoverageWorkItemID: manifest.CoverageItems[0].ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite, Target: runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"}}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, DeclarationRef: runtimeTestSemanticDeclarationRef(manifest, manifest.CoverageItems[0].ID)}
 	baseFeasibility := runtimecontract.RuntimeSemanticProofFeasibility{SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent, ManifestHash: manifest.Hash, DefinitionSeedHash: manifest.DefinitionSeedHash, CoverageWorkItemID: baseProposal.CoverageWorkItemID, ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(baseProposal), OwnerModuleID: baseProposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID, Status: runtimecontract.RuntimeSemanticFeasibilityFeasible, ObservedRevision: catalog.ObservedRevision, TargetRefs: baseProposal.Target.ExactTargetRefs}
 	secondProposal := baseProposal.Clone()
 	secondProposal.CoverageWorkItemID = second.ID
-	secondProposal.DeclarationRef = "semantic/" + string(second.ID)
+	secondProposal.DeclarationRef = runtimeTestSemanticDeclarationRef(manifest, second.ID)
 	proposals := []runtimecontract.RuntimeSemanticProofProposal{baseProposal, secondProposal}
 	secondFeasibility := baseFeasibility.Clone()
 	secondFeasibility.CoverageWorkItemID = second.ID
@@ -2563,7 +2563,7 @@ func semanticPlanningFixture(t *testing.T, aggregate RuntimeAggregate) (runtimec
 		CoverageWorkItemID: "cwi-v2", OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite,
 		Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"}},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-		DeclarationRef: "semantic/cwi-v2",
+		DeclarationRef: runtimeTestSemanticDeclarationRef(manifest, "cwi-v2"),
 	}
 	document := runtimecontract.RuntimeSemanticPlanDocument{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,

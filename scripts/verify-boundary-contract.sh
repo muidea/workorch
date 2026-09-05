@@ -5389,7 +5389,7 @@ if grep -q -E -- 'ValidationSurfaceID|ValidationRecipeID|validationSurfaceId|val
 	echo "boundary contract violation: provider projection leaked dependency surface/recipe identity" >&2
 	exit 1
 fi
-if ! grep -q -F 'strings.Contains(authority, prospectiveConstraint.ValidationRecipeID)' internal/modules/blocks/llm/biz/runtime_candidate_provider_test.go; then
+if ! grep -q -F 'strings.Contains(providerRequest.Schema, prospectiveConstraint.ValidationRecipeID)' internal/modules/blocks/llm/biz/runtime_candidate_provider_test.go; then
 	echo "boundary contract violation: dependency recipe identity value-isolation regression is missing" >&2
 	exit 1
 fi
@@ -5659,5 +5659,147 @@ if grep -R -n -E --include='*.go' --exclude='*_test.go' -- '^[[:space:]]+(Result
 	echo "boundary contract violation: resource owner Biz Dependencies accept independently supplied repositories" >&2
 	exit 1
 fi
+
+# A shared validation recipe is only an executable transport. Application
+# compiles immutable per-CWI requirements, the Shell owner publishes exact
+# applicability, and only the Orchestrator SM-2 aggregate may seal/credit the
+# resulting proof. No Workspace-side compiler or recipe-derived synthetic
+# receipt check may recreate a second authority path.
+validation_requirement_callsites="$(grep -R -l -E --include='*.go' --exclude='*_test.go' -- 'CompileRuntimeValidationProofRequirements\(' internal | sort)"
+expected_validation_requirement_callsites="$(printf '%s\n' \
+	internal/modules/application/workorchd/biz/appservice/activationcore/runtime_bootstrap.go \
+	internal/modules/kernel/orchestrator/biz/runtime/aggregate_invariant.go \
+	internal/modules/kernel/orchestrator/biz/runtime_prerequisite_drive.go \
+	internal/pkg/workorchruntimecontract/runtime_semantic_obligation.go \
+	internal/pkg/workorchruntimecontract/runtime_validation_proof_requirement.go | sort)"
+if [[ "$validation_requirement_callsites" != "$expected_validation_requirement_callsites" ]]; then
+	echo "boundary contract violation: per-CWI validation requirement compiler gained or lost an owner boundary callsite" >&2
+	exit 1
+fi
+if grep -R -n -E --include='*.go' --exclude='*_test.go' -- 'shellValidationRecipeProofCheckRef|shell-validation-check-' internal/modules/blocks/shell | grep -q .; then
+	echo "boundary contract violation: Shell restored recipe-derived synthetic proof checks" >&2
+	exit 1
+fi
+if grep -n -E -- 'WORKORCH_CHECK_PASSED|CHECK_PASSED' \
+		scripts/verify-llm-workspace-execution.sh scripts/create-runtime-bounded-positive-fixtures.sh | grep -q .; then
+	echo "boundary contract violation: positive Runtime fixtures restored raw stdout marker proof" >&2
+	exit 1
+fi
+if grep -n -E -- 'WORKORCH_CHECK_PASSED|CHECK_PASSED' \
+		internal/modules/kernel/orchestrator/biz/runtime_drive_test.go | grep -q .; then
+	echo "boundary contract violation: positive Runtime drive fixtures restored raw stdout marker proof" >&2
+	exit 1
+fi
+if ! grep -q -F '软件开发（Go 原生验证）' internal/pkg/workorchdefaults/defaults/templates.json ||
+	! grep -q -F 'shell/go-test-json/v1' docs/40-profiles-capabilities/software-dev/goal-coverage-and-dod.md; then
+	echo "boundary contract violation: built-in software-dev profile no longer identifies its current Go-native proof adapter" >&2
+	exit 1
+fi
+for marker in \
+	'ValidationProofRequirements: validationProofRequirements' \
+	'CompileRuntimeValidationProofRequirements(' \
+	'WorkspaceManifestBinding: manifestBinding'; do
+	if ! grep -q -F -- "$marker" internal/modules/kernel/orchestrator/biz/runtime_prerequisite_drive.go; then
+		echo "boundary contract violation: Orchestrator proof-requirement owner request lost $marker" >&2
+		exit 1
+	fi
+done
+for marker in \
+	'ProofRequirementBindings: bindings' \
+	'ProofRequirementPreparations: preparations' \
+	'RuntimeValidationProofRequirementBindingForRecipe(requirement, recipe.ID, attestations...)' \
+	'instrumentManagedValidationNativeChecks' \
+	'RuntimeSelectableValidationRecipeRefs(inventory.ValidationSurfaces)'; do
+	if ! grep -R -q -F --include='*.go' -- "$marker" internal/modules/blocks/shell/biz; then
+		echo "boundary contract violation: Shell exact CWI applicability lost $marker" >&2
+		exit 1
+	fi
+done
+if ! grep -q -F 'ValidateRuntimeSemanticPlanManifestAgainstDefinition' internal/modules/kernel/orchestrator/biz/runtime/aggregate_invariant.go ||
+	! grep -q -F 'ValidationProofRequirementHash' internal/pkg/workorchruntimecontract/runtime_coverage_evidence_binding.go ||
+	! grep -q -F 'len(rawRequiredCheckRefs) != 0' internal/pkg/workorchruntimecontract/runtime_semantic_contract.go; then
+	echo "boundary contract violation: managed validation proof lost aggregate reverse proof or provider check-field rejection" >&2
+	exit 1
+fi
+for marker in \
+	'ValidationProofBinding:             validationProofBinding' \
+	'ValidationProofBinding:    request.ValidationProofBinding.Clone()'; do
+	if ! grep -R -q -F --include='*.go' -- "$marker" internal/modules/kernel/orchestrator/biz; then
+		echo "boundary contract violation: exact managed-validation execution seal lost $marker" >&2
+		exit 1
+	fi
+done
+for regression in \
+	'TestCompileRuntimeValidationProofRequirementsKeepsDistinctExactCWIs' \
+	'TestRecipeNeutralCWIRequirementBindsEveryCompatibleReadyOwnerRecipe' \
+	'TestRuntimeValidationProofAuthorityRejectsDuplicateNormalizationLaundering' \
+	'TestRuntimeValidationSurfaceRejectsNativeCheckReuseAcrossReadyAndPreparationRecords' \
+	'TestDefaultManagedValidationRecipeDoesNotManufactureCWISpecificProof' \
+	'TestShellValidationSurfaceKeepsPerCWIMixedReadiness' \
+	'TestShellOwnerReconciliationDoesNotTreatGenericRecipeSuccessAsCWIProof' \
+	'TestDefaultManagedValidationRecipeCreditsExactOwnerNativeAttestation' \
+	'TestRawWorkspaceMarkerCannotCreditManagedValidation' \
+	'TestGoTestJSONOutputEventCannotForgeNativePass' \
+	'TestRuntimeValidationExecutionBindingComesOnlyFromSealedCWIAndOwnerCatalog' \
+	'TestRuntimeShellExecutorSealsExactPersistedValidationAttestation' \
+	'TestRuntimeAggregateShellValidationProofApplicabilitySurvivesSerializationAndFailsClosed' \
+	'TestBuiltinSoftwareDevAllManagedCWIsCloseThroughTypedNativeProofPipeline' \
+	'TestRuntimeBootstrapMCPOnlyValidationDoesNotEnlistShellManagedProof' \
+	'TestRuntimeStateRepositoryRejectsAmbiguousRawActivationEvidencePoliciesWithoutRewriting'; do
+	if ! grep -R -q -F --include='*_test.go' -- "$regression" internal; then
+		echo "boundary contract violation: CWI validation proof regression is missing ($regression)" >&2
+		exit 1
+	fi
+done
+
+# Repository adapters publish canonical files through one owner-neutral
+# crash-safe primitive. The canonical path may never be truncated in place;
+# cache visibility follows the rename publication boundary.
+if grep -R -n -F --include='*.go' --exclude='*_test.go' -- 'os.WriteFile(' \
+	internal/pkg/repository/file internal/pkg/workorchrepo | grep -q .; then
+	echo "boundary contract violation: file repository restored in-place canonical writes" >&2
+	exit 1
+fi
+for marker in 'os.CreateTemp' 'temporary.Sync()' 'os.Rename' 'syncDir(directory)'; do
+	if ! grep -q -F -- "$marker" internal/pkg/repository/filecommit/filecommit.go; then
+		echo "boundary contract violation: crash-safe file publication lost $marker" >&2
+		exit 1
+	fi
+done
+if ! grep -q -F 'saveMapWithCommit(path, items, commitFileAtomically)' internal/pkg/repository/file/file.go ||
+	! grep -q -F 'if outcome.Published' internal/pkg/repository/file/atomic_file.go ||
+	! grep -q -F 'cache.loaded = false' internal/pkg/repository/file/atomic_file.go; then
+	echo "boundary contract violation: map repository no longer fences cache at atomic publication" >&2
+	exit 1
+fi
+for regression in \
+	'TestPublishConcurrentReadersObserveOnlyCompleteGenerations' \
+	'TestPublishReportsPublishedButDurabilityUnacknowledged' \
+	'TestSaveMapPublishesOnlyCompleteOldOrNewLargeJSON' \
+	'TestSaveMapPostPublicationSyncFailureInvalidatesOldCache'; do
+	if ! grep -R -q -F --include='*_test.go' -- "$regression" internal/pkg/repository; then
+		echo "boundary contract violation: crash-safe repository regression is missing ($regression)" >&2
+		exit 1
+	fi
+done
+
+# Workspace owns its Run projection cursor, but that private delivery fence is
+# not a public Workspace state transition. Persist cursor-only advances while
+# suppressing duplicate WorkspaceStateChanged payloads.
+workspace_projection_handler="$(sed -n '/^func (m \*Biz) applyRunProjection(/,/^}/p' internal/modules/blocks/workspace/biz/lifecycle_handler.go)"
+if ! grep -q -F 'publicProjectionChanged := !sameWorkspaceChangedNotification' <<<"$workspace_projection_handler" ||
+	! grep -q -F 'if publicProjectionChanged {' <<<"$workspace_projection_handler" ||
+	! grep -q -F 'm.publishWorkspaceUpdated(ctx, next)' <<<"$workspace_projection_handler"; then
+	echo "boundary contract violation: Workspace cursor-only projection regained public notification noise" >&2
+	exit 1
+fi
+for regression in \
+	'TestWorkspaceRunProjectionPersistsCursorWithoutRepublishingUnchangedPublicState' \
+	'TestWorkspaceRunProjectionFreshOwnerAdvancesCursorWithoutPublicStateNotification'; do
+	if ! grep -q -F -- "$regression" internal/modules/blocks/workspace/biz/run_projection_notification_test.go; then
+		echo "boundary contract violation: Workspace private-cursor notification regression is missing ($regression)" >&2
+		exit 1
+	fi
+done
 
 echo "boundary contract verification passed"

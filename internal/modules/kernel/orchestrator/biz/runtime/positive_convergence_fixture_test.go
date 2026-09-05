@@ -63,7 +63,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	initialized := runtimeTestInitializeAndSealSemanticContract(t, ctx, rawController, facts, controllerDefinition(), nil)
 	facts = initialized.Facts
 	focusID := facts.Focus.ID
-	validationRecipeID, validationCheckRefs := runtimePositiveConvergenceValidationProof(t, facts)
+	validationRecipeID, validationProtocolRef, validationCheckRefs := runtimePositiveConvergenceValidationProof(t, facts)
 
 	// --- 1) attempt 0: schema/contract failure ---
 	if _, err := controller.BeginCandidateAttemptForTest(ctx, "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
@@ -142,7 +142,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			Kind:                runtimecontract.EvidenceKindValidation,
 			Status:              ExecutionEvidenceStatusAccepted,
 			Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
-				RecipeID:       validationRecipeID,
+				RecipeID: validationRecipeID, ObservationProtocolRef: validationProtocolRef,
 				ExecutedChecks: append([]string(nil), validationCheckRefs...), PassedChecks: append([]string(nil), validationCheckRefs...),
 			}},
 		})
@@ -290,7 +290,8 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 			Kind:                runtimecontract.EvidenceKindValidation,
 			Status:              ExecutionEvidenceStatusAccepted,
 			Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
-				RecipeID: validationRecipeID, ExecutedChecks: append([]string(nil), validationCheckRefs...), PassedChecks: append([]string(nil), validationCheckRefs...),
+				RecipeID: validationRecipeID, ObservationProtocolRef: validationProtocolRef,
+				ExecutedChecks: append([]string(nil), validationCheckRefs...), PassedChecks: append([]string(nil), validationCheckRefs...),
 			}},
 		})
 		if err != nil {
@@ -346,7 +347,7 @@ func TestPositiveConvergenceFixture_AttemptCorrectionPartialGapSameFocusRepair(t
 	}
 }
 
-func runtimePositiveConvergenceValidationProof(t *testing.T, facts runtimecontract.RuntimeFacts) (string, []string) {
+func runtimePositiveConvergenceValidationProof(t *testing.T, facts runtimecontract.RuntimeFacts) (string, string, []string) {
 	t.Helper()
 	if len(facts.Focus.CoverageEvidenceBindings) != 1 {
 		t.Fatalf("positive convergence focus has no unique semantic binding: %+v", facts.Focus.CoverageEvidenceBindings)
@@ -354,10 +355,18 @@ func runtimePositiveConvergenceValidationProof(t *testing.T, facts runtimecontra
 	proof, found := runtimecontract.CoverageEvidenceProofForKind(
 		facts.Focus.CoverageEvidenceBindings[0], runtimecontract.EvidenceKindValidation,
 	)
-	if !found || proof.ValidationRecipeID == "" || len(proof.RequiredCheckRefs) == 0 {
+	if !found || proof.ValidationRecipeID == "" || len(proof.ValidationCheckAttestations) == 0 {
 		t.Fatalf("positive convergence binding has no complete validation proof: %+v", facts.Focus.CoverageEvidenceBindings[0])
 	}
-	return proof.ValidationRecipeID, append([]string(nil), proof.RequiredCheckRefs...)
+	protocolRef := proof.ValidationCheckAttestations[0].ObservationProtocolRef
+	checks := make([]string, 0, len(proof.ValidationCheckAttestations))
+	for _, attestation := range proof.ValidationCheckAttestations {
+		if attestation.ObservationProtocolRef != protocolRef {
+			t.Fatalf("positive convergence binding uses multiple validation protocols: %+v", proof.ValidationCheckAttestations)
+		}
+		checks = append(checks, attestation.NativeCheckRef)
+	}
+	return proof.ValidationRecipeID, protocolRef, checks
 }
 
 // RVC-17: budget exhaustion produces typed terminal, not infinite repair.

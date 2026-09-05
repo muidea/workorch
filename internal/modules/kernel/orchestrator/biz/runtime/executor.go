@@ -12,18 +12,23 @@ import (
 )
 
 type RuntimeOperationExecutionRequest struct {
-	WorkspaceID                        common.WorkspaceID
-	RunID                              common.RunID
-	DispatchID                         string
-	Transaction                        runtimecontract.AuthorityTransaction
-	Operation                          runtimecontract.RuntimeOperation
-	Execution                          runtimecontract.RuntimeOperationExecutionRecord
-	GovernanceGrant                    *runtimecontract.RuntimeOperationGovernanceGrant
-	EvidenceKind                       string
-	TargetRole                         string
-	EvidencePolicies                   []runtimecontract.RuntimeEvidencePolicy
-	ValidationRecipes                  []runtimecontract.RuntimeValidationRecipe
-	ValidationScopeTargetRefs          []string
+	WorkspaceID               common.WorkspaceID
+	RunID                     common.RunID
+	DispatchID                string
+	Transaction               runtimecontract.AuthorityTransaction
+	Operation                 runtimecontract.RuntimeOperation
+	Execution                 runtimecontract.RuntimeOperationExecutionRecord
+	GovernanceGrant           *runtimecontract.RuntimeOperationGovernanceGrant
+	EvidenceKind              string
+	TargetRole                string
+	EvidencePolicies          []runtimecontract.RuntimeEvidencePolicy
+	ValidationRecipes         []runtimecontract.RuntimeValidationRecipe
+	ValidationScopeTargetRefs []string
+	// ValidationProofBinding is the exact owner-native check mapping already
+	// sealed by SM-2 for a managed-validation CWI. It is selected only from the
+	// persisted CoverageEvidenceBinding and its persisted owner catalog; the
+	// candidate parameter payload cannot supply or alter it.
+	ValidationProofBinding             runtimecontract.RuntimeValidationProofRequirementBinding
 	CapabilityStates                   []runtimecontract.RuntimeCapabilityStateSnapshot
 	WorkspaceTreeObservation           *runtimecontract.RuntimePrerequisiteObservation
 	CompletedRequiredOperationReceipts []runtimecontract.RuntimeRequiredOperationReceiptBinding

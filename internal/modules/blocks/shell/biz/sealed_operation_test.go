@@ -18,6 +18,7 @@ func sealedShellTestCommand(t *testing.T, adapter *RuntimeAdapter, executionCont
 	if kind == runtimecontract.RuntimeBlockKindManagedValidationSession {
 		recipeID := data.ValidationRecipeID
 		operation.Parameters = []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}}
+		operation.BindingRefs = []string{"binding/shell-test/" + recipeID}
 	} else {
 		command := data.Command
 		stateChanging := data.StateChanging
@@ -45,12 +46,32 @@ func sealedShellTestCommand(t *testing.T, adapter *RuntimeAdapter, executionCont
 	}
 	catalog.TargetRefs = append([]string(nil), executionContext.TargetRefs...)
 	catalog.ValidationRecipes = runtimecontract.NormalizeRuntimeValidationRecipes(recipes)
+	sealInput := shellevents.RuntimeExecutionSealInput{
+		TargetRole: targetRole, ValidationScopeTargetRefs: validationScope, EvidencePolicies: executionContext.EvidencePolicies,
+	}
+	if kind == runtimecontract.RuntimeBlockKindManagedValidationSession {
+		requirement := shellValidationProofRequirementForTest(t, data.ValidationRecipeID, "cwi-shell-seal-test")
+		attestations := shellValidationCheckAttestationsForTest(requirement.RequiredCheckRefs)
+		proofBinding, bindErr := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(requirement, data.ValidationRecipeID, attestations...)
+		if bindErr != nil {
+			t.Fatal(bindErr)
+		}
+		catalog.ValidationRecipeRefs = []string{data.ValidationRecipeID}
+		catalog.ValidationSurfaces = []runtimecontract.RuntimeValidationSurface{{
+			ID: data.ValidationRecipeID, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness:     runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "shell-test-managed-validation-schema",
+			InputBindingRef: "shell-test-managed-validation-input", CheckRefs: append([]string(nil), requirement.RequiredCheckRefs...),
+			ProofApplicability:       runtimecontract.RuntimeValidationProofDirect,
+			ProofRequirementBindings: []runtimecontract.RuntimeValidationProofRequirementBinding{proofBinding},
+			EffectScope:              runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}}
+		sealInput.ValidationProofBinding = proofBinding
+	}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	observation := adapter.runtimeAdmissibilityObservation(executionContext.WorkspaceDeliverableDirectory, catalog.PrerequisiteID, catalog, catalog.TargetRefs)
-	sealed, err := shellevents.SealRuntimeOperation(operation, catalog, shellevents.RuntimeExecutionSealInput{
-		CatalogObservation: observation, TargetRole: targetRole,
-		ValidationScopeTargetRefs: validationScope, EvidencePolicies: executionContext.EvidencePolicies,
-	})
+	sealInput.CatalogObservation = observation
+	sealed, err := shellevents.SealRuntimeOperation(operation, catalog, sealInput)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,4 +86,15 @@ func sealedShellTestCommand(t *testing.T, adapter *RuntimeAdapter, executionCont
 		ReplayProof: executionContext.Execution.ReplayProof,
 	})
 	return shellevents.ExecuteOperationCommand{RuntimeOperationExecutionContext: executionContext, SealedOperation: sealed}
+}
+
+func shellValidationCheckAttestationsForTest(requiredCheckRefs []string) []runtimecontract.RuntimeValidationCheckAttestationBinding {
+	ret := make([]runtimecontract.RuntimeValidationCheckAttestationBinding, 0, len(requiredCheckRefs))
+	for _, checkRef := range requiredCheckRefs {
+		ret = append(ret, runtimecontract.RuntimeValidationCheckAttestationBinding{
+			RequiredCheckRef: checkRef, ObservationProtocolRef: shellGoTestObservationProtocolRef,
+			NativeCheckRef: "TestWorkOrchCWI_SHELLSEALTEST",
+		})
+	}
+	return runtimecontract.NormalizeRuntimeValidationCheckAttestationBindings(ret)
 }

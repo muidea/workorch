@@ -161,6 +161,7 @@ func eventSemanticCandidateCommand(t *testing.T) llmevents.RequestRuntimeCandida
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
 		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
 			CoverageWorkItemID: "cwi-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			DeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-1"),
 		}},
 		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
@@ -825,7 +826,7 @@ func TestRequestRuntimeCandidatePreservesSealedReadOnlyMCPMetadata(t *testing.T)
 		ID: "binding/test/focus-1/cwi-1", CoverageWorkItemID: "cwi-1", FocusID: "focus-1", DefinitionRevision: "definition-1",
 		Proofs: []runtimecontract.CoverageEvidenceProof{{
 			EvidenceKind: runtimecontract.EvidenceKindValidation, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
-			AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "mcp-read",
+			AllowedOperationKinds: []string{runtimecontract.StepKindMCPToolCall}, ValidationRecipeID: "mcp-read",
 		}},
 		TargetSelectorRef: "test/mcp-read", TargetSelectorOwnerRef: "test-llm", TargetSelectorSubjectRef: "focus-1",
 		DeclarationRef: "test/runtime-candidate-event-adapter",

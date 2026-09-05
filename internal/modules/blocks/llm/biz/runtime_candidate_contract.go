@@ -213,6 +213,7 @@ func runtimeCandidateContractCatalog() string {
 		"context.requiredState is the sole canonical decision authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode.",
 		"When context.repairDirective is present, obey its sealed state, effect, evidence and operation constraints. The exact fields and values remain in outputContract and the current runtime authority.",
 		"context.requiredEvidenceKinds declares the current evidence obligation; it never overrides context.requiredState, context.repairDirective, or outputContract.",
+		"When C3 carries a validationProofPreparation for the current CWI, a state-change candidate must create or update exactly its targetRef and implement a real executable assertion with the exact ownerNativeCheckAttestation.nativeCheckRef. For Shell Go preparation, the function name is the supplied TestWorkOrchCWI_* native identity and must have a real testing.T assertion; never substitute the semantic RequiredCheckRef as a function name. WORKORCH_CHECK_PASSED text, logs, echoes, generic tests, and command exit status are diagnostic only and can never attest the CWI.",
 		"When rejectedOperationShapes is present in the C4 execution-tail object, every listed operation hash and exact structural operation is forbidden until later accepted evidence supersedes it. Choose an admissible kind and change kind, targets, or execution-semantic parameters.",
 	}, "\n")
 }

@@ -7,6 +7,8 @@ import (
 	"path"
 	"sort"
 	"strings"
+
+	"github.com/muidea/workorch/internal/pkg/common"
 )
 
 const (
@@ -139,9 +141,9 @@ func (c RuntimeProspectiveTargetClause) Normalized() RuntimeProspectiveTargetCla
 }
 
 func (c RuntimeProspectiveTargetClause) Clone() RuntimeProspectiveTargetClause {
-	c = c.Normalized()
-	c.AllOf = append([]RuntimeProspectiveTargetPredicate(nil), c.AllOf...)
-	return c
+	// Normalized allocates and canonicalizes the complete predicate slice, so a
+	// second copy would only repeat the same deep traversal.
+	return c.Normalized()
 }
 
 func (c RuntimeProspectiveTargetClause) Validate() error {
@@ -180,6 +182,98 @@ type RuntimeProspectiveTargetSatisfactionConstraint struct {
 	AllOf                              []RuntimeProspectiveTargetClause
 }
 
+type RuntimeValidationProofPreparation struct {
+	RequirementHash    string
+	DefinitionRevision string
+	CoverageWorkItemID common.CoverageWorkItemID
+	DeclarationRef     string
+	ValidationRecipeID string
+	TargetRef          string
+	CheckAttestations  []RuntimeValidationCheckAttestationBinding
+	// ProspectiveTargetSatisfactionConstraint is the complete, per-CWI target
+	// contract authored by the capability owner. Keeping it on the preparation
+	// record avoids turning one recipe-wide surface readiness into an all-CWI
+	// union: each missing requirement can be acquired independently.
+	ProspectiveTargetSatisfactionConstraint RuntimeProspectiveTargetSatisfactionConstraint
+}
+
+func (p RuntimeValidationProofPreparation) Normalized() RuntimeValidationProofPreparation {
+	p.RequirementHash = strings.TrimSpace(p.RequirementHash)
+	p.DefinitionRevision = strings.TrimSpace(p.DefinitionRevision)
+	p.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(p.CoverageWorkItemID)))
+	p.DeclarationRef = strings.TrimSpace(p.DeclarationRef)
+	p.ValidationRecipeID = strings.TrimSpace(p.ValidationRecipeID)
+	p.TargetRef = strings.TrimSpace(p.TargetRef)
+	p.CheckAttestations = NormalizeRuntimeValidationCheckAttestationBindings(p.CheckAttestations)
+	p.ProspectiveTargetSatisfactionConstraint = p.ProspectiveTargetSatisfactionConstraint.Normalized()
+	return p
+}
+
+func (p RuntimeValidationProofPreparation) Clone() RuntimeValidationProofPreparation {
+	// Normalized detaches both the attestation slice and the nested target
+	// constraint. Keep Clone single-pass because this record is replicated in
+	// every retained semantic generation.
+	return p.Normalized()
+}
+
+func (p RuntimeValidationProofPreparation) Validate() error {
+	rawAttestations := p.CheckAttestations
+	p = p.Normalized()
+	if p.RequirementHash == "" || p.DefinitionRevision == "" || p.CoverageWorkItemID == "" || p.DeclarationRef == "" ||
+		p.ValidationRecipeID == "" || (p.TargetRef != "" && !runtimeProspectiveTargetRefValid(p.TargetRef)) || len(p.CheckAttestations) == 0 {
+		return fmt.Errorf("runtime validation proof preparation requires exact requirement, CWI, recipe and native attestations")
+	}
+	if strings.Contains(p.DeclarationRef, "*") {
+		return fmt.Errorf("runtime validation proof preparation declaration %q is not CWI-specific", p.DeclarationRef)
+	}
+	required := make([]string, 0, len(p.CheckAttestations))
+	for _, attestation := range p.CheckAttestations {
+		required = append(required, attestation.RequiredCheckRef)
+	}
+	if err := ValidateRuntimeValidationCheckAttestationBindings(rawAttestations, required); err != nil {
+		return err
+	}
+	constraint := p.ProspectiveTargetSatisfactionConstraint
+	if err := constraint.Validate(); err != nil {
+		return fmt.Errorf("runtime validation proof preparation target constraint: %w", err)
+	}
+	if constraint.ValidationRecipeID != p.ValidationRecipeID {
+		return fmt.Errorf("runtime validation proof preparation recipe does not match target constraint")
+	}
+	if p.TargetRef != "" {
+		exactTargetDeclared := false
+		for _, clause := range constraint.AllOf {
+			for _, predicate := range clause.AllOf {
+				if predicate.Kind == RuntimeProspectiveTargetPredicatePathExact && predicate.Value == p.TargetRef {
+					exactTargetDeclared = true
+				}
+			}
+		}
+		if !exactTargetDeclared {
+			return fmt.Errorf("runtime validation proof preparation target %q is absent from exact target constraint", p.TargetRef)
+		}
+	}
+	return nil
+}
+
+func normalizeRuntimeValidationProofPreparations(values []RuntimeValidationProofPreparation) []RuntimeValidationProofPreparation {
+	ret := make([]RuntimeValidationProofPreparation, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, value.Clone())
+	}
+	sort.SliceStable(ret, func(i, j int) bool {
+		if ret[i].RequirementHash != ret[j].RequirementHash {
+			return ret[i].RequirementHash < ret[j].RequirementHash
+		}
+		return ret[i].TargetRef < ret[j].TargetRef
+	})
+	return nilIfEmpty(ret)
+}
+
+func CloneRuntimeValidationProofPreparations(values []RuntimeValidationProofPreparation) []RuntimeValidationProofPreparation {
+	return normalizeRuntimeValidationProofPreparations(values)
+}
+
 func (c RuntimeProspectiveTargetSatisfactionConstraint) Normalized() RuntimeProspectiveTargetSatisfactionConstraint {
 	c.SchemaVersion = strings.TrimSpace(c.SchemaVersion)
 	c.OwnerModuleID = strings.TrimSpace(c.OwnerModuleID)
@@ -200,13 +294,8 @@ func (c RuntimeProspectiveTargetSatisfactionConstraint) Normalized() RuntimePros
 }
 
 func (c RuntimeProspectiveTargetSatisfactionConstraint) Clone() RuntimeProspectiveTargetSatisfactionConstraint {
-	c = c.Normalized()
-	values := make([]RuntimeProspectiveTargetClause, 0, len(c.AllOf))
-	for _, clause := range c.AllOf {
-		values = append(values, clause.Clone())
-	}
-	c.AllOf = nilIfEmpty(values)
-	return c
+	// Normalized already allocates every clause and predicate.
+	return c.Normalized()
 }
 
 func (c RuntimeProspectiveTargetSatisfactionConstraint) Validate() error {
@@ -234,6 +323,13 @@ func (c RuntimeProspectiveTargetSatisfactionConstraint) Validate() error {
 
 func StableRuntimeProspectiveTargetSatisfactionConstraintHash(value RuntimeProspectiveTargetSatisfactionConstraint) string {
 	value = value.Normalized()
+	return stableRuntimeProspectiveTargetSatisfactionConstraintHashCanonical(value)
+}
+
+// stableRuntimeProspectiveTargetSatisfactionConstraintHashCanonical hashes a
+// value already normalized by its enclosing catalog. It stays private so all
+// external callers retain the canonicalization boundary.
+func stableRuntimeProspectiveTargetSatisfactionConstraintHashCanonical(value RuntimeProspectiveTargetSatisfactionConstraint) string {
 	h := sha256.New()
 	writeHashString(h, RuntimeProspectiveTargetSatisfactionConstraintSchemaCurrent)
 	writeHashString(h, value.OwnerModuleID)
@@ -376,15 +472,77 @@ func ResolveRuntimeProspectiveTargetSatisfactionConstraint(catalog RuntimeOperat
 	for _, surface := range catalog.ValidationSurfaces {
 		surface = surface.Normalized()
 		if surface.OwnerModuleID != requirement.OwnerModuleID || surface.OperationKind != requirement.OperationKind ||
-			surface.Readiness != RuntimeValidationSurfacePrerequisiteRequired || surface.ProspectiveSatisfactionContractRef != contractRef ||
-			surface.ProofApplicability != RuntimeValidationProofDirect || !RuntimeEffectIsNonDurable(surface.EffectScope) ||
-			!runtimeValidationSurfaceHasExplicitReplayPolicy(surface.IdempotencyClass) || surface.ProspectiveTargetSatisfactionConstraint == nil {
+			!RuntimeEffectIsNonDurable(surface.EffectScope) || !runtimeValidationSurfaceHasExplicitReplayPolicy(surface.IdempotencyClass) {
 			continue
 		}
-		matched = append(matched, surface.ProspectiveTargetSatisfactionConstraint.Clone())
+		constraint, scoped := runtimeProspectiveConstraintForOwnerFactRequirement(surface, requirement, contractRef)
+		if !scoped {
+			continue
+		}
+		matched = append(matched, constraint)
 	}
 	if len(matched) != 1 {
 		return RuntimeProspectiveTargetSatisfactionConstraint{}, fmt.Errorf("runtime prospective target satisfaction contract %q requires exactly one all-of surface, got %d", contractRef, len(matched))
 	}
 	return matched[0].Clone(), nil
+}
+
+// ResolveRuntimeValidationProofPreparation returns the one capability-owner
+// preparation record for an exact missing CWI proof requirement. It never
+// interprets the opaque native check protocol and cannot turn the preparation
+// into evidence credit.
+func ResolveRuntimeValidationProofPreparation(catalog RuntimeOperationAdmissibility, requirement RuntimeOwnerFactRequirement, contractRef string) (RuntimeValidationProofPreparation, error) {
+	catalog = catalog.Normalized()
+	requirement = requirement.Normalized()
+	contractRef = strings.TrimSpace(contractRef)
+	if err := catalog.Validate(); err != nil {
+		return RuntimeValidationProofPreparation{}, err
+	}
+	if err := requirement.Validate(); err != nil {
+		return RuntimeValidationProofPreparation{}, err
+	}
+	if requirement.ValidationProofRequirementHash == "" || contractRef == "" || catalog.OwnerModuleID != requirement.OwnerModuleID {
+		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof preparation requires exact owner-fact requirement and contract")
+	}
+	var matched []RuntimeValidationProofPreparation
+	for _, surface := range catalog.ValidationSurfaces {
+		surface = surface.Normalized()
+		if surface.OwnerModuleID != requirement.OwnerModuleID || surface.OperationKind != requirement.OperationKind ||
+			!RuntimeEffectIsNonDurable(surface.EffectScope) || !runtimeValidationSurfaceHasExplicitReplayPolicy(surface.IdempotencyClass) {
+			continue
+		}
+		for _, preparation := range surface.ProofRequirementPreparations {
+			if preparation.RequirementHash == requirement.ValidationProofRequirementHash &&
+				preparation.ProspectiveTargetSatisfactionConstraint.ProspectiveSatisfactionContractRef == contractRef {
+				matched = append(matched, preparation.Clone())
+			}
+		}
+	}
+	if len(matched) != 1 {
+		return RuntimeValidationProofPreparation{}, fmt.Errorf("runtime validation proof requirement %q requires exactly one preparation, got %d", requirement.ValidationProofRequirementHash, len(matched))
+	}
+	return matched[0].Clone(), nil
+}
+
+func runtimeProspectiveConstraintForOwnerFactRequirement(surface RuntimeValidationSurface, requirement RuntimeOwnerFactRequirement, contractRef string) (RuntimeProspectiveTargetSatisfactionConstraint, bool) {
+	surface = surface.Clone()
+	requirement = requirement.Normalized()
+	contractRef = strings.TrimSpace(contractRef)
+	if requirement.ValidationProofRequirementHash == "" {
+		if surface.Readiness != RuntimeValidationSurfacePrerequisiteRequired || surface.ProspectiveTargetSatisfactionConstraint == nil ||
+			surface.ProspectiveSatisfactionContractRef != contractRef {
+			return RuntimeProspectiveTargetSatisfactionConstraint{}, false
+		}
+		return surface.ProspectiveTargetSatisfactionConstraint.Clone(), true
+	}
+	for _, preparation := range surface.ProofRequirementPreparations {
+		if preparation.RequirementHash == requirement.ValidationProofRequirementHash {
+			constraint := preparation.ProspectiveTargetSatisfactionConstraint.Clone()
+			if constraint.ProspectiveSatisfactionContractRef != contractRef {
+				return RuntimeProspectiveTargetSatisfactionConstraint{}, false
+			}
+			return constraint, true
+		}
+	}
+	return RuntimeProspectiveTargetSatisfactionConstraint{}, false
 }

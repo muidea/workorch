@@ -177,6 +177,10 @@ func resolveRuntimeCoverageItems(units []workUnit, activation runtimecontract.Ru
 		if unit.evidenceRole != "" {
 			policy.EvidenceRole = unit.evidenceRole
 		}
+		// The work unit is now an admitted exact Definition item. Assign its
+		// canonical declaration here so profile wildcards and bootstrap recipes
+		// can never escape into Runtime as proof authority.
+		policy.SemanticProofDeclarationRef = runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(unit.sourceScope, unit.sourceID)
 		itemID := unit.itemID
 		if itemID == "" {
 			itemID = common.CoverageWorkItemID(fmt.Sprintf("cwi-%03d", unit.order))
@@ -324,15 +328,6 @@ func finalizeRuntimeCoverage(compiled compiledCoverage, allUnits []workUnit, pro
 	}
 	compiled.CoverageItems = coverageItems
 	return compiled, nil
-}
-
-// compiledEvidencePolicyRequiresIndependentFocus identifies declarations that
-// need a CWI-specific semantic proof declaration. It intentionally lives in
-// activationcore: it interprets profile/template policy while
-// workorchruntimecontract only validates the resulting immutable values.
-func compiledEvidencePolicyRequiresIndependentFocus(policy compiledEvidencePolicy) bool {
-	return containsRuntimeEvidenceKind(policy.RequiredEvidenceKinds, runtimecontract.EvidenceKindValidation) ||
-		policy.RequireExecutableBehaviorEvidence || len(policy.RequiredOwnerFacts) != 0 || len(policy.MetricConstraints) != 0 || len(policy.ArtifactRefs) != 0
 }
 
 func newCompiledCoverageFocus(id, sliceID, groupScope string, item resolvedCoverageItem) runtimecontract.CoverageFocus {
@@ -724,7 +719,7 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 		if err != nil {
 			return compiledEvidencePolicy{}, err
 		}
-		policy, err = mergeCompiledEvidencePolicy(policy, wildcard)
+		policy, err = mergeCompiledEvidencePolicy(policy, wildcardQualityRequirements(wildcard))
 		if err != nil {
 			return compiledEvidencePolicy{}, err
 		}
@@ -737,27 +732,53 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 	if len(policy.RequiredEvidenceKinds) == 0 {
 		policy.RequiredEvidenceKinds = defaultEvidenceKinds
 	}
-	if compiledEvidencePolicyRequiresIndependentFocus(policy) {
-		if hasCWISemanticProofDeclaration(exact) {
-			policy.SemanticProofDeclarationRef = "profile/" + scope + "/" + id
-		} else {
-			// Wildcard rules remain useful quality gates, but their recipe/check
-			// cannot be copied into an arbitrary CWI binding and later grant
-			// semantic coverage credit.
-			policy.SemanticProofDeclarationRef = "profile/" + scope + "/*"
-		}
-	}
+	// This exact identity is compiled only after the Application has resolved an
+	// admitted CWI. A wildcard may contribute declarative constraints above,
+	// including an owner-fact postcondition, but never survives as Definition
+	// identity or supplies recipe/check/current-owner authority for a CWI.
+	policy.SemanticProofDeclarationRef = runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(scope, id)
 	return policy, nil
 }
 
-func hasCWISemanticProofDeclaration(values []runtimecontract.RuntimeProfileEvidenceRequirement) bool {
+func wildcardQualityRequirements(values []runtimecontract.RuntimeProfileEvidenceRequirement) []runtimecontract.RuntimeProfileEvidenceRequirement {
+	ret := make([]runtimecontract.RuntimeProfileEvidenceRequirement, 0, len(values))
 	for _, value := range values {
-		if strings.TrimSpace(value.ValidationRecipeID) != "" || len(value.RequiredCheckRefs) != 0 ||
-			len(value.RequiredOwnerFacts) != 0 || len(value.MetricConstraints) != 0 || len(value.ArtifactRefs) != 0 {
-			return true
+		// A wildcard is a declarative policy template, not Runtime authority. The
+		// Application may instantiate its constraints into an already admitted
+		// exact CWI, whose later owner catalog and SM-2 binding remain necessary.
+		// Only wildcard identity and recipe/check proof identity are discarded:
+		// those must come from the canonical exact Definition and owner catalog.
+		ret = append(ret, runtimecontract.RuntimeProfileEvidenceRequirement{
+			EvidenceRole:                         value.EvidenceRole,
+			TargetRole:                           value.TargetRole,
+			TargetRefs:                           append([]string(nil), value.TargetRefs...),
+			TargetDiscoverySources:               append([]string(nil), value.TargetDiscoverySources...),
+			TargetSelectorRef:                    value.TargetSelectorRef,
+			TargetSelectorOwnerRef:               value.TargetSelectorOwnerRef,
+			TargetSelectorSubjectRef:             value.TargetSelectorSubjectRef,
+			TargetSelectorCandidateRefs:          append([]string(nil), value.TargetSelectorCandidateRefs...),
+			ProspectiveTargetAllOfConstraintRefs: append([]string(nil), value.ProspectiveTargetAllOfConstraintRefs...),
+			RequireTargetGrounding:               value.RequireTargetGrounding,
+			RequiredEvidenceKinds:                append([]string(nil), value.RequiredEvidenceKinds...),
+			RequireDirectEvidence:                value.RequireDirectEvidence,
+			RequireClaimEvidence:                 value.RequireClaimEvidence,
+			RequireExecutableBehaviorEvidence:    value.RequireExecutableBehaviorEvidence,
+			RequireCoverageTargets:               value.RequireCoverageTargets,
+			AcceptedStepKinds:                    append([]string(nil), value.AcceptedStepKinds...),
+			AcceptedOperationVariants:            append([]runtimecontract.RuntimeOperationVariantRef(nil), value.AcceptedOperationVariants...),
+			RejectedStepKinds:                    append([]string(nil), value.RejectedStepKinds...),
+			MetricConstraints:                    append([]string(nil), value.MetricConstraints...),
+			ArtifactRefs:                         append([]string(nil), value.ArtifactRefs...),
+			RequiredOwnerFacts:                   append([]runtimecontract.RuntimeOwnerFactRequirement(nil), value.RequiredOwnerFacts...),
+			OwnerFactConvergences:                runtimecontract.CloneRuntimeOwnerFactConvergences(value.OwnerFactConvergences),
+			Description:                          value.Description,
+		})
+		if value.ValidationFailureRepairConvergence != nil {
+			clone := value.ValidationFailureRepairConvergence.Clone()
+			ret[len(ret)-1].ValidationFailureRepairConvergence = &clone
 		}
 	}
-	return false
+	return ret
 }
 
 func filterRequirementsByID(values []runtimecontract.RuntimeProfileEvidenceRequirement, id string) []runtimecontract.RuntimeProfileEvidenceRequirement {

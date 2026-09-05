@@ -442,7 +442,10 @@ func coverageProofLineageTestBinding(id, target string) runtimecontract.Coverage
 				EvidenceKind:          runtimecontract.EvidenceKindValidation,
 				RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
 				AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
-				ValidationRecipeID:    "recipe-lineage", RequiredCheckRefs: []string{"check-lineage"},
+				ValidationRecipeID:    "recipe-lineage", ValidationProofRequirementHash: "runtime-validation-proof-requirement-test-lineage", RequiredCheckRefs: []string{"check-lineage"},
+				ValidationCheckAttestations: []runtimecontract.RuntimeValidationCheckAttestationBinding{{
+					RequiredCheckRef: "check-lineage", ObservationProtocolRef: "test/lineage-validation-observation/v1", NativeCheckRef: "test/native/lineage/check",
+				}},
 			},
 		},
 	}.Normalized()

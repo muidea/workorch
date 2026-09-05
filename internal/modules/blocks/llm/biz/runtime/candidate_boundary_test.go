@@ -190,7 +190,7 @@ func semanticBoundaryRequest(t *testing.T) llmmodels.RuntimeCandidateRequest {
 		CoverageItems: items, AllowedOwnerModuleIDs: []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
 		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
-			CoverageWorkItemID: "cwi-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			CoverageWorkItemID: "cwi-1", DeclarationRef: "profile/dodItem/dod-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		}},
 		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
@@ -718,11 +718,26 @@ func candidateRequest(t *testing.T, state runtimecontract.ConvergenceState) llmm
 		},
 	}
 	if state == runtimecontract.ConvergenceStateNeedValidation {
+		requirement := candidateBoundaryValidationProofRequirement()
 		recipes := runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(facts.Activation.EvidencePolicies)
 		catalog := runtimecontract.RuntimeOperationAdmissibility{
 			PrerequisiteID: "test-managed-validation-catalog", OwnerModuleID: runtimecontract.RuntimeModuleShell,
 			OperationKinds:       []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 			ValidationRecipeRefs: []string{"test-managed-validation"}, ValidationRecipes: recipes,
+			ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+				ID: "test-managed-validation", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+				OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+				Readiness:     runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "shell-schema-boundary-test", InputBindingRef: "shell-input-boundary-test",
+				CheckRefs: append([]string(nil), requirement.RequiredCheckRefs...), ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+				ProofRequirementBindings: []runtimecontract.RuntimeValidationProofRequirementBinding{func() runtimecontract.RuntimeValidationProofRequirementBinding {
+					binding, bindErr := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(requirement, "test-managed-validation", candidateBoundaryValidationCheckAttestations(requirement.RequiredCheckRefs)...)
+					if bindErr != nil {
+						t.Fatal(bindErr)
+					}
+					return binding
+				}()},
+				EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+			}},
 			ObservedRevision: "test-managed-validation-catalog-v1",
 		}
 		catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
@@ -838,7 +853,7 @@ func candidateRequestAssessmentSemanticPreimage(t *testing.T) (runtimecontract.C
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-		DeclarationRef:        "semantic-plan/dod-1",
+		DeclarationRef:        runtimecontract.RuntimeSemanticCurrentDeclarationRef(manifest.ProofObligations[0]),
 	}
 	document := runtimecontract.RuntimeSemanticPlanDocument{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent,
@@ -897,15 +912,41 @@ func candidateRequestCoverageBinding(evidenceKind string) runtimecontract.Covera
 		AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
 	}
 	if evidenceKind == runtimecontract.EvidenceKindValidation {
+		requirement := candidateBoundaryValidationProofRequirement()
 		proof.RequiredEffectScopes = []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone, runtimecontract.RuntimeEffectEphemeralSession}
 		proof.AllowedOperationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 		proof.ValidationRecipeID = "test-managed-validation"
+		proof.ValidationProofRequirementHash = requirement.Hash
+		proof.RequiredCheckRefs = append([]string(nil), requirement.RequiredCheckRefs...)
+		proof.ValidationCheckAttestations = candidateBoundaryValidationCheckAttestations(requirement.RequiredCheckRefs)
 	}
 	binding := runtimecontract.CoverageEvidenceBinding{
 		ID: "binding/test/cwi-1", CoverageWorkItemID: "cwi-1", FocusID: "focus-1", DefinitionRevision: "definition-1",
 		Proofs:     []runtimecontract.CoverageEvidenceProof{proof},
-		TargetRefs: []string{"main.go"}, DeclarationRef: "test/llm-candidate-boundary",
+		TargetRefs: []string{"main.go"}, DeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-1"),
 	}.Normalized()
 	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 	return binding
+}
+
+func candidateBoundaryValidationProofRequirement() runtimecontract.RuntimeValidationProofRequirement {
+	requirement := runtimecontract.RuntimeValidationProofRequirement{
+		SchemaVersion:      runtimecontract.RuntimeValidationProofRequirementSchemaCurrent,
+		DefinitionRevision: "definition-1", CoverageWorkItemID: "cwi-1",
+		SourceScope: "dodItem", SourceID: "dod-1", SourceTextHash: "runtime-validation-source-boundary-test",
+		DeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-1"), ValidationRecipeID: "test-managed-validation",
+		RequiredCheckRefs: []string{"workorch-cwi-check-llm-boundary"},
+	}.Normalized()
+	requirement.Hash = runtimecontract.StableRuntimeValidationProofRequirementHash(requirement)
+	return requirement
+}
+
+func candidateBoundaryValidationCheckAttestations(requiredCheckRefs []string) []runtimecontract.RuntimeValidationCheckAttestationBinding {
+	ret := make([]runtimecontract.RuntimeValidationCheckAttestationBinding, 0, len(requiredCheckRefs))
+	for _, checkRef := range requiredCheckRefs {
+		ret = append(ret, runtimecontract.RuntimeValidationCheckAttestationBinding{
+			RequiredCheckRef: checkRef, ObservationProtocolRef: "test/llm-owner-native/v1", NativeCheckRef: checkRef + "/native",
+		})
+	}
+	return runtimecontract.NormalizeRuntimeValidationCheckAttestationBindings(ret)
 }

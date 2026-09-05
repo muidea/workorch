@@ -247,6 +247,8 @@ func TestRuntimeSemanticOrderAcceptedValidationRepairIgnoresUnrelatedEligibleClo
 		}
 		if index == 0 {
 			focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+			focus.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+			focus.ValidationRecipeID = "incident-managed-validation"
 			focus.AssessmentScope = "dodItem"
 			focus.AssessmentID = "dod/cwi-001"
 			focus.AssessmentText = "validation succeeds"
@@ -297,6 +299,10 @@ func TestRuntimeSemanticOrderAcceptedValidationRepairIgnoresUnrelatedEligibleClo
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileCatalog, shellCatalog}
 	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindFileWrite}
 	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	facts, err = runtimeTestBindExactManagedValidationProofFacts(facts)
+	if err != nil {
+		t.Fatalf("bind incident validation owner proof: %v", err)
+	}
 	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
 		Selection:           facts.Activation.ProviderSelection,
 		ContextWindowTokens: 32768, ProviderMaxOutputTokens: 8192, EffectiveMaxOutputTokens: 4096,
@@ -671,7 +677,7 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 				},
 				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 				RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-				DeclarationRef:        "semantic/session-test",
+				DeclarationRef:        runtimecontract.RuntimeSemanticCurrentDeclarationRef(command.SemanticManifest.ProofObligations[0]),
 			}
 			if command.CandidateAttempt == 1 {
 				proposal.Target = runtimecontract.RuntimeOperationTargetAuthorization{
@@ -1031,9 +1037,24 @@ func TestRuntimeSemanticFalseUndeclaredPrerequisiteUsesCorrectionAcrossRestart(t
 	}
 	bootstrap := runtimeBootstrap()
 	bootstrap.Definition.CapabilityContract = append(bootstrap.Definition.CapabilityContract, runtimecontract.RuntimeBlockKindManagedValidationSession)
+	bootstrap.DefinitionFocuses[0].RequiredEvidenceKinds = runtimeTestNormalizeStrings(append(
+		bootstrap.DefinitionFocuses[0].RequiredEvidenceKinds,
+		runtimecontract.EvidenceKindValidation,
+	))
+	bootstrap.DefinitionFocuses[0].AcceptedStepKinds = runtimeTestNormalizeStrings(append(
+		bootstrap.DefinitionFocuses[0].AcceptedStepKinds,
+		runtimecontract.RuntimeBlockKindManagedValidationSession,
+	))
+	bootstrap.DefinitionFocuses[0].ValidationRecipeID = "recipe/managed-validation"
 	bootstrap.DefinitionFocuses[0].RequiredOwnerFacts = []runtimecontract.RuntimeOwnerFactRequirement{requirement}
 	bootstrap.DefinitionFocuses[0].OwnerFactConvergences = []runtimecontract.RuntimeOwnerFactConvergence{{Requirement: requirement, RequirePreexisting: true}}
 	bootstrap = runtimeTestBootstrapWithReboundBindings(bootstrap)
+	// This test exercises the provider's generic typed claim that a declared
+	// owner fact is absent. The claim wire intentionally carries no CWI proof
+	// hash, so retain the generic Definition requirement while the independent
+	// Shell surface below still carries its exact CWI proof binding.
+	bootstrap.DefinitionFocuses[0].RequiredOwnerFacts[0].ValidationProofRequirementHash = ""
+	bootstrap.DefinitionFocuses[0].OwnerFactConvergences[0].Requirement.ValidationProofRequirementHash = ""
 	facts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
 	if err != nil {
 		t.Fatal(err)
@@ -1079,6 +1100,10 @@ func TestRuntimeSemanticFalseUndeclaredPrerequisiteUsesCorrectionAcrossRestart(t
 	}
 	fileCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(fileCatalog)
 	aggregate.Facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{fileCatalog, shellCatalog}
+	aggregate.Facts, err = runtimeTestBindExactManagedValidationProofFacts(aggregate.Facts)
+	if err != nil {
+		t.Fatalf("bind false-gap validation owner proof: %v", err)
+	}
 	repository.aggregate = aggregate
 
 	providerCalls := 0
@@ -1376,7 +1401,7 @@ func TestRuntimeSemanticDriveFailsOnlyAfterPersistedCatalogRefreshBudgetIsExhaus
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-		DeclarationRef:        "semantic/budget-test",
+		DeclarationRef:        runtimecontract.RuntimeSemanticCurrentDeclarationRef(manifest.ProofObligations[0]),
 	}
 	order := runtimecontract.RuntimeSemanticPlanDocument{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: manifest.Hash,

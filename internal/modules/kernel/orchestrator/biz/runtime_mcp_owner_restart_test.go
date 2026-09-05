@@ -165,6 +165,7 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 				fileInventory, fileObservation := acquireFileBackedFileAdmissibility(t, ctx, hub, deliverable)
 				fileManifest := acquireFileBackedManifest(t, ctx, hub, deliverable)
 				aggregate := runtimeFileBackedMCPFailureAggregate(t, inventory, observation, fileInventory, fileObservation, fileManifest)
+				assertRuntimeFileBackedMCPTypedProofCatalog(t, aggregate, inventory.SnapshotID)
 				runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 				run := runtimeRunForTest(common.RunStateActive, aggregate.Definition)
 				bootstrap := runtimeBootstrap()
@@ -698,6 +699,45 @@ func TestRuntimeFileBackedMCPOwnerFailureTargetReceiptRestartMatrix(t *testing.T
 			})
 		}
 	}
+}
+
+func assertRuntimeFileBackedMCPTypedProofCatalog(t *testing.T, aggregate runtime.RuntimeAggregate, snapshotID string) {
+	t.Helper()
+	if aggregate.SemanticPlanning.Manifest == nil {
+		t.Fatal("MCP restart fixture has no sealed semantic manifest")
+	}
+	assertCatalogs := func(scope string, catalogs []runtimecontract.RuntimeOperationAdmissibility) {
+		t.Helper()
+		found := false
+		for _, raw := range catalogs {
+			catalog := raw.Normalized()
+			if catalog.OwnerModuleID == runtimecontract.RuntimeModuleShell {
+				t.Fatalf("%s installed MCP proof as Shell inventory: %+v", scope, catalog)
+			}
+			if catalog.OwnerModuleID != runtimecontract.RuntimeModuleMCP {
+				continue
+			}
+			if found || catalog.SnapshotID != snapshotID || len(catalog.ValidationRecipes) != 0 {
+				t.Fatalf("%s MCP catalog identity drifted: %+v", scope, catalog)
+			}
+			found = true
+			surface, ok := runtimecontract.RuntimeValidationSurfaceForID(
+				catalog.ValidationSurfaces,
+				runtimecontract.RuntimeMCPToolValidationRecipeID("mcp-grounding", "lookup.references"),
+			)
+			if !ok || surface.OwnerModuleID != runtimecontract.RuntimeModuleMCP ||
+				surface.OperationKind != runtimecontract.StepKindMCPToolCall ||
+				surface.ProofApplicability != runtimecontract.RuntimeValidationProofDirect ||
+				len(surface.ProofRequirementBindings) != 0 || len(surface.ProofRequirementPreparations) != 0 {
+				t.Fatalf("%s lost MCP-owned typed proof surface: %+v", scope, catalog.ValidationSurfaces)
+			}
+		}
+		if !found {
+			t.Fatalf("%s has no MCP owner catalog: %+v", scope, catalogs)
+		}
+	}
+	assertCatalogs("current facts", aggregate.Facts.Resources.OperationAdmissibilities)
+	assertCatalogs("sealed manifest", aggregate.SemanticPlanning.Manifest.OwnerCatalogs)
 }
 
 func runtimePendingCandidateManifestHashForBizTest(t *testing.T, ctx context.Context, controller *runtime.RuntimeController, workspaceID common.WorkspaceID, runID common.RunID, attempt int) string {

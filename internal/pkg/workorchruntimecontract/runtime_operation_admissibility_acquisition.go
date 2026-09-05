@@ -20,6 +20,10 @@ type RuntimeOperationAdmissibilityRequest struct {
 	RequiredKinds                 []string
 	RequiredTargetRefs            []string
 	ValidationRecipes             []RuntimeValidationRecipe
+	// ValidationProofRequirements are Definition-owned per-CWI identities.
+	// The addressed owner may publish an exact applicability binding for a
+	// matching recipe but cannot widen or rewrite these values.
+	ValidationProofRequirements []RuntimeValidationProofRequirement
 	// WorkspaceManifestBinding is the current workspace-manifest owner fact used by a
 	// capability owner whose admissibility depends on workspace contents.  It
 	// is immutable request context, not a second workspace observation: the
@@ -88,12 +92,15 @@ func (a RuntimeOperationAdmissibilityAcquisition) ValidateForRequest(request Run
 		strings.TrimSpace(a.AuthoritySnapshotID) != strings.TrimSpace(request.AuthoritySnapshotID) {
 		return fmt.Errorf("runtime operation admissibility acquisition scope does not match request")
 	}
+	if err := a.Admissibility.Validate(); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeValidationProofRequirements(request.ValidationProofRequirements); err != nil {
+		return fmt.Errorf("runtime operation admissibility proof requirements: %w", err)
+	}
 	inventory := a.Admissibility.Normalized()
 	if inventory.PrerequisiteID != strings.TrimSpace(request.PrerequisiteID) || inventory.OwnerModuleID != strings.TrimSpace(request.OwnerModuleID) {
 		return fmt.Errorf("runtime operation admissibility acquisition inventory does not match request")
-	}
-	if err := inventory.Validate(); err != nil {
-		return err
 	}
 	observation := a.Observation.Normalized()
 	if observation.PrerequisiteID != inventory.PrerequisiteID ||
@@ -121,6 +128,80 @@ func (a RuntimeOperationAdmissibilityAcquisition) ValidateForRequest(request Run
 			confirmed, confirmedFound := RuntimeValidationRecipeForID(inventory.ValidationRecipes, recipeRef)
 			if !declaredFound || !confirmedFound || !sameRuntimeValidationRecipe(declared, confirmed) {
 				return fmt.Errorf("runtime Shell admissibility published unconfirmed validation recipe ref %q", recipeRef)
+			}
+		}
+		for _, recipe := range inventory.ValidationRecipes {
+			surface, found := RuntimeValidationSurfaceForID(inventory.ValidationSurfaces, recipe.ID)
+			if !found || surface.Readiness != RuntimeValidationSurfaceReady {
+				return fmt.Errorf("runtime Shell admissibility confirmed recipe %q without a ready surface", recipe.ID)
+			}
+		}
+	}
+	if err := ValidateRuntimeValidationProofRequirementCatalogApplicability(request.ValidationProofRequirements, []RuntimeOperationAdmissibility{inventory}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ValidateRuntimeValidationProofRequirementCatalogApplicability verifies the
+// exact Definition-requirement participation of owner catalogs without
+// exposing capability-specific classification to callers. A ready managed
+// validation surface compatible with a requested requirement must publish one
+// exact binding; no catalog may invent, widen, or duplicate requirement
+// authority. Other typed validation owners remain outside this Shell proof
+// protocol.
+func ValidateRuntimeValidationProofRequirementCatalogApplicability(requirements []RuntimeValidationProofRequirement, catalogs []RuntimeOperationAdmissibility) error {
+	if err := ValidateRuntimeValidationProofRequirements(requirements); err != nil {
+		return fmt.Errorf("runtime validation proof requirements: %w", err)
+	}
+	if err := ValidateRuntimeOperationAdmissibilities(catalogs); err != nil {
+		return fmt.Errorf("runtime validation proof owner catalogs: %w", err)
+	}
+	requested := NormalizeRuntimeValidationProofRequirements(requirements)
+	for _, rawCatalog := range catalogs {
+		catalog := rawCatalog.Normalized()
+		if catalog.OwnerModuleID != RuntimeModuleShell || !runtimeOperationAdmissibilityKindsContain(catalog.OperationKinds, RuntimeBlockKindManagedValidationSession) {
+			continue
+		}
+		for _, surface := range catalog.ValidationSurfaces {
+			seenSurfaceRequirements := make(map[string]struct{}, len(surface.ProofRequirementBindings)+len(surface.ProofRequirementPreparations))
+			for _, binding := range surface.ProofRequirementBindings {
+				requirement, found := RuntimeValidationProofRequirementForCoverage(requested, binding.CoverageWorkItemID)
+				if !found || requirement.Hash != binding.RequirementHash || requirement.DefinitionRevision != binding.DefinitionRevision ||
+					requirement.DeclarationRef != binding.DeclarationRef || binding.ValidationRecipeID != surface.ID ||
+					(requirement.ValidationRecipeID != "" && requirement.ValidationRecipeID != binding.ValidationRecipeID) ||
+					!sameStrings(requirement.RequiredCheckRefs, binding.RequiredCheckRefs) {
+					return fmt.Errorf("runtime validation owner catalog published undeclared proof requirement binding %q", binding.RequirementHash)
+				}
+				seenSurfaceRequirements[binding.RequirementHash] = struct{}{}
+			}
+			for _, preparation := range surface.ProofRequirementPreparations {
+				requirement, found := RuntimeValidationProofRequirementForCoverage(requested, preparation.CoverageWorkItemID)
+				attestedChecks := make([]string, 0, len(preparation.CheckAttestations))
+				for _, attestation := range preparation.CheckAttestations {
+					attestedChecks = append(attestedChecks, attestation.RequiredCheckRef)
+				}
+				if !found || requirement.Hash != preparation.RequirementHash || requirement.DefinitionRevision != preparation.DefinitionRevision ||
+					requirement.DeclarationRef != preparation.DeclarationRef || preparation.ValidationRecipeID != surface.ID ||
+					(requirement.ValidationRecipeID != "" && requirement.ValidationRecipeID != preparation.ValidationRecipeID) ||
+					!sameStrings(requirement.RequiredCheckRefs, attestedChecks) {
+					return fmt.Errorf("runtime validation owner catalog published undeclared proof requirement preparation %q", preparation.RequirementHash)
+				}
+				seenSurfaceRequirements[preparation.RequirementHash] = struct{}{}
+			}
+			for _, requirement := range requested {
+				if requirement.ValidationRecipeID != "" && requirement.ValidationRecipeID != surface.ID {
+					continue
+				}
+				if surface.Readiness == RuntimeValidationSurfaceUnavailable || surface.ProofApplicability == RuntimeValidationProofAuxiliary {
+					continue
+				}
+				if surface.ProofApplicability != RuntimeValidationProofDirect {
+					return fmt.Errorf("runtime validation owner catalog recipe %q omitted applicability for requirement %q", surface.ID, requirement.Hash)
+				}
+				if _, exact := seenSurfaceRequirements[requirement.Hash]; !exact {
+					return fmt.Errorf("runtime validation owner catalog recipe %q omitted exact ready-or-prerequisite record %q", surface.ID, requirement.Hash)
+				}
 			}
 		}
 	}
@@ -506,6 +587,9 @@ func ValidateRuntimeOperationAdmissibilityRequest(request RuntimeOperationAdmiss
 		}
 	}
 	if len(request.ValidationRecipes) == 0 {
+		if len(request.ValidationProofRequirements) != 0 {
+			return fmt.Errorf("runtime validation proof requirements require declared recipes")
+		}
 		return nil
 	}
 	if ownerModuleID != RuntimeModuleShell || !runtimeOperationAdmissibilityKindsContain(request.RequiredKinds, RuntimeBlockKindManagedValidationSession) {
@@ -524,6 +608,18 @@ func ValidateRuntimeOperationAdmissibilityRequest(request RuntimeOperationAdmiss
 			return fmt.Errorf("runtime validation recipe %q is duplicated", recipe.ID)
 		}
 		seen[recipe.ID] = struct{}{}
+	}
+	if err := ValidateRuntimeValidationProofRequirements(request.ValidationProofRequirements); err != nil {
+		return err
+	}
+	for _, requirement := range request.ValidationProofRequirements {
+		requirement = requirement.Normalized()
+		if requirement.ValidationRecipeID != "" {
+			if _, declared := seen[requirement.ValidationRecipeID]; declared {
+				continue
+			}
+			return fmt.Errorf("runtime validation proof requirement %q references undeclared recipe %q", requirement.Hash, requirement.ValidationRecipeID)
+		}
 	}
 	return nil
 }

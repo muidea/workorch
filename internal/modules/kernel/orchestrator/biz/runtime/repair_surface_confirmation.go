@@ -182,7 +182,7 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 				return RuntimeAggregate{}, err
 			}
 		} else {
-			facts = preflightRuntimeFactsPreservingPending(facts, runtimeTargetGroundingRequirements(facts))
+			facts = preflightRuntimeFactsPreservingPending(facts, runtimeTargetGroundingRequirements(facts, aggregate.CoverageProofLineage))
 		}
 		aggregate.Facts = facts
 	} else {
@@ -195,7 +195,7 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 		}
 		// A newly confirmed owner surface replaces stale focus snapshots before
 		// issuing the state-change authority.
-		aggregate.Facts = preflightRuntimeFactsPreservingPending(aggregate.Facts, runtimeTargetGroundingRequirements(aggregate.Facts))
+		aggregate.Facts = preflightRuntimeFactsPreservingPending(aggregate.Facts, runtimeTargetGroundingRequirements(aggregate.Facts, aggregate.CoverageProofLineage))
 	}
 	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
 	if err != nil {

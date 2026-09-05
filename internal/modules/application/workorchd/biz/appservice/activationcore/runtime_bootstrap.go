@@ -49,8 +49,6 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	capabilityContract := []string{
 		runtimecontract.StepKindFileEdit,
 		runtimecontract.StepKindFileRead,
-		runtimecontract.StepKindShellCommand,
-		runtimecontract.RuntimeBlockKindManagedValidationSession,
 		runtimecontract.RuntimeBlockKindDecisionRequest,
 	}
 	// Evidence policies are compiled into sealed focuses before capability
@@ -75,16 +73,29 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	if err != nil {
 		return nil, fmt.Errorf("runtime definition seed: %w", err)
 	}
+	// Compile the exact per-CWI validation requirements while all immutable
+	// Definition inputs are still available. The requirements are deliberately
+	// not persisted as a parallel bootstrap field: Orchestrator recompiles the
+	// same value from DefinitionSeed + DefinitionFocuses before owner
+	// admissibility acquisition, and the semantic obligation persists the
+	// generation-specific copy.
+	validationProofRequirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(definitionRevision, compiled.CoverageItems, definitionFocuses)
+	if err != nil {
+		return nil, fmt.Errorf("runtime validation proof requirements: %w", err)
+	}
+	definitionFocuses, err = bindRuntimeValidationProofOwnerFacts(definitionSeed, definitionFocuses, validationProofRequirements)
+	if err != nil {
+		return nil, fmt.Errorf("runtime validation proof owner facts: %w", err)
+	}
 	requirements := []runtimecontract.RuntimeRequirement{
 		{Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile, Reason: "workspace manifest required"},
 		{Kind: runtimecontract.PrerequisiteKindValidationScratch, OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator, Reason: "validation scratch required"},
 		{Kind: runtimecontract.PrerequisiteKindProviderCeiling, OwnerModuleID: runtimecontract.RuntimeModuleLLM, MinimumBytes: 96 * 1024, Reason: "provider ceiling required"},
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassStateChange, RequiredCapabilities: []string{runtimecontract.StepKindFileEdit}, Reason: "state-change capability required"},
-		// file/read and managed validation are sealed non-mutating validation operations.
-		// shell/command remains available for state-change-capable shell work, but generic
-		// produce_validation must not depend exclusively on a side-effecting kind.
+		// file/read is the neutral non-mutating validation baseline. Managed
+		// validation is acquired only when an admitted exact focus/profile declares
+		// that operation kind; MCP-only Definitions must not implicitly enlist Shell.
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleFile, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.StepKindFileRead}, Reason: "read-only validation capability required"},
-		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleShell, CapabilityClass: runtimecontract.RuntimeCapabilityClassValidation, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Reason: "managed validation capability required"},
 		{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleDecision, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindDecisionRequest}, Reason: "governance capability required"},
 	}
 	profileRequirements, err := runtimeProfileCapabilityRequirements(activation.ExecutionContract.ProfileContracts, activation.OperationPolicies)
@@ -148,6 +159,83 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 		return nil, err
 	}
 	return &bootstrap, nil
+}
+
+// bindRuntimeValidationProofOwnerFacts is the sole Application compiler step
+// that connects a Definition-owned exact CWI requirement to an already
+// declared selectable managed-validation owner fact. It never creates an
+// owner fact, chooses a recipe, or interprets an owner-native preparation.
+func bindRuntimeValidationProofOwnerFacts(
+	seed runtimecontract.RuntimeDefinitionSeed,
+	focuses []runtimecontract.RuntimeDefinitionFocus,
+	requirements []runtimecontract.RuntimeValidationProofRequirement,
+) ([]runtimecontract.RuntimeDefinitionFocus, error) {
+	ret := runtimecontract.CloneRuntimeDefinitionFocuses(focuses)
+	for focusIndex := range ret {
+		focus := &ret[focusIndex]
+		if len(focus.CoverageWorkItemIDs) != 1 {
+			continue
+		}
+		requirement, found := runtimecontract.RuntimeValidationProofRequirementForCoverage(requirements, focus.CoverageWorkItemIDs[0])
+		if !found {
+			continue
+		}
+		refRemap := make(map[string]string)
+		matchedOwnerFact := false
+		for index := range focus.RequiredOwnerFacts {
+			fact := focus.RequiredOwnerFacts[index].Normalized()
+			if !runtimeOwnerFactCarriesValidationProofRequirement(fact) {
+				continue
+			}
+			matchedOwnerFact = true
+			if fact.ValidationProofRequirementHash != "" && fact.ValidationProofRequirementHash != requirement.Hash {
+				return nil, fmt.Errorf("focus %q owner fact carries mismatched validation proof requirement", focus.ID)
+			}
+			oldRef := runtimecontract.RuntimeOwnerFactRequirementRef(fact)
+			fact.ValidationProofRequirementHash = requirement.Hash
+			focus.RequiredOwnerFacts[index] = fact
+			refRemap[oldRef] = runtimecontract.RuntimeOwnerFactRequirementRef(fact)
+		}
+		for index := range focus.OwnerFactConvergences {
+			convergence := focus.OwnerFactConvergences[index].Normalized()
+			fact := convergence.Requirement
+			if runtimeOwnerFactCarriesValidationProofRequirement(fact) {
+				if fact.ValidationProofRequirementHash != "" && fact.ValidationProofRequirementHash != requirement.Hash {
+					return nil, fmt.Errorf("focus %q owner-fact convergence carries mismatched validation proof requirement", focus.ID)
+				}
+				oldRef := runtimecontract.RuntimeOwnerFactRequirementRef(fact)
+				fact.ValidationProofRequirementHash = requirement.Hash
+				convergence.Requirement = fact
+				refRemap[oldRef] = runtimecontract.RuntimeOwnerFactRequirementRef(fact)
+			}
+			focus.OwnerFactConvergences[index] = convergence
+		}
+		if !matchedOwnerFact {
+			return nil, fmt.Errorf("focus %q managed validation proof requirement has no explicit selectable-surface owner fact and convergence", focus.ID)
+		}
+		if len(refRemap) != 0 {
+			for index := range focus.OwnerFactConvergences {
+				dependencies := append([]string(nil), focus.OwnerFactConvergences[index].DependsOnRequirementRefs...)
+				for dependencyIndex, dependency := range dependencies {
+					if replacement, ok := refRemap[dependency]; ok {
+						dependencies[dependencyIndex] = replacement
+					}
+				}
+				focus.OwnerFactConvergences[index].DependsOnRequirementRefs = dependencies
+			}
+		}
+	}
+	ret = runtimecontract.NormalizeRuntimeDefinitionFocuses(ret)
+	if err := runtimecontract.ValidateRuntimeDefinitionFocuses(seed, ret); err != nil {
+		return nil, err
+	}
+	return ret, nil
+}
+
+func runtimeOwnerFactCarriesValidationProofRequirement(value runtimecontract.RuntimeOwnerFactRequirement) bool {
+	value = value.Normalized()
+	return value.FactKind == runtimecontract.RuntimeOwnerFactSelectableValidationSurface &&
+		value.OperationKind == runtimecontract.RuntimeBlockKindManagedValidationSession
 }
 
 func containsRuntimeEvidenceKind(values []string, wanted string) bool {

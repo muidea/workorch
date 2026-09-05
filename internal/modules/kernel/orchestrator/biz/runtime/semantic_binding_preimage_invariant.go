@@ -135,8 +135,13 @@ func buildRuntimeSemanticBindingPreimageInventory(ledger runtimecontract.Runtime
 		byBindingID: make(map[string]runtimeSemanticBindingPreimage),
 		byFocusID:   make(map[string][]runtimeSemanticBindingPreimage),
 	}
-	active := ledger.Clone()
+	// Detach only the active generation. Cloning before clearing History would
+	// deep-copy every immutable generation and then traverse each one again
+	// below, multiplying validation cost without strengthening the preimage
+	// proof.
+	active := ledger
 	active.History = nil
+	active = active.Clone()
 	if err := addRuntimeSemanticLedgerBindingPreimages(&inventory, "active", active); err != nil {
 		return runtimeSemanticBindingPreimageInventory{}, err
 	}

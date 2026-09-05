@@ -186,8 +186,9 @@ promotion；activation compiler 只能消费 promotion 后的正式 startup inpu
 11. Definition item、edge、gate、gate membership、partition 和总字节数符合彼此独立的容量预算；
 12. 不因 context budget 较小而裁剪 authority inventory；
 13. candidate 封存完整 normalized typed Profile snapshot，hash 与 candidate 中封存值一致；每个 Profile-required
-    acceptance/deliverable source 具有 exact `scope + id` proof declaration、非空受支持 evidence kinds 和至少一个可返回
-    对应 typed owner receipt 的 accepted operation；wildcard 不能替代 exact proof，多个 Profile 不能重复声明同一 required source；
+    acceptance/deliverable source 必须映射到一个已 admission 的 exact CWI，并可由唯一 activation compiler 生成 canonical
+    exact proof declaration，且具有非空受支持 evidence kinds 和至少一个可返回对应 typed owner receipt 的 accepted
+    operation；wildcard 只能作为已 admission exact CWI 的声明模板，不能替代 exact CWI proof 或注入 current owner fact、recipe/native check、dispatch/credit authority；
 14. Profile requirement/convergence declaration 无悬空 dependency 或 cycle，candidate bindings 与从 exact Profile snapshot
     独立派生的 manifest 逐项一致；
 15. admission result 在输入 slice/map permutation 后保持同一 candidate/admission-result hash。
@@ -197,7 +198,8 @@ promotion；activation compiler 只能消费 promotion 后的正式 startup inpu
 和 bootstrap；结果必须绑定 promotion 产生的 `DefinitionRevision + StartupInputHash`。任何 candidate/promoted snapshot 漂移均返回
 stale/conflict，不得复用旧 admission result 或部分编译物。
 
-Static completeness 只检查**已声明合同**。稳定错误码 `declared_prerequisite_unresolved` 表示 candidate-owned 显式
+Static completeness 只检查**已声明合同**。activation compiler 生成的 exact declaration 只命名已经 admission 的 CWI，
+不从 Goal/DoD 文本推断新的业务要求。稳定错误码 `declared_prerequisite_unresolved` 表示 candidate-owned 显式
 `RequiresRef`/`DependsOnItemRef` 没有唯一 source/provider closure；`definition_profile_contract_invalid` 表示 Profile-required
 CWI 没有 exact executable proof closure；`definition_profile_prerequisite_unresolved` 表示 Profile-derived required owner fact
 或其 candidate manifest 没有唯一 acquisition/reobserve closure。后两者要求 `select_or_fix_template_profile`，前者要求

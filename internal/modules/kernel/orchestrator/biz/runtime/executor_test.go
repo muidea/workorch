@@ -136,11 +136,22 @@ func (e *passingManagedValidationExecutor) ExecuteRuntimeOperation(ctx context.C
 		return RuntimeOperationExecutionResult{}, fmt.Errorf("managed validation fixture requires one sealed recipe, got %d", len(request.ValidationRecipes))
 	}
 	recipeID := request.ValidationRecipes[0].ID
-	checkRef := "check/" + recipeID
+	if request.ValidationProofBinding.RequirementHash == "" || request.ValidationProofBinding.ValidationRecipeID != recipeID || len(request.ValidationProofBinding.CheckAttestations) == 0 {
+		return RuntimeOperationExecutionResult{}, fmt.Errorf("managed validation fixture requires the sealed exact proof binding")
+	}
+	protocolRef := request.ValidationProofBinding.CheckAttestations[0].ObservationProtocolRef
+	nativeChecks := make([]string, 0, len(request.ValidationProofBinding.CheckAttestations))
+	for _, attestation := range request.ValidationProofBinding.CheckAttestations {
+		if attestation.ObservationProtocolRef != protocolRef {
+			return RuntimeOperationExecutionResult{}, fmt.Errorf("managed validation fixture received mixed observation protocols")
+		}
+		nativeChecks = append(nativeChecks, attestation.NativeCheckRef)
+	}
 	evidence := runtimecontract.RuntimeOperationEvidence{
 		Summary: "current workspace state validated",
 		Validation: &runtimecontract.RuntimeValidationObservation{
-			RecipeID: recipeID, ExecutedChecks: []string{checkRef}, PassedChecks: []string{checkRef},
+			RecipeID: recipeID, ObservationProtocolRef: protocolRef,
+			ExecutedChecks: append([]string(nil), nativeChecks...), PassedChecks: append([]string(nil), nativeChecks...),
 		},
 	}
 	receipt := runtimecontract.RuntimeOperationReceipt{
@@ -1250,9 +1261,23 @@ func TestRuntimeControllerExecutesManagedValidationWithSealedRecipeAfterResource
 	// previous owner snapshot.
 	refreshedPrerequisite := runtimeTestManagedValidationPrerequisite("operation-admissibility-shell-refreshed")
 	refreshedInventory := runtimeTestManagedValidationInventory(refreshedPrerequisite.ID)
-	refreshedInventory.ValidationRecipes = refreshedInventory.ValidationRecipes[1:]
-	refreshedInventory.ValidationSurfaces = refreshedInventory.ValidationSurfaces[1:]
+	refreshedInventory.ValidationSurfaces[0].Readiness = runtimecontract.RuntimeValidationSurfaceUnavailable
+	refreshedInventory.ValidationSurfaces[0].ReadinessReason = "sealed recipe is no longer executable in the current owner snapshot"
+	refreshedInventory.ValidationSurfaces[0].InputBindingRef = ""
+	refreshedInventory.ValidationSurfaces[0].ProofApplicability = runtimecontract.RuntimeValidationProofNotDeclared
+	refreshedInventory.ValidationSurfaces[0].ProofRequirementBindings = nil
+	refreshedInventory.ValidationSurfaces[0].ProofRequirementPreparations = nil
+	refreshedInventory.ValidationSurfaces[0].CheckRefs = nil
 	refreshedInventory.ObservedRevision = "shell-policy-test-v2"
+	refreshedInventory.ValidationRecipeRefs = runtimecontract.RuntimeSelectableValidationRecipeRefs(refreshedInventory.ValidationSurfaces)
+	declaredRecipes := runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(runtimeManagedValidationEvidencePolicies())
+	for _, recipe := range declaredRecipes {
+		for _, recipeRef := range refreshedInventory.ValidationRecipeRefs {
+			if recipe.ID == recipeRef {
+				refreshedInventory.ValidationRecipes = append(refreshedInventory.ValidationRecipes, recipe)
+			}
+		}
+	}
 	refreshedInventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(refreshedInventory)
 	refreshedObservation := runtimecontract.RuntimePrerequisiteObservation{
 		PrerequisiteID: refreshedPrerequisite.ID, Kind: refreshedPrerequisite.Kind,

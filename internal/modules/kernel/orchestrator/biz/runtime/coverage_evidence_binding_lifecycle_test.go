@@ -503,6 +503,20 @@ func sealMultiTargetExactBindingProofsForTest(t *testing.T, targets []string, in
 	}
 	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, prerequisite)
 	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
+	facts, err = runtimeTestBindManagedValidationProofRequirements(facts)
+	if err != nil {
+		t.Fatalf("bind multi-target validation proof requirement: %v", err)
+	}
+	for index := range facts.Resources.PrerequisiteObservations {
+		ownerObservation := &facts.Resources.PrerequisiteObservations[index]
+		for _, ownerCatalog := range facts.Resources.OperationAdmissibilities {
+			if ownerCatalog.PrerequisiteID != ownerObservation.PrerequisiteID || ownerCatalog.OwnerModuleID != ownerObservation.OwnerModuleID {
+				continue
+			}
+			ownerObservation.ContentHash = ownerCatalog.SnapshotID
+			ownerObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(*ownerObservation)
+		}
+	}
 	definition := controllerDefinition()
 	if includeValidation {
 		definition.CapabilityContract = append(definition.CapabilityContract, runtimecontract.RuntimeBlockKindManagedValidationSession)
@@ -534,7 +548,11 @@ func sealMultiTargetExactBindingProofsForTest(t *testing.T, targets []string, in
 	if err := order.ValidateAgainstManifest(manifest); err != nil {
 		t.Fatal(err)
 	}
-	declarationRef := "semantic/multi-target-exact/" + string(manifest.CoverageItems[0].ID)
+	if len(manifest.ProofObligations) != 1 || manifest.ProofObligations[0].CoverageWorkItemID != manifest.CoverageItems[0].ID {
+		t.Fatalf("multi-target semantic fixture has no exact compiled obligation: %+v", manifest.ProofObligations)
+	}
+	obligation := manifest.ProofObligations[0].Normalized()
+	declarationRef := obligation.DeclarationRef
 	stateChangeProposal := runtimecontract.RuntimeSemanticProofProposal{
 		CoverageWorkItemID: manifest.CoverageItems[0].ID, OwnerModuleID: runtimecontract.RuntimeModuleFile,
 		OperationKind: runtimecontract.StepKindFileWrite,
@@ -563,13 +581,11 @@ func sealMultiTargetExactBindingProofsForTest(t *testing.T, targets []string, in
 				continue
 			}
 			shellCatalog = ownerCatalog.Normalized()
-			for _, candidateSurface := range shellCatalog.ValidationSurfaces {
-				candidateSurface = candidateSurface.Normalized()
-				if candidateSurface.Readiness == runtimecontract.RuntimeValidationSurfaceReady &&
-					candidateSurface.ProofApplicability == runtimecontract.RuntimeValidationProofDirect {
-					surface = candidateSurface
-					break
-				}
+			if obligation.ValidationProofRequirement != nil {
+				surface, _, _ = runtimecontract.RuntimeValidationSurfaceForProofRequirement(
+					shellCatalog.ValidationSurfaces,
+					*obligation.ValidationProofRequirement,
+				)
 			}
 		}
 		if shellCatalog.SnapshotID == "" || surface.ID == "" {
@@ -593,7 +609,7 @@ func sealMultiTargetExactBindingProofsForTest(t *testing.T, targets []string, in
 		proposalFixtures = append(proposalFixtures, proposalFixture{
 			proposal: validationProposal, catalog: shellCatalog,
 			catalogObservationID: shellObservation.ObservationID,
-			requiredCheckRefs:    append([]string(nil), surface.CheckRefs...),
+			requiredCheckRefs:    append([]string(nil), obligation.ValidationProofRequirement.RequiredCheckRefs...),
 		})
 	}
 	apply := func(event RuntimeInternalEvent) {

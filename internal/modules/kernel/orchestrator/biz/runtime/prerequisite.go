@@ -199,12 +199,16 @@ func runtimeRequirementsWithCapabilityPrerequisiteFacts(facts runtimecontract.Ru
 // prospective target already has owner feasibility authority and must not be
 // read before creation. Discovery source IDs only assert the owner facts that
 // the profile declared as a bounded basis.
-func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []runtimecontract.RuntimeRequirement {
+func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) []runtimecontract.RuntimeRequirement {
 	facts = facts.Normalized()
 	focus, required := runtimeCurrentTargetGroundingFocus(facts)
 	if !required {
 		return nil
 	}
+	prospectiveAcquisitionConsumed := prospectiveOwnerFactAcquisitionReceiptCommitted(
+		facts,
+		runtimeCoverageProofLineageArgument(proofLineages),
+	)
 	requirements := make([]runtimecontract.RuntimeRequirement, 0, len(focus.TargetRefs)+len(focus.TargetDiscoverySources)+1)
 	// Use the same owner-private target classification as SM-2 grounding and
 	// SM-3 candidate admission. Only targets classified as currently existing
@@ -233,6 +237,13 @@ func runtimeTargetGroundingRequirements(facts runtimecontract.RuntimeFacts) []ru
 	if len(targetAuthority.targetRefs) == 0 && !targetAuthority.hasProspectiveTargets() {
 		selection := currentFocusTargetSelection(facts)
 		if selection == nil {
+			if prospectiveAcquisitionConsumed {
+				// Re-querying the create-only selector after its accepted
+				// acquisition receipt can only observe the now-existing target as
+				// unsupported. Keep compiling the ordinary manifest/catalog
+				// freshness requirements below so the required owner is reobserved.
+				goto selectionRequirementDone
+			}
 			// A prospective selector is itself a sealed target
 			// acquisition requirement.  Semantic planning may provide the
 			// selector/prospective declaration without a discovery-source hint;

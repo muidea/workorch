@@ -5,6 +5,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +21,7 @@ import (
 const (
 	shellValidationStaticUnavailableReason       = "owner_static_execution_unavailable"
 	shellValidationApplicableInputRequiredReason = "applicable_workspace_input_required"
+	shellGoTestObservationProtocolRef            = "shell/go-test-json/v1"
 )
 
 // PreflightRuntimeValidationRecipes returns the deterministic subset of
@@ -94,19 +98,64 @@ func runtimeValidationRecipesApplicableToManifest(recipes []runtimemodel.Runtime
 // shellValidationSurfaces preserves every activation-declared recipe as one
 // Shell-owner readiness fact while keeping the executable recipe inventory
 // ready-only. It owns no Runtime transition and performs no additional I/O.
-func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.RuntimeValidationRecipe, binding runtimemodel.RuntimeWorkspaceManifestBinding, catalogObservedRevision string) []runtimemodel.RuntimeValidationSurface {
+func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.RuntimeValidationRecipe, requirements []runtimemodel.RuntimeValidationProofRequirement, binding runtimemodel.RuntimeWorkspaceManifestBinding, catalogObservedRevision string, workspaceDirectories ...string) []runtimemodel.RuntimeValidationSurface {
 	binding = binding.Normalized()
 	catalogObservedRevision = strings.TrimSpace(catalogObservedRevision)
+	workspaceDirectory := ""
+	if len(workspaceDirectories) != 0 {
+		workspaceDirectory = strings.TrimSpace(workspaceDirectories[0])
+	}
 	staticIDs := shellValidationRecipeIDs(staticallyReady)
 	readyIDs := shellValidationRecipeIDs(ready)
 	ret := make([]runtimemodel.RuntimeValidationSurface, 0, len(declared))
 	for _, recipe := range runtimemodel.NormalizeRuntimeValidationRecipes(declared) {
 		schemaHash := shellValidationRecipeSchemaHash(recipe)
+		bindings := make([]runtimemodel.RuntimeValidationProofRequirementBinding, 0)
+		checks := make([]string, 0)
+		preparations := make([]runtimemodel.RuntimeValidationProofPreparation, 0)
+		compatibleRequirements := 0
+		if staticIDs[recipe.ID] {
+			for _, requirement := range runtimemodel.NormalizeRuntimeValidationProofRequirements(requirements) {
+				if requirement.Validate() != nil ||
+					(requirement.ValidationRecipeID != "" && requirement.ValidationRecipeID != recipe.ID) {
+					continue
+				}
+				compatibleRequirements++
+				attestations, observable := shellValidationCheckAttestations(recipe, requirement)
+				if !observable {
+					continue
+				}
+				preparation, observableNow, preparable := shellValidationProofPreparation(workspaceDirectory, binding.Manifest, catalogObservedRevision, readyIDs[recipe.ID], recipe, requirement, attestations)
+				if !observableNow {
+					if preparable {
+						preparations = append(preparations, preparation)
+					}
+					continue
+				}
+				if !readyIDs[recipe.ID] {
+					continue
+				}
+				ownerBinding, err := runtimemodel.RuntimeValidationProofRequirementBindingForRecipe(requirement, recipe.ID, attestations...)
+				if err != nil {
+					continue
+				}
+				bindings = append(bindings, ownerBinding)
+				checks = append(checks, requirement.RequiredCheckRefs...)
+			}
+		}
 		surface := runtimemodel.RuntimeValidationSurface{
 			ID: recipe.ID, OwnerModuleID: ModuleID, OperationKind: runtimemodel.RuntimeBlockKindManagedValidationSession,
-			CheckRefs: []string{shellValidationRecipeProofCheckRef(recipe.ID)}, ProofApplicability: runtimemodel.RuntimeValidationProofDirect, EffectScope: runtimemodel.RuntimeEffectEphemeralSession,
+			CheckRefs: normalizeShellStrings(checks), ProofRequirementBindings: bindings, ProofRequirementPreparations: preparations,
+			ProofApplicability: runtimemodel.RuntimeValidationProofNotDeclared, EffectScope: runtimemodel.RuntimeEffectEphemeralSession,
 			IdempotencyClass: runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
 			InputSchemaHash:  schemaHash,
+		}
+		if len(bindings) != 0 {
+			surface.ProofApplicability = runtimemodel.RuntimeValidationProofDirect
+		} else if len(preparations) != 0 {
+			surface.ProofApplicability = runtimemodel.RuntimeValidationProofDirect
+		} else if compatibleRequirements != 0 {
+			surface.ProofApplicability = runtimemodel.RuntimeValidationProofAuxiliary
 		}
 		switch {
 		case readyIDs[recipe.ID]:
@@ -129,11 +178,211 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 	return runtimemodel.NormalizeRuntimeValidationSurfaces(ret)
 }
 
+// shellValidationCheckAttestations maps Definition-owned checks to exact Go
+// test identities emitted by the owner-native verbose test protocol. Recipes
+// without a structured native observation protocol remain executable owner
+// tools, but cannot become direct per-CWI proof surfaces.
+func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecipe, requirement runtimemodel.RuntimeValidationProofRequirement) ([]runtimemodel.RuntimeValidationCheckAttestationBinding, bool) {
+	command, args, err := shellCommandSpec(recipe.Command, recipe.Args)
+	if err != nil {
+		return nil, false
+	}
+	command, args, _ = normalizeShellExecutionCommand(command, args)
+	if filepath.Base(strings.TrimSpace(command)) != "go" || len(args) == 0 || strings.TrimSpace(args[0]) != "test" {
+		return nil, false
+	}
+	for index := 1; index < len(args); index++ {
+		arg := strings.TrimSpace(args[index])
+		if arg == "-run" || arg == "--run" || strings.HasPrefix(arg, "-run=") || strings.HasPrefix(arg, "--run=") {
+			return nil, false
+		}
+	}
+	ret := make([]runtimemodel.RuntimeValidationCheckAttestationBinding, 0, len(requirement.RequiredCheckRefs))
+	for _, required := range requirement.Normalized().RequiredCheckRefs {
+		suffix := strings.TrimPrefix(required, "workorch-cwi-check-")
+		if suffix == required || suffix == "" {
+			return nil, false
+		}
+		ret = append(ret, runtimemodel.RuntimeValidationCheckAttestationBinding{
+			RequiredCheckRef: required, ObservationProtocolRef: shellGoTestObservationProtocolRef,
+			NativeCheckRef: "TestWorkOrchCWI_" + strings.ToUpper(suffix),
+		})
+	}
+	return runtimemodel.NormalizeRuntimeValidationCheckAttestationBindings(ret), len(ret) != 0
+}
+
+func shellValidationNativeCheckTargetRef(requirement runtimemodel.RuntimeValidationProofRequirement) string {
+	requirement = requirement.Normalized()
+	digest := sha256.Sum256([]byte("workorch-shell-native-check-target/v1\x00" + requirement.Hash))
+	return "workorch_validation/cwi_" + hex.EncodeToString(digest[:10]) + "_test.go"
+}
+
+func shellValidationProofPreparation(workspaceDirectory string, manifest runtimemodel.WorkspaceManifest, catalogObservedRevision string, recipeReady bool, recipe runtimemodel.RuntimeValidationRecipe, requirement runtimemodel.RuntimeValidationProofRequirement, attestations []runtimemodel.RuntimeValidationCheckAttestationBinding) (runtimemodel.RuntimeValidationProofPreparation, bool, bool) {
+	nativeChecksDeclared := shellNativeValidationChecksDeclared(workspaceDirectory, manifest.TargetRefs, attestations)
+	if nativeChecksDeclared && recipeReady {
+		return runtimemodel.RuntimeValidationProofPreparation{}, true, true
+	}
+	targetRef := ""
+	if !nativeChecksDeclared {
+		targetRef = shellValidationNativeCheckTargetRef(requirement)
+	}
+	if targetRef != "" && shellStringIncluded(manifest.TargetRefs, targetRef) {
+		digest := sha256.Sum256([]byte("workorch-shell-native-check-repair-target/v1\x00" + requirement.Hash + "\x00" + manifest.Revision))
+		base := strings.TrimSuffix(targetRef, "_test.go")
+		for index := 0; index < 8; index++ {
+			candidate := fmt.Sprintf("%s_repair_%s_%d_test.go", base, hex.EncodeToString(digest[:4]), index+1)
+			if !shellStringIncluded(manifest.TargetRefs, candidate) {
+				targetRef = candidate
+				break
+			}
+		}
+	}
+	requiredTargets := []string(nil)
+	if targetRef != "" {
+		requiredTargets = []string{targetRef}
+	}
+	constraint, ok := shellProspectiveTargetSatisfactionConstraint(recipe, manifest.TargetRefs, catalogObservedRevision, requiredTargets...)
+	if !ok {
+		return runtimemodel.RuntimeValidationProofPreparation{}, false, false
+	}
+	preparation := runtimemodel.RuntimeValidationProofPreparation{
+		RequirementHash: requirement.Hash, DefinitionRevision: requirement.DefinitionRevision,
+		CoverageWorkItemID: requirement.CoverageWorkItemID, DeclarationRef: requirement.DeclarationRef,
+		ValidationRecipeID: recipe.ID, TargetRef: targetRef,
+		CheckAttestations:                       runtimemodel.CloneRuntimeValidationCheckAttestationBindings(attestations),
+		ProspectiveTargetSatisfactionConstraint: constraint,
+	}.Normalized()
+	if preparation.Validate() != nil {
+		return runtimemodel.RuntimeValidationProofPreparation{}, false, false
+	}
+	return preparation, false, true
+}
+
+func shellNativeValidationChecksDeclared(workspaceDirectory string, targetRefs []string, attestations []runtimemodel.RuntimeValidationCheckAttestationBinding) bool {
+	root, err := filepath.Abs(strings.TrimSpace(workspaceDirectory))
+	if err != nil || root == "" || len(attestations) == 0 {
+		return false
+	}
+	expected := make(map[string]struct{}, len(attestations))
+	for _, attestation := range attestations {
+		attestation = attestation.Normalized()
+		if attestation.ObservationProtocolRef != shellGoTestObservationProtocolRef || attestation.NativeCheckRef == "" {
+			return false
+		}
+		expected[attestation.NativeCheckRef] = struct{}{}
+	}
+	for _, targetRef := range normalizeShellStrings(targetRefs) {
+		if !strings.HasSuffix(targetRef, "_test.go") {
+			continue
+		}
+		path := filepath.Join(root, filepath.FromSlash(targetRef))
+		relative, relErr := filepath.Rel(root, path)
+		if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			continue
+		}
+		file, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if parseErr != nil {
+			continue
+		}
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Recv != nil || !shellGoTestFunctionHasAssertion(function) {
+				continue
+			}
+			delete(expected, function.Name.Name)
+		}
+	}
+	return len(expected) == 0
+}
+
+func shellGoTestFunctionHasAssertion(function *ast.FuncDecl) bool {
+	if function == nil || function.Type == nil || function.Type.Params == nil || len(function.Type.Params.List) != 1 || function.Type.Results != nil || function.Body == nil {
+		return false
+	}
+	parameter := function.Type.Params.List[0]
+	if len(parameter.Names) != 1 {
+		return false
+	}
+	pointer, ok := parameter.Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	selector, ok := pointer.X.(*ast.SelectorExpr)
+	if !ok || selector.Sel == nil || selector.Sel.Name != "T" {
+		return false
+	}
+	parameterName := parameter.Names[0].Name
+	hasAssertion := false
+	ast.Inspect(function.Body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selected, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || selected.Sel == nil {
+			return true
+		}
+		receiver, ok := selected.X.(*ast.Ident)
+		if !ok || receiver.Name != parameterName {
+			return true
+		}
+		switch selected.Sel.Name {
+		case "Error", "Errorf", "Fatal", "Fatalf", "Fail", "FailNow":
+			hasAssertion = true
+			return false
+		default:
+			return true
+		}
+	})
+	return hasAssertion
+}
+
+func instrumentManagedValidationNativeChecks(request *RuntimeCommandRequest) error {
+	if request == nil || len(request.ValidationCheckAttestations) == 0 {
+		return nil
+	}
+	requiredRefs := make([]string, 0, len(request.ValidationCheckAttestations))
+	nativeChecks := make([]string, 0, len(request.ValidationCheckAttestations))
+	for _, raw := range request.ValidationCheckAttestations {
+		attestation := raw.Normalized()
+		if attestation.ObservationProtocolRef != shellGoTestObservationProtocolRef ||
+			!strings.HasPrefix(attestation.NativeCheckRef, "TestWorkOrchCWI_") {
+			return fmt.Errorf("managed validation has unsupported native check attestation")
+		}
+		requiredRefs = append(requiredRefs, attestation.RequiredCheckRef)
+		nativeChecks = append(nativeChecks, attestation.NativeCheckRef)
+	}
+	if err := runtimemodel.ValidateRuntimeValidationCheckAttestationBindings(request.ValidationCheckAttestations, requiredRefs); err != nil {
+		return err
+	}
+	command, args, err := shellCommandSpec(request.Command, request.Args)
+	if err != nil {
+		return err
+	}
+	command, args, _ = normalizeShellExecutionCommand(command, args)
+	if filepath.Base(strings.TrimSpace(command)) != "go" || len(args) == 0 || strings.TrimSpace(args[0]) != "test" {
+		return fmt.Errorf("managed validation native check attestation requires go test")
+	}
+	for index := 1; index < len(args); index++ {
+		arg := strings.TrimSpace(args[index])
+		if arg == "-run" || arg == "--run" || strings.HasPrefix(arg, "-run=") || strings.HasPrefix(arg, "--run=") {
+			return fmt.Errorf("managed validation recipe already constrains native checks")
+		}
+	}
+	instrumented := make([]string, 0, len(args)+5)
+	instrumented = append(instrumented, args[0], "-json", "-count=1", "-run", "^("+strings.Join(normalizeShellStrings(nativeChecks), "|")+")$")
+	instrumented = append(instrumented, args[1:]...)
+	request.Command = command
+	request.Args = instrumented
+	request.ValidationCheckAttestations = runtimemodel.CloneRuntimeValidationCheckAttestationBindings(request.ValidationCheckAttestations)
+	return nil
+}
+
 // shellProspectiveTargetSatisfactionConstraint publishes one mandatory clause
 // for each missing input of the exact activation-sealed recipe. A bounded set
 // may cover several clauses, but every clause is required; Shell never
 // publishes an alternative aggregation.
-func shellProspectiveTargetSatisfactionConstraint(recipe runtimemodel.RuntimeValidationRecipe, currentTargetRefs []string, catalogObservedRevision string) (runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint, bool) {
+func shellProspectiveTargetSatisfactionConstraint(recipe runtimemodel.RuntimeValidationRecipe, currentTargetRefs []string, catalogObservedRevision string, requiredNativeTargetRefs ...string) (runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint, bool) {
 	recipe = recipe.Normalized()
 	catalogObservedRevision = strings.TrimSpace(catalogObservedRevision)
 	isGoTest, packageRoots, ok := shellGoTestManifestRequirements(recipe)
@@ -141,7 +390,18 @@ func shellProspectiveTargetSatisfactionConstraint(recipe runtimemodel.RuntimeVal
 		return runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{}, false
 	}
 	currentTargetRefs = normalizeShellStrings(currentTargetRefs)
-	clauses := make([]runtimemodel.RuntimeProspectiveTargetClause, 0, 2+len(packageRoots))
+	clauses := make([]runtimemodel.RuntimeProspectiveTargetClause, 0, 2+len(packageRoots)+len(requiredNativeTargetRefs))
+	for _, targetRef := range normalizeShellStrings(requiredNativeTargetRefs) {
+		if shellStringIncluded(currentTargetRefs, targetRef) {
+			continue
+		}
+		clauses = append(clauses, runtimemodel.RuntimeProspectiveTargetClause{
+			ID: "native-check-target/" + targetRef,
+			AllOf: []runtimemodel.RuntimeProspectiveTargetPredicate{{
+				Kind: runtimemodel.RuntimeProspectiveTargetPredicatePathExact, Value: targetRef,
+			}},
+		})
+	}
 	if !shellManifestHasGoModule(currentTargetRefs) {
 		clauses = append(clauses, runtimemodel.RuntimeProspectiveTargetClause{
 			ID: "go-module-root",
@@ -188,19 +448,6 @@ func shellProspectiveTargetSatisfactionConstraint(recipe runtimemodel.RuntimeVal
 		return runtimemodel.RuntimeProspectiveTargetSatisfactionConstraint{}, false
 	}
 	return value, true
-}
-
-// shellValidationRecipeProofCheckRef is the exact owner-published aggregate
-// check for one recipe execution with real, non-conflicting work. Tool-native
-// checks remain in the observation for audit, while semantic binding consumes
-// this bounded identity instead of incorrectly treating RecipeID as a check.
-func shellValidationRecipeProofCheckRef(recipeID string) string {
-	recipeID = strings.TrimSpace(recipeID)
-	if recipeID == "" {
-		return ""
-	}
-	digest := sha256.Sum256([]byte("shell-managed-validation-check\x00" + recipeID))
-	return "shell-validation-check-" + hex.EncodeToString(digest[:])[:20]
 }
 
 func shellValidationRecipeIDs(recipes []runtimemodel.RuntimeValidationRecipe) map[string]bool {

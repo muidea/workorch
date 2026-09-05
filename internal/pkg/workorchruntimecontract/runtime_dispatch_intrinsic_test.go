@@ -351,6 +351,8 @@ func runtimeManagedValidationDispatchIntrinsicFixture(t *testing.T) RuntimeDispa
 		Proofs: []CoverageEvidenceProof{{
 			EvidenceKind: EvidenceKindValidation, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectEphemeralSession},
 			AllowedOperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: recipeID,
+			ValidationProofRequirementHash: "runtime-validation-proof-requirement-dispatch-1", RequiredCheckRefs: []string{"workorch-cwi-check-dispatch-1"},
+			ValidationCheckAttestations: runtimeValidationCheckAttestationsForTest([]string{"workorch-cwi-check-dispatch-1"}),
 		}},
 		TargetRefs: []string{"target.txt"}, DeclarationRef: "test/runtime-dispatch-intrinsic",
 	}.Normalized()

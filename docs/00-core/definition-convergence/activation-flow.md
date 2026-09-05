@@ -68,8 +68,11 @@ Missing, pending, cross-scoped or non-`all_of` definitions fail before Run creat
 remain equal across bootstrap, facts, authority transaction and candidate. A caller cannot rebuild it from a projection or
 map during Resume.
 
-Profile wildcard evidence declarations remain policy for Definition-derived rows only; they cannot close an exact Profile-owned required
-CWI. A proof-incomplete Profile never reaches bootstrap compilation. The Runtime compiler repeats the Profile validation only as a
+Profile wildcard evidence declarations remain declarative policy templates for Definition-derived rows only; after an exact CWI is
+admitted, Application may instantiate their quality, target/selector, acquisition, repair and operation/evidence constraints onto that
+row. They cannot create current owner facts, recipe/native-check, dispatch or credit authority, or close a CWI. The activation compiler
+creates the row's canonical exact declaration. A
+proof-incomplete Profile never reaches bootstrap compilation. The Runtime compiler repeats the Profile validation only as a
 fail-closed SM-2 input defense if an internal caller bypasses normal admission; it does not open a second ticket or become a state owner.
 
 ## Typed RuntimeBootstrap

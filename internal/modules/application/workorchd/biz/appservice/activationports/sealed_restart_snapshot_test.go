@@ -161,6 +161,7 @@ func sealedRestartSnapshotBootstrap(t *testing.T, activation runtimecontract.Run
 			ID: "focus-1", SliceID: "slice-1",
 			AssessmentScope: item.SourceScope, AssessmentID: item.SourceID, AssessmentText: item.TargetText,
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			EvidenceDeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(item.SourceScope, item.SourceID),
 		}},
 		Slices: []runtimecontract.RuntimeAcceptanceSlice{slice}, CoverageItems: []runtimecontract.RuntimeCoverageItem{item},
 		ConvergencePolicy: runtimecontract.DefaultRuntimeConvergencePolicy(), RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),

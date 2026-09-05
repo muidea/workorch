@@ -697,6 +697,44 @@ func attachRuntimeSemanticProofObligationSchema(items map[string]any, manifest R
 		if !found {
 			return fmt.Errorf("runtime semantic proof-batch coverage %q has no sealed proof obligation", coverageID)
 		}
+		currentDeclarationRef := RuntimeSemanticCurrentDeclarationRef(obligation)
+		thenProperties := map[string]any{
+			"declarationRef": map[string]any{"const": currentDeclarationRef},
+		}
+		allOf = append(allOf, map[string]any{
+			"if": map[string]any{
+				"required":   []string{"coverageWorkItemId"},
+				"properties": map[string]any{"coverageWorkItemId": map[string]any{"const": string(coverageID)}},
+			},
+			"then": map[string]any{"properties": thenProperties},
+		})
+		if obligation.ValidationProofRequirement != nil && obligation.ValidationFailureRepair == nil && obligation.OwnerFactAcquisition == nil {
+			requirement := obligation.ValidationProofRequirement.Normalized()
+			selectableRecipes := RuntimeSelectableValidationRecipeRefsForProofRequirementInCatalogs(manifest.OwnerCatalogs, requirement)
+			then := map[string]any{}
+			if len(selectableRecipes) == 0 {
+				// The requirement does not make another validation owner invalid;
+				// it only makes an unbound Shell managed-validation proposal
+				// impossible for this CWI.
+				then["not"] = map[string]any{}
+			} else {
+				then["required"] = []string{"validationRecipeId"}
+				then["properties"] = map[string]any{
+					"validationRecipeId": stringEnumSchemaWithMinimum(selectableRecipes, 1),
+				}
+			}
+			allOf = append(allOf, map[string]any{
+				"if": map[string]any{
+					"required": []string{"coverageWorkItemId", "ownerModuleId", "operationKind"},
+					"properties": map[string]any{
+						"coverageWorkItemId": map[string]any{"const": string(coverageID)},
+						"ownerModuleId":      map[string]any{"const": RuntimeModuleShell},
+						"operationKind":      map[string]any{"const": RuntimeBlockKindManagedValidationSession},
+					},
+				},
+				"then": then,
+			})
+		}
 		if len(obligation.DeclarationProspectiveTargetAllOfConstraintRefs) != 0 {
 			allOf = append(allOf, map[string]any{
 				"if": map[string]any{

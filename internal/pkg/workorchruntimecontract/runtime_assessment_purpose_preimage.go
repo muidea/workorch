@@ -16,6 +16,11 @@ type RuntimeAssessmentPurposePreimage struct {
 	OwnerFactAcquisition *RuntimeSemanticOwnerFactAcquisition
 }
 
+type runtimeAssessmentPurposeBindingPreimage struct {
+	bindings []CoverageEvidenceBinding
+	preimage RuntimeAssessmentPurposePreimage
+}
+
 func (p RuntimeAssessmentPurposePreimage) Clone() RuntimeAssessmentPurposePreimage {
 	if p.OwnerFactAcquisition != nil {
 		value := p.OwnerFactAcquisition.Clone()
@@ -38,41 +43,86 @@ func ResolveRuntimeAssessmentPurposePreimage(
 	if err := ValidateCoverageEvidenceBindingProjection(bindings); err != nil {
 		return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment purpose binding preimage: %w", err)
 	}
-
-	var matches []RuntimeAssessmentPurposePreimage
-	active := ledger.Clone()
-	active.History = nil
-	if preimage, found, err := runtimeAssessmentPurposePreimageFromSemanticGeneration(active, bindings); err != nil {
+	entries, err := runtimeAssessmentPurposePreimagesFromSemanticLedger(ledger, false)
+	if err != nil {
 		return RuntimeAssessmentPurposePreimage{}, err
-	} else if found {
-		matches = append(matches, preimage)
 	}
-	for index, generation := range ledger.History {
-		if err := generation.Validate(); err != nil {
-			return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment purpose semantic history %d: %w", index, err)
-		}
-		if preimage, found, err := runtimeAssessmentPurposePreimageFromSemanticGeneration(generation.Snapshot, bindings); err != nil {
-			return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment purpose semantic history %d: %w", index, err)
-		} else if found {
-			matches = append(matches, preimage)
-		}
-	}
+	matches := runtimeAssessmentPurposePreimagesMatchingBindings(entries, bindings)
 	if len(matches) != 1 {
 		return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment purpose has %d exact semantic binding preimages", len(matches))
 	}
 	return matches[0].Clone(), nil
 }
 
+func runtimeAssessmentPurposePreimagesFromSemanticLedger(ledger RuntimeSemanticPlanningLedger, semanticLedgerAlreadyValidated bool) ([]runtimeAssessmentPurposeBindingPreimage, error) {
+	ret := make([]runtimeAssessmentPurposeBindingPreimage, 0)
+	// Detach only the active generation. Cloning the ledger before clearing
+	// History needlessly clones every immutable snapshot that is traversed
+	// separately below.
+	active := ledger
+	active.History = nil
+	active = active.Clone()
+	activeEntries, err := runtimeAssessmentPurposePreimagesFromSemanticGeneration(active)
+	if err != nil {
+		return nil, err
+	}
+	ret = append(ret, activeEntries...)
+	for index, generation := range ledger.History {
+		if !semanticLedgerAlreadyValidated {
+			if err := generation.Validate(); err != nil {
+				return nil, fmt.Errorf("runtime assessment purpose semantic history %d: %w", index, err)
+			}
+		}
+		entries, err := runtimeAssessmentPurposePreimagesFromSemanticGeneration(generation.Snapshot)
+		if err != nil {
+			return nil, fmt.Errorf("runtime assessment purpose semantic history %d: %w", index, err)
+		}
+		ret = append(ret, entries...)
+	}
+	return ret, nil
+}
+
+func runtimeAssessmentPurposePreimagesMatchingBindings(entries []runtimeAssessmentPurposeBindingPreimage, bindings []CoverageEvidenceBinding) []RuntimeAssessmentPurposePreimage {
+	matches := make([]RuntimeAssessmentPurposePreimage, 0, 1)
+	for _, entry := range entries {
+		if RuntimeCoverageEvidenceBindingProjectionsEqual(entry.bindings, bindings) {
+			matches = append(matches, entry.preimage)
+		}
+	}
+	return matches
+}
+
 func runtimeAssessmentPurposePreimageFromSemanticGeneration(
 	ledger RuntimeSemanticPlanningLedger,
 	bindings []CoverageEvidenceBinding,
 ) (RuntimeAssessmentPurposePreimage, bool, error) {
-	if ledger.Manifest == nil {
+	entries, err := runtimeAssessmentPurposePreimagesFromSemanticGeneration(ledger)
+	if err != nil {
+		return RuntimeAssessmentPurposePreimage{}, false, err
+	}
+	matches := runtimeAssessmentPurposePreimagesMatchingBindings(entries, bindings)
+	if len(matches) == 0 {
 		return RuntimeAssessmentPurposePreimage{}, false, nil
+	}
+	if len(matches) != 1 {
+		manifestHash := ""
+		if ledger.Manifest != nil {
+			manifestHash = ledger.Manifest.Normalized().Hash
+		}
+		return RuntimeAssessmentPurposePreimage{}, false, fmt.Errorf("runtime assessment purpose semantic manifest %q has duplicate binding preimages", manifestHash)
+	}
+	return matches[0].Clone(), true, nil
+}
+
+func runtimeAssessmentPurposePreimagesFromSemanticGeneration(
+	ledger RuntimeSemanticPlanningLedger,
+) ([]runtimeAssessmentPurposeBindingPreimage, error) {
+	if ledger.Manifest == nil {
+		return nil, nil
 	}
 	manifest := ledger.Manifest.Normalized()
 	if err := manifest.Validate(); err != nil {
-		return RuntimeAssessmentPurposePreimage{}, false, fmt.Errorf("runtime assessment purpose semantic manifest: %w", err)
+		return nil, fmt.Errorf("runtime assessment purpose semantic manifest: %w", err)
 	}
 	documents := make(map[string]RuntimeSemanticPlanDocument, len(ledger.BatchDocuments))
 	for _, document := range ledger.BatchDocuments {
@@ -83,7 +133,7 @@ func runtimeAssessmentPurposePreimageFromSemanticGeneration(
 		results[result.BatchID] = result.Normalized()
 	}
 
-	matchedFocuses := make([]CoverageFocus, 0, 1)
+	ret := make([]runtimeAssessmentPurposeBindingPreimage, 0)
 	for _, rawBatch := range ledger.Batches {
 		batch := rawBatch.Normalized()
 		if batch.State != RuntimeSemanticPlanBatchAccepted {
@@ -99,24 +149,26 @@ func runtimeAssessmentPurposePreimageFromSemanticGeneration(
 		}
 		focuses, _, err := CompileRuntimeSemanticBindings(manifest, batch.RequestLogicalID, document, feasibilities)
 		if err != nil {
-			return RuntimeAssessmentPurposePreimage{}, false, fmt.Errorf("runtime assessment purpose semantic batch %q: %w", batch.BatchID, err)
+			return nil, fmt.Errorf("runtime assessment purpose semantic batch %q: %w", batch.BatchID, err)
 		}
 		for _, focus := range focuses {
 			focus = focus.Normalized()
-			if RuntimeCoverageEvidenceBindingProjectionsEqual(focus.CoverageEvidenceBindings, bindings) {
-				matchedFocuses = append(matchedFocuses, focus)
+			preimage, err := runtimeAssessmentPurposePreimageForFocus(manifest, focus)
+			if err != nil {
+				return nil, err
 			}
+			ret = append(ret, runtimeAssessmentPurposeBindingPreimage{
+				bindings: CloneCoverageEvidenceBindings(focus.CoverageEvidenceBindings),
+				preimage: preimage,
+			})
 		}
 	}
-	if len(matchedFocuses) == 0 {
-		return RuntimeAssessmentPurposePreimage{}, false, nil
-	}
-	if len(matchedFocuses) != 1 {
-		return RuntimeAssessmentPurposePreimage{}, false, fmt.Errorf("runtime assessment purpose semantic manifest %q has duplicate binding preimages", manifest.Hash)
-	}
-	focus := matchedFocuses[0]
+	return ret, nil
+}
+
+func runtimeAssessmentPurposePreimageForFocus(manifest RuntimeSemanticPlanManifest, focus CoverageFocus) (RuntimeAssessmentPurposePreimage, error) {
 	if len(focus.CoverageWorkItemIDs) != 1 {
-		return RuntimeAssessmentPurposePreimage{}, false, fmt.Errorf("runtime assessment purpose semantic focus must contain one coverage item")
+		return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment purpose semantic focus must contain one coverage item")
 	}
 	coverageID := focus.CoverageWorkItemIDs[0]
 	var obligation *RuntimeSemanticProofObligation
@@ -126,16 +178,16 @@ func runtimeAssessmentPurposePreimageFromSemanticGeneration(
 			continue
 		}
 		if obligation != nil {
-			return RuntimeAssessmentPurposePreimage{}, false, fmt.Errorf("runtime assessment purpose semantic manifest has duplicate CWI obligations")
+			return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment purpose semantic manifest has duplicate CWI obligations")
 		}
 		obligation = &candidate
 	}
 	if obligation == nil {
-		return RuntimeAssessmentPurposePreimage{}, false, fmt.Errorf("runtime assessment purpose semantic manifest has no CWI obligation")
+		return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment purpose semantic manifest has no CWI obligation")
 	}
 	resolved, err := ResolveRuntimeSemanticEvidenceObligation(*obligation)
 	if err != nil {
-		return RuntimeAssessmentPurposePreimage{}, false, fmt.Errorf("runtime assessment purpose evidence obligation: %w", err)
+		return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment purpose evidence obligation: %w", err)
 	}
 	preimage := RuntimeAssessmentPurposePreimage{SemanticManifestHash: manifest.Hash}
 	switch resolved.Purpose {
@@ -143,18 +195,18 @@ func runtimeAssessmentPurposePreimageFromSemanticGeneration(
 		preimage.Purpose = RuntimeAssessmentPurposeDefinitionProof
 	case RuntimeSemanticEvidenceObligationOwnerFactAcquisition:
 		if obligation.OwnerFactAcquisition == nil {
-			return RuntimeAssessmentPurposePreimage{}, false, fmt.Errorf("runtime assessment owner-fact purpose has no acquisition contract")
+			return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment owner-fact purpose has no acquisition contract")
 		}
 		value := obligation.OwnerFactAcquisition.Clone()
 		if err := value.Validate(); err != nil {
-			return RuntimeAssessmentPurposePreimage{}, false, fmt.Errorf("runtime assessment owner-fact purpose: %w", err)
+			return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment owner-fact purpose: %w", err)
 		}
 		preimage.Purpose = RuntimeAssessmentPurposeOwnerFactAcquisition
 		preimage.OwnerFactAcquisition = &value
 	default:
-		return RuntimeAssessmentPurposePreimage{}, false, fmt.Errorf("runtime assessment purpose has unsupported semantic obligation %q", resolved.Purpose)
+		return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment purpose has unsupported semantic obligation %q", resolved.Purpose)
 	}
-	return preimage, true, nil
+	return preimage, nil
 }
 
 func runtimeAssessmentPurposeBatchFeasibilities(

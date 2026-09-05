@@ -74,6 +74,7 @@ type RuntimeCWIReconciliationBindingRef struct {
 	ProspectiveTargetRefs                []string
 	ValidationRecipeIDs                  []string
 	RequiredCheckRefs                    []string
+	ValidationCheckAttestations          []RuntimeValidationCheckAttestationBinding
 	MetricConstraints                    []string
 	ArtifactRefs                         []string
 }
@@ -94,6 +95,7 @@ func (r RuntimeCWIReconciliationBindingRef) Normalized() RuntimeCWIReconciliatio
 	r.ProspectiveTargetRefs = normalizeStrings(r.ProspectiveTargetRefs)
 	r.ValidationRecipeIDs = normalizeStrings(r.ValidationRecipeIDs)
 	r.RequiredCheckRefs = normalizeStrings(r.RequiredCheckRefs)
+	r.ValidationCheckAttestations = NormalizeRuntimeValidationCheckAttestationBindings(r.ValidationCheckAttestations)
 	r.MetricConstraints = normalizeStrings(r.MetricConstraints)
 	r.ArtifactRefs = normalizeStrings(r.ArtifactRefs)
 	return r
@@ -110,12 +112,21 @@ func (r RuntimeCWIReconciliationBindingRef) Clone() RuntimeCWIReconciliationBind
 	r.ProspectiveTargetRefs = append([]string(nil), r.ProspectiveTargetRefs...)
 	r.ValidationRecipeIDs = append([]string(nil), r.ValidationRecipeIDs...)
 	r.RequiredCheckRefs = append([]string(nil), r.RequiredCheckRefs...)
+	r.ValidationCheckAttestations = CloneRuntimeValidationCheckAttestationBindings(r.ValidationCheckAttestations)
 	r.MetricConstraints = append([]string(nil), r.MetricConstraints...)
 	r.ArtifactRefs = append([]string(nil), r.ArtifactRefs...)
 	return r
 }
 
 func (r RuntimeCWIReconciliationBindingRef) Validate() error {
+	if duplicate := duplicateRuntimeValidationProofCheckRef(r.RequiredCheckRefs); duplicate != "" {
+		return fmt.Errorf("reconciliation binding ref %q duplicates check %q", strings.TrimSpace(r.BindingID), duplicate)
+	}
+	if len(r.ValidationCheckAttestations) != 0 {
+		if err := ValidateRuntimeValidationCheckAttestationBindings(r.ValidationCheckAttestations, r.RequiredCheckRefs); err != nil {
+			return fmt.Errorf("reconciliation binding ref %q: %w", strings.TrimSpace(r.BindingID), err)
+		}
+	}
 	r = r.Normalized()
 	if r.CoverageWorkItemID == "" || r.BindingID == "" || r.BindingHash == "" {
 		return fmt.Errorf("reconciliation binding ref requires coverage item and binding identity")
@@ -136,6 +147,13 @@ func (r RuntimeCWIReconciliationBindingRef) Validate() error {
 	}
 	if err := ValidateRuntimeProspectiveTargetAllOfConstraintRefs(r.ProspectiveTargetAllOfConstraintRefs); err != nil {
 		return fmt.Errorf("reconciliation binding ref %q: %w", r.BindingID, err)
+	}
+	managed := runtimeOperationKindsContain(r.AllowedOperationKinds, RuntimeBlockKindManagedValidationSession)
+	if managed && (len(r.RequiredCheckRefs) == 0 || len(r.ValidationCheckAttestations) == 0) {
+		return fmt.Errorf("reconciliation binding ref %q managed validation requires native check attestations", r.BindingID)
+	}
+	if !managed && len(r.ValidationCheckAttestations) != 0 {
+		return fmt.Errorf("reconciliation binding ref %q non-managed proof cannot carry Shell native check attestations", r.BindingID)
 	}
 	return nil
 }
@@ -225,6 +243,7 @@ func CompileRuntimeCWIReconciliationContract(definitionRevision string, focuses 
 			operationKinds := make([]string, 0, len(binding.Proofs))
 			recipeIDs := make([]string, 0, len(binding.Proofs))
 			checkRefs := make([]string, 0, len(binding.Proofs))
+			checkAttestations := make([]RuntimeValidationCheckAttestationBinding, 0, len(binding.Proofs))
 			metricConstraints := make([]string, 0, len(binding.Proofs))
 			artifactRefs := make([]string, 0, len(binding.Proofs))
 			for _, proof := range binding.Proofs {
@@ -233,6 +252,7 @@ func CompileRuntimeCWIReconciliationContract(definitionRevision string, focuses 
 					recipeIDs = append(recipeIDs, proof.ValidationRecipeID)
 				}
 				checkRefs = append(checkRefs, proof.RequiredCheckRefs...)
+				checkAttestations = append(checkAttestations, proof.ValidationCheckAttestations...)
 				metricConstraints = append(metricConstraints, proof.MetricConstraints...)
 				artifactRefs = append(artifactRefs, proof.ArtifactRefs...)
 				for _, kind := range proof.AllowedOperationKinds {
@@ -259,6 +279,7 @@ func CompileRuntimeCWIReconciliationContract(definitionRevision string, focuses 
 				ProspectiveTargetRefs:                binding.ProspectiveTargetRefs,
 				ValidationRecipeIDs:                  recipeIDs,
 				RequiredCheckRefs:                    checkRefs,
+				ValidationCheckAttestations:          checkAttestations,
 				MetricConstraints:                    metricConstraints,
 				ArtifactRefs:                         artifactRefs,
 			}.Normalized()
@@ -303,6 +324,11 @@ func StableRuntimeCWIReconciliationContractHash(contract RuntimeCWIReconciliatio
 		writeHashStrings(h, binding.ProspectiveTargetRefs)
 		writeHashStrings(h, binding.ValidationRecipeIDs)
 		writeHashStrings(h, binding.RequiredCheckRefs)
+		for _, attestation := range binding.ValidationCheckAttestations {
+			writeHashString(h, attestation.RequiredCheckRef)
+			writeHashString(h, attestation.ObservationProtocolRef)
+			writeHashString(h, attestation.NativeCheckRef)
+		}
 		writeHashStrings(h, binding.MetricConstraints)
 		writeHashStrings(h, binding.ArtifactRefs)
 	}
@@ -1082,6 +1108,7 @@ func sameRuntimeCWIReconciliationBindingRefs(left, right []RuntimeCWIReconciliat
 			!sameStrings(left[index].ProspectiveTargetRefs, right[index].ProspectiveTargetRefs) ||
 			!sameStrings(left[index].ValidationRecipeIDs, right[index].ValidationRecipeIDs) ||
 			!sameStrings(left[index].RequiredCheckRefs, right[index].RequiredCheckRefs) ||
+			!SameRuntimeValidationCheckAttestationBindings(left[index].ValidationCheckAttestations, right[index].ValidationCheckAttestations) ||
 			!sameStrings(left[index].MetricConstraints, right[index].MetricConstraints) ||
 			!sameStrings(left[index].ArtifactRefs, right[index].ArtifactRefs) {
 			return false

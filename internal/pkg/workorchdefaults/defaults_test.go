@@ -18,6 +18,9 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	if item == nil {
 		t.Fatal("software-dev template missing")
 	}
+	if item.Name != "软件开发（Go 原生验证）" || !strings.Contains(item.Description, "Go 原生测试协议") {
+		t.Fatalf("software-dev template must explicitly identify its current Go-native proof adapter: name=%q description=%q", item.Name, item.Description)
+	}
 	if len(item.DoDItems) < 6 {
 		t.Fatalf("software-dev DoD items = %d, want >= 6", len(item.DoDItems))
 	}

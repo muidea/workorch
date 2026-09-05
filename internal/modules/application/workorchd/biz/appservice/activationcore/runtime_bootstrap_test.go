@@ -23,6 +23,48 @@ func testAcceptanceSlicePolicy() *runtimecontract.RuntimeAcceptanceSlicePolicy {
 	}
 }
 
+func withTestManagedValidationOwnerFactClosure(activation runtimecontract.RuntimeActivationContext) runtimecontract.RuntimeActivationContext {
+	ownerFact := runtimecontract.RuntimeOwnerFactRequirement{
+		OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		FactKind:      runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+	}
+	for profileIndex := range activation.ExecutionContract.ProfileContracts {
+		profile := &activation.ExecutionContract.ProfileContracts[profileIndex]
+		for requirementIndex := range profile.EvidenceRequirements {
+			requirement := &profile.EvidenceRequirements[requirementIndex]
+			if !containsRuntimeBootstrapString(requirement.AcceptedStepKinds, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+				continue
+			}
+			factFound := false
+			for _, declared := range requirement.RequiredOwnerFacts {
+				declared = declared.Normalized()
+				if declared.OwnerModuleID == ownerFact.OwnerModuleID && declared.FactKind == ownerFact.FactKind && declared.OperationKind == ownerFact.OperationKind {
+					factFound = true
+					break
+				}
+			}
+			if !factFound {
+				requirement.RequiredOwnerFacts = append(requirement.RequiredOwnerFacts, ownerFact)
+			}
+			convergenceFound := false
+			for _, convergence := range requirement.OwnerFactConvergences {
+				declared := convergence.Requirement.Normalized()
+				if declared.OwnerModuleID == ownerFact.OwnerModuleID && declared.FactKind == ownerFact.FactKind && declared.OperationKind == ownerFact.OperationKind {
+					convergenceFound = true
+					break
+				}
+			}
+			if !convergenceFound {
+				requirement.OwnerFactConvergences = append(requirement.OwnerFactConvergences, runtimecontract.RuntimeOwnerFactConvergence{
+					Requirement: ownerFact, RequirePreexisting: true,
+				})
+			}
+		}
+	}
+	return activation
+}
+
 // withTestDeterministicProof supplies the same explicit declaration a real
 // profile/template must provide after C12.  It deliberately lives in tests:
 // production activation must reject an undeclared proof instead of inventing
@@ -91,11 +133,35 @@ func withTestDeterministicProof(goal *workspacemodel.Goal, dod *workspacemodel.D
 	for scope, ids := range semantic {
 		requirements := make([]runtimecontract.RuntimeProfileEvidenceRequirement, 0, len(ids))
 		for id := range ids {
-			requirements = append(requirements, runtimecontract.RuntimeProfileEvidenceRequirement{
+			ownerFact := runtimecontract.RuntimeOwnerFactRequirement{
+				OwnerModuleID: runtimecontract.RuntimeModuleShell,
+				FactKind:      runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+				OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			}
+			declaresOwnerFact := false
+			for _, profile := range activation.ExecutionContract.ProfileContracts {
+				for _, existing := range profile.EvidenceRequirements {
+					if existing.Scope != scope || existing.ID != id {
+						continue
+					}
+					for _, fact := range existing.RequiredOwnerFacts {
+						fact = fact.Normalized()
+						if fact.OwnerModuleID == ownerFact.OwnerModuleID && fact.FactKind == ownerFact.FactKind && fact.OperationKind == ownerFact.OperationKind {
+							declaresOwnerFact = true
+						}
+					}
+				}
+			}
+			requirement := runtimecontract.RuntimeProfileEvidenceRequirement{
 				ID: id, Scope: scope, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 				AcceptedStepKinds:  []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 				ValidationRecipeID: recipeID, RequiredCheckRefs: []string{"test-deterministic-check/" + id},
-			})
+			}
+			if !declaresOwnerFact {
+				requirement.RequiredOwnerFacts = []runtimecontract.RuntimeOwnerFactRequirement{ownerFact}
+				requirement.OwnerFactConvergences = []runtimecontract.RuntimeOwnerFactConvergence{{Requirement: ownerFact, RequirePreexisting: true}}
+			}
+			requirements = append(requirements, requirement)
 		}
 		activation.ExecutionContract.ProfileContracts = append(activation.ExecutionContract.ProfileContracts, runtimecontract.RuntimeProfileContract{ID: profileID + "-" + scope, EvidenceRequirements: requirements})
 	}
@@ -165,7 +231,7 @@ func TestRuntimeBootstrapRejectsReadOnlyValidationProfileBeforeRun(t *testing.T)
 	}
 }
 
-func TestRuntimeBootstrapKeepsSharedValidationDeclarationAsNonAuthoritativeSeed(t *testing.T) {
+func TestRuntimeBootstrapDoesNotPromoteWildcardRecipeIntoCWIProofAuthority(t *testing.T) {
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
@@ -187,6 +253,17 @@ func TestRuntimeBootstrapKeepsSharedValidationDeclarationAsNonAuthoritativeSeed(
 					AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 					TargetRefs:        []string{"workspace/implementation"}, TargetRole: "implementation",
 					ValidationRecipeID: "shared-validation", RequiredCheckRefs: []string{"check/generic"},
+					RequiredOwnerFacts: []runtimecontract.RuntimeOwnerFactRequirement{{
+						OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+						OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+					}},
+					OwnerFactConvergences: []runtimecontract.RuntimeOwnerFactConvergence{{
+						Requirement: runtimecontract.RuntimeOwnerFactRequirement{
+							OwnerModuleID: runtimecontract.RuntimeModuleShell, FactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
+							OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+						},
+						RequirePreexisting: true,
+					}},
 				}},
 			}},
 		},
@@ -199,6 +276,45 @@ func TestRuntimeBootstrapKeepsSharedValidationDeclarationAsNonAuthoritativeSeed(
 	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 2 {
 		t.Fatalf("shared validation seed bootstrap=%+v err=%v", bootstrap, err)
 	}
+	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(
+		bootstrap.Definition.Revision,
+		bootstrap.DefinitionSeed.CoverageItems,
+		bootstrap.DefinitionFocuses,
+	)
+	if err != nil || len(requirements) != 2 {
+		t.Fatalf("per-CWI validation requirements=%+v err=%v, want two", requirements, err)
+	}
+	first, second := requirements[0], requirements[1]
+	if first.ValidationRecipeID != "" || second.ValidationRecipeID != "" ||
+		first.Hash == second.Hash || first.DeclarationRef == second.DeclarationRef ||
+		first.DeclarationRef != "definition/dodItem/dod-001" || second.DeclarationRef != "definition/dodItem/dod-002" ||
+		containsRuntimeBootstrapString(first.RequiredCheckRefs, "check/generic") || containsRuntimeBootstrapString(second.RequiredCheckRefs, "check/generic") {
+		t.Fatalf("wildcard recipe/check became exact CWI authority: first=%+v second=%+v", first, second)
+	}
+	firstCWI := runtimecontract.StableRuntimeCWIValidationCheckRef(bootstrap.Definition.Revision, bootstrap.DefinitionSeed.CoverageItems[0])
+	secondCWI := runtimecontract.StableRuntimeCWIValidationCheckRef(bootstrap.Definition.Revision, bootstrap.DefinitionSeed.CoverageItems[1])
+	if firstCWI == secondCWI || !containsRuntimeBootstrapString(first.RequiredCheckRefs, firstCWI) ||
+		!containsRuntimeBootstrapString(second.RequiredCheckRefs, secondCWI) ||
+		containsRuntimeBootstrapString(first.RequiredCheckRefs, secondCWI) || containsRuntimeBootstrapString(second.RequiredCheckRefs, firstCWI) {
+		t.Fatalf("CWI-specific checks are not isolated: first=%v second=%v", first.RequiredCheckRefs, second.RequiredCheckRefs)
+	}
+	for index, requirement := range requirements {
+		focus := bootstrap.DefinitionFocuses[index]
+		if len(focus.RequiredOwnerFacts) != 1 || len(focus.OwnerFactConvergences) != 1 ||
+			focus.RequiredOwnerFacts[0].ValidationProofRequirementHash != requirement.Hash ||
+			focus.OwnerFactConvergences[0].Requirement.ValidationProofRequirementHash != requirement.Hash {
+			t.Fatalf("CWI %q owner-fact requirement was not bound to exact proof: focus=%+v requirement=%+v", requirement.CoverageWorkItemID, focus, requirement)
+		}
+	}
+}
+
+func containsRuntimeBootstrapString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRuntimeBootstrapDefersMissingSemanticFieldsToPlanning(t *testing.T) {
@@ -219,7 +335,7 @@ func TestRuntimeBootstrapDefersMissingSemanticFieldsToPlanning(t *testing.T) {
 	}
 	goal := &workspacemodel.Goal{ID: "goal", WorkspaceID: "workspace", Text: "goal"}
 	dod := &workspacemodel.DoD{ID: "dod", WorkspaceID: "workspace", Items: []string{"first", "second"}}
-	bootstrap, err := RuntimeBootstrap(goal, dod, "definition", "startup-input-test", nil, activation)
+	bootstrap, err := RuntimeBootstrap(goal, dod, "definition", "startup-input-test", nil, withTestManagedValidationOwnerFactClosure(activation))
 	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 2 {
 		t.Fatalf("semantic planning seed bootstrap=%+v err=%v", bootstrap, err)
 	}
@@ -243,7 +359,7 @@ func TestRuntimeBootstrapDoesNotClaimShellOwnerRecipeFeasibility(t *testing.T) {
 	}
 	goal := &workspacemodel.Goal{ID: "goal", WorkspaceID: "workspace", Text: "goal"}
 	dod := &workspacemodel.DoD{ID: "dod", WorkspaceID: "workspace", Items: []string{"bridge starts"}}
-	bootstrap, err := RuntimeBootstrap(goal, dod, "definition", "startup-input-test", nil, activation)
+	bootstrap, err := RuntimeBootstrap(goal, dod, "definition", "startup-input-test", nil, withTestManagedValidationOwnerFactClosure(activation))
 	if err != nil || bootstrap == nil || len(bootstrap.DefinitionFocuses) != 1 {
 		t.Fatalf("bootstrap shell recipe seed=%+v err=%v", bootstrap, err)
 	}
@@ -272,7 +388,7 @@ func TestRuntimeBootstrapDefersCWIValidationCheckToSemanticPlanning(t *testing.T
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior one"}},
-		"definition-1", "startup-input-test", nil, activation,
+		"definition-1", "startup-input-test", nil, withTestManagedValidationOwnerFactClosure(activation),
 	)
 	if err != nil || bootstrap == nil || len(bootstrap.DefinitionSeed.CoverageItems) != 1 {
 		t.Fatalf("missing CWI check seed bootstrap=%+v err=%v", bootstrap, err)
@@ -306,7 +422,7 @@ func TestRuntimeBootstrapAllowsPerCWIVariationWithSharedRecipe(t *testing.T) {
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"behavior one", "behavior two"}},
-		"definition-1", "startup-input-test", nil, activation,
+		"definition-1", "startup-input-test", nil, withTestManagedValidationOwnerFactClosure(activation),
 	)
 	if err != nil {
 		t.Fatalf("per-CWI proof bootstrap: %v", err)
@@ -318,6 +434,20 @@ func TestRuntimeBootstrapAllowsPerCWIVariationWithSharedRecipe(t *testing.T) {
 		if len(focus.CoverageWorkItemIDs) != 1 {
 			t.Fatalf("activation sealed semantic proof: %+v", focus)
 		}
+	}
+	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(
+		bootstrap.Definition.Revision,
+		bootstrap.DefinitionSeed.CoverageItems,
+		bootstrap.DefinitionFocuses,
+	)
+	if err != nil || len(requirements) != 2 {
+		t.Fatalf("shared-recipe exact requirements=%+v err=%v", requirements, err)
+	}
+	if requirements[0].ValidationRecipeID != "shared-validation" || requirements[1].ValidationRecipeID != "shared-validation" ||
+		requirements[0].Hash == requirements[1].Hash ||
+		containsRuntimeBootstrapString(requirements[0].RequiredCheckRefs, "check/two") ||
+		containsRuntimeBootstrapString(requirements[1].RequiredCheckRefs, "check/one") {
+		t.Fatalf("shared recipe did not retain distinct CWI proof identities: %+v", requirements)
 	}
 }
 
@@ -349,7 +479,7 @@ func TestRuntimeBootstrapSeparatesFourValidationCWIsInsideOnePresentationSlice(t
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "deliver"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"one", "two", "three", "four"}},
-		"definition-1", "startup-input-test", nil, activation,
+		"definition-1", "startup-input-test", nil, withTestManagedValidationOwnerFactClosure(activation),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -409,6 +539,13 @@ func TestRuntimeBootstrapDoesNotCarryEvidencePolicyBindingTarget(t *testing.T) {
 			StateChangePolicy:     runtimecontract.RuntimeStateChangeAllowedButNotRequired,
 		},
 	}
+	activation.ExecutionContract.ProfileContracts = append(activation.ExecutionContract.ProfileContracts, runtimecontract.RuntimeProfileContract{
+		ID: "test-evidence-policy-owner-fact",
+		EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+			ID: "dod-001", Scope: "dodItem", AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		}},
+	})
+	activation = withTestManagedValidationOwnerFactClosure(activation)
 	bootstrap, err := RuntimeBootstrap(
 		&workspacemodel.Goal{ID: "goal-1", WorkspaceID: "ws-1", Text: "verify source"},
 		&workspacemodel.DoD{ID: "dod-1", WorkspaceID: "ws-1", Items: []string{"source exists"}},
@@ -450,7 +587,7 @@ func TestRuntimeBootstrapBuildsOrderedDoDFocuses(t *testing.T) {
 		t.Fatalf("bootstrap must not seal side-effecting shell/command as default validation capability: %+v", bootstrap.Requirements)
 	}
 	if !containsBootstrapOperationAdmissibility(bootstrap.Requirements, runtimecontract.RuntimeModuleFile, runtimecontract.StepKindFileEdit, runtimecontract.StepKindFileRead) ||
-		!containsBootstrapOperationAdmissibility(bootstrap.Requirements, runtimecontract.RuntimeModuleShell, runtimecontract.StepKindShellCommand, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+		!containsBootstrapOperationAdmissibility(bootstrap.Requirements, runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession) {
 		t.Fatalf("bootstrap must seal owner operation-admissibility prerequisites: %+v", bootstrap.Requirements)
 	}
 	facts, err := bootstrap.InitialFacts(common.WorkspaceID("ws-1"), common.RunID("run-1"))
@@ -862,4 +999,95 @@ func TestRuntimeBootstrapRegistersSelectedReadOnlyMCPToolForValidation(t *testin
 	if containsBootstrapCapability(bootstrap.Requirements, runtimecontract.RuntimeModuleMCP, runtimecontract.RuntimeCapabilityClassStateChange, runtimecontract.StepKindMCPToolCall) {
 		t.Fatalf("selected read-only MCP tool must not be acquired as state-change capability: %+v", bootstrap.Requirements)
 	}
+}
+
+func TestRuntimeBootstrapMCPOnlyValidationDoesNotEnlistShellManagedProof(t *testing.T) {
+	serverID, toolName := "mcp-only", "repository.summary"
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		MCPCapabilities: []runtimecontract.RuntimeMCPCapabilityContext{{
+			ID: "mcp-only:tool:repository.summary", ServerID: common.MCPServerID(serverID), Kind: "tool",
+			OperationKind: runtimecontract.StepKindMCPToolCall, Name: toolName, Enabled: true,
+			EffectScope: string(runtimecontract.RuntimeEffectNone), IdempotencyClass: string(runtimecontract.RuntimeOperationIdempotencySafeToReplay),
+		}},
+		OperationPolicies: []runtimecontract.RuntimeOperationPolicyFact{{
+			ID: "operation-policy/mcp-only:tool:repository.summary", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+			OperationKind: runtimecontract.StepKindMCPToolCall, SubjectRef: "mcp-only:tool:repository.summary",
+			ParameterMatches: []runtimecontract.RuntimeOperationParameterMatch{
+				{Name: "serverId", String: &serverID}, {Name: "tool", String: &toolName},
+			},
+			EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+		}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
+			StateChangePolicy:     runtimecontract.RuntimeStateChangeAllowedButNotRequired,
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "mcp-only-validation",
+				DeliverableExpectations: []runtimecontract.RuntimeDeliverableExpectation{{
+					ID: "repository_summary", Required: true, EvidenceRole: "supplemental_evidence",
+				}},
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+					ID: "repository_summary", Scope: "deliverable", EvidenceRole: "supplemental_evidence",
+					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+					AcceptedStepKinds:     []string{runtimecontract.StepKindMCPToolCall},
+				}},
+			}},
+		},
+	}
+	bootstrap, err := RuntimeBootstrap(
+		&workspacemodel.Goal{ID: "goal-mcp-only", WorkspaceID: "workspace-mcp-only", Text: "obtain a bounded repository summary"},
+		&workspacemodel.DoD{ID: "dod-mcp-only", WorkspaceID: "workspace-mcp-only", Items: []string{"repository summary is available"}},
+		"definition-mcp-only", "startup-input-mcp-only", nil, activation,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proofRequirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(
+		bootstrap.Definition.Revision, bootstrap.DefinitionSeed.CoverageItems, bootstrap.DefinitionFocuses,
+	)
+	if err != nil || len(proofRequirements) != 0 {
+		t.Fatalf("MCP-only Definition compiled Shell proof requirements=%+v err=%v", proofRequirements, err)
+	}
+	if containsString(bootstrap.Definition.CapabilityContract, runtimecontract.RuntimeBlockKindManagedValidationSession) ||
+		containsString(bootstrap.Definition.CapabilityContract, runtimecontract.StepKindShellCommand) ||
+		bootstrapRequirementsContainOwner(bootstrap.Requirements, runtimecontract.RuntimeModuleShell) {
+		t.Fatalf("MCP-only Definition implicitly enlisted Shell managed validation: definition=%+v requirements=%+v", bootstrap.Definition, bootstrap.Requirements)
+	}
+	if !containsBootstrapCapability(bootstrap.Requirements, runtimecontract.RuntimeModuleMCP, runtimecontract.RuntimeCapabilityClassValidation, runtimecontract.StepKindMCPToolCall) {
+		t.Fatalf("MCP-only Definition omitted its typed MCP validation capability: %+v", bootstrap.Requirements)
+	}
+}
+
+func TestRuntimeBootstrapRejectsManagedValidationWithoutProfileOwnedAcquisition(t *testing.T) {
+	activation := runtimecontract.RuntimeActivationContext{
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{
+			AcceptanceSlicePolicy: testAcceptanceSlicePolicy(),
+			StateChangePolicy:     runtimecontract.RuntimeStateChangeAllowedButNotRequired,
+			ProfileContracts: []runtimecontract.RuntimeProfileContract{{
+				ID: "managed-without-acquisition",
+				EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{
+					ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+					AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+				}},
+			}},
+		},
+	}
+	bootstrap, err := RuntimeBootstrap(
+		&workspacemodel.Goal{ID: "goal-managed", WorkspaceID: "workspace-managed", Text: "validate a deliverable"},
+		&workspacemodel.DoD{ID: "dod-managed", WorkspaceID: "workspace-managed", Items: []string{"the deliverable is validated"}},
+		"definition-managed", "startup-input-managed", nil, activation,
+	)
+	if err == nil || bootstrap != nil || !strings.Contains(err.Error(), "has no explicit selectable-surface owner fact and convergence") {
+		t.Fatalf("managed validation without Profile-owned acquisition crossed activation: bootstrap=%+v err=%v", bootstrap, err)
+	}
+}
+
+func bootstrapRequirementsContainOwner(requirements []runtimecontract.RuntimeRequirement, owner string) bool {
+	for _, requirement := range requirements {
+		if requirement.OwnerModuleID == owner {
+			return true
+		}
+	}
+	return false
 }

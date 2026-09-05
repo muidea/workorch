@@ -2,6 +2,7 @@ package shell
 
 import (
 	"bufio"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 
@@ -9,18 +10,11 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// Managed validation recipes may emit these owner-defined, line-oriented
-// markers when a profile needs a named check that is not represented by a
-// tool-native format (for example a deterministic file-presence assertion).
-// The marker is parsed only from the output of the sealed Shell recipe; a
-// candidate cannot submit checks directly.  Keeping the protocol in the
-// Shell owner preserves the typed receipt boundary without treating a generic
-// exit code or summary as semantic proof.
-const (
-	managedValidationCheckPassedPrefix  = "WORKORCH_CHECK_PASSED="
-	managedValidationCheckFailedPrefix  = "WORKORCH_CHECK_FAILED="
-	managedValidationCheckSkippedPrefix = "WORKORCH_CHECK_SKIPPED="
-)
+type shellGoTestJSONEvent struct {
+	Action string `json:"Action"`
+	Test   string `json:"Test"`
+	Output string `json:"Output"`
+}
 
 // attachShellValidationObservation records the owner fact that a sealed
 // managed-validation recipe was actually run. A recipe may be a generic
@@ -37,8 +31,15 @@ func attachShellValidationObservation(output *RuntimeCommandResult, command stri
 		return
 	}
 	isGoTest := filepath.Base(strings.TrimSpace(command)) == "go" && len(args) > 0 && strings.TrimSpace(args[0]) == "test"
-	observation := shellValidationObservation(output.Stdout, output.Stderr, isGoTest)
+	isGoTestJSON := isGoTest && shellGoTestJSONEnabled(args[1:])
+	observation := shellValidationObservation(output.Stdout, output.Stderr, isGoTest && !isGoTestJSON)
+	if isGoTestJSON {
+		observation = goTestJSONValidationObservation(output.Stdout, output.Stderr)
+	}
 	observation.RecipeID = strings.TrimSpace(recipeID)
+	if isGoTestJSON {
+		observation.ObservationProtocolRef = shellGoTestObservationProtocolRef
+	}
 	rawOutput := strings.Join([]string{output.Stdout, output.Stderr}, "\n")
 	if preview := strings.TrimSpace(rawOutput); preview != "" {
 		observation.OutputPreview = shellPreview(common.RedactSensitiveString(preview), 2048)
@@ -81,14 +82,75 @@ func attachShellValidationObservation(output *RuntimeCommandResult, command stri
 	if output.ExitCode == 0 && !output.ZeroWork && strings.TrimSpace(output.EvidenceQuality) != string(common.EvidenceQualityInconclusive) &&
 		strings.TrimSpace(output.EvidenceQuality) != string(common.EvidenceQualityInvalid) && len(observation.PassedChecks) != 0 {
 		output.EvidenceQuality = string(common.EvidenceQualityValid)
-		proofCheck := shellValidationRecipeProofCheckRef(observation.RecipeID)
-		if proofCheck != "" {
-			observation.ExecutedChecks = append(observation.ExecutedChecks, proofCheck)
-			observation.PassedChecks = append(observation.PassedChecks, proofCheck)
-		}
-		observation = observation.Normalized()
 	}
 	output.ValidationObservation = &observation
+}
+
+func shellGoTestJSONEnabled(args []string) bool {
+	for _, value := range args {
+		value = strings.TrimSpace(value)
+		if value == "-json" || value == "--json" || value == "-json=true" || value == "--json=true" {
+			return true
+		}
+	}
+	return false
+}
+
+func goTestJSONValidationObservation(stdout, stderr string) runtimecontract.RuntimeValidationObservation {
+	observation := runtimecontract.RuntimeValidationObservation{}
+	scanner := bufio.NewScanner(strings.NewReader(strings.Join([]string{stdout, stderr}, "\n")))
+	scanner.Buffer(make([]byte, 4096), 2*MaxCommandOutputBytes+1024)
+	for scanner.Scan() {
+		var event shellGoTestJSONEvent
+		if json.Unmarshal([]byte(strings.TrimSpace(scanner.Text())), &event) != nil {
+			continue
+		}
+		name := topLevelGoTestCheck(event.Test)
+		if name == "" {
+			continue
+		}
+		switch strings.TrimSpace(event.Action) {
+		case "run":
+			observation.ExecutedChecks = append(observation.ExecutedChecks, name)
+		case "pass":
+			observation.PassedChecks = append(observation.PassedChecks, name)
+		case "fail":
+			observation.FailedChecks = append(observation.FailedChecks, name)
+		case "skip":
+			observation.SkippedChecks = append(observation.SkippedChecks, name)
+		}
+	}
+	return observation.Normalized()
+}
+
+// goTestJSONDiagnosticOutput extracts only the bounded, tool-owned Output
+// records emitted by `go test -json`. Compiler and package-loader diagnostics
+// are wrapped in these records, so scanning the raw JSON envelope cannot find
+// their file locations reliably. The command runner already bounds stdout and
+// stderr independently; the scanner limit covers their largest possible line
+// without creating a second unbounded protocol.
+func goTestJSONDiagnosticOutput(stdout, stderr string) string {
+	var output strings.Builder
+	for _, stream := range []string{stdout, stderr} {
+		scanner := bufio.NewScanner(strings.NewReader(stream))
+		scanner.Buffer(make([]byte, 4096), 2*MaxCommandOutputBytes+1024)
+		for scanner.Scan() {
+			var event shellGoTestJSONEvent
+			if json.Unmarshal([]byte(strings.TrimSpace(scanner.Text())), &event) != nil || strings.TrimSpace(event.Output) == "" {
+				continue
+			}
+			switch strings.TrimSpace(event.Action) {
+			case "output", "build-output":
+			default:
+				continue
+			}
+			output.WriteString(event.Output)
+			if !strings.HasSuffix(event.Output, "\n") {
+				output.WriteByte('\n')
+			}
+		}
+	}
+	return output.String()
 }
 
 // goTestObservationIsExplicitZeroWork recognizes the tool-level zero-work
@@ -149,18 +211,6 @@ func shellValidationObservation(stdout, stderr string, includeGoTestChecks bool)
 	scanner := bufio.NewScanner(strings.NewReader(strings.Join([]string{stdout, stderr}, "\n")))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if managedValidationCheck := managedValidationCheckMarker(line); managedValidationCheck.kind != "" {
-			observation.ExecutedChecks = append(observation.ExecutedChecks, managedValidationCheck.name)
-			switch managedValidationCheck.kind {
-			case "passed":
-				observation.PassedChecks = append(observation.PassedChecks, managedValidationCheck.name)
-			case "failed":
-				observation.FailedChecks = append(observation.FailedChecks, managedValidationCheck.name)
-			case "skipped":
-				observation.SkippedChecks = append(observation.SkippedChecks, managedValidationCheck.name)
-			}
-			continue
-		}
 		if !includeGoTestChecks {
 			continue
 		}
@@ -188,32 +238,6 @@ func shellValidationObservation(stdout, stderr string, includeGoTestChecks bool)
 		}
 	}
 	return observation.Normalized()
-}
-
-type managedValidationCheckMarkerValue struct {
-	kind string
-	name string
-}
-
-func managedValidationCheckMarker(line string) managedValidationCheckMarkerValue {
-	for _, marker := range []struct {
-		prefix string
-		kind   string
-	}{
-		{prefix: managedValidationCheckPassedPrefix, kind: "passed"},
-		{prefix: managedValidationCheckFailedPrefix, kind: "failed"},
-		{prefix: managedValidationCheckSkippedPrefix, kind: "skipped"},
-	} {
-		if !strings.HasPrefix(line, marker.prefix) {
-			continue
-		}
-		name := strings.TrimSpace(strings.TrimPrefix(line, marker.prefix))
-		if name == "" {
-			return managedValidationCheckMarkerValue{}
-		}
-		return managedValidationCheckMarkerValue{kind: marker.kind, name: name}
-	}
-	return managedValidationCheckMarkerValue{}
 }
 
 func goTestResultName(value string) string {

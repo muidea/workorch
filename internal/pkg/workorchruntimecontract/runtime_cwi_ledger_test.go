@@ -412,7 +412,7 @@ func TestValidateRuntimeCWIReconciliationLedgerRejectsUnboundedHistory(t *testin
 
 func runtimeCWILedgerFacts(t *testing.T) RuntimeFacts {
 	t.Helper()
-	focus := runtimeCWIReconciliationFocus()
+	focus := runtimeCWIReconciliationFocus(t)
 	binding := focus.CoverageEvidenceBindings[0].Clone()
 	ref := RuntimeCWIBindingRefForCoverageBinding(binding, "semantic-manifest-1")
 	contract, err := CompileRuntimeCWIReconciliationContract("definition-1", []CoverageFocus{focus})

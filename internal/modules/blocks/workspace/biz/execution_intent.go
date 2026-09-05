@@ -92,10 +92,10 @@ func (m *Biz) prepareWorkspaceExecutionIntent(ev magicevent.Event) (preparedWork
 	if !ok || ev.Source() != workspaceExecutionIngressSource {
 		return preparedWorkspaceExecutionIntent{}, common.ErrInvalidArgument
 	}
-	cmd = cmd.Normalized()
 	if err := cmd.Validate(); err != nil {
 		return preparedWorkspaceExecutionIntent{}, err
 	}
+	cmd = cmd.Normalized()
 	ctx, err := common.BindRuntimeWorkspaceContext(ev.Context(), cmd.WorkspaceID)
 	if err != nil {
 		return preparedWorkspaceExecutionIntent{}, err

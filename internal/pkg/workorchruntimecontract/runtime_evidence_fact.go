@@ -63,6 +63,7 @@ func StableRuntimeEvidenceFactHash(fact EvidenceFact) string {
 	} else {
 		observation := fact.Validation.Normalized()
 		writeHashString(h, observation.RecipeID)
+		writeHashString(h, observation.ObservationProtocolRef)
 		writeHashStrings(h, observation.ExecutedChecks)
 		writeHashStrings(h, observation.PassedChecks)
 		writeHashStrings(h, observation.FailedChecks)

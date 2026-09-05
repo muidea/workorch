@@ -15,6 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func mustMemoryStepPayload(t *testing.T, input map[string]any) workorcheventpayload.Payload {
@@ -109,6 +110,32 @@ func TestRunRepository_CRUD(t *testing.T) {
 
 	if _, err := repo.Get(ctx, common.RunID("missing")); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("get missing run err = %v, want not found", err)
+	}
+}
+
+func TestRunRepositoryRejectsAmbiguousBootstrapAuthorityOnWriteAndRead(t *testing.T) {
+	ctx := context.Background()
+	repo := NewRunRepository()
+	policy := runtimecontract.RuntimeEvidencePolicy{ID: "policy-1", AppliesTo: runtimecontract.StepKindFileWrite}.Normalized()
+	invalidRun := func(id common.RunID) *runmodel.Run {
+		bootstrap := runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{
+			EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{policy, policy},
+		}}
+		return &runmodel.Run{ID: id, WorkspaceID: "ws-raw-bootstrap", State: common.RunStatePending, RuntimeBootstrap: &bootstrap}
+	}
+
+	if err := repo.Create(ctx, invalidRun("run-write")); err == nil {
+		t.Fatal("memory Run repository accepted duplicate bootstrap authority on write")
+	}
+
+	stored := invalidRun("run-read")
+	stored.Revision = 1
+	stored.WorkspaceRunGeneration = 1
+	repo.mu.Lock()
+	repo.items[workspaceScopedKey(stored.WorkspaceID, string(stored.ID))] = stored
+	repo.mu.Unlock()
+	if _, err := repo.Get(ctx, stored.ID); err == nil {
+		t.Fatal("memory Run repository accepted duplicate bootstrap authority on read")
 	}
 }
 

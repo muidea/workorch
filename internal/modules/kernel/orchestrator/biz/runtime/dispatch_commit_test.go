@@ -91,7 +91,10 @@ func TestCoverageEvidenceCreditRequiresExactSealedBindingAndOwnerReceipt(t *test
 	receipt := &runtimecontract.RuntimeOperationReceipt{
 		ExecutionKey: "exec/ws-1/run-1/dispatch/validate-a", Fence: 1, OperationID: "validate-a", Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
 		ObservedEffectScope: runtimecontract.RuntimeEffectEphemeralSession, TargetRefs: []string{"main.go"},
-		Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe-a", ExecutedChecks: []string{"check-a"}, PassedChecks: []string{"check-a"}}},
+		Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
+			RecipeID: "recipe-a", ObservationProtocolRef: "test/dispatch-validation-observation/v1",
+			ExecutedChecks: []string{"test/native/binding/a"}, PassedChecks: []string{"test/native/binding/a"},
+		}},
 	}
 	refs, credit, diagnostic := coverageEvidenceCreditForReceipt(facts.Focus.CoverageEvidenceBindings, operation, runtimecontract.EvidenceKindValidation, receipt)
 	if len(refs) != 1 || refs[0] != "binding/a" || len(credit) != 1 || credit[0] != "cwi-a" || diagnostic != "" {
@@ -100,7 +103,10 @@ func TestCoverageEvidenceCreditRequiresExactSealedBindingAndOwnerReceipt(t *test
 
 	// A real, accepted receipt that reports a check owned by another binding is
 	// retained by the caller but cannot close either CWI through this operation.
-	receipt.Evidence.Validation = &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe-b", ExecutedChecks: []string{"check-b"}, PassedChecks: []string{"check-b"}}
+	receipt.Evidence.Validation = &runtimecontract.RuntimeValidationObservation{
+		RecipeID: "recipe-b", ObservationProtocolRef: "test/dispatch-validation-observation/v1",
+		ExecutedChecks: []string{"test/native/binding/b"}, PassedChecks: []string{"test/native/binding/b"},
+	}
 	_, credit, diagnostic = coverageEvidenceCreditForReceipt(facts.Focus.CoverageEvidenceBindings, operation, runtimecontract.EvidenceKindValidation, receipt)
 	if len(credit) != 0 || diagnostic == "" {
 		t.Fatalf("foreign generic validation received credit=%v diagnostic=%q", credit, diagnostic)
@@ -178,7 +184,14 @@ func testDispatchCoverageBinding(id string, coverageID common.CoverageWorkItemID
 		ValidationRecipeID: recipeID,
 	}
 	if checkRef != "" {
+		// This helper represents an already sealed direct proof binding. Managed
+		// validation therefore needs the exact CWI requirement identity as well
+		// as its recipe/check; a recipe-wide success is deliberately insufficient.
+		proof.ValidationProofRequirementHash = "test-validation-proof-requirement/" + id
 		proof.RequiredCheckRefs = []string{checkRef}
+		proof.ValidationCheckAttestations = []runtimecontract.RuntimeValidationCheckAttestationBinding{{
+			RequiredCheckRef: checkRef, ObservationProtocolRef: "test/dispatch-validation-observation/v1", NativeCheckRef: "test/native/" + id,
+		}}
 	}
 	binding := runtimecontract.CoverageEvidenceBinding{
 		ID: id, CoverageWorkItemID: coverageID, FocusID: focusID, DefinitionRevision: definitionRevision,
@@ -353,9 +366,7 @@ func TestDispatchCommitAtomicallyReopensAndRequeuesCompletedDependency(t *testin
 		EventID: "event-validation-before-source", WorkspaceID: "ws-1", RunID: "run-1", DispatchID: sealedValidation.ActiveDispatch.ID,
 		AuthoritySnapshotID: sealedValidation.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: runtimeTestActiveOperationID(t, sealedValidation, 0),
 		Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
-		Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
-			RecipeID: validationProof.ValidationRecipeID, ExecutedChecks: append([]string(nil), validationProof.RequiredCheckRefs...), PassedChecks: append([]string(nil), validationProof.RequiredCheckRefs...),
-		}},
+		Evidence: runtimecontract.RuntimeOperationEvidence{Validation: runtimeTestPassedManagedValidationObservation(t, validationProof)},
 	}
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &validationEvidence)
 	validated, err := coordinator.commitEvidence(context.Background(), validationEvidence)
@@ -904,7 +915,7 @@ func runtimeTestSealPendingStateChangeFocus(t *testing.T, controller *RuntimeCon
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-		DeclarationRef:        "test/semantic/" + string(coverageID),
+		DeclarationRef:        runtimeTestSemanticDeclarationRef(manifest, coverageID),
 	}.Normalized()
 	batch, err := semanticplan.CompileFocusBatch(
 		manifest, order, aggregate.SemanticPlanning.NextBatchSequence, "dispatch-reopen-source-batch",

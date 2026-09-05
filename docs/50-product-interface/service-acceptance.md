@@ -104,12 +104,19 @@ HTTP/owner integration acceptance必须证明：
   promotion/Run/provider/dispatch/effect；
 - candidate 保存的完整 normalized typed Profile snapshot 与`RuntimeProfileContractsHash`精确匹配；hash-only、snapshot drift、
   candidate owner-fact manifest 与 snapshot 派生值不一致均在admission/Start/Restart前拒绝；
-- 每个 Profile-required acceptance/deliverable source 缺 exact proof/evidence kind/owner-receipt-capable operation 时返回
-  `definition_profile_contract_invalid + select_or_fix_template_profile + BlockingTicketID`；wildcard不能替代exact proof，
-  也不能降级为assessment-only focus；
+- 每个 Profile-required acceptance/deliverable source 若不能映射 admitted exact CWI、不能由 activation compiler 生成
+  canonical exact proof declaration，或缺 evidence kind/owner-receipt-capable operation，则返回
+  `definition_profile_contract_invalid + select_or_fix_template_profile + BlockingTicketID`；wildcard只能作为已 admission exact CWI
+  的声明模板，不能注入 current owner fact、recipe/native check、dispatch/credit authority，也不能降级为assessment-only focus；
 - Profile required owner fact 缺 exact preexisting 或唯一 one-shot acquisition/reobserve closure、存在重复/悬空/环时返回
   `definition_profile_prerequisite_unresolved + select_or_fix_template_profile + BlockingTicketID`；Profile contract snapshot/hash
   permutation稳定；
+- managed CWI 的 recipe-wide readiness 与逐 CWI readiness 分离；同一 surface 的 ready binding/missing preparation、native
+  identity 跨 CWI 唯一性、File prospective all-of receipt、Shell fresh reobserve 和 restart 必须有真实 owner integration
+  验收。preparation/文件写入/exit 0 均不产生 validation credit；Application 未经 Profile 声明不得自动生成该跨 owner
+  convergence，MCP-only/无 Shell recipe 定义不得被强制进入 Shell preparation。稳定 ID `software-dev` 当前必须在产品界面
+  明示为 Go-native validation Profile；其他 framework-native closure 必须选择另一 typed Profile，不能由目录扫描或
+  Application/Orchestrator 猜测；
 - corrected static candidate经过promotion、专用Decision resolution与Workspace acknowledgement后才eligible；response loss、
   duplicate或stale binding不能产生第二ticket/revision或运行窗口；
 - Run-scoped runtime-definition clarification只投影`revise_definition_and_restart`；通用Decision single/batch resolve与Resume
@@ -212,6 +219,14 @@ File-backed acceptance must distinguish four data classes:
 
 Required guards:
 
+- every owner-backed single-file publication uses the repository-neutral crash-safe commit primitive: a same-directory
+  temporary file is written completely, mode-set, file-synced and closed before atomic rename, then the parent directory is
+  synced before durability is acknowledged; repositories must not expose an in-place truncate/write window on the canonical
+  path;
+- a failure before rename leaves the previous canonical value and cache authoritative. A failure after rename is
+  `published but durability unacknowledged`: the caller returns the error, but any process cache must be advanced or evicted so
+  that a retry fresh-reads the published generation instead of overwriting it from an older cached revision. Temporary files
+  are never recovery authority and a corrupt canonical file continues to fail closed;
 - no startup scan mutates inactive/running Run state through workorchd;
 - no stale Step/watchdog/checkpoint replay drives Runtime;
 - duplicate inventory/notification/re-drive is idempotent;

@@ -21,6 +21,11 @@ type RuntimeExecutionSealInput struct {
 	TargetRole                string
 	ValidationScopeTargetRefs []string
 	EvidencePolicies          []runtimecontract.RuntimeEvidencePolicy
+	// ValidationProofBinding is selected by Orchestrator from the exact
+	// CoverageEvidenceBinding and the sealed Shell owner catalog. Shell may
+	// consume this mapping but must never infer it from command parameters or
+	// process output.
+	ValidationProofBinding runtimecontract.RuntimeValidationProofRequirementBinding
 }
 
 // RuntimeExecutionAuthorization binds one Shell operation to the exact owner
@@ -37,6 +42,7 @@ type RuntimeExecutionAuthorization struct {
 	ValidationRecipes         []runtimecontract.RuntimeValidationRecipe
 	ValidationScopeTargetRefs []string
 	EvidencePolicies          []runtimecontract.RuntimeEvidencePolicy
+	ValidationProofBinding    runtimecontract.RuntimeValidationProofRequirementBinding
 }
 
 func (a RuntimeExecutionAuthorization) normalized() RuntimeExecutionAuthorization {
@@ -50,10 +56,14 @@ func (a RuntimeExecutionAuthorization) normalized() RuntimeExecutionAuthorizatio
 	a.ValidationRecipes = runtimecontract.NormalizeRuntimeValidationRecipes(a.ValidationRecipes)
 	a.ValidationScopeTargetRefs = normalizeExecutionStrings(a.ValidationScopeTargetRefs)
 	a.EvidencePolicies = runtimecontract.NormalizeRuntimeEvidencePolicies(a.EvidencePolicies)
+	a.ValidationProofBinding = a.ValidationProofBinding.Clone()
 	return a
 }
 
 func (a RuntimeExecutionAuthorization) validateForOperation(operation runtimecontract.RuntimeOperation) error {
+	if err := runtimecontract.ValidateRuntimeEvidencePolicies(a.EvidencePolicies); err != nil {
+		return fmt.Errorf("sealed Shell evidence policies: %w", err)
+	}
 	a = a.normalized()
 	if a.CatalogSnapshotID == "" || a.PrerequisiteID == "" || a.OwnerRevision == "" {
 		return fmt.Errorf("sealed Shell authorization requires catalog identity and revision")
@@ -75,9 +85,6 @@ func (a RuntimeExecutionAuthorization) validateForOperation(operation runtimecon
 	if !found || matched.ID != a.Policy.ID || a.Policy.OwnerModuleID != runtimecontract.RuntimeModuleShell {
 		return fmt.Errorf("sealed Shell operation policy does not select the operation")
 	}
-	if err := runtimecontract.ValidateRuntimeEvidencePolicies(a.EvidencePolicies); err != nil {
-		return fmt.Errorf("sealed Shell evidence policies: %w", err)
-	}
 	data, err := OperationDataFromRuntimeOperation(operation)
 	if err != nil {
 		return err
@@ -86,8 +93,16 @@ func (a RuntimeExecutionAuthorization) validateForOperation(operation runtimecon
 		if _, found := runtimecontract.RuntimeValidationRecipeForID(a.ValidationRecipes, data.ValidationRecipeID); !found {
 			return fmt.Errorf("sealed Shell managed-validation recipe is absent from owner catalog")
 		}
+		if err := a.ValidationProofBinding.Validate(); err != nil {
+			return fmt.Errorf("sealed Shell managed-validation proof binding: %w", err)
+		}
+		if a.ValidationProofBinding.ValidationRecipeID != data.ValidationRecipeID || len(operation.BindingRefs) != 1 {
+			return fmt.Errorf("sealed Shell managed-validation proof binding does not match operation")
+		}
 	} else if len(a.ValidationScopeTargetRefs) != 0 {
 		return fmt.Errorf("sealed shell/command must not carry managed-validation target scope")
+	} else if !runtimeValidationProofBindingEmpty(a.ValidationProofBinding) {
+		return fmt.Errorf("sealed shell/command must not carry managed-validation proof binding")
 	}
 	return nil
 }
@@ -102,6 +117,9 @@ type SealedRuntimeOperation struct {
 }
 
 func SealRuntimeOperation(operation runtimecontract.RuntimeOperation, catalog runtimecontract.RuntimeOperationAdmissibility, input RuntimeExecutionSealInput) (SealedRuntimeOperation, error) {
+	if err := runtimecontract.ValidateRuntimeEvidencePolicies(input.EvidencePolicies); err != nil {
+		return SealedRuntimeOperation{}, fmt.Errorf("Shell execution evidence policies: %w", err)
+	}
 	operation = operation.Normalized()
 	if operation.Kind != runtimecontract.StepKindShellCommand && operation.Kind != runtimecontract.RuntimeBlockKindManagedValidationSession {
 		return SealedRuntimeOperation{}, fmt.Errorf("runtime operation kind %q is not owned by Shell", operation.Kind)
@@ -134,7 +152,11 @@ func SealRuntimeOperation(operation runtimecontract.RuntimeOperation, catalog ru
 		ValidationRecipes:         catalog.ValidationRecipes,
 		ValidationScopeTargetRefs: input.ValidationScopeTargetRefs,
 		EvidencePolicies:          input.EvidencePolicies,
+		ValidationProofBinding:    input.ValidationProofBinding,
 	}.normalized()
+	if operation.Kind == runtimecontract.RuntimeBlockKindManagedValidationSession && !catalogContainsValidationProofBinding(catalog, authorization.ValidationProofBinding) {
+		return SealedRuntimeOperation{}, fmt.Errorf("Shell owner catalog does not contain selected validation proof binding")
+	}
 	if err := authorization.validateForOperation(operation); err != nil {
 		return SealedRuntimeOperation{}, err
 	}
@@ -146,9 +168,38 @@ func SealRuntimeOperation(operation runtimecontract.RuntimeOperation, catalog ru
 	return SealedRuntimeOperation{Operation: detachedOperation, Authorization: detachedAuthorization, PayloadHash: hex.EncodeToString(sum[:])}, nil
 }
 
+func runtimeValidationProofBindingEmpty(binding runtimecontract.RuntimeValidationProofRequirementBinding) bool {
+	return binding.RequirementHash == "" && binding.DefinitionRevision == "" && binding.CoverageWorkItemID == "" &&
+		binding.DeclarationRef == "" && binding.ValidationRecipeID == "" && len(binding.RequiredCheckRefs) == 0 && len(binding.CheckAttestations) == 0
+}
+
+func catalogContainsValidationProofBinding(catalog runtimecontract.RuntimeOperationAdmissibility, selected runtimecontract.RuntimeValidationProofRequirementBinding) bool {
+	selected = selected.Clone()
+	if selected.Validate() != nil {
+		return false
+	}
+	surface, found := runtimecontract.RuntimeValidationSurfaceForID(catalog.ValidationSurfaces, selected.ValidationRecipeID)
+	if !found || surface.Readiness != runtimecontract.RuntimeValidationSurfaceReady || surface.ProofApplicability != runtimecontract.RuntimeValidationProofDirect {
+		return false
+	}
+	for _, candidate := range surface.ProofRequirementBindings {
+		candidate = candidate.Clone()
+		if candidate.RequirementHash == selected.RequirementHash && candidate.DefinitionRevision == selected.DefinitionRevision &&
+			candidate.CoverageWorkItemID == selected.CoverageWorkItemID && candidate.DeclarationRef == selected.DeclarationRef &&
+			candidate.ValidationRecipeID == selected.ValidationRecipeID && sameExecutionStrings(candidate.RequiredCheckRefs, selected.RequiredCheckRefs) &&
+			runtimecontract.SameRuntimeValidationCheckAttestationBindings(candidate.CheckAttestations, selected.CheckAttestations) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s SealedRuntimeOperation) ValidateForExecution(context runtimecontract.RuntimeOperationExecutionContext) (runtimecontract.RuntimeOperation, RuntimeExecutionAuthorization, error) {
 	if err := runtimecontract.ValidateRuntimeOperationExecutionContextScope(context); err != nil {
 		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, err
+	}
+	if err := runtimecontract.ValidateRuntimeEvidencePolicies(s.Authorization.EvidencePolicies); err != nil {
+		return runtimecontract.RuntimeOperation{}, RuntimeExecutionAuthorization{}, fmt.Errorf("sealed Shell evidence policies: %w", err)
 	}
 	operation := s.Operation.Normalized()
 	authorization := s.Authorization.normalized()

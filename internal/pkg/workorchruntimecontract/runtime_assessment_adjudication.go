@@ -510,16 +510,7 @@ func assessmentValidationShowsExecutableBehavior(binding CoverageEvidenceBinding
 	if !found {
 		return false
 	}
-	observation := fact.Validation.Normalized()
-	if observation.RecipeID != proof.ValidationRecipeID || len(proof.RequiredCheckRefs) == 0 {
-		return false
-	}
-	for _, required := range proof.RequiredCheckRefs {
-		if !RuntimeValidationCheckPassed(observation, required) {
-			return false
-		}
-	}
-	return true
+	return RuntimeValidationObservationSatisfiesCoverageProof(proof, *fact.Validation)
 }
 
 func assessmentProspectiveTargetsComplete(required []string, facts []EvidenceFact) bool {

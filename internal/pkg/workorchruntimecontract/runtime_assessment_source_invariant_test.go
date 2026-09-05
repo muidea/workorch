@@ -14,6 +14,7 @@ func TestRuntimeDefinitionFocusAssessmentSourceIsExactSeedProjection(t *testing.
 		ID: "definition-focus-1", SliceID: item.SliceID,
 		AssessmentScope: item.SourceScope, AssessmentID: item.SourceID, AssessmentText: item.TargetText,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{item.ID}, RequiredEvidenceKinds: []string{EvidenceKindValidation},
+		EvidenceDeclarationRef: CanonicalRuntimeDefinitionEvidenceDeclarationRef(item.SourceScope, item.SourceID),
 	}
 	if err := ValidateRuntimeDefinitionFocuses(seed, []RuntimeDefinitionFocus{valid}); err != nil {
 		t.Fatalf("valid exact source projection: %v", err)
@@ -44,6 +45,7 @@ func TestRuntimeAssessmentAuthoritySourceIsSeedRootedForActiveDispatch(t *testin
 			ID: "definition-focus-1", SliceID: item.SliceID,
 			AssessmentScope: item.SourceScope, AssessmentID: item.SourceID, AssessmentText: item.TargetText,
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{item.ID}, RequiredEvidenceKinds: []string{EvidenceKindValidation},
+			EvidenceDeclarationRef: CanonicalRuntimeDefinitionEvidenceDeclarationRef(item.SourceScope, item.SourceID),
 		}},
 	}
 	dispatch := RuntimeDispatchRecord{
@@ -252,6 +254,31 @@ func TestRuntimeAssessmentPreSealBindingLineageIsExactAcrossManifestAttemptDispa
 		drifted.AdmissionCoverageBindingHash = StableRuntimeCoverageEvidenceBindingSnapshotHash(drifted.AdmissionCoverageBindings)
 		if err := ValidateRuntimeAcceptedCandidateManifestLineage(&dispatch, nil, []RuntimeCandidateAttemptRecord{drifted}, []RuntimeCandidateRequestSession{session}); err == nil {
 			t.Fatal("assessment attempt binding drift was accepted")
+		}
+	})
+	t.Run("duplicate request session", func(t *testing.T) {
+		if err := ValidateRuntimeAcceptedCandidateManifestLineage(
+			&dispatch,
+			nil,
+			[]RuntimeCandidateAttemptRecord{attempt},
+			[]RuntimeCandidateRequestSession{session, session},
+		); err == nil {
+			t.Fatal("duplicate pre-seal request session was accepted")
+		}
+	})
+	t.Run("unrelated raw manifest remains fail closed", func(t *testing.T) {
+		malformed := session.Clone()
+		malformed.LogicalRequestID = "unrelated-request"
+		manifestCopy := malformed.CandidateManifest.Clone()
+		manifestCopy.Bindings = append(manifestCopy.Bindings, manifestCopy.Bindings[0])
+		malformed.CandidateManifest = &manifestCopy
+		if err := ValidateRuntimeAcceptedCandidateManifestLineage(
+			&dispatch,
+			nil,
+			[]RuntimeCandidateAttemptRecord{attempt},
+			[]RuntimeCandidateRequestSession{session, malformed},
+		); err == nil {
+			t.Fatal("unrelated non-canonical pre-seal manifest was accepted")
 		}
 	})
 	t.Run("dispatch drift", func(t *testing.T) {

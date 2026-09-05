@@ -684,10 +684,10 @@ func runtimeProspectiveSatisfactionContractRecipeRefs(catalog RuntimeOperationAd
 	for _, surface := range catalog.ValidationSurfaces {
 		surface = surface.Normalized()
 		if surface.OwnerModuleID == requirement.OwnerModuleID && surface.OperationKind == requirement.OperationKind &&
-			surface.Readiness == RuntimeValidationSurfacePrerequisiteRequired && surface.ProspectiveSatisfactionContractRef == contractRef &&
-			surface.ProofApplicability == RuntimeValidationProofDirect && RuntimeEffectIsNonDurable(surface.EffectScope) &&
-			runtimeValidationSurfaceHasExplicitReplayPolicy(surface.IdempotencyClass) {
-			ret = append(ret, surface.ID)
+			RuntimeEffectIsNonDurable(surface.EffectScope) && runtimeValidationSurfaceHasExplicitReplayPolicy(surface.IdempotencyClass) {
+			if _, scoped := runtimeProspectiveConstraintForOwnerFactRequirement(surface, requirement, contractRef); scoped {
+				ret = append(ret, surface.ID)
+			}
 		}
 	}
 	return normalizeStrings(ret)

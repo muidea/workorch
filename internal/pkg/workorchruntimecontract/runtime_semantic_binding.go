@@ -15,16 +15,20 @@ import (
 // not mutate an aggregate or choose a Runtime action; only the SM-2 reducer may
 // persist its output.
 func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, logicalRequestID string, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
-	manifest = manifest.Normalized()
-	document = document.Normalized()
+	validated, err := validateRuntimeSemanticPlanManifest(manifest)
+	if err != nil {
+		return nil, RuntimeCWIReconciliationContract{}, err
+	}
+	manifest = validated.manifest
 	generationID := StableRuntimeSemanticGenerationID(manifest.Hash, logicalRequestID)
 	if generationID == "" {
 		return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding requires manifest and logical-request generation identity")
 	}
-	if err := document.ValidateAgainstManifest(manifest); err != nil {
+	if err := validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(document, validated); err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
-	if err := validateRuntimeSemanticFeasibilitySet(manifest, document, feasibilities, true); err != nil {
+	document = document.Normalized()
+	if err := validateRuntimeSemanticFeasibilitySetWithValidatedManifest(validated, document, feasibilities, true); err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
 	sourceByCoverage := make(map[common.CoverageWorkItemID]CoverageFocus, len(manifest.ProofObligations))
@@ -76,10 +80,7 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, logica
 		if !found {
 			return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding has no proof obligation for coverage %q", proofSet.CoverageWorkItemID)
 		}
-		evidenceObligation, err := ResolveRuntimeSemanticEvidenceObligation(obligation)
-		if err != nil {
-			return nil, RuntimeCWIReconciliationContract{}, err
-		}
+		evidenceObligation := resolveValidatedRuntimeSemanticEvidenceObligation(obligation)
 		if err := validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet, source, evidenceObligation.CurrentRequiredEvidenceKinds); err != nil {
 			return nil, RuntimeCWIReconciliationContract{}, err
 		}
@@ -118,14 +119,47 @@ func validateRuntimeSemanticPlanProofObligations(document RuntimeSemanticPlanDoc
 		if !found {
 			return fmt.Errorf("runtime semantic proof for coverage %q has no sealed obligation", proofSet.CoverageWorkItemID)
 		}
-		evidenceObligation, err := ResolveRuntimeSemanticEvidenceObligation(obligation)
-		if err != nil {
-			return err
-		}
+		evidenceObligation := resolveValidatedRuntimeSemanticEvidenceObligation(obligation)
 		sourceValue := runtimeSemanticProofObligationSourceFocus(obligation)
 		source := &sourceValue
 		if err := validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet, source, evidenceObligation.CurrentRequiredEvidenceKinds); err != nil {
 			return err
+		}
+		currentDeclarationRef := RuntimeSemanticCurrentDeclarationRef(obligation)
+		for proposalIndex, rawProposal := range proofSet.Proposals {
+			proposal := rawProposal.Normalized()
+			if proposal.DeclarationRef != currentDeclarationRef {
+				return runtimeSemanticProposalViolation(proposal, proposalIndex, "declarationRef", RuntimeSemanticConstraintAllowedValue,
+					proposal.DeclarationRef, nil, []string{currentDeclarationRef}, fmt.Errorf("runtime semantic proof declarationRef is not the sealed CWI declaration"))
+			}
+			if len(proposal.RequiredEvidenceKinds) != 1 || proposal.RequiredEvidenceKinds[0] != EvidenceKindValidation {
+				continue
+			}
+			if proposal.OperationKind == RuntimeBlockKindManagedValidationSession {
+				if obligation.ValidationProofRequirement == nil {
+					return runtimeSemanticProposalViolation(proposal, proposalIndex, "validationRecipeId", RuntimeSemanticConstraintRelational,
+						proposal.ValidationRecipeID, []string{"exact CWI validation proof requirement"}, nil, fmt.Errorf("managed validation cannot prove a CWI without an exact requirement"))
+				}
+				requirement := obligation.ValidationProofRequirement.Normalized()
+				if requirement.ValidationRecipeID != "" && proposal.ValidationRecipeID != requirement.ValidationRecipeID {
+					return runtimeSemanticProposalViolation(proposal, proposalIndex, "validationRecipeId", RuntimeSemanticConstraintAllowedValue,
+						proposal.ValidationRecipeID, nil, []string{requirement.ValidationRecipeID}, fmt.Errorf("managed validation recipe does not match the sealed CWI requirement"))
+				}
+				catalog, found := runtimeSemanticManifestCatalogForOwner(manifest, proposal.OwnerModuleID)
+				if !found {
+					return runtimeSemanticProposalViolation(proposal, proposalIndex, "ownerModuleId", RuntimeSemanticConstraintAllowedValue,
+						proposal.OwnerModuleID, nil, manifest.AllowedOwnerModuleIDs, fmt.Errorf("managed validation has no sealed owner catalog"))
+				}
+				surface, found := RuntimeValidationSurfaceForID(catalog.ValidationSurfaces, proposal.ValidationRecipeID)
+				if !found {
+					return runtimeSemanticProposalViolation(proposal, proposalIndex, "validationRecipeId", RuntimeSemanticConstraintAllowedValue,
+						proposal.ValidationRecipeID, nil, RuntimeSelectableValidationRecipeRefsForProofRequirement(catalog.ValidationSurfaces, requirement), fmt.Errorf("managed validation recipe has no owner surface"))
+				}
+				if _, _, exact := RuntimeValidationSurfaceForProofRequirement([]RuntimeValidationSurface{surface}, requirement); !exact {
+					return runtimeSemanticProposalViolation(proposal, proposalIndex, "validationRecipeId", RuntimeSemanticConstraintAllowedValue,
+						proposal.ValidationRecipeID, nil, RuntimeSelectableValidationRecipeRefsForProofRequirement(catalog.ValidationSurfaces, requirement), fmt.Errorf("managed validation recipe is not bound to the exact CWI requirement"))
+				}
+			}
 		}
 		proposalIndex := -1
 		for index, proposal := range document.Proposals {
@@ -142,6 +176,33 @@ func validateRuntimeSemanticPlanProofObligations(document RuntimeSemanticPlanDoc
 		}
 	}
 	return nil
+}
+
+func resolveValidatedRuntimeSemanticEvidenceObligation(obligation RuntimeSemanticProofObligation) RuntimeSemanticEvidenceObligation {
+	ret := RuntimeSemanticEvidenceObligation{
+		Purpose:                       RuntimeSemanticEvidenceObligationDefinitionProof,
+		TerminalRequiredEvidenceKinds: obligation.RequiredEvidenceKinds,
+		CurrentRequiredEvidenceKinds:  obligation.RequiredEvidenceKinds,
+	}
+	if obligation.OwnerFactAcquisition != nil {
+		ret.Purpose = RuntimeSemanticEvidenceObligationOwnerFactAcquisition
+		ret.CurrentRequiredEvidenceKinds = []string{EvidenceKindStateChange}
+	}
+	if obligation.ValidationFailureRepair != nil {
+		ret.Purpose = RuntimeSemanticEvidenceObligationValidationFailureRepair
+		ret.CurrentRequiredEvidenceKinds = []string{EvidenceKindStateChange}
+	}
+	return ret
+}
+
+func runtimeSemanticManifestCatalogForOwner(manifest RuntimeSemanticPlanManifest, ownerModuleID string) (RuntimeOperationAdmissibility, bool) {
+	ownerModuleID = strings.TrimSpace(ownerModuleID)
+	for _, catalog := range manifest.OwnerCatalogs {
+		if catalog.OwnerModuleID == ownerModuleID {
+			return catalog, true
+		}
+	}
+	return RuntimeOperationAdmissibility{}, false
 }
 
 func validateRuntimeSemanticOwnerFactAcquisition(proofSet RuntimeSemanticCWIProofSet, acquisition *RuntimeSemanticOwnerFactAcquisition, proposalIndex int) error {
@@ -202,13 +263,25 @@ func validateRuntimeSemanticOwnerFactAcquisition(proofSet RuntimeSemanticCWIProo
 
 func runtimeSemanticBindingSourceFocuses(values []RuntimeDefinitionFocus) (map[common.CoverageWorkItemID]RuntimeDefinitionFocus, error) {
 	ret := make(map[common.CoverageWorkItemID]RuntimeDefinitionFocus, len(values))
-	for _, value := range values {
+	seenFocusIDs := make(map[string]struct{}, len(values))
+	for _, raw := range values {
+		if duplicate := duplicateRuntimeValidationProofCheckRef(raw.RequiredCheckRefs); duplicate != "" {
+			return nil, fmt.Errorf("runtime semantic source focus %q duplicates check %q", strings.TrimSpace(raw.ID), duplicate)
+		}
+		if len(raw.CoverageWorkItemIDs) != len(normalizeCoverageWorkItemIDs(raw.CoverageWorkItemIDs)) {
+			return nil, fmt.Errorf("runtime semantic source focus %q has duplicate or empty coverage identity", strings.TrimSpace(raw.ID))
+		}
+		value := raw.Normalized()
+		if _, duplicate := seenFocusIDs[value.ID]; duplicate {
+			return nil, fmt.Errorf("runtime semantic source focus %q is duplicated", value.ID)
+		}
+		seenFocusIDs[value.ID] = struct{}{}
 		value = value.Normalized()
 		for _, coverageID := range value.CoverageWorkItemIDs {
 			if coverageID == "" {
 				return nil, fmt.Errorf("runtime semantic source focus %q has an empty coverage item", value.ID)
 			}
-			if prior, duplicate := ret[coverageID]; duplicate && prior.ID != value.ID {
+			if _, duplicate := ret[coverageID]; duplicate {
 				return nil, fmt.Errorf("runtime semantic source focuses duplicate coverage %q", coverageID)
 			}
 			ret[coverageID] = value
@@ -365,10 +438,17 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 	var validationRecipeID string
 	validationChecks := make([]string, 0)
 	var validationRepair *RuntimeSemanticValidationFailureRepair
+	var validationProofRequirement *RuntimeValidationProofRequirement
 	for _, obligation := range manifest.ProofObligations {
-		if obligation.CoverageWorkItemID == proofSet.CoverageWorkItemID && obligation.ValidationFailureRepair != nil {
-			value := obligation.ValidationFailureRepair.Clone()
-			validationRepair = &value
+		if obligation.CoverageWorkItemID == proofSet.CoverageWorkItemID {
+			if obligation.ValidationFailureRepair != nil {
+				value := obligation.ValidationFailureRepair.Clone()
+				validationRepair = &value
+			}
+			if obligation.ValidationProofRequirement != nil {
+				value := obligation.ValidationProofRequirement.Clone()
+				validationProofRequirement = &value
+			}
 			break
 		}
 	}
@@ -392,9 +472,6 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 		if !found {
 			return CoverageFocus{}, fmt.Errorf("runtime semantic proof set for coverage %q lacks fact %q", proofSet.CoverageWorkItemID, proposalHash)
 		}
-		if err := fact.ValidateForProposal(manifest, rawProposal); err != nil {
-			return CoverageFocus{}, err
-		}
 		if validationRepair != nil && proposal.Target.Policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget &&
 			!sameStrings(fact.TargetRefs, proposal.Target.ProspectiveTargetRefs) {
 			return CoverageFocus{}, fmt.Errorf("runtime semantic validation repair prospective target lacks exact capability-owner confirmation")
@@ -416,6 +493,17 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 		if evidenceKind == EvidenceKindValidation {
 			proof.ValidationRecipeID = fact.ValidationRecipeID
 			proof.RequiredCheckRefs = append([]string(nil), fact.RequiredCheckRefs...)
+			if proposal.OperationKind == RuntimeBlockKindManagedValidationSession {
+				if validationProofRequirement == nil {
+					return CoverageFocus{}, fmt.Errorf("managed validation proof for coverage %q lacks exact proof requirement", proofSet.CoverageWorkItemID)
+				}
+				proof.ValidationProofRequirementHash = validationProofRequirement.Hash
+				attestations, attestationErr := runtimeSemanticValidationCheckAttestations(manifest, fact, *validationProofRequirement)
+				if attestationErr != nil {
+					return CoverageFocus{}, fmt.Errorf("managed validation proof for coverage %q: %w", proofSet.CoverageWorkItemID, attestationErr)
+				}
+				proof.ValidationCheckAttestations = attestations
+			}
 			validationRecipeID = fact.ValidationRecipeID
 			validationChecks = append(validationChecks, fact.RequiredCheckRefs...)
 		}
@@ -551,6 +639,26 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 		return CoverageFocus{}, err
 	}
 	return focus, nil
+}
+
+func runtimeSemanticValidationCheckAttestations(manifest RuntimeSemanticPlanManifest, fact RuntimeSemanticProofFeasibility, requirement RuntimeValidationProofRequirement) ([]RuntimeValidationCheckAttestationBinding, error) {
+	fact = fact.Normalized()
+	requirement = requirement.Normalized()
+	for _, catalog := range manifest.OwnerCatalogs {
+		if catalog.OwnerModuleID != fact.OwnerModuleID || catalog.SnapshotID != fact.CatalogSnapshotID {
+			continue
+		}
+		surface, found := runtimeValidationSurfaceForIDNormalized(catalog.ValidationSurfaces, fact.ValidationRecipeID)
+		if !found {
+			return nil, fmt.Errorf("sealed owner catalog lacks selected validation surface %q", fact.ValidationRecipeID)
+		}
+		binding, exact := runtimeValidationSurfaceProofRequirementBindingNormalized(surface, requirement)
+		if !exact || binding.ValidationRecipeID != fact.ValidationRecipeID {
+			return nil, fmt.Errorf("sealed owner catalog lacks exact CWI proof binding for recipe %q", fact.ValidationRecipeID)
+		}
+		return CloneRuntimeValidationCheckAttestationBindings(binding.CheckAttestations), nil
+	}
+	return nil, fmt.Errorf("sealed owner catalog %q is unavailable", fact.CatalogSnapshotID)
 }
 
 // runtimeSemanticSourceProofRequirementIndex assigns profile-sealed metric and

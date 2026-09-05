@@ -2200,6 +2200,12 @@ func (r *RunRepository) create(item *run.Run, allocateID bool) error {
 	if item == nil || item.WorkspaceID == "" || (allocateID && item.ID != "") || (!allocateID && item.ID == "") {
 		return common.ErrInvalidArgument
 	}
+	if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
+		return err
+	}
+	if err := validateMemoryRunInventory(r.items); err != nil {
+		return err
+	}
 	if _, retired := r.workspaceRetirements[item.WorkspaceID]; retired {
 		return common.ErrConflict
 	}
@@ -2254,9 +2260,21 @@ func runRepositoryStateIsTerminal(state common.RunState) bool {
 	}
 }
 
+func validateMemoryRunInventory(items map[string]*run.Run) error {
+	for key, item := range items {
+		if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
+			return fmt.Errorf("load Run %q: %w", key, err)
+		}
+	}
+	return nil
+}
+
 func (r *RunRepository) Get(ctx context.Context, id common.RunID) (*run.Run, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if err := validateMemoryRunInventory(r.items); err != nil {
+		return nil, err
+	}
 	if key, scoped := runtimeWorkspaceScopedKey(ctx, string(id)); scoped {
 		item, ok := r.items[key]
 		if !ok {
@@ -2286,6 +2304,9 @@ func (r *RunRepository) GetByWorkspaceID(_ context.Context, workspaceID common.W
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if err := validateMemoryRunInventory(r.items); err != nil {
+		return nil, err
+	}
 	item, ok := r.items[workspaceScopedKey(workspaceID, string(id))]
 	if !ok {
 		return nil, common.ErrNotFound
@@ -2296,6 +2317,9 @@ func (r *RunRepository) GetByWorkspaceID(_ context.Context, workspaceID common.W
 func (r *RunRepository) List(_ context.Context) ([]*run.Run, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if err := validateMemoryRunInventory(r.items); err != nil {
+		return nil, err
+	}
 
 	ids := make([]string, 0, len(r.items))
 	for key := range r.items {
@@ -2313,6 +2337,9 @@ func (r *RunRepository) List(_ context.Context) ([]*run.Run, error) {
 func (r *RunRepository) ListByWorkspaceID(_ context.Context, workspaceID common.WorkspaceID) ([]*run.Run, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if err := validateMemoryRunInventory(r.items); err != nil {
+		return nil, err
+	}
 
 	ids := make([]string, 0, len(r.items))
 	for key, item := range r.items {
@@ -2332,6 +2359,12 @@ func (r *RunRepository) ListByWorkspaceID(_ context.Context, workspaceID common.
 func (r *RunRepository) Update(ctx context.Context, item *run.Run) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
+		return err
+	}
+	if err := validateMemoryRunInventory(r.items); err != nil {
+		return err
+	}
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
 	if item.WorkspaceID == "" {
 		if scopedKey, scoped := runtimeWorkspaceScopedKey(ctx, string(item.ID)); scoped {
@@ -2370,6 +2403,12 @@ func (r *RunRepository) Update(ctx context.Context, item *run.Run) error {
 func (r *RunRepository) CompareAndSwap(ctx context.Context, item *run.Run, expectedRevision uint64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
+		return err
+	}
+	if err := validateMemoryRunInventory(r.items); err != nil {
+		return err
+	}
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
 	if item.WorkspaceID == "" {
 		if scopedKey, scoped := runtimeWorkspaceScopedKey(ctx, string(item.ID)); scoped {
@@ -2419,6 +2458,12 @@ func (r *RunRepository) CompareAndSwapRuntimeState(ctx context.Context, item *ru
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
+		return err
+	}
+	if err := validateMemoryRunInventory(r.items); err != nil {
+		return err
+	}
 	key := workspaceScopedKey(item.WorkspaceID, string(item.ID))
 	current, ok := r.items[key]
 	if !ok || current == nil {
@@ -2443,6 +2488,9 @@ func (r *RunRepository) CompareAndSwapRuntimeState(ctx context.Context, item *ru
 func (r *RunRepository) Delete(ctx context.Context, id common.RunID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := validateMemoryRunInventory(r.items); err != nil {
+		return err
+	}
 	if key, scoped := runtimeWorkspaceScopedKey(ctx, string(id)); scoped {
 		current, ok := r.items[key]
 		if !ok {
@@ -2484,6 +2532,9 @@ func (r *RunRepository) PrepareWorkspaceRetirement(ctx context.Context, intent r
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := validateMemoryRunInventory(r.items); err != nil {
+		return nil, err
+	}
 	if current, ok := r.workspaceRetirements[intent.WorkspaceID]; ok {
 		if current.Intent() != intent {
 			return nil, common.ErrConflict
@@ -2521,6 +2572,9 @@ func (r *RunRepository) FinalizeWorkspaceRetirement(ctx context.Context, token d
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := validateMemoryRunInventory(r.items); err != nil {
+		return nil, err
+	}
 	current, ok := r.workspaceRetirements[token.WorkspaceID]
 	if !ok {
 		return nil, common.ErrNotFound
@@ -2592,6 +2646,9 @@ func (r *RunRepository) withRunResourceMutation(ctx context.Context, runID commo
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if err := validateMemoryRunInventory(r.items); err != nil {
+		return err
+	}
 	key, err := findScopedMemoryKey(ctx, r.items, string(runID), func(item *run.Run) string { return string(item.ID) })
 	if err != nil {
 		return err

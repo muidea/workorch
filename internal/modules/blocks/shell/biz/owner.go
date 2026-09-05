@@ -119,7 +119,6 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 	allPassed := true
 	var checkRefs []string
 	var targetRefs []string
-	validationObservations := make([]runtimecontract.RuntimeValidationObservation, 0, len(recipes))
 	for _, recipe := range recipes {
 		request := RuntimeCommandRequest{
 			WorkspaceID:                   command.WorkspaceID,
@@ -132,8 +131,9 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 				RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 				OriginalNodeKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 			},
-			TargetRefs:        append([]string(nil), command.Binding.TargetRefs...),
-			ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe},
+			TargetRefs:                  append([]string(nil), command.Binding.TargetRefs...),
+			ValidationRecipes:           []runtimecontract.RuntimeValidationRecipe{recipe},
+			ValidationCheckAttestations: runtimecontract.CloneRuntimeValidationCheckAttestationBindings(command.Binding.ValidationCheckAttestations),
 		}
 		// Reconciliation uses the same owner-local recipe resolution boundary as
 		// ordinary managed-validation dispatch. The provider supplies only the
@@ -155,12 +155,13 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 			if len(runtimecontract.RuntimeValidationConflictingChecks(value)) != 0 {
 				allPassed = false
 			}
-			for _, check := range value.PassedChecks {
-				if runtimecontract.RuntimeValidationCheckPassed(value, check) {
-					checkRefs = append(checkRefs, check)
+			for _, attestation := range command.Binding.ValidationCheckAttestations {
+				attestation = attestation.Normalized()
+				if value.ObservationProtocolRef == attestation.ObservationProtocolRef &&
+					runtimecontract.RuntimeValidationCheckPassed(value, attestation.NativeCheckRef) {
+					checkRefs = append(checkRefs, attestation.RequiredCheckRef)
 				}
 			}
-			validationObservations = append(validationObservations, value)
 			targetRefs = append(targetRefs, output.TargetRefs...)
 		}
 	}
@@ -170,14 +171,7 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 	// this owner cannot observe remains unverifiable.
 	if len(command.Binding.RequiredCheckRefs) != 0 {
 		for _, required := range command.Binding.RequiredCheckRefs {
-			passed := false
-			for _, observation := range validationObservations {
-				if runtimecontract.RuntimeValidationCheckPassed(observation, required) {
-					passed = true
-					break
-				}
-			}
-			if !passed {
+			if !shellStringIncluded(checkRefs, required) {
 				allPassed = false
 			}
 		}
@@ -326,8 +320,9 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		ValidationScratchAutoCleanup:    data.ValidationScratchAutoCleanup,
 		ValidationScratchAutoCleanupSet: data.ValidationScratchAutoCleanupSet,
 		ValidationEvidence:              data.ValidationEvidence, ManagedValidation: data.ManagedValidation,
-		EvidencePolicies:  authorization.EvidencePolicies,
-		ValidationRecipes: authorization.ValidationRecipes,
+		EvidencePolicies:            authorization.EvidencePolicies,
+		ValidationRecipes:           authorization.ValidationRecipes,
+		ValidationCheckAttestations: runtimecontract.CloneRuntimeValidationCheckAttestationBindings(authorization.ValidationProofBinding.CheckAttestations),
 	}
 	operationResult := RuntimeCommandResult{}
 	var executeErr error
@@ -495,7 +490,7 @@ func resolveManagedValidationRecipe(request *RuntimeCommandRequest) error {
 	if recipe.TimeoutMillis > 0 {
 		request.TimeoutMillis = recipe.TimeoutMillis
 	}
-	return nil
+	return instrumentManagedValidationNativeChecks(request)
 }
 
 func validationRecipeUnavailableResult(request RuntimeCommandRequest, err error) RuntimeCommandResult {
@@ -685,8 +680,10 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 			return
 		}
 		confirmed := runtimeValidationRecipesApplicableToManifest(staticallyReady, command.WorkspaceManifestBinding.Manifest.TargetRefs)
-		inventory.ValidationRecipes = confirmed
-		inventory.ValidationSurfaces = shellValidationSurfaces(command.ValidationRecipes, staticallyReady, confirmed, command.WorkspaceManifestBinding, inventory.ObservedRevision)
+		inventory.ValidationSurfaces = shellValidationSurfaces(command.ValidationRecipes, staticallyReady, confirmed, command.ValidationProofRequirements, command.WorkspaceManifestBinding, inventory.ObservedRevision, command.WorkspaceDeliverableDirectory)
+		selectableRefs := runtimecontract.RuntimeSelectableValidationRecipeRefs(inventory.ValidationSurfaces)
+		inventory.ValidationRecipeRefs = selectableRefs
+		inventory.ValidationRecipes = shellValidationRecipesForRefs(confirmed, selectableRefs)
 	}
 	inventory = inventory.Normalized()
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
@@ -698,6 +695,20 @@ func (m *Biz) handleRuntimeOperationAdmissibility(event magicevent.Event, result
 		command.WorkspaceDeliverableDirectory, command.PrerequisiteID, inventory, command.RequiredTargetRefs, command.WorkspaceManifestBinding,
 	)
 	result.Set(shellevents.AcquireRuntimeOperationAdmissibilityResult{Acquisition: runtimecontract.RuntimeOperationAdmissibilityAcquisition{WorkspaceID: command.WorkspaceID, RunID: command.RunID, AuthoritySnapshotID: command.AuthoritySnapshotID, Admissibility: inventory, Observation: observation}}, nil)
+}
+
+func shellValidationRecipesForRefs(recipes []runtimecontract.RuntimeValidationRecipe, refs []string) []runtimecontract.RuntimeValidationRecipe {
+	allowed := make(map[string]struct{}, len(refs))
+	for _, ref := range normalizeShellStrings(refs) {
+		allowed[ref] = struct{}{}
+	}
+	ret := make([]runtimecontract.RuntimeValidationRecipe, 0, len(allowed))
+	for _, recipe := range runtimecontract.NormalizeRuntimeValidationRecipes(recipes) {
+		if _, found := allowed[recipe.ID]; found {
+			ret = append(ret, recipe)
+		}
+	}
+	return runtimecontract.NormalizeRuntimeValidationRecipes(ret)
 }
 
 func runtimeShellManagedValidationRequested(kinds []string) bool {

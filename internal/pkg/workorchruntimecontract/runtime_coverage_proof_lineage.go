@@ -19,25 +19,27 @@ import (
 // This is a pure contract value. It neither grants coverage credit nor decides
 // a Runtime transition; those decisions remain Orchestrator SM-2-owned.
 type CoverageEvidenceProofIdentity struct {
-	DefinitionRevision       string
-	CoverageWorkItemID       common.CoverageWorkItemID
-	EvidenceKind             string
-	OwnerModuleID            string
-	AllowedOperationKinds    []string
-	AllowedOperationVariants []RuntimeOperationVariantRef
-	TargetPolicy             CoverageEvidenceProofTargetPolicy
-	TargetRefs               []string
-	TargetSelectorRef        string
-	TargetSelectorOwnerRef   string
-	TargetSelectorSubjectRef string
-	ProspectiveTargetRefs    []string
-	RequiredEffectScopes     []RuntimeEffectScope
-	DeclarationRef           string
-	ValidationRecipeID       string
-	RequiredCheckRefs        []string
-	MetricConstraints        []string
-	ArtifactRefs             []string
-	Hash                     string
+	DefinitionRevision             string
+	CoverageWorkItemID             common.CoverageWorkItemID
+	EvidenceKind                   string
+	OwnerModuleID                  string
+	AllowedOperationKinds          []string
+	AllowedOperationVariants       []RuntimeOperationVariantRef
+	TargetPolicy                   CoverageEvidenceProofTargetPolicy
+	TargetRefs                     []string
+	TargetSelectorRef              string
+	TargetSelectorOwnerRef         string
+	TargetSelectorSubjectRef       string
+	ProspectiveTargetRefs          []string
+	RequiredEffectScopes           []RuntimeEffectScope
+	DeclarationRef                 string
+	ValidationRecipeID             string
+	ValidationProofRequirementHash string
+	RequiredCheckRefs              []string
+	ValidationCheckAttestations    []RuntimeValidationCheckAttestationBinding
+	MetricConstraints              []string
+	ArtifactRefs                   []string
+	Hash                           string
 }
 
 // CoverageEvidenceProofTargetPolicy is derived only from the sealed binding
@@ -66,7 +68,9 @@ func (i CoverageEvidenceProofIdentity) Normalized() CoverageEvidenceProofIdentit
 	i.RequiredEffectScopes = NormalizeRuntimeEffectScopes(i.RequiredEffectScopes)
 	i.DeclarationRef = strings.TrimSpace(i.DeclarationRef)
 	i.ValidationRecipeID = strings.TrimSpace(i.ValidationRecipeID)
+	i.ValidationProofRequirementHash = strings.TrimSpace(i.ValidationProofRequirementHash)
 	i.RequiredCheckRefs = normalizeStrings(i.RequiredCheckRefs)
+	i.ValidationCheckAttestations = NormalizeRuntimeValidationCheckAttestationBindings(i.ValidationCheckAttestations)
 	i.MetricConstraints = normalizeStrings(i.MetricConstraints)
 	i.ArtifactRefs = normalizeStrings(i.ArtifactRefs)
 	i.Hash = strings.TrimSpace(i.Hash)
@@ -81,12 +85,16 @@ func (i CoverageEvidenceProofIdentity) Clone() CoverageEvidenceProofIdentity {
 	i.ProspectiveTargetRefs = append([]string(nil), i.ProspectiveTargetRefs...)
 	i.RequiredEffectScopes = append([]RuntimeEffectScope(nil), i.RequiredEffectScopes...)
 	i.RequiredCheckRefs = append([]string(nil), i.RequiredCheckRefs...)
+	i.ValidationCheckAttestations = CloneRuntimeValidationCheckAttestationBindings(i.ValidationCheckAttestations)
 	i.MetricConstraints = append([]string(nil), i.MetricConstraints...)
 	i.ArtifactRefs = append([]string(nil), i.ArtifactRefs...)
 	return i
 }
 
 func (i CoverageEvidenceProofIdentity) Validate() error {
+	if duplicate := duplicateRuntimeValidationProofCheckRef(i.RequiredCheckRefs); duplicate != "" {
+		return fmt.Errorf("coverage evidence proof identity duplicates check %q", duplicate)
+	}
 	i = i.Normalized()
 	if i.DefinitionRevision == "" || i.CoverageWorkItemID == "" || i.OwnerModuleID == "" || i.DeclarationRef == "" {
 		return fmt.Errorf("coverage evidence proof identity requires definition, coverage item, owner and declaration")
@@ -127,11 +135,25 @@ func (i CoverageEvidenceProofIdentity) Validate() error {
 	default:
 		return fmt.Errorf("coverage evidence proof identity has unsupported target policy %q", i.TargetPolicy)
 	}
-	if i.EvidenceKind == EvidenceKindStateChange && (i.ValidationRecipeID != "" || len(i.RequiredCheckRefs) != 0) {
+	if i.EvidenceKind == EvidenceKindStateChange && (i.ValidationRecipeID != "" || i.ValidationProofRequirementHash != "" || len(i.RequiredCheckRefs) != 0 || len(i.ValidationCheckAttestations) != 0) {
 		return fmt.Errorf("state-change proof identity cannot carry validation recipe/checks")
 	}
 	if i.EvidenceKind == EvidenceKindValidation && i.ValidationRecipeID == "" {
 		return fmt.Errorf("validation proof identity requires validation recipe")
+	}
+	if i.EvidenceKind == EvidenceKindValidation {
+		managed := runtimeOperationKindsContain(i.AllowedOperationKinds, RuntimeBlockKindManagedValidationSession)
+		if managed && (i.ValidationProofRequirementHash == "" || len(i.RequiredCheckRefs) == 0 || len(i.ValidationCheckAttestations) == 0) {
+			return fmt.Errorf("managed validation proof identity requires an exact CWI proof requirement and native check attestations")
+		}
+		if managed {
+			if err := ValidateRuntimeValidationCheckAttestationBindings(i.ValidationCheckAttestations, i.RequiredCheckRefs); err != nil {
+				return err
+			}
+		}
+		if !managed && (i.ValidationProofRequirementHash != "" || len(i.ValidationCheckAttestations) != 0) {
+			return fmt.Errorf("non-managed validation proof identity cannot carry a Shell CWI proof requirement")
+		}
 	}
 	if i.Hash == "" || i.Hash != StableCoverageEvidenceProofIdentityHash(i) {
 		return fmt.Errorf("coverage evidence proof identity hash does not match contents")
@@ -168,24 +190,26 @@ func DeriveCoverageEvidenceProofIdentity(binding CoverageEvidenceBinding, eviden
 		return CoverageEvidenceProofIdentity{}, err
 	}
 	identity := CoverageEvidenceProofIdentity{
-		DefinitionRevision:       binding.DefinitionRevision,
-		CoverageWorkItemID:       binding.CoverageWorkItemID,
-		EvidenceKind:             proof.EvidenceKind,
-		OwnerModuleID:            owner,
-		AllowedOperationKinds:    append([]string(nil), proof.AllowedOperationKinds...),
-		AllowedOperationVariants: append([]RuntimeOperationVariantRef(nil), proof.AllowedOperationVariants...),
-		TargetPolicy:             policy,
-		TargetRefs:               append([]string(nil), binding.TargetRefs...),
-		TargetSelectorRef:        binding.TargetSelectorRef,
-		TargetSelectorOwnerRef:   binding.TargetSelectorOwnerRef,
-		TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
-		ProspectiveTargetRefs:    binding.ProspectiveTargetRefs,
-		RequiredEffectScopes:     append([]RuntimeEffectScope(nil), proof.RequiredEffectScopes...),
-		DeclarationRef:           binding.DeclarationRef,
-		ValidationRecipeID:       proof.ValidationRecipeID,
-		RequiredCheckRefs:        append([]string(nil), proof.RequiredCheckRefs...),
-		MetricConstraints:        append([]string(nil), proof.MetricConstraints...),
-		ArtifactRefs:             append([]string(nil), proof.ArtifactRefs...),
+		DefinitionRevision:             binding.DefinitionRevision,
+		CoverageWorkItemID:             binding.CoverageWorkItemID,
+		EvidenceKind:                   proof.EvidenceKind,
+		OwnerModuleID:                  owner,
+		AllowedOperationKinds:          append([]string(nil), proof.AllowedOperationKinds...),
+		AllowedOperationVariants:       append([]RuntimeOperationVariantRef(nil), proof.AllowedOperationVariants...),
+		TargetPolicy:                   policy,
+		TargetRefs:                     append([]string(nil), binding.TargetRefs...),
+		TargetSelectorRef:              binding.TargetSelectorRef,
+		TargetSelectorOwnerRef:         binding.TargetSelectorOwnerRef,
+		TargetSelectorSubjectRef:       binding.TargetSelectorSubjectRef,
+		ProspectiveTargetRefs:          binding.ProspectiveTargetRefs,
+		RequiredEffectScopes:           append([]RuntimeEffectScope(nil), proof.RequiredEffectScopes...),
+		DeclarationRef:                 binding.DeclarationRef,
+		ValidationRecipeID:             proof.ValidationRecipeID,
+		ValidationProofRequirementHash: proof.ValidationProofRequirementHash,
+		RequiredCheckRefs:              append([]string(nil), proof.RequiredCheckRefs...),
+		ValidationCheckAttestations:    CloneRuntimeValidationCheckAttestationBindings(proof.ValidationCheckAttestations),
+		MetricConstraints:              append([]string(nil), proof.MetricConstraints...),
+		ArtifactRefs:                   append([]string(nil), proof.ArtifactRefs...),
 	}.Normalized()
 	identity.Hash = StableCoverageEvidenceProofIdentityHash(identity)
 	if err := identity.Validate(); err != nil {
@@ -236,7 +260,13 @@ func StableCoverageEvidenceProofIdentityHash(identity CoverageEvidenceProofIdent
 	writeHashStrings(h, RuntimeEffectScopesAsStrings(identity.RequiredEffectScopes))
 	writeHashString(h, identity.DeclarationRef)
 	writeHashString(h, identity.ValidationRecipeID)
+	writeHashString(h, identity.ValidationProofRequirementHash)
 	writeHashStrings(h, identity.RequiredCheckRefs)
+	for _, attestation := range identity.ValidationCheckAttestations {
+		writeHashString(h, attestation.RequiredCheckRef)
+		writeHashString(h, attestation.ObservationProtocolRef)
+		writeHashString(h, attestation.NativeCheckRef)
+	}
 	writeHashStrings(h, identity.MetricConstraints)
 	writeHashStrings(h, identity.ArtifactRefs)
 	return "coverage-evidence-proof-identity-" + hex.EncodeToString(h.Sum(nil))
@@ -279,8 +309,12 @@ func FirstCoverageEvidenceProofIdentityDifference(left, right CoverageEvidencePr
 		return "declaration"
 	case left.ValidationRecipeID != right.ValidationRecipeID:
 		return "validation_recipe"
+	case left.ValidationProofRequirementHash != right.ValidationProofRequirementHash:
+		return "validation_proof_requirement"
 	case !sameStrings(left.RequiredCheckRefs, right.RequiredCheckRefs):
 		return "required_checks"
+	case !SameRuntimeValidationCheckAttestationBindings(left.ValidationCheckAttestations, right.ValidationCheckAttestations):
+		return "validation_check_attestations"
 	case !sameStrings(left.MetricConstraints, right.MetricConstraints):
 		return "metrics"
 	case !sameStrings(left.ArtifactRefs, right.ArtifactRefs):
@@ -418,6 +452,19 @@ func (l RuntimeCoverageProofLineage) Clone() RuntimeCoverageProofLineage {
 }
 
 func (l RuntimeCoverageProofLineage) Validate() error {
+	// Validate nested proof identities before Normalized/Clone can sort and
+	// deduplicate their slices. Persisted lineage is opaque owner authority;
+	// recovery must reject duplicate/aliased checks instead of repairing them.
+	if l.SourceProofIdentity.Hash != "" {
+		if err := l.SourceProofIdentity.Validate(); err != nil {
+			return fmt.Errorf("coverage proof lineage source proof identity: %w", err)
+		}
+	}
+	if l.CurrentProofIdentity.Hash != "" {
+		if err := l.CurrentProofIdentity.Validate(); err != nil {
+			return fmt.Errorf("coverage proof lineage current proof identity: %w", err)
+		}
+	}
 	l = l.Normalized()
 	if l.ID == "" || l.WorkspaceID == "" || l.RunID == "" || l.CoverageWorkItemID == "" ||
 		(l.EvidenceKind != EvidenceKindStateChange && l.EvidenceKind != EvidenceKindValidation) {
@@ -536,6 +583,14 @@ func runtimeCoverageProofLineageKindRank(kind RuntimeCoverageProofLineageKind) i
 func ValidateRuntimeCoverageProofLineage(values []RuntimeCoverageProofLineage) error {
 	if len(values) > RuntimeCoverageProofLineageLimit {
 		return fmt.Errorf("coverage proof lineage exceeds bounded limit %d", RuntimeCoverageProofLineageLimit)
+	}
+	// Validate the opaque rows before sorting. In particular this preserves
+	// nested proof-check duplicates that their canonical representation cannot
+	// carry.
+	for _, row := range values {
+		if err := row.Validate(); err != nil {
+			return err
+		}
 	}
 	normalized := NormalizeRuntimeCoverageProofLineage(values)
 	if len(normalized) != len(values) {

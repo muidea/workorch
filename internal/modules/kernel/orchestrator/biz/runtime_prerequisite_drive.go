@@ -267,9 +267,19 @@ func (m *Biz) resolveRuntimePrerequisite(
 			return runtime.PrerequisiteResult{}, bindingErr
 		}
 		validationRecipes := []runtimecontract.RuntimeValidationRecipe(nil)
+		validationProofRequirements := []runtimecontract.RuntimeValidationProofRequirement(nil)
 		manifestBinding := runtimecontract.RuntimeWorkspaceManifestBinding{}
 		if prerequisite.OwnerModuleID == runtimecontract.RuntimeModuleShell && runtimeRequiredKindsContain(prerequisite.RequiredCapabilities, runtimecontract.RuntimeBlockKindManagedValidationSession) {
 			validationRecipes = runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(aggregate.Facts.Activation.EvidencePolicies)
+			var proofErr error
+			validationProofRequirements, proofErr = runtimecontract.CompileRuntimeValidationProofRequirements(
+				aggregate.Facts.DefinitionRevision,
+				aggregate.Facts.DefinitionSeed.CoverageItems,
+				aggregate.Facts.DefinitionFocuses,
+			)
+			if proofErr != nil {
+				return runtime.PrerequisiteResult{}, fmt.Errorf("compile runtime validation proof requirements: %w", proofErr)
+			}
 			if len(validationRecipes) != 0 {
 				var manifestErr error
 				manifestBinding, manifestErr = runtimeWorkspaceManifestBinding(aggregate.Facts)
@@ -283,7 +293,7 @@ func (m *Biz) resolveRuntimePrerequisite(
 			PrerequisiteID: prerequisite.ID, OwnerModuleID: prerequisite.OwnerModuleID,
 			WorkspaceDeliverableDirectory: deliverableDirectory, RequiredKinds: append([]string(nil), prerequisite.RequiredCapabilities...),
 			RequiredTargetRefs: runtimeOperationAdmissibilityTargetRefs(aggregate, prerequisite.OwnerModuleID), CapabilityStateBinding: binding,
-			ValidationRecipes: validationRecipes, WorkspaceManifestBinding: manifestBinding,
+			ValidationRecipes: validationRecipes, ValidationProofRequirements: validationProofRequirements, WorkspaceManifestBinding: manifestBinding,
 			// Operation admissibility is another owner-grounded SM-2 inventory.
 			// In particular, it must include a file created by a prior accepted
 			// operation so the next sealed validation can read it. Candidate

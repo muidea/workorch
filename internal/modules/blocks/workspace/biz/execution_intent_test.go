@@ -136,6 +136,7 @@ func workspaceExecutionIntentBootstrap(t *testing.T, workspaceID common.Workspac
 		DefinitionFocuses: []runtimecontract.RuntimeDefinitionFocus{{
 			ID: "focus-1", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: string(dod.ID), AssessmentText: dod.Items[0],
 			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequireAssessment: true,
+			EvidenceDeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", string(dod.ID)),
 		}},
 		Slices: slices, CoverageItems: coverageItems,
 		ConvergencePolicy: runtimecontract.DefaultRuntimeConvergencePolicy(), RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),

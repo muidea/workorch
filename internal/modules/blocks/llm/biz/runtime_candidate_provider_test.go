@@ -44,6 +44,34 @@ func runtimeCandidateCorrectionInputForProviderTest(manifestHash, path, alternat
 	return &input
 }
 
+func runtimeValidationProofRequirementForLLMTest(t testing.TB, definitionRevision string, coverageID common.CoverageWorkItemID, sourceID, sourceText, declarationRef, recipeID string) runtimecontract.RuntimeValidationProofRequirement {
+	t.Helper()
+	items := []runtimecontract.RuntimeCoverageItem{{
+		ID: coverageID, SourceScope: "dodItem", SourceID: sourceID, TargetText: sourceText,
+	}}
+	focuses := []runtimecontract.RuntimeDefinitionFocus{{
+		ID: "validation-proof/" + string(coverageID), AssessmentScope: "dodItem", AssessmentID: sourceID, AssessmentText: sourceText,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		AcceptedStepKinds:      []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		EvidenceDeclarationRef: declarationRef, ValidationRecipeID: recipeID,
+	}}
+	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(definitionRevision, items, focuses)
+	if err != nil || len(requirements) != 1 {
+		t.Fatalf("compile validation proof requirement: requirements=%+v err=%v", requirements, err)
+	}
+	return requirements[0]
+}
+
+func runtimeValidationCheckAttestationsForLLMTest(requiredCheckRefs []string) []runtimecontract.RuntimeValidationCheckAttestationBinding {
+	ret := make([]runtimecontract.RuntimeValidationCheckAttestationBinding, 0, len(requiredCheckRefs))
+	for _, checkRef := range requiredCheckRefs {
+		ret = append(ret, runtimecontract.RuntimeValidationCheckAttestationBinding{
+			RequiredCheckRef: checkRef, ObservationProtocolRef: "test/llm-owner-native/v1", NativeCheckRef: checkRef + "/native",
+		})
+	}
+	return runtimecontract.NormalizeRuntimeValidationCheckAttestationBindings(ret)
+}
+
 func runtimeCandidateCorrectionObservationForProviderTest(failure runtimecontract.RuntimeCandidateFailure, path string) *runtimecontract.RuntimeCandidateCorrectionObservation {
 	diagnostic := failure.Diagnostic.Clone()
 	if diagnostic == nil {
@@ -408,7 +436,7 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 	prerequisite := runtimecontract.RuntimeCoverageItem{ID: "cwi-000", SliceID: "slice-1", SourceScope: "dodItem", SourceID: "dod-000", TargetText: "prerequisite"}
 	base.SemanticManifest.CoverageItems = append(base.SemanticManifest.CoverageItems, prerequisite)
 	base.SemanticManifest.ProofObligations = append(base.SemanticManifest.ProofObligations, runtimecontract.RuntimeSemanticProofObligation{
-		CoverageWorkItemID: "cwi-000", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		CoverageWorkItemID: "cwi-000", DeclarationRef: "profile/dodItem/dod-000", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 	})
 	base.SemanticContext.DefinitionSeed.CoverageItems = append(base.SemanticContext.DefinitionSeed.CoverageItems, prerequisite)
 	base.SemanticContext.DefinitionSeed.Slices[0].CoverageWorkItemIDs = append(base.SemanticContext.DefinitionSeed.Slices[0].CoverageWorkItemIDs, "cwi-000")
@@ -659,7 +687,7 @@ func TestRuntimeSemanticProofBatchProviderProjectionOmitsUnrelatedCoverage(t *te
 	request.SemanticContext.BatchCoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-001"}
 	request.SemanticManifest.CoverageItems = items
 	request.SemanticManifest.ProofObligations = append(request.SemanticManifest.ProofObligations, runtimecontract.RuntimeSemanticProofObligation{
-		CoverageWorkItemID: "cwi-002", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		CoverageWorkItemID: "cwi-002", DeclarationRef: "profile/dodItem/dod-002", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 	})
 	request.SemanticManifest.DefinitionSeedHash = seed.Hash
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
@@ -774,9 +802,14 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 		ReobserveOwnerModuleID: runtimecontract.RuntimeModuleShell, ReobserveFactKind: runtimecontract.RuntimeOwnerFactSelectableValidationSurface,
 		MaxAcquisitionAttempts: 1,
 	}
+	proofRequirement := runtimeValidationProofRequirementForLLMTest(
+		t, request.SemanticManifest.DefinitionRevision, "cwi-001", "dod-001", "the artifact works",
+		runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-001"), "validation-surface-dependency",
+	)
 	request.SemanticManifest.OwnerCatalogs[0] = catalog
 	request.SemanticManifest.ProofObligations = []runtimecontract.RuntimeSemanticProofObligation{{
-		CoverageWorkItemID: "cwi-001", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		CoverageWorkItemID: "cwi-001", DeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-001"), RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		ValidationProofRequirement:   &proofRequirement,
 		DeclarationTargetSelectorRef: "file/workspace_deliverable", DeclarationTargetSelectorOwnerRef: "software-dev", DeclarationTargetSelectorSubjectRef: "validation_preparation",
 		DeclarationTargetSelectorCandidateRefs:          []string{prospectiveTarget},
 		DeclarationProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path"},
@@ -795,6 +828,13 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 			MaxAcquisitionAttempts: 1,
 		},
 	}}
+	dependencyBinding, err := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(
+		proofRequirement, "validation-surface-dependency",
+		runtimeValidationCheckAttestationsForLLMTest(proofRequirement.RequiredCheckRefs)...,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	dependencyCatalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "shell-prospective-dependency", OwnerModuleID: runtimecontract.RuntimeModuleShell,
 		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
@@ -805,10 +845,16 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 			InputSchemaHash: "shell-schema-dependency", PrerequisiteRef: "workspace/validation-input",
 			ProspectiveSatisfactionContractRef:      "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
 			ProspectiveTargetSatisfactionConstraint: &prospectiveConstraint,
-			CheckRefs:                               []string{"check/validation-surface-dependency"},
-			ProofApplicability:                      runtimecontract.RuntimeValidationProofDirect,
-			EffectScope:                             runtimecontract.RuntimeEffectEphemeralSession,
-			IdempotencyClass:                        runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+			ProofRequirementPreparations: []runtimecontract.RuntimeValidationProofPreparation{{
+				RequirementHash: dependencyBinding.RequirementHash, DefinitionRevision: dependencyBinding.DefinitionRevision,
+				CoverageWorkItemID: dependencyBinding.CoverageWorkItemID, DeclarationRef: dependencyBinding.DeclarationRef,
+				ValidationRecipeID:                      dependencyBinding.ValidationRecipeID,
+				CheckAttestations:                       runtimecontract.CloneRuntimeValidationCheckAttestationBindings(dependencyBinding.CheckAttestations),
+				ProspectiveTargetSatisfactionConstraint: prospectiveConstraint,
+			}},
+			ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+			EffectScope:        runtimecontract.RuntimeEffectEphemeralSession,
+			IdempotencyClass:   runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 		}},
 		ObservedRevision: "shell-policy-dependency-v1",
 	}
@@ -843,10 +889,11 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 	}
 	if acquisition.ProspectiveTargetConstraint == nil ||
 		strings.Contains(string(constraintProjectionJSON), `"validationRecipeId"`) ||
-		strings.Contains(string(constraintProjectionJSON), `"validationSurfaceId"`) ||
-		strings.Contains(string(constraintProjectionJSON), prospectiveConstraint.ValidationRecipeID) ||
-		strings.Contains(authority, prospectiveConstraint.ValidationRecipeID) {
+		strings.Contains(string(constraintProjectionJSON), `"validationSurfaceId"`) {
 		t.Fatalf("provider-safe prospective target constraint leaked its dependency recipe identity: %s", constraintProjectionJSON)
+	}
+	if !strings.Contains(authority, `"validationProofRequirement"`) || !strings.Contains(authority, proofRequirement.Hash) {
+		t.Fatalf("provider projection lost Definition-sealed exact validation proof requirement: %s", authority)
 	}
 	if !strings.Contains(authority, `"declarationTargetSelectorRef":"file/workspace_deliverable"`) ||
 		!strings.Contains(authority, `"acquisitionTargetSelectorRef":"workspace-relative-new-file-target"`) ||
@@ -1010,8 +1057,9 @@ func TestRuntimeSemanticProviderProjectsTypedValidationFailureRepairOnlyInC3(t *
 		TargetRole:            "deliverable_implementation", TargetSelectorRef: "file/workspace_deliverable",
 		TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "dodItem",
 		TargetSelectorCandidateRefs: []string{"docs/lsp_tools.md", "lsp_tools.go"}, RequireTargetGrounding: true,
-		AcceptedStepKinds: []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession},
-		RequireAssessment: true,
+		AcceptedStepKinds:      []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession},
+		EvidenceDeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-001"),
+		RequireAssessment:      true,
 	}})
 	focuses[0].ValidationFailureRepairConvergence = &convergence
 	focuses = runtimecontract.NormalizeRuntimeDefinitionFocuses(focuses)
@@ -1188,7 +1236,7 @@ func runtimeSemanticProviderAcquisitionPayloadForTest(t *testing.T, manifest run
 				"prospectiveTargetRefs":     []string{targetRef},
 			},
 			"requiredEvidenceKinds": []string{runtimecontract.EvidenceKindStateChange},
-			"declarationRef":        "semantic-plan/dod-001",
+			"declarationRef":        runtimecontract.RuntimeSemanticCurrentDeclarationRef(manifest.ProofObligations[0]),
 		}},
 	})
 	if err != nil {
@@ -1273,7 +1321,7 @@ func runtimeSemanticProviderTestRequest(t testing.TB) llmmodels.RuntimeCandidate
 		AllowedOwnerModuleIDs: []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
 		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
-			CoverageWorkItemID: "cwi-001", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			CoverageWorkItemID: "cwi-001", DeclarationRef: "profile/dodItem/dod-001", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		}},
 		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
@@ -1318,7 +1366,7 @@ func TestRuntimeProviderRequestRejectsUnsealedManifestBeforeProviderConfiguratio
 
 func runtimeCandidateManifestForRequest(t *testing.T, decision runtimecontract.RuntimeDecision, context runtimecontract.RuntimeCandidateContext) runtimecontract.RuntimeCandidateContractManifest {
 	t.Helper()
-	decision = runtimeCandidateDecisionForSchemaTest(decision)
+	decision = runtimeCandidateDecisionForSchemaTest(t, decision)
 	ownerFacts := runtimecontract.RuntimeCandidateManifestOwnerFactsFromResources(context.Resources)
 	if decision.State == runtimecontract.ConvergenceStateNeedAssessment {
 		ownerFacts.AssessmentPurpose = runtimecontract.RuntimeAssessmentPurposeDefinitionProof
@@ -1337,7 +1385,7 @@ func runtimeCandidateManifestForRequest(t *testing.T, decision runtimecontract.R
 // explicitly so no legacy decision-to-schema fallback survives in production.
 func runtimeCandidateManifestForSchema(t *testing.T, decision runtimecontract.RuntimeDecision, selection *runtimecontract.RuntimeTargetSelection) runtimecontract.RuntimeCandidateContractManifest {
 	t.Helper()
-	decision = runtimeCandidateDecisionForSchemaTest(decision)
+	decision = runtimeCandidateDecisionForSchemaTest(t, decision)
 	ownerFacts := runtimecontract.RuntimeCandidateManifestOwnerFacts{TargetSelection: selection}
 	if selection != nil {
 		ownerFacts.OperationAdmissibilities = runtimeCandidateScopeOwnerFactsForTest()
@@ -1384,7 +1432,8 @@ func runtimeCandidateScopeOwnerFactsForTest() []runtimecontract.RuntimeOperation
 // the same C5 invariant as production authority: a state-changing or
 // validation convergence state always carries sealed coverage and effect
 // constraints. Production code never fills these fields at render time.
-func runtimeCandidateDecisionForSchemaTest(decision runtimecontract.RuntimeDecision) runtimecontract.RuntimeDecision {
+func runtimeCandidateDecisionForSchemaTest(t testing.TB, decision runtimecontract.RuntimeDecision) runtimecontract.RuntimeDecision {
+	t.Helper()
 	contract := decision.RequiredOutput.Normalized()
 	switch decision.State {
 	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation:
@@ -1420,15 +1469,21 @@ func runtimeCandidateDecisionForSchemaTest(decision runtimecontract.RuntimeDecis
 		decision.Focus.TargetSelectorSubjectRef = "validation/managed-session"
 		bindings := make([]runtimecontract.CoverageEvidenceBinding, 0, len(contract.CoverageWorkItemIDs))
 		for _, coverageID := range contract.CoverageWorkItemIDs {
+			requirement := runtimeValidationProofRequirementForLLMTest(
+				t, decision.AuthoritySnapshot.DefinitionRevision, coverageID, string(coverageID), "schema validation requirement",
+				runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", string(coverageID)), "recipe/llm-schema-test",
+			)
 			binding := runtimecontract.CoverageEvidenceBinding{
 				ID: "binding/llm-schema-test/" + string(coverageID), CoverageWorkItemID: coverageID,
 				FocusID: decision.Focus.ID, DefinitionRevision: decision.AuthoritySnapshot.DefinitionRevision,
 				Proofs: []runtimecontract.CoverageEvidenceProof{{
 					EvidenceKind: runtimecontract.EvidenceKindValidation, AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 					RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, ValidationRecipeID: "recipe/llm-schema-test",
+					ValidationProofRequirementHash: requirement.Hash, RequiredCheckRefs: append([]string(nil), requirement.RequiredCheckRefs...),
+					ValidationCheckAttestations: runtimeValidationCheckAttestationsForLLMTest(requirement.RequiredCheckRefs),
 				}},
 				TargetSelectorRef: decision.Focus.TargetSelectorRef, TargetSelectorOwnerRef: decision.Focus.TargetSelectorOwnerRef,
-				TargetSelectorSubjectRef: decision.Focus.TargetSelectorSubjectRef, DeclarationRef: "definition/llm-schema-test/" + string(coverageID),
+				TargetSelectorSubjectRef: decision.Focus.TargetSelectorSubjectRef, DeclarationRef: requirement.DeclarationRef,
 			}
 			binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 			bindings = append(bindings, binding)
@@ -2249,7 +2304,7 @@ func TestValidateRuntimeCandidateManifestSupportingFactsRequiresCanonicalExactBi
 
 func TestRuntimeProviderContractRequiresCompleteCompactBoundedOutput(t *testing.T) {
 	contract := runtimeCandidateContractCatalog()
-	for _, required := range []string{"exactly one JSON object", "complete", "compact", "finished", "unknown fields", "unrequested operations", "preface", "suffix", "markdown fences", "Do not repeat"} {
+	for _, required := range []string{"exactly one JSON object", "complete", "compact", "finished", "unknown fields", "unrequested operations", "preface", "suffix", "markdown fences", "Do not repeat", "validationProofPreparation", "real executable assertion", "ownerNativeCheckAttestation.nativeCheckRef", "diagnostic only", "can never attest"} {
 		if !strings.Contains(contract, required) {
 			t.Fatalf("runtime candidate contract lost %q: %s", required, contract)
 		}
@@ -2259,6 +2314,28 @@ func TestRuntimeProviderContractRequiresCompleteCompactBoundedOutput(t *testing.
 		if !strings.Contains(schema, required) {
 			t.Fatalf("runtime candidate schema lost bound %s: %s", required, schema)
 		}
+	}
+}
+
+func TestRuntimeCandidateProjectionKeepsExactCWICheckInVolatileAuthority(t *testing.T) {
+	const exactCheck = "workorch-cwi-check-projection-test"
+	context := runtimecontract.RuntimeCandidateContext{
+		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1",
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, RequiredCheckRefs: []string{exactCheck},
+		},
+	}
+	projection := runtimeCandidateAuthorityContextProjection(context, runtimecontract.RuntimeCandidateContractManifest{})
+	raw, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), exactCheck) || !strings.Contains(string(raw), `"RequiredCheckRefs"`) {
+		t.Fatalf("C3 authority lost exact CWI check: %s", raw)
+	}
+	if strings.Contains(runtimeCandidateContractCatalog(), exactCheck) {
+		t.Fatalf("exact CWI check leaked from volatile C3 authority into stable C0")
 	}
 }
 

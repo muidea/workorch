@@ -52,6 +52,9 @@ func (c *RuntimeController) initialize(ctx context.Context, facts runtimecontrac
 	if c == nil || c.repository == nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
+	if err := runtimecontract.ValidateRuntimeFactsRaw(facts); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	facts = facts.Normalized()
 	if facts.CWILedgerSchemaVersion == "" {
 		var ledgerErr error

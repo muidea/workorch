@@ -894,7 +894,7 @@ func TestOwnerBindingContradictionRetiresExactBindingWithoutEffectAndIsRestartId
 			Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"target.txt"},
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
-		DeclarationRef: "semantic/reopened-existing-target",
+		DeclarationRef: runtimeTestSemanticDeclarationRef(freshManifest, item.ID),
 	}
 	document := runtimecontract.RuntimeSemanticPlanDocument{
 		SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: freshManifest.Hash, DefinitionSeedHash: freshManifest.DefinitionSeedHash,

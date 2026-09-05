@@ -7,7 +7,7 @@ import (
 )
 
 func TestCompileRuntimeCWIReconciliationContractBuildsScopedOwnerRefs(t *testing.T) {
-	contract, err := CompileRuntimeCWIReconciliationContract("definition-1", []CoverageFocus{runtimeCWIReconciliationFocus()})
+	contract, err := CompileRuntimeCWIReconciliationContract("definition-1", []CoverageFocus{runtimeCWIReconciliationFocus(t)})
 	if err != nil {
 		t.Fatalf("CompileRuntimeCWIReconciliationContract() error = %v", err)
 	}
@@ -28,8 +28,8 @@ func TestCompileRuntimeCWIReconciliationContractBuildsScopedOwnerRefs(t *testing
 }
 
 func TestRuntimeCWIReconciliationBindingSetHashIgnoresFocusOrder(t *testing.T) {
-	first := runtimeCWIReconciliationFocus()
-	second := runtimeCWIReconciliationFocus()
+	first := runtimeCWIReconciliationFocus(t)
+	second := runtimeCWIReconciliationFocus(t)
 	second.ID = "focus-2"
 	second.CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-2"}
 	second.CoverageEvidenceBindings[0].ID = "binding-2"
@@ -51,7 +51,7 @@ func TestRuntimeCWIReconciliationBindingSetHashIgnoresFocusOrder(t *testing.T) {
 }
 
 func TestRuntimeCWIReconciliationContractRetainsSelectorCandidates(t *testing.T) {
-	focus := runtimeCWIReconciliationFocus()
+	focus := runtimeCWIReconciliationFocus(t)
 	focus.CoverageEvidenceBindings[0].TargetRefs = nil
 	focus.CoverageEvidenceBindings[0].TargetSelectorRef = "file/profile_declared_candidates"
 	focus.CoverageEvidenceBindings[0].TargetSelectorOwnerRef = RuntimeModuleFile
@@ -93,7 +93,7 @@ func TestRuntimeCWIReconciliationContractRetainsSelectorCandidates(t *testing.T)
 }
 
 func TestRuntimeCWIReconciliationRequestAndBatchRejectScopeAndCompletenessDrift(t *testing.T) {
-	contract, err := CompileRuntimeCWIReconciliationContract("definition-1", []CoverageFocus{runtimeCWIReconciliationFocus()})
+	contract, err := CompileRuntimeCWIReconciliationContract("definition-1", []CoverageFocus{runtimeCWIReconciliationFocus(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestRuntimeCWIReconciliationRequestAndBatchRejectScopeAndCompletenessDrift(
 }
 
 func TestRuntimeCWIReconciliationBatchHashExcludesOriginalDiagnosticText(t *testing.T) {
-	contract, err := CompileRuntimeCWIReconciliationContract("definition-1", []CoverageFocus{runtimeCWIReconciliationFocus()})
+	contract, err := CompileRuntimeCWIReconciliationContract("definition-1", []CoverageFocus{runtimeCWIReconciliationFocus(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,14 +182,19 @@ func TestRuntimeCWIReconciliationBatchHashExcludesOriginalDiagnosticText(t *test
 	}
 }
 
-func runtimeCWIReconciliationFocus() CoverageFocus {
+func runtimeCWIReconciliationFocus(t testing.TB) CoverageFocus {
+	t.Helper()
+	item := RuntimeCoverageItem{ID: "cwi-1", SourceScope: "dodItem", SourceID: "dod-1", TargetText: "main works"}
+	requirement := runtimeValidationProofRequirementForTest(t, "definition-1", item, "definition/dodItem/dod-1", "recipe/main", []string{"check/main"})
 	binding := CoverageEvidenceBinding{
 		ID: "binding-1", CoverageWorkItemID: common.CoverageWorkItemID("cwi-1"), FocusID: "focus-1", DefinitionRevision: "definition-1",
 		Proofs: []CoverageEvidenceProof{{
 			EvidenceKind: EvidenceKindValidation, RequiredEffectScopes: []RuntimeEffectScope{RuntimeEffectNone},
-			AllowedOperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe/main", RequiredCheckRefs: []string{"check/main"},
+			AllowedOperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe/main",
+			ValidationProofRequirementHash: requirement.Hash, RequiredCheckRefs: append([]string(nil), requirement.RequiredCheckRefs...),
+			ValidationCheckAttestations: runtimeValidationCheckAttestationsForTest(requirement.RequiredCheckRefs),
 		}},
-		TargetRefs: []string{"main.go"}, DeclarationRef: "profile/test",
+		TargetRefs: []string{"main.go"}, DeclarationRef: requirement.DeclarationRef,
 	}
 	binding.Hash = StableCoverageEvidenceBindingHash(binding)
 	return CoverageFocus{

@@ -62,6 +62,20 @@ func (r RuntimeSemanticPlanBatchFeasibilityResult) Normalized() RuntimeSemanticP
 }
 
 func (r RuntimeSemanticPlanBatchFeasibilityResult) Validate(batch RuntimeSemanticPlanBatch, document RuntimeSemanticPlanDocument, manifest RuntimeSemanticPlanManifest) error {
+	validated, err := validateRuntimeSemanticPlanManifest(manifest)
+	if err != nil {
+		return err
+	}
+	if err := validateRuntimeSemanticPlanBatchAgainstValidatedManifest(batch, validated); err != nil {
+		return err
+	}
+	if err := validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(document, validated); err != nil {
+		return err
+	}
+	return validateRuntimeSemanticPlanBatchFeasibilityResultWithValidatedManifest(r, batch, document, validated)
+}
+
+func validateRuntimeSemanticPlanBatchFeasibilityResultWithValidatedManifest(r RuntimeSemanticPlanBatchFeasibilityResult, batch RuntimeSemanticPlanBatch, document RuntimeSemanticPlanDocument, validated runtimeValidatedSemanticManifest) error {
 	r = r.Normalized()
 	batch = batch.Normalized()
 	document = document.Normalized()
@@ -71,7 +85,7 @@ func (r RuntimeSemanticPlanBatchFeasibilityResult) Validate(batch RuntimeSemanti
 	if batch.State != RuntimeSemanticPlanBatchAccepted {
 		return fmt.Errorf("runtime semantic batch feasibility result requires accepted batch")
 	}
-	return ValidateRuntimeSemanticPlanBatchFeasibilities(manifest, document, r.Feasibilities)
+	return validateRuntimeSemanticPlanBatchFeasibilitiesWithValidatedManifest(validated, document, r.Feasibilities)
 }
 
 func StableRuntimeSemanticPlanBatchFeasibilityResultHash(result RuntimeSemanticPlanBatchFeasibilityResult) string {
@@ -108,9 +122,17 @@ func (b RuntimeSemanticPlanBatch) Clone() RuntimeSemanticPlanBatch {
 }
 
 func (b RuntimeSemanticPlanBatch) ValidateAgainstManifest(manifest RuntimeSemanticPlanManifest) error {
+	validated, err := validateRuntimeSemanticPlanManifest(manifest)
+	if err != nil {
+		return err
+	}
+	return validateRuntimeSemanticPlanBatchAgainstValidatedManifest(b, validated)
+}
+
+func validateRuntimeSemanticPlanBatchAgainstValidatedManifest(b RuntimeSemanticPlanBatch, validated runtimeValidatedSemanticManifest) error {
 	raw := b
 	b = b.Normalized()
-	manifest = manifest.Normalized()
+	manifest := validated.manifest
 	// Batch identity is persisted authority.  Do not silently repair duplicate
 	// or empty ordered IDs while validating it: doing so would change the
 	// selected/pending lineage and allow a forged private event to acquire a
@@ -119,9 +141,6 @@ func (b RuntimeSemanticPlanBatch) ValidateAgainstManifest(manifest RuntimeSemant
 		len(raw.PendingCoverageWorkItemIDs) != len(b.PendingCoverageWorkItemIDs) ||
 		len(raw.DependencyBarrierRefs) != len(b.DependencyBarrierRefs) {
 		return fmt.Errorf("runtime semantic plan batch contains duplicate or empty identity values")
-	}
-	if err := manifest.Validate(); err != nil {
-		return err
 	}
 	if b.BatchID == "" || b.ManifestHash != manifest.Hash || b.DefinitionSeedHash != manifest.DefinitionSeedHash || b.CoverageOrderHash == "" || b.Sequence < 0 || b.RequestLogicalID == "" || len(b.CoverageWorkItemIDs) == 0 {
 		return fmt.Errorf("runtime semantic plan batch requires identity, manifest, sequence, request and coverage")
@@ -336,13 +355,20 @@ func MergeRuntimeSemanticPlanBatchDocuments(manifest RuntimeSemanticPlanManifest
 // feasibility fan-out. It does not decide whether the facts are feasible; it
 // only enforces one exact observation per independently feasible proof.
 func ValidateRuntimeSemanticPlanBatchFeasibilities(manifest RuntimeSemanticPlanManifest, document RuntimeSemanticPlanDocument, values []RuntimeSemanticProofFeasibility) error {
-	manifest = manifest.Normalized()
+	validated, err := validateRuntimeSemanticPlanManifest(manifest)
+	if err != nil {
+		return err
+	}
+	if err := validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(document, validated); err != nil {
+		return err
+	}
+	return validateRuntimeSemanticPlanBatchFeasibilitiesWithValidatedManifest(validated, document, values)
+}
+
+func validateRuntimeSemanticPlanBatchFeasibilitiesWithValidatedManifest(validated runtimeValidatedSemanticManifest, document RuntimeSemanticPlanDocument, values []RuntimeSemanticProofFeasibility) error {
 	document = document.Normalized()
 	if document.PlanStep != RuntimeSemanticPlanStepProofBatch || document.BatchID == "" {
 		return fmt.Errorf("runtime semantic feasibility requires a proof batch document")
-	}
-	if err := document.ValidateAgainstManifest(manifest); err != nil {
-		return err
 	}
 	proposals := make(map[string]RuntimeSemanticProofProposal, len(document.Proposals))
 	for _, proposal := range document.Proposals {
@@ -357,7 +383,7 @@ func ValidateRuntimeSemanticPlanBatchFeasibilities(manifest RuntimeSemanticPlanM
 		if _, duplicate := seen[value.ProposalHash]; duplicate {
 			return fmt.Errorf("runtime semantic batch feasibility duplicates proof %q", value.ProposalHash)
 		}
-		if err := value.ValidateForProposal(manifest, proposal); err != nil {
+		if err := value.validateForProposalWithValidatedManifest(validated, proposal, true, false, false); err != nil {
 			return err
 		}
 		seen[value.ProposalHash] = struct{}{}

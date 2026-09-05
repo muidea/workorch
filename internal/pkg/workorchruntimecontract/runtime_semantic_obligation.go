@@ -89,6 +89,16 @@ func ResolveRuntimeSemanticEvidenceObligation(obligation RuntimeSemanticProofObl
 	return ret, nil
 }
 
+// RuntimeSemanticCurrentDeclarationRef returns the only declaration identity
+// a provider may echo for the current proof purpose.
+func RuntimeSemanticCurrentDeclarationRef(obligation RuntimeSemanticProofObligation) string {
+	obligation = obligation.Normalized()
+	if obligation.ValidationFailureRepair != nil {
+		return obligation.ValidationFailureRepair.Normalized().ConvergenceID
+	}
+	return obligation.DeclarationRef
+}
+
 func (a RuntimeSemanticOwnerFactAcquisition) Normalized() RuntimeSemanticOwnerFactAcquisition {
 	a.Requirement = a.Requirement.Normalized()
 	a.ProspectiveSatisfactionContractRef = strings.TrimSpace(a.ProspectiveSatisfactionContractRef)
@@ -170,8 +180,14 @@ func (a RuntimeSemanticOwnerFactAcquisition) Validate() error {
 // carried by a sealed manifest. It replaces later reads of activation
 // DefinitionFocuses during document admission and binding compilation.
 type RuntimeSemanticProofObligation struct {
-	CoverageWorkItemID                              common.CoverageWorkItemID
+	CoverageWorkItemID common.CoverageWorkItemID
+	// DeclarationRef is derived from the sealed Definition source. It is not a
+	// provider choice. ValidationProofRequirement further binds a Shell recipe
+	// to the unique CWI check that may receive validation credit.
+	DeclarationRef                                  string
+	ValidationProofRequirement                      *RuntimeValidationProofRequirement
 	RequiredEvidenceKinds                           []string
+	DeclarationAcceptedStepKinds                    []string
 	DeclarationEvidenceRole                         string
 	DeclarationTargetRole                           string
 	DeclarationTargetDiscoverySources               []string
@@ -196,7 +212,13 @@ type RuntimeSemanticProofObligation struct {
 
 func (o RuntimeSemanticProofObligation) Normalized() RuntimeSemanticProofObligation {
 	o.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(o.CoverageWorkItemID)))
+	o.DeclarationRef = strings.TrimSpace(o.DeclarationRef)
+	if o.ValidationProofRequirement != nil {
+		value := o.ValidationProofRequirement.Clone()
+		o.ValidationProofRequirement = &value
+	}
 	o.RequiredEvidenceKinds = normalizeStrings(o.RequiredEvidenceKinds)
+	o.DeclarationAcceptedStepKinds = canonicalizeOperationKinds(o.DeclarationAcceptedStepKinds)
 	o.DeclarationEvidenceRole = strings.TrimSpace(o.DeclarationEvidenceRole)
 	o.DeclarationTargetRole = strings.TrimSpace(o.DeclarationTargetRole)
 	o.DeclarationTargetDiscoverySources = normalizeStrings(o.DeclarationTargetDiscoverySources)
@@ -223,6 +245,11 @@ func (o RuntimeSemanticProofObligation) Normalized() RuntimeSemanticProofObligat
 func (o RuntimeSemanticProofObligation) Clone() RuntimeSemanticProofObligation {
 	o = o.Normalized()
 	o.RequiredEvidenceKinds = append([]string(nil), o.RequiredEvidenceKinds...)
+	o.DeclarationAcceptedStepKinds = append([]string(nil), o.DeclarationAcceptedStepKinds...)
+	if o.ValidationProofRequirement != nil {
+		value := o.ValidationProofRequirement.Clone()
+		o.ValidationProofRequirement = &value
+	}
 	o.DeclarationTargetDiscoverySources = append([]string(nil), o.DeclarationTargetDiscoverySources...)
 	o.DeclarationTargetSelectorCandidateRefs = append([]string(nil), o.DeclarationTargetSelectorCandidateRefs...)
 	o.DeclarationProspectiveTargetAllOfConstraintRefs = append([]string(nil), o.DeclarationProspectiveTargetAllOfConstraintRefs...)
@@ -239,9 +266,23 @@ func (o RuntimeSemanticProofObligation) Clone() RuntimeSemanticProofObligation {
 }
 
 func (o RuntimeSemanticProofObligation) Validate() error {
+	if o.ValidationProofRequirement != nil {
+		if err := o.ValidationProofRequirement.Validate(); err != nil {
+			return err
+		}
+	}
 	o = o.Normalized()
-	if o.CoverageWorkItemID == "" || (len(o.RequiredEvidenceKinds) == 0 && !o.RequireAssessment) {
-		return fmt.Errorf("runtime semantic proof obligation requires coverage and evidence or assessment")
+	if o.CoverageWorkItemID == "" || o.DeclarationRef == "" || strings.Contains(o.DeclarationRef, "*") || (len(o.RequiredEvidenceKinds) == 0 && !o.RequireAssessment) {
+		return fmt.Errorf("runtime semantic proof obligation requires coverage, exact declaration and evidence or assessment")
+	}
+	if o.ValidationProofRequirement != nil {
+		requirement := o.ValidationProofRequirement.Normalized()
+		if err := requirement.Validate(); err != nil {
+			return err
+		}
+		if requirement.CoverageWorkItemID != o.CoverageWorkItemID || requirement.DeclarationRef != o.DeclarationRef || !containsString(o.RequiredEvidenceKinds, EvidenceKindValidation) {
+			return fmt.Errorf("runtime semantic validation proof requirement does not match obligation")
+		}
 	}
 	if err := ValidateRuntimeOwnerFactRequirements(o.RequiredOwnerFacts); err != nil {
 		return err
@@ -313,7 +354,10 @@ func sameRuntimeSemanticProofObligations(left, right []RuntimeSemanticProofOblig
 	for idx := range left {
 		l, r := left[idx], right[idx]
 		if l.CoverageWorkItemID != r.CoverageWorkItemID ||
+			l.DeclarationRef != r.DeclarationRef ||
+			!sameOptionalRuntimeValidationProofRequirement(l.ValidationProofRequirement, r.ValidationProofRequirement) ||
 			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) ||
+			!sameStrings(l.DeclarationAcceptedStepKinds, r.DeclarationAcceptedStepKinds) ||
 			l.DeclarationEvidenceRole != r.DeclarationEvidenceRole ||
 			l.DeclarationTargetRole != r.DeclarationTargetRole ||
 			!sameStrings(l.DeclarationTargetDiscoverySources, r.DeclarationTargetDiscoverySources) ||
@@ -363,6 +407,13 @@ func sameRuntimeSemanticOwnerFactAcquisition(left, right *RuntimeSemanticOwnerFa
 		l.MaxAcquisitionAttempts == r.MaxAcquisitionAttempts
 }
 
+func sameOptionalRuntimeValidationProofRequirement(left, right *RuntimeValidationProofRequirement) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return sameRuntimeValidationProofRequirement(*left, *right)
+}
+
 func sameRuntimeProspectiveTargetSatisfactionConstraints(left, right *RuntimeProspectiveTargetSatisfactionConstraint) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
@@ -379,8 +430,22 @@ func runtimeSemanticProofObligationDefinitionSource(o RuntimeSemanticProofObliga
 			}
 			return o.ValidationFailureRepair.Normalized().FailedFocusID
 		}(),
-		CoverageWorkItemIDs:                  []common.CoverageWorkItemID{o.CoverageWorkItemID},
-		RequiredEvidenceKinds:                append([]string(nil), o.RequiredEvidenceKinds...),
+		CoverageWorkItemIDs:    []common.CoverageWorkItemID{o.CoverageWorkItemID},
+		RequiredEvidenceKinds:  append([]string(nil), o.RequiredEvidenceKinds...),
+		AcceptedStepKinds:      append([]string(nil), o.DeclarationAcceptedStepKinds...),
+		EvidenceDeclarationRef: o.DeclarationRef,
+		ValidationRecipeID: func() string {
+			if o.ValidationProofRequirement == nil {
+				return ""
+			}
+			return o.ValidationProofRequirement.ValidationRecipeID
+		}(),
+		RequiredCheckRefs: func() []string {
+			if o.ValidationProofRequirement == nil {
+				return nil
+			}
+			return append([]string(nil), o.ValidationProofRequirement.RequiredCheckRefs...)
+		}(),
 		EvidenceRole:                         o.DeclarationEvidenceRole,
 		TargetRole:                           o.DeclarationTargetRole,
 		TargetDiscoverySources:               append([]string(nil), o.DeclarationTargetDiscoverySources...),
@@ -430,7 +495,14 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 	for _, raw := range normalizeRuntimeSemanticProofObligations(values) {
 		value := raw.Normalized()
 		writeHashString(h, string(value.CoverageWorkItemID))
+		writeHashString(h, value.DeclarationRef)
+		if value.ValidationProofRequirement == nil {
+			writeHashString(h, "no-validation-proof-requirement")
+		} else {
+			writeHashString(h, value.ValidationProofRequirement.Hash)
+		}
 		writeHashStrings(h, value.RequiredEvidenceKinds)
+		writeHashStrings(h, value.DeclarationAcceptedStepKinds)
 		writeHashString(h, value.DeclarationEvidenceRole)
 		writeHashString(h, value.DeclarationTargetRole)
 		writeHashStrings(h, value.DeclarationTargetDiscoverySources)
@@ -446,9 +518,7 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 		writeHashString(h, strconv.FormatBool(value.RequireCoverageTargets))
 		writeHashString(h, strconv.FormatBool(value.RequireAssessment))
 		for _, requirement := range value.RequiredOwnerFacts {
-			writeHashString(h, requirement.OwnerModuleID)
-			writeHashString(h, string(requirement.FactKind))
-			writeHashString(h, requirement.OperationKind)
+			writeHashString(h, RuntimeOwnerFactRequirementRef(requirement))
 		}
 		for _, convergence := range value.OwnerFactConvergences {
 			convergence = convergence.Normalized()
@@ -505,9 +575,64 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 	}
 }
 
-func compileRuntimeSemanticProofObligations(sourceFocuses []RuntimeDefinitionFocus, coverageItems []RuntimeCoverageItem, catalogs []RuntimeOperationAdmissibility) ([]RuntimeSemanticProofObligation, error) {
+// compileRuntimeSemanticDefinitionProofObligation copies only immutable
+// Definition/CWI facts into the terminal obligation. Owner catalogs may add a
+// current acquisition or repair route later, but cannot alter this source.
+func compileRuntimeSemanticDefinitionProofObligation(definitionRevision string, item RuntimeCoverageItem, source RuntimeDefinitionFocus) (RuntimeSemanticProofObligation, error) {
+	item = item.Normalized()
+	source = source.Normalized()
+	if item.ID == "" || len(source.CoverageWorkItemIDs) != 1 || source.CoverageWorkItemIDs[0] != item.ID {
+		return RuntimeSemanticProofObligation{}, fmt.Errorf("runtime semantic proof obligation has mismatched Definition source for coverage %q", item.ID)
+	}
+	declarationRef := strings.TrimSpace(source.EvidenceDeclarationRef)
+	if declarationRef == "" || strings.Contains(declarationRef, "*") {
+		return RuntimeSemanticProofObligation{}, fmt.Errorf("runtime semantic proof obligation coverage %q requires an exact admitted-CWI declaration", item.ID)
+	}
+	obligation := RuntimeSemanticProofObligation{
+		CoverageWorkItemID:                              item.ID,
+		DeclarationRef:                                  declarationRef,
+		RequiredEvidenceKinds:                           append([]string(nil), source.RequiredEvidenceKinds...),
+		DeclarationAcceptedStepKinds:                    append([]string(nil), source.AcceptedStepKinds...),
+		DeclarationEvidenceRole:                         source.EvidenceRole,
+		DeclarationTargetRole:                           source.TargetRole,
+		DeclarationTargetDiscoverySources:               append([]string(nil), source.TargetDiscoverySources...),
+		DeclarationTargetSelectorRef:                    source.TargetSelectorRef,
+		DeclarationTargetSelectorOwnerRef:               source.TargetSelectorOwnerRef,
+		DeclarationTargetSelectorSubjectRef:             source.TargetSelectorSubjectRef,
+		DeclarationTargetSelectorCandidateRefs:          append([]string(nil), source.TargetSelectorCandidateRefs...),
+		DeclarationProspectiveTargetAllOfConstraintRefs: append([]string(nil), source.ProspectiveTargetAllOfConstraintRefs...),
+		RequireTargetGrounding:                          source.RequireTargetGrounding,
+		RequireDirectEvidence:                           source.RequireDirectEvidence,
+		RequireClaimEvidence:                            source.RequireClaimEvidence,
+		RequireExecutableBehaviorEvidence:               source.RequireExecutableBehaviorEvidence,
+		RequireCoverageTargets:                          source.RequireCoverageTargets,
+		RequireAssessment:                               source.RequireAssessment,
+		RequiredOwnerFacts:                              append([]RuntimeOwnerFactRequirement(nil), source.RequiredOwnerFacts...),
+		OwnerFactConvergences:                           CloneRuntimeOwnerFactConvergences(source.OwnerFactConvergences),
+		MetricConstraints:                               append([]string(nil), source.MetricConstraints...),
+		ArtifactRefs:                                    append([]string(nil), source.ArtifactRefs...),
+	}
+	validationRequirements, err := CompileRuntimeValidationProofRequirements(definitionRevision, []RuntimeCoverageItem{item}, []RuntimeDefinitionFocus{source})
+	if err != nil {
+		return RuntimeSemanticProofObligation{}, err
+	}
+	if requirement, found := RuntimeValidationProofRequirementForCoverage(validationRequirements, item.ID); found {
+		value := requirement.Clone()
+		obligation.ValidationProofRequirement = &value
+	}
+	obligation = obligation.Normalized()
+	if err := obligation.Validate(); err != nil {
+		return RuntimeSemanticProofObligation{}, fmt.Errorf("runtime semantic proof obligation for coverage %q: %w", item.ID, err)
+	}
+	return obligation, nil
+}
+
+func compileRuntimeSemanticProofObligations(definitionRevision string, sourceFocuses []RuntimeDefinitionFocus, coverageItems []RuntimeCoverageItem, catalogs []RuntimeOperationAdmissibility) ([]RuntimeSemanticProofObligation, error) {
 	sourceByCoverage, err := runtimeSemanticBindingSourceFocuses(sourceFocuses)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateRuntimeSemanticOwnerCatalogCollection(catalogs); err != nil {
 		return nil, err
 	}
 	catalogByOwner := make(map[string]RuntimeOperationAdmissibility, len(catalogs))
@@ -524,27 +649,20 @@ func compileRuntimeSemanticProofObligations(sourceFocuses []RuntimeDefinitionFoc
 			return nil, fmt.Errorf("runtime semantic proof obligation has no Definition focus for coverage %q", item.ID)
 		}
 		source = source.Normalized()
-		obligation := RuntimeSemanticProofObligation{
-			CoverageWorkItemID:                              item.ID,
-			RequiredEvidenceKinds:                           append([]string(nil), source.RequiredEvidenceKinds...),
-			DeclarationEvidenceRole:                         source.EvidenceRole,
-			DeclarationTargetRole:                           source.TargetRole,
-			DeclarationTargetDiscoverySources:               append([]string(nil), source.TargetDiscoverySources...),
-			DeclarationTargetSelectorRef:                    source.TargetSelectorRef,
-			DeclarationTargetSelectorOwnerRef:               source.TargetSelectorOwnerRef,
-			DeclarationTargetSelectorSubjectRef:             source.TargetSelectorSubjectRef,
-			DeclarationTargetSelectorCandidateRefs:          append([]string(nil), source.TargetSelectorCandidateRefs...),
-			DeclarationProspectiveTargetAllOfConstraintRefs: append([]string(nil), source.ProspectiveTargetAllOfConstraintRefs...),
-			RequireTargetGrounding:                          source.RequireTargetGrounding,
-			RequireDirectEvidence:                           source.RequireDirectEvidence,
-			RequireClaimEvidence:                            source.RequireClaimEvidence,
-			RequireExecutableBehaviorEvidence:               source.RequireExecutableBehaviorEvidence,
-			RequireCoverageTargets:                          source.RequireCoverageTargets,
-			RequireAssessment:                               source.RequireAssessment,
-			RequiredOwnerFacts:                              append([]RuntimeOwnerFactRequirement(nil), source.RequiredOwnerFacts...),
-			OwnerFactConvergences:                           CloneRuntimeOwnerFactConvergences(source.OwnerFactConvergences),
-			MetricConstraints:                               append([]string(nil), source.MetricConstraints...),
-			ArtifactRefs:                                    append([]string(nil), source.ArtifactRefs...),
+		obligation, err := compileRuntimeSemanticDefinitionProofObligation(definitionRevision, item, source)
+		if err != nil {
+			return nil, err
+		}
+		if requirement := obligation.ValidationProofRequirement; requirement != nil {
+			applicable := 0
+			for _, catalog := range catalogs {
+				if _, _, ok := RuntimeValidationSurfaceDeclaringProofRequirement(catalog.ValidationSurfaces, *requirement); ok {
+					applicable++
+				}
+			}
+			if applicable > 1 {
+				return nil, fmt.Errorf("runtime validation proof requirement for coverage %q has ambiguous cross-owner applicability, got %d catalogs", item.ID, applicable)
+			}
 		}
 		if len(RuntimeMissingOwnerFactRequirements(source.RequiredOwnerFacts, catalogs)) != 0 {
 			convergence, required := ResolveRuntimeOwnerFactAcquisition(source.RequiredOwnerFacts, source.OwnerFactConvergences, catalogs)

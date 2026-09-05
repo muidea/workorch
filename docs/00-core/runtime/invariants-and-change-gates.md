@@ -97,8 +97,10 @@ sealed replay authority时，再次physical owner call才必须先由独立SM-4 
 进入`outcome_unknown`。owner必须preflight exact grant；persisted grant与query/caller grant必须同时缺失或逐字段完全一致，
 不能通过省略grant绕过治理。
 
-validation recipe identity与check identity必须分离。required check只有在owner receipt中真实passed，且不同时出现在
-failed/skipped时才能贡献credit；exit 0、recipe ID、非空PassedChecks或冲突outcome均不能替代matching check fact。
+validation recipe identity与check identity必须分离。每个 Definition required check 必须由 capability owner 的 exact
+applicability binding 映射到一个 owner-opaque observation protocol/native check，并随 sealed execution authority 哈希封存；
+只有 matching typed attestation 报告 passed 且没有 failed/skipped 冲突时才能贡献 credit。exit 0、recipe ID、raw stdout
+marker、非空 PassedChecks 或冲突 outcome 均不能替代 matching attestation。
 
 state-changing capability operation 的 receipt 必须由 owner 对真实 effect 做有界观察。对 workspace durable Shell
 operation，真实 changed refs 必须非空且属于 sealed `RuntimeOperation.TargetRefs`；存在未声明 changed ref、只有

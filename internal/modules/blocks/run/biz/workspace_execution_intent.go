@@ -55,10 +55,10 @@ func (m *Biz) executeWorkspaceExecutionIntent(ev magicevent.Event) (runevents.Wo
 	if !ok || ev.Source() != workspaceExecutionIntentRunSource {
 		return runevents.WorkspaceExecutionIntentResult{}, common.ErrInvalidArgument
 	}
-	cmd = cmd.Normalized()
 	if err := cmd.Validate(); err != nil {
 		return runevents.WorkspaceExecutionIntentResult{}, err
 	}
+	cmd = cmd.Normalized()
 	ctx, err := common.BindRuntimeWorkspaceContext(ev.Context(), cmd.WorkspaceID)
 	if err != nil {
 		return runevents.WorkspaceExecutionIntentResult{}, err
@@ -362,6 +362,11 @@ func (m *Biz) persistReplacementIntent(ctx context.Context, predecessor *runmode
 	if predecessor == nil || predecessor.ID == "" || predecessor.WorkspaceID == "" || intent.State != "" {
 		return common.ErrInvalidArgument
 	}
+	if intent.Bootstrap != nil {
+		if err := runtimecontract.ValidateRuntimeBootstrapRaw(*intent.Bootstrap); err != nil {
+			return err
+		}
+	}
 	clone := runmodel.CloneReplacementIntent(intent)
 	_, err := m.submitReplacementInternalEvent(ctx, m.runs, replacementInternalEvent{
 		Kind: replacementInternalEventRequested, WorkspaceID: predecessor.WorkspaceID, RunID: predecessor.ID, Requested: &clone,
@@ -373,6 +378,9 @@ func (m *Biz) persistReplacementIntent(ctx context.Context, predecessor *runmode
 func (m *Biz) createWorkspaceExecutionReplacement(ctx context.Context, intent runmodel.ReplacementIntent, predecessorID common.RunID) (*runmodel.Run, error) {
 	if intent.Bootstrap == nil {
 		return nil, common.ErrInvalidArgument
+	}
+	if err := runtimecontract.ValidateRuntimeBootstrapRaw(*intent.Bootstrap); err != nil {
+		return nil, err
 	}
 	bootstrap := intent.Bootstrap.Clone()
 	if err := bootstrap.Validate(); err != nil {

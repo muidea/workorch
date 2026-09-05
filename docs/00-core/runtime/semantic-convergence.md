@@ -46,9 +46,18 @@ template/profile policy、稳定 coverage item identity、presentation slice 以
 不要求普通用户预先填写 workspace-specific target/recipe/check；缺 exact binding 的有效 seed 进入 persisted
 `semantic_contract_required` authority，而不是在 application 中终止。
 
+每个已 admission 的 exact CWI 若要求 validation，activation compiler 必须从 immutable Definition revision、
+CWI/source identity、source-text hash 与该 CWI 的 canonical declaration 编译唯一
+`RuntimeValidationProofRequirement`；其中生成的 CWI check ref 对不同 CWI 必须不同。Profile 的 wildcard 只是声明模板：
+Application 只能在一个已经 admission 的 exact CWI 上实例化其质量、target/selector、owner-fact acquisition、repair 与
+evidence/operation 上界；wildcard identity 本身不能进入 Runtime，且不能贡献 current owner fact、recipe/native check、
+dispatch 或 credit，也不能替代该 exact declaration。requirement 是 Definition 声明事实，不是 operation/binding/credit；recipe 仅可作为 exact Profile
+declaration 的可选约束，空值表示由 capability owner 从当前 ready typed catalog 选择兼容载体。普通用户不需要编写
+Runtime JSON、recipe 或 check。
+
 SM-3 使用同一 request-session、complete-document evaluator 与 attempt-0/1 预算请求一个无副作用
 `semantic_plan` document。它只能逐 CWI 提出 owner、operation/effect、三种 target policy 之一、target/selector、
-recipe/check 与适用 metric/artifact；不能携带 Runtime action、coverage state、credit、terminal、retry、ticket 或
+owner catalog 中兼容的 recipe 与适用 metric/artifact；不能编写 declaration/check，也不能携带 Runtime action、coverage state、credit、terminal、retry、ticket 或
 owner result。semantic provider request 前，SM-2/SM-4 必须已通过 typed prerequisite 获取并持久化 canonical owner
 admissibility catalog；manifest/hash/schema/evaluator 只暴露该 snapshot/revision 中的 operation、target、selector、
 constraint 与当前适用的 recipe vocabulary。声明了 workspace-sensitive validation recipe 时，SM-2 必须先取得 File
@@ -68,7 +77,10 @@ owner operation-admissibility catalog 必须把“可调用 operation”与“�
 unavailable`、`direct | auxiliary | not_declared` proof applicability、input schema hash、owner-sealed input binding 或
 prerequisite lineage、check refs、effect 与 replay class；只有已经具有完整 input binding、non-durable effect、明确的
 `safe_to_replay | at_most_once | owner_managed` replay class，并由 owner 显式声明为 `direct` 的 `ready` surface 才能进入
-`ValidationRecipeRefs`。其中`at_most_once`只允许首次sealed execution；claimed/no-receipt必须进入`outcome_unknown`而不能因
+`ValidationRecipeRefs`。Shell managed-validation surface 还必须对 request 中的 exact
+`RuntimeValidationProofRequirement` 返回逐 CWI `ProofRequirementBinding`；surface-wide check union、recipe identity 或 exit 0
+均不能替代该 binding。binding 必须逐 check 封存 capability-owner 的 opaque observation protocol/native check mapping；
+execution receipt 只接受 matching typed attestation，raw stdout/stderr marker 不是 proof。其中`at_most_once`只允许首次sealed execution；claimed/no-receipt必须进入`outcome_unknown`而不能因
 validation身份重放。`auxiliary`/`not_declared`、
 `prerequisite_required`/`unavailable` surface 仍随 aggregate 和 audit 持久化，但不得
 进入 provider schema、C3 ownerCatalog、correction allowed values 或 behavior probe。catalog 分类只读取 owner 本地/typed
@@ -79,6 +91,16 @@ alternative，SM-3 只在该交集中规划，若无
 可满足 required proof 的 alternative，则先检查owner是否提供typed recovery condition/trigger/deadline且当前budget允许；
 完整时进入persisted recoverable runtime wait，否则沿bounded semantic-contract fail-closed主线处理。catalog文本或
 `unavailable`标签本身不能创建wait。
+
+surface 的 recipe-wide `Readiness` 与逐 CWI proof readiness 必须分离：同一个 ready recipe 可以同时携带 CWI-A 的
+`ProofRequirementBinding` 与 CWI-B 的 `ProofRequirementPreparation`。preparation 只是 capability owner 对缺失 native
+check/input 发布的 exact、all-of、revision-bound prospective fact，不是 proof 或 operation authority；只有 Profile 已显式
+声明该 selectable-owner-fact 的唯一 acquisition/reobserve convergence 时，SM-2 才能封存 acquisition transaction。receiving
+owner receipt 后必须重新查询 capability owner，由 fresh observation 把 preparation 转成 binding，再由 SM-2 私有事件 seal。
+exact acquisition receipt 同时消费该 prospective transaction 的 create-only `TargetSelection` lifecycle identity；目录变更失效
+只能重新取得受影响的 owner facts，不得把已执行 selector 放回 pending 或在 fresh restart 后重建它。
+Application 只把 Profile 声明实例化到 admitted exact CWI 并写入 requirement hash，不得自行发明跨 owner convergence；缺
+显式 Profile closure 的 managed CWI 在 activation admission fail closed。
 
 profile 可以在 immutable DefinitionFocus 中声明中立的 `RuntimeOwnerFactRequirement`，但不能提交 owner 的目标状态或
 生成第二份 capability authority。当前支持的 `selectable_validation_surface` 只要求指定 capability owner 的当前 typed
@@ -91,8 +113,10 @@ Workorchd 只把 profile 声明编译进 bootstrap/DefinitionFocus；capability 
 `owner_fact_missing -> acquisition owner/kind/variant/target-policy/operation-selector -> reobserve owner/fact` closure，且
 `MaxAcquisitionAttempts=1`。Profile-derived closure 缺失、重复、与 exact Profile snapshot 派生 manifest 不一致、依赖悬空/
 成环时，在 Run 前返回 `definition_profile_prerequisite_unresolved + select_or_fix_template_profile`。每个 Profile-required
-acceptance/deliverable CWI 还必须在 pre-seal 具有 exact proof declaration、非空受支持 evidence kind 和 owner-receipt-capable
-operation；否则返回 `definition_profile_contract_invalid`，不得降级为 assessment-only focus。SM-2 只消费这条
+acceptance/deliverable CWI 还必须在 pre-seal 具有可确定编译的 canonical exact proof declaration、非空受支持 evidence kind 和 owner-receipt-capable
+operation；activation compiler 只从已经 admission 的 exact CWI 生成 declaration/requirement。wildcard policy 只能在该编译点成为
+exact CWI 的声明约束，不能被实例化成 current owner fact、recipe/native check、dispatch 或 credit。
+无法实例化时返回 `definition_profile_contract_invalid`，不得降级为 assessment-only focus。SM-2 只消费这条
 sealed declaration：Definition 的 target selector 只标识声明侧 subject/lineage，不是 capability operation authorization；
 acquisition 必须另外绑定 capability owner catalog 中的 exact operation selector。current catalog 缺 fact 时，SM-2/SM-3
 先把每个 CWI 的声明 lineage、required fact 与 exact acquisition 编译为唯一 `RuntimeSemanticProofObligation` 并封存进
@@ -218,8 +242,9 @@ decode/validate 边界失败；不得补声明、推导旧状态、生成 compat
 Fresh activation 的 immutable `DefinitionFocuses` 与 SM-2 generation-specific
 `Focus/RemainingFocuses/CompletedFocuses` 必须分离。前者只包含 CWI、presentation slice、required
 evidence/assessment、声明式 metric/artifact obligation、owner-fact postcondition、target role 与可选 profile
-selector/candidate scope、mandatory prospective constraint refs，以及可选的单一 Profile `ValidationFailureRepairConvergence`；不得携带
-exact/resolved/prospective target、operation kind/variant、recipe/check 或 binding。后者可以随 owner resource revision
+selector/candidate scope、mandatory prospective constraint refs、可选的单一 Profile `ValidationFailureRepairConvergence`，
+以及 activation compiler 生成的 exact CWI declaration 和可选 exact Profile recipe/check constraint；不得携带
+exact/resolved/prospective target、selected operation kind/variant、owner applicability 或 proof binding。后者可以随 owner resource revision
 退休、重开和重新 seal。semantic document admission、owner feasibility 与 final seal 都只能用 immutable
 DefinitionFocus 检查 source declaration，不能把上一 generation 的 accepted operation 当成下一 generation 声明。
 

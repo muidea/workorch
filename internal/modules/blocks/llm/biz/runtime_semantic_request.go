@@ -21,6 +21,9 @@ func prepareRuntimeSemanticPlanRequest(request llmmodels.RuntimeCandidateRequest
 	if request.CandidateManifest.Hash != "" || request.CandidateContext.WorkspaceID != "" || request.CandidateContext.RunID != "" || request.DefinitionContext.Revision != "" || request.CandidateCorrectionObservation != nil || request.CandidateCorrection != nil {
 		return runtimeSemanticPreparedRequest{}, fmt.Errorf("semantic plan provider request must not carry operations fields")
 	}
+	if err := runtimecontract.ValidateRuntimeEvidencePolicies(request.SemanticContext.Activation.EvidencePolicies); err != nil {
+		return runtimeSemanticPreparedRequest{}, fmt.Errorf("runtime semantic plan context activation evidence policies: %w", err)
+	}
 	context := request.SemanticContext.Clone()
 	manifest := request.SemanticManifest.Clone()
 	if err := context.Validate(manifest); err != nil {

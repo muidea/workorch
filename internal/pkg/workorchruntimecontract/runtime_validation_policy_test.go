@@ -1,6 +1,10 @@
 package workorchruntimecontract
 
-import "testing"
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
 
 func TestRuntimeValidationPolicyRetryLimitIsTypedAndDeterministic(t *testing.T) {
 	policies := []RuntimeValidationPolicy{{
@@ -89,6 +93,87 @@ func TestRuntimeValidationRecipeDeclarationIsExplicitAndAllowsNoArguments(t *tes
 	}
 	if recipes := RuntimeValidationRecipeDeclarationsFromEvidencePolicies([]RuntimeEvidencePolicy{undeclared}); len(recipes) != 0 {
 		t.Fatalf("undeclared recipe leaked into activation declarations: %+v", recipes)
+	}
+}
+
+func TestRuntimeActivationRejectsAmbiguousRawEvidencePolicyProjection(t *testing.T) {
+	base := RuntimeEvidencePolicy{
+		ID: "managed", AppliesTo: StepKindShellCommand, CommandName: "go",
+		RecipeDeclared: true, RecipeArgs: []string{"test", "-v", "./..."},
+		CoverageRequirements: []RuntimeCoverageEvidenceRequirement{{
+			ID: "validation", Scope: "deliverable", RequiredEvidenceKinds: []string{EvidenceKindValidation},
+		}},
+	}.Normalized()
+
+	tests := map[string][]RuntimeEvidencePolicy{
+		"duplicate policy identity": {
+			base,
+			func() RuntimeEvidencePolicy {
+				changed := base
+				changed.CommandName = "other"
+				return changed
+			}(),
+		},
+		"duplicate nested coverage identity": {
+			func() RuntimeEvidencePolicy {
+				changed := base
+				changed.CoverageRequirements = append(changed.CoverageRequirements, changed.CoverageRequirements[0])
+				return changed
+			}(),
+		},
+		"whitespace alias nested coverage identity": {
+			func() RuntimeEvidencePolicy {
+				changed := base
+				alias := changed.CoverageRequirements[0]
+				alias.ID = " validation "
+				changed.CoverageRequirements = append(changed.CoverageRequirements, alias)
+				return changed
+			}(),
+		},
+	}
+	for name, policies := range tests {
+		t.Run(name, func(t *testing.T) {
+			activation := RuntimeActivationContext{EvidencePolicies: policies}
+			err := activation.Validate()
+			if err == nil || !strings.Contains(err.Error(), "evidence polic") {
+				t.Fatalf("ambiguous raw evidence policies accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestCloneRuntimeEvidencePoliciesPreservesCanonicalEmptyOperationVariants(t *testing.T) {
+	policies := NormalizeRuntimeEvidencePolicies([]RuntimeEvidencePolicy{{
+		ID:        "policy-1",
+		AppliesTo: StepKindShellCommand,
+		CoverageRequirements: []RuntimeCoverageEvidenceRequirement{{
+			ID:    "requirement-1",
+			Scope: "direct",
+		}},
+	}})
+	if err := ValidateRuntimeEvidencePolicies(policies); err != nil {
+		t.Fatalf("canonical policy fixture: %v", err)
+	}
+	if policies[0].CoverageRequirements[0].AcceptedOperationVariants == nil {
+		t.Fatal("canonical empty operation variants unexpectedly use nil representation")
+	}
+
+	cloned := CloneRuntimeEvidencePolicies(policies)
+	if !reflect.DeepEqual(cloned, policies) {
+		t.Fatalf("clone changed canonical raw representation:\nsource=%#v\nclone=%#v", policies, cloned)
+	}
+	if err := ValidateRuntimeEvidencePolicies(cloned); err != nil {
+		t.Fatalf("cloned canonical policy: %v", err)
+	}
+
+	malformed := CloneRuntimeEvidencePolicies(policies)
+	malformed[0].CoverageRequirements[0].AcceptedOperationVariants = nil
+	clonedMalformed := CloneRuntimeEvidencePolicies(malformed)
+	if !reflect.DeepEqual(clonedMalformed, malformed) {
+		t.Fatalf("clone laundered malformed raw representation:\nsource=%#v\nclone=%#v", malformed, clonedMalformed)
+	}
+	if err := ValidateRuntimeEvidencePolicies(clonedMalformed); err == nil {
+		t.Fatal("cloned malformed policy unexpectedly passed raw validation")
 	}
 }
 

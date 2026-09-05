@@ -204,16 +204,21 @@ type RuntimeValidationObservation struct {
 	// RecipeID records the owner-executed validation recipe identity. It is
 	// audit/evidence data only; the Orchestrator continues to decide action and
 	// terminal state from canonical receipt facts.
-	RecipeID       string
-	ExecutedChecks []string
-	PassedChecks   []string
-	FailedChecks   []string
-	SkippedChecks  []string
-	OutputPreview  string
+	RecipeID string
+	// ObservationProtocolRef identifies the owner-native parser/protocol that
+	// produced Executed/Passed/Failed/Skipped checks. Raw process output has no
+	// protocol identity and cannot attest a Definition check.
+	ObservationProtocolRef string
+	ExecutedChecks         []string
+	PassedChecks           []string
+	FailedChecks           []string
+	SkippedChecks          []string
+	OutputPreview          string
 }
 
 func (o RuntimeValidationObservation) Normalized() RuntimeValidationObservation {
 	o.RecipeID = strings.TrimSpace(o.RecipeID)
+	o.ObservationProtocolRef = strings.TrimSpace(o.ObservationProtocolRef)
 	o.ExecutedChecks = normalizeStrings(o.ExecutedChecks)
 	o.PassedChecks = normalizeStrings(o.PassedChecks)
 	o.FailedChecks = normalizeStrings(o.FailedChecks)
@@ -1034,15 +1039,14 @@ func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibilit
 		a.MCPCapabilities = caps
 	}
 	a.ValidationRecipes = NormalizeRuntimeValidationRecipes(a.ValidationRecipes)
-	for _, recipe := range a.ValidationRecipes {
-		a.ValidationRecipeRefs = append(a.ValidationRecipeRefs, recipe.ID)
-	}
-	a.ValidationRecipeRefs = normalizeStrings(a.ValidationRecipeRefs)
 	a.ObservedRevision = strings.TrimSpace(a.ObservedRevision)
 	return a
 }
 
 func (a RuntimeOperationAdmissibility) Validate() error {
+	if err := ValidateRuntimeValidationRecipeProjection(a.ValidationRecipes); err != nil {
+		return fmt.Errorf("runtime operation admissibility validation recipes: %w", err)
+	}
 	// Preserve duplicate variant facts until validation. Silently canonicalizing
 	// them would make two conflicting owner declarations replay as one fact.
 	seenVariants := make(map[string]struct{}, len(a.OperationVariants))
@@ -1059,6 +1063,9 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 	}
 	seenSurfaces := make(map[string]struct{}, len(a.ValidationSurfaces))
 	for _, raw := range a.ValidationSurfaces {
+		if err := raw.Validate(); err != nil {
+			return err
+		}
 		value := raw.Normalized()
 		if value.ID == "" {
 			return fmt.Errorf("runtime operation admissibility has a validation surface without identity")
@@ -1093,9 +1100,6 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 	}
 	if len(a.ValidationSurfaces) > 0 {
 		for _, surface := range a.ValidationSurfaces {
-			if err := surface.Validate(); err != nil {
-				return err
-			}
 			if surface.OwnerModuleID != a.OwnerModuleID || !runtimeOperationKindsContain(a.OperationKinds, surface.OperationKind) {
 				return fmt.Errorf("runtime validation surface %q is outside owner operation inventory", surface.ID)
 			}
@@ -1105,8 +1109,14 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 					return fmt.Errorf("runtime validation surface %q prospective target constraint catalog revision mismatch", surface.ID)
 				}
 			}
+			for _, preparation := range surface.ProofRequirementPreparations {
+				constraint := preparation.ProspectiveTargetSatisfactionConstraint.Normalized()
+				if constraint.CatalogObservedRevision != a.ObservedRevision {
+					return fmt.Errorf("runtime validation surface %q proof preparation catalog revision mismatch", surface.ID)
+				}
+			}
 		}
-		if selectable := RuntimeSelectableValidationRecipeRefs(a.ValidationSurfaces); !sameStrings(selectable, a.ValidationRecipeRefs) {
+		if selectable := runtimeSelectableValidationRecipeRefsCanonical(a.ValidationSurfaces); !sameStrings(selectable, a.ValidationRecipeRefs) {
 			return fmt.Errorf("runtime operation admissibility validation recipe refs do not match selectable validation surfaces")
 		}
 	}
@@ -1115,7 +1125,7 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 			return fmt.Errorf("runtime operation policy fact %q is outside owner operation inventory", policy.ID)
 		}
 	}
-	if expected := StableRuntimeOperationAdmissibilitySnapshotID(a); a.SnapshotID != expected {
+	if expected := stableRuntimeOperationAdmissibilitySnapshotIDCanonical(a); a.SnapshotID != expected {
 		return fmt.Errorf("runtime operation admissibility snapshot identity mismatch")
 	}
 	return nil
@@ -1133,6 +1143,13 @@ func runtimeOperationKindsContain(values []string, wanted string) bool {
 
 func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissibility) string {
 	value = value.Normalized()
+	return stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value)
+}
+
+// stableRuntimeOperationAdmissibilitySnapshotIDCanonical hashes a value that
+// has already passed the catalog's canonicalization boundary. Keeping this
+// helper private prevents callers from bypassing raw fail-closed validation.
+func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperationAdmissibility) string {
 	h := sha256.New()
 	writeHashString(h, value.PrerequisiteID)
 	writeHashString(h, value.OwnerModuleID)
@@ -1164,10 +1181,37 @@ func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissi
 		if surface.ProspectiveTargetSatisfactionConstraint == nil {
 			writeHashString(h, "no-prospective-target-satisfaction-constraint")
 		} else {
-			writeHashString(h, StableRuntimeProspectiveTargetSatisfactionConstraintHash(*surface.ProspectiveTargetSatisfactionConstraint))
+			writeHashString(h, stableRuntimeProspectiveTargetSatisfactionConstraintHashCanonical(*surface.ProspectiveTargetSatisfactionConstraint))
 		}
 		writeHashStrings(h, surface.CheckRefs)
 		writeHashString(h, string(surface.ProofApplicability))
+		for _, binding := range surface.ProofRequirementBindings {
+			writeHashString(h, binding.RequirementHash)
+			writeHashString(h, binding.DefinitionRevision)
+			writeHashString(h, string(binding.CoverageWorkItemID))
+			writeHashString(h, binding.DeclarationRef)
+			writeHashString(h, binding.ValidationRecipeID)
+			writeHashStrings(h, binding.RequiredCheckRefs)
+			for _, attestation := range binding.CheckAttestations {
+				writeHashString(h, attestation.RequiredCheckRef)
+				writeHashString(h, attestation.ObservationProtocolRef)
+				writeHashString(h, attestation.NativeCheckRef)
+			}
+		}
+		for _, preparation := range surface.ProofRequirementPreparations {
+			writeHashString(h, preparation.RequirementHash)
+			writeHashString(h, preparation.DefinitionRevision)
+			writeHashString(h, string(preparation.CoverageWorkItemID))
+			writeHashString(h, preparation.DeclarationRef)
+			writeHashString(h, preparation.ValidationRecipeID)
+			writeHashString(h, preparation.TargetRef)
+			for _, attestation := range preparation.CheckAttestations {
+				writeHashString(h, attestation.RequiredCheckRef)
+				writeHashString(h, attestation.ObservationProtocolRef)
+				writeHashString(h, attestation.NativeCheckRef)
+			}
+			writeHashString(h, stableRuntimeProspectiveTargetSatisfactionConstraintHashCanonical(preparation.ProspectiveTargetSatisfactionConstraint))
+		}
 		writeHashString(h, string(surface.EffectScope))
 		writeHashString(h, string(surface.IdempotencyClass))
 	}
@@ -1664,10 +1708,31 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 
 func (f RuntimeFacts) Validate() error {
 	raw := f
+	// Facts normalization must not repair a coordinated persisted rewrite of
+	// activation evidence authority. Check this nested raw collection before
+	// f.Normalized() can canonicalize nested authority fields.
+	if err := ValidateRuntimeFactsRaw(raw); err != nil {
+		return err
+	}
+	rawFocuses := make([]CoverageFocus, 0, 1+len(raw.RemainingFocuses)+len(raw.CompletedFocuses))
+	rawFocuses = append(rawFocuses, raw.Focus)
+	rawFocuses = append(rawFocuses, raw.RemainingFocuses...)
+	rawFocuses = append(rawFocuses, raw.CompletedFocuses...)
+	for _, focus := range rawFocuses {
+		if len(focus.CoverageEvidenceBindings) == 0 {
+			continue
+		}
+		if err := ValidateCoverageEvidenceBindingsForFocus(focus, raw.DefinitionRevision); err != nil {
+			return fmt.Errorf("runtime facts focus %s: %w", strings.TrimSpace(focus.ID), err)
+		}
+	}
 	for _, snapshot := range raw.Resources.CapabilityStates {
 		if err := validateRequiredOperationVariants(snapshot.RequiredOperationSequence); err != nil {
 			return fmt.Errorf("runtime capability-state snapshot %q operation sequence: %w", strings.TrimSpace(snapshot.SnapshotID), err)
 		}
+	}
+	if err := ValidateRuntimeOperationAdmissibilities(raw.Resources.OperationAdmissibilities); err != nil {
+		return fmt.Errorf("runtime operation admissibility: %w", err)
 	}
 	f = f.Normalized()
 	if f.WorkspaceID == "" || f.RunID == "" {
@@ -1926,6 +1991,17 @@ func (f RuntimeFacts) Validate() error {
 	return nil
 }
 
+// ValidateRuntimeFactsRaw checks authority-bearing raw shape without requiring
+// a fully initialized Runtime ledger. Callers that must initialize missing
+// owner state use it before their first normalization, then run Validate on the
+// complete facts.
+func ValidateRuntimeFactsRaw(f RuntimeFacts) error {
+	if err := ValidateRuntimeEvidencePolicies(f.Activation.EvidencePolicies); err != nil {
+		return fmt.Errorf("runtime facts activation evidence policies: %w", err)
+	}
+	return nil
+}
+
 // AcceptedEvidenceRefsForFocus returns the canonical reference set that an
 // assessment may cite for the current focus. Rendering and commit validation
 // must use this same helper to avoid two evidence namespaces.
@@ -1972,7 +2048,7 @@ func (f CoverageFocus) Normalized() CoverageFocus {
 	f.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(f.RequiredOwnerFacts)
 	f.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(f.OwnerFactConvergences)
 	f.ValidationRecipeID = strings.TrimSpace(f.ValidationRecipeID)
-	f.RequiredCheckRefs = normalizeStrings(f.RequiredCheckRefs)
+	f.RequiredCheckRefs = normalizeRuntimeValidationProofCheckRefs(f.RequiredCheckRefs)
 	f.MetricConstraints = normalizeStrings(f.MetricConstraints)
 	f.ArtifactRefs = normalizeStrings(f.ArtifactRefs)
 	f.AcceptedStepKinds = normalizeStrings(f.AcceptedStepKinds)
@@ -2055,23 +2131,37 @@ func (r RuntimeResourceFacts) Normalized() RuntimeResourceFacts {
 }
 
 func NormalizeRuntimeOperationAdmissibilities(values []RuntimeOperationAdmissibility) []RuntimeOperationAdmissibility {
-	byPrerequisite := make(map[string]RuntimeOperationAdmissibility, len(values))
+	ret := make([]RuntimeOperationAdmissibility, 0, len(values))
 	for _, value := range values {
 		value = value.Normalized()
 		if value.PrerequisiteID != "" {
-			byPrerequisite[value.PrerequisiteID] = value
+			ret = append(ret, value)
 		}
 	}
-	keys := make([]string, 0, len(byPrerequisite))
-	for key := range byPrerequisite {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	ret := make([]RuntimeOperationAdmissibility, 0, len(keys))
-	for _, key := range keys {
-		ret = append(ret, byPrerequisite[key])
-	}
+	sort.SliceStable(ret, func(i, j int) bool {
+		if ret[i].PrerequisiteID != ret[j].PrerequisiteID {
+			return ret[i].PrerequisiteID < ret[j].PrerequisiteID
+		}
+		return ret[i].OwnerModuleID < ret[j].OwnerModuleID
+	})
 	return nilIfEmpty(ret)
+}
+
+// ValidateRuntimeOperationAdmissibilities rejects duplicate authority before
+// canonical ordering. A normalizer must never choose which owner catalog wins.
+func ValidateRuntimeOperationAdmissibilities(values []RuntimeOperationAdmissibility) error {
+	seenPrerequisites := make(map[string]struct{}, len(values))
+	for _, raw := range values {
+		if err := raw.Validate(); err != nil {
+			return err
+		}
+		value := raw.Normalized()
+		if _, duplicate := seenPrerequisites[value.PrerequisiteID]; duplicate {
+			return fmt.Errorf("runtime operation admissibility duplicates prerequisite %q", value.PrerequisiteID)
+		}
+		seenPrerequisites[value.PrerequisiteID] = struct{}{}
+	}
+	return nil
 }
 
 func NormalizeRuntimeCapabilityStateSnapshots(values []RuntimeCapabilityStateSnapshot) []RuntimeCapabilityStateSnapshot {

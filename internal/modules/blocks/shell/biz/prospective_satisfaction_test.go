@@ -248,13 +248,17 @@ func shellProspectiveSatisfactionCommandWithRecipesFixture(t *testing.T, adapter
 	shellCatalog.TargetRefs = []string{"go.mod", "main.go"}
 	shellCatalog.ValidationSurfaces = make([]runtimecontract.RuntimeValidationSurface, 0, len(recipes))
 	for _, recipe := range recipes {
+		requirement := shellValidationProofRequirementForTest(t, recipe.ID, common.CoverageWorkItemID(coverageID))
 		surface := runtimecontract.RuntimeValidationSurface{
 			ID: recipe.ID, OwnerModuleID: modulecommon.ModuleID, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
-			Readiness:          runtimecontract.RuntimeValidationSurfacePrerequisiteRequired,
-			ReadinessReason:    shellValidationApplicableInputRequiredReason,
-			InputSchemaHash:    shellValidationRecipeSchemaHash(recipe),
-			PrerequisiteRef:    "shell-validation-prerequisite/" + shellValidationRecipeSchemaHash(recipe) + "/applicable-workspace-input",
-			CheckRefs:          []string{shellValidationRecipeProofCheckRef(recipe.ID)},
+			Readiness:       runtimecontract.RuntimeValidationSurfacePrerequisiteRequired,
+			ReadinessReason: shellValidationApplicableInputRequiredReason,
+			InputSchemaHash: shellValidationRecipeSchemaHash(recipe),
+			PrerequisiteRef: "shell-validation-prerequisite/" + shellValidationRecipeSchemaHash(recipe) + "/applicable-workspace-input",
+			CheckRefs:       append([]string(nil), requirement.RequiredCheckRefs...),
+			ProofRequirementBindings: []runtimecontract.RuntimeValidationProofRequirementBinding{
+				runtimecontract.RuntimeValidationProofRequirementBindingFor(requirement),
+			},
 			ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
 			EffectScope:        runtimecontract.RuntimeEffectEphemeralSession,
 			IdempotencyClass:   runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
@@ -350,6 +354,7 @@ func shellProspectiveSatisfactionCommandWithRecipesFixture(t *testing.T, adapter
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
 		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
 			CoverageWorkItemID:                coverageID,
+			DeclarationRef:                    "semantic/cwi-prospective",
 			RequiredEvidenceKinds:             []string{runtimecontract.EvidenceKindValidation},
 			DeclarationTargetSelectorRef:      declarationSelector,
 			DeclarationTargetSelectorOwnerRef: "software-dev", DeclarationTargetSelectorSubjectRef: "validation_preparation",

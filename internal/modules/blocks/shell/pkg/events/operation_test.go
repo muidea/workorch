@@ -115,7 +115,8 @@ func shellSealFixture(t *testing.T) (runtimecontract.RuntimeOperation, runtimeco
 	recipeID := "managed-check"
 	operation := runtimecontract.RuntimeOperation{
 		ID: "validate-1", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, TargetRefs: []string{"entry.go"},
-		Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
+		BindingRefs: []string{"binding/shell-seal-test"},
+		Parameters:  []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}
 	catalog, err := runtimecontract.NewRuntimeOperationAdmissibility(
 		"shell-admissibility", runtimecontract.RuntimeModuleShell, []string{operation.Kind}, operation.TargetRefs, nil,
@@ -130,6 +131,22 @@ func shellSealFixture(t *testing.T) (runtimecontract.RuntimeOperation, runtimeco
 		ID: "shell-managed-policy", OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: operation.Kind,
 		SubjectRef: "managed-validation", EffectScope: runtimecontract.RuntimeEffectEphemeralSession,
 		IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+	}}
+	proofBinding := runtimecontract.RuntimeValidationProofRequirementBinding{
+		RequirementHash: "runtime-validation-proof-requirement-shell-seal-test", DefinitionRevision: "definition-shell-seal-test",
+		CoverageWorkItemID: "cwi-shell-seal-test", DeclarationRef: "definition/dodItem/dod-shell-seal-test",
+		ValidationRecipeID: recipeID, RequiredCheckRefs: []string{"workorch-cwi-check-shell-seal-test"},
+		CheckAttestations: []runtimecontract.RuntimeValidationCheckAttestationBinding{{
+			RequiredCheckRef: "workorch-cwi-check-shell-seal-test", ObservationProtocolRef: "test/shell-owner-native/v1",
+			NativeCheckRef: "native-shell-seal-test",
+		}},
+	}
+	catalog.ValidationSurfaces = []runtimecontract.RuntimeValidationSurface{{
+		ID: recipeID, OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+		Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "shell-seal-test-schema", InputBindingRef: "shell-seal-test-input",
+		CheckRefs: []string{"workorch-cwi-check-shell-seal-test"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+		ProofRequirementBindings: []runtimecontract.RuntimeValidationProofRequirementBinding{proofBinding},
+		EffectScope:              runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 	}}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	if err := catalog.Validate(); err != nil {
@@ -146,7 +163,8 @@ func shellSealFixture(t *testing.T) (runtimecontract.RuntimeOperation, runtimeco
 	observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
 	input := RuntimeExecutionSealInput{
 		CatalogObservation: observation, TargetRole: "implementation", ValidationScopeTargetRefs: []string{"entry.go"},
-		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{ID: "managed-evidence", AppliesTo: runtimecontract.StepKindShellCommand, Description: "sealed"}},
+		EvidencePolicies:       []runtimecontract.RuntimeEvidencePolicy{{ID: "managed-evidence", AppliesTo: runtimecontract.StepKindShellCommand, Description: "sealed"}},
+		ValidationProofBinding: proofBinding,
 	}
 	executionContext := runtimecontract.RuntimeOperationExecutionContext{
 		WorkspaceID: "ws", RunID: "run", DispatchID: "dispatch",

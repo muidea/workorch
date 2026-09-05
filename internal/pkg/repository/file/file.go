@@ -377,9 +377,6 @@ func (r *SoulRepository) loadSoul(dir string, id common.SoulID) (*soul.Soul, err
 }
 
 func (r *SoulRepository) saveSoul(dir string, item *soul.Soul) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
 	cloned := cloneSoul(item)
 	soulMD := cloned.SoulMD
 	cloned.SoulMD = ""
@@ -387,10 +384,10 @@ func (r *SoulRepository) saveSoul(dir string, item *soul.Soul) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, soulMetadataFile), data, 0o644); err != nil {
+	if err := writeFileAtomic(filepath.Join(dir, soulMetadataFile), data, 0o644); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, soulDefinitionFile), []byte(strings.TrimSpace(soulMD)+"\n"), 0o644)
+	return writeFileAtomic(filepath.Join(dir, soulDefinitionFile), []byte(strings.TrimSpace(soulMD)+"\n"), 0o644)
 }
 
 func NewMemoryItemRepository(path string) *MemoryItemRepository {
@@ -1431,9 +1428,6 @@ func (r *EventRecordRepository) Delete(_ context.Context, id common.EventRecordI
 		return common.ErrNotFound
 	}
 	path := r.deletedMarkerPath(id)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	if err := writeFileAtomic(path, []byte(string(id)+"\n"), 0o644); err != nil {
 		return err
 	}
@@ -2652,11 +2646,14 @@ func (r *RunRepository) create(item *run.Run, allocatedGeneration uint64, genera
 	if item == nil || item.WorkspaceID == "" || (allocateID && item.ID != "") || (!allocateID && item.ID == "") {
 		return common.ErrInvalidArgument
 	}
+	if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
+		return err
+	}
 	if generationPreallocated && allocatedGeneration == 0 {
 		return common.ErrInvalidArgument
 	}
 
-	items, err := loadMap[common.RunID, run.Run](r.path)
+	items, err := loadRunMap(r.path)
 	if err != nil {
 		return err
 	}
@@ -2746,6 +2743,20 @@ func (r *RunRepository) workspaceGenerationPath() string {
 	return r.path + ".workspace-generations"
 }
 
+func loadRunMap(path string) (map[common.RunID]run.Run, error) {
+	items, err := loadMap[common.RunID, run.Run](path)
+	if err != nil {
+		return nil, err
+	}
+	for id, item := range items {
+		current := item
+		if err := run.ValidateRunRuntimeBootstrapsRaw(&current); err != nil {
+			return nil, fmt.Errorf("load Run %q: %w", id, err)
+		}
+	}
+	return items, nil
+}
+
 func validatePersistedRunGenerationWatermarks(items map[common.RunID]run.Run, heads map[common.WorkspaceID]runWorkspacePersistenceHead) error {
 	seen := map[common.WorkspaceID]map[uint64]struct{}{}
 	for _, item := range items {
@@ -2780,7 +2791,7 @@ func (r *RunRepository) Get(_ context.Context, id common.RunID) (*run.Run, error
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.RunID, run.Run](r.path)
+	items, err := loadRunMap(r.path)
 	if err != nil {
 		return nil, err
 	}
@@ -2798,7 +2809,7 @@ func (r *RunRepository) GetByWorkspaceID(_ context.Context, workspaceID common.W
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.RunID, run.Run](r.path)
+	items, err := loadRunMap(r.path)
 	if err != nil {
 		return nil, err
 	}
@@ -2813,7 +2824,7 @@ func (r *RunRepository) List(_ context.Context) ([]*run.Run, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.RunID, run.Run](r.path)
+	items, err := loadRunMap(r.path)
 	if err != nil {
 		return nil, err
 	}
@@ -2836,7 +2847,7 @@ func (r *RunRepository) ListByWorkspaceID(_ context.Context, workspaceID common.
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	items, err := loadMap[common.RunID, run.Run](r.path)
+	items, err := loadRunMap(r.path)
 	if err != nil {
 		return nil, err
 	}
@@ -2863,8 +2874,11 @@ func (r *RunRepository) Update(_ context.Context, item *run.Run) error {
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
+	if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
+		return err
+	}
 
-	items, err := loadMap[common.RunID, run.Run](r.path)
+	items, err := loadRunMap(r.path)
 	if err != nil {
 		return err
 	}
@@ -2903,7 +2917,10 @@ func (r *RunRepository) CompareAndSwap(_ context.Context, item *run.Run, expecte
 	if item == nil || item.ID == "" {
 		return common.ErrInvalidArgument
 	}
-	items, err := loadMap[common.RunID, run.Run](r.path)
+	if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
+		return err
+	}
+	items, err := loadRunMap(r.path)
 	if err != nil {
 		return err
 	}
@@ -2941,12 +2958,15 @@ func (r *RunRepository) CompareAndSwapRuntimeState(ctx context.Context, item *ru
 	if r == nil || item == nil || item.ID == "" || item.WorkspaceID == "" || expectedRevision == 0 {
 		return common.ErrInvalidArgument
 	}
+	if err := run.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
+		return err
+	}
 	if err := validateRuntimeWorkspaceScope(ctx, item.WorkspaceID); err != nil {
 		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	items, err := loadMap[common.RunID, run.Run](r.path)
+	items, err := loadRunMap(r.path)
 	if err != nil {
 		return err
 	}
@@ -2982,7 +3002,7 @@ func (r *RunRepository) CompareAndSwapRuntimeState(ctx context.Context, item *ru
 func (r *RunRepository) Delete(_ context.Context, id common.RunID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	items, err := loadMap[common.RunID, run.Run](r.path)
+	items, err := loadRunMap(r.path)
 	if err != nil {
 		return err
 	}
@@ -3011,7 +3031,7 @@ func (r *RunRepository) PrepareWorkspaceRetirement(ctx context.Context, intent r
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	items, err := loadMap[common.RunID, run.Run](r.path)
+	items, err := loadRunMap(r.path)
 	if err != nil {
 		return nil, err
 	}
@@ -3069,7 +3089,7 @@ func (r *RunRepository) FinalizeWorkspaceRetirement(ctx context.Context, token d
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	items, err := loadMap[common.RunID, run.Run](r.path)
+	items, err := loadRunMap(r.path)
 	if err != nil {
 		return nil, err
 	}
@@ -3427,9 +3447,6 @@ func (r *StepRepository) stepDirForItem(item *run.Step) string {
 
 func (r *StepRepository) saveStep(item *run.Step) error {
 	dir := r.stepDirForItem(item)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
 	metadata := *cloneStep(item)
 	metadata.Input = workorcheventpayload.Payload{}
 	metadata.Output = workorcheventpayload.Payload{}
@@ -3665,9 +3682,6 @@ func (r *ToolCallRepository) toolCallDirForItem(item *runtimeevidencemodel.ToolC
 
 func (r *ToolCallRepository) saveToolCall(item *runtimeevidencemodel.ToolCall) error {
 	dir := r.toolCallDirForItem(item)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
 	metadata := *cloneToolCall(item)
 	metadata.Arguments = workorcheventpayload.Payload{}
 	metadata.Output = workorcheventpayload.Payload{}
@@ -4506,22 +4520,7 @@ func deleteMapItem[K comparable, V any](path string, id K) error {
 }
 
 func saveMap[K comparable, V any](path string, items map[K]V) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	data, err := json.Marshal(items)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return err
-	}
-	cache := mapCacheEntry(path)
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	cache.items = cloneStoredMap(items)
-	cache.loaded = true
-	return nil
+	return saveMapWithCommit(path, items, commitFileAtomically)
 }
 
 func writeJSONFileAtomic(path string, value any) error {
@@ -4561,43 +4560,6 @@ func readOptionalMapFile(path string) (map[string]any, error) {
 		return nil, fmt.Errorf("%w: persisted payload file must contain an object", workorcheventpayload.ErrInvalidPayload)
 	}
 	return item, nil
-}
-
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	cleanup = false
-	return nil
 }
 
 func mapCacheEntry(path string) *mapFileCacheEntry {

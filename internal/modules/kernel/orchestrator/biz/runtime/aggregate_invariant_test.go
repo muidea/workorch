@@ -352,6 +352,224 @@ func runtimeTestEvidenceAggregateRoundTrip(t *testing.T, aggregate RuntimeAggreg
 	return loaded
 }
 
+func runtimeTestOpaqueProofRequirementBinding(
+	t testing.TB,
+	requirement runtimecontract.RuntimeValidationProofRequirement,
+	recipeID string,
+) runtimecontract.RuntimeValidationProofRequirementBinding {
+	t.Helper()
+	attestations := runtimeTestValidationCheckAttestations(requirement, recipeID)
+	binding, err := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(requirement, recipeID, attestations...)
+	if err != nil {
+		t.Fatalf("bind exact validation proof requirement: %v", err)
+	}
+	return binding
+}
+
+func TestRuntimeAggregateShellValidationProofApplicabilitySurvivesSerializationAndFailsClosed(t *testing.T) {
+	items := []runtimecontract.RuntimeCoverageItem{
+		{ID: "cwi-proof-a", SliceID: "slice-proof", SourceScope: "dodItem", SourceID: "dod-a", TargetText: "first exact requirement"},
+		{ID: "cwi-proof-b", SliceID: "slice-proof", SourceScope: "dodItem", SourceID: "dod-b", TargetText: "second exact requirement"},
+	}
+	focuses := []runtimecontract.RuntimeDefinitionFocus{
+		{
+			ID: "focus-proof-a", SliceID: "slice-proof", AssessmentScope: "dodItem", AssessmentID: "dod-a", AssessmentText: "first exact requirement",
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-proof-a"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+			AcceptedStepKinds:      []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+			EvidenceDeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-a"), ValidationRecipeID: "shared-proof-recipe", RequiredCheckRefs: []string{"profile-check-a"},
+		},
+		{
+			ID: "focus-proof-b", SliceID: "slice-proof", AssessmentScope: "dodItem", AssessmentID: "dod-b", AssessmentText: "second exact requirement",
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-proof-b"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+			AcceptedStepKinds:      []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+			EvidenceDeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-b"), ValidationRecipeID: "shared-proof-recipe", RequiredCheckRefs: []string{"profile-check-b"},
+		},
+	}
+	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements("definition-proof", items, focuses)
+	if err != nil || len(requirements) != 2 {
+		t.Fatalf("compile exact proof requirements: requirements=%+v err=%v", requirements, err)
+	}
+	bindings := make([]runtimecontract.RuntimeValidationProofRequirementBinding, 0, len(requirements))
+	checks := make([]string, 0)
+	for _, requirement := range requirements {
+		bindings = append(bindings, runtimeTestOpaqueProofRequirementBinding(t, requirement, requirement.ValidationRecipeID))
+		checks = append(checks, requirement.RequiredCheckRefs...)
+	}
+	shellCatalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "proof-shell-catalog", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKinds:       []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationRecipeRefs: []string{"shared-proof-recipe"},
+		ValidationRecipes:    []runtimecontract.RuntimeValidationRecipe{{ID: "shared-proof-recipe", Command: "true"}},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+			ID: "shared-proof-recipe", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+			OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness:     runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "proof-input-schema", InputBindingRef: "proof-input-binding",
+			CheckRefs: checks, ProofApplicability: runtimecontract.RuntimeValidationProofDirect, ProofRequirementBindings: bindings,
+			EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}},
+		ObservedRevision: "proof-shell-revision",
+	}
+	shellCatalog = shellCatalog.Normalized()
+	shellCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(shellCatalog)
+	facts := runtimecontract.RuntimeFacts{
+		DefinitionRevision: "definition-proof",
+		DefinitionSeed:     runtimecontract.RuntimeDefinitionSeed{CoverageItems: items},
+		DefinitionFocuses:  focuses,
+		Resources:          runtimecontract.RuntimeResourceFacts{OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{shellCatalog}},
+	}
+	payload, err := json.Marshal(facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var loaded runtimecontract.RuntimeFacts
+	if err := json.Unmarshal(payload, &loaded); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRuntimeValidationProofApplicability(loaded, nil); err != nil {
+		t.Fatalf("serialized exact Shell applicability was rejected: %v", err)
+	}
+	if loaded.DefinitionFocuses[0].EvidenceDeclarationRef == "" || loaded.DefinitionFocuses[0].ValidationRecipeID == "" ||
+		len(loaded.Resources.OperationAdmissibilities[0].ValidationSurfaces[0].ProofRequirementBindings) != 2 {
+		t.Fatalf("serialization lost immutable proof lineage: %+v", loaded)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*runtimecontract.RuntimeFacts)
+	}{
+		{
+			name: "legacy synthetic surface without exact bindings",
+			mutate: func(value *runtimecontract.RuntimeFacts) {
+				value.Resources.OperationAdmissibilities[0].ValidationSurfaces[0].ProofRequirementBindings = nil
+			},
+		},
+		{
+			name: "another CWI marker cannot close the requirement",
+			mutate: func(value *runtimecontract.RuntimeFacts) {
+				surface := &value.Resources.OperationAdmissibilities[0].ValidationSurfaces[0]
+				surface.ProofRequirementBindings[0].RequiredCheckRefs = append([]string(nil), requirements[1].RequiredCheckRefs...)
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var drifted runtimecontract.RuntimeFacts
+			if err := json.Unmarshal(payload, &drifted); err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(&drifted)
+			if err := validateRuntimeValidationProofApplicability(drifted, nil); err == nil {
+				t.Fatalf("non-exact Shell proof applicability survived fresh-load validation: %+v", drifted.Resources.OperationAdmissibilities)
+			}
+		})
+	}
+
+	mcpFacts := runtimecontract.RuntimeFacts{
+		DefinitionRevision: "definition-mcp-proof",
+		DefinitionSeed: runtimecontract.RuntimeDefinitionSeed{CoverageItems: []runtimecontract.RuntimeCoverageItem{{
+			ID: "cwi-mcp", SliceID: "slice-mcp", SourceScope: "dodItem", SourceID: "dod-mcp", TargetText: "MCP validation remains legal",
+		}}},
+		DefinitionFocuses: []runtimecontract.RuntimeDefinitionFocus{{
+			ID: "focus-mcp", SliceID: "slice-mcp", AssessmentScope: "dodItem", AssessmentID: "dod-mcp", AssessmentText: "MCP validation remains legal",
+			CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-mcp"}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+			EvidenceDeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-mcp"),
+		}},
+		Resources: runtimecontract.RuntimeResourceFacts{OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{{
+			PrerequisiteID: "proof-mcp-catalog", OwnerModuleID: runtimecontract.RuntimeModuleMCP,
+			OperationKinds:       []string{runtimecontract.StepKindMCPToolCall},
+			ValidationRecipeRefs: []string{"mcp/tool/validate"},
+			ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{{
+				ID: "mcp/tool/validate", OwnerModuleID: runtimecontract.RuntimeModuleMCP, OperationKind: runtimecontract.StepKindMCPToolCall,
+				Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "mcp-input-schema", InputBindingRef: "mcp-input-binding",
+				CheckRefs: []string{"mcp-generic-check"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+				EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+			}},
+			ObservedRevision: "proof-mcp-revision",
+		}}},
+	}
+	mcpFacts.Resources.OperationAdmissibilities[0] = mcpFacts.Resources.OperationAdmissibilities[0].Normalized()
+	mcpFacts.Resources.OperationAdmissibilities[0].SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(mcpFacts.Resources.OperationAdmissibilities[0])
+	if err := validateRuntimeValidationProofApplicability(mcpFacts, nil); err != nil {
+		t.Fatalf("non-Shell validation was incorrectly subjected to Shell proof binding: %v", err)
+	}
+}
+
+func TestRuntimeValidationProofApplicabilityAllowsOwnerRecipeAlternativesAndRejectsSurfaceDrift(t *testing.T) {
+	item := runtimecontract.RuntimeCoverageItem{
+		ID: "cwi-neutral-proof", SliceID: "slice-neutral-proof", SourceScope: "dodItem", SourceID: "dod-neutral-proof", TargetText: "neutral proof requirement",
+	}
+	focus := runtimecontract.RuntimeDefinitionFocus{
+		ID: "focus-neutral-proof", SliceID: item.SliceID,
+		AssessmentScope: item.SourceScope, AssessmentID: item.SourceID, AssessmentText: item.TargetText,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{item.ID}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+		AcceptedStepKinds:      []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		EvidenceDeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(item.SourceScope, item.SourceID),
+	}
+	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements("definition-neutral-proof", []runtimecontract.RuntimeCoverageItem{item}, []runtimecontract.RuntimeDefinitionFocus{focus})
+	if err != nil || len(requirements) != 1 {
+		t.Fatalf("compile neutral requirement: requirements=%+v err=%v", requirements, err)
+	}
+	requirement := requirements[0]
+	newSurface := func(recipeID string) runtimecontract.RuntimeValidationSurface {
+		binding := runtimeTestOpaqueProofRequirementBinding(t, requirement, recipeID)
+		return runtimecontract.RuntimeValidationSurface{
+			ID: recipeID, OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+			Readiness: runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "test/schema/" + recipeID, InputBindingRef: "test/input/" + recipeID,
+			CheckRefs: append([]string(nil), requirement.RequiredCheckRefs...), ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+			ProofRequirementBindings: []runtimecontract.RuntimeValidationProofRequirementBinding{binding},
+			EffectScope:              runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		}
+	}
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "neutral-proof-catalog", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKinds:       []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		ValidationRecipeRefs: []string{"recipe/a", "recipe/b"},
+		ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{
+			{ID: "recipe/a", Command: "true"},
+			{ID: "recipe/b", Command: "true"},
+		},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{newSurface("recipe/a"), newSurface("recipe/b")},
+		ObservedRevision:   "neutral-proof-v1",
+	}
+	catalog = catalog.Normalized()
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogApplicability(requirements, []runtimecontract.RuntimeOperationAdmissibility{catalog}); err != nil {
+		t.Fatalf("two ready compatible recipe alternatives were rejected: %v", err)
+	}
+
+	duplicate := runtimecontract.CloneRuntimeOperationAdmissibilities([]runtimecontract.RuntimeOperationAdmissibility{catalog})[0]
+	duplicate.ValidationSurfaces[0].ProofRequirementBindings = append(
+		duplicate.ValidationSurfaces[0].ProofRequirementBindings,
+		duplicate.ValidationSurfaces[0].ProofRequirementBindings[0],
+	)
+	if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogApplicability(requirements, []runtimecontract.RuntimeOperationAdmissibility{duplicate}); err == nil {
+		t.Fatal("duplicate exact bindings on one ready surface were accepted")
+	}
+
+	notDeclared := runtimecontract.CloneRuntimeOperationAdmissibilities([]runtimecontract.RuntimeOperationAdmissibility{catalog})[0]
+	notDeclared.ValidationSurfaces[0].ProofApplicability = runtimecontract.RuntimeValidationProofNotDeclared
+	notDeclared.ValidationSurfaces[0].ProofRequirementBindings = nil
+	if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogApplicability(requirements, []runtimecontract.RuntimeOperationAdmissibility{notDeclared}); err == nil {
+		t.Fatal("ready surface removed its exact binding by changing proof applicability")
+	}
+
+	constrained := requirement.Clone()
+	constrained.ValidationRecipeID = "recipe/a"
+	constrained.Hash = runtimecontract.StableRuntimeValidationProofRequirementHash(constrained)
+	unavailable := runtimecontract.CloneRuntimeOperationAdmissibilities([]runtimecontract.RuntimeOperationAdmissibility{catalog})[0]
+	unavailable.ValidationSurfaces = []runtimecontract.RuntimeValidationSurface{{
+		ID: "recipe/a", OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+		Readiness: runtimecontract.RuntimeValidationSurfaceUnavailable, ReadinessReason: "test unavailable", InputSchemaHash: "test/schema/recipe/a",
+		ProofApplicability: runtimecontract.RuntimeValidationProofNotDeclared,
+		EffectScope:        runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+	}}
+	unavailable.ValidationRecipeRefs = nil
+	unavailable.ValidationRecipes = nil
+	unavailable = unavailable.Normalized()
+	unavailable.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(unavailable)
+	if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogApplicability([]runtimecontract.RuntimeValidationProofRequirement{constrained}, []runtimecontract.RuntimeOperationAdmissibility{unavailable}); err != nil {
+		t.Fatalf("constrained unavailable surface was incorrectly required to bind: %v", err)
+	}
+}
+
 func TestRuntimeAggregateRejectsOwnerFactAcquisitionTerminalCredit(t *testing.T) {
 	for _, retireManifest := range []bool{false, true} {
 		name := "active_manifest"
@@ -511,6 +729,7 @@ func runtimePendingCandidateFeasibilityAggregate(t *testing.T) RuntimeAggregate 
 	if initialized.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("pending feasibility fixture decision = %+v", initialized.Decision)
 	}
+	inventory = runtimeTestOperationAdmissibilityForOwner(t, initialized.Facts, runtimecontract.RuntimeModuleFile)
 	oldText, newText := "before", "after"
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "edit-target", Kind: runtimecontract.StepKindFileEdit,

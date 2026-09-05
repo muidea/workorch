@@ -2,9 +2,11 @@ package workorchruntimecontract_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -47,7 +49,8 @@ func TestRuntimeSemanticExistingTargetCorrectionSelectsOwnerReplacementKind(t *t
 			runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
 		},
 		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
-			CoverageWorkItemID: "cwi-existing", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			CoverageWorkItemID: "cwi-existing", DeclarationRef: "semantic/cwi-existing",
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		}},
 		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
@@ -158,11 +161,41 @@ func TestRuntimeSemanticProofFeasibilityRejectsForgedSealedOwnerFacts(t *testing
 		AllowedOwnerModuleIDs:     []string{runtimecontract.RuntimeModuleShell},
 		AllowedOperationKinds:     []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 		AllowedTargetPolicies:     []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
-		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
-			CoverageWorkItemID: "cwi-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
-		}},
-		OwnerCatalogs: []runtimecontract.RuntimeOperationAdmissibility{catalog},
+		OwnerCatalogs:             []runtimecontract.RuntimeOperationAdmissibility{catalog},
 	}
+	focus := runtimecontract.RuntimeDefinitionFocus{
+		ID: "validation-focus", AssessmentScope: "dodItem", AssessmentID: "dod-1", AssessmentText: "works",
+		CoverageWorkItemIDs:    []common.CoverageWorkItemID{"cwi-1"},
+		RequiredEvidenceKinds:  []string{runtimecontract.EvidenceKindValidation},
+		AcceptedStepKinds:      []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
+		EvidenceDeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-1"), ValidationRecipeID: "recipe/test", RequiredCheckRefs: []string{"check/test"},
+	}
+	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(manifest.DefinitionRevision, manifest.CoverageItems, []runtimecontract.RuntimeDefinitionFocus{focus})
+	if err != nil || len(requirements) != 1 {
+		t.Fatalf("compile exact validation requirement: requirements=%+v err=%v", requirements, err)
+	}
+	requirement := requirements[0]
+	attestations := make([]runtimecontract.RuntimeValidationCheckAttestationBinding, 0, len(requirement.RequiredCheckRefs))
+	for index, checkRef := range requirement.RequiredCheckRefs {
+		attestations = append(attestations, runtimecontract.RuntimeValidationCheckAttestationBinding{
+			RequiredCheckRef: checkRef, ObservationProtocolRef: "test/owner-native-validation/v1",
+			NativeCheckRef: fmt.Sprintf("native-check-%d", index+1),
+		})
+	}
+	binding := runtimecontract.RuntimeValidationProofRequirementBinding{
+		RequirementHash: requirement.Hash, DefinitionRevision: requirement.DefinitionRevision,
+		CoverageWorkItemID: requirement.CoverageWorkItemID, DeclarationRef: requirement.DeclarationRef,
+		ValidationRecipeID: requirement.ValidationRecipeID, RequiredCheckRefs: requirement.RequiredCheckRefs,
+		CheckAttestations: attestations,
+	}
+	manifest.OwnerCatalogs[0].ValidationSurfaces[0].CheckRefs = append([]string(nil), requirement.RequiredCheckRefs...)
+	manifest.OwnerCatalogs[0].ValidationSurfaces[0].ProofRequirementBindings = []runtimecontract.RuntimeValidationProofRequirementBinding{binding}
+	manifest.OwnerCatalogs[0].SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(manifest.OwnerCatalogs[0])
+	catalog = manifest.OwnerCatalogs[0]
+	manifest.ProofObligations = []runtimecontract.RuntimeSemanticProofObligation{{
+		CoverageWorkItemID: "cwi-1", DeclarationRef: requirement.DeclarationRef,
+		ValidationProofRequirement: &requirement, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
+	}}
 	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
 	proposal := runtimecontract.RuntimeSemanticProofProposal{
 		CoverageWorkItemID: "cwi-1", OwnerModuleID: runtimecontract.RuntimeModuleShell,
@@ -172,7 +205,7 @@ func TestRuntimeSemanticProofFeasibilityRejectsForgedSealedOwnerFacts(t *testing
 		},
 		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 		RequiredEffectScopes:  []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession},
-		ValidationRecipeID:    "recipe/test", DeclarationRef: "semantic/dod-1",
+		ValidationRecipeID:    "recipe/test", DeclarationRef: requirement.DeclarationRef,
 	}
 	base := runtimecontract.RuntimeSemanticProofFeasibility{
 		SchemaVersion: runtimecontract.RuntimeSemanticFeasibilitySchemaCurrent,
@@ -180,7 +213,7 @@ func TestRuntimeSemanticProofFeasibilityRejectsForgedSealedOwnerFacts(t *testing
 		CoverageWorkItemID: proposal.CoverageWorkItemID, ProposalHash: runtimecontract.StableRuntimeSemanticProofProposalHash(proposal),
 		OwnerModuleID: proposal.OwnerModuleID, CatalogSnapshotID: catalog.SnapshotID,
 		Status: runtimecontract.RuntimeSemanticFeasibilityFeasible, ObservedRevision: catalog.ObservedRevision,
-		ValidationRecipeID: proposal.ValidationRecipeID, RequiredCheckRefs: []string{"check/test"},
+		ValidationRecipeID: proposal.ValidationRecipeID, RequiredCheckRefs: append([]string(nil), requirement.RequiredCheckRefs...),
 	}
 	if err := base.ValidateForProposal(manifest, proposal); err != nil {
 		t.Fatal(err)
@@ -207,7 +240,8 @@ func semanticFeasibilityCommandFixture(t *testing.T) runtimecontract.RuntimeSema
 		AllowedOwnerModuleIDs:     []string{runtimecontract.RuntimeModuleFile}, AllowedOperationKinds: []string{runtimecontract.StepKindFileWrite},
 		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget},
 		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
-			CoverageWorkItemID: "cwi-1", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+			CoverageWorkItemID: "cwi-1", DeclarationRef: "semantic/dod-1",
+			RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
 		}},
 	}
 	proposal := runtimecontract.RuntimeSemanticProofProposal{

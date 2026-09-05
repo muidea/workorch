@@ -163,6 +163,11 @@ func runtimeTestPrepareUnboundActivationFacts(t *testing.T, facts runtimecontrac
 	// the fixture just set.
 	facts.DefinitionFocuses = nil
 	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
+	bound, err := runtimeTestBindManagedValidationProofRequirements(facts)
+	if err != nil {
+		t.Fatalf("bind unbound activation validation proof requirements: %v", err)
+	}
+	facts = bound
 	return facts
 }
 
@@ -184,6 +189,15 @@ func runtimeTestInitializeAndSealSemanticContract(
 		t.Fatal("semantic lifecycle fixture has no controller")
 	}
 	facts = runtimeTestPrepareUnboundActivationFacts(t, facts)
+	// The production Application seals the same capability inventory into both
+	// Definition and RuntimeFacts. Focused fixtures often start from a minimal
+	// controllerDefinition, so make that activation preimage explicit here.
+	for _, kind := range facts.Capabilities.StateChangeKinds {
+		definition.CapabilityContract = runtimeTestAppendUnique(definition.CapabilityContract, kind)
+	}
+	for _, kind := range facts.Capabilities.ValidationKinds {
+		definition.CapabilityContract = runtimeTestAppendUnique(definition.CapabilityContract, kind)
+	}
 	if _, err := controller.initialize(ctx, facts, definition, requirements); err != nil {
 		t.Fatalf("initialize unbound semantic lifecycle fixture: %v", err)
 	}

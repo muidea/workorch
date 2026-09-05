@@ -16,6 +16,18 @@ type transitionCoordinatorRepository struct {
 	mutateBeforeError bool
 }
 
+type transitionCoordinatorValidatedRepository struct {
+	transitionCoordinatorRepository
+	validatedSaves int
+}
+
+func (r *transitionCoordinatorValidatedRepository) SaveValidated(_ context.Context, aggregate RuntimeAggregate, expectedRevision uint64) error {
+	r.validatedSaves++
+	r.lastAggregate = aggregate
+	r.lastExpected = expectedRevision
+	return r.saveErr
+}
+
 func (r *transitionCoordinatorRepository) Load(context.Context, common.WorkspaceID, common.RunID) (RuntimeAggregate, error) {
 	return RuntimeAggregate{}, common.ErrNotFound
 }
@@ -108,5 +120,30 @@ func TestRuntimeTransitionCoordinatorCommitsValidatedAggregateOnce(t *testing.T)
 	}
 	if repository.lastAggregate.StateRevision != aggregate.StateRevision {
 		t.Fatalf("saved aggregate revision=%d, want %d", repository.lastAggregate.StateRevision, aggregate.StateRevision)
+	}
+}
+
+func TestRuntimeTransitionCoordinatorUsesValidatedRepositoryOnlyAfterInvariantCheck(t *testing.T) {
+	repository := &transitionCoordinatorValidatedRepository{}
+	coordinator, err := NewRuntimeTransitionCoordinator(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate := stateChangeAggregate(t)
+
+	invalid := aggregate
+	invalid.Decision.AuthoritySnapshot.RunID = "different-run"
+	if err := coordinator.Commit(context.Background(), invalid, invalid.StateRevision-1); err == nil {
+		t.Fatal("invalid aggregate was accepted")
+	}
+	if repository.validatedSaves != 0 || repository.saves != 0 {
+		t.Fatalf("invalid aggregate reached repository: validated=%d ordinary=%d", repository.validatedSaves, repository.saves)
+	}
+
+	if err := coordinator.Commit(context.Background(), aggregate, aggregate.StateRevision-1); err != nil {
+		t.Fatal(err)
+	}
+	if repository.validatedSaves != 1 || repository.saves != 0 {
+		t.Fatalf("save paths: validated=%d ordinary=%d", repository.validatedSaves, repository.saves)
 	}
 }

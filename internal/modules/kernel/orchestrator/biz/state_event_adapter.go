@@ -41,6 +41,9 @@ func (r runSnapshotReader) Read(ctx context.Context, workspaceID common.Workspac
 	if response.Run == nil {
 		return nil, common.ErrNotFound
 	}
+	if err := runmodel.ValidateRunRuntimeBootstrapsRaw(response.Run); err != nil {
+		return nil, err
+	}
 	return response.Run, nil
 }
 
@@ -67,58 +70,55 @@ func (r workspaceSnapshotReader) Read(ctx context.Context, id common.WorkspaceID
 	return workspaceeventmapping.Workspace(response.Workspace), nil
 }
 
-func storeRuntimeStateRecordCommandFromModel(item *runmodel.Run) (runevents.StoreRuntimeStateRecordCommand, error) {
-	if item == nil {
-		return runevents.StoreRuntimeStateRecordCommand{}, nil
-	}
-	ret := runevents.StoreRuntimeStateRecordCommand{
-		RunID:        item.ID,
-		WorkspaceID:  item.WorkspaceID,
-		RuntimeState: cloneRuntimeStateRecord(item.RuntimeState),
-	}
-	if item.RuntimeState != nil {
-		revision := item.RuntimeState.StateRevision
-		ret.ExpectedRuntimeStateRevision = &revision
-		fence, err := runtimeLifecycleFenceFromModel(item)
-		if err != nil {
-			return runevents.StoreRuntimeStateRecordCommand{}, err
-		}
-		ret.LifecycleFence = fence
-	}
-	return ret, nil
-}
-
 func runtimeLifecycleFenceFromModel(item *runmodel.Run) (*runtimecontract.RuntimeOpaqueLifecycleFence, error) {
 	if item == nil || item.RuntimeState == nil || item.RuntimeBootstrap == nil {
 		return nil, nil
 	}
 	state := item.RuntimeState
+	outcome, terminal, err := runtime.DeriveTerminalOutcome(state.Decision, state.Termination)
+	if err != nil {
+		return nil, err
+	}
+	var governanceHandoff runtimeGovernanceLifecycleHandoff
+	governed := false
+	if !terminal {
+		governanceHandoff, governed, err = runtimeGovernanceLifecycleHandoffFromState(state)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !terminal && !governed {
+		return nil, nil
+	}
 	fence := runtimecontract.RuntimeOpaqueLifecycleFence{
 		WorkspaceID: item.WorkspaceID, RunID: item.ID, RuntimeStateRevision: state.StateRevision,
 		RuntimeStateRef:  runevents.RuntimeStateRef(item.WorkspaceID, item.ID, state.StateRevision),
 		RuntimeStateHash: runtimecontract.StableRuntimeStateRecordHash(*state),
 		BootstrapHash:    runtimecontract.StableRuntimeBootstrapHash(*item.RuntimeBootstrap),
 	}
-	outcome, terminal, err := runtime.DeriveTerminalOutcome(state.Decision, state.Termination)
-	if err != nil {
-		return nil, err
-	}
 	if terminal {
 		fence.TerminalFenceID = runtimecontract.StableTerminalDeliveryID(item.WorkspaceID, item.ID, state.Decision.AuthoritySnapshot.ID, outcome)
 	} else {
-		governanceHandoff, governed, err := runtimeGovernanceLifecycleHandoffFromState(state)
-		if err != nil {
-			return nil, err
-		}
-		if governed {
-			fence.GovernanceFenceID = governanceHandoff.FenceID()
-			fence.GovernanceResolutionID = governanceHandoff.ResolutionID
-		}
-	}
-	if fence.GovernanceFenceID == "" && fence.TerminalFenceID == "" {
-		return nil, nil
+		fence.GovernanceFenceID = governanceHandoff.FenceID()
+		fence.GovernanceResolutionID = governanceHandoff.ResolutionID
 	}
 	return &fence, nil
+}
+
+// runtimeStateRequiresLifecycleFence classifies the owner-facing SM-1/SM-4
+// handoff before loading a complete Run snapshot. Ordinary nonterminal Runtime
+// CAS writes carry no lifecycle fence, so they can go directly to the Run
+// owner's opaque CAS command without an unrelated full Run read/clone.
+func runtimeStateRequiresLifecycleFence(state *runtimecontract.RuntimeStateRecord) (bool, error) {
+	if state == nil {
+		return false, common.ErrInvalidArgument
+	}
+	_, terminal, err := runtime.DeriveTerminalOutcome(state.Decision, state.Termination)
+	if err != nil || terminal {
+		return terminal, err
+	}
+	_, governed, err := runtimeGovernanceLifecycleHandoffFromState(state)
+	return governed, err
 }
 
 type runtimeGovernanceLifecycleHandoffKind string
@@ -264,12 +264,4 @@ func runtimeGovernanceLifecycleHandoffFromState(state *runtimecontract.RuntimeSt
 
 func runtimeGovernanceLifecycleFenceID(authoritySnapshotID, dispatchID string) string {
 	return "runtime-governance/" + authoritySnapshotID + "/" + dispatchID
-}
-
-func cloneRuntimeStateRecord(value *runtimecontract.RuntimeStateRecord) *runtimecontract.RuntimeStateRecord {
-	if value == nil {
-		return nil
-	}
-	cloned := value.Clone()
-	return &cloned
 }

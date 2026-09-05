@@ -296,7 +296,7 @@ func NewRuntimeSemanticProofFeasibilityObservation(command RuntimeSemanticProofF
 // at this stage and is validated only after Orchestrator attaches it.
 func NewRuntimeSemanticProofFeasibilityOwnerObservation(command RuntimeSemanticProofFeasibilityRequest, status RuntimeSemanticFeasibilityStatus, observedRevision string, targetRefs []string, prospectiveDelta *RuntimeProspectiveWorkspaceManifestDelta, diagnostic *RuntimeOriginalDiagnostic) (RuntimeSemanticProofFeasibilityObservation, error) {
 	proposal := command.Proposal.Normalized()
-	confirmedChecks := runtimeSemanticOwnerConfirmedCheckRefs(command.OwnerCatalog, proposal.ValidationRecipeID)
+	confirmedChecks := runtimeSemanticOwnerConfirmedCheckRefs(command.OwnerCatalog, command.Manifest, proposal)
 	observation := RuntimeSemanticProofFeasibility{
 		SchemaVersion: RuntimeSemanticFeasibilitySchemaCurrent,
 		ManifestHash:  command.Manifest.Normalized().Hash, DefinitionSeedHash: command.Manifest.Normalized().DefinitionSeedHash,
@@ -322,8 +322,8 @@ func NewRuntimeSemanticProofFeasibilityOwnerObservation(command RuntimeSemanticP
 // identities from the addressed owner's exact ready/direct surface. Recipe
 // identity and check identity are deliberately separate: a recipe may execute
 // several tool-native checks, and the provider cannot invent either set.
-func runtimeSemanticOwnerConfirmedCheckRefs(catalog RuntimeOperationAdmissibility, recipeID string) []string {
-	recipeID = strings.TrimSpace(recipeID)
+func runtimeSemanticOwnerConfirmedCheckRefs(catalog RuntimeOperationAdmissibility, manifest RuntimeSemanticPlanManifest, proposal RuntimeSemanticProofProposal) []string {
+	recipeID := strings.TrimSpace(proposal.ValidationRecipeID)
 	if recipeID == "" {
 		return nil
 	}
@@ -334,6 +334,19 @@ func runtimeSemanticOwnerConfirmedCheckRefs(catalog RuntimeOperationAdmissibilit
 	surface = surface.Normalized()
 	if surface.Readiness != RuntimeValidationSurfaceReady || surface.ProofApplicability != RuntimeValidationProofDirect ||
 		!containsString(catalog.ValidationRecipeRefs, recipeID) {
+		return nil
+	}
+	if proposal.OperationKind == RuntimeBlockKindManagedValidationSession {
+		for _, obligation := range manifest.Normalized().ProofObligations {
+			if obligation.CoverageWorkItemID != proposal.CoverageWorkItemID || obligation.ValidationProofRequirement == nil {
+				continue
+			}
+			_, binding, exact := RuntimeValidationSurfaceForProofRequirement([]RuntimeValidationSurface{surface}, *obligation.ValidationProofRequirement)
+			if !exact || binding.ValidationRecipeID != recipeID {
+				return nil
+			}
+			return append([]string(nil), binding.RequiredCheckRefs...)
+		}
 		return nil
 	}
 	return append([]string(nil), surface.CheckRefs...)

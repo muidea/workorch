@@ -3,6 +3,7 @@ package file
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -204,6 +205,65 @@ func TestRunRepositoryCreateReturnsErrorWhenPersistedJSONCorrupt(t *testing.T) {
 	}
 	if string(after) != string(corrupt) {
 		t.Fatalf("run file changed after corrupt create: got %q want %q", string(after), string(corrupt))
+	}
+}
+
+func TestRunRepositoryFreshLoadRejectsAmbiguousBootstrapAuthorityWithoutMutation(t *testing.T) {
+	policy := orchestratormodel.RuntimeEvidencePolicy{
+		ID: "policy-1", AppliesTo: orchestratormodel.StepKindFileWrite,
+		CoverageRequirements: []orchestratormodel.RuntimeCoverageEvidenceRequirement{{ID: "dod-1", Scope: "dodItem"}},
+	}.Normalized()
+	tests := map[string][]orchestratormodel.RuntimeEvidencePolicy{
+		"duplicate policy": {policy, policy},
+		"duplicate nested requirement": {func() orchestratormodel.RuntimeEvidencePolicy {
+			value := policy
+			value.CoverageRequirements = append(value.CoverageRequirements, value.CoverageRequirements[0])
+			return value
+		}()},
+		"duplicate nested check ref": {func() orchestratormodel.RuntimeEvidencePolicy {
+			value := policy
+			value.CoverageRequirements[0].RequiredEvidenceKinds = []string{orchestratormodel.EvidenceKindValidation}
+			value.CoverageRequirements[0].ValidationRecipeID = "recipe-1"
+			value.CoverageRequirements[0].RequiredCheckRefs = []string{"check-1", "check-1"}
+			return value
+		}()},
+		"whitespace nested target": {func() orchestratormodel.RuntimeEvidencePolicy {
+			value := policy
+			value.CoverageRequirements[0].TargetRefs = []string{" target.go "}
+			return value
+		}()},
+	}
+	for name, policies := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "run.json")
+			bootstrap := orchestratormodel.RuntimeBootstrap{Activation: orchestratormodel.RuntimeActivationContext{EvidencePolicies: policies}}
+			item := runmodel.Run{ID: "run-raw-bootstrap", WorkspaceID: "ws-raw-bootstrap", State: common.RunStatePending, RuntimeBootstrap: &bootstrap}
+			repo := NewRunRepository(path)
+			if err := repo.Create(context.Background(), &item); err == nil || !strings.Contains(err.Error(), "evidence polic") {
+				t.Fatalf("file Run repository accepted duplicate bootstrap authority on write: %v", err)
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("rejected Run write created persistence file: %v", err)
+			}
+			data, err := json.Marshal(map[common.RunID]runmodel.Run{item.ID: item})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := repo.Get(context.Background(), item.ID); err == nil || !strings.Contains(err.Error(), "evidence polic") {
+				t.Fatalf("fresh Run load accepted duplicate bootstrap authority: %v", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(after, data) {
+				t.Fatal("invalid persisted Run was rewritten during failed fresh load")
+			}
+		})
 	}
 }
 

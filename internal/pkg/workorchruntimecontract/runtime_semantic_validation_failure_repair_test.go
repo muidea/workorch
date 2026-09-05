@@ -31,7 +31,7 @@ func TestCompileRuntimeSemanticValidationFailureRepairSealsOneFileProofAndFreshV
 		TargetRole: "deliverable_implementation", TargetSelectorRef: "file/workspace_deliverable",
 		TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "dodItem", RequireTargetGrounding: true,
 		AcceptedStepKinds: []string{StepKindFileWrite, RuntimeBlockKindPatchApply, RuntimeBlockKindManagedValidationSession},
-		RequireAssessment: true,
+		RequireAssessment: true, EvidenceDeclarationRef: CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-item-repair"),
 	}})
 	definitionFocuses[0].ValidationFailureRepairConvergence = &convergence
 	definitionFocuses = NormalizeRuntimeDefinitionFocuses(definitionFocuses)
@@ -51,6 +51,9 @@ func TestCompileRuntimeSemanticValidationFailureRepairSealsOneFileProofAndFreshV
 	)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if err := ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest, seed, definitionFocuses); err != nil {
+		t.Fatalf("production repair manifest failed immutable Definition reverse validation: %v", err)
 	}
 	if len(manifest.ProofObligations) != 1 || len(manifest.OwnerCatalogs) != 1 || manifest.OwnerCatalogs[0].OwnerModuleID != RuntimeModuleFile ||
 		len(manifest.AllowedOwnerModuleIDs) != 1 || manifest.AllowedOwnerModuleIDs[0] != RuntimeModuleFile {
@@ -182,6 +185,7 @@ func TestCompileRuntimeSemanticValidationFailureRepairRejectsWrongFocusAndCovera
 	focuses := CompileRuntimeDefinitionFocuses([]CoverageFocus{{
 		ID: "focus-exact", SliceID: "slice", AssessmentScope: "dodItem", AssessmentID: "item", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi"},
 		RequiredEvidenceKinds: []string{EvidenceKindValidation}, RequireAssessment: true,
+		EvidenceDeclarationRef: CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "item"),
 	}})
 	focuses[0].ValidationFailureRepairConvergence = &convergence
 	focuses = NormalizeRuntimeDefinitionFocuses(focuses)

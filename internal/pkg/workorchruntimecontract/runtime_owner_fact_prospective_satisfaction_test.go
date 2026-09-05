@@ -39,7 +39,7 @@ func TestRuntimeOwnerFactConvergenceProspectiveSatisfactionContractPolicyGate(t 
 }
 
 func TestRuntimeValidationSurfaceProspectiveSatisfactionContractReadinessGate(t *testing.T) {
-	value := runtimeProspectiveSatisfactionSurfaceForTest()
+	value := runtimeProspectiveSatisfactionSurfaceForTest(t)
 	if err := value.Validate(); err != nil {
 		t.Fatalf("prerequisite-required prospective satisfaction surface rejected: %v", err)
 	}
@@ -213,18 +213,19 @@ func runtimeProspectiveSatisfactionOwnerFactsForTest(t *testing.T, catalog Runti
 	return observation, []RuntimeValidationRecipe{recipe}
 }
 
-func runtimeProspectiveSatisfactionSurfaceForTest() RuntimeValidationSurface {
-	value := RuntimeValidationSurface{
+func runtimeProspectiveSatisfactionSurfaceForTest(t *testing.T) RuntimeValidationSurface {
+	value := bindRuntimeValidationSurfaceForTest(RuntimeValidationSurface{
 		ID: "recipe/prospective", OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
 		Readiness: RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "applicable workspace input required",
 		InputSchemaHash: "schema/prospective", PrerequisiteRef: "workspace/validation-input",
 		ProspectiveSatisfactionContractRef: runtimeProspectiveSatisfactionContractRefForTest,
-		CheckRefs:                          []string{"check/prospective"}, ProofApplicability: RuntimeValidationProofDirect,
-		EffectScope: RuntimeEffectEphemeralSession, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
-	}
+		EffectScope:                        RuntimeEffectEphemeralSession, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+	}, runtimeValidationProofRequirementForTest(t, "definition-prospective", RuntimeCoverageItem{
+		ID: "cwi-prospective", SourceScope: "dodItem", SourceID: "dod-prospective", TargetText: "prospective validation",
+	}, "definition/dodItem/dod-prospective", "recipe/prospective", []string{"check/prospective"}))
 	constraint := runtimeProspectiveTargetConstraintForTest(value, runtimeProspectiveSatisfactionContractRefForTest, "shell-policy-test", ".sh")
 	value.ProspectiveTargetSatisfactionConstraint = &constraint
-	return value
+	return prepareRuntimeValidationSurfaceForTest(t, value, constraint)
 }
 
 func runtimeProspectiveTargetConstraintForTest(surface RuntimeValidationSurface, contractRef, catalogRevision, suffix string) RuntimeProspectiveTargetSatisfactionConstraint {

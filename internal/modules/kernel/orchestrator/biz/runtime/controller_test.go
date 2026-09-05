@@ -415,7 +415,9 @@ func TestRuntimeControllerAssessmentRepairAuthorityIsScopedAcrossConcurrentWorks
 			runtimeTestSealCurrentPolicies(&facts)
 			facts.DefinitionFocuses = nil
 			facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
-			if _, err := controller.initialize(ctx, facts, controllerDefinition(), nil); err != nil {
+			definition := controllerDefinition()
+			definition.CapabilityContract = append(definition.CapabilityContract, runtimecontract.RuntimeBlockKindManagedValidationSession)
+			if _, err := controller.initialize(ctx, facts, definition, nil); err != nil {
 				results <- outcome{scenario: current, err: err}
 				return
 			}
@@ -511,13 +513,27 @@ func TestRuntimeControllerAssessmentRepairAuthorityIsScopedAcrossConcurrentWorks
 				results <- outcome{scenario: current, err: fmt.Errorf("validation seal has no unique execution")}
 				return
 			}
-			checkRef := "check/" + runtimeManagedValidationEvidencePolicy().ID
+			validationProof, found := runtimecontract.CoverageEvidenceProofForKind(facts.Focus.CoverageEvidenceBindings[0], runtimecontract.EvidenceKindValidation)
+			if !found || len(validationProof.ValidationCheckAttestations) == 0 {
+				results <- outcome{scenario: current, err: fmt.Errorf("validation binding has no exact checks: %+v", facts.Focus.CoverageEvidenceBindings[0])}
+				return
+			}
+			protocolRef := validationProof.ValidationCheckAttestations[0].ObservationProtocolRef
+			nativeChecks := make([]string, 0, len(validationProof.ValidationCheckAttestations))
+			for _, attestation := range validationProof.ValidationCheckAttestations {
+				if attestation.ObservationProtocolRef != protocolRef {
+					results <- outcome{scenario: current, err: fmt.Errorf("validation binding has mixed observation protocols: %+v", validationProof.ValidationCheckAttestations)}
+					return
+				}
+				nativeChecks = append(nativeChecks, attestation.NativeCheckRef)
+			}
 			validationEvidence := ExecutionEvidence{
 				EventID: "validation-" + current.focusID, WorkspaceID: current.workspaceID, RunID: current.runID,
 				DispatchID: validationSealed.ActiveDispatch.ID, AuthoritySnapshotID: validationSealed.ActiveDispatch.Transaction.AuthoritySnapshotID,
 				OperationID: validationSealed.ActiveDispatch.OperationExecutions[0].OperationID, Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusAccepted,
 				Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
-					RecipeID: runtimeManagedValidationEvidencePolicy().ID, ExecutedChecks: []string{checkRef}, PassedChecks: []string{checkRef},
+					RecipeID: runtimeManagedValidationEvidencePolicy().ID, ObservationProtocolRef: protocolRef,
+					ExecutedChecks: append([]string(nil), nativeChecks...), PassedChecks: append([]string(nil), nativeChecks...),
 				}},
 			}
 			if err := attachRuntimeTestScopedOwnerReceiptResult(repository, &validationEvidence); err != nil {
@@ -1128,12 +1144,12 @@ func TestRuntimeControllerRejectsExecutableSealWithoutPersistedOwnerFeasibility(
 		ID: inventory.PrerequisiteID, Kind: runtimecontract.PrerequisiteKindOperationAdmissibility,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile, RequiredCapabilities: []string{runtimecontract.StepKindFileWrite},
 	}}
-	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
-		t.Fatal(err)
-	}
+	initialized := runtimeTestInitializeAndSealSemanticContract(t, context.Background(), controller, facts, controllerDefinition(), nil)
+	inventory = runtimeTestOperationAdmissibilityForOwner(t, initialized.Facts, runtimecontract.RuntimeModuleFile)
 	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "write-1", Kind: runtimecontract.StepKindFileWrite, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: []string{"target.txt"}, Parameters: runtimeFileWriteParameters("state"),
 	}}}}}
+	candidate = runtimeTestBindCandidateToFacts(t, repository.aggregate.Facts, candidate)
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "stable-prefix"); err != nil {
 		t.Fatal(err)
 	}
@@ -1921,7 +1937,7 @@ func controllerFacts() runtimecontract.RuntimeFacts {
 	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
 	facts.DefinitionFocuses = []runtimecontract.RuntimeDefinitionFocus{{
 		ID: "definition-focus-v2", SliceID: "slice-v2", AssessmentScope: "dodItem", AssessmentID: "dod-v2", AssessmentText: "deliver", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange},
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, EvidenceDeclarationRef: runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-v2"),
 	}}
 	catalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "test-semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
@@ -1969,15 +1985,14 @@ func runtimeTestManagedValidationInventory(prerequisiteID string) runtimecontrac
 			OperationKind:   runtimecontract.RuntimeBlockKindManagedValidationSession,
 			Readiness:       runtimecontract.RuntimeValidationSurfaceReady,
 			InputSchemaHash: "test-managed-validation-input/v1", InputBindingRef: "test-managed-validation-input/" + recipe.ID,
-			CheckRefs: []string{"check/" + recipe.ID}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
-			EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+			ProofApplicability: runtimecontract.RuntimeValidationProofNotDeclared,
+			EffectScope:        runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 		})
 	}
 	inventory := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID:     prerequisiteID,
 		OwnerModuleID:      runtimecontract.RuntimeModuleShell,
 		OperationKinds:     []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
-		ValidationRecipes:  recipes,
 		ValidationSurfaces: surfaces,
 		ObservedRevision:   "shell-policy-test-v1",
 	}
@@ -2001,12 +2016,82 @@ func runtimeTestManagedValidationPrerequisite(id string) runtimecontract.Runtime
 func runtimeFactsWithManagedValidationRecipe(facts runtimecontract.RuntimeFacts) runtimecontract.RuntimeFacts {
 	prerequisite := runtimeTestManagedValidationPrerequisite("operation-admissibility-shell-managed-validation")
 	facts.Activation.EvidencePolicies = runtimeManagedValidationEvidencePolicies()
-	facts.Prerequisites.Satisfied = append(facts.Prerequisites.Satisfied, prerequisite)
+	declareValidation := func(focus runtimecontract.CoverageFocus) runtimecontract.CoverageFocus {
+		focus = focus.Normalized()
+		if !hasRuntimeTestEvidenceKind(focus.RequiredEvidenceKinds, runtimecontract.EvidenceKindValidation) {
+			return focus
+		}
+		if hasRuntimeTestEvidenceKind(focus.RequiredEvidenceKinds, runtimecontract.EvidenceKindStateChange) {
+			for _, kind := range facts.Capabilities.StateChangeKinds {
+				focus.AcceptedStepKinds = runtimeTestAppendUnique(focus.AcceptedStepKinds, kind)
+			}
+		}
+		focus.AcceptedStepKinds = runtimeTestAppendUnique(focus.AcceptedStepKinds, runtimecontract.RuntimeBlockKindManagedValidationSession)
+		if focus.ValidationRecipeID == "" {
+			focus.ValidationRecipeID = runtimeManagedValidationEvidencePolicy().ID
+		}
+		if len(focus.RequiredCheckRefs) == 0 {
+			focus.RequiredCheckRefs = []string{"check/" + focus.ValidationRecipeID}
+		}
+		return focus.Normalized()
+	}
+	facts.Focus = declareValidation(facts.Focus)
+	for idx := range facts.RemainingFocuses {
+		facts.RemainingFocuses[idx] = declareValidation(facts.RemainingFocuses[idx])
+	}
+	for idx := range facts.CompletedFocuses {
+		facts.CompletedFocuses[idx] = declareValidation(facts.CompletedFocuses[idx])
+	}
+	for idx := range facts.DefinitionFocuses {
+		declaration := facts.DefinitionFocuses[idx].Clone()
+		if !hasRuntimeTestEvidenceKind(declaration.RequiredEvidenceKinds, runtimecontract.EvidenceKindValidation) {
+			continue
+		}
+		if hasRuntimeTestEvidenceKind(declaration.RequiredEvidenceKinds, runtimecontract.EvidenceKindStateChange) {
+			for _, kind := range facts.Capabilities.StateChangeKinds {
+				declaration.AcceptedStepKinds = runtimeTestAppendUnique(declaration.AcceptedStepKinds, kind)
+			}
+		}
+		declaration.AcceptedStepKinds = runtimeTestAppendUnique(declaration.AcceptedStepKinds, runtimecontract.RuntimeBlockKindManagedValidationSession)
+		if declaration.ValidationRecipeID == "" {
+			declaration.ValidationRecipeID = runtimeManagedValidationEvidencePolicy().ID
+		}
+		if declaration.EvidenceDeclarationRef == "" || strings.Contains(declaration.EvidenceDeclarationRef, "*") {
+			declaration.EvidenceDeclarationRef = runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(declaration.AssessmentScope, declaration.AssessmentID)
+		}
+		if len(declaration.RequiredCheckRefs) == 0 {
+			declaration.RequiredCheckRefs = []string{"check/" + declaration.ValidationRecipeID}
+		}
+		facts.DefinitionFocuses[idx] = declaration.Normalized()
+	}
+	satisfied := facts.Prerequisites.Satisfied[:0]
+	for _, existing := range facts.Prerequisites.Satisfied {
+		if existing.ID == prerequisite.ID && existing.OwnerModuleID == prerequisite.OwnerModuleID {
+			continue
+		}
+		satisfied = append(satisfied, existing)
+	}
+	facts.Prerequisites.Satisfied = append(satisfied, prerequisite)
 	inventory := runtimeTestManagedValidationInventory(prerequisite.ID)
 	inventory.TargetRefs = append([]string(nil), facts.Focus.TargetRefs...)
 	inventory.TargetRefs = append(inventory.TargetRefs, facts.Focus.ProspectiveTargetRefs...)
 	inventory.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
-	facts.Resources.OperationAdmissibilities = append(facts.Resources.OperationAdmissibilities, inventory)
+	catalogs := facts.Resources.OperationAdmissibilities[:0]
+	for _, existing := range facts.Resources.OperationAdmissibilities {
+		if existing.PrerequisiteID == inventory.PrerequisiteID && existing.OwnerModuleID == inventory.OwnerModuleID {
+			continue
+		}
+		catalogs = append(catalogs, existing)
+	}
+	facts.Resources.OperationAdmissibilities = append(catalogs, inventory)
+	if facts.DefinitionSeed.SchemaVersion != "" {
+		facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
+		bound, err := runtimeTestBindManagedValidationProofRequirements(facts)
+		if err != nil {
+			panic(fmt.Sprintf("bind managed-validation test inventory: %v", err))
+		}
+		facts = bound
+	}
 	return facts
 }
 

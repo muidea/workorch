@@ -110,9 +110,15 @@ load facts
   包括经过 manifest preflight 的 Shell validation catalog；没有该依赖的普通 Shell policy/target catalog 不得按 owner
   名称或 workspace 范围被扩大退休。重复 resource change/invalidation 必须幂等，且内生 owner receipt 不消耗 stale budget。
 - evidence 必须同时通过 current-run、focus、sealed `CoverageEvidenceBinding`、quality、effect、receipt 和适用的
-  recipe/check/metric/artifact 门禁。SM-2 只能从 sealed dispatch 的 `BindingRef`、owner receipt 与 persisted binding
+  recipe/check/metric/artifact 门禁。managed-validation 的 Definition check 还必须经 owner catalog 中 sealed 的
+  observation-protocol/native-check mapping 与 receipt typed attestation exact-match；raw process output 不构成该映射或
+  attestation。SM-2 只能从 sealed dispatch 的 `BindingRef`、owner receipt 与 persisted binding
   逐字段匹配后派生 CWI coverage；candidate 的 raw `coverageWorkItemIds`、assessment claim、非空 `PassedChecks`、
   exit code 0、历史 summary、memory、projection 和前一 focus evidence 都不能关闭当前 coverage。
+- recipe-wide readiness 不得代表所有 CWI ready。同一 capability surface 可以对 ready CWI 持 binding、对 missing CWI 持
+  preparation；两者必须按 requirement hash 分离，且所有 binding/preparation 的 native identity 跨 CWI 唯一。
+  preparation 只可通过 Profile 显式声明的 acquisition→owner reobserve closure 推进，不能由 Application、provider、
+  receiving owner 或 SM-2 临时补策略；缺 closure 时 activation 必须 fail closed。
 - multi-target prospective all-of binding 还必须通过 collective receipt gate：同一个 sealed dispatch 中，每个 target
   恰有一个 matching required operation、owner-committed `accepted` exact receipt 与 Orchestrator-committed
   `evidence_committed` execution member。partial accepted set 仍保持 CWI unsatisfied/unsettled；rejected、stale、weak、
@@ -249,7 +255,8 @@ current manifest 临时补全 scope；没有 matching sealed fallback 时按 typ
 - assessment evidence gate 只验证 current-run/focus、binding-matched owner receipt、effect、quality 与封存的
   focus evidence policy；它不得把 assessment observation、claim signal 或 `PassedChecks` 非空解释为 CWI credit，
   也不得改写 observation 的 disposition、items、gap 或 refs。profile 的 observable validation recipe 只能约束候选
-  选择该命令时的必要参数；只有 receipt 实际报告 binding 要求的 exact check/metric/artifact 才可满足该 binding，
+  选择该命令时的必要参数；只有 receipt 通过 sealed owner observation protocol 对 exact native check 产生 matching typed
+  attestation，且满足 binding 要求的 check/metric/artifact，才可满足该 binding，
   不得用 Goal/DoD、summary、operation ID 或检查名之间的自由文本相似度裁决 coverage。
 - 每个 assessment focus 的 `AssessmentScope + AssessmentID + AssessmentText` 必须逐字段等于 Definition seed 对应 slice 的
   `SourceScope + SourceID + TargetText`；active/completed assessment authority 都必须反证到该 immutable seed source。SM-3

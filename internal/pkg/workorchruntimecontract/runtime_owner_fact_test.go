@@ -40,12 +40,13 @@ func TestRuntimeMissingOwnerFactRequirementsRequiresReadyDirectPublishedSurface(
 		FactKind:      RuntimeOwnerFactSelectableValidationSurface,
 		OperationKind: RuntimeBlockKindManagedValidationSession,
 	}
-	direct := RuntimeValidationSurface{
+	direct := bindRuntimeValidationSurfaceForTest(RuntimeValidationSurface{
 		ID: "recipe/direct", OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
 		Readiness: RuntimeValidationSurfaceReady, InputSchemaHash: "schema-direct", InputBindingRef: "input-direct",
-		CheckRefs: []string{"check/direct"}, ProofApplicability: RuntimeValidationProofDirect,
 		EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-	}
+	}, runtimeValidationProofRequirementForTest(t, "definition-owner-fact", RuntimeCoverageItem{
+		ID: "cwi-owner-fact", SourceScope: "dodItem", SourceID: "dod-owner-fact", TargetText: "owner fact",
+	}, "definition/dodItem/dod-owner-fact", "recipe/direct", []string{"check/direct"}))
 	catalog := RuntimeOperationAdmissibility{
 		PrerequisiteID: "shell-catalog", OwnerModuleID: RuntimeModuleShell,
 		OperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeRefs: []string{direct.ID},
@@ -62,6 +63,7 @@ func TestRuntimeMissingOwnerFactRequirementsRequiresReadyDirectPublishedSurface(
 	auxiliary := direct
 	auxiliary.ID = "recipe/auxiliary"
 	auxiliary.ProofApplicability = RuntimeValidationProofAuxiliary
+	auxiliary.ProofRequirementBindings = nil
 	auxiliaryCatalog := catalog
 	auxiliaryCatalog.ValidationRecipeRefs = nil
 	auxiliaryCatalog.ValidationSurfaces = []RuntimeValidationSurface{auxiliary}
@@ -117,16 +119,18 @@ func TestResolveRuntimeOwnerFactAcquisitionUsesOnlySealedMissingFactClosure(t *t
 		t.Fatal("missing preexisting-only owner fact granted acquisition authority")
 	}
 
+	readySurface := bindRuntimeValidationSurfaceForTest(RuntimeValidationSurface{
+		ID: "recipe/ready", OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
+		Readiness: RuntimeValidationSurfaceReady, InputSchemaHash: "schema/ready", InputBindingRef: "input/ready",
+		EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
+	}, runtimeValidationProofRequirementForTest(t, "definition-ready", RuntimeCoverageItem{
+		ID: "cwi-ready", SourceScope: "dodItem", SourceID: "dod-ready", TargetText: "ready validation",
+	}, "definition/dodItem/dod-ready", "recipe/ready", []string{"check/ready"}))
 	readyCatalog := RuntimeOperationAdmissibility{
 		PrerequisiteID: "shell-ready", OwnerModuleID: RuntimeModuleShell,
 		OperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeRefs: []string{"recipe/ready"},
-		ValidationSurfaces: []RuntimeValidationSurface{{
-			ID: "recipe/ready", OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
-			Readiness: RuntimeValidationSurfaceReady, InputSchemaHash: "schema/ready", InputBindingRef: "input/ready",
-			CheckRefs: []string{"check/ready"}, ProofApplicability: RuntimeValidationProofDirect,
-			EffectScope: RuntimeEffectNone, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay,
-		}},
-		ObservedRevision: "shell-ready-v1",
+		ValidationSurfaces: []RuntimeValidationSurface{readySurface},
+		ObservedRevision:   "shell-ready-v1",
 	}
 	readyCatalog.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(readyCatalog)
 	if _, found := ResolveRuntimeOwnerFactAcquisition([]RuntimeOwnerFactRequirement{requirement}, []RuntimeOwnerFactConvergence{convergence}, []RuntimeOperationAdmissibility{readyCatalog}); found {

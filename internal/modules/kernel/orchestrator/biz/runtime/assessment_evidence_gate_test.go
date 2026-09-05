@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -118,6 +119,21 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 	if !found {
 		t.Fatalf("sealed assessment fixture has no current CWI binding: %+v", aggregate.Facts.Focus)
 	}
+	validationProof, found := runtimecontract.CoverageEvidenceProofForKind(binding, runtimecontract.EvidenceKindValidation)
+	if !found {
+		t.Fatalf("sealed assessment fixture has no exact validation proof: %+v", binding)
+	}
+	if len(validationProof.ValidationCheckAttestations) == 0 {
+		t.Fatalf("sealed assessment fixture has no owner-native check attestations: %+v", validationProof)
+	}
+	protocolRef := validationProof.ValidationCheckAttestations[0].ObservationProtocolRef
+	nativeChecks := make([]string, 0, len(validationProof.ValidationCheckAttestations))
+	for _, attestation := range validationProof.ValidationCheckAttestations {
+		if attestation.ObservationProtocolRef != protocolRef {
+			t.Fatalf("sealed assessment fixture uses multiple observation protocols: %+v", validationProof.ValidationCheckAttestations)
+		}
+		nativeChecks = append(nativeChecks, attestation.NativeCheckRef)
+	}
 	candidate := managedValidationCandidate("validate-claim")
 	candidate.Validation.Operations[0].Operation.BindingRefs = []string{binding.ID}
 	candidate.Validation.Operations[0].Operation.CoverageWorkItemIDs = nil
@@ -132,7 +148,10 @@ func TestCommitAssessmentAcceptsStructuredClaimEvidenceWithoutTextSimilarity(t *
 		Evidence: runtimecontract.RuntimeOperationEvidence{
 			Summary: "validation completed", Quality: common.EvidenceQualityValid,
 			Validation: &runtimecontract.RuntimeValidationObservation{
-				RecipeID: runtimeManagedValidationEvidencePolicy().ID, ExecutedChecks: []string{"TestLSPToolExistence"}, PassedChecks: []string{"TestLSPToolExistence"},
+				RecipeID:               runtimeManagedValidationEvidencePolicy().ID,
+				ObservationProtocolRef: protocolRef,
+				ExecutedChecks:         append([]string(nil), nativeChecks...),
+				PassedChecks:           append([]string(nil), nativeChecks...),
 			},
 		},
 	}
@@ -169,10 +188,37 @@ func assessmentGateFixture(t *testing.T, claim, passedCheck string) (RuntimeAggr
 		ID: "validate-claim", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 		BindingRefs: []string{bindingRef}, TargetRefs: []string{"target.txt"},
 	}
-	observation := &runtimecontract.RuntimeValidationObservation{RecipeID: "test-recipe", ExecutedChecks: []string{passedCheck}, PassedChecks: []string{passedCheck}}
 	requiredChecks := []string(nil)
 	if passedCheck != "" {
 		requiredChecks = []string{passedCheck}
+	} else {
+		requiredChecks = []string{"TestRequiredClaim"}
+	}
+	binding := assessmentTestBinding(
+		bindingRef, "cwi-claim", "focus-claim", "definition-claim",
+		[]string{runtimecontract.EvidenceKindValidation}, []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
+		[]string{runtimecontract.RuntimeBlockKindManagedValidationSession}, []string{"target.txt"}, "test-recipe", requiredChecks,
+	)
+	validationProof, found := runtimecontract.CoverageEvidenceProofForKind(binding, runtimecontract.EvidenceKindValidation)
+	if !found {
+		t.Fatal("assessment fixture has no managed-validation proof")
+	}
+	observation := &runtimecontract.RuntimeValidationObservation{RecipeID: "test-recipe"}
+	if len(validationProof.ValidationCheckAttestations) != 0 {
+		observation.ObservationProtocolRef = validationProof.ValidationCheckAttestations[0].ObservationProtocolRef
+	}
+	if passedCheck != "" {
+		for _, attestation := range validationProof.ValidationCheckAttestations {
+			if attestation.RequiredCheckRef != passedCheck {
+				continue
+			}
+			observation.ExecutedChecks = []string{attestation.NativeCheckRef}
+			observation.PassedChecks = []string{attestation.NativeCheckRef}
+			break
+		}
+		if !runtimecontract.RuntimeValidationObservationSatisfiesCoverageProof(validationProof, *observation) {
+			t.Fatalf("assessment fixture observation does not satisfy managed proof: proof=%+v observation=%+v", validationProof, *observation)
+		}
 	}
 	aggregate := RuntimeAggregate{
 		Facts: runtimecontract.RuntimeFacts{
@@ -182,11 +228,7 @@ func assessmentGateFixture(t *testing.T, claim, passedCheck string) (RuntimeAggr
 				RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation},
 				AcceptedStepKinds:     []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 				RequireDirectEvidence: true, RequireClaimEvidence: true, RequireExecutableBehaviorEvidence: true,
-				CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{assessmentTestBinding(
-					bindingRef, "cwi-claim", "focus-claim", "definition-claim",
-					[]string{runtimecontract.EvidenceKindValidation}, []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone},
-					[]string{runtimecontract.RuntimeBlockKindManagedValidationSession}, []string{"target.txt"}, "test-recipe", requiredChecks,
-				)},
+				CoverageEvidenceBindings: []runtimecontract.CoverageEvidenceBinding{binding},
 			},
 			Coverage: []runtimecontract.RuntimeCoverageItemFact{{
 				ID: "cwi-claim", State: runtimecontract.RuntimeCoverageItemStateOpen, TargetText: claim,
@@ -211,9 +253,21 @@ func assessmentGateFixture(t *testing.T, claim, passedCheck string) (RuntimeAggr
 }
 
 func assessmentTestBinding(id string, coverageID common.CoverageWorkItemID, focusID, definitionRevision string, _ []string, scopes []runtimecontract.RuntimeEffectScope, operationKinds, targetRefs []string, recipeID string, checks []string) runtimecontract.CoverageEvidenceBinding {
+	attestations := make([]runtimecontract.RuntimeValidationCheckAttestationBinding, 0, len(checks))
+	for index, checkRef := range checks {
+		attestations = append(attestations, runtimecontract.RuntimeValidationCheckAttestationBinding{
+			RequiredCheckRef:       checkRef,
+			ObservationProtocolRef: "test/assessment-validation-observation/v1",
+			NativeCheckRef:         fmt.Sprintf("test/native/assessment/%d", index),
+		})
+	}
 	binding := runtimecontract.CoverageEvidenceBinding{
 		ID: id, CoverageWorkItemID: coverageID, FocusID: focusID, DefinitionRevision: definitionRevision,
-		Proofs:     []runtimecontract.CoverageEvidenceProof{{EvidenceKind: runtimecontract.EvidenceKindValidation, RequiredEffectScopes: scopes, AllowedOperationKinds: operationKinds, ValidationRecipeID: recipeID, RequiredCheckRefs: checks}},
+		Proofs: []runtimecontract.CoverageEvidenceProof{{
+			EvidenceKind: runtimecontract.EvidenceKindValidation, RequiredEffectScopes: scopes, AllowedOperationKinds: operationKinds,
+			ValidationRecipeID: recipeID, ValidationProofRequirementHash: "runtime-validation-proof-requirement-test-cwi-claim", RequiredCheckRefs: checks,
+			ValidationCheckAttestations: attestations,
+		}},
 		TargetRefs: targetRefs, DeclarationRef: "test/assessment-proof",
 	}.Normalized()
 	binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)

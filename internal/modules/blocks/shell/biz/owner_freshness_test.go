@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,12 +67,12 @@ func TestShellOwnerZeroWorkValidationReceiptReplaysQualityWithoutReexecution(t *
 		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"fixture_test.go"},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
 			ID: "zero-work", AppliesTo: runtimecontract.StepKindShellCommand, CommandName: "go", ArgsContain: []string{"test"},
-			ZeroWorkMarkers: []string{"no tests to run", "[no tests to run]"}, WorkEvidenceMarkers: []string{"=== RUN", "--- PASS:"},
+			ZeroWorkMarkers: []string{"[no tests to run]", "no tests to run"}, WorkEvidenceMarkers: []string{"--- PASS:", "=== RUN"},
 			QualityOnZeroWork: "inconclusive", EvidenceReason: "no matching validation checks", EvidenceTags: []string{"zero_work"},
 		}},
 	}
 	recipes := []runtimecontract.RuntimeValidationRecipe{{
-		ID: "go-test-zero-work", Command: "go", Args: []string{"test", "-v", "-run", "TestMissing", "./..."},
+		ID: "go-test-zero-work", Command: "go", Args: []string{"test", "-v", "./..."},
 	}}
 	command := sealedShellTestCommand(t, owner.runtimeAdapter, executionContext, runtimecontract.RuntimeBlockKindManagedValidationSession, shellevents.OperationData{
 		ValidationRecipeID: "go-test-zero-work",
@@ -244,7 +245,7 @@ func TestShellOwnerAcceptsObservedEffectsWithinMultipleSealedTargets(t *testing.
 	}
 }
 
-func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(t *testing.T) {
+func TestShellOwnerAdmissibilityDoesNotPublishUnsupportedNativeProofRecipe(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh is not available")
 	}
@@ -268,6 +269,10 @@ func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(
 			{ID: "confirmed", Command: "sh", Args: []string{"-c", "true"}},
 			{ID: "unavailable", Command: "workorch-command-that-does-not-exist", Args: []string{"check"}},
 		},
+		ValidationProofRequirements: []runtimecontract.RuntimeValidationProofRequirement{
+			shellValidationProofRequirementForTest(t, "confirmed", "cwi-confirmed"),
+			shellValidationProofRequirementForTest(t, "unavailable", "cwi-unavailable"),
+		},
 		WorkspaceManifestBinding: shellTestWorkspaceManifestBinding("tree-shell", []string{"validation.txt"}),
 	}
 	result := hub.Send(magicevent.NewEventWithContext(shellevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
@@ -282,8 +287,8 @@ func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(
 	if !ok {
 		t.Fatalf("Shell admissibility response = %T", data)
 	}
-	if len(response.Acquisition.Admissibility.ValidationRecipes) != 1 || response.Acquisition.Admissibility.ValidationRecipes[0].ID != "confirmed" {
-		t.Fatalf("owner-confirmed recipes = %+v", response.Acquisition.Admissibility.ValidationRecipes)
+	if len(response.Acquisition.Admissibility.ValidationRecipes) != 0 || len(response.Acquisition.Admissibility.ValidationRecipeRefs) != 0 {
+		t.Fatalf("non-native recipe became selectable = %+v", response.Acquisition.Admissibility.ValidationRecipes)
 	}
 	if len(response.Acquisition.Admissibility.ValidationSurfaces) != 2 {
 		t.Fatalf("owner validation surfaces = %+v", response.Acquisition.Admissibility.ValidationSurfaces)
@@ -293,7 +298,8 @@ func TestShellOwnerAdmissibilityPersistsOnlyPreflightConfirmedValidationRecipes(
 		t.Fatalf("owner omitted confirmed validation surface: %+v", response.Acquisition.Admissibility.ValidationSurfaces)
 	}
 	if surface.ID != "confirmed" || surface.Readiness != runtimecontract.RuntimeValidationSurfaceReady ||
-		surface.InputBindingRef == "" || !strings.Contains(surface.InputBindingRef, "tree-shell") || surface.PrerequisiteRef != "" {
+		surface.InputBindingRef == "" || !strings.Contains(surface.InputBindingRef, "tree-shell") || surface.PrerequisiteRef != "" ||
+		surface.ProofApplicability != runtimecontract.RuntimeValidationProofAuxiliary || len(surface.ProofRequirementBindings) != 0 || len(surface.ProofRequirementPreparations) != 0 {
 		t.Fatalf("owner-confirmed validation surface = %+v", surface)
 	}
 	unavailable, found := shellValidationSurfaceForTest(response.Acquisition.Admissibility.ValidationSurfaces, "unavailable")
@@ -335,6 +341,7 @@ func TestShellOwnerAdmissibilityPublishesManifestPrerequisiteBeforeValidationIsR
 	t.Cleanup(func() { owner.Teardown(ctx) })
 	workspace := t.TempDir()
 	recipe := runtimecontract.RuntimeValidationRecipe{ID: "go-test", Command: "go", Args: []string{"test", "./..."}}
+	requirement := shellValidationProofRequirementForTest(t, recipe.ID, "cwi-go-test")
 	acquire := func(prerequisiteID, revision string, targetRefs []string) runtimecontract.RuntimeOperationAdmissibility {
 		t.Helper()
 		command := shellevents.AcquireRuntimeOperationAdmissibilityCommand{
@@ -342,7 +349,8 @@ func TestShellOwnerAdmissibilityPublishesManifestPrerequisiteBeforeValidationIsR
 			PrerequisiteID: prerequisiteID, OwnerModuleID: modulecommon.ModuleID,
 			WorkspaceDeliverableDirectory: workspace, RequiredKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 			RequiredTargetRefs: targetRefs, MaxItems: 8, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{recipe},
-			WorkspaceManifestBinding: shellTestWorkspaceManifestBinding(revision, targetRefs),
+			ValidationProofRequirements: []runtimecontract.RuntimeValidationProofRequirement{requirement},
+			WorkspaceManifestBinding:    shellTestWorkspaceManifestBinding(revision, targetRefs),
 		}
 		result := hub.Send(magicevent.NewEventWithContext(shellevents.TopicAcquireRuntimeOperationAdmissibility, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
 		if result == nil {
@@ -393,12 +401,59 @@ func TestShellOwnerAdmissibilityPublishesManifestPrerequisiteBeforeValidationIsR
 		t.Fatalf("manifest-prerequisite validation inventory = %+v surface=%+v found=%t", waiting, waitingSurface, found)
 	}
 
-	ready := acquire("admissibility-shell-ready", "tree-with-module-and-tests", []string{"go.mod", "main.go", "main_test.go"})
+	nativeMissing := acquire("admissibility-shell-ready-input-missing-native", "tree-with-module-and-tests", []string{"go.mod", "main.go", "main_test.go"})
+	nativeMissingSurface, found := shellValidationSurfaceForTest(nativeMissing.ValidationSurfaces, recipe.ID)
+	if !found || nativeMissingSurface.Readiness != runtimecontract.RuntimeValidationSurfaceReady ||
+		len(nativeMissingSurface.ProofRequirementBindings) != 0 || len(nativeMissingSurface.ProofRequirementPreparations) != 1 ||
+		len(nativeMissing.ValidationRecipes) != 0 || len(nativeMissing.ValidationRecipeRefs) != 0 {
+		t.Fatalf("recipe-ready/native-missing inventory = %+v surface=%+v found=%t", nativeMissing, nativeMissingSurface, found)
+	}
+
+	attestations, supported := shellValidationCheckAttestations(recipe, requirement)
+	if !supported || len(attestations) != 1 {
+		t.Fatalf("native check mapping = %+v supported=%t", attestations, supported)
+	}
+	nativeTargetRef := shellValidationNativeCheckTargetRef(requirement)
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(workspace, nativeTargetRef)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nativeSource := fmt.Sprintf(`package workorch_validation
+
+import "testing"
+
+func %s(t *testing.T) {
+	if 2+2 != 4 {
+		t.Fatal("owner-native assertion failed")
+	}
+}
+`, attestations[0].NativeCheckRef)
+	if err := os.WriteFile(filepath.Join(workspace, nativeTargetRef), []byte(nativeSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commonInputMissing := acquire("admissibility-shell-native-present-common-input-missing", "tree-native-without-module", []string{"main.go", nativeTargetRef})
+	commonInputMissingSurface, found := shellValidationSurfaceForTest(commonInputMissing.ValidationSurfaces, recipe.ID)
+	if !found || commonInputMissingSurface.Readiness != runtimecontract.RuntimeValidationSurfacePrerequisiteRequired ||
+		len(commonInputMissingSurface.ProofRequirementBindings) != 0 || len(commonInputMissingSurface.ProofRequirementPreparations) != 1 ||
+		commonInputMissingSurface.ProofRequirementPreparations[0].TargetRef != "" ||
+		!runtimecontract.RuntimeProspectiveTargetsSatisfyConstraint([]string{"go.mod"}, commonInputMissingSurface.ProofRequirementPreparations[0].ProspectiveTargetSatisfactionConstraint) {
+		t.Fatalf("native-present/common-input-missing inventory = %+v surface=%+v found=%t", commonInputMissing, commonInputMissingSurface, found)
+	}
+	for name, content := range map[string]string{
+		"go.mod":  "module example.com/workorch-shell-readiness\n\ngo 1.26\n",
+		"main.go": "package main\n",
+	} {
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readyRefs := []string{"go.mod", "main.go", nativeTargetRef}
+	ready := acquire("admissibility-shell-ready", "tree-with-native-check", readyRefs)
 	readySurface, found := shellValidationSurfaceForTest(ready.ValidationSurfaces, recipe.ID)
 	if !found || readySurface.Readiness != runtimecontract.RuntimeValidationSurfaceReady ||
-		!strings.Contains(readySurface.InputBindingRef, "tree-with-module-and-tests") || readySurface.PrerequisiteRef != "" ||
+		!strings.Contains(readySurface.InputBindingRef, "tree-with-native-check") || readySurface.PrerequisiteRef != "" ||
 		readySurface.ProspectiveSatisfactionContractRef != "" ||
 		readySurface.ProspectiveTargetSatisfactionConstraint != nil ||
+		len(readySurface.ProofRequirementBindings) != 1 || len(readySurface.ProofRequirementPreparations) != 0 ||
 		len(ready.ValidationRecipes) != 1 || len(ready.ValidationRecipeRefs) != 1 || ready.ValidationRecipeRefs[0] != recipe.ID {
 		t.Fatalf("ready validation inventory = %+v surface=%+v found=%t", ready, readySurface, found)
 	}

@@ -99,7 +99,13 @@ func CloneRuntimeEvidencePolicies(values []RuntimeEvidencePolicy) []RuntimeEvide
 				requirement.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), requirement.ProspectiveTargetAllOfConstraintRefs...)
 				requirement.RequiredEvidenceKinds = append([]string(nil), requirement.RequiredEvidenceKinds...)
 				requirement.AcceptedStepKinds = append([]string(nil), requirement.AcceptedStepKinds...)
-				requirement.AcceptedOperationVariants = append([]RuntimeOperationVariantRef(nil), requirement.AcceptedOperationVariants...)
+				// Preserve the exact raw nil/empty representation while detaching the
+				// slice. RuntimeOperationVariantRefs canonically represents an empty
+				// set as a non-nil empty slice, and Clone must neither corrupt a valid
+				// projection nor launder a malformed nil projection before validation.
+				if requirement.AcceptedOperationVariants != nil {
+					requirement.AcceptedOperationVariants = append([]RuntimeOperationVariantRef{}, requirement.AcceptedOperationVariants...)
+				}
 				requirement.RejectedStepKinds = append([]string(nil), requirement.RejectedStepKinds...)
 				requirement.RequiredCheckRefs = append([]string(nil), requirement.RequiredCheckRefs...)
 				requirement.MetricConstraints = append([]string(nil), requirement.MetricConstraints...)
@@ -133,6 +139,20 @@ func (p RuntimeEvidencePolicy) Normalized() RuntimeEvidencePolicy {
 }
 
 func (p RuntimeEvidencePolicy) Validate() error {
+	seenRequirements := make(map[string]struct{}, len(p.CoverageRequirements))
+	for _, requirement := range p.CoverageRequirements {
+		key := strings.TrimSpace(requirement.Scope) + "|" + strings.TrimSpace(requirement.ID)
+		if key == "|" {
+			continue
+		}
+		if _, duplicate := seenRequirements[key]; duplicate {
+			return fmt.Errorf("runtime evidence policy %q duplicates coverage requirement %q", strings.TrimSpace(p.ID), key)
+		}
+		seenRequirements[key] = struct{}{}
+		if duplicate := duplicateRuntimeValidationProofCheckRef(requirement.RequiredCheckRefs); duplicate != "" {
+			return fmt.Errorf("runtime coverage evidence requirement %q duplicates check %q", strings.TrimSpace(requirement.ID), duplicate)
+		}
+	}
 	p = p.Normalized()
 	if p.ID == "" || p.AppliesTo == "" {
 		return fmt.Errorf("runtime evidence policy requires id and applies-to kind")
@@ -155,6 +175,15 @@ func (p RuntimeEvidencePolicy) Validate() error {
 	for _, requirement := range p.CoverageRequirements {
 		if requirement.ID == "" || requirement.Scope == "" {
 			return fmt.Errorf("runtime coverage evidence requirement requires id and scope")
+		}
+		if requirement.ValidationRecipeID != "" && !containsString(requirement.RequiredEvidenceKinds, EvidenceKindValidation) {
+			return fmt.Errorf("runtime coverage evidence requirement %q validation recipe requires validation evidence", requirement.ID)
+		}
+		if len(requirement.RequiredCheckRefs) != 0 && requirement.ValidationRecipeID == "" {
+			return fmt.Errorf("runtime coverage evidence requirement %q checks require a validation recipe", requirement.ID)
+		}
+		if duplicate := duplicateRuntimeValidationProofCheckRef(requirement.RequiredCheckRefs); duplicate != "" {
+			return fmt.Errorf("runtime coverage evidence requirement %q duplicates check %q", requirement.ID, duplicate)
 		}
 		if err := ValidateRuntimeTargetGrounding(requirement.RequireTargetGrounding, requirement.TargetRole, requirement.TargetRefs, requirement.TargetDiscoverySources, requirement.TargetSelectorRef); err != nil {
 			return fmt.Errorf("runtime coverage evidence requirement %q: %w", requirement.ID, err)
@@ -361,27 +390,31 @@ func CloneRuntimeValidationRecipes(values []RuntimeValidationRecipe) []RuntimeVa
 }
 
 func NormalizeRuntimeEvidencePolicies(values []RuntimeEvidencePolicy) []RuntimeEvidencePolicy {
-	byID := map[string]RuntimeEvidencePolicy{}
+	ret := make([]RuntimeEvidencePolicy, 0, len(values))
 	for _, value := range values {
-		value = value.Normalized()
-		if value.ID != "" {
-			byID[value.ID] = value
-		}
+		ret = append(ret, value.Normalized())
 	}
-	keys := make([]string, 0, len(byID))
-	for key := range byID {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	ret := make([]RuntimeEvidencePolicy, 0, len(keys))
-	for _, key := range keys {
-		ret = append(ret, byID[key])
-	}
+	// Normalization is deliberately lossless. Duplicate or empty identities
+	// are invalid authority and must remain observable until validation rejects
+	// them; a generic canonicalizer must never choose a last writer.
+	sort.SliceStable(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })
 	return nilIfEmpty(ret)
 }
 
 func ValidateRuntimeEvidencePolicies(values []RuntimeEvidencePolicy) error {
-	for _, value := range NormalizeRuntimeEvidencePolicies(values) {
+	normalized := NormalizeRuntimeEvidencePolicies(values)
+	if !reflect.DeepEqual(values, normalized) {
+		return fmt.Errorf("runtime evidence policy projection requires canonical raw policies with unique identities")
+	}
+	seenPolicyIDs := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if _, duplicate := seenPolicyIDs[value.ID]; duplicate {
+			return fmt.Errorf("runtime evidence policy projection duplicates policy %q", value.ID)
+		}
+		seenPolicyIDs[value.ID] = struct{}{}
+		if !reflect.DeepEqual(value, value.Normalized()) {
+			return fmt.Errorf("runtime evidence policy %q requires canonical raw fields and unique coverage identities", strings.TrimSpace(value.ID))
+		}
 		if err := value.Validate(); err != nil {
 			return err
 		}
@@ -404,7 +437,7 @@ func SameRuntimeEvidencePolicies(left []RuntimeEvidencePolicy, right []RuntimeEv
 }
 
 func normalizeRuntimeCoverageEvidenceRequirements(values []RuntimeCoverageEvidenceRequirement) []RuntimeCoverageEvidenceRequirement {
-	byKey := map[string]RuntimeCoverageEvidenceRequirement{}
+	ret := make([]RuntimeCoverageEvidenceRequirement, 0, len(values))
 	for _, value := range values {
 		value.ID = strings.TrimSpace(value.ID)
 		value.Scope = strings.TrimSpace(value.Scope)
@@ -422,23 +455,20 @@ func normalizeRuntimeCoverageEvidenceRequirements(values []RuntimeCoverageEviden
 		value.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(value.AcceptedOperationVariants)
 		value.RejectedStepKinds = normalizeStrings(value.RejectedStepKinds)
 		value.ValidationRecipeID = strings.TrimSpace(value.ValidationRecipeID)
-		value.RequiredCheckRefs = normalizeStrings(value.RequiredCheckRefs)
+		value.RequiredCheckRefs = normalizeRuntimeValidationProofCheckRefs(value.RequiredCheckRefs)
 		value.MetricConstraints = normalizeStrings(value.MetricConstraints)
 		value.ArtifactRefs = normalizeStrings(value.ArtifactRefs)
 		value.Description = strings.TrimSpace(value.Description)
-		if value.ID != "" && value.Scope != "" {
-			byKey[value.Scope+"|"+value.ID] = value
+		ret = append(ret, value)
+	}
+	// As with the containing policy set, preserve invalid duplicates and empty
+	// identities so validation—not normalization—owns conflict rejection.
+	sort.SliceStable(ret, func(i, j int) bool {
+		if ret[i].Scope != ret[j].Scope {
+			return ret[i].Scope < ret[j].Scope
 		}
-	}
-	keys := make([]string, 0, len(byKey))
-	for key := range byKey {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	ret := make([]RuntimeCoverageEvidenceRequirement, 0, len(keys))
-	for _, key := range keys {
-		ret = append(ret, byKey[key])
-	}
+		return ret[i].ID < ret[j].ID
+	})
 	return nilIfEmpty(ret)
 }
 

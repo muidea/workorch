@@ -55,6 +55,17 @@ capability resource state。
   Soul/Skill/MCP/Memory snapshot 和 `StartupInputHash` 在既有 Run 中不可改写。
 - required CWI 在 operation candidate 前必须由 SM-2 从 immutable Definition seed、typed owner catalog、SM-3 semantic document
   与 matching owner feasibility 封存唯一 `CoverageEvidenceBinding`。不存在 binding-free operation authority。
+- 每个已 admission 且要求 validation 的 exact CWI 必须由 Application 本地纯 compiler 绑定 Definition revision、
+  CWI/source identity、source-text hash 与 canonical exact declaration，形成 recipe-neutral
+  `RuntimeValidationProofRequirement`。Profile wildcard 只是由 Application 施加到已 admission exact CWI 的声明模板；它可收紧
+  quality、target/selector、owner-fact acquisition、repair 与 evidence/operation 上界，但不能贡献 current owner fact、recipe/native check、dispatch 或 credit；capability
+  owner 从当前 typed ready catalog 选择兼容 recipe 并返回 exact per-CWI applicability binding。semantic provider 不能编写
+  declaration/check，SM-2 也不能把 recipe ID、generic exit 0 或另一个 CWI 的 marker 提升为 proof。
+- capability owner 可对尚缺 native check/input 的 exact requirement 返回 revision-bound preparation；它不是 Runtime authority。
+  只有 Profile 已封存的唯一 owner-fact acquisition/reobserve convergence 能使 SM-2 建立 receiving-owner prospective
+  transaction；exact acquisition receipt 会消费对应的 create-only `TargetSelection` lifecycle identity，resource-change
+  invalidation 不得重新激活或重发该 selector；receipt 后仍须 capability owner fresh reobserve、SM-2 私有 seal。Orchestrator 不解释 native protocol，
+  Application 不自动生成跨 owner convergence，MCP typed validation 也不借用 Shell preparation。
 - Goal/DoD、prospective constraint、required sequence 和 collective receipt 只支持 conjunctive `all_of`；不存在
   `one_of`/`any_of` terminal escape。Definition gap 只能进入专用 clarification transaction。
 - provider-facing manifest、closed JSON Schema、strict decoder、single evaluator 和 owner feasibility 共享一个 sealed

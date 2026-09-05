@@ -1,10 +1,124 @@
 package workorchruntimecontract
 
 import (
+	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
+
+func TestRuntimeBootstrapRejectsAmbiguousRawEvidencePoliciesBeforeCloneOrReload(t *testing.T) {
+	policy := RuntimeEvidencePolicy{
+		ID: "policy-1", AppliesTo: StepKindFileWrite,
+		CoverageRequirements: []RuntimeCoverageEvidenceRequirement{{ID: "dod-1", Scope: "dodItem"}},
+	}.Normalized()
+	tests := map[string]struct {
+		policies             []RuntimeEvidencePolicy
+		wantPolicyCount      int
+		wantRequirementCount int
+	}{
+		"duplicate policy": {
+			policies: []RuntimeEvidencePolicy{policy, policy}, wantPolicyCount: 2, wantRequirementCount: 1,
+		},
+		"duplicate nested requirement": {
+			policies: []RuntimeEvidencePolicy{func() RuntimeEvidencePolicy {
+				value := policy
+				value.CoverageRequirements = append(value.CoverageRequirements, value.CoverageRequirements[0])
+				return value
+			}()},
+			wantPolicyCount: 1, wantRequirementCount: 2,
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			bootstrap := RuntimeBootstrap{Activation: RuntimeActivationContext{EvidencePolicies: test.policies}}
+			normalized := bootstrap.Normalized()
+			if len(normalized.Activation.EvidencePolicies) != test.wantPolicyCount || len(normalized.Activation.EvidencePolicies[0].CoverageRequirements) != test.wantRequirementCount {
+				t.Fatalf("normalization laundered duplicate authority: %+v", normalized.Activation.EvidencePolicies)
+			}
+			cloned := bootstrap.Clone()
+			if len(cloned.Activation.EvidencePolicies) != test.wantPolicyCount || len(cloned.Activation.EvidencePolicies[0].CoverageRequirements) != test.wantRequirementCount {
+				t.Fatalf("clone laundered duplicate authority: %+v", cloned.Activation.EvidencePolicies)
+			}
+			for label, err := range map[string]error{
+				"raw validation":  ValidateRuntimeBootstrapRaw(bootstrap),
+				"full validation": bootstrap.Validate(),
+				"initial facts": func() error {
+					_, err := bootstrap.InitialFacts("ws-1", "run-1")
+					return err
+				}(),
+			} {
+				if err == nil || !strings.Contains(err.Error(), "evidence polic") {
+					t.Fatalf("%s accepted ambiguous authority: %v", label, err)
+				}
+			}
+			data, err := json.Marshal(bootstrap)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reloaded RuntimeBootstrap
+			if err := json.Unmarshal(data, &reloaded); err == nil || !strings.Contains(err.Error(), "evidence polic") {
+				t.Fatalf("current JSON reload accepted ambiguous authority: %v", err)
+			}
+		})
+	}
+}
+
+func TestRuntimeBootstrapRejectsNonCanonicalNestedEvidencePolicySetsBeforeClone(t *testing.T) {
+	base := RuntimeEvidencePolicy{
+		ID: "policy-1", AppliesTo: StepKindFileWrite,
+		CoverageRequirements: []RuntimeCoverageEvidenceRequirement{{ID: "dod-1", Scope: "dodItem"}},
+	}.Normalized()
+	for name, mutate := range map[string]func(*RuntimeCoverageEvidenceRequirement){
+		"duplicate check ref": func(value *RuntimeCoverageEvidenceRequirement) {
+			value.RequiredEvidenceKinds = []string{EvidenceKindValidation}
+			value.ValidationRecipeID = "recipe-1"
+			value.RequiredCheckRefs = []string{"check-1", "check-1"}
+		},
+		"whitespace target ref": func(value *RuntimeCoverageEvidenceRequirement) {
+			value.TargetRefs = []string{" target.go "}
+		},
+		"noncanonical target order": func(value *RuntimeCoverageEvidenceRequirement) {
+			value.TargetRefs = []string{"z.go", "a.go"}
+		},
+		"empty evidence kind": func(value *RuntimeCoverageEvidenceRequirement) {
+			value.RequiredEvidenceKinds = []string{EvidenceKindValidation, ""}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			policy := CloneRuntimeEvidencePolicies([]RuntimeEvidencePolicy{base})[0]
+			mutate(&policy.CoverageRequirements[0])
+			bootstrap := RuntimeBootstrap{Activation: RuntimeActivationContext{EvidencePolicies: []RuntimeEvidencePolicy{policy}}}
+			cloned := bootstrap.Clone()
+			if !reflect.DeepEqual(cloned.Activation.EvidencePolicies, bootstrap.Activation.EvidencePolicies) {
+				t.Fatalf("clone laundered noncanonical nested authority: source=%+v clone=%+v", bootstrap.Activation.EvidencePolicies, cloned.Activation.EvidencePolicies)
+			}
+			for label, err := range map[string]error{
+				"raw bootstrap":  ValidateRuntimeBootstrapRaw(bootstrap),
+				"full bootstrap": bootstrap.Validate(),
+				"raw facts":      ValidateRuntimeFactsRaw(RuntimeFacts{Activation: bootstrap.Activation}),
+				"initial facts": func() error {
+					_, err := bootstrap.InitialFacts("ws-1", "run-1")
+					return err
+				}(),
+			} {
+				if err == nil || !strings.Contains(err.Error(), "evidence polic") {
+					t.Fatalf("%s accepted noncanonical nested authority: %v", label, err)
+				}
+			}
+			data, err := json.Marshal(bootstrap)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reloaded RuntimeBootstrap
+			if err := json.Unmarshal(data, &reloaded); err == nil || !strings.Contains(err.Error(), "evidence polic") {
+				t.Fatalf("current JSON reload accepted noncanonical nested authority: %v", err)
+			}
+		})
+	}
+}
 
 func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 	skills, skillBudget := sealedRuntimeSkillFixture(t, "skill-1", "typed instruction")
@@ -18,8 +132,8 @@ func TestRuntimeBootstrapCloneAndEqualityPreserveTypedContract(t *testing.T) {
 			MaxRepairAttemptsPerFocus: 7, ValidationPolicies: []RuntimeValidationPolicy{{ID: "validation", Scope: "workspace_profile", AppliesToEvidenceKinds: []string{EvidenceKindValidation}, MaxValidationOnlyRetriesPerFocus: 2}},
 		}},
 		DefinitionFocuses: []RuntimeDefinitionFocus{
-			{ID: "focus-1", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
-			{ID: "focus-0", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-000", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-0"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}},
+			{ID: "focus-1", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-001", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}, EvidenceDeclarationRef: CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-001")},
+			{ID: "focus-0", SliceID: "slice-1", AssessmentScope: "dodItem", AssessmentID: "dod-000", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-0"}, RequiredEvidenceKinds: []string{EvidenceKindStateChange}, EvidenceDeclarationRef: CanonicalRuntimeDefinitionEvidenceDeclarationRef("dodItem", "dod-000")},
 		},
 		Slices: []RuntimeAcceptanceSlice{{ID: "slice-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1", "cwi-0"}, CompletionPolicy: RuntimeAcceptanceSliceCompletionAll, ResultPolicy: RuntimeAcceptanceSliceResultAllowed}},
 		CoverageItems: []RuntimeCoverageItem{
@@ -193,7 +307,7 @@ func TestRuntimeDefinitionFocusPreservesDeclarationWithoutGenerationAuthority(t 
 		TargetRefs: []string{"declared-but-not-owner-resolved.txt"}, TargetSelectorRef: "file/workspace-deliverable",
 		TargetSelectorOwnerRef: "profile/test", TargetSelectorSubjectRef: "verification_target",
 		TargetSelectorCandidateRefs: []string{"activation-sealed-validation.sh"}, ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"}, RequireTargetGrounding: true,
-		AcceptedStepKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe-1",
+		AcceptedStepKinds: []string{RuntimeBlockKindManagedValidationSession}, EvidenceDeclarationRef: "definition/dodItem/dod-1", ValidationRecipeID: "recipe-1",
 		RequiredCheckRefs: []string{"check-1"},
 	}})
 	if err := ValidateRuntimeDefinitionFocuses(seed, compiled); err != nil {

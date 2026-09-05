@@ -18,6 +18,22 @@ import (
 )
 
 func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.T) {
+	builtin := builtinSoftwareDevTemplateForTest(t)
+	workspace := &workspacemodel.Workspace{
+		ID: "workspace-builtin-software-dev", DeliverableDirectory: "/workspace", TemplateID: builtin.ID,
+		EvidencePolicies: workorcheventpayload.CloneSlice(builtin.EvidencePolicies),
+	}
+	goal := &workspacemodel.Goal{ID: "goal-builtin", WorkspaceID: workspace.ID, Text: "implement the requested behavior", DefinitionRevision: "goal-r1"}
+	dod := &workspacemodel.DoD{ID: "dod-builtin", WorkspaceID: workspace.ID, Items: []string{"requested behavior is validated"}, DefinitionRevision: "dod-r1"}
+	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, builtin)
+	if err != nil {
+		t.Fatalf("compile builtin candidate inputs: %v", err)
+	}
+	assertBuiltinSoftwareDevCandidateAndBootstrap(t, builtin, workspace, goal, dod, candidate)
+}
+
+func builtinSoftwareDevTemplateForTest(t *testing.T) *workspacemodel.WorkspaceTemplate {
+	t.Helper()
 	templates, err := workorchdefaults.BuiltinWorkspaceTemplateDefaults()
 	if err != nil {
 		t.Fatalf("load builtin templates: %v", err)
@@ -45,16 +61,18 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 	if builtin == nil {
 		t.Fatal("software-dev builtin template is missing")
 	}
-	workspace := &workspacemodel.Workspace{
-		ID: "workspace-builtin-software-dev", DeliverableDirectory: "/workspace", TemplateID: builtin.ID,
-		EvidencePolicies: workorcheventpayload.CloneSlice(builtin.EvidencePolicies),
-	}
-	goal := &workspacemodel.Goal{ID: "goal-builtin", WorkspaceID: workspace.ID, Text: "implement the requested behavior", DefinitionRevision: "goal-r1"}
-	dod := &workspacemodel.DoD{ID: "dod-builtin", WorkspaceID: workspace.ID, Items: []string{"requested behavior is validated"}, DefinitionRevision: "dod-r1"}
-	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, builtin)
-	if err != nil {
-		t.Fatalf("compile builtin candidate inputs: %v", err)
-	}
+	return builtin
+}
+
+func assertBuiltinSoftwareDevCandidateAndBootstrap(
+	t *testing.T,
+	builtin *workspacemodel.WorkspaceTemplate,
+	workspace *workspacemodel.Workspace,
+	goal *workspacemodel.Goal,
+	dod *workspacemodel.DoD,
+	candidate workspacemodel.DefinitionAdmissionCandidate,
+) *runtimecontract.RuntimeBootstrap {
+	t.Helper()
 	var parsedRepair *runtimecontract.RuntimeValidationFailureRepairConvergence
 	for _, profile := range candidate.RuntimeProfileContracts {
 		if profile.ID != "software-dev" {
@@ -119,12 +137,14 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 	if err != nil {
 		t.Fatalf("compile admitted builtin software-dev bootstrap: %v", err)
 	}
-	compiledRepairRoutes := 0
+	compiledRepairFocuses := 0
 	compiledDependencyMisroute := false
 	for _, focus := range bootstrap.DefinitionFocuses {
 		if focus.AssessmentScope != "dodItem" || focus.ValidationFailureRepairConvergence == nil {
 			continue
 		}
+		compiledRepairFocuses++
+		compiledRepairRoutes := 0
 		for _, expected := range expectedRoutes {
 			if route, found := focus.ValidationFailureRepairConvergence.RouteForTrigger(
 				runtimecontract.RuntimeModuleShell,
@@ -136,13 +156,17 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 				compiledRepairRoutes++
 			}
 		}
-		_, compiledDependencyMisroute = focus.ValidationFailureRepairConvergence.RouteForTrigger(
+		if compiledRepairRoutes != len(expectedRoutes) {
+			t.Fatalf("admitted software-dev focus lost its exact bounded repair routes: %+v", focus)
+		}
+		_, misrouted := focus.ValidationFailureRepairConvergence.RouteForTrigger(
 			runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession,
 			runtimecontract.ValidationDiagnosticDependencyMismatch, runtimecontract.ValidationEvidenceTargetDependencyContract,
 			runtimecontract.ValidationDiagnosticDependencyMismatch,
 		)
+		compiledDependencyMisroute = compiledDependencyMisroute || misrouted
 	}
-	if compiledRepairRoutes != len(expectedRoutes) || compiledDependencyMisroute {
+	if compiledRepairFocuses != len(dod.Items) || compiledDependencyMisroute {
 		t.Fatalf("admitted software-dev bootstrap lost its exact bounded repair routes: %+v", bootstrap.DefinitionFocuses)
 	}
 	if !containsActivationString(bootstrap.Definition.CapabilityContract, runtimecontract.StepKindFileEdit) ||
@@ -169,6 +193,7 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 	if !capabilityFound || !admissibilityFound {
 		t.Fatalf("repair operation did not compile into File startup prerequisites: %+v", bootstrap.Requirements)
 	}
+	return bootstrap
 }
 
 func containsActivationString(values []string, wanted string) bool {
@@ -178,6 +203,151 @@ func containsActivationString(values []string, wanted string) bool {
 		}
 	}
 	return false
+}
+
+func TestBuiltinSoftwareDevBootstrapBindsEveryCompiledManagedCWI(t *testing.T) {
+	builtin := builtinSoftwareDevTemplateForTest(t)
+	workspace := &workspacemodel.Workspace{
+		ID: "workspace-builtin-proof-set", DeliverableDirectory: "/workspace", TemplateID: builtin.ID,
+		EvidencePolicies: workorcheventpayload.CloneSlice(builtin.EvidencePolicies),
+	}
+	goal := &workspacemodel.Goal{
+		ID: "goal-builtin-proof-set", WorkspaceID: workspace.ID, Text: builtin.GoalText, DefinitionRevision: "goal-proof-set-r1",
+	}
+	dod := &workspacemodel.DoD{
+		ID: "dod-builtin-proof-set", WorkspaceID: workspace.ID, Items: append([]string(nil), builtin.DoDItems...), DefinitionRevision: "dod-proof-set-r1",
+	}
+	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, builtin)
+	if err != nil {
+		t.Fatalf("compile builtin proof-set candidate: %v", err)
+	}
+	bootstrap := assertBuiltinSoftwareDevCandidateAndBootstrap(t, builtin, workspace, goal, dod, candidate)
+	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(
+		bootstrap.Definition.Revision, bootstrap.DefinitionSeed.CoverageItems, bootstrap.DefinitionFocuses,
+	)
+	if err != nil {
+		t.Fatalf("compile builtin exact proof requirements: %v", err)
+	}
+	managedFocuses := make(map[common.CoverageWorkItemID]runtimecontract.RuntimeDefinitionFocus)
+	for _, focus := range bootstrap.DefinitionFocuses {
+		if containsActivationString(focus.RequiredEvidenceKinds, runtimecontract.EvidenceKindValidation) &&
+			containsActivationString(focus.AcceptedStepKinds, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+			managedFocuses[focus.CoverageWorkItemIDs[0]] = focus
+		}
+	}
+	// The current built-in Definition has one managed requirement per actual
+	// DoD work unit plus validation_report. Optional acceptance dimensions and
+	// goalCoverage are not invented as work units by this assertion.
+	if len(requirements) != len(builtin.DoDItems)+1 || len(managedFocuses) != len(requirements) {
+		t.Fatalf("builtin compiled managed proof set: requirements=%d managedFocuses=%d DoD=%d", len(requirements), len(managedFocuses), len(builtin.DoDItems))
+	}
+	seenScopes := make(map[string]int)
+	seenHashes := make(map[string]struct{}, len(requirements))
+	for _, requirement := range requirements {
+		focus, found := managedFocuses[requirement.CoverageWorkItemID]
+		if !found {
+			t.Fatalf("proof requirement %q has no exact managed focus: %+v", requirement.Hash, requirement)
+		}
+		seenScopes[requirement.SourceScope]++
+		if requirement.ValidationRecipeID != "" || requirement.DeclarationRef != runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(requirement.SourceScope, requirement.SourceID) {
+			t.Fatalf("builtin wildcard became recipe/identity authority: %+v", requirement)
+		}
+		if _, duplicate := seenHashes[requirement.Hash]; duplicate {
+			t.Fatalf("builtin proof requirement hash reused across CWIs: %+v", requirement)
+		}
+		seenHashes[requirement.Hash] = struct{}{}
+		ownerFactBound := false
+		for _, fact := range focus.RequiredOwnerFacts {
+			fact = fact.Normalized()
+			if fact.OwnerModuleID == runtimecontract.RuntimeModuleShell &&
+				fact.FactKind == runtimecontract.RuntimeOwnerFactSelectableValidationSurface &&
+				fact.OperationKind == runtimecontract.RuntimeBlockKindManagedValidationSession &&
+				fact.ValidationProofRequirementHash == requirement.Hash {
+				ownerFactBound = true
+			}
+		}
+		convergenceBound := false
+		for _, convergence := range focus.OwnerFactConvergences {
+			convergence = convergence.Normalized()
+			fact := convergence.Requirement
+			if fact.OwnerModuleID == runtimecontract.RuntimeModuleShell &&
+				fact.FactKind == runtimecontract.RuntimeOwnerFactSelectableValidationSurface &&
+				fact.OperationKind == runtimecontract.RuntimeBlockKindManagedValidationSession &&
+				fact.ValidationProofRequirementHash == requirement.Hash &&
+				convergence.AcquisitionOwnerModuleID == runtimecontract.RuntimeModuleFile &&
+				convergence.AcquisitionOperationKind == runtimecontract.StepKindFileWrite &&
+				convergence.ReobserveOwnerModuleID == runtimecontract.RuntimeModuleShell {
+				convergenceBound = true
+			}
+		}
+		if !ownerFactBound || !convergenceBound {
+			t.Fatalf("builtin exact CWI has no Profile-owned proof preparation closure: focus=%+v requirement=%+v", focus, requirement)
+		}
+	}
+	if seenScopes["dodItem"] != len(builtin.DoDItems) || seenScopes["deliverable"] != 1 {
+		t.Fatalf("builtin actual managed proof scopes=%v, want all DoD plus validation_report", seenScopes)
+	}
+}
+
+func TestBuiltinSoftwareDevExplicitAcceptanceDimensionGetsExactProofClosure(t *testing.T) {
+	builtin := builtinSoftwareDevTemplateForTest(t)
+	workspace := &workspacemodel.Workspace{ID: "workspace-builtin-dimension", DeliverableDirectory: "/workspace", TemplateID: builtin.ID}
+	goal := &workspacemodel.Goal{ID: "goal-builtin-dimension", WorkspaceID: workspace.ID, Text: "deliver an executable entrypoint", DefinitionRevision: "goal-dimension-r1"}
+	dod := &workspacemodel.DoD{ID: "dod-builtin-dimension", WorkspaceID: workspace.ID, Items: []string{"entrypoint is validated"}, DefinitionRevision: "dod-dimension-r1"}
+	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, builtin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := runtimecontract.NormalizeRuntimeProfileContracts(candidate.RuntimeProfileContracts)
+	foundDimension := false
+	for profileIndex := range profiles {
+		for dimensionIndex := range profiles[profileIndex].AcceptanceDimensions {
+			dimension := &profiles[profileIndex].AcceptanceDimensions[dimensionIndex]
+			if dimension.ID == "runtime_entrypoint" {
+				dimension.Required = true
+				foundDimension = true
+			}
+		}
+		for requirementIndex := range profiles[profileIndex].EvidenceRequirements {
+			requirement := &profiles[profileIndex].EvidenceRequirements[requirementIndex]
+			if requirement.Scope == "acceptanceDimension" && requirement.ID == "runtime_entrypoint" {
+				requirement.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+			}
+		}
+	}
+	if !foundDimension {
+		t.Fatal("builtin software-dev profile has no runtime_entrypoint dimension")
+	}
+	executionContract := runtimeExecutionContract(builtin.ContextHints.Map())
+	executionContract.ProfileContracts = runtimecontract.NormalizeRuntimeProfileContracts(profiles)
+	bootstrap, err := activationcore.RuntimeBootstrap(goal, dod, "definition-builtin-dimension", "startup-input-builtin-dimension", nil, runtimecontract.RuntimeActivationContext{
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "test-provider", ModelID: "test-model"}},
+		ExecutionContract: executionContract,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(bootstrap.Definition.Revision, bootstrap.DefinitionSeed.CoverageItems, bootstrap.DefinitionFocuses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, requirement := range requirements {
+		if requirement.SourceScope != "acceptanceDimension" || requirement.SourceID != "runtime_entrypoint" {
+			continue
+		}
+		for _, focus := range bootstrap.DefinitionFocuses {
+			if len(focus.CoverageWorkItemIDs) != 1 || focus.CoverageWorkItemIDs[0] != requirement.CoverageWorkItemID {
+				continue
+			}
+			for _, fact := range focus.RequiredOwnerFacts {
+				if fact.Normalized().ValidationProofRequirementHash == requirement.Hash {
+					return
+				}
+			}
+		}
+		t.Fatalf("acceptanceDimension requirement has no exact owner fact: %+v", requirement)
+	}
+	t.Fatal("explicit runtime_entrypoint dimension compiled no exact managed proof requirement")
 }
 
 func TestDefinitionAdmissionBlocksIncompleteValidationRepairContractBeforeRun(t *testing.T) {

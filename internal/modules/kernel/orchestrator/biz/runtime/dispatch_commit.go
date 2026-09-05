@@ -546,6 +546,8 @@ func sealRuntimeDispatchOperationAuthority(
 	var sealedCatalogs []runtimecontract.RuntimeOperationAdmissibility
 	var sealedObservations []runtimecontract.RuntimePrerequisiteObservation
 	var sealedPolicies []runtimecontract.RuntimeOperationPolicyFact
+	sealedCatalogSnapshots := make(map[string]struct{})
+	sealedObservationIDs := make(map[string]struct{})
 	for _, operation := range candidateRuntimeOperations(candidate) {
 		operation = operation.Normalized()
 		var snapshotID, acquisitionBinding string
@@ -562,9 +564,15 @@ func sealRuntimeDispatchOperationAuthority(
 				return nil, nil, nil, fmt.Errorf("runtime dispatch operation %q has no complete owner catalog preimage", operation.ID)
 			}
 			observation := runtimeOwnerCatalogObservationForOperation(observations, catalog)
-			sealedCatalogs = append(sealedCatalogs, *catalog)
+			if _, alreadySealed := sealedCatalogSnapshots[catalog.SnapshotID]; !alreadySealed {
+				sealedCatalogs = append(sealedCatalogs, *catalog)
+				sealedCatalogSnapshots[catalog.SnapshotID] = struct{}{}
+			}
 			if observation != nil {
-				sealedObservations = append(sealedObservations, *observation)
+				if _, alreadySealed := sealedObservationIDs[observation.ObservationID]; !alreadySealed {
+					sealedObservations = append(sealedObservations, *observation)
+					sealedObservationIDs[observation.ObservationID] = struct{}{}
+				}
 			}
 			continue
 		}

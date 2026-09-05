@@ -90,8 +90,8 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 		len(diagnostic.TargetRefs) != 0 || diagnostic.TargetObservation != nil {
 		t.Fatalf("shell owner failure = %+v", response)
 	}
-	if diagnostic.ValidationDiagnostic == nil || diagnostic.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
-		t.Fatalf("shell owner failure lost validation diagnostic: %+v", diagnostic)
+	if diagnostic.OriginalCode != "validation_recipe_unavailable" || diagnostic.ValidationDiagnostic != nil {
+		t.Fatalf("non-native managed recipe did not fail closed: %+v", diagnostic)
 	}
 	if diagnostic.ValidationFailureObservation != nil {
 		t.Fatalf("shell owner promoted the validation entry into a failure candidate: %+v", diagnostic)
@@ -99,9 +99,6 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 	if !reflect.DeepEqual(response.Receipt.TargetRefs, []string{"validation-entry.go"}) || response.Receipt.Feedback == nil ||
 		len(diagnostic.TargetRefs) != 0 || diagnostic.TargetObservation != nil {
 		t.Fatalf("shell owner receipt = %+v", response.Receipt)
-	}
-	if diagnostic.ValidationDiagnostic == nil || diagnostic.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
-		t.Fatalf("shell owner receipt lost validation diagnostic: %+v", diagnostic)
 	}
 	if diagnostic.ValidationFailureObservation != nil {
 		t.Fatalf("shell owner receipt promoted unstructured output: %+v", diagnostic)
@@ -135,8 +132,8 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 		len(duplicateDiagnostic.TargetRefs) != 0 || duplicateDiagnostic.TargetObservation != nil {
 		t.Fatalf("duplicate shell validation delivery = %+v commits=%d", duplicate, commits)
 	}
-	if duplicateDiagnostic.ValidationDiagnostic == nil || duplicateDiagnostic.ValidationDiagnostic.Class != runtimecontract.ValidationDiagnosticBuildFailed {
-		t.Fatalf("duplicate shell validation lost persisted diagnostic: %+v", duplicateDiagnostic)
+	if duplicateDiagnostic.OriginalCode != "validation_recipe_unavailable" || duplicateDiagnostic.ValidationDiagnostic != nil {
+		t.Fatalf("duplicate shell validation changed fail-closed diagnostic: %+v", duplicateDiagnostic)
 	}
 }
 
@@ -193,6 +190,26 @@ func TestShellManagedGoDiagnosticReportsActualManifestScopedFailureTarget(t *tes
 	targetTypeObservation := shellValidationFailureObservation(executionContext, authorization, drifted)
 	if targetTypeObservation == nil || targetTypeObservation.DiagnosticHash == observation.DiagnosticHash {
 		t.Fatal("validation observation hash ignored exact repair-route evidence target type")
+	}
+}
+
+func TestShellManagedGoJSONDiagnosticReportsActualManifestScopedFailureTarget(t *testing.T) {
+	request := RuntimeCommandRequest{
+		ManagedValidation:         runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+		Args:                      []string{"test", "-json", "-count=1", "-run", "^(TestWorkOrchCWI_EXACT)$", "./..."},
+		ValidationScopeTargetRefs: []string{"cmd/lsp-bridge/main.go", "internal/lspbridge/native_test.go"},
+	}
+	output := RuntimeCommandResult{
+		WorkingDirectory: "/tmp/workorch-shell-validation/workspace",
+		Stdout: strings.Join([]string{
+			`{"Time":"2026-09-04T12:00:00Z","Action":"start","Package":"example.test"}`,
+			`{"ImportPath":"example.test","Action":"build-output","Output":"cmd/lsp-bridge/main.go:178:23: undefined: context\\n"}`,
+			`{"Time":"2026-09-04T12:00:00Z","Action":"output","Package":"example.test","Output":"outside.go:2:1: undefined: forged\\n"}`,
+			`{"Time":"2026-09-04T12:00:00Z","Action":"fail","Package":"example.test","Elapsed":0}`,
+		}, "\n"),
+	}
+	if targets := shellValidationDiagnosticTargetRefs(output, request, "go"); !reflect.DeepEqual(targets, []string{"cmd/lsp-bridge/main.go"}) {
+		t.Fatalf("managed Go JSON failure targets = %v", targets)
 	}
 }
 
@@ -290,19 +307,10 @@ func TestShellOwnerEmitsOnlySealedScopeValidationFailureObservation(t *testing.T
 		t.Fatal(err)
 	}
 	response, ok := data.(shellevents.ExecuteOperationResult)
-	diagnostic := response.Receipt.Feedback.OriginalDiagnostic
-	if !ok || diagnostic == nil || diagnostic.TargetObservation != nil || diagnostic.ValidationFailureObservation == nil {
-		t.Fatalf("structured shell failure = %#v", data)
-	}
-	observation := diagnostic.ValidationFailureObservation
-	if observation.TargetRole != "implementation" || len(observation.CandidateTargetRefs) != 1 || observation.CandidateTargetRefs[0] != "implementation.go" ||
-		len(observation.ValidationScopeTargetRefs) != 1 || observation.ValidationScopeTargetRefs[0] != "implementation.go" ||
-		observation.DiagnosticClass != runtimecontract.ValidationDiagnosticBuildFailed || len(observation.DiagnosticHash) != 64 {
-		t.Fatalf("structured failure observation = %+v", observation)
-	}
-	if len(diagnostic.TargetRefs) != 0 || response.Receipt.Feedback.OriginalDiagnostic.TargetObservation != nil ||
-		!reflect.DeepEqual(response.Receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation, observation) {
-		t.Fatalf("structured receipt lost target binding: response=%+v receipt=%+v", diagnostic, response.Receipt)
+	if !ok || response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || response.Receipt.Feedback == nil ||
+		response.Receipt.Feedback.OriginalDiagnostic == nil || response.Receipt.Feedback.OriginalDiagnostic.OriginalCode != "validation_recipe_unavailable" ||
+		response.Receipt.Feedback.OriginalDiagnostic.ValidationFailureObservation != nil {
+		t.Fatalf("untrusted non-native failure marker did not fail closed = %#v", data)
 	}
 }
 
@@ -423,18 +431,9 @@ func main() {
 				t.Fatalf("Shell owner rejected receipt = %#v", data)
 			}
 			diagnostic := response.Receipt.Feedback.OriginalDiagnostic
-			if diagnostic.TargetObservation != nil || len(diagnostic.TargetRefs) != 0 || diagnostic.ValidationDiagnostic == nil {
-				t.Fatalf("Shell owner leaked direct target authority: %+v", diagnostic)
-			}
-			observation := diagnostic.ValidationFailureObservation
-			if len(test.wantCandidateRefs) == 0 {
-				if observation != nil || len(diagnostic.ValidationDiagnostic.TargetRefs) != 0 {
-					t.Fatalf("invalid marker fell back to parser candidate: diagnostic=%+v observation=%+v", diagnostic.ValidationDiagnostic, observation)
-				}
-			} else if observation == nil || !reflect.DeepEqual(observation.CandidateTargetRefs, test.wantCandidateRefs) ||
-				!reflect.DeepEqual(diagnostic.ValidationDiagnostic.TargetRefs, test.wantCandidateRefs) ||
-				!reflect.DeepEqual(observation.ValidationScopeTargetRefs, canonicalShellFailureTargetRefs(validationScope)) {
-				t.Fatalf("bounded marker/parser candidate union = diagnostic=%+v observation=%+v", diagnostic.ValidationDiagnostic, observation)
+			if diagnostic.TargetObservation != nil || len(diagnostic.TargetRefs) != 0 || diagnostic.ValidationDiagnostic != nil ||
+				diagnostic.ValidationFailureObservation != nil || diagnostic.OriginalCode != "validation_recipe_unavailable" {
+				t.Fatalf("non-native managed-validation marker did not fail closed: %+v", diagnostic)
 			}
 
 			duplicateResult := hub.Send(magicevent.NewEventWithContext(

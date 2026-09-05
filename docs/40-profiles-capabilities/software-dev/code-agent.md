@@ -4,12 +4,14 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-26
+Last Verified: 2026-09-04
 
 ## Purpose
 
-`software-dev` specializes neutral Runtime contracts for code delivery. It supplies template/Soul guidance, coverage roles,
-evidence requirements and allowed capability classes; it does not add a code-specific state machine to Orchestrator.
+`software-dev` specializes neutral Runtime contracts for code delivery. The stable ID currently selects a Go-native validation
+adapter and should be presented as **Software development (Go-native validation)**. It supplies template/Soul guidance,
+coverage roles, evidence requirements and allowed capability classes; it does not add a code-specific state machine to
+Orchestrator. Other framework-native or MCP-only proof closures require a separately declared typed Profile.
 
 ## Expected Behavior
 
@@ -31,7 +33,7 @@ evidence requirements and allowed capability classes; it does not add a code-spe
 | inspect files | `file/list`, `file/read` | observation only |
 | create file | `file/write` | prospective target must be absent and owner-admitted |
 | modify existing file | `patch/apply:unified_diff` | one minimal multi-hunk diff per owner/canonical target; current revision/base hash required |
-| validate | `validation/managed_session` | owner-sealed recipe, bounded isolated workspace copy, foreground process group |
+| validate | `validation/managed_session` | current built-in Profile: Shell `go test -json` exact native check; owner-sealed recipe, bounded isolated workspace copy, foreground process group |
 | bounded command state change | `shell/command` | explicit durable targets; never validation/read-only evidence |
 | inspect/version | `git/read`, `git/write:init|add|commit` | no unsupported remote/destructive variants |
 | semantic assistance | selected LSP MCP tools | auxiliary; cannot replace build/test evidence |
@@ -43,9 +45,9 @@ For the built-in DoD validation-readiness closure, a prospective File create is 
 managed-validation recipe would become selectable. The default `go test -v ./...` recipe requires a root `go.mod` and at least
 one non-excluded `*_test.go` in the isolated workspace manifest. When `go.mod` already exists, adding a real `*_test.go` target
 can satisfy the remaining all-of applicability contract; a test file alone in a workspace without `go.mod`, or a generic
-`scripts/validate.sh`, cannot make the recipe selectable. If module and test prerequisites are both missing, one File target
-cannot close both gaps and the Shell surface remains a non-actionable prerequisite. This is software-dev Profile/Shell policy,
-not an Orchestrator filename or language rule.
+`scripts/validate.sh`, cannot make the recipe selectable. If module and test prerequisites are both missing, the bounded
+collective File preparation must cover both exact mandatory clauses before Shell reobservation. This is software-dev
+Profile/Shell policy, not an Orchestrator filename or language rule.
 
 ## Runtime Mapping
 

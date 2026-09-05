@@ -308,42 +308,11 @@ func readWorkspaceDeletionFile[T any](path string) (*T, error) {
 }
 
 func writeWorkspaceDeletionFile(path string, item any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	data, err := json.Marshal(item)
 	if err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".workspace-deletion-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	keep := false
-	defer func() {
-		_ = temporary.Close()
-		if !keep {
-			_ = os.Remove(temporaryPath)
-		}
-	}()
-	if err := temporary.Chmod(0o644); err != nil {
-		return err
-	}
-	if _, err := temporary.Write(data); err != nil {
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return err
-	}
-	keep = true
-	return nil
+	return publishRepositoryFile(path, data, 0o644)
 }
 
 type memoryWorkspaceDeletionRepository struct {

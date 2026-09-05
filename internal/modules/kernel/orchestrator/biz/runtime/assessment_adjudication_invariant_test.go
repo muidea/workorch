@@ -100,7 +100,9 @@ func TestRuntimeAssessmentAdjudicationSurvivesRestartAndRawCloneDetaches(t *test
 	if completed.CompletedDispatches[dispatchIndex].AssessmentAdjudication.Proofs[0].EvidenceFactHash == "mutated-clone" {
 		t.Fatal("runtime aggregate clone shares assessment adjudication proof backing storage")
 	}
-	restarted, err := controller.initialize(context.Background(), bootstrap, controllerDefinition(), nil)
+	// Restart must replay the exact Definition that was sealed with the
+	// capability-aware bootstrap, not reconstruct an older generic fixture.
+	restarted, err := controller.initialize(context.Background(), bootstrap, completed.Definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

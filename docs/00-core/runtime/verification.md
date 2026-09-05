@@ -245,6 +245,24 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   admission/duplicate/restart 正向，missing/hash mismatch，协调改写 dispatch projection + self-seal，以及 recipe ID、command、
   ordered args、timeout 漂移；governance multi-hop 必须逐跳 exact 继承。非 managed File/MCP candidate 必须保持空 recipe
   projection/hash；
+- managed-validation applicability matrix 必须证明共享 recipe 只提供 executable transport，不直接提供 CWI credit：Application
+  从 immutable Definition revision、CWI/source identity、source text 与 compiler-owned exact declaration 编译唯一、
+  recipe-neutral 的 `RuntimeValidationProofRequirement`；Profile wildcard 不得注入 recipe/check/owner authority，exact Profile
+  declaration 只能提供可选 recipe constraint。Shell 必须从当前 ready typed catalog 选择兼容 recipe，并只对 request 中
+  matching requirement 发布逐 CWI binding；SM-2 seal 与 fresh-load
+  必须从 immutable `DefinitionFocuses` 反向重编译并逐字段匹配。generic recipe exit 0、recipe-derived synthetic check、surface-wide
+  check union、另一个 CWI 的 marker、provider 自填 declaration/check、missing requirement hash 和 normalize-last-wins duplicate
+  均须在 owner query、semantic seal、receipt credit 或 opaque reload 边界 fail closed。每个 check 必须具有 owner-opaque
+  observation protocol/native identity mapping，并随 execution seal 跨 duplicate/restart 保持 exact；正向 fixture 必须由
+  matching tool-native outcome 产生 typed attestation。纯 `printf/echo WORKORCH_CHECK_PASSED=*`、native other-CWI、failed/skipped、
+  protocol/mapping 漂移与 receipt 自填 attestation 均不得获得 credit；MCP typed validation 保持其独立 owner-receipt路径，不得被强制伪造
+  Shell requirement；
+- per-CWI preparation matrix 必须覆盖同一 ready recipe 下 A-ready/B-missing、binding+preparation 与 preparation+preparation
+  native identity 冲突、missing native target/common input 的 exact all-of、receiving-owner collective receipt、capability-owner
+  fresh reobserve、binding seal、execution/restart，以及 stale catalog/requirement/declaration/target/protocol 漂移；preparation、
+  state-change receipt 与 provider proposal本身都不得贡献 validation credit。software-dev 默认 Profile 必须显式覆盖其 managed
+  `acceptanceDimension/*`、`goalCoverage/*`、`dodItem/*` 与 `deliverable/validation_report` closure；Application 不得自动为
+  未声明 Profile 编译跨 owner convergence。MCP-only/无 Shell recipe bootstrap 必须保持合法且不产生 Shell requirement；
 - software-dev specialization 的 Shell `WORKORCH_FAILURE_TARGET` matrix 必须证明 closed/role/class/scope-bounded marker 只贡献 diagnostic candidate refs，receipt
   的 direct `RuntimeFailureTargetObservation`/`TargetObservation` authority 保持为空；只有 matching finite scope 才能形成
   `RuntimeValidationFailureObservation`，且必须继续等待 sealed repair-owner confirmation 与 SM-2 transition。missing/multiple/unknown-field、

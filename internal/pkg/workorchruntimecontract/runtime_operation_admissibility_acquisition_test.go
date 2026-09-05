@@ -92,6 +92,12 @@ func TestShellValidationAdmissibilityRequiresAndPreservesFileManifestBinding(t *
 	inventory := RuntimeOperationAdmissibility{
 		PrerequisiteID: request.PrerequisiteID, OwnerModuleID: RuntimeModuleShell,
 		OperationKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipes: []RuntimeValidationRecipe{declared},
+		ValidationSurfaces: []RuntimeValidationSurface{{
+			ID: declared.ID, OwnerModuleID: RuntimeModuleShell, OperationKind: RuntimeBlockKindManagedValidationSession,
+			Readiness: RuntimeValidationSurfaceReady, InputSchemaHash: "schema/go-tests", InputBindingRef: "input/go-tests/tree-1",
+			ProofApplicability: RuntimeValidationProofAuxiliary, EffectScope: RuntimeEffectEphemeralSession,
+			IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+		}},
 		ObservedRevision: "shell-policy-1",
 	}
 	inventory.SnapshotID = StableRuntimeOperationAdmissibilitySnapshotID(inventory)

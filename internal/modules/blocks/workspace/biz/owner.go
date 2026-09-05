@@ -214,11 +214,33 @@ func (m *Biz) publishWorkspaceUpdated(ctx context.Context, item *workspacemodel.
 	if m == nil || m.EventHub() == nil || item == nil {
 		return
 	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceStateChanged, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, workspaceevents.WorkspaceChangedData{
+	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceStateChanged, modulecommon.ModuleID, workspaceevents.NotificationDestination, magicevent.NewHeader(), ctx, workspaceChangedNotification(item))
+	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), event.ID(), eventcontract.LaneScope{SubjectType: "workspace", SubjectID: string(item.ID), WorkspaceID: string(item.ID)}))
+	m.PostEvent(event)
+}
+
+// workspaceChangedNotification is the public Workspace state projection used
+// by EventHub, Eventstream and transport consumers. Owner-private fields such
+// as RunProjectionCursor and persistence Revision are intentionally absent.
+func workspaceChangedNotification(item *workspacemodel.Workspace) workspaceevents.WorkspaceChangedData {
+	if item == nil {
+		return workspaceevents.WorkspaceChangedData{}
+	}
+	return workspaceevents.WorkspaceChangedData{
 		WorkspaceID: item.ID, Title: item.Title, Description: item.Description,
 		DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory,
 		State: item.State, ActiveRunID: item.ActiveRunID, DefaultLLMSelection: runtimecontract.CloneProviderInferenceSelection(item.DefaultLLMSelection),
-	})
-	event.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), event.ID(), eventcontract.LaneScope{SubjectType: "workspace", SubjectID: string(item.ID), WorkspaceID: string(item.ID)}))
-	m.PostEvent(event)
+	}
+}
+
+func sameWorkspaceChangedNotification(left, right workspaceevents.WorkspaceChangedData) bool {
+	if left.WorkspaceID != right.WorkspaceID || left.Title != right.Title || left.Description != right.Description ||
+		left.DeliverableDirectory != right.DeliverableDirectory || left.InternalDirectory != right.InternalDirectory ||
+		left.State != right.State || left.ActiveRunID != right.ActiveRunID || left.RunID != right.RunID {
+		return false
+	}
+	if left.DefaultLLMSelection == nil || right.DefaultLLMSelection == nil {
+		return left.DefaultLLMSelection == nil && right.DefaultLLMSelection == nil
+	}
+	return left.DefaultLLMSelection.Same(*right.DefaultLLMSelection)
 }

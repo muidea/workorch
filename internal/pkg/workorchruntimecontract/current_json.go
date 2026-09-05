@@ -43,6 +43,10 @@ func (b *RuntimeBootstrap) UnmarshalJSON(data []byte) error {
 	if err := decodeCurrentRuntimeJSON(data, &decoded, "runtime bootstrap"); err != nil {
 		return err
 	}
-	*b = RuntimeBootstrap(decoded)
+	current := RuntimeBootstrap(decoded)
+	if err := ValidateRuntimeBootstrapRaw(current); err != nil {
+		return fmt.Errorf("decode current runtime bootstrap: %w", err)
+	}
+	*b = current
 	return nil
 }

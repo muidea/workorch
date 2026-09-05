@@ -160,8 +160,14 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
 	if err := a.Facts.Validate(); err != nil {
 		return err
 	}
+	if err := validateRuntimeAggregateValidationProofApplicability(a); err != nil {
+		return err
+	}
 	if err := a.SemanticPlanning.Validate(); err != nil {
 		return fmt.Errorf("runtime aggregate semantic planning ledger: %w", err)
+	}
+	if err := validateRuntimeAggregateSemanticValidationProofRequirements(a); err != nil {
+		return err
 	}
 	for idx, history := range a.SemanticPlanning.History {
 		if history.Snapshot.Manifest == nil {
@@ -200,6 +206,113 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
 	}
 	if a.Decision.AuthoritySnapshot.WorkspaceID != a.Facts.WorkspaceID || a.Decision.AuthoritySnapshot.RunID != a.Facts.RunID {
 		return fmt.Errorf("runtime aggregate decision scope mismatch")
+	}
+	return nil
+}
+
+// validateRuntimeAggregateValidationProofApplicability is the fresh-load
+// reverse proof for persisted capability-owner validation catalogs.
+// The Definition inputs remain the only source of CWI identities; this gate
+// invokes the shared contract compiler and merely verifies that the opaque
+// owner fact is still an exact projection of those immutable inputs. It never
+// infers a recipe, rewrites a wildcard, or advances Runtime state.
+func validateRuntimeAggregateValidationProofApplicability(a RuntimeAggregate) error {
+	sealedCatalogs := make([]runtimecontract.RuntimeOperationAdmissibility, 0)
+	if a.SemanticPlanning.Manifest != nil {
+		sealedCatalogs = append(sealedCatalogs, a.SemanticPlanning.Manifest.OwnerCatalogs...)
+	}
+	for _, generation := range a.SemanticPlanning.History {
+		if generation.Snapshot.Manifest != nil {
+			sealedCatalogs = append(sealedCatalogs, generation.Snapshot.Manifest.OwnerCatalogs...)
+		}
+	}
+	return validateRuntimeValidationProofApplicability(a.Facts, sealedCatalogs)
+}
+
+func validateRuntimeValidationProofApplicability(facts runtimecontract.RuntimeFacts, sealedCatalogs []runtimecontract.RuntimeOperationAdmissibility) error {
+	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(
+		facts.DefinitionRevision,
+		facts.DefinitionSeed.CoverageItems,
+		facts.DefinitionFocuses,
+	)
+	if err != nil {
+		return fmt.Errorf("runtime aggregate validation proof requirements: %w", err)
+	}
+	// Validate raw persisted owner facts before deriving normalized views. The
+	// contract validator is the sole interpreter of binding/preparation
+	// applicability; aggregate recovery only supplies immutable Definition
+	// requirements and retained owner catalogs.
+	if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogApplicability(requirements, facts.Resources.OperationAdmissibilities); err != nil {
+		return fmt.Errorf("runtime aggregate current validation proof applicability: %w", err)
+	}
+	for index, catalog := range sealedCatalogs {
+		if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogApplicability(requirements, []runtimecontract.RuntimeOperationAdmissibility{catalog}); err != nil {
+			return fmt.Errorf("runtime aggregate sealed validation proof applicability %d: %w", index, err)
+		}
+	}
+
+	currentCatalogs := runtimecontract.NormalizeRuntimeOperationAdmissibilities(facts.Resources.OperationAdmissibilities)
+	currentShellCatalogs := runtimeManagedValidationShellCatalogs(currentCatalogs)
+	// Once Shell has returned its current managed-validation owner fact, every
+	// activation-declared recipe must remain represented by a typed surface.
+	// Otherwise a coordinated deletion could masquerade as "not acquired" and
+	// bypass the exact requirement gate on fresh load.
+	if len(currentShellCatalogs) != 0 {
+		for _, recipe := range runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(facts.Activation.EvidencePolicies) {
+			found := false
+			for _, catalog := range currentShellCatalogs {
+				if _, ok := runtimecontract.RuntimeValidationSurfaceForID(catalog.ValidationSurfaces, recipe.ID); ok {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("runtime aggregate acquired Shell validation catalog is missing declared recipe surface %q", recipe.ID)
+			}
+		}
+	}
+	return nil
+}
+
+func runtimeManagedValidationShellCatalogs(values []runtimecontract.RuntimeOperationAdmissibility) []runtimecontract.RuntimeOperationAdmissibility {
+	ret := make([]runtimecontract.RuntimeOperationAdmissibility, 0, len(values))
+	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(runtimecontract.RuntimeBlockKindManagedValidationSession)
+	if !found {
+		return ret
+	}
+	for _, raw := range values {
+		catalog := raw.Normalized()
+		if catalog.OwnerModuleID != descriptor.OwnerModuleID || !runtimeStringsContain(catalog.OperationKinds, runtimecontract.RuntimeBlockKindManagedValidationSession) {
+			continue
+		}
+		ret = append(ret, catalog)
+	}
+	return ret
+}
+
+// validateRuntimeAggregateSemanticValidationProofRequirements binds every
+// retained semantic generation back to the immutable Definition compiler
+// input. RuntimeSemanticPlanManifest cannot prove this relationship from its
+// own obligation copy; doing so would let a coordinated rewrite self-attest.
+func validateRuntimeAggregateSemanticValidationProofRequirements(a RuntimeAggregate) error {
+	validateManifest := func(label string, manifest runtimecontract.RuntimeSemanticPlanManifest) error {
+		if err := runtimecontract.ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest, a.Facts.DefinitionSeed, a.Facts.DefinitionFocuses); err != nil {
+			return fmt.Errorf("runtime aggregate semantic %s: %w", label, err)
+		}
+		return nil
+	}
+	if a.SemanticPlanning.Manifest != nil {
+		if err := validateManifest("active manifest", *a.SemanticPlanning.Manifest); err != nil {
+			return err
+		}
+	}
+	for index, generation := range a.SemanticPlanning.History {
+		if generation.Snapshot.Manifest == nil {
+			continue
+		}
+		if err := validateManifest(fmt.Sprintf("history manifest %d", index), *generation.Snapshot.Manifest); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -376,7 +489,7 @@ func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate) error {
 	if err := runtimecontract.ValidateRuntimeAcceptedCandidateManifestLineage(active, completed, a.CandidateAttempts, a.CandidateRequestSessions); err != nil {
 		return err
 	}
-	return runtimecontract.ValidateRuntimeAcceptedAssessmentPurposePreimages(a.SemanticPlanning, active, completed, a.CandidateAttempts, a.CandidateRequestSessions)
+	return runtimecontract.ValidateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedger(a.SemanticPlanning, active, completed, a.CandidateAttempts, a.CandidateRequestSessions)
 }
 
 // validateRuntimeCandidateFeasibilityBindings is the fresh-load reverse proof
@@ -2019,11 +2132,15 @@ func validateRuntimeAggregateSM4DriveLease(a RuntimeAggregate) error {
 			return fmt.Errorf("runtime aggregate terminal-delivery lease does not match its persisted recovery request")
 		}
 	} else if runtimecontract.RuntimeDriveLeaseBindsNonTerminalRecovery(*a.DriveLease) {
-		if a.Termination != nil || isTerminalConvergenceState(a.Decision.State) {
-			return fmt.Errorf("runtime aggregate terminal state cannot retain nonterminal recovery authority")
-		}
 		if err := runtimecontract.ValidateRuntimeNonTerminalRecoveryLeaseBinding(recovery, *a.DriveLease); err != nil {
 			return fmt.Errorf("runtime aggregate drive lease: %w", err)
+		}
+		// The worker holding this exact running request may seal ordinary
+		// convergence before its exit settlement releases the lease or performs
+		// first terminal delivery. A scheduled lease has not entered that worker
+		// cut, and administrative termination owns a separate retired-lease lane.
+		if a.Termination != nil || (isTerminalConvergenceState(a.Decision.State) && a.DriveLease.State != runtimecontract.RuntimeDriveLeaseRunning) {
+			return fmt.Errorf("runtime aggregate terminal state cannot retain nonterminal recovery authority outside an exact running convergence handoff")
 		}
 	} else if a.DriveLease.RecoveryRequestID != "" {
 		return fmt.Errorf("runtime aggregate non-terminal lease carries terminal recovery request")

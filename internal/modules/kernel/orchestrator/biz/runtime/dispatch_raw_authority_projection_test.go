@@ -92,7 +92,9 @@ func TestSealedDispatchToRuntimeRecordPreservesRawAuthorityProjectionShape(t *te
 func TestRuntimeAggregateFreshLoadRejectsRawDispatchProjectionLaundering(t *testing.T) {
 	stateFacts := baseDispatchFacts()
 	stateFacts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
-	stateAggregate := RuntimeAggregate{StateRevision: 1, Definition: dispatchDefinition(), Facts: stateFacts}
+	stateDefinition := dispatchDefinition()
+	stateDefinition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply}
+	stateAggregate := RuntimeAggregate{StateRevision: 1, Definition: stateDefinition, Facts: stateFacts}
 	runtimeTestEnsureCurrentFocusBindings(t, &stateAggregate)
 	stateRepository := &durableRuntimeStateRepository{aggregate: stateAggregate}
 	stateBaseline := sealCandidateForTest(t, stateRepository, stateChangeCandidate())

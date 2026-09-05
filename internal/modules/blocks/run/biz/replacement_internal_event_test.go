@@ -2,12 +2,14 @@ package run
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func TestReplacementInternalEventRequiresExactlyOneFact(t *testing.T) {
@@ -18,6 +20,26 @@ func TestReplacementInternalEventRequiresExactlyOneFact(t *testing.T) {
 	})
 	if !errors.Is(err, common.ErrInvalidArgument) {
 		t.Fatalf("multi-payload replacement event err = %v, want invalid argument", err)
+	}
+}
+
+func TestReplacementRequestedRejectsRawBootstrapBeforeClone(t *testing.T) {
+	policy := runtimecontract.RuntimeEvidencePolicy{
+		ID: "policy-1", AppliesTo: runtimecontract.StepKindFileWrite,
+		CoverageRequirements: []runtimecontract.RuntimeCoverageEvidenceRequirement{{
+			ID: "dod-1", Scope: "dodItem", TargetRefs: []string{" target.go "},
+		}},
+	}
+	bootstrap := runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{policy}}}
+	requested := runmodel.ReplacementIntent{WorkspaceID: "workspace-1", Bootstrap: &bootstrap}
+	_, err := normalizeReplacementInternalEvent(replacementInternalEvent{
+		Kind: replacementInternalEventRequested, WorkspaceID: "workspace-1", RunID: "run-1", OccurredAt: "2026-08-22T00:00:00Z", Requested: &requested,
+	})
+	if err == nil || !strings.Contains(err.Error(), "evidence polic") {
+		t.Fatalf("replacement event accepted noncanonical bootstrap before clone: %v", err)
+	}
+	if got := requested.Bootstrap.Activation.EvidencePolicies[0].CoverageRequirements[0].TargetRefs[0]; got != " target.go " {
+		t.Fatalf("rejected replacement bootstrap was normalized in place: %q", got)
 	}
 }
 

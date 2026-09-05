@@ -102,10 +102,10 @@ DefinitionAdmissionCandidate
 - `RuntimeProfileContracts` 是 admission compiler 的完整 typed 输入，不是仅供展示的副本。其规范化 hash 必须与
   `RuntimeProfileContractsHash` 精确一致；Workspace pure compiler 必须从该 snapshot 独立派生 owner-fact/convergence
   manifest，并逐项匹配 candidate 中的 bindings，Application 不能只提交一个 hash 或自算 manifest 取代 owner 校验；
-- Profile 中每个 `required=true` 的 acceptance dimension/deliverable expectation 都会形成 required CWI，因此必须存在同一
-  `scope + id` 的 exact evidence requirement，显式声明非空 `requiredEvidenceKinds`，且每种 evidence kind 至少有一个
-  accepted operation 能返回对应 typed owner receipt proof。`dodItem:*`、`goalCoverage:*` 等 wildcard quality policy 不能
-  替代 Profile-owned required CWI 的 exact proof declaration；相同 `scope + id` 也不能被多个 Profile 重复声明；
+- Profile 中每个 `required=true` 的 acceptance dimension/deliverable expectation 都会形成 required exact CWI，因此必须
+  显式声明非空 `requiredEvidenceKinds`，且每种 evidence kind 至少有一个 accepted operation 能返回对应 typed owner
+  receipt proof。唯一 activation compiler 为该 admitted CWI 生成 canonical exact evidence declaration；`dodItem:*`、
+  `goalCoverage:*` 等 wildcard 只可作为已 admission exact CWI 的声明模板合并约束，不能贡献 current owner fact、recipe/native check、dispatch/credit authority，也不能作为 proof declaration；
 - 上述 Profile proof closure 缺失、evidence kind 不受支持或 operation 无 owner receipt proof 时返回
   `definition_profile_contract_invalid`；Profile snapshot 与派生 owner-fact/convergence manifest 不一致、closure 缺失、重复、
   悬空或成环时返回 `definition_profile_prerequisite_unresolved`。两者都必须在 promotion 前打开

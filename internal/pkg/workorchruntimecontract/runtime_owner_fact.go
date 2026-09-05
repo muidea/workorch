@@ -26,9 +26,10 @@ const (
 // existing typed owner catalog. It carries no owner-specific parameters and
 // cannot create, refresh, or mutate that catalog.
 type RuntimeOwnerFactRequirement struct {
-	OwnerModuleID string
-	FactKind      RuntimeOwnerFactKind
-	OperationKind string
+	OwnerModuleID                  string
+	FactKind                       RuntimeOwnerFactKind
+	OperationKind                  string
+	ValidationProofRequirementHash string
 }
 
 // RuntimeOwnerFactConvergence is a profile-owned, static closure declaration
@@ -277,7 +278,7 @@ func ResolveRuntimeOwnerFactAcquisition(requirements []RuntimeOwnerFactRequireme
 }
 func RuntimeOwnerFactRequirementRef(value RuntimeOwnerFactRequirement) string {
 	value = value.Normalized()
-	return value.OwnerModuleID + "|" + string(value.FactKind) + "|" + value.OperationKind
+	return value.OwnerModuleID + "|" + string(value.FactKind) + "|" + value.OperationKind + "|" + value.ValidationProofRequirementHash
 }
 
 func runtimeOwnerFactConvergenceCycle(edges map[string][]string) []string {
@@ -342,6 +343,7 @@ func (r RuntimeOwnerFactRequirement) Normalized() RuntimeOwnerFactRequirement {
 	r.OwnerModuleID = strings.TrimSpace(r.OwnerModuleID)
 	r.FactKind = RuntimeOwnerFactKind(strings.TrimSpace(string(r.FactKind)))
 	r.OperationKind = CanonicalRuntimeBlockKind(r.OperationKind)
+	r.ValidationProofRequirementHash = strings.TrimSpace(r.ValidationProofRequirementHash)
 	return r
 }
 
@@ -359,6 +361,9 @@ func (r RuntimeOwnerFactRequirement) Validate() error {
 		if !runtimeDescriptorAllowsState(descriptor, ConvergenceStateNeedValidation) {
 			return fmt.Errorf("runtime owner-fact requirement operation %q is not a validation operation", r.OperationKind)
 		}
+		if r.ValidationProofRequirementHash != "" && !strings.HasPrefix(r.ValidationProofRequirementHash, RuntimeValidationProofRequirementHashPrefix) {
+			return fmt.Errorf("runtime owner-fact requirement has invalid validation proof requirement identity")
+		}
 		return nil
 	default:
 		return fmt.Errorf("runtime owner-fact requirement has unsupported fact kind %q", r.FactKind)
@@ -372,7 +377,7 @@ func NormalizeRuntimeOwnerFactRequirements(values []RuntimeOwnerFactRequirement)
 		if value.OwnerModuleID == "" || value.FactKind == "" || value.OperationKind == "" {
 			continue
 		}
-		key := value.OwnerModuleID + "|" + string(value.FactKind) + "|" + value.OperationKind
+		key := RuntimeOwnerFactRequirementRef(value)
 		byKey[key] = value
 	}
 	keys := make([]string, 0, len(byKey))
@@ -394,7 +399,7 @@ func ValidateRuntimeOwnerFactRequirements(values []RuntimeOwnerFactRequirement) 
 		if err := value.Validate(); err != nil {
 			return err
 		}
-		key := value.OwnerModuleID + "|" + string(value.FactKind) + "|" + value.OperationKind
+		key := RuntimeOwnerFactRequirementRef(value)
 		if _, duplicate := seen[key]; duplicate {
 			return fmt.Errorf("runtime owner-fact requirement %q is duplicated", key)
 		}
@@ -437,8 +442,16 @@ func runtimeOwnerFactRequirementSatisfied(requirement RuntimeOwnerFactRequiremen
 					surface.ProofApplicability != RuntimeValidationProofDirect {
 					continue
 				}
-				if _, published := selectable[surface.ID]; published {
+				if _, published := selectable[surface.ID]; !published {
+					continue
+				}
+				if requirement.ValidationProofRequirementHash == "" {
 					return true
+				}
+				for _, binding := range surface.ProofRequirementBindings {
+					if binding.RequirementHash == requirement.ValidationProofRequirementHash {
+						return true
+					}
 				}
 			}
 		}

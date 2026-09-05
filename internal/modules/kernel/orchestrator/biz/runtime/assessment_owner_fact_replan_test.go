@@ -67,9 +67,8 @@ func TestCommitAssessmentReopensCurrentCWIWhenOwnerFactIsSoleGap(t *testing.T) {
 	if progressed.ActiveDispatch != nil {
 		t.Fatalf("assessment dispatch remained active after atomic CWI reopen: %+v", progressed.ActiveDispatch)
 	}
-	if len(progressed.Facts.Repair.NoProgressOperationShapes) != 1 ||
-		progressed.Facts.Repair.NoProgressOperationShapes[0].Operation.Kind != runtimecontract.StepKindFileWrite {
-		t.Fatalf("owner-fact reopen lost accepted operation anti-replay fact: %+v", progressed.Facts.Repair)
+	if len(progressed.Facts.Repair.NoProgressOperationShapes) != 0 {
+		t.Fatalf("non-durable validation proof created state-change anti-replay authority: %+v", progressed.Facts.Repair)
 	}
 	if err := progressed.Validate(); err != nil {
 		t.Fatalf("replanned aggregate is invalid: %v", err)
@@ -80,34 +79,10 @@ func TestCommitAssessmentReopensCurrentCWIWhenOwnerFactIsSoleGap(t *testing.T) {
 		t.Fatal("owner-fact semantic rebinding invariant accepted predecessor target authority")
 	}
 
-	// The new binding has a new semantic identity, but the same operation shape
-	// remains blocked for this CWI until an owner-observable gap changes.
-	var successorFocus runtimecontract.CoverageFocus
-	for _, dispatch := range progressed.CompletedDispatches {
-		if dispatch.Candidate.Assessment != nil && dispatch.AssessmentAuthorityInput != nil {
-			successorFocus = dispatch.AssessmentAuthorityInput.Focus.Normalized()
-		}
-	}
-	if len(successorFocus.CoverageEvidenceBindings) != 1 {
-		t.Fatalf("replanned assessment has no durable semantic focus preimage: %+v", progressed.CompletedDispatches)
-	}
-	successorFocus.ID = "semantic-focus-owner-fact-successor"
-	successorBinding := successorFocus.CoverageEvidenceBindings[0].Clone()
-	successorBinding.ID = "semantic-binding-owner-fact-successor"
-	successorBinding.FocusID = successorFocus.ID
-	successorBinding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(successorBinding)
-	successorFocus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{successorBinding}
-	resealed, err := sealRuntimeCWIBindings(progressed.Facts, "semantic-manifest-owner-fact-successor", []runtimecontract.CoverageFocus{successorFocus}, nil)
-	if err != nil {
-		t.Fatalf("seal successor owner-fact binding: %v", err)
-	}
-	if len(resealed.Repair.NoProgressOperationShapes) != 1 ||
-		resealed.Repair.NoProgressOperationShapes[0].Hash != progressed.Facts.Repair.NoProgressOperationShapes[0].Hash ||
-		resealed.Repair.FocusID != successorFocus.ID {
-		t.Fatalf("successor semantic focus lost CWI anti-replay authority: %+v", resealed.Repair)
-	}
-
-	restarted, err := controller.initialize(context.Background(), bootstrapFacts, controllerDefinition(), nil)
+	// Restart consumes the persisted Definition identity. Rebuilding the old
+	// generic test Definition would correctly conflict with the capability-
+	// sealed aggregate and would not exercise idempotent replay.
+	restarted, err := controller.initialize(context.Background(), bootstrapFacts, progressed.Definition, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,43 +272,18 @@ func TestAssessmentObservedUsesRetiredAcquisitionPurposeAfterReceiptResourceChan
 	progressed := result.Aggregate
 	item := progressed.Facts.Coverage[0]
 	if progressed.Decision.State != runtimecontract.ConvergenceStateFailed || progressed.Decision.Terminal == nil ||
-		progressed.Decision.Terminal.Code != "target_grounding_unresolved" || item.State != runtimecontract.RuntimeCoverageItemStateOpen ||
-		item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateReopened ||
-		item.CurrentBindingRef != nil || len(item.ReopenLineage) != 1 || item.ReopenLineage[0].Reason != runtimeCWIReopenReasonOwnerFactAcquisitionSettled {
-		t.Fatalf("retired acquisition state_change closed terminal CWI instead of reopening it: decision=%+v item=%+v", progressed.Decision, item)
+		progressed.Decision.Terminal.Code != "owner_fact_convergence_exhausted" || item.State != runtimecontract.RuntimeCoverageItemStateUnsatisfied ||
+		item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound ||
+		item.CurrentBindingRef == nil || len(item.ReopenLineage) != 0 {
+		t.Fatalf("retired acquisition did not fail closed at its one-shot owner-fact boundary: decision=%+v item=%+v", progressed.Decision, item)
 	}
-	if progressed.Facts.Focus.ID != "semantic-pending/cwi-v2" || len(progressed.Facts.Repair.NoProgressOperationShapes) != 1 ||
-		progressed.Facts.Repair.NoProgressOperationShapes[0].FailureCode != runtimeCWIReopenReasonOwnerFactAcquisitionSettled {
-		t.Fatalf("terminal validation successor or acquisition anti-replay lineage was not restored: focus=%+v repair=%+v", progressed.Facts.Focus, progressed.Facts.Repair)
-	}
-	for _, prerequisite := range progressed.Facts.Prerequisites.Pending {
-		if prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection {
-			t.Fatalf("owner-fact successor reacquired the retired prospective target selector: focus=%+v prerequisite=%+v", progressed.Facts.Focus, prerequisite)
-		}
-	}
-	assertRuntimeSemanticRebindingDefinitionSeed(t, progressed.Facts)
-	if err := candidateRequestSessionActionAllowed(progressed, runtimecontract.RuntimeProviderDocumentSemanticPlan); err != nil {
-		t.Fatalf("retired acquisition successor did not admit semantic re-drive: %v", err)
-	}
-	successor, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverage(
-		progressed.Facts.WorkspaceID,
-		progressed.Facts.RunID,
-		progressed.Definition,
-		progressed.Facts.DefinitionSeed,
-		progressed.Facts.DefinitionFocuses,
-		progressed.Facts.Activation.ExecutionContract,
-		progressed.Facts.Resources.OperationAdmissibilities,
-		runtimecontract.RuntimeCWIsEligibleForPlanning(progressed.Facts),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(successor.ProofObligations) != 1 || successor.ProofObligations[0].OwnerFactAcquisition != nil ||
-		len(successor.ProofObligations[0].RequiredEvidenceKinds) != 1 || successor.ProofObligations[0].RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation {
-		t.Fatalf("reopened successor did not restore terminal validation proof: %+v", successor.ProofObligations)
+	if progressed.Facts.Focus.ID != before.Facts.Focus.ID || len(progressed.Facts.Repair.NoProgressOperationShapes) != 1 ||
+		progressed.Facts.Repair.NoProgressOperationShapes[0].FailureSignature != runtimeOwnerFactAcquisitionFailureSignature(acquisition.Requirement) ||
+		progressed.Facts.Repair.NoProgressOperationShapes[0].Operation.Kind != acquisition.AcquisitionOperationKind {
+		t.Fatalf("exhausted acquisition did not retain its exact anti-replay lineage: focus=%+v repair=%+v", progressed.Facts.Focus, progressed.Facts.Repair)
 	}
 	if err := progressed.Validate(); err != nil {
-		t.Fatalf("retired-acquisition successor aggregate is invalid: %v", err)
+		t.Fatalf("retired-acquisition terminal aggregate is invalid: %v", err)
 	}
 
 	// The same owner-private fact is stale after the first commit. It must not
@@ -346,7 +296,7 @@ func TestAssessmentObservedUsesRetiredAcquisitionPurposeAfterReceiptResourceChan
 	}); !errors.Is(duplicateErr, common.ErrConflict) {
 		t.Fatalf("duplicate AssessmentObserved err=%v, want conflict", duplicateErr)
 	}
-	if repository.saves != savesAfterCommit || len(repository.aggregate.Facts.Coverage[0].ReopenLineage) != 1 || len(repository.aggregate.Facts.Assessments) != 1 {
+	if repository.saves != savesAfterCommit || len(repository.aggregate.Facts.Coverage[0].ReopenLineage) != 0 || len(repository.aggregate.Facts.Assessments) != 1 {
 		t.Fatalf("duplicate AssessmentObserved mutated acquisition settlement: saves=%d before=%d aggregate=%+v", repository.saves, savesAfterCommit, repository.aggregate)
 	}
 }
@@ -425,6 +375,11 @@ func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool, operationKind
 		t.Fatalf("initialize owner-fact assessment controller: %v", err)
 	}
 	facts := controllerFacts()
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	facts.Focus.ValidationRecipeID = runtimeManagedValidationEvidencePolicy().ID
+	facts.Focus.RequiredCheckRefs = []string{"check/" + runtimeManagedValidationEvidencePolicy().ID}
+	facts.Activation.EvidencePolicies = runtimeManagedValidationEvidencePolicies()
+	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts.Focus.RequireAssessment = true
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts.Capabilities.StateChangeKinds = append(facts.Capabilities.StateChangeKinds, runtimecontract.RuntimeBlockKindPatchApply)
@@ -475,8 +430,14 @@ func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool, operationKind
 	runtimeTestSealCurrentPolicies(&facts)
 	facts.DefinitionFocuses = nil
 	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
+	facts, err = runtimeTestBindManagedValidationProofRequirements(facts)
+	if err != nil {
+		t.Fatalf("bind owner-fact assessment validation proof: %v", err)
+	}
 	bootstrapFacts := facts
-	if _, err := controller.initialize(context.Background(), facts, controllerDefinition(), nil); err != nil {
+	definition := controllerDefinition()
+	definition.CapabilityContract = runtimeTestAppendUnique(definition.CapabilityContract, runtimecontract.RuntimeBlockKindManagedValidationSession)
+	if _, err := controller.initialize(context.Background(), facts, definition, nil); err != nil {
 		t.Fatalf("initialize owner-fact assessment aggregate: %v", err)
 	}
 	semantic, err := controller.EnsureSemanticContractSealedForOperationTest(context.Background(), "ws-v2", "run-v2")
@@ -495,26 +456,30 @@ func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool, operationKind
 	if len(semantic.Decision.RequiredOutput.RequiredOperationSequence) == 1 {
 		requiredOperationRef = semantic.Decision.RequiredOutput.RequiredOperationSequence[0].RequirementID
 	}
-	operationKind := runtimecontract.StepKindFileWrite
-	parameters := runtimeFileWriteParameters("state")
+	operationKind := runtimecontract.RuntimeBlockKindManagedValidationSession
+	parameters := runtimeManagedValidationParameters()
 	if !ownerFactReady && !ownerFactBecomesMissingAfterProof {
 		operationKind = convergence.AcquisitionOperationKind
+		parameters = runtimeFileWriteParameters("state")
 		if operationKind == runtimecontract.RuntimeBlockKindPatchApply {
 			patchType := "file_write"
 			content := "state"
 			parameters = []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "content", String: &content}}
 		}
 	}
-	candidate := runtimeTestBindCandidateToFacts(t, facts, runtimecontract.RuntimeCandidate{
-		StateChange: &runtimecontract.StateChangeCandidate{
-			Operations: []runtimecontract.StateChangingOperation{{
-				Operation: runtimecontract.RuntimeOperation{
-					ID: "write-owner-fact", Kind: operationKind, RequiredOperationRef: requiredOperationRef,
-					CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: targetRefs, Parameters: parameters,
-				},
-			}},
-		},
-	})
+	operation := runtimecontract.RuntimeOperation{
+		ID: "prove-owner-fact", Kind: operationKind, RequiredOperationRef: requiredOperationRef,
+		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"}, TargetRefs: targetRefs, Parameters: parameters,
+	}
+	candidate := runtimecontract.RuntimeCandidate{}
+	evidenceKind := runtimecontract.EvidenceKindValidation
+	if ownerFactReady || ownerFactBecomesMissingAfterProof {
+		candidate.Validation = &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: operation}}}
+	} else {
+		candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: operation}}}
+		evidenceKind = runtimecontract.EvidenceKindStateChange
+	}
+	candidate = runtimeTestBindCandidateToFacts(t, facts, candidate)
 	if err := RecordFixtureCandidateFeasibilities(context.Background(), controller, "ws-v2", "run-v2", 0, candidate); err != nil {
 		t.Fatalf("record owner-fact state-change feasibility: %v", err)
 	}
@@ -525,12 +490,18 @@ func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool, operationKind
 	evidence := ExecutionEvidence{
 		EventID: "event-owner-fact", WorkspaceID: "ws-v2", RunID: "run-v2", DispatchID: sealed.ActiveDispatch.ID,
 		AuthoritySnapshotID: sealed.ActiveDispatch.Transaction.AuthoritySnapshotID, OperationID: runtimeTestActiveOperationID(t, sealed, 0),
-		Kind: runtimecontract.EvidenceKindStateChange, Status: ExecutionEvidenceStatusAccepted,
+		Kind: evidenceKind, Status: ExecutionEvidenceStatusAccepted,
+	}
+	if evidenceKind == runtimecontract.EvidenceKindValidation {
+		evidence.Evidence = runtimecontract.RuntimeOperationEvidence{
+			Summary: "owner-fact validation proof passed",
+			Quality: common.EvidenceQualityValid,
+		}
 	}
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &evidence)
 	committed, err := controller.commitEvidence(context.Background(), evidence)
 	if err != nil || committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
-		t.Fatalf("owner-fact fixture did not reach assessment: aggregate=%+v err=%v", committed.Aggregate, err)
+		t.Fatalf("owner-fact fixture did not reach assessment: decision=%+v failure=%+v err=%v", committed.Aggregate.Decision, committed.Aggregate.Facts.Failure, err)
 	}
 	if ownerFactBecomesMissingAfterProof {
 		catalogs := make([]runtimecontract.RuntimeOperationAdmissibility, 0, len(repository.aggregate.Facts.Resources.OperationAdmissibilities))
@@ -541,6 +512,11 @@ func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool, operationKind
 		}
 		catalogs = append(catalogs, runtimeTestProspectiveValidationDependencyCatalog(t, convergence.ProspectiveSatisfactionContractRef))
 		repository.aggregate.Facts.Resources.OperationAdmissibilities = runtimecontract.NormalizeRuntimeOperationAdmissibilities(catalogs)
+		boundFacts, bindErr := runtimeTestBindManagedValidationProofRequirements(repository.aggregate.Facts)
+		if bindErr != nil {
+			t.Fatalf("bind missing owner-fact proof preparation: %v", bindErr)
+		}
+		repository.aggregate.Facts = boundFacts
 		refreshedFacts, refreshedDecision, refreshErr := ReduceRuntimeStateWithDirective(
 			repository.aggregate.Facts,
 			&repository.aggregate.Decision.AuthoritySnapshot,
@@ -583,6 +559,10 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T, retir
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
 	facts.Capabilities.ValidationKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	facts.Focus.ValidationRecipeID = runtimeManagedValidationEvidencePolicy().ID
+	facts.Focus.RequiredCheckRefs = []string{"check/" + runtimeManagedValidationEvidencePolicy().ID}
+	facts.Activation.EvidencePolicies = runtimeManagedValidationEvidencePolicies()
 	facts.Focus.RequiredOwnerFacts = []runtimecontract.RuntimeOwnerFactRequirement{runtimeTestSelectableValidationOwnerFact()}
 	convergence := runtimeTestSelectableValidationOwnerFactConvergence()
 	facts.Focus.OwnerFactConvergences = []runtimecontract.RuntimeOwnerFactConvergence{convergence}
@@ -625,6 +605,10 @@ func prepareTerminalValidationOwnerFactAcquisitionAssessment(t *testing.T, retir
 	}
 	facts.DefinitionFocuses = nil
 	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
+	facts, err = runtimeTestBindManagedValidationProofRequirements(facts)
+	if err != nil {
+		t.Fatalf("bind owner-fact acquisition validation proof: %v", err)
+	}
 	bootstrapFacts := facts
 	definition := controllerDefinition()
 	definition.CapabilityContract = []string{runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindManagedValidationSession}
@@ -934,18 +918,20 @@ func runtimeTestSelectableValidationOwnerFactConvergence() runtimecontract.Runti
 
 func runtimeTestSelectableValidationCatalog(t *testing.T) runtimecontract.RuntimeOperationAdmissibility {
 	t.Helper()
+	requirement := runtimeTestOwnerFactValidationRequirement(t)
 	surface := runtimecontract.RuntimeValidationSurface{
-		ID: "recipe/owner-fact-ready", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		ID: requirement.ValidationRecipeID, OwnerModuleID: runtimecontract.RuntimeModuleShell,
 		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 		Readiness:     runtimecontract.RuntimeValidationSurfaceReady, InputSchemaHash: "schema/owner-fact-v1", InputBindingRef: "workspace/owner-fact-v1",
-		CheckRefs: []string{"check/owner-fact"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
-		EffectScope: runtimecontract.RuntimeEffectNone, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencySafeToReplay,
+		CheckRefs: append([]string(nil), requirement.RequiredCheckRefs...), ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
+		ProofRequirementBindings: []runtimecontract.RuntimeValidationProofRequirementBinding{runtimeTestOpaqueProofRequirementBinding(t, requirement, requirement.ValidationRecipeID)},
+		EffectScope:              runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 	}
 	catalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "operation-admissibility-shell-owner-fact", OwnerModuleID: runtimecontract.RuntimeModuleShell,
 		OperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeRefs: []string{surface.ID},
-		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{surface}, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{{ID: surface.ID, Command: "true"}},
-		ObservedRevision: "shell-owner-fact-v1",
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{surface, runtimeTestUnavailableAlternativeValidationSurface()}, ValidationRecipes: []runtimecontract.RuntimeValidationRecipe{{ID: surface.ID, Command: "true"}},
+		TargetRefs: []string{"target.txt"}, ObservedRevision: "shell-owner-fact-v1",
 	}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	if err := catalog.Validate(); err != nil {
@@ -956,8 +942,9 @@ func runtimeTestSelectableValidationCatalog(t *testing.T) runtimecontract.Runtim
 
 func runtimeTestProspectiveValidationDependencyCatalog(t *testing.T, contractRef string) runtimecontract.RuntimeOperationAdmissibility {
 	t.Helper()
+	requirement := runtimeTestOwnerFactValidationRequirement(t)
 	surface := runtimecontract.RuntimeValidationSurface{
-		ID: "recipe/owner-fact-prospective", OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		ID: requirement.ValidationRecipeID, OwnerModuleID: runtimecontract.RuntimeModuleShell,
 		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 		Readiness:     runtimecontract.RuntimeValidationSurfacePrerequisiteRequired, ReadinessReason: "applicable workspace input required",
 		InputSchemaHash: "schema/owner-fact-prospective-v1", PrerequisiteRef: "workspace/owner-fact-validation-input",
@@ -965,19 +952,19 @@ func runtimeTestProspectiveValidationDependencyCatalog(t *testing.T, contractRef
 		ProspectiveTargetSatisfactionConstraint: &runtimecontract.RuntimeProspectiveTargetSatisfactionConstraint{
 			SchemaVersion: runtimecontract.RuntimeProspectiveTargetSatisfactionConstraintSchemaCurrent,
 			OwnerModuleID: runtimecontract.RuntimeModuleShell, ProspectiveSatisfactionContractRef: contractRef,
-			ValidationSurfaceID: "recipe/owner-fact-prospective", ValidationRecipeID: "recipe/owner-fact-prospective",
+			ValidationSurfaceID: requirement.ValidationRecipeID, ValidationRecipeID: requirement.ValidationRecipeID,
 			InputSchemaHash: "schema/owner-fact-prospective-v1", CatalogObservedRevision: "shell-owner-fact-policy-v1",
 			AllOf: []runtimecontract.RuntimeProspectiveTargetClause{{
 				ID: "go-test-input", AllOf: []runtimecontract.RuntimeProspectiveTargetPredicate{{Kind: runtimecontract.RuntimeProspectiveTargetPredicatePathSuffix, Value: "_test.go"}},
 			}},
 		},
-		CheckRefs: []string{"check/owner-fact-prospective"}, ProofApplicability: runtimecontract.RuntimeValidationProofDirect,
-		EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+		ProofApplicability: runtimecontract.RuntimeValidationProofNotDeclared,
+		EffectScope:        runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
 	}
 	catalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "operation-admissibility-shell-owner-fact", OwnerModuleID: runtimecontract.RuntimeModuleShell,
 		OperationKinds:     []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
-		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{surface},
+		ValidationSurfaces: []runtimecontract.RuntimeValidationSurface{surface, runtimeTestUnavailableAlternativeValidationSurface()},
 		ObservedRevision:   "shell-owner-fact-policy-v1",
 	}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
@@ -985,4 +972,34 @@ func runtimeTestProspectiveValidationDependencyCatalog(t *testing.T, contractRef
 		t.Fatalf("prospective owner-fact dependency catalog: %v", err)
 	}
 	return catalog
+}
+
+func runtimeTestUnavailableAlternativeValidationSurface() runtimecontract.RuntimeValidationSurface {
+	return runtimecontract.RuntimeValidationSurface{
+		ID: runtimeManagedValidationEvidencePolicies()[1].ID, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
+		Readiness:     runtimecontract.RuntimeValidationSurfaceUnavailable, ReadinessReason: "test alternative unavailable",
+		InputSchemaHash: "schema/owner-fact-alternative-v1", ProofApplicability: runtimecontract.RuntimeValidationProofNotDeclared,
+		EffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce,
+	}
+}
+
+func runtimeTestOwnerFactValidationRequirement(t *testing.T) runtimecontract.RuntimeValidationProofRequirement {
+	t.Helper()
+	facts := controllerFacts()
+	declaration := facts.DefinitionFocuses[0].Clone()
+	declaration.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
+	declaration.AcceptedStepKinds = []string{runtimecontract.RuntimeBlockKindManagedValidationSession}
+	declaration.EvidenceDeclarationRef = runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(declaration.AssessmentScope, declaration.AssessmentID)
+	declaration.ValidationRecipeID = runtimeManagedValidationEvidencePolicy().ID
+	declaration.RequiredCheckRefs = []string{"check/" + declaration.ValidationRecipeID}
+	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(
+		facts.DefinitionRevision,
+		facts.DefinitionSeed.CoverageItems,
+		[]runtimecontract.RuntimeDefinitionFocus{declaration},
+	)
+	if err != nil || len(requirements) != 1 {
+		t.Fatalf("compile owner-fact validation proof requirement: requirements=%+v err=%v", requirements, err)
+	}
+	return requirements[0]
 }

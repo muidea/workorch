@@ -125,6 +125,11 @@ func (c RuntimeCandidateContext) Normalized() RuntimeCandidateContext {
 }
 
 func (c RuntimeCandidateContext) Validate(decision RuntimeDecision) error {
+	// Activation evidence policies are immutable cross-owner authority. Check
+	// their raw projection before Normalized can canonicalize nested sets.
+	if err := ValidateRuntimeEvidencePolicies(c.Activation.EvidencePolicies); err != nil {
+		return fmt.Errorf("runtime candidate context activation evidence policies: %w", err)
+	}
 	c = c.Normalized()
 	if c.WorkspaceID == "" || c.RunID == "" || c.DefinitionRevision == "" || c.EvidenceRevision == "" || c.Focus.ID == "" {
 		return fmt.Errorf("runtime candidate context requires scope, revisions and focus")

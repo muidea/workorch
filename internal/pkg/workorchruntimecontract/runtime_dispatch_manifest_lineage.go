@@ -18,42 +18,48 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 	if active != nil {
 		dispatches = append(dispatches, *active)
 	}
+	acceptedAttempts := make([]RuntimeCandidateAttemptRecord, 0, len(attempts))
 	for _, rawAttempt := range attempts {
 		attempt := rawAttempt.Normalized()
 		if attempt.State != RuntimeCandidateAttemptStateAccepted {
 			continue
 		}
-		var dispatch *RuntimeDispatchRecord
-		dispatchMatches := 0
-		for index := range dispatches {
-			if dispatches[index].ID != attempt.DispatchID {
-				continue
+		acceptedAttempts = append(acceptedAttempts, attempt)
+	}
+	if len(acceptedAttempts) == 0 {
+		return nil
+	}
+
+	// Index immutable lineage once for the whole accepted-attempt ledger. The
+	// former nested scans normalized and raw-validated every request session for
+	// every accepted attempt, making restart validation quadratic in completed
+	// dispatch history without adding an independent authority check.
+	dispatchByID := make(map[string]RuntimeDispatchRecord, len(dispatches))
+	dispatchCounts := make(map[string]int, len(dispatches))
+	for _, dispatch := range dispatches {
+		dispatchCounts[dispatch.ID]++
+		dispatchByID[dispatch.ID] = dispatch
+	}
+	sessionByRequest := make(map[string]RuntimeCandidateRequestSession, len(sessions))
+	sessionCounts := make(map[string]int, len(sessions))
+	for _, rawSession := range sessions {
+		if rawSession.CandidateManifest != nil {
+			if err := ValidateRuntimeCandidateContractManifestRawCanonical(*rawSession.CandidateManifest); err != nil {
+				return fmt.Errorf("accepted runtime candidate attempt pre-seal manifest is not raw-canonical: %w", err)
 			}
-			value := dispatches[index]
-			dispatch = &value
-			dispatchMatches++
 		}
-		if dispatchMatches != 1 || dispatch == nil {
+		session := rawSession.Normalized()
+		sessionCounts[session.LogicalRequestID]++
+		sessionByRequest[session.LogicalRequestID] = session
+	}
+
+	for _, attempt := range acceptedAttempts {
+		dispatch, found := dispatchByID[attempt.DispatchID]
+		if !found || dispatchCounts[attempt.DispatchID] != 1 {
 			return fmt.Errorf("accepted runtime candidate attempt has no unique dispatch for manifest reverse proof")
 		}
-		var session *RuntimeCandidateRequestSession
-		sessionMatches := 0
-		for index := range sessions {
-			rawSession := sessions[index]
-			if rawSession.CandidateManifest != nil {
-				if err := ValidateRuntimeCandidateContractManifestRawCanonical(*rawSession.CandidateManifest); err != nil {
-					return fmt.Errorf("accepted runtime candidate attempt pre-seal manifest is not raw-canonical: %w", err)
-				}
-			}
-			candidate := rawSession.Normalized()
-			if candidate.LogicalRequestID != attempt.LogicalRequestID {
-				continue
-			}
-			value := candidate
-			session = &value
-			sessionMatches++
-		}
-		if sessionMatches != 1 || session == nil || session.DocumentKind != RuntimeProviderDocumentOperations ||
+		session, found := sessionByRequest[attempt.LogicalRequestID]
+		if !found || sessionCounts[attempt.LogicalRequestID] != 1 || session.DocumentKind != RuntimeProviderDocumentOperations ||
 			session.CandidateManifest == nil || session.Transaction != attempt.Transaction ||
 			session.StablePrefixHash != attempt.StablePrefixHash || session.ManifestHash != attempt.ManifestHash {
 			return fmt.Errorf("accepted runtime candidate attempt has no exact pre-seal operations manifest")
@@ -139,51 +145,100 @@ func ValidateRuntimeAcceptedAssessmentPurposePreimages(
 	attempts []RuntimeCandidateAttemptRecord,
 	sessions []RuntimeCandidateRequestSession,
 ) error {
+	if err := ledger.Validate(); err != nil {
+		return fmt.Errorf("accepted runtime assessment semantic ledger: %w", err)
+	}
+	return validateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedger(ledger, active, completed, attempts, sessions)
+}
+
+// ValidateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedger
+// performs the assessment-lineage cross-check after the enclosing aggregate
+// has already validated the exact semantic ledger. It avoids revalidating each
+// immutable history snapshot while still recompiling the independent binding
+// preimages used by accepted dispatches.
+func ValidateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedger(
+	ledger RuntimeSemanticPlanningLedger,
+	active *RuntimeDispatchRecord,
+	completed []RuntimeDispatchRecord,
+	attempts []RuntimeCandidateAttemptRecord,
+	sessions []RuntimeCandidateRequestSession,
+) error {
+	return validateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedger(ledger, active, completed, attempts, sessions)
+}
+
+func validateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedger(
+	ledger RuntimeSemanticPlanningLedger,
+	active *RuntimeDispatchRecord,
+	completed []RuntimeDispatchRecord,
+	attempts []RuntimeCandidateAttemptRecord,
+	sessions []RuntimeCandidateRequestSession,
+) error {
 	dispatches := make([]RuntimeDispatchRecord, 0, len(completed)+1)
 	dispatches = append(dispatches, completed...)
 	if active != nil {
 		dispatches = append(dispatches, *active)
 	}
+	dispatchByID := make(map[string]RuntimeDispatchRecord, len(dispatches))
+	dispatchCounts := make(map[string]int, len(dispatches))
+	for _, dispatch := range dispatches {
+		dispatchCounts[dispatch.ID]++
+		dispatchByID[dispatch.ID] = dispatch
+	}
+	sessionManifestByRequest := make(map[string]RuntimeCandidateContractManifest, len(sessions))
+	sessionCounts := make(map[string]int, len(sessions))
+	for _, session := range sessions {
+		sessionCounts[session.LogicalRequestID]++
+		if session.CandidateManifest != nil {
+			sessionManifestByRequest[session.LogicalRequestID] = session.CandidateManifest.Clone()
+		}
+	}
+	type acceptedAssessment struct {
+		dispatch RuntimeDispatchRecord
+		manifest RuntimeCandidateContractManifest
+	}
+	acceptedAssessments := make([]acceptedAssessment, 0)
 	for _, rawAttempt := range attempts {
 		attempt := rawAttempt.Normalized()
 		if attempt.State != RuntimeCandidateAttemptStateAccepted {
 			continue
 		}
-		var dispatch *RuntimeDispatchRecord
-		matches := 0
-		for index := range dispatches {
-			if dispatches[index].ID != attempt.DispatchID {
-				continue
-			}
-			value := dispatches[index]
-			dispatch = &value
-			matches++
-		}
-		if matches != 1 || dispatch == nil {
+		dispatch, found := dispatchByID[attempt.DispatchID]
+		if !found || dispatchCounts[attempt.DispatchID] != 1 {
 			return fmt.Errorf("accepted runtime candidate attempt has no unique dispatch for assessment purpose proof")
 		}
 		if dispatch.Candidate.Assessment == nil {
 			continue
 		}
-		var manifest *RuntimeCandidateContractManifest
-		matches = 0
-		for index := range sessions {
-			if sessions[index].LogicalRequestID != attempt.LogicalRequestID {
-				continue
-			}
-			if sessions[index].CandidateManifest != nil {
-				value := sessions[index].CandidateManifest.Clone()
-				manifest = &value
-			}
-			matches++
-		}
-		if matches != 1 || manifest == nil {
+		manifest, found := sessionManifestByRequest[attempt.LogicalRequestID]
+		if !found || sessionCounts[attempt.LogicalRequestID] != 1 {
 			return fmt.Errorf("accepted runtime assessment attempt has no unique pre-seal manifest")
 		}
-		preimage, err := ResolveRuntimeAssessmentPurposePreimage(ledger, manifest.Bindings)
-		if err != nil {
-			return fmt.Errorf("accepted runtime assessment attempt purpose preimage: %w", err)
+		acceptedAssessments = append(acceptedAssessments, acceptedAssessment{dispatch: dispatch, manifest: manifest})
+	}
+	if len(acceptedAssessments) == 0 {
+		return nil
+	}
+	// Build the semantic generation index once for the whole accepted-attempt
+	// ledger. Replaying every immutable generation for every assessment makes
+	// validation quadratic in retained audit history and can prevent an
+	// otherwise healthy Runtime from reaching its next owner transition. This
+	// is only a local validation acceleration: exact binding projection
+	// equality and the unique-preimage requirement remain unchanged.
+	preimages, err := runtimeAssessmentPurposePreimagesFromSemanticLedger(ledger, true)
+	if err != nil {
+		return fmt.Errorf("accepted runtime assessment attempt purpose preimage: %w", err)
+	}
+	for _, accepted := range acceptedAssessments {
+		if err := ValidateCoverageEvidenceBindingProjection(accepted.manifest.Bindings); err != nil {
+			return fmt.Errorf("accepted runtime assessment attempt purpose preimage: runtime assessment purpose binding preimage: %w", err)
 		}
+		matches := runtimeAssessmentPurposePreimagesMatchingBindings(preimages, accepted.manifest.Bindings)
+		if len(matches) != 1 {
+			return fmt.Errorf("accepted runtime assessment attempt purpose preimage: runtime assessment purpose has %d exact semantic binding preimages", len(matches))
+		}
+		preimage := matches[0]
+		manifest := accepted.manifest
+		dispatch := accepted.dispatch
 		if manifest.AssessmentPurpose != preimage.Purpose ||
 			manifest.AssessmentPurposeManifestHash != preimage.SemanticManifestHash ||
 			dispatch.AssessmentAuthorityInput == nil ||

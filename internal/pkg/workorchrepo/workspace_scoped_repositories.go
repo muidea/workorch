@@ -811,42 +811,11 @@ func (s *workspaceScopedFileStore) saveWorkspaceRunGenerationHead(workspaceID co
 		value.Purge.Receipt = value.Purge.Receipt.Clone()
 	}
 	path := s.workspaceRunGenerationPath(workspaceID)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".run-generation-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	keep := false
-	defer func() {
-		_ = temporary.Close()
-		if !keep {
-			_ = os.Remove(temporaryPath)
-		}
-	}()
-	if err := temporary.Chmod(0o644); err != nil {
-		return err
-	}
-	if _, err := temporary.Write(data); err != nil {
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return err
-	}
-	keep = true
-	return nil
+	return publishRepositoryFile(path, data, 0o644)
 }
 
 func (s *workspaceScopedFileStore) systemPath(name string) string {
@@ -1237,43 +1206,7 @@ func writeWorkspaceScopedJSONFileAtomic(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".workspace-owner-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	keep := false
-	defer func() {
-		_ = temporary.Close()
-		if !keep {
-			_ = os.Remove(temporaryPath)
-		}
-	}()
-	if err := temporary.Chmod(0o644); err != nil {
-		return err
-	}
-	if _, err := temporary.Write(data); err != nil {
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return err
-	}
-	keep = true
-	directory, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	return directory.Sync()
+	return publishRepositoryFile(path, data, 0o644)
 }
 
 func (s *workspaceScopedFileStore) upsertWorkspaceIndex(item *workspacemodel.Workspace) error {
@@ -1996,6 +1929,9 @@ func (r *workspaceScopedRunRepository) CreateNextWorkspaceRun(ctx context.Contex
 func (r *workspaceScopedRunRepository) create(ctx context.Context, item *runmodel.Run, allocateID bool) error {
 	if item == nil || item.WorkspaceID == "" || (allocateID && item.ID != "") || (!allocateID && item.ID == "") {
 		return common.ErrInvalidArgument
+	}
+	if err := runmodel.ValidateRunRuntimeBootstrapsRaw(item); err != nil {
+		return err
 	}
 	headLock := workspaceRunGenerationLock(r.store.workspaceRunGenerationPath(item.WorkspaceID))
 	headLock.Lock()

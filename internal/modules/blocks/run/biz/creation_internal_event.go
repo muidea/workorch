@@ -48,6 +48,11 @@ func submitRunCreationInternalEvent(ctx context.Context, runs repository.RunRepo
 		(fact.ReconciliationScope != runtimecontract.RuntimeCWIReconciliationScopeCurrentRun && fact.ReconciliationScope != runtimecontract.RuntimeCWIReconciliationScopeWorkspaceFull) {
 		return nil, common.ErrInvalidArgument
 	}
+	if fact.RuntimeBootstrap != nil {
+		if err := runtimecontract.ValidateRuntimeBootstrapRaw(*fact.RuntimeBootstrap); err != nil {
+			return nil, err
+		}
+	}
 	bound, err := common.BindRuntimeWorkspaceContext(ctx, fact.WorkspaceID)
 	if err != nil {
 		return nil, err

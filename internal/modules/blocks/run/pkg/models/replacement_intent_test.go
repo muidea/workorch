@@ -28,6 +28,24 @@ func TestRunPersistenceRejectsRetiredAndUnknownFields(t *testing.T) {
 	}
 }
 
+func TestRunPersistenceRejectsAmbiguousBootstrapAuthorityInEverySlot(t *testing.T) {
+	policy := runtimecontract.RuntimeEvidencePolicy{ID: "policy-1", AppliesTo: runtimecontract.StepKindFileWrite}.Normalized()
+	bootstrap := runtimecontract.RuntimeBootstrap{Activation: runtimecontract.RuntimeActivationContext{
+		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{policy, policy},
+	}}
+	for name, item := range map[string]*Run{
+		"activation":          {RuntimeBootstrap: &bootstrap},
+		"replacement":         {ReplacementIntent: &ReplacementIntent{Bootstrap: &bootstrap}},
+		"retired replacement": {RetiredReplacementIntents: []ReplacementIntent{{Bootstrap: &bootstrap}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateRunRuntimeBootstrapsRaw(item); err == nil || !strings.Contains(err.Error(), "evidence polic") {
+				t.Fatalf("Run persistence accepted ambiguous %s bootstrap authority: %v", name, err)
+			}
+		})
+	}
+}
+
 func TestReplacementIntentValidForPredecessorAndCloneDetachesBootstrap(t *testing.T) {
 	if got := StableReplacementIntentHash(ReplacementIntent{}); got != "" {
 		t.Fatalf("nil-bootstrap replacement hash = %q, want empty", got)

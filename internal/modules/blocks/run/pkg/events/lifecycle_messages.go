@@ -41,6 +41,11 @@ func (c WorkspaceExecutionIntentCommand) Normalized() WorkspaceExecutionIntentCo
 }
 
 func (c WorkspaceExecutionIntentCommand) Validate() error {
+	if c.Bootstrap != nil {
+		if err := runtimecontract.ValidateRuntimeBootstrapRaw(*c.Bootstrap); err != nil {
+			return fmt.Errorf("%w: restart bootstrap: %v", common.ErrInvalidArgument, err)
+		}
+	}
 	c = c.Normalized()
 	if c.WorkspaceID == "" || c.RequestID == "" {
 		return fmt.Errorf("%w: workspace execution selection requires scope and request identity", common.ErrInvalidArgument)

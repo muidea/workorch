@@ -474,7 +474,7 @@ func (r RuntimeStateRecord) Validate() error {
 	if err := ValidateRuntimeAcceptedCandidateManifestLineage(r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, r.CandidateRequestSessions); err != nil {
 		return err
 	}
-	if err := ValidateRuntimeAcceptedAssessmentPurposePreimages(r.SemanticPlanning, r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, r.CandidateRequestSessions); err != nil {
+	if err := ValidateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedger(r.SemanticPlanning, r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, r.CandidateRequestSessions); err != nil {
 		return err
 	}
 	if err := ValidateRuntimeOperationReceipts(r.OperationReceipts); err != nil {
@@ -525,11 +525,14 @@ func (r RuntimeStateRecord) Validate() error {
 				return fmt.Errorf("runtime state terminal-delivery lease does not match persisted recovery request")
 			}
 		} else if RuntimeDriveLeaseBindsNonTerminalRecovery(*r.DriveLease) {
-			if r.Termination != nil || isTerminalRuntimeDecision(r.Decision) {
-				return fmt.Errorf("runtime state terminal cannot retain nonterminal recovery authority")
-			}
 			if err := ValidateRuntimeNonTerminalRecoveryLeaseBinding(r.Facts.Recovery, *r.DriveLease); err != nil {
 				return fmt.Errorf("runtime state drive lease: %w", err)
+			}
+			// A newly sealed convergence terminal may retain only the exact
+			// request-bound running worker until SM-4 exit settlement. Scheduled
+			// authority and the administrative termination lane remain disjoint.
+			if r.Termination != nil || (isTerminalRuntimeDecision(r.Decision) && r.DriveLease.State != RuntimeDriveLeaseRunning) {
+				return fmt.Errorf("runtime state terminal cannot retain nonterminal recovery authority outside an exact running convergence handoff")
 			}
 		} else if r.DriveLease.RecoveryRequestID != "" {
 			return fmt.Errorf("runtime state non-terminal lease carries terminal recovery request")

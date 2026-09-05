@@ -2,8 +2,6 @@ package shell
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -41,7 +39,7 @@ func TestShellOwnerReconciliationDoesNotTreatGenericRecipeSuccessAsCWIProof(t *t
 	if result.Observation.Status != runtimecontract.RuntimeCWIReconciliationObservationUnverifiable {
 		t.Fatalf("generic recipe observation status = %q, want unverifiable", result.Observation.Status)
 	}
-	if result.Observation.OriginalDiagnostic == nil || result.Observation.OriginalDiagnostic.OriginalCode != "validation_check_declaration_unavailable" {
+	if result.Observation.OriginalDiagnostic == nil || result.Observation.OriginalDiagnostic.OriginalCode != "validation_proof_incomplete" {
 		t.Fatalf("generic recipe diagnostic = %+v", result.Observation.OriginalDiagnostic)
 	}
 	if ref := runtimecontract.StableRuntimeCWIReconciliationObservationRef(result.Observation); ref == "" {
@@ -49,7 +47,7 @@ func TestShellOwnerReconciliationDoesNotTreatGenericRecipeSuccessAsCWIProof(t *t
 	}
 }
 
-func TestShellOwnerReconciliationAcceptsExplicitStructuredCheck(t *testing.T) {
+func TestShellOwnerReconciliationAcceptsOwnerNativeStructuredCheck(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -59,18 +57,21 @@ func TestShellOwnerReconciliationAcceptsExplicitStructuredCheck(t *testing.T) {
 	}
 	t.Cleanup(func() { owner.Teardown(ctx) })
 
-	workspace := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspace, "fixture.go"), []byte("package fixture\n"), 0o644); err != nil {
-		t.Fatal(err)
+	workspace := newGoValidationWorkspace(t, `package fixture
+
+import "testing"
+
+func TestWorkOrchCWI_SHELLRECONCILIATION(t *testing.T) {
+	if false {
+		t.Fatal("unreachable")
 	}
-	const checkRef = "file/present"
+}
+`)
+	const checkRef = "workorch-cwi-check-shell-reconciliation"
 	recipe := runtimecontract.RuntimeValidationRecipe{
-		ID:      "structured-presence",
-		Command: "sh",
-		Args:    []string{"-c", "test -f fixture.go && printf 'WORKORCH_CHECK_PASSED=file/present\\n'"},
+		ID: "structured-presence", Command: "go", Args: []string{"test", "./..."},
 	}
 	command := shellReconciliationQueryCommand(t, workspace, recipe)
-	command.Binding.RequiredCheckRefs = []string{checkRef}
 	response := hub.Send(magicevent.NewEventWithContext(
 		shellevents.TopicQueryRuntimeCWIReconciliation,
 		runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command,
@@ -86,10 +87,8 @@ func TestShellOwnerReconciliationAcceptsExplicitStructuredCheck(t *testing.T) {
 	if result.Observation.Status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
 		t.Fatalf("structured check observation status = %q, want satisfied; diagnostic=%+v observation=%+v", result.Observation.Status, result.Observation.OriginalDiagnostic, result.Observation)
 	}
-	proofCheck := shellValidationRecipeProofCheckRef(recipe.ID)
-	if len(result.Observation.CheckRefs) != 2 || !shellStringIncluded(result.Observation.CheckRefs, checkRef) ||
-		!shellStringIncluded(result.Observation.CheckRefs, proofCheck) {
-		t.Fatalf("structured check refs = %#v, want %q and %q", result.Observation.CheckRefs, checkRef, proofCheck)
+	if len(result.Observation.CheckRefs) != 1 || !shellStringIncluded(result.Observation.CheckRefs, checkRef) {
+		t.Fatalf("structured check refs = %#v, want only %q", result.Observation.CheckRefs, checkRef)
 	}
 }
 
@@ -104,6 +103,11 @@ func shellReconciliationQueryCommand(t *testing.T, workspace string, recipe runt
 		AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession},
 		TargetRefs:            []string{"fixture.go"},
 		ValidationRecipeIDs:   []string{recipe.ID},
+		RequiredCheckRefs:     []string{"workorch-cwi-check-shell-reconciliation"},
+		ValidationCheckAttestations: []runtimecontract.RuntimeValidationCheckAttestationBinding{{
+			RequiredCheckRef: "workorch-cwi-check-shell-reconciliation", ObservationProtocolRef: shellGoTestObservationProtocolRef,
+			NativeCheckRef: "TestWorkOrchCWI_SHELLRECONCILIATION",
+		}},
 	}
 	if err := binding.Validate(); err != nil {
 		t.Fatalf("shell binding: %v", err)

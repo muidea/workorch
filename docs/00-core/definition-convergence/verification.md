@@ -35,7 +35,7 @@ Last Verified: 2026-08-26
 | change any startup input | 新 owner-sealed startup-input snapshot/hash；Goal/DoD/关系变化另产生新 Definition revision；当前 Run/bootstrap/graph 不变 |
 | required item has no CWI / CWI has two primary items | static mapping validation fail-closed before Run creation |
 | constraint has no consumer / all-of aggregation has no gate | static disposition validation fail-closed |
-| required Profile CWI lacks exact proof declaration | candidate promotion 前`definition_profile_contract_invalid + select_or_fix_template_profile + BlockingTicketID`；wildcard evidence policy不能代替exact `scope + id`；零 startup-input/Runtime/provider/dispatch/effect |
+| required Profile CWI cannot compile canonical exact proof declaration | candidate promotion 前`definition_profile_contract_invalid + select_or_fix_template_profile + BlockingTicketID`；只允许从已 admission 的 exact CWI 编译，wildcard policy只能实例化声明约束，不能注入 current owner fact、recipe/native-check、dispatch/credit authority；零 startup-input/Runtime/provider/dispatch/effect |
 | required Profile CWI has empty/unsupported evidence kinds or no proof-capable accepted operation | 同一确定性Profile violation/ticket；不得降级为assessment-only focus；零 startup-input/Runtime/provider/dispatch/effect |
 | duplicate required Profile source across profiles | `definition_profile_contract_invalid`精确报告全部Profile source refs；不得按Profile顺序覆盖或合并 |
 | required Profile owner fact has no unique acquisition/reobserve closure | candidate promotion 前 `definition_profile_prerequisite_unresolved + select_or_fix_template_profile + BlockingTicketID`；零 startup-input/Runtime/provider/dispatch/effect |
