@@ -5690,9 +5690,14 @@ if grep -n -E -- 'WORKORCH_CHECK_PASSED|CHECK_PASSED' \
 	echo "boundary contract violation: positive Runtime drive fixtures restored raw stdout marker proof" >&2
 	exit 1
 fi
-if ! grep -q -F '软件开发（Go 原生验证）' internal/pkg/workorchdefaults/defaults/templates.json ||
-	! grep -q -F 'shell/go-test-json/v1' docs/40-profiles-capabilities/software-dev/goal-coverage-and-dod.md; then
-	echo "boundary contract violation: built-in software-dev profile no longer identifies its current Go-native proof adapter" >&2
+if ! grep -q -F '"name": "软件开发"' internal/pkg/workorchdefaults/defaults/templates.json ||
+	! grep -q -F '支持项目声明的构建工具、测试框架和原生验证能力。' internal/pkg/workorchdefaults/defaults/templates.json ||
+	grep -q -F '软件开发（Go 原生验证）' internal/pkg/workorchdefaults/defaults/templates.json; then
+	echo "boundary contract violation: software-dev template presentation leaked a framework-specific validation adapter" >&2
+	exit 1
+fi
+if ! grep -q -F 'shell/go-test-json/v1' docs/40-profiles-capabilities/software-dev/goal-coverage-and-dod.md; then
+	echo "boundary contract violation: Shell Go-native proof adapter contract is no longer documented at the capability boundary" >&2
 	exit 1
 fi
 for marker in \

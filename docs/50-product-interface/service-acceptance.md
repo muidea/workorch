@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-08-26
+Last Verified: 2026-09-05
 
 ## Purpose
 
@@ -114,9 +114,9 @@ HTTP/owner integration acceptance必须证明：
 - managed CWI 的 recipe-wide readiness 与逐 CWI readiness 分离；同一 surface 的 ready binding/missing preparation、native
   identity 跨 CWI 唯一性、File prospective all-of receipt、Shell fresh reobserve 和 restart 必须有真实 owner integration
   验收。preparation/文件写入/exit 0 均不产生 validation credit；Application 未经 Profile 声明不得自动生成该跨 owner
-  convergence，MCP-only/无 Shell recipe 定义不得被强制进入 Shell preparation。稳定 ID `software-dev` 当前必须在产品界面
-  明示为 Go-native validation Profile；其他 framework-native closure 必须选择另一 typed Profile，不能由目录扫描或
-  Application/Orchestrator 猜测；
+  convergence，MCP-only/无 Shell recipe 定义不得被强制进入 Shell preparation。稳定 ID `software-dev` 在产品界面必须保持
+  语言与框架中立；Go-native 等具体 adapter identity 只出现在 capability-owner 合同与诊断中，不能进入模板名称/描述，也不能由
+  目录扫描或 Application/Orchestrator 猜测；
 - corrected static candidate经过promotion、专用Decision resolution与Workspace acknowledgement后才eligible；response loss、
   duplicate或stale binding不能产生第二ticket/revision或运行窗口；
 - Run-scoped runtime-definition clarification只投影`revise_definition_and_restart`；通用Decision single/batch resolve与Resume

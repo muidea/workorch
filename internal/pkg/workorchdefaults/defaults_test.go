@@ -9,7 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing.T) {
+func TestEmbeddedSoftwareDevTemplatePresentationIsFrameworkNeutral(t *testing.T) {
 	templates, err := loadEmbeddedTemplates()
 	if err != nil {
 		t.Fatalf("loadEmbeddedTemplates: %v", err)
@@ -18,8 +18,25 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 	if item == nil {
 		t.Fatal("software-dev template missing")
 	}
-	if item.Name != "软件开发（Go 原生验证）" || !strings.Contains(item.Description, "Go 原生测试协议") {
-		t.Fatalf("software-dev template must explicitly identify its current Go-native proof adapter: name=%q description=%q", item.Name, item.Description)
+	if item.Name != "软件开发" {
+		t.Fatalf("software-dev template name = %q, want framework-neutral presentation", item.Name)
+	}
+	presentation := strings.ToLower(item.Name + "\n" + item.Description)
+	for _, framework := range []string{"go 原生", "go-native", "golang", "node.js", "python", "rust"} {
+		if strings.Contains(presentation, framework) {
+			t.Fatalf("software-dev template presentation leaks validation adapter %q: name=%q description=%q", framework, item.Name, item.Description)
+		}
+	}
+}
+
+func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing.T) {
+	templates, err := loadEmbeddedTemplates()
+	if err != nil {
+		t.Fatalf("loadEmbeddedTemplates: %v", err)
+	}
+	item := findEmbeddedTemplateByID(templates, "software-dev")
+	if item == nil {
+		t.Fatal("software-dev template missing")
 	}
 	if len(item.DoDItems) < 6 {
 		t.Fatalf("software-dev DoD items = %d, want >= 6", len(item.DoDItems))

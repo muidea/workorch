@@ -4,19 +4,19 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-09-04
+Last Verified: 2026-09-05
 
 ## Scope
 
-This document defines the built-in software-development evidence specialization. Its stable template ID remains
-`software-dev`, but the current proof-closed implementation explicitly selects Shell's Go-native validation adapter
-(`shell/go-test-json/v1`). This is a Profile choice, not a Runtime-core language rule. The neutral CWI/focus/evidence machinery
-remains owned by Orchestrator and [the core Runtime contract](../../00-core/runtime-stage-contract.md).
+This document defines the built-in software-development evidence specialization. Its stable template ID and product
+presentation remain language- and framework-neutral. Shell's current Go-native validation adapter
+(`shell/go-test-json/v1`) is one typed capability-owner implementation, not part of the template identity or Runtime-core
+language. The neutral CWI/focus/evidence machinery remains owned by Orchestrator and
+[the core Runtime contract](../../00-core/runtime-stage-contract.md).
 
-The delivery under test may use any implementation language when the sealed Go assertion exercises its real CLI/API/service
-entrypoint. A project that requires Python-, Node-, Rust- or another framework-native proof must select a Profile that declares
-that owner's typed observation adapter, or an exact MCP-only proof Profile. It must not silently reuse this Profile's Go recipe,
-stdout self-reporting, or an Application-inferred fallback.
+The delivery under test may use any implementation language. A concrete native proof must be supplied by the matching typed
+capability-owner adapter (or by an exact MCP proof contract); it must not be inferred from template presentation, silently
+reuse an unrelated recipe, trust stdout self-reporting, or use an Application-inferred fallback.
 
 ## Coverage Dimensions
 
@@ -53,7 +53,7 @@ The built-in `software-dev` Profile declares only terminal work that has an exac
 | Source | Required evidence | Proof owner path |
 | --- | --- | --- |
 | `deliverable/source_change` | `state_change` | File/Patch owner receipt for the grounded `workspace_delivery_change` target role |
-| each `dodItem/*` | `validation` | Go-native managed-validation receipt for the sealed proof identity; generic shell/file success and optional MCP navigation evidence are not proof |
+| each `dodItem/*` | `validation` | capability-owner typed validation receipt for the sealed proof identity; generic shell/file success and optional MCP navigation evidence are not proof |
 | `deliverable/validation_report` | `validation` | Shell managed-validation receipt; generic shell success is not proof |
 | `deliverable/version_control_snapshot` | `state_change` | matching Git write/add/commit owner receipts |
 
@@ -106,8 +106,8 @@ the Runtime must not manufacture a generic CWI without an exact proof declaratio
 - every operation must match the current binding, required variant, target authorization and owner catalog revision;
 - existing files require revision-bound replacement; `file/write` is create-only;
 - validation recipes must be activation-sealed and owner-confirmed;
-- the built-in stable `software-dev` ID denotes the current Go-native proof Profile; a non-Go-native or MCP-only closure is a
-  distinct explicit Profile contract, not an alternative inferred by Application or Orchestrator;
+- the stable `software-dev` identity does not select a language or framework; a concrete native or MCP proof closure is an
+  explicit typed adapter contract, not an alternative inferred by Application or Orchestrator;
 - `prospective_owner_target` validation preparation must carry the exact Profile-derived
   `ProspectiveSatisfactionContractRef`; Shell must publish one matching provider-safe typed `all_of` constraint, while the
   dependency catalog and recipe command remain freshness authority only and never LLM-selectable;

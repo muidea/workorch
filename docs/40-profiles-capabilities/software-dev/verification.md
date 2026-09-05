@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-09-04
+Last Verified: 2026-09-05
 
 ## Purpose
 
@@ -15,9 +15,9 @@ and converges through the same neutral Runtime owner model. It must not make leg
 
 ### Definition And Profile
 
-- the stable `software-dev` template is presented and validated as the current Go-native proof Profile; its six Soul bindings
-  and full Soul bodies load through the correct owners, while other framework-native/MCP-only closure requires another explicit
-  Profile contract;
+- the stable `software-dev` template is presented and validated without language/framework branding; its six Soul bindings and
+  full Soul bodies load through the correct owners, while each concrete framework-native/MCP proof closure remains an explicit
+  typed capability-owner adapter contract;
 - Goal/DoD compile into bounded CWIs, evidence roles and typed profile/execution contracts;
 - the built-in terminal set is exactly `source_change`, each DoD validation, `validation_report` and
   `version_control_snapshot`; validation preparation remains a DoD prerequisite, while coverage-map/generic-deliverable remain

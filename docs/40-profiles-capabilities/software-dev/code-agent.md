@@ -4,14 +4,14 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-09-04
+Last Verified: 2026-09-05
 
 ## Purpose
 
-`software-dev` specializes neutral Runtime contracts for code delivery. The stable ID currently selects a Go-native validation
-adapter and should be presented as **Software development (Go-native validation)**. It supplies template/Soul guidance,
-coverage roles, evidence requirements and allowed capability classes; it does not add a code-specific state machine to
-Orchestrator. Other framework-native or MCP-only proof closures require a separately declared typed Profile.
+`software-dev` specializes neutral Runtime contracts for code delivery. Its stable template identity and product presentation
+remain language- and framework-neutral. It supplies template/Soul guidance, coverage roles, evidence requirements and allowed
+capability classes; it does not add a code-specific state machine to Orchestrator. Concrete framework-native or MCP proof
+closures belong to typed capability-owner adapters and must not be promoted into the template name or description.
 
 ## Expected Behavior
 
@@ -33,7 +33,7 @@ Orchestrator. Other framework-native or MCP-only proof closures require a separa
 | inspect files | `file/list`, `file/read` | observation only |
 | create file | `file/write` | prospective target must be absent and owner-admitted |
 | modify existing file | `patch/apply:unified_diff` | one minimal multi-hunk diff per owner/canonical target; current revision/base hash required |
-| validate | `validation/managed_session` | current built-in Profile: Shell `go test -json` exact native check; owner-sealed recipe, bounded isolated workspace copy, foreground process group |
+| validate | `validation/managed_session` | owner-sealed recipe and native observation adapter, bounded isolated workspace copy, foreground process group; the current Shell Go adapter is one capability implementation, not template identity |
 | bounded command state change | `shell/command` | explicit durable targets; never validation/read-only evidence |
 | inspect/version | `git/read`, `git/write:init|add|commit` | no unsupported remote/destructive variants |
 | semantic assistance | selected LSP MCP tools | auxiliary; cannot replace build/test evidence |

@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability-index
 
-Last Verified: 2026-09-04
+Last Verified: 2026-09-05
 
 | Topic | Contract |
 | --- | --- |
@@ -16,10 +16,10 @@ Last Verified: 2026-09-04
 These documents specialize Template/Profile/Soul/capability behavior without adding a Runtime state machine or hard-coded
 software-development branch to Orchestrator.
 
-The built-in Profile keeps the stable `software-dev` ID but is the current **Go-native validation** specialization. It also
-seals the File-to-Shell prospective-satisfaction contract for one-shot DoD validation preparation. Other framework-native or
-MCP-only proof closures require a distinct explicit typed Profile; Application and Orchestrator never infer one from workspace
-contents.
+The built-in `software-dev` template keeps a language- and framework-neutral identity. It also seals the declarative
+File-to-Shell prospective-satisfaction contract used by typed managed-validation adapters for one-shot DoD validation
+preparation. The current Shell owner includes a Go-native adapter, while other framework-native or MCP-only proof closures use
+their own explicit typed adapter contracts; adapter names and protocols are not part of the stable template presentation.
 File owns the hypothetical workspace-manifest delta, Shell owns managed-validation applicability, and Orchestrator only joins
 their typed facts inside SM-2; none of the three may transition a sibling owner's state.
 

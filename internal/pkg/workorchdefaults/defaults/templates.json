@@ -160,8 +160,8 @@
   },
   {
     "id": "software-dev",
-    "name": "软件开发（Go 原生验证）",
-    "description": "编码实现、运行测试、修复缺陷的完整软件开发流程。当前内置证明闭环使用由 Shell owner 持有的 Go 原生测试协议；其他框架原生或 MCP-only 验证需选择对应的显式 Profile。",
+    "name": "软件开发",
+    "description": "编码实现、运行测试、修复缺陷的完整软件开发流程。支持项目声明的构建工具、测试框架和原生验证能力。",
     "goalText": "根据需求完成软件开发任务：编码实现、运行测试、修复缺陷、产出交付物。",
     "defaultSoulId": "soul-software-dev-execution",
     "doDItems": [
