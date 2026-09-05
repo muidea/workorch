@@ -321,7 +321,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			Parameters: []RuntimeOperationParameterContract{
 				{Name: "patchType", Type: RuntimeOperationParameterTypeString, Required: true, Description: "file_write, text_replace, or unified_diff"},
 				{Name: "content", Type: RuntimeOperationParameterTypeString, Description: "complete file_write content; an empty string is allowed"},
-				{Name: "diff", Type: RuntimeOperationParameterTypeString, Description: "unified_diff content"},
+				{Name: "diff", Type: RuntimeOperationParameterTypeString, Description: "complete single-file unified_diff content with file headers and at least one hunk; hunk-only content is invalid"},
 				{Name: "oldText", Type: RuntimeOperationParameterTypeString, Description: "exact text_replace source text"},
 				{Name: "newText", Type: RuntimeOperationParameterTypeString, Description: "text_replace replacement; an empty string is allowed"},
 				{Name: "baseHash", Type: RuntimeOperationParameterTypeString, Description: "owner-observed current content hash; required when file_write replaces an existing target"},
@@ -351,6 +351,8 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 				"file_write replacing an existing target must provide the owner-observed baseHash",
 				"text_replace must provide non-empty oldText and a distinct newText",
 				"unified_diff must provide non-empty diff",
+				"an accepted unified_diff update form contains exactly one --- a/<target> and +++ b/<target> file-header pair followed by at least one explicit @@ -oldStart,oldCount +newStart,newCount @@ hunk; hunk-only content is invalid",
+				"an accepted unified_diff creation form uses --- /dev/null and +++ b/<target> file headers followed by at least one explicit @@ -0,0 +newStart,newCount @@ hunk",
 				"unified_diff must apply to the current owner-observed target content",
 				"targetRefs must contain exactly one workspace-relative target",
 			},

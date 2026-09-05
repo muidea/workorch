@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-09-04
+Last Verified: 2026-09-05
 
 ## 功能范围与边界
 
@@ -52,6 +52,9 @@ operation。
   manifest-bound 的 `conformant | nonconformant | owner_contract_defect` 静态事实。feasibility 对合法但无法应用到 current
   owner-observed target 的 diff 返回 manifest-bound `candidate_constraint_violated`，携带 exact target/revision 与封闭 shape。
   File 在两阶段都不选择 correction、retry、terminal 或 Runtime state transition。
+- `patch/apply|patch/preview` variant、parameter description 与 provider-safe syntax guidance 只由 File operation contract 声明并
+  随 sealed manifest 投影；Profile/Soul 不固定 `unified_diff`、不复制 parser 规则。`unified_diff` 的 canonical standard form 包含
+  单一 `---/+++` file-header pair 和至少一个 explicit `@@ ... @@` hunk，hunk-only content 在 owner conformance 中 fail closed。
 - `file/edit` 的 operation-level constraint 与 `patch/apply|patch/preview:text_replace` 的 variant-level constraint 共享
   `oldText` applicability 合同。feasibility 复用 execution 的 text replacement/patch parser 与 matcher 做只读应用；
   current revision 下缺失/歧义/occurrence 越界的匹配返回 bounded applicability violation，不能冒充 stale 或扩大 target。

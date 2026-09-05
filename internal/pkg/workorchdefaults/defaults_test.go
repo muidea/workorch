@@ -44,7 +44,8 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 
 	assertContainsAnyDoDItem(t, item.DoDItems, "Goal")
 	assertContainsAnyDoDItem(t, item.DoDItems, "PRD")
-	assertContainsAnyDoDItem(t, item.DoDItems, "unified_diff")
+	assertContainsAnyDoDItem(t, item.DoDItems, "capability-owner receipt")
+	assertContainsAnyDoDItem(t, item.DoDItems, "state_change")
 	assertContainsAnyDoDItem(t, item.DoDItems, "git/write")
 	assertContainsAnyDoDItem(t, item.DoDItems, "build/test")
 	assertContainsAnyDoDItem(t, item.DoDItems, "最终交付入口")
@@ -320,7 +321,9 @@ func TestEmbeddedSoftwareDevSoulsUseCurrentRuntimeDocuments(t *testing.T) {
 	assertSoulContains(t, planning.SoulMD, "semantic_plan")
 	assertSoulContains(t, planning.SoulMD, "DefinitionFocuses")
 	assertSoulContains(t, planning.SoulMD, "每个 required CWI")
-	assertSoulContains(t, planning.SoulMD, "patch/apply:unified_diff")
+	assertSoulContains(t, planning.SoulMD, "sealed File owner catalog")
+	assertSoulContains(t, planning.SoulMD, "具体 variant、参数形态和语法只由 File owner contract 声明")
+	assertSoulNotContains(t, planning.SoulMD, "unified_diff")
 	assertSoulNotContains(t, planning.SoulMD, "text_replace")
 	assertSoulContains(t, planning.SoulMD, "file/write")
 	assertSoulContains(t, planning.SoulMD, "bounded implementation slice")
@@ -334,14 +337,15 @@ func TestEmbeddedSoftwareDevSoulsUseCurrentRuntimeDocuments(t *testing.T) {
 	assertStringSliceContains(t, execution.AllowedToolKinds, "patch/apply")
 	for _, kind := range execution.AllowedToolKinds {
 		if kind == "file/edit" {
-			t.Fatal("software-dev execution Soul still permits file/edit outside the canonical patch/apply:unified_diff profile")
+			t.Fatal("software-dev execution Soul still permits file/edit outside the declared patch/apply profile")
 		}
 	}
 	assertSoulContains(t, execution.SoulMD, "operations")
 	assertSoulContains(t, execution.SoulMD, "sealed manifest")
 	assertSoulContains(t, execution.SoulMD, "bindingRefs")
 	assertSoulContains(t, execution.SoulMD, "patch/apply")
-	assertSoulContains(t, execution.SoulMD, "patch/apply:unified_diff")
+	assertSoulContains(t, execution.SoulMD, "sealed File owner contract")
+	assertSoulNotContains(t, execution.SoulMD, "unified_diff")
 	assertSoulNotContains(t, execution.SoulMD, "text_replace")
 	assertSoulContains(t, execution.SoulMD, "create-only `file/write`")
 	assertSoulContains(t, execution.SoulMD, "owner snapshot")
@@ -357,6 +361,9 @@ func TestEmbeddedSoftwareDevSoulsUseCurrentRuntimeDocuments(t *testing.T) {
 
 	assertSoulContains(t, artifact.SoulMD, "DoD 条目证据引用")
 	assertSoulContains(t, artifact.SoulMD, "version_control_snapshot")
+	assertSoulContains(t, artifact.SoulMD, "capability-owner receipt")
+	assertSoulNotContains(t, artifact.SoulMD, "unified_diff")
+	assertSoulNotContains(t, artifact.SoulMD, "text_replace")
 	assertSoulContains(t, decision.SoulMD, "不要因为 workspace 为空就直接请求源码")
 
 	for _, soul := range souls {
@@ -837,13 +844,8 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			}
 			assertStringListContains(t, accepted, "patch/apply")
 			assertStringListContains(t, accepted, "file/write")
-			variants, ok := item["acceptedOperationVariants"].([]any)
-			if !ok || len(variants) != 1 {
-				t.Fatalf("source_change acceptedOperationVariants = %+v, want one canonical patch variant", item["acceptedOperationVariants"])
-			}
-			variant, ok := variants[0].(map[string]any)
-			if !ok || variant["kind"] != "patch/apply" || variant["variantId"] != "unified_diff" {
-				t.Fatalf("source_change acceptedOperationVariants = %+v, want patch/apply unified_diff", variants)
+			if variants, present := item["acceptedOperationVariants"]; present {
+				t.Fatalf("source_change must leave concrete File variants to the sealed owner catalog: %+v", variants)
 			}
 			assertStringListContains(t, rejected, "file/read")
 			assertStringListContains(t, rejected, "file/list")

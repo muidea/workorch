@@ -3,7 +3,7 @@
 产出结构化交付物，面向最终交付而不是过程日志。
 
 ## 交付物清单
-- source: unified_diff 或补丁交付物（Patch Artifact），说明修改文件、关键变更和范围控制
+- source: capability-owner receipt 支撑的 workspace state-change 交付物，说明修改文件、关键变更和范围控制
 - test_report: 测试命令、退出码、pass/fail/skipped 或等价摘要
 - configuration: 如有配置变更一并提交并说明影响
 - version_control_snapshot: 如 workspace 输出发生有意义变更，记录 git/write add/commit 证据、commit hash、提交信息和相关路径；无可提交变更时说明 zeroWork 或跳过原因
@@ -18,7 +18,7 @@
 - 若缺失的是 primary_state_change，应继续产生受控状态变更或给出 failed assessment/blocker，不要用补充报告冒充代码变更
 
 ## 交付物质量要求
-- unified_diff 只能包含与 Goal 直接相关的文件变更
+- source state-change 交付物只能包含与 Goal 直接相关的 workspace 变更
 - 最终结果必须包含：改动摘要、变更文件、行为变化、验证命令、验证结果、失败/跳过说明、残余风险和后续建议
 - 测试报告必须说明实际运行命令、覆盖的 DoD 条目、Goal 覆盖项、主路径/错误路径/入口路径/配置路径/并发路径覆盖情况；未运行或跳过时必须说明原因和影响
 - 不要包含 build 产物二进制文件，除非 Goal 明确要求并且 runtime artifact policy 允许；若 workspace 中存在构建产物、日志或临时文件，应说明是否属于交付范围

@@ -32,13 +32,16 @@ closures belong to typed capability-owner adapters and must not be promoted into
 | --- | --- | --- |
 | inspect files | `file/list`, `file/read` | observation only |
 | create file | `file/write` | prospective target must be absent and owner-admitted |
-| modify existing file | `patch/apply:unified_diff` | one minimal multi-hunk diff per owner/canonical target; current revision/base hash required |
+| modify existing file | `patch/apply` | exact variant/parameter syntax comes only from the sealed File-owner catalog; one revision-bound operation per owner/canonical target |
 | validate | `validation/managed_session` | owner-sealed recipe and native observation adapter, bounded isolated workspace copy, foreground process group; the current Shell Go adapter is one capability implementation, not template identity |
 | bounded command state change | `shell/command` | explicit durable targets; never validation/read-only evidence |
 | inspect/version | `git/read`, `git/write:init|add|commit` | no unsupported remote/destructive variants |
 | semantic assistance | selected LSP MCP tools | auxiliary; cannot replace build/test evidence |
 
 Only operations present in the activation-sealed capability contract and current owner admissibility catalog are candidates.
+The Profile may admit File state-change kinds and evidence roles, but it does not select `patch/apply` variants or restate their
+parser contract. Semantic feasibility seals the owner-confirmed variant; the File operation manifest then supplies its exact
+parameter and syntax rules to the provider-facing C3 contract.
 
 For the built-in DoD validation-readiness closure, a prospective File create is eligible only when the sealed
 `ProspectiveSatisfactionContractRef` lets Shell prove from the File-authored hypothetical resulting manifest that an exact

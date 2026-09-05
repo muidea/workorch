@@ -2304,7 +2304,7 @@ func TestValidateRuntimeCandidateManifestSupportingFactsRequiresCanonicalExactBi
 
 func TestRuntimeProviderContractRequiresCompleteCompactBoundedOutput(t *testing.T) {
 	contract := runtimeCandidateContractCatalog()
-	for _, required := range []string{"exactly one JSON object", "complete", "compact", "finished", "unknown fields", "unrequested operations", "preface", "suffix", "markdown fences", "Do not repeat", "validationProofPreparation", "real executable assertion", "ownerNativeCheckAttestation.nativeCheckRef", "diagnostic only", "can never attest"} {
+	for _, required := range []string{"exactly one JSON object", "complete", "compact", "finished", "unknown fields", "unrequested operations", "preface", "suffix", "markdown fences", "Do not repeat", "operations field and every parameters field are JSON arrays", "independent object with name plus exactly one declared typed value field", "never encode parameters as an object/map", "validationProofPreparation", "real executable assertion", "ownerNativeCheckAttestation.nativeCheckRef", "diagnostic only", "can never attest"} {
 		if !strings.Contains(contract, required) {
 			t.Fatalf("runtime candidate contract lost %q: %s", required, contract)
 		}
@@ -3102,6 +3102,17 @@ func TestRuntimeCandidateAuxiliarySingletonWireIsMinimalWithJSONSchemaResponseOn
 		!slices.Contains(rule.DerivedParameterNames(), "patchType") {
 		t.Fatalf("minimal auxiliary wire rule = %+v found=%t", rule, found)
 	}
+	output := runtimeCandidateOutputContractForManifest(manifest, wire)
+	if output.CanonicalWireLayout == "" ||
+		!strings.Contains(output.CanonicalWireLayout, `"kind":"patch/apply"`) ||
+		!strings.Contains(output.CanonicalWireLayout, `"parameters":[`) ||
+		strings.Contains(output.CanonicalWireLayout, `"parameters":{`) {
+		t.Fatalf("auxiliary-only canonical wire layout = %q, want one array-encoded operation example", output.CanonicalWireLayout)
+	}
+	if !strings.Contains(output.StructuredOutputInstruction, "Every parameters field is a JSON array, never a JSON object or map.") ||
+		!strings.Contains(output.StructuredOutputInstruction, "Encode each parameter as one independent object with name first and exactly one declared typed value field") {
+		t.Fatalf("auxiliary-only structured output instruction does not close parameter entry encoding: %s", output.StructuredOutputInstruction)
+	}
 	schema := runtimeCandidateSchemaForManifest(manifest)
 	for _, localField := range []string{"bindingRefs", "targetRefs"} {
 		if runtimeOperationSchemaHasProperty(t, schema, localField) {
@@ -3138,6 +3149,53 @@ func TestRuntimeCandidateAuxiliarySingletonWireIsMinimalWithJSONSchemaResponseOn
 			!slices.Equal(operation.TargetRefs, rule.DerivedTargetRefs) {
 			t.Fatalf("JSONSchemaResponse=%t locally compiled auxiliary operation=%+v", enabled, operation)
 		}
+	}
+}
+
+func TestRuntimeCandidateAuxiliaryUnifiedDiffWireCarriesOwnerSyntaxInArrayLayout(t *testing.T) {
+	facts := runtimecontract.RuntimeFacts{
+		DefinitionRevision: "definition-auxiliary-unified-diff-wire",
+		Focus: runtimecontract.CoverageFocus{
+			ID: "focus-auxiliary-unified-diff-wire", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-auxiliary-unified-diff-wire"}, TargetRefs: []string{"main.go"},
+		},
+	}
+	bindRuntimeCandidateTestFocus(t, &facts, runtimecontract.ConvergenceStateNeedStateChange, []string{runtimecontract.RuntimeBlockKindPatchApply})
+	decision := runtimecontract.RuntimeDecision{
+		State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus,
+		AuthoritySnapshot: runtimecontract.AuthoritySnapshot{DefinitionRevision: facts.DefinitionRevision},
+		RequiredOutput: runtimecontract.RequiredOutputContract{
+			AcceptedKinds: []string{runtimecontract.RuntimeBlockKindPatchApply},
+			AcceptedOperationVariants: []runtimecontract.RuntimeOperationVariantRef{{
+				Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "unified_diff",
+			}},
+			AcceptedEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable},
+			CoverageWorkItemIDs:  append([]common.CoverageWorkItemID(nil), facts.Focus.CoverageWorkItemIDs...),
+			TargetRefs:           append([]string(nil), facts.Focus.TargetRefs...),
+		},
+	}
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFacts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := runtimeCandidateOutputContractForTest(t, manifest)
+	if !strings.Contains(output.CanonicalWireLayout, `"parameters":[{"name":"diff","string":`) ||
+		strings.Contains(output.CanonicalWireLayout, `"patchType"`) {
+		t.Fatalf("unified_diff canonical wire layout = %q, want provider diff entry with locally-derived variant omitted", output.CanonicalWireLayout)
+	}
+	if len(output.OperationContracts) != 1 {
+		t.Fatalf("unified_diff operation contracts = %+v", output.OperationContracts)
+	}
+	rules := strings.Join(output.OperationContracts[0].Rules, "\n")
+	for _, required := range []string{"--- a/<target>", "+++ b/<target>", "@@ -oldStart,oldCount +newStart,newCount @@", "hunk-only content is invalid"} {
+		if !strings.Contains(rules, required) {
+			t.Fatalf("unified_diff owner rules lost %q: %s", required, rules)
+		}
+	}
+	payload := []byte(`{"operations":[{"kind":"patch/apply","parameters":[{"name":"diff","string":"--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new\n"}]}]}`)
+	candidate, err := runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(manifest, payload)
+	if err != nil || candidate.StateChange == nil || len(candidate.StateChange.Operations) != 1 {
+		t.Fatalf("decode canonical unified_diff wire candidate=%+v err=%v", candidate, err)
 	}
 }
 

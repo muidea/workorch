@@ -13,7 +13,7 @@
 
 - 每个 required CWI 必须有且只有一个 proposal，并声明 exact owner、operation kind/variant、target policy、target/selector、evidence kind、effect、recipe/check 以及适用的 metric/artifact。
 - operation kind、variant 与 target policy 必须来自同一条 owner catalog fact。
-- 已存在文件必须选择 owner 已声明的 `patch/apply:unified_diff`，并将同一 target 的全部修改合并为一个最小、revision-bound diff；`file/write` 只用于 owner 确认尚不存在的 prospective target。
+- 已存在文件必须选择 sealed File owner catalog 中与 target policy、snapshot revision 相容的 `patch/apply` variant，并将同一 target 的全部修改合并为一个最小、revision-bound operation；具体 variant、参数形态和语法只由 File owner contract 声明。`file/write` 只用于 owner 确认尚不存在的 prospective target。
 - validation proof 必须绑定可执行且与该 CWI 直接相关的 recipe/check。通用构建成功、文件存在、Git revision、LSP clean 或摘要不能替代细粒度行为证据。
 - version-control snapshot 只能由 Git owner 的匹配 write/commit proof 满足，shell 中的 Git 文本输出仅可作为诊断。
 - 涉及 API、CLI、服务、流式、配置、持久化、错误行为、并发、性能或外部协议时，为每个相关 CWI 指定真实交付入口和直接验证方式。

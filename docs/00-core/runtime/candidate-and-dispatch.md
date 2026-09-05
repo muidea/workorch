@@ -296,7 +296,10 @@ endpoint。唯一当前例外是 pre-seal 已声明 `ProspectiveSatisfactionCont
 non-JSON、scalar/array root、multiple JSON roots或trailing bytes 是 no-candidate observation，不是 provider protocol failure；
 它们不进入 decoder/evaluator，而由 SM-3 的 request session 使用 bounded whole-document recovery，始终为零 candidate attempt。
 恰好一个完整 JSON object 则无条件经过 sealed manifest 驱动的 strict local decoder/schema admission；provider JSON Schema
-仅可提前减少坏输出，不能跳过或改变本地裁决。
+仅可提前减少坏输出，不能跳过或改变本地裁决。operations wire 固定使用 root `operations` array；每个 operation 的
+`parameters` 也固定为 `{name,<typed-value-field>}` entry array，禁止 object/map 编码。C3 canonical layout 在 required sequence
+存在时展示完整 required slots；只有 auxiliary operations 时只展示一个非强制 shape example，不能把所有可选 operation
+渲染成隐含必选集合。
 
 通过 strict local admission 的完整 candidate document 只允许进入一个纯 `CandidateEvaluator`。它的输入是 persisted manifest、decoded
 candidate 和同一 authority contract 的 prior attempt fact；输出只能是 `accepted` 或一个完整的
@@ -315,8 +318,9 @@ kind 生效：该 kind 的合法集合是 `AcceptedOperationVariants` 与 exact 
 conformance command/result 取得 `conformant | nonconformant | owner_contract_defect`：owner 可以复用其执行路径的同一
 parser/matcher，但不得读取或修改 workspace。`target_applicability` 则只能在 ordinary typed feasibility 中以只读方式观察 current
 target/revision，并返回 `candidate_constraint_violated` 或正常 feasibility outcome。owner 在两条路径都不得生成 effect/receipt、
-选择 retry/terminal，或返回 raw parameter/parser diagnostic。当前 File `patch/apply|patch/preview` 的 `unified_diff` 通过 static
-conformance 验证 single-file syntax 与 header/target 一致，通过 dynamic feasibility 验证 diff 可应用到 owner-observed target；
+选择 retry/terminal，或返回 raw parameter/parser diagnostic。当前 File `patch/apply|patch/preview` 的 `unified_diff` 完整
+header/hunk 规则由 File operation manifest 投影到 C3；static conformance 验证 single-file syntax 与 header/target 一致，
+通过 dynamic feasibility 验证 diff 可应用到 owner-observed target；
 `patch/preview` 的 content-sensitive variant 同样必须先取得 current target snapshot。Core 不解释 File code 或 parser message。
 未声明相应 constraint 的 operation 不调用对应通道，也不持久化占位 record。
 

@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-09-01
+Last Verified: 2026-09-05
 
 ## 功能范围与边界
 
@@ -46,6 +46,9 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
   选择；required kind、唯一 reachable variant、所有 reachable authorization 共有的 singleton binding、required
   cardinality-one singleton target 和 fixed parameter 由 Runtime 本地派生，provider 回显必须拒绝；unreachable variant
   authorization 不得重新暴露 binding。
+  `operations` 与每个 `parameters` 都是 JSON array；parameter 必须逐项编码为 `{name,<typed-value-field>}`，不能使用 object/map。
+  required sequence 的 canonical layout 展示全部 required slots；auxiliary-only manifest 只展示一个非强制 operation example，
+  完整 selectable set 仍由同一 schema/wire rules 表达，不能因 layout 产生第二份 required authority。
   JSONSchemaResponse on/off 不改变该最小 wire 或 local admission；LLM block 不做 JSON repair，不选择 correction/retry。
 - LLM owner 在输出边界将 incomplete、empty、non-JSON、scalar/array root、multiple JSON roots 与 trailing bytes 归一为
   no-candidate `DocumentOutcome`，不携带 content。只有恰好一个完整 JSON object 能作为 opaque content 返回；framing outcome

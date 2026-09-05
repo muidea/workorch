@@ -167,7 +167,7 @@
     "doDItems": [
       "目标（Goal）对应的需求能力已实现，并与验收范围保持一致",
       "已从 PRD、README、需求文档或用户 Goal 中提取功能目标、约束和验收点，并映射到执行计划",
-      "代码和配置变更保持最小且与目标直接相关，并提供 unified_diff 证据",
+      "代码和配置变更保持最小且与目标直接相关，并提供 capability-owner receipt 可追溯的 state_change 证据",
       "若 workspace 输出发生有意义变更，必须通过 git/write add/commit 形成本地版本控制快照，并在证据中引用 commit",
       "相关 build/test 验证已执行并通过；无法执行时记录跳过原因和影响评估",
       "若 Goal 或 DoD 涉及 CLI、服务、API、脚本、单二进制或其他运行交付入口，必须提供命中最终交付入口的直接验证证据",
@@ -908,12 +908,6 @@
               "acceptedStepKinds": [
                 "file/write",
                 "patch/apply"
-              ],
-              "acceptedOperationVariants": [
-                {
-                  "kind": "patch/apply",
-                  "variantId": "unified_diff"
-                }
               ],
               "rejectedStepKinds": [
                 "file/read",

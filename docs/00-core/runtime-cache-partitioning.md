@@ -30,6 +30,9 @@ Provider-facing 第一段必须是连续的 C0→C1→C2。C3→C4→C5 只能�
 
 - C3 operation kind、variant、parameter、effect、coverage 与 target policy 只从 persisted
   `RuntimeCandidateContractManifest` 渲染，不能从 profile、owner inventory 或错误文本拼第二份合同；
+- operations/parameters 都使用 array wire；parameter 必须是独立 `{name,<typed-value-field>}` entry，不能把参数名改成 object/map
+  sibling key。required sequence 的 canonical layout 覆盖全部 required slots；auxiliary-only manifest 只给一个非强制 shape
+  example，完整可选集合仍以 schema/wire rules 为唯一权威；
 - typed candidate command 可以携带完整 owner facts供 LLM owner执行本地 integrity/freshness 校验，但 provider-facing C3
   不得展开 raw operation-admissibility catalog、prerequisite-observation ledger、capability-state 或 validation scratch。
   target snapshot、target-selection 与 MCP activation supporting fact 只能按当前 manifest 的 owner、target policy 与

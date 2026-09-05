@@ -212,7 +212,7 @@ func runtimeCandidateContractCatalog() string {
 		"Return exactly one JSON object for the requested Runtime convergence state; it must be complete, compact, and finished in this response. The JSON object itself is the candidate; never wrap it in another object.",
 		"The C3 current runtime authority's outputContract is the sole structured-output contract. Its manifestHash, wireContractHash, schema, structuredOutputInstruction, canonicalWireLayout, wireRules, and operationContracts define the complete proposal surface for this request.",
 		"Emit only schema fields and manifest-authorized operations. Do not infer or add unknown fields, unrequested operations, prose, preface, suffix, or markdown fences. Do not repeat the Goal, DoD, manifest, authority, or input context.",
-		"For every operation, emit only the fields listed by its wireRule. Fields listed as locallyDerivedFields are compiled by Runtime from the sealed manifest and are forbidden in provider output. Keep parameters as the last member of each operation object and close the operation and root only after parameters are complete.",
+		"For every operation, emit only the fields listed by its wireRule. Fields listed as locallyDerivedFields are compiled by Runtime from the sealed manifest and are forbidden in provider output. The root operations field and every parameters field are JSON arrays. Encode each parameter as an independent object with name plus exactly one declared typed value field; never encode parameters as an object/map. Keep parameters as the last member of each operation object and close the operation and root only after parameters are complete.",
 		"context.requiredState is the sole canonical decision authority. Do not invent or modify convergence state, focus, authority, transaction, or output mode.",
 		"When context.repairDirective is present, obey its sealed state, effect, evidence and operation constraints. The exact fields and values remain in outputContract and the current runtime authority.",
 		"context.requiredEvidenceKinds declares the current evidence obligation; it never overrides context.requiredState, context.repairDirective, or outputContract.",
@@ -282,11 +282,22 @@ func runtimeCandidateCanonicalWireLayout(manifest runtimecontract.RuntimeCandida
 			requiredRules = append(requiredRules, rule)
 		}
 	}
-	if len(requiredRules) == 0 {
+	layoutRules := requiredRules
+	layoutPrefix := "Layout only; replace placeholder values from C1-C3 and never emit locally-derived fields: "
+	if len(layoutRules) == 0 && len(wire.OperationRules) != 0 {
+		// A candidate with auxiliary-only operations still needs one concrete wire
+		// example. Rendering an example for every auxiliary rule would falsely
+		// suggest that every optional operation is required, so use the first
+		// normalized rule only; the schema and wireRules remain the complete
+		// authority for all selectable operations.
+		layoutRules = wire.OperationRules[:1]
+		layoutPrefix = "Layout example for one authorized auxiliary operation; choose only operations needed by the current C1-C3 authority, replace placeholder values, and never emit locally-derived fields: "
+	}
+	if len(layoutRules) == 0 {
 		return ""
 	}
-	operations := make([]runtimeCandidateWireLayoutOperation, 0, len(requiredRules))
-	for _, rule := range requiredRules {
+	operations := make([]runtimeCandidateWireLayoutOperation, 0, len(layoutRules))
+	for _, rule := range layoutRules {
 		rule = rule.Normalized()
 		value := runtimeCandidateWireLayoutOperation{}
 		if rule.RequiredSlot() {
@@ -316,7 +327,7 @@ func runtimeCandidateCanonicalWireLayout(manifest runtimecontract.RuntimeCandida
 		operations = append(operations, value)
 	}
 	encoded, _ := json.Marshal(runtimeCandidateWireLayoutPayload{Operations: operations})
-	return "Layout only; replace placeholder values from C1-C3 and never emit locally-derived fields: " + string(encoded)
+	return layoutPrefix + string(encoded)
 }
 
 func runtimeCandidateOperationParameterForName(values []runtimecontract.RuntimeOperationParameterContract, name string) (runtimecontract.RuntimeOperationParameterContract, bool) {
@@ -662,7 +673,10 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 		lines = append(lines, line)
 	}
 	if len(wire.OperationRules) != 0 {
-		lines = append(lines, "Within every operation object, emit requiredOperationRef first when present, then kind/bindingRefs/targetRefs only when listed, and parameters last. Do not close the operation or root before parameters are complete. Operation id and dependsOn are derived by Runtime; never emit them.")
+		lines = append(lines,
+			"The root operations field is a JSON array. Within every operation object, emit requiredOperationRef first when present, then kind/bindingRefs/targetRefs only when listed, and parameters last. Do not close the operation or root before parameters are complete. Operation id and dependsOn are derived by Runtime; never emit them.",
+			"Every parameters field is a JSON array, never a JSON object or map. Encode each parameter as one independent object with name first and exactly one declared typed value field: string, integer, boolean, or stringList. Never encode parameter names as sibling keys in a map.",
+		)
 	}
 	return strings.Join(lines, "\n")
 }

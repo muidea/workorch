@@ -26,7 +26,8 @@ focused contract；本页不复制字段级正文。
 - provider-facing token 值只有 LLM owner 的 sealed `ProviderCeiling` 一个权威；submission 前任何不一致均零 physical call。
 - attempt 0 与 same-contract attempt 1 复用同一 C0～C3、authority transaction、manifest 与 `stablePrefixHash`。
 - operations C3 的 output contract 必须携带从 sealed manifest 纯编译的 exact `wireContractHash`、canonical
-  wire layout、per-slot rules 与适用 operation/selected-variant `valueRules`。attempt 1/restart 只能重算同一 hash；wire 规则漂移属于请求身份缺陷，不是
+  wire layout、per-slot rules 与适用 operation/selected-variant `valueRules`。operations 与 parameter-entry 均为 array wire；
+  auxiliary-only layout 只展示一个非强制 shape example，不能把所有可选 operation 提升为 required。attempt 1/restart 只能重算同一 hash；wire 规则漂移属于请求身份缺陷，不是
   provider correction input，且不得通过改写 C4 绕过。
 - operations attempt 1 的 C4 必须携带 attempt 0 persisted directive 的 provider-safe detached correction input：manifest、
   objectives 与 concrete schema/parameter-entry/owner-constraint/operation-set/semantic witness；failure 与该 input 的 normalized

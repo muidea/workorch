@@ -297,6 +297,29 @@ func TestRuntimeOperationVariantContractMatchesPatchVariants(t *testing.T) {
 	}
 }
 
+func TestPatchOperationContractPublishesCompleteUnifiedDiffSyntax(t *testing.T) {
+	contract, ok := RuntimeOperationContractForKind(RuntimeBlockKindPatchApply)
+	if !ok {
+		t.Fatal("patch contract missing")
+	}
+	diffDescription := ""
+	for _, parameter := range contract.Parameters {
+		if parameter.Name == "diff" {
+			diffDescription = parameter.Description
+			break
+		}
+	}
+	if !strings.Contains(diffDescription, "file headers") || !strings.Contains(diffDescription, "hunk-only content is invalid") {
+		t.Fatalf("patch diff parameter description = %q, want complete syntax boundary", diffDescription)
+	}
+	rules := strings.Join(contract.Rules, "\n")
+	for _, required := range []string{"--- a/<target>", "+++ b/<target>", "--- /dev/null", "@@ -oldStart,oldCount +newStart,newCount @@", "hunk-only content is invalid"} {
+		if !strings.Contains(rules, required) {
+			t.Fatalf("patch contract rules lost %q: %s", required, rules)
+		}
+	}
+}
+
 func TestRuntimeOperationVariantContractRejectsOwnerIgnoredParameters(t *testing.T) {
 	target := "README.md"
 	value := "unexpected"
