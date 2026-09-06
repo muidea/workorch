@@ -252,6 +252,10 @@ validation failure 因果中的三类 target 是相互独立的 immutable fact�
 invariant；二者不要求相等或相交。因而不得以
 operation entry 覆写 diagnostic candidate，operation entry 也不得被自动晋升为 `FailureTarget`。current manifest 只参与后续 repair-owner
 freshness confirmation，不能改写 completed dispatch 已封存的 validation scope 或历史 observation causation。
+
+execution producer、receipt admission、repair confirmation/commitment 与 fresh-load invariant 必须共用上述 sealed-scope
+投影函数。单文件 entry、多文件 full catalog 是必测正例；缩小/扩张 observation scope、entry 越权、错误 dispatch 与
+重启后从 current catalog 重建范围均须拒绝。范围修正不改变 SM-1 owner，也不授予 capability owner SM-2/SM-3 转换权。
 software-dev Profile 中 Shell 的 closed `WORKORCH_FAILURE_TARGET` marker 也只是 owner-supported bounded diagnostic candidate；它不得直接填充或生成
 `RuntimeFailureTargetObservation` authority，只能在通过 sealed finite scope gate 后进入 `RuntimeValidationFailureObservation`，再由
 Profile 指定的 repair-owner confirmation 与 SM-2 private event 封存真实 repair surface。sealed Shell-owner catalog 的

@@ -298,6 +298,19 @@ They must record the deployed revision/config identity, workspace/run IDs, termi
 call evidence and filesystem/artifact evidence where applicable. A valid artifact without later convergence is positive
 progress but not complete deployed acceptance.
 
+Closure observer 在观察窗口前后各采集 Workspace snapshot，以同一 `workspaceId/runId` 的 `acceptance.audit` 比较
+owner-accepted evidence ID、durable-effect execution key 和 satisfied CWI ID。`active` 是 SM-1 执行态；心跳、LLM usage、
+state revision 变化仅说明 activity，不证明目标正向推进。没有可比 baseline 或窗口内零增量只能报告未观察到进展，不能
+据此推断服务永久卡住；完整 completion 则要求当前 Run 已 completed、当前 Run accepted result 和 coverage 全闭合。
+historical Run result、重复 receipt/fence、已有局部效果不能覆盖当前 failed/stalled/ineffectiveRetry。治理 blocker 单独分类，
+`pass=true` 仅表示受治理等待可解释，`positiveProgress=false` 明确表示不是自动正向推进。Readiness 与这些判定相互独立。
+`scripts/test_observe_runtime_progress.py` 随 boundary gate 执行，observer 不从上述视图生成 mutation。
+
+Builtin-defaults HTTP 验收同时覆盖只读 current/target preview 与显式单资源 guarded upgrade，必须证明 missing/wrong/duplicate
+owner result fail-closed、定制与 stale 请求 `409`、写后响应丢失/fresh-owner retry 幂等，以及普通启动零覆盖。升级 catalog
+不能隐式刷新 Workspace definition/admission 或改变 Run 封存输入；[Built-In Default Resources](../40-profiles-capabilities/workspace/builtin-default-resources.md)
+是该专题合同。
+
 `verify-authority-live-e2e-closure` 的权威 readback 只由 Workspace/Run/Decision owner 读模型与 workspace snapshot 的
 immutable `runCommand` outcome构成。显式 execution activation提交后，matching request的`accepted|rejected` outcome就是
 admission completion evidence；后续 Runtime 正向推进由 owner state/projection单独观察。该 verifier 和

@@ -11,6 +11,16 @@ import (
 )
 
 func registerCatalogReadRoutes(router engine.RouteRegistry, state *serverState) {
+	router.AddHandler("/api/v1/workorch/builtin-defaults", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		items, err := state.listBuiltinDefaults(r.Context(), state.config.Backend, state.config.DataRoot)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			Defaults []workorchmanagementcontract.BuiltinDefault `json:"defaults"`
+		}{Defaults: items})
+	})
 	router.AddHandler("/api/v1/workorch/souls", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.soulListRequests.Add(1)
 		items, err := state.listSouls(r.Context(), state.config.Backend, state.config.DataRoot)
@@ -95,6 +105,19 @@ func registerCatalogReadRoutes(router engine.RouteRegistry, state *serverState) 
 }
 
 func registerCatalogWriteRoutes(router engine.RouteRegistry, state *serverState) {
+	router.AddHandler("/api/v1/workorch/builtin-defaults/upgrades", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		var request workorchmanagementcontract.BuiltinDefaultUpgrade
+		if err := decodeJSON(r, &request); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		value, err := state.upgradeBuiltinDefault(r.Context(), state.config.Backend, state.config.DataRoot, request)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, value)
+	})
 	router.AddHandler("/api/v1/workorch/souls", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		state.metrics.soulCreateRequests.Add(1)
 		var req workorchmanagementcontract.SoulMutation

@@ -169,6 +169,12 @@ func validateGovernanceApplicationPorts(ports GovernancePorts) error {
 }
 
 func validateRegistryApplicationPorts(ports RegistryPorts) error {
+	if ports.ListBuiltinDefaults == nil {
+		return fmt.Errorf("missing Registry.ListBuiltinDefaults application port")
+	}
+	if ports.UpgradeBuiltinDefault == nil {
+		return fmt.Errorf("missing Registry.UpgradeBuiltinDefault application port")
+	}
 	if ports.CreateSoul == nil {
 		return fmt.Errorf("missing Registry.CreateSoul application port")
 	}

@@ -18,6 +18,7 @@ detached projection；读取、等待、缓存或 replay 不能修改 owner stat
 | `GET` | `/healthz`, `/readyz`, `/metrics`, `/debug/pprof/**` | process health/readiness/metrics/debug |
 | `GET` | `/configuration` | redacted persisted configuration and active-revision status |
 | `GET` | `/configuration/llm/models` | active LLM-owner catalog summary |
+| `GET` | `/builtin-defaults` | `{defaults: [...]}`；Template/Soul owner 的 current/embedded content hashes、recognized revision、presence 与 upgrade availability；不是 Run sealed revision |
 | `GET` | `/console`, `/console/`, `/console/**` | embedded Web console assets |
 
 ## Workspace And Run Reads

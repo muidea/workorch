@@ -214,6 +214,30 @@ then
   exit 1
 fi
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces" >"$TMP_DIR/workspaces.json"
+if [[ -z "$WORKSPACE_IDS" && "$AUTO_SNAPSHOT_LIMIT" =~ ^[0-9]+$ && "$AUTO_SNAPSHOT_LIMIT" -gt 0 ]]; then
+  WORKSPACE_IDS="$(python3 - "$TMP_DIR/workspaces.json" "$AUTO_SNAPSHOT_LIMIT" <<'PY'
+import json
+import sys
+
+body = json.load(open(sys.argv[1], encoding="utf-8"))
+ids = [str(item.get("id") or "").strip() for item in body.get("workspaces") or []]
+print(",".join([item for item in ids if item][:int(sys.argv[2])]))
+PY
+)"
+  if [[ -n "$WORKSPACE_IDS" ]]; then
+    echo "$WORKSPACE_IDS" >"$TMP_DIR/auto-workspace-ids.txt"
+  fi
+fi
+# Capture an actual baseline before the observation window. An unchanged
+# heartbeat or already-existing receipt cannot prove continuing progress.
+if [[ -n "$WORKSPACE_IDS" ]]; then
+  IFS=',' read -ra IDS <<<"$WORKSPACE_IDS"
+  for workspace_id in "${IDS[@]}"; do
+    workspace_id="$(echo "$workspace_id" | xargs)"
+    [[ -n "$workspace_id" ]] || continue
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/snapshot-before-$workspace_id.json"
+  done
+fi
 curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics-before.txt"
 OBSERVED_PROCESS_PID="$(infer_process_pid || true)"
 if [[ -n "$OBSERVED_PROCESS_PID" ]]; then
@@ -351,30 +375,6 @@ if [[ ${#created_workspace_ids[@]} -gt 0 ]]; then
   fi
 fi
 
-if [[ -z "$WORKSPACE_IDS" && "$AUTO_SNAPSHOT_LIMIT" =~ ^[0-9]+$ && "$AUTO_SNAPSHOT_LIMIT" -gt 0 ]]; then
-  WORKSPACE_IDS="$(python3 - "$TMP_DIR/workspaces.json" "$AUTO_SNAPSHOT_LIMIT" <<'PY'
-import json
-import sys
-
-path, limit_text = sys.argv[1], sys.argv[2]
-limit = int(limit_text or "0")
-body = json.load(open(path, encoding="utf-8"))
-ids = []
-for item in body.get("workspaces") or []:
-    workspace_id = str(item.get("id") or "").strip()
-    if not workspace_id:
-        continue
-    ids.append(workspace_id)
-    if len(ids) >= limit:
-        break
-print(",".join(ids))
-PY
-)"
-  if [[ -n "$WORKSPACE_IDS" ]]; then
-    echo "$WORKSPACE_IDS" >"$TMP_DIR/auto-workspace-ids.txt"
-  fi
-fi
-
 if [[ -n "$WORKSPACE_IDS" ]]; then
   IFS=',' read -ra IDS <<<"$WORKSPACE_IDS"
   for workspace_id in "${IDS[@]}"; do
@@ -384,13 +384,16 @@ if [[ -n "$WORKSPACE_IDS" ]]; then
   done
 fi
 
-python3 - "$TMP_DIR" "$WORKSPACE_IDS" "$MIN_WORKSPACE_COUNT" "$AI_PROXY_LOG" "$AI_PROXY_INTERACTIONS_DIR" "$MIN_CACHE_HIT_RATE" "$REQUIRE_CACHE_SAMPLES" "$MIN_CACHE_SAMPLE_COUNT" "$CACHE_PROVIDER" "$CACHE_MODEL" "$CACHE_SINCE" "$CACHE_UNTIL" "$CACHE_BASELINE_FILE" "$MIN_CACHE_AVERAGE_DELTA" "$MIN_CACHE_LATEST_DELTA" "$SYNTHETIC_WORKSPACE_COUNT" "$TMP_DIR/synthetic-workspace-ids.txt" "$ENABLE_PPROF_CHECK" "$REQUIRE_PPROF" "$ENABLE_CPU_PROFILE_CHECK" "$REQUIRE_CPU_PROFILE" "$MAX_PENDING_REBUILDS" "$MAX_PROJECTION_SCHEDULE_DROPPED_DELTA" "$MAX_SUSPICIOUS_CPU_FLAT_PERCENT" "$MAX_SUSPICIOUS_CPU_CUM_PERCENT" "$REQUIRE_GOVERNANCE_RESOLUTION" <<'PY'
+python3 - "$TMP_DIR" "$WORKSPACE_IDS" "$MIN_WORKSPACE_COUNT" "$AI_PROXY_LOG" "$AI_PROXY_INTERACTIONS_DIR" "$MIN_CACHE_HIT_RATE" "$REQUIRE_CACHE_SAMPLES" "$MIN_CACHE_SAMPLE_COUNT" "$CACHE_PROVIDER" "$CACHE_MODEL" "$CACHE_SINCE" "$CACHE_UNTIL" "$CACHE_BASELINE_FILE" "$MIN_CACHE_AVERAGE_DELTA" "$MIN_CACHE_LATEST_DELTA" "$SYNTHETIC_WORKSPACE_COUNT" "$TMP_DIR/synthetic-workspace-ids.txt" "$ENABLE_PPROF_CHECK" "$REQUIRE_PPROF" "$ENABLE_CPU_PROFILE_CHECK" "$REQUIRE_CPU_PROFILE" "$MAX_PENDING_REBUILDS" "$MAX_PROJECTION_SCHEDULE_DROPPED_DELTA" "$MAX_SUSPICIOUS_CPU_FLAT_PERCENT" "$MAX_SUSPICIOUS_CPU_CUM_PERCENT" "$REQUIRE_GOVERNANCE_RESOLUTION" "$ROOT_DIR/scripts" <<'PY'
 import json
 import os
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, sys.argv[27])
+from observe_runtime_progress import evaluate_workspace_progress, runtime_progress_facts
 
 artifact_dir = Path(sys.argv[1])
 workspace_ids = [item.strip() for item in sys.argv[2].split(",") if item.strip()]
@@ -758,6 +761,7 @@ def workspace_live_summary(workspace_id, snapshot_body):
     decisions = list_value(snapshot.get("decisions"))
     approvals = list_value(snapshot.get("approvals"))
     results = list_value(snapshot.get("results"))
+    run_results = [item for item in results if isinstance(item, dict) and item.get("runId") == run.get("id") and item.get("workspaceId") == workspace_id]
     artifacts = list_value(snapshot.get("artifacts"))
     task_decompositions = list_value(snapshot.get("taskDecompositions"))
     execution_sections = list_value(snapshot.get("executionSections"))
@@ -766,15 +770,20 @@ def workspace_live_summary(workspace_id, snapshot_body):
     open_decisions = [
         item for item in decisions
         if isinstance(item, dict) and str(item.get("state") or "") not in {"resolved", "closed", "canceled", "cancelled"}
+        and item.get("workspaceId") == workspace_id
+        and ((item.get("runId") or "") == (run.get("id") or "") or item.get("id") in {workspace.get("blockingTicketId"), run.get("blockingTicketId")})
     ]
     pending_approvals = [
         item for item in approvals
         if isinstance(item, dict) and str(item.get("state") or "") not in {"approved", "rejected", "closed", "canceled", "cancelled"}
+        and item.get("workspaceId") == workspace_id
+        and ((item.get("runId") or "") == (run.get("id") or "") or item.get("id") in {workspace.get("blockingApprovalId"), run.get("blockingApprovalId")})
     ]
-    latest_result = latest_by_time(results, "updatedAt", "acceptedAt", "createdAt")
+    latest_result = latest_by_time(run_results, "updatedAt", "acceptedAt", "createdAt")
     latest_task_decomposition = latest_by_time(task_decompositions, "updatedAt", "createdAt")
     return {
         "workspaceId": workspace_id,
+        "runtimeProgress": runtime_progress_facts(snapshot),
         "workspace": {
             "id": workspace.get("id"),
             "title": workspace.get("title"),
@@ -843,6 +852,7 @@ def workspace_live_summary(workspace_id, snapshot_body):
             "pendingApprovals": len(pending_approvals),
             "results": len(results),
             "acceptedResults": sum(1 for item in results if isinstance(item, dict) and item.get("state") == "accepted"),
+            "currentRunAcceptedResults": sum(1 for item in run_results if item.get("state") == "accepted"),
             "rejectedResults": sum(1 for item in results if isinstance(item, dict) and item.get("state") == "rejected"),
             "artifacts": len(artifacts),
             "taskDecompositions": len(task_decompositions),
@@ -920,76 +930,6 @@ min_goal_accepted_results = int_env("WORKORCH_OBSERVE_MIN_GOAL_ACCEPTED_RESULTS"
 min_goal_artifacts = int_env("WORKORCH_OBSERVE_MIN_GOAL_ARTIFACTS", 0)
 require_goal_coverage_closed = bool_env("WORKORCH_OBSERVE_REQUIRE_GOAL_COVERAGE_CLOSED", True)
 
-def evaluate_workspace_progress(summary):
-    issues = []
-    workspace = summary.get("workspace") or {}
-    run = summary.get("run") or {}
-    counts = summary.get("counts") or {}
-    blockers = summary.get("blockers") or {}
-    heartbeat = summary.get("heartbeat") or {}
-    convergence = summary.get("convergenceStatus") or {}
-    workspace_id = summary.get("workspaceId") or workspace.get("id") or ""
-    workspace_state = str(workspace.get("state") or "").strip()
-    run_state = str(run.get("state") or "").strip()
-    accepted_results = int(counts.get("acceptedResults") or 0)
-    open_decisions = int(counts.get("openDecisions") or 0)
-    pending_approvals = int(counts.get("pendingApprovals") or 0)
-    has_decision_blocker = open_decisions > 0 and (
-        workspace.get("blockingTicketId")
-        or run.get("blockingTicketId")
-        or blockers.get("openDecisions")
-        or workspace_state == "waiting_decision"
-        or run_state == "blocked_on_decision"
-    )
-    has_approval_blocker = pending_approvals > 0 and (
-        workspace.get("blockingApprovalId")
-        or run.get("blockingApprovalId")
-        or blockers.get("pendingApprovals")
-        or workspace_state == "waiting_approval"
-        or run_state == "blocked_on_approval"
-    )
-    has_accepted_evidence = accepted_results > 0
-    has_terminal_success = run_state == "completed" and accepted_results >= min_goal_accepted_results
-    has_live_activity = bool(heartbeat.get("latestEffectiveProgressAt")) and run_state in {"running", "dispatching"}
-
-    if has_terminal_success:
-        mode = "completed_with_accepted_evidence"
-    elif has_accepted_evidence:
-        mode = "positive_progress_with_accepted_evidence"
-    elif has_decision_blocker:
-        mode = "governed_decision_blocker"
-    elif has_approval_blocker:
-        mode = "governed_approval_blocker"
-    elif has_live_activity:
-        mode = "active_runtime_progress_without_accepted_evidence"
-    else:
-        mode = "no_positive_progress_or_governed_blocker"
-        issues.append(
-            "workspace has no accepted evidence, no governed blocker, and no active progress heartbeat: "
-            f"workspaceState={workspace_state!r} runState={run_state!r} "
-            f"acceptedResults={accepted_results} openDecisions={open_decisions} pendingApprovals={pending_approvals}"
-        )
-    if has_decision_blocker and convergence.get("decisionEligibilityDenied"):
-        reason = str(convergence.get("decisionNotEligibleReason") or "").strip()
-        issues.append(
-            "workspace has an open decision while convergenceStatus marks decision eligibility denied: "
-            f"reason={reason!r} stepId={convergence.get('decisionNotEligibleStepId')!r}"
-        )
-    return {
-        "workspaceId": workspace_id,
-        "workspaceState": workspace_state,
-        "runId": run.get("id") or workspace.get("activeRunId"),
-        "runState": run_state,
-        "mode": mode,
-        "decisionEligibility": {
-            "denied": bool(convergence.get("decisionEligibilityDenied")),
-            "reason": convergence.get("decisionNotEligibleReason"),
-            "stepId": convergence.get("decisionNotEligibleStepId"),
-        },
-        "pass": not issues,
-        "issues": issues,
-    }
-
 def evaluate_goal_convergence(summary):
     issues = []
     workspace = summary.get("workspace") or {}
@@ -1019,7 +959,7 @@ def evaluate_goal_convergence(summary):
     if bool(convergence.get("ineffectiveRetry")) or bool(heartbeat.get("ineffectiveRetry")):
         issues.append("run convergence status is marked ineffectiveRetry")
 
-    accepted_results = int(counts.get("acceptedResults") or 0)
+    accepted_results = len((summary.get("runtimeProgress") or {}).get("acceptedResultIds") or [])
     if accepted_results < min_goal_accepted_results:
         issues.append(
             "accepted result count below convergence threshold: "
@@ -1040,7 +980,7 @@ def evaluate_goal_convergence(summary):
 
     current_gap = str(coverage.get("currentGap") or "").strip()
     missing_evidence = coverage.get("missingEvidenceKinds") or []
-    if require_goal_coverage_closed and (current_gap or missing_evidence):
+    if require_goal_coverage_closed and (current_gap or missing_evidence or not (summary.get("runtimeProgress") or {}).get("coverageClosed")):
         issues.append(
             "coverage still has an open gap: "
             f"currentGap={current_gap!r} missingEvidenceKinds={missing_evidence}"
@@ -1126,7 +1066,9 @@ for workspace_id in workspace_ids:
         live_summary = workspace_live_summary(workspace_id, snapshot_body)
         workspace_summaries.append(live_summary)
         goal_convergence.append(evaluate_goal_convergence(live_summary))
-        workspace_progress.append(evaluate_workspace_progress(live_summary))
+        before_path = artifact_dir / f"snapshot-before-{workspace_id}.json"
+        before_summary = workspace_live_summary(workspace_id, read_json(before_path)) if before_path.exists() else None
+        workspace_progress.append(evaluate_workspace_progress(live_summary, before_summary, min_goal_accepted_results))
         admission_outcome = execution_admission_outcome_from_run_command(
             snapshot.get("runCommand"),
             f"workspace-snapshot[{workspace_id}].runCommand",
@@ -1161,7 +1103,7 @@ for workspace_id in workspace_ids:
             warnings.append(f"{workspace_id}: runHeartbeat.activityState missing or empty")
         if max_state_changing_required_missing_after_snapshot:
             run_state = str((snapshot.get("run") or {}).get("state") or "").strip()
-            if run_state in {"running", "dispatching", "blocked_on_decision", "blocked_on_approval"} and snapshot_has_state_change_preflight(snapshot):
+            if run_state in {"active", "blocked_on_decision", "blocked_on_approval"} and snapshot_has_state_change_preflight(snapshot):
                 max_allowed = int(max_state_changing_required_missing_after_snapshot)
                 refs = nested_contract_violation_rule_refs(snapshot, "state_changing_required_missing")
                 count = len(refs)

@@ -20,6 +20,7 @@ func Contracts() []eventcontract.Contract {
 		TopicWorkspaceCommandListDoDsByWS,
 		TopicWorkspaceTemplateCommandGet,
 		TopicWorkspaceTemplateCommandList,
+		TopicWorkspaceTemplateCommandQueryBuiltinDefaults,
 	)...)
 	ret = append(ret, eventcontract.Build("workspace", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicWorkspaceCommandCreate,
@@ -36,6 +37,7 @@ func Contracts() []eventcontract.Contract {
 		TopicWorkspaceTemplateCommandUpdate,
 		TopicWorkspaceTemplateCommandDelete,
 		TopicWorkspaceTemplateCommandEnsureDefaults,
+		TopicWorkspaceTemplateCommandUpgradeBuiltinDefault,
 		TopicWorkspaceCommandExecutionIntent,
 		TopicWorkspaceFactTerminalDelivery,
 		TopicWorkspaceDefinitionAdmissionIntent,

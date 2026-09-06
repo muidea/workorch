@@ -162,6 +162,12 @@ capability resource state。
 
 ### Receipt, evidence and repair
 
+- validation entry authorization 与 full diagnostic scope 分离。发送 owner execution、接纳 failure receipt、确认 repair
+  surface、commitment 和 fresh-load invariant 必须复用同一个 completed-dispatch scope 投影：取 exact
+  admissibility snapshot/acquisition binding 的完整 catalog，不以单 operation entry 的 authorization 集合代替。
+  catalog 只提供诊断范围，不扩大 entry 授权；候选修复 target 仍需 capability owner confirmation。
+  `shell_owner_receipt_integration_test.go` 用单文件 entry + 多文件真实 Shell catalog 覆盖 SM-3 receipt → SM-2 confirmation/
+  repair → fresh validation，以及 SM-4 reload/duplicate。SM-1 的 lifecycle authority 和 reducer 入口不变。
 - 已封存 validation-repair effect 的 rejected owner receipt 必须在完成 dispatch 的同一次 private SM-3/SM-2 CAS 中
   退休 target/directive，并封存 `repair_surface_unavailable`；若持有 semantic repair intermediate binding，同步退休该 binding。
   receipt 原诊断、confirmation、commitment 与 evidence lineage 保持不可变；普通拒绝不授权恢复旧修复范围或自动 successor。

@@ -32,14 +32,15 @@ type Dependencies struct {
 
 type Biz struct {
 	basebiz.Base
-	manager    *goalDoDManager
-	workspaces repository.WorkspaceRepository
-	cleaner    repository.WorkspaceDeletionMaterialCleaner
-	goals      repository.GoalRepository
-	dods       repository.DoDRepository
-	templates  repository.WorkspaceTemplateRepository
-	topics     []string
-	started    bool
+	manager            *goalDoDManager
+	workspaces         repository.WorkspaceRepository
+	cleaner            repository.WorkspaceDeletionMaterialCleaner
+	goals              repository.GoalRepository
+	dods               repository.DoDRepository
+	templates          repository.WorkspaceTemplateRepository
+	topics             []string
+	started            bool
+	templateMutationMu sync.Mutex
 	// deletionIngressMu serializes the initial Workspace deletion admission
 	// against owner public mutation ingresses. Persisted CAS remains the
 	// authority; this lock only closes same-process non-Workspace side-effect
@@ -106,6 +107,10 @@ func (m *Biz) Start() error {
 	m.SubscribeMatchedFunc(ModuleID+"/run-projection", runevents.NotificationDestination, runevents.TopicRunRuntimeCommandsReady, m.handleRunRuntimeCommandsReady)
 	m.topics = append(m.topics, workspaceevents.TopicWorkspaceTemplateCommandEnsureDefaults)
 	m.SubscribeFunc(workspaceevents.TopicWorkspaceTemplateCommandEnsureDefaults, m.handleSystemDefaultsCommand)
+	for _, topic := range []string{workspaceevents.TopicWorkspaceTemplateCommandQueryBuiltinDefaults, workspaceevents.TopicWorkspaceTemplateCommandUpgradeBuiltinDefault} {
+		m.topics = append(m.topics, topic)
+		m.SubscribeFunc(topic, m.handleBuiltinTemplateDefaultsCommand)
+	}
 	if err := m.startRunProjectionReconciliation(); err != nil {
 		m.unsubscribeOwnerTopics()
 		return err
@@ -115,6 +120,9 @@ func (m *Biz) Start() error {
 }
 
 func (m *Biz) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent.Result) {
+	if result == nil {
+		return
+	}
 	if ev == nil || ev.Source() != workspaceTemplateDefaultsCommandSource || m == nil || m.templates == nil {
 		setSystemWorkspaceTemplateDefaultsResult(result, common.ErrInvalidArgument)
 		return
@@ -123,6 +131,8 @@ func (m *Biz) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent
 		setSystemWorkspaceTemplateDefaultsResult(result, common.ErrInvalidArgument)
 		return
 	}
+	m.templateMutationMu.Lock()
+	defer m.templateMutationMu.Unlock()
 	setSystemWorkspaceTemplateDefaultsResult(result, ensureBuiltinWorkspaceTemplateDefaults(ev.Context(), m.templates))
 }
 

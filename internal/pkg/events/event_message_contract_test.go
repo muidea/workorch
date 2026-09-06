@@ -67,7 +67,10 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// File adds one SM-3 read/query topic for manifest-declared operation
 	// candidate conformance. It returns an owner fact only; the Orchestrator
 	// private reducer remains the sole candidate/retry transition authority.
-	const expectedProductionTopicCount = 283
+	// Soul and Workspace each add an independent builtin preview query and
+	// guarded upgrade command. Only their private owner transactions may write;
+	// no cross-owner upgrade state machine or implicit activation is introduced.
+	const expectedProductionTopicCount = 287
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}

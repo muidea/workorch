@@ -12,6 +12,8 @@ import (
 )
 
 func (m *Biz) executeWorkspaceTemplateCommand(ctx context.Context, ev magicevent.Event) (workspaceCommandResponse, error) {
+	m.templateMutationMu.Lock()
+	defer m.templateMutationMu.Unlock()
 	switch ev.ID() {
 	case workspaceevents.TopicWorkspaceTemplateCommandCreate:
 		cmd, ok := ev.Data().(workspaceevents.CreateWorkspaceTemplateCommand)

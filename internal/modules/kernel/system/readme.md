@@ -31,7 +31,8 @@ Last Verified: 2026-08-30
 - System 不取得 Soul、Workspace、MCP repository/service，也不定义通用 ensure envelope。
 - 默认值的 validation、dedupe、CAS、create-if-missing 与持久化完全属于接收 owner。
 - 已存在的内置 ID 和用户新增 ID 必须保持不变；删除内置 ID 后，下次启动才按当前嵌入值重新创建。
-- 当前没有默认资源 migration/upgrade；System 不以普通 ensure 覆盖旧对象。
+- System 不提供 migration/upgrade，也不以普通 ensure 覆盖旧对象；Template/Soul 的显式 guarded upgrade 由 Application
+  直接向各资源 owner 提交，其私有事务与 System 启动协调无关。
 - System 不参与 Definition admission、Run lifecycle、Runtime drive、governance、projection 或 deletion。
 - 新增默认资源 owner 必须同时增加 owner-defined concrete contract、明确顺序和失败/重试验收。
 

@@ -71,6 +71,8 @@ type ApproveApprovalFunc func(context.Context, string, string, string, appmodelc
 type RejectApprovalFunc func(context.Context, string, string, string, appmodelcore.ResolveApprovalCommand) (projectioncontract.Approval, error)
 type BatchResolveApprovalsFunc func(context.Context, string, string, appmodelcore.BatchResolveApprovalCommand) ([]projectioncontract.Approval, error)
 type CreateSoulFunc func(context.Context, string, string, workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error)
+type ListBuiltinDefaultsFunc func(context.Context, string, string) ([]workorchmanagementcontract.BuiltinDefault, error)
+type UpgradeBuiltinDefaultFunc func(context.Context, string, string, workorchmanagementcontract.BuiltinDefaultUpgrade) (workorchmanagementcontract.BuiltinDefaultUpgradeResult, error)
 type UpdateSoulFunc func(context.Context, string, string, string, workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error)
 type DeleteSoulFunc func(context.Context, string, string, string) error
 type ReadSoulFunc func(context.Context, string, string, string) (workorchmanagementcontract.Soul, error)

@@ -66,6 +66,10 @@ func (m *Biz) Start() error {
 	}
 	m.topics = append(m.topics, soulevents.TopicSoulCommandEnsureDefaults)
 	m.SubscribeFunc(soulevents.TopicSoulCommandEnsureDefaults, m.handleSystemDefaultsCommand)
+	for _, topic := range []string{soulevents.TopicSoulCommandQueryBuiltinDefaults, soulevents.TopicSoulCommandUpgradeBuiltinDefault} {
+		m.topics = append(m.topics, topic)
+		m.SubscribeFunc(topic, m.handleBuiltinDefaultsCommand)
+	}
 	m.started = true
 	return nil
 }

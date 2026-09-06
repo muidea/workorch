@@ -62,6 +62,9 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
 
 ### Bootstrap and projection
 
+- builtin-defaults query 只汇总 Soul/Workspace 的 detached concrete result；单资源 upgrade 只向对应 owner 发出带
+  expected/target content hash 的 typed command。Application 不维护升级状态、不得用 query 结果代替 owner 写入时校验，
+  也不隐式刷新 Workspace binding/admission 或重启 Run。
 - bootstrap compiler 无损封存 definition/profile、provider、Soul、Skill、MCP、Memory、evidence policy、budget 与 directory
   snapshot；所有 current-shape admission binding 由 Workspace owner pure compiler 重验。capability requirement 必须是终态证明
   kinds 与 Profile validation-repair route kinds 的并集，因此 repair-only owner operation 可被启动时采集，但不得被加入终态

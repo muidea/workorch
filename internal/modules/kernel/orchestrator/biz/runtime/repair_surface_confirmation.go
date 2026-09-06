@@ -279,7 +279,9 @@ func sealedValidationFailureObservationMatches(aggregate RuntimeAggregate, obser
 // sealedValidationFailureObservationMatchesDispatch binds an observation to
 // one immutable dispatch seal. It is shared by receipt admission (active
 // dispatch) and post-execution SM-2 confirmation (completed dispatch), so both
-// boundaries apply the same per-operation authorization semantics.
+// boundaries apply the same entry authorization and execution-bound catalog
+// diagnostic scope as the outbound owner handoff. No current inventory may
+// supplement a missing or retired dispatch seal.
 func sealedValidationFailureObservationMatchesDispatch(dispatch SealedDispatch, observation runtimecontract.RuntimeValidationFailureObservation) bool {
 	if dispatch.Candidate.Validation == nil {
 		return false
@@ -291,12 +293,17 @@ func sealedValidationFailureObservationMatchesDispatch(dispatch SealedDispatch, 
 		if err != nil {
 			continue
 		}
+		validationScope, err := runtimeValidationScopeTargetRefs(dispatch, value)
+		if err != nil {
+			continue
+		}
 		operations = append(operations, proof.SealedValidationOperation{
 			DispatchID: dispatch.ID, AuthoritySnapshotID: dispatch.Transaction.AuthoritySnapshotID,
 			OperationID: value.ID, TargetRole: dispatch.FocusTargetRole,
-			OperationTargetRefs: append([]string(nil), value.TargetRefs...),
-			RequireTargets:      targetAuthorization.RequireTargets,
-			TargetAuthorization: targetAuthorization.Target,
+			OperationTargetRefs:       append([]string(nil), value.TargetRefs...),
+			RequireTargets:            targetAuthorization.RequireTargets,
+			TargetAuthorization:       targetAuthorization.Target,
+			ValidationScopeTargetRefs: validationScope,
 		})
 	}
 	return proof.ValidationFailureObservationMatchesSealedOperation(operations, observation)

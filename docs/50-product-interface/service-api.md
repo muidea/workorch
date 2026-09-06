@@ -81,6 +81,7 @@ LLM configuration save does not mutate the running LLM owner snapshot or any sea
 | `DELETE` | `/workspaces/:workspaceId` | submit one Workspace-owner delete intent; optional typed purge mode |
 | `PUT` / `DELETE` | `/workspaces/:workspaceId/llm-selection` | owner-CAS update/clear selection |
 | `PUT` | `/workspaces/:workspaceId/soul-bindings` | update owner-managed Soul routing |
+| `POST` | `/workspaces/:workspaceId/template-binding-refresh` | explicitly refresh template-bound policy; does not mutate a sealed Run |
 | `POST` | `/workspaces/:workspaceId/goals` | submit Goal authoring change through admission candidate |
 | `PUT` | `/workspaces/:workspaceId/goals/:goalId` | submit scoped Goal revision candidate |
 | `POST` | `/workspaces/:workspaceId/dods` | submit DoD authoring change through admission candidate |
@@ -153,6 +154,7 @@ type/payload或action/principal/context做幂等readback；Workorchd不得重判
 | --- | --- |
 | Soul | `POST /souls`; `PUT, DELETE /souls/:soulId` |
 | Workspace Template | `POST /workspace-templates`; `PUT, DELETE /workspace-templates/:templateId` |
+| Builtin Template/Soul | `POST /builtin-defaults/upgrades` |
 | Skill | `POST /skills` |
 | MCP server | `POST /mcp/servers`; `PUT /mcp/servers/:serverId` |
 | MCP capability | `POST /mcp/capabilities`; `PUT /mcp/capabilities/:capabilityId` |
@@ -163,6 +165,13 @@ Registry DTO 只表达 declarative owner resource。MCP Registry owns metadata�
 Server DTO只接受`environmentRefs`而不接受environment value；supported ref由MCP execution最后解析，plaintext credential在
 persistence/EventHub前拒绝。Capability以`enabled`作为唯一availability字段；owner-issued
 `source/sourceRef/revision`只读provenance不能作为mutation authority。
+
+Builtin upgrade body 如 `{"kind":"soul","id":"...","expectedContentHash":"...","targetContentHash":"..."}`，kind 仅允许 `soul|workspace_template`。
+先从 `GET /builtin-defaults` 取得 preview；owner 写入时重新比较，只有 exact reviewed baseline 可升级。成功返回
+`{default: <current owner observation>, upgraded: true|false}`；已到同一目标的响应丢失重试为 `false`。
+定制/未知内容、stale expected hash 或 changed target 返回 `409`，缺资源为 `404`，无 force 或 batch-atomic promise。
+此操作不刷新 Workspace、不创建 eligible admission、不触发 Run activation；详见
+[Built-In Default Resources](../40-profiles-capabilities/workspace/builtin-default-resources.md#explicit-guarded-upgrade)。
 
 ### Optional Setup Draft
 

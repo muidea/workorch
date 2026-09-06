@@ -43,9 +43,10 @@ func TestValidationFailureObservationMatchesSealedOperationUsesSealedValidationS
 		OperationTargetRefs: []string{"internal/lsp/server_test.go"},
 		RequireTargets:      true,
 		TargetAuthorization: runtimecontract.RuntimeOperationTargetAuthorization{
-			Policy:               runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
-			OwnerScopeTargetRefs: []string{"internal/lsp/server.go", "internal/lsp/server_test.go"},
+			Policy:          runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+			ExactTargetRefs: []string{"internal/lsp/server_test.go"},
 		},
+		ValidationScopeTargetRefs: []string{"internal/lsp/server.go", "internal/lsp/server_test.go"},
 	}
 	observation := runtimecontract.RuntimeValidationFailureObservation{
 		WorkspaceID:               "workspace-1",
@@ -81,9 +82,10 @@ func TestValidationFailureObservationMatchesSealedOperationRejectsUnsealedOrInva
 		OperationTargetRefs: []string{"internal/lsp/server_test.go"},
 		RequireTargets:      true,
 		TargetAuthorization: runtimecontract.RuntimeOperationTargetAuthorization{
-			Policy:               runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
-			OwnerScopeTargetRefs: []string{"internal/lsp/server.go", "internal/lsp/server_test.go"},
+			Policy:          runtimecontract.RuntimeOperationTargetPolicyExactTarget,
+			ExactTargetRefs: []string{"internal/lsp/server_test.go"},
 		},
+		ValidationScopeTargetRefs: []string{"internal/lsp/server.go", "internal/lsp/server_test.go"},
 	}
 	observation := runtimecontract.RuntimeValidationFailureObservation{
 		WorkspaceID:               "workspace-1",
@@ -160,10 +162,24 @@ func TestValidationFailureObservationMatchesSealedOperationRejectsUnsealedOrInva
 			},
 		},
 		{
+			name: "entry inside diagnostic scope but outside entry authorization",
+			mutateOp: func(value *SealedValidationOperation) {
+				value.OperationTargetRefs = []string{"internal/lsp/server.go"}
+			},
+		},
+		{
+			name: "authorized entry outside diagnostic scope",
+			mutateOp: func(value *SealedValidationOperation) {
+				value.ValidationScopeTargetRefs = []string{"internal/lsp/server.go"}
+			},
+			mutateFacts: func(value *runtimecontract.RuntimeValidationFailureObservation) {
+				value.ValidationScopeTargetRefs = []string{"internal/lsp/server.go"}
+			},
+		},
+		{
 			name: "missing sealed validation scope",
 			mutateOp: func(value *SealedValidationOperation) {
-				value.TargetAuthorization.OwnerScopeTargetRefs = nil
-				value.TargetAuthorization.OwnerSelectorRefs = []string{"workspace-validation-target"}
+				value.ValidationScopeTargetRefs = nil
 			},
 		},
 	}

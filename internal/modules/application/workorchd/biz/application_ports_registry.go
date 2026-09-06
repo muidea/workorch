@@ -11,6 +11,24 @@ import (
 
 func (p *runtimeApplicationPorts) configureRegistryPorts() {
 	ports := &p.ports
+	ports.Registry.ListBuiltinDefaults = func(ctx context.Context, _, _ string) ([]workorchmanagementcontract.BuiltinDefault, error) {
+		var ret []workorchmanagementcontract.BuiltinDefault
+		err := p.withSession(ctx, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.ListBuiltinDefaultsWithSession(ctx, session)
+			return err
+		})
+		return ret, err
+	}
+	ports.Registry.UpgradeBuiltinDefault = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.BuiltinDefaultUpgrade) (workorchmanagementcontract.BuiltinDefaultUpgradeResult, error) {
+		var ret workorchmanagementcontract.BuiltinDefaultUpgradeResult
+		err := p.withSession(ctx, func(session *runtimecore.Session) error {
+			var err error
+			ret, err = appservice.UpgradeBuiltinDefaultWithSession(ctx, session, cmd)
+			return err
+		})
+		return ret, err
+	}
 	ports.Registry.CreateSoul = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.SoulMutation) (workorchmanagementcontract.Soul, error) {
 		var ret workorchmanagementcontract.Soul
 		err := p.withSession(ctx, func(session *runtimecore.Session) error {

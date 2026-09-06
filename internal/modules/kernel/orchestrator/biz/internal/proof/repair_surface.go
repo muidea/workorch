@@ -18,6 +18,9 @@ type SealedValidationOperation struct {
 	OperationTargetRefs []string
 	RequireTargets      bool
 	TargetAuthorization runtimecontract.RuntimeOperationTargetAuthorization
+	// Projected only from the exact execution-bound catalog retained by the
+	// dispatch. Entry authorization is a different, potentially smaller scope.
+	ValidationScopeTargetRefs []string
 }
 
 // RepairSurfaceConfirmationExists recognizes an exact persisted owner reply.
@@ -55,13 +58,14 @@ func ValidationFailureObservationMatchesSealedOperation(operations []SealedValid
 		return false
 	}
 	for _, operation := range operations {
-		validationScopeTargetRefs := operation.TargetAuthorization.AllowedTargetRefs()
+		validationScopeTargetRefs := operation.ValidationScopeTargetRefs
 		if strings.TrimSpace(operation.DispatchID) != observation.DispatchID ||
 			strings.TrimSpace(operation.AuthoritySnapshotID) != observation.AuthoritySnapshotID ||
 			strings.TrimSpace(operation.OperationID) != observation.OperationID ||
 			strings.TrimSpace(operation.TargetRole) != observation.TargetRole ||
 			len(validationScopeTargetRefs) == 0 ||
 			runtimecontract.ValidateRuntimeOperationTargetsAgainstAuthorization(operation.TargetAuthorization, operation.OperationTargetRefs, operation.RequireTargets) != nil ||
+			!grounding.TargetRefsContained(operation.OperationTargetRefs, validationScopeTargetRefs) ||
 			!grounding.SameTargetRefs(validationScopeTargetRefs, observation.ValidationScopeTargetRefs) {
 			continue
 		}

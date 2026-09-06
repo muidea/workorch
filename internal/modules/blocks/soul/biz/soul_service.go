@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/common"
@@ -17,6 +18,8 @@ import (
 
 type service struct {
 	souls repository.SoulRepository
+	// Serializes owner-local content replacement with guarded builtin upgrades.
+	mutationMu sync.Mutex
 }
 
 func newService(souls repository.SoulRepository) *service {
@@ -28,6 +31,8 @@ func (s *service) createSoulCommand(ctx context.Context, cmd soulevents.CreateSo
 }
 
 func (s *service) createSoul(ctx context.Context, cmd soulevents.CreateSoulCommand, provenance string) (*soulmodel.Soul, error) {
+	s.mutationMu.Lock()
+	defer s.mutationMu.Unlock()
 	item, err := normalizedSoulFromCommand(cmd)
 	if err != nil {
 		return nil, err
@@ -45,6 +50,12 @@ func (s *service) createSoul(ctx context.Context, cmd soulevents.CreateSoulComma
 }
 
 func (s *service) updateSoul(ctx context.Context, cmd soulevents.CreateSoulCommand) (*soulmodel.Soul, error) {
+	s.mutationMu.Lock()
+	defer s.mutationMu.Unlock()
+	return s.updateSoulLocked(ctx, cmd)
+}
+
+func (s *service) updateSoulLocked(ctx context.Context, cmd soulevents.CreateSoulCommand) (*soulmodel.Soul, error) {
 	item, err := normalizedSoulFromCommand(cmd)
 	if err != nil {
 		return nil, err
@@ -67,6 +78,8 @@ func (s *service) updateSoul(ctx context.Context, cmd soulevents.CreateSoulComma
 }
 
 func (s *service) deleteSoul(ctx context.Context, id common.SoulID) error {
+	s.mutationMu.Lock()
+	defer s.mutationMu.Unlock()
 	if err := validateSoulID(id); err != nil {
 		return err
 	}

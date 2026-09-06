@@ -96,7 +96,7 @@ type ValidateCapabilitySelectionResult struct {
 }
 
 func MessageContracts() []eventcontract.MessageContract {
-	ret := []eventcontract.MessageContract{}
+	ret := builtinDefaultMessageContracts()
 	for _, topic := range []string{
 		TopicSoulCommandCreate,
 		TopicSoulCommandGet,

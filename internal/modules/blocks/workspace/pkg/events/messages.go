@@ -419,6 +419,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[RuntimeTerminalDeliveryFact, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceFactTerminalDelivery).MessageContract(),
 		eventcontract.CommandTopic[DefinitionAdmissionIntentCommand, DefinitionAdmissionIntentResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceDefinitionAdmissionIntent).MessageContract(),
 	}
+	ret = append(ret, builtinDefaultMessageContracts()...)
 	for _, topic := range []string{
 		TopicWorkspaceCreated,
 		TopicWorkspaceStateChanged,

@@ -80,6 +80,8 @@ type GovernancePorts struct {
 }
 
 type RegistryPorts struct {
+	ListBuiltinDefaults     ListBuiltinDefaultsFunc
+	UpgradeBuiltinDefault   UpgradeBuiltinDefaultFunc
 	CreateSoul              CreateSoulFunc
 	UpdateSoul              UpdateSoulFunc
 	DeleteSoul              DeleteSoulFunc

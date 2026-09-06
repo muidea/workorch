@@ -200,7 +200,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}
 	sealedOperation := sealedOperations[0]
 	sealedValidationScope, err := runtimeValidationScopeTargetRefs(*sealedAggregate.ActiveDispatch, sealedOperation)
-	if err != nil || !slices.Equal(sealedValidationScope, []string{"implementation.go"}) ||
+	if err != nil || !slices.Equal(sealedValidationScope, shellCatalog.TargetRefs) || len(sealedValidationScope) <= 1 ||
 		len(sealedOperation.TargetRefs) != 1 || sealedOperation.TargetRefs[0] != "implementation.go" {
 		t.Fatalf("exact validation seal = entry=%v scope=%v err=%v", sealedOperation.TargetRefs, sealedValidationScope, err)
 	}
@@ -260,7 +260,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}
 	failureObservation := persisted.Facts.Failure.ValidationFailureObservation.Clone()
 	if !slices.Equal(failureObservation.CandidateTargetRefs, []string{"implementation.go"}) ||
-		!slices.Equal(failureObservation.ValidationScopeTargetRefs, []string{"implementation.go"}) {
+		!slices.Equal(failureObservation.ValidationScopeTargetRefs, sealedValidationScope) {
 		t.Fatalf("Shell observation lost exact sealed scope: %+v", failureObservation)
 	}
 	if _, err := controller.recordValidationFailureObservation(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, failureObservation); err != nil {
@@ -435,7 +435,7 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	if replayed.Receipt.ExecutionKey != execution.ExecutionKey || diagnostic == nil || diagnostic.TargetObservation != nil ||
 		diagnostic.ValidationFailureObservation == nil ||
 		!slices.Equal(diagnostic.ValidationFailureObservation.CandidateTargetRefs, []string{"implementation.go"}) ||
-		!slices.Equal(diagnostic.ValidationFailureObservation.ValidationScopeTargetRefs, []string{"implementation.go"}) {
+		!slices.Equal(diagnostic.ValidationFailureObservation.ValidationScopeTargetRefs, sealedValidationScope) {
 		t.Fatalf("duplicate Shell execution did not replay the committed receipt: %+v", replayed)
 	}
 
@@ -978,13 +978,13 @@ func addObservedShellFailureTargetFreshness(t *testing.T, ctx context.Context, h
 	initialManifest := sendObservedManifest(t, ctx, hub, *aggregate, manifestPrerequisite, workspaceDirectory)
 	initial := acquireObservedShellValidationCatalog(
 		t, ctx, hub, *aggregate, prerequisite, workspaceDirectory, initialManifest,
-		[]string{"implementation.go"}, requirements,
+		initialManifest.Manifest.TargetRefs, requirements,
 	)
 	runtimeTestInstallShellNativeValidationChecks(t, workspaceDirectory, initial.Acquisition.Admissibility, requirements, nativeCheckFails)
 	manifest := sendObservedManifest(t, ctx, hub, *aggregate, manifestPrerequisite, workspaceDirectory)
 	response := acquireObservedShellValidationCatalog(
 		t, ctx, hub, *aggregate, prerequisite, workspaceDirectory, manifest,
-		[]string{"implementation.go"}, requirements,
+		manifest.Manifest.TargetRefs, requirements,
 	)
 	for _, recipe := range runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(aggregate.Facts.Activation.EvidencePolicies) {
 		if !slices.Contains(response.Acquisition.Admissibility.ValidationRecipeRefs, recipe.ID) {
