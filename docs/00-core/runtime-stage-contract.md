@@ -140,6 +140,9 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
 ## Definition And LLM Boundary
 
 - 正式 startup input 是 Goal、DoD、Workspace Template snapshot 与 resolved project workspace directory。
+- 新 Start/Restart 自动采用当前 Template/Soul 并由 Workspace-private admission 追加新 candidate、封存新 startup input；
+  已准入历史只作不可变 lineage，不以当前 schema/compiler 重编译或改写。新配置无效仍在 pre-seal 阻塞。Resume/recovery
+  保持原 Run snapshot，不热替换 SM-1～SM-4 输入，详见 [Automatic Configuration Loading](../40-profiles-capabilities/workspace/builtin-default-resources.md#automatic-configuration-loading)。
 - canonical Goal/DoD aggregation、dependency、gate 与 terminal 只支持 `all_of`；不提供 `one_of`/`any_of` terminal escape。
 - 显式 unsupported relation 只能存在于 Workspace owner 的 pre-seal admission candidate，并必须在 Run 前形成 blocking ticket。
 - Definition admission 在 promotion 前分别无损编译 Template 与 Workspace 的 `EvidencePolicies`，拒绝空/重复 ID、

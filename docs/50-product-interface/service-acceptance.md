@@ -312,8 +312,9 @@ Workspace heartbeat 的 `latestActivityAt` 与 `latestEffectiveProgressAt` 必�
 耗尽可形成该诊断。Web/TUI 与 heartbeat age metrics 共用这份只读投影，不生成新状态机或恢复动作。
 
 Builtin-defaults HTTP 验收同时覆盖只读 current/target preview 与显式单资源 guarded upgrade，必须证明 missing/wrong/duplicate
-owner result fail-closed、定制与 stale 请求 `409`、写后响应丢失/fresh-owner retry 幂等，以及普通启动零覆盖。升级 catalog
-不能隐式刷新 Workspace definition/admission 或改变 Run 封存输入；[Built-In Default Resources](../40-profiles-capabilities/workspace/builtin-default-resources.md)
+owner result fail-closed、定制与 stale 请求 `409`、写后响应丢失/fresh-owner retry 幂等，以及普通启动只更新 exact reviewed
+未定制版本、保留定制/未知内容。升级 catalog 不改变旧 Run 封存输入；新 Start/Restart 自动读取新配置并追加准入，
+必须证明旧 candidate/Run 原样、无效新配置阻塞、Resume/recovery 不热替换。[Built-In Default Resources](../40-profiles-capabilities/workspace/builtin-default-resources.md)
 是该专题合同。
 
 `verify-authority-live-e2e-closure` 的权威 readback 只由 Workspace/Run/Decision owner 读模型与 workspace snapshot 的

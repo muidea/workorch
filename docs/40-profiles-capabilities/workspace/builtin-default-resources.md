@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-21
+Last Verified: 2026-09-06
 
 ## Purpose
 
@@ -49,9 +49,10 @@ embedded owner-neutral defaults
 System 不定义上述 command schema、不访问 owner repository，也不持有综合 defaults store。Partial startup failure
 fail-fast；重启重放同一 owner command。MCP defaults 使用 MCP Registry owner 的独立 ensure contract，在 MCP 专题维护。
 
-所有built-in都是seed-once、user-editable owner resource。Ensure只在built-in ID不存在时创建，绝不覆盖已有Soul、Template、
-MCP Server或Capability；删除built-in后，下一次startup可按当时embedded declaration重建。embedded default变更不自动迁移
-既有 resource，升级不得要求清空 Runtime 数据。
+所有 built-in 都是 user-editable owner resource。Ensure 创建缺失 ID；Template/Soul owner 还自动将精确匹配 reviewed
+historical fingerprint 的未定制资源更新到当前内嵌配置，复用下述 owner-private guarded upgrade。未知、定制或缺少完整
+来源/内容身份的资源保留，不做推测性覆盖。MCP Server/Capability 仍为 create-if-missing，不参与本合同的自动更新。
+删除 built-in 后，下一次 startup 可按当时 embedded declaration 重建；不要求清空 Runtime 数据或重新创建 Workspace。
 
 ## Explicit Guarded Upgrade
 
@@ -71,9 +72,29 @@ bindings。未知/定制内容、stale preview、目标 binary 已变化均返�
 写入成功但 response 丢失后，原请求在 fresh owner/file handle 重放；已达同一目标则返回 `upgraded=false`，不重复写入或
 增加 revision。不存在的资源由 startup ensure 负责，upgrade 不承担隐式 create。
 
-升级 catalog 不改写已存在 Workspace 的 template-bound policy、eligible admission 或 Run activation。需要采用新内容时，
-显式刷新 Workspace template binding、重新完成 definition admission，再提交 Restart；Resume/recovery 始终使用原封存输入。
-用户定制内容需要显式人工合并，不能把后续重启解释为允许覆盖。
+升级 catalog 本身不改写 Workspace、历史 candidate 或 Run activation，也不触发执行。用户定制的 catalog 资源需要显式
+人工合并，不能把后续重启解释为允许覆盖。
+
+## Automatic Configuration Loading
+
+新 Start/Restart 自动读取当前 Template 与 Soul，不要求先手动 refresh，也不要求重新创建 Workspace：
+
+- Workspace 的 `TemplateBindingHash` 记录当前 authoring 字段所物化的 Template 版本；模板未变时保留 Workspace 显式
+  配置。模板变化时，重新物化其 profile、default/stage Soul、context hints 与 evidence policies，删除已从模板移除的旧策略。
+  这些字段跟随模板整体更新；需要长期维护独立策略时应绑定自己的 Template。旧 Workspace 没有该字段时用旧 startup 的
+  Template hash 判断；连该来源也不存在时，在下一次新执行准入中采用当前模板，不回填历史记录。
+- Goal/DoD 使用现有用户定义，保留 Workspace ID、目录、provider selection、生命周期和历史 Run。创建后、首次 Start 前
+  的模板更新也遵守同一规则。
+- Application 只编译 detached 当前输入；Workspace-private definition-admission event 在 Template CRUD 共用锁内重新核对
+  Template hash、Workspace revision/configuration fence，再通过 CAS 追加新 candidate 并 promotion 新 startup input。
+  同输入重放幂等；并发漂移拒绝，不封存混合版本。新配置不满足当前准入规则时阻塞，不回退使用旧 eligible seal。
+- 已完成准入的历史 candidate 仅作不可变 identity/lineage 关联，不用当前 compiler/schema 重编译、规范化或重写。
+  新 candidate 必须满足当前合同；缺失/冲突的归档身份及未解决的 clarification 仍 fail-closed，不能借配置更新绕过。
+- Soul 在每次新 bootstrap 编译时按当前绑定从 Soul owner 读取，封存其 revision/content hash 和内容；跨请求不缓存旧内容。
+  Resume、恢复和同一 Run 的后续 drive 始终使用该 Run 的原封存输入，不热替换运行中的配置。
+
+影响边界是 Workspace pre-seal admission 与 SM-1 新执行输入；SM-1 lifecycle、SM-2/SM-3 authority/dispatch、SM-4 recovery
+与 delivery 的 owner/transition 均不改变。配置加载不产生自动 successor，不跨组件管理状态机。
 
 只读版本核对必须区分三层，不能把“已部署最新 binary”或“catalog 已升级”解释为“已有 Run 使用新配置”：
 
@@ -109,6 +130,8 @@ Fresh Start/Restart resolves exact Template/Soul revisions into immutable activa
 binding validity 与 forbidden authority vocabulary。
 显式升级还覆盖 current/target query、exact baseline、定制/未知/stale 零写入、并发普通编辑、写后响应丢失与 file reload replay；
 Application/HTTP tests 验证 concrete owner result、错误 scope/hash、缺失/错误/重复结果和 `409` 冲突传播。
+自动加载另外覆盖 memory/file 启动更新与定制保护、旧 schema 原样 read/CAS/reopen、新配置准入、首次 Start 前更新、
+未变化配置幂等、Template/Workspace 并发漂移拒绝、无效新配置阻塞、Soul 重新读取及历史 Run 文件不变。
 
 ## Related Contracts
 

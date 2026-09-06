@@ -99,6 +99,23 @@ func (m *Biz) updateWorkspace(ctx context.Context, ev magicevent.Event) (workspa
 	// Generic metadata updates deliberately preserve lifecycle-owned fields.
 	// Workspace.State and ActiveRunID may only be changed by lifecycle_reducer.
 	item := workspaceFromUpdateCommand(current, cmd)
+	if cmd.TemplateBindingHash != "" && (cmd.TemplateID != current.TemplateID || cmd.TemplateBindingHash != current.TemplateBindingHash) {
+		// A materialized binding claims one exact live Template observation.
+		// Serialize its verification/persistence with Template CRUD.
+		m.templateMutationMu.Lock()
+		defer m.templateMutationMu.Unlock()
+		if m.templates == nil {
+			return workspaceCommandResponse{}, common.ErrInvalidArgument
+		}
+		template, err := m.templates.Get(ctx, cmd.TemplateID)
+		if err != nil {
+			return workspaceCommandResponse{}, err
+		}
+		if workspacemodel.WorkspaceTemplateSnapshotHash(template) != cmd.TemplateBindingHash {
+			return workspaceCommandResponse{}, common.ErrConflict
+		}
+		item.TemplateBindingHash = cmd.TemplateBindingHash
+	}
 	if err := m.workspaces.CompareAndSwap(ctx, item, item.Revision); err != nil {
 		return workspaceCommandResponse{}, err
 	}
@@ -193,6 +210,9 @@ func workspaceFromUpdateCommand(current *workspacemodel.Workspace, cmd workspace
 	item.DeliverableDirectory = cmd.DeliverableDirectory
 	item.InternalDirectory = cmd.InternalDirectory
 	item.TemplateID = cmd.TemplateID
+	if cmd.TemplateID != current.TemplateID {
+		item.TemplateBindingHash = ""
+	}
 	item.ProfileID = cmd.ProfileID
 	item.DefaultLLMSelection = runtimecontract.CloneProviderInferenceSelection(cmd.DefaultLLMSelection)
 	item.DefaultSoulID = cmd.DefaultSoulID

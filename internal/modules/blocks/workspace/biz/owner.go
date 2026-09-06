@@ -131,9 +131,7 @@ func (m *Biz) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent
 		setSystemWorkspaceTemplateDefaultsResult(result, common.ErrInvalidArgument)
 		return
 	}
-	m.templateMutationMu.Lock()
-	defer m.templateMutationMu.Unlock()
-	setSystemWorkspaceTemplateDefaultsResult(result, ensureBuiltinWorkspaceTemplateDefaults(ev.Context(), m.templates))
+	setSystemWorkspaceTemplateDefaultsResult(result, m.ensureCurrentBuiltinWorkspaceTemplateDefaults(ev.Context()))
 }
 
 func setSystemWorkspaceTemplateDefaultsResult(result magicevent.Result, err error) {

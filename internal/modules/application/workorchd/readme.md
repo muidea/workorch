@@ -66,7 +66,9 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
   expected/target content hash 的 typed command。Application 不维护升级状态、不得用 query 结果代替 owner 写入时校验，
   也不隐式刷新 Workspace binding/admission 或重启 Run。
 - bootstrap compiler 无损封存 definition/profile、provider、Soul、Skill、MCP、Memory、evidence policy、budget 与 directory
-  snapshot；所有 current-shape admission binding 由 Workspace owner pure compiler 重验。capability requirement 必须是终态证明
+  snapshot；新 Start/Restart 自动读取当前 Template/Soul 并提交 Workspace owner-private admission，不要求手动刷新或重建
+  Workspace。旧已准入 candidate 只作 lineage，不用当前 compiler 重验；新 candidate 严格按当前合同准入。Resume/recovery
+  不重新读取当前资源。capability requirement 必须是终态证明
   kinds 与 Profile validation-repair route kinds 的并集，因此 repair-only owner operation 可被启动时采集，但不得被加入终态
   `AcceptedStepKinds`。authority-bearing route 数组按原 cardinality 严格解析；`null`/scalar/empty/unknown、重复 identity 或
   duplicate exact trigger 不能被过滤、折叠或默认补全，且 repair kinds 未共同声明 concrete owner confirmation protocol 时

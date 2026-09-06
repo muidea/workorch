@@ -17,6 +17,7 @@ import (
 type definitionAdmissionInternalEvent struct {
 	WorkspaceID common.WorkspaceID
 	Intent      *workspaceevents.DefinitionAdmissionIntentCommand
+	Template    *workspacemodel.WorkspaceTemplate
 }
 
 type definitionAdmissionTransition struct {
@@ -47,10 +48,75 @@ func reduceDefinitionAdmissionInternalEvent(current *workspacemodel.Workspace, e
 	if err := workspaceDeletionRejectsMutation(current); err != nil {
 		return definitionAdmissionTransition{}, err
 	}
-	if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
+	if event.Intent.CurrentTemplate {
+		baseline := uint64(0)
+		if current.ActivationAdmission != nil {
+			baseline = current.ActivationAdmission.CandidateRevision
+		}
+		for _, archived := range current.DefinitionAdmissionCandidates {
+			if archived.CandidateRevision > baseline && archived.Validate() != nil {
+				return definitionAdmissionTransition{}, fmt.Errorf("%w: unresolved admission candidate has no current clarification contract", common.ErrConflict)
+			}
+		}
+		if event.Template == nil || event.Template.ID != current.TemplateID ||
+			workspacemodel.WorkspaceTemplateSnapshotHash(event.Template) != event.Intent.Candidate.WorkspaceTemplateSnapshot.SnapshotHash {
+			return definitionAdmissionTransition{}, fmt.Errorf("%w: current Template changed during admission", common.ErrConflict)
+		}
+		latest, _ := currentDefinitionAdmissionCandidate(current.DefinitionAdmissionCandidates, event.Intent.Candidate.CandidateID)
+		exactReplay := latest != nil && latest.CandidateHash == event.Intent.Candidate.CandidateHash && latest.CandidateRevision == event.Intent.Candidate.CandidateRevision
+		if !exactReplay && (event.Intent.ExpectedWorkspaceRevision == 0 || event.Intent.ExpectedWorkspaceRevision != current.Revision) {
+			return definitionAdmissionTransition{}, common.ErrConflict
+		}
+		if err := validateArchivedAdmissionIdentity(current); err != nil {
+			return definitionAdmissionTransition{}, err
+		}
+		var err error
+		current, err = workspacemodel.WorkspaceForCurrentTemplate(current, event.Template)
+		if err != nil {
+			return definitionAdmissionTransition{}, err
+		}
+		if event.Intent.ExpectedConfigurationHash == "" || event.Intent.ExpectedConfigurationHash != workspacemodel.WorkspaceConfigurationHash(current) {
+			return definitionAdmissionTransition{}, fmt.Errorf("%w: Workspace configuration changed during admission", common.ErrConflict)
+		}
+	} else if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
 		return definitionAdmissionTransition{}, fmt.Errorf("%w: invalid current definition admission: %v", common.ErrConflict, err)
 	}
 	return reduceDefinitionAdmissionIntent(current, *event.Intent)
+}
+
+// Old admission is a lineage anchor, not an executable configuration. Check
+// scope and identity without running today's compiler against archived input.
+// Partial/missing/conflicting records remain corruption, never migration input.
+func validateArchivedAdmissionIdentity(current *workspacemodel.Workspace) error {
+	if current.StartupInput == nil && current.ActivationAdmission == nil {
+		return nil
+	}
+	if current.StartupInput == nil || current.ActivationAdmission == nil {
+		return common.ErrConflict
+	}
+	s, a := current.StartupInput, current.ActivationAdmission
+	if s.WorkspaceID != current.ID || a.WorkspaceID != current.ID || s.StartupInputHash == "" ||
+		a.StartupInputHash != s.StartupInputHash || a.DefinitionRevision != s.DefinitionRevision {
+		return common.ErrConflict
+	}
+	matched := 0
+	for _, candidate := range current.DefinitionAdmissionCandidates {
+		if candidate.WorkspaceID == current.ID && candidate.CandidateID == a.CandidateID &&
+			candidate.CandidateRevision == a.CandidateRevision && candidate.CandidateHash == a.CandidateHash {
+			matched++
+		}
+	}
+	if matched != 1 {
+		return common.ErrConflict
+	}
+	if a.State != workspacemodel.WorkspaceActivationEligible {
+		// An unresolved ticket remains an active owner obligation. It cannot be
+		// treated as settled archive or silently cleared by a configuration edit.
+		if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
+			return common.ErrConflict
+		}
+	}
+	return nil
 }
 
 func reduceDefinitionAdmissionIntent(current *workspacemodel.Workspace, command workspaceevents.DefinitionAdmissionIntentCommand) (definitionAdmissionTransition, error) {
@@ -68,6 +134,9 @@ func reduceDefinitionAdmissionIntent(current *workspacemodel.Workspace, command 
 		return definitionAdmissionTransition{}, common.ErrConflict
 	}
 	priorClarification := outstandingDefinitionClarification(&next, candidate)
+	if current.ActivationAdmission != nil && current.ActivationAdmission.State == workspacemodel.WorkspaceActivationPendingClarificationResolution && priorClarification == nil {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
 
 	if admissionResult.Disposition == workspacemodel.DefinitionAdmissionClarificationRequired {
 		if command.ClarificationTicket != nil || command.ClarificationResolution != nil {
@@ -160,8 +229,15 @@ func persistDefinitionAdmissionCandidate(current *workspacemodel.Workspace, comm
 	seenRevisions := map[uint64]struct{}{}
 	duplicateCandidate := false
 	for _, existing := range current.DefinitionAdmissionCandidates {
-		existing = existing.Normalized()
-		if err := existing.Validate(); err != nil {
+		if !command.CurrentTemplate {
+			existing = existing.Normalized()
+		}
+		if !command.CurrentTemplate || existing.CandidateRevision == candidate.CandidateRevision {
+			if err := existing.Validate(); err != nil {
+				return workspacemodel.Workspace{}, "", false, common.ErrConflict
+			}
+		}
+		if existing.WorkspaceID != current.ID || existing.CandidateID == "" || existing.CandidateRevision == 0 || existing.CandidateHash == "" {
 			return workspacemodel.Workspace{}, "", false, common.ErrConflict
 		}
 		if lineageID == "" {
@@ -313,6 +389,19 @@ func (m *Biz) submitDefinitionAdmissionInternalEvent(ctx context.Context, event 
 	if err != nil {
 		return definitionAdmissionTransition{}, err
 	}
+	if event.Intent.CurrentTemplate {
+		// Template CRUD and this read/CAS share one owner lock. A template edit
+		// cannot drift between observation and the Workspace admission commit.
+		m.templateMutationMu.Lock()
+		defer m.templateMutationMu.Unlock()
+		if m.templates == nil {
+			return definitionAdmissionTransition{}, common.ErrInvalidArgument
+		}
+		event.Template, err = m.templates.Get(ctx, event.Intent.Candidate.WorkspaceTemplateSnapshot.TemplateRef)
+		if err != nil {
+			return definitionAdmissionTransition{}, err
+		}
+	}
 	bound, err := common.BindRuntimeWorkspaceContext(ctx, event.WorkspaceID)
 	if err != nil {
 		return definitionAdmissionTransition{}, err
@@ -338,6 +427,7 @@ func (m *Biz) submitDefinitionAdmissionInternalEvent(ctx context.Context, event 
 			}
 			return definitionAdmissionTransition{}, err
 		}
+		m.publishWorkspaceUpdated(bound, transition.Next)
 		return transition, nil
 	}
 	return definitionAdmissionTransition{}, common.ErrConflict

@@ -59,6 +59,7 @@ func UpdateWorkspaceRecord(ctx context.Context, hub magicevent.Hub, item *worksp
 		DeliverableDirectory: item.DeliverableDirectory,
 		InternalDirectory:    item.InternalDirectory,
 		TemplateID:           item.TemplateID,
+		TemplateBindingHash:  item.TemplateBindingHash,
 		ProfileID:            item.ProfileID,
 		DefaultLLMSelection:  runtimecontract.CloneProviderInferenceSelection(item.DefaultLLMSelection),
 		DefaultSoulID:        item.DefaultSoulID,

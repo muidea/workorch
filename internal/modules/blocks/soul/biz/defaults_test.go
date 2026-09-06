@@ -52,7 +52,7 @@ func TestEnsureBuiltinSoulDefaultsSeedsMissingAndPreservesExisting(t *testing.T)
 			}
 
 			for attempt := 1; attempt <= 2; attempt++ {
-				if err := ensureBuiltinSoulDefaults(ctx, newService(repo)); err != nil {
+				if err := newService(repo).ensureCurrentBuiltinSoulDefaults(ctx); err != nil {
 					t.Fatalf("ensure attempt %d: %v", attempt, err)
 				}
 				got, err := repo.Get(ctx, existing.ID)
@@ -66,6 +66,50 @@ func TestEnsureBuiltinSoulDefaultsSeedsMissingAndPreservesExisting(t *testing.T)
 			items, err := repo.List(ctx)
 			if err != nil || len(items) != len(defaults) {
 				t.Fatalf("seeded souls len=%d want=%d err=%v", len(items), len(defaults), err)
+			}
+		})
+	}
+}
+
+func TestStartupAutomaticallyLoadsReviewedBuiltinSoulAfterReopen(t *testing.T) {
+	for _, backend := range []string{"memory", "file"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "souls")
+			var repo repository.SoulRepository = memoryrepo.NewSoulRepository()
+			if backend == "file" {
+				repo = filerepo.NewSoulRepository(path)
+			}
+			old, err := newService(repo).createSoul(ctx, historicalExecutionSoul(t), soulmodel.SoulSourceBuiltinSeed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for attempt := 0; attempt < 2; attempt++ {
+				if backend == "file" {
+					repo = filerepo.NewSoulRepository(path)
+				}
+				s := newService(repo)
+				if err := s.ensureCurrentBuiltinSoulDefaults(ctx); err != nil {
+					t.Fatal(err)
+				}
+				current, err := s.getSoul(ctx, old.ID)
+				if err != nil || current.Revision != old.Revision+1 || current.ContentHash == old.ContentHash || current.SourceProvenance != soulmodel.SoulSourceBuiltinSeed {
+					t.Fatalf("automatic upgrade/replay: %+v %v", current, err)
+				}
+			}
+			custom := historicalExecutionSoul(t)
+			custom.SoulMD += "\nUser extension."
+			s := newService(repo)
+			before, err := s.updateSoul(ctx, custom)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.ensureCurrentBuiltinSoulDefaults(ctx); err != nil {
+				t.Fatal(err)
+			}
+			after, err := s.getSoul(ctx, old.ID)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("customized builtin overwritten: %+v %v", after, err)
 			}
 		})
 	}

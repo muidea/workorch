@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -251,19 +252,20 @@ func (c DefinitionAdmissionCandidate) WithHash() DefinitionAdmissionCandidate {
 }
 
 func (c DefinitionAdmissionCandidate) Clone() DefinitionAdmissionCandidate {
-	c = c.Normalized()
-	c.DoDInputs = append([]DefinitionCandidateItem(nil), c.DoDInputs...)
-	c.AdmissionPolicyBindings = append([]DefinitionAdmissionPolicyBinding(nil), c.AdmissionPolicyBindings...)
-	c.RuntimeProfileContracts = runtimecontract.NormalizeRuntimeProfileContracts(c.RuntimeProfileContracts)
-	c.RequiredOwnerFactBindings = append([]DefinitionRequiredOwnerFactBinding(nil), c.RequiredOwnerFactBindings...)
-	c.OwnerFactConvergenceBindings = append([]DefinitionOwnerFactConvergenceBinding(nil), c.OwnerFactConvergenceBindings...)
+	// History is opaque persistence, not fresh compiler input. In particular,
+	// preserve old schema/compiler versions, ordering and absent fields.
+	c.DoDInputs = slices.Clone(c.DoDInputs)
+	c.AdmissionPolicyBindings = slices.Clone(c.AdmissionPolicyBindings)
+	c.RuntimeProfileContracts = runtimecontract.CloneRuntimeProfileContracts(c.RuntimeProfileContracts)
+	c.RequiredOwnerFactBindings = slices.Clone(c.RequiredOwnerFactBindings)
+	c.OwnerFactConvergenceBindings = slices.Clone(c.OwnerFactConvergenceBindings)
 	for idx := range c.OwnerFactConvergenceBindings {
-		c.OwnerFactConvergenceBindings[idx].Convergence.DependsOnRequirementRefs = append([]string(nil), c.OwnerFactConvergenceBindings[idx].Convergence.DependsOnRequirementRefs...)
+		c.OwnerFactConvergenceBindings[idx].Convergence.DependsOnRequirementRefs = slices.Clone(c.OwnerFactConvergenceBindings[idx].Convergence.DependsOnRequirementRefs)
 	}
-	c.ProposedRelationInputs = append([]DefinitionProposedRelationInput(nil), c.ProposedRelationInputs...)
+	c.ProposedRelationInputs = slices.Clone(c.ProposedRelationInputs)
 	for idx := range c.ProposedRelationInputs {
-		c.ProposedRelationInputs[idx].SourceItemRefs = append([]string(nil), c.ProposedRelationInputs[idx].SourceItemRefs...)
-		c.ProposedRelationInputs[idx].TargetItemRefs = append([]string(nil), c.ProposedRelationInputs[idx].TargetItemRefs...)
+		c.ProposedRelationInputs[idx].SourceItemRefs = slices.Clone(c.ProposedRelationInputs[idx].SourceItemRefs)
+		c.ProposedRelationInputs[idx].TargetItemRefs = slices.Clone(c.ProposedRelationInputs[idx].TargetItemRefs)
 	}
 	return c
 }

@@ -22,6 +22,9 @@ type Workspace struct {
 	// a caller-selected target state.
 	RunProjectionCursor WorkspaceRunProjectionCursor
 	TemplateID          string
+	// TemplateBindingHash identifies the live template materialized into the
+	// authoring fields below. It is not a Run seal or an admission-history field.
+	TemplateBindingHash string
 	ProfileID           string
 	DefaultLLMSelection *runtimecontract.ProviderInferenceSelection
 	DefaultSoulID       common.SoulID

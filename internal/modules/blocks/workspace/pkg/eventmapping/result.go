@@ -18,7 +18,8 @@ func Workspace(item *workspaceevents.Workspace) *workspacemodel.Workspace {
 		Revision: item.Revision, ID: item.ID, Title: item.Title, Description: item.Description,
 		DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory,
 		State: item.State, ActiveRunID: item.ActiveRunID, TemplateID: item.TemplateID, ProfileID: item.ProfileID,
-		DefaultSoulID: item.DefaultSoulID, SoulBindings: soulbinding.SoulIDMap(item.SoulBindings),
+		TemplateBindingHash: item.TemplateBindingHash,
+		DefaultSoulID:       item.DefaultSoulID, SoulBindings: soulbinding.SoulIDMap(item.SoulBindings),
 		ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}
 	ret.DefinitionAdmissionCandidates = cloneAdmissionCandidates(item.DefinitionAdmissionCandidates)
@@ -75,6 +76,7 @@ func WorkspaceDTO(item *workspacemodel.Workspace) *workspaceevents.Workspace {
 		return nil
 	}
 	ret := &workspaceevents.Workspace{Revision: item.Revision, ID: item.ID, Title: item.Title, Description: item.Description, DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory, State: item.State, ActiveRunID: item.ActiveRunID, TemplateID: item.TemplateID, ProfileID: item.ProfileID, DefaultSoulID: item.DefaultSoulID, SoulBindings: soulbinding.FromSoulIDMap(item.SoulBindings), ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies)}
+	ret.TemplateBindingHash = item.TemplateBindingHash
 	ret.DefinitionAdmissionCandidates = cloneAdmissionCandidates(item.DefinitionAdmissionCandidates)
 	if item.StartupInput != nil {
 		value := item.StartupInput.Clone()

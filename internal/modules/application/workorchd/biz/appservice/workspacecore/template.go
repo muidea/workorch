@@ -56,6 +56,11 @@ func ApplyTemplateToWorkspace(item *workspacemodel.Workspace, template workorchm
 	}
 	item.ContextHints = contextHints
 	item.EvidencePolicies = evidencePolicies
+	record, err := WorkspaceTemplateToOwner(template)
+	if err != nil {
+		return nil, err
+	}
+	item.TemplateBindingHash = workspacemodel.WorkspaceTemplateSnapshotHash(record)
 	return item, nil
 }
 

@@ -172,6 +172,8 @@ Builtin upgrade body 如 `{"kind":"soul","id":"...","expectedContentHash":"...",
 定制/未知内容、stale expected hash 或 changed target 返回 `409`，缺资源为 `404`，无 force 或 batch-atomic promise。
 此操作不刷新 Workspace、不创建 eligible admission、不触发 Run activation；详见
 [Built-In Default Resources](../40-profiles-capabilities/workspace/builtin-default-resources.md#explicit-guarded-upgrade)。
+新 Start/Restart 会自动读取当前 Template/Soul 并重新准入，无需先提交 template refresh；Resume/recovery 与旧归档仍使用
+原 Run seal。服务启动时仅由资源 owner 自动更新 exact reviewed 未定制的内置版本，未知/定制内容不覆盖。
 
 ### Optional Setup Draft
 

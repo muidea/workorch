@@ -27,6 +27,9 @@ func (c DefinitionAdmissionIntentCommand) Validate() error {
 	if err := c.Candidate.Validate(); err != nil {
 		return fmt.Errorf("definition admission intent candidate: %w", err)
 	}
+	if c.CurrentTemplate && (c.ExpectedWorkspaceRevision == 0 || c.ExpectedConfigurationHash == "") {
+		return fmt.Errorf("current-template admission requires Workspace revision and configuration fences")
+	}
 	if c.ClarificationTicket != nil && c.ClarificationResolution != nil {
 		return fmt.Errorf("definition admission intent accepts at most one Decision-owner fact")
 	}

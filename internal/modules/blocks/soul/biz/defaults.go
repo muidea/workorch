@@ -11,6 +11,44 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
+// Seeding and automatic reviewed-version upgrades remain Soul-owner work.
+// Existing Run snapshots are never consulted or rewritten by this operation.
+func (s *service) ensureCurrentBuiltinSoulDefaults(ctx context.Context) error {
+	if err := ensureBuiltinSoulDefaults(ctx, s); err != nil {
+		return err
+	}
+	defaults, err := workorchdefaults.BuiltinSoulDefaults()
+	if err != nil {
+		return err
+	}
+	for _, raw := range defaults {
+		stored, err := s.souls.Get(ctx, common.SoulID(raw.ID))
+		if errors.Is(err, common.ErrNotFound) {
+			continue // a concurrent delete is not consent to recreate again
+		}
+		if err != nil {
+			return err
+		}
+		current, err := normalizedStoredSoul(stored)
+		if err != nil {
+			continue // unknown legacy identity is not an upgrade baseline
+		}
+		target, err := normalizedSoulFromCommand(soulDefaultCreateCommand(raw))
+		if err != nil {
+			return err
+		}
+		item := builtinSoulDefaultObservation(current, target)
+		if !item.UpgradeAvailable {
+			continue
+		}
+		_, err = s.submitBuiltinDefaultUpgrade(ctx, soulBuiltinUpgradeEvent{SoulID: item.SoulID, ExpectedContentHash: item.CurrentContentHash, TargetContentHash: item.BuiltinContentHash})
+		if err != nil && !errors.Is(err, common.ErrConflict) {
+			return err
+		}
+	}
+	return nil
+}
+
 func ensureBuiltinSoulDefaults(ctx context.Context, service *service) error {
 	if service == nil || service.souls == nil {
 		return common.ErrInvalidArgument

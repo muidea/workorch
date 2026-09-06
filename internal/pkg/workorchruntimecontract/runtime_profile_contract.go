@@ -20,6 +20,12 @@ type RuntimeProfileContract struct {
 	BootstrapRecipes []RuntimeBootstrapRecipe
 }
 
+// CloneRuntimeProfileContracts copies archived declarations without applying
+// today's normalization, defaults or deduplication rules.
+func CloneRuntimeProfileContracts(values []RuntimeProfileContract) []RuntimeProfileContract {
+	return cloneRuntimeStateRawSlice(values, cloneRuntimeProfileContractRaw)
+}
+
 // RuntimeBootstrapRecipe is declarative input for an activation adapter. The
 // matcher terms are profile data rather than orchestrator policy; a profile
 // that cannot select exactly one bounded recipe must leave artifact-role

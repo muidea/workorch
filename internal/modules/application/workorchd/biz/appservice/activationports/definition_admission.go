@@ -45,18 +45,21 @@ func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub,
 	if definitionRevision == "" {
 		return WorkspaceDefinitionAdmissionSnapshot{}, fmt.Errorf("%w: current Goal/DoD revision is incomplete", common.ErrConflict)
 	}
-	if err := validateCurrentWorkspaceDefinitionAdmission(workspace); err != nil {
-		return WorkspaceDefinitionAdmissionSnapshot{}, invalidCurrentWorkspaceStartupInput(err)
-	}
 	template, err := workspaceports.ReadWorkspaceTemplateRecord(ctx, hub, strings.TrimSpace(workspace.TemplateID))
 	if err != nil {
 		return WorkspaceDefinitionAdmissionSnapshot{}, fmt.Errorf("%w: Workspace Template snapshot is required for Definition admission: %v", common.ErrConflict, err)
+	}
+	// Fresh activation compiles current configuration, not historical policy.
+	workspace, err = workspacemodel.WorkspaceForCurrentTemplate(workspace, template)
+	if err != nil {
+		return WorkspaceDefinitionAdmissionSnapshot{}, err
 	}
 	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, template)
 	if err != nil {
 		return WorkspaceDefinitionAdmissionSnapshot{}, err
 	}
-	intent := workspaceevents.DefinitionAdmissionIntentCommand{Candidate: candidate, ExpectedCandidateRevision: candidate.CandidateRevision - 1}
+	intent := workspaceevents.DefinitionAdmissionIntentCommand{Candidate: candidate, ExpectedCandidateRevision: candidate.CandidateRevision - 1,
+		CurrentTemplate: true, ExpectedWorkspaceRevision: workspace.Revision, ExpectedConfigurationHash: workspacemodel.WorkspaceConfigurationHash(workspace)}
 	var opened *decisionevents.OpenWorkspaceDefinitionClarificationRequestResult
 	for attempt := 0; attempt < 4; attempt++ {
 		result, submitErr := workspaceports.SubmitDefinitionAdmissionIntent(ctx, hub, intent)
@@ -337,17 +340,9 @@ func validateCurrentWorkspaceDefinitionAdmission(workspace *workspacemodel.Works
 }
 
 func invalidCurrentWorkspaceStartupInput(cause error) error {
-	return fmt.Errorf("%w: current Workspace startup input does not match the only supported shape; recreate the Workspace from the current Template: %v", common.ErrConflict, cause)
+	return fmt.Errorf("%w: Workspace admission does not match the current input; start a new execution with the current Template: %v", common.ErrConflict, cause)
 }
 
 func workspaceTemplateSnapshotHash(template *workspacemodel.WorkspaceTemplate) string {
-	h := sha256.New()
-	values := []string{template.ID, template.Name, template.Description, template.GoalText, strings.Join(template.DoDItems, "\x00"), template.DefaultSoulID, template.ContextHints.CanonicalString()}
-	for _, policy := range template.EvidencePolicies {
-		values = append(values, policy.CanonicalString())
-	}
-	for _, value := range values {
-		_, _ = fmt.Fprintf(h, "%08x%s", len(value), value)
-	}
-	return "template-snapshot-sha256:" + hex.EncodeToString(h.Sum(nil))
+	return workspacemodel.WorkspaceTemplateSnapshotHash(template)
 }

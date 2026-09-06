@@ -26,7 +26,8 @@ transition。
 | repository backend | Soul → repository | `SoulRepository` CRUD/list | owner-private 技术依赖 |
 
 每个 topic 在 [`pkg/events`](pkg/events) 中有独立 concrete command/result。list 使用稳定 ID cursor，默认 100、最大 200。
-默认资源 ensure 复用同一 normalization/validation 路径，只创建缺失 ID，不覆盖已有对象。
+默认资源 ensure 创建缺失 ID，并通过同一 owner-private guarded upgrade 自动更新 exact reviewed、未定制且带完整
+`builtin_seed` 内容身份的旧版本。定制/未知对象保留，不凭内置 ID 推测升级许可。
 
 ## 不变量与非职责
 
@@ -41,6 +42,8 @@ transition。
   和 `builtin_seed` provenance；provenance 单独不能证明未定制。未知/定制/stale/changed-target 零写入，不提供 force。
 - 升级写入后响应丢失，fresh owner 可凭 exact 内容识别已达目标，重复请求为 no-op、不再次增加 revision；本事务不修改
   Workspace admission 或 Run 封存 Soul snapshot，不触发 Resume/Restart。历史指纹表是纯数据，不是跨 owner 状态管理器。
+- 新 Start/Restart 的 activation 读取当时的 Soul owner 内容，不复用跨请求旧快照；Resume/recovery 继续使用 Run seal。
+  Soul owner 不遍历 Workspace/Run 做热替换、迁移或历史记录修补。
 - result 必须 detached clone；repository/service 不对其它组件开放。
 - `EnsureDefaults` 的 caller identity 是合同的一部分，错误 source 即 fail-closed、零写入。
 - Soul 不查询 Skill/MCP owner、不判断 selected capability 是否存在，也不把 guidance 转成 Runtime authority。

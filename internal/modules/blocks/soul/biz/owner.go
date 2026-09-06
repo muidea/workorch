@@ -101,7 +101,7 @@ func (m *Biz) handleSystemDefaultsCommand(ev magicevent.Event, result magicevent
 		setSystemSoulDefaultsResult(result, common.ErrInvalidArgument)
 		return
 	}
-	setSystemSoulDefaultsResult(result, ensureBuiltinSoulDefaults(ev.Context(), m.service))
+	setSystemSoulDefaultsResult(result, m.service.ensureCurrentBuiltinSoulDefaults(ev.Context()))
 }
 
 func setSystemSoulDefaultsResult(result magicevent.Result, err error) {

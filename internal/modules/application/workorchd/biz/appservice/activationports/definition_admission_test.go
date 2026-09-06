@@ -1,12 +1,10 @@
 package activationports
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
 
-	magicevent "github.com/muidea/magicCommon/event"
 	activationcore "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	definitionadmission "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -836,7 +834,7 @@ func TestDefinitionAdmissionCandidateSealsProfileOwnerFactClosureBeforeRun(t *te
 	}
 }
 
-func TestCurrentEligibleDefinitionAdmissionRejectsIncompleteCurrentConvergenceWithoutReauthoring(t *testing.T) {
+func TestFreshDefinitionAdmissionReauthorsIncompleteHistoricalConvergence(t *testing.T) {
 	profile := map[string]any{"profileContracts": map[string]any{"software-dev": map[string]any{
 		"evidenceRequirements": []any{map[string]any{
 			"id": "validation_preparation", "scope": "deliverable",
@@ -885,14 +883,19 @@ func TestCurrentEligibleDefinitionAdmissionRejectsIncompleteCurrentConvergenceWi
 		t.Fatalf("incomplete current convergence err=%v candidateHash=%q", err, workspace.DefinitionAdmissionCandidates[0].CandidateHash)
 	}
 	want := invalidCurrentWorkspaceStartupInput(err)
-	if !errors.Is(want, common.ErrConflict) || !strings.Contains(want.Error(), "recreate the Workspace from the current Template") {
+	if !errors.Is(want, common.ErrConflict) || !strings.Contains(want.Error(), "start a new execution with the current Template") {
 		t.Fatalf("strict current-shape error = %v", want)
 	}
-	hub := magicevent.NewHub(4)
-	t.Cleanup(func() { hub.Terminate(context.Background()) })
-	_, ensureErr := EnsureWorkspaceDefinitionAdmission(context.Background(), hub, workspace, goal, dod)
-	if !errors.Is(ensureErr, common.ErrConflict) || !strings.Contains(ensureErr.Error(), "recreate the Workspace from the current Template") {
-		t.Fatalf("Restart pre-seal current-shape error = %v", ensureErr)
+	fresh, err := definitionAdmissionCandidate(workspace, goal, dod, template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := definitionadmission.Compile(fresh)
+	if err != nil || compiled.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf || fresh.CandidateRevision != candidate.CandidateRevision+1 || fresh.BaseStartupInputHash != startup.StartupInputHash {
+		t.Fatalf("fresh current-config admission = %+v candidate=%+v err=%v", compiled, fresh, err)
+	}
+	if workspace.DefinitionAdmissionCandidates[0].CandidateHash != before || workspace.DefinitionAdmissionCandidates[0].OwnerFactConvergenceBindings[0].Convergence.AcquisitionTargetPolicy != "" {
+		t.Fatal("fresh authoring rewrote the archived candidate")
 	}
 }
 

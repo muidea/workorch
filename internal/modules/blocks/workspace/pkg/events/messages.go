@@ -42,6 +42,7 @@ type Workspace struct {
 	State                         common.WorkspaceState
 	ActiveRunID                   common.RunID
 	TemplateID                    string
+	TemplateBindingHash           string
 	ProfileID                     string
 	DefaultLLMSelection           *runtimecontract.ProviderInferenceSelection
 	DefaultSoulID                 common.SoulID
@@ -73,6 +74,7 @@ type UpdateWorkspaceCommand struct {
 	DeliverableDirectory string
 	InternalDirectory    string
 	TemplateID           string
+	TemplateBindingHash  string
 	ProfileID            string
 	DefaultLLMSelection  *runtimecontract.ProviderInferenceSelection
 	DefaultSoulID        common.SoulID
@@ -276,6 +278,10 @@ type EnsureWorkspaceTemplateDefaultsResult struct {
 type DefinitionAdmissionIntentCommand struct {
 	Candidate                 workspacemodel.DefinitionAdmissionCandidate
 	ExpectedCandidateRevision uint64
+	// CurrentTemplate is fresh authoring for Start/Restart, never Resume.
+	CurrentTemplate           bool
+	ExpectedWorkspaceRevision uint64
+	ExpectedConfigurationHash string
 	ClarificationTicket       *WorkspaceDefinitionClarificationTicketFact
 	ClarificationResolution   *WorkspaceDefinitionClarificationResolutionFact
 }
