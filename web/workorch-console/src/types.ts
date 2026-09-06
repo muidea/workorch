@@ -195,6 +195,9 @@ export type Workspace = {
   deliverableDirectory: string;
   state: string;
   activeRunId?: string;
+	admittedStartupInputHash?: string;
+	admittedTemplateRevision?: string;
+	admittedTemplateSnapshotHash?: string;
   // Mutable workspace preference. It applies only to the next activation.
   defaultLLMSelection?: ProviderInferenceSelection;
   defaultSoulId?: string;
@@ -303,6 +306,7 @@ export type RunHeartbeat = {
   latestResultAt?: string;
   latestArtifactAt?: string;
   latestPatchAt?: string;
+	latestActivityAt?: string;
   latestEffectiveProgressAt?: string;
   ineffectiveRetry?: boolean;
   stalled?: boolean;
@@ -1347,6 +1351,9 @@ export type RuntimeRepairClosure = {
 // Audit is display-only. In particular, gap.missingEvidenceKinds is an LLM
 // claim and cannot be used to select action, retries or any command.
 export type RuntimeAudit = {
+	startupInputHash?: string;
+	sealedProfileContractsHash?: string;
+	sealedSoulBindings?: { stage: string; soulId: string; revision: number; contentHash: string; sourceProvenance: string }[];
   repair: RuntimeAuditRepair;
   assessments?: RuntimeAuditAssessment[];
   failure?: RuntimeAuditFailure;
@@ -1564,6 +1571,7 @@ export type TaskProgress = {
 };
 
 export type RuntimeProgress = {
+  latestAcceptedEvidenceAt?: string;
   stateRevision?: number;
   evidenceSequence?: number;
   completedDispatchCount?: number;

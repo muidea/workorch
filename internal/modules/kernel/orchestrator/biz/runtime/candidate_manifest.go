@@ -12,6 +12,9 @@ import (
 // source and the exact accepted semantic binding generation must both prove
 // it before any provider request can be opened.
 func BuildRuntimeCandidateContractManifestForAggregate(aggregate RuntimeAggregate) (runtimecontract.RuntimeCandidateContractManifest, error) {
+	if err := rejectCandidateBeforeRepairSurfaceConfirmation(aggregate); err != nil {
+		return runtimecontract.RuntimeCandidateContractManifest{}, err
+	}
 	ownerFacts := runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
 		runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
 	)

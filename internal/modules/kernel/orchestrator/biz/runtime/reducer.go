@@ -11,7 +11,7 @@ import (
 )
 
 func ReduceRuntimeState(facts runtimecontract.RuntimeFacts, previous *runtimecontract.AuthoritySnapshot, proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, error) {
-	decision, _, err := reduceAndSealRuntimeState(facts, previous, nil, runtimeCoverageProofLineageArgument(proofLineages))
+	decision, _, err := reduceAndSealRuntimeState(facts, previous, nil, nil, runtimeCoverageProofLineageArgument(proofLineages))
 	return decision, err
 }
 
@@ -31,6 +31,7 @@ func reduceAndSealRuntimeState(
 	facts runtimecontract.RuntimeFacts,
 	previous *runtimecontract.AuthoritySnapshot,
 	ownerEvent *runtimeOwnerInternalReductionEvent,
+	lineage *RuntimeAggregate,
 	proofLineage []runtimecontract.RuntimeCoverageProofLineage,
 ) (runtimecontract.RuntimeDecision, bool, error) {
 	facts = facts.Normalized()
@@ -42,7 +43,17 @@ func reduceAndSealRuntimeState(
 		return runtimecontract.RuntimeDecision{}, false, err
 	}
 	if !eventHandled {
-		decision, err = reduce(facts, proofLineage)
+		confirmationPending := false
+		if lineage != nil {
+			current := *lineage
+			current.Facts = facts
+			obligation, _, obligationErr := runtimeRepairSurfaceConfirmationObligation(current)
+			if obligationErr != nil {
+				return runtimecontract.RuntimeDecision{}, false, obligationErr
+			}
+			confirmationPending = obligation.OwnerModuleID != ""
+		}
+		decision, err = reduce(facts, proofLineage, confirmationPending)
 		if err != nil {
 			return runtimecontract.RuntimeDecision{}, false, err
 		}
@@ -80,6 +91,23 @@ func reduceRuntimeStateWithDirectiveAndOwnerEvent(
 	ownerEvent *runtimeOwnerInternalReductionEvent,
 	proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage,
 ) (runtimecontract.RuntimeFacts, runtimecontract.RuntimeDecision, error) {
+	return reduceRuntimeStateWithLineage(facts, previous, ownerEvent, nil, proofLineages...)
+}
+
+// All aggregate-backed private transitions use the same reducer input. History
+// proves a pending owner confirmation, never substitutes for current targets or
+// rewrites an execution-locked semantic binding.
+func reduceRuntimeAggregateWithDirective(aggregate RuntimeAggregate, facts runtimecontract.RuntimeFacts, previous *runtimecontract.AuthoritySnapshot) (runtimecontract.RuntimeFacts, runtimecontract.RuntimeDecision, error) {
+	return reduceRuntimeStateWithLineage(facts, previous, nil, &aggregate, aggregate.CoverageProofLineage)
+}
+
+func reduceRuntimeStateWithLineage(
+	facts runtimecontract.RuntimeFacts,
+	previous *runtimecontract.AuthoritySnapshot,
+	ownerEvent *runtimeOwnerInternalReductionEvent,
+	lineage *RuntimeAggregate,
+	proofLineages ...[]runtimecontract.RuntimeCoverageProofLineage,
+) (runtimecontract.RuntimeFacts, runtimecontract.RuntimeDecision, error) {
 	facts = facts.Normalized()
 	// Every SM-2 reduction is a defensive repair-ledger boundary. Focus changes
 	// normally reset this state atomically, while semantic re-seal, retirement,
@@ -109,7 +137,7 @@ func reduceRuntimeStateWithDirectiveAndOwnerEvent(
 	if len(facts.Prerequisites.Pending) == 0 {
 		facts = preflightRuntimeFactsPreservingPending(facts, runtimeTargetGroundingRequirements(facts, proofLineages...))
 	}
-	decision, eventHandled, err := reduceAndSealRuntimeState(facts, previous, ownerEvent, runtimeCoverageProofLineageArgument(proofLineages))
+	decision, eventHandled, err := reduceAndSealRuntimeState(facts, previous, ownerEvent, lineage, runtimeCoverageProofLineageArgument(proofLineages))
 	if err != nil {
 		return facts, runtimecontract.RuntimeDecision{}, err
 	}
@@ -356,7 +384,7 @@ func retireNonCurrentFocusScopedPrerequisites(facts runtimecontract.RuntimeFacts
 	return facts.Normalized()
 }
 
-func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.RuntimeCoverageProofLineage) (runtimecontract.RuntimeDecision, error) {
+func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.RuntimeCoverageProofLineage, confirmationPending bool) (runtimecontract.RuntimeDecision, error) {
 	base := runtimecontract.RuntimeDecision{Focus: facts.Focus}
 	// A failure whose persisted budget/disposition already determines governance
 	// or terminal authority must win before mutable prerequisite bookkeeping.
@@ -379,6 +407,11 @@ func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.R
 			PrerequisiteIDs: ids,
 		}
 		return base, nil
+	}
+	if confirmationPending {
+		// This is a read-only confirmation handoff, not an executable validation
+		// or repair authorization. SM-3 rejects candidate work until it settles.
+		return validationOutputDecision(base, facts)
 	}
 	// A validation failure remains a validation gap unless a capability owner
 	// has persisted a current, exact repair surface.  Policy text, a command
@@ -1081,6 +1114,10 @@ func validationDecision(base runtimecontract.RuntimeDecision, facts runtimecontr
 	if decision, blocked, err := targetGroundingDecision(base, facts, true, proofLineages...); err != nil || blocked {
 		return decision, err
 	}
+	return validationOutputDecision(base, facts)
+}
+
+func validationOutputDecision(base runtimecontract.RuntimeDecision, facts runtimecontract.RuntimeFacts) (runtimecontract.RuntimeDecision, error) {
 	acceptedKinds := focusAcceptedKinds(facts.Capabilities.ValidationKinds, facts.Focus)
 	if len(acceptedKinds) == 0 {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "capability_unavailable", "validation authority has no concrete runtime capability"), nil

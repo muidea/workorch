@@ -1310,7 +1310,7 @@ func (c *planningTransactionComponent) observeSemanticFeasibility(ctx context.Co
 			if err := retireSemanticPlanningGeneration(&transaction.aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated, gaps); err != nil {
 				return RuntimeAggregate{}, err
 			}
-			facts, decision, reduceErr := ReduceRuntimeStateWithDirective(transaction.aggregate.Facts, nil, transaction.aggregate.CoverageProofLineage)
+			facts, decision, reduceErr := reduceRuntimeAggregateWithDirective(transaction.aggregate, transaction.aggregate.Facts, nil)
 			if reduceErr != nil {
 				return RuntimeAggregate{}, reduceErr
 			}

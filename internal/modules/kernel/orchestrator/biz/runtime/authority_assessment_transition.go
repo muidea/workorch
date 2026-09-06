@@ -193,7 +193,7 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 			}
 		}
 	}
-	facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	facts, nextDecision, err := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

@@ -48,6 +48,7 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 		activeDispatchID = strings.TrimSpace(state.ActiveDispatch.ID)
 	}
 	ret := projectioncontract.RuntimeProgress{
+		LatestAcceptedEvidenceAt:        latestRuntimeAcceptedEvidenceAt(state),
 		StateRevision:                   state.StateRevision,
 		EvidenceSequence:                state.EvidenceSequence,
 		CompletedDispatchCount:          len(state.CompletedDispatches),
@@ -261,10 +262,44 @@ func applyRuntimeProgressToRepairLoop(progress *projectioncontract.TaskProgress,
 	if strings.TrimSpace(summary.FailureSignature) != "" {
 		loop.LastFailureSignature = summary.FailureSignature
 	}
-	if strings.TrimSpace(summary.FailureMessage) != "" {
-		loop.RepeatedFailureReason = summary.FailureMessage
+	for _, repeated := range facts.Repair.SignatureCounts {
+		if repeated.Signature == summary.FailureSignature && repeated.Signature != "" && repeated.Count > 1 {
+			loop.RepeatedFailureReason = summary.FailureMessage
+			break
+		}
 	}
 	progress.RepairLoop = loop
+}
+
+// Only owner-committed receipts already credited by Orchestrator can supply an
+// effective-progress timestamp. Activity, rejected validation, and unbound reads
+// never become proof; a causation-only accepted durable repair is still progress.
+func latestRuntimeAcceptedEvidenceAt(state runtimecontract.RuntimeStateRecord) string {
+	latest := ""
+	dispatches := append([]runtimecontract.RuntimeDispatchRecord(nil), state.CompletedDispatches...)
+	if state.ActiveDispatch != nil {
+		dispatches = append(dispatches, *state.ActiveDispatch)
+	}
+	for _, fact := range state.Facts.Evidence.Accepted {
+		for _, dispatch := range dispatches {
+			if dispatch.ID != fact.DispatchID || dispatch.WorkspaceID != state.Facts.WorkspaceID || dispatch.RunID != state.Facts.RunID {
+				continue
+			}
+			for _, execution := range dispatch.OperationExecutions {
+				if execution.OperationID != fact.OperationID || execution.State != runtimecontract.OperationExecutionEvidenceCommitted {
+					continue
+				}
+				receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(state.OperationReceipts, execution.ExecutionKey, execution.Fence)
+				if !found || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || receipt.OperationID != fact.OperationID ||
+					execution.OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(receipt) ||
+					(len(fact.CoverageWorkItemIDs) == 0 && !(receipt.Changed && runtimecontract.RuntimeEffectIsDurable(receipt.ObservedEffectScope))) {
+					continue
+				}
+				latest = latestStringTime(latest, receipt.CompletedAt)
+			}
+		}
+	}
+	return latest
 }
 
 func applyRuntimeProgressToCurrentStep(progress *projectioncontract.TaskProgress, summary projectioncontract.RuntimeProgress, state runtimecontract.RuntimeStateRecord) {

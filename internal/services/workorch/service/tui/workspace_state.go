@@ -1366,6 +1366,7 @@ func runHeartbeatEqual(a, b projectioncontract.RunHeartbeat) bool {
 		strings.TrimSpace(a.LatestResultAt) == strings.TrimSpace(b.LatestResultAt) &&
 		strings.TrimSpace(a.LatestArtifactAt) == strings.TrimSpace(b.LatestArtifactAt) &&
 		strings.TrimSpace(a.LatestPatchAt) == strings.TrimSpace(b.LatestPatchAt) &&
+		strings.TrimSpace(a.LatestActivityAt) == strings.TrimSpace(b.LatestActivityAt) &&
 		strings.TrimSpace(a.LatestEffectiveProgressAt) == strings.TrimSpace(b.LatestEffectiveProgressAt) &&
 		a.IneffectiveRetry == b.IneffectiveRetry &&
 		a.Stalled == b.Stalled &&

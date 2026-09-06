@@ -151,7 +151,7 @@ func applySemanticCatalogRefresh(aggregate *RuntimeAggregate) error {
 	if !retired {
 		return fmt.Errorf("%w: semantic catalog refresh cannot retire an active dispatch", common.ErrConflict)
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(*aggregate, aggregate.Facts, nil)
 	if err != nil {
 		return err
 	}
@@ -207,7 +207,7 @@ func (c *planningTransactionComponent) invalidateSemanticCatalogGeneration(ctx c
 	if err := retireSemanticPlanningGeneration(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated, gaps); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -270,7 +270,7 @@ func (c *planningTransactionComponent) sealSemanticContract(ctx context.Context,
 			if err := retireSemanticPlanningGeneration(&aggregate, runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated, gaps); err != nil {
 				return RuntimeAggregate{}, err
 			}
-			facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+			facts, decision, reduceErr := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, nil)
 			if reduceErr != nil {
 				return RuntimeAggregate{}, reduceErr
 			}
@@ -363,7 +363,7 @@ func (c *planningTransactionComponent) sealSemanticContract(ctx context.Context,
 			return RuntimeAggregate{}, err
 		}
 	}
-	aggregate.Facts, aggregate.Decision, err = ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	aggregate.Facts, aggregate.Decision, err = reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -440,7 +440,7 @@ func applySemanticContractFailureToAggregate(aggregate RuntimeAggregate, termina
 	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, semanticFailure, runtimeFailureAuthorityRetire, nil); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

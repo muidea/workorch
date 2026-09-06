@@ -78,7 +78,7 @@ func (c *planningTransactionComponent) invalidateCandidateRequestSessionForPrere
 			return RuntimeAggregate{}, err
 		}
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, facts, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

@@ -3149,6 +3149,7 @@ func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
 		RunID:                     "run-a",
 		ActivityState:             "no_activity",
 		Summary:                   "no effective progress evidence yet",
+		LatestActivityAt:          "2026-06-10T00:01:00Z",
 		LatestEffectiveProgressAt: "2026-06-10T00:00:00Z",
 		Stalled:                   true,
 	}
@@ -3169,6 +3170,7 @@ func TestModelInspectStatusIncludesRunHeartbeat(t *testing.T) {
 	for _, want := range []string{
 		"stream revision: last 42, gaps 2, latest gap 3",
 		"activity: no_activity - no effective progress evidence yet",
+		"latest activity: 2026-06-10T00:01:00Z",
 		"latest progress: 2026-06-10T00:00:00Z",
 		"convergence: focus focus-a | convergence need_validation | gap missing accepted evidence | evidence missing validation accepted 2 rejected 1 | decision governance_required",
 	} {

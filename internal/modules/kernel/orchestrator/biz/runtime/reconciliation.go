@@ -190,7 +190,7 @@ func (c *authorityComponent) commitReconciliationBatch(ctx context.Context, work
 			return RuntimeAggregate{}, false, retireErr
 		}
 	}
-	nextFacts, nextDecision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	nextFacts, nextDecision, reduceErr := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if reduceErr != nil {
 		return RuntimeAggregate{}, false, reduceErr
 	}

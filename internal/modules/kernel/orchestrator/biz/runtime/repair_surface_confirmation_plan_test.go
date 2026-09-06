@@ -9,6 +9,44 @@ import (
 )
 
 func TestCurrentRuntimeRepairSurfaceConfirmationPlanEligibilityMatrix(t *testing.T) {
+	t.Run("terminal and exhausted facts cannot reopen a confirmation obligation", func(t *testing.T) {
+		aggregate, _ := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("9", 64))
+		for name, mutate := range map[string]func(*RuntimeAggregate){
+			"sealed terminal": func(a *RuntimeAggregate) {
+				a.Decision = terminalDecision(a.Decision, runtimecontract.ConvergenceStateFailed, "target_grounding_unresolved", "already sealed")
+			},
+			"repair budget exhausted": func(a *RuntimeAggregate) { a.Facts.Repair.Exhausted = true },
+		} {
+			t.Run(name, func(t *testing.T) {
+				changed := cloneRuntimeAggregateForMCPProvenanceTest(t, aggregate)
+				mutate(&changed)
+				obligation, _, err := runtimeRepairSurfaceConfirmationObligation(changed)
+				if err != nil || obligation.OwnerModuleID != "" {
+					t.Fatalf("closed authority reopened owner obligation: %+v err=%v", obligation, err)
+				}
+			})
+		}
+	})
+
+	t.Run("historical or uncommitted proof cannot open a query", func(t *testing.T) {
+		aggregate, _ := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("8", 64))
+		for name, mutate := range map[string]func(*RuntimeAggregate){
+			"other focus":           func(a *RuntimeAggregate) { a.Facts.Focus.ID = "other-focus" },
+			"other definition":      func(a *RuntimeAggregate) { a.Facts.DefinitionRevision = "other-definition" },
+			"retired binding":       func(a *RuntimeAggregate) { a.Facts.Coverage[0].CurrentBindingRef.BindingID = "other-binding" },
+			"missing exact receipt": func(a *RuntimeAggregate) { a.OperationReceipts = nil },
+		} {
+			t.Run(name, func(t *testing.T) {
+				changed := cloneRuntimeAggregateForMCPProvenanceTest(t, aggregate)
+				mutate(&changed)
+				plan, err := CurrentRuntimeRepairSurfaceConfirmationPlan(changed)
+				if err == nil || plan.Required() {
+					t.Fatalf("invalid lineage opened a confirmation query: plan=%+v err=%v", plan, err)
+				}
+			})
+		}
+	})
+
 	t.Run("pending observation requires one owner query", func(t *testing.T) {
 		aggregate, observation := validationRepairSurfaceObservedAggregateForTest(t, true, strings.Repeat("1", 64))
 		var requestID string

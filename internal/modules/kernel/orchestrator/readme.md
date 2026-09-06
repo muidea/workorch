@@ -167,7 +167,9 @@ capability resource state。
   admissibility snapshot/acquisition binding 的完整 catalog，不以单 operation entry 的 authorization 集合代替。
   catalog 只提供诊断范围，不扩大 entry 授权；候选修复 target 仍需 capability owner confirmation。
   `shell_owner_receipt_integration_test.go` 用单文件 entry + 多文件真实 Shell catalog 覆盖 SM-3 receipt → SM-2 confirmation/
-  repair → fresh validation，以及 SM-4 reload/duplicate。SM-1 的 lifecycle authority 和 reducer 入口不变。
+  repair → fresh validation，以及 SM-4 reload/duplicate；复合回归还覆盖 catalog 更新后再次失败→独立新确认→第二次修复
+  成功或 profile budget 耗尽、旧 continuation 消费的反向篡改校验与零候选/provider 旁路。SM-1 lifecycle authority 不变，
+  SM-2/3/4 的迁移仍只通过 Orchestrator private internal event/统一 aggregate reducer。
 - 已封存 validation-repair effect 的 rejected owner receipt 必须在完成 dispatch 的同一次 private SM-3/SM-2 CAS 中
   退休 target/directive，并封存 `repair_surface_unavailable`；若持有 semantic repair intermediate binding，同步退休该 binding。
   receipt 原诊断、confirmation、commitment 与 evidence lineage 保持不可变；普通拒绝不授权恢复旧修复范围或自动 successor。
@@ -221,6 +223,14 @@ capability resource state。
   aggregate、exact VFO confirmation sequence 与 repair transaction lineage 派生，不持久化第二份 phase。`FailureTarget == nil`
   只是 mutable authority shape，不能单独表示“等待确认”。SM-4 delayed drive 必须先 reload/re-plan，再决定是否查询 owner；同一
   VFO 已 `confirmed|rejected`、active partial repair、target-free fresh validation 或 administrative termination 均为零 query。
+  reducer、query plan 与 SM-3 candidate/provider guard 共用 `runtimeRepairSurfaceConfirmationObligation`：它从 exact committed
+  validation receipt、current focus/definition binding、sealed route、未耗尽 budget 与该 observation 的 sequence 派生待确认义务，
+  不依赖它将要生成的 Decision。新的 rejected fresh validation 在同一 receipt CAS 消费旧 target-free continuation，且不授予
+  CWI credit；新 VFO 可以形成独立、受限的确认窗口。该义务先于可变 catalog 的普通 target-grounding 判定，确认前禁止
+  semantic/operations provider request 与 candidate attempt。catalog refresh 不退休 execution-locked binding、不修改 startup
+  input，也不复用旧 confirmed target；已封存 terminal、contract defect 或 budget exhaustion 不能被该窗口重新打开。
+  profile repair budget 在 rejected receipt 的同一 CAS 结算，耗尽后无新 owner query。fresh-load 只有 exact rejected evidence、
+  processed event、candidate manifest closure、committed execution 和 matching receipt fence/hash 才能证明旧 continuation 已消费。
   plan 必须派生 exact
   `RequestID + IssuedAtStateRevision + protocol-bound SubjectRef + ExpectedSubjectRevision`；protocol descriptor 只向 core 暴露
   owner-neutral resource domain/subject，expected revision 来自 matching current prerequisite observation，不能硬编码 File 或 manifest

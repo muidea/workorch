@@ -18,6 +18,7 @@ type RunHeartbeat struct {
 	LatestResultAt            string `json:"latestResultAt,omitempty"`
 	LatestArtifactAt          string `json:"latestArtifactAt,omitempty"`
 	LatestPatchAt             string `json:"latestPatchAt,omitempty"`
+	LatestActivityAt          string `json:"latestActivityAt,omitempty"`
 	LatestEffectiveProgressAt string `json:"latestEffectiveProgressAt,omitempty"`
 	IneffectiveRetry          bool   `json:"ineffectiveRetry,omitempty"`
 	Stalled                   bool   `json:"stalled,omitempty"`

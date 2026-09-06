@@ -197,7 +197,7 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 		// issuing the state-change authority.
 		aggregate.Facts = preflightRuntimeFactsPreservingPending(aggregate.Facts, runtimeTargetGroundingRequirements(aggregate.Facts, aggregate.CoverageProofLineage))
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

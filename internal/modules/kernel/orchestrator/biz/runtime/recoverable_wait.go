@@ -194,7 +194,7 @@ func (c *driveDeliveryComponent) exhaustRecoverableWait(ctx context.Context, wor
 	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
 		return RuntimeAggregate{}, err
 	}
-	facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	facts, decision, reduceErr := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if reduceErr != nil {
 		return RuntimeAggregate{}, reduceErr
 	}
@@ -251,7 +251,7 @@ func (c *driveDeliveryComponent) expireRecoverableWait(ctx context.Context, aggr
 	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
 		return RuntimeAggregate{}, false, err
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, false, err
 	}
@@ -383,7 +383,7 @@ func confirmRecoverableWaitProbe(aggregate *RuntimeAggregate, observation runtim
 		if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
 			return false, err
 		}
-		facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+		facts, decision, reduceErr := reduceRuntimeAggregateWithDirective(*aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 		if reduceErr != nil {
 			return false, reduceErr
 		}

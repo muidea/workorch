@@ -28,6 +28,12 @@ func mapRunHeartbeatAt(snapshot readmodelcore.WorkspaceSnapshotState, now time.T
 		}
 	}
 	runID := run.ID
+	if snapshot.TaskProgress.RunID != runID {
+		snapshot.TaskProgress = projectioncontract.TaskProgress{}
+	}
+	if audit := snapshot.Acceptance.Audit; audit != nil && audit.RunID != runID {
+		snapshot.Acceptance = projectioncontract.AcceptanceProjection{}
+	}
 	ret := projectioncontract.RunHeartbeat{
 		WorkspaceID:     firstNonEmptyString(run.WorkspaceID, snapshot.Workspace.ID),
 		RunID:           runID,
@@ -42,7 +48,7 @@ func mapRunHeartbeatAt(snapshot readmodelcore.WorkspaceSnapshotState, now time.T
 	ret.LatestResultAt = latestResultProgress(snapshot.Results, runID)
 	ret.LatestArtifactAt = latestArtifactProgress(snapshot.Artifacts, snapshot.ArtifactContinuations, runID)
 	ret.LatestPatchAt = latestPatchProgress(snapshot.Patches, runID)
-	ret.LatestEffectiveProgressAt = latestStringTime(
+	ret.LatestActivityAt = latestStringTime(
 		ret.LatestEventAt,
 		ret.LatestLLMUsageAt,
 		ret.LatestResultAt,
@@ -50,14 +56,23 @@ func mapRunHeartbeatAt(snapshot readmodelcore.WorkspaceSnapshotState, now time.T
 		ret.LatestPatchAt,
 		latestMemoryRecallProgress(snapshot.MemoryRecallTraces, runID),
 	)
+	if summary := snapshot.TaskProgress.Runtime; summary != nil {
+		ret.LatestEffectiveProgressAt = summary.LatestAcceptedEvidenceAt
+	}
+	for _, result := range snapshot.Results {
+		if result.RunID == runID && result.State == string(common.ResultStateAccepted) {
+			ret.LatestEffectiveProgressAt = latestStringTime(ret.LatestEffectiveProgressAt, result.CreatedAt)
+		}
+	}
+	ret.LatestActivityAt = latestStringTime(ret.LatestActivityAt, ret.LatestEffectiveProgressAt)
 	ret.IneffectiveRetry = heartbeatIneffectiveRetry(snapshot)
 	ret.ActivityState = heartbeatActivityState(*run, snapshot.TaskProgress, ret)
 	if runStateIsLiveForHeartbeat(run.State) {
 		ret.Stalled = ret.ActivityState == "no_activity"
-		if ret.ActivityState == "running" && heartbeatProgressStalledAt(ret.LatestEffectiveProgressAt, now) {
+		if ret.ActivityState == "running" && heartbeatProgressStalledAt(ret.LatestActivityAt, now) {
 			ret.ActivityState = "stalled"
 			ret.Stalled = true
-			ret.Summary = heartbeatStalledSummary(ret.LatestEffectiveProgressAt, now)
+			ret.Summary = heartbeatStalledSummary(ret.LatestActivityAt, now)
 		}
 	}
 	ret.Summary = heartbeatSummary(ret)
@@ -65,19 +80,16 @@ func mapRunHeartbeatAt(snapshot readmodelcore.WorkspaceSnapshotState, now time.T
 }
 
 func heartbeatIneffectiveRetry(snapshot readmodelcore.WorkspaceSnapshotState) bool {
-	if runtimeRetryExhausted(snapshot.TaskProgress.Runtime) {
-		return true
+	if summary := snapshot.TaskProgress.Runtime; summary != nil {
+		// Current owner-derived facts replace earlier display flags, including
+		// the prior snapshot's ConvergenceStatus. Do not latch a projection bit.
+		return runtimeRetryExhausted(summary) || strings.TrimSpace(snapshot.TaskProgress.RepairLoop.RepeatedFailureReason) != ""
 	}
 	if strings.TrimSpace(snapshot.TaskProgress.RepairLoop.RepeatedFailureReason) != "" || snapshot.TaskProgress.RepairLoop.Escalated {
 		return true
 	}
 	if budget := snapshot.Acceptance.Budget; budget != nil && heartbeatConvergenceBudgetEscalated(budget.Decision) {
 		return true
-	}
-	if status := snapshot.ConvergenceStatus; status != nil {
-		if status.IneffectiveRetry || strings.TrimSpace(status.DecisionCause) == "retry_exhaustion" {
-			return true
-		}
 	}
 	return false
 }
@@ -89,7 +101,7 @@ func runtimeRetryExhausted(summary *projectioncontract.RuntimeProgress) bool {
 	// The terminal code is the authoritative SM-3 outcome. Check the zero-retry
 	// authority exhaustion first so records persisted before the failure-class
 	// split are not displayed as ineffective retries.
-	if strings.TrimSpace(summary.TerminalCode) == "candidate_authority_exhausted" {
+	if strings.TrimSpace(summary.TerminalCode) == "candidate_authority_exhausted" || strings.TrimSpace(summary.TerminalCode) == "validation_failure_repair_route_unavailable" {
 		return false
 	}
 	switch strings.TrimSpace(summary.FailureClass) {
@@ -159,7 +171,7 @@ func latestEventProgress(items []projectioncontract.EventRecord, runID string) (
 	var revision int64
 	var occurredAt string
 	for _, item := range items {
-		if runID != "" && item.RunID != "" && item.RunID != runID {
+		if item.RunID != runID {
 			continue
 		}
 		if latestStringTime(occurredAt, item.OccurredAt) == item.OccurredAt {
@@ -174,7 +186,7 @@ func latestEventProgress(items []projectioncontract.EventRecord, runID string) (
 func latestLLMUsageProgress(items []projectioncontract.LLMUsageTrace, runID string) string {
 	var latest string
 	for _, item := range items {
-		if runID != "" && item.RunID != "" && item.RunID != runID {
+		if item.RunID != runID {
 			continue
 		}
 		latest = latestStringTime(latest, item.CompletedAt, item.OccurredAt, item.StartedAt)
@@ -251,7 +263,7 @@ func heartbeatActivityState(run appmodelcore.Run, progress projectioncontract.Ta
 	if heartbeat.IneffectiveRetry {
 		return "ineffective_retry"
 	}
-	if strings.TrimSpace(heartbeat.LatestEffectiveProgressAt) == "" {
+	if strings.TrimSpace(heartbeat.LatestActivityAt) == "" {
 		return "no_activity"
 	}
 	return "running"
@@ -269,7 +281,7 @@ func heartbeatSummary(item projectioncontract.RunHeartbeat) string {
 	case "ineffective_retry":
 		return "ineffective retry detected"
 	case "no_activity":
-		return "no effective progress evidence yet"
+		return "no run activity observed yet"
 	case "completed", "failed", "cancelled", "superseded":
 		return "run " + item.ActivityState
 	default:
@@ -303,7 +315,7 @@ func heartbeatStalledSummary(latestProgressAt string, now time.Time) string {
 	if err != nil || now.Before(latest) {
 		return "run stalled"
 	}
-	return "no effective progress for " + now.Sub(latest).Truncate(time.Second).String() + " since " + latestProgressAt
+	return "no run activity for " + now.Sub(latest).Truncate(time.Second).String() + " since " + latestProgressAt
 }
 
 func runStateIsLiveForHeartbeat(state string) bool {

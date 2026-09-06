@@ -75,6 +75,17 @@ bindings。未知/定制内容、stale preview、目标 binary 已变化均返�
 显式刷新 Workspace template binding、重新完成 definition admission，再提交 Restart；Resume/recovery 始终使用原封存输入。
 用户定制内容需要显式人工合并，不能把后续重启解释为允许覆盖。
 
+只读版本核对必须区分三层，不能把“已部署最新 binary”或“catalog 已升级”解释为“已有 Run 使用新配置”：
+
+- catalog current/target 使用上述 builtin-defaults preview；
+- Workspace DTO 的 `admittedTemplateRevision/admittedTemplateSnapshotHash/admittedStartupInputHash` 来自 Workspace owner
+  已 promotion 的 startup input，未准入时为空；template snapshot hash 与 catalog content hash 是不同合同，不能直接等同；
+- `acceptance.audit` 的 `startupInputHash/sealedProfileContractsHash/sealedSoulBindings` 只来自该 Run 封存 activation。
+  Soul metadata 包含 default/stage、ID、revision、content hash、source provenance，不包含 instructions。
+
+projection clone 必须 detached，display metadata 不得反向构造 admission。没有这些历史封存字段时展示未知，不回填当前
+catalog、不推测升级成功，也不触发 owner mutation。
+
 ## Template And Soul Contract
 
 Template 可以声明 starter Goal/DoD、default Soul/role binding、context/evidence/capability policy 与 execution constraint。

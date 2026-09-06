@@ -71,6 +71,11 @@ func (m AppModel) renderInspectStatus() string {
 			b.WriteString(m.runHeartbeat.Summary)
 		}
 		b.WriteString("\n")
+		if m.runHeartbeat.LatestActivityAt != "" {
+			b.WriteString("- latest activity: ")
+			b.WriteString(m.runHeartbeat.LatestActivityAt)
+			b.WriteString("\n")
+		}
 		if m.runHeartbeat.LatestEffectiveProgressAt != "" {
 			b.WriteString("- latest progress: ")
 			b.WriteString(m.runHeartbeat.LatestEffectiveProgressAt)

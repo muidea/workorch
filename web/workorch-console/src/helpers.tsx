@@ -170,6 +170,7 @@ export function runHeartbeatDescriptions(heartbeat?: RunHeartbeat) {
     { key: 'summary', label: '活动摘要', children: boundedParagraph(heartbeat.summary, { rows: 2 }) },
     { key: 'latestStep', label: '最近步骤', children: [heartbeat.latestStepId, heartbeat.latestStepKind, heartbeat.latestStepState].filter(Boolean).join(' / ') || '-' },
     { key: 'latestEvent', label: '最近事件', children: [heartbeat.latestEventTopic, heartbeat.latestEventRevision ? `rev ${heartbeat.latestEventRevision}` : '', heartbeat.latestEventAt].filter(Boolean).join(' / ') || '-' },
+    { key: 'latestActivity', label: '最近活动', children: heartbeat.latestActivityAt || '-' },
     { key: 'latestProgress', label: '最近有效进展', children: heartbeat.latestEffectiveProgressAt || '-' },
     { key: 'latestLLM', label: '最近 LLM', children: heartbeat.latestLLMUsageAt || '-' },
     { key: 'latestResult', label: '最近结果', children: heartbeat.latestResultAt || '-' },
@@ -443,6 +444,26 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
             { key: 'directiveTargets', label: 'Grounded Targets', children: compactTags(directive.targetRefs ?? directive.closure?.groundedTargetRefs ?? [], 4) },
             { key: 'directiveClosure', label: 'Closure', children: shortId(directive.closure?.id) },
             { key: 'directiveBaseline', label: 'Baseline Evidence', children: directive.closure?.baselineEvidenceRevision || '-' }
+          ]}
+        />
+      ) : null}
+      {audit ? (
+        <Descriptions
+          title="Run 封存配置（只读，资源升级不会改写）"
+          column={1}
+          size="small"
+          items={[
+            { key: 'sealedInput', label: 'Startup Input Hash', children: audit.startupInputHash || '-' },
+            { key: 'sealedProfiles', label: 'Profile Contracts Hash', children: audit.sealedProfileContractsHash || '-' },
+            { key: 'sealedSouls', label: '封存 Soul 版本', children: (
+              <Space direction="vertical" size="small">
+                {(audit.sealedSoulBindings ?? []).map((binding) => (
+                  <Typography.Text key={binding.stage} copyable>
+                    {binding.stage}: {binding.soulId} · r{binding.revision} · {binding.contentHash}
+                  </Typography.Text>
+                ))}
+              </Space>
+            ) }
           ]}
         />
       ) : null}

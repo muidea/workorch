@@ -92,6 +92,7 @@ func activeRunHeartbeatState(state string) bool {
 
 func runHeartbeatAgeSeconds(heartbeat projectioncontract.RunHeartbeat, now time.Time) int64 {
 	for _, candidate := range []string{
+		heartbeat.LatestActivityAt,
 		heartbeat.LatestEffectiveProgressAt,
 		heartbeat.LatestEventAt,
 		heartbeat.LatestLLMUsageAt,

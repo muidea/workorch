@@ -29,6 +29,12 @@ import (
 // candidate; the resulting target must then be snapshotted before it can enter
 // another candidate authority.
 func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *testing.T) {
+	t.Run("fresh validation succeeds", func(t *testing.T) { testObservedShellRepair(t, false, true) })
+	t.Run("second repair succeeds", func(t *testing.T) { testObservedShellRepair(t, true, true) })
+	t.Run("second repair exhausts budget", func(t *testing.T) { testObservedShellRepair(t, true, false) })
+}
+
+func testObservedShellRepair(t *testing.T, failsAgain, secondSucceeds bool) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go is not available")
 	}
@@ -468,6 +474,9 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	patchType := "text_replace"
 	oldText := currentSnapshot.Content
 	repairedContent := "package fixture\n// repaired through confirmed surface\n"
+	if failsAgain {
+		repairedContent += "var _ = anotherMissingImplementation\n"
+	}
 	baseHash := currentSnapshot.ContentHash
 	repairCandidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
 		Kind:                runtimecontract.RuntimeBlockKindPatchApply,
@@ -707,6 +716,63 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	if failsAgain {
+		if freshCatalog.SnapshotID == shellCatalog.SnapshotID ||
+			validated.Facts.Focus.CoverageEvidenceBindings[0].Hash != restartedFinal.Facts.Focus.CoverageEvidenceBindings[0].Hash ||
+			validated.Definition.StartupInputHash != restartedFinal.Definition.StartupInputHash {
+			t.Fatal("catalog refresh must not rewrite the execution-locked binding or sealed startup input")
+		}
+		plan, planErr := CurrentRuntimeRepairSurfaceConfirmationPlan(validated)
+		if planErr != nil || !plan.Required() || validated.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
+			t.Fatalf("new rejected validation lost owner confirmation after catalog refresh: state=%s terminal=%+v plan=%+v err=%v", validated.Decision.State, validated.Decision.Terminal, plan, planErr)
+		}
+		if plan.RequestID == reopenedPlan.RequestID || runtimecontract.SameRuntimeValidationFailureObservation(plan.Observation, failureObservation) ||
+			plan.ExpectedSubjectRevision == reopenedPlan.ExpectedSubjectRevision || validated.Facts.Resources.FailureTarget != nil || validated.Facts.RepairDirective != nil {
+			t.Fatalf("new rejected validation inherited old repair authority: plan=%+v directive=%+v", plan, validated.Facts.RepairDirective)
+		}
+		for _, documentKind := range []runtimecontract.RuntimeProviderDocumentKind{runtimecontract.RuntimeProviderDocumentOperations, runtimecontract.RuntimeProviderDocumentSemanticPlan} {
+			if err := candidateRequestSessionActionAllowed(validated, documentKind); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("pending confirmation admitted %s provider work: %v", documentKind, err)
+			}
+		}
+		if err := validateCandidateAttemptBeginAuthority(validated); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("pending confirmation admitted candidate work: %v", err)
+		}
+		for name, mutate := range map[string]func(*RuntimeAggregate){
+			"missing fresh rejected evidence": func(a *RuntimeAggregate) {
+				for index, fact := range a.Facts.Evidence.Rejected {
+					if fact.DispatchID == freshSeal.ActiveDispatch.ID {
+						a.Facts.Evidence.Rejected = append(a.Facts.Evidence.Rejected[:index], a.Facts.Evidence.Rejected[index+1:]...)
+						break
+					}
+				}
+			},
+			"old continuation restored": func(a *RuntimeAggregate) { a.Facts.RepairDirective = restartedFinal.Facts.RepairDirective },
+			"fresh receipt fence drift": func(a *RuntimeAggregate) {
+				for index := range a.OperationReceipts {
+					if feedback := a.OperationReceipts[index].Feedback; feedback != nil && feedback.DispatchID == freshSeal.ActiveDispatch.ID {
+						a.OperationReceipts[index].Fence++
+					}
+				}
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				changed := cloneRuntimeAggregateForMCPProvenanceTest(t, validated)
+				mutate(&changed)
+				if err := validateConfirmedRepairFreshValidationContinuation(changed); err == nil {
+					t.Fatal("invalid fresh-validation consumption passed reverse proof")
+				}
+			})
+		}
+		// Exact old response replay is harmless even though this is now a new
+		// observation sequence. It cannot restore the first target or directive.
+		replayed, err := controller.recordRepairSurfaceConfirmation(ctx, validated.Facts.WorkspaceID, validated.Facts.RunID, confirmationResponse.Confirmation)
+		if err != nil || replayed.StateRevision != validated.StateRevision || replayed.Facts.Resources.FailureTarget != nil {
+			t.Fatalf("old confirmation replay changed the new obligation: %v", err)
+		}
+		testContinueObservedShellRepair(t, ctx, hub, repository, validated, workspaceDirectory, secondSucceeds)
+		return
+	}
 	acceptedValidation := false
 	for _, fact := range validated.Facts.Evidence.Accepted {
 		if fact.DispatchID == freshSeal.ActiveDispatch.ID && fact.Kind == runtimecontract.EvidenceKindValidation && len(fact.CoverageWorkItemIDs) == 1 {
@@ -718,6 +784,93 @@ func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *t
 	}
 	if err := validated.Validate(); err != nil {
 		t.Fatalf("fresh validation reload: %v", err)
+	}
+}
+
+func testContinueObservedShellRepair(t *testing.T, ctx context.Context, hub magicevent.Hub, repository *durableRuntimeStateRepository, pending RuntimeAggregate, workspaceDirectory string, succeeds bool) {
+	t.Helper()
+	// Reload the new failure without altering owner resources or old seals.
+	repository.aggregate = cloneRuntimeAggregateForMCPProvenanceTest(t, pending)
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := CurrentRuntimeRepairSurfaceConfirmationPlan(repository.aggregate)
+	if err != nil || !plan.Required() {
+		t.Fatalf("reload lost new confirmation obligation: %v", err)
+	}
+	response := hub.Send(magicevent.NewEventWithContext(fileevents.TopicConfirmRuntimeRepairSurface, runtimecontract.RuntimeModuleOrchestrator,
+		orchestratorevents.PrerequisiteCommandDestination, magicevent.NewHeader(), ctx, fileevents.ConfirmRuntimeRepairSurfaceCommand{
+			RequestID: plan.RequestID, IssuedAtStateRevision: plan.IssuedAtStateRevision, ExpectedSubjectRevision: plan.ExpectedSubjectRevision,
+			WorkspaceID: pending.Facts.WorkspaceID, RunID: pending.Facts.RunID, WorkspaceDeliverableDirectory: workspaceDirectory, Observation: plan.Observation,
+		}))
+	data, ownerErr := response.Get()
+	if ownerErr != nil {
+		t.Fatal(ownerErr)
+	}
+	confirmation := data.(fileevents.ConfirmRuntimeRepairSurfaceResult).Confirmation
+	confirmed, err := controller.recordRepairSurfaceConfirmation(ctx, pending.Facts.WorkspaceID, pending.Facts.RunID, confirmation)
+	if err != nil || confirmed.StateRevision != pending.StateRevision+1 || len(confirmed.RepairSurfaceConfirmations) != len(pending.RepairSurfaceConfirmations)+1 {
+		t.Fatalf("second confirmation was not one owner CAS: %v", err)
+	}
+	loaded := reacquireObservedShellRepairPrerequisites(t, ctx, hub, controller, confirmed, workspaceDirectory)
+	if loaded.Facts.RepairDirective == nil || loaded.Facts.RepairDirective.CurrentFailure == nil ||
+		loaded.Facts.RepairDirective.CurrentFailure.Signature != pending.Facts.Failure.Signature {
+		t.Fatalf("second repair did not bind the new rejected receipt: state=%s terminal=%+v failure=%+v directive=%+v repair=%+v", loaded.Decision.State, loaded.Decision.Terminal, loaded.Facts.Failure, loaded.Facts.RepairDirective, loaded.Facts.Repair)
+	}
+	var snapshot runtimecontract.TargetSnapshot
+	for _, value := range loaded.Facts.Resources.TargetSnapshots {
+		if value.TargetRef == "implementation.go" {
+			snapshot = value
+		}
+	}
+	patchType, oldText, baseHash := "text_replace", snapshot.Content, snapshot.ContentHash
+	newText := "package fixture\n// second confirmed repair\n"
+	if !succeeds {
+		newText += "var _ = finalMissingImplementation\n"
+	}
+	candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
+		Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{"implementation.go"}, BindingRefs: []string{loaded.Facts.Focus.CoverageEvidenceBindings[0].ID},
+		Parameters: []runtimecontract.OperationParameter{{Name: "patchType", String: &patchType}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}, {Name: "baseHash", String: &baseHash}},
+	}}}}}
+	candidate = runtimeTestMustDeriveCandidateAuthority(t, loaded, candidate)
+	catalog := runtimeTestOperationAdmissibilityForOwner(t, loaded.Facts, runtimecontract.RuntimeModuleFile)
+	sealCandidateWithFeasibilitiesForTest(t, repository, candidate, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
+		OperationID: candidate.StateChange.Operations[0].Operation.ID, AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
+		Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
+	}})
+	repaired, err := controller.executeActiveDispatch(ctx, loaded.Facts.WorkspaceID, loaded.Facts.RunID, runtimeObservedFilePatchExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := reacquireObservedShellRepairPrerequisites(t, ctx, hub, controller, repaired, workspaceDirectory)
+	recipeID := ready.Facts.Focus.ValidationRecipeID
+	fresh := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
+		Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, TargetRefs: []string{"implementation.go"}, BindingRefs: []string{ready.Facts.Focus.CoverageEvidenceBindings[0].ID},
+		Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
+	}}}}}
+	fresh = runtimeTestMustDeriveCandidateAuthority(t, ready, fresh)
+	catalog = runtimeTestOperationAdmissibilityForOwner(t, ready.Facts, runtimecontract.RuntimeModuleShell)
+	sealCandidateWithFeasibilitiesForTest(t, repository, fresh, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
+		OperationID: fresh.Validation.Operations[0].Operation.ID, AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
+		Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
+	}})
+	final, err := controller.executeActiveDispatch(ctx, ready.Facts.WorkspaceID, ready.Facts.RunID, runtimeObservedShellExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if succeeds {
+		if !hasAcceptedCurrentFocusValidationEvidence(final.Facts, final.CoverageProofLineage) || final.Decision.State == runtimecontract.ConvergenceStateFailed {
+			t.Fatalf("second repair lost new validation proof: decision=%+v failure=%+v", final.Decision, final.Facts.Failure)
+		}
+	} else if final.Decision.State != runtimecontract.ConvergenceStateFailed || final.Decision.Terminal == nil || final.Decision.Terminal.Code != "validation_failure_repair_exhausted" {
+		t.Fatalf("third rejection did not close sealed Profile budget: decision=%+v repair=%+v", final.Decision, final.Facts.Repair)
+	}
+	if err := final.Validate(); err != nil {
+		t.Fatalf("final reload: %v", err)
+	}
+	if plan, err := CurrentRuntimeRepairSurfaceConfirmationPlan(final); err != nil || plan.Required() {
+		t.Fatalf("settled sequence issued another owner query: %+v %v", plan, err)
 	}
 }
 

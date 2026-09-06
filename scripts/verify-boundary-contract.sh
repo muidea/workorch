@@ -4423,20 +4423,48 @@ done
 # absence is not an independent progress state and cannot reopen a terminal VFO.
 runtime_repair_confirmation_plan="$(sed -n '/^func CurrentRuntimeRepairSurfaceConfirmationPlan(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/repair_surface_confirmation_plan.go)"
 for marker in \
-	'aggregate.Termination != nil' \
-	'aggregate.ActiveDispatch != nil' \
-	'runtimeValidationFailureObservationIsTargetless' \
-	'runtimeLatestRepairSurfaceConfirmation' \
-	'RuntimeRepairSurfaceConfirmed, runtimecontract.RuntimeRepairSurfaceRejected' \
+	'aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation' \
+	'len(aggregate.Facts.Prerequisites.Pending) != 0' \
+	'runtimeRepairSurfaceConfirmationObligation(aggregate)' \
 	'stableRuntimeRepairSurfaceConfirmationRequestID' \
-	'runtimecontract.RuntimeRepairSurfaceConfirmationDescriptorForProtocol' \
 	'currentRuntimeRepairSurfaceSubjectRevision' \
-	'IssuedAtStateRevision: aggregate.StateRevision' \
-	'SubjectRef: descriptor.SubjectRef' \
-	'ExpectedSubjectRevision: expectedSubjectRevision' \
-	'currentRuntimeRepairSurfaceConfirmationContract'; do
+	'plan.IssuedAtStateRevision = aggregate.StateRevision' \
+	'plan.ExpectedSubjectRevision = expectedSubjectRevision'; do
 	if ! grep -q -F -- "$marker" <<<"$runtime_repair_confirmation_plan"; then
 		echo "boundary contract violation: canonical repair-confirmation plan lost $marker" >&2
+		exit 1
+	fi
+done
+runtime_repair_confirmation_obligation="$(sed -n '/^func runtimeRepairSurfaceConfirmationObligation(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/repair_surface_confirmation_plan.go)"
+for marker in \
+	'aggregate.Termination != nil' \
+	'aggregate.Decision.Terminal != nil' \
+	'aggregate.ActiveDispatch != nil' \
+	'aggregate.Facts.RepairDirective != nil' \
+	'runtimeValidationFailureObservationIsTargetless' \
+	'reduceDeterminedFailure' \
+	'sealedValidationFailureObservationMatches' \
+	'runtimeValidationFailureObservationHasPersistedReceipt' \
+	'confirmedRepairSourceUsesCurrentBinding' \
+	'runtimeLatestRepairSurfaceConfirmation' \
+	'RuntimeRepairSurfaceConfirmed, runtimecontract.RuntimeRepairSurfaceRejected' \
+	'runtimecontract.RuntimeRepairSurfaceConfirmationDescriptorForProtocol' \
+	'SubjectRef: descriptor.SubjectRef' \
+	'currentRuntimeRepairSurfaceConfirmationContract'; do
+	if ! grep -q -F -- "$marker" <<<"$runtime_repair_confirmation_obligation"; then
+		echo "boundary contract violation: shared repair-confirmation obligation lost $marker" >&2
+		exit 1
+	fi
+done
+runtime_repair_confirmation_guard="$(sed -n '/^func rejectCandidateBeforeRepairSurfaceConfirmation(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/repair_surface_confirmation_plan.go)"
+if ! grep -q -F -- 'runtimeRepairSurfaceConfirmationObligation(aggregate)' <<<"$runtime_repair_confirmation_guard" ||
+	! grep -q -F -- 'runtimeRepairSurfaceConfirmationObligation(current)' internal/modules/kernel/orchestrator/biz/runtime/reducer.go; then
+	echo "boundary contract violation: reducer and candidate guard no longer share the owner confirmation obligation" >&2
+	exit 1
+fi
+for source in candidate_manifest.go candidate_dispatch_transition.go candidate_request_session.go; do
+	if ! grep -q -F -- 'rejectCandidateBeforeRepairSurfaceConfirmation(aggregate)' "internal/modules/kernel/orchestrator/biz/runtime/$source"; then
+		echo "boundary contract violation: pending confirmation lost candidate/provider guard ($source)" >&2
 		exit 1
 	fi
 done

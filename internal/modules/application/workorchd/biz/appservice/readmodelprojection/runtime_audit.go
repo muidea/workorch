@@ -21,7 +21,9 @@ func mapRuntimeAudit(runtimeState *runtimecontract.RuntimeStateRecord) *projecti
 		WorkspaceID: string(facts.WorkspaceID), RunID: string(facts.RunID),
 		StateRevision: state.StateRevision, EvidenceSequence: state.EvidenceSequence,
 		DefinitionRevision: facts.DefinitionRevision, EvidenceRevision: facts.EvidenceRevision,
-		Focus: runtimeAuditFocus(facts.Focus), Coverage: runtimeAuditCoverage(facts.Coverage),
+		StartupInputHash:           state.Definition.StartupInputHash,
+		SealedProfileContractsHash: runtimecontract.StableRuntimeProfileContractsHash(facts.Activation.ExecutionContract.ProfileContracts),
+		Focus:                      runtimeAuditFocus(facts.Focus), Coverage: runtimeAuditCoverage(facts.Coverage),
 		RemainingFocusIDs: runtimeAuditFocusIDs(facts.RemainingFocuses), CompletedFocusIDs: runtimeAuditFocusIDs(facts.CompletedFocuses),
 		CoverageBindings: runtimeAuditAllCoverageBindings(facts),
 		AcceptedEvidence: runtimeAuditEvidence(facts.Evidence.Accepted), RejectedEvidence: runtimeAuditEvidence(facts.Evidence.Rejected),
@@ -30,6 +32,18 @@ func mapRuntimeAudit(runtimeState *runtimecontract.RuntimeStateRecord) *projecti
 		OperationReceipts: runtimeAuditOperationReceipts(state.OperationReceipts),
 		Repair:            runtimeAuditRepair(facts), Assessments: runtimeAuditAssessments(facts.Assessments),
 		RepairDirective: runtimeRepairDirectiveProjection(facts.RepairDirective),
+	}
+	if soul := facts.Activation.DefaultSoul; soul != nil {
+		ret.SealedSoulBindings = append(ret.SealedSoulBindings, projectioncontract.RuntimeAuditSoulBinding{
+			Stage: "default", SoulID: string(soul.ID), Revision: soul.Revision,
+			ContentHash: soul.ContentHash, SourceProvenance: soul.SourceProvenance,
+		})
+	}
+	for _, binding := range facts.Activation.StageSoulBindings {
+		ret.SealedSoulBindings = append(ret.SealedSoulBindings, projectioncontract.RuntimeAuditSoulBinding{
+			Stage: binding.Stage, SoulID: string(binding.Soul.ID), Revision: binding.Soul.Revision,
+			ContentHash: binding.Soul.ContentHash, SourceProvenance: binding.Soul.SourceProvenance,
+		})
 	}
 	if facts.Failure != nil {
 		ret.Failure = runtimeAuditFailure(*facts.Failure)

@@ -91,6 +91,8 @@ func applyTaskProgressConvergenceStatus(ret *projectioncontract.ConvergenceStatu
 		return
 	}
 	if runtime := progress.Runtime; runtime != nil {
+		ret.LatestEffectiveProgressAt = runtime.LatestAcceptedEvidenceAt
+		ret.LastProgressAt = runtime.LatestAcceptedEvidenceAt
 		ret.CurrentFocusID = firstNonEmptyString(ret.CurrentFocusID, runtime.CurrentFocusID)
 		ret.ConvergenceState = strings.TrimSpace(runtime.ConvergenceState)
 		if runtime.AcceptedEvidenceCount > ret.AcceptedEvidenceCount {
@@ -210,7 +212,7 @@ func mapWorkspaceConvergenceStatus(snapshot readmodelcore.WorkspaceSnapshotState
 	ret := mapConvergenceStatus(runSnapshot)
 	if ret != nil {
 		ret.LatestEffectiveProgressAt = snapshot.RunHeartbeat.LatestEffectiveProgressAt
-		ret.LastProgressAt = firstNonEmptyString(snapshot.RunHeartbeat.LatestEffectiveProgressAt, ret.LastProgressAt)
+		ret.LastProgressAt = snapshot.RunHeartbeat.LatestEffectiveProgressAt
 		ret.Stalled = snapshot.RunHeartbeat.Stalled
 		ret.IneffectiveRetry = snapshot.RunHeartbeat.IneffectiveRetry
 	}

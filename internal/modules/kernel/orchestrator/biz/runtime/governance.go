@@ -315,8 +315,8 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 			ownerReductionEvent = event
 		}
 	}
-	facts, decision, err := reduceRuntimeStateWithDirectiveAndOwnerEvent(
-		aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, ownerReductionEvent, aggregate.CoverageProofLineage,
+	facts, decision, err := reduceRuntimeStateWithLineage(
+		aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, ownerReductionEvent, &aggregate, aggregate.CoverageProofLineage,
 	)
 	if err != nil {
 		return EvidenceCommitResult{}, err

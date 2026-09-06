@@ -61,7 +61,7 @@ func (c *authorityComponent) invalidateSemanticCatalogForFocusScope(ctx context.
 		// would incorrectly reject the owner's fresh same-revision response.
 		RefreshDiagnostic: &diagnostic,
 	})
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -127,7 +127,7 @@ func (c *authorityComponent) invalidatePrerequisitesForReadOnlyStale(ctx context
 			return RuntimeAggregate{}, err
 		}
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, facts, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

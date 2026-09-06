@@ -41,7 +41,7 @@ func (c *authorityComponent) reconcileAuthorityBeforeCandidate(ctx context.Conte
 	if requirements := activeProviderCeilingRequirements(facts); len(requirements) != 0 {
 		facts = preflightRuntimeFactsPreservingPending(facts, requirements)
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -89,7 +89,7 @@ func (c *authorityComponent) recordFeasibilityFact(ctx context.Context, workspac
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.Facts.Feasibility = &fact
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -197,7 +197,7 @@ func applyFailureFactToAggregate(aggregate RuntimeAggregate, fact runtimecontrac
 		return RuntimeAggregate{}, err
 	}
 	facts := aggregate.Facts
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -310,7 +310,7 @@ func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID
 		}
 		facts = aggregate.Facts
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

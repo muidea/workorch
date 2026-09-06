@@ -314,6 +314,11 @@ contract defect、budget exhaustion 或 owner failure terminal 也必须保持�
 termination 仍走独立 Run-owner intent/SM-4 handoff lane。该门禁不允许 operations request 穿过 transient 窗口，也不允许
 capability owner、Application 或 projection 改写任何 Runtime state。
 
+execution-locked binding 下的新 fresh validation 若 rejected，SM-2 先用 exact receipt 与当前 sealed route/budget 判定新
+repair-owner confirmation 义务，不得因 current catalog 已更新就跳过确认直接交付普通 target-grounding terminal。义务不
+退休原 binding、不触发 semantic successor，也不授权 operation；SM-3 在确认结算前拒绝 semantic/operations candidate
+入口。确认后的 state-change repair 仍需新的 validation receipt，不能复用此前失败序列的 confirmed target 或 CWI credit。
+
 semantic generation 的 eligible closure 必须由 generation purpose 唯一派生，并由 accepted-order projection、focus
 advance 与 retirement check 共用。普通 definition generation 使用当时全部尚未绑定且可规划的 current CWI；
 `validation_failure_repair` generation 只包含触发 repair 的 exact current CWI，不得把其它全局 eligible CWI 拼入该

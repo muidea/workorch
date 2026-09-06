@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -40,19 +41,63 @@ func (p RuntimeRepairSurfaceConfirmationPlan) Required() bool {
 // rejected observations can never issue another owner query. A current repair
 // directive likewise owns the next action and excludes this handoff.
 func CurrentRuntimeRepairSurfaceConfirmationPlan(aggregate RuntimeAggregate) (RuntimeRepairSurfaceConfirmationPlan, error) {
-	if err := runtimecontract.ValidateRuntimeRepairSurfaceConfirmationRecords(aggregate.RepairSurfaceConfirmations); err != nil {
-		return RuntimeRepairSurfaceConfirmationPlan{}, fmt.Errorf("runtime repair surface confirmation plan: %w", err)
-	}
-	if aggregate.Termination != nil || aggregate.ActiveDispatch != nil || aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation ||
-		len(aggregate.Facts.Prerequisites.Pending) != 0 || aggregate.Facts.RepairDirective != nil ||
-		!runtimeValidationFailureObservationIsTargetless(aggregate.Facts) {
+	if aggregate.Decision.State != runtimecontract.ConvergenceStateNeedValidation || len(aggregate.Facts.Prerequisites.Pending) != 0 {
 		return RuntimeRepairSurfaceConfirmationPlan{}, nil
+	}
+	plan, refreshLineage, err := runtimeRepairSurfaceConfirmationObligation(aggregate)
+	if err != nil || plan.OwnerModuleID == "" {
+		return RuntimeRepairSurfaceConfirmationPlan{}, err
+	}
+	expectedSubjectRevision, err := currentRuntimeRepairSurfaceSubjectRevision(aggregate, plan.OwnerModuleID, plan.SubjectDomain, plan.SubjectRef)
+	if err != nil {
+		return RuntimeRepairSurfaceConfirmationPlan{}, err
+	}
+	plan.ExpectedSubjectRevision = expectedSubjectRevision
+	plan.IssuedAtStateRevision = aggregate.StateRevision
+	plan.RequestID = stableRuntimeRepairSurfaceConfirmationRequestID(plan.Observation, plan.OwnerModuleID, plan.Protocol, plan.SubjectRef, expectedSubjectRevision, aggregate.StateRevision, refreshLineage)
+	return plan, nil
+}
+
+// runtimeRepairSurfaceConfirmationObligation proves the pending handoff without
+// consulting the decision it must help SM-2 derive. It carries no query fence or
+// target authority; the public plan adds those only after prerequisites settle.
+// Reducer, query admission and candidate guard share this exact receipt/sequence
+// classifier, including after a newer validation fails under a refreshed catalog.
+func runtimeRepairSurfaceConfirmationObligation(aggregate RuntimeAggregate) (RuntimeRepairSurfaceConfirmationPlan, string, error) {
+	if err := runtimecontract.ValidateRuntimeRepairSurfaceConfirmationRecords(aggregate.RepairSurfaceConfirmations); err != nil {
+		return RuntimeRepairSurfaceConfirmationPlan{}, "", fmt.Errorf("runtime repair surface confirmation plan: %w", err)
+	}
+	if aggregate.Termination != nil || aggregate.Decision.Terminal != nil || aggregate.ActiveDispatch != nil || aggregate.Facts.RepairDirective != nil ||
+		!runtimeValidationFailureObservationIsTargetless(aggregate.Facts) {
+		return RuntimeRepairSurfaceConfirmationPlan{}, "", nil
+	}
+	if _, determined, err := reduceDeterminedFailure(runtimecontract.RuntimeDecision{Focus: aggregate.Facts.Focus}, aggregate.Facts); err != nil || determined {
+		return RuntimeRepairSurfaceConfirmationPlan{}, "", err
 	}
 
 	failure := aggregate.Facts.Failure.Normalized()
 	observation := failure.ValidationFailureObservation.Clone()
 	if err := observation.Validate(); err != nil {
-		return RuntimeRepairSurfaceConfirmationPlan{}, fmt.Errorf("runtime repair surface confirmation plan observation: %w", err)
+		return RuntimeRepairSurfaceConfirmationPlan{}, "", fmt.Errorf("runtime repair surface confirmation plan observation: %w", err)
+	}
+	if !sealedValidationFailureObservationMatches(aggregate, observation) || !runtimeValidationFailureObservationHasPersistedReceipt(aggregate, observation) {
+		return RuntimeRepairSurfaceConfirmationPlan{}, "", fmt.Errorf("runtime repair surface confirmation obligation has no exact committed validation receipt")
+	}
+	for _, dispatch := range aggregate.CompletedDispatches {
+		if dispatch.ID != observation.DispatchID {
+			continue
+		}
+		operation, found := candidateOperationByID(dispatch.Candidate, observation.OperationID)
+		coverageIDs := make([]common.CoverageWorkItemID, 0, len(operation.BindingRefs))
+		for _, binding := range dispatch.CoverageBindings {
+			if containsString(operation.BindingRefs, binding.ID) {
+				coverageIDs = append(coverageIDs, binding.CoverageWorkItemID)
+			}
+		}
+		if !found || dispatch.Transaction.FocusID != aggregate.Facts.Focus.ID || dispatch.Transaction.DefinitionRevision != aggregate.Facts.DefinitionRevision ||
+			!confirmedRepairSourceUsesCurrentBinding(aggregate.Facts, operation.BindingRefs, coverageIDs) {
+			return RuntimeRepairSurfaceConfirmationPlan{}, "", fmt.Errorf("runtime repair surface confirmation obligation is not bound to the current focus and definition proof")
+		}
 	}
 	refreshLineage := "initial"
 	if latest, latestSignature, found := runtimeLatestRepairSurfaceConfirmation(aggregate, observation); found {
@@ -65,36 +110,29 @@ func CurrentRuntimeRepairSurfaceConfirmationPlan(aggregate RuntimeAggregate) (Ru
 			// reconstruct that comparison through the broad contract package.
 			refreshLineage = latestSignature
 			if refreshLineage == "" {
-				return RuntimeRepairSurfaceConfirmationPlan{}, fmt.Errorf("runtime repair surface confirmation plan stale lineage is absent")
+				return RuntimeRepairSurfaceConfirmationPlan{}, "", fmt.Errorf("runtime repair surface confirmation plan stale lineage is absent")
 			}
 		case runtimecontract.RuntimeRepairSurfaceConfirmed, runtimecontract.RuntimeRepairSurfaceRejected:
-			return RuntimeRepairSurfaceConfirmationPlan{}, nil
+			return RuntimeRepairSurfaceConfirmationPlan{}, "", nil
 		default:
-			return RuntimeRepairSurfaceConfirmationPlan{}, fmt.Errorf("runtime repair surface confirmation plan has unsupported disposition %q", latest.Disposition)
+			return RuntimeRepairSurfaceConfirmationPlan{}, "", fmt.Errorf("runtime repair surface confirmation plan has unsupported disposition %q", latest.Disposition)
 		}
 	}
 
 	ownerModuleID, protocol, err := currentRuntimeRepairSurfaceConfirmationContract(aggregate, observation)
 	if err != nil {
-		return RuntimeRepairSurfaceConfirmationPlan{}, err
+		return RuntimeRepairSurfaceConfirmationPlan{}, "", err
 	}
 	if ownerModuleID == "" || protocol == runtimecontract.RuntimeRepairSurfaceConfirmationProtocolNone {
-		return RuntimeRepairSurfaceConfirmationPlan{}, fmt.Errorf("runtime repair surface confirmation plan has no concrete owner protocol")
+		return RuntimeRepairSurfaceConfirmationPlan{}, "", fmt.Errorf("runtime repair surface confirmation plan has no concrete owner protocol")
 	}
 	descriptor, found := runtimecontract.RuntimeRepairSurfaceConfirmationDescriptorForProtocol(protocol)
 	if !found {
-		return RuntimeRepairSurfaceConfirmationPlan{}, fmt.Errorf("runtime repair surface confirmation plan has no subject for protocol %q", protocol)
-	}
-	expectedSubjectRevision, err := currentRuntimeRepairSurfaceSubjectRevision(aggregate, ownerModuleID, descriptor.ResourceDomain, descriptor.SubjectRef)
-	if err != nil {
-		return RuntimeRepairSurfaceConfirmationPlan{}, err
+		return RuntimeRepairSurfaceConfirmationPlan{}, "", fmt.Errorf("runtime repair surface confirmation plan has no subject for protocol %q", protocol)
 	}
 	return RuntimeRepairSurfaceConfirmationPlan{
-		RequestID:             stableRuntimeRepairSurfaceConfirmationRequestID(observation, ownerModuleID, protocol, descriptor.SubjectRef, expectedSubjectRevision, aggregate.StateRevision, refreshLineage),
-		IssuedAtStateRevision: aggregate.StateRevision,
-		Observation:           observation, OwnerModuleID: ownerModuleID, Protocol: protocol, SubjectDomain: descriptor.ResourceDomain, SubjectRef: descriptor.SubjectRef,
-		ExpectedSubjectRevision: expectedSubjectRevision,
-	}, nil
+		Observation: observation, OwnerModuleID: ownerModuleID, Protocol: protocol, SubjectDomain: descriptor.ResourceDomain, SubjectRef: descriptor.SubjectRef,
+	}, refreshLineage, nil
 }
 
 // currentRuntimeRepairSurfaceSubjectRevision returns the one exact current
@@ -160,4 +198,15 @@ func stableRuntimeRepairSurfaceObservationSequenceID(observation runtimecontract
 	encoded, _ := json.Marshal(observation.Normalized())
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])
+}
+
+func rejectCandidateBeforeRepairSurfaceConfirmation(aggregate RuntimeAggregate) error {
+	obligation, _, err := runtimeRepairSurfaceConfirmationObligation(aggregate)
+	if err != nil {
+		return err
+	}
+	if obligation.OwnerModuleID != "" {
+		return fmt.Errorf("%w: candidate authority awaits exact repair-owner confirmation", common.ErrConflict)
+	}
+	return nil
 }

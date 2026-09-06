@@ -1,11 +1,40 @@
 package readmodelprojection
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestMapRuntimeAuditExposesSealedVersionsWithoutGuidanceOrCatalogLookup(t *testing.T) {
+	soul := runtimecontract.RuntimeSoulContext{ID: "soul-sealed", Revision: 3, ContentHash: "sealed-content", SourceProvenance: "builtin/previous", Instructions: "private-guidance-sentinel"}
+	state := runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{Activation: runtimecontract.RuntimeActivationContext{
+		DefaultSoul:       &soul,
+		StageSoulBindings: []runtimecontract.RuntimeStageSoulBinding{{Stage: "execution", Soul: soul}},
+		ExecutionContract: runtimecontract.RuntimeExecutionContract{ProfileContracts: []runtimecontract.RuntimeProfileContract{{ID: "sealed-profile"}}},
+	}}}
+	state.Definition.StartupInputHash = "sealed-input"
+	audit := mapRuntimeAudit(&state)
+	if audit.StartupInputHash != "sealed-input" || audit.SealedProfileContractsHash != runtimecontract.StableRuntimeProfileContractsHash(state.Facts.Activation.ExecutionContract.ProfileContracts) || len(audit.SealedSoulBindings) != 2 {
+		t.Fatalf("sealed configuration metadata = %+v", audit)
+	}
+	for _, binding := range audit.SealedSoulBindings {
+		if binding.SoulID != "soul-sealed" || binding.Revision != 3 || binding.ContentHash != "sealed-content" || binding.SourceProvenance != "builtin/previous" {
+			t.Fatalf("sealed Soul metadata = %+v", binding)
+		}
+	}
+	encoded, err := json.Marshal(audit)
+	if err != nil || strings.Contains(string(encoded), soul.Instructions) || strings.Contains(string(encoded), "instructions") {
+		t.Fatalf("audit leaked sealed guidance: err=%v", err)
+	}
+	audit.SealedSoulBindings[1].Revision = 99
+	if state.Facts.Activation.StageSoulBindings[0].Soul.Revision != 3 || mapRuntimeAudit(&state).SealedSoulBindings[1].Revision != 3 {
+		t.Fatal("display metadata mutated the sealed Run input")
+	}
+}
 
 func TestMapRuntimeAuditSeparatesActiveAndRetiredPrerequisiteLifecycle(t *testing.T) {
 	state := runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{

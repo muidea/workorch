@@ -12,7 +12,7 @@ func MapWorkspace(item *workspacemodel.Workspace) appmodelcore.Workspace {
 	if item == nil {
 		return appmodelcore.Workspace{}
 	}
-	return appmodelcore.Workspace{
+	ret := appmodelcore.Workspace{
 		Revision:             item.Revision,
 		ID:                   string(item.ID),
 		Title:                item.Title,
@@ -29,6 +29,12 @@ func MapWorkspace(item *workspacemodel.Workspace) appmodelcore.Workspace {
 		ContextHints:         cloneContextMap(item.ContextHints.Map()),
 		EvidencePolicies:     cloneContextMapSlice(workorcheventpayload.MapSlice(item.EvidencePolicies)),
 	}
+	if item.StartupInput != nil {
+		ret.AdmittedStartupInputHash = item.StartupInput.StartupInputHash
+		ret.AdmittedTemplateRevision = item.StartupInput.TemplateRevision
+		ret.AdmittedTemplateSnapshotHash = item.StartupInput.TemplateSnapshotHash
+	}
+	return ret
 }
 
 func WorkspaceModelFromView(item appmodelcore.Workspace) *workspacemodel.Workspace {

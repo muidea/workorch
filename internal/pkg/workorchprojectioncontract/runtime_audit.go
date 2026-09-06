@@ -7,29 +7,42 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 // dispatch and terminal lineage without exposing executable parameters or
 // owner-private prerequisite content.
 type RuntimeAudit struct {
-	WorkspaceID        string                         `json:"workspaceId,omitempty"`
-	RunID              string                         `json:"runId,omitempty"`
-	StateRevision      uint64                         `json:"stateRevision,omitempty"`
-	EvidenceSequence   uint64                         `json:"evidenceSequence,omitempty"`
-	DefinitionRevision string                         `json:"definitionRevision,omitempty"`
-	EvidenceRevision   string                         `json:"evidenceRevision,omitempty"`
-	Focus              RuntimeAuditFocus              `json:"focus"`
-	RemainingFocusIDs  []string                       `json:"remainingFocusIds,omitempty"`
-	CompletedFocusIDs  []string                       `json:"completedFocusIds,omitempty"`
-	Coverage           []RuntimeAuditCoverage         `json:"coverage,omitempty"`
-	CoverageBindings   []RuntimeAuditCoverageBinding  `json:"coverageBindings,omitempty"`
-	AcceptedEvidence   []RuntimeAuditEvidence         `json:"acceptedEvidence,omitempty"`
-	RejectedEvidence   []RuntimeAuditEvidence         `json:"rejectedEvidence,omitempty"`
-	Grounding          RuntimeAuditGrounding          `json:"grounding"`
-	Authority          RuntimeAuditAuthority          `json:"authority"`
-	CandidateAttempts  []RuntimeAuditCandidateAttempt `json:"candidateAttempts,omitempty"`
-	Dispatches         []RuntimeAuditDispatch         `json:"dispatches,omitempty"`
-	OperationReceipts  []RuntimeAuditOperationReceipt `json:"operationReceipts,omitempty"`
-	Repair             RuntimeAuditRepair             `json:"repair"`
-	Failure            *RuntimeAuditFailure           `json:"failure,omitempty"`
-	RepairDirective    *RuntimeRepairDirective        `json:"repairDirective,omitempty"`
-	Assessments        []RuntimeAuditAssessment       `json:"assessments,omitempty"`
-	Terminal           *RuntimeAuditTerminal          `json:"terminal,omitempty"`
+	WorkspaceID                string                         `json:"workspaceId,omitempty"`
+	RunID                      string                         `json:"runId,omitempty"`
+	StateRevision              uint64                         `json:"stateRevision,omitempty"`
+	EvidenceSequence           uint64                         `json:"evidenceSequence,omitempty"`
+	DefinitionRevision         string                         `json:"definitionRevision,omitempty"`
+	StartupInputHash           string                         `json:"startupInputHash,omitempty"`
+	SealedProfileContractsHash string                         `json:"sealedProfileContractsHash,omitempty"`
+	SealedSoulBindings         []RuntimeAuditSoulBinding      `json:"sealedSoulBindings,omitempty"`
+	EvidenceRevision           string                         `json:"evidenceRevision,omitempty"`
+	Focus                      RuntimeAuditFocus              `json:"focus"`
+	RemainingFocusIDs          []string                       `json:"remainingFocusIds,omitempty"`
+	CompletedFocusIDs          []string                       `json:"completedFocusIds,omitempty"`
+	Coverage                   []RuntimeAuditCoverage         `json:"coverage,omitempty"`
+	CoverageBindings           []RuntimeAuditCoverageBinding  `json:"coverageBindings,omitempty"`
+	AcceptedEvidence           []RuntimeAuditEvidence         `json:"acceptedEvidence,omitempty"`
+	RejectedEvidence           []RuntimeAuditEvidence         `json:"rejectedEvidence,omitempty"`
+	Grounding                  RuntimeAuditGrounding          `json:"grounding"`
+	Authority                  RuntimeAuditAuthority          `json:"authority"`
+	CandidateAttempts          []RuntimeAuditCandidateAttempt `json:"candidateAttempts,omitempty"`
+	Dispatches                 []RuntimeAuditDispatch         `json:"dispatches,omitempty"`
+	OperationReceipts          []RuntimeAuditOperationReceipt `json:"operationReceipts,omitempty"`
+	Repair                     RuntimeAuditRepair             `json:"repair"`
+	Failure                    *RuntimeAuditFailure           `json:"failure,omitempty"`
+	RepairDirective            *RuntimeRepairDirective        `json:"repairDirective,omitempty"`
+	Assessments                []RuntimeAuditAssessment       `json:"assessments,omitempty"`
+	Terminal                   *RuntimeAuditTerminal          `json:"terminal,omitempty"`
+}
+
+// RuntimeAuditSoulBinding exposes sealed metadata, never guidance text or a
+// mutable catalog lookup. A resource upgrade cannot change these Run facts.
+type RuntimeAuditSoulBinding struct {
+	Stage            string `json:"stage"`
+	SoulID           string `json:"soulId"`
+	Revision         uint64 `json:"revision"`
+	ContentHash      string `json:"contentHash"`
+	SourceProvenance string `json:"sourceProvenance"`
 }
 
 type RuntimeAuditFocus struct {
@@ -354,6 +367,7 @@ func CloneRuntimeAudit(item *RuntimeAudit) *RuntimeAudit {
 		return nil
 	}
 	ret := *item
+	ret.SealedSoulBindings = append([]RuntimeAuditSoulBinding(nil), item.SealedSoulBindings...)
 	ret.RemainingFocusIDs = append([]string(nil), item.RemainingFocusIDs...)
 	ret.CompletedFocusIDs = append([]string(nil), item.CompletedFocusIDs...)
 	ret.Focus.CoverageWorkItemIDs = append([]string(nil), item.Focus.CoverageWorkItemIDs...)

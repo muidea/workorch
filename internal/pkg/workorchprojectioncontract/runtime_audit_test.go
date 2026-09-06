@@ -2,6 +2,15 @@ package workorchprojectioncontract
 
 import "testing"
 
+func TestCloneRuntimeAuditDetachesSealedSoulMetadata(t *testing.T) {
+	input := &RuntimeAudit{StartupInputHash: "sealed-input", SealedProfileContractsHash: "sealed-profile", SealedSoulBindings: []RuntimeAuditSoulBinding{{Stage: "execution", SoulID: "soul-a", Revision: 3, ContentHash: "sealed-content"}}}
+	cloned := CloneRuntimeAudit(input)
+	cloned.SealedSoulBindings[0].Revision = 4
+	if input.SealedSoulBindings[0].Revision != 3 || cloned.StartupInputHash != input.StartupInputHash || cloned.SealedProfileContractsHash != input.SealedProfileContractsHash {
+		t.Fatal("audit clone lost or aliased sealed metadata")
+	}
+}
+
 func TestCloneRuntimeAuditEvidenceDetachesCollections(t *testing.T) {
 	input := []RuntimeAuditEvidence{{
 		ID: "evidence-1", TargetRefs: []string{"a.go"}, BindingRefs: []string{"binding-1"},

@@ -1462,9 +1462,9 @@ func runtimeConfirmedRepairOwnsFreshValidationDirective(facts runtimecontract.Ru
 
 // validateConfirmedRepairFreshValidationContinuation is the fresh-load
 // reverse proof for the target-free NeedValidation handoff. Every applicable
-// completed transaction must either have fresh validation newer than its final
-// repair-owner receipt, retain exactly one canonical target-free directive, or
-// be atomically retired by an exact SM-2 failed terminal. A stale, renamed,
+// completed transaction must either have accepted fresh validation, an exact
+// rejected fresh-validation receipt consuming its handoff, one canonical
+// target-free directive, or an atomic SM-2 failed terminal. A stale, renamed,
 // target-restored, or lineage-free nonterminal projection fails closed.
 func validateConfirmedRepairFreshValidationContinuation(aggregate RuntimeAggregate) error {
 	transactions, err := completedConfirmedRepairTransactions(aggregate)
@@ -1491,6 +1491,15 @@ func validateConfirmedRepairFreshValidationContinuation(aggregate RuntimeAggrega
 			}
 			continue
 		}
+		if confirmedRepairFreshValidationRejected(aggregate, completed) {
+			// A fresh rejected validation consumes this continuation just as a
+			// successful validation does, but grants no credit. Its exact new
+			// receipt may open a separate bounded confirmation sequence.
+			if facts.RepairDirective != nil && runtimecontract.SameRuntimeRepairClosure(facts.RepairDirective.Closure, expected.Closure) {
+				return fmt.Errorf("runtime aggregate rejected fresh validation retained its consumed repair continuation")
+			}
+			continue
+		}
 		if terminalFailureClosed {
 			if facts.RepairDirective != nil {
 				return fmt.Errorf("runtime aggregate failed terminal retained confirmed owner repair fresh-validation authority")
@@ -1510,6 +1519,46 @@ func validateConfirmedRepairFreshValidationContinuation(aggregate RuntimeAggrega
 		return fmt.Errorf("runtime aggregate confirmed owner repair fresh-validation directive has no exact completed transaction (completed=%d applicable=%d)", len(transactions), applicable)
 	}
 	return nil
+}
+
+// History proves consumption of a specific fresh-validation handoff, not new
+// repair authority. The new failure still needs its own route, budget, owner
+// confirmation and current resource facts before another effect is admissible.
+func confirmedRepairFreshValidationRejected(aggregate RuntimeAggregate, completed completedConfirmedRepairTransaction) bool {
+	for _, dispatch := range aggregate.CompletedDispatches {
+		if dispatch.State != DispatchStateCommitted || dispatch.Candidate.Validation == nil || dispatch.RepairCommitment != nil {
+			continue
+		}
+		matchingManifests := 0
+		for _, session := range aggregate.CandidateRequestSessions {
+			manifest := session.CandidateManifest
+			if manifest != nil && session.Transaction == dispatch.Transaction && manifest.Hash == dispatch.CandidateManifestHash &&
+				manifest.RepairClosureID == completed.transaction.closure.ID && manifest.RepairPurpose == "" {
+				matchingManifests++
+			}
+		}
+		if matchingManifests != 1 {
+			continue
+		}
+		for _, fact := range aggregate.Facts.Evidence.Rejected {
+			if fact.DispatchID != dispatch.ID || fact.Kind != runtimecontract.EvidenceKindValidation ||
+				!runtimecontract.EvidenceRevisionAfter(fact.Revision, completed.finalEvidenceRevision) || !containsString(aggregate.ProcessedEventIDs, string(fact.ID)) ||
+				!sameRuntimeStringSet(fact.BindingRefs, completed.transaction.sourceOp.BindingRefs) {
+				continue
+			}
+			execution, found := operationExecutionRecord(dispatch.OperationExecutions, fact.OperationID)
+			if !found || execution.State != runtimecontract.OperationExecutionEvidenceCommitted || !containsString(dispatch.CompletedOperationIDs, fact.OperationID) {
+				continue
+			}
+			receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, execution.ExecutionKey, execution.Fence)
+			if found && receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected && receipt.Feedback != nil &&
+				receipt.Feedback.DispatchID == dispatch.ID && receipt.OperationID == fact.OperationID &&
+				execution.OwnerReceiptHash == runtimecontract.StableRuntimeOperationReceiptHash(receipt) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func settleConfirmedRepairDefinitionRepair(

@@ -5,6 +5,7 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 // RuntimeProgress is a read-only product projection of persisted Runtime
 // progress. Consumers must not reverse-drive Runtime authority from it.
 type RuntimeProgress struct {
+	LatestAcceptedEvidenceAt        string                                      `json:"latestAcceptedEvidenceAt,omitempty"`
 	StateRevision                   uint64                                      `json:"stateRevision,omitempty"`
 	EvidenceSequence                uint64                                      `json:"evidenceSequence,omitempty"`
 	CompletedDispatchCount          int                                         `json:"completedDispatchCount"`

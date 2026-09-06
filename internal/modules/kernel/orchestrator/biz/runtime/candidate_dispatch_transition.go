@@ -97,6 +97,9 @@ func validateCandidateAttemptBeginAuthority(aggregate RuntimeAggregate) error {
 	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
 		return err
 	}
+	if err := rejectCandidateBeforeRepairSurfaceConfirmation(aggregate); err != nil {
+		return err
+	}
 	switch aggregate.Decision.State {
 	case runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment:
 	default:
@@ -1096,7 +1099,7 @@ func closeCandidateAttemptWithCorrection(aggregate *RuntimeAggregate, idx, attem
 	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, *fact, runtimeFailureAuthorityRetire, nil); err != nil {
 		return err
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(*aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return err
 	}

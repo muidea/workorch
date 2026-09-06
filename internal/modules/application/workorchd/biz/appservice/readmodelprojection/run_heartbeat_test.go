@@ -57,8 +57,8 @@ func TestMapRunHeartbeatProjectsLatestProgressEvidence(t *testing.T) {
 	if got.LatestEvidenceRef != "latest-evidence" || got.LatestEventTopic != "latest" || got.LatestEventRevision != 2 {
 		t.Fatalf("evidence/event = %+v, want latest evidence and event", got)
 	}
-	if got.LatestEffectiveProgressAt != "2026-06-10T00:06:00Z" {
-		t.Fatalf("latest effective progress = %q, want patch timestamp", got.LatestEffectiveProgressAt)
+	if got.LatestEffectiveProgressAt != "" || got.LatestActivityAt != "2026-06-10T00:06:00Z" {
+		t.Fatalf("activity without accepted owner evidence is not effective progress: %+v", got)
 	}
 	if got.ActivityState != "ineffective_retry" || !got.IneffectiveRetry || got.Stalled {
 		t.Fatalf("activity = %+v, want ineffective retry without stalled", got)
@@ -105,7 +105,7 @@ func TestMapRunHeartbeatMarksRuntimeNoProgressTerminalAsIneffectiveRetry(t *test
 		Run: &appmodelcore.Run{
 			ID: "run-v2", WorkspaceID: "ws-v2", State: string(common.RunStateFailed),
 		},
-		TaskProgress: projectioncontract.TaskProgress{Runtime: &projectioncontract.RuntimeProgress{
+		TaskProgress: projectioncontract.TaskProgress{RunID: "run-v2", Runtime: &projectioncontract.RuntimeProgress{
 			FailureClass: string(runtimecontract.FailureClassNoProgressExhausted), TerminalCode: "no_progress_exhausted",
 		}},
 	}
@@ -147,7 +147,7 @@ func TestMapRunHeartbeatDoesNotTreatAssessmentActionAsBudgetEscalation(t *testin
 	}
 }
 
-func TestMapRunHeartbeatMarksWaitingDecisionRetryExhaustionIneffectiveRetry(t *testing.T) {
+func TestMapRunHeartbeatDoesNotInferRetryFromPriorConvergenceProjection(t *testing.T) {
 	t.Parallel()
 
 	got := mapRunHeartbeat(readmodelcore.WorkspaceSnapshotState{
@@ -159,8 +159,8 @@ func TestMapRunHeartbeatMarksWaitingDecisionRetryExhaustionIneffectiveRetry(t *t
 			DecisionCause: "retry_exhaustion",
 		},
 	})
-	if got.ActivityState != "waiting_decision" || !got.IneffectiveRetry {
-		t.Fatalf("heartbeat = %+v, want waiting decision with ineffective retry signal", got)
+	if got.ActivityState != "waiting_decision" || got.IneffectiveRetry {
+		t.Fatalf("heartbeat = %+v, want owner waiting decision without inferred retry signal", got)
 	}
 }
 
@@ -171,7 +171,7 @@ func TestMapRunHeartbeatMarksLiveRunStalledAfterProgressThreshold(t *testing.T) 
 	if got.ActivityState != "stalled" || !got.Stalled {
 		t.Fatalf("heartbeat = %+v, want stalled live run", got)
 	}
-	if got.Summary != "no effective progress for 11m0s since 2026-06-10T00:00:00Z" {
+	if got.Summary != "no run activity for 11m0s since 2026-06-10T00:00:00Z" {
 		t.Fatalf("summary = %q, want stalled duration summary", got.Summary)
 	}
 }

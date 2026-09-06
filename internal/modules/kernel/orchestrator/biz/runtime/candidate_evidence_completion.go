@@ -146,11 +146,18 @@ func completeEvidenceDispatch(
 		// diagnostic; it must never leak into SM-4 as an unfulfillable handoff.
 		if fact.Kind == runtimecontract.EvidenceKindValidation && aggregate.Facts.Failure != nil &&
 			aggregate.Facts.Failure.ValidationFailureObservation != nil {
-			_, matched, matchErr := matchRuntimeValidationFailureRepairTrigger(*aggregate, fact, admission.Operation)
+			trigger, matched, matchErr := matchRuntimeValidationFailureRepairTrigger(*aggregate, fact, admission.Operation)
 			if matchErr != nil {
 				return matchErr
 			}
 			repairSurfaceConfirmationPending = matched
+			if matched && (aggregate.Facts.Repair.Exhausted || aggregate.Facts.Repair.RepairAttempts > trigger.convergence.MaxAttempts) {
+				// Existing-owner confirmation uses the same sealed Profile budget
+				// as prospective repair. The rejected receipt closes it in this CAS.
+				if err := markRuntimeValidationFailureRepairExhausted(&aggregate.Facts, trigger); err != nil {
+					return err
+				}
+			}
 		}
 		if !repairSurfaceConfirmationPending {
 			opened, err := openRuntimeValidationFailureRepairGeneration(aggregate, fact, admission.Operation)
@@ -194,7 +201,7 @@ func completeEvidenceDispatch(
 	if canAdvanceFocus {
 		previousSnapshot = &aggregate.Decision.AuthoritySnapshot
 	}
-	facts, nextDecision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, previousSnapshot, aggregate.CoverageProofLineage)
+	facts, nextDecision, err := reduceRuntimeAggregateWithDirective(*aggregate, aggregate.Facts, previousSnapshot)
 	if err != nil {
 		return err
 	}

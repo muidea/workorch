@@ -82,7 +82,7 @@ func applyCandidatePrerequisiteStale(aggregate *RuntimeAggregate, idx int, stale
 			return err
 		}
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(*aggregate, facts, nil)
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ func applyCandidateFeasibilityPrerequisite(aggregate *RuntimeAggregate, idx int,
 	aggregate.CandidateAttempts[idx].Stale = nil
 	requestCopy := request
 	aggregate.CandidateAttempts[idx].PrerequisiteRequest = &requestCopy
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(*aggregate, facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return err
 	}
@@ -374,7 +374,7 @@ func applyOwnerBindingContradiction(aggregate *RuntimeAggregate, contradiction o
 	}
 	facts = aggregate.Facts
 	facts.Failure = nil
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(*aggregate, facts, nil)
 	if err != nil {
 		return err
 	}
@@ -410,7 +410,7 @@ func applyOwnerValidationRepairInfeasibility(aggregate *RuntimeAggregate, observ
 	if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
 		return err
 	}
-	resolvedFacts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	resolvedFacts, decision, err := reduceRuntimeAggregateWithDirective(*aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return err
 	}
@@ -443,7 +443,7 @@ func applyOwnerInfeasibilityFailure(aggregate *RuntimeAggregate, observation run
 		return err
 	}
 	facts := aggregate.Facts
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(*aggregate, facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
 		return err
 	}
@@ -534,7 +534,7 @@ func (c *candidateDispatchComponent) invalidateActiveDispatchForPrerequisiteStal
 			return RuntimeAggregate{}, err
 		}
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(facts, nil, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, facts, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}

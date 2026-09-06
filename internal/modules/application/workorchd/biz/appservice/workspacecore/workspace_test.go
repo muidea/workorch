@@ -3,10 +3,30 @@ package workspacecore
 import (
 	"testing"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
+
+func TestMapWorkspaceExposesAdmissionMetadataWithoutRebuildingAuthority(t *testing.T) {
+	owner := &workspacemodel.Workspace{ID: "ws-admitted", TemplateID: "template-a", StartupInput: &workspacemodel.WorkspaceStartupInputContract{
+		StartupInputHash: "admitted-input", TemplateRevision: "7", TemplateSnapshotHash: "admitted-template",
+	}}
+	view := MapWorkspace(owner)
+	public := appmodelcore.ProjectWorkspace(view)
+	if public.AdmittedStartupInputHash != "admitted-input" || public.AdmittedTemplateRevision != "7" || public.AdmittedTemplateSnapshotHash != "admitted-template" {
+		t.Fatalf("workspace projection lost owner admission metadata: %+v", public)
+	}
+	view.AdmittedStartupInputHash = "display-only"
+	view.AdmittedTemplateRevision = "99"
+	if owner.StartupInput.StartupInputHash != "admitted-input" || owner.StartupInput.TemplateRevision != "7" {
+		t.Fatal("display metadata mutated Workspace owner admission")
+	}
+	if restored := WorkspaceModelFromView(view); restored.StartupInput != nil || restored.ActivationAdmission != nil {
+		t.Fatal("projection metadata rebuilt owner startup/admission authority")
+	}
+}
 
 func TestApplyTemplateToWorkspace(t *testing.T) {
 	t.Parallel()

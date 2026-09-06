@@ -193,6 +193,12 @@ load facts
   任意历史 confirmed record 恢复。是否允许下一次 read-only owner query 只能由 SM-2 owner-private confirmation plan 从当前
   persisted aggregate、该 VFO 的 exact sequence 与 repair transaction lineage 一次性计算；`FailureTarget == nil` 不是 phase
   pointer。SM-4 delayed drive 必须 reload 后重新计算，不能用调用方携带的旧 projection 继续 query。
+  SM-2 reducer、query plan 与 SM-3 candidate/provider 准入共用同一 owner-private 待确认义务判定；其输入是 exact committed
+  validation receipt、current focus/definition binding、sealed route、剩余 budget 和 observation sequence，而非它将生成的
+  Decision。新的 fresh-validation rejection 可以产生新 VFO，但只能在新 receipt 的同一 CAS 消费旧 continuation、退休旧
+  target/directive 并打开独立确认窗口。普通 current-catalog target-grounding 不得抢先终止此窗口；窗口内禁止 candidate
+  attempt 与 semantic/operations provider request。已封存 terminal、contract failure 和 budget exhaustion 仍优先，不能重开。
+  Profile repair budget 在同一 rejected receipt CAS 结算，超限不再发出确认 query；重复 receipt 不重复扣费。
   同一个 plan 同时约束 query admission 与 confirmation writer 的 fresh-load CAS admission，并封存
   `RequestID + IssuedAtStateRevision + protocol-bound SubjectRef + ExpectedSubjectRevision`。protocol descriptor 只声明 owner-neutral
   resource domain/subject；expected revision 必须来自 matching current owner prerequisite observation，Runtime core 不得按 concrete owner
@@ -468,6 +474,10 @@ sealed authority + preflight ready
   workspace-tree edges 必须从 confirmation revision 形成唯一连续链，operation ID 排序没有 revision authority。最后一项
   accepted 时，SM-2 在同一 CAS 从 immutable validation-owner receipt + repair-owner confirmation + sealed Decision/dispatch 重算 closure，并生成新的
   target-free fresh-validation directive；任一 rejected/dispatch-invalidated member 均禁止恢复 stale target/directive。
+  后续 fresh validation 的 rejection 只消费其 manifest exact closure 所指向的 continuation，不提供成功 proof。反向不变量
+  必须同时匹配更新的 rejected evidence revision、processed event、manifest transaction/hash/closure、committed operation 与
+  exact rejected receipt fence/hash；缺任一项都不能用历史失败掩盖丢失的 continuation。新失败必须独立经过 SM-2 route/budget/
+  current resource-owner confirmation，旧 confirmation、binding 和 startup input 不改写。
   active partial dispatch、上述 target-free fresh-validation continuation 与 administrative termination 都必须使 confirmation plan
   为空；它们不能因 mutable `FailureTarget` 已退休而再次触发 resource-owner query。termination 后的新 confirmation response 不得
   改写 SM-2；termination 前已持久化的 exact response duplicate 仍是零写 replay。

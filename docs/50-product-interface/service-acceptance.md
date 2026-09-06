@@ -306,6 +306,11 @@ historical Run result、重复 receipt/fence、已有局部效果不能覆盖当
 `pass=true` 仅表示受治理等待可解释，`positiveProgress=false` 明确表示不是自动正向推进。Readiness 与这些判定相互独立。
 `scripts/test_observe_runtime_progress.py` 随 boundary gate 执行，observer 不从上述视图生成 mutation。
 
+Workspace heartbeat 的 `latestActivityAt` 与 `latestEffectiveProgressAt` 必须分开：前者是当前 Run 的活动时间，后者只来自
+已接受的 exact owner receipt（CWI proof 或 changed durable repair）及当前 Run accepted Result。单次失败、其它 signature
+的历史重复或上一份 projection 的 retry 标记不能生成当前 `ineffectiveRetry`；只有当前 signature 的实际重复或正式预算
+耗尽可形成该诊断。Web/TUI 与 heartbeat age metrics 共用这份只读投影，不生成新状态机或恢复动作。
+
 Builtin-defaults HTTP 验收同时覆盖只读 current/target preview 与显式单资源 guarded upgrade，必须证明 missing/wrong/duplicate
 owner result fail-closed、定制与 stale 请求 `409`、写后响应丢失/fresh-owner retry 幂等，以及普通启动零覆盖。升级 catalog
 不能隐式刷新 Workspace definition/admission 或改变 Run 封存输入；[Built-In Default Resources](../40-profiles-capabilities/workspace/builtin-default-resources.md)

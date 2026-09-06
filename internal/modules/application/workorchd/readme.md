@@ -75,6 +75,13 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
   kernel reducer。required source 缺 exact executable proof 时必须在 pre-seal admission 阻塞。
 - projection 只保存 bounded immutable public DTO。canonical Workspace/Run state、active Run 与 exact blocker ref 原样投影；
   display summary、consistency diagnostic、recovery hint 与 metrics 都不能生成 mutation intent。
+- Run heartbeat 区分 `latestActivityAt` 与 `latestEffectiveProgressAt`。事件、LLM 调用及普通 artifact/patch/result 时间只形成
+  activity；effective progress 仅使用当前 Run 已被 Orchestrator 接受的 exact committed receipt（CWI proof 或 durable changed
+  repair）及当前 Run accepted Result。activity age 用于心跳指标；局部有效进展不能覆盖 failed terminal。重复失败只来自
+  当前 failure signature 的 owner count > 1 或正式 exhausted fact，不继承旧 projection 的 retry 标记。
+- 版本展示分为 builtin-defaults catalog current/target、Workspace admission 的 template revision/snapshot/input hash，以及
+  Run audit 的 sealed startup/profile hash 与 Soul stage/id/revision/content hash/provenance。展示不实时读取 catalog 替换
+  Run snapshot，不泄漏 sealed guidance；这些 detached metadata 不能反向构造 Workspace admission 或 Runtime authority。
 - Artifact、Step、ToolCall 和 RuntimeCheckpoint 内容只经其 owner 的 bounded typed read；禁止以 `dataRoot/backend`、
   `os.ReadFile` 或 raw-file fallback 绕过 owner。
 
@@ -104,6 +111,7 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
 | Eventstream high-watermark result | `TestReadWorkspaceProjectionHighWatermarksRejectsResultContractDrift`、`TestReadWorkspaceProjectionHighWatermarksReturnsDetachedCanonicalResult` | 覆盖 exact requested scope/order/revision 校验与 detached clone |
 | LLM embedding result | `TestGenerateEmbeddingRejectsCompletionResultOnEmbeddingTopic`、`TestGenerateEmbeddingRejectsInvalidConcreteResult`、`TestGenerateEmbeddingReturnsDetachedVectorAndUsage` | 覆盖 topic/result type、exact target/vector fact 与 vector/usage detachment |
 | projection/read model/SSE | `biz/projection/*_test.go`、`biz/appservice/readmodelprojection/*_test.go`、`service/server/projection_sse_test.go` | legal/illegal lifecycle、duplicate/stale event、restart generation、failed/degraded recovery、transport detachment |
+| activity/progress 与封存版本 | `biz/appservice/readmodelprojection/progress_owner_facts_test.go`、`runtime_audit_test.go`、`biz/appservice/workspacecore/workspace_test.go`、`biz/appservice/workspaceviewcore/store_metrics_activity_test.go` | exact current-run receipt、activity 不冒充 proof、当前 signature 重复计数、旧 projection 零继承、catalog/admission/Run 分离、metadata clone 与禁止反向重建 |
 | Application self-source authorization | `TestWorkspaceProjectionChangedConsumerRequiresExactApplicationOwnerSource` | 覆盖 exact owner、forged/noncanonical source 与 wrong concrete payload |
 | Workspace deletion ingress | `biz/appservice/appmodelcore/workspace_deletion_test.go`、`biz/appservice/workspaceports/workspace_command_payload_test.go`、`service/server/event_subscriptions_test.go` | stable RequestID、single owner command、duplicate disposition、SSE-only receipt；payload-conflict/response-loss 的 durable replay 属于 Workspace owner 验收 |
 | persistence and owner boundaries | `biz/testkit/runtime_integration_test.go`、`biz/production_setup_test.go`、`service/server/production_transport_boundary_test.go`、`service/server/application_port_validation_test.go` | memory/file assembly、typed production wiring、repository/service/EventHub AST fences |

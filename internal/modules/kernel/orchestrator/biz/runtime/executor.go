@@ -192,7 +192,7 @@ func (c *candidateDispatchComponent) recordOperationGovernanceRequired(ctx conte
 		aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 		aggregate.ActiveDispatch = nil
 	}
-	facts, decision, reduceErr := ReduceRuntimeStateWithDirective(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot, aggregate.CoverageProofLineage)
+	facts, decision, reduceErr := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if reduceErr != nil {
 		return RuntimeAggregate{}, reduceErr
 	}

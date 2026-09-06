@@ -1328,6 +1328,9 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                   items={[
                     { key: 'defaultSoul', label: '默认执行人格', children: workspaceDefaultSoulLabel },
                     { key: 'stageSoul', label: '阶段覆盖', children: compactTags(stageBindingTags, 3) },
+                    { key: 'admittedTemplateRevision', label: 'Workspace 准入模板版本', children: snapshot?.workspace.admittedTemplateRevision || '-' },
+                    { key: 'admittedTemplateHash', label: 'Workspace 准入模板快照', children: snapshot?.workspace.admittedTemplateSnapshotHash || '-' },
+                    { key: 'admittedInputHash', label: 'Workspace 准入输入 Hash', children: snapshot?.workspace.admittedStartupInputHash || '-' },
                     { key: 'priority', label: '启用优先级', children: compactTags(soulBindings?.priorityPolicy ?? []) }
                   ]}
                 />

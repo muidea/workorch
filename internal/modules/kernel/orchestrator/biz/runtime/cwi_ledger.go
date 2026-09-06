@@ -1048,7 +1048,7 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 			if err := retireSemanticPlanningGenerationForEligibilityChange(&aggregate, closureChanged); err != nil {
 				return RuntimeAggregate{}, err
 			}
-			facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+			facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, nil)
 			if err != nil {
 				return RuntimeAggregate{}, err
 			}
@@ -1091,7 +1091,7 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.Facts = projected
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, nil)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -1446,7 +1446,7 @@ func applyRuntimeCWIBindingRetirement(aggregate *RuntimeAggregate, fact RuntimeC
 	if err := runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(aggregate.Facts, nil, sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches), aggregate.OperationReceipts); err != nil {
 		return fmt.Errorf("%w: %v", common.ErrConflict, err)
 	}
-	facts, decision, err := ReduceRuntimeStateWithDirective(aggregate.Facts, nil, aggregate.CoverageProofLineage)
+	facts, decision, err := reduceRuntimeAggregateWithDirective(*aggregate, aggregate.Facts, nil)
 	if err != nil {
 		return err
 	}
