@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -22,7 +23,10 @@ func TestCandidateRejectionCodeDispositionMatrixIsTotal(t *testing.T) {
 		{code: "candidate_action_evidence_mismatch", disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce},
 		{code: "candidate_target_outside_grounding", disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce},
 		{code: "candidate_creation_scope_missing_file_target", disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce},
+		{code: "candidate_owner_target_effect_overlap", disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce},
 		{code: "candidate_owner_constraint_nonconformant", disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce},
+		{code: "candidate_operation_value_rule_nonconformant", disposition: runtimecontract.RuntimeCandidateCorrectionCorrectableOnce},
+		{code: "candidate_repair_closure_mismatch", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "candidate_repair_closure_mismatch"},
 		{code: "candidate_replays_rejected_candidate_shape", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "candidate_retry_exhausted"},
 		{code: "candidate_authority_exhausted", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "candidate_authority_exhausted"},
 		{code: "candidate_retry_exhausted", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "candidate_retry_exhausted"},
@@ -30,6 +34,10 @@ func TestCandidateRejectionCodeDispositionMatrixIsTotal(t *testing.T) {
 		{code: "operation_candidate_conformance_probe_invalid", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "operation_candidate_conformance_probe_invalid"},
 		{code: "operation_feasibility_probe_invalid", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "operation_feasibility_probe_invalid"},
 		{code: "runtime_contract_defect", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "runtime_contract_defect"},
+		{code: "provider", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "provider"},
+		{code: "provider_transient", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "provider_transient"},
+		{code: "provider_authentication", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "provider_authentication"},
+		{code: "provider_configuration", disposition: runtimecontract.RuntimeCandidateCorrectionRejectedFinal, terminalCode: "provider_configuration"},
 	}
 	for _, testCase := range codes {
 		disposition, ok := CandidateRejectionCodeDisposition(testCase.code)
@@ -297,13 +305,43 @@ func TestSealCandidateRejectionUnknownCodeBecomesContractDefect(t *testing.T) {
 	failure := &runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: "candidate_correction_undefined", Signature: "undefined",
 		Reason: "legacy catch-all must not remain ordinary",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations.targetRefs", Actual: "validation-entry", Allowed: []string{"repair-target"}, ManifestHash: manifest.Hash,
+			Objectives: []runtimecontract.RuntimeCandidateCorrectionObjective{runtimecontract.RuntimeCandidateCorrectionReplaceTarget},
+		},
 	}
 	sealed, directive, err := SealCandidateRejection(failure, manifest)
 	if err != nil || sealed == nil || directive == nil {
 		t.Fatalf("seal unknown = sealed=%+v directive=%+v err=%v", sealed, directive, err)
 	}
-	if sealed.Code != "runtime_contract_defect" || directive.TerminalCode != "runtime_contract_defect" {
+	if sealed.Code != "runtime_contract_defect" || directive.TerminalCode != "runtime_contract_defect" || directive.Witness != nil ||
+		!strings.Contains(sealed.Reason, `sourceCode="candidate_correction_undefined"`) ||
+		strings.Contains(sealed.Reason, failure.Reason) || !reflect.DeepEqual(sealed.Diagnostic, failure.Diagnostic) {
 		t.Fatalf("unknown code must become runtime_contract_defect: sealed=%+v directive=%+v", sealed, directive)
+	}
+	failure.Code = strings.Repeat("x", 4096)
+	bounded, _, err := SealCandidateRejection(failure, manifest)
+	if err != nil || len(bounded.Reason) > 256 {
+		t.Fatalf("unclassified producer identity is not bounded: %v", err)
+	}
+}
+
+func TestRepairClosureRejectionPreservesCauseAndCannotOpenCorrection(t *testing.T) {
+	t.Parallel()
+	manifest := runtimecontract.RuntimeCandidateContractManifest{Hash: "manifest-hash"}
+	failure := &runtimecontract.RuntimeCandidateFailure{
+		Class: runtimecontract.RuntimeCandidateFailureClassContract, Code: candidateAdmissionCodeRepairClosureMismatch,
+		Signature: "candidate-repair-closure-mismatch", Reason: "sealed closure conflicts with the current candidate",
+		Diagnostic: &runtimecontract.RuntimeCandidateFailureDiagnostic{
+			Path: "$.operations.targetRefs", Actual: "validation-entry", Allowed: []string{"repair-target"}, ManifestHash: manifest.Hash,
+		},
+	}
+	sealed, directive, err := SealCandidateRejection(failure, manifest)
+	if err != nil || sealed == nil || directive == nil || sealed.Code != failure.Code || sealed.Reason != failure.Reason ||
+		directive.Disposition != runtimecontract.RuntimeCandidateCorrectionRejectedFinal || directive.TerminalCode != failure.Code ||
+		directive.Witness != nil || len(directive.Objectives) != 0 ||
+		CandidateAttemptIsCorrectableOnce(runtimecontract.RuntimeCandidateAttemptRecord{Failure: sealed, Correction: directive}) {
+		t.Fatalf("closure conflict lost its cause or opened provider correction: failure=%+v correction=%+v err=%v", sealed, directive, err)
 	}
 }
 

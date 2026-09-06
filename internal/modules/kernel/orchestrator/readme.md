@@ -219,6 +219,14 @@ capability resource state。
   必须在同一 private CAS 中退休该 continuation 并封存 failed terminal，SM-4 不得循环生成 `persisted_pending` lease。只有显式
   required sequence/collective receipt-set 才要求完整 surface 全部产生 effect。software-dev Profile 的
   `Shell diagnostic → File confirmation/effect` 只是该中立合同的一种 specialization，不是 Orchestrator core 分支条件。
+  SM-3 的 `candidateRepairClosureFacts` 复用 fresh-load 的 exact completed-transaction reverse proof，把 final repair evidence
+  revision 投影为同一份 invocation-local 因果边界：旧 closure targets 不再限制普通 validation manifest 的入口，且该边界前的
+  rejected operation shapes 退休；修复回执仍零 CWI credit，边界后的新 rejection 仍受防重放限制。不能凭 state/purpose/ID
+  标签绕过证明。候选准入与最终 seal 必须接受同一合法 manifest，真实验证入口不要求等于修复文件。
+  `candidate_repair_closure_mismatch` 显式归入 SM-3 rejected-final，保留原始 code/diagnostic；未知 producer code 才封存
+  SM-3 `runtime_contract_defect` failure 并保留有界 source code；SM-2 的 canonical contract-defect terminal vocabulary 不因此改变。
+  生产 code 常量、decoder/probe failure 分支由源码导出测试核对 disposition，
+  不是运行时第二份 policy registry。SM-2/SM-3/SM-4 仍共享 owner-private event 和 aggregate CAS，SM-1、capability 与投影不选状态。
 - `CurrentRuntimeRepairSurfaceConfirmationPlan` 是该 read-only handoff 的唯一 owner-private action classifier；它只从当前持久化
   aggregate、exact VFO confirmation sequence 与 repair transaction lineage 派生，不持久化第二份 phase。`FailureTarget == nil`
   只是 mutable authority shape，不能单独表示“等待确认”。SM-4 delayed drive 必须先 reload/re-plan，再决定是否查询 owner；同一

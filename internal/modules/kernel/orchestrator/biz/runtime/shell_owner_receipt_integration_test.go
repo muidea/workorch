@@ -29,12 +29,16 @@ import (
 // candidate; the resulting target must then be snapshotted before it can enter
 // another candidate authority.
 func TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *testing.T) {
-	t.Run("fresh validation succeeds", func(t *testing.T) { testObservedShellRepair(t, false, true) })
-	t.Run("second repair succeeds", func(t *testing.T) { testObservedShellRepair(t, true, true) })
-	t.Run("second repair exhausts budget", func(t *testing.T) { testObservedShellRepair(t, true, false) })
+	for _, entry := range []string{"implementation.go", "validation_entry_test.go"} {
+		t.Run(entry, func(t *testing.T) {
+			t.Run("fresh validation succeeds", func(t *testing.T) { testObservedShellRepair(t, entry, false, true) })
+			t.Run("second repair succeeds", func(t *testing.T) { testObservedShellRepair(t, entry, true, true) })
+			t.Run("second repair exhausts budget", func(t *testing.T) { testObservedShellRepair(t, entry, true, false) })
+		})
+	}
 }
 
-func testObservedShellRepair(t *testing.T, failsAgain, secondSucceeds bool) {
+func testObservedShellRepair(t *testing.T, validationEntry string, failsAgain, secondSucceeds bool) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go is not available")
 	}
@@ -49,6 +53,9 @@ func testObservedShellRepair(t *testing.T, failsAgain, secondSucceeds bool) {
 	// The Shell owner derives the repair candidate from its native Go
 	// diagnostic. Raw stdout markers are deliberately not proof authority.
 	if err := os.WriteFile(filepath.Join(workspaceDirectory, "implementation.go"), []byte("package fixture\n\nvar _ = workorchMissingImplementation\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDirectory, "validation_entry_test.go"), []byte("package fixture\n\nimport \"testing\"\n\nfunc TestValidationEntry(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(workspaceDirectory, "validation-entry.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
@@ -98,7 +105,7 @@ func testObservedShellRepair(t *testing.T, failsAgain, secondSucceeds bool) {
 		aggregate.Facts.Focus.TargetSelectorRef = shellSelectorRef
 		aggregate.Facts.Focus.TargetSelectorOwnerRef = runtimecontract.RuntimeModuleShell
 		aggregate.Facts.Focus.TargetSelectorSubjectRef = "implementation"
-		aggregate.Facts.Focus.TargetSelectorCandidateRefs = []string{"implementation.go"}
+		aggregate.Facts.Focus.TargetSelectorCandidateRefs = []string{validationEntry}
 		aggregate.Facts.Focus.RequireTargetGrounding = true
 		runtimeTestInstallObservedShellPreflight(aggregate, ownerPreflight, shellCatalog)
 		route := runtimeValidationFailureRepairRouteForTest("observed-build-repair", runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetFailureSurface)
@@ -177,7 +184,7 @@ func testObservedShellRepair(t *testing.T, failsAgain, secondSucceeds bool) {
 	candidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
 		ID: "validate-with-observed-target", Kind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
-		TargetRefs:          []string{"implementation.go"},
+		TargetRefs:          []string{validationEntry},
 		Parameters:          []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}}}}}
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
@@ -207,7 +214,7 @@ func testObservedShellRepair(t *testing.T, failsAgain, secondSucceeds bool) {
 	sealedOperation := sealedOperations[0]
 	sealedValidationScope, err := runtimeValidationScopeTargetRefs(*sealedAggregate.ActiveDispatch, sealedOperation)
 	if err != nil || !slices.Equal(sealedValidationScope, shellCatalog.TargetRefs) || len(sealedValidationScope) <= 1 ||
-		len(sealedOperation.TargetRefs) != 1 || sealedOperation.TargetRefs[0] != "implementation.go" {
+		len(sealedOperation.TargetRefs) != 1 || sealedOperation.TargetRefs[0] != validationEntry {
 		t.Fatalf("exact validation seal = entry=%v scope=%v err=%v", sealedOperation.TargetRefs, sealedValidationScope, err)
 	}
 	if selected := runtimeOwnerCatalogForOperation(
@@ -361,9 +368,14 @@ func testObservedShellRepair(t *testing.T, failsAgain, secondSucceeds bool) {
 	}
 	persisted, err = controller.recordRepairSurfaceConfirmation(ctx, persisted.Facts.WorkspaceID, persisted.Facts.RunID, confirmationResponse.Confirmation)
 	if err != nil || persisted.Facts.Resources.FailureTarget == nil || persisted.Facts.Resources.FailureTarget.TargetObservation == nil ||
-		!slices.Equal(persisted.Facts.Resources.FailureTarget.TargetRefs, []string{"implementation.go"}) ||
-		persisted.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		!slices.Equal(persisted.Facts.Resources.FailureTarget.TargetRefs, []string{"implementation.go"}) {
 		t.Fatalf("owner confirmation did not CAS-bind the refreshed failure target: state=%s terminal=%+v target=%+v err=%v", persisted.Decision.State, persisted.Decision.Terminal, persisted.Facts.Resources.FailureTarget, err)
+	}
+	// A distinct repair target needs its own File snapshot; the validation
+	// entry's existing snapshot cannot authorize that effect.
+	persisted = reacquireObservedShellRepairPrerequisites(t, ctx, hub, controller, persisted, workspaceDirectory)
+	if persisted.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
+		t.Fatalf("confirmed repair target did not become executable after owner refresh: %s", persisted.Decision.State)
 	}
 	var refreshedTargetSnapshot runtimecontract.TargetSnapshot
 	for _, snapshot := range persisted.Facts.Resources.TargetSnapshots {
@@ -701,17 +713,14 @@ func testObservedShellRepair(t *testing.T, failsAgain, secondSucceeds bool) {
 		}
 	}
 	freshCandidate := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
-		Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, TargetRefs: []string{"implementation.go"},
+		Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, TargetRefs: []string{validationEntry},
 		BindingRefs: []string{restartedFinal.Facts.Focus.CoverageEvidenceBindings[0].ID},
 		Parameters:  []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}}}}}
 	freshCandidate = runtimeTestMustDeriveCandidateAuthority(t, restartedFinal, freshCandidate)
+	testObservedFreshValidationAdmission(t, restartedFinal, freshCandidate)
 	freshCatalog := runtimeTestOperationAdmissibilityForOwner(t, restartedFinal.Facts, runtimecontract.RuntimeModuleShell)
-	freshOperation := freshCandidate.Validation.Operations[0].Operation
-	freshSeal := sealCandidateWithFeasibilitiesForTest(t, repository, freshCandidate, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
-		OperationID: freshOperation.ID, AdmissibilitySnapshotID: freshCatalog.SnapshotID, AcquisitionBinding: freshCatalog.AcquisitionBinding,
-		Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
-	}})
+	freshSeal := testSealObservedFreshValidation(t, ctx, controller, restartedFinal, freshCandidate)
 	validated, err := controller.executeActiveDispatch(ctx, final.Facts.WorkspaceID, final.Facts.RunID, runtimeObservedShellExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
 	if err != nil {
 		t.Fatal(err)
@@ -721,6 +730,9 @@ func testObservedShellRepair(t *testing.T, failsAgain, secondSucceeds bool) {
 			validated.Facts.Focus.CoverageEvidenceBindings[0].Hash != restartedFinal.Facts.Focus.CoverageEvidenceBindings[0].Hash ||
 			validated.Definition.StartupInputHash != restartedFinal.Definition.StartupInputHash {
 			t.Fatal("catalog refresh must not rewrite the execution-locked binding or sealed startup input")
+		}
+		if len(ActiveRejectedOperationShapes(validated)) == 0 {
+			t.Fatal("new rejected validation lost its replay guard before another confirmed repair")
 		}
 		plan, planErr := CurrentRuntimeRepairSurfaceConfirmationPlan(validated)
 		if planErr != nil || !plan.Required() || validated.Decision.State != runtimecontract.ConvergenceStateNeedValidation {
@@ -770,7 +782,7 @@ func testObservedShellRepair(t *testing.T, failsAgain, secondSucceeds bool) {
 		if err != nil || replayed.StateRevision != validated.StateRevision || replayed.Facts.Resources.FailureTarget != nil {
 			t.Fatalf("old confirmation replay changed the new obligation: %v", err)
 		}
-		testContinueObservedShellRepair(t, ctx, hub, repository, validated, workspaceDirectory, secondSucceeds)
+		testContinueObservedShellRepair(t, ctx, hub, repository, validated, workspaceDirectory, validationEntry, secondSucceeds)
 		return
 	}
 	acceptedValidation := false
@@ -787,7 +799,100 @@ func testObservedShellRepair(t *testing.T, failsAgain, secondSucceeds bool) {
 	}
 }
 
-func testContinueObservedShellRepair(t *testing.T, ctx context.Context, hub magicevent.Hub, repository *durableRuntimeStateRepository, pending RuntimeAggregate, workspaceDirectory string, succeeds bool) {
+// Final sealing alone does not exercise the production pre-probe evaluator.
+// The exact same manifest must admit validation of the Definition entry even
+// when the completed File repair targeted a different implementation file.
+func testObservedFreshValidationAdmission(t *testing.T, aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate) {
+	t.Helper()
+	manifest, err := BuildRuntimeCandidateContractManifestForAggregate(aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admission := EvaluateCandidateAdmissionWithManifest(aggregate, manifest, candidate); !admission.Accepted() {
+		t.Fatalf("fresh validation rejected before owner probe: failure=%+v diagnostic=%+v correction=%+v", admission.Failure, admission.Failure.Diagnostic, admission.Correction)
+	}
+	for name, mutate := range map[string]func(*RuntimeAggregate){
+		"missing confirmation": func(a *RuntimeAggregate) { a.RepairSurfaceConfirmations = nil },
+		"orphan handoff":       func(a *RuntimeAggregate) { a.CompletedDispatches = nil },
+		"missing receipts":     func(a *RuntimeAggregate) { a.OperationReceipts = nil },
+		"missing continuation": func(a *RuntimeAggregate) { a.Facts.RepairDirective = nil },
+		"restored repair target": func(a *RuntimeAggregate) {
+			a.Facts.RepairDirective.TargetRefs = append([]string(nil), a.Facts.RepairDirective.Closure.GroundedTargetRefs...)
+		},
+		"stale evidence fence": func(a *RuntimeAggregate) {
+			a.Facts.RepairDirective.SupersedesEvidenceRevision = "runtime-evidence-99999999999999999999"
+		},
+		"different closure": func(a *RuntimeAggregate) { a.Facts.RepairDirective.Closure.ID = "other-closure" },
+	} {
+		t.Run("admission rejects "+name, func(t *testing.T) {
+			changed := cloneRuntimeAggregateForMCPProvenanceTest(t, aggregate)
+			mutate(&changed)
+			proof := candidateRepairClosureFacts(changed)
+			if proof.LineageError == "" || proof.CompletedRepairEvidenceRevision != "" {
+				t.Fatalf("unproven repair handoff acquired a new validation baseline: %+v", proof)
+			}
+			admission := EvaluateCandidateAdmissionWithManifest(changed, manifest, candidate)
+			if admission.Accepted() || admission.Failure.Code != "runtime_contract_defect" || admission.Correction.Witness != nil {
+				t.Fatalf("invalid lineage admitted correction/dispatch: failure=%+v correction=%+v", admission.Failure, admission.Correction)
+			}
+		})
+	}
+	for name, mutate := range map[string]func(*runtimecontract.RuntimeOperation){
+		"unsealed target": func(op *runtimecontract.RuntimeOperation) { op.TargetRefs = []string{"unsealed-target"} },
+		"stale binding":   func(op *runtimecontract.RuntimeOperation) { op.BindingRefs = []string{"stale-binding"} },
+		"different owner": func(op *runtimecontract.RuntimeOperation) { op.Kind = runtimecontract.StepKindFileRead },
+	} {
+		t.Run("admission rejects "+name, func(t *testing.T) {
+			changed := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{
+				Operations: append([]runtimecontract.ValidationOperation(nil), candidate.Validation.Operations...),
+			}}
+			mutate(&changed.Validation.Operations[0].Operation)
+			if admission := EvaluateCandidateAdmissionWithManifest(aggregate, manifest, changed); admission.Accepted() {
+				t.Fatal("fresh validation bypassed the sealed manifest")
+			}
+		})
+	}
+}
+
+// The provider document and read-only feasible responses are fixture inputs;
+// proposal admission and dispatch sealing use the real SM-3 owner transitions.
+// The external effect still runs through the real Shell owner below.
+func testSealObservedFreshValidation(t *testing.T, ctx context.Context, controller *RuntimeController, aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate) RuntimeAggregate {
+	t.Helper()
+	workspaceID, runID := aggregate.Facts.WorkspaceID, aggregate.Facts.RunID
+	if _, err := controller.BeginCandidateAttemptForTest(ctx, workspaceID, runID, 0, "fresh-validation-prefix"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordFixtureCandidateFeasibilities(ctx, controller, workspaceID, runID, 0, candidate); err != nil {
+		t.Fatal(err)
+	}
+	pending, manifest, requestID, err := candidateAttemptTestBinding(ctx, controller, workspaceID, runID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testObservedFreshValidationRejectionCAS(t, pending)
+	seal := RuntimeInternalEvent{
+		Kind: RuntimeInternalEventCandidateSealed, Scope: RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
+		Transaction: &RuntimeInternalTransactionPayload{Attempt: 0, Manifest: &manifest, LogicalRequestID: requestID, Candidate: &candidate},
+	}
+	sealed, err := controller.ApplyInternalEvent(ctx, seal)
+	if err != nil || sealed.Aggregate.ActiveDispatch == nil || sealed.Aggregate.StateRevision != pending.StateRevision+1 ||
+		sealed.Aggregate.ActiveDispatch.RepairCommitment != nil {
+		t.Fatalf("fresh validation did not seal in one owner CAS without new repair authority: %v", err)
+	}
+	duplicate, err := controller.ApplyInternalEvent(ctx, seal)
+	if err != nil || duplicate.Aggregate.StateRevision != sealed.Aggregate.StateRevision ||
+		duplicate.Aggregate.ActiveDispatch.ID != sealed.Aggregate.ActiveDispatch.ID {
+		t.Fatalf("duplicate fresh validation seal changed the transaction: %v", err)
+	}
+	loaded, err := controller.Load(ctx, workspaceID, runID)
+	if err != nil || loaded.ActiveDispatch.ID != sealed.Aggregate.ActiveDispatch.ID {
+		t.Fatalf("fresh validation seal cannot be reloaded: %v", err)
+	}
+	return loaded
+}
+
+func testContinueObservedShellRepair(t *testing.T, ctx context.Context, hub magicevent.Hub, repository *durableRuntimeStateRepository, pending RuntimeAggregate, workspaceDirectory, validationEntry string, succeeds bool) {
 	t.Helper()
 	// Reload the new failure without altering owner resources or old seals.
 	repository.aggregate = cloneRuntimeAggregateForMCPProvenanceTest(t, pending)
@@ -846,15 +951,12 @@ func testContinueObservedShellRepair(t *testing.T, ctx context.Context, hub magi
 	ready := reacquireObservedShellRepairPrerequisites(t, ctx, hub, controller, repaired, workspaceDirectory)
 	recipeID := ready.Facts.Focus.ValidationRecipeID
 	fresh := runtimecontract.RuntimeCandidate{Validation: &runtimecontract.ValidationCandidate{Operations: []runtimecontract.ValidationOperation{{Operation: runtimecontract.RuntimeOperation{
-		Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, TargetRefs: []string{"implementation.go"}, BindingRefs: []string{ready.Facts.Focus.CoverageEvidenceBindings[0].ID},
+		Kind: runtimecontract.RuntimeBlockKindManagedValidationSession, TargetRefs: []string{validationEntry}, BindingRefs: []string{ready.Facts.Focus.CoverageEvidenceBindings[0].ID},
 		Parameters: []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
 	}}}}}
 	fresh = runtimeTestMustDeriveCandidateAuthority(t, ready, fresh)
-	catalog = runtimeTestOperationAdmissibilityForOwner(t, ready.Facts, runtimecontract.RuntimeModuleShell)
-	sealCandidateWithFeasibilitiesForTest(t, repository, fresh, []runtimecontract.RuntimeCandidateFeasibilityRecord{{
-		OperationID: fresh.Validation.Operations[0].Operation.ID, AdmissibilitySnapshotID: catalog.SnapshotID, AcquisitionBinding: catalog.AcquisitionBinding,
-		Observation: &runtimecontract.RuntimeOwnerFeasibilityObservation{Outcome: runtimecontract.RuntimeOwnerFeasibilityFeasible},
-	}})
+	testObservedFreshValidationAdmission(t, ready, fresh)
+	testSealObservedFreshValidation(t, ctx, controller, ready, fresh)
 	final, err := controller.executeActiveDispatch(ctx, ready.Facts.WorkspaceID, ready.Facts.RunID, runtimeObservedShellExecutor{hub: hub, deliverableDirectory: workspaceDirectory})
 	if err != nil {
 		t.Fatal(err)

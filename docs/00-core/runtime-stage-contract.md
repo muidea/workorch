@@ -89,6 +89,11 @@ current mutable facts重选 owner。repair receipts 全部接受后，target-fre
 `persisted_pending` successor。software-dev Profile 的 exact route 可将 owner specialization 为 File；任何具体
 owner、diagnostic 或 repair vocabulary 都不是 Core repair 常量。
 
+SM-3 candidate admission 与拒绝重放窗口必须复用同一 completed repair/confirmation/receipt/current-binding 反向证明：
+target-free handoff 的旧 repair targets 仅保留因果含义，新验证入口由普通 Definition manifest 授权，允许与修复文件不同。
+final repair evidence revision 之前的失败验证不能阻止在已改变状态上重跑同一 check；这不授予 repair CWI credit，
+也不清除更晚的新失败。该事实仅在 Orchestrator 内部派生，不新增状态机、持久化 phase 或跨 owner 状态写入口。
+
 Workspace 删除不是第五个 Runtime 状态机。Workspace owner 持久化唯一 deletion coordinator aggregate；Application
 只提交一次 typed 删除意图。初次发现 active Run 时必须零删除意图返回 conflict。准入后，Run owner 先在自身
 generation-head 线性化点以 private reducer/CAS 封存 `draining` fence：它永久拒绝新 Run、Restart、普通 SM-1、Step、

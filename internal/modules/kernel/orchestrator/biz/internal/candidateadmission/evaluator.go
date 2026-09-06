@@ -36,6 +36,16 @@ type ValidationGapFacts struct {
 	LatestFailureStateChanging bool
 }
 
+// RepairClosureFacts is an invocation-local proof projection, not persisted
+// phase or caller-selected authority. Runtime proves the exact completed
+// repair/confirmation/receipt lineage before marking its fresh-validation
+// handoff. Only that handoff makes the old closure targets causation-only;
+// the sealed manifest still bounds every validation target and binding.
+type RepairClosureFacts struct {
+	CompletedRepairEvidenceRevision string
+	LineageError                    string
+}
+
 // EvaluationInput is an invocation-local, immutable view of the complete SM-3
 // candidate admission facts. Rejected and prior-attempt shapes have already
 // been filtered to the current authority contract by the Runtime owner.
@@ -48,6 +58,7 @@ type EvaluationInput struct {
 	PriorFailedProposalShapes []string
 	NoProgressOperationShapes []runtimecontract.RuntimeRejectedOperationShape
 	ValidationGap             ValidationGapFacts
+	RepairClosure             RepairClosureFacts
 }
 
 // Evaluate is the single structural CandidateEvaluator. It returns the first
@@ -78,7 +89,7 @@ func Evaluate(input EvaluationInput) *runtimecontract.RuntimeCandidateFailure {
 	}
 	// Aggregate-local target/binding/evidence fences are structural and must
 	// precede replay so one complete document has one deterministic first error.
-	if failure := RepairClosureFailure(input.Facts, input.Decision, input.Candidate); failure != nil {
+	if failure := RepairClosureFailure(input.Facts, input.Decision, input.Candidate, input.RepairClosure); failure != nil {
 		return completeCandidateFailure(input.Manifest, input.Candidate, failure)
 	}
 	if failure := MissingValidationFailure(input.Facts, input.Decision, input.Candidate, input.ValidationGap); failure != nil {
@@ -110,8 +121,17 @@ func InvalidSignature(candidate runtimecontract.RuntimeCandidate) string {
 }
 
 // RepairClosureFailure checks that proof-bearing operations stay within the
-// active repair closure's sealed coverage and target set.
-func RepairClosureFailure(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate) *runtimecontract.RuntimeCandidateFailure {
+// active repair closure's sealed coverage and action-authoritative target set.
+// Confirmed repair completion retires only the latter; fresh validation stays
+// bound to the same closure/CWIs and the current sealed manifest, not the old
+// implementation targets retained in the closure's immutable audit identity.
+func RepairClosureFailure(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, proof RepairClosureFacts) *runtimecontract.RuntimeCandidateFailure {
+	if proof.LineageError != "" {
+		return &runtimecontract.RuntimeCandidateFailure{
+			Class: runtimecontract.RuntimeCandidateFailureClassInternal, Code: "runtime_contract_defect",
+			Signature: "candidate-repair-lineage-invalid", Reason: proof.LineageError,
+		}
+	}
 	directive := facts.RepairDirective
 	if directive == nil || directive.Closure == nil || directive.FocusID != facts.Focus.ID {
 		return nil
@@ -135,7 +155,8 @@ func RepairClosureFailure(facts runtimecontract.RuntimeFacts, decision runtimeco
 				"runtime repair candidate operation is outside the sealed repair coverage",
 			)
 		}
-		if len(closure.GroundedTargetRefs) > 0 && !grounding.TargetRefsIntersect(closure.GroundedTargetRefs, operation.TargetRefs) {
+		freshValidation := proof.CompletedRepairEvidenceRevision != "" && decision.State == runtimecontract.ConvergenceStateNeedValidation
+		if !freshValidation && len(closure.GroundedTargetRefs) > 0 && !grounding.TargetRefsIntersect(closure.GroundedTargetRefs, operation.TargetRefs) {
 			return allowedTargetsFailure(
 				CodeRepairClosureMismatch,
 				SignatureRepairClosureMismatch,

@@ -26,6 +26,10 @@ func CandidateRejectionCodeDisposition(code string) (runtimecontract.RuntimeCand
 		"candidate_operation_value_rule_nonconformant":
 		return runtimecontract.RuntimeCandidateCorrectionCorrectableOnce, true
 	case "candidate_replays_rejected_candidate_shape",
+		// A document that passed the manifest but conflicts with the sealed
+		// SM-2 closure cannot repair that authority through provider correction.
+		// Ordinary selectable target/binding mistakes fail the manifest earlier.
+		"candidate_repair_closure_mismatch",
 		"candidate_authority_exhausted",
 		"candidate_retry_exhausted",
 		"workspace_resolution_failed",
@@ -272,6 +276,16 @@ func candidateRejectionContractDefect(source runtimecontract.RuntimeCandidateFai
 	message := strings.TrimSpace(detail)
 	if message == "" {
 		message = "complete candidate rejection is not classifiable"
+	}
+	// Preserve a bounded producer identity without copying its raw reason (it
+	// may contain provider text). The cloned diagnostic retains exact field,
+	// manifest and shape provenance; no archive schema migration is needed.
+	code := []rune(strings.TrimSpace(source.Code))
+	if len(code) > 96 {
+		code = append(code[:96], []rune("...")...)
+	}
+	if len(code) != 0 {
+		message += fmt.Sprintf(" (sourceCode=%q)", string(code))
 	}
 	return &runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassInternal, Code: "runtime_contract_defect",

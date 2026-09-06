@@ -172,6 +172,36 @@ func TestRepairClosureAdmissionPermitsNonCreditingCurrentStateValidation(t *test
 	}
 }
 
+func TestRepairClosureAdmissionNeedsCompletedLineageNotValidationLabels(t *testing.T) {
+	aggregate := validationOnlyAggregateWithPreparation(t, nil)
+	candidate := runtimeTestMustDeriveCandidateAuthority(t, aggregate, validationCandidate())
+	closure := runtimecontract.RuntimeRepairClosure{
+		GapSignature: "unconfirmed-repair", BaselineEvidenceRevision: aggregate.Facts.EvidenceRevision,
+		CoverageWorkItemIDs:   aggregate.Facts.Focus.CoverageWorkItemIDs,
+		RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange, runtimecontract.EvidenceKindValidation},
+		GroundedTargetRefs:    []string{"repair-target"}, RequireValidationAfterStateChange: true,
+	}
+	closure.ID = runtimecontract.StableRuntimeRepairClosureID(closure)
+	aggregate.Decision.RequiredOutput.RepairClosureID = closure.ID
+	// Empty purpose/targets and NeedValidation are not proof that the owner
+	// completed a repair. An ordinary closure retains its target guard.
+	aggregate.Facts.RepairDirective = &runtimecontract.RuntimeRepairDirective{
+		ID: "unconfirmed-fresh-validation", FocusID: aggregate.Facts.Focus.ID,
+		RequiredState: runtimecontract.ConvergenceStateNeedValidation, Closure: &closure,
+	}
+	admission := rejectCandidateRepairClosure(aggregate, candidate)
+	if admission.Accepted() || admission.Failure.Code != candidateAdmissionCodeRepairClosureMismatch {
+		t.Fatalf("validation labels retired repair target authority: %+v", admission)
+	}
+	// Even the canonical-looking ID must reverse-prove the exact completed
+	// transaction, confirmation and receipts before it can retire those targets.
+	aggregate.Facts.RepairDirective.ID = "confirmed-repair/" + aggregate.Facts.Focus.ID + "/" + closure.ID + "/fresh-validation"
+	admission = rejectCandidateRepairClosure(aggregate, candidate)
+	if admission.Accepted() || admission.Failure.Code != "runtime_contract_defect" {
+		t.Fatalf("forged canonical handoff acquired validation authority: %+v", admission)
+	}
+}
+
 func TestActiveRejectedOperationShapesRetainsOnlyCurrentLineageAndInfeasibleProposalFacts(t *testing.T) {
 	aggregate, replayedCandidate := aggregateWithActiveRejectedCandidate(t)
 	fresh := replayedCandidate.StateChange.Operations[0].Operation

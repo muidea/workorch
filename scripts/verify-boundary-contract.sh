@@ -4409,6 +4409,9 @@ for regression in \
 	'TestRejectedTypedValidationWithoutFailureTargetOpensProfileRepairGeneration' \
 	'TestValidationFailureRepairMultiTargetSettlementUsesOneCompletedAllOfDispatch' \
 	'TestRuntimeCandidateAttemptFailedRequiresManifestBoundTotalCorrection' \
+	'TestCandidateRejectionProducersHaveOwnerDisposition' \
+	'TestRepairClosureRejectionPreservesCauseAndCannotOpenCorrection' \
+	'TestRepairClosureAdmissionNeedsCompletedLineageNotValidationLabels' \
 	'TestCandidateCorrectionFrontierExhaustsSingleTargetAndSealsConcreteAlternative' \
 	'TestRuntimeMainlineCandidateAuthorityExhaustionHasNoCorrectionProviderOrBudgetEffect' \
 	'TestRuntimeFileBackedSemanticCandidateReplayExhaustionSurvivesCASBoundaries'; do

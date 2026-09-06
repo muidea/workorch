@@ -35,6 +35,9 @@ func TestConfirmedRepairMultiOperationReceiptChainSurvivesRestartAndDuplicate(t 
 	if err := partial.Aggregate.Validate(); err != nil {
 		t.Fatalf("partial all-of repair did not survive fresh-load invariant: %v", err)
 	}
+	if proof := candidateRepairClosureFacts(partial.Aggregate); proof.LineageError != "" || proof.CompletedRepairEvidenceRevision != "" {
+		t.Fatalf("partial repair retired validation replay/target fences: %+v", proof)
+	}
 
 	partialRevision := partial.Aggregate.StateRevision
 	restarted, err := NewDispatchCoordinator(fixture.repository)
@@ -63,6 +66,10 @@ func TestConfirmedRepairMultiOperationReceiptChainSurvivesRestartAndDuplicate(t 
 	}
 	if err := settled.Aggregate.Validate(); err != nil {
 		t.Fatalf("settled all-of repair did not survive fresh load: %v", err)
+	}
+	if proof := candidateRepairClosureFacts(settled.Aggregate); proof.LineageError != "" ||
+		proof.CompletedRepairEvidenceRevision != settled.Aggregate.Facts.RepairDirective.SupersedesEvidenceRevision {
+		t.Fatalf("all-of completion lost the exact fresh-validation baseline: %+v", proof)
 	}
 	for _, test := range []struct {
 		name      string

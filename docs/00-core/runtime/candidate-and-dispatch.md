@@ -94,6 +94,14 @@ repair commitment。若某个 repair 确实要求完整 surface 全部产生 eff
 `RequiredOperationSequence`/collective receipt-set；LLM candidate、commitment 派生或 receipt 校验均不得自行把 membership
 升级为 full-set equality，也不得把 closure 缩成 candidate 选择的子集。
 
+target-free 指不继承 repair action target，不表示 validation 无 target 或放宽 manifest。SM-3 必须复用 aggregate
+fresh-load 的 completed repair/confirmation/receipt/current-binding 反向证明；只有 exact handoff 才把旧 closure targets
+视为因果记录，并使用普通 Definition validation manifest 的 target/binding 授权。修复文件与 validation entry 可以不同。
+同一证明产生的 final repair evidence revision 也是拒绝重放的因果边界：即使修复没有 CWI credit，边界之前的失败验证
+也不能阻止在新状态上重跑同一 check；边界之后的新 rejection 仍受重放限制。不得仅凭 `need_validation`、空 purpose/target
+或 canonical-looking directive ID 放宽任何准入；partial repair、缺失/漂移的 confirmation、receipt、binding 或 closure 均不能
+产生这份 invocation-local proof。该投影不是第二份持久化 phase，不能改写历史 closure、receipt 或 startup 配置。
+
 repair operation 的 source `BindingRefs` 是 immutable validation-failure causation，不自动成为该 state-change receipt 的
 coverage proof。若 matching source binding 没有 `state_change` proof，Orchestrator 必须从 sealed
 `RuntimeDispatchRepairCommitment` 将其分类为 causation-only：accepted fact 保留 binding、保持零
@@ -365,6 +373,12 @@ manifest、attempt ledger、rejected shape 与 typed field violations 决定：
 | --- | --- | --- |
 | `correctable_once` | 单一 JSON object 在同一 manifest 下存在可验证的 schema/parameter-entry/operation-value-rule/owner-constraint/operation-set correction，或有限 frontier 中存在已封存的合法语义差异 witness，且尚未使用 correction attempt | 将 manifest hash、目标 delta 和 witness 随 attempt 0 持久化，只允许 attempt 1 |
 | `rejected_final` | 没有可证明的同合同语义差异，或 correction attempt 已用尽 | 形成 typed candidate terminal，零额外 provider call |
+
+每个生产 rejection producer 的 code 必须由 Orchestrator 的单一 disposition policy 显式分类，并由源码生产分支导出的
+验证清单覆盖，不能只验证一份手工抄录的 code 列表。candidate 已通过 manifest、却违反 SM-2 sealed closure 的
+`candidate_repair_closure_mismatch` 是 `rejected_final`：provider 不能通过修改候选修复 owner authority。普通可选择的
+target/binding 错误仍由前置 manifest gate 及合法 witness 决定 attempt 1。未知 code 必须以 `runtime_contract_defect`
+封闭，保留有界 source code 及 typed path/manifest/shape diagnostic，不复制 raw provider reason；禁止默认重试或吞掉原始原因。
 
 `CorrectionDirective` 是 Orchestrator persisted state，不是 evaluator/LLM/capability feedback。它只描述 candidate
 delta，例如删除 forbidden field、补 provider wire 的 required proposal field、把错误内嵌的 declared parameter 重编码为独立

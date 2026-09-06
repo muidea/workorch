@@ -149,7 +149,23 @@ func candidateAdmissionEvaluationInput(aggregate RuntimeAggregate, manifest work
 		PriorFailedProposalShapes: activeFailedCandidateProposalShapes(aggregate),
 		NoProgressOperationShapes: noProgressShapes,
 		ValidationGap:             candidateValidationGapFacts(aggregate),
+		RepairClosure:             candidateRepairClosureFacts(aggregate),
 	}
+}
+
+// Reuse the same reverse proof as aggregate fresh-load. Neither NeedValidation
+// nor an empty repair purpose alone can retire confirmed repair target
+// authority. This detached projection never edits the closure or archives.
+func candidateRepairClosureFacts(aggregate RuntimeAggregate) candidateadmission.RepairClosureFacts {
+	if err := validateConfirmedRepairFreshValidationContinuation(aggregate); err != nil {
+		return candidateadmission.RepairClosureFacts{LineageError: err.Error()}
+	}
+	if runtimeConfirmedRepairOwnsFreshValidationDirective(aggregate.Facts) {
+		return candidateadmission.RepairClosureFacts{
+			CompletedRepairEvidenceRevision: aggregate.Facts.RepairDirective.Normalized().SupersedesEvidenceRevision,
+		}
+	}
+	return candidateadmission.RepairClosureFacts{}
 }
 
 // rejectCandidateRepairClosure is the SM-3 counterpart to the SM-2 repair
@@ -160,7 +176,7 @@ func candidateAdmissionEvaluationInput(aggregate RuntimeAggregate, manifest work
 // does not infer domain semantics: it checks only persisted proof declarations
 // and owner-grounded target references.
 func rejectCandidateRepairClosure(aggregate RuntimeAggregate, candidate workorchruntimecontract.RuntimeCandidate) CandidateAdmissionResult {
-	return candidateAdmissionResultFromFailure(candidateadmission.RepairClosureFailure(aggregate.Facts, aggregate.Decision, candidate))
+	return candidateAdmissionResultFromFailure(candidateadmission.RepairClosureFailure(aggregate.Facts, aggregate.Decision, candidate, candidateRepairClosureFacts(aggregate)))
 }
 
 // rejectCandidateOutsideGroundedTargets is the SM-3 fence for a focus whose
@@ -198,6 +214,14 @@ func ActiveRejectedOperationShapes(aggregate RuntimeAggregate) []workorchruntime
 		dispatchByID[strings.TrimSpace(dispatch.ID)] = dispatch
 	}
 	latestAcceptedRevision := latestAcceptedEvidenceRevision(facts, aggregate.CoverageProofLineage)
+	// A completed confirmed repair is causation-only, so it correctly does not
+	// appear in the CWI-credit projection above. Its exact receipt-chain fence
+	// nevertheless retires failures from the pre-repair workspace: fresh
+	// validation must be allowed to rerun the same sealed check on new state.
+	// The same reverse proof controls both this replay fence and closure targets.
+	if repair := candidateRepairClosureFacts(aggregate); evidenceRevisionAfter(repair.CompletedRepairEvidenceRevision, latestAcceptedRevision) {
+		latestAcceptedRevision = repair.CompletedRepairEvidenceRevision
+	}
 	ret := make([]workorchruntimecontract.RuntimeRejectedOperationShape, 0, len(facts.Evidence.Rejected))
 	for _, evidence := range facts.Evidence.Rejected {
 		dispatch, ok := dispatchByID[strings.TrimSpace(evidence.DispatchID)]
