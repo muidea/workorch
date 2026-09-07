@@ -266,6 +266,7 @@ func StableCoverageEvidenceProofIdentityHash(identity CoverageEvidenceProofIdent
 		writeHashString(h, attestation.RequiredCheckRef)
 		writeHashString(h, attestation.ObservationProtocolRef)
 		writeHashString(h, attestation.NativeCheckRef)
+		writeRuntimeSupplementalNativeCheckHash(h, attestation)
 	}
 	writeHashStrings(h, identity.MetricConstraints)
 	writeHashStrings(h, identity.ArtifactRefs)

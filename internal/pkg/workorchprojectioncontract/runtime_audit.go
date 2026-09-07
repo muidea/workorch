@@ -251,9 +251,10 @@ type RuntimeAuditCoverageProof struct {
 // mapping needed to audit a managed validation receipt. It is display-only and
 // cannot be submitted as an owner attestation or operation command.
 type RuntimeAuditValidationCheckAttestation struct {
-	RequiredCheckRef       string `json:"requiredCheckRef,omitempty"`
-	ObservationProtocolRef string `json:"observationProtocolRef,omitempty"`
-	NativeCheckRef         string `json:"nativeCheckRef,omitempty"`
+	RequiredCheckRef           string `json:"requiredCheckRef,omitempty"`
+	ObservationProtocolRef     string `json:"observationProtocolRef,omitempty"`
+	SupplementalNativeCheckRef string `json:"supplementalNativeCheckRef,omitempty"`
+	NativeCheckRef             string `json:"nativeCheckRef,omitempty"`
 }
 
 // RuntimeAuditDispatch contains only sealed SM-3 identity required by audit

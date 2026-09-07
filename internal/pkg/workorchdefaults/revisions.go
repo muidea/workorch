@@ -17,6 +17,9 @@ func KnownBuiltinContentRevision(kind, id, contentHash string) string {
 // canonical content hashing. Historical runtime/configuration data is never
 // decoded or rewritten by this table.
 var reviewedBuiltinRevisions = [...]struct{ kind, id, contentHash, revision string }{
+	{"workspace_template", "software-dev", "workspace-template-content-sha256:7dfa8bc304eeb9ce9f019cf754cea499906b63bad055349b3951ec43b126e554", "0317a3f6"},
+	{"soul", "soul-software-dev-execution", "soul-content-sha256:a3dbed514ff31b70b025a1d262bf68cb2c7735e66c05c4ad8124bdabde0c1dac", "0317a3f6"},
+	{"soul", "soul-software-dev-validation", "soul-content-sha256:1c058c88072a4f71e5694dd4b8d14561a58cb078213af4c31d79d9d886249bfb", "0317a3f6"},
 	{"soul", "soul-software-dev-execution", "soul-content-sha256:396bb1ee6c468959a0681b5d4c91927d61207bf1c9348cebeae01209dc920505", "0be3a5f3"},
 	{"soul", "soul-software-dev-execution", "soul-content-sha256:93c6b3419a89d09070d9320a97b7bfb265e99befdc73fda982b1aae5949237b7", "72bcd3ec"},
 	{"soul", "soul-generic-governed-planning", "soul-content-sha256:f5a926d08dfa05ca0a51cb7dfbb72d5b28b374bd51b2c0ff535904f8700b7ff0", "fe73385d"},

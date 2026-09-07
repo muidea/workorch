@@ -277,6 +277,11 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   semantic fallback；target-free + exact `existing_owner_scope` route 直接封存 `repair_surface_unavailable`。repair-purpose
   Definition gap 同样必须终止且零 clarification ticket。confirmed directive 的 operation kinds 必须精确等于 route 声明。
   terminal 分支在 duplicate/restart 后保持零额外 CAS、owner query、provider、effect、governance、budget 与 SM-4 wait；
+- input-addition matrix 必须覆盖 exact original binding、缺失/错配 typed contract、已存在 supplement 的禁止再次扩张、
+  exact singleton prospective target schema/admission、创建 receipt 零 terminal credit 与 fresh all-of binding；
+  原/补充任一缺失/失败/跳过/incomplete、旧协议与跨 CWI native reuse 均不能提供新 proof，空字段保留旧 JSON/hash。
+  `TestValidationInputAdditionOwnerFactIsBoundedAndRestartStable` 覆盖私有 CAS/restart/duplicate/stale，真实能力链由
+  software-dev Profile 的 native proof pipeline 校准；
 - managed-validation receipt matrix 必须在 commit 与 fresh-load 同时拒绝 direct diagnostic `TargetRefs`（即使它等于 current
   focus、operation entry 或 sealed scope member）、direct/cross-owner `TargetObservation`、出现在 File/MCP/durable Shell receipt
   中的 VFO，以及 workspace/run/actual dispatch/authority/operation/signature/role/class/candidate/scope 任一漂移。顶层与 nested

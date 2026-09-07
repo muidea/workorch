@@ -164,8 +164,7 @@ func RuntimeValidationObservationSatisfiesCoverageProof(proof CoverageEvidencePr
 	}
 	if proof.ValidationProofRequirementHash != "" {
 		for _, attestation := range proof.ValidationCheckAttestations {
-			if observation.ObservationProtocolRef != attestation.ObservationProtocolRef ||
-				!RuntimeValidationCheckPassed(observation, attestation.NativeCheckRef) {
+			if !RuntimeValidationAttestationPassed(observation, attestation) {
 				return false
 			}
 		}
@@ -355,6 +354,7 @@ func StableCoverageEvidenceBindingHash(binding CoverageEvidenceBinding) string {
 			writeHashString(h, attestation.RequiredCheckRef)
 			writeHashString(h, attestation.ObservationProtocolRef)
 			writeHashString(h, attestation.NativeCheckRef)
+			writeRuntimeSupplementalNativeCheckHash(h, attestation)
 		}
 		writeHashStrings(h, proof.MetricConstraints)
 		writeHashStrings(h, proof.ArtifactRefs)

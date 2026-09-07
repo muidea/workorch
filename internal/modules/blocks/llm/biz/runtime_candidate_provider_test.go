@@ -1017,6 +1017,11 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 }
 
 func TestRuntimeSemanticProviderProjectsTypedValidationFailureRepairOnlyInC3(t *testing.T) {
+	t.Run("implementation_repair", func(t *testing.T) { assertRuntimeRepairProjection(t, false) })
+	t.Run("validation_input_addition", func(t *testing.T) { assertRuntimeRepairProjection(t, true) })
+}
+
+func assertRuntimeRepairProjection(t *testing.T, requireInputAddition bool) {
 	request := runtimeSemanticProviderTestRequest(t)
 	definition := request.SemanticContext.Definition
 	definition.CapabilityContract = []string{
@@ -1035,7 +1040,8 @@ func TestRuntimeSemanticProviderProjectsTypedValidationFailureRepairOnlyInC3(t *
 	convergence := runtimecontract.RuntimeValidationFailureRepairConvergence{
 		ID: "dod-validation-repair",
 		Routes: []runtimecontract.RuntimeValidationFailureRepairRoute{{
-			ID: "build-failure-to-file", TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell,
+			RequireInputAddition: requireInputAddition,
+			ID:                   "build-failure-to-file", TriggerOwnerModuleID: runtimecontract.RuntimeModuleShell,
 			TriggerOperationKind:   runtimecontract.RuntimeBlockKindManagedValidationSession,
 			TriggerDiagnosticClass: runtimecontract.ValidationDiagnosticBuildFailed, TriggerEvidenceTargetType: runtimecontract.ValidationEvidenceTargetFailureSurface,
 			TriggerOwnerDiagnosticCode: "shell_exit_nonzero", RepairEvidenceKind: runtimecontract.EvidenceKindStateChange,
@@ -1095,10 +1101,14 @@ func TestRuntimeSemanticProviderProjectsTypedValidationFailureRepairOnlyInC3(t *
 	if err != nil {
 		t.Fatal(err)
 	}
+	var addition runtimecontract.RuntimeValidationInputAddition
+	if requireInputAddition {
+		addition = runtimecontract.RuntimeValidationInputAddition{RequiredCheckRef: "check/required", OriginalNativeCheckRef: "owner/native/original", NativeCheckRef: "owner/native/supplement", TargetRef: "lsp_tools.go"}
+	}
 	repairManifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverageWithValidationFailureRepair(
 		"ws-1", "run-1", definition, seed, focuses, request.SemanticContext.Activation.ExecutionContract,
 		catalogs, []common.CoverageWorkItemID{"cwi-001"}, runtimecontract.RuntimeValidationFailureRepairGenerationInput{
-			CoverageWorkItemID: "cwi-001", FailedFocusID: "focus-repair",
+			CoverageWorkItemID: "cwi-001", FailedFocusID: "focus-repair", InputAddition: addition,
 			FailureSignature:           "validation-failure/package-conflict/1",
 			TriggerOwnerModuleID:       runtimecontract.RuntimeModuleShell,
 			TriggerOperationKind:       runtimecontract.RuntimeBlockKindManagedValidationSession,
@@ -1143,7 +1153,7 @@ func TestRuntimeSemanticProviderProjectsTypedValidationFailureRepairOnlyInC3(t *
 		obligation.OwnerFactAcquisition != nil ||
 		!slices.Equal(obligation.TerminalRequiredEvidenceKinds, []string{runtimecontract.EvidenceKindValidation}) ||
 		!slices.Equal(obligation.CurrentRequiredEvidenceKinds, []string{runtimecontract.EvidenceKindStateChange}) ||
-		repair.FailedFocusID != "focus-repair" || repair.ConvergenceID != convergence.ID ||
+		repair.FailedFocusID != "focus-repair" || repair.ConvergenceID != convergence.ID || repair.InputAddition != addition ||
 		repair.FailureSignature != "validation-failure/package-conflict/1" ||
 		repair.TriggerDiagnosticClass != runtimecontract.ValidationDiagnosticBuildFailed ||
 		repair.RepairOwnerModuleID != runtimecontract.RuntimeModuleFile ||

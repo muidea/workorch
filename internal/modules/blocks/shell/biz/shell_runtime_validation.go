@@ -21,6 +21,7 @@ const (
 	shellValidationApplicableInputRequiredReason = "applicable_workspace_input_required"
 	shellGoTestObservationProtocolRef            = "shell/go-test-json/v1"
 	shellGoBehaviorObservationProtocolRef        = "shell/go-test-json/workspace-behavior/v2"
+	shellGoSupplementObservationProtocolRef      = "shell/go-test-json/workspace-behavior/v3"
 )
 
 // resolveRuntimeValidationRecipeDeclarations is the Shell-owner adapter
@@ -159,6 +160,7 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 				if !observable {
 					continue
 				}
+				attestations = shellValidationSupplementAttestations(attestations, binding.Manifest.TargetRefs)
 				preparation, observableNow, preparable := shellValidationProofPreparation(workspaceDirectory, binding.Manifest, catalogObservedRevision, readyIDs[recipe.ID], recipe, requirement, attestations)
 				if !observableNow {
 					if preparable {
@@ -321,7 +323,12 @@ func instrumentManagedValidationNativeChecks(request *RuntimeCommandRequest) err
 			return fmt.Errorf("managed validation has unsupported native check attestation")
 		}
 		requiredRefs = append(requiredRefs, attestation.RequiredCheckRef)
-		nativeChecks = append(nativeChecks, regexp.QuoteMeta(attestation.NativeCheckRef))
+		if attestation.SupplementalNativeCheckRef != "" && (attestation.ObservationProtocolRef != shellGoSupplementObservationProtocolRef || attestation.SupplementalNativeCheckRef != shellSupplementCheckRef(attestation.NativeCheckRef)) {
+			return fmt.Errorf("managed validation has unsupported supplemental native input")
+		}
+		for _, ref := range attestation.NativeCheckRefs() {
+			nativeChecks = append(nativeChecks, regexp.QuoteMeta(ref))
+		}
 	}
 	if err := runtimemodel.ValidateRuntimeValidationCheckAttestationBindings(request.ValidationCheckAttestations, requiredRefs); err != nil {
 		return err
@@ -341,11 +348,11 @@ func instrumentManagedValidationNativeChecks(request *RuntimeCommandRequest) err
 		}
 	}
 	if shellRequiresWorkspaceBehavior(*request) {
-		if len(request.ValidationCheckAttestations) > maxShellBehaviorNativeChecks {
+		if len(nativeChecks) > maxShellBehaviorNativeChecks {
 			return fmt.Errorf("workspace behavior observation exceeds the native-check bound")
 		}
 		for _, attestation := range request.ValidationCheckAttestations {
-			if attestation.ObservationProtocolRef != shellGoBehaviorObservationProtocolRef {
+			if attestation.ObservationProtocolRef != request.ValidationCheckAttestations[0].ObservationProtocolRef {
 				return fmt.Errorf("managed validation cannot mix native observation protocols")
 			}
 		}

@@ -30,6 +30,11 @@ import (
 // and attests the native check; only then may the SM-2 matcher derive credit.
 // Neither Orchestrator nor the provider interprets Go, test names, or stdout.
 func TestBuiltinSoftwareDevAllManagedCWIsCloseThroughTypedNativeProofPipeline(t *testing.T) {
+	t.Run("ready_inputs", func(t *testing.T) { runDefaultNativeProofPipeline(t, false) })
+	t.Run("create_only_conjunctive_input", func(t *testing.T) { runDefaultNativeProofPipeline(t, true) })
+}
+
+func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go is not available")
 	}
@@ -155,6 +160,10 @@ func TestBuiltinSoftwareDevAllManagedCWIsCloseThroughTypedNativeProofPipeline(t 
 	for index, requirement := range requirements {
 		preparation := preparations[requirement.Hash]
 		operation := defaultNativeProofFileOperation(requirement, preparation, index)
+		if supplementFirst && index == 0 {
+			weak := fmt.Sprintf("package workorch_validation\nimport (\"testing\"; \"strings\")\nfunc %s(t *testing.T) { if !strings.Contains(\"contract\", \"contract\") { t.Fatal(\"missing contract\") } }\n", preparation.CheckAttestations[0].NativeCheckRef)
+			operation.Parameters = []runtimecontract.OperationParameter{{Name: "content", String: &weak}}
+		}
 		dispatchID := fmt.Sprintf("dispatch-default-proof-file-%02d", index+1)
 		receipt := executeFileWrite(operation, dispatchID)
 		if len(receipt.TargetRefs) != 1 || receipt.TargetRefs[0] != preparation.TargetRef {
@@ -208,27 +217,60 @@ func TestBuiltinSoftwareDevAllManagedCWIsCloseThroughTypedNativeProofPipeline(t 
 			TargetRefs:  []string{preparedTarget},
 			Parameters:  []runtimecontract.OperationParameter{{Name: "recipeId", String: &recipeID}},
 		}
-		sealed, err := shellevents.SealRuntimeOperation(operation, catalog, shellevents.RuntimeExecutionSealInput{
-			CatalogObservation:        reobserved.Acquisition.Observation,
-			TargetRole:                semanticFocus.TargetRole,
-			ValidationScopeTargetRefs: append([]string(nil), catalog.TargetRefs...),
-			EvidencePolicies:          bootstrap.Activation.EvidencePolicies,
-			ValidationProofBinding:    ownerBinding,
-		})
-		if err != nil {
-			t.Fatalf("seal default native proof %q on surface %q: %v", requirement.Hash, surface.ID, err)
+		executeBoundValidation := func(dispatchID string) shellevents.ExecuteOperationResult {
+			sealed, err := shellevents.SealRuntimeOperation(operation, catalog, shellevents.RuntimeExecutionSealInput{
+				CatalogObservation:        reobserved.Acquisition.Observation,
+				TargetRole:                semanticFocus.TargetRole,
+				ValidationScopeTargetRefs: append([]string(nil), catalog.TargetRefs...),
+				EvidencePolicies:          bootstrap.Activation.EvidencePolicies,
+				ValidationProofBinding:    ownerBinding,
+			})
+			if err != nil {
+				t.Fatalf("seal default native proof %q on surface %q: %v", requirement.Hash, surface.ID, err)
+			}
+			return sendObservedShellExecution(t, ctx, hub, shellevents.ExecuteOperationCommand{
+				RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
+					Execution:   defaultNativeProofExecutionEnvelope(workspaceID, runID, dispatchID, operation, &catalog),
+					WorkspaceID: workspaceID, RunID: runID, DispatchID: dispatchID,
+					Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, RequiredOutputHash: "required-output-default-native-proof"},
+					OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), EvidenceKind: runtimecontract.EvidenceKindValidation,
+					WorkspaceDeliverableDirectory: workspaceDirectory,
+				},
+				SealedOperation: sealed,
+			})
 		}
-		dispatchID := fmt.Sprintf("dispatch-default-proof-shell-%02d", index+1)
-		response := sendObservedShellExecution(t, ctx, hub, shellevents.ExecuteOperationCommand{
-			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
-				Execution:   defaultNativeProofExecutionEnvelope(workspaceID, runID, dispatchID, operation, &catalog),
-				WorkspaceID: workspaceID, RunID: runID, DispatchID: dispatchID,
-				Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, RequiredOutputHash: "required-output-default-native-proof"},
-				OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), EvidenceKind: runtimecontract.EvidenceKindValidation,
-				WorkspaceDeliverableDirectory: workspaceDirectory,
-			},
-			SealedOperation: sealed,
-		})
+		response := executeBoundValidation(fmt.Sprintf("dispatch-default-proof-shell-%02d", index+1))
+		if supplementFirst && index == 0 {
+			if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || response.Receipt.Feedback == nil || response.Receipt.Feedback.OriginalDiagnostic == nil || response.Receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic == nil {
+				t.Fatalf("weak input was not rejected with typed diagnostic: %+v", response.Receipt)
+			}
+			diagnostic := response.Receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic
+			addition := diagnostic.InputAddition
+			convergence := focus.ValidationFailureRepairConvergence
+			if convergence == nil {
+				t.Fatal("default CWI lacks repair policy")
+			}
+			route, found := convergence.RouteForTrigger(runtimecontract.RuntimeModuleShell, operation.Kind, diagnostic.Class, diagnostic.RecommendedEvidenceTargetType, diagnostic.OwnerCode)
+			if !found || !route.RequireInputAddition || len(route.RepairOperationKinds) != 1 || route.RepairOperationKinds[0] != runtimecontract.StepKindFileWrite || !addition.MatchesBinding(coverageBinding) {
+				t.Fatalf("default Profile has no exact create-only input contract: diagnostic=%+v route=%+v", diagnostic, route)
+			}
+			originalBinding := ownerBinding.Clone()
+			content := fmt.Sprintf("package workorch_validation\nimport (\"testing\"; subject \"example.com/workorch-default-native-proof\")\nfunc %s(t *testing.T) { if subject.DeliveredValue() != 4 { t.Fatal(\"delivery entry returned wrong value\") } }\n", addition.NativeCheckRef)
+			created := executeFileWrite(runtimecontract.RuntimeOperation{ID: "supplement-input", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{addition.TargetRef}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}}}, "dispatch-create-supplement")
+			if _, credit, _ := coverageEvidenceCreditForReceipt([]runtimecontract.CoverageEvidenceBinding{coverageBinding}, operation, runtimecontract.EvidenceKindValidation, &created); len(credit) != 0 {
+				t.Fatal("input creation credited validation")
+			}
+			observedManifest = sendObservedManifest(t, ctx, hub, aggregate, manifestPrerequisite, workspaceDirectory)
+			reobserved = acquireObservedShellValidationCatalog(t, ctx, hub, aggregate, shellPrerequisite, workspaceDirectory, observedManifest, observedManifest.Manifest.TargetRefs, requirements)
+			catalog = reobserved.Acquisition.Admissibility.Normalized()
+			_, ownerBinding, found = runtimecontract.RuntimeValidationSurfaceForProofRequirement(catalog.ValidationSurfaces, requirement)
+			if !found || len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].NativeCheckRef != originalBinding.CheckAttestations[0].NativeCheckRef || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != addition.NativeCheckRef || ownerBinding.CheckAttestations[0].ObservationProtocolRef == originalBinding.CheckAttestations[0].ObservationProtocolRef {
+				t.Fatalf("fresh owner binding replaced original instead of adding all-of: %+v", ownerBinding)
+			}
+			coverageBinding, semanticFocus = defaultNativeProofCoverageBinding(t, focus, requirement, ownerBinding, preparedTarget)
+			response = executeBoundValidation("dispatch-default-proof-fresh-validation")
+		}
+
 		if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || response.Receipt.Evidence.Validation == nil {
 			t.Fatalf("Shell native proof %q receipt = %+v", requirement.Hash, response.Receipt)
 		}

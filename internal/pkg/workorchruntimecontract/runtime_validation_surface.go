@@ -172,11 +172,13 @@ func (s RuntimeValidationSurface) Validate() error {
 		boundChecks = append(boundChecks, binding.RequiredCheckRefs...)
 		for _, attestation := range binding.CheckAttestations {
 			attestation = attestation.Normalized()
-			nativeIdentity := attestation.ObservationProtocolRef + "\x00" + attestation.NativeCheckRef
-			if priorCoverage, duplicate := boundNativeChecks[nativeIdentity]; duplicate && priorCoverage != binding.CoverageWorkItemID {
-				return fmt.Errorf("runtime validation surface %q native check %q is shared by coverage %q and %q", s.ID, attestation.NativeCheckRef, priorCoverage, binding.CoverageWorkItemID)
+			for _, ref := range attestation.NativeCheckRefs() {
+				nativeIdentity := attestation.ObservationProtocolRef + "\x00" + ref
+				if priorCoverage, duplicate := boundNativeChecks[nativeIdentity]; duplicate && priorCoverage != binding.CoverageWorkItemID {
+					return fmt.Errorf("runtime validation surface %q native check %q is shared by coverage %q and %q", s.ID, ref, priorCoverage, binding.CoverageWorkItemID)
+				}
+				boundNativeChecks[nativeIdentity] = binding.CoverageWorkItemID
 			}
-			boundNativeChecks[nativeIdentity] = binding.CoverageWorkItemID
 		}
 	}
 	if len(s.ProofRequirementBindings) != 0 && s.ProofApplicability != RuntimeValidationProofDirect {
@@ -197,11 +199,13 @@ func (s RuntimeValidationSurface) Validate() error {
 		}
 		for _, attestation := range preparation.CheckAttestations {
 			attestation = attestation.Normalized()
-			nativeIdentity := attestation.ObservationProtocolRef + "\x00" + attestation.NativeCheckRef
-			if priorCoverage, duplicate := boundNativeChecks[nativeIdentity]; duplicate && priorCoverage != preparation.CoverageWorkItemID {
-				return fmt.Errorf("runtime validation surface %q native check %q is shared by coverage %q and %q", s.ID, attestation.NativeCheckRef, priorCoverage, preparation.CoverageWorkItemID)
+			for _, ref := range attestation.NativeCheckRefs() {
+				nativeIdentity := attestation.ObservationProtocolRef + "\x00" + ref
+				if priorCoverage, duplicate := boundNativeChecks[nativeIdentity]; duplicate && priorCoverage != preparation.CoverageWorkItemID {
+					return fmt.Errorf("runtime validation surface %q native check %q is shared by coverage %q and %q", s.ID, ref, priorCoverage, preparation.CoverageWorkItemID)
+				}
+				boundNativeChecks[nativeIdentity] = preparation.CoverageWorkItemID
 			}
-			boundNativeChecks[nativeIdentity] = preparation.CoverageWorkItemID
 		}
 		constraint := preparation.ProspectiveTargetSatisfactionConstraint.Normalized()
 		if preparation.ValidationRecipeID != s.ID || constraint.OwnerModuleID != s.OwnerModuleID ||
@@ -295,12 +299,16 @@ type RuntimeValidationCheckAttestationBinding struct {
 	RequiredCheckRef       string
 	ObservationProtocolRef string
 	NativeCheckRef         string
+	// Optional conjunctive input: never replaces the original native check.
+	// Empty preserves the identity and behavior of already sealed bindings.
+	SupplementalNativeCheckRef string `json:",omitempty"`
 }
 
 func (b RuntimeValidationCheckAttestationBinding) Normalized() RuntimeValidationCheckAttestationBinding {
 	b.RequiredCheckRef = strings.TrimSpace(b.RequiredCheckRef)
 	b.ObservationProtocolRef = strings.TrimSpace(b.ObservationProtocolRef)
 	b.NativeCheckRef = strings.TrimSpace(b.NativeCheckRef)
+	b.SupplementalNativeCheckRef = strings.TrimSpace(b.SupplementalNativeCheckRef)
 	return b
 }
 
@@ -309,7 +317,36 @@ func (b RuntimeValidationCheckAttestationBinding) Validate() error {
 	if b.RequiredCheckRef == "" || b.ObservationProtocolRef == "" || b.NativeCheckRef == "" {
 		return fmt.Errorf("runtime validation check attestation requires Definition check, observation protocol and native check")
 	}
+	if b.SupplementalNativeCheckRef != "" && (b.SupplementalNativeCheckRef == b.NativeCheckRef || len(b.SupplementalNativeCheckRef) > 512 || strings.IndexFunc(b.SupplementalNativeCheckRef, func(r rune) bool { return r < 32 || r == 127 }) >= 0) {
+		return fmt.Errorf("supplemental native check must be distinct and bounded")
+	}
 	return nil
+}
+
+// NativeCheckRefs is the complete all-of native input, not a set of alternatives.
+func (b RuntimeValidationCheckAttestationBinding) NativeCheckRefs() []string {
+	b = b.Normalized()
+	refs := []string{b.NativeCheckRef}
+	if b.SupplementalNativeCheckRef != "" {
+		refs = append(refs, b.SupplementalNativeCheckRef)
+	}
+	return refs
+}
+
+// RuntimeValidationAttestationPassed checks all native inputs under the exact
+// owner protocol. Receipt quality, freshness and CWI credit remain separate gates.
+func RuntimeValidationAttestationPassed(observation RuntimeValidationObservation, binding RuntimeValidationCheckAttestationBinding) bool {
+	binding = binding.Normalized()
+	observation = observation.Normalized()
+	if binding.Validate() != nil || observation.ObservationProtocolRef != binding.ObservationProtocolRef {
+		return false
+	}
+	for _, ref := range binding.NativeCheckRefs() {
+		if !RuntimeValidationCheckPassed(observation, ref) {
+			return false
+		}
+	}
+	return true
 }
 
 func NormalizeRuntimeValidationCheckAttestationBindings(values []RuntimeValidationCheckAttestationBinding) []RuntimeValidationCheckAttestationBinding {
@@ -361,12 +398,14 @@ func ValidateRuntimeValidationCheckAttestationBindings(values []RuntimeValidatio
 		if _, duplicate := seenRequired[value.RequiredCheckRef]; duplicate {
 			return fmt.Errorf("runtime validation check attestation duplicates Definition check %q", value.RequiredCheckRef)
 		}
-		nativeIdentity := value.ObservationProtocolRef + "\x00" + value.NativeCheckRef
-		if _, duplicate := seenNative[nativeIdentity]; duplicate {
-			return fmt.Errorf("runtime validation check attestation duplicates native check %q", value.NativeCheckRef)
+		for _, ref := range value.NativeCheckRefs() {
+			nativeIdentity := value.ObservationProtocolRef + "\x00" + ref
+			if _, duplicate := seenNative[nativeIdentity]; duplicate {
+				return fmt.Errorf("runtime validation check attestation duplicates native check %q", ref)
+			}
+			seenNative[nativeIdentity] = struct{}{}
 		}
 		seenRequired[value.RequiredCheckRef] = struct{}{}
-		seenNative[nativeIdentity] = struct{}{}
 	}
 	if !sameStrings(normalizeStrings(requiredCheckRefs), func() []string {
 		refs := make([]string, 0, len(values))

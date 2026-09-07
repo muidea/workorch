@@ -1215,6 +1215,7 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 				writeHashString(h, attestation.RequiredCheckRef)
 				writeHashString(h, attestation.ObservationProtocolRef)
 				writeHashString(h, attestation.NativeCheckRef)
+				writeRuntimeSupplementalNativeCheckHash(h, attestation)
 			}
 		}
 		for _, preparation := range surface.ProofRequirementPreparations {
@@ -1228,6 +1229,7 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 				writeHashString(h, attestation.RequiredCheckRef)
 				writeHashString(h, attestation.ObservationProtocolRef)
 				writeHashString(h, attestation.NativeCheckRef)
+				writeRuntimeSupplementalNativeCheckHash(h, attestation)
 			}
 			writeHashString(h, stableRuntimeProspectiveTargetSatisfactionConstraintHashCanonical(preparation.ProspectiveTargetSatisfactionConstraint))
 			if preparation.OriginalDiagnostic != nil {

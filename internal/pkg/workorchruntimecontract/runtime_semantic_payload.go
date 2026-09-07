@@ -775,6 +775,10 @@ func attachRuntimeSemanticProofObligationSchema(items map[string]any, manifest R
 				if len(repair.RepairDeclarationTargetSelectorCandidateRefs) > 0 && len(repair.RepairDeclarationTargetSelectorCandidateRefs) < maxItems {
 					maxItems = len(repair.RepairDeclarationTargetSelectorCandidateRefs)
 				}
+				if repair.RequireInputAddition {
+					itemSchema["const"] = repair.InputAddition.TargetRef
+					maxItems = 1
+				}
 				targetProperties["prospectiveTargetRefs"] = map[string]any{
 					"type": "array", "minItems": 1, "maxItems": maxItems, "uniqueItems": true, "items": itemSchema,
 				}

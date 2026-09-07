@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -16,14 +18,56 @@ import (
 	filerepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-func historicalSoftwareTemplate(t *testing.T) *workspacemodel.WorkspaceTemplate {
+//go:embed testdata/software-dev-template-0317a3f6.json
+var previousSoftwareTemplateJSON []byte
+
+func previousSoftwareTemplate(t *testing.T) workorchmanagementcontract.WorkspaceTemplate {
 	t.Helper()
+	var raw workorchmanagementcontract.WorkspaceTemplate
+	if err := json.Unmarshal(previousSoftwareTemplateJSON, &raw); err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestPreviousSoftwareTemplateReviewedFingerprint(t *testing.T) {
+	previous, err := builtinWorkspaceTemplate(previousSoftwareTemplate(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := workspacemodel.StableWorkspaceTemplateContentHash(previous)
+	if got := workorchdefaults.KnownBuiltinContentRevision("workspace_template", previous.ID, hash); got != "0317a3f6" {
+		t.Fatalf("previous builtin is not reviewed: hash=%s revision=%s", hash, got)
+	}
 	defaults, err := workorchdefaults.BuiltinWorkspaceTemplateDefaults()
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, raw := range defaults {
+		if raw.ID != previous.ID {
+			continue
+		}
+		current, err := builtinWorkspaceTemplate(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observation, err := builtinTemplateDefaultObservation(previous, current)
+		if err != nil || !observation.UpgradeAvailable {
+			t.Fatalf("new input route unavailable to old builtin: %+v %v", observation, err)
+		}
+		return
+	}
+	t.Fatal("missing current software-dev template")
+}
+
+func historicalSoftwareTemplate(t *testing.T) *workspacemodel.WorkspaceTemplate {
+	t.Helper()
+	// Historical authority is reconstructed only from frozen reviewed input,
+	// never from mutable current defaults.
+	defaults := []workorchmanagementcontract.WorkspaceTemplate{previousSoftwareTemplate(t)}
 	for _, raw := range defaults {
 		if raw.ID != "software-dev" {
 			continue

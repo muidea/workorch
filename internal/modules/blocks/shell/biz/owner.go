@@ -157,8 +157,7 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 			}
 			for _, attestation := range command.Binding.ValidationCheckAttestations {
 				attestation = attestation.Normalized()
-				if value.ObservationProtocolRef == attestation.ObservationProtocolRef &&
-					runtimecontract.RuntimeValidationCheckPassed(value, attestation.NativeCheckRef) {
+				if runtimecontract.RuntimeValidationAttestationPassed(value, attestation) {
 					checkRefs = append(checkRefs, attestation.RequiredCheckRef)
 				}
 			}

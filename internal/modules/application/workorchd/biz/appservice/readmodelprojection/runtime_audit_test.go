@@ -128,7 +128,7 @@ func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *test
 			AllowedOperationKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "recipe/audit",
 			ValidationProofRequirementHash: "runtime-validation-proof-requirement-audit", RequiredCheckRefs: []string{"check/audit"},
 			ValidationCheckAttestations: []runtimecontract.RuntimeValidationCheckAttestationBinding{{
-				RequiredCheckRef: "check/audit", ObservationProtocolRef: "shell/audit/v1", NativeCheckRef: "native/check/audit",
+				RequiredCheckRef: "check/audit", ObservationProtocolRef: "shell/audit/v1", NativeCheckRef: "native/check/audit", SupplementalNativeCheckRef: "native/check/supplement",
 			}},
 			MetricConstraints: []string{"metric/audit"}, ArtifactRefs: []string{"artifact/audit"},
 		}}, TargetRefs: []string{"main.go"}, DeclarationRef: "profile/audit",
@@ -182,7 +182,7 @@ func TestMapRuntimeAuditProjectsBindingReceiptAndDerivedCreditSeparately(t *test
 		len(projectedProof.RequiredCheckRefs) != 1 || len(projectedProof.ValidationCheckAttestations) != 1 ||
 		projectedProof.ValidationCheckAttestations[0].RequiredCheckRef != "check/audit" ||
 		projectedProof.ValidationCheckAttestations[0].ObservationProtocolRef != "shell/audit/v1" ||
-		projectedProof.ValidationCheckAttestations[0].NativeCheckRef != "native/check/audit" {
+		projectedProof.ValidationCheckAttestations[0].NativeCheckRef != "native/check/audit" || projectedProof.ValidationCheckAttestations[0].SupplementalNativeCheckRef != "native/check/supplement" {
 		t.Fatalf("binding declaration projection = %+v", projectedBinding)
 	}
 	evidence := audit.AcceptedEvidence[0]

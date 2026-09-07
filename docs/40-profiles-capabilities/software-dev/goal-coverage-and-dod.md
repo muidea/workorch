@@ -10,7 +10,8 @@ Last Verified: 2026-09-05
 
 This document defines the built-in software-development evidence specialization. Its stable template ID and product
 presentation remain language- and framework-neutral. Shell's current Go-native validation adapter
-(`shell/go-test-json/workspace-behavior/v2`, with sealed `shell/go-test-json/v1` replay retained) is one typed capability-owner implementation, not part of the template identity or Runtime-core
+(`shell/go-test-json/workspace-behavior/v2`, or v3 for fresh conjunctive input, with sealed `shell/go-test-json/v1` and v2 replay
+retained) is one typed capability-owner implementation, not part of the template identity or Runtime-core
 language. The neutral CWI/focus/evidence machinery remains owned by Orchestrator and
 [the core Runtime contract](../../00-core/runtime-stage-contract.md).
 
@@ -109,6 +110,18 @@ observed implementation candidates to the existing File confirmation lane. Chang
 separately declared contract and positive/negative calibration preserving the original acceptance intent; the default
 implementation repair route does not authorize such a change. Built-in reference tests calibrate their fixed fixture only and
 must not be presented as a production registry of trusted graders for arbitrary requirements.
+
+The separate `missing-behavior-to-new-validation-input` route admits only the exact Shell
+`validation_output_inconclusive / validation_output / validation_workspace_behavior_unobserved` tuple with a matching typed
+`InputAddition`. It declares File `file/write`, `prospective_owner_target`, `RequireInputAddition=true` and the
+`validation_input_supplement` role. This authorizes one new input, never replacement of existing criteria: the required/original
+check must match the rejected binding, and the proposal must name only the owner-specified new path. File remains create-only;
+its receipt gives no DoD credit. Fresh Shell v3 binding requires the original and supplemental checks together, including real
+workspace implementation observation. Missing/mismatched input contracts and an ineffective existing supplement terminate
+boundedly; they do not open repeated input additions. Input compilation errors do not authorize editing original assertions.
+The current adapter publishes this addition only for a single native attestation; broader input/toolchain contracts need an
+explicit extension. Template identity and Runtime core remain language-neutral; this does not claim general multilingual or
+arbitrary-Goal trusted-grader support.
 
 - every required Profile acceptance/deliverable source maps to one admitted exact CWI; the activation compiler emits its canonical
   exact evidence declaration, while the Profile supplies nonempty supported evidence kinds and at least one accepted operation

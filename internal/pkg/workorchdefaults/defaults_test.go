@@ -954,7 +954,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 						t.Fatalf("dodItem validation failure repair convergence = %+v", repair)
 					}
 					routes, ok := repair["routes"].([]any)
-					if !ok || len(routes) != 3 {
+					if !ok || len(routes) != 4 {
 						t.Fatalf("dodItem validation failure repair routes = %+v", repair["routes"])
 					}
 					routesByID := make(map[string]map[string]any, len(routes))
@@ -965,6 +965,14 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 						}
 						id, _ := route["id"].(string)
 						routesByID[id] = route
+					}
+					addition := routesByID["missing-behavior-to-new-validation-input"]
+					if addition["requireInputAddition"] != true || addition["repairTargetPolicy"] != "prospective_owner_target" || addition["repairTargetRole"] != "validation_input_supplement" || addition["triggerOwnerDiagnosticCode"] != "validation_workspace_behavior_unobserved" || addition["repairOperationTargetSelectorRef"] != "workspace-relative-new-file-target" {
+						t.Fatalf("input addition is not independently create-only: %+v", addition)
+					}
+					kinds, _ := addition["repairOperationKinds"].([]any)
+					if len(kinds) != 1 || kinds[0] != "file/write" {
+						t.Fatal("input addition may overwrite existing tests")
 					}
 					expectedRoutes := map[string]struct {
 						diagnosticClass string

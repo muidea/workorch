@@ -133,15 +133,16 @@ type runtimeCandidateProviderSafeFailureProjection struct {
 }
 
 type runtimeCandidateValidationDiagnosticProjection struct {
-	Class              string   `json:"class,omitempty"`
-	OwnerCode          string   `json:"ownerCode,omitempty"`
-	EvidenceTargetType string   `json:"evidenceTargetType,omitempty"`
-	Operation          string   `json:"operation,omitempty"`
-	CommandKind        string   `json:"commandKind,omitempty"`
-	ExitCode           int      `json:"exitCode,omitempty"`
-	TimedOut           bool     `json:"timedOut,omitempty"`
-	UnavailableCommand string   `json:"unavailableCommand,omitempty"`
-	TargetRefs         []string `json:"targetRefs,omitempty"`
+	InputAddition      runtimecontract.RuntimeValidationInputAddition `json:"inputAddition,omitzero"`
+	Class              string                                         `json:"class,omitempty"`
+	OwnerCode          string                                         `json:"ownerCode,omitempty"`
+	EvidenceTargetType string                                         `json:"evidenceTargetType,omitempty"`
+	Operation          string                                         `json:"operation,omitempty"`
+	CommandKind        string                                         `json:"commandKind,omitempty"`
+	ExitCode           int                                            `json:"exitCode,omitempty"`
+	TimedOut           bool                                           `json:"timedOut,omitempty"`
+	UnavailableCommand string                                         `json:"unavailableCommand,omitempty"`
+	TargetRefs         []string                                       `json:"targetRefs,omitempty"`
 }
 
 type runtimeCandidateProviderSafeEvidenceProjection struct {
@@ -284,7 +285,7 @@ func runtimeCandidateValidationProofPreparations(focus runtimecontract.CoverageF
 				for _, attestation := range preparation.CheckAttestations {
 					ret = append(ret, runtimeSemanticNativeCheckAttestationProjection{
 						ValidationRecipeID: preparation.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
-						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef,
+						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
 						TargetRef: preparation.TargetRef,
 					})
 				}
@@ -562,7 +563,7 @@ func runtimeProviderSafeFailure(value *runtimecontract.FailureFact) *runtimeCand
 	}
 	if failure.ValidationDiagnostic != nil {
 		d := failure.ValidationDiagnostic.Normalized()
-		ret.ValidationDiagnostic = &runtimeCandidateValidationDiagnosticProjection{Class: d.Class, OwnerCode: d.OwnerCode,
+		ret.ValidationDiagnostic = &runtimeCandidateValidationDiagnosticProjection{Class: d.Class, OwnerCode: d.OwnerCode, InputAddition: d.InputAddition,
 			EvidenceTargetType: d.RecommendedEvidenceTargetType, Operation: d.Operation, CommandKind: d.CommandKind,
 			ExitCode: d.ExitCode, TimedOut: d.TimedOut, UnavailableCommand: d.UnavailableCommand, TargetRefs: append([]string(nil), d.TargetRefs...)}
 	}

@@ -38,26 +38,28 @@ const (
 )
 
 type ValidationFailureDiagnostic struct {
-	SchemaVersion                 string   `json:"schemaVersion,omitempty"`
-	Class                         string   `json:"class,omitempty"`
-	OwnerCode                     string   `json:"ownerCode,omitempty"`
-	Reason                        string   `json:"reason,omitempty"`
-	RecommendedEvidenceTargetType string   `json:"recommendedEvidenceTargetType,omitempty"`
-	Stage                         string   `json:"stage,omitempty"`
-	Operation                     string   `json:"operation,omitempty"`
-	CommandKind                   string   `json:"commandKind,omitempty"`
-	ExitCode                      int      `json:"exitCode,omitempty"`
-	TimedOut                      bool     `json:"timedOut,omitempty"`
-	CommandPolicyViolation        bool     `json:"commandPolicyViolation,omitempty"`
-	UnavailableCommand            string   `json:"unavailableCommand,omitempty"`
-	TargetRefs                    []string `json:"targetRefs,omitempty"`
-	ObservationType               string   `json:"observationType,omitempty"`
-	EvidenceMode                  string   `json:"evidenceMode,omitempty"`
-	StdoutPreview                 string   `json:"stdoutPreview,omitempty"`
-	StderrPreview                 string   `json:"stderrPreview,omitempty"`
+	InputAddition                 RuntimeValidationInputAddition `json:"inputAddition,omitzero"`
+	SchemaVersion                 string                         `json:"schemaVersion,omitempty"`
+	Class                         string                         `json:"class,omitempty"`
+	OwnerCode                     string                         `json:"ownerCode,omitempty"`
+	Reason                        string                         `json:"reason,omitempty"`
+	RecommendedEvidenceTargetType string                         `json:"recommendedEvidenceTargetType,omitempty"`
+	Stage                         string                         `json:"stage,omitempty"`
+	Operation                     string                         `json:"operation,omitempty"`
+	CommandKind                   string                         `json:"commandKind,omitempty"`
+	ExitCode                      int                            `json:"exitCode,omitempty"`
+	TimedOut                      bool                           `json:"timedOut,omitempty"`
+	CommandPolicyViolation        bool                           `json:"commandPolicyViolation,omitempty"`
+	UnavailableCommand            string                         `json:"unavailableCommand,omitempty"`
+	TargetRefs                    []string                       `json:"targetRefs,omitempty"`
+	ObservationType               string                         `json:"observationType,omitempty"`
+	EvidenceMode                  string                         `json:"evidenceMode,omitempty"`
+	StdoutPreview                 string                         `json:"stdoutPreview,omitempty"`
+	StderrPreview                 string                         `json:"stderrPreview,omitempty"`
 }
 
 func (d ValidationFailureDiagnostic) Normalized() ValidationFailureDiagnostic {
+	d.InputAddition = d.InputAddition.Normalized()
 	d.SchemaVersion = strings.TrimSpace(d.SchemaVersion)
 	d.Class = strings.TrimSpace(d.Class)
 	d.OwnerCode = strings.TrimSpace(d.OwnerCode)
@@ -90,7 +92,7 @@ func sameValidationFailureDiagnostic(left, right *ValidationFailureDiagnostic) b
 	}
 	l := left.Normalized()
 	r := right.Normalized()
-	return l.SchemaVersion == r.SchemaVersion && l.Class == r.Class && l.OwnerCode == r.OwnerCode && l.Reason == r.Reason &&
+	return l.InputAddition == r.InputAddition && l.SchemaVersion == r.SchemaVersion && l.Class == r.Class && l.OwnerCode == r.OwnerCode && l.Reason == r.Reason &&
 		l.RecommendedEvidenceTargetType == r.RecommendedEvidenceTargetType && l.Stage == r.Stage &&
 		l.Operation == r.Operation && l.CommandKind == r.CommandKind && l.ExitCode == r.ExitCode &&
 		l.TimedOut == r.TimedOut && l.CommandPolicyViolation == r.CommandPolicyViolation &&

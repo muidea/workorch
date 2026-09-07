@@ -81,7 +81,8 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
 ### Native check readiness and behavior observation
 
 当前 `shell/project-native-validation/v1` adapter 的 Go-native binding 使用 `shell/go-test-json/workspace-behavior/v2`；已封存的
-`shell/go-test-json/v1` 仍按原协议执行/重放，不修改历史 receipt、binding 或归档。新协议属于 Shell adapter，
+v1/v2 binding 仍按原协议执行/重放，不修改历史 receipt、binding 或归档。fresh manifest 若含 exact CWI 补充输入，使用
+`shell/go-test-json/workspace-behavior/v3`。协议属于 Shell adapter，
 不进入模板身份或 Orchestrator 的状态选择逻辑。显式固定 command 的 legacy recipe 保持 v1 语义，不能被静默增加 coverage
 要求，也不能被声称具有 v2 的行为 grounding；需要该 grounding 的 Profile 应声明 project-native adapter。
 
@@ -100,6 +101,16 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
 - 执行覆盖是必要的行为 grounding，不是逐 Goal/DoD 的充分语义证明、独立可信 grader 或对抗性 OS sandbox。
   子进程/其它语言的交付入口若不被该 adapter 观测，必须提供对应的 typed owner proof adapter；不能用同名测试、
   source-text、dependency-only success 或模型声明补齐。验证输入/验收判据修订需要独立合同，默认实现修复不授予该权限。
+
+v2 对只有一个 native attestation 的缺失实现执行事实返回 bounded `InputAddition`：保留原 required/native check，另给
+一个 exact workspace-relative 新输入与 supplemental native identity。该事实不授权写文件，必须匹配 Profile 的独立
+create-only route，并经 File feasibility 和 SM-2 seal。多 attestation、不可验证或其它失败不推断补充合同。
+fresh v3 catalog 将原检查与补充检查绑定为 all-of，并沿用最多 32 个 native input 的执行/观测上界。补充文件只允许
+imports 和该 exact test function；不能借 top-level helper、全局变量、`init`、`TestMain` 或重定义原检查替换实现/判据。
+补充仍未观测实现时返回 `validation_workspace_behavior_supplement_unobserved`，不再提供补充合同；补充的编译错误也
+不能把测试/owner harness 文件交给普通实现修复。具体 CWI 的真实交付入口断言仍不可由“任意函数被覆盖”替代。
+`TestValidationInputSupplementRequiresOriginalAndDeliveryBehavior` 校准原检查失败、实现错误、源码/dependency/fake bypass、
+skip、初始化/runner override、输入编译错误、v2 replay 与 v3 fresh all-of 正反例。
 
 `TestNativeCheckStructureResolvesOnlyReachableTestingAssertions`、
 `TestWorkspaceBehaviorProofRequiresDeliveryExecutionAndProtectsAssertionInputs` 与

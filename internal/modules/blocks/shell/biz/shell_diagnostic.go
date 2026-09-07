@@ -55,6 +55,17 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 			targetRefs = nil
 		}
 	}
+	if class == runtimemodel.ValidationDiagnosticBuildFailed && len(request.ValidationCheckAttestations) != 0 && request.ValidationCheckAttestations[0].ObservationProtocolRef == shellGoSupplementObservationProtocolRef {
+		// A newly added input that does not compile cannot authorize rewriting
+		// original acceptance inputs through the ordinary implementation route.
+		implementationRefs := make([]string, 0, len(targetRefs))
+		for _, ref := range targetRefs {
+			if !strings.HasSuffix(ref, "_test.go") && !strings.HasPrefix(ref, "workorch_validation/") {
+				implementationRefs = append(implementationRefs, ref)
+			}
+		}
+		targetRefs = implementationRefs
+	}
 	output.validationFailureTargetCandidatesInvalid = !targetCandidatesValid
 	diagnostic := &runtimemodel.ValidationFailureDiagnostic{
 		SchemaVersion:                 runtimemodel.ValidationFailureDiagnosticSchemaVersion,
@@ -72,6 +83,12 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 		EvidenceMode:       request.ValidationEvidence.Mode,
 		StdoutPreview:      shellPreview(output.Stdout, 2048),
 		StderrPreview:      shellPreview(output.Stderr, 2048),
+	}
+	if ownerCode == "validation_workspace_behavior_unobserved" && len(request.ValidationCheckAttestations) == 1 {
+		check := request.ValidationCheckAttestations[0]
+		if check.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef && check.SupplementalNativeCheckRef == "" {
+			diagnostic.InputAddition = runtimemodel.RuntimeValidationInputAddition{RequiredCheckRef: check.RequiredCheckRef, OriginalNativeCheckRef: check.NativeCheckRef, NativeCheckRef: shellSupplementCheckRef(check.NativeCheckRef), TargetRef: shellSupplementTargetRef(check.NativeCheckRef)}
+		}
 	}
 	output.ValidationFailureDiagnostic = diagnostic
 	output.RuntimeDiagnostics.ValidationFailureDiagnostic = diagnostic

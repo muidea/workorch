@@ -198,7 +198,7 @@ func runtimeCoverageBinding(value projectioncontract.RuntimeAuditCoverageBinding
 		}
 		for _, attestation := range projected.ValidationCheckAttestations {
 			proof.ValidationCheckAttestations = append(proof.ValidationCheckAttestations, runtimecontract.RuntimeValidationCheckAttestationBinding{
-				RequiredCheckRef: attestation.RequiredCheckRef, ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef,
+				RequiredCheckRef: attestation.RequiredCheckRef, ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
 			})
 		}
 		proofs = append(proofs, proof)

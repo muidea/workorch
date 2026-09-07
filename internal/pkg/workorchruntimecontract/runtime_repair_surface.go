@@ -115,6 +115,7 @@ func StableRuntimeValidationFailureObservationDiagnosticHash(diagnostic Validati
 	writeHashString(h, diagnostic.Class)
 	writeHashString(h, diagnostic.OwnerCode)
 	writeHashString(h, diagnostic.RecommendedEvidenceTargetType)
+	writeRuntimeValidationInputAdditionHash(h, diagnostic.InputAddition)
 	writeHashString(h, diagnostic.Stage)
 	writeHashString(h, diagnostic.Operation)
 	writeHashStrings(h, diagnostic.TargetRefs)

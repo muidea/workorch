@@ -31,6 +31,7 @@ type RuntimeValidationFailureRepairConvergence struct {
 // owner-backed state-change repair surface. Diagnostic prose, stdout/stderr and
 // target guesses never participate in route selection.
 type RuntimeValidationFailureRepairRoute struct {
+	RequireInputAddition       bool `json:",omitempty"`
 	ID                         string
 	TriggerOwnerModuleID       string
 	TriggerOperationKind       string
@@ -164,6 +165,9 @@ func (r RuntimeValidationFailureRepairRoute) Validate() error {
 	if _, ok := RuntimeRepairSurfaceConfirmationProtocolForOperationKinds(r.RepairOwnerModuleID, r.RepairOperationKinds); !ok {
 		return fmt.Errorf("repair owner %q operations do not publish one shared repair-surface confirmation protocol", r.RepairOwnerModuleID)
 	}
+	if r.RequireInputAddition && r.RepairTargetPolicy != RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+		return fmt.Errorf("validation input addition requires create-only prospective repair")
+	}
 	if r.RepairTargetRole == "" || r.RepairDeclarationTargetSelectorRef == "" || r.RepairDeclarationTargetSelectorOwnerRef == "" || r.RepairDeclarationTargetSelectorSubjectRef == "" || r.RepairOperationTargetSelectorRef == "" {
 		return fmt.Errorf("requires an independent repair target role and complete selector identity")
 	}
@@ -279,6 +283,9 @@ func StableRuntimeValidationFailureRepairRouteHash(value RuntimeValidationFailur
 	writeHashString(h, value.RepairDeclarationTargetSelectorSubjectRef)
 	writeHashStrings(h, value.RepairDeclarationTargetSelectorCandidateRefs)
 	writeHashString(h, value.RepairOperationTargetSelectorRef)
+	if value.RequireInputAddition {
+		writeHashString(h, "require-validation-input-addition/v1")
+	}
 	return "runtime-validation-failure-repair-route-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 

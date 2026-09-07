@@ -75,11 +75,12 @@ type runtimeSemanticValidationProofRequirementProjection struct {
 }
 
 type runtimeSemanticNativeCheckAttestationProjection struct {
-	ValidationRecipeID     string `json:"validationRecipeId"`
-	RequiredCheckRef       string `json:"requiredCheckRef"`
-	ObservationProtocolRef string `json:"observationProtocolRef"`
-	NativeCheckRef         string `json:"nativeCheckRef"`
-	TargetRef              string `json:"targetRef,omitempty"`
+	ValidationRecipeID         string `json:"validationRecipeId"`
+	RequiredCheckRef           string `json:"requiredCheckRef"`
+	ObservationProtocolRef     string `json:"observationProtocolRef"`
+	SupplementalNativeCheckRef string `json:"supplementalNativeCheckRef,omitempty"`
+	NativeCheckRef             string `json:"nativeCheckRef"`
+	TargetRef                  string `json:"targetRef,omitempty"`
 }
 
 // runtimeSemanticValidationFailureRepairProjection is the provider-safe C3
@@ -88,24 +89,25 @@ type runtimeSemanticNativeCheckAttestationProjection struct {
 // carries no raw diagnostic, Runtime action, retry, terminal, receipt or owner
 // observation.
 type runtimeSemanticValidationFailureRepairProjection struct {
-	FailedFocusID                                string                                       `json:"failedFocusId"`
-	ConvergenceID                                string                                       `json:"convergenceId"`
-	FailureSignature                             string                                       `json:"failureSignature"`
-	TriggerOwnerModuleID                         string                                       `json:"triggerOwnerModuleId"`
-	TriggerOperationKind                         string                                       `json:"triggerOperationKind"`
-	TriggerDiagnosticClass                       string                                       `json:"triggerDiagnosticClass"`
-	RepairOwnerModuleID                          string                                       `json:"repairOwnerModuleId"`
-	RepairOperationKinds                         []string                                     `json:"repairOperationKinds"`
-	RepairTargetPolicy                           runtimecontract.RuntimeOperationTargetPolicy `json:"repairTargetPolicy"`
-	RepairTargetRole                             string                                       `json:"repairTargetRole"`
-	RepairDeclarationTargetSelectorRef           string                                       `json:"repairDeclarationTargetSelectorRef"`
-	RepairDeclarationTargetSelectorOwnerRef      string                                       `json:"repairDeclarationTargetSelectorOwnerRef"`
-	RepairDeclarationTargetSelectorSubjectRef    string                                       `json:"repairDeclarationTargetSelectorSubjectRef"`
-	RepairDeclarationTargetSelectorCandidateRefs []string                                     `json:"repairDeclarationTargetSelectorCandidateRefs,omitempty"`
-	RepairOperationTargetSelectorRef             string                                       `json:"repairOperationTargetSelectorRef"`
-	RepairConstraintRefs                         []string                                     `json:"repairConstraintRefs,omitempty"`
-	RequireFreshValidation                       bool                                         `json:"requireFreshValidation"`
-	MaxAttempts                                  int                                          `json:"maxAttempts"`
+	InputAddition                                runtimecontract.RuntimeValidationInputAddition `json:"inputAddition,omitzero"`
+	FailedFocusID                                string                                         `json:"failedFocusId"`
+	ConvergenceID                                string                                         `json:"convergenceId"`
+	FailureSignature                             string                                         `json:"failureSignature"`
+	TriggerOwnerModuleID                         string                                         `json:"triggerOwnerModuleId"`
+	TriggerOperationKind                         string                                         `json:"triggerOperationKind"`
+	TriggerDiagnosticClass                       string                                         `json:"triggerDiagnosticClass"`
+	RepairOwnerModuleID                          string                                         `json:"repairOwnerModuleId"`
+	RepairOperationKinds                         []string                                       `json:"repairOperationKinds"`
+	RepairTargetPolicy                           runtimecontract.RuntimeOperationTargetPolicy   `json:"repairTargetPolicy"`
+	RepairTargetRole                             string                                         `json:"repairTargetRole"`
+	RepairDeclarationTargetSelectorRef           string                                         `json:"repairDeclarationTargetSelectorRef"`
+	RepairDeclarationTargetSelectorOwnerRef      string                                         `json:"repairDeclarationTargetSelectorOwnerRef"`
+	RepairDeclarationTargetSelectorSubjectRef    string                                         `json:"repairDeclarationTargetSelectorSubjectRef"`
+	RepairDeclarationTargetSelectorCandidateRefs []string                                       `json:"repairDeclarationTargetSelectorCandidateRefs,omitempty"`
+	RepairOperationTargetSelectorRef             string                                         `json:"repairOperationTargetSelectorRef"`
+	RepairConstraintRefs                         []string                                       `json:"repairConstraintRefs,omitempty"`
+	RequireFreshValidation                       bool                                           `json:"requireFreshValidation"`
+	MaxAttempts                                  int                                            `json:"maxAttempts"`
 }
 
 type runtimeSemanticOwnerFactAcquisitionProjection struct {
@@ -308,6 +310,7 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 			repair := value.ValidationFailureRepair.Normalized()
 			projection.ValidationFailureRepair = &runtimeSemanticValidationFailureRepairProjection{
 				FailedFocusID:                                repair.FailedFocusID,
+				InputAddition:                                repair.InputAddition,
 				ConvergenceID:                                repair.ConvergenceID,
 				FailureSignature:                             repair.FailureSignature,
 				TriggerOwnerModuleID:                         repair.TriggerOwnerModuleID,
@@ -374,7 +377,7 @@ func runtimeSemanticProspectiveTargetConstraintForProvider(value *runtimecontrac
 		for _, attestation := range preparationValue.CheckAttestations {
 			projection.ValidationProofPreparations = append(projection.ValidationProofPreparations, runtimeSemanticNativeCheckAttestationProjection{
 				ValidationRecipeID: preparationValue.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
-				ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef,
+				ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
 				TargetRef: preparationValue.TargetRef,
 			})
 		}
@@ -394,7 +397,7 @@ func runtimeSemanticNativeCheckAttestationsForRequirement(catalogs []runtimecont
 				for _, attestation := range binding.CheckAttestations {
 					ret = append(ret, runtimeSemanticNativeCheckAttestationProjection{
 						ValidationRecipeID: binding.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
-						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef,
+						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
 					})
 				}
 			}
@@ -405,7 +408,7 @@ func runtimeSemanticNativeCheckAttestationsForRequirement(catalogs []runtimecont
 				for _, attestation := range preparation.CheckAttestations {
 					ret = append(ret, runtimeSemanticNativeCheckAttestationProjection{
 						ValidationRecipeID: preparation.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
-						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef,
+						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
 						TargetRef: preparation.TargetRef,
 					})
 				}

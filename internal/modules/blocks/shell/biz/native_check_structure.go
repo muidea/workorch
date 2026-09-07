@@ -87,6 +87,24 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 			invalidSources = append(invalidSources, ref)
 			continue
 		}
+		for _, check := range attestations {
+			if check.SupplementalNativeCheckRef == "" || ref != shellSupplementTargetRef(check.NativeCheckRef) {
+				continue
+			}
+			for _, decl := range file.Decls {
+				switch item := decl.(type) {
+				case *ast.GenDecl:
+					if item.Tok == token.IMPORT {
+						continue
+					}
+				case *ast.FuncDecl:
+					if item.Recv == nil && item.Name.Name == check.SupplementalNativeCheckRef {
+						continue
+					}
+				}
+				return shellNativeCheckInspection{Code: "native_check_supplement_contract_invalid", CheckRef: check.SupplementalNativeCheckRef, TargetRefs: []string{ref}}
+			}
+		}
 		alias := ""
 		for _, item := range file.Imports {
 			importPath, _ := strconv.Unquote(item.Path.Value)
@@ -111,7 +129,7 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 			}
 		}
 	}
-	for _, raw := range runtimecontract.NormalizeRuntimeValidationCheckAttestationBindings(attestations) {
+	for _, raw := range shellFlattenNativeCheckAttestations(attestations) {
 		if !shellNativeObservationProtocolSupported(raw.ObservationProtocolRef) || raw.NativeCheckRef == "" {
 			return shellNativeCheckInspection{Code: "native_check_protocol_unsupported", CheckRef: raw.NativeCheckRef}
 		}
@@ -130,6 +148,9 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 			return shellNativeCheckInspection{Code: "native_check_ambiguous", CheckRef: raw.NativeCheckRef, TargetRefs: normalizeShellStrings(refs)}
 		}
 		entry := matches[0]
+		if raw.ObservationProtocolRef == shellGoSupplementObservationProtocolRef && strings.HasSuffix(raw.NativeCheckRef, "_Behavior") && entry.targetRef != shellSupplementTargetRef(strings.TrimSuffix(raw.NativeCheckRef, "_Behavior")) {
+			return shellNativeCheckInspection{Code: "native_check_supplement_out_of_scope", CheckRef: raw.NativeCheckRef, TargetRefs: []string{entry.targetRef}}
+		}
 		parameters := nativeCheckTestingParameters(entry.decl.Type, entry.testingAlias)
 		if entry.decl.Type.Results != nil || len(parameters) != 1 || parameters[0] == nil || entry.decl.Type.Params.NumFields() != 1 {
 			return shellNativeCheckInspection{Code: "native_check_signature_invalid", CheckRef: raw.NativeCheckRef, TargetRefs: []string{entry.targetRef}}

@@ -20,12 +20,12 @@ const maxShellBehaviorNativeChecks = 32
 // workspace's non-test implementation. This is necessary behavior grounding,
 // not a universal semantic grader or an authorization to edit the assertions.
 func shellNativeObservationProtocolSupported(ref string) bool {
-	return ref == shellGoTestObservationProtocolRef || ref == shellGoBehaviorObservationProtocolRef
+	return ref == shellGoTestObservationProtocolRef || ref == shellGoBehaviorObservationProtocolRef || ref == shellGoSupplementObservationProtocolRef
 }
 
 func shellRequiresWorkspaceBehavior(request RuntimeCommandRequest) bool {
 	for _, attestation := range request.ValidationCheckAttestations {
-		if attestation.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef {
+		if attestation.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef || attestation.ObservationProtocolRef == shellGoSupplementObservationProtocolRef {
 			return true
 		}
 	}
@@ -75,10 +75,15 @@ func prepareShellBehaviorObservation(request RuntimeCommandRequest, args []strin
 	exactRun, jsonOutput, uncached := false, false, false
 	var nativeChecks []string
 	for _, attestation := range request.ValidationCheckAttestations {
-		if attestation.ObservationProtocolRef != shellGoBehaviorObservationProtocolRef {
+		if attestation.ObservationProtocolRef != request.ValidationCheckAttestations[0].ObservationProtocolRef {
 			return nil, "", fmt.Errorf("workspace behavior observation cannot mix native protocols")
 		}
-		nativeChecks = append(nativeChecks, regexp.QuoteMeta(attestation.NativeCheckRef))
+		for _, ref := range attestation.NativeCheckRefs() {
+			nativeChecks = append(nativeChecks, regexp.QuoteMeta(ref))
+		}
+	}
+	if len(nativeChecks) > maxShellBehaviorNativeChecks {
+		return nil, "", fmt.Errorf("native input bound exceeded")
 	}
 	expectedRun := "^(" + strings.Join(normalizeShellStrings(nativeChecks), "|") + ")$"
 	for index, arg := range args {
@@ -201,7 +206,7 @@ func attachShellWorkspaceBehavior(output *RuntimeCommandResult, request RuntimeC
 		return nil
 	}
 	observation := output.ValidationObservation
-	observation.ObservationProtocolRef = shellGoBehaviorObservationProtocolRef
+	observation.ObservationProtocolRef = request.ValidationCheckAttestations[0].ObservationProtocolRef
 	targets, observationErr := shellWorkspaceBehaviorTargets(executionDirectory, coveragePath, request.ValidationScopeTargetRefs)
 	if observationErr == nil {
 		output.workspaceBehaviorTargetRefs = targets
@@ -222,10 +227,18 @@ func attachShellWorkspaceBehavior(output *RuntimeCommandResult, request RuntimeC
 	}
 	output.EvidenceQuality = string(common.EvidenceQualityInconclusive)
 	output.EvidenceReason = "native check did not provide complete observed execution of the workspace implementation; source-text assertions and dependency-only tests are not delivery behavior proof"
+	if observation.ObservationProtocolRef == shellGoSupplementObservationProtocolRef && code == "validation_workspace_behavior_unobserved" {
+		code = "validation_workspace_behavior_supplement_unobserved"
+	}
+	if code == "validation_workspace_behavior_unobserved" {
+		for _, attestation := range request.ValidationCheckAttestations {
+			output.EvidenceReason += fmt.Sprintf("; preserve existing checks; add %s with %s exercising the actual delivery entry for the same immutable requirement", shellSupplementTargetRef(attestation.NativeCheckRef), shellSupplementCheckRef(attestation.NativeCheckRef))
+		}
+	}
 	output.FailureReason, output.FailureCode = code, code
 	output.Stage = code
 	for _, attestation := range request.ValidationCheckAttestations {
-		observation.IncompleteChecks = append(observation.IncompleteChecks, attestation.NativeCheckRef)
+		observation.IncompleteChecks = append(observation.IncompleteChecks, attestation.NativeCheckRefs()...)
 	}
 	*observation = observation.Normalized()
 	return fmt.Errorf("%s", output.EvidenceReason)

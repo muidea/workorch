@@ -185,6 +185,9 @@ load facts
   `validation_failure_repair` semantic fallback。exact `existing_owner_scope` route 缺少 observation 时必须在同一 receipt CAS
   封存 `repair_surface_unavailable`；repair-purpose provider document 返回 Definition gap 时也进入相同 private terminal，不能
   创建 clarification authority。
+  `RequireInputAddition` route 还要求同一 committed receipt 的 typed input addition 匹配原 required/native binding，且
+  binding 尚无 supplement；不满足时同一私有 CAS 有界终止。该 flag 不提供任意输入编辑权限，SM-3 只接受一个 exact
+  prospective input target，owner feasibility 后仅 SM-2 可以 seal；创建结算后仍 reopen 原 CWI 等待 fresh all-of validation。
   原始 observation 必须完整保留，但不得反向选择 action、retry、ticket 或其它 terminal。
   canonical managed-validation rejected receipt 的 `receipt.TargetRefs` 仅保留 execution/entry lineage；
   `OriginalDiagnostic.TargetRefs` 与 `TargetObservation` 必须为空，candidate 只能位于最多八项的

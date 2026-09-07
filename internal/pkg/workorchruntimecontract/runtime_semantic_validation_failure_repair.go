@@ -14,6 +14,7 @@ import (
 // generation to the exact rejected validation fact. It is a pure compiler
 // input, not a state transition or retry decision.
 type RuntimeValidationFailureRepairGenerationInput struct {
+	InputAddition              RuntimeValidationInputAddition `json:",omitzero"`
 	CoverageWorkItemID         common.CoverageWorkItemID
 	FailedFocusID              string
 	FailureSignature           string
@@ -25,6 +26,7 @@ type RuntimeValidationFailureRepairGenerationInput struct {
 }
 
 func (i RuntimeValidationFailureRepairGenerationInput) Normalized() RuntimeValidationFailureRepairGenerationInput {
+	i.InputAddition = i.InputAddition.Normalized()
 	i.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(i.CoverageWorkItemID)))
 	i.FailedFocusID = strings.TrimSpace(i.FailedFocusID)
 	i.FailureSignature = strings.TrimSpace(i.FailureSignature)
@@ -43,6 +45,11 @@ func (i RuntimeValidationFailureRepairGenerationInput) Validate() error {
 		i.TriggerEvidenceTargetType == "" || i.TriggerOwnerDiagnosticCode == "" {
 		return fmt.Errorf("validation failure repair generation requires coverage, failed focus, failure signature and exact typed trigger")
 	}
+	if i.InputAddition != (RuntimeValidationInputAddition{}) {
+		if err := i.InputAddition.Validate(); err != nil {
+			return err
+		}
+	}
 	if !runtimeValidationDiagnosticClassKnown(i.TriggerDiagnosticClass) {
 		return fmt.Errorf("validation failure repair generation has unknown diagnostic class %q", i.TriggerDiagnosticClass)
 	}
@@ -60,6 +67,8 @@ func (i RuntimeValidationFailureRepairGenerationInput) Validate() error {
 // a provider proposal, confirmed by repair-owner feasibility, and sealed only in the
 // resulting CoverageEvidenceBinding.
 type RuntimeSemanticValidationFailureRepair struct {
+	RequireInputAddition       bool                           `json:",omitempty"`
+	InputAddition              RuntimeValidationInputAddition `json:",omitzero"`
 	FailedFocusID              string
 	ConvergenceID              string
 	ConvergenceHash            string
@@ -90,6 +99,7 @@ type RuntimeSemanticValidationFailureRepair struct {
 }
 
 func (r RuntimeSemanticValidationFailureRepair) Normalized() RuntimeSemanticValidationFailureRepair {
+	r.InputAddition = r.InputAddition.Normalized()
 	r.FailedFocusID = strings.TrimSpace(r.FailedFocusID)
 	r.ConvergenceID = strings.TrimSpace(r.ConvergenceID)
 	r.ConvergenceHash = strings.TrimSpace(r.ConvergenceHash)
@@ -131,6 +141,7 @@ func (r RuntimeSemanticValidationFailureRepair) convergence() RuntimeValidationF
 		ID: r.ConvergenceID,
 		Routes: []RuntimeValidationFailureRepairRoute{{
 			ID:                                           r.RouteID,
+			RequireInputAddition:                         r.RequireInputAddition,
 			TriggerOwnerModuleID:                         r.TriggerOwnerModuleID,
 			TriggerOperationKind:                         r.TriggerOperationKind,
 			TriggerDiagnosticClass:                       r.TriggerDiagnosticClass,
@@ -172,6 +183,13 @@ func (r RuntimeSemanticValidationFailureRepair) Validate() error {
 		return err
 	}
 	route := r.route()
+	if r.RequireInputAddition {
+		if err := r.InputAddition.Validate(); err != nil {
+			return err
+		}
+	} else if r.InputAddition != (RuntimeValidationInputAddition{}) {
+		return fmt.Errorf("undeclared validation input addition")
+	}
 	if r.RouteHash != StableRuntimeValidationFailureRepairRouteHash(route) {
 		return fmt.Errorf("runtime semantic validation repair route hash does not match declaration")
 	}
@@ -188,6 +206,10 @@ func StableRuntimeSemanticValidationFailureRepairHash(value RuntimeSemanticValid
 	value = value.Normalized()
 	h := sha256.New()
 	writeHashString(h, "runtime-semantic-validation-failure-repair")
+	writeRuntimeValidationInputAdditionHash(h, value.InputAddition)
+	if value.RequireInputAddition {
+		writeHashString(h, "require-validation-input-addition/v1")
+	}
 	writeHashString(h, value.FailedFocusID)
 	writeHashString(h, value.ConvergenceID)
 	writeHashString(h, value.ConvergenceHash)
@@ -282,6 +304,8 @@ func compileRuntimeSemanticValidationFailureRepairObligation(
 	}
 	repair := RuntimeSemanticValidationFailureRepair{
 		FailedFocusID:                                input.FailedFocusID,
+		RequireInputAddition:                         route.RequireInputAddition,
+		InputAddition:                                input.InputAddition,
 		ConvergenceID:                                convergence.ID,
 		ConvergenceHash:                              StableRuntimeValidationFailureRepairConvergenceHash(convergence),
 		RouteID:                                      route.ID,
@@ -408,6 +432,14 @@ func validateRuntimeSemanticValidationFailureRepair(
 		{field: "target.ownerSelectorRefs", actual: strings.Join(proposal.Target.OwnerSelectorRefs, ","), allowed: []string{sealed.RepairOperationTargetSelectorRef}, valid: len(proposal.Target.OwnerSelectorRefs) == 1 && proposal.Target.OwnerSelectorRefs[0] == sealed.RepairOperationTargetSelectorRef},
 		{field: "target.prospectiveConstraintRefs", actual: strings.Join(proposal.Target.ProspectiveConstraintRefs, ","), allowed: sealed.RepairConstraintRefs, valid: sameStrings(proposal.Target.ProspectiveConstraintRefs, sealed.RepairConstraintRefs)},
 		{field: "declarationRef", actual: proposal.DeclarationRef, allowed: []string{sealed.ConvergenceID}, valid: proposal.DeclarationRef == sealed.ConvergenceID},
+	}
+	if sealed.RequireInputAddition {
+		checks = append(checks, struct {
+			field   string
+			actual  string
+			allowed []string
+			valid   bool
+		}{field: "target.prospectiveTargetRefs", actual: strings.Join(proposal.Target.ProspectiveTargetRefs, ","), allowed: []string{sealed.InputAddition.TargetRef}, valid: len(proposal.Target.ProspectiveTargetRefs) == 1 && proposal.Target.ProspectiveTargetRefs[0] == sealed.InputAddition.TargetRef})
 	}
 	for _, check := range checks {
 		if !check.valid {

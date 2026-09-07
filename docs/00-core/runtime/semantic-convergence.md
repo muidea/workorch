@@ -345,6 +345,12 @@ binding；`RequireFreshValidation` 保证 repair receipt 不授予 terminal vali
 authority，相同 Definition 的普通/repair generation 必须保持 C0～C2 与 stable prefix 完全一致。software-dev Profile 将该
 owner specialization 为 File 只是 Profile 事实，不是 Core reducer 分支。
 
+当 exact prospective route 声明 `RequireInputAddition` 时，generation input 只能来自已提交 owner receipt 中与原 binding
+匹配的 `InputAddition`，不能从 diagnostic 文本推断 target/check。manifest/hash 与 provider C3 保留该 bounded typed
+合同，schema/document admission 将 `prospectiveTargetRefs` 限定为它的一个 exact target；额外/替代 target 在 owner probe
+前拒绝。原 native check 和 Definition 不可替换；repair receipt 仍只触发 SM-2 内部 fresh-validation reopen。
+新 binding 只能来自重新观测后的 owner applicability，不得把旧 observation 解释为已通过新增检查。
+
 每次 semantic owner-private event 完成 CAS 后，调用方必须仅从返回的 current aggregate 重新读取 phase、generation、
 manifest、accepted order 与 request identity。若该 event 已退休 generation 或清空 manifest，本轮 semantic transaction
 立即返回 aggregate 交给 owner drive 重新分派；不得继续使用 CAS 前的 manifest/hash/request 假设，也不得依赖 panic 或

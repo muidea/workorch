@@ -14,6 +14,13 @@ import (
 
 const RuntimeValidationFailureDetailLimit = 32
 
+func writeRuntimeSupplementalNativeCheckHash(h hash.Hash, binding RuntimeValidationCheckAttestationBinding) {
+	if ref := binding.Normalized().SupplementalNativeCheckRef; ref != "" {
+		writeHashString(h, "conjunctive-native-input/v1")
+		writeHashString(h, ref)
+	}
+}
+
 // RuntimeValidationCheckFailure is a capability-owner observation, not a repair
 // authorization. DiagnosticHash addresses the assertion text without exporting
 // logs, expected/actual secrets or tool-private messages. TargetRef is a bounded

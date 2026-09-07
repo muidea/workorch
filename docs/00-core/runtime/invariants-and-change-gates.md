@@ -98,7 +98,8 @@ sealed replay authority时，再次physical owner call才必须先由独立SM-4 
 不能通过省略grant绕过治理。
 
 validation recipe identity与check identity必须分离。每个 Definition required check 必须由 capability owner 的 exact
-applicability binding 映射到一个 owner-opaque observation protocol/native check，并随 sealed execution authority 哈希封存；
+applicability binding 映射到一个 owner-opaque observation protocol/native check（可附带不可替代原检查的 conjunctive
+`SupplementalNativeCheckRef`），并随 sealed execution authority 哈希封存；
 只有 matching typed attestation 报告 passed 且没有 failed/skipped 冲突时才能贡献 credit。exit 0、recipe ID、raw stdout
 marker、非空 PassedChecks 或冲突 outcome 均不能替代 matching attestation。
 

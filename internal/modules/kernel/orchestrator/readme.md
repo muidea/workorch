@@ -105,6 +105,12 @@ capability resource state。
   route 字段与 sealed validation scope，并在 receipt admission/fresh-load 从 immutable owner receipt 重算。该 scope 只能来自
   matching operation execution 的 `AdmissibilitySnapshotID + AcquisitionBinding` 所绑定、已随 dispatch 封存的完整 Shell-owner
   catalog `TargetRefs`；per-operation target authorization 只裁决 validation entry，不能代替 diagnostic scope。
+- 验证输入补充仍由同一 SM-2 receipt/reopen/seal 私有事件处理：exact prospective Profile route 的
+  `RequireInputAddition` 要求 owner typed `InputAddition` 精确匹配 completed dispatch 的原 required/native binding，且没有
+  existing supplement。缺失/错配同一 CAS 终止，不回退任意文件修复。SM-3 schema/proposal 只允许一个 exact new input；
+  创建只结算中间 state-change，必须 fresh owner catalog → 新 binding → 原/补充检查 all-of 才可获 validation credit。
+  SM-1 不变；SM-4 重启/投影不能推断该合同。`validation_input_addition_test.go` 覆盖 duplicate/stale/restart、无效合同、
+  exact target seal 与创建零 credit；`default_native_validation_integration_test.go` 校准真实 File/Shell receipt 和 matcher。
 - candidate proposal 持久化后，SM-3 必须按 manifest-declared `CandidateConstraints` 的 kind 获取 exact owner fact。
   constraints 是 operation-level 与 selected variant-level 的合并合同；无 variant 的 operation 同样受约束，不能创建虚拟 variant。
   已声明 dynamic constraint 的 operation 在缺少 owner admissibility 时禁止走 static capability seal lane。

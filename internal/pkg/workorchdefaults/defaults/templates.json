@@ -1127,6 +1127,27 @@
                     "repairDeclarationTargetSelectorSubjectRef": "dodItem_repair",
                     "repairDeclarationTargetSelectorCandidateRefs": [],
                     "repairOperationTargetSelectorRef": "workspace-relative-existing-file-target"
+                  },
+                  {
+                    "id": "missing-behavior-to-new-validation-input",
+                    "triggerOwnerModuleId": "blocks/shell",
+                    "triggerOperationKind": "validation/managed_session",
+                    "triggerDiagnosticClass": "validation_output_inconclusive",
+                    "triggerEvidenceTargetType": "validation_output",
+                    "triggerOwnerDiagnosticCode": "validation_workspace_behavior_unobserved",
+                    "repairEvidenceKind": "state_change",
+                    "repairOwnerModuleId": "blocks/file",
+                    "repairOperationKinds": [
+                      "file/write"
+                    ],
+                    "repairTargetPolicy": "prospective_owner_target",
+                    "repairTargetRole": "validation_input_supplement",
+                    "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
+                    "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+                    "repairDeclarationTargetSelectorSubjectRef": "dodItem_validation_input",
+                    "repairDeclarationTargetSelectorCandidateRefs": [],
+                    "repairOperationTargetSelectorRef": "workspace-relative-new-file-target",
+                    "requireInputAddition": true
                   }
                 ],
                 "requireFreshValidation": true,

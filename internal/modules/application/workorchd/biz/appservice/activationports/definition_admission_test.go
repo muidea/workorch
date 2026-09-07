@@ -82,8 +82,12 @@ func assertBuiltinSoftwareDevCandidateAndBootstrap(
 			}
 		}
 	}
-	if parsedRepair == nil || len(parsedRepair.Routes) != 3 || !parsedRepair.RequireFreshValidation || parsedRepair.MaxAttempts != 2 {
+	if parsedRepair == nil || len(parsedRepair.Routes) != 4 || !parsedRepair.RequireFreshValidation || parsedRepair.MaxAttempts != 2 {
 		t.Fatalf("builtin software-dev repair convergence was not parsed into the admission candidate: %+v", parsedRepair)
+	}
+	addition, found := parsedRepair.RouteForTrigger(runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession, runtimecontract.ValidationDiagnosticOutputInconclusive, runtimecontract.ValidationEvidenceTargetValidationOutput, "validation_workspace_behavior_unobserved")
+	if !found || !addition.RequireInputAddition || addition.RepairTargetPolicy != runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget || len(addition.RepairOperationKinds) != 1 || addition.RepairOperationKinds[0] != runtimecontract.StepKindFileWrite {
+		t.Fatal("input addition route lost during admission")
 	}
 	expectedRoutes := []struct {
 		class      string

@@ -89,6 +89,14 @@ current mutable facts重选 owner。repair receipts 全部接受后，target-fre
 `persisted_pending` successor。software-dev Profile 的 exact route 可将 owner specialization 为 File；任何具体
 owner、diagnostic 或 repair vocabulary 都不是 Core repair 常量。
 
+验证输入补充复用上述四机合同，不创建新 owner/状态机。Profile route 的 `RequireInputAddition` 只允许
+`prospective_owner_target`；SM-2 在 rejected receipt 的私有事件中验证 typed `InputAddition` 的 required/original native
+check 与 completed dispatch binding 精确匹配，且原 binding 尚无补充检查。缺失或不匹配与无可用 route 同样有界终止。
+SM-3 的 semantic manifest/schema 只允许该 exact new target；resource owner 返回 feasibility，SM-2 内部事件才可 seal。
+创建 receipt 不授予 validation credit；fresh owner catalog/binding 的 `SupplementalNativeCheckRef` 与原检查是 all-of。
+新增字段进入诊断、manifest、binding、proof lineage 和 reconciliation identity；空扩展保留旧 JSON/hash。
+SM-1 生命周期不变，SM-4 只重放 aggregate 与投递只读事实；模板/Soul 新配置仍仅进入新 Start/Restart 的快照，不改旧归档。
+
 SM-3 candidate admission 与拒绝重放窗口必须复用同一 completed repair/confirmation/receipt/current-binding 反向证明：
 target-free handoff 的旧 repair targets 仅保留因果含义，新验证入口由普通 Definition manifest 授权，允许与修复文件不同。
 final repair evidence revision 之前的失败验证不能阻止在已改变状态上重跑同一 check；这不授予 repair CWI credit，

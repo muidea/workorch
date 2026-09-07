@@ -1419,6 +1419,7 @@ export type RuntimeAuditValidationCheckAttestation = {
   requiredCheckRef?: string;
   observationProtocolRef?: string;
   nativeCheckRef?: string;
+  supplementalNativeCheckRef?: string;
 };
 
 // A bounded, read-only view of the SM-3 sealed operation authorization. It

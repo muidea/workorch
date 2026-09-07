@@ -165,6 +165,9 @@ Shell-owner surface 为当前 ready recipe 返回的 exact per-CWI applicability
 union 或成功退出均不构成该关系。该 owner binding 还必须逐 check 封存 opaque observation protocol/native check mapping，
 并进入 dispatch execution seal；只有 owner receipt 的 matching typed attestation 可以满足 required check，raw process
 marker 只能作为诊断。
+可选 `SupplementalNativeCheckRef` 是同一 required check 的第二个 conjunctive native input，不能替代原检查；两者
+必须在同一 sealed protocol 下独立 executed/passed，任一 skipped/failed/incomplete 均拒绝。该字段必须进入 owner
+catalog、binding、dispatch、proof lineage 与 reconciliation hash，不能跨 CWI 复用；缺省字段保持旧协议身份。
 若 exact native check 或 recipe input 尚不存在，capability owner 可为该 requirement 发布独立
 `ProofRequirementPreparation`。它只允许经 Profile 已声明的 owner-fact acquisition closure 进入 prospective all-of
 transaction；candidate 可见 exact target 与 opaque native identity，但不得把它当作 proof。receiving owner 完成后必须

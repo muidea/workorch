@@ -44,7 +44,7 @@ func runtimeValidationFailureRepairRouteForTest(id, diagnosticClass, targetType 
 	}
 }
 
-func runtimeValidationFailureRepairAggregateForTest(t *testing.T, convergence runtimecontract.RuntimeValidationFailureRepairConvergence) RuntimeAggregate {
+func runtimeValidationFailureRepairAggregateForTest(t *testing.T, convergence runtimecontract.RuntimeValidationFailureRepairConvergence, prepare ...func(*RuntimeAggregate)) RuntimeAggregate {
 	t.Helper()
 	// Install the repair policy and owner catalogs before the baseline SM-2
 	// generation is sealed. Rewriting immutable Definition inputs after the
@@ -70,6 +70,9 @@ func runtimeValidationFailureRepairAggregateForTest(t *testing.T, convergence ru
 		for _, route := range convergence.Routes {
 			aggregate.Facts.Capabilities.StateChangeKinds = append(aggregate.Facts.Capabilities.StateChangeKinds, route.RepairOperationKinds...)
 			aggregate.Definition.CapabilityContract = append(aggregate.Definition.CapabilityContract, route.RepairOperationKinds...)
+		}
+		for _, hook := range prepare {
+			hook(aggregate)
 		}
 	})
 }

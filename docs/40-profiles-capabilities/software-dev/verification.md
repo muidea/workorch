@@ -75,10 +75,19 @@ and converges through the same neutral Runtime owner model. It must not make leg
   while managed Go implementation diagnostics may report only actual `*.go:line[:column]` locations inside the fresh File manifest
   scope. Dependency metadata diagnostics carry zero implementation candidates, have no built-in route and cannot enter the
   prospective implementation repair generation;
-- a built-in matching typed validation rejection must include a structured manifest-scoped candidate target. File confirms that
+- a built-in implementation-repair rejection must include a structured manifest-scoped candidate target. File confirms that
   existing regular-file surface before SM-2 seals repair authority; a missing observation reaches `repair_surface_unavailable`
   without semantic target generation. Confirmed directive operation kinds are exactly the route's `file/edit`; repair receipts
   grant no DoD credit and always require fresh validation;
+- the separate missing-behavior route requires exact typed input identities and one create-only File target, preserves all
+  original checks and grants zero validation credit for creation. Fresh Shell v3 requires original + supplement all-of; no
+  supplemental check, a failed/skipped/incomplete original or supplement, fake/test-only behavior, or old-v2 observation may
+  close the new proof. An ineffective supplement or compilation failure in its input cannot open repeated input additions or
+  implementation edits of assertions. `TestValidationInputAdditionOwnerFactIsBoundedAndRestartStable` and
+  `TestValidationInputSupplementRequiresOriginalAndDeliveryBehavior` cover owner-state and real Go negative cases;
+- `TestBuiltinSoftwareDevAllManagedCWIsCloseThroughTypedNativeProofPipeline/create_only_conjunctive_input` checks the actual
+  default Profile tuple, typed Shell diagnostic, File-created supplemental input, fresh Shell observation and SM-2 matcher.
+  It is fixed-fixture protocol calibration, not evidence that a deployed user Goal has completed;
 - an exact diagnostic with no exact route atomically reaches `validation_failure_repair_route_unavailable` in the rejected-receipt
   CAS, with zero semantic/candidate provider call, capability effect, governance ticket or delayed recovery. Duplicate/restart is
   idempotent, stale catalog/failure lineage cannot seal, and Profile/repair budgets terminate rather than loop;

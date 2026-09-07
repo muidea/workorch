@@ -32,6 +32,45 @@ var previousExecutionSoulMD string
 //go:embed testdata/software-dev-validation-0be3a5f3.md
 var previousValidationSoulMD string
 
+//go:embed testdata/software-dev-execution-0317a3f6.md
+var previousInputExecutionSoulMD string
+
+//go:embed testdata/software-dev-validation-0317a3f6.md
+var previousInputValidationSoulMD string
+
+func TestPreviousValidationInputSoulsReviewedFingerprints(t *testing.T) {
+	defaults, err := workorchdefaults.BuiltinSoulDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, raw := range defaults {
+		var md string
+		switch raw.ID {
+		case "soul-software-dev-execution":
+			md = previousInputExecutionSoulMD
+		case "soul-software-dev-validation":
+			md = previousInputValidationSoulMD
+		default:
+			continue
+		}
+		cmd := soulDefaultCreateCommand(raw)
+		cmd.SoulMD = md
+		value, err := normalizedSoulFromCommand(cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash := soulmodel.StableSoulContentHash(value)
+		if got := workorchdefaults.KnownBuiltinContentRevision("soul", raw.ID, hash); got != "0317a3f6" {
+			t.Fatalf("previous Soul not reviewed: %s %s %s", raw.ID, hash, got)
+		}
+		checked++
+	}
+	if checked != 2 {
+		t.Fatalf("checked previous Souls = %d", checked)
+	}
+}
+
 func historicalExecutionSoul(t *testing.T) soulevents.CreateSoulCommand {
 	t.Helper()
 	defaults, err := workorchdefaults.BuiltinSoulDefaults()

@@ -461,6 +461,7 @@ func runtimeValidationFailureRepairRoutes(value any) []runtimecontract.RuntimeVa
 		}
 		ret = append(ret, runtimecontract.RuntimeValidationFailureRepairRoute{
 			ID:                                           runtimeString(raw["id"]),
+			RequireInputAddition:                         runtimeBool(raw["requireInputAddition"]),
 			TriggerOwnerModuleID:                         runtimeString(raw["triggerOwnerModuleId"]),
 			TriggerOperationKind:                         runtimeString(raw["triggerOperationKind"]),
 			TriggerDiagnosticClass:                       runtimeString(raw["triggerDiagnosticClass"]),
@@ -548,6 +549,10 @@ func runtimeValidationFailureRepairRouteHasExactShape(raw map[string]any) bool {
 			"repairEvidenceKind", "repairOwnerModuleId", "repairTargetPolicy", "repairTargetRole",
 			"repairDeclarationTargetSelectorRef", "repairDeclarationTargetSelectorOwnerRef", "repairDeclarationTargetSelectorSubjectRef", "repairOperationTargetSelectorRef":
 			if _, ok := value.(string); !ok {
+				return false
+			}
+		case "requireInputAddition":
+			if _, ok := value.(bool); !ok {
 				return false
 			}
 		case "repairOperationKinds", "repairDeclarationTargetSelectorCandidateRefs":
