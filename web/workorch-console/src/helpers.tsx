@@ -8,6 +8,8 @@ import { stateLabel as canonicalStateLabel } from './utils/format';
 import { stateTag as canonicalStateTag } from './utils/ui';
 import { presentWorkspaceRunCommand } from './workspaceRunCommand';
 import { validationRepairPolicyLabel } from './runtimeProgressPresentation';
+import { originalDiagnosticLabel } from './runtimeProgressPresentation';
+import type { RuntimeAuditCandidateAttempt } from './types';
 import { canonicalActiveRunIsGovernanceBlocked, canonicalDefinitionClarification, workspaceBoardExecutionIntentAllowed, workspaceDefinitionClarification } from './governanceMutationTarget';
 
 export { progressKindLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels, stateLabels } from './utils/constants';
@@ -483,9 +485,31 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
             { key: 'failureTargets', label: 'Targets', children: compactTags(audit.failure.targetRefs ?? [], 4) },
             { key: 'failureMessage', label: 'Message', children: audit.failure.message || '-' },
             { key: 'failureOwner', label: 'Producer', children: audit.failure.originalDiagnostic?.ownerModuleId || '-' },
+            { key: 'failureOriginalCode', label: 'Original Code', children: audit.failure.originalDiagnostic?.originalCode || '-' },
+            { key: 'failureOperation', label: 'Operation', children: audit.failure.originalDiagnostic?.operationId || '-' },
             { key: 'failureOriginal', label: 'Original Diagnostic', children: audit.failure.originalDiagnostic?.originalMessage || audit.failure.originalDiagnostic?.omittedReason || '-' },
             { key: 'failureRevision', label: 'Expected / Observed Revision', children: [audit.failure.originalDiagnostic?.expectedRevision, audit.failure.originalDiagnostic?.observedRevision].filter(Boolean).join(' / ') || '-' }
           ]}
+        />
+      ) : null}
+      {audit?.candidateAttempts?.length ? (
+        <ProTable<RuntimeAuditCandidateAttempt>
+          rowKey={(item) => `${item.authorityContractId}-${item.attempt ?? 0}`}
+          title={() => 'Candidate Attempts (diagnostic only)'}
+          search={false}
+          options={false}
+          pagination={{ pageSize: 5 }}
+          size="small"
+          columns={[
+            { title: 'Attempt', dataIndex: 'attempt', render: (_, item) => item.attempt ?? 0 },
+            { title: 'State', dataIndex: 'state', render: (_, item) => stateTag(item.state) },
+            { title: 'Owner Outcome', dataIndex: 'ownerFeasibilityOutcome', ellipsis: true },
+            { title: 'Failure Code', dataIndex: 'failureCode', ellipsis: true },
+            { title: 'Owner / Original Code', render: (_, item) => originalDiagnosticLabel(item.originalDiagnostic) },
+            { title: 'Target', render: (_, item) => compactTags(item.originalDiagnostic?.targetRefs ?? [], 4) },
+            { title: 'Diagnostic', ellipsis: true, render: (_, item) => item.originalDiagnostic?.originalMessage || '-' }
+          ]}
+          dataSource={audit.candidateAttempts}
         />
       ) : null}
       {observations.length ? (

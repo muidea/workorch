@@ -376,6 +376,14 @@ func runtimeAuditCandidateAttempts(values []runtimecontract.RuntimeCandidateAtte
 			item.FailureCode = value.Failure.Code
 			item.FailureSignature = value.Failure.Signature
 		}
+		if observation := value.OwnerFeasibility; observation != nil {
+			item.OwnerFeasibilityOutcome = string(observation.Outcome)
+			item.OwnerCatalogSnapshotID = observation.OwnerPolicy.CatalogSnapshotID
+			if observation.Feedback != nil {
+				item.OwnerFeasibilityCategory = string(observation.Feedback.StableCategory)
+				item.OriginalDiagnostic = observation.Feedback.OriginalDiagnostic.CloneOriginal()
+			}
+		}
 		ret = append(ret, item)
 	}
 	sort.SliceStable(ret, func(i, j int) bool {

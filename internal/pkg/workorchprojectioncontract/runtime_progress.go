@@ -5,6 +5,7 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 // RuntimeProgress is a read-only product projection of persisted Runtime
 // progress. Consumers must not reverse-drive Runtime authority from it.
 type RuntimeProgress struct {
+	OriginalDiagnostic              *runtimecontract.RuntimeOriginalDiagnostic  `json:"originalDiagnostic,omitempty"`
 	LatestAcceptedEvidenceAt        string                                      `json:"latestAcceptedEvidenceAt,omitempty"`
 	LatestDurableEffectAt           string                                      `json:"latestDurableEffectAt,omitempty"`
 	DurableEffectCount              int                                         `json:"durableEffectCount"`
@@ -66,6 +67,7 @@ func CloneRuntimeProgress(item *RuntimeProgress) *RuntimeProgress {
 		return nil
 	}
 	ret := *item
+	ret.OriginalDiagnostic = item.OriginalDiagnostic.CloneOriginal()
 	ret.MissingEvidenceKinds = append([]string(nil), item.MissingEvidenceKinds...)
 	ret.RepairHintCodes = append([]string(nil), item.RepairHintCodes...)
 	if item.ExecutionBudget != nil {

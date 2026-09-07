@@ -3147,7 +3147,13 @@ func TestRuntimeCandidateAuxiliarySingletonWireIsMinimalWithJSONSchemaResponseOn
 			TargetRefs:                append([]string(nil), facts.Focus.TargetRefs...),
 		},
 	}
-	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFacts{})
+	catalog := runtimecontract.RuntimeOperationAdmissibility{
+		PrerequisiteID: "file-catalog", OwnerModuleID: runtimecontract.RuntimeModuleFile,
+		OperationKinds: []string{runtimecontract.RuntimeBlockKindPatchApply}, TargetRefs: []string{"main.go"}, ObservedRevision: "tree-1",
+		TargetParameterBindings: []runtimecontract.RuntimeTargetParameterBinding{{Kind: runtimecontract.RuntimeBlockKindPatchApply, Name: "baseHash", Values: []runtimecontract.RuntimeTargetParameterValue{{TargetRef: "main.go", Value: "main-preimage"}}}},
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
+	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(decision, runtimecontract.RuntimeCandidateManifestOwnerFacts{OperationAdmissibilities: []runtimecontract.RuntimeOperationAdmissibility{catalog}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3156,10 +3162,13 @@ func TestRuntimeCandidateAuxiliarySingletonWireIsMinimalWithJSONSchemaResponseOn
 	if !found || rule.VariantID != "text_replace" ||
 		!slices.Equal(rule.ProviderFields, []string{"kind", "parameters"}) ||
 		len(rule.DerivedBindingRefs) != 1 || !slices.Equal(rule.DerivedTargetRefs, []string{"main.go"}) ||
-		!slices.Contains(rule.DerivedParameterNames(), "patchType") {
+		!slices.Contains(rule.DerivedParameterNames(), "patchType") || !slices.Contains(rule.DerivedParameterNames(), "baseHash") || slices.Contains(rule.ProviderParameterNames, "baseHash") {
 		t.Fatalf("minimal auxiliary wire rule = %+v found=%t", rule, found)
 	}
 	output := runtimeCandidateOutputContractForManifest(manifest, wire)
+	if !strings.Contains(output.StructuredOutputInstruction, "parameters[name=baseHash]") || strings.Contains(output.CanonicalWireLayout, "baseHash") {
+		t.Fatal("instruction/layout did not agree on the locally derived precondition")
+	}
 	if output.CanonicalWireLayout == "" ||
 		!strings.Contains(output.CanonicalWireLayout, `"kind":"patch/apply"`) ||
 		!strings.Contains(output.CanonicalWireLayout, `"parameters":[`) ||
@@ -3179,6 +3188,9 @@ func TestRuntimeCandidateAuxiliarySingletonWireIsMinimalWithJSONSchemaResponseOn
 	if strings.Contains(schema, `"const":"patchType"`) || strings.Contains(schema, `"const":"text_replace"`) {
 		t.Fatalf("auxiliary operation schema exposed locally-derived variant authority: %s", schema)
 	}
+	if strings.Contains(schema, `"const":"baseHash"`) {
+		t.Fatal("schema exposed a target-bound owner parameter")
+	}
 	payload := []byte(`{"operations":[{"kind":"patch/apply","parameters":[{"name":"oldText","string":"before"},{"name":"newText","string":"after"}]}]}`)
 	request := llmmodels.ProviderRequest{Schema: schema}
 	for _, enabled := range []bool{false, true} {
@@ -3194,14 +3206,16 @@ func TestRuntimeCandidateAuxiliarySingletonWireIsMinimalWithJSONSchemaResponseOn
 			t.Fatalf("JSONSchemaResponse=%t minimal auxiliary candidate=%+v err=%v", enabled, candidate, decodeErr)
 		}
 		operation := candidate.StateChange.Operations[0].Operation
-		variantDerived := false
+		variantDerived, preimageDerived := false, false
 		for _, parameter := range operation.Parameters {
 			if parameter.Name == "patchType" && parameter.String != nil && *parameter.String == "text_replace" {
 				variantDerived = true
-				break
+			}
+			if parameter.Name == "baseHash" && parameter.String != nil && *parameter.String == "main-preimage" {
+				preimageDerived = true
 			}
 		}
-		if operation.Kind != runtimecontract.RuntimeBlockKindPatchApply || !variantDerived ||
+		if operation.Kind != runtimecontract.RuntimeBlockKindPatchApply || !variantDerived || !preimageDerived ||
 			!slices.Equal(operation.BindingRefs, rule.DerivedBindingRefs) ||
 			!slices.Equal(operation.TargetRefs, rule.DerivedTargetRefs) {
 			t.Fatalf("JSONSchemaResponse=%t locally compiled auxiliary operation=%+v", enabled, operation)

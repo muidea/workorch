@@ -627,6 +627,9 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 		t.Fatal(err)
 	}
 	invalidated := ownerEvent.Aggregate
+	if invalidated.Facts.Failure == nil || !reflect.DeepEqual(invalidated.Facts.Failure.OriginalDiagnostic, expectedDiagnostic) {
+		t.Fatal("owner invalidation lost its original diagnostic")
+	}
 	if invalidated.Decision.State != runtimecontract.ConvergenceStateNeedStateChange || invalidated.Decision.AuthoritySnapshot.ID == beforeAuthority ||
 		len(invalidated.CandidateAttempts) != 1 || invalidated.CandidateAttempts[0].State != runtimecontract.RuntimeCandidateAttemptStateInvalidated ||
 		invalidated.CandidateAttempts[0].OwnerFeasibility == nil || invalidated.CandidateAttempts[0].Failure != nil ||
@@ -692,6 +695,9 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 		t.Fatal(err)
 	}
 	fenced := terminalEvent.Aggregate
+	if fenced.Facts.Failure == nil || !reflect.DeepEqual(fenced.Facts.Failure.OriginalDiagnostic, expectedDiagnostic) {
+		t.Fatal("unchanged-authority guard replaced the root cause with generic no-progress")
+	}
 	if repository.saves != savesBeforeFence+1 || fenced.StateRevision != revisionBeforeFence+1 {
 		t.Fatalf("authority failure transition did not use exactly one independent CAS: revision=%d saves=%d", fenced.StateRevision, repository.saves)
 	}
@@ -714,6 +720,9 @@ func TestOwnerInfeasibilityInvalidatesAttemptAndFormsNewAuthorityWithoutCorrecti
 		reloadedAfterFence.Decision.Terminal.Code != "equivalent_authority_no_progress" || repository.saves != restartSaves ||
 		len(reloadedAfterFence.CandidateRequestSessions) != requestSessionsBeforeFence {
 		t.Fatalf("equivalent authority fence changed across restart: %+v saves=%d", reloadedAfterFence, repository.saves)
+	}
+	if !reflect.DeepEqual(reloadedAfterFence.Facts.Failure.OriginalDiagnostic, expectedDiagnostic) {
+		t.Fatal("terminal root cause drifted across restart")
 	}
 	saves := repository.saves
 	duplicateEvent, err := restarted.ApplyInternalEvent(ctx, RuntimeInternalEvent{

@@ -48,6 +48,9 @@ func (a *RuntimeAdapter) AcquireTargetSnapshot(ctx context.Context, workspaceDir
 type workspaceManifestObservation struct {
 	manifest   runtimemodel.WorkspaceManifest
 	entryCount int
+	// Acquired in the same scan as manifest.Revision; never re-read to bind a
+	// candidate precondition from a different filesystem observation.
+	targetPreimages []runtimemodel.RuntimeTargetParameterValue
 }
 
 func (a *RuntimeAdapter) AcquireWorkspaceManifest(workspaceDirectory string) (runtimemodel.WorkspaceManifest, error) {
@@ -74,6 +77,7 @@ func (a *RuntimeAdapter) acquireWorkspaceManifestObservation(workspaceDirectory 
 		return workspaceManifestObservation{}, fmt.Errorf("%w: workspace manifest exceeds bounded file listing", common.ErrInvalidArgument)
 	}
 	targetRefs := make([]string, 0, len(result.Entries))
+	var targetPreimages []runtimemodel.RuntimeTargetParameterValue
 	h := sha256.New()
 	for _, entry := range result.Entries {
 		ref := strings.TrimSpace(entry.Path)
@@ -89,6 +93,7 @@ func (a *RuntimeAdapter) acquireWorkspaceManifestObservation(workspaceDirectory 
 		switch kind {
 		case "file":
 			targetRefs = append(targetRefs, ref)
+			targetPreimages = append(targetPreimages, runtimemodel.RuntimeTargetParameterValue{TargetRef: ref, Value: entry.ContentHash})
 			_, _ = fmt.Fprintf(h, "%s|%d|%s;", entry.ContentHash, entry.Size, entry.ModifiedAt)
 		case "symlink":
 			// ListFiles resolves safe internal aliases to their current target ref.
@@ -104,6 +109,7 @@ func (a *RuntimeAdapter) acquireWorkspaceManifestObservation(workspaceDirectory 
 			Revision:   hex.EncodeToString(h.Sum(nil)),
 			TargetRefs: targetRefs,
 		},
-		entryCount: len(result.Entries),
+		entryCount:      len(result.Entries),
+		targetPreimages: targetPreimages,
 	}, nil
 }

@@ -189,16 +189,20 @@ type RuntimeAuditAuthority struct {
 }
 
 type RuntimeAuditCandidateAttempt struct {
-	AuthorityContractID string `json:"authorityContractId,omitempty"`
-	AuthoritySnapshotID string `json:"authoritySnapshotId,omitempty"`
-	State               string `json:"state,omitempty"`
-	Attempt             int    `json:"attempt,omitempty"`
-	StablePrefixHash    string `json:"stablePrefixHash,omitempty"`
-	ProposalPersisted   bool   `json:"proposalPersisted,omitempty"`
-	FeasibilityCount    int    `json:"feasibilityCount,omitempty"`
-	FailureClass        string `json:"failureClass,omitempty"`
-	FailureCode         string `json:"failureCode,omitempty"`
-	FailureSignature    string `json:"failureSignature,omitempty"`
+	OwnerFeasibilityOutcome  string                                     `json:"ownerFeasibilityOutcome,omitempty"`
+	OwnerFeasibilityCategory string                                     `json:"ownerFeasibilityCategory,omitempty"`
+	OwnerCatalogSnapshotID   string                                     `json:"ownerCatalogSnapshotId,omitempty"`
+	OriginalDiagnostic       *runtimecontract.RuntimeOriginalDiagnostic `json:"originalDiagnostic,omitempty"`
+	AuthorityContractID      string                                     `json:"authorityContractId,omitempty"`
+	AuthoritySnapshotID      string                                     `json:"authoritySnapshotId,omitempty"`
+	State                    string                                     `json:"state,omitempty"`
+	Attempt                  int                                        `json:"attempt,omitempty"`
+	StablePrefixHash         string                                     `json:"stablePrefixHash,omitempty"`
+	ProposalPersisted        bool                                       `json:"proposalPersisted,omitempty"`
+	FeasibilityCount         int                                        `json:"feasibilityCount,omitempty"`
+	FailureClass             string                                     `json:"failureClass,omitempty"`
+	FailureCode              string                                     `json:"failureCode,omitempty"`
+	FailureSignature         string                                     `json:"failureSignature,omitempty"`
 }
 
 type RuntimeAuditTerminal struct {
@@ -383,6 +387,9 @@ func CloneRuntimeAudit(item *RuntimeAudit) *RuntimeAudit {
 	ret.RejectedEvidence = CloneRuntimeAuditEvidence(item.RejectedEvidence)
 	ret.Grounding = cloneRuntimeAuditGrounding(item.Grounding)
 	ret.CandidateAttempts = append([]RuntimeAuditCandidateAttempt(nil), item.CandidateAttempts...)
+	for i := range ret.CandidateAttempts {
+		ret.CandidateAttempts[i].OriginalDiagnostic = item.CandidateAttempts[i].OriginalDiagnostic.CloneOriginal()
+	}
 	ret.Dispatches = cloneRuntimeAuditDispatches(item.Dispatches)
 	ret.OperationReceipts = cloneRuntimeAuditOperationReceipts(item.OperationReceipts)
 	ret.Repair.ActiveGapCoverageWorkItemIDs = append([]string(nil), item.Repair.ActiveGapCoverageWorkItemIDs...)

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -169,6 +170,9 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 	if initialized.StateRevision != 1 || initialized.Decision.State != runtimecontract.ConvergenceStateNeedPrerequisite {
 		t.Fatalf("initialized aggregate = %+v", initialized)
 	}
+	if initialized.ResultFeedbackVersion != runtimecontract.RuntimeResultFeedbackVersionCurrent {
+		t.Fatalf("new Run did not seal the current feedback renderer: %d", initialized.ResultFeedbackVersion)
+	}
 	if got, want := initialized.Facts.Activation.ExecutionContract.OperationContractRevision, runtimecontract.RuntimeOperationContractRevision(); got != want {
 		t.Fatalf("operation contract revision = %q, want %q", got, want)
 	}
@@ -185,6 +189,43 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 	}
 	if restarted.Decision.AuthoritySnapshot.ID != initialized.Decision.AuthoritySnapshot.ID || restarted.Decision.AuthoritySnapshot.Attempt != 0 {
 		t.Fatalf("restart changed authority: before=%+v after=%+v", initialized.Decision.AuthoritySnapshot, restarted.Decision.AuthoritySnapshot)
+	}
+	if restarted.ResultFeedbackVersion != initialized.ResultFeedbackVersion {
+		t.Fatal("restart changed the sealed feedback renderer")
+	}
+}
+
+func TestRuntimeControllerInitializePreservesLegacyFeedbackVersionWithoutWrite(t *testing.T) {
+	repository := &controllerRepository{}
+	controller, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts, definition := controllerFacts(), controllerDefinition()
+	if _, err := controller.initialize(context.Background(), facts, definition, nil); err != nil {
+		t.Fatal(err)
+	}
+	// A pre-extension archive omits the field. Loading it must not opt an
+	// existing Run into new Result material, even before it becomes terminal.
+	repository.aggregate.ResultFeedbackVersion = 0
+	before, err := json.Marshal(repository.aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedController, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := restartedController.initialize(context.Background(), facts, definition, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := json.Marshal(restarted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.saves != 1 || string(before) != string(after) {
+		t.Fatal("restart rewrote legacy aggregate or feedback renderer")
 	}
 }
 

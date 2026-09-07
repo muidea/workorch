@@ -407,6 +407,9 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 			projection.AllowedVariantIDs = append([]string(nil), operation.AllowedVariantIDs...)
 			projection.RequireOneOfParameters = append([]string(nil), operation.RequireOneOfParameters...)
 		}
+		if len(operation.TargetParameterBindings) != 0 {
+			projection.Rules = append([]string{"Executable rules describe the locally compiled operation. Target-bound parameters are supplied from sealed owner preimages, not by the provider; omit them even when an executable rule requires their presence."}, projection.Rules...)
+		}
 		for _, authorization := range operation.BindingAuthorizations {
 			if !runtimeCandidateWireKindSelectsBinding(wire, operation.Kind, authorization.RequiredOperationRef) ||
 				(authorization.RequiredOperationRef == "" && len(operation.Variants) != 0 && !runtimeCandidateManifestHasVariant(operation.Variants, authorization.VariantID)) {

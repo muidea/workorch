@@ -11,6 +11,7 @@ import (
 // RuntimeResultCloseout is the Orchestrator-authored structured terminal outcome.
 // Result owner only persists it; it must not re-judge accepted/rejected authority.
 type RuntimeResultCloseout struct {
+	OriginalDiagnostic             *RuntimeOriginalDiagnostic `json:",omitempty"`
 	SchemaVersion                  uint32
 	CloseoutID                     string
 	StartupInputHash               string
@@ -59,7 +60,13 @@ type RuntimeOperationCloseout struct {
 
 const RuntimeResultCloseoutSchemaVersionCurrent uint32 = 1
 
+// Result feedback is sealed by Orchestrator when an aggregate is initialized.
+// Zero retains the original material renderer for already-started Runs, even
+// across a Result-committed/acknowledgement-lost deployment boundary.
+const RuntimeResultFeedbackVersionCurrent uint32 = 1
+
 func (c RuntimeResultCloseout) Normalized() RuntimeResultCloseout {
+	c.OriginalDiagnostic = c.OriginalDiagnostic.CloneOriginal()
 	c.CloseoutID = strings.TrimSpace(c.CloseoutID)
 	c.StartupInputHash = strings.TrimSpace(c.StartupInputHash)
 	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)
@@ -142,6 +149,11 @@ func (c RuntimeResultCloseout) Normalized() RuntimeResultCloseout {
 
 func (c RuntimeResultCloseout) Validate() error {
 	c = c.Normalized()
+	if c.OriginalDiagnostic != nil {
+		if err := c.OriginalDiagnostic.Validate(); err != nil {
+			return fmt.Errorf("runtime result closeout original diagnostic: %w", err)
+		}
+	}
 	if c.SchemaVersion != RuntimeResultCloseoutSchemaVersionCurrent {
 		return fmt.Errorf("unsupported runtime result closeout schema version %d", c.SchemaVersion)
 	}

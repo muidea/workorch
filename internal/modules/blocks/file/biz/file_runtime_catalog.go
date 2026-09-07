@@ -25,13 +25,14 @@ func runtimeFileProspectiveTargetAllOfConstraintRefs() []string {
 // to render a candidate. It reads metadata only and never writes a receipt or
 // workspace file.
 func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory, prerequisiteID string, operationKinds, requiredTargetRefs []string, maxItems int) (runtimemodel.RuntimeOperationAdmissibility, error) {
-	manifest, err := a.AcquireWorkspaceManifest(workspaceDirectory)
+	observation, err := a.acquireWorkspaceManifestObservation(workspaceDirectory)
 	if err != nil {
 		return runtimemodel.RuntimeOperationAdmissibility{}, err
 	}
 	if maxItems < 1 || maxItems > runtimemodel.RuntimeOwnerInventoryItemsMaxCount {
 		return runtimemodel.RuntimeOperationAdmissibility{}, common.ErrInvalidArgument
 	}
+	manifest := observation.manifest
 	inventory := runtimemodel.RuntimeOperationAdmissibility{
 		PrerequisiteID:    prerequisiteID,
 		OwnerModuleID:     runtimemodel.RuntimeModuleFile,
@@ -46,6 +47,22 @@ func (a *RuntimeAdapter) AcquireRuntimeOperationAdmissibility(workspaceDirectory
 			runtimeFileConstraintRegularExistingTarget,
 		},
 		ObservedRevision: manifest.Revision,
+	}
+	for _, rawKind := range operationKinds {
+		kind := runtimemodel.CanonicalRuntimeBlockKind(rawKind)
+		switch kind {
+		case runtimemodel.StepKindFileEdit, runtimemodel.RuntimeBlockKindPatchApply, runtimemodel.RuntimeBlockKindPatchPreview:
+			binding := runtimemodel.RuntimeTargetParameterBinding{Kind: kind, Name: "baseHash"}
+			for _, value := range observation.targetPreimages {
+				for _, target := range inventory.TargetRefs {
+					if value.TargetRef == target {
+						binding.Values = append(binding.Values, value)
+						break
+					}
+				}
+			}
+			inventory.TargetParameterBindings = append(inventory.TargetParameterBindings, binding)
+		}
 	}
 	inventory.SnapshotID = runtimemodel.StableRuntimeOperationAdmissibilitySnapshotID(inventory)
 	if err := inventory.Validate(); err != nil {

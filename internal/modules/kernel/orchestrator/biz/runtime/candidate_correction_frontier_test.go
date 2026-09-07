@@ -175,6 +175,12 @@ func TestCandidateCorrectionFrontierSealsAndCrossesOperationSetConsolidation(t *
 }
 
 func TestCandidateCorrectionFrontierExhaustsSingleTargetAndSealsConcreteAlternative(t *testing.T) {
+	t.Run("legacy", func(t *testing.T) { testTargetCorrectionFrontier(t, false) })
+	t.Run("target_parameter_binding", func(t *testing.T) { testTargetCorrectionFrontier(t, true) })
+}
+
+func testTargetCorrectionFrontier(t *testing.T, withTargetPreimages bool) {
+	t.Helper()
 	aggregate, candidate := aggregateWithActiveRejectedCandidate(t)
 	manifest, err := runtimecontract.BuildRuntimeCandidateContractManifest(
 		aggregate.Decision,
@@ -182,6 +188,13 @@ func TestCandidateCorrectionFrontierExhaustsSingleTargetAndSealsConcreteAlternat
 	)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if withTargetPreimages {
+		manifest.Operations[0].TargetParameterBindings = []runtimecontract.RuntimeTargetParameterBinding{{
+			Kind: manifest.Operations[0].Kind, Name: "baseHash", Values: []runtimecontract.RuntimeTargetParameterValue{{TargetRef: "main.go", Value: "main-preimage"}},
+		}}
+		manifest.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(manifest)
+		candidate.StateChange.Operations[0].Operation.Parameters = candidateCorrectionSetStringParameter(candidate.StateChange.Operations[0].Operation.Parameters, "baseHash", "main-preimage")
 	}
 	candidate = runtimeTestMustDeriveCandidateForManifest(t, manifest, candidate)
 	failure := &runtimecontract.RuntimeCandidateFailure{
@@ -203,6 +216,9 @@ func TestCandidateCorrectionFrontierExhaustsSingleTargetAndSealsConcreteAlternat
 		t.Fatalf("target frontier fixture operations=%+v", withAlternative.Operations)
 	}
 	withAlternative.Operations[0].Target.ExactTargetRefs = append(withAlternative.Operations[0].Target.ExactTargetRefs, "support.go")
+	if withTargetPreimages {
+		withAlternative.Operations[0].TargetParameterBindings[0].Values = append(withAlternative.Operations[0].TargetParameterBindings[0].Values, runtimecontract.RuntimeTargetParameterValue{TargetRef: "support.go", Value: "support-preimage"})
+	}
 	withAlternative.Hash = ""
 	withAlternative = withAlternative.Normalized()
 	withAlternative.Hash = runtimecontract.StableRuntimeCandidateContractManifestHash(withAlternative)
@@ -241,6 +257,17 @@ func TestCandidateCorrectionFrontierExhaustsSingleTargetAndSealsConcreteAlternat
 	alternative := candidate
 	alternative.StateChange = &runtimecontract.StateChangeCandidate{Operations: append([]runtimecontract.StateChangingOperation(nil), candidate.StateChange.Operations...)}
 	alternative.StateChange.Operations[0].Operation.TargetRefs = []string{"support.go"}
+	if withTargetPreimages {
+		alternative.StateChange.Operations[0].Operation.Parameters = candidateCorrectionSetStringParameter(alternative.StateChange.Operations[0].Operation.Parameters, "baseHash", "support-preimage")
+		wire, err := runtimecontract.EncodeRuntimeCandidatePayloadWithManifest(withAlternative, alternative)
+		if err != nil {
+			t.Fatal(err)
+		}
+		alternative, err = runtimecontract.DecodeRuntimeCandidatePayloadWithManifest(withAlternative, wire)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := validateAttemptCandidateCrossesPersistedWitness(aggregate, withAlternative, alternative); err != nil {
 		t.Fatalf("sealed target alternative rejected on attempt 1: %v", err)
 	}

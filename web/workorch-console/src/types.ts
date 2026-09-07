@@ -789,6 +789,7 @@ export type RuntimeCheckpointPage = {
 };
 
 export type Result = {
+  originalDiagnostic?: RuntimeOriginalDiagnostic;
   id: string;
   workspaceId: string;
   runId: string;
@@ -1355,6 +1356,7 @@ export type RuntimeRepairClosure = {
 // Audit is display-only. In particular, gap.missingEvidenceKinds is an LLM
 // claim and cannot be used to select action, retries or any command.
 export type RuntimeAudit = {
+  candidateAttempts?: RuntimeAuditCandidateAttempt[];
 	startupInputHash?: string;
 	sealedProfileContractsHash?: string;
 	sealedSoulBindings?: { stage: string; soulId: string; revision: number; contentHash: string; sourceProvenance: string }[];
@@ -1368,6 +1370,19 @@ export type RuntimeAudit = {
   acceptedEvidence?: RuntimeAuditEvidence[];
   rejectedEvidence?: RuntimeAuditEvidence[];
   operationReceipts?: RuntimeAuditOperationReceipt[];
+};
+
+export type RuntimeAuditCandidateAttempt = {
+  authorityContractId?: string;
+  authoritySnapshotId?: string;
+  state?: string;
+  attempt?: number;
+  proposalPersisted?: boolean;
+  failureCode?: string;
+  ownerFeasibilityOutcome?: string;
+  ownerFeasibilityCategory?: string;
+  ownerCatalogSnapshotId?: string;
+  originalDiagnostic?: RuntimeOriginalDiagnostic;
 };
 
 export type RuntimeAuditCoverageBinding = {
@@ -1592,6 +1607,7 @@ export type TaskProgress = {
 };
 
 export type RuntimeProgress = {
+  originalDiagnostic?: RuntimeOriginalDiagnostic;
   latestAcceptedEvidenceAt?: string;
   latestDurableEffectAt?: string;
   durableEffectCount?: number;

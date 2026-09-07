@@ -150,11 +150,14 @@ type ExecutionEvidence struct {
 }
 
 type RuntimeAggregate struct {
-	StateRevision    uint64
-	EvidenceSequence uint64
-	Definition       runtimecontract.RuntimeDefinitionContext
-	Facts            runtimecontract.RuntimeFacts
-	SemanticPlanning runtimecontract.RuntimeSemanticPlanningLedger
+	// ResultFeedbackVersion is immutable SM-4 rendering policy, initialized
+	// once by Orchestrator. Run persists it opaquely; recovery never upgrades it.
+	ResultFeedbackVersion uint32 `json:",omitempty"`
+	StateRevision         uint64
+	EvidenceSequence      uint64
+	Definition            runtimecontract.RuntimeDefinitionContext
+	Facts                 runtimecontract.RuntimeFacts
+	SemanticPlanning      runtimecontract.RuntimeSemanticPlanningLedger
 	// Reconciliation is SM-2-owned request/batch lineage. Capability owner
 	// observations enter only through RuntimeInternalEvent and never mutate
 	// Facts directly.

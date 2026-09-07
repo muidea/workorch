@@ -78,6 +78,7 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 		ret.FailureCode = strings.TrimSpace(facts.Failure.Code)
 		ret.FailureSignature = strings.TrimSpace(facts.Failure.Signature)
 		ret.FailureMessage = strings.TrimSpace(facts.Failure.Message)
+		ret.OriginalDiagnostic = facts.Failure.OriginalDiagnostic.CloneOriginal()
 	}
 	if state.ExecutionBudget.Policy.PolicyRevision != "" {
 		activeWaitID := ""

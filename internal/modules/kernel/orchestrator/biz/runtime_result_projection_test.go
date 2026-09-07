@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1165,6 +1166,15 @@ func TestDeliverRuntimeTerminalRejectsRecoverablePrerequisiteRefresh(t *testing.
 }
 
 func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjection(t *testing.T) {
+	for _, version := range []uint32{0, runtimecontract.RuntimeResultFeedbackVersionCurrent} {
+		t.Run(fmt.Sprintf("feedback_version_%d", version), func(t *testing.T) {
+			testTerminalResultPersistenceRestart(t, version)
+		})
+	}
+}
+
+func testTerminalResultPersistenceRestart(t *testing.T, feedbackVersion uint32) {
+	t.Helper()
 	ctx := context.Background()
 	firstHub := magicevent.NewHub(32)
 	root := t.TempDir()
@@ -1180,9 +1190,15 @@ func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjecti
 	}
 
 	aggregate := runtimeAggregate(t, 2)
+	aggregate.ResultFeedbackVersion = feedbackVersion
 	aggregate.Facts.Failure = &runtimecontract.FailureFact{
 		Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_contract_defect",
 		Signature: "contract-defect", Message: "sealed contract mismatch",
+		OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
+			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleFile,
+			OriginalClass: "candidate_contract_failure", OriginalCode: "patch_basehash_mismatch", OriginalMessage: "patch baseHash mismatch",
+			Signature: "file/preflight", TargetRefs: []string{"implementation.go"},
+		},
 	}
 	decision, err := runtime.ReduceRuntimeState(aggregate.Facts, &aggregate.Decision.AuthoritySnapshot)
 	if err != nil {
@@ -1209,8 +1225,13 @@ func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjecti
 		t.Fatal("Result persistence crash point was not reached")
 	}
 	resultID := common.ResultID("ws-v2/run-v2/result/dod-assessment")
-	if item, err := resultRepo.Get(ctx, resultID); err != nil || item.State != common.ResultStateRejected {
-		t.Fatalf("persisted Result=%+v err=%v", item, err)
+	beforeResult, err := resultRepo.Get(ctx, resultID)
+	if err != nil || beforeResult.State != common.ResultStateRejected {
+		t.Fatalf("persisted Result=%+v err=%v", beforeResult, err)
+	}
+	if (beforeResult.RuntimeCloseout.OriginalDiagnostic != nil) != (feedbackVersion != 0) ||
+		(beforeResult.SummaryDetail.VerificationSummary != "") != (feedbackVersion != 0) {
+		t.Fatal("Result material did not follow its Run's sealed feedback version")
 	}
 	if run, err := runs.Get(ctx, "run-v2"); err != nil || run.State != common.RunStateActive {
 		t.Fatalf("Run changed before restart projection: %+v err=%v", run, err)
@@ -1259,6 +1280,9 @@ func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjecti
 	items, err := resultRepo.ListByRun(ctx, "run-v2")
 	if err != nil || len(items) != 1 {
 		t.Fatalf("Result restart delivery duplicated item=%+v err=%v", items, err)
+	}
+	if !reflect.DeepEqual(beforeResult, items[0]) || restartedAggregate.ResultFeedbackVersion != feedbackVersion {
+		t.Fatal("restart changed already-persisted Result or its feedback renderer")
 	}
 }
 

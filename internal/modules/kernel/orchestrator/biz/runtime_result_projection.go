@@ -213,6 +213,9 @@ func (m *Biz) recordRuntimeDeliveryAcknowledgement(ctx context.Context, acknowle
 }
 
 func runtimeResultMaterialFromAggregate(aggregate runtime.RuntimeAggregate, outcome runtimecontract.TerminalOutcome) (resultevents.ResultMaterial, error) {
+	if aggregate.ResultFeedbackVersion > runtimecontract.RuntimeResultFeedbackVersionCurrent {
+		return resultevents.ResultMaterial{}, fmt.Errorf("unsupported runtime result feedback version %d", aggregate.ResultFeedbackVersion)
+	}
 	derived, terminal, err := runtime.DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
 	if err != nil {
 		return resultevents.ResultMaterial{}, err
@@ -265,6 +268,9 @@ func runtimeResultMaterialFromAggregate(aggregate runtime.RuntimeAggregate, outc
 		SummaryDetail: workorchresultcontract.ResultSummary{GoalOutcome: terminalSummary, EvidenceRefs: append([]string(nil), evidenceRefs...), ArtifactRefs: append([]common.ArtifactID(nil), artifactRefs...)},
 	}
 	item.RuntimeCloseout = runtimeResultCloseout(aggregate, outcome, accepted, evidenceRefs)
+	if aggregate.ResultFeedbackVersion == runtimecontract.RuntimeResultFeedbackVersionCurrent {
+		runtimeCompleteResultFeedback(&item, aggregate)
+	}
 	return item, nil
 }
 
@@ -296,6 +302,9 @@ func runtimeResultCloseout(aggregate runtime.RuntimeAggregate, outcome runtimeco
 	accumulator.apply(&closeout)
 	if !accepted {
 		accumulator.applyTerminalFailure(&closeout, aggregate)
+	}
+	if aggregate.ResultFeedbackVersion == 0 {
+		closeout.OriginalDiagnostic = nil
 	}
 	closeout.OwnerRevisionSet = runtimeCloseoutOwnerRevisionSet(aggregate)
 	closeout.RequirementOutcomes = runtimeRequirementOutcomes(aggregate, closeout.OwnerRevisionSet)
@@ -615,6 +624,7 @@ func (a *runtimeCloseoutAccumulator) applyTerminalFailure(closeout *runtimecontr
 }
 
 func (a *runtimeCloseoutAccumulator) applyFailureFact(closeout *runtimecontract.RuntimeResultCloseout, failure *runtimecontract.FailureFact) {
+	closeout.OriginalDiagnostic = failure.OriginalDiagnostic.CloneOriginal()
 	if failure.Class != "" {
 		closeout.FailureClass = failure.Class
 	}

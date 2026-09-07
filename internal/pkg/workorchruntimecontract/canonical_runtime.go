@@ -759,10 +759,11 @@ type RuntimeOperationAdmissibility struct {
 	// may use a prospective target.  It is intentionally a typed slice rather
 	// than a process-wide index or map so the fact is persisted with the owner
 	// catalog and can be validated/replayed as one immutable snapshot.
-	OperationVariants []RuntimeOperationAdmissibilityVariant
-	TargetRefs        []string
-	SelectorRefs      []string
-	ConstraintRefs    []string
+	OperationVariants       []RuntimeOperationAdmissibilityVariant
+	TargetParameterBindings []RuntimeTargetParameterBinding `json:",omitempty"`
+	TargetRefs              []string
+	SelectorRefs            []string
+	ConstraintRefs          []string
 	// ValidationRecipeRefs is the ready-only owner-neutral identity set of
 	// validation surfaces the owner can execute with an already sealed input
 	// binding. Shell may additionally retain the full command recipe below;
@@ -1033,6 +1034,7 @@ func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibilit
 		a.OperationVariants = nilIfEmpty(variants)
 	}
 	a.TargetRefs = normalizeStrings(a.TargetRefs)
+	a.TargetParameterBindings = normalizeRuntimeTargetParameterBindings(a.TargetParameterBindings)
 	a.SelectorRefs = normalizeStrings(a.SelectorRefs)
 	a.ConstraintRefs = normalizeStrings(a.ConstraintRefs)
 	a.ValidationRecipeRefs = normalizeStrings(a.ValidationRecipeRefs)
@@ -1092,6 +1094,9 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 		return err
 	}
 	a = a.Normalized()
+	if err := validateRuntimeTargetParameterBindings(a.TargetParameterBindings, a.OwnerModuleID, a.OperationKinds, a.TargetRefs); err != nil {
+		return err
+	}
 	if a.PrerequisiteID == "" || a.SnapshotID == "" || a.OwnerModuleID == "" || len(a.OperationKinds) == 0 || a.ObservedRevision == "" {
 		return fmt.Errorf("runtime operation admissibility requires identity, owner, kinds and revision")
 	}
@@ -1178,6 +1183,7 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 		writeHashStrings(h, variant.ConstraintRefs)
 	}
 	writeHashStrings(h, value.TargetRefs)
+	writeRuntimeTargetParameterBindingsHash(h, value.TargetParameterBindings)
 	writeHashStrings(h, value.SelectorRefs)
 	writeHashStrings(h, value.ConstraintRefs)
 	writeHashStrings(h, value.ValidationRecipeRefs)

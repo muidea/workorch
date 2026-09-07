@@ -54,6 +54,18 @@ decoder 不做本地补全、删除或 JSON repair；只有 SM-3 持久化同 pa
 attempt 1 重写一份完整 document。schema、instruction、strict compiler、fixture encoder 必须消费同一份 wire contract，
 禁止各自重新推导字段；JSONSchemaResponse on/off 不得改变最小文档或本地编译结果。
 
+capability owner 可在 catalog 声明 typed `TargetParameterBindings`：它只绑定已声明的 optional string parameter 与
+bounded exact target preimage，不携带状态或 transition。existing/exact target 的 manifest 必须具备允许集合内每个 target
+的完整 literal；singleton operation 选择 target 后，SM-3 纯 compiler 从 sealed manifest/wire 取该 target 的 exact literal，
+不能借用其它 target、重新读取资源或由 provider 猜值。prospective target 保留派生参数声明但无 existing preimage，编译时
+省略该参数。两者都禁止 provider 回显该参数，即使值正确；echo 是既有 typed document rejection，不是本地 JSON repair。
+catalog、manifest、wire hash 均绑定声明和 literal；空扩展不增加 hash 字节，不改写旧 sealed archive。owner feasibility
+ingress 重验 authorization 与 catalog preimage 的一致性，并继续验证 current freshness；本地派生不绕过 owner stale、
+applicability 或 effect/replay guard。该动态合同只进入 C3，不改变 C0～C2。
+非法 target 的 syntax/membership/cardinality 仍由同一 strict boundary 拒绝并保留既有 correction frontier；不能以
+“无法派生参数”覆盖原始 target diagnostic。SM-3 若证明某个已授权 target alternative，必须用同一 pure projection
+重新派生该 target 的依赖 literal，保证 witness hash 与实际 attempt-1 wire compilation 一致，且不增加任何可选参数。
+
 strict compiler 一旦为 provider operation 选中 wire rule，任何后续 operation-scoped schema diagnostic 都必须携带
 `RuntimeCandidateWireRuleIdentity`：exact `wireContractHash`、provider `operationIndex`、`requiredOperationRef`（required slot）
 或 canonical `operationKind`（auxiliary rule）以及 `variantId`。该 identity 只是 diagnostic lineage，不授予 candidate、retry
@@ -474,6 +486,11 @@ provider dependency/governance 在进入 candidate pipeline 前单独处理。�
 | `owner_candidate_constraint` | capability owner 对 manifest-declared parameter shape 的 static conformance，或对 current target/revision 的 dynamic `candidate_constraint_violated` factual observation | proposal 持久化后，以 Orchestrator private SM-3 event/CAS 持久化；static nonconformant 或 dynamic violation 与唯一 correction/final 原子关闭 attempt。static lane 零 workspace I/O；dynamic lane 只读且两者均零 effect、receipt 与独立预算 |
 | `owner_feasibility` | capability owner 的 ordinary `stale`、`prerequisite_required`、`infeasible` 或 `owner_contract_defect` factual observation | 同一个 `CandidateFeasibilityObserved` owner-private event/CAS 同时保存事实并由 SM-2/SM-3/SM-4 协调归约：退休 prerequisite、取得新 authority、形成 typed terminal 或进入有合同的 recovery；不得先存半状态再发第二事件，且零 candidate correction attempt。它不与 provider request terminal 共用结果或 transition |
 | `accepted` | evaluator 接受、全部 static constraints 有 conformant fact，dynamic applicability 被 current feasibility 接受，且 ordinary owner feasibility 为 feasible | persist sealed dispatch 后才可执行 |
+
+ordinary owner infeasibility 及其 invalidated attempt 必须保留 owner 原始 diagnostic。若随后相同 authority input 被
+`equivalent_authority_no_progress` guard 终止，SM-2 failure 同时保留 guard code 与该 exact infeasibility 的
+`OriginalDiagnostic`，不得以泛化 guard 文本覆盖原因，也不得借此放宽 correction、repair 或 provider budget。投影只展示
+两层事实；它不能据 owner code 发出 retry 或选择下一 action。
 
 `requestBytes>0`、selected streaming mode、错误文本或 reservation 都不证明 physical submission。exact unsubmitted audit
 必须在对应 session transition CAS 中 release reservations；缺失/篡改 audit 只能结算为 unknown 并终止当前 request，禁止

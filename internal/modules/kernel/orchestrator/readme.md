@@ -74,6 +74,10 @@ capability resource state。
   authorization 共有的 singleton binding、required cardinality-one singleton target 和 fixed parameter 均本地派生；
   unreachable variant authorization 不扩大 wire。LLM wire 不包含这些本地值或 operation ID/dependency；本地 compiler
   唯一派生完整 DTO、identity 与 graph。
+- owner catalog 可提供 typed target-parameter preimage。SM-3 将完整 bounded existing target literal 或 prospective 无
+  preimage 声明封入 manifest/wire/hash，并在选定 singleton target 后纯派生 exact 参数；provider echo 必须拒绝，owner
+  ingress 仍重验 catalog/freshness。Core 不解释参数的业务含义，不重新观察资源，也不新增 owner/correction authority；
+  nil/empty 扩展保持旧 archive identity。动态声明只影响 C3。
 - operations ExpectedDocument 持久化 exact `WireContractHash`，request session 保留 manifest identity；任一 framing 为单一
   JSON object 的 completed document
   进入 accepted 或 rejected candidate attempt 时，都在关闭该 attempt 的同一个 owner-private CAS 中封存 exact
@@ -108,6 +112,9 @@ capability resource state。
 - failed attempt 保留 feasibility fact 时，同一失败 CAS 必须保存 exact owner catalog preimage。历史 reverse proof 使用
   sealed manifest snapshot ref + catalog self hash + operation/owner/acquisition/revision；不得读取新 catalog 重建旧拒绝。
   pending attempt 仍只认 current catalog；历史 preimage 不进入 admission、provider projection 或 dispatch authority。
+- SM-2 ordinary infeasibility failure 与后继 `equivalent_authority_no_progress` terminal 必须保留 exact matching
+  invalidated attempt 的 `OriginalDiagnostic`。guard code 与 owner cause 是独立事实；保留诊断不授权额外 provider、
+  correction、repair 或 successor。Application/TUI/Web 只能投影原始 owner、code、target 与 message。
 - ordinary owner infeasibility 在当前 binding purpose 为 `validation_failure_repair` 时不得走会清空 directive、保留 binding 的
   通用 failure 路径。Orchestrator 必须在同一个 private event/CAS 中 invalidates candidate、以 exact owner observation 退役该
   intermediate binding，并形成有界 `repair_surface_unavailable` terminal；duplicate/restart 不得重复退役或消耗 effect/budget。
@@ -310,6 +317,11 @@ capability resource state。
   governance-resolution EventHub command/topic；Application和Governance都不发布 Resume。
 - terminal outcome先由 SM-2 seal，再由 SM-4按 Result→Workspace→Run顺序交付。各 owner只执行自身 private reducer并返回 exact
   acknowledgement；partial/response-loss从同一 delivery ledger幂等续驱，不改写 terminal decision。
+- SM-4 的 Result material 从已裁决的 requirement outcomes、evidence 与 receipts 投影逐项 DoD、实现/验证摘要、限制、
+  风险和仅供阅读的后续建议；没有 validation evidence 不能描述为验证已执行或失败。terminal guard 与原始 owner cause
+  分别保存，Result owner 不重判验收。新 aggregate 初始化时一次封存 `ResultFeedbackVersion=1`；既有 record 缺省 `0`
+  沿用旧 renderer，Start/Resume/restart 不补写该值。未知版本 fail closed；同一 Run 的 Result 内容与 hash 在升级、
+  response loss 和 pending delivery replay 后必须相同，不改写旧 Result/Run 归档。
 - Workspace deletion只允许在 Run owner `draining` fence后排空既有 terminal delivery。Orchestrator独占自身 quiescence/purge
   private reducer，不终止 Run、不推进 Workspace deletion phase、不跨 owner删除资源。
 
@@ -347,6 +359,7 @@ capability resource state。
 
 | 验收面 | 自动化证据 | 必需维度 |
 | --- | --- | --- |
+| target preimage / terminal feedback | `workorchruntimecontract/runtime_target_parameter_binding_test.go`、`blocks/file/target_parameter_test.go`、`biz/runtime/prerequisite_freshness_test.go`、`biz/runtime_result_feedback_test.go`、`biz/runtime/controller_test.go::TestRuntimeControllerInitializePreservesLegacyFeedbackVersionWithoutWrite`、`biz/runtime_result_projection_test.go::TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjection` | SM-3 exact target 派生与 echo 拒绝；SM-2 无进展 guard 保留 root cause 且零额外预算；SM-4 完整且不虚构验收的反馈、旧/新版本 partial delivery 重启重放；SM-1 与 capability owner 不变 |
 | repair rejection / historical probe lineage | `biz/runtime/repair_rejection_closure_test.go`、`biz/runtime/candidate_owner_conformance_test.go`、`biz/runtime/shell_owner_receipt_integration_test.go::TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot` | first-member/partial-effect rejected repair 同 CAS 退役；candidate correction 的 exact catalog preimage、tamper/协调重封存拒绝、CAS-before/response-loss/restart duplicate；真实 Shell→File correction→effect→fresh validation，历史拒绝不阻塞 current owner fact 推进 |
 | Module lifecycle/core dependencies | `plugin_test.go::TestModuleRunBindsFrameworkContextToOwnerLifecycle`、`plugin_test.go::TestModuleSetupRejectsMissingBackgroundRoutine`、`biz/owner_test.go::TestModuleIdentityConfigureStartStopContract`、`biz/owner_test.go::TestModuleConfigureRequiresCoreDependencies`、`biz/owner_test.go::TestFailedStartRemovesAllIngressAndCancelsLifecycle` | identity、Configure/Start/Stop、framework context、required BackgroundRoutine、startup rollback、deadline-aware Stop、canonical evidence repository bundle 与 EventHub dependency fail-fast |
 | owner-private dispatcher/CAS/aggregate | `biz/runtime/internal_event_*_test.go`、`biz/runtime/component_facades_test.go`、`biz/runtime/aggregate_invariant_test.go`、`biz/runtime/structure_contract_test.go`、`biz/runtime/failure_authority_transition_test.go`（含 `TestOwnerInfeasibilityAtomicallyTerminatesValidationRepairBinding`）、`biz/runtime/candidate_owner_conformance_test.go::TestOwnerCandidateApplicabilityViolationClosesFactAndCorrectionInOneCAS` | exactly-one payload、primary SM 与 coordinated write-set、single mutation root/CAS、三种 failure-authority policy、candidate feasibility fact+disposition 单 CAS、validation-repair infeasibility 原子退役/terminal、旧 target/directive 不泄漏、duplicate/fresh-load 与 pre/post-CAS failure |

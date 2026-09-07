@@ -2,6 +2,7 @@ package workorchruntimecontract
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -310,6 +311,13 @@ func ValidateRuntimeOperationFeasibilityRequest(request RuntimeOperationFeasibil
 	}
 	if err := ValidateRuntimeOperationTargetsAgainstAuthorization(authorization.Target, operation.TargetRefs, authorization.RequireTargetRefs); err != nil {
 		return fmt.Errorf("runtime operation feasibility target authorization: %w", err)
+	}
+	expectedBindings := runtimeCandidateTargetParameterBindings(operation.Kind, authorization.Target, []RuntimeOperationAdmissibility{inventory}, ownerModuleID)
+	if !reflect.DeepEqual(expectedBindings, authorization.TargetParameterBindings) {
+		return fmt.Errorf("runtime operation feasibility target preimages do not match owner catalog")
+	}
+	if err := validateRuntimeOperationTargetParameterPreimage(operation, authorization); err != nil {
+		return fmt.Errorf("runtime operation feasibility target precondition: %w", err)
 	}
 	if len(authorization.AdmissibilitySnapshotRefs) != 0 {
 		found := false

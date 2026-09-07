@@ -283,8 +283,8 @@ func runtimeCandidateWireRuleDerivesField(rule RuntimeCandidateWireOperationRule
 
 func compileRuntimeCandidateWireParameters(compiled map[string]json.RawMessage, rule RuntimeCandidateWireOperationRule, path string, wireRule *RuntimeCandidateWireRuleIdentity) error {
 	derivedNames := make(map[string]struct{}, len(rule.DerivedParameters))
-	for _, parameter := range rule.DerivedParameters {
-		derivedNames[parameter.Name] = struct{}{}
+	for _, name := range rule.DerivedParameterNames() {
+		derivedNames[name] = struct{}{}
 	}
 	parameters := make([]json.RawMessage, 0, len(rule.DerivedParameters)+len(rule.ProviderParameterNames))
 	if raw, found := compiled["parameters"]; found {
@@ -315,6 +315,20 @@ func compileRuntimeCandidateWireParameters(compiled map[string]json.RawMessage, 
 	}
 	for _, parameter := range rule.DerivedParameters {
 		parameters = append(parameters, runtimeCandidateWireJSONValue(runtimeCandidateWireParameterPayload(parameter)))
+	}
+	if len(rule.TargetParameterBindings) != 0 {
+		var targets []string
+		// Invalid target syntax/membership/cardinality belongs to the existing
+		// strict target boundary below, including its failed-candidate frontier.
+		// Never invent a preimage or replace that diagnostic with a compiler error.
+		if err := json.Unmarshal(compiled["targetRefs"], &targets); err == nil {
+			derived, err := runtimeTargetDerivedParameters(rule.TargetParameterBindings, normalizeStrings(targets))
+			if err == nil {
+				for _, parameter := range derived {
+					parameters = append(parameters, runtimeCandidateWireJSONValue(runtimeCandidateWireParameterPayload(parameter)))
+				}
+			}
+		}
 	}
 	if len(parameters) == 0 {
 		delete(compiled, "parameters")

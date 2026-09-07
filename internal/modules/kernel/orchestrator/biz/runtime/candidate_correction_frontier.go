@@ -474,6 +474,26 @@ func candidateTargetCorrectionWitness(manifest runtimecontract.RuntimeCandidateC
 		default:
 			continue
 		}
+		if len(authorization.TargetParameterBindings) != 0 {
+			derived, err := runtimecontract.RuntimeCandidateTargetParameters(authorization, mutated.TargetRefs)
+			if err != nil {
+				continue
+			}
+			// A target witness changes the provider choice, not its owner-authored
+			// dependent literals. Prove the exact operation the wire compiler will
+			// produce for that choice; never reuse another target's preimage.
+			mutated.Parameters = nil
+			for _, parameter := range operation.Parameters {
+				locallyDerived := false
+				for _, binding := range authorization.TargetParameterBindings {
+					locallyDerived = locallyDerived || binding.Name == parameter.Name
+				}
+				if !locallyDerived {
+					mutated.Parameters = append(mutated.Parameters, parameter)
+				}
+			}
+			mutated.Parameters = append(mutated.Parameters, derived...)
+		}
 		if witness := candidateOperationMutationWitness(manifest, candidate, index, operation, mutated, field, current, alternative, rejectedShape, blocked); witness != nil {
 			return witness
 		}

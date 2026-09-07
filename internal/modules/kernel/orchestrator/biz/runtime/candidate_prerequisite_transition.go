@@ -477,6 +477,7 @@ func ownerInfeasibilityFailure(observation runtimecontract.RuntimeOwnerFeasibili
 		failure.Signature = "validation-recipe-exhausted/" + diagnostic.Signature
 		failure.Message = "sealed validation recipe is unavailable: " + diagnostic.OriginalMessage
 	}
+	failure.OriginalDiagnostic = diagnostic.CloneOriginal()
 	return failure
 }
 

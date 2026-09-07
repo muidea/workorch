@@ -184,17 +184,22 @@ func applyCandidateAttemptBegin(aggregate *RuntimeAggregate, plan candidateAttem
 }
 
 func equivalentOwnerInfeasibilityExists(attempts []runtimecontract.RuntimeCandidateAttemptRecord, authorityInputID string) bool {
+	return equivalentOwnerInfeasibility(attempts, authorityInputID) != nil
+}
+
+func equivalentOwnerInfeasibility(attempts []runtimecontract.RuntimeCandidateAttemptRecord, authorityInputID string) *runtimecontract.RuntimeOwnerFeasibilityObservation {
 	authorityInputID = strings.TrimSpace(authorityInputID)
 	if authorityInputID == "" {
-		return false
+		return nil
 	}
 	for _, attempt := range attempts {
 		if attempt.State == runtimecontract.RuntimeCandidateAttemptStateInvalidated && attempt.OwnerFeasibility != nil &&
 			attempt.Transaction.AuthorityInputID == authorityInputID {
-			return true
+			value := attempt.OwnerFeasibility.Clone()
+			return &value
 		}
 	}
-	return false
+	return nil
 }
 
 // rejectCompletedCandidateDocument is the single SM-3 attempt transition for

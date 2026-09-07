@@ -438,6 +438,9 @@ func validateRuntimeCandidateOperationAgainstManifest(manifest RuntimeCandidateC
 		}
 		values[name] = parameter
 	}
+	if err := validateRuntimeOperationTargetParameterPreimage(operation, operationManifest); err != nil {
+		return runtimeCandidateContractDiagnostic(operation.ID, path+".parameters", "target_parameter_preimage_mismatch", nil, nil, nil, err)
+	}
 	for _, parameter := range operationManifest.Parameters {
 		if parameter.Required {
 			if _, found := values[parameter.Name]; !found {

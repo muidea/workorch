@@ -2319,7 +2319,32 @@ func runtimeExpectedDocumentHash(expected *runtimecontract.RuntimeExpectedDocume
 // only current provider-selectable wire fields; raw CWI IDs never reach JSON.
 func bindRuntimeTestCandidateToManifest(manifest runtimecontract.RuntimeCandidateContractManifest, candidate runtimecontract.RuntimeCandidate) runtimecontract.RuntimeCandidate {
 	bind := func(operation *runtimecontract.RuntimeOperation) {
-		if operation == nil || len(operation.CoverageWorkItemIDs) == 0 {
+		if operation == nil {
+			return
+		}
+		operationManifest, found := runtimeTestManifestOperationForKind(manifest, operation.Kind)
+		if !found {
+			return
+		}
+		// Scripted providers start from a complete typed fixture; only the wire
+		// encoder strips local fields. Bind missing preconditions to the sealed
+		// target exactly, never overwrite an explicitly wrong test value.
+		for _, binding := range operationManifest.TargetParameterBindings {
+			present := false
+			for _, parameter := range operation.Parameters {
+				present = present || parameter.Name == binding.Name
+			}
+			if present || len(operation.TargetRefs) != 1 {
+				continue
+			}
+			for _, value := range binding.Values {
+				if value.TargetRef == operation.TargetRefs[0] {
+					literal := value.Value
+					operation.Parameters = append(operation.Parameters, runtimecontract.OperationParameter{Name: binding.Name, String: &literal})
+				}
+			}
+		}
+		if len(operation.CoverageWorkItemIDs) == 0 {
 			return
 		}
 		// CoverageWorkItemIDs is only a local fixture hint used to select the
@@ -2327,10 +2352,6 @@ func bindRuntimeTestCandidateToManifest(manifest runtimecontract.RuntimeCandidat
 		coverageWorkItemIDs := append([]common.CoverageWorkItemID(nil), operation.CoverageWorkItemIDs...)
 		operation.CoverageWorkItemIDs = nil
 		if len(operation.BindingRefs) != 0 {
-			return
-		}
-		operationManifest, found := runtimeTestManifestOperationForKind(manifest, operation.Kind)
-		if !found {
 			return
 		}
 		if operation.RequiredOperationRef == "" && len(operationManifest.RequiredOperationReferences) == 1 {

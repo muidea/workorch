@@ -55,6 +55,11 @@ operation。
 - `patch/apply|patch/preview` variant、parameter description 与 provider-safe syntax guidance 只由 File operation contract 声明并
   随 sealed manifest 投影；Profile/Soul 不固定 `unified_diff`、不复制 parser 规则。`unified_diff` 的 canonical standard form 包含
   单一 `---/+++` file-header pair 和至少一个 explicit `@@ ... @@` hunk，hunk-only content 在 owner conformance 中 fail closed。
+- File catalog 对 `file/edit`、`patch/apply`、`patch/preview` 发布 target-bound `baseHash` preimage；literal 必须来自生成
+  workspace manifest revision 的同一次 regular-file scan，并限制在 catalog 的 bounded target set。File 只提供事实；SM-3
+  从 sealed manifest 为已选 singleton target 派生参数，LLM 不回显或猜测 hash。prospective target 无 existing preimage，
+  省略参数；`file/write` 的 create-only 合同不变。File feasibility ingress 重验 exact catalog/authorization/preimage，
+  current revision 漂移仍返回 typed stale，执行 hash guard 与 replay proof 不因本地派生而放宽。
 - `file/edit` 的 operation-level constraint 与 `patch/apply|patch/preview:text_replace` 的 variant-level constraint 共享
   `oldText` applicability 合同。feasibility 复用 execution 的 text replacement/patch parser 与 matcher 做只读应用；
   current revision 下缺失/歧义/occurrence 越界的匹配返回 bounded applicability violation，不能冒充 stale 或扩大 target。
@@ -83,6 +88,7 @@ operation。
 | --- | --- | --- |
 | normal list/read/write/edit/preview/apply | [`module_test.go`](module_test.go)、[`biz/file_runtime_adapter_test.go`](biz/file_runtime_adapter_test.go) | 覆盖 create-only 与 existing-target selector、读写编辑及 patch 主路径 |
 | text edit applicability | [`edit_applicability_test.go`](edit_applicability_test.go) | `file/edit` 与 `patch/apply|patch/preview` text_replace 的真实 EventHub 矩阵：exact/byte-exact、空 replacement、occurrence、缺失/歧义/越界、baseHash/binary 与 duplicate；probe 零写入/receipt，owner constraint 不含执行或纠正权限 |
+| target-bound parameter preimage | [`target_parameter_test.go`](target_parameter_test.go)、`workorchruntimecontract/runtime_target_parameter_binding_test.go` | 多文件 exact target hash、provider echo 拒绝、required/auxiliary 与 prospective 编译、catalog/manifest/wire hash、真实 owner restart、direct ingress drift 拒绝与外部修改后的 stale；read-only probe 零 effect |
 | typed contract / sealed identity | [`pkg/events/operation_test.go`](pkg/events/operation_test.go)、`kernel/orchestrator/biz/prerequisite_event_adapter_test.go::TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract` | 16 topic inventory、payload/scope binding、create-only selector effect 前 `create`/effect 后 `unsupported` 覆盖 |
 | candidate constraints | [`biz/file_runtime_candidate_conformance_test.go`](biz/file_runtime_candidate_conformance_test.go)、`biz/file_runtime_adapter_test.go::TestRuntimeAdapterRuntimeFeasibilityRejectsStaleUnifiedDiff`、`module_test.go::TestFileModuleReportsUnifiedDiffTargetApplicabilityAsTypedCandidateConstraint`、[`pkg/events/operation_test.go`](pkg/events/operation_test.go) | static valid/invalid unified diff、target/target-policy mode、零 workspace I/O conformance，以及真实 owner EventHub 路径中 current target conflict 的 manifest/revision-bound typed applicability violation 与零 effect 覆盖 |
 | exact source | `TestFileRuntimeOwnerCommandsRejectUntrustedSources`、`TestFileWorkspaceManifestAllowsGitOwnerSource`、`TestFileModuleRejectsDriftedSealedOperationBeforeEffect` | 10 个 read topic 的 producer matrix 与 execute wrong-source 覆盖 |

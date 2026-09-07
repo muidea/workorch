@@ -1,4 +1,10 @@
-// Read-only labels. Limits are projected declarations, never client policy.
+import type { RuntimeOriginalDiagnostic } from './types.ts';
+
+// Read-only labels. Limits and owner causes are projected facts, never client policy.
+export function originalDiagnosticLabel(value?: RuntimeOriginalDiagnostic): string {
+  return [value?.ownerModuleId, value?.originalCode].filter(Boolean).join(' / ') || '-';
+}
+
 export function validationRepairPolicyLabel(value?: {
   validationRepairPolicyId?: string;
   validationRepairMaxAttempts?: number;

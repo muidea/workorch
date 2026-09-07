@@ -113,12 +113,13 @@ func (c *RuntimeController) initialize(ctx context.Context, facts runtimecontrac
 		return RuntimeAggregate{}, err
 	}
 	aggregate := RuntimeAggregate{
-		StateRevision:    1,
-		Definition:       definition,
-		Facts:            facts,
-		SemanticPlanning: semanticPlanning,
-		ExecutionBudget:  executionBudget,
-		Decision:         decision,
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		StateRevision:         1,
+		Definition:            definition,
+		Facts:                 facts,
+		SemanticPlanning:      semanticPlanning,
+		ExecutionBudget:       executionBudget,
+		Decision:              decision,
 	}
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeAggregate{}, err

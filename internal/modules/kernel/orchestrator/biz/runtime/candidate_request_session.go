@@ -80,12 +80,22 @@ func (c *planningTransactionComponent) ensureCandidateRequestSessionWithExpected
 
 func equivalentAuthorityNoProgressFailure(aggregate RuntimeAggregate) runtimecontract.FailureFact {
 	transaction := aggregate.Decision.AuthorityTransaction()
-	return runtimecontract.FailureFact{
+	failure := runtimecontract.FailureFact{
 		Class:     runtimecontract.FailureClassNoProgressExhausted,
 		Code:      "equivalent_authority_no_progress",
 		Signature: "equivalent-authority/" + transaction.AuthorityInputID,
 		Message:   "unchanged authority inputs already produced the same owner infeasibility",
 	}
+	// Preserve the exact matching owner cause without turning diagnostic text
+	// into a retry or target authorization. The unchanged-authority guard and
+	// its separate SM-2 failure event/CAS remain the only disposition authority.
+	if observation := equivalentOwnerInfeasibility(aggregate.CandidateAttempts, transaction.AuthorityInputID); observation != nil && observation.Feedback != nil {
+		failure.OriginalDiagnostic = observation.Feedback.OriginalDiagnostic.CloneOriginal()
+		if failure.OriginalDiagnostic != nil {
+			failure.TargetRefs = append([]string(nil), failure.OriginalDiagnostic.TargetRefs...)
+		}
+	}
+	return failure
 }
 
 func operationRequestSessionExistsForAuthority(sessions []runtimecontract.RuntimeCandidateRequestSession, transaction runtimecontract.AuthorityTransaction) bool {

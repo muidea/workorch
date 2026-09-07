@@ -2233,7 +2233,7 @@ fi
 file_manifest_observation="$(sed -n '/^func (a \*RuntimeAdapter) acquireWorkspaceManifestObservation(/,/^}/p' internal/modules/blocks/file/biz/file_runtime_snapshot.go)"
 file_capacity_guard="$(sed -n '/^func runtimeFileProspectiveTargetWouldOverflowManifest(/,/^}/p; /^func runtimeFileProspectiveTargetAdditionalEntries(/,/^}/p' "$file_target_admission")"
 file_effect_capacity_guard="$(sed -n '/^func (a \*RuntimeAdapter) validateProspectivePatchManifestCapacity(/,/^}/p' internal/modules/blocks/file/biz/file_runtime_typed.go)"
-if ! grep -q -F -- 'entryCount: len(result.Entries)' <<<"$file_manifest_observation" ||
+if ! grep -q -E -- 'entryCount:[[:space:]]+len\(result\.Entries\)' <<<"$file_manifest_observation" ||
 	! grep -q -F -- 'runtimeFileProspectiveTargetAdditionalEntries' <<<"$file_capacity_guard" ||
 	! grep -q -F -- 'entryCount+additional > defaultMaxEntries' <<<"$file_capacity_guard" ||
 	! grep -q -F -- 'observation.entryCount+additional > defaultMaxEntries' <<<"$file_effect_capacity_guard"; then

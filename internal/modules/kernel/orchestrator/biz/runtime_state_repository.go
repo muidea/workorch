@@ -161,6 +161,7 @@ func (r runtimeStateRepository) SaveValidated(ctx context.Context, aggregate run
 
 func runtimeStateRecordFromAggregate(aggregate runtime.RuntimeAggregate) runtimecontract.RuntimeStateRecord {
 	ret := runtimecontract.RuntimeStateRecord{
+		ResultFeedbackVersion:           aggregate.ResultFeedbackVersion,
 		StateRevision:                   aggregate.StateRevision,
 		EvidenceSequence:                aggregate.EvidenceSequence,
 		Definition:                      aggregate.Definition,
@@ -209,6 +210,7 @@ func runtimeStateRecordFromAggregate(aggregate runtime.RuntimeAggregate) runtime
 
 func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runtime.RuntimeAggregate {
 	ret := runtime.RuntimeAggregate{
+		ResultFeedbackVersion:           record.ResultFeedbackVersion,
 		StateRevision:                   record.StateRevision,
 		EvidenceSequence:                record.EvidenceSequence,
 		Definition:                      record.Definition,

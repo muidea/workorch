@@ -20,6 +20,7 @@ const RuntimeCandidateWireContractRevision = "runtime-candidate-wire-contract/v2
 // field already fixed by that manifest slot. Auxiliary rules are selected by
 // Kind and retain the provider-selectable operation vocabulary.
 type RuntimeCandidateWireOperationRule struct {
+	TargetParameterBindings        []RuntimeTargetParameterBinding `json:",omitempty"`
 	RequiredOperationRef           string
 	Kind                           string
 	VariantID                      string
@@ -208,6 +209,7 @@ func runtimeCandidateWireRuleForIdentitySelector(contract RuntimeCandidateWireCo
 }
 
 func (r RuntimeCandidateWireOperationRule) Normalized() RuntimeCandidateWireOperationRule {
+	r.TargetParameterBindings = normalizeRuntimeTargetParameterBindings(r.TargetParameterBindings)
 	r.RequiredOperationRef = strings.TrimSpace(r.RequiredOperationRef)
 	r.Kind = CanonicalRuntimeBlockKind(r.Kind)
 	r.VariantID = strings.TrimSpace(r.VariantID)
@@ -234,6 +236,7 @@ func (r RuntimeCandidateWireOperationRule) Normalized() RuntimeCandidateWireOper
 }
 
 func (r RuntimeCandidateWireOperationRule) Clone() RuntimeCandidateWireOperationRule {
+	r.TargetParameterBindings = cloneRuntimeTargetParameterBindings(r.TargetParameterBindings)
 	r = r.Normalized()
 	r.ProviderFields = append([]string(nil), r.ProviderFields...)
 	r.RequiredProviderFields = append([]string(nil), r.RequiredProviderFields...)
@@ -255,6 +258,9 @@ func (r RuntimeCandidateWireOperationRule) RequiredSlot() bool {
 
 func (r RuntimeCandidateWireOperationRule) DerivedParameterNames() []string {
 	names := make([]string, 0, len(r.DerivedParameters))
+	for _, binding := range r.TargetParameterBindings {
+		names = append(names, binding.Name)
+	}
 	for _, parameter := range r.Normalized().DerivedParameters {
 		names = append(names, parameter.Name)
 	}
@@ -385,6 +391,7 @@ func runtimeCandidateRequiredWireRule(operation RuntimeCandidateOperationManifes
 	requirement = normalizedRequirements[0]
 	rule := RuntimeCandidateWireOperationRule{
 		RequiredOperationRef:     requirement.RequirementID,
+		TargetParameterBindings:  cloneRuntimeTargetParameterBindings(operation.TargetParameterBindings),
 		Kind:                     operation.Kind,
 		VariantID:                requirement.VariantID,
 		ProviderFields:           []string{"requiredOperationRef"},
@@ -448,6 +455,7 @@ func runtimeCandidateAuxiliaryWireRule(operation RuntimeCandidateOperationManife
 	operation = operation.Normalized()
 	rule := RuntimeCandidateWireOperationRule{
 		Kind:                     operation.Kind,
+		TargetParameterBindings:  cloneRuntimeTargetParameterBindings(operation.TargetParameterBindings),
 		ProviderFields:           []string{"kind"},
 		RequiredProviderFields:   []string{"kind"},
 		DynamicParameterPrefixes: append([]string(nil), operation.DynamicParameterPrefixes...),
@@ -507,6 +515,9 @@ func runtimeCandidateWireParameterRule(
 	context string,
 ) (derived []OperationParameter, provider, required, requiredNonEmpty, requireOneOf []string, err error) {
 	derivedNames := make(map[string]struct{})
+	for _, binding := range operation.TargetParameterBindings {
+		derivedNames[binding.Name] = struct{}{}
+	}
 	if variant != nil {
 		for _, discriminator := range variant.Discriminators {
 			parameter, found := runtimeCandidateWireParameter(operation.Parameters, discriminator.Name)
@@ -672,6 +683,7 @@ func StableRuntimeCandidateWireContractHash(contract RuntimeCandidateWireContrac
 		writeHashString(h, rule.RequiredOperationRef)
 		writeHashString(h, rule.Kind)
 		writeHashString(h, rule.VariantID)
+		writeRuntimeTargetParameterBindingsHash(h, rule.TargetParameterBindings)
 		for _, values := range [][]string{
 			rule.ProviderFields, rule.RequiredProviderFields, rule.ProviderParameterNames,
 			rule.RequiredProviderParameterNames, rule.RequiredNonEmptyParameterNames, rule.RequireOneOfProviderParameters,

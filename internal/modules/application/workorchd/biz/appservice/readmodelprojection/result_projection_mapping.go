@@ -10,7 +10,7 @@ import (
 // source: result_item_mapping.go
 
 func mapResult(item *resultmodel.Result) projectioncontract.Result {
-	return projectioncontract.Result{
+	result := projectioncontract.Result{
 		ID:            string(item.ID),
 		WorkspaceID:   string(item.WorkspaceID),
 		RunID:         string(item.RunID),
@@ -28,6 +28,10 @@ func mapResult(item *resultmodel.Result) projectioncontract.Result {
 		CreatedAt:     item.CreatedAt,
 		UpdatedAt:     item.UpdatedAt,
 	}
+	if item.RuntimeCloseout != nil {
+		result.OriginalDiagnostic = item.RuntimeCloseout.OriginalDiagnostic.CloneOriginal()
+	}
+	return result
 }
 
 // source: result_mapping.go
@@ -55,7 +59,7 @@ func projectResult(item *resultmodel.Result) projectioncontract.Result {
 	if item == nil {
 		return projectioncontract.Result{}
 	}
-	return projectioncontract.Result{
+	result := projectioncontract.Result{
 		ID:           string(item.ID),
 		WorkspaceID:  string(item.WorkspaceID),
 		RunID:        string(item.RunID),
@@ -71,4 +75,8 @@ func projectResult(item *resultmodel.Result) projectioncontract.Result {
 		CreatedAt:    item.CreatedAt,
 		UpdatedAt:    item.UpdatedAt,
 	}
+	if item.RuntimeCloseout != nil {
+		result.OriginalDiagnostic = item.RuntimeCloseout.OriginalDiagnostic.CloneOriginal()
+	}
+	return result
 }

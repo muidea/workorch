@@ -7,6 +7,7 @@ import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBun
 import { workorchApi } from '../api';
 import { useSSE } from '../hooks';
 import { modelLabels } from '../utils/constants';
+import { originalDiagnosticLabel } from '../runtimeProgressPresentation';
 import * as helpers from '../helpers';
 import { canonicalActiveRunIsGovernanceBlocked, canonicalDefinitionClarification, workspaceDefinitionClarification, workspaceExecutionIntentAllowed } from '../governanceMutationTarget';
 
@@ -1372,6 +1373,9 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                     { key: 'summary', label: '成果结论', children: boundedParagraph(goalOutcomeSummary(runSnapshot), { rows: 3, className: 'goal-outcome-summary' }) },
                     { key: 'implementation', label: '实现摘要', children: outcomeSummary?.implementationSummary ? boundedParagraph(outcomeSummary.implementationSummary, { rows: 3 }) : '-' },
                     { key: 'verification', label: '验证摘要', children: outcomeSummary?.verificationSummary ? boundedParagraph(outcomeSummary.verificationSummary, { rows: 3 }) : '-' },
+                    { key: 'ownerCause', label: '原始失败来源', children: originalDiagnosticLabel(outcomeResult?.originalDiagnostic) },
+                    { key: 'ownerDiagnostic', label: '原始失败诊断', children: boundedParagraph(outcomeResult?.originalDiagnostic?.originalMessage || outcomeResult?.originalDiagnostic?.omittedReason || '-', { rows: 3 }) },
+                    { key: 'limitations', label: '已知限制', children: outcomeSummary?.knownLimitations?.length ? compactTags(outcomeSummary.knownLimitations, 4) : '-' },
                     { key: 'risks', label: '剩余风险', children: outcomeSummary?.residualRisks?.length ? compactTags(outcomeSummary.residualRisks, 4) : '-' },
                     { key: 'nextActions', label: '后续动作', children: outcomeSummary?.nextActions?.length ? compactTags(outcomeSummary.nextActions, 4) : '-' },
                     { key: 'source', label: '结果来源', children: outcomeResult ? `${outcomeResult.sourceType || '-'} / ${outcomeResult.sourceRef || '-'}` : '-' },

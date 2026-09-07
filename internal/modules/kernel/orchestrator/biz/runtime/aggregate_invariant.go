@@ -15,6 +15,9 @@ import (
 // validators are ordered to preserve the historical fail-fast sequence while
 // making each state-machine responsibility reviewable in isolation.
 func (a RuntimeAggregate) Validate() error {
+	if a.ResultFeedbackVersion > runtimecontract.RuntimeResultFeedbackVersionCurrent {
+		return fmt.Errorf("unsupported runtime result feedback version %d", a.ResultFeedbackVersion)
+	}
 	var active *runtimecontract.RuntimeDispatchRecord
 	if a.ActiveDispatch != nil {
 		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)

@@ -1475,6 +1475,7 @@ func runtimeProgressEqual(a, b *projectioncontract.RuntimeProgress) bool {
 		strings.TrimSpace(a.FailureCode) != strings.TrimSpace(b.FailureCode) ||
 		strings.TrimSpace(a.FailureSignature) != strings.TrimSpace(b.FailureSignature) ||
 		strings.TrimSpace(a.FailureMessage) != strings.TrimSpace(b.FailureMessage) ||
+		!reflect.DeepEqual(a.OriginalDiagnostic, b.OriginalDiagnostic) ||
 		strings.TrimSpace(a.PrerequisiteRefreshState) != strings.TrimSpace(b.PrerequisiteRefreshState) ||
 		a.PrerequisiteRefreshUsed != b.PrerequisiteRefreshUsed ||
 		a.PrerequisiteRefreshLimit != b.PrerequisiteRefreshLimit {

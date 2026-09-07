@@ -329,8 +329,8 @@ func runtimeCandidateProviderWirePayloadForCandidate(manifest RuntimeCandidateCo
 		}
 		if runtimeCandidateWireContains(rule.ProviderFields, "parameters") {
 			derived := make(map[string]struct{}, len(rule.DerivedParameters))
-			for _, parameter := range rule.DerivedParameters {
-				derived[parameter.Name] = struct{}{}
+			for _, name := range rule.DerivedParameterNames() {
+				derived[name] = struct{}{}
 			}
 			for _, parameter := range operation.Parameters {
 				if _, fixed := derived[parameter.Name]; fixed {

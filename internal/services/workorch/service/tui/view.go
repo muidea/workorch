@@ -670,6 +670,10 @@ func renderRuntimeProgressCompact(runtime *projectioncontract.RuntimeProgress, w
 		b.WriteString(truncateDisplay("- failure "+msg, width))
 		b.WriteString("\n")
 	}
+	if diagnostic := runtime.OriginalDiagnostic; diagnostic != nil {
+		b.WriteString(truncateDisplay(fmt.Sprintf("- owner cause %s | %s | %s", diagnostic.OwnerModuleID, diagnostic.OriginalCode, strings.Join(diagnostic.TargetRefs, ",")), width))
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 

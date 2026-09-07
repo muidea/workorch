@@ -411,29 +411,9 @@ func (d *RuntimeOriginalDiagnostic) CloneOriginal() *RuntimeOriginalDiagnostic {
 	if d == nil {
 		return nil
 	}
-	clone := *d
-	clone.TargetRefs = append([]string(nil), d.TargetRefs...)
-	clone.FieldViolations = make([]RuntimeFieldViolation, len(d.FieldViolations))
-	for index := range d.FieldViolations {
-		clone.FieldViolations[index] = d.FieldViolations[index].CloneOriginal()
-	}
-	clone.SemanticViolations = cloneRuntimeSemanticContractViolations(d.SemanticViolations)
-	if d.TargetObservation != nil {
-		value := d.TargetObservation.Clone()
-		clone.TargetObservation = &value
-	}
-	if d.ValidationDiagnostic != nil {
-		value := d.ValidationDiagnostic.Clone()
-		clone.ValidationDiagnostic = &value
-	}
-	if d.ValidationFailureObservation != nil {
-		value := d.ValidationFailureObservation.Clone()
-		clone.ValidationFailureObservation = &value
-	}
-	if d.GovernanceDependency != nil {
-		value := d.GovernanceDependency.Clone()
-		clone.GovernanceDependency = &value
-	}
+	// Reuse the aggregate's raw clone: nil/empty, producer order and nested
+	// diagnostic bytes must not change merely because a view was copied.
+	clone := cloneRuntimeOriginalDiagnosticRaw(*d)
 	return &clone
 }
 

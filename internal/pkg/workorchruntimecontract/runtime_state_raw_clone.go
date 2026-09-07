@@ -565,6 +565,7 @@ func cloneRuntimeCandidateContractManifestRaw(in RuntimeCandidateContractManifes
 
 func cloneRuntimeCandidateOperationManifestRaw(in RuntimeCandidateOperationManifest) RuntimeCandidateOperationManifest {
 	out := in
+	out.TargetParameterBindings = cloneRuntimeTargetParameterBindings(in.TargetParameterBindings)
 	out.CandidateConstraints = cloneRuntimeStateRawSlice(in.CandidateConstraints, func(value RuntimeOperationCandidateConstraint) RuntimeOperationCandidateConstraint { return value })
 	out.ValueRules = cloneRuntimeStateRawSlice(in.ValueRules, func(value RuntimeOperationValueRule) RuntimeOperationValueRule {
 		value.ParameterNames = cloneRuntimeStateRawSlice(value.ParameterNames, func(name string) string { return name })
@@ -1264,6 +1265,7 @@ func cloneRuntimeOperationRaw(in RuntimeOperation) RuntimeOperation {
 
 func cloneRuntimeOperationAdmissibilityRaw(in RuntimeOperationAdmissibility) RuntimeOperationAdmissibility {
 	out := in
+	out.TargetParameterBindings = cloneRuntimeTargetParameterBindings(in.TargetParameterBindings)
 	out.OperationKinds = cloneRuntimeStateRawSlice(in.OperationKinds, func(item string) string { return item })
 	out.OperationVariants = cloneRuntimeStateRawSlice(in.OperationVariants, func(item RuntimeOperationAdmissibilityVariant) RuntimeOperationAdmissibilityVariant {
 		return cloneRuntimeOperationAdmissibilityVariantRaw(item)

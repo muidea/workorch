@@ -284,10 +284,11 @@ func (r RuntimeCandidateAttemptRecord) Clone() RuntimeCandidateAttemptRecord {
 
 // RuntimeStateRecord 是 Runtime 在 Run owner 中持久化的唯一正式状态。
 type RuntimeStateRecord struct {
-	StateRevision    uint64
-	EvidenceSequence uint64
-	Definition       RuntimeDefinitionContext
-	Facts            RuntimeFacts
+	ResultFeedbackVersion uint32 `json:",omitempty"`
+	StateRevision         uint64
+	EvidenceSequence      uint64
+	Definition            RuntimeDefinitionContext
+	Facts                 RuntimeFacts
 	// SemanticPlanning is the sole persisted semantic-plan request/proposal/
 	// feasibility/seal ledger. Run stores it opaquely with the aggregate.
 	SemanticPlanning RuntimeSemanticPlanningLedger

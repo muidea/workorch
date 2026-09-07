@@ -95,6 +95,20 @@ func TestRuntimeFeedbackCloneDoesNotShareSlices(t *testing.T) {
 	}
 }
 
+func TestOriginalDiagnosticClonePreservesRawNilEmptyAndNestedShape(t *testing.T) {
+	for _, original := range []*RuntimeOriginalDiagnostic{
+		{OriginalMessage: " original "},
+		{TargetRefs: []string{}, FieldViolations: []RuntimeFieldViolation{}, SemanticViolations: []RuntimeSemanticContractViolation{}},
+		{TargetRefs: []string{" b ", "a", " b "}, ValidationDiagnostic: &ValidationFailureDiagnostic{TargetRefs: []string{" b ", "a", " b "}}},
+	} {
+		cloned := original.CloneOriginal()
+		if !reflect.DeepEqual(cloned, original) {
+			t.Fatalf("diagnostic clone normalized raw facts: got=%#v want=%#v", cloned, original)
+		}
+		assertRuntimeStateRawCloneDetached(t, reflect.ValueOf(original), reflect.ValueOf(cloned), "original diagnostic")
+	}
+}
+
 func TestRuntimeFeedbackValidationEnforcesDiagnosticAndSafetyBoundary(t *testing.T) {
 	feedback := validRuntimeFeedback()
 	if err := feedback.Validate(); err != nil {

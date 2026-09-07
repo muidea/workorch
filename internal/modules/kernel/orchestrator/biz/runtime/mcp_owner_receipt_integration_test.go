@@ -414,13 +414,20 @@ func TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot(t *tes
 	if !found {
 		t.Fatalf("candidate proposal lost File owner admissibility observation: %+v", persisted.Facts.Resources.PrerequisiteObservations)
 	}
+	var authorization runtimecontract.RuntimeCandidateOperationManifest
+	for _, operation := range manifest.Operations {
+		if operation.Kind == decodedCandidate.StateChange.Operations[0].Operation.Kind {
+			authorization = operation
+			break
+		}
+	}
 	probeResult := hub.Send(magicevent.NewEventWithContext(
 		fileevents.TopicProbeRuntimeOperationFeasibility, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile,
 		magicevent.NewHeader(), ctx, fileevents.ProbeRuntimeOperationFeasibilityCommand{
 			WorkspaceID: persisted.Facts.WorkspaceID, RunID: persisted.Facts.RunID, Transaction: persisted.Decision.AuthorityTransaction(),
 			WorkspaceDeliverableDirectory: workspaceDirectory, Operation: decodedCandidate.StateChange.Operations[0].Operation,
 			Admissibility: inventory, CapabilityStateBinding: inventory.AcquisitionBinding, Observation: &observation,
-			CandidateManifestHash: manifest.Hash, OperationAuthorization: mustRuntimeOperationAuthorizationIdentity(t, decodedCandidate.StateChange.Operations[0].Operation.Kind),
+			CandidateManifestHash: manifest.Hash, OperationAuthorization: authorization,
 		},
 	))
 	if probeResult == nil {

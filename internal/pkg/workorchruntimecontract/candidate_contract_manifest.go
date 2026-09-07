@@ -134,9 +134,10 @@ func (p RuntimeCandidateOperationSetPolicy) Validate(state ConvergenceState) err
 // parameter/variant contract, effect/coverage/dependency constraints, one
 // TargetPolicy, and snapshot/revision identity. It is not a second state object.
 type RuntimeCandidateOperationManifest struct {
-	Kind                   string
-	OwnerModuleID          string
-	AllowedOperationFields []string
+	TargetParameterBindings []RuntimeTargetParameterBinding `json:",omitempty"`
+	Kind                    string
+	OwnerModuleID           string
+	AllowedOperationFields  []string
 	// RequiredOperationFields is the single wire-level required-field source
 	// consumed by schema, prompt and strict payload validation. Authority fields
 	// such as operation ID and dependencies are deliberately absent: the
@@ -581,6 +582,7 @@ func (m RuntimeCandidateOperationManifest) Normalized() RuntimeCandidateOperatio
 	m.RequiredOperationFields = normalizeStrings(m.RequiredOperationFields)
 	m.AllowedVariantIDs = normalizeStrings(m.AllowedVariantIDs)
 	m.Parameters = cloneRuntimeOperationParameterContracts(m.Parameters)
+	m.TargetParameterBindings = normalizeRuntimeTargetParameterBindings(m.TargetParameterBindings)
 	m.RequireOneOfParameters = cloneRuntimeCandidateContractStrings(m.RequireOneOfParameters)
 	m.TargetCardinality = RuntimeOperationTargetCardinality(strings.TrimSpace(string(m.TargetCardinality)))
 	m.ForbiddenParameters = cloneRuntimeCandidateContractStrings(m.ForbiddenParameters)
@@ -701,6 +703,9 @@ func ValidateRuntimeCandidateContractManifestRawCanonical(manifest RuntimeCandid
 	for _, operation := range manifest.Operations {
 		if err := validateRuntimeOperationValueRuleDeclarations(operation.Kind, operation.Parameters, operation.ValueRules, operation.Variants); err != nil {
 			return fmt.Errorf("runtime candidate contract manifest operation %q value rules: %w", operation.Kind, err)
+		}
+		if err := validateRuntimeCandidateTargetParameterBindings(operation); err != nil {
+			return err
 		}
 	}
 	if err := ValidateCoverageEvidenceBindingProjection(manifest.Bindings); err != nil {
@@ -826,6 +831,7 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 	for _, operation := range manifest.Operations {
 		writeHashString(h, operation.Kind)
 		writeHashString(h, operation.OwnerModuleID)
+		writeRuntimeTargetParameterBindingsHash(h, operation.TargetParameterBindings)
 		writeHashStrings(h, operation.AllowedOperationFields)
 		writeHashStrings(h, operation.RequiredOperationFields)
 		writeHashStrings(h, operation.AllowedVariantIDs)
@@ -994,6 +1000,7 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		}
 	}
 	operationManifest := RuntimeCandidateOperationManifest{
+		TargetParameterBindings:     runtimeCandidateTargetParameterBindings(contract.Kind, target, ownerFacts.OperationAdmissibilities, descriptor.OwnerModuleID),
 		Kind:                        contract.Kind,
 		OwnerModuleID:               descriptor.OwnerModuleID,
 		AllowedOperationFields:      fields,
@@ -1023,6 +1030,9 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		return RuntimeCandidateOperationManifest{}, fmt.Errorf("candidate manifest operation kind %q value rules: %w", kind, err)
 	}
 	operationManifest.RequiredOperationFields = runtimeCandidateRequiredOperationFields(operationManifest)
+	if err := validateRuntimeCandidateTargetParameterBindings(operationManifest); err != nil {
+		return RuntimeCandidateOperationManifest{}, err
+	}
 	if _, err := RuntimeOperationCorrectionFields(operationManifest); err != nil {
 		return RuntimeCandidateOperationManifest{}, fmt.Errorf("candidate manifest operation kind %q correction metadata: %w", kind, err)
 	}

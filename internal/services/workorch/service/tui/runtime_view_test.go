@@ -213,6 +213,25 @@ func TestRenderRuntimeProgressKeepsProviderTransportFailureSeparateFromFreshness
 	}
 }
 
+func TestRuntimeProgressShowsOriginalOwnerCauseAndRefreshesOnCauseChange(t *testing.T) {
+	progress := &projectioncontract.RuntimeProgress{
+		FailureCode: "equivalent_authority_no_progress", FailureMessage: "unchanged authority inputs",
+		OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/file", OriginalCode: "patch_basehash_mismatch", TargetRefs: []string{"session.txt"}},
+	}
+	text := stripANSI(renderRuntimeProgressCompact(progress, 180))
+	if !strings.Contains(text, "failure unchanged authority inputs") || !strings.Contains(text, "owner cause blocks/file | patch_basehash_mismatch | session.txt") || !strings.Contains(text, "durable effects 0 | accepted validation 0 | satisfied CWI 0") {
+		t.Fatalf("terminal/root cause or zero progress is missing: %q", text)
+	}
+	changed := projectioncontract.CloneRuntimeProgress(progress)
+	if !runtimeProgressEqual(progress, changed) {
+		t.Fatal("diagnostic clone changed display")
+	}
+	changed.OriginalDiagnostic.OriginalCode = "different_owner_code"
+	if runtimeProgressEqual(progress, changed) {
+		t.Fatal("TUI ignored original cause change")
+	}
+}
+
 func TestRuntimeViewFollowTailAndUserScrolledUnread(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-follow", "")
 	m.width = 120
