@@ -1455,6 +1455,7 @@ func runtimeProgressEqual(a, b *projectioncontract.RuntimeProgress) bool {
 		return false
 	}
 	if a.StateRevision != b.StateRevision ||
+		!reflect.DeepEqual(a.RunEvidence, b.RunEvidence) ||
 		a.LatestAcceptedEvidenceAt != b.LatestAcceptedEvidenceAt ||
 		a.LatestDurableEffectAt != b.LatestDurableEffectAt ||
 		a.DurableEffectCount != b.DurableEffectCount ||

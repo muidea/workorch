@@ -446,7 +446,7 @@ func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.R
 		if missing := runtimecontract.RuntimeMissingOwnerFactRequirements(facts.Focus.RequiredOwnerFacts, facts.Resources.OperationAdmissibilities); len(missing) != 0 {
 			acquisition, ready := runtimecontract.ResolveRuntimeOwnerFactAcquisition(facts.Focus.RequiredOwnerFacts, facts.Focus.OwnerFactConvergences, facts.Resources.OperationAdmissibilities)
 			if !ready || runtimeOwnerFactReplanBudgetExhausted(facts, acquisition) {
-				return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "owner_fact_convergence_exhausted", "required capability-owner fact remained unavailable after the bounded semantic replan budget"), nil
+				return ownerFactExhaustedDecision(base, facts), nil
 			}
 		}
 	}
@@ -1602,7 +1602,7 @@ func repairableAssessmentDecision(base runtimecontract.RuntimeDecision, facts ru
 	if len(runtimecontract.RuntimeMissingOwnerFactRequirements(facts.Focus.RequiredOwnerFacts, facts.Resources.OperationAdmissibilities)) != 0 {
 		acquisition, acquisitionReady := runtimecontract.ResolveRuntimeOwnerFactAcquisition(facts.Focus.RequiredOwnerFacts, facts.Focus.OwnerFactConvergences, facts.Resources.OperationAdmissibilities)
 		if !acquisitionReady || runtimeOwnerFactReplanBudgetExhausted(facts, acquisition) {
-			return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "owner_fact_convergence_exhausted", "required capability-owner fact remained unavailable after the bounded semantic replan budget"), nil
+			return ownerFactExhaustedDecision(base, facts), nil
 		}
 		// Production assessment commit normally reopens the CWI and retires its
 		// semantic generation in the same CAS before reaching this reducer. This

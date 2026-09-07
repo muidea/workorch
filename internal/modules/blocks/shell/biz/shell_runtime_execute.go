@@ -110,6 +110,17 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 			return finalizeShellResult(output, err)
 		}
 	}
+	behaviorArgs, behaviorPath, behaviorErr := prepareShellBehaviorObservation(request, execArgs)
+	if behaviorErr != nil {
+		now := time.Now().UTC()
+		output := shellBaseOutput(request, command, args, deliverableDirectory, commandNormalization, execCommand)
+		output.Status, output.Stage = "failed", "validation_behavior_contract_rejected"
+		output.FailureCode, output.FailureReason = "validation_behavior_contract_rejected", "validation_behavior_contract_rejected"
+		attachManagedValidationResources(&output, request, 0, now, now, "failed")
+		attachShellValidationFailureDiagnostic(&output, request, execCommand, 0, false, true, behaviorErr)
+		return finalizeShellResult(output, behaviorErr)
+	}
+	execArgs = behaviorArgs
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -119,6 +130,9 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	cmd.Env = a.filteredEnv()
 	if managedValidation {
 		cmd.Env = managedValidationEnvironment(cmd.Env, request.ValidationScratchDirectory)
+	}
+	if shellRequiresWorkspaceBehavior(request) {
+		cmd.Env = shellBehaviorEnvironment(cmd.Env)
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
@@ -176,6 +190,9 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	attachShellValidationObservation(&output, command, args, request.ValidationRecipeID, managedValidation)
 	attachShellValidationCheckFailures(&output, request)
 	applyShellEvidencePolicies(request.EvidencePolicies, command, args, request.ValidationRecipeID, &output)
+	if behaviorErr := attachShellWorkspaceBehavior(&output, request, executionDirectory, behaviorPath); err == nil && behaviorErr != nil {
+		err = behaviorErr
+	}
 	if runCtx.Err() == context.DeadlineExceeded {
 		output.Status = "timeout"
 		output.Stage = "shell_command_timeout"

@@ -1574,6 +1574,7 @@ func cloneRuntimeProspectiveTargetSatisfactionConstraintRaw(in RuntimeProspectiv
 
 func cloneRuntimeValidationProofPreparationRaw(in RuntimeValidationProofPreparation) RuntimeValidationProofPreparation {
 	out := in
+	out.OriginalDiagnostic = in.OriginalDiagnostic.CloneOriginal()
 	out.CheckAttestations = cloneRuntimeStateRawSlice(in.CheckAttestations, func(value RuntimeValidationCheckAttestationBinding) RuntimeValidationCheckAttestationBinding {
 		return value
 	})
@@ -2067,6 +2068,7 @@ func cloneRuntimeTemplateStageRequiredOutputRaw(in RuntimeTemplateStageRequiredO
 
 func cloneRuntimeTerminalDecisionRaw(in RuntimeTerminalDecision) RuntimeTerminalDecision {
 	out := in
+	out.OriginalDiagnostic = in.OriginalDiagnostic.CloneOriginal()
 	return out
 }
 

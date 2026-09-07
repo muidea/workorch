@@ -57,6 +57,14 @@ coverage、assessment和evidence使用三个独立projection字段；单一progr
 `partially_covered`、`indeterminate`或`stale_or_superseded`。recoverable wait与governance blocker、terminal failure分开展示，
 并绑定同一Runtime state revision；execution-budget view只读展示confirmed/unknown/remaining，不能成为本地倒计时authority。
 
+Runtime progress 必须明确区分整个 Run 与当前 focus 的口径。`runEvidence` 汇总当前 Run accepted/rejected ledger 的
+全部 evidence 和 validation，与正式 Result 的累计口径一致；legacy flat `acceptedEvidenceCount`、
+`acceptedValidationEvidenceCount`、`rejectedEvidenceCount` 保持当前 focus diagnostic lineage 语义，其中 accepted
+validation 还要求 CWI credit。durable effects、satisfied CWI 与 dispatch 是全 Run 指标，不能与 focus validation 数量
+混排成同一累计摘要。旧 producer 未提供 `runEvidence` 时显示缺省，不把未知累计数填为零。TUI 与 Web 共用的
+Runtime summary 必须标注 `whole Run` / `current focus`；scope 切换、统计和 terminal owner cause 变化均触发显示刷新，
+不重算 acceptance 或迁移任何 Runtime 状态。
+
 ## Local Interrupt
 
 `Ctrl+C` changes only local `running/progress` display fields. A later owner notification or explicit refresh may show that the

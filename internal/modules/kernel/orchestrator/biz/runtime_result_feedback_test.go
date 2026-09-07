@@ -79,3 +79,27 @@ func TestRuntimeTerminalFeedbackKeepsLegacyDeliveryMaterialAndRejectsUnknownVers
 		t.Fatal("unknown feedback version fell back to a different Result material")
 	}
 }
+
+func TestRuntimeReadinessTerminalCauseSurvivesResultMaterialAndOpaqueRoundTrip(t *testing.T) {
+	aggregate := runtimeTerminalAggregate(t)
+	aggregate.ResultFeedbackVersion = runtimecontract.RuntimeResultFeedbackVersionCurrent
+	aggregate.Facts.Failure = nil
+	aggregate.Decision.State = runtimecontract.ConvergenceStateFailed
+	diagnostic := &runtimecontract.RuntimeOriginalDiagnostic{SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: runtimecontract.RuntimeModuleShell,
+		OriginalClass: "validation_readiness", OriginalCode: "native_check_assertion_unresolved", OriginalMessage: "exact native check has no supported assertion", Signature: "readiness/cwi", TargetRefs: []string{"checks/cwi.test"}}
+	aggregate.Decision.Terminal = &runtimecontract.RuntimeTerminalDecision{Code: "owner_fact_convergence_exhausted", Summary: "bounded acquisition exhausted", OriginalDiagnostic: diagnostic}
+	// The materializer consumes already-sealed facts; reducer/invariant tests
+	// separately prove their owner event and exact-catalog authority.
+	item := mustRuntimeResultMaterial(t, aggregate)
+	if !reflect.DeepEqual(item.RuntimeCloseout.OriginalDiagnostic, diagnostic) || item.RuntimeCloseout.FailureCode != "owner_fact_convergence_exhausted" {
+		t.Fatal("formal Result lost exact readiness cause")
+	}
+	restored := runtimeAggregateFromRecord(runtimeStateRecordFromAggregate(aggregate))
+	if repeated := mustRuntimeResultMaterial(t, restored); !reflect.DeepEqual(item, repeated) {
+		t.Fatal("delivery retry/restart changed Result material")
+	}
+	item.RuntimeCloseout.OriginalDiagnostic.TargetRefs[0] = "modified"
+	if diagnostic.TargetRefs[0] != "checks/cwi.test" {
+		t.Fatal("Result aliases terminal authority")
+	}
+}

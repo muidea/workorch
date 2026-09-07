@@ -369,6 +369,11 @@ func TestCommitAssessmentFailsClosedAfterOwnerFactReplanBudget(t *testing.T) {
 
 func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool, operationKinds ...string) (*RuntimeController, *controllerRepository, runtimecontract.RuntimeFacts) {
 	t.Helper()
+	return prepareOwnerFactAssessmentWithDiagnostic(t, ownerFactReady, nil, operationKinds...)
+}
+
+func prepareOwnerFactAssessmentWithDiagnostic(t *testing.T, ownerFactReady bool, diagnostic *runtimecontract.RuntimeOriginalDiagnostic, operationKinds ...string) (*RuntimeController, *controllerRepository, runtimecontract.RuntimeFacts) {
+	t.Helper()
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
@@ -433,6 +438,19 @@ func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool, operationKind
 	facts, err = runtimeTestBindManagedValidationProofRequirements(facts)
 	if err != nil {
 		t.Fatalf("bind owner-fact assessment validation proof: %v", err)
+	}
+	if diagnostic != nil {
+		for catalogIndex := range facts.Resources.OperationAdmissibilities {
+			catalog := &facts.Resources.OperationAdmissibilities[catalogIndex]
+			for surfaceIndex := range catalog.ValidationSurfaces {
+				for preparationIndex := range catalog.ValidationSurfaces[surfaceIndex].ProofRequirementPreparations {
+					preparation := &catalog.ValidationSurfaces[surfaceIndex].ProofRequirementPreparations[preparationIndex]
+					preparation.OriginalDiagnostic = diagnostic.CloneOriginal()
+					preparation.OriginalDiagnostic.ObservedRevision = catalog.ObservedRevision
+				}
+			}
+			catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
+		}
 	}
 	bootstrapFacts := facts
 	definition := controllerDefinition()

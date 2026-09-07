@@ -1230,6 +1230,10 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 				writeHashString(h, attestation.NativeCheckRef)
 			}
 			writeHashString(h, stableRuntimeProspectiveTargetSatisfactionConstraintHashCanonical(preparation.ProspectiveTargetSatisfactionConstraint))
+			if preparation.OriginalDiagnostic != nil {
+				writeHashString(h, "proof-preparation-original-diagnostic/v1")
+				writeHashString(h, StableRuntimeFeedbackHash(RuntimeFeedback{OriginalDiagnostic: preparation.OriginalDiagnostic}))
+			}
 		}
 		writeHashString(h, string(surface.EffectScope))
 		writeHashString(h, string(surface.IdempotencyClass))
@@ -1629,6 +1633,9 @@ type AuthoritySnapshot struct {
 type RuntimeTerminalDecision struct {
 	Code    string
 	Summary string
+	// Audit-only cause sealed by SM-2 from exact-current owner facts. It cannot
+	// choose a transition or authorize another acquisition.
+	OriginalDiagnostic *RuntimeOriginalDiagnostic `json:",omitempty"`
 }
 
 // TerminalOutcomeKind is the one terminal identity that crosses the SM-4
@@ -2478,6 +2485,7 @@ func SealRuntimeDecision(facts RuntimeFacts, decision RuntimeDecision, attempt i
 		terminal := *decision.Terminal
 		terminal.Code = strings.TrimSpace(terminal.Code)
 		terminal.Summary = strings.TrimSpace(terminal.Summary)
+		terminal.OriginalDiagnostic = terminal.OriginalDiagnostic.CloneOriginal()
 		decision.Terminal = &terminal
 	}
 	requiredOutputHash := StableRequiredOutputHash(decision.RequiredOutput)
@@ -2524,6 +2532,11 @@ func (d RuntimeDecision) Validate() error {
 	}
 	if d.Terminal != nil && d.Terminal.Code == "" {
 		return fmt.Errorf("terminal outcome requires a code")
+	}
+	if d.Terminal != nil && d.Terminal.OriginalDiagnostic != nil {
+		if err := d.Terminal.OriginalDiagnostic.Validate(); err != nil {
+			return fmt.Errorf("terminal owner diagnostic: %w", err)
+		}
 	}
 	if d.State == ConvergenceStateNeedPrerequisite && len(d.Prerequisites) == 0 {
 		return fmt.Errorf("prerequisite decision requires pending prerequisites")

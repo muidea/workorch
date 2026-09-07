@@ -430,6 +430,7 @@ func %s(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, nativeTargetRef), []byte(nativeSource), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeNativeStructureSource(t, workspace, "main.go", "package main\n")
 	commonInputMissing := acquire("admissibility-shell-native-present-common-input-missing", "tree-native-without-module", []string{"main.go", nativeTargetRef})
 	commonInputMissingSurface, found := shellValidationSurfaceForTest(commonInputMissing.ValidationSurfaces, recipe.ID)
 	if !found || commonInputMissingSurface.Readiness != runtimecontract.RuntimeValidationSurfacePrerequisiteRequired ||

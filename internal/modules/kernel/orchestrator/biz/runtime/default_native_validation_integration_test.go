@@ -142,6 +142,12 @@ func TestBuiltinSoftwareDevAllManagedCWIsCloseThroughTypedNativeProofPipeline(t 
 	if len(moduleReceipt.TargetRefs) != 1 || moduleReceipt.TargetRefs[0] != "go.mod" {
 		t.Fatalf("File module preparation did not attest Shell's exact module target: %+v", moduleReceipt)
 	}
+	// This fixture proves the owner protocol, not arbitrary template semantics.
+	// Its fixed subject is separate from the native validation inputs and must
+	// really execute under the v2 behavior-observation contract.
+	subject := "package fixture\nfunc DeliveredValue() int { return 4 }\n"
+	executeFileWrite(runtimecontract.RuntimeOperation{ID: "fixture-subject", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{"fixture.go"},
+		Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &subject}}}, "dispatch-fixture-subject")
 
 	// Each File operation is one exact owner-authored prospective target. A
 	// provider may return the set as several operations in one candidate, but it
@@ -343,10 +349,10 @@ func defaultNativeProofFileOperation(
 	index int,
 ) runtimecontract.RuntimeOperation {
 	var source strings.Builder
-	source.WriteString("package workorch_validation\n\nimport \"testing\"\n\n")
+	source.WriteString("package workorch_validation\n\nimport (\"testing\"; subject \"example.com/workorch-default-native-proof\")\n\n")
 	for _, attestation := range preparation.CheckAttestations {
 		fmt.Fprintf(&source, "func %s(t *testing.T) {\n", attestation.NativeCheckRef)
-		source.WriteString("\tif 2+2 != 4 { t.Fatal(\"owner-native validation assertion failed\") }\n")
+		source.WriteString("\tif subject.DeliveredValue() != 4 { t.Fatal(\"owner-native validation assertion failed\") }\n")
 		source.WriteString("}\n\n")
 	}
 	content := source.String()

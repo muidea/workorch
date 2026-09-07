@@ -207,6 +207,11 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
 	if err := a.Decision.Validate(); err != nil {
 		return err
 	}
+	if terminal := a.Decision.Terminal; terminal != nil && terminal.OriginalDiagnostic != nil {
+		if terminal.Code != "owner_fact_convergence_exhausted" || !reflect.DeepEqual(terminal.OriginalDiagnostic, missingOwnerFactDiagnostic(a.Facts)) {
+			return fmt.Errorf("runtime terminal owner cause does not match exact-current missing owner fact")
+		}
+	}
 	if a.Decision.AuthoritySnapshot.WorkspaceID != a.Facts.WorkspaceID || a.Decision.AuthoritySnapshot.RunID != a.Facts.RunID {
 		return fmt.Errorf("runtime aggregate decision scope mismatch")
 	}

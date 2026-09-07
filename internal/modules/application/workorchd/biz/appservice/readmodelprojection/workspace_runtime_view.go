@@ -123,16 +123,17 @@ func runtimeProgressSummary(runtime *projectioncontract.RuntimeProgress) string 
 	}
 	parts = append(parts, fmt.Sprintf("dispatch %d", runtime.CompletedDispatchCount))
 	parts = append(parts, fmt.Sprintf("attempts %d", runtime.CandidateAttemptCount))
-	parts = append(parts, fmt.Sprintf("durable effects %d | accepted validation %d | satisfied CWI %d", runtime.DurableEffectCount, runtime.AcceptedValidationEvidenceCount, runtime.SatisfiedCWICount))
+	parts = append(parts, fmt.Sprintf("whole Run: durable effects %d | satisfied CWI %d", runtime.DurableEffectCount, runtime.SatisfiedCWICount))
+	if counts := runtime.RunEvidence; counts != nil {
+		parts = append(parts, fmt.Sprintf("whole Run: evidence accepted %d rejected %d | validation accepted %d rejected %d", counts.Accepted, counts.Rejected, counts.AcceptedValidation, counts.RejectedValidation))
+	}
 	if runtime.ValidationFailureOccurrences > 1 {
 		parts = append(parts, fmt.Sprintf("same validation failure %d", runtime.ValidationFailureOccurrences))
 	}
 	if state := strings.TrimSpace(runtime.PrerequisiteRefreshState); state != "" {
 		parts = append(parts, fmt.Sprintf("prerequisite refresh %s %d/%d", state, runtime.PrerequisiteRefreshUsed, runtime.PrerequisiteRefreshLimit))
 	}
-	if runtime.AcceptedEvidenceCount > 0 || runtime.RejectedEvidenceCount > 0 {
-		parts = append(parts, fmt.Sprintf("accepted %d rejected %d", runtime.AcceptedEvidenceCount, runtime.RejectedEvidenceCount))
-	}
+	parts = append(parts, fmt.Sprintf("current focus: evidence accepted %d rejected %d | CWI-credited validation %d", runtime.AcceptedEvidenceCount, runtime.RejectedEvidenceCount, runtime.AcceptedValidationEvidenceCount))
 	if len(runtime.MissingEvidenceKinds) > 0 {
 		parts = append(parts, "missing "+strings.Join(runtime.MissingEvidenceKinds, ","))
 	}
@@ -140,6 +141,9 @@ func runtimeProgressSummary(runtime *projectioncontract.RuntimeProgress) string 
 		parts = append(parts, msg)
 	} else if class := strings.TrimSpace(runtime.FailureClass); class != "" {
 		parts = append(parts, class)
+	}
+	if diagnostic := runtime.OriginalDiagnostic; diagnostic != nil {
+		parts = append(parts, "owner cause "+diagnostic.OwnerModuleID+" / "+diagnostic.OriginalCode+": "+diagnostic.OriginalMessage)
 	}
 	return strings.Join(parts, " | ")
 }

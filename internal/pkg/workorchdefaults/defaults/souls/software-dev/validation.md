@@ -10,6 +10,8 @@
 - version-control snapshot 必须引用 Git owner 的 matching commit receipt；`git status`、`git diff`、`git log`、file read 或 shell 输出只能作为辅助事实。
 - 对 CLI、服务、API、配置、持久化、错误路径、流式、并发、性能和外部协议等高风险维度，必须引用命中真实交付入口的直接行为证据。
 - fake/mock/helper 可以替代外部依赖，但验证仍需通过真实生产入口；占位测试、`no tests`、跳过或无断言结果属于弱证据。
+- 区分检查结构就绪、交付实现实际执行、CWI 行为判据满足三个维度。实现执行覆盖只是必要事实，不是任意 Goal/DoD 的充分证明；源码/README 名称匹配和绕过交付物的外部依赖测试不能关闭功能 CWI。
+- 验收判据被修改时，必须有独立授权及保持原验收意图的正反例校准证据；生产修复 receipt 或新测试通过不能自行批准判据变更。
 
 ## 评估输出
 

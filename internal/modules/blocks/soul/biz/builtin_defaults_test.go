@@ -2,6 +2,7 @@ package soul
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -19,6 +20,18 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 )
 
+// Frozen Git-reviewed inputs must not be reconstructed from the latest Soul:
+// otherwise every guidance edit silently changes the historical test baseline.
+//
+//go:embed testdata/software-dev-execution-fe73385d.md
+var historicalExecutionSoulMD string
+
+//go:embed testdata/software-dev-execution-0be3a5f3.md
+var previousExecutionSoulMD string
+
+//go:embed testdata/software-dev-validation-0be3a5f3.md
+var previousValidationSoulMD string
+
 func historicalExecutionSoul(t *testing.T) soulevents.CreateSoulCommand {
 	t.Helper()
 	defaults, err := workorchdefaults.BuiltinSoulDefaults()
@@ -30,20 +43,7 @@ func historicalExecutionSoul(t *testing.T) soulevents.CreateSoulCommand {
 			continue
 		}
 		cmd := soulDefaultCreateCommand(raw)
-		lines := strings.Split(cmd.SoulMD, "\n")
-		for i, line := range lines {
-			if strings.HasPrefix(line, "- existing target 必须使用") {
-				lines[i] = "- existing target 必须使用 owner 已声明的 `patch/apply:unified_diff`，把同一文件的所有必要修改合并为一个最小 diff，并携带 owner snapshot 给出的 revision/base hash；不得为同一 target 再选择 create-only `file/write` 或第二个 patch。"
-			}
-		}
-		kept := lines[:0]
-		for _, line := range lines {
-			if strings.HasPrefix(line, "- 修复必须对应 C4") || strings.HasPrefix(line, "- 不得通过 skip") {
-				continue
-			}
-			kept = append(kept, line)
-		}
-		cmd.SoulMD = strings.Join(kept, "\n")
+		cmd.SoulMD = historicalExecutionSoulMD
 		value, err := normalizedSoulFromCommand(cmd)
 		if err != nil {
 			t.Fatal(err)
@@ -55,6 +55,61 @@ func historicalExecutionSoul(t *testing.T) soulevents.CreateSoulCommand {
 	}
 	t.Fatal("missing builtin execution Soul")
 	return soulevents.CreateSoulCommand{}
+}
+
+func TestPreviousSoftwareDevSoulReviewedFingerprints(t *testing.T) {
+	defaults, err := workorchdefaults.BuiltinSoulDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range defaults {
+		md := ""
+		switch raw.ID {
+		case "soul-software-dev-execution":
+			md = previousExecutionSoulMD
+		case "soul-software-dev-validation":
+			md = previousValidationSoulMD
+		default:
+			continue
+		}
+		cmd := soulDefaultCreateCommand(raw)
+		cmd.SoulMD = md
+		value, err := normalizedSoulFromCommand(cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash := soulmodel.StableSoulContentHash(value)
+		if workorchdefaults.KnownBuiltinContentRevision("soul", raw.ID, hash) == "" {
+			t.Fatalf("previous %s is not reviewed: %s", raw.ID, hash)
+		}
+		for _, backend := range []string{"memory", "file"} {
+			t.Run(raw.ID+"/"+backend, func(t *testing.T) {
+				ctx := context.Background()
+				root := filepath.Join(t.TempDir(), "souls")
+				var repo repository.SoulRepository = memoryrepo.NewSoulRepository()
+				if backend == "file" {
+					repo = filerepo.NewSoulRepository(root)
+				}
+				old, err := newService(repo).createSoul(ctx, cmd, soulmodel.SoulSourceBuiltinSeed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for attempt := 0; attempt < 2; attempt++ {
+					if backend == "file" {
+						repo = filerepo.NewSoulRepository(root)
+					}
+					s := newService(repo)
+					if err := s.ensureCurrentBuiltinSoulDefaults(ctx); err != nil {
+						t.Fatal(err)
+					}
+					current, err := s.getSoul(ctx, old.ID)
+					if err != nil || current.Revision != old.Revision+1 || current.ContentHash == old.ContentHash {
+						t.Fatalf("previous seed did not load/replay latest content: %+v %v", current, err)
+					}
+				}
+			})
+		}
+	}
 }
 
 func TestSoftwareDevExecutionGuidanceIsFactBound(t *testing.T) {

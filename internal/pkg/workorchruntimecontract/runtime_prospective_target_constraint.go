@@ -190,6 +190,9 @@ type RuntimeValidationProofPreparation struct {
 	ValidationRecipeID string
 	TargetRef          string
 	CheckAttestations  []RuntimeValidationCheckAttestationBinding
+	// OriginalDiagnostic is owner-authored observation, never an action or a
+	// repair authorization. Omission preserves historical catalog identities.
+	OriginalDiagnostic *RuntimeOriginalDiagnostic `json:",omitempty"`
 	// ProspectiveTargetSatisfactionConstraint is the complete, per-CWI target
 	// contract authored by the capability owner. Keeping it on the preparation
 	// record avoids turning one recipe-wide surface readiness into an all-CWI
@@ -205,6 +208,7 @@ func (p RuntimeValidationProofPreparation) Normalized() RuntimeValidationProofPr
 	p.ValidationRecipeID = strings.TrimSpace(p.ValidationRecipeID)
 	p.TargetRef = strings.TrimSpace(p.TargetRef)
 	p.CheckAttestations = NormalizeRuntimeValidationCheckAttestationBindings(p.CheckAttestations)
+	p.OriginalDiagnostic = p.OriginalDiagnostic.CloneOriginal()
 	p.ProspectiveTargetSatisfactionConstraint = p.ProspectiveTargetSatisfactionConstraint.Normalized()
 	return p
 }
@@ -239,6 +243,14 @@ func (p RuntimeValidationProofPreparation) Validate() error {
 	}
 	if constraint.ValidationRecipeID != p.ValidationRecipeID {
 		return fmt.Errorf("runtime validation proof preparation recipe does not match target constraint")
+	}
+	if p.OriginalDiagnostic != nil {
+		if err := p.OriginalDiagnostic.Validate(); err != nil {
+			return fmt.Errorf("runtime validation proof preparation diagnostic: %w", err)
+		}
+		if p.OriginalDiagnostic.OwnerModuleID != constraint.OwnerModuleID || p.OriginalDiagnostic.ObservedRevision != constraint.CatalogObservedRevision {
+			return fmt.Errorf("runtime validation proof preparation diagnostic must match its owner and catalog revision")
+		}
 	}
 	if p.TargetRef != "" {
 		exactTargetDeclared := false

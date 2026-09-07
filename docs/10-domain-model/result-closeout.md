@@ -121,6 +121,7 @@ RuntimeResultCloseout
   FailureClass
   FailureCode
   FailureSignature
+  OriginalDiagnostic
   PredecessorRunID
   PredecessorResultID
   RecoveryPolicy
@@ -138,6 +139,10 @@ RuntimeResultCloseout
 6. terminal all-of witness、Runtime state revision与terminal delivery引用同一aggregate closeout transaction。
 
 rejected closeout 仍必须逐项保存已满足、未满足、未判定和stale lineage，以及typed failure/gap；不能伪造成空结果。
+具体 owner 原因来自已持久化 FailureFact，或 SM-2 在 owner-fact 有界耗尽时封存的 terminal `OriginalDiagnostic`；
+无 FailureFact 不等于没有具体原因。终止 code 与原始 owner code 保持独立，原始 requirement/check/target/revision 信息
+不得由 Result 或 Application 重建、归一成泛化错误或用于重新选择下一轮动作。原因参与 closeout hash，duplicate/restart
+必须保持原始值；历史无该可选字段的记录与 legacy feedback renderer 不升级、不补写。
 `KnownLimitations[]` 只描述未被Definition声明为required的已知限制；不能豁免required CWI或把`indeterminate`变为成功。
 
 `RequirementOutcomes[]`、refs、limitations和operation outcomes canonical排序后计算`CloseoutHash`。same `CloseoutID`的duplicate

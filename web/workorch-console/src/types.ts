@@ -1356,6 +1356,7 @@ export type RuntimeRepairClosure = {
 // Audit is display-only. In particular, gap.missingEvidenceKinds is an LLM
 // claim and cannot be used to select action, retries or any command.
 export type RuntimeAudit = {
+  terminal?: { code?: string; summary?: string; originalDiagnostic?: RuntimeOriginalDiagnostic; administrativeKind?: string; administrativeRevision?: number; terminalDeliveryAttempts?: number };
   candidateAttempts?: RuntimeAuditCandidateAttempt[];
 	startupInputHash?: string;
 	sealedProfileContractsHash?: string;
@@ -1607,6 +1608,8 @@ export type TaskProgress = {
 };
 
 export type RuntimeProgress = {
+  // Whole-Run totals; absent on older producers. Flat counts below are focus-scoped.
+  runEvidence?: { accepted: number; acceptedValidation: number; rejected: number; rejectedValidation: number };
   originalDiagnostic?: RuntimeOriginalDiagnostic;
   latestAcceptedEvidenceAt?: string;
   latestDurableEffectAt?: string;

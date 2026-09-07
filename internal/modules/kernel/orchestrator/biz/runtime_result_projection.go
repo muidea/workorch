@@ -618,6 +618,13 @@ func (a *runtimeCloseoutAccumulator) applyTerminalFailure(closeout *runtimecontr
 	if closeout.FailureCode == "" && aggregate.Decision.Terminal != nil {
 		closeout.FailureCode = strings.TrimSpace(aggregate.Decision.Terminal.Code)
 	}
+	if aggregate.Decision.Terminal != nil && aggregate.Decision.Terminal.OriginalDiagnostic != nil {
+		closeout.OriginalDiagnostic = aggregate.Decision.Terminal.OriginalDiagnostic.CloneOriginal()
+		for _, ref := range closeout.OriginalDiagnostic.TargetRefs {
+			a.targets[ref] = struct{}{}
+		}
+		closeout.TargetRefs = stringsFromSet(a.targets)
+	}
 	if closeout.FailureSignature == "" && aggregate.Facts.Repair.LastCycleID != "" {
 		closeout.FailureSignature = aggregate.Facts.Repair.LastCycleID
 	}

@@ -206,11 +206,12 @@ type RuntimeAuditCandidateAttempt struct {
 }
 
 type RuntimeAuditTerminal struct {
-	Code                     string `json:"code,omitempty"`
-	Summary                  string `json:"summary,omitempty"`
-	AdministrativeKind       string `json:"administrativeKind,omitempty"`
-	AdministrativeRevision   uint64 `json:"administrativeRevision,omitempty"`
-	TerminalDeliveryAttempts int    `json:"terminalDeliveryAttempts,omitempty"`
+	OriginalDiagnostic       *runtimecontract.RuntimeOriginalDiagnostic `json:"originalDiagnostic,omitempty"`
+	Code                     string                                     `json:"code,omitempty"`
+	Summary                  string                                     `json:"summary,omitempty"`
+	AdministrativeKind       string                                     `json:"administrativeKind,omitempty"`
+	AdministrativeRevision   uint64                                     `json:"administrativeRevision,omitempty"`
+	TerminalDeliveryAttempts int                                        `json:"terminalDeliveryAttempts,omitempty"`
 }
 
 // RuntimeAuditCoverageBinding is immutable activation-declaration metadata.
@@ -403,6 +404,7 @@ func CloneRuntimeAudit(item *RuntimeAudit) *RuntimeAudit {
 	ret.Assessments = CloneRuntimeAuditAssessments(item.Assessments)
 	if item.Terminal != nil {
 		terminal := *item.Terminal
+		terminal.OriginalDiagnostic = terminal.OriginalDiagnostic.CloneOriginal()
 		ret.Terminal = &terminal
 	}
 	return &ret

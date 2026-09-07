@@ -62,6 +62,10 @@ capability resource state。
   owner 从当前 typed ready catalog 选择兼容 recipe 并返回 exact per-CWI applicability binding。semantic provider 不能编写
   declaration/check，SM-2 也不能把 recipe ID、generic exit 0 或另一个 CWI 的 marker 提升为 proof。
 - capability owner 可对尚缺 native check/input 的 exact requirement 返回 revision-bound preparation；它不是 Runtime authority。
+  preparation 可携带 owner-authored `OriginalDiagnostic`，其 owner/revision 必须匹配 exact catalog，并进入 snapshot hash。
+  SM-2 在既有 owner-fact exhaustion internal event 中把唯一 exact-current 原因封存为 terminal 的 audit-only cause；
+  原因文本/code 不选择 transition、不增加 acquisition budget。fresh-load invariant 拒绝 owner、definition、requirement、
+  catalog revision 或原文漂移，旧记录缺少该可选字段时不补写。SM-4 Result materializer 与 Application 只 detached 透传。
   只有 Profile 已封存的唯一 owner-fact acquisition/reobserve convergence 能使 SM-2 建立 receiving-owner prospective
   transaction；exact acquisition receipt 会消费对应的 create-only `TargetSelection` lifecycle identity，resource-change
   invalidation 不得重新激活或重发该 selector；receipt 后仍须 capability owner fresh reobserve、SM-2 私有 seal。Orchestrator 不解释 native protocol，

@@ -1414,6 +1414,30 @@ func runtimeTestInstallShellNativeValidationChecks(
 	fail bool,
 ) {
 	t.Helper()
+	moduleData, err := os.ReadFile(filepath.Join(workspaceDirectory, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modulePath := ""
+	for _, line := range strings.Split(string(moduleData), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "module" {
+			modulePath = strings.Trim(fields[1], "\"")
+			break
+		}
+	}
+	if modulePath == "" {
+		t.Fatal("native owner fixture requires a module")
+	}
+	// An independent, fixed subject exercises the native behavior protocol.
+	// The surrounding fixtures test Runtime transitions, not template semantics.
+	subjectDirectory := filepath.Join(workspaceDirectory, "runtime_proof_subject")
+	if err := os.MkdirAll(subjectDirectory, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subjectDirectory, "subject.go"), []byte("package subject\nfunc Value() int { return 4 }\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	preparationByRequirement := make(map[string]runtimecontract.RuntimeValidationProofPreparation)
 	for _, surface := range catalog.ValidationSurfaces {
 		for _, preparation := range surface.ProofRequirementPreparations {
@@ -1426,13 +1450,13 @@ func runtimeTestInstallShellNativeValidationChecks(
 			t.Fatalf("Shell catalog has no exact native preparation for requirement %q: %+v", requirement.Hash, catalog)
 		}
 		var source strings.Builder
-		source.WriteString("package workorch_validation\n\nimport \"testing\"\n\n")
+		fmt.Fprintf(&source, "package workorch_validation\n\nimport (\"testing\"; subject %q)\n\n", modulePath+"/runtime_proof_subject")
 		for _, attestation := range preparation.CheckAttestations {
 			fmt.Fprintf(&source, "func %s(t *testing.T) {\n", attestation.NativeCheckRef)
 			if fail {
-				source.WriteString("\tt.Fatal(\"owner-native validation assertion failed\")\n")
+				source.WriteString("\tif subject.Value() != 5 { t.Fatal(\"owner-native validation assertion failed\") }\n")
 			} else {
-				source.WriteString("\tif 2+2 != 4 { t.Fatal(\"owner-native validation assertion failed\") }\n")
+				source.WriteString("\tif subject.Value() != 4 { t.Fatal(\"owner-native validation assertion failed\") }\n")
 			}
 			source.WriteString("}\n\n")
 		}

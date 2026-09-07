@@ -52,6 +52,9 @@ func TestRuntimeProgressRefreshTracksEffectAndAcceptanceIndependently(t *testing
 		"effect count":   func(p *projectioncontract.RuntimeProgress) { p.DurableEffectCount = 1 },
 		"acceptance":     func(p *projectioncontract.RuntimeProgress) { p.SatisfiedCWICount = 1 },
 		"repeat":         func(p *projectioncontract.RuntimeProgress) { p.ValidationFailureOccurrences = 2 },
+		"run totals": func(p *projectioncontract.RuntimeProgress) {
+			p.RunEvidence = &projectioncontract.RuntimeEvidenceCounts{AcceptedValidation: 1}
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := baseline
@@ -68,8 +71,9 @@ func TestRuntimeProgressRefreshTracksEffectAndAcceptanceIndependently(t *testing
 	}
 	progressText := stripANSI(renderRuntimeProgressCompact(&projectioncontract.RuntimeProgress{
 		DurableEffectCount: 3, AcceptedValidationEvidenceCount: 0, SatisfiedCWICount: 1, ValidationFailureOccurrences: 3,
+		RunEvidence: &projectioncontract.RuntimeEvidenceCounts{Accepted: 4, AcceptedValidation: 1, Rejected: 1, RejectedValidation: 1},
 	}, 180))
-	if !strings.Contains(progressText, "durable effects 3 | accepted validation 0 | satisfied CWI 1") || !strings.Contains(progressText, "same validation failure observed 3 times") {
+	if !strings.Contains(progressText, "whole Run: durable effects 3 | satisfied CWI 1") || !strings.Contains(progressText, "whole Run: evidence accepted 4 rejected 1 | validation accepted 1 rejected 1") || !strings.Contains(progressText, "current focus:") || !strings.Contains(progressText, "same validation failure observed 3 times") {
 		t.Fatalf("rendered effect/acceptance/failure facts are incomplete: %s", progressText)
 	}
 }
@@ -219,7 +223,7 @@ func TestRuntimeProgressShowsOriginalOwnerCauseAndRefreshesOnCauseChange(t *test
 		OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: "blocks/file", OriginalCode: "patch_basehash_mismatch", TargetRefs: []string{"session.txt"}},
 	}
 	text := stripANSI(renderRuntimeProgressCompact(progress, 180))
-	if !strings.Contains(text, "failure unchanged authority inputs") || !strings.Contains(text, "owner cause blocks/file | patch_basehash_mismatch | session.txt") || !strings.Contains(text, "durable effects 0 | accepted validation 0 | satisfied CWI 0") {
+	if !strings.Contains(text, "failure unchanged authority inputs") || !strings.Contains(text, "owner cause blocks/file | patch_basehash_mismatch | session.txt") || !strings.Contains(text, "whole Run: durable effects 0 | satisfied CWI 0") || !strings.Contains(text, "current focus: evidence accepted 0 rejected 0 | CWI-credited validation 0") {
 		t.Fatalf("terminal/root cause or zero progress is missing: %q", text)
 	}
 	changed := projectioncontract.CloneRuntimeProgress(progress)

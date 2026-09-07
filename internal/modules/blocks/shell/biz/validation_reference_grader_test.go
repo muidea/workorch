@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -16,7 +17,7 @@ import (
 // variants. It proves behavior, not source layout, names or an exit-code marker.
 // These are local owner-contract tests, never deployed DCE evidence.
 func TestReferenceValidationGraderRejectsWeakAndUnrelatedEvidence(t *testing.T) {
-	recipe := runtimecontract.RuntimeValidationRecipe{ID: "reference-behavior", Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60_000}
+	recipe := runtimecontract.RuntimeValidationRecipe{ID: "reference-behavior", AdapterRef: shellcommon.ValidationRecipeAdapterProjectNative, Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60_000}
 	requirement := shellValidationProofRequirementForTest(t, "", "cwi-reference-behavior")
 	attestations, supported := shellValidationCheckAttestations(recipe, requirement)
 	if !supported || len(attestations) != 1 {

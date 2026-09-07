@@ -99,6 +99,11 @@ check/input 发布的 exact、all-of、revision-bound prospective fact，不是 
 owner receipt 后必须重新查询 capability owner，由 fresh observation 把 preparation 转成 binding，再由 SM-2 私有事件 seal。
 exact acquisition receipt 同时消费该 prospective transaction 的 create-only `TargetSelection` lifecycle identity；目录变更失效
 只能重新取得受影响的 owner facts，不得把已执行 selector 放回 pending 或在 fresh restart 后重建它。
+preparation 可以附带 capability-owner 原始、有界、audit-safe `OriginalDiagnostic`；owner 与 catalog revision 必须精确
+匹配，且原文进入 catalog snapshot hash。SM-2 仅在既有 owner-private exhaustion event 中，将当前缺失 exact requirement
+的唯一原因复制到 `RuntimeTerminalDecision.OriginalDiagnostic`；缺失/歧义/过期原因不从历史或文本重建。它是原因事实，
+不是第五状态机或第二份 action/terminal kind，不能改变单次 acquisition、重试或 credit 合同。SM-4 与投影层只消费已封存
+原因；旧 archive 中字段缺省时保留原哈希和旧 delivery material，不做 backfill。
 Application 只把 Profile 声明实例化到 admitted exact CWI 并写入 requirement hash，不得自行发明跨 owner convergence；缺
 显式 Profile closure 的 managed CWI 在 activation admission fail closed。
 

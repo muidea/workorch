@@ -78,6 +78,34 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
 
 ## 能力验收
 
+### Native check readiness and behavior observation
+
+当前 `shell/project-native-validation/v1` adapter 的 Go-native binding 使用 `shell/go-test-json/workspace-behavior/v2`；已封存的
+`shell/go-test-json/v1` 仍按原协议执行/重放，不修改历史 receipt、binding 或归档。新协议属于 Shell adapter，
+不进入模板身份或 Orchestrator 的状态选择逻辑。显式固定 command 的 legacy recipe 保持 v1 语义，不能被静默增加 coverage
+要求，也不能被声称具有 v2 的行为 grounding；需要该 grounding 的 Profile 应声明 project-native adapter。
+
+- 结构就绪通过真实 `testing` import、`*testing.T` 对象身份和同包具名 helper / `t.Run` 子测试解析断言。
+  未调用闭包、未引用 helper、遮蔽的同名变量、跨包 helper 与歧义入口不能代替断言；不支持的结构明确报告未解析。
+  检查有 256 源文件、8 MiB、32768 AST 节点、64 层 helper 调用的上界，且读取限制在 workspace root。
+- preparation 的可选 `OriginalDiagnostic` 保留 exact requirement/CWI/check、manifest revision、catalog revision 与
+  结构缺失/未解析/歧义/资源上界原因；它不是 target、repair 或 retry authority。
+- v2 每次执行绑定同一 proof 的完整 native-check 集合（最多 32 项），强制 fresh JSON test observation，并在 managed
+  scratch 内生成 owner-controlled workspace coverage。外部模块、测试源、`workorch_validation` harness 与零执行记录
+  不提供实现执行证据；无可核对的 workspace 实现执行或输出不完整时，返回
+  `validation_workspace_behavior_unobserved | validation_workspace_behavior_unverifiable` 与 `IncompleteChecks`，不授予 proof。
+  caller 不能覆盖 coverage/runner/overlay 参数；环境中的 `GOFLAGS` 和外部 `GOWORK` 不得替换该观测合同。
+- v2 test failure 的 assertion location 仍完整作为 check diagnostic 保留，但只把 coverage 观测到的实现文件作为
+  File confirmation 的候选；不把断言文件自动路由成实现修复。File 确认和 SM-2 seal 仍不可省略。
+- 执行覆盖是必要的行为 grounding，不是逐 Goal/DoD 的充分语义证明、独立可信 grader 或对抗性 OS sandbox。
+  子进程/其它语言的交付入口若不被该 adapter 观测，必须提供对应的 typed owner proof adapter；不能用同名测试、
+  source-text、dependency-only success 或模型声明补齐。验证输入/验收判据修订需要独立合同，默认实现修复不授予该权限。
+
+`TestNativeCheckStructureResolvesOnlyReachableTestingAssertions`、
+`TestWorkspaceBehaviorProofRequiresDeliveryExecutionAndProtectsAssertionInputs` 与
+`TestWorkspaceBehaviorObservationRejectsForeignHarnessAndIncompleteCoverage` 覆盖上述正反例；v1 compatibility、
+instrumentation override、skip、临时资源清理及现有 typed receipt/restart 测试共同验证执行边界。
+
 | 验收维度 | 自动化证据 | 状态 |
 | --- | --- | --- |
 | normal | command、managed validation、structured check、isolated workspace 与 concrete module EventHub execute tests | 已覆盖两类能力的主要正常路径 |

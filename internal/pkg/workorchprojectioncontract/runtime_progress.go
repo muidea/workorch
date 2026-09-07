@@ -5,6 +5,10 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 // RuntimeProgress is a read-only product projection of persisted Runtime
 // progress. Consumers must not reverse-drive Runtime authority from it.
 type RuntimeProgress struct {
+	// RunEvidence is whole-Run accounting. The legacy flat evidence counters
+	// below remain current-focus diagnostic-lineage counters for compatibility.
+	// nil means an older producer did not supply totals, not zero progress.
+	RunEvidence                     *RuntimeEvidenceCounts                      `json:"runEvidence,omitempty"`
 	OriginalDiagnostic              *runtimecontract.RuntimeOriginalDiagnostic  `json:"originalDiagnostic,omitempty"`
 	LatestAcceptedEvidenceAt        string                                      `json:"latestAcceptedEvidenceAt,omitempty"`
 	LatestDurableEffectAt           string                                      `json:"latestDurableEffectAt,omitempty"`
@@ -37,6 +41,13 @@ type RuntimeProgress struct {
 	RecoverableWait                 *runtimecontract.RuntimeRecoverableWaitView `json:"recoverableWait,omitempty"`
 }
 
+type RuntimeEvidenceCounts struct {
+	Accepted           int `json:"accepted"`
+	AcceptedValidation int `json:"acceptedValidation"`
+	Rejected           int `json:"rejected"`
+	RejectedValidation int `json:"rejectedValidation"`
+}
+
 type RuntimePrerequisiteRefreshInvalidation struct {
 	Signature        string                              `json:"signature,omitempty"`
 	Source           string                              `json:"source,omitempty"`
@@ -67,6 +78,10 @@ func CloneRuntimeProgress(item *RuntimeProgress) *RuntimeProgress {
 		return nil
 	}
 	ret := *item
+	if item.RunEvidence != nil {
+		counts := *item.RunEvidence
+		ret.RunEvidence = &counts
+	}
 	ret.OriginalDiagnostic = item.OriginalDiagnostic.CloneOriginal()
 	ret.MissingEvidenceKinds = append([]string(nil), item.MissingEvidenceKinds...)
 	ret.RepairHintCodes = append([]string(nil), item.RepairHintCodes...)

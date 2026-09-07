@@ -27,10 +27,16 @@ func applyRuntimeProgress(progress *projectioncontract.TaskProgress, run *runmod
 
 func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncontract.RuntimeProgress {
 	facts := state.Facts.Normalized()
+	runEvidence := &projectioncontract.RuntimeEvidenceCounts{
+		Accepted: len(facts.Evidence.Accepted), Rejected: len(facts.Evidence.Rejected),
+	}
 	accepted := 0
 	acceptedValidation := 0
 	rejected := 0
 	for _, evidence := range facts.Evidence.Accepted {
+		if evidence.Kind == runtimecontract.EvidenceKindValidation {
+			runEvidence.AcceptedValidation++
+		}
 		if runtimecontract.EvidenceBelongsToCurrentFocusForDiagnosticLineage(facts, evidence) {
 			accepted++
 			if evidence.Kind == runtimecontract.EvidenceKindValidation && len(evidence.CoverageWorkItemIDs) > 0 {
@@ -39,6 +45,9 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 		}
 	}
 	for _, evidence := range facts.Evidence.Rejected {
+		if evidence.Kind == runtimecontract.EvidenceKindValidation {
+			runEvidence.RejectedValidation++
+		}
 		if runtimecontract.EvidenceBelongsToCurrentFocusForDiagnosticLineage(facts, evidence) {
 			rejected++
 		}
@@ -49,6 +58,7 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 	}
 	acceptedAt, effectAt, effectCount := runtimeOwnerEvidenceProgress(state)
 	ret := projectioncontract.RuntimeProgress{
+		RunEvidence:                     runEvidence,
 		LatestAcceptedEvidenceAt:        acceptedAt,
 		LatestDurableEffectAt:           effectAt,
 		DurableEffectCount:              effectCount,
@@ -79,6 +89,9 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 		ret.FailureSignature = strings.TrimSpace(facts.Failure.Signature)
 		ret.FailureMessage = strings.TrimSpace(facts.Failure.Message)
 		ret.OriginalDiagnostic = facts.Failure.OriginalDiagnostic.CloneOriginal()
+	}
+	if state.Decision.Terminal != nil && state.Decision.Terminal.OriginalDiagnostic != nil {
+		ret.OriginalDiagnostic = state.Decision.Terminal.OriginalDiagnostic.CloneOriginal()
 	}
 	if state.ExecutionBudget.Policy.PolicyRevision != "" {
 		activeWaitID := ""

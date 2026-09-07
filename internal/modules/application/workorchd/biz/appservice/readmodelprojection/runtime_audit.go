@@ -53,6 +53,7 @@ func mapRuntimeAudit(runtimeState *runtimecontract.RuntimeStateRecord) *projecti
 		if state.Decision.Terminal != nil {
 			terminal.Code = state.Decision.Terminal.Code
 			terminal.Summary = state.Decision.Terminal.Summary
+			terminal.OriginalDiagnostic = state.Decision.Terminal.OriginalDiagnostic.CloneOriginal()
 		}
 		if state.Termination != nil {
 			terminal.AdministrativeKind = string(state.Termination.Kind)

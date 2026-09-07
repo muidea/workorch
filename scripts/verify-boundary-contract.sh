@@ -3317,6 +3317,7 @@ fi
 matches="$(
   find internal/modules/kernel internal/modules/blocks internal/pkg -type f \
     ! -name '*_test.go' \
+    ! -path '*/testdata/*' \
     ! -path 'internal/pkg/workorchdefaults/defaults/*' \
     ! -path '*/dist/*' \
     ! -path '*/node_modules/*' \

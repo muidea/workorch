@@ -21,6 +21,8 @@
 - validation 失败后只能依据 sealed current failure、target snapshot、owner-grounded repair surface 和新 authority 生成候选；不得复用 stale hunk 或重复未改变输入的失败 shape。
 - 修复必须对应 C4 `currentValidationFailure` 中的 exact check、case 和断言位置；检查 A 失败时修改检查 B、同文件的无关函数或只产生文件差异，都不能证明 A 已修复。`failureDetailsIncomplete` 表示事实缺失，只能在 manifest 授权内补充只读取证，不得猜测预期值或扩展修复范围。
 - 不得通过 skip、删除断言、降低阈值、吞掉错误或只核对静态标记，把失败伪装成通过。判定验证器本身有缺陷时，应保留原始失败和 Goal/DoD 验收意图，以独立的正例与反例校准修正；候选不能自行批准新的验收基线。修复回执只证明 effect，必须等待同一 CWI 的 fresh validation 与评估事实。
+- native check 的名称、断言结构和就绪状态只证明检查可识别；功能验证必须实际调用本 workspace 的交付入口，并断言该入口的输出或副作用。源码/README 字符串搜索、在测试中另写一套实现、直接调用外部依赖而绕过交付物，均不能替代交付行为证据。
+- 将生产实现、验证输入与验收判据分开。断言所在文件不是自动获准修改的实现目标；没有独立的验证输入修订合同，不得把生产修复授权用于修改判据。
 - 涉及多个外部目标、接口、协议或格式时，候选必须保持各 target/interface contract 的输入、输出、错误和验证证据独立可追踪。
 
 ## 边界

@@ -175,6 +175,7 @@ func TestDefaultManagedValidationRecipeCreditsExactOwnerNativeAttestation(t *tes
 	}
 	recipe := runtimecontract.RuntimeValidationRecipe{
 		ID: "software-dev-validation-evidence", Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60_000,
+		AdapterRef: modulecommon.ValidationRecipeAdapterProjectNative,
 	}
 	requirement := shellValidationProofRequirementForTest(t, "", "cwi-asserted-validation")
 	attestations, supported := shellValidationCheckAttestations(recipe, requirement)
@@ -187,12 +188,13 @@ func TestDefaultManagedValidationRecipeCreditsExactOwnerNativeAttestation(t *tes
 import "testing"
 
 func %s(t *testing.T) {
-	got, want := 2+2, 4
+	got, want := deliveredValue(), 4
 	if got != want {
 		t.Fatalf("detailed CWI assertion: got %%d, want %%d", got, want)
 	}
 }
 `, nativeCheck))
+	writeNativeStructureSource(t, workspace, "fixture.go", "package fixture\nfunc deliveredValue() int { return 4 }\n")
 	manifestBinding := shellTestWorkspaceManifestBinding("tree-asserted-validation", []string{"fixture.go", "fixture_test.go", "go.mod"})
 	surfaces := shellValidationSurfaces(
 		[]runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationRecipe{recipe},
@@ -211,6 +213,7 @@ func %s(t *testing.T) {
 		Command: recipe.Command, Args: recipe.Args, TimeoutMillis: recipe.TimeoutMillis,
 		TargetRefs:                  []string{"fixture_test.go"},
 		ValidationCheckAttestations: ownerBinding.CheckAttestations,
+		ValidationScopeTargetRefs:   manifestBinding.Manifest.TargetRefs,
 	}
 	if err := instrumentManagedValidationNativeChecks(&request); err != nil {
 		t.Fatalf("instrument exact native checks: %v", err)
@@ -219,7 +222,7 @@ func %s(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
 	}
-	if result.ValidationObservation == nil || result.ValidationObservation.ObservationProtocolRef != shellGoTestObservationProtocolRef ||
+	if result.ValidationObservation == nil || result.ValidationObservation.ObservationProtocolRef != shellGoBehaviorObservationProtocolRef ||
 		!runtimecontract.RuntimeValidationCheckPassed(*result.ValidationObservation, nativeCheck) ||
 		runtimecontract.RuntimeValidationCheckPassed(*result.ValidationObservation, requirement.RequiredCheckRefs[0]) {
 		t.Fatalf("real assertion did not produce exact owner-native observation: %+v", result.ValidationObservation)

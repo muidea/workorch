@@ -75,6 +75,9 @@ type RuntimeCommandResult struct {
 	// extraction share this immutable parse so they cannot disagree about the
 	// same tool output. It never crosses the Shell owner boundary.
 	goTestJSONFacts *shellGoTestJSONFacts
+	// v2 behavior-observation candidates are independent of assertion locations.
+	// They never authorize repair without the existing File-owner confirmation.
+	workspaceBehaviorTargetRefs []string
 	// validationFailureTargetCandidatesInvalid records that the owner-private
 	// structured-output parser observed more candidates than the bounded
 	// validation-failure protocol permits. An empty TargetRefs slice alone cannot

@@ -10,7 +10,7 @@ Last Verified: 2026-09-05
 
 This document defines the built-in software-development evidence specialization. Its stable template ID and product
 presentation remain language- and framework-neutral. Shell's current Go-native validation adapter
-(`shell/go-test-json/v1`) is one typed capability-owner implementation, not part of the template identity or Runtime-core
+(`shell/go-test-json/workspace-behavior/v2`, with sealed `shell/go-test-json/v1` replay retained) is one typed capability-owner implementation, not part of the template identity or Runtime-core
 language. The neutral CWI/focus/evidence machinery remains owned by Orchestrator and
 [the core Runtime contract](../../00-core/runtime-stage-contract.md).
 
@@ -95,6 +95,20 @@ terminal members. A concrete Goal may still declare an additional artifact throu
 the Runtime must not manufacture a generic CWI without an exact proof declaration.
 
 ## Admission Rules
+
+Native-check structural readiness, observed execution of the delivery implementation, and semantic satisfaction of the CWI are
+separate claims. Helper/subtest assertions may establish structural readiness; workspace implementation coverage supplies only
+a necessary execution fact. Neither is a general-purpose Goal/DoD grader. Functional/API/CLI/protocol claims require assertions
+against the actual delivery entrypoint, not source/README strings, a parallel implementation inside the test, or direct calls to
+external dependencies that bypass the delivery. A matching owner adapter must observe the delivery path; unsupported subprocess
+or language instrumentation is unverifiable, not a successful proof fallback.
+
+Production implementation, verification inputs and acceptance criteria remain separate responsibilities. A failing assertion's
+source location is diagnostic, not automatic permission to edit that assertion. The v2 Shell adapter supplies independently
+observed implementation candidates to the existing File confirmation lane. Changing verification inputs/criteria requires a
+separately declared contract and positive/negative calibration preserving the original acceptance intent; the default
+implementation repair route does not authorize such a change. Built-in reference tests calibrate their fixed fixture only and
+must not be presented as a production registry of trusted graders for arbitrary requirements.
 
 - every required Profile acceptance/deliverable source maps to one admitted exact CWI; the activation compiler emits its canonical
   exact evidence declaration, while the Profile supplies nonempty supported evidence kinds and at least one accepted operation

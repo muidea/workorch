@@ -45,6 +45,16 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 	if shellValidationDiagnosticMayIdentifyImplementationEffect(class) {
 		targetRefs, targetCandidatesValid = shellValidationDiagnosticTargetCandidates(*output, request, execCommand, class)
 	}
+	if class == runtimemodel.ValidationDiagnosticTestFailed && shellRequiresWorkspaceBehavior(request) {
+		// An assertion's location is a verification input, not proof that its
+		// criterion is defective. Only independently observed implementation
+		// execution may propose File repair candidates under the default route.
+		targetRefs = normalizeShellStrings(output.workspaceBehaviorTargetRefs)
+		targetCandidatesValid = len(targetRefs) <= runtimemodel.RuntimeFailureTargetObservationMaxTargetRefs
+		if !targetCandidatesValid {
+			targetRefs = nil
+		}
+	}
 	output.validationFailureTargetCandidatesInvalid = !targetCandidatesValid
 	diagnostic := &runtimemodel.ValidationFailureDiagnostic{
 		SchemaVersion:                 runtimemodel.ValidationFailureDiagnosticSchemaVersion,

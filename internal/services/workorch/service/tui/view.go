@@ -658,10 +658,14 @@ func renderRuntimeProgressCompact(runtime *projectioncontract.RuntimeProgress, w
 	if len(runtime.MissingEvidenceKinds) > 0 {
 		missing = strings.Join(runtime.MissingEvidenceKinds, ",")
 	}
-	b.WriteString(truncateDisplay(fmt.Sprintf("- evidence accepted %d rejected %d | missing %s", runtime.AcceptedEvidenceCount, runtime.RejectedEvidenceCount, missing), width))
+	b.WriteString(truncateDisplay(fmt.Sprintf("- current focus: evidence accepted %d rejected %d | CWI-credited validation %d | missing %s", runtime.AcceptedEvidenceCount, runtime.RejectedEvidenceCount, runtime.AcceptedValidationEvidenceCount, missing), width))
 	b.WriteString("\n")
-	b.WriteString(truncateDisplay(fmt.Sprintf("- durable effects %d | accepted validation %d | satisfied CWI %d", runtime.DurableEffectCount, runtime.AcceptedValidationEvidenceCount, runtime.SatisfiedCWICount), width))
+	b.WriteString(truncateDisplay(fmt.Sprintf("- whole Run: durable effects %d | satisfied CWI %d", runtime.DurableEffectCount, runtime.SatisfiedCWICount), width))
 	b.WriteString("\n")
+	if counts := runtime.RunEvidence; counts != nil {
+		b.WriteString(truncateDisplay(fmt.Sprintf("- whole Run: evidence accepted %d rejected %d | validation accepted %d rejected %d", counts.Accepted, counts.Rejected, counts.AcceptedValidation, counts.RejectedValidation), width))
+		b.WriteString("\n")
+	}
 	if runtime.ValidationFailureOccurrences > 1 {
 		b.WriteString(truncateDisplay(fmt.Sprintf("- same validation failure observed %d times", runtime.ValidationFailureOccurrences), width))
 		b.WriteString("\n")
@@ -673,6 +677,10 @@ func renderRuntimeProgressCompact(runtime *projectioncontract.RuntimeProgress, w
 	if diagnostic := runtime.OriginalDiagnostic; diagnostic != nil {
 		b.WriteString(truncateDisplay(fmt.Sprintf("- owner cause %s | %s | %s", diagnostic.OwnerModuleID, diagnostic.OriginalCode, strings.Join(diagnostic.TargetRefs, ",")), width))
 		b.WriteString("\n")
+		if diagnostic.OriginalMessage != "" {
+			b.WriteString(truncateDisplay("  "+diagnostic.OriginalMessage, width))
+			b.WriteString("\n")
+		}
 	}
 	return b.String()
 }

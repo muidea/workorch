@@ -1193,6 +1193,7 @@ func cloneRuntimeDecision(decision RuntimeDecision) RuntimeDecision {
 	}
 	if decision.Terminal != nil {
 		value := *decision.Terminal
+		value.OriginalDiagnostic = value.OriginalDiagnostic.CloneOriginal()
 		ret.Terminal = &value
 	}
 	return ret
