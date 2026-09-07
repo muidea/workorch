@@ -123,6 +123,10 @@ func runtimeProgressSummary(runtime *projectioncontract.RuntimeProgress) string 
 	}
 	parts = append(parts, fmt.Sprintf("dispatch %d", runtime.CompletedDispatchCount))
 	parts = append(parts, fmt.Sprintf("attempts %d", runtime.CandidateAttemptCount))
+	parts = append(parts, fmt.Sprintf("durable effects %d | accepted validation %d | satisfied CWI %d", runtime.DurableEffectCount, runtime.AcceptedValidationEvidenceCount, runtime.SatisfiedCWICount))
+	if runtime.ValidationFailureOccurrences > 1 {
+		parts = append(parts, fmt.Sprintf("same validation failure %d", runtime.ValidationFailureOccurrences))
+	}
 	if state := strings.TrimSpace(runtime.PrerequisiteRefreshState); state != "" {
 		parts = append(parts, fmt.Sprintf("prerequisite refresh %s %d/%d", state, runtime.PrerequisiteRefreshUsed, runtime.PrerequisiteRefreshLimit))
 	}

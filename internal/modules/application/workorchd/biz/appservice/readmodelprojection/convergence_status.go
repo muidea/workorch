@@ -73,6 +73,8 @@ func applyAcceptanceConvergenceStatus(ret *projectioncontract.ConvergenceStatus,
 	if budget := acceptance.Budget; budget != nil {
 		ret.RepairAttempts = budget.RepairAttempts
 		ret.MaxRepairAttempts = budget.MaxRepairAttemptsPerFocus
+		ret.ValidationRepairPolicyID = budget.ValidationRepairPolicyID
+		ret.ValidationRepairMaxAttempts = budget.ValidationRepairMaxAttempts
 		ret.RepeatedFailureSignatureCount = budget.RepeatedFailureSignatures
 		if ret.CurrentSliceID == "" {
 			ret.CurrentSliceID = strings.TrimSpace(budget.SliceID)

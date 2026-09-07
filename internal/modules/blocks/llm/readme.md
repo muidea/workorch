@@ -89,6 +89,10 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
   manifest命中的target/stage supporting context，不展开raw operation-admissibility、prerequisite-observation或无关owner/MCP
   catalog，operation vocabulary只来自同一个sealed manifest。manifest引用的supporting snapshot缺失、漂移或owner/kind
   不匹配时必须在physical submission前返回unsubmitted integrity fact，不能静默投影为空。
+- repair authority 在 C3 使用显式字段投影，不序列化完整 persisted directive 中的诊断与 operation 参数。C4 独立保留 exact
+  current validation failure 的 receipt/check/case/location/digest、环境/exit/timeout facts 和 missing/truncated 标记；该
+  receipt 不受 recent-history 四项窗口裁剪。raw logs、自由诊断与 expected/actual 内容不进入 provider。comparison count
+  是只读事实，不授权模型选择 retry、next focus 或 terminal；最终 rendered request 回归必须证明 C0～C2 bytes/hash 不漂移。
 - streaming configured timeout只表示header/body idle interval并随正数wire read重置；独立hard/caller deadline保持整次调用有界。
   body idle 与hard deadline返回不同typed transport identity，保留submitted/response bytes且丢弃partial payload/usage；adapter
   不据此发起第二次physical call。

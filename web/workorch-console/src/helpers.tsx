@@ -7,6 +7,7 @@ import { modelLabels, progressKindLabels, recoveryModeLabels, repairLoopStateLab
 import { stateLabel as canonicalStateLabel } from './utils/format';
 import { stateTag as canonicalStateTag } from './utils/ui';
 import { presentWorkspaceRunCommand } from './workspaceRunCommand';
+import { validationRepairPolicyLabel } from './runtimeProgressPresentation';
 import { canonicalActiveRunIsGovernanceBlocked, canonicalDefinitionClarification, workspaceBoardExecutionIntentAllowed, workspaceDefinitionClarification } from './governanceMutationTarget';
 
 export { progressKindLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels, stateLabels } from './utils/constants';
@@ -196,6 +197,7 @@ export function convergenceStatusDescriptions(status?: ConvergenceStatus) {
     { key: 'convergenceState', label: '收敛状态', children: status.convergenceState ? <Tag color="blue">{status.convergenceState}</Tag> : '-' },
     { key: 'coverage', label: 'Coverage', children: <Space wrap><Tag color="green">closed {status.closedCoverageItemCount ?? 0}</Tag><Tag color="gold">remaining {status.remainingCoverageItemCount ?? 0}</Tag></Space> },
     { key: 'disposition', label: 'Assessment Disposition', children: status.assessmentDisposition ? <Tag color="purple">{status.assessmentDisposition}</Tag> : '-' },
+    { key: 'profileRepair', label: 'Profile 修复上限', children: validationRepairPolicyLabel(status) },
     { key: 'repair', label: 'Repair / Budget', children: <Space wrap>{repairLabel ? <Tag>repair {repairLabel}</Tag> : null}{status.repeatedFailureSignatureCount || status.retrySignatureRepeatCount ? <Tag color="gold">repeat {status.repeatedFailureSignatureCount ?? status.retrySignatureRepeatCount}</Tag> : null}{!repairLabel && !(status.repeatedFailureSignatureCount || status.retrySignatureRepeatCount) ? '-' : null}</Space> },
     { key: 'gap', label: '当前 Gap', children: boundedParagraph(status.gapSummary || status.currentGap, { rows: 2 }) },
     { key: 'missingEvidence', label: '缺失证据', children: compactTags(status.missingEvidenceKinds ?? [], 4) },
@@ -360,6 +362,8 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
           { key: 'budgetDecision', label: 'Budget Decision', children: budget?.decision || budget?.state || '-' },
           { key: 'budgetReason', label: 'Budget Reason', children: budget?.lastDecisionReason || '-' },
           { key: 'repairAttempts', label: 'Repair Attempts', children: budget?.repairAttempts || '-' },
+          { key: 'profileRepairLimit', label: 'Profile Repair Limit', children: validationRepairPolicyLabel(budget) },
+          { key: 'globalRepairLimit', label: 'Global Repair Limit', children: budget?.maxRepairAttemptsPerFocus ?? '-' },
           { key: 'noDeltaRounds', label: 'No Delta Rounds', children: budget?.noCoverageDeltaRounds || '-' }
         ]}
       />

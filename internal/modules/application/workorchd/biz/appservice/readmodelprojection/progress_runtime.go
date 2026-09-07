@@ -33,7 +33,7 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 	for _, evidence := range facts.Evidence.Accepted {
 		if runtimecontract.EvidenceBelongsToCurrentFocusForDiagnosticLineage(facts, evidence) {
 			accepted++
-			if evidence.Kind == runtimecontract.EvidenceKindValidation {
+			if evidence.Kind == runtimecontract.EvidenceKindValidation && len(evidence.CoverageWorkItemIDs) > 0 {
 				acceptedValidation++
 			}
 		}
@@ -47,8 +47,11 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 	if state.ActiveDispatch != nil {
 		activeDispatchID = strings.TrimSpace(state.ActiveDispatch.ID)
 	}
+	acceptedAt, effectAt, effectCount := runtimeOwnerEvidenceProgress(state)
 	ret := projectioncontract.RuntimeProgress{
-		LatestAcceptedEvidenceAt:        latestRuntimeAcceptedEvidenceAt(state),
+		LatestAcceptedEvidenceAt:        acceptedAt,
+		LatestDurableEffectAt:           effectAt,
+		DurableEffectCount:              effectCount,
 		StateRevision:                   state.StateRevision,
 		EvidenceSequence:                state.EvidenceSequence,
 		CompletedDispatchCount:          len(state.CompletedDispatches),
@@ -61,6 +64,12 @@ func mapRuntimeProgress(state runtimecontract.RuntimeStateRecord) projectioncont
 		ConvergenceState:                string(state.Decision.State),
 		ActiveDispatchID:                activeDispatchID,
 	}
+	for _, item := range facts.Coverage {
+		if item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+			ret.SatisfiedCWICount++
+		}
+	}
+	ret.ValidationFailureFingerprint, ret.ValidationFailureOccurrences = runtimeValidationFailureComparison(facts)
 	if state.Decision.Terminal != nil {
 		ret.TerminalCode = strings.TrimSpace(state.Decision.Terminal.Code)
 	}
@@ -268,14 +277,23 @@ func applyRuntimeProgressToRepairLoop(progress *projectioncontract.TaskProgress,
 			break
 		}
 	}
+	if summary.ValidationFailureOccurrences > 1 && facts.Failure != nil {
+		loop.RepeatedFailureReason = "same validation check failure recurred across repair transactions"
+	}
 	progress.RepairLoop = loop
 }
 
-// Only owner-committed receipts already credited by Orchestrator can supply an
-// effective-progress timestamp. Activity, rejected validation, and unbound reads
-// never become proof; a causation-only accepted durable repair is still progress.
+// A causation-only repair is a durable effect, not acceptance progress. Both
+// clocks require an exact committed receipt; neither activity nor an unbound
+// read can supply the acceptance clock.
 func latestRuntimeAcceptedEvidenceAt(state runtimecontract.RuntimeStateRecord) string {
-	latest := ""
+	latest, _, _ := runtimeOwnerEvidenceProgress(state)
+	return latest
+}
+
+func runtimeOwnerEvidenceProgress(state runtimecontract.RuntimeStateRecord) (string, string, int) {
+	latest, effectAt := "", ""
+	effects := make(map[string]struct{})
 	dispatches := append([]runtimecontract.RuntimeDispatchRecord(nil), state.CompletedDispatches...)
 	if state.ActiveDispatch != nil {
 		dispatches = append(dispatches, *state.ActiveDispatch)
@@ -291,15 +309,33 @@ func latestRuntimeAcceptedEvidenceAt(state runtimecontract.RuntimeStateRecord) s
 				}
 				receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(state.OperationReceipts, execution.ExecutionKey, execution.Fence)
 				if !found || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || receipt.OperationID != fact.OperationID ||
-					execution.OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(receipt) ||
-					(len(fact.CoverageWorkItemIDs) == 0 && !(receipt.Changed && runtimecontract.RuntimeEffectIsDurable(receipt.ObservedEffectScope))) {
+					execution.OwnerReceiptHash != runtimecontract.StableRuntimeOperationReceiptHash(receipt) {
 					continue
 				}
-				latest = latestStringTime(latest, receipt.CompletedAt)
+				if len(fact.CoverageWorkItemIDs) > 0 {
+					latest = latestStringTime(latest, receipt.CompletedAt)
+				}
+				if receipt.Changed && runtimecontract.RuntimeEffectIsDurable(receipt.ObservedEffectScope) {
+					effectAt = latestStringTime(effectAt, receipt.CompletedAt)
+					effects[receipt.ExecutionKey] = struct{}{}
+				}
 			}
 		}
 	}
-	return latest
+	return latest, effectAt, len(effects)
+}
+
+func runtimeValidationFailureComparison(facts runtimecontract.RuntimeFacts) (string, int) {
+	for i := len(facts.Evidence.Rejected) - 1; i >= 0; i-- {
+		fact := facts.Evidence.Rejected[i]
+		if !runtimecontract.EvidenceBelongsToCurrentFocusForDiagnosticLineage(facts, fact) {
+			continue
+		}
+		if fingerprint := runtimecontract.RuntimeValidationFailureFingerprint(fact, facts.Focus.CoverageEvidenceBindings...); fingerprint != "" {
+			return fingerprint, runtimecontract.RuntimeValidationFailureOccurrences(facts.Evidence, fact, facts.Focus.CoverageEvidenceBindings...)
+		}
+	}
+	return "", 0
 }
 
 func applyRuntimeProgressToCurrentStep(progress *projectioncontract.TaskProgress, summary projectioncontract.RuntimeProgress, state runtimecontract.RuntimeStateRecord) {

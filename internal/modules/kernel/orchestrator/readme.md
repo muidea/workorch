@@ -162,6 +162,12 @@ capability resource state。
 
 ### Receipt, evidence and repair
 
+- SM-2 rejected-receipt event 对同一 CWI/recipe/protocol/check/case/assertion 的重复失败进行纯 evidence-ledger 比较，在原 CAS
+  更新既有 no-progress debt；不改 transaction signature、RequiredOutputHash、repair closure 或 receipt fence。exact credited
+  validation pass 关闭比较窗口，零 CWI credit 的 durable repair 不关闭。SM-3 receipt/evidence hashes 同时绑定 owner 的有界
+  check failure details、incomplete checks 与 output truncation；SM-4 fresh load/duplicate 复用原 ledger，零归档 backfill。
+  rejected evidence 的 CWI 诊断归属只从 sealed binding 读取；没有 binding 的记录不猜测归属，不能补写验收 credit。
+  `validation_failure_comparison_test.go`、Shell reference-grader tests 与既有 repair receipt/CAS/restart matrix 共同验证此边界。
 - validation entry authorization 与 full diagnostic scope 分离。发送 owner execution、接纳 failure receipt、确认 repair
   surface、commitment 和 fresh-load invariant 必须复用同一个 completed-dispatch scope 投影：取 exact
   admissibility snapshot/acquisition binding 的完整 catalog，不以单 operation entry 的 authorization 集合代替。

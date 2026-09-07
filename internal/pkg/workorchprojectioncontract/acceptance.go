@@ -71,6 +71,8 @@ type ConvergenceBudget struct {
 	State                       string `json:"state,omitempty"`
 	Decision                    string `json:"decision,omitempty"`
 	MaxRepairAttemptsPerFocus   int    `json:"maxRepairAttemptsPerFocus,omitempty"`
+	ValidationRepairPolicyID    string `json:"validationRepairPolicyId,omitempty"`
+	ValidationRepairMaxAttempts int    `json:"validationRepairMaxAttempts,omitempty"`
 	MaxLLMRoundsPerSlice        int    `json:"maxLLMRoundsPerSlice,omitempty"`
 	MaxRepeatedFailureSignature int    `json:"maxRepeatedFailureSignature,omitempty"`
 	MaxValidationOnlyRetries    int    `json:"maxValidationOnlyRetries,omitempty"`

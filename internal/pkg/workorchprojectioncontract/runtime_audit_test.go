@@ -1,6 +1,29 @@
 package workorchprojectioncontract
 
-import "testing"
+import (
+	"testing"
+
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+)
+
+func TestCloneRuntimeAuditDetachesValidationFailureFacts(t *testing.T) {
+	detail := runtimecontract.RuntimeValidationCheckFailure{CheckRef: "check-A", TargetRef: "checks/a.test", Line: 47, DiagnosticHash: "diagnostic-digest"}
+	input := &RuntimeAudit{
+		RejectedEvidence:  []RuntimeAuditEvidence{{CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{detail}, IncompleteChecks: []string{"check-A"}, FailureDetailsTruncated: true, OutputTruncated: true}},
+		OperationReceipts: []RuntimeAuditOperationReceipt{{CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{detail}, IncompleteChecks: []string{"check-A"}, FailureDetailsTruncated: true, OutputTruncated: true}},
+	}
+	cloned := CloneRuntimeAudit(input)
+	cloned.RejectedEvidence[0].CheckFailures[0].Line++
+	cloned.RejectedEvidence[0].IncompleteChecks[0] = "check-B"
+	cloned.OperationReceipts[0].CheckFailures[0].Line++
+	cloned.OperationReceipts[0].IncompleteChecks[0] = "check-B"
+	if input.RejectedEvidence[0].CheckFailures[0].Line != 47 || input.OperationReceipts[0].CheckFailures[0].Line != 47 ||
+		input.RejectedEvidence[0].IncompleteChecks[0] != "check-A" || input.OperationReceipts[0].IncompleteChecks[0] != "check-A" ||
+		!cloned.RejectedEvidence[0].FailureDetailsTruncated || !cloned.OperationReceipts[0].FailureDetailsTruncated ||
+		!cloned.RejectedEvidence[0].OutputTruncated || !cloned.OperationReceipts[0].OutputTruncated {
+		t.Fatal("audit clone aliased validation facts or lost incompleteness")
+	}
+}
 
 func TestCloneRuntimeAuditDetachesSealedSoulMetadata(t *testing.T) {
 	input := &RuntimeAudit{StartupInputHash: "sealed-input", SealedProfileContractsHash: "sealed-profile", SealedSoulBindings: []RuntimeAuditSoulBinding{{Stage: "execution", SoulID: "soul-a", Revision: 3, ContentHash: "sealed-content"}}}

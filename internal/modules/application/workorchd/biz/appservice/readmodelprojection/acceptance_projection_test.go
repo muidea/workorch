@@ -10,6 +10,34 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func TestAcceptanceProjectionSeparatesSemanticRepeatAndProfileBudget(t *testing.T) {
+	state := runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{WorkspaceID: "ws", RunID: "run",
+		Focus:             runtimecontract.CoverageFocus{ID: "focus", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi"}},
+		ConvergencePolicy: runtimecontract.RuntimeConvergencePolicy{MaxRepairAttemptsPerFocus: 48},
+		DefinitionFocuses: []runtimecontract.RuntimeDefinitionFocus{{ID: "definition-focus", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi"},
+			ValidationFailureRepairConvergence: &runtimecontract.RuntimeValidationFailureRepairConvergence{ID: "profile-policy", MaxAttempts: 2}}}}}
+	state.Facts.Focus.CoverageEvidenceBindings = []runtimecontract.CoverageEvidenceBinding{{ID: "binding-cwi", CoverageWorkItemID: "cwi"}}
+	for _, id := range []string{"one", "two", "three"} {
+		state.Facts.Evidence.Rejected = append(state.Facts.Evidence.Rejected, runtimecontract.EvidenceFact{ID: common.EvidenceRecordID(id), Kind: runtimecontract.EvidenceKindValidation,
+			FocusID: "focus", BindingRefs: []string{"binding-cwi"}, FailureSignature: "transaction-" + id,
+			Validation: &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe", ObservationProtocolRef: "native/v1", FailedChecks: []string{"check-A"}}})
+		state.Facts.Repair.SignatureCounts = append(state.Facts.Repair.SignatureCounts, runtimecontract.RuntimeFailureSignatureCount{Signature: "transaction-" + id, Count: 1})
+	}
+	before, _ := json.Marshal(state)
+	view := mapAcceptanceProjection(&runmodel.Run{RuntimeState: &state})
+	progress := mapRuntimeProgress(state)
+	if view.Budget.RepeatedFailureSignatures != 3 || progress.ValidationFailureOccurrences != 3 {
+		t.Fatalf("same check was split by closure: %+v %+v", view.Budget, progress)
+	}
+	if view.Budget.MaxRepairAttemptsPerFocus != 48 || view.Budget.ValidationRepairMaxAttempts != 2 || view.Budget.ValidationRepairPolicyID != "profile-policy" {
+		t.Fatalf("Profile budget replaced by global budget: %+v", view.Budget)
+	}
+	after, _ := json.Marshal(state)
+	if string(before) != string(after) {
+		t.Fatal("projection wrote state authority")
+	}
+}
+
 func TestMapAcceptanceProjectionReadsPersistedRuntimeFacts(t *testing.T) {
 	state := runtimecontract.RuntimeStateRecord{StateRevision: 7, EvidenceSequence: 3, Facts: runtimecontract.RuntimeFacts{
 		WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-3",

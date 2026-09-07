@@ -295,11 +295,13 @@ Real-provider checks are explicit, credentialed and excluded from CI. Use `make 
 the executable inventory for LLM、Runtime convergence、MCP、vector memory、weather and governance live gates.
 
 They must record the deployed revision/config identity, workspace/run IDs, terminal or bounded-live disposition, provider
-call evidence and filesystem/artifact evidence where applicable. A valid artifact without later convergence is positive
-progress but not complete deployed acceptance.
+call evidence and filesystem/artifact evidence where applicable. A durable artifact without a matching validation/CWI/Result
+acceptance delta is effect progress, not proof of positive acceptance convergence or complete deployed acceptance.
 
 Closure observer 在观察窗口前后各采集 Workspace snapshot，以同一 `workspaceId/runId` 的 `acceptance.audit` 比较
-owner-accepted evidence ID、durable-effect execution key 和 satisfied CWI ID。`active` 是 SM-1 执行态；心跳、LLM usage、
+owner-accepted evidence ID、credited validation ID、durable-effect execution key 和 satisfied CWI ID。独立反馈 activity、effect
+与 acceptance delta；只有 validation/CWI/Result acceptance delta 或正式 accepted completion 可报告 `positiveProgress`。
+仅有修复 effect 时报告 `effects_without_acceptance_progress`。`active` 是 SM-1 执行态；心跳、LLM usage、
 state revision 变化仅说明 activity，不证明目标正向推进。没有可比 baseline 或窗口内零增量只能报告未观察到进展，不能
 据此推断服务永久卡住；完整 completion 则要求当前 Run 已 completed、当前 Run accepted result 和 coverage 全闭合。
 historical Run result、重复 receipt/fence、已有局部效果不能覆盖当前 failed/stalled/ineffectiveRetry。治理 blocker 单独分类，
@@ -307,9 +309,11 @@ historical Run result、重复 receipt/fence、已有局部效果不能覆盖当
 `scripts/test_observe_runtime_progress.py` 随 boundary gate 执行，observer 不从上述视图生成 mutation。
 
 Workspace heartbeat 的 `latestActivityAt` 与 `latestEffectiveProgressAt` 必须分开：前者是当前 Run 的活动时间，后者只来自
-已接受的 exact owner receipt（CWI proof 或 changed durable repair）及当前 Run accepted Result。单次失败、其它 signature
-的历史重复或上一份 projection 的 retry 标记不能生成当前 `ineffectiveRetry`；只有当前 signature 的实际重复或正式预算
-耗尽可形成该诊断。Web/TUI 与 heartbeat age metrics 共用这份只读投影，不生成新状态机或恢复动作。
+已接受且具有 CWI credit 的 exact owner receipt 及当前 Run accepted Result。零 CWI credit 的 changed durable repair 只更新
+独立 `latestDurableEffectAt/durableEffectCount`。单次失败、无关检查的历史重复或上一份 projection 的 retry 标记不能生成当前
+`ineffectiveRetry`；current failure 的实际重复（包括跨 repair closure 的同一 native-check failure）或正式预算耗尽可形成
+该诊断。Profile 的 `validationRepairPolicyId/validationRepairMaxAttempts` 与全局 repair limit 分开显示，不从错误文本推断。
+Web/TUI 与 heartbeat age metrics 共用这份只读投影，不生成新状态机或恢复动作。
 
 Builtin-defaults HTTP 验收同时覆盖只读 current/target preview 与显式单资源 guarded upgrade，必须证明 missing/wrong/duplicate
 owner result fail-closed、定制与 stale 请求 `409`、写后响应丢失/fresh-owner retry 幂等，以及普通启动只更新 exact reviewed

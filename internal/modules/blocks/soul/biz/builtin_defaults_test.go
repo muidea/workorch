@@ -36,7 +36,14 @@ func historicalExecutionSoul(t *testing.T) soulevents.CreateSoulCommand {
 				lines[i] = "- existing target 必须使用 owner 已声明的 `patch/apply:unified_diff`，把同一文件的所有必要修改合并为一个最小 diff，并携带 owner snapshot 给出的 revision/base hash；不得为同一 target 再选择 create-only `file/write` 或第二个 patch。"
 			}
 		}
-		cmd.SoulMD = strings.Join(lines, "\n")
+		kept := lines[:0]
+		for _, line := range lines {
+			if strings.HasPrefix(line, "- 修复必须对应 C4") || strings.HasPrefix(line, "- 不得通过 skip") {
+				continue
+			}
+			kept = append(kept, line)
+		}
+		cmd.SoulMD = strings.Join(kept, "\n")
 		value, err := normalizedSoulFromCommand(cmd)
 		if err != nil {
 			t.Fatal(err)
@@ -48,6 +55,30 @@ func historicalExecutionSoul(t *testing.T) soulevents.CreateSoulCommand {
 	}
 	t.Fatal("missing builtin execution Soul")
 	return soulevents.CreateSoulCommand{}
+}
+
+func TestSoftwareDevExecutionGuidanceIsFactBound(t *testing.T) {
+	defaults, err := workorchdefaults.BuiltinSoulDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range defaults {
+		if raw.ID != "soul-software-dev-execution" {
+			continue
+		}
+		value, err := normalizedSoulFromCommand(soulDefaultCreateCommand(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("current builtin content: %s", soulmodel.StableSoulContentHash(value))
+		for _, required := range []string{"sealed current failure", "currentValidationFailure", "failureDetailsIncomplete", "独立的正例与反例", "候选不能自行批准新的验收基线"} {
+			if !strings.Contains(value.SoulMD, required) {
+				t.Fatalf("execution guidance lost %s", required)
+			}
+		}
+		return
+	}
+	t.Fatal("missing software-dev execution guidance")
 }
 
 type lostSoulUpgradeResponse struct {

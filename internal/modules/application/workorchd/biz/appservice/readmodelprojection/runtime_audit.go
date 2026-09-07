@@ -93,6 +93,10 @@ func runtimeAuditEvidence(values []runtimecontract.EvidenceFact) []projectioncon
 			item.PassedChecks = append([]string(nil), observation.PassedChecks...)
 			item.FailedChecks = append([]string(nil), observation.FailedChecks...)
 			item.SkippedChecks = append([]string(nil), observation.SkippedChecks...)
+			item.IncompleteChecks = append([]string(nil), observation.IncompleteChecks...)
+			item.CheckFailures = append([]runtimecontract.RuntimeValidationCheckFailure(nil), observation.CheckFailures...)
+			item.FailureDetailsTruncated = observation.FailureDetailsTruncated
+			item.OutputTruncated = observation.OutputTruncated
 		}
 		ret = append(ret, item)
 	}
@@ -334,6 +338,10 @@ func runtimeAuditOperationReceipts(values []runtimecontract.RuntimeOperationRece
 			item.PassedChecks = append([]string(nil), observation.PassedChecks...)
 			item.FailedChecks = append([]string(nil), observation.FailedChecks...)
 			item.SkippedChecks = append([]string(nil), observation.SkippedChecks...)
+			item.IncompleteChecks = append([]string(nil), observation.IncompleteChecks...)
+			item.CheckFailures = append([]runtimecontract.RuntimeValidationCheckFailure(nil), observation.CheckFailures...)
+			item.FailureDetailsTruncated = observation.FailureDetailsTruncated
+			item.OutputTruncated = observation.OutputTruncated
 		}
 		if value.Feedback != nil {
 			feedback := value.Feedback.CloneOriginal()

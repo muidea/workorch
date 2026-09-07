@@ -69,6 +69,7 @@ func StableRuntimeEvidenceFactHash(fact EvidenceFact) string {
 		writeHashStrings(h, observation.FailedChecks)
 		writeHashStrings(h, observation.SkippedChecks)
 		writeHashString(h, observation.OutputPreview)
+		writeRuntimeValidationFailureDetailsHash(h, observation)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

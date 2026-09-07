@@ -94,6 +94,25 @@ class RuntimeProgressTest(unittest.TestCase):
         value["acceptance"]["audit"]["runId"] = "run-1"
         self.assertFalse(runtime_progress_facts(value)["auditScopeValid"])
 
+    def test_repair_effect_without_validation_or_cwi_delta_is_not_positive(self):
+        before = summary(snapshot())
+        value = snapshot()
+        audit = value["acceptance"]["audit"]
+        audit["stateRevision"] = 2
+        audit["acceptedEvidence"] = [{"id": "repair", "kind": "state_change", "coverageWorkItemIds": []}]
+        audit["operationReceipts"] = [{"executionKey": "repair-key", "outcome": "accepted", "changed": True,
+                                       "observedEffectScope": "workspace_durable"}]
+        result = evaluate_workspace_progress(summary(value), before)
+        self.assertTrue(result["activityObserved"])
+        self.assertTrue(result["durableEffectObserved"])
+        self.assertFalse(result["acceptanceProgressObserved"])
+        self.assertFalse(result["positiveProgress"])
+        self.assertEqual(result["mode"], "effects_without_acceptance_progress")
+        audit["acceptedEvidence"].append({"id": "validation", "kind": "validation", "coverageWorkItemIds": ["cwi-1"]})
+        result = evaluate_workspace_progress(summary(value), before)
+        self.assertTrue(result["acceptanceProgressObserved"])
+        self.assertTrue(result["positiveProgress"])
+
     def test_effects_do_not_override_failure_or_stall(self):
         before = summary(snapshot())
         for state in ("failed", "cancelled", "superseded", "active"):

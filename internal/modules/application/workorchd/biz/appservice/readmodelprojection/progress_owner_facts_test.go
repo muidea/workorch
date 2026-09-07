@@ -17,6 +17,13 @@ func TestRepairLoopUsesExactCurrentFailureCountWithoutLatchingDisplayFlags(t *te
 			Failure: &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Signature: "current", Message: "current failure"},
 		}}
 		summary := mapRuntimeProgress(state)
+		wantRepeated := 0
+		if count > 1 {
+			wantRepeated = count
+		}
+		if got := runtimeRepeatedFailureOccurrences(state.Facts); got != wantRepeated {
+			t.Fatalf("count=%d historical unrelated signature leaked into repeated failure count: %d", count, got)
+		}
 		progress := projectioncontract.TaskProgress{State: "active", Runtime: &summary,
 			RepairLoop: projectioncontract.RepairLoop{RepeatedFailureReason: "prior projection", Escalated: true}}
 		applyRuntimeProgressToRepairLoop(&progress, summary, state)
@@ -30,6 +37,19 @@ func TestRepairLoopUsesExactCurrentFailureCountWithoutLatchingDisplayFlags(t *te
 	}
 }
 
+func TestRuntimeProgressValidationCountRequiresCoverageCredit(t *testing.T) {
+	state := runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{
+		Focus: runtimecontract.CoverageFocus{ID: "focus", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi"}},
+		Evidence: runtimecontract.EvidenceLedger{Accepted: []runtimecontract.EvidenceFact{
+			{ID: "auxiliary", FocusID: "focus", Kind: runtimecontract.EvidenceKindValidation},
+			{ID: "credited", FocusID: "focus", Kind: runtimecontract.EvidenceKindValidation, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi"}},
+		}},
+	}}
+	if got := mapRuntimeProgress(state).AcceptedValidationEvidenceCount; got != 1 {
+		t.Fatalf("uncredited validation became acceptance progress: %d", got)
+	}
+}
+
 func TestRuntimeProgressTimestampRequiresAcceptedExactOwnerReceipt(t *testing.T) {
 	receipt := runtimecontract.RuntimeOperationReceipt{ExecutionKey: "effect-key", Fence: 1, OperationID: "effect", Outcome: runtimecontract.RuntimeOperationOutcomeAccepted,
 		ObservedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable, Changed: true, CompletedAt: "2026-06-10T00:01:00Z"}
@@ -39,8 +59,16 @@ func TestRuntimeProgressTimestampRequiresAcceptedExactOwnerReceipt(t *testing.T)
 			OperationID: "effect", ExecutionKey: "effect-key", Fence: 1, State: runtimecontract.OperationExecutionEvidenceCommitted, OwnerReceiptHash: runtimecontract.StableRuntimeOperationReceiptHash(receipt),
 		}}}}, OperationReceipts: []runtimecontract.RuntimeOperationReceipt{receipt},
 	}
-	if got := latestRuntimeAcceptedEvidenceAt(state); got != receipt.CompletedAt {
-		t.Fatalf("accepted causation-only repair did not count as progress: %q", got)
+	if got := latestRuntimeAcceptedEvidenceAt(state); got != "" {
+		t.Fatalf("causation-only repair became acceptance progress: %q", got)
+	}
+	if acceptedAt, effectAt, effects := runtimeOwnerEvidenceProgress(state); acceptedAt != "" || effectAt != receipt.CompletedAt || effects != 1 {
+		t.Fatalf("repair effect clock/count lost exact owner fact: %s %s %d", acceptedAt, effectAt, effects)
+	}
+	credited := state.Clone()
+	credited.Facts.Evidence.Accepted[0].CoverageWorkItemIDs = []common.CoverageWorkItemID{"cwi-a"}
+	if got := latestRuntimeAcceptedEvidenceAt(credited); got != receipt.CompletedAt {
+		t.Fatalf("credited evidence lost its clock: %s", got)
 	}
 	for name, mutate := range map[string]func(*runtimecontract.RuntimeStateRecord){
 		"rejected": func(s *runtimecontract.RuntimeStateRecord) {
@@ -58,6 +86,9 @@ func TestRuntimeProgressTimestampRequiresAcceptedExactOwnerReceipt(t *testing.T)
 			mutate(&changed)
 			if got := latestRuntimeAcceptedEvidenceAt(changed); got != "" {
 				t.Fatalf("invalid progress timestamp: %q", got)
+			}
+			if _, at, count := runtimeOwnerEvidenceProgress(changed); at != "" || count != 0 {
+				t.Fatal("invalid receipt supplied effect progress")
 			}
 		})
 	}

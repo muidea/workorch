@@ -46,6 +46,8 @@ type ConvergenceStatus struct {
 	AssessmentDisposition         string   `json:"assessmentDisposition,omitempty"`
 	RepairAttempts                int      `json:"repairAttempts,omitempty"`
 	MaxRepairAttempts             int      `json:"maxRepairAttempts,omitempty"`
+	ValidationRepairPolicyID      string   `json:"validationRepairPolicyId,omitempty"`
+	ValidationRepairMaxAttempts   int      `json:"validationRepairMaxAttempts,omitempty"`
 	RepeatedFailureSignatureCount int      `json:"repeatedFailureSignatureCount,omitempty"`
 	LatestAcceptedEvidenceRef     string   `json:"latestAcceptedEvidenceRef,omitempty"`
 	NextActivationRequired        bool     `json:"nextActivationRequired,omitempty"`

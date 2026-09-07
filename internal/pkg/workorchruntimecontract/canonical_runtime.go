@@ -208,12 +208,18 @@ type RuntimeValidationObservation struct {
 	// ObservationProtocolRef identifies the owner-native parser/protocol that
 	// produced Executed/Passed/Failed/Skipped checks. Raw process output has no
 	// protocol identity and cannot attest a Definition check.
-	ObservationProtocolRef string
-	ExecutedChecks         []string
-	PassedChecks           []string
-	FailedChecks           []string
-	SkippedChecks          []string
-	OutputPreview          string
+	ObservationProtocolRef  string
+	ExecutedChecks          []string
+	PassedChecks            []string
+	FailedChecks            []string
+	SkippedChecks           []string
+	OutputPreview           string
+	CheckFailures           []RuntimeValidationCheckFailure `json:",omitempty"`
+	FailureDetailsTruncated bool                            `json:",omitempty"`
+	OutputTruncated         bool                            `json:",omitempty"`
+	// IncompleteChecks identifies checks with skipped required subchecks. A
+	// top-level pass does not prove that all of its behavior was exercised.
+	IncompleteChecks []string `json:",omitempty"`
 }
 
 func (o RuntimeValidationObservation) Normalized() RuntimeValidationObservation {
@@ -224,6 +230,8 @@ func (o RuntimeValidationObservation) Normalized() RuntimeValidationObservation 
 	o.FailedChecks = normalizeStrings(o.FailedChecks)
 	o.SkippedChecks = normalizeStrings(o.SkippedChecks)
 	o.OutputPreview = strings.TrimSpace(o.OutputPreview)
+	o.CheckFailures = normalizeRuntimeValidationCheckFailures(o.CheckFailures)
+	o.IncompleteChecks = normalizeStrings(o.IncompleteChecks)
 	return o
 }
 
@@ -245,7 +253,7 @@ func RuntimeValidationCheckPassed(observation RuntimeValidationObservation, chec
 	if checkRef == "" || !containsString(observation.PassedChecks, checkRef) {
 		return false
 	}
-	return !containsString(observation.FailedChecks, checkRef) && !containsString(observation.SkippedChecks, checkRef)
+	return !observation.OutputTruncated && !containsString(observation.FailedChecks, checkRef) && !containsString(observation.SkippedChecks, checkRef) && !containsString(observation.IncompleteChecks, checkRef)
 }
 
 // RuntimeValidationConflictingChecks returns checks reported in more than one

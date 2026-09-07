@@ -118,6 +118,11 @@ core 只定义 provider-neutral 分区与审计；provider 私有 cache-control 
 - 当前 focus 与 required evidence / assessment 要求
 - accepted / rejected evidence 摘要与 refs
 - 当前 failure fact（结构化 class/reason/target，而非 raw dump）
+- C4 保留 exact current failure signature 对应的 validation receipt，即使该 receipt 已落在 recent-history 窗口之外。
+  显示 recipe/protocol、执行/通过/失败/跳过/未完整检查，以及有界 check/case/location/line/digest；缺失或截断必须通过
+  `failureDetailsIncomplete`/`checksTruncated` 显式表达，不能猜测 assertion 的 expected/actual。comparison fingerprint 与
+  occurrences 只描述同一 Run 的失败事实，不授权 retry。C3 repair projection 只保留 sealed authority refs/surface，不展开
+  `CurrentFailure`、原始诊断或 rejected operation 参数；诊断 class、owner code、环境/命令与 exit/timeout facts 只在 C4。
 - sealed manifest 命中的 target snapshot、stage activation 与 bounded supporting fact；完整 capability/admissibility/freshness
   inventory 只供 owner-local integrity/freshness 校验，不直接展开给 provider
 - activation 中的 Soul / Skill / MCP / Memory **快照**（已在 bootstrap 封存）

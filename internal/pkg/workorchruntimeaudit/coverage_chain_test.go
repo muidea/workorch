@@ -9,6 +9,52 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func TestAuditValidationFeedbackPreservesIncompleteProofAndExactDiagnostics(t *testing.T) {
+	baseline := projectioncontract.RuntimeAuditOperationReceipt{ValidationRecipeID: "recipe", ObservationProtocolRef: "owner/checks/v1",
+		ExecutedChecks: []string{"check-A"}, PassedChecks: []string{"check-A"}}
+	proof := runtimecontract.CoverageEvidenceProof{EvidenceKind: runtimecontract.EvidenceKindValidation,
+		RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectNone}, AllowedOperationKinds: []string{runtimecontract.StepKindMCPToolCall},
+		ValidationRecipeID: "recipe", RequiredCheckRefs: []string{"check-A"}}
+	if !runtimecontract.RuntimeValidationObservationSatisfiesCoverageProof(proof, *runtimeOperationReceipt(baseline).Evidence.Validation) {
+		t.Fatal("valid audit fixture lost exact check proof")
+	}
+	for name, mutate := range map[string]func(*projectioncontract.RuntimeAuditOperationReceipt){
+		"skipped subcheck": func(r *projectioncontract.RuntimeAuditOperationReceipt) { r.IncompleteChecks = []string{"check-A"} },
+		"partial output":   func(r *projectioncontract.RuntimeAuditOperationReceipt) { r.OutputTruncated = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := baseline
+			mutate(&changed)
+			if runtimecontract.RuntimeValidationObservationSatisfiesCoverageProof(proof, *runtimeOperationReceipt(changed).Evidence.Validation) {
+				t.Fatal("audit conversion upgraded incomplete evidence to proof")
+			}
+		})
+	}
+	baseline.PassedChecks, baseline.FailedChecks = nil, []string{"check-A"}
+	baseline.CheckFailures = []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: "check-A", TargetRef: "checks/a.test", Line: 47, DiagnosticHash: strings.Repeat("a", 64)}}
+	evidence := projectioncontract.RuntimeAuditEvidence{ValidationRecipeID: baseline.ValidationRecipeID, ObservationProtocolRef: baseline.ObservationProtocolRef,
+		ExecutedChecks: baseline.ExecutedChecks, FailedChecks: baseline.FailedChecks, CheckFailures: baseline.CheckFailures}
+	receipt := runtimeOperationReceipt(baseline)
+	if !sameValidationObservation(receipt.Evidence.Validation, evidence) {
+		t.Fatal("identical receipt/evidence diagnostics differ")
+	}
+	for name, mutate := range map[string]func(*projectioncontract.RuntimeAuditEvidence){
+		"location":         func(e *projectioncontract.RuntimeAuditEvidence) { e.CheckFailures[0].Line++ },
+		"omitted details":  func(e *projectioncontract.RuntimeAuditEvidence) { e.CheckFailures = nil },
+		"partial details":  func(e *projectioncontract.RuntimeAuditEvidence) { e.FailureDetailsTruncated = true },
+		"partial output":   func(e *projectioncontract.RuntimeAuditEvidence) { e.OutputTruncated = true },
+		"incomplete check": func(e *projectioncontract.RuntimeAuditEvidence) { e.IncompleteChecks = []string{"check-A"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := projectioncontract.CloneRuntimeAuditEvidence([]projectioncontract.RuntimeAuditEvidence{evidence})[0]
+			mutate(&changed)
+			if sameValidationObservation(receipt.Evidence.Validation, changed) {
+				t.Fatal("audit ignored mismatched owner feedback")
+			}
+		})
+	}
+}
+
 func TestCoverageBindingChainUsesCanonicalExactTargetSubsetPolicy(t *testing.T) {
 	binding := runtimecontract.CoverageEvidenceBinding{
 		ID: "binding/cwi-1", CoverageWorkItemID: "cwi-1", FocusID: "focus-1", DefinitionRevision: "definition-1",

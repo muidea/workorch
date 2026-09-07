@@ -1234,7 +1234,8 @@ func runtimeAuditEvidenceEqual(a, b projectioncontract.RuntimeAuditEvidence) boo
 		stringSliceEqualDisplay(a.CoverageWorkItemIDs, b.CoverageWorkItemIDs) && stringSliceEqualDisplay(a.EvidenceRefs, b.EvidenceRefs) &&
 		stringSliceEqualDisplay(a.EvidenceTags, b.EvidenceTags) && stringSliceEqualDisplay(a.ExecutedChecks, b.ExecutedChecks) &&
 		stringSliceEqualDisplay(a.PassedChecks, b.PassedChecks) && stringSliceEqualDisplay(a.FailedChecks, b.FailedChecks) &&
-		stringSliceEqualDisplay(a.SkippedChecks, b.SkippedChecks)
+		stringSliceEqualDisplay(a.SkippedChecks, b.SkippedChecks) && stringSliceEqualDisplay(a.IncompleteChecks, b.IncompleteChecks) &&
+		reflect.DeepEqual(a.CheckFailures, b.CheckFailures) && a.FailureDetailsTruncated == b.FailureDetailsTruncated && a.OutputTruncated == b.OutputTruncated
 }
 
 func runtimeAuditOperationReceiptEqual(a, b projectioncontract.RuntimeAuditOperationReceipt) bool {
@@ -1246,7 +1247,9 @@ func runtimeAuditOperationReceiptEqual(a, b projectioncontract.RuntimeAuditOpera
 		stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs) &&
 		stringSliceEqualDisplay(a.EvidenceRefs, b.EvidenceRefs) && stringSliceEqualDisplay(a.EvidenceTags, b.EvidenceTags) &&
 		stringSliceEqualDisplay(a.ExecutedChecks, b.ExecutedChecks) && stringSliceEqualDisplay(a.PassedChecks, b.PassedChecks) &&
-		stringSliceEqualDisplay(a.FailedChecks, b.FailedChecks) && stringSliceEqualDisplay(a.SkippedChecks, b.SkippedChecks)
+		stringSliceEqualDisplay(a.FailedChecks, b.FailedChecks) && stringSliceEqualDisplay(a.SkippedChecks, b.SkippedChecks) &&
+		stringSliceEqualDisplay(a.IncompleteChecks, b.IncompleteChecks) && reflect.DeepEqual(a.CheckFailures, b.CheckFailures) &&
+		a.FailureDetailsTruncated == b.FailureDetailsTruncated && a.OutputTruncated == b.OutputTruncated
 }
 
 func runtimeAuditFailureEqual(a, b *projectioncontract.RuntimeAuditFailure) bool {
@@ -1319,6 +1322,8 @@ func convergenceBudgetEqual(a, b *projectioncontract.ConvergenceBudget) bool {
 		a.MaxRepairAttemptsPerFocus == b.MaxRepairAttemptsPerFocus &&
 		a.MaxLLMRoundsPerSlice == b.MaxLLMRoundsPerSlice &&
 		a.MaxRepeatedFailureSignature == b.MaxRepeatedFailureSignature &&
+		a.ValidationRepairPolicyID == b.ValidationRepairPolicyID &&
+		a.ValidationRepairMaxAttempts == b.ValidationRepairMaxAttempts &&
 		a.MaxValidationOnlyRetries == b.MaxValidationOnlyRetries &&
 		a.MaxNoCoverageDeltaRounds == b.MaxNoCoverageDeltaRounds &&
 		a.MaxContextBytesPerRepair == b.MaxContextBytesPerRepair &&
@@ -1394,6 +1399,8 @@ func convergenceStatusEqual(a, b *projectioncontract.ConvergenceStatus) bool {
 		strings.TrimSpace(a.AssessmentDisposition) == strings.TrimSpace(b.AssessmentDisposition) &&
 		a.RepairAttempts == b.RepairAttempts &&
 		a.MaxRepairAttempts == b.MaxRepairAttempts &&
+		a.ValidationRepairPolicyID == b.ValidationRepairPolicyID &&
+		a.ValidationRepairMaxAttempts == b.ValidationRepairMaxAttempts &&
 		a.RepeatedFailureSignatureCount == b.RepeatedFailureSignatureCount &&
 		strings.TrimSpace(a.LatestAcceptedEvidenceRef) == strings.TrimSpace(b.LatestAcceptedEvidenceRef) &&
 		a.NextActivationRequired == b.NextActivationRequired &&
@@ -1448,6 +1455,12 @@ func runtimeProgressEqual(a, b *projectioncontract.RuntimeProgress) bool {
 		return false
 	}
 	if a.StateRevision != b.StateRevision ||
+		a.LatestAcceptedEvidenceAt != b.LatestAcceptedEvidenceAt ||
+		a.LatestDurableEffectAt != b.LatestDurableEffectAt ||
+		a.DurableEffectCount != b.DurableEffectCount ||
+		a.SatisfiedCWICount != b.SatisfiedCWICount ||
+		a.ValidationFailureFingerprint != b.ValidationFailureFingerprint ||
+		a.ValidationFailureOccurrences != b.ValidationFailureOccurrences ||
 		a.EvidenceSequence != b.EvidenceSequence ||
 		strings.TrimSpace(a.CurrentFocusID) != strings.TrimSpace(b.CurrentFocusID) ||
 		strings.TrimSpace(a.ConvergenceState) != strings.TrimSpace(b.ConvergenceState) ||

@@ -52,6 +52,10 @@ Provider-facing 第一段必须是连续的 C0→C1→C2。C3→C4→C5 只能�
   不得进入任何 C0～C5 section。后继 owner conformance result 是 required shape 的唯一证明，不改变 C0～C3 section hash；
 - external capability receipt 只把 owner-normalized bounded summary/hash放入C4 evidence tail；raw payload只能作为
   opaque C5 ref，不能展开provider body、transport endpoint或diagnostic；
+- C4 current validation failure 独立于 recent evidence 的裁剪窗口，以 exact failure signature 绑定其 receipt；typed check/case、
+  location/line、assertion digest 与显式 missing/truncated 状态保持有界。C3 不得直接序列化完整 `RuntimeRepairDirective`
+  的 diagnostic、rejected candidate parameters 或历史 failure；它只投影 current repair authority。failure detail 变化不得
+  改写 C0～C2，同一 transaction 的 correction 仍不得改变 C0～C3。
 - operation kind、variant 与 target policy 必须来自同一 owner fact；具体 owner/kind/target 只存在于 C3 manifest。
 
 attempt 0 与 same-contract attempt 1 必须复用相同 C0～C3 section hash、manifest、authority transaction 与

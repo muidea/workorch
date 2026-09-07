@@ -22,6 +22,7 @@ type shellGoTestJSONDiagnosticRecord struct {
 	Action     string
 	Package    string
 	ImportPath string
+	Test       string
 	Output     string
 }
 
@@ -81,6 +82,13 @@ func attachShellValidationObservation(output *RuntimeCommandResult, command stri
 		if strings.TrimSpace(output.EvidenceReason) == "" {
 			output.EvidenceReason = "validation command reported failed checks"
 		}
+		output.ValidationObservation = &observation
+		return
+	}
+	if len(observation.IncompleteChecks) != 0 {
+		output.EvidenceQuality = string(common.EvidenceQualityInconclusive)
+		output.EvidenceReason = "validation check contains skipped subchecks"
+		output.EvidenceTags = appendUniqueShellEvidenceTag(output.EvidenceTags, "incomplete_check")
 		output.ValidationObservation = &observation
 		return
 	}
@@ -147,7 +155,7 @@ func parseGoTestJSONFacts(stdout, stderr string) shellGoTestJSONFacts {
 			if strings.TrimSpace(event.Output) != "" {
 				diagnosticRecords = append(diagnosticRecords, shellGoTestJSONDiagnosticRecord{
 					Action: strings.TrimSpace(event.Action), Package: strings.TrimSpace(event.Package),
-					ImportPath: strings.TrimSpace(event.ImportPath), Output: event.Output,
+					ImportPath: strings.TrimSpace(event.ImportPath), Test: strings.TrimSpace(event.Test), Output: event.Output,
 				})
 				hasBuildOutput = hasBuildOutput || strings.TrimSpace(event.Action) == "build-output"
 				diagnosticOutput.WriteString(event.Output)
@@ -158,6 +166,9 @@ func parseGoTestJSONFacts(stdout, stderr string) shellGoTestJSONFacts {
 		}
 		name := topLevelGoTestCheck(event.Test)
 		if name == "" {
+			if parent, _, nested := strings.Cut(strings.TrimSpace(event.Test), "/"); nested && parent != "" && strings.TrimSpace(event.Action) == "skip" {
+				observation.IncompleteChecks = append(observation.IncompleteChecks, parent)
+			}
 			continue
 		}
 		switch strings.TrimSpace(event.Action) {

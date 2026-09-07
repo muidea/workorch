@@ -158,6 +158,7 @@ func RuntimeValidationObservationSatisfiesCoverageProof(proof CoverageEvidencePr
 	proof = proof.Normalized()
 	observation = observation.Normalized()
 	if proof.Validate() != nil || proof.EvidenceKind != EvidenceKindValidation ||
+		observation.ValidateFailureDetails() != nil || observation.OutputTruncated ||
 		observation.RecipeID != proof.ValidationRecipeID || len(RuntimeValidationConflictingChecks(observation)) != 0 {
 		return false
 	}

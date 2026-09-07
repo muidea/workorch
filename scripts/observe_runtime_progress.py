@@ -28,6 +28,8 @@ def runtime_progress_facts(snapshot):
         "stateRevision": int(audit.get("stateRevision") or 0) if audit_matches else 0,
         "acceptedResultIds": accepted_results,
         "acceptedEvidenceIds": sorted({item["id"] for item in evidence if item.get("id")}),
+        "acceptedValidationEvidenceIds": sorted({item["id"] for item in evidence
+            if item.get("id") and item.get("kind") == "validation" and item.get("coverageWorkItemIds")}),
         # Recovery fences/repeated receipt delivery for one execution are not
         # independent effects. Only owner-accepted durable changes count here.
         "durableEffectExecutionKeys": sorted({item["executionKey"] for item in receipts
@@ -53,9 +55,11 @@ def evaluate_workspace_progress(summary, previous=None, min_accepted_results=1):
                     and run_id == (previous.get("run") or {}).get("id"))
     comparable = same_run and facts.get("auditScopeValid") is True and before.get("auditScopeValid") is True
     comparable = comparable and int(facts.get("stateRevision") or 0) >= int(before.get("stateRevision") or 0)
-    fields = ("acceptedResultIds", "acceptedEvidenceIds", "durableEffectExecutionKeys", "satisfiedCWIIds")
+    fields = ("acceptedResultIds", "acceptedEvidenceIds", "acceptedValidationEvidenceIds", "durableEffectExecutionKeys", "satisfiedCWIIds")
     delta = {key: sorted(set(facts.get(key) or []) - set(before.get(key) or [])) if comparable else [] for key in fields}
     observed_progress = any(delta.values())
+    acceptance_progress = any(delta[key] for key in ("acceptedResultIds", "acceptedValidationEvidenceIds", "satisfiedCWIIds"))
+    effect_observed = bool(delta["durableEffectExecutionKeys"])
     previous_heartbeat = (previous or {}).get("heartbeat") or {}
     heartbeat_changed = same_run and any(heartbeat.get(key) and heartbeat.get(key) != previous_heartbeat.get(key)
         for key in ("latestEventRevision", "latestLLMUsageAt", "latestEffectiveProgressAt"))
@@ -84,11 +88,14 @@ def evaluate_workspace_progress(summary, previous=None, min_accepted_results=1):
         mode = "governed_decision_blocker"
     elif approval_blocker:
         mode = "governed_approval_blocker"
-    elif state == "active" and observed_progress:
+    elif state == "active" and acceptance_progress:
         mode = "positive_progress_with_owner_evidence"
+    elif state == "active" and effect_observed:
+        mode = "effects_without_acceptance_progress"
+        issues.append("durable effects observed, but no validation/CWI/Result acceptance delta in this interval")
     else:
         mode = "active_without_observed_progress" if activity_observed else "no_observed_positive_progress"
-        issues.append("no same-Run owner-evidence/effect/CWI delta or fully accepted completion observed in this interval")
+        issues.append("no same-Run validation/CWI/Result acceptance delta or fully accepted completion observed in this interval")
     if decision_blocker and convergence.get("decisionEligibilityDenied"):
         issues.append("open decision conflicts with owner-projected decision eligibility: "
                       + str(convergence.get("decisionNotEligibleReason") or ""))
@@ -97,7 +104,8 @@ def evaluate_workspace_progress(summary, previous=None, min_accepted_results=1):
         "runId": run_id, "runState": state, "mode": mode,
         "comparisonAvailable": bool(comparable), "activityObserved": bool(activity_observed),
         "observedProgress": observed_progress, "completed": completed,
-        "positiveProgress": bool(not issues and (completed or (state == "active" and observed_progress))),
+        "durableEffectObserved": effect_observed, "acceptanceProgressObserved": acceptance_progress,
+        "positiveProgress": bool(not issues and (completed or (state == "active" and acceptance_progress))),
         "delta": delta, "stateRevisionDelta": revision_delta,
         "decisionEligibility": {"denied": bool(convergence.get("decisionEligibilityDenied")),
             "reason": convergence.get("decisionNotEligibleReason"), "stepId": convergence.get("decisionNotEligibleStepId")},

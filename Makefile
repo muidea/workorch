@@ -110,7 +110,7 @@ help:
 	@echo "  verify-tui-workspace-switch-visual - record and verify TUI workspace switch view snapshots"
 	@echo "  verify-tui-runtime-refresh-history-live - TC10 live: server restart/SSE reconnect/runtime-view history artifacts"
 	@echo "  verify-tui-terminal-render - verify real PTY TUI render against deployed service"
-	@echo "  release     - build cross-platform release binaries into $(RELEASE_OUT)/"
+	@echo "  release     - require full deployed convergence evidence, then package into $(RELEASE_OUT)/"
 	@echo "  release-check - fmt-check + vet + test + verify-boundary-contract + release"
 	@echo "  install-latest - install latest release binary from GitHub via install script"
 	@echo "  ci         - fmt-check + vet + test + build + file-backed service verification"
@@ -362,6 +362,7 @@ DEPLOYED_CONVERGENCE_PROFILE_ID ?=
 
 verify-deployed-convergence-manifest-tests:
 	python3 ./scripts/test_verify_deployed_convergence_manifest.py
+	python3 ./scripts/test_release_convergence_gate.py
 
 verify-deployed-convergence-ci-safe:
 	python3 ./scripts/verify_deployed_convergence_manifest.py \
@@ -421,7 +422,9 @@ RELEASE_OUT ?= ./dist
 RELEASE_TAG ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev")
 RELEASE_PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-release: go-deps console-build
+release: override DEPLOYED_CONVERGENCE_PROFILE := full
+release: verify-deployed-convergence-release
+	$(MAKE) go-deps console-build
 	@rm -rf $(RELEASE_OUT)
 	@mkdir -p $(RELEASE_OUT)
 	@set -e; \

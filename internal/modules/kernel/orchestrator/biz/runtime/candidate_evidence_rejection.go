@@ -150,6 +150,11 @@ func ensureRejectedExecutionFailureSignature(aggregate *RuntimeAggregate, fact *
 
 func rejectedExecutionRepairLedger(facts runtimecontract.RuntimeFacts, evidence ExecutionEvidence, operation runtimecontract.RuntimeOperation, fact runtimecontract.EvidenceFact, failure runtimecontract.FailureFact, gap runtimecontract.RuntimeAssessmentGap, signature string) (runtimecontract.RuntimeRepairLedger, error) {
 	previousCount := repairFailureSignatureCount(facts.Repair, signature)
+	// Transaction signatures fence closure/dispatch identity; a new repair
+	// closure must not erase the observation that the same check still fails.
+	// Derive the comparison from immutable receipts' evidence in this same
+	// private event, without a second persisted counter or projection authority.
+	semanticPreviousCount := runtimecontract.RuntimeValidationFailureOccurrences(facts.Evidence, fact, facts.Focus.CoverageEvidenceBindings...)
 	cycleID := runtimecontract.StableRepairCycleID(string(facts.RunID), facts.Focus.ID, signature, evidence.EventID)
 	ledger, _, err := beginRepairCycle(facts.Repair, facts.Focus.ID, facts.Focus.SliceID, cycleID, signature, facts.ConvergencePolicy)
 	if err != nil {
@@ -167,7 +172,7 @@ func rejectedExecutionRepairLedger(facts runtimecontract.RuntimeFacts, evidence 
 			FailureMessage:   failure.Message,
 		})
 		ledger = noteRepairNoProgress(ledger)
-	} else if previousCount > 0 {
+	} else if previousCount > 0 || semanticPreviousCount > 0 {
 		ledger = noteRepairNoProgress(ledger)
 	}
 	return ledger, nil

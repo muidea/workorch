@@ -6,6 +6,11 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 // progress. Consumers must not reverse-drive Runtime authority from it.
 type RuntimeProgress struct {
 	LatestAcceptedEvidenceAt        string                                      `json:"latestAcceptedEvidenceAt,omitempty"`
+	LatestDurableEffectAt           string                                      `json:"latestDurableEffectAt,omitempty"`
+	DurableEffectCount              int                                         `json:"durableEffectCount"`
+	SatisfiedCWICount               int                                         `json:"satisfiedCwiCount"`
+	ValidationFailureFingerprint    string                                      `json:"validationFailureFingerprint,omitempty"`
+	ValidationFailureOccurrences    int                                         `json:"validationFailureOccurrences"`
 	StateRevision                   uint64                                      `json:"stateRevision,omitempty"`
 	EvidenceSequence                uint64                                      `json:"evidenceSequence,omitempty"`
 	CompletedDispatchCount          int                                         `json:"completedDispatchCount"`

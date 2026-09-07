@@ -1688,6 +1688,50 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	if request.ContextBudget.ActualBytes <= 0 || request.ContextBudget.ActualBytes >= 96*1024 {
 		t.Fatalf("provider request actual bytes = %d, want current-stage projection below 96 KiB", request.ContextBudget.ActualBytes)
 	}
+	t.Run("final rendered failure context is complete and volatile", func(t *testing.T) {
+		feedbackContext := candidateContext.Normalized()
+		feedbackContext.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Signature: "current-check-failure", Message: "private raw diagnostic"}
+		if len(feedbackContext.Focus.CoverageEvidenceBindings) == 0 {
+			t.Fatal("render fixture has no sealed binding")
+		}
+		failed := runtimecontract.EvidenceFact{ID: "causal-validation-receipt", Kind: runtimecontract.EvidenceKindValidation,
+			BindingRefs: []string{feedbackContext.Focus.CoverageEvidenceBindings[0].ID}, FailureSignature: "current-check-failure",
+			Validation: &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe", ObservationProtocolRef: "owner/checks/v1", FailedChecks: []string{"check-A"},
+				OutputPreview: "private output", CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: "check-A", TargetRef: "checks/a.test", Line: 47, DiagnosticHash: strings.Repeat("a", 64)}}}}
+		feedbackContext.Evidence.Rejected = []runtimecontract.EvidenceFact{failed}
+		for i := 0; i < runtimeCandidateExecutionTailLimit+1; i++ {
+			feedbackContext.Evidence.Rejected = append(feedbackContext.Evidence.Rejected, runtimecontract.EvidenceFact{ID: common.EvidenceRecordID(fmt.Sprintf("unrelated-%d", i)), Kind: runtimecontract.EvidenceKindStateChange})
+		}
+		withFeedback, err := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+			Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: feedbackContext})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 4; i++ {
+			if withFeedback.PromptContext.Sections[i].Content != request.PromptContext.Sections[i].Content {
+				t.Fatalf("failure feedback changed C%d", i)
+			}
+		}
+		tail := withFeedback.PromptContext.Sections[4].Content
+		for _, want := range []string{"currentValidationFailure", "causal-validation-receipt", "check-A", "checks/a.test", `"line":47`, `"failureDetailsIncomplete":false`, `"occurrences":1`} {
+			if !strings.Contains(tail, want) {
+				t.Fatalf("final C4 lost current failure fact %q: %s", want, tail)
+			}
+		}
+		for _, forbidden := range []string{"private raw diagnostic", "private output"} {
+			for _, section := range withFeedback.PromptContext.Sections {
+				if strings.Contains(section.Content, forbidden) {
+					t.Fatalf("raw diagnostic reached %s", section.ID)
+				}
+			}
+		}
+		failed.Validation.CheckFailures = nil
+		feedbackContext.Evidence.Rejected[0] = failed
+		missing := runtimeCurrentValidationFailure(feedbackContext)
+		if missing == nil || missing.Validation == nil || !missing.Validation.FailureDetailsIncomplete {
+			t.Fatal("missing assertion details silently appeared complete")
+		}
+	})
 	if request.PromptContext.Sections[3].Content == "" || request.PromptContext.Sections[4].Content == "" || request.Schema == "" {
 		t.Fatalf("provider request lost dynamic context: %+v", request)
 	}
@@ -2750,10 +2794,23 @@ func TestRuntimeCandidateAuthorityProjectionPreservesRepairDirectiveAuthority(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"ValidationDiagnostic", runtimecontract.ValidationDiagnosticBuildFailed, "compile failed", "main.go"} {
+	for _, want := range []string{"repairDirective", "repair-1", "main.go"} {
 		if !strings.Contains(string(encoded), want) {
-			t.Fatalf("C3 projection lost validation diagnostic %q: %s", want, encoded)
+			t.Fatalf("C3 projection lost repair authority %q: %s", want, encoded)
 		}
+	}
+	for _, forbidden := range []string{"ValidationDiagnostic", "compile failed", "CurrentFailure"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("C3 leaked private repair diagnostic: %s", encoded)
+		}
+	}
+	tail := buildRuntimeCandidateExecutionTailProjection(context, 0, nil, runtimeCandidateContextManifest(runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.StepKindFileWrite), nil)
+	encoded, err = json.Marshal(tail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), runtimecontract.ValidationDiagnosticBuildFailed) || strings.Contains(string(encoded), "compile failed") {
+		t.Fatalf("C4 must retain typed diagnostic without raw output: %s", encoded)
 	}
 }
 

@@ -329,6 +329,8 @@ export type ConvergenceStatus = {
   assessmentDisposition?: string;
   repairAttempts?: number;
   maxRepairAttempts?: number;
+  validationRepairPolicyId?: string;
+  validationRepairMaxAttempts?: number;
   repeatedFailureSignatureCount?: number;
   latestAcceptedEvidenceRef?: string;
   nextActivationRequired?: boolean;
@@ -1149,6 +1151,8 @@ export type ConvergenceBudget = {
   maxRepairAttemptsPerFocus?: number;
   maxLLMRoundsPerSlice?: number;
   maxRepeatedFailureSignature?: number;
+  validationRepairPolicyId?: string;
+  validationRepairMaxAttempts?: number;
   maxValidationOnlyRetries?: number;
   maxNoCoverageDeltaRounds?: number;
   maxContextBytesPerRepair?: number;
@@ -1420,6 +1424,15 @@ export type RuntimeAuditSealedOperation = {
   targetRefs?: string[];
 };
 
+export type RuntimeValidationCheckFailure = {
+  checkRef: string;
+  caseRef?: string;
+  packageRef?: string;
+  targetRef?: string;
+  line?: number;
+  diagnosticHash: string;
+};
+
 // CoverageWorkItemIds here are already SM-2-derived ledger credit. Candidate
 // coverage claims are neither represented nor accepted by this API shape.
 export type RuntimeAuditEvidence = {
@@ -1446,6 +1459,10 @@ export type RuntimeAuditEvidence = {
   passedChecks?: string[];
   failedChecks?: string[];
   skippedChecks?: string[];
+  incompleteChecks?: string[];
+  checkFailures?: RuntimeValidationCheckFailure[];
+  failureDetailsTruncated?: boolean;
+  outputTruncated?: boolean;
 };
 
 export type RuntimeAuditOperationReceipt = {
@@ -1467,6 +1484,10 @@ export type RuntimeAuditOperationReceipt = {
   passedChecks?: string[];
   failedChecks?: string[];
   skippedChecks?: string[];
+  incompleteChecks?: string[];
+  checkFailures?: RuntimeValidationCheckFailure[];
+  failureDetailsTruncated?: boolean;
+  outputTruncated?: boolean;
 };
 
 export type RuntimeAuditRepair = {
@@ -1572,6 +1593,11 @@ export type TaskProgress = {
 
 export type RuntimeProgress = {
   latestAcceptedEvidenceAt?: string;
+  latestDurableEffectAt?: string;
+  durableEffectCount?: number;
+  satisfiedCwiCount?: number;
+  validationFailureFingerprint?: string;
+  validationFailureOccurrences?: number;
   stateRevision?: number;
   evidenceSequence?: number;
   completedDispatchCount?: number;

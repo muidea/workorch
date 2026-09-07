@@ -275,27 +275,31 @@ type RuntimeAuditSealedOperation struct {
 // RuntimeAuditOperationReceipt is structured, already-judged capability-owner
 // feedback. It cannot issue a command or mutate Runtime state.
 type RuntimeAuditOperationReceipt struct {
-	ExecutionKey           string                                     `json:"executionKey,omitempty"`
-	Fence                  uint64                                     `json:"fence,omitempty"`
-	OperationID            string                                     `json:"operationId,omitempty"`
-	Outcome                string                                     `json:"outcome,omitempty"`
-	ObservedEffectScope    string                                     `json:"observedEffectScope,omitempty"`
-	Changed                bool                                       `json:"changed,omitempty"`
-	FeedbackDomain         string                                     `json:"feedbackDomain,omitempty"`
-	StableCategory         string                                     `json:"stableCategory,omitempty"`
-	OriginalDiagnostic     *runtimecontract.RuntimeOriginalDiagnostic `json:"originalDiagnostic,omitempty"`
-	TargetRefs             []string                                   `json:"targetRefs,omitempty"`
-	Quality                string                                     `json:"quality,omitempty"`
-	ZeroWork               bool                                       `json:"zeroWork,omitempty"`
-	EvidenceReason         string                                     `json:"evidenceReason,omitempty"`
-	EvidenceRefs           []string                                   `json:"evidenceRefs,omitempty"`
-	EvidenceTags           []string                                   `json:"evidenceTags,omitempty"`
-	ValidationRecipeID     string                                     `json:"validationRecipeId,omitempty"`
-	ObservationProtocolRef string                                     `json:"observationProtocolRef,omitempty"`
-	ExecutedChecks         []string                                   `json:"executedChecks,omitempty"`
-	PassedChecks           []string                                   `json:"passedChecks,omitempty"`
-	FailedChecks           []string                                   `json:"failedChecks,omitempty"`
-	SkippedChecks          []string                                   `json:"skippedChecks,omitempty"`
+	ExecutionKey            string                                          `json:"executionKey,omitempty"`
+	Fence                   uint64                                          `json:"fence,omitempty"`
+	OperationID             string                                          `json:"operationId,omitempty"`
+	Outcome                 string                                          `json:"outcome,omitempty"`
+	ObservedEffectScope     string                                          `json:"observedEffectScope,omitempty"`
+	Changed                 bool                                            `json:"changed,omitempty"`
+	FeedbackDomain          string                                          `json:"feedbackDomain,omitempty"`
+	StableCategory          string                                          `json:"stableCategory,omitempty"`
+	OriginalDiagnostic      *runtimecontract.RuntimeOriginalDiagnostic      `json:"originalDiagnostic,omitempty"`
+	TargetRefs              []string                                        `json:"targetRefs,omitempty"`
+	Quality                 string                                          `json:"quality,omitempty"`
+	ZeroWork                bool                                            `json:"zeroWork,omitempty"`
+	EvidenceReason          string                                          `json:"evidenceReason,omitempty"`
+	EvidenceRefs            []string                                        `json:"evidenceRefs,omitempty"`
+	EvidenceTags            []string                                        `json:"evidenceTags,omitempty"`
+	ValidationRecipeID      string                                          `json:"validationRecipeId,omitempty"`
+	ObservationProtocolRef  string                                          `json:"observationProtocolRef,omitempty"`
+	ExecutedChecks          []string                                        `json:"executedChecks,omitempty"`
+	PassedChecks            []string                                        `json:"passedChecks,omitempty"`
+	FailedChecks            []string                                        `json:"failedChecks,omitempty"`
+	SkippedChecks           []string                                        `json:"skippedChecks,omitempty"`
+	IncompleteChecks        []string                                        `json:"incompleteChecks,omitempty"`
+	CheckFailures           []runtimecontract.RuntimeValidationCheckFailure `json:"checkFailures,omitempty"`
+	FailureDetailsTruncated bool                                            `json:"failureDetailsTruncated,omitempty"`
+	OutputTruncated         bool                                            `json:"outputTruncated,omitempty"`
 }
 
 type RuntimeAuditRepair struct {
@@ -505,6 +509,8 @@ func cloneRuntimeAuditOperationReceipts(items []RuntimeAuditOperationReceipt) []
 		item.PassedChecks = append([]string(nil), item.PassedChecks...)
 		item.FailedChecks = append([]string(nil), item.FailedChecks...)
 		item.SkippedChecks = append([]string(nil), item.SkippedChecks...)
+		item.IncompleteChecks = append([]string(nil), item.IncompleteChecks...)
+		item.CheckFailures = append([]runtimecontract.RuntimeValidationCheckFailure(nil), item.CheckFailures...)
 		ret = append(ret, item)
 	}
 	return ret
@@ -585,29 +591,33 @@ func cloneRuntimeAuditAssessmentItems(values []RuntimeAuditAssessmentItem) []Run
 // already-judged Runtime evidence fact. It carries no reducer instruction or
 // evidence-admission authority.
 type RuntimeAuditEvidence struct {
-	ID                     string   `json:"id,omitempty"`
-	Kind                   string   `json:"kind,omitempty"`
-	AuthoritySnapshotID    string   `json:"authoritySnapshotId,omitempty"`
-	DispatchID             string   `json:"dispatchId,omitempty"`
-	OperationID            string   `json:"operationId,omitempty"`
-	Revision               string   `json:"revision,omitempty"`
-	FailureClass           string   `json:"failureClass,omitempty"`
-	FailureCode            string   `json:"failureCode,omitempty"`
-	FailureSignature       string   `json:"failureSignature,omitempty"`
-	TargetRefs             []string `json:"targetRefs,omitempty"`
-	BindingRefs            []string `json:"bindingRefs,omitempty"`
-	CoverageWorkItemIDs    []string `json:"coverageWorkItemIds,omitempty"`
-	Quality                string   `json:"quality,omitempty"`
-	ZeroWork               bool     `json:"zeroWork,omitempty"`
-	EvidenceReason         string   `json:"evidenceReason,omitempty"`
-	EvidenceRefs           []string `json:"evidenceRefs,omitempty"`
-	EvidenceTags           []string `json:"evidenceTags,omitempty"`
-	ValidationRecipeID     string   `json:"validationRecipeId,omitempty"`
-	ObservationProtocolRef string   `json:"observationProtocolRef,omitempty"`
-	ExecutedChecks         []string `json:"executedChecks,omitempty"`
-	PassedChecks           []string `json:"passedChecks,omitempty"`
-	FailedChecks           []string `json:"failedChecks,omitempty"`
-	SkippedChecks          []string `json:"skippedChecks,omitempty"`
+	ID                      string                                          `json:"id,omitempty"`
+	Kind                    string                                          `json:"kind,omitempty"`
+	AuthoritySnapshotID     string                                          `json:"authoritySnapshotId,omitempty"`
+	DispatchID              string                                          `json:"dispatchId,omitempty"`
+	OperationID             string                                          `json:"operationId,omitempty"`
+	Revision                string                                          `json:"revision,omitempty"`
+	FailureClass            string                                          `json:"failureClass,omitempty"`
+	FailureCode             string                                          `json:"failureCode,omitempty"`
+	FailureSignature        string                                          `json:"failureSignature,omitempty"`
+	TargetRefs              []string                                        `json:"targetRefs,omitempty"`
+	BindingRefs             []string                                        `json:"bindingRefs,omitempty"`
+	CoverageWorkItemIDs     []string                                        `json:"coverageWorkItemIds,omitempty"`
+	Quality                 string                                          `json:"quality,omitempty"`
+	ZeroWork                bool                                            `json:"zeroWork,omitempty"`
+	EvidenceReason          string                                          `json:"evidenceReason,omitempty"`
+	EvidenceRefs            []string                                        `json:"evidenceRefs,omitempty"`
+	EvidenceTags            []string                                        `json:"evidenceTags,omitempty"`
+	ValidationRecipeID      string                                          `json:"validationRecipeId,omitempty"`
+	ObservationProtocolRef  string                                          `json:"observationProtocolRef,omitempty"`
+	ExecutedChecks          []string                                        `json:"executedChecks,omitempty"`
+	PassedChecks            []string                                        `json:"passedChecks,omitempty"`
+	FailedChecks            []string                                        `json:"failedChecks,omitempty"`
+	SkippedChecks           []string                                        `json:"skippedChecks,omitempty"`
+	IncompleteChecks        []string                                        `json:"incompleteChecks,omitempty"`
+	CheckFailures           []runtimecontract.RuntimeValidationCheckFailure `json:"checkFailures,omitempty"`
+	FailureDetailsTruncated bool                                            `json:"failureDetailsTruncated,omitempty"`
+	OutputTruncated         bool                                            `json:"outputTruncated,omitempty"`
 }
 
 func CloneRuntimeAuditEvidence(values []RuntimeAuditEvidence) []RuntimeAuditEvidence {
@@ -625,6 +635,8 @@ func CloneRuntimeAuditEvidence(values []RuntimeAuditEvidence) []RuntimeAuditEvid
 		value.PassedChecks = append([]string(nil), value.PassedChecks...)
 		value.FailedChecks = append([]string(nil), value.FailedChecks...)
 		value.SkippedChecks = append([]string(nil), value.SkippedChecks...)
+		value.IncompleteChecks = append([]string(nil), value.IncompleteChecks...)
+		value.CheckFailures = append([]runtimecontract.RuntimeValidationCheckFailure(nil), value.CheckFailures...)
 		ret = append(ret, value)
 	}
 	return ret

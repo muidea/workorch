@@ -583,6 +583,11 @@ func (r RuntimeOperationReceipt) Validate() error {
 	if !ValidRuntimeEffectScope(r.ObservedEffectScope) {
 		return fmt.Errorf("operation receipt has invalid observed effect scope %q", r.ObservedEffectScope)
 	}
+	if r.Evidence.Validation != nil {
+		if err := r.Evidence.Validation.ValidateFailureDetails(); err != nil {
+			return err
+		}
+	}
 	if r.Evidence.ContentAddress != nil {
 		if err := r.Evidence.ContentAddress.Validate(); err != nil {
 			return err
@@ -784,6 +789,7 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 		writeHashStrings(h, observation.FailedChecks)
 		writeHashStrings(h, observation.SkippedChecks)
 		writeHashString(h, observation.OutputPreview)
+		writeRuntimeValidationFailureDetailsHash(h, observation)
 	}
 	if receipt.Evidence.ExitCode == nil {
 		writeHashString(h, "exit:nil")

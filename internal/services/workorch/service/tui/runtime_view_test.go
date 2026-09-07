@@ -10,6 +10,70 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func TestRuntimeAuditRefreshTracksValidationFailureDetails(t *testing.T) {
+	baseline := &projectioncontract.RuntimeAudit{
+		RejectedEvidence:  []projectioncontract.RuntimeAuditEvidence{{CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: "check-A", Line: 47}}}},
+		OperationReceipts: []projectioncontract.RuntimeAuditOperationReceipt{{CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: "check-A", Line: 47}}}},
+	}
+	for name, mutate := range map[string]func(*projectioncontract.RuntimeAudit){
+		"line": func(a *projectioncontract.RuntimeAudit) {
+			a.RejectedEvidence[0].CheckFailures[0].Line++
+			a.OperationReceipts[0].CheckFailures[0].Line++
+		},
+		"incomplete": func(a *projectioncontract.RuntimeAudit) {
+			a.RejectedEvidence[0].IncompleteChecks = []string{"check-A"}
+			a.OperationReceipts[0].IncompleteChecks = []string{"check-A"}
+		},
+		"output truncated": func(a *projectioncontract.RuntimeAudit) {
+			a.RejectedEvidence[0].OutputTruncated = true
+			a.OperationReceipts[0].OutputTruncated = true
+		},
+		"details truncated": func(a *projectioncontract.RuntimeAudit) {
+			a.RejectedEvidence[0].FailureDetailsTruncated = true
+			a.OperationReceipts[0].FailureDetailsTruncated = true
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := projectioncontract.CloneRuntimeAudit(baseline)
+			mutate(changed)
+			if runtimeAuditEvidenceEqual(baseline.RejectedEvidence[0], changed.RejectedEvidence[0]) ||
+				runtimeAuditOperationReceiptEqual(baseline.OperationReceipts[0], changed.OperationReceipts[0]) {
+				t.Fatal("TUI ignored owner diagnostic changes")
+			}
+		})
+	}
+}
+
+func TestRuntimeProgressRefreshTracksEffectAndAcceptanceIndependently(t *testing.T) {
+	baseline := projectioncontract.RuntimeProgress{StateRevision: 10}
+	for name, mutate := range map[string]func(*projectioncontract.RuntimeProgress){
+		"accepted clock": func(p *projectioncontract.RuntimeProgress) { p.LatestAcceptedEvidenceAt = "accepted-at" },
+		"effect clock":   func(p *projectioncontract.RuntimeProgress) { p.LatestDurableEffectAt = "effect-at" },
+		"effect count":   func(p *projectioncontract.RuntimeProgress) { p.DurableEffectCount = 1 },
+		"acceptance":     func(p *projectioncontract.RuntimeProgress) { p.SatisfiedCWICount = 1 },
+		"repeat":         func(p *projectioncontract.RuntimeProgress) { p.ValidationFailureOccurrences = 2 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := baseline
+			mutate(&changed)
+			if runtimeProgressEqual(&baseline, &changed) {
+				t.Fatal("changed progress projection did not refresh")
+			}
+		})
+	}
+	status := projectioncontract.ConvergenceStatus{MaxRepairAttempts: 48, RepairAttempts: 3, ValidationRepairPolicyID: "profile-policy", ValidationRepairMaxAttempts: 2}
+	text := convergenceRepairText(&status)
+	if !strings.Contains(text, "profile repair limit 2 (profile-policy)") || !strings.Contains(text, "3/48") {
+		t.Fatalf("Profile/global budget lost their identities: %s", text)
+	}
+	progressText := stripANSI(renderRuntimeProgressCompact(&projectioncontract.RuntimeProgress{
+		DurableEffectCount: 3, AcceptedValidationEvidenceCount: 0, SatisfiedCWICount: 1, ValidationFailureOccurrences: 3,
+	}, 180))
+	if !strings.Contains(progressText, "durable effects 3 | accepted validation 0 | satisfied CWI 1") || !strings.Contains(progressText, "same validation failure observed 3 times") {
+		t.Fatalf("rendered effect/acceptance/failure facts are incomplete: %s", progressText)
+	}
+}
+
 func TestApplyWorkspaceRuntimeViewRendersProgressAndActivity(t *testing.T) {
 	m := NewAppModel(newFake(t), "ws-runtime", "")
 	m.width = 120

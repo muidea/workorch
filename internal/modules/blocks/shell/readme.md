@@ -67,6 +67,14 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
   digest。diagnostic operation kind 必须是实际 sealed Shell operation kind；Shell 不选择匹配 route、repair owner、confirmation
   protocol 或终态。
 - 原始 stdout/stderr、secret 和自由文本 diagnostic 不得进入 Runtime authority；公开 diagnostic 必须有界、脱敏。
+- managed native check 的 failure feedback 从同一 JSON event 关联 check/case 与 assertion location，仅对 sealed validation
+  scope 内的唯一相对路径发布 `CheckFailures`（最多 32 项，超限显式标记）。assertion 内容只保留 digest，不导出原始
+  expected/actual；passing check 的日志不能成为另一个 failed check 的诊断。父检查 PASS 但子检查 skip 时发布
+  `IncompleteChecks`，transcript 截断时发布 `OutputTruncated`，两者均不能满足 native-check proof。Shell 不裁决修复因果。
+- `TestReferenceValidationGraderRejectsWeakAndUnrelatedEvidence` 使用固定行为 grader 校准不同合法文件中的正确实现、不可调用/
+  错误实现、静态标记、删除断言、whole/subcheck skip、依赖缺失与 A 失败/B 修改。删除断言由既有 owner declaration
+  prerequisite 拒绝；父检查 PASS/子检查 skip 由 native observation 拒绝。此测试只证明该 reference fixture 与协议，不能
+  宣称 AST 中出现断言即可证明任意 Goal/DoD，也不构成 DCE producer evidence。
 
 ## 能力验收
 

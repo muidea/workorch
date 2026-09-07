@@ -144,6 +144,8 @@ crash场景必须在被测transaction的持久化边界注入确定性stop/failp
 
 ## Release Decision
 
+- `make release`（包括 `release-check` 的打包步骤）在生成 archive 前必须执行 `full` manifest gate；命令行指定较小
+  profile 不得降低 release 所需场景集合。缺失 producer/evidence 时 fail closed，单测或基础 CI 不得替代完整部署证明。
 - CI-safe发布基线至少覆盖可用mock条件下的`DC-01`、`DC-03`、`DC-05`、`DC-06`、`DC-07`、`DC-08`、`DC-09`、`DC-10`。
 - Definition发布基线必须另覆盖`DC-11`与`DC-12`；只证明一个合法all-of happy path不能替代显式/隐式歧义的fail-closed路径。
 - real-provider发布声明必须另覆盖`DC-02`及`DC-01`的real-provider variant。

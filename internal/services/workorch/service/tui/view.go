@@ -660,6 +660,12 @@ func renderRuntimeProgressCompact(runtime *projectioncontract.RuntimeProgress, w
 	}
 	b.WriteString(truncateDisplay(fmt.Sprintf("- evidence accepted %d rejected %d | missing %s", runtime.AcceptedEvidenceCount, runtime.RejectedEvidenceCount, missing), width))
 	b.WriteString("\n")
+	b.WriteString(truncateDisplay(fmt.Sprintf("- durable effects %d | accepted validation %d | satisfied CWI %d", runtime.DurableEffectCount, runtime.AcceptedValidationEvidenceCount, runtime.SatisfiedCWICount), width))
+	b.WriteString("\n")
+	if runtime.ValidationFailureOccurrences > 1 {
+		b.WriteString(truncateDisplay(fmt.Sprintf("- same validation failure observed %d times", runtime.ValidationFailureOccurrences), width))
+		b.WriteString("\n")
+	}
 	if msg := strings.TrimSpace(runtime.FailureMessage); msg != "" {
 		b.WriteString(truncateDisplay("- failure "+msg, width))
 		b.WriteString("\n")
@@ -776,6 +782,9 @@ func convergenceRepairText(item *projectioncontract.ConvergenceStatus) string {
 		return ""
 	}
 	parts := make([]string, 0, 2)
+	if item.ValidationRepairMaxAttempts > 0 {
+		parts = append(parts, fmt.Sprintf("profile repair limit %d (%s)", item.ValidationRepairMaxAttempts, item.ValidationRepairPolicyID))
+	}
 	if item.MaxRepairAttempts > 0 || item.RepairAttempts > 0 {
 		if item.MaxRepairAttempts > 0 {
 			parts = append(parts, fmt.Sprintf("repair %d/%d", item.RepairAttempts, item.MaxRepairAttempts))

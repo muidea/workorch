@@ -71,7 +71,7 @@ func mapAcceptanceProjection(run *runmodel.Run) projectioncontract.AcceptancePro
 		MaxRepairAttemptsPerFocus: facts.ConvergencePolicy.MaxRepairAttemptsPerFocus,
 		MaxValidationOnlyRetries:  facts.ConvergencePolicy.MaxValidationOnlyRetriesPerFocus,
 		RepairAttempts:            facts.Repair.RepairAttempts, ValidationOnlyRetries: facts.Repair.ValidationOnlyRetries,
-		RepeatedFailureSignatures: len(facts.Repair.SignatureCounts), NoCoverageDeltaRounds: facts.Repair.NoProgressCount,
+		RepeatedFailureSignatures: runtimeRepeatedFailureOccurrences(facts), NoCoverageDeltaRounds: facts.Repair.NoProgressCount,
 		MaxPrerequisiteRefreshes: facts.RecoveryPolicy.MaxPrerequisiteRefreshes,
 		PrerequisiteRefreshes:    facts.Recovery.Used(runtimecontract.RuntimeRecoveryBudgetPrerequisiteRefresh),
 	}
@@ -84,6 +84,19 @@ func mapAcceptanceProjection(run *runmodel.Run) projectioncontract.AcceptancePro
 		CASReloadAttempts:            facts.Recovery.CASReloadAttempts,
 		MaxTerminalDeliveryAttempts:  facts.RecoveryPolicy.MaxTerminalDeliveryAttempts,
 		TerminalDeliveryAttempts:     facts.Recovery.TerminalDeliveryAttempts,
+	}
+	// Profile repair and global convergence budgets are distinct declarations.
+	// Project the exact immutable CWI policy, never infer it from error text or
+	// substitute the larger global limit for a narrower Profile bound.
+	if len(facts.Focus.CoverageWorkItemIDs) == 1 {
+		for _, declaration := range facts.DefinitionFocuses {
+			if len(declaration.CoverageWorkItemIDs) != 1 || declaration.CoverageWorkItemIDs[0] != facts.Focus.CoverageWorkItemIDs[0] || declaration.ValidationFailureRepairConvergence == nil {
+				continue
+			}
+			projection.Budget.ValidationRepairPolicyID = declaration.ValidationFailureRepairConvergence.ID
+			projection.Budget.ValidationRepairMaxAttempts = declaration.ValidationFailureRepairConvergence.MaxAttempts
+			break
+		}
 	}
 	if state.ExecutionBudget.Policy.PolicyRevision != "" {
 		activeWaitID := ""
@@ -111,6 +124,26 @@ func mapAcceptanceProjection(run *runmodel.Run) projectioncontract.AcceptancePro
 	projection.Audit = mapRuntimeAudit(state)
 	projection.Summary = summarizeAcceptanceSlices(projection.Slices)
 	return projection
+}
+
+func runtimeRepeatedFailureOccurrences(facts runtimecontract.RuntimeFacts) int {
+	_, count := runtimeValidationFailureComparison(facts)
+	signature := ""
+	if facts.Failure != nil {
+		signature = facts.Failure.Signature
+	}
+	if facts.RepairDirective != nil && facts.RepairDirective.CurrentFailure != nil {
+		signature = facts.RepairDirective.CurrentFailure.Signature
+	}
+	for _, item := range facts.Repair.SignatureCounts {
+		if signature != "" && item.Signature == signature && item.Count > count {
+			count = item.Count
+		}
+	}
+	if count < 2 {
+		return 0
+	}
+	return count
 }
 
 func runtimeRepairDirectiveProjection(value *runtimecontract.RuntimeRepairDirective) *projectioncontract.RuntimeRepairDirective {
@@ -378,6 +411,8 @@ func decodeConvergenceBudget(value any) projectioncontract.ConvergenceBudget {
 			State:                       stringValue(typed, "state", "State"),
 			Decision:                    stringValue(typed, "decision", "Decision"),
 			MaxRepairAttemptsPerFocus:   readModelIntValue(valueByKey(typed, "maxRepairAttemptsPerFocus", "MaxRepairAttemptsPerFocus")),
+			ValidationRepairPolicyID:    stringValue(typed, "validationRepairPolicyId", "ValidationRepairPolicyID"),
+			ValidationRepairMaxAttempts: readModelIntValue(valueByKey(typed, "validationRepairMaxAttempts", "ValidationRepairMaxAttempts")),
 			MaxLLMRoundsPerSlice:        readModelIntValue(valueByKey(typed, "maxLLMRoundsPerSlice", "MaxLLMRoundsPerSlice")),
 			MaxRepeatedFailureSignature: readModelIntValue(valueByKey(typed, "maxRepeatedFailureSignature", "MaxRepeatedFailureSignature")),
 			MaxValidationOnlyRetries:    readModelIntValue(valueByKey(typed, "maxValidationOnlyRetries", "MaxValidationOnlyRetries")),
@@ -426,6 +461,8 @@ func isEmptyConvergenceBudget(item projectioncontract.ConvergenceBudget) bool {
 		strings.TrimSpace(item.State) == "" &&
 		strings.TrimSpace(item.Decision) == "" &&
 		item.MaxRepairAttemptsPerFocus == 0 &&
+		item.ValidationRepairPolicyID == "" &&
+		item.ValidationRepairMaxAttempts == 0 &&
 		item.MaxLLMRoundsPerSlice == 0 &&
 		item.MaxRepeatedFailureSignature == 0 &&
 		item.MaxValidationOnlyRetries == 0 &&

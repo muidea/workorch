@@ -128,6 +128,17 @@ load facts
   CAS 提交。capability/LLM result 不拥有该 transition。
 - repairable gap 保持同一 focus，必须持久化结构化缺口。有效新 evidence 不清零同 focus 总 repair
   budget；只有原子 focus advance 才开启新的 repair ledger。
+- validation failure 的 transaction signature 与语义比较必须分离。`RequiredOutputHash`、repair closure、dispatch 和 receipt
+  fence 保持原有 exact identity；同一 CWI、recipe/protocol、failed check/case 与 assertion digest 的再次失败，由 SM-2
+  rejected-receipt private event 从 immutable evidence ledger 派生并更新既有 `NoProgressCount`，不能靠新 closure 清零。
+  只有这些 exact checks 的后继 credited validation pass 才关闭比较窗口；无关检查、无 credit 的修复 effect 与 activity
+  均不能关闭窗口。fingerprint/occurrences 是纯比较结果，不是第二份 receipt identity、repair authority 或 persisted counter。
+  rejected evidence 不携带 CWI credit；比较时只通过已封存 binding 解析诊断归属，未知 binding 不得从 current focus 猜测，
+  更不得回填 `CoverageWorkItemIDs` 或把失败证据移入 accepted ledger。
+- owner-native observation 必须区分 passed、failed、skipped、`IncompleteChecks` 与 `OutputTruncated`。父检查 PASS 但必需
+  子检查被跳过，或 transcript 不完整时，不能成为 exact native-check proof。可选 `CheckFailures` 只保留有界 check/case、
+  workspace-relative location/line 和 assertion digest；不能把诊断位置当作 root cause 或 repair target authority。
+  receipt/evidence hash 与 raw clone 同时绑定完整扩展；缺省扩展不改变既有记录 hash，禁止 backfill 旧归档。
 - mandatory assessment 尚未 adjudicate 时，accepted durable state receipt 不得提前清除 same-gap repair debt、active gap、
   cycle 或 no-progress provenance。若且仅若该 receipt 具有 exact current-binding CWI credit、真实 changed workspace-durable
   effect、命中 active repair directive 的 owner-grounded target，且 ordered all-of 仍缺声明内 validation，SM-2 可将
