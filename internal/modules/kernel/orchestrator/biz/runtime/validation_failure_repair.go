@@ -486,10 +486,25 @@ func runtimeValidationFailureRepairOwnsFreshValidationDirective(facts runtimecon
 		return false
 	}
 	index := runtimeCWICoverageIndex(facts.Coverage, coverageID)
-	if index < 0 || facts.Coverage[index].CurrentBindingRef == nil ||
-		facts.Coverage[index].CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound ||
+	if index < 0 ||
 		facts.Coverage[index].State == runtimecontract.RuntimeCoverageItemStateSatisfied ||
 		runtimeValidationFailureRepairReopenReason(facts.Coverage[index]) != runtimeCWIReopenReasonValidationFailureRepairSettled {
+		return false
+	}
+	closure := directive.Closure.Normalized()
+	if !closure.RequireValidationAfterStateChange || len(closure.GroundedTargetRefs) == 0 ||
+		len(closure.CoverageWorkItemIDs) != 1 || closure.CoverageWorkItemIDs[0] != coverageID ||
+		!contains(closure.RequiredEvidenceKinds, runtimecontract.EvidenceKindStateChange) ||
+		!contains(closure.RequiredEvidenceKinds, runtimecontract.EvidenceKindValidation) {
+		return false
+	}
+	// The receipt CAS retires the repair binding before the Definition-proof
+	// successor is sealed. This target-free continuation also owns that pending
+	// window; generic synchronization must not restore the old repair targets.
+	if facts.Coverage[index].CurrentBindingRef == nil {
+		return facts.Coverage[index].CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateReopened
+	}
+	if facts.Coverage[index].CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound {
 		return false
 	}
 	binding, found := coverageEvidenceBindingForCoverage(facts.Focus, coverageID)
@@ -499,11 +514,7 @@ func runtimeValidationFailureRepairOwnsFreshValidationDirective(facts runtimecon
 	if _, found := runtimecontract.CoverageEvidenceProofForKind(binding, runtimecontract.EvidenceKindValidation); !found {
 		return false
 	}
-	closure := directive.Closure.Normalized()
-	return closure.RequireValidationAfterStateChange && len(closure.GroundedTargetRefs) != 0 &&
-		len(closure.CoverageWorkItemIDs) == 1 && closure.CoverageWorkItemIDs[0] == coverageID &&
-		contains(closure.RequiredEvidenceKinds, runtimecontract.EvidenceKindStateChange) &&
-		contains(closure.RequiredEvidenceKinds, runtimecontract.EvidenceKindValidation)
+	return true
 }
 
 // CurrentRuntimeValidationFailureRepairGenerationInput returns the one
@@ -831,7 +842,12 @@ func currentRuntimeSemanticValidationFailureRepair(aggregate RuntimeAggregate) (
 	if !found || binding.ID != ref.BindingID || binding.Hash != ref.BindingHash {
 		return runtimecontract.RuntimeSemanticValidationFailureRepair{}, false, fmt.Errorf("%w: validation failure repair CWI binding conflicts with focus", common.ErrConflict)
 	}
+	return runtimeSemanticValidationFailureRepairForBinding(aggregate, coverageID, ref)
+}
 
+// Current binding and settled-repair replay share the same immutable purpose
+// lookup. A historical reference is never installed as current authority.
+func runtimeSemanticValidationFailureRepairForBinding(aggregate RuntimeAggregate, coverageID common.CoverageWorkItemID, ref runtimecontract.RuntimeCWIBindingRef) (runtimecontract.RuntimeSemanticValidationFailureRepair, bool, error) {
 	manifestMatches := 0
 	var purpose runtimecontract.RuntimeSemanticEvidenceObligationPurpose
 	var repair runtimecontract.RuntimeSemanticValidationFailureRepair

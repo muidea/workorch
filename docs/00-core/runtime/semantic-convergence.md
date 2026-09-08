@@ -340,8 +340,10 @@ declaration 不适用，则只能由 source binding 中 state-change operation d
 diagnostic 文本推断。不得投影 raw diagnostic、owner message、receipt、Runtime action、retry 或 terminal disposition。provider
 只能提出一份结构匹配且与 typed failure 相关的 `state_change` proposal；每个 prospective target 都必须对修复该 failure 有
 贡献。选定的 resource/effect owner 只判断完整 target set 的 factual feasibility，只有 SM-2 private internal event 可以 seal
-binding；`RequireFreshValidation` 保证 repair receipt 不授予 terminal validation credit。accepted repair 的 pre-seal purpose
-固定为 `confirmed_validation_repair`，commitment 以 `RepairOwnerModuleID` 封存同一 owner。该内容只属于 C3 volatile
+binding；`RequireFreshValidation` 保证 repair receipt 不授予 terminal validation credit。prospective semantic repair 的 purpose
+由 exact `validation_failure_repair` manifest/binding 证明；execution-locked binding 的 owner-confirmed repair 则在 pre-seal
+封存 `confirmed_validation_repair` commitment，以 `RepairOwnerModuleID` 绑定同一 owner。二者均由同一 Orchestrator owner
+消费完成证明并要求 fresh validation，不是两套状态管理。该内容只属于 C3 volatile
 authority，相同 Definition 的普通/repair generation 必须保持 C0～C2 与 stable prefix 完全一致。software-dev Profile 将该
 owner specialization 为 File 只是 Profile 事实，不是 Core reducer 分支。
 
@@ -350,6 +352,15 @@ owner specialization 为 File 只是 Profile 事实，不是 Core reducer 分支
 合同，schema/document admission 将 `prospectiveTargetRefs` 限定为它的一个 exact target；额外/替代 target 在 owner probe
 前拒绝。原 native check 和 Definition 不可替换；repair receipt 仍只触发 SM-2 内部 fresh-validation reopen。
 新 binding 只能来自重新观测后的 owner applicability，不得把旧 observation 解释为已通过新增检查。
+
+repair receipt 的 SM-2 CAS 必须保留 target-free fresh-validation continuation，覆盖 `semantic-pending`、prerequisite
+重获与 successor binding seal 的完整窗口；generic missing-evidence 同步不得在 binding-free 窗口改写 trigger、ID 或恢复
+旧 repair targets。fresh-load、SM-3 candidate admission 和旧失败 replay fence 共用 owner-local 完成证明：从 CWI reopen 的
+previous binding/trigger、immutable semantic manifest、pre-seal candidate manifest、同一 completed dispatch 的完整
+operation/execution/owner receipt/accepted evidence 集合反证 closure 与最终 repair evidence revision。缺失、重复、stale fence、
+部分 all-of、改写 closure 或 barrier 均拒绝；该证明只解除旧修复目标对新 validation surface 的限制，不授予 terminal credit。
+新的 accepted validation 消费该 continuation 后，SM-2 在同一次 reduction 中清除已满足的 directive 并进入 assessment；
+不能保留旧 validation requirements 污染 assessment context，也不能由 candidate adapter 或 SM-4 修补 authority。
 
 每次 semantic owner-private event 完成 CAS 后，调用方必须仅从返回的 current aggregate 重新读取 phase、generation、
 manifest、accepted order 与 request identity。若该 event 已退休 generation 或清空 manifest，本轮 semantic transaction

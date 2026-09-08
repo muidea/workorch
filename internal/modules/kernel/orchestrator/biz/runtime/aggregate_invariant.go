@@ -1172,6 +1172,9 @@ func validateRuntimeAggregateSM2RepairLedgers(a RuntimeAggregate) error {
 	if err := validateConfirmedRepairFreshValidationContinuation(a); err != nil {
 		return err
 	}
+	if _, err := semanticRepairFreshValidationEvidenceRevision(a); err != nil {
+		return err
+	}
 	return nil
 }
 

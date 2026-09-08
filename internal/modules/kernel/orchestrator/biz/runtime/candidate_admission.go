@@ -154,11 +154,18 @@ func candidateAdmissionEvaluationInput(aggregate RuntimeAggregate, manifest work
 }
 
 // Reuse the same reverse proof as aggregate fresh-load. Neither NeedValidation
-// nor an empty repair purpose alone can retire confirmed repair target
+// nor an empty repair purpose alone can retire semantic/confirmed repair target
 // authority. This detached projection never edits the closure or archives.
 func candidateRepairClosureFacts(aggregate RuntimeAggregate) candidateadmission.RepairClosureFacts {
 	if err := validateConfirmedRepairFreshValidationContinuation(aggregate); err != nil {
 		return candidateadmission.RepairClosureFacts{LineageError: err.Error()}
+	}
+	semanticRevision, err := semanticRepairFreshValidationEvidenceRevision(aggregate)
+	if err != nil {
+		return candidateadmission.RepairClosureFacts{LineageError: err.Error()}
+	}
+	if semanticRevision != "" {
+		return candidateadmission.RepairClosureFacts{CompletedRepairEvidenceRevision: semanticRevision}
 	}
 	if runtimeConfirmedRepairOwnsFreshValidationDirective(aggregate.Facts) {
 		return candidateadmission.RepairClosureFacts{
@@ -214,7 +221,7 @@ func ActiveRejectedOperationShapes(aggregate RuntimeAggregate) []workorchruntime
 		dispatchByID[strings.TrimSpace(dispatch.ID)] = dispatch
 	}
 	latestAcceptedRevision := latestAcceptedEvidenceRevision(facts, aggregate.CoverageProofLineage)
-	// A completed confirmed repair is causation-only, so it correctly does not
+	// A completed repair is causation-only, so it correctly does not
 	// appear in the CWI-credit projection above. Its exact receipt-chain fence
 	// nevertheless retires failures from the pre-repair workspace: fresh
 	// validation must be allowed to rerun the same sealed check on new state.

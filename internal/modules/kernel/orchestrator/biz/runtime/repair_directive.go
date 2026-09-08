@@ -42,13 +42,15 @@ func syncRepairDirective(facts runtimecontract.RuntimeFacts, decision runtimecon
 		// Capability-owner feasibility seals exact prospective targets.
 		return facts
 	}
-	if runtimeValidationFailureRepairOwnsSealedDirective(facts) || runtimeValidationFailureRepairOwnsFreshValidationDirective(facts) ||
+	if runtimeValidationFailureRepairOwnsSealedDirective(facts) ||
+		(runtimeValidationFailureRepairOwnsFreshValidationDirective(facts) && !repairDirectiveEvidenceSatisfied(facts, *facts.RepairDirective, proofLineage)) ||
 		runtimeConfirmedRepairOwnsFreshValidationDirective(facts) {
 		// The repair-purpose binding and exact capability-owner-confirmed target already own
 		// the state-change continuation; its Definition-proof successor likewise
 		// owns the independently sealed validation action. Completing a target
-		// snapshot prerequisite must resume either directive instead of rebuilding
-		// it from the broader focus/capability inventory or closure targets.
+		// snapshot prerequisite must resume either outstanding directive instead
+		// of rebuilding it from broader inventory or closure targets. A fresh
+		// accepted validation consumes the handoff and reaches assessment below.
 		return facts
 	}
 	// An accepted state-change repair has precedence over the ordinary

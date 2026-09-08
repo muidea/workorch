@@ -229,14 +229,10 @@ func validateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedge
 		return fmt.Errorf("accepted runtime assessment attempt purpose preimage: %w", err)
 	}
 	for _, accepted := range acceptedAssessments {
-		if err := ValidateCoverageEvidenceBindingProjection(accepted.manifest.Bindings); err != nil {
-			return fmt.Errorf("accepted runtime assessment attempt purpose preimage: runtime assessment purpose binding preimage: %w", err)
+		preimage, err := resolveRuntimeAssessmentPurposePreimage(preimages, accepted.manifest.Bindings)
+		if err != nil {
+			return fmt.Errorf("accepted runtime assessment attempt purpose preimage: %w", err)
 		}
-		matches := runtimeAssessmentPurposePreimagesMatchingBindings(preimages, accepted.manifest.Bindings)
-		if len(matches) != 1 {
-			return fmt.Errorf("accepted runtime assessment attempt purpose preimage: runtime assessment purpose has %d exact semantic binding preimages", len(matches))
-		}
-		preimage := matches[0]
 		manifest := accepted.manifest
 		dispatch := accepted.dispatch
 		if manifest.AssessmentPurpose != preimage.Purpose ||

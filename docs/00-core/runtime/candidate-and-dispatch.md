@@ -128,6 +128,12 @@ request-session `CandidateManifest`，并以 exact semantic manifest/provider do
 dispatch 的 `AssessmentAuthorityInput` 只能在一次性 final seal 中消费该 purpose。repair commitment 及 governance continuation 的
 source/grant/execution projection同样必须在首次 hash/Validate 前完成，seal 返回后不得再写 authority 字段或重算 hash。
 
+assessment purpose 的纯解析必须先在 active/history accepted batch 中找到唯一 exact binding preimage，再解析该证明的
+obligation purpose。候选 manifest 构建和 accepted-assessment fresh-load 校验共用同一算法；合法但无关的
+`validation_failure_repair` generation 不能否定历史 `definition_proof` 或 `owner_fact_acquisition` assessment。
+若匹配的证明本身为 repair-only，则不得创建或接受 assessment；missing/duplicate preimage、未知合同、manifest/document/owner
+fact 漂移仍 fail closed。invocation-local index 只重放历史事实，不跳过坏记录、不增加持久化字段，也不改写归档或授予 CWI credit。
+
 同一 locally compiled candidate/dispatch 内，每个 durable operation 必须独占 canonical
 `(OwnerModuleID, TargetRef)`。两个普通 operation 即使由 manifest 派生出 dependency edge，也不能先后修改同一 owner resource，因为它们的
 target snapshot/replay proof 都在第一个 effect 前封存；provider 必须把同一目标的完整变化合并为一个 operation 和一个

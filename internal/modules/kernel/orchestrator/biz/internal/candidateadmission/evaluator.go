@@ -38,7 +38,7 @@ type ValidationGapFacts struct {
 
 // RepairClosureFacts is an invocation-local proof projection, not persisted
 // phase or caller-selected authority. Runtime proves the exact completed
-// repair/confirmation/receipt lineage before marking its fresh-validation
+// semantic-or-confirmed repair/receipt lineage before marking its fresh-validation
 // handoff. Only that handoff makes the old closure targets causation-only;
 // the sealed manifest still bounds every validation target and binding.
 type RepairClosureFacts struct {
@@ -122,7 +122,7 @@ func InvalidSignature(candidate runtimecontract.RuntimeCandidate) string {
 
 // RepairClosureFailure checks that proof-bearing operations stay within the
 // active repair closure's sealed coverage and action-authoritative target set.
-// Confirmed repair completion retires only the latter; fresh validation stays
+// Proven repair completion retires only the latter; fresh validation stays
 // bound to the same closure/CWIs and the current sealed manifest, not the old
 // implementation targets retained in the closure's immutable audit identity.
 func RepairClosureFailure(facts runtimecontract.RuntimeFacts, decision runtimecontract.RuntimeDecision, candidate runtimecontract.RuntimeCandidate, proof RepairClosureFacts) *runtimecontract.RuntimeCandidateFailure {

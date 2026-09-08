@@ -176,6 +176,13 @@ capability resource state。
 - accepted candidate 在 effect 前必须同时持久化 candidate attempt、admission target/binding/recipe commitment、
   `SealedDispatch`、operation execution key/fence 与 `DispatchAuthorityHash`。fresh load 从原始 manifest/document/owner fact
   preimage 反证，不从 current mutable facts重编译。
+- assessment purpose 在候选构建和历史 accepted-attempt 校验中共用纯合同解析：先唯一 exact-match binding preimage，再解释该
+  obligation 的用途。合法的 current/history repair generation 不污染另一证明的 assessment；匹配 repair-only 的 assessment
+  仍拒绝。index 仅 invocation-local，不新增状态机、owner、持久化字段或归档回填，SM-2/3/4 仍只消费本 owner private event。
+- semantic repair 的 target-free fresh-validation directive 同时覆盖 binding-free 与重新 sealed 窗口。SM-2 不得在前者用
+  generic missing-evidence 覆盖它，在新 validation accepted 后也不得继续保留它；该 evidence CAS 消费 handoff 后才进入
+  assessment。SM-3 admission、replay fence 与 aggregate fresh-load 共用 `semantic_repair_continuation.go` 的旧 binding、
+  candidate manifest、完整同-dispatch receipt/evidence 反证；旧 closure targets 只留作因果审计，不约束新 Definition 验证目标。
 
 ### Receipt, evidence and repair
 
@@ -369,6 +376,7 @@ capability resource state。
 
 | 验收面 | 自动化证据 | 必需维度 |
 | --- | --- | --- |
+| assessment purpose / repair generations | `workorchruntimecontract/runtime_assessment_purpose_preimage_test.go`、`biz/runtime/assessment_purpose_preseal_test.go`、`biz/runtime_validation_input_addition_mainline_test.go` | active/history purpose 隔离、exact binding 唯一反证、repair-only 不授予 assessment、缺失/重复/篡改拒绝；file-backed Run + 真实 File/Shell 的历史 assessment→弱验证拒绝→semantic repair seal→create-only input→fresh validation→assessment→终态投递；SM-2 seal CAS 前后、input receipt 与 fresh validation 提交后重启；终态 duplicate、各切点零额外 provider/预算，旧输入与 startup 不变，SM-1 ownership 不变 |
 | target preimage / terminal feedback | `workorchruntimecontract/runtime_target_parameter_binding_test.go`、`blocks/file/target_parameter_test.go`、`biz/runtime/prerequisite_freshness_test.go`、`biz/runtime_result_feedback_test.go`、`biz/runtime/controller_test.go::TestRuntimeControllerInitializePreservesLegacyFeedbackVersionWithoutWrite`、`biz/runtime_result_projection_test.go::TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjection` | SM-3 exact target 派生与 echo 拒绝；SM-2 无进展 guard 保留 root cause 且零额外预算；SM-4 完整且不虚构验收的反馈、旧/新版本 partial delivery 重启重放；SM-1 与 capability owner 不变 |
 | repair rejection / historical probe lineage | `biz/runtime/repair_rejection_closure_test.go`、`biz/runtime/candidate_owner_conformance_test.go`、`biz/runtime/shell_owner_receipt_integration_test.go::TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot` | first-member/partial-effect rejected repair 同 CAS 退役；candidate correction 的 exact catalog preimage、tamper/协调重封存拒绝、CAS-before/response-loss/restart duplicate；真实 Shell→File correction→effect→fresh validation，历史拒绝不阻塞 current owner fact 推进 |
 | Module lifecycle/core dependencies | `plugin_test.go::TestModuleRunBindsFrameworkContextToOwnerLifecycle`、`plugin_test.go::TestModuleSetupRejectsMissingBackgroundRoutine`、`biz/owner_test.go::TestModuleIdentityConfigureStartStopContract`、`biz/owner_test.go::TestModuleConfigureRequiresCoreDependencies`、`biz/owner_test.go::TestFailedStartRemovesAllIngressAndCancelsLifecycle` | identity、Configure/Start/Stop、framework context、required BackgroundRoutine、startup rollback、deadline-aware Stop、canonical evidence repository bundle 与 EventHub dependency fail-fast |
