@@ -117,6 +117,7 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 	}
 	var observedRevision = command.WorkspaceBaselineRevision
 	allPassed := true
+	var failureCode, failureMessage string
 	var checkRefs []string
 	var targetRefs []string
 	for _, recipe := range recipes {
@@ -132,6 +133,7 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 				OriginalNodeKind: runtimecontract.RuntimeBlockKindManagedValidationSession,
 			},
 			TargetRefs:                  append([]string(nil), command.Binding.TargetRefs...),
+			ValidationScopeTargetRefs:   append([]string(nil), command.ValidationScopeTargetRefs...),
 			ValidationRecipes:           []runtimecontract.RuntimeValidationRecipe{recipe},
 			ValidationCheckAttestations: runtimecontract.CloneRuntimeValidationCheckAttestationBindings(command.Binding.ValidationCheckAttestations),
 		}
@@ -141,11 +143,17 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 		// invoking its adapter.
 		if resolveErr := resolveManagedValidationRecipe(&request); resolveErr != nil {
 			allPassed = false
+			if failureCode == "" {
+				failureCode, failureMessage = "validation_recipe_resolution_failed", "sealed validation recipe could not be prepared"
+			}
 			continue
 		}
 		output, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), request)
-		if executeErr != nil || output.Status != "completed" || output.ExitCode != 0 || output.ZeroWork || output.ValidationObservation == nil {
+		if executeErr != nil || output.Status != "completed" || output.ExitCode != 0 || output.ZeroWork || output.ValidationObservation == nil || output.Evidence.Quality != common.EvidenceQualityValid {
 			allPassed = false
+			if failureCode == "" && output.FailureCode != "" {
+				failureCode, failureMessage = output.FailureCode, output.FailureMessage
+			}
 		}
 		if output.ValidationObservation != nil {
 			value := output.ValidationObservation.Normalized()
@@ -190,6 +198,9 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 	if !allPassed {
 		status = runtimecontract.RuntimeCWIReconciliationObservationUnverifiable
 		message, code = "Shell recipe did not produce all binding-specific validation facts", "validation_proof_incomplete"
+		if failureCode != "" {
+			message, code = failureMessage, failureCode
+		}
 		if len(command.Binding.RequiredCheckRefs) == 0 {
 			message, code = "Shell binding declares no CWI-specific required checks", "validation_check_declaration_unavailable"
 		}

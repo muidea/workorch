@@ -364,8 +364,9 @@ capability resource state。
   acknowledgement；partial/response-loss从同一 delivery ledger幂等续驱，不改写 terminal decision。
 - SM-4 的 Result material 从已裁决的 requirement outcomes、evidence 与 receipts 投影逐项 DoD、实现/验证摘要、限制、
   风险和仅供阅读的后续建议；没有 validation evidence 不能描述为验证已执行或失败。terminal guard 与原始 owner cause
-  分别保存，Result owner 不重判验收。新 aggregate 初始化时一次封存 `ResultFeedbackVersion=1`；既有 record 缺省 `0`
-  沿用旧 renderer，Start/Resume/restart 不补写该值。未知版本 fail closed；同一 Run 的 Result 内容与 hash 在升级、
+  分别保存，Result owner 不重判验收。新 aggregate 初始化时一次封存 `ResultFeedbackVersion=2`；该版本以当前 SM-2
+  coverage 判断历史 satisfied assessment 的适用性，当前未满足时显示 indeterminate，不删除历史评估或证据。
+  既有 record 的 `0/1` 沿用对应 renderer，Resume 不补写该值。未知版本 fail closed；同一 Run 的 Result 内容与 hash 在升级、
   response loss 和 pending delivery replay 后必须相同，不改写旧 Result/Run 归档。
 - Workspace deletion只允许在 Run owner `draining` fence后排空既有 terminal delivery。Orchestrator独占自身 quiescence/purge
   private reducer，不终止 Run、不推进 Workspace deletion phase、不跨 owner删除资源。

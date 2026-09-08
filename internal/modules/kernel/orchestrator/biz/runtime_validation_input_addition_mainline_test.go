@@ -616,6 +616,32 @@ func %s(t *testing.T) { assertDelivery(t) }
 		}
 	}
 	callsBefore := providerCalls.Load()
+	if mode.BehaviorRepair && cut == "uninterrupted" {
+		// Read-only owner re-observation of the real two-CWI mainline after
+		// source repair + fresh v4 validation + file-backed restart. This does
+		// not drive a terminal Run or manufacture another acceptance credit.
+		request := runtimeReconciliationRequestForRun(persisted, aggregate, "verify-completed-proof-context", 0)
+		batch := module.queryRuntimeReconciliationBatch(ctx, request, aggregate, deliverable, internalDir, nil)
+		if err := batch.ValidateForRequest(request); err != nil {
+			t.Fatalf("reloaded two-CWI reconciliation batch: %v", err)
+		}
+		observed := false
+		for _, observation := range batch.Observations {
+			if observation.CoverageWorkItemID == "cwi-2" && observation.OwnerModuleID == runtimecontract.RuntimeModuleShell {
+				observed = true
+				if observation.Status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
+					t.Fatalf("fresh accepted v4 proof became unverifiable after restart: %+v", observation)
+				}
+			}
+		}
+		if !observed || providerCalls.Load() != callsBefore {
+			t.Fatal("reconciliation omitted the validation owner or invoked the provider")
+		}
+		after, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+		if err != nil || !reflect.DeepEqual(after.RuntimeState, persisted.RuntimeState) {
+			t.Fatal("owner observation rewrote the terminal aggregate")
+		}
+	}
 	for range 2 {
 		replayed, err := newRuntimeDriveTestModule(t, hub).driveRuntime(ctx, command)
 		if err != nil || replayed.StateRevision != completed.StateRevision || providerCalls.Load() != callsBefore {

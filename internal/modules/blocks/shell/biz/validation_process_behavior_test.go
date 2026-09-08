@@ -36,6 +36,7 @@ func TestEntrypointBehaviorObservesBuiltGoProcessWithoutRewritingInputs(t *testi
 		{"one language wrong", `for _, lang := range languages { verify(t, bin, lang) }`, "wrong/symbol", false, true},
 		{"build only", `if _,e:=os.Stat(bin); e!=nil { t.Fatal(e) }`, "src/rust/symbol", false, false},
 		{"external process only", `if out,e:=exec.Command("go","version").Output(); e!=nil || len(out)==0 { t.Fatal("external command") }`, "src/rust/symbol", false, false},
+		{"external process fails", `if out,e:=exec.Command("go","version").Output(); e!=nil || len(out)==0 { t.Fatal("external command") }; t.Fatal("backend definition returned null")`, "src/rust/symbol", false, false},
 		{"original check fails", `for _, lang := range languages { verify(t, bin, lang) }`, "src/rust/symbol", false, true},
 		{"required dependency skipped", `t.Run("rust",func(t *testing.T){ t.Skip("backend unavailable") }); verify(t,bin,"go")`, "src/rust/symbol", false, true},
 		{"instrumentation disabled", `os.Setenv("GOCOVERDIR",t.TempDir()); verify(t,bin,"go")`, "src/rust/symbol", false, false},
@@ -87,6 +88,12 @@ func %s(t *testing.T) {
 			}
 			if result.ValidationObservation == nil || result.ValidationObservation.ObservationProtocolRef != shellGoEntrypointObservationProtocolRef {
 				t.Fatal("lost sealed v4 identity")
+			}
+			if tc.name == "five protocol inputs" {
+				checkEntrypointReconciliation(t, request)
+			}
+			if tc.name == "external process fails" && result.ValidationFailureDiagnostic != nil && len(result.ValidationFailureDiagnostic.TargetRefs) != 0 {
+				t.Fatal("backend-only failure manufactured a delivery repair target")
 			}
 			if !tc.pass && result.ValidationFailureDiagnostic != nil && result.ValidationFailureDiagnostic.InputAddition != (runtimecontract.RuntimeValidationInputAddition{}) {
 				t.Fatal("ineffective supplement authorized a repeated input addition")

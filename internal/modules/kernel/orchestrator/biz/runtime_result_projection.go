@@ -268,7 +268,7 @@ func runtimeResultMaterialFromAggregate(aggregate runtime.RuntimeAggregate, outc
 		SummaryDetail: workorchresultcontract.ResultSummary{GoalOutcome: terminalSummary, EvidenceRefs: append([]string(nil), evidenceRefs...), ArtifactRefs: append([]common.ArtifactID(nil), artifactRefs...)},
 	}
 	item.RuntimeCloseout = runtimeResultCloseout(aggregate, outcome, accepted, evidenceRefs)
-	if aggregate.ResultFeedbackVersion == runtimecontract.RuntimeResultFeedbackVersionCurrent {
+	if aggregate.ResultFeedbackVersion >= 1 {
 		runtimeCompleteResultFeedback(&item, aggregate)
 	}
 	return item, nil
@@ -397,6 +397,13 @@ func runtimeRequirementOutcomes(aggregate runtime.RuntimeAggregate, ownerSet run
 					}
 				}
 			}
+		}
+		// Historical assessments are immutable audit facts. Only the current
+		// SM-2 coverage ledger establishes whether their satisfied judgment still
+		// applies. Preserve v0/v1 delivery material across restart/retry.
+		if aggregate.ResultFeedbackVersion >= 2 && outcome.AssessmentState == runtimecontract.RuntimeRequirementSatisfied && coverage.State != runtimecontract.RuntimeCoverageItemStateSatisfied {
+			outcome.AssessmentState = runtimecontract.RuntimeRequirementIndeterminate
+			outcome.AssessmentReasonCode = "current_coverage_not_satisfied"
 		}
 		outcome.MissingEvidenceKinds = append(outcome.MissingEvidenceKinds, requiredKinds[coverage.ID]...)
 		outcome.EvidenceItems = runtimeRequirementEvidenceItems(aggregate.Facts.Evidence, coverage, ownerSet.SetHash)

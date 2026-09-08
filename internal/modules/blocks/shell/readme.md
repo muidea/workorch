@@ -41,7 +41,9 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
   `RuntimeValidationProofRequirement` 时，才可对 matching recipe 发布逐 CWI applicability binding；recipe ID、进程 exit 0、
   zero-work marker 或 surface-wide check union 都不能自行成为 CWI proof。
 - applicability binding 必须把每个 Definition check 映射到 Shell-owner 的 exact observation protocol 与 native check
-  identity，并随 sealed execution authority 一同哈希封存。receipt/reconciliation 只承认该 protocol adapter 产生的 typed
+  identity，并随 sealed execution authority 一同哈希封存。reconciliation 复用 exact completed dispatch 的完整 validation
+  scope 与 recipe，不扫描当前目录补 authority；准备/执行失败保留具体 owner code，缺少 scope 不猜测 target。
+  receipt/reconciliation 只承认该 protocol adapter 产生的 typed
   check attestation；raw stdout/stderr（包括 `WORKORCH_CHECK_PASSED=*`）、recipe ID 或任意进程自报 marker 只能是诊断，
   不能填充 passed check authority。另一个 CWI/native check 即使来自同一 recipe 也不能获得当前 CWI credit。
 - recipe 的静态/输入 `Readiness` 与 requirement readiness 分开。一个 ready recipe 可以同时发布 ready CWI 的 exact binding、

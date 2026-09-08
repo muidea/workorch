@@ -39,7 +39,7 @@ func TestShellOwnerReconciliationDoesNotTreatGenericRecipeSuccessAsCWIProof(t *t
 	if result.Observation.Status != runtimecontract.RuntimeCWIReconciliationObservationUnverifiable {
 		t.Fatalf("generic recipe observation status = %q, want unverifiable", result.Observation.Status)
 	}
-	if result.Observation.OriginalDiagnostic == nil || result.Observation.OriginalDiagnostic.OriginalCode != "validation_proof_incomplete" {
+	if result.Observation.OriginalDiagnostic == nil || result.Observation.OriginalDiagnostic.OriginalCode != "validation_recipe_resolution_failed" {
 		t.Fatalf("generic recipe diagnostic = %+v", result.Observation.OriginalDiagnostic)
 	}
 	if ref := runtimecontract.StableRuntimeCWIReconciliationObservationRef(result.Observation); ref == "" {
@@ -125,5 +125,40 @@ func shellReconciliationQueryCommand(t *testing.T, workspace string, recipe runt
 		WorkspaceBaselineRevision:     "tree-shell-reconciliation",
 		WorkspaceBaselineRef:          "workspace-tree/tree-shell-reconciliation",
 		ValidationRecipes:             []runtimecontract.RuntimeValidationRecipe{recipe},
+	}
+}
+
+func checkEntrypointReconciliation(t *testing.T, request RuntimeCommandRequest) {
+	t.Helper()
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner := &Biz{Base: basebiz.New(modulecommon.ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	recipe := runtimecontract.RuntimeValidationRecipe{ID: request.ValidationRecipeID, Command: "go", Args: []string{"test", "./..."}, TimeoutMillis: 60000}
+	command := shellReconciliationQueryCommand(t, request.WorkspaceDeliverableDirectory, recipe)
+	command.Binding.TargetRefs = request.TargetRefs
+	command.Binding.RequiredCheckRefs = []string{request.ValidationCheckAttestations[0].RequiredCheckRef}
+	command.Binding.ValidationCheckAttestations = request.ValidationCheckAttestations
+	for _, complete := range []bool{true, false, true} {
+		command.ValidationScopeTargetRefs = nil
+		if complete {
+			command.ValidationScopeTargetRefs = request.ValidationScopeTargetRefs
+		}
+		response := hub.Send(magicevent.NewEventWithContext(shellevents.TopicQueryRuntimeCWIReconciliation, runtimecontract.RuntimeModuleOrchestrator, modulecommon.ModuleID, magicevent.NewHeader(), ctx, command))
+		data, err := response.Get()
+		if err != nil {
+			t.Fatal(err)
+		}
+		observation := data.(shellevents.QueryRuntimeCWIReconciliationResult).Observation
+		if complete && observation.Status != runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
+			t.Fatalf("same v4 native/supplement proof failed reconciliation: %+v", observation)
+		}
+		if !complete && (observation.Status != runtimecontract.RuntimeCWIReconciliationObservationUnverifiable || observation.OriginalDiagnostic == nil || observation.OriginalDiagnostic.OriginalCode != "validation_behavior_contract_rejected") {
+			t.Fatalf("missing sealed scope borrowed targets or lost preflight cause: %+v", observation)
+		}
 	}
 }

@@ -111,6 +111,7 @@ func (m *Biz) queryRuntimeReconciliationBatch(ctx context.Context, request runti
 	}
 	validationRecipes = runtimecontract.NormalizeRuntimeValidationRecipes(validationRecipes)
 	for _, binding := range request.Bindings {
+		validationScope, sealedRecipes := runtime.ReconciliationValidationContext(aggregate, binding)
 		for _, owner := range binding.OwnerModuleIDs {
 			command := runtimecontract.RuntimeCWIOwnerReconciliationRequest{
 				WorkspaceID: request.WorkspaceID, RunID: request.RunID, RequestID: request.RequestID,
@@ -119,6 +120,10 @@ func (m *Biz) queryRuntimeReconciliationBatch(ctx context.Context, request runti
 				WorkspaceDeliverableDirectory: deliverableDirectory, WorkspaceInternalDirectory: internalDirectory,
 				WorkspaceBaselineRevision: request.WorkspaceBaselineRevision, WorkspaceBaselineRef: request.WorkspaceBaselineRef,
 				ValidationRecipes: append([]runtimecontract.RuntimeValidationRecipe(nil), validationRecipes...),
+			}
+			if owner == runtimecontract.RuntimeModuleShell && len(sealedRecipes) != 0 {
+				command.ValidationScopeTargetRefs = append([]string(nil), validationScope...)
+				command.ValidationRecipes = sealedRecipes
 			}
 			observation, err := queryRuntimeCWIReconciliationOwner(ctx, m.EventHub(), owner, command, request)
 			if workspaceErr != nil {

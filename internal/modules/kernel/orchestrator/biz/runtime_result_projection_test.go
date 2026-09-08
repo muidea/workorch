@@ -1166,7 +1166,7 @@ func TestDeliverRuntimeTerminalRejectsRecoverablePrerequisiteRefresh(t *testing.
 }
 
 func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjection(t *testing.T) {
-	for _, version := range []uint32{0, runtimecontract.RuntimeResultFeedbackVersionCurrent} {
+	for _, version := range []uint32{0, 1, runtimecontract.RuntimeResultFeedbackVersionCurrent} {
 		t.Run(fmt.Sprintf("feedback_version_%d", version), func(t *testing.T) {
 			testTerminalResultPersistenceRestart(t, version)
 		})

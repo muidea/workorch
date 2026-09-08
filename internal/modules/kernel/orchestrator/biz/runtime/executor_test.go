@@ -1345,6 +1345,48 @@ func TestRuntimeControllerExecutesManagedValidationWithSealedRecipeAfterResource
 	if got.ID != "test-managed-validation" || got.Command != "true" || len(got.Args) != 1 || got.Args[0] != "workorch-validation" {
 		t.Fatalf("execution used refreshed inventory instead of sealed recipe: %+v", got)
 	}
+	completed := repository.aggregate
+	var binding runtimecontract.RuntimeCWIReconciliationBindingRef
+	for _, value := range completed.Facts.ReconciliationContract.Bindings {
+		if value.BindingID == operation.BindingRefs[0] {
+			binding = value
+		}
+	}
+	scope, recipes := ReconciliationValidationContext(completed, binding)
+	if !reflect.DeepEqual(scope, sealedValidationScope) || !reflect.DeepEqual(recipes, executor.requests[0].ValidationRecipes) {
+		t.Fatalf("reconciliation lost exact execution authority after refresh/restart: scope=%v recipes=%+v binding=%+v", scope, recipes, binding)
+	}
+	if scopeAgain, recipesAgain := ReconciliationValidationContext(completed, binding); !reflect.DeepEqual(scope, scopeAgain) || !reflect.DeepEqual(recipes, recipesAgain) {
+		t.Fatal("duplicate reconciliation changed the sealed context")
+	}
+	for _, scenario := range []string{"other-run", "other-definition", "changed-dispatch-hash", "changed-native-mapping", "changed-recipe"} {
+		t.Run("reconciliation/"+scenario, func(t *testing.T) {
+			changed := completed
+			changed.CompletedDispatches = append([]SealedDispatch(nil), completed.CompletedDispatches...)
+			requested := binding.Clone()
+			switch scenario {
+			case "other-run":
+				changed.Facts.RunID = "unrelated-run"
+			case "other-definition":
+				changed.Facts.DefinitionRevision = "superseded-definition"
+			case "changed-dispatch-hash":
+				for i := range changed.CompletedDispatches {
+					changed.CompletedDispatches[i].DispatchAuthorityHash = "tampered"
+				}
+			case "changed-native-mapping":
+				requested.ValidationCheckAttestations[0].NativeCheckRef = "unrelated-check"
+			case "changed-recipe":
+				requested.ValidationRecipeIDs = []string{"unsealed-recipe"}
+			}
+			if scope, recipes := ReconciliationValidationContext(changed, requested); len(scope) != 0 || len(recipes) != 0 {
+				t.Fatal("unmatched authority obtained a reconciliation context")
+			}
+		})
+	}
+	binding.BindingHash = "superseded-binding"
+	if scope, recipes := ReconciliationValidationContext(completed, binding); len(scope) != 0 || len(recipes) != 0 {
+		t.Fatal("superseded binding borrowed a completed dispatch context")
+	}
 }
 
 func beginAndAcceptCandidate(t *testing.T, controller *RuntimeController, aggregate RuntimeAggregate, candidate runtimecontract.RuntimeCandidate) (RuntimeAggregate, error) {

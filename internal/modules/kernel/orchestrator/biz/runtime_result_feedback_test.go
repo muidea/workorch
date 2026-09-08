@@ -6,8 +6,41 @@ import (
 	"testing"
 
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestRuntimeFeedbackDoesNotPresentHistoricalSatisfiedAssessmentAsCurrentCredit(t *testing.T) {
+	for _, version := range []uint32{0, 1, runtimecontract.RuntimeResultFeedbackVersionCurrent} {
+		aggregate := runtimeTerminalAggregate(t)
+		aggregate.ResultFeedbackVersion = version
+		coverage := &aggregate.Facts.Coverage[0]
+		coverage.State = runtimecontract.RuntimeCoverageItemStateOpen
+		aggregate.Facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{ID: "historical-pass", CoverageWorkItemIDs: []common.CoverageWorkItemID{coverage.ID}, Disposition: runtimecontract.AssessmentDispositionSatisfied}}
+		before := aggregate.Facts.Assessments[0]
+		outcomes := runtimeRequirementOutcomes(aggregate, runtimecontract.RuntimeOwnerRevisionSet{})
+		for _, outcome := range outcomes {
+			if outcome.CoverageWorkItemID != coverage.ID {
+				continue
+			}
+			if version < 2 && outcome.AssessmentState != runtimecontract.RuntimeRequirementSatisfied {
+				t.Fatal("legacy delivery material was silently upgraded")
+			}
+			if version >= 2 && (outcome.AssessmentState != runtimecontract.RuntimeRequirementIndeterminate || outcome.AssessmentReasonCode != "current_coverage_not_satisfied") {
+				t.Fatalf("historical credit presented as current: %+v", outcome)
+			}
+		}
+		if !reflect.DeepEqual(before, aggregate.Facts.Assessments[0]) {
+			t.Fatal("projection rewrote historical assessment")
+		}
+		coverage.State = runtimecontract.RuntimeCoverageItemStateSatisfied
+		for _, outcome := range runtimeRequirementOutcomes(aggregate, runtimecontract.RuntimeOwnerRevisionSet{}) {
+			if outcome.CoverageWorkItemID == coverage.ID && outcome.AssessmentState != runtimecontract.RuntimeRequirementSatisfied {
+				t.Fatal("current satisfied coverage lost its assessment")
+			}
+		}
+	}
+}
 
 func TestRuntimeTerminalFeedbackPreservesOwnerCauseAndUnassessedRequirements(t *testing.T) {
 	aggregate := runtimeTerminalAggregate(t)

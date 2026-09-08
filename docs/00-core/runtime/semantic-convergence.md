@@ -243,6 +243,11 @@ typed observation/receipt：
 - File 只返回 owner-grounded target/artifact/selector fact；Shell 必须执行封存 recipe 并报告 CWI-specific checks，
   没有 required checks 时为 `unverifiable`；Git revision 不等于 semantic proof；MCP catalog/tool surface readiness
   没有可执行 behavior probe 时也只能为 `unverifiable`。
+- Shell 当前 Run 的 validation reconciliation 从同 workspace/run/definition、exact binding/hash 的已完成 SM-3
+  dispatch 投影 recipe 与完整 validation scope，并复用普通执行的 owner-native 检查映射和准备路径。
+  该读取不授予新 operation authority；不得用当前目录、后来 catalog 或操作入口 target 替代封存 scope。
+  缺少精确历史上下文的 behavior proof 保持 unverifiable；具体 owner preparation/execution cause 必须保留，
+  不能全部折叠为通用 proof-incomplete。owner 不决定 retain/reopen，仍由 SM-2 private event 消费批次。
 
 Semantic planning 与 reconciliation 都不是第五个状态机：request/attempt/feasibility/seal/batch/history/lineage
 均属于 Orchestrator SM-2/SM-3/SM-4 aggregate；Workspace、

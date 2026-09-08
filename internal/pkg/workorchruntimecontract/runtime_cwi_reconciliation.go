@@ -381,6 +381,10 @@ type RuntimeCWIOwnerReconciliationRequest struct {
 	WorkspaceBaselineRevision     string
 	WorkspaceBaselineRef          string
 	ValidationRecipes             []RuntimeValidationRecipe
+	// ValidationScopeTargetRefs is projected from the exact completed dispatch
+	// for this binding, never from a later workspace inventory. Empty means no
+	// replayable validation scope; owners must not infer one from TargetRefs.
+	ValidationScopeTargetRefs []string
 }
 
 func ValidateRuntimeCWIOwnerReconciliationRequest(c RuntimeCWIOwnerReconciliationRequest, ownerModuleID string) error {
