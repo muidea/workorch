@@ -88,7 +88,16 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 			continue
 		}
 		for _, check := range attestations {
+			if check.ObservationProtocolRef == shellGoEntrypointObservationProtocolRef && strings.HasSuffix(ref, "_test.go") && shellNativeRunnerOverride(file) {
+				return shellNativeCheckInspection{Code: "native_check_runner_override", CheckRef: check.NativeCheckRef, TargetRefs: []string{ref}}
+			}
 			if check.SupplementalNativeCheckRef == "" || ref != shellSupplementTargetRef(check.NativeCheckRef) {
+				continue
+			}
+			if check.ObservationProtocolRef == shellGoEntrypointObservationProtocolRef {
+				if !shellEntrypointSupplementDeclarations(file, check.SupplementalNativeCheckRef) {
+					return shellNativeCheckInspection{Code: "native_check_supplement_contract_invalid", CheckRef: check.SupplementalNativeCheckRef, TargetRefs: []string{ref}}
+				}
 				continue
 			}
 			for _, decl := range file.Decls {
@@ -148,7 +157,7 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 			return shellNativeCheckInspection{Code: "native_check_ambiguous", CheckRef: raw.NativeCheckRef, TargetRefs: normalizeShellStrings(refs)}
 		}
 		entry := matches[0]
-		if raw.ObservationProtocolRef == shellGoSupplementObservationProtocolRef && strings.HasSuffix(raw.NativeCheckRef, "_Behavior") && entry.targetRef != shellSupplementTargetRef(strings.TrimSuffix(raw.NativeCheckRef, "_Behavior")) {
+		if (raw.ObservationProtocolRef == shellGoSupplementObservationProtocolRef || raw.ObservationProtocolRef == shellGoEntrypointObservationProtocolRef) && strings.HasSuffix(raw.NativeCheckRef, "_Behavior") && entry.targetRef != shellSupplementTargetRef(strings.TrimSuffix(raw.NativeCheckRef, "_Behavior")) {
 			return shellNativeCheckInspection{Code: "native_check_supplement_out_of_scope", CheckRef: raw.NativeCheckRef, TargetRefs: []string{entry.targetRef}}
 		}
 		parameters := nativeCheckTestingParameters(entry.decl.Type, entry.testingAlias)

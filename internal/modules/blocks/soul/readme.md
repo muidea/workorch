@@ -44,6 +44,8 @@ transition。
   Workspace admission 或 Run 封存 Soul snapshot，不触发 Resume/Restart。历史指纹表是纯数据，不是跨 owner 状态管理器。
 - 新 Start/Restart 的 activation 读取当时的 Soul owner 内容，不复用跨请求旧快照；Resume/recovery 继续使用 Run seal。
   Soul owner 不遍历 Workspace/Run 做热替换、迁移或历史记录修补。
+  guidance 更新须连同此前发布内容的完整 frozen fixture 与精确指纹验证；
+  `TestEntrypointSoulsUpgradeReopensReviewedPreviousDefaults` 覆盖规划/执行/验收 Soul 的 memory/file 自动更新、幂等及定制保护。
 - result 必须 detached clone；repository/service 不对其它组件开放。
 - `EnsureDefaults` 的 caller identity 是合同的一部分，错误 source 即 fail-closed、零写入。
 - Soul 不查询 Skill/MCP owner、不判断 selected capability 是否存在，也不把 guidance 转成 Runtime authority。

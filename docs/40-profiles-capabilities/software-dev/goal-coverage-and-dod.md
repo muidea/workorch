@@ -10,14 +10,21 @@ Last Verified: 2026-09-05
 
 This document defines the built-in software-development evidence specialization. Its stable template ID and product
 presentation remain language- and framework-neutral. Shell's current Go-native validation adapter
-(`shell/go-test-json/workspace-behavior/v2`, or v3 for fresh conjunctive input, with sealed `shell/go-test-json/v1` and v2 replay
-retained) is one typed capability-owner implementation, not part of the template identity or Runtime-core
+(`shell/go-test-json/workspace-behavior/v4` for the explicitly selected `shell/project-native-validation/v2` adapter, with
+sealed `shell/go-test-json/v1` and behavior v2/v3 replay retained) is one typed capability-owner implementation, not part of the template identity or Runtime-core
 language. The neutral CWI/focus/evidence machinery remains owned by Orchestrator and
 [the core Runtime contract](../../00-core/runtime-stage-contract.md).
 
 The delivery under test may use any implementation language. A concrete native proof must be supplied by the matching typed
 capability-owner adapter (or by an exact MCP proof contract); it must not be inferred from template presentation, silently
 reuse an unrelated recipe, trust stdout self-reporting, or use an Application-inferred fallback.
+
+Implementation language and supported product languages/backends are independent dimensions. A Go implementation of a
+multi-language MCP/LSP bridge is a Go development target; all languages, tools, protocol behavior and metrics admitted in its
+Goal/DoD remain required. Deferring development-template adapters for other implementation languages does not defer those
+product capabilities. A single-language milestone or mock-backend calibration is not acceptance of the full multi-language
+product. Local best-effort dependency checks must report missing/skipped work as unverified; a strict release environment must
+actually execute every required integration check.
 
 ## Coverage Dimensions
 
@@ -120,7 +127,7 @@ its receipt gives no DoD credit. Fresh Shell v3 binding requires the original an
 workspace implementation observation. Missing/mismatched input contracts and an ineffective existing supplement terminate
 boundedly; they do not open repeated input additions. Input compilation errors do not authorize editing original assertions.
 The addition also carries the owner's bounded `contentContractRef + contentRequirements`; filename/check identity alone is
-insufficient. The current Go adapter permits only imports and the exact supplemental test at file scope, with supporting
+insufficient. The legacy project-native v1 adapter permits only imports and the exact supplemental test at file scope, with supporting
 constants, variables, types and closures local to that test. Existing invalid inputs become per-CWI owner unavailability, not
 another preparable path or hypothetical `would_satisfy`. SM-2 closes before another provider call and preserves the exact cause
 through Result delivery; neither Soul guidance nor file creation is validation proof.
@@ -155,6 +162,30 @@ arbitrary-Goal trusted-grader support.
 - partial assessment closes only explicitly satisfied work items and leaves the rest active;
 - no current-Run accepted evidence means a satisfied assessment is invalid.
 
+### Versioned entrypoint observation and unchanged-input reuse
+
+New template activations select `shell/project-native-validation/v2`. Its Go behavior v4 contract allows named same-package
+assertion helpers, types, constants and data-only variables in the exact conjunctive supplement. Runner overrides (`init` or
+`TestMain`), extra test definitions, methods and effectful global initializers remain inadmissible. The bounded native walker
+still requires reachable real `testing.T` assertions. This is a new observation/input contract, not permission to revise criteria:
+existing bytes are re-inspected without rewriting any workspace input or historical archive. Invalid syntax, unresolved
+assertions and unsupported input shapes remain explicit owner unavailability, not replacement-file authority.
+
+Within the same managed session, Shell instruments Go test execution and Go-built child executables, restores its own
+`GOCOVERDIR` at the test-execution boundary, and converts bounded fresh binary coverage with the Go toolchain. Only non-test,
+non-harness implementation paths from the sealed workspace manifest contribute execution facts. Building without running,
+prebuilt/unobserved binaries, foreign/harness coverage, malformed/truncated artifacts and skipped checks cannot substitute for
+proof. Source/module/test input changes inside the disposable execution copy invalidate observation. Backend processes in
+other languages may execute but do not themselves establish execution of the Go delivery. Actual protocol and semantic
+assertions remain mandatory; this instrumentation is neither a universal grader nor an adversarial OS sandbox.
+
+Adapter selection is activation-sealed: new Start/Restart can use the current template, while Resume/recovery retains the old
+adapter and binding. Automatic default loading requires the exact reviewed previous Template/Soul fingerprints; customized
+or unknown content stays untouched. No protocol is upgraded by checking its name, current Soul text or current registry alone. Original and
+supplemental checks remain all-of. File retains sole durable-write ownership; Shell performs only ephemeral execution;
+Orchestrator retains all SM-2/3/4 authority and Run retains SM-1. A missing-input addition uses the existing typed route and
+fresh-validation transaction; unchanged-input reuse needs no File mutation, extra acquisition budget or fifth state machine.
+
 ## Repair And Restart
 
 The built-in wildcard `dodItem/*` declarative policy contributes validation/acquisition/repair guards only after Application
@@ -188,7 +219,7 @@ repair authority. Duplicate trigger tuples or cross-owner operations fail pre-se
 capability set; it is not a Goal/DoD `one_of` terminal relation, and an accepted repair receipt cannot itself satisfy the DoD
 validation requirement.
 
-The software-dev template seals `shell/project-native-validation/v1`, not a language command, argument vector or environment.
+The software-dev template seals `shell/project-native-validation/v2`, not a language command, argument vector or environment.
 Shell alone resolves that declaration against the exact File-owner manifest and publishes the concrete executable recipe; the
 current Shell adapter can recognize Go project facts and keeps all Go grammar private to the owner. The managed-validation wire
 then contains only the sealed `recipeId`; it does not carry a caller-selected command or failure class. Unrecognized failures

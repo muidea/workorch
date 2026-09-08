@@ -77,7 +77,9 @@ type RuntimeCommandResult struct {
 	goTestJSONFacts *shellGoTestJSONFacts
 	// v2 behavior-observation candidates are independent of assertion locations.
 	// They never authorize repair without the existing File-owner confirmation.
-	workspaceBehaviorTargetRefs []string
+	workspaceBehaviorTargetRefs        []string
+	workspaceProcessBehaviorTargetRefs []string
+	workspaceProcessBehaviorError      error
 	// validationFailureTargetCandidatesInvalid records that the owner-private
 	// structured-output parser observed more candidates than the bounded
 	// validation-failure protocol permits. An empty TargetRefs slice alone cannot

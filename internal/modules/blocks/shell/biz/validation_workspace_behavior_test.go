@@ -123,6 +123,7 @@ func TestWorkspaceBehaviorProtocolIsOwnedByProjectNativeAdapter(t *testing.T) {
 	for _, test := range []struct{ adapter, protocol string }{
 		{"", shellGoTestObservationProtocolRef},
 		{modulecommon.ValidationRecipeAdapterProjectNative, shellGoBehaviorObservationProtocolRef},
+		{modulecommon.ValidationRecipeAdapterProjectEntrypoint, shellGoEntrypointObservationProtocolRef},
 	} {
 		recipe := runtimecontract.RuntimeValidationRecipe{Command: "go", Args: []string{"test", "./..."}, AdapterRef: test.adapter}
 		attestations, ok := shellValidationCheckAttestations(recipe, requirement)

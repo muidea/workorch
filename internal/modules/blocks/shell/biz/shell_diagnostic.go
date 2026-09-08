@@ -55,7 +55,7 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 			targetRefs = nil
 		}
 	}
-	if class == runtimemodel.ValidationDiagnosticBuildFailed && len(request.ValidationCheckAttestations) != 0 && request.ValidationCheckAttestations[0].ObservationProtocolRef == shellGoSupplementObservationProtocolRef {
+	if class == runtimemodel.ValidationDiagnosticBuildFailed && len(request.ValidationCheckAttestations) != 0 && (request.ValidationCheckAttestations[0].ObservationProtocolRef == shellGoSupplementObservationProtocolRef || request.ValidationCheckAttestations[0].ObservationProtocolRef == shellGoEntrypointObservationProtocolRef) {
 		// A newly added input that does not compile cannot authorize rewriting
 		// original acceptance inputs through the ordinary implementation route.
 		implementationRefs := make([]string, 0, len(targetRefs))
@@ -86,7 +86,7 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 	}
 	if ownerCode == "validation_workspace_behavior_unobserved" && len(request.ValidationCheckAttestations) == 1 {
 		check := request.ValidationCheckAttestations[0]
-		if check.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef && check.SupplementalNativeCheckRef == "" {
+		if (check.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef || check.ObservationProtocolRef == shellGoEntrypointObservationProtocolRef) && check.SupplementalNativeCheckRef == "" {
 			diagnostic.InputAddition = shellValidationInputAddition(check)
 		}
 	}

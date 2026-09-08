@@ -111,6 +111,14 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		}
 	}
 	behaviorArgs, behaviorPath, behaviorErr := prepareShellBehaviorObservation(request, execArgs)
+	processBehaviorPath := ""
+	var entrypointSources map[string]string
+	if behaviorErr == nil {
+		processBehaviorPath, behaviorErr = prepareShellProcessBehavior(request, executionDirectory)
+	}
+	if behaviorErr == nil && processBehaviorPath != "" {
+		entrypointSources, behaviorErr = shellEntrypointSourceSnapshot(executionDirectory)
+	}
 	if behaviorErr != nil {
 		now := time.Now().UTC()
 		output := shellBaseOutput(request, command, args, deliverableDirectory, commandNormalization, execCommand)
@@ -120,7 +128,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		attachShellValidationFailureDiagnostic(&output, request, execCommand, 0, false, true, behaviorErr)
 		return finalizeShellResult(output, behaviorErr)
 	}
-	execArgs = behaviorArgs
+	execArgs = shellProcessBehaviorArgs(behaviorArgs, processBehaviorPath)
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -134,6 +142,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	if shellRequiresWorkspaceBehavior(request) {
 		cmd.Env = shellBehaviorEnvironment(cmd.Env)
 	}
+	cmd.Env = shellProcessBehaviorEnvironment(cmd.Env, processBehaviorPath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
@@ -190,6 +199,15 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	attachShellValidationObservation(&output, command, args, request.ValidationRecipeID, managedValidation)
 	attachShellValidationCheckFailures(&output, request)
 	applyShellEvidencePolicies(request.EvidencePolicies, command, args, request.ValidationRecipeID, &output)
+	if processBehaviorPath != "" {
+		output.workspaceProcessBehaviorTargetRefs, output.workspaceProcessBehaviorError = shellProcessBehaviorTargets(runCtx, execCommand, executionDirectory, processBehaviorPath, cmd.Env, request.ValidationScopeTargetRefs)
+		afterSources, sourceErr := shellEntrypointSourceSnapshot(executionDirectory)
+		if sourceErr != nil || shellWorkspaceTargetChangesChanged(shellWorkspaceTargetChanges(entrypointSources, afterSources)) {
+			output.workspaceProcessBehaviorTargetRefs = nil
+			output.workspaceProcessBehaviorError = fmt.Errorf("validation changed the observed Go implementation or verification inputs")
+		}
+		output.DurationMillis = time.Since(startedAt).Milliseconds()
+	}
 	if behaviorErr := attachShellWorkspaceBehavior(&output, request, executionDirectory, behaviorPath); err == nil && behaviorErr != nil {
 		err = behaviorErr
 	}

@@ -35,7 +35,7 @@ and converges through the same neutral Runtime owner model. It must not make leg
   separate declaration/operation selectors. A route whose repair operations do not publish one concrete owner confirmation protocol
   fails pre-seal. Duplicate/partial triggers, cross-owner kinds, non-state-change evidence, incomplete selectors, disabled fresh validation or an
   out-of-range bound fail pre-seal and create no Run/provider/capability work;
-- the template validation declaration contains only `shell/project-native-validation/v1`, with no language command, arguments or
+- the template validation declaration contains only `shell/project-native-validation/v2`, with no language command, arguments or
   environment, and its validation-environment policy contains no language profile. Shell resolves the declaration from the exact File manifest, and the default managed-validation wire contains
   only `recipeId`. Shell alone emits exact `module_manifest_parse_failed`, `source_compile_failed` or `test_failed` owner facts
   from bounded tool output. Generic `shell_exit_nonzero` has no default repair route;
@@ -47,6 +47,20 @@ and converges through the same neutral Runtime owner model. It must not make leg
 - current provider guidance uses current semantic-plan/candidate schemas.
 
 ### Operations And Evidence
+
+- `TestEntrypointContractReobservesHistoricalInputOnlyForNewAdapter` proves that unchanged helper-based input remains
+  unavailable to a legacy activation and becomes inspectable only under the explicit new adapter; no replacement preparation,
+  archive migration or implicit protocol upgrade is allowed;
+- `TestEntrypointBehaviorObservesBuiltGoProcessWithoutRewritingInputs` calibrates a real Go executable with five protocol
+  input cases, one incorrect response, build-only execution, instrumentation loss, skipped required checks and sandbox source
+  mutation. This is owner-protocol calibration, not real five-language LSP integration acceptance;
+- `TestEntrypointInputContractRejectsRunnerAndInitializerEffects` and
+  `TestEntrypointProcessObservationRejectsUnboundArtifacts` reject runner/initializer overrides, extra test definitions,
+  incomplete/oversized artifacts and symlink import. Neither static readiness nor process coverage alone proves CWI semantics;
+- `TestDriveRuntimeEntrypointValidationUsesSameOwnerTransactionsAcrossRestart` exercises real File/Shell with file-backed
+  Run/Result/Workspace: rejected weak proof → exact create-only input → Go-built child execution → fresh all-of validation →
+  assessment → three-owner terminal delivery. Pre/post-seal, input-receipt and post-validation crash cuts preserve the same
+  provider budget, original inputs and immutable startup; duplicate and tampered receipt/continuation replay remain fenced;
 
 - absent-target creation and existing-target revision-bound replacement are distinct;
 - one candidate contains at most one ordinary durable operation for each capability owner/canonical target; same-file edits are

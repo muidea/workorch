@@ -15,17 +15,17 @@ import (
 
 const maxShellBehaviorNativeChecks = 32
 
-// v1 remains an execution/replay contract for already-sealed checks. New
-// project-native catalogs publish v2, which additionally requires execution of the
-// workspace's non-test implementation. This is necessary behavior grounding,
-// not a universal semantic grader or an authorization to edit the assertions.
+// v1 remains an execution/replay contract for already-sealed checks. The
+// versioned project-native adapter selects v2/v3 or v4, each requiring execution
+// of the workspace's non-test implementation. This is necessary behavior
+// grounding, not a semantic grader or authorization to edit the assertions.
 func shellNativeObservationProtocolSupported(ref string) bool {
-	return ref == shellGoTestObservationProtocolRef || ref == shellGoBehaviorObservationProtocolRef || ref == shellGoSupplementObservationProtocolRef
+	return ref == shellGoTestObservationProtocolRef || ref == shellGoBehaviorObservationProtocolRef || ref == shellGoSupplementObservationProtocolRef || ref == shellGoEntrypointObservationProtocolRef
 }
 
 func shellRequiresWorkspaceBehavior(request RuntimeCommandRequest) bool {
 	for _, attestation := range request.ValidationCheckAttestations {
-		if attestation.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef || attestation.ObservationProtocolRef == shellGoSupplementObservationProtocolRef {
+		if attestation.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef || attestation.ObservationProtocolRef == shellGoSupplementObservationProtocolRef || attestation.ObservationProtocolRef == shellGoEntrypointObservationProtocolRef {
 			return true
 		}
 	}
@@ -208,6 +208,15 @@ func attachShellWorkspaceBehavior(output *RuntimeCommandResult, request RuntimeC
 	observation := output.ValidationObservation
 	observation.ObservationProtocolRef = request.ValidationCheckAttestations[0].ObservationProtocolRef
 	targets, observationErr := shellWorkspaceBehaviorTargets(executionDirectory, coveragePath, request.ValidationScopeTargetRefs)
+	if shellRequiresEntrypointBehavior(request) {
+		targets = canonicalShellBehaviorTargets(append(targets, output.workspaceProcessBehaviorTargetRefs...))
+		if output.workspaceProcessBehaviorError != nil {
+			observationErr = output.workspaceProcessBehaviorError
+		}
+		if len(output.workspaceProcessBehaviorTargetRefs) != 0 && observationErr == nil {
+			output.EvidenceTags = appendUniqueShellEvidenceTag(output.EvidenceTags, "workspace_process_behavior_observed")
+		}
+	}
 	if observationErr == nil {
 		output.workspaceBehaviorTargetRefs = targets
 	}
@@ -227,7 +236,7 @@ func attachShellWorkspaceBehavior(output *RuntimeCommandResult, request RuntimeC
 	}
 	output.EvidenceQuality = string(common.EvidenceQualityInconclusive)
 	output.EvidenceReason = "native check did not provide complete observed execution of the workspace implementation; source-text assertions and dependency-only tests are not delivery behavior proof"
-	if observation.ObservationProtocolRef == shellGoSupplementObservationProtocolRef && code == "validation_workspace_behavior_unobserved" {
+	if (observation.ObservationProtocolRef == shellGoSupplementObservationProtocolRef || shellEntrypointHasSupplement(request)) && code == "validation_workspace_behavior_unobserved" {
 		code = "validation_workspace_behavior_supplement_unobserved"
 	}
 	if code == "validation_workspace_behavior_unobserved" {

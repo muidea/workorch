@@ -149,7 +149,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 	}
 	// This fixture proves the owner protocol, not arbitrary template semantics.
 	// Its fixed subject is separate from the native validation inputs and must
-	// really execute under the v2 behavior-observation contract.
+	// really execute under the default adapter's v4 observation contract.
 	subject := "package fixture\nfunc DeliveredValue() int { return 4 }\n"
 	executeFileWrite(runtimecontract.RuntimeOperation{ID: "fixture-subject", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{"fixture.go"},
 		Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &subject}}}, "dispatch-fixture-subject")
@@ -203,6 +203,9 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 		if !found {
 			t.Fatalf("reobserved catalog has no exact ready binding for %q: %+v", requirement.Hash, catalog.ValidationSurfaces)
 		}
+		if len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].ObservationProtocolRef != "shell/go-test-json/workspace-behavior/v4" || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != "" {
+			t.Fatalf("default adapter did not publish an unsupplemented v4 binding: %+v", ownerBinding)
+		}
 		focus, found := focusByCoverage[requirement.CoverageWorkItemID]
 		if !found {
 			t.Fatalf("default proof requirement %q has no exact focus", requirement.Hash)
@@ -246,6 +249,9 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 			}
 			diagnostic := response.Receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic
 			addition := diagnostic.InputAddition
+			if addition.ContentContractRef != "shell/go-test-input/conjunctive-entrypoint-test/v2" {
+				t.Fatalf("default adapter did not publish the versioned entrypoint input contract: %+v", addition)
+			}
 			convergence := focus.ValidationFailureRepairConvergence
 			if convergence == nil {
 				t.Fatal("default CWI lacks repair policy")
@@ -264,7 +270,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 			reobserved = acquireObservedShellValidationCatalog(t, ctx, hub, aggregate, shellPrerequisite, workspaceDirectory, observedManifest, observedManifest.Manifest.TargetRefs, requirements)
 			catalog = reobserved.Acquisition.Admissibility.Normalized()
 			_, ownerBinding, found = runtimecontract.RuntimeValidationSurfaceForProofRequirement(catalog.ValidationSurfaces, requirement)
-			if !found || len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].NativeCheckRef != originalBinding.CheckAttestations[0].NativeCheckRef || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != addition.NativeCheckRef || ownerBinding.CheckAttestations[0].ObservationProtocolRef == originalBinding.CheckAttestations[0].ObservationProtocolRef {
+			if !found || len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].NativeCheckRef != originalBinding.CheckAttestations[0].NativeCheckRef || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != addition.NativeCheckRef || ownerBinding.CheckAttestations[0].ObservationProtocolRef != originalBinding.CheckAttestations[0].ObservationProtocolRef {
 				t.Fatalf("fresh owner binding replaced original instead of adding all-of: %+v", ownerBinding)
 			}
 			coverageBinding, semanticFocus = defaultNativeProofCoverageBinding(t, focus, requirement, ownerBinding, preparedTarget)

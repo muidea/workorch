@@ -5770,7 +5770,7 @@ policies = template.get("evidencePolicies", [])
 if len(policies) != 1:
     raise SystemExit(1)
 policy = policies[0]
-if policy.get("recipeAdapterRef") != "shell/project-native-validation/v1":
+if policy.get("recipeAdapterRef") != "shell/project-native-validation/v2":
     raise SystemExit(1)
 if any(key in policy for key in ("commandName", "recipeArgs", "requiredArgs", "argsContain", "workEvidenceMarkers")):
     raise SystemExit(1)
@@ -5783,6 +5783,7 @@ then
 	exit 1
 fi
 if ! grep -q -F 'ValidationRecipeAdapterProjectNative = "shell/project-native-validation/v1"' internal/modules/blocks/shell/pkg/common/common.go ||
+	! grep -q -F 'ValidationRecipeAdapterProjectEntrypoint = "shell/project-native-validation/v2"' internal/modules/blocks/shell/pkg/common/common.go ||
 	! grep -q -F 'resolveRuntimeValidationRecipeDeclarations(command.ValidationRecipes, command.WorkspaceManifestBinding.Manifest)' internal/modules/blocks/shell/biz/owner.go; then
 	echo "boundary contract violation: project-native validation recipe is not resolved solely inside the Shell owner from the bound File manifest" >&2
 	exit 1

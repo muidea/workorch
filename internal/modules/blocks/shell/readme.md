@@ -35,7 +35,7 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
 - `shell/command` 不得伪装成 `effect=none` validation；managed validation 不能退化为任意命令字符串。
 - execute 前必须验证 producer、同步 Result、sealed payload、owner catalog、target scope、execution key/fence 和 receipt authority。
 - managed validation 必须在隔离副本中运行；临时 effect 不得写回 deliverable，scratch 和进程组必须按策略释放。
-- activation-declared recipe 可以是固定 transport 或 `shell/project-native-validation/v1` owner-adapter ref；模板不得携带
+- activation-declared recipe 可以是固定 transport 或版本化的 `shell/project-native-validation/v1|v2` owner-adapter ref；模板不得携带
   语言 command/args/env。Shell 只依据同一 request 绑定的 File-owner manifest 解析具体 recipe，且该解析只产生 owner fact，
   不触发 Runtime 状态。Shell 只有在 Orchestrator request 携带 exact Definition-owned
   `RuntimeValidationProofRequirement` 时，才可对 matching recipe 发布逐 CWI applicability binding；recipe ID、进程 exit 0、
@@ -79,6 +79,26 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
 ## 能力验收
 
 ### Native check readiness and behavior observation
+
+新 Start/Restart 可显式选择 `shell/project-native-validation/v2`，其 Go binding 固定使用
+`shell/go-test-json/workspace-behavior/v4`。该版本同时观测 in-process 测试与本次 Go 构建的子进程；v1 resolver 和已封存
+v1/v2/v3 observation 的原有语义不变。Resume/recovery 不根据当前默认配置升级协议。
+
+v4 的 `shell/go-test-input/conjunctive-entrypoint-test/v2` 允许 exact 补充文件中的同包具名 helper、type、const、无调用/闭包
+初始化的 var，仍拒绝 init、TestMain、method、额外 Test 定义与不可达的 testing.T 断言。旧输入只被重新检查，不被改写；
+原检查和补充检查仍是 all-of。结构无效或语义证据不足不授权改写判据，也不自动扩大 File repair surface。
+
+Shell 在同一个 managed scratch/session 内生成固定 test-exec wrapper，恢复被 go test 覆盖的 owner GOCOVERDIR；
+GOFLAGS 为 Go-built 子进程启用覆盖插桩，真实执行数据由 Go covdata 转换，不从 stdout 自报或 caller 路径导入。转换共用
+operation deadline，并额外限时 10 秒；最多 128 个 artifact、8 MiB 输入以及既有 coverage record 上界，非 regular-file、
+不完整/未知数据、converter warning/truncation 均 fail closed。只构建未运行不产生证明，Go delivery 外的依赖、非 Go 后端、
+测试/harness 文件和零执行记录不计入实现执行。观测路径归一去重，防止多个 coverage block 放大 File repair scope。
+执行前后核对隔离副本中的 Go 源码、模块与验证输入；发生改变则证据不可验证。测试临时项目/数据应使用独立临时目录。
+这不是防恶意代码的 OS sandbox，也不是语义 grader；具体协议响应、各语言后端与性能验收仍需独立对应的原始断言。
+
+这些变化只发生在能力 owner 的事实生产中：SM-1 不变，SM-2/3/4 沿用原有 private-event、sealed dispatch、receipt 和
+recovery/delivery 合同。`TestEntrypointBehaviorObservesBuiltGoProcessWithoutRewritingInputs` 与 Orchestrator 的
+`TestDriveRuntimeEntrypointValidationUsesSameOwnerTransactionsAcrossRestart` 覆盖校准、旧协议隔离及四机联合回归。
 
 当前 `shell/project-native-validation/v1` adapter 的 Go-native binding 使用 `shell/go-test-json/workspace-behavior/v2`；已封存的
 v1/v2 binding 仍按原协议执行/重放，不修改历史 receipt、binding 或归档。fresh manifest 若含 exact CWI 补充输入，使用

@@ -133,7 +133,7 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 		t.Fatalf("software-dev evidencePolicies missing")
 	}
 	policy := item.EvidencePolicies[0]
-	if policy["recipeAdapterRef"] != "shell/project-native-validation/v1" {
+	if policy["recipeAdapterRef"] != "shell/project-native-validation/v2" {
 		t.Fatalf("software-dev evidence policy recipeAdapterRef = %v, want neutral Shell adapter", policy["recipeAdapterRef"])
 	}
 	for _, forbidden := range []string{"commandName", "recipeArgs", "requiredArgs", "argsContain", "workEvidenceMarkers"} {
@@ -330,6 +330,8 @@ func TestEmbeddedSoftwareDevSoulsUseCurrentRuntimeDocuments(t *testing.T) {
 	assertSoulContains(t, planning.SoulMD, "workspace 文件清单为空不等于缺少源码")
 	assertSoulContains(t, planning.SoulMD, "package/module/import")
 	assertSoulContains(t, planning.SoulMD, "真实交付入口")
+	assertSoulContains(t, planning.SoulMD, "实现语言")
+	assertSoulContains(t, planning.SoulMD, "不能因其他实现语言的 template 适配尚未提供而删减或延期")
 
 	assertStringSliceContains(t, execution.AllowedToolKinds, "git/read")
 	assertStringSliceContains(t, execution.AllowedToolKinds, "git/write")
@@ -344,6 +346,8 @@ func TestEmbeddedSoftwareDevSoulsUseCurrentRuntimeDocuments(t *testing.T) {
 	assertSoulContains(t, execution.SoulMD, "sealed manifest")
 	assertSoulContains(t, execution.SoulMD, "inputAddition.contentContractRef")
 	assertSoulContains(t, execution.SoulMD, "contentRequirements")
+	assertSoulContains(t, execution.SoulMD, "不得把后端语言支持移入其他实现语言 template 的待办")
+	assertSoulContains(t, execution.SoulMD, "旧协议不支持的路径不能仅凭 Soul 指令获得授权")
 	assertSoulContains(t, execution.SoulMD, "bindingRefs")
 	assertSoulContains(t, execution.SoulMD, "patch/apply")
 	assertSoulContains(t, execution.SoulMD, "sealed File owner contract")
@@ -360,6 +364,9 @@ func TestEmbeddedSoftwareDevSoulsUseCurrentRuntimeDocuments(t *testing.T) {
 	assertSoulContains(t, validation.SoulMD, "exact recipe/check")
 	assertSoulContains(t, validation.SoulMD, "version-control snapshot")
 	assertSoulContains(t, validation.SoulMD, "claim-to-evidence")
+	assertSoulContains(t, validation.SoulMD, "使用 Go 实现多语言服务不减少任何已封存语言或协议的验收项")
+	assertSoulContains(t, validation.SoulMD, "skip 只能报告未验证")
+	assertSoulContains(t, validation.SoulMD, "仍须核对真实协议响应、错误路径与逐项语义断言")
 
 	assertSoulContains(t, artifact.SoulMD, "DoD 条目证据引用")
 	assertSoulContains(t, artifact.SoulMD, "version_control_snapshot")

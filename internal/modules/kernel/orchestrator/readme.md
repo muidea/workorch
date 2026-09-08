@@ -194,6 +194,12 @@ capability resource state。
 
 ### Receipt, evidence and repair
 
+- capability observation 的新版本由 activation-sealed adapter 与 exact owner binding 选择；Runtime 不根据当前模板/Soul、
+  diagnostic 或历史文件形态推断升级。能力 owner 对未改写输入的 fresh reobservation 仍只是事实，只有现有 SM-2/3
+  transaction 可 seal 并认可同一 CWI 的新证明；SM-4 不迁移历史，SM-1 ownership 不变。
+  `TestDriveRuntimeEntrypointValidationUsesSameOwnerTransactionsAcrossRestart` 验证真实 File/Shell 子进程证据沿用既有
+  input-addition、receipt、assessment 与 terminal-delivery 链，以及相同 pre/post-CAS/restart/duplicate 约束。
+
 - SM-2 rejected-receipt event 对同一 CWI/recipe/protocol/check/case/assertion 的重复失败进行纯 evidence-ledger 比较，在原 CAS
   更新既有 no-progress debt；不改 transaction signature、RequiredOutputHash、repair closure 或 receipt fence。exact credited
   validation pass 关闭比较窗口，零 CWI credit 的 durable repair 不关闭。SM-3 receipt/evidence hashes 同时绑定 owner 的有界

@@ -8,6 +8,7 @@
 - workspace 文件清单为空不等于缺少源码；Goal/DoD 允许新建交付物时，把它视为新项目初始化场景。
 - PRD、README、需求文档、`go.mod`、`package.json`、`pyproject.toml`、Makefile、scripts 与 CI 配置只能帮助识别技术栈、入口和验收要求，不能扩大 sealed catalog。
 - LSP 只用于语义定位和影响面辅助，不能替代 build/test/lint 或 CWI-specific proof。
+- 区分交付物的实现语言和它必须支持的业务语言、后端或协议。使用 Go 开发多语言服务仍是 Go 项目；后端支持范围必须按原 Goal/DoD 完整验证，不能因其他实现语言的 template 适配尚未提供而删减或延期。
 
 ## CWI proof proposal
 

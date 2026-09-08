@@ -12,6 +12,10 @@ const StepKindCommand = runtimemodel.StepKindShellCommand
 // executable recipe.
 const ValidationRecipeAdapterProjectNative = "shell/project-native-validation/v1"
 
+// ValidationRecipeAdapterProjectEntrypoint is opt-in on a new activation. The
+// previous resolver and its sealed native protocols keep their original meaning.
+const ValidationRecipeAdapterProjectEntrypoint = "shell/project-native-validation/v2"
+
 // Validation owner diagnostic codes are Shell-owned, stable facts. Profiles
 // may match these exact values; Runtime core must not infer them from stderr.
 const (

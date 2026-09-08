@@ -18,6 +18,7 @@ import (
 	resultbiz "github.com/muidea/workorch/internal/modules/blocks/result/biz"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
+	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	workspacemodule "github.com/muidea/workorch/internal/modules/blocks/workspace"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -49,7 +50,7 @@ func TestDriveRuntimeInvalidSupplementClosesBeforeAnotherAcquisition(t *testing.
 	var baseline int64
 	for _, cut := range []string{"uninterrupted", "after_input_receipt", "after_unavailability_terminal"} {
 		t.Run(cut, func(t *testing.T) {
-			calls := runValidationInputAdditionMainline(t, cut, true)
+			calls := runValidationInputAdditionMainline(t, cut, validationInputMainlineOptions{InvalidSupplement: true})
 			if cut == "uninterrupted" {
 				baseline = calls
 			} else if baseline != 0 && baseline != calls {
@@ -59,8 +60,31 @@ func TestDriveRuntimeInvalidSupplementClosesBeforeAnotherAcquisition(t *testing.
 	}
 }
 
-func runValidationInputAdditionMainline(t *testing.T, cut string, invalidInputs ...bool) int64 {
-	invalidSupplement := len(invalidInputs) != 0 && invalidInputs[0]
+type validationInputMainlineOptions struct {
+	InvalidSupplement bool
+	Entrypoint        bool
+}
+
+func TestDriveRuntimeEntrypointValidationUsesSameOwnerTransactionsAcrossRestart(t *testing.T) {
+	var baseline int64
+	for _, cut := range []string{"uninterrupted", "before_repair_seal", "after_repair_seal", "after_input_receipt", "after_fresh_validation"} {
+		t.Run(cut, func(t *testing.T) {
+			calls := runValidationInputAdditionMainline(t, cut, validationInputMainlineOptions{Entrypoint: true})
+			if cut == "uninterrupted" {
+				baseline = calls
+			} else if calls != baseline {
+				t.Fatalf("entrypoint restart consumed extra provider budget: %d != %d", calls, baseline)
+			}
+		})
+	}
+}
+
+func runValidationInputAdditionMainline(t *testing.T, cut string, options ...validationInputMainlineOptions) int64 {
+	var mode validationInputMainlineOptions
+	if len(options) != 0 {
+		mode = options[0]
+	}
+	invalidSupplement := mode.InvalidSupplement
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -72,11 +96,22 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, invalidInputs 
 		}
 	}
 	bootstrap := validationInputAdditionMainlineBootstrap()
+	if mode.Entrypoint {
+		bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = shellcommon.ValidationRecipeAdapterProjectEntrypoint
+	}
 	// Initial fixture only: Shell authors the original native check and File
 	// writes it before the Run. The later supplement must come from Runtime.
 	runtimeTestPrepareNativeValidationThroughOwners(t, bootstrap, deliverable)
 	if err := os.WriteFile(filepath.Join(deliverable, "subject.go"), []byte("package fixture\nfunc DeliveredValue() int { return 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if mode.Entrypoint {
+		if err := os.MkdirAll(filepath.Join(deliverable, "cmd", "delivery"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(deliverable, "cmd", "delivery", "main.go"), []byte("package main\nimport (\"fmt\"; subject \"example.com/workorch-runtime-native-fixture\")\nfunc main(){ fmt.Print(subject.DeliveredValue()) }\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	weakInputs := make(map[string][]byte)
 	entries, err := os.ReadDir(filepath.Join(deliverable, "workorch_validation"))
@@ -177,6 +212,19 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, invalidInputs 
 			operation.Parameters = []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}
 			if coverageID == "cwi-2" {
 				content := fmt.Sprintf("package workorch_validation\nimport (\"testing\"; subject \"example.com/workorch-runtime-native-fixture\")\nfunc %s(t *testing.T) { const expected = 4; type response struct { value int }; read := func() response { return response{subject.DeliveredValue()} }; if read().value != expected { t.Fatal(\"wrong delivered behavior\") } }\n", addition.NativeCheckRef)
+				if mode.Entrypoint {
+					content = fmt.Sprintf(`package workorch_validation
+import ("testing"; "os/exec"; "path/filepath"; "strings")
+const expected = "4"
+func assertDelivery(t *testing.T) {
+ t.Helper(); bin:=filepath.Join(t.TempDir(),"delivery")
+ build:=exec.Command("go","build","-buildvcs=false","-o",bin,"./cmd/delivery"); build.Dir=".."
+ if output,err:=build.CombinedOutput(); err!=nil { t.Fatalf("build: %%v %%s",err,output) }
+ output,err:=exec.Command(bin).Output(); if err!=nil || strings.TrimSpace(string(output))!=expected { t.Fatal("wrong delivered behavior") }
+}
+func %s(t *testing.T) { assertDelivery(t) }
+`, addition.NativeCheckRef)
+				}
 				if addition.ContentContractRef == "" || addition.ContentRequirements == "" {
 					t.Error("supplement generation lost the receiving owner's content contract")
 				}
@@ -310,6 +358,9 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, invalidInputs 
 	acceptedValidation, rejectedValidation, createdInputs := 0, 0, 0
 	for _, receipt := range aggregate.OperationReceipts {
 		if receipt.Evidence.Validation != nil {
+			if mode.Entrypoint && receipt.Evidence.Validation.ObservationProtocolRef != "shell/go-test-json/workspace-behavior/v4" {
+				t.Fatal("entrypoint receipt lost its sealed owner protocol")
+			}
 			if receipt.Outcome == runtimecontract.RuntimeOperationOutcomeAccepted {
 				acceptedValidation++
 			} else {
@@ -397,10 +448,14 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, invalidInputs 
 		}
 	}
 	nativeBindings := 0
+	wantProtocol := "shell/go-test-json/workspace-behavior/v3"
+	if mode.Entrypoint {
+		wantProtocol = "shell/go-test-json/workspace-behavior/v4"
+	}
 	for _, binding := range freshValidation.Facts.Focus.CoverageEvidenceBindings {
 		for _, proof := range binding.Proofs {
 			for _, check := range proof.ValidationCheckAttestations {
-				if check.RequiredCheckRef == addition.RequiredCheckRef && check.NativeCheckRef == addition.OriginalNativeCheckRef && check.SupplementalNativeCheckRef == addition.NativeCheckRef && check.ObservationProtocolRef == "shell/go-test-json/workspace-behavior/v3" {
+				if check.RequiredCheckRef == addition.RequiredCheckRef && check.NativeCheckRef == addition.OriginalNativeCheckRef && check.SupplementalNativeCheckRef == addition.NativeCheckRef && check.ObservationProtocolRef == wantProtocol {
 					nativeBindings++
 				}
 			}

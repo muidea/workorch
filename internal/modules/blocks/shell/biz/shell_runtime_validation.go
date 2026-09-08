@@ -22,6 +22,7 @@ const (
 	shellGoTestObservationProtocolRef            = "shell/go-test-json/v1"
 	shellGoBehaviorObservationProtocolRef        = "shell/go-test-json/workspace-behavior/v2"
 	shellGoSupplementObservationProtocolRef      = "shell/go-test-json/workspace-behavior/v3"
+	shellGoEntrypointObservationProtocolRef      = "shell/go-test-json/workspace-behavior/v4"
 )
 
 // resolveRuntimeValidationRecipeDeclarations is the Shell-owner adapter
@@ -37,7 +38,7 @@ func resolveRuntimeValidationRecipeDeclarations(recipes []runtimemodel.RuntimeVa
 			continue
 		}
 		switch declaration.AdapterRef {
-		case modulecommon.ValidationRecipeAdapterProjectNative:
+		case modulecommon.ValidationRecipeAdapterProjectNative, modulecommon.ValidationRecipeAdapterProjectEntrypoint:
 			// An empty workspace has no competing project fact. The currently
 			// registered owner implementation may therefore publish its bounded
 			// prerequisite contract; once any project files exist, resolution is
@@ -241,8 +242,11 @@ func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecip
 	// Only the project-native adapter owns this stronger execution contract.
 	// Explicit fixed-command recipes retain their declared native v1 semantics;
 	// a static/custom recipe must not silently acquire behavior instrumentation.
-	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectNative {
+	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectNative || recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectEntrypoint {
 		protocol = shellGoBehaviorObservationProtocolRef
+		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectEntrypoint {
+			protocol = shellGoEntrypointObservationProtocolRef
+		}
 		if len(requirement.RequiredCheckRefs) == 0 || len(requirement.RequiredCheckRefs) > maxShellBehaviorNativeChecks || validateShellBehaviorRecipeArgs(args) != nil {
 			return nil, false
 		}
@@ -347,7 +351,7 @@ func instrumentManagedValidationNativeChecks(request *RuntimeCommandRequest) err
 			return fmt.Errorf("managed validation has unsupported native check attestation")
 		}
 		requiredRefs = append(requiredRefs, attestation.RequiredCheckRef)
-		if attestation.SupplementalNativeCheckRef != "" && (attestation.ObservationProtocolRef != shellGoSupplementObservationProtocolRef || attestation.SupplementalNativeCheckRef != shellSupplementCheckRef(attestation.NativeCheckRef)) {
+		if attestation.SupplementalNativeCheckRef != "" && ((attestation.ObservationProtocolRef != shellGoSupplementObservationProtocolRef && attestation.ObservationProtocolRef != shellGoEntrypointObservationProtocolRef) || attestation.SupplementalNativeCheckRef != shellSupplementCheckRef(attestation.NativeCheckRef)) {
 			return fmt.Errorf("managed validation has unsupported supplemental native input")
 		}
 		for _, ref := range attestation.NativeCheckRefs() {

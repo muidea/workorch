@@ -48,6 +48,8 @@ Last Verified: 2026-08-30
   owner-local lock 内，并与普通 Template CRUD/ensure 串行。current full-content hash 必须精确命中 reviewed historical
   fingerprint 与 caller expected hash，target hash 必须等于当前内嵌值。未知/定制/stale 内容拒绝；已达目标的 exact replay
   不写入。此私有 catalog 事务不修改 definition admission、active-run slot 或 SM-1～SM-4。
+  内置 adapter 升版必须登记此前发布内容的精确指纹，并以完整 frozen fixture 验证自动更新及定制保护；
+  `TestEntrypointTemplateUpgradeReopensReviewedPreviousDefault` 覆盖 memory/file reopen，不凭内置 ID 扩大升级范围。
 - 不拥有 Run SM-1、Orchestrator SM-2/SM-3/SM-4、Result 裁决、Decision/Approval 生命周期或 capability 执行。
 - 不解析默认项目目录，不读取 capability catalog，不选择 Runtime operation/target，也不跨 owner 直接清理资源。
 
