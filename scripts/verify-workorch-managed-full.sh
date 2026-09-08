@@ -325,7 +325,9 @@ if [[ "$SKIP_PREFLIGHT" != "1" && "$SKIP_PREFLIGHT" != "true" ]]; then
   run_step make fmt-check
   run_step make console-build
   run_step make vet
-  run_step go test $GO_TEST_FLAGS $GO_TEST_PACKAGES
+  # Share the Makefile's package-level test deadline. Keep explicit caller
+  # flags/packages intact; this does not change Runtime convergence limits.
+  run_step go test "-timeout=$(make --no-print-directory -s go-test-timeout)" $GO_TEST_FLAGS $GO_TEST_PACKAGES
 else
   echo "==> skip managed preflight checks"
 fi

@@ -228,11 +228,12 @@ func runtimeOperationReceipt(value projectioncontract.RuntimeAuditOperationRecei
 			EvidenceRefs: append([]string(nil), value.EvidenceRefs...), EvidenceTags: append([]string(nil), value.EvidenceTags...),
 		},
 	}
-	if value.ValidationRecipeID != "" || value.ObservationProtocolRef != "" || value.FailureDetailsTruncated || value.OutputTruncated ||
+	if value.ValidationRecipeID != "" || value.ObservationProtocolRef != "" || value.FailureDetailProtocolRef != "" || value.FailureDetailsTruncated || value.OutputTruncated ||
 		len(value.ExecutedChecks)+len(value.PassedChecks)+len(value.FailedChecks)+len(value.SkippedChecks)+len(value.IncompleteChecks)+len(value.CheckFailures) != 0 {
 		receipt.Evidence.Validation = &runtimecontract.RuntimeValidationObservation{
 			RecipeID: value.ValidationRecipeID, ObservationProtocolRef: value.ObservationProtocolRef,
-			ExecutedChecks: append([]string(nil), value.ExecutedChecks...), PassedChecks: append([]string(nil), value.PassedChecks...),
+			FailureDetailProtocolRef: value.FailureDetailProtocolRef,
+			ExecutedChecks:           append([]string(nil), value.ExecutedChecks...), PassedChecks: append([]string(nil), value.PassedChecks...),
 			FailedChecks: append([]string(nil), value.FailedChecks...), SkippedChecks: append([]string(nil), value.SkippedChecks...),
 			IncompleteChecks: append([]string(nil), value.IncompleteChecks...), CheckFailures: append([]runtimecontract.RuntimeValidationCheckFailure(nil), value.CheckFailures...),
 			FailureDetailsTruncated: value.FailureDetailsTruncated, OutputTruncated: value.OutputTruncated,
@@ -242,7 +243,7 @@ func runtimeOperationReceipt(value projectioncontract.RuntimeAuditOperationRecei
 }
 
 func sameValidationObservation(receipt *runtimecontract.RuntimeValidationObservation, evidence projectioncontract.RuntimeAuditEvidence) bool {
-	hasEvidenceObservation := evidence.ValidationRecipeID != "" || evidence.ObservationProtocolRef != "" || evidence.FailureDetailsTruncated || evidence.OutputTruncated ||
+	hasEvidenceObservation := evidence.ValidationRecipeID != "" || evidence.ObservationProtocolRef != "" || evidence.FailureDetailProtocolRef != "" || evidence.FailureDetailsTruncated || evidence.OutputTruncated ||
 		len(evidence.ExecutedChecks)+len(evidence.PassedChecks)+len(evidence.FailedChecks)+len(evidence.SkippedChecks)+len(evidence.IncompleteChecks)+len(evidence.CheckFailures) != 0
 	if receipt == nil {
 		return !hasEvidenceObservation
@@ -253,6 +254,7 @@ func sameValidationObservation(receipt *runtimecontract.RuntimeValidationObserva
 	value := receipt.Normalized()
 	details := (runtimecontract.RuntimeValidationObservation{CheckFailures: evidence.CheckFailures}).Normalized().CheckFailures
 	return value.RecipeID == strings.TrimSpace(evidence.ValidationRecipeID) && value.ObservationProtocolRef == strings.TrimSpace(evidence.ObservationProtocolRef) &&
+		value.FailureDetailProtocolRef == evidence.FailureDetailProtocolRef &&
 		sameStrings(value.ExecutedChecks, evidence.ExecutedChecks) && sameStrings(value.PassedChecks, evidence.PassedChecks) &&
 		sameStrings(value.FailedChecks, evidence.FailedChecks) && sameStrings(value.SkippedChecks, evidence.SkippedChecks) &&
 		sameStrings(value.IncompleteChecks, evidence.IncompleteChecks) && slices.Equal(value.CheckFailures, details) &&

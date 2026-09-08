@@ -16,6 +16,15 @@ func TestRuntimeAuditRefreshTracksValidationFailureDetails(t *testing.T) {
 		OperationReceipts: []projectioncontract.RuntimeAuditOperationReceipt{{CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: "check-A", Line: 47}}}},
 	}
 	for name, mutate := range map[string]func(*projectioncontract.RuntimeAudit){
+		"detail protocol": func(a *projectioncontract.RuntimeAudit) {
+			a.RejectedEvidence[0].FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocolV2
+			a.OperationReceipts[0].FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocolV2
+		},
+		"reported assertion": func(a *projectioncontract.RuntimeAudit) {
+			report := runtimecontract.RuntimeValidationReportedAssertion{Code: "shape_mismatch", ExpectedShape: "object", ObservedShape: "array"}
+			a.RejectedEvidence[0].CheckFailures[0].ReportedAssertion = report
+			a.OperationReceipts[0].CheckFailures[0].ReportedAssertion = report
+		},
 		"line": func(a *projectioncontract.RuntimeAudit) {
 			a.RejectedEvidence[0].CheckFailures[0].Line++
 			a.OperationReceipts[0].CheckFailures[0].Line++

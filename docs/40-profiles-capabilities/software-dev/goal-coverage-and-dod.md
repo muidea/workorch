@@ -118,6 +118,19 @@ separately declared contract and positive/negative calibration preserving the or
 implementation repair route does not authorize such a change. Built-in reference tests calibrate their fixed fixture only and
 must not be presented as a production registry of trusted graders for arbitrary requirements.
 
+Failure feedback must distinguish traceability from repair information. With the optional v2 diagnostic extension, a check
+location and digest alone remain incomplete; a bounded reported assertion may convey a closed expected/observed shape but is
+not an independently verified value or acceptance evidence. The Shell content contract may declare optional report syntax for
+new inputs. Neither that syntax nor missing reports authorize rewriting existing criteria. A new scratch path, receipt, or
+comment-only implementation change is not validation progress; only fresh exact-CWI proof can close the failure window.
+
+`TestStdioEnvelopeReferenceGraderCalibration` independently exercises the same fixed entrypoint grader against known correct,
+incorrect and comment-only implementations. `TestDriveRuntimeAssertionFeedbackRepairsBehaviorAcrossRestart` then exercises
+real File/Shell/Run owners with a scripted provider through failure, typed feedback, implementation repair, fresh validation and
+terminal delivery, including CAS/restart cuts. `verify-software-dev-goal-dod-e2e` runs these contract calibrations, not a real-model
+completion benchmark. The full deployed Goal and release DCE still require their own exact evidence and registered producers;
+these tests must not be registered as substitutes.
+
 The separate `missing-behavior-to-new-validation-input` route admits only the exact Shell
 `validation_output_inconclusive / validation_output / validation_workspace_behavior_unobserved` tuple with a matching typed
 `InputAddition`. It declares File `file/write`, `prospective_owner_target`, `RequireInputAddition=true` and the

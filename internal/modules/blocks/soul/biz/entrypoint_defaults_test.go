@@ -21,9 +21,21 @@ import (
 //go:embed testdata/software-dev-souls-93a5d468.json
 var preEntrypointSoulsJSON []byte
 
+//go:embed testdata/software-dev-souls-f964490d.json
+var preAssertionFeedbackSoulsJSON []byte
+
 func TestEntrypointSoulsUpgradeReopensReviewedPreviousDefaults(t *testing.T) {
+	testReviewedSoulsUpgrade(t, preEntrypointSoulsJSON, "93a5d468", 3)
+}
+
+func TestAssertionFeedbackSoulUpgradePreservesArchivesAndCustomization(t *testing.T) {
+	testReviewedSoulsUpgrade(t, preAssertionFeedbackSoulsJSON, "f964490d", 1)
+}
+
+func testReviewedSoulsUpgrade(t *testing.T, data []byte, revision string, count int) {
+	t.Helper()
 	var previous []workorchmanagementcontract.Soul
-	if err := json.Unmarshal(preEntrypointSoulsJSON, &previous); err != nil || len(previous) != 3 {
+	if err := json.Unmarshal(data, &previous); err != nil || len(previous) != count {
 		t.Fatalf("previous software-dev Souls: %d %v", len(previous), err)
 	}
 	for _, raw := range previous {
@@ -34,7 +46,7 @@ func TestEntrypointSoulsUpgradeReopensReviewedPreviousDefaults(t *testing.T) {
 				t.Fatal(err)
 			}
 			hash := soulmodel.StableSoulContentHash(value)
-			if workorchdefaults.KnownBuiltinContentRevision("soul", raw.ID, hash) != "93a5d468" {
+			if workorchdefaults.KnownBuiltinContentRevision("soul", raw.ID, hash) != revision {
 				t.Fatalf("pre-entrypoint Soul is not reviewed: %s %s", raw.ID, hash)
 			}
 			for _, backend := range []string{"memory", "file"} {

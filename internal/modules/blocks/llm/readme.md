@@ -93,6 +93,9 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
   current validation failure 的 receipt/check/case/location/digest、环境/exit/timeout facts 和 missing/truncated 标记；该
   receipt 不受 recent-history 四项窗口裁剪。raw logs、自由诊断与 expected/actual 内容不进入 provider。comparison count
   是只读事实，不授权模型选择 retry、next focus 或 terminal；最终 rendered request 回归必须证明 C0～C2 bytes/hash 不漂移。
+- C4 只接纳校验通过的可选 `validation/check-failure/v2`、`comparisonHash` 与封闭 `reportedAssertion` 形态；报告是检查
+  自报，不是独立验收事实。v2 缺少报告时，即使有 location/hash 也必须 `failureDetailsIncomplete=true`；非法协议或形态
+  不向 provider 转发。没有扩展的历史请求不添加默认字段、不改变原字节；这些诊断不能改变 C3 授权或 C0～C2 前缀。
 - 验证输入补充的 owner-authored `contentContractRef + contentRequirements` 与 exact target/native identity 一起由既有 typed
   projection 保留：semantic repair 放入 C3，operations 当前失败放入 C4；不另按语言推导规则，不改 C0～C2。
   LLM 只生成 proposal，不能把输入结构声明、File 创建成功或 owner unavailability 解释为已验证/可再补充。

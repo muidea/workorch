@@ -23,6 +23,10 @@ func attachShellValidationCheckFailures(output *RuntimeCommandResult, request Ru
 	observation := output.ValidationObservation.Clone()
 	observation.CheckFailures = nil
 	observation.FailureDetailsTruncated = false
+	observation.FailureDetailProtocolRef = ""
+	if len(observation.FailedChecks) != 0 {
+		observation.FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocolV2
+	}
 	observation.OutputTruncated = output.OutputTruncated
 	if output.OutputTruncated {
 		output.EvidenceQuality = string(common.EvidenceQualityInconclusive)
@@ -44,6 +48,9 @@ func attachShellValidationCheckFailures(output *RuntimeCommandResult, request Ru
 		if _, ok := failed[check]; !ok || record.Action != "output" {
 			continue
 		}
+		if outcome := output.goTestJSONFacts.CaseOutcomes[record.Package+"\x00"+record.Test]; outcome != "" && outcome != "fail" {
+			continue
+		}
 		for _, line := range strings.Split(record.Output, "\n") {
 			match := shellGoAssertionLocationPattern.FindStringSubmatch(line)
 			if len(match) != 4 {
@@ -57,11 +64,17 @@ func attachShellValidationCheckFailures(output *RuntimeCommandResult, request Ru
 			if err != nil || lineNumber <= 0 {
 				continue
 			}
-			// Hash only the assertion, not its line or temporary execution path.
+			// Keep the exact assertion identity for receipt/replay fencing.
+			// The versioned comparison digest is diagnostic-only.
 			digest := sha256.Sum256([]byte(strings.TrimSpace(match[3])))
 			detail := runtimecontract.RuntimeValidationCheckFailure{CheckRef: check, CaseRef: record.Test,
-				PackageRef: record.Package, TargetRef: target, Line: lineNumber, DiagnosticHash: hex.EncodeToString(digest[:])}
-			probe := runtimecontract.RuntimeValidationObservation{FailedChecks: []string{check}, CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{detail}}
+				PackageRef: record.Package, TargetRef: target, Line: lineNumber, DiagnosticHash: hex.EncodeToString(digest[:]),
+				ComparisonHash: shellAssertionComparisonHash(match[3], request.ValidationScratchDirectory)}
+			if output.goTestJSONFacts.CaseOutcomes[record.Package+"\x00"+record.Test] == "fail" {
+				detail.ReportedAssertion = shellReportedAssertion(match[3])
+			}
+			probe := runtimecontract.RuntimeValidationObservation{FailedChecks: []string{check}, CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{detail},
+				FailureDetailProtocolRef: observation.FailureDetailProtocolRef}
 			if probe.ValidateFailureDetails() != nil {
 				continue
 			}

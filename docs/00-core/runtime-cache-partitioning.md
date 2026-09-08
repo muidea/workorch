@@ -59,6 +59,8 @@ Provider-facing 第一段必须是连续的 C0→C1→C2。C3→C4→C5 只能�
   location/line、assertion digest 与显式 missing/truncated 状态保持有界。C3 不得直接序列化完整 `RuntimeRepairDirective`
   的 diagnostic、rejected candidate parameters 或历史 failure；它只投影 current repair authority。failure detail 变化不得
   改写 C0～C2，同一 transaction 的 correction 仍不得改变 C0～C3。
+- 可选 failure detail v2 的协议、精确/比较 digest 与封闭自报 assertion shape 也只在 C4；缺少报告不能用 location/hash
+  充当语义完整反馈。旧请求没有扩展时不补默认字段；新诊断不能刷新 C0～C3，也不能回填旧 request/evidence identity。
 - operation kind、variant 与 target policy 必须来自同一 owner fact；具体 owner/kind/target 只存在于 C3 manifest。
 
 attempt 0 与 same-contract attempt 1 必须复用相同 C0～C3 section hash、manifest、authority transaction 与

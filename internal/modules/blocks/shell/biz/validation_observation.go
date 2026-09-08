@@ -37,6 +37,9 @@ type shellGoTestJSONFacts struct {
 	DiagnosticOutput  string
 	DiagnosticRecords []shellGoTestJSONDiagnosticRecord
 	HasBuildOutput    bool
+	// Package-scoped native case outcomes are private parse facts, not another
+	// state machine. Passing/skipped subcase output cannot diagnose a failed sibling.
+	CaseOutcomes map[string]string
 }
 
 // attachShellValidationObservation records the owner fact that a sealed
@@ -136,6 +139,7 @@ func parseGoTestJSONFacts(stdout, stderr string) shellGoTestJSONFacts {
 	observation := runtimecontract.RuntimeValidationObservation{}
 	diagnosticRecords := make([]shellGoTestJSONDiagnosticRecord, 0)
 	hasBuildOutput := false
+	caseOutcomes := make(map[string]string)
 	var diagnosticOutput strings.Builder
 	scanner := bufio.NewScanner(strings.NewReader(strings.Join([]string{stdout, stderr}, "\n")))
 	scanner.Buffer(make([]byte, 4096), 2*MaxCommandOutputBytes+1024)
@@ -165,6 +169,14 @@ func parseGoTestJSONFacts(stdout, stderr string) shellGoTestJSONFacts {
 			}
 		}
 		name := topLevelGoTestCheck(event.Test)
+		if event.Test != "" && (event.Action == "pass" || event.Action == "fail" || event.Action == "skip") {
+			key := strings.TrimSpace(event.Package) + "\x00" + strings.TrimSpace(event.Test)
+			if previous := caseOutcomes[key]; previous != "" && previous != event.Action {
+				caseOutcomes[key] = "conflicting"
+			} else {
+				caseOutcomes[key] = event.Action
+			}
+		}
 		if name == "" {
 			if parent, _, nested := strings.Cut(strings.TrimSpace(event.Test), "/"); nested && parent != "" && strings.TrimSpace(event.Action) == "skip" {
 				observation.IncompleteChecks = append(observation.IncompleteChecks, parent)
@@ -187,6 +199,7 @@ func parseGoTestJSONFacts(stdout, stderr string) shellGoTestJSONFacts {
 		DiagnosticOutput:  diagnosticOutput.String(),
 		DiagnosticRecords: diagnosticRecords,
 		HasBuildOutput:    hasBuildOutput,
+		CaseOutcomes:      caseOutcomes,
 	}
 }
 

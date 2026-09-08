@@ -33,8 +33,10 @@ func TestRejectedValidationFeedbackCommitsAtomicallyAndReplaysWithoutDebt(t *tes
 		OperationID: operation.ID, Kind: runtimecontract.EvidenceKindValidation, Status: ExecutionEvidenceStatusRejected, Failure: failure,
 		Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &runtimecontract.RuntimeValidationObservation{
 			RecipeID: proof.ValidationRecipeID, ObservationProtocolRef: check.ObservationProtocolRef,
-			ExecutedChecks: []string{check.NativeCheckRef}, FailedChecks: []string{check.NativeCheckRef},
-			CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: check.NativeCheckRef, TargetRef: "checks/a.test", Line: 47, DiagnosticHash: strings.Repeat("a", 64)}},
+			FailureDetailProtocolRef: runtimecontract.RuntimeValidationFailureDetailProtocolV2,
+			ExecutedChecks:           []string{check.NativeCheckRef}, FailedChecks: []string{check.NativeCheckRef},
+			CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: check.NativeCheckRef, TargetRef: "checks/a.test", Line: 47, DiagnosticHash: strings.Repeat("a", 64),
+				ComparisonHash: strings.Repeat("c", 64), ReportedAssertion: runtimecontract.RuntimeValidationReportedAssertion{Code: "shape_mismatch", ExpectedShape: "object", ObservedShape: "array"}}},
 		}},
 	}
 	attachRuntimeTestOwnerReceipt(t, &seed.aggregate, &evidence)
@@ -79,6 +81,10 @@ func TestRejectedValidationFeedbackCommitsAtomicallyAndReplaysWithoutDebt(t *tes
 			if len(fact.CoverageWorkItemIDs) != 0 {
 				t.Fatal("failure comparison manufactured CWI credit")
 			}
+			if fact.Validation.FailureDetailProtocolRef != runtimecontract.RuntimeValidationFailureDetailProtocolV2 ||
+				fact.Validation.CheckFailures[0].ComparisonHash != strings.Repeat("c", 64) || fact.Validation.CheckFailures[0].ReportedAssertion.ObservedShape != "array" {
+				t.Fatal("owner-private receipt CAS or reload lost diagnostic extension")
+			}
 			writes, debt := repository.saveAttempts, committed.Aggregate.Facts.Repair
 			duplicate, err := controller.commitEvidence(context.Background(), evidence)
 			if err != nil || duplicate.Disposition != CommitDispositionDuplicate || repository.saveAttempts != writes || !reflect.DeepEqual(duplicate.Aggregate.Facts.Repair, debt) {
@@ -97,7 +103,12 @@ func TestRejectedValidationRepairDebtSurvivesNewTransactionIdentity(t *testing.T
 		failure := orchestratorevents.RuntimeOperationFailure(runtimecontract.AuthorityTransaction{RequiredOutputHash: outputHash}, operation.Kind, "test_failed", "same check failed", nil)
 		fact := runtimecontract.EvidenceFact{ID: common.EvidenceRecordID(outputHash), Kind: runtimecontract.EvidenceKindValidation,
 			FocusID: "focus", BindingRefs: []string{"binding-cwi"}, FailureClass: failure.Class, FailureCode: failure.Code, FailureSignature: failure.Signature,
-			Validation: &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe", ObservationProtocolRef: "owner/checks/v1", FailedChecks: []string{"check-A"}}}
+			Validation: &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe", ObservationProtocolRef: "owner/checks/v1", FailedChecks: []string{"check-A"},
+				FailureDetailProtocolRef: runtimecontract.RuntimeValidationFailureDetailProtocolV2,
+				// The owner observed the same assertion after a new scratch path
+				// and comment-only source delta. Exact receipt identity differs.
+				CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: "check-A", DiagnosticHash: strings.Repeat(string(rune('a'+i)), 64), ComparisonHash: strings.Repeat("c", 64)}},
+			}}
 		gap := rejectedExecutionAssessmentGap(facts, fact, *failure)
 		ledger, err := rejectedExecutionRepairLedger(facts, ExecutionEvidence{EventID: outputHash}, operation, fact, *failure, gap, failure.Signature)
 		if err != nil {

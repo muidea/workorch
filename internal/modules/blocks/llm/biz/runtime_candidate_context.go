@@ -103,6 +103,7 @@ type runtimeCandidateRepairAuthorityProjection struct {
 type runtimeCandidateValidationProjection struct {
 	RecipeID                 string                                          `json:"recipeId,omitempty"`
 	ObservationProtocolRef   string                                          `json:"observationProtocolRef,omitempty"`
+	FailureDetailProtocolRef string                                          `json:"failureDetailProtocolRef,omitempty"`
 	ExecutedChecks           []string                                        `json:"executedChecks,omitempty"`
 	PassedChecks             []string                                        `json:"passedChecks,omitempty"`
 	FailedChecks             []string                                        `json:"failedChecks,omitempty"`
@@ -623,7 +624,20 @@ func runtimeProviderSafeValidation(value *runtimecontract.RuntimeValidationObser
 	ret.FailedChecks, ret.SkippedChecks = bounded(o.FailedChecks), bounded(o.SkippedChecks)
 	ret.IncompleteChecks = bounded(o.IncompleteChecks)
 	if o.ValidateFailureDetails() == nil {
+		ret.FailureDetailProtocolRef = o.FailureDetailProtocolRef
 		ret.CheckFailures = append([]runtimecontract.RuntimeValidationCheckFailure(nil), o.CheckFailures...)
+	} else {
+		ret.FailureDetailsIncomplete = true
+	}
+	// Legacy requests keep their original bytes. The explicit diagnostic
+	// extension distinguishes traceable locations from actionable reported
+	// shapes; neither a line nor a hash can supply missing assertion semantics.
+	if o.FailureDetailProtocolRef == runtimecontract.RuntimeValidationFailureDetailProtocolV2 {
+		for _, detail := range ret.CheckFailures {
+			if detail.ReportedAssertion == (runtimecontract.RuntimeValidationReportedAssertion{}) {
+				ret.FailureDetailsIncomplete = true
+			}
+		}
 	}
 	for _, check := range o.FailedChecks {
 		found := false

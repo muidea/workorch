@@ -8,10 +8,10 @@ import (
 
 // This declaration and the native-check inspector form one Shell-owned
 // contract. The bounded prose is public input syntax, never parser diagnostics.
-const shellSupplementContentContractRef = "shell/go-test-input/single-conjunctive-test/v1"
+const shellSupplementContentContractRef = "shell/go-test-input/single-conjunctive-test/v2"
 const shellSupplementContentRequirements = "Create one Go test source file with a package clause, imports, and exactly one top-level function named nativeCheckRef with signature func(t *testing.T). No other top-level declarations: no helper functions, methods, const, var, type, init, TestMain, or original-check redefinition. Put constants, variables, types and any helper closures inside that test function. Place testing assertions directly in the test body or a direct t.Run callback, not solely in helper closures. Call the actual workspace delivery implementation; source-text checks, test-local replacement implementations, dependency-only calls and subprocess-only execution do not establish workspace behavior under this observation protocol. Preserve originalNativeCheckRef and all existing validation inputs; both original and supplemental checks must execute and pass."
 
-const shellEntrypointContentContractRef = "shell/go-test-input/conjunctive-entrypoint-test/v2"
+const shellEntrypointContentContractRef = "shell/go-test-input/conjunctive-entrypoint-test/v3"
 const shellEntrypointContentRequirements = "Create one Go test source file with package/imports and the exact nativeCheckRef func(t *testing.T). Named same-package helpers, types, constants and data-only variables are allowed; no init, TestMain, methods, other Test functions, original-check redefinition or function calls/closures in global initializers. Assertions must be reachable through the real testing.T, directly, in t.Run or named helpers. Exercise the actual workspace Go delivery, either in-process or via a Go-built executable inheriting the owner GOFLAGS and GOCOVERDIR; do not override instrumentation, use prebuilt binaries, exit the test runner, mutate validation inputs or substitute source strings/test-local/dependency-only behavior. Non-Go backend processes are allowed but do not themselves prove Go delivery execution. Assert the actual protocol responses and every required language/criterion, reporting missing dependencies as unverified, never passed. Preserve all original checks and inputs; original and supplement must execute and pass together."
 
 func shellValidationInputAddition(check runtimecontract.RuntimeValidationCheckAttestationBinding) runtimecontract.RuntimeValidationInputAddition {
@@ -23,6 +23,7 @@ func shellValidationInputAddition(check runtimecontract.RuntimeValidationCheckAt
 	if check.ObservationProtocolRef == shellGoEntrypointObservationProtocolRef {
 		addition.ContentContractRef, addition.ContentRequirements = shellEntrypointContentContractRef, shellEntrypointContentRequirements
 	}
+	addition.ContentRequirements += shellAssertionFeedbackRequirements
 	return addition
 }
 

@@ -6,6 +6,9 @@ APP := ./application/workorch
 PKGS := ./...
 GOFMT ?= gofmt
 GOTEST_FLAGS ?=
+# Per-package test deadline for the combined file-backed recovery matrices.
+# This is harness configuration, never a workspace Runtime/repair budget.
+GOTEST_TIMEOUT ?= 15m
 GO_MOD_DOWNLOAD_FLAGS ?=
 BUILD_OUT ?= ./bin/workorch
 CLI_BUILD_OUT ?= $(BUILD_OUT)
@@ -152,11 +155,15 @@ fmt-check:
 		exit 1; \
 	fi
 
+.PHONY: go-test-timeout
+go-test-timeout:
+	@printf '%s\n' '$(GOTEST_TIMEOUT)'
+
 test: go-deps
-	$(GO) test $(GOTEST_FLAGS) $(PKGS)
+	$(GO) test -timeout=$(GOTEST_TIMEOUT) $(GOTEST_FLAGS) $(PKGS)
 
 test-race: go-deps
-	$(GO) test -race $(GOTEST_FLAGS) $(PKGS)
+	$(GO) test -race -timeout=$(GOTEST_TIMEOUT) $(GOTEST_FLAGS) $(PKGS)
 
 vet: go-deps
 	$(GO) vet $(PKGS)

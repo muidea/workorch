@@ -14,6 +14,43 @@ import (
 
 const RuntimeValidationFailureDetailLimit = 32
 
+const RuntimeValidationFailureDetailProtocolV2 = "validation/check-failure/v2"
+
+// RuntimeValidationReportedAssertion is a failed check's bounded diagnostic
+// report, NOT an independently observed value or an acceptance attestation.
+// Closed shapes exclude arbitrary messages and expected/actual values. Only
+// the native validation observation can establish pass/fail.
+type RuntimeValidationReportedAssertion struct {
+	Code          string `json:"code"`
+	ExpectedShape string `json:"expectedShape"`
+	ObservedShape string `json:"observedShape"`
+}
+
+func (a RuntimeValidationReportedAssertion) Validate() error {
+	if a == (RuntimeValidationReportedAssertion{}) {
+		return nil
+	}
+	allowed := func(value string, values ...string) bool { return containsString(values, value) }
+	valid := false
+	switch a.Code {
+	case "shape_mismatch":
+		shapes := []string{"null", "boolean", "number", "string", "array", "object"}
+		valid = allowed(a.ExpectedShape, shapes...) && allowed(a.ObservedShape, shapes...)
+	case "presence_mismatch":
+		valid = allowed(a.ExpectedShape, "present", "absent") && allowed(a.ObservedShape, "present", "absent")
+	case "emptiness_mismatch":
+		valid = allowed(a.ExpectedShape, "empty", "nonempty") && allowed(a.ObservedShape, "empty", "nonempty")
+	case "predicate_mismatch":
+		valid = allowed(a.ExpectedShape, "true", "false") && allowed(a.ObservedShape, "true", "false")
+	case "value_mismatch":
+		valid = a.ExpectedShape == "equal" && a.ObservedShape == "different"
+	}
+	if !valid || a.ExpectedShape == a.ObservedShape {
+		return fmt.Errorf("validation assertion report requires a closed mismatching shape pair")
+	}
+	return nil
+}
+
 func writeRuntimeSupplementalNativeCheckHash(h hash.Hash, binding RuntimeValidationCheckAttestationBinding) {
 	if ref := binding.Normalized().SupplementalNativeCheckRef; ref != "" {
 		writeHashString(h, "conjunctive-native-input/v1")
@@ -32,6 +69,10 @@ type RuntimeValidationCheckFailure struct {
 	TargetRef      string `json:"targetRef,omitempty"`
 	Line           int    `json:"line,omitempty"`
 	DiagnosticHash string `json:"diagnosticHash"`
+	// ComparisonHash removes only owner-known execution noise. DiagnosticHash
+	// still binds the exact private assertion; neither identity grants authority.
+	ComparisonHash    string                             `json:"comparisonHash,omitempty"`
+	ReportedAssertion RuntimeValidationReportedAssertion `json:"reportedAssertion,omitzero"`
 }
 
 func normalizeRuntimeValidationCheckFailures(values []RuntimeValidationCheckFailure) []RuntimeValidationCheckFailure {
@@ -60,7 +101,11 @@ func normalizeRuntimeValidationCheckFailures(values []RuntimeValidationCheckFail
 		if l.Line != r.Line {
 			return l.Line < r.Line
 		}
-		return l.DiagnosticHash < r.DiagnosticHash
+		if l.DiagnosticHash != r.DiagnosticHash {
+			return l.DiagnosticHash < r.DiagnosticHash
+		}
+		return strings.Join([]string{l.ComparisonHash, l.ReportedAssertion.Code, l.ReportedAssertion.ExpectedShape, l.ReportedAssertion.ObservedShape}, "\x00") <
+			strings.Join([]string{r.ComparisonHash, r.ReportedAssertion.Code, r.ReportedAssertion.ExpectedShape, r.ReportedAssertion.ObservedShape}, "\x00")
 	})
 	return ret
 }
@@ -69,6 +114,9 @@ func normalizeRuntimeValidationCheckFailures(values []RuntimeValidationCheckFail
 // diagnostics. If supplied, they must be bounded, safe and attached to an actual
 // failed check. Missing details remain explicitly observable at the renderer.
 func (o RuntimeValidationObservation) ValidateFailureDetails() error {
+	if o.FailureDetailProtocolRef != "" && (o.FailureDetailProtocolRef != RuntimeValidationFailureDetailProtocolV2 || len(o.FailedChecks) == 0) {
+		return fmt.Errorf("unsupported validation failure detail protocol or missing failed check")
+	}
 	if len(o.CheckFailures) > RuntimeValidationFailureDetailLimit {
 		return fmt.Errorf("validation failure detail bound exceeded")
 	}
@@ -93,6 +141,21 @@ func (o RuntimeValidationObservation) ValidateFailureDetails() error {
 		if _, err := hex.DecodeString(value.DiagnosticHash); err != nil {
 			return fmt.Errorf("invalid validation diagnostic identity: %w", err)
 		}
+		if o.FailureDetailProtocolRef == "" {
+			if value.ComparisonHash != "" || value.ReportedAssertion != (RuntimeValidationReportedAssertion{}) {
+				return fmt.Errorf("validation diagnostic extension requires its exact protocol")
+			}
+		} else {
+			if len(value.ComparisonHash) != sha256.Size*2 || strings.ToLower(value.ComparisonHash) != value.ComparisonHash {
+				return fmt.Errorf("validation comparison requires sha256 identity")
+			}
+			if _, err := hex.DecodeString(value.ComparisonHash); err != nil {
+				return fmt.Errorf("invalid validation comparison identity")
+			}
+			if err := value.ReportedAssertion.Validate(); err != nil {
+				return err
+			}
+		}
 		if _, duplicate := seen[value]; duplicate {
 			return fmt.Errorf("duplicate validation failure detail")
 		}
@@ -104,7 +167,7 @@ func (o RuntimeValidationObservation) ValidateFailureDetails() error {
 // Preserve exact hashes of records with no detail extension. This is an
 // optional fact extension, never an archive rewrite or authority migration.
 func writeRuntimeValidationFailureDetailsHash(h hash.Hash, observation RuntimeValidationObservation) {
-	if len(observation.CheckFailures) == 0 && !observation.FailureDetailsTruncated && !observation.OutputTruncated && len(observation.IncompleteChecks) == 0 {
+	if len(observation.CheckFailures) == 0 && !observation.FailureDetailsTruncated && !observation.OutputTruncated && len(observation.IncompleteChecks) == 0 && observation.FailureDetailProtocolRef == "" {
 		return
 	}
 	writeHashString(h, "validation-check-failure-details/v1")
@@ -113,6 +176,18 @@ func writeRuntimeValidationFailureDetailsHash(h hash.Hash, observation RuntimeVa
 	writeHashStrings(h, normalizeStrings(observation.IncompleteChecks))
 	for _, detail := range normalizeRuntimeValidationCheckFailures(observation.CheckFailures) {
 		writeHashStrings(h, []string{detail.CheckRef, detail.CaseRef, detail.PackageRef, detail.TargetRef, fmt.Sprint(detail.Line), detail.DiagnosticHash})
+	}
+	// Append without changing the original v1 hash layout. Absent optional
+	// fields retain their archived bytes and identity, including existing v1 details.
+	if observation.FailureDetailProtocolRef != "" {
+		writeHashString(h, observation.FailureDetailProtocolRef)
+	}
+	for _, detail := range normalizeRuntimeValidationCheckFailures(observation.CheckFailures) {
+		if detail.ComparisonHash != "" || detail.ReportedAssertion != (RuntimeValidationReportedAssertion{}) {
+			writeHashStrings(h, []string{"validation-check-diagnostic/v2", detail.CheckRef, detail.CaseRef, detail.PackageRef,
+				detail.TargetRef, fmt.Sprint(detail.Line), detail.DiagnosticHash, detail.ComparisonHash,
+				detail.ReportedAssertion.Code, detail.ReportedAssertion.ExpectedShape, detail.ReportedAssertion.ObservedShape})
+		}
 	}
 }
 
@@ -131,6 +206,9 @@ func RuntimeValidationFailureFingerprint(fact EvidenceFact, bindings ...Coverage
 	}
 	h := sha256.New()
 	writeHashString(h, "validation-failure-comparison/v1")
+	if o.FailureDetailProtocolRef != "" {
+		writeHashString(h, o.FailureDetailProtocolRef)
+	}
 	for _, id := range coverageIDs {
 		writeHashString(h, string(id))
 	}
@@ -140,7 +218,11 @@ func RuntimeValidationFailureFingerprint(fact EvidenceFact, bindings ...Coverage
 	// Dedup because one assertion can be logged from multiple call locations.
 	diagnostics := make([]string, 0, len(o.CheckFailures))
 	for _, detail := range o.CheckFailures {
-		diagnostics = append(diagnostics, strings.Join([]string{detail.CheckRef, detail.CaseRef, detail.PackageRef, detail.DiagnosticHash}, "\x00"))
+		digest := detail.DiagnosticHash
+		if o.FailureDetailProtocolRef == RuntimeValidationFailureDetailProtocolV2 {
+			digest = detail.ComparisonHash
+		}
+		diagnostics = append(diagnostics, strings.Join([]string{detail.CheckRef, detail.CaseRef, detail.PackageRef, digest}, "\x00"))
 	}
 	writeHashStrings(h, normalizeStrings(diagnostics))
 	writeHashString(h, fmt.Sprint(o.FailureDetailsTruncated))

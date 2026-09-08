@@ -135,9 +135,13 @@ load facts
   均不能关闭窗口。fingerprint/occurrences 是纯比较结果，不是第二份 receipt identity、repair authority 或 persisted counter。
   rejected evidence 不携带 CWI credit；比较时只通过已封存 binding 解析诊断归属，未知 binding 不得从 current focus 猜测，
   更不得回填 `CoverageWorkItemIDs` 或把失败证据移入 accepted ledger。
+  新 owner observation 可声明 `validation/check-failure/v2`：精确断言 `DiagnosticHash` 继续参与 receipt/evidence fencing，
+  仅语义比较使用 opaque `ComparisonHash`。已知执行噪声由 capability owner 归一，Core 不解析路径、语言或日志；缺省协议
+  保留历史 hash/比较规则，不跨版本合并、不迁移归档。比较结果仍只在原 SM-2 private event 的单次 CAS 内更新既有 debt。
 - owner-native observation 必须区分 passed、failed、skipped、`IncompleteChecks` 与 `OutputTruncated`。父检查 PASS 但必需
   子检查被跳过，或 transcript 不完整时，不能成为 exact native-check proof。可选 `CheckFailures` 只保留有界 check/case、
-  workspace-relative location/line 和 assertion digest；不能把诊断位置当作 root cause 或 repair target authority。
+  workspace-relative location/line 和 assertion digest；v2 另允许封闭 `ReportedAssertion` code/expected/observed shape，
+  它只表示检查自报，不是独立验收事实；无报告必须显式表示诊断不完整。不能把诊断位置当作 root cause 或 repair target authority。
   receipt/evidence hash 与 raw clone 同时绑定完整扩展；缺省扩展不改变既有记录 hash，禁止 backfill 旧归档。
 - mandatory assessment 尚未 adjudicate 时，accepted durable state receipt 不得提前清除 same-gap repair debt、active gap、
   cycle 或 no-progress provenance。若且仅若该 receipt 具有 exact current-binding CWI credit、真实 changed workspace-durable

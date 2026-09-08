@@ -214,7 +214,12 @@ capability resource state。
   validation pass 关闭比较窗口，零 CWI credit 的 durable repair 不关闭。SM-3 receipt/evidence hashes 同时绑定 owner 的有界
   check failure details、incomplete checks 与 output truncation；SM-4 fresh load/duplicate 复用原 ledger，零归档 backfill。
   rejected evidence 的 CWI 诊断归属只从 sealed binding 读取；没有 binding 的记录不猜测归属，不能补写验收 credit。
+  可选 `validation/check-failure/v2` 的比较使用 owner 提供的 opaque `ComparisonHash`，而 receipt/evidence 仍绑定精确
+  `DiagnosticHash`、协议和全部 bounded reported assertion。路径归一与测试语法只在 capability owner；Core 不解析日志。
+  未携带扩展的归档及旧比较身份保持原样，不 backfill、不跨版本猜测同一失败，不新增 repair counter 或 transition。
   `validation_failure_comparison_test.go`、Shell reference-grader tests 与既有 repair receipt/CAS/restart matrix 共同验证此边界。
+  `TestDriveRuntimeAssertionFeedbackRepairsBehaviorAcrossRestart` 以真实 File/Shell/Run 和 scripted provider 验证同一输入
+  经真实失败→诊断→实现修复→fresh validation→CWI/Result/Run 关闭，覆盖 rejected-evidence CAS 前后中断；不是真实模型求解验收。
 - validation entry authorization 与 full diagnostic scope 分离。发送 owner execution、接纳 failure receipt、确认 repair
   surface、commitment 和 fresh-load invariant 必须复用同一个 completed-dispatch scope 投影：取 exact
   admissibility snapshot/acquisition binding 的完整 catalog，不以单 operation entry 的 authorization 集合代替。

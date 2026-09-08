@@ -123,6 +123,9 @@ core 只定义 provider-neutral 分区与审计；provider 私有 cache-control 
   `failureDetailsIncomplete`/`checksTruncated` 显式表达，不能猜测 assertion 的 expected/actual。comparison fingerprint 与
   occurrences 只描述同一 Run 的失败事实，不授权 retry。C3 repair projection 只保留 sealed authority refs/surface，不展开
   `CurrentFailure`、原始诊断或 rejected operation 参数；诊断 class、owner code、环境/命令与 exit/timeout facts 只在 C4。
+- 可选 v2 failure detail 仅允许封闭的 `reportedAssertion` 与 opaque `comparisonHash`，不能透传原始 expected/actual 值；
+  shape 是检查自报诊断，不是独立验收结论。v2 只有位置/hash 仍须标记 `failureDetailsIncomplete=true`，非法扩展直接省略并
+  标记不完整；无扩展的历史请求保留原渲染字节。诊断变化不产生新 authority、permission 或 stable-prefix 变化。
 - sealed manifest 命中的 target snapshot、stage activation 与 bounded supporting fact；完整 capability/admissibility/freshness
   inventory 只供 owner-local integrity/freshness 校验，不直接展开给 provider
 - activation 中的 Soul / Skill / MCP / Memory **快照**（已在 bootstrap 封存）

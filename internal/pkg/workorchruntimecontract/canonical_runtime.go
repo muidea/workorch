@@ -217,6 +217,9 @@ type RuntimeValidationObservation struct {
 	CheckFailures           []RuntimeValidationCheckFailure `json:",omitempty"`
 	FailureDetailsTruncated bool                            `json:",omitempty"`
 	OutputTruncated         bool                            `json:",omitempty"`
+	// Optional diagnostic protocol, not a native pass/fail protocol. Empty
+	// retains the original receipt and request identity; never backfill it.
+	FailureDetailProtocolRef string `json:",omitempty"`
 	// IncompleteChecks identifies checks with skipped required subchecks. A
 	// top-level pass does not prove that all of its behavior was exercised.
 	IncompleteChecks []string `json:",omitempty"`

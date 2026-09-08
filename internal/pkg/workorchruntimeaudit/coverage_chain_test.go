@@ -32,13 +32,27 @@ func TestAuditValidationFeedbackPreservesIncompleteProofAndExactDiagnostics(t *t
 	}
 	baseline.PassedChecks, baseline.FailedChecks = nil, []string{"check-A"}
 	baseline.CheckFailures = []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: "check-A", TargetRef: "checks/a.test", Line: 47, DiagnosticHash: strings.Repeat("a", 64)}}
+	baseline.FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocolV2
+	baseline.CheckFailures[0].ComparisonHash = strings.Repeat("c", 64)
+	baseline.CheckFailures[0].ReportedAssertion = runtimecontract.RuntimeValidationReportedAssertion{Code: "shape_mismatch", ExpectedShape: "object", ObservedShape: "array"}
 	evidence := projectioncontract.RuntimeAuditEvidence{ValidationRecipeID: baseline.ValidationRecipeID, ObservationProtocolRef: baseline.ObservationProtocolRef,
-		ExecutedChecks: baseline.ExecutedChecks, FailedChecks: baseline.FailedChecks, CheckFailures: baseline.CheckFailures}
+		FailureDetailProtocolRef: baseline.FailureDetailProtocolRef,
+		ExecutedChecks:           baseline.ExecutedChecks, FailedChecks: baseline.FailedChecks, CheckFailures: baseline.CheckFailures}
 	receipt := runtimeOperationReceipt(baseline)
+	if err := receipt.Evidence.Validation.ValidateFailureDetails(); err != nil {
+		t.Fatal(err)
+	}
 	if !sameValidationObservation(receipt.Evidence.Validation, evidence) {
 		t.Fatal("identical receipt/evidence diagnostics differ")
 	}
 	for name, mutate := range map[string]func(*projectioncontract.RuntimeAuditEvidence){
+		"detail protocol": func(e *projectioncontract.RuntimeAuditEvidence) { e.FailureDetailProtocolRef = "" },
+		"comparison": func(e *projectioncontract.RuntimeAuditEvidence) {
+			e.CheckFailures[0].ComparisonHash = strings.Repeat("d", 64)
+		},
+		"reported assertion": func(e *projectioncontract.RuntimeAuditEvidence) {
+			e.CheckFailures[0].ReportedAssertion.ObservedShape = "null"
+		},
 		"location":         func(e *projectioncontract.RuntimeAuditEvidence) { e.CheckFailures[0].Line++ },
 		"omitted details":  func(e *projectioncontract.RuntimeAuditEvidence) { e.CheckFailures = nil },
 		"partial details":  func(e *projectioncontract.RuntimeAuditEvidence) { e.FailureDetailsTruncated = true },

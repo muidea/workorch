@@ -1448,6 +1448,13 @@ export type RuntimeValidationCheckFailure = {
   targetRef?: string;
   line?: number;
   diagnosticHash: string;
+  comparisonHash?: string;
+  // Diagnostic report only; this does not attest acceptance or authorize repair.
+  reportedAssertion?: {
+    code: string;
+    expectedShape: string;
+    observedShape: string;
+  };
 };
 
 // CoverageWorkItemIds here are already SM-2-derived ledger credit. Candidate
@@ -1478,6 +1485,7 @@ export type RuntimeAuditEvidence = {
   skippedChecks?: string[];
   incompleteChecks?: string[];
   checkFailures?: RuntimeValidationCheckFailure[];
+  failureDetailProtocolRef?: string;
   failureDetailsTruncated?: boolean;
   outputTruncated?: boolean;
 };
@@ -1503,6 +1511,7 @@ export type RuntimeAuditOperationReceipt = {
   skippedChecks?: string[];
   incompleteChecks?: string[];
   checkFailures?: RuntimeValidationCheckFailure[];
+  failureDetailProtocolRef?: string;
   failureDetailsTruncated?: boolean;
   outputTruncated?: boolean;
 };

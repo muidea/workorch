@@ -68,8 +68,11 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
   protocol 或终态。
 - 原始 stdout/stderr、secret 和自由文本 diagnostic 不得进入 Runtime authority；公开 diagnostic 必须有界、脱敏。
 - managed native check 的 failure feedback 从同一 JSON event 关联 check/case 与 assertion location，仅对 sealed validation
-  scope 内的唯一相对路径发布 `CheckFailures`（最多 32 项，超限显式标记）。assertion 内容只保留 digest，不导出原始
-  expected/actual；passing check 的日志不能成为另一个 failed check 的诊断。父检查 PASS 但子检查 skip 时发布
+  scope 内的唯一相对路径发布 `CheckFailures`（最多 32 项，超限显式标记）。assertion 正文不导出，`DiagnosticHash` 保留
+  精确正文身份；新失败附带可选 `validation/check-failure/v2` 诊断协议，`ComparisonHash` 只归一本 owner 当前 scratch
+  前缀及其中 Go testing 自动生成的目录后缀，不抹掉任意临时路径、文件名或断言值。旧回执及 v1 digest 不改写。
+  只有 exact package/case 的 native fail 才可附带 `ReportedAssertion`；passing/skipped case 的日志不能描述另一个失败。
+  自报的 expected/observed shape 是有界诊断而非独立事实、执行证明、通过标记或 repair authority。父检查 PASS 但子检查 skip 时发布
   `IncompleteChecks`，transcript 截断时发布 `OutputTruncated`，两者均不能满足 native-check proof。Shell 不裁决修复因果。
 - `TestReferenceValidationGraderRejectsWeakAndUnrelatedEvidence` 使用固定行为 grader 校准不同合法文件中的正确实现、不可调用/
   错误实现、静态标记、删除断言、whole/subcheck skip、依赖缺失与 A 失败/B 修改。删除断言由既有 owner declaration
@@ -84,9 +87,18 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
 `shell/go-test-json/workspace-behavior/v4`。该版本同时观测 in-process 测试与本次 Go 构建的子进程；v1 resolver 和已封存
 v1/v2/v3 observation 的原有语义不变。Resume/recovery 不根据当前默认配置升级协议。
 
-v4 的 `shell/go-test-input/conjunctive-entrypoint-test/v2` 允许 exact 补充文件中的同包具名 helper、type、const、无调用/闭包
+v4 新发布的 `shell/go-test-input/conjunctive-entrypoint-test/v3` 允许 exact 补充文件中的同包具名 helper、type、const、无调用/闭包
 初始化的 var，仍拒绝 init、TestMain、method、额外 Test 定义与不可达的 testing.T 断言。旧输入只被重新检查，不被改写；
 原检查和补充检查仍是 all-of。结构无效或语义证据不足不授权改写判据，也不自动扩大 File repair surface。
+
+新增输入内容合同可以声明可选失败报告语法：实际 testing.T 断言失败时，在独立一行输出
+`WORKORCH_ASSERTION_V1 code=shape_mismatch expected=object observed=array`。必须精确四个有序 token；封闭 code/shape 配对
+由 shared typed DTO 校验，不接受额外正文、实际值或秘密。缺失/无效报告保留位置与 digest，并由 LLM 标记诊断不完整；
+不为补诊断改写已有测试，也不把报告语法纳入 native pass/fail 判据。旧 single-test v1 / entrypoint v2 内容合同保持封存，
+新声明分别为 v2 / v3 并进入 owner catalog revision，不能从新配置重建旧 authority。
+`TestStdioEnvelopeReferenceGraderCalibration` 校准固定真实进程的正例、错误 result/framing/id、缺失工具、marker-only 和
+comment-only 反例；`TestShellAssertionComparisonUsesRealManagedTemporaryPaths` 校准真实两次执行的精确 digest 不同而比较
+身份相同。它们不是完整 MCP 或五语言验收器，也不提供 release DCE 证据。
 
 v4 对 exact bound supplement 的编译失败另发布最多 8 项 `InputLocations`（相对路径、行、列、封闭 code/symbol），
 它们是诊断而非 writable target。仅当实际 compiler 的全部相关错误均为同一文件中的 undefined ASCII identifier，且

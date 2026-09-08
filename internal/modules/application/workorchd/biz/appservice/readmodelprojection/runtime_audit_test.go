@@ -2,12 +2,44 @@ package readmodelprojection
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestMapRuntimeAuditPreservesDiagnosticProtocolWithoutCreditOrMutation(t *testing.T) {
+	observation := &runtimecontract.RuntimeValidationObservation{RecipeID: "recipe", ObservationProtocolRef: "owner/checks/v1",
+		FailedChecks: []string{"check"}, FailureDetailProtocolRef: runtimecontract.RuntimeValidationFailureDetailProtocolV2,
+		CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: "check", TargetRef: "checks/input.test", Line: 12,
+			DiagnosticHash: strings.Repeat("a", 64), ComparisonHash: strings.Repeat("c", 64),
+			ReportedAssertion: runtimecontract.RuntimeValidationReportedAssertion{Code: "shape_mismatch", ExpectedShape: "object", ObservedShape: "array"}}}}
+	state := runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{Evidence: runtimecontract.EvidenceLedger{
+		Rejected: []runtimecontract.EvidenceFact{{ID: "failed", Kind: runtimecontract.EvidenceKindValidation, Validation: observation}},
+	}}, OperationReceipts: []runtimecontract.RuntimeOperationReceipt{{ExecutionKey: "execution", OperationID: "validate",
+		Outcome: runtimecontract.RuntimeOperationOutcomeRejected, Evidence: runtimecontract.RuntimeOperationEvidence{Validation: observation}}}}
+	before, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := mapRuntimeAudit(&state)
+	if audit == nil || len(audit.RejectedEvidence) != 1 || len(audit.OperationReceipts) != 1 || len(audit.AcceptedEvidence) != 0 {
+		t.Fatal("readmodel lost failed receipt or invented credit")
+	}
+	fact, receipt := audit.RejectedEvidence[0], audit.OperationReceipts[0]
+	if fact.FailureDetailProtocolRef != observation.FailureDetailProtocolRef || receipt.FailureDetailProtocolRef != observation.FailureDetailProtocolRef ||
+		!reflect.DeepEqual(fact.CheckFailures, observation.CheckFailures) || !reflect.DeepEqual(receipt.CheckFailures, observation.CheckFailures) || len(fact.CoverageWorkItemIDs) != 0 {
+		t.Fatal("audit changed owner diagnostic facts or attributed acceptance")
+	}
+	fact.CheckFailures[0].ReportedAssertion.ObservedShape = "null"
+	receipt.CheckFailures[0].ComparisonHash = "reader mutation"
+	after, err := json.Marshal(state)
+	if err != nil || string(before) != string(after) {
+		t.Fatal("projection reader mutated authoritative source")
+	}
+}
 
 func TestMapRuntimeAuditExposesSealedVersionsWithoutGuidanceOrCatalogLookup(t *testing.T) {
 	soul := runtimecontract.RuntimeSoulContext{ID: "soul-sealed", Revision: 3, ContentHash: "sealed-content", SourceProvenance: "builtin/previous", Instructions: "private-guidance-sentinel"}

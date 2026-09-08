@@ -31,6 +31,11 @@ core verifier 只验证：
 
 core verifier 不验证 software-dev 特定文件、语言、测试命令、目录或业务 DoD；这些属于 profile verifier。
 
+`make test` / `make test-race` 与 managed CI 共用 Makefile 的包级超时 `GOTEST_TIMEOUT=15m`，可由调用方覆盖；
+managed 脚本通过 `go-test-timeout` 读取同一声明，保留原有 caller flags/package 参数解析和显式 timeout override。
+完整 file-backed 恢复矩阵使用同一明确测试进程上限；`GOTEST_FLAGS` / managed package filter 仍须原样传递。
+测试超时只限制 harness 进程，不得修改 Runtime 的 repair、no-progress、provider 或 Profile budget，也不减少验收场景。
+
 `scripts/state-transition-owners.manifest` 是唯一 verification-only owner/dispatcher 清单。它必须显式列出 SM-1～SM-4
 以及每个 `*_internal_event.go` / `*_internal_events.go` / `internal_event.go` owner-private transition、transaction、effect、audit 或 derived
 projection gate；owner root、private-event file 与 dispatcher 必须都位于同一组件 `biz/`。新增内部事件文件但未归属、
@@ -134,6 +139,10 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   typed status + 不同 capability-private code/prefix，以及未知 typed status，证明私有码不改变 failure/repair/retry/governance/
   terminal，未知 status fail closed；静态扫描必须拒绝 reducer 引用 concrete capability owner 常量或其 diagnostic prefix；
 - provider-safe correction projection 与 audit-safe original diagnostic 分开生成，互不覆盖；
+- 可选 failed-check diagnostic v2 必须覆盖原始/比较身份分离、unsafe/缺失报告、省略扩展的历史 JSON/hash 精确保留、
+  全字段 tamper、clone/投影隔离和最终 provider C4 bytes。重复失败只在 SM-2 原 rejected-receipt CAS 更新已有 debt；
+  pre/post-CAS、duplicate/fresh-worker replay 不增加 effect/provider/debt，也不能把诊断或零 credit 修复当作验收进度。
+  固定参考 grader 的正反例和 scripted-provider 联合主线仅校准各自合同，不得替代 deployed release DCE producer。
 - parameter-entry malformed corpus 必须覆盖 fixed declared parameter 被内嵌为 sibling 的聚合识别，以及 undeclared、wrong-type、
   duplicate/mixed ambiguity 不获得 re-encode authority；diagnostic/C4/aggregate 只保留 index/kind/name/type，不保留原值；
 - operation `ValueRules` matrix 必须覆盖 operation/variant declaration、非空/范围/布尔/不同值/有序关系、重复或冲突 catalog、

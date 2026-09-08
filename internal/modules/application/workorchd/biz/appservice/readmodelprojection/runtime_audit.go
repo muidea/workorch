@@ -90,6 +90,7 @@ func runtimeAuditEvidence(values []runtimecontract.EvidenceFact) []projectioncon
 			observation := value.Validation.Normalized()
 			item.ValidationRecipeID = observation.RecipeID
 			item.ObservationProtocolRef = observation.ObservationProtocolRef
+			item.FailureDetailProtocolRef = observation.FailureDetailProtocolRef
 			item.ExecutedChecks = append([]string(nil), observation.ExecutedChecks...)
 			item.PassedChecks = append([]string(nil), observation.PassedChecks...)
 			item.FailedChecks = append([]string(nil), observation.FailedChecks...)
@@ -335,6 +336,7 @@ func runtimeAuditOperationReceipts(values []runtimecontract.RuntimeOperationRece
 			observation := value.Evidence.Validation.Normalized()
 			item.ValidationRecipeID = observation.RecipeID
 			item.ObservationProtocolRef = observation.ObservationProtocolRef
+			item.FailureDetailProtocolRef = observation.FailureDetailProtocolRef
 			item.ExecutedChecks = append([]string(nil), observation.ExecutedChecks...)
 			item.PassedChecks = append([]string(nil), observation.PassedChecks...)
 			item.FailedChecks = append([]string(nil), observation.FailedChecks...)

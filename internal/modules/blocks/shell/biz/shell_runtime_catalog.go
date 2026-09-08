@@ -115,6 +115,7 @@ func (a *RuntimeAdapter) runtimeAdmissibilityPolicyRevision() string {
 	h := sha256.New()
 	_, _ = fmt.Fprintf(h, "contract=shell-policy-v3;timeout=%s;input-contract=%s;input-requirements=%s;", a.timeout, shellSupplementContentContractRef, shellSupplementContentRequirements)
 	_, _ = fmt.Fprintf(h, "entrypoint-contract=%s;entrypoint-requirements=%s;protocol=%s;process-files=%d;", shellEntrypointContentContractRef, shellEntrypointContentRequirements, shellGoEntrypointObservationProtocolRef, maxShellProcessCoverageFiles)
+	_, _ = fmt.Fprintf(h, "failure-details=%s;failure-requirements=%s;", runtimemodel.RuntimeValidationFailureDetailProtocolV2, shellAssertionFeedbackRequirements)
 	for _, key := range keys {
 		_, _ = fmt.Fprintf(h, "env=%s;", key)
 	}

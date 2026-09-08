@@ -20,7 +20,7 @@ func TestSupplementContentContractAndFreshReadinessAgreeWithoutReplacementPrepar
 	if addition.Validate() != nil || addition.ContentContractRef != shellSupplementContentContractRef {
 		t.Fatal("missing bounded owner content contract")
 	}
-	for _, phrase := range []string{"top-level", "helper", "const", "var", "type", "init", "TestMain", "originalNativeCheckRef", "subprocess", "not solely in helper closures"} {
+	for _, phrase := range []string{"top-level", "helper", "const", "var", "type", "init", "TestMain", "originalNativeCheckRef", "subprocess", "not solely in helper closures", "WORKORCH_ASSERTION_V1", "diagnostic-incomplete", "never proves execution or pass"} {
 		if !strings.Contains(addition.ContentRequirements, phrase) {
 			t.Fatalf("content contract omits %q", phrase)
 		}

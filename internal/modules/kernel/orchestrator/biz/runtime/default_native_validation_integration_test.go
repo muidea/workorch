@@ -249,7 +249,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 			}
 			diagnostic := response.Receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic
 			addition := diagnostic.InputAddition
-			if addition.ContentContractRef != "shell/go-test-input/conjunctive-entrypoint-test/v2" {
+			if addition.ContentContractRef != "shell/go-test-input/conjunctive-entrypoint-test/v3" {
 				t.Fatalf("default adapter did not publish the versioned entrypoint input contract: %+v", addition)
 			}
 			convergence := focus.ValidationFailureRepairConvergence

@@ -1740,6 +1740,36 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 				}
 			}
 		}
+		// New diagnostic facts are volatile and explicit. An old location/hash
+		// record above must retain its exact rendering rather than be backfilled.
+		failed.Validation.FailureDetailProtocolRef = runtimecontract.RuntimeValidationFailureDetailProtocolV2
+		failed.Validation.CheckFailures[0].ComparisonHash = strings.Repeat("c", 64)
+		for _, complete := range []bool{false, true} {
+			if complete {
+				failed.Validation.CheckFailures[0].ReportedAssertion = runtimecontract.RuntimeValidationReportedAssertion{
+					Code: "shape_mismatch", ExpectedShape: "object", ObservedShape: "array",
+				}
+			}
+			feedbackContext.Evidence.Rejected[0] = failed
+			rendered, renderErr := runtimeProviderRequest(llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations,
+				Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: feedbackContext})
+			if renderErr != nil {
+				t.Fatal(renderErr)
+			}
+			for i := 0; i < 4; i++ {
+				if rendered.PromptContext.Sections[i].Content != withFeedback.PromptContext.Sections[i].Content {
+					t.Fatalf("diagnostic extension changed C%d", i)
+				}
+			}
+			newTail := rendered.PromptContext.Sections[4].Content
+			if !strings.Contains(newTail, `"failureDetailProtocolRef":"validation/check-failure/v2"`) ||
+				!strings.Contains(newTail, fmt.Sprintf(`"failureDetailsIncomplete":%t`, !complete)) {
+				t.Fatalf("diagnostic completeness lost: %s", newTail)
+			}
+			if complete && (!strings.Contains(newTail, `"reportedAssertion"`) || !strings.Contains(newTail, `"expectedShape":"object"`) || !strings.Contains(newTail, `"observedShape":"array"`)) {
+				t.Fatal("safe reported assertion missing from actual provider request")
+			}
+		}
 		failed.Validation.CheckFailures = nil
 		feedbackContext.Evidence.Rejected[0] = failed
 		missing := runtimeCurrentValidationFailure(feedbackContext)

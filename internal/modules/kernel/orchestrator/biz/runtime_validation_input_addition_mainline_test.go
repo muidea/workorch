@@ -65,6 +65,21 @@ type validationInputMainlineOptions struct {
 	InvalidSupplement bool
 	Entrypoint        bool
 	CompileRepair     bool
+	BehaviorRepair    bool
+}
+
+func TestDriveRuntimeAssertionFeedbackRepairsBehaviorAcrossRestart(t *testing.T) {
+	var baseline int64
+	for _, cut := range []string{"uninterrupted", "before_behavior_failure", "after_behavior_failure", "after_fresh_validation"} {
+		t.Run(cut, func(t *testing.T) {
+			calls := runValidationInputAdditionMainline(t, cut, validationInputMainlineOptions{Entrypoint: true, BehaviorRepair: true})
+			if cut == "uninterrupted" {
+				baseline = calls
+			} else if calls != baseline {
+				t.Fatalf("failure feedback restart consumed another provider call: %d != %d", calls, baseline)
+			}
+		})
+	}
 }
 
 func TestDriveRuntimeValidationInputCompileRepairPreservesCriteriaAcrossRestart(t *testing.T) {
@@ -114,6 +129,19 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 	bootstrap := validationInputAdditionMainlineBootstrap()
 	if mode.Entrypoint {
 		bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = shellcommon.ValidationRecipeAdapterProjectEntrypoint
+	}
+	if mode.BehaviorRepair {
+		convergence := bootstrap.DefinitionFocuses[1].ValidationFailureRepairConvergence.Clone()
+		convergence.MaxAttempts = 2 // one input acquisition, one implementation repair
+		route := convergence.Routes[0].Clone()
+		route.ID, route.RequireInputAddition = "test-failure-to-file-edit", false
+		route.TriggerDiagnosticClass, route.TriggerEvidenceTargetType, route.TriggerOwnerDiagnosticCode = runtimecontract.ValidationDiagnosticTestFailed, runtimecontract.ValidationEvidenceTargetBehaviorEvidence, "test_failed"
+		route.RepairOperationKinds, route.RepairTargetPolicy = []string{runtimecontract.StepKindFileEdit}, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope
+		route.RepairTargetRole, route.RepairOperationTargetSelectorRef = "deliverable_implementation", "workspace-relative-existing-file-target"
+		convergence.Routes = append(convergence.Routes, route)
+		bootstrap.DefinitionFocuses[1].ValidationFailureRepairConvergence = &convergence
+		bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].ValidationFailureRepairConvergence = &convergence
+		bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
 	}
 	if mode.CompileRepair {
 		bootstrap.Definition.CapabilityContract = append(bootstrap.Definition.CapabilityContract, runtimecontract.RuntimeBlockKindPatchApply)
@@ -217,6 +245,7 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 	var freshValidation runtime.RuntimeAggregate
 	var inputBeforeRepair string
 	var observedInputRepair *runtimecontract.RuntimeValidationInputRepair
+	var behaviorRepairs int
 	llm := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llm.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls.Add(1)
@@ -246,8 +275,28 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 		case runtimecontract.ConvergenceStateNeedStateChange:
 			operation := runtimecontract.RuntimeOperation{ID: "source-change", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"subject.go"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}}
 			oldText, newText := "return 2", "return 4"
+			if mode.BehaviorRepair {
+				newText = "return 3" // real implementation defect, not a grader defect
+			}
 			operation.Parameters = []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}
-			if coverageID == "cwi-2" && mode.CompileRepair && command.CandidateManifest.Operations[0].InputRepair != nil {
+			if coverageID == "cwi-2" && mode.BehaviorRepair && command.CandidateManifest.Operations[0].Kind == runtimecontract.StepKindFileEdit {
+				behaviorRepairs++
+				operation.ID = "repair-behavior"
+				oldText, newText = "return 3", "return 4"
+				seen := false
+				for _, fact := range command.CandidateContext.Evidence.Rejected {
+					if fact.Validation == nil || len(fact.Validation.CheckFailures) == 0 {
+						continue
+					}
+					detail := fact.Validation.CheckFailures[0]
+					seen = fact.Validation.FailureDetailProtocolRef == runtimecontract.RuntimeValidationFailureDetailProtocolV2 &&
+						detail.CheckRef == addition.NativeCheckRef && detail.TargetRef == addition.TargetRef && detail.ComparisonHash != "" &&
+						detail.ReportedAssertion.Code == "value_mismatch" && len(fact.CoverageWorkItemIDs) == 0
+				}
+				if !seen {
+					t.Error("real failed assertion did not reach the candidate as uncredited owner facts")
+				}
+			} else if coverageID == "cwi-2" && mode.CompileRepair && command.CandidateManifest.Operations[0].InputRepair != nil {
 				observedInputRepair = command.CandidateManifest.Operations[0].InputRepair.Clone()
 				if observedInputRepair.TargetRef != addition.TargetRef || len(observedInputRepair.Corrections) != 1 {
 					t.Error("input repair not tied to original supplemental input")
@@ -269,6 +318,9 @@ func assertDelivery(t *testing.T) {
 }
 func %s(t *testing.T) { assertDelivery(t) }
 `, addition.NativeCheckRef)
+				}
+				if mode.BehaviorRepair {
+					content = strings.ReplaceAll(content, "wrong delivered behavior", "WORKORCH_ASSERTION_V1 code=value_mismatch expected=equal observed=different")
 				}
 				if addition.ContentContractRef == "" || addition.ContentRequirements == "" {
 					t.Error("supplement generation lost the receiving owner's content contract")
@@ -292,7 +344,9 @@ func %s(t *testing.T) { assertDelivery(t) }
 				if loadErr != nil {
 					t.Errorf("reload fresh validation: %v", loadErr)
 				}
-				freshValidation = current
+				if !mode.BehaviorRepair || freshValidation.StateRevision == 0 {
+					freshValidation = current
+				}
 			}
 			candidate = runtimeManagedShellValidationCandidate("validate-behavior", coverageID, focus.TargetRefs[0], "behavior-validation")
 		case runtimecontract.ConvergenceStateNeedAssessment:
@@ -311,7 +365,15 @@ func %s(t *testing.T) { assertDelivery(t) }
 	module := newRuntimeDriveTestModule(t, hub)
 	command := orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}
 	if cut != "uninterrupted" {
-		crash := &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: cut != "before_repair_seal" && cut != "before_input_repair_seal", marker: cut, match: func(aggregate runtime.RuntimeAggregate) bool {
+		crash := &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: cut != "before_repair_seal" && cut != "before_input_repair_seal" && cut != "before_behavior_failure", marker: cut, match: func(aggregate runtime.RuntimeAggregate) bool {
+			if cut == "before_behavior_failure" || cut == "after_behavior_failure" {
+				for _, fact := range aggregate.Facts.Evidence.Rejected {
+					if fact.Validation != nil && len(fact.Validation.CheckFailures) != 0 {
+						return true
+					}
+				}
+				return false
+			}
 			if cut == "before_input_repair_seal" || cut == "after_input_repair_seal" {
 				return aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.RepairCommitment != nil && aggregate.ActiveDispatch.RepairCommitment.InputRepair != nil
 			}
@@ -434,6 +496,12 @@ func %s(t *testing.T) { assertDelivery(t) }
 	wantRejected, wantChanges := 1, 1
 	if mode.CompileRepair {
 		wantRejected, wantChanges = 2, 2
+	}
+	if mode.BehaviorRepair {
+		wantRejected = 2
+		if behaviorRepairs != 1 {
+			t.Fatal("feedback did not produce exactly one implementation repair")
+		}
 	}
 	if acceptedValidation != wantAccepted || rejectedValidation != wantRejected || createdInputs != wantChanges || addition.TargetRef == "" {
 		t.Fatalf("unexpected effect/validation counts: accepted=%d rejected=%d input=%d addition=%+v", acceptedValidation, rejectedValidation, createdInputs, addition)

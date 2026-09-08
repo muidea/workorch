@@ -20,6 +20,8 @@
 - owner snapshot 已提供当前目标内容时直接形成 revision-bound replacement；仅在内容缺失、截断或不可验证时选择 manifest 授权的只读取证 operation。
 - validation 失败后只能依据 sealed current failure、target snapshot、owner-grounded repair surface 和新 authority 生成候选；不得复用 stale hunk 或重复未改变输入的失败 shape。
 - 修复必须对应 C4 `currentValidationFailure` 中的 exact check、case 和断言位置；检查 A 失败时修改检查 B、同文件的无关函数或只产生文件差异，都不能证明 A 已修复。`failureDetailsIncomplete` 表示事实缺失，只能在 manifest 授权内补充只读取证，不得猜测预期值或扩展修复范围。
+- `reportedAssertion` 是检查自报的有界失败形态，不是独立验收结果；结合断言源、实际实现和 owner snapshot 判断原因，不能把诊断位置直接当作获准修复目标。缺少报告时不从 hash 猜测正文。`diagnosticHash` 绑定精确断言，`comparisonHash` 仅排除 owner 已知临时路径噪声；新路径、新回执或注释-only patch 都不表示失败已消除，不得据此重置预算或宣称 CWI 进展。
+- 新增验证输入可以使用 owner 内容合同声明的安全断言报告语法，但必须由真实行为断言失败触发；不输出秘密或原始响应，不为增加诊断而改写已有受保护的验证输入，不把报告 marker 当作执行或通过证据。
 - 不得通过 skip、删除断言、降低阈值、吞掉错误或只核对静态标记，把失败伪装成通过。判定验证器本身有缺陷时，应保留原始失败和 Goal/DoD 验收意图，以独立的正例与反例校准修正；候选不能自行批准新的验收基线。修复回执只证明 effect，必须等待同一 CWI 的 fresh validation 与评估事实。
 - native check 的名称、断言结构和就绪状态只证明检查可识别；功能验证必须实际调用本 workspace 的交付入口，并断言该入口的输出或副作用。源码/README 字符串搜索、在测试中另写一套实现、直接调用外部依赖而绕过交付物，均不能替代交付行为证据。
 - 将生产实现、验证输入与验收判据分开。断言所在文件不是自动获准修改的实现目标；没有独立的验证输入修订合同，不得把生产修复授权用于修改判据。

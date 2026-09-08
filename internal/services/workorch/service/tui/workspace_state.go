@@ -1230,6 +1230,7 @@ func runtimeAuditEvidenceEqual(a, b projectioncontract.RuntimeAuditEvidence) boo
 		a.FailureClass == b.FailureClass && a.FailureCode == b.FailureCode && a.FailureSignature == b.FailureSignature &&
 		a.Quality == b.Quality && a.ZeroWork == b.ZeroWork && a.EvidenceReason == b.EvidenceReason &&
 		a.ValidationRecipeID == b.ValidationRecipeID && a.ObservationProtocolRef == b.ObservationProtocolRef &&
+		a.FailureDetailProtocolRef == b.FailureDetailProtocolRef &&
 		stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs) && stringSliceEqualDisplay(a.BindingRefs, b.BindingRefs) &&
 		stringSliceEqualDisplay(a.CoverageWorkItemIDs, b.CoverageWorkItemIDs) && stringSliceEqualDisplay(a.EvidenceRefs, b.EvidenceRefs) &&
 		stringSliceEqualDisplay(a.EvidenceTags, b.EvidenceTags) && stringSliceEqualDisplay(a.ExecutedChecks, b.ExecutedChecks) &&
@@ -1244,6 +1245,7 @@ func runtimeAuditOperationReceiptEqual(a, b projectioncontract.RuntimeAuditOpera
 		a.FeedbackDomain == b.FeedbackDomain && a.StableCategory == b.StableCategory &&
 		reflect.DeepEqual(a.OriginalDiagnostic, b.OriginalDiagnostic) && a.ValidationRecipeID == b.ValidationRecipeID &&
 		a.ObservationProtocolRef == b.ObservationProtocolRef &&
+		a.FailureDetailProtocolRef == b.FailureDetailProtocolRef &&
 		stringSliceEqualDisplay(a.TargetRefs, b.TargetRefs) &&
 		stringSliceEqualDisplay(a.EvidenceRefs, b.EvidenceRefs) && stringSliceEqualDisplay(a.EvidenceTags, b.EvidenceTags) &&
 		stringSliceEqualDisplay(a.ExecutedChecks, b.ExecutedChecks) && stringSliceEqualDisplay(a.PassedChecks, b.PassedChecks) &&
