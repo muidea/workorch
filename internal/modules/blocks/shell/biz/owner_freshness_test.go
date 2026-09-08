@@ -401,6 +401,10 @@ func TestShellOwnerAdmissibilityPublishesManifestPrerequisiteBeforeValidationIsR
 		t.Fatalf("manifest-prerequisite validation inventory = %+v surface=%+v found=%t", waiting, waitingSurface, found)
 	}
 
+	// The owner manifest must describe actual sources. Unreadable sources are
+	// unavailability, not proof that a new native check alone would suffice.
+	writeNativeStructureSource(t, workspace, "main.go", "package main\n")
+	writeNativeStructureSource(t, workspace, "main_test.go", "package main\n")
 	nativeMissing := acquire("admissibility-shell-ready-input-missing-native", "tree-with-module-and-tests", []string{"go.mod", "main.go", "main_test.go"})
 	nativeMissingSurface, found := shellValidationSurfaceForTest(nativeMissing.ValidationSurfaces, recipe.ID)
 	if !found || nativeMissingSurface.Readiness != runtimecontract.RuntimeValidationSurfaceReady ||

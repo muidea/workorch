@@ -87,7 +87,7 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 	if ownerCode == "validation_workspace_behavior_unobserved" && len(request.ValidationCheckAttestations) == 1 {
 		check := request.ValidationCheckAttestations[0]
 		if check.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef && check.SupplementalNativeCheckRef == "" {
-			diagnostic.InputAddition = runtimemodel.RuntimeValidationInputAddition{RequiredCheckRef: check.RequiredCheckRef, OriginalNativeCheckRef: check.NativeCheckRef, NativeCheckRef: shellSupplementCheckRef(check.NativeCheckRef), TargetRef: shellSupplementTargetRef(check.NativeCheckRef)}
+			diagnostic.InputAddition = shellValidationInputAddition(check)
 		}
 	}
 	output.ValidationFailureDiagnostic = diagnostic

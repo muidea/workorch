@@ -252,6 +252,9 @@ func ResolveRuntimeOwnerFactAcquisition(requirements []RuntimeOwnerFactRequireme
 	ready := make([]RuntimeOwnerFactConvergence, 0, len(missing))
 	for _, requirement := range missing {
 		value, found := byRequirement[RuntimeOwnerFactRequirementRef(requirement)]
+		if RuntimeOwnerFactHasUnavailableValidationProof(requirement, catalogs) {
+			return RuntimeOwnerFactConvergence{}, false
+		}
 		if !found || value.RequirePreexisting || value.MaxAcquisitionAttempts != 1 {
 			// A missing preexisting-only postcondition is definition drift, not
 			// authority to execute some other acquisition.

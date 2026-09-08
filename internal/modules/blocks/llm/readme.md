@@ -93,6 +93,9 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
   current validation failure 的 receipt/check/case/location/digest、环境/exit/timeout facts 和 missing/truncated 标记；该
   receipt 不受 recent-history 四项窗口裁剪。raw logs、自由诊断与 expected/actual 内容不进入 provider。comparison count
   是只读事实，不授权模型选择 retry、next focus 或 terminal；最终 rendered request 回归必须证明 C0～C2 bytes/hash 不漂移。
+- 验证输入补充的 owner-authored `contentContractRef + contentRequirements` 与 exact target/native identity 一起由既有 typed
+  projection 保留：semantic repair 放入 C3，operations 当前失败放入 C4；不另按语言推导规则，不改 C0～C2。
+  LLM 只生成 proposal，不能把输入结构声明、File 创建成功或 owner unavailability 解释为已验证/可再补充。
 - streaming configured timeout只表示header/body idle interval并随正数wire read重置；独立hard/caller deadline保持整次调用有界。
   body idle 与hard deadline返回不同typed transport identity，保留submitted/response bytes且丢弃partial payload/usage；adapter
   不据此发起第二次physical call。

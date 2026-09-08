@@ -119,6 +119,11 @@ check must match the rejected binding, and the proposal must name only the owner
 its receipt gives no DoD credit. Fresh Shell v3 binding requires the original and supplemental checks together, including real
 workspace implementation observation. Missing/mismatched input contracts and an ineffective existing supplement terminate
 boundedly; they do not open repeated input additions. Input compilation errors do not authorize editing original assertions.
+The addition also carries the owner's bounded `contentContractRef + contentRequirements`; filename/check identity alone is
+insufficient. The current Go adapter permits only imports and the exact supplemental test at file scope, with supporting
+constants, variables, types and closures local to that test. Existing invalid inputs become per-CWI owner unavailability, not
+another preparable path or hypothetical `would_satisfy`. SM-2 closes before another provider call and preserves the exact cause
+through Result delivery; neither Soul guidance nor file creation is validation proof.
 The current adapter publishes this addition only for a single native attestation; broader input/toolchain contracts need an
 explicit extension. Template identity and Runtime core remain language-neutral; this does not claim general multilingual or
 arbitrary-Goal trusted-grader support.

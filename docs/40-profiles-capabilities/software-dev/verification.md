@@ -85,6 +85,12 @@ and converges through the same neutral Runtime owner model. It must not make leg
   close the new proof. An ineffective supplement or compilation failure in its input cannot open repeated input additions or
   implementation edits of assertions. `TestValidationInputAdditionOwnerFactIsBoundedAndRestartStable` and
   `TestValidationInputSupplementRequiresOriginalAndDeliveryBehavior` cover owner-state and real Go negative cases;
+- `TestDriveRuntimeValidationInputAdditionPreservesHistoricalAssessment` and
+  `TestDriveRuntimeInvalidSupplementClosesBeforeAnotherAcquisition` exercise real File/Shell and file-backed Run/Result/Workspace
+  owners through the full drive: valid inline input reaches fresh validation, while invalid existing supplemental declarations
+  retain the exact Shell diagnostic and terminate with no second acquisition/provider call or validation credit. Crash cuts at
+  input receipt and unavailability terminal, duplicate drive and stale/missing/altered owner-cause records must preserve the
+  original inputs, budgets, historical assessment preimage and Result→Workspace→Run acknowledgements;
 - `TestBuiltinSoftwareDevAllManagedCWIsCloseThroughTypedNativeProofPipeline/create_only_conjunctive_input` checks the actual
   default Profile tuple, typed Shell diagnostic, File-created supplemental input, fresh Shell observation and SM-2 matcher.
   It is fixed-fixture protocol calibration, not evidence that a deployed user Goal has completed;

@@ -1133,6 +1133,11 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 					return fmt.Errorf("runtime validation surface %q proof preparation catalog revision mismatch", surface.ID)
 				}
 			}
+			for _, unavailable := range surface.ProofRequirementUnavailabilities {
+				if unavailable.OriginalDiagnostic == nil || unavailable.OriginalDiagnostic.ObservedRevision != a.ObservedRevision {
+					return fmt.Errorf("runtime validation surface %q proof unavailability catalog revision mismatch", surface.ID)
+				}
+			}
 		}
 		if selectable := runtimeSelectableValidationRecipeRefsCanonical(a.ValidationSurfaces); !sameStrings(selectable, a.ValidationRecipeRefs) {
 			return fmt.Errorf("runtime operation admissibility validation recipe refs do not match selectable validation surfaces")
@@ -1237,6 +1242,7 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 				writeHashString(h, StableRuntimeFeedbackHash(RuntimeFeedback{OriginalDiagnostic: preparation.OriginalDiagnostic}))
 			}
 		}
+		writeRuntimeValidationProofUnavailabilitiesHash(h, surface.ProofRequirementUnavailabilities)
 		writeHashString(h, string(surface.EffectScope))
 		writeHashString(h, string(surface.IdempotencyClass))
 	}

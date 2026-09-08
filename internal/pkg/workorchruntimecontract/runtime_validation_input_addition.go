@@ -15,6 +15,10 @@ type RuntimeValidationInputAddition struct {
 	OriginalNativeCheckRef string `json:"originalNativeCheckRef"`
 	NativeCheckRef         string `json:"nativeCheckRef"`
 	TargetRef              string `json:"targetRef"`
+	// Owner-authored, provider-safe content contract. Core binds and forwards
+	// these values; only the validation owner interprets/enforces their syntax.
+	ContentContractRef  string `json:"contentContractRef,omitempty"`
+	ContentRequirements string `json:"contentRequirements,omitempty"`
 }
 
 func (v RuntimeValidationInputAddition) Normalized() RuntimeValidationInputAddition {
@@ -22,6 +26,8 @@ func (v RuntimeValidationInputAddition) Normalized() RuntimeValidationInputAddit
 	v.OriginalNativeCheckRef = strings.TrimSpace(v.OriginalNativeCheckRef)
 	v.NativeCheckRef = strings.TrimSpace(v.NativeCheckRef)
 	v.TargetRef = strings.TrimSpace(v.TargetRef)
+	v.ContentContractRef = strings.TrimSpace(v.ContentContractRef)
+	v.ContentRequirements = strings.TrimSpace(v.ContentRequirements)
 	return v
 }
 
@@ -34,6 +40,10 @@ func (v RuntimeValidationInputAddition) Validate() error {
 	}
 	if v.NativeCheckRef == v.OriginalNativeCheckRef || path.IsAbs(v.TargetRef) || path.Clean(v.TargetRef) != v.TargetRef || v.TargetRef == "." || v.TargetRef == ".." || strings.HasPrefix(v.TargetRef, "../") || strings.ContainsAny(v.TargetRef, "\\:") {
 		return fmt.Errorf("validation input addition must preserve the original check and identify one relative new input")
+	}
+	if (v.ContentContractRef == "") != (v.ContentRequirements == "") || len(v.ContentContractRef) > 512 || len(v.ContentRequirements) > 4096 ||
+		strings.IndexFunc(v.ContentContractRef+v.ContentRequirements, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
+		return fmt.Errorf("validation input addition requires a bounded owner content contract and requirements together")
 	}
 	return nil
 }
@@ -59,4 +69,8 @@ func writeRuntimeValidationInputAdditionHash(h interface{ Write([]byte) (int, er
 	v = v.Normalized()
 	writeHashString(h, "validation-input-addition/v1")
 	writeHashStrings(h, []string{v.RequiredCheckRef, v.OriginalNativeCheckRef, v.NativeCheckRef, v.TargetRef})
+	if v.ContentContractRef != "" || v.ContentRequirements != "" {
+		writeHashString(h, "validation-input-content-contract/v1")
+		writeHashStrings(h, []string{v.ContentContractRef, v.ContentRequirements})
+	}
 }

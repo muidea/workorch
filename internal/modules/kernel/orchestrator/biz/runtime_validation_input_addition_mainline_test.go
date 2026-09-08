@@ -45,7 +45,22 @@ func TestDriveRuntimeValidationInputAdditionPreservesHistoricalAssessment(t *tes
 	}
 }
 
-func runValidationInputAdditionMainline(t *testing.T, cut string) int64 {
+func TestDriveRuntimeInvalidSupplementClosesBeforeAnotherAcquisition(t *testing.T) {
+	var baseline int64
+	for _, cut := range []string{"uninterrupted", "after_input_receipt", "after_unavailability_terminal"} {
+		t.Run(cut, func(t *testing.T) {
+			calls := runValidationInputAdditionMainline(t, cut, true)
+			if cut == "uninterrupted" {
+				baseline = calls
+			} else if baseline != 0 && baseline != calls {
+				t.Fatalf("unavailability restart consumed provider budget: %d != %d", calls, baseline)
+			}
+		})
+	}
+}
+
+func runValidationInputAdditionMainline(t *testing.T, cut string, invalidInputs ...bool) int64 {
+	invalidSupplement := len(invalidInputs) != 0 && invalidInputs[0]
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -126,6 +141,7 @@ func runValidationInputAdditionMainline(t *testing.T, cut string) int64 {
 	t.Cleanup(func() { _ = resultOwner.Stop(ctx) })
 
 	var providerCalls atomic.Int64
+	var inputProviderCall int64
 	var addition runtimecontract.RuntimeValidationInputAddition
 	var historicalAssessment runtimecontract.RuntimeCandidateContractManifest
 	var freshValidation runtime.RuntimeAggregate
@@ -160,7 +176,14 @@ func runValidationInputAdditionMainline(t *testing.T, cut string) int64 {
 			oldText, newText := "return 2", "return 4"
 			operation.Parameters = []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}
 			if coverageID == "cwi-2" {
-				content := fmt.Sprintf("package workorch_validation\nimport (\"testing\"; subject \"example.com/workorch-runtime-native-fixture\")\nfunc %s(t *testing.T) { if subject.DeliveredValue() != 4 { t.Fatal(\"wrong delivered behavior\") } }\n", addition.NativeCheckRef)
+				content := fmt.Sprintf("package workorch_validation\nimport (\"testing\"; subject \"example.com/workorch-runtime-native-fixture\")\nfunc %s(t *testing.T) { const expected = 4; type response struct { value int }; read := func() response { return response{subject.DeliveredValue()} }; if read().value != expected { t.Fatal(\"wrong delivered behavior\") } }\n", addition.NativeCheckRef)
+				if addition.ContentContractRef == "" || addition.ContentRequirements == "" {
+					t.Error("supplement generation lost the receiving owner's content contract")
+				}
+				if invalidSupplement {
+					content += "const expected = 4\nvar fixtureValue = 4\ntype response struct { Value int }\nfunc helper() int { return expected }\n"
+				}
+				inputProviderCall = providerCalls.Load()
 				operation.ID, operation.Kind, operation.TargetRefs = "create-input-addition", runtimecontract.StepKindFileWrite, []string{addition.TargetRef}
 				operation.Parameters = []runtimecontract.OperationParameter{{Name: "content", String: &content}}
 			}
@@ -191,6 +214,9 @@ func runValidationInputAdditionMainline(t *testing.T, cut string) int64 {
 	command := orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}
 	if cut != "uninterrupted" {
 		crash := &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: cut != "before_repair_seal", marker: cut, match: func(aggregate runtime.RuntimeAggregate) bool {
+			if cut == "after_unavailability_terminal" {
+				return aggregate.Decision.Terminal != nil && aggregate.Decision.Terminal.Code == "owner_fact_convergence_exhausted"
+			}
 			if cut == "after_input_receipt" {
 				return addition.TargetRef != "" && aggregate.ActiveDispatch == nil && aggregate.Facts.Focus.ID == "semantic-pending/cwi-2" && aggregate.Facts.RepairDirective != nil && aggregate.Facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedValidation
 			}
@@ -238,7 +264,11 @@ func runValidationInputAdditionMainline(t *testing.T, cut string) int64 {
 		module = newRuntimeDriveTestModule(t, hub)
 	}
 	completed, err := module.driveRuntime(ctx, command)
-	if err != nil || completed.State != runtimecontract.ConvergenceStateComplete {
+	wantState, wantRun, wantResult, wantSatisfied := runtimecontract.ConvergenceStateComplete, common.RunStateCompleted, common.ResultStateAccepted, 2
+	if invalidSupplement {
+		wantState, wantRun, wantResult, wantSatisfied = runtimecontract.ConvergenceStateFailed, common.RunStateFailed, common.ResultStateRejected, 1
+	}
+	if err != nil || completed.State != wantState {
 		persisted, _ := module.loadRuntime(ctx, "ws-v2", "run-v2")
 		t.Fatalf("input addition did not complete: result=%+v err=%v failure=%+v semantic=%s focusTargets=%v repair=%+v", completed, err, persisted.Facts.Failure, persisted.SemanticPlanning.Phase, persisted.Facts.Focus.TargetRefs, persisted.Facts.Repair)
 	}
@@ -255,11 +285,11 @@ func runValidationInputAdditionMainline(t *testing.T, cut string) int64 {
 	if err := aggregate.Validate(); err != nil {
 		t.Fatalf("completed aggregate invariant: %v", err)
 	}
-	if persisted.State != common.RunStateCompleted || !runtimeTerminalDeliveryFullyAcknowledged(aggregate) || !reflect.DeepEqual(persisted.RuntimeBootstrap, initialRun.RuntimeBootstrap) {
+	if persisted.State != wantRun || !runtimeTerminalDeliveryFullyAcknowledged(aggregate) || !reflect.DeepEqual(persisted.RuntimeBootstrap, initialRun.RuntimeBootstrap) {
 		t.Fatalf("terminal delivery incomplete or immutable startup changed: run=%s acknowledged=%t bootstrapUnchanged=%t", persisted.State, runtimeTerminalDeliveryFullyAcknowledged(aggregate), reflect.DeepEqual(persisted.RuntimeBootstrap, initialRun.RuntimeBootstrap))
 	}
 	items, err := results.ListByRun(ctx, "run-v2")
-	if err != nil || len(items) != 1 || items[0].State != common.ResultStateAccepted || items[0].RuntimeCloseout == nil || len(items[0].RuntimeCloseout.SatisfiedCoverageWorkItemIDs) != 2 {
+	if err != nil || len(items) != 1 || items[0].State != wantResult || items[0].RuntimeCloseout == nil || len(items[0].RuntimeCloseout.SatisfiedCoverageWorkItemIDs) != wantSatisfied {
 		t.Fatalf("Result owner did not persist the judged two-CWI closeout: %+v %v", items, err)
 	}
 	workspace, err := workspaces.Get(ctx, "ws-v2")
@@ -267,6 +297,12 @@ func runValidationInputAdditionMainline(t *testing.T, cut string) int64 {
 		t.Fatalf("Workspace owner did not settle its active Run: %+v %v", workspace, err)
 	}
 	for _, item := range aggregate.Facts.Coverage {
+		if invalidSupplement && item.ID == "cwi-2" {
+			if item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+				t.Fatal("invalid supplemental input gained coverage credit")
+			}
+			continue
+		}
 		if item.State != runtimecontract.RuntimeCoverageItemStateSatisfied {
 			t.Fatalf("CWI not settled by exact evidence: %+v", item)
 		}
@@ -284,7 +320,11 @@ func runValidationInputAdditionMainline(t *testing.T, cut string) int64 {
 			createdInputs++
 		}
 	}
-	if acceptedValidation != 1 || rejectedValidation != 1 || createdInputs != 1 || addition.TargetRef == "" {
+	wantAccepted := 1
+	if invalidSupplement {
+		wantAccepted = 0
+	}
+	if acceptedValidation != wantAccepted || rejectedValidation != 1 || createdInputs != 1 || addition.TargetRef == "" {
 		t.Fatalf("unexpected effect/validation counts: accepted=%d rejected=%d input=%d addition=%+v", acceptedValidation, rejectedValidation, createdInputs, addition)
 	}
 	for path, before := range weakInputs {
@@ -296,6 +336,57 @@ func runValidationInputAdditionMainline(t *testing.T, cut string) int64 {
 	preimage, err := runtimecontract.ResolveRuntimeAssessmentPurposePreimage(aggregate.SemanticPlanning, historicalAssessment.Bindings)
 	if err != nil || preimage.SemanticManifestHash != historicalAssessment.AssessmentPurposeManifestHash {
 		t.Fatalf("historical assessment lost exact immutable preimage: %+v %v", preimage, err)
+	}
+	if invalidSupplement {
+		terminal := aggregate.Decision.Terminal
+		if terminal == nil || terminal.Code != "owner_fact_convergence_exhausted" || terminal.OriginalDiagnostic == nil ||
+			terminal.OriginalDiagnostic.OriginalCode != "native_check_supplement_contract_invalid" ||
+			!reflect.DeepEqual(terminal.OriginalDiagnostic.TargetRefs, []string{addition.TargetRef}) ||
+			!reflect.DeepEqual(items[0].RuntimeCloseout.OriginalDiagnostic, terminal.OriginalDiagnostic) {
+			t.Fatalf("bounded terminal/Result lost exact Shell cause: terminal=%+v result=%+v", terminal, items[0].RuntimeCloseout)
+		}
+		if providerCalls.Load() != inputProviderCall || freshValidation.StateRevision != 0 {
+			t.Fatalf("invalid supplement opened another provider request: %d != %d", providerCalls.Load(), inputProviderCall)
+		}
+		for _, scenario := range []string{"missing cause", "changed cause", "stale catalog", "missing owner fact", "duplicate owner fact"} {
+			t.Run(scenario, func(t *testing.T) {
+				changed := runtimeAggregateFromRecord(runtimeStateRecordFromAggregate(aggregate))
+				switch scenario {
+				case "missing cause":
+					changed.Decision.Terminal.OriginalDiagnostic = nil
+				case "changed cause":
+					changed.Decision.Terminal.OriginalDiagnostic.OriginalCode = "other"
+				default:
+					for ci := range changed.Facts.Resources.OperationAdmissibilities {
+						catalog := &changed.Facts.Resources.OperationAdmissibilities[ci]
+						for si := range catalog.ValidationSurfaces {
+							surface := &catalog.ValidationSurfaces[si]
+							if len(surface.ProofRequirementUnavailabilities) == 0 {
+								continue
+							}
+							switch scenario {
+							case "stale catalog":
+								surface.ProofRequirementUnavailabilities[0].OriginalDiagnostic.ObservedRevision = "stale"
+							case "missing owner fact":
+								surface.ProofRequirementUnavailabilities = nil
+							case "duplicate owner fact":
+								surface.ProofRequirementUnavailabilities = append(surface.ProofRequirementUnavailabilities, surface.ProofRequirementUnavailabilities[0])
+							}
+						}
+					}
+				}
+				if changed.Validate() == nil {
+					t.Fatal("fresh load accepted invalid terminal owner cause")
+				}
+			})
+		}
+		for range 2 {
+			replayed, replayErr := newRuntimeDriveTestModule(t, hub).driveRuntime(ctx, command)
+			if replayErr != nil || replayed.StateRevision != completed.StateRevision || providerCalls.Load() != inputProviderCall {
+				t.Fatalf("terminal restart repeated transition/provider: %+v %v", replayed, replayErr)
+			}
+		}
+		return providerCalls.Load()
 	}
 	if freshValidation.StateRevision == 0 || freshValidation.Facts.RepairDirective == nil || len(freshValidation.Facts.RepairDirective.TargetRefs) != 0 {
 		t.Fatal("fresh validation lacks a target-free, restart-valid repair continuation")

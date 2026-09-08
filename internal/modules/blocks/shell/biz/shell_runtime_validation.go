@@ -148,6 +148,7 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 		bindings := make([]runtimemodel.RuntimeValidationProofRequirementBinding, 0)
 		checks := make([]string, 0)
 		preparations := make([]runtimemodel.RuntimeValidationProofPreparation, 0)
+		unavailabilities := make([]runtimemodel.RuntimeValidationProofUnavailability, 0)
 		compatibleRequirements := 0
 		if staticIDs[recipe.ID] {
 			for _, requirement := range runtimemodel.NormalizeRuntimeValidationProofRequirements(requirements) {
@@ -161,7 +162,15 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 					continue
 				}
 				attestations = shellValidationSupplementAttestations(attestations, binding.Manifest.TargetRefs)
-				preparation, observableNow, preparable := shellValidationProofPreparation(workspaceDirectory, binding.Manifest, catalogObservedRevision, readyIDs[recipe.ID], recipe, requirement, attestations)
+				inspection := inspectShellNativeValidationChecks(workspaceDirectory, binding.Manifest.TargetRefs, attestations)
+				if !shellNativeCheckInspectionPreparable(inspection, requirement, binding.Manifest.TargetRefs, attestations) {
+					unavailabilities = append(unavailabilities, runtimemodel.RuntimeValidationProofUnavailability{
+						Requirement: requirement, ValidationRecipeID: recipe.ID,
+						OriginalDiagnostic: shellNativeCheckReadinessDiagnostic(inspection, requirement, binding.Manifest, catalogObservedRevision, ""),
+					})
+					continue
+				}
+				preparation, observableNow, preparable := shellValidationProofPreparationFromInspection(inspection, binding.Manifest, catalogObservedRevision, readyIDs[recipe.ID], recipe, requirement, attestations)
 				if !observableNow {
 					if preparable {
 						preparations = append(preparations, preparation)
@@ -182,13 +191,14 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 		surface := runtimemodel.RuntimeValidationSurface{
 			ID: recipe.ID, OwnerModuleID: ModuleID, OperationKind: runtimemodel.RuntimeBlockKindManagedValidationSession,
 			CheckRefs: normalizeShellStrings(checks), ProofRequirementBindings: bindings, ProofRequirementPreparations: preparations,
-			ProofApplicability: runtimemodel.RuntimeValidationProofNotDeclared, EffectScope: runtimemodel.RuntimeEffectEphemeralSession,
+			ProofRequirementUnavailabilities: unavailabilities,
+			ProofApplicability:               runtimemodel.RuntimeValidationProofNotDeclared, EffectScope: runtimemodel.RuntimeEffectEphemeralSession,
 			IdempotencyClass: runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
 			InputSchemaHash:  schemaHash,
 		}
 		if len(bindings) != 0 {
 			surface.ProofApplicability = runtimemodel.RuntimeValidationProofDirect
-		} else if len(preparations) != 0 {
+		} else if len(preparations) != 0 || len(unavailabilities) != 0 {
 			surface.ProofApplicability = runtimemodel.RuntimeValidationProofDirect
 		} else if compatibleRequirements != 0 {
 			surface.ProofApplicability = runtimemodel.RuntimeValidationProofAuxiliary
@@ -265,6 +275,31 @@ func shellValidationNativeCheckTargetRef(requirement runtimemodel.RuntimeValidat
 
 func shellValidationProofPreparation(workspaceDirectory string, manifest runtimemodel.WorkspaceManifest, catalogObservedRevision string, recipeReady bool, recipe runtimemodel.RuntimeValidationRecipe, requirement runtimemodel.RuntimeValidationProofRequirement, attestations []runtimemodel.RuntimeValidationCheckAttestationBinding) (runtimemodel.RuntimeValidationProofPreparation, bool, bool) {
 	inspection := inspectShellNativeValidationChecks(workspaceDirectory, manifest.TargetRefs, attestations)
+	return shellValidationProofPreparationFromInspection(inspection, manifest, catalogObservedRevision, recipeReady, recipe, requirement, attestations)
+}
+
+func shellNativeCheckInspectionPreparable(inspection shellNativeCheckInspection, requirement runtimemodel.RuntimeValidationProofRequirement, refs []string, attestations []runtimemodel.RuntimeValidationCheckAttestationBinding) bool {
+	if inspection.Code == "" {
+		return true
+	}
+	// A create-only acquisition cannot remove ambiguity, repair syntax or
+	// assertions, or replace an existing conjunctive input. Do not advertise a
+	// different filename as satisfaction of any of those observations.
+	if inspection.Code != "native_check_missing" || shellStringIncluded(refs, shellValidationNativeCheckTargetRef(requirement)) {
+		return false
+	}
+	for _, check := range attestations {
+		if check.SupplementalNativeCheckRef != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func shellValidationProofPreparationFromInspection(inspection shellNativeCheckInspection, manifest runtimemodel.WorkspaceManifest, catalogObservedRevision string, recipeReady bool, recipe runtimemodel.RuntimeValidationRecipe, requirement runtimemodel.RuntimeValidationProofRequirement, attestations []runtimemodel.RuntimeValidationCheckAttestationBinding) (runtimemodel.RuntimeValidationProofPreparation, bool, bool) {
+	if !shellNativeCheckInspectionPreparable(inspection, requirement, manifest.TargetRefs, attestations) {
+		return runtimemodel.RuntimeValidationProofPreparation{}, false, false
+	}
 	nativeChecksDeclared := inspection.Code == ""
 	if nativeChecksDeclared && recipeReady {
 		return runtimemodel.RuntimeValidationProofPreparation{}, true, true
@@ -272,17 +307,6 @@ func shellValidationProofPreparation(workspaceDirectory string, manifest runtime
 	targetRef := ""
 	if !nativeChecksDeclared {
 		targetRef = shellValidationNativeCheckTargetRef(requirement)
-	}
-	if targetRef != "" && shellStringIncluded(manifest.TargetRefs, targetRef) {
-		digest := sha256.Sum256([]byte("workorch-shell-native-check-repair-target/v1\x00" + requirement.Hash + "\x00" + manifest.Revision))
-		base := strings.TrimSuffix(targetRef, "_test.go")
-		for index := 0; index < 8; index++ {
-			candidate := fmt.Sprintf("%s_repair_%s_%d_test.go", base, hex.EncodeToString(digest[:4]), index+1)
-			if !shellStringIncluded(manifest.TargetRefs, candidate) {
-				targetRef = candidate
-				break
-			}
-		}
 	}
 	requiredTargets := []string(nil)
 	if targetRef != "" {

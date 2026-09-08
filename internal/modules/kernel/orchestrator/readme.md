@@ -70,6 +70,12 @@ capability resource state。
   transaction；exact acquisition receipt 会消费对应的 create-only `TargetSelection` lifecycle identity，resource-change
   invalidation 不得重新激活或重发该 selector；receipt 后仍须 capability owner fresh reobserve、SM-2 私有 seal。Orchestrator 不解释 native protocol，
   Application 不自动生成跨 owner convergence，MCP typed validation 也不借用 Shell preparation。
+- 不能通过 declared prospective acquisition 补齐的 exact validation requirement，由 capability owner 单独发布
+  `ProofRequirementUnavailability`，不能伪装为 preparation。SM-2 在 current prerequisite 结算的既有私有事件/CAS 中，
+  以 `owner_fact_convergence_exhausted` 封存原始原因；先于 semantic request、repair directive 与新 acquisition。
+  binding-free cursor 只按 exact CWI 读取 immutable Definition owner-fact declaration，不回填 focus/binding。
+  fresh-load 重验 requirement/catalog/owner/diagnostic；缺失或漂移 cause 拒绝。SM-4 只按既有 Result→Workspace→Run
+  交付，无额外 provider/operation、acquisition/recovery budget 或新状态机。
 - Goal/DoD、prospective constraint、required sequence 和 collective receipt 只支持 conjunctive `all_of`；不存在
   `one_of`/`any_of` terminal escape。Definition gap 只能进入专用 clarification transaction。
 - provider-facing manifest、closed JSON Schema、strict decoder、single evaluator 和 owner feasibility 共享一个 sealed
@@ -109,6 +115,8 @@ capability resource state。
   `RequireInputAddition` 要求 owner typed `InputAddition` 精确匹配 completed dispatch 的原 required/native binding，且没有
   existing supplement。缺失/错配同一 CAS 终止，不回退任意文件修复。SM-3 schema/proposal 只允许一个 exact new input；
   创建只结算中间 state-change，必须 fresh owner catalog → 新 binding → 原/补充检查 all-of 才可获 validation credit。
+  owner-authored `contentContractRef + contentRequirements` 只作为 bounded typed value 进入 input/hash 与 C3/C4，不由 Core
+  解释语法；既有补充输入无效时不允许新 acquisition 穿过 fresh-validation 的 Definition-proof seal guard。
   SM-1 不变；SM-4 重启/投影不能推断该合同。`validation_input_addition_test.go` 覆盖 duplicate/stale/restart、无效合同、
   exact target seal 与创建零 credit；`default_native_validation_integration_test.go` 校准真实 File/Shell receipt 和 matcher。
 - candidate proposal 持久化后，SM-3 必须按 manifest-declared `CandidateConstraints` 的 kind 获取 exact owner fact。

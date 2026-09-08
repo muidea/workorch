@@ -38,6 +38,33 @@ var previousInputExecutionSoulMD string
 //go:embed testdata/software-dev-validation-0317a3f6.md
 var previousInputValidationSoulMD string
 
+//go:embed testdata/software-dev-execution-983be412.md
+var previousContentContractExecutionSoulMD string
+
+func TestPreviousInputContentContractSoulReviewedFingerprint(t *testing.T) {
+	defaults, err := workorchdefaults.BuiltinSoulDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range defaults {
+		if raw.ID != "soul-software-dev-execution" {
+			continue
+		}
+		cmd := soulDefaultCreateCommand(raw)
+		cmd.SoulMD = previousContentContractExecutionSoulMD
+		value, err := normalizedSoulFromCommand(cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash := soulmodel.StableSoulContentHash(value)
+		if got := workorchdefaults.KnownBuiltinContentRevision("soul", raw.ID, hash); got != "983be412" {
+			t.Fatalf("previous Soul not reviewed: %s %s %s", raw.ID, hash, got)
+		}
+		return
+	}
+	t.Fatal("execution Soul missing")
+}
+
 func TestPreviousValidationInputSoulsReviewedFingerprints(t *testing.T) {
 	defaults, err := workorchdefaults.BuiltinSoulDefaults()
 	if err != nil {

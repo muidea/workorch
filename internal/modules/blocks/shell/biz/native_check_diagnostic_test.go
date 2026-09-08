@@ -10,7 +10,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestNativeCheckPreparationReportsExactCauseAndAcceptsReachableHelper(t *testing.T) {
+func TestNativeCheckUnavailableReportsExactCauseAndAcceptsReachableHelper(t *testing.T) {
 	recipe := runtimecontract.RuntimeValidationRecipe{ID: "native", Command: "go", Args: []string{"test", "./..."}, AdapterRef: modulecommon.ValidationRecipeAdapterProjectNative}
 	requirement := shellValidationProofRequirementForTest(t, "", "cwi-helper")
 	attestations, ok := shellValidationCheckAttestations(recipe, requirement)
@@ -21,13 +21,14 @@ func TestNativeCheckPreparationReportsExactCauseAndAcceptsReachableHelper(t *tes
 	workspace := newGoValidationWorkspace(t, fmt.Sprintf("package fixture\nimport \"testing\"\nfunc %s(t *testing.T) { t.Run(\"required\", func(child *testing.T) { verify(child) }) }\n", check))
 	manifest := shellTestWorkspaceManifestBinding("tree-helper-missing", []string{"fixture.go", "fixture_test.go", "go.mod"}).Manifest
 	preparation, ready, supported := shellValidationProofPreparation(workspace, manifest, "catalog-before", true, recipe, requirement, attestations)
-	if ready || !supported || preparation.OriginalDiagnostic == nil {
-		t.Fatalf("unresolved helper did not publish a preparation cause: %+v", preparation)
+	if ready || supported || preparation.OriginalDiagnostic != nil {
+		t.Fatalf("unresolved existing check advertised a create-only remedy: %+v", preparation)
 	}
-	diagnostic := preparation.OriginalDiagnostic
-	if err := preparation.Validate(); err != nil {
-		t.Fatal(err)
+	surfaces := shellValidationSurfaces([]runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationProofRequirement{requirement}, runtimecontract.RuntimeWorkspaceManifestBinding{Manifest: manifest}, "catalog-before", workspace)
+	if len(surfaces) != 1 || len(surfaces[0].ProofRequirementUnavailabilities) != 1 || len(surfaces[0].ProofRequirementPreparations) != 0 {
+		t.Fatalf("unresolved helper lost its exact unavailability: %+v", surfaces)
 	}
+	diagnostic := surfaces[0].ProofRequirementUnavailabilities[0].OriginalDiagnostic
 	if diagnostic.OwnerModuleID != ModuleID || diagnostic.ObservedRevision != "catalog-before" || diagnostic.OriginalCode != "native_check_assertion_unresolved" ||
 		!strings.Contains(diagnostic.OriginalMessage, check) || !strings.Contains(diagnostic.OriginalMessage, requirement.Hash) ||
 		!reflect.DeepEqual(diagnostic.TargetRefs, []string{"fixture_test.go"}) {
@@ -37,7 +38,7 @@ func TestNativeCheckPreparationReportsExactCauseAndAcceptsReachableHelper(t *tes
 	for _, violation := range diagnostic.FieldViolations {
 		fields[violation.Path] = violation.Actual
 	}
-	if fields["workspaceManifest.revision"] != manifest.Revision || fields["preparation.targetRef"] != preparation.TargetRef || fields["nativeCheckRef"] != check {
+	if fields["workspaceManifest.revision"] != manifest.Revision || fields["preparation.targetRef"] != "" || fields["nativeCheckRef"] != check {
 		t.Fatalf("preparation identities were conflated: %v", fields)
 	}
 	writeNativeStructureSource(t, workspace, "helpers_test.go", "package fixture\nimport \"testing\"\nfunc verify(t *testing.T) { if 1 != 1 { t.Fatal(\"bad\") } }\n")

@@ -413,6 +413,12 @@ func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.R
 		// or repair authorization. SM-3 rejects candidate work until it settles.
 		return validationOutputDecision(base, facts)
 	}
+	// Only after current prerequisites settle can a capability owner's exact
+	// unavailability close this SM-2 obligation. It cannot become another
+	// acquisition or be hidden by a target-free fresh-validation directive.
+	if missingOwnerFactIsUnavailable(facts) {
+		return ownerFactExhaustedDecision(base, facts), nil
+	}
 	// A validation failure remains a validation gap unless a capability owner
 	// has persisted a current, exact repair surface.  Policy text, a command
 	// entry, and an infeasible candidate are not implementation authority.

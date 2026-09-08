@@ -342,6 +342,8 @@ func TestEmbeddedSoftwareDevSoulsUseCurrentRuntimeDocuments(t *testing.T) {
 	}
 	assertSoulContains(t, execution.SoulMD, "operations")
 	assertSoulContains(t, execution.SoulMD, "sealed manifest")
+	assertSoulContains(t, execution.SoulMD, "inputAddition.contentContractRef")
+	assertSoulContains(t, execution.SoulMD, "contentRequirements")
 	assertSoulContains(t, execution.SoulMD, "bindingRefs")
 	assertSoulContains(t, execution.SoulMD, "patch/apply")
 	assertSoulContains(t, execution.SoulMD, "sealed File owner contract")

@@ -190,6 +190,13 @@ func ValidateRuntimeValidationProofRequirementCatalogApplicability(requirements 
 				}
 				seenSurfaceRequirements[preparation.RequirementHash] = struct{}{}
 			}
+			for _, unavailable := range surface.ProofRequirementUnavailabilities {
+				requirement, found := RuntimeValidationProofRequirementForCoverage(requested, unavailable.Requirement.CoverageWorkItemID)
+				if unavailable.Validate() != nil || !found || requirement.Hash != unavailable.Requirement.Hash || unavailable.ValidationRecipeID != surface.ID {
+					return fmt.Errorf("runtime validation owner catalog published undeclared proof unavailability %q", unavailable.Requirement.Hash)
+				}
+				seenSurfaceRequirements[requirement.Hash] = struct{}{}
+			}
 			for _, requirement := range requested {
 				if requirement.ValidationRecipeID != "" && requirement.ValidationRecipeID != surface.ID {
 					continue

@@ -1103,7 +1103,7 @@ func assertRuntimeRepairProjection(t *testing.T, requireInputAddition bool) {
 	}
 	var addition runtimecontract.RuntimeValidationInputAddition
 	if requireInputAddition {
-		addition = runtimecontract.RuntimeValidationInputAddition{RequiredCheckRef: "check/required", OriginalNativeCheckRef: "owner/native/original", NativeCheckRef: "owner/native/supplement", TargetRef: "lsp_tools.go"}
+		addition = runtimecontract.RuntimeValidationInputAddition{RequiredCheckRef: "check/required", OriginalNativeCheckRef: "owner/native/original", NativeCheckRef: "owner/native/supplement", TargetRef: "lsp_tools.go", ContentContractRef: "owner/input-shape/v1", ContentRequirements: "Only the declared entry is allowed; all supporting declarations must be local to it."}
 	}
 	repairManifest, err := runtimecontract.CompileRuntimeSemanticPlanManifestForCoverageWithValidationFailureRepair(
 		"ws-1", "run-1", definition, seed, focuses, request.SemanticContext.Activation.ExecutionContract,
@@ -1701,6 +1701,10 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	t.Run("final rendered failure context is complete and volatile", func(t *testing.T) {
 		feedbackContext := candidateContext.Normalized()
 		feedbackContext.Failure = &runtimecontract.FailureFact{Class: runtimecontract.FailureClassExecutionFailure, Signature: "current-check-failure", Message: "private raw diagnostic"}
+		feedbackContext.Failure.ValidationDiagnostic = &runtimecontract.ValidationFailureDiagnostic{InputAddition: runtimecontract.RuntimeValidationInputAddition{
+			RequiredCheckRef: "check-A", OriginalNativeCheckRef: "original-A", NativeCheckRef: "supplement-A", TargetRef: "checks/addition.test",
+			ContentContractRef: "owner/input/v1", ContentRequirements: "One declared entry with local supporting declarations.",
+		}}
 		if len(feedbackContext.Focus.CoverageEvidenceBindings) == 0 {
 			t.Fatal("render fixture has no sealed binding")
 		}
@@ -1723,7 +1727,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			}
 		}
 		tail := withFeedback.PromptContext.Sections[4].Content
-		for _, want := range []string{"currentValidationFailure", "causal-validation-receipt", "check-A", "checks/a.test", `"line":47`, `"failureDetailsIncomplete":false`, `"occurrences":1`} {
+		for _, want := range []string{"currentValidationFailure", "causal-validation-receipt", "check-A", "checks/a.test", `"line":47`, `"failureDetailsIncomplete":false`, `"occurrences":1`, `"contentContractRef":"owner/input/v1"`, `"contentRequirements":"One declared entry with local supporting declarations."`} {
 			if !strings.Contains(tail, want) {
 				t.Fatalf("final C4 lost current failure fact %q: %s", want, tail)
 			}

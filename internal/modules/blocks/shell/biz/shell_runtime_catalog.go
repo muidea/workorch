@@ -113,7 +113,7 @@ func (a *RuntimeAdapter) runtimeAdmissibilityPolicyRevision() string {
 	}
 	sort.Strings(keys)
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "contract=shell-policy-v2;timeout=%s;", a.timeout)
+	_, _ = fmt.Fprintf(h, "contract=shell-policy-v3;timeout=%s;input-contract=%s;input-requirements=%s;", a.timeout, shellSupplementContentContractRef, shellSupplementContentRequirements)
 	for _, key := range keys {
 		_, _ = fmt.Fprintf(h, "env=%s;", key)
 	}

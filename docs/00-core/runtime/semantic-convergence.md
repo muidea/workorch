@@ -104,6 +104,12 @@ preparation 可以附带 capability-owner 原始、有界、audit-safe `Original
 的唯一原因复制到 `RuntimeTerminalDecision.OriginalDiagnostic`；缺失/歧义/过期原因不从历史或文本重建。它是原因事实，
 不是第五状态机或第二份 action/terminal kind，不能改变单次 acquisition、重试或 credit 合同。SM-4 与投影层只消费已封存
 原因；旧 archive 中字段缺省时保留原哈希和旧 delivery material，不做 backfill。
+不能通过声明的 prospective acquisition 补齐的输入必须独立发布为 `ProofRequirementUnavailability`，包含 exact
+Definition requirement、recipe 与 owner 原始 diagnostic，并由同一 catalog snapshot/revision 绑定；不得同时发布该
+requirement 的 binding/preparation，也不得推导替代 target。SM-2 等 current prerequisites 全部结算后，在既有私有
+reduction/CAS 中按 `owner_fact_convergence_exhausted` 有界收口，先于新的 semantic provider request 与 acquisition。
+binding-free focus 的 postcondition 只从 exact CWI 的 immutable Definition declaration 读取，不向 cursor 回填 authority。
+原因完整进入 terminal/Result，fresh-load 拒绝缺失/漂移，SM-4 与资源 owner 不重新裁决。
 Application 只把 Profile 声明实例化到 admitted exact CWI 并写入 requirement hash，不得自行发明跨 owner convergence；缺
 显式 Profile closure 的 managed CWI 在 activation admission fail closed。
 
@@ -352,6 +358,9 @@ owner specialization 为 File 只是 Profile 事实，不是 Core reducer 分支
 合同，schema/document admission 将 `prospectiveTargetRefs` 限定为它的一个 exact target；额外/替代 target 在 owner probe
 前拒绝。原 native check 和 Definition 不可替换；repair receipt 仍只触发 SM-2 内部 fresh-validation reopen。
 新 binding 只能来自重新观测后的 owner applicability，不得把旧 observation 解释为已通过新增检查。
+`InputAddition` 可携带成对的 owner-authored `contentContractRef + contentRequirements`，限定新增输入的完整内容与
+观测合同；它们是有界、hash-bound、provider-safe 的声明，不是 raw diagnostic 或 Runtime disposition。Core 只绑定并
+透传到 volatile C3/C4，接收验证 owner 独立解释/检查；空扩展不改变旧 JSON/hash 或 C0～C2。
 
 repair receipt 的 SM-2 CAS 必须保留 target-free fresh-validation continuation，覆盖 `semantic-pending`、prerequisite
 重获与 successor binding seal 的完整窗口；generic missing-evidence 同步不得在 binding-free 窗口改写 trigger、ID 或恢复

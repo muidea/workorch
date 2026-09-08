@@ -38,6 +38,53 @@ func TestValidationInputAdditionPreservesOriginalIdentityAndBoundsTarget(t *test
 	}
 }
 
+func TestValidationInputContentContractIsOptionalBoundedAndHashBound(t *testing.T) {
+	legacy := RuntimeValidationInputAddition{RequiredCheckRef: "check", OriginalNativeCheckRef: "original", NativeCheckRef: "supplement", TargetRef: "checks/input"}
+	digest := func(v RuntimeValidationInputAddition) string {
+		h := sha256.New()
+		writeRuntimeValidationInputAdditionHash(h, v)
+		return string(h.Sum(nil))
+	}
+	// Independently reconstruct the pre-extension bytes, not just a round trip.
+	h := sha256.New()
+	writeHashString(h, "validation-input-addition/v1")
+	writeHashStrings(h, []string{legacy.RequiredCheckRef, legacy.OriginalNativeCheckRef, legacy.NativeCheckRef, legacy.TargetRef})
+	if digest(legacy) != string(h.Sum(nil)) {
+		t.Fatal("empty content contract changed old sealed identity")
+	}
+	encoded, _ := json.Marshal(legacy)
+	if strings.Contains(string(encoded), "contentContract") || strings.Contains(string(encoded), "contentRequirements") {
+		t.Fatal("empty content contract changed old JSON")
+	}
+	current := legacy
+	current.ContentContractRef, current.ContentRequirements = "owner/input/v1", "Only one declared entry; supporting declarations are local."
+	if current.Validate() != nil || digest(current) == digest(legacy) {
+		t.Fatal("owner content contract missing from hash")
+	}
+	for _, mutate := range []func(*RuntimeValidationInputAddition){
+		func(v *RuntimeValidationInputAddition) { v.ContentContractRef += "changed" },
+		func(v *RuntimeValidationInputAddition) { v.ContentRequirements += "changed" },
+	} {
+		changed := current
+		mutate(&changed)
+		if digest(changed) == digest(current) {
+			t.Fatal("content contract drift not hash-bound")
+		}
+	}
+	for _, mutate := range []func(*RuntimeValidationInputAddition){
+		func(v *RuntimeValidationInputAddition) { v.ContentContractRef = "" },
+		func(v *RuntimeValidationInputAddition) { v.ContentRequirements = "" },
+		func(v *RuntimeValidationInputAddition) { v.ContentRequirements = strings.Repeat("x", 4097) },
+		func(v *RuntimeValidationInputAddition) { v.ContentRequirements = "invalid\x00input" },
+	} {
+		bad := current
+		mutate(&bad)
+		if bad.Validate() == nil {
+			t.Fatal("incomplete or unsafe owner content contract accepted")
+		}
+	}
+}
+
 func TestSupplementalValidationAttestationIsConjunctive(t *testing.T) {
 	binding := RuntimeValidationCheckAttestationBinding{RequiredCheckRef: "requirement", ObservationProtocolRef: "owner/v3", NativeCheckRef: "original", SupplementalNativeCheckRef: "supplement"}
 	base := RuntimeValidationObservation{ObservationProtocolRef: "owner/v3", ExecutedChecks: binding.NativeCheckRefs(), PassedChecks: binding.NativeCheckRefs()}

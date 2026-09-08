@@ -2124,6 +2124,11 @@ func cloneRuntimeValidationRecipeRaw(in RuntimeValidationRecipe) RuntimeValidati
 
 func cloneRuntimeValidationSurfaceRaw(in RuntimeValidationSurface) RuntimeValidationSurface {
 	out := in
+	out.ProofRequirementUnavailabilities = cloneRuntimeStateRawSlice(in.ProofRequirementUnavailabilities, func(item RuntimeValidationProofUnavailability) RuntimeValidationProofUnavailability {
+		item.Requirement.RequiredCheckRefs = cloneRuntimeStateRawSlice(item.Requirement.RequiredCheckRefs, func(value string) string { return value })
+		item.OriginalDiagnostic = item.OriginalDiagnostic.CloneOriginal()
+		return item
+	})
 	out.ProspectiveTargetSatisfactionConstraint = cloneRuntimeStateRawPointer(in.ProspectiveTargetSatisfactionConstraint, func(item RuntimeProspectiveTargetSatisfactionConstraint) RuntimeProspectiveTargetSatisfactionConstraint {
 		return cloneRuntimeProspectiveTargetSatisfactionConstraintRaw(item)
 	})

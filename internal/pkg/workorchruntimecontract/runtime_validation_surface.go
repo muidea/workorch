@@ -66,8 +66,11 @@ type RuntimeValidationSurface struct {
 	// technically ready for CWI-A while CWI-B independently requires a bounded
 	// preparation; surface-wide Readiness never collapses those two facts.
 	ProofRequirementPreparations []RuntimeValidationProofPreparation
-	EffectScope                  RuntimeEffectScope
-	IdempotencyClass             RuntimeOperationIdempotencyClass
+	// Unavailability is per requirement, independent from recipe readiness. It
+	// must never be projected as a prospective preparation or executable proof.
+	ProofRequirementUnavailabilities []RuntimeValidationProofUnavailability `json:",omitempty"`
+	EffectScope                      RuntimeEffectScope
+	IdempotencyClass                 RuntimeOperationIdempotencyClass
 }
 
 func (s RuntimeValidationSurface) Normalized() RuntimeValidationSurface {
@@ -87,6 +90,7 @@ func (s RuntimeValidationSurface) Normalized() RuntimeValidationSurface {
 	s.CheckRefs = normalizeStrings(s.CheckRefs)
 	s.ProofRequirementBindings = NormalizeRuntimeValidationProofRequirementBindings(s.ProofRequirementBindings)
 	s.ProofRequirementPreparations = normalizeRuntimeValidationProofPreparations(s.ProofRequirementPreparations)
+	s.ProofRequirementUnavailabilities = normalizeRuntimeValidationProofUnavailabilities(s.ProofRequirementUnavailabilities)
 	s.ProofApplicability = RuntimeValidationProofApplicability(strings.TrimSpace(string(s.ProofApplicability)))
 	s.EffectScope = NormalizeRuntimeEffectScope(s.EffectScope)
 	s.IdempotencyClass = NormalizeRuntimeOperationIdempotencyClass(s.IdempotencyClass)
@@ -134,6 +138,24 @@ func (s RuntimeValidationSurface) Validate() error {
 		seenRequirementHashes[preparation.RequirementHash] = struct{}{}
 		seenRequirementCoverage[preparation.CoverageWorkItemID] = struct{}{}
 	}
+	for _, unavailable := range raw.ProofRequirementUnavailabilities {
+		if err := unavailable.Validate(); err != nil {
+			return fmt.Errorf("runtime validation surface %q: %w", raw.ID, err)
+		}
+		unavailable = unavailable.Normalized()
+		requirement := unavailable.Requirement.Normalized()
+		if _, duplicate := seenRequirementHashes[requirement.Hash]; duplicate {
+			return fmt.Errorf("runtime validation surface %q duplicates unavailable requirement %q", raw.ID, requirement.Hash)
+		}
+		if _, duplicate := seenRequirementCoverage[requirement.CoverageWorkItemID]; duplicate {
+			return fmt.Errorf("runtime validation surface %q duplicates unavailable coverage %q", raw.ID, requirement.CoverageWorkItemID)
+		}
+		seenRequirementHashes[requirement.Hash] = struct{}{}
+		seenRequirementCoverage[requirement.CoverageWorkItemID] = struct{}{}
+		if unavailable.ValidationRecipeID != strings.TrimSpace(raw.ID) || unavailable.OriginalDiagnostic.OwnerModuleID != strings.TrimSpace(raw.OwnerModuleID) {
+			return fmt.Errorf("runtime validation surface %q unavailable proof owner or recipe mismatch", raw.ID)
+		}
+	}
 	s = s.Normalized()
 	if s.ID == "" || s.OwnerModuleID == "" || s.OperationKind == "" || s.InputSchemaHash == "" {
 		return fmt.Errorf("runtime validation surface requires identity, owner, operation and input schema")
@@ -153,10 +175,10 @@ func (s RuntimeValidationSurface) Validate() error {
 		return fmt.Errorf("runtime validation surface %q has invalid proof applicability %q", s.ID, s.ProofApplicability)
 	}
 	if s.OwnerModuleID == RuntimeModuleShell && s.Readiness == RuntimeValidationSurfaceReady && s.ProofApplicability == RuntimeValidationProofDirect &&
-		len(s.ProofRequirementBindings) == 0 && len(s.ProofRequirementPreparations) == 0 {
+		len(s.ProofRequirementBindings) == 0 && len(s.ProofRequirementPreparations) == 0 && len(s.ProofRequirementUnavailabilities) == 0 {
 		return fmt.Errorf("direct Shell validation surface %q requires exact CWI proof records", s.ID)
 	}
-	if (len(s.ProofRequirementBindings) != 0 || len(s.ProofRequirementPreparations) != 0) &&
+	if (len(s.ProofRequirementBindings) != 0 || len(s.ProofRequirementPreparations) != 0 || len(s.ProofRequirementUnavailabilities) != 0) &&
 		(s.OwnerModuleID != RuntimeModuleShell || s.OperationKind != RuntimeBlockKindManagedValidationSession) {
 		return fmt.Errorf("runtime validation surface %q exact CWI proof records require Shell managed-validation ownership", s.ID)
 	}
@@ -189,6 +211,9 @@ func (s RuntimeValidationSurface) Validate() error {
 	}
 	if len(s.ProofRequirementPreparations) != 0 && s.ProofApplicability != RuntimeValidationProofDirect {
 		return fmt.Errorf("runtime validation surface %q has exact proof preparations without direct applicability", s.ID)
+	}
+	if len(s.ProofRequirementUnavailabilities) != 0 && s.ProofApplicability != RuntimeValidationProofDirect {
+		return fmt.Errorf("runtime validation surface %q has exact unavailability without direct applicability", s.ID)
 	}
 	if len(s.ProofRequirementBindings) != 0 && !sameStrings(normalizeStrings(boundChecks), s.CheckRefs) {
 		return fmt.Errorf("runtime validation surface %q checks do not match exact proof requirement bindings", s.ID)

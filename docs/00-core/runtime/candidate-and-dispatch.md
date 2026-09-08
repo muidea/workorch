@@ -179,6 +179,11 @@ catalog、binding、dispatch、proof lineage 与 reconciliation hash，不能跨
 transaction；candidate 可见 exact target 与 opaque native identity，但不得把它当作 proof。receiving owner 完成后必须
 重新取得 capability catalog 并由 SM-2 seal 新 binding，不能由 receiving owner、provider 或 Application 直接把
 preparation 升级为 credit。
+已有输入不合法且不能经该 create-only acquisition 补齐时，owner 必须发布独立的 exact requirement unavailability，
+而非另一条“准备文件”路径；它不能进入 `OwnerFactAcquisition` obligation、prospective satisfaction 或新 candidate。
+SM-2 在 current owner facts 结算后提前封存原始原因并有界停止，不放宽 fresh-validation 的 `definition_proof` guard。
+input addition 的 owner content contract 与 exact path/check 一起传给生成方；文件 effect 不证明验证结构/行为已经通过，
+fresh owner reobservation 仍不可省略。
 当前 Runtime 对 validation proof 采用一 focus 一 CWI 的保守形状；共享 recipe 只有在每个 CWI 具有独立
 requirement/check/target 并编译为独立 focus/binding 时才允许。Profile wildcard 或 focus 级泛化 recipe/check 不得由一个 owner receipt 扇出关闭
 多个异构 CWI。缺 binding、binding 不能被 owner 独立验证或 binding set 与 current definition 不一致时，

@@ -44,8 +44,8 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
   identity，并随 sealed execution authority 一同哈希封存。receipt/reconciliation 只承认该 protocol adapter 产生的 typed
   check attestation；raw stdout/stderr（包括 `WORKORCH_CHECK_PASSED=*`）、recipe ID 或任意进程自报 marker 只能是诊断，
   不能填充 passed check authority。另一个 CWI/native check 即使来自同一 recipe 也不能获得当前 CWI credit。
-- recipe 的静态/输入 `Readiness` 与 requirement readiness 分开。一个 ready recipe 可以同时发布 ready CWI 的 exact binding
-  和 missing CWI 的 exact preparation；preparation 封存 requirement、catalog revision、native mapping 与完整 prospective
+- recipe 的静态/输入 `Readiness` 与 requirement readiness 分开。一个 ready recipe 可以同时发布 ready CWI 的 exact binding、
+  missing CWI 的 exact preparation 和另一 CWI 的 `ProofRequirementUnavailability`；preparation 封存 requirement、catalog revision、native mapping 与完整 prospective
   all-of target constraint，但不授予 proof/dispatch。File 完成 Profile 已声明的 acquisition 后，Shell 必须 fresh acquire
   workspace manifest 并重新发布 binding；旧 preparation、别的 CWI 或别的 protocol mapping 不得复用。
 - workspace-durable command 的 observed change 必须落在 sealed targets 内；未声明 effect 必须 rejected。
@@ -90,7 +90,10 @@ v1/v2 binding 仍按原协议执行/重放，不修改历史 receipt、binding �
   未调用闭包、未引用 helper、遮蔽的同名变量、跨包 helper 与歧义入口不能代替断言；不支持的结构明确报告未解析。
   检查有 256 源文件、8 MiB、32768 AST 节点、64 层 helper 调用的上界，且读取限制在 workspace root。
 - preparation 的可选 `OriginalDiagnostic` 保留 exact requirement/CWI/check、manifest revision、catalog revision 与
-  结构缺失/未解析/歧义/资源上界原因；它不是 target、repair 或 retry authority。
+  缺失输入原因；不能通过新建输入补齐的结构无效、未解析、歧义、读取失败或资源上界，改由独立的
+  `ProofRequirementUnavailability` 保留 exact requirement 与原始原因，不发布另一条 create 路径或 prospective constraint。
+  同一 requirement 不能同时为 ready、preparable 与 unavailable；其它 CWI 的合法 binding 不受影响。以上均不是
+  target、repair、retry 或 terminal authority。
 - v2 每次执行绑定同一 proof 的完整 native-check 集合（最多 32 项），强制 fresh JSON test observation，并在 managed
   scratch 内生成 owner-controlled workspace coverage。外部模块、测试源、`workorch_validation` harness 与零执行记录
   不提供实现执行证据；无可核对的 workspace 实现执行或输出不完整时，返回
@@ -107,10 +110,18 @@ v2 对只有一个 native attestation 的缺失实现执行事实返回 bounded 
 create-only route，并经 File feasibility 和 SM-2 seal。多 attestation、不可验证或其它失败不推断补充合同。
 fresh v3 catalog 将原检查与补充检查绑定为 all-of，并沿用最多 32 个 native input 的执行/观测上界。补充文件只允许
 imports 和该 exact test function；不能借 top-level helper、全局变量、`init`、`TestMain` 或重定义原检查替换实现/判据。
+`InputAddition.contentContractRef + contentRequirements` 随 owner receipt/hash、repair manifest 与 provider 投影携带同一
+有界内容合同：辅助常量、变量、类型与闭包须位于 test function 内，断言须直接位于 test body 或 `t.Run` callback
+中，不能只藏在辅助闭包；真实入口必须受该协议观测。
+既有补充输入无效时，fresh catalog 只发布该 CWI 的 unavailability 和 exact 原因；pure prospective query 没有可解析的
+preparation，不能宣称另建文件会满足它。Shell policy revision 绑定这份合同，旧 snapshot 按 typed stale 重获；历史
+binding/receipt 不升级或改写。
 补充仍未观测实现时返回 `validation_workspace_behavior_supplement_unobserved`，不再提供补充合同；补充的编译错误也
 不能把测试/owner harness 文件交给普通实现修复。具体 CWI 的真实交付入口断言仍不可由“任意函数被覆盖”替代。
 `TestValidationInputSupplementRequiresOriginalAndDeliveryBehavior` 校准原检查失败、实现错误、源码/dependency/fake bypass、
 skip、初始化/runner override、输入编译错误、v2 replay 与 v3 fresh all-of 正反例。
+`TestSupplementContentContractAndFreshReadinessAgreeWithoutReplacementPreparation` 覆盖 inline 正例与顶层 helper/const/var/type、
+runner/init、语法、无断言反例，并验证另一 CWI 不受影响、零替代 preparation 与零 `would_satisfy`。
 
 `TestNativeCheckStructureResolvesOnlyReachableTestingAssertions`、
 `TestWorkspaceBehaviorProofRequiresDeliveryExecutionAndProtectsAssertionInputs` 与
