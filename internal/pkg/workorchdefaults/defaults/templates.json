@@ -1129,6 +1129,25 @@
                     "repairOperationTargetSelectorRef": "workspace-relative-existing-file-target"
                   },
                   {
+                    "id": "input-symbol-case-to-attested-patch",
+                    "triggerOwnerModuleId": "blocks/shell",
+                    "triggerOperationKind": "validation/managed_session",
+                    "triggerDiagnosticClass": "validation_build_failed",
+                    "triggerEvidenceTargetType": "validation_input",
+                    "triggerOwnerDiagnosticCode": "validation_input_symbol_case_mismatch",
+                    "repairEvidenceKind": "state_change",
+                    "repairOwnerModuleId": "blocks/file",
+                    "repairOperationKinds": ["patch/apply"],
+                    "repairTargetPolicy": "existing_owner_scope",
+                    "repairTargetRole": "validation_input_maintenance",
+                    "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
+                    "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+                    "repairDeclarationTargetSelectorSubjectRef": "dodItem_validation_input",
+                    "repairDeclarationTargetSelectorCandidateRefs": [],
+                    "repairOperationTargetSelectorRef": "workspace-relative-existing-file-target",
+                    "requireInputRepair": true
+                  },
+                  {
                     "id": "missing-behavior-to-new-validation-input",
                     "triggerOwnerModuleId": "blocks/shell",
                     "triggerOperationKind": "validation/managed_session",

@@ -1705,6 +1705,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			RequiredCheckRef: "check-A", OriginalNativeCheckRef: "original-A", NativeCheckRef: "supplement-A", TargetRef: "checks/addition.test",
 			ContentContractRef: "owner/input/v1", ContentRequirements: "One declared entry with local supporting declarations.",
 		}}
+		feedbackContext.Failure.ValidationDiagnostic.InputLocations = []runtimecontract.RuntimeValidationInputLocation{{TargetRef: "checks/input.test", Line: 137, Column: 23, Code: "undefined_identifier", Symbol: "expectedvalue"}}
 		if len(feedbackContext.Focus.CoverageEvidenceBindings) == 0 {
 			t.Fatal("render fixture has no sealed binding")
 		}
@@ -1727,7 +1728,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 			}
 		}
 		tail := withFeedback.PromptContext.Sections[4].Content
-		for _, want := range []string{"currentValidationFailure", "causal-validation-receipt", "check-A", "checks/a.test", `"line":47`, `"failureDetailsIncomplete":false`, `"occurrences":1`, `"contentContractRef":"owner/input/v1"`, `"contentRequirements":"One declared entry with local supporting declarations."`} {
+		for _, want := range []string{"currentValidationFailure", "causal-validation-receipt", "check-A", "checks/a.test", `"line":47`, `"failureDetailsIncomplete":false`, `"occurrences":1`, `"contentContractRef":"owner/input/v1"`, `"contentRequirements":"One declared entry with local supporting declarations."`, `"inputLocations"`, `"line":137`, `"column":23`, `"symbol":"expectedvalue"`} {
 			if !strings.Contains(tail, want) {
 				t.Fatalf("final C4 lost current failure fact %q: %s", want, tail)
 			}

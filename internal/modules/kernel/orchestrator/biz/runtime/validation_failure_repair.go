@@ -238,7 +238,7 @@ func matchRuntimeValidationFailureRepairTrigger(aggregate RuntimeAggregate, fact
 	route, routeFound := declaration.ValidationFailureRepairConvergence.RouteForTrigger(
 		original.OwnerModuleID, operation.Kind, diagnostic.Class, diagnostic.RecommendedEvidenceTargetType, diagnostic.OwnerCode,
 	)
-	if !routeFound || (route.RequireInputAddition && !diagnostic.InputAddition.MatchesBinding(binding)) {
+	if !routeFound || !route.AcceptsInputDiagnostic(diagnostic, binding) {
 		return runtimeValidationFailureRepairTrigger{}, false, nil
 	}
 	trigger := runtimeValidationFailureRepairTrigger{
@@ -353,7 +353,7 @@ func markRuntimeValidationFailureRepairRouteUnavailable(aggregate *RuntimeAggreg
 		trigger.TriggerDiagnosticClass,
 		trigger.TriggerEvidenceTargetType,
 		trigger.TriggerOwnerDiagnosticCode,
-	); found && (!route.RequireInputAddition || diagnostic.InputAddition.MatchesBinding(binding)) {
+	); found && route.AcceptsInputDiagnostic(diagnostic, binding) {
 		return false, nil
 	}
 
@@ -581,7 +581,7 @@ func CurrentRuntimeValidationFailureRepairGenerationInput(aggregate RuntimeAggre
 	route, routeFound := trigger.convergence.RouteForTrigger(
 		original.OwnerModuleID, operation.Kind, diagnostic.Class, diagnostic.RecommendedEvidenceTargetType, diagnostic.OwnerCode,
 	)
-	if !routeFound || (route.RequireInputAddition && !diagnostic.InputAddition.MatchesBinding(binding)) {
+	if !routeFound || !route.AcceptsInputDiagnostic(diagnostic, binding) {
 		return runtimecontract.RuntimeValidationFailureRepairGenerationInput{}, false, fmt.Errorf("%w: persisted validation failure repair trigger has no exact Profile route", common.ErrConflict)
 	}
 	trigger.route = route

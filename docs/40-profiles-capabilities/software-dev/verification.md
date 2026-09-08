@@ -61,6 +61,20 @@ and converges through the same neutral Runtime owner model. It must not make leg
   Run/Result/Workspace: rejected weak proof → exact create-only input → Go-built child execution → fresh all-of validation →
   assessment → three-owner terminal delivery. Pre/post-seal, input-receipt and post-validation crash cuts preserve the same
   provider budget, original inputs and immutable startup; duplicate and tampered receipt/continuation replay remain fenced;
+- `TestValidationInputCompileDiagnosticAttestsOnlyExactCaseDelta` and
+  `TestValidationInputRepairRefusesAmbiguityAndNonSymbolChanges` calibrate real compiler locations, exact same-file case deltas,
+  ambiguity/shadow/unsupported-symbol, stale protocol, truncated output and changed-input negatives. Only the separate
+  input-maintenance route is eligible; assertion locations alone never authorize edits;
+- `TestFileOwnerInputRepairRejectsAnyUnattestedByteDeltaWithoutEffect` and
+  `TestInputRepairFeasibilityCannotLoseOrWidenOwnerPostimage` reject assertion changes, old diagnostics/preimages and missing or
+  widened replay proofs before effect. `TestDriveRuntimeValidationInputCompileRepairPreservesCriteriaAcrossRestart` exercises
+  weak validation → new supplement with a compilation error → exact File repair → fresh all-of → final assessment/owner
+  delivery, with five interruption cuts, unchanged original inputs/startup and no extra provider calls. Fresh-load rejects
+  altered source diagnostics, manifest, commitment and replay proof. These remain fixed-fixture harness checks, not deployed
+  acceptance of the five-language LSP Goal;
+- `TestInputRepairTemplateUpgradeReopensReviewedPreviousDefault` checks the complete frozen `52643362` template on memory/file
+  repositories, repeated reopen and customized-default preservation. New activation may load reviewed current defaults; old
+  Run archives, sealed bindings and startup are not backfilled;
 
 - absent-target creation and existing-target revision-bound replacement are distinct;
 - one candidate contains at most one ordinary durable operation for each capability owner/canonical target; same-file edits are

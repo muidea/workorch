@@ -565,6 +565,7 @@ func cloneRuntimeCandidateContractManifestRaw(in RuntimeCandidateContractManifes
 
 func cloneRuntimeCandidateOperationManifestRaw(in RuntimeCandidateOperationManifest) RuntimeCandidateOperationManifest {
 	out := in
+	out.InputRepair = in.InputRepair.Clone()
 	out.TargetParameterBindings = cloneRuntimeTargetParameterBindings(in.TargetParameterBindings)
 	out.CandidateConstraints = cloneRuntimeStateRawSlice(in.CandidateConstraints, func(value RuntimeOperationCandidateConstraint) RuntimeOperationCandidateConstraint { return value })
 	out.ValueRules = cloneRuntimeStateRawSlice(in.ValueRules, func(value RuntimeOperationValueRule) RuntimeOperationValueRule {
@@ -1625,6 +1626,7 @@ func cloneRuntimeRepairClosureRaw(in RuntimeRepairClosure) RuntimeRepairClosure 
 
 func cloneRuntimeDispatchRepairCommitmentRaw(in RuntimeDispatchRepairCommitment) RuntimeDispatchRepairCommitment {
 	out := in
+	out.InputRepair = in.InputRepair.Clone()
 	out.Closure = cloneRuntimeRepairClosureRaw(in.Closure)
 	return out
 }
@@ -2176,6 +2178,8 @@ func cloneValidationCandidateRaw(in ValidationCandidate) ValidationCandidate {
 
 func cloneValidationFailureDiagnosticRaw(in ValidationFailureDiagnostic) ValidationFailureDiagnostic {
 	out := in
+	out.InputRepair = in.InputRepair.Clone()
+	out.InputLocations = cloneRuntimeStateRawSlice(in.InputLocations, func(value RuntimeValidationInputLocation) RuntimeValidationInputLocation { return value })
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
 	return out
 }

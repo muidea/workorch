@@ -80,6 +80,7 @@ type RuntimeCommandResult struct {
 	workspaceBehaviorTargetRefs        []string
 	workspaceProcessBehaviorTargetRefs []string
 	workspaceProcessBehaviorError      error
+	validationSourcesUnchanged         bool
 	// validationFailureTargetCandidatesInvalid records that the owner-private
 	// structured-output parser observed more candidates than the bounded
 	// validation-failure protocol permits. An empty TargetRefs slice alone cannot

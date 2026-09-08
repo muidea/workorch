@@ -188,6 +188,11 @@ load facts
   `RequireInputAddition` route 还要求同一 committed receipt 的 typed input addition 匹配原 required/native binding，且
   binding 尚无 supplement；不满足时同一私有 CAS 有界终止。该 flag 不提供任意输入编辑权限，SM-3 只接受一个 exact
   prospective input target，owner feasibility 后仅 SM-2 可以 seal；创建结算后仍 reopen 原 CWI 等待 fresh all-of validation。
+  `RequireInputRepair` 则是独立 existing-scope 路由：仅接受 exact original binding 的 typed input delta，经原 resource-owner
+  confirmation 进入 confirmed repair。SM-2 的初次 decision 与持久化 directive 均受同一 route kind 限制；SM-3 只封存
+  一个由 owner feasibility 证明 exact pre/postimage 的 operation。只读 compiler location 不授予 write authority，普通
+  implementation route 不能借用 input delta。其 source receipt、manifest、commitment 与 replay proof 在 seal/restart 均须
+  相符；仍用原 repair budget 和 fresh-validation handoff，不新增跨 owner 状态或隐式循环。
   原始 observation 必须完整保留，但不得反向选择 action、retry、ticket 或其它 terminal。
   canonical managed-validation rejected receipt 的 `receipt.TargetRefs` 仅保留 execution/entry lineage；
   `OriginalDiagnostic.TargetRefs` 与 `TargetObservation` 必须为空，candidate 只能位于最多八项的

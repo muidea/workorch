@@ -569,6 +569,10 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 	}
 	operation := command.Operation.Normalized()
 	failure, stale, replayProof := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithReplayProof(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
+	if repair := command.OperationAuthorization.InputRepair; repair != nil && failure == nil && stale == nil && !repair.MatchesReplayProof(replayProof) {
+		failure = fileOperationInfeasible(operation, "validation_input_postimage_mismatch", "candidate does not preserve the sealed validation input delta", operation.TargetRefs)
+		replayProof = nil
+	}
 	prerequisiteRequest := fileOperationSnapshotPrerequisiteRequest(operation, failure, command.CurrentTargetSnapshot)
 	constraintImpact := ownerFeasibilityConstraintImpact(operationAuthorizationTargetPolicy(command.OperationAuthorization), failure)
 	var violation *runtimecontract.RuntimeOperationCandidateConstraintViolation

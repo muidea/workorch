@@ -202,6 +202,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	if processBehaviorPath != "" {
 		output.workspaceProcessBehaviorTargetRefs, output.workspaceProcessBehaviorError = shellProcessBehaviorTargets(runCtx, execCommand, executionDirectory, processBehaviorPath, cmd.Env, request.ValidationScopeTargetRefs)
 		afterSources, sourceErr := shellEntrypointSourceSnapshot(executionDirectory)
+		output.validationSourcesUnchanged = sourceErr == nil && !shellWorkspaceTargetChangesChanged(shellWorkspaceTargetChanges(entrypointSources, afterSources))
 		if sourceErr != nil || shellWorkspaceTargetChangesChanged(shellWorkspaceTargetChanges(entrypointSources, afterSources)) {
 			output.workspaceProcessBehaviorTargetRefs = nil
 			output.workspaceProcessBehaviorError = fmt.Errorf("validation changed the observed Go implementation or verification inputs")
@@ -220,7 +221,6 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	}
 	if err != nil {
 		output.Status = "failed"
-		attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), processResourceStatus)
 		attachShellCommandFailureDiagnostics(&output, execCommand, err)
 		if output.FailureCode == "" && output.FailureReason == "" && output.Stage == "" {
 			output.Stage = "shell_command_failed"
@@ -228,6 +228,9 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 			output.FailureCode = "shell_exit_nonzero"
 		}
 		attachShellValidationFailureDiagnostic(&output, request, execCommand, exitCode, false, false, err)
+		// Compile input observations while the exact executed scratch preimage
+		// still exists; resource reporting also performs the owner's cleanup.
+		attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), processResourceStatus)
 		return finalizeShellResult(output, err)
 	}
 	afterWorkspace, observeErr := shellWorkspaceFileRevisions(deliverableDirectory, request.StateChanging || managedValidation)

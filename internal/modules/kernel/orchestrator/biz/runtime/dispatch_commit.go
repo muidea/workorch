@@ -292,6 +292,23 @@ func SealDispatchWithManifestAndPreSealAuthority(
 	authority RuntimeDispatchPreSealAuthority,
 ) (SealedDispatch, error) {
 	manifest = manifest.Normalized()
+	for _, authorization := range manifest.Operations {
+		if authorization.InputRepair == nil {
+			continue
+		}
+		if authority.RepairCommitment == nil || !runtimecontract.SameRuntimeValidationInputRepair(authorization.InputRepair, authority.RepairCommitment.InputRepair) {
+			return SealedDispatch{}, fmt.Errorf("runtime input repair seal has no exact source commitment")
+		}
+		matches := 0
+		for _, feasibility := range feasibilities {
+			if feasibility.Observation != nil && feasibility.Observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible && authorization.InputRepair.MatchesReplayProof(feasibility.ReplayProof) {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return SealedDispatch{}, fmt.Errorf("runtime input repair seal requires one exact owner pre/postimage proof")
+		}
+	}
 	repairRequired := manifest.State == runtimecontract.ConvergenceStateNeedStateChange &&
 		manifest.RepairPurpose == runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation
 	if repairRequired {

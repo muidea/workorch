@@ -711,6 +711,20 @@ func stateChangeDecision(base runtimecontract.RuntimeDecision, facts runtimecont
 	if len(acceptedKinds) == 0 && needsStateChangeForOwnerGroundedFailure(facts) {
 		acceptedKinds = ownerGroundedFailureRepairKinds(facts)
 	}
+	if needsStateChangeForOwnerGroundedFailure(facts) {
+		if route, found := confirmedValidationRepairRoute(facts); found {
+			// A confirmed resource supplies targets, not additional operation
+			// authority. Apply the same Profile boundary on the initial decision
+			// as on its persisted repair directive.
+			var declared []string
+			for _, kind := range acceptedKinds {
+				if contains(route.RepairOperationKinds, kind) {
+					declared = append(declared, kind)
+				}
+			}
+			acceptedKinds = declared
+		}
+	}
 	if len(acceptedKinds) == 0 {
 		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, "capability_unavailable", "state-change authority has no concrete runtime capability"), nil
 	}

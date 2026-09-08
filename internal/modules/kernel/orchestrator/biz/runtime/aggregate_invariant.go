@@ -576,10 +576,8 @@ func validateRuntimeCandidateFeasibilityBindings(a RuntimeAggregate) error {
 					return fmt.Errorf("runtime candidate feasibility operation %q prerequisite request has the wrong identity", operation.ID)
 				}
 			}
-			if observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityCandidateConstraintViolated {
-				if err := validateCandidateFeasibilityObservationBinding(catalogs, operation, feasibility, manifest); err != nil {
-					return err
-				}
+			if err := validateCandidateFeasibilityObservationBinding(catalogs, operation, feasibility, manifest); err != nil {
+				return err
 			}
 			if feasibility.ReplayProof != nil {
 				proof := feasibility.ReplayProof.Normalized()
@@ -1922,6 +1920,11 @@ func runtimeExpectedRepairSurfaceOwner(a RuntimeAggregate, observation runtimeco
 		if !matched {
 			return "", fmt.Errorf("validation failure repair owner does not match sealed Profile trigger")
 		}
+		for _, binding := range sourceBindings {
+			if binding.CoverageWorkItemID == coverageID && !route.AcceptsInputDiagnostic(diagnostic, binding) {
+				return "", fmt.Errorf("validation failure repair input does not match its independent Profile route and sealed proof")
+			}
+		}
 		if profileOwner != "" && profileOwner != route.RepairOwnerModuleID {
 			return "", fmt.Errorf("validation failure repair owner is ambiguous across sealed Profile declarations")
 		}
@@ -1936,6 +1939,9 @@ func runtimeExpectedRepairSurfaceOwner(a RuntimeAggregate, observation runtimeco
 	}
 
 	bindingOwner := ""
+	if diagnostic.InputRepair != nil {
+		return "", fmt.Errorf("validation input repair requires an explicit Profile route")
+	}
 	for _, binding := range sourceBindings {
 		proofMatched := false
 		for _, proof := range binding.Proofs {

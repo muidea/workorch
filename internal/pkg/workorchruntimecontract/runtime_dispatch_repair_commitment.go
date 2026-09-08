@@ -28,6 +28,7 @@ const (
 // OriginDispatchID remains unchanged across operation-governance resume hops.
 // No field is derived from current Focus, FailureTarget or RepairDirective.
 type RuntimeDispatchRepairCommitment struct {
+	InputRepair         *RuntimeValidationInputRepair `json:",omitempty"`
 	Purpose             RuntimeDispatchRepairPurpose
 	RepairOwnerModuleID string
 	OriginDispatchID    string
@@ -49,6 +50,7 @@ type RuntimeDispatchRepairCommitment struct {
 }
 
 func (c RuntimeDispatchRepairCommitment) Normalized() RuntimeDispatchRepairCommitment {
+	c.InputRepair = c.InputRepair.Clone()
 	c.Purpose = RuntimeDispatchRepairPurpose(strings.TrimSpace(string(c.Purpose)))
 	c.RepairOwnerModuleID = strings.TrimSpace(c.RepairOwnerModuleID)
 	c.OriginDispatchID = strings.TrimSpace(c.OriginDispatchID)
@@ -75,6 +77,14 @@ func (c RuntimeDispatchRepairCommitment) Clone() RuntimeDispatchRepairCommitment
 
 func (c RuntimeDispatchRepairCommitment) Validate() error {
 	c = c.Normalized()
+	if c.InputRepair != nil {
+		if err := c.InputRepair.Validate(); err != nil {
+			return err
+		}
+		if !sameStrings(c.Closure.GroundedTargetRefs, []string{c.InputRepair.TargetRef}) {
+			return fmt.Errorf("input repair commitment requires its exact input target")
+		}
+	}
 	if c.Purpose != RuntimeDispatchRepairPurposeConfirmedValidation {
 		return fmt.Errorf("runtime dispatch repair commitment has invalid purpose %q", c.Purpose)
 	}
@@ -98,6 +108,7 @@ func StableRuntimeDispatchRepairCommitmentHash(value RuntimeDispatchRepairCommit
 	value = value.Normalized()
 	h := sha256.New()
 	writeHashString(h, "runtime-dispatch-repair-commitment/v1")
+	writeRuntimeValidationInputRepairHash(h, value.InputRepair)
 	writeHashString(h, string(value.Purpose))
 	writeHashString(h, value.RepairOwnerModuleID)
 	writeHashString(h, value.OriginDispatchID)
@@ -123,7 +134,7 @@ func SameRuntimeDispatchRepairCommitment(left, right *RuntimeDispatchRepairCommi
 		return left == nil && right == nil
 	}
 	l, r := left.Normalized(), right.Normalized()
-	return l.Purpose == r.Purpose && l.RepairOwnerModuleID == r.RepairOwnerModuleID &&
+	return SameRuntimeValidationInputRepair(l.InputRepair, r.InputRepair) && l.Purpose == r.Purpose && l.RepairOwnerModuleID == r.RepairOwnerModuleID &&
 		l.OriginDispatchID == r.OriginDispatchID && l.FocusID == r.FocusID &&
 		SameRuntimeRepairClosure(&l.Closure, &r.Closure) &&
 		l.ConfirmationIdentityHash == r.ConfirmationIdentityHash && l.ConfirmationHash == r.ConfirmationHash &&

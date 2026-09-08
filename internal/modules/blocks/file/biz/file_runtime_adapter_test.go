@@ -786,7 +786,7 @@ func TestRuntimeAdapterProbeAllowsSelectedNewFileWriteTargetWithoutMutation(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inventory.TargetRefs) != 0 || len(inventory.SelectorRefs) != 1 || inventory.SelectorRefs[0] != runtimeFileSelectorWorkspaceRelativeNewTarget {
+	if len(inventory.TargetRefs) != 0 || len(inventory.SelectorRefs) != 2 || !containsString(inventory.SelectorRefs, runtimeFileSelectorWorkspaceRelativeNewTarget) || !containsString(inventory.SelectorRefs, runtimeFileSelectorWorkspaceRelativeExistingTarget) {
 		t.Fatalf("empty-workspace inventory = %+v, want bounded new-target selector", inventory)
 	}
 	patchType, content, target := "file_write", "package main\n", "main.go"

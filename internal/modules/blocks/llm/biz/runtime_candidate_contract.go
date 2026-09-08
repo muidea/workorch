@@ -69,6 +69,7 @@ type runtimeCandidateEffectPolicyProjection struct {
 }
 
 type runtimeCandidateOperationContractProjection struct {
+	InputRepair                 *runtimecontract.RuntimeValidationInputRepair         `json:"inputRepair,omitempty"`
 	Kind                        string                                                `json:"kind"`
 	OwnerModuleID               string                                                `json:"ownerModuleId,omitempty"`
 	AllowedOperationFields      []string                                              `json:"allowedOperationFields,omitempty"`
@@ -371,6 +372,7 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 		auxiliaryVariantSelectable := hasAuxiliaryRule && auxiliaryRule.VariantID == ""
 		target := operation.Target.Normalized()
 		projection := runtimeCandidateOperationContractProjection{
+			InputRepair:                 operation.InputRepair.Clone(),
 			Kind:                        operation.Kind,
 			OwnerModuleID:               operation.OwnerModuleID,
 			AllowedOperationFields:      allowedWireFields,
@@ -409,6 +411,9 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 		}
 		if len(operation.TargetParameterBindings) != 0 {
 			projection.Rules = append([]string{"Executable rules describe the locally compiled operation. Target-bound parameters are supplied from sealed owner preimages, not by the provider; omit them even when an executable rule requires their presence."}, projection.Rules...)
+		}
+		if operation.InputRepair != nil {
+			projection.Rules = append(projection.Rules, "Apply only the exact input symbol corrections. Preserve every other byte, declaration, assertion and original check. The resource owner must prove both sealed content hashes before any write; this repair grants no validation credit.")
 		}
 		for _, authorization := range operation.BindingAuthorizations {
 			if !runtimeCandidateWireKindSelectsBinding(wire, operation.Kind, authorization.RequiredOperationRef) ||

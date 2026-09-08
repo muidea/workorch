@@ -17,6 +17,7 @@ func KnownBuiltinContentRevision(kind, id, contentHash string) string {
 // canonical content hashing. Historical runtime/configuration data is never
 // decoded or rewritten by this table.
 var reviewedBuiltinRevisions = [...]struct{ kind, id, contentHash, revision string }{
+	{"workspace_template", "software-dev", "workspace-template-content-sha256:7794dcd3da96cb8a83fecf49de640e41cc5ca09632fba55f7a712f5f4ff5edc8", "52643362"},
 	{"workspace_template", "software-dev", "workspace-template-content-sha256:94f2349ea393bcdd7a3938afc3ed801f1c0b937794e2e52a73ccdeab522b6dea", "93a5d468"},
 	{"soul", "soul-software-dev-planning", "soul-content-sha256:c597f2b4bcab3e39766f7d90dda5d623ffe6d72a5e2d677fe730399ab1a51306", "93a5d468"},
 	{"soul", "soul-software-dev-execution", "soul-content-sha256:7763a12469329ff4896807800d4bc1eafd128021b1e929e6008f78a7b27545ef", "93a5d468"},

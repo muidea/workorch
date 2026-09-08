@@ -370,6 +370,7 @@ func writeRuntimeOriginalDiagnosticTypedFactsHash(h interface{ Write([]byte) (in
 		writeHashString(h, value.Reason)
 		writeHashString(h, value.RecommendedEvidenceTargetType)
 		writeRuntimeValidationInputAdditionHash(h, value.InputAddition)
+		writeRuntimeValidationInputDiagnosticHash(h, *value)
 		writeHashString(h, value.Stage)
 		writeHashString(h, value.Operation)
 		writeHashString(h, value.CommandKind)
@@ -486,6 +487,11 @@ func (d *RuntimeOriginalDiagnostic) Validate() error {
 	for index, violation := range canonical.SemanticViolations {
 		if err := violation.Validate(); err != nil {
 			return fmt.Errorf("original diagnostic semantic violation %d: %w", index, err)
+		}
+	}
+	if canonical.ValidationDiagnostic != nil {
+		if err := validateRuntimeValidationInputDiagnostic(*canonical.ValidationDiagnostic); err != nil {
+			return err
 		}
 	}
 	if canonical.ValidationDiagnostic != nil && canonical.ValidationDiagnostic.InputAddition != (RuntimeValidationInputAddition{}) {

@@ -135,6 +135,16 @@ The current adapter publishes this addition only for a single native attestation
 explicit extension. Template identity and Runtime core remain language-neutral; this does not claim general multilingual or
 arbitrary-Goal trusted-grader support.
 
+The independent `input-symbol-case-to-attested-patch` route matches only Shell managed validation's
+`validation_build_failed / validation_input / validation_input_symbol_case_mismatch` tuple. It declares
+`RequireInputRepair=true`, File `patch/apply`, existing-owner scope and `validation_input_maintenance`, without increasing the
+shared two-attempt repair bound. The v4 Shell owner may attest only unambiguous same-file data-identifier case corrections in
+the exact bound supplement, with bounded compiler locations and byte-exact pre/postimage hashes. File independently confirms
+the existing input and previews the same delta; SM-3 seals one operation and its replay proof. All other bytes, original
+checks, assertions and expected values remain unchanged. Ambiguous/unsupported compilation failures, assertion failures and
+missing/mismatched contracts do not gain input-edit authority. Fresh original + supplemental validation is still required for
+credit. This is criterion-preserving input maintenance, not a general test-repair permission or a substitute for product acceptance.
+
 - every required Profile acceptance/deliverable source maps to one admitted exact CWI; the activation compiler emits its canonical
   exact evidence declaration, while the Profile supplies nonempty supported evidence kinds and at least one accepted operation
   capable of returning the matching typed owner receipt;

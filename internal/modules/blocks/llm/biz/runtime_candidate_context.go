@@ -133,16 +133,17 @@ type runtimeCandidateProviderSafeFailureProjection struct {
 }
 
 type runtimeCandidateValidationDiagnosticProjection struct {
-	InputAddition      runtimecontract.RuntimeValidationInputAddition `json:"inputAddition,omitzero"`
-	Class              string                                         `json:"class,omitempty"`
-	OwnerCode          string                                         `json:"ownerCode,omitempty"`
-	EvidenceTargetType string                                         `json:"evidenceTargetType,omitempty"`
-	Operation          string                                         `json:"operation,omitempty"`
-	CommandKind        string                                         `json:"commandKind,omitempty"`
-	ExitCode           int                                            `json:"exitCode,omitempty"`
-	TimedOut           bool                                           `json:"timedOut,omitempty"`
-	UnavailableCommand string                                         `json:"unavailableCommand,omitempty"`
-	TargetRefs         []string                                       `json:"targetRefs,omitempty"`
+	InputLocations     []runtimecontract.RuntimeValidationInputLocation `json:"inputLocations,omitempty"`
+	InputAddition      runtimecontract.RuntimeValidationInputAddition   `json:"inputAddition,omitzero"`
+	Class              string                                           `json:"class,omitempty"`
+	OwnerCode          string                                           `json:"ownerCode,omitempty"`
+	EvidenceTargetType string                                           `json:"evidenceTargetType,omitempty"`
+	Operation          string                                           `json:"operation,omitempty"`
+	CommandKind        string                                           `json:"commandKind,omitempty"`
+	ExitCode           int                                              `json:"exitCode,omitempty"`
+	TimedOut           bool                                             `json:"timedOut,omitempty"`
+	UnavailableCommand string                                           `json:"unavailableCommand,omitempty"`
+	TargetRefs         []string                                         `json:"targetRefs,omitempty"`
 }
 
 type runtimeCandidateProviderSafeEvidenceProjection struct {
@@ -564,6 +565,7 @@ func runtimeProviderSafeFailure(value *runtimecontract.FailureFact) *runtimeCand
 	if failure.ValidationDiagnostic != nil {
 		d := failure.ValidationDiagnostic.Normalized()
 		ret.ValidationDiagnostic = &runtimeCandidateValidationDiagnosticProjection{Class: d.Class, OwnerCode: d.OwnerCode, InputAddition: d.InputAddition,
+			InputLocations:     append([]runtimecontract.RuntimeValidationInputLocation(nil), d.InputLocations...),
 			EvidenceTargetType: d.RecommendedEvidenceTargetType, Operation: d.Operation, CommandKind: d.CommandKind,
 			ExitCode: d.ExitCode, TimedOut: d.TimedOut, UnavailableCommand: d.UnavailableCommand, TargetRefs: append([]string(nil), d.TargetRefs...)}
 	}

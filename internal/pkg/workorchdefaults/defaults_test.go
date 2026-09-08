@@ -963,7 +963,7 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 						t.Fatalf("dodItem validation failure repair convergence = %+v", repair)
 					}
 					routes, ok := repair["routes"].([]any)
-					if !ok || len(routes) != 4 {
+					if !ok || len(routes) != 5 {
 						t.Fatalf("dodItem validation failure repair routes = %+v", repair["routes"])
 					}
 					routesByID := make(map[string]map[string]any, len(routes))
@@ -982,6 +982,14 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 					kinds, _ := addition["repairOperationKinds"].([]any)
 					if len(kinds) != 1 || kinds[0] != "file/write" {
 						t.Fatal("input addition may overwrite existing tests")
+					}
+					inputRepair := routesByID["input-symbol-case-to-attested-patch"]
+					repairKinds, _ := inputRepair["repairOperationKinds"].([]any)
+					if inputRepair["requireInputRepair"] != true || inputRepair["requireInputAddition"] == true ||
+						inputRepair["triggerEvidenceTargetType"] != "validation_input" || inputRepair["triggerOwnerDiagnosticCode"] != "validation_input_symbol_case_mismatch" ||
+						inputRepair["repairTargetPolicy"] != "existing_owner_scope" || inputRepair["repairTargetRole"] != "validation_input_maintenance" ||
+						len(repairKinds) != 1 || repairKinds[0] != "patch/apply" {
+						t.Fatalf("input repair lost its independent exact-content gate: %+v", inputRepair)
 					}
 					expectedRoutes := map[string]struct {
 						diagnosticClass string

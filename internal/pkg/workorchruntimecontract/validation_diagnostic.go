@@ -1,6 +1,9 @@
 package workorchruntimecontract
 
-import "strings"
+import (
+	"reflect"
+	"strings"
+)
 
 const (
 	ValidationFailureDiagnosticSchemaVersion = "workorch.validationFailureDiagnostic"
@@ -35,30 +38,35 @@ const (
 	ValidationEvidenceTargetBehaviorEvidence   = "behavior_evidence"
 	ValidationEvidenceTargetCoverageBinding    = "coverage_binding"
 	ValidationEvidenceTargetFailureSurface     = "failure_surface"
+	ValidationEvidenceTargetValidationInput    = "validation_input"
 )
 
 type ValidationFailureDiagnostic struct {
-	InputAddition                 RuntimeValidationInputAddition `json:"inputAddition,omitzero"`
-	SchemaVersion                 string                         `json:"schemaVersion,omitempty"`
-	Class                         string                         `json:"class,omitempty"`
-	OwnerCode                     string                         `json:"ownerCode,omitempty"`
-	Reason                        string                         `json:"reason,omitempty"`
-	RecommendedEvidenceTargetType string                         `json:"recommendedEvidenceTargetType,omitempty"`
-	Stage                         string                         `json:"stage,omitempty"`
-	Operation                     string                         `json:"operation,omitempty"`
-	CommandKind                   string                         `json:"commandKind,omitempty"`
-	ExitCode                      int                            `json:"exitCode,omitempty"`
-	TimedOut                      bool                           `json:"timedOut,omitempty"`
-	CommandPolicyViolation        bool                           `json:"commandPolicyViolation,omitempty"`
-	UnavailableCommand            string                         `json:"unavailableCommand,omitempty"`
-	TargetRefs                    []string                       `json:"targetRefs,omitempty"`
-	ObservationType               string                         `json:"observationType,omitempty"`
-	EvidenceMode                  string                         `json:"evidenceMode,omitempty"`
-	StdoutPreview                 string                         `json:"stdoutPreview,omitempty"`
-	StderrPreview                 string                         `json:"stderrPreview,omitempty"`
+	InputRepair                   *RuntimeValidationInputRepair    `json:"inputRepair,omitempty"`
+	InputLocations                []RuntimeValidationInputLocation `json:"inputLocations,omitempty"`
+	InputAddition                 RuntimeValidationInputAddition   `json:"inputAddition,omitzero"`
+	SchemaVersion                 string                           `json:"schemaVersion,omitempty"`
+	Class                         string                           `json:"class,omitempty"`
+	OwnerCode                     string                           `json:"ownerCode,omitempty"`
+	Reason                        string                           `json:"reason,omitempty"`
+	RecommendedEvidenceTargetType string                           `json:"recommendedEvidenceTargetType,omitempty"`
+	Stage                         string                           `json:"stage,omitempty"`
+	Operation                     string                           `json:"operation,omitempty"`
+	CommandKind                   string                           `json:"commandKind,omitempty"`
+	ExitCode                      int                              `json:"exitCode,omitempty"`
+	TimedOut                      bool                             `json:"timedOut,omitempty"`
+	CommandPolicyViolation        bool                             `json:"commandPolicyViolation,omitempty"`
+	UnavailableCommand            string                           `json:"unavailableCommand,omitempty"`
+	TargetRefs                    []string                         `json:"targetRefs,omitempty"`
+	ObservationType               string                           `json:"observationType,omitempty"`
+	EvidenceMode                  string                           `json:"evidenceMode,omitempty"`
+	StdoutPreview                 string                           `json:"stdoutPreview,omitempty"`
+	StderrPreview                 string                           `json:"stderrPreview,omitempty"`
 }
 
 func (d ValidationFailureDiagnostic) Normalized() ValidationFailureDiagnostic {
+	d.InputRepair = d.InputRepair.Clone()
+	d.InputLocations = append([]RuntimeValidationInputLocation(nil), d.InputLocations...)
 	d.InputAddition = d.InputAddition.Normalized()
 	d.SchemaVersion = strings.TrimSpace(d.SchemaVersion)
 	d.Class = strings.TrimSpace(d.Class)
@@ -92,7 +100,7 @@ func sameValidationFailureDiagnostic(left, right *ValidationFailureDiagnostic) b
 	}
 	l := left.Normalized()
 	r := right.Normalized()
-	return l.InputAddition == r.InputAddition && l.SchemaVersion == r.SchemaVersion && l.Class == r.Class && l.OwnerCode == r.OwnerCode && l.Reason == r.Reason &&
+	return SameRuntimeValidationInputRepair(l.InputRepair, r.InputRepair) && reflect.DeepEqual(l.InputLocations, r.InputLocations) && l.InputAddition == r.InputAddition && l.SchemaVersion == r.SchemaVersion && l.Class == r.Class && l.OwnerCode == r.OwnerCode && l.Reason == r.Reason &&
 		l.RecommendedEvidenceTargetType == r.RecommendedEvidenceTargetType && l.Stage == r.Stage &&
 		l.Operation == r.Operation && l.CommandKind == r.CommandKind && l.ExitCode == r.ExitCode &&
 		l.TimedOut == r.TimedOut && l.CommandPolicyViolation == r.CommandPolicyViolation &&

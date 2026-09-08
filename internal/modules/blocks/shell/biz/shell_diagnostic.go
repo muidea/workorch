@@ -90,6 +90,20 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 			diagnostic.InputAddition = shellValidationInputAddition(check)
 		}
 	}
+	if class == runtimemodel.ValidationDiagnosticBuildFailed {
+		diagnostic.InputLocations, diagnostic.InputRepair = shellValidationInputCompileFact(*output, request, execCommand)
+		if len(diagnostic.InputLocations) != 0 {
+			diagnostic.RecommendedEvidenceTargetType = runtimemodel.ValidationEvidenceTargetValidationInput
+			diagnostic.OwnerCode = "validation_input_compile_failed"
+			diagnostic.TargetRefs = nil
+			location := diagnostic.InputLocations[0]
+			diagnostic.Reason = fmt.Sprintf("validation input %s:%d:%d: %s %s", location.TargetRef, location.Line, location.Column, location.Code, location.Symbol)
+			if diagnostic.InputRepair != nil {
+				diagnostic.OwnerCode = shellInputSymbolRepairCode
+				diagnostic.TargetRefs = []string{diagnostic.InputRepair.TargetRef}
+			}
+		}
+	}
 	output.ValidationFailureDiagnostic = diagnostic
 	output.RuntimeDiagnostics.ValidationFailureDiagnostic = diagnostic
 	if class == runtimemodel.ValidationDiagnosticCommandInvalid {
@@ -615,6 +629,9 @@ func shellCommandNotFound(err error) bool {
 func finalizeShellResult(output RuntimeCommandResult, executeErr error) (RuntimeCommandResult, error) {
 	output.FailureCode = firstNonEmptyShellString(output.FailureCode, output.FailureReason, output.Stage)
 	baseMessage := firstNonEmptyShellString(output.FailureMessage, output.Reason, errorString(executeErr), output.EvidenceReason)
+	if output.ValidationFailureDiagnostic != nil && len(output.ValidationFailureDiagnostic.InputLocations) != 0 {
+		baseMessage = output.ValidationFailureDiagnostic.Reason
+	}
 	output.FailureMessage = enrichShellFailureMessage(baseMessage, output)
 	summary := firstNonEmptyShellString(output.Summary, output.Status)
 	if summary == "" && output.Command != "" {

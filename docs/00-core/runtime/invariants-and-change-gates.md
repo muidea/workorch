@@ -83,6 +83,11 @@ purpose、Focus/bindings 与 owner admissibility catalog，其 hash 是 dispatch
 还包括 source/grant 派生的 completed/claimed execution 与 fence/key）必须在一次 typed pre-seal builder 中完成，然后仅计算一次
 最终 authority hash并 Validate。builder 返回后补写 authority 或为补写内容重算 hash均属 SM-3 边界违规。
 
+输入维护的可选 `InputRepair` 也属于此 pre-seal authority：独立 Profile route、原 validation binding、原 owner receipt
+与 resource-owner exact pre/postimage proof 必须共同反证 manifest/commitment。只凭诊断位置、当前 target hash、candidate
+自报修复内容或同步重算自身 hash 都不足以授权。测试须覆盖 exact delta、夹带断言、旧诊断/输入、缺失 proof、
+篡改 source/manifest/commitment、seal 前后与 receipt/fresh-validation 后重启；empty extension 必须保留旧 JSON/hash。
+
 operation-scoped governance必须保存恰好一个ticket/approval owner identity，以及resolution、dependency、subject、
 receipt hash、ExecutionKey、fence、effect与sealed idempotency binding。continue只恢复suspended binding指向且未列入source
 `CompletedOperationIDs`的exact `owner_committed` execution；保留source governance receipt/history，新resume execution

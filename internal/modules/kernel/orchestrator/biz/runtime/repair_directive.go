@@ -345,13 +345,15 @@ func confirmedValidationRepairRoute(facts runtimecontract.RuntimeFacts) (runtime
 	if original == nil {
 		return runtimecontract.RuntimeValidationFailureRepairRoute{}, false
 	}
-	return declaration.ValidationFailureRepairConvergence.RouteForTrigger(
+	route, found := declaration.ValidationFailureRepairConvergence.RouteForTrigger(
 		original.OwnerModuleID,
 		diagnostic.Operation,
 		diagnostic.Class,
 		diagnostic.RecommendedEvidenceTargetType,
 		diagnostic.OwnerCode,
 	)
+	binding, bound := coverageEvidenceBindingForCoverage(facts.Focus, facts.Focus.CoverageWorkItemIDs[0])
+	return route, found && bound && route.AcceptsInputDiagnostic(diagnostic, binding)
 }
 
 // repairClosureRequiredEvidenceKinds is canonical SM-2 repair sequencing. It

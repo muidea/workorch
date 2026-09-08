@@ -97,6 +97,11 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 				dispatch.RepairCommitment.Normalized().OriginDispatchID != dispatch.ID {
 				return fmt.Errorf("accepted runtime candidate attempt %q omitted its manifest-required repair commitment (session=%t attempt=%t dispatch=%t)", attempt.DispatchID, session.RepairCommitment != nil, attempt.AdmissionRepairCommitment != nil, dispatch.RepairCommitment != nil)
 			}
+			for _, authorization := range manifest.Operations {
+				if !SameRuntimeValidationInputRepair(authorization.InputRepair, dispatch.RepairCommitment.InputRepair) {
+					return fmt.Errorf("accepted input repair manifest differs from sealed source commitment")
+				}
+			}
 		} else if session.RepairCommitment != nil || attempt.AdmissionRepairCommitment != nil || dispatch.RepairCommitment != nil {
 			return fmt.Errorf("accepted runtime candidate attempt carries a repair commitment without manifest purpose")
 		}

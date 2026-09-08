@@ -134,6 +134,7 @@ func (p RuntimeCandidateOperationSetPolicy) Validate(state ConvergenceState) err
 // parameter/variant contract, effect/coverage/dependency constraints, one
 // TargetPolicy, and snapshot/revision identity. It is not a second state object.
 type RuntimeCandidateOperationManifest struct {
+	InputRepair             *RuntimeValidationInputRepair   `json:",omitempty"`
 	TargetParameterBindings []RuntimeTargetParameterBinding `json:",omitempty"`
 	Kind                    string
 	OwnerModuleID           string
@@ -207,6 +208,7 @@ func (a RuntimeOperationBindingAuthorization) Normalized() RuntimeOperationBindi
 // values: the compiler never reacquires inventory, never expands truncated
 // lists, and never invents domain paths.
 type RuntimeCandidateManifestOwnerFacts struct {
+	InputRepair                   *RuntimeValidationInputRepair
 	TargetSelection               *RuntimeTargetSelection
 	OperationAdmissibilities      []RuntimeOperationAdmissibility
 	ValidationRecipes             []RuntimeValidationRecipe
@@ -236,7 +238,11 @@ func RuntimeCandidateManifestOwnerFactsFromResources(resources RuntimeResourceFa
 // state transition, provider rendering, or owner execution.
 func RuntimeCandidateManifestOwnerFactsFromContext(context RuntimeCandidateContext) RuntimeCandidateManifestOwnerFacts {
 	context = context.Normalized()
-	return RuntimeCandidateManifestOwnerFactsFromResources(context.Resources).Normalized()
+	facts := RuntimeCandidateManifestOwnerFactsFromResources(context.Resources)
+	if context.RequiredState == ConvergenceStateNeedStateChange && context.Failure != nil && context.Failure.ValidationDiagnostic != nil {
+		facts.InputRepair = context.Failure.ValidationDiagnostic.InputRepair.Clone()
+	}
+	return facts.Normalized()
 }
 
 // RuntimeValidationRecipesFromOperationAdmissibilities returns the
@@ -297,6 +303,7 @@ func RuntimeCandidateManagedValidationRecipeSnapshot(manifest RuntimeCandidateCo
 }
 
 func (f RuntimeCandidateManifestOwnerFacts) Normalized() RuntimeCandidateManifestOwnerFacts {
+	f.InputRepair = f.InputRepair.Clone()
 	if f.TargetSelection != nil {
 		selection := f.TargetSelection.Normalized()
 		f.TargetSelection = &selection
@@ -337,6 +344,9 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 	switch decision.State {
 	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation:
 		manifest.MaxOperationCount = RuntimeCandidateOperationMaxCount
+		if ownerFacts.InputRepair != nil {
+			manifest.MaxOperationCount = 1
+		}
 		if len(required.CoverageWorkItemIDs) != 0 {
 			if err := ValidateCoverageEvidenceBindingsForFocus(decision.Focus, decision.AuthoritySnapshot.DefinitionRevision); err != nil {
 				return RuntimeCandidateContractManifest{}, fmt.Errorf("coverage_binding_unavailable: %w", err)
@@ -457,7 +467,11 @@ func ValidateRuntimeCandidateContractManifestForSealedDecision(manifest RuntimeC
 	}
 	switch decision.State {
 	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation:
-		if manifest.MaxOperationCount != RuntimeCandidateOperationMaxCount {
+		maxOperations := RuntimeCandidateOperationMaxCount
+		if len(manifest.Operations) == 1 && manifest.Operations[0].InputRepair != nil {
+			maxOperations = 1
+		}
+		if manifest.MaxOperationCount != maxOperations {
 			return fmt.Errorf("runtime operation candidate manifest has invalid cardinality ceiling")
 		}
 	case ConvergenceStateNeedAssessment:
@@ -576,6 +590,7 @@ func (m RuntimeCandidateContractManifest) Normalized() RuntimeCandidateContractM
 }
 
 func (m RuntimeCandidateOperationManifest) Normalized() RuntimeCandidateOperationManifest {
+	m.InputRepair = m.InputRepair.Clone()
 	m.Kind = CanonicalRuntimeBlockKind(m.Kind)
 	m.OwnerModuleID = strings.TrimSpace(m.OwnerModuleID)
 	m.AllowedOperationFields = normalizeStrings(m.AllowedOperationFields)
@@ -701,6 +716,15 @@ func ValidateRuntimeCandidateContractManifestRawCanonical(manifest RuntimeCandid
 		return fmt.Errorf("runtime candidate contract manifest is not raw-canonical")
 	}
 	for _, operation := range manifest.Operations {
+		if operation.InputRepair != nil {
+			if err := operation.InputRepair.Validate(); err != nil {
+				return err
+			}
+			if manifest.RepairPurpose != RuntimeDispatchRepairPurposeConfirmedValidation || len(manifest.Operations) != 1 || manifest.MaxOperationCount != 1 || len(manifest.Bindings) != 1 ||
+				!operation.InputRepair.MatchesBinding(manifest.Bindings[0]) || !sameStrings(operation.Target.AllowedTargetRefs(), []string{operation.InputRepair.TargetRef}) {
+				return fmt.Errorf("validation input repair requires one confirmed operation with exact input and original proof binding")
+			}
+		}
 		if err := validateRuntimeOperationValueRuleDeclarations(operation.Kind, operation.Parameters, operation.ValueRules, operation.Variants); err != nil {
 			return fmt.Errorf("runtime candidate contract manifest operation %q value rules: %w", operation.Kind, err)
 		}
@@ -832,6 +856,7 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashString(h, operation.Kind)
 		writeHashString(h, operation.OwnerModuleID)
 		writeRuntimeTargetParameterBindingsHash(h, operation.TargetParameterBindings)
+		writeRuntimeValidationInputRepairHash(h, operation.InputRepair)
 		writeHashStrings(h, operation.AllowedOperationFields)
 		writeHashStrings(h, operation.RequiredOperationFields)
 		writeHashStrings(h, operation.AllowedVariantIDs)
@@ -1000,6 +1025,7 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		}
 	}
 	operationManifest := RuntimeCandidateOperationManifest{
+		InputRepair:                 ownerFacts.InputRepair.Clone(),
 		TargetParameterBindings:     runtimeCandidateTargetParameterBindings(contract.Kind, target, ownerFacts.OperationAdmissibilities, descriptor.OwnerModuleID),
 		Kind:                        contract.Kind,
 		OwnerModuleID:               descriptor.OwnerModuleID,

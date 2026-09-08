@@ -576,6 +576,12 @@ func duplicateCandidateFeasibilityDisposition(attempts []runtimecontract.Runtime
 }
 
 func validateCandidateFeasibilityObservationBinding(catalogs []runtimecontract.RuntimeOperationAdmissibility, operation runtimecontract.RuntimeOperation, record runtimecontract.RuntimeCandidateFeasibilityRecord, manifest runtimecontract.RuntimeCandidateContractManifest) error {
+	for _, authorization := range manifest.Operations {
+		if authorization.Kind == operation.Kind && authorization.InputRepair != nil && record.Observation != nil &&
+			record.Observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible && !authorization.InputRepair.MatchesReplayProof(record.ReplayProof) {
+			return fmt.Errorf("%w: input repair feasibility must prove the sealed exact content delta", common.ErrConflict)
+		}
+	}
 	if record.Observation == nil || record.Observation.Outcome != runtimecontract.RuntimeOwnerFeasibilityCandidateConstraintViolated {
 		return nil
 	}

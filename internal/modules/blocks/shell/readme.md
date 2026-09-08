@@ -88,6 +88,15 @@ v4 的 `shell/go-test-input/conjunctive-entrypoint-test/v2` 允许 exact 补充�
 初始化的 var，仍拒绝 init、TestMain、method、额外 Test 定义与不可达的 testing.T 断言。旧输入只被重新检查，不被改写；
 原检查和补充检查仍是 all-of。结构无效或语义证据不足不授权改写判据，也不自动扩大 File repair surface。
 
+v4 对 exact bound supplement 的编译失败另发布最多 8 项 `InputLocations`（相对路径、行、列、封闭 code/symbol），
+它们是诊断而非 writable target。仅当实际 compiler 的全部相关错误均为同一文件中的 undefined ASCII identifier，且
+唯一同文件 package const/var 声明只差大小写、无局部 shadow、位置命中 unresolved AST identifier、执行副本源码未变且
+输出未截断时，Shell 才发布 `InputRepair`：原 required/protocol/native/supplement identity、exact target、
+before/after SHA-256 和有限 corrections。只读解析上限 256 KiB；函数/类型、歧义、断言失败或其它编译错误均不生成修复。
+该 postimage 只替换指定 identifier，所有其它字节（包括断言与 expected value）不变。事实须在清理执行副本前产生；Shell
+不得修改 workspace。Profile 独立授权、File 确认/预览和 SM-3 seal 之后才可能产生 durable repair，随后仍须 fresh all-of。
+`biz/validation_input_repair_test.go` 校准真实三处大小写编译错误、诊断完整反馈，以及歧义/shadow/旧协议/截断/源码变化负例。
+
 Shell 在同一个 managed scratch/session 内生成固定 test-exec wrapper，恢复被 go test 覆盖的 owner GOCOVERDIR；
 GOFLAGS 为 Go-built 子进程启用覆盖插桩，真实执行数据由 Go covdata 转换，不从 stdout 自报或 caller 路径导入。转换共用
 operation deadline，并额外限时 10 秒；最多 128 个 artifact、8 MiB 输入以及既有 coverage record 上界，非 regular-file、

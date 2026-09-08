@@ -46,6 +46,7 @@ func ownerFeasibilityConstraintImpact(targetPolicy runtimecontract.RuntimeOperat
 }
 
 var ownerFeasibilityCategories = map[string]runtimecontract.RuntimeOwnerFeasibilityCategory{
+	"validation_input_postimage_mismatch": runtimecontract.RuntimeOwnerFeasibilityCategoryPolicyDisallowed,
 	"operation_target_missing":            runtimecontract.RuntimeOwnerFeasibilityCategoryResourceAbsent,
 	"patch_target_missing":                runtimecontract.RuntimeOwnerFeasibilityCategoryResourceAbsent,
 	"operation_target_not_regular":        runtimecontract.RuntimeOwnerFeasibilityCategoryTargetNotRegular,

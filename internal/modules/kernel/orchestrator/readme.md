@@ -119,6 +119,15 @@ capability resource state。
   解释语法；既有补充输入无效时不允许新 acquisition 穿过 fresh-validation 的 Definition-proof seal guard。
   SM-1 不变；SM-4 重启/投影不能推断该合同。`validation_input_addition_test.go` 覆盖 duplicate/stale/restart、无效合同、
   exact target seal 与创建零 credit；`default_native_validation_integration_test.go` 校准真实 File/Shell receipt 和 matcher。
+- criterion-preserving 输入修复复用 confirmed-validation transaction：Profile 的独立 `RequireInputRepair` route 必须匹配
+  rejected receipt 的 typed `InputRepair`、原 required/protocol/native/supplement binding 和唯一 input target；普通实现 route
+  不可借用该事实。SM-2 初次 decision 与后续 directive 均按 exact route 限制 kinds，不从 capability union 扩权。
+  File 确认 existing regular target 后，SM-3 manifest 封存同一 bounded delta，最多一项 operation；File feasibility 的
+  ReplayProof 必须证明 exact before/after hash。manifest、pre-seal commitment、source receipt 与 execution proof 在
+  final seal/fresh-load 逐一核对，缺失、替换或放宽均拒绝。repair 零 validation credit，仍由原 SM-2 私有事件转 fresh all-of；
+  不增加 repair/recovery budget，不修改 SM-1、旧归档或 sealed startup，SM-4 只恢复该 transaction。
+  `biz/runtime_validation_input_addition_mainline_test.go` 的 compile-repair 场景覆盖真实 File/Shell、5 个 crash cuts、
+  零额外 provider 调用与终态归档 tamper；`biz/runtime/validation_input_repair_test.go` 校准 exact feasibility proof gate。
 - candidate proposal 持久化后，SM-3 必须按 manifest-declared `CandidateConstraints` 的 kind 获取 exact owner fact。
   constraints 是 operation-level 与 selected variant-level 的合并合同；无 variant 的 operation 同样受约束，不能创建虚拟 variant。
   已声明 dynamic constraint 的 operation 在缺少 owner admissibility 时禁止走 static capability seal lane。

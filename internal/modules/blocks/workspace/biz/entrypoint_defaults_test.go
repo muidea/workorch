@@ -21,9 +21,21 @@ import (
 //go:embed testdata/software-dev-template-93a5d468.json
 var preEntrypointTemplateJSON []byte
 
+//go:embed testdata/software-dev-template-52643362.json
+var preInputRepairTemplateJSON []byte
+
 func TestEntrypointTemplateUpgradeReopensReviewedPreviousDefault(t *testing.T) {
+	assertReviewedTemplateUpgrade(t, preEntrypointTemplateJSON, "93a5d468")
+}
+
+func TestInputRepairTemplateUpgradeReopensReviewedPreviousDefault(t *testing.T) {
+	assertReviewedTemplateUpgrade(t, preInputRepairTemplateJSON, "52643362")
+}
+
+func assertReviewedTemplateUpgrade(t *testing.T, previous []byte, revision string) {
+	t.Helper()
 	var raw workorchmanagementcontract.WorkspaceTemplate
-	if err := json.Unmarshal(preEntrypointTemplateJSON, &raw); err != nil {
+	if err := json.Unmarshal(previous, &raw); err != nil {
 		t.Fatal(err)
 	}
 	old, err := builtinWorkspaceTemplate(raw)
@@ -31,8 +43,8 @@ func TestEntrypointTemplateUpgradeReopensReviewedPreviousDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := workspacemodel.StableWorkspaceTemplateContentHash(old)
-	if workorchdefaults.KnownBuiltinContentRevision("workspace_template", old.ID, hash) != "93a5d468" {
-		t.Fatalf("pre-entrypoint template is not reviewed: %s", hash)
+	if workorchdefaults.KnownBuiltinContentRevision("workspace_template", old.ID, hash) != revision {
+		t.Fatalf("previous template %s is not reviewed: %s", revision, hash)
 	}
 	for _, backend := range []string{"memory", "file"} {
 		t.Run(backend, func(t *testing.T) {

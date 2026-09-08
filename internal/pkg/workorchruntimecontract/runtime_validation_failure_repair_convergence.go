@@ -31,6 +31,7 @@ type RuntimeValidationFailureRepairConvergence struct {
 // owner-backed state-change repair surface. Diagnostic prose, stdout/stderr and
 // target guesses never participate in route selection.
 type RuntimeValidationFailureRepairRoute struct {
+	RequireInputRepair         bool `json:",omitempty"`
 	RequireInputAddition       bool `json:",omitempty"`
 	ID                         string
 	TriggerOwnerModuleID       string
@@ -168,6 +169,10 @@ func (r RuntimeValidationFailureRepairRoute) Validate() error {
 	if r.RequireInputAddition && r.RepairTargetPolicy != RuntimeOperationTargetPolicyProspectiveOwnerTarget {
 		return fmt.Errorf("validation input addition requires create-only prospective repair")
 	}
+	if r.RequireInputRepair && (r.RequireInputAddition || r.RepairTargetPolicy != RuntimeOperationTargetPolicyExistingOwnerScope ||
+		len(r.RepairOperationKinds) != 1 || r.RepairOperationKinds[0] != RuntimeBlockKindPatchApply) {
+		return fmt.Errorf("validation input repair requires one existing-scope operation with owner pre/postimage replay proof")
+	}
 	if r.RepairTargetRole == "" || r.RepairDeclarationTargetSelectorRef == "" || r.RepairDeclarationTargetSelectorOwnerRef == "" || r.RepairDeclarationTargetSelectorSubjectRef == "" || r.RepairOperationTargetSelectorRef == "" {
 		return fmt.Errorf("requires an independent repair target role and complete selector identity")
 	}
@@ -286,6 +291,9 @@ func StableRuntimeValidationFailureRepairRouteHash(value RuntimeValidationFailur
 	if value.RequireInputAddition {
 		writeHashString(h, "require-validation-input-addition/v1")
 	}
+	if value.RequireInputRepair {
+		writeHashString(h, "require-validation-input-repair/v1")
+	}
 	return "runtime-validation-failure-repair-route-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
@@ -353,6 +361,7 @@ func runtimeValidationEvidenceTargetTypeKnown(value string) bool {
 		ValidationEvidenceTargetValidationOutput,
 		ValidationEvidenceTargetBehaviorEvidence,
 		ValidationEvidenceTargetCoverageBinding,
+		ValidationEvidenceTargetValidationInput,
 		ValidationEvidenceTargetFailureSurface:
 		return true
 	default:

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -63,6 +64,21 @@ func TestDriveRuntimeInvalidSupplementClosesBeforeAnotherAcquisition(t *testing.
 type validationInputMainlineOptions struct {
 	InvalidSupplement bool
 	Entrypoint        bool
+	CompileRepair     bool
+}
+
+func TestDriveRuntimeValidationInputCompileRepairPreservesCriteriaAcrossRestart(t *testing.T) {
+	var baseline int64
+	for _, cut := range []string{"uninterrupted", "before_input_repair_seal", "after_input_repair_seal", "after_input_repair_receipt", "after_fresh_validation"} {
+		t.Run(cut, func(t *testing.T) {
+			calls := runValidationInputAdditionMainline(t, cut, validationInputMainlineOptions{Entrypoint: true, CompileRepair: true})
+			if cut == "uninterrupted" {
+				baseline = calls
+			} else if calls != baseline {
+				t.Fatalf("input repair restart consumed provider budget: %d != %d", calls, baseline)
+			}
+		})
+	}
 }
 
 func TestDriveRuntimeEntrypointValidationUsesSameOwnerTransactionsAcrossRestart(t *testing.T) {
@@ -98,6 +114,25 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 	bootstrap := validationInputAdditionMainlineBootstrap()
 	if mode.Entrypoint {
 		bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = shellcommon.ValidationRecipeAdapterProjectEntrypoint
+	}
+	if mode.CompileRepair {
+		bootstrap.Definition.CapabilityContract = append(bootstrap.Definition.CapabilityContract, runtimecontract.RuntimeBlockKindPatchApply)
+		convergence := bootstrap.DefinitionFocuses[1].ValidationFailureRepairConvergence.Clone()
+		convergence.MaxAttempts = 2
+		route := convergence.Routes[0].Clone()
+		route.ID, route.RequireInputAddition, route.RequireInputRepair = "input-symbol-case-to-attested-patch", false, true
+		route.TriggerDiagnosticClass, route.TriggerEvidenceTargetType, route.TriggerOwnerDiagnosticCode = runtimecontract.ValidationDiagnosticBuildFailed, runtimecontract.ValidationEvidenceTargetValidationInput, "validation_input_symbol_case_mismatch"
+		route.RepairOperationKinds, route.RepairTargetPolicy = []string{runtimecontract.RuntimeBlockKindPatchApply}, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope
+		route.RepairTargetRole, route.RepairOperationTargetSelectorRef = "validation_input_maintenance", "workspace-relative-existing-file-target"
+		convergence.Routes = append(convergence.Routes, route)
+		bootstrap.DefinitionFocuses[1].ValidationFailureRepairConvergence = &convergence
+		bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].ValidationFailureRepairConvergence = &convergence
+		for i := range bootstrap.Requirements {
+			if bootstrap.Requirements[i].OwnerModuleID == runtimecontract.RuntimeModuleFile {
+				bootstrap.Requirements[i].RequiredCapabilities = append(bootstrap.Requirements[i].RequiredCapabilities, runtimecontract.RuntimeBlockKindPatchApply)
+			}
+		}
+		bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
 	}
 	// Initial fixture only: Shell authors the original native check and File
 	// writes it before the Run. The later supplement must come from Runtime.
@@ -180,6 +215,8 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 	var addition runtimecontract.RuntimeValidationInputAddition
 	var historicalAssessment runtimecontract.RuntimeCandidateContractManifest
 	var freshValidation runtime.RuntimeAggregate
+	var inputBeforeRepair string
+	var observedInputRepair *runtimecontract.RuntimeValidationInputRepair
 	llm := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llm.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls.Add(1)
@@ -210,7 +247,15 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 			operation := runtimecontract.RuntimeOperation{ID: "source-change", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"subject.go"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}}
 			oldText, newText := "return 2", "return 4"
 			operation.Parameters = []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}
-			if coverageID == "cwi-2" {
+			if coverageID == "cwi-2" && mode.CompileRepair && command.CandidateManifest.Operations[0].InputRepair != nil {
+				observedInputRepair = command.CandidateManifest.Operations[0].InputRepair.Clone()
+				if observedInputRepair.TargetRef != addition.TargetRef || len(observedInputRepair.Corrections) != 1 {
+					t.Error("input repair not tied to original supplemental input")
+				}
+				oldText, newText, variant := "!=workOrchExpected", "!=workorchExpected", "text_replace"
+				operation.ID, operation.Kind, operation.TargetRefs = "repair-input-compile", runtimecontract.RuntimeBlockKindPatchApply, []string{observedInputRepair.TargetRef}
+				operation.Parameters = []runtimecontract.OperationParameter{{Name: "patchType", String: &variant}, {Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}
+			} else if coverageID == "cwi-2" {
 				content := fmt.Sprintf("package workorch_validation\nimport (\"testing\"; subject \"example.com/workorch-runtime-native-fixture\")\nfunc %s(t *testing.T) { const expected = 4; type response struct { value int }; read := func() response { return response{subject.DeliveredValue()} }; if read().value != expected { t.Fatal(\"wrong delivered behavior\") } }\n", addition.NativeCheckRef)
 				if mode.Entrypoint {
 					content = fmt.Sprintf(`package workorch_validation
@@ -230,6 +275,11 @@ func %s(t *testing.T) { assertDelivery(t) }
 				}
 				if invalidSupplement {
 					content += "const expected = 4\nvar fixtureValue = 4\ntype response struct { Value int }\nfunc helper() int { return expected }\n"
+				}
+				if mode.CompileRepair {
+					content = strings.ReplaceAll(content, "const expected", "const workorchExpected")
+					content = strings.ReplaceAll(content, "!=expected", "!=workOrchExpected")
+					inputBeforeRepair = content
 				}
 				inputProviderCall = providerCalls.Load()
 				operation.ID, operation.Kind, operation.TargetRefs = "create-input-addition", runtimecontract.StepKindFileWrite, []string{addition.TargetRef}
@@ -261,7 +311,13 @@ func %s(t *testing.T) { assertDelivery(t) }
 	module := newRuntimeDriveTestModule(t, hub)
 	command := orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}
 	if cut != "uninterrupted" {
-		crash := &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: cut != "before_repair_seal", marker: cut, match: func(aggregate runtime.RuntimeAggregate) bool {
+		crash := &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: cut != "before_repair_seal" && cut != "before_input_repair_seal", marker: cut, match: func(aggregate runtime.RuntimeAggregate) bool {
+			if cut == "before_input_repair_seal" || cut == "after_input_repair_seal" {
+				return aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.RepairCommitment != nil && aggregate.ActiveDispatch.RepairCommitment.InputRepair != nil
+			}
+			if cut == "after_input_repair_receipt" {
+				return observedInputRepair != nil && aggregate.ActiveDispatch == nil && aggregate.Facts.RepairDirective != nil && aggregate.Facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedValidation
+			}
 			if cut == "after_unavailability_terminal" {
 				return aggregate.Decision.Terminal != nil && aggregate.Decision.Terminal.Code == "owner_fact_convergence_exhausted"
 			}
@@ -375,8 +431,29 @@ func %s(t *testing.T) { assertDelivery(t) }
 	if invalidSupplement {
 		wantAccepted = 0
 	}
-	if acceptedValidation != wantAccepted || rejectedValidation != 1 || createdInputs != 1 || addition.TargetRef == "" {
+	wantRejected, wantChanges := 1, 1
+	if mode.CompileRepair {
+		wantRejected, wantChanges = 2, 2
+	}
+	if acceptedValidation != wantAccepted || rejectedValidation != wantRejected || createdInputs != wantChanges || addition.TargetRef == "" {
 		t.Fatalf("unexpected effect/validation counts: accepted=%d rejected=%d input=%d addition=%+v", acceptedValidation, rejectedValidation, createdInputs, addition)
+	}
+	if mode.CompileRepair {
+		content, err := os.ReadFile(filepath.Join(deliverable, addition.TargetRef))
+		if err != nil || string(content) != strings.ReplaceAll(inputBeforeRepair, "!=workOrchExpected", "!=workorchExpected") {
+			t.Fatal("input repair changed acceptance criteria or unrelated bytes")
+		}
+		if observedInputRepair == nil {
+			t.Fatal("input compilation error bypassed independently sealed repair")
+		}
+		for _, dispatch := range aggregate.CompletedDispatches {
+			if dispatch.RepairCommitment == nil || dispatch.RepairCommitment.InputRepair == nil {
+				continue
+			}
+			if !observedInputRepair.MatchesReplayProof(dispatch.OperationExecutions[0].ReplayProof) {
+				t.Fatal("lost exact content repair proof")
+			}
+		}
 	}
 	for path, before := range weakInputs {
 		after, err := os.ReadFile(path)
@@ -466,6 +543,9 @@ func %s(t *testing.T) { assertDelivery(t) }
 	}
 	if cut == "uninterrupted" {
 		assertSemanticRepairContinuationTamperRejected(t, freshValidation)
+		if mode.CompileRepair {
+			assertInputRepairArchiveTamperRejected(t, aggregate)
+		}
 	}
 	callsBefore := providerCalls.Load()
 	for range 2 {
@@ -475,6 +555,59 @@ func %s(t *testing.T) { assertDelivery(t) }
 		}
 	}
 	return callsBefore
+}
+
+func assertInputRepairArchiveTamperRejected(t *testing.T, completed runtime.RuntimeAggregate) {
+	t.Helper()
+	for _, scenario := range []string{"missing_commitment", "changed_commitment", "missing_replay_proof", "changed_replay_postimage", "missing_manifest_input", "changed_manifest_input", "changed_source_diagnostic"} {
+		t.Run(scenario, func(t *testing.T) {
+			changed := runtimeAggregateFromRecord(runtimeStateRecordFromAggregate(completed))
+			found := false
+			for index := range changed.CompletedDispatches {
+				dispatch := &changed.CompletedDispatches[index]
+				if dispatch.RepairCommitment == nil || dispatch.RepairCommitment.InputRepair == nil {
+					continue
+				}
+				found = true
+				switch scenario {
+				case "missing_commitment":
+					dispatch.RepairCommitment.InputRepair = nil
+				case "changed_commitment":
+					dispatch.RepairCommitment.InputRepair.AfterHash = strings.Repeat("c", 64)
+				case "missing_replay_proof":
+					dispatch.OperationExecutions[0].ReplayProof = nil
+				case "changed_replay_postimage":
+					dispatch.OperationExecutions[0].ReplayProof.AfterHash = strings.Repeat("c", 64)
+				case "missing_manifest_input", "changed_manifest_input":
+					for i := range changed.CandidateRequestSessions {
+						manifest := changed.CandidateRequestSessions[i].CandidateManifest
+						if manifest == nil || manifest.Hash != dispatch.CandidateManifestHash {
+							continue
+						}
+						if scenario == "missing_manifest_input" {
+							manifest.Operations[0].InputRepair = nil
+						} else {
+							manifest.Operations[0].InputRepair.Corrections[0].After = "other"
+						}
+					}
+				case "changed_source_diagnostic":
+					for i := range changed.OperationReceipts {
+						receipt := &changed.OperationReceipts[i]
+						if receipt.ExecutionKey == dispatch.RepairCommitment.SourceReceiptExecutionKey {
+							receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic.InputRepair.BeforeHash = strings.Repeat("c", 64)
+						}
+					}
+				}
+				break
+			}
+			if !found {
+				t.Fatal("no input repair dispatch")
+			}
+			if err := changed.Validate(); err == nil {
+				t.Fatal("tampered input repair archive accepted on fresh load")
+			}
+		})
+	}
 }
 
 func assertSemanticRepairContinuationTamperRejected(t *testing.T, fresh runtime.RuntimeAggregate) {

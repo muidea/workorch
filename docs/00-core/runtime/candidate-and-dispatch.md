@@ -106,6 +106,14 @@ repair commitment。若某个 repair 确实要求完整 surface 全部产生 eff
 `RequiredOperationSequence`/collective receipt-set；LLM candidate、commitment 派生或 receipt 校验均不得自行把 membership
 升级为 full-set equality，也不得把 closure 缩成 candidate 选择的子集。
 
+独立 Profile `RequireInputRepair` 的 criterion-preserving 特例必须携带 validation owner 的 typed `InputRepair`，
+精确绑定原 required/protocol/native/supplement check、单一输入与 before/after content hash。它仍使用
+`confirmed_validation_repair`：manifest 只允许一项 operation，commitment 必须保留与 original receipt 相同的 delta，
+feasibility/dispatch execution 的 resource-owner `ReplayProof` 必须证明两个 exact hash。final seal 与 fresh-load 均重验
+这条 lineage；仅 target membership 相同不够，不能夹带断言、expected value 或其它字节修改。Core 只验证 typed identity，
+不解析语言或 compiler 输出。修复不贡献 validation credit，后继 fresh-validation manifest 不携带 input-write authority，
+原检查和 supplement 仍不可互相替代。缺省 extension 不改变历史 JSON/hash，不能为旧 dispatch 补写该 authority。
+
 target-free 指不继承 repair action target，不表示 validation 无 target 或放宽 manifest。SM-3 必须复用 aggregate
 fresh-load 的 completed repair/confirmation/receipt/current-binding 反向证明；只有 exact handoff 才把旧 closure targets
 视为因果记录，并使用普通 Definition validation manifest 的 target/binding 授权。修复文件与 validation entry 可以不同。

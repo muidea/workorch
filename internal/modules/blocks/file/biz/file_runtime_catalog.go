@@ -76,8 +76,10 @@ func fileAdmissibilitySelectorRefs(operationKinds []string) []string {
 	existingTarget := false
 	for _, kind := range operationKinds {
 		switch runtimemodel.CanonicalRuntimeBlockKind(kind) {
-		case runtimemodel.StepKindFileWrite, runtimemodel.RuntimeBlockKindPatchApply, runtimemodel.RuntimeBlockKindPatchPreview:
+		case runtimemodel.StepKindFileWrite, runtimemodel.RuntimeBlockKindPatchPreview:
 			newTarget = true
+		case runtimemodel.RuntimeBlockKindPatchApply:
+			newTarget, existingTarget = true, true
 		case runtimemodel.StepKindFileEdit, runtimemodel.StepKindFileRead, runtimemodel.RuntimeBlockKindPatchRevert:
 			existingTarget = true
 		}
@@ -142,6 +144,9 @@ func fileAdmissibilityOperationVariants(operationKinds []string) []runtimemodel.
 					policies = policiesCreate
 					variantSelectors = newTargetSelector
 					variantConstraints = newTargetConstraints
+				} else {
+					variantSelectors = existingTargetSelector
+					variantConstraints = existingTargetConstraints
 				}
 				ret = append(ret, runtimemodel.RuntimeOperationAdmissibilityVariant{Kind: kind, VariantID: variantID, AllowedTargetPolicies: policies, SelectorRefs: variantSelectors, ConstraintRefs: variantConstraints})
 			}

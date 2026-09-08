@@ -122,6 +122,12 @@ func deriveConfirmedRepairAdmissionCommitment(
 		if sourceErr != nil {
 			return nil, sourceErr
 		}
+		inputRepair := sourceReceipt.Feedback.OriginalDiagnostic.ValidationDiagnostic.InputRepair.Clone()
+		for _, authorization := range manifest.Operations {
+			if !runtimecontract.SameRuntimeValidationInputRepair(inputRepair, authorization.InputRepair) {
+				return nil, fmt.Errorf("%w: input repair manifest differs from original validation owner fact", common.ErrConflict)
+			}
+		}
 		if sourceFact.Revision != aggregate.Decision.AuthorityTransaction().EvidenceRevision ||
 			!sameRuntimeStringSet(sourceFact.BindingRefs, sourceOperation.BindingRefs) ||
 			!confirmedRepairSourceBindingsCoverCurrentScope(aggregate, sourceOperation.BindingRefs, coverageIDs) {
@@ -158,6 +164,7 @@ func deriveConfirmedRepairAdmissionCommitment(
 			return nil, fmt.Errorf("%w: confirmed owner repair admission has no exact current state-change directive", common.ErrConflict)
 		}
 		commitment := runtimecontract.RuntimeDispatchRepairCommitment{
+			InputRepair:               inputRepair,
 			Purpose:                   runtimecontract.RuntimeDispatchRepairPurposeConfirmedValidation,
 			RepairOwnerModuleID:       confirmation.OwnerModuleID,
 			OriginDispatchID:          originID,
@@ -236,6 +243,14 @@ func confirmedRepairTransactionFromCommitment(
 	sourceFact, sourceReceipt, sourceOperation, err := confirmedRepairSourceRejection(aggregate, *confirmation)
 	if err != nil {
 		return nil, err
+	}
+	if !runtimecontract.SameRuntimeValidationInputRepair(commitment.InputRepair, sourceReceipt.Feedback.OriginalDiagnostic.ValidationDiagnostic.InputRepair) {
+		return nil, fmt.Errorf("%w: input repair commitment differs from original validation owner fact", common.ErrConflict)
+	}
+	if commitment.InputRepair != nil {
+		if len(dispatch.OperationExecutions) != 1 || !commitment.InputRepair.MatchesReplayProof(dispatch.OperationExecutions[0].ReplayProof) {
+			return nil, fmt.Errorf("%w: input repair dispatch lost its exact owner pre/postimage proof", common.ErrConflict)
+		}
 	}
 	if commitment.SourceDispatchID != confirmation.Observation.DispatchID ||
 		commitment.SourceDispatchID != sourceFact.DispatchID ||
