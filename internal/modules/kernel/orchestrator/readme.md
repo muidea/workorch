@@ -51,6 +51,13 @@ capability resource state。
 
 ### Semantic and candidate authority
 
+- 验收扩展只允许与原 Goal/DoD 一致的补充和细化，并与原义务合取；不允许通过 approval、输入版本或外部参考
+  覆盖原准则。测试实现不等同于验收准则，修改输入不能从失败本身推导授权。shared contract 的
+  `RuntimeValidationInputAddition.MatchesBinding` / `RuntimeValidationInputRepair.MatchesBinding` 对完整原始
+  binding 执行唯一映射和别名冲突校验，不能在 normalization 去重后或首条匹配后认可输入维护。
+  该检查仍由既有 SM-2/SM-3 owner-private transaction 消费，不新增 event、状态机、预算或组件写入入口；
+  SM-1 与 SM-4 不变。`runtime_validation_input_identity_test.go` 覆盖独立补充、重复/替换/别名、排列、重复调用及
+  序列化重载。身份一致是必要条件，不是自然语言语义一致证明；未有适用性证明的版本不得发布可用 proof。
 - activation 只消费 Run owner 已封存的 `RuntimeBootstrap`。Definition startup input、Profile contract、provider selection、
   Soul/Skill/MCP/Memory snapshot 和 `StartupInputHash` 在既有 Run 中不可改写。
 - required CWI 在 operation candidate 前必须由 SM-2 从 immutable Definition seed、typed owner catalog、SM-3 semantic document

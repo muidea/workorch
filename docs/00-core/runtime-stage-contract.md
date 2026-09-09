@@ -152,6 +152,14 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
 
 ## Definition And LLM Boundary
 
+- 原 Goal/DoD 是验收基准。Template、Profile、执行期验证输入和补充检查只能细化或增加与该基准一致的约束，不能
+  删除、替换、放宽或通过冲突约束改变原验收语义；所有新增义务与原义务合取。审批、外部参考实现通过、版本升级、
+  测试自通过及覆盖率均不是违反该规则的豁免。原准则与具体测试实现是不同对象：旧测试不能仅因存在而取得准则权威，
+  也不能仅因失败就被认定错误；输入修改仍须有保留原准则的明确合同和证据。
+- 输入补充/修复准入必须检查完整 binding 中唯一的原 required/native 映射，不得 first-match 后忽略其余冲突。
+  新补充不能复用任何已有 native/supplement identity，输入修复不能借用另一 required check 的 identity；重复、替换
+  或别名映射在既有 SM-2/SM-3 输入维护授权前拒绝。此纯身份校验不证明任意自然语言判据的语义一致性；无法建立
+  一致性的候选不得获得新证明绑定或验收 credit，也不能自动变成实现修复。SM-1/SM-4 不新增迁移或归档回填。
 - 正式 startup input 是 Goal、DoD、Workspace Template snapshot 与 resolved project workspace directory。
 - 新 Start/Restart 自动采用当前 Template/Soul 并由 Workspace-private admission 追加新 candidate、封存新 startup input；
   已准入历史只作不可变 lineage，不以当前 schema/compiler 重编译或改写。新配置无效仍在 pre-seal 阻塞。Resume/recovery

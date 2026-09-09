@@ -8,6 +8,14 @@ Last Verified: 2026-09-04
 
 ## Versioned validation input boundary
 
+The original Goal/DoD remains the acceptance baseline. Added checks may only
+refine or supplement it consistently and conjunctively; a new input version,
+approval, reference repository or passing test cannot waive an original criterion.
+An old test implementation is not itself the criterion: changing it still requires
+a criterion-preserving contract, not merely a failing result. Identity isolation
+alone grants no replacement authority. The reserved v3 adapter below remains
+unavailable and is not a way to bypass an original failed check.
+
 `shell/project-native-validation/v3` reserves an independent native-check identity
 (`_InputV3`) and exact `workorch_validation/v3/` input path for a newly sealed
 activation. It does not rename, delete or select older checks, and cannot change

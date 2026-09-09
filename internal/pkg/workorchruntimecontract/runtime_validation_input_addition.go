@@ -52,14 +52,25 @@ func (v RuntimeValidationInputAddition) MatchesBinding(binding CoverageEvidenceB
 	if v.Validate() != nil {
 		return false
 	}
+	matched := false
 	for _, proof := range binding.Proofs {
 		for _, check := range proof.ValidationCheckAttestations {
-			if check.RequiredCheckRef == v.RequiredCheckRef && check.NativeCheckRef == v.OriginalNativeCheckRef && check.SupplementalNativeCheckRef == "" {
-				return true
+			// A supplement must add an independent check, never reuse another
+			// mandatory check or hide a conflicting mapping later in the binding.
+			if check.NativeCheckRef == v.NativeCheckRef || check.SupplementalNativeCheckRef == v.NativeCheckRef {
+				return false
+			}
+			if check.RequiredCheckRef == v.RequiredCheckRef {
+				if matched || check.NativeCheckRef != v.OriginalNativeCheckRef || check.SupplementalNativeCheckRef != "" {
+					return false
+				}
+				matched = true
+			} else if check.NativeCheckRef == v.OriginalNativeCheckRef || check.SupplementalNativeCheckRef == v.OriginalNativeCheckRef {
+				return false
 			}
 		}
 	}
-	return false
+	return matched
 }
 
 func writeRuntimeValidationInputAdditionHash(h interface{ Write([]byte) (int, error) }, v RuntimeValidationInputAddition) {

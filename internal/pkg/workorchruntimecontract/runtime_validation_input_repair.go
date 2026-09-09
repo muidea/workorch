@@ -92,15 +92,26 @@ func (v *RuntimeValidationInputRepair) MatchesBinding(binding CoverageEvidenceBi
 	if v == nil || v.Validate() != nil {
 		return false
 	}
-	for _, proof := range binding.Normalized().Proofs {
+	matched := false
+	// Inspect the raw complete mapping: normalization must not erase duplicate
+	// or conflicting claims before repair authority is checked.
+	for _, proof := range binding.Proofs {
 		for _, check := range proof.ValidationCheckAttestations {
-			if check.ObservationProtocolRef == v.ObservationProtocolRef && check.RequiredCheckRef == v.RequiredCheckRef && check.NativeCheckRef == v.OriginalNativeCheckRef &&
-				check.SupplementalNativeCheckRef == v.SupplementalNativeCheckRef {
-				return true
+			if check.RequiredCheckRef == v.RequiredCheckRef {
+				if matched || check.ObservationProtocolRef != v.ObservationProtocolRef || check.NativeCheckRef != v.OriginalNativeCheckRef || check.SupplementalNativeCheckRef != v.SupplementalNativeCheckRef {
+					return false
+				}
+				matched = true
+			} else {
+				for _, native := range check.NativeCheckRefs() {
+					if native == v.OriginalNativeCheckRef || native == v.SupplementalNativeCheckRef {
+						return false
+					}
+				}
 			}
 		}
 	}
-	return false
+	return matched
 }
 
 func (v *RuntimeValidationInputRepair) MatchesReplayProof(proof *RuntimeOperationReplayProof) bool {
