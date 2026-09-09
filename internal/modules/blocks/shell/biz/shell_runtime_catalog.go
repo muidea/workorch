@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimemodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -116,6 +117,7 @@ func (a *RuntimeAdapter) runtimeAdmissibilityPolicyRevision() string {
 	_, _ = fmt.Fprintf(h, "contract=shell-policy-v3;timeout=%s;input-contract=%s;input-requirements=%s;", a.timeout, shellSupplementContentContractRef, shellSupplementContentRequirements)
 	_, _ = fmt.Fprintf(h, "entrypoint-contract=%s;entrypoint-requirements=%s;protocol=%s;process-files=%d;", shellEntrypointContentContractRef, shellEntrypointContentRequirements, shellGoEntrypointObservationProtocolRef, maxShellProcessCoverageFiles)
 	_, _ = fmt.Fprintf(h, "failure-details=%s;failure-requirements=%s;", runtimemodel.RuntimeValidationFailureDetailProtocolV2, shellAssertionFeedbackRequirements)
+	_, _ = fmt.Fprintf(h, "versioned-input=%s;", modulecommon.ValidationRecipeAdapterVersionedEntrypoint)
 	for _, key := range keys {
 		_, _ = fmt.Fprintf(h, "env=%s;", key)
 	}

@@ -27,6 +27,7 @@ func TestWorkspaceBehaviorProofRequiresDeliveryExecutionAndProtectsAssertionInpu
 		{"shadow implementation in test", `if fakeCompute(4) != 11 { t.Fatal("wrong result") }`, `func fakeCompute(v int) int { return v+7 }`, false, false},
 		{"unrelated check is not selected", `if 1 != 1 { t.Fatal("placeholder") }`, `func TestUnrelated(t *testing.T) { if compute(4) != 11 { t.Fatal("wrong result") } }`, false, false},
 		{"failed assertion", `if compute(4) != 12 { t.Fatal("wrong result") }`, "", false, true},
+		{"failed dependency assertion", `if strings.TrimSpace(" a ") != "b" { t.Fatal("dependency assertion failed") }`, "", false, false},
 		{"required subtest skipped", `t.Run("required", func(t *testing.T) { t.Skip("missing dependency"); if compute(4) != 11 { t.Fatal("wrong result") } })`, "", false, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -51,7 +52,7 @@ func TestWorkspaceBehaviorProofRequiresDeliveryExecutionAndProtectsAssertionInpu
 			if (len(result.workspaceBehaviorTargetRefs) != 0) != test.wantObserved {
 				t.Fatalf("observed implementation=%v", result.workspaceBehaviorTargetRefs)
 			}
-			if !test.wantObserved && len(result.ValidationObservation.IncompleteChecks) == 0 {
+			if !test.wantObserved && len(result.ValidationObservation.IncompleteChecks) == 0 && len(result.ValidationObservation.CheckFailures) == 0 {
 				t.Fatal("weak behavior could satisfy a check-only consumer")
 			}
 			if test.name == "failed assertion" {
@@ -60,6 +61,16 @@ func TestWorkspaceBehaviorProofRequiresDeliveryExecutionAndProtectsAssertionInpu
 				}
 				if len(result.ValidationObservation.CheckFailures) == 0 || result.ValidationObservation.CheckFailures[0].TargetRef != "fixture_test.go" {
 					t.Fatal("assertion location was not retained independently")
+				}
+			}
+			if test.name == "failed dependency assertion" {
+				diagnostic := result.ValidationFailureDiagnostic
+				if diagnostic == nil || diagnostic.Class != runtimecontract.ValidationDiagnosticTestFailed || diagnostic.OwnerCode != "validation_test_failure_unattributed" ||
+					diagnostic.RecommendedEvidenceTargetType != runtimecontract.ValidationEvidenceTargetValidationOutput || len(diagnostic.TargetRefs) != 0 || !reflect.DeepEqual(diagnostic.InputAddition, runtimecontract.RuntimeValidationInputAddition{}) || diagnostic.InputRepair != nil {
+					t.Fatalf("unattributed failure authorized a repair: %+v", diagnostic)
+				}
+				if result.ExitCode == 0 || len(result.ValidationObservation.CheckFailures) == 0 {
+					t.Fatal("unattributed failure lost its original execution/check facts")
 				}
 			}
 			for _, resource := range result.ValidationResources {

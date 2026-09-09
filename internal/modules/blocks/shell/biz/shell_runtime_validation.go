@@ -38,7 +38,7 @@ func resolveRuntimeValidationRecipeDeclarations(recipes []runtimemodel.RuntimeVa
 			continue
 		}
 		switch declaration.AdapterRef {
-		case modulecommon.ValidationRecipeAdapterProjectNative, modulecommon.ValidationRecipeAdapterProjectEntrypoint:
+		case modulecommon.ValidationRecipeAdapterProjectNative, modulecommon.ValidationRecipeAdapterProjectEntrypoint, modulecommon.ValidationRecipeAdapterVersionedEntrypoint:
 			// An empty workspace has no competing project fact. The currently
 			// registered owner implementation may therefore publish its bounded
 			// prerequisite contract; once any project files exist, resolution is
@@ -164,6 +164,18 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 				}
 				attestations = shellValidationSupplementAttestations(attestations, binding.Manifest.TargetRefs)
 				inspection := inspectShellNativeValidationChecks(workspaceDirectory, binding.Manifest.TargetRefs, attestations)
+				// Version isolation and AST readiness do not establish semantic
+				// equivalence to the immutable requirement. Until an independent
+				// calibration contract is available, this adapter cannot publish
+				// a direct proof or speculative acquisition authority.
+				if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint {
+					inspection.Code = "validation_input_calibration_unavailable"
+					unavailabilities = append(unavailabilities, runtimemodel.RuntimeValidationProofUnavailability{
+						Requirement: requirement, ValidationRecipeID: recipe.ID,
+						OriginalDiagnostic: shellNativeCheckReadinessDiagnostic(inspection, requirement, binding.Manifest, catalogObservedRevision, ""),
+					})
+					continue
+				}
 				if !shellNativeCheckInspectionPreparable(inspection, requirement, binding.Manifest.TargetRefs, attestations) {
 					unavailabilities = append(unavailabilities, runtimemodel.RuntimeValidationProofUnavailability{
 						Requirement: requirement, ValidationRecipeID: recipe.ID,
@@ -239,12 +251,18 @@ func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecip
 		return nil, false
 	}
 	protocol := shellGoTestObservationProtocolRef
+	// The current versioned acquisition has one exact input target per CWI.
+	// A multi-check declaration needs an explicit multi-input contract; never
+	// publish a partially preparable all-of binding.
+	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint && len(requirement.RequiredCheckRefs) != 1 {
+		return nil, false
+	}
 	// Only the project-native adapter owns this stronger execution contract.
 	// Explicit fixed-command recipes retain their declared native v1 semantics;
 	// a static/custom recipe must not silently acquire behavior instrumentation.
-	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectNative || recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectEntrypoint {
+	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectNative || recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectEntrypoint || recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint {
 		protocol = shellGoBehaviorObservationProtocolRef
-		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectEntrypoint {
+		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectEntrypoint || recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint {
 			protocol = shellGoEntrypointObservationProtocolRef
 		}
 		if len(requirement.RequiredCheckRefs) == 0 || len(requirement.RequiredCheckRefs) > maxShellBehaviorNativeChecks || validateShellBehaviorRecipeArgs(args) != nil {
@@ -263,16 +281,23 @@ func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecip
 		if suffix == required || suffix == "" {
 			return nil, false
 		}
+		native := "TestWorkOrchCWI_" + strings.ToUpper(suffix)
+		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint {
+			native += "_InputV3"
+		}
 		ret = append(ret, runtimemodel.RuntimeValidationCheckAttestationBinding{
 			RequiredCheckRef: required, ObservationProtocolRef: protocol,
-			NativeCheckRef: "TestWorkOrchCWI_" + strings.ToUpper(suffix),
+			NativeCheckRef: native,
 		})
 	}
 	return runtimemodel.NormalizeRuntimeValidationCheckAttestationBindings(ret), len(ret) != 0
 }
 
-func shellValidationNativeCheckTargetRef(requirement runtimemodel.RuntimeValidationProofRequirement) string {
+func shellValidationNativeCheckTargetRef(requirement runtimemodel.RuntimeValidationProofRequirement, attestations ...runtimemodel.RuntimeValidationCheckAttestationBinding) string {
 	requirement = requirement.Normalized()
+	if len(attestations) != 0 && shellVersionedNativeCheck(attestations[0]) {
+		return shellVersionedNativeCheckTarget(attestations[0].NativeCheckRef)
+	}
 	digest := sha256.Sum256([]byte("workorch-shell-native-check-target/v1\x00" + requirement.Hash))
 	return "workorch_validation/cwi_" + hex.EncodeToString(digest[:10]) + "_test.go"
 }
@@ -289,7 +314,7 @@ func shellNativeCheckInspectionPreparable(inspection shellNativeCheckInspection,
 	// A create-only acquisition cannot remove ambiguity, repair syntax or
 	// assertions, or replace an existing conjunctive input. Do not advertise a
 	// different filename as satisfaction of any of those observations.
-	if inspection.Code != "native_check_missing" || shellStringIncluded(refs, shellValidationNativeCheckTargetRef(requirement)) {
+	if inspection.Code != "native_check_missing" || shellStringIncluded(refs, shellValidationNativeCheckTargetRef(requirement, attestations...)) {
 		return false
 	}
 	for _, check := range attestations {
@@ -310,7 +335,7 @@ func shellValidationProofPreparationFromInspection(inspection shellNativeCheckIn
 	}
 	targetRef := ""
 	if !nativeChecksDeclared {
-		targetRef = shellValidationNativeCheckTargetRef(requirement)
+		targetRef = shellValidationNativeCheckTargetRef(requirement, attestations...)
 	}
 	requiredTargets := []string(nil)
 	if targetRef != "" {

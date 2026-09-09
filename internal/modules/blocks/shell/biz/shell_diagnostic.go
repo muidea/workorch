@@ -54,6 +54,15 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 		if !targetCandidatesValid {
 			targetRefs = nil
 		}
+		// A failing check is a tool fact, not attribution to the deliverable.
+		// Do not publish the ordinary implementation-repair route identity when
+		// complete, bounded implementation observations are unavailable. This
+		// does not establish that the input is wrong or authorize input edits.
+		if len(targetRefs) == 0 || output.OutputTruncated {
+			ownerCode = "validation_test_failure_unattributed"
+			targetType = runtimemodel.ValidationEvidenceTargetValidationOutput
+			targetRefs = nil
+		}
 	}
 	if class == runtimemodel.ValidationDiagnosticBuildFailed && len(request.ValidationCheckAttestations) != 0 && (request.ValidationCheckAttestations[0].ObservationProtocolRef == shellGoSupplementObservationProtocolRef || request.ValidationCheckAttestations[0].ObservationProtocolRef == shellGoEntrypointObservationProtocolRef) {
 		// A newly added input that does not compile cannot authorize rewriting
@@ -83,6 +92,9 @@ func attachShellValidationFailureDiagnostic(output *RuntimeCommandResult, reques
 		EvidenceMode:       request.ValidationEvidence.Mode,
 		StdoutPreview:      shellPreview(output.Stdout, 2048),
 		StderrPreview:      shellPreview(output.Stderr, 2048),
+	}
+	if ownerCode == "validation_test_failure_unattributed" {
+		diagnostic.Reason = "test execution failed, but complete bounded workspace implementation observations are unavailable; neither an implementation defect nor a validation-input defect is established; original failure: " + diagnostic.Reason
 	}
 	if ownerCode == "validation_workspace_behavior_unobserved" && len(request.ValidationCheckAttestations) == 1 {
 		check := request.ValidationCheckAttestations[0]

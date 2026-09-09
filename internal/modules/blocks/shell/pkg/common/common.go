@@ -16,6 +16,11 @@ const ValidationRecipeAdapterProjectNative = "shell/project-native-validation/v1
 // previous resolver and its sealed native protocols keep their original meaning.
 const ValidationRecipeAdapterProjectEntrypoint = "shell/project-native-validation/v2"
 
+// Versioned inputs are a reserved adapter, not a default or ready proof
+// surface: independent semantic calibration is mandatory. Older adapters
+// retain their original native identities and conjunctive checks.
+const ValidationRecipeAdapterVersionedEntrypoint = "shell/project-native-validation/v3"
+
 // Validation owner diagnostic codes are Shell-owned, stable facts. Profiles
 // may match these exact values; Runtime core must not infer them from stderr.
 const (

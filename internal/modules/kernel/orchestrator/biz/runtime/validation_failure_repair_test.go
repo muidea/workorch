@@ -242,45 +242,54 @@ func TestRejectedTypedValidationWithoutStructuredTargetTerminatesExistingScopeRo
 }
 
 func TestRejectedTypedValidationWithoutExactProfileRouteTerminatesWithoutRetry(t *testing.T) {
-	aggregate := runtimeValidationFailureRepairAggregateForTest(t, runtimeValidationFailureRepairConvergenceForTest(2))
-	repository := &durableRuntimeStateRepository{aggregate: aggregate}
-	coordinator, err := NewDispatchCoordinator(repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sealed := sealCandidateForTest(t, repository, validationCandidate())
-	evidence := runtimeRejectedValidationEvidenceForTest(
-		t, sealed, "event-validation-route-unavailable", runtimecontract.ValidationDiagnosticDependencyMismatch,
-	)
-	evidence.Failure.ValidationDiagnostic.RecommendedEvidenceTargetType = runtimecontract.ValidationEvidenceTargetDependencyContract
-	evidence.Failure.ValidationDiagnostic.OwnerCode = "dependency_catalog_missing"
-	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
+	for _, diagnostic := range []struct{ name, class, target, code string }{
+		{"dependency", runtimecontract.ValidationDiagnosticDependencyMismatch, runtimecontract.ValidationEvidenceTargetDependencyContract, "dependency_catalog_missing"},
+		// Owner-private codes remain opaque to the reducer. A test failure
+		// without attribution must not borrow an implementation repair route.
+		{"unattributed test", runtimecontract.ValidationDiagnosticTestFailed, runtimecontract.ValidationEvidenceTargetValidationOutput, "owner_test_attribution_unavailable"},
+	} {
+		t.Run(diagnostic.name, func(t *testing.T) {
+			aggregate := runtimeValidationFailureRepairAggregateForTest(t, runtimeValidationFailureRepairConvergenceForTest(2))
+			repository := &durableRuntimeStateRepository{aggregate: aggregate}
+			coordinator, err := NewDispatchCoordinator(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sealed := sealCandidateForTest(t, repository, validationCandidate())
+			evidence := runtimeRejectedValidationEvidenceForTest(
+				t, sealed, "event-validation-route-unavailable", diagnostic.class,
+			)
+			evidence.Failure.ValidationDiagnostic.RecommendedEvidenceTargetType = diagnostic.target
+			evidence.Failure.ValidationDiagnostic.OwnerCode = diagnostic.code
+			attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &evidence)
 
-	committed, err := coordinator.commitEvidence(context.Background(), evidence)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || committed.Aggregate.Decision.Terminal == nil ||
-		committed.Aggregate.Decision.Terminal.Code != "validation_failure_repair_route_unavailable" ||
-		committed.Aggregate.Facts.Failure == nil || committed.Aggregate.Facts.Failure.Class != runtimecontract.FailureClassNoProgressExhausted ||
-		committed.Aggregate.Facts.Failure.Code != "validation_failure_repair_route_unavailable" || !committed.Aggregate.Facts.Repair.Exhausted ||
-		committed.Aggregate.Facts.Repair.RepairAttempts != 1 || committed.Aggregate.Facts.Repair.ValidationOnlyRetries != 0 ||
-		len(committed.Aggregate.Facts.Coverage[0].ReopenLineage) != 0 || committed.Aggregate.DefinitionClarification != nil {
-		t.Fatalf("unroutable owner diagnostic did not terminate in its receipt CAS: %+v", committed.Aggregate)
-	}
-	if _, required, inputErr := CurrentRuntimeValidationFailureRepairGenerationInput(committed.Aggregate); inputErr != nil || required {
-		t.Fatalf("unroutable diagnostic opened semantic repair generation: required=%v err=%v", required, inputErr)
-	}
+			committed, err := coordinator.commitEvidence(context.Background(), evidence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateFailed || committed.Aggregate.Decision.Terminal == nil ||
+				committed.Aggregate.Decision.Terminal.Code != "validation_failure_repair_route_unavailable" ||
+				committed.Aggregate.Facts.Failure == nil || committed.Aggregate.Facts.Failure.Class != runtimecontract.FailureClassNoProgressExhausted ||
+				committed.Aggregate.Facts.Failure.Code != "validation_failure_repair_route_unavailable" || !committed.Aggregate.Facts.Repair.Exhausted ||
+				committed.Aggregate.Facts.Repair.RepairAttempts != 1 || committed.Aggregate.Facts.Repair.ValidationOnlyRetries != 0 ||
+				len(committed.Aggregate.Facts.Coverage[0].ReopenLineage) != 0 || committed.Aggregate.DefinitionClarification != nil {
+				t.Fatalf("unroutable owner diagnostic did not terminate in its receipt CAS: %+v", committed.Aggregate)
+			}
+			if _, required, inputErr := CurrentRuntimeValidationFailureRepairGenerationInput(committed.Aggregate); inputErr != nil || required {
+				t.Fatalf("unroutable diagnostic opened semantic repair generation: required=%v err=%v", required, inputErr)
+			}
 
-	revision := committed.Aggregate.StateRevision
-	restarted, err := NewDispatchCoordinator(repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	duplicate, err := restarted.commitEvidence(context.Background(), evidence)
-	if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != revision ||
-		duplicate.Aggregate.Facts.Repair.RepairAttempts != 1 || duplicate.Aggregate.Facts.Repair.ValidationOnlyRetries != 0 {
-		t.Fatalf("duplicate unroutable rejection changed terminal authority: result=%+v err=%v", duplicate, err)
+			revision := committed.Aggregate.StateRevision
+			restarted, err := NewDispatchCoordinator(repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			duplicate, err := restarted.commitEvidence(context.Background(), evidence)
+			if err != nil || duplicate.Disposition != CommitDispositionDuplicate || duplicate.Aggregate.StateRevision != revision ||
+				duplicate.Aggregate.Facts.Repair.RepairAttempts != 1 || duplicate.Aggregate.Facts.Repair.ValidationOnlyRetries != 0 {
+				t.Fatalf("duplicate unroutable rejection changed terminal authority: result=%+v err=%v", duplicate, err)
+			}
+		})
 	}
 }
 

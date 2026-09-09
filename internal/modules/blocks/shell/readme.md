@@ -6,6 +6,49 @@ Type: capability-block-contract
 
 Last Verified: 2026-09-04
 
+## Versioned validation input boundary
+
+`shell/project-native-validation/v3` reserves an independent native-check identity
+(`_InputV3`) and exact `workorch_validation/v3/` input path for a newly sealed
+activation. It does not rename, delete or select older checks, and cannot change
+an already sealed v1/v2 activation, binding or receipt. The immutable Definition
+requirement/check identity is unchanged. A single-input contract cannot advertise
+partial support for a multi-check all-of requirement.
+
+Structural readiness and instrumented execution are necessary but not sufficient
+semantic calibration. An input that merely has a reachable assertion, starts a
+delivery process or passes its own tests cannot authorize replacement of the
+previous verification input. Without an independent calibration contract, v3
+publishes `validation_input_calibration_unavailable`, with no proof binding or
+acquisition preparation. The built-in software-development template remains on
+its existing adapter. Capability tests of version isolation and positive/negative
+execution are not release-grade semantic calibration of arbitrary Goal/DoD.
+
+Shell reports only facts. Orchestrator's existing owner-private SM-2/3/4 events
+remain responsible for binding, credit, bounded failure and delivery; there is no
+calibration state machine in the template, File owner, Soul or projection.
+
+An external reference repository is optional supporting material, not a prerequisite
+for ordinary workspace execution. Neither its CI result nor process coverage proves
+that an arbitrary verification input preserves the workspace's Goal/DoD semantics.
+
+## Validation failure attribution
+
+A behavior-protocol test failure retains its original test-failure class, exit code
+and check failures. Only complete, bounded observations of workspace implementation
+execution can propose implementation repair targets. With no such observations, or
+truncated output, Shell publishes `validation_test_failure_unattributed` with
+`validation_output` and no targets, input addition or input repair authorization.
+This means attribution is unavailable, not that the deliverable or its tests are
+known to be defective. Ordinary `test_failed` implementation repair must not match
+this fact. Environment, dependency, build and input-compile diagnostics retain their
+existing precedence; legacy protocols retain their original interpretation.
+
+Shell does not choose a successor, repair route or terminal state. The existing
+Orchestrator SM-2 private receipt event resolves the exact sealed profile route;
+SM-3 dispatch and SM-4 delivery/recovery remain unchanged. Result and projections
+consume the judged result without reinterpreting this owner diagnostic.
+
 ## 功能范围与边界
 
 `blocks/shell` 是本地 `shell/command` 与 `validation/managed_session` 的 capability owner。
