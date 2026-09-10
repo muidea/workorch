@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"strings"
 
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
@@ -64,5 +65,20 @@ func runtimeCompleteResultFeedback(item *resultevents.ResultMaterial, aggregate 
 		item.SummaryDetail.KnownLimitations = []string{"The Run ended without complete Goal/DoD acceptance."}
 		item.SummaryDetail.ResidualRisks = []string{fmt.Sprintf("%d coverage work items remain unsatisfied; partial output must not be treated as accepted delivery.", len(closeout.UnsatisfiedCoverageWorkItemIDs))}
 		item.SummaryDetail.NextActions = []string{"Review the terminal and owner diagnostics, resolve the reported blocker, then explicitly request a new activation if appropriate."}
+		if aggregate.ResultFeedbackVersion >= 3 && closeout.OriginalDiagnostic != nil {
+			for _, review := range closeout.OriginalDiagnostic.ValidationInputReviews {
+				for _, check := range review.Report.Checks {
+					item.SummaryDetail.KnownLimitations = append(item.SummaryDetail.KnownLimitations,
+						fmt.Sprintf("Input review only; CWI %s; original check %s; %s: %s Inputs: %s. Report: %s.", review.CoverageWorkItemID, check.RequiredCheckRef, check.Conclusion, check.Reason, strings.Join(check.InputTargetRefs, ", "), review.ReviewRef))
+					for _, obligation := range check.Obligations {
+						item.SummaryDetail.KnownLimitations = append(item.SummaryDetail.KnownLimitations,
+							fmt.Sprintf("Original obligation %q; input coverage %s: %s", obligation.CriterionText, obligation.Finding, obligation.Reason))
+					}
+				}
+				if review.Redacted {
+					item.SummaryDetail.KnownLimitations = append(item.SummaryDetail.KnownLimitations, "Sensitive diagnostic text was redacted; the report reference and original report hash are retained.")
+				}
+			}
+		}
 	}
 }

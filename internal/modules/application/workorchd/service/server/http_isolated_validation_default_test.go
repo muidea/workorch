@@ -78,6 +78,9 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 		if recipe.AdapterRef != shellcommon.ValidationRecipeAdapterIsolatedEntrypoint {
 			t.Fatalf("normal activation retained unreviewed adapter: %+v", recipe)
 		}
+		if recipe.InputReviewProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV2 {
+			t.Fatal("normal activation omitted the complete-obligation review protocol")
+		}
 		found = true
 	}
 	if !found {

@@ -1093,7 +1093,14 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 			return fmt.Errorf("runtime operation admissibility duplicates validation surface %q", value.ID)
 		}
 		seenSurfaces[value.ID] = struct{}{}
+		recipe, _ := RuntimeValidationRecipeForID(a.ValidationRecipes, value.ID)
 		for _, binding := range raw.ProofRequirementBindings {
+			if recipe.InputReviewProtocolRef != "" && (binding.InputReview == nil || binding.InputReview.ProtocolRef != recipe.InputReviewProtocolRef) {
+				return fmt.Errorf("runtime owner catalog downgraded the sealed input review protocol")
+			}
+			if binding.InputReview != nil && binding.InputReview.ProtocolRef == RuntimeValidationInputReviewProtocolV2 && recipe.InputReviewProtocolRef != RuntimeValidationInputReviewProtocolV2 {
+				return fmt.Errorf("runtime owner catalog introduced an undeclared v2 input review protocol")
+			}
 			if binding.InputReview == nil {
 				continue
 			}
@@ -1301,6 +1308,7 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 	for _, recipe := range value.ValidationRecipes {
 		writeHashString(h, recipe.ID)
 		writeHashString(h, recipe.AdapterRef)
+		writeRuntimeValidationRecipeInputReviewHash(h, recipe)
 		writeHashString(h, recipe.Command)
 		writeHashStrings(h, recipe.Args)
 		writeHashString(h, fmt.Sprintf("%d", recipe.TimeoutMillis))

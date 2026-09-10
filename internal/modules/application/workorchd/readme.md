@@ -4,7 +4,7 @@ Status: active
 
 Type: application-module-contract
 
-Last Verified: 2026-09-03
+Last Verified: 2026-09-10
 
 ## 功能范围与边界
 
@@ -77,6 +77,9 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
   kernel reducer。required source 缺 exact executable proof 时必须在 pre-seal admission 阻塞。
 - projection 只保存 bounded immutable public DTO。canonical Workspace/Run state、active Run 与 exact blocker ref 原样投影；
   display summary、consistency diagnostic、recovery hint 与 metrics 都不能生成 mutation intent。
+- blocking input-review 详情从 Orchestrator 的 sealed original diagnostic 深拷贝到 audit/outcome DTO；Web 的只读展开项
+  保留全部 check/obligation、输入身份与原因，不受摘要标签的条数截断。脱敏文本及原报告 hash 原样显示，不能据此
+  生成 approval/retry/验收权限，也不能把 review 当作实际 validation 或有效进展。
 - Run heartbeat 区分 `latestActivityAt` 与 `latestEffectiveProgressAt`。事件、LLM 调用及普通 artifact/patch/result 时间只形成
   activity；effective progress 仅使用当前 Run 已被 Orchestrator 接受的 exact committed receipt（CWI proof 或 durable changed
   repair）及当前 Run accepted Result。activity age 用于心跳指标；局部有效进展不能覆盖 failed terminal。重复失败只来自

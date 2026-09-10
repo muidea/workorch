@@ -121,8 +121,11 @@ func classifyRuntimeInputReview(transaction *semanticPlanningMutationTransaction
 	a := transaction.aggregate
 	a.SemanticPlanning = ledger
 	code := "validation_input_review_conflict"
+	if runtimeInputReviewOnlyCoverageOmissions(document) {
+		code = "validation_input_review_coverage_incomplete"
+	}
 	if conclusion == runtimecontract.RuntimeValidationInputInconclusive {
-		code = runtimeInputReviewInformationFailure(len(ledger.History), ledger.Manifest.InputReviewInformation, document)
+		code = runtimeInputReviewInformationFailureForLedger(ledger, document)
 		if code == "" {
 			dependency := runtimeInputReviewDependency(a, ledger, document)
 			if a.Facts.Failure != nil && a.Facts.Failure.GovernanceDependency != nil && runtimecontract.SameExternalDependency(*a.Facts.Failure.GovernanceDependency, dependency) {
@@ -145,12 +148,96 @@ func classifyRuntimeInputReview(transaction *semanticPlanningMutationTransaction
 	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
 		OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator, OriginalClass: "contract",
 		OriginalCode: code, OriginalMessage: "validation input review did not establish consistency with the immutable original criteria", Signature: runtimeInputReviewRef(a, ledger, document)}
+	if a.ResultFeedbackVersion >= 3 {
+		diagnostic.ValidationInputReviews, err = runtimeInputReviewFeedback(a, ledger, document)
+		if err != nil {
+			return true, false, err
+		}
+	}
 	updated, err := applySemanticContractFailureToAggregate(a, code, diagnostic)
 	if err != nil {
 		return true, false, err
 	}
 	transaction.aggregate, transaction.ledger = updated, updated.SemanticPlanning
 	return true, true, nil
+}
+
+func runtimeInputReviewFeedback(a RuntimeAggregate, ledger runtimecontract.RuntimeSemanticPlanningLedger, document runtimecontract.RuntimeSemanticPlanDocument) ([]runtimecontract.RuntimeValidationInputReviewFeedback, error) {
+	var reports []runtimecontract.RuntimeValidationInputReviewFeedback
+	for _, proposal := range document.Proposals {
+		if proposal.ValidationInputReview == nil {
+			continue
+		}
+		binding, found := runtimecontract.RuntimeSemanticValidationInputReviewBinding(proposal, ledger.Manifest.OwnerCatalogs)
+		if !found {
+			return nil, fmt.Errorf("input review feedback has no exact admitted subject")
+		}
+		report, err := runtimecontract.ProjectRuntimeValidationInputReviewFeedback(runtimeInputReviewRef(a, ledger, document), binding, *proposal.ValidationInputReview)
+		if err != nil {
+			return nil, err
+		}
+		reports = append(reports, report)
+	}
+	return reports, nil
+}
+
+func runtimeInputReviewOnlyCoverageOmissions(document runtimecontract.RuntimeSemanticPlanDocument) bool {
+	missing := false
+	for _, proposal := range document.Proposals {
+		if proposal.ValidationInputReview == nil {
+			continue
+		}
+		if runtimecontract.RuntimeValidationInputReviewConclusion(*proposal.ValidationInputReview) == runtimecontract.RuntimeValidationInputConsistent {
+			continue
+		}
+		if !runtimecontract.RuntimeValidationInputReviewOnlyCoverageOmissions(*proposal.ValidationInputReview) {
+			return false
+		}
+		missing = true
+	}
+	return missing
+}
+
+// V2 charges information against Run + immutable CWI + original check, not
+// mutable input bytes, native names, paths, recipe or catalog revision. No
+// extra counter is reconstructed or reset on re-drive; the preceding sealed
+// information retirements are the complete budget preimage. V1 keeps its
+// original exact-subject contract for already-started Runs.
+func runtimeInputReviewInformationFailureForLedger(ledger runtimecontract.RuntimeSemanticPlanningLedger, document runtimecontract.RuntimeSemanticPlanDocument) string {
+	if code := runtimeInputReviewInformationFailure(len(ledger.History), ledger.Manifest.InputReviewInformation, document); code != "" {
+		return code
+	}
+	for _, current := range document.Proposals {
+		binding, found := runtimecontract.RuntimeSemanticValidationInputReviewBinding(current, ledger.Manifest.OwnerCatalogs)
+		if !found || binding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV2 || current.ValidationInputReview == nil {
+			continue
+		}
+		for _, history := range ledger.History {
+			if history.Reason != runtimecontract.RuntimeSemanticPlanningRetirementInputReviewInformation {
+				continue
+			}
+			previous, ok := runtimeInputReviewDocument(history.Snapshot)
+			if !ok {
+				continue
+			}
+			for _, prior := range previous.Proposals {
+				if prior.CoverageWorkItemID != current.CoverageWorkItemID || prior.ValidationInputReview == nil {
+					continue
+				}
+				for _, check := range current.ValidationInputReview.Checks {
+					if check.Conclusion != runtimecontract.RuntimeValidationInputInconclusive {
+						continue
+					}
+					for _, old := range prior.ValidationInputReview.Checks {
+						if old.RequiredCheckRef == check.RequiredCheckRef && old.Conclusion == runtimecontract.RuntimeValidationInputInconclusive {
+							return "validation_input_review_information_exhausted"
+						}
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func runtimeInputReviewResolutionMatches(a RuntimeAggregate, ledger runtimecontract.RuntimeSemanticPlanningLedger, resolution runtimecontract.RuntimeGovernanceResolution) bool {
@@ -260,6 +347,17 @@ func validateRuntimeInputReviewAggregate(a RuntimeAggregate) error {
 			if history.Snapshot.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted {
 				return fmt.Errorf("input review information retired a non-review transaction")
 			}
+			precedingLedger := history.Snapshot.Clone()
+			for _, prior := range a.SemanticPlanning.History {
+				if prior.RetiredAtStateRevision >= history.RetiredAtStateRevision {
+					break
+				}
+				precedingLedger.History = append(precedingLedger.History, prior)
+			}
+			document, _ := runtimeInputReviewDocument(precedingLedger)
+			if code := runtimeInputReviewInformationFailureForLedger(precedingLedger, document); code != "" {
+				return fmt.Errorf("input review information retirement exceeds its immutable check budget: %s", code)
+			}
 			for _, source := range information {
 				if source.ResolutionID == history.InputReviewResolutionID {
 					preceding = append(preceding, source)
@@ -282,6 +380,39 @@ func validateRuntimeInputReviewAggregate(a RuntimeAggregate) error {
 		if !found || runtimeInputReviewConclusion(document) != runtimecontract.RuntimeValidationInputInconclusive ||
 			!runtimecontract.SameExternalDependency(*a.Facts.Failure.GovernanceDependency, runtimeInputReviewDependency(a, a.SemanticPlanning, document)) {
 			return fmt.Errorf("input review governance requires the exact complete inconclusive report")
+		}
+		if code := runtimeInputReviewInformationFailureForLedger(a.SemanticPlanning, document); code != "" {
+			return fmt.Errorf("input review governance exceeded the original check information budget: %s", code)
+		}
+	}
+	if a.ResultFeedbackVersion >= 3 {
+		var diagnostics []*runtimecontract.RuntimeOriginalDiagnostic
+		if a.Facts.Failure != nil {
+			diagnostics = append(diagnostics, a.Facts.Failure.OriginalDiagnostic)
+		}
+		if a.Decision.Terminal != nil {
+			diagnostics = append(diagnostics, a.Decision.Terminal.OriginalDiagnostic)
+		}
+		for _, diagnostic := range diagnostics {
+			if diagnostic == nil || diagnostic.OwnerModuleID != runtimecontract.RuntimeModuleOrchestrator {
+				continue
+			}
+			switch diagnostic.OriginalCode {
+			case "validation_input_review_conflict", "validation_input_review_coverage_incomplete",
+				"validation_input_review_information_exhausted", "validation_input_review_history_exhausted":
+			default:
+				if len(diagnostic.ValidationInputReviews) == 0 {
+					continue
+				}
+			}
+			document, found := runtimeInputReviewDocument(a.SemanticPlanning)
+			if !found || runtimeInputReviewConclusion(document) == runtimecontract.RuntimeValidationInputConsistent {
+				return fmt.Errorf("blocking input review diagnostic has no admitted blocking report")
+			}
+			expected, err := runtimeInputReviewFeedback(a, a.SemanticPlanning, document)
+			if err != nil || !reflect.DeepEqual(expected, diagnostic.ValidationInputReviews) {
+				return fmt.Errorf("blocking input review diagnostic lost exact report provenance")
+			}
 		}
 	}
 	return nil

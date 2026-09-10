@@ -33,6 +33,9 @@ func resolveRuntimeValidationRecipeDeclarations(recipes []runtimemodel.RuntimeVa
 	manifest.TargetRefs = normalizeShellStrings(manifest.TargetRefs)
 	resolved := make([]runtimemodel.RuntimeValidationRecipe, 0, len(recipes))
 	for _, declaration := range runtimemodel.NormalizeRuntimeValidationRecipeDeclarations(recipes) {
+		if declaration.InputReviewProtocolRef != "" && !shellValidationInputReviewRequired(declaration.AdapterRef) {
+			continue
+		}
 		if declaration.Command != "" {
 			resolved = append(resolved, declaration)
 			continue
@@ -205,6 +208,10 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 				if shellValidationInputReviewRequired(recipe.AdapterRef) {
 					var code string
 					ownerBinding.InputReview, code = shellVersionedInputReview(workspaceDirectory, binding.Manifest.TargetRefs, ownerBinding)
+					if code == "" && recipe.InputReviewProtocolRef != "" {
+						ownerBinding.InputReview.ProtocolRef = recipe.InputReviewProtocolRef
+						ownerBinding.InputReview.Hash = runtimemodel.StableRuntimeValidationInputReviewSubjectHash(*ownerBinding.InputReview, ownerBinding)
+					}
 					if code != "" {
 						inspection.Code = code
 						unavailabilities = append(unavailabilities, runtimemodel.RuntimeValidationProofUnavailability{
@@ -553,6 +560,9 @@ func shellValidationRecipeSchemaHash(recipe runtimemodel.RuntimeValidationRecipe
 	recipe = recipe.Normalized()
 	digest := sha256.New()
 	_, _ = fmt.Fprintf(digest, "%s\x00%s\x00%s\x00%d\x00", recipe.ID, recipe.AdapterRef, recipe.Command, recipe.TimeoutMillis)
+	if recipe.InputReviewProtocolRef != "" {
+		_, _ = fmt.Fprintf(digest, "input-review\x00%s\x00", recipe.InputReviewProtocolRef)
+	}
 	for _, arg := range recipe.Args {
 		_, _ = fmt.Fprintf(digest, "%s\x00", arg)
 	}

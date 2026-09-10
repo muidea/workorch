@@ -681,6 +681,10 @@ func renderRuntimeProgressCompact(runtime *projectioncontract.RuntimeProgress, w
 			b.WriteString(truncateDisplay("  "+diagnostic.OriginalMessage, width))
 			b.WriteString("\n")
 		}
+		if len(diagnostic.ValidationInputReviews) != 0 {
+			b.WriteString(truncateDisplay(fmt.Sprintf("  input review reports: %d (diagnostic only; inspect acceptance for full details)", len(diagnostic.ValidationInputReviews)), width))
+			b.WriteString("\n")
+		}
 	}
 	return b.String()
 }

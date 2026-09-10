@@ -239,6 +239,9 @@ func renderInspectAcceptance(item projectioncontract.AcceptanceProjection) strin
 		}
 		b.WriteString("\n")
 	}
+	if item.Audit != nil && item.Audit.Failure != nil {
+		writeInputReviewFeedback(&b, item.Audit.Failure.OriginalDiagnostic)
+	}
 	if item.Audit != nil && len(item.Audit.Assessments) > 0 {
 		observation := item.Audit.Assessments[len(item.Audit.Assessments)-1]
 		b.WriteString("- latest assessment observation (diagnostic only): ")

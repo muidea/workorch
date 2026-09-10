@@ -4,7 +4,7 @@ Status: active
 
 Type: process-service-contract
 
-Last Verified: 2026-09-02
+Last Verified: 2026-09-10
 
 ## 功能说明
 
@@ -21,6 +21,10 @@ error object 都不得进入 EventHub command/data/result。Shutdown 先取消 o
 TUI/CLI 只依赖 `internal/pkg/workorchport` 的稳定 contract；embedded backend 通过
 typed EventHub command/result，remote backend 通过 client，不直接调用 owner `biz`、
 `service` 或 repository。
+
+TUI `inspect acceptance` 只读显示 sealed original diagnostic 中完整的 input-review check/obligation、
+原 CWI/check、输入 refs、subject/report hash 与原因；紧凑进度视图只给出报告数量和查看提示。
+评审不是实际验证或验收证据，端侧不能据此选择重试、自动解决 ticket 或重建 authority。
 
 `/exit` 是 TUI 唯一显式进程退出命令，由根按键入口在 Help、model-selection 等 modal
 分流之前统一识别。modal 只能暂存该完整命令，不得各自复制退出语义或吞掉它的按键；

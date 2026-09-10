@@ -63,3 +63,30 @@ func TestOwnerInfeasibilityCauseSurvivesAllPublicProjectionsWithoutAuthority(t *
 		t.Fatal("public diagnostics exposed execution authority")
 	}
 }
+
+func TestInputReviewFeedbackSurvivesPublicProjectionsWithoutNewAuthority(t *testing.T) {
+	diagnostic := &runtimecontract.RuntimeOriginalDiagnostic{OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator, OriginalCode: "validation_input_review_coverage_incomplete", ValidationInputReviews: []runtimecontract.RuntimeValidationInputReviewFeedback{{
+		ReviewRef: "review-1", ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2, CoverageWorkItemID: "cwi-1", RequirementHash: "original-requirement", ReportHash: "report-hash",
+		Report: runtimecontract.RuntimeValidationInputReview{SubjectHash: "exact-input", Checks: []runtimecontract.RuntimeValidationInputCheckReview{{
+			RequiredCheckRef: "original-check", Conclusion: runtimecontract.RuntimeValidationInputConflict, Reason: "documentation is not checked", InputTargetRefs: []string{"checks/input"},
+			Obligations: []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: "document tools", Finding: runtimecontract.RuntimeValidationInputMissing, Reason: "no assertion", InputTargetRefs: []string{"checks/input"}}},
+		}}},
+	}}}
+	state := runtimecontract.RuntimeStateRecord{Facts: runtimecontract.RuntimeFacts{Failure: &runtimecontract.FailureFact{Code: "semantic_contract_failed", OriginalDiagnostic: diagnostic}}}
+	audit := mapRuntimeAudit(&state)
+	progress := mapRuntimeProgress(state)
+	result := mapResult(&resultmodel.Result{RuntimeCloseout: &runtimecontract.RuntimeResultCloseout{OriginalDiagnostic: diagnostic}})
+	view := projectResultView(result)
+	for _, got := range []*runtimecontract.RuntimeOriginalDiagnostic{audit.Failure.OriginalDiagnostic, progress.OriginalDiagnostic, result.OriginalDiagnostic, view.OriginalDiagnostic} {
+		if !reflect.DeepEqual(got, diagnostic) {
+			t.Fatal("projection dropped input review provenance or observations")
+		}
+		got.ValidationInputReviews[0].Report.Checks[0].Obligations[0].Reason = "client mutation"
+		if diagnostic.ValidationInputReviews[0].Report.Checks[0].Obligations[0].Reason != "no assertion" {
+			t.Fatal("public report aliases Runtime authority")
+		}
+	}
+	if progress.AcceptedValidationEvidenceCount != 0 || progress.SatisfiedCWICount != 0 || (result.DoDAssessment != nil && result.DoDAssessment.Satisfied) {
+		t.Fatal("input report was converted into validation or coverage credit")
+	}
+}

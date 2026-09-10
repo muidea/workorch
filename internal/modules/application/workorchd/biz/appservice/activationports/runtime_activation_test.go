@@ -32,6 +32,25 @@ func TestCompileRuntimeEvidencePoliciesPreservesOwnerAdapterDeclaration(t *testi
 	}
 }
 
+func TestCompileRuntimeEvidencePoliciesSealsInputReviewProtocolForNewActivation(t *testing.T) {
+	for _, ref := range []string{"", runtimecontract.RuntimeValidationInputReviewProtocolV2, "unsupported"} {
+		policies, err := compileRuntimeEvidencePolicies("review-profile", []workorcheventpayload.Payload{workorcheventpayload.New(
+			workorcheventpayload.StringField("id", "review"), workorcheventpayload.StringField("appliesTo", runtimecontract.StepKindShellCommand),
+			workorcheventpayload.StringField("recipeAdapterRef", "owner/review/v1"), workorcheventpayload.BoolField("recipeDeclared", true),
+			workorcheventpayload.StringField("recipeInputReviewProtocolRef", ref),
+		)})
+		if ref == "unsupported" {
+			if err == nil {
+				t.Fatal("unknown protocol admitted at activation")
+			}
+			continue
+		}
+		if err != nil || len(policies) != 1 || policies[0].RecipeInputReviewProtocolRef != ref {
+			t.Fatalf("activation changed protocol %q: %v", ref, err)
+		}
+	}
+}
+
 func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 	defaultSoul := &soulmodel.Soul{ID: "soul-default", Revision: 1, ContentHash: "soul-default-hash", SourceProvenance: "test", Name: "default", SoulMD: "default instructions"}
 	executionSoul := &soulmodel.Soul{ID: "soul-execution", Revision: 1, ContentHash: "soul-execution-hash", SourceProvenance: "test", Name: "execution", SoulMD: "execution instructions"}

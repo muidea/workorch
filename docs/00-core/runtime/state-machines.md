@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-09-04
+Last Verified: 2026-09-10
 
 ## 四个协调状态机
 
@@ -386,6 +386,9 @@ current manifest 临时补全 scope；没有 matching sealed fallback 时按 typ
   exact `provide_validation_input_facts` governance dependency。Decision 管理 ticket；matching information resolution 的
   同一次 owner-private CAS 以 `input_review_information` 留存旧 semantic generation，重入 `required` 并由新请求重新评审。
   每 Run/exact subject 最多一次信息补充，history 容量检查先于开票；原 Definition/startup/报告不改写、CWI 零 credit。
+  activation 显式选择的 review v2 按原 CWI/check 进一步绑定预算，不允许用输入身份漂移或进程重启重置；
+  v2 原文/obligation 映射属于 SM-3 admission，纯缺项分类和预算属于同一 SM-2 私有事件。缺项仍明确失败，不借
+  validation-failure route 伪造执行事实。完整诊断仅由 SM-4 依封存 feedback 版本交付，UI/Result 不分类、不迁移。
   SM-3/SM-4 复用原 request/governance dispatch/continuation，SM-1 仍归 Run；空/解析/身份错误不属于业务不确定性。
 - complete Definition-gap document 只是 LLM observation candidate。`undeclared_prerequisite` 必须为每个 offending CWI 提供至少
   一条唯一、bounded、typed `PrerequisiteClaim(CoverageWorkItemID, OwnerModuleID, FactKind, OperationKind)`；其它 gap kind 禁止携带

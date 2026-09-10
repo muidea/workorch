@@ -9,6 +9,7 @@ import { stateTag as canonicalStateTag } from './utils/ui';
 import { presentWorkspaceRunCommand } from './workspaceRunCommand';
 import { validationRepairPolicyLabel } from './runtimeProgressPresentation';
 import { originalDiagnosticLabel } from './runtimeProgressPresentation';
+import { RuntimeInputReviewDetails } from './components/RuntimeInputReviewDetails';
 import type { RuntimeAuditCandidateAttempt } from './types';
 import { canonicalActiveRunIsGovernanceBlocked, canonicalDefinitionClarification, workspaceBoardExecutionIntentAllowed, workspaceDefinitionClarification } from './governanceMutationTarget';
 
@@ -487,7 +488,7 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
             { key: 'failureOwner', label: 'Producer', children: audit.failure.originalDiagnostic?.ownerModuleId || '-' },
             { key: 'failureOriginalCode', label: 'Original Code', children: audit.failure.originalDiagnostic?.originalCode || '-' },
             { key: 'failureOperation', label: 'Operation', children: audit.failure.originalDiagnostic?.operationId || '-' },
-            { key: 'failureOriginal', label: 'Original Diagnostic', children: audit.failure.originalDiagnostic?.originalMessage || audit.failure.originalDiagnostic?.omittedReason || '-' },
+            { key: 'failureOriginal', label: 'Original Diagnostic', children: <Space direction="vertical" style={{ width: '100%' }}>{audit.failure.originalDiagnostic?.originalMessage || audit.failure.originalDiagnostic?.omittedReason || '-'}<RuntimeInputReviewDetails diagnostic={audit.failure.originalDiagnostic} /></Space> },
             { key: 'failureRevision', label: 'Expected / Observed Revision', children: [audit.failure.originalDiagnostic?.expectedRevision, audit.failure.originalDiagnostic?.observedRevision].filter(Boolean).join(' / ') || '-' }
           ]}
         />

@@ -1788,6 +1788,12 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(d RuntimeSemant
 			return runtimeSemanticProposalViolation(proposal, proposalIndex, "validationInputReview", RuntimeSemanticConstraintRelational,
 				"incomplete_or_unbound_review", []string{"complete exact owner-bound input review"}, nil, err)
 		}
+		if proposal.ValidationInputReview != nil {
+			if err := proposal.ValidationInputReview.ValidateCriterionText(items[proposal.CoverageWorkItemID].TargetText); err != nil {
+				return runtimeSemanticProposalViolation(proposal, proposalIndex, "validationInputReview", RuntimeSemanticConstraintRelational,
+					"incomplete_or_foreign_criterion_mapping", []string{"complete exact original criterion excerpts"}, nil, err)
+			}
+		}
 		if len(catalog.ValidationRecipeRefs) == 0 && containsRuntimeSemanticEvidenceKind(proposal.RequiredEvidenceKinds, EvidenceKindValidation) {
 			return runtimeSemanticProposalViolation(proposal, proposalIndex, "requiredEvidenceKinds", RuntimeSemanticConstraintRelational, EvidenceKindValidation, []string{EvidenceKindStateChange}, nil, fmt.Errorf("runtime semantic document owner %q does not provide validation recipes", catalog.OwnerModuleID))
 		}

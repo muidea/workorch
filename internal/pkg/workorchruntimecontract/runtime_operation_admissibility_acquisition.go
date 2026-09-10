@@ -231,14 +231,14 @@ func runtimeObservationDependsOnWorkspaceTreeRevision(observation RuntimePrerequ
 func sameRuntimeValidationRecipe(left, right RuntimeValidationRecipe) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	return left.ID == right.ID && left.AdapterRef == right.AdapterRef && left.Command == right.Command && left.TimeoutMillis == right.TimeoutMillis && sameStrings(left.Args, right.Args)
+	return left.ID == right.ID && left.AdapterRef == right.AdapterRef && left.InputReviewProtocolRef == right.InputReviewProtocolRef && left.Command == right.Command && left.TimeoutMillis == right.TimeoutMillis && sameStrings(left.Args, right.Args)
 }
 
 func runtimeValidationRecipeConfirmsDeclaration(declared, confirmed RuntimeValidationRecipe) bool {
 	declared = declared.Normalized()
 	confirmed = confirmed.Normalized()
 	if declared.ValidateDeclaration() != nil || confirmed.Validate() != nil || declared.ID != confirmed.ID ||
-		declared.AdapterRef != confirmed.AdapterRef || declared.TimeoutMillis != confirmed.TimeoutMillis {
+		declared.AdapterRef != confirmed.AdapterRef || declared.InputReviewProtocolRef != confirmed.InputReviewProtocolRef || declared.TimeoutMillis != confirmed.TimeoutMillis {
 		return false
 	}
 	if declared.Command == "" {

@@ -65,7 +65,9 @@ const RuntimeResultCloseoutSchemaVersionCurrent uint32 = 1
 // Runs, even across a Result-committed/acknowledgement-lost deployment boundary.
 // Version two reports historical satisfied assessments as indeterminate when
 // the current SM-2 coverage ledger no longer carries satisfied credit.
-const RuntimeResultFeedbackVersionCurrent uint32 = 2
+// Version three includes the admitted blocking input review in diagnostics and
+// human-readable feedback. Zero through two keep their original material.
+const RuntimeResultFeedbackVersionCurrent uint32 = 3
 
 func (c RuntimeResultCloseout) Normalized() RuntimeResultCloseout {
 	c.OriginalDiagnostic = c.OriginalDiagnostic.CloneOriginal()

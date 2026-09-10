@@ -126,10 +126,11 @@ type RuntimeOriginalDiagnostic struct {
 	// The following typed observations preserve safe producer facts required by
 	// the Orchestrator reducer. They are diagnostic detail, never an outcome,
 	// retry, target authorization, or transition instruction.
-	TargetObservation            *RuntimeFailureTargetObservation     `json:"targetObservation,omitempty"`
-	ValidationDiagnostic         *ValidationFailureDiagnostic         `json:"validationDiagnostic,omitempty"`
-	ValidationFailureObservation *RuntimeValidationFailureObservation `json:"validationFailureObservation,omitempty"`
-	GovernanceDependency         *ExternalDependency                  `json:"governanceDependency,omitempty"`
+	TargetObservation            *RuntimeFailureTargetObservation       `json:"targetObservation,omitempty"`
+	ValidationDiagnostic         *ValidationFailureDiagnostic           `json:"validationDiagnostic,omitempty"`
+	ValidationFailureObservation *RuntimeValidationFailureObservation   `json:"validationFailureObservation,omitempty"`
+	GovernanceDependency         *ExternalDependency                    `json:"governanceDependency,omitempty"`
+	ValidationInputReviews       []RuntimeValidationInputReviewFeedback `json:"validationInputReviews,omitempty"`
 }
 
 // RuntimeFieldViolation preserves an individual wire or contract violation.
@@ -338,6 +339,7 @@ func StableRuntimeFeedbackHash(feedback RuntimeFeedback) string {
 }
 
 func writeRuntimeOriginalDiagnosticTypedFactsHash(h interface{ Write([]byte) (int, error) }, diagnostic *RuntimeOriginalDiagnostic) {
+	writeRuntimeValidationInputReviewFeedbackHash(h, diagnostic.ValidationInputReviews)
 	if diagnostic.TargetObservation == nil {
 		writeHashString(h, "target-observation:nil")
 	} else {
@@ -487,6 +489,17 @@ func (d *RuntimeOriginalDiagnostic) Validate() error {
 	for index, violation := range canonical.SemanticViolations {
 		if err := violation.Validate(); err != nil {
 			return fmt.Errorf("original diagnostic semantic violation %d: %w", index, err)
+		}
+	}
+	if len(canonical.ValidationInputReviews) != 0 && canonical.OwnerModuleID != RuntimeModuleOrchestrator {
+		return fmt.Errorf("only Orchestrator may project admitted validation input reviews")
+	}
+	for _, review := range canonical.ValidationInputReviews {
+		if err := review.Validate(); err != nil {
+			return err
+		}
+		if review.ReviewRef != canonical.Signature {
+			return fmt.Errorf("input review feedback is not bound to this diagnostic")
 		}
 	}
 	if canonical.ValidationDiagnostic != nil {

@@ -205,6 +205,15 @@ package is not proof of `go test ./...` and does not waive historical failures. 
 contract, not just a filename. Consistent review permits the existing SM-2 feasibility/seal path; conflict fails, and complete
 inconclusive review opens the existing Decision ticket for bounded information and re-review. Review and creation grant zero credit.
 
+The default recipe separately seals `validation/input-consistency/v2`. Each required check reports a complete bounded mapping
+of exact original-criterion excerpts to `covered`, `missing`, `conflicting` or `unknown` observations, with reasons and exact
+observed input refs. Textual coverage prevents silent omission of a conjunct but is not semantic or execution proof. A pure
+omission is classified as `validation_input_review_coverage_incomplete`, separately from a contradictory assertion; both block
+validation. This classification does not authorize a replacement, a synthetic failed-validation receipt or automatic input
+addition. Only complete uncertainty opens a factual ticket, at most once per Run + immutable CWI/original check even if input
+bytes, paths or native identities change. Full terminal per-check feedback retains the original report hash and explicitly
+distinguishes review from actual validation. V1 archives retain the original schema, budget and rendering.
+
 Within the same managed session, Shell instruments Go test execution and Go-built child executables, restores its own
 `GOCOVERDIR` at the test-execution boundary, and converts bounded fresh binary coverage with the Go toolchain. Only non-test,
 non-harness implementation paths from the sealed workspace manifest contribute execution facts. Building without running,

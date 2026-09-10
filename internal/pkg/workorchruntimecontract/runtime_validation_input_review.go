@@ -3,6 +3,7 @@ package workorchruntimecontract
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
@@ -14,10 +15,13 @@ import (
 
 const (
 	RuntimeValidationInputReviewProtocol          = "validation/input-consistency/v1"
+	RuntimeValidationInputReviewProtocolV2        = "validation/input-consistency/v2"
 	RuntimeValidationInputReviewMaxFiles          = 16
 	RuntimeValidationInputReviewMaxBytes          = 64 * 1024
 	RuntimeValidationInputReviewMaxReasonBytes    = 2048
 	RuntimeValidationInputReviewMaxScopeBytes     = 4096
+	RuntimeValidationInputReviewMaxObligations    = 16
+	RuntimeValidationInputReviewMaxReportBytes    = 32 * 1024
 	RuntimeValidationInputReviewInformationAction = "provide_validation_input_facts"
 	RuntimeValidationInputReviewFailureClass      = "validation_input_review"
 )
@@ -27,6 +31,10 @@ const (
 	RuntimeValidationInputConsistent   = "consistent"
 	RuntimeValidationInputConflict     = "conflict"
 	RuntimeValidationInputInconclusive = "inconclusive"
+	RuntimeValidationInputCovered      = "covered"
+	RuntimeValidationInputMissing      = "missing"
+	RuntimeValidationInputConflicting  = "conflicting"
+	RuntimeValidationInputUnknown      = "unknown"
 )
 
 // RuntimeValidationInputReviewSubject is a bounded, exact owner observation.
@@ -61,6 +69,17 @@ type RuntimeValidationInputCheckReview struct {
 	Conclusion       string   `json:"conclusion"`
 	Reason           string   `json:"reason"`
 	InputTargetRefs  []string `json:"inputTargetRefs"`
+	// V2 decomposes the immutable criterion into exact excerpts and describes
+	// input coverage. These are observations, not new acceptance criteria or a
+	// repair authorization. V1 reports must not carry this extension.
+	Obligations []RuntimeValidationInputObligationReview `json:"obligations,omitempty"`
+}
+
+type RuntimeValidationInputObligationReview struct {
+	CriterionText   string   `json:"criterionText"`
+	Finding         string   `json:"finding"`
+	Reason          string   `json:"reason"`
+	InputTargetRefs []string `json:"inputTargetRefs"`
 }
 
 // Information is a Decision-owner resolution fact, not a criterion, a
@@ -143,9 +162,15 @@ func (s RuntimeValidationInputReviewSubject) Clone() RuntimeValidationInputRevie
 }
 
 func (r RuntimeValidationInputReview) Clone() RuntimeValidationInputReview {
-	r.Checks = append([]RuntimeValidationInputCheckReview(nil), r.Checks...)
+	r.Checks = cloneRuntimeStateRawSlice(r.Checks, func(check RuntimeValidationInputCheckReview) RuntimeValidationInputCheckReview { return check })
 	for i := range r.Checks {
-		r.Checks[i].InputTargetRefs = append([]string(nil), r.Checks[i].InputTargetRefs...)
+		r.Checks[i].InputTargetRefs = cloneRuntimeStateRawSlice(r.Checks[i].InputTargetRefs, func(value string) string { return value })
+		r.Checks[i].Obligations = cloneRuntimeStateRawSlice(r.Checks[i].Obligations, func(value RuntimeValidationInputObligationReview) RuntimeValidationInputObligationReview {
+			return value
+		})
+		for j := range r.Checks[i].Obligations {
+			r.Checks[i].Obligations[j].InputTargetRefs = cloneRuntimeStateRawSlice(r.Checks[i].Obligations[j].InputTargetRefs, func(value string) string { return value })
+		}
 	}
 	return r
 }
@@ -185,7 +210,7 @@ func StableRuntimeValidationInputReviewSubjectHash(s RuntimeValidationInputRevie
 }
 
 func (s RuntimeValidationInputReviewSubject) ValidateAgainstBinding(b RuntimeValidationProofRequirementBinding) error {
-	if s.ProtocolRef != RuntimeValidationInputReviewProtocol || len(s.Files) == 0 || len(s.Files) > RuntimeValidationInputReviewMaxFiles {
+	if !RuntimeValidationInputReviewProtocolSupported(s.ProtocolRef) || len(s.Files) == 0 || len(s.Files) > RuntimeValidationInputReviewMaxFiles {
 		return fmt.Errorf("validation input review requires a supported protocol and complete bounded inputs")
 	}
 	if (s.ScopeContractRef == "") != (s.ScopeRequirements == "") || len(s.ScopeContractRef) > 512 || len(s.ScopeRequirements) > RuntimeValidationInputReviewMaxScopeBytes ||
@@ -245,6 +270,22 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 				return fmt.Errorf("validation input review references an unobserved input")
 			}
 		}
+		if b.InputReview.ProtocolRef == RuntimeValidationInputReviewProtocol {
+			if check.Obligations != nil {
+				return fmt.Errorf("v1 input review cannot carry v2 obligation observations")
+			}
+		} else {
+			if err := validateRuntimeValidationInputObligations(check); err != nil {
+				return err
+			}
+		}
+	}
+	// Do not retroactively impose a new capacity limit on archived v1 reports.
+	if b.InputReview.ProtocolRef == RuntimeValidationInputReviewProtocolV2 {
+		encoded, err := json.Marshal(r)
+		if err != nil || len(encoded) > RuntimeValidationInputReviewMaxReportBytes {
+			return fmt.Errorf("validation input review report capacity exceeded")
+		}
 	}
 	return nil
 }
@@ -278,6 +319,15 @@ func writeRuntimeValidationInputReviewHash(h interface{ Write([]byte) (int, erro
 		writeHashString(h, check.Conclusion)
 		writeHashString(h, check.Reason)
 		writeHashStrings(h, check.InputTargetRefs)
+		if len(check.Obligations) != 0 {
+			writeHashString(h, RuntimeValidationInputReviewProtocolV2)
+			for _, obligation := range check.Obligations {
+				writeHashString(h, obligation.CriterionText)
+				writeHashString(h, obligation.Finding)
+				writeHashString(h, obligation.Reason)
+				writeHashStrings(h, obligation.InputTargetRefs)
+			}
+		}
 	}
 }
 

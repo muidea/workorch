@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-09-03
+Last Verified: 2026-09-10
 
 ## 规范化候选合同
 
@@ -127,17 +127,32 @@ required checks/native mapping。Core 不识别语言、文件名或 adapter 业
 可选 `ScopeContractRef + ScopeRequirements` 成对声明 owner 执行/观测范围，分别最多 512/4096 bytes，完整 UTF-8 且
 无控制字符；二者进入 subject hash 与完整 C3 integrity 校验。范围改变使旧报告失效；空扩展不改变旧 JSON/hash。
 
+新 activation 可显式声明 `RecipeInputReviewProtocolRef=validation/input-consistency/v2`；接收 owner 必须原样确认到
+recipe 的 `InputReviewProtocolRef`，再发布相同协议的 subject。所有 recipe commitment/hash 绑定该可选字段；空值
+保留旧 JSON/hash，未知、降级或未声明的 v2 不得进入 catalog/dispatch。
+v2 每个 check 必须包含 1～16 项 `obligations`，字段为 `criterionText/finding/reason/inputTargetRefs`；finding 只允许
+`covered|missing|conflicting|unknown`。原文摘录须覆盖原 CWI 准则全部非空白字符，不能换词、遗漏合取项或限定词；
+报告 JSON 最多 32 KiB，reason/excerpt 各最多 2048 bytes。文本覆盖并不证明语义蕴含，引用准则也不是执行证据。
+missing/conflicting 导出 conflict，只有无此两类而存在 unknown 时为 inconclusive；没有负项才可 consistent。
+SM-2 将纯覆盖遗漏单独记录为 `validation_input_review_coverage_incomplete`，仍不能 seal validation binding 或进入旧
+validation-failure repair。当前评审合同不授予发布前候选的写入、已发布输入的自动合取补充或准则替换权限。
+
 SM-3 按原 request session 持久化完整报告；SM-2 的 `SemanticFeasibilityRequired` 私有事件在 owner feasibility 前分类。
 一致才继续原 binding/reconciliation seal，冲突明确失败。完整无法判断封存 exact governance dependency，复用本地
 governance dispatch 和 Decision ticket，不新增 provider 调用或状态机。ticket 信息 resolution 的同一次 SM-2 CAS
 将旧 semantic generation 以 `input_review_information` 留存，重入 `required`；新 manifest 只能携带相同 subject 的
 preceding resolution facts，以新 request 重新评审。原 Definition/startup、旧输入/报告不改写，review/resolution 零 credit。
 SM-4 只交付既有 continuation，SM-1 仍由 Run owner 处理。每 Run/exact subject 的信息补充最多一次，仍无法判断明确失败。
+v2 在此基础上按 Run/原 CWI/check 反证 preceding 信息补充记录，输入、路径、native/recipe/catalog 变化或进程重启不能
+重置一次性预算。fresh-load 重验历史消费和当前治理 dependency；旧 subject 事实仍不得用于另一 subject。
 格式、内容不完整、身份漂移和 provider transport/recovery 属于既有 bounded request/correction，不得伪造业务不确定性开票。
 
 `runtime_validation_input_review_test.go`、LLM `runtime_input_review_projection_test.go` 和 Orchestrator
 `runtime_validation_input_review_mainline_test.go` 分别证明纯合同、完整 C3 与缓存不变、真实 capability/Decision + file-backed Run
 的执行和恢复边界；脚本化 provider 证据不得登记为真实 LLM 或 release DCE 验收。
+`runtime_validation_input_obligations_test.go` 覆盖完整原文映射、缺项/冲突/不明分离、严格 wire 与降级拒绝；
+`TestDriveRuntimeInputReviewV2OmissionAndRestart` 与使用当前模板的 `TestDriveRuntimeIsolatedInputReviewMainline`
+证明真实 owner 的零越权、信息复核、原输入保留、终态反馈和持久化切点。
 
 三种策略的 operation target 校验必须只有一份 owner-neutral 纯实现，并由 manifest strict decode、candidate
 admission、owner feasibility preflight、dispatch seal/fresh-load 与 receipt credit 共同调用。owner receipt 的 `TargetRefs` 必须先与其 sealed

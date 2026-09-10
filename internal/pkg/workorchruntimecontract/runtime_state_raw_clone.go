@@ -1390,6 +1390,9 @@ func cloneRuntimeOperationVariantRefRaw(in RuntimeOperationVariantRef) RuntimeOp
 
 func cloneRuntimeOriginalDiagnosticRaw(in RuntimeOriginalDiagnostic) RuntimeOriginalDiagnostic {
 	out := in
+	out.ValidationInputReviews = cloneRuntimeStateRawSlice(in.ValidationInputReviews, func(value RuntimeValidationInputReviewFeedback) RuntimeValidationInputReviewFeedback {
+		return value.Clone()
+	})
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
 	out.FieldViolations = cloneRuntimeStateRawSlice(in.FieldViolations, func(item RuntimeFieldViolation) RuntimeFieldViolation { return cloneRuntimeFieldViolationRaw(item) })
 	out.SemanticViolations = cloneRuntimeStateRawSlice(in.SemanticViolations, func(item RuntimeSemanticContractViolation) RuntimeSemanticContractViolation {

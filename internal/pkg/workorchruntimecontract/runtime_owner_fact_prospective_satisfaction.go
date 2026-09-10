@@ -398,6 +398,7 @@ func StableRuntimeOwnerFactProspectiveSatisfactionRequestHash(value RuntimeOwner
 	for _, recipe := range value.ValidationRecipes {
 		writeHashString(h, recipe.ID)
 		writeHashString(h, recipe.AdapterRef)
+		writeRuntimeValidationRecipeInputReviewHash(h, recipe)
 		writeHashString(h, recipe.Command)
 		writeHashStrings(h, recipe.Args)
 		writeHashString(h, fmt.Sprintf("%d", recipe.TimeoutMillis))

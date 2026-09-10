@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-09-01
+Last Verified: 2026-09-10
 
 ## Purpose
 
@@ -109,6 +109,11 @@ confirmed 一次。
 Context inventory、Definition partition、active window 和 semantic batch capacity 仍由
 [Definition Context Strategy](../definition-convergence/context-strategy.md) 管理。容量上限和 execution consumption 不得复用
 同一字段或错误码。
+
+输入评审 v2 的一次性信息补充以同一 Run 内原 CWI/check 为身份，从既有 semantic generation 的
+`input_review_information` retirement 与 exact Decision resolution 反证；不新建计数 owner。subject 内容、路径、native、
+recipe/catalog revision 和进程重启不能刷新额度。只允许把 resolution facts 投影到其原 exact subject；预算消费范围
+不能被误用为把事实移植到新 subject 的权限。v1 保持封存的 exact-subject 预算，history 容量和 provider/request 预算仍独立。
 
 ## Allocate Before Call Or Effect
 

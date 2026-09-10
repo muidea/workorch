@@ -11,7 +11,7 @@ import (
 )
 
 func TestRuntimeFeedbackDoesNotPresentHistoricalSatisfiedAssessmentAsCurrentCredit(t *testing.T) {
-	for _, version := range []uint32{0, 1, runtimecontract.RuntimeResultFeedbackVersionCurrent} {
+	for _, version := range []uint32{0, 1, 2, runtimecontract.RuntimeResultFeedbackVersionCurrent} {
 		aggregate := runtimeTerminalAggregate(t)
 		aggregate.ResultFeedbackVersion = version
 		coverage := &aggregate.Facts.Coverage[0]

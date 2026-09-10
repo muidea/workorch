@@ -24,8 +24,25 @@ func validateRuntimeValidationInputReviewPayload(path string, raw json.RawMessag
 			return &RuntimeCandidatePayloadDiagnostic{Path: checkPath, Actual: "non_object", Required: []string{"object"}}
 		}
 		fields := []string{"requiredCheckRef", "conclusion", "reason", "inputTargetRefs"}
-		if err := validateRuntimeSemanticObjectFields(checkPath, check, fields, fields); err != nil {
+		if err := validateRuntimeSemanticObjectFields(checkPath, check, append(append([]string(nil), fields...), "obligations"), fields); err != nil {
 			return err
+		}
+		if raw, exists := check["obligations"]; exists {
+			var obligations []json.RawMessage
+			if err := json.Unmarshal(raw, &obligations); err != nil || len(obligations) == 0 || len(obligations) > RuntimeValidationInputReviewMaxObligations {
+				return &RuntimeCandidatePayloadDiagnostic{Path: checkPath + ".obligations", Actual: "empty_or_unbounded_mapping", Required: []string{"complete bounded obligation array"}}
+			}
+			for j, rawObligation := range obligations {
+				var obligation map[string]json.RawMessage
+				path := fmt.Sprintf("%s.obligations[%d]", checkPath, j)
+				if err := json.Unmarshal(rawObligation, &obligation); err != nil || obligation == nil {
+					return &RuntimeCandidatePayloadDiagnostic{Path: path, Actual: "non_object", Required: []string{"object"}}
+				}
+				fields := []string{"criterionText", "finding", "reason", "inputTargetRefs"}
+				if err := validateRuntimeSemanticObjectFields(path, obligation, fields, fields); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
@@ -64,6 +81,22 @@ func addRuntimeSemanticInputReviewSchema(proposal map[string]any, manifest Runti
 						"reason":           map[string]any{"type": "string", "minLength": 1, "maxLength": RuntimeValidationInputReviewMaxReasonBytes},
 						"inputTargetRefs":  stringEnumArraySchemaWithMaximum(refs, len(refs), 1),
 					},
+				}
+				if binding.InputReview.ProtocolRef == RuntimeValidationInputReviewProtocolV2 {
+					checkSchema["required"] = append(checkSchema["required"].([]string), "obligations")
+					checkSchema["properties"].(map[string]any)["obligations"] = map[string]any{
+						"type": "array", "minItems": 1, "maxItems": RuntimeValidationInputReviewMaxObligations,
+						"items": map[string]any{
+							"type": "object", "additionalProperties": false,
+							"required": []string{"criterionText", "finding", "reason", "inputTargetRefs"},
+							"properties": map[string]any{
+								"criterionText":   map[string]any{"type": "string", "minLength": 1, "maxLength": RuntimeValidationInputReviewMaxReasonBytes},
+								"finding":         stringEnumSchema([]string{RuntimeValidationInputCovered, RuntimeValidationInputMissing, RuntimeValidationInputConflicting, RuntimeValidationInputUnknown}),
+								"reason":          map[string]any{"type": "string", "minLength": 1, "maxLength": RuntimeValidationInputReviewMaxReasonBytes},
+								"inputTargetRefs": stringEnumArraySchemaWithMaximum(refs, len(refs), 1),
+							},
+						},
+					}
 				}
 				var allChecks []any
 				for _, check := range binding.RequiredCheckRefs {

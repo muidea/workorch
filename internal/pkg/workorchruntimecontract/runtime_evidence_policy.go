@@ -18,7 +18,10 @@ type RuntimeEvidencePolicy struct {
 	// command; only the addressed capability owner may resolve it from fresh
 	// owner facts into an executable RuntimeValidationRecipe.
 	RecipeAdapterRef string
-	ArgsContain      []string
+	// Empty preserves the historical owner protocol. A nonempty value is an
+	// explicit activation seal, never a hot-loaded change to an existing Run.
+	RecipeInputReviewProtocolRef string `json:",omitempty"`
+	ArgsContain                  []string
 	// RecipeArgs declares a profile validation recipe. The ordered command line
 	// is sealed at activation, then must be preflight-confirmed by the Shell
 	// owner before it becomes selectable by an LLM; an LLM may never reconstruct
@@ -131,6 +134,7 @@ func (p RuntimeEvidencePolicy) Normalized() RuntimeEvidencePolicy {
 	p.AppliesTo = strings.TrimSpace(p.AppliesTo)
 	p.CommandName = strings.TrimSpace(p.CommandName)
 	p.RecipeAdapterRef = strings.TrimSpace(p.RecipeAdapterRef)
+	p.RecipeInputReviewProtocolRef = strings.TrimSpace(p.RecipeInputReviewProtocolRef)
 	p.ArgsContain = normalizeStrings(p.ArgsContain)
 	p.RecipeArgs = normalizeOrderedStrings(p.RecipeArgs)
 	p.RequiredArgs = normalizeStrings(p.RequiredArgs)
@@ -174,6 +178,9 @@ func (p RuntimeEvidencePolicy) Validate() error {
 	}
 	if p.RecipeDeclared && p.CommandName != "" && p.RecipeAdapterRef != "" {
 		return fmt.Errorf("runtime evidence policy validation recipe cannot declare both command and owner adapter")
+	}
+	if p.RecipeInputReviewProtocolRef != "" && (!p.RecipeDeclared || p.RecipeAdapterRef == "" || !RuntimeValidationInputReviewProtocolSupported(p.RecipeInputReviewProtocolRef)) {
+		return fmt.Errorf("runtime evidence policy input review protocol requires an explicit owner-adapted recipe and supported protocol")
 	}
 	if p.RecipeDeclared && p.CommandName == "" && len(p.RecipeArgs) != 0 {
 		return fmt.Errorf("runtime evidence policy owner-adapted recipe cannot declare command args")
@@ -225,15 +232,17 @@ type RuntimeValidationRecipe struct {
 	// AdapterRef is empty for a fixed profile command. For an owner-adapted
 	// declaration it is the only executable-selection input; the capability
 	// owner preserves it on the concrete recipe it publishes.
-	AdapterRef    string
-	Command       string
-	Args          []string
-	TimeoutMillis int64
+	AdapterRef             string
+	InputReviewProtocolRef string `json:",omitempty"`
+	Command                string
+	Args                   []string
+	TimeoutMillis          int64
 }
 
 func (r RuntimeValidationRecipe) Normalized() RuntimeValidationRecipe {
 	r.ID = strings.TrimSpace(r.ID)
 	r.AdapterRef = strings.TrimSpace(r.AdapterRef)
+	r.InputReviewProtocolRef = strings.TrimSpace(r.InputReviewProtocolRef)
 	r.Command = strings.TrimSpace(r.Command)
 	r.Args = normalizeOrderedStrings(r.Args)
 	return r
@@ -243,6 +252,9 @@ func (r RuntimeValidationRecipe) Validate() error {
 	r = r.Normalized()
 	if r.ID == "" || r.Command == "" {
 		return fmt.Errorf("runtime validation recipe requires id and command")
+	}
+	if err := r.validateInputReviewProtocol(); err != nil {
+		return err
 	}
 	if r.TimeoutMillis != 0 && (r.TimeoutMillis < 1000 || r.TimeoutMillis > 600000) {
 		return fmt.Errorf("runtime validation recipe timeout must be between 1000 and 600000")
@@ -258,6 +270,9 @@ func (r RuntimeValidationRecipe) ValidateDeclaration() error {
 	if r.ID == "" || (r.Command == "" && r.AdapterRef == "") {
 		return fmt.Errorf("runtime validation recipe declaration requires id and command or owner adapter ref")
 	}
+	if err := r.validateInputReviewProtocol(); err != nil {
+		return err
+	}
 	if r.Command == "" && len(r.Args) != 0 {
 		return fmt.Errorf("runtime validation recipe adapter declaration cannot contain command args")
 	}
@@ -265,6 +280,20 @@ func (r RuntimeValidationRecipe) ValidateDeclaration() error {
 		return fmt.Errorf("runtime validation recipe timeout must be between 1000 and 600000")
 	}
 	return nil
+}
+
+func (r RuntimeValidationRecipe) validateInputReviewProtocol() error {
+	if r.InputReviewProtocolRef != "" && (r.AdapterRef == "" || !RuntimeValidationInputReviewProtocolSupported(r.InputReviewProtocolRef)) {
+		return fmt.Errorf("runtime validation recipe input review requires a supported owner protocol")
+	}
+	return nil
+}
+
+func writeRuntimeValidationRecipeInputReviewHash(h interface{ Write([]byte) (int, error) }, recipe RuntimeValidationRecipe) {
+	if recipe.InputReviewProtocolRef != "" {
+		writeHashString(h, "runtime-validation-recipe-input-review/v1")
+		writeHashString(h, recipe.InputReviewProtocolRef)
+	}
 }
 
 // RuntimeValidationRecipeDeclarationsFromEvidencePolicies derives the profile
@@ -277,7 +306,7 @@ func RuntimeValidationRecipeDeclarationsFromEvidencePolicies(policies []RuntimeE
 		if !policy.RecipeDeclared || policy.AppliesTo != StepKindShellCommand || (policy.CommandName == "" && policy.RecipeAdapterRef == "") {
 			continue
 		}
-		recipe := RuntimeValidationRecipe{ID: policy.ID, AdapterRef: policy.RecipeAdapterRef, Command: policy.CommandName, Args: append([]string(nil), policy.RecipeArgs...), TimeoutMillis: policy.RecipeTimeoutMillis}.Normalized()
+		recipe := RuntimeValidationRecipe{ID: policy.ID, AdapterRef: policy.RecipeAdapterRef, InputReviewProtocolRef: policy.RecipeInputReviewProtocolRef, Command: policy.CommandName, Args: append([]string(nil), policy.RecipeArgs...), TimeoutMillis: policy.RecipeTimeoutMillis}.Normalized()
 		if recipe.ValidateDeclaration() == nil {
 			ret = append(ret, recipe)
 		}
@@ -544,7 +573,7 @@ func sameRuntimeEvidencePolicy(left RuntimeEvidencePolicy, right RuntimeEvidence
 	left = left.Normalized()
 	right = right.Normalized()
 	if left.ID != right.ID || left.Profile != right.Profile || left.Rule != right.Rule || left.AppliesTo != right.AppliesTo ||
-		left.CommandName != right.CommandName || left.RecipeAdapterRef != right.RecipeAdapterRef || left.RecipeTimeoutMillis != right.RecipeTimeoutMillis || left.QualityOnZeroWork != right.QualityOnZeroWork || left.MarksZeroWork != right.MarksZeroWork ||
+		left.CommandName != right.CommandName || left.RecipeAdapterRef != right.RecipeAdapterRef || left.RecipeInputReviewProtocolRef != right.RecipeInputReviewProtocolRef || left.RecipeTimeoutMillis != right.RecipeTimeoutMillis || left.QualityOnZeroWork != right.QualityOnZeroWork || left.MarksZeroWork != right.MarksZeroWork ||
 		left.EvidenceReason != right.EvidenceReason || left.Description != right.Description ||
 		left.RecipeDeclared != right.RecipeDeclared ||
 		!sameStrings(left.ArgsContain, right.ArgsContain) || !sameStrings(left.RecipeArgs, right.RecipeArgs) || !sameStrings(left.RequiredArgs, right.RequiredArgs) || !sameStrings(left.ZeroWorkMarkers, right.ZeroWorkMarkers) ||

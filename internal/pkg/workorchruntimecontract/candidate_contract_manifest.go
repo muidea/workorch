@@ -951,6 +951,7 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashStrings(h, operation.AdmissibilitySnapshotRefs)
 		for _, recipe := range operation.ValidationRecipes {
 			writeHashString(h, recipe.ID)
+			writeRuntimeValidationRecipeInputReviewHash(h, recipe)
 			writeHashString(h, recipe.Command)
 			writeHashStrings(h, recipe.Args)
 			writeHashString(h, fmt.Sprintf("%d", recipe.TimeoutMillis))

@@ -8,6 +8,7 @@ import { workorchApi } from '../api';
 import { useSSE } from '../hooks';
 import { modelLabels } from '../utils/constants';
 import { originalDiagnosticLabel } from '../runtimeProgressPresentation';
+import { RuntimeInputReviewDetails } from '../components/RuntimeInputReviewDetails';
 import * as helpers from '../helpers';
 import { canonicalActiveRunIsGovernanceBlocked, canonicalDefinitionClarification, workspaceDefinitionClarification, workspaceExecutionIntentAllowed } from '../governanceMutationTarget';
 
@@ -1382,6 +1383,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                     { key: 'evidence', label: '结果证据', children: outcomeResult?.evidenceRefs?.length ? compactTags(outcomeResult.evidenceRefs) : '-' }
                   ]}
                 />
+                <RuntimeInputReviewDetails diagnostic={outcomeResult?.originalDiagnostic} />
                 <CardGrid>
                   <ProCard title={modelLabels.doDAssessment} colSpan={{ xs: 24, lg: 12 }}>
                     {outcomeDoDItems.length ? (

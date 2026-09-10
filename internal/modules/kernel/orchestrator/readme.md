@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-09-04
+Last Verified: 2026-09-10
 
 ## 功能范围与边界
 
@@ -238,10 +238,20 @@ Orchestrator 独占 SM-2～SM-4；恢复、重复结果及重复 ticket 请求�
 超时、传输故障、空响应、解析失败、缺少逐项结果和身份不匹配不是业务“无法判断”结论，不得直接制造 ticket；它们遵守
 既有 request recovery、document admission 和预算合同。ordinary Definition gap/repair 路径也不得猜测评审结论。
 生产接线复用 `semantic_plan/proof_batch`，不新增请求种类或状态机。capability owner 的 proof binding 可声明
-`InputReview`，封存 `validation/input-consistency/v1`、完整输入字节/hash、原 required checks/native mapping；LLM
+`InputReview`，封存 activation 选择的 `validation/input-consistency/v1|v2`、完整输入字节/hash、原 required checks/native mapping；LLM
 只返回 `validationInputReview` 的 exact subjectHash 和逐 check 的 `consistent|conflict|inconclusive`、reason、input refs。
 缺项、重复项、未知字段/结论或身份漂移仍是 document admission error。完整报告持久化后，SM-2 的
 `SemanticFeasibilityRequired` 私有事件在 proposal feasibility probe 前分类：一致才进入既有 feasibility/binding seal；冲突明确失败。
+
+v2 必须由新 activation 的 `RecipeInputReviewProtocolRef` 显式声明，并在 owner-confirmed recipe、catalog、manifest 与
+dispatch recipe commitment 中保留。空值沿用旧 owner 协议；不得省略、降级或把 v2 注入未声明的 recipe。
+v2 每个 check 另含至多 16 个 `obligations`：原文 `criterionText`、`covered|missing|conflicting|unknown` finding、reason 和
+input refs；完整报告 JSON 至多 32 KiB。摘录必须共同覆盖原 CWI 准则全部非空白字符，不能省略限定词或合取项。
+该门禁证明文本来源与覆盖完整，不证明断言蕴含准则；语义仍须独立评审，真实验证与 assessment 仍不可缺。
+check conclusion 必须与 findings 一致，missing/conflicting 优先于 unknown。只有全报告的非一致项均为已确定的覆盖遗漏时，
+SM-2 才使用 `validation_input_review_coverage_incomplete` 区分缺项；真实冲突或混合不明不能被标记为纯缺项。
+此分类仍为明确失败，不是 create/patch/supplement 或 retry 授权；不能伪造 validation receipt 接入已有 validation-failure
+repair route，不能改写已发布输入、改变原准则或发放 credit。
 
 完整无法判断经本地 governance dispatch（无额外 LLM 调用）封存 `provide_validation_input_facts`，由 Decision
 创建 `runtime_governance` ticket。`provide_missing_info` 必须提供非空、完整 UTF-8、最多 2048 bytes 的事实摘要。
@@ -251,6 +261,9 @@ generation，重入 `required`；SM-4 只交付 continuation。新 manifest 仅�
 每个 Run 的同一 exact subject 最多接受一次信息补充；仍无法判断以 `validation_input_review_information_exhausted`
 明确失败，不循环开票；既有 history 容量不足以消费答案时，在开票前以 `validation_input_review_history_exhausted` 终止。
 拒绝 ticket 则沿既有治理 fail 路径终止。既有 history、request/correction、provider budget 不另开账户。
+v2 进一步以同一 Run 的原 CWI/check 为信息预算身份；内容、路径、native/recipe/catalog revision 变化和进程重启均不能
+刷新额度。预算从 preceding `input_review_information` 原记录反证，不新增跨 owner counter；fresh-load 同样拒绝超额
+retirement 或治理 dependency。ticket 事实仍只供 exact subject 使用，不能把旧输入的信息移植为新输入的一致结论。
 
 Shell v3/v4 adapter 是此合同的 capability producer；输入来源不可读、超出完整 review envelope 或 native mapping 不支持时仍不可用。
 v4 的逐 CWI 输入/执行范围由 Shell 独占定义；Core 不按语言或路径裁剪评审输入。默认模板只在新 Start/Restart 选择
@@ -421,9 +434,13 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
   acknowledgement；partial/response-loss从同一 delivery ledger幂等续驱，不改写 terminal decision。
 - SM-4 的 Result material 从已裁决的 requirement outcomes、evidence 与 receipts 投影逐项 DoD、实现/验证摘要、限制、
   风险和仅供阅读的后续建议；没有 validation evidence 不能描述为验证已执行或失败。terminal guard 与原始 owner cause
-  分别保存，Result owner 不重判验收。新 aggregate 初始化时一次封存 `ResultFeedbackVersion=2`；该版本以当前 SM-2
+  分别保存，Result owner 不重判验收。新 aggregate 初始化时一次封存 `ResultFeedbackVersion=3`；沿用 v2 以当前 SM-2
   coverage 判断历史 satisfied assessment 的适用性，当前未满足时显示 indeterminate，不删除历史评估或证据。
-  既有 record 的 `0/1` 沿用对应 renderer，Resume 不补写该值。未知版本 fail closed；同一 Run 的 Result 内容与 hash 在升级、
+  v3 的 input-review terminal diagnostic 另保留完整 blocking batch 的 typed reports（CWI、requirement、subject、review ref/hash、
+  逐 check/obligation 事实），并从原 persisted document/binding 反证；删除或篡改反馈不得在 fresh-load 被接受。
+  敏感文本/控制字符只在 detached feedback 中脱敏，保留原报告引用/hash，不复制输入文件内容。Result、Web 和 TUI 仅展示，
+  不能据此选择 action；完整详情不能只剩被裁剪的通用摘要。
+  既有 record 的 `0/1/2` 沿用对应 renderer，Resume 不补写该值。未知版本 fail closed；同一 Run 的 Result 内容与 hash 在升级、
   response loss 和 pending delivery replay 后必须相同，不改写旧 Result/Run 归档。
 - Workspace deletion只允许在 Run owner `draining` fence后排空既有 terminal delivery。Orchestrator独占自身 quiescence/purge
   private reducer，不终止 Run、不推进 Workspace deletion phase、不跨 owner删除资源。
@@ -464,6 +481,7 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
 | --- | --- | --- |
 | ordinary validation-input protection | `workorchruntimecontract/runtime_validation_input_protection_test.go`、`biz/runtime_validation_input_addition_mainline_test.go::TestDriveRuntimeOrdinaryMutationCannotWeakenValidationInputAcrossRestart`、`TestDriveRuntimeRepeatedInputWeakeningClosesWithoutEffectOrTicket` | 三策略及 selector-only 排除、source preimage/hash/clone/replay、exact repair 例外；真实 File/Shell + file-backed Run + scripted provider 下，越界拒绝→合法源码修改→独立补充→fresh validation→Result/Workspace/Run 完成；source dispatch/input receipt/拒绝终态切点重启零额外 provider，重复越界零 effect/credit/ticket，不宣称真实模型或 release DCE 验收 |
 | validation-input review / factual ticket | `biz/runtime_validation_input_review_mainline_test.go`、`workorchruntimecontract/runtime_validation_input_review_test.go` | SM-2/3/4 共用旧事务；一致→实际验证，冲突/格式错误零 ticket，无法判断→Decision 信息→新请求重新评审；同一 subject 信息上限、reject、exact duplicate、内容/lineage tamper、五个持久化切点恢复与零额外 provider；SM-1 仍由 Run owner 交付 |
+| v2 obligation review / full feedback | `workorchruntimecontract/runtime_validation_input_obligations_test.go`、`runtime_validation_input_review_feedback_test.go`、`biz/runtime/validation_input_review_test.go`、`biz/runtime_validation_input_review_mainline_test.go` | 完整原文映射及 Unicode/容量边界、缺项与矛盾分离、Run 内原 CWI/check 信息额度、协议降级拒绝；真实 owner 原输入不变、零虚构 receipt/credit、终态逐项反馈及脱敏、删除/篡改反证、重复和重启幂等 |
 | assessment purpose / repair generations | `workorchruntimecontract/runtime_assessment_purpose_preimage_test.go`、`biz/runtime/assessment_purpose_preseal_test.go`、`biz/runtime_validation_input_addition_mainline_test.go` | active/history purpose 隔离、exact binding 唯一反证、repair-only 不授予 assessment、缺失/重复/篡改拒绝；file-backed Run + 真实 File/Shell 的历史 assessment→弱验证拒绝→semantic repair seal→create-only input→fresh validation→assessment→终态投递；SM-2 seal CAS 前后、input receipt 与 fresh validation 提交后重启；终态 duplicate、各切点零额外 provider/预算，旧输入与 startup 不变，SM-1 ownership 不变 |
 | target preimage / terminal feedback | `workorchruntimecontract/runtime_target_parameter_binding_test.go`、`blocks/file/target_parameter_test.go`、`biz/runtime/prerequisite_freshness_test.go`、`biz/runtime_result_feedback_test.go`、`biz/runtime/controller_test.go::TestRuntimeControllerInitializePreservesLegacyFeedbackVersionWithoutWrite`、`biz/runtime_result_projection_test.go::TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjection` | SM-3 exact target 派生与 echo 拒绝；SM-2 无进展 guard 保留 root cause 且零额外预算；SM-4 完整且不虚构验收的反馈、旧/新版本 partial delivery 重启重放；SM-1 与 capability owner 不变 |
 | repair rejection / historical probe lineage | `biz/runtime/repair_rejection_closure_test.go`、`biz/runtime/candidate_owner_conformance_test.go`、`biz/runtime/shell_owner_receipt_integration_test.go::TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot` | first-member/partial-effect rejected repair 同 CAS 退役；candidate correction 的 exact catalog preimage、tamper/协调重封存拒绝、CAS-before/response-loss/restart duplicate；真实 Shell→File correction→effect→fresh validation，历史拒绝不阻塞 current owner fact 推进 |
@@ -483,3 +501,8 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
 真实 provider、远端 endpoint 和长时间网络故障由
 [`deployed-convergence-scenarios.md`](../../../../docs/50-product-interface/deployed-convergence-scenarios.md) 验收；部署事实不能替代
 本表的 deterministic contract tests。
+
+显式设置 `WORKORCH_READONLY_RUN_ARCHIVE` 为一个已有 `run.json` 的绝对路径后，可单独运行
+`biz/runtime_archive_readonly_test.go::TestRuntimeArchiveReadOnlyCompatibility`。
+该诊断只读取并验证原 bootstrap、record 和 aggregate，核对封存 feedback 版本及文件 hash；不启动 Hub、repository、
+Runtime drive 或 provider，也不改写归档。默认 CI 不读取本地运行数据；通过该检查不是重新执行或 workspace 验收。

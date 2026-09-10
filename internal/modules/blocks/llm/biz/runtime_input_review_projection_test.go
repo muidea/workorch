@@ -81,6 +81,53 @@ func TestRuntimeInputReviewExactSourceAndInformationStayInC3(t *testing.T) {
 	}
 }
 
+func TestRuntimeInputReviewV2ObligationsSchemaAndFreshContentOnlyChangeC3(t *testing.T) {
+	request := runtimeInputReviewProviderFixture(t)
+	catalog := &request.SemanticManifest.OwnerCatalogs[0]
+	binding := &catalog.ValidationSurfaces[0].ProofRequirementBindings[0]
+	catalog.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{{ID: binding.ValidationRecipeID, AdapterRef: "owner/review/v1", Command: "check", InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2}}
+	binding.InputReview.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV2
+	binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, *binding)
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
+	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	before, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"obligations", "criterionText", "finding", "covered", "missing", "conflicting", "unknown"} {
+		if !strings.Contains(before.Schema, `"`+field+`"`) {
+			t.Fatalf("v2 schema lost %s", field)
+		}
+	}
+	var projection runtimeSemanticAuthorityProjection
+	if err := json.Unmarshal([]byte(before.PromptContext.Sections[3].Content), &projection); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(projection.OutputInstruction, "EVERY conjunct") || !strings.Contains(projection.OutputInstruction, "cannot authorize publication") {
+		t.Fatal("v2 instruction omitted complete mapping or observation-only boundary")
+	}
+	binding.InputReview.Files[0].Content += "// a changed helper\n"
+	binding.InputReview.Files[0].ContentHash = runtimecontract.RuntimeValidationInputContentHash(binding.InputReview.Files[0].Content)
+	binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, *binding)
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
+	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	after, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i <= 2; i++ {
+		if before.PromptContext.Sections[i].Content != after.PromptContext.Sections[i].Content {
+			t.Fatalf("v2 content changed stable C%d", i)
+		}
+	}
+	if before.ContextBudget.CachePlan.StablePrefixHash != after.ContextBudget.CachePlan.StablePrefixHash || before.PromptContext.Sections[3].Content == after.PromptContext.Sections[3].Content {
+		t.Fatal("v2 content did not preserve stable prefix and refresh exact C3")
+	}
+	if validateRuntimeSemanticContextIntegrity(request.SemanticContext, request.SemanticManifest, 0, nil, nil, before.ContextBudget, before.PromptContext) == nil {
+		t.Fatal("old report subject was accepted for changed input")
+	}
+}
+
 func TestRuntimeInputReviewOwnerScopeIsCompleteAndOnlyChangesC3(t *testing.T) {
 	request := runtimeInputReviewProviderFixture(t)
 	legacy, err := runtimeProviderRequest(request)

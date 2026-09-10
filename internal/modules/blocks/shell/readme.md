@@ -117,6 +117,16 @@ Only a complete consistent LLM report can pass Orchestrator's subsequent binding
 gate, and actual validation/assessment remain required. Capability and scripted-provider
 tests do not constitute release-grade semantic calibration of arbitrary Goal/DoD.
 
+The review protocol is separately selected by the activation-sealed recipe's
+`InputReviewProtocolRef`. Current built-in activations explicitly select
+`validation/input-consistency/v2`; an absent selection retains the v1 subject and
+historical hashes. v3/v4 adapters publish the selected protocol in the exact subject
+and catalog commitment without changing the source bytes, native identities or paths.
+Unsupported protocol/adapter combinations fail closed. Shell provides source and
+scope facts only; it does not classify obligations, grant additions, open tickets or
+transition Runtime. `TestInputReviewProtocolSelectionPreservesOriginalInputsAndNativeMapping`
+covers the read-only selection and downgrade boundary.
+
 #### Per-CWI review and execution scope
 
 New built-in software-development activations select `shell/project-native-validation/v4`,

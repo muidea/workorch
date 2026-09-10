@@ -35,7 +35,8 @@ and converges through the same neutral Runtime owner model. It must not make leg
   separate declaration/operation selectors. A route whose repair operations do not publish one concrete owner confirmation protocol
   fails pre-seal. Duplicate/partial triggers, cross-owner kinds, non-state-change evidence, incomplete selectors, disabled fresh validation or an
   out-of-range bound fail pre-seal and create no Run/provider/capability work;
-- the template validation declaration contains only `shell/project-native-validation/v4`, with no language command, arguments or
+- the template validation declaration selects `shell/project-native-validation/v4` and the explicit independent review protocol
+  `validation/input-consistency/v2`, with no language command, arguments or
   environment, and its validation-environment policy contains no language profile. Shell resolves the declaration from the exact File manifest, and the default managed-validation wire contains
   only `recipeId`. Shell alone emits exact `module_manifest_parse_failed`, `source_compile_failed` or `test_failed` owner facts
   from bounded tool output. Generic `shell_exit_nonzero` has no default repair route;
@@ -63,6 +64,12 @@ and converges through the same neutral Runtime owner model. It must not make leg
   delivery. Scripted provider results are not real-model, arbitrary-Goal semantic calibration or release DCE evidence;
 - `TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition` uses normal HTTP authoring and the production restart
   compiler with 24 criteria / 27 CWIs / 25 managed proof requirements, without patching bootstrap selection;
+- `TestDriveRuntimeInputReviewV2OmissionAndRestart` and the current-template isolated mainline cover complete original-criterion mappings, consistent review followed by
+  actual validation, distinct omission/conflict outcomes, bounded factual clarification, malformed documents, rejection,
+  restart cuts and duplicate three-owner delivery. Negative reviews execute no validation and grant no DoD credit;
+- V2 information budget is keyed by Run + original CWI/check; a changed input path, bytes, native name, recipe or catalog
+  cannot reset it. Complete per-check feedback, exact report commitment and immutable original inputs survive fresh load;
+  removing or altering the sealed report projection is rejected. These are harness contract tests, not deployed product acceptance;
 
 - `TestEntrypointContractReobservesHistoricalInputOnlyForNewAdapter` proves that unchanged helper-based input remains
   unavailable to a legacy activation and becomes inspectable only under the explicit new adapter; no replacement preparation,

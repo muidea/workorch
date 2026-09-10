@@ -4,7 +4,7 @@ Status: active
 
 Type: stateful-block-contract
 
-Last Verified: 2026-08-30
+Last Verified: 2026-09-10
 
 ## 功能范围与边界
 
@@ -31,6 +31,10 @@ canonical Result ID 由 workspace/run 派生；Artifact ID 由 Result ID 与 sea
 - 原始 owner diagnostic、逐项 DoD 与实现/验证/限制/风险反馈是 Orchestrator 已裁决的 sealed material；Result 不根据
   diagnostic 选择 retry 或重判验收。Result renderer 版本只由 Orchestrator 在 Run 初始化时封存；旧 Run pending delivery
   必须复用旧 material，不能由 Result owner 在升级或重放时补写新字段或重算另一份摘要。
+- 新 Run 的 Result feedback v3 保留 Orchestrator 已封存的 blocking input-review batch 逐 check/obligation 事实，
+  包括输入 refs、subject/report hash、原 CWI/requirement、结论及原因；安全投影可脱敏，但保留原报告 hash。
+  Result 只存储和返回这份 typed material，不读原输入、不再次调用 LLM、不产生重试、审批或验收 credit。
+  feedback v0/v1/v2 保持各自的历史渲染与 delivery hash。
 - Result 状态同状态重放幂等；`draft → accepted|rejected`，已终态只允许 owner-internal `→ superseded`，不存在外围 generic update/delete。
 - Workspace tombstone 后普通读写永久 fail closed；purge 物理 sink 只能由 Result-private deletion dispatcher 调用。
 - 不拥有 evidence quality、DoD coverage credit、terminal outcome 选择、Run SM-1 或 Runtime SM-2～SM-4。

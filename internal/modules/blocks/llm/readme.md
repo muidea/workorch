@@ -61,6 +61,11 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
   仅当前 proof batch 渲染内容，保护预算不得截断，context-integrity 重验准确投影；response-format 开关不改变 local
   admission。LLM 不创建 ticket，不处理 Runtime 转换；完整无法判断与格式错误由 Orchestrator 分流。
   `biz/runtime_input_review_projection_test.go` 覆盖完整内容/信息、schema、C0～C2 稳定和截断拒绝。
+  activation 显式选择 `validation/input-consistency/v2` 时，每个 check 必须有完整有界的 `obligations`：原准则
+  exact excerpts、`covered|missing|conflicting|unknown`、reason 和已观测 input refs。摘录合起来须覆盖原准则全部
+  非空白文本（包括连接词）；这只是防止漏报的来源约束，不是语义证明。每 check 最多 16 项，单报告 JSON 不超过
+  32 KiB。schema 与本地 decoder 同源，缺项、未知字段或相互矛盾的结论仍是文档准入错误，不是事实 ticket。
+  V1 不出现新字段；协议-specific schema/instruction、输入和信息均在 C3，同一 activation 的 C0～C2 不因评审变动。
   subject 可声明有界 `ScopeContractRef + ScopeRequirements`，描述 owner 实际执行/观测范围；它随 subject hash 封存并
   完整放入 C3，不能由 recipe 名推测更广的验证范围。缺省保持旧请求；范围变动不能复用旧报告。
 - create-only validation preparation 的可选 `ContentContractRef + ContentRequirements` 由 capability owner 提供并进入

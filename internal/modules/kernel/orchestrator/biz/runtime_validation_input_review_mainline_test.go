@@ -57,6 +57,23 @@ func TestDriveRuntimeValidationInputReviewRestart(t *testing.T) {
 type validationInputReviewMainlineOptions struct {
 	Adapter         string
 	ValidationCount int
+	ProtocolRef     string
+}
+
+func TestDriveRuntimeInputReviewV2OmissionAndRestart(t *testing.T) {
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterIsolatedEntrypoint, ValidationCount: 1, ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2}
+	// The shipped-default mainline below covers v2 consistency, contradiction,
+	// clarification and its recovery cuts. Exercise the additional omission
+	// branch here without repeating those expensive real-owner scenarios.
+	var baseline int64
+	t.Run("omission", func(t *testing.T) { baseline = runValidationInputReviewMainline(t, "omission", "", options) })
+	for _, cut := range []string{"after_review_document", "after_review_failure"} {
+		t.Run(cut, func(t *testing.T) {
+			if calls := runValidationInputReviewMainline(t, "omission", cut, options); calls != baseline {
+				t.Fatal("restart repeated a completed review request")
+			}
+		})
+	}
 }
 
 func TestDriveRuntimeIsolatedInputReviewMainline(t *testing.T) {
@@ -65,12 +82,15 @@ func TestDriveRuntimeIsolatedInputReviewMainline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := ""
+	adapter, protocol := "", ""
 	for _, template := range templates {
 		if template.ID == "software-dev" {
 			for _, policy := range template.EvidencePolicies {
 				if ref, ok := policy["recipeAdapterRef"].(string); ok {
 					adapter = ref
+				}
+				if ref, ok := policy["recipeInputReviewProtocolRef"].(string); ok {
+					protocol = ref
 				}
 			}
 		}
@@ -78,12 +98,15 @@ func TestDriveRuntimeIsolatedInputReviewMainline(t *testing.T) {
 	if adapter != shellcommon.ValidationRecipeAdapterIsolatedEntrypoint {
 		t.Fatal("default template does not enable reviewed isolated inputs")
 	}
-	options := validationInputReviewMainlineOptions{Adapter: adapter, ValidationCount: 1}
+	if protocol != runtimecontract.RuntimeValidationInputReviewProtocolV2 {
+		t.Fatal("default template does not seal the obligation-review protocol")
+	}
+	options := validationInputReviewMainlineOptions{Adapter: adapter, ValidationCount: 1, ProtocolRef: protocol}
 	for _, mode := range []string{"consistent", "conflict", "clarify", "exhausted", "malformed", "reject"} {
 		t.Run(mode, func(t *testing.T) { runValidationInputReviewMainline(t, mode, "", options) })
 	}
 	t.Run("multiple_cwi", func(t *testing.T) {
-		runValidationInputReviewMainline(t, "consistent", "", validationInputReviewMainlineOptions{Adapter: adapter, ValidationCount: 3})
+		runValidationInputReviewMainline(t, "consistent", "", validationInputReviewMainlineOptions{Adapter: adapter, ValidationCount: 3, ProtocolRef: protocol})
 	})
 	baseline := runValidationInputReviewMainline(t, "clarify", "", options)
 	for _, cut := range []string{"after_review_document", "after_review_classification", "after_ticket_binding", "after_information_commit", "after_review_binding"} {
@@ -113,6 +136,10 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	}
 	bootstrap := validationInputAdditionMainlineBootstrap()
 	bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = options.Adapter
+	bootstrap.Activation.EvidencePolicies[0].RecipeInputReviewProtocolRef = options.ProtocolRef
+	if mode == "omission" {
+		bootstrap.CoverageItems[1].TargetText = "invoke the delivered program and document its output"
+	}
 	for index := 3; index <= options.ValidationCount+1; index++ {
 		id := common.CoverageWorkItemID(fmt.Sprintf("cwi-%d", index))
 		focus := bootstrap.DefinitionFocuses[1].Clone()
@@ -249,7 +276,7 @@ func %s(t *testing.T) {
 					firstReviewManifest = command.SemanticManifest.Hash
 				}
 				conclusion := runtimecontract.RuntimeValidationInputConsistent
-				if mode == "conflict" {
+				if mode == "conflict" || mode == "omission" {
 					conclusion = runtimecontract.RuntimeValidationInputConflict
 				}
 				if mode == "exhausted" || mode == "reject" || (mode == "clarify" && len(command.SemanticManifest.InputReviewInformation) == 0) {
@@ -264,6 +291,27 @@ func %s(t *testing.T) {
 				review := &runtimecontract.RuntimeValidationInputReview{SubjectHash: binding.InputReview.Hash}
 				for _, check := range binding.RequiredCheckRefs {
 					review.Checks = append(review.Checks, runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: conclusion, Reason: "Confirm whether this input invokes the delivered program without bypassing the original requirement.", InputTargetRefs: []string{inputTargets[proposal.CoverageWorkItemID]}})
+					if binding.InputReview.ProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocolV2 {
+						item := &review.Checks[len(review.Checks)-1]
+						finding := runtimecontract.RuntimeValidationInputCovered
+						if conclusion == runtimecontract.RuntimeValidationInputConflict {
+							finding = runtimecontract.RuntimeValidationInputConflicting
+						} else if conclusion == runtimecontract.RuntimeValidationInputInconclusive {
+							finding = runtimecontract.RuntimeValidationInputUnknown
+						}
+						for _, coverage := range command.SemanticManifest.CoverageItems {
+							if coverage.ID == proposal.CoverageWorkItemID {
+								item.Obligations = []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: coverage.TargetText, Finding: finding, Reason: item.Reason, InputTargetRefs: item.InputTargetRefs}}
+							}
+						}
+						if mode == "omission" {
+							item.Reason = "The input invokes the delivered program but does not check the required documentation."
+							item.Obligations = []runtimecontract.RuntimeValidationInputObligationReview{
+								{CriterionText: "invoke the delivered program", Finding: runtimecontract.RuntimeValidationInputCovered, Reason: "The input builds and invokes the delivery process.", InputTargetRefs: item.InputTargetRefs},
+								{CriterionText: "and document its output", Finding: runtimecontract.RuntimeValidationInputMissing, Reason: "No documentation assertion exists in the reviewed input.", InputTargetRefs: item.InputTargetRefs},
+							}
+						}
+					}
 				}
 				proposal.ValidationInputReview = review
 			}
@@ -325,6 +373,8 @@ func %s(t *testing.T) {
 				return a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted && len(a.SemanticPlanning.BatchDocuments) != 0 && a.SemanticPlanning.BatchDocuments[0].Proposals[0].ValidationInputReview != nil
 			case "after_review_classification":
 				return a.Facts.Failure != nil && a.Facts.Failure.Code == "validation_input_review_inconclusive"
+			case "after_review_failure":
+				return a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed && a.Facts.Failure != nil && a.Facts.Failure.OriginalDiagnostic != nil && len(a.Facts.Failure.OriginalDiagnostic.ValidationInputReviews) != 0
 			case "after_ticket_binding":
 				return len(a.GovernanceRequests) == 1
 			case "after_information_commit":
@@ -458,7 +508,7 @@ func %s(t *testing.T) {
 	if success && validationCalls != options.ValidationCount || !success && validationCalls != 0 {
 		t.Fatalf("unexpected validation calls: %d", validationCalls)
 	}
-	if (mode == "conflict" || mode == "malformed") && len(completed.GovernanceRequests) != 0 {
+	if (mode == "conflict" || mode == "omission" || mode == "malformed") && len(completed.GovernanceRequests) != 0 {
 		t.Fatal("conflict/format error created clarification ticket")
 	}
 	if mode == "clarify" || mode == "exhausted" {
@@ -517,6 +567,30 @@ func %s(t *testing.T) {
 	closeouts, err := results.ListByRun(ctx, "run-v2")
 	if err != nil || stored.State != wantRun || len(closeouts) != 1 || closeouts[0].State != wantResult || closeouts[0].RuntimeCloseout == nil || len(closeouts[0].RuntimeCloseout.SatisfiedCoverageWorkItemIDs) != wantCoverage {
 		t.Fatalf("review/validation/acceptance conflated: run=%s result=%+v err=%v", stored.State, closeouts, err)
+	}
+	if mode == "conflict" || mode == "omission" || mode == "exhausted" {
+		diagnostic := closeouts[0].RuntimeCloseout.OriginalDiagnostic
+		if diagnostic == nil || len(diagnostic.ValidationInputReviews) != 1 || !strings.Contains(strings.Join(closeouts[0].SummaryDetail.KnownLimitations, "\n"), diagnostic.ValidationInputReviews[0].Report.Checks[0].Reason) {
+			t.Fatal("Result omitted the original input review reason or exact report identity")
+		}
+		if mode == "omission" && diagnostic.OriginalCode != "validation_input_review_coverage_incomplete" {
+			t.Fatal("typed omission was conflated with contradiction")
+		}
+		for _, mutate := range []func(*runtimecontract.RuntimeOriginalDiagnostic){
+			func(d *runtimecontract.RuntimeOriginalDiagnostic) { d.ValidationInputReviews = nil },
+			func(d *runtimecontract.RuntimeOriginalDiagnostic) {
+				d.ValidationInputReviews[0].Report.Checks[0].Reason = "forged review"
+			},
+			func(d *runtimecontract.RuntimeOriginalDiagnostic) {
+				d.ValidationInputReviews[0].ReportHash = "runtime-input-review-report-forged"
+			},
+		} {
+			bad := runtimeAggregateFromRecord(runtimeStateRecordFromAggregate(completed))
+			mutate(bad.Facts.Failure.OriginalDiagnostic)
+			if bad.Validate() == nil {
+				t.Fatal("fresh-load accepted a diagnostic without exact report provenance")
+			}
+		}
 	}
 	return calls.Load()
 }

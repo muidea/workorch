@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-09-01
+Last Verified: 2026-09-10
 
 ## Provider-Neutral Cache Model
 
@@ -83,6 +83,11 @@ semantic-plan 复用同一 section 顺序：
 `RuntimeOwnerFactRequirement` 在 C2 只描述 owner、fact kind 和 operation kind；current readiness、recipe identity、
 input binding 与 proof applicability 只能来自 C3 current catalog。catalog revision 变化必须产生新 manifest 和 logical
 request，不能 continuation 旧 complete document。
+
+`validation/input-consistency/v2` 的协议-specific schema/instruction、逐 check 原准则摘录映射、exact 输入、
+subject hash 与事实澄清信息只属于当前 proof batch 的 C3。协议选择来自 activation 已封存的 recipe policy；
+同一 activation 内输入、评审或信息变化不得改写 C0～C2/`StablePrefixHash`。完整受保护内容不能截断为摘要；
+V1 的缺省字段、schema 与历史请求哈希保持不变。
 
 semantic owner 的 `stale|prerequisite_required` original diagnostic 只进入 aggregate audit，不进入 C4。只有带 exact
 revision fence 的 stale 可触发 SM-2 有界重获；当前无 owner-defined acquisition contract 的 prerequisite-required

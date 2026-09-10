@@ -1,0 +1,1162 @@
+{
+  "id": "software-dev",
+  "name": "软件开发",
+  "description": "编码实现、运行测试、修复缺陷的完整软件开发流程。支持项目声明的构建工具、测试框架和原生验证能力。",
+  "goalText": "根据需求完成软件开发任务：编码实现、运行测试、修复缺陷、产出交付物。",
+  "defaultSoulId": "soul-software-dev-execution",
+  "doDItems": [
+    "目标（Goal）对应的需求能力已实现，并与验收范围保持一致",
+    "已从 PRD、README、需求文档或用户 Goal 中提取功能目标、约束和验收点，并映射到执行计划",
+    "代码和配置变更保持最小且与目标直接相关，并提供 capability-owner receipt 可追溯的 state_change 证据",
+    "若 workspace 输出发生有意义变更，必须通过 git/write add/commit 形成本地版本控制快照，并在证据中引用 commit",
+    "相关 build/test 验证已执行并通过；无法执行时记录跳过原因和影响评估",
+    "若 Goal 或 DoD 涉及 CLI、服务、API、脚本、单二进制或其他运行交付入口，必须提供命中最终交付入口的直接验证证据",
+    "针对高风险验收维度的测试必须绑定真实交付入口或生产实现；测试文件中临时定义的 fake/mock/helper 只能作为辅助，不能作为唯一 satisfied 证据",
+    "若 Goal 或 DoD 涉及流式、错误透传、配置加载、持久化副作用、并发或其他用户可观察行为，必须提供对应行为的直接验证证据或明确跳过原因与影响",
+    "若 Goal 或 DoD 涉及性能、资源占用、压缩率、吞吐、延迟、预算或其他量化指标，必须提供包含实际数值的可执行测量证据，并说明是否达到阈值",
+    "每个关键 DoD 条目均有对应的功能测试、集成测试或可解释的替代验证；主路径、错误路径和关键分支均有覆盖说明",
+    "lint/静态检查按项目约定执行；缺失命令时记录替代检查或跳过原因",
+    "最终结果包含改动摘要、验证命令、验证结果、失败/跳过说明、残余风险和后续建议",
+    "DoD 验收评估逐项给出 evidenceRefs，并在交付物索引中可追溯"
+  ],
+  "soulBindings": {
+    "planning": "soul-software-dev-planning",
+    "execution": "soul-software-dev-execution",
+    "decision": "soul-software-dev-decision",
+    "approval": "soul-software-dev-approval",
+    "validation": "soul-software-dev-validation",
+    "artifact": "soul-software-dev-artifact"
+  },
+  "contextHints": {
+    "templateStagePolicies": {
+      "schemaVersion": "workorch.template_stage_policy",
+      "stages": [
+        {
+          "id": "planning",
+          "soulBinding": "planning",
+          "requiredOutputs": [
+            {
+              "kind": "gap_baseline",
+              "evidenceKinds": [
+                "assessment"
+              ]
+            }
+          ],
+          "completion": {
+            "policy": "required_outputs_accepted"
+          },
+          "governance": {
+            "decisionMode": "when_required",
+            "approvalMode": "when_required"
+          },
+          "policyRefs": {
+            "evidencePolicies": [],
+            "capabilityUsagePolicies": [
+              "software-dev-code-semantics-guidance"
+            ]
+          }
+        },
+        {
+          "id": "execution",
+          "soulBinding": "execution",
+          "requiredOutputs": [
+            {
+              "kind": "state_change",
+              "evidenceKinds": [
+                "state_change"
+              ]
+            }
+          ],
+          "completion": {
+            "policy": "required_outputs_accepted"
+          },
+          "governance": {
+            "decisionMode": "when_required",
+            "approvalMode": "when_required"
+          },
+          "policyRefs": {
+            "evidencePolicies": [],
+            "capabilityUsagePolicies": [
+              "software-dev-code-semantics-guidance"
+            ]
+          }
+        },
+        {
+          "id": "repair",
+          "soulBinding": "execution",
+          "requiredOutputs": [
+            {
+              "kind": "state_change",
+              "evidenceKinds": [
+                "state_change"
+              ]
+            }
+          ],
+          "completion": {
+            "policy": "required_outputs_accepted"
+          },
+          "governance": {
+            "decisionMode": "when_required",
+            "approvalMode": "when_required"
+          },
+          "policyRefs": {
+            "evidencePolicies": [
+              "software-dev-validation-evidence"
+            ],
+            "capabilityUsagePolicies": [
+              "software-dev-code-semantics-guidance"
+            ]
+          }
+        },
+        {
+          "id": "validation",
+          "soulBinding": "validation",
+          "requiredOutputs": [
+            {
+              "kind": "validation",
+              "evidenceKinds": [
+                "validation"
+              ]
+            }
+          ],
+          "completion": {
+            "policy": "required_outputs_accepted"
+          },
+          "governance": {
+            "decisionMode": "when_required",
+            "approvalMode": "when_required"
+          },
+          "policyRefs": {
+            "evidencePolicies": [
+              "software-dev-validation-evidence"
+            ],
+            "capabilityUsagePolicies": [
+              "software-dev-code-semantics-guidance"
+            ]
+          }
+        },
+        {
+          "id": "artifact",
+          "soulBinding": "artifact",
+          "requiredOutputs": [
+            {
+              "kind": "artifact",
+              "evidenceKinds": [
+                "artifact"
+              ]
+            }
+          ],
+          "completion": {
+            "policy": "required_outputs_accepted"
+          },
+          "governance": {
+            "decisionMode": "when_required",
+            "approvalMode": "when_required"
+          },
+          "policyRefs": {
+            "evidencePolicies": [
+              "software-dev-validation-evidence"
+            ],
+            "capabilityUsagePolicies": []
+          }
+        }
+      ]
+    },
+    "stateChangePolicy": "must_produce_state_change",
+    "acceptanceSlicePolicy": {
+      "schemaVersion": "workorch.acceptance_slice_policy",
+      "maxWorkItems": 4,
+      "maxFocuses": 64,
+      "maxCandidateContextItems": 4,
+      "completionPolicy": "all_required_items_accepted",
+      "resultPolicy": "slice_result_allowed",
+      "groups": [
+        {
+          "id": "slice-primary-state-change",
+          "title": "Primary state change",
+          "scope": "primary_state_change",
+          "priority": 10,
+          "maxWorkItems": 2,
+          "match": {
+            "evidenceRoles": [
+              "primary_state_change"
+            ]
+          }
+        },
+        {
+          "id": "slice-direct-validation",
+          "title": "Direct validation evidence",
+          "scope": "direct_validation",
+          "priority": 20,
+          "maxWorkItems": 4,
+          "match": {
+            "missingEvidenceKinds": [
+              "validation"
+            ]
+          }
+        },
+        {
+          "id": "slice-supplemental-evidence",
+          "title": "Supplemental evidence",
+          "scope": "supplemental_evidence",
+          "priority": 30,
+          "maxWorkItems": 4,
+          "match": {
+            "evidenceRoles": [
+              "supplemental_evidence"
+            ]
+          }
+        },
+        {
+          "id": "slice-version-control-snapshot",
+          "title": "Version-control snapshot",
+          "scope": "version_control_snapshot",
+          "priority": 15,
+          "maxWorkItems": 2,
+          "match": {
+            "sourceRequirementIds": [
+              "version_control_snapshot"
+            ]
+          }
+        },
+        {
+          "id": "slice-remaining-acceptance",
+          "title": "Remaining acceptance",
+          "scope": "remaining_acceptance",
+          "priority": 90,
+          "maxWorkItems": 4,
+          "match": {
+            "all": true
+          }
+        }
+      ]
+    },
+    "runtimeRepair": {
+      "prerequisiteManifestTargetPatterns": [
+        "go.mod",
+        "go.sum",
+        "package.json",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "pyproject.toml",
+        "requirements*.txt",
+        "poetry.lock",
+        "Cargo.toml",
+        "Cargo.lock",
+        "Makefile"
+      ]
+    },
+    "versionControl": {
+      "git": {
+        "initializeOnCreate": true,
+        "snapshotPolicy": "commit_meaningful_changes",
+        "snapshotEvidence": "local_commit_for_workspace_output_changes"
+      }
+    },
+    "semanticCodeNavigation": {
+      "provider": "mcp",
+      "optional": true,
+      "evidenceStrength": "auxiliary",
+      "defaultMCPServerIds": [
+        "mcp-lsp-bridge"
+      ],
+      "defaultCapabilityIds": [
+        "mcp-lsp-bridge:tool:lsp_initialize",
+        "mcp-lsp-bridge:tool:lsp_sync",
+        "mcp-lsp-bridge:tool:lsp_definition",
+        "mcp-lsp-bridge:tool:lsp_hover",
+        "mcp-lsp-bridge:tool:lsp_references",
+        "mcp-lsp-bridge:tool:lsp_diagnostics",
+        "mcp-lsp-bridge:tool:lsp_status",
+        "mcp-lsp-bridge:tool:lsp_shutdown",
+        "mcp-lsp-bridge:tool:lsp_repair"
+      ],
+      "notes": [
+        "semantic navigation is optional and must not replace build/test/lint or direct DoD evidence",
+        "empty semantic results are inconclusive"
+      ]
+    },
+    "capabilityUsagePolicies": [
+      {
+        "id": "software-dev-code-semantics-guidance",
+        "scope": "workspace_profile",
+        "appliesToCategory": "code_semantics",
+        "evidenceStrength": "auxiliary",
+        "usageMode": "prefer_when_triggered",
+        "triggerStages": [
+          "planning",
+          "execution",
+          "repair",
+          "validation"
+        ],
+        "triggerSignals": [
+          "cross_file_impact_unclear",
+          "symbol_resolution_needed",
+          "undefined_identifier",
+          "unknown_field",
+          "missing_method",
+          "interface_or_constructor_mismatch",
+          "compile_or_vet_diagnostics_need_semantic_confirmation"
+        ],
+        "preferredTools": [
+          "lsp_initialize",
+          "lsp_sync",
+          "lsp_definition",
+          "lsp_hover",
+          "lsp_references",
+          "lsp_diagnostics",
+          "lsp_status",
+          "lsp_shutdown",
+          "lsp_repair"
+        ],
+        "requiredAfterKinds": [
+          "patch/apply"
+        ],
+        "fallbackPolicy": "fallback_to_file_read_and_build_output_without_blocking",
+        "notes": [
+          "use semantic capabilities to reduce ambiguity before broad patching when local textual evidence is insufficient",
+          "after a relevant patch, sync current file content before relying on semantic diagnostics",
+          "semantic outputs can support localization and impact analysis but cannot replace direct validation evidence"
+        ]
+      }
+    ],
+    "validationPolicies": [
+      {
+        "id": "software-dev-validation-discovery-first",
+        "scope": "workspace_profile",
+        "appliesToEvidenceKinds": [
+          "validation"
+        ],
+        "validationSafetyClass": "bounded",
+        "discoveryRequired": true,
+        "discoverySources": [
+          "workspace_manifest",
+          "project_files",
+          "declared_commands",
+          "available_capabilities"
+        ],
+        "allowedExecutionModes": [
+          "runtime_operations",
+          "managed_harness",
+          "deferred",
+          "decision"
+        ],
+        "maxValidationOnlyRetriesPerFocus": 2,
+        "validationScratchRequired": true,
+        "allowedValidationModes": [
+          "discovered_target",
+          "controlled_substitute",
+          "managed_harness",
+          "deferred_evidence"
+        ],
+        "notes": [
+          "Inspect or enumerate available validation targets before selecting a validation route.",
+          "Only run discovered targets or controlled substitutes that are explicitly tied to current Goal/DoD coverage.",
+          "If no validation target exists, return concrete missing-evidence assessment, deferred evidence, or governance blocker instead of guessing target names."
+        ]
+      }
+    ],
+    "managedWorkspaceConfigs": [
+      {
+        "path": "lsp-bridge/mcp-config.json",
+        "format": "json",
+        "mergeMissing": true,
+        "content": {
+          "languages": {
+            "go": {
+              "command": [
+                "gopls",
+                "serve"
+              ]
+            },
+            "python": {
+              "command": [
+                "pyright-langserver",
+                "--stdio"
+              ]
+            },
+            "typescript": {
+              "command": [
+                "typescript-language-server",
+                "--stdio"
+              ]
+            },
+            "rust": {
+              "command": [
+                "rust-analyzer"
+              ]
+            },
+            "shell": {
+              "command": [
+                "bash-language-server",
+                "start"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "profileContracts": {
+      "software-dev": {
+        "acceptanceDimensions": [
+          {
+            "id": "functional_behavior",
+            "required": false,
+            "description": "Goal-level functional behavior and primary path"
+          },
+          {
+            "id": "external_contract",
+            "required": false,
+            "description": "API, CLI, file format, protocol, input/output compatibility, or other external contract"
+          },
+          {
+            "id": "runtime_entrypoint",
+            "required": false,
+            "description": "Command, service, script, package, or callable entrypoint used to run the deliverable"
+          },
+          {
+            "id": "configuration",
+            "required": false,
+            "description": "Configuration sources, defaults, environment overrides, and configuration error behavior"
+          },
+          {
+            "id": "persistence_or_side_effect",
+            "required": false,
+            "description": "File writes, state changes, audit records, or external side effects promised by the Goal or DoD"
+          },
+          {
+            "id": "error_behavior",
+            "required": false,
+            "description": "Error propagation, status, invalid input, dependency failure, or exceptional path behavior"
+          },
+          {
+            "id": "streaming_or_long_running",
+            "required": false,
+            "description": "Streaming, incremental output, long-running operation, cancellation, or completion behavior"
+          },
+          {
+            "id": "concurrency",
+            "required": false,
+            "description": "Concurrent calls, shared state, locks, races, or resource safety"
+          },
+          {
+            "id": "quantitative_behavior",
+            "required": false,
+            "description": "Measured performance, resource use, compression, throughput, latency, budget, or other quantified behavior promised by Goal or DoD"
+          },
+          {
+            "id": "deliverable",
+            "required": false,
+            "description": "Build artifact, binary, package, document, or other user-facing deliverable"
+          }
+        ],
+        "deliverableExpectations": [
+          {
+            "id": "source_change",
+            "required": true,
+            "evidenceRole": "primary_state_change",
+            "description": "Source, configuration, documentation, or workspace state change directly related to Goal"
+          },
+          {
+            "id": "validation_report",
+            "required": true,
+            "evidenceRole": "supplemental_evidence",
+            "description": "Validation command, test report, lint/static check, or justified skipped validation"
+          },
+          {
+            "id": "version_control_snapshot",
+            "required": true,
+            "evidenceRole": "supplemental_evidence",
+            "description": "Local version-control snapshot for meaningful workspace output changes, including changed paths and commit evidence"
+          }
+        ],
+        "coverageDependencies": [
+          {
+            "id": "source-change-precedes-and-refreshes-dod-validation",
+            "sourceScope": "deliverable",
+            "sourceRequirementId": "source_change",
+            "dependentScope": "dodItem",
+            "dependentRequirementId": "*",
+            "requireSourceSettled": true,
+            "triggerEvidenceKinds": [
+              "state_change"
+            ]
+          },
+          {
+            "id": "dod-validation-precedes-and-refreshes-validation-report",
+            "sourceScope": "dodItem",
+            "sourceRequirementId": "*",
+            "dependentScope": "deliverable",
+            "dependentRequirementId": "validation_report",
+            "requireSourceSettled": true,
+            "triggerEvidenceKinds": [
+              "state_change"
+            ]
+          },
+          {
+            "id": "source-change-precedes-and-refreshes-final-snapshot",
+            "sourceScope": "deliverable",
+            "sourceRequirementId": "source_change",
+            "dependentScope": "deliverable",
+            "dependentRequirementId": "version_control_snapshot",
+            "requireSourceSettled": true,
+            "triggerEvidenceKinds": [
+              "state_change"
+            ]
+          },
+          {
+            "id": "dod-validation-precedes-and-refreshes-final-snapshot",
+            "sourceScope": "dodItem",
+            "sourceRequirementId": "*",
+            "dependentScope": "deliverable",
+            "dependentRequirementId": "version_control_snapshot",
+            "requireSourceSettled": true,
+            "triggerEvidenceKinds": [
+              "state_change"
+            ]
+          },
+          {
+            "id": "validation-report-precedes-final-snapshot",
+            "sourceScope": "deliverable",
+            "sourceRequirementId": "validation_report",
+            "dependentScope": "deliverable",
+            "dependentRequirementId": "version_control_snapshot",
+            "requireSourceSettled": true
+          }
+        ],
+        "validationEnvironmentPolicy": {
+          "schemaVersion": "workorch.software_dev.validation_environment",
+          "scratchIsolationRequired": true,
+          "preferManagedSessionFor": [
+            "service",
+            "proxy",
+            "streaming",
+            "long_running",
+            "temporary_port",
+            "process_cleanup"
+          ],
+          "boundedForegroundOnly": true,
+          "cleanupRequired": true,
+          "guidance": [
+            "Run validation from an isolated scratch directory or managed validation session when the check needs temporary files, generated harnesses, ports, or subprocess cleanup.",
+            "Prefer validation/managed_session for service, proxy, streaming, long-running, temporary-port, or cleanup-sensitive checks when that capability is available.",
+            "Use bounded foreground commands or project test harnesses when managed validation is unavailable; do not use detached background processes as validation evidence."
+          ]
+        },
+        "evidenceRequirements": [
+          {
+            "id": "runtime_entrypoint",
+            "scope": "acceptanceDimension",
+            "requireDirectEvidence": true,
+            "requireExecutableBehaviorEvidence": true,
+            "acceptedStepKinds": [
+              "shell/command",
+              "mcp/tool_call",
+              "validation/managed_session"
+            ],
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get"
+            ],
+            "description": "Entrypoint claims must be supported by direct executable validation or equivalent action evidence, not only by read-only inspection or summary artifacts; service lifecycle validation should prefer runtime-managed validation session when available."
+          },
+          {
+            "id": "persistence_or_side_effect",
+            "scope": "acceptanceDimension",
+            "requireDirectEvidence": true,
+            "requireExecutableBehaviorEvidence": true,
+            "acceptedStepKinds": [
+              "validation/managed_session",
+              "shell/command",
+              "mcp/tool_call"
+            ],
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get"
+            ],
+            "description": "Read-only file evidence can show existing state, but cannot prove writes, append behavior, audit records, or other side effects."
+          },
+          {
+            "id": "streaming_or_long_running",
+            "scope": "acceptanceDimension",
+            "requireDirectEvidence": true,
+            "requireExecutableBehaviorEvidence": true,
+            "acceptedStepKinds": [
+              "shell/command",
+              "mcp/tool_call",
+              "validation/managed_session"
+            ],
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get"
+            ],
+            "description": "Streaming or long-running behavior must be supported by executed validation or equivalent runtime action evidence; prefer runtime-managed validation session when available."
+          },
+          {
+            "id": "external_contract",
+            "scope": "acceptanceDimension",
+            "requireDirectEvidence": true,
+            "requireExecutableBehaviorEvidence": true,
+            "acceptedStepKinds": [
+              "validation/managed_session",
+              "shell/command",
+              "mcp/tool_call"
+            ],
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get"
+            ],
+            "description": "API, CLI, protocol, format, or other external contract claims must be supported by direct validation or equivalent action evidence."
+          },
+          {
+            "id": "error_behavior",
+            "scope": "acceptanceDimension",
+            "requireDirectEvidence": true,
+            "requireExecutableBehaviorEvidence": true,
+            "acceptedStepKinds": [
+              "validation/managed_session",
+              "shell/command",
+              "mcp/tool_call"
+            ],
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get"
+            ],
+            "description": "Error-path behavior must be supported by executed validation or equivalent runtime action evidence."
+          },
+          {
+            "id": "concurrency",
+            "scope": "acceptanceDimension",
+            "requireDirectEvidence": true,
+            "requireExecutableBehaviorEvidence": true,
+            "acceptedStepKinds": [
+              "validation/managed_session",
+              "shell/command",
+              "mcp/tool_call"
+            ],
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get"
+            ],
+            "description": "Concurrency claims must be supported by executed validation or equivalent runtime action evidence."
+          },
+          {
+            "id": "quantitative_behavior",
+            "scope": "acceptanceDimension",
+            "requireDirectEvidence": true,
+            "requireClaimEvidence": true,
+            "requireExecutableBehaviorEvidence": true,
+            "acceptedStepKinds": [
+              "validation/managed_session",
+              "shell/command",
+              "mcp/tool_call"
+            ],
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get"
+            ],
+            "description": "Quantified performance, resource, compression, throughput, latency, or budget claims must cite executed measurement evidence with actual numeric output and threshold comparison."
+          },
+          {
+            "id": "*",
+            "scope": "acceptanceDimension",
+            "requiredEvidenceKinds": [
+              "validation"
+            ],
+            "targetRole": "deliverable_implementation",
+            "targetDiscoverySources": [
+              "workspace_manifest",
+              "project_files"
+            ],
+            "targetSelectorRef": "file/workspace_deliverable",
+            "targetSelectorOwnerRef": "software-dev",
+            "targetSelectorSubjectRef": "acceptanceDimension",
+            "prospectiveTargetAllOfConstraintRefs": [
+              "workspace-relative-path",
+              "new-target-requires-owner-selector"
+            ],
+            "requireTargetGrounding": true,
+            "acceptedStepKinds": [
+              "validation/managed_session",
+              "file/write"
+            ],
+            "requiredOwnerFacts": [
+              {
+                "ownerModuleId": "blocks/shell",
+                "factKind": "selectable_validation_surface",
+                "operationKind": "validation/managed_session"
+              }
+            ],
+            "ownerFactConvergences": [
+              {
+                "ownerModuleId": "blocks/shell",
+                "factKind": "selectable_validation_surface",
+                "operationKind": "validation/managed_session",
+                "missingTrigger": "owner_fact_missing",
+                "acquisitionOwnerModuleId": "blocks/file",
+                "acquisitionOperationKind": "file/write",
+                "acquisitionTargetPolicy": "prospective_owner_target",
+                "acquisitionTargetSelectorRef": "workspace-relative-new-file-target",
+                "prospectiveSatisfactionContractRef": "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+                "targetSelectorRef": "file/workspace_deliverable",
+                "targetSelectorOwnerRef": "software-dev",
+                "targetSelectorSubjectRef": "acceptanceDimension",
+                "reobserveOwnerModuleId": "blocks/shell",
+                "reobserveFactKind": "selectable_validation_surface",
+                "maxAcquisitionAttempts": 1
+              }
+            ],
+            "description": "Software-development acceptance dimensions that admit managed validation require an explicit, profile-owned path for preparing and re-observing their exact owner-native assertion."
+          },
+          {
+            "id": "source_change",
+            "scope": "deliverable",
+            "evidenceRole": "primary_state_change",
+            "requiredEvidenceKinds": [
+              "state_change"
+            ],
+            "targetRole": "workspace_delivery_change",
+            "targetDiscoverySources": [
+              "workspace_manifest",
+              "project_files"
+            ],
+            "targetSelectorRef": "file/workspace_deliverable",
+            "targetSelectorOwnerRef": "software-dev",
+            "targetSelectorSubjectRef": "workspace_deliverable_create_scope",
+            "prospectiveTargetAllOfConstraintRefs": [
+              "workspace-relative-path",
+              "new-target-requires-owner-selector"
+            ],
+            "requireTargetGrounding": true,
+            "requireDirectEvidence": true,
+            "requireCoverageTargets": true,
+            "acceptedStepKinds": [
+              "file/write",
+              "patch/apply"
+            ],
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get"
+            ],
+            "description": "A satisfied source_change deliverable must cite direct state-changing File write or patch evidence for the workspace output with coverageTargets aligned to the Goal, DoD, or deliverable item, not only read-only inspection or summary artifacts."
+          },
+          {
+            "id": "validation_report",
+            "scope": "deliverable",
+            "evidenceRole": "supplemental_evidence",
+            "requiredEvidenceKinds": [
+              "validation"
+            ],
+            "targetRole": "validation_evidence",
+            "targetDiscoverySources": [
+              "workspace_manifest",
+              "project_files"
+            ],
+            "targetSelectorRef": "file/workspace_deliverable",
+            "targetSelectorOwnerRef": "software-dev",
+            "targetSelectorSubjectRef": "validation_report",
+            "prospectiveTargetAllOfConstraintRefs": [
+              "workspace-relative-path",
+              "new-target-requires-owner-selector"
+            ],
+            "requireTargetGrounding": true,
+            "requireDirectEvidence": true,
+            "acceptedStepKinds": [
+              "validation/managed_session",
+              "file/write"
+            ],
+            "requiredOwnerFacts": [
+              {
+                "ownerModuleId": "blocks/shell",
+                "factKind": "selectable_validation_surface",
+                "operationKind": "validation/managed_session"
+              }
+            ],
+            "ownerFactConvergences": [
+              {
+                "ownerModuleId": "blocks/shell",
+                "factKind": "selectable_validation_surface",
+                "operationKind": "validation/managed_session",
+                "missingTrigger": "owner_fact_missing",
+                "acquisitionOwnerModuleId": "blocks/file",
+                "acquisitionOperationKind": "file/write",
+                "acquisitionTargetPolicy": "prospective_owner_target",
+                "acquisitionTargetSelectorRef": "workspace-relative-new-file-target",
+                "prospectiveSatisfactionContractRef": "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+                "targetSelectorRef": "file/workspace_deliverable",
+                "targetSelectorOwnerRef": "software-dev",
+                "targetSelectorSubjectRef": "validation_report",
+                "reobserveOwnerModuleId": "blocks/shell",
+                "reobserveFactKind": "selectable_validation_surface",
+                "maxAcquisitionAttempts": 1
+              }
+            ],
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get"
+            ],
+            "description": "A validation_report must cite bounded executed validation evidence. Any accepted source_change evidence declared after this report reopens the report through the sealed coverage dependency."
+          },
+          {
+            "id": "version_control_snapshot",
+            "scope": "deliverable",
+            "evidenceRole": "supplemental_evidence",
+            "requiredEvidenceKinds": [
+              "state_change"
+            ],
+            "requireDirectEvidence": true,
+            "acceptedStepKinds": [
+              "git/write"
+            ],
+            "acceptedOperationVariants": [
+              {
+                "kind": "git/write",
+                "variantId": "commit"
+              }
+            ],
+            "capabilityStateRequirements": [
+              {
+                "ownerModuleId": "blocks/git",
+                "capabilityStateKind": "repository_state",
+                "subjectRef": "workspace_deliverable"
+              }
+            ],
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get",
+              "shell/command"
+            ],
+            "description": "A satisfied version-control snapshot must cite git/write evidence, normally add plus commit, rather than read-only inspection or shell-based git commands."
+          },
+          {
+            "id": "*",
+            "scope": "dodItem",
+            "requiredEvidenceKinds": [
+              "validation"
+            ],
+            "targetRole": "deliverable_implementation",
+            "targetDiscoverySources": [
+              "workspace_manifest",
+              "project_files"
+            ],
+            "targetSelectorRef": "file/workspace_deliverable",
+            "targetSelectorOwnerRef": "software-dev",
+            "targetSelectorSubjectRef": "dodItem",
+            "prospectiveTargetAllOfConstraintRefs": [
+              "workspace-relative-path",
+              "new-target-requires-owner-selector"
+            ],
+            "requireTargetGrounding": true,
+            "requireDirectEvidence": true,
+            "requireClaimEvidence": true,
+            "requireExecutableBehaviorEvidence": true,
+            "acceptedStepKinds": [
+              "validation/managed_session",
+              "shell/command",
+              "file/write",
+              "file/edit",
+              "patch/apply",
+              "mcp/tool_call"
+            ],
+            "requiredOwnerFacts": [
+              {
+                "ownerModuleId": "blocks/shell",
+                "factKind": "selectable_validation_surface",
+                "operationKind": "validation/managed_session"
+              }
+            ],
+            "ownerFactConvergences": [
+              {
+                "ownerModuleId": "blocks/shell",
+                "factKind": "selectable_validation_surface",
+                "operationKind": "validation/managed_session",
+                "missingTrigger": "owner_fact_missing",
+                "acquisitionOwnerModuleId": "blocks/file",
+                "acquisitionOperationKind": "file/write",
+                "acquisitionTargetPolicy": "prospective_owner_target",
+                "acquisitionTargetSelectorRef": "workspace-relative-new-file-target",
+                "prospectiveSatisfactionContractRef": "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+                "targetSelectorRef": "file/workspace_deliverable",
+                "targetSelectorOwnerRef": "software-dev",
+                "targetSelectorSubjectRef": "dodItem",
+                "reobserveOwnerModuleId": "blocks/shell",
+                "reobserveFactKind": "selectable_validation_surface",
+                "maxAcquisitionAttempts": 1
+              }
+            ],
+            "validationFailureRepairConvergence": {
+              "id": "dod-validation-rejected-implementation-repair",
+              "routes": [
+                {
+                  "id": "module-manifest-parse-to-file-edit",
+                  "triggerOwnerModuleId": "blocks/shell",
+                  "triggerOperationKind": "validation/managed_session",
+                  "triggerDiagnosticClass": "validation_build_failed",
+                  "triggerEvidenceTargetType": "failure_surface",
+                  "triggerOwnerDiagnosticCode": "module_manifest_parse_failed",
+                  "repairEvidenceKind": "state_change",
+                  "repairOwnerModuleId": "blocks/file",
+                  "repairOperationKinds": [
+                    "file/edit"
+                  ],
+                  "repairTargetPolicy": "existing_owner_scope",
+                  "repairTargetRole": "deliverable_implementation",
+                  "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
+                  "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+                  "repairDeclarationTargetSelectorSubjectRef": "dodItem_repair",
+                  "repairDeclarationTargetSelectorCandidateRefs": [],
+                  "repairOperationTargetSelectorRef": "workspace-relative-existing-file-target"
+                },
+                {
+                  "id": "source-compile-to-file-edit",
+                  "triggerOwnerModuleId": "blocks/shell",
+                  "triggerOperationKind": "validation/managed_session",
+                  "triggerDiagnosticClass": "validation_build_failed",
+                  "triggerEvidenceTargetType": "failure_surface",
+                  "triggerOwnerDiagnosticCode": "source_compile_failed",
+                  "repairEvidenceKind": "state_change",
+                  "repairOwnerModuleId": "blocks/file",
+                  "repairOperationKinds": [
+                    "file/edit"
+                  ],
+                  "repairTargetPolicy": "existing_owner_scope",
+                  "repairTargetRole": "deliverable_implementation",
+                  "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
+                  "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+                  "repairDeclarationTargetSelectorSubjectRef": "dodItem_repair",
+                  "repairDeclarationTargetSelectorCandidateRefs": [],
+                  "repairOperationTargetSelectorRef": "workspace-relative-existing-file-target"
+                },
+                {
+                  "id": "test-failure-to-file-edit",
+                  "triggerOwnerModuleId": "blocks/shell",
+                  "triggerOperationKind": "validation/managed_session",
+                  "triggerDiagnosticClass": "validation_test_failed",
+                  "triggerEvidenceTargetType": "behavior_evidence",
+                  "triggerOwnerDiagnosticCode": "test_failed",
+                  "repairEvidenceKind": "state_change",
+                  "repairOwnerModuleId": "blocks/file",
+                  "repairOperationKinds": [
+                    "file/edit"
+                  ],
+                  "repairTargetPolicy": "existing_owner_scope",
+                  "repairTargetRole": "deliverable_implementation",
+                  "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
+                  "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+                  "repairDeclarationTargetSelectorSubjectRef": "dodItem_repair",
+                  "repairDeclarationTargetSelectorCandidateRefs": [],
+                  "repairOperationTargetSelectorRef": "workspace-relative-existing-file-target"
+                },
+                {
+                  "id": "input-symbol-case-to-attested-patch",
+                  "triggerOwnerModuleId": "blocks/shell",
+                  "triggerOperationKind": "validation/managed_session",
+                  "triggerDiagnosticClass": "validation_build_failed",
+                  "triggerEvidenceTargetType": "validation_input",
+                  "triggerOwnerDiagnosticCode": "validation_input_symbol_case_mismatch",
+                  "repairEvidenceKind": "state_change",
+                  "repairOwnerModuleId": "blocks/file",
+                  "repairOperationKinds": [
+                    "patch/apply"
+                  ],
+                  "repairTargetPolicy": "existing_owner_scope",
+                  "repairTargetRole": "validation_input_maintenance",
+                  "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
+                  "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+                  "repairDeclarationTargetSelectorSubjectRef": "dodItem_validation_input",
+                  "repairDeclarationTargetSelectorCandidateRefs": [],
+                  "repairOperationTargetSelectorRef": "workspace-relative-existing-file-target",
+                  "requireInputRepair": true
+                },
+                {
+                  "id": "missing-behavior-to-new-validation-input",
+                  "triggerOwnerModuleId": "blocks/shell",
+                  "triggerOperationKind": "validation/managed_session",
+                  "triggerDiagnosticClass": "validation_output_inconclusive",
+                  "triggerEvidenceTargetType": "validation_output",
+                  "triggerOwnerDiagnosticCode": "validation_workspace_behavior_unobserved",
+                  "repairEvidenceKind": "state_change",
+                  "repairOwnerModuleId": "blocks/file",
+                  "repairOperationKinds": [
+                    "file/write"
+                  ],
+                  "repairTargetPolicy": "prospective_owner_target",
+                  "repairTargetRole": "validation_input_supplement",
+                  "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
+                  "repairDeclarationTargetSelectorOwnerRef": "software-dev",
+                  "repairDeclarationTargetSelectorSubjectRef": "dodItem_validation_input",
+                  "repairDeclarationTargetSelectorCandidateRefs": [],
+                  "repairOperationTargetSelectorRef": "workspace-relative-new-file-target",
+                  "requireInputAddition": true
+                }
+              ],
+              "requireFreshValidation": true,
+              "maxAttempts": 2
+            },
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get"
+            ],
+            "description": "Satisfied DoD items must be backed by direct evidence whose output, input, or coverageTargets align with the specific claim; a generic build/test pass is not sufficient for detailed behavioral claims."
+          },
+          {
+            "id": "*",
+            "scope": "goalCoverage",
+            "requiredEvidenceKinds": [
+              "validation"
+            ],
+            "targetRole": "deliverable_implementation",
+            "targetDiscoverySources": [
+              "workspace_manifest",
+              "project_files"
+            ],
+            "targetSelectorRef": "file/workspace_deliverable",
+            "targetSelectorOwnerRef": "software-dev",
+            "targetSelectorSubjectRef": "goalCoverage",
+            "prospectiveTargetAllOfConstraintRefs": [
+              "workspace-relative-path",
+              "new-target-requires-owner-selector"
+            ],
+            "requireTargetGrounding": true,
+            "requireDirectEvidence": true,
+            "requireClaimEvidence": true,
+            "requireExecutableBehaviorEvidence": true,
+            "acceptedStepKinds": [
+              "validation/managed_session",
+              "shell/command",
+              "file/write",
+              "patch/apply",
+              "mcp/tool_call"
+            ],
+            "requiredOwnerFacts": [
+              {
+                "ownerModuleId": "blocks/shell",
+                "factKind": "selectable_validation_surface",
+                "operationKind": "validation/managed_session"
+              }
+            ],
+            "ownerFactConvergences": [
+              {
+                "ownerModuleId": "blocks/shell",
+                "factKind": "selectable_validation_surface",
+                "operationKind": "validation/managed_session",
+                "missingTrigger": "owner_fact_missing",
+                "acquisitionOwnerModuleId": "blocks/file",
+                "acquisitionOperationKind": "file/write",
+                "acquisitionTargetPolicy": "prospective_owner_target",
+                "acquisitionTargetSelectorRef": "workspace-relative-new-file-target",
+                "prospectiveSatisfactionContractRef": "shell/selectable-validation-surface/prospective-workspace-manifest/v1",
+                "targetSelectorRef": "file/workspace_deliverable",
+                "targetSelectorOwnerRef": "software-dev",
+                "targetSelectorSubjectRef": "goalCoverage",
+                "reobserveOwnerModuleId": "blocks/shell",
+                "reobserveFactKind": "selectable_validation_surface",
+                "maxAcquisitionAttempts": 1
+              }
+            ],
+            "rejectedStepKinds": [
+              "file/read",
+              "file/list",
+              "mcp/resource_read",
+              "mcp/prompt_get"
+            ],
+            "description": "Satisfied Goal coverage items must be backed by direct evidence whose output, input, or coverageTargets align with the specific Goal requirement; broad validation commands cannot close unrelated Goal leaves by themselves."
+          }
+        ]
+      }
+    }
+  },
+  "evidencePolicies": [
+    {
+      "id": "software-dev-validation-evidence",
+      "profile": "software-dev",
+      "rule": "software_dev_test_zero_work_is_inconclusive",
+      "appliesTo": "shell/command",
+      "recipeAdapterRef": "shell/project-native-validation/v4",
+      "recipeDeclared": true,
+      "recipeTimeoutMillis": 60000,
+      "zeroWorkMarkers": [
+        "no tests to run",
+        "0 tests"
+      ],
+      "qualityOnZeroWork": "inconclusive",
+      "zeroWork": true,
+      "evidenceTags": [
+        "software-dev",
+        "test",
+        "zero_work"
+      ],
+      "evidenceReason": "test command completed without executing matching tests",
+      "coverageRequirements": [
+        {
+          "id": "*",
+          "scope": "dod_item",
+          "requiredEvidenceKinds": [
+            "validation"
+          ],
+          "requireDirectEvidence": true,
+          "requireClaimEvidence": true,
+          "requireExecutableBehaviorEvidence": true,
+          "acceptedStepKinds": [
+            "validation/managed_session",
+            "shell/command",
+            "mcp/tool_call"
+          ],
+          "rejectedStepKinds": [
+            "file/read",
+            "file/list",
+            "mcp/resource_read",
+            "mcp/prompt_get"
+          ],
+          "description": "DoD satisfaction claims require direct validation evidence; zero-work validation is inconclusive."
+        },
+        {
+          "id": "*",
+          "scope": "goal_coverage",
+          "requiredEvidenceKinds": [
+            "validation"
+          ],
+          "requireDirectEvidence": true,
+          "requireClaimEvidence": true,
+          "requireExecutableBehaviorEvidence": true,
+          "acceptedStepKinds": [
+            "validation/managed_session",
+            "shell/command",
+            "mcp/tool_call"
+          ],
+          "rejectedStepKinds": [
+            "file/read",
+            "file/list",
+            "mcp/resource_read",
+            "mcp/prompt_get"
+          ],
+          "description": "Goal coverage claims require direct validation evidence; zero-work validation is inconclusive."
+        }
+      ],
+      "description": "Validation evidence must represent actual executed work before it can support a satisfied DoD item."
+    }
+  ]
+}

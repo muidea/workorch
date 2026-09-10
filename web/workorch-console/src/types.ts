@@ -1270,6 +1270,31 @@ export type RuntimeOriginalDiagnostic = {
   validationDiagnostic?: RuntimeValidationFailureDiagnostic;
   validationFailureObservation?: RuntimeValidationFailureObservation;
   governanceDependency?: RuntimeExternalDependency;
+  validationInputReviews?: RuntimeValidationInputReviewFeedback[];
+};
+
+export type RuntimeValidationInputReviewFeedback = {
+  reviewRef: string;
+  protocolRef: string;
+  coverageWorkItemId: string;
+  requirementHash: string;
+  reportHash: string;
+  redacted?: boolean;
+  report: {
+    subjectHash: string;
+    checks: Array<{
+      requiredCheckRef: string;
+      conclusion: 'consistent' | 'conflict' | 'inconclusive';
+      reason: string;
+      inputTargetRefs: string[];
+      obligations?: Array<{
+        criterionText: string;
+        finding: 'covered' | 'missing' | 'conflicting' | 'unknown';
+        reason: string;
+        inputTargetRefs: string[];
+      }>;
+    }>;
+  };
 };
 
 export type RuntimeFieldViolation = {
