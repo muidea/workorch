@@ -252,8 +252,10 @@ generation，重入 `required`；SM-4 只交付 continuation。新 manifest 仅�
 明确失败，不循环开票；既有 history 容量不足以消费答案时，在开票前以 `validation_input_review_history_exhausted` 终止。
 拒绝 ticket 则沿既有治理 fail 路径终止。既有 history、request/correction、provider budget 不另开账户。
 
-Shell v3 是此合同的 capability producer；输入来源不可读、超出完整 review envelope 或 native mapping 不支持时仍不可用。
-默认软件开发模板不在恢复中自动升级 adapter。脚本化 provider 主线只能证明事务/owner/恢复合同，不代表真实 LLM
+Shell v3/v4 adapter 是此合同的 capability producer；输入来源不可读、超出完整 review envelope 或 native mapping 不支持时仍不可用。
+v4 的逐 CWI 输入/执行范围由 Shell 独占定义；Core 不按语言或路径裁剪评审输入。默认模板只在新 Start/Restart 选择
+当前 adapter，不在恢复中自动升级。preparation 的 owner-authored 内容合同随 catalog hash 封存，只在 C3 投影，不授予
+File 输入修改、review 或执行 credit。脚本化 provider 主线只能证明事务/owner/恢复合同，不代表真实 LLM
 语义可靠性或 release DCE 已验收。
 
 ### Receipt, evidence and repair

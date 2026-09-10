@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-09-05
+Last Verified: 2026-09-10
 
 ## 功能范围与边界
 
@@ -61,6 +61,12 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
   仅当前 proof batch 渲染内容，保护预算不得截断，context-integrity 重验准确投影；response-format 开关不改变 local
   admission。LLM 不创建 ticket，不处理 Runtime 转换；完整无法判断与格式错误由 Orchestrator 分流。
   `biz/runtime_input_review_projection_test.go` 覆盖完整内容/信息、schema、C0～C2 稳定和截断拒绝。
+  subject 可声明有界 `ScopeContractRef + ScopeRequirements`，描述 owner 实际执行/观测范围；它随 subject hash 封存并
+  完整放入 C3，不能由 recipe 名推测更广的验证范围。缺省保持旧请求；范围变动不能复用旧报告。
+- create-only validation preparation 的可选 `ContentContractRef + ContentRequirements` 由 capability owner 提供并进入
+  catalog hash；semantic requirement/acquisition 与 operations 的 C3 必须随 exact target/native mapping 原样投影。
+  LLM 不按文件名补规则，不把生成输入视为一致性结论或执行 credit；空扩展不改变历史 request JSON/hash。
+  `biz/runtime_preparation_content_test.go` 验证三个投影入口一致、完整且保留旧格式。
 - LLM owner 在输出边界将 incomplete、empty、non-JSON、scalar/array root、multiple JSON roots 与 trailing bytes 归一为
   no-candidate `DocumentOutcome`，不携带 content。只有恰好一个完整 JSON object 能作为 opaque content 返回；framing outcome
   不创建 candidate correction，后续 whole-document recovery/terminal 只由 Orchestrator 的 sealed request session 决定。

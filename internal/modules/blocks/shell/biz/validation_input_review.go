@@ -12,7 +12,7 @@ import (
 )
 
 // The adapter supplies bytes, never a consistency verdict. Include the entire
-// versioned input namespace (helpers/fixtures included) and module definitions;
+// v3 input namespace, or the v4 check's exact package, and module definitions;
 // exceeding the bounded review envelope is explicit unavailability, not a
 // truncated or inferred review. Delivery code is still proved by execution.
 func shellVersionedInputReview(directory string, targets []string, binding runtimecontract.RuntimeValidationProofRequirementBinding) (*runtimecontract.RuntimeValidationInputReviewSubject, string) {
@@ -21,9 +21,23 @@ func shellVersionedInputReview(directory string, targets []string, binding runti
 		return nil, "validation_input_review_source_unavailable"
 	}
 	defer root.Close()
+	prefix := "workorch_validation/v3/"
+	pkg, scopeErr := shellIsolatedValidationPackage(binding.CheckAttestations)
+	if scopeErr != nil {
+		return nil, "validation_input_review_mapping_unsupported"
+	}
+	if pkg != "" {
+		prefix = pkg + "/"
+		if code := shellIsolatedInputScopeCode(targets, pkg); code != "" {
+			return nil, code
+		}
+		if code := shellIsolatedInputSourceSetCode(root, targets, pkg); code != "" {
+			return nil, code
+		}
+	}
 	var refs []string
 	for _, target := range normalizeShellStrings(targets) {
-		if strings.HasPrefix(target, "workorch_validation/v3/") || target == "go.mod" || target == "go.sum" || target == "go.work" || target == "go.work.sum" {
+		if strings.HasPrefix(target, prefix) || target == "go.mod" || target == "go.sum" || target == "go.work" || target == "go.work.sum" {
 			refs = append(refs, target)
 		}
 	}
@@ -32,6 +46,9 @@ func shellVersionedInputReview(directory string, targets []string, binding runti
 	}
 	slices.Sort(refs)
 	subject := &runtimecontract.RuntimeValidationInputReviewSubject{ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}
+	if pkg != "" {
+		subject.ScopeContractRef, subject.ScopeRequirements = shellIsolatedReviewScopeContractRef, shellIsolatedReviewScopeRequirements
+	}
 	remaining := int64(runtimecontract.RuntimeValidationInputReviewMaxBytes)
 	for _, ref := range refs {
 		info, err := root.Lstat(filepath.FromSlash(ref))
@@ -58,6 +75,9 @@ func shellVersionedInputReview(directory string, targets []string, binding runti
 	}
 	for _, check := range binding.CheckAttestations {
 		if !slices.Contains(refs, shellVersionedNativeCheckTarget(check.NativeCheckRef)) {
+			return nil, "validation_input_review_source_unavailable"
+		}
+		if pkg != "" && check.SupplementalNativeCheckRef != "" && !slices.Contains(refs, shellSupplementTargetRef(check.NativeCheckRef)) {
 			return nil, "validation_input_review_source_unavailable"
 		}
 	}

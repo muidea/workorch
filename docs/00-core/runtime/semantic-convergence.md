@@ -110,6 +110,10 @@ preparation 可以附带 capability-owner 原始、有界、audit-safe `Original
 的唯一原因复制到 `RuntimeTerminalDecision.OriginalDiagnostic`；缺失/歧义/过期原因不从历史或文本重建。它是原因事实，
 不是第五状态机或第二份 action/terminal kind，不能改变单次 acquisition、重试或 credit 合同。SM-4 与投影层只消费已封存
 原因；旧 archive 中字段缺省时保留原哈希和旧 delivery material，不做 backfill。
+preparation 还可携带成对的 `ContentContractRef + ContentRequirements`：由 capability owner 定义的完整有界输入语法，
+分别不超过 512/4096 bytes，无控制字符，必须为 UTF-8。二者进入同一 catalog hash，semantic/operations C3 随 exact
+target/native identity 保留；Core 只验证合同身份与边界，不解析语言、裁剪内容或授予 effect/review/credit。
+空扩展保持旧 JSON/hash；输入生成仍只走既有 SM-2 acquisition、SM-3 dispatch 和 receiving owner 的 create-only 合同。
 不能通过声明的 prospective acquisition 补齐的输入必须独立发布为 `ProofRequirementUnavailability`，包含 exact
 Definition requirement、recipe 与 owner 原始 diagnostic，并由同一 catalog snapshot/revision 绑定；不得同时发布该
 requirement 的 binding/preparation，也不得推导替代 target。SM-2 等 current prerequisites 全部结算后，在既有私有

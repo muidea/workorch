@@ -4,7 +4,7 @@ Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-09-06
+Last Verified: 2026-09-10
 
 ## Purpose
 
@@ -107,6 +107,11 @@ bindings。未知/定制内容、stale preview、目标 binary 已变化均返�
 projection clone 必须 detached，display metadata 不得反向构造 admission。没有这些历史封存字段时展示未知，不回填当前
 catalog、不推测升级成功，也不触发 owner mutation。
 
+当前 `software-dev` 的新执行声明 `shell/project-native-validation/v4`，使逐 CWI 输入必须经过独立一致性评审与
+包范围验证；这是 Shell capability 合同，不改变模板中立身份、原 Goal/DoD 或验收集合。精确未定制的旧内置模板
+通过 reviewed fingerprint 在 owner ensure 时升级；新 Start/Restart 编译当前配置，旧 Run 的 v1/v2/v3 不被回填。
+终态 Run 不因升级重新运行；需要显式 Restart。未能识别的定制模板仍须用户合并，不能借升级绕过。
+
 ## Template And Soul Contract
 
 Template 可以声明 starter Goal/DoD、default Soul/role binding、context/evidence/capability policy 与 execution constraint。
@@ -132,6 +137,9 @@ binding validity 与 forbidden authority vocabulary。
 Application/HTTP tests 验证 concrete owner result、错误 scope/hash、缺失/错误/重复结果和 `409` 冲突传播。
 自动加载另外覆盖 memory/file 启动更新与定制保护、旧 schema 原样 read/CAS/reopen、新配置准入、首次 Start 前更新、
 未变化配置幂等、Template/Workspace 并发漂移拒绝、无效新配置阻塞、Soul 重新读取及历史 Run 文件不变。
+`TestIsolatedInputTemplateUpgradeReopensReviewedPreviousDefault` 使用冻结完整 `dfa5c1ad` 内容核对 memory/file 升级与
+定制保护；`TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition` 通过正常 HTTP authoring 和正式 restart
+compiler，核对当前内置模板生成 24 DoD / 27 CWI、25 managed requirements 与幂等 startup，不手工替换 bootstrap adapter。
 
 ## Related Contracts
 

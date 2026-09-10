@@ -121,6 +121,11 @@ required checks/native mapping。Core 不识别语言、文件名或 adapter 业
 请求在 C3 获得这些准确事实，对照 C1 原 Goal/DoD，返回 closed `validationInputReview`：subjectHash 和每个原 check 的
 `consistent|conflict|inconclusive`、非空 reason、准确 input refs。完整 all-of 映射不能遗漏、重复或换成新准则。
 文件注释、候选自身声明、自测通过和 ticket 摘要均不产生一致性或验收 authority。
+评审输入范围与执行范围必须由同一 capability owner 定义并按原 native mapping 版本化封存；Core 不得为了容量截断
+内容、替 owner 选择文件或把独立 CWI 的输入合成新的全局授权。超出 owner 完整输入闭包的来源保持不可验证；局部
+检查执行不得冒充原准则要求的完整工程验证。新默认只影响新 activation，旧封存协议与归档保持原解释。
+可选 `ScopeContractRef + ScopeRequirements` 成对声明 owner 执行/观测范围，分别最多 512/4096 bytes，完整 UTF-8 且
+无控制字符；二者进入 subject hash 与完整 C3 integrity 校验。范围改变使旧报告失效；空扩展不改变旧 JSON/hash。
 
 SM-3 按原 request session 持久化完整报告；SM-2 的 `SemanticFeasibilityRequired` 私有事件在 owner feasibility 前分类。
 一致才继续原 binding/reconciliation seal，冲突明确失败。完整无法判断封存 exact governance dependency，复用本地

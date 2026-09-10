@@ -20,8 +20,12 @@ func shellValidationInputAddition(check runtimecontract.RuntimeValidationCheckAt
 		NativeCheckRef: shellSupplementCheckRef(check.NativeCheckRef), TargetRef: shellSupplementTargetRef(check.NativeCheckRef),
 		ContentContractRef: shellSupplementContentContractRef, ContentRequirements: shellSupplementContentRequirements,
 	}
-	if check.ObservationProtocolRef == shellGoEntrypointObservationProtocolRef {
+	if shellEntrypointObservationProtocol(check.ObservationProtocolRef) {
 		addition.ContentContractRef, addition.ContentRequirements = shellEntrypointContentContractRef, shellEntrypointContentRequirements
+	}
+	if shellIsolatedNativeCheck(check) {
+		addition.ContentContractRef = shellIsolatedInputContentContractRef
+		addition.ContentRequirements = shellIsolatedInputContentRequirements + " Preserve originalNativeCheckRef; original and supplemental checks must execute and pass conjunctively in this same package."
 	}
 	addition.ContentRequirements += shellAssertionFeedbackRequirements
 	return addition
@@ -33,6 +37,9 @@ func shellValidationInputAddition(check runtimecontract.RuntimeValidationCheckAt
 func shellSupplementCheckRef(native string) string { return native + "_Behavior" }
 
 func shellSupplementTargetRef(native string) string {
+	if shellIsolatedNativeIdentity.MatchString(native) {
+		return shellIsolatedNativePackage(native) + "/behavior_test.go"
+	}
 	return "workorch_validation/behavior_" + strings.ToLower(strings.TrimPrefix(native, "TestWorkOrchCWI_")) + "_test.go"
 }
 
@@ -40,7 +47,7 @@ func shellValidationSupplementAttestations(values []runtimecontract.RuntimeValid
 	values = runtimecontract.CloneRuntimeValidationCheckAttestationBindings(values)
 	supplemented := false
 	for i := range values {
-		if values[i].ObservationProtocolRef != shellGoBehaviorObservationProtocolRef && values[i].ObservationProtocolRef != shellGoEntrypointObservationProtocolRef {
+		if values[i].ObservationProtocolRef != shellGoBehaviorObservationProtocolRef && !shellEntrypointObservationProtocol(values[i].ObservationProtocolRef) {
 			continue
 		}
 		if shellStringIncluded(refs, shellSupplementTargetRef(values[i].NativeCheckRef)) {

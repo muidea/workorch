@@ -30,6 +30,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
+	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -53,8 +54,53 @@ func TestDriveRuntimeValidationInputReviewRestart(t *testing.T) {
 	}
 }
 
-func runValidationInputReviewMainline(t *testing.T, mode, cut string) int64 {
+type validationInputReviewMainlineOptions struct {
+	Adapter         string
+	ValidationCount int
+}
+
+func TestDriveRuntimeIsolatedInputReviewMainline(t *testing.T) {
+	// Selection comes from the shipped declaration, not a test-only opt-in.
+	templates, err := workorchdefaults.BuiltinWorkspaceTemplateDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := ""
+	for _, template := range templates {
+		if template.ID == "software-dev" {
+			for _, policy := range template.EvidencePolicies {
+				if ref, ok := policy["recipeAdapterRef"].(string); ok {
+					adapter = ref
+				}
+			}
+		}
+	}
+	if adapter != shellcommon.ValidationRecipeAdapterIsolatedEntrypoint {
+		t.Fatal("default template does not enable reviewed isolated inputs")
+	}
+	options := validationInputReviewMainlineOptions{Adapter: adapter, ValidationCount: 1}
+	for _, mode := range []string{"consistent", "conflict", "clarify", "exhausted", "malformed", "reject"} {
+		t.Run(mode, func(t *testing.T) { runValidationInputReviewMainline(t, mode, "", options) })
+	}
+	t.Run("multiple_cwi", func(t *testing.T) {
+		runValidationInputReviewMainline(t, "consistent", "", validationInputReviewMainlineOptions{Adapter: adapter, ValidationCount: 3})
+	})
+	baseline := runValidationInputReviewMainline(t, "clarify", "", options)
+	for _, cut := range []string{"after_review_document", "after_review_classification", "after_ticket_binding", "after_information_commit", "after_review_binding"} {
+		t.Run(cut, func(t *testing.T) {
+			if got := runValidationInputReviewMainline(t, "clarify", cut, options); got != baseline {
+				t.Fatalf("restart repeated provider call: %d != %d", got, baseline)
+			}
+		})
+	}
+}
+
+func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested ...validationInputReviewMainlineOptions) int64 {
 	t.Helper()
+	options := validationInputReviewMainlineOptions{Adapter: shellcommon.ValidationRecipeAdapterVersionedEntrypoint, ValidationCount: 1}
+	if len(requested) != 0 {
+		options = requested[0]
+	}
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -66,35 +112,59 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string) int64 {
 		}
 	}
 	bootstrap := validationInputAdditionMainlineBootstrap()
-	bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = shellcommon.ValidationRecipeAdapterVersionedEntrypoint
+	bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = options.Adapter
+	for index := 3; index <= options.ValidationCount+1; index++ {
+		id := common.CoverageWorkItemID(fmt.Sprintf("cwi-%d", index))
+		focus := bootstrap.DefinitionFocuses[1].Clone()
+		focus.ID, focus.CoverageWorkItemIDs, focus.EvidenceDeclarationRef = "focus-"+string(id), []common.CoverageWorkItemID{id}, ""
+		focus.AssessmentID = string(id)
+		bootstrap.DefinitionFocuses = append(bootstrap.DefinitionFocuses, focus)
+		declaration := runtimecontract.NormalizeRuntimeProfileContracts(bootstrap.Activation.ExecutionContract.ProfileContracts)[0].EvidenceRequirements[1]
+		declaration.ID = string(id)
+		bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements = append(bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements, declaration)
+		bootstrap.CoverageItems = append(bootstrap.CoverageItems, runtimecontract.RuntimeCoverageItem{ID: id, SliceID: "slice-mainline", SourceScope: "dodItem", Order: index, PrerequisiteCoverageWorkItemIDs: []common.CoverageWorkItemID{common.CoverageWorkItemID(fmt.Sprintf("cwi-%d", index-1))}})
+		bootstrap.Slices[0].CoverageWorkItemIDs = append(bootstrap.Slices[0].CoverageWorkItemIDs, id)
+		runtimeTestDeclareExactManagedValidationOwnerFact(&bootstrap, id, "behavior-validation", false)
+	}
 	bootstrap.Definition.CapabilityContract = append(bootstrap.Definition.CapabilityContract, runtimecontract.RuntimeBlockKindDecisionRequest)
 	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleDecision, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindDecisionRequest}})
 	bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
 	runtimeTestPrepareNativeValidationThroughOwners(t, bootstrap, directory)
-	entries, err := os.ReadDir(filepath.Join(directory, "workorch_validation/v3"))
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("versioned owner input: %v", err)
-	}
-	inputTarget := filepath.ToSlash(filepath.Join("workorch_validation/v3", entries[0].Name()))
 	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(bootstrap.Definition.Revision, bootstrap.CoverageItems, bootstrap.DefinitionFocuses)
-	if err != nil || len(requirements) != 1 {
+	if err != nil || len(requirements) != options.ValidationCount {
 		t.Fatal(err)
 	}
-	native := "TestWorkOrchCWI_" + strings.ToUpper(strings.TrimPrefix(requirements[0].RequiredCheckRefs[0], "workorch-cwi-check-")) + "_InputV3"
-	input := fmt.Sprintf(`package workorch_validation
-import ("testing"; "os/exec"; "path/filepath"; "strings")
-func %s(t *testing.T) {
- bin:=filepath.Join(t.TempDir(),"delivery")
- build:=exec.Command("go","build","-buildvcs=false","-o",bin,"./cmd/delivery"); build.Dir="../.."
- if out,err:=build.CombinedOutput(); err!=nil { t.Fatalf("build: %%v %%s",err,out) }
- out,err:=exec.Command(bin).Output(); if err!=nil || strings.TrimSpace(string(out))!="4" { t.Fatal("wrong delivered behavior") }
-}
-`, native)
 	initialFiles := map[string]string{
-		inputTarget:            input,
 		"subject.go":           "package fixture\nfunc DeliveredValue() int { return 2 }\n",
 		"cmd/delivery/main.go": "package main\nimport (\"fmt\"; subject \"example.com/workorch-runtime-native-fixture\")\nfunc main(){fmt.Print(subject.DeliveredValue())}\n",
 		"historical_test.go":   "package fixture\n// Immutable prior input; not selected by the versioned adapter.\n",
+	}
+	inputTargets := map[common.CoverageWorkItemID]string{}
+	for _, requirement := range requirements {
+		native := "TestWorkOrchCWI_" + strings.ToUpper(strings.TrimPrefix(requirement.RequiredCheckRefs[0], "workorch-cwi-check-"))
+		parent, suffix := "../..", "_InputV3"
+		if options.Adapter == shellcommon.ValidationRecipeAdapterIsolatedEntrypoint {
+			parent, suffix = "../../..", "_InputV4"
+		}
+		native += suffix
+		inputTarget := "workorch_validation/v3/" + strings.ToLower(native) + "_test.go"
+		if options.Adapter == shellcommon.ValidationRecipeAdapterIsolatedEntrypoint {
+			inputTarget = "workorch_validation/v4/" + strings.ToLower(native) + "/input_test.go"
+		}
+		if _, err := os.Stat(filepath.Join(directory, inputTarget)); err != nil {
+			t.Fatalf("owner did not prepare exact input: %v", err)
+		}
+		inputTargets[requirement.CoverageWorkItemID] = inputTarget
+		initialFiles[inputTarget] = fmt.Sprintf(`package workorch_validation
+import ("testing"; "os/exec"; "path/filepath"; "strings")
+func %s(t *testing.T) {
+ bin:=filepath.Join(t.TempDir(),"delivery")
+ build:=exec.Command("go","build","-buildvcs=false","-o",bin,"./cmd/delivery"); build.Dir=%q
+ if out,err:=build.CombinedOutput(); err!=nil { t.Fatalf("build: %%v %%s",err,out) }
+ out,err:=exec.Command(bin).Output(); if err!=nil || strings.TrimSpace(string(out))!="4" { t.Fatal("wrong delivered behavior") }
+}
+
+`, native, parent)
 	}
 	for ref, content := range initialFiles {
 		path := filepath.Join(directory, ref)
@@ -141,7 +211,8 @@ func %s(t *testing.T) {
 	startRuntimeManagedValidationTestOwner(t, hub)
 	startRuntimeProviderCeilingTestOwner(t, hub)
 	resultOwner := resultmodule.New()
-	if err := resultOwner.Configure(resultbiz.Dependencies{OwnerRepositories: testResultOwnerRepositories(memory.NewResultRepository(), memory.NewArtifactRepository(), memory.NewResultWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
+	results := memory.NewResultRepository()
+	if err := resultOwner.Configure(resultbiz.Dependencies{OwnerRepositories: testResultOwnerRepositories(results, memory.NewArtifactRepository(), memory.NewResultWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := resultOwner.Start(); err != nil {
@@ -192,7 +263,7 @@ func %s(t *testing.T) {
 				}
 				review := &runtimecontract.RuntimeValidationInputReview{SubjectHash: binding.InputReview.Hash}
 				for _, check := range binding.RequiredCheckRefs {
-					review.Checks = append(review.Checks, runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: conclusion, Reason: "Confirm whether this input invokes the delivered program without bypassing the original requirement.", InputTargetRefs: []string{inputTarget}})
+					review.Checks = append(review.Checks, runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: conclusion, Reason: "Confirm whether this input invokes the delivered program without bypassing the original requirement.", InputTargetRefs: []string{inputTargets[proposal.CoverageWorkItemID]}})
 				}
 				proposal.ValidationInputReview = review
 			}
@@ -214,7 +285,7 @@ func %s(t *testing.T) {
 			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "deliver", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"subject.go"}, CoverageWorkItemIDs: command.Decision.Focus.CoverageWorkItemIDs, Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}}}}}
 		case runtimecontract.ConvergenceStateNeedValidation:
 			validationCalls++
-			candidate = runtimeManagedShellValidationCandidate("validate", "cwi-2", "subject.go", "behavior-validation")
+			candidate = runtimeManagedShellValidationCandidate("validate", command.Decision.Focus.CoverageWorkItemIDs[0], "subject.go", "behavior-validation")
 		case runtimecontract.ConvergenceStateNeedAssessment:
 			candidate = runtimeSatisfiedAssessmentCandidate(command, "exact owner evidence satisfies coverage")
 		default:
@@ -384,7 +455,7 @@ func %s(t *testing.T) {
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
 		t.Fatalf("mode=%s state=%s terminal=%+v failure=%+v", mode, completed.Decision.State, completed.Decision.Terminal, completed.Facts.Failure)
 	}
-	if success && validationCalls != 1 || !success && validationCalls != 0 {
+	if success && validationCalls != options.ValidationCount || !success && validationCalls != 0 {
 		t.Fatalf("unexpected validation calls: %d", validationCalls)
 	}
 	if (mode == "conflict" || mode == "malformed") && len(completed.GovernanceRequests) != 0 {
@@ -417,7 +488,10 @@ func %s(t *testing.T) {
 			}
 		}
 	}
-	for _, ref := range []string{inputTarget, "historical_test.go"} {
+	for ref := range initialFiles {
+		if ref == "subject.go" {
+			continue
+		}
 		content, err := os.ReadFile(filepath.Join(directory, ref))
 		if err != nil || string(content) != initialFiles[ref] {
 			t.Fatal("review path rewrote existing input")
@@ -425,6 +499,24 @@ func %s(t *testing.T) {
 	}
 	if cut != "" && !crash.fired {
 		t.Fatalf("restart cut not reached: %s", cut)
+	}
+	command := orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}
+	for range 2 {
+		if err := module.driveAndProjectRuntimeLockedWithCommand(ctx, command); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil || stored.RuntimeState == nil || !runtimeTerminalDeliveryFullyAcknowledged(runtimeAggregateFromRecord(*stored.RuntimeState)) {
+		t.Fatalf("terminal owner delivery incomplete: %v", err)
+	}
+	wantRun, wantResult, wantCoverage := common.RunStateFailed, common.ResultStateRejected, 1
+	if success {
+		wantRun, wantResult, wantCoverage = common.RunStateCompleted, common.ResultStateAccepted, options.ValidationCount+1
+	}
+	closeouts, err := results.ListByRun(ctx, "run-v2")
+	if err != nil || stored.State != wantRun || len(closeouts) != 1 || closeouts[0].State != wantResult || closeouts[0].RuntimeCloseout == nil || len(closeouts[0].RuntimeCloseout.SatisfiedCoverageWorkItemIDs) != wantCoverage {
+		t.Fatalf("review/validation/acceptance conflated: run=%s result=%+v err=%v", stored.State, closeouts, err)
 	}
 	return calls.Load()
 }

@@ -27,7 +27,9 @@ import (
 // proves the default Profile's complete, actually compiled managed-validation
 // set. Application seals an exact requirement per CWI; Shell publishes an
 // owner-native preparation; File creates exactly that target; Shell reobserves
-// and attests the native check; only then may the SM-2 matcher derive credit.
+// and attests the native check; only then can the pure receipt matcher match it.
+// This is owner-protocol calibration, not semantic binding admission. The
+// independent input-review transaction is covered by the drive mainline tests.
 // Neither Orchestrator nor the provider interprets Go, test names, or stdout.
 func TestBuiltinSoftwareDevAllManagedCWIsCloseThroughTypedNativeProofPipeline(t *testing.T) {
 	t.Run("ready_inputs", func(t *testing.T) { runDefaultNativeProofPipeline(t, false) })
@@ -203,8 +205,8 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 		if !found {
 			t.Fatalf("reobserved catalog has no exact ready binding for %q: %+v", requirement.Hash, catalog.ValidationSurfaces)
 		}
-		if len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].ObservationProtocolRef != "shell/go-test-json/workspace-behavior/v4" || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != "" {
-			t.Fatalf("default adapter did not publish an unsupplemented v4 binding: %+v", ownerBinding)
+		if len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].ObservationProtocolRef != "shell/go-test-json/workspace-behavior/v5" || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != "" || ownerBinding.InputReview == nil || ownerBinding.InputReview.ValidateAgainstBinding(ownerBinding) != nil || len(ownerBinding.InputReview.Files) != 2 {
+			t.Fatalf("default adapter did not publish an exact isolated review subject: %+v", ownerBinding)
 		}
 		focus, found := focusByCoverage[requirement.CoverageWorkItemID]
 		if !found {
@@ -249,7 +251,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 			}
 			diagnostic := response.Receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic
 			addition := diagnostic.InputAddition
-			if addition.ContentContractRef != "shell/go-test-input/conjunctive-entrypoint-test/v3" {
+			if addition.ContentContractRef != "shell/go-test-input/isolated-entrypoint/v1" {
 				t.Fatalf("default adapter did not publish the versioned entrypoint input contract: %+v", addition)
 			}
 			convergence := focus.ValidationFailureRepairConvergence
@@ -272,6 +274,9 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 			_, ownerBinding, found = runtimecontract.RuntimeValidationSurfaceForProofRequirement(catalog.ValidationSurfaces, requirement)
 			if !found || len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].NativeCheckRef != originalBinding.CheckAttestations[0].NativeCheckRef || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != addition.NativeCheckRef || ownerBinding.CheckAttestations[0].ObservationProtocolRef != originalBinding.CheckAttestations[0].ObservationProtocolRef {
 				t.Fatalf("fresh owner binding replaced original instead of adding all-of: %+v", ownerBinding)
+			}
+			if ownerBinding.InputReview == nil || ownerBinding.InputReview.Hash == originalBinding.InputReview.Hash || len(ownerBinding.InputReview.Files) != 3 {
+				t.Fatal("supplement did not require a fresh complete input review")
 			}
 			coverageBinding, semanticFocus = defaultNativeProofCoverageBinding(t, focus, requirement, ownerBinding, preparedTarget)
 			response = executeBoundValidation("dispatch-default-proof-fresh-validation")

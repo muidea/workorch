@@ -20,6 +20,7 @@ const ValidationRecipeAdapterProjectEntrypoint = "shell/project-native-validatio
 // bindings require independent exact-content review before Runtime may seal a
 // proof. Older adapters retain their native identities and conjunctive checks.
 const ValidationRecipeAdapterVersionedEntrypoint = "shell/project-native-validation/v3"
+const ValidationRecipeAdapterIsolatedEntrypoint = "shell/project-native-validation/v4"
 
 // Validation owner diagnostic codes are Shell-owned, stable facts. Profiles
 // may match these exact values; Runtime core must not infer them from stderr.

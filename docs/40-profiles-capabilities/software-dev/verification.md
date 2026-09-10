@@ -4,7 +4,7 @@ Status: normative
 
 Type: verification-contract
 
-Last Verified: 2026-09-05
+Last Verified: 2026-09-10
 
 ## Purpose
 
@@ -35,7 +35,7 @@ and converges through the same neutral Runtime owner model. It must not make leg
   separate declaration/operation selectors. A route whose repair operations do not publish one concrete owner confirmation protocol
   fails pre-seal. Duplicate/partial triggers, cross-owner kinds, non-state-change evidence, incomplete selectors, disabled fresh validation or an
   out-of-range bound fail pre-seal and create no Run/provider/capability work;
-- the template validation declaration contains only `shell/project-native-validation/v2`, with no language command, arguments or
+- the template validation declaration contains only `shell/project-native-validation/v4`, with no language command, arguments or
   environment, and its validation-environment policy contains no language profile. Shell resolves the declaration from the exact File manifest, and the default managed-validation wire contains
   only `recipeId`. Shell alone emits exact `module_manifest_parse_failed`, `source_compile_failed` or `test_failed` owner facts
   from bounded tool output. Generic `shell_exit_nonzero` has no default repair route;
@@ -47,6 +47,22 @@ and converges through the same neutral Runtime owner model. It must not make leg
 - current provider guidance uses current semantic-plan/candidate schemas.
 
 ### Operations And Evidence
+
+- `TestIsolatedInputReviewScalesAcrossTwentyFiveCWIs` proves complete independent review subjects and protection for 25 CWI
+  inputs, plus exact helper freshness without global accumulation; capacity is not raised or truncated;
+- `TestIsolatedInputSourceMembershipCannotOmitOnDiskInputs` rejects manifest/actual-package differences at both review and
+  execution readiness, including unlisted helpers/fixtures/root definitions, removed inputs, directory symlinks and ancestor
+  module overrides; its bounded scan does not visit neighboring CWI packages;
+- `TestIsolatedInputExecutesOnlyReviewedPackageAndActualDelivery` calibrates real Go execution with broken neighboring inputs,
+  incorrect delivery, dependency-only behavior, required skips, helper overrides/unlisted helpers and conjunctive supplements. The scope is
+  package membership, not an OS sandbox or implied full-suite proof; explicit full-project criteria remain mandatory;
+- the review subject seals the owner's bounded scope contract and exact input/native mapping. LLM C3 preserves both;
+  scope/content drift rejects old review identities, while absent fields preserve historical JSON/hash and C0–C2 stays stable;
+- `TestDriveRuntimeIsolatedInputReviewMainline` covers multiple CWI completion, all three review outcomes, bounded factual
+  tickets/re-review, malformed/rejected paths, five restart cuts, unchanged inputs/startup and duplicate three-owner terminal
+  delivery. Scripted provider results are not real-model, arbitrary-Goal semantic calibration or release DCE evidence;
+- `TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition` uses normal HTTP authoring and the production restart
+  compiler with 24 criteria / 27 CWIs / 25 managed proof requirements, without patching bootstrap selection;
 
 - `TestEntrypointContractReobservesHistoricalInputOnlyForNewAdapter` proves that unchanged helper-based input remains
   unavailable to a legacy activation and becomes inspectable only under the explicit new adapter; no replacement preparation,

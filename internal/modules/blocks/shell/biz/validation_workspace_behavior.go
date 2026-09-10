@@ -20,12 +20,12 @@ const maxShellBehaviorNativeChecks = 32
 // of the workspace's non-test implementation. This is necessary behavior
 // grounding, not a semantic grader or authorization to edit the assertions.
 func shellNativeObservationProtocolSupported(ref string) bool {
-	return ref == shellGoTestObservationProtocolRef || ref == shellGoBehaviorObservationProtocolRef || ref == shellGoSupplementObservationProtocolRef || ref == shellGoEntrypointObservationProtocolRef
+	return ref == shellGoTestObservationProtocolRef || ref == shellGoBehaviorObservationProtocolRef || ref == shellGoSupplementObservationProtocolRef || shellEntrypointObservationProtocol(ref)
 }
 
 func shellRequiresWorkspaceBehavior(request RuntimeCommandRequest) bool {
 	for _, attestation := range request.ValidationCheckAttestations {
-		if attestation.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef || attestation.ObservationProtocolRef == shellGoSupplementObservationProtocolRef || attestation.ObservationProtocolRef == shellGoEntrypointObservationProtocolRef {
+		if attestation.ObservationProtocolRef == shellGoBehaviorObservationProtocolRef || attestation.ObservationProtocolRef == shellGoSupplementObservationProtocolRef || shellEntrypointObservationProtocol(attestation.ObservationProtocolRef) {
 			return true
 		}
 	}
@@ -62,7 +62,7 @@ func validateShellBehaviorRecipeArgs(args []string) error {
 	return nil
 }
 
-func prepareShellBehaviorObservation(request RuntimeCommandRequest, args []string) ([]string, string, error) {
+func prepareShellBehaviorObservation(request RuntimeCommandRequest, args []string, executionDirectories ...string) ([]string, string, error) {
 	if !shellRequiresWorkspaceBehavior(request) {
 		return args, "", nil
 	}
@@ -99,6 +99,28 @@ func prepareShellBehaviorObservation(request RuntimeCommandRequest, args []strin
 	if !exactRun || !jsonOutput || !uncached {
 		return nil, "", fmt.Errorf("workspace behavior observation requires exact owner native-check instrumentation")
 	}
+	coveragePackages := "./..."
+	pkg, err := shellIsolatedValidationPackage(request.ValidationCheckAttestations)
+	if err != nil {
+		return nil, "", err
+	}
+	if pkg != "" {
+		prefix := "test\x00-json\x00-count=1\x00-run\x00" + expectedRun + "\x00"
+		if joined := strings.Join(args, "\x00"); joined != prefix+"./"+pkg && joined != prefix+"-v\x00./"+pkg {
+			return nil, "", fmt.Errorf("isolated validation must execute only its exact reviewed package")
+		}
+		directory := request.WorkspaceDeliverableDirectory
+		if len(executionDirectories) != 0 {
+			directory = executionDirectories[0]
+		}
+		if inspection := inspectShellNativeValidationChecks(directory, request.ValidationScopeTargetRefs, request.ValidationCheckAttestations); inspection.Code != "" {
+			return nil, "", fmt.Errorf("isolated validation input precondition failed: %s", inspection.Code)
+		}
+		coveragePackages, err = shellIsolatedCoveragePackages(directory, request.ValidationScopeTargetRefs, pkg)
+		if err != nil {
+			return nil, "", err
+		}
+	}
 	file, err := os.CreateTemp(request.ValidationScratchDirectory, "native-behavior-*.cover")
 	if err != nil {
 		return nil, "", err
@@ -107,7 +129,7 @@ func prepareShellBehaviorObservation(request RuntimeCommandRequest, args []strin
 	if err := file.Close(); err != nil {
 		return nil, "", err
 	}
-	instrumented := []string{args[0], "-coverpkg=./...", "-covermode=count", "-coverprofile=" + name}
+	instrumented := []string{args[0], "-coverpkg=" + coveragePackages, "-covermode=count", "-coverprofile=" + name}
 	return append(instrumented, args[1:]...), name, nil
 }
 

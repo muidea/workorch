@@ -16,7 +16,7 @@ import (
 const maxShellProcessCoverageFiles = 128
 
 func shellRequiresEntrypointBehavior(request RuntimeCommandRequest) bool {
-	return len(request.ValidationCheckAttestations) != 0 && request.ValidationCheckAttestations[0].ObservationProtocolRef == shellGoEntrypointObservationProtocolRef
+	return len(request.ValidationCheckAttestations) != 0 && shellEntrypointObservationProtocol(request.ValidationCheckAttestations[0].ObservationProtocolRef)
 }
 
 func shellEntrypointHasSupplement(request RuntimeCommandRequest) bool {
@@ -63,7 +63,7 @@ func shellProcessBehaviorArgs(args []string, directory string) []string {
 	return append([]string{args[0], "-exec=" + strconv.Quote(filepath.Join(directory, "test-exec"))}, args[1:]...)
 }
 
-func shellProcessBehaviorEnvironment(env []string, directory string) []string {
+func shellProcessBehaviorEnvironment(env []string, directory string, testArgs []string) []string {
 	if directory == "" {
 		return env
 	}
@@ -74,7 +74,14 @@ func shellProcessBehaviorEnvironment(env []string, directory string) []string {
 		}
 		ret = append(ret, value)
 	}
-	return append(ret, "GOFLAGS=-cover -covermode=count -coverpkg=./...", "GOCOVERDIR="+directory, "WORKORCH_PROCESS_COVERDIR="+directory)
+	coverage := "-coverpkg=./..."
+	for _, arg := range testArgs {
+		if strings.HasPrefix(arg, "-coverpkg=") {
+			coverage = arg
+			break
+		}
+	}
+	return append(ret, "GOFLAGS=-cover -covermode=count "+coverage, "GOCOVERDIR="+directory, "WORKORCH_PROCESS_COVERDIR="+directory)
 }
 
 // This observation supplies execution grounding only. The native test must

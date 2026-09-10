@@ -38,7 +38,7 @@ func resolveRuntimeValidationRecipeDeclarations(recipes []runtimemodel.RuntimeVa
 			continue
 		}
 		switch declaration.AdapterRef {
-		case modulecommon.ValidationRecipeAdapterProjectNative, modulecommon.ValidationRecipeAdapterProjectEntrypoint, modulecommon.ValidationRecipeAdapterVersionedEntrypoint:
+		case modulecommon.ValidationRecipeAdapterProjectNative, modulecommon.ValidationRecipeAdapterProjectEntrypoint, modulecommon.ValidationRecipeAdapterVersionedEntrypoint, modulecommon.ValidationRecipeAdapterIsolatedEntrypoint:
 			// An empty workspace has no competing project fact. The currently
 			// registered owner implementation may therefore publish its bounded
 			// prerequisite contract; once any project files exist, resolution is
@@ -170,7 +170,7 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 				compatibleRequirements++
 				attestations, observable := shellValidationCheckAttestations(recipe, requirement)
 				if !observable {
-					if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint {
+					if shellValidationInputReviewRequired(recipe.AdapterRef) {
 						unavailabilities = append(unavailabilities, runtimemodel.RuntimeValidationProofUnavailability{
 							Requirement: requirement, ValidationRecipeID: recipe.ID,
 							OriginalDiagnostic: shellNativeCheckReadinessDiagnostic(shellNativeCheckInspection{Code: "validation_input_review_mapping_unsupported"}, requirement, binding.Manifest, catalogObservedRevision, ""),
@@ -202,7 +202,7 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 				if err != nil {
 					continue
 				}
-				if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint {
+				if shellValidationInputReviewRequired(recipe.AdapterRef) {
 					var code string
 					ownerBinding.InputReview, code = shellVersionedInputReview(workspaceDirectory, binding.Manifest.TargetRefs, ownerBinding)
 					if code != "" {
@@ -275,16 +275,19 @@ func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecip
 	// The current versioned acquisition has one exact input target per CWI.
 	// A multi-check declaration needs an explicit multi-input contract; never
 	// publish a partially preparable all-of binding.
-	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint && len(requirement.RequiredCheckRefs) != 1 {
+	if shellValidationInputReviewRequired(recipe.AdapterRef) && len(requirement.RequiredCheckRefs) != 1 {
 		return nil, false
 	}
 	// Only the project-native adapter owns this stronger execution contract.
 	// Explicit fixed-command recipes retain their declared native v1 semantics;
 	// a static/custom recipe must not silently acquire behavior instrumentation.
-	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectNative || recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectEntrypoint || recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint {
+	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectNative || recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectEntrypoint || shellValidationInputReviewRequired(recipe.AdapterRef) {
 		protocol = shellGoBehaviorObservationProtocolRef
 		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectEntrypoint || recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint {
 			protocol = shellGoEntrypointObservationProtocolRef
+		}
+		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterIsolatedEntrypoint {
+			protocol = shellGoIsolatedEntrypointObservationProtocolRef
 		}
 		if len(requirement.RequiredCheckRefs) == 0 || len(requirement.RequiredCheckRefs) > maxShellBehaviorNativeChecks || validateShellBehaviorRecipeArgs(args) != nil {
 			return nil, false
@@ -305,6 +308,12 @@ func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecip
 		native := "TestWorkOrchCWI_" + strings.ToUpper(suffix)
 		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint {
 			native += "_InputV3"
+		}
+		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterIsolatedEntrypoint {
+			native += "_InputV4"
+			if !shellIsolatedNativeIdentity.MatchString(native) {
+				return nil, false
+			}
 		}
 		ret = append(ret, runtimemodel.RuntimeValidationCheckAttestationBinding{
 			RequiredCheckRef: required, ObservationProtocolRef: protocol,
@@ -374,6 +383,10 @@ func shellValidationProofPreparationFromInspection(inspection shellNativeCheckIn
 		CheckAttestations:                       runtimemodel.CloneRuntimeValidationCheckAttestationBindings(attestations),
 		ProspectiveTargetSatisfactionConstraint: constraint,
 	}.Normalized()
+	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterIsolatedEntrypoint && targetRef != "" {
+		preparation.ContentContractRef = shellIsolatedInputContentContractRef
+		preparation.ContentRequirements = shellIsolatedInputContentRequirements + shellAssertionFeedbackRequirements
+	}
 	if preparation.Validate() != nil {
 		return runtimemodel.RuntimeValidationProofPreparation{}, false, false
 	}
@@ -397,7 +410,7 @@ func instrumentManagedValidationNativeChecks(request *RuntimeCommandRequest) err
 			return fmt.Errorf("managed validation has unsupported native check attestation")
 		}
 		requiredRefs = append(requiredRefs, attestation.RequiredCheckRef)
-		if attestation.SupplementalNativeCheckRef != "" && ((attestation.ObservationProtocolRef != shellGoSupplementObservationProtocolRef && attestation.ObservationProtocolRef != shellGoEntrypointObservationProtocolRef) || attestation.SupplementalNativeCheckRef != shellSupplementCheckRef(attestation.NativeCheckRef)) {
+		if attestation.SupplementalNativeCheckRef != "" && ((attestation.ObservationProtocolRef != shellGoSupplementObservationProtocolRef && !shellEntrypointObservationProtocol(attestation.ObservationProtocolRef)) || attestation.SupplementalNativeCheckRef != shellSupplementCheckRef(attestation.NativeCheckRef)) {
 			return fmt.Errorf("managed validation has unsupported supplemental native input")
 		}
 		for _, ref := range attestation.NativeCheckRefs() {
@@ -433,6 +446,19 @@ func instrumentManagedValidationNativeChecks(request *RuntimeCommandRequest) err
 		if err := validateShellBehaviorRecipeArgs(args); err != nil {
 			return err
 		}
+	}
+	pkg, err := shellIsolatedValidationPackage(request.ValidationCheckAttestations)
+	if err != nil {
+		return err
+	}
+	if pkg != "" {
+		// A v5 owner declaration has one fixed transport shape. Never narrow
+		// arbitrary caller arguments or treat this as full-project test proof.
+		if strings.Join(args, "\x00") != "test\x00./..." && strings.Join(args, "\x00") != "test\x00-v\x00./..." {
+			return fmt.Errorf("isolated validation requires the owner-declared recipe")
+		}
+		args = append([]string(nil), args...)
+		args[len(args)-1] = "./" + pkg
 	}
 	instrumented := make([]string, 0, len(args)+5)
 	instrumented = append(instrumented, args[0], "-json", "-count=1", "-run", "^("+strings.Join(normalizeShellStrings(nativeChecks), "|")+")$")

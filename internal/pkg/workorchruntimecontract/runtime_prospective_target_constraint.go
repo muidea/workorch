@@ -7,6 +7,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -190,6 +191,10 @@ type RuntimeValidationProofPreparation struct {
 	ValidationRecipeID string
 	TargetRef          string
 	CheckAttestations  []RuntimeValidationCheckAttestationBinding
+	// Optional owner-authored content syntax. Core preserves it in the catalog
+	// and provider projection; it is neither mutation nor acceptance authority.
+	ContentContractRef  string `json:",omitempty"`
+	ContentRequirements string `json:",omitempty"`
 	// OriginalDiagnostic is owner-authored observation, never an action or a
 	// repair authorization. Omission preserves historical catalog identities.
 	OriginalDiagnostic *RuntimeOriginalDiagnostic `json:",omitempty"`
@@ -208,6 +213,8 @@ func (p RuntimeValidationProofPreparation) Normalized() RuntimeValidationProofPr
 	p.ValidationRecipeID = strings.TrimSpace(p.ValidationRecipeID)
 	p.TargetRef = strings.TrimSpace(p.TargetRef)
 	p.CheckAttestations = NormalizeRuntimeValidationCheckAttestationBindings(p.CheckAttestations)
+	p.ContentContractRef = strings.TrimSpace(p.ContentContractRef)
+	p.ContentRequirements = strings.TrimSpace(p.ContentRequirements)
 	p.OriginalDiagnostic = p.OriginalDiagnostic.CloneOriginal()
 	p.ProspectiveTargetSatisfactionConstraint = p.ProspectiveTargetSatisfactionConstraint.Normalized()
 	return p
@@ -229,6 +236,10 @@ func (p RuntimeValidationProofPreparation) Validate() error {
 	}
 	if strings.Contains(p.DeclarationRef, "*") {
 		return fmt.Errorf("runtime validation proof preparation declaration %q is not CWI-specific", p.DeclarationRef)
+	}
+	if (p.ContentContractRef == "") != (p.ContentRequirements == "") || len(p.ContentContractRef) > 512 || len(p.ContentRequirements) > 4096 || !utf8.ValidString(p.ContentContractRef+p.ContentRequirements) ||
+		strings.IndexFunc(p.ContentContractRef+p.ContentRequirements, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
+		return fmt.Errorf("runtime validation proof preparation requires bounded owner content contract and requirements together")
 	}
 	required := make([]string, 0, len(p.CheckAttestations))
 	for _, attestation := range p.CheckAttestations {

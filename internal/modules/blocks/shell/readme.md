@@ -4,7 +4,7 @@ Status: active
 
 Type: capability-block-contract
 
-Last Verified: 2026-09-04
+Last Verified: 2026-09-10
 
 ## 功能范围与边界
 
@@ -35,7 +35,7 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
 - `shell/command` 不得伪装成 `effect=none` validation；managed validation 不能退化为任意命令字符串。
 - execute 前必须验证 producer、同步 Result、sealed payload、owner catalog、target scope、execution key/fence 和 receipt authority。
 - managed validation 必须在隔离副本中运行；临时 effect 不得写回 deliverable，scratch 和进程组必须按策略释放。
-- activation-declared recipe 可以是固定 transport 或版本化的 `shell/project-native-validation/v1|v2` owner-adapter ref；模板不得携带
+- activation-declared recipe 可以是固定 transport 或版本化的 `shell/project-native-validation/v1|v2|v3|v4` owner-adapter ref；模板不得携带
   语言 command/args/env。Shell 只依据同一 request 绑定的 File-owner manifest 解析具体 recipe，且该解析只产生 owner fact，
   不触发 Runtime 状态。Shell 只有在 Orchestrator request 携带 exact Definition-owned
   `RuntimeValidationProofRequirement` 时，才可对 matching recipe 发布逐 CWI applicability binding；recipe ID、进程 exit 0、
@@ -114,9 +114,61 @@ or validation credit. Freshness dependencies retain the bytes actually reviewed,
 not a later re-read that might hide an intervening edit.
 
 Only a complete consistent LLM report can pass Orchestrator's subsequent binding
-gate, and actual validation/assessment remain required. The built-in software
-development template keeps its existing adapter; capability and scripted-provider
+gate, and actual validation/assessment remain required. Capability and scripted-provider
 tests do not constitute release-grade semantic calibration of arbitrary Goal/DoD.
+
+#### Per-CWI review and execution scope
+
+New built-in software-development activations select `shell/project-native-validation/v4`,
+with `shell/go-test-json/workspace-behavior/v5` and a `_InputV4` native identity.
+Each check has an independent package:
+`workorch_validation/v4/<lowercase-native-identity>/input_test.go`.
+Its optional conjunctive supplement is `behavior_test.go` in the same package.
+The review subject contains this entire package directory (helpers/fixtures included)
+plus present root `go.mod`, `go.sum`, `go.work` and `go.work.sum`, still bounded by
+16 files / 64 KiB. Other CWI packages do not consume this subject's budget or change
+its hash. All namespace inputs remain protected mutation targets, independently of
+the current CWI's review scope. v3 retains its namespace-wide contract for old seals.
+Before review and execution readiness, Shell compares this package's actual files
+and present root definitions with the bound File manifest. Unlisted/missing helpers
+or fixtures report `validation_input_review_source_set_changed`; symlinks and nested
+modules/packages fail closed. The read-only directory scan is bounded to 256 entries
+and never traverses neighboring CWI packages. Neither the file set nor review bytes
+are truncated to obtain a binding.
+The subject also seals `ScopeContractRef + ScopeRequirements`, an explicit bounded
+owner description of this execution boundary. LLM review receives it in full in C3;
+changing the scope invalidates old reports even when input bytes are unchanged.
+
+Shell selects only the exact reviewed package and original/supplemental native checks;
+it does not compile or select neighboring checks through `./...`. Coverage uses exact
+module-qualified implementation package identities from the sealed manifest, excluding
+the harness namespace, also for Go-built children. This is package membership isolation,
+not an OS sandbox, semantic proof or proof that the full project test suite ran. An original
+full-suite/build criterion still requires explicit actual execution/assertions by its input;
+historical failures may not be silently omitted to satisfy that criterion.
+
+Every current-package Go source is structurally inspected, including non-test helpers.
+Runner overrides, effectful initializers, other tests/methods, cgo and imports of other
+validation packages are unsupported. Nested Go packages/modules and intermediate
+module/workspace definitions are explicit `validation_input_review_scope_unsupported`;
+invalid helpers, symlinks, unreadable or oversized inputs fail closed. This bounded
+closure does not certify arbitrary dynamic file/process dependencies: a review cannot
+declare consistency when it requires unreviewed external harness code or fixtures.
+
+Exact create-only preparation carries the bounded owner-authored
+`ContentContractRef + ContentRequirements` (`shell/go-test-input/isolated-entrypoint/v1`).
+The catalog hash binds both; semantic acquisition and operation C3 preserve them with
+the exact target/native mapping. Core and File do not infer Go rules. Generation does
+not grant review, validation or acceptance credit, and does not permit editing old inputs.
+
+`validation_input_package_test.go` covers 25 simultaneous CWI subjects, complete helper
+freshness, actual/manifest membership mismatch, scope/capacity rejection and real Go
+execution with broken neighboring inputs and unlisted helper rejection.
+The Orchestrator isolated-review mainline covers multiple CWI completion, tri-state review,
+ticket/re-review, five restart cuts and duplicate Result→Workspace→Run delivery.
+The normal HTTP authoring/restart-compiler test covers 24 original criteria / 27 CWIs
+using the shipped template without patching its bootstrap. None is real-model or release
+DCE evidence, nor acceptance of the user's actual multilingual bridge.
 
 Shell reports only facts. Orchestrator's existing owner-private SM-2/3/4 events
 remain responsible for binding, credit, bounded failure and delivery; there is no
@@ -143,7 +195,7 @@ facts separately from readiness and checks that repeated queries preserve bytes.
 | --- | --- | --- |
 | Conjunctive addition | Exact original check mapping, fresh supplemental identity, declared content contract and resource-owner feasibility | Original and supplemental checks remain mandatory; creation grants no validation credit |
 | Criterion-preserving symbol repair | Owner-observed compiler location, bounded exact symbol delta and matching before/after hashes | Only the attested input delta is writable; original and supplemental checks remain mandatory |
-| Different validation implementation or observation path | LLM consistency review against the original criteria, bound to exact input content, followed by owner execution facts | v3 supplies mandatory review subjects; only Orchestrator can seal a consistent report after the independent request, with no waiver or review credit |
+| Different validation implementation or observation path | LLM consistency review against the original criteria, bound to exact input content, followed by owner execution facts | v3/v4 adapters supply mandatory review subjects; only Orchestrator can seal a consistent report after the independent request, with no waiver or review credit |
 
 The last row cannot borrow either of the first two authorizations. In particular,
 an unattributed test failure does not establish an input defect, and a compatible

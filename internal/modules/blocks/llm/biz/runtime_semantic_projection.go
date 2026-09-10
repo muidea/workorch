@@ -80,6 +80,8 @@ type runtimeSemanticInputReviewProjection struct {
 	ValidationRecipeID string                                                    `json:"validationRecipeId"`
 	SubjectHash        string                                                    `json:"subjectHash"`
 	ProtocolRef        string                                                    `json:"protocolRef"`
+	ScopeContractRef   string                                                    `json:"scopeContractRef,omitempty"`
+	ScopeRequirements  string                                                    `json:"scopeRequirements,omitempty"`
 	Files              []runtimecontract.RuntimeValidationInputReviewFile        `json:"files"`
 	Information        []runtimecontract.RuntimeValidationInputReviewInformation `json:"information,omitempty"`
 }
@@ -91,6 +93,8 @@ type runtimeSemanticNativeCheckAttestationProjection struct {
 	SupplementalNativeCheckRef string `json:"supplementalNativeCheckRef,omitempty"`
 	NativeCheckRef             string `json:"nativeCheckRef"`
 	TargetRef                  string `json:"targetRef,omitempty"`
+	ContentContractRef         string `json:"contentContractRef,omitempty"`
+	ContentRequirements        string `json:"contentRequirements,omitempty"`
 }
 
 // runtimeSemanticValidationFailureRepairProjection is the provider-safe C3
@@ -402,7 +406,7 @@ func runtimeSemanticProspectiveTargetConstraintForProvider(value *runtimecontrac
 			projection.ValidationProofPreparations = append(projection.ValidationProofPreparations, runtimeSemanticNativeCheckAttestationProjection{
 				ValidationRecipeID: preparationValue.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
 				ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
-				TargetRef: preparationValue.TargetRef,
+				TargetRef: preparationValue.TargetRef, ContentContractRef: preparationValue.ContentContractRef, ContentRequirements: preparationValue.ContentRequirements,
 			})
 		}
 	}
@@ -433,7 +437,7 @@ func runtimeSemanticNativeCheckAttestationsForRequirement(catalogs []runtimecont
 					ret = append(ret, runtimeSemanticNativeCheckAttestationProjection{
 						ValidationRecipeID: preparation.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
 						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
-						TargetRef: preparation.TargetRef,
+						TargetRef: preparation.TargetRef, ContentContractRef: preparation.ContentContractRef, ContentRequirements: preparation.ContentRequirements,
 					})
 				}
 			}

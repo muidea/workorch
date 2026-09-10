@@ -17,6 +17,7 @@ const (
 	RuntimeValidationInputReviewMaxFiles          = 16
 	RuntimeValidationInputReviewMaxBytes          = 64 * 1024
 	RuntimeValidationInputReviewMaxReasonBytes    = 2048
+	RuntimeValidationInputReviewMaxScopeBytes     = 4096
 	RuntimeValidationInputReviewInformationAction = "provide_validation_input_facts"
 	RuntimeValidationInputReviewFailureClass      = "validation_input_review"
 )
@@ -36,6 +37,10 @@ type RuntimeValidationInputReviewSubject struct {
 	ProtocolRef string
 	Hash        string
 	Files       []RuntimeValidationInputReviewFile
+	// Optional owner-authored limits on what these inputs execute/observe. A
+	// reviewer must not infer a wider proof scope from recipe names or paths.
+	ScopeContractRef  string `json:",omitempty"`
+	ScopeRequirements string `json:",omitempty"`
 }
 
 type RuntimeValidationInputReviewFile struct {
@@ -172,12 +177,21 @@ func StableRuntimeValidationInputReviewSubjectHash(s RuntimeValidationInputRevie
 		writeHashString(h, file.TargetRef)
 		writeHashString(h, file.ContentHash)
 	}
+	if s.ScopeContractRef != "" || s.ScopeRequirements != "" {
+		writeHashString(h, "validation-input-review-scope/v1")
+		writeHashStrings(h, []string{s.ScopeContractRef, s.ScopeRequirements})
+	}
 	return "runtime-input-review-" + hex.EncodeToString(h.Sum(nil))
 }
 
 func (s RuntimeValidationInputReviewSubject) ValidateAgainstBinding(b RuntimeValidationProofRequirementBinding) error {
 	if s.ProtocolRef != RuntimeValidationInputReviewProtocol || len(s.Files) == 0 || len(s.Files) > RuntimeValidationInputReviewMaxFiles {
 		return fmt.Errorf("validation input review requires a supported protocol and complete bounded inputs")
+	}
+	if (s.ScopeContractRef == "") != (s.ScopeRequirements == "") || len(s.ScopeContractRef) > 512 || len(s.ScopeRequirements) > RuntimeValidationInputReviewMaxScopeBytes ||
+		strings.TrimSpace(s.ScopeContractRef) != s.ScopeContractRef || strings.TrimSpace(s.ScopeRequirements) != s.ScopeRequirements || !utf8.ValidString(s.ScopeContractRef+s.ScopeRequirements) ||
+		strings.IndexFunc(s.ScopeContractRef+s.ScopeRequirements, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
+		return fmt.Errorf("validation input review requires a complete bounded owner scope contract")
 	}
 	bytes := 0
 	previous := ""

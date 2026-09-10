@@ -32,7 +32,7 @@ func shellValidationInputCompileFact(output RuntimeCommandResult, request Runtim
 		return nil, nil
 	}
 	check := request.ValidationCheckAttestations[0]
-	if check.ObservationProtocolRef != shellGoEntrypointObservationProtocolRef || check.SupplementalNativeCheckRef != shellSupplementCheckRef(check.NativeCheckRef) {
+	if !shellEntrypointObservationProtocol(check.ObservationProtocolRef) || check.SupplementalNativeCheckRef != shellSupplementCheckRef(check.NativeCheckRef) {
 		return nil, nil
 	}
 	target := shellSupplementTargetRef(check.NativeCheckRef)

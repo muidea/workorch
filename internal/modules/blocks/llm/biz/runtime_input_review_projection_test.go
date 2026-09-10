@@ -80,3 +80,43 @@ func TestRuntimeInputReviewExactSourceAndInformationStayInC3(t *testing.T) {
 		t.Fatal("truncated review context admitted")
 	}
 }
+
+func TestRuntimeInputReviewOwnerScopeIsCompleteAndOnlyChangesC3(t *testing.T) {
+	request := runtimeInputReviewProviderFixture(t)
+	legacy, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := &request.SemanticManifest.OwnerCatalogs[0]
+	binding := &catalog.ValidationSurfaces[0].ProofRequirementBindings[0]
+	binding.InputReview.ScopeContractRef, binding.InputReview.ScopeRequirements = "owner/isolated-input/v1", "This input does not execute the full project suite by implication."
+	binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, *binding)
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
+	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	current, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i <= 2; i++ {
+		if legacy.PromptContext.Sections[i].Content != current.PromptContext.Sections[i].Content {
+			t.Fatalf("scope changed stable C%d", i)
+		}
+	}
+	if legacy.ContextBudget.CachePlan.StablePrefixHash != current.ContextBudget.CachePlan.StablePrefixHash {
+		t.Fatal("scope changed stable cache prefix")
+	}
+	var projection runtimeSemanticAuthorityProjection
+	if err := json.Unmarshal([]byte(current.PromptContext.Sections[3].Content), &projection); err != nil {
+		t.Fatal(err)
+	}
+	review := &projection.Manifest.ProofObligations[0].ValidationProofRequirement.InputReviews[0]
+	if review.ScopeContractRef != binding.InputReview.ScopeContractRef || review.ScopeRequirements != binding.InputReview.ScopeRequirements || !strings.Contains(projection.OutputInstruction, "scopeContractRef/scopeRequirements") {
+		t.Fatal("complete owner execution scope missing from review")
+	}
+	review.ScopeRequirements = ""
+	corrupt, _ := json.Marshal(projection)
+	current.PromptContext.Sections[3].Content = string(corrupt)
+	if validateRuntimeSemanticContextIntegrity(request.SemanticContext, request.SemanticManifest, 0, nil, nil, current.ContextBudget, current.PromptContext) == nil {
+		t.Fatal("truncated execution scope admitted")
+	}
+}

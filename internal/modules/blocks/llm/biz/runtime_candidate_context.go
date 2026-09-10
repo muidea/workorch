@@ -288,7 +288,7 @@ func runtimeCandidateValidationProofPreparations(focus runtimecontract.CoverageF
 					ret = append(ret, runtimeSemanticNativeCheckAttestationProjection{
 						ValidationRecipeID: preparation.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
 						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
-						TargetRef: preparation.TargetRef,
+						TargetRef: preparation.TargetRef, ContentContractRef: preparation.ContentContractRef, ContentRequirements: preparation.ContentRequirements,
 					})
 				}
 			}

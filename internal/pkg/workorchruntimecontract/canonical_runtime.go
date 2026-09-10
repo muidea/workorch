@@ -1261,6 +1261,10 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 				writeHashString(h, "proof-preparation-original-diagnostic/v1")
 				writeHashString(h, StableRuntimeFeedbackHash(RuntimeFeedback{OriginalDiagnostic: preparation.OriginalDiagnostic}))
 			}
+			if preparation.ContentContractRef != "" || preparation.ContentRequirements != "" {
+				writeHashString(h, "proof-preparation-content-contract/v1")
+				writeHashStrings(h, []string{preparation.ContentContractRef, preparation.ContentRequirements})
+			}
 		}
 		writeRuntimeValidationProofUnavailabilitiesHash(h, surface.ProofRequirementUnavailabilities)
 		writeHashString(h, string(surface.EffectScope))

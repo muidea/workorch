@@ -128,6 +128,38 @@ func TestValidationInputReviewSubjectExactPreimageAndClone(t *testing.T) {
 	}
 }
 
+func TestValidationInputReviewScopeIsOptionalBoundedAndChangesReportIdentity(t *testing.T) {
+	_, document, _, binding := semanticInputReviewFixture(t)
+	legacy, _ := json.Marshal(binding.InputReview)
+	oldHash := binding.InputReview.Hash
+	if strings.Contains(string(legacy), "ScopeContractRef") || strings.Contains(string(legacy), "ScopeRequirements") {
+		t.Fatal("legacy review gained a scope contract")
+	}
+	binding.InputReview.ScopeContractRef, binding.InputReview.ScopeRequirements = "owner/exact-scope/v1", "Executes the exact bound input, not the full project suite."
+	if binding.InputReview.ValidateAgainstBinding(binding) == nil {
+		t.Fatal("scope change retained old subject identity")
+	}
+	binding.InputReview.Hash = StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, binding)
+	if binding.InputReview.Hash == oldHash || binding.InputReview.ValidateAgainstBinding(binding) != nil {
+		t.Fatal("scope contract not hash bound")
+	}
+	if document.Proposals[1].ValidationInputReview.ValidateAgainstBinding(binding) == nil {
+		t.Fatal("old review authorized another execution scope")
+	}
+	for _, scope := range [][2]string{{"ref", ""}, {"", "unbound"}, {"ref", strings.Repeat("x", RuntimeValidationInputReviewMaxScopeBytes+1)}, {"ref", " control\n"}, {"ref", string([]byte{0xff})}} {
+		bad := binding.InputReview.Clone()
+		bad.ScopeContractRef, bad.ScopeRequirements = scope[0], scope[1]
+		bad.Hash = StableRuntimeValidationInputReviewSubjectHash(bad, binding)
+		if bad.ValidateAgainstBinding(binding) == nil {
+			t.Fatal("invalid scope contract accepted")
+		}
+	}
+	var restored RuntimeValidationInputReviewSubject
+	if err := json.Unmarshal(legacy, &restored); err != nil || StableRuntimeValidationInputReviewSubjectHash(restored, binding) != oldHash {
+		t.Fatal("old review hash changed across reload")
+	}
+}
+
 func TestValidationInputReviewPayloadHasNoAuthorityEscape(t *testing.T) {
 	_, document, _, _ := semanticInputReviewFixture(t)
 	raw, err := json.Marshal(document.Proposals[1].ValidationInputReview)

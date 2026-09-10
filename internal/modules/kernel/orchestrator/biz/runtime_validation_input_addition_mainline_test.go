@@ -950,7 +950,7 @@ func validationInputAdditionMainlineSemanticDocument(command llmevents.RequestRu
 				if repair := obligation.ValidationFailureRepair; repair != nil {
 					proposal.OperationKind = runtimecontract.StepKindFileWrite
 					proposal.Target = runtimecontract.RuntimeOperationTargetAuthorization{Policy: repair.RepairTargetPolicy, OwnerSelectorRefs: []string{repair.RepairOperationTargetSelectorRef}, ProspectiveConstraintRefs: repair.RepairConstraintRefs, ProspectiveTargetRefs: []string{repair.InputAddition.TargetRef}}
-				} else if coverageID == "cwi-2" {
+				} else if obligation.ValidationProofRequirement != nil {
 					proposal.OwnerModuleID, proposal.OperationKind = runtimecontract.RuntimeModuleShell, runtimecontract.RuntimeBlockKindManagedValidationSession
 					proposal.RequiredEvidenceKinds, proposal.RequiredEffectScopes = []string{runtimecontract.EvidenceKindValidation}, []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession}
 					proposal.ValidationRecipeID = "behavior-validation"

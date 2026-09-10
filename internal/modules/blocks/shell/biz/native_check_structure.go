@@ -47,6 +47,18 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 		return shellNativeCheckInspection{Code: "native_check_input_unavailable"}
 	}
 	defer sourceRoot.Close()
+	isolatedPackage, scopeErr := shellIsolatedValidationPackage(attestations)
+	if scopeErr != nil {
+		return shellNativeCheckInspection{Code: "validation_input_review_mapping_unsupported"}
+	}
+	if isolatedPackage != "" {
+		if code := shellIsolatedInputScopeCode(targetRefs, isolatedPackage); code != "" {
+			return shellNativeCheckInspection{Code: code}
+		}
+		if code := shellIsolatedInputSourceSetCode(sourceRoot, targetRefs, isolatedPackage); code != "" {
+			return shellNativeCheckInspection{Code: code}
+		}
+	}
 	functions := make(map[string][]shellNativeCheckFunction)
 	entries := make(map[string][]shellNativeCheckFunction)
 	// Preserve every observed native input, including ambiguous/rejected
@@ -63,6 +75,9 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 	var invalidSources []string
 	fileCount, sourceBytes := 0, int64(0)
 	for _, ref := range normalizeShellStrings(targetRefs) {
+		if isolatedPackage != "" && !strings.HasPrefix(ref, isolatedPackage+"/") {
+			continue
+		}
 		if !strings.HasSuffix(ref, ".go") || managedValidationSandboxPathExcluded(ref) {
 			continue
 		}
@@ -100,16 +115,25 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 			continue
 		}
 		for _, check := range attestations {
+			if isolatedPackage != "" {
+				native := check.NativeCheckRef
+				if ref == shellSupplementTargetRef(native) && check.SupplementalNativeCheckRef != "" {
+					native = check.SupplementalNativeCheckRef
+				}
+				if !shellIsolatedInputDeclarations(file, native) {
+					return shellNativeCheckInspection{Code: "native_check_versioned_contract_invalid", CheckRef: native, TargetRefs: []string{ref}}
+				}
+			}
 			if shellVersionedNativeCheck(check) && ref == shellVersionedNativeCheckTarget(check.NativeCheckRef) && !shellEntrypointSupplementDeclarations(file, check.NativeCheckRef) {
 				return shellNativeCheckInspection{Code: "native_check_versioned_contract_invalid", CheckRef: check.NativeCheckRef, TargetRefs: []string{ref}}
 			}
-			if check.ObservationProtocolRef == shellGoEntrypointObservationProtocolRef && strings.HasSuffix(ref, "_test.go") && shellNativeRunnerOverride(file) {
+			if shellEntrypointObservationProtocol(check.ObservationProtocolRef) && strings.HasSuffix(ref, "_test.go") && shellNativeRunnerOverride(file) {
 				return shellNativeCheckInspection{Code: "native_check_runner_override", CheckRef: check.NativeCheckRef, TargetRefs: []string{ref}}
 			}
 			if check.SupplementalNativeCheckRef == "" || ref != shellSupplementTargetRef(check.NativeCheckRef) {
 				continue
 			}
-			if check.ObservationProtocolRef == shellGoEntrypointObservationProtocolRef {
+			if shellEntrypointObservationProtocol(check.ObservationProtocolRef) {
 				if !shellEntrypointSupplementDeclarations(file, check.SupplementalNativeCheckRef) {
 					return shellNativeCheckInspection{Code: "native_check_supplement_contract_invalid", CheckRef: check.SupplementalNativeCheckRef, TargetRefs: []string{ref}}
 				}
@@ -153,6 +177,9 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 			}
 		}
 	}
+	if isolatedPackage != "" && len(invalidSources) != 0 {
+		return shellNativeCheckInspection{Code: "native_check_source_invalid", TargetRefs: invalidSources}
+	}
 	for _, raw := range shellFlattenNativeCheckAttestations(attestations) {
 		if !shellNativeObservationProtocolSupported(raw.ObservationProtocolRef) || raw.NativeCheckRef == "" {
 			return shellNativeCheckInspection{Code: "native_check_protocol_unsupported", CheckRef: raw.NativeCheckRef}
@@ -172,10 +199,10 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 			return shellNativeCheckInspection{Code: "native_check_ambiguous", CheckRef: raw.NativeCheckRef, TargetRefs: normalizeShellStrings(refs)}
 		}
 		entry := matches[0]
-		if shellVersionedNativeCheck(raw) && entry.targetRef != shellVersionedNativeCheckTarget(raw.NativeCheckRef) {
+		if shellVersionedNativeCheck(raw) && !strings.HasSuffix(raw.NativeCheckRef, "_Behavior") && entry.targetRef != shellVersionedNativeCheckTarget(raw.NativeCheckRef) {
 			return shellNativeCheckInspection{Code: "native_check_versioned_out_of_scope", CheckRef: raw.NativeCheckRef, TargetRefs: []string{entry.targetRef}}
 		}
-		if (raw.ObservationProtocolRef == shellGoSupplementObservationProtocolRef || raw.ObservationProtocolRef == shellGoEntrypointObservationProtocolRef) && strings.HasSuffix(raw.NativeCheckRef, "_Behavior") && entry.targetRef != shellSupplementTargetRef(strings.TrimSuffix(raw.NativeCheckRef, "_Behavior")) {
+		if (raw.ObservationProtocolRef == shellGoSupplementObservationProtocolRef || shellEntrypointObservationProtocol(raw.ObservationProtocolRef)) && strings.HasSuffix(raw.NativeCheckRef, "_Behavior") && entry.targetRef != shellSupplementTargetRef(strings.TrimSuffix(raw.NativeCheckRef, "_Behavior")) {
 			return shellNativeCheckInspection{Code: "native_check_supplement_out_of_scope", CheckRef: raw.NativeCheckRef, TargetRefs: []string{entry.targetRef}}
 		}
 		parameters := nativeCheckTestingParameters(entry.decl.Type, entry.testingAlias)

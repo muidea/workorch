@@ -24,6 +24,13 @@ var preEntrypointTemplateJSON []byte
 //go:embed testdata/software-dev-template-52643362.json
 var preInputRepairTemplateJSON []byte
 
+//go:embed testdata/software-dev-template-dfa5c1ad.json
+var preIsolatedInputTemplateJSON []byte
+
+func TestIsolatedInputTemplateUpgradeReopensReviewedPreviousDefault(t *testing.T) {
+	assertReviewedTemplateUpgrade(t, preIsolatedInputTemplateJSON, "dfa5c1ad")
+}
+
 func TestEntrypointTemplateUpgradeReopensReviewedPreviousDefault(t *testing.T) {
 	assertReviewedTemplateUpgrade(t, preEntrypointTemplateJSON, "93a5d468")
 }

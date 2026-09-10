@@ -110,7 +110,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 			return finalizeShellResult(output, err)
 		}
 	}
-	behaviorArgs, behaviorPath, behaviorErr := prepareShellBehaviorObservation(request, execArgs)
+	behaviorArgs, behaviorPath, behaviorErr := prepareShellBehaviorObservation(request, execArgs, executionDirectory)
 	processBehaviorPath := ""
 	var entrypointSources map[string]string
 	if behaviorErr == nil {
@@ -142,7 +142,7 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 	if shellRequiresWorkspaceBehavior(request) {
 		cmd.Env = shellBehaviorEnvironment(cmd.Env)
 	}
-	cmd.Env = shellProcessBehaviorEnvironment(cmd.Env, processBehaviorPath)
+	cmd.Env = shellProcessBehaviorEnvironment(cmd.Env, processBehaviorPath, behaviorArgs)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {

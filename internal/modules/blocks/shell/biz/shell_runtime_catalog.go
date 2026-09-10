@@ -118,6 +118,8 @@ func (a *RuntimeAdapter) runtimeAdmissibilityPolicyRevision() string {
 	_, _ = fmt.Fprintf(h, "entrypoint-contract=%s;entrypoint-requirements=%s;protocol=%s;process-files=%d;", shellEntrypointContentContractRef, shellEntrypointContentRequirements, shellGoEntrypointObservationProtocolRef, maxShellProcessCoverageFiles)
 	_, _ = fmt.Fprintf(h, "failure-details=%s;failure-requirements=%s;", runtimemodel.RuntimeValidationFailureDetailProtocolV2, shellAssertionFeedbackRequirements)
 	_, _ = fmt.Fprintf(h, "versioned-input=%s;", modulecommon.ValidationRecipeAdapterVersionedEntrypoint)
+	_, _ = fmt.Fprintf(h, "isolated-input=%s;protocol=%s;contract=%s;requirements=%s;", modulecommon.ValidationRecipeAdapterIsolatedEntrypoint, shellGoIsolatedEntrypointObservationProtocolRef, shellIsolatedInputContentContractRef, shellIsolatedInputContentRequirements)
+	_, _ = fmt.Fprintf(h, "isolated-review-scope=%s;requirements=%s;", shellIsolatedReviewScopeContractRef, shellIsolatedReviewScopeRequirements)
 	_, _ = fmt.Fprint(h, "input-protection=shell/native-input-targets/v1;")
 	_, _ = fmt.Fprintf(h, "input-review=%s;files=%d;bytes=%d;", runtimemodel.RuntimeValidationInputReviewProtocol, runtimemodel.RuntimeValidationInputReviewMaxFiles, runtimemodel.RuntimeValidationInputReviewMaxBytes)
 	for _, key := range keys {
