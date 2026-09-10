@@ -688,6 +688,9 @@ func validateAcceptedCandidateDispatchBindings(a RuntimeAggregate) error {
 }
 
 func validateRuntimeAggregateGovernanceLedgers(a RuntimeAggregate) error {
+	if err := validateRuntimeInputReviewAggregate(a); err != nil {
+		return err
+	}
 	if err := runtimecontract.ValidateRuntimeGovernanceResolutionRecords(a.GovernanceResolutions); err != nil {
 		return err
 	}

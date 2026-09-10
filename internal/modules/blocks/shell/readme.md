@@ -6,57 +6,6 @@ Type: capability-block-contract
 
 Last Verified: 2026-09-04
 
-## Versioned validation input boundary
-
-The original Goal/DoD remains the acceptance baseline. Added checks may only
-refine or supplement it consistently and conjunctively; a new input version,
-approval, reference repository or passing test cannot waive an original criterion.
-An old test implementation is not itself the criterion: changing it still requires
-a criterion-preserving contract, not merely a failing result. Identity isolation
-alone grants no replacement authority. The reserved v3 adapter below remains
-unavailable and is not a way to bypass an original failed check.
-
-`shell/project-native-validation/v3` reserves an independent native-check identity
-(`_InputV3`) and exact `workorch_validation/v3/` input path for a newly sealed
-activation. It does not rename, delete or select older checks, and cannot change
-an already sealed v1/v2 activation, binding or receipt. The immutable Definition
-requirement/check identity is unchanged. A single-input contract cannot advertise
-partial support for a multi-check all-of requirement.
-
-Structural readiness and instrumented execution are necessary but not sufficient
-semantic calibration. An input that merely has a reachable assertion, starts a
-delivery process or passes its own tests cannot authorize replacement of the
-previous verification input. Without an independent calibration contract, v3
-publishes `validation_input_calibration_unavailable`, with no proof binding or
-acquisition preparation. The built-in software-development template remains on
-its existing adapter. Capability tests of version isolation and positive/negative
-execution are not release-grade semantic calibration of arbitrary Goal/DoD.
-
-Shell reports only facts. Orchestrator's existing owner-private SM-2/3/4 events
-remain responsible for binding, credit, bounded failure and delivery; there is no
-calibration state machine in the template, File owner, Soul or projection.
-
-An external reference repository is optional supporting material, not a prerequisite
-for ordinary workspace execution. Neither its CI result nor process coverage proves
-that an arbitrary verification input preserves the workspace's Goal/DoD semantics.
-
-## Validation failure attribution
-
-A behavior-protocol test failure retains its original test-failure class, exit code
-and check failures. Only complete, bounded observations of workspace implementation
-execution can propose implementation repair targets. With no such observations, or
-truncated output, Shell publishes `validation_test_failure_unattributed` with
-`validation_output` and no targets, input addition or input repair authorization.
-This means attribution is unavailable, not that the deliverable or its tests are
-known to be defective. Ordinary `test_failed` implementation repair must not match
-this fact. Environment, dependency, build and input-compile diagnostics retain their
-existing precedence; legacy protocols retain their original interpretation.
-
-Shell does not choose a successor, repair route or terminal state. The existing
-Orchestrator SM-2 private receipt event resolves the exact sealed profile route;
-SM-3 dispatch and SM-4 delivery/recovery remain unchanged. Result and projections
-consume the judged result without reinterpreting this owner diagnostic.
-
 ## 功能范围与边界
 
 `blocks/shell` 是本地 `shell/command` 与 `validation/managed_session` 的 capability owner。
@@ -131,6 +80,100 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
   错误实现、静态标记、删除断言、whole/subcheck skip、依赖缺失与 A 失败/B 修改。删除断言由既有 owner declaration
   prerequisite 拒绝；父检查 PASS/子检查 skip 由 native observation 拒绝。此测试只证明该 reference fixture 与协议，不能
   宣称 AST 中出现断言即可证明任意 Goal/DoD，也不构成 DCE producer evidence。
+
+
+### Versioned validation input boundary
+
+The original Goal/DoD remains the acceptance baseline. Added checks may only
+refine or supplement it consistently and conjunctively; a new input version,
+approval, reference repository or passing test cannot waive an original criterion.
+An old test implementation is not itself the criterion: changing it still requires
+a criterion-preserving contract, not merely a failing result. Identity isolation
+alone grants no replacement authority. The v3 adapter below requires independent
+input review and is not a way to bypass an original failed criterion.
+
+`shell/project-native-validation/v3` declares an independent native-check identity
+(`_InputV3`) and exact `workorch_validation/v3/` input path for a newly sealed
+activation. It does not rename, delete or select older checks, and cannot change
+an already sealed v1/v2 activation, binding or receipt. The immutable Definition
+requirement/check identity is unchanged. A single-input contract cannot advertise
+partial support for a multi-check all-of requirement.
+
+Structural readiness and instrumented execution are necessary but not sufficient
+semantic calibration. An input that merely has a reachable assertion, starts a
+delivery process or passes its own tests cannot authorize replacement of the
+previous verification input. A ready v3 owner binding carries a mandatory exact
+`InputReview` subject: the complete versioned input namespace (helpers/fixtures
+included) and present Go module/workspace definitions, with content hashes and
+the immutable requirement/native mapping. The current envelope is 16 files and
+64 KiB per subject; unavailable/invalid-UTF-8/symlink/over-capacity inputs produce an
+explicit `validation_input_review_*` unavailability, never truncated review.
+Unrepresentable multi-check mappings are also explicit unavailability. Missing
+inputs may use the existing exact create-only preparation; creation is not review
+or validation credit. Freshness dependencies retain the bytes actually reviewed,
+not a later re-read that might hide an intervening edit.
+
+Only a complete consistent LLM report can pass Orchestrator's subsequent binding
+gate, and actual validation/assessment remain required. The built-in software
+development template keeps its existing adapter; capability and scripted-provider
+tests do not constitute release-grade semantic calibration of arbitrary Goal/DoD.
+
+Shell reports only facts. Orchestrator's existing owner-private SM-2/3/4 events
+remain responsible for binding, credit, bounded failure and delivery; there is no
+calibration state machine in the template, File owner, Soul or projection.
+
+An external reference repository is optional supporting material, not a prerequisite
+for ordinary workspace execution. Neither its CI result nor process coverage proves
+that an arbitrary verification input preserves the workspace's Goal/DoD semantics.
+
+#### Executable input-maintenance contracts
+
+Shell reports observed validation inputs through each surface's typed
+`InputTargetOwnerModuleID + InputTargetRefs`: existing files in its private
+`workorch_validation/` namespace, plus native entry files identified by the current
+requirement inspection. Namespace inputs remain listed before their proof batch;
+ambiguous or non-ready inputs do not become ordinary implementation targets.
+Collection is bounded, read-only and part of the catalog identity. It neither
+authorizes an edit nor manages File/Runtime state. Orchestrator compiles these facts
+into sealed mutation exclusions; File consumes the generic target contract without
+recognizing the namespace. `biz/validation_input_protection_test.go` verifies these
+facts separately from readiness and checks that repeated queries preserve bytes.
+
+| Input change | Required proof | Current authority boundary |
+| --- | --- | --- |
+| Conjunctive addition | Exact original check mapping, fresh supplemental identity, declared content contract and resource-owner feasibility | Original and supplemental checks remain mandatory; creation grants no validation credit |
+| Criterion-preserving symbol repair | Owner-observed compiler location, bounded exact symbol delta and matching before/after hashes | Only the attested input delta is writable; original and supplemental checks remain mandatory |
+| Different validation implementation or observation path | LLM consistency review against the original criteria, bound to exact input content, followed by owner execution facts | v3 supplies mandatory review subjects; only Orchestrator can seal a consistent report after the independent request, with no waiver or review credit |
+
+The last row cannot borrow either of the first two authorizations. In particular,
+an unattributed test failure does not establish an input defect, and a compatible
+check name does not establish that its assertions represent the original criteria.
+Existing governance approval alone supplies neither fact. The consistency judgment
+belongs to a bounded LLM review, not to Shell's syntax or execution observer. A
+consistent review is not an execution pass; a conflicting review cannot be
+overridden by approval. An inconclusive completed review requires a clarification
+ticket via Orchestrator and the Decision owner. Shell neither creates that ticket
+nor advances review/binding state. Ticket information is re-reviewed through the
+same semantic transaction, not consumed by Shell as permission or acceptance.
+`biz/validation_input_review_test.go` covers bounded exact source and freshness;
+the Orchestrator mainline tests exercise real owner execution and ticket recovery.
+
+### Validation failure attribution
+
+A behavior-protocol test failure retains its original test-failure class, exit code
+and check failures. Only complete, bounded observations of workspace implementation
+execution can propose implementation repair targets. With no such observations, or
+truncated output, Shell publishes `validation_test_failure_unattributed` with
+`validation_output` and no targets, input addition or input repair authorization.
+This means attribution is unavailable, not that the deliverable or its tests are
+known to be defective. Ordinary `test_failed` implementation repair must not match
+this fact. Environment, dependency, build and input-compile diagnostics retain their
+existing precedence; legacy protocols retain their original interpretation.
+
+Shell does not choose a successor, repair route or terminal state. The existing
+Orchestrator SM-2 private receipt event resolves the exact sealed profile route;
+SM-3 dispatch and SM-4 delivery/recovery remain unchanged. Result and projections
+consume the judged result without reinterpreting this owner diagnostic.
 
 ## 能力验收
 

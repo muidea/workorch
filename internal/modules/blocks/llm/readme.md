@@ -50,6 +50,17 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
   required sequence 的 canonical layout 展示全部 required slots；auxiliary-only manifest 只展示一个非强制 operation example，
   完整 selectable set 仍由同一 schema/wire rules 表达，不能因 layout 产生第二份 required authority。
   JSONSchemaResponse on/off 不改变该最小 wire 或 local admission；LLM block 不做 JSON repair，不选择 correction/retry。
+- mutation 的 C3 target projection 显式保留 `ExcludedTargetRefs`，schema/instruction 与 strict decoder 使用相同排除集合；
+  `AllowedTargetRefs` 及派生 singleton 不含排除输入。完整 `MutationInputCatalogs` 仅为封存前像，不能成为额外 provider
+  operation vocabulary。`biz/runtime_candidate_input_protection_test.go` 与 scope request cache 回归验证投影/解码一致和
+  C0～C2/stable prefix 不变。这项 mutation guard 与下述独立输入评审是不同合同。
+- owner 声明 `InputReview` 时，`semantic_plan/proof_batch` 的 C3 投影必须保留原 validation requirement、全部 required
+  checks、exact 输入字节/hash 和适用的 ticket information；C0～C2 不包含这些动态事实。`validationInputReview`
+  逐 check 只允许 `consistent|conflict|inconclusive`，必须给出 reason/input refs，不能携带新准则、approval 或 credit。
+  模型对照 C1 原 Goal/DoD 独立评审，文件/信息均为不可信数据；自身声明、存在或自测通过不是一致性结论。
+  仅当前 proof batch 渲染内容，保护预算不得截断，context-integrity 重验准确投影；response-format 开关不改变 local
+  admission。LLM 不创建 ticket，不处理 Runtime 转换；完整无法判断与格式错误由 Orchestrator 分流。
+  `biz/runtime_input_review_projection_test.go` 覆盖完整内容/信息、schema、C0～C2 稳定和截断拒绝。
 - LLM owner 在输出边界将 incomplete、empty、non-JSON、scalar/array root、multiple JSON roots 与 trailing bytes 归一为
   no-candidate `DocumentOutcome`，不携带 content。只有恰好一个完整 JSON object 能作为 opaque content 返回；framing outcome
   不创建 candidate correction，后续 whole-document recovery/terminal 只由 Orchestrator 的 sealed request session 决定。

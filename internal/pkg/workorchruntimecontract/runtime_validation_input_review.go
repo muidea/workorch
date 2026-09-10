@@ -1,0 +1,316 @@
+package workorchruntimecontract
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"reflect"
+	"sort"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/muidea/workorch/internal/pkg/common"
+)
+
+const (
+	RuntimeValidationInputReviewProtocol          = "validation/input-consistency/v1"
+	RuntimeValidationInputReviewMaxFiles          = 16
+	RuntimeValidationInputReviewMaxBytes          = 64 * 1024
+	RuntimeValidationInputReviewMaxReasonBytes    = 2048
+	RuntimeValidationInputReviewInformationAction = "provide_validation_input_facts"
+	RuntimeValidationInputReviewFailureClass      = "validation_input_review"
+)
+
+// These are provider observations, never Runtime dispositions or transitions.
+const (
+	RuntimeValidationInputConsistent   = "consistent"
+	RuntimeValidationInputConflict     = "conflict"
+	RuntimeValidationInputInconclusive = "inconclusive"
+)
+
+// RuntimeValidationInputReviewSubject is a bounded, exact owner observation.
+// Its content is input to an independent review, not a provider-generated
+// assertion of compliance. The enclosing owner binding seals the immutable
+// requirement, native checks, recipe and catalog revision.
+type RuntimeValidationInputReviewSubject struct {
+	ProtocolRef string
+	Hash        string
+	Files       []RuntimeValidationInputReviewFile
+}
+
+type RuntimeValidationInputReviewFile struct {
+	TargetRef   string `json:"targetRef"`
+	ContentHash string `json:"contentHash"`
+	Content     string `json:"content"`
+}
+
+// RuntimeValidationInputReview is deliberately a closed per-check report.
+// There is no overall approval bit, alternative criterion or replacement DoD.
+type RuntimeValidationInputReview struct {
+	SubjectHash string                              `json:"subjectHash"`
+	Checks      []RuntimeValidationInputCheckReview `json:"checks"`
+}
+
+type RuntimeValidationInputCheckReview struct {
+	RequiredCheckRef string   `json:"requiredCheckRef"`
+	Conclusion       string   `json:"conclusion"`
+	Reason           string   `json:"reason"`
+	InputTargetRefs  []string `json:"inputTargetRefs"`
+}
+
+// Information is a Decision-owner resolution fact, not a criterion, a
+// consistency verdict or an execution grant. The next manifest may include
+// it only for the same exact owner input subject.
+type RuntimeValidationInputReviewInformation struct {
+	SubjectHash  string              `json:"subjectHash"`
+	ReviewRef    string              `json:"reviewRef"`
+	TicketID     common.TicketID     `json:"ticketId"`
+	ResolutionID common.ResolutionID `json:"resolutionId"`
+	Summary      string              `json:"summary"`
+}
+
+func (i RuntimeValidationInputReviewInformation) Validate() error {
+	if i.SubjectHash == "" || i.ReviewRef == "" || i.TicketID == "" || i.ResolutionID == "" ||
+		i.Summary == "" || strings.TrimSpace(i.Summary) != i.Summary || !utf8.ValidString(i.Summary) || len(i.Summary) > RuntimeValidationInputReviewMaxReasonBytes {
+		return fmt.Errorf("validation input review information requires exact source identity and bounded facts")
+	}
+	return nil
+}
+
+func RuntimeSemanticInputReviewInformationForCatalogs(values []RuntimeValidationInputReviewInformation, catalogs []RuntimeOperationAdmissibility) []RuntimeValidationInputReviewInformation {
+	subjects := make(map[string]bool)
+	for _, catalog := range catalogs {
+		for _, surface := range catalog.ValidationSurfaces {
+			for _, binding := range surface.ProofRequirementBindings {
+				if binding.InputReview != nil {
+					subjects[binding.InputReview.Hash] = true
+				}
+			}
+		}
+	}
+	var ret []RuntimeValidationInputReviewInformation
+	for _, value := range values {
+		if subjects[value.SubjectHash] {
+			ret = append(ret, value)
+		}
+	}
+	sort.Slice(ret, func(i, j int) bool { return ret[i].SubjectHash < ret[j].SubjectHash })
+	return ret
+}
+
+func validateRuntimeSemanticInputReviewInformation(m RuntimeSemanticPlanManifest) error {
+	if len(m.InputReviewInformation) == 0 {
+		return nil
+	}
+	if !reflect.DeepEqual(m.InputReviewInformation, RuntimeSemanticInputReviewInformationForCatalogs(m.InputReviewInformation, m.OwnerCatalogs)) {
+		return fmt.Errorf("semantic input review information must bind current subjects in canonical order")
+	}
+	previous := ""
+	for _, value := range m.InputReviewInformation {
+		if err := value.Validate(); err != nil {
+			return err
+		}
+		if value.SubjectHash <= previous {
+			return fmt.Errorf("semantic input review permits only one information resolution per exact subject")
+		}
+		previous = value.SubjectHash
+	}
+	return nil
+}
+
+func writeRuntimeSemanticInputReviewInformationHash(h interface{ Write([]byte) (int, error) }, values []RuntimeValidationInputReviewInformation) {
+	if len(values) == 0 {
+		return
+	}
+	writeHashString(h, "runtime-input-review-information/v1")
+	for _, value := range values {
+		writeHashString(h, value.SubjectHash)
+		writeHashString(h, value.ReviewRef)
+		writeHashString(h, string(value.TicketID))
+		writeHashString(h, string(value.ResolutionID))
+		writeHashString(h, value.Summary)
+	}
+}
+
+func (s RuntimeValidationInputReviewSubject) Clone() RuntimeValidationInputReviewSubject {
+	s.Files = append([]RuntimeValidationInputReviewFile(nil), s.Files...)
+	return s
+}
+
+func (r RuntimeValidationInputReview) Clone() RuntimeValidationInputReview {
+	r.Checks = append([]RuntimeValidationInputCheckReview(nil), r.Checks...)
+	for i := range r.Checks {
+		r.Checks[i].InputTargetRefs = append([]string(nil), r.Checks[i].InputTargetRefs...)
+	}
+	return r
+}
+
+func RuntimeValidationInputContentHash(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
+}
+
+// StableRuntimeValidationInputReviewSubjectHash also binds the complete native
+// mapping. Changing a required check, supplement, recipe or criterion identity
+// invalidates a report even if every input byte stayed unchanged.
+func StableRuntimeValidationInputReviewSubjectHash(s RuntimeValidationInputReviewSubject, b RuntimeValidationProofRequirementBinding) string {
+	h := sha256.New()
+	writeHashString(h, s.ProtocolRef)
+	writeHashString(h, b.RequirementHash)
+	writeHashString(h, b.DefinitionRevision)
+	writeHashString(h, string(b.CoverageWorkItemID))
+	writeHashString(h, b.DeclarationRef)
+	writeHashString(h, b.ValidationRecipeID)
+	writeHashStrings(h, b.RequiredCheckRefs)
+	for _, check := range b.CheckAttestations {
+		writeHashString(h, check.RequiredCheckRef)
+		writeHashString(h, check.ObservationProtocolRef)
+		writeHashString(h, check.NativeCheckRef)
+		writeHashString(h, check.SupplementalNativeCheckRef)
+	}
+	for _, file := range s.Files {
+		writeHashString(h, file.TargetRef)
+		writeHashString(h, file.ContentHash)
+	}
+	return "runtime-input-review-" + hex.EncodeToString(h.Sum(nil))
+}
+
+func (s RuntimeValidationInputReviewSubject) ValidateAgainstBinding(b RuntimeValidationProofRequirementBinding) error {
+	if s.ProtocolRef != RuntimeValidationInputReviewProtocol || len(s.Files) == 0 || len(s.Files) > RuntimeValidationInputReviewMaxFiles {
+		return fmt.Errorf("validation input review requires a supported protocol and complete bounded inputs")
+	}
+	bytes := 0
+	previous := ""
+	for _, file := range s.Files {
+		if !runtimeProspectiveTargetRefValid(file.TargetRef) || file.TargetRef != strings.TrimSpace(file.TargetRef) || file.TargetRef <= previous ||
+			!utf8.ValidString(file.Content) || file.ContentHash != RuntimeValidationInputContentHash(file.Content) {
+			return fmt.Errorf("validation input review requires canonical unique targets and exact complete content")
+		}
+		bytes += len(file.Content)
+		if bytes > RuntimeValidationInputReviewMaxBytes {
+			return fmt.Errorf("validation input review input capacity exceeded")
+		}
+		previous = file.TargetRef
+	}
+	if s.Hash != StableRuntimeValidationInputReviewSubjectHash(s, b) {
+		return fmt.Errorf("validation input review subject does not bind the exact criterion and input identity")
+	}
+	return nil
+}
+
+func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidationProofRequirementBinding) error {
+	if b.InputReview == nil || r.SubjectHash != b.InputReview.Hash {
+		return fmt.Errorf("validation input review has no exact owner subject")
+	}
+	if err := b.InputReview.ValidateAgainstBinding(b); err != nil {
+		return err
+	}
+	if len(r.Checks) != len(b.RequiredCheckRefs) {
+		return fmt.Errorf("validation input review must cover every original required check")
+	}
+	seen := make(map[string]bool, len(r.Checks))
+	for _, check := range r.Checks {
+		if !containsString(b.RequiredCheckRefs, check.RequiredCheckRef) || seen[check.RequiredCheckRef] ||
+			check.Reason != strings.TrimSpace(check.Reason) || check.Reason == "" || !utf8.ValidString(check.Reason) ||
+			len(check.Reason) > RuntimeValidationInputReviewMaxReasonBytes {
+			return fmt.Errorf("validation input review has missing, duplicate or invalid per-check reasoning")
+		}
+		seen[check.RequiredCheckRef] = true
+		switch check.Conclusion {
+		case RuntimeValidationInputConsistent, RuntimeValidationInputConflict, RuntimeValidationInputInconclusive:
+		default:
+			return fmt.Errorf("validation input review has an unsupported conclusion")
+		}
+		refs := normalizeStrings(check.InputTargetRefs)
+		if len(refs) == 0 || !reflect.DeepEqual(refs, check.InputTargetRefs) {
+			return fmt.Errorf("validation input review requires canonical exact input references for every check")
+		}
+		for _, ref := range refs {
+			idx := sort.Search(len(b.InputReview.Files), func(i int) bool { return b.InputReview.Files[i].TargetRef >= ref })
+			if idx == len(b.InputReview.Files) || b.InputReview.Files[idx].TargetRef != ref {
+				return fmt.Errorf("validation input review references an unobserved input")
+			}
+		}
+	}
+	return nil
+}
+
+// RuntimeValidationInputReviewConclusion only summarizes already validated
+// facts. A conflict cannot be hidden by another check being inconclusive.
+func RuntimeValidationInputReviewConclusion(r RuntimeValidationInputReview) string {
+	ret := RuntimeValidationInputConsistent
+	for _, check := range r.Checks {
+		if check.Conclusion == RuntimeValidationInputConflict {
+			return RuntimeValidationInputConflict
+		}
+		if check.Conclusion != RuntimeValidationInputConsistent {
+			ret = RuntimeValidationInputInconclusive
+		}
+	}
+	if len(r.Checks) == 0 {
+		return ""
+	}
+	return ret
+}
+
+func writeRuntimeValidationInputReviewHash(h interface{ Write([]byte) (int, error) }, r *RuntimeValidationInputReview) {
+	if r == nil {
+		return
+	}
+	writeHashString(h, RuntimeValidationInputReviewProtocol)
+	writeHashString(h, r.SubjectHash)
+	for _, check := range r.Checks {
+		writeHashString(h, check.RequiredCheckRef)
+		writeHashString(h, check.Conclusion)
+		writeHashString(h, check.Reason)
+		writeHashStrings(h, check.InputTargetRefs)
+	}
+}
+
+func RuntimeSemanticValidationInputReviewBinding(p RuntimeSemanticProofProposal, catalogs []RuntimeOperationAdmissibility) (RuntimeValidationProofRequirementBinding, bool) {
+	if !containsString(p.RequiredEvidenceKinds, EvidenceKindValidation) {
+		return RuntimeValidationProofRequirementBinding{}, false
+	}
+	for _, catalog := range catalogs {
+		if catalog.OwnerModuleID != p.OwnerModuleID {
+			continue
+		}
+		for _, surface := range catalog.ValidationSurfaces {
+			if surface.ID != p.ValidationRecipeID || surface.OperationKind != p.OperationKind {
+				continue
+			}
+			for _, binding := range surface.ProofRequirementBindings {
+				if binding.CoverageWorkItemID == p.CoverageWorkItemID && binding.DeclarationRef == p.DeclarationRef && binding.InputReview != nil {
+					return binding.Clone(), true
+				}
+			}
+		}
+	}
+	return RuntimeValidationProofRequirementBinding{}, false
+}
+
+func validateRuntimeSemanticInputReview(p RuntimeSemanticProofProposal, catalog RuntimeOperationAdmissibility) error {
+	binding, required := RuntimeSemanticValidationInputReviewBinding(p, []RuntimeOperationAdmissibility{catalog})
+	if !required {
+		if p.ValidationInputReview != nil {
+			return fmt.Errorf("semantic proposal cannot introduce an undeclared input review")
+		}
+		return nil
+	}
+	if p.ValidationInputReview == nil {
+		return fmt.Errorf("semantic proposal requires an independent complete input review")
+	}
+	return p.ValidationInputReview.ValidateAgainstBinding(binding)
+}
+
+// ValidateRuntimeSemanticInputReviewConsistency is a binding guard, not
+// document admission. Complete conflict/inconclusive reports remain valid
+// observations, but neither can be compiled into proof authority.
+func ValidateRuntimeSemanticInputReviewConsistency(d RuntimeSemanticPlanDocument) error {
+	for _, proposal := range d.Proposals {
+		if proposal.ValidationInputReview != nil && RuntimeValidationInputReviewConclusion(*proposal.ValidationInputReview) != RuntimeValidationInputConsistent {
+			return fmt.Errorf("validation input consistency is not established for coverage %q", proposal.CoverageWorkItemID)
+		}
+	}
+	return nil
+}

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,6 +67,36 @@ type validationInputMainlineOptions struct {
 	Entrypoint        bool
 	CompileRepair     bool
 	BehaviorRepair    bool
+	InputProtection   bool
+	RepeatInputBypass bool
+}
+
+func TestDriveRuntimeOrdinaryMutationCannotWeakenValidationInputAcrossRestart(t *testing.T) {
+	var baseline int64
+	for _, cut := range []string{"uninterrupted", "after_ordinary_source_seal", "after_input_receipt"} {
+		t.Run(cut, func(t *testing.T) {
+			calls := runValidationInputAdditionMainline(t, cut, validationInputMainlineOptions{Entrypoint: true, InputProtection: true})
+			if cut == "uninterrupted" {
+				baseline = calls
+			} else if calls != baseline {
+				t.Fatalf("input exclusion restart consumed another provider call: %d != %d", calls, baseline)
+			}
+		})
+	}
+}
+
+func TestDriveRuntimeRepeatedInputWeakeningClosesWithoutEffectOrTicket(t *testing.T) {
+	var baseline int64
+	for _, cut := range []string{"uninterrupted", "after_input_exclusion_terminal"} {
+		t.Run(cut, func(t *testing.T) {
+			calls := runValidationInputAdditionMainline(t, cut, validationInputMainlineOptions{Entrypoint: true, InputProtection: true, RepeatInputBypass: true})
+			if cut == "uninterrupted" {
+				baseline = calls
+			} else if calls != baseline {
+				t.Fatalf("terminal replay consumed provider budget: %d != %d", calls, baseline)
+			}
+		})
+	}
 }
 
 func TestDriveRuntimeAssertionFeedbackRepairsBehaviorAcrossRestart(t *testing.T) {
@@ -189,6 +220,19 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 		}
 		weakInputs[path] = content
 	}
+	var protectedInput string
+	var sourceTargets []string
+	if mode.InputProtection {
+		protectedInput = filepath.ToSlash(filepath.Join("workorch_validation", entries[0].Name()))
+		if err := os.WriteFile(filepath.Join(deliverable, "support.go"), []byte("package fixture\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		sourceTargets = []string{"subject.go", "support.go", protectedInput}
+		// Reproduce an ordinary implementation scope which also happens to
+		// contain an existing native input, as a real workspace manifest does.
+		bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].TargetRefs = sourceTargets
+		bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
+	}
 	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
 	workspaces := filerepository.NewWorkspaceRepository(filepath.Join(root, "workspaces.json"))
 	results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
@@ -246,6 +290,7 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 	var inputBeforeRepair string
 	var observedInputRepair *runtimecontract.RuntimeValidationInputRepair
 	var behaviorRepairs int
+	var inputBypassAttempts int
 	llm := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llm.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls.Add(1)
@@ -259,7 +304,7 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 					}
 				}
 			}
-			response, err := validationInputAdditionMainlineSemanticResult(command)
+			response, err := validationInputAdditionMainlineSemanticResult(command, sourceTargets...)
 			if err != nil {
 				t.Errorf("semantic provider fixture: %v", err)
 				result.Set(nil, cd.NewError(cd.Unexpected, err.Error()))
@@ -273,6 +318,31 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 		var candidate runtimecontract.RuntimeCandidate
 		switch command.Decision.State {
 		case runtimecontract.ConvergenceStateNeedStateChange:
+			if mode.InputProtection && coverageID == "cwi-1" {
+				sealed := command.CandidateManifest
+				if len(sealed.MutationInputCatalogs) == 0 || len(sealed.Operations) != 1 || !reflect.DeepEqual(sealed.Operations[0].Target.ExcludedTargetRefs, []string{protectedInput}) {
+					t.Error("first ordinary operation did not consume Shell input facts")
+				}
+				if inputBypassAttempts == 0 || mode.RepeatInputBypass {
+					inputBypassAttempts++
+					oldText, newText := "return 2", "return 4"
+					if mode.RepeatInputBypass {
+						oldText, newText = "t.Fatal(", "t.Skip("
+					}
+					payload, _ := json.Marshal(map[string]any{"operations": []any{map[string]any{
+						"kind": runtimecontract.StepKindFileEdit, "targetRefs": []string{protectedInput},
+						"parameters": []any{map[string]string{"name": "oldText", "string": oldText}, map[string]string{"name": "newText", "string": newText}},
+					}}})
+					result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{
+						Transaction: command.Transaction, DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity,
+						ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload),
+					}), nil)
+					return
+				}
+				if command.CandidateAttempt != 1 || command.CandidateCorrectionObservation == nil {
+					t.Error("excluded input did not follow the bounded candidate-correction transaction")
+				}
+			}
 			operation := runtimecontract.RuntimeOperation{ID: "source-change", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"subject.go"}, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}}
 			oldText, newText := "return 2", "return 4"
 			if mode.BehaviorRepair {
@@ -366,6 +436,12 @@ func %s(t *testing.T) { assertDelivery(t) }
 	command := orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}
 	if cut != "uninterrupted" {
 		crash := &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: cut != "before_repair_seal" && cut != "before_input_repair_seal" && cut != "before_behavior_failure", marker: cut, match: func(aggregate runtime.RuntimeAggregate) bool {
+			if cut == "after_input_exclusion_terminal" {
+				return aggregate.Decision.Terminal != nil && aggregate.Decision.Terminal.Code == "candidate_retry_exhausted"
+			}
+			if cut == "after_ordinary_source_seal" {
+				return aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Candidate.StateChange != nil && reflect.DeepEqual(aggregate.ActiveDispatch.Candidate.StateChange.Operations[0].Operation.TargetRefs, []string{"subject.go"})
+			}
 			if cut == "before_behavior_failure" || cut == "after_behavior_failure" {
 				for _, fact := range aggregate.Facts.Evidence.Rejected {
 					if fact.Validation != nil && len(fact.Validation.CheckFailures) != 0 {
@@ -417,15 +493,25 @@ func %s(t *testing.T) { assertDelivery(t) }
 		if err != nil || cutAggregate.Validate() != nil {
 			t.Fatalf("repair seal cut is not restart-valid: load=%v validate=%v", err, cutAggregate.Validate())
 		}
-		if _, err := os.Stat(filepath.Join(deliverable, addition.TargetRef)); cut == "before_repair_seal" || cut == "after_repair_seal" {
+		if cut == "after_ordinary_source_seal" {
+			if cutAggregate.ActiveDispatch == nil || len(cutAggregate.ActiveDispatch.OperationTargetAuthorizations) == 0 || len(cutAggregate.ActiveDispatch.OperationTargetAuthorizations[0].Target.ExcludedTargetRefs) == 0 {
+				t.Fatal("sealed dispatch lost input exclusions across process loss")
+			}
+		} else if cut == "after_input_exclusion_terminal" {
+			if len(cutAggregate.OperationReceipts) != 0 || cutAggregate.ActiveDispatch != nil {
+				t.Fatal("rejected ordinary input mutation produced an operation")
+			}
+		} else if _, err := os.Stat(filepath.Join(deliverable, addition.TargetRef)); cut == "before_repair_seal" || cut == "after_repair_seal" {
 			if !os.IsNotExist(err) {
 				t.Fatalf("repair seal performed an effect before dispatch: %v", err)
 			}
 		} else if err != nil {
 			t.Fatalf("committed repair lost its durable effect: %v", err)
 		}
-		if _, err := runtimecontract.ResolveRuntimeAssessmentPurposePreimage(cutAggregate.SemanticPlanning, historicalAssessment.Bindings); err != nil {
-			t.Fatalf("repair seal invalidated historical assessment: %v", err)
+		if historicalAssessment.Hash != "" {
+			if _, err := runtimecontract.ResolveRuntimeAssessmentPurposePreimage(cutAggregate.SemanticPlanning, historicalAssessment.Bindings); err != nil {
+				t.Fatalf("repair seal invalidated historical assessment: %v", err)
+			}
 		}
 		module = newRuntimeDriveTestModule(t, hub)
 	}
@@ -433,6 +519,9 @@ func %s(t *testing.T) { assertDelivery(t) }
 	wantState, wantRun, wantResult, wantSatisfied := runtimecontract.ConvergenceStateComplete, common.RunStateCompleted, common.ResultStateAccepted, 2
 	if invalidSupplement {
 		wantState, wantRun, wantResult, wantSatisfied = runtimecontract.ConvergenceStateFailed, common.RunStateFailed, common.ResultStateRejected, 1
+	}
+	if mode.RepeatInputBypass {
+		wantState, wantRun, wantResult, wantSatisfied = runtimecontract.ConvergenceStateFailed, common.RunStateFailed, common.ResultStateRejected, 0
 	}
 	if err != nil || completed.State != wantState {
 		persisted, _ := module.loadRuntime(ctx, "ws-v2", "run-v2")
@@ -461,6 +550,23 @@ func %s(t *testing.T) { assertDelivery(t) }
 	workspace, err := workspaces.Get(ctx, "ws-v2")
 	if err != nil || workspace.ActiveRunID != "" {
 		t.Fatalf("Workspace owner did not settle its active Run: %+v %v", workspace, err)
+	}
+	if mode.RepeatInputBypass {
+		if inputBypassAttempts != 2 || aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "candidate_retry_exhausted" || len(aggregate.OperationReceipts) != 0 || completed.BlockingTicketID != "" || completed.BlockingApprovalID != "" {
+			t.Fatalf("input bypass did not close through bounded SM-3 rejection: attempts=%d result=%+v", inputBypassAttempts, completed)
+		}
+		for _, item := range aggregate.Facts.Coverage {
+			if item.State == runtimecontract.RuntimeCoverageItemStateSatisfied {
+				t.Fatal("rejected ordinary input mutation granted coverage credit")
+			}
+		}
+		for path, before := range weakInputs {
+			after, err := os.ReadFile(path)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatal("rejected input weakening changed historical bytes")
+			}
+		}
+		return providerCalls.Load()
 	}
 	for _, item := range aggregate.Facts.Coverage {
 		if invalidSupplement && item.ID == "cwi-2" {
@@ -505,6 +611,18 @@ func %s(t *testing.T) { assertDelivery(t) }
 	}
 	if acceptedValidation != wantAccepted || rejectedValidation != wantRejected || createdInputs != wantChanges || addition.TargetRef == "" {
 		t.Fatalf("unexpected effect/validation counts: accepted=%d rejected=%d input=%d addition=%+v", acceptedValidation, rejectedValidation, createdInputs, addition)
+	}
+	if mode.InputProtection {
+		if inputBypassAttempts != 1 {
+			t.Fatal("ordinary input mutation did not consume exactly one rejected candidate")
+		}
+		for _, receipt := range aggregate.OperationReceipts {
+			for _, target := range receipt.TargetRefs {
+				if target == protectedInput && receipt.Changed {
+					t.Fatal("ordinary candidate acquired input mutation credit")
+				}
+			}
+		}
 	}
 	if mode.CompileRepair {
 		content, err := os.ReadFile(filepath.Join(deliverable, addition.TargetRef))
@@ -800,7 +918,16 @@ func validationInputAdditionMainlineBootstrap() runtimecontract.RuntimeBootstrap
 	return runtimeTestBootstrapWithBindings(bootstrap)
 }
 
-func validationInputAdditionMainlineSemanticResult(command llmevents.RequestRuntimeCandidateCommand) (llmevents.RequestRuntimeCandidateResult, error) {
+func validationInputAdditionMainlineSemanticResult(command llmevents.RequestRuntimeCandidateCommand, sourceTargets ...string) (llmevents.RequestRuntimeCandidateResult, error) {
+	document := validationInputAdditionMainlineSemanticDocument(command, sourceTargets...)
+	payload, err := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
+	if err != nil {
+		return llmevents.RequestRuntimeCandidateResult{}, err
+	}
+	return runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload)}), nil
+}
+
+func validationInputAdditionMainlineSemanticDocument(command llmevents.RequestRuntimeCandidateCommand, sourceTargets ...string) runtimecontract.RuntimeSemanticPlanDocument {
 	document := runtimecontract.RuntimeSemanticPlanDocument{SchemaVersion: runtimecontract.RuntimeSemanticPlanDocumentSchemaCurrent, ManifestHash: command.SemanticManifest.Hash, DefinitionSeedHash: command.SemanticManifest.DefinitionSeedHash, PlanStep: command.SemanticContext.PlanStep}
 	if document.PlanStep == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
 		for _, item := range command.SemanticManifest.CoverageItems {
@@ -817,6 +944,9 @@ func validationInputAdditionMainlineSemanticResult(command llmevents.RequestRunt
 				proposal := runtimecontract.RuntimeSemanticProofProposal{CoverageWorkItemID: coverageID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileEdit,
 					Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExactTarget, ExactTargetRefs: []string{"subject.go"}},
 					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, DeclarationRef: runtimecontract.RuntimeSemanticCurrentDeclarationRef(obligation)}
+				if coverageID == "cwi-1" && len(sourceTargets) != 0 {
+					proposal.Target.ExactTargetRefs = append([]string(nil), sourceTargets...)
+				}
 				if repair := obligation.ValidationFailureRepair; repair != nil {
 					proposal.OperationKind = runtimecontract.StepKindFileWrite
 					proposal.Target = runtimecontract.RuntimeOperationTargetAuthorization{Policy: repair.RepairTargetPolicy, OwnerSelectorRefs: []string{repair.RepairOperationTargetSelectorRef}, ProspectiveConstraintRefs: repair.RepairConstraintRefs, ProspectiveTargetRefs: []string{repair.InputAddition.TargetRef}}
@@ -829,9 +959,5 @@ func validationInputAdditionMainlineSemanticResult(command llmevents.RequestRunt
 			}
 		}
 	}
-	payload, err := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
-	if err != nil {
-		return llmevents.RequestRuntimeCandidateResult{}, err
-	}
-	return runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{DocumentKind: command.DocumentKind, RequestIdentity: command.RequestIdentity, ExpectedDocumentHash: runtimeExpectedDocumentHash(command.ExpectedDocument), DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload)}), nil
+	return document
 }

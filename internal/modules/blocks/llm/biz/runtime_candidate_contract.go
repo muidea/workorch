@@ -113,6 +113,7 @@ type runtimeCandidateBindingAuthorizationProjection struct {
 // one sealed TargetPolicy. It carries membership facts only; no raw owner
 // error text and no domain heuristics.
 type runtimeCandidateOperationTargetProjection struct {
+	ExcludedTargetRefs        []string                                     `json:"excludedTargetRefs,omitempty"`
 	Policy                    runtimecontract.RuntimeOperationTargetPolicy `json:"policy"`
 	ExactTargetRefs           []string                                     `json:"exactTargetRefs,omitempty"`
 	OwnerScopeTargetRefs      []string                                     `json:"ownerScopeTargetRefs,omitempty"`
@@ -391,6 +392,7 @@ func runtimeCandidateOperationContractsForManifest(values []runtimecontract.Runt
 			AcceptedEffectScopes:        append([]runtimecontract.RuntimeEffectScope(nil), operation.AcceptedEffectScopes...),
 			RequiredEffectScopes:        append([]runtimecontract.RuntimeEffectScope(nil), operation.RequiredEffectScopes...),
 			Target: runtimeCandidateOperationTargetProjection{
+				ExcludedTargetRefs:        append([]string(nil), target.ExcludedTargetRefs...),
 				Policy:                    target.Policy,
 				ExactTargetRefs:           append([]string(nil), target.ExactTargetRefs...),
 				OwnerScopeTargetRefs:      append([]string(nil), target.OwnerScopeTargetRefs...),
@@ -667,6 +669,9 @@ func runtimeCandidateStructuredOutputInstruction(manifest runtimecontract.Runtim
 			}
 			if allowed := operation.Target.AllowedTargetRefs(); len(allowed) != 0 {
 				line += " Allowed targets: " + runtimeCandidateContractFieldList(allowed) + "."
+			}
+			if excluded := operation.Target.ExcludedTargetRefs; len(excluded) != 0 {
+				line += " Excluded targets cannot be modified by this operation: " + runtimeCandidateContractFieldList(excluded) + "."
 			}
 		}
 		if len(operation.ForbiddenParameters) > 0 {

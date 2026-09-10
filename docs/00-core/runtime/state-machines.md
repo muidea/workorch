@@ -381,6 +381,12 @@ current manifest 临时补全 scope；没有 matching sealed fallback 时按 typ
 - governance 只用于独立封存的真实权限、外部依赖或明确要求人工输入的配置/策略阻塞。capability infeasible、
   retry/repair budget exhaustion、候选/证据合同违规本身不能创建 ticket；只有对应 owner fact 同时携带 typed
   `ExternalDependency/GovernanceRequirement` 时才可进入 `need_governance`。
+- owner-declared validation input 的完整逐项 LLM review 是独立 observation：SM-2 的
+  `SemanticFeasibilityRequired` 在 proposal feasibility 前分类，完整一致继续，冲突失败，真实无法判断才封存
+  exact `provide_validation_input_facts` governance dependency。Decision 管理 ticket；matching information resolution 的
+  同一次 owner-private CAS 以 `input_review_information` 留存旧 semantic generation，重入 `required` 并由新请求重新评审。
+  每 Run/exact subject 最多一次信息补充，history 容量检查先于开票；原 Definition/startup/报告不改写、CWI 零 credit。
+  SM-3/SM-4 复用原 request/governance dispatch/continuation，SM-1 仍归 Run；空/解析/身份错误不属于业务不确定性。
 - complete Definition-gap document 只是 LLM observation candidate。`undeclared_prerequisite` 必须为每个 offending CWI 提供至少
   一条唯一、bounded、typed `PrerequisiteClaim(CoverageWorkItemID, OwnerModuleID, FactKind, OperationKind)`；其它 gap kind 禁止携带
   claim；shared source ref 必须覆盖其全部 CWI，proof-batch ref/claim 不得逃逸 sealed batch。SM-2/SM-3 在任何 owner-private

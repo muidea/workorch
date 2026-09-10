@@ -72,6 +72,16 @@ type runtimeSemanticValidationProofRequirementProjection struct {
 	SelectableValidationRecipeIDs []string                                          `json:"selectableValidationRecipeIds,omitempty"`
 	RequiredCheckRefs             []string                                          `json:"requiredCheckRefs"`
 	OwnerNativeCheckAttestations  []runtimeSemanticNativeCheckAttestationProjection `json:"ownerNativeCheckAttestations,omitempty"`
+	InputReviews                  []runtimeSemanticInputReviewProjection            `json:"inputReviews,omitempty"`
+}
+
+type runtimeSemanticInputReviewProjection struct {
+	OwnerModuleID      string                                                    `json:"ownerModuleId"`
+	ValidationRecipeID string                                                    `json:"validationRecipeId"`
+	SubjectHash        string                                                    `json:"subjectHash"`
+	ProtocolRef        string                                                    `json:"protocolRef"`
+	Files              []runtimecontract.RuntimeValidationInputReviewFile        `json:"files"`
+	Information        []runtimecontract.RuntimeValidationInputReviewInformation `json:"information,omitempty"`
 }
 
 type runtimeSemanticNativeCheckAttestationProjection struct {
@@ -222,6 +232,19 @@ func runtimeSemanticManifestForProvider(manifest runtimecontract.RuntimeSemantic
 		if err != nil {
 			return runtimeSemanticManifestProjection{}, err
 		}
+		for i := range projection.ProofObligations {
+			requirement := projection.ProofObligations[i].ValidationProofRequirement
+			if requirement == nil {
+				continue
+			}
+			for j := range requirement.InputReviews {
+				for _, information := range manifest.InputReviewInformation {
+					if information.SubjectHash == requirement.InputReviews[j].SubjectHash {
+						requirement.InputReviews[j].Information = append(requirement.InputReviews[j].Information, information)
+					}
+				}
+			}
+		}
 		projection.OwnerCatalogs = runtimeSemanticOwnerCatalogsForProvider(manifest.OwnerCatalogs)
 	}
 	return projection, nil
@@ -262,6 +285,7 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 				SelectableValidationRecipeIDs: runtimecontract.RuntimeSelectableValidationRecipeRefsForProofRequirementInCatalogs(ownerCatalogs, requirement),
 				RequiredCheckRefs:             append([]string(nil), requirement.RequiredCheckRefs...),
 				OwnerNativeCheckAttestations:  runtimeSemanticNativeCheckAttestationsForRequirement(ownerCatalogs, requirement),
+				InputReviews:                  runtimeSemanticInputReviewsForRequirement(ownerCatalogs, requirement),
 			}
 		}
 		if value.OwnerFactAcquisition != nil {

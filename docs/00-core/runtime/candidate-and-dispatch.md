@@ -89,6 +89,51 @@ hash 缺失或漂移必须在 provider/feasibility/effect 前 fail-closed。
 `TargetPolicy` 是 owner-neutral 的纯合同词汇。File、Git、Shell、MCP 或业务 profile 的具体语义仍由对应
 owner/profile 提供；Orchestrator 只编译和验证 typed receipt，不按文件名、命令或领域文本推断策略。
 
+validation owner 可在 `RuntimeValidationSurface` 发布 `InputTargetOwnerModuleID + InputTargetRefs`，声明当前观察到的
+验证输入资源身份。该事实独立于 recipe/requirement readiness，不是可写目标、repair permission 或 validation credit。
+SM-3 从当前 typed owner catalogs 为 `need_state_change` manifest 纯编译 `ExcludedTargetRefs`，并保存来源
+`MutationInputCatalogs` 的完整封存前像。它是现有三种 target policy 的负向成员约束，不是第四种 policy；即使
+ordinary source binding 的 scope 包含输入、或 scope 只声明 owner selector，输入也不能被普通修改借道写入。
+Core 不识别文件名、语言、测试框架或 adapter namespace。来源事实只收紧同一 resource owner 的操作，不跨 owner 扩张授权。
+非可选 input protection observation 单独受 `RuntimeValidationInputTargetsMaxCount` 的完整集合上界约束，不借用
+32 项可选 owner inventory 或 candidate context budget；超限必须拒绝，不能截断后把遗漏输入留作可写目标。
+
+schema、C3 instruction、strict decoder、target-parameter derivation、candidate evaluator、owner feasibility ingress 和
+sealed dispatch/replay 共用同一排除集合；scope/参数 preimage 只能从排除后的合法集合派生。manifest hash 绑定完整
+catalog identity，target authorization/dispatch hash 绑定 exact exclusions；fresh-load 必须重验前像与集合，不能清空后
+仅重算 hash。来源 catalog 不是额外可选 operation/surface，不得展开为 provider authority；动态约束只改变 C3，不改变
+C0～C2。空扩展保持旧 JSON/hash，不为旧 session、dispatch 或 archive 补写新权限/约束。
+semantic provider proposal 不得自报该 operation-only 排除字段；共享 target DTO 的复用不能把它带入 SM-2 proof authority。
+
+唯一既有输入写入例外是下述 confirmed-validation `InputRepair` 的 exact criterion-preserving delta：原 binding、
+closure/purpose 与单一 input 身份全部匹配，才可从排除集合移除该一个 target；其它输入仍受保护。fresh validation
+不继承例外。create-only input addition 不覆盖旧输入，不因创建成功取得 validation credit。普通输入越界仍是 SM-3
+既有 bounded candidate rejection/correction；重复越界不能产生 effect、credit 或 clarification ticket。
+SM-1 生命周期与 SM-2/SM-4 ownership 不变，不引入第五状态机。这项保护不等同于验证实现的一致性评审；声明
+`InputReview` 的替代输入必须经过下述独立 review/binding transaction。
+这是 exact owner/operation target 的准入合同，不能宣称为任意 Shell/MCP 子进程隐含文件 I/O 的隔离证明；这些
+effect owner 必须在自身执行合同中另行证明资源写入边界，不能从 File target 排除集合推导它们已获得或已受限的权限。
+
+验证输入的一致性评审还必须满足以下独立合同：
+
+capability owner 可在 proof binding 上声明 `InputReview`：支持的协议、完整有界输入字节/hash，以及封存的原准则与
+required checks/native mapping。Core 不识别语言、文件名或 adapter 业务语义。LLM 的现有 `semantic_plan/proof_batch`
+请求在 C3 获得这些准确事实，对照 C1 原 Goal/DoD，返回 closed `validationInputReview`：subjectHash 和每个原 check 的
+`consistent|conflict|inconclusive`、非空 reason、准确 input refs。完整 all-of 映射不能遗漏、重复或换成新准则。
+文件注释、候选自身声明、自测通过和 ticket 摘要均不产生一致性或验收 authority。
+
+SM-3 按原 request session 持久化完整报告；SM-2 的 `SemanticFeasibilityRequired` 私有事件在 owner feasibility 前分类。
+一致才继续原 binding/reconciliation seal，冲突明确失败。完整无法判断封存 exact governance dependency，复用本地
+governance dispatch 和 Decision ticket，不新增 provider 调用或状态机。ticket 信息 resolution 的同一次 SM-2 CAS
+将旧 semantic generation 以 `input_review_information` 留存，重入 `required`；新 manifest 只能携带相同 subject 的
+preceding resolution facts，以新 request 重新评审。原 Definition/startup、旧输入/报告不改写，review/resolution 零 credit。
+SM-4 只交付既有 continuation，SM-1 仍由 Run owner 处理。每 Run/exact subject 的信息补充最多一次，仍无法判断明确失败。
+格式、内容不完整、身份漂移和 provider transport/recovery 属于既有 bounded request/correction，不得伪造业务不确定性开票。
+
+`runtime_validation_input_review_test.go`、LLM `runtime_input_review_projection_test.go` 和 Orchestrator
+`runtime_validation_input_review_mainline_test.go` 分别证明纯合同、完整 C3 与缓存不变、真实 capability/Decision + file-backed Run
+的执行和恢复边界；脚本化 provider 证据不得登记为真实 LLM 或 release DCE 验收。
+
 三种策略的 operation target 校验必须只有一份 owner-neutral 纯实现，并由 manifest strict decode、candidate
 admission、owner feasibility preflight、dispatch seal/fresh-load 与 receipt credit 共同调用。owner receipt 的 `TargetRefs` 必须先与其 sealed
 operation 的 `TargetRefs` 精确相等，再用同一策略验证该 operation 是否处于 binding/manifest 授权范围内。对于

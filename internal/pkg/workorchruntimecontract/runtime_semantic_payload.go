@@ -13,7 +13,7 @@ import (
 
 var (
 	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "diagnosticMessage", "documentKind", "gapKind", "manifestHash", "offendingItemRefs", "planStep", "prerequisiteClaims", "proposals", "resultKind", "schemaVersion"}
-	runtimeSemanticProposalFields = []string{"coverageWorkItemId", "declarationRef", "operationKind", "operationVariantId", "ownerModuleId", "requiredEvidenceKinds", "target", "validationRecipeId"}
+	runtimeSemanticProposalFields = []string{"coverageWorkItemId", "declarationRef", "operationKind", "operationVariantId", "ownerModuleId", "requiredEvidenceKinds", "target", "validationRecipeId", "validationInputReview"}
 	runtimeSemanticTargetFields   = []string{"exactTargetRefs", "ownerScopeTargetRefs", "ownerSelectorRefs", "policy", "prospectiveConstraintRefs", "prospectiveTargetRefs"}
 )
 
@@ -31,14 +31,15 @@ type runtimeSemanticPlanPayload struct {
 }
 
 type runtimeSemanticProposalPayload struct {
-	CoverageWorkItemID    common.CoverageWorkItemID    `json:"coverageWorkItemId"`
-	OwnerModuleID         string                       `json:"ownerModuleId"`
-	OperationKind         string                       `json:"operationKind"`
-	OperationVariantID    string                       `json:"operationVariantId,omitempty"`
-	Target                runtimeSemanticTargetPayload `json:"target"`
-	RequiredEvidenceKinds []string                     `json:"requiredEvidenceKinds"`
-	ValidationRecipeID    string                       `json:"validationRecipeId,omitempty"`
-	DeclarationRef        string                       `json:"declarationRef"`
+	CoverageWorkItemID    common.CoverageWorkItemID     `json:"coverageWorkItemId"`
+	OwnerModuleID         string                        `json:"ownerModuleId"`
+	OperationKind         string                        `json:"operationKind"`
+	OperationVariantID    string                        `json:"operationVariantId,omitempty"`
+	Target                runtimeSemanticTargetPayload  `json:"target"`
+	RequiredEvidenceKinds []string                      `json:"requiredEvidenceKinds"`
+	ValidationRecipeID    string                        `json:"validationRecipeId,omitempty"`
+	DeclarationRef        string                        `json:"declarationRef"`
+	ValidationInputReview *RuntimeValidationInputReview `json:"validationInputReview,omitempty"`
 }
 
 type runtimeSemanticTargetPayload struct {
@@ -136,8 +137,9 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 				ProspectiveConstraintRefs: value.Target.ProspectiveConstraintRefs, ProspectiveTargetRefs: value.Target.ProspectiveTargetRefs,
 			},
 			RequiredEvidenceKinds: value.RequiredEvidenceKinds, RequiredEffectScopes: deriveRuntimeSemanticProposalEffects(manifest, value),
-			ValidationRecipeID: value.ValidationRecipeID,
-			DeclarationRef:     value.DeclarationRef,
+			ValidationRecipeID:    value.ValidationRecipeID,
+			DeclarationRef:        value.DeclarationRef,
+			ValidationInputReview: value.ValidationInputReview,
 		})
 	}
 	if err := document.ValidateAgainstManifest(manifest); err != nil {
@@ -199,6 +201,7 @@ func EncodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 			RequiredEvidenceKinds: value.RequiredEvidenceKinds,
 			ValidationRecipeID:    value.ValidationRecipeID,
 			DeclarationRef:        value.DeclarationRef,
+			ValidationInputReview: value.ValidationInputReview,
 		})
 	}
 	return json.Marshal(wire)
@@ -243,6 +246,11 @@ func validateRuntimeSemanticPayloadFields(payload []byte) error {
 		}
 		if err := validateRuntimeSemanticObjectFields(fmt.Sprintf("$.proposals[%d]", idx), proposal, runtimeSemanticProposalFields, []string{"coverageWorkItemId", "ownerModuleId", "operationKind", "target", "requiredEvidenceKinds", "declarationRef"}); err != nil {
 			return err
+		}
+		if review, exists := proposal["validationInputReview"]; exists {
+			if err := validateRuntimeValidationInputReviewPayload(fmt.Sprintf("$.proposals[%d].validationInputReview", idx), review); err != nil {
+				return err
+			}
 		}
 		var target map[string]json.RawMessage
 		if err := json.Unmarshal(proposal["target"], &target); err != nil {
@@ -568,6 +576,7 @@ func RuntimeSemanticPlanJSONSchema(manifest RuntimeSemanticPlanManifest) (string
 			}
 		}
 	}
+	addRuntimeSemanticInputReviewSchema(proposalItems, manifest)
 	encoded, err := json.Marshal(schema)
 	return string(encoded), err
 }

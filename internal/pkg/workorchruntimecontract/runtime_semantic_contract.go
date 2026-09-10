@@ -171,7 +171,8 @@ type RuntimeSemanticPlanManifest struct {
 	// provider I/O. They prevent the semantic planner from guessing targets,
 	// selectors, constraints, recipes, or catalog revisions and then learning
 	// those facts only through a later rejection.
-	OwnerCatalogs []RuntimeOperationAdmissibility
+	OwnerCatalogs          []RuntimeOperationAdmissibility
+	InputReviewInformation []RuntimeValidationInputReviewInformation `json:",omitempty"`
 	// OwnerFactDependencyCatalogs seal capability-owner facts that are required
 	// to judge a prospective owner-fact acquisition but are intentionally not
 	// selectable semantic-plan vocabulary. They participate in freshness/CAS
@@ -655,6 +656,7 @@ func (m RuntimeSemanticPlanManifest) Normalized() RuntimeSemanticPlanManifest {
 	m.ProofObligations = normalizeRuntimeSemanticProofObligations(m.ProofObligations)
 	m.OwnerCatalogs = NormalizeRuntimeOperationAdmissibilities(m.OwnerCatalogs)
 	m.OwnerFactDependencyCatalogs = NormalizeRuntimeOperationAdmissibilities(m.OwnerFactDependencyCatalogs)
+	m.InputReviewInformation = append([]RuntimeValidationInputReviewInformation(nil), m.InputReviewInformation...)
 	return m
 }
 
@@ -741,6 +743,9 @@ func validateRuntimeSemanticPlanManifest(m RuntimeSemanticPlanManifest) (runtime
 }
 
 func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest, session *runtimeSemanticValidationSession) (runtimeValidatedSemanticManifest, error) {
+	if err := validateRuntimeSemanticInputReviewInformation(m); err != nil {
+		return runtimeValidatedSemanticManifest{}, err
+	}
 	manifestKey := strings.TrimSpace(m.Hash)
 	for _, entry := range session.manifests[manifestKey] {
 		if reflect.DeepEqual(entry.raw, m) {
@@ -1389,6 +1394,7 @@ func StableRuntimeSemanticPlanManifestHash(manifest RuntimeSemanticPlanManifest)
 
 func stableRuntimeSemanticPlanManifestHashCanonical(manifest RuntimeSemanticPlanManifest) string {
 	h := sha256.New()
+	writeRuntimeSemanticInputReviewInformationHash(h, manifest.InputReviewInformation)
 	writeHashString(h, RuntimeSemanticPlanManifestSchemaCurrent)
 	writeHashString(h, string(manifest.WorkspaceID))
 	writeHashString(h, string(manifest.RunID))
@@ -1444,6 +1450,7 @@ type RuntimeSemanticProofProposal struct {
 	ValidationRecipeID    string
 	RequiredCheckRefs     []string
 	DeclarationRef        string
+	ValidationInputReview *RuntimeValidationInputReview `json:",omitempty"`
 }
 
 // RuntimeSemanticProposalConstraintError is the pure proposal-contract fact
@@ -1481,6 +1488,10 @@ func (p RuntimeSemanticProofProposal) Normalized() RuntimeSemanticProofProposal 
 	p.ValidationRecipeID = strings.TrimSpace(p.ValidationRecipeID)
 	p.RequiredCheckRefs = normalizeStrings(p.RequiredCheckRefs)
 	p.DeclarationRef = strings.TrimSpace(p.DeclarationRef)
+	if p.ValidationInputReview != nil {
+		value := p.ValidationInputReview.Clone()
+		p.ValidationInputReview = &value
+	}
 	return p
 }
 
@@ -1494,6 +1505,12 @@ func (p RuntimeSemanticProofProposal) Clone() RuntimeSemanticProofProposal {
 }
 
 func (p RuntimeSemanticProofProposal) Validate() error {
+	// This target DTO is also used by sealed operation manifests. Mutation
+	// exclusions belong to their owner-fact compiler, never to a provider's
+	// semantic proposal or the SM-2 proof it requests.
+	if len(p.Target.ExcludedTargetRefs) != 0 {
+		return runtimeSemanticProposalConstraint("target", RuntimeSemanticConstraintRelational, "owner_only_mutation_exclusions", []string{"provider target without mutation exclusions"}, nil)
+	}
 	rawEvidenceKinds := append([]string(nil), p.RequiredEvidenceKinds...)
 	rawProspectiveTargetRefs := append([]string(nil), p.Target.ProspectiveTargetRefs...)
 	rawRequiredCheckRefs := append([]string(nil), p.RequiredCheckRefs...)
@@ -1587,6 +1604,7 @@ func StableRuntimeSemanticProofProposalHash(proposal RuntimeSemanticProofProposa
 	writeHashString(h, proposal.ValidationRecipeID)
 	writeHashStrings(h, proposal.RequiredCheckRefs)
 	writeHashString(h, proposal.DeclarationRef)
+	writeRuntimeValidationInputReviewHash(h, proposal.ValidationInputReview)
 	return "runtime-semantic-proposal-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
@@ -1765,6 +1783,10 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(d RuntimeSemant
 			}
 			return runtimeSemanticProposalViolation(proposal, proposalIndex, "operationVariantId", RuntimeSemanticConstraintRelational,
 				proposal.OperationVariantID, nil, nil, err)
+		}
+		if err := validateRuntimeSemanticInputReview(proposal, catalog); err != nil {
+			return runtimeSemanticProposalViolation(proposal, proposalIndex, "validationInputReview", RuntimeSemanticConstraintRelational,
+				"incomplete_or_unbound_review", []string{"complete exact owner-bound input review"}, nil, err)
 		}
 		if len(catalog.ValidationRecipeRefs) == 0 && containsRuntimeSemanticEvidenceKind(proposal.RequiredEvidenceKinds, EvidenceKindValidation) {
 			return runtimeSemanticProposalViolation(proposal, proposalIndex, "requiredEvidenceKinds", RuntimeSemanticConstraintRelational, EvidenceKindValidation, []string{EvidenceKindStateChange}, nil, fmt.Errorf("runtime semantic document owner %q does not provide validation recipes", catalog.OwnerModuleID))
@@ -2137,6 +2159,7 @@ const (
 	// coverage order were accepted. The next generation must recompile the
 	// complete closure; the old provider order is audit lineage only.
 	RuntimeSemanticPlanningRetirementEligibleClosureChanged RuntimeSemanticPlanningRetirementReason = "eligible_closure_changed"
+	RuntimeSemanticPlanningRetirementInputReviewInformation RuntimeSemanticPlanningRetirementReason = "input_review_information"
 )
 
 // RuntimeSemanticPlanningHistoryLimit bounds immutable semantic lineage kept
@@ -2238,10 +2261,11 @@ func (g RuntimeSemanticFeasibilityGap) Validate() error {
 // snapshot.  This keeps request-session identity and generation identity
 // separate without allowing retired authority to be reused.
 type RuntimeSemanticPlanningGeneration struct {
-	RetiredAtStateRevision uint64
-	Reason                 RuntimeSemanticPlanningRetirementReason
-	InvalidationSignatures []string
-	PrerequisiteIDs        []string
+	InputReviewResolutionID common.ResolutionID `json:",omitempty"`
+	RetiredAtStateRevision  uint64
+	Reason                  RuntimeSemanticPlanningRetirementReason
+	InvalidationSignatures  []string
+	PrerequisiteIDs         []string
 	// ReopenedCoverageIDs and ReopenTriggerRefs bind a CWI-reopen retirement
 	// to the owner-local SM-2 facts that invalidated prior credit. They are
 	// audit lineage only and never select an operation or a recovery action.
@@ -2294,6 +2318,10 @@ func validateRuntimeSemanticPlanningGenerationNormalized(raw, g RuntimeSemanticP
 		return fmt.Errorf("runtime semantic planning generation requires retirement identity and reason")
 	}
 	switch g.Reason {
+	case RuntimeSemanticPlanningRetirementInputReviewInformation:
+		if g.InputReviewResolutionID == "" || len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
+			return fmt.Errorf("runtime input review retirement requires only exact information resolution lineage")
+		}
 	case RuntimeSemanticPlanningRetirementResourceInvalidated, RuntimeSemanticPlanningRetirementCatalogRefresh:
 		if len(g.InvalidationSignatures) == 0 || len(g.PrerequisiteIDs) == 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
 			return fmt.Errorf("runtime semantic catalog retirement requires only catalog lineage")
@@ -2308,6 +2336,9 @@ func validateRuntimeSemanticPlanningGenerationNormalized(raw, g RuntimeSemanticP
 		}
 	default:
 		return fmt.Errorf("runtime semantic planning generation has unsupported retirement reason %q", g.Reason)
+	}
+	if g.Reason != RuntimeSemanticPlanningRetirementInputReviewInformation && g.InputReviewResolutionID != "" {
+		return fmt.Errorf("runtime non-review retirement cannot carry an information resolution")
 	}
 	if g.Snapshot.History != nil {
 		return fmt.Errorf("runtime semantic planning generation snapshot must not contain nested history")
@@ -3718,6 +3749,7 @@ func writeRuntimeSemanticTargetHash(h hashStringWriter, target RuntimeOperationT
 	writeHashStrings(h, target.OwnerSelectorRefs)
 	writeHashStrings(h, target.ProspectiveConstraintRefs)
 	writeHashStrings(h, target.ProspectiveTargetRefs)
+	writeRuntimeExcludedTargetsHash(h, target.ExcludedTargetRefs)
 }
 
 func runtimeSemanticStringSet(values []string) map[string]struct{} {

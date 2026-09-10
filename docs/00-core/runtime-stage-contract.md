@@ -66,6 +66,12 @@ successor。
 Recovery is idempotent re-drive from the Run-owned opaque aggregate. Projection、Eventstream、provider text、process-local cache
 和历史 event sequence 都不能重建或替代 authority。
 
+验证输入一致性评审复用上述四机：SM-3 持久化 owner-declared exact input 的完整 LLM 逐项报告，SM-2 在 feasibility/binding
+前区分一致、冲突和真实信息不足；只有后者封存 typed governance dependency，由 Decision owner 管理 ticket。
+信息 resolution 仅使 SM-2 留存旧 semantic generation 并发起新请求重新评审，SM-4 交付 continuation，Run 独占 SM-1。
+原 Goal/DoD、startup、旧输入和报告不得改写，ticket/review 零 credit；格式/身份错误仍走旧 request/correction budget。
+细则与证据见 [Candidate and Dispatch](runtime/candidate-and-dispatch.md) 和 Orchestrator implementation SoT。
+
 validation failure repair 也必须保持 core owner-neutral：sealed Profile 的 exact
 `(trigger owner, operation kind, diagnostic class, evidence target type, owner code)` route，或 source binding 的 operation
 descriptor，先确定唯一 resource/effect owner；该 route 的全部 repair operation 还必须在 pre-seal 共同声明一个可执行的

@@ -29,6 +29,7 @@ type ManifestIdentity struct {
 	// persisted the exact typed rejection and Profile convergence. It selects
 	// the shared repair-purpose compiler; it is never synthesized here.
 	ValidationFailureRepair *runtimecontract.RuntimeValidationFailureRepairGenerationInput
+	InputReviewInformation  []runtimecontract.RuntimeValidationInputReviewInformation
 }
 
 // CompileManifest is the single focused-package entry for compiling a
@@ -36,6 +37,19 @@ type ManifestIdentity struct {
 // schema and hash; this wrapper keeps the Orchestrator's planning code free of
 // duplicate compilation paths.
 func CompileManifest(identity ManifestIdentity) (runtimecontract.RuntimeSemanticPlanManifest, error) {
+	manifest, err := compileManifestBase(identity)
+	if err != nil {
+		return runtimecontract.RuntimeSemanticPlanManifest{}, err
+	}
+	manifest.InputReviewInformation = runtimecontract.RuntimeSemanticInputReviewInformationForCatalogs(identity.InputReviewInformation, manifest.OwnerCatalogs)
+	manifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(manifest)
+	if err := manifest.Validate(); err != nil {
+		return runtimecontract.RuntimeSemanticPlanManifest{}, err
+	}
+	return manifest, nil
+}
+
+func compileManifestBase(identity ManifestIdentity) (runtimecontract.RuntimeSemanticPlanManifest, error) {
 	if identity.ValidationFailureRepair != nil {
 		input := identity.ValidationFailureRepair.Normalized()
 		return runtimecontract.CompileRuntimeSemanticPlanManifestForCoverageWithValidationFailureRepair(

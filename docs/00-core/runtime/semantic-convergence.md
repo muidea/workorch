@@ -66,6 +66,12 @@ owner 的 manifest 及其 exact freshness observation，再通过 concrete typed
 Orchestrator 不解释 manifest path 或 recipe。没有 confirmed recipe 的 `validation/managed_session` 不得进入
 provider-visible allowed operation set。SM-3 接受 document 只形成 internal fact，不创建 `SealedDispatch`。
 
+owner binding 声明 `InputReview` 时，proof-batch 还必须携带 exact 内容身份及所有原 required checks 的 closed
+`validationInputReview`；check refs 只是引用原声明，不能增删或替换准则。SM-2 仅允许完整一致报告继续 feasibility/seal，
+完整冲突明确失败，完整信息不足沿既有 Decision governance ticket 请求事实。matching resolution 保留旧 generation，
+以新 semantic manifest/request 重新评审，不改 Definition 或直接 credit。request、信息一次性和 history 容量均有界；
+格式/身份错误不能降级为业务 ticket。完整合同见 [Candidate and Dispatch](candidate-and-dispatch.md)。
+
 coverage-order request 的 closed schema 与 provider instruction 必须一致：`proposals` 是 required field 且只能为 `[]`，
 不能用“不返回 proposals”替代空数组。缺字段、覆盖不全、重复/未知 CWI 等 complete-document 结构错误，由 SM-3 从
 current manifest 合成 typed `coverage_order_document` factual violation，并只允许同 request contract 的 attempt 1；

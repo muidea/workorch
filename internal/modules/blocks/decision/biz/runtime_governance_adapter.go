@@ -3,6 +3,7 @@ package decision
 import (
 	"context"
 	"strings"
+	"unicode/utf8"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -38,11 +39,19 @@ func (m *Biz) handleRuntimeGovernanceRequest(event magicevent.Event, result magi
 		setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{}, err)
 		return
 	}
+	failureClass := "governance_dependency"
+	if command.Dependency.RequestedAction == runtimecontract.RuntimeValidationInputReviewInformationAction {
+		if command.Dependency.Kind != string(runtimecontract.GovernanceDecision) || command.Dependency.SubjectRef == "" {
+			setRuntimeGovernanceRequestResult(result, decisionevents.OpenRuntimeGovernanceRequestResult{}, common.ErrInvalidArgument)
+			return
+		}
+		failureClass = runtimecontract.RuntimeValidationInputReviewFailureClass
+	}
 	ticket, _, err := m.service.EnsureTicketAndReturn(ctx, decisioncontracts.CreateTicketCommand{
 		TicketID: command.TicketID, WorkspaceID: command.WorkspaceID, RunID: command.RunID,
 		StepID: common.StepID("runtime/" + command.DispatchID), Reason: command.Dependency.Reason,
 		DecisionKind: "runtime_governance", Question: command.Dependency.Reason,
-		FailureClass: "governance_dependency", FailureSignature: command.Dependency.Kind + ":" + command.Dependency.SubjectRef,
+		FailureClass: failureClass, FailureSignature: command.Dependency.Kind + ":" + command.Dependency.SubjectRef,
 		AllowedRecoveryActions: []string{command.ContinueResolutionType, command.FailResolutionType},
 	})
 	if err != nil {
@@ -77,6 +86,11 @@ func (m *Biz) executeRuntimeGovernanceResolution(ctx context.Context, cmd decisi
 	}
 	if currentTicket.DecisionKind != cmd.DecisionKind {
 		return decisionevents.EnsureResolvedResult{}, common.ErrConflict
+	}
+	if currentTicket.FailureClass == runtimecontract.RuntimeValidationInputReviewFailureClass && cmd.Type == modulecommon.ResolutionTypeProvideMissingInfo {
+		if !validRuntimeInputReviewInformationSummary(resolveCommand.Payload.String("summary")) {
+			return decisionevents.EnsureResolvedResult{}, common.ErrInvalidArgument
+		}
 	}
 	ticket, proposal, err := m.service.EnsureRuntimeGovernanceResolutionProposal(ctx, resolveCommand)
 	if err != nil {
@@ -114,6 +128,11 @@ func (m *Biz) commitRuntimeGovernanceTicketProposal(ctx context.Context, ticket 
 	outcome := runtimecontract.RuntimeGovernanceResolutionOutcome("")
 	switch proposal.ResolutionType {
 	case modulecommon.ResolutionTypeProvideMissingInfo:
+		// Reconciliation uses this same path after reopening a pending owner
+		// proposal. Missing information cannot be backfilled from the question.
+		if ticket.FailureClass == runtimecontract.RuntimeValidationInputReviewFailureClass && !validRuntimeInputReviewInformationSummary(proposal.Payload.String("summary")) {
+			return orchestratorevents.CommitRuntimeGovernanceResolutionResult{}, common.ErrInvalidArgument
+		}
 		outcome = runtimecontract.RuntimeGovernanceResolutionOutcomeContinue
 	case modulecommon.ResolutionTypeRejectCurrentPath:
 		outcome = runtimecontract.RuntimeGovernanceResolutionOutcomeFail
@@ -155,6 +174,10 @@ func (m *Biz) commitRuntimeGovernanceTicketProposal(ctx context.Context, ticket 
 		return nil
 	})
 	return response, err
+}
+
+func validRuntimeInputReviewInformationSummary(value string, present bool) bool {
+	return present && value != "" && strings.TrimSpace(value) == value && utf8.ValidString(value) && len(value) <= runtimecontract.RuntimeValidationInputReviewMaxReasonBytes
 }
 
 func runtimeGovernanceProposalSummary(ticket *decisionmodel.Ticket, proposal *decisionmodel.RuntimeGovernanceResolutionProposal) string {

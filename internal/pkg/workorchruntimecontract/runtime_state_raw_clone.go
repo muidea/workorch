@@ -545,6 +545,7 @@ func cloneRuntimeCandidateRaw(in RuntimeCandidate) RuntimeCandidate {
 
 func cloneRuntimeCandidateContractManifestRaw(in RuntimeCandidateContractManifest) RuntimeCandidateContractManifest {
 	out := in
+	out.MutationInputCatalogs = cloneRuntimeStateRawSlice(in.MutationInputCatalogs, cloneRuntimeOperationAdmissibilityRaw)
 	out.EffectPolicy.AllowedOperationEffects = cloneRuntimeStateRawSlice(in.EffectPolicy.AllowedOperationEffects, func(item RuntimeEffectScope) RuntimeEffectScope { return item })
 	out.EffectPolicy.AllowedAcceptedReceiptEffects = cloneRuntimeStateRawSlice(in.EffectPolicy.AllowedAcceptedReceiptEffects, func(item RuntimeEffectScope) RuntimeEffectScope { return item })
 	out.RequiredTopLevelFields = cloneRuntimeStateRawSlice(in.RequiredTopLevelFields, func(item string) string { return item })
@@ -602,11 +603,7 @@ func cloneRuntimeCandidateOperationManifestRaw(in RuntimeCandidateOperationManif
 	})
 	out.AcceptedEffectScopes = cloneRuntimeStateRawSlice(in.AcceptedEffectScopes, func(item RuntimeEffectScope) RuntimeEffectScope { return item })
 	out.RequiredEffectScopes = cloneRuntimeStateRawSlice(in.RequiredEffectScopes, func(item RuntimeEffectScope) RuntimeEffectScope { return item })
-	out.Target.ExactTargetRefs = cloneRuntimeStateRawSlice(in.Target.ExactTargetRefs, func(item string) string { return item })
-	out.Target.OwnerScopeTargetRefs = cloneRuntimeStateRawSlice(in.Target.OwnerScopeTargetRefs, func(item string) string { return item })
-	out.Target.OwnerSelectorRefs = cloneRuntimeStateRawSlice(in.Target.OwnerSelectorRefs, func(item string) string { return item })
-	out.Target.ProspectiveConstraintRefs = cloneRuntimeStateRawSlice(in.Target.ProspectiveConstraintRefs, func(item string) string { return item })
-	out.Target.ProspectiveTargetRefs = cloneRuntimeStateRawSlice(in.Target.ProspectiveTargetRefs, func(item string) string { return item })
+	out.Target = cloneRuntimeOperationTargetAuthorizationRaw(in.Target)
 	out.PrerequisiteSnapshotRefs = cloneRuntimeStateRawSlice(in.PrerequisiteSnapshotRefs, func(item string) string { return item })
 	out.AdmissibilitySnapshotRefs = cloneRuntimeStateRawSlice(in.AdmissibilitySnapshotRefs, func(item string) string { return item })
 	out.ValidationRecipes = cloneRuntimeStateRawSlice(in.ValidationRecipes, func(item RuntimeValidationRecipe) RuntimeValidationRecipe {
@@ -1377,6 +1374,7 @@ func cloneRuntimeOperationReplayProofRaw(in RuntimeOperationReplayProof) Runtime
 
 func cloneRuntimeOperationTargetAuthorizationRaw(in RuntimeOperationTargetAuthorization) RuntimeOperationTargetAuthorization {
 	out := in
+	out.ExcludedTargetRefs = cloneRuntimeStateRawSlice(in.ExcludedTargetRefs, func(item string) string { return item })
 	out.ExactTargetRefs = cloneRuntimeStateRawSlice(in.ExactTargetRefs, func(item string) string { return item })
 	out.OwnerScopeTargetRefs = cloneRuntimeStateRawSlice(in.OwnerScopeTargetRefs, func(item string) string { return item })
 	out.OwnerSelectorRefs = cloneRuntimeStateRawSlice(in.OwnerSelectorRefs, func(item string) string { return item })
@@ -1781,6 +1779,9 @@ func cloneRuntimeSemanticPlanDocumentRaw(in RuntimeSemanticPlanDocument) Runtime
 
 func cloneRuntimeSemanticPlanManifestRaw(in RuntimeSemanticPlanManifest) RuntimeSemanticPlanManifest {
 	out := in
+	out.InputReviewInformation = cloneRuntimeStateRawSlice(in.InputReviewInformation, func(item RuntimeValidationInputReviewInformation) RuntimeValidationInputReviewInformation {
+		return item
+	})
 	out.CoverageItems = cloneRuntimeStateRawSlice(in.CoverageItems, func(item RuntimeCoverageItem) RuntimeCoverageItem { return cloneRuntimeCoverageItemRaw(item) })
 	out.AllowedOwnerModuleIDs = cloneRuntimeStateRawSlice(in.AllowedOwnerModuleIDs, func(item string) string { return item })
 	out.AllowedOperationKinds = cloneRuntimeStateRawSlice(in.AllowedOperationKinds, func(item string) string { return item })
@@ -1904,6 +1905,7 @@ func cloneRuntimeSemanticProofObligationRaw(in RuntimeSemanticProofObligation) R
 
 func cloneRuntimeSemanticProofProposalRaw(in RuntimeSemanticProofProposal) RuntimeSemanticProofProposal {
 	out := in
+	out.ValidationInputReview = cloneRuntimeStateRawPointer(in.ValidationInputReview, func(item RuntimeValidationInputReview) RuntimeValidationInputReview { return item.Clone() })
 	out.Target = cloneRuntimeOperationTargetAuthorizationRaw(in.Target)
 	out.RequiredEvidenceKinds = cloneRuntimeStateRawSlice(in.RequiredEvidenceKinds, func(item string) string { return item })
 	out.RequiredEffectScopes = cloneRuntimeStateRawSlice(in.RequiredEffectScopes, func(item RuntimeEffectScope) RuntimeEffectScope { return item })
@@ -2126,6 +2128,7 @@ func cloneRuntimeValidationRecipeRaw(in RuntimeValidationRecipe) RuntimeValidati
 
 func cloneRuntimeValidationSurfaceRaw(in RuntimeValidationSurface) RuntimeValidationSurface {
 	out := in
+	out.InputTargetRefs = cloneRuntimeStateRawSlice(in.InputTargetRefs, func(item string) string { return item })
 	out.ProofRequirementUnavailabilities = cloneRuntimeStateRawSlice(in.ProofRequirementUnavailabilities, func(item RuntimeValidationProofUnavailability) RuntimeValidationProofUnavailability {
 		item.Requirement.RequiredCheckRefs = cloneRuntimeStateRawSlice(item.Requirement.RequiredCheckRefs, func(value string) string { return value })
 		item.OriginalDiagnostic = item.OriginalDiagnostic.CloneOriginal()
@@ -2136,6 +2139,9 @@ func cloneRuntimeValidationSurfaceRaw(in RuntimeValidationSurface) RuntimeValida
 	})
 	out.CheckRefs = cloneRuntimeStateRawSlice(in.CheckRefs, func(item string) string { return item })
 	out.ProofRequirementBindings = cloneRuntimeStateRawSlice(in.ProofRequirementBindings, func(item RuntimeValidationProofRequirementBinding) RuntimeValidationProofRequirementBinding {
+		item.InputReview = cloneRuntimeStateRawPointer(item.InputReview, func(value RuntimeValidationInputReviewSubject) RuntimeValidationInputReviewSubject {
+			return value.Clone()
+		})
 		item.RequiredCheckRefs = cloneRuntimeStateRawSlice(item.RequiredCheckRefs, func(value string) string { return value })
 		item.CheckAttestations = cloneRuntimeStateRawSlice(item.CheckAttestations, func(value RuntimeValidationCheckAttestationBinding) RuntimeValidationCheckAttestationBinding {
 			return value

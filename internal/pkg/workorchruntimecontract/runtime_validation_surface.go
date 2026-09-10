@@ -38,14 +38,19 @@ const (
 // ready-and-direct set; this value preserves why another callable surface was
 // not exposed without leaking owner implementation or choosing a retry.
 type RuntimeValidationSurface struct {
-	ID              string
-	OwnerModuleID   string
-	OperationKind   string
-	Readiness       RuntimeValidationSurfaceReadiness
-	ReadinessReason string
-	InputSchemaHash string
-	InputBindingRef string
-	PrerequisiteRef string
+	// Input targets are capability-owner observations, not writable delivery
+	// targets. The resource owner is explicit; Core does not infer it from a
+	// filename, language or validation adapter. Empty fields preserve archives.
+	InputTargetOwnerModuleID string   `json:",omitempty"`
+	InputTargetRefs          []string `json:",omitempty"`
+	ID                       string
+	OwnerModuleID            string
+	OperationKind            string
+	Readiness                RuntimeValidationSurfaceReadiness
+	ReadinessReason          string
+	InputSchemaHash          string
+	InputBindingRef          string
+	PrerequisiteRef          string
 	// ProspectiveSatisfactionContractRef is present only on a prerequisite-
 	// required surface whose owner can judge whether a typed prospective
 	// workspace delta would make that surface selectable.
@@ -74,6 +79,8 @@ type RuntimeValidationSurface struct {
 }
 
 func (s RuntimeValidationSurface) Normalized() RuntimeValidationSurface {
+	s.InputTargetOwnerModuleID = strings.TrimSpace(s.InputTargetOwnerModuleID)
+	s.InputTargetRefs = normalizeStrings(s.InputTargetRefs)
 	s.ID = strings.TrimSpace(s.ID)
 	s.OwnerModuleID = strings.TrimSpace(s.OwnerModuleID)
 	s.OperationKind = CanonicalRuntimeBlockKind(s.OperationKind)
@@ -105,6 +112,9 @@ func (s RuntimeValidationSurface) Clone() RuntimeValidationSurface {
 
 func (s RuntimeValidationSurface) Validate() error {
 	raw := s
+	if err := validateRuntimeValidationInputTargets(raw); err != nil {
+		return err
+	}
 	if duplicate := duplicateRuntimeValidationProofCheckRef(raw.CheckRefs); duplicate != "" {
 		return fmt.Errorf("runtime validation surface %q duplicates check %q", strings.TrimSpace(raw.ID), duplicate)
 	}
@@ -314,6 +324,9 @@ type RuntimeValidationProofRequirementBinding struct {
 	// Definition check to one owner-native observation. Provider/workspace
 	// stdout is never itself an attestation protocol.
 	CheckAttestations []RuntimeValidationCheckAttestationBinding
+	// InputReview requires a complete LLM consistency report before SM-2 may
+	// seal a proof. Owner readiness alone cannot discharge that requirement.
+	InputReview *RuntimeValidationInputReviewSubject `json:",omitempty"`
 }
 
 // RuntimeValidationCheckAttestationBinding binds one Definition-owned check
@@ -452,6 +465,10 @@ func (b RuntimeValidationProofRequirementBinding) Normalized() RuntimeValidation
 	b.ValidationRecipeID = strings.TrimSpace(b.ValidationRecipeID)
 	b.RequiredCheckRefs = normalizeRuntimeValidationProofCheckRefs(b.RequiredCheckRefs)
 	b.CheckAttestations = NormalizeRuntimeValidationCheckAttestationBindings(b.CheckAttestations)
+	if b.InputReview != nil {
+		value := b.InputReview.Clone()
+		b.InputReview = &value
+	}
 	return b
 }
 
@@ -461,6 +478,11 @@ func (b RuntimeValidationProofRequirementBinding) Clone() RuntimeValidationProof
 }
 
 func (b RuntimeValidationProofRequirementBinding) Validate() error {
+	if b.InputReview != nil {
+		if err := b.InputReview.ValidateAgainstBinding(b); err != nil {
+			return err
+		}
+	}
 	if duplicate := duplicateRuntimeValidationProofCheckRef(b.RequiredCheckRefs); duplicate != "" {
 		return fmt.Errorf("runtime validation proof requirement binding duplicates check %q", duplicate)
 	}

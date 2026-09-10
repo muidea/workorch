@@ -28,6 +28,9 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, logica
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
 	document = document.Normalized()
+	if err := ValidateRuntimeSemanticInputReviewConsistency(document); err != nil {
+		return nil, RuntimeCWIReconciliationContract{}, err
+	}
 	if err := validateRuntimeSemanticFeasibilitySetWithValidatedManifest(validated, document, feasibilities, true); err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}

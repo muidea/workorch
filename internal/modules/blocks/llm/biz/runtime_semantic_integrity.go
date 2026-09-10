@@ -1,7 +1,9 @@
 package llm
 
 import (
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -36,6 +38,31 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 	}
 	if len(budget.RedactedPaths) > 0 && budget.RedactionApplied {
 		missing = append(missing, "protected_context_redacted")
+	}
+	if context.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
+		projection, err := runtimeSemanticManifestForProvider(manifest, context.PlanStep, context.BatchCoverageWorkItemIDs)
+		if err != nil {
+			return err
+		}
+		var actual runtimeSemanticAuthorityProjection
+		if json.Unmarshal([]byte(contents["C3"]), &actual) != nil {
+			missing = append(missing, "P0.semantic_authority")
+		} else {
+			for _, obligation := range projection.ProofObligations {
+				if obligation.ValidationProofRequirement == nil || len(obligation.ValidationProofRequirement.InputReviews) == 0 {
+					continue
+				}
+				found := false
+				for _, rendered := range actual.Manifest.ProofObligations {
+					if rendered.CoverageWorkItemID == obligation.CoverageWorkItemID && reflect.DeepEqual(rendered.ValidationProofRequirement, obligation.ValidationProofRequirement) {
+						found = true
+					}
+				}
+				if !found {
+					missing = append(missing, "P0.validation_input_review_preimage")
+				}
+			}
+		}
 	}
 	if len(missing) == 0 {
 		return nil

@@ -48,6 +48,9 @@ const (
 // operation authorization. Exactly one Policy is active; unused ref slices must
 // be empty after normalize.
 type RuntimeOperationTargetAuthorization struct {
+	// ExcludedTargetRefs is a sealed negative membership constraint. It also
+	// applies to selector-only scopes; normalization must never erase it.
+	ExcludedTargetRefs        []string `json:",omitempty"`
 	Policy                    RuntimeOperationTargetPolicy
 	ExactTargetRefs           []string
 	OwnerScopeTargetRefs      []string
@@ -66,9 +69,12 @@ type RuntimeOperationTargetAuthorization struct {
 // operation-level authorization input for renderer, decoder, evaluator and
 // owner feasibility.
 type RuntimeCandidateContractManifest struct {
-	Revision string
-	Hash     string
-	State    ConvergenceState
+	// Retain complete owner preimages for mutation exclusions. They are not
+	// operation capabilities or provider-selectable catalogs.
+	MutationInputCatalogs []RuntimeOperationAdmissibility `json:",omitempty"`
+	Revision              string
+	Hash                  string
+	State                 ConvergenceState
 	// EffectPolicy is the canonical convergence-state policy shared by renderer,
 	// candidate admission, dispatch seal and receipt evidence adjudication.
 	EffectPolicy RuntimeConvergenceEffectPolicy
@@ -367,6 +373,9 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 			}
 			manifest.Operations = append(manifest.Operations, operation)
 		}
+		if decision.State == ConvergenceStateNeedStateChange {
+			manifest.MutationInputCatalogs = runtimeValidationInputProtectionCatalogs(ownerFacts.OperationAdmissibilities, manifest.Operations)
+		}
 	case ConvergenceStateNeedAssessment:
 		// Assessment has a closed non-operation envelope, but its post-seal
 		// adjudication is still scoped to the exact semantic proof bindings of the
@@ -556,6 +565,7 @@ func RuntimeCandidateAllowedOperationKinds(decision RuntimeDecision, selection *
 }
 
 func (m RuntimeCandidateContractManifest) Normalized() RuntimeCandidateContractManifest {
+	m.MutationInputCatalogs = NormalizeRuntimeOperationAdmissibilities(m.MutationInputCatalogs)
 	m.Revision = strings.TrimSpace(m.Revision)
 	m.Hash = strings.TrimSpace(m.Hash)
 	m.State = ConvergenceState(strings.TrimSpace(string(m.State)))
@@ -636,6 +646,7 @@ func (m RuntimeCandidateOperationManifest) Normalized() RuntimeCandidateOperatio
 }
 
 func (t RuntimeOperationTargetAuthorization) Normalized() RuntimeOperationTargetAuthorization {
+	t.ExcludedTargetRefs = normalizeStrings(t.ExcludedTargetRefs)
 	t.Policy = RuntimeOperationTargetPolicy(strings.TrimSpace(string(t.Policy)))
 	t.ExactTargetRefs = normalizeStrings(t.ExactTargetRefs)
 	t.OwnerScopeTargetRefs = normalizeStrings(t.OwnerScopeTargetRefs)
@@ -687,14 +698,14 @@ func (t RuntimeOperationTargetAuthorization) AllowedTargetRefs() []string {
 	t = t.Normalized()
 	switch t.Policy {
 	case RuntimeOperationTargetPolicyExactTarget:
-		return append([]string(nil), t.ExactTargetRefs...)
+		return runtimeTargetsWithoutExcluded(t.ExactTargetRefs, t.ExcludedTargetRefs)
 	case RuntimeOperationTargetPolicyExistingOwnerScope:
 		if len(t.OwnerScopeTargetRefs) != 0 {
-			return append([]string(nil), t.OwnerScopeTargetRefs...)
+			return runtimeTargetsWithoutExcluded(t.OwnerScopeTargetRefs, t.ExcludedTargetRefs)
 		}
 		return nil
 	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-		return append([]string(nil), t.ProspectiveTargetRefs...)
+		return runtimeTargetsWithoutExcluded(t.ProspectiveTargetRefs, t.ExcludedTargetRefs)
 	default:
 		return nil
 	}
@@ -714,6 +725,9 @@ func ValidateRuntimeCandidateContractManifestRawCanonical(manifest RuntimeCandid
 	canonical := manifest.Normalized()
 	if !reflect.DeepEqual(manifest, canonical) {
 		return fmt.Errorf("runtime candidate contract manifest is not raw-canonical")
+	}
+	if err := validateRuntimeManifestInputProtection(manifest); err != nil {
+		return err
 	}
 	for _, operation := range manifest.Operations {
 		if operation.InputRepair != nil {
@@ -840,6 +854,12 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashString(h, binding.Hash)
 	}
 	writeHashStrings(h, manifest.TargetRefs)
+	if len(manifest.MutationInputCatalogs) != 0 {
+		writeHashString(h, "runtime-mutation-input-catalogs/v1")
+		for _, catalog := range manifest.MutationInputCatalogs {
+			writeHashString(h, catalog.SnapshotID)
+		}
+	}
 	writeHashString(h, manifest.RepairClosureID)
 	writeHashString(h, string(manifest.RepairPurpose))
 	writeHashString(h, string(manifest.AssessmentPurpose))
@@ -926,6 +946,7 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 		writeHashStrings(h, operation.Target.OwnerSelectorRefs)
 		writeHashStrings(h, operation.Target.ProspectiveConstraintRefs)
 		writeHashStrings(h, operation.Target.ProspectiveTargetRefs)
+		writeRuntimeExcludedTargetsHash(h, operation.Target.ExcludedTargetRefs)
 		writeHashStrings(h, operation.PrerequisiteSnapshotRefs)
 		writeHashStrings(h, operation.AdmissibilitySnapshotRefs)
 		for _, recipe := range operation.ValidationRecipes {
@@ -1008,6 +1029,9 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 	)
 	if err != nil {
 		return RuntimeCandidateOperationManifest{}, err
+	}
+	if state == ConvergenceStateNeedStateChange {
+		target.ExcludedTargetRefs = runtimeValidationInputMutationExclusions(descriptor.OwnerModuleID, ownerFacts, required, bindings)
 	}
 	// Wire-level RequireTargetRefs stays contract-driven for exact_target so
 	// kinds without a target field (git init, shell read-only, MCP tool call, …)

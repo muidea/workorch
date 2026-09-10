@@ -118,6 +118,8 @@ func (a *RuntimeAdapter) runtimeAdmissibilityPolicyRevision() string {
 	_, _ = fmt.Fprintf(h, "entrypoint-contract=%s;entrypoint-requirements=%s;protocol=%s;process-files=%d;", shellEntrypointContentContractRef, shellEntrypointContentRequirements, shellGoEntrypointObservationProtocolRef, maxShellProcessCoverageFiles)
 	_, _ = fmt.Fprintf(h, "failure-details=%s;failure-requirements=%s;", runtimemodel.RuntimeValidationFailureDetailProtocolV2, shellAssertionFeedbackRequirements)
 	_, _ = fmt.Fprintf(h, "versioned-input=%s;", modulecommon.ValidationRecipeAdapterVersionedEntrypoint)
+	_, _ = fmt.Fprint(h, "input-protection=shell/native-input-targets/v1;")
+	_, _ = fmt.Fprintf(h, "input-review=%s;files=%d;bytes=%d;", runtimemodel.RuntimeValidationInputReviewProtocol, runtimemodel.RuntimeValidationInputReviewMaxFiles, runtimemodel.RuntimeValidationInputReviewMaxBytes)
 	for _, key := range keys {
 		_, _ = fmt.Fprintf(h, "env=%s;", key)
 	}
@@ -150,6 +152,29 @@ func (a *RuntimeAdapter) runtimeAdmissibilityObservationWithManifest(workspaceDi
 		dependencies = append(dependencies, runtimemodel.RuntimeFreshnessDependency{
 			Domain: runtimemodel.RuntimeResourceWorkspaceTarget, OwnerModuleID: runtimemodel.RuntimeModuleFile, SubjectRef: strings.TrimSpace(targetRef), Revision: revision,
 		})
+	}
+	// Use the content actually delivered for review as the freshness preimage.
+	// Re-reading it here could bless different bytes after a concurrent edit.
+	for _, surface := range inventory.ValidationSurfaces {
+		for _, proof := range surface.ProofRequirementBindings {
+			if proof.InputReview == nil {
+				continue
+			}
+			for _, file := range proof.InputReview.Files {
+				dependency := runtimemodel.RuntimeFreshnessDependency{Domain: runtimemodel.RuntimeResourceWorkspaceTarget,
+					OwnerModuleID: runtimemodel.RuntimeModuleFile, SubjectRef: file.TargetRef, Revision: file.ContentHash}
+				found := false
+				for i := range dependencies {
+					if dependencies[i].Domain == dependency.Domain && dependencies[i].OwnerModuleID == dependency.OwnerModuleID && dependencies[i].SubjectRef == dependency.SubjectRef {
+						dependencies[i] = dependency
+						found = true
+					}
+				}
+				if !found {
+					dependencies = append(dependencies, dependency)
+				}
+			}
+		}
 	}
 	observation := runtimemodel.RuntimePrerequisiteObservation{
 		PrerequisiteID: prerequisiteID, Kind: runtimemodel.PrerequisiteKindOperationAdmissibility, OwnerModuleID: runtimemodel.RuntimeModuleShell,

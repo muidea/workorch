@@ -59,6 +59,14 @@ func ValidateRuntimeOperationTargetsAgainstAuthorization(
 	authorization = authorization.Normalized()
 	targetRefs = normalizeStrings(targetRefs)
 	allowed := authorization.AllowedTargetRefs()
+	for _, target := range targetRefs {
+		if containsString(authorization.ExcludedTargetRefs, target) {
+			return &RuntimeOperationTargetAuthorizationError{
+				Rule: runtimeOperationTargetRuleOutside, Actual: target,
+				Allowed: allowed, Required: []string{"target outside sealed mutation exclusions"},
+			}
+		}
+	}
 
 	requiredError := func() error {
 		return &RuntimeOperationTargetAuthorizationError{

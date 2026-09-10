@@ -105,7 +105,7 @@ if json.Unmarshal(out,&got)!=nil || got.Path!="src/"+language+"/symbol" || got.L
 	}
 }
 
-func TestVersionedInputCannotSealProofWithoutIndependentCalibration(t *testing.T) {
+func TestVersionedInputPublishesExactReviewSubjectNotConsistencyVerdict(t *testing.T) {
 	recipe := runtimecontract.RuntimeValidationRecipe{ID: "native", Command: "go", Args: []string{"test", "./..."}, AdapterRef: modulecommon.ValidationRecipeAdapterVersionedEntrypoint}
 	requirement := shellValidationProofRequirementForTest(t, recipe.ID, "cwi-versioned")
 	checks, ok := shellValidationCheckAttestations(recipe, requirement)
@@ -118,11 +118,12 @@ func TestVersionedInputCannotSealProofWithoutIndependentCalibration(t *testing.T
 	binding := shellTestWorkspaceManifestBinding("same-tree", []string{target})
 	for range 2 {
 		surfaces := shellValidationSurfaces([]runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationRecipe{recipe}, []runtimecontract.RuntimeValidationProofRequirement{requirement}, binding, "catalog-versioned", root)
-		if len(surfaces) != 1 || surfaces[0].Validate() != nil || len(surfaces[0].ProofRequirementBindings) != 0 || len(surfaces[0].ProofRequirementPreparations) != 0 || len(surfaces[0].ProofRequirementUnavailabilities) != 1 {
-			t.Fatalf("uncalibrated input became authority: %+v", surfaces)
+		if len(surfaces) != 1 || surfaces[0].Validate() != nil || len(surfaces[0].ProofRequirementBindings) != 1 || len(surfaces[0].ProofRequirementPreparations) != 0 || len(surfaces[0].ProofRequirementUnavailabilities) != 0 {
+			t.Fatalf("owner review subject unavailable: %+v", surfaces)
 		}
-		if surfaces[0].ProofRequirementUnavailabilities[0].OriginalDiagnostic.OriginalCode != "validation_input_calibration_unavailable" {
-			t.Fatal("missing calibration cause")
+		proof := surfaces[0].ProofRequirementBindings[0]
+		if proof.InputReview == nil || proof.InputReview.ValidateAgainstBinding(proof) != nil || len(proof.InputReview.Files) != 1 || proof.InputReview.Files[0].TargetRef != target {
+			t.Fatal("missing exact independently reviewable source")
 		}
 	}
 }

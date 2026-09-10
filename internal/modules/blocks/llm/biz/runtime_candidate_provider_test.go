@@ -3938,6 +3938,25 @@ func TestRuntimeProviderRequestNarrowsFileScopeAcrossSchemaContextAndRetry(t *te
 			t.Fatalf("scope provider C3 lost %q: %s", required, dynamic)
 		}
 	}
+	t.Run("input exclusion facts remain outside stable prefix", func(t *testing.T) {
+		protectedContext := candidateContext
+		protectedContext.Resources.OperationAdmissibilities = append(append([]runtimecontract.RuntimeOperationAdmissibility(nil), candidateContext.Resources.OperationAdmissibilities...), inputProtectionProviderCatalog())
+		protectedRequest := candidateRequest
+		protectedRequest.CandidateContext = protectedContext
+		protectedRequest.CandidateManifest = runtimeCandidateManifestForRequest(t, decision, protectedContext)
+		rendered, err := runtimeProviderRequest(protectedRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for index := 0; index < 3; index++ {
+			if rendered.PromptContext.Sections[index].Content != request.PromptContext.Sections[index].Content {
+				t.Fatalf("volatile validation input facts changed C%d", index)
+			}
+		}
+		if rendered.ContextBudget.CachePlan.RenderedStablePrefixHash != request.ContextBudget.CachePlan.RenderedStablePrefixHash || rendered.ContextBudget.CachePlan.StablePrefixHash != request.ContextBudget.CachePlan.StablePrefixHash || !strings.Contains(rendered.PromptContext.Sections[3].Content, `"excludedTargetRefs":["input.fixture"]`) {
+			t.Fatal("input protection drifted stable prefix or disappeared from C3")
+		}
+	})
 	for _, forbidden := range []string{`"kind":"git/write"`, `"admissibleOperationKinds"`, `"capabilities"`, `"operationAdmissibilities"`, `"prerequisiteObservations"`} {
 		if strings.Contains(dynamic, forbidden) {
 			t.Fatalf("scope provider C3 widened operation contracts to %s: %s", forbidden, dynamic)

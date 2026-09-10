@@ -211,6 +211,10 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 		return EvidenceCommitResult{}, fmt.Errorf("%w: governance resolution does not match the active governed dispatch", common.ErrConflict)
 	}
 	dependency := aggregate.ActiveDispatch.Candidate.Governance.ExternalDependency
+	inputReview := dependency.RequestedAction == runtimecontract.RuntimeValidationInputReviewInformationAction
+	if inputReview && !runtimeInputReviewResolutionMatches(aggregate, aggregate.SemanticPlanning, resolution) {
+		return EvidenceCommitResult{}, fmt.Errorf("%w: input-review resolution has no exact complete report", common.ErrConflict)
+	}
 	dispatchFacts := governancecheck.DispatchFacts{
 		DecisionState: aggregate.Decision.State, DispatchID: aggregate.ActiveDispatch.ID,
 		AuthoritySnapshotID: aggregate.ActiveDispatch.Transaction.AuthoritySnapshotID,
@@ -301,6 +305,11 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 	dispatch.State = DispatchStateCommitted
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
+	if inputReview && resolution.Outcome == runtimecontract.RuntimeGovernanceResolutionOutcomeContinue {
+		if err := retireRuntimeInputReviewForInformation(&aggregate, resolution); err != nil {
+			return EvidenceCommitResult{}, err
+		}
+	}
 	if grantedBindingIndex < 0 {
 		aggregate.Facts.RepairDirective = nil
 	}

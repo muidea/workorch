@@ -286,6 +286,7 @@ func StableRuntimeDispatchOperationTargetAuthorizationsHash(values []RuntimeDisp
 		writeHashStrings(h, value.Target.OwnerSelectorRefs)
 		writeHashStrings(h, value.Target.ProspectiveConstraintRefs)
 		writeHashStrings(h, value.Target.ProspectiveTargetRefs)
+		writeRuntimeExcludedTargetsHash(h, value.Target.ExcludedTargetRefs)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

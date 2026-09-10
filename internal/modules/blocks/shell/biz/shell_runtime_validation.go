@@ -151,6 +151,16 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 		preparations := make([]runtimemodel.RuntimeValidationProofPreparation, 0)
 		unavailabilities := make([]runtimemodel.RuntimeValidationProofUnavailability, 0)
 		compatibleRequirements := 0
+		var inputTargets []string
+		// This namespace is owned by this adapter, never by Core or File. Keep
+		// existing inputs protected even when a native check is invalid/missing
+		// or belongs to a later proof batch. New create-only preparations remain
+		// available; no historical file is edited or renamed here.
+		for _, target := range binding.Manifest.TargetRefs {
+			if strings.HasPrefix(target, "workorch_validation/") {
+				inputTargets = append(inputTargets, target)
+			}
+		}
 		if staticIDs[recipe.ID] {
 			for _, requirement := range runtimemodel.NormalizeRuntimeValidationProofRequirements(requirements) {
 				if requirement.Validate() != nil ||
@@ -160,22 +170,17 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 				compatibleRequirements++
 				attestations, observable := shellValidationCheckAttestations(recipe, requirement)
 				if !observable {
+					if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint {
+						unavailabilities = append(unavailabilities, runtimemodel.RuntimeValidationProofUnavailability{
+							Requirement: requirement, ValidationRecipeID: recipe.ID,
+							OriginalDiagnostic: shellNativeCheckReadinessDiagnostic(shellNativeCheckInspection{Code: "validation_input_review_mapping_unsupported"}, requirement, binding.Manifest, catalogObservedRevision, ""),
+						})
+					}
 					continue
 				}
 				attestations = shellValidationSupplementAttestations(attestations, binding.Manifest.TargetRefs)
 				inspection := inspectShellNativeValidationChecks(workspaceDirectory, binding.Manifest.TargetRefs, attestations)
-				// Version isolation and AST readiness do not establish semantic
-				// equivalence to the immutable requirement. Until an independent
-				// calibration contract is available, this adapter cannot publish
-				// a direct proof or speculative acquisition authority.
-				if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint {
-					inspection.Code = "validation_input_calibration_unavailable"
-					unavailabilities = append(unavailabilities, runtimemodel.RuntimeValidationProofUnavailability{
-						Requirement: requirement, ValidationRecipeID: recipe.ID,
-						OriginalDiagnostic: shellNativeCheckReadinessDiagnostic(inspection, requirement, binding.Manifest, catalogObservedRevision, ""),
-					})
-					continue
-				}
+				inputTargets = append(inputTargets, inspection.InputTargetRefs...)
 				if !shellNativeCheckInspectionPreparable(inspection, requirement, binding.Manifest.TargetRefs, attestations) {
 					unavailabilities = append(unavailabilities, runtimemodel.RuntimeValidationProofUnavailability{
 						Requirement: requirement, ValidationRecipeID: recipe.ID,
@@ -197,6 +202,18 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 				if err != nil {
 					continue
 				}
+				if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint {
+					var code string
+					ownerBinding.InputReview, code = shellVersionedInputReview(workspaceDirectory, binding.Manifest.TargetRefs, ownerBinding)
+					if code != "" {
+						inspection.Code = code
+						unavailabilities = append(unavailabilities, runtimemodel.RuntimeValidationProofUnavailability{
+							Requirement: requirement, ValidationRecipeID: recipe.ID,
+							OriginalDiagnostic: shellNativeCheckReadinessDiagnostic(inspection, requirement, binding.Manifest, catalogObservedRevision, ""),
+						})
+						continue
+					}
+				}
 				bindings = append(bindings, ownerBinding)
 				checks = append(checks, requirement.RequiredCheckRefs...)
 			}
@@ -208,6 +225,10 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 			ProofApplicability:               runtimemodel.RuntimeValidationProofNotDeclared, EffectScope: runtimemodel.RuntimeEffectEphemeralSession,
 			IdempotencyClass: runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
 			InputSchemaHash:  schemaHash,
+		}
+		if len(inputTargets) != 0 {
+			surface.InputTargetOwnerModuleID = runtimemodel.RuntimeModuleFile
+			surface.InputTargetRefs = normalizeShellStrings(inputTargets)
 		}
 		if len(bindings) != 0 {
 			surface.ProofApplicability = runtimemodel.RuntimeValidationProofDirect

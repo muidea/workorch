@@ -1080,6 +1080,7 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 		seenVariants[key] = struct{}{}
 	}
 	seenSurfaces := make(map[string]struct{}, len(a.ValidationSurfaces))
+	reviewInputVersions := make(map[string]string)
 	for _, raw := range a.ValidationSurfaces {
 		if err := raw.Validate(); err != nil {
 			return err
@@ -1092,6 +1093,17 @@ func (a RuntimeOperationAdmissibility) Validate() error {
 			return fmt.Errorf("runtime operation admissibility duplicates validation surface %q", value.ID)
 		}
 		seenSurfaces[value.ID] = struct{}{}
+		for _, binding := range raw.ProofRequirementBindings {
+			if binding.InputReview == nil {
+				continue
+			}
+			for _, file := range binding.InputReview.Files {
+				if prior, found := reviewInputVersions[file.TargetRef]; found && prior != file.ContentHash {
+					return fmt.Errorf("runtime owner catalog has conflicting review input versions for %q", file.TargetRef)
+				}
+				reviewInputVersions[file.TargetRef] = file.ContentHash
+			}
+		}
 	}
 	if err := ValidateRuntimeOperationPolicyFacts(a.OperationPolicies); err != nil {
 		return err
@@ -1196,6 +1208,7 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 	writeHashStrings(h, value.ConstraintRefs)
 	writeHashStrings(h, value.ValidationRecipeRefs)
 	for _, surface := range value.ValidationSurfaces {
+		writeRuntimeValidationInputTargetsHash(h, surface)
 		writeHashString(h, surface.ID)
 		writeHashString(h, surface.OwnerModuleID)
 		writeHashString(h, surface.OperationKind)
@@ -1213,6 +1226,10 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 		writeHashStrings(h, surface.CheckRefs)
 		writeHashString(h, string(surface.ProofApplicability))
 		for _, binding := range surface.ProofRequirementBindings {
+			if binding.InputReview != nil {
+				writeHashString(h, RuntimeValidationInputReviewProtocol)
+				writeHashString(h, binding.InputReview.Hash)
+			}
 			writeHashString(h, binding.RequirementHash)
 			writeHashString(h, binding.DefinitionRevision)
 			writeHashString(h, string(binding.CoverageWorkItemID))

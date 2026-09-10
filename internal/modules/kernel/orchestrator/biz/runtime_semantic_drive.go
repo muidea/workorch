@@ -77,6 +77,10 @@ func (m *Biz) driveRuntimeSemanticRequired(ctx context.Context, aggregate runtim
 		Execution:         aggregate.Facts.Activation.ExecutionContract, Admissibilities: aggregate.Facts.Resources.OperationAdmissibilities,
 		EligibleCoverage: eligibleCoverage,
 	}
+	identity.InputReviewInformation, repairErr = runtime.RuntimeInputReviewInformation(aggregate)
+	if repairErr != nil {
+		return runtime.RuntimeAggregate{}, repairErr
+	}
 	if repairRequired {
 		// A repair purpose is CWI-local and cannot replace unrelated eligible
 		// Definition proofs in the same generation.

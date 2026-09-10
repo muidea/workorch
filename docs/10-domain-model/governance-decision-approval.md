@@ -40,6 +40,14 @@ continuation action、resume/successor references。对现行 Runtime governance
 通用 `replan` 字段不授权 application 创建 successor。重新按新 definition 执行必须走独立的 Workspace `restart`
 intent 与 Run-owned `ReplacementIntent` transaction。
 
+验证输入一致性评审的完整 `inconclusive` 报告使用 `runtime_governance` ticket（failure class
+`validation_input_review`、requested action `provide_validation_input_facts`），不是 Definition clarification。
+Orchestrator 绑定 immutable Definition/startup、原 required checks、exact 输入内容、report 和 request；Decision 独占票据状态。
+`provide_missing_info` 仅提交非空且至多 2048 bytes 的完整 UTF-8 事实摘要；不能修改原准则、审批冲突或授予 credit。
+matching resolution 接纳后，原报告 append-only 保留，新 semantic manifest/request 对同一内容重新评审。
+同一 Run/exact subject 最多接受一次信息补充；仍无法判断明确失败，不因预算耗尽再开票。
+只有完整业务不确定性可以进入这条路径，空/截断/格式/身份错误继续使用既有请求恢复和 correction budget。
+
 Definition clarification使用受限的Decision ticket class，不继承上述通用resolution行为：
 
 - pre-seal ticket只能由corrected all-of candidate的admission/promotion事实驱动

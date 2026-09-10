@@ -51,6 +51,16 @@ capability resource state。
 
 ### Semantic and candidate authority
 
+- 输入维护的可执行范围以 Shell 的 [input-maintenance contracts](../../blocks/shell/readme.md#executable-input-maintenance-contracts)
+  为准：已有 addition/repair 合同不授权通用验证实现替换。检查身份一致、普通 approval resolution 或外部测试通过
+  都不能替代 LLM 对原准则与新验证实现的一致性评审；评审要求见下节。这不增加审批豁免或第五个状态机，也不允许
+  通过泛化 repair route 绕过不可用的证明面。
+- 普通 state-change 的输入保护由 capability owner 的 `InputTargetOwnerModuleID + InputTargetRefs` 事实经同一 manifest
+  compiler 形成 `ExcludedTargetRefs`；三种 target policy（含 selector-only）共同执行。manifest 保留完整
+  `MutationInputCatalogs` 前像，accepted attempt、dispatch target authorization、hash 与 restart fence 不得丢失或改写
+  排除集合。只有 exact confirmed-validation `InputRepair` 可开放自己的单一 target，其余输入不开放；create-only addition
+  与合法实现修改仍走原事务。Core 不解析文件名/语言，capability owner 不选择 SM-2/SM-3/SM-4 transition；SM-1 不变。
+  这是普通修改准入，不是 LLM semantic review；越界重复只走既有 bounded candidate failure，不能制造治理 ticket。
 - 验收扩展只允许与原 Goal/DoD 一致的补充和细化，并与原义务合取；不允许通过 approval、输入版本或外部参考
   覆盖原准则。测试实现不等同于验收准则，修改输入不能从失败本身推导授权。shared contract 的
   `RuntimeValidationInputAddition.MatchesBinding` / `RuntimeValidationInputRepair.MatchesBinding` 对完整原始
@@ -207,6 +217,44 @@ capability resource state。
   generic missing-evidence 覆盖它，在新 validation accepted 后也不得继续保留它；该 evidence CAS 消费 handoff 后才进入
   assessment。SM-3 admission、replay fence 与 aggregate fresh-load 共用 `semantic_repair_continuation.go` 的旧 binding、
   candidate manifest、完整同-dispatch receipt/evidence 反证；旧 closure targets 只留作因果审计，不约束新 Definition 验证目标。
+
+### Validation-input consistency review boundary
+
+验证输入的一致性允许交由 LLM 评审，不要求用户逐项预先确认，也不要求外部参考实现。原 Goal/DoD 仍是唯一基准；
+新增验收只能一致地补充、细化，并与原义务合取。LLM 必须评审原准则与准确输入内容，而不是仅复述候选自身的符合性声明。
+评审是语义判断，不是确定性等价证明，也不是验收通过事实。
+
+| 完整评审结论 | 唯一合法后续边界 |
+| --- | --- |
+| 一致 | Orchestrator 校验完整逐项映射、原准则、输入内容身份及当前 request 后，才可由 SM-2 私有事件认可相应绑定；仍须实际执行和证据验收 |
+| 冲突 | 不得绑定或取得 credit；只能在已有预算与授权内生成保留原准则的新候选，或明确失败，不能请求审批豁免冲突 |
+| 无法判断 | Orchestrator 封存具体未决问题，经既有 typed governance 协作由 Decision owner 创建阻塞 ticket；LLM 不创建票据或修改 Runtime 状态 |
+
+评审身份必须绑定 workspace/run、sealed Definition/startup input、原准则来源、待评审输入的 exact 内容版本和 request。
+输入变化或评审过期不得复用“一致”结论。ticket 必须保留相同身份、未决准则和所需信息；ticket 处理结果仅补充事实，
+不能改变原准则或直接授予验证 credit，继续执行前必须重新评审适用的准确输入。Decision 独占 ticket 生命周期，
+Orchestrator 独占 SM-2～SM-4；恢复、重复结果及重复 ticket 请求必须沿持久化身份幂等处理。
+
+超时、传输故障、空响应、解析失败、缺少逐项结果和身份不匹配不是业务“无法判断”结论，不得直接制造 ticket；它们遵守
+既有 request recovery、document admission 和预算合同。ordinary Definition gap/repair 路径也不得猜测评审结论。
+生产接线复用 `semantic_plan/proof_batch`，不新增请求种类或状态机。capability owner 的 proof binding 可声明
+`InputReview`，封存 `validation/input-consistency/v1`、完整输入字节/hash、原 required checks/native mapping；LLM
+只返回 `validationInputReview` 的 exact subjectHash 和逐 check 的 `consistent|conflict|inconclusive`、reason、input refs。
+缺项、重复项、未知字段/结论或身份漂移仍是 document admission error。完整报告持久化后，SM-2 的
+`SemanticFeasibilityRequired` 私有事件在 proposal feasibility probe 前分类：一致才进入既有 feasibility/binding seal；冲突明确失败。
+
+完整无法判断经本地 governance dispatch（无额外 LLM 调用）封存 `provide_validation_input_facts`，由 Decision
+创建 `runtime_governance` ticket。`provide_missing_info` 必须提供非空、完整 UTF-8、最多 2048 bytes 的事实摘要。
+SM-2 验证 exact ticket/request/report lineage，在同一个 resolution CAS 中以 `input_review_information` 保留原 semantic
+generation，重入 `required`；SM-4 只交付 continuation。新 manifest 仅携带准确 subject 的 preceding resolution facts，
+使用新 logical request 重新评审；不改写 Definition/startup、旧报告或历史证据，也不授予 CWI credit。
+每个 Run 的同一 exact subject 最多接受一次信息补充；仍无法判断以 `validation_input_review_information_exhausted`
+明确失败，不循环开票；既有 history 容量不足以消费答案时，在开票前以 `validation_input_review_history_exhausted` 终止。
+拒绝 ticket 则沿既有治理 fail 路径终止。既有 history、request/correction、provider budget 不另开账户。
+
+Shell v3 是此合同的 capability producer；输入来源不可读、超出完整 review envelope 或 native mapping 不支持时仍不可用。
+默认软件开发模板不在恢复中自动升级 adapter。脚本化 provider 主线只能证明事务/owner/恢复合同，不代表真实 LLM
+语义可靠性或 release DCE 已验收。
 
 ### Receipt, evidence and repair
 
@@ -412,6 +460,8 @@ capability resource state。
 
 | 验收面 | 自动化证据 | 必需维度 |
 | --- | --- | --- |
+| ordinary validation-input protection | `workorchruntimecontract/runtime_validation_input_protection_test.go`、`biz/runtime_validation_input_addition_mainline_test.go::TestDriveRuntimeOrdinaryMutationCannotWeakenValidationInputAcrossRestart`、`TestDriveRuntimeRepeatedInputWeakeningClosesWithoutEffectOrTicket` | 三策略及 selector-only 排除、source preimage/hash/clone/replay、exact repair 例外；真实 File/Shell + file-backed Run + scripted provider 下，越界拒绝→合法源码修改→独立补充→fresh validation→Result/Workspace/Run 完成；source dispatch/input receipt/拒绝终态切点重启零额外 provider，重复越界零 effect/credit/ticket，不宣称真实模型或 release DCE 验收 |
+| validation-input review / factual ticket | `biz/runtime_validation_input_review_mainline_test.go`、`workorchruntimecontract/runtime_validation_input_review_test.go` | SM-2/3/4 共用旧事务；一致→实际验证，冲突/格式错误零 ticket，无法判断→Decision 信息→新请求重新评审；同一 subject 信息上限、reject、exact duplicate、内容/lineage tamper、五个持久化切点恢复与零额外 provider；SM-1 仍由 Run owner 交付 |
 | assessment purpose / repair generations | `workorchruntimecontract/runtime_assessment_purpose_preimage_test.go`、`biz/runtime/assessment_purpose_preseal_test.go`、`biz/runtime_validation_input_addition_mainline_test.go` | active/history purpose 隔离、exact binding 唯一反证、repair-only 不授予 assessment、缺失/重复/篡改拒绝；file-backed Run + 真实 File/Shell 的历史 assessment→弱验证拒绝→semantic repair seal→create-only input→fresh validation→assessment→终态投递；SM-2 seal CAS 前后、input receipt 与 fresh validation 提交后重启；终态 duplicate、各切点零额外 provider/预算，旧输入与 startup 不变，SM-1 ownership 不变 |
 | target preimage / terminal feedback | `workorchruntimecontract/runtime_target_parameter_binding_test.go`、`blocks/file/target_parameter_test.go`、`biz/runtime/prerequisite_freshness_test.go`、`biz/runtime_result_feedback_test.go`、`biz/runtime/controller_test.go::TestRuntimeControllerInitializePreservesLegacyFeedbackVersionWithoutWrite`、`biz/runtime_result_projection_test.go::TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjection` | SM-3 exact target 派生与 echo 拒绝；SM-2 无进展 guard 保留 root cause 且零额外预算；SM-4 完整且不虚构验收的反馈、旧/新版本 partial delivery 重启重放；SM-1 与 capability owner 不变 |
 | repair rejection / historical probe lineage | `biz/runtime/repair_rejection_closure_test.go`、`biz/runtime/candidate_owner_conformance_test.go`、`biz/runtime/shell_owner_receipt_integration_test.go::TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot` | first-member/partial-effect rejected repair 同 CAS 退役；candidate correction 的 exact catalog preimage、tamper/协调重封存拒绝、CAS-before/response-loss/restart duplicate；真实 Shell→File correction→effect→fresh validation，历史拒绝不阻塞 current owner fact 推进 |

@@ -80,6 +80,10 @@ operation。
   SHA-256 全部相同，才返回普通 `ReplayProof`。错配返回 `validation_input_postimage_mismatch / policy_disallowed`，零写入，
   不冒充 candidate correction。真正 apply 和 receipt-loss replay 继续核对已封存 ReplayProof，不能借新 catalog 应用旧诊断。
   File 不解释编译错误、不改变验收标准、不自行选择修复或 validation；修复 receipt 不构成 DoD credit。
+- File ingress 共同消费 sealed target authorization 的 `ExcludedTargetRefs`，普通修改不能通过既有 scope 或 selector
+  写入排除目标。File 不按路径/扩展名判断是否为验证输入，也不调用 Shell、LLM 或 Decision 取得额外权限；排除集合和
+  exact repair 例外只来自 Orchestrator sealed manifest。`biz/validation_input_protection_test.go` 覆盖真实 EventHub
+  对排除输入的零副作用拒绝，以及合法实现目标的重复只读 feasibility。
 - workspace manifest/revision 对 deliverable topology/content 变化敏感；admissibility/target snapshot 漂移返回 typed stale，
   不自行刷新 authority。
 - state-changing effect 返回 exact before/after revision 和 bounded evidence。execution key 已有 committed receipt 时返回 replay

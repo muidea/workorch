@@ -398,7 +398,7 @@ func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, 
 		}
 		return runtimeDriveTransitionOutcome{aggregate: updated}, nil
 	}
-	if semanticAuthorityPending {
+	if semanticAuthorityPending && aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance {
 		return m.driveOneRuntimeSemanticTransition(ctx, aggregate, previousRevision, previousConvergence)
 	}
 	if aggregate.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningFailed {

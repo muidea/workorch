@@ -50,6 +50,10 @@ func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runti
 		Admissibilities:   aggregate.Facts.Resources.OperationAdmissibilities,
 		EligibleCoverage:  eligible,
 	}
+	identity.InputReviewInformation, err = RuntimeInputReviewInformation(aggregate)
+	if err != nil {
+		return err
+	}
 	if repairRequired {
 		identity.EligibleCoverage = []common.CoverageWorkItemID{repairInput.CoverageWorkItemID}
 		identity.ValidationFailureRepair = &repairInput
@@ -1258,6 +1262,9 @@ func (c *planningTransactionComponent) requireSemanticFeasibility(ctx context.Co
 		return RuntimeAggregate{}, err
 	}
 	changed, err := func(_ RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+		if handled, changed, err := classifyRuntimeInputReview(&transaction); handled {
+			return changed, err
+		}
 		if ledger.Phase == runtimecontract.RuntimeSemanticPlanningFeasibilityRequired {
 			return false, nil
 		}

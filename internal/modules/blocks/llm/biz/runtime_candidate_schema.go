@@ -191,6 +191,9 @@ func runtimeCandidateOperationManifestForKind(values []runtimecontract.RuntimeCa
 func runtimeOperationTargetRefsSchema(operation runtimecontract.RuntimeCandidateOperationManifest) map[string]any {
 	allowedTargets := operation.Target.Normalized().AllowedTargetRefs()
 	targetItems := map[string]any{"type": "string", "maxLength": runtimeProviderStringMaxLength}
+	if excluded := operation.Target.Normalized().ExcludedTargetRefs; len(excluded) != 0 {
+		targetItems["not"] = map[string]any{"enum": append([]string(nil), excluded...)}
+	}
 	if len(allowedTargets) > 0 {
 		targetItems["enum"] = append([]string(nil), allowedTargets...)
 	}

@@ -24,9 +24,10 @@ const (
 // It is not a semantic grader and cannot establish that a Goal/DoD is satisfied.
 // The same bounded inspection feeds catalog readiness and its factual diagnostic.
 type shellNativeCheckInspection struct {
-	Code       string
-	CheckRef   string
-	TargetRefs []string
+	InputTargetRefs []string
+	Code            string
+	CheckRef        string
+	TargetRefs      []string
 }
 
 type shellNativeCheckFunction struct {
@@ -36,7 +37,7 @@ type shellNativeCheckFunction struct {
 	testingAlias string
 }
 
-func inspectShellNativeValidationChecks(directory string, targetRefs []string, attestations []runtimecontract.RuntimeValidationCheckAttestationBinding) shellNativeCheckInspection {
+func inspectShellNativeValidationChecks(directory string, targetRefs []string, attestations []runtimecontract.RuntimeValidationCheckAttestationBinding) (inspection shellNativeCheckInspection) {
 	root, err := filepath.Abs(strings.TrimSpace(directory))
 	if err != nil || strings.TrimSpace(directory) == "" || len(attestations) == 0 {
 		return shellNativeCheckInspection{Code: "native_check_input_unavailable"}
@@ -48,6 +49,17 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 	defer sourceRoot.Close()
 	functions := make(map[string][]shellNativeCheckFunction)
 	entries := make(map[string][]shellNativeCheckFunction)
+	// Preserve every observed native input, including ambiguous/rejected
+	// entries. Readiness failure never turns an input into an ordinary writable
+	// implementation. These identities do not grant repair authority.
+	defer func() {
+		for _, check := range shellFlattenNativeCheckAttestations(attestations) {
+			for _, entry := range entries[check.NativeCheckRef] {
+				inspection.InputTargetRefs = append(inspection.InputTargetRefs, entry.targetRef)
+			}
+		}
+		inspection.InputTargetRefs = normalizeShellStrings(inspection.InputTargetRefs)
+	}()
 	var invalidSources []string
 	fileCount, sourceBytes := 0, int64(0)
 	for _, ref := range normalizeShellStrings(targetRefs) {
