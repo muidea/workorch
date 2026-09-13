@@ -3,10 +3,12 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -48,6 +50,56 @@ func TestDriveRuntimeValidationInputAdditionPreservesHistoricalAssessment(t *tes
 	}
 }
 
+func TestDriveRuntimeExecutionLimitsPreserveRealOwnerCompletionAcrossRestart(t *testing.T) {
+	var baseline int64
+	for _, cut := range []string{"uninterrupted", "after_input_receipt"} {
+		t.Run(cut, func(t *testing.T) {
+			calls := runValidationInputAdditionMainline(t, cut, validationInputMainlineOptions{ExecutionLimits: &runtimecontract.RuntimeExecutionLimits{
+				ProtocolRef: runtimecontract.RuntimeExecutionLimitsV1, MaxProviderCalls: 64, MaxCapabilityOperations: 32, MaxProofBatchesPerCWI: 4, MaxDurableDispatchesPerCWI: 2,
+			}})
+			if calls < 2 || calls > 64 {
+				t.Fatalf("physical calls outside declared budget: %d", calls)
+			}
+			if cut == "uninterrupted" {
+				baseline = calls
+			} else if calls != baseline {
+				t.Fatal("restart consumed additional provider calls")
+			}
+		})
+	}
+}
+
+func TestDriveRuntimeProofBudgetExhaustionClosesWithoutAnotherProviderOrEffect(t *testing.T) {
+	runValidationInputAdditionMainline(t, "uninterrupted", validationInputMainlineOptions{
+		ProofBudgetExhaustion: true,
+		ExecutionLimits: &runtimecontract.RuntimeExecutionLimits{
+			ProtocolRef: runtimecontract.RuntimeExecutionLimitsV1, MaxProviderCalls: 64, MaxCapabilityOperations: 32, MaxProofBatchesPerCWI: 1,
+		},
+	})
+}
+
+func TestDriveRuntimeDurableDispatchBudgetBoundsAdditionAndRepairAcrossRestart(t *testing.T) {
+	for _, cut := range []string{"uninterrupted", "after_input_receipt"} {
+		t.Run(cut, func(t *testing.T) {
+			runValidationInputAdditionMainline(t, cut, validationInputMainlineOptions{
+				Entrypoint: true, BehaviorRepair: true, DurableBudgetExhaustion: true,
+				ExecutionLimits: &runtimecontract.RuntimeExecutionLimits{
+					ProtocolRef: runtimecontract.RuntimeExecutionLimitsV1, MaxProviderCalls: 64, MaxCapabilityOperations: 32, MaxDurableDispatchesPerCWI: 1,
+				},
+			})
+		})
+	}
+}
+
+func TestDriveRuntimeDurableDispatchBudgetAllowsAdditionAndRepairWithinLimit(t *testing.T) {
+	runValidationInputAdditionMainline(t, "uninterrupted", validationInputMainlineOptions{
+		Entrypoint: true, BehaviorRepair: true,
+		ExecutionLimits: &runtimecontract.RuntimeExecutionLimits{
+			ProtocolRef: runtimecontract.RuntimeExecutionLimitsV1, MaxProviderCalls: 64, MaxCapabilityOperations: 32, MaxDurableDispatchesPerCWI: 2,
+		},
+	})
+}
+
 func TestDriveRuntimeInvalidSupplementClosesBeforeAnotherAcquisition(t *testing.T) {
 	var baseline int64
 	for _, cut := range []string{"uninterrupted", "after_input_receipt", "after_unavailability_terminal"} {
@@ -63,12 +115,15 @@ func TestDriveRuntimeInvalidSupplementClosesBeforeAnotherAcquisition(t *testing.
 }
 
 type validationInputMainlineOptions struct {
-	InvalidSupplement bool
-	Entrypoint        bool
-	CompileRepair     bool
-	BehaviorRepair    bool
-	InputProtection   bool
-	RepeatInputBypass bool
+	ExecutionLimits         *runtimecontract.RuntimeExecutionLimits
+	ProofBudgetExhaustion   bool
+	DurableBudgetExhaustion bool
+	InvalidSupplement       bool
+	Entrypoint              bool
+	CompileRepair           bool
+	BehaviorRepair          bool
+	InputProtection         bool
+	RepeatInputBypass       bool
 }
 
 func TestDriveRuntimeOrdinaryMutationCannotWeakenValidationInputAcrossRestart(t *testing.T) {
@@ -195,6 +250,15 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 	}
 	// Initial fixture only: Shell authors the original native check and File
 	// writes it before the Run. The later supplement must come from Runtime.
+	if mode.ExecutionLimits != nil {
+		bootstrap.Activation.ExecutionContract.ExecutionLimits = mode.ExecutionLimits
+		var err error
+		bootstrap.ExecutionBudgetPolicy, err = runtimecontract.RuntimeExecutionBudgetPolicyWithLimits(bootstrap.ConvergencePolicy, bootstrap.RecoveryPolicy, mode.ExecutionLimits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
+	}
 	runtimeTestPrepareNativeValidationThroughOwners(t, bootstrap, deliverable)
 	if err := os.WriteFile(filepath.Join(deliverable, "subject.go"), []byte("package fixture\nfunc DeliveredValue() int { return 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -291,11 +355,107 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 	var observedInputRepair *runtimecontract.RuntimeValidationInputRepair
 	var behaviorRepairs int
 	var inputBypassAttempts int
+	var observedSuccessfulWorkHistory bool
 	llm := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llm.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		providerCalls.Add(1)
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+			// Reload via the Run owner, including after the tested crash cuts.
+			// Session/submission CAS advances the aggregate revision but must not
+			// invent CWI acceptance or history in the pre-session observation.
+			reader := newRuntimeDriveTestModule(t, hub)
+			persisted, loadErr := reader.loadRuntime(ctx, command.WorkspaceID, command.RunID)
+			if loadErr != nil {
+				t.Error(loadErr)
+			} else {
+				progress := command.SemanticContext.CoverageProgress
+				replayed, progressErr := runtimecontract.BuildRuntimeSemanticCoverageProgress(command.SemanticContext, command.SemanticManifest, persisted.Facts, progress.SourceStateRevision)
+				if progressErr != nil || !reflect.DeepEqual(replayed, progress) || progress.SourceStateRevision > persisted.StateRevision {
+					t.Errorf("semantic progress diverged from reloaded owner facts: %+v err=%v", replayed, progressErr)
+				}
+				history, historyErr := runtime.SemanticExecutionHistory(persisted, command.SemanticContext, command.SemanticManifest)
+				if historyErr != nil || !reflect.DeepEqual(history, command.SemanticContext.ExecutionHistory) {
+					t.Errorf("semantic execution history diverged from reloaded receipts: err=%v", historyErr)
+				}
+				for _, observation := range history.Receipts {
+					if observation.ExpectedEffectScope == "" {
+						t.Error("real owner history lost sealed effect expectation")
+					}
+					if observation.ObservedState == runtimecontract.RuntimeOperationOutcomeRejected && observation.Diagnostic == nil {
+						t.Error("real owner rejected receipt lost its diagnostic")
+					}
+					if observation.ObservedState == runtimecontract.RuntimeOperationOutcomeAccepted && observation.Changed && slices.Contains(observation.BoundCoverageWorkItemIDs, common.CoverageWorkItemID("cwi-1")) {
+						observedSuccessfulWorkHistory = true
+					}
+				}
+				budget := command.SemanticContext.ExecutionBudget
+				persistedRecord := runtimeStateRecordFromAggregate(persisted)
+				durableUsage, durableErr := runtimecontract.RuntimeDurableDispatchUsage(persistedRecord.ActiveDispatch, persistedRecord.CompletedDispatches, persistedRecord.CandidateAttempts)
+				if durableErr != nil {
+					t.Fatal(durableErr)
+				}
+				for _, observed := range budget.VisibleDurableDispatches {
+					if observed.Used != durableUsage[observed.CoverageWorkItemID] {
+						t.Fatalf("semantic durable budget differs from persisted seal lineage: %+v, usage=%v", observed, durableUsage)
+					}
+				}
+				if err := budget.Validate(command.SemanticContext, command.SemanticManifest); err != nil {
+					t.Fatalf("semantic request lost budget observation: %v", err)
+				}
+				view, budgetErr := runtimecontract.BuildRuntimeExecutionBudgetView(persisted.Facts.WorkspaceID, persisted.Facts.RunID, persisted.StateRevision, persisted.ExecutionBudget, "", "")
+				if budgetErr != nil {
+					t.Fatal(budgetErr)
+				}
+				for _, observed := range budget.PhysicalDimensions {
+					for _, current := range view.Dimensions {
+						if current.Dimension != observed.Dimension {
+							continue
+						}
+						// The observation precedes this callback's one submission
+						// CAS; all earlier calls and all effects remain accounted.
+						increment := int64(0)
+						if current.Dimension == runtimecontract.RuntimeBudgetDimensionProviderCall {
+							increment = 1
+						}
+						if current.Confirmed != observed.Confirmed || current.Unknown != observed.Unknown || current.Reserved != observed.Reserved+increment || current.Remaining != observed.Remaining-increment {
+							t.Fatalf("semantic budget differs from exact pre-submission owner accounting: observed=%+v current=%+v", observed, current)
+						}
+					}
+				}
+				usage := runtimecontract.RuntimeSemanticProofBatchUsage(persisted.SemanticPlanning)
+				for _, item := range budget.VisibleProofBatches {
+					if item.Used != usage[item.CoverageWorkItemID] {
+						t.Fatal("semantic request reset original CWI proof usage")
+					}
+				}
+			}
+			if err := runtimecontract.ValidateRuntimeSemanticExecutionFeedback(command.SemanticContext, command.SemanticManifest); err != nil {
+				t.Errorf("semantic repair request lost exact causal feedback: %v", err)
+			}
+			for _, feedback := range command.SemanticContext.ExecutionFeedback {
+				if feedback.Diagnostic == nil || feedback.Diagnostic.OwnerModuleID != runtimecontract.RuntimeModuleShell || feedback.Diagnostic.ValidationDiagnostic == nil || feedback.Diagnostic.OriginalCode == "" {
+					t.Errorf("real Shell rejection lost owner diagnostic before semantic planning: %+v", feedback.Diagnostic)
+				}
+				// A native check may pass while delivery-behavior evidence is
+				// missing. Preserve the actual dispositions, not invented failures.
+				if feedback.Validation == nil || feedback.Validation.RecipeID == "" ||
+					len(feedback.Validation.ExecutedChecks)+len(feedback.Validation.PassedChecks)+len(feedback.Validation.FailedChecks)+len(feedback.Validation.SkippedChecks)+len(feedback.Validation.IncompleteChecks) == 0 {
+					t.Errorf("real Shell rejection lost typed check observations before semantic planning: %+v", feedback.Validation)
+				}
+				// Reload through the normal typed owner boundary while the physical
+				// request is in flight: feedback must not depend on CAS revision.
+				reader := newRuntimeDriveTestModule(t, hub)
+				persisted, err := reader.loadRuntime(ctx, command.SemanticContext.WorkspaceID, command.SemanticContext.RunID)
+				if err != nil {
+					t.Error(err)
+					continue
+				}
+				replayed, err := runtime.SemanticExecutionFeedback(persisted, command.SemanticContext, command.SemanticManifest)
+				if err != nil || !reflect.DeepEqual(replayed, command.SemanticContext.ExecutionFeedback) {
+					t.Errorf("fresh owner load changed semantic execution feedback: %+v err=%v", replayed, err)
+				}
+			}
 			for _, obligation := range command.SemanticManifest.ProofObligations {
 				if obligation.ValidationFailureRepair != nil {
 					addition = obligation.ValidationFailureRepair.InputAddition
@@ -516,7 +676,52 @@ func %s(t *testing.T) { assertDelivery(t) }
 		module = newRuntimeDriveTestModule(t, hub)
 	}
 	completed, err := module.driveRuntime(ctx, command)
+	if mode.ProofBudgetExhaustion || mode.DurableBudgetExhaustion {
+		var exhausted *runtimecontract.RuntimeBudgetExhaustedError
+		var durableExhausted *runtimecontract.RuntimeDurableDispatchBudgetExhaustedError
+		if mode.DurableBudgetExhaustion {
+			if !errors.As(err, &durableExhausted) || durableExhausted.CoverageWorkItemID != "cwi-2" {
+				t.Fatalf("expected same-CWI durable seal exhaustion: %v", err)
+			}
+		} else if !errors.As(err, &exhausted) || exhausted.Dimension != runtimecontract.RuntimeBudgetDimensionSemanticGeneration {
+			t.Fatalf("expected proof budget exhaustion before provider: %v", err)
+		}
+		before, loadErr := module.loadRuntime(ctx, "ws-v2", "run-v2")
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		if mode.ProofBudgetExhaustion && (before.SemanticPlanning.ActiveBatchID != "" || len(before.SemanticPlanning.Batches) != 0 || runtimecontract.RuntimeSemanticProofBatchUsage(before.SemanticPlanning)["cwi-2"] != 1) {
+			t.Fatal("exhaustion created another proof batch or reset original CWI usage")
+		}
+		if mode.DurableBudgetExhaustion {
+			if before.ActiveDispatch != nil {
+				t.Fatal("exhausted candidate created a dispatch")
+			}
+			usage, usageErr := runtimecontract.RuntimeDurableDispatchUsage(nil, runtimeStateRecordFromAggregate(before).CompletedDispatches, before.CandidateAttempts)
+			if usageErr != nil || usage["cwi-2"] != 1 {
+				t.Fatalf("addition and repair did not share original CWI budget: %v %v", usage, usageErr)
+			}
+		}
+		calls := providerCalls.Load()
+		// Exercise the production SM-4 error boundary and SM-2 terminal reducer,
+		// followed by the ordinary Result -> Workspace -> Run owner handoff.
+		retry, handled := module.handleScheduledRuntimeDriveFailure(ctx, scheduledRuntimeDriveRequest{workspaceID: "ws-v2", runID: "run-v2", source: "proof-budget-test"}, err)
+		if !handled || retry != nil {
+			t.Fatal("proof exhaustion left a retry or unhandled failure")
+		}
+		after, loadErr := module.loadRuntime(ctx, "ws-v2", "run-v2")
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		if calls != providerCalls.Load() || !reflect.DeepEqual(before.CandidateRequestSessions, after.CandidateRequestSessions) || !reflect.DeepEqual(before.OperationReceipts, after.OperationReceipts) || !reflect.DeepEqual(before.ExecutionBudget, after.ExecutionBudget) {
+			t.Fatal("budget terminal created another session, allocation, provider call or effect")
+		}
+		completed, err = runtimeTerminalDriveResult(after), nil
+	}
 	wantState, wantRun, wantResult, wantSatisfied := runtimecontract.ConvergenceStateComplete, common.RunStateCompleted, common.ResultStateAccepted, 2
+	if mode.ProofBudgetExhaustion || mode.DurableBudgetExhaustion {
+		wantState, wantRun, wantResult, wantSatisfied = runtimecontract.ConvergenceStateFailed, common.RunStateFailed, common.ResultStateRejected, 1
+	}
 	if invalidSupplement {
 		wantState, wantRun, wantResult, wantSatisfied = runtimecontract.ConvergenceStateFailed, common.RunStateFailed, common.ResultStateRejected, 1
 	}
@@ -543,6 +748,29 @@ func %s(t *testing.T) { assertDelivery(t) }
 	if persisted.State != wantRun || !runtimeTerminalDeliveryFullyAcknowledged(aggregate) || !reflect.DeepEqual(persisted.RuntimeBootstrap, initialRun.RuntimeBootstrap) {
 		t.Fatalf("terminal delivery incomplete or immutable startup changed: run=%s acknowledged=%t bootstrapUnchanged=%t", persisted.State, runtimeTerminalDeliveryFullyAcknowledged(aggregate), reflect.DeepEqual(persisted.RuntimeBootstrap, initialRun.RuntimeBootstrap))
 	}
+	if mode.ExecutionLimits != nil {
+		if !runtimecontract.SameRuntimeExecutionLimits(aggregate.Facts.Activation.ExecutionContract.ExecutionLimits, mode.ExecutionLimits) {
+			t.Fatal("Run lost its sealed execution limits")
+		}
+		if !observedSuccessfulWorkHistory {
+			t.Fatal("next semantic request never observed completed source work")
+		}
+		if err := runtimecontract.ValidateRuntimeExecutionLimitsBinding(aggregate.ExecutionBudget.Policy, mode.ExecutionLimits); err != nil {
+			t.Fatal(err)
+		}
+		view, err := runtimecontract.BuildRuntimeExecutionBudgetView(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.StateRevision, aggregate.ExecutionBudget, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, dimension := range view.Dimensions {
+			if dimension.Dimension == runtimecontract.RuntimeBudgetDimensionProviderCall && dimension.Confirmed+dimension.Unknown != providerCalls.Load() {
+				t.Fatalf("real provider invocations differ from shared budget: %+v calls=%d", dimension, providerCalls.Load())
+			}
+			if dimension.Dimension == runtimecontract.RuntimeBudgetDimensionCapabilityOperation && dimension.Confirmed != int64(len(aggregate.OperationReceipts)) {
+				t.Fatalf("real owner receipts differ from operation budget: %+v receipts=%d", dimension, len(aggregate.OperationReceipts))
+			}
+		}
+	}
 	items, err := results.ListByRun(ctx, "run-v2")
 	if err != nil || len(items) != 1 || items[0].State != wantResult || items[0].RuntimeCloseout == nil || len(items[0].RuntimeCloseout.SatisfiedCoverageWorkItemIDs) != wantSatisfied {
 		t.Fatalf("Result owner did not persist the judged two-CWI closeout: %+v %v", items, err)
@@ -567,6 +795,27 @@ func %s(t *testing.T) { assertDelivery(t) }
 			}
 		}
 		return providerCalls.Load()
+	}
+	if mode.ProofBudgetExhaustion || mode.DurableBudgetExhaustion {
+		if aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "execution_budget_exhausted" || completed.BlockingTicketID != "" || completed.BlockingApprovalID != "" {
+			t.Fatalf("proof exhaustion was not a bounded budget terminal: %+v", completed)
+		}
+		for path, before := range weakInputs {
+			after, err := os.ReadFile(path)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatal("proof exhaustion changed original validation input")
+			}
+		}
+		fresh := newRuntimeDriveTestModule(t, hub)
+		calls, revision := providerCalls.Load(), aggregate.StateRevision
+		if err := fresh.driveAndProjectRuntimeLockedWithCommand(ctx, command); err != nil {
+			t.Fatal(err)
+		}
+		replayed, err := fresh.loadRuntime(ctx, "ws-v2", "run-v2")
+		if err != nil || calls != providerCalls.Load() || revision != replayed.StateRevision {
+			t.Fatal("terminal reload/replay created new work")
+		}
+		return calls
 	}
 	for _, item := range aggregate.Facts.Coverage {
 		if invalidSupplement && item.ID == "cwi-2" {

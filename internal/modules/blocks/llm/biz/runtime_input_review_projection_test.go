@@ -32,6 +32,7 @@ func runtimeInputReviewProviderFixture(t *testing.T) llmmodels.RuntimeCandidateR
 	request.SemanticManifest.AllowedTargetPolicies = []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExactTarget}
 	request.SemanticManifest.ProofObligations = []runtimecontract.RuntimeSemanticProofObligation{{CoverageWorkItemID: "cwi-001", DeclarationRef: requirement.DeclarationRef, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, ValidationProofRequirement: &requirement}}
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	refreshSemanticProgressForTest(t, &request)
 	return request
 }
 
@@ -44,6 +45,7 @@ func TestRuntimeInputReviewExactSourceAndInformationStayInC3(t *testing.T) {
 	binding := request.SemanticManifest.OwnerCatalogs[0].ValidationSurfaces[0].ProofRequirementBindings[0]
 	request.SemanticManifest.InputReviewInformation = []runtimecontract.RuntimeValidationInputReviewInformation{{SubjectHash: binding.InputReview.Hash, ReviewRef: "review-ref", TicketID: "ticket", ResolutionID: "resolution", Summary: "new bounded factual answer"}}
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	refreshSemanticProgressForTest(t, &request)
 	after, err := runtimeProviderRequest(request)
 	if err != nil {
 		t.Fatal(err)
@@ -90,6 +92,7 @@ func TestRuntimeInputReviewV2ObligationsSchemaAndFreshContentOnlyChangeC3(t *tes
 	binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, *binding)
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	refreshSemanticProgressForTest(t, &request)
 	before, err := runtimeProviderRequest(request)
 	if err != nil {
 		t.Fatal(err)
@@ -111,6 +114,7 @@ func TestRuntimeInputReviewV2ObligationsSchemaAndFreshContentOnlyChangeC3(t *tes
 	binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, *binding)
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	refreshSemanticProgressForTest(t, &request)
 	after, err := runtimeProviderRequest(request)
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +144,7 @@ func TestRuntimeInputReviewOwnerScopeIsCompleteAndOnlyChangesC3(t *testing.T) {
 	binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*binding.InputReview, *binding)
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	refreshSemanticProgressForTest(t, &request)
 	current, err := runtimeProviderRequest(request)
 	if err != nil {
 		t.Fatal(err)

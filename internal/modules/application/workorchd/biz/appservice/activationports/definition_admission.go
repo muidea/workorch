@@ -258,6 +258,18 @@ func definitionAdmissionProfileBindings(workspace *workspacemodel.Workspace, tem
 	if workspace == nil || template == nil {
 		return nil, nil, nil, nil, "", common.ErrInvalidArgument
 	}
+	// Check both source layers before merge can discard a malformed collection.
+	for _, input := range []map[string]any{template.ContextHints.Map(), workspace.ContextHints.Map()} {
+		if err := validateRuntimeExecutionLimitsInput(input); err != nil {
+			return nil, nil, nil, nil, "", err
+		}
+	}
+	if err := validateRuntimeProfileInputShape(template.ContextHints.Map()); err != nil {
+		return nil, nil, nil, nil, "", err
+	}
+	if err := validateRuntimeProfileInputShape(workspace.ContextHints.Map()); err != nil {
+		return nil, nil, nil, nil, "", err
+	}
 	effective := activationcore.MergeTemplateWorkspaceContextHintsForExecutionContract(template.ContextHints.Map(), workspace.ContextHints.Map())
 	rawProfiles := runtimeMap(effective["profileContracts"])
 	if err := validateRuntimePresealTargetDeclarations(map[string]any{"profileContracts": rawProfiles}, nil); err != nil {
@@ -283,6 +295,9 @@ func definitionAdmissionProfileBindings(workspace *workspacemodel.Workspace, tem
 		})
 	}
 	policies = append(policies, evidencePolicyBindings...)
+	if limits := runtimeExecutionLimits(effective); limits != nil {
+		policies = append(policies, runtimeExecutionLimitsAdmissionBinding(*limits))
+	}
 	required, convergences := definitionadmission.CompileProfileOwnerFactBindings(profiles)
 	return policies, profiles, required, convergences, runtimecontract.StableRuntimeProfileContractsHash(profiles), nil
 }

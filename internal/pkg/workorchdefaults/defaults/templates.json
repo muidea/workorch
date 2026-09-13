@@ -513,7 +513,11 @@
           "notes": [
             "Inspect or enumerate available validation targets before selecting a validation route.",
             "Only run discovered targets or controlled substitutes that are explicitly tied to current Goal/DoD coverage.",
-            "If no validation target exists, return concrete missing-evidence assessment, deferred evidence, or governance blocker instead of guessing target names."
+            "If no validation target exists, return concrete missing-evidence assessment, deferred evidence, or governance blocker instead of guessing target names.",
+            "Run validation from an isolated scratch directory or managed validation session when the check needs temporary files, generated harnesses, ports, or subprocess cleanup.",
+            "Prefer validation/managed_session for service, proxy, streaming, long-running, temporary-port, or cleanup-sensitive checks when that capability is available.",
+            "Use bounded foreground commands or project test harnesses when managed validation is unavailable; do not use detached background processes as validation evidence.",
+            "Validation must clean up its temporary files, ports, and subprocesses through the capability owner's managed lifecycle."
           ]
         }
       ],
@@ -685,25 +689,6 @@
               "requireSourceSettled": true
             }
           ],
-          "validationEnvironmentPolicy": {
-            "schemaVersion": "workorch.software_dev.validation_environment",
-            "scratchIsolationRequired": true,
-            "preferManagedSessionFor": [
-              "service",
-              "proxy",
-              "streaming",
-              "long_running",
-              "temporary_port",
-              "process_cleanup"
-            ],
-            "boundedForegroundOnly": true,
-            "cleanupRequired": true,
-            "guidance": [
-              "Run validation from an isolated scratch directory or managed validation session when the check needs temporary files, generated harnesses, ports, or subprocess cleanup.",
-              "Prefer validation/managed_session for service, proxy, streaming, long-running, temporary-port, or cleanup-sensitive checks when that capability is available.",
-              "Use bounded foreground commands or project test harnesses when managed validation is unavailable; do not use detached background processes as validation evidence."
-            ]
-          },
           "evidenceRequirements": [
             {
               "id": "runtime_entrypoint",

@@ -7,6 +7,10 @@ import (
 )
 
 type runtimeSemanticTailProjection struct {
+	CoverageProgress    runtimecontract.RuntimeSemanticCoverageProgress       `json:"coverageProgress"`
+	ExecutionHistory    runtimecontract.RuntimeSemanticExecutionHistory       `json:"executionHistory"`
+	ExecutionBudget     runtimecontract.RuntimeSemanticExecutionBudget        `json:"executionBudget"`
+	ExecutionFeedback   []runtimecontract.RuntimeSemanticExecutionFeedback    `json:"executionFeedback,omitempty"`
 	Attempt             int                                                   `json:"attempt"`
 	PreviousRejection   *runtimecontract.RuntimeSemanticCorrectionObservation `json:"previousRejection,omitempty"`
 	CorrectionDirective *runtimecontract.RuntimeSemanticCorrectionDirective   `json:"correctionDirective,omitempty"`

@@ -69,6 +69,9 @@ func (b RuntimeBootstrap) Validate() error {
 	if err := ValidateRuntimeExecutionBudgetPolicySources(b.ExecutionBudgetPolicy, b.ConvergencePolicy, b.RecoveryPolicy); err != nil {
 		return err
 	}
+	if err := ValidateRuntimeExecutionLimitsBinding(b.ExecutionBudgetPolicy, b.Activation.ExecutionContract.ExecutionLimits); err != nil {
+		return err
+	}
 	for _, requirement := range b.Requirements {
 		if !RuntimePrerequisiteKindSupported(requirement.Kind) {
 			return fmt.Errorf("runtime bootstrap has unsupported prerequisite kind %q", requirement.Kind)
@@ -122,6 +125,9 @@ func (b RuntimeBootstrap) Validate() error {
 	}
 	if err := ValidateRuntimeDefinitionFocuses(b.DefinitionSeed, b.DefinitionFocuses); err != nil {
 		return fmt.Errorf("runtime bootstrap definition focuses: %w", err)
+	}
+	if err := ValidateRuntimeImplementationWorkCapabilityRequirements(b.DefinitionFocuses, b.Activation.ExecutionContract.ProfileContracts, b.Definition.CapabilityContract, b.Requirements); err != nil {
+		return fmt.Errorf("runtime bootstrap definition work policies: %w", err)
 	}
 	slices := make(map[string]RuntimeAcceptanceSlice, len(b.Slices))
 	for _, slice := range b.Slices {

@@ -16,7 +16,7 @@ import (
 )
 
 // PreflightRuntimeCandidate asks the LLM owner to render the sealed request
-// and validate C0-C5/P0-P4 before a candidate attempt is persisted. It is a
+// and validate C0-C5/P0-P4 before a request session or candidate attempt is persisted. It is a
 // typed read-only EventHub exchange: no provider call and no candidate can be
 // produced by this path.
 func PreflightRuntimeCandidate(ctx context.Context, hub magicevent.Hub, command llmevents.PreflightRuntimeCandidateCommand) (llmevents.PreflightRuntimeCandidateResult, error) {

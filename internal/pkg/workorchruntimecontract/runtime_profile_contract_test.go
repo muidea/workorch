@@ -171,7 +171,7 @@ func TestRuntimeProfileOwnerFactRequirementIsNormalizedBoundedAndCompared(t *tes
 			ID: "validation_preparation", Scope: "deliverable",
 			TargetSelectorRef: "file/workspace_deliverable", TargetSelectorOwnerRef: "software-dev", TargetSelectorSubjectRef: "validation_preparation",
 			AcceptedStepKinds:  []string{StepKindFileWrite, RuntimeBlockKindManagedValidationSession},
-			RequiredOwnerFacts: []RuntimeOwnerFactRequirement{requirement, requirement},
+			RequiredOwnerFacts: []RuntimeOwnerFactRequirement{requirement},
 			OwnerFactConvergences: []RuntimeOwnerFactConvergence{{
 				Requirement: requirement, MissingTrigger: RuntimeOwnerFactMissingTrigger,
 				ProspectiveSatisfactionContractRef: "shell/managed-validation/workspace-manifest-v1",

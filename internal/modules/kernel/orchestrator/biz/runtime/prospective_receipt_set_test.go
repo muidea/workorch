@@ -165,7 +165,7 @@ func prospectiveAllOfDispatchFixture(t *testing.T, requireAssessment bool) (*dur
 	}
 	facts.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(facts.DefinitionSeed)
 	facts.DefinitionFocuses = runtimeTestDefinitionFocuses(facts)
-	aggregate := RuntimeAggregate{StateRevision: 1, Definition: dispatchDefinition(), Facts: facts}
+	aggregate := RuntimeAggregate{ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent, StateRevision: 1, Definition: dispatchDefinition(), Facts: facts}
 	addCandidateAdmissionTargetPolicyFixture(&aggregate.Facts, runtimecontract.RuntimeModuleFile, runtimecontract.RuntimeBlockKindPatchApply, "file_write", runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, nil)
 	runtimeTestEnsureCurrentFocusBindings(t, &aggregate)
 	decision, err := ReduceRuntimeState(aggregate.Facts, nil)

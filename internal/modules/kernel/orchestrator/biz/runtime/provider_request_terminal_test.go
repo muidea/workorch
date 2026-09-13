@@ -340,6 +340,7 @@ func preparedSemanticProviderTerminalSession(t *testing.T) (RuntimeAggregate, ru
 		t.Fatal(err)
 	}
 	facts := controllerFacts()
+	facts.Resources.ProviderCeiling = semanticRequestTestCeiling(facts)
 	catalog, prerequisite, observation := semanticPlanningCatalogFixture()
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
@@ -349,21 +350,13 @@ func preparedSemanticProviderTerminalSession(t *testing.T) (RuntimeAggregate, ru
 		t.Fatal(err)
 	}
 	manifest, _, _ := semanticPlanningFixture(t, aggregate)
-	expected := semanticCoverageOrderExpectedDocument(aggregate, manifest.Hash, "semantic-provider-terminal-prefix")
+	aggregate, expected := startSemanticRequestForTest(t, controller, aggregate, manifest, "semantic-provider-terminal-prefix")
 	aggregate, session, err := controller.ensureCandidateRequestSessionWithExpected(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, expected.StablePrefixHash, manifest.Hash, "", &expected)
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
-		Kind:        RuntimeInternalEventSemanticPlanRequestStarted,
-		Scope:       RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
-		Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: expected.StablePrefixHash, LogicalRequestID: session.LogicalRequestID},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, session.NextSequence)
-	submitted, err := controller.markCandidateRequestSubmitted(ctx, started.Aggregate.Facts.WorkspaceID, started.Aggregate.Facts.RunID, session.LogicalRequestID, session.NextSequence, physicalCallID)
+	submitted, err := controller.markCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, session.NextSequence, physicalCallID)
 	if err != nil {
 		t.Fatal(err)
 	}

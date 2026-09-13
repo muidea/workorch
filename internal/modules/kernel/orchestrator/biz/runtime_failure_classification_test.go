@@ -21,6 +21,13 @@ func TestClassifyRuntimeDriveFailureKeepsUnsupportedCapabilityOutOfGovernance(t 
 	}
 }
 
+func TestClassifyDurableDispatchBudgetFailureIsTerminalNotPhysicalAllocation(t *testing.T) {
+	failure := classifyRuntimeDriveFailure(&runtimecontract.RuntimeDurableDispatchBudgetExhaustedError{CoverageWorkItemID: "cwi-original", Limit: 1})
+	if failure.Class != runtimecontract.FailureClassExecutionBudgetExhausted || failure.Code != "execution_budget_exhausted" || failure.Signature != "execution-budget-exhausted/durable-dispatch/cwi-original" || runtime.FailureClassDisposition(failure.Class) != runtime.FailureDispositionBoundedFail {
+		t.Fatalf("logical budget failure misclassified: %+v", failure)
+	}
+}
+
 func TestClassifyRuntimeDriveFailureKeepsCapabilityCatalogClassificationOwnerNeutral(t *testing.T) {
 	failure := classifyRuntimeDriveFailure(&runtimecontract.RuntimeCapabilityCatalogUnavailableError{
 		OwnerModuleID: runtimecontract.RuntimeModuleMCP,

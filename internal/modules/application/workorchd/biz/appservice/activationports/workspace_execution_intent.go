@@ -65,6 +65,9 @@ func validateRuntimeBootstrapStartupSeal(workspace *workspacemodel.Workspace, te
 	}
 	startup := workspace.StartupInput.Normalized()
 	admission := workspace.ActivationAdmission.Normalized()
+	if err := validateRuntimeExecutionLimitsStartupSeal(candidate, bootstrap.Activation.ExecutionContract.ExecutionLimits); err != nil {
+		return err
+	}
 	if startup.ValidateCandidate(candidate) != nil || admission.ValidateCandidate(startup, candidate) != nil || admission.State != workspacemodel.WorkspaceActivationEligible {
 		return fmt.Errorf("%w: Runtime bootstrap does not bind an eligible Workspace Definition admission", common.ErrConflict)
 	}

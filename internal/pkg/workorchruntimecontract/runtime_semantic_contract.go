@@ -230,6 +230,9 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 	if err := ValidateRuntimeDefinitionFocuses(seed, definitionFocuses); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
+	if err := ValidateRuntimeDefinitionImplementationWorkPolicies(definitionFocuses, execution.ProfileContracts); err != nil {
+		return RuntimeSemanticPlanManifest{}, err
+	}
 	seed = seed.Clone()
 	definitionFocuses = NormalizeRuntimeDefinitionFocuses(definitionFocuses)
 	if err := execution.Validate(); err != nil {
@@ -552,7 +555,10 @@ func runtimeSemanticCatalogVariantIDs(catalog RuntimeOperationAdmissibility, kin
 
 // RuntimeSemanticPlanRequestContext is the bounded provider context used
 // before any operation focus or binding exists. It deliberately excludes
-// RuntimeDecision, coverage facts, dispatch and owner observations.
+// RuntimeDecision and mutable coverage/dispatch authority. ExecutionFeedback
+// carries only exact causal receipt facts for the current repair batch.
+// ExecutionHistory separately observes bounded Run-local committed work; it
+// never expands the current manifest or grants acceptance credit.
 type RuntimeSemanticPlanRequestContext struct {
 	WorkspaceID              common.WorkspaceID
 	RunID                    common.RunID
@@ -564,6 +570,10 @@ type RuntimeSemanticPlanRequestContext struct {
 	BatchID                  string
 	BatchSequence            int
 	BatchCoverageWorkItemIDs []common.CoverageWorkItemID
+	ExecutionFeedback        []RuntimeSemanticExecutionFeedback
+	CoverageProgress         RuntimeSemanticCoverageProgress
+	ExecutionHistory         RuntimeSemanticExecutionHistory
+	ExecutionBudget          RuntimeSemanticExecutionBudget
 }
 
 func (c RuntimeSemanticPlanRequestContext) Normalized() RuntimeSemanticPlanRequestContext {
@@ -572,6 +582,13 @@ func (c RuntimeSemanticPlanRequestContext) Normalized() RuntimeSemanticPlanReque
 	c.Definition = c.Definition.Normalized()
 	c.DefinitionSeed = c.DefinitionSeed.Clone()
 	c.BatchCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), c.BatchCoverageWorkItemIDs...)
+	c.ExecutionFeedback = append([]RuntimeSemanticExecutionFeedback(nil), c.ExecutionFeedback...)
+	c.CoverageProgress = c.CoverageProgress.Clone()
+	c.ExecutionHistory = c.ExecutionHistory.Clone()
+	c.ExecutionBudget = c.ExecutionBudget.Clone()
+	for i := range c.ExecutionFeedback {
+		c.ExecutionFeedback[i] = c.ExecutionFeedback[i].Clone()
+	}
 	c.Activation = c.Activation.Normalized()
 	c.PlanStep = RuntimeSemanticPlanStep(strings.TrimSpace(string(c.PlanStep)))
 	c.BatchID = strings.TrimSpace(c.BatchID)
@@ -638,7 +655,16 @@ func (c RuntimeSemanticPlanRequestContext) Validate(manifest RuntimeSemanticPlan
 		manifest.OperationContractRevision != c.Activation.ExecutionContract.OperationContractRevision || c.ProviderCeiling.Selection.Target != c.Activation.ProviderSelection.Target {
 		return fmt.Errorf("runtime semantic request context identity does not match manifest")
 	}
-	return nil
+	if err := c.CoverageProgress.Validate(c, manifest); err != nil {
+		return err
+	}
+	if err := c.ExecutionHistory.Validate(c, manifest); err != nil {
+		return err
+	}
+	if err := c.ExecutionBudget.Validate(c, manifest); err != nil {
+		return err
+	}
+	return ValidateRuntimeSemanticExecutionFeedback(c, manifest)
 }
 
 func (m RuntimeSemanticPlanManifest) Normalized() RuntimeSemanticPlanManifest {

@@ -3,6 +3,7 @@ package appservice
 import (
 	"context"
 	"errors"
+	frameworkdef "github.com/muidea/magicCommon/def"
 	"os"
 	"path/filepath"
 	"sync"
@@ -27,12 +28,12 @@ type countingActivationEventHub struct {
 	onSend func(magicevent.Event)
 }
 
-func (h *countingActivationEventHub) Subscribe(id string, observer magicevent.Observer) {
-	h.base.Subscribe(id, observer)
+func (h *countingActivationEventHub) Subscribe(id string, observer magicevent.Observer) *frameworkdef.Error {
+	return h.base.Subscribe(id, observer)
 }
 
-func (h *countingActivationEventHub) Unsubscribe(id string, observer magicevent.Observer) {
-	h.base.Unsubscribe(id, observer)
+func (h *countingActivationEventHub) Unsubscribe(id string, observer magicevent.Observer) *frameworkdef.Error {
+	return h.base.Unsubscribe(id, observer)
 }
 
 func (h *countingActivationEventHub) Post(event magicevent.Event) {

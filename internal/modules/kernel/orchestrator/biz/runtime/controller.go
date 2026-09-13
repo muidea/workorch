@@ -75,6 +75,9 @@ func (c *RuntimeController) initialize(ctx context.Context, facts runtimecontrac
 	}
 	existing, err := c.repository.Load(ctx, facts.WorkspaceID, facts.RunID)
 	if err == nil {
+		if err := runtimecontract.ValidateRuntimeResultFeedbackVersion(existing.ResultFeedbackVersion); err != nil {
+			return RuntimeAggregate{}, err
+		}
 		if !isTerminalConvergenceState(existing.Decision.State) || TargetGroundingTerminalSemanticReDrivePending(existing) {
 			if err := runtimecontract.ValidateRuntimeOperationContractRevision(existing.Facts.Activation.ExecutionContract.OperationContractRevision); err != nil {
 				return RuntimeAggregate{}, err

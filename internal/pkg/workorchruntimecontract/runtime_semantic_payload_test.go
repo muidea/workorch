@@ -852,6 +852,25 @@ func TestRuntimeSemanticPlanSchemaAndRequestContextAreManifestBound(t *testing.T
 		ProviderCeiling: &ProviderCeiling{Selection: ProviderInferenceSelection{Target: target}, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 2048, EffectiveMaxOutputTokens: 1024, MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1"},
 		PlanStep:        RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
 	}
+	context.CoverageProgress, err = BuildRuntimeSemanticCoverageProgress(context, manifest, RuntimeFacts{
+		WorkspaceID: context.WorkspaceID, RunID: context.RunID, DefinitionRevision: context.Definition.Revision,
+		DefinitionSeed: seed, EvidenceRevision: "evidence-1", Coverage: InitialRuntimeCoverageFacts(seed.CoverageItems),
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context.ExecutionHistory, err = BuildRuntimeSemanticExecutionHistory(context, manifest, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgetView, err := BuildRuntimeExecutionBudgetView(context.WorkspaceID, context.RunID, context.CoverageProgress.SourceStateRevision, RuntimeExecutionBudgetLedger{Policy: DefaultRuntimeExecutionBudgetPolicy()}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	context.ExecutionBudget, err = BuildRuntimeSemanticExecutionBudget(context, manifest, budgetView, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := context.Validate(manifest); err != nil {
 		t.Fatal(err)
 	}

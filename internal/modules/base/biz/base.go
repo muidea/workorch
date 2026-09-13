@@ -53,20 +53,32 @@ func (s *Base) BackgroundRoutine() task.BackgroundRoutine {
 	return s.backgroundRoutine
 }
 
+// Void subscription helpers declare required lifecycle operations. Following
+// the framework contract, failure interrupts Setup/Teardown; the framework's
+// lifecycle guard reports it. Never continue with a partially registered owner.
+// Callers that need recoverable errors use the checked Hub API directly.
 func (s *Base) Subscribe(eventID string, observer event.Observer) {
-	s.eventHub.Subscribe(eventID, observer)
+	if err := s.eventHub.Subscribe(eventID, observer); err != nil {
+		panic(err)
+	}
 }
 
 func (s *Base) Unsubscribe(eventID string, observer event.Observer) {
-	s.eventHub.Unsubscribe(eventID, observer)
+	if err := s.eventHub.Unsubscribe(eventID, observer); err != nil {
+		panic(err)
+	}
 }
 
 func (s *Base) SubscribeFunc(eventID string, observerFunc event.ObserverFunc) {
-	s.simpleObserver.Subscribe(eventID, observerFunc)
+	if err := s.simpleObserver.Subscribe(eventID, observerFunc); err != nil {
+		panic(err)
+	}
 }
 
 func (s *Base) UnsubscribeFunc(eventID string) {
-	s.simpleObserver.Unsubscribe(eventID)
+	if err := s.simpleObserver.Unsubscribe(eventID); err != nil {
+		panic(err)
+	}
 }
 
 // SubscribeMatchedFunc is the owner-neutral variant for a Biz that needs a
@@ -80,7 +92,9 @@ func (s *Base) SubscribeMatchedFunc(observerID, matchID, eventID string, observe
 		s.matchedObservers[observerID] = observer
 	}
 	s.matchedMu.Unlock()
-	observer.Subscribe(eventID, observerFunc)
+	if err := observer.Subscribe(eventID, observerFunc); err != nil {
+		panic(err)
+	}
 }
 
 func (s *Base) UnsubscribeMatchedFunc(observerID, eventID string) {
@@ -88,7 +102,9 @@ func (s *Base) UnsubscribeMatchedFunc(observerID, eventID string) {
 	observer := s.matchedObservers[observerID]
 	s.matchedMu.Unlock()
 	if observer != nil {
-		observer.Unsubscribe(eventID)
+		if err := observer.Unsubscribe(eventID); err != nil {
+			panic(err)
+		}
 	}
 }
 
@@ -101,13 +117,19 @@ func (s *Base) SendEvent(value event.Event) event.Result {
 }
 
 func (s *Base) SyncTask(funcPtr func()) {
-	s.backgroundRoutine.SyncTask(&routineTask{funcPtr: funcPtr})
+	if err := s.backgroundRoutine.SyncTask(&routineTask{funcPtr: funcPtr}); err != nil {
+		panic(err)
+	}
 }
 
 func (s *Base) AsyncTask(funcPtr func()) {
-	s.backgroundRoutine.AsyncTask(&routineTask{funcPtr: funcPtr})
+	if err := s.backgroundRoutine.AsyncTask(&routineTask{funcPtr: funcPtr}); err != nil {
+		panic(err)
+	}
 }
 
 func (s *Base) Timer(ctx context.Context, intervalValue time.Duration, offsetValue time.Duration, funcPtr func()) {
-	s.backgroundRoutine.Timer(ctx, &routineTask{funcPtr: funcPtr}, intervalValue, offsetValue)
+	if err := s.backgroundRoutine.Timer(ctx, &routineTask{funcPtr: funcPtr}, intervalValue, offsetValue); err != nil {
+		panic(err)
+	}
 }

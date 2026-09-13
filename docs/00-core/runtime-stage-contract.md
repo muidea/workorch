@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-index
 
-Last Verified: 2026-09-04
+Last Verified: 2026-09-10
 
 ## Purpose
 
@@ -155,6 +155,9 @@ SM-1 lifecycle state，也不能留下无后继的 `active + nonterminal` Run。
 provider、candidate、semantic proof、capability operation、repair 与 recovery 的消费按各自 persisted sub-ledger 管理；
 产品级 execution-budget view 只确定性汇总，不成为第二份消费 authority。完整合同见
 [Execution Budget](runtime/execution-budget.md)。
+新 activation 可显式封存 `runtime-execution-limits/v1`，收紧同 Run 的 provider call/capability operation 物理上限，
+并可选逐原 CWI proof-batch 上限。逻辑批次从 SM-3 当前/退休批次汇总，不新增账本或一般工作授权；Bootstrap 与
+fresh-load 反查同一声明，SM-2 exhaustion 与 SM-4 recovery/delivery 继续使用原私有事件。
 
 ## Definition And LLM Boundary
 
@@ -242,11 +245,16 @@ provider、candidate、semantic proof、capability operation、repair 与 recove
   已由 current feasibility observation 接受。operation-level 与 selected variant-level constraints 合并后共同验收；
   variant-less operation 不得漏检，dynamic constraint 缺少 owner admissibility 时不得走 static seal。
   未声明相应 constraint 的 operation 不得生成占位 fact、额外 owner call 或 correction。
-- operations preflight 必须发生在 exact request-session CAS 之前；同一 transaction、stable prefix、manifest、correction hash 与
+- semantic-plan 与 operations preflight 必须发生在 exact request-session CAS 之前；同一 transaction、stable prefix、manifest、correction hash 与
   expected-document attempt 的 persisted session 是 restart proof。document-complete 后 attempt-begin CAS 前中断或 CAS 后响应丢失
   只能恢复同一 local admission transaction，不能重发 preflight/provider、重复扣减 correction budget 或提前执行 capability。
   completed document 一旦进入 attempt，无论 accepted/rejected，都必须在 attempt closure 的同一 owner-private CAS 保存 exact
   CandidateManifest body；wire diagnostic 在 fresh load 时只能由该前像重验，不能从 current mutable authority 重建。
+  semantic coverage-order、proof-batch 和 correction private event 只封存请求意图，不提前创建 session；预检拒绝由 SM-2
+  `semantic_contract_failed` 收口，零新 session/physical call/allocation，不能走要求已结算调用的 provider-terminal 路径。
+  SM-3 session writer 必须 fresh-load 当前请求意图，新建/复用都反查 ledger logical identity、active batch/CWI/order、
+  correction attempt 和 sealed output/recovery budget；仅 required/order-accepted/document-accepted 不授权 session，
+  旧预检成功不能越过此门禁，不能补写传入 ExpectedDocument 的错误身份。
 - strict decoder 已得到 current wire 的完整 typed operation document、但 manifest semantic admission 因 exact
   `bindingRefs` 等字段失败时，SM-3 只可把该 typed value 保存在 failed `CandidateAttempt` 的 owner-private correction
   frontier；它从不成为 accepted candidate、feasibility input、dispatch 或 authority。manifest 为 exact operation slot 声明

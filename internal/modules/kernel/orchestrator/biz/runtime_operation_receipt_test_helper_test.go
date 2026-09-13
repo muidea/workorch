@@ -32,7 +32,7 @@ func startRuntimeReceiptTestOwner(t *testing.T, hub magicevent.Hub) {
 // current-schema fixtures.  Tests may script the provider, but a validation
 // receipt must still be an owner fact for the exact sealed recipe; File read
 // operations are not a substitute for managed-validation coverage.
-func startRuntimeManagedValidationTestOwner(t *testing.T, hub magicevent.Hub) {
+func startRuntimeManagedValidationTestOwner(t *testing.T, hub magicevent.Hub) *shellmodule.Module {
 	t.Helper()
 	module := shellmodule.New()
 	if err := module.Configure(shellbiz.Dependencies{EventHub: hub, RuntimeAdapter: shellbiz.NewRuntimeAdapter()}); err != nil {
@@ -42,4 +42,5 @@ func startRuntimeManagedValidationTestOwner(t *testing.T, hub magicevent.Hub) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = module.Stop(context.Background()) })
+	return module
 }

@@ -249,3 +249,10 @@ func TestServerStateScheduleBackgroundFailureReleasesWaitGroup(t *testing.T) {
 		t.Fatalf("waitBackground did not observe released wait group: %v", err)
 	}
 }
+
+func (r *recordingBackgroundRoutine) AsyncTaskContext(ctx context.Context, task magictask.Task) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.AsyncTask(task)
+}

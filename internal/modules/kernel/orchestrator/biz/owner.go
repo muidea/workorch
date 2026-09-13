@@ -1175,11 +1175,15 @@ func (m *Biz) handleRunStateChanged(ev magicevent.Event, _ magicevent.Result) {
 	if m.runtimeController == nil {
 		return
 	}
+	// The Run fact is already committed. Its request may have ended before
+	// this asynchronous callback runs; admission belongs to our lifecycle,
+	// just like the scheduled worker. Stop and retirement fences still apply.
+	ctx := m.orchestratorBackgroundContext(ev.Context(), data.WorkspaceID)
 	var scheduleErr error
 	if requestID := strings.TrimSpace(data.ReconciliationRequestID); requestID != "" {
-		scheduleErr = m.scheduleRuntimeDriveWithReconciliation(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active_resume", requestID, 0)
+		scheduleErr = m.scheduleRuntimeDriveWithReconciliation(ctx, data.WorkspaceID, data.RunID, "run_state_active_resume", requestID, 0)
 	} else {
-		scheduleErr = m.scheduleRuntimeDrive(ev.Context(), data.WorkspaceID, data.RunID, "run_state_active")
+		scheduleErr = m.scheduleRuntimeDrive(ctx, data.WorkspaceID, data.RunID, "run_state_active")
 	}
 	if err := scheduleErr; err != nil && !errors.Is(err, context.Canceled) && !runtimeDriveScheduleSettlementWasRetained(err) {
 		slog.Warn("workorch Runtime drive scheduling rejected", "source", "run_state_active", "workspaceID", data.WorkspaceID, "runID", data.RunID, "err", err)
@@ -1197,7 +1201,8 @@ func (m *Biz) handleRunContinuationRequested(ev magicevent.Event, _ magicevent.R
 		return
 	}
 	data = data.Normalized()
-	if err := m.scheduleRuntimeDriveWithReconciliation(ev.Context(), data.WorkspaceID, data.RunID, "run_continuation_requested", data.RequestID, 0); err != nil && !errors.Is(err, context.Canceled) && !runtimeDriveScheduleSettlementWasRetained(err) {
+	ctx := m.orchestratorBackgroundContext(ev.Context(), data.WorkspaceID)
+	if err := m.scheduleRuntimeDriveWithReconciliation(ctx, data.WorkspaceID, data.RunID, "run_continuation_requested", data.RequestID, 0); err != nil && !errors.Is(err, context.Canceled) && !runtimeDriveScheduleSettlementWasRetained(err) {
 		slog.Warn("workorch Runtime continuation drive scheduling rejected", "workspaceID", data.WorkspaceID, "runID", data.RunID, "err", err)
 	}
 }
@@ -3686,9 +3691,15 @@ func classifyRuntimeDriveFailure(err error) runtimecontract.FailureFact {
 	var ownerTransient *runtime.RuntimeOwnerTransientError
 	var semanticRejection *runtime.RuntimeSemanticRejectionError
 	var executionBudgetExhausted *runtimecontract.RuntimeBudgetExhaustedError
+	var durableDispatchBudgetExhausted *runtimecontract.RuntimeDurableDispatchBudgetExhaustedError
 	var timeout interface{ Timeout() bool }
 	var temporary interface{ Temporary() bool }
 	switch {
+	case errors.As(err, &durableDispatchBudgetExhausted):
+		return runtimecontract.FailureFact{
+			Class: runtimecontract.FailureClassExecutionBudgetExhausted, Code: "execution_budget_exhausted",
+			Signature: "execution-budget-exhausted/durable-dispatch/" + string(durableDispatchBudgetExhausted.CoverageWorkItemID), Message: msg,
+		}
 	case errors.As(err, &executionBudgetExhausted):
 		return runtimecontract.FailureFact{
 			Class: runtimecontract.FailureClassExecutionBudgetExhausted, Code: "execution_budget_exhausted",

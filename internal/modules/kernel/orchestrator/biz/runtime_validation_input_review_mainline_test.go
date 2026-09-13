@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -66,11 +67,20 @@ func TestDriveRuntimeInputReviewV2OmissionAndRestart(t *testing.T) {
 	// clarification and its recovery cuts. Exercise the additional omission
 	// branch here without repeating those expensive real-owner scenarios.
 	var baseline int64
-	t.Run("omission", func(t *testing.T) { baseline = runValidationInputReviewMainline(t, "omission", "", options) })
+	var baselineOnce sync.Once
+	baselineCalls := func(t *testing.T) int64 {
+		t.Helper()
+		// A filtered restart subtest must still establish the uninterrupted
+		// reference. Never skip the budget assertion when a sibling did not run.
+		baselineOnce.Do(func() { baseline = runValidationInputReviewMainline(t, "omission", "", options) })
+		return baseline
+	}
+	t.Run("omission", func(t *testing.T) { baselineCalls(t) })
 	for _, cut := range []string{"after_review_document", "after_review_failure"} {
 		t.Run(cut, func(t *testing.T) {
-			if calls := runValidationInputReviewMainline(t, "omission", cut, options); calls != baseline {
-				t.Fatal("restart repeated a completed review request")
+			expected := baselineCalls(t)
+			if calls := runValidationInputReviewMainline(t, "omission", cut, options); calls != expected {
+				t.Fatalf("restart repeated a completed review request: got=%d uninterrupted=%d", calls, expected)
 			}
 		})
 	}

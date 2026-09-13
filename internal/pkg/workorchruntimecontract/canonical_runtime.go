@@ -1827,6 +1827,9 @@ func (f RuntimeFacts) Validate() error {
 			if err := ValidateRuntimeDefinitionFocuses(f.DefinitionSeed, f.DefinitionFocuses); err != nil {
 				return fmt.Errorf("runtime facts definition focuses: %w", err)
 			}
+			if err := ValidateRuntimeDefinitionImplementationWorkPolicies(f.DefinitionFocuses, f.Activation.ExecutionContract.ProfileContracts); err != nil {
+				return fmt.Errorf("runtime facts definition work policies: %w", err)
+			}
 		}
 	}
 	if f.Focus.ID == "" {
@@ -1864,6 +1867,9 @@ func (f RuntimeFacts) Validate() error {
 	}
 	if err := ValidateRuntimeExecutionBudgetPolicySources(f.ExecutionBudgetPolicy, f.ConvergencePolicy, f.RecoveryPolicy); err != nil {
 		return fmt.Errorf("runtime facts execution budget policy: %w", err)
+	}
+	if err := ValidateRuntimeExecutionLimitsBinding(f.ExecutionBudgetPolicy, f.Activation.ExecutionContract.ExecutionLimits); err != nil {
+		return fmt.Errorf("runtime facts execution budget limits: %w", err)
 	}
 	if err := f.Recovery.Validate(f.RecoveryPolicy); err != nil {
 		return fmt.Errorf("runtime facts recovery ledger: %w", err)

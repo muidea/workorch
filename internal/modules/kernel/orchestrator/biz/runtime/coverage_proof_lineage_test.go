@@ -384,6 +384,7 @@ func coverageProofLineageTestAggregate(binding runtimecontract.CoverageEvidenceB
 		},
 	}
 	return RuntimeAggregate{
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
 		Facts: runtimecontract.RuntimeFacts{
 			WorkspaceID: "ws-lineage", RunID: "run-lineage", DefinitionRevision: "definition-lineage",
 			Focus:    focus,

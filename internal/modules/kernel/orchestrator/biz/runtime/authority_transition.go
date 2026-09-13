@@ -203,7 +203,9 @@ func applyFailureFactToAggregate(aggregate RuntimeAggregate, fact runtimecontrac
 	}
 	aggregate.Facts = facts
 	aggregate.Decision = decision
-	closePendingCandidateAttemptsForTerminal(&aggregate, fact)
+	if err := closePendingCandidateAttemptsForTerminal(&aggregate, fact); err != nil {
+		return RuntimeAggregate{}, err
+	}
 	return aggregate, nil
 }
 

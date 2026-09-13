@@ -13,14 +13,22 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func semanticCoverageOrderExpectedDocument(aggregate RuntimeAggregate, manifestHash, stablePrefixHash string) runtimecontract.RuntimeExpectedDocumentContract {
-	return runtimecontract.RuntimeExpectedDocumentContract{
-		SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent,
-		DocumentKind:  runtimecontract.RuntimeProviderDocumentSemanticPlan,
-		PlanStep:      runtimecontract.RuntimeSemanticPlanStepCoverageOrder,
-		ManifestHash:  manifestHash, DefinitionSeedHash: aggregate.Facts.DefinitionSeed.Hash,
-		StablePrefixHash: stablePrefixHash, MaxOutputTokens: 4096, MaxRecoveryAttempts: 1,
+func startSemanticRequestForTest(t *testing.T, controller *RuntimeController, aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest, prefix string) (RuntimeAggregate, runtimecontract.RuntimeExpectedDocumentContract) {
+	t.Helper()
+	logicalID := runtimecontract.StableRuntimeCandidateRequestSessionID(runtimecontract.RuntimeProviderDocumentSemanticPlan, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction(), prefix, manifest.Hash, "")
+	result, err := controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
+		Kind:        RuntimeInternalEventSemanticPlanRequestStarted,
+		Scope:       RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+		Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: prefix, LogicalRequestID: logicalID},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	expected, err := SemanticExpectedDocument(result.Aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result.Aggregate, expected
 }
 
 type semanticResponseLossRepository struct {
@@ -813,6 +821,7 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 		t.Fatal(err)
 	}
 	facts := controllerFacts()
+	facts.Resources.ProviderCeiling = semanticRequestTestCeiling(facts)
 	facts.RecoveryPolicy.MaxPrerequisiteRefreshes = 2
 	catalog, prerequisite, observation := semanticPlanningCatalogFixture()
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
@@ -856,13 +865,12 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 		aggregate = result.Aggregate
 		return aggregate
 	}
-	expected := semanticCoverageOrderExpectedDocument(aggregate, manifest.Hash, "semantic-prefix-1")
+	aggregate, expected := startSemanticRequestForTest(t, controller, aggregate, manifest, "semantic-prefix-1")
 	withSession, session, err := controller.ensureCandidateRequestSessionWithExpected(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, "semantic-prefix-1", manifest.Hash, "", &expected)
 	if err != nil {
 		t.Fatal(err)
 	}
 	aggregate = withSession
-	apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanRequestStarted, Transaction: &RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: "semantic-prefix-1", LogicalRequestID: session.LogicalRequestID}})
 	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, 1)
 	aggregate, err = controller.markCandidateRequestSubmitted(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, 1, physicalCallID)
 	if err != nil {
@@ -1017,7 +1025,7 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 	if newManifest.Hash == manifest.Hash {
 		t.Fatal("new catalog revision did not change semantic manifest identity")
 	}
-	newExpected := semanticCoverageOrderExpectedDocument(aggregate, newManifest.Hash, "semantic-prefix-1")
+	aggregate, newExpected := startSemanticRequestForTest(t, controller, aggregate, newManifest, "semantic-prefix-1")
 	withNewSession, newSession, err := controller.ensureCandidateRequestSessionWithExpected(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, "semantic-prefix-1", newManifest.Hash, "", &newExpected)
 	if err != nil {
 		t.Fatal(err)
@@ -2454,7 +2462,7 @@ func semanticPlanningCatalogFixture() (runtimecontract.RuntimeOperationAdmissibi
 	return catalog, prerequisite, observation
 }
 
-func sealedSemanticPlanningAggregate(t *testing.T) (*RuntimeController, *controllerRepository, RuntimeAggregate, runtimecontract.RuntimeOperationAdmissibility, runtimecontract.RuntimePrerequisite, runtimecontract.RuntimePrerequisiteObservation) {
+func sealedSemanticPlanningAggregate(t *testing.T, limits ...*runtimecontract.RuntimeExecutionLimits) (*RuntimeController, *controllerRepository, RuntimeAggregate, runtimecontract.RuntimeOperationAdmissibility, runtimecontract.RuntimePrerequisite, runtimecontract.RuntimePrerequisiteObservation) {
 	t.Helper()
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
@@ -2462,6 +2470,10 @@ func sealedSemanticPlanningAggregate(t *testing.T) (*RuntimeController, *control
 		t.Fatal(err)
 	}
 	facts := controllerFacts()
+	if len(limits) > 0 {
+		facts.Activation.ExecutionContract.ExecutionLimits = limits[0]
+		runtimeTestSealCurrentPolicies(&facts)
+	}
 	catalog, prerequisite, observation := semanticPlanningCatalogFixture()
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}
@@ -2524,7 +2536,7 @@ func sealedSemanticPlanningAggregate(t *testing.T) (*RuntimeController, *control
 	return controller, repository, aggregate, catalog, prerequisite, observation
 }
 
-func newSemanticPlanningController(t *testing.T) (*RuntimeController, *controllerRepository, RuntimeAggregate) {
+func newSemanticPlanningController(t *testing.T, limits ...*runtimecontract.RuntimeExecutionLimits) (*RuntimeController, *controllerRepository, RuntimeAggregate) {
 	t.Helper()
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
@@ -2532,6 +2544,10 @@ func newSemanticPlanningController(t *testing.T) (*RuntimeController, *controlle
 		t.Fatal(err)
 	}
 	facts := controllerFacts()
+	if len(limits) > 0 {
+		facts.Activation.ExecutionContract.ExecutionLimits = limits[0]
+		runtimeTestSealCurrentPolicies(&facts)
+	}
 	catalog, prerequisite, observation := semanticPlanningCatalogFixture()
 	facts.Resources.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{catalog}
 	facts.Resources.PrerequisiteObservations = []runtimecontract.RuntimePrerequisiteObservation{observation}

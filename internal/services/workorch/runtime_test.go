@@ -29,7 +29,9 @@ func TestFrameworkRuntimeServerStopObserverHasConcreteIdentityAndIndependentLife
 	t.Cleanup(func() { hub.Terminate(ctx) })
 
 	runtime := &frameworkRuntime{serverStopped: make(chan struct{})}
-	runtime.subscribeServerStopped(hub)
+	if err := runtime.subscribeServerStopped(hub); err != nil {
+		t.Fatal(err)
+	}
 	if runtime.serverStopObserver == nil {
 		t.Fatal("server stop observer was not installed")
 	}
@@ -58,6 +60,18 @@ func TestFrameworkRuntimeServerStopObserverHasConcreteIdentityAndIndependentLife
 	second := workorchdevents.ServiceStoppedData{ServiceName: "workorch", State: "stopped", ErrorCode: "server_stopped", StoppedAt: time.Now().UTC()}
 	hub.Post(magicevent.NewEventWithContext(workorchdevents.TopicWorkorchDServiceStopped, "test", workorchdevents.NotificationDestination, magicevent.NewHeader(), ctx, second))
 	waitForServerStopPeerNotification(t, peerNotifications)
+}
+
+func TestFrameworkRuntimeRejectsServerStopSubscriptionOnClosedHub(t *testing.T) {
+	hub := magicevent.NewHub(16)
+	hub.Terminate(context.Background())
+	runtime := &frameworkRuntime{serverStopped: make(chan struct{})}
+	if err := runtime.subscribeServerStopped(hub); err == nil {
+		t.Fatal("closed Hub was reported as a successful server-stop subscription")
+	}
+	if runtime.serverStopObserver != nil {
+		t.Fatal("failed subscription published an observer")
+	}
 }
 
 func waitForServerStopPeerNotification(t *testing.T, notifications <-chan struct{}) {

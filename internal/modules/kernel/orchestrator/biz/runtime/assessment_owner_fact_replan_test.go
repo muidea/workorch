@@ -151,8 +151,8 @@ func TestCommitAssessmentSettlesAcquisitionBeforeTerminalDefinitionProof(t *test
 			t.Fatalf("acquisition successor reacquired the retired prospective target selector: %+v", prerequisite)
 		}
 	}
-	if err := candidateRequestSessionActionAllowed(progressed, runtimecontract.RuntimeProviderDocumentSemanticPlan); err != nil {
-		t.Fatalf("provisional grounding view did not admit the successor semantic request: %v", err)
+	if err := candidateRequestSessionActionAllowed(progressed, runtimecontract.RuntimeProviderDocumentSemanticPlan); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("required successor opened a session before sealing request intent: %v", err)
 	}
 	if progressed.DefinitionClarification != nil || progressed.Decision.State == runtimecontract.ConvergenceStateNeedGovernance {
 		t.Fatalf("declared acquisition opened a Definition clarification: %+v", progressed.DefinitionClarification)
@@ -202,6 +202,15 @@ func TestCommitAssessmentSettlesAcquisitionBeforeTerminalDefinitionProof(t *test
 	if repository.saves != savesBefore+1 || restarted.StateRevision != progressed.StateRevision ||
 		restarted.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequired || restarted.Facts.Focus.ID != progressed.Facts.Focus.ID {
 		t.Fatalf("restart changed acquisition settlement authority: saves=%d before=%d restarted=%+v", repository.saves, savesBefore, restarted)
+	}
+	// Settled acquisition may advance through the owner-private request-intent
+	// event, but the required phase itself is not provider-session authority.
+	requested, _ := startSemanticRequestForTest(t, controller, restarted, successorManifest, "acquisition-successor-prefix")
+	if err := candidateRequestSessionActionAllowed(requested, runtimecontract.RuntimeProviderDocumentSemanticPlan); err != nil {
+		t.Fatalf("sealed successor intent was blocked by provisional grounding: %v", err)
+	}
+	if len(requested.CandidateRequestSessions) != len(restarted.CandidateRequestSessions) {
+		t.Fatal("sealing successor request intent created a provider session")
 	}
 }
 

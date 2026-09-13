@@ -54,6 +54,9 @@ func newCatalogOnlyShellGovernanceFixture(t *testing.T) catalogOnlyShellGovernan
 	}
 
 	facts := controllerFacts()
+	facts.Activation.ExecutionContract.ExecutionLimits = &runtimecontract.RuntimeExecutionLimits{
+		ProtocolRef: runtimecontract.RuntimeExecutionLimitsV1, MaxProviderCalls: 64, MaxCapabilityOperations: 32, MaxDurableDispatchesPerCWI: 1,
+	}
 	facts.Focus.TargetRefs = []string{"a.txt", "b.txt"}
 	facts.Focus.AcceptedStepKinds = []string{runtimecontract.StepKindShellCommand}
 	facts.Capabilities.StateChangeKinds = []string{runtimecontract.StepKindShellCommand}

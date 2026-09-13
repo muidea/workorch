@@ -39,6 +39,19 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 	if len(budget.RedactedPaths) > 0 && budget.RedactionApplied {
 		missing = append(missing, "protected_context_redacted")
 	}
+	var tail runtimeSemanticTailProjection
+	if json.Unmarshal([]byte(contents["C4"]), &tail) != nil || !reflect.DeepEqual(tail.CoverageProgress, context.CoverageProgress) {
+		missing = append(missing, "P2.semantic_coverage_progress")
+	}
+	if json.Unmarshal([]byte(contents["C4"]), &tail) != nil || !reflect.DeepEqual(tail.ExecutionFeedback, context.ExecutionFeedback) {
+		missing = append(missing, "P1.semantic_execution_feedback")
+	}
+	if json.Unmarshal([]byte(contents["C4"]), &tail) != nil || !reflect.DeepEqual(tail.ExecutionHistory, context.ExecutionHistory) {
+		missing = append(missing, "P3.semantic_execution_history")
+	}
+	if json.Unmarshal([]byte(contents["C4"]), &tail) != nil || !reflect.DeepEqual(tail.ExecutionBudget, context.ExecutionBudget) {
+		missing = append(missing, "P3.semantic_execution_budget")
+	}
 	if context.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
 		projection, err := runtimeSemanticManifestForProvider(manifest, context.PlanStep, context.BatchCoverageWorkItemIDs)
 		if err != nil {

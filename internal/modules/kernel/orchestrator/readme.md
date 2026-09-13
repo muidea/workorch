@@ -4,7 +4,7 @@ Status: active
 
 Type: kernel-module-implementation-contract
 
-Last Verified: 2026-09-10
+Last Verified: 2026-09-11
 
 ## 功能范围与边界
 
@@ -70,6 +70,16 @@ capability resource state。
   序列化重载。身份一致是必要条件，不是自然语言语义一致证明；未有适用性证明的版本不得发布可用 proof。
 - activation 只消费 Run owner 已封存的 `RuntimeBootstrap`。Definition startup input、Profile contract、provider selection、
   Soul/Skill/MCP/Memory snapshot 和 `StartupInputHash` 在既有 Run 中不可改写。
+- semantic repair 请求的 C4 execution feedback 由本 owner 从 CWI reopen trigger、retired binding、sealed dispatch、
+  committed execution 与 rejected owner receipt 反证后只读投影；不从 mutable failure 或最近 evidence 猜测来源。
+  在新建 provider session 前核对来源，缺失时走既有 SM-2 `SemanticContractFailed` 私有事件，不伪造 physical call
+  或 budget settlement。SM-3 仍独占请求/dispatch 事务，SM-4 只驱动读取，SM-1 不变；没有新增主写字段、状态或额度。
+  同版本 fresh-load 重建 exact feedback，跨 owner 只通过原 typed semantic context；LLM 只渲染和校验 C4，不能选择动作。
+  `biz/runtime/semantic_execution_feedback_test.go`、LLM feedback tests 和真实 File/Shell input-addition 主线覆盖来源、
+  错源/重复/篡改、无来源零请求、稳定 prefix 与重启，不能据此声称一般 CWI 开发循环或真实模型目标完成。
+- Profile identity 的共享纯合同必须保留全部声明供准入拒绝，recipe、required checks、metric、artifact、owner-fact proof identity、capability-state
+  owner/kind/subject 均进入封存 hash。SM-2/3/4 消费完整当前 Profile，不从缺字段的旧 hash 推断等价；该防御检查不新增
+  transition、operation、预算或 owner。验证见 `workorchruntimecontract/runtime_profile_identity_test.go`。
 - required CWI 在 operation candidate 前必须由 SM-2 从 immutable Definition seed、typed owner catalog、SM-3 semantic document
   与 matching owner feasibility 封存唯一 `CoverageEvidenceBinding`。不存在 binding-free operation authority。
 - 每个已 admission 且要求 validation 的 exact CWI 必须由 Application 本地纯 compiler 绑定 Definition revision、
@@ -191,6 +201,16 @@ capability resource state。
 - proof batch 的 `RequestLogicalID` 是 immutable semantic generation identity；attempt-1 只推进 ledger 当前 provider
   request-session cursor。accepted document hash、owner fact、SM-2 seal 与 fresh-load replay 都必须绑定同一 batch identity，
   禁止 seal 从 ledger cursor、最后一个 session 或下游 projection 选择 generation。
+- semantic coverage-order、proof-batch 与 correction 私有事件只封存请求意图；统一 request path 在 causal context/content 和
+  LLM rendered preflight 通过后才 CAS 创建 session。新请求预检失败由既有 SM-2 semantic failure 终止，零新 session、
+  physical call 或预算 allocation；不伪造结算以调用 provider-terminal。精确 persisted session 是同版本预检证明，SM-4
+  重驱不重复预检，SM-3 仍重验完整 session/expected-document 身份。prepared 继续首次提交，submitted-without-outcome
+  只封存 unknown，document-complete 只本地准入。`biz/runtime_semantic_preflight_test.go` 覆盖真实 LLM 渲染拒绝、三个入口、
+  session/submitted/document-complete CAS 前中断和 CAS 后响应丢失；SM-1 owner、现有预算与跨 owner 合同不变。
+- semantic ExpectedDocument 由 `biz/runtime/semantic_request_contract.go` 的同一 owner-local 纯投影供 rendering 与 session
+  writer 复用；writer 在 fresh-load 后反查当前 ledger logical request、active batch/CWI/order、修正身份与 output/recovery
+  budget，新建和复用一视同仁。required/order-accepted/proof-batch-document-accepted 不授权 session，旧预检结果不能
+  补写身份后入账。`biz/runtime/semantic_request_contract_test.go` 覆盖 owner 准入、精确 batch 和同版本重启复用。
 - accepted order 内 `EligibleFocusProjected` 推进 current CWI 后若产生新的 semantic prerequisite，Orchestrator 必须先通过
   typed owner command/result 与 SM-2 private event/CAS 结算，再从 fresh authority transaction 编译下一 proof batch 和
   `RequestLogicalID`。pending 窗口不得创建 request session、调用 provider 或扣减 budget；provider 前 guard 只是 fail-closed
@@ -217,6 +237,34 @@ capability resource state。
   generic missing-evidence 覆盖它，在新 validation accepted 后也不得继续保留它；该 evidence CAS 消费 handoff 后才进入
   assessment。SM-3 admission、replay fence 与 aggregate fresh-load 共用 `semantic_repair_continuation.go` 的旧 binding、
   candidate manifest、完整同-dispatch receipt/evidence 反证；旧 closure targets 只留作因果审计，不约束新 Definition 验证目标。
+
+semantic request 的 `CoverageProgress` 由 Orchestrator 从当前 aggregate 纯投影：总量使用完整 sealed CWI inventory，
+明细仅限当前 manifest/batch，并保留 scope、state/evidence revision 与 hash。当前证据引用数、重开次数不代替
+SM-2 的验收状态或 fresh proof。请求前检查 owner facts 完整性，非法来源沿既有 SM-2 私有 failure 处理，不创建新
+provider session/allocation。LLM 仅负责 typed 校验与 C4 完整渲染；SM-4 重启重新读取同一 owner，不存第二份账本，
+SM-1、原准则、dispatch/repair/预算权限不变。
+
+同一请求的 `ExecutionHistory` 只从本 owner 验证过的 aggregate/receipt ledger 投影最近 16 条已提交回执，含总量、
+省略数、提交序号、原 binding CWI、owner/kind、receipt fence/hash、target/effect/changed 与 typed validation 事实。
+全量来源先检查，再选择有界尾部；不能忽略窗口外坏记录。已完成且不在当前 batch 的原 CWI 仍可作为历史工作观察，
+但 bound CWI 和 owner accepted 不产生当前 credit，也不能替代 exact repair origin。无回执的在途/unknown execution
+不在此计数内，不授权重试。所有值仅进入 C4 并逐值校验；SM-3 新 session 前的来源失败沿原 SM-2 semantic failure
+处理，SM-4 仅重投影，SM-1 不变；无新增账本/状态/预算/操作权限。`biz/runtime/semantic_execution_history_test.go`
+及真实 File/Shell input-addition 主线覆盖来源拒绝、成功工作反馈、零虚构验收与同版本重启。
+
+`ExpectedEffectScope`/`RequestedTargetRefs` 分别只取原 sealed execution/operation，与 receipt observed 值分开。
+历史及 exact repair feedback 复用 `ProjectRuntimeSemanticExecutionDiagnostic`，从原 receipt feedback 保留
+owner/class/code/signature、revision、来源 hash、truncated/redacted 及可选 typed validation diagnostic；修复来源
+不得缺失 diagnostic。只读投影不包含 message/reason/preview、私有 detail ref、输入维护或治理权限；自报退出码
+不证明检查执行或验收通过。SM-2/3/4 的私有 writer、CAS、预算、状态和调度权限不变，SM-1 无变更。
+
+semantic `ExecutionBudget` 从同一 exact revision 的完整 aggregate 只读派生：复用既有 budget view 的两个 Run 物理
+维度、current/history semantic batches 的原 CWI 消费，以及原 accepted dispatch lineage 的逐 CWI durable seal
+用量/剩余额度；治理续派不重复占额，失败/失效不退款，不复制 token/repair scope 或持久化第二份计数。
+SM-3 新 session 前组装、来源失败沿原 SM-2 semantic failure；SM-4 只重投影当前快照，SM-1 不变。快照先于本次
+submission，后者仍独立预留；unknown 保守占额，已消费批次不因退休/重启退款，null 附加 cap 不表示无限工作。
+LLM 仅 C4 完整渲染/校验，无 action/credit/预算权限。`semantic_execution_budget_test.go`、原 proof-budget CAS/history
+矩阵及真实 File/Shell 主线覆盖 pre-submission 对账、same-version reload、duplicate、unknown 和稳定前缀。
 
 ### Validation-input consistency review boundary
 
@@ -385,6 +433,25 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
 
 ### Recovery, governance and delivery
 
+- 可选 `MaxDurableDispatchesPerCWI` 复用 accepted attempt → original dispatch 的 sealed ledger；SM-3 final admission
+  在与 accepted attempt/ActiveDispatch 同一 CAS 中占额，对完整 binding CWI 按 durable dispatch 计数，而非文件/操作数。
+  governance resume 不产生新 accepted attempt，继承原额度；失败、失效、换 generation、重启不退额。aggregate/opaque
+  state 同时验证 admission lineage 和上限；typed 耗尽复用 SM-4 failure ingress 与 SM-2 terminal，SM-1 不变。
+  该逻辑上限不替代物理 claim 预算，不开放通用工作权限，也不保证已有候选 provider 零消费。
+
+- activation-sealed `RuntimeExecutionLimits` 收紧现有 Run 级物理调用/操作维度；bootstrap 与 facts reload 反查对应
+  policy 的 scope、limit、unit、单次增量及耗尽合同，不接受重新 hash 后的扩额。SM-3 submission/claim 的原私有
+  event/CAS 是 reservation 唯一写入点，SM-2/SM-4 沿用既有耗尽/恢复路径，SM-1 不变；没有第二份账本或一般工作授权。
+  `biz/runtime/execution_limits_test.go` 覆盖调用/操作 CAS 前后、duplicate、stale、unknown 占额与同版本重载；
+  `TestDriveRuntimeExecutionLimitsPreserveRealOwnerCompletionAcrossRestart` 覆盖显式限额下真实 File/Shell、file-backed
+  Run、Result 的完成与重启，并逐项对比物理调用/owner receipt 与原预算视图。provider 为 scripted fixture，不代表真实模型验收。
+- 可选 `MaxProofBatchesPerCWI` 只约束原 CWI 的证明规划批次，不是实现迭代数。SM-3 compile 私有事件在 fresh-load
+  后汇总 current/history selected CWI 消费并与 requesting batch 同 CAS 提交；pending 窗口不计，预检失败不退还，
+  同批次 correction/recovery 不重复计。exact duplicate 零写、身份漂移拒绝、generation retirement 不清零；额度不足
+  在 session/provider 前返回 typed budget exhaustion，由原 SM-4 failure ingress 与 SM-2 terminal 处理。
+  shared usage 只是原 semantic ledger 的纯投影；aggregate/opaque-state 均检查上限，Application、Run、LLM 不获得计数
+  或 transition 权限，SM-1 不变。`biz/runtime/semantic_proof_budget_test.go` 覆盖 CAS/restart/历史占额，真实 owner
+  `TestDriveRuntimeProofBudgetExhaustionClosesWithoutAnotherProviderOrEffect` 覆盖零额外请求/effect/ticket 的终态交付与重放。
 - provider、operation、CAS、repair、governance、terminal delivery 使用独立 persisted budget/guard。allocation 在 external
   call/effect 前与授权同 CAS 创建；submitted outcome必须 settlement，unknown conservatively占用预算。
 - generic nonterminal recovery 仅接收 Run persistence owner 产生的 scoped typed CAS conflict，或带 exact
@@ -425,6 +492,11 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
   durable successor仍只来自 aggregate lease/authorization，重启从 Run owner inventory 恢复。Module 保持 startup weight 30、
   teardown weight 90：前者保证 Orchestrator ingress 先于 Run recovery，后者保证 Orchestrator worker 先于 Run/capability teardown
   停止；两个依赖顺序不得再复用同一个反向权重推导。
+- 已提交的 Run active/resume/continuation 异步通知进入 SM-4 后，retirement admission 与 worker submission 都使用
+  Orchestrator lifecycle + exact workspace context，不能沿用已结束的 caller context。同步 command 仍尊重 caller cancellation；
+  owner Stop/cancel、source/typed fact 校验、retirement/quiescence fence 与 singleflight 不得旁路。该 context 切换不授予
+  通知 reducer authority，也不新增状态或恢复路径；`biz/runtime_notification_context_test.go` 覆盖取消请求、owner 关闭、
+  retired workspace、错误来源和重复通知。
 - startup 只用 Run owner 的 bounded recovery inventory/readiness/opaque record query。unknown/retired current JSON、cursor cycle、
   page/item limit、nil/wrong result直接使启动失败，零 provider/capability/governance side effect。
 - Decision/Approval owner 持久化 resolution；Orchestrator只暴露 ticket-resolution 与 approval-resolution 两个具体 typed ingress，
@@ -434,14 +506,14 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
   acknowledgement；partial/response-loss从同一 delivery ledger幂等续驱，不改写 terminal decision。
 - SM-4 的 Result material 从已裁决的 requirement outcomes、evidence 与 receipts 投影逐项 DoD、实现/验证摘要、限制、
   风险和仅供阅读的后续建议；没有 validation evidence 不能描述为验证已执行或失败。terminal guard 与原始 owner cause
-  分别保存，Result owner 不重判验收。新 aggregate 初始化时一次封存 `ResultFeedbackVersion=3`；沿用 v2 以当前 SM-2
+  分别保存，Result owner 不重判验收。新 aggregate 初始化时一次封存 `ResultFeedbackVersion=3`；以当前 SM-2
   coverage 判断历史 satisfied assessment 的适用性，当前未满足时显示 indeterminate，不删除历史评估或证据。
   v3 的 input-review terminal diagnostic 另保留完整 blocking batch 的 typed reports（CWI、requirement、subject、review ref/hash、
   逐 check/obligation 事实），并从原 persisted document/binding 反证；删除或篡改反馈不得在 fresh-load 被接受。
   敏感文本/控制字符只在 detached feedback 中脱敏，保留原报告引用/hash，不复制输入文件内容。Result、Web 和 TUI 仅展示，
   不能据此选择 action；完整详情不能只剩被裁剪的通用摘要。
-  既有 record 的 `0/1/2` 沿用对应 renderer，Resume 不补写该值。未知版本 fail closed；同一 Run 的 Result 内容与 hash 在升级、
-  response loss 和 pending delivery replay 后必须相同，不改写旧 Result/Run 归档。
+  当前只允许版本 3；缺失、旧版或未知版本均在 Run record、aggregate、initialize 和 Result material 入口 fail closed，
+  不 fallback、不回填、不改写旧 Result/Run 归档。同版本 response loss、重启及 pending delivery replay 的内容与 hash 必须相同。
 - Workspace deletion只允许在 Run owner `draining` fence后排空既有 terminal delivery。Orchestrator独占自身 quiescence/purge
   private reducer，不终止 Run、不推进 Workspace deletion phase、不跨 owner删除资源。
 
@@ -477,13 +549,42 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
 
 ## 能力验收
 
+Profile 可携带独立的 `RuntimeImplementationWorkPolicy` 声明（`runtime-implementation-work/v1`），但当前
+`RuntimeExecutionContract.Validate` 拒绝该协议执行；Workspace promotion 同样在 Run 前拒绝。
+声明有界的 owner/operation/selector/轮次、fresh observation/validation 与输入保护，进入 Profile 身份与 exact CWI 的不可变 Definition 投影，
+不是 SM-2 工作 binding、SM-3 dispatch 权限或 SM-4 下一动作。普通 terminal proof、owner-fact acquisition、
+validation-failure repair 的现行 purpose 不变；不能用新声明借用这两种专用中间工作的状态转换。
+Definition 投影由 Application 编译，Runtime 在 bootstrap、facts 重载与 semantic manifest 编译边界独立校验其
+exact Profile source；丢失、注入、跨 CWI 或策略漂移不得读取时修补。raw clone/同版本 JSON 重载保留全部值，
+bootstrap equality 包含 policy；SM-1/2/3/4 无新增 transition、工作计数器或执行权限。
+工作能力清单从已匹配 exact CWI policy 编译，bootstrap 独立核对 Definition capability contract 与对应
+owner 的全局 state-change capability / operation-admissibility prerequisites；缺失或 owner/class 错配拒绝。
+既有 typed capability acquisition 返回 inventory observation，不授予 scope、variant、dispatch 或验收 credit。
+`runtime_implementation_work_capabilities_test.go` 覆盖投影与重载反证，
+`biz/runtime_implementation_work_capability_test.go` 只证明真实 File owner 的能力事实获取，不证明工作循环。
+独立的 `RuntimeImplementationWorkScopeRequest` 从 exact CWI/封存 Profile 和当前 resource-owner manifest 纯编译；
+请求身份绑定 workspace/run、authority、Definition seed、CWI、完整 policy 与 owner manifest 前像，不以观察时间刷新身份。
+请求自校验 hash 不构成来源授权：适配器在 owner I/O 前使用独立的 `RuntimeImplementationWorkScopeSources`
+重新编译比对，观察重载亦提供同一来源校验。生产 consumer 必须从 owner 当前 aggregate 提供这些输入，
+不得从待验证请求反向构造 sources；该输入不是新的持久化权威。
+Biz 只读适配层复用 File 的 typed target-selection 合同，保留完整有界 inventory、unsupported 负事实和可识别的 stale 错误；
+单轮工作目标上限不能裁剪 owner 观察。返回的 scope observation 不是工作授权，不写入 terminal-proof 的
+`Resources.TargetSelection`，不绕过验证输入排除、operation admissibility/feasibility 或 SM-2 binding seal。
+该适配层尚未接入 drive/private-event consumer；没有新增 SM-1/2/3/4 writer、CAS、工作消费或 dispatch。
+`runtime_implementation_work_scope_test.go`（shared 与 Biz）验证 source/身份/前像、raw clone/重载、真实 File
+只读查询、owner 重建、revision 漂移和完整范围；这些测试不替代工作回执、CAS 或两轮实现正例。
+合同与准入测试为 `runtime_implementation_work_policy_test.go`（shared/activationports）、
+`runtime_definition_implementation_work_test.go`、Application `runtime_implementation_work_test.go`、
+`biz/runtime/definition_implementation_work_test.go` 和 Workspace `definition_implementation_work_admission_test.go`，
+不证明同 CWI 实现闭环。
+
 | 验收面 | 自动化证据 | 必需维度 |
 | --- | --- | --- |
 | ordinary validation-input protection | `workorchruntimecontract/runtime_validation_input_protection_test.go`、`biz/runtime_validation_input_addition_mainline_test.go::TestDriveRuntimeOrdinaryMutationCannotWeakenValidationInputAcrossRestart`、`TestDriveRuntimeRepeatedInputWeakeningClosesWithoutEffectOrTicket` | 三策略及 selector-only 排除、source preimage/hash/clone/replay、exact repair 例外；真实 File/Shell + file-backed Run + scripted provider 下，越界拒绝→合法源码修改→独立补充→fresh validation→Result/Workspace/Run 完成；source dispatch/input receipt/拒绝终态切点重启零额外 provider，重复越界零 effect/credit/ticket，不宣称真实模型或 release DCE 验收 |
 | validation-input review / factual ticket | `biz/runtime_validation_input_review_mainline_test.go`、`workorchruntimecontract/runtime_validation_input_review_test.go` | SM-2/3/4 共用旧事务；一致→实际验证，冲突/格式错误零 ticket，无法判断→Decision 信息→新请求重新评审；同一 subject 信息上限、reject、exact duplicate、内容/lineage tamper、五个持久化切点恢复与零额外 provider；SM-1 仍由 Run owner 交付 |
 | v2 obligation review / full feedback | `workorchruntimecontract/runtime_validation_input_obligations_test.go`、`runtime_validation_input_review_feedback_test.go`、`biz/runtime/validation_input_review_test.go`、`biz/runtime_validation_input_review_mainline_test.go` | 完整原文映射及 Unicode/容量边界、缺项与矛盾分离、Run 内原 CWI/check 信息额度、协议降级拒绝；真实 owner 原输入不变、零虚构 receipt/credit、终态逐项反馈及脱敏、删除/篡改反证、重复和重启幂等 |
 | assessment purpose / repair generations | `workorchruntimecontract/runtime_assessment_purpose_preimage_test.go`、`biz/runtime/assessment_purpose_preseal_test.go`、`biz/runtime_validation_input_addition_mainline_test.go` | active/history purpose 隔离、exact binding 唯一反证、repair-only 不授予 assessment、缺失/重复/篡改拒绝；file-backed Run + 真实 File/Shell 的历史 assessment→弱验证拒绝→semantic repair seal→create-only input→fresh validation→assessment→终态投递；SM-2 seal CAS 前后、input receipt 与 fresh validation 提交后重启；终态 duplicate、各切点零额外 provider/预算，旧输入与 startup 不变，SM-1 ownership 不变 |
-| target preimage / terminal feedback | `workorchruntimecontract/runtime_target_parameter_binding_test.go`、`blocks/file/target_parameter_test.go`、`biz/runtime/prerequisite_freshness_test.go`、`biz/runtime_result_feedback_test.go`、`biz/runtime/controller_test.go::TestRuntimeControllerInitializePreservesLegacyFeedbackVersionWithoutWrite`、`biz/runtime_result_projection_test.go::TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjection` | SM-3 exact target 派生与 echo 拒绝；SM-2 无进展 guard 保留 root cause 且零额外预算；SM-4 完整且不虚构验收的反馈、旧/新版本 partial delivery 重启重放；SM-1 与 capability owner 不变 |
+| target preimage / terminal feedback | `workorchruntimecontract/runtime_target_parameter_binding_test.go`、`blocks/file/target_parameter_test.go`、`biz/runtime/prerequisite_freshness_test.go`、`biz/runtime_result_feedback_test.go`、`biz/runtime/controller_test.go::TestRuntimeControllerInitializeRejectsNoncurrentFeedbackVersionWithoutWrite`、`biz/runtime_result_projection_test.go::TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjection` | SM-3 exact target 派生与 echo 拒绝；SM-2 无进展 guard 保留 root cause 且零额外预算；SM-4 完整且不虚构验收的反馈、非当前版本零改写拒绝、当前版本 partial delivery 重启重放；SM-1 与 capability owner 不变 |
 | repair rejection / historical probe lineage | `biz/runtime/repair_rejection_closure_test.go`、`biz/runtime/candidate_owner_conformance_test.go`、`biz/runtime/shell_owner_receipt_integration_test.go::TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot` | first-member/partial-effect rejected repair 同 CAS 退役；candidate correction 的 exact catalog preimage、tamper/协调重封存拒绝、CAS-before/response-loss/restart duplicate；真实 Shell→File correction→effect→fresh validation，历史拒绝不阻塞 current owner fact 推进 |
 | Module lifecycle/core dependencies | `plugin_test.go::TestModuleRunBindsFrameworkContextToOwnerLifecycle`、`plugin_test.go::TestModuleSetupRejectsMissingBackgroundRoutine`、`biz/owner_test.go::TestModuleIdentityConfigureStartStopContract`、`biz/owner_test.go::TestModuleConfigureRequiresCoreDependencies`、`biz/owner_test.go::TestFailedStartRemovesAllIngressAndCancelsLifecycle` | identity、Configure/Start/Stop、framework context、required BackgroundRoutine、startup rollback、deadline-aware Stop、canonical evidence repository bundle 与 EventHub dependency fail-fast |
 | owner-private dispatcher/CAS/aggregate | `biz/runtime/internal_event_*_test.go`、`biz/runtime/component_facades_test.go`、`biz/runtime/aggregate_invariant_test.go`、`biz/runtime/structure_contract_test.go`、`biz/runtime/failure_authority_transition_test.go`（含 `TestOwnerInfeasibilityAtomicallyTerminatesValidationRepairBinding`）、`biz/runtime/candidate_owner_conformance_test.go::TestOwnerCandidateApplicabilityViolationClosesFactAndCorrectionInOneCAS` | exactly-one payload、primary SM 与 coordinated write-set、single mutation root/CAS、三种 failure-authority policy、candidate feasibility fact+disposition 单 CAS、validation-repair infeasibility 原子退役/terminal、旧 target/directive 不泄漏、duplicate/fresh-load 与 pre/post-CAS failure |

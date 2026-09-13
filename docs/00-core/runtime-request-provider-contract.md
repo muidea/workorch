@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-09-01
+Last Verified: 2026-09-10
 
 ## Typed Request Binding
 
@@ -15,8 +15,43 @@ Runtime 的唯一 provider transaction 管道使用显式 `DocumentKind`：
 - 两类字段互斥；空 kind 不解释为 operations，command/result/audit 必须回显同一 kind；
 - LLM block 只消费 typed command，不从 map、prompt 文本或临时上下文重建 authority。
 
+当前 semantic 请求必须包含 Orchestrator 从 owner 快照投影的 `CoverageProgress`，绑定完整 sealed inventory、
+当前 manifest/batch 与来源 revision；缺字段或错源不得 fallback。整体验收计数与可见 CWI 的证据引用数/重开数
+只在 C4 渲染，后者不产生验收 credit。LLM 校验输入 scope/hash/成员完整性，并在预算渲染后逐值核对
+`P2.semantic_coverage_progress`；丢失或改写必须在 provider submission 前拒绝。恢复只重建只读观察，
+不回填旧请求、不建立第二份验收状态；细则见 [Context Assembly](runtime-request-context-assembly.md#semantic-请求的只读覆盖进度)。
+
+当前 semantic 请求同时要求 `ExecutionHistory`：从 Run 的已提交 receipt ledger 得到有界历史、原 bound CWI、
+owner/kind、outcome/effect/changed、target/hash 与 typed validation 观察。最近 16 条按原提交序号保留，省略数显式
+表达；缺字段不能默认为无执行，超限不能隐式删行。LLM 校验来源绑定/容量/hash，在渲染后逐值保护
+`P3.semantic_execution_history`；普通历史失败不能冒充专用修复来源，owner accepted 不等于 Runtime 验收通过。
+
+历史同时保留 sealed operation 的 requested targets 与 sealed execution 的 expected effect，不能用回执实际值反填。
+历史和 exact repair feedback 的 `diagnostic` 使用同一窄投影，保留原 owner/code、revision、完整 feedback hash、
+truncated/redacted 和可选的 typed validation diagnostic；不透传原文或维护权限。修复专用反馈缺少 causal diagnostic
+必须拒绝，普通回执缺少诊断显式为 null。自报退出码不是进程执行或通过检查的证明；新增值仍只在 C4 完整性门禁内。
+
+`ExecutionBudget` 同样必需：保留同一 pre-submission owner 快照的两个 Run 物理维度，以及当前可见原 CWI 在
+current/history 批次中的消费和原始 accepted dispatch lineage 的 durable seal 消费。附加 proof/durable cap 为 null
+不是无限预算，unknown 不退额，治理续派不重复计数，快照不是下一调用或实施授权。
+缺字段、错源、成员/余额不完整在 provider 前拒绝；C4 渲染后执行 `P3.semantic_execution_budget` 逐值保护。
+不新增 budget ledger、状态机或兼容默认值；详见 [Context Assembly](runtime-request-context-assembly.md#semantic-请求的执行预算观察)。
+
 Orchestrator 在 request 前封存 logical request、authority/manifest identity、C0～C5 section hashes、
 `StablePrefixHash` 与 `RuntimeExpectedDocumentContract`。transaction、definition、manifest 或 execution contract 漂移时不得 seal。
+
+semantic-plan 与 operations 的只读渲染预检先于 request-session CAS。semantic 初始、proof-batch 和 correction 私有事件
+只保存请求意图；新请求预检拒绝在零新 session/physical call/allocation 下由 SM-2 终止，不是 provider terminal fact。
+已持久化的 exact session 证明该请求通过预检；恢复重验 transaction、manifest、prefix、correction 和 expected document，
+不再调用 preflight。prepared 首次提交、预算约束的 whole-document recovery、submitted-unknown 与 complete-local-admission
+仍遵守各自的独立合同，不能用 session 存在绕过身份或 submission guard。
+
+semantic request-session 的唯一写入者在 CAS 前重新加载 aggregate，核对当前 request-open/correction 意图；
+`required`、order-accepted 和 proof-batch-document-accepted 本身均不授权 provider session。ExpectedDocument 从同一
+owner 内的纯投影取得，精确绑定 ledger logical request、manifest/prefix、active batch 的 ID/sequence/CWI membership/
+coverage-order、修正身份/轮次、Definition seed、已封存 output ceiling 和 recovery 上限。新建与复用均执行此校验；
+不得覆盖或重算调用者提供的 semantic ExpectedDocument 来修补不匹配身份。预检期间意图变化后返回的旧成功结果
+不产生 session、physical allocation 或 provider call；历史 session 只保留审计，不移植为当前请求的证明。
 
 该persisted request session与canonical convergence state、`RequiredOutputContract`、`DocumentKind`、ExpectedDocument、
 provider ceiling、reasoning effort、budget和stable-prefix identity共同构成purpose-bound semantic invocation contract。产品层

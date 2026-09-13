@@ -4,7 +4,7 @@ Status: normative
 
 Type: core-contract-part
 
-Last Verified: 2026-09-10
+Last Verified: 2026-09-11
 
 ## 四个协调状态机
 
@@ -426,9 +426,24 @@ sealed authority + preflight ready
   identity、stable-prefix hash 和 logical request identity。EOF、output limit、timeout、429/5xx 等允许恢复的事实走
   session/provider recovery；401/403、configuration/protocol、未知提交和 document recovery 耗尽走 terminal，不消耗 candidate 或
   repair budget。恢复只能重新请求同一有界完整 document；历史 raw output 只作 owner audit，不得拼接成 authority document。
+- semantic coverage-order、proof-batch 与 correction 先由私有事件封存请求意图，再统一执行只读预检，最后 CAS 创建 exact
+  session。新请求预检拒绝只触发 SM-2 semantic contract failure，零新 session/physical call/budget allocation；不得调用
+  要求已结算 physical request 的 provider-terminal transaction。session 的精确身份是同版本恢复的预检证明，restart 不重复
+  preflight；未提交可继续首次调用，已提交未结算只封存 unknown，完整文档只做 local admission。
+  session writer 必须 fresh-load 并反查当前请求意图及同一 owner 纯投影的 ExpectedDocument；新建/复用均检查完整
+  logical/batch/CWI/order/correction/budget 身份。required/order-accepted/proof-batch-document-accepted 不授权请求，
+  预检期间意图变化后的旧成功结果不能生成 session 或 physical allocation。
 - provider terminal 是明确的 SM-3→SM-2 owner-local transaction：唯一 normalized fact 必须在一次 aggregate CAS 中同时
   关闭 request session 与应用 exact failure。不得恢复“先 terminal session、后 failure”的双 CAS；fresh reload 对缺少
   matching failure 的 torn terminal fail-closed，对 submitted-without-outcome 只封存 unknown 且零 provider replay。
+- 可选 `MaxProofBatchesPerCWI` 在 `semantic_plan_batch_compiled` 的同一私有 CAS 中消费：从 current/history batches
+  汇总原 CWI，只有 selected 集合占额，pending 窗口不占额。精确重放先于 next-sequence/active-document guard，零写；
+  退休 generation、改变请求或重启不清零。不足时零新 batch/session/provider，由原 SM-4 failure ingress→SM-2 terminal
+  收口；不扩充 repair、工作权限或治理额度。aggregate/opaque-state fresh-load 均反查原 ledger，详见 execution-budget。
+- 可选 `MaxDurableDispatchesPerCWI` 只在 final candidate admission 的同一次 accepted-attempt/dispatch CAS 占额：
+  按原 accepted dispatch 的 durable expected effect 和 binding CWI 汇总，不按操作数、成功回执或当前 generation 计数。
+  governance resume 复用原额度；失效/失败不退额，exact duplicate 零写，fresh-load 同时验证 admission lineage 与上限。
+  不足时零新 dispatch/claim/effect，已有 provider 消费保留；原 SM-4 failure ingress→SM-2 budget terminal 处理，SM-1 不变。
 - LLM result 的 `providerSubmitted` 是 physical-call 唯一事实，Orchestrator 不从 request bytes/response mode 推断。
   每个 result 先形成 owner-private budget settlement；stale、document-complete、recoverable 或 terminal transition 必须在其
   同一次 aggregate CAS 中应用 settlement。recoverable CAS 还原子消费适用的 SM-4 transport guard，并在耗尽时应用 SM-2
@@ -538,6 +553,9 @@ sealed authority + preflight ready
 
 - `DriveRuntimeCommand/Result` 是 Orchestrator 唯一同步推进合同。Application 不保留 continuation queue；
   Run owner state notification 才能投递 Orchestrator 的内部 drive event。
+- 已提交的 Run active/resume/continuation 异步通知，其 admission 与调度使用 Orchestrator 自身生命周期及 exact workspace
+  context，不受已结束的原请求取消影响。同步 command 仍尊重 caller cancellation；owner 关闭、source/fact 校验、
+  retirement/quiescence fence 与 singleflight 必须保持，通知本身不能选择 transition 或替代 aggregate authority。
 - 每个非等待、非终态 transition 必须持久化递增 `StateRevision`；无进展或超过 guard 必须 typed
   fail-fast，不能在进程内空转。
 - 每个 Orchestrator worker 的退出边界必须满足以下二选一：仍由当前 run-scoped gate 同步执行下一 owner-private transition；
@@ -667,6 +685,9 @@ sealed authority + preflight ready
   owner acknowledgement。Result owner acknowledgement 必须携带其按 sealed material 派生并已持久化的 exact `ResultID`；
   SM-4 只把该 fact 原样交给最终 Run delivery，Run owner将其封存为 `TerminalResultID`，不得自行派生或查询 Result。
   Workspace/Run acknowledgement 禁止携带 `ResultID`。projection health 不参与 reducer，也不是 runtime blocker。
+- Result feedback 只允许当前封存版本；缺失、旧版及未知版在 Run record/aggregate/initialize/material 入口拒绝，不由
+  recovery 升级或补写。SM-4 同版本重启从原 aggregate 重投完全相同的 Result material/hash，仍按既有 delivery ledger
+  等待三 owner ack；此版本门禁不改变 SM-2 验收裁决或 SM-1 生命周期 owner。
 - catalog retirement 后若旧 no-effect binding 仍为 current binding，SM-4 必须先投递 typed `CWIBindingRetired` fact，由
   SM-2 唯一 reducer 退休 exact catalog lineage 并 reopen CWI；事件完成前旧 binding 不可作为 operation authority，也不能把
   provisional `target_grounding_unresolved` 交付。CWI 真正 binding-free 后，SM-4 把新 semantic generation 视为更高优先级的

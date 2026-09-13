@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"context"
+	frameworkdef "github.com/muidea/magicCommon/def"
 	"log/slog"
 	"strings"
 	"sync/atomic"
@@ -21,18 +22,18 @@ type gitLifecycleHub struct {
 	unsubscriptions atomic.Int32
 }
 
-func (h *gitLifecycleHub) Subscribe(id string, observer magicevent.Observer) {
+func (h *gitLifecycleHub) Subscribe(id string, observer magicevent.Observer) *frameworkdef.Error {
 	if id == gitevents.TopicAcquireRuntimeCapabilities {
 		h.subscriptions.Add(1)
 	}
-	h.Hub.Subscribe(id, observer)
+	return h.Hub.Subscribe(id, observer)
 }
 
-func (h *gitLifecycleHub) Unsubscribe(id string, observer magicevent.Observer) {
+func (h *gitLifecycleHub) Unsubscribe(id string, observer magicevent.Observer) *frameworkdef.Error {
 	if id == gitevents.TopicAcquireRuntimeCapabilities {
 		h.unsubscriptions.Add(1)
 	}
-	h.Hub.Unsubscribe(id, observer)
+	return h.Hub.Unsubscribe(id, observer)
 }
 
 type gitLifecycleEvent struct {

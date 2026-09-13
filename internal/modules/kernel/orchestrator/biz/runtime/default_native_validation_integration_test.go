@@ -70,8 +70,9 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 		t.Fatal(err)
 	}
 	aggregate := RuntimeAggregate{
-		Definition: bootstrap.Definition,
-		Facts:      facts,
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		Definition:            bootstrap.Definition,
+		Facts:                 facts,
 		Decision: runtimecontract.RuntimeDecision{AuthoritySnapshot: runtimecontract.AuthoritySnapshot{
 			ID: "authority-default-native-proof",
 		}},

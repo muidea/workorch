@@ -1154,7 +1154,8 @@ func TestPendingConfirmedRepairTransactionDoesNotMatchFreshValidationPartialDisp
 		CurrentFailure: &failure, Closure: &closure,
 	}
 	aggregate := RuntimeAggregate{
-		Facts: runtimecontract.RuntimeFacts{RepairDirective: &directive},
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		Facts:                 runtimecontract.RuntimeFacts{RepairDirective: &directive},
 		Decision: runtimecontract.RuntimeDecision{
 			State:          runtimecontract.ConvergenceStateNeedValidation,
 			RequiredOutput: runtimecontract.RequiredOutputContract{RepairClosureID: closure.ID},

@@ -791,6 +791,9 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 	if record.Proposal != nil && runtimecontract.StableRuntimeCandidateHash(*record.Proposal) != runtimecontract.StableRuntimeCandidateHash(candidate) {
 		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: accepted candidate does not match the persisted proposal", common.ErrConflict)
 	}
+	if err := runtimecontract.CheckRuntimeDurableDispatchBudget(aggregate.Facts.Activation.ExecutionContract.ExecutionLimits, sealedDispatchRecord(aggregate.ActiveDispatch), sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches), aggregate.CandidateAttempts, sealedDispatchToRuntimeRecord(dispatch)); err != nil {
+		return CandidateAdmissionCommitResult{}, err
+	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateAccepted
 	aggregate.CandidateAttempts[idx].Proposal = nil
@@ -1219,10 +1222,11 @@ func candidateAttemptTerminalFailureFact(attempt int, failure runtimecontract.Ru
 // closePendingCandidateAttemptsForTerminal closes any in-flight SM-3 request
 // when an SM-2/SM-4 failure fact has already sealed terminal authority. This is
 // part of the same aggregate CAS: a terminal Run must never persist an open
-// provider transaction that a restart could replay.
-func closePendingCandidateAttemptsForTerminal(aggregate *RuntimeAggregate, fact runtimecontract.FailureFact) {
+// provider transaction that a restart could replay. Retained feasibility facts
+// keep their exact owner catalog preimages just like the candidate-failed exit.
+func closePendingCandidateAttemptsForTerminal(aggregate *RuntimeAggregate, fact runtimecontract.FailureFact) error {
 	if aggregate == nil || (!isTerminalConvergenceState(aggregate.Decision.State) && aggregate.Decision.Terminal == nil) {
-		return
+		return nil
 	}
 	failure := runtimecontract.RuntimeCandidateFailure{
 		Class: runtimecontract.RuntimeCandidateFailureClassInternal, Code: strings.TrimSpace(fact.Code),
@@ -1238,6 +1242,9 @@ func closePendingCandidateAttemptsForTerminal(aggregate *RuntimeAggregate, fact 
 		if aggregate.CandidateAttempts[idx].State != runtimecontract.RuntimeCandidateAttemptStatePending {
 			continue
 		}
+		if err := retainFailedCandidateFeasibilityCatalogs(aggregate, idx); err != nil {
+			return err
+		}
 		failureCopy := failure
 		aggregate.CandidateAttempts[idx].State = runtimecontract.RuntimeCandidateAttemptStateFailed
 		aggregate.CandidateAttempts[idx].Failure = &failureCopy
@@ -1247,6 +1254,7 @@ func closePendingCandidateAttemptsForTerminal(aggregate *RuntimeAggregate, fact 
 		}
 		aggregate.CandidateAttempts[idx].Correction = rejectedFinalDirective(aggregate.CandidateAttempts[idx].ManifestHash, terminalCode)
 	}
+	return nil
 }
 
 func candidateAttemptsForContract(values []runtimecontract.RuntimeCandidateAttemptRecord, workspaceID common.WorkspaceID, runID common.RunID, contractID string) []runtimecontract.RuntimeCandidateAttemptRecord {

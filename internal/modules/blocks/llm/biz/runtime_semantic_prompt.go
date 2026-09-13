@@ -54,6 +54,10 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 		return runtimeSemanticPrompt{}, err
 	}
 	tailJSON, err := json.Marshal(runtimeSemanticTailProjection{
+		CoverageProgress:    prepared.context.CoverageProgress,
+		ExecutionHistory:    prepared.context.ExecutionHistory,
+		ExecutionBudget:     prepared.context.ExecutionBudget,
+		ExecutionFeedback:   prepared.context.ExecutionFeedback,
 		Attempt:             request.CandidateAttempt,
 		PreviousRejection:   cloneRuntimeSemanticCorrectionObservation(request.SemanticCorrectionObservation),
 		CorrectionDirective: cloneRuntimeSemanticCorrectionDirective(request.SemanticCorrectionDirective),

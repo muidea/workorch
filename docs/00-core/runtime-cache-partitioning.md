@@ -77,7 +77,26 @@ semantic-plan 复用同一 section 顺序：
 - C2 保存 immutable execution contract、DefinitionFocus declaration 与 profile-declared owner-fact requirement；
 - C3 保存 Definition seed、sealed semantic manifest/schema、current owner admissibility snapshot/revision、activation已封存的
   planning Soul guidance以及bounded target/selector/constraint/recipe vocabulary；Soul只提供context，不能新增或裁剪manifest authority；
-- C4 保存 attempt 0/1 与 provider-safe rejection；C5 保存 acceptance-slice/cross-partition refs。
+- C4 保存 attempt 0/1、provider-safe rejection、当前只读 coverage progress、Run 内有界 committed receipt history、执行预算观察
+  和适用的 exact causal repair feedback；
+  C5 保存 acceptance-slice/cross-partition refs。
+
+coverage progress 的整体数量来自完整封存 CWI inventory，明细只覆盖当前 manifest/batch。当前证据引用数与重开
+次数只是事实摘要，不是执行计数或验收权限；它的 source revision/hash 与内容均不得进入 C0～C3。同一快照恢复
+必须重现相同值，合法 CAS 后只读 revision 可变化；同合同 correction 仍不得改写 manifest 或稳定前缀。
+
+receipt history 是提交顺序下最近 16 条的只读观察，旧条目的省略数必须显式保留；它不表示完整执行清单、当前 owner
+readiness 或新的操作 vocabulary。其历史 bound CWI 可不在当前 manifest 内，但必须属于同一 sealed Definition；
+历史 accepted receipt 不授予当前 CWI credit。scope/revision/hash 与全部选中反馈均只在 C4，并做逐值保护。
+
+历史的 requested target/expected effect 与 observed target/effect 分开，前者只投影原封存 operation/execution。
+历史及 exact repair feedback 的 owner diagnostic 只投影 code/revision、完整来源 hash、truncated/redacted 及有界
+typed validation diagnostic；原文、私有 detail ref 与维修/治理权限不透传。该 C4 投影不可重写 C0～C3，
+自报 exit code、timeout 或历史故障码不能成为新的操作授权或验收 credit。
+
+执行预算观察包括 Run provider/capability 物理余额与可见原 CWI proof-batch、durable-dispatch 消费，从当前 owner 账本派生；
+reserved/unknown、current/history 批次、原 accepted dispatch lineage 和显式 null 附加上限不可裁剪或改值。它是本次 submission 前快照，不是请求或
+工作授权，也不是全部策略额度清单；只改变 C4，不改变 C0～C3 或 stable prefix，不在重启时创建第二份计数。
 
 上一 generation 的 operation、target、binding 和 owner readiness 只能进入 volatile lineage，不能回写 C2。
 `RuntimeOwnerFactRequirement` 在 C2 只描述 owner、fact kind 和 operation kind；current readiness、recipe identity、

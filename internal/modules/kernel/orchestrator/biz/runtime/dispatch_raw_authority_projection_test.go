@@ -94,7 +94,7 @@ func TestRuntimeAggregateFreshLoadRejectsRawDispatchProjectionLaundering(t *test
 	stateFacts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
 	stateDefinition := dispatchDefinition()
 	stateDefinition.CapabilityContract = []string{runtimecontract.RuntimeBlockKindPatchApply}
-	stateAggregate := RuntimeAggregate{StateRevision: 1, Definition: stateDefinition, Facts: stateFacts}
+	stateAggregate := RuntimeAggregate{ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent, StateRevision: 1, Definition: stateDefinition, Facts: stateFacts}
 	runtimeTestEnsureCurrentFocusBindings(t, &stateAggregate)
 	stateRepository := &durableRuntimeStateRepository{aggregate: stateAggregate}
 	stateBaseline := sealCandidateForTest(t, stateRepository, stateChangeCandidate())

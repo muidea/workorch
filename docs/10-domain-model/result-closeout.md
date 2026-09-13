@@ -142,7 +142,9 @@ rejected closeout 仍必须逐项保存已满足、未满足、未判定和stale
 具体 owner 原因来自已持久化 FailureFact，或 SM-2 在 owner-fact 有界耗尽时封存的 terminal `OriginalDiagnostic`；
 无 FailureFact 不等于没有具体原因。终止 code 与原始 owner code 保持独立，原始 requirement/check/target/revision 信息
 不得由 Result 或 Application 重建、归一成泛化错误或用于重新选择下一轮动作。原因参与 closeout hash，duplicate/restart
-必须保持原始值；历史无该可选字段的记录与 legacy feedback renderer 不升级、不补写。
+必须保持原始值。当前 Runtime 只允许 `ResultFeedbackVersionCurrent` 的反馈合同；缺失、旧版或未知版本在
+record/aggregate/material 准入失败，不保留旧 renderer，也不升级、补写或删除旧归档。同版本重启及 ack 丢失的重投
+仍必须产生完全相同的 Result 内容与 hash。
 `KnownLimitations[]` 只描述未被Definition声明为required的已知限制；不能豁免required CWI或把`indeterminate`变为成功。
 
 `RequirementOutcomes[]`、refs、limitations和operation outcomes canonical排序后计算`CloseoutHash`。same `CloseoutID`的duplicate

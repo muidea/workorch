@@ -148,11 +148,9 @@ func classifyRuntimeInputReview(transaction *semanticPlanningMutationTransaction
 	diagnostic := runtimecontract.RuntimeOriginalDiagnostic{SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent,
 		OwnerModuleID: runtimecontract.RuntimeModuleOrchestrator, OriginalClass: "contract",
 		OriginalCode: code, OriginalMessage: "validation input review did not establish consistency with the immutable original criteria", Signature: runtimeInputReviewRef(a, ledger, document)}
-	if a.ResultFeedbackVersion >= 3 {
-		diagnostic.ValidationInputReviews, err = runtimeInputReviewFeedback(a, ledger, document)
-		if err != nil {
-			return true, false, err
-		}
+	diagnostic.ValidationInputReviews, err = runtimeInputReviewFeedback(a, ledger, document)
+	if err != nil {
+		return true, false, err
 	}
 	updated, err := applySemanticContractFailureToAggregate(a, code, diagnostic)
 	if err != nil {
@@ -385,34 +383,32 @@ func validateRuntimeInputReviewAggregate(a RuntimeAggregate) error {
 			return fmt.Errorf("input review governance exceeded the original check information budget: %s", code)
 		}
 	}
-	if a.ResultFeedbackVersion >= 3 {
-		var diagnostics []*runtimecontract.RuntimeOriginalDiagnostic
-		if a.Facts.Failure != nil {
-			diagnostics = append(diagnostics, a.Facts.Failure.OriginalDiagnostic)
+	var diagnostics []*runtimecontract.RuntimeOriginalDiagnostic
+	if a.Facts.Failure != nil {
+		diagnostics = append(diagnostics, a.Facts.Failure.OriginalDiagnostic)
+	}
+	if a.Decision.Terminal != nil {
+		diagnostics = append(diagnostics, a.Decision.Terminal.OriginalDiagnostic)
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic == nil || diagnostic.OwnerModuleID != runtimecontract.RuntimeModuleOrchestrator {
+			continue
 		}
-		if a.Decision.Terminal != nil {
-			diagnostics = append(diagnostics, a.Decision.Terminal.OriginalDiagnostic)
-		}
-		for _, diagnostic := range diagnostics {
-			if diagnostic == nil || diagnostic.OwnerModuleID != runtimecontract.RuntimeModuleOrchestrator {
+		switch diagnostic.OriginalCode {
+		case "validation_input_review_conflict", "validation_input_review_coverage_incomplete",
+			"validation_input_review_information_exhausted", "validation_input_review_history_exhausted":
+		default:
+			if len(diagnostic.ValidationInputReviews) == 0 {
 				continue
 			}
-			switch diagnostic.OriginalCode {
-			case "validation_input_review_conflict", "validation_input_review_coverage_incomplete",
-				"validation_input_review_information_exhausted", "validation_input_review_history_exhausted":
-			default:
-				if len(diagnostic.ValidationInputReviews) == 0 {
-					continue
-				}
-			}
-			document, found := runtimeInputReviewDocument(a.SemanticPlanning)
-			if !found || runtimeInputReviewConclusion(document) == runtimecontract.RuntimeValidationInputConsistent {
-				return fmt.Errorf("blocking input review diagnostic has no admitted blocking report")
-			}
-			expected, err := runtimeInputReviewFeedback(a, a.SemanticPlanning, document)
-			if err != nil || !reflect.DeepEqual(expected, diagnostic.ValidationInputReviews) {
-				return fmt.Errorf("blocking input review diagnostic lost exact report provenance")
-			}
+		}
+		document, found := runtimeInputReviewDocument(a.SemanticPlanning)
+		if !found || runtimeInputReviewConclusion(document) == runtimecontract.RuntimeValidationInputConsistent {
+			return fmt.Errorf("blocking input review diagnostic has no admitted blocking report")
+		}
+		expected, err := runtimeInputReviewFeedback(a, a.SemanticPlanning, document)
+		if err != nil || !reflect.DeepEqual(expected, diagnostic.ValidationInputReviews) {
+			return fmt.Errorf("blocking input review diagnostic lost exact report provenance")
 		}
 	}
 	return nil

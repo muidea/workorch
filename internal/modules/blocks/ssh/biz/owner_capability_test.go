@@ -3,6 +3,7 @@ package ssh
 import (
 	"bytes"
 	"context"
+	frameworkdef "github.com/muidea/magicCommon/def"
 	"log/slog"
 	"strings"
 	"sync/atomic"
@@ -20,18 +21,18 @@ type sshLifecycleHub struct {
 	unsubscriptions atomic.Int32
 }
 
-func (h *sshLifecycleHub) Subscribe(id string, observer magicevent.Observer) {
+func (h *sshLifecycleHub) Subscribe(id string, observer magicevent.Observer) *frameworkdef.Error {
 	if id == sshevents.TopicAcquireRuntimeCapabilities {
 		h.subscriptions.Add(1)
 	}
-	h.Hub.Subscribe(id, observer)
+	return h.Hub.Subscribe(id, observer)
 }
 
-func (h *sshLifecycleHub) Unsubscribe(id string, observer magicevent.Observer) {
+func (h *sshLifecycleHub) Unsubscribe(id string, observer magicevent.Observer) *frameworkdef.Error {
 	if id == sshevents.TopicAcquireRuntimeCapabilities {
 		h.unsubscriptions.Add(1)
 	}
-	h.Hub.Unsubscribe(id, observer)
+	return h.Hub.Unsubscribe(id, observer)
 }
 
 type sshLifecycleEvent struct {

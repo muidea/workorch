@@ -100,25 +100,11 @@ type runtimeCandidateRepairAuthorityProjection struct {
 	TargetRefs            []string                                     `json:"targetRefs,omitempty"`
 }
 
-type runtimeCandidateValidationProjection struct {
-	RecipeID                 string                                          `json:"recipeId,omitempty"`
-	ObservationProtocolRef   string                                          `json:"observationProtocolRef,omitempty"`
-	FailureDetailProtocolRef string                                          `json:"failureDetailProtocolRef,omitempty"`
-	ExecutedChecks           []string                                        `json:"executedChecks,omitempty"`
-	PassedChecks             []string                                        `json:"passedChecks,omitempty"`
-	FailedChecks             []string                                        `json:"failedChecks,omitempty"`
-	SkippedChecks            []string                                        `json:"skippedChecks,omitempty"`
-	IncompleteChecks         []string                                        `json:"incompleteChecks,omitempty"`
-	CheckFailures            []runtimecontract.RuntimeValidationCheckFailure `json:"checkFailures,omitempty"`
-	FailureDetailsIncomplete bool                                            `json:"failureDetailsIncomplete"`
-	ChecksTruncated          bool                                            `json:"checksTruncated,omitempty"`
-}
-
 type runtimeCandidateValidationFailureProjection struct {
-	EvidenceID  common.EvidenceRecordID               `json:"evidenceId"`
-	Fingerprint string                                `json:"fingerprint,omitempty"`
-	Occurrences int                                   `json:"occurrences"`
-	Validation  *runtimeCandidateValidationProjection `json:"validation,omitempty"`
+	EvidenceID  common.EvidenceRecordID                             `json:"evidenceId"`
+	Fingerprint string                                              `json:"fingerprint,omitempty"`
+	Occurrences int                                                 `json:"occurrences"`
+	Validation  *runtimecontract.RuntimeValidationExecutionFeedback `json:"validation,omitempty"`
 }
 
 // The following C4 values are deliberately narrower than the persisted
@@ -148,24 +134,24 @@ type runtimeCandidateValidationDiagnosticProjection struct {
 }
 
 type runtimeCandidateProviderSafeEvidenceProjection struct {
-	ID                  common.EvidenceRecordID               `json:"id,omitempty"`
-	Kind                string                                `json:"kind,omitempty"`
-	SubjectRef          string                                `json:"subjectRef,omitempty"`
-	AuthoritySnapshotID string                                `json:"authoritySnapshotId,omitempty"`
-	DispatchID          string                                `json:"dispatchId,omitempty"`
-	OperationID         string                                `json:"operationId,omitempty"`
-	Revision            string                                `json:"revision,omitempty"`
-	FailureClass        runtimecontract.FailureClass          `json:"failureClass,omitempty"`
-	FailureCode         string                                `json:"failureCode,omitempty"`
-	FailureSignature    string                                `json:"failureSignature,omitempty"`
-	ContentHash         string                                `json:"contentHash,omitempty"`
-	ExitCode            *int64                                `json:"exitCode,omitempty"`
-	EvidenceRefs        []string                              `json:"evidenceRefs,omitempty"`
-	TargetRefs          []string                              `json:"targetRefs,omitempty"`
-	CoverageWorkItemIDs []common.CoverageWorkItemID           `json:"coverageWorkItemIds,omitempty"`
-	Quality             common.EvidenceQuality                `json:"quality,omitempty"`
-	ZeroWork            bool                                  `json:"zeroWork,omitempty"`
-	Validation          *runtimeCandidateValidationProjection `json:"validation,omitempty"`
+	ID                  common.EvidenceRecordID                             `json:"id,omitempty"`
+	Kind                string                                              `json:"kind,omitempty"`
+	SubjectRef          string                                              `json:"subjectRef,omitempty"`
+	AuthoritySnapshotID string                                              `json:"authoritySnapshotId,omitempty"`
+	DispatchID          string                                              `json:"dispatchId,omitempty"`
+	OperationID         string                                              `json:"operationId,omitempty"`
+	Revision            string                                              `json:"revision,omitempty"`
+	FailureClass        runtimecontract.FailureClass                        `json:"failureClass,omitempty"`
+	FailureCode         string                                              `json:"failureCode,omitempty"`
+	FailureSignature    string                                              `json:"failureSignature,omitempty"`
+	ContentHash         string                                              `json:"contentHash,omitempty"`
+	ExitCode            *int64                                              `json:"exitCode,omitempty"`
+	EvidenceRefs        []string                                            `json:"evidenceRefs,omitempty"`
+	TargetRefs          []string                                            `json:"targetRefs,omitempty"`
+	CoverageWorkItemIDs []common.CoverageWorkItemID                         `json:"coverageWorkItemIds,omitempty"`
+	Quality             common.EvidenceQuality                              `json:"quality,omitempty"`
+	ZeroWork            bool                                                `json:"zeroWork,omitempty"`
+	Validation          *runtimecontract.RuntimeValidationExecutionFeedback `json:"validation,omitempty"`
 }
 
 type runtimeCandidateProviderSafeAssessmentProjection struct {
@@ -586,7 +572,7 @@ func runtimeProviderSafeEvidence(values []runtimecontract.EvidenceFact) []runtim
 			ContentHash: value.ContentHash, ExitCode: value.ExitCode, EvidenceRefs: append([]string(nil), value.EvidenceRefs...),
 			TargetRefs: append([]string(nil), value.TargetRefs...), CoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), value.CoverageWorkItemIDs...),
 			Quality: value.Quality, ZeroWork: value.ZeroWork,
-			Validation: runtimeProviderSafeValidation(value.Validation),
+			Validation: runtimecontract.ProjectRuntimeValidationExecutionFeedback(value.Validation),
 		})
 	}
 	return ret
@@ -602,54 +588,6 @@ func runtimeCandidateRepairAuthority(value *runtimecontract.RuntimeRepairDirecti
 		AllowedOperationKinds: d.AllowedOperationKinds, CoverageWorkItemIDs: d.CoverageWorkItemIDs, TargetRefs: d.TargetRefs}
 	if d.Closure != nil {
 		ret.ClosureID = d.Closure.ID
-	}
-	return ret
-}
-
-func runtimeProviderSafeValidation(value *runtimecontract.RuntimeValidationObservation) *runtimeCandidateValidationProjection {
-	if value == nil {
-		return nil
-	}
-	o := value.Normalized()
-	ret := &runtimeCandidateValidationProjection{RecipeID: o.RecipeID, ObservationProtocolRef: o.ObservationProtocolRef,
-		FailureDetailsIncomplete: o.FailureDetailsTruncated || o.OutputTruncated, ChecksTruncated: o.OutputTruncated}
-	bounded := func(values []string) []string {
-		if len(values) > runtimecontract.RuntimeValidationFailureDetailLimit {
-			ret.ChecksTruncated = true
-			values = values[:runtimecontract.RuntimeValidationFailureDetailLimit]
-		}
-		return append([]string(nil), values...)
-	}
-	ret.ExecutedChecks, ret.PassedChecks = bounded(o.ExecutedChecks), bounded(o.PassedChecks)
-	ret.FailedChecks, ret.SkippedChecks = bounded(o.FailedChecks), bounded(o.SkippedChecks)
-	ret.IncompleteChecks = bounded(o.IncompleteChecks)
-	if o.ValidateFailureDetails() == nil {
-		ret.FailureDetailProtocolRef = o.FailureDetailProtocolRef
-		ret.CheckFailures = append([]runtimecontract.RuntimeValidationCheckFailure(nil), o.CheckFailures...)
-	} else {
-		ret.FailureDetailsIncomplete = true
-	}
-	// Legacy requests keep their original bytes. The explicit diagnostic
-	// extension distinguishes traceable locations from actionable reported
-	// shapes; neither a line nor a hash can supply missing assertion semantics.
-	if o.FailureDetailProtocolRef == runtimecontract.RuntimeValidationFailureDetailProtocolV2 {
-		for _, detail := range ret.CheckFailures {
-			if detail.ReportedAssertion == (runtimecontract.RuntimeValidationReportedAssertion{}) {
-				ret.FailureDetailsIncomplete = true
-			}
-		}
-	}
-	for _, check := range o.FailedChecks {
-		found := false
-		for _, detail := range ret.CheckFailures {
-			if detail.CheckRef == check {
-				found = true
-				break
-			}
-		}
-		if !found {
-			ret.FailureDetailsIncomplete = true
-		}
 	}
 	return ret
 }
@@ -672,7 +610,7 @@ func runtimeCurrentValidationFailure(context runtimecontract.RuntimeCandidateCon
 		return &runtimeCandidateValidationFailureProjection{EvidenceID: fact.ID,
 			Fingerprint: runtimecontract.RuntimeValidationFailureFingerprint(fact, context.Focus.CoverageEvidenceBindings...),
 			Occurrences: runtimecontract.RuntimeValidationFailureOccurrences(context.Evidence, fact, context.Focus.CoverageEvidenceBindings...),
-			Validation:  runtimeProviderSafeValidation(fact.Validation)}
+			Validation:  runtimecontract.ProjectRuntimeValidationExecutionFeedback(fact.Validation)}
 	}
 	return nil
 }

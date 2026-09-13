@@ -2200,7 +2200,7 @@ func TestRuntimeFileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSnap
 		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
-	startRuntimeFileManifestOwner(t, ctx, hub)
+	fileOwner := startRuntimeFileManifestOwner(t, ctx, hub)
 	storeRoot := filepath.Join(root, "git-owner-data")
 	store, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
 	if err != nil {
@@ -2274,6 +2274,9 @@ func TestRuntimeFileBackedGitQueryReceiptCrashBeforePrerequisiteCommitReusesSnap
 		t.Fatal(err)
 	}
 	if err := runOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
 	hub.Terminate(ctx)
@@ -3296,7 +3299,7 @@ func TestRuntimeFileBackedValidationScratchCommitCrashRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			startProcess := func(t *testing.T) (magicevent.Hub, *filerepository.RunRepository, *runmodule.Module, magicevent.SimpleObserver) {
+			startProcess := func(t *testing.T) (magicevent.Hub, *filerepository.RunRepository, *runmodule.Module, *filemodule.Module, magicevent.SimpleObserver) {
 				t.Helper()
 				hub := magicevent.NewHub(16)
 				processRuns := filerepository.NewRunRepository(runsPath)
@@ -3315,10 +3318,13 @@ func TestRuntimeFileBackedValidationScratchCommitCrashRestart(t *testing.T) {
 						ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory,
 					}}, nil)
 				})
-				startRuntimeFileManifestOwner(t, ctx, hub)
-				return hub, processRuns, runOwner, workspaceObserver
+				fileOwner := startRuntimeFileManifestOwner(t, ctx, hub)
+				return hub, processRuns, runOwner, fileOwner, workspaceObserver
 			}
-			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, workspaceObserver magicevent.SimpleObserver) {
+			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, fileOwner *filemodule.Module, workspaceObserver magicevent.SimpleObserver) {
+				if fileOwner != nil {
+					_ = fileOwner.Stop(ctx)
+				}
 				if workspaceObserver != nil {
 					workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 				}
@@ -3330,7 +3336,7 @@ func TestRuntimeFileBackedValidationScratchCommitCrashRestart(t *testing.T) {
 				}
 			}
 
-			hub, processRuns, runOwner, workspaceObserver := startProcess(t)
+			hub, processRuns, runOwner, fileOwner, workspaceObserver := startProcess(t)
 			baseRepository := runtimeStateRepository{hub: hub}
 			marker := "validation-scratch-before-cas"
 			if crashAfterCAS {
@@ -3386,9 +3392,9 @@ func TestRuntimeFileBackedValidationScratchCommitCrashRestart(t *testing.T) {
 				t.Fatalf("validation scratch acquisition entered a candidate or side-effect path: %+v", crashed.RuntimeState)
 			}
 
-			stopProcess(hub, runOwner, workspaceObserver)
-			hub, processRuns, runOwner, workspaceObserver = startProcess(t)
-			defer stopProcess(hub, runOwner, workspaceObserver)
+			stopProcess(hub, runOwner, fileOwner, workspaceObserver)
+			hub, processRuns, runOwner, fileOwner, workspaceObserver = startProcess(t)
+			defer stopProcess(hub, runOwner, fileOwner, workspaceObserver)
 			restarted := newRuntimeDriveTestModule(t, hub)
 			loaded, err := restarted.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
@@ -3481,7 +3487,7 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 				t.Fatal(err)
 			}
 
-			startProcess := func(t *testing.T) (magicevent.Hub, *filerepository.RunRepository, *runmodule.Module, magicevent.SimpleObserver) {
+			startProcess := func(t *testing.T) (magicevent.Hub, *filerepository.RunRepository, *runmodule.Module, *filemodule.Module, magicevent.SimpleObserver) {
 				t.Helper()
 				hub := magicevent.NewHub(16)
 				processRuns := filerepository.NewRunRepository(runsPath)
@@ -3500,10 +3506,13 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 						ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory,
 					}}, nil)
 				})
-				startRuntimeFileManifestOwner(t, ctx, hub)
-				return hub, processRuns, runOwner, workspaceObserver
+				fileOwner := startRuntimeFileManifestOwner(t, ctx, hub)
+				return hub, processRuns, runOwner, fileOwner, workspaceObserver
 			}
-			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, workspaceObserver magicevent.SimpleObserver) {
+			stopProcess := func(hub magicevent.Hub, runOwner *runmodule.Module, fileOwner *filemodule.Module, workspaceObserver magicevent.SimpleObserver) {
+				if fileOwner != nil {
+					_ = fileOwner.Stop(ctx)
+				}
 				if workspaceObserver != nil {
 					workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 				}
@@ -3517,7 +3526,7 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 
 			// Process one obtains and commits the scoped resource through the normal
 			// local prerequisite path, then exits completely before resource loss.
-			hub, processRuns, runOwner, workspaceObserver := startProcess(t)
+			hub, processRuns, runOwner, fileOwner, workspaceObserver := startProcess(t)
 			first := newRuntimeDriveTestModule(t, hub)
 			run, err := processRuns.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 			if err != nil {
@@ -3540,11 +3549,11 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 			if err := os.RemoveAll(committedScratch.Reference); err != nil {
 				t.Fatal(err)
 			}
-			stopProcess(hub, runOwner, workspaceObserver)
+			stopProcess(hub, runOwner, fileOwner, workspaceObserver)
 
 			// Process two sees the deleted resource. Fault only the exact
 			// read-only invalidation write, before or after its Run-owner CAS.
-			hub, processRuns, runOwner, workspaceObserver = startProcess(t)
+			hub, processRuns, runOwner, fileOwner, workspaceObserver = startProcess(t)
 			baseRepository := runtimeStateRepository{hub: hub}
 			marker := "validation-scratch-stale-before-cas"
 			if crashAfterCAS {
@@ -3593,14 +3602,14 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 				len(crashed.RuntimeState.GovernanceRequests) != 0 || len(crashed.RuntimeState.OperationReceipts) != 0 {
 				t.Fatalf("scratch stale invalidation entered candidate or side-effect path: %+v", crashed.RuntimeState)
 			}
-			stopProcess(hub, runOwner, workspaceObserver)
+			stopProcess(hub, runOwner, fileOwner, workspaceObserver)
 
 			// Process three is entirely new. If process two crashed before CAS it
 			// performs the one stale retirement; if after CAS it merely reacquires
 			// the scoped scratch. Either way no other prerequisite or candidate work
 			// is allowed.
-			hub, processRuns, runOwner, workspaceObserver = startProcess(t)
-			defer func() { stopProcess(hub, runOwner, workspaceObserver) }()
+			hub, processRuns, runOwner, fileOwner, workspaceObserver = startProcess(t)
+			defer func() { stopProcess(hub, runOwner, fileOwner, workspaceObserver) }()
 			restarted := newRuntimeDriveTestModule(t, hub)
 			loaded, err = restarted.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil {
@@ -3676,10 +3685,10 @@ func runRuntimeFileBackedValidationScratchStaleInvalidationCrashRestart(t *testi
 				// The next process observes either the committed terminal or the
 				// original stale resource and converges once. It never requests a
 				// candidate or touches the already exhausted ledger again.
-				stopProcess(hub, runOwner, workspaceObserver)
+				stopProcess(hub, runOwner, fileOwner, workspaceObserver)
 				hub, runOwner, workspaceObserver = nil, nil, nil
-				terminalHub, terminalRuns, terminalRunOwner, terminalWorkspaceObserver := startProcess(t)
-				defer stopProcess(terminalHub, terminalRunOwner, terminalWorkspaceObserver)
+				terminalHub, terminalRuns, terminalRunOwner, terminalFileOwner, terminalWorkspaceObserver := startProcess(t)
+				defer stopProcess(terminalHub, terminalRunOwner, terminalFileOwner, terminalWorkspaceObserver)
 				terminalBiz := newRuntimeDriveTestModule(t, terminalHub)
 				terminalResult, terminalErr := terminalBiz.driveRuntimeLocked(ctx, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
 				if terminalErr != nil || terminalResult.State != runtimecontract.ConvergenceStateFailed {
@@ -5763,7 +5772,7 @@ func TestRuntimeFileBackedGitSnapshotCommitResponseLossRestartReusesCommittedSna
 		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
-	startRuntimeFileManifestOwner(t, ctx, hub)
+	fileOwner := startRuntimeFileManifestOwner(t, ctx, hub)
 	storeRoot := filepath.Join(root, "git-owner-data")
 	store, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
 	if err != nil {
@@ -5833,6 +5842,9 @@ func TestRuntimeFileBackedGitSnapshotCommitResponseLossRestartReusesCommittedSna
 		t.Fatal(err)
 	}
 	if err := runOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
 	hub.Terminate(ctx)
@@ -6440,7 +6452,7 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
-	startRuntimeFileManifestOwner(t, ctx, hub)
+	fileOwner := startRuntimeFileManifestOwner(t, ctx, hub)
 	storeRoot := filepath.Join(root, "git-owner-data")
 	store, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
 	if err != nil {
@@ -6532,6 +6544,9 @@ func runRuntimeFileBackedGitStaleRefreshCrashRestart(t *testing.T, crashAfterCAS
 		t.Fatal(err)
 	}
 	if err := runOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
 	hub.Terminate(ctx)
@@ -6696,7 +6711,7 @@ func runRuntimeFileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.
 		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDir}}, nil)
 	})
 	t.Cleanup(func() { workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet) })
-	startRuntimeFileManifestOwner(t, ctx, hub)
+	fileOwner := startRuntimeFileManifestOwner(t, ctx, hub)
 	storeRoot := filepath.Join(root, "git-owner-data")
 	store, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
 	if err != nil {
@@ -6789,6 +6804,9 @@ func runRuntimeFileBackedGitReceiptResourceChangeRefreshCrashRestart(t *testing.
 		t.Fatal(err)
 	}
 	if err := runOwner.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
 	hub.Terminate(ctx)
@@ -6902,6 +6920,7 @@ func TestRuntimeFileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t *
 				runs              *filerepository.RunRepository
 				runOwner          *runmodule.Module
 				gitOwner          *gitmodule.Module
+				fileOwner         *filemodule.Module
 				workspaceObserver magicevent.SimpleObserver
 			}
 			startProcess := func(t *testing.T) process {
@@ -6924,11 +6943,12 @@ func TestRuntimeFileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t *
 						ID: "ws-v2", DeliverableDirectory: deliverable, InternalDirectory: internalDirectory,
 					}}, nil)
 				})
-				startRuntimeFileManifestOwner(t, ctx, hub)
+				fileOwner := startRuntimeFileManifestOwner(t, ctx, hub)
 				store, err := gitbiz.NewCapabilityStateReceiptStore(storeRoot)
 				if err != nil {
 					workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 					_ = runOwner.Stop(ctx)
+					_ = fileOwner.Stop(ctx)
 					hub.Terminate(ctx)
 					t.Fatal(err)
 				}
@@ -6936,18 +6956,23 @@ func TestRuntimeFileBackedMixedOwnerReceiptThenLocalScratchStaleCrashRestart(t *
 				if err := gitOwner.Configure(gitbiz.Dependencies{EventHub: hub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(), CapabilityStateReceipts: store}); err != nil {
 					workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 					_ = runOwner.Stop(ctx)
+					_ = fileOwner.Stop(ctx)
 					hub.Terminate(ctx)
 					t.Fatal(err)
 				}
 				if err := gitOwner.Start(); err != nil {
 					workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 					_ = runOwner.Stop(ctx)
+					_ = fileOwner.Stop(ctx)
 					hub.Terminate(ctx)
 					t.Fatal(err)
 				}
-				return process{hub: hub, runs: runs, runOwner: runOwner, gitOwner: gitOwner, workspaceObserver: workspaceObserver}
+				return process{hub: hub, runs: runs, runOwner: runOwner, gitOwner: gitOwner, fileOwner: fileOwner, workspaceObserver: workspaceObserver}
 			}
 			stopProcess := func(value process) {
+				if value.fileOwner != nil {
+					_ = value.fileOwner.Stop(ctx)
+				}
 				if value.workspaceObserver != nil {
 					value.workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 				}
@@ -8459,8 +8484,9 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+			var validationOwner *shellmodule.Module
 			if testCase.validation {
-				startRuntimeManagedValidationTestOwner(t, hub)
+				validationOwner = startRuntimeManagedValidationTestOwner(t, hub)
 			}
 
 			module := newRuntimeDriveTestModule(t, hub)
@@ -8571,6 +8597,11 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 			// validation has an ambiguous owner-call boundary and must become
 			// outcome_unknown without replay; durable state change consumes its
 			// persisted receipt without a second write.
+			if validationOwner != nil {
+				if err := validationOwner.Stop(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
 			workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
 			if err := fileOwner.Stop(ctx); err != nil {
 				t.Fatal(err)
@@ -11816,7 +11847,7 @@ func TestRequestAndSealRuntimeCandidateReacquiresProviderCeilingAfterTypedStale(
 	}
 }
 
-func startRuntimeFileManifestOwner(t *testing.T, ctx context.Context, hub magicevent.Hub) {
+func startRuntimeFileManifestOwner(t *testing.T, ctx context.Context, hub magicevent.Hub) *filemodule.Module {
 	t.Helper()
 	fileOwner := filemodule.New()
 	if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
@@ -11826,6 +11857,7 @@ func startRuntimeFileManifestOwner(t *testing.T, ctx context.Context, hub magice
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
+	return fileOwner
 }
 
 func newRuntimeDriveTestModule(t *testing.T, hub magicevent.Hub) *Biz {
@@ -11990,7 +12022,8 @@ func runtimeOuterValidationRepairAggregate(
 	}
 	aggregate := runtime.RuntimeAggregate{
 		StateRevision: revision, Definition: bootstrap.Definition, Facts: facts,
-		SemanticPlanning: semanticPlanning, ExecutionBudget: executionBudget, Decision: decision,
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		SemanticPlanning:      semanticPlanning, ExecutionBudget: executionBudget, Decision: decision,
 	}
 	if err := aggregate.Validate(); err != nil {
 		t.Fatalf("sealed repair Profile aggregate: %v", err)
@@ -12057,7 +12090,7 @@ func TestRuntimeDecisionPersistsFeasibilityWithoutCallingProvider(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	aggregate := runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{StateRevision: 1, Definition: runtimeDefinition(), Facts: facts.Normalized(), Decision: decision})
+	aggregate := runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent, StateRevision: 1, Definition: runtimeDefinition(), Facts: facts.Normalized(), Decision: decision})
 	aggregate = runtimeDriveCommitTargetSnapshotsForFixture(t, aggregate)
 	repository := &runtimeDriveRepository{aggregate: aggregate}
 	biz := newRuntimeTestOwner()
@@ -12126,7 +12159,7 @@ func TestRuntimeDecisionTerminatesBeforeProviderWhenShellConfirmsNoValidationRec
 	// to the exact CWI requirement before the first reducer validation. The test
 	// still leaves ValidationRecipes empty, which is the owner fact whose
 	// pre-provider terminal behavior is under test.
-	aggregate := runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{StateRevision: 1, Definition: runtimeDefinition(), Facts: facts.Normalized()})
+	aggregate := runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent, StateRevision: 1, Definition: runtimeDefinition(), Facts: facts.Normalized()})
 	aggregate = runtimeDriveCommitTargetSnapshotsForFixture(t, aggregate)
 	repository := &runtimeDriveRepository{aggregate: aggregate}
 	biz := newRuntimeTestOwner()
@@ -12244,7 +12277,8 @@ func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T
 	}
 	historicalObservation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(historicalObservation)
 	aggregate := runtimeTestAggregateWithSemanticPlanning(t, runtime.RuntimeAggregate{
-		StateRevision: 7, Definition: runtimeDefinition(), Facts: preparedFacts, Decision: preparedDecision,
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		StateRevision:         7, Definition: runtimeDefinition(), Facts: preparedFacts, Decision: preparedDecision,
 	})
 	aggregate.Facts.Prerequisites.Satisfied = append(aggregate.Facts.Prerequisites.Satisfied, historicalPrerequisite)
 	aggregate.Facts.Resources.TargetSelection = &historicalSelection

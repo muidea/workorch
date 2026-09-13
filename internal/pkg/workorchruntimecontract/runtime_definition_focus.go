@@ -47,8 +47,11 @@ type RuntimeDefinitionFocus struct {
 	ValidationRecipeID                 string
 	RequiredCheckRefs                  []string
 	ValidationFailureRepairConvergence *RuntimeValidationFailureRepairConvergence
-	MetricConstraints                  []string
-	ArtifactRefs                       []string
+	// ImplementationWorkPolicy is an exact-CWI projection of the sealed
+	// Profile declaration, not a working binding or executable operation.
+	ImplementationWorkPolicy *RuntimeImplementationWorkPolicy `json:",omitempty"`
+	MetricConstraints        []string
+	ArtifactRefs             []string
 }
 
 // CanonicalRuntimeDefinitionEvidenceDeclarationRef returns the sole
@@ -87,6 +90,10 @@ func (f RuntimeDefinitionFocus) Normalized() RuntimeDefinitionFocus {
 	f.ValidationRecipeID = strings.TrimSpace(f.ValidationRecipeID)
 	f.RequiredCheckRefs = normalizeRuntimeValidationProofCheckRefs(f.RequiredCheckRefs)
 	f.ValidationFailureRepairConvergence = cloneRuntimeValidationFailureRepairConvergence(f.ValidationFailureRepairConvergence)
+	if f.ImplementationWorkPolicy != nil {
+		value := f.ImplementationWorkPolicy.Normalized()
+		f.ImplementationWorkPolicy = &value
+	}
 	f.MetricConstraints = normalizeStrings(f.MetricConstraints)
 	f.ArtifactRefs = normalizeStrings(f.ArtifactRefs)
 	return f
@@ -281,6 +288,9 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Runt
 			return fmt.Errorf("runtime definition focuses duplicate coverage %q", coverageID)
 		}
 		seenCoverage[coverageID] = struct{}{}
+		if err := validateRuntimeDefinitionImplementationWorkPolicy(focus); err != nil {
+			return err
+		}
 		selectorParts := 0
 		for _, value := range []string{focus.TargetSelectorRef, focus.TargetSelectorOwnerRef, focus.TargetSelectorSubjectRef} {
 			if value != "" {
@@ -363,5 +373,6 @@ func sameRuntimeDefinitionFocus(left, right RuntimeDefinitionFocus) bool {
 		SameRuntimeOwnerFactConvergences(left.OwnerFactConvergences, right.OwnerFactConvergences) &&
 		left.EvidenceDeclarationRef == right.EvidenceDeclarationRef && left.ValidationRecipeID == right.ValidationRecipeID && sameStrings(left.RequiredCheckRefs, right.RequiredCheckRefs) &&
 		SameRuntimeValidationFailureRepairConvergence(left.ValidationFailureRepairConvergence, right.ValidationFailureRepairConvergence) &&
+		SameRuntimeImplementationWorkPolicy(left.ImplementationWorkPolicy, right.ImplementationWorkPolicy) &&
 		sameStrings(left.MetricConstraints, right.MetricConstraints) && sameStrings(left.ArtifactRefs, right.ArtifactRefs)
 }

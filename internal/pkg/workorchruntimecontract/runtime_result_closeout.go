@@ -61,13 +61,17 @@ type RuntimeOperationCloseout struct {
 const RuntimeResultCloseoutSchemaVersionCurrent uint32 = 1
 
 // Result feedback is sealed by Orchestrator when an aggregate is initialized.
-// Zero and one retain their original material renderers for already-started
-// Runs, even across a Result-committed/acknowledgement-lost deployment boundary.
-// Version two reports historical satisfied assessments as indeterminate when
-// the current SM-2 coverage ledger no longer carries satisfied credit.
-// Version three includes the admitted blocking input review in diagnostics and
-// human-readable feedback. Zero through two keep their original material.
+// Only the current contract may drive or render a Result. Older archives are
+// rejected without mutation or fallback; same-version acknowledgement loss
+// must reproduce the identical material from the persisted aggregate.
 const RuntimeResultFeedbackVersionCurrent uint32 = 3
+
+func ValidateRuntimeResultFeedbackVersion(version uint32) error {
+	if version != RuntimeResultFeedbackVersionCurrent {
+		return fmt.Errorf("unsupported runtime result feedback version %d; require current version %d", version, RuntimeResultFeedbackVersionCurrent)
+	}
+	return nil
+}
 
 func (c RuntimeResultCloseout) Normalized() RuntimeResultCloseout {
 	c.OriginalDiagnostic = c.OriginalDiagnostic.CloneOriginal()

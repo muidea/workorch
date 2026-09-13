@@ -55,6 +55,20 @@ dispatch 或 credit，也不能替代该 exact declaration。requirement 是 Def
 declaration 的可选约束，空值表示由 capability owner 从当前 ready typed catalog 选择兼容载体。普通用户不需要编写
 Runtime JSON、recipe 或 check。
 
+可选 `RuntimeImplementationWorkPolicy` 只作为 exact CWI 的不可变 Profile 声明投影进入 Definition；
+wildcard/exact 冲突不能被覆盖，原 validation-only 终结义务不变。bootstrap、facts 与 semantic manifest 编译须
+独立核对该投影和封存 Profile 的精确 source，不能从当前配置补回缺失值。它不进入 mutable focus cursor、
+`CoverageFocusDeclaration` 的最终 proof 或现行三种 evidence purpose；当前执行支持门禁仍拒绝该协议，
+声明存在不表示已取得 owner scope/binding、工作轮次或 dispatch 权限。
+启动能力清单须包含已匹配 exact CWI 工作策略的 operation kinds，并分别声明对应 owner 的全局
+state-change capability 与 operation-admissibility prerequisite；未匹配的 Profile 工作策略不进入该清单。
+bootstrap 独立拒绝清单或 prerequisite 缺失、owner/class 不符。该清单仅用于取得 owner 事实，不能将
+跨 CWI 的能力并集解释为单个 CWI 的 variant、target、scope 或最终验收权限。
+工作范围的只读观察与 terminal-proof target selection 必须分离：前者绑定原 CWI、封存工作策略、请求 authority
+和 resource owner 的当前 manifest/revision；不能写入后者的单一 `Resources.TargetSelection`。观察的完整范围不受
+单轮可修改目标数裁剪，unsupported 是负事实，revision 漂移不能作为当前范围接受。范围中出现验证输入仅是观察，
+不解除普通 mutation exclusions；取得范围观察也不表示已封存工作 binding、消费轮次或获得 dispatch 权限。
+
 SM-3 使用同一 request-session、complete-document evaluator 与 attempt-0/1 预算请求一个无副作用
 `semantic_plan` document。它只能逐 CWI 提出 owner、operation/effect、三种 target policy 之一、target/selector、
 owner catalog 中兼容的 recipe 与适用 metric/artifact；不能编写 declaration/check，也不能携带 Runtime action、coverage state、credit、terminal、retry、ticket 或

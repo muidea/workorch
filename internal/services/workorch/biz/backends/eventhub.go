@@ -2,7 +2,9 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -91,7 +93,7 @@ func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler port.Even
 		sequence := eventHubObserverSequence.Add(1)
 		eventstreamObserverID := fmt.Sprintf("/eventstream/consumers/services/workorch/backend/%d", sequence)
 		eventstreamObserver := magicevent.NewSimpleObserverWithMatchID(eventstreamObserverID, eventstreamObserverID, b.parent.commandHub)
-		eventstreamObserver.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
+		if err := eventstreamObserver.Subscribe(eventstreamevents.TopicEventStreamRecordAppended, func(event magicevent.Event, result magicevent.Result) {
 			data, ok := event.Data().(eventstreamevents.EventRecordAppendedData)
 			if ok {
 				evt := convertBackendEvent(eventRecordBackendEvent(data.Record))
@@ -102,10 +104,12 @@ func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler port.Even
 			if result != nil {
 				result.Set(nil, nil)
 			}
-		})
+		}); err != nil {
+			return nil, err
+		}
 		workspaceObserverID := fmt.Sprintf("/workspace/consumers/services/workorch/backend/%d", sequence)
 		workspaceObserver := magicevent.NewSimpleObserverWithMatchID(workspaceObserverID, workspaceObserverID, b.parent.commandHub)
-		workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceDeleted, func(event magicevent.Event, result magicevent.Result) {
+		if err := workspaceObserver.Subscribe(workspaceevents.TopicWorkspaceDeleted, func(event magicevent.Event, result magicevent.Result) {
 			data, ok := event.Data().(workspaceevents.WorkspaceDeletedData)
 			if ok && event.Source() == "blocks/workspace" && data.Validate() == nil {
 				evt := convertBackendEvent(workspaceDeletedBackendEvent(data))
@@ -116,10 +120,19 @@ func (b *eventHubEventsBackend) Subscribe(ctx context.Context, handler port.Even
 			if result != nil {
 				result.Set(nil, nil)
 			}
-		})
+		}); err != nil {
+			if cleanupErr := eventstreamObserver.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended); cleanupErr != nil {
+				return nil, errors.Join(err, cleanupErr)
+			}
+			return nil, err
+		}
 		unsubscribers = append(unsubscribers, func() {
-			eventstreamObserver.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended)
-			workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceDeleted)
+			if err := eventstreamObserver.Unsubscribe(eventstreamevents.TopicEventStreamRecordAppended); err != nil {
+				slog.Error("event stream unsubscribe failed", "error", err)
+			}
+			if err := workspaceObserver.Unsubscribe(workspaceevents.TopicWorkspaceDeleted); err != nil {
+				slog.Error("workspace unsubscribe failed", "error", err)
+			}
 		})
 	}
 
@@ -169,7 +182,7 @@ func (b *eventHubProjectionEventsBackend) SubscribeWorkspaceProjection(
 
 	observerID := fmt.Sprintf("/workorchd/consumers/services/workorch/projection/%d", eventHubObserverSequence.Add(1))
 	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, b.parent.commandHub)
-	observer.Subscribe(workorchdevents.TopicWorkspaceProjectionChanged, func(event magicevent.Event, result magicevent.Result) {
+	if err := observer.Subscribe(workorchdevents.TopicWorkspaceProjectionChanged, func(event magicevent.Event, result magicevent.Result) {
 		if data, ok := event.Data().(workorchdevents.WorkspaceProjectionChangedData); ok {
 			info := workspaceProjectionChangedInfoFromData(data, event.ID())
 			onChanged(event.Context(), info)
@@ -177,9 +190,14 @@ func (b *eventHubProjectionEventsBackend) SubscribeWorkspaceProjection(
 		if result != nil {
 			result.Set(nil, nil)
 		}
-	})
+	}); err != nil {
+		publishStatus(port.SubscriptionStatus{State: port.SubscriptionDegraded, LastError: err.Error()})
+		return func() {}, err
+	}
 	unsub := func() {
-		observer.Unsubscribe(workorchdevents.TopicWorkspaceProjectionChanged)
+		if err := observer.Unsubscribe(workorchdevents.TopicWorkspaceProjectionChanged); err != nil {
+			publishStatus(port.SubscriptionStatus{State: port.SubscriptionDegraded, LastError: err.Error()})
+		}
 	}
 	b.subs = append(b.subs, unsub)
 	// Subscription is established once the typed observer is attached.

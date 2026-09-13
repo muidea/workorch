@@ -346,6 +346,9 @@ type RuntimeStateRecord struct {
 }
 
 func (r RuntimeStateRecord) Validate() error {
+	if err := ValidateRuntimeResultFeedbackVersion(r.ResultFeedbackVersion); err != nil {
+		return err
+	}
 	if r.Facts.WorkspaceID == "" || r.Facts.RunID == "" {
 		return fmt.Errorf("runtime state requires workspace and run scope")
 	}
@@ -375,6 +378,9 @@ func (r RuntimeStateRecord) Validate() error {
 	}
 	if err := r.SemanticPlanning.Validate(); err != nil {
 		return fmt.Errorf("runtime semantic planning ledger: %w", err)
+	}
+	if err := ValidateRuntimeSemanticProofBatchLimits(r.SemanticPlanning, r.Facts.Activation.ExecutionContract.ExecutionLimits); err != nil {
+		return err
 	}
 	if r.SemanticPlanning.DefinitionSeed.Hash != r.Facts.DefinitionSeed.Hash {
 		return fmt.Errorf("runtime semantic planning seed does not match facts")
@@ -479,6 +485,9 @@ func (r RuntimeStateRecord) Validate() error {
 		return err
 	}
 	if err := ValidateRuntimeAcceptedCandidateManifestLineage(r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, r.CandidateRequestSessions); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeDurableDispatchLimits(r.Facts.Activation.ExecutionContract.ExecutionLimits, r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts); err != nil {
 		return err
 	}
 	if err := ValidateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedger(r.SemanticPlanning, r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, r.CandidateRequestSessions); err != nil {

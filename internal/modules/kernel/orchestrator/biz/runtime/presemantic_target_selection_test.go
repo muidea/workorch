@@ -95,6 +95,11 @@ func TestPresemanticTargetSelectionOwnerFactFencesSemanticRequest(t *testing.T) 
 	if CurrentFocusTargetSelectionConfirmsUnresolved(boundedEmptyScope.Facts) {
 		t.Fatal("empty current owner scope hid a bounded prospective declaration candidate")
 	}
+	required := boundedEmptyScope
+	required.SemanticPlanning.Phase = runtimecontract.RuntimeSemanticPlanningRequired
+	if err := candidateRequestSessionActionAllowed(required, runtimecontract.RuntimeProviderDocumentSemanticPlan); err == nil {
+		t.Fatal("bounded owner scope created session authority without request intent")
+	}
 	if err := candidateRequestSessionActionAllowed(boundedEmptyScope, runtimecontract.RuntimeProviderDocumentSemanticPlan); err != nil {
 		t.Fatalf("bounded prospective declaration did not continue semantic planning: %v", err)
 	}
@@ -158,9 +163,12 @@ func presemanticTargetSelectionGateAggregate(t *testing.T, disposition runtimeco
 		TargetSelectorCandidateRefs: append([]string(nil), selectorCandidates...), ProspectiveTargetAllOfConstraintRefs: append([]string(nil), prospectiveAllOf...),
 	}
 	aggregate := RuntimeAggregate{
-		Facts:            facts,
-		Decision:         runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedPrerequisite},
-		SemanticPlanning: runtimecontract.RuntimeSemanticPlanningLedger{Phase: runtimecontract.RuntimeSemanticPlanningRequired},
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		Facts:                 facts,
+		Decision:              runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedPrerequisite},
+		// Isolate the owner-fact gate under a request-open phase so negative
+		// owner facts cannot pass merely because the phase gate rejects them.
+		SemanticPlanning: runtimecontract.RuntimeSemanticPlanningLedger{Phase: runtimecontract.RuntimeSemanticPlanningRequestOpen},
 	}
 	if disposition == "" {
 		aggregate.Facts.Prerequisites.Pending = []runtimecontract.RuntimePrerequisite{selectionPrerequisite}

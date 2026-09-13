@@ -3,6 +3,7 @@ package shell
 import (
 	"bytes"
 	"context"
+	frameworkdef "github.com/muidea/magicCommon/def"
 	"log/slog"
 	"strings"
 	"sync/atomic"
@@ -20,18 +21,18 @@ type shellLifecycleHub struct {
 	unsubscriptions atomic.Int32
 }
 
-func (h *shellLifecycleHub) Subscribe(id string, observer magicevent.Observer) {
+func (h *shellLifecycleHub) Subscribe(id string, observer magicevent.Observer) *frameworkdef.Error {
 	if id == shellevents.TopicAcquireRuntimeCapabilities {
 		h.subscriptions.Add(1)
 	}
-	h.Hub.Subscribe(id, observer)
+	return h.Hub.Subscribe(id, observer)
 }
 
-func (h *shellLifecycleHub) Unsubscribe(id string, observer magicevent.Observer) {
+func (h *shellLifecycleHub) Unsubscribe(id string, observer magicevent.Observer) *frameworkdef.Error {
 	if id == shellevents.TopicAcquireRuntimeCapabilities {
 		h.unsubscriptions.Add(1)
 	}
-	h.Hub.Unsubscribe(id, observer)
+	return h.Hub.Unsubscribe(id, observer)
 }
 
 type shellLifecycleEvent struct {

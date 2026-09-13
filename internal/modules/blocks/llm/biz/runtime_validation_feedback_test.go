@@ -31,7 +31,7 @@ func TestRuntimeProviderValidationRejectsMalformedDiagnosticExtension(t *testing
 				CheckFailures: []runtimecontract.RuntimeValidationCheckFailure{{CheckRef: "check", DiagnosticHash: strings.Repeat("a", 64), ComparisonHash: strings.Repeat("c", 64),
 					ReportedAssertion: runtimecontract.RuntimeValidationReportedAssertion{Code: "shape_mismatch", ExpectedShape: "object", ObservedShape: "array"}}}}
 			mutate(&o)
-			projected := runtimeProviderSafeValidation(&o)
+			projected := runtimecontract.ProjectRuntimeValidationExecutionFeedback(&o)
 			encoded, err := json.Marshal(projected)
 			if err != nil || strings.Contains(string(encoded), "private-secret") || len(projected.CheckFailures) != 0 || !projected.FailureDetailsIncomplete || len(projected.FailedChecks) != 1 {
 				t.Fatal("malformed diagnostic leaked to provider or disguised a failed check")

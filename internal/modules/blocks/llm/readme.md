@@ -33,6 +33,27 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
 
 ## 不变量与非职责
 
+- semantic 请求必须携带 Orchestrator 的只读 coverage progress：完整 sealed inventory 的验收计数、当前 manifest/
+  batch CWI 的当前证据引用数与重开数，以及 scope/revision/hash。接收前校验完整绑定，C4 渲染后逐值保护，
+  缺失/裁剪/篡改在 provider 前拒绝；64 KiB 上限与 provider ceiling 同时生效。LLM 不把记录数量解释为 credit，
+  不维护第二份进度状态；进度变化不改 C0～C3。详见 [context assembly](../../../../docs/00-core/runtime-request-context-assembly.md#semantic-请求的只读覆盖进度)。
+- semantic 请求的 typed `ExecutionHistory` 观察同一 Run 已提交的最近 16 条回执及省略数，包含成功工作和失败事实。
+  原 bound CWI 只证明历史归属；owner accepted、durable changed 不等于当前验收。接收端拒绝缺少 scope/hash、错序、
+  重复、外来 CWI 或超限，C4 渲染后以 `P3.semantic_execution_history` 逐值校验；不展开 raw summary/参数/输出，
+  不改变 C0～C3、稳定前缀、Runtime 状态或权限。它不能替代下述专用修复来源，也不包括无回执的在途/unknown 工作。
+  历史保留封存的 requested target/expected effect 与实际观察的区别；历史及专用修复反馈均保留窄 typed owner
+  diagnostic（code/revision/hash、truncated/redacted、可选 validation diagnostic）。不传原文/私有 detail ref/维护权限，
+  自报退出码不证明进程执行或验收通过；新增字段参与原 C4 逐值完整性检查，不改变其他分区。
+- semantic 请求必须保留 typed `ExecutionBudget` 的 pre-submission Run 物理余额与原 CWI proof-batch 用量；它只观察
+  Orchestrator 已有账本，reserved/unknown 不退额，null 附加 cap 不表示无限执行，也不表示全部策略预算。接收端检查
+  scope/revision/hash、完整成员及余额等式；C4 渲染后 `P3.semantic_execution_budget` 逐值保护，32 KiB 与 provider ceiling
+  同时约束，不改变 C0～C3/stable prefix。LLM 不预留额度、不选择状态、不凭快照授予工作或验收权限。
+- semantic repair proof-batch 必须经 typed context 接收本批每个修复 CWI 的 exact causal execution feedback；
+  接收边界校验 workspace/run、Definition/startup、manifest、CWI、原 declaration/failure/owner/operation 和内容 hash。
+  仅在 C4 渲染，post-render integrity 比对完整值；普通 proof/coverage order 的这个专用字段不接受无关历史失败。validation check
+  projection 与 operations 请求共用纯合同，不含 raw output/错误原文；缺失或截断显式表达，整组上限 64 KiB 并受
+  provider ceiling 限制。LLM 不核发 repair authority 或 credit，不变更状态；详见
+  [context assembly](../../../../docs/00-core/runtime-request-context-assembly.md#semantic-repair-的执行事实反馈)。
 - `Configure` 缺 EventHub 立即失败；`Start` 冻结配置且重复调用不重复订阅，`Stop` 清除订阅、配置和 physical guard。
 - provider/model 必须由 exact catalog/config fact 解析；capacity 不完整时 fail-closed，不按模型名猜测、不静默换 target。
 - `JSONSchemaResponse` 只有显式 capability fact 为 true 才发送；未声明时依赖同一 sealed manifest、prompt 和 local strict

@@ -171,6 +171,25 @@ func eventSemanticCandidateCommand(t *testing.T) llmevents.RequestRuntimeCandida
 		ProviderCeiling: &runtimecontract.ProviderCeiling{Selection: runtimecontract.ProviderInferenceSelection{Target: target}, ContextWindowTokens: 8192, ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 2048, MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1"},
 		PlanStep:        runtimecontract.RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchSequence: 0, BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
 	}
+	context.CoverageProgress, err = runtimecontract.BuildRuntimeSemanticCoverageProgress(context, manifest, runtimecontract.RuntimeFacts{
+		WorkspaceID: context.WorkspaceID, RunID: context.RunID, DefinitionRevision: context.Definition.Revision,
+		DefinitionSeed: seed, EvidenceRevision: "evidence-1", Coverage: runtimecontract.InitialRuntimeCoverageFacts(seed.CoverageItems),
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context.ExecutionHistory, err = runtimecontract.BuildRuntimeSemanticExecutionHistory(context, manifest, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgetView, err := runtimecontract.BuildRuntimeExecutionBudgetView(context.WorkspaceID, context.RunID, context.CoverageProgress.SourceStateRevision, runtimecontract.RuntimeExecutionBudgetLedger{Policy: runtimecontract.DefaultRuntimeExecutionBudgetPolicy()}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	context.ExecutionBudget, err = runtimecontract.BuildRuntimeSemanticExecutionBudget(context, manifest, budgetView, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	command := llmevents.RequestRuntimeCandidateCommand{
 		WorkspaceID: "ws-1", RunID: "run-1", DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan,
 		RequestIdentity:  runtimecontract.RuntimeCandidateRequestIdentity{LogicalRequestID: "semantic-request-1", Sequence: 1, PhysicalCallID: "semantic-call-1"},

@@ -1041,3 +1041,17 @@ func (r *recordingBackgroundRoutine) Timer(context.Context, magictask.Task, time
 func (r *recordingBackgroundRoutine) Shutdown(context.Context) bool {
 	return true
 }
+
+func (b *rejectRuntimeSettlementTicksBackground) AsyncTaskContext(ctx context.Context, task magictask.Task) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return b.AsyncTask(task)
+}
+
+func (r *recordingBackgroundRoutine) AsyncTaskContext(ctx context.Context, task magictask.Task) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.AsyncTask(task)
+}

@@ -65,7 +65,7 @@ func runtimeCompleteResultFeedback(item *resultevents.ResultMaterial, aggregate 
 		item.SummaryDetail.KnownLimitations = []string{"The Run ended without complete Goal/DoD acceptance."}
 		item.SummaryDetail.ResidualRisks = []string{fmt.Sprintf("%d coverage work items remain unsatisfied; partial output must not be treated as accepted delivery.", len(closeout.UnsatisfiedCoverageWorkItemIDs))}
 		item.SummaryDetail.NextActions = []string{"Review the terminal and owner diagnostics, resolve the reported blocker, then explicitly request a new activation if appropriate."}
-		if aggregate.ResultFeedbackVersion >= 3 && closeout.OriginalDiagnostic != nil {
+		if closeout.OriginalDiagnostic != nil {
 			for _, review := range closeout.OriginalDiagnostic.ValidationInputReviews {
 				for _, check := range review.Report.Checks {
 					item.SummaryDetail.KnownLimitations = append(item.SummaryDetail.KnownLimitations,

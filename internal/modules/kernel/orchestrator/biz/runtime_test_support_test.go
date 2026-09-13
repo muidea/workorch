@@ -2203,16 +2203,18 @@ type runtimeTestRunRetirementFallbackHub struct {
 	magicevent.Hub
 }
 
-func (h runtimeTestRunRetirementFallbackHub) Subscribe(eventID string, observer magicevent.Observer) {
+func (h runtimeTestRunRetirementFallbackHub) Subscribe(eventID string, observer magicevent.Observer) *cd.Error {
 	if h.Hub != nil {
-		h.Hub.Subscribe(eventID, observer)
+		return h.Hub.Subscribe(eventID, observer)
 	}
+	return nil
 }
 
-func (h runtimeTestRunRetirementFallbackHub) Unsubscribe(eventID string, observer magicevent.Observer) {
+func (h runtimeTestRunRetirementFallbackHub) Unsubscribe(eventID string, observer magicevent.Observer) *cd.Error {
 	if h.Hub != nil {
-		h.Hub.Unsubscribe(eventID, observer)
+		return h.Hub.Unsubscribe(eventID, observer)
 	}
+	return nil
 }
 
 func (h runtimeTestRunRetirementFallbackHub) Post(event magicevent.Event) {

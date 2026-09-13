@@ -195,7 +195,7 @@ func TestRuntimeControllerInitializeRunsPreflightReduceAndPersistOnce(t *testing
 	}
 }
 
-func TestRuntimeControllerInitializePreservesLegacyFeedbackVersionWithoutWrite(t *testing.T) {
+func TestRuntimeControllerInitializeRejectsNoncurrentFeedbackVersionWithoutWrite(t *testing.T) {
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
@@ -205,8 +205,7 @@ func TestRuntimeControllerInitializePreservesLegacyFeedbackVersionWithoutWrite(t
 	if _, err := controller.initialize(context.Background(), facts, definition, nil); err != nil {
 		t.Fatal(err)
 	}
-	// A pre-extension archive omits the field. Loading it must not opt an
-	// existing Run into new Result material, even before it becomes terminal.
+	// Unsupported archives fail closed without upgrading or writing them.
 	repository.aggregate.ResultFeedbackVersion = 0
 	before, err := json.Marshal(repository.aggregate)
 	if err != nil {
@@ -216,11 +215,11 @@ func TestRuntimeControllerInitializePreservesLegacyFeedbackVersionWithoutWrite(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := restartedController.initialize(context.Background(), facts, definition, nil)
-	if err != nil {
-		t.Fatal(err)
+	_, err = restartedController.initialize(context.Background(), facts, definition, nil)
+	if err == nil {
+		t.Fatal("unsupported feedback version resumed")
 	}
-	after, err := json.Marshal(restarted)
+	after, err := json.Marshal(repository.aggregate)
 	if err != nil {
 		t.Fatal(err)
 	}

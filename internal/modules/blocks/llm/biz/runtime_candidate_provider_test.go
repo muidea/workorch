@@ -443,6 +443,7 @@ func TestRuntimeSemanticPlanProviderUsesSingleCachePipelineAndSafeCorrection(t *
 	base.SemanticContext.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(base.SemanticContext.DefinitionSeed)
 	base.SemanticManifest.DefinitionSeedHash = base.SemanticContext.DefinitionSeed.Hash
 	base.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(base.SemanticManifest)
+	refreshSemanticProgressForTest(t, &base)
 	initial, err := runtimeProviderRequest(base)
 	if err != nil {
 		t.Fatal(err)
@@ -523,6 +524,7 @@ func TestRuntimeSemanticCoverageOrderCorrectionProjectsExactManifestCoverage(t *
 	request.SemanticContext.BatchID = ""
 	request.SemanticContext.BatchSequence = 0
 	request.SemanticContext.BatchCoverageWorkItemIDs = nil
+	refreshSemanticProgressForTest(t, &request)
 	violation := runtimecontract.RuntimeSemanticContractViolation{
 		Kind: runtimecontract.RuntimeSemanticContractViolationCoverageOrderDocument, Path: "$.proposals", Actual: "missing_required",
 		RequiredCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
@@ -647,6 +649,7 @@ func TestRuntimeSemanticExistingTargetCorrectionCarriesOwnerRevisionAndReplaceme
 	request.CandidateAttempt = 1
 	request.SemanticCorrectionObservation = observation
 	request.SemanticCorrectionDirective = &directive
+	refreshSemanticProgressForTest(t, &request)
 	providerRequest, err := runtimeProviderRequest(request)
 	if err != nil {
 		t.Fatal(err)
@@ -691,6 +694,7 @@ func TestRuntimeSemanticProofBatchProviderProjectionOmitsUnrelatedCoverage(t *te
 	})
 	request.SemanticManifest.DefinitionSeedHash = seed.Hash
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	refreshSemanticProgressForTest(t, &request)
 	providerRequest, err := runtimeProviderRequest(request)
 	if err != nil {
 		t.Fatal(err)
@@ -861,6 +865,7 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 	dependencyCatalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(dependencyCatalog)
 	request.SemanticManifest.OwnerFactDependencyCatalogs = []runtimecontract.RuntimeOperationAdmissibility{dependencyCatalog}
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	refreshSemanticProgressForTest(t, &request)
 	providerRequest, err := runtimeProviderRequest(request)
 	if err != nil {
 		t.Fatal(err)
@@ -945,6 +950,7 @@ func TestRuntimeSemanticProviderProjectsDefinitionLineageAndExactAcquisitionSele
 	openSelectorRequest.SemanticManifest = request.SemanticManifest.Clone()
 	openSelectorRequest.SemanticManifest.ProofObligations[0].DeclarationTargetSelectorCandidateRefs = nil
 	openSelectorRequest.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(openSelectorRequest.SemanticManifest)
+	refreshSemanticProgressForTest(t, &openSelectorRequest)
 	openSelectorProviderRequest, err := runtimeProviderRequest(openSelectorRequest)
 	if err != nil {
 		t.Fatal(err)
@@ -1128,18 +1134,59 @@ func assertRuntimeRepairProjection(t *testing.T, requireInputAddition bool) {
 	)
 	baselineRequest := request
 	baselineRequest.SemanticManifest = baselineManifest
+	refreshSemanticProgressForTest(t, &baselineRequest)
 	baseline, err := runtimeProviderRequest(baselineRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repairRequest := request
 	repairRequest.SemanticManifest = repairManifest
+	refreshSemanticProgressForTest(t, &repairRequest)
+	repairRequest.SemanticContext.ExecutionFeedback = runtimeSemanticRepairFeedbackForTest(repairRequest.SemanticContext, repairManifest)
 	providerRequest, err := runtimeProviderRequest(repairRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	authority := providerRequest.PromptContext.Sections[3].Content
+	var tail runtimeSemanticTailProjection
+	if err := json.Unmarshal([]byte(providerRequest.PromptContext.Sections[4].Content), &tail); err != nil {
+		t.Fatal(err)
+	}
+	if len(tail.ExecutionFeedback) != 1 || tail.ExecutionFeedback[0].Hash != repairRequest.SemanticContext.ExecutionFeedback[0].Hash {
+		t.Fatalf("semantic repair lost its causal execution feedback: %+v", tail)
+	}
+	if strings.Contains(providerRequest.PromptContext.Sections[4].Content, "RAW_SECRET_MUST_NOT_TRAVEL") {
+		t.Fatal("semantic feedback exposed raw owner output")
+	}
+	withoutFeedback := repairRequest
+	withoutFeedback.SemanticContext = repairRequest.SemanticContext.Clone()
+	withoutFeedback.SemanticContext.ExecutionFeedback = nil
+	if _, err := runtimeProviderRequest(withoutFeedback); err == nil {
+		t.Fatal("repair request without causal feedback passed provider preflight")
+	}
+	updatedFeedback := repairRequest
+	updatedFeedback.SemanticContext = repairRequest.SemanticContext.Clone()
+	updatedFeedback.SemanticContext.ExecutionFeedback[0].Validation = nil
+	updatedFeedback.SemanticContext.ExecutionFeedback[0].Hash = runtimecontract.StableRuntimeSemanticExecutionFeedbackHash(updatedFeedback.SemanticContext.ExecutionFeedback[0])
+	updatedProvider, err := runtimeProviderRequest(updatedFeedback)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 4; index++ {
+		if updatedProvider.PromptContext.Sections[index].Content != providerRequest.PromptContext.Sections[index].Content {
+			t.Fatalf("execution feedback changed section C%d", index)
+		}
+	}
+	if updatedProvider.ContextBudget.CachePlan.StablePrefixHash != providerRequest.ContextBudget.CachePlan.StablePrefixHash ||
+		updatedProvider.ContextBudget.CachePlan.RenderedStablePrefixHash != providerRequest.ContextBudget.CachePlan.RenderedStablePrefixHash {
+		t.Fatal("execution feedback changed stable cache identity")
+	}
+	// Even syntactically valid post-render removal is a protected-context loss.
+	updatedProvider.PromptContext.Sections[4].Content = `{"attempt":0}`
+	if err := validateRuntimeSemanticContextIntegrity(updatedFeedback.SemanticContext, repairManifest, 0, nil, nil, updatedProvider.ContextBudget, updatedProvider.PromptContext); err == nil {
+		t.Fatal("post-render feedback removal passed integrity check")
+	}
 	var projection runtimeSemanticAuthorityProjection
 	if err := json.Unmarshal([]byte(authority), &projection); err != nil {
 		t.Fatal(err)
@@ -1272,6 +1319,7 @@ func TestRuntimeSemanticCoverageOrderProjectionOmitsUnrelatedDefinitionSlices(t 
 	request.SemanticContext.DefinitionSeed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(request.SemanticContext.DefinitionSeed)
 	request.SemanticManifest.DefinitionSeedHash = request.SemanticContext.DefinitionSeed.Hash
 	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	refreshSemanticProgressForTest(t, &request)
 	providerRequest, err := runtimeProviderRequest(request)
 	if err != nil {
 		t.Fatal(err)
@@ -1344,6 +1392,25 @@ func runtimeSemanticProviderTestRequest(t testing.TB) llmmodels.RuntimeCandidate
 		WorkspaceID: "ws-1", RunID: "run-1", Definition: definition, DefinitionSeed: seed, Activation: activation, ProviderCeiling: ceiling,
 		PlanStep: runtimecontract.RuntimeSemanticPlanStepProofBatch, BatchID: "batch-1", BatchSequence: 0,
 		BatchCoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-001"},
+	}
+	context.CoverageProgress, err = runtimecontract.BuildRuntimeSemanticCoverageProgress(context, manifest, runtimecontract.RuntimeFacts{
+		WorkspaceID: context.WorkspaceID, RunID: context.RunID, DefinitionRevision: definition.Revision,
+		DefinitionSeed: seed, EvidenceRevision: "evidence-1", Coverage: runtimecontract.InitialRuntimeCoverageFacts(seed.CoverageItems),
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context.ExecutionHistory, err = runtimecontract.BuildRuntimeSemanticExecutionHistory(context, manifest, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgetView, err := runtimecontract.BuildRuntimeExecutionBudgetView(context.WorkspaceID, context.RunID, context.CoverageProgress.SourceStateRevision, runtimecontract.RuntimeExecutionBudgetLedger{Policy: runtimecontract.DefaultRuntimeExecutionBudgetPolicy()}, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	context.ExecutionBudget, err = runtimecontract.BuildRuntimeSemanticExecutionBudget(context, manifest, budgetView, nil, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := context.Validate(manifest); err != nil {
 		t.Fatal(err)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
@@ -84,6 +85,12 @@ func RuntimeActivationContext(
 // first appears in an SM-3 proposal and becomes authority only after SM-2
 // binding.
 func validateRuntimePresealTargetDeclarations(executionContract map[string]any, evidencePolicies []workorcheventpayload.Payload) error {
+	if err := validateRuntimeExecutionLimitsInput(executionContract); err != nil {
+		return err
+	}
+	if err := validateRuntimeProfileInputShape(executionContract); err != nil {
+		return err
+	}
 	if runtimeValueContainsField(executionContract, "prospectiveTargetRef") {
 		return fmt.Errorf("%w: pre-seal execution contract rejects prospectiveTargetRef; declare targetSelectorCandidateRefs instead", common.ErrInvalidArgument)
 	}
@@ -235,6 +242,7 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
 		StateChangePolicy:         runtimecontract.RuntimeStateChangePolicy(runtimeString(input["stateChangePolicy"])),
 		MaxRepairAttemptsPerFocus: runtimeInt(input["maxRepairAttemptsPerFocus"]),
+		ExecutionLimits:           runtimeExecutionLimits(input),
 	}
 	if recovery := runtimeMap(input["candidateDocumentRecovery"]); len(recovery) > 0 {
 		ret.CandidateDocumentRecovery = runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{
@@ -353,6 +361,7 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 				})
 			}
 			validationFailureRepairConvergence := runtimeValidationFailureRepairConvergence(item)
+			implementationWorkPolicy := runtimeImplementationWorkPolicy(item)
 			contract.EvidenceRequirements = append(contract.EvidenceRequirements, runtimecontract.RuntimeProfileEvidenceRequirement{
 				ID: requirementID, Scope: requirementScope, EvidenceRole: runtimeString(item["evidenceRole"]),
 				TargetRole: runtimeString(item["targetRole"]), TargetRefs: runtimeStrings(item["targetRefs"]),
@@ -369,6 +378,7 @@ func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecu
 				RequiredOwnerFacts:                 ownerFacts,
 				OwnerFactConvergences:              ownerFactConvergences,
 				ValidationFailureRepairConvergence: validationFailureRepairConvergence,
+				ImplementationWorkPolicy:           implementationWorkPolicy,
 				CapabilityStateRequirements:        stateRequirements,
 				RejectedStepKinds:                  runtimeStrings(item["rejectedStepKinds"]), Description: runtimeString(item["description"]),
 			})
@@ -585,10 +595,13 @@ func runtimeStringListHasExactShape(value any) bool {
 
 func runtimeIntegerHasExactShape(value any) bool {
 	switch typed := value.(type) {
-	case int, int64:
+	case int:
 		return true
+	case int64:
+		return int64(int(typed)) == typed
 	case float64:
-		return !math.IsNaN(typed) && !math.IsInf(typed, 0) && typed == math.Trunc(typed)
+		limit := math.Ldexp(1, strconv.IntSize-1)
+		return !math.IsNaN(typed) && !math.IsInf(typed, 0) && typed == math.Trunc(typed) && typed >= -limit && typed < limit
 	default:
 		return false
 	}

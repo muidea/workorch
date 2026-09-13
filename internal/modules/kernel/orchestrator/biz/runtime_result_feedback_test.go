@@ -11,33 +11,27 @@ import (
 )
 
 func TestRuntimeFeedbackDoesNotPresentHistoricalSatisfiedAssessmentAsCurrentCredit(t *testing.T) {
-	for _, version := range []uint32{0, 1, 2, runtimecontract.RuntimeResultFeedbackVersionCurrent} {
-		aggregate := runtimeTerminalAggregate(t)
-		aggregate.ResultFeedbackVersion = version
-		coverage := &aggregate.Facts.Coverage[0]
-		coverage.State = runtimecontract.RuntimeCoverageItemStateOpen
-		aggregate.Facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{ID: "historical-pass", CoverageWorkItemIDs: []common.CoverageWorkItemID{coverage.ID}, Disposition: runtimecontract.AssessmentDispositionSatisfied}}
-		before := aggregate.Facts.Assessments[0]
-		outcomes := runtimeRequirementOutcomes(aggregate, runtimecontract.RuntimeOwnerRevisionSet{})
-		for _, outcome := range outcomes {
-			if outcome.CoverageWorkItemID != coverage.ID {
-				continue
-			}
-			if version < 2 && outcome.AssessmentState != runtimecontract.RuntimeRequirementSatisfied {
-				t.Fatal("legacy delivery material was silently upgraded")
-			}
-			if version >= 2 && (outcome.AssessmentState != runtimecontract.RuntimeRequirementIndeterminate || outcome.AssessmentReasonCode != "current_coverage_not_satisfied") {
-				t.Fatalf("historical credit presented as current: %+v", outcome)
-			}
+	aggregate := runtimeTerminalAggregate(t)
+	coverage := &aggregate.Facts.Coverage[0]
+	coverage.State = runtimecontract.RuntimeCoverageItemStateOpen
+	aggregate.Facts.Assessments = []runtimecontract.RuntimeAssessmentFact{{ID: "historical-pass", CoverageWorkItemIDs: []common.CoverageWorkItemID{coverage.ID}, Disposition: runtimecontract.AssessmentDispositionSatisfied}}
+	before := aggregate.Facts.Assessments[0]
+	outcomes := runtimeRequirementOutcomes(aggregate, runtimecontract.RuntimeOwnerRevisionSet{})
+	for _, outcome := range outcomes {
+		if outcome.CoverageWorkItemID != coverage.ID {
+			continue
 		}
-		if !reflect.DeepEqual(before, aggregate.Facts.Assessments[0]) {
-			t.Fatal("projection rewrote historical assessment")
+		if outcome.AssessmentState != runtimecontract.RuntimeRequirementIndeterminate || outcome.AssessmentReasonCode != "current_coverage_not_satisfied" {
+			t.Fatalf("historical credit presented as current: %+v", outcome)
 		}
-		coverage.State = runtimecontract.RuntimeCoverageItemStateSatisfied
-		for _, outcome := range runtimeRequirementOutcomes(aggregate, runtimecontract.RuntimeOwnerRevisionSet{}) {
-			if outcome.CoverageWorkItemID == coverage.ID && outcome.AssessmentState != runtimecontract.RuntimeRequirementSatisfied {
-				t.Fatal("current satisfied coverage lost its assessment")
-			}
+	}
+	if !reflect.DeepEqual(before, aggregate.Facts.Assessments[0]) {
+		t.Fatal("projection rewrote historical assessment")
+	}
+	coverage.State = runtimecontract.RuntimeCoverageItemStateSatisfied
+	for _, outcome := range runtimeRequirementOutcomes(aggregate, runtimecontract.RuntimeOwnerRevisionSet{}) {
+		if outcome.CoverageWorkItemID == coverage.ID && outcome.AssessmentState != runtimecontract.RuntimeRequirementSatisfied {
+			t.Fatal("current satisfied coverage lost its assessment")
 		}
 	}
 }
@@ -89,27 +83,29 @@ func TestRuntimeTerminalFeedbackPreservesOwnerCauseAndUnassessedRequirements(t *
 	}
 }
 
-func TestRuntimeTerminalFeedbackKeepsLegacyDeliveryMaterialAndRejectsUnknownVersion(t *testing.T) {
-	aggregate := runtimeTerminalAggregate(t)
-	aggregate.ResultFeedbackVersion = 0
-	legacy := mustRuntimeResultMaterial(t, aggregate)
-	if legacy.SummaryDetail.VerificationSummary != "" || legacy.RuntimeCloseout.OriginalDiagnostic != nil {
-		t.Fatal("legacy delivery material was upgraded")
-	}
-	reloaded := runtimeAggregateFromRecord(runtimeStateRecordFromAggregate(aggregate))
-	if repeated := mustRuntimeResultMaterial(t, reloaded); !reflect.DeepEqual(legacy, repeated) {
-		t.Fatal("restart changed legacy Result material")
-	}
-	aggregate.ResultFeedbackVersion = runtimecontract.RuntimeResultFeedbackVersionCurrent + 1
-	if err := aggregate.Validate(); err == nil {
-		t.Fatal("unsupported delivery renderer reached Runtime drive")
-	}
-	outcome, _, err := runtime.DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := runtimeResultMaterialFromAggregate(aggregate, outcome); err == nil {
-		t.Fatal("unknown feedback version fell back to a different Result material")
+func TestRuntimeTerminalFeedbackRejectsNoncurrentVersionWithoutMutation(t *testing.T) {
+	for _, version := range []uint32{0, 1, 2, runtimecontract.RuntimeResultFeedbackVersionCurrent + 1} {
+		aggregate := runtimeTerminalAggregate(t)
+		aggregate.ResultFeedbackVersion = version
+		record := runtimeStateRecordFromAggregate(aggregate)
+		before := record.Clone()
+		if err := aggregate.Validate(); err == nil {
+			t.Fatalf("unsupported renderer %d reached Runtime drive", version)
+		}
+		if err := record.Validate(); err == nil {
+			t.Fatalf("unsupported renderer %d admitted by Run contract", version)
+		}
+		reloaded := runtimeAggregateFromRecord(record)
+		outcome, _, err := runtime.DeriveTerminalOutcome(reloaded.Decision, reloaded.Termination)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := runtimeResultMaterialFromAggregate(reloaded, outcome); err == nil {
+			t.Fatalf("unsupported renderer %d fell back to different material", version)
+		}
+		if !reflect.DeepEqual(before, runtimeStateRecordFromAggregate(reloaded)) {
+			t.Fatal("unsupported archive was mutated")
+		}
 	}
 }
 

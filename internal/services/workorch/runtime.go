@@ -3,7 +3,6 @@ package workorch
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -38,27 +37,31 @@ func (s *frameworkRuntime) Startup(ctx context.Context) error {
 	if err := EnsureConfigFile(s.configDir); err != nil {
 		return err
 	}
-	err := application.StartupWithOptions(ctx, frameworkservice.DefaultService(), application.Options{
+	// A failed Setup still requires checked cleanup of entered framework phases.
+	s.started = true
+	s.serverStopped = make(chan struct{})
+	s.serverStopOnce = sync.Once{}
+	err := application.StartupWithOptions(ctx, &frameworkModuleService{delegate: frameworkservice.DefaultService()}, application.Options{
 		ConfigDir:   s.configDir,
 		ServiceName: "workorch",
 	})
 	if err != nil {
 		return err
 	}
-	s.started = true
-	s.serverStopped = make(chan struct{})
-	s.serverStopOnce = sync.Once{}
 	hub := application.Get().EventHub()
 	if hub == nil {
 		return common.ErrInvalidArgument
 	}
-	s.subscribeServerStopped(hub)
-	return nil
+	return s.subscribeServerStopped(hub)
 }
 
-func (s *frameworkRuntime) subscribeServerStopped(hub magicevent.Hub) {
-	s.serverStopObserver = magicevent.NewSimpleObserverWithMatchID(serverStopObserverID, workorchdevents.NotificationDestination, hub)
-	s.serverStopObserver.Subscribe(workorchdevents.TopicWorkorchDServiceStopped, s.handleServerStopped)
+func (s *frameworkRuntime) subscribeServerStopped(hub magicevent.Hub) error {
+	observer := magicevent.NewSimpleObserverWithMatchID(serverStopObserverID, workorchdevents.NotificationDestination, hub)
+	if err := observer.Subscribe(workorchdevents.TopicWorkorchDServiceStopped, s.handleServerStopped); err != nil {
+		return err
+	}
+	s.serverStopObserver = observer
+	return nil
 }
 
 func (s *frameworkRuntime) Run(ctx context.Context) error {
@@ -76,23 +79,19 @@ func (s *frameworkRuntime) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	timeout := applicationShutdownTimeout()
-	if timeout <= 0 {
-		application.Shutdown(ctx)
-		s.started = false
-		return nil
-	}
 	shutdownCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if s.serverStopObserver != nil {
-		s.serverStopObserver.Unsubscribe(workorchdevents.TopicWorkorchDServiceStopped)
+		if err := s.serverStopObserver.Unsubscribe(workorchdevents.TopicWorkorchDServiceStopped); err != nil {
+			return err
+		}
 		s.serverStopObserver = nil
 	}
 	s.serverStopOnce.Do(func() { close(s.serverStopped) })
-	application.Shutdown(shutdownCtx)
-	s.started = false
-	if err := shutdownCtx.Err(); err != nil {
-		slog.Error("workorch application shutdown context finished", "timeout", timeout, "err", err)
+	if err := application.ShutdownChecked(shutdownCtx); err != nil {
+		return err
 	}
+	s.started = false
 	return nil
 }
 

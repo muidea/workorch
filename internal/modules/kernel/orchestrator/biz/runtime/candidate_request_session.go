@@ -47,16 +47,25 @@ func (c *planningTransactionComponent) ensureCandidateRequestSessionWithExpected
 	}
 	session.LogicalRequestID = runtimecontract.StableRuntimeCandidateRequestSessionID(documentKind, workspaceID, runID, transaction, session.StablePrefixHash, session.ManifestHash, session.CorrectionHash)
 	value := expected.Clone()
-	value.SchemaVersion = runtimecontract.RuntimeExpectedDocumentSchemaCurrent
-	value.DocumentKind = documentKind
-	value.ManifestHash = session.ManifestHash
-	value.LogicalRequestID = session.LogicalRequestID
-	value.StablePrefixHash = session.StablePrefixHash
-	value.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(value)
+	if documentKind == runtimecontract.RuntimeProviderDocumentOperations {
+		value.SchemaVersion = runtimecontract.RuntimeExpectedDocumentSchemaCurrent
+		value.DocumentKind = documentKind
+		value.ManifestHash = session.ManifestHash
+		value.LogicalRequestID = session.LogicalRequestID
+		value.StablePrefixHash = session.StablePrefixHash
+		value.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(value)
+	}
 	if err := value.Validate(); err != nil {
 		return candidateRequestSessionEnsureResult{}, fmt.Errorf("%w: invalid expected document contract", common.ErrInvalidArgument)
 	}
 	session.ExpectedDocument = &value
+	// Re-read and fence intent inside the sole session writer. A successful
+	// preflight of an earlier aggregate cannot authorize a new transaction.
+	if documentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
+		if err := validateCurrentCandidateRequestSession(aggregate, session); err != nil {
+			return candidateRequestSessionEnsureResult{}, err
+		}
+	}
 	if idx, existing, found := runtimeCandidateRequestSessionByID(aggregate.CandidateRequestSessions, session.LogicalRequestID); found {
 		if err := validateCurrentCandidateRequestSession(aggregate, existing); err != nil {
 			return candidateRequestSessionEnsureResult{}, err
@@ -284,7 +293,7 @@ func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKi
 			}
 		}
 		switch aggregate.SemanticPlanning.Phase {
-		case runtimecontract.RuntimeSemanticPlanningRequired, runtimecontract.RuntimeSemanticPlanningOrderRequestOpen, runtimecontract.RuntimeSemanticPlanningRequestOpen, runtimecontract.RuntimeSemanticPlanningOrderAccepted, runtimecontract.RuntimeSemanticPlanningCorrectionRequired, runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen, runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted:
+		case runtimecontract.RuntimeSemanticPlanningOrderRequestOpen, runtimecontract.RuntimeSemanticPlanningRequestOpen, runtimecontract.RuntimeSemanticPlanningCorrectionRequired, runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen:
 			return nil
 		default:
 			return fmt.Errorf("%w: current semantic phase does not accept a provider request", common.ErrConflict)
@@ -353,10 +362,7 @@ func validateCurrentCandidateRequestSession(aggregate RuntimeAggregate, session 
 		return fmt.Errorf("%w: runtime candidate request session does not match current authority", common.ErrConflict)
 	}
 	if session.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
-		ledger := aggregate.SemanticPlanning.Normalized()
-		if ledger.Manifest == nil || ledger.Manifest.Hash != session.ManifestHash || ledger.StablePrefixHash != session.StablePrefixHash {
-			return fmt.Errorf("%w: semantic request session does not match planning authority", common.ErrConflict)
-		}
+		return validateSemanticRequestIntent(aggregate, session)
 	}
 	return nil
 }

@@ -120,6 +120,13 @@ catalog、不推测升级成功，也不触发 owner mutation。
 Template 可以声明 starter Goal/DoD、default Soul/role binding、context/evidence/capability policy 与 execution constraint。
 这些字段是 admission/bootstrap declaration，不能选择 SM-2 state、seal dispatch 或写 evidence。
 
+`contextHints.profileContracts` 只允许当前 typed Profile decoder 消费的字段与精确类型，不保留看似政策却未被消费的
+扩展。软件开发模板的隔离提示、受限前台执行、禁止 detached 验证与清理要求放在实际进入 activation 的
+`contextHints.validationPolicies[].notes`；`validationScratchRequired=true` 与 bounded safety 声明保持不变。
+不再声明未被 Runtime 消费的 `validationEnvironmentPolicy`。notes 是声明性 guidance，不创造隔离保证或执行权限；
+实际进程、超时、effect、scratch 和清理仍由 sealed operation 与 capability owner 合同约束。原 Goal/DoD、required CWI、
+proof requirements 和验收依赖不因该表示调整而改变；旧模板/Run 归档不回填，也不提供旧字段 fallback。
+
 Soul exposes owner metadata and full `soulMd` guidance；它可以约束 Skill/MCP/capability reference 与模型行为，但不能
 授予 owner catalog 中不存在的 operation、绕过 governance、选择 Runtime action 或接受 evidence。API/projection exposes
 `soulMd`；`soulMDRef` 只是 embedded implementation detail，Template stores Soul ID/binding 而不是 path。

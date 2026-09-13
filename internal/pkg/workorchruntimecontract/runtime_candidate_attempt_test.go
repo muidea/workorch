@@ -475,7 +475,8 @@ func TestRuntimeStateRecordRejectsTerminalDecisionWithPendingCandidateAttempt(t 
 		t.Fatal(err)
 	}
 	record := RuntimeStateRecord{
-		StateRevision: 1,
+		ResultFeedbackVersion: RuntimeResultFeedbackVersionCurrent,
+		StateRevision:         1,
 		Definition: RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 			Revision: facts.DefinitionRevision, GoalID: "goal-1", GoalDefinition: "goal",
 			DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"},

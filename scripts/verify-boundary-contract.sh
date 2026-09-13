@@ -5774,12 +5774,12 @@ if policy.get("recipeAdapterRef") != "shell/project-native-validation/v4":
     raise SystemExit(1)
 if any(key in policy for key in ("commandName", "recipeArgs", "requiredArgs", "argsContain", "workEvidenceMarkers")):
     raise SystemExit(1)
-validation_environment = template.get("contextHints", {}).get("profileContracts", {}).get("software-dev", {}).get("validationEnvironmentPolicy", {})
-if "languageProfiles" in validation_environment:
+software_profile = template.get("contextHints", {}).get("profileContracts", {}).get("software-dev", {})
+if "validationEnvironmentPolicy" in software_profile:
     raise SystemExit(1)
 PY
 then
-	echo "boundary contract violation: software-dev template must select the reviewed Shell owner adapter without embedding a language-specific recipe" >&2
+	echo "boundary contract violation: software-dev template must select the reviewed Shell owner adapter without an unconsumed Profile policy or language-specific recipe" >&2
 	exit 1
 fi
 if ! grep -q -F 'ValidationRecipeAdapterProjectNative = "shell/project-native-validation/v1"' internal/modules/blocks/shell/pkg/common/common.go ||

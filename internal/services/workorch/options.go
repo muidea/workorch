@@ -41,7 +41,7 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	if err := svc.Startup(ctx); err != nil {
-		return err
+		return errors.Join(err, svc.Shutdown(context.Background()))
 	}
 	runErr := svc.Run(ctx)
 	return errors.Join(runErr, svc.Shutdown(context.Background()))

@@ -58,7 +58,7 @@ func TestSystemModuleIdentityStartStopContract(t *testing.T) {
 func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(64)
-	defer hub.Terminate(ctx)
+	t.Cleanup(func() { hub.Terminate(ctx) })
 	souls := memoryrepo.NewSoulRepository()
 	workspaceRepositories := memoryrepo.NewWorkspaceOwnerRepositorySet()
 	templates := workspaceRepositories.OwnerRepositories().Templates()
@@ -115,7 +115,7 @@ func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *test
 func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChanges(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(64)
-	defer hub.Terminate(ctx)
+	t.Cleanup(func() { hub.Terminate(ctx) })
 	souls := memoryrepo.NewSoulRepository()
 	workspaceRepositories := memoryrepo.NewWorkspaceOwnerRepositorySet()
 	templates := workspaceRepositories.OwnerRepositories().Templates()

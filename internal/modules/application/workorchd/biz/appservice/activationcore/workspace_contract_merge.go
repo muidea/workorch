@@ -152,26 +152,30 @@ func contextMapSliceValue(value any) []map[string]any {
 }
 
 func mergeProfileContractCollection(template, workspace []map[string]any, identityFields []string) []map[string]any {
-	merged := make(map[string]map[string]any, len(template)+len(workspace))
+	// Only a unique item in each configuration layer may participate in an
+	// explicit override. Duplicates within either input are invalid declarations,
+	// not overrides; preserve them (and unnamed items) for owner admission.
+	templateCounts, workspaceCounts := map[string]int{}, map[string]int{}
 	for _, item := range template {
-		if key := profileContractCollectionIdentity(item, identityFields); key != "" {
-			merged[key] = cloneContextMapDeep(item)
-		}
+		templateCounts[profileContractCollectionIdentity(item, identityFields)]++
 	}
 	for _, item := range workspace {
-		if key := profileContractCollectionIdentity(item, identityFields); key != "" {
-			merged[key] = cloneContextMapDeep(item)
+		workspaceCounts[profileContractCollectionIdentity(item, identityFields)]++
+	}
+	ret := make([]map[string]any, 0, len(template)+len(workspace))
+	for _, item := range template {
+		key := profileContractCollectionIdentity(item, identityFields)
+		if key != "" && templateCounts[key] == 1 && workspaceCounts[key] == 1 {
+			continue
 		}
+		ret = append(ret, cloneContextMapDeep(item))
 	}
-	keys := make([]string, 0, len(merged))
-	for key := range merged {
-		keys = append(keys, key)
+	for _, item := range workspace {
+		ret = append(ret, cloneContextMapDeep(item))
 	}
-	sort.Strings(keys)
-	ret := make([]map[string]any, 0, len(keys))
-	for _, key := range keys {
-		ret = append(ret, merged[key])
-	}
+	sort.SliceStable(ret, func(i, j int) bool {
+		return profileContractCollectionIdentity(ret[i], identityFields) < profileContractCollectionIdentity(ret[j], identityFields)
+	})
 	return ret
 }
 

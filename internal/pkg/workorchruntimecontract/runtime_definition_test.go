@@ -25,7 +25,8 @@ func TestRuntimeStateRejectsDefinitionRevisionMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := RuntimeStateRecord{
-		StateRevision: 1,
+		ResultFeedbackVersion: RuntimeResultFeedbackVersionCurrent,
+		StateRevision:         1,
 		Definition: RuntimeDefinitionContext{StartupInputHash: "startup-input-test",
 			Revision: "other-definition", GoalID: "goal-1", GoalDefinition: "goal", DoDID: "dod-1", DoDDefinition: "dod", CapabilityContract: []string{"file/write"},
 		},

@@ -1928,3 +1928,10 @@ func (h *recordingGovernanceHub) Posted() []magicevent.Event {
 	defer h.mu.Unlock()
 	return append([]magicevent.Event(nil), h.posted...)
 }
+
+func (r *recordingBackgroundRoutine) AsyncTaskContext(ctx context.Context, task magictask.Task) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.AsyncTask(task)
+}

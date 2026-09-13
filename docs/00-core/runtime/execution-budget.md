@@ -22,6 +22,59 @@ semantic proof、operation、repair 和 recovery budget 纳入一个确定性视
 
 ## Stable Value Contracts
 
+### Activation-Sealed Execution Limits
+
+Template `contextHints.executionLimits` 可选择 `protocolRef=runtime-execution-limits/v1`，并同时声明精确整数
+`maxProviderCalls`（1～4096）和 `maxCapabilityOperations`（1～8192）。这两个 Run 级上限只收紧当前默认预算；
+不修改 token、单请求恢复、candidate correction、repair 或信息补充政策，也不授予新的工作权限。
+未声明时使用当前默认物理预算；空对象、缺项、未知字段/协议、零值、非整数和提高硬上界均拒绝。
+
+Template 与 Workspace 两侧在合并前独立检查，沿用 execution context 的 Template 优先规则；Template 未声明时才使用
+Workspace 声明。effective typed limits 作为 `execution-limits:effective` policy binding 进入 Workspace admission candidate，
+final bootstrap 必须与该 binding 精确一致。limits 进入 execution-contract identity；Application 仅纯编译既有
+`RuntimeExecutionBudgetPolicy`，不持有计数或 Runtime transition。Bootstrap 与 Runtime facts fresh-load 都反查声明，
+同时重算 policy/ledger hash 不能扩大限额。无须用户在常规 setup 中填写 budget JSON。
+
+SM-3 provider submission 与 operation claim 继续在其原 owner-private CAS 中预留额度；所有 semantic/operations 请求、
+correction、允许的 recovery 和能力用途共用原有 Run 账本，不按 purpose、CWI、文件或 request 名另开物理余额。
+SM-2 沿用 budget exhaustion 终止裁决，SM-4 只按 persisted ledger 恢复；SM-1 不选择动作。unknown 仍占用预算，
+重复提交不重复扣减，同 Run Resume/recovery 不重新编译 policy。限额声明不是最短工作链可完成性的证明；过小预算可
+合法耗尽，不能通过删减原验收义务完成 Run。此协议不启用一般实现、草稿修订或纯遗漏补充循环。
+
+同一声明可另选 `maxProofBatchesPerCWI`（精确整数 1～17，即当前 semantic history 容量加一代）。省略时不附加
+此逻辑上限，已有物理和 history 上限仍生效；显式零、负值、非整数或超界拒绝。它进入相同 admission/execution
+identity，但不是物理 policy dimension，也不是 CWI 实现迭代次数。不能以 reopen count、证据数量或 provider 次数替代。
+
+唯一消费来源是同一 Run 的 `SemanticPlanning.Batches` 及各 `History[].Snapshot.Batches`：每个已持久化批次对
+`CoverageWorkItemIDs` 中每个原 CWI 占一单位，`PendingCoverageWorkItemIDs` 不占额。同批次的格式纠正、transport
+和完整文档恢复不再占逻辑批次额度，物理调用仍照常结算。批次意图 CAS 后的预检失败也不退还该单位。
+换 manifest、catalog、路径、内容、purpose、request ID 或退休 generation 都不重置余额。
+
+SM-3 `semantic_plan_batch_compiled` 私有事件 fresh-load 后先验证 exact manifest/order/focus，再在追加 requesting
+batch 的同一次 CAS 占额。精确已提交重放在 active-document/next-sequence guard 前识别，零 CAS、零重复消费；错身份
+或已失败批次不能重开。额度不足在创建批次/session/preflight/provider 前返回带 CWI/上限的 typed semantic-generation
+budget exhaustion，由现有 SM-4 错误边界提交私有失败事件、SM-2 裁决终态并按原三 owner 链交付；不创建治理 ticket。
+aggregate 与 opaque Runtime state 的当前形态校验均从原记录汇总并拒绝超额；该纯只读投影不提供第二份计数 authority，
+SM-1 仍由 Run 独占。本上限只约束 proof planning，不能作为一般工作范围、草稿修订或持续开发循环已启用的依据。
+
+同一声明还可选择 `maxDurableDispatchesPerCWI`（精确整数 1～8192，上界取既有 capability-operation 默认硬上限）。
+省略不附加此逻辑上限；显式零、负值、非整数、超界拒绝。它参与相同 admission/bootstrap/execution identity，
+但不新增物理预算维度或计数 ledger。它计量持久化工作 dispatch 的封存次数，不是成功实现次数或证明批次数。
+
+唯一计量来源为 accepted candidate attempt 指向的原 dispatch：存在 durable expected effect 时，对该 dispatch
+封存 binding inventory 中每个原 CWI 各占一单位，同 dispatch 的多个文件/operation 不重复计。合法 governance resume
+继承原封存授权，不产生新的 accepted attempt，因此不重复占额；fresh-load 必须同时验证完整 admission/resume lineage，
+不能通过删除 accepted attempt 或伪造 resume 退额。rejected/no-op/unknown、未执行、失效或退休的已封存工作均不退额。
+新的 proof generation、focus、purpose 或 request 不改变原 CWI 的已占额度；纯读取、验证、assessment 不占此额度。
+
+SM-3 final admission 在候选、owner feasibility、封存身份全部通过后、accepted attempt 与 ActiveDispatch 的同一次 CAS
+之前检查额度。CAS 前失败无占额，CAS 后响应丢失及 exact duplicate 复用同一封存记录；超额不创建新 dispatch、claim、
+physical allocation 或 effect。此时原候选请求可能已消费 provider 预算，不能宣称零 provider call。typed durable-dispatch
+exhaustion 复用 SM-4 failure ingress→SM-2 terminal→原 owner delivery，不新增 ticket、重试或扩权路径。
+aggregate 与 opaque state 都重算上限并拒绝持久化超额。该限制不开放一般实现、草稿、诊断或补充权限，也不证明循环可完成。
+
+### Ledger Values
+
 policy、allocation、consumption、reconciliation 与 projection 分为五个值对象；它们都是 aggregate fact/value，均不新增
 repository 或 owner：
 

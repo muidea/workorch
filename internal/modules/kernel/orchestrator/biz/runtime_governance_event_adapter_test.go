@@ -509,6 +509,7 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	// Reconstruct process-local infrastructure and repository instances from the
 	// same durable files; no old EventHub observer or controller is reused.
 	restartedHub := magicevent.NewHub(16)
+	t.Cleanup(func() { restartedHub.Terminate(ctx) })
 	restartedRuns := filerepository.NewRunRepository(runsPath)
 	restartedRunOwner := runmodule.New()
 	if err := restartedRunOwner.Configure(runOwnerTestDependencies(restartedRuns, nil, nil, restartedHub)); err != nil {
@@ -540,7 +541,6 @@ func TestRuntimeGovernanceResolutionFileBackedRestartReplaysExactlyOnce(t *testi
 	t.Cleanup(func() {
 		restartedObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 		restartedObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket)
-		restartedHub.Terminate(ctx)
 	})
 
 	for replay := 0; replay < 2; replay++ {
@@ -657,6 +657,7 @@ func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidate
 	// Recreate all process-local owners from their file roots. No initial Hub,
 	// controller, provider response, or ticket repository instance is reused.
 	restartedHub := magicevent.NewHub(16)
+	t.Cleanup(func() { restartedHub.Terminate(ctx) })
 	restartedRuns := filerepository.NewRunRepository(runsPath)
 	restartedRunOwner := runmodule.New()
 	if err := restartedRunOwner.Configure(runOwnerTestDependencies(restartedRuns, nil, nil, restartedHub)); err != nil {
@@ -684,7 +685,6 @@ func TestRuntimeFileBackedBoundGovernanceRestartPreservesBindingWithoutCandidate
 	restartedLLMObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(_ magicevent.Event, _ magicevent.Result) { restartedCandidateCalls++ })
 	t.Cleanup(func() {
 		restartedLLMObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate)
-		restartedHub.Terminate(ctx)
 	})
 	reloaded, err := restartedBiz.loadRuntime(ctx, facts.WorkspaceID, facts.RunID)
 	if err != nil {

@@ -551,6 +551,22 @@ func (c *planningTransactionComponent) compileSemanticPlanBatch(ctx context.Cont
 		return RuntimeAggregate{}, err
 	}
 	changed, err := func(aggregate RuntimeAggregate, ledger *runtimecontract.RuntimeSemanticPlanningLedger) (bool, error) {
+		// An exact committed compile is read-only, including after a lost CAS
+		// response. Check it before the next-sequence/active-document guards.
+		if ledger.Manifest != nil && batch.State == runtimecontract.RuntimeSemanticPlanBatchPending {
+			if err := batch.ValidateAgainstManifest(*ledger.Manifest); err != nil {
+				return false, err
+			}
+			for _, existing := range ledger.Batches {
+				if existing.Sequence != batch.Sequence && existing.BatchID != batch.BatchID {
+					continue
+				}
+				if !runtimecontract.SameRuntimeSemanticPlanBatchImmutableIdentity(existing, batch) || existing.State == runtimecontract.RuntimeSemanticPlanBatchFailed || existing.State == runtimecontract.RuntimeSemanticPlanBatchPending {
+					return false, fmt.Errorf("%w: semantic batch replay differs from committed compile", common.ErrConflict)
+				}
+				return false, nil
+			}
+		}
 		if ledger.Manifest == nil || ledger.CoverageOrderDocument == nil || ledger.Document == nil || ledger.Document.PlanStep != runtimecontract.RuntimeSemanticPlanStepCoverageOrder || ledger.ActiveBatchID != "" {
 			return false, fmt.Errorf("%w: semantic batch requires an accepted coverage order", common.ErrConflict)
 		}
@@ -582,26 +598,14 @@ func (c *planningTransactionComponent) compileSemanticPlanBatch(ctx context.Cont
 		if err != nil {
 			return false, err
 		}
-		for idx := range ledger.Batches {
-			existing := ledger.Batches[idx]
-			if existing.Sequence == batch.Sequence || existing.BatchID == batch.BatchID {
-				if !runtimecontract.SameRuntimeSemanticPlanBatchImmutableIdentity(existing, requesting) {
-					return false, fmt.Errorf("%w: semantic batch sequence or identity already exists with different contents", common.ErrConflict)
+		if limits := aggregate.Facts.Activation.ExecutionContract.ExecutionLimits; limits != nil && limits.MaxProofBatchesPerCWI > 0 {
+			usage := runtimecontract.RuntimeSemanticProofBatchUsage(*ledger)
+			for _, id := range requesting.CoverageWorkItemIDs {
+				if usage[id] >= limits.MaxProofBatchesPerCWI {
+					return false, fmt.Errorf("CWI %q proof batch limit %d: %w", id, limits.MaxProofBatchesPerCWI, &runtimecontract.RuntimeBudgetExhaustedError{
+						Dimension: runtimecontract.RuntimeBudgetDimensionSemanticGeneration, Required: 1, Remaining: 0,
+					})
 				}
-				if existing.State == runtimecontract.RuntimeSemanticPlanBatchFailed {
-					return false, fmt.Errorf("%w: semantic batch was already failed", common.ErrConflict)
-				}
-				if existing.State == runtimecontract.RuntimeSemanticPlanBatchPending {
-					ledger.Batches[idx] = requesting
-					ledger.ActiveBatchID = requesting.BatchID
-					ledger.LogicalRequestID = requesting.RequestLogicalID
-					ledger.Phase = runtimecontract.RuntimeSemanticPlanningProofBatchRequestOpen
-					return true, nil
-				}
-				// The compile event was replayed after the private transition (or
-				// after a later batch state). Immutable identity is sufficient for a
-				// read-only replay; lifecycle state remains owner-authoritative.
-				return false, nil
 			}
 		}
 		ledger.Batches = append(ledger.Batches, requesting)

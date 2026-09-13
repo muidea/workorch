@@ -771,17 +771,23 @@ func assertSoftwareDevAcceptanceDimensions(t *testing.T, hints map[string]any) {
 			t.Fatalf("software-dev coverageDependencies missing %s in %+v", id, dependencies)
 		}
 	}
-	validationPolicy, ok := softwareDev["validationEnvironmentPolicy"].(map[string]any)
-	if !ok {
-		t.Fatalf("software-dev validationEnvironmentPolicy = %+v, want map", softwareDev["validationEnvironmentPolicy"])
+	if _, exists := softwareDev["validationEnvironmentPolicy"]; exists {
+		t.Fatal("software-dev retains an unconsumed Profile policy")
 	}
-	if validationPolicy["scratchIsolationRequired"] != true || validationPolicy["boundedForegroundOnly"] != true {
-		t.Fatalf("validationEnvironmentPolicy = %+v, want scratch isolation and bounded foreground", validationPolicy)
+	validationPolicies, ok := hints["validationPolicies"].([]any)
+	if !ok || len(validationPolicies) != 1 {
+		t.Fatal("software-dev requires one effective validation policy")
 	}
-	if _, exists := validationPolicy["languageProfiles"]; exists {
-		t.Fatalf("software-dev validationEnvironmentPolicy embeds language profile: %+v", validationPolicy["languageProfiles"])
+	validationPolicy, ok := validationPolicies[0].(map[string]any)
+	if !ok || validationPolicy["validationScratchRequired"] != true || validationPolicy["validationSafetyClass"] != "bounded" {
+		t.Fatalf("effective validation policy lost scratch/bounded requirements: %+v", validationPolicy)
 	}
-	guidance, _ := json.Marshal(validationPolicy["guidance"])
+	guidance, _ := json.Marshal(validationPolicy["notes"])
+	for _, required := range []string{"isolated scratch", "bounded foreground", "do not use detached background", "must clean up"} {
+		if !strings.Contains(string(guidance), required) {
+			t.Fatalf("effective validation policy lost %q guidance", required)
+		}
+	}
 	if strings.Contains(strings.ToLower(string(guidance)), "go scratch") || strings.Contains(string(guidance), "GOFLAGS") {
 		t.Fatalf("software-dev validation guidance embeds Go adapter policy: %s", guidance)
 	}

@@ -213,8 +213,8 @@ func (m *Biz) recordRuntimeDeliveryAcknowledgement(ctx context.Context, acknowle
 }
 
 func runtimeResultMaterialFromAggregate(aggregate runtime.RuntimeAggregate, outcome runtimecontract.TerminalOutcome) (resultevents.ResultMaterial, error) {
-	if aggregate.ResultFeedbackVersion > runtimecontract.RuntimeResultFeedbackVersionCurrent {
-		return resultevents.ResultMaterial{}, fmt.Errorf("unsupported runtime result feedback version %d", aggregate.ResultFeedbackVersion)
+	if err := runtimecontract.ValidateRuntimeResultFeedbackVersion(aggregate.ResultFeedbackVersion); err != nil {
+		return resultevents.ResultMaterial{}, err
 	}
 	derived, terminal, err := runtime.DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
 	if err != nil {
@@ -268,9 +268,7 @@ func runtimeResultMaterialFromAggregate(aggregate runtime.RuntimeAggregate, outc
 		SummaryDetail: workorchresultcontract.ResultSummary{GoalOutcome: terminalSummary, EvidenceRefs: append([]string(nil), evidenceRefs...), ArtifactRefs: append([]common.ArtifactID(nil), artifactRefs...)},
 	}
 	item.RuntimeCloseout = runtimeResultCloseout(aggregate, outcome, accepted, evidenceRefs)
-	if aggregate.ResultFeedbackVersion >= 1 {
-		runtimeCompleteResultFeedback(&item, aggregate)
-	}
+	runtimeCompleteResultFeedback(&item, aggregate)
 	return item, nil
 }
 
@@ -302,9 +300,6 @@ func runtimeResultCloseout(aggregate runtime.RuntimeAggregate, outcome runtimeco
 	accumulator.apply(&closeout)
 	if !accepted {
 		accumulator.applyTerminalFailure(&closeout, aggregate)
-	}
-	if aggregate.ResultFeedbackVersion == 0 {
-		closeout.OriginalDiagnostic = nil
 	}
 	closeout.OwnerRevisionSet = runtimeCloseoutOwnerRevisionSet(aggregate)
 	closeout.RequirementOutcomes = runtimeRequirementOutcomes(aggregate, closeout.OwnerRevisionSet)
@@ -400,8 +395,8 @@ func runtimeRequirementOutcomes(aggregate runtime.RuntimeAggregate, ownerSet run
 		}
 		// Historical assessments are immutable audit facts. Only the current
 		// SM-2 coverage ledger establishes whether their satisfied judgment still
-		// applies. Preserve v0/v1 delivery material across restart/retry.
-		if aggregate.ResultFeedbackVersion >= 2 && outcome.AssessmentState == runtimecontract.RuntimeRequirementSatisfied && coverage.State != runtimecontract.RuntimeCoverageItemStateSatisfied {
+		// applies; rendering never restores credit from a historical assessment.
+		if outcome.AssessmentState == runtimecontract.RuntimeRequirementSatisfied && coverage.State != runtimecontract.RuntimeCoverageItemStateSatisfied {
 			outcome.AssessmentState = runtimecontract.RuntimeRequirementIndeterminate
 			outcome.AssessmentReasonCode = "current_coverage_not_satisfied"
 		}

@@ -111,6 +111,99 @@ provider-facing 请求按 cacheability 分层（细则见 `../00-core/runtime-re
 
 core 只定义 provider-neutral 分区与审计；provider 私有 cache-control 仅 adapter 层设置。
 
+### Semantic 请求的只读覆盖进度
+
+每个 `semantic_plan` 请求必须携带 typed `RuntimeSemanticCoverageProgress`。Orchestrator 从同一 aggregate 快照
+投影完整封存 CWI 清单的 `total/open/satisfied/unsatisfied`；不能把本次 eligible manifest 的数量当作 Goal 总量。
+明细仅包含 coverage-order manifest 或当前 proof batch 的 CWI，按其规范顺序输出验收观察 `observedState`、当前记录的
+`EvidenceRefs` 数量和 `ReopenLineage` 数量。证据引用数量不代表全部历史执行次数、fresh proof 或验收 credit；
+重开后证据引用可能已被清理，不能把它当作累计工作量。原准则与具体修复结果仍分别来自 C1/C3 和下述因果反馈。
+
+摘要绑定 workspace/run、Definition/startup、seed/manifest、step/batch、source state revision 与 evidence revision，
+并带完整内容 hash。缺失、重复、错源或未知状态的 owner facts 必须拒绝，不靠删除坏行或默认 open 补足计数。
+整体 JSON 上限 64 KiB，同时受 provider ceiling 限制。LLM 先校验 typed scope/hash/数量与成员完整性，再对 C4
+做逐值 integrity 检查；受保护进度不得静默裁剪。hash 证明传输一致性，不授权 LLM 自报验收。
+
+只读进度只进入 C4；单独更新它不得改变 C0～C3 或 stable prefix。重启从当前 owner 快照重新投影，同一快照的
+值/hash 一致，合法 CAS 后 source revision 可以更新。它不持久化第二份状态账本、不修改旧归档、不触发状态转换，
+也不改变 SM-2 的验收、SM-3 的 dispatch 或既有预算权限。
+
+### Semantic 请求的已提交操作历史
+
+每个 semantic 请求还必须携带 `RuntimeSemanticExecutionHistory`，由 Orchestrator 从同一 Run 的 persisted receipt
+ledger 按提交顺序投影最近 16 条 owner-committed 结果，显式提供 `totalReceipts/omittedReceipts/receiptSequence`。
+空历史也必须有完整 scope/source/hash，不能用缺字段冒充“尚未执行”。历史覆盖整个 sealed CWI inventory，允许看到
+已经完成、因而不在当前 manifest/batch 内的 CWI 的工作；不能只把当前 proof batch 当作全部工作历史。
+
+投影前复用 aggregate 不变量，并逐项反查 sealed dispatch、operation、execution key/fence 和 exact receipt ref/hash；
+缺失、重复、错源或不一致不能在裁剪时被丢弃。`boundCoverageWorkItemIds` 仅来自原 operation 的 binding，表示历史
+工作归属而不是 evidence credit；`observedState=accepted`、`changed=true` 或 durable effect 均不能替代当前验收。
+尚无回执的 sealed/claimed/unknown execution 不属于该“已提交回执”计数，不能据此推断未执行或可安全重试。
+
+每条保留 owner/kind、原 target refs、before/after hash、observed outcome/effect、changed 和有界 typed validation
+check 事实。`expectedEffectScope` 必须来自 sealed execution，`requestedTargetRefs` 来自 sealed operation；二者与回执的
+实际 effect/target 分开保留，不以预期补造实际事实。无 validation observation 时明确为 null；不包含原始
+summary/diagnostic、output、操作参数或下一动作。
+历史失败不等于当前修复来源，不能代替下述专用 exact-causal feedback；超过 16 条的旧历史明确计为省略，不能声称
+已完整展开。整组 JSON 上限 64 KiB，并受 provider ceiling 约束；已选窗口超限必须拒绝，不静默删行或裁剪检查。
+
+scope 绑定 workspace/run、Definition/startup、当前 manifest 与同一 CoverageProgress 的 source revision；完整值进入
+C4，LLM 接收端检查身份、计数、序号、CWI membership 与 hash，渲染后逐值执行 `P3.semantic_execution_history`
+integrity。单独反馈变化不得改变 C0～C3 或 stable prefix。同版本恢复只从 owner aggregate 重投影，session 提交造成
+revision 前进不改变已有回执内容；没有新 owner、可写投影、状态机、预算或归档回填。
+
+历史回执及下述 exact repair feedback 通过同一个纯投影携带 `diagnostic`：原 owner/class/code/signature、
+expected/observed revision、原 truncated/redacted 标志和绑定完整原 feedback 的 hash；`summaryOnly=true` 必须显式保留。
+可选 `validationDiagnostic` 只保留 owner 自报的 class/code、command kind、`reportedExitCode` 和 timeout；退出码默认值、
+命令种类或诊断存在均不能证明进程执行过、检查通过或可修复，实际执行检查仍来自独立 validation observation。
+缺少 owner diagnostic/validation diagnostic 分别显式为 null；修复专用反馈因其原 receipt 必须有 diagnostic 而不允许
+省略该来源。原 message/reason、preview、detail ref、field values、输入维护授权与治理续驱均不透传；该投影不是完整
+诊断材料，也不授予通过 hash 读取 owner 私有内容的权限。全部新增值只在 C4 接收/逐值保护，不改 C0～C3，
+同版本重投影保留相同内容及身份。
+
+### Semantic 请求的执行预算观察
+
+`RuntimeSemanticExecutionBudget` 是必需的只读 C4 事实，与 CoverageProgress 使用同一 workspace/run、Definition/startup、
+manifest 和 exact source state revision。Orchestrator 验证完整 aggregate 后，从既有 execution-budget view 选择
+`provider_call`、`capability_operation` 两个 Run 物理维度，保留 limit、confirmed、reserved、unknown、remaining、
+exhausted、policy revision 和 source-view hash；不把 allocation 明细、token usage 或当前 focus 的 repair 额度冒充全 Run 余额。
+
+同一投影从当前及退休 semantic batches 汇总原 CWI 的 selected membership，明细只覆盖当前 manifest/batch。
+每个已编译批次占一次，pending membership、同批 correction、session/recovery 不另计逻辑批次；generation retirement
+不退额。`proofBatchLimit=null` 和逐项 `remaining=null` 只表示未声明附加的逐 CWI 上限，不表示无限执行；既有 request、
+history、repair、recovery 和物理硬上限继续生效。此处的 proof batch 数也不等于实施迭代数或验收进度。
+
+同一观察还必须包含 `durableDispatchLimit` 与 `visibleDurableDispatches`：从完整 validated aggregate 的原始 accepted
+dispatch lineage 推导逐原 CWI durable seal 次数，再选出当前可见 CWI。封存即占额，失败/失效/无实际变更不退款；
+治理续派、重复回执及重启不重复计数。未声明附加上限时 limit/remaining 显式为 null，但 used 仍如实保留。
+任何隐藏 CWI 的负值、越额或外来身份也必须拒绝，不能用可见窗口遮蔽非法来源；该观察不构成实施权限或验收 credit。
+
+这是构造请求时、该次 physical submission CAS **之前**的余额快照；本次请求仍须由 SM-3 在当前账本预留额度。
+prepared/recovery 重驱重新读取当前快照，不能拿旧 revision 从新 aggregate 重建旧余额；已完成文档只恢复本地准入。
+同版本同快照投影/hash 一致，submitted-unknown 保守占额。共享层只验证值和绑定，LLM 不预留、退还或重置预算。
+
+接收端验证 scope/hash、两维完整性、封存的可选限额、溢出安全的余额等式和可见 CWI 完整性；渲染后执行
+`P3.semantic_execution_budget` 逐值校验，协调重算 hash 也不能掩盖裁剪或改值。整个观察不超过 32 KiB，仍受 provider
+ceiling 约束，不能隐式删项。所有动态值仅进入 C4，不改变 C0～C3/stable prefix，不赋予工作、dispatch、credit 或终结权。
+
+### Semantic repair 的执行事实反馈
+
+`semantic_plan/proof_batch` 对本批每个 `ValidationFailureRepair` CWI 必须携带一条 typed
+`RuntimeSemanticExecutionFeedback`；普通 proof 和 coverage ordering 的这个专用字段不接收历史失败。Orchestrator 从该 CWI
+的持久化 reopen `TriggerRef` 定位 rejected evidence，再反证原 binding、sealed dispatch、committed execution 和
+owner receipt 的 exact identity/hash；不能使用“最近一次失败”、当前 mutable failure 或签名搜索代替因果来源。
+合同的 `FailedFocusID` 是原 Definition declaration 身份，不是 retired runtime focus 名称。
+
+反馈绑定 workspace/run、Definition/startup、manifest、CWI、失败、operation 和 receipt，只在 C4 渲染。
+共享的安全 validation projection 保留执行/通过/失败/跳过/不完整 check、typed assertion 与缺失/截断标志；
+不携带 raw output、错误原文、operation parameters、next action 或 coverage credit。没有 typed observation 时显式
+`validation: null`，不能由日志或 hash 猜测断言。单条 check inventory 受现有 failure-detail limit 约束，整个反馈集合
+JSON 上限 64 KiB，同时受现有 provider ceiling 约束；超限或缺失必要来源须拒绝，不静默省略必要反馈。
+
+LLM owner 在 provider 前校验 exact batch/scope/hash/结构；post-render integrity 再逐值检查 C4，裁剪、注入或改写均
+失败。C0～C3 不因执行反馈变化而变化，原 Goal/DoD 与验收权限不变。同版本重启从原持久化事实重建相同反馈，
+不新增状态/预算账户，不回填旧归档。该反馈是规划事实输入，不是新的修复或验证权限。
+
 ## What Enters Candidate Context
 
 允许进入默认 candidate context 的：

@@ -2,6 +2,7 @@ package workorchruntimecontract
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -103,9 +104,12 @@ type RuntimeProfileEvidenceRequirement struct {
 	// terminal proof requirement and therefore cannot add state_change to the
 	// DoD terminal evidence kinds.
 	ValidationFailureRepairConvergence *RuntimeValidationFailureRepairConvergence
-	CapabilityStateRequirements        []RuntimeProfileCapabilityStateRequirement
-	RejectedStepKinds                  []string
-	Description                        string
+	// ImplementationWorkPolicy is a separate, default-absent declaration. It
+	// cannot borrow the rejected-validation trigger or change terminal proof.
+	ImplementationWorkPolicy    *RuntimeImplementationWorkPolicy
+	CapabilityStateRequirements []RuntimeProfileCapabilityStateRequirement
+	RejectedStepKinds           []string
+	Description                 string
 }
 
 type RuntimeProfileCapabilityStateRequirement struct {
@@ -273,7 +277,10 @@ func runtimeProfileHasProofOperation(kinds []string, evidenceKind string) bool {
 }
 
 func NormalizeRuntimeProfileContracts(values []RuntimeProfileContract) []RuntimeProfileContract {
-	byID := map[string]RuntimeProfileContract{}
+	// These are authority declarations, not an override map. Keep invalid and
+	// duplicate entries until admission can reject them; last-write-wins would
+	// silently discard required work before Workspace seals the Definition.
+	ret := make([]RuntimeProfileContract, 0, len(values))
 	for _, value := range values {
 		value.ID = strings.TrimSpace(value.ID)
 		value.AcceptanceDimensions = normalizeRuntimeAcceptanceDimensions(value.AcceptanceDimensions)
@@ -281,37 +288,42 @@ func NormalizeRuntimeProfileContracts(values []RuntimeProfileContract) []Runtime
 		value.EvidenceRequirements = normalizeRuntimeProfileEvidenceRequirements(value.EvidenceRequirements)
 		value.CoverageDependencies = normalizeRuntimeCoverageDependencies(value.CoverageDependencies)
 		value.BootstrapRecipes = normalizeRuntimeBootstrapRecipes(value.BootstrapRecipes)
-		if value.ID != "" {
-			byID[value.ID] = value
-		}
+		ret = append(ret, value)
 	}
-	keys := make([]string, 0, len(byID))
-	for key := range byID {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	ret := make([]RuntimeProfileContract, 0, len(keys))
-	for _, key := range keys {
-		ret = append(ret, byID[key])
-	}
+	sort.SliceStable(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })
 	return nilIfEmpty(ret)
 }
 
 func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
+	seenProfiles := make(map[string]struct{}, len(values))
 	for _, profile := range NormalizeRuntimeProfileContracts(values) {
 		if profile.ID == "" {
 			return fmt.Errorf("runtime profile contract requires id")
 		}
+		if _, duplicate := seenProfiles[profile.ID]; duplicate {
+			return fmt.Errorf("runtime profile contract duplicates id %q", profile.ID)
+		}
+		seenProfiles[profile.ID] = struct{}{}
 		seenEvidenceRequirementRefs := make(map[string]struct{}, len(profile.EvidenceRequirements))
+		seenDimensions := make(map[string]struct{}, len(profile.AcceptanceDimensions))
 		for _, item := range profile.AcceptanceDimensions {
 			if item.ID == "" {
 				return fmt.Errorf("runtime acceptance dimension requires id")
 			}
+			if _, duplicate := seenDimensions[item.ID]; duplicate {
+				return fmt.Errorf("runtime profile %q duplicates acceptance dimension %q", profile.ID, item.ID)
+			}
+			seenDimensions[item.ID] = struct{}{}
 		}
+		seenDeliverables := make(map[string]struct{}, len(profile.DeliverableExpectations))
 		for _, item := range profile.DeliverableExpectations {
 			if item.ID == "" {
 				return fmt.Errorf("runtime deliverable expectation requires id")
 			}
+			if _, duplicate := seenDeliverables[item.ID]; duplicate {
+				return fmt.Errorf("runtime profile %q duplicates deliverable expectation %q", profile.ID, item.ID)
+			}
+			seenDeliverables[item.ID] = struct{}{}
 		}
 		for _, item := range profile.EvidenceRequirements {
 			if item.ID == "" || item.Scope == "" {
@@ -347,7 +359,15 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 					return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
 				}
 			}
+			seenStates := make(map[RuntimeProfileCapabilityStateRequirement]struct{}, len(item.CapabilityStateRequirements))
 			for _, state := range item.CapabilityStateRequirements {
+				if state.OwnerModuleID == "" || state.CapabilityStateKind == "" || state.SubjectRef == "" {
+					return fmt.Errorf("runtime profile evidence requirement %q requires complete capability-state identity", item.ID)
+				}
+				if _, duplicate := seenStates[state]; duplicate {
+					return fmt.Errorf("runtime profile evidence requirement %q duplicates capability-state identity", item.ID)
+				}
+				seenStates[state] = struct{}{}
 				if !runtimeProfileCapabilityStateOwnerMatchesAcceptedStepKind(state.OwnerModuleID, item.AcceptedStepKinds) {
 					return fmt.Errorf("runtime profile evidence requirement %q capability-state owner %q does not own an accepted operation kind", item.ID, state.OwnerModuleID)
 				}
@@ -357,6 +377,14 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 			}
 			if err := ValidateRuntimeOwnerFactConvergences(item.RequiredOwnerFacts, item.OwnerFactConvergences); err != nil {
 				return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
+			}
+			if item.ImplementationWorkPolicy != nil {
+				if len(item.RequiredEvidenceKinds) != 1 || item.RequiredEvidenceKinds[0] != EvidenceKindValidation {
+					return fmt.Errorf("runtime profile evidence requirement %q implementation work must preserve validation-only terminal evidence", item.ID)
+				}
+				if err := item.ImplementationWorkPolicy.Validate(); err != nil {
+					return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
+				}
 			}
 			if item.ValidationFailureRepairConvergence != nil {
 				if item.Scope != "dodItem" {
@@ -386,7 +414,15 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 					return fmt.Errorf("runtime profile evidence requirement %q owner-fact acquisition %q is outside accepted operation kinds", item.ID, convergence.AcquisitionOperationKind)
 				}
 			}
+			seenVariants := make(map[RuntimeOperationVariantRef]struct{}, len(item.AcceptedOperationVariants))
 			for _, variant := range item.AcceptedOperationVariants {
+				if variant.Kind == "" || variant.VariantID == "" {
+					return fmt.Errorf("runtime profile evidence requirement %q requires complete operation variant identity", item.ID)
+				}
+				if _, duplicate := seenVariants[variant]; duplicate {
+					return fmt.Errorf("runtime profile evidence requirement %q duplicates operation variant identity", item.ID)
+				}
+				seenVariants[variant] = struct{}{}
 				if !runtimeProfileContainsOperationKind(item.AcceptedStepKinds, variant.Kind) {
 					return fmt.Errorf("runtime profile evidence requirement %q operation variant %q is outside accepted operation kinds", item.ID, variant.VariantID)
 				}
@@ -401,6 +437,13 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 			}
 		}
 		for leftIndex, left := range profile.EvidenceRequirements {
+			for _, right := range profile.EvidenceRequirements[leftIndex+1:] {
+				if left.ImplementationWorkPolicy != nil && right.ImplementationWorkPolicy != nil && left.Scope == right.Scope &&
+					(left.ID == "*" || right.ID == "*" || left.ID == right.ID) &&
+					!SameRuntimeImplementationWorkPolicy(left.ImplementationWorkPolicy, right.ImplementationWorkPolicy) {
+					return fmt.Errorf("runtime profile evidence requirements %q and %q declare conflicting implementation work policies", left.ID, right.ID)
+				}
+			}
 			if left.ValidationFailureRepairConvergence == nil {
 				continue
 			}
@@ -414,11 +457,16 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 				}
 			}
 		}
+		seenDependencies := make(map[string]struct{}, len(profile.CoverageDependencies))
 		for _, dependency := range profile.CoverageDependencies {
 			if dependency.ID == "" || dependency.SourceScope == "" || dependency.SourceRequirementID == "" ||
 				dependency.DependentScope == "" || dependency.DependentRequirementID == "" {
 				return fmt.Errorf("runtime coverage dependency requires identity, source and dependent bindings")
 			}
+			if _, duplicate := seenDependencies[dependency.ID]; duplicate {
+				return fmt.Errorf("runtime profile %q duplicates coverage dependency %q", profile.ID, dependency.ID)
+			}
+			seenDependencies[dependency.ID] = struct{}{}
 			if dependency.SourceScope == dependency.DependentScope && dependency.SourceRequirementID == dependency.DependentRequirementID {
 				return fmt.Errorf("runtime coverage dependency %q cannot target itself", dependency.ID)
 			}
@@ -426,10 +474,15 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 				return fmt.Errorf("runtime coverage dependency %q requires admission or invalidation semantics", dependency.ID)
 			}
 		}
+		seenRecipes := make(map[string]struct{}, len(profile.BootstrapRecipes))
 		for _, recipe := range profile.BootstrapRecipes {
 			if err := recipe.Validate(); err != nil {
 				return fmt.Errorf("runtime bootstrap recipe %q: %w", recipe.ID, err)
 			}
+			if _, duplicate := seenRecipes[recipe.ID]; duplicate {
+				return fmt.Errorf("runtime profile %q duplicates bootstrap recipe %q", profile.ID, recipe.ID)
+			}
+			seenRecipes[recipe.ID] = struct{}{}
 		}
 	}
 	if violations := RuntimeProfileProofClosureViolations(values); len(violations) > 0 {
@@ -440,28 +493,24 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 }
 
 func normalizeRuntimeBootstrapRecipes(values []RuntimeBootstrapRecipe) []RuntimeBootstrapRecipe {
-	byID := map[string]RuntimeBootstrapRecipe{}
+	ret := make([]RuntimeBootstrapRecipe, 0, len(values))
 	for _, value := range values {
-		value = value.Normalized()
-		if value.ID != "" {
-			byID[value.ID] = value
-		}
+		ret = append(ret, value.Normalized())
 	}
-	return sortedMapValues(byID)
+	sort.SliceStable(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })
+	return nilIfEmpty(ret)
 }
 
 func (r RuntimeBootstrapRecipe) Normalized() RuntimeBootstrapRecipe {
 	r.ID = strings.TrimSpace(r.ID)
 	r.RequiredGoalTerms = normalizeStrings(r.RequiredGoalTerms)
 	r.RequiredDoDTerms = normalizeStrings(r.RequiredDoDTerms)
-	byID := map[string]RuntimeBootstrapArtifact{}
+	artifacts := make([]RuntimeBootstrapArtifact, 0, len(r.Artifacts))
 	for _, artifact := range r.Artifacts {
-		artifact = artifact.Normalized()
-		if artifact.ID != "" {
-			byID[artifact.ID] = artifact
-		}
+		artifacts = append(artifacts, artifact.Normalized())
 	}
-	r.Artifacts = sortedMapValues(byID)
+	sort.SliceStable(artifacts, func(i, j int) bool { return artifacts[i].ID < artifacts[j].ID })
+	r.Artifacts = nilIfEmpty(artifacts)
 	return r
 }
 
@@ -610,28 +659,26 @@ func SameRuntimeProfileContracts(left []RuntimeProfileContract, right []RuntimeP
 }
 
 func normalizeRuntimeAcceptanceDimensions(values []RuntimeAcceptanceDimension) []RuntimeAcceptanceDimension {
-	byID := map[string]RuntimeAcceptanceDimension{}
+	ret := make([]RuntimeAcceptanceDimension, 0, len(values))
 	for _, value := range values {
 		value.ID = strings.TrimSpace(value.ID)
 		value.Description = strings.TrimSpace(value.Description)
-		if value.ID != "" {
-			byID[value.ID] = value
-		}
+		ret = append(ret, value)
 	}
-	return sortedMapValues(byID)
+	sort.SliceStable(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })
+	return nilIfEmpty(ret)
 }
 
 func normalizeRuntimeDeliverableExpectations(values []RuntimeDeliverableExpectation) []RuntimeDeliverableExpectation {
-	byID := map[string]RuntimeDeliverableExpectation{}
+	ret := make([]RuntimeDeliverableExpectation, 0, len(values))
 	for _, value := range values {
 		value.ID = strings.TrimSpace(value.ID)
 		value.EvidenceRole = strings.TrimSpace(value.EvidenceRole)
 		value.Description = strings.TrimSpace(value.Description)
-		if value.ID != "" {
-			byID[value.ID] = value
-		}
+		ret = append(ret, value)
 	}
-	return sortedMapValues(byID)
+	sort.SliceStable(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })
+	return nilIfEmpty(ret)
 }
 
 func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidenceRequirement) []RuntimeProfileEvidenceRequirement {
@@ -650,14 +697,38 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 		value.ProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(value.ProspectiveTargetAllOfConstraintRefs)
 		value.RequiredEvidenceKinds = normalizeStrings(value.RequiredEvidenceKinds)
 		value.AcceptedStepKinds = normalizeStrings(value.AcceptedStepKinds)
-		value.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(value.AcceptedOperationVariants)
+		variants := append([]RuntimeOperationVariantRef(nil), value.AcceptedOperationVariants...)
+		for i := range variants {
+			variants[i].Kind = CanonicalRuntimeBlockKind(variants[i].Kind)
+			variants[i].VariantID = strings.TrimSpace(variants[i].VariantID)
+		}
+		sort.SliceStable(variants, func(i, j int) bool {
+			if variants[i].Kind != variants[j].Kind {
+				return variants[i].Kind < variants[j].Kind
+			}
+			return variants[i].VariantID < variants[j].VariantID
+		})
+		value.AcceptedOperationVariants = nilIfEmpty(variants)
 		value.ValidationRecipeID = strings.TrimSpace(value.ValidationRecipeID)
 		value.RequiredCheckRefs = normalizeRuntimeValidationProofCheckRefs(value.RequiredCheckRefs)
 		value.MetricConstraints = normalizeStrings(value.MetricConstraints)
 		value.ArtifactRefs = normalizeStrings(value.ArtifactRefs)
-		value.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(value.RequiredOwnerFacts)
+		// Profile declarations must retain invalid/duplicate facts until admission;
+		// the general owner-fact set helper is for merging already-admitted facts.
+		facts := append([]RuntimeOwnerFactRequirement(nil), value.RequiredOwnerFacts...)
+		for i := range facts {
+			facts[i] = facts[i].Normalized()
+		}
+		sort.SliceStable(facts, func(i, j int) bool {
+			return RuntimeOwnerFactRequirementRef(facts[i]) < RuntimeOwnerFactRequirementRef(facts[j])
+		})
+		value.RequiredOwnerFacts = nilIfEmpty(facts)
 		value.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(value.OwnerFactConvergences)
 		value.ValidationFailureRepairConvergence = cloneRuntimeValidationFailureRepairConvergence(value.ValidationFailureRepairConvergence)
+		if value.ImplementationWorkPolicy != nil {
+			policy := value.ImplementationWorkPolicy.Normalized()
+			value.ImplementationWorkPolicy = &policy
+		}
 		value.CapabilityStateRequirements = normalizeRuntimeProfileCapabilityStateRequirements(value.CapabilityStateRequirements)
 		value.RejectedStepKinds = normalizeStrings(value.RejectedStepKinds)
 		value.Description = strings.TrimSpace(value.Description)
@@ -670,20 +741,28 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 }
 
 func normalizeRuntimeProfileCapabilityStateRequirements(values []RuntimeProfileCapabilityStateRequirement) []RuntimeProfileCapabilityStateRequirement {
-	byKey := map[string]RuntimeProfileCapabilityStateRequirement{}
+	ret := make([]RuntimeProfileCapabilityStateRequirement, 0, len(values))
 	for _, value := range values {
 		value.OwnerModuleID = strings.TrimSpace(value.OwnerModuleID)
 		value.CapabilityStateKind = strings.TrimSpace(value.CapabilityStateKind)
 		value.SubjectRef = strings.TrimSpace(value.SubjectRef)
-		if value.OwnerModuleID != "" && value.CapabilityStateKind != "" && value.SubjectRef != "" {
-			byKey[value.OwnerModuleID+"|"+value.CapabilityStateKind+"|"+value.SubjectRef] = value
-		}
+		ret = append(ret, value)
 	}
-	return sortedMapValues(byKey)
+	sort.SliceStable(ret, func(i, j int) bool {
+		l, r := ret[i], ret[j]
+		if l.OwnerModuleID != r.OwnerModuleID {
+			return l.OwnerModuleID < r.OwnerModuleID
+		}
+		if l.CapabilityStateKind != r.CapabilityStateKind {
+			return l.CapabilityStateKind < r.CapabilityStateKind
+		}
+		return l.SubjectRef < r.SubjectRef
+	})
+	return nilIfEmpty(ret)
 }
 
 func normalizeRuntimeCoverageDependencies(values []RuntimeCoverageDependency) []RuntimeCoverageDependency {
-	byKey := map[string]RuntimeCoverageDependency{}
+	ret := make([]RuntimeCoverageDependency, 0, len(values))
 	for _, value := range values {
 		value.ID = strings.TrimSpace(value.ID)
 		value.SourceScope = strings.TrimSpace(value.SourceScope)
@@ -691,10 +770,10 @@ func normalizeRuntimeCoverageDependencies(values []RuntimeCoverageDependency) []
 		value.DependentScope = strings.TrimSpace(value.DependentScope)
 		value.DependentRequirementID = strings.TrimSpace(value.DependentRequirementID)
 		value.TriggerEvidenceKinds = normalizeStrings(value.TriggerEvidenceKinds)
-		key := strings.Join([]string{value.ID, value.SourceScope, value.SourceRequirementID, value.DependentScope, value.DependentRequirementID}, "|")
-		byKey[key] = value
+		ret = append(ret, value)
 	}
-	return sortedMapValues(byKey)
+	sort.SliceStable(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })
+	return nilIfEmpty(ret)
 }
 
 func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfileContract) bool {
@@ -721,12 +800,15 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 	}
 	for idx := range left.EvidenceRequirements {
 		l, r := left.EvidenceRequirements[idx], right.EvidenceRequirements[idx]
+		if !SameRuntimeImplementationWorkPolicy(l.ImplementationWorkPolicy, r.ImplementationWorkPolicy) {
+			return false
+		}
 		if l.ID != r.ID || l.Scope != r.Scope || l.EvidenceRole != r.EvidenceRole || l.TargetRole != r.TargetRole || l.TargetSelectorRef != r.TargetSelectorRef || l.TargetSelectorOwnerRef != r.TargetSelectorOwnerRef || l.TargetSelectorSubjectRef != r.TargetSelectorSubjectRef ||
 			!sameStrings(l.TargetRefs, r.TargetRefs) || !sameStrings(l.TargetDiscoverySources, r.TargetDiscoverySources) || !sameStrings(l.TargetSelectorCandidateRefs, r.TargetSelectorCandidateRefs) || !SameRuntimeProspectiveTargetAllOfConstraintRefs(l.ProspectiveTargetAllOfConstraintRefs, r.ProspectiveTargetAllOfConstraintRefs) || l.RequireTargetGrounding != r.RequireTargetGrounding ||
 			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || l.RequireDirectEvidence != r.RequireDirectEvidence ||
 			l.RequireClaimEvidence != r.RequireClaimEvidence || l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence ||
 			l.RequireCoverageTargets != r.RequireCoverageTargets || l.ValidationRecipeID != r.ValidationRecipeID || l.Description != r.Description ||
-			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) || !sameStrings(l.RequiredCheckRefs, r.RequiredCheckRefs) || !sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) || !sameRuntimeOwnerFactRequirements(l.RequiredOwnerFacts, r.RequiredOwnerFacts) || !SameRuntimeOwnerFactConvergences(l.OwnerFactConvergences, r.OwnerFactConvergences) || !SameRuntimeValidationFailureRepairConvergence(l.ValidationFailureRepairConvergence, r.ValidationFailureRepairConvergence) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
+			!sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !slices.Equal(l.AcceptedOperationVariants, r.AcceptedOperationVariants) || !sameStrings(l.RequiredCheckRefs, r.RequiredCheckRefs) || !sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) || !slices.Equal(l.RequiredOwnerFacts, r.RequiredOwnerFacts) || !SameRuntimeOwnerFactConvergences(l.OwnerFactConvergences, r.OwnerFactConvergences) || !SameRuntimeValidationFailureRepairConvergence(l.ValidationFailureRepairConvergence, r.ValidationFailureRepairConvergence) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
 			return false
 		}
 		if len(l.CapabilityStateRequirements) != len(r.CapabilityStateRequirements) {

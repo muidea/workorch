@@ -8,6 +8,11 @@ Last Verified: 2026-09-10
 
 ## 规范化候选合同
 
+可选逐原 CWI durable-dispatch 上限属于 SM-3 final seal guard，而非 candidate correction 或新工作授权。
+候选通过完整 admission 后，accepted attempt 与 dispatch 在同一 CAS 中封存并占额；耗尽只走 typed budget failure，
+不得通过生成另一候选、修改 binding 或治理 ticket 绕过。精确重放不重复占额，计量与恢复合同见
+[Execution Budget](execution-budget.md#activation-sealed-execution-limits)。
+
 Runtime 不要求穷举所有模型输出组合。它要求把动态 owner 事实先编译成一份有限、可验证的
 `RuntimeCandidateContractManifest`，此后 renderer、decoder、candidate evaluator、owner candidate conformance、owner feasibility 和
 fixture 都只能消费这份封存合同，不能再次解释原始 profile、目录、错误文本或临时上下文。
@@ -16,6 +21,8 @@ failed attempt 保留 owner feasibility fact 时，Orchestrator 必须在同一�
 catalog preimage。它仅用于按 sealed manifest snapshot ref、自身内容 hash、operation owner、acquisition 与 observed
 revision 反证历史，不构成 current admissibility；pending attempt 仍必须匹配当前 owner catalog。后续 effect 或
 prerequisite refresh 不得用新 catalog 重建历史拒绝，也不得因历史 catalog 已退休而否定合法的成功修复。
+上述留存同时适用于完整候选拒绝和 SM-2/SM-4 terminal failure 关闭 pending attempt；后者不能只更改状态而遗漏
+事实前像，必须与 terminal authority 在同一 aggregate CAS 完成，不产生新的候选或 correction 额度。
 
 每个 manifest 由零到多个 `SealedOperationAuthorization` 组成。该名称表示 manifest 内的一条纯值授权记录，
 不是新的状态机或 owner；实现可在现有 manifest DTO 内表达。每条授权至少包含：
@@ -356,11 +363,24 @@ sequence；它们不直接消费 semantic proposal 或 File/Shell fact，也不�
 每次semantic-plan或operations provider call都必须使用SM-3 persisted request session形成purpose-bound invocation seal；
 seal不是另一份activation authority。对应call、correction、semantic generation和operation consumption必须引用
 [Execution Budget](execution-budget.md)中的exact sub-ledger identity。
-operations 的 rendered preflight 必须先于 exact request-session CAS；因此同一 authority transaction、stable prefix、manifest、
-correction hash 与 expected-document attempt 的 session 是 restart 已通过 preflight 的 durable proof。prepared、document-complete 或
-已绑定 pending proposal 的恢复不得重发 preflight/provider，也不得重复扣减 correction budget；任一 identity 漂移都不能复用旧
-session。document-complete 后 attempt-begin CAS 前中断与 CAS 后响应丢失必须分别恢复为“无新 attempt”或“原 pending attempt”，
+semantic-plan 与 operations 的 rendered preflight 必须先于 exact request-session CAS；因此同一 authority transaction、stable prefix、manifest、
+correction hash 与 expected-document attempt 的 session 是 restart 已通过 preflight 的 durable proof。prepared、recovery-pending、document-complete 或
+已绑定 pending proposal 的恢复不得重发 preflight，也不得重复扣减 correction budget；任一 identity 漂移都不能复用旧
+session。prepared 只可继续首次 physical submission；recovery-pending 只按原预算授权新 physical identity；已提交但无持久化结果只能
+封存 unknown，complete 只继续 local admission。document-complete 后 attempt-begin CAS 前中断与 CAS 后响应丢失必须分别恢复为“无新 attempt”或“原 pending attempt”，
 两者都只继续 local admission/feasibility/seal，不能产生第二次 capability effect。
+
+semantic coverage-order、proof-batch 和 attempt-1 correction 的 private transition 只封存 manifest/batch/correction 与 logical
+request 意图；渲染预检统一在后继 request path 执行，通过后才 ensure session。新请求的 causal context、correction/content 或
+rendered preflight 拒绝使用既有 SM-2 `semantic_contract_failed`，不能伪造 physical settlement 或留下 prepared session。
+session CAS 前中断可重新做无副作用预检；CAS 后响应丢失必须复用同一 session。已有请求的 unknown/terminal 仍遵守同 CAS
+的 SM-3/SM-2/预算结算合同，不为此增加 machine、owner、兼容字段或重试额度。
+
+semantic session writer 在自己的 private event 内 fresh-load，并反查当前 request-open/correction 意图与完整
+ExpectedDocument；仅在 required、order-accepted 或 proof-batch-document-accepted 不得新建请求。rendering 与 writer
+共享 owner-local 纯投影，不能分别选择 batch、CWI membership、coverage-order、修正轮次或 output/recovery budget。
+新建和复用都必须匹配当前 ledger logical identity，不能通过覆盖传入 ExpectedDocument 的身份字段或重算 hash 接受
+旧预检结果。拒绝发生在 session append/CAS、physical allocation 和 provider call 之前。
 
 operations document 被接受时，SM-3 必须先从 exact manifest + candidate 前像独立生成并持久化
 `AdmissionTargetAuthorizations + TargetAuthorizationHash`；若选择 `validation/managed_session`，同时生成并持久化

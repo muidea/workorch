@@ -989,7 +989,7 @@ func runtimeTestSealPendingStateChangeFocus(t *testing.T, controller *RuntimeCon
 func stateChangeAggregateWithPreparation(t *testing.T, prepare func(*RuntimeAggregate)) RuntimeAggregate {
 	t.Helper()
 	facts := baseDispatchFacts()
-	aggregate := RuntimeAggregate{StateRevision: 1, Definition: dispatchDefinition(), Facts: facts}
+	aggregate := RuntimeAggregate{ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent, StateRevision: 1, Definition: dispatchDefinition(), Facts: facts}
 	if prepare != nil {
 		prepare(&aggregate)
 	}
@@ -1234,9 +1234,10 @@ func validationAggregatePrepared(t *testing.T, prepare func(*RuntimeAggregate), 
 		validationFacts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
 	}
 	initial := RuntimeAggregate{
-		StateRevision: 1,
-		Definition:    dispatchDefinition(),
-		Facts:         validationFacts,
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		StateRevision:         1,
+		Definition:            dispatchDefinition(),
+		Facts:                 validationFacts,
 	}
 	if prepare != nil {
 		prepare(&initial)

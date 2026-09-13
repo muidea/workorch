@@ -53,7 +53,8 @@ func runtimeTestOperationAdmissibilityPresent(values []runtimecontract.RuntimeOp
 
 func TestRuntimeSemanticCatalogScopeGapRespectsTypedTargetPolicy(t *testing.T) {
 	base := RuntimeAggregate{
-		SemanticPlanning: runtimecontract.RuntimeSemanticPlanningLedger{Phase: runtimecontract.RuntimeSemanticPlanningRequired},
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		SemanticPlanning:      runtimecontract.RuntimeSemanticPlanningLedger{Phase: runtimecontract.RuntimeSemanticPlanningRequired},
 		Facts: runtimecontract.RuntimeFacts{Focus: runtimecontract.CoverageFocus{
 			ID: "semantic-pending/cwi", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi"},
 			TargetRefs: []string{"main.go"}, AcceptedStepKinds: []string{runtimecontract.StepKindGitWrite},

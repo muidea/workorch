@@ -131,3 +131,10 @@ func (*moduleLifecycleRecordingBackground) Timer(context.Context, magictask.Task
 }
 
 func (*moduleLifecycleRecordingBackground) Shutdown(context.Context) bool { return true }
+
+func (b *moduleLifecycleRecordingBackground) AsyncTaskContext(ctx context.Context, value magictask.Task) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return b.AsyncTask(value)
+}

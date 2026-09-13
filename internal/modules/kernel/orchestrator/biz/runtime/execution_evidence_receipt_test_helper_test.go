@@ -2333,7 +2333,11 @@ func runtimeTestSealCurrentPolicies(facts *runtimecontract.RuntimeFacts) {
 		recovery.MaxPrerequisiteRefreshes = facts.RecoveryPolicy.MaxPrerequisiteRefreshes
 	}
 	facts.RecoveryPolicy = recovery
-	facts.ExecutionBudgetPolicy = runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(convergence, recovery)
+	policy, err := runtimecontract.RuntimeExecutionBudgetPolicyWithLimits(convergence, recovery, facts.Activation.ExecutionContract.ExecutionLimits)
+	if err != nil {
+		panic(fmt.Sprintf("invalid test execution limits: %v", err))
+	}
+	facts.ExecutionBudgetPolicy = policy
 }
 
 func runtimeTestBindCandidateToFacts(t *testing.T, facts runtimecontract.RuntimeFacts, candidate runtimecontract.RuntimeCandidate) runtimecontract.RuntimeCandidate {

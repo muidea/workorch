@@ -3,6 +3,7 @@ package soul
 import (
 	"context"
 	"errors"
+	frameworkdef "github.com/muidea/magicCommon/def"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -369,14 +370,14 @@ type soulLifecycleHub struct {
 	unsubscriptions map[string]int
 }
 
-func (h *soulLifecycleHub) Subscribe(topic string, observer magicevent.Observer) {
+func (h *soulLifecycleHub) Subscribe(topic string, observer magicevent.Observer) *frameworkdef.Error {
 	h.subscriptions[topic]++
-	h.Hub.Subscribe(topic, observer)
+	return h.Hub.Subscribe(topic, observer)
 }
 
-func (h *soulLifecycleHub) Unsubscribe(topic string, observer magicevent.Observer) {
+func (h *soulLifecycleHub) Unsubscribe(topic string, observer magicevent.Observer) *frameworkdef.Error {
 	h.unsubscriptions[topic]++
-	h.Hub.Unsubscribe(topic, observer)
+	return h.Hub.Unsubscribe(topic, observer)
 }
 
 func soulLifecycleTopics() []string {

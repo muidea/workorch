@@ -67,6 +67,13 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 		return nil, err
 	}
 	capabilityContract = append(capabilityContract, profileCapabilityKinds...)
+	workRequirements, err := runtimecontract.CompileRuntimeImplementationWorkCapabilityRequirements(definitionFocuses, activation.ExecutionContract.ProfileContracts)
+	if err != nil {
+		return nil, err
+	}
+	for _, requirement := range workRequirements {
+		capabilityContract = append(capabilityContract, requirement.RequiredCapabilities...)
+	}
 	definition.CapabilityContract = capabilityContract
 	definition.ChangeImpact = changeImpact
 	definitionSeed, err := runtimecontract.CompileRuntimeDefinitionSeed(definition, activation, compiled.CoverageItems, compiled.Slices)
@@ -108,6 +115,7 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 		return nil, err
 	}
 	requirements = append(requirements, focusRequirements...)
+	requirements = append(requirements, workRequirements...)
 	admissibilityRequirements, err := runtimeOperationAdmissibilityRequirements(capabilityContract)
 	if err != nil {
 		return nil, err
@@ -140,7 +148,10 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	// owner resource-change refreshes and stale/no-progress recovery have
 	// separate typed allowances; Resume only reads this sealed policy.
 	recoveryPolicy := runtimecontract.DefaultRuntimeRecoveryPolicy()
-	executionBudgetPolicy := runtimecontract.RuntimeExecutionBudgetPolicyForRuntimePolicies(convergencePolicy, recoveryPolicy)
+	executionBudgetPolicy, err := runtimecontract.RuntimeExecutionBudgetPolicyWithLimits(convergencePolicy, recoveryPolicy, activation.ExecutionContract.ExecutionLimits)
+	if err != nil {
+		return nil, err
+	}
 	bootstrap := runtimecontract.RuntimeBootstrap{
 		Activation:             activation,
 		Definition:             definition,

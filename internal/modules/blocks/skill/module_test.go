@@ -3,6 +3,7 @@ package skill
 import (
 	"context"
 	"errors"
+	frameworkdef "github.com/muidea/magicCommon/def"
 	"testing"
 
 	skillbiz "github.com/muidea/workorch/internal/modules/blocks/skill/biz"
@@ -189,14 +190,14 @@ type skillLifecycleHub struct {
 	unsubscriptions map[string]int
 }
 
-func (h *skillLifecycleHub) Subscribe(topic string, observer magicevent.Observer) {
+func (h *skillLifecycleHub) Subscribe(topic string, observer magicevent.Observer) *frameworkdef.Error {
 	h.subscriptions[topic]++
-	h.Hub.Subscribe(topic, observer)
+	return h.Hub.Subscribe(topic, observer)
 }
 
-func (h *skillLifecycleHub) Unsubscribe(topic string, observer magicevent.Observer) {
+func (h *skillLifecycleHub) Unsubscribe(topic string, observer magicevent.Observer) *frameworkdef.Error {
 	h.unsubscriptions[topic]++
-	h.Hub.Unsubscribe(topic, observer)
+	return h.Hub.Unsubscribe(topic, observer)
 }
 
 func skillLifecycleTopics() []string {

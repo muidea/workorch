@@ -123,7 +123,7 @@ func runtimeTestSemanticPreimageStateChangeAggregate(t *testing.T) RuntimeAggreg
 	t.Helper()
 	facts := baseDispatchFacts()
 	facts.Focus.RequiredEvidenceKinds = []string{runtimecontract.EvidenceKindStateChange}
-	aggregate := RuntimeAggregate{StateRevision: 1, Definition: dispatchDefinition(), Facts: facts}
+	aggregate := RuntimeAggregate{ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent, StateRevision: 1, Definition: dispatchDefinition(), Facts: facts}
 	runtimeTestEnsureCurrentFocusBindings(t, &aggregate)
 	return aggregate
 }

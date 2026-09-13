@@ -17,6 +17,7 @@ type RuntimeExecutionContract struct {
 	OperationContractRevision string
 	StateChangePolicy         RuntimeStateChangePolicy
 	MaxRepairAttemptsPerFocus int
+	ExecutionLimits           *RuntimeExecutionLimits `json:",omitempty"`
 	// CandidateDocumentRecovery bounds complete-document provider retries for
 	// this Run. Resume cannot change the activation-sealed budget.
 	CandidateDocumentRecovery RuntimeCandidateDocumentRecoveryPolicy
@@ -45,6 +46,10 @@ func (c RuntimeExecutionContract) Normalized() RuntimeExecutionContract {
 	c.OperationContractRevision = strings.TrimSpace(c.OperationContractRevision)
 	c.StateChangePolicy = RuntimeStateChangePolicy(strings.TrimSpace(string(c.StateChangePolicy)))
 	c.CandidateDocumentRecovery = c.CandidateDocumentRecovery.Normalized()
+	if c.ExecutionLimits != nil {
+		limits := *c.ExecutionLimits
+		c.ExecutionLimits = &limits
+	}
 	c.CapabilityUsagePolicies = normalizeRuntimeCapabilityUsagePolicies(c.CapabilityUsagePolicies)
 	c.ValidationPolicies = NormalizeRuntimeValidationPolicies(c.ValidationPolicies)
 	c.ProfileContracts = NormalizeRuntimeProfileContracts(c.ProfileContracts)
@@ -77,10 +82,18 @@ func (c RuntimeExecutionContract) Validate() error {
 	if err := c.CandidateDocumentRecovery.Validate(); err != nil {
 		return err
 	}
+	if c.ExecutionLimits != nil {
+		if err := c.ExecutionLimits.Validate(); err != nil {
+			return err
+		}
+	}
 	if err := ValidateRuntimeValidationPolicies(c.ValidationPolicies); err != nil {
 		return err
 	}
 	if err := ValidateRuntimeProfileContracts(c.ProfileContracts); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeImplementationWorkAvailability(c.ProfileContracts); err != nil {
 		return err
 	}
 	if c.AcceptanceSlicePolicy != nil {
@@ -101,6 +114,7 @@ func SameRuntimeExecutionContract(left RuntimeExecutionContract, right RuntimeEx
 	right = right.Normalized()
 	if left.OperationContractRevision != right.OperationContractRevision || left.StateChangePolicy != right.StateChangePolicy || left.MaxRepairAttemptsPerFocus != right.MaxRepairAttemptsPerFocus ||
 		left.CandidateDocumentRecovery != right.CandidateDocumentRecovery ||
+		!SameRuntimeExecutionLimits(left.ExecutionLimits, right.ExecutionLimits) ||
 		len(left.CapabilityUsagePolicies) != len(right.CapabilityUsagePolicies) ||
 		!sameRuntimeValidationPolicies(left.ValidationPolicies, right.ValidationPolicies) ||
 		!SameRuntimeProfileContracts(left.ProfileContracts, right.ProfileContracts) || !SameRuntimeTemplateStagePolicy(left.TemplateStagePolicy, right.TemplateStagePolicy) ||

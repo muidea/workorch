@@ -62,6 +62,14 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
 
 ### Bootstrap and projection
 
+- 可选 `ImplementationWorkPolicy` 只从匹配 Profile 声明实例化到 exact CWI 的不可变 Definition，wildcard/exact
+  必须一致；不修改原 CWI/check/最终 validation proof，不把工作 operation/selector 写入 mutable focus。
+  合并后的非 validation-only CWI 拒绝，Runtime 独立反证 Profile source。当前协议仍被执行支持门禁拒绝；
+  编译成功不是可执行工作授权。`runtime_implementation_work_test.go` 覆盖精确匹配、冲突、隔离、身份与门禁。
+  已匹配 CWI 的工作 operation kinds 同时编入 Definition capability contract、对应 owner 的 state-change
+  inventory prerequisite 和 operation-admissibility prerequisite；不从未匹配策略或最终验证权限推导。
+  Runtime 独立校验该投影的完整性；能力清单不是 CWI 工作 binding，也不扩大最终 proof。
+
 - builtin-defaults query 只汇总 Soul/Workspace 的 detached concrete result；单资源 upgrade 只向对应 owner 发出带
   expected/target content hash 的 typed command。Application 不维护升级状态、不得用 query 结果代替 owner 写入时校验，
   也不隐式刷新 Workspace binding/admission 或重启 Run。
@@ -75,8 +83,24 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
   必须阻塞 pre-seal。
 - Application 可以定义 profile 到 typed focus/proof declaration 的映射，但不得把 profile-specific action 逻辑下沉到
   kernel reducer。required source 缺 exact executable proof 时必须在 pre-seal admission 阻塞。
+- Profile 集合在 Template/Workspace merge 前检查可无损转换的对象/数组形态；同一输入层的空/重复成员必须保留给 typed
+  owner admission，不能用后写覆盖隐藏 required 义务。只有两层各自唯一的同 identity 项可按显式配置覆盖规则合并；
+  该配置规则不是语义一致性证明。final bootstrap 独立验证同一完整 Profile，不能依赖前一 adapter 已检查。
+- Profile 的原始配置还必须符合当前对象层级的封闭字段与精确值类型；未知/错层字段、布尔字符串、混合/空白成员列表、
+  非整数或越界数值均在两侧 merge 前返回输入错误。final activation 独立检查；不把非法配置转为默认值，也不伪造
+  Workspace admission 或 Runtime 状态。既有 repair lossless decoder 保留其 owner 裁决路径。六个内置模板、两侧
+  覆盖、直接 activation 和正常 payload 重载由 `activationports/runtime_profile_input_test.go` 验证；SM-1～SM-4 不变。
+  `activationports/runtime_profile_decoder_contract_test.go` 在测试中逐对象核对实际 decoder 的字段与转换类型，防止
+  校验器和 decoder 单边漂移；该 AST 索引不是生产 registry 或运行期权威重建。
 - projection 只保存 bounded immutable public DTO。canonical Workspace/Run state、active Run 与 exact blocker ref 原样投影；
   display summary、consistency diagnostic、recovery hint 与 metrics 都不能生成 mutation intent。
+- `contextHints.executionLimits` 的 `runtime-execution-limits/v1` 收紧 Run 级 provider call 与 capability operation 上限，
+  并可选 `maxProofBatchesPerCWI`（1～17）；该字段只封存进 typed activation，由 Orchestrator 原 semantic ledger 消费，
+  不编译为物理调用 dimension，也不是一般工作迭代授权。省略不附加逻辑上限，显式零/错类型/超界拒绝。
+  两侧原始配置先独立检查，再按 Template 优先合并；effective typed identity 进入 Workspace admission policy binding，
+  final bootstrap 反查该封存。`activationcore` 将声明编译到既有预算 policy，不增加计数 owner、调用入口或执行权限。
+  `activationports/runtime_execution_limits_test.go` 与 `activationcore/runtime_execution_limits_test.go` 覆盖无损输入、
+  合并、完整准入身份、当前协议重载与 policy 重封存漂移；未知协议、缺字段和扩大默认硬上限拒绝。
 - blocking input-review 详情从 Orchestrator 的 sealed original diagnostic 深拷贝到 audit/outcome DTO；Web 的只读展开项
   保留全部 check/obligation、输入身份与原因，不受摘要标签的条数截断。脱敏文本及原报告 hash 原样显示，不能据此
   生成 approval/retry/验收权限，也不能把 review 当作实际 validation 或有效进展。

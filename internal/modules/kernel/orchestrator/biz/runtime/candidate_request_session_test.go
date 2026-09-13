@@ -257,6 +257,7 @@ func TestRuntimeCandidateNoDocumentRestartKeepsRecoveryOutsideCandidateAttempts(
 
 func TestSemanticRequestMayReplaceOnlyBindingFreeProvisionalTerminal(t *testing.T) {
 	aggregate := RuntimeAggregate{
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
 		Facts: runtimecontract.RuntimeFacts{
 			Focus: runtimecontract.CoverageFocus{ID: "semantic-pending/cwi-2", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-2"}},
 			Coverage: []runtimecontract.RuntimeCoverageItemFact{{
@@ -270,7 +271,7 @@ func TestSemanticRequestMayReplaceOnlyBindingFreeProvisionalTerminal(t *testing.
 				Code: "target_grounding_unresolved", Summary: "binding-free focus has no target yet",
 			},
 		},
-		SemanticPlanning: runtimecontract.RuntimeSemanticPlanningLedger{Phase: runtimecontract.RuntimeSemanticPlanningRequired},
+		SemanticPlanning: runtimecontract.RuntimeSemanticPlanningLedger{Phase: runtimecontract.RuntimeSemanticPlanningRequestOpen},
 	}
 	if SemanticOperationAuthorityReady(aggregate) {
 		t.Fatal("binding-free provisional terminal unexpectedly has semantic operation authority")

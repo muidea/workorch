@@ -39,6 +39,9 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 	writeHashString(h, string(execution.StateChangePolicy))
 	writeHashString(h, fmt.Sprintf("%d", execution.MaxRepairAttemptsPerFocus))
 	writeHashString(h, fmt.Sprintf("%d", execution.CandidateDocumentRecovery.MaxAttempts))
+	if execution.ExecutionLimits != nil {
+		writeHashString(h, StableRuntimeExecutionLimitsHash(*execution.ExecutionLimits))
+	}
 	writeHashString(h, fmt.Sprintf("%d", len(execution.CapabilityUsagePolicies)))
 	for _, policy := range execution.CapabilityUsagePolicies {
 		writeHashString(h, policy.ID)
@@ -103,21 +106,34 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 			writeHashString(h, fmt.Sprintf("%t", requirement.RequireExecutableBehaviorEvidence))
 			writeHashString(h, fmt.Sprintf("%t", requirement.RequireCoverageTargets))
 			writeHashStrings(h, requirement.AcceptedStepKinds)
+			writeHashString(h, fmt.Sprintf("%d", len(requirement.AcceptedOperationVariants)))
 			for _, variant := range requirement.AcceptedOperationVariants {
 				writeHashString(h, variant.Kind)
 				writeHashString(h, variant.VariantID)
+			}
+			writeHashString(h, requirement.ValidationRecipeID)
+			writeHashStrings(h, requirement.RequiredCheckRefs)
+			writeHashStrings(h, requirement.MetricConstraints)
+			writeHashStrings(h, requirement.ArtifactRefs)
+			writeHashString(h, fmt.Sprintf("%d", len(requirement.CapabilityStateRequirements)))
+			for _, state := range requirement.CapabilityStateRequirements {
+				writeHashString(h, state.OwnerModuleID)
+				writeHashString(h, state.CapabilityStateKind)
+				writeHashString(h, state.SubjectRef)
 			}
 			writeHashString(h, fmt.Sprintf("%d", len(requirement.RequiredOwnerFacts)))
 			for _, ownerFact := range requirement.RequiredOwnerFacts {
 				writeHashString(h, ownerFact.OwnerModuleID)
 				writeHashString(h, string(ownerFact.FactKind))
 				writeHashString(h, ownerFact.OperationKind)
+				writeHashString(h, ownerFact.ValidationProofRequirementHash)
 			}
 			writeHashString(h, fmt.Sprintf("%d", len(requirement.OwnerFactConvergences)))
 			for _, convergence := range requirement.OwnerFactConvergences {
 				writeHashString(h, convergence.Requirement.OwnerModuleID)
 				writeHashString(h, string(convergence.Requirement.FactKind))
 				writeHashString(h, convergence.Requirement.OperationKind)
+				writeHashString(h, convergence.Requirement.ValidationProofRequirementHash)
 				writeHashString(h, fmt.Sprintf("%t", convergence.RequirePreexisting))
 				writeHashString(h, convergence.ProspectiveSatisfactionContractRef)
 				writeHashString(h, convergence.MissingTrigger)
@@ -139,6 +155,10 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 			} else {
 				writeHashString(h, "validation-failure-repair:present")
 				writeHashString(h, StableRuntimeValidationFailureRepairConvergenceHash(*requirement.ValidationFailureRepairConvergence))
+			}
+			if requirement.ImplementationWorkPolicy != nil {
+				writeHashString(h, "implementation-work-policy")
+				writeHashString(h, StableRuntimeImplementationWorkPolicyHash(*requirement.ImplementationWorkPolicy))
 			}
 			writeHashStrings(h, requirement.RejectedStepKinds)
 			writeHashString(h, requirement.Description)

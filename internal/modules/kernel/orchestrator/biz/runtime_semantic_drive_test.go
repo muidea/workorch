@@ -210,7 +210,7 @@ func TestRuntimeSemanticOrderAcceptedRetirementHandsRequiredPhaseBackToOuterDriv
 	}
 }
 
-func TestRuntimeSemanticOrderAcceptedValidationRepairIgnoresUnrelatedEligibleClosureOnRedrive(t *testing.T) {
+func TestRuntimeSemanticOrderAcceptedValidationRepairKeepsScopeAndRejectsMissingReceiptOnRedrive(t *testing.T) {
 	ctx := context.Background()
 	convergence := runtimecontract.RuntimeValidationFailureRepairConvergence{
 		ID: "incident-validation-repair",
@@ -468,28 +468,30 @@ func TestRuntimeSemanticOrderAcceptedValidationRepairIgnoresUnrelatedEligibleClo
 	if err != nil {
 		t.Fatalf("request repair proof batch with decision=%+v: %v", batched.Decision, err)
 	}
-	if requested.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted || len(requested.SemanticPlanning.History) != 0 ||
+	// This synthetic order fixture intentionally has no rejected owner receipt.
+	// Scope projection remains valid, but it cannot authorize a provider request.
+	if requested.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed || len(requested.SemanticPlanning.History) != 0 ||
 		len(requested.SemanticPlanning.Batches) != 1 || requested.SemanticPlanning.ActiveBatchID != batchID ||
-		requested.SemanticPlanning.Batches[0].RequestLogicalID != requestID || len(requested.CandidateRequestSessions) != 1 ||
-		requested.CandidateRequestSessions[0].LogicalRequestID != requestID || requested.CandidateRequestSessions[0].State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete ||
-		providerCalls != 1 || countingRepository.saves <= 1 {
-		t.Fatalf("repair proof-batch request was not completed exactly once: ledger=%+v sessions=%d provider=%d saves=%d", requested.SemanticPlanning, len(requested.CandidateRequestSessions), providerCalls, countingRepository.saves)
+		requested.SemanticPlanning.Batches[0].RequestLogicalID != requestID || len(requested.CandidateRequestSessions) != 0 ||
+		providerCalls != 0 || countingRepository.saves != 2 || requested.Facts.Failure == nil ||
+		!strings.Contains(requested.Facts.Failure.Message, "repair trigger lineage") {
+		t.Fatalf("repair without receipt was not rejected before provider session: ledger=%+v sessions=%d provider=%d saves=%d failure=%+v", requested.SemanticPlanning, len(requested.CandidateRequestSessions), providerCalls, countingRepository.saves, requested.Facts.Failure)
 	}
 	revision := requested.StateRevision
 	saves := countingRepository.saves
 
 	// A worker replay carrying the pre-CAS OrderAccepted aggregate must reload
-	// owner state. It observes the already compiled batch and returns without a
+	// owner state. It observes the recorded contract failure and returns without a
 	// second projection, batch, request session, provider call, or CAS.
 	for replay := 0; replay < 2; replay++ {
 		replayed, replayErr := module.driveRuntimeSemanticPlanning(ctx, aggregate)
 		if replayErr != nil {
 			t.Fatalf("repair order replay %d: %v", replay, replayErr)
 		}
-		if replayed.StateRevision != revision || replayed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted ||
+		if replayed.StateRevision != revision || replayed.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningFailed ||
 			len(replayed.SemanticPlanning.History) != 0 || len(replayed.SemanticPlanning.Batches) != 1 ||
 			replayed.SemanticPlanning.ActiveBatchID != batchID || replayed.SemanticPlanning.Batches[0].RequestLogicalID != requestID ||
-			len(replayed.CandidateRequestSessions) != 1 || providerCalls != 1 || countingRepository.saves != saves {
+			len(replayed.CandidateRequestSessions) != 0 || providerCalls != 0 || countingRepository.saves != saves {
 			t.Fatalf("repair order replay %d created duplicate work: ledger=%+v sessions=%d provider=%d saves=%d", replay, replayed.SemanticPlanning, len(replayed.CandidateRequestSessions), providerCalls, countingRepository.saves)
 		}
 	}
@@ -501,7 +503,7 @@ func TestRuntimeSemanticCorrectionExpectedDocumentKeepsPlanStepAndBatch(t *testi
 	aggregate.SemanticPlanning.Manifest = &manifest
 	aggregate.SemanticPlanning.Attempt = 1
 
-	coverageExpected, err := runtimeSemanticExpectedDocumentForLedger(aggregate, aggregate.SemanticPlanning)
+	coverageExpected, err := runtime.SemanticExpectedDocument(aggregate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,7 +516,7 @@ func TestRuntimeSemanticCorrectionExpectedDocumentKeepsPlanStepAndBatch(t *testi
 	}
 	aggregate.SemanticPlanning.ActiveBatchID = batch.BatchID
 	aggregate.SemanticPlanning.Batches = []runtimecontract.RuntimeSemanticPlanBatch{batch}
-	batchExpected, err := runtimeSemanticExpectedDocumentForLedger(aggregate, aggregate.SemanticPlanning)
+	batchExpected, err := runtime.SemanticExpectedDocument(aggregate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -739,8 +741,8 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 	if err != nil {
 		t.Fatal(err)
 	}
-	if started.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequestOpen || started.SemanticPlanning.LogicalRequestID == "" || len(started.CandidateRequestSessions) != 1 || requestCount != 0 {
-		t.Fatalf("semantic request was not persisted before provider I/O: %+v", started.SemanticPlanning)
+	if started.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningRequestOpen || started.SemanticPlanning.LogicalRequestID == "" || len(started.CandidateRequestSessions) != 0 || requestCount != 0 {
+		t.Fatalf("semantic intent was not sealed independently of preflight/session creation: %+v", started.SemanticPlanning)
 	}
 	evaluated, err := module.driveRuntimeSemanticPlanning(ctx, started)
 	if err != nil {
@@ -760,7 +762,7 @@ func TestRuntimeSemanticDriveUsesPersistedRequestSessionAndExcludesRetiredGenera
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proofObserved.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningCorrectionRequired || proofObserved.SemanticPlanning.Attempt != 1 || len(proofObserved.SemanticPlanning.Rejections) != 1 || len(proofObserved.CandidateRequestSessions) != 3 || requestCount != 2 {
+	if proofObserved.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningCorrectionRequired || proofObserved.SemanticPlanning.Attempt != 1 || len(proofObserved.SemanticPlanning.Rejections) != 1 || len(proofObserved.CandidateRequestSessions) != 2 || requestCount != 2 {
 		t.Fatalf("contradictory proof did not open one bounded correction: ledger=%+v sessions=%+v requests=%d", proofObserved.SemanticPlanning, proofObserved.CandidateRequestSessions, requestCount)
 	}
 	corrected, err := module.driveRuntimeSemanticPlanning(ctx, proofObserved)
@@ -960,6 +962,14 @@ func TestRuntimeSemanticDriveNoDocumentUsesBoundedRequestRecovery(t *testing.T) 
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if command.DocumentKind != runtimecontract.RuntimeProviderDocumentSemanticPlan {
 			t.Errorf("semantic empty-document request kind = %q", command.DocumentKind)
+		}
+		budget := command.SemanticContext.ExecutionBudget
+		if err := budget.Validate(command.SemanticContext, command.SemanticManifest); err != nil {
+			t.Fatalf("recovery request lost its budget snapshot: %v", err)
+		}
+		physical := budget.PhysicalDimensions[0]
+		if physical.Confirmed+physical.Reserved+physical.Unknown != int64(providerCalls-1) || physical.Remaining != physical.Limit-int64(providerCalls-1) || budget.VisibleProofBatches[0].Used != 0 {
+			t.Fatal("document recovery refunded physical use or invented a proof batch")
 		}
 		if command.SemanticCorrectionObservation != nil || command.SemanticCorrectionDirective != nil {
 			t.Errorf("no-document recovery crossed into semantic correction: observation=%+v directive=%+v", command.SemanticCorrectionObservation, command.SemanticCorrectionDirective)
@@ -1355,6 +1365,11 @@ func TestRuntimeSemanticDriveFailsOnlyAfterPersistedCatalogRefreshBudgetIsExhaus
 		t.Fatal(err)
 	}
 	facts.RecoveryPolicy.MaxPrerequisiteRefreshes = 1
+	facts.Resources.ProviderCeiling = &runtimecontract.ProviderCeiling{
+		Selection: facts.Activation.ProviderSelection, ContextWindowTokens: 8192,
+		ProviderMaxOutputTokens: 4096, EffectiveMaxOutputTokens: 4096,
+		MaxInputTokens: 4096, MaxBytes: 65536, CapabilityRevision: "cap-1", ConfigurationRevision: "config-1",
+	}
 	facts.Recovery.PrerequisiteRefreshes = 1
 	catalog := runtimecontract.RuntimeOperationAdmissibility{
 		PrerequisiteID: "semantic-file", OwnerModuleID: runtimecontract.RuntimeModuleFile,
@@ -1412,20 +1427,22 @@ func TestRuntimeSemanticDriveFailsOnlyAfterPersistedCatalogRefreshBudgetIsExhaus
 		t.Fatal(err)
 	}
 	stablePrefixHash := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
-	expected := runtimeSemanticExpectedDocument(aggregate, runtimecontract.RuntimeSemanticPlanStepCoverageOrder, nil, 0)
-	expected.MaxOutputTokens = 4096
-	expected.MaxRecoveryAttempts = 1
-	aggregate, session, err := runtimeTestControllerEnsureCandidateRequestWithExpected(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, stablePrefixHash, manifest.Hash, "", expected)
-	if err != nil {
-		t.Fatal(err)
-	}
+	logicalID := runtimeSemanticLogicalRequestID(aggregate, stablePrefixHash, manifest.Hash, "")
 	result, err := controller.ApplyInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventSemanticPlanRequestStarted, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: stablePrefixHash, LogicalRequestID: session.LogicalRequestID},
+		Kind: runtime.RuntimeInternalEventSemanticPlanRequestStarted, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: stablePrefixHash, LogicalRequestID: logicalID},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	aggregate = result.Aggregate
+	expected, err := runtime.SemanticExpectedDocument(aggregate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate, session, err := runtimeTestControllerEnsureCandidateRequestWithExpected(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, stablePrefixHash, manifest.Hash, "", expected)
+	if err != nil {
+		t.Fatal(err)
+	}
 	physicalCallID := runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, 1)
 	aggregate, err = runtimeTestControllerMarkCandidateRequestSubmitted(controller, ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, session.LogicalRequestID, 1, physicalCallID)
 	if err != nil {

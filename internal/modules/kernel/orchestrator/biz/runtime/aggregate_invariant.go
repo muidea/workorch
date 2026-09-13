@@ -15,8 +15,8 @@ import (
 // validators are ordered to preserve the historical fail-fast sequence while
 // making each state-machine responsibility reviewable in isolation.
 func (a RuntimeAggregate) Validate() error {
-	if a.ResultFeedbackVersion > runtimecontract.RuntimeResultFeedbackVersionCurrent {
-		return fmt.Errorf("unsupported runtime result feedback version %d", a.ResultFeedbackVersion)
+	if err := runtimecontract.ValidateRuntimeResultFeedbackVersion(a.ResultFeedbackVersion); err != nil {
+		return err
 	}
 	var active *runtimecontract.RuntimeDispatchRecord
 	if a.ActiveDispatch != nil {
@@ -168,6 +168,9 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
 	}
 	if err := a.SemanticPlanning.Validate(); err != nil {
 		return fmt.Errorf("runtime aggregate semantic planning ledger: %w", err)
+	}
+	if err := runtimecontract.ValidateRuntimeSemanticProofBatchLimits(a.SemanticPlanning, a.Facts.Activation.ExecutionContract.ExecutionLimits); err != nil {
+		return err
 	}
 	if err := validateRuntimeAggregateSemanticValidationProofRequirements(a); err != nil {
 		return err
@@ -496,6 +499,9 @@ func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate) error {
 		return err
 	}
 	if err := runtimecontract.ValidateRuntimeAcceptedCandidateManifestLineage(active, completed, a.CandidateAttempts, a.CandidateRequestSessions); err != nil {
+		return err
+	}
+	if err := runtimecontract.ValidateRuntimeDurableDispatchLimits(a.Facts.Activation.ExecutionContract.ExecutionLimits, active, completed, a.CandidateAttempts); err != nil {
 		return err
 	}
 	return runtimecontract.ValidateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedger(a.SemanticPlanning, active, completed, a.CandidateAttempts, a.CandidateRequestSessions)

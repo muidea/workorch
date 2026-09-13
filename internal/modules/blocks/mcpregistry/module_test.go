@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	frameworkdef "github.com/muidea/magicCommon/def"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -395,14 +396,14 @@ type mcpRegistryLifecycleHub struct {
 	unsubscriptions map[string]int
 }
 
-func (h *mcpRegistryLifecycleHub) Subscribe(topic string, observer magicevent.Observer) {
+func (h *mcpRegistryLifecycleHub) Subscribe(topic string, observer magicevent.Observer) *frameworkdef.Error {
 	h.subscriptions[topic]++
-	h.Hub.Subscribe(topic, observer)
+	return h.Hub.Subscribe(topic, observer)
 }
 
-func (h *mcpRegistryLifecycleHub) Unsubscribe(topic string, observer magicevent.Observer) {
+func (h *mcpRegistryLifecycleHub) Unsubscribe(topic string, observer magicevent.Observer) *frameworkdef.Error {
 	h.unsubscriptions[topic]++
-	h.Hub.Unsubscribe(topic, observer)
+	return h.Hub.Unsubscribe(topic, observer)
 }
 
 func mcpRegistryLifecycleTopics() []string {

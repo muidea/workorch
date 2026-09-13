@@ -955,6 +955,7 @@ func cloneRuntimeDefinitionContextRaw(in RuntimeDefinitionContext) RuntimeDefini
 
 func cloneRuntimeDefinitionFocusRaw(in RuntimeDefinitionFocus) RuntimeDefinitionFocus {
 	out := in
+	out.ImplementationWorkPolicy = cloneRuntimeImplementationWorkPolicy(in.ImplementationWorkPolicy)
 	out.CoverageWorkItemIDs = cloneRuntimeStateRawSlice(in.CoverageWorkItemIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
 	out.RequiredEvidenceKinds = cloneRuntimeStateRawSlice(in.RequiredEvidenceKinds, func(item string) string { return item })
 	out.AcceptedStepKinds = cloneRuntimeStateRawSlice(in.AcceptedStepKinds, func(item string) string { return item })
@@ -1117,6 +1118,7 @@ func cloneRuntimeExecutionBudgetPolicyRaw(in RuntimeExecutionBudgetPolicy) Runti
 
 func cloneRuntimeExecutionContractRaw(in RuntimeExecutionContract) RuntimeExecutionContract {
 	out := in
+	out.ExecutionLimits = cloneRuntimeStateRawPointer(in.ExecutionLimits, func(item RuntimeExecutionLimits) RuntimeExecutionLimits { return item })
 	out.CandidateDocumentRecovery = cloneRuntimeCandidateDocumentRecoveryPolicyRaw(in.CandidateDocumentRecovery)
 	out.CapabilityUsagePolicies = cloneRuntimeStateRawSlice(in.CapabilityUsagePolicies, func(item RuntimeCapabilityUsagePolicy) RuntimeCapabilityUsagePolicy {
 		return cloneRuntimeCapabilityUsagePolicyRaw(item)
@@ -1525,6 +1527,7 @@ func cloneRuntimeProfileContractRaw(in RuntimeProfileContract) RuntimeProfileCon
 
 func cloneRuntimeProfileEvidenceRequirementRaw(in RuntimeProfileEvidenceRequirement) RuntimeProfileEvidenceRequirement {
 	out := in
+	out.ImplementationWorkPolicy = cloneRuntimeImplementationWorkPolicy(in.ImplementationWorkPolicy)
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
 	out.TargetDiscoverySources = cloneRuntimeStateRawSlice(in.TargetDiscoverySources, func(item string) string { return item })
 	out.TargetSelectorCandidateRefs = cloneRuntimeStateRawSlice(in.TargetSelectorCandidateRefs, func(item string) string { return item })

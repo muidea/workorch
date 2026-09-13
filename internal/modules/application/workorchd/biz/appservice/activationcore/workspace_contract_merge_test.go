@@ -1,10 +1,37 @@
 package activationcore
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func TestProfileMergePreservesInvalidSourceIdentitiesForAdmission(t *testing.T) {
+	for _, key := range []string{"acceptanceDimensions", "deliverableExpectations", "evidenceRequirements", "coverageDependencies", "bootstrapRecipes"} {
+		for _, duplicateLayer := range []string{"template", "workspace"} {
+			t.Run(key+"/"+duplicateLayer, func(t *testing.T) {
+				item := map[string]any{"id": "entry", "scope": "dodItem", "required": true}
+				template, workspace := map[string]any{key: []map[string]any{item}}, map[string]any{key: []map[string]any{item}}
+				invalid := []map[string]any{item, {"id": "entry", "scope": "dodItem", "required": false}, {"id": " "}}
+				if duplicateLayer == "template" {
+					template[key] = invalid
+				} else {
+					workspace[key] = invalid
+				}
+				beforeTemplate, beforeWorkspace := cloneContextMapDeep(template), cloneContextMapDeep(workspace)
+				merged := contextMapSliceValue(MergeTemplateWorkspaceProfileContract(template, workspace)[key])
+				if len(merged) != 4 {
+					t.Fatalf("invalid source declarations collapsed: %#v", merged)
+				}
+				merged[0]["id"] = "changed"
+				if !reflect.DeepEqual(template, beforeTemplate) || !reflect.DeepEqual(workspace, beforeWorkspace) {
+					t.Fatal("merge aliased or modified caller policy")
+				}
+			})
+		}
+	}
+}
 
 func TestMergeTemplateWorkspaceProfileContractPreservesWildcardAndAddsExactSemanticProof(t *testing.T) {
 	template := map[string]any{

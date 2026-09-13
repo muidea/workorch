@@ -39,6 +39,9 @@ Last Verified: 2026-08-30
   normalization、补字段或 rehash。新输入严格使用当前 compiler，历史身份损坏与未解决 clarification 不能被自动更新绕过。
   Resume/recovery 不进入此 authoring 事务，SM-1～SM-4 仍消费原 Run seal。
 - Definition 仅支持完整 `all_of`；unsupported alternative 必须保留阻塞 clarification，不得降级或补默认语义。
+- Profile 声明必须无损保留全部成员直至 owner admission；空/重复 identity、缺失 owner/state/variant 不能被 normalization
+  清除。Workspace 只通过既有 private admission event 拒绝并保存 invalid candidate，不创建 startup/eligible admission。
+  recipe/check/metric/artifact/owner-fact proof identity/capability-state 全部进入 Profile seal；同版本重复、重启和内容漂移遵守相同 hash/CAS fence。
 - Workspace 的 active-run slot 只消费 Run owner fact 和 Orchestrator sealed terminal delivery；普通 Run 通知不能释放 slot。
 - `RunProjectionCursor` 是 Workspace owner-private delivery fence：每个更高 Run/Runtime revision 都必须持久化，但只有
   `WorkspaceChangedData` 的公开字段实际变化时才发布 `WorkspaceStateChanged`。cursor-only CAS 不得伪装成公开 Workspace
@@ -63,6 +66,7 @@ Last Verified: 2026-08-30
 | Template explicit upgrade | [`biz/builtin_defaults_test.go`](biz/builtin_defaults_test.go) | memory/file、seed 不覆盖旧版本、错误 source/Post、未知/定制/stale/changed-target 拒绝、写后响应丢失与 fresh-handle replay、并发普通编辑保护 |
 | automatic configuration / archive isolation | [`biz/current_configuration_admission_test.go`](biz/current_configuration_admission_test.go)、[`biz/defaults_test.go`](biz/defaults_test.go)、[`pkg/models/template_test.go`](pkg/models/template_test.go) | file reopen、旧 schema 原样保存、当前配置准入与幂等、无效配置阻塞、并发 fence、Soul fresh read、历史 Run 零改写、未定制内置 Template 自动更新 |
 | Definition normal/unsupported/duplicate/stale/provenance | `biz/definition_admission_test.go::TestDefinitionAdmissionIntentAutomaticallyPromotesEligibleCandidate`、`biz/definition_admission_test.go::TestDefinitionAdmissionIntentKeepsUnsupportedAlternativePreseal`、`biz/definition_admission_test.go::TestDefinitionAdmissionRejectsSelfConsistentUnpersistedDecisionTicketWithoutPromotion`、`biz/definition_admission_test.go::TestDefinitionAdmissionRejectsStaleLineageCAS` | 已覆盖 |
+| lossless Profile identity / current-schema restart | `biz/definition_profile_identity_test.go::TestDefinitionProfileIdentityRejectionSurvivesOwnerRestart`、`workorchruntimecontract/runtime_profile_identity_test.go` | required→optional 重复声明不能消失；file-backed candidate 保留两项、fresh owner 重复零写、零 startup/activation、同 hash 篡改拒绝；无 Run/provider/capability 依赖 |
 | privileged source matrix 与零 mutation | `biz/privileged_source_test.go::TestWorkspacePrivilegedIngressRejectsForgedSourcesWithoutOwnerMutation`、`biz/privileged_source_test.go::TestWorkspaceTemplateDefaultsIngressAcceptsOnlySystemOwner` | 已覆盖 |
 | execution normal/duplicate/stale/restart | `biz/execution_intent_test.go::TestWorkspaceExecutionIntentDuplicateReplayUsesActiveRunAndRejectsResultDrift`、`biz/execution_intent_test.go::TestWorkspaceExecutionInternalEventRejectsStaleStartupWithoutMutation`、`biz/execution_intent_test.go::TestWorkspaceRestartMaterializesDefaultSelectionByPrivateEventBeforeRunOwner` | 已覆盖 |
 | Run projection lost/duplicate/stale/restart/public notification | `biz/run_projection_reconciliation_test.go::TestWorkspaceRunProjectionFreshOwnerRecoversWithoutHistoricalNotification`、`biz/run_projection_reconciliation_test.go::TestWorkspaceRunProjectionRevisionFenceRejectsStaleAndConflictingFacts`、`biz/lifecycle_reducer_test.go::TestReduceRunProjectionFactDuplicateIsNoop`、`biz/run_projection_notification_test.go` | 已覆盖 cursor 持久化、真实公开字段变化通知与 cursor-only 零通知 |

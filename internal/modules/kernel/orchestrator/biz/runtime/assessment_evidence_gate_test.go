@@ -221,6 +221,7 @@ func assessmentGateFixture(t *testing.T, claim, passedCheck string) (RuntimeAggr
 		}
 	}
 	aggregate := RuntimeAggregate{
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
 		Facts: runtimecontract.RuntimeFacts{
 			DefinitionRevision: "definition-claim",
 			Focus: runtimecontract.CoverageFocus{

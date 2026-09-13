@@ -64,6 +64,7 @@ type compiledEvidencePolicy struct {
 	RequiredOwnerFacts                   []runtimecontract.RuntimeOwnerFactRequirement
 	OwnerFactConvergences                []runtimecontract.RuntimeOwnerFactConvergence
 	ValidationFailureRepairConvergence   *runtimecontract.RuntimeValidationFailureRepairConvergence
+	ImplementationWorkPolicy             *runtimecontract.RuntimeImplementationWorkPolicy
 	ValidationRecipeID                   string
 	RequiredCheckRefs                    []string
 	MetricConstraints                    []string
@@ -327,6 +328,9 @@ func finalizeRuntimeCoverage(compiled compiledCoverage, allUnits []workUnit, pro
 		return compiledCoverage{}, fmt.Errorf("runtime coverage focus compiler produced %d focuses, exceeding sealed policy limit %d; configure bounded acceptance slices", len(compiled.Focuses), maxFocuses)
 	}
 	compiled.CoverageItems = coverageItems
+	if err := runtimecontract.ValidateRuntimeDefinitionImplementationWorkPolicies(compiled.DefinitionFocuses, profiles); err != nil {
+		return compiledCoverage{}, err
+	}
 	return compiled, nil
 }
 
@@ -368,6 +372,10 @@ func newCompiledRuntimeDefinitionFocus(focus runtimecontract.CoverageFocus, poli
 	if policy.ValidationFailureRepairConvergence != nil {
 		value := policy.ValidationFailureRepairConvergence.Clone()
 		definition.ValidationFailureRepairConvergence = &value
+	}
+	if policy.ImplementationWorkPolicy != nil {
+		value := policy.ImplementationWorkPolicy.Clone()
+		definition.ImplementationWorkPolicy = &value
 	}
 	return definition.Normalized(), nil
 }
@@ -777,6 +785,10 @@ func wildcardQualityRequirements(values []runtimecontract.RuntimeProfileEvidence
 			clone := value.ValidationFailureRepairConvergence.Clone()
 			ret[len(ret)-1].ValidationFailureRepairConvergence = &clone
 		}
+		if value.ImplementationWorkPolicy != nil {
+			clone := value.ImplementationWorkPolicy.Clone()
+			ret[len(ret)-1].ImplementationWorkPolicy = &clone
+		}
 	}
 	return ret
 }
@@ -846,6 +858,15 @@ func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []run
 			if base.ValidationFailureRepairConvergence == nil {
 				clone := requirement.ValidationFailureRepairConvergence.Clone()
 				base.ValidationFailureRepairConvergence = &clone
+			}
+		}
+		if requirement.ImplementationWorkPolicy != nil {
+			if base.ImplementationWorkPolicy != nil && !runtimecontract.SameRuntimeImplementationWorkPolicy(base.ImplementationWorkPolicy, requirement.ImplementationWorkPolicy) {
+				return compiledEvidencePolicy{}, fmt.Errorf("coverage evidence policy has conflicting implementation work declarations")
+			}
+			if base.ImplementationWorkPolicy == nil {
+				clone := requirement.ImplementationWorkPolicy.Clone()
+				base.ImplementationWorkPolicy = &clone
 			}
 		}
 		// Profile explicit primary_state_change implies state-change evidence.

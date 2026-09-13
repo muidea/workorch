@@ -61,6 +61,9 @@ func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemo
 	if err := runtimecontract.ValidateRuntimeProfileContracts(candidate.RuntimeProfileContracts); err != nil {
 		return clarification(candidate, workspacemodel.DefinitionAdmissionProfileContractInvalid, runtimeProfileRefs(candidate.RuntimeProfileContracts), "runtime_profile_contract_invalid"), nil
 	}
+	if err := runtimecontract.ValidateRuntimeImplementationWorkAvailability(candidate.RuntimeProfileContracts); err != nil {
+		return clarification(candidate, workspacemodel.DefinitionAdmissionProfileContractInvalid, runtimeProfileRefs(candidate.RuntimeProfileContracts), "implementation_work_protocol_unavailable"), nil
+	}
 	result := workspacemodel.DefinitionAdmissionResult{
 		WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision,
 		CandidateHash: candidate.CandidateHash, Disposition: workspacemodel.DefinitionAdmissionAdmittedAllOf,

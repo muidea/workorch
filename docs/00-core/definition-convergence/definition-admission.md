@@ -102,6 +102,36 @@ DefinitionAdmissionCandidate
 - `RuntimeProfileContracts` 是 admission compiler 的完整 typed 输入，不是仅供展示的副本。其规范化 hash 必须与
   `RuntimeProfileContractsHash` 精确一致；Workspace pure compiler 必须从该 snapshot 独立派生 owner-fact/convergence
   manifest，并逐项匹配 candidate 中的 bindings，Application 不能只提交一个 hash 或自算 manifest 取代 owner 校验；
+- Profile、acceptance dimension、deliverable、bootstrap recipe/artifact、coverage dependency、required owner fact、operation
+  variant 与 capability-state declaration 的归一化只规范字段并稳定排序，不能丢弃空 identity、折叠重复项或采用 last-write-wins。
+  重复 Profile/成员 identity、缺失 identity 和不完整 owner/state/variant 必须在 typed admission 拒绝；同一层的重复项不能
+  因 Template/Workspace merge 被另一个配置层覆盖。合并前不能无损转为 typed declaration 的非对象集合成员直接返回输入错误，
+  不伪造 owner admission；已有 lossless repair decoder 保持由 Workspace 分类其 invalid declaration。
+- Profile 配置采用与当前 decoder 一致的封闭字段合同，字段必须位于其实际所属对象。未知字段、拼写错误、错误层级、
+  `null`/错误类型不得被丢弃、默认为 false 或转为空列表；布尔值必须是布尔，字符串列表不得含非字符串或空白成员，
+  数值额度必须是可无损转为当前整数类型的有限整数。两侧源配置在 merge 前分别检查，final activation 再独立检查。
+  无法无损解码的源返回输入错误，不能伪造 Workspace admission、启动 Run 或靠 LLM 修正。新工作/草稿/预算字段只有
+  实现当前 typed producer/consumer 与相应合同后才可接入，配置中的未知声明不表示能力已启用；原有完整 typed
+  Profile 的身份、proof closure 与语义裁决仍由 Workspace owner 执行。
+- `implementationWorkPolicy` 是独立的 Profile 声明，不借用 `owner_fact_acquisition` 或
+  `validation_failure_repair` 的权限。当前 `runtime-implementation-work/v1` 声明限定一个 workspace-effect receipt
+  owner、1～8 项带 target 合同的 operation/variant、完整 declaration selector、最多 8 个候选/合取约束引用、
+  1～8 个逐原 CWI 工作轮次和每轮 1～8 个 target；开放 prospective scope 必须有候选或全员必需约束。
+  `requireFreshObservation`、`requireFreshValidation`、`protectValidationInputs` 均必须为 true，原 requirement
+  仍保持 validation-only terminal evidence。声明没有 owner observation、exact selected target、工作计数或 dispatch authority；
+  其中 selector 是 Profile 声明身份，不是 capability operation selector。
+  完整 typed policy 进入 Profile hash，raw clone/当前 JSON 重载保留全部值，重复、空白和未知字段不能被吞掉。
+  Application 的纯编译将匹配 source scope/id 的 policy 深拷贝到 exact CWI 的不可变 Definition；wildcard 与 exact
+  同时声明时必须一致，不能按优先级覆盖或取并集扩权。最终合并后的 CWI 仍须 validation-only；策略不得进入
+  mutable focus cursor 或替换原 check/terminal proof。Runtime 在 bootstrap、facts 重载和 semantic manifest 编译边界
+  独立核对 Definition 与封存 Profile，拒绝注入、遗漏、跨 source 或边界漂移；不在读取时回填。
+  **当前执行支持门禁拒绝所有非空 implementationWorkPolicy**：Workspace 沿既有
+  `definition_profile_contract_invalid` 返回 `implementation_work_protocol_unavailable`，不形成 startup/activation；
+  Runtime execution contract 同样拒绝，不能绕过 Workspace 直接启动。缺省不产生新策略，也不修改默认模板。
+  此项区分声明有效与协议可执行，不代表一般实现循环、轮次消费或工作 binding 已存在。
+- Profile 封存 hash 完整包含 validation recipe、required checks、metrics、artifact refs、owner-fact/convergence 的 proof identity、capability-state owner/kind/subject
+  及 operation variants 的基数；这些约束任一变更必须改变 candidate/startup 的 Profile 身份与相应请求前缀。当前协议不提供
+  缺字段的旧 Profile hash 回退或数据迁移；同版本重复提交、fresh-owner reload、已封存输入不可修改的要求仍然有效。
 - Profile 中每个 `required=true` 的 acceptance dimension/deliverable expectation 都会形成 required exact CWI，因此必须
   显式声明非空 `requiredEvidenceKinds`，且每种 evidence kind 至少有一个 accepted operation 能返回对应 typed owner
   receipt proof。唯一 activation compiler 为该 admitted CWI 生成 canonical exact evidence declaration；`dodItem:*`、

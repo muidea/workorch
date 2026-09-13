@@ -5598,12 +5598,13 @@ func runtimeAggregate(t *testing.T, revision uint64) runtime.RuntimeAggregate {
 		t.Fatal(err)
 	}
 	aggregate := runtime.RuntimeAggregate{
-		StateRevision:    revision,
-		Definition:       bootstrap.Definition,
-		Facts:            initialized,
-		SemanticPlanning: semanticPlanning,
-		ExecutionBudget:  executionBudget,
-		Decision:         decision,
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		StateRevision:         revision,
+		Definition:            bootstrap.Definition,
+		Facts:                 initialized,
+		SemanticPlanning:      semanticPlanning,
+		ExecutionBudget:       executionBudget,
+		Decision:              decision,
 	}
 	if err := aggregate.Validate(); err != nil {
 		t.Fatal(err)

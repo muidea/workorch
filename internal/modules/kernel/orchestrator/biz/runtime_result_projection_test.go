@@ -1166,11 +1166,7 @@ func TestDeliverRuntimeTerminalRejectsRecoverablePrerequisiteRefresh(t *testing.
 }
 
 func TestDeliverRuntimeTerminalRestartsAfterResultPersistenceBeforeOwnerProjection(t *testing.T) {
-	for _, version := range []uint32{0, 1, 2, runtimecontract.RuntimeResultFeedbackVersionCurrent} {
-		t.Run(fmt.Sprintf("feedback_version_%d", version), func(t *testing.T) {
-			testTerminalResultPersistenceRestart(t, version)
-		})
-	}
+	testTerminalResultPersistenceRestart(t, runtimecontract.RuntimeResultFeedbackVersionCurrent)
 }
 
 func testTerminalResultPersistenceRestart(t *testing.T, feedbackVersion uint32) {
@@ -1229,8 +1225,7 @@ func testTerminalResultPersistenceRestart(t *testing.T, feedbackVersion uint32) 
 	if err != nil || beforeResult.State != common.ResultStateRejected {
 		t.Fatalf("persisted Result=%+v err=%v", beforeResult, err)
 	}
-	if (beforeResult.RuntimeCloseout.OriginalDiagnostic != nil) != (feedbackVersion != 0) ||
-		(beforeResult.SummaryDetail.VerificationSummary != "") != (feedbackVersion != 0) {
+	if beforeResult.RuntimeCloseout.OriginalDiagnostic == nil || beforeResult.SummaryDetail.VerificationSummary == "" {
 		t.Fatal("Result material did not follow its Run's sealed feedback version")
 	}
 	if run, err := runs.Get(ctx, "run-v2"); err != nil || run.State != common.RunStateActive {
@@ -1495,14 +1490,15 @@ func TestDeliverRuntimePrerequisiteRefreshExhaustedRestartsAfterTerminalPersiste
 
 func TestRuntimeResultProjectionBuildsAcceptedDoDAssessment(t *testing.T) {
 	aggregate := runtime.RuntimeAggregate{
-		Definition: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-1", DoDID: "dod-1"},
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		Definition:            runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-1", DoDID: "dod-1"},
 		Facts: runtimecontract.RuntimeFacts{
 			Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 			WorkspaceID:        "ws-1",
 			RunID:              "run-1",
 			DefinitionRevision: "definition-1",
 			Focus:              runtimecontract.CoverageFocus{ID: "focus-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}},
-			Coverage:           []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"event-1"}}},
+			Coverage:           []runtimecontract.RuntimeCoverageItemFact{{ID: "cwi-1", SourceScope: "dodItem", TargetText: "行为已验证", State: runtimecontract.RuntimeCoverageItemStateSatisfied, EvidenceRefs: []string{"event-1"}}},
 			Assessments: []runtimecontract.RuntimeAssessmentFact{{
 				ID: "assessment-1", FocusID: "focus-1", Scope: "dodItem", RequirementID: "dod-001", RequirementText: "行为已验证",
 				CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"},
@@ -1535,7 +1531,8 @@ func TestRuntimeResultProjectionBuildsAcceptedDoDAssessment(t *testing.T) {
 
 func TestRuntimeResultProjectionBuildsStructuredRejectedCloseout(t *testing.T) {
 	aggregate := runtime.RuntimeAggregate{
-		Definition: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		Definition:            runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},
 		Facts: runtimecontract.RuntimeFacts{
 			Activation:         runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 			WorkspaceID:        "ws-1",
@@ -1602,7 +1599,8 @@ func TestRuntimeResultProjectionBuildsStructuredRejectedCloseout(t *testing.T) {
 
 func TestRuntimeResultProjectionExcludesSettledClaimedGapFromTerminalFailure(t *testing.T) {
 	aggregate := runtime.RuntimeAggregate{
-		Definition: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		Definition:            runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},
 		Facts: runtimecontract.RuntimeFacts{
 			Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1",
@@ -1653,7 +1651,8 @@ func containsRuntimeResultString(values []string, wanted string) bool {
 
 func TestRuntimeResultProjectionPackagesLedgerEvidenceBeforeAssessment(t *testing.T) {
 	aggregate := runtime.RuntimeAggregate{
-		Definition: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},
+		ResultFeedbackVersion: runtimecontract.RuntimeResultFeedbackVersionCurrent,
+		Definition:            runtimecontract.RuntimeDefinitionContext{StartupInputHash: "startup-input-test", GoalID: "goal-1", DoDID: "dod-1", Revision: "definition-1"},
 		Facts: runtimecontract.RuntimeFacts{
 			Activation:  runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}}},
 			WorkspaceID: "ws-1", RunID: "run-1", DefinitionRevision: "definition-1", EvidenceRevision: "runtime-evidence-00000000000000000002",
