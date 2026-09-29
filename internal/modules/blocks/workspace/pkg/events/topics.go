@@ -41,4 +41,8 @@ const (
 	TopicWorkspaceCommandExecutionIntent    = "/workspace/command/execution-intent"
 	TopicWorkspaceFactTerminalDelivery      = "/workspace/fact/terminal-delivery"
 	TopicWorkspaceDefinitionAdmissionIntent = "/workspace/definition-admission/intent"
+	TopicWorkspaceSpecificationBegin        = "/workspace/definition-specification/begin"
+	TopicWorkspaceSpecificationReserve      = "/workspace/definition-specification/reserve"
+	TopicWorkspaceSpecificationComplete     = "/workspace/definition-specification/complete"
+	TopicWorkspaceSpecificationQuery        = "/workspace/definition-specification/query"
 )

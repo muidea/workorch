@@ -233,6 +233,9 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 	if err := ValidateRuntimeDefinitionImplementationWorkPolicies(definitionFocuses, execution.ProfileContracts); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
+	if err := ValidateRuntimeDefinitionVerificationPolicies(definitionFocuses, execution.ProfileContracts); err != nil {
+		return RuntimeSemanticPlanManifest{}, err
+	}
 	seed = seed.Clone()
 	definitionFocuses = NormalizeRuntimeDefinitionFocuses(definitionFocuses)
 	if err := execution.Validate(); err != nil {

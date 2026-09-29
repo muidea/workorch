@@ -1931,6 +1931,10 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 			cloned.DefinitionAdmissionCandidates[idx] = item.DefinitionAdmissionCandidates[idx].Clone()
 		}
 	}
+	if item.DefinitionSpecificationLedger != nil {
+		ledger := item.DefinitionSpecificationLedger.Clone()
+		cloned.DefinitionSpecificationLedger = &ledger
+	}
 	if item.StartupInput != nil {
 		value := item.StartupInput.Clone()
 		cloned.StartupInput = &value

@@ -228,6 +228,7 @@ func persistDefinitionAdmissionCandidate(current *workspacemodel.Workspace, comm
 	lineageID := ""
 	seenRevisions := map[uint64]struct{}{}
 	duplicateCandidate := false
+	latestHasSpecification := false
 	for _, existing := range current.DefinitionAdmissionCandidates {
 		if !command.CurrentTemplate {
 			existing = existing.Normalized()
@@ -258,6 +259,7 @@ func persistDefinitionAdmissionCandidate(current *workspacemodel.Workspace, comm
 		}
 		if existing.CandidateRevision > currentRevision {
 			currentRevision = existing.CandidateRevision
+			latestHasSpecification = existing.Specification != nil
 		}
 	}
 	if currentRevision != uint64(len(seenRevisions)) {
@@ -268,6 +270,12 @@ func persistDefinitionAdmissionCandidate(current *workspacemodel.Workspace, comm
 	}
 	if duplicateCandidate {
 		return *current, workspaceevents.DefinitionAdmissionCandidateDuplicate, false, nil
+	}
+	// The latest immutable authoring attempt cannot lose a submitted
+	// specification by bypassing the Application adapter. Archived legacy
+	// candidates remain readable; only a new successor is subject to this gate.
+	if latestHasSpecification && candidate.Specification == nil {
+		return workspacemodel.Workspace{}, "", false, common.ErrConflict
 	}
 	if command.ExpectedCandidateRevision != currentRevision || candidate.CandidateRevision != currentRevision+1 {
 		return workspacemodel.Workspace{}, "", false, common.ErrConflict
@@ -389,15 +397,18 @@ func (m *Biz) submitDefinitionAdmissionInternalEvent(ctx context.Context, event 
 	if err != nil {
 		return definitionAdmissionTransition{}, err
 	}
+	// Provenance validation also reads the resolved Template when an active
+	// compilation epoch exists. Keep that read and the admission CAS under the
+	// same owner mutation fence, even on a legacy CurrentTemplate=false intent.
+	// The caller already holds definitionMu, so the lock order remains
+	// definitionMu -> templateMutationMu across every admission path.
+	m.templateMutationMu.Lock()
+	defer m.templateMutationMu.Unlock()
 	if event.Intent.CurrentTemplate {
-		// Template CRUD and this read/CAS share one owner lock. A template edit
-		// cannot drift between observation and the Workspace admission commit.
-		m.templateMutationMu.Lock()
-		defer m.templateMutationMu.Unlock()
 		if m.templates == nil {
 			return definitionAdmissionTransition{}, common.ErrInvalidArgument
 		}
-		event.Template, err = m.templates.Get(ctx, event.Intent.Candidate.WorkspaceTemplateSnapshot.TemplateRef)
+		event.Template, err = m.resolvedTemplate(ctx, event.Intent.Candidate.WorkspaceTemplateSnapshot.TemplateRef)
 		if err != nil {
 			return definitionAdmissionTransition{}, err
 		}
@@ -409,6 +420,9 @@ func (m *Biz) submitDefinitionAdmissionInternalEvent(ctx context.Context, event 
 	for attempt := 0; attempt < 4; attempt++ {
 		current, err := m.workspaces.Get(bound, event.WorkspaceID)
 		if err != nil {
+			return definitionAdmissionTransition{}, err
+		}
+		if err := m.validateCompilationAdmission(bound, current, *event.Intent); err != nil {
 			return definitionAdmissionTransition{}, err
 		}
 		transition, err := reduceDefinitionAdmissionInternalEvent(current, event)

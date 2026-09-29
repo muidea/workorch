@@ -305,6 +305,20 @@ func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCo
 		}
 	}
 	attachManagedValidationResources(&output, request, pid, startedAt, time.Now().UTC(), processResourceStatus)
+	if managedValidation && output.ValidationObservation != nil && output.Status == "completed" && output.ExitCode == 0 &&
+		!output.ZeroWork && !output.OutputTruncated && output.EvidenceQuality == string(common.EvidenceQualityValid) &&
+		output.ValidationObservation.RecipeID == request.ValidationRecipeID && len(output.ValidationObservation.PassedChecks) != 0 &&
+		len(output.ValidationObservation.ExecutedChecks) != 0 && len(output.ValidationObservation.FailedChecks) == 0 &&
+		len(output.ValidationObservation.SkippedChecks) == 0 && len(output.ValidationObservation.IncompleteChecks) == 0 {
+		observation := output.ValidationObservation
+		switch {
+		case shellRequiresWorkspaceBehavior(request) && shellStringIncluded(output.EvidenceTags, "workspace_behavior_observed"):
+			observation.ProofClass = runtimemodel.RuntimeValidationProofBehavioral
+		case observation.ObservationProtocolRef == shellGoTestObservationProtocolRef &&
+			filepath.Base(strings.TrimSpace(command)) == "go" && len(args) != 0 && args[0] == "test" && shellGoTestJSONEnabled(args[1:]):
+			observation.ProofClass = runtimemodel.RuntimeValidationProofExecuted
+		}
+	}
 	return finalizeShellResult(output, nil)
 }
 

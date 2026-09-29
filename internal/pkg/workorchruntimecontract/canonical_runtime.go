@@ -68,6 +68,7 @@ type CoverageFocus struct {
 	RequireExecutableBehaviorEvidence bool
 	RequireCoverageTargets            bool
 	RequireAssessment                 bool
+	VerificationPolicy                *RuntimeVerificationPolicy `json:",omitempty"`
 	// RequiredOwnerFacts are profile-declared postconditions evaluated only
 	// from current capability-owner catalogs when SM-2 commits assessment.
 	// They do not grant an operation or let another component mutate owner state.
@@ -197,6 +198,14 @@ func (a RuntimeEvidenceContentAddress) Validate() error {
 
 func (a RuntimeEvidenceContentAddress) Clone() RuntimeEvidenceContentAddress { return a.Normalized() }
 
+type RuntimeValidationProofClass string
+
+const (
+	RuntimeValidationProofStatic     RuntimeValidationProofClass = "static"
+	RuntimeValidationProofExecuted   RuntimeValidationProofClass = "executed"
+	RuntimeValidationProofBehavioral RuntimeValidationProofClass = "behavioral"
+)
+
 // RuntimeValidationObservation is an owner-reported, domain-neutral summary of
 // validation work. Capability owners may derive it from tool-specific output,
 // while Orchestrator only consumes the typed quality and check identities.
@@ -205,6 +214,11 @@ type RuntimeValidationObservation struct {
 	// audit/evidence data only; the Orchestrator continues to decide action and
 	// terminal state from canonical receipt facts.
 	RecipeID string
+	// ProofClass is an optional capability-owner attestation of the native
+	// observation's modality. It does not itself grant a grade: SM-2 verifies
+	// the exact receipt, sealed recipe, passed checks and execution scope.
+	// Empty preserves existing receipt/evidence identities.
+	ProofClass RuntimeValidationProofClass `json:",omitempty"`
 	// ObservationProtocolRef identifies the owner-native parser/protocol that
 	// produced Executed/Passed/Failed/Skipped checks. Raw process output has no
 	// protocol identity and cannot attest a Definition check.
@@ -227,6 +241,7 @@ type RuntimeValidationObservation struct {
 
 func (o RuntimeValidationObservation) Normalized() RuntimeValidationObservation {
 	o.RecipeID = strings.TrimSpace(o.RecipeID)
+	o.ProofClass = RuntimeValidationProofClass(strings.TrimSpace(string(o.ProofClass)))
 	o.ObservationProtocolRef = strings.TrimSpace(o.ObservationProtocolRef)
 	o.ExecutedChecks = normalizeStrings(o.ExecutedChecks)
 	o.PassedChecks = normalizeStrings(o.PassedChecks)
@@ -1801,6 +1816,13 @@ func (f RuntimeFacts) Validate() error {
 	if err := ValidateRuntimeOperationAdmissibilities(raw.Resources.OperationAdmissibilities); err != nil {
 		return fmt.Errorf("runtime operation admissibility: %w", err)
 	}
+	for _, fact := range append(append([]EvidenceFact(nil), raw.Evidence.Accepted...), raw.Evidence.Rejected...) {
+		if fact.Validation != nil {
+			if err := fact.Validation.ValidateFailureDetails(); err != nil {
+				return fmt.Errorf("runtime evidence validation observation %q: %w", fact.ID, err)
+			}
+		}
+	}
 	f = f.Normalized()
 	if f.WorkspaceID == "" || f.RunID == "" {
 		return fmt.Errorf("runtime facts require workspace and run scope")
@@ -1829,6 +1851,9 @@ func (f RuntimeFacts) Validate() error {
 			}
 			if err := ValidateRuntimeDefinitionImplementationWorkPolicies(f.DefinitionFocuses, f.Activation.ExecutionContract.ProfileContracts); err != nil {
 				return fmt.Errorf("runtime facts definition work policies: %w", err)
+			}
+			if err := ValidateRuntimeDefinitionVerificationPolicies(f.DefinitionFocuses, f.Activation.ExecutionContract.ProfileContracts); err != nil {
+				return fmt.Errorf("runtime facts definition verification policies: %w", err)
 			}
 		}
 	}
@@ -2106,6 +2131,10 @@ func (f CoverageFocus) Normalized() CoverageFocus {
 	f.AssessmentText = strings.TrimSpace(f.AssessmentText)
 	f.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(f.CoverageWorkItemIDs)
 	f.CoverageEvidenceBindings = NormalizeCoverageEvidenceBindings(f.CoverageEvidenceBindings)
+	if f.VerificationPolicy != nil {
+		value := f.VerificationPolicy.Normalized()
+		f.VerificationPolicy = &value
+	}
 	f.EvidenceDeclarationRef = strings.TrimSpace(f.EvidenceDeclarationRef)
 	f.RequiredEvidenceKinds = normalizeStrings(f.RequiredEvidenceKinds)
 	f.TargetRefs = normalizeStrings(f.TargetRefs)
@@ -2708,6 +2737,10 @@ func StableRuntimeAuthorityFocusHash(focus CoverageFocus) string {
 	for _, binding := range focus.CoverageEvidenceBindings {
 		writeHashString(h, binding.ID)
 		writeHashString(h, binding.Hash)
+	}
+	if focus.VerificationPolicy != nil {
+		writeHashString(h, "verification-policy")
+		writeHashString(h, StableRuntimeVerificationPolicyHash(*focus.VerificationPolicy))
 	}
 	return "focus-" + hex.EncodeToString(h.Sum(nil))[:20]
 }

@@ -65,6 +65,7 @@ type compiledEvidencePolicy struct {
 	OwnerFactConvergences                []runtimecontract.RuntimeOwnerFactConvergence
 	ValidationFailureRepairConvergence   *runtimecontract.RuntimeValidationFailureRepairConvergence
 	ImplementationWorkPolicy             *runtimecontract.RuntimeImplementationWorkPolicy
+	VerificationPolicy                   *runtimecontract.RuntimeVerificationPolicy
 	ValidationRecipeID                   string
 	RequiredCheckRefs                    []string
 	MetricConstraints                    []string
@@ -331,6 +332,9 @@ func finalizeRuntimeCoverage(compiled compiledCoverage, allUnits []workUnit, pro
 	if err := runtimecontract.ValidateRuntimeDefinitionImplementationWorkPolicies(compiled.DefinitionFocuses, profiles); err != nil {
 		return compiledCoverage{}, err
 	}
+	if err := runtimecontract.ValidateRuntimeDefinitionVerificationPolicies(compiled.DefinitionFocuses, profiles); err != nil {
+		return compiledCoverage{}, err
+	}
 	return compiled, nil
 }
 
@@ -376,6 +380,9 @@ func newCompiledRuntimeDefinitionFocus(focus runtimecontract.CoverageFocus, poli
 	if policy.ImplementationWorkPolicy != nil {
 		value := policy.ImplementationWorkPolicy.Clone()
 		definition.ImplementationWorkPolicy = &value
+	}
+	if policy.VerificationPolicy != nil {
+		definition.VerificationPolicy = policy.VerificationPolicy
 	}
 	return definition.Normalized(), nil
 }
@@ -708,6 +715,7 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 				RequiredCheckRefs:                    append([]string(nil), requirement.RequiredCheckRefs...),
 				MetricConstraints:                    append([]string(nil), requirement.MetricConstraints...),
 				ArtifactRefs:                         append([]string(nil), requirement.ArtifactRefs...),
+				VerificationPolicy:                   requirement.VerificationPolicy,
 				Description:                          requirement.Description,
 			}
 			if err := validateProfileAcceptedKinds(mapped); err != nil {
@@ -777,6 +785,7 @@ func wildcardQualityRequirements(values []runtimecontract.RuntimeProfileEvidence
 			RejectedStepKinds:                    append([]string(nil), value.RejectedStepKinds...),
 			MetricConstraints:                    append([]string(nil), value.MetricConstraints...),
 			ArtifactRefs:                         append([]string(nil), value.ArtifactRefs...),
+			VerificationPolicy:                   value.VerificationPolicy,
 			RequiredOwnerFacts:                   append([]runtimecontract.RuntimeOwnerFactRequirement(nil), value.RequiredOwnerFacts...),
 			OwnerFactConvergences:                runtimecontract.CloneRuntimeOwnerFactConvergences(value.OwnerFactConvergences),
 			Description:                          value.Description,
@@ -859,6 +868,12 @@ func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []run
 				clone := requirement.ValidationFailureRepairConvergence.Clone()
 				base.ValidationFailureRepairConvergence = &clone
 			}
+		}
+		if requirement.VerificationPolicy != nil {
+			if base.VerificationPolicy != nil && !runtimecontract.SameRuntimeVerificationPolicy(base.VerificationPolicy, requirement.VerificationPolicy) {
+				return compiledEvidencePolicy{}, fmt.Errorf("coverage evidence policy has conflicting verification policies")
+			}
+			base.VerificationPolicy = requirement.VerificationPolicy
 		}
 		if requirement.ImplementationWorkPolicy != nil {
 			if base.ImplementationWorkPolicy != nil && !runtimecontract.SameRuntimeImplementationWorkPolicy(base.ImplementationWorkPolicy, requirement.ImplementationWorkPolicy) {

@@ -126,6 +126,9 @@ func (b RuntimeBootstrap) Validate() error {
 	if err := ValidateRuntimeDefinitionFocuses(b.DefinitionSeed, b.DefinitionFocuses); err != nil {
 		return fmt.Errorf("runtime bootstrap definition focuses: %w", err)
 	}
+	if err := ValidateRuntimeDefinitionVerificationPolicies(b.DefinitionFocuses, b.Activation.ExecutionContract.ProfileContracts); err != nil {
+		return fmt.Errorf("runtime bootstrap verification policies: %w", err)
+	}
 	if err := ValidateRuntimeImplementationWorkCapabilityRequirements(b.DefinitionFocuses, b.Activation.ExecutionContract.ProfileContracts, b.Definition.CapabilityContract, b.Requirements); err != nil {
 		return fmt.Errorf("runtime bootstrap definition work policies: %w", err)
 	}
@@ -341,6 +344,7 @@ func sameCoverageFocus(left CoverageFocus, right CoverageFocus) bool {
 		left.RequireExecutableBehaviorEvidence == right.RequireExecutableBehaviorEvidence && left.RequireCoverageTargets == right.RequireCoverageTargets && left.ValidationRecipeID == right.ValidationRecipeID &&
 		sameRuntimeOwnerFactRequirements(left.RequiredOwnerFacts, right.RequiredOwnerFacts) && SameRuntimeOwnerFactConvergences(left.OwnerFactConvergences, right.OwnerFactConvergences) &&
 		sameCoverageEvidenceBindings(left.CoverageEvidenceBindings, right.CoverageEvidenceBindings) &&
+		SameRuntimeVerificationPolicy(left.VerificationPolicy, right.VerificationPolicy) &&
 		sameStrings(left.RequiredEvidenceKinds, right.RequiredEvidenceKinds) && sameStrings(left.TargetRefs, right.TargetRefs) && sameStrings(left.TargetDiscoverySources, right.TargetDiscoverySources) && sameStrings(left.TargetSelectorCandidateRefs, right.TargetSelectorCandidateRefs) && sameStrings(left.RequiredCheckRefs, right.RequiredCheckRefs) && sameStrings(left.MetricConstraints, right.MetricConstraints) && sameStrings(left.ArtifactRefs, right.ArtifactRefs) &&
 		sameStrings(left.AcceptedStepKinds, right.AcceptedStepKinds) && SameRuntimeOperationVariantRefs(left.AcceptedOperationVariants, right.AcceptedOperationVariants) &&
 		sameStrings(left.RejectedStepKinds, right.RejectedStepKinds)

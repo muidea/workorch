@@ -49,6 +49,10 @@ func (m *Biz) submitDefinitionAdmissionIntent(ctx context.Context, cmd workspace
 	if err := cmd.Validate(); err != nil {
 		return workspaceevents.DefinitionAdmissionIntentResult{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 	}
+	if m.manager != nil {
+		m.manager.definitionMu.Lock()
+		defer m.manager.definitionMu.Unlock()
+	}
 	if err := m.verifyDefinitionClarificationProvenance(ctx, cmd); err != nil {
 		return workspaceevents.DefinitionAdmissionIntentResult{}, err
 	}
@@ -105,6 +109,10 @@ func startupInputFromCandidate(candidate workspacemodel.DefinitionAdmissionCandi
 	if len(candidate.DoDInputs) > 0 {
 		definitionRevision += "|" + candidate.DoDInputs[0].SourceIdentity
 	}
+	specificationHash := ""
+	if candidate.Specification != nil {
+		specificationHash = candidate.Specification.AdmissionHash()
+	}
 	return (workspacemodel.WorkspaceStartupInputContract{
 		WorkspaceID:                       candidate.WorkspaceID,
 		DefinitionRevision:                definitionRevision,
@@ -116,6 +124,7 @@ func startupInputFromCandidate(candidate workspacemodel.DefinitionAdmissionCandi
 		TemplateRevision:                  candidate.WorkspaceTemplateSnapshot.Revision,
 		TemplateSnapshotHash:              candidate.WorkspaceTemplateSnapshot.SnapshotHash,
 		RuntimeProfileContractsHash:       candidate.RuntimeProfileContractsHash,
+		SpecificationHash:                 specificationHash,
 		ResolvedProjectWorkspaceDirectory: candidate.ResolvedProjectWorkspaceDirectory,
 		CandidateItemToItemRefMappings:    mappings,
 	}).WithHash()

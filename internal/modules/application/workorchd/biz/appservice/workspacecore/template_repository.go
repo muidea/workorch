@@ -16,15 +16,17 @@ func WorkspaceTemplateToOwner(item workorchmanagementcontract.WorkspaceTemplate)
 		return nil, err
 	}
 	return &workspacemodel.WorkspaceTemplate{
-		ID:               item.ID,
-		Name:             item.Name,
-		Description:      item.Description,
-		GoalText:         item.GoalText,
-		DoDItems:         append([]string(nil), item.DoDItems...),
-		DefaultSoulID:    item.DefaultSoulID,
-		SoulBindings:     cloneStringMap(item.SoulBindings),
-		ContextHints:     contextHints,
-		EvidencePolicies: evidencePolicies,
+		ID:                item.ID,
+		ParentTemplateIDs: append([]string(nil), item.ParentTemplateIDs...),
+		EffectiveSources:  fromManagementTemplateSources(item.EffectiveSources),
+		Name:              item.Name,
+		Description:       item.Description,
+		GoalText:          item.GoalText,
+		DoDItems:          append([]string(nil), item.DoDItems...),
+		DefaultSoulID:     item.DefaultSoulID,
+		SoulBindings:      cloneStringMap(item.SoulBindings),
+		ContextHints:      contextHints,
+		EvidencePolicies:  evidencePolicies,
 	}, nil
 }
 
@@ -33,14 +35,38 @@ func WorkspaceTemplateFromOwner(item *workspacemodel.WorkspaceTemplate) workorch
 		return workorchmanagementcontract.WorkspaceTemplate{}
 	}
 	return workorchmanagementcontract.WorkspaceTemplate{
-		ID:               item.ID,
-		Name:             item.Name,
-		Description:      item.Description,
-		GoalText:         item.GoalText,
-		DoDItems:         append([]string(nil), item.DoDItems...),
-		DefaultSoulID:    item.DefaultSoulID,
-		SoulBindings:     cloneStringMap(item.SoulBindings),
-		ContextHints:     item.ContextHints.Map(),
-		EvidencePolicies: workorcheventpayload.MapSlice(item.EvidencePolicies),
+		ID:                item.ID,
+		ParentTemplateIDs: append([]string(nil), item.ParentTemplateIDs...),
+		EffectiveSources:  toManagementTemplateSources(item.EffectiveSources),
+		Name:              item.Name,
+		Description:       item.Description,
+		GoalText:          item.GoalText,
+		DoDItems:          append([]string(nil), item.DoDItems...),
+		DefaultSoulID:     item.DefaultSoulID,
+		SoulBindings:      cloneStringMap(item.SoulBindings),
+		ContextHints:      item.ContextHints.Map(),
+		EvidencePolicies:  workorcheventpayload.MapSlice(item.EvidencePolicies),
 	}
+}
+
+func fromManagementTemplateSources(items []workorchmanagementcontract.TemplateSource) []workspacemodel.TemplateSource {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]workspacemodel.TemplateSource, len(items))
+	for idx, item := range items {
+		ret[idx] = workspacemodel.TemplateSource{TemplateID: item.TemplateID, ContentHash: item.ContentHash}
+	}
+	return ret
+}
+
+func toManagementTemplateSources(items []workspacemodel.TemplateSource) []workorchmanagementcontract.TemplateSource {
+	if len(items) == 0 {
+		return nil
+	}
+	ret := make([]workorchmanagementcontract.TemplateSource, len(items))
+	for idx, item := range items {
+		ret[idx] = workorchmanagementcontract.TemplateSource{TemplateID: item.TemplateID, ContentHash: item.ContentHash}
+	}
+	return ret
 }

@@ -49,6 +49,12 @@ func TestWorkspaceBehaviorProofRequiresDeliveryExecutionAndProtectsAssertionInpu
 			if result.ValidationObservation == nil || result.ValidationObservation.ObservationProtocolRef != shellGoBehaviorObservationProtocolRef {
 				t.Fatal("lost exact v2 observation")
 			}
+			if test.wantPass && result.Evidence.Validation.ProofClass != runtimecontract.RuntimeValidationProofBehavioral {
+				t.Fatal("successful owner-observed workspace behavior lost behavioral attestation")
+			}
+			if !test.wantPass && result.Evidence.Validation.ProofClass != "" {
+				t.Fatal("incomplete or failed workspace behavior claimed behavioral grade")
+			}
 			if (len(result.workspaceBehaviorTargetRefs) != 0) != test.wantObserved {
 				t.Fatalf("observed implementation=%v", result.workspaceBehaviorTargetRefs)
 			}

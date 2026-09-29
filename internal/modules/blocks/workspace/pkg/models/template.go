@@ -16,7 +16,11 @@ import (
 // WorkspaceTemplate is the workspace owner's durable template DTO. Repository
 // representations are intentionally kept inside the workspace owner.
 type WorkspaceTemplate struct {
-	ID               string                         `json:"id"`
+	ID                string   `json:"id"`
+	ParentTemplateIDs []string `json:"parentTemplateIds,omitempty"`
+	// EffectiveSources is populated only on a resolved read, root first. Raw
+	// repository records leave it empty; it binds inherited content to its source.
+	EffectiveSources []TemplateSource               `json:"effectiveSources,omitempty"`
 	Name             string                         `json:"name"`
 	Description      string                         `json:"description,omitempty"`
 	GoalText         string                         `json:"goalText,omitempty"`
@@ -45,6 +49,14 @@ func WorkspaceTemplateSnapshotHash(template *WorkspaceTemplate) string {
 	sort.Strings(stages)
 	for _, stage := range stages {
 		values = append(values, stage, template.SoulBindings[stage])
+	}
+	// Preserve the byte-for-byte historical hash for templates without parents.
+	// A derived snapshot binds both effective content and every raw ancestor.
+	for _, parentID := range template.ParentTemplateIDs {
+		values = append(values, "parent-template-id", parentID)
+	}
+	if len(template.EffectiveSources) > 1 {
+		values = append(values, "effective-template-sources", inheritedTemplateSourceHash(template.EffectiveSources))
 	}
 	for _, value := range values {
 		_, _ = fmt.Fprintf(h, "%08x%s", len(value), value)

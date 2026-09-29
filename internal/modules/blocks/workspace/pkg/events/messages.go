@@ -56,15 +56,17 @@ type Workspace struct {
 }
 
 type WorkspaceTemplate struct {
-	ID               string
-	Name             string
-	Description      string
-	GoalText         string
-	DoDItems         []string
-	DefaultSoulID    string
-	SoulBindings     []soulbinding.Binding
-	ContextHints     workorcheventpayload.Payload
-	EvidencePolicies []workorcheventpayload.Payload
+	ID                string
+	ParentTemplateIDs []string
+	EffectiveSources  []workspacemodel.TemplateSource
+	Name              string
+	Description       string
+	GoalText          string
+	DoDItems          []string
+	DefaultSoulID     string
+	SoulBindings      []soulbinding.Binding
+	ContextHints      workorcheventpayload.Payload
+	EvidencePolicies  []workorcheventpayload.Payload
 }
 
 type UpdateWorkspaceCommand struct {
@@ -221,15 +223,16 @@ type DeleteDoDCommand struct {
 	DoDID       common.DoDID
 }
 type CreateWorkspaceTemplateCommand struct {
-	TemplateID       string
-	Name             string
-	Description      string
-	GoalText         string
-	DoDItems         []string
-	DefaultSoulID    string
-	SoulBindings     []soulbinding.Binding
-	ContextHints     workorcheventpayload.Payload
-	EvidencePolicies []workorcheventpayload.Payload
+	TemplateID        string
+	ParentTemplateIDs []string
+	Name              string
+	Description       string
+	GoalText          string
+	DoDItems          []string
+	DefaultSoulID     string
+	SoulBindings      []soulbinding.Binding
+	ContextHints      workorcheventpayload.Payload
+	EvidencePolicies  []workorcheventpayload.Payload
 }
 
 type UpdateWorkspaceTemplateCommand CreateWorkspaceTemplateCommand

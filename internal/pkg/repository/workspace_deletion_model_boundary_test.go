@@ -11,6 +11,28 @@ import (
 	"testing"
 )
 
+func isIsolatedWorktreeDirectory(root, path string) bool {
+	return filepath.Clean(path) == filepath.Join(root, ".claude", "worktrees")
+}
+
+func TestOwnerBoundaryWorktreeExclusionDoesNotExcludeProduction(t *testing.T) {
+	root := t.TempDir()
+	for _, tc := range []struct {
+		path string
+		skip bool
+	}{
+		{filepath.Join(".claude", "worktrees"), true},
+		{".claude", false},
+		{"internal", false},
+		{filepath.Join("internal", ".claude", "worktrees"), false},
+		{filepath.Join("internal", "modules", "blocks", "workspace"), false},
+	} {
+		if got := isIsolatedWorktreeDirectory(root, filepath.Join(root, tc.path)); got != tc.skip {
+			t.Errorf("scan exclusion %q = %v, want %v", tc.path, got, tc.skip)
+		}
+	}
+}
+
 // WorkspaceDeletion is an owner-private persistence entity. EventHub exposes
 // only immutable concrete acknowledgement DTOs; sibling production packages
 // must not construct or reduce the durable tombstone directly.
@@ -38,6 +60,10 @@ func TestWorkspaceDeletionPersistenceModelsStayOwnerPrivate(t *testing.T) {
 			return walkErr
 		}
 		if entry.IsDir() {
+			// 隔离工作树不是当前仓库源码；仅排除其明确路径，不豁免主树 owner 检查。
+			if isIsolatedWorktreeDirectory(repositoryRoot, path) {
+				return filepath.SkipDir
+			}
 			// Runtime data and generated dependency trees are not repository
 			// source. In particular, an in-progress workspace may contain
 			// intentionally incomplete Go files and must never weaken or break

@@ -142,6 +142,11 @@ var observedCommandStateFields = map[string]bool{
 // when only one immutable observation inside a shared DTO is state-like; a
 // newly added sibling State field then fails closed until separately audited.
 var observedStateCarrierFields = map[string]bool{
+	"internal/modules/blocks/workspace/pkg/models:DefinitionSpecificationRequestIdentity|Phase": true,
+	// Specification critiques and declaration matches are immutable authoring
+	// facts. Workspace Compile, not either Status field, selects admission.
+	"internal/modules/blocks/workspace/pkg/models:GoalSpecificationCompletenessReview|Status":               true,
+	"internal/modules/blocks/workspace/pkg/models:GoalSpecificationVerification|Status":                     true,
 	"internal/modules/blocks/llm/pkg/models:ProviderAdapterCacheHint|Mode":                                  true,
 	"internal/modules/blocks/llm/pkg/models:ProviderContextBudget|ProfileMode":                              true,
 	"internal/modules/blocks/llm/pkg/models:ProviderContextProfile|ProfileMode":                             true,

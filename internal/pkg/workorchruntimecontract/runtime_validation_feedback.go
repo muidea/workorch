@@ -114,6 +114,17 @@ func normalizeRuntimeValidationCheckFailures(values []RuntimeValidationCheckFail
 // diagnostics. If supplied, they must be bounded, safe and attached to an actual
 // failed check. Missing details remain explicitly observable at the renderer.
 func (o RuntimeValidationObservation) ValidateFailureDetails() error {
+	switch o.ProofClass {
+	case "", RuntimeValidationProofStatic, RuntimeValidationProofExecuted, RuntimeValidationProofBehavioral:
+	default:
+		return fmt.Errorf("unsupported validation proof class %q", o.ProofClass)
+	}
+	if o.ProofClass != "" && (o.RecipeID == "" || o.ObservationProtocolRef == "" || o.OutputTruncated ||
+		len(o.ExecutedChecks) == 0 || len(o.PassedChecks) == 0 ||
+		len(o.FailedChecks) != 0 || len(o.SkippedChecks) != 0 || len(o.IncompleteChecks) != 0 ||
+		len(RuntimeValidationConflictingChecks(o)) != 0) {
+		return fmt.Errorf("classified validation proof requires complete passing native checks")
+	}
 	if o.FailureDetailProtocolRef != "" && (o.FailureDetailProtocolRef != RuntimeValidationFailureDetailProtocolV2 || len(o.FailedChecks) == 0) {
 		return fmt.Errorf("unsupported validation failure detail protocol or missing failed check")
 	}

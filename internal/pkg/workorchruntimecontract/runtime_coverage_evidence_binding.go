@@ -217,6 +217,7 @@ type CoverageEvidenceBinding struct {
 	FocusID                  string
 	DefinitionRevision       string
 	Proofs                   []CoverageEvidenceProof
+	VerificationPolicy       *RuntimeVerificationPolicy `json:",omitempty"`
 	TargetRefs               []string
 	TargetSelectorRef        string
 	TargetSelectorOwnerRef   string
@@ -244,6 +245,10 @@ func (b CoverageEvidenceBinding) Normalized() CoverageEvidenceBinding {
 	b.FocusID = strings.TrimSpace(b.FocusID)
 	b.DefinitionRevision = strings.TrimSpace(b.DefinitionRevision)
 	b.Proofs = NormalizeCoverageEvidenceProofs(b.Proofs)
+	if b.VerificationPolicy != nil {
+		value := b.VerificationPolicy.Normalized()
+		b.VerificationPolicy = &value
+	}
 	b.TargetRefs = normalizeStrings(b.TargetRefs)
 	b.TargetSelectorRef = strings.TrimSpace(b.TargetSelectorRef)
 	b.TargetSelectorOwnerRef = strings.TrimSpace(b.TargetSelectorOwnerRef)
@@ -263,6 +268,7 @@ func (b CoverageEvidenceBinding) Clone() CoverageEvidenceBinding {
 	for index := range b.Proofs {
 		b.Proofs[index] = b.Proofs[index].Clone()
 	}
+	b.VerificationPolicy = cloneRuntimeVerificationPolicy(b.VerificationPolicy)
 	b.TargetRefs = append([]string(nil), b.TargetRefs...)
 	b.TargetSelectorCandidateRefs = append([]string(nil), b.TargetSelectorCandidateRefs...)
 	b.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), b.ProspectiveTargetAllOfConstraintRefs...)
@@ -292,6 +298,11 @@ func (b CoverageEvidenceBinding) Validate() error {
 	}
 	if len(b.Proofs) == 0 {
 		return fmt.Errorf("coverage evidence binding %q requires at least one evidence proof", b.ID)
+	}
+	if b.VerificationPolicy != nil {
+		if err := b.VerificationPolicy.Validate(); err != nil {
+			return fmt.Errorf("coverage evidence binding %q: %w", b.ID, err)
+		}
 	}
 	if len(b.TargetRefs) == 0 && b.TargetSelectorRef == "" && len(b.ProspectiveTargetRefs) == 0 {
 		return fmt.Errorf("coverage evidence binding %q requires an exact target, selector or prospective target", b.ID)
@@ -358,6 +369,10 @@ func StableCoverageEvidenceBindingHash(binding CoverageEvidenceBinding) string {
 		}
 		writeHashStrings(h, proof.MetricConstraints)
 		writeHashStrings(h, proof.ArtifactRefs)
+	}
+	if binding.VerificationPolicy != nil {
+		writeHashString(h, "verification-policy")
+		writeHashString(h, StableRuntimeVerificationPolicyHash(*binding.VerificationPolicy))
 	}
 	writeHashStrings(h, binding.TargetRefs)
 	writeHashString(h, binding.TargetSelectorRef)
@@ -474,6 +489,9 @@ func ValidateCoverageEvidenceBindingsForFocus(focus CoverageFocus, definitionRev
 		if binding.FocusID != focus.ID || binding.DefinitionRevision != definitionRevision {
 			return fmt.Errorf("coverage binding %q does not match focus/definition identity", binding.ID)
 		}
+		if !SameRuntimeVerificationPolicy(binding.VerificationPolicy, focus.VerificationPolicy) {
+			return fmt.Errorf("coverage binding %q verification policy does not match focus authority", binding.ID)
+		}
 		if !sameStrings(binding.EvidenceKinds(), focus.RequiredEvidenceKinds) {
 			return fmt.Errorf("coverage binding %q proof kinds do not match focus requirements", binding.ID)
 		}
@@ -502,6 +520,11 @@ func ValidateCoverageEvidenceBindingsForFocus(focus CoverageFocus, definitionRev
 // before any owner receipt, Run, or provider request can exist.
 func ValidateRuntimeFocusEvidenceDeclaration(focus CoverageFocus) error {
 	focus = focus.Normalized()
+	if focus.VerificationPolicy != nil {
+		if err := focus.VerificationPolicy.Validate(); err != nil {
+			return fmt.Errorf("coverage focus %q: %w", focus.ID, err)
+		}
+	}
 	if err := ValidateRuntimeOwnerFactRequirements(focus.RequiredOwnerFacts); err != nil {
 		return fmt.Errorf("coverage focus %q owner facts: %w", focus.ID, err)
 	}

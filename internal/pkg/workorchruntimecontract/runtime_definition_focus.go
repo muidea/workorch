@@ -50,6 +50,7 @@ type RuntimeDefinitionFocus struct {
 	// ImplementationWorkPolicy is an exact-CWI projection of the sealed
 	// Profile declaration, not a working binding or executable operation.
 	ImplementationWorkPolicy *RuntimeImplementationWorkPolicy `json:",omitempty"`
+	VerificationPolicy       *RuntimeVerificationPolicy       `json:",omitempty"`
 	MetricConstraints        []string
 	ArtifactRefs             []string
 }
@@ -94,6 +95,10 @@ func (f RuntimeDefinitionFocus) Normalized() RuntimeDefinitionFocus {
 		value := f.ImplementationWorkPolicy.Normalized()
 		f.ImplementationWorkPolicy = &value
 	}
+	if f.VerificationPolicy != nil {
+		value := f.VerificationPolicy.Normalized()
+		f.VerificationPolicy = &value
+	}
 	f.MetricConstraints = normalizeStrings(f.MetricConstraints)
 	f.ArtifactRefs = normalizeStrings(f.ArtifactRefs)
 	return f
@@ -111,6 +116,7 @@ func (f RuntimeDefinitionFocus) Clone() RuntimeDefinitionFocus {
 	f.OwnerFactConvergences = CloneRuntimeOwnerFactConvergences(f.OwnerFactConvergences)
 	f.RequiredCheckRefs = append([]string(nil), f.RequiredCheckRefs...)
 	f.ValidationFailureRepairConvergence = cloneRuntimeValidationFailureRepairConvergence(f.ValidationFailureRepairConvergence)
+	f.VerificationPolicy = cloneRuntimeVerificationPolicy(f.VerificationPolicy)
 	f.MetricConstraints = append([]string(nil), f.MetricConstraints...)
 	f.ArtifactRefs = append([]string(nil), f.ArtifactRefs...)
 	return f
@@ -147,6 +153,7 @@ func (f RuntimeDefinitionFocus) CoverageFocusDeclaration() CoverageFocus {
 		EvidenceDeclarationRef:               f.EvidenceDeclarationRef,
 		ValidationRecipeID:                   f.ValidationRecipeID,
 		RequiredCheckRefs:                    append([]string(nil), f.RequiredCheckRefs...),
+		VerificationPolicy:                   cloneRuntimeVerificationPolicy(f.VerificationPolicy),
 		MetricConstraints:                    append([]string(nil), f.MetricConstraints...),
 		ArtifactRefs:                         append([]string(nil), f.ArtifactRefs...),
 	}.Normalized()
@@ -166,6 +173,7 @@ func (f RuntimeDefinitionFocus) RuntimeFocusSeed() CoverageFocus {
 		CoverageWorkItemIDs:   append([]common.CoverageWorkItemID(nil), f.CoverageWorkItemIDs...),
 		RequiredEvidenceKinds: append([]string(nil), f.RequiredEvidenceKinds...),
 		RequireAssessment:     f.RequireAssessment,
+		VerificationPolicy:    cloneRuntimeVerificationPolicy(f.VerificationPolicy),
 	}.Normalized()
 }
 
@@ -206,6 +214,7 @@ func CompileRuntimeDefinitionFocuses(values []CoverageFocus) []RuntimeDefinition
 			EvidenceDeclarationRef:               value.EvidenceDeclarationRef,
 			ValidationRecipeID:                   value.ValidationRecipeID,
 			RequiredCheckRefs:                    append([]string(nil), value.RequiredCheckRefs...),
+			VerificationPolicy:                   cloneRuntimeVerificationPolicy(value.VerificationPolicy),
 			MetricConstraints:                    append([]string(nil), value.MetricConstraints...),
 			ArtifactRefs:                         append([]string(nil), value.ArtifactRefs...),
 		}.Normalized())
@@ -349,6 +358,11 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Runt
 				return fmt.Errorf("runtime definition focus %q owner-fact acquisition selector does not match its declaration", focus.ID)
 			}
 		}
+		if focus.VerificationPolicy != nil {
+			if err := focus.VerificationPolicy.Validate(); err != nil {
+				return fmt.Errorf("runtime definition focus %q: %w", focus.ID, err)
+			}
+		}
 	}
 	if len(seenCoverage) != len(items) {
 		return fmt.Errorf("runtime definition focuses do not cover every definition seed item")
@@ -374,5 +388,6 @@ func sameRuntimeDefinitionFocus(left, right RuntimeDefinitionFocus) bool {
 		left.EvidenceDeclarationRef == right.EvidenceDeclarationRef && left.ValidationRecipeID == right.ValidationRecipeID && sameStrings(left.RequiredCheckRefs, right.RequiredCheckRefs) &&
 		SameRuntimeValidationFailureRepairConvergence(left.ValidationFailureRepairConvergence, right.ValidationFailureRepairConvergence) &&
 		SameRuntimeImplementationWorkPolicy(left.ImplementationWorkPolicy, right.ImplementationWorkPolicy) &&
+		SameRuntimeVerificationPolicy(left.VerificationPolicy, right.VerificationPolicy) &&
 		sameStrings(left.MetricConstraints, right.MetricConstraints) && sameStrings(left.ArtifactRefs, right.ArtifactRefs)
 }

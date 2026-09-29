@@ -391,6 +391,10 @@ func canonicalAssessmentEvidenceWithoutOwnerFactsForCoverageForPurpose(
 	if canonicalAssessmentEvidenceQualityFailureForPurpose(aggregate, coverageID, refs, purpose) != "" {
 		return nil, false
 	}
+	if purpose == runtimecontract.RuntimeAssessmentPurposeDefinitionProof && bound &&
+		!runtimeVerificationPolicySatisfied(aggregate, binding, coverageID, refs) {
+		return nil, false
+	}
 	return refs, true
 }
 

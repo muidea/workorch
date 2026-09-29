@@ -286,6 +286,9 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 		if response.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || response.Receipt.Evidence.Validation == nil {
 			t.Fatalf("Shell native proof %q receipt = %+v", requirement.Hash, response.Receipt)
 		}
+		if response.Receipt.Evidence.Validation.ProofClass != runtimecontract.RuntimeValidationProofBehavioral || response.Receipt.Evidence.Validation.ValidateFailureDetails() != nil {
+			t.Fatalf("real owner behavioral observation lost typed modality: %+v", response.Receipt.Evidence.Validation)
+		}
 		bindingRefs, coverageIDs, diagnostic := coverageEvidenceCreditForReceipt(
 			[]runtimecontract.CoverageEvidenceBinding{coverageBinding}, operation,
 			runtimecontract.EvidenceKindValidation, &response.Receipt,

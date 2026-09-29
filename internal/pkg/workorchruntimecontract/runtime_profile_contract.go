@@ -107,6 +107,7 @@ type RuntimeProfileEvidenceRequirement struct {
 	// ImplementationWorkPolicy is a separate, default-absent declaration. It
 	// cannot borrow the rejected-validation trigger or change terminal proof.
 	ImplementationWorkPolicy    *RuntimeImplementationWorkPolicy
+	VerificationPolicy          *RuntimeVerificationPolicy `json:",omitempty"`
 	CapabilityStateRequirements []RuntimeProfileCapabilityStateRequirement
 	RejectedStepKinds           []string
 	Description                 string
@@ -378,6 +379,11 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 			if err := ValidateRuntimeOwnerFactConvergences(item.RequiredOwnerFacts, item.OwnerFactConvergences); err != nil {
 				return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
 			}
+			if item.VerificationPolicy != nil {
+				if err := item.VerificationPolicy.Validate(); err != nil {
+					return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
+				}
+			}
 			if item.ImplementationWorkPolicy != nil {
 				if len(item.RequiredEvidenceKinds) != 1 || item.RequiredEvidenceKinds[0] != EvidenceKindValidation {
 					return fmt.Errorf("runtime profile evidence requirement %q implementation work must preserve validation-only terminal evidence", item.ID)
@@ -438,6 +444,11 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 		}
 		for leftIndex, left := range profile.EvidenceRequirements {
 			for _, right := range profile.EvidenceRequirements[leftIndex+1:] {
+				if left.VerificationPolicy != nil && right.VerificationPolicy != nil && left.Scope == right.Scope &&
+					(left.ID == "*" || right.ID == "*" || left.ID == right.ID) &&
+					!SameRuntimeVerificationPolicy(left.VerificationPolicy, right.VerificationPolicy) {
+					return fmt.Errorf("runtime profile evidence requirements %q and %q declare conflicting verification policies", left.ID, right.ID)
+				}
 				if left.ImplementationWorkPolicy != nil && right.ImplementationWorkPolicy != nil && left.Scope == right.Scope &&
 					(left.ID == "*" || right.ID == "*" || left.ID == right.ID) &&
 					!SameRuntimeImplementationWorkPolicy(left.ImplementationWorkPolicy, right.ImplementationWorkPolicy) {
@@ -729,6 +740,10 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 			policy := value.ImplementationWorkPolicy.Normalized()
 			value.ImplementationWorkPolicy = &policy
 		}
+		if value.VerificationPolicy != nil {
+			policy := value.VerificationPolicy.Normalized()
+			value.VerificationPolicy = &policy
+		}
 		value.CapabilityStateRequirements = normalizeRuntimeProfileCapabilityStateRequirements(value.CapabilityStateRequirements)
 		value.RejectedStepKinds = normalizeStrings(value.RejectedStepKinds)
 		value.Description = strings.TrimSpace(value.Description)
@@ -800,7 +815,8 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 	}
 	for idx := range left.EvidenceRequirements {
 		l, r := left.EvidenceRequirements[idx], right.EvidenceRequirements[idx]
-		if !SameRuntimeImplementationWorkPolicy(l.ImplementationWorkPolicy, r.ImplementationWorkPolicy) {
+		if !SameRuntimeImplementationWorkPolicy(l.ImplementationWorkPolicy, r.ImplementationWorkPolicy) ||
+			!SameRuntimeVerificationPolicy(l.VerificationPolicy, r.VerificationPolicy) {
 			return false
 		}
 		if l.ID != r.ID || l.Scope != r.Scope || l.EvidenceRole != r.EvidenceRole || l.TargetRole != r.TargetRole || l.TargetSelectorRef != r.TargetSelectorRef || l.TargetSelectorOwnerRef != r.TargetSelectorOwnerRef || l.TargetSelectorSubjectRef != r.TargetSelectorSubjectRef ||

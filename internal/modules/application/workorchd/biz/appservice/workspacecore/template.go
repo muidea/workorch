@@ -13,17 +13,25 @@ import (
 
 func NormalizeWorkspaceTemplate(template workorchmanagementcontract.WorkspaceTemplate) (workorchmanagementcontract.WorkspaceTemplate, error) {
 	item := workorchmanagementcontract.WorkspaceTemplate{
-		ID:               strings.TrimSpace(template.ID),
-		Name:             strings.TrimSpace(template.Name),
-		Description:      strings.TrimSpace(template.Description),
-		GoalText:         strings.TrimSpace(template.GoalText),
-		DoDItems:         definitioncore.NormalizeDoDItems(template.DoDItems),
-		DefaultSoulID:    strings.TrimSpace(template.DefaultSoulID),
-		ContextHints:     cloneContextMap(template.ContextHints),
-		EvidencePolicies: cloneContextMapSlice(template.EvidencePolicies),
+		ID:                strings.TrimSpace(template.ID),
+		ParentTemplateIDs: normalizeTemplateParentIDs(template.ParentTemplateIDs),
+		Name:              strings.TrimSpace(template.Name),
+		Description:       strings.TrimSpace(template.Description),
+		GoalText:          strings.TrimSpace(template.GoalText),
+		DoDItems:          definitioncore.NormalizeDoDItems(template.DoDItems),
+		DefaultSoulID:     strings.TrimSpace(template.DefaultSoulID),
+		ContextHints:      cloneContextMap(template.ContextHints),
+		EvidencePolicies:  cloneContextMapSlice(template.EvidencePolicies),
 	}
-	if item.ID == "" || item.Name == "" {
+	if item.ID == "" || item.Name == "" || len(template.EffectiveSources) != 0 {
 		return workorchmanagementcontract.WorkspaceTemplate{}, common.ErrInvalidArgument
+	}
+	seenParents := make(map[string]bool)
+	for _, parentID := range item.ParentTemplateIDs {
+		if parentID == "" || parentID == item.ID || seenParents[parentID] {
+			return workorchmanagementcontract.WorkspaceTemplate{}, common.ErrInvalidArgument
+		}
+		seenParents[parentID] = true
 	}
 	bindings, err := appmodelcore.NormalizeSoulBindings(template.SoulBindings)
 	if err != nil {
@@ -31,6 +39,17 @@ func NormalizeWorkspaceTemplate(template workorchmanagementcontract.WorkspaceTem
 	}
 	item.SoulBindings = appmodelcore.MapSoulBindingIDs(bindings)
 	return item, nil
+}
+
+func normalizeTemplateParentIDs(input []string) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	output := make([]string, len(input))
+	for idx, value := range input {
+		output[idx] = strings.TrimSpace(value)
+	}
+	return output
 }
 
 func ApplyTemplateToWorkspace(item *workspacemodel.Workspace, template workorchmanagementcontract.WorkspaceTemplate) (*workspacemodel.Workspace, error) {

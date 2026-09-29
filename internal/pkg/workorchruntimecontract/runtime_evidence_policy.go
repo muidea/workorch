@@ -81,6 +81,7 @@ type RuntimeCoverageEvidenceRequirement struct {
 	RequiredCheckRefs                    []string
 	MetricConstraints                    []string
 	ArtifactRefs                         []string
+	VerificationPolicy                   *RuntimeVerificationPolicy `json:",omitempty"`
 	Description                          string
 }
 
@@ -118,6 +119,7 @@ func CloneRuntimeEvidencePolicies(values []RuntimeEvidencePolicy) []RuntimeEvide
 				requirement.RequiredCheckRefs = append([]string(nil), requirement.RequiredCheckRefs...)
 				requirement.MetricConstraints = append([]string(nil), requirement.MetricConstraints...)
 				requirement.ArtifactRefs = append([]string(nil), requirement.ArtifactRefs...)
+				requirement.VerificationPolicy = cloneRuntimeVerificationPolicy(requirement.VerificationPolicy)
 				requirements = append(requirements, requirement)
 			}
 			value.CoverageRequirements = requirements
@@ -192,6 +194,11 @@ func (p RuntimeEvidencePolicy) Validate() error {
 		return fmt.Errorf("runtime evidence policy recipe timeout must be between 1000 and 600000")
 	}
 	for _, requirement := range p.CoverageRequirements {
+		if requirement.VerificationPolicy != nil {
+			if err := requirement.VerificationPolicy.Validate(); err != nil {
+				return fmt.Errorf("runtime coverage evidence requirement %q: %w", requirement.ID, err)
+			}
+		}
 		if requirement.ID == "" || requirement.Scope == "" {
 			return fmt.Errorf("runtime coverage evidence requirement requires id and scope")
 		}
@@ -555,6 +562,10 @@ func normalizeRuntimeCoverageEvidenceRequirements(values []RuntimeCoverageEviden
 		value.RequiredCheckRefs = normalizeRuntimeValidationProofCheckRefs(value.RequiredCheckRefs)
 		value.MetricConstraints = normalizeStrings(value.MetricConstraints)
 		value.ArtifactRefs = normalizeStrings(value.ArtifactRefs)
+		if value.VerificationPolicy != nil {
+			policy := value.VerificationPolicy.Normalized()
+			value.VerificationPolicy = &policy
+		}
 		value.Description = strings.TrimSpace(value.Description)
 		ret = append(ret, value)
 	}
@@ -589,7 +600,7 @@ func sameRuntimeEvidencePolicy(left RuntimeEvidencePolicy, right RuntimeEvidence
 			l.RequireExecutableBehaviorEvidence != r.RequireExecutableBehaviorEvidence || l.RequireCoverageTargets != r.RequireCoverageTargets || l.ValidationRecipeID != r.ValidationRecipeID || l.Description != r.Description ||
 			!sameStrings(l.TargetRefs, r.TargetRefs) || !sameStrings(l.TargetDiscoverySources, r.TargetDiscoverySources) || !sameStrings(l.TargetSelectorCandidateRefs, r.TargetSelectorCandidateRefs) || !SameRuntimeProspectiveTargetAllOfConstraintRefs(l.ProspectiveTargetAllOfConstraintRefs, r.ProspectiveTargetAllOfConstraintRefs) ||
 			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) || !sameStrings(l.AcceptedStepKinds, r.AcceptedStepKinds) || !SameRuntimeOperationVariantRefs(l.AcceptedOperationVariants, r.AcceptedOperationVariants) ||
-			!sameStrings(l.RequiredCheckRefs, r.RequiredCheckRefs) || !sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
+			!SameRuntimeVerificationPolicy(l.VerificationPolicy, r.VerificationPolicy) || !sameStrings(l.RequiredCheckRefs, r.RequiredCheckRefs) || !sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) || !sameStrings(l.RejectedStepKinds, r.RejectedStepKinds) {
 			return false
 		}
 	}

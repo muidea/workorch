@@ -549,6 +549,9 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 		Proofs: proofs, TargetRefs: targetRefs, TargetSelectorRef: selectorRef, DeclarationRef: declarationRef,
 		ProspectiveTargetRefs: prospectiveTargetRefs, PrerequisiteRefs: prerequisiteRefs,
 	}
+	if source != nil {
+		binding.VerificationPolicy = cloneRuntimeVerificationPolicy(source.VerificationPolicy)
+	}
 	if validationRepair != nil {
 		repair := validationRepair.Normalized()
 		binding.PrerequisiteRefs = append(binding.PrerequisiteRefs,

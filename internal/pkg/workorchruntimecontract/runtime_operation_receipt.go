@@ -790,6 +790,10 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 		writeHashStrings(h, observation.SkippedChecks)
 		writeHashString(h, observation.OutputPreview)
 		writeRuntimeValidationFailureDetailsHash(h, observation)
+		if observation.ProofClass != "" {
+			writeHashString(h, "validation-proof-class/v1")
+			writeHashString(h, string(observation.ProofClass))
+		}
 	}
 	if receipt.Evidence.ExitCode == nil {
 		writeHashString(h, "exit:nil")

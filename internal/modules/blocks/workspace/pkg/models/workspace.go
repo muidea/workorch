@@ -34,6 +34,9 @@ type Workspace struct {
 	// DefinitionAdmissionCandidates is immutable owner history. The current
 	// candidate is the highest revision in one CandidateID lineage.
 	DefinitionAdmissionCandidates []DefinitionAdmissionCandidate
+	// DefinitionSpecificationLedger is Workspace-private pre-seal request history.
+	// It neither promotes a Definition nor authorizes Runtime execution.
+	DefinitionSpecificationLedger *DefinitionSpecificationRequestLedger
 	StartupInput                  *WorkspaceStartupInputContract
 	ActivationAdmission           *WorkspaceActivationAdmission
 	// TerminalDelivery is the Workspace owner's persisted release fence. It is

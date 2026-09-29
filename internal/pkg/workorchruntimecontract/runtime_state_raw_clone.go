@@ -78,6 +78,7 @@ func cloneAuthorityTransactionRaw(in AuthorityTransaction) AuthorityTransaction 
 
 func cloneCoverageEvidenceBindingRaw(in CoverageEvidenceBinding) CoverageEvidenceBinding {
 	out := in
+	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.Proofs = cloneRuntimeStateRawSlice(in.Proofs, func(item CoverageEvidenceProof) CoverageEvidenceProof { return cloneCoverageEvidenceProofRaw(item) })
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
 	out.TargetSelectorCandidateRefs = cloneRuntimeStateRawSlice(in.TargetSelectorCandidateRefs, func(item string) string { return item })
@@ -105,6 +106,7 @@ func cloneCoverageEvidenceProofRaw(in CoverageEvidenceProof) CoverageEvidencePro
 
 func cloneCoverageEvidenceProofIdentityRaw(in CoverageEvidenceProofIdentity) CoverageEvidenceProofIdentity {
 	out := in
+	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.AllowedOperationKinds = cloneRuntimeStateRawSlice(in.AllowedOperationKinds, func(item string) string { return item })
 	out.AllowedOperationVariants = cloneRuntimeStateRawSlice(in.AllowedOperationVariants, func(item RuntimeOperationVariantRef) RuntimeOperationVariantRef {
 		return cloneRuntimeOperationVariantRefRaw(item)
@@ -123,6 +125,7 @@ func cloneCoverageEvidenceProofIdentityRaw(in CoverageEvidenceProofIdentity) Cov
 
 func cloneCoverageFocusRaw(in CoverageFocus) CoverageFocus {
 	out := in
+	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.CoverageWorkItemIDs = cloneRuntimeStateRawSlice(in.CoverageWorkItemIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
 	out.CoverageEvidenceBindings = cloneRuntimeStateRawSlice(in.CoverageEvidenceBindings, func(item CoverageEvidenceBinding) CoverageEvidenceBinding {
 		return cloneCoverageEvidenceBindingRaw(item)
@@ -826,6 +829,7 @@ func cloneRuntimeCoverageDependencyRaw(in RuntimeCoverageDependency) RuntimeCove
 
 func cloneRuntimeCoverageEvidenceRequirementRaw(in RuntimeCoverageEvidenceRequirement) RuntimeCoverageEvidenceRequirement {
 	out := in
+	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
 	out.TargetDiscoverySources = cloneRuntimeStateRawSlice(in.TargetDiscoverySources, func(item string) string { return item })
 	out.TargetSelectorCandidateRefs = cloneRuntimeStateRawSlice(in.TargetSelectorCandidateRefs, func(item string) string { return item })
@@ -955,6 +959,7 @@ func cloneRuntimeDefinitionContextRaw(in RuntimeDefinitionContext) RuntimeDefini
 
 func cloneRuntimeDefinitionFocusRaw(in RuntimeDefinitionFocus) RuntimeDefinitionFocus {
 	out := in
+	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.ImplementationWorkPolicy = cloneRuntimeImplementationWorkPolicy(in.ImplementationWorkPolicy)
 	out.CoverageWorkItemIDs = cloneRuntimeStateRawSlice(in.CoverageWorkItemIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
 	out.RequiredEvidenceKinds = cloneRuntimeStateRawSlice(in.RequiredEvidenceKinds, func(item string) string { return item })
@@ -1527,6 +1532,7 @@ func cloneRuntimeProfileContractRaw(in RuntimeProfileContract) RuntimeProfileCon
 
 func cloneRuntimeProfileEvidenceRequirementRaw(in RuntimeProfileEvidenceRequirement) RuntimeProfileEvidenceRequirement {
 	out := in
+	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.ImplementationWorkPolicy = cloneRuntimeImplementationWorkPolicy(in.ImplementationWorkPolicy)
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
 	out.TargetDiscoverySources = cloneRuntimeStateRawSlice(in.TargetDiscoverySources, func(item string) string { return item })
@@ -1883,6 +1889,7 @@ func cloneRuntimeSemanticProofFeasibilityRaw(in RuntimeSemanticProofFeasibility)
 
 func cloneRuntimeSemanticProofObligationRaw(in RuntimeSemanticProofObligation) RuntimeSemanticProofObligation {
 	out := in
+	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.ValidationProofRequirement = cloneRuntimeStateRawPointer(in.ValidationProofRequirement, func(item RuntimeValidationProofRequirement) RuntimeValidationProofRequirement {
 		item.RequiredCheckRefs = cloneRuntimeStateRawSlice(item.RequiredCheckRefs, func(value string) string { return value })
 		return item

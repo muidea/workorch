@@ -35,6 +35,8 @@ internal/modules/blocks/run/pkg/models/run.go|RunLineageState|owner_private_stat
 internal/modules/blocks/run/pkg/models/workspace_retirement.go|WorkspaceRetirementPhase|owner_private_state|internal/modules/blocks/run|run.workspace_retirement
 internal/pkg/workorchrepo/workspace_scoped_repositories.go|workspaceRunResourcePurgePhase|owner_private_state|internal/modules/blocks/run|run.workspace_retirement
 internal/pkg/workorchrepo/workspace_scoped_repositories.go|orchestratorEvidencePurgeJournalPhase|owner_private_state|internal/modules/kernel/orchestrator|orchestrator.workspace_deletion
+internal/modules/blocks/workspace/pkg/models/goal_specification.go|GoalSpecificationCompletenessReview.Status|immutable_outcome|internal/modules/blocks/workspace|-
+internal/modules/blocks/workspace/pkg/models/goal_specification.go|GoalSpecificationVerification.Status|immutable_outcome|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/events/messages.go|DefinitionAdmissionCandidateDisposition|immutable_outcome|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/events/messages.go|DefinitionAdmissionIntentDisposition|immutable_outcome|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/events/messages.go|DeleteWorkspaceDisposition|immutable_outcome|internal/modules/blocks/workspace|-
@@ -115,3 +117,6 @@ internal/pkg/workorchruntimecontract/runtime_state.go|RuntimeDispatchState|owner
 internal/pkg/workorchruntimecontract/runtime_state.go|RuntimeCandidateAttemptState|owner_private_state|internal/modules/kernel/orchestrator|sm_3
 internal/services/workorch/service/tui/model.go|progressState|ephemeral_technical|internal/services/workorch|-
 internal/services/workorch/options.go|Mode|ephemeral_technical|internal/services/workorch|-
+internal/modules/blocks/workspace/pkg/events/definition_specification.go|DefinitionSpecificationRequestDisposition|immutable_outcome|internal/modules/blocks/workspace|-
+internal/modules/blocks/workspace/pkg/models/definition_specification_ledger.go|DefinitionSpecificationPhase|immutable_trace|internal/modules/blocks/workspace|-
+internal/modules/blocks/workspace/pkg/models/definition_specification_ledger.go|DefinitionSpecificationRequestState|owner_private_state|internal/modules/blocks/workspace|workspace.definition_specification

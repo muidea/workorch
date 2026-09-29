@@ -21,6 +21,7 @@ func Contracts() []eventcontract.Contract {
 		TopicWorkspaceTemplateCommandGet,
 		TopicWorkspaceTemplateCommandList,
 		TopicWorkspaceTemplateCommandQueryBuiltinDefaults,
+		TopicWorkspaceSpecificationQuery,
 	)...)
 	ret = append(ret, eventcontract.Build("workspace", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicWorkspaceCommandCreate,
@@ -41,6 +42,9 @@ func Contracts() []eventcontract.Contract {
 		TopicWorkspaceCommandExecutionIntent,
 		TopicWorkspaceFactTerminalDelivery,
 		TopicWorkspaceDefinitionAdmissionIntent,
+		TopicWorkspaceSpecificationBegin,
+		TopicWorkspaceSpecificationReserve,
+		TopicWorkspaceSpecificationComplete,
 	)...)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM1, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicWorkspaceCommandExecutionIntent)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicWorkspaceFactTerminalDelivery)

@@ -69,14 +69,15 @@ func workspaceTemplateCommandFromOwner(item *workspacemodel.WorkspaceTemplate) w
 		return workspaceevents.CreateWorkspaceTemplateCommand{}
 	}
 	return workspaceevents.CreateWorkspaceTemplateCommand{
-		TemplateID:       item.ID,
-		Name:             item.Name,
-		Description:      item.Description,
-		GoalText:         item.GoalText,
-		DoDItems:         append([]string(nil), item.DoDItems...),
-		DefaultSoulID:    item.DefaultSoulID,
-		SoulBindings:     soulbinding.FromStringMap(item.SoulBindings),
-		ContextHints:     item.ContextHints.Clone(),
-		EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
+		TemplateID:        item.ID,
+		ParentTemplateIDs: append([]string(nil), item.ParentTemplateIDs...),
+		Name:              item.Name,
+		Description:       item.Description,
+		GoalText:          item.GoalText,
+		DoDItems:          append([]string(nil), item.DoDItems...),
+		DefaultSoulID:     item.DefaultSoulID,
+		SoulBindings:      soulbinding.FromStringMap(item.SoulBindings),
+		ContextHints:      item.ContextHints.Clone(),
+		EvidencePolicies:  workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}
 }

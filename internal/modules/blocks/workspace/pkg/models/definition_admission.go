@@ -26,6 +26,7 @@ const (
 	DefinitionAdmissionProfileContractInvalid        string                         = "definition_profile_contract_invalid"
 	DefinitionAdmissionProfilePrerequisiteUnresolved string                         = "definition_profile_prerequisite_unresolved"
 	DefinitionAdmissionTerminalPolicyUnsupported     string                         = "definition_terminal_policy_unsupported"
+	DefinitionAdmissionSpecificationIncomplete       string                         = "goal_specification_incomplete"
 )
 
 type DefinitionCandidateItem struct {
@@ -91,7 +92,12 @@ type DefinitionAdmissionCandidate struct {
 	AdmissionCompilerVersion          string
 	ResolvedProjectWorkspaceDirectory string
 	ProposedRelationInputs            []DefinitionProposedRelationInput
-	CandidateHash                     string
+	// Specification is an optional v1 pre-seal admission proposal. Nil retains
+	// the exact historical candidate schema and hash.
+	Specification *GoalSpecification
+	// Optional owner compilation identity. Nil preserves archived specifications.
+	CompilationRef *DefinitionSpecificationCompilationRef
+	CandidateHash  string
 }
 
 type DefinitionAdmissionResult struct {
@@ -115,16 +121,19 @@ type CandidateItemToItemRefMapping struct {
 }
 
 type WorkspaceStartupInputContract struct {
-	WorkspaceID                       common.WorkspaceID
-	DefinitionRevision                string
-	GoalDefinitionRef                 string
-	GoalTextHash                      string
-	DoDDefinitionRefs                 []string
-	DoDItemSetHash                    string
-	WorkspaceTemplateRef              string
-	TemplateRevision                  string
-	TemplateSnapshotHash              string
-	RuntimeProfileContractsHash       string
+	WorkspaceID                 common.WorkspaceID
+	DefinitionRevision          string
+	GoalDefinitionRef           string
+	GoalTextHash                string
+	DoDDefinitionRefs           []string
+	DoDItemSetHash              string
+	WorkspaceTemplateRef        string
+	TemplateRevision            string
+	TemplateSnapshotHash        string
+	RuntimeProfileContractsHash string
+	// SpecificationHash seals content and review judgments only when the
+	// candidate includes the optional v1 specification.
+	SpecificationHash                 string
 	ResolvedProjectWorkspaceDirectory string
 	CandidateItemToItemRefMappings    []CandidateItemToItemRefMapping
 	CandidateItemToItemRefMappingHash string
@@ -168,6 +177,14 @@ func (c DefinitionAdmissionCandidate) Normalized() DefinitionAdmissionCandidate 
 	c.AdmissionCompilerVersion = strings.TrimSpace(c.AdmissionCompilerVersion)
 	c.ResolvedProjectWorkspaceDirectory = strings.TrimSpace(c.ResolvedProjectWorkspaceDirectory)
 	c.ProposedRelationInputs = normalizeProposedRelations(c.ProposedRelationInputs)
+	if c.Specification != nil {
+		specification := c.Specification.Normalized()
+		c.Specification = &specification
+	}
+	if c.CompilationRef != nil {
+		ref := c.CompilationRef.Normalized()
+		c.CompilationRef = &ref
+	}
 	c.CandidateHash = strings.TrimSpace(c.CandidateHash)
 	return c
 }
@@ -238,6 +255,16 @@ func (c DefinitionAdmissionCandidate) Validate() error {
 			}
 		}
 	}
+	if c.Specification != nil {
+		if err := c.Specification.Validate(c.GoalInput, c.DoDInputs); err != nil {
+			return err
+		}
+	}
+	if c.CompilationRef != nil {
+		if c.Specification == nil || c.CompilationRef.Validate() != nil {
+			return fmt.Errorf("compiled candidate requires complete owner compilation reference and specification")
+		}
+	}
 	want := c.computeHash()
 	if c.CandidateHash == "" || c.CandidateHash != want {
 		return fmt.Errorf("definition admission candidate hash mismatch")
@@ -266,6 +293,14 @@ func (c DefinitionAdmissionCandidate) Clone() DefinitionAdmissionCandidate {
 	for idx := range c.ProposedRelationInputs {
 		c.ProposedRelationInputs[idx].SourceItemRefs = slices.Clone(c.ProposedRelationInputs[idx].SourceItemRefs)
 		c.ProposedRelationInputs[idx].TargetItemRefs = slices.Clone(c.ProposedRelationInputs[idx].TargetItemRefs)
+	}
+	if c.Specification != nil {
+		specification := c.Specification.Clone()
+		c.Specification = &specification
+	}
+	if c.CompilationRef != nil {
+		ref := *c.CompilationRef
+		c.CompilationRef = &ref
 	}
 	return c
 }
@@ -298,6 +333,13 @@ func (c DefinitionAdmissionCandidate) computeHash() string {
 		writeDefinitionHash(h, relation.RelationRef, relation.RelationKind)
 		writeDefinitionHash(h, relation.SourceItemRefs...)
 		writeDefinitionHash(h, relation.TargetItemRefs...)
+	}
+	if c.Specification != nil {
+		writeDefinitionHash(h, "goal-specification-v1", c.Specification.AdmissionHash())
+	}
+	if c.CompilationRef != nil {
+		writeDefinitionHash(h, "workspace-specification-compilation-v1", c.CompilationRef.InputCandidateHash, c.CompilationRef.CompilationInputHash, c.CompilationRef.ProposalPermitID, c.CompilationRef.ProposalHash,
+			c.CompilationRef.CriticPermitIDs[0], c.CompilationRef.CriticPermitIDs[1], c.CompilationRef.CriticPermitIDs[2], c.CompilationRef.CriticPermitIDs[3], c.CompilationRef.CriticPermitIDs[4], c.CompilationRef.CriticPermitIDs[5])
 	}
 	return "definition-candidate-sha256:" + hex.EncodeToString(h.Sum(nil))
 }
@@ -368,6 +410,7 @@ func (s WorkspaceStartupInputContract) Normalized() WorkspaceStartupInputContrac
 	s.TemplateRevision = strings.TrimSpace(s.TemplateRevision)
 	s.TemplateSnapshotHash = strings.TrimSpace(s.TemplateSnapshotHash)
 	s.RuntimeProfileContractsHash = strings.TrimSpace(s.RuntimeProfileContractsHash)
+	s.SpecificationHash = strings.TrimSpace(s.SpecificationHash)
 	s.ResolvedProjectWorkspaceDirectory = strings.TrimSpace(s.ResolvedProjectWorkspaceDirectory)
 	s.CandidateItemToItemRefMappings = normalizeItemMappings(s.CandidateItemToItemRefMappings)
 	s.CandidateItemToItemRefMappingHash = strings.TrimSpace(s.CandidateItemToItemRefMappingHash)
@@ -408,6 +451,7 @@ func (s WorkspaceStartupInputContract) ValidateCandidate(candidate DefinitionAdm
 		s.TemplateRevision != candidate.WorkspaceTemplateSnapshot.Revision ||
 		s.TemplateSnapshotHash != candidate.WorkspaceTemplateSnapshot.SnapshotHash ||
 		s.RuntimeProfileContractsHash != candidate.RuntimeProfileContractsHash ||
+		s.SpecificationHash != candidateSpecificationAdmissionHash(candidate) ||
 		s.ResolvedProjectWorkspaceDirectory != candidate.ResolvedProjectWorkspaceDirectory {
 		return fmt.Errorf("workspace startup input does not bind the exact admission candidate")
 	}
@@ -477,7 +521,17 @@ func (s WorkspaceStartupInputContract) computeHash() string {
 	writeDefinitionHash(h, string(s.WorkspaceID), s.DefinitionRevision, s.GoalDefinitionRef, s.GoalTextHash)
 	writeDefinitionHash(h, s.DoDDefinitionRefs...)
 	writeDefinitionHash(h, s.DoDItemSetHash, s.WorkspaceTemplateRef, s.TemplateRevision, s.TemplateSnapshotHash, s.RuntimeProfileContractsHash, s.ResolvedProjectWorkspaceDirectory, s.CandidateItemToItemRefMappingHash)
+	if s.SpecificationHash != "" {
+		writeDefinitionHash(h, "goal-specification-v1", s.SpecificationHash)
+	}
 	return "workspace-startup-input-sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+func candidateSpecificationAdmissionHash(candidate DefinitionAdmissionCandidate) string {
+	if candidate.Specification == nil {
+		return ""
+	}
+	return candidate.Specification.AdmissionHash()
 }
 
 func (a WorkspaceActivationAdmission) Normalized() WorkspaceActivationAdmission {

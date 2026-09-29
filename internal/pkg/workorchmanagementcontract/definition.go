@@ -76,16 +76,23 @@ type WorkspaceSoulBindings struct {
 	AvailableStages []string          `json:"availableStages,omitempty"`
 }
 
+type TemplateSource struct {
+	TemplateID  string `json:"templateId"`
+	ContentHash string `json:"contentHash"`
+}
+
 type WorkspaceTemplate struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Description      string            `json:"description,omitempty"`
-	GoalText         string            `json:"goalText,omitempty"`
-	DoDItems         []string          `json:"doDItems,omitempty"`
-	DefaultSoulID    string            `json:"defaultSoulId,omitempty"`
-	SoulBindings     map[string]string `json:"soulBindings,omitempty"`
-	ContextHints     map[string]any    `json:"contextHints,omitempty"`
-	EvidencePolicies []map[string]any  `json:"evidencePolicies,omitempty"`
+	ID                string            `json:"id"`
+	ParentTemplateIDs []string          `json:"parentTemplateIds,omitempty"`
+	EffectiveSources  []TemplateSource  `json:"effectiveSources,omitempty"`
+	Name              string            `json:"name"`
+	Description       string            `json:"description,omitempty"`
+	GoalText          string            `json:"goalText,omitempty"`
+	DoDItems          []string          `json:"doDItems,omitempty"`
+	DefaultSoulID     string            `json:"defaultSoulId,omitempty"`
+	SoulBindings      map[string]string `json:"soulBindings,omitempty"`
+	ContextHints      map[string]any    `json:"contextHints,omitempty"`
+	EvidencePolicies  []map[string]any  `json:"evidencePolicies,omitempty"`
 }
 
 type Soul struct {

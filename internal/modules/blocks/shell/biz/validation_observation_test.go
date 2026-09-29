@@ -87,6 +87,31 @@ func TestExisting(t *testing.T) {}
 	}
 }
 
+func TestRuntimeAdapterAttestsExecutedNativeCheckOnlyAfterActualRun(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not available")
+	}
+	workspace := newGoValidationWorkspace(t, `package fixture
+import "testing"
+func TestWorkOrchCWI_EXECUTED(t *testing.T) { if 2+2 != 4 { t.Fatal("failed") } }
+`)
+	request := RuntimeCommandRequest{
+		WorkspaceDeliverableDirectory: workspace,
+		ValidationRecipeID:            "executed-check",
+		ManagedValidation:             runtimecontract.RuntimeManagedValidation{RuntimeManaged: true, Kind: runtimecontract.RuntimeBlockKindManagedValidationSession},
+		Command:                       "go", Args: []string{"test", "-v", "./..."}, TargetRefs: []string{"fixture_test.go"},
+		ValidationCheckAttestations: []runtimecontract.RuntimeValidationCheckAttestationBinding{{RequiredCheckRef: "check", NativeCheckRef: "TestWorkOrchCWI_EXECUTED", ObservationProtocolRef: shellGoTestObservationProtocolRef}},
+	}
+	if err := instrumentManagedValidationNativeChecks(&request); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewRuntimeAdapter().ExecuteOperation(context.Background(), request)
+	if err != nil || result.Evidence.Validation == nil || result.Evidence.Validation.ProofClass != runtimecontract.RuntimeValidationProofExecuted ||
+		!runtimecontract.RuntimeValidationCheckPassed(*result.Evidence.Validation, "TestWorkOrchCWI_EXECUTED") {
+		t.Fatalf("real executed validation did not attest level 3 modality: err=%v observation=%+v evidence=%+v", err, result.Evidence.Validation, result.Evidence)
+	}
+}
+
 func TestRuntimeAdapterObservesTopLevelPassedAndSkippedGoChecks(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go is not available")
@@ -223,6 +248,7 @@ func %s(t *testing.T) {
 		t.Fatalf("ExecuteOperation: %v output=%+v", err, result)
 	}
 	if result.ValidationObservation == nil || result.ValidationObservation.ObservationProtocolRef != shellGoBehaviorObservationProtocolRef ||
+		result.ValidationObservation.ProofClass != runtimecontract.RuntimeValidationProofBehavioral ||
 		!runtimecontract.RuntimeValidationCheckPassed(*result.ValidationObservation, nativeCheck) ||
 		runtimecontract.RuntimeValidationCheckPassed(*result.ValidationObservation, requirement.RequiredCheckRefs[0]) {
 		t.Fatalf("real assertion did not produce exact owner-native observation: %+v", result.ValidationObservation)

@@ -160,6 +160,10 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 				writeHashString(h, "implementation-work-policy")
 				writeHashString(h, StableRuntimeImplementationWorkPolicyHash(*requirement.ImplementationWorkPolicy))
 			}
+			if requirement.VerificationPolicy != nil {
+				writeHashString(h, "verification-policy")
+				writeHashString(h, StableRuntimeVerificationPolicyHash(*requirement.VerificationPolicy))
+			}
 			writeHashStrings(h, requirement.RejectedStepKinds)
 			writeHashString(h, requirement.Description)
 		}

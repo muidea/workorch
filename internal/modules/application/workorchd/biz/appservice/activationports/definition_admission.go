@@ -58,6 +58,22 @@ func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub,
 	if err != nil {
 		return WorkspaceDefinitionAdmissionSnapshot{}, err
 	}
+	return SubmitWorkspaceDefinitionAdmission(ctx, hub, workspace, template, candidate)
+}
+
+// SubmitWorkspaceDefinitionAdmission 保留调用方已完成审查的确切候选，复用 owner 准入及 clarification 事务。
+// 不重建候选、不调用 provider，也不创建 Run。
+func SubmitWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub, workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate, candidate workspacemodel.DefinitionAdmissionCandidate) (WorkspaceDefinitionAdmissionSnapshot, error) {
+	if ctx == nil || hub == nil || workspace == nil || template == nil || workspace.ID == "" ||
+		candidate.WorkspaceID != workspace.ID || template.ID != workspace.TemplateID ||
+		candidate.WorkspaceTemplateSnapshot.TemplateRef != template.ID ||
+		candidate.WorkspaceTemplateSnapshot.SnapshotHash != workspacemodel.WorkspaceTemplateSnapshotHash(template) {
+		return WorkspaceDefinitionAdmissionSnapshot{}, common.ErrInvalidArgument
+	}
+	if err := candidate.Validate(); err != nil {
+		return WorkspaceDefinitionAdmissionSnapshot{}, err
+	}
+	candidate = candidate.Clone()
 	intent := workspaceevents.DefinitionAdmissionIntentCommand{Candidate: candidate, ExpectedCandidateRevision: candidate.CandidateRevision - 1,
 		CurrentTemplate: true, ExpectedWorkspaceRevision: workspace.Revision, ExpectedConfigurationHash: workspacemodel.WorkspaceConfigurationHash(workspace)}
 	var opened *decisionevents.OpenWorkspaceDefinitionClarificationRequestResult
@@ -213,6 +229,19 @@ func definitionAdmissionCandidate(workspace *workspacemodel.Workspace, goal *wor
 		exact, err := definitionAdmissionCandidateForIdentity(workspace, goal, dod, template, latest.CandidateID, latest.CandidateRevision, latest.BaseDefinitionRevision, latest.BaseStartupInputHash)
 		if err != nil {
 			return workspacemodel.DefinitionAdmissionCandidate{}, err
+		}
+		if latest.Specification != nil {
+			// A reviewed specification is bound to its complete authoring input.
+			// Reuse only the exact input; a configuration or definition change
+			// requires another review, never a silent return to legacy admission.
+			withoutSpecification := latest.Clone()
+			withoutSpecification.Specification = nil
+			withoutSpecification.CompilationRef = nil
+			withoutSpecification = withoutSpecification.WithHash()
+			if exact.CandidateHash != withoutSpecification.CandidateHash {
+				return workspacemodel.DefinitionAdmissionCandidate{}, fmt.Errorf("%w: reviewed specification requires recompilation for changed definition or template", common.ErrConflict)
+			}
+			return latest.Clone(), nil
 		}
 		if exact.CandidateHash == latest.CandidateHash {
 			return latest.Clone(), nil

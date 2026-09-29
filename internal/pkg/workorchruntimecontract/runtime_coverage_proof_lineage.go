@@ -39,6 +39,7 @@ type CoverageEvidenceProofIdentity struct {
 	ValidationCheckAttestations    []RuntimeValidationCheckAttestationBinding
 	MetricConstraints              []string
 	ArtifactRefs                   []string
+	VerificationPolicy             *RuntimeVerificationPolicy `json:",omitempty"`
 	Hash                           string
 }
 
@@ -73,6 +74,10 @@ func (i CoverageEvidenceProofIdentity) Normalized() CoverageEvidenceProofIdentit
 	i.ValidationCheckAttestations = NormalizeRuntimeValidationCheckAttestationBindings(i.ValidationCheckAttestations)
 	i.MetricConstraints = normalizeStrings(i.MetricConstraints)
 	i.ArtifactRefs = normalizeStrings(i.ArtifactRefs)
+	if i.VerificationPolicy != nil {
+		value := i.VerificationPolicy.Normalized()
+		i.VerificationPolicy = &value
+	}
 	i.Hash = strings.TrimSpace(i.Hash)
 	return i
 }
@@ -88,6 +93,7 @@ func (i CoverageEvidenceProofIdentity) Clone() CoverageEvidenceProofIdentity {
 	i.ValidationCheckAttestations = CloneRuntimeValidationCheckAttestationBindings(i.ValidationCheckAttestations)
 	i.MetricConstraints = append([]string(nil), i.MetricConstraints...)
 	i.ArtifactRefs = append([]string(nil), i.ArtifactRefs...)
+	i.VerificationPolicy = cloneRuntimeVerificationPolicy(i.VerificationPolicy)
 	return i
 }
 
@@ -210,6 +216,7 @@ func DeriveCoverageEvidenceProofIdentity(binding CoverageEvidenceBinding, eviden
 		ValidationCheckAttestations:    CloneRuntimeValidationCheckAttestationBindings(proof.ValidationCheckAttestations),
 		MetricConstraints:              append([]string(nil), proof.MetricConstraints...),
 		ArtifactRefs:                   append([]string(nil), proof.ArtifactRefs...),
+		VerificationPolicy:             cloneRuntimeVerificationPolicy(binding.VerificationPolicy),
 	}.Normalized()
 	identity.Hash = StableCoverageEvidenceProofIdentityHash(identity)
 	if err := identity.Validate(); err != nil {
@@ -270,6 +277,10 @@ func StableCoverageEvidenceProofIdentityHash(identity CoverageEvidenceProofIdent
 	}
 	writeHashStrings(h, identity.MetricConstraints)
 	writeHashStrings(h, identity.ArtifactRefs)
+	if identity.VerificationPolicy != nil {
+		writeHashString(h, "verification-policy")
+		writeHashString(h, StableRuntimeVerificationPolicyHash(*identity.VerificationPolicy))
+	}
 	return "coverage-evidence-proof-identity-" + hex.EncodeToString(h.Sum(nil))
 }
 
@@ -320,6 +331,8 @@ func FirstCoverageEvidenceProofIdentityDifference(left, right CoverageEvidencePr
 		return "metrics"
 	case !sameStrings(left.ArtifactRefs, right.ArtifactRefs):
 		return "artifacts"
+	case !SameRuntimeVerificationPolicy(left.VerificationPolicy, right.VerificationPolicy):
+		return "verification_policy"
 	default:
 		return ""
 	}

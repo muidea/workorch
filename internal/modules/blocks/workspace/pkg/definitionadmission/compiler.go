@@ -33,6 +33,11 @@ func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemo
 	if candidate.AdmissionCompilerVersion != workspacemodel.DefinitionAdmissionCompilerVersionCurrent {
 		return workspacemodel.DefinitionAdmissionResult{}, fmt.Errorf("unsupported definition admission compiler %q", candidate.AdmissionCompilerVersion)
 	}
+	if candidate.Specification != nil {
+		if refs := specificationAdmissionViolations(candidate); len(refs) > 0 {
+			return clarification(candidate, workspacemodel.DefinitionAdmissionSpecificationIncomplete, refs, "goal_specification_incomplete"), nil
+		}
+	}
 	for _, relation := range candidate.ProposedRelationInputs {
 		kind := strings.ToLower(strings.TrimSpace(relation.RelationKind))
 		if _, unsupported := unsupportedAlternativeKinds[kind]; unsupported {
@@ -71,6 +76,123 @@ func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemo
 		CanonicalAdmittedInputHash: stableHash("admitted_all_of", candidate.CandidateHash, candidate.AdmissionCompilerVersion),
 	}.WithHash()
 	return result, result.ValidateFor(candidate)
+}
+
+func specificationAdmissionViolations(candidate workspacemodel.DefinitionAdmissionCandidate) []string {
+	spec := candidate.Specification.Normalized()
+	violations := make([]string, 0)
+	if len(spec.Dimensions) == 0 {
+		violations = append(violations, "dimension/missing")
+	}
+	if len(spec.Requirements) == 0 {
+		violations = append(violations, "requirement/missing")
+	}
+	for _, resource := range spec.Resources {
+		if resource.Required && (!resource.Available || resource.SnapshotHash == "") {
+			violations = append(violations, "resource/"+resource.ID)
+		}
+	}
+	for _, dimension := range spec.Dimensions {
+		if !dimension.Required {
+			continue
+		}
+		if !dimension.Activated {
+			violations = append(violations, "dimension/"+dimension.ID)
+		}
+		found := false
+		for _, requirement := range spec.Requirements {
+			if requirement.DimensionID == dimension.ID && requirement.Required {
+				found = true
+			}
+		}
+		if !found {
+			violations = append(violations, "dimension/"+dimension.ID+"/requirement")
+		}
+	}
+	mappedDoD := make(map[string]bool, len(candidate.DoDInputs))
+	for _, requirement := range spec.Requirements {
+		if !requirement.Required {
+			continue
+		}
+		if requirement.Text == "" || len(requirement.SourceItemRefs) == 0 {
+			violations = append(violations, "requirement/"+requirement.ID+"/source")
+		}
+		found := false
+		for _, obligation := range spec.Obligations {
+			if obligation.RequirementID == requirement.ID && obligation.Text != "" {
+				found = true
+				for _, ref := range obligation.DoDItemRefs {
+					mappedDoD[ref] = true
+				}
+			}
+		}
+		if !found {
+			violations = append(violations, "requirement/"+requirement.ID+"/obligation")
+		}
+	}
+	for _, obligation := range spec.Obligations {
+		if specRequirementIsRequired(spec.Requirements, obligation.RequirementID) && len(obligation.DoDItemRefs) == 0 {
+			violations = append(violations, "obligation/"+obligation.ID+"/dod_mapping")
+		}
+		found := false
+		for _, verification := range spec.Verifications {
+			if verification.ObligationID != obligation.ID {
+				continue
+			}
+			if verification.Declaration != "" && verification.Status == workspacemodel.GoalVerificationDeclared && specificationVerificationProfileMatches(candidate, verification) {
+				found = true
+			} else {
+				violations = append(violations, "verification/"+verification.ID)
+			}
+		}
+		if !found {
+			violations = append(violations, "obligation/"+obligation.ID+"/verification")
+		}
+	}
+	for _, dod := range candidate.DoDInputs {
+		if !mappedDoD[dod.CandidateItemRef] {
+			violations = append(violations, "dod/"+dod.CandidateItemRef)
+		}
+	}
+	for _, review := range spec.Reviews {
+		if review.Status != workspacemodel.GoalReviewPass {
+			violations = append(violations, "review/"+review.Kind)
+		}
+	}
+	return normalizeStrings(violations)
+}
+
+func specRequirementIsRequired(requirements []workspacemodel.GoalSpecificationRequirement, id string) bool {
+	for _, requirement := range requirements {
+		if requirement.ID == id {
+			return requirement.Required
+		}
+	}
+	return false
+}
+
+// Profile references establish only an exact declaration identity. Neither a
+// profile match nor review PASS proves runtime owner feasibility or free-text
+// semantic completeness.
+func specificationVerificationProfileMatches(candidate workspacemodel.DefinitionAdmissionCandidate, verification workspacemodel.GoalSpecificationVerification) bool {
+	for _, profile := range candidate.RuntimeProfileContracts {
+		if profile.ID != verification.ProfileID {
+			continue
+		}
+		for _, declaration := range profile.EvidenceRequirements {
+			if declaration.ID == verification.EvidenceRequirementID && declaration.Scope == verification.Scope && specificationProfileHasProofDeclaration(declaration) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func specificationProfileHasProofDeclaration(declaration runtimecontract.RuntimeProfileEvidenceRequirement) bool {
+	// An ID and scope alone identify a placeholder, not a proof protocol. This
+	// only checks the existence of an authored proof declaration; actual
+	// capability feasibility remains a Runtime owner observation.
+	return len(declaration.RequiredEvidenceKinds) > 0 && len(declaration.AcceptedStepKinds) > 0
 }
 
 // CompileProfileOwnerFactBindings derives the exact pre-seal manifest from a

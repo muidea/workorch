@@ -206,6 +206,7 @@ type RuntimeSemanticProofObligation struct {
 	OwnerFactConvergences                           []RuntimeOwnerFactConvergence
 	MetricConstraints                               []string
 	ArtifactRefs                                    []string
+	VerificationPolicy                              *RuntimeVerificationPolicy `json:",omitempty"`
 	OwnerFactAcquisition                            *RuntimeSemanticOwnerFactAcquisition
 	ValidationFailureRepair                         *RuntimeSemanticValidationFailureRepair
 }
@@ -231,6 +232,10 @@ func (o RuntimeSemanticProofObligation) Normalized() RuntimeSemanticProofObligat
 	o.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(o.OwnerFactConvergences)
 	o.MetricConstraints = normalizeStrings(o.MetricConstraints)
 	o.ArtifactRefs = normalizeStrings(o.ArtifactRefs)
+	if o.VerificationPolicy != nil {
+		value := o.VerificationPolicy.Normalized()
+		o.VerificationPolicy = &value
+	}
 	if o.OwnerFactAcquisition != nil {
 		value := o.OwnerFactAcquisition.Normalized()
 		o.OwnerFactAcquisition = &value
@@ -257,6 +262,7 @@ func (o RuntimeSemanticProofObligation) Clone() RuntimeSemanticProofObligation {
 	o.OwnerFactConvergences = CloneRuntimeOwnerFactConvergences(o.OwnerFactConvergences)
 	o.MetricConstraints = append([]string(nil), o.MetricConstraints...)
 	o.ArtifactRefs = append([]string(nil), o.ArtifactRefs...)
+	o.VerificationPolicy = cloneRuntimeVerificationPolicy(o.VerificationPolicy)
 	if o.OwnerFactAcquisition != nil {
 		value := o.OwnerFactAcquisition.Clone()
 		o.OwnerFactAcquisition = &value
@@ -266,6 +272,11 @@ func (o RuntimeSemanticProofObligation) Clone() RuntimeSemanticProofObligation {
 }
 
 func (o RuntimeSemanticProofObligation) Validate() error {
+	if o.VerificationPolicy != nil {
+		if err := o.VerificationPolicy.Validate(); err != nil {
+			return err
+		}
+	}
 	if o.ValidationProofRequirement != nil {
 		if err := o.ValidationProofRequirement.Validate(); err != nil {
 			return err
@@ -375,6 +386,7 @@ func sameRuntimeSemanticProofObligations(left, right []RuntimeSemanticProofOblig
 			!sameRuntimeOwnerFactRequirements(l.RequiredOwnerFacts, r.RequiredOwnerFacts) ||
 			!SameRuntimeOwnerFactConvergences(l.OwnerFactConvergences, r.OwnerFactConvergences) ||
 			!sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) ||
+			!SameRuntimeVerificationPolicy(l.VerificationPolicy, r.VerificationPolicy) ||
 			!sameRuntimeSemanticOwnerFactAcquisition(l.OwnerFactAcquisition, r.OwnerFactAcquisition) ||
 			!sameRuntimeSemanticValidationFailureRepair(l.ValidationFailureRepair, r.ValidationFailureRepair) {
 			return false
@@ -469,8 +481,9 @@ func runtimeSemanticProofObligationDefinitionSource(o RuntimeSemanticProofObliga
 			value := o.ValidationFailureRepair.convergence()
 			return &value
 		}(),
-		MetricConstraints: append([]string(nil), o.MetricConstraints...),
-		ArtifactRefs:      append([]string(nil), o.ArtifactRefs...),
+		MetricConstraints:  append([]string(nil), o.MetricConstraints...),
+		ArtifactRefs:       append([]string(nil), o.ArtifactRefs...),
+		VerificationPolicy: cloneRuntimeVerificationPolicy(o.VerificationPolicy),
 	}.Normalized()
 }
 
@@ -541,6 +554,10 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 		}
 		writeHashStrings(h, value.MetricConstraints)
 		writeHashStrings(h, value.ArtifactRefs)
+		if value.VerificationPolicy != nil {
+			writeHashString(h, "verification-policy")
+			writeHashString(h, StableRuntimeVerificationPolicyHash(*value.VerificationPolicy))
+		}
 		if value.OwnerFactAcquisition == nil {
 			writeHashString(h, "no-owner-fact-acquisition")
 		} else {
@@ -611,6 +628,7 @@ func compileRuntimeSemanticDefinitionProofObligation(definitionRevision string, 
 		OwnerFactConvergences:                           CloneRuntimeOwnerFactConvergences(source.OwnerFactConvergences),
 		MetricConstraints:                               append([]string(nil), source.MetricConstraints...),
 		ArtifactRefs:                                    append([]string(nil), source.ArtifactRefs...),
+		VerificationPolicy:                              cloneRuntimeVerificationPolicy(source.VerificationPolicy),
 	}
 	validationRequirements, err := CompileRuntimeValidationProofRequirements(definitionRevision, []RuntimeCoverageItem{item}, []RuntimeDefinitionFocus{source})
 	if err != nil {
