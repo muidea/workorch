@@ -114,6 +114,15 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 					spec = &copy
 				}
 			}
+			if spec == nil && len(result.Requests) > 0 {
+				result.State = "outcome_unresolved"
+				for _, request := range result.Requests {
+					if request.State == "failed" {
+						result.State = "failed"
+						break
+					}
+				}
+			}
 			if spec != nil {
 				proposal.ProposalHash = spec.ContentHash()
 				for _, resource := range spec.Resources {

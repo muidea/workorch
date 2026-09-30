@@ -119,6 +119,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     <Space direction="vertical" style={{ width: '100%' }}>
       <Alert type="info" showIcon message="输入目标即可，验收清单由模板与目标派生。六类审查通过后才可确认；此操作不会启动 Run。" />
       {failure && <Alert type="error" showIcon message={failure} description={recovery ? '创建身份已保留。重试将恢复原草稿，不会重新创建工作空间。' : undefined} />}
+      {view?.requests?.filter(request => request.state === 'failed').map((request, index) => <Alert key={`${request.phase}-${request.reviewKind || index}`} type="error" showIcon message={`规格请求失败：${request.phase}${request.reviewKind ? ` · ${request.reviewKind}` : ''}`} description={`${request.failureCode || '请求失败'}。当前输入不会自动重发 provider；请修订输入后重新审查。`} />)}
       {recovery && !view && <Alert type="warning" message="存在未完成的创建请求。将先以原 payload 恢复，再保存当前修改。" />}
       <Form form={form} layout="vertical" onValuesChange={() => setEdited(true)} disabled={busy || ['confirming', 'admitting', 'admitted'].includes(view?.state || '')}>
         <Form.Item name="title" label="名称" rules={[{ required: true }]}><Input disabled={Boolean(recovery)} /></Form.Item>

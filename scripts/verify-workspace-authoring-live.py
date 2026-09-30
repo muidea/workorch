@@ -8,6 +8,36 @@ import urllib.request
 import uuid
 
 
+def require_zero_runs(response):
+    runs = response.get("runs")
+    if not isinstance(runs, list):
+        raise RuntimeError("Run 查询响应缺少有效 runs，不能证明零 Run")
+    if runs:
+        raise RuntimeError("创作、编译或确认阶段出现未显式启动的 Run")
+
+
+def require_ready_proposal(view):
+    if view.get("state") != "ready_to_confirm" or view.get("templateCurrent") is not True:
+        raise RuntimeError("未得到当前模板下可确认规格；保留草稿供诊断")
+    proposal = view.get("proposal")
+    if not isinstance(proposal, dict):
+        raise RuntimeError("待确认规格响应缺少 proposal")
+    for value in (view.get("inputHash"), view.get("derivationPermitId"), proposal.get("proposalHash"), proposal.get("specificationHash")):
+        if not isinstance(value, str) or not value:
+            raise RuntimeError("待确认规格缺少精确确认身份")
+    if proposal.get("derivationPermitId") != view["derivationPermitId"]:
+        raise RuntimeError("待确认规格派生身份不一致")
+    reviews = proposal.get("reviews")
+    kinds = {"dimension_coverage", "negative_path", "regression", "resource_environment", "traceability", "verifier_feasibility"}
+    if not isinstance(reviews, list) or len(reviews) != 6 or any(not isinstance(review, dict) for review in reviews):
+        raise RuntimeError("六审查响应不完整")
+    if {review.get("kind") for review in reviews} != kinds or any(review.get("status") != "PASS" or review.get("specificationHash") != proposal["proposalHash"] for review in reviews):
+        raise RuntimeError("六审查未全部 PASS 或未绑定当前提案")
+    if not isinstance(proposal.get("items"), list) or not proposal["items"]:
+        raise RuntimeError("派生验收清单为空")
+    return proposal
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8080")
@@ -50,9 +80,7 @@ def main():
     replay = request("POST", "/api/v1/workorch/workspace-authoring", payload)["authoring"]
     if replay["workspaceId"] != workspace_id or replay["inputHash"] != view["inputHash"]:
         raise RuntimeError("重复创建没有返回相同持久身份")
-    runs = request("GET", path + "/runs").get("runs", [])
-    if runs:
-        raise RuntimeError("创作阶段出现未显式启动的 Run")
+    require_zero_runs(request("GET", path + "/runs"))
     request("POST", path + "/authoring/compile")
     deadline = time.monotonic() + args.timeout
     while time.monotonic() < deadline:
@@ -63,26 +91,19 @@ def main():
     else:
         raise RuntimeError("编译超时或结果未决；不得以新请求自动重发 provider")
     print("state=" + view["state"], flush=True)
-    if view["state"] != "ready_to_confirm":
-        raise RuntimeError("未得到六审查通过的待确认规格；保留草稿供诊断")
-    proposal = view["proposal"]
-    reviews = proposal.get("reviews", [])
-    if len(reviews) != 6 or len({review["kind"] for review in reviews}) != 6 or any(review["status"] != "PASS" for review in reviews):
-        raise RuntimeError("六审查不完整或未全部 PASS")
-    if not proposal.get("items"):
-        raise RuntimeError("派生验收清单为空")
+    proposal = require_ready_proposal(view)
+    require_zero_runs(request("GET", path + "/runs"))
     if args.confirm:
         exact = {"inputHash": view["inputHash"], "derivationPermitId": view["derivationPermitId"],
                  "proposalHash": proposal["proposalHash"], "specificationHash": proposal["specificationHash"],
                  "expectedWorkspaceRevision": view["workspaceRevision"]}
         confirmed = request("POST", path + "/authoring/confirm", exact)["authoring"]
-        if confirmed["state"] != "admitted" or not confirmed.get("startupInputHash"):
+        if confirmed["state"] != "admitted" or confirmed.get("activationState") != "eligible" or not confirmed.get("startupInputHash"):
             raise RuntimeError("确认后未 eligible；请核对模板 proof 与准入阻塞")
         repeated = request("POST", path + "/authoring/confirm", exact)["authoring"]
         if repeated["startupInputHash"] != confirmed["startupInputHash"] or repeated["workspaceRevision"] != confirmed["workspaceRevision"]:
             raise RuntimeError("精确确认重放发生额外变更")
-    if request("GET", path + "/runs").get("runs", []):
-        raise RuntimeError("编译或确认自动创建 Run")
+    require_zero_runs(request("GET", path + "/runs"))
     print("PASS: 持久创建／六审查" + ("／确认准入重放" if args.confirm else "") + "／零自动 Run")
 
 

@@ -6,7 +6,7 @@ import type { DefinitionAuthoringView } from '../src/types.ts';
 const ready = (): DefinitionAuthoringView => ({
   workspaceId: 'ws', workspaceRevision: 8, state: 'ready_to_confirm', templateCurrent: true,
   inputHash: 'input', derivationPermitId: 'permit',
-  proposal: { goalText: '目标', items: [], proposalHash: 'proposal', specificationHash: 'spec', derivationPermitId: 'permit', reviews: Array.from({ length: 6 }, (_, index) => ({ kind: String(index), status: 'PASS' })) }
+  proposal: { goalText: '目标', items: [{ ref: 'item', text: '验收', sourceKind: 'DERIVED' }], proposalHash: 'proposal', specificationHash: 'spec', derivationPermitId: 'permit', reviews: ['dimension_coverage', 'negative_path', 'regression', 'resource_environment', 'traceability', 'verifier_feasibility'].map(kind => ({ kind, status: 'PASS', specificationHash: 'proposal' })) }
 });
 
 test('确认要求完整身份和六份 PASS，阻塞与过期模板不可确认', () => {
@@ -22,6 +22,21 @@ test('确认要求完整身份和六份 PASS，阻塞与过期模板不可确认
   const failed = ready();
   failed.proposal!.reviews![0].status = 'UNKNOWN';
   assert.equal(authoringCanConfirm(failed), false);
+});
+
+test('确认拒绝非规范审查、过期提案、派生身份不一致和空验收', () => {
+  const invented = ready();
+  invented.proposal!.reviews![0].kind = 'invented';
+  assert.equal(authoringCanConfirm(invented), false);
+  const stale = ready();
+  stale.proposal!.reviews![0].specificationHash = 'previous-proposal';
+  assert.equal(authoringCanConfirm(stale), false);
+  const mismatch = ready();
+  mismatch.proposal!.derivationPermitId = 'previous-permit';
+  assert.equal(authoringCanConfirm(mismatch), false);
+  const empty = ready();
+  empty.proposal!.items = [];
+  assert.equal(authoringCanConfirm(empty), false);
 });
 
 test('已接受任务及持久中间阶段继续查询，不把未决当成功', () => {

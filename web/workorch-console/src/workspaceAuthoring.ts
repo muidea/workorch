@@ -3,8 +3,10 @@ import type { DefinitionAuthoringCreate, DefinitionAuthoringView } from './types
 export const authoringRecoveryKey = 'workorch.workspace-authoring.v1';
 export type AuthoringRecovery = { request: DefinitionAuthoringCreate; workspaceId?: string; pendingConfirmation?: { inputHash: string; derivationPermitId: string; proposalHash: string; specificationHash: string; expectedWorkspaceRevision: number } };
 
+const reviewKinds = new Set(['dimension_coverage', 'negative_path', 'regression', 'resource_environment', 'traceability', 'verifier_feasibility']);
+
 export function authoringCanConfirm(view?: DefinitionAuthoringView): boolean {
-  return Boolean(view && view.state === 'ready_to_confirm' && view.templateCurrent && view.inputHash && view.derivationPermitId && view.proposal?.proposalHash && view.proposal.specificationHash && view.proposal.reviews?.length === 6 && view.proposal.reviews.every(review => review.status === 'PASS') && new Set(view.proposal.reviews.map(review => review.kind)).size === 6);
+  return Boolean(view && view.state === 'ready_to_confirm' && view.templateCurrent && view.inputHash && view.derivationPermitId && view.proposal?.proposalHash && view.proposal.specificationHash && view.proposal.derivationPermitId === view.derivationPermitId && view.proposal.items.length > 0 && view.proposal.reviews?.length === 6 && view.proposal.reviews.every(review => review.status === 'PASS' && reviewKinds.has(review.kind) && review.specificationHash === view.proposal!.proposalHash) && new Set(view.proposal.reviews.map(review => review.kind)).size === 6);
 }
 
 export function authoringNeedsPolling(view?: DefinitionAuthoringView): boolean {

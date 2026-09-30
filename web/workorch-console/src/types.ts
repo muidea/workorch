@@ -36,7 +36,7 @@ export type DefinitionAuthoringView = {
     proposalHash?: string;
     specificationHash?: string;
     derivationPermitId: string;
-    reviews?: { kind: string; status: string; reason?: string }[];
+    reviews?: { kind: string; status: string; reason?: string; specificationHash: string; evidenceRefs?: string[]; requirementIds?: string[] }[];
     verifications?: { id: string; obligationId: string; declaration: string; status: string; profileId?: string }[];
   };
 };

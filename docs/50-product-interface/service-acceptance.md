@@ -65,6 +65,16 @@ Do not reintroduce tests for `POST .../runs`, `POST .../runs/:runId/start`, `POS
 
 正式创建链路为 `POST /api/v1/workorch/workspace-authoring` → workspace-scoped `authoring` 查询／修订 → `authoring/compile` → `authoring/confirm`。创建 RequestID 与原 payload 必须保存并可精确重放；编译接受的 202 只表示 BackgroundRoutine 接受任务，不代表 owner 已完成规格或准入。查询始终以 Workspace 持久 ledger 为准，结果未决不得自动重发 provider。确认绑定原 input／permit／proposal／specification hashes；确认和准入不自动启动 Run。
 
+确定性验收使用正式 HTTP ports、真实 file-backed Workspace／File／Decision owners 与 mock provider，覆盖六审查、exact confirmation replay、重启、FAIL／UNKNOWN 阻塞及资源漂移拒绝。它不替代真实 provider 或浏览器交互验收：
+
+```bash
+go test ./internal/modules/application/workorchd/biz \
+  -run '^TestAuthoringHTTPFileBackedCompilationConfirmationAndRecovery$' -count=1
+python3 scripts/test-verify-workspace-authoring-live.py
+```
+
+验收器必须拒绝不完整证据：`runs` 必须明确为列表且为空；六审查必须覆盖规范 kind、全部 PASS 并绑定当前 proposalHash；待确认规格必须有非空验收项、完整确认身份与一致的 derivationPermitID；确认必须同时返回 `admitted`、`eligible` 和非空 StartupInputHash。缺字段不得按成功或零 Run 处理。
+
 对已启动、配置好 provider 的隔离实例，可显式执行：
 
 ```bash

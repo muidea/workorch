@@ -71,6 +71,44 @@ func TestDefinitionAuthoringViewKeepsFailureAndConfirmationVisible(t *testing.T)
 	}
 }
 
+func TestDefinitionAuthoringViewExposesProposalFailureAndUnresolvedOutcome(t *testing.T) {
+	for _, failure := range []string{"", "invalid_proposal"} {
+		t.Run(failure, func(t *testing.T) {
+			input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: "ws", Revision: 1, GoalText: "交付目标", TemplateID: "t"}
+			template := workspace.WorkspaceTemplate{ID: "t"}
+			record := workspace.DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshot: template, TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template)}
+			record, derivation, _, err := record.ReserveDerivation("derive/"+record.InputHash, "provider", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			acceptance := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"明确验收"}}
+			record, err = record.CompleteDerivation(derivation.PermitID, &acceptance, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, proposal, _, err := record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{RequestID: "proposal", DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if failure != "" {
+				record, err = record.CompleteSpecification(proposal.PermitID, nil, nil, failure)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			query := workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: 4, Record: &record, CurrentTemplateAvailable: true, CurrentTemplateSnapshotHash: record.TemplateSnapshotHash}
+			view, err := definitionAuthoringView(query)
+			want := "outcome_unresolved"
+			if failure != "" {
+				want = "failed"
+			}
+			if err != nil || view.State != want || len(view.Requests) != 1 || view.Requests[0].FailureCode != failure || view.Proposal == nil || view.Proposal.ProposalHash != "" {
+				t.Fatalf("proposal outcome hidden as derived: %+v %v", view, err)
+			}
+		})
+	}
+}
+
 func TestSaveDefinitionAuthoringViewReplaysLostResponse(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
