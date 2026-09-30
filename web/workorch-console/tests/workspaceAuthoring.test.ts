@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { authoringCanConfirm, authoringNeedsPolling, parseAuthoringRecovery } from '../src/workspaceAuthoring.ts';
+import { authoringCanConfirm, authoringCanReplayConfirmation, authoringNeedsPolling, parseAuthoringRecovery } from '../src/workspaceAuthoring.ts';
 import type { DefinitionAuthoringView } from '../src/types.ts';
 
 const ready = (): DefinitionAuthoringView => ({
@@ -39,6 +39,20 @@ test('确认拒绝非规范审查、过期提案、派生身份不一致和空�
   assert.equal(authoringCanConfirm(empty), false);
 });
 
+test('刷新后仅允许相同工作空间和四份精确身份的原确认重放', () => {
+  const view = ready();
+  const recovery = { request: { requestId: 'stable', title: '名称', templateId: 'template', input: { goalText: '目标' } }, workspaceId: 'ws', pendingConfirmation: { inputHash: 'input', derivationPermitId: 'permit', proposalHash: 'proposal', specificationHash: 'spec', expectedWorkspaceRevision: 8 } };
+  assert.equal(authoringCanReplayConfirmation(view, recovery), true);
+  for (const state of ['confirming', 'admitting']) assert.equal(authoringCanReplayConfirmation({ ...view, state, workspaceRevision: 12 }, recovery), true);
+  for (const state of ['draft', 'review_blocked', 'outcome_unresolved', 'clarification_required', 'admitted']) assert.equal(authoringCanReplayConfirmation({ ...view, state }, recovery), false);
+  assert.equal(authoringCanReplayConfirmation({ ...view, inputHash: 'revision-2' }, recovery), false);
+  assert.equal(authoringCanReplayConfirmation(view, { ...recovery, workspaceId: 'other' }), false);
+  for (const field of ['inputHash', 'derivationPermitId', 'proposalHash', 'specificationHash'] as const) {
+    assert.equal(authoringCanReplayConfirmation(view, { ...recovery, pendingConfirmation: { ...recovery.pendingConfirmation, [field]: 'stale' } }), false);
+  }
+  assert.equal(authoringCanReplayConfirmation(view, undefined), false);
+});
+
 test('已接受任务及持久中间阶段继续查询，不把未决当成功', () => {
   assert.equal(authoringNeedsPolling({ ...ready(), state: 'draft', compilationAccepted: true }), true);
   for (const state of ['deriving', 'derived', 'reviewing', 'outcome_unresolved']) assert.equal(authoringNeedsPolling({ ...ready(), state }), true);
@@ -51,4 +65,8 @@ test('恢复保留发送前创建身份与原 payload，拒绝损坏记录', () 
   assert.equal(parseAuthoringRecovery('{'), undefined);
   assert.equal(parseAuthoringRecovery('{}'), undefined);
   assert.equal(parseAuthoringRecovery(null), undefined);
+  const pendingConfirmation = { inputHash: 'input', derivationPermitId: 'permit', proposalHash: 'proposal', specificationHash: 'spec', expectedWorkspaceRevision: 8 };
+  assert.deepEqual(parseAuthoringRecovery(JSON.stringify({ ...saved, pendingConfirmation })), { ...saved, pendingConfirmation });
+  assert.equal(parseAuthoringRecovery(JSON.stringify({ request: saved.request, pendingConfirmation })), undefined);
+  assert.equal(parseAuthoringRecovery(JSON.stringify({ ...saved, pendingConfirmation: { ...pendingConfirmation, specificationHash: '' } })), undefined);
 });

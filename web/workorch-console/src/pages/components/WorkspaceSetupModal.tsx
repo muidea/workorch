@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, App as AntApp, Button, Form, Input, List, Modal, Select, Space, Tag, Typography } from 'antd';
 import { workorchApi } from '../../api';
 import { errorMessage } from '../../helpers';
-import { authoringCanConfirm, authoringNeedsPolling, authoringRecoveryKey, parseAuthoringRecovery } from '../../workspaceAuthoring';
+import { authoringCanConfirm, authoringCanReplayConfirmation, authoringNeedsPolling, authoringRecoveryKey, parseAuthoringRecovery } from '../../workspaceAuthoring';
 import type { AuthoringRecovery } from '../../workspaceAuthoring';
 import type { DefinitionAuthoringView, WorkspaceTemplate } from '../../types';
 
@@ -90,8 +90,10 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     }
   };
 
+  const canConfirm = !edited && (recovery?.pendingConfirmation ? authoringCanReplayConfirmation(view, recovery) : authoringCanConfirm(view));
+
   const confirm = async () => {
-    if (!view || edited || (!authoringCanConfirm(view) && !recovery?.pendingConfirmation && !['confirming', 'admitting'].includes(view.state))) return;
+    if (!view || !canConfirm) return;
     setBusy(true);
     setFailure('');
     try {
@@ -114,7 +116,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     <Button onClick={onClose}>关闭（已保存草稿可恢复）</Button>
     {view?.state === 'admitted' && <Button type="primary" onClick={async () => { await onCreated(view.workspaceId); localStorage.removeItem(authoringRecoveryKey); onClose(); }}>进入已准入工作空间</Button>}
     <Button loading={busy} onClick={generate} disabled={busy || ['confirming', 'admitting', 'admitted'].includes(view?.state || '')}>保存并生成／恢复审查</Button>
-    <Button type="primary" loading={busy} onClick={confirm} disabled={busy || edited || (!authoringCanConfirm(view) && !recovery?.pendingConfirmation && !['confirming', 'admitting'].includes(view?.state || ''))}>确认规格并准入</Button>
+    <Button type="primary" loading={busy} onClick={confirm} disabled={busy || !canConfirm}>确认规格并准入</Button>
   </Space>}>
     <Space direction="vertical" style={{ width: '100%' }}>
       <Alert type="info" showIcon message="输入目标即可，验收清单由模板与目标派生。六类审查通过后才可确认；此操作不会启动 Run。" />
@@ -131,6 +133,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
       </Form>
       {view && <>
         <Typography.Text>草稿：{view.workspaceId} · revision {view.inputRevision} · {view.state}</Typography.Text>
+        {recovery?.pendingConfirmation && !authoringCanReplayConfirmation(view, recovery) && view.state !== 'admitted' && <Alert type="warning" message="原确认请求与当前草稿不一致，不能用旧凭据确认新规格。请保存修订并重新审查。" />}
         {edited && <Alert type="warning" message="输入已修改，旧规格不可确认。请保存并重新审查。" />}
         {!view.templateCurrent && <Alert type="warning" message="模板已变化或不可用，请保存新的创作 revision。" />}
         {view.state === 'outcome_unresolved' && <Alert type="warning" message="已有持久请求结果未决，不会自动重发 provider。可查询恢复结果或修改输入形成新 revision。" />}
