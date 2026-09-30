@@ -1,4 +1,5 @@
 import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, CreateWorkspaceRequest, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPCapabilityMutation, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderInferenceSelection, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { DefinitionAuthoringCreate, DefinitionAuthoringInput, DefinitionAuthoringView } from './types';
 import { parseWorkspaceExecutionAdmission } from './workspaceExecutionAdmission';
 
 const apiBase = '/api/v1/workorch';
@@ -184,6 +185,30 @@ export const workorchApi = {
       body: JSON.stringify({ providerId: selection.target.providerId, modelId: selection.target.modelId, reasoningEffort: selection.reasoningEffort, expectedRevision })
     });
     return body.workspace;
+  },
+  createDefinitionAuthoring: async (input: DefinitionAuthoringCreate) => {
+    const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspace-authoring`, { method: 'POST', body: JSON.stringify(input) });
+    return body.authoring;
+  },
+  readDefinitionAuthoring: async (id: string) => {
+    const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspaces/${encodeURIComponent(id)}/authoring`);
+    return body.authoring;
+  },
+  saveDefinitionAuthoring: async (id: string, input: DefinitionAuthoringInput, templateId: string, revision: number, hash: string) => {
+    const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspaces/${encodeURIComponent(id)}/authoring`, {
+      method: 'PUT', body: JSON.stringify({ input, templateId, expectedWorkspaceRevision: revision, expectedInputHash: hash })
+    });
+    return body.authoring;
+  },
+  compileDefinitionAuthoring: async (id: string) => {
+    const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspaces/${encodeURIComponent(id)}/authoring/compile`, { method: 'POST' });
+    return body.authoring;
+  },
+  confirmDefinitionAuthoring: async (view: DefinitionAuthoringView) => {
+    const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspaces/${encodeURIComponent(view.workspaceId)}/authoring/confirm`, {
+      method: 'POST', body: JSON.stringify({ inputHash: view.inputHash, derivationPermitId: view.derivationPermitId, proposalHash: view.proposal?.proposalHash, specificationHash: view.proposal?.specificationHash, expectedWorkspaceRevision: view.workspaceRevision })
+    });
+    return body.authoring;
   },
   createWorkspace: async (requestBody: CreateWorkspaceRequest) => {
     const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces`, {

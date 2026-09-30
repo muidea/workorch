@@ -1,3 +1,46 @@
+export type DefinitionAuthoringInput = {
+  goalText: string;
+  acceptanceRequirements?: string[];
+  resourceRefs?: string[];
+};
+
+export type DefinitionAuthoringCreate = {
+  requestId: string;
+  title: string;
+  description?: string;
+  templateId: string;
+  deliverableDirectory?: string;
+  input: DefinitionAuthoringInput;
+};
+
+export type DefinitionAuthoringView = {
+  workspaceId: string;
+  workspaceRevision: number;
+  state: string;
+  compilationAccepted?: boolean;
+  input?: DefinitionAuthoringInput;
+  inputRevision?: number;
+  inputHash?: string;
+  templateId?: string;
+  templateCurrent: boolean;
+  derivationPermitId?: string;
+  confirmationPhase?: string;
+  blockingTicketId?: string;
+  admissionViolationCode?: string;
+  admissionOffendingRefs?: string[];
+  startupInputHash?: string;
+  requests?: { phase: string; reviewKind?: string; state: string; failureCode?: string }[];
+  proposal?: {
+    goalText: string;
+    items: { ref: string; text: string; sourceKind: string }[];
+    proposalHash?: string;
+    specificationHash?: string;
+    derivationPermitId: string;
+    reviews?: { kind: string; status: string; reason?: string }[];
+    verifications?: { id: string; obligationId: string; declaration: string; status: string; profileId?: string }[];
+  };
+};
+
 export type ServiceConfiguration = {
   server: ServerConfiguration;
   repository: RepositoryConfiguration;

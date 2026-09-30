@@ -85,7 +85,11 @@ func registerDefinitionAuthoringRoutes(router engine.RouteRegistry, state *serve
 			writeBusinessError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, definitionAuthoringResponse{Authoring: view})
+		status := http.StatusOK
+		if view.CompilationAccepted {
+			status = http.StatusAccepted
+		}
+		writeJSON(w, status, definitionAuthoringResponse{Authoring: view})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/authoring/confirm", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		id, ok := definitionAuthoringWorkspaceFromPath(r.URL.Path, "confirm")

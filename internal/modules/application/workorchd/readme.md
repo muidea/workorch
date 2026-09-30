@@ -22,7 +22,7 @@ Workspace 的启动输入是 Goal、DoD、Template/Profile snapshot 与 resolved
 `StartupInputHash` 与 activation eligibility。Definition 只接受完整 `all_of`；unsupported relation 必须形成 blocking
 clarification，不能创建 Run。启动输入封存后，执行期 LLM 处理不得修改它。
 
-Goal-only 创作用例先保存 Workspace owner 的版本化草稿，以持久 reserve permit 调用派生和六类独立审查，确认 exact proposal/specification hash 后才物化正式定义并准入。阻塞后继沿同一候选 lineage 重新审查；Application 只协调 Decision ticket 的替换或 resolution，Workspace 验证其持久来源并独占 pending → eligible 转换。刷新投影以 owner 查询为准；pending startup 显示 `admitting`，不能显示已准入或启动 Run。当前正式创作已接稳定 management ports 和 HTTP 创建／查询／修订／编译／确认 route，创建 RequestID 由 Workspace owner 持久验证；Web 向导、后台编译生命周期、旧创建旁路收口及完整端到端验收仍未完成。当前 HTTP 编译为同步调用，不能当作已交付的后台任务恢复合同。
+Goal-only 创作用例先保存 Workspace owner 的版本化草稿，以持久 reserve permit 调用派生和六类独立审查，确认 exact proposal/specification hash 后才物化正式定义并准入。阻塞后继沿同一候选 lineage 重新审查；Application 只协调 Decision ticket 的替换或 resolution，Workspace 验证其持久来源并独占 pending → eligible 转换。刷新投影以 owner 查询为准；pending startup 显示 `admitting`，不能显示已准入或启动 Run。当前正式创作已接稳定 management ports 和 HTTP 创建／查询／修订／编译／确认 route，创建 RequestID 由 Workspace owner 持久验证；Web 创建向导已改为单一创作／审查／确认入口，发送前保存创建身份，重新打开按 owner 查询恢复。生产 HTTP 编译由 Application 的 BackgroundRoutine 托管，接受回执返回 202，任务使用独立于 HTTP 请求的生命周期 context，Stop 取消并排空已接受任务；任务数有界，结果与预算仍只在 Workspace ledger。已 reserve 但结果未决不重发 provider。当前尚未完成旧 REST 创建旁路收口、完整端到端恢复及显式启动验收，不能以 Web helper 测试或构建通过替代这些合同。
 
 `resume` 是既有 Run 的 continuation，不携带 fresh bootstrap；`restart` 使用当前 eligible Workspace definition 编译 fresh
 bootstrap。两者都进入 Workspace owner 的 workspace-scoped execution admission，Application 不直达 Run mutation，也不创建

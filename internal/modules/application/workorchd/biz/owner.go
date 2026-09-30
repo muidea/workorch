@@ -35,13 +35,14 @@ const ModuleID = modulecommon.ModuleID
 // module root only delegates framework callbacks to it.
 type Biz struct {
 	basebiz.Base
-	service       *server.Service
-	runtime       *runtimeComponent
-	workspaceGate *workspaceCommandGateway
-	cliDispatcher *appservice.CLICommandDispatcher
-	execution     *executionusecase.UseCase
-	admissions    *executionAdmissionLifecycle
-	projection    *projectioncomponent.Component
+	service        *server.Service
+	runtime        *runtimeComponent
+	workspaceGate  *workspaceCommandGateway
+	cliDispatcher  *appservice.CLICommandDispatcher
+	execution      *executionusecase.UseCase
+	admissions     *executionAdmissionLifecycle
+	projection     *projectioncomponent.Component
+	authoringTasks *authoringTaskLifecycle
 }
 
 func New() *Biz { return &Biz{} }
@@ -63,7 +64,9 @@ func (b *Biz) Setup(ctx context.Context, commandHub magicevent.Hub, backgroundRo
 	}
 	b.runtime = runtime
 	b.workspaceGate = &workspaceCommandGateway{hub: b.EventHub(), runtime: runtime}
+	b.authoringTasks = newAuthoringTaskLifecycle()
 	applicationPorts := runtime.applicationPorts()
+	b.configureAuthoringBackgroundPorts(&applicationPorts)
 	if err := b.service.StartupWithApplicationPorts(ctx, modulecommon.ServiceName, applicationPorts, b.BackgroundRoutine()); err != nil {
 		_ = b.runtime.close(ctx)
 		b.runtime = nil
@@ -142,6 +145,9 @@ func (b *Biz) Stop(ctx context.Context) {
 		// the Workorchd command subscription, execution use case and projection
 		// are still live. This preserves the lane transaction through shutdown.
 		b.service.DrainHTTP(ctx)
+	}
+	if b.authoringTasks != nil {
+		b.authoringTasks.stop()
 	}
 	if admissions != nil {
 		admissions.wait()

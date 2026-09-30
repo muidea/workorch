@@ -85,6 +85,7 @@ type DefinitionAuthoringRequestState struct {
 // DefinitionAuthoringView is a bounded management read model, not a submitted
 // owner record. In particular, File snapshot content never crosses this API.
 type DefinitionAuthoringView struct {
+	CompilationAccepted    bool                              `json:"compilationAccepted,omitempty"`
 	WorkspaceID            string                            `json:"workspaceId"`
 	WorkspaceRevision      uint64                            `json:"workspaceRevision"`
 	State                  string                            `json:"state"`
