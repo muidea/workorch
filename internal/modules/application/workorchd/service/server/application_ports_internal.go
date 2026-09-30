@@ -19,6 +19,11 @@ func applicationOperationsFromPorts(ports ApplicationPorts) applicationOperation
 			listWorkspaces:                  ports.Workspace.ListWorkspaces,
 		},
 		definitionOperations: definitionOperations{
+			authoring: DefinitionAuthoringPorts{
+				Create: ports.Definition.CreateDefinitionAuthoring, Read: ports.Definition.ReadDefinitionAuthoring,
+				Save: ports.Definition.SaveDefinitionAuthoring, Compile: ports.Definition.CompileDefinitionAuthoring,
+				Confirm: ports.Definition.ConfirmDefinitionAuthoring,
+			},
 			defineGoal:                  ports.Definition.DefineGoal,
 			updateGoal:                  ports.Definition.UpdateGoal,
 			readGoal:                    ports.Definition.ReadGoal,

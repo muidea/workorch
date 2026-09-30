@@ -2,14 +2,11 @@ package activationports
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governanceports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
@@ -18,8 +15,8 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 	definitioncontract "github.com/muidea/workorch/internal/pkg/workorchdefinitioncontract"
-	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -284,85 +281,60 @@ func definitionAdmissionCandidateForIdentity(workspace *workspacemodel.Workspace
 }
 
 func definitionAdmissionProfileBindings(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) ([]workspacemodel.DefinitionAdmissionPolicyBinding, []runtimecontract.RuntimeProfileContract, []workspacemodel.DefinitionRequiredOwnerFactBinding, []workspacemodel.DefinitionOwnerFactConvergenceBinding, string, error) {
-	if workspace == nil || template == nil {
-		return nil, nil, nil, nil, "", common.ErrInvalidArgument
-	}
-	// Check both source layers before merge can discard a malformed collection.
-	for _, input := range []map[string]any{template.ContextHints.Map(), workspace.ContextHints.Map()} {
-		if err := validateRuntimeExecutionLimitsInput(input); err != nil {
-			return nil, nil, nil, nil, "", err
-		}
-	}
-	if err := validateRuntimeProfileInputShape(template.ContextHints.Map()); err != nil {
-		return nil, nil, nil, nil, "", err
-	}
-	if err := validateRuntimeProfileInputShape(workspace.ContextHints.Map()); err != nil {
-		return nil, nil, nil, nil, "", err
-	}
-	effective := activationcore.MergeTemplateWorkspaceContextHintsForExecutionContract(template.ContextHints.Map(), workspace.ContextHints.Map())
-	rawProfiles := runtimeMap(effective["profileContracts"])
-	if err := validateRuntimePresealTargetDeclarations(map[string]any{"profileContracts": rawProfiles}, nil); err != nil {
-		return nil, nil, nil, nil, "", err
-	}
-	evidencePolicyBindings, err := definitionAdmissionEvidencePolicyBindings(workspace, template)
+	bindings, err := definitionconfiguration.Compile(workspace, template)
 	if err != nil {
 		return nil, nil, nil, nil, "", err
 	}
-	contract := runtimeExecutionContract(map[string]any{"profileContracts": rawProfiles})
-	profiles := runtimecontract.NormalizeRuntimeProfileContracts(contract.ProfileContracts)
-	policies := make([]workspacemodel.DefinitionAdmissionPolicyBinding, 0, len(profiles)+len(evidencePolicyBindings))
-	for _, profile := range profiles {
-		encoded, err := json.Marshal(rawProfiles[profile.ID])
-		if err != nil {
-			return nil, nil, nil, nil, "", fmt.Errorf("%w: profile %q cannot be canonically sealed", common.ErrConflict, profile.ID)
-		}
-		h := sha256.New()
-		_, _ = fmt.Fprintf(h, "%08x%s%08x%s", len(profile.ID), profile.ID, len(encoded), encoded)
-		policies = append(policies, workspacemodel.DefinitionAdmissionPolicyBinding{
-			PolicyRef: "profile:" + profile.ID, Revision: "runtime-profile-contract-v1",
-			SnapshotHash: "profile-snapshot-sha256:" + hex.EncodeToString(h.Sum(nil)),
-		})
-	}
-	policies = append(policies, evidencePolicyBindings...)
-	if limits := runtimeExecutionLimits(effective); limits != nil {
-		policies = append(policies, runtimeExecutionLimitsAdmissionBinding(*limits))
-	}
-	required, convergences := definitionadmission.CompileProfileOwnerFactBindings(profiles)
-	return policies, profiles, required, convergences, runtimecontract.StableRuntimeProfileContractsHash(profiles), nil
+	return bindings.PolicyBindings, bindings.ProfileContracts, bindings.RequiredOwnerFacts, bindings.OwnerFactConvergences, bindings.ProfileContractsHash, nil
 }
 
-// definitionAdmissionEvidencePolicyBindings seals both Template input and the
-// Workspace-owned effective copy before promotion. Runtime activation consumes
-// the Workspace policies, while the Template remains a formal startup input;
-// neither surface may hide the removed exact prospective-target declaration.
-func definitionAdmissionEvidencePolicyBindings(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) ([]workspacemodel.DefinitionAdmissionPolicyBinding, error) {
-	if workspace == nil || template == nil {
-		return nil, common.ErrInvalidArgument
+func AuthoringAdmissionCandidate(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) (workspacemodel.DefinitionAdmissionCandidate, error) {
+	if workspace == nil || template == nil || workspace.DefinitionAuthoring == nil || workspace.DefinitionAuthoringConfirmation == nil || workspace.ID == "" || template.ID != workspace.TemplateID || workspace.StartupInput != nil || workspace.ActivationAdmission != nil || len(workspace.DefinitionAdmissionCandidates) != len(workspace.DefinitionAuthoringHistory) || workspace.ValidateDefinitionAuthoringHistory() != nil || workspace.DefinitionSpecificationLedger != nil {
+		return workspacemodel.DefinitionAdmissionCandidate{}, common.ErrConflict
 	}
-	if err := validateRuntimeEvidencePolicyInputs("Template "+strings.TrimSpace(template.ID), template.EvidencePolicies); err != nil {
-		return nil, err
+	if len(workspace.DefinitionAuthoringHistory) > 0 && workspace.DefinitionAuthoringConfirmation.ValidateSuccessor(workspace.DefinitionAuthoringHistory[len(workspace.DefinitionAuthoringHistory)-1].Confirmation) != nil {
+		return workspacemodel.DefinitionAdmissionCandidate{}, common.ErrConflict
 	}
-	if err := validateRuntimeEvidencePolicyInputs("Workspace "+strings.TrimSpace(string(workspace.ID)), workspace.EvidencePolicies); err != nil {
-		return nil, err
+	journal := *workspace.DefinitionAuthoringConfirmation
+	if journal.ConfigurationHash != workspacemodel.WorkspaceConfigurationHash(workspace) || journal.TemplateSnapshotHash != workspacemodel.WorkspaceTemplateSnapshotHash(template) {
+		return workspacemodel.DefinitionAdmissionCandidate{}, common.ErrConflict
 	}
-	ret := make([]workspacemodel.DefinitionAdmissionPolicyBinding, 0, len(template.EvidencePolicies)+len(workspace.EvidencePolicies))
-	appendBindings := func(owner string, policies []workorcheventpayload.Payload) {
-		for idx, policy := range policies {
-			policyID, _ := policy.String("id")
-			policyID = strings.TrimSpace(policyID)
-			canonical := policy.CanonicalString()
-			h := sha256.New()
-			_, _ = fmt.Fprintf(h, "%08x%s", len(canonical), canonical)
-			ret = append(ret, workspacemodel.DefinitionAdmissionPolicyBinding{
-				PolicyRef:    fmt.Sprintf("%s-evidence-policy:%06d:%s", owner, idx+1, policyID),
-				Revision:     "runtime-evidence-policy-v1",
-				SnapshotHash: "evidence-policy-snapshot-sha256:" + hex.EncodeToString(h.Sum(nil)),
-			})
-		}
+	goal, dod, spec, err := workspacemodel.ConfirmedAuthoringCandidateInputs(workspace.DefinitionAuthoring, journal, workspace.ID)
+	if err != nil {
+		return workspacemodel.DefinitionAdmissionCandidate{}, err
 	}
-	appendBindings("template", template.EvidencePolicies)
-	appendBindings("workspace", workspace.EvidencePolicies)
-	return ret, nil
+	ref, err := workspacemodel.ConfirmedAuthoringAdmissionRef(workspace.DefinitionAuthoring, journal, workspace.ID)
+	if err != nil {
+		return workspacemodel.DefinitionAdmissionCandidate{}, err
+	}
+	policyBindings, profileContracts, requiredFacts, convergences, profileHash, err := definitionAdmissionProfileBindings(workspace, template)
+	if err != nil {
+		return workspacemodel.DefinitionAdmissionCandidate{}, err
+	}
+	refs := make([]string, len(dod))
+	for index := range dod {
+		refs[index] = dod[index].CandidateItemRef
+	}
+	sort.Strings(refs)
+	lineageID := "authoring-" + workspacemodel.StableDefinitionAuthoringConfirmationID(workspace.ID, journal.InputHash, journal.DerivationPermitID, journal.SpecificationHash)
+	if len(workspace.DefinitionAuthoringHistory) > 0 {
+		lineageID = workspace.DefinitionAdmissionCandidates[0].CandidateID
+	}
+	candidate := workspacemodel.DefinitionAdmissionCandidate{
+		SchemaVersion: workspacemodel.DefinitionAdmissionCandidateSchemaVersionCurrent,
+		WorkspaceID:   workspace.ID, CandidateID: lineageID, CandidateRevision: uint64(len(workspace.DefinitionAuthoringHistory) + 1),
+		GoalInput: goal, DoDInputs: dod,
+		WorkspaceTemplateSnapshot: workspacemodel.DefinitionTemplateSnapshot{TemplateRef: template.ID, Revision: "template:" + journal.TemplateSnapshotHash, SnapshotHash: journal.TemplateSnapshotHash},
+		AdmissionPolicyBindings:   policyBindings, RuntimeProfileContracts: profileContracts, RequiredOwnerFactBindings: requiredFacts, OwnerFactConvergenceBindings: convergences, RuntimeProfileContractsHash: profileHash,
+		AdmissionCompilerVersion: workspacemodel.DefinitionAdmissionCompilerVersionCurrent, ResolvedProjectWorkspaceDirectory: workspace.DeliverableDirectory,
+		ProposedRelationInputs: []workspacemodel.DefinitionProposedRelationInput{{RelationRef: "terminal-all-of", RelationKind: "all_of", SourceItemRefs: refs, TargetItemRefs: []string{goal.CandidateItemRef}}},
+		Specification:          &spec, AuthoringRef: &ref,
+	}
+	candidate = candidate.WithHash()
+	if err := candidate.Validate(); err != nil {
+		return workspacemodel.DefinitionAdmissionCandidate{}, err
+	}
+	return candidate, nil
 }
 
 func validateCurrentWorkspaceDefinitionAdmission(workspace *workspacemodel.Workspace) error {

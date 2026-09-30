@@ -96,6 +96,9 @@ func (m *Biz) updateWorkspace(ctx context.Context, ev magicevent.Event) (workspa
 	if err := workspaceDeletionRejectsMutation(current); err != nil {
 		return workspaceCommandResponse{}, err
 	}
+	if current.DefinitionAuthoringConfirmation != nil {
+		return workspaceCommandResponse{}, common.ErrConflict
+	}
 	// Generic metadata updates deliberately preserve lifecycle-owned fields.
 	// Workspace.State and ActiveRunID may only be changed by lifecycle_reducer.
 	item := workspaceFromUpdateCommand(current, cmd)
@@ -134,6 +137,9 @@ func (m *Biz) updateWorkspaceLLMSelection(ctx context.Context, ev magicevent.Eve
 	}
 	if err := workspaceDeletionRejectsMutation(item); err != nil {
 		return workspaceCommandResponse{}, err
+	}
+	if item.DefinitionAuthoringConfirmation != nil {
+		return workspaceCommandResponse{}, common.ErrConflict
 	}
 	if cmd.ExpectedRevision == 0 || item.Revision != cmd.ExpectedRevision {
 		return workspaceCommandResponse{}, common.ErrConflict

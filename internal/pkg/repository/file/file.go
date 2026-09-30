@@ -4616,6 +4616,24 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 			cloned.DefinitionAdmissionCandidates[idx] = item.DefinitionAdmissionCandidates[idx].Clone()
 		}
 	}
+	if item.DefinitionAuthoringCreation != nil {
+		creation := *item.DefinitionAuthoringCreation
+		cloned.DefinitionAuthoringCreation = &creation
+	}
+	if item.DefinitionAuthoring != nil {
+		record := item.DefinitionAuthoring.Clone()
+		cloned.DefinitionAuthoring = &record
+	}
+	if item.DefinitionAuthoringConfirmation != nil {
+		confirmation := item.DefinitionAuthoringConfirmation.Clone()
+		cloned.DefinitionAuthoringConfirmation = &confirmation
+	}
+	if item.DefinitionAuthoringHistory != nil {
+		cloned.DefinitionAuthoringHistory = make([]workspace.DefinitionAuthoringConfirmedRevision, len(item.DefinitionAuthoringHistory))
+		for index, revision := range item.DefinitionAuthoringHistory {
+			cloned.DefinitionAuthoringHistory[index] = revision.Clone()
+		}
+	}
 	if item.DefinitionSpecificationLedger != nil {
 		ledger := item.DefinitionSpecificationLedger.Clone()
 		cloned.DefinitionSpecificationLedger = &ledger

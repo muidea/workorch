@@ -11,24 +11,36 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-// definitionAdmissionInternalEvent is the only Workspace-owner input allowed
-// to select a pre-seal admission transition. Its public source carries one
-// immutable candidate intent and, at most, one immutable Decision-owner fact.
+// definitionAdmissionInternalEvent is the sole Workspace owner input selecting
+// pre-seal admission, including confirmed authoring. Exactly one candidate
+// ingress is present; legacy intents may carry one Decision-owner fact.
 type definitionAdmissionInternalEvent struct {
-	WorkspaceID common.WorkspaceID
-	Intent      *workspaceevents.DefinitionAdmissionIntentCommand
-	Template    *workspacemodel.WorkspaceTemplate
+	WorkspaceID       common.WorkspaceID
+	Intent            *workspaceevents.DefinitionAdmissionIntentCommand
+	Authoring         *workspaceevents.AdmitDefinitionAuthoringCommand
+	VerifiedResources *verifiedAuthoringResources
+	Template          *workspacemodel.WorkspaceTemplate
 }
 
 type definitionAdmissionTransition struct {
-	Next   *workspacemodel.Workspace
-	Noop   bool
-	Result *workspaceevents.DefinitionAdmissionIntentResult
+	Next            *workspacemodel.Workspace
+	Noop            bool
+	Result          *workspaceevents.DefinitionAdmissionIntentResult
+	AuthoringResult *workspaceevents.AdmitDefinitionAuthoringResult
 }
 
 func normalizeDefinitionAdmissionInternalEvent(event definitionAdmissionInternalEvent) (definitionAdmissionInternalEvent, error) {
-	if event.WorkspaceID == "" || event.Intent == nil {
+	if event.WorkspaceID == "" || (event.Intent == nil) == (event.Authoring == nil) || (event.Intent != nil && event.VerifiedResources != nil) {
 		return definitionAdmissionInternalEvent{}, common.ErrInvalidArgument
+	}
+	if event.Authoring != nil {
+		command := *event.Authoring
+		if event.Intent != nil || event.Template != nil || command.Validate() != nil || command.Candidate.WorkspaceID != event.WorkspaceID {
+			return definitionAdmissionInternalEvent{}, common.ErrInvalidArgument
+		}
+		command.Candidate = command.Candidate.Clone()
+		event.Authoring = &command
+		return event, nil
 	}
 	intent := event.Intent.Normalized()
 	if err := intent.Validate(); err != nil || intent.Candidate.WorkspaceID != event.WorkspaceID {
@@ -42,11 +54,18 @@ func normalizeDefinitionAdmissionInternalEvent(event definitionAdmissionInternal
 }
 
 func reduceDefinitionAdmissionInternalEvent(current *workspacemodel.Workspace, event definitionAdmissionInternalEvent) (definitionAdmissionTransition, error) {
-	if current == nil || current.ID != event.WorkspaceID || event.Intent == nil {
+	if current == nil || current.ID != event.WorkspaceID || (event.Intent == nil) == (event.Authoring == nil) || (event.Authoring != nil && event.Template != nil) {
 		return definitionAdmissionTransition{}, common.ErrConflict
 	}
 	if err := workspaceDeletionRejectsMutation(current); err != nil {
 		return definitionAdmissionTransition{}, err
+	}
+	if event.Authoring != nil {
+		return reduceConfirmedAuthoringAdmission(current, *event.Authoring)
+	}
+	if current.DefinitionAuthoring != nil || current.DefinitionAuthoringConfirmation != nil {
+		// 创作草稿和确认 journal 只能通过审查来源校验的专用准入入口。
+		return definitionAdmissionTransition{}, fmt.Errorf("%w: authoring draft requires reviewed confirmation before admission", common.ErrConflict)
 	}
 	if event.Intent.CurrentTemplate {
 		baseline := uint64(0)
@@ -82,6 +101,129 @@ func reduceDefinitionAdmissionInternalEvent(current *workspacemodel.Workspace, e
 		return definitionAdmissionTransition{}, fmt.Errorf("%w: invalid current definition admission: %v", common.ErrConflict, err)
 	}
 	return reduceDefinitionAdmissionIntent(current, *event.Intent)
+}
+
+func reduceConfirmedAuthoringAdmission(current *workspacemodel.Workspace, command workspaceevents.AdmitDefinitionAuthoringCommand) (definitionAdmissionTransition, error) {
+	candidate := command.Candidate.Clone()
+	admission, err := definitionadmission.Compile(candidate)
+	if err != nil {
+		return definitionAdmissionTransition{}, err
+	}
+	if current.ValidateDefinitionAuthoringHistory() != nil || len(current.DefinitionAdmissionCandidates) > len(current.DefinitionAuthoringHistory)+1 || candidate.CandidateRevision != uint64(len(current.DefinitionAuthoringHistory)+1) {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
+	if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
+	prior := outstandingPreSealDefinitionClarification(current, candidate)
+	result := workspaceevents.AdmitDefinitionAuthoringResult{Candidate: candidate, AdmissionResult: admission, PriorClarification: prior, WorkspaceRevision: current.Revision}
+	index := len(current.DefinitionAuthoringHistory)
+	stored := len(current.DefinitionAdmissionCandidates) == index+1
+	if stored && (current.DefinitionAdmissionCandidates[index].CandidateHash != candidate.CandidateHash || current.DefinitionAdmissionCandidates[index].CandidateID != candidate.CandidateID) {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
+	if !stored && (len(current.DefinitionAdmissionCandidates) != index || current.Revision != command.ExpectedWorkspaceRevision) {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
+	if stored && (candidate.Validate() != nil || current.DefinitionAdmissionCandidates[index].Validate() != nil) {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
+	if index > 0 && (candidate.CandidateID != current.DefinitionAdmissionCandidates[0].CandidateID || candidate.BaseDefinitionRevision != "" || candidate.BaseStartupInputHash != "") {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
+	next := *current
+	changed := !stored
+	if changed {
+		next.DefinitionAdmissionCandidates = append(cloneDefinitionAdmissionCandidates(current.DefinitionAdmissionCandidates), candidate.Clone())
+	}
+	if admission.Disposition == workspacemodel.DefinitionAdmissionClarificationRequired {
+		if index > 0 && prior == nil || command.ClarificationTicket != nil || command.ClarificationResolution != nil || current.StartupInput != nil || current.ActivationAdmission != nil {
+			return definitionAdmissionTransition{}, common.ErrConflict
+		}
+		if changed {
+			result.WorkspaceRevision++
+		}
+		if err := result.ValidateFor(command); err != nil {
+			return definitionAdmissionTransition{}, err
+		}
+		if !changed {
+			return definitionAdmissionTransition{Noop: true, AuthoringResult: &result}, nil
+		}
+		return definitionAdmissionTransition{Next: &next, AuthoringResult: &result}, nil
+	}
+	if admission.Disposition != workspacemodel.DefinitionAdmissionAdmittedAllOf || index > 0 && prior == nil {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
+	startup, activation, bound := definitionActivationForCandidate(&next, candidate)
+	if current.StartupInput != nil && !bound || current.ActivationAdmission != nil && !bound {
+		return definitionAdmissionTransition{}, common.ErrConflict
+	}
+	if bound {
+		if prior == nil && (activation.BlockingTicketID != "" || activation.State != workspacemodel.WorkspaceActivationEligible) || prior != nil && activation.BlockingTicketID == "" {
+			return definitionAdmissionTransition{}, common.ErrConflict
+		}
+		switch activation.State {
+		case workspacemodel.WorkspaceActivationPendingClarificationResolution:
+			if prior == nil || command.ClarificationTicket != nil && (command.ClarificationTicket.ValidateFor(*prior) != nil || command.ClarificationTicket.TicketBinding.TicketID != activation.BlockingTicketID) {
+				return definitionAdmissionTransition{}, common.ErrConflict
+			}
+			if command.ClarificationResolution != nil {
+				if command.ClarificationResolution.ValidateFor(*prior, candidate, admission, startup, activation) != nil {
+					return definitionAdmissionTransition{}, common.ErrConflict
+				}
+				activation.State = workspacemodel.WorkspaceActivationEligible
+				activation.ClarificationResolutionID = command.ClarificationResolution.ResolutionBinding.ResolutionID
+				activation.ClarificationResolutionBindingHash = command.ClarificationResolution.ResolutionBinding.ResolutionBindingHash
+				next.ActivationAdmission = &activation
+				changed = true
+			}
+		case workspacemodel.WorkspaceActivationEligible:
+			if command.ClarificationTicket != nil || command.ClarificationResolution != nil && command.ClarificationResolution.ValidateForEligible(candidate, admission, startup, activation) != nil {
+				return definitionAdmissionTransition{}, common.ErrConflict
+			}
+		default:
+			return definitionAdmissionTransition{}, common.ErrConflict
+		}
+	} else if prior != nil {
+		if command.ClarificationResolution != nil {
+			return definitionAdmissionTransition{}, common.ErrConflict
+		}
+		if command.ClarificationTicket != nil {
+			if command.ClarificationTicket.ValidateFor(*prior) != nil {
+				return definitionAdmissionTransition{}, common.ErrConflict
+			}
+			var promoteErr error
+			next, startup, activation, promoteErr = promoteDefinitionAdmission(&next, candidate, admission, command.ClarificationTicket.TicketBinding.TicketID)
+			if promoteErr != nil {
+				return definitionAdmissionTransition{}, promoteErr
+			}
+			changed = true
+		}
+	} else {
+		if command.ClarificationTicket != nil || command.ClarificationResolution != nil {
+			return definitionAdmissionTransition{}, common.ErrConflict
+		}
+		var promoteErr error
+		next, startup, activation, promoteErr = promoteDefinitionAdmission(&next, candidate, admission, "")
+		if promoteErr != nil {
+			return definitionAdmissionTransition{}, promoteErr
+		}
+		changed = true
+	}
+	if next.StartupInput != nil {
+		result.StartupInput = &startup
+		result.ActivationAdmission = &activation
+	}
+	if changed {
+		result.WorkspaceRevision++
+	}
+	if err := result.ValidateFor(command); err != nil {
+		return definitionAdmissionTransition{}, err
+	}
+	if changed {
+		return definitionAdmissionTransition{Next: &next, AuthoringResult: &result}, nil
+	}
+	return definitionAdmissionTransition{Noop: true, AuthoringResult: &result}, nil
 }
 
 // Old admission is a lineage anchor, not an executable configuration. Check
@@ -292,6 +434,10 @@ func persistDefinitionAdmissionCandidate(current *workspacemodel.Workspace, comm
 	return next, workspaceevents.DefinitionAdmissionCandidateCreated, true, nil
 }
 
+func outstandingPreSealDefinitionClarification(current *workspacemodel.Workspace, candidate workspacemodel.DefinitionAdmissionCandidate) *workspaceevents.DefinitionAdmissionClarificationBinding {
+	return definitionClarificationAfterBaseline(current, candidate, 0)
+}
+
 func outstandingDefinitionClarification(current *workspacemodel.Workspace, candidate workspacemodel.DefinitionAdmissionCandidate) *workspaceevents.DefinitionAdmissionClarificationBinding {
 	if current == nil {
 		return nil
@@ -302,6 +448,13 @@ func outstandingDefinitionClarification(current *workspacemodel.Workspace, candi
 		if activation.State == workspacemodel.WorkspaceActivationEligible && activation.CandidateID == candidate.CandidateID {
 			eligibleBaseline = activation.CandidateRevision
 		}
+	}
+	return definitionClarificationAfterBaseline(current, candidate, eligibleBaseline)
+}
+
+func definitionClarificationAfterBaseline(current *workspacemodel.Workspace, candidate workspacemodel.DefinitionAdmissionCandidate, eligibleBaseline uint64) *workspaceevents.DefinitionAdmissionClarificationBinding {
+	if current == nil {
+		return nil
 	}
 	var selected *workspaceevents.DefinitionAdmissionClarificationBinding
 	for _, existing := range current.DefinitionAdmissionCandidates {
@@ -404,7 +557,10 @@ func (m *Biz) submitDefinitionAdmissionInternalEvent(ctx context.Context, event 
 	// definitionMu -> templateMutationMu across every admission path.
 	m.templateMutationMu.Lock()
 	defer m.templateMutationMu.Unlock()
-	if event.Intent.CurrentTemplate {
+	if event.Authoring != nil && (m.manager == nil || m.goals == nil || m.dods == nil || m.templates == nil) {
+		return definitionAdmissionTransition{}, common.ErrInvalidArgument
+	}
+	if event.Intent != nil && event.Intent.CurrentTemplate {
 		if m.templates == nil {
 			return definitionAdmissionTransition{}, common.ErrInvalidArgument
 		}
@@ -422,8 +578,17 @@ func (m *Biz) submitDefinitionAdmissionInternalEvent(ctx context.Context, event 
 		if err != nil {
 			return definitionAdmissionTransition{}, err
 		}
-		if err := m.validateCompilationAdmission(bound, current, *event.Intent); err != nil {
-			return definitionAdmissionTransition{}, err
+		if event.Authoring != nil {
+			if err := m.verifyDefinitionClarificationProvenance(ctx, workspaceevents.DefinitionAdmissionIntentCommand{Candidate: event.Authoring.Candidate, ClarificationTicket: event.Authoring.ClarificationTicket, ClarificationResolution: event.Authoring.ClarificationResolution}); err != nil {
+				return definitionAdmissionTransition{}, err
+			}
+			if err := m.verifyConfirmedAuthoringAdmission(bound, current, event.Authoring.Candidate, *event.Authoring, event.VerifiedResources); err != nil {
+				return definitionAdmissionTransition{}, err
+			}
+		} else {
+			if err := m.validateCompilationAdmission(bound, current, *event.Intent); err != nil {
+				return definitionAdmissionTransition{}, err
+			}
 		}
 		transition, err := reduceDefinitionAdmissionInternalEvent(current, event)
 		if err != nil {

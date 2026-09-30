@@ -13,6 +13,8 @@ const (
 	TopicAcquireRuntimeTargetSelection                = "/file/runtime-prerequisite/acquire-target-selection"
 	TopicAcquireWorkspaceManifest                     = "/file/runtime-prerequisite/acquire-workspace-manifest"
 	TopicConfirmRuntimeRepairSurface                  = "/file/runtime-query/confirm-repair-surface"
+	TopicAcquireAuthoringResources                    = "/file/authoring/acquire-resources"
+	TopicVerifyAuthoringResource                      = "/file/authoring/verify-resource"
 
 	TopicExecuteFileListOperation     = "/file/runtime-operation/list"
 	TopicExecuteFileReadOperation     = "/file/runtime-operation/read"

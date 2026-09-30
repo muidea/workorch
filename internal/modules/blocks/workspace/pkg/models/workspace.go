@@ -36,9 +36,13 @@ type Workspace struct {
 	DefinitionAdmissionCandidates []DefinitionAdmissionCandidate
 	// DefinitionSpecificationLedger is Workspace-private pre-seal request history.
 	// It neither promotes a Definition nor authorizes Runtime execution.
-	DefinitionSpecificationLedger *DefinitionSpecificationRequestLedger
-	StartupInput                  *WorkspaceStartupInputContract
-	ActivationAdmission           *WorkspaceActivationAdmission
+	DefinitionAuthoringCreation     *DefinitionAuthoringCreation
+	DefinitionAuthoring             *DefinitionAuthoringRecord
+	DefinitionAuthoringConfirmation *DefinitionAuthoringConfirmation
+	DefinitionAuthoringHistory      []DefinitionAuthoringConfirmedRevision
+	DefinitionSpecificationLedger   *DefinitionSpecificationRequestLedger
+	StartupInput                    *WorkspaceStartupInputContract
+	ActivationAdmission             *WorkspaceActivationAdmission
 	// TerminalDelivery is the Workspace owner's persisted release fence. It is
 	// written only by the lifecycle reducer and never by generic metadata update.
 	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { App as AntApp, Button, Descriptions, Empty, Form, Input, List, Modal, Select, Space, Steps, Tag, Typography } from 'antd';
 import { ProCard } from '../../components/proCompat';
 import { workorchApi } from '../../api';
+import { workspaceTemplateSuggestions } from '../../workspaceTemplateSuggestions';
 import type { Soul, WorkspaceSetupDraftSession, WorkspaceTemplate } from '../../types';
 import {
   boundedParagraph,
@@ -136,14 +137,23 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: WorkspaceSetup
     clearDraft();
     const template = workspaceTemplates.find((item) => item.id === templateID);
     if (!template) {
-      goalForm.resetFields();
-      doDForm.resetFields();
-      soulBindingsForm.resetFields();
       return;
     }
-    goalForm.setFieldsValue({ text: template.goalText || '' });
-    doDForm.setFieldsValue({ items: joinLines(template.doDItems) });
-    soulBindingsForm.setFieldsValue({ defaultSoulId: template.defaultSoulId, bindings: template.soulBindings ?? {} });
+    const suggestions = workspaceTemplateSuggestions({
+      goalText: goalForm.getFieldValue('text'),
+      doDText: doDForm.getFieldValue('items'),
+      goalTouched: goalForm.isFieldTouched('text'),
+      doDTouched: doDForm.isFieldTouched('items')
+    }, template);
+    if (suggestions.goalText !== undefined) {
+      goalForm.setFieldsValue({ text: suggestions.goalText });
+    }
+    if (suggestions.doDText !== undefined) {
+      doDForm.setFieldsValue({ items: suggestions.doDText });
+    }
+    if (!soulBindingsForm.isFieldsTouched()) {
+      soulBindingsForm.setFieldsValue({ defaultSoulId: template.defaultSoulId, bindings: template.soulBindings ?? {} });
+    }
   };
 
   const draftFromForms = () => workspaceSetupDraftFromForms(goalForm.getFieldValue('text'), doDForm.getFieldValue('items'));
@@ -302,7 +312,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: WorkspaceSetup
           <Select options={[{ value: 'manual', label: '手动填写 Goal / DoD' }, { value: 'smart', label: '智能生成 Goal / DoD' }]} />
         </Form.Item>
         <Form.Item name="templateId" label="工作空间模板（Workspace Template）" rules={[{ required: true, message: '请选择工作空间模板' }]}>
-          <Select placeholder="选择模板并带入目标、验收标准和执行人格绑定" onChange={applyTemplate} options={workspaceTemplates.map((item) => ({ value: item.id, label: `${item.name || item.id} (${item.id})` }))} />
+          <Select placeholder="选择模板；仅为空白且未编辑的字段填入建议" onChange={applyTemplate} options={workspaceTemplates.map((item) => ({ value: item.id, label: `${item.name || item.id} (${item.id})` }))} />
         </Form.Item>
         <Form.Item name="title" label="标题" rules={[{ required: true }]}><Input placeholder="本地 workorch 工作空间" /></Form.Item>
         <Form.Item name="description" label="描述"><Input.TextArea rows={3} placeholder="描述工作空间目标、范围或当前交付预期" /></Form.Item>

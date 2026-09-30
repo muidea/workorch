@@ -28,6 +28,7 @@ type workspaceOperations struct {
 }
 
 type definitionOperations struct {
+	authoring                   DefinitionAuthoringPorts
 	defineGoal                  DefineGoalFunc
 	updateGoal                  UpdateGoalFunc
 	readGoal                    ReadGoalFunc

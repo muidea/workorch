@@ -74,6 +74,13 @@ func (m *Biz) executeGoalCommand(ctx context.Context, ev magicevent.Event) (work
 		if hidden {
 			return workspaceCommandResponse{}, common.ErrNotFound
 		}
+		visible, err := m.authoringFormalDefinitionVisible(scopedCtx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceCommandResponse{}, err
+		}
+		if !visible {
+			return workspaceCommandResponse{}, common.ErrNotFound
+		}
 		item, err := m.goals.Get(scopedCtx, cmd.GoalID)
 		if err != nil {
 			return workspaceCommandResponse{}, err
@@ -93,6 +100,13 @@ func (m *Biz) executeGoalCommand(ctx context.Context, ev magicevent.Event) (work
 			return workspaceCommandResponse{}, err
 		}
 		if hidden {
+			return workspaceCommandResponse{Goals: []*workspacemodel.Goal{}}, nil
+		}
+		visible, err := m.authoringFormalDefinitionVisible(scopedCtx, cmd.WorkspaceID)
+		if err != nil {
+			return workspaceCommandResponse{}, err
+		}
+		if !visible {
 			return workspaceCommandResponse{Goals: []*workspacemodel.Goal{}}, nil
 		}
 		items, err := m.goals.ListByWorkspaceID(scopedCtx, cmd.WorkspaceID)

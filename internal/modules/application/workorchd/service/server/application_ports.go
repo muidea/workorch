@@ -32,6 +32,11 @@ type WorkspacePorts struct {
 }
 
 type DefinitionPorts struct {
+	CreateDefinitionAuthoring   CreateDefinitionAuthoringFunc
+	ReadDefinitionAuthoring     ReadDefinitionAuthoringFunc
+	SaveDefinitionAuthoring     SaveDefinitionAuthoringFunc
+	CompileDefinitionAuthoring  ReadDefinitionAuthoringFunc
+	ConfirmDefinitionAuthoring  ConfirmDefinitionAuthoringFunc
 	DefineGoal                  DefineGoalFunc
 	UpdateGoal                  UpdateGoalFunc
 	ReadGoal                    ReadGoalFunc

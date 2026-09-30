@@ -22,6 +22,7 @@ func newApplicationPorts(withSession func(context.Context, func(*runtimecore.Ses
 	p.configureConfigurationPorts()
 	p.configureWorkspacePorts()
 	p.configureDefinitionPorts()
+	p.configureAuthoringPorts()
 	p.configureRunPorts()
 	p.configureGovernancePorts()
 	p.configureRegistryPorts()

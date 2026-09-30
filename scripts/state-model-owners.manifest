@@ -120,3 +120,4 @@ internal/services/workorch/options.go|Mode|ephemeral_technical|internal/services
 internal/modules/blocks/workspace/pkg/events/definition_specification.go|DefinitionSpecificationRequestDisposition|immutable_outcome|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/models/definition_specification_ledger.go|DefinitionSpecificationPhase|immutable_trace|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/models/definition_specification_ledger.go|DefinitionSpecificationRequestState|owner_private_state|internal/modules/blocks/workspace|workspace.definition_specification
+internal/modules/blocks/workspace/pkg/models/definition_authoring_confirmation_journal.go|DefinitionAuthoringConfirmationPhase|owner_private_state|internal/modules/blocks/workspace|workspace.definition_authoring_confirmation

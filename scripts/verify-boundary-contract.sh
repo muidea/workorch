@@ -4362,19 +4362,34 @@ for marker in \
 		exit 1
 	fi
 done
-definition_policy_seal="$(sed -n '/^func definitionAdmissionEvidencePolicyBindings(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/definition_admission.go)"
+# Definition configuration moved to a shared pure compiler so Application and the
+# Workspace owner independently seal the same current source facts.
+definition_configuration_source="$({
+	sed -n '/^func Compile(/,/^}/p' internal/pkg/definitionconfiguration/definition_configuration.go
+	sed -n '/^func validateEvidencePolicies(/,/^}/p' internal/pkg/definitionconfiguration/definition_configuration.go
+	sed -n '/^func evidencePolicyBindings(/,/^}/p' internal/pkg/definitionconfiguration/definition_configuration.go
+})"
 for marker in \
-	'validateRuntimeEvidencePolicyInputs("Template ' \
-	'validateRuntimeEvidencePolicyInputs("Workspace ' \
+	'validateEvidencePolicies("Template ' \
+	'validateEvidencePolicies("Workspace ' \
+	'payloadContainsField(item.Fields, "prospectiveTargetRef")' \
+	'evidencePolicy(item).Validate()' \
+	'seen[id]' \
 	'policy.CanonicalString()' \
 	'PolicyRef:' \
 	'Revision:' \
 	'SnapshotHash:'; do
-	if ! grep -q -F "$marker" <<<"$definition_policy_seal"; then
+	if ! grep -q -F "$marker" <<<"$definition_configuration_source"; then
 		echo "boundary contract violation: Definition candidate policy snapshot lost $marker" >&2
 		exit 1
 	fi
 done
+definition_configuration_call="$(sed -n '/^func definitionAdmissionProfileBindings(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/definition_admission.go)"
+if ! grep -q -F 'definitionconfiguration.Compile(workspace, template)' <<<"$definition_configuration_call" ||
+	! grep -q -F 'definitionconfiguration.Compile(current, template)' internal/modules/blocks/workspace/biz/definition_authoring_admission.go; then
+	echo "boundary contract violation: Definition policy snapshot compiler is not checked by both Application and Workspace" >&2
+	exit 1
+fi
 if ! grep -q -F 'AdmissionPolicyBindings: policyBindings' internal/modules/application/workorchd/biz/appservice/activationports/definition_admission.go; then
 	echo "boundary contract violation: Definition candidate assembly omits the admitted policy snapshot bindings" >&2
 	exit 1

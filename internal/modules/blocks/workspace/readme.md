@@ -16,7 +16,7 @@ Last Verified: 2026-08-30
 
 | 交互方 | typed command/data/result | 边界 |
 | --- | --- | --- |
-| `application/workorchd` | Workspace/Goal/DoD/Template CRUD；`DefinitionAdmissionIntentCommand/Result`；`WorkspaceExecutionIntentCommand/Result`；`DeleteWorkspaceCommand/Result` | Application 提交输入和意图；Workspace 决定自身聚合转换。definition admission、execution intent 只接受 Application source。 |
+| `application/workorchd` | Workspace/Goal/DoD/Template CRUD；`ConfirmDefinitionAuthoringCommand/Result`；`DefinitionAdmissionIntentCommand/Result`；`WorkspaceExecutionIntentCommand/Result`；`DeleteWorkspaceCommand/Result` | Application 提交输入和意图；Workspace 决定自身聚合转换。authoring confirmation、definition admission、execution intent 只接受 Application source。 |
 | `kernel/system` | `EnsureWorkspaceTemplateDefaultsCommand/Result` | startup ensure 唯一 producer；owner 创建缺失资源并自动更新 exact reviewed 未定制 Template；只接受 `kernel/system`。 |
 | `application/workorchd` | `QueryBuiltinWorkspaceTemplateDefaultsCommand/Result`、`UpgradeBuiltinWorkspaceTemplateDefaultCommand/Result` | exact `application/workorchd/appservice`；只操作 Template catalog，不改变已 admission Workspace 或 Run。 |
 | `blocks/decision` | `QueryWorkspaceDefinitionClarificationFactCommand/Result` | Workspace 在 promotion 前读取 Decision 已持久化的 ticket/resolution 事实，不接受 caller 自证 binding。 |
@@ -29,7 +29,10 @@ Last Verified: 2026-08-30
 
 ## 不变量与非职责
 
+- 正式创作创建入口接受稳定 RequestID，Workspace ID 由该身份确定。初始草稿与不可变创建回执在同一次 owner repository Create 中保存；同身份不同内容拒绝，响应丢失／file reopen 后重放不增写，后续修订也不会被初始创建重放覆盖。目录初始化由 Application 在身份持久后执行，失败可用同一请求重试；创建不物化正式 Goal／DoD、不准入、不创建 Run。模板与目录修改通过创作保存事件随新 input revision 一次 CAS 更新，不以普通配置修改替代创作输入。
 - startup input 一经 promotion 不可被 Runtime LLM 修改；candidate/admission lineage、definition revision 与 `StartupInputHash` 必须 exact 绑定。
+- 新建期 `DefinitionAuthoringRecord` 仅保存 Goal-only 草稿、Template 快照、派生与审查请求；正式 Goal／DoD 与 startup/eligible admission 必须在用户精确确认后另行物化。资源引用最多 8 个；Application 向 File owner 取得有界文件事实，派生 reserve 若含资源，Workspace 在任何自身 mutation lock 外向 File owner 核对 exact 内容/hash 和当前草稿 revision，再由纯 reducer 对 Workspace revision 及模板做 CAS 栅栏。创作规格结构校验把持久派生快照映射为不可由 provider 改写的必需资源身份，六审查依然只是候选事实。持久资源快照和 permit 仅证明该时点的输入身份，不保证多文件原子读取或后续内容不变。确认 journal 和最终准入各自在 mutation/deletion 锁外重新向 File owner 验证原派生资源及当前 Workspace revision，随后在锁内核对 input、permit、snapshot hash、Template/configuration 与 revision 才可 CAS；Prepared journal 恢复及阻塞候选的重复准入也必须重新验证。File 与 Workspace 没有共同事务或跨文件原子快照，文件在最终验证后至 Workspace CAS 之间发生的外部变化不能被宣称已原子阻止。
+- `DefinitionAuthoringConfirmation` 是同 owner 的持久 prepare／materialized journal：只从已持久派生提案和六份唯一 PASS 审查重组 exact hash，封存原派生资源快照 hash 与确定性 Goal／DoD after-image，再逐仓幂等物化；任一 file-backed cutpoint 可重开续写，重复请求不增写，冲突行不得覆盖。prepared 阶段的部分 Goal／DoD 写入对普通正式定义读取不可见，旧规格编译入口也不能消费创作期正式行。已物化确认的纯候选构建保留原始六审查的候选 item ref 和 `SpecificationHash`，并将正式 Goal／DoD 的精确 ID／revision 绑定到候选来源身份；后续 startup 映射负责生成正式 item ref，不能假称审查者评审过重写 hash 的规格，也不能把 `UNVERIFIED` 变成 Profile 证据声明。Application 的确认后继已接正式候选与准入，阻塞候选由 Decision owner 打开澄清 ticket，不创建 Run；新建期旧准入入口仍关闭。journal 在场时普通 Workspace 配置更新、正式 Goal／DoD CRUD 与删除入口均不允许改写该事务。未封存 startup 的阻塞候选允许提交新的创作 revision：归档原记录及 materialized journal，保留请求预算和正式定义 lineage，重新派生并完成六审查后沿同一 `CandidateID` 追加连续 candidate revision；prepared 后继仍不能暴露部分正式行。仍阻塞的后继由 Application 协调 Decision 替换旧票据；通过纯准入的后继须先验证持久旧票据，封存 `pending_clarification_resolution`，再验证 Decision 持久 resolution 后才能 eligible。确认重放和查询保留原 blocker 身份，不自动创建 Run。此 owner/Application 路径已验证，不代表 HTTP/Web 创建向导已接通。
 - 新 Start/Restart 自动加载当前 Template/Soul。Application 提交带 `CurrentTemplate`、expected Workspace revision/configuration
   hash 的新 candidate；Workspace-private admission event 持有 Template mutation lock，复核当前 Template hash，物化变化的
   template-bound 字段并 CAS 追加新 candidate/promotion。Goal/DoD、目录、provider selection、生命周期与旧 Run 不变。
@@ -68,6 +71,7 @@ Last Verified: 2026-08-30
 
 | 能力/维度 | 测试证据 | 结论 |
 | --- | --- | --- |
+| 创作阻塞后继与确认恢复 | `biz/definition_authoring_successor_test.go` | 同 CandidateID 连续 revision、旧票据 resolved／新票据 open、候选追加与 pending startup 重开、安全 resolution、prepared／Goal／DoD／materialized cutpoint 及零自动 Run；不是 HTTP/Web 闭环验收 |
 | 多父模板 DAG 与解析结果隔离 | `pkg/models/template_inheritance_dag_test.go`、`biz/template_inheritance_test.go` | 覆盖 diamond 去重、父顺序身份、共享祖先最长路径上限、父引用深拷贝及 owner 模板操作 |
 | 规格候选结构与防降级 | `pkg/models/goal_specification_test.go`、`pkg/definitionadmission/goal_specification_test.go`、`biz/goal_specification_persistence_test.go` | 覆盖六类审查绑定、引用唯一性、占位验证声明拒绝、startup 哈希及 owner 后继候选禁止移除规格；不等同于自动规格生产入口验收 |
 | module lifecycle与 owner repository binding | `module_test.go::TestModuleIdentityConfigureStartStopContract`、`module_test.go::TestModuleConfigureRequiresBoundOwnerRepositoriesAndEventHub`、`internal/pkg/repository/resource_owner_repositories_test.go::TestResourceOwnerRepositoryBundlesRejectMixedMemorySets`、`TestResourceOwnerRepositoryBundlesValidateForMemoryAndReopenedFileBackends` | 已覆盖必需 aggregate/EventHub、memory/file factory 正向构造、zero/unbound/mixed set 启动前拒绝与 file reopen binding 重建 |

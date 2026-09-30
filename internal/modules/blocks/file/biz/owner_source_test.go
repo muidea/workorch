@@ -107,7 +107,7 @@ func TestFileOwnerStartIsIdempotentAndTeardownClearsLifecycle(t *testing.T) {
 	}
 }
 
-func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllSixteenTopics(t *testing.T) {
+func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllEighteenTopics(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -129,6 +129,8 @@ func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllSixteenTopics(t *testing.T)
 		{fileevents.TopicProbeRuntimeSemanticProofFeasibility, ModuleID},
 		{fileevents.TopicQueryRuntimeCWIReconciliation, ModuleID},
 		{fileevents.TopicAcquireTargetSnapshot, fileevents.PrerequisiteCommandDestination},
+		{fileevents.TopicAcquireAuthoringResources, ModuleID},
+		{fileevents.TopicVerifyAuthoringResource, ModuleID},
 		{fileevents.TopicAcquireRuntimeTargetSelection, fileevents.PrerequisiteCommandDestination},
 		{fileevents.TopicAcquireWorkspaceManifest, fileevents.PrerequisiteCommandDestination},
 		{fileevents.TopicConfirmRuntimeRepairSurface, fileevents.PrerequisiteCommandDestination},
@@ -140,8 +142,15 @@ func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllSixteenTopics(t *testing.T)
 		{fileevents.TopicExecutePatchPreviewOperation, ModuleID},
 	}
 	for _, item := range topics {
+		source := runtimecontract.RuntimeModuleOrchestrator
+		if item.topic == fileevents.TopicAcquireAuthoringResources {
+			source = authoringApplicationSource
+		}
+		if item.topic == fileevents.TopicVerifyAuthoringResource {
+			source = "blocks/workspace"
+		}
 		event := &fileCountingDataEvent{Event: magicevent.NewEventWithContext(
-			item.topic, runtimecontract.RuntimeModuleOrchestrator, item.destination, magicevent.NewHeader(), ctx, nil,
+			item.topic, source, item.destination, magicevent.NewHeader(), ctx, nil,
 		)}
 		result := hub.Send(event)
 		if result == nil || result.Error() == nil {
@@ -153,8 +162,15 @@ func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllSixteenTopics(t *testing.T)
 	}
 	owner.Teardown(ctx)
 	for _, item := range topics {
+		source := runtimecontract.RuntimeModuleOrchestrator
+		if item.topic == fileevents.TopicAcquireAuthoringResources {
+			source = authoringApplicationSource
+		}
+		if item.topic == fileevents.TopicVerifyAuthoringResource {
+			source = "blocks/workspace"
+		}
 		event := &fileCountingDataEvent{Event: magicevent.NewEventWithContext(
-			item.topic, runtimecontract.RuntimeModuleOrchestrator, item.destination, magicevent.NewHeader(), ctx, nil,
+			item.topic, source, item.destination, magicevent.NewHeader(), ctx, nil,
 		)}
 		hub.Send(event)
 		if got := event.reads.Load(); got != 0 {

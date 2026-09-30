@@ -12,6 +12,8 @@ func Contracts() []eventcontract.Contract {
 		TopicAcquireRuntimeTargetSelection,
 		TopicAcquireWorkspaceManifest,
 		TopicConfirmRuntimeRepairSurface,
+		TopicAcquireAuthoringResources,
+		TopicVerifyAuthoringResource,
 	)
 	ret = append(ret, eventcontract.Build("file", eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute,
 		TopicExecuteFileListOperation,

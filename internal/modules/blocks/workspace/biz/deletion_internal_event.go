@@ -230,6 +230,9 @@ func reduceWorkspaceDeletionRequested(current *workspacemodel.Workspace, fact wo
 		return workspaceDeletionTransition{}, common.ErrConflict
 	}
 	if current.Deletion == nil {
+		if current.DefinitionAuthoringConfirmation != nil {
+			return workspaceDeletionTransition{}, common.ErrConflict
+		}
 		if current.ActiveRunID != "" || (command.ExpectedRevision != 0 && current.Revision != command.ExpectedRevision) {
 			return workspaceDeletionTransition{}, common.ErrConflict
 		}

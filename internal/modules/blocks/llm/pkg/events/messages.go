@@ -19,8 +19,9 @@ const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/ll
 const CommandDestination = modulecommon.ModuleID
 
 type CompleteProviderCommand struct {
-	Target  runtimecontract.ProviderModelTarget
-	Request ProviderRequest
+	Target                        runtimecontract.ProviderModelTarget
+	Request                       ProviderRequest
+	ExpectedConfigurationRevision string
 }
 
 type TraceReference struct {

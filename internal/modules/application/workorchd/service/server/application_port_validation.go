@@ -40,6 +40,21 @@ func validateWorkspaceApplicationPorts(ports WorkspacePorts) error {
 }
 
 func validateDefinitionApplicationPorts(ports DefinitionPorts) error {
+	if ports.CreateDefinitionAuthoring == nil {
+		return fmt.Errorf("missing Definition.CreateDefinitionAuthoring application port")
+	}
+	if ports.ReadDefinitionAuthoring == nil {
+		return fmt.Errorf("missing Definition.ReadDefinitionAuthoring application port")
+	}
+	if ports.SaveDefinitionAuthoring == nil {
+		return fmt.Errorf("missing Definition.SaveDefinitionAuthoring application port")
+	}
+	if ports.CompileDefinitionAuthoring == nil {
+		return fmt.Errorf("missing Definition.CompileDefinitionAuthoring application port")
+	}
+	if ports.ConfirmDefinitionAuthoring == nil {
+		return fmt.Errorf("missing Definition.ConfirmDefinitionAuthoring application port")
+	}
 	if ports.DefineGoal == nil {
 		return fmt.Errorf("missing Definition.DefineGoal application port")
 	}

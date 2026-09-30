@@ -2,7 +2,10 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"strings"
+
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -18,6 +21,8 @@ type workspaceCreationRequestedFact struct {
 	Description          string
 	DeliverableDirectory string
 	InternalDirectory    string
+	Authoring            *workspaceevents.CreateDefinitionAuthoringCommand
+	Template             *workspacemodel.WorkspaceTemplate
 }
 
 // workspaceCreationInternalEvent contains a bounded owner fact, never the
@@ -50,6 +55,32 @@ func (m *goalDoDManager) submitWorkspaceCreationInternalEvent(ctx context.Contex
 		DeliverableDirectory: fact.DeliverableDirectory,
 		InternalDirectory:    fact.InternalDirectory,
 		State:                common.WorkspaceStateActive,
+	}
+	if fact.Authoring != nil {
+		cmd := *fact.Authoring
+		if cmd.Validate() != nil || cmd.WorkspaceID != fact.WorkspaceID || cmd.Title != fact.Title || cmd.Description != fact.Description || cmd.DeliverableDirectory != fact.DeliverableDirectory || cmd.InternalDirectory != fact.InternalDirectory {
+			return nil, common.ErrInvalidArgument
+		}
+		current, readErr := m.workspaces.Get(bound, fact.WorkspaceID)
+		if readErr == nil {
+			if current.DefinitionAuthoringCreation == nil || current.DefinitionAuthoringCreation.Validate(current.ID) != nil || current.DefinitionAuthoringCreation.RequestID != cmd.RequestID || current.DefinitionAuthoringCreation.InputHash != cmd.CreationInputHash() || workspaceDeletionRejectsMutation(current) != nil {
+				return nil, common.ErrConflict
+			}
+			return current, nil
+		}
+		if !errors.Is(readErr, common.ErrNotFound) {
+			return nil, readErr
+		}
+		if fact.Template == nil || fact.Template.ID != cmd.Input.TemplateID {
+			return nil, common.ErrConflict
+		}
+		record := workspacemodel.DefinitionAuthoringRecord{Input: cmd.Input.Normalized(), InputHash: cmd.Input.InputHash(), TemplateSnapshot: fact.Template.Clone(), TemplateSnapshotHash: workspacemodel.WorkspaceTemplateSnapshotHash(fact.Template)}
+		if record.Validate() != nil {
+			return nil, common.ErrConflict
+		}
+		workspace.TemplateID = fact.Template.ID
+		workspace.DefinitionAuthoring = &record
+		workspace.DefinitionAuthoringCreation = &workspacemodel.DefinitionAuthoringCreation{RequestID: cmd.RequestID, InputHash: cmd.CreationInputHash()}
 	}
 	if err := m.workspaces.Create(bound, workspace); err != nil {
 		return nil, err

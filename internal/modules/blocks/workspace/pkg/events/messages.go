@@ -404,6 +404,7 @@ func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
 		eventcontract.CommandTopic[CreateWorkspaceCommand, WorkspaceResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandCreate).MessageContract(),
 		eventcontract.CommandTopic[GetWorkspaceCommand, WorkspaceResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandGet).MessageContract(),
+		eventcontract.CommandTopic[QueryAuthoringResourceScopeCommand, QueryAuthoringResourceScopeResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceAuthoringResourceScopeQuery).MessageContract(),
 		eventcontract.CommandTopic[ListWorkspacesCommand, WorkspaceListResult]("workspace", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicWorkspaceCommandList).MessageContract(),
 		eventcontract.CommandTopic[UpdateWorkspaceCommand, WorkspaceResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdate).MessageContract(),
 		eventcontract.CommandTopic[UpdateWorkspaceLLMSelectionCommand, WorkspaceLLMSelectionResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandUpdateLLMSelection).MessageContract(),
@@ -427,6 +428,9 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[WorkspaceExecutionIntentCommand, WorkspaceExecutionIntentResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceCommandExecutionIntent).MessageContract(),
 		eventcontract.CommandTopic[RuntimeTerminalDeliveryFact, WorkspaceLifecycleCommandResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceFactTerminalDelivery).MessageContract(),
 		eventcontract.CommandTopic[DefinitionAdmissionIntentCommand, DefinitionAdmissionIntentResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceDefinitionAdmissionIntent).MessageContract(),
+		eventcontract.CommandTopic[CreateDefinitionAuthoringCommand, CreateDefinitionAuthoringResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceDefinitionAuthoringCreate).MessageContract(),
+		eventcontract.CommandTopic[ConfirmDefinitionAuthoringCommand, ConfirmDefinitionAuthoringResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceAuthoringConfirm).MessageContract(),
+		eventcontract.CommandTopic[AdmitDefinitionAuthoringCommand, AdmitDefinitionAuthoringResult]("workspace", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicWorkspaceAuthoringAdmit).MessageContract(),
 	}
 	ret = append(ret, builtinDefaultMessageContracts()...)
 	for _, topic := range []string{

@@ -16,22 +16,156 @@ import (
 const definitionSpecificationCommandSource = definitionAdmissionCommandSource
 
 func definitionSpecificationTopics() []string {
-	return []string{workspaceevents.TopicWorkspaceSpecificationBegin, workspaceevents.TopicWorkspaceSpecificationReserve, workspaceevents.TopicWorkspaceSpecificationComplete, workspaceevents.TopicWorkspaceSpecificationQuery}
+	return []string{workspaceevents.TopicWorkspaceDerivationReserve, workspaceevents.TopicWorkspaceDerivationComplete, workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, workspaceevents.TopicWorkspaceAuthoringSpecificationComplete, workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery, workspaceevents.TopicWorkspaceDefinitionAuthoringCreate, workspaceevents.TopicWorkspaceDefinitionAuthoringSave, workspaceevents.TopicWorkspaceAuthoringConfirm, workspaceevents.TopicWorkspaceAuthoringAdmit, workspaceevents.TopicWorkspaceSpecificationBegin, workspaceevents.TopicWorkspaceSpecificationReserve, workspaceevents.TopicWorkspaceSpecificationComplete, workspaceevents.TopicWorkspaceSpecificationQuery}
 }
 
 func (m *Biz) handleDefinitionSpecificationCommand(ev magicevent.Event, result magicevent.Result) {
 	if result == nil {
 		return
 	}
-	if ev == nil || m == nil || m.workspaces == nil || ev.Source() != definitionSpecificationCommandSource {
+	if ev == nil || m == nil || m.workspaces == nil || (ev.Source() != definitionSpecificationCommandSource && (ev.ID() != workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery || ev.Source() != "blocks/file")) {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
+	}
+	// File verification synchronously queries this Workspace owner. Perform it
+	// before the deletion ingress read lock, or a waiting writer could block the
+	// nested query while this handler waits for File. A direct internal call
+	// cannot set VerifiedResources through an EventHub payload.
+	resourcesVerified := false
+	var confirmationProof *verifiedAuthoringResources
+	var admissionProof *verifiedAuthoringResources
+	var derivationReserve *workspaceevents.ReserveDefinitionDerivationCommand
+	if ev.ID() == workspaceevents.TopicWorkspaceDerivationReserve {
+		if command, ok := ev.Data().(workspaceevents.ReserveDefinitionDerivationCommand); ok {
+			command.Resources = workspacemodel.CloneDefinitionAuthoringResources(command.Resources)
+			derivationReserve = &command
+			if len(command.Resources) != 0 {
+				if err := m.verifyAuthoringDerivationResources(ev.Context(), command); err != nil {
+					result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+					return
+				}
+				resourcesVerified = true
+			}
+		}
+	}
+	if ev.ID() == workspaceevents.TopicWorkspaceAuthoringConfirm {
+		if command, ok := ev.Data().(workspaceevents.ConfirmDefinitionAuthoringCommand); ok && command.Validate() == nil {
+			proof, err := m.verifyCurrentAuthoringResources(ev.Context(), command.WorkspaceID, command.DerivationPermitID)
+			if err != nil {
+				result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+				return
+			}
+			confirmationProof = &proof
+		}
+	}
+	if ev.ID() == workspaceevents.TopicWorkspaceAuthoringAdmit {
+		if command, ok := ev.Data().(workspaceevents.AdmitDefinitionAuthoringCommand); ok && command.Validate() == nil && command.Candidate.AuthoringRef != nil {
+			proof, err := m.verifyCurrentAuthoringResources(ev.Context(), command.Candidate.WorkspaceID, command.Candidate.AuthoringRef.DerivationPermitID)
+			if err != nil {
+				result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+				return
+			}
+			admissionProof = &proof
+		}
 	}
 	m.deletionIngressMu.RLock()
 	defer m.deletionIngressMu.RUnlock()
 	var reply any
 	var err error
 	switch ev.ID() {
+	case workspaceevents.TopicWorkspaceDerivationReserve:
+		if derivationReserve == nil {
+			err = common.ErrInvalidArgument
+		} else {
+			var transition definitionSpecificationTransition
+			transition, err = m.submitDefinitionSpecificationInternalEvent(ev.Context(), definitionSpecificationInternalEvent{WorkspaceID: derivationReserve.WorkspaceID, DeriveReserve: derivationReserve, VerifiedResources: resourcesVerified})
+			if err == nil {
+				reply = *transition.Derivation
+			}
+		}
+	case workspaceevents.TopicWorkspaceDerivationComplete:
+		cmd, ok := ev.Data().(workspaceevents.CompleteDefinitionDerivationCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			var transition definitionSpecificationTransition
+			transition, err = m.submitDefinitionSpecificationInternalEvent(ev.Context(), definitionSpecificationInternalEvent{WorkspaceID: cmd.WorkspaceID, DeriveComplete: &cmd})
+			if err == nil {
+				reply = *transition.Derivation
+			}
+		}
+	case workspaceevents.TopicWorkspaceAuthoringSpecificationReserve:
+		cmd, ok := ev.Data().(workspaceevents.ReserveAuthoringSpecificationCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			var transition definitionSpecificationTransition
+			transition, err = m.submitDefinitionSpecificationInternalEvent(ev.Context(), definitionSpecificationInternalEvent{WorkspaceID: cmd.WorkspaceID, AuthoringSpecReserve: &cmd})
+			if err == nil {
+				reply = *transition.AuthoringSpecification
+			}
+		}
+	case workspaceevents.TopicWorkspaceAuthoringSpecificationComplete:
+		cmd, ok := ev.Data().(workspaceevents.CompleteAuthoringSpecificationCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			var transition definitionSpecificationTransition
+			transition, err = m.submitDefinitionSpecificationInternalEvent(ev.Context(), definitionSpecificationInternalEvent{WorkspaceID: cmd.WorkspaceID, AuthoringSpecComplete: &cmd})
+			if err == nil {
+				reply = *transition.AuthoringSpecification
+			}
+		}
+	case workspaceevents.TopicWorkspaceDefinitionAuthoringQuery:
+		cmd, ok := ev.Data().(workspaceevents.QueryDefinitionAuthoringCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			reply, err = m.queryDefinitionAuthoring(ev.Context(), cmd)
+		}
+	case workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery:
+		cmd, ok := ev.Data().(workspaceevents.QueryAuthoringResourceScopeCommand)
+		if !ok || ev.Source() != "blocks/file" {
+			err = common.ErrInvalidArgument
+		} else {
+			var view workspaceevents.QueryDefinitionAuthoringResult
+			view, err = m.queryDefinitionAuthoring(ev.Context(), workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: cmd.WorkspaceID})
+			if err == nil {
+				reply, err = workspaceevents.AuthoringResourceScopeFor(view, cmd)
+			}
+		}
+	case workspaceevents.TopicWorkspaceDefinitionAuthoringCreate:
+		cmd, ok := ev.Data().(workspaceevents.CreateDefinitionAuthoringCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			reply, err = m.createDefinitionAuthoring(ev.Context(), cmd)
+		}
+	case workspaceevents.TopicWorkspaceDefinitionAuthoringSave:
+		cmd, ok := ev.Data().(workspaceevents.SaveDefinitionAuthoringCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			var transition definitionSpecificationTransition
+			transition, err = m.submitDefinitionSpecificationInternalEvent(ev.Context(), definitionSpecificationInternalEvent{WorkspaceID: cmd.Input.WorkspaceID, Authoring: &cmd})
+			if err == nil {
+				reply = *transition.Authoring
+			}
+		}
+	case workspaceevents.TopicWorkspaceAuthoringConfirm:
+		cmd, ok := ev.Data().(workspaceevents.ConfirmDefinitionAuthoringCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			reply, err = m.submitDefinitionAuthoringConfirmationInternalEvent(ev.Context(), definitionAuthoringConfirmationInternalEvent{Command: cmd, VerifiedResources: confirmationProof})
+		}
+	case workspaceevents.TopicWorkspaceAuthoringAdmit:
+		cmd, ok := ev.Data().(workspaceevents.AdmitDefinitionAuthoringCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			reply, err = m.submitDefinitionAuthoringAdmissionWithProof(ev.Context(), cmd, admissionProof)
+		}
 	case workspaceevents.TopicWorkspaceSpecificationBegin:
 		cmd, ok := ev.Data().(workspaceevents.BeginDefinitionSpecificationCommand)
 		if !ok {
@@ -94,6 +228,9 @@ func (m *Biz) observeDefinitionSpecification(ctx context.Context, workspaceID co
 	}
 	if err = workspaceDeletionRejectsMutation(w); err != nil {
 		return definitionSpecificationObservation{}, err
+	}
+	if w.DefinitionAuthoring != nil || w.DefinitionAuthoringConfirmation != nil {
+		return definitionSpecificationObservation{}, common.ErrConflict
 	}
 	goals, err := m.goals.ListByWorkspaceID(ctx, workspaceID)
 	if err != nil {

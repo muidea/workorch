@@ -20,6 +20,46 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func TestSpecificationProviderSourceRequiresReservedConfiguration(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	defer hub.Terminate(ctx)
+	configured := workorchconfig.DefaultLLMConfig()
+	configured.AIProxy.BaseURL = "https://example.invalid/v1"
+	configured.AIProxy.APIKey = "test-only-key"
+	configured.DefaultChat = workorchconfig.ProviderModelTargetConfig{ProviderID: workorchconfig.BuiltinAIProxyProviderID, ModelID: "chat-model"}
+	owner, err := New(hub, nil, Dependencies{LoadLLMConfig: func() (workorchconfig.LLMConfig, error) { return configured, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Teardown(ctx)
+	request := llmevents.CompleteProviderCommand{
+		Target:                        runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "chat-model"},
+		Request:                       llmevents.ProviderRequest{WorkspaceID: "ws", Model: "chat-model", Kind: "workspace/specification/derive"},
+		ExpectedConfigurationRevision: owner.activeLLMConfigurationRevision,
+	}
+	if !llmCommandHasExactApplicationSource(magicevent.NewEventWithContext(llmevents.TopicLLMCommandCompleteProvider, llmApplicationOwnerSource, llmevents.CommandDestination, magicevent.NewHeader(), ctx, request)) {
+		t.Fatal("persisted specification request rejected at source gate")
+	}
+	for _, mutation := range []func(*llmevents.CompleteProviderCommand){
+		func(cmd *llmevents.CompleteProviderCommand) { cmd.ExpectedConfigurationRevision = "" },
+		func(cmd *llmevents.CompleteProviderCommand) { cmd.Request.WorkspaceID = "" },
+		func(cmd *llmevents.CompleteProviderCommand) { cmd.Request.Kind = "other" },
+	} {
+		altered := request
+		mutation(&altered)
+		if llmCommandHasExactApplicationSource(magicevent.NewEventWithContext(llmevents.TopicLLMCommandCompleteProvider, llmApplicationOwnerSource, llmevents.CommandDestination, magicevent.NewHeader(), ctx, altered)) {
+			t.Fatal("unsealed application completion passed source gate")
+		}
+	}
+	if _, metadata, err := owner.completeProvider(ctx, request.Target, llmmodels.ProviderRequest{Model: request.Target.ModelID}, "different-revision"); !errors.Is(err, common.ErrConflict) || metadata.Submitted {
+		t.Fatalf("configuration drift submitted provider request: %+v %v", metadata, err)
+	}
+}
+
 type countingCandidateProvider struct{ calls atomic.Int32 }
 
 func (p *countingCandidateProvider) GenerateCandidate(context.Context, llmmodels.RuntimeCandidateRequest) (llmmodels.RuntimeCandidateGenerationResult, error) {

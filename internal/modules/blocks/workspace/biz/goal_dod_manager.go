@@ -35,7 +35,13 @@ func (m *goalDoDManager) requireMutableWorkspace(ctx context.Context, workspaceI
 	if err != nil {
 		return err
 	}
-	return workspaceDeletionRejectsMutation(item)
+	if err := workspaceDeletionRejectsMutation(item); err != nil {
+		return err
+	}
+	if item.DefinitionAuthoring != nil {
+		return fmt.Errorf("%w: edit the authoring draft instead of formal definitions", common.ErrConflict)
+	}
+	return nil
 }
 
 func newGoalDoDManager(workspaces repository.WorkspaceRepository, goals repository.GoalRepository, dods repository.DoDRepository) *goalDoDManager {

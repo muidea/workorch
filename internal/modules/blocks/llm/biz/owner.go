@@ -946,16 +946,35 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 // llmCommandHasExactApplicationSource is the generic LLM command ingress
 // authorization gate. Runtime commands have their own exact Orchestrator
 // gate; these topics are owned by the Application setup/configuration paths.
-// The setup-draft generator is a distinct appservice producer and is allowed
-// only on its completion topic.
+// The setup-draft generator is a distinct appservice producer. Persisted
+// specification requests must additionally carry the reserved configuration
+// revision, which this owner checks again before physical submission.
 func llmCommandHasExactApplicationSource(ev magicevent.Event) bool {
 	if ev == nil {
 		return false
 	}
 	if ev.ID() == llmevents.TopicLLMCommandCompleteProvider {
-		return ev.Source() == llmSetupDraftAppserviceSource
+		if ev.Source() == llmSetupDraftAppserviceSource {
+			return true
+		}
+		if ev.Source() != llmApplicationOwnerSource {
+			return false
+		}
+		cmd, ok := ev.Data().(llmevents.CompleteProviderCommand)
+		return ok && specificationCompletionKindAllowed(cmd.Request.Kind) && cmd.Request.WorkspaceID != "" && cmd.ExpectedConfigurationRevision != ""
 	}
 	return ev.Source() == llmApplicationOwnerSource
+}
+
+func specificationCompletionKindAllowed(kind string) bool {
+	switch kind {
+	case "workspace/specification/derive", "workspace/specification/proposal":
+		return true
+	case "workspace/specification/review/dimension_coverage", "workspace/specification/review/negative_path", "workspace/specification/review/regression", "workspace/specification/review/resource_environment", "workspace/specification/review/traceability", "workspace/specification/review/verifier_feasibility":
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *Biz) validateInferenceSelection(ctx context.Context, selection runtimecontract.ProviderInferenceSelection, operation string) (runtimecontract.ProviderInferenceSelection, string, error) {
@@ -1001,7 +1020,7 @@ func (m *Biz) executeCommand(ev magicevent.Event) (providerCommandExecution, err
 			return providerCommandExecution{}, err
 		}
 		startedAt := time.Now().UTC()
-		completion, metadata, err := m.completeProvider(ctx, cmd.Target, request)
+		completion, metadata, err := m.completeProvider(ctx, cmd.Target, request, cmd.ExpectedConfigurationRevision)
 		audit := providerCommandAudit(request, metadata, completion.RequestBytes, completion.ResponseBytes, startedAt, time.Now().UTC(), err)
 		applyProviderUsageToAudit(audit, completion.Usage)
 		execution := providerCommandExecution{Audit: audit, Usage: cloneProviderUsage(completion.Usage)}
@@ -1166,10 +1185,13 @@ func setLLMMagicError(result magicevent.Result, err error) {
 	result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
 }
 
-func (m *Biz) completeProvider(ctx context.Context, target runtimecontract.ProviderModelTarget, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, providerExecutionMetadata, error) {
+func (m *Biz) completeProvider(ctx context.Context, target runtimecontract.ProviderModelTarget, request llmmodels.ProviderRequest, expectedConfigurationRevision string) (llmmodels.ProviderCompletionResult, providerExecutionMetadata, error) {
 	metadata := providerExecutionMetadata{Target: target.Normalized(), PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming}
 	if m == nil {
 		return llmmodels.ProviderCompletionResult{}, metadata, common.ErrInvalidArgument
+	}
+	if expectedConfigurationRevision != "" && expectedConfigurationRevision != m.activeLLMConfigurationRevision {
+		return llmmodels.ProviderCompletionResult{}, metadata, fmt.Errorf("%w: provider configuration changed after specification reserve", common.ErrConflict)
 	}
 	target = metadata.Target
 	if target.ProviderID == "" && target.ModelID == "" {

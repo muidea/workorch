@@ -14,20 +14,62 @@ import (
 // definitionSpecificationInternalEvent is an owner-private, typed mutation
 // intent. No EventHub caller can directly select a ledger transition.
 type definitionSpecificationInternalEvent struct {
-	WorkspaceID common.WorkspaceID
-	Begin       *workspaceevents.BeginDefinitionSpecificationCommand
-	Reserve     *workspaceevents.ReserveDefinitionSpecificationRequestCommand
-	Complete    *workspaceevents.CompleteDefinitionSpecificationRequestCommand
+	WorkspaceID           common.WorkspaceID
+	Authoring             *workspaceevents.SaveDefinitionAuthoringCommand
+	DeriveReserve         *workspaceevents.ReserveDefinitionDerivationCommand
+	VerifiedResources     bool
+	DeriveComplete        *workspaceevents.CompleteDefinitionDerivationCommand
+	AuthoringSpecReserve  *workspaceevents.ReserveAuthoringSpecificationCommand
+	AuthoringSpecComplete *workspaceevents.CompleteAuthoringSpecificationCommand
+	Begin                 *workspaceevents.BeginDefinitionSpecificationCommand
+	Reserve               *workspaceevents.ReserveDefinitionSpecificationRequestCommand
+	Complete              *workspaceevents.CompleteDefinitionSpecificationRequestCommand
 }
 
 type definitionSpecificationTransition struct {
-	Next    *workspacemodel.Workspace
-	Begin   *workspaceevents.BeginDefinitionSpecificationResult
-	Request *workspaceevents.DefinitionSpecificationRequestResult
+	Authoring              *workspaceevents.SaveDefinitionAuthoringResult
+	Derivation             *workspaceevents.DefinitionDerivationRequestResult
+	AuthoringSpecification *workspaceevents.AuthoringSpecificationRequestResult
+	Next                   *workspacemodel.Workspace
+	Begin                  *workspaceevents.BeginDefinitionSpecificationResult
+	Request                *workspaceevents.DefinitionSpecificationRequestResult
 }
 
 func (e definitionSpecificationInternalEvent) validate() error {
 	count := 0
+	if e.VerifiedResources && (e.DeriveReserve == nil || len(e.DeriveReserve.Resources) == 0) {
+		return common.ErrInvalidArgument
+	}
+	if e.DeriveReserve != nil {
+		count++
+		if e.DeriveReserve.Validate() != nil || e.DeriveReserve.WorkspaceID != e.WorkspaceID {
+			return common.ErrInvalidArgument
+		}
+	}
+	if e.DeriveComplete != nil {
+		count++
+		if e.DeriveComplete.Validate() != nil || e.DeriveComplete.WorkspaceID != e.WorkspaceID {
+			return common.ErrInvalidArgument
+		}
+	}
+	if e.AuthoringSpecReserve != nil {
+		count++
+		if e.AuthoringSpecReserve.Validate() != nil || e.AuthoringSpecReserve.WorkspaceID != e.WorkspaceID {
+			return common.ErrInvalidArgument
+		}
+	}
+	if e.AuthoringSpecComplete != nil {
+		count++
+		if e.AuthoringSpecComplete.Validate() != nil || e.AuthoringSpecComplete.WorkspaceID != e.WorkspaceID {
+			return common.ErrInvalidArgument
+		}
+	}
+	if e.Authoring != nil {
+		count++
+		if e.Authoring.Validate() != nil || e.Authoring.Input.WorkspaceID != e.WorkspaceID {
+			return common.ErrInvalidArgument
+		}
+	}
 	if e.Begin != nil {
 		count++
 		if e.Begin.Validate() != nil || e.Begin.Candidate.WorkspaceID != e.WorkspaceID {
@@ -70,9 +112,25 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 		return definitionSpecificationTransition{}, err
 	}
 	for attempt := 0; attempt < 4; attempt++ {
-		observation, err := m.observeDefinitionSpecification(bound, event.WorkspaceID)
+		var observation definitionSpecificationObservation
+		var err error
+		if event.Authoring != nil || event.DeriveReserve != nil || event.DeriveComplete != nil || event.AuthoringSpecReserve != nil || event.AuthoringSpecComplete != nil {
+			observation, err = m.observeDefinitionAuthoring(bound, event.WorkspaceID)
+		} else {
+			observation, err = m.observeDefinitionSpecification(bound, event.WorkspaceID)
+		}
 		if err != nil {
 			return definitionSpecificationTransition{}, err
+		}
+		if event.Authoring != nil || event.DeriveReserve != nil || event.AuthoringSpecReserve != nil {
+			templateID := observation.workspace.TemplateID
+			if event.Authoring != nil {
+				templateID = event.Authoring.Input.Normalized().TemplateID
+			}
+			observation.template, err = m.resolvedTemplate(bound, templateID)
+			if err != nil {
+				return definitionSpecificationTransition{}, err
+			}
 		}
 		transition, err := reduceDefinitionSpecificationInternalEvent(observation, event)
 		if err != nil {
@@ -96,6 +154,12 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 // it neither calls a provider nor reads/writes repositories or EventHub.
 func reduceDefinitionSpecificationInternalEvent(o definitionSpecificationObservation, e definitionSpecificationInternalEvent) (definitionSpecificationTransition, error) {
 	switch {
+	case e.AuthoringSpecReserve != nil || e.AuthoringSpecComplete != nil:
+		return reduceAuthoringSpecification(o, e)
+	case e.DeriveReserve != nil || e.DeriveComplete != nil:
+		return reduceDefinitionDerivation(o, e)
+	case e.Authoring != nil:
+		return reduceDefinitionAuthoring(o, *e.Authoring)
 	case e.Begin != nil:
 		return reduceDefinitionSpecificationBegin(o, *e.Begin)
 	case e.Reserve != nil:
