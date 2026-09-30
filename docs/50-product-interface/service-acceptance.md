@@ -61,6 +61,20 @@ Acceptance must prove:
 Do not reintroduce tests for `POST .../runs`, `POST .../runs/:runId/start`, `POST .../runs/:runId/resume` or
 `ExecutionContextPatch` as successful behavior. Their rejection is the retired-surface guard.
 
+## 持久规格创作 Live 验收
+
+正式创建链路为 `POST /api/v1/workorch/workspace-authoring` → workspace-scoped `authoring` 查询／修订 → `authoring/compile` → `authoring/confirm`。创建 RequestID 与原 payload 必须保存并可精确重放；编译接受的 202 只表示 BackgroundRoutine 接受任务，不代表 owner 已完成规格或准入。查询始终以 Workspace 持久 ledger 为准，结果未决不得自动重发 provider。确认绑定原 input／permit／proposal／specification hashes；确认和准入不自动启动 Run。
+
+对已启动、配置好 provider 的隔离实例，可显式执行：
+
+```bash
+python3 scripts/verify-workspace-authoring-live.py \
+  --base-url http://127.0.0.1:8080 --template-id <template-id> \
+  --goal '<目标>' --directory <项目目录> --resource <相对文件引用> --confirm
+```
+
+该验收会创建持久 Workspace 并调用 provider；不得作为无副作用 smoke 自动执行。脚本不读取 credential，不输出输入、provider 原文或配置，不删除测试 Workspace，也不启动 Run。默认只验收到六审查通过，`--confirm` 额外要求 eligible、精确确认重放与零自动 Run；模板缺可执行 proof 必须阻塞，不能为了通过修改验证声明。响应丢失可用打印的 `--request-id` 与原输入重放。此 live gate 不替代浏览器交互、进程重启和后续显式执行的独立验收。
+
 ## Workspace Deletion Contract
 
 HTTP/owner integration acceptance must prove:

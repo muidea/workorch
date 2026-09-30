@@ -37,7 +37,7 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 		t.Fatal(err)
 	}
 	record := current.DefinitionAuthoring.Clone()
-	reserveDerivation := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: id, InputHash: record.InputHash, RequestID: "derive-successor", ProviderBindingHash: "provider", ResourceSnapshotHash: workspacemodel.DefinitionAuthoringResourcesHash(nil)}
+	reserveDerivation := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: id, InputHash: record.InputHash, RequestID: "derive-successor/" + record.InputHash, ProviderBindingHash: "provider", ResourceSnapshotHash: workspacemodel.DefinitionAuthoringResourcesHash(nil)}
 	reservedDerivation, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, DeriveReserve: &reserveDerivation})
 	if err != nil || reservedDerivation.Derivation == nil || reservedDerivation.Derivation.FreshPermitID == "" {
 		t.Fatalf("reserve successor derivation: %v", err)
@@ -58,7 +58,7 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 			proof.Scope = "dodItem"
 		}
 	}
-	reserveProposal := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: id, InputHash: record.InputHash, RequestID: "proposal-successor", DerivationPermitID: derivation.PermitID, ProviderBindingHash: "provider"}
+	reserveProposal := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: id, InputHash: record.InputHash, RequestID: "proposal-successor/" + record.InputHash, DerivationPermitID: derivation.PermitID, ProviderBindingHash: "provider"}
 	reservedProposal, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &reserveProposal})
 	if err != nil || reservedProposal.AuthoringSpecification == nil || reservedProposal.AuthoringSpecification.FreshPermitID == "" {
 		t.Fatalf("reserve successor proposal: %v", err)
@@ -68,7 +68,7 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 		t.Fatal(err)
 	}
 	for _, kind := range []string{workspacemodel.GoalReviewDimensionCoverage, workspacemodel.GoalReviewNegativePath, workspacemodel.GoalReviewRegression, workspacemodel.GoalReviewResourceEnvironment, workspacemodel.GoalReviewTraceability, workspacemodel.GoalReviewVerifierFeasibility} {
-		reserveReview := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: id, InputHash: record.InputHash, RequestID: "successor-" + kind, DerivationPermitID: derivation.PermitID, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"}
+		reserveReview := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: id, InputHash: record.InputHash, RequestID: "successor-" + kind + "/" + record.InputHash, DerivationPermitID: derivation.PermitID, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"}
 		reservedReview, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &reserveReview})
 		if err != nil || reservedReview.AuthoringSpecification == nil || reservedReview.AuthoringSpecification.FreshPermitID == "" {
 			t.Fatalf("reserve successor review %s: %v", kind, err)
@@ -88,6 +88,40 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 		t.Fatal(err)
 	}
 	return workspaceevents.ConfirmDefinitionAuthoringCommand{WorkspaceID: id, InputHash: record.InputHash, DerivationPermitID: derivation.PermitID, ProposalHash: proposal.ContentHash(), SpecificationHash: reviewed.AdmissionHash(), ExpectedWorkspaceRevision: updated.Revision}
+}
+
+func TestAuthoringMultipleBlockedSuccessorsRetainCumulativeBudget(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	owners := openFileDefinitionAdmissionOwners(t, root)
+	defer func() { owners.close() }()
+	command := seedReviewedAuthoringConfirmation(t, owners, "ws-multiple-successors")
+	if err := owners.workspace.Start(); err != nil {
+		t.Fatal(err)
+	}
+	application := &appbiz.Biz{Base: basebiz.New(appbiz.ModuleID, owners.hub, nil)}
+	if _, err := application.ConfirmAndAdmitDefinitionAuthoring(ctx, command); err != nil {
+		t.Fatal(err)
+	}
+	for revision := 2; revision <= 3; revision++ {
+		command = reviewedAuthoringSuccessor(t, owners, command.WorkspaceID, false)
+		if _, err := application.ConfirmAndAdmitDefinitionAuthoring(ctx, command); err != nil {
+			t.Fatalf("revision %d: %v", revision, err)
+		}
+		stored, err := owners.repositories.Workspaces.Get(ctx, command.WorkspaceID)
+		if err != nil || len(stored.DefinitionAuthoringHistory) != revision-1 || len(stored.DefinitionAdmissionCandidates) != revision || len(stored.DefinitionAuthoring.DerivationRequests) != revision || len(stored.DefinitionAuthoring.SpecificationRequests) != 7*revision || stored.ValidateDefinitionAuthoringHistory() != nil || stored.StartupInput != nil || stored.ActiveRunID != "" {
+			t.Fatalf("revision %d lost history or budget: %+v %v", revision, stored, err)
+		}
+	}
+	owners.close()
+	owners = openFileDefinitionAdmissionOwners(t, root)
+	if err := owners.workspace.Start(); err != nil {
+		t.Fatal(err)
+	}
+	application = &appbiz.Biz{Base: basebiz.New(appbiz.ModuleID, owners.hub, nil)}
+	if _, err := application.ConfirmAndAdmitDefinitionAuthoring(ctx, command); err != nil {
+		t.Fatalf("revision 3 reopen: %v", err)
+	}
 }
 
 func TestAuthoringBlockedSuccessorReconcilesTicketAndRetainsLineage(t *testing.T) {

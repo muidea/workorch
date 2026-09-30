@@ -79,6 +79,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
       if (edited || current.input?.goalText !== input.goalText || current.templateId !== values.templateId || JSON.stringify(current.input?.acceptanceRequirements || []) !== JSON.stringify(input.acceptanceRequirements) || JSON.stringify(current.input?.resourceRefs || []) !== JSON.stringify(input.resourceRefs)) {
         current = await workorchApi.saveDefinitionAuthoring(current.workspaceId, input, values.templateId, current.workspaceRevision, current.inputHash || '');
         applyView(current);
+        if (recovery) persist({ request: recovery.request, workspaceId: current.workspaceId });
       }
       const next = await workorchApi.compileDefinitionAuthoring(current.workspaceId);
       setView(next);
@@ -90,11 +91,12 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
   };
 
   const confirm = async () => {
-    if (!view || edited || (!authoringCanConfirm(view) && !['confirming', 'admitting'].includes(view.state))) return;
+    if (!view || edited || (!authoringCanConfirm(view) && !recovery?.pendingConfirmation && !['confirming', 'admitting'].includes(view.state))) return;
     setBusy(true);
     setFailure('');
     try {
-      const next = await workorchApi.confirmDefinitionAuthoring(view);
+      if (recovery && !recovery.pendingConfirmation) persist({ ...recovery, pendingConfirmation: { inputHash: view.inputHash || '', derivationPermitId: view.derivationPermitId || '', proposalHash: view.proposal?.proposalHash || '', specificationHash: view.proposal?.specificationHash || '', expectedWorkspaceRevision: view.workspaceRevision } });
+      const next = await workorchApi.confirmDefinitionAuthoring(view, recovery?.pendingConfirmation);
       setView(next);
       if (next.state === 'admitted') {
         localStorage.removeItem(authoringRecoveryKey);
@@ -110,8 +112,9 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
 
   return <Modal open={open} title="新建工作空间 · 规格创作" width={850} onCancel={onClose} footer={<Space>
     <Button onClick={onClose}>关闭（已保存草稿可恢复）</Button>
+    {view?.state === 'admitted' && <Button type="primary" onClick={async () => { await onCreated(view.workspaceId); localStorage.removeItem(authoringRecoveryKey); onClose(); }}>进入已准入工作空间</Button>}
     <Button loading={busy} onClick={generate} disabled={busy || ['confirming', 'admitting', 'admitted'].includes(view?.state || '')}>保存并生成／恢复审查</Button>
-    <Button type="primary" loading={busy} onClick={confirm} disabled={busy || edited || (!authoringCanConfirm(view) && !['confirming', 'admitting'].includes(view?.state || ''))}>确认规格并准入</Button>
+    <Button type="primary" loading={busy} onClick={confirm} disabled={busy || edited || (!authoringCanConfirm(view) && !recovery?.pendingConfirmation && !['confirming', 'admitting'].includes(view?.state || ''))}>确认规格并准入</Button>
   </Space>}>
     <Space direction="vertical" style={{ width: '100%' }}>
       <Alert type="info" showIcon message="输入目标即可，验收清单由模板与目标派生。六类审查通过后才可确认；此操作不会启动 Run。" />

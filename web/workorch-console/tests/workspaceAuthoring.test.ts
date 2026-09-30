@@ -16,6 +16,9 @@ test('确认要求完整身份和六份 PASS，阻塞与过期模板不可确认
   const missing = ready();
   delete missing.proposal!.specificationHash;
   assert.equal(authoringCanConfirm(missing), false);
+  const duplicate = ready();
+  duplicate.proposal!.reviews![1].kind = duplicate.proposal!.reviews![0].kind;
+  assert.equal(authoringCanConfirm(duplicate), false);
   const failed = ready();
   failed.proposal!.reviews![0].status = 'UNKNOWN';
   assert.equal(authoringCanConfirm(failed), false);
