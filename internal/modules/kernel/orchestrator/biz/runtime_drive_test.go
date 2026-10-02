@@ -182,12 +182,25 @@ func (r *runtimeSaveCrashRepository) Load(ctx context.Context, workspaceID commo
 }
 
 func (r *runtimeSaveCrashRepository) Save(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
+	return r.save(ctx, aggregate, expectedRevision, r.delegate.Save)
+}
+
+func (r *runtimeSaveCrashRepository) SaveValidated(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
+	if delegate, ok := r.delegate.(interface {
+		SaveValidated(context.Context, runtime.RuntimeAggregate, uint64) error
+	}); ok {
+		return r.save(ctx, aggregate, expectedRevision, delegate.SaveValidated)
+	}
+	return r.Save(ctx, aggregate, expectedRevision)
+}
+
+func (r *runtimeSaveCrashRepository) save(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64, persist func(context.Context, runtime.RuntimeAggregate, uint64) error) error {
 	matched := !r.fired && r.match != nil && r.match(aggregate)
 	if matched && !r.after {
 		r.fired = true
 		panic(r.marker)
 	}
-	if err := r.delegate.Save(ctx, aggregate, expectedRevision); err != nil {
+	if err := persist(ctx, aggregate, expectedRevision); err != nil {
 		return err
 	}
 	if matched && r.after {

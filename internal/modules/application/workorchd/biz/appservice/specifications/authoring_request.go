@@ -8,6 +8,7 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -28,6 +29,10 @@ func AuthoringProposalCommand(derivation workspace.DefinitionDerivationRequest, 
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
+	bindings, err := definitionconfiguration.Compile(&workspace.Workspace{}, &derivation.Template)
+	if err != nil {
+		return llmevents.CompleteProviderCommand{}, err
+	}
 	goal := workspace.DefinitionCandidateItem{CandidateItemRef: workspace.DefinitionAuthoringGoalItemRef, Text: derivation.Input.GoalText, SourceIdentity: derivation.Input.InputHash()}
 	payload, err := json.Marshal(struct {
 		Goal                 workspace.DefinitionCandidateItem               `json:"goal"`
@@ -37,8 +42,9 @@ func AuthoringProposalCommand(derivation workspace.DefinitionDerivationRequest, 
 		ResourceSnapshotHash string                                          `json:"resourceSnapshotHash"`
 		Resources            []workspace.DefinitionAuthoringResourceSnapshot `json:"resources"`
 		ExpectedResources    []workspace.GoalSpecificationResource           `json:"expectedResources"`
+		Profiles             []runtimecontract.RuntimeProfileContract        `json:"profiles"`
 		OutputShape          workspace.GoalSpecification                     `json:"outputShape"`
-	}{goal, items, derivation.Input.InputHash(), workspace.WorkspaceTemplateSnapshotHash(&derivation.Template), derivation.ResourceSnapshotHash, derivation.Resources, resources, workspace.GoalSpecification{Version: workspace.GoalSpecificationVersionCurrent, GoalItemRef: goal.CandidateItemRef, GoalTextHash: workspace.StableDefinitionTextHash(goal.Text), Resources: resources}})
+	}{goal, items, derivation.Input.InputHash(), workspace.WorkspaceTemplateSnapshotHash(&derivation.Template), derivation.ResourceSnapshotHash, derivation.Resources, resources, bindings.ProfileContracts, workspace.GoalSpecification{Version: workspace.GoalSpecificationVersionCurrent, GoalItemRef: goal.CandidateItemRef, GoalTextHash: workspace.StableDefinitionTextHash(goal.Text), Resources: resources}})
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
@@ -56,6 +62,10 @@ func AuthoringReviewCommand(derivation workspace.DefinitionDerivationRequest, pr
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
+	bindings, err := definitionconfiguration.Compile(&workspace.Workspace{}, &derivation.Template)
+	if err != nil {
+		return llmevents.CompleteProviderCommand{}, err
+	}
 	// A critic reads the immutable proposal, never another critic's review.
 	payload, err := json.Marshal(struct {
 		Kind                 string                                          `json:"kind"`
@@ -64,8 +74,9 @@ func AuthoringReviewCommand(derivation workspace.DefinitionDerivationRequest, pr
 		Resources            []workspace.DefinitionAuthoringResourceSnapshot `json:"resources"`
 		Goal                 workspace.DefinitionCandidateItem               `json:"goal"`
 		CandidateAcceptance  []workspace.DefinitionCandidateItem             `json:"candidateAcceptance"`
+		Profiles             []runtimecontract.RuntimeProfileContract        `json:"profiles"`
 		Specification        workspace.GoalSpecification                     `json:"specification"`
-	}{kind, proposal.ContentHash(), derivation.ResourceSnapshotHash, derivation.Resources, workspace.DefinitionCandidateItem{CandidateItemRef: workspace.DefinitionAuthoringGoalItemRef, Text: derivation.Input.GoalText, SourceIdentity: derivation.Input.InputHash()}, items, proposal})
+	}{kind, proposal.ContentHash(), derivation.ResourceSnapshotHash, derivation.Resources, workspace.DefinitionCandidateItem{CandidateItemRef: workspace.DefinitionAuthoringGoalItemRef, Text: derivation.Input.GoalText, SourceIdentity: derivation.Input.InputHash()}, items, bindings.ProfileContracts, proposal})
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}

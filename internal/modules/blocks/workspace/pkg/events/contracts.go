@@ -23,7 +23,6 @@ func Contracts() []eventcontract.Contract {
 		TopicWorkspaceTemplateCommandQueryBuiltinDefaults,
 		TopicWorkspaceDefinitionAuthoringQuery,
 		TopicWorkspaceAuthoringResourceScopeQuery,
-		TopicWorkspaceSpecificationQuery,
 	)...)
 	ret = append(ret, eventcontract.Build("workspace", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicWorkspaceCommandCreate,

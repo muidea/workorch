@@ -591,23 +591,20 @@ func TestModelWorkspacePanelDisambiguatesDuplicateNames(t *testing.T) {
 	}
 }
 
-func TestModelSubmitGoalStartsRun(t *testing.T) {
-	m := NewAppModel(newFake(t), "ws-1", "")
-	next, _ := m.Update(WorkspaceListMsg{Workspaces: []projectioncontract.Workspace{{ID: "ws-1", Title: "Project", State: "active"}}})
-	m = asModel(next)
-	m.input = "/goal finish task"
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+func TestModelSubmitGoalStartsRunRejectsRetiredDefinitionWrite(t *testing.T) {
+	be := newRecordingBE(t, common.RunStateActive)
+	m := NewAppModel(be, "ws-1", "")
+	m.setInput("/goal finish task")
+	_, cmd := m.submitInput()
 	if cmd == nil {
-		t.Fatal("expected submit command")
+		t.Fatal("退休命令应提供明确提示")
 	}
-	msg := cmd()
-	next, _ = asModel(next).Update(msg)
-	m = asModel(next)
-	if m.activeRunID != "run-1" || m.running || m.progress != progressSubmitting {
-		t.Fatalf("run admission = %q/%v/%s, want run-1 awaiting projection", m.activeRunID, m.running, m.progress)
+	msg, ok := cmd().(RunStartedMsg)
+	if !ok || msg.Error == nil || msg.Admission != nil {
+		t.Fatalf("退休目标写入未拒绝: %#v", msg)
 	}
-	if m.currentTask != "finish task" {
-		t.Fatalf("current task = %q, want submitted input", m.currentTask)
+	if len(be.goals) != 0 || len(be.runCommands) != 0 {
+		t.Fatal("退休命令写入目标或启动 Run")
 	}
 }
 
@@ -637,84 +634,54 @@ func TestModelPlainInputWithActiveRunningRunUsesWorkspaceResume(t *testing.T) {
 	}
 }
 
-func TestModelPlainInputIdleWorkspaceSubmitsGoal(t *testing.T) {
+func TestModelPlainInputIdleWorkspaceSubmitsGoalRejectsRetiredDefinitionWrite(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
-	m.activeRunID = ""
-	m.running = false
-	m.setInput("补充新的目标")
-
-	next, cmd := m.submitInput()
-	m = asModel(next)
+	m.setInput("新目标")
+	_, cmd := m.submitInput()
 	if cmd == nil {
-		t.Fatal("plain input in idle workspace should submit goal")
+		t.Fatal("退休命令应提供明确提示")
 	}
-	msg := cmd()
-	_, _ = m.Update(msg)
-
-	if len(be.goals) != 1 || be.goals[0] != "补充新的目标" {
-		t.Fatalf("goals = %v, want plain input as goal", be.goals)
+	msg, ok := cmd().(RunStartedMsg)
+	if !ok || msg.Error == nil || msg.Admission != nil {
+		t.Fatalf("退休目标写入未拒绝: %#v", msg)
+	}
+	if len(be.goals) != 0 || len(be.runCommands) != 0 {
+		t.Fatal("退休命令写入目标或启动 Run")
 	}
 }
 
-func TestModelPlainInputUsesCurrentWorkspaceLiveRunOnly(t *testing.T) {
+func TestModelPlainInputUsesCurrentWorkspaceLiveRunOnlyRejectsRetiredDefinitionWrite(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateActive)
-	m := NewAppModel(be, "ws-b", "")
-	m.workspaces = []projectioncontract.Workspace{
-		{ID: "ws-a", Title: "A", State: string(common.WorkspaceStateActive), ActiveRunID: "run-a"},
-		{ID: "ws-b", Title: "B", State: string(common.WorkspaceStateActive)},
-	}
-	m.activeWorkspaceID = "ws-b"
-	m.selectedWorkspaceID = "ws-b"
-	m.activeRunID = "run-a"
-	m.running = true
-	m.progress = progressRunning
-	m.setInput("启动 B 工作区")
-
-	next, cmd := m.submitInput()
+	m := NewAppModel(be, "ws-1", "")
+	m.setInput("新目标")
+	_, cmd := m.submitInput()
 	if cmd == nil {
-		t.Fatal("expected submit command")
+		t.Fatal("退休命令应提供明确提示")
 	}
 	msg, ok := cmd().(RunStartedMsg)
-	if !ok || msg.Error != nil || msg.Admission == nil {
-		t.Fatalf("submit msg = %#v, want scoped RunStartedMsg", msg)
+	if !ok || msg.Error == nil || msg.Admission != nil {
+		t.Fatalf("退休目标写入未拒绝: %#v", msg)
 	}
-	if msg.WorkspaceID != "ws-b" || msg.Admission.WorkspaceID != "ws-b" {
-		t.Fatalf("run scope = msg:%q admission:%q, want ws-b", msg.WorkspaceID, msg.Admission.WorkspaceID)
-	}
-	_, _ = next.(*AppModel).Update(msg)
-
-	if len(be.goals) != 1 || be.goals[0] != "启动 B 工作区" {
-		t.Fatalf("goals = %v, want new goal for current workspace", be.goals)
+	if len(be.goals) != 0 || len(be.runCommands) != 0 {
+		t.Fatal("退休命令写入目标或启动 Run")
 	}
 }
 
-func TestModelPlainInputFailedWorkspaceIgnoresStaleActiveRun(t *testing.T) {
+func TestModelPlainInputFailedWorkspaceIgnoresStaleActiveRunRejectsRetiredDefinitionWrite(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
-	m.workspaces = []projectioncontract.Workspace{
-		{ID: "ws-1", Title: "idle", State: string(common.WorkspaceStateActive)},
-	}
-	m.activeRunID = "run-stale"
-	m.running = true
-	m.progress = progressRunning
-	m.setInput("重新整理目标")
-
-	next, cmd := m.submitInput()
-	m = asModel(next)
+	m.setInput("新目标")
+	_, cmd := m.submitInput()
 	if cmd == nil {
-		t.Fatal("expected goal submission command for failed workspace")
-	}
-	if m.progressText == "Continuing active run" {
-		t.Fatalf("progressText = %q, want non-continuation submission text", m.progressText)
+		t.Fatal("退休命令应提供明确提示")
 	}
 	msg, ok := cmd().(RunStartedMsg)
-	if !ok || msg.Error != nil || msg.Admission == nil {
-		t.Fatalf("submit msg = %#v, want RunStartedMsg", msg)
+	if !ok || msg.Error == nil || msg.Admission != nil {
+		t.Fatalf("退休目标写入未拒绝: %#v", msg)
 	}
-	_, _ = m.Update(msg)
-	if len(be.goals) != 1 || be.goals[0] != "重新整理目标" {
-		t.Fatalf("goals = %v, want failed workspace input submitted as new goal", be.goals)
+	if len(be.goals) != 0 || len(be.runCommands) != 0 {
+		t.Fatal("退休命令写入目标或启动 Run")
 	}
 }
 
@@ -735,21 +702,20 @@ func TestModelIgnoresRunStartedErrorForInactiveWorkspace(t *testing.T) {
 	}
 }
 
-func TestModelGoalSlashCommandCanSubmitRunControlWordsAsGoal(t *testing.T) {
+func TestModelGoalSlashCommandCanSubmitRunControlWordsAsGoalRejectsRetiredDefinitionWrite(t *testing.T) {
 	be := newRecordingBE(t, common.RunStateActive)
 	m := NewAppModel(be, "ws-1", "")
-	m.activeRunID = "run-resume"
-	m.setInput("/goal 继续处理")
-
-	next, cmd := m.submitInput()
+	m.setInput("/goal finish task")
+	_, cmd := m.submitInput()
 	if cmd == nil {
-		t.Fatal("expected goal submit command")
+		t.Fatal("退休命令应提供明确提示")
 	}
-	msg := cmd()
-	_, _ = next.(*AppModel).Update(msg)
-
-	if len(be.goals) != 1 || be.goals[0] != "继续处理" {
-		t.Fatalf("goals = %v, want explicit /goal text", be.goals)
+	msg, ok := cmd().(RunStartedMsg)
+	if !ok || msg.Error == nil || msg.Admission != nil {
+		t.Fatalf("退休目标写入未拒绝: %#v", msg)
+	}
+	if len(be.goals) != 0 || len(be.runCommands) != 0 {
+		t.Fatal("退休命令写入目标或启动 Run")
 	}
 }
 
@@ -1165,12 +1131,12 @@ func TestModelDefinitionClarificationOffersOnlyRevisionAndRestartActions(t *test
 	}, false)
 	m.setInput("/")
 	input := stripANSI(m.renderInput(160))
-	for _, want := range []string{"definition >", "/goal", "/dod", "/run restart"} {
+	for _, want := range []string{"definition >", "/run restart"} {
 		if !strings.Contains(input, want) {
 			t.Fatalf("definition prompt = %q, want %q", input, want)
 		}
 	}
-	for _, forbidden := range []string{"/decision answer", "/decision terminate", "/run resume"} {
+	for _, forbidden := range []string{"/goal", "/dod", "/workspace create", "/decision answer", "/decision terminate", "/run resume"} {
 		if strings.Contains(input, forbidden) {
 			t.Fatalf("definition prompt = %q, must not offer %q", input, forbidden)
 		}
@@ -1575,7 +1541,7 @@ func TestModelSlashCompletionHelpAndClearCommands(t *testing.T) {
 	}
 	m.width = 80
 	m.height = 20
-	if view := stripANSI(m.View()); !strings.Contains(view, "WorkOrch Help") || !strings.Contains(view, "/status") || !strings.Contains(view, "/coverage") {
+	if view := stripANSI(m.View()); !strings.Contains(view, "WorkOrch 帮助") || !strings.Contains(view, "/status") || !strings.Contains(view, "/coverage") {
 		t.Fatalf("help overlay missing content:\n%s", view)
 	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -2271,7 +2237,7 @@ func TestModelEmptyWorkspaceGuidance(t *testing.T) {
 	m.width = 90
 	m.height = 18
 	view := stripANSI(m.View())
-	for _, want := range []string{"No workspaces found", "/workspace create <title> --template <template-id> [--dir <path>]", "/dod"} {
+	for _, want := range []string{"未找到工作空间", "Web 控制台", "规格创作、审查与确认", "/workspace"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("empty workspace guidance missing %q:\n%s", want, view)
 		}
@@ -5536,74 +5502,37 @@ func TestModelDodSlashCommandNormalizesMarkdownDoD(t *testing.T) {
 	}
 }
 
-func TestModelDodSlashCommandPersistsDoDToActiveWorkspace(t *testing.T) {
+func TestModelDodSlashCommandPersistsDoDToActiveWorkspaceRejectsRetiredWrite(t *testing.T) {
 	be := &recordingDoDBE{fakeBE: newFake(t)}
-	model := NewAppModel(be, "ws-1", "")
-	model.width = 120
-	model.height = 24
-	model.setInput("/dod tests pass; diff is delivered")
-
-	updated, cmd := model.submitInput()
+	m := NewAppModel(be, "ws-1", "")
+	m.setInput("/dod tests pass")
+	_, cmd := m.submitInput()
 	if cmd == nil {
-		t.Fatal("dod command returned nil cmd")
+		t.Fatal("退休命令应提供明确提示")
 	}
 	msg, ok := cmd().(DoDUpdatedMsg)
-	if !ok || msg.Error != nil || msg.DoD == nil {
-		t.Fatalf("dod command msg = %#v, want DoDUpdatedMsg", msg)
+	if !ok || msg.Error == nil || msg.DoD != nil {
+		t.Fatalf("退休写入未拒绝: %#v", msg)
 	}
-	if be.workspaceID != "ws-1" {
-		t.Fatalf("persisted workspace = %q, want ws-1", be.workspaceID)
-	}
-	want := []string{"tests pass", "diff is delivered"}
-	if len(be.items) != len(want) {
-		t.Fatalf("persisted items = %#v, want %#v", be.items, want)
-	}
-	for idx := range want {
-		if be.items[idx] != want[idx] {
-			t.Fatalf("persisted items = %#v, want %#v", be.items, want)
-		}
-	}
-
-	next, refresh := updated.(*AppModel).Update(msg)
-	if refresh == nil {
-		t.Fatal("dod update should refresh workspace context")
-	}
-	got := next.(AppModel)
-	if got.progressText != "DoD saved" {
-		t.Fatalf("progress text = %q, want DoD saved", got.progressText)
+	if be.workspaceID != "" || len(be.items) != 0 {
+		t.Fatal("退休 DoD 写入产生副作用")
 	}
 }
 
-func TestModelWorkspaceCreateCommandUsesTemplateAndActivatesWorkspace(t *testing.T) {
+func TestModelWorkspaceCreateCommandUsesTemplateAndActivatesWorkspaceRejectsRetiredWrite(t *testing.T) {
 	be := &workspaceCreateFake{fakeBE: newFake(t)}
-	model := NewAppModel(be, "", "")
-	model.width = 120
-	model.height = 24
-	model.setInput("/workspace create code agent --template template-a --dir /tmp/code-agent")
-
-	updated, cmd := model.submitInput()
+	m := NewAppModel(be, "ws-1", "")
+	m.setInput("/workspace create task --template template-a")
+	_, cmd := m.submitInput()
 	if cmd == nil {
-		t.Fatal("workspace create command returned nil cmd")
+		t.Fatal("退休命令应提供明确提示")
 	}
 	msg, ok := cmd().(WorkspaceCreatedMsg)
-	if !ok || msg.Error != nil || msg.Workspace == nil {
-		t.Fatalf("workspace create msg = %#v, want created workspace", msg)
+	if !ok || msg.Error == nil || msg.Workspace != nil {
+		t.Fatalf("退休写入未拒绝: %#v", msg)
 	}
-	if be.createReq.Title != "code agent" || be.createReq.TemplateID != "template-a" || be.createReq.DeliverableDirectory != "/tmp/code-agent" {
-		t.Fatalf("create request = %+v, want title/template/dir", be.createReq)
-	}
-
-	next, refresh := updated.(*AppModel).Update(msg)
-	if refresh == nil {
-		t.Fatal("expected workspace create to refresh list/context")
-	}
-	got := next.(AppModel)
-	if got.activeWorkspaceID != "ws-created" {
-		t.Fatalf("active workspace = %q, want ws-created", got.activeWorkspaceID)
-	}
-	view := stripANSI(got.View())
-	if !strings.Contains(view, "bindings: planning,execution") {
-		t.Fatalf("view missing workspace binding summary:\n%s", view)
+	if be.createReq.Title != "" {
+		t.Fatal("退休创建调用 backend")
 	}
 }
 

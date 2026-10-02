@@ -9,6 +9,11 @@ func (r DefinitionAuthoringRecord) ConfirmableSpecification(derivationPermitID, 
 	if err := r.Validate(); err != nil {
 		return DefinitionDerivationRequest{}, GoalSpecification{}, err
 	}
+	return r.confirmableSpecification(derivationPermitID, proposalHash)
+}
+
+// 仅由本次调用内已完整校验 ledger 的入口使用，不持久缓存或接受外部校验标记。
+func (r DefinitionAuthoringRecord) confirmableSpecification(derivationPermitID, proposalHash string) (DefinitionDerivationRequest, GoalSpecification, error) {
 	derivation, err := r.derivationForSpecification(derivationPermitID)
 	if err != nil || derivation.Input.InputHash() != r.InputHash || WorkspaceTemplateSnapshotHash(&derivation.Template) != r.TemplateSnapshotHash {
 		return DefinitionDerivationRequest{}, GoalSpecification{}, fmt.Errorf("authoring confirmation requires current completed derivation")

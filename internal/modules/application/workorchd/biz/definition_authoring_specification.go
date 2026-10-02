@@ -26,10 +26,14 @@ func (b *Biz) CompileAuthoringSpecification(ctx context.Context, id common.Works
 	if view.Record == nil || !view.CurrentTemplateAvailable || view.Record.TemplateSnapshotHash != view.CurrentTemplateSnapshotHash {
 		return workspace.GoalSpecification{}, common.ErrConflict
 	}
+	record, err := view.Record.Model()
+	if err != nil {
+		return workspace.GoalSpecification{}, err
+	}
 	var derivation *workspace.DefinitionDerivationRequest
-	for n := range view.Record.DerivationRequests {
-		request := &view.Record.DerivationRequests[n]
-		if request.Input.InputHash() == view.Record.InputHash && workspace.WorkspaceTemplateSnapshotHash(&request.Template) == view.Record.TemplateSnapshotHash && request.Proposal != nil {
+	for n := range record.DerivationRequests {
+		request := &record.DerivationRequests[n]
+		if request.Input.InputHash() == record.InputHash && workspace.WorkspaceTemplateSnapshotHash(&request.Template) == record.TemplateSnapshotHash && request.Proposal != nil {
 			derivation = request
 		}
 	}
@@ -37,7 +41,7 @@ func (b *Biz) CompileAuthoringSpecification(ctx context.Context, id common.Works
 		return workspace.GoalSpecification{}, fmt.Errorf("%w: derived acceptance must be persisted before specification", common.ErrConflict)
 	}
 	// A complete replay does not consult mutable provider configuration.
-	if specification, complete, replayErr := compiledAuthoringSpecification(*view.Record, *derivation); replayErr != nil || complete {
+	if specification, complete, replayErr := compiledAuthoringSpecification(record, *derivation); replayErr != nil || complete {
 		return specification, replayErr
 	}
 	configuration, err := b.activeDefinitionProviderConfiguration(ctx)
@@ -48,7 +52,7 @@ func (b *Biz) CompileAuthoringSpecification(ctx context.Context, id common.Works
 	if derivation.ProviderBindingHash != bindingHash {
 		return workspace.GoalSpecification{}, fmt.Errorf("%w: specification provider configuration changed after derivation", common.ErrConflict)
 	}
-	for _, previous := range view.Record.SpecificationRequests {
+	for _, previous := range record.SpecificationRequests {
 		if previous.DerivationPermitID == derivation.PermitID && previous.ProviderBindingHash != bindingHash {
 			return workspace.GoalSpecification{}, fmt.Errorf("%w: specification provider configuration changed between persisted stages", common.ErrConflict)
 		}

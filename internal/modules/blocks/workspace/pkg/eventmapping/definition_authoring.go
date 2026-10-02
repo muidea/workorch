@@ -1,0 +1,43 @@
+package eventmapping
+
+import (
+	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+)
+
+func DefinitionDerivationRequestDTO(r workspace.DefinitionDerivationRequest) workspaceevents.DefinitionDerivationRequest {
+	r = r.Clone()
+	return workspaceevents.DefinitionDerivationRequest{
+		RequestID: r.RequestID, Input: r.Input, Template: *TemplateDTO(&r.Template),
+		Resources: r.Resources, ResourceSnapshotHash: r.ResourceSnapshotHash,
+		ProviderBindingHash: r.ProviderBindingHash, PermitID: r.PermitID,
+		Proposal: r.Proposal, FailureCode: r.FailureCode,
+	}
+}
+
+func DefinitionAuthoringRecordDTO(r workspace.DefinitionAuthoringRecord) workspaceevents.DefinitionAuthoringRecord {
+	r = r.Clone()
+	ret := workspaceevents.DefinitionAuthoringRecord{
+		Input: r.Input, InputHash: r.InputHash, TemplateSnapshotHash: r.TemplateSnapshotHash,
+		TemplateSnapshot: *TemplateDTO(&r.TemplateSnapshot), SpecificationRequests: r.SpecificationRequests,
+		SaveReceipts: r.SaveReceipts,
+	}
+	if r.DerivationRequests != nil {
+		ret.DerivationRequests = make([]workspaceevents.DefinitionDerivationRequest, len(r.DerivationRequests))
+	}
+	for n, request := range r.DerivationRequests {
+		ret.DerivationRequests[n] = DefinitionDerivationRequestDTO(request)
+	}
+	return ret
+}
+
+func DefinitionAuthoringHistoryDTOs(history []workspace.DefinitionAuthoringConfirmedRevision) []workspaceevents.DefinitionAuthoringConfirmedRevision {
+	if history == nil {
+		return nil
+	}
+	ret := make([]workspaceevents.DefinitionAuthoringConfirmedRevision, len(history))
+	for n, revision := range history {
+		ret[n] = workspaceevents.DefinitionAuthoringConfirmedRevision{Record: DefinitionAuthoringRecordDTO(revision.Record), Confirmation: revision.Confirmation.Clone()}
+	}
+	return ret
+}

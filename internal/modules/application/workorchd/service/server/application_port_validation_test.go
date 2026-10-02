@@ -38,6 +38,19 @@ func TestApplicationPortsValidateCoversEveryTypedPort(t *testing.T) {
 	}
 }
 
+func TestApplicationPortsExcludeRetiredDefinitionWrites(t *testing.T) {
+	for _, group := range []reflect.Type{reflect.TypeOf(WorkspacePorts{}), reflect.TypeOf(DefinitionPorts{})} {
+		for _, name := range []string{"CreateWorkspace", "DefineGoal", "UpdateGoal", "DefineDoD", "UpdateDoD", "CheckGoalDoDQuality", "GenerateWorkspaceSetupDraft"} {
+			if _, exists := group.FieldByName(name); exists {
+				t.Fatalf("退休端口仍公开: %s.%s", group.Name(), name)
+			}
+		}
+	}
+	if err := completeApplicationPorts(t).Validate(); err != nil {
+		t.Fatalf("现行端口必须足以完成装配: %v", err)
+	}
+}
+
 func TestRunApplicationPortsRemainReadOnly(t *testing.T) {
 	typeOfRunPorts := reflect.TypeOf(RunPorts{})
 	for index := 0; index < typeOfRunPorts.NumField(); index++ {

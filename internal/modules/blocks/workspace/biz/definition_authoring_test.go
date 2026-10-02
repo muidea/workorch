@@ -11,7 +11,7 @@ func TestDefinitionAuthoringReducerSavesWithoutAdmission(t *testing.T) {
 	w := &workspace.Workspace{ID: "ws", Revision: 1, TemplateID: "t"}
 	template := &workspace.WorkspaceTemplate{ID: "t"}
 	input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: "ws", Revision: 1, TemplateID: "t", GoalText: "目标", AcceptanceRequirements: []string{"条件"}}
-	cmd := workspaceevents.SaveDefinitionAuthoringCommand{Input: input, ExpectedWorkspaceRevision: 1}
+	cmd := workspaceevents.SaveDefinitionAuthoringCommand{RequestID: "save-test", Input: input, ExpectedWorkspaceRevision: 1}
 	o := definitionSpecificationObservation{workspace: w, template: template}
 	first, err := reduceDefinitionAuthoring(o, cmd)
 	if err != nil {
@@ -42,6 +42,8 @@ func TestDefinitionAuthoringReducerSavesWithoutAdmission(t *testing.T) {
 		t.Fatal("stale CAS accepted")
 	}
 	cmd.ExpectedWorkspaceRevision = o.workspace.Revision
+	cmd.ExpectedInputHash = o.workspace.DefinitionAuthoring.InputHash
+	cmd.RequestID = "new-save"
 	if _, err := reduceDefinitionAuthoring(o, cmd); err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +55,7 @@ func TestDefinitionAuthoringReducerSavesWithoutAdmission(t *testing.T) {
 }
 
 func TestDefinitionAuthoringReducerRejectsExistingAuthority(t *testing.T) {
-	cmd := workspaceevents.SaveDefinitionAuthoringCommand{Input: workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: "ws", Revision: 1, TemplateID: "t", GoalText: "目标"}, ExpectedWorkspaceRevision: 1}
+	cmd := workspaceevents.SaveDefinitionAuthoringCommand{RequestID: "save-test", Input: workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: "ws", Revision: 1, TemplateID: "t", GoalText: "目标"}, ExpectedWorkspaceRevision: 1}
 	for _, mutate := range []func(*workspace.Workspace){
 		func(w *workspace.Workspace) { w.StartupInput = &workspace.WorkspaceStartupInputContract{} },
 		func(w *workspace.Workspace) { w.ActivationAdmission = &workspace.WorkspaceActivationAdmission{} },

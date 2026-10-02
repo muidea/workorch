@@ -3,11 +3,14 @@ package activationports
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governanceports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	workspacecontracts "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/contracts"
@@ -30,10 +33,8 @@ type WorkspaceDefinitionAdmissionSnapshot struct {
 	Candidate workspacemodel.DefinitionAdmissionCandidate
 }
 
-// EnsureWorkspaceDefinitionAdmission compiles one immutable authoring intent,
-// submits it to the Workspace owner and composes only the Decision-owner work
-// requested by the factual owner outcome. Workspace alone selects candidate
-// persistence, promotion and eligibility through its private reducer.
+// EnsureWorkspaceDefinitionAdmission 为已确认创作核对 exact owner 准入并复用原候选；
+// 其他定义路径提交 immutable intent，由 Workspace 独占 persistence、promotion 和 eligibility。
 func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub, workspace *workspacemodel.Workspace, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (WorkspaceDefinitionAdmissionSnapshot, error) {
 	if hub == nil || workspace == nil || goal == nil || dod == nil || workspace.ID == "" || goal.WorkspaceID != workspace.ID || dod.WorkspaceID != workspace.ID {
 		return WorkspaceDefinitionAdmissionSnapshot{}, common.ErrInvalidArgument
@@ -50,6 +51,52 @@ func EnsureWorkspaceDefinitionAdmission(ctx context.Context, hub magicevent.Hub,
 	workspace, err = workspacemodel.WorkspaceForCurrentTemplate(workspace, template)
 	if err != nil {
 		return WorkspaceDefinitionAdmissionSnapshot{}, err
+	}
+	for _, candidate := range workspace.DefinitionAdmissionCandidates {
+		if candidate.AuthoringRef == nil {
+			continue
+		}
+		command := workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: workspace.ID}
+		ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, "application/workorchd", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+		ownerevent.BindLane(ev, workspaceevents.Contracts(), workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, "workspace", string(workspace.ID), workspace.ID, "", "")
+		view, err := ownerevent.WorkspaceOwner[workspaceevents.QueryDefinitionAuthoringResult](hub.Send(ev), workspaceevents.TopicWorkspaceDefinitionAuthoringQuery)
+		if err != nil {
+			return WorkspaceDefinitionAdmissionSnapshot{}, err
+		}
+		if err := view.ValidateFor(command); err != nil || view.WorkspaceRevision != workspace.Revision || view.Record == nil || view.Confirmation == nil {
+			return WorkspaceDefinitionAdmissionSnapshot{}, fmt.Errorf("%w: authoring activation observation changed or lacks confirmation", common.ErrConflict)
+		}
+		record, err := view.Record.Model()
+		if err != nil {
+			return WorkspaceDefinitionAdmissionSnapshot{}, err
+		}
+		history, err := workspaceevents.AuthoringHistoryModels(view.History)
+		if err != nil {
+			return WorkspaceDefinitionAdmissionSnapshot{}, err
+		}
+		workspace.DefinitionAuthoring = &record
+		workspace.DefinitionAuthoringConfirmation = view.Confirmation
+		workspace.DefinitionAuthoringHistory = history
+		break
+	}
+	if workspace.DefinitionAuthoring != nil || workspace.DefinitionAuthoringConfirmation != nil {
+		candidate, present, err := workspace.ValidateActivationAdmissionPersistence()
+		journal := workspace.DefinitionAuthoringConfirmation
+		if err != nil || !present || journal == nil || workspace.ActivationAdmission.State != workspacemodel.WorkspaceActivationEligible ||
+			journal.TemplateSnapshotHash != workspacemodel.WorkspaceTemplateSnapshotHash(template) || workspace.DeliverableDirectory != candidate.ResolvedProjectWorkspaceDirectory ||
+			goal.ID != journal.Goal.ID || goal.DefinitionRevision != journal.Goal.DefinitionRevision || goal.Text != journal.Goal.Text ||
+			dod.ID != journal.DoD.ID || dod.DefinitionRevision != journal.DoD.DefinitionRevision || !slices.Equal(dod.Items, journal.DoD.Items) ||
+			definitionRevision != workspace.StartupInput.DefinitionRevision {
+			return WorkspaceDefinitionAdmissionSnapshot{}, fmt.Errorf("%w: authoring activation requires exact confirmed admission and unchanged input", common.ErrConflict)
+		}
+		bindings, err := definitionconfiguration.Compile(workspace, template)
+		if err != nil || bindings.ProfileContractsHash != candidate.RuntimeProfileContractsHash || !reflect.DeepEqual(bindings.PolicyBindings, candidate.AdmissionPolicyBindings) {
+			return WorkspaceDefinitionAdmissionSnapshot{}, fmt.Errorf("%w: authoring activation policy changed after confirmation", common.ErrConflict)
+		}
+		if err := validateCurrentWorkspaceDefinitionAdmission(workspace); err != nil {
+			return WorkspaceDefinitionAdmissionSnapshot{}, invalidCurrentWorkspaceStartupInput(err)
+		}
+		return WorkspaceDefinitionAdmissionSnapshot{Workspace: workspace, Template: template, Candidate: candidate}, nil
 	}
 	candidate, err := definitionAdmissionCandidate(workspace, goal, dod, template)
 	if err != nil {

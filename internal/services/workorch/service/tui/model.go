@@ -2688,7 +2688,7 @@ func (m *AppModel) syncMainViewportToCurrentContent() {
 
 func (m AppModel) emptyResultText() string {
 	if len(m.workspaces) == 0 && strings.TrimSpace(m.activeWorkspaceID) == "" {
-		return "No workspaces found.\n\nCreate one from this TUI:\n  /workspace create <title> --template <template-id> [--dir <path>]\n\nUseful commands:\n  /help          Show commands\n  /goal          Submit a new goal\n  /dod           Set acceptance criteria\n  /run resume    Resume active run\n  /run restart   Create a fresh activation\n  /exit          Quit"
+		return "未找到工作空间。\n\n请在 Web 控制台完成规格创作、审查与确认。\nTUI 暂未提供创作向导，不支持直接写入 Goal／DoD。\n\n常用命令：\n  /workspace     选择已有工作空间\n  /help          查看命令\n  /run resume    显式申请继续执行\n  /run restart   显式申请新的激活\n  /exit          退出"
 	}
 	switch m.progress {
 	case progressSubmitting:

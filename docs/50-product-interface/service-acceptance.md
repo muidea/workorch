@@ -68,10 +68,24 @@ Do not reintroduce tests for `POST .../runs`, `POST .../runs/:runId/start`, `POS
 确定性验收使用正式 HTTP ports、真实 file-backed Workspace／File／Decision owners 与 mock provider，覆盖六审查、exact confirmation replay、重启、FAIL／UNKNOWN 阻塞及资源漂移拒绝。它不替代真实 provider 或浏览器交互验收：
 
 ```bash
-go test ./internal/modules/application/workorchd/biz \
-  -run '^TestAuthoringHTTPFileBackedCompilationConfirmationAndRecovery$' -count=1
-python3 scripts/test-verify-workspace-authoring-live.py
+make verify-workspace-authoring-contract
 ```
+
+共享脚本 mock 的本地合同测试也在此目标中执行。它只解析正式 C3 创作输入，回显派生身份、保留候选来源与资源快照。proposal／critic 请求携带从持久模板快照编译的 typed Profile 声明；mock 仅在存在唯一、适用于全部候选项的 `dodItem/*` 声明时回显 DECLARED binding，verifier-feasibility 核对 exact binding，否则返回 UNKNOWN。声明不代表实际执行证据，不能替代 Workspace owner 准入或后续 capability-native proof。
+
+LLM／MCP provider 分发已接入共享 mock；Template／Soul 使用仅支持 authoring 的本地 mock。三条脚本的创建统一通过 `create-authoring-verification-workspace.py` 完成持久创建、六审查、精确确认及零自动 Run 检查，再只读获取正式 Goal／DoD 身份，不调用退休写 REST。恢复 journal 默认位于用户 state 目录，不进入仓库或验收 artifacts，成功后仍保留。脚本语法与本地合同测试不等于 deployed managed 正例；部署验证需要单独授权并实际执行。
+
+验收分别保留可控排队的四场景与真实 BackgroundRoutine 正例；后者不手动运行 queued task，验证 HTTP 202 后自动派生、六审查、确认及 owners 重开。owners 重开不是独立进程退出／启动验证，mock provider 也不替代真实 provider。
+
+另有真实 worker 在派生 provider barrier 内的重复 compile 验收：原物理调用在途时重复提交不产生新派生调用，放行后共完成一次派生、一次 proposal 与六次审查，再验证确认重放和 owners 重开。该证据不替代所有阶段的并发提交、独立进程中断或预算耗尽测试。CI 独立执行本地合同目标，不代表 managed 验收脚本已在部署实例上通过。
+
+另有可控排队竞争场景：四次 HTTP compile 均在草稿阶段接受，任务通过同一启动 barrier 并发运行，验证 owner permit 竞争后只产生八次物理调用，并完成确认及 owners 重开。该场景使用测试任务调度器，不等于真实 worker 的所有调度交错；启动 barrier 也不保证每次运行都同时到达 reserve。需与真实 worker 在途重放场景共同保留，不能替代修订交错、进程中断或全量 race 证据。
+
+完整 software-dev 定义回归位于 Application Biz 的 HTTP 集成层：24 条用户要求与 13 条模板必需项全部进入正式 DoD，经六审查和 exact 确认得到 eligible、零 Run；Restart bootstrap 保留原 StartupInputHash、isolated adapter 与 v2 review，完整编译 42 个 proof／44 个 CWI。重复编译与 Goal／DoD／模板／目录／Definition policy／Profile 漂移拒绝不得增加 Workspace revision 或 provider 调用；typed authoring query 的错误 scope、旧 revision、缺 Record／Confirmation 或重复 Template Soul binding 均拒绝复用准入。未确认规格的显式启动必须零 Run。随后独立提交显式 activation，Run 必须封存同一 startup seal，首次保存默认 provider selection 后原请求重放仍只保留一个 Run、零额外创作调用。该测试抑制异步 drive 通知，验证到 SM-1 materialization，不替代 Runtime 收敛或真实执行。
+
+持久 owner 门禁必须分别验证保存回执同 CAS 竞争只有一个赢家、128 条上限拒绝新请求但保留原重放、历史保存不能冒充当前修订；派生累计 16 次、规格累计 112 次和各阶段两次 attempt 不随输入 revision／RequestID／重开而重置。预算 fixture 不调用 provider，只证明 owner 授权额度，不能冒充物理调用计数。
+
+独立子进程在派生 reserve、派生 completion、确认 prepare、正式 Goal 写入、正式 DoD 写入的持久切点退出，父进程重开后必须复用原 permit／确认身份且精确重放零额外写入。澄清 successor 还覆盖决议前、Decision resolution 已持久化但 Workspace 仍 pending、完整准入后三个进程退出边界；重开须复用原决议和 startup seal，不重复创建 ticket 或 Run。这些受控切点不等于随机 kill 或真实 provider 中断。
 
 验收器必须拒绝不完整证据：`runs` 必须明确为列表且为空；六审查必须覆盖规范 kind、全部 PASS 并绑定当前 proposalHash；待确认规格必须有非空验收项、完整确认身份与一致的 derivationPermitID；确认必须同时返回 `admitted`、`eligible` 和非空 StartupInputHash。缺字段不得按成功或零 Run 处理。
 
@@ -80,10 +94,15 @@ python3 scripts/test-verify-workspace-authoring-live.py
 ```bash
 python3 scripts/verify-workspace-authoring-live.py \
   --base-url http://127.0.0.1:8080 --template-id <template-id> \
-  --goal '<目标>' --directory <项目目录> --resource <相对文件引用> --confirm
+  --goal '<目标>' --directory <项目目录> --resource <相对文件引用> \
+  --recovery-file "$HOME/.local/state/workorch/authoring-live/<验证批次>.json" --confirm
 ```
 
-该验收会创建持久 Workspace 并调用 provider；不得作为无副作用 smoke 自动执行。脚本不读取 credential，不输出输入、provider 原文或配置，不删除测试 Workspace，也不启动 Run。默认只验收到六审查通过，`--confirm` 额外要求 eligible、精确确认重放与零自动 Run；模板缺可执行 proof 必须阻塞，不能为了通过修改验证声明。响应丢失可用打印的 `--request-id` 与原输入重放。此 live gate 不替代浏览器交互、进程重启和后续显式执行的独立验收。
+该验收会创建持久 Workspace 并调用 provider；不得作为无副作用 smoke 自动执行。脚本不读取 credential，不输出输入、provider 原文或配置，不删除测试 Workspace，也不启动 Run。默认只验收到六审查通过，`--confirm` 额外要求 eligible、精确确认重放与零自动 Run；模板缺可执行 proof 必须阻塞，不能为了通过修改验证声明。
+
+`--recovery-file` 必填，必须放在仓库外；文件以 `0600` 保存原创建输入、实例地址、Workspace ID 及发送前的精确确认请求，包含可能敏感的目标与资源引用，不得提交或公开。脚本持有本地排他锁并原子落盘，防止同一恢复文件被并发执行。响应丢失后使用同一文件、实例和原输入重试；输入或实例变化会拒绝，不覆盖原身份。已保存原确认时直接重放原 hashes 与 expected revision，不重新编译，不以当前提案替换原确认；即使 owner 已推进到 admitted 也可恢复。缺少 `--confirm` 则不恢复确认。该本地文件不是 owner authority，也不替代浏览器交互、进程重启和后续显式执行的独立验收。
+
+恢复驱动区分持久阶段：`draft／derived` 可提交 compile，由 owner reserve 判定 fresh permit；`outcome_unresolved` 可能是正常 provider 在途或中断后未决，验收器在有界期限内只查询，允许原调用完成；超时保留原身份，不自动重发 provider。原确认返回 `confirming／admitting` 时，验收器查询并只重放 journal 中的原确认 hashes 与 expected revision，超时保留原身份；owner 已进入确认事务而本地没有原确认时 fail closed，不从当前提案构造替代确认。
 
 ## Workspace Deletion Contract
 
@@ -150,8 +169,7 @@ HTTP/owner integration acceptance必须证明：
 - runtime clarification的open/bind/ack任一response-loss或process restart复用exact identity，且predecessor不扩图、不接收新
   Definition、不产生affected-focus operation。
 
-setup-draft LLM仍是可选authoring surface；manual Template + Goal + DoD + blank directory必须能够完成candidate/admission，且
-不限制startup seal后的bounded Runtime LLM调用。
+普通 Web 创建只提交 Template、Goal、资源引用和可选用户验收要求，目录可留空。正式 DoD 由持久创作、六审查和用户精确确认事务物化；退休 setup-draft session 与手填 Goal／DoD CRUD 不能作为准入旁路。CLI／TUI 未提供完整创作向导时明确拒绝旧写入口。startup seal 后的 bounded Runtime LLM 调用仍遵守 Runtime 合同。
 
 ## In-Process HTTP Baseline
 

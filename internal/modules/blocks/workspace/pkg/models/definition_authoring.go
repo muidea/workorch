@@ -29,9 +29,11 @@ type DefinitionAuthoringRecord struct {
 	TemplateSnapshot      WorkspaceTemplate
 	DerivationRequests    []DefinitionDerivationRequest
 	SpecificationRequests []DefinitionAuthoringSpecificationRequest
+	SaveReceipts          []DefinitionAuthoringSaveReceipt
 }
 
 func (r DefinitionAuthoringRecord) Clone() DefinitionAuthoringRecord {
+	r.SaveReceipts = append([]DefinitionAuthoringSaveReceipt(nil), r.SaveReceipts...)
 	r.Input = r.Input.Clone()
 	r.TemplateSnapshot = r.TemplateSnapshot.Clone()
 	r.DerivationRequests = append([]DefinitionDerivationRequest(nil), r.DerivationRequests...)
@@ -51,6 +53,16 @@ func (r DefinitionAuthoringRecord) Validate() error {
 	}
 	if r.InputHash != r.Input.InputHash() || r.TemplateSnapshot.ID != r.Input.Normalized().TemplateID || r.TemplateSnapshotHash != WorkspaceTemplateSnapshotHash(&r.TemplateSnapshot) {
 		return fmt.Errorf("authoring record identity mismatch")
+	}
+	if len(r.SaveReceipts) > DefinitionAuthoringSaveReceiptLimit {
+		return fmt.Errorf("authoring save receipt limit exceeded")
+	}
+	seen := make(map[string]bool, len(r.SaveReceipts))
+	for _, receipt := range r.SaveReceipts {
+		if receipt.Validate() != nil || seen[receipt.RequestID] {
+			return fmt.Errorf("authoring save receipt identity mismatch")
+		}
+		seen[receipt.RequestID] = true
 	}
 	if err := validateDerivationRequests(r.DerivationRequests, r.Input); err != nil {
 		return err

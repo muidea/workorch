@@ -15,7 +15,6 @@ func (d *CLICommandDispatcher) runTypedCLI() error {
 		return nil
 	}
 	for _, topic := range []string{
-		workorchdevents.TopicCLIWorkspaceCreate,
 		workorchdevents.TopicCLIWorkspaceGet,
 		workorchdevents.TopicCLIWorkspaceList,
 		workorchdevents.TopicCLIWorkspaceSnapshot,
@@ -26,14 +25,10 @@ func (d *CLICommandDispatcher) runTypedCLI() error {
 	}
 	d.SubscribeFunc(workorchdevents.TopicWorkorchDCommandReadWorkspaceRuntimeView, d.handleTypedWorkspaceRuntimeView)
 	for _, topic := range []string{
-		workorchdevents.TopicCLIGoalDefine,
 		workorchdevents.TopicCLIGoalList,
 		workorchdevents.TopicCLIGoalGet,
-		workorchdevents.TopicCLIGoalUpdate,
-		workorchdevents.TopicCLIDoDDefine,
 		workorchdevents.TopicCLIDoDList,
 		workorchdevents.TopicCLIDoDGet,
-		workorchdevents.TopicCLIDoDUpdate,
 	} {
 		d.SubscribeFunc(topic, d.handleTypedCLIDefinition)
 	}
@@ -116,6 +111,12 @@ func setTypedCLIError(result magicevent.Result, err error) bool {
 	}
 	result.Set(nil, cd.NewError(cd.Unexpected, err.Error()))
 	return true
+}
+
+func setRetiredDefinitionWrite(result magicevent.Result) {
+	if result != nil {
+		result.Set(nil, cd.NewError(cd.Unexpected, common.ErrConflict.Error()+": 旧规格写操作已退休，请通过 Web 持久规格创作完成审查与确认"))
+	}
 }
 
 func setInvalidTypedCLICommand(result magicevent.Result) {

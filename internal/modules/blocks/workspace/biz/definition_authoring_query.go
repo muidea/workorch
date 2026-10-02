@@ -5,6 +5,7 @@ import (
 
 	definitionadmission "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
 
+	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -38,27 +39,19 @@ func (m *Biz) queryDefinitionAuthoring(ctx context.Context, cmd workspaceevents.
 	}
 	// 有已封存草稿时，现行模板删除也不能阻断历史请求查询及完成。
 	if w.DefinitionAuthoring != nil {
-		record := w.DefinitionAuthoring.Clone()
+		record := workspaceeventmapping.DefinitionAuthoringRecordDTO(*w.DefinitionAuthoring)
 		result.Record = &record
 	}
-	if err := w.ValidateDefinitionAuthoringHistory(); err != nil {
+	candidate, present, err := w.ValidateActivationAdmissionPersistence()
+	if err != nil {
 		return workspaceevents.QueryDefinitionAuthoringResult{}, err
 	}
-	if _, _, err := w.ValidateActivationAdmissionPersistence(); err != nil {
-		return workspaceevents.QueryDefinitionAuthoringResult{}, err
-	}
-	for _, archived := range w.DefinitionAuthoringHistory {
-		result.History = append(result.History, archived.Clone())
-	}
+	result.History = workspaceeventmapping.DefinitionAuthoringHistoryDTOs(w.DefinitionAuthoringHistory)
 	if w.DefinitionAuthoringConfirmation != nil {
 		confirmation := w.DefinitionAuthoringConfirmation.Clone()
 		result.Confirmation = &confirmation
 	}
 	if len(w.DefinitionAdmissionCandidates) > 0 && w.DefinitionAuthoringConfirmation != nil {
-		candidate, present, err := w.ValidateActivationAdmissionPersistence()
-		if err != nil {
-			return workspaceevents.QueryDefinitionAuthoringResult{}, err
-		}
 		if !present && len(w.DefinitionAdmissionCandidates) != len(w.DefinitionAuthoringHistory) {
 			candidate = w.DefinitionAdmissionCandidates[len(w.DefinitionAdmissionCandidates)-1].Clone()
 		}

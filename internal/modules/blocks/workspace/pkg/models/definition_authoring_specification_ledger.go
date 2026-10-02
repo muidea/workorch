@@ -83,7 +83,13 @@ func validateAuthoringSpecificationRequests(record DefinitionAuthoringRecord) er
 	}
 	seen := make(map[string]bool, len(record.SpecificationRequests))
 	attempts := map[string]int{}
-	completedProposals := map[string]*GoalSpecification{}
+	type completedProposal struct {
+		specification *GoalSpecification
+		context       authoringSpecificationContext
+		hash          string
+	}
+	completedProposals := map[string]completedProposal{}
+	contexts := map[string]authoringSpecificationContext{}
 	for _, request := range record.SpecificationRequests {
 		if err := request.Validate(); err != nil {
 			return err
@@ -106,19 +112,28 @@ func validateAuthoringSpecificationRequests(record DefinitionAuthoringRecord) er
 		}
 		if request.Phase == DefinitionSpecificationProposal {
 			if request.Proposal != nil {
-				if err := ValidateAuthoringSpecification(derivation.Input, &derivation.Template, *derivation.Proposal, derivation.Resources, *request.Proposal); err != nil {
+				context, present := contexts[request.DerivationPermitID]
+				if !present {
+					context, err = newAuthoringSpecificationContext(derivation.Input, &derivation.Template, *derivation.Proposal, derivation.Resources)
+					if err != nil {
+						return err
+					}
+					contexts[request.DerivationPermitID] = context
+				}
+				if err := context.validate(*request.Proposal); err != nil {
 					return fmt.Errorf("authoring specification proposal changed sealed requirements: %w", err)
 				}
-				completedProposals[request.DerivationPermitID+"\x00"+request.Proposal.ContentHash()] = request.Proposal
+				hash := request.Proposal.ContentHash()
+				completedProposals[request.DerivationPermitID+"\x00"+hash] = completedProposal{specification: request.Proposal, context: context, hash: hash}
 			}
 			continue
 		}
-		proposal := completedProposals[request.DerivationPermitID+"\x00"+request.ProposalHash]
-		if proposal == nil {
+		proposal, present := completedProposals[request.DerivationPermitID+"\x00"+request.ProposalHash]
+		if !present {
 			return fmt.Errorf("authoring critic lacks preceding completed proposal")
 		}
 		if request.Review != nil {
-			if err := validateAuthoringReview(*request.Review, *proposal, derivation); err != nil {
+			if err := proposal.context.validateReview(*request.Review, *proposal.specification, proposal.hash); err != nil {
 				return err
 			}
 		}
@@ -126,22 +141,17 @@ func validateAuthoringSpecificationRequests(record DefinitionAuthoringRecord) er
 	return nil
 }
 
-func validateAuthoringReview(review GoalSpecificationCompletenessReview, proposal GoalSpecification, derivation DefinitionDerivationRequest) error {
-	items, err := derivation.Proposal.CandidateItems(derivation.Input, &derivation.Template)
-	if err != nil {
-		return err
-	}
+func (c authoringSpecificationContext) validateReview(review GoalSpecificationCompletenessReview, proposal GoalSpecification, proposalHash string) error {
 	seed := proposal.Clone()
 	seed.Reviews = nil
 	for _, kind := range goalReviewKinds {
-		entry := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewUnknown, SpecificationHash: proposal.ContentHash()}
+		entry := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewUnknown, SpecificationHash: proposalHash}
 		if kind == review.Kind {
 			entry = review
 		}
 		seed.Reviews = append(seed.Reviews, entry)
 	}
-	goal := DefinitionCandidateItem{CandidateItemRef: DefinitionAuthoringGoalItemRef, Text: derivation.Input.GoalText, SourceIdentity: derivation.Input.InputHash()}
-	return seed.Validate(goal, items)
+	return seed.Validate(c.goal, c.items)
 }
 
 func (r DefinitionAuthoringRecord) derivationForSpecification(permitID string) (DefinitionDerivationRequest, error) {

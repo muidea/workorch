@@ -28,7 +28,7 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 	input := current.DefinitionAuthoring.Input.Clone()
 	input.Revision++
 	input.GoalText = "修订后的交付目标"
-	save := workspaceevents.SaveDefinitionAuthoringCommand{Input: input, ExpectedWorkspaceRevision: current.Revision}
+	save := workspaceevents.SaveDefinitionAuthoringCommand{RequestID: "save-successor/" + input.InputHash(), ExpectedInputHash: current.DefinitionAuthoring.InputHash, Input: input, ExpectedWorkspaceRevision: current.Revision}
 	if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, Authoring: &save}); err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestAuthoringEligibleStartupRejectsDraftRevision(t *testing.T) {
 	if err != nil || first.ActivationAdmission == nil || first.ActivationAdmission.State != workspacemodel.WorkspaceActivationEligible {
 		t.Fatalf("initial proof should be eligible: %+v %v", first, err)
 	}
-	if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: firstCommand.WorkspaceID, Authoring: &workspaceevents.SaveDefinitionAuthoringCommand{Input: workspacemodel.DefinitionAuthoringInput{Version: 1, WorkspaceID: firstCommand.WorkspaceID, Revision: 2, GoalText: "new", TemplateID: "template"}, ExpectedWorkspaceRevision: first.WorkspaceRevision}}); !errors.Is(err, common.ErrConflict) {
+	if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: firstCommand.WorkspaceID, Authoring: &workspaceevents.SaveDefinitionAuthoringCommand{RequestID: "save-test", Input: workspacemodel.DefinitionAuthoringInput{Version: 1, WorkspaceID: firstCommand.WorkspaceID, Revision: 2, GoalText: "new", TemplateID: "template"}, ExpectedWorkspaceRevision: first.WorkspaceRevision}}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("eligible startup was edited as a draft: %v", err)
 	}
 }

@@ -280,16 +280,18 @@ precreate_observation_workspaces() {
     python3 - "$idx" "$workspace_dir" >"$payload_file" <<'PY'
 import json
 import sys
+import uuid
 
 idx, workspace_dir = sys.argv[1], sys.argv[2]
 print(json.dumps({
+    "requestId": str(uuid.uuid4()),
     "title": f"runtime idle baseline workspace {idx}",
-    "description": "workspace precreated before idle baseline observation",
     "deliverableDirectory": workspace_dir,
     "templateId": "generic-governed",
+    "input": {"goalText": "只读观测空闲工作空间，不编译、不准入、不启动 Run"},
 }, ensure_ascii=False))
 PY
-    curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" \
+    curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspace-authoring" \
       -H 'Content-Type: application/json' \
       -d @"$payload_file" >"$response_file"
     python3 - "$response_file" >>"$ids_file" <<'PY'
@@ -297,9 +299,13 @@ import json
 import sys
 
 body = json.load(open(sys.argv[1], encoding="utf-8"))
-workspace_id = ((body.get("workspace") or {}).get("id") or "").strip()
-if workspace_id:
-    print(workspace_id)
+authoring = body.get("authoring") or {}
+workspace_id = authoring.get("workspaceId")
+if not isinstance(workspace_id, str) or not workspace_id or authoring.get("state") != "draft":
+    raise SystemExit("空闲观测必须返回持久创作草稿")
+if authoring.get("startupInputHash") or authoring.get("activationState") == "eligible":
+    raise SystemExit("空闲观测草稿不得已准入")
+print(workspace_id)
 PY
   done
   wait_projection_drained

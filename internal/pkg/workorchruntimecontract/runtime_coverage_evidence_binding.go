@@ -334,7 +334,7 @@ func (b CoverageEvidenceBinding) Validate() error {
 			}
 		}
 	}
-	if b.Hash != "" && b.Hash != StableCoverageEvidenceBindingHash(b) {
+	if b.Hash != "" && b.Hash != stableCoverageEvidenceBindingHashNormalized(b) {
 		return fmt.Errorf("coverage evidence binding %q hash does not match contents", b.ID)
 	}
 	return nil
@@ -343,8 +343,11 @@ func (b CoverageEvidenceBinding) Validate() error {
 // StableCoverageEvidenceBindingHash is the immutable value identity used in a
 // sealed manifest/dispatch. It intentionally excludes Hash itself.
 func StableCoverageEvidenceBindingHash(binding CoverageEvidenceBinding) string {
-	binding = binding.Normalized()
-	binding.Hash = ""
+	return stableCoverageEvidenceBindingHashNormalized(binding.Normalized())
+}
+
+// 仅复用本次调用的规范化值；公开 hash 与校验入口仍完整处理原始输入。
+func stableCoverageEvidenceBindingHashNormalized(binding CoverageEvidenceBinding) string {
 	h := sha256.New()
 	writeHashString(h, binding.ID)
 	writeHashString(h, string(binding.CoverageWorkItemID))
@@ -393,7 +396,7 @@ func NormalizeCoverageEvidenceBindings(values []CoverageEvidenceBinding) []Cover
 		if value.ID == "" {
 			continue
 		}
-		value.Hash = StableCoverageEvidenceBindingHash(value)
+		value.Hash = stableCoverageEvidenceBindingHashNormalized(value)
 		ret = append(ret, value)
 	}
 	// Preserve duplicate identities until an authority validator can reject

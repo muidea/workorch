@@ -53,7 +53,7 @@ func TestFormalDefinitionsExcludeNewAuthoringDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := workspaceevents.SaveDefinitionAuthoringCommand{Input: workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: w.ID, Revision: 1, TemplateID: w.TemplateID, GoalText: "另一个目标"}, ExpectedWorkspaceRevision: w.Revision}
+	cmd := workspaceevents.SaveDefinitionAuthoringCommand{RequestID: "save-test", Input: workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: w.ID, Revision: 1, TemplateID: w.TemplateID, GoalText: "另一个目标"}, ExpectedWorkspaceRevision: w.Revision}
 	if _, err := fixture.owner.submitDefinitionSpecificationInternalEvent(fixture.ctx, definitionSpecificationInternalEvent{WorkspaceID: w.ID, Authoring: &cmd}); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("formal definitions accepted new draft: %v", err)
 	}

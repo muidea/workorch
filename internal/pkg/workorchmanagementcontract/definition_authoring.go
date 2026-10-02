@@ -18,7 +18,8 @@ type DefinitionAuthoringCreate struct {
 }
 
 type DefinitionAuthoringSave struct {
-	TemplateID                string                   `json:"templateId,omitempty"`
+	RequestID                 string                   `json:"requestId"`
+	TemplateID                string                   `json:"templateId"`
 	DeliverableDirectory      *string                  `json:"deliverableDirectory,omitempty"`
 	Input                     DefinitionAuthoringInput `json:"input"`
 	ExpectedWorkspaceRevision uint64                   `json:"expectedWorkspaceRevision"`

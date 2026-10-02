@@ -270,20 +270,15 @@ type CLIConfigurationRefreshChatModelsResult struct{ Configuration workorchport.
 
 func CLIMessageContracts() []eventcontract.MessageContract {
 	return eventcontract.MessageContracts(
-		eventcontract.FacadeTopic[CLIWorkspaceCreateCommand, CLIWorkspaceCreateResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceCreate),
 		eventcontract.FacadeTopic[CLIWorkspaceGetCommand, CLIWorkspaceGetResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceGet),
 		eventcontract.FacadeTopic[CLIWorkspaceListCommand, CLIWorkspaceListResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceList),
 		eventcontract.FacadeTopic[CLIWorkspaceSnapshotCommand, CLIWorkspaceSnapshotResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceSnapshot),
 		eventcontract.FacadeTopic[CLIWorkspaceDeleteCommand, CLIWorkspaceDeleteResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceDelete),
 		eventcontract.FacadeTopic[CLIWorkspaceUpdateLLMSelectionCommand, CLIWorkspaceUpdateLLMSelectionResult]("cli.workspace", definitionPackage, TopicCLIWorkspaceUpdateLLMSelection),
-		eventcontract.FacadeTopic[CLIGoalDefineCommand, CLIGoalDefineResult]("cli.goal", definitionPackage, TopicCLIGoalDefine),
 		eventcontract.FacadeTopic[CLIGoalListCommand, CLIGoalListResult]("cli.goal", definitionPackage, TopicCLIGoalList),
 		eventcontract.FacadeTopic[CLIGoalGetCommand, CLIGoalGetResult]("cli.goal", definitionPackage, TopicCLIGoalGet),
-		eventcontract.FacadeTopic[CLIGoalUpdateCommand, CLIGoalUpdateResult]("cli.goal", definitionPackage, TopicCLIGoalUpdate),
-		eventcontract.FacadeTopic[CLIDoDDefineCommand, CLIDoDDefineResult]("cli.dod", definitionPackage, TopicCLIDoDDefine),
 		eventcontract.FacadeTopic[CLIDoDListCommand, CLIDoDListResult]("cli.dod", definitionPackage, TopicCLIDoDList),
 		eventcontract.FacadeTopic[CLIDoDGetCommand, CLIDoDGetResult]("cli.dod", definitionPackage, TopicCLIDoDGet),
-		eventcontract.FacadeTopic[CLIDoDUpdateCommand, CLIDoDUpdateResult]("cli.dod", definitionPackage, TopicCLIDoDUpdate),
 		eventcontract.FacadeTopic[CLIRunGetCommand, CLIRunGetResult]("cli.run", definitionPackage, TopicCLIRunGet),
 		eventcontract.FacadeTopic[CLIRunListCommand, CLIRunListResult]("cli.run", definitionPackage, TopicCLIRunList),
 		eventcontract.FacadeTopic[CLIRunStatusCommand, CLIRunStatusResult]("cli.run", definitionPackage, TopicCLIRunStatus),
@@ -327,9 +322,9 @@ func CLIMessageContracts() []eventcontract.MessageContract {
 
 func CLITopics() []string {
 	return []string{
-		TopicCLIWorkspaceCreate, TopicCLIWorkspaceGet, TopicCLIWorkspaceList, TopicCLIWorkspaceSnapshot, TopicCLIWorkspaceDelete, TopicCLIWorkspaceUpdateLLMSelection,
-		TopicCLIGoalDefine, TopicCLIGoalList, TopicCLIGoalGet, TopicCLIGoalUpdate,
-		TopicCLIDoDDefine, TopicCLIDoDList, TopicCLIDoDGet, TopicCLIDoDUpdate,
+		TopicCLIWorkspaceGet, TopicCLIWorkspaceList, TopicCLIWorkspaceSnapshot, TopicCLIWorkspaceDelete, TopicCLIWorkspaceUpdateLLMSelection,
+		TopicCLIGoalList, TopicCLIGoalGet,
+		TopicCLIDoDList, TopicCLIDoDGet,
 		TopicCLIRunGet, TopicCLIRunList, TopicCLIRunStatus,
 		TopicCLIDecisionResolve, TopicCLIDecisionBatchResolve, TopicCLIDecisionList, TopicCLIDecisionGet,
 		TopicCLIApprovalApprove, TopicCLIApprovalReject, TopicCLIApprovalBatchResolve, TopicCLIApprovalList, TopicCLIApprovalGet,

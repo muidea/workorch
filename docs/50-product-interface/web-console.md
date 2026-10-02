@@ -53,10 +53,15 @@ streaming/non-streaming，并单独展示 exact `providerSubmitted`。历史或 
 event ID、request bytes 或 streaming 补造；旧 `streaming` boolean 即使存在也不能成为页面判断来源。
 
 activation form 不提供 Goal/DoD、Skill、MCP 或 Memory 的 per-run override；这些定义和策略只从 owner 当前状态编译。
-Workspace 创建使用共享的 `WorkspaceSetupModal`，正常流程要求 Template、Goal 与 DoD。工作目录允许留空；创建时由
-application 生成 `.workorch-workspaces/<workspace-id>`，显式输入只作为目录覆盖。表单提交的是 pre-seal candidate；只有
-all-of admission/promotion 且 activation admission eligible 后才能启用执行操作。clarification response 必须显示 typed code 与
-`BlockingTicketID`，不能提供 one-of 确认或自动择支。
+Workspace 创建使用共享的 `WorkspaceSetupModal`，用户提交 Template、Goal、资源引用及可选额外验收要求，不手填正式 DoD。
+工作目录可留空，解析为 `.workorch-workspaces/<workspace-id>`。持久草稿经派生、六类独立审查与用户精确确认后，才物化
+正式 Goal／DoD 并由 owner 准入；创建、编译、确认均不启动 Run。FAIL／UNKNOWN／资源或模板漂移不得确认。
+浏览器发送前保存原创建、待保存与确认身份；关闭重开后只接受当前打开会话的回执，旧回执不得覆盖表单或清理恢复记录。
+恢复原保存后，创建页和详情页仅在规范化输入或模板快照变化时提交新保存；未改变输入的审查恢复直接 compile，不以 edited 标记生成新 RequestID 或消耗回执额度。
+存在 pendingConfirmation 时，两页暂停保存修订和重新审查，保留原 hashes 与 expected revision，并提供原确认恢复；本地 edited 标记不替换原确认身份。不能通过普通审查动作静默放弃确认请求。
+创建页和详情编辑页均必须拒绝损坏恢复记录，保留原记录并阻止替代保存、确认与清理；不得把解析失败当作新建空态。
+创作查询跨 effect 单飞，发送前再次检查会话与查询代次；失效排队不得发出 GET，单次查询超时有界。已接受的写事务不因关闭页面而取消。
+已准入结果的进入操作要求 matching Workspace、eligible 与非空 StartupInputHash，不重新编译或启动 Run。
 
 ### Workspace Detail
 
@@ -68,15 +73,16 @@ all-of admission/promotion 且 activation admission eligible 后才能启用执�
 - 按需分页的 Step、ToolCall、RuntimeCheckpoint、Result、Patch、ValidationResult 与 Artifact；
 - workspace/run-scoped EventRecord 诊断列表。
 
-页面支持 Goal/DoD candidate authoring/admission、quality check、Workspace LLM/Soul selection、execution activation 与 Workspace delete。
+页面支持创建期持久规格创作／澄清、Workspace LLM/Soul selection、execution activation 与 Workspace delete。
+正式 Goal／DoD 只读展示，不提供旧 CRUD 或质量评分入口。创作编辑器展示审查、验证声明、失败请求与准入阻塞。
 这些表单只组装已公开的 HTTP DTO；owner 校验、revision CAS 和状态转换全部留在服务端。
 
-若current Run投影为runtime-definition clarification，详情页必须显示typed gap、offending refs和
-`revise_definition_and_restart`动作，禁用普通Decision answer与Resume。用户先通过Goal/DoD表单提交新的all-of candidate；
-详情页保留独立、显式Restart入口，但不得根据Goal/DoD revision、SSE、display字段或前端比较猜测admission eligibility；
-每次Restart均交由Workspace/Run owner判定并原样显示typed rejection。页面不直接关闭ticket、不把新Definition写入
-predecessor，也不构造replacement-resolution payload。Board遇到exact canonical Definition blocker时始终只导航到该
-Workspace的Definition修订入口，绝不直接发送Resume或Restart。
+若 current Run 投影为 runtime-definition clarification，详情页显示 typed gap、offending refs，并禁用普通 Decision answer 与 Resume。
+当前 Web 不支持同 Run 规格修订，不能用创建期 authoring 或旧 CRUD 修改 Run seal。
+详情页保留独立、显式 Restart 入口，但不得根据 Goal/DoD revision、SSE、display 字段或前端比较猜测 admission eligibility；
+每次 Restart 均交由 Workspace/Run owner 判定并原样显示 typed rejection。页面不直接关闭 ticket、不把新 Definition 写入
+predecessor，也不构造 replacement-resolution payload。Board 遇到 exact canonical Definition blocker 时只导航到详情，
+绝不直接发送 Resume 或 Restart。
 
 `steps`、`runtime-checkpoints`、`taskProgress`、`taskDecompositions` 和 `artifactContinuations` 是历史/诊断或事实展示数据。
 Runtime `nextAction` 兼容字段已删除。TaskProgress/ContextBundle 只展示 exact blocker、owner 要求/允许动作与独立导航提示；

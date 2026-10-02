@@ -103,7 +103,8 @@ func runtimeAssessmentPurposePreimagesFromSemanticGeneration(
 		return nil, nil
 	}
 	manifest := ledger.Manifest.Normalized()
-	if err := manifest.Validate(); err != nil {
+	validated, err := validateRuntimeSemanticPlanManifest(manifest)
+	if err != nil {
 		return nil, fmt.Errorf("runtime assessment purpose semantic manifest: %w", err)
 	}
 	documents := make(map[string]RuntimeSemanticPlanDocument, len(ledger.BatchDocuments))
@@ -129,7 +130,7 @@ func runtimeAssessmentPurposePreimagesFromSemanticGeneration(
 		if !found {
 			continue
 		}
-		focuses, _, err := CompileRuntimeSemanticBindings(manifest, batch.RequestLogicalID, document, feasibilities)
+		focuses, _, err := compileRuntimeSemanticBindingsWithValidatedManifest(validated, batch.RequestLogicalID, document, feasibilities)
 		if err != nil {
 			return nil, fmt.Errorf("runtime assessment purpose semantic batch %q: %w", batch.BatchID, err)
 		}

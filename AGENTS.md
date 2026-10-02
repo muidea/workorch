@@ -37,8 +37,11 @@ Module/Block shape: `module.go` / `plugin.go`, `biz/` (orchestrator has `biz/run
 - A bounded SM-3 semantic-plan document may propose per-CWI proof after startup input is sealed; capability owners return
   feasibility; only an SM-2 private internal event may seal `CoverageEvidenceBinding` and the reconciliation contract before
   operation candidate/dispatch. Runtime LLM processing may not modify the sealed startup input.
-- Normal TUI/Web workspace setup requires template, Goal and DoD. It must produce a resolved workspace directory, but the
-  directory input is optional: blank input resolves to `.workorch-workspaces/<workspace-id>`. It must not require raw
+- Normal Web workspace setup takes template, Goal, resource references and optional user acceptance requirements; DoD is
+  derived, independently reviewed and materialized only after exact user confirmation. TUI has no authoring wizard and must
+  reject retired direct definition writes. Creation/confirmation never starts a Run; execution is an explicit separate intent.
+  Setup must produce a resolved workspace directory, but the directory input is optional: blank input resolves to
+  `.workorch-workspaces/<workspace-id>`. It must not require raw
   `contextHints`/`evidencePolicies`, target, recipe, check, metric or artifact JSON from the user.
 
 ### Documentation authority

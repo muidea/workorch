@@ -220,6 +220,27 @@ verify-service:
 
 verify-service-file: verify-service
 
+# 仅本地 mock／持久 owner 合同测试；不连接部署实例或真实 provider。
+.PHONY: verify-workspace-authoring-contract
+verify-workspace-authoring-contract:
+	python3 scripts/test-verify-authoring-mock.py
+	python3 scripts/test-verify-authoring-mock-server.py
+	python3 scripts/test-create-authoring-verification-workspace.py
+	python3 scripts/test-verify-workspace-authoring-live.py
+	go test ./internal/pkg/events -run '^TestOwnerEvent(ContractsAreCompleteAndUnique|CommandsHaveProductionSenderAndReceiver|MessageGraphsAreConcrete)$$' -count=1
+	go test -race ./internal/modules/blocks/workspace/pkg/eventmapping -run '^TestAuthoring' -count=1 -timeout=3m
+	go test ./internal/services/workorch -run '^TestWeb(ConsoleMutatingEndpointsStayWithinProductSurfaceContract|WorkspaceSetupRequiresTemplateAndAllowsDefaultDirectory)$$' -count=1
+	go test ./internal/modules/application/workorchd/biz/appservice -run '^TestCLIDispatcherRejectsRetiredDefinitionWritesWithoutOwner$$' -count=1
+	go test ./internal/modules/application/workorchd/service/server -run '^TestRetired(DefinitionWriteRoutesDoNotCallApplicationPorts|DraftRoutesHaveNoSessionSideEffects)$$' -count=1 -timeout=3m
+	go test ./internal/pkg/workorchclient -run '^TestDefinitionAuthoringClient' -count=1
+	go test ./internal/modules/application/workorchd/biz -run '^Test(SaveDefinitionAuthoringView|AuthoringApplicationRejectsMismatchedOwnerResults)' -count=1
+	go test ./internal/modules/blocks/workspace/pkg/models -run '^Test(DefinitionAuthoringSaveReceipt|ConfirmedAuthoringAdmissionSource)' -count=1
+	go test -race ./internal/modules/blocks/workspace/biz -run '^TestAuthoring(QueryAndAdmissionRejectSourceTampering|QueryRejectsCorruptArchivedSource)$$' -count=1 -timeout=3m
+	go test ./internal/modules/blocks/workspace/biz -run '^Test(Authoring(SaveReceiptRejectsForgedIdentityAndSurvivesABA|SaveReceiptLimitAndConcurrentCAS|ProcessConfirmationRecovery|ProcessDecisionAdmissionRecovery|ProcessDerivationPermitRecovery|FileBudgetExhaustionSurvivesRevisions|FileSpecificationBudgetExhaustionSurvivesRevisions|SpecificationConcurrentReserveUsesOneFreshPermit|RevisionFencesHistoricalSpecificationCompletion|RevisionFencesHistoricalDerivationCompletion)|DefinitionAuthoringApplication(CreationRecoversFileOwner|TemplateDirectoryReplayAfterReopen))$$' -count=1
+	go test ./internal/modules/application/workorchd/biz -run '^TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition$$' -count=1
+	go test -race ./internal/modules/application/workorchd/biz -run '^TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition$$' -count=1 -timeout=3m
+	go test ./internal/modules/application/workorchd/biz -run '^TestAuthoringHTTP(FileBackedCompilationConfirmationAndRecovery|RealBackgroundRoutineFileRecovery|ConcurrentCompileUsesOnePhysicalDerivation|CompileTasksCompeteForFreshPermit)$$' -count=1
+
 verify-workspace-template-soul:
 	./scripts/verify-workspace-template-soul.sh
 

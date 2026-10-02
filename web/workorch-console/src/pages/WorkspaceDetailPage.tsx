@@ -3,8 +3,9 @@ import { Alert, App as AntApp, Button, Checkbox, Descriptions, Dropdown, Empty, 
 import { CardGrid, PageContainer, ProCard, ProTable } from '../components/proCompat';
 import type { ProColumns } from '../components/proCompat';
 import { DownOutlined } from '@ant-design/icons';
-import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, GoalDoDQualityCheck, MCPServer, MemoryItem, Patch, PatchPage, ProjectionStatus, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings } from '../types';
+import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, MCPServer, MemoryItem, Patch, PatchPage, ProjectionStatus, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings } from '../types';
 import { workorchApi } from '../api';
+import { WorkspaceAuthoringEditor } from './components/WorkspaceAuthoringEditor';
 import { useSSE } from '../hooks';
 import { modelLabels } from '../utils/constants';
 import { originalDiagnosticLabel } from '../runtimeProgressPresentation';
@@ -95,21 +96,14 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [runArtifactHasMore, setRunArtifactHasMore] = useState(false);
   const [runArtifactLoading, setRunArtifactLoading] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [authoringOpen, setAuthoringOpen] = useState(false);
   const [activationOpen, setActivationOpen] = useState(false);
   const [activationLoading, setActivationLoading] = useState(false);
   const [activationIntent, setActivationIntent] = useState<'resume' | 'restart'>('resume');
-  const [goalDefinitionOpen, setGoalDefinitionOpen] = useState(false);
-  const [dodDefinitionOpen, setDoDDefinitionOpen] = useState(false);
   const [soulBindingEditorOpen, setSoulBindingEditorOpen] = useState(false);
   const [workspaceDeleteOpen, setWorkspaceDeleteOpen] = useState(false);
-  const [businessSubmitting, setBusinessSubmitting] = useState(false);
   const [workspaceDeleting, setWorkspaceDeleting] = useState(false);
   const [soulBindingSaving, setSoulBindingSaving] = useState(false);
-  const [editingGoal, setEditingGoal] = useState<Goal | undefined>(undefined);
-  const [editingDoD, setEditingDoD] = useState<DoD | undefined>(undefined);
-  const [qualityCheck, setQualityCheck] = useState<GoalDoDQualityCheck | undefined>(undefined);
-  const [qualityCheckOpen, setQualityCheckOpen] = useState(false);
-  const [qualityCheckLoading, setQualityCheckLoading] = useState(false);
   const [activationTracking, setActivationTracking] = useState(false);
   const [workspaceListReady, setWorkspaceListReady] = useState(false);
   const workspaceListRequestSeq = useRef(0);
@@ -121,8 +115,6 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
 	const activationSelectedTargetKey = Form.useWatch('llmTargetKey', activationForm);
   const [soulBindingsForm] = Form.useForm();
   const [workspaceDeleteForm] = Form.useForm<WorkspaceDeleteFormValues>();
-  const [goalForm] = Form.useForm();
-  const [dodForm] = Form.useForm();
 
   useEffect(() => {
     currentWorkspaceIdRef.current = workspaceId;
@@ -942,58 +934,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setActivationOpen(true);
   };
 
-  const openGoalDefinition = (goal?: Goal) => {
-    setEditingGoal(goal);
-    goalForm.setFieldsValue({ text: goal?.text || '' });
-    setGoalDefinitionOpen(true);
-  };
-
-  const openDoDDefinition = (dod?: DoD) => {
-    setEditingDoD(dod);
-    dodForm.setFieldsValue({ items: dod?.items?.join('\n') || '' });
-    setDoDDefinitionOpen(true);
-  };
-
   const openDefinitionRevision = () => {
-    const goal = goals[0];
-    if (goal) {
-      openGoalDefinition(goal);
-      return;
-    }
-    const dod = readyDoDs[0] ?? dods[0];
-    if (dod) {
-      openDoDDefinition(dod);
-      return;
-    }
-    openGoalDefinition();
-  };
-
-  const openGoalDoDQualityCheck = async (goal?: Goal, dod?: DoD) => {
-    if (!workspaceId) {
-      message.error('请先选择工作空间');
-      return;
-    }
-    const targetGoal = goal ?? goals[0];
-    const targetDoD = dod ?? readyDoDs[0] ?? dods[0];
-    if (!targetGoal || !targetDoD) {
-      message.warning('请先定义目标和验收标准');
-      return;
-    }
-    setQualityCheckLoading(true);
-    try {
-      const next = await workorchApi.checkGoalDoDQuality(workspaceId, {
-        goalId: targetGoal.id,
-        doDId: targetDoD.id,
-        goalText: targetGoal.text,
-        doDItems: targetDoD.items
-      });
-      setQualityCheck(next);
-      setQualityCheckOpen(true);
-    } catch (error) {
-      message.error(errorMessage(error));
-    } finally {
-      setQualityCheckLoading(false);
-    }
+    if (workspaceId) setAuthoringOpen(true);
   };
 
   const runColumns: ProColumns<Run>[] = [
@@ -1097,18 +1039,12 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             <Dropdown
               menu={{
                 items: [
-                  { key: 'goal', label: '定义目标', disabled: !workspaceId },
-                  { key: 'dod', label: '定义验收标准', disabled: !workspaceId },
-					{ key: 'soul', label: '调整执行人格', disabled: !workspaceId }
+                  { key: 'authoring', label: '规格创作／澄清', disabled: !workspaceId || Boolean(snapshot?.workspace.activeRunId) },
+                  { key: 'soul', label: '调整执行人格', disabled: !workspaceId }
                 ],
                 onClick: ({ key }) => {
-                  if (key === 'goal') {
-                    openGoalDefinition();
-                  } else if (key === 'dod') {
-                    openDoDDefinition();
-                  } else if (key === 'soul') {
-                    openSoulBindingEditor();
-                  }
+                  if (key === 'authoring') openDefinitionRevision();
+                  else if (key === 'soul') openSoulBindingEditor();
                 }
               }}
             >
@@ -1159,12 +1095,11 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                   />
                   <Typography.Text type="secondary">
                     {runtimeDefinitionReplacementAvailable
-                      ? '可先修订 Goal/DoD，再由用户显式 Restart；最终 admission 只由 Workspace owner 判定，读模型 freshness 不参与命令许可。此工单不能被解释为通用 answer 或 Resume。'
-                      : '这是 pre-seal Definition clarification；请修订 Goal/DoD。没有 Run 时不能解释为通用 answer、Resume 或 Restart。'}
+                      ? '当前不支持同 Run 规格修订。此工单不能被解释为通用 answer 或 Resume，也不能通过旧 Goal/DoD CRUD 修改封存输入。'
+                      : '这是创建期规格澄清；请在持久规格创作中修订输入并重新审查。没有 Run 时不能解释为通用 answer、Resume 或 Restart。'}
                   </Typography.Text>
                   <Space wrap>
-                    <Button type="primary" onClick={() => openGoalDefinition(goals[0])}>修订 Goal</Button>
-                    <Button onClick={() => openDoDDefinition(readyDoDs[0] ?? dods[0])}>修订 DoD</Button>
+                    <Button type="primary" disabled={runtimeDefinitionReplacementAvailable} onClick={openDefinitionRevision}>修订创作输入并重新审查</Button>
                     {runtimeDefinitionReplacementAvailable ? <Button onClick={() => requestWorkspaceActivation('restart')}>显式 Restart（由 owner 校验）</Button> : null}
                   </Space>
                 </Space>
@@ -1275,14 +1210,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                   pagination={goals.length > 4 ? { pageSize: 4, size: 'small' } : false}
                   dataSource={goals}
                   renderItem={(item) => {
-                    const targetDoD = readyDoDs[0] ?? dods[0];
                     return (
-                      <List.Item
-                        actions={[
-                          <Button key="edit" type="link" size="small" onClick={() => openGoalDefinition(item)}>修改</Button>,
-                          <Button key="quality" type="link" size="small" loading={qualityCheckLoading} disabled={!targetDoD} onClick={() => void openGoalDoDQualityCheck(item, targetDoD)}>质量评分</Button>
-                        ]}
-                      >
+                      <List.Item>
                         <List.Item.Meta
                           title={<Space><Typography.Text copyable>{item.id}</Typography.Text></Space>}
                           description={boundedParagraph(item.text, { rows: 3 })}
@@ -1300,15 +1229,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                   pagination={dodDefinitionRows.length > 5 ? { pageSize: 5, size: 'small' } : false}
                   dataSource={dodDefinitionRows}
                   renderItem={(item) => {
-                    const dod = dods.find((candidate) => candidate.id === item.id);
-                    const targetGoal = goals[0];
                     return (
-                      <List.Item
-                        actions={[
-                          <Button key="edit" type="link" size="small" disabled={!dod} onClick={() => dod && openDoDDefinition(dod)}>修改</Button>,
-                          <Button key="quality" type="link" size="small" loading={qualityCheckLoading} disabled={!dod || !targetGoal} onClick={() => dod && void openGoalDoDQualityCheck(targetGoal, dod)}>质量评分</Button>
-                        ]}
-                      >
+                      <List.Item>
                         <List.Item.Meta
                           title={<Space><Tag>{item.index}</Tag>{stateTag(item.state)}<Typography.Text copyable>{item.id}</Typography.Text></Space>}
                           description={boundedParagraph(item.text, { rows: 2 })}
@@ -2226,154 +2148,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
           </Typography.Paragraph>
         </Form>
       </Modal>
-      <Modal
-        title={editingGoal ? '修改目标' : '定义目标'}
-        open={goalDefinitionOpen}
-        confirmLoading={businessSubmitting}
-        onCancel={() => {
-          setGoalDefinitionOpen(false);
-          setEditingGoal(undefined);
-          goalForm.resetFields();
-        }}
-        onOk={() => goalForm.submit()}
-      >
-        <Form
-          form={goalForm}
-          layout="vertical"
-          onFinish={async (values: { text: string }) => {
-            if (!workspaceId) {
-              message.error('请先选择工作空间');
-              return;
-            }
-            setBusinessSubmitting(true);
-            try {
-              if (editingGoal) {
-                await workorchApi.updateGoal(workspaceId, editingGoal.id, values.text);
-              } else {
-                await workorchApi.defineGoal(workspaceId, values.text);
-              }
-              await loadWorkspaceContext(workspaceId);
-              setGoalDefinitionOpen(false);
-              setEditingGoal(undefined);
-              goalForm.resetFields();
-              message.success(editingGoal ? '目标已修改' : '目标已定义');
-            } catch (error) {
-              message.error(errorMessage(error));
-            } finally {
-              setBusinessSubmitting(false);
-            }
-          }}
-        >
-          <Form.Item name="text" label="目标" rules={[{ required: true, whitespace: true, min: 1 }]}>
-            <Input.TextArea rows={4} placeholder="描述该工作空间要达成的业务结果" />
-          </Form.Item>
-        </Form>
-      </Modal>
-      <Modal
-        title={editingDoD ? '修改验收标准' : '定义验收标准'}
-        open={dodDefinitionOpen}
-        confirmLoading={businessSubmitting}
-        onCancel={() => {
-          setDoDDefinitionOpen(false);
-          setEditingDoD(undefined);
-          dodForm.resetFields();
-        }}
-        onOk={() => dodForm.submit()}
-      >
-        <Form
-          form={dodForm}
-          layout="vertical"
-          onFinish={async (values: { items: string }) => {
-            if (!workspaceId) {
-              message.error('请先选择工作空间');
-              return;
-            }
-            setBusinessSubmitting(true);
-            try {
-              const items = values.items.split('\n').map((item) => item.trim()).filter(Boolean);
-              if (editingDoD) {
-                await workorchApi.updateDoD(workspaceId, editingDoD.id, items);
-              } else {
-                await workorchApi.defineDoD(workspaceId, items);
-              }
-              await loadWorkspaceContext(workspaceId);
-              setDoDDefinitionOpen(false);
-              setEditingDoD(undefined);
-              dodForm.resetFields();
-              message.success(editingDoD ? '验收标准已修改' : '验收标准已定义');
-            } catch (error) {
-              message.error(errorMessage(error));
-            } finally {
-              setBusinessSubmitting(false);
-            }
-          }}
-        >
-          <Form.Item name="items" label="验收项" rules={[{ required: true }]}>
-            <Input.TextArea rows={5} placeholder={'每行一个验收标准\n示例：服务已完成本地部署并可访问'} />
-          </Form.Item>
-        </Form>
-      </Modal>
-      <Modal
-        title="Goal / DoD 质量评分"
-        open={qualityCheckOpen}
-        onCancel={() => setQualityCheckOpen(false)}
-        footer={<Button onClick={() => setQualityCheckOpen(false)}>关闭</Button>}
-        width={760}
-      >
-        {qualityCheck ? (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Descriptions
-              bordered
-              size="small"
-              column={{ xs: 1, md: 2 }}
-              items={[
-                { key: 'status', label: '状态', children: stateTag(qualityCheck.status) },
-                { key: 'executionScore', label: '执行评分', children: numberText(qualityCheck.executionScore) },
-                { key: 'verificationScore', label: '验证评分', children: numberText(qualityCheck.verificationScore) },
-                { key: 'executable', label: '可执行', children: qualityCheck.executable ? <Tag color="green">是</Tag> : <Tag color="red">否</Tag> },
-                { key: 'verifiable', label: '可验证', children: qualityCheck.verifiable ? <Tag color="green">是</Tag> : <Tag color="red">否</Tag> },
-                { key: 'goal', label: 'Goal', children: qualityCheck.goalId || '-' },
-                { key: 'dod', label: 'DoD', children: qualityCheck.doDId || '-' }
-              ]}
-            />
-            {qualityCheck.missingConstraints?.length ? (
-              <div>
-                <Typography.Text strong>缺失约束</Typography.Text>
-                <div>{compactTags(qualityCheck.missingConstraints, 8)}</div>
-              </div>
-            ) : null}
-            {qualityCheck.suggestions?.length ? (
-              <div>
-                <Typography.Text strong>改进建议</Typography.Text>
-                <List
-                  size="small"
-                  dataSource={qualityCheck.suggestions}
-                  renderItem={(item) => <List.Item>{item}</List.Item>}
-                />
-              </div>
-            ) : null}
-            {qualityCheck.issues?.length ? (
-              <div>
-                <Typography.Text strong>问题明细</Typography.Text>
-                <List
-                  size="small"
-                  dataSource={qualityCheck.issues}
-                  renderItem={(item) => (
-                    <List.Item>
-                      <List.Item.Meta
-                        title={<Space><Tag>{item.severity}</Tag><Typography.Text>{item.code}</Typography.Text><Typography.Text type="secondary">{item.target}</Typography.Text></Space>}
-                        description={item.suggestion ? `${item.message} ${item.suggestion}` : item.message}
-                      />
-                    </List.Item>
-                  )}
-                />
-              </div>
-            ) : null}
-          </Space>
-        ) : (
-          <Empty description="暂无质量评分结果" />
-        )}
-      </Modal>
+      <WorkspaceAuthoringEditor open={authoringOpen} workspaceId={workspaceId} onClose={() => setAuthoringOpen(false)} onAdmitted={async () => { if (workspaceId) await loadWorkspaceContext(workspaceId); }} />
       <Modal
         title={activationIntent === 'restart' ? '创建新的工作空间执行' : '恢复当前工作空间执行'}
         open={activationOpen}

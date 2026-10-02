@@ -34,7 +34,7 @@ func TestAuthoringResourceScopeUsesRealWorkspaceOwnerAfterFileReopen(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	save := workspaceevents.SaveDefinitionAuthoringCommand{Input: input, ExpectedWorkspaceRevision: stored.Revision}
+	save := workspaceevents.SaveDefinitionAuthoringCommand{RequestID: "save-test", Input: input, ExpectedWorkspaceRevision: stored.Revision}
 	if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: input.WorkspaceID, Authoring: &save}); err != nil {
 		t.Fatal(err)
 	}

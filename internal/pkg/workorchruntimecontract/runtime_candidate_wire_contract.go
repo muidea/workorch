@@ -335,10 +335,15 @@ func (c RuntimeCandidateWireContract) Validate(manifest RuntimeCandidateContract
 // rule, not post-hoc repair: the strict decoder rejects provider echoes and
 // then adds the sealed values before the ordinary manifest evaluator runs.
 func BuildRuntimeCandidateWireContract(manifest RuntimeCandidateContractManifest) (RuntimeCandidateWireContract, error) {
-	if err := ValidateRuntimeCandidateContractManifestRawCanonical(manifest); err != nil {
+	validated, err := validateRuntimeCandidateManifestRawCanonical(manifest)
+	if err != nil {
 		return RuntimeCandidateWireContract{}, fmt.Errorf("runtime candidate wire manifest: %w", err)
 	}
-	manifest = manifest.Normalized()
+	return buildRuntimeCandidateWireContractFromValidatedManifest(validated)
+}
+
+func buildRuntimeCandidateWireContractFromValidatedManifest(validated runtimeValidatedCandidateManifest) (RuntimeCandidateWireContract, error) {
+	manifest := validated.manifest
 	contract := RuntimeCandidateWireContract{
 		Revision:               RuntimeCandidateWireContractRevision,
 		ManifestHash:           manifest.Hash,

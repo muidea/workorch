@@ -85,6 +85,66 @@ func TestAuthoringTaskLifecycleSchedulingFailureDoesNotLeakDrain(t *testing.T) {
 	lifecycle.stop()
 }
 
+func TestAuthoringTaskLifecycleRealWorkerCancellationAndDrain(t *testing.T) {
+	lifecycle := newAuthoringTaskLifecycle()
+	routine := task.NewBackgroundRoutine(1)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if !routine.Shutdown(ctx) {
+			t.Error("真实后台 worker 未停止")
+		}
+	}()
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	release := make(chan struct{})
+	defer func() {
+		lifecycle.cancel()
+		close(release)
+		lifecycle.stop()
+	}()
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	defer cancelRequest()
+	if err := lifecycle.schedule(requestCtx, routine, func(ctx context.Context) {
+		close(started)
+		<-ctx.Done()
+		close(cancelled)
+		<-release
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("真实 worker 未执行已接受任务")
+	}
+	cancelRequest()
+	if lifecycle.ctx.Err() != nil {
+		t.Fatal("HTTP 请求取消影响任务生命周期")
+	}
+	stopped := make(chan struct{})
+	go func() { lifecycle.stop(); close(stopped) }()
+	select {
+	case <-cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stop 未取消运行任务")
+	}
+	select {
+	case <-stopped:
+		t.Fatal("stop 未等待真实任务清理")
+	default:
+	}
+	if err := lifecycle.schedule(context.Background(), routine, func(context.Context) {}); err == nil {
+		t.Fatal("停机后仍接受任务")
+	}
+	release <- struct{}{}
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("真实任务清理后 stop 未返回")
+	}
+}
+
 func TestAuthoringTaskLifecycleDoesNotUseHTTPRequestCancellation(t *testing.T) {
 	lifecycle := newAuthoringTaskLifecycle()
 	routine := &authoringTestRoutine{}

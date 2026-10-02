@@ -3,6 +3,7 @@ package workspace
 import (
 	"reflect"
 
+	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -45,7 +46,7 @@ func reduceDefinitionDerivation(o definitionSpecificationObservation, e definiti
 	if err != nil {
 		return definitionSpecificationTransition{}, err
 	}
-	result := workspaceevents.DefinitionDerivationRequestResult{Request: request.Clone(), Consumed: uint32(len(next.DerivationRequests)), Remaining: uint32(workspace.DefinitionDerivationRequestLimit - len(next.DerivationRequests))}
+	result := workspaceevents.DefinitionDerivationRequestResult{Request: workspaceeventmapping.DefinitionDerivationRequestDTO(request), Consumed: uint32(len(next.DerivationRequests)), Remaining: uint32(workspace.DefinitionDerivationRequestLimit - len(next.DerivationRequests))}
 	if fresh {
 		result.FreshPermitID = request.PermitID
 	}

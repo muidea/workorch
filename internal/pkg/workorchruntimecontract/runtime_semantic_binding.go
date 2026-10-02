@@ -19,7 +19,12 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, logica
 	if err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
-	manifest = validated.manifest
+	return compileRuntimeSemanticBindingsWithValidatedManifest(validated, logicalRequestID, document, feasibilities)
+}
+
+// 仅复用同一次调用完整校验所得的 manifest；document 与 owner facts 仍逐批完整反证。
+func compileRuntimeSemanticBindingsWithValidatedManifest(validated runtimeValidatedSemanticManifest, logicalRequestID string, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
+	manifest := validated.manifest
 	generationID := StableRuntimeSemanticGenerationID(manifest.Hash, logicalRequestID)
 	if generationID == "" {
 		return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding requires manifest and logical-request generation identity")

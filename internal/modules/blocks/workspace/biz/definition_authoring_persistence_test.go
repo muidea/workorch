@@ -26,7 +26,7 @@ func TestDefinitionAuthoringFileReopenAndQuery(t *testing.T) {
 		owners.close()
 		t.Fatal(err)
 	}
-	command := workspaceevents.SaveDefinitionAuthoringCommand{Input: workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: w.ID, Revision: 1, GoalText: "目标", TemplateID: w.TemplateID, AcceptanceRequirements: []string{"用户条件"}}, ExpectedWorkspaceRevision: stored.Revision}
+	command := workspaceevents.SaveDefinitionAuthoringCommand{RequestID: "save-test", Input: workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: w.ID, Revision: 1, GoalText: "目标", TemplateID: w.TemplateID, AcceptanceRequirements: []string{"用户条件"}}, ExpectedWorkspaceRevision: stored.Revision}
 	_, err = owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: w.ID, Authoring: &command})
 	owners.close()
 	if err != nil {

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -36,43 +37,13 @@ func TestAgentChannelLifecycle(t *testing.T) {
 	a.Close()
 }
 
-func TestAgentRunCompletesFromBackendEvent(t *testing.T) {
-	be := newFakeBackend()
-	a := NewWithBackend(be)
-	done := make(chan error, 1)
-	go func() {
-		done <- a.RunWithBackend(context.Background(), "ws-1", "test goal")
-	}()
-
-	select {
-	case evt := <-a.Events():
-		if evt.Type != EventRunCreated {
-			t.Fatalf("first event = %s, want run created", evt.Type)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for run created")
+func TestAgentGoalFirstRunRejectsWithoutBackendAccess(t *testing.T) {
+	a := NewWithBackend(nil)
+	if err := a.RunWithBackend(context.Background(), "ws-1", "目标"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("退休执行未拒绝: %v", err)
 	}
-
-	be.emit(backend.Event{
-		Type:        backend.EventRunStateChanged,
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		Payload:     map[string]any{"state": string(common.RunStateCompleted)},
-	})
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("RunWithBackend error = %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for agent completion")
-	}
-	if be.runCommand.WorkspaceID != "ws-1" ||
-		be.runCommand.Intent != backend.RunCommandIntentRestart ||
-		be.runCommand.Reason != "user_requested" ||
-		be.runCommand.Source != "agent" {
-		t.Fatalf("run command = %+v, want workspace-scoped agent restart", be.runCommand)
+	if event, ok := <-a.Events(); ok {
+		t.Fatalf("退休执行发布了事件: %+v", event)
 	}
 }
 

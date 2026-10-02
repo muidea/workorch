@@ -15,6 +15,7 @@ import (
 	fileowner "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	workspaceowner "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
+	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
@@ -61,7 +62,7 @@ func TestDerivationApplicationAcquiresFileFactsBeforeProviderAndReplays(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.SaveDefinitionAuthoring(ctx, workspaceevents.SaveDefinitionAuthoringCommand{Input: input, ExpectedWorkspaceRevision: stored.Revision}); err != nil {
+	if _, err := b.SaveDefinitionAuthoring(ctx, workspaceevents.SaveDefinitionAuthoringCommand{RequestID: "save-test", Input: input, ExpectedWorkspaceRevision: stored.Revision}); err != nil {
 		t.Fatal(err)
 	}
 	provider := magicevent.NewSimpleObserver(llmevents.CommandDestination, hub)
@@ -128,7 +129,7 @@ func TestDerivationApplicationReplaysHistoricalRequestWithoutCurrentTemplate(t *
 	owner := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	if err := owner.Subscribe(workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, func(ev magicevent.Event, result magicevent.Result) {
 		copy := record.Clone()
-		result.Set(workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: 2, Record: &copy}, nil)
+		result.Set(workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: 2, Record: authoringTestRecord(copy)}, nil)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +157,7 @@ func TestDerivationApplicationCallsProviderOnceAndReplays(t *testing.T) {
 			switch cmd := ev.Data().(type) {
 			case workspaceevents.QueryDefinitionAuthoringCommand:
 				copy := record.Clone()
-				result.Set(workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: 1, Record: &copy, CurrentTemplateSnapshotHash: record.TemplateSnapshotHash, CurrentTemplateAvailable: true}, nil)
+				result.Set(workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: 1, Record: authoringTestRecord(copy), CurrentTemplateSnapshotHash: record.TemplateSnapshotHash, CurrentTemplateAvailable: true}, nil)
 			case workspaceevents.ReserveDefinitionDerivationCommand:
 				next, request, fresh, err := record.ReserveDerivation(cmd.RequestID, cmd.ProviderBindingHash, cmd.Resources)
 				if err != nil {
@@ -164,7 +165,7 @@ func TestDerivationApplicationCallsProviderOnceAndReplays(t *testing.T) {
 					return
 				}
 				record = next
-				reply := workspaceevents.DefinitionDerivationRequestResult{Request: request, Consumed: 1, Remaining: 15}
+				reply := workspaceevents.DefinitionDerivationRequestResult{Request: workspaceeventmapping.DefinitionDerivationRequestDTO(request), Consumed: 1, Remaining: 15}
 				if fresh {
 					reply.FreshPermitID = request.PermitID
 				}
@@ -176,7 +177,7 @@ func TestDerivationApplicationCallsProviderOnceAndReplays(t *testing.T) {
 					return
 				}
 				record = next
-				result.Set(workspaceevents.DefinitionDerivationRequestResult{Request: record.DerivationRequests[0].Clone(), Consumed: 1, Remaining: 15}, nil)
+				result.Set(workspaceevents.DefinitionDerivationRequestResult{Request: workspaceeventmapping.DefinitionDerivationRequestDTO(record.DerivationRequests[0]), Consumed: 1, Remaining: 15}, nil)
 			}
 		}); err != nil {
 			t.Fatal(err)

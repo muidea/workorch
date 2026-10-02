@@ -90,9 +90,8 @@ func newRuntimeHub(commandHub magicevent.Hub) *runtimeHub {
 
 func (h *runtimeHub) Terminate(ctx context.Context) {
 	h.once.Do(func() {
-		// Module Stop unsubscribes observers. That must happen while the hub is
-		// still accepting control-plane actions, but after background work has
-		// been drained by bootstrap.Runtime.Shutdown (background-first).
+		// 先停止 owner workers 并取消订阅，期间 Hub 仍接受控制面操作；
+		// 随后终止 Hub，由 bootstrap.Runtime.Shutdown 最后 drain BackgroundRoutine。
 		for idx := len(h.modules) - 1; idx >= 0; idx-- {
 			_ = h.modules[idx].Stop(ctx)
 		}

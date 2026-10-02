@@ -24,24 +24,43 @@ func AuthoringSpecificationResources(input DefinitionAuthoringInput, snapshots [
 	return resources, nil
 }
 
+type authoringSpecificationContext struct {
+	goal      DefinitionCandidateItem
+	items     []DefinitionCandidateItem
+	resources []GoalSpecificationResource
+}
+
+func newAuthoringSpecificationContext(input DefinitionAuthoringInput, template *WorkspaceTemplate, derived DefinitionDerivedAcceptance, snapshots []DefinitionAuthoringResourceSnapshot) (authoringSpecificationContext, error) {
+	items, err := derived.CandidateItems(input, template)
+	if err != nil {
+		return authoringSpecificationContext{}, err
+	}
+	resources, err := AuthoringSpecificationResources(input, snapshots)
+	if err != nil {
+		return authoringSpecificationContext{}, err
+	}
+	return authoringSpecificationContext{
+		goal:      DefinitionCandidateItem{CandidateItemRef: DefinitionAuthoringGoalItemRef, Text: input.Normalized().GoalText, SourceIdentity: input.InputHash()},
+		items:     items,
+		resources: resources,
+	}, nil
+}
+
 // ValidateAuthoringSpecification checks that a proposed specification retains
 // every sealed authoring item and the exact persisted resource identity. It
 // does not establish File-origin provenance or current availability. Textual
 // equivalence beyond exact preservation still requires the six independent
 // reviews and owner admission.
 func ValidateAuthoringSpecification(input DefinitionAuthoringInput, template *WorkspaceTemplate, derived DefinitionDerivedAcceptance, snapshots []DefinitionAuthoringResourceSnapshot, spec GoalSpecification) error {
-	if err := derived.ValidateFor(input, template); err != nil {
-		return err
-	}
-	resources, err := AuthoringSpecificationResources(input, snapshots)
+	context, err := newAuthoringSpecificationContext(input, template, derived, snapshots)
 	if err != nil {
 		return err
 	}
-	items, err := derived.CandidateItems(input, template)
-	if err != nil {
-		return err
-	}
-	goal := DefinitionCandidateItem{CandidateItemRef: DefinitionAuthoringGoalItemRef, Text: input.Normalized().GoalText, SourceIdentity: input.InputHash()}
+	return context.validate(spec)
+}
+
+func (c authoringSpecificationContext) validate(spec GoalSpecification) error {
+	goal, items, resources := c.goal, c.items, c.resources
 	if len(spec.Resources) != len(resources) {
 		return fmt.Errorf("authoring specification changed sealed resource facts")
 	}
@@ -58,8 +77,9 @@ func ValidateAuthoringSpecification(input DefinitionAuthoringInput, template *Wo
 	}
 	withReviews := spec.Clone()
 	if len(withReviews.Reviews) == 0 {
+		proposalHash := spec.ContentHash()
 		for _, kind := range goalReviewKinds {
-			withReviews.Reviews = append(withReviews.Reviews, GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewUnknown, SpecificationHash: spec.ContentHash()})
+			withReviews.Reviews = append(withReviews.Reviews, GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewUnknown, SpecificationHash: proposalHash})
 		}
 	}
 	if err := withReviews.Validate(goal, items); err != nil {

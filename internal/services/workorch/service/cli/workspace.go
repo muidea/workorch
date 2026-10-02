@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
@@ -50,32 +49,11 @@ var workspaceListCmd = &cobra.Command{
 }
 
 var workspaceCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new workspace",
+	Use:    "create",
+	Short:  "已退休：请通过 Web 创作规格",
+	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		title, _ := cmd.Flags().GetString("title")
-		desc, _ := cmd.Flags().GetString("description")
-		dir, _ := cmd.Flags().GetString("working-dir")
-		templateID, _ := cmd.Flags().GetString("template")
-		ws, err := mustBackend().Workspace().Create(ctx(), workorchmanagementcontract.WorkspaceCreateRequest{
-			Title:                title,
-			Description:          desc,
-			DeliverableDirectory: dir,
-			TemplateID:           templateID,
-		})
-		if err != nil {
-			return fmt.Errorf("create workspace: %w", err)
-		}
-		if jsonOutput {
-			printJSON(ws)
-			return nil
-		}
-		fmt.Printf("Workspace created: %s\n", styleTitle.Render(string(ws.ID)))
-		fmt.Printf("  Title: %s\n", ws.Title)
-		if ws.Description != "" {
-			fmt.Printf("  Description: %s\n", ws.Description)
-		}
-		return nil
+		return fmt.Errorf("%w: 旧创建写操作已退休，请通过 Web 完成规格创作、审查与确认", common.ErrConflict)
 	},
 }
 
@@ -167,7 +145,6 @@ func init() {
 	workspaceCreateCmd.Flags().String("description", "", "Workspace description")
 	workspaceCreateCmd.Flags().String("working-dir", "", "Deliverable directory path")
 	workspaceCreateCmd.Flags().String("template", "", "Workspace template ID")
-	workspaceCreateCmd.MarkFlagRequired("title")
 
 	workspaceDeleteCmd.Flags().Bool("purge", false, "Purge all related data")
 }

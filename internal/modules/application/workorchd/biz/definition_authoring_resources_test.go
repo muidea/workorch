@@ -42,7 +42,7 @@ func TestAuthoringResourcesUseRealFileOwnerAndFailOnStaleOrUnsafeInput(t *testin
 			revision++
 		}
 		copy := record.Clone()
-		response := workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: revision, Record: &copy, DeliverableDirectory: root, CurrentTemplateAvailable: true, CurrentTemplateSnapshotHash: record.TemplateSnapshotHash}
+		response := workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: revision, Record: authoringTestRecord(copy), DeliverableDirectory: root, CurrentTemplateAvailable: true, CurrentTemplateSnapshotHash: record.TemplateSnapshotHash}
 		result.Set(response, nil)
 	}); err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func TestAuthoringResourcesUseRealFileOwnerAndFailOnStaleOrUnsafeInput(t *testin
 			return
 		}
 		copy := record.Clone()
-		view := workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: revision, Record: &copy, DeliverableDirectory: root, CurrentTemplateAvailable: true, CurrentTemplateSnapshotHash: record.TemplateSnapshotHash}
+		view := workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: revision, Record: authoringTestRecord(copy), DeliverableDirectory: root, CurrentTemplateAvailable: true, CurrentTemplateSnapshotHash: record.TemplateSnapshotHash}
 		scope, err := workspaceevents.AuthoringResourceScopeFor(view, command)
 		if err != nil {
 			result.Set(nil, nil)

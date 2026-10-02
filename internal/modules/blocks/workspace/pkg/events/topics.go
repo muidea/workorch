@@ -48,5 +48,4 @@ const (
 	TopicWorkspaceSpecificationBegin          = "/workspace/definition-specification/begin"
 	TopicWorkspaceSpecificationReserve        = "/workspace/definition-specification/reserve"
 	TopicWorkspaceSpecificationComplete       = "/workspace/definition-specification/complete"
-	TopicWorkspaceSpecificationQuery          = "/workspace/definition-specification/query"
 )

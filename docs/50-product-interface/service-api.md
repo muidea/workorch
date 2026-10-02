@@ -37,6 +37,7 @@ POST /api/v1/workorch/workspaces/:workspaceId/execution-activations
 ```
 
 - `intent` 空值规范化为 `resume`，只允许 `resume|restart`；
+- Goal-only authoring 的 Restart 只复用 exact confirmed、eligible 的 owner candidate：typed 查询绑定同一 Workspace revision，正式 Goal／DoD、模板、目录与 Definition policy 必须保持封存身份。首次启动保存默认 provider selection 不使原 RequestID 重放失效；它不授权替换已确认规格或重新调用创作 provider。
 - execution admission 不接受 body/query/header priority；Run 顺序与 owner activation identity 不由 caller priority 控制；
 - caller 不能注入 RunID、Goal/DoD、provider/Soul/Skill/MCP/Memory selection、Runtime context、target state 或 successor identity；
 - fresh Start/Restart 必须绑定 exact `WorkspaceActivationAdmission=eligible`；pending 返回
@@ -77,21 +78,27 @@ LLM configuration save does not mutate the running LLM owner snapshot or any sea
 
 | Method | Path | Command semantics |
 | --- | --- | --- |
-| `POST` | `/workspaces` | create owner-identified Workspace |
+| `POST` | `/workspace-authoring` | 持久创建 Goal-only 创作草稿，按 RequestID 与原 payload 重放 |
+| `PUT` | `/workspaces/:workspaceId/authoring` | 保存创建期输入修订，绑定 expected revision／inputHash |
+| `POST` | `/workspaces/:workspaceId/authoring/compile` | 托管派生与六类独立审查；202 仅为任务接受回执 |
+| `POST` | `/workspaces/:workspaceId/authoring/confirm` | 精确确认 input／permit／proposal／specification hashes，物化并准入 |
 | `DELETE` | `/workspaces/:workspaceId` | submit one Workspace-owner delete intent; optional typed purge mode |
 | `PUT` / `DELETE` | `/workspaces/:workspaceId/llm-selection` | owner-CAS update/clear selection |
 | `PUT` | `/workspaces/:workspaceId/soul-bindings` | update owner-managed Soul routing |
 | `POST` | `/workspaces/:workspaceId/template-binding-refresh` | explicitly refresh template-bound policy; does not mutate a sealed Run |
-| `POST` | `/workspaces/:workspaceId/goals` | submit Goal authoring change through admission candidate |
-| `PUT` | `/workspaces/:workspaceId/goals/:goalId` | submit scoped Goal revision candidate |
-| `POST` | `/workspaces/:workspaceId/dods` | submit DoD authoring change through admission candidate |
-| `PUT` | `/workspaces/:workspaceId/dods/:dodId` | submit scoped DoD revision candidate |
-| `POST` | `/workspaces/:workspaceId/goal-dod-quality-check` | bounded non-mutating assessment of supplied/referenced text |
 | `POST` | `/workspaces/:workspaceId/execution-activations` | submit `resume|restart` intent |
 
-Workspace creation accepts title、optional description、optional directory and template ID；owner generates identity。
-Blank directory resolves to `.workorch-workspaces/<workspace-id>` before candidate promotion。普通 setup 不要求 raw
-context/evidence/target/recipe/check/metric/artifact JSON。
+创作输入为 RequestID、名称、Template、Goal、资源引用及可选用户验收要求；工作目录可留空，解析为
+`.workorch-workspaces/<workspace-id>`。正式 Goal／DoD 仅在精确确认事务中物化，随后由 owner 准入；创建、编译、确认均不启动 Run。
+普通 setup 不要求 raw context/evidence/target/recipe/check/metric/artifact JSON。
+
+旧 `POST /workspaces`、Goal／DoD POST／PUT、`goal-dod-quality-check` 和内存 draft session 写路由均已退休，返回 `404`。
+正式定义 GET 保留作读取；同 Run 规格修订不通过旧 CRUD 暴露。
+Go client 只提供正式 authoring 写方法，退休创建／Goal／DoD 写方法不再存在。
+TUI 的旧创建、目标提交及 DoD 保存命令明确拒绝，不调用 backend 写操作、不生成默认 DoD，也不自动 Restart；
+当前 TUI 未提供完整创作向导，帮助、空态和补全不推荐退休写命令；用户通过 Web 完成规格创作后，可在 TUI 读取并显式提交执行。
+CLI 的 `workspace create` 与 Goal-first `agent [goal]` 已隐藏，并在访问 backend 或订阅事件之前直接拒绝；agent 不再生成默认 DoD 或自动提交 Restart。CLI／TUI 尚未交付完整规格创作向导。保留旧命令解析仅用于返回明确退休提示，不构成兼容创建路径。
+local EventHub 与 remote backend 对退休写接口均在发送前返回冲突提示；五个退休 CLI 定义写 topic 不再注册为 production facade 或 dispatcher 订阅，handler 的直接防御分支仍拒绝，不能绕过 backend 调用旧创建或 Goal／DoD 写用例。Workspace owner 内部 typed command 保留供受控事务与测试夹具使用。
 
 Workspace delete 默认为 retain：完成后隐藏 Workspace 及各 owner 的 workspace-scoped 资源，保留物理
 记录与永久 fence。显式 purge 仅请求每个 owner 幂等清理自身数据。Application 不执行
@@ -99,7 +106,7 @@ Workspace delete 默认为 retain：完成后隐藏 Workspace 及各 owner 的 w
 `activeRunId` 非空时零 intent 写入并返回 `409`；已接纳流程在部分失败、响应丢失或重启后由
 Workspace owner 从 durable deletion aggregate 幂等重驱，exact retry 不创建第二个删除链。
 
-Goal/DoD mutation先提交 immutable `DefinitionAdmissionCandidate` 并执行 pure admission。只有 `admitted_all_of`
+确认事务向 Workspace owner 提交 immutable `DefinitionAdmissionCandidate` 并执行 pure admission。只有 `admitted_all_of`
 可以 promotion；`definition_one_of_unsupported` 或 declared ambiguity 返回 typed `BlockingTicketID`。Corrected
 candidate 仍需 Decision resolution 与 Workspace acknowledgement 才能变为 eligible。
 
@@ -120,13 +127,14 @@ policy snapshot ref/revision/hash 均进入 immutable candidate hash，后续 li
 
 - pre-seal ticket由新candidate的all-of admission、专用Decision resolution和Workspace acknowledgement收口；不存在
   “接受one-of后继续”的payload；
-- Run-scoped runtime-definition ticket不提供公共continue/fail resolution。用户只提交修正后的candidate与显式`restart` intent；
-  Run owner在持久化matching `ReplacementIntent`后，通过
+- Run-scoped runtime-definition ticket不提供公共continue/fail resolution。当前公共 API 不提供同 Run 规格修订入口；
+  显式 `restart` 仍由 owner 校验 fresh eligible bootstrap。内部 replacement 合同中，Run owner在持久化matching `ReplacementIntent`后，通过
   `ResolveRuntimeDefinitionClarificationByReplacementCommand/Result`与Decision owner收口。HTTP handler、Web/TUI和
   workorchd均不得代发该owner-to-owner command或伪造replacement binding。
 
-不存在独立的`/runtime-definition-clarifications/:id/continue`、直接ticket-close或Definition patch route。普通Goal/DoD写入、
-promotion和execution activation仍分别经过各自owner合同，任何一步失败都保持零新Run/provider/dispatch/effect。
+不存在独立的`/runtime-definition-clarifications/:id/continue`、直接ticket-close或Definition patch route。
+创建期 authoring 确认、promotion 和 execution activation 分别经过各自 owner 合同；旧 Goal／DoD 写路由不再公开。
+确认前派生和审查允许按持久 permit 调用 provider，但不启动 Run 或执行其 operation。
 
 ### Governance
 
@@ -172,19 +180,22 @@ Builtin upgrade body 如 `{"kind":"soul","id":"...","expectedContentHash":"...",
 定制/未知内容、stale expected hash 或 changed target 返回 `409`，缺资源为 `404`，无 force 或 batch-atomic promise。
 此操作不刷新 Workspace、不创建 eligible admission、不触发 Run activation；详见
 [Built-In Default Resources](../40-profiles-capabilities/workspace/builtin-default-resources.md#explicit-guarded-upgrade)。
-新 Start/Restart 会自动读取当前 Template/Soul 并重新准入，无需先提交 template refresh；Resume/recovery 与旧归档仍使用
-原 Run seal。服务启动时仅由资源 owner 自动更新 exact reviewed 未定制的内置版本，未知/定制内容不覆盖。
+新 Start/Restart 读取当前 Template/Soul，但不能自动替换 Goal-only authoring 的确认身份：模板或 Definition policy 漂移时阻塞，须经受支持的显式创作修订、六审查与重新确认后才能使用新准入。其他受控 owner 定义路径仍按当前配置重新准入；Resume/recovery 与旧归档使用原 Run seal。服务启动时仅由资源 owner 自动更新 exact reviewed 未定制的内置版本，未知/定制内容不覆盖；catalog 升级本身不重新确认 Workspace。
 
-### Optional Setup Draft
+### 持久规格创作
 
-| Method | Path | Semantics |
-| --- | --- | --- |
-| `POST` | `/workspace-setup-draft-sessions` | create process-local optional authoring session |
-| `POST` | `/workspace-setup-draft-sessions/:draftSessionId/messages` | append message and generate bounded draft |
-| `POST` | `/workspace-setup-draft-sessions/:draftSessionId/regenerate` | regenerate current draft |
+创作查询为 `GET /workspaces/:workspaceId/authoring`；结果以 Workspace 持久 ledger 为准，不以内存会话作为权威。
+派生、提案及六 critic 分别先持久 reserve 再调用 provider；未决请求不得自动重发。FAIL／UNKNOWN 保持阻塞。
+确认必须绑定当前输入及完整审查身份。浏览器本地编辑不是 owner 草稿或准入凭据。
 
-Draft endpoint不写 Workspace owner state、不直接 promotion/start，也不把 `one_of` 提供为合法选项。采用 draft 必须重新
-提交普通 admission candidate。
+保存请求必须显式提供非空 `templateId`，不得用现行记录补齐原请求身份。保存响应丢失时，浏览器保留原 pendingSave 的 `requestId`、模板、输入、expected revision 与 inputHash，优先重放原请求。
+Workspace owner 在同一 CAS 中持久有界保存回执（最多 128 条，不淘汰迟到重放身份）；相同 RequestID 的不同 payload 返回 `409`。
+原请求精确重放不增加 revision、不调用 provider；原回执已被后续输入替代时 HTTP 返回 `409`，不能把 ABA 后相同文本当原保存成功。
+新等价保存仍校验当前 CAS，并持久其独立回执；旧 schema 或伪造 expected hash 不进入等价旁路。
+保存后的返回查询必须仍匹配原回执的输入及模板快照；同输入的编译推进可返回最新状态，被后续修订替代则返回 `409`，不得作为原保存成功。
+不同输入的过期 CAS 仍返回 `409`。冲突后用户可显式读取当前草稿并放弃原保存重放身份，保留本地编辑；
+该操作只读取，不自动保存或覆盖。用户核对 owner 当前目标后，另行提交修订并重新审查。
+详情页编辑恢复记录绑定 exact Workspace，不能跨工作空间复用保存或确认凭据。
 
 ## Command Scope And Responses
 

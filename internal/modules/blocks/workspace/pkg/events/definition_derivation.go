@@ -46,7 +46,7 @@ func (c CompleteDefinitionDerivationCommand) Validate() error {
 
 // FreshPermitID 仅在首次记账 CAS 成功后返回；Request 中的身份不能作为重发许可。
 type DefinitionDerivationRequestResult struct {
-	Request       workspace.DefinitionDerivationRequest
+	Request       DefinitionDerivationRequest
 	FreshPermitID string
 	Consumed      uint32
 	Remaining     uint32

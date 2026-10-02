@@ -9,7 +9,7 @@ import (
 func TestAuthoringResourceScopeBindsCurrentDraftAndRef(t *testing.T) {
 	input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: "ws", Revision: 1, GoalText: "目标", TemplateID: "t", ResourceRefs: []string{"requirements.txt"}}
 	template := workspace.WorkspaceTemplate{ID: "t"}
-	record := workspace.DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshot: template, TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template)}
+	record := DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshot: WorkspaceTemplate{ID: template.ID}, TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template)}
 	view := QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: 1, Record: &record, DeliverableDirectory: "/workspace/project", CurrentTemplateAvailable: true, CurrentTemplateSnapshotHash: record.TemplateSnapshotHash}
 	command := QueryAuthoringResourceScopeCommand{WorkspaceID: input.WorkspaceID, InputHash: record.InputHash, ResourceRef: input.ResourceRefs[0]}
 	got, err := AuthoringResourceScopeFor(view, command)

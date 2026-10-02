@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { App as AntApp, Badge, Button, Descriptions, Empty, Space, Tag, Typography } from 'antd';
 import { CardGrid, PageContainer, ProCard } from '../components/proCompat';
 import { workorchApi } from '../api';
@@ -8,6 +8,7 @@ import { errorMessage, shortId, stateTag, stateLabel, boundedParagraph, metricGr
 import { projectionStatusSummary, workspaceBoardActivationRequest, workspaceBoardActivationHint } from '../helpers';
 import { workspaceDefinitionClarification } from '../governanceMutationTarget';
 import type { ControlPlaneProps, ProjectionStatus, Workspace, WorkspaceExecutionIntentRequest } from '../types';
+import { enterAuthoringWorkspace } from '../workspaceAuthoring';
 import { WorkspaceSetupModal } from './components/WorkspaceSetupModal';
 
 type WorkspaceBoardCardItem = {
@@ -24,26 +25,33 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
   const [projection, setProjection] = useState<ProjectionStatus | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [workspaceSetupOpen, setWorkspaceSetupOpen] = useState(false);
+  const boardRequest = useRef(0);
+  const mounted = useRef(true);
 
   const loadBoard = useCallback(async (showLoading = true) => {
+    const token = ++boardRequest.current;
+    const isCurrent = () => mounted.current && token === boardRequest.current;
     if (showLoading) {
       setLoading(true);
     }
     try {
       const nextProjection = await workorchApi.listWorkspaceProjection();
+      if (!isCurrent()) return;
       setProjection(nextProjection.projection);
       setBoardItems(nextProjection.workspaces.map((workspace) => ({ workspace })));
     } catch (error) {
-      message.error(errorMessage(error));
+      if (isCurrent()) message.error(errorMessage(error));
     } finally {
-      if (showLoading) {
+      if (isCurrent()) {
         setLoading(false);
       }
     }
   }, [message]);
 
   useEffect(() => {
+    mounted.current = true;
     void loadBoard();
+    return () => { mounted.current = false; boardRequest.current++; };
   }, [loadBoard]);
 
   useSSE((event) => {
@@ -92,10 +100,8 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
     trackWorkspaceExecutionInBackground(workspace, request);
   };
 
-  const handleWorkspaceCreated = async (workspaceId: string) => {
-    await loadBoard();
-    onOpenWorkspace(workspaceId);
-  };
+  const handleWorkspaceCreated = (workspaceId: string, isCurrent: () => boolean) =>
+    enterAuthoringWorkspace(workspaceId, loadBoard, isCurrent, onOpenWorkspace);
 
   return (
     <PageContainer

@@ -405,42 +405,6 @@ upsert_json() {
   esac
 }
 
-ensure_goal() {
-  local workspace_id="$1"
-  local text="$2"
-  local list_output="$TMP_DIR/goals-before.json"
-  local existing_id
-  get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" "$list_output"
-  existing_id="$(json_first_id "$list_output" "goals")"
-  if [[ -n "$existing_id" ]]; then
-    put_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals/$existing_id" \
-      '{"text":"'"$text"'"}' \
-      "$TMP_DIR/goal.json"
-    return
-  fi
-  post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" \
-    '{"text":"'"$text"'"}' \
-    "$TMP_DIR/goal.json"
-}
-
-ensure_dod() {
-  local workspace_id="$1"
-  local item="$2"
-  local list_output="$TMP_DIR/dods-before.json"
-  local existing_id
-  get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" "$list_output"
-  existing_id="$(json_first_id "$list_output" "dods")"
-  if [[ -n "$existing_id" ]]; then
-    put_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods/$existing_id" \
-      '{"items":["'"$item"'"]}' \
-      "$TMP_DIR/dod.json"
-    return
-  fi
-  post_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" \
-    '{"items":["'"$item"'"]}' \
-    "$TMP_DIR/dod.json"
-}
-
 start_mock_provider() {
   cat >"$TMP_DIR/llm_mock_provider.py" <<'PY'
 import json
@@ -543,13 +507,16 @@ class Handler(BaseHTTPRequestHandler):
         user_content = str(payload.get("input", ""))
         try:
             server_id = os.environ.get("WORKORCH_MCP_STDIO_VERIFY_SERVER_ID", "mcp-stdio-verify")
-            if "### C3.semantic-authority" in user_content:
-                decision = semantic_plan_payload(user_content, server_id)
-            else:
-                decision = decision_payload(user_content, server_id)
-        except MockContractError as error:
-            print(f"mock contract rejected request: {error}", flush=True)
-            encoded = json.dumps({"error": {"message": f"mock contract: {error}"}}).encode("utf-8")
+            from verify_authoring_mock import AuthoringMockError, authoring_response
+            decision = authoring_response(user_content)
+            if decision is None:
+                if "### C3.semantic-authority" in user_content:
+                    decision = semantic_plan_payload(user_content, server_id)
+                else:
+                    decision = decision_payload(user_content, server_id)
+        except (MockContractError, AuthoringMockError):
+            print("mock 合同拒绝请求", flush=True)
+            encoded = json.dumps({"error": {"message": "mock 合同无效"}}).encode("utf-8")
             self.send_response(422)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(encoded)))
@@ -825,20 +792,24 @@ post_json "$BASE_URL/api/v1/workorch/workspace-templates" \
   '{"id":"'"$MCP_TEMPLATE_ID"'","name":"MCP stdio verification","description":"Runtime MCP stdio validation profile","goalText":"Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.","doDItems":["stdio MCP tool call completes"],"defaultSoulId":"soul-generic-governed-execution","soulBindings":{"planning":"soul-generic-governed-planning","execution":"soul-generic-governed-execution","validation":"soul-generic-governed-validation","decision":"soul-generic-governed-decision","approval":"soul-generic-governed-approval","artifact":"soul-generic-governed-artifact"},"contextHints":{"semanticCodeNavigation":{"defaultMCPServerIds":["'"$MCP_SERVER_ID"'"],"defaultCapabilityIds":["'"$MCP_CAPABILITY_ID"'"]},"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy","maxWorkItems":1,"maxFocuses":2,"maxCandidateContextItems":16,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"mcp-stdio-e2e","title":"MCP stdio acceptance","scope":"mcp_stdio","priority":10,"maxWorkItems":1,"match":{"all":true}}]},"profileContracts":{"mcp-stdio-e2e":{"evidenceRequirements":[{"id":"*","scope":"dodItem","evidenceRole":"supplemental_evidence","targetRole":"mcp_capability","targetSelectorRef":"mcp-capability-selector","targetSelectorOwnerRef":"blocks/mcp","targetSelectorSubjectRef":"'"$MCP_CAPABILITY_ID"'","targetDiscoverySources":["available_capabilities"],"requireTargetGrounding":false,"requiredEvidenceKinds":["validation"],"requireDirectEvidence":true,"requireExecutableBehaviorEvidence":true,"acceptedStepKinds":["mcp/tool_call"],"validationRecipeId":"mcp/tool_call/'"$MCP_SERVER_ID"'/repo.summary","requiredCheckRefs":["mcp/tool_call/'"$MCP_SERVER_ID"'/repo.summary"]}]}}}}' \
   "$TMP_DIR/mcp-template.json"
 
-post_json "$BASE_URL/api/v1/workorch/workspaces" \
-  '{"title":"mcp stdio verification","description":"verify MCP stdio transport through Runtime candidate execution","templateId":"'"$MCP_TEMPLATE_ID"'"}' \
-  "$TMP_DIR/workspace.json"
+python3 - "$MCP_TEMPLATE_ID" >"$TMP_DIR/authoring-input.json" <<'PY'
+import json
+import sys
+json.dump({'title': 'mcp stdio verification', 'templateId': sys.argv[1],
+           'input': {'goalText': 'Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence.',
+                     'acceptanceRequirements': [], 'resourceRefs': []}}, sys.stdout)
+PY
+recovery_root="${WORKORCH_AUTHORING_RECOVERY_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/workorch/verification-authoring}"
+python3 "$ROOT_DIR/scripts/create-authoring-verification-workspace.py" \
+  --base-url "$BASE_URL" --payload-file "$TMP_DIR/authoring-input.json" \
+  --recovery-file "$recovery_root/mcp-$VERIFY_SUFFIX.json" --output-prefix "$TMP_DIR/authoring"
+cp "$TMP_DIR/authoring-workspace.json" "$TMP_DIR/workspace.json"
+cp "$TMP_DIR/authoring-goal.json" "$TMP_DIR/goal.json"
+cp "$TMP_DIR/authoring-dod.json" "$TMP_DIR/dod.json"
 workspace_id="$(json_path "$TMP_DIR/workspace.json" "workspace.id")"
-[[ -n "$workspace_id" ]]
-
-ensure_goal "$workspace_id" \
-  "Plan and execute one MCP stdio repo.summary tool call, then assess the DoD from the tool evidence."
 goal_id="$(json_path "$TMP_DIR/goal.json" "goal.id")"
-[[ -n "$goal_id" ]]
-
-ensure_dod "$workspace_id" "stdio MCP tool call completes"
 dod_id="$(json_path "$TMP_DIR/dod.json" "dod.id")"
-[[ -n "$dod_id" ]]
+[[ -n "$workspace_id" && -n "$goal_id" && -n "$dod_id" ]]
 
 get_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/runs" "$TMP_DIR/activation-before-runs.json"
 post_activation_json "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \

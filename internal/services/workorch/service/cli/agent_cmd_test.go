@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
@@ -15,37 +17,28 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestRunAgentReturnsBackendErrorBeforeEvents(t *testing.T) {
+func TestRetiredCLICommandsRejectBeforeBackendAccess(t *testing.T) {
 	previousBackend := cliBackend
 	previousWorkspaceID := defaultWorkspaceID
 	t.Cleanup(func() {
 		cliBackend = previousBackend
 		defaultWorkspaceID = previousWorkspaceID
 	})
-
-	cliBackend = agentCommandFailureBackend{goalErr: errors.New("define goal failed")}
-	defaultWorkspaceID = "ws-agent"
-
-	err := runAgent(nil, []string{"do", "work"})
-	if err == nil || !strings.Contains(err.Error(), "define goal failed") {
-		t.Fatalf("runAgent error = %v, want define goal failure", err)
+	// nil backend 使任何读写或订阅依赖访问失败。
+	cliBackend = nil
+	for _, workspaceID := range []string{"", "ws-agent"} {
+		defaultWorkspaceID = workspaceID
+		if err := runAgent(nil, []string{"执行目标"}); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("退休 agent 未直接拒绝: %v", err)
+		}
+		if err := workspaceCreateCmd.RunE(workspaceCreateCmd, nil); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("退休创建未直接拒绝: %v", err)
+		}
 	}
-}
-
-func TestRunAgentRequiresSelectedWorkspace(t *testing.T) {
-	previousBackend := cliBackend
-	previousWorkspaceID := defaultWorkspaceID
-	t.Cleanup(func() {
-		cliBackend = previousBackend
-		defaultWorkspaceID = previousWorkspaceID
-	})
-
-	cliBackend = agentCommandFailureBackend{}
-	defaultWorkspaceID = ""
-
-	err := runAgent(nil, []string{"do", "work"})
-	if err == nil || !strings.Contains(err.Error(), "workspace is required") {
-		t.Fatalf("runAgent error = %v, want workspace required", err)
+	for _, command := range []*cobra.Command{agentCmd, workspaceCreateCmd} {
+		if !command.Hidden || !strings.Contains(command.Short, "已退休") {
+			t.Fatalf("退休命令仍作为正常功能显示: %s", command.Name())
+		}
 	}
 }
 

@@ -611,6 +611,16 @@ func (w *Workspace) ValidateActivationAdmissionPersistence() (DefinitionAdmissio
 	if w == nil {
 		return DefinitionAdmissionCandidate{}, false, common.ErrInvalidArgument
 	}
+	if w.DefinitionAuthoringConfirmation != nil {
+		confirmation := w.DefinitionAuthoringConfirmation
+		sequence := confirmation.FormalSequence
+		if sequence == 0 && confirmation.PreviousInputHash == "" {
+			sequence = 1
+		}
+		if sequence != uint64(len(w.DefinitionAuthoringHistory)+1) {
+			return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring confirmation lacks exact history sequence")
+		}
+	}
 	if w.StartupInput == nil && w.ActivationAdmission == nil {
 		if len(w.DefinitionAuthoringHistory) > 0 {
 			if err := w.ValidateDefinitionAuthoringHistory(); err != nil {
@@ -639,12 +649,11 @@ func (w *Workspace) ValidateActivationAdmissionPersistence() (DefinitionAdmissio
 			if candidate.Validate() != nil || candidate.AuthoringRef == nil || candidate.CandidateID != w.DefinitionAdmissionCandidates[0].CandidateID || candidate.CandidateRevision != uint64(len(w.DefinitionAdmissionCandidates)) {
 				return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring successor candidate is invalid")
 			}
-			ref, err := ConfirmedAuthoringAdmissionRef(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID)
+			goal, dod, reviewed, ref, err := ConfirmedAuthoringAdmissionSource(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID)
 			if err != nil || *candidate.AuthoringRef != ref || w.DefinitionAuthoringConfirmation.ValidateSuccessor(w.DefinitionAuthoringHistory[len(w.DefinitionAuthoringHistory)-1].Confirmation) != nil {
 				return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring successor lost reviewed source")
 			}
-			goal, dod, reviewed, err := ConfirmedAuthoringCandidateInputs(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID)
-			if err != nil || candidate.GoalInput != goal || !reflect.DeepEqual(candidate.DoDInputs, DefinitionAdmissionCandidate{DoDInputs: dod}.Normalized().DoDInputs) || candidate.Specification == nil || !reflect.DeepEqual(candidate.Specification.Normalized(), reviewed.Normalized()) {
+			if candidate.GoalInput != goal || !reflect.DeepEqual(candidate.DoDInputs, DefinitionAdmissionCandidate{DoDInputs: dod}.Normalized().DoDInputs) || candidate.Specification == nil || !reflect.DeepEqual(candidate.Specification.Normalized(), reviewed.Normalized()) {
 				return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring successor differs from reviewed input")
 			}
 			return DefinitionAdmissionCandidate{}, false, nil
@@ -657,12 +666,11 @@ func (w *Workspace) ValidateActivationAdmissionPersistence() (DefinitionAdmissio
 			if err := candidate.Validate(); err != nil || candidate.AuthoringRef == nil {
 				return DefinitionAdmissionCandidate{}, false, fmt.Errorf("blocked authoring candidate is invalid")
 			}
-			ref, err := ConfirmedAuthoringAdmissionRef(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID)
+			goal, dod, reviewed, ref, err := ConfirmedAuthoringAdmissionSource(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID)
 			if err != nil || *candidate.AuthoringRef != ref {
 				return DefinitionAdmissionCandidate{}, false, fmt.Errorf("blocked authoring candidate lost reviewed source")
 			}
-			goal, dod, reviewed, err := ConfirmedAuthoringCandidateInputs(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID)
-			if err != nil || candidate.GoalInput != goal || !reflect.DeepEqual(candidate.DoDInputs, DefinitionAdmissionCandidate{DoDInputs: dod}.Normalized().DoDInputs) || candidate.Specification == nil || !reflect.DeepEqual(candidate.Specification.Normalized(), reviewed.Normalized()) {
+			if candidate.GoalInput != goal || !reflect.DeepEqual(candidate.DoDInputs, DefinitionAdmissionCandidate{DoDInputs: dod}.Normalized().DoDInputs) || candidate.Specification == nil || !reflect.DeepEqual(candidate.Specification.Normalized(), reviewed.Normalized()) {
 				return DefinitionAdmissionCandidate{}, false, fmt.Errorf("blocked authoring candidate differs from reviewed input")
 			}
 		}
@@ -696,15 +704,14 @@ func (w *Workspace) ValidateActivationAdmissionPersistence() (DefinitionAdmissio
 		return DefinitionAdmissionCandidate{}, false, err
 	}
 	if w.DefinitionAuthoringConfirmation != nil {
-		if w.DefinitionAuthoring == nil || w.DefinitionAuthoringConfirmation.Validate(w.DefinitionAuthoring, w.ID) != nil || matched.AuthoringRef == nil || len(w.DefinitionAdmissionCandidates) != len(w.DefinitionAuthoringHistory)+1 || matched.CandidateRevision != uint64(len(w.DefinitionAdmissionCandidates)) || len(w.DefinitionAuthoringHistory) > 0 && (matched.CandidateID != w.DefinitionAdmissionCandidates[0].CandidateID || w.DefinitionAuthoringConfirmation.ValidateSuccessor(w.DefinitionAuthoringHistory[len(w.DefinitionAuthoringHistory)-1].Confirmation) != nil) {
+		if w.DefinitionAuthoring == nil || matched.AuthoringRef == nil || len(w.DefinitionAdmissionCandidates) != len(w.DefinitionAuthoringHistory)+1 || matched.CandidateRevision != uint64(len(w.DefinitionAdmissionCandidates)) || len(w.DefinitionAuthoringHistory) > 0 && (matched.CandidateID != w.DefinitionAdmissionCandidates[0].CandidateID || w.DefinitionAuthoringConfirmation.ValidateSuccessor(w.DefinitionAuthoringHistory[len(w.DefinitionAuthoringHistory)-1].Confirmation) != nil) {
 			return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring admission lacks exact persisted confirmation")
 		}
-		ref, err := ConfirmedAuthoringAdmissionRef(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID)
+		goal, dod, reviewed, ref, err := ConfirmedAuthoringAdmissionSource(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID)
 		if err != nil || *matched.AuthoringRef != ref {
 			return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring admission lost original review provenance")
 		}
-		goal, dod, reviewed, err := ConfirmedAuthoringCandidateInputs(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID)
-		if err != nil || matched.GoalInput != goal || !reflect.DeepEqual(matched.DoDInputs, DefinitionAdmissionCandidate{DoDInputs: dod}.Normalized().DoDInputs) || matched.Specification == nil || !reflect.DeepEqual(matched.Specification.Normalized(), reviewed.Normalized()) {
+		if matched.GoalInput != goal || !reflect.DeepEqual(matched.DoDInputs, DefinitionAdmissionCandidate{DoDInputs: dod}.Normalized().DoDInputs) || matched.Specification == nil || !reflect.DeepEqual(matched.Specification.Normalized(), reviewed.Normalized()) {
 			return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring admission differs from confirmed Goal, DoD or reviews")
 		}
 	} else if matched.AuthoringRef != nil {

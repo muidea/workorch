@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 
+	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -54,6 +55,9 @@ func reduceDefinitionAuthoring(o definitionSpecificationObservation, cmd workspa
 	}
 	input := cmd.Input.Normalized()
 	w := o.workspace
+	if replay, matched, err := replayDefinitionAuthoringSave(w, cmd); matched || err != nil {
+		return replay, err
+	}
 	if w == nil || o.template == nil || input.WorkspaceID != w.ID || o.template.ID != input.TemplateID {
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
@@ -75,12 +79,27 @@ func reduceDefinitionAuthoring(o definitionSpecificationObservation, cmd workspa
 	}
 	record := workspacemodel.DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshotHash: workspacemodel.WorkspaceTemplateSnapshotHash(o.template), TemplateSnapshot: o.template.Clone()}
 	previous := w.DefinitionAuthoring
+	if w.Revision != cmd.ExpectedWorkspaceRevision || (previous != nil && cmd.ExpectedInputHash != previous.InputHash) || (previous == nil && cmd.ExpectedInputHash != "") {
+		return definitionSpecificationTransition{}, common.ErrConflict
+	}
+	receipt := workspacemodel.DefinitionAuthoringSaveReceipt{RequestID: cmd.RequestID, RequestHash: workspacemodel.DefinitionAuthoringSaveRequestHash(cmd.RequestID, cmd.Input, cmd.ExpectedWorkspaceRevision, cmd.ExpectedInputHash, cmd.DeliverableDirectory), InputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, WorkspaceRevision: w.Revision + 1}
+	if w.Revision == ^uint64(0) {
+		return definitionSpecificationTransition{}, common.ErrConflict
+	}
 	if previous != nil {
 		if previous.Validate() != nil || previous.Input.WorkspaceID != w.ID {
 			return definitionSpecificationTransition{}, common.ErrConflict
 		}
+		if len(previous.SaveReceipts) >= workspacemodel.DefinitionAuthoringSaveReceiptLimit {
+			return definitionSpecificationTransition{}, common.ErrConflict
+		}
+		record.SaveReceipts = append(append([]workspacemodel.DefinitionAuthoringSaveReceipt(nil), previous.SaveReceipts...), receipt)
 		if previous.InputHash == record.InputHash && previous.TemplateSnapshotHash == record.TemplateSnapshotHash && w.TemplateID == input.TemplateID && directory == w.DeliverableDirectory && w.DefinitionAuthoringConfirmation == nil {
-			return definitionSpecificationTransition{Authoring: &workspaceevents.SaveDefinitionAuthoringResult{Record: previous.Clone()}}, nil
+			next := *w
+			copy := previous.Clone()
+			copy.SaveReceipts = record.SaveReceipts
+			next.DefinitionAuthoring = &copy
+			return definitionSpecificationTransition{Next: &next, Authoring: &workspaceevents.SaveDefinitionAuthoringResult{Record: workspaceeventmapping.DefinitionAuthoringRecordDTO(copy), Receipt: receipt}}, nil
 		}
 		if previous.InputHash == record.InputHash && previous.TemplateSnapshotHash == record.TemplateSnapshotHash {
 			return definitionSpecificationTransition{}, common.ErrConflict
@@ -90,11 +109,11 @@ func reduceDefinitionAuthoring(o definitionSpecificationObservation, cmd workspa
 		if previous.Input.Revision == ^uint64(0) || input.Revision != previous.Input.Revision+1 {
 			return definitionSpecificationTransition{}, common.ErrConflict
 		}
-	} else if input.Revision != 1 {
-		return definitionSpecificationTransition{}, common.ErrConflict
-	}
-	if w.Revision != cmd.ExpectedWorkspaceRevision {
-		return definitionSpecificationTransition{}, common.ErrConflict
+	} else {
+		if input.Revision != 1 {
+			return definitionSpecificationTransition{}, common.ErrConflict
+		}
+		record.SaveReceipts = []workspacemodel.DefinitionAuthoringSaveReceipt{receipt}
 	}
 	if err := record.Validate(); err != nil {
 		return definitionSpecificationTransition{}, common.ErrConflict
@@ -102,14 +121,16 @@ func reduceDefinitionAuthoring(o definitionSpecificationObservation, cmd workspa
 	if w.DefinitionAuthoringConfirmation != nil && len(w.DefinitionAdmissionCandidates) > 0 && previous != nil && previous.InputHash == w.DefinitionAuthoringConfirmation.InputHash {
 		archived := workspacemodel.DefinitionAuthoringConfirmedRevision{Record: previous.Clone(), Confirmation: w.DefinitionAuthoringConfirmation.Clone()}
 		next := *w
-		applyAuthoringConfiguration(&next, input.TemplateID, directory)
+		if err := applyAuthoringConfiguration(&next, o.template, directory); err != nil {
+			return definitionSpecificationTransition{}, err
+		}
 		next.DefinitionAuthoringHistory = append(append([]workspacemodel.DefinitionAuthoringConfirmedRevision(nil), w.DefinitionAuthoringHistory...), archived)
 		next.DefinitionAuthoring = &record
 		next.DefinitionAuthoringConfirmation = nil
 		if next.ValidateDefinitionAuthoringHistory() != nil {
 			return definitionSpecificationTransition{}, common.ErrConflict
 		}
-		return definitionSpecificationTransition{Next: &next, Authoring: &workspaceevents.SaveDefinitionAuthoringResult{Record: record.Clone()}}, nil
+		return definitionSpecificationTransition{Next: &next, Authoring: &workspaceevents.SaveDefinitionAuthoringResult{Record: workspaceeventmapping.DefinitionAuthoringRecordDTO(record), Receipt: receipt}}, nil
 	}
 	if w.DefinitionAuthoringConfirmation != nil {
 		return definitionSpecificationTransition{}, common.ErrConflict
@@ -118,15 +139,49 @@ func reduceDefinitionAuthoring(o definitionSpecificationObservation, cmd workspa
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
 	next := *w
-	applyAuthoringConfiguration(&next, input.TemplateID, directory)
+	if err := applyAuthoringConfiguration(&next, o.template, directory); err != nil {
+		return definitionSpecificationTransition{}, err
+	}
 	next.DefinitionAuthoring = &record
-	return definitionSpecificationTransition{Next: &next, Authoring: &workspaceevents.SaveDefinitionAuthoringResult{Record: record.Clone()}}, nil
+	return definitionSpecificationTransition{Next: &next, Authoring: &workspaceevents.SaveDefinitionAuthoringResult{Record: workspaceeventmapping.DefinitionAuthoringRecordDTO(record), Receipt: receipt}}, nil
 }
 
-func applyAuthoringConfiguration(w *workspacemodel.Workspace, templateID, directory string) {
-	if w.TemplateID != templateID {
+func applyAuthoringConfiguration(w *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate, directory string) error {
+	if w.TemplateID != template.ID {
 		w.TemplateBindingHash = ""
 	}
-	w.TemplateID = templateID
+	w.TemplateID = template.ID
 	w.DeliverableDirectory = directory
+	next, err := workspacemodel.WorkspaceForCurrentTemplate(w, template)
+	if err != nil {
+		return err
+	}
+	*w = *next
+	return nil
+}
+
+// 精确回执重放不观察现行模板，但必须校验 owner scope 与原 CAS 结果。
+func replayDefinitionAuthoringSave(w *workspacemodel.Workspace, cmd workspaceevents.SaveDefinitionAuthoringCommand) (definitionSpecificationTransition, bool, error) {
+	if w == nil || w.ID != cmd.Input.WorkspaceID {
+		return definitionSpecificationTransition{}, false, common.ErrConflict
+	}
+	if w.DefinitionAuthoring == nil {
+		return definitionSpecificationTransition{}, false, nil
+	}
+	if w.DefinitionAuthoring.Validate() != nil || w.DefinitionAuthoring.Input.WorkspaceID != w.ID {
+		return definitionSpecificationTransition{}, false, common.ErrConflict
+	}
+	for _, receipt := range w.DefinitionAuthoring.SaveReceipts {
+		if receipt.WorkspaceRevision > w.Revision {
+			return definitionSpecificationTransition{}, false, common.ErrConflict
+		}
+		if receipt.RequestID != cmd.RequestID {
+			continue
+		}
+		if cmd.ExpectedWorkspaceRevision == ^uint64(0) || receipt.WorkspaceRevision != cmd.ExpectedWorkspaceRevision+1 || receipt.RequestHash != workspacemodel.DefinitionAuthoringSaveRequestHash(cmd.RequestID, cmd.Input, cmd.ExpectedWorkspaceRevision, cmd.ExpectedInputHash, cmd.DeliverableDirectory) {
+			return definitionSpecificationTransition{}, false, common.ErrConflict
+		}
+		return definitionSpecificationTransition{Authoring: &workspaceevents.SaveDefinitionAuthoringResult{Record: workspaceeventmapping.DefinitionAuthoringRecordDTO(*w.DefinitionAuthoring), Receipt: receipt}}, true, nil
+	}
+	return definitionSpecificationTransition{}, false, nil
 }

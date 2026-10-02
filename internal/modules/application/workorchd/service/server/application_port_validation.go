@@ -6,9 +6,6 @@ func validateWorkspaceApplicationPorts(ports WorkspacePorts) error {
 	if ports.Validate == nil {
 		return fmt.Errorf("missing Workspace.Validate application port")
 	}
-	if ports.CreateWorkspace == nil {
-		return fmt.Errorf("missing Workspace.CreateWorkspace application port")
-	}
 	if ports.DeleteWorkspace == nil {
 		return fmt.Errorf("missing Workspace.DeleteWorkspace application port")
 	}
@@ -55,35 +52,17 @@ func validateDefinitionApplicationPorts(ports DefinitionPorts) error {
 	if ports.ConfirmDefinitionAuthoring == nil {
 		return fmt.Errorf("missing Definition.ConfirmDefinitionAuthoring application port")
 	}
-	if ports.DefineGoal == nil {
-		return fmt.Errorf("missing Definition.DefineGoal application port")
-	}
-	if ports.UpdateGoal == nil {
-		return fmt.Errorf("missing Definition.UpdateGoal application port")
-	}
 	if ports.ReadGoal == nil {
 		return fmt.Errorf("missing Definition.ReadGoal application port")
 	}
 	if ports.ListGoals == nil {
 		return fmt.Errorf("missing Definition.ListGoals application port")
 	}
-	if ports.DefineDoD == nil {
-		return fmt.Errorf("missing Definition.DefineDoD application port")
-	}
-	if ports.UpdateDoD == nil {
-		return fmt.Errorf("missing Definition.UpdateDoD application port")
-	}
 	if ports.ReadDoD == nil {
 		return fmt.Errorf("missing Definition.ReadDoD application port")
 	}
 	if ports.ListDoDs == nil {
 		return fmt.Errorf("missing Definition.ListDoDs application port")
-	}
-	if ports.CheckGoalDoDQuality == nil {
-		return fmt.Errorf("missing Definition.CheckGoalDoDQuality application port")
-	}
-	if ports.GenerateWorkspaceSetupDraft == nil {
-		return fmt.Errorf("missing Definition.GenerateWorkspaceSetupDraft application port")
 	}
 	return nil
 }

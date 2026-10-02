@@ -168,10 +168,7 @@ func optionalRequestSeq(values []int64) int64 {
 
 func CreateWorkspace(be backend.Backend, req workorchmanagementcontract.WorkspaceCreateRequest) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		ws, err := be.Workspace().Create(ctx, req)
-		return WorkspaceCreatedMsg{Workspace: ws, Error: err}
+		return WorkspaceCreatedMsg{Error: fmt.Errorf("%w: TUI 创建向导尚未接入持久规格创作，请使用 Web 创建入口", common.ErrConflict)}
 	}
 }
 
@@ -391,45 +388,13 @@ func WaitForProjectionSignal(
 
 func SubmitGoal(be backend.Backend, workspaceID string, text string, dodItems []string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		wsID := common.WorkspaceID(workspaceID)
-		_, err := be.Goal().Define(ctx, wsID, text)
-		if err != nil {
-			return RunStartedMsg{WorkspaceID: workspaceID, Error: err}
-		}
-		if len(dodItems) == 0 {
-			dodItems = backend.DefaultDoDItemsForWorkspace(ctx, be, wsID)
-		}
-		_, err = be.DoD().Define(ctx, wsID, dodItems)
-		if err != nil {
-			return RunStartedMsg{WorkspaceID: workspaceID, Error: err}
-		}
-		admission, err := be.Run().Command(ctx, backend.WorkspaceRunCommand{
-			WorkspaceID: wsID,
-			Intent:      backend.RunCommandIntentRestart,
-			Reason:      "user_requested",
-			Source:      "tui",
-		})
-		if err != nil {
-			return RunStartedMsg{WorkspaceID: workspaceID, Error: err}
-		}
-		return RunStartedMsg{Admission: admission, WorkspaceID: workspaceID}
+		return RunStartedMsg{WorkspaceID: workspaceID, Error: fmt.Errorf("%w: 旧目标提交已退休，请通过 Web 创作并确认规格；运行需另行显式启动", common.ErrConflict)}
 	}
 }
 
 func PersistDoD(be backend.Backend, workspaceID string, items []string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if strings.TrimSpace(workspaceID) == "" {
-			return DoDUpdatedMsg{Error: common.ErrInvalidArgument}
-		}
-		dod, err := be.DoD().Define(ctx, common.WorkspaceID(workspaceID), items)
-		if err != nil {
-			return DoDUpdatedMsg{Error: err}
-		}
-		return DoDUpdatedMsg{DoD: dod}
+		return DoDUpdatedMsg{Error: fmt.Errorf("%w: 正式 DoD 只由规格确认事务物化，请使用 Web 创作入口", common.ErrConflict)}
 	}
 }
 

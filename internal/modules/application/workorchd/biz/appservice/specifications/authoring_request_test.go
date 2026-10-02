@@ -14,6 +14,9 @@ import (
 func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *testing.T) {
 	input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: "ws", Revision: 1, GoalText: "交付目标", TemplateID: "t", AcceptanceRequirements: []string{"用户验收"}}
 	template := workspace.WorkspaceTemplate{ID: "t", DoDItems: []string{"模板验收"}}
+	if err := json.Unmarshal([]byte(`{"profileContracts":{"sealed-profile":{"evidenceRequirements":[{"id":"*","scope":"dodItem","requiredEvidenceKinds":["validation"],"acceptedStepKinds":["shell/run"]}]}}}`), &template.ContextHints); err != nil {
+		t.Fatal(err)
+	}
 	derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: input.InputHash(), TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template), AdditionalItems: []string{"补充验收"}}
 	record := workspace.DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshot: template, TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template)}
 	record, derivation, _, err := record.ReserveDerivation("derive-1", "provider", nil)
@@ -46,16 +49,20 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 		t.Fatal("volatile identity or provider binding leaked into provider-facing stable prefix")
 	}
 	var proposalPayload struct {
-		Goal                workspace.DefinitionCandidateItem   `json:"goal"`
-		CandidateAcceptance []workspace.DefinitionCandidateItem `json:"candidateAcceptance"`
-		InputHash           string                              `json:"inputHash"`
-		TemplateHash        string                              `json:"templateHash"`
+		Goal                workspace.DefinitionCandidateItem        `json:"goal"`
+		CandidateAcceptance []workspace.DefinitionCandidateItem      `json:"candidateAcceptance"`
+		InputHash           string                                   `json:"inputHash"`
+		TemplateHash        string                                   `json:"templateHash"`
+		Profiles            []runtimecontract.RuntimeProfileContract `json:"profiles"`
 	}
 	if err := json.Unmarshal([]byte(volatile.Content), &proposalPayload); err != nil {
 		t.Fatal(err)
 	}
 	if proposalPayload.Goal.Text != input.GoalText || proposalPayload.InputHash != input.InputHash() || proposalPayload.TemplateHash != workspace.WorkspaceTemplateSnapshotHash(&template) || len(proposalPayload.CandidateAcceptance) != 3 {
 		t.Fatalf("proposal omitted sealed input: %+v", proposalPayload)
+	}
+	if len(proposalPayload.Profiles) != 1 || proposalPayload.Profiles[0].ID != "sealed-profile" || len(proposalPayload.Profiles[0].EvidenceRequirements) != 1 || proposalPayload.Profiles[0].EvidenceRequirements[0].ID != "*" || strings.Contains(stable.Content, "sealed-profile") {
+		t.Fatal("封存 Profile 声明未精确进入 C3 或污染了 C0")
 	}
 	if !strings.Contains(volatile.Content, `"resourceSnapshotHash":"`+derivation.ResourceSnapshotHash+`"`) {
 		t.Fatal("proposal omitted the sealed resource snapshot hash")
@@ -77,17 +84,21 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 		t.Fatalf("critic lacks independent review and unknown-resource contract: %+v", command.Request)
 	}
 	var reviewPayload struct {
-		Kind                string                              `json:"kind"`
-		ProposalHash        string                              `json:"proposalHash"`
-		Goal                workspace.DefinitionCandidateItem   `json:"goal"`
-		CandidateAcceptance []workspace.DefinitionCandidateItem `json:"candidateAcceptance"`
-		Specification       workspace.GoalSpecification         `json:"specification"`
+		Kind                string                                   `json:"kind"`
+		ProposalHash        string                                   `json:"proposalHash"`
+		Goal                workspace.DefinitionCandidateItem        `json:"goal"`
+		CandidateAcceptance []workspace.DefinitionCandidateItem      `json:"candidateAcceptance"`
+		Specification       workspace.GoalSpecification              `json:"specification"`
+		Profiles            []runtimecontract.RuntimeProfileContract `json:"profiles"`
 	}
 	if err := json.Unmarshal([]byte(command.Request.PromptContext.Sections[1].Content), &reviewPayload); err != nil {
 		t.Fatal(err)
 	}
 	if reviewPayload.Kind != workspace.GoalReviewTraceability || reviewPayload.ProposalHash != spec.ContentHash() || reviewPayload.Goal.Text != input.GoalText || len(reviewPayload.CandidateAcceptance) != 3 || len(reviewPayload.Specification.Reviews) != 0 {
 		t.Fatalf("critic received wrong or contaminated proposal: %+v", reviewPayload)
+	}
+	if runtimecontract.StableRuntimeProfileContractsHash(reviewPayload.Profiles) != runtimecontract.StableRuntimeProfileContractsHash(proposalPayload.Profiles) || strings.Contains(command.Request.PromptContext.Sections[0].Content, "sealed-profile") {
+		t.Fatal("独立审查读取了不同 Profile 声明或改变了稳定前缀")
 	}
 	if !strings.Contains(command.Request.PromptContext.Sections[1].Content, `"resourceSnapshotHash":"`+derivation.ResourceSnapshotHash+`"`) {
 		t.Fatal("critic omitted the sealed resource snapshot hash")

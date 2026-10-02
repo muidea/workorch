@@ -90,6 +90,8 @@ github.com/muidea/magicCommon v1.5.15 h1:Xp6ccjaQVBkd1CkKRwflJEJW2DbpmbCQnlQo7by
 github.com/muidea/magicCommon v1.5.15/go.mod h1:ku98eEXLRGVh0Yj+893OavRcDnGeUBXE3uIFGl3ZbMo=
 github.com/muidea/magicCommon v1.5.17 h1:02mBXOmCvRcWhiwNCeIRxsltasc3V7Gh8bIR2OLbPYM=
 github.com/muidea/magicCommon v1.5.17/go.mod h1:ku98eEXLRGVh0Yj+893OavRcDnGeUBXE3uIFGl3ZbMo=
+github.com/muidea/magicCommon v1.5.18 h1:S0hwa+LzIXrxzj2efPh/h7eimKlw3luWm7qlQ5HaZxs=
+github.com/muidea/magicCommon v1.5.18/go.mod h1:ku98eEXLRGVh0Yj+893OavRcDnGeUBXE3uIFGl3ZbMo=
 github.com/muidea/magicEngine v1.5.3 h1:luPYsBXXsEgKB+WclAPQFsLBe9f57b/v8Nz41OsrJE0=
 github.com/muidea/magicEngine v1.5.3/go.mod h1:VeVGHY8YkzK7Cx/HDuK27KIew71sRRJsvDRMNaq2p5I=
 github.com/pelletier/go-toml/v2 v2.4.3 h1:GTRvJQutkOSftxIFD5xw9aepkYNuPWmVJpffdDPYVpY=

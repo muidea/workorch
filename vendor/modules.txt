@@ -131,7 +131,7 @@ github.com/muesli/reflow/wordwrap
 # github.com/muesli/termenv v0.16.0
 ## explicit; go 1.17
 github.com/muesli/termenv
-# github.com/muidea/magicCommon v1.5.17
+# github.com/muidea/magicCommon v1.5.18
 ## explicit; go 1.26.0
 github.com/muidea/magicCommon/def
 github.com/muidea/magicCommon/event
@@ -139,6 +139,7 @@ github.com/muidea/magicCommon/execute
 github.com/muidea/magicCommon/foundation/helper
 github.com/muidea/magicCommon/foundation/net
 github.com/muidea/magicCommon/foundation/path
+github.com/muidea/magicCommon/foundation/profiling
 github.com/muidea/magicCommon/foundation/system
 github.com/muidea/magicCommon/foundation/util
 github.com/muidea/magicCommon/framework/application

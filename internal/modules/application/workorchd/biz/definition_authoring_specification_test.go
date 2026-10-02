@@ -69,7 +69,7 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 			switch command := ev.Data().(type) {
 			case workspaceevents.QueryDefinitionAuthoringCommand:
 				copy := record.Clone()
-				result.Set(workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: 1, Record: &copy, CurrentTemplateAvailable: true, CurrentTemplateSnapshotHash: copy.TemplateSnapshotHash}, nil)
+				result.Set(workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: 1, Record: authoringTestRecord(copy), CurrentTemplateAvailable: true, CurrentTemplateSnapshotHash: copy.TemplateSnapshotHash}, nil)
 			case workspaceevents.ReserveAuthoringSpecificationCommand:
 				next, request, fresh, err := record.ReserveSpecification(command.Request())
 				if err != nil {

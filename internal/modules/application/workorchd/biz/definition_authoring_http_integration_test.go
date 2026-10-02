@@ -10,11 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	decisionowner "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
@@ -36,6 +38,28 @@ func TestAuthoringHTTPFileBackedCompilationConfirmationAndRecovery(t *testing.T)
 	}
 }
 
+func TestAuthoringHTTPRealBackgroundRoutineFileRecovery(t *testing.T) {
+	testAuthoringHTTPFileBackedScenario(t, "real_background")
+}
+
+func TestAuthoringHTTPConcurrentCompileUsesOnePhysicalDerivation(t *testing.T) {
+	testAuthoringHTTPFileBackedScenario(t, "concurrent_compile")
+}
+
+type authoringConcurrentRoutine struct {
+	task.BackgroundRoutine
+	queued []task.Task
+}
+
+func (r *authoringConcurrentRoutine) AsyncTaskContext(_ context.Context, work task.Task) error {
+	r.queued = append(r.queued, work)
+	return nil
+}
+
+func TestAuthoringHTTPCompileTasksCompeteForFreshPermit(t *testing.T) {
+	testAuthoringHTTPFileBackedScenario(t, "reserve_compete")
+}
+
 func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	ctx := context.Background()
 	storage, directory := t.TempDir(), t.TempDir()
@@ -51,6 +75,13 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		t.Fatal(err)
 	}
 	var physicalCalls atomic.Int32
+	realWorker := scenario == "real_background" || scenario == "concurrent_compile"
+	deriveStarted, releaseDerive := make(chan struct{}), make(chan struct{})
+	var concurrentRoutine *authoringConcurrentRoutine
+	var startedOnce, releaseOnce sync.Once
+	if scenario == "concurrent_compile" {
+		t.Cleanup(func() { releaseOnce.Do(func() { close(releaseDerive) }) })
+	}
 	open := func() (string, *authoringTestRoutine, func()) {
 		t.Helper()
 		hub := magicevent.NewHub(32)
@@ -98,6 +129,10 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			var payload []byte
 			switch command.Request.Kind {
 			case "workspace/specification/derive":
+				if scenario == "concurrent_compile" {
+					startedOnce.Do(func() { close(deriveStarted) })
+					<-releaseDerive
+				}
 				if len(record.DerivationRequests) != 1 || len(record.DerivationRequests[0].Resources) != 1 {
 					t.Error("provider called before File snapshot and permit")
 					return
@@ -145,8 +180,16 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			t.Fatal(err)
 		}
 		routine := &authoringTestRoutine{}
-		application := &Biz{Base: basebiz.New(ModuleID, hub, routine), authoringTasks: newAuthoringTaskLifecycle()}
-		component, err := newRuntimeComponentFromCommandHub(hub, routine)
+		var background task.BackgroundRoutine = routine
+		if scenario == "reserve_compete" {
+			concurrentRoutine = &authoringConcurrentRoutine{}
+			background = concurrentRoutine
+		}
+		if realWorker {
+			background = task.NewBackgroundRoutine(2)
+		}
+		application := &Biz{Base: basebiz.New(ModuleID, hub, background), authoringTasks: newAuthoringTaskLifecycle()}
+		component, err := newRuntimeComponentFromCommandHub(hub, background)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -161,7 +204,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		if err := listener.Close(); err != nil {
 			t.Fatal(err)
 		}
-		transport := server.NewHTTPServerWithApplicationPorts(server.Config{Addr: address, Backend: "file", DataRoot: storage}, ports, routine)
+		transport := server.NewHTTPServerWithApplicationPorts(server.Config{Addr: address, Backend: "file", DataRoot: storage}, ports, background)
 		finished := make(chan error, 1)
 		go func() { finished <- transport.Start() }()
 		baseURL := "http://" + address
@@ -185,6 +228,9 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				t.Error(err)
 			}
 			application.authoringTasks.stop()
+			if realWorker && !background.Shutdown(shutdown) {
+				t.Error("真实后台编译 worker 未停止")
+			}
 			if err := <-finished; err != nil {
 				t.Error(err)
 			}
@@ -200,7 +246,12 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		}
 	}
 	baseURL, routine, closeOwners := open()
-	defer func() { closeOwners() }()
+	defer func() {
+		if scenario == "concurrent_compile" {
+			releaseOnce.Do(func() { close(releaseDerive) })
+		}
+		closeOwners()
+	}()
 	request := management.DefinitionAuthoringCreate{RequestID: "http-file-recovery", Title: "HTTP 创作", TemplateID: "http-template", DeliverableDirectory: directory, Input: management.DefinitionAuthoringInput{GoalText: "交付目标", AcceptanceRequirements: []string{"用户验收"}, ResourceRefs: []string{"requirements.txt"}}}
 	assertNoRuns := func() {
 		t.Helper()
@@ -216,12 +267,68 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	if replay.InputHash != created.InputHash || replay.WorkspaceRevision != created.WorkspaceRevision {
 		t.Fatal("create replay changed identity")
 	}
+	save := management.DefinitionAuthoringSave{RequestID: "save-http", TemplateID: request.TemplateID, Input: request.Input, ExpectedWorkspaceRevision: created.WorkspaceRevision, ExpectedInputHash: created.InputHash}
+	save.Input.GoalText = "修订后的交付目标"
+	updated := authoringHTTPRequest(t, baseURL, http.MethodPut, path, save, http.StatusOK)
+	if updated.InputRevision != 2 || updated.InputHash == created.InputHash {
+		t.Fatal("修订未形成新的输入身份")
+	}
+	closeOwners()
+	baseURL, routine, closeOwners = open()
+	saveReplay := authoringHTTPRequest(t, baseURL, http.MethodPut, path, save, http.StatusOK)
+	if saveReplay.InputHash != updated.InputHash || saveReplay.WorkspaceRevision != updated.WorkspaceRevision {
+		t.Fatal("保存响应丢失重放再次写入 revision")
+	}
+	conflictingSave := save
+	conflictingSave.Input.GoalText = "过期不同输入"
+	authoringHTTPRequest(t, baseURL, http.MethodPut, path, conflictingSave, http.StatusConflict)
+	assertNoRuns()
 	accepted := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusAccepted)
-	if !accepted.CompilationAccepted || accepted.State != "draft" || physicalCalls.Load() != 0 {
+	if !accepted.CompilationAccepted || accepted.State != "draft" || (!realWorker && physicalCalls.Load() != 0) {
 		t.Fatal("acceptance fabricated owner progress")
 	}
-	routine.queued.Run()
+	if scenario == "concurrent_compile" {
+		select {
+		case <-deriveStarted:
+		case <-time.After(5 * time.Second):
+			t.Fatal("并发编译派生调用未进入 barrier")
+		}
+		// 派生物理调用仍在途时，重复请求只能复用 owner permit。
+		for range 4 {
+			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusOK)
+		}
+		releaseOnce.Do(func() { close(releaseDerive) })
+	}
+	if scenario == "reserve_compete" {
+		for range 3 {
+			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusAccepted)
+		}
+		if len(concurrentRoutine.queued) != 4 {
+			t.Fatalf("竞争夹具任务数=%d，want 4", len(concurrentRoutine.queued))
+		}
+		start := make(chan struct{})
+		var workers sync.WaitGroup
+		for _, work := range concurrentRoutine.queued {
+			workers.Add(1)
+			go func(work task.Task) {
+				defer workers.Done()
+				<-start
+				work.Run()
+			}(work)
+		}
+		close(start)
+		workers.Wait()
+	} else if !realWorker {
+		routine.queued.Run()
+	}
 	ready := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+	if realWorker {
+		deadline := time.Now().Add(30 * time.Second)
+		for ready.State != "ready_to_confirm" && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+			ready = authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+		}
+	}
 	wantState := "ready_to_confirm"
 	if scenario == "review_fail" || scenario == "review_unknown" {
 		wantState = "review_blocked"

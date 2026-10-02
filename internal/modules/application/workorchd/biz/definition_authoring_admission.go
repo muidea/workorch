@@ -52,9 +52,17 @@ func (b *Biz) ConfirmAndAdmitDefinitionAuthoring(ctx context.Context, command wo
 	if current.Revision != view.WorkspaceRevision || view.Record == nil || view.Confirmation == nil {
 		return workspaceevents.AdmitDefinitionAuthoringResult{}, common.ErrConflict
 	}
-	current.DefinitionAuthoring = view.Record
+	record, modelErr := view.Record.Model()
+	if modelErr != nil {
+		return workspaceevents.AdmitDefinitionAuthoringResult{}, modelErr
+	}
+	history, modelErr := workspaceevents.AuthoringHistoryModels(view.History)
+	if modelErr != nil {
+		return workspaceevents.AdmitDefinitionAuthoringResult{}, modelErr
+	}
+	current.DefinitionAuthoring = &record
 	current.DefinitionAuthoringConfirmation = view.Confirmation
-	current.DefinitionAuthoringHistory = view.History
+	current.DefinitionAuthoringHistory = history
 	if view.AdmissionCandidate != nil {
 		return b.replayConfirmedDefinitionAuthoringAdmission(ctx, command, current)
 	}

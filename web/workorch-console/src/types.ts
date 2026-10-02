@@ -25,6 +25,7 @@ export type DefinitionAuthoringView = {
   templateCurrent: boolean;
   derivationPermitId?: string;
   confirmationPhase?: string;
+  activationState?: string;
   blockingTicketId?: string;
   admissionViolationCode?: string;
   admissionOffendingRefs?: string[];

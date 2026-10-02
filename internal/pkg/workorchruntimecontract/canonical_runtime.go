@@ -2781,6 +2781,16 @@ func writeHashString(w hashStringWriter, value string) {
 }
 
 func normalizeStrings(values []string) []string {
+	canonical := true
+	for index, value := range values {
+		if value == "" || strings.TrimSpace(value) != value || (index > 0 && values[index-1] >= value) {
+			canonical = false
+			break
+		}
+	}
+	if canonical {
+		return append([]string(nil), values...)
+	}
 	seen := make(map[string]struct{}, len(values))
 	ret := make([]string, 0, len(values))
 	for _, value := range values {

@@ -376,9 +376,6 @@ func baseSlashCommandSuggestions() []slashCommandSuggestion {
 		{Command: "/model clear", Description: "inherit system default model"},
 		{Command: "/model reasoning", Insert: "/model reasoning ", Description: "set next-run reasoning effort"},
 		{Command: "/workspace", Description: "select workspace"},
-		{Command: "/workspace create", Insert: "/workspace create ", Description: "create workspace"},
-		{Command: "/goal", Insert: "/goal ", Description: "submit a new goal"},
-		{Command: "/dod", Insert: "/dod ", Description: "set DoD items"},
 		{Command: "/status", Description: "show workspace and run status"},
 		{Command: "/coverage", Description: "show DoD coverage progress"},
 		{Command: "/steps", Description: "show recent step summary"},
@@ -397,9 +394,7 @@ func (m AppModel) contextualSlashCommandSuggestions() []slashCommandSuggestion {
 	switch m.activeWorkspacePromptMode() {
 	case workspacePromptModeDefinition:
 		return []slashCommandSuggestion{
-			{Command: "/goal", Insert: "/goal ", Description: "revise Goal definition", Contextual: true},
-			{Command: "/dod", Insert: "/dod ", Description: "revise DoD definition", Contextual: true},
-			{Command: "/run restart", Description: "start a fresh activation after revision", Contextual: true},
+			{Command: "/run restart", Description: "显式申请新的工作空间激活，由 owner 校验准入", Contextual: true},
 			{Command: "/decision show", Description: "show definition clarification", Contextual: true},
 			{Command: "/decision list", Description: "list decision tickets", Contextual: true},
 		}
@@ -433,7 +428,6 @@ func (m AppModel) contextualSlashCommandSuggestions() []slashCommandSuggestion {
 	default:
 		if m.activeWorkspaceID == "" {
 			return []slashCommandSuggestion{
-				{Command: "/workspace create", Insert: "/workspace create ", Description: "create workspace", Contextual: true},
 				{Command: "/workspace", Description: "select workspace", Contextual: true},
 			}
 		}

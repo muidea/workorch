@@ -10,7 +10,6 @@ import (
 
 	engine "github.com/muidea/magicEngine/http"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionquality"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelprojection"
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
@@ -403,35 +402,10 @@ func projectionHTTPStatus(err error) int {
 }
 
 func registerWorkspaceWriteRoutes(router engine.RouteRegistry, state *serverState) {
-	registerWorkspaceCreateRoute(router, state)
 	registerWorkspaceInferenceWriteRoutes(router, state)
 	registerWorkspaceDeleteRoute(router, state)
 	registerWorkspaceExecutionWriteRoute(router, state)
 	registerWorkspaceContextWriteRoute(router, state)
-	registerWorkspaceDefinitionWriteRoutes(router, state)
-}
-
-func registerWorkspaceCreateRoute(router engine.RouteRegistry, state *serverState) {
-	router.AddHandler("/api/v1/workorch/workspaces", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		state.metrics.workspaceCreateRequests.Add(1)
-		var req workorchmanagementcontract.WorkspaceCreateRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
-			return
-		}
-		item, err := state.createWorkspace(r.Context(), state.config.Backend, state.config.DataRoot, req)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		state.upsertProjectedWorkspace(item)
-		writeJSON(w, http.StatusCreated, workspaceResponse{
-			Service:   "workorch",
-			Backend:   state.config.Backend,
-			DataRoot:  state.config.DataRoot,
-			Workspace: appmodelcore.ProjectWorkspace(item),
-		})
-	})
 }
 
 func registerWorkspaceInferenceWriteRoutes(router engine.RouteRegistry, state *serverState) {
@@ -589,159 +563,6 @@ func registerWorkspaceContextWriteRoute(router engine.RouteRegistry, state *serv
 			Backend:      state.config.Backend,
 			DataRoot:     state.config.DataRoot,
 			SoulBindings: item,
-		})
-	})
-}
-
-func registerWorkspaceDefinitionWriteRoutes(router engine.RouteRegistry, state *serverState) {
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
-		if !ok || action != "goals" {
-			http.NotFound(w, r)
-			return
-		}
-		state.metrics.goalDefineRequests.Add(1)
-		var req defineGoalRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
-			return
-		}
-		item, err := state.defineGoal(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, req.Text)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
-		writeJSON(w, http.StatusCreated, goalResponse{
-			Service:  "workorch",
-			Backend:  state.config.Backend,
-			DataRoot: state.config.DataRoot,
-			Goal:     item,
-		})
-	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goals/:goalId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		workspaceID, goalID, ok := workspaceResourceIDFromPath(r.URL.Path, "goals")
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		state.metrics.goalDefineRequests.Add(1)
-		var req defineGoalRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
-			return
-		}
-		ctx := common.ContextWithRuntimeWorkspaceID(r.Context(), common.WorkspaceID(workspaceID))
-		current, err := state.readGoal(ctx, state.config.Backend, state.config.DataRoot, workspaceID, goalID)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		if current.WorkspaceID != workspaceID {
-			writeJSON(w, http.StatusNotFound, errorResponse{Error: "goal not found in workspace"})
-			return
-		}
-		item, err := state.updateGoal(ctx, state.config.Backend, state.config.DataRoot, workspaceID, goalID, req.Text)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
-		writeJSON(w, http.StatusOK, goalResponse{
-			Service:  "workorch",
-			Backend:  state.config.Backend,
-			DataRoot: state.config.DataRoot,
-			Goal:     item,
-		})
-	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/dods", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
-		if !ok || action != "dods" {
-			http.NotFound(w, r)
-			return
-		}
-		state.metrics.dodDefineRequests.Add(1)
-		var req defineDoDRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
-			return
-		}
-		item, err := state.defineDoD(r.Context(), state.config.Backend, state.config.DataRoot, workspaceID, req.Items)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
-		writeJSON(w, http.StatusCreated, dodResponse{
-			Service:  "workorch",
-			Backend:  state.config.Backend,
-			DataRoot: state.config.DataRoot,
-			DoD:      item,
-		})
-	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/dods/:dodId", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		workspaceID, dodID, ok := workspaceResourceIDFromPath(r.URL.Path, "dods")
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		state.metrics.dodDefineRequests.Add(1)
-		var req defineDoDRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
-			return
-		}
-		ctx := common.ContextWithRuntimeWorkspaceID(r.Context(), common.WorkspaceID(workspaceID))
-		current, err := state.readDoD(ctx, state.config.Backend, state.config.DataRoot, workspaceID, dodID)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		if current.WorkspaceID != workspaceID {
-			writeJSON(w, http.StatusNotFound, errorResponse{Error: "dod not found in workspace"})
-			return
-		}
-		item, err := state.updateDoD(ctx, state.config.Backend, state.config.DataRoot, workspaceID, dodID, req.Items)
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		state.rebuildProjectedWorkspace(r.Context(), workspaceID)
-		writeJSON(w, http.StatusOK, dodResponse{
-			Service:  "workorch",
-			Backend:  state.config.Backend,
-			DataRoot: state.config.DataRoot,
-			DoD:      item,
-		})
-	})
-	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/goal-dod-quality-check", http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
-		workspaceID, action, ok := workspaceActionFromPath(r.URL.Path)
-		if !ok || action != "goal-dod-quality-check" {
-			http.NotFound(w, r)
-			return
-		}
-		state.metrics.goalDoDQualityCheckRequests.Add(1)
-		var req goalDoDQualityCheckRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
-			return
-		}
-		item, err := state.checkGoalDoDQuality(r.Context(), state.config.Backend, state.config.DataRoot, definitionquality.Command{
-			WorkspaceID: workspaceID,
-			GoalID:      req.GoalID,
-			DoDID:       req.DoDID,
-			GoalText:    req.GoalText,
-			DoDItems:    req.DoDItems,
-		})
-		if err != nil {
-			writeBusinessError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, goalDoDQualityCheckResponse{
-			Service:      "workorch",
-			Backend:      state.config.Backend,
-			DataRoot:     state.config.DataRoot,
-			QualityCheck: item,
 		})
 	})
 }

@@ -13,7 +13,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func TestDefaultDoDItemsForWorkspaceUsesMatchingTemplate(t *testing.T) {
+func TestTemplateDoDItemsForWorkspaceUsesMatchingTemplate(t *testing.T) {
 	be := newFakeBackend()
 	be.workspaces = append(be.workspaces, projectioncontract.Workspace{
 		ID:            "ws-template",
@@ -27,7 +27,10 @@ func TestDefaultDoDItemsForWorkspaceUsesMatchingTemplate(t *testing.T) {
 		DoDItems:      []string{"tests pass", "diff is delivered"},
 	})
 
-	got := backend.DefaultDoDItemsForWorkspace(context.Background(), be, "ws-template")
+	got, matched := backend.TemplateDoDItemsForWorkspace(context.Background(), be, "ws-template")
+	if !matched {
+		t.Fatal("模板声明读取未匹配")
+	}
 
 	want := []string{"tests pass", "diff is delivered"}
 	if !reflect.DeepEqual(got, want) {
@@ -35,15 +38,12 @@ func TestDefaultDoDItemsForWorkspaceUsesMatchingTemplate(t *testing.T) {
 	}
 }
 
-func TestDefaultDoDItemsForWorkspaceFallsBackWhenTemplateDoesNotMatch(t *testing.T) {
+func TestTemplateDoDItemsForWorkspaceNeverInventsFallback(t *testing.T) {
 	be := newFakeBackend()
 	be.workspaces = append(be.workspaces, projectioncontract.Workspace{ID: "ws-generic"})
-
-	got := backend.DefaultDoDItemsForWorkspace(context.Background(), be, "ws-generic")
-
-	want := []string{"目标已完成，输出包含明确的执行结果"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("DoD items = %+v, want %+v", got, want)
+	got, matched := backend.TemplateDoDItemsForWorkspace(context.Background(), be, "ws-generic")
+	if matched || len(got) != 0 {
+		t.Fatalf("不存在模板声明时虚构了验收项: %+v matched=%v", got, matched)
 	}
 }
 

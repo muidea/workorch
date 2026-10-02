@@ -25,6 +25,13 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache: true
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.1'
+          cache: npm
+          cache-dependency-path: web/workorch-console/package-lock.json
+
       - name: Make verify-boundary-contract
         run: make verify-boundary-contract
 
@@ -36,6 +43,9 @@ jobs:
 
       - name: Verify deployed convergence manifest gate contracts
         run: make verify-deployed-convergence-manifest-tests
+
+      - name: Verify 持久规格创作合同（仅 mock）
+        run: make verify-workspace-authoring-contract
 
       - name: Managed verify-ci-mvp-file with mock providers
         env:

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func authoringSpecificationFixture(t *testing.T) (DefinitionAuthoringInput, WorkspaceTemplate, DefinitionDerivedAcceptance, GoalSpecification) {
+func authoringSpecificationFixture(t testing.TB) (DefinitionAuthoringInput, WorkspaceTemplate, DefinitionDerivedAcceptance, GoalSpecification) {
 	t.Helper()
 	input := DefinitionAuthoringInput{Version: 1, WorkspaceID: "ws", Revision: 1, GoalText: "交付结果", TemplateID: "t", AcceptanceRequirements: []string{"用户要求"}}
 	template := WorkspaceTemplate{ID: "t", DoDItems: []string{"模板要求"}}

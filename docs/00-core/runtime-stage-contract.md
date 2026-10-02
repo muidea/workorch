@@ -170,7 +170,7 @@ fresh-load 反查同一声明，SM-2 exhaustion 与 SM-4 recovery/delivery 继�
   或别名映射在既有 SM-2/SM-3 输入维护授权前拒绝。此纯身份校验不证明任意自然语言判据的语义一致性；无法建立
   一致性的候选不得获得新证明绑定或验收 credit，也不能自动变成实现修复。SM-1/SM-4 不新增迁移或归档回填。
 - 正式 startup input 是 Goal、DoD、Workspace Template snapshot 与 resolved project workspace directory。
-- 新 Start/Restart 自动采用当前 Template/Soul 并由 Workspace-private admission 追加新 candidate、封存新 startup input；
+- 新 Start/Restart 读取当前 Template/Soul。Goal-only authoring 只复用 exact confirmed、eligible candidate；模板或 Definition policy 漂移保持阻塞，不能自动替换确认。其他受控 owner 定义路径由 Workspace-private admission 追加新 candidate、封存新 startup input。
   已准入历史只作不可变 lineage，不以当前 schema/compiler 重编译或改写。新配置无效仍在 pre-seal 阻塞。Resume/recovery
   保持原 Run snapshot，不热替换 SM-1～SM-4 输入，详见 [Automatic Configuration Loading](../40-profiles-capabilities/workspace/builtin-default-resources.md#automatic-configuration-loading)。
 - canonical Goal/DoD aggregation、dependency、gate 与 terminal 只支持 `all_of`；不提供 `one_of`/`any_of` terminal escape。

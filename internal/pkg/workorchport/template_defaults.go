@@ -8,20 +8,6 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
-var genericDoDItems = []string{"目标已完成，输出包含明确的执行结果"}
-
-// DefaultDoDItemsForWorkspace returns the Workspace template DoD when the
-// Workspace's persisted Soul routing matches a template initialized at create
-// time. It deliberately does not mutate Workspace bindings or infer template
-// state at Run activation.
-func DefaultDoDItemsForWorkspace(ctx context.Context, be Backend, wsID common.WorkspaceID) []string {
-	items, ok := TemplateDoDItemsForWorkspace(ctx, be, wsID)
-	if ok {
-		return items
-	}
-	return append([]string(nil), genericDoDItems...)
-}
-
 func TemplateDoDItemsForWorkspace(ctx context.Context, be Backend, wsID common.WorkspaceID) ([]string, bool) {
 	if be == nil || wsID == "" {
 		return nil, false

@@ -722,52 +722,62 @@ func (m RuntimeCandidateContractManifest) Clone() RuntimeCandidateContractManife
 // loading the aggregate. Stable hashes deliberately operate on normalized
 // values and therefore cannot provide this raw-shape fence on their own.
 func ValidateRuntimeCandidateContractManifestRawCanonical(manifest RuntimeCandidateContractManifest) error {
+	_, err := validateRuntimeCandidateManifestRawCanonical(manifest)
+	return err
+}
+
+// 本次完整 raw 校验的 detached 产物，只供同一次调用的私有 wire compiler 使用。
+type runtimeValidatedCandidateManifest struct {
+	manifest RuntimeCandidateContractManifest
+}
+
+func validateRuntimeCandidateManifestRawCanonical(manifest RuntimeCandidateContractManifest) (runtimeValidatedCandidateManifest, error) {
 	canonical := manifest.Normalized()
 	if !reflect.DeepEqual(manifest, canonical) {
-		return fmt.Errorf("runtime candidate contract manifest is not raw-canonical")
+		return runtimeValidatedCandidateManifest{}, fmt.Errorf("runtime candidate contract manifest is not raw-canonical")
 	}
 	if err := validateRuntimeManifestInputProtection(manifest); err != nil {
-		return err
+		return runtimeValidatedCandidateManifest{}, err
 	}
 	for _, operation := range manifest.Operations {
 		if operation.InputRepair != nil {
 			if err := operation.InputRepair.Validate(); err != nil {
-				return err
+				return runtimeValidatedCandidateManifest{}, err
 			}
 			if manifest.RepairPurpose != RuntimeDispatchRepairPurposeConfirmedValidation || len(manifest.Operations) != 1 || manifest.MaxOperationCount != 1 || len(manifest.Bindings) != 1 ||
 				!operation.InputRepair.MatchesBinding(manifest.Bindings[0]) || !sameStrings(operation.Target.AllowedTargetRefs(), []string{operation.InputRepair.TargetRef}) {
-				return fmt.Errorf("validation input repair requires one confirmed operation with exact input and original proof binding")
+				return runtimeValidatedCandidateManifest{}, fmt.Errorf("validation input repair requires one confirmed operation with exact input and original proof binding")
 			}
 		}
 		if err := validateRuntimeOperationValueRuleDeclarations(operation.Kind, operation.Parameters, operation.ValueRules, operation.Variants); err != nil {
-			return fmt.Errorf("runtime candidate contract manifest operation %q value rules: %w", operation.Kind, err)
+			return runtimeValidatedCandidateManifest{}, fmt.Errorf("runtime candidate contract manifest operation %q value rules: %w", operation.Kind, err)
 		}
 		if err := validateRuntimeCandidateTargetParameterBindings(operation); err != nil {
-			return err
+			return runtimeValidatedCandidateManifest{}, err
 		}
 	}
 	if err := ValidateCoverageEvidenceBindingProjection(manifest.Bindings); err != nil {
-		return fmt.Errorf("runtime candidate contract manifest bindings: %w", err)
+		return runtimeValidatedCandidateManifest{}, fmt.Errorf("runtime candidate contract manifest bindings: %w", err)
 	}
 	if manifest.RepairPurpose != "" &&
 		(manifest.RepairPurpose != RuntimeDispatchRepairPurposeConfirmedValidation || manifest.RepairClosureID == "") {
-		return fmt.Errorf("runtime candidate contract manifest has invalid repair purpose %q", manifest.RepairPurpose)
+		return runtimeValidatedCandidateManifest{}, fmt.Errorf("runtime candidate contract manifest has invalid repair purpose %q", manifest.RepairPurpose)
 	}
 	if err := validateRuntimeConfirmedRepairManifestBindingLineage(manifest); err != nil {
-		return err
+		return runtimeValidatedCandidateManifest{}, err
 	}
 	if manifest.State == ConvergenceStateNeedAssessment {
 		if (manifest.AssessmentPurpose != RuntimeAssessmentPurposeDefinitionProof && manifest.AssessmentPurpose != RuntimeAssessmentPurposeOwnerFactAcquisition) ||
 			manifest.AssessmentPurposeManifestHash == "" || len(manifest.Bindings) == 0 {
-			return fmt.Errorf("runtime candidate contract manifest has invalid assessment purpose preimage")
+			return runtimeValidatedCandidateManifest{}, fmt.Errorf("runtime candidate contract manifest has invalid assessment purpose preimage")
 		}
 	} else if manifest.AssessmentPurpose != "" || manifest.AssessmentPurposeManifestHash != "" {
-		return fmt.Errorf("non-assessment runtime candidate contract manifest carries assessment purpose")
+		return runtimeValidatedCandidateManifest{}, fmt.Errorf("non-assessment runtime candidate contract manifest carries assessment purpose")
 	}
 	if manifest.Hash == "" || manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
-		return fmt.Errorf("runtime candidate contract manifest hash mismatch")
+		return runtimeValidatedCandidateManifest{}, fmt.Errorf("runtime candidate contract manifest hash mismatch")
 	}
-	return nil
+	return runtimeValidatedCandidateManifest{manifest: canonical}, nil
 }
 
 func validateRuntimeConfirmedRepairManifestBindingLineage(manifest RuntimeCandidateContractManifest) error {

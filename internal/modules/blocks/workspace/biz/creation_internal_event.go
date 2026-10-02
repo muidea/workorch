@@ -79,6 +79,10 @@ func (m *goalDoDManager) submitWorkspaceCreationInternalEvent(ctx context.Contex
 			return nil, common.ErrConflict
 		}
 		workspace.TemplateID = fact.Template.ID
+		workspace, err = workspacemodel.WorkspaceForCurrentTemplate(workspace, fact.Template)
+		if err != nil {
+			return nil, err
+		}
 		workspace.DefinitionAuthoring = &record
 		workspace.DefinitionAuthoringCreation = &workspacemodel.DefinitionAuthoringCreation{RequestID: cmd.RequestID, InputHash: cmd.CreationInputHash()}
 	}

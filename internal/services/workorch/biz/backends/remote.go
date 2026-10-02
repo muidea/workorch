@@ -115,12 +115,7 @@ func workspaceProjectionFromClient(ws *projectioncontract.Workspace) projectionc
 }
 
 func (b *remoteWorkspaceBackend) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	ws, err := b.cl.CreateWorkspace(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	info := workspaceProjectionFromClient(ws)
-	return &info, nil
+	return nil, fmt.Errorf("%w: 旧创建／定义写操作已退休，请通过 Web 持久规格创作完成审查与确认", common.ErrConflict)
 }
 
 func (b *remoteWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
@@ -232,7 +227,7 @@ func (b *remoteWorkspaceBackend) Delete(ctx context.Context, id common.Workspace
 type remoteGoalBackend struct{ cl *client.Client }
 
 func (b *remoteGoalBackend) Define(ctx context.Context, wsID common.WorkspaceID, text string) (*workorchmanagementcontract.Goal, error) {
-	return b.cl.CreateGoal(ctx, string(wsID), text)
+	return nil, fmt.Errorf("%w: 旧创建／定义写操作已退休，请通过 Web 持久规格创作完成审查与确认", common.ErrConflict)
 }
 func (b *remoteGoalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchmanagementcontract.Goal, error) {
 	return b.cl.ListGoals(ctx, string(wsID))
@@ -241,7 +236,7 @@ func (b *remoteGoalBackend) Get(ctx context.Context, wsID common.WorkspaceID, id
 	return b.cl.GetGoal(ctx, string(wsID), string(id))
 }
 func (b *remoteGoalBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*workorchmanagementcontract.Goal, error) {
-	return b.cl.UpdateGoal(ctx, string(wsID), string(id), text)
+	return nil, fmt.Errorf("%w: 旧创建／定义写操作已退休，请通过 Web 持久规格创作完成审查与确认", common.ErrConflict)
 }
 
 // ── Remote DoD ──
@@ -249,7 +244,7 @@ func (b *remoteGoalBackend) Update(ctx context.Context, wsID common.WorkspaceID,
 type remoteDoDBackend struct{ cl *client.Client }
 
 func (b *remoteDoDBackend) Define(ctx context.Context, wsID common.WorkspaceID, items []string) (*workorchmanagementcontract.DoD, error) {
-	return b.cl.CreateDoD(ctx, string(wsID), items)
+	return nil, fmt.Errorf("%w: 旧创建／定义写操作已退休，请通过 Web 持久规格创作完成审查与确认", common.ErrConflict)
 }
 func (b *remoteDoDBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchmanagementcontract.DoD, error) {
 	return b.cl.ListDoDs(ctx, string(wsID))
@@ -258,7 +253,7 @@ func (b *remoteDoDBackend) Get(ctx context.Context, wsID common.WorkspaceID, id 
 	return b.cl.GetDoD(ctx, string(wsID), string(id))
 }
 func (b *remoteDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*workorchmanagementcontract.DoD, error) {
-	return b.cl.UpdateDoD(ctx, string(wsID), string(id), items)
+	return nil, fmt.Errorf("%w: 旧创建／定义写操作已退休，请通过 Web 持久规格创作完成审查与确认", common.ErrConflict)
 }
 
 // ── Remote Run ──

@@ -46,7 +46,11 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 	if view.Record == nil {
 		return result, nil
 	}
-	record := view.Record
+	recordModel, err := view.Record.Model()
+	if err != nil {
+		return workorchmanagementcontract.DefinitionAuthoringView{}, err
+	}
+	record := &recordModel
 	input := record.Input.Normalized()
 	result.Input = &workorchmanagementcontract.DefinitionAuthoringInput{GoalText: input.GoalText, AcceptanceRequirements: input.AcceptanceRequirements, ResourceRefs: input.ResourceRefs}
 	result.InputHash = record.InputHash

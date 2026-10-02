@@ -114,6 +114,15 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 	for attempt := 0; attempt < 4; attempt++ {
 		var observation definitionSpecificationObservation
 		var err error
+		if event.Authoring != nil {
+			current, readErr := m.workspaces.Get(bound, event.WorkspaceID)
+			if readErr != nil {
+				return definitionSpecificationTransition{}, readErr
+			}
+			if replay, matched, err := replayDefinitionAuthoringSave(current, *event.Authoring); matched || err != nil {
+				return replay, err
+			}
+		}
 		if event.Authoring != nil || event.DeriveReserve != nil || event.DeriveComplete != nil || event.AuthoringSpecReserve != nil || event.AuthoringSpecComplete != nil {
 			observation, err = m.observeDefinitionAuthoring(bound, event.WorkspaceID)
 		} else {

@@ -21,6 +21,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 )
 
@@ -243,7 +244,7 @@ func TestWorkorchServerModeServesHealthAndRunEndpoints(t *testing.T) {
 
 	waitForHealthy(t, "http://"+addr+"/healthz")
 	assertMetricsAvailable(t, "http://"+addr+"/metrics")
-	createWorkspace(t, "http://"+addr+"/api/v1/workorch/workspaces", "main memory workspace")
+	createAuthoringWorkspace(t, "http://"+addr+"/api/v1/workorch/workspace-authoring", "main memory workspace")
 }
 
 func TestWorkorchServerModeFailsWithUnsupportedRepositoryBackend(t *testing.T) {
@@ -470,28 +471,32 @@ func assertMetricsAvailable(t *testing.T, metricsURL string) {
 	}
 }
 
-func createWorkspace(t *testing.T, endpoint string, title string) string {
+func createAuthoringWorkspace(t *testing.T, endpoint string, title string) string {
 	t.Helper()
-
-	description := title + " description"
-	body := strings.NewReader(fmt.Sprintf(`{"title":%q,"description":%q}`, title, description))
-	resp, err := http.Post(endpoint, "application/json", body)
+	request := workorchmanagementcontract.DefinitionAuthoringCreate{RequestID: "server-mode-create", Title: title, TemplateID: "software-dev", DeliverableDirectory: filepath.Join(t.TempDir(), "project"), Input: workorchmanagementcontract.DefinitionAuthoringInput{GoalText: "验证服务创建期持久创作"}}
+	encoded, err := json.Marshal(request)
 	if err != nil {
-		t.Fatalf("create workspace: %v", err)
+		t.Fatal(err)
+	}
+	resp, err := http.Post(endpoint, "application/json", strings.NewReader(string(encoded)))
+	if err != nil {
+		t.Fatalf("create authoring: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		responseBody, _ := io.ReadAll(resp.Body)
-		t.Fatalf("create workspace status = %d, want 201, body = %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+		t.Fatalf("create authoring status = %d, want 201, body = %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
 	}
-	var payload workorchWorkspaceResponse
+	var payload struct {
+		Authoring workorchmanagementcontract.DefinitionAuthoringView `json:"authoring"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode create workspace response: %v", err)
+		t.Fatal(err)
 	}
-	if payload.Workspace.ID == "" || payload.Workspace.Title != title || payload.Workspace.Description != description || payload.Workspace.DeliverableDirectory == "" || payload.Workspace.State != "active" {
-		t.Fatalf("created workspace = %+v, want generated/%s/%s/non-empty deliverable directory/active", payload.Workspace, title, description)
+	if payload.Authoring.WorkspaceID == "" || payload.Authoring.State != "draft" || payload.Authoring.Input == nil || payload.Authoring.Input.GoalText != request.Input.GoalText || payload.Authoring.StartupInputHash != "" {
+		t.Fatalf("创作草稿不完整或提前准入: %+v", payload.Authoring)
 	}
-	return payload.Workspace.ID
+	return payload.Authoring.WorkspaceID
 }
 
 func assertWorkspaceLayoutDirectories(t *testing.T, dataDir string, workspaceID string) {

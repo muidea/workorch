@@ -15,17 +15,13 @@ func TestWebConsoleMutatingEndpointsStayWithinProductSurfaceContract(t *testing.
 		`${apiBase}/configuration/llm`,
 		`${apiBase}/configuration/server`,
 		`${apiBase}/configuration/web-search`,
-		`${apiBase}/workspaces`, // create workspace only.
-		`${apiBase}/workspace-setup-draft-sessions`,
-		`/workspace-setup-draft-sessions/${encodeURIComponent(sessionId)}/messages`,
-		`/workspace-setup-draft-sessions/${encodeURIComponent(sessionId)}/regenerate`,
+		`${apiBase}/workspace-authoring`,
+		`/workspaces/${encodeURIComponent(id)}/authoring`,
+		`/workspaces/${encodeURIComponent(id)}/authoring/compile`,
+		`/workspaces/${encodeURIComponent(view.workspaceId)}/authoring/confirm`,
 		`/workspaces/${encodeURIComponent(workspaceId)}${suffix}`, // delete workspace only.
+		`/workspaces/${encodeURIComponent(workspaceId)}/llm-selection`,
 		`/workspaces/${encodeURIComponent(workspaceId)}/soul-bindings`,
-		`/workspaces/${encodeURIComponent(workspaceId)}/goals`,
-		`/workspaces/${encodeURIComponent(workspaceId)}/goals/${encodeURIComponent(goalId)}`,
-		`/workspaces/${encodeURIComponent(workspaceId)}/dods`,
-		`/workspaces/${encodeURIComponent(workspaceId)}/dods/${encodeURIComponent(dodId)}`,
-		`/workspaces/${encodeURIComponent(workspaceId)}/goal-dod-quality-check`,
 		`/workspaces/${encodeURIComponent(workspaceId)}/execution-activations`,
 		`${apiBase}/souls`,
 		`${apiBase}/souls/${encodeURIComponent(soulId)}`,
@@ -213,14 +209,14 @@ func TestWebWorkspaceExecutionAdmissionRequiresExactOwnerContract(t *testing.T) 
 
 func TestWebWorkspaceSetupRequiresTemplateAndAllowsDefaultDirectory(t *testing.T) {
 	data := string(readWebConsoleFile(t, "src/pages/components/WorkspaceSetupModal.tsx"))
-	if !strings.Contains(data, `name="templateId" label="工作空间模板（Workspace Template）" rules={[{ required: true`) {
+	if !strings.Contains(data, `name="templateId" label="模板" rules={[{ required: true`) {
 		t.Fatal("WorkspaceSetupModal must require a template")
 	}
 	if strings.Contains(data, `name="deliverableDirectory" label="工作目录" rules={[{ required: true`) {
 		t.Fatal("WorkspaceSetupModal must not require an explicit workspace directory")
 	}
-	if !strings.Contains(data, "可选。留空时自动使用 .workorch-workspaces/工作空间 ID") {
-		t.Fatal("WorkspaceSetupModal must describe owner-generated default workspace directory")
+	if !strings.Contains(data, `name="deliverableDirectory" label="工作目录（可留空，自动解析）"`) {
+		t.Fatal("WorkspaceSetupModal must describe the optional resolved workspace directory")
 	}
 }
 

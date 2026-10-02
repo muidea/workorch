@@ -204,7 +204,7 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
 	if err := a.Definition.Validate(); err != nil {
 		return err
 	}
-	if a.Definition.Normalized().Revision != a.Facts.Normalized().DefinitionRevision {
+	if strings.TrimSpace(a.Definition.Revision) != strings.TrimSpace(a.Facts.DefinitionRevision) {
 		return fmt.Errorf("runtime aggregate definition revision mismatch")
 	}
 	if err := a.Decision.Validate(); err != nil {
@@ -842,31 +842,27 @@ func runtimeEvidenceCommitFactProjectionForID(a RuntimeAggregate, id common.Evid
 		return runtimeEvidenceCommitFactProjection{}, fmt.Errorf("evidence fact id is empty")
 	}
 	acceptedRaw, rejectedRaw := 0, 0
+	var selected runtimecontract.EvidenceFact
 	for _, fact := range a.Facts.Evidence.Accepted {
 		if fact.ID == id {
 			acceptedRaw++
+			selected = fact
 		}
 	}
 	for _, fact := range a.Facts.Evidence.Rejected {
 		if fact.ID == id {
 			rejectedRaw++
+			selected = fact
 		}
 	}
 	if acceptedRaw+rejectedRaw != 1 {
 		return runtimeEvidenceCommitFactProjection{}, fmt.Errorf("evidence fact %q must exist exactly once across accepted/rejected ledgers", id)
 	}
-	facts := a.Facts.Normalized().Evidence
-	projection := runtimeEvidenceCommitFactProjection{rejected: rejectedRaw == 1}
-	values := facts.Accepted
-	if projection.rejected {
-		values = facts.Rejected
-	}
-	for _, fact := range values {
-		if fact.ID == id {
-			projection.fact = fact
-			break
-		}
-	}
+	// 原始 cardinality 已反证，只规范化本条证据；不复制无关的 authority、catalog 或 prerequisite。
+	facts := (runtimecontract.RuntimeFacts{Evidence: runtimecontract.EvidenceLedger{
+		Accepted: []runtimecontract.EvidenceFact{selected},
+	}}).Normalized().Evidence.Accepted
+	projection := runtimeEvidenceCommitFactProjection{fact: facts[0], rejected: rejectedRaw == 1}
 	processed := 0
 	for _, eventID := range a.ProcessedEventIDs {
 		if eventID == string(id) {

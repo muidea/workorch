@@ -57,21 +57,26 @@ func authoringFormalRevisionAt(prefix string, sequence uint64, text string) stri
 }
 
 func (c DefinitionAuthoringConfirmation) Validate(record *DefinitionAuthoringRecord, workspaceID common.WorkspaceID) error {
-	if record == nil || record.Validate() != nil || workspaceID == "" || c.InputHash != record.InputHash || c.TemplateSnapshotHash != record.TemplateSnapshotHash || c.ConfigurationHash == "" ||
+	_, _, err := c.validatedSpecification(record, workspaceID)
+	return err
+}
+
+func (c DefinitionAuthoringConfirmation) validatedSpecification(record *DefinitionAuthoringRecord, workspaceID common.WorkspaceID) (GoalSpecification, []DefinitionCandidateItem, error) {
+	if record == nil || record.Input.WorkspaceID != workspaceID || record.Validate() != nil || workspaceID == "" || c.InputHash != record.InputHash || c.TemplateSnapshotHash != record.TemplateSnapshotHash || c.ConfigurationHash == "" ||
 		(c.Phase != DefinitionAuthoringConfirmationPrepared && c.Phase != DefinitionAuthoringConfirmationMaterialized) {
-		return fmt.Errorf("authoring confirmation journal has invalid input or phase")
+		return GoalSpecification{}, nil, fmt.Errorf("authoring confirmation journal has invalid input or phase")
 	}
-	derivation, specification, err := record.ConfirmableSpecification(c.DerivationPermitID, c.ProposalHash)
+	derivation, specification, err := record.confirmableSpecification(c.DerivationPermitID, c.ProposalHash)
 	if err != nil || specification.AdmissionHash() != c.SpecificationHash || c.ResourceSnapshotHash != derivation.ResourceSnapshotHash {
-		return fmt.Errorf("authoring confirmation journal has no exact reviewed specification or resource snapshot")
+		return GoalSpecification{}, nil, fmt.Errorf("authoring confirmation journal has no exact reviewed specification or resource snapshot")
 	}
 	items, err := derivation.Proposal.CandidateItems(derivation.Input, &derivation.Template)
 	if err != nil || len(items) != len(c.DoD.Items) || len(items) == 0 {
-		return fmt.Errorf("authoring confirmation journal lost derived DoD")
+		return GoalSpecification{}, nil, fmt.Errorf("authoring confirmation journal lost derived DoD")
 	}
 	for n, item := range items {
 		if c.DoD.Items[n] != item.Text {
-			return fmt.Errorf("authoring confirmation journal changed derived DoD item")
+			return GoalSpecification{}, nil, fmt.Errorf("authoring confirmation journal changed derived DoD item")
 		}
 	}
 	sequence := c.FormalSequence
@@ -79,22 +84,22 @@ func (c DefinitionAuthoringConfirmation) Validate(record *DefinitionAuthoringRec
 		sequence = 1
 	}
 	if sequence == 0 || sequence == 1 && c.PreviousInputHash != "" || sequence > 1 && c.PreviousInputHash == "" || sequence > 1 && c.PreviousInputHash == c.InputHash {
-		return fmt.Errorf("authoring confirmation journal has invalid formal lineage")
+		return GoalSpecification{}, nil, fmt.Errorf("authoring confirmation journal has invalid formal lineage")
 	}
 	previousGoal, previousDoD := common.GoalID(""), common.DoDID("")
 	if sequence > 1 {
 		previousGoal = c.Goal.PreviousGoalID
 		previousDoD = c.DoD.PreviousDoDID
 		if previousGoal == "" || previousDoD == "" || c.Goal.PreviousDefinitionHash == "" || c.DoD.PreviousDefinitionHash == "" {
-			return fmt.Errorf("authoring successor journal lacks predecessor definition identity")
+			return GoalSpecification{}, nil, fmt.Errorf("authoring successor journal lacks predecessor definition identity")
 		}
 	} else if c.Goal.PreviousGoalID != "" || c.DoD.PreviousDoDID != "" || c.Goal.PreviousDefinitionHash != "" || c.DoD.PreviousDefinitionHash != "" {
-		return fmt.Errorf("initial authoring journal claims a predecessor")
+		return GoalSpecification{}, nil, fmt.Errorf("initial authoring journal claims a predecessor")
 	}
 	if c.Goal.WorkspaceID != workspaceID || c.DoD.WorkspaceID != workspaceID || c.Goal.ID != common.GoalID("authoring-goal-"+StableDefinitionAuthoringConfirmationID(workspaceID, c.InputHash, c.DerivationPermitID, c.SpecificationHash)) || c.DoD.ID != common.DoDID("authoring-dod-"+StableDefinitionAuthoringConfirmationID(workspaceID, c.InputHash, c.DerivationPermitID, c.SpecificationHash)) || c.Goal.Text != strings.TrimSpace(record.Input.GoalText) || c.Goal.DefinitionRevision != authoringFormalRevisionAt("goal", sequence, c.Goal.Text) || c.DoD.DefinitionRevision != authoringFormalRevisionAt("dod", sequence, strings.Join(c.DoD.Items, "\n")) || c.Goal.LineageState != "active" || c.DoD.LineageState != "active" || c.DoD.State != common.DoDStateReady {
-		return fmt.Errorf("authoring confirmation journal contains invalid formal after-images")
+		return GoalSpecification{}, nil, fmt.Errorf("authoring confirmation journal contains invalid formal after-images")
 	}
-	return nil
+	return specification, items, nil
 }
 
 func (c DefinitionAuthoringConfirmation) ValidateSuccessor(predecessor DefinitionAuthoringConfirmation) error {

@@ -13,15 +13,6 @@ import (
 
 func (p *runtimeApplicationPorts) configureWorkspacePorts() {
 	ports := &p.ports
-	ports.Workspace.CreateWorkspace = func(ctx context.Context, _, _ string, cmd workorchmanagementcontract.WorkspaceCreateRequest) (appmodelcore.Workspace, error) {
-		var ret appmodelcore.Workspace
-		err := p.withSession(ctx, func(session *runtimecore.Session) error {
-			var err error
-			ret, err = appservice.CreateWorkspaceWithTemplateWithSession(ctx, session, cmd)
-			return err
-		})
-		return ret, err
-	}
 	ports.Workspace.DeleteWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appmodelcore.DeleteWorkspaceCommand) error {
 		return p.withSession(ctx, func(session *runtimecore.Session) error {
 			return appservice.DeleteWorkspaceWithSession(ctx, session, workspaceID, cmd)

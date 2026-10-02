@@ -13,6 +13,9 @@ SOUL_ID="soul-template-e2e-$VERIFY_SUFFIX"
 UPDATED_SOUL_NAME="Template E2E Soul Updated $VERIFY_SUFFIX"
 TEMPLATE_ID="workspace-template-e2e-$VERIFY_SUFFIX"
 WORKSPACE_TITLE="Workspace Template E2E $VERIFY_SUFFIX"
+MOCK_PID=""
+MOCK_ADDR="${WORKORCH_LLM_VERIFY_MOCK_ADDR:-127.0.0.1:18181}"
+MOCK_BASE_URL="http://$MOCK_ADDR/v1"
 
 report_failure() {
   local status=$?
@@ -24,18 +27,17 @@ report_failure() {
   for file in "$TMP_DIR"/*; do
     [[ -f "$file" ]] || continue
     echo "--- $file ---" >&2
-    if [[ "$file" == *.json ]]; then
-      python3 -m json.tool "$file" >&2 || cat "$file" >&2
-    elif [[ "$file" == *.js ]]; then
-      wc -c "$file" >&2
-    else
-      cat "$file" >&2
-    fi
+    # 只记录文件名和大小，不将输入、规格或 provider 响应写入失败日志。
+    wc -c "$file" >&2
   done
 }
 
 cleanup() {
   local status=$?
+  if [[ -n "$MOCK_PID" ]]; then
+    kill "$MOCK_PID" 2>/dev/null || true
+    wait "$MOCK_PID" 2>/dev/null || true
+  fi
   if [[ "$KEEP_ARTIFACTS" != "1" && $status -eq 0 ]]; then
     rm -rf "$TMP_DIR"
   fi
@@ -248,6 +250,13 @@ cat >"$TMP_DIR/template-create.json" <<JSON
     "DoD is defined from template data",
     "Workspace Soul bindings are persisted and readable"
   ],
+  "contextHints": {
+    "profileContracts": {
+      "template-authoring-fixture": {
+        "evidenceRequirements": [{"id": "*", "scope": "dodItem", "requiredEvidenceKinds": ["validation"], "acceptedStepKinds": ["shell/run"]}]
+      }
+    }
+  },
   "defaultSoulId": "$SOUL_ID",
   "soulBindings": {
     "planning": "$SOUL_ID",
@@ -300,44 +309,44 @@ with open(templates_path, "r", encoding="utf-8") as fh:
 template = next(item for item in templates if item["id"] == template_id)
 workspace = {
     "title": title,
-    "description": template.get("description", ""),
+    "input": {"goalText": template["goalText"], "acceptanceRequirements": [], "resourceRefs": []},
     "templateId": template_id,
 }
 with open(output_path, "w", encoding="utf-8") as fh:
     json.dump(workspace, fh, ensure_ascii=False)
 PY
 
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" \
-  -H 'Content-Type: application/json' \
-  -d @"$TMP_DIR/workspace-create.json" >"$TMP_DIR/workspace-created.json"
-workspace_id="$(json_get "$TMP_DIR/workspace-created.json" "workspace.id")"
-if [[ -z "$workspace_id" || "$workspace_id" != ws-* ]]; then
-  echo "workspace id is invalid: $workspace_id" >&2
-  exit 1
-fi
-
-python3 - "$TMP_DIR/templates.json" "$TEMPLATE_ID" "$TMP_DIR/goal-create.json" "$TMP_DIR/dod-create.json" <<'PY'
+curl -fsS "$BASE_URL/api/v1/workorch/configuration" >"$TMP_DIR/configuration.json"
+python3 - "$TMP_DIR/configuration.json" "$MOCK_BASE_URL" <<'PY'
 import json
 import sys
-
-templates_path, template_id, goal_path, dod_path = sys.argv[1:5]
-with open(templates_path, "r", encoding="utf-8") as fh:
-    templates = json.load(fh).get("workspaceTemplates", [])
-template = next(item for item in templates if item["id"] == template_id)
-with open(goal_path, "w", encoding="utf-8") as fh:
-    json.dump({"text": template["goalText"]}, fh, ensure_ascii=False)
-with open(dod_path, "w", encoding="utf-8") as fh:
-    json.dump({"items": template["doDItems"]}, fh, ensure_ascii=False)
+llm = json.load(open(sys.argv[1]))['configuration']['llm']
+proxy = llm.get('aiProxy') or {}
+if str(proxy.get('baseUrl') or proxy.get('baseURL') or '').rstrip('/') != sys.argv[2].rstrip('/'):
+    raise SystemExit('模板验收必须连接预配置的隔离本地 mock，不调用真实 provider')
 PY
-
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" \
-  -H 'Content-Type: application/json' \
-  -d @"$TMP_DIR/goal-create.json" >"$TMP_DIR/goal-created.json"
+python3 "$ROOT_DIR/scripts/verify-authoring-mock-server.py" --port "${MOCK_ADDR##*:}" >"$TMP_DIR/authoring-mock.log" 2>&1 &
+MOCK_PID=$!
+mock_ready=0
+for _ in {1..30}; do
+  kill -0 "$MOCK_PID" 2>/dev/null || break
+  if curl -fsS "$MOCK_BASE_URL/models" >/dev/null; then mock_ready=1; break; fi
+  sleep 1
+done
+[[ "$mock_ready" == 1 ]]
+curl -fsS -X POST "$BASE_URL/api/v1/workorch/configuration/llm/models/refresh" -H 'Content-Type: application/json' -d '{}' >"$TMP_DIR/catalog-refreshed.json"
+curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type: application/json' -d '{"defaultChatModelId":"verify-model"}' >"$TMP_DIR/configuration-updated.json"
+recovery_root="${WORKORCH_AUTHORING_RECOVERY_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/workorch/verification-authoring}"
+python3 "$ROOT_DIR/scripts/create-authoring-verification-workspace.py" \
+  --base-url "$BASE_URL" --payload-file "$TMP_DIR/workspace-create.json" \
+  --recovery-file "$recovery_root/template-$VERIFY_SUFFIX.json" --output-prefix "$TMP_DIR/confirmed"
+cp "$TMP_DIR/confirmed-workspace.json" "$TMP_DIR/workspace-created.json"
+cp "$TMP_DIR/confirmed-goal.json" "$TMP_DIR/goal-created.json"
+cp "$TMP_DIR/confirmed-dod.json" "$TMP_DIR/dod-created.json"
+workspace_id="$(json_get "$TMP_DIR/workspace-created.json" "workspace.id")"
 goal_id="$(json_get "$TMP_DIR/goal-created.json" "goal.id")"
-curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" \
-  -H 'Content-Type: application/json' \
-  -d @"$TMP_DIR/dod-create.json" >"$TMP_DIR/dod-created.json"
 dod_id="$(json_get "$TMP_DIR/dod-created.json" "dod.id")"
+[[ -n "$workspace_id" && -n "$goal_id" && -n "$dod_id" ]]
 
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/soul-bindings" >"$TMP_DIR/bindings-read.json"
 assert_json "$TMP_DIR/bindings-read.json" "workspace default soul from template" "data['soulBindings']['defaultSoulId'] == '$SOUL_ID'"

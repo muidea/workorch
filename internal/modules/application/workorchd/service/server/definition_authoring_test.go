@@ -31,7 +31,7 @@ func TestDefinitionAuthoringHTTPRoutesUseIndependentContracts(t *testing.T) {
 			return view, nil
 		},
 		Save: func(_ context.Context, id string, request workorchmanagementcontract.DefinitionAuthoringSave) (workorchmanagementcontract.DefinitionAuthoringView, error) {
-			if id != "ws" || request.ExpectedWorkspaceRevision != 2 || request.ExpectedInputHash != "input" || request.TemplateID != "changed" {
+			if id != "ws" || request.RequestID != "save-request" || request.ExpectedWorkspaceRevision != 2 || request.ExpectedInputHash != "input" || request.TemplateID != "changed" {
 				t.Fatalf("wrong save contract: %+v", request)
 			}
 			calls = append(calls, "save")
@@ -56,7 +56,7 @@ func TestDefinitionAuthoringHTTPRoutesUseIndependentContracts(t *testing.T) {
 	}{
 		{http.MethodPost, "/api/v1/workorch/workspace-authoring", `{"requestId":"request","title":"任务","templateId":"template","input":{"goalText":"目标"}}`, http.StatusCreated},
 		{http.MethodGet, "/api/v1/workorch/workspaces/ws/authoring", "", http.StatusOK},
-		{http.MethodPut, "/api/v1/workorch/workspaces/ws/authoring", `{"templateId":"changed","input":{"goalText":"新目标"},"expectedWorkspaceRevision":2,"expectedInputHash":"input"}`, http.StatusOK},
+		{http.MethodPut, "/api/v1/workorch/workspaces/ws/authoring", `{"requestId":"save-request","templateId":"changed","input":{"goalText":"新目标"},"expectedWorkspaceRevision":2,"expectedInputHash":"input"}`, http.StatusOK},
 		{http.MethodPost, "/api/v1/workorch/workspaces/ws/authoring/compile", "", http.StatusOK},
 		{http.MethodPost, "/api/v1/workorch/workspaces/ws/authoring/confirm", `{"inputHash":"input","derivationPermitId":"permit","proposalHash":"proposal","specificationHash":"spec","expectedWorkspaceRevision":2}`, http.StatusOK},
 	} {

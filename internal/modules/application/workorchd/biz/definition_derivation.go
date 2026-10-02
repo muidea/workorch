@@ -26,7 +26,11 @@ func (b *Biz) DeriveDefinitionAcceptance(ctx context.Context, id common.Workspac
 	if err := view.Record.Validate(); err != nil {
 		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
 	}
-	record := view.Record
+	recordModel, err := view.Record.Model()
+	if err != nil {
+		return workspace.DefinitionDerivedAcceptance{}, err
+	}
+	record := &recordModel
 	requestID := "derive/" + record.InputHash
 	// 历史请求只按封存身份重放，不依赖已变化或删除的现行模板。
 	for _, previous := range record.DerivationRequests {
@@ -84,15 +88,19 @@ func (b *Biz) DeriveDefinitionAcceptance(ctx context.Context, id common.Workspac
 	if err := reserved.ValidateReserve(reserve); err != nil {
 		return workspace.DefinitionDerivedAcceptance{}, err
 	}
+	reservedRequest, err := reserved.Request.Model()
+	if err != nil {
+		return workspace.DefinitionDerivedAcceptance{}, err
+	}
 	if reserved.FreshPermitID == "" {
-		return derivationOutcome(reserved.Request)
+		return derivationOutcome(reservedRequest)
 	}
 	payload, providerErr := b.completeDefinitionDocument(ctx, command)
 	completion := workspaceevents.CompleteDefinitionDerivationCommand{WorkspaceID: id, PermitID: reserved.FreshPermitID}
 	if providerErr != nil {
 		completion.FailureCode = "provider_failed"
 	} else {
-		proposal, parseErr := specifications.ParseDerivedAcceptance(payload, reserved.Request.Input, &reserved.Request.Template)
+		proposal, parseErr := specifications.ParseDerivedAcceptance(payload, reservedRequest.Input, &reservedRequest.Template)
 		if parseErr != nil {
 			completion.FailureCode = "invalid_proposal"
 		} else {
@@ -122,7 +130,11 @@ func (b *Biz) DeriveDefinitionAcceptance(ctx context.Context, id common.Workspac
 	if err := completed.ValidateCompletion(completion); err != nil {
 		return workspace.DefinitionDerivedAcceptance{}, err
 	}
-	return derivationOutcome(completed.Request)
+	completedRequest, err := completed.Request.Model()
+	if err != nil {
+		return workspace.DefinitionDerivedAcceptance{}, err
+	}
+	return derivationOutcome(completedRequest)
 }
 
 func sameAuthoringResourceRevisions(facts []fileevents.AcquireAuthoringResourceResult, revision uint64) bool {

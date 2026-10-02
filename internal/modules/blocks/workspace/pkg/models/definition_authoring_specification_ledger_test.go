@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func authoringLedgerFixture(t *testing.T) (DefinitionAuthoringRecord, GoalSpecification) {
+func authoringLedgerFixture(t testing.TB) (DefinitionAuthoringRecord, GoalSpecification) {
 	t.Helper()
 	input, template, derived, spec := authoringSpecificationFixture(t)
 	record := DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshot: template, TemplateSnapshotHash: WorkspaceTemplateSnapshotHash(&template)}

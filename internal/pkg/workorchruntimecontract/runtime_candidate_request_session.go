@@ -178,15 +178,22 @@ func (s RuntimeCandidateRequestSession) Normalized() RuntimeCandidateRequestSess
 }
 
 func (s RuntimeCandidateRequestSession) Validate() error {
+	var validatedManifest *runtimeValidatedCandidateManifest
 	if s.CandidateManifest != nil {
-		if err := ValidateRuntimeCandidateContractManifestRawCanonical(*s.CandidateManifest); err != nil {
+		validated, err := validateRuntimeCandidateManifestRawCanonical(*s.CandidateManifest)
+		if err != nil {
 			return fmt.Errorf("runtime candidate request session persisted operations manifest: %w", err)
 		}
+		validatedManifest = &validated
 	}
 	if err := ValidateRuntimeDispatchRepairCommitmentProjection(s.RepairCommitmentHash, s.RepairCommitment); err != nil {
 		return fmt.Errorf("runtime candidate request session repair commitment: %w", err)
 	}
+	s.CandidateManifest = nil
 	s = s.Normalized()
+	if validatedManifest != nil {
+		s.CandidateManifest = &validatedManifest.manifest
+	}
 	if s.LogicalRequestID == "" || (s.DocumentKind != RuntimeProviderDocumentSemanticPlan && s.DocumentKind != RuntimeProviderDocumentOperations) || s.StablePrefixHash == "" || s.ManifestHash == "" ||
 		strings.TrimSpace(s.Transaction.AuthoritySnapshotID) == "" || s.NextSequence <= 0 || s.DocumentRecoveryOutcomes < 0 || s.TransportOutcomes < 0 {
 		return common.ErrInvalidArgument
@@ -199,12 +206,11 @@ func (s RuntimeCandidateRequestSession) Validate() error {
 			return common.ErrInvalidArgument
 		}
 	}
-	if s.CandidateManifest != nil {
-		if s.DocumentKind != RuntimeProviderDocumentOperations || s.CandidateManifest.Hash != s.ManifestHash ||
-			s.CandidateManifest.Hash != StableRuntimeCandidateContractManifestHash(*s.CandidateManifest) {
+	if validatedManifest != nil {
+		if s.DocumentKind != RuntimeProviderDocumentOperations || s.CandidateManifest.Hash != s.ManifestHash {
 			return fmt.Errorf("runtime candidate request session has invalid persisted operations manifest")
 		}
-		wire, err := BuildRuntimeCandidateWireContract(*s.CandidateManifest)
+		wire, err := buildRuntimeCandidateWireContractFromValidatedManifest(*validatedManifest)
 		if err != nil || s.ExpectedDocument == nil || s.ExpectedDocument.WireContractHash != wire.Hash {
 			return fmt.Errorf("runtime candidate request session wire contract does not match persisted operations manifest")
 		}

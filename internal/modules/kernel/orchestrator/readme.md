@@ -41,6 +41,19 @@ capability resource state。
   candidate dispatch、drive delivery component 只共享该 kernel，不持有 sibling、Hub 或第二份 aggregate。
 - `RuntimeAggregate.Validate` 顺序验证 SM-2、SM-3、SM-4 及 cross-machine fence。所有合法变化经一次 semantic CAS；
   projection、timer、adapter 和 shared contract package都不能直接写 aggregate。
+- 纯校验只可在同一次调用内复用本地规范化值：SM-2 binding hash 保持原字段、顺序和完整内容重算；SM-3 session
+  可把本次完整 raw-canonical/source/hash 校验得到的 detached manifest 交给私有 wire compiler，不能仅凭调用者 hash
+  推断成功。semantic assessment 前像重建可将同一 generation 完整校验所得的私有 manifest 产物复用于逐批 binding compiler，
+  每批 document、request identity 与 owner feasibility 仍完整反证；公开 compiler 每次重新校验，
+  `runtime_semantic_binding_validation_reuse_test.go` 固定产物一致性、逐批拒绝和输入不变边界。
+  公开 manifest、wire、session 与 fresh-load 入口每次仍完整反证，不持久化成功凭据、不增加 caller 已校验标志。
+  `runtime_coverage_evidence_binding_hash_test.go` 和 `runtime_candidate_session_validation_test.go` 固定 hash、重复调用、
+  同版本重载、来源篡改与深拷贝边界。已规范化字符串集合仍返回 detached 副本，非规范输入保留 trim／去重／排序语义，
+  由 `runtime_normalize_strings_test.go` 的 reference 与 fuzz 固定。SM-3 证据投影先反证原始 accepted/rejected exact cardinality，
+  再仅规范化匹配的单条证据，并逐次检查 exact processed-event fence；不复制无关 Facts，也不缓存成功结果，
+  由 `biz/runtime/evidence_projection_normalization_test.go` 与既有 fresh-load 账本篡改测试固定。崩溃注入 wrapper 保留 production Coordinator 的完整 aggregate gate 和
+  `SaveValidated` 写入路径；CAS 前后切点、普通 `Save`、失败回执与非法 aggregate 拒绝由
+  `biz/runtime_crash_repository_test.go` 固定。SM-1～SM-4 的 transition、authority、预算和恢复规则均不改变。
 - `Facts.Failure` 的替换只能经过 `replaceRuntimeFailureAuthority`，并必须显式选择三种 policy 之一：
   `runtimeFailureAuthorityRetainInterlude` 仅在同一原子事务的有界中间态保留既有 target/directive；
   `runtimeFailureAuthorityRetire` 同时清除旧 `FailureTarget + RepairDirective`；

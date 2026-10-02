@@ -388,21 +388,6 @@ type resolveApprovalRequest struct {
 	Payload workorcheventpayload.Payload `json:"payload,omitempty"`
 }
 
-type defineGoalRequest struct {
-	Text string `json:"text"`
-}
-
-type defineDoDRequest struct {
-	Items []string `json:"items"`
-}
-
-type goalDoDQualityCheckRequest struct {
-	GoalID   string   `json:"goalId,omitempty"`
-	DoDID    string   `json:"doDId,omitempty"`
-	GoalText string   `json:"goalText,omitempty"`
-	DoDItems []string `json:"doDItems,omitempty"`
-}
-
 type createWorkspaceSetupDraftSessionRequest struct {
 	TemplateID           string `json:"templateId,omitempty"`
 	Title                string `json:"title,omitempty"`

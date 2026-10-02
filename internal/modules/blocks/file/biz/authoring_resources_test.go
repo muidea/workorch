@@ -64,7 +64,7 @@ func TestAuthoringResourceOwnerRequiresSafeCompleteScopedFile(t *testing.T) {
 		"requirements.txt", ".env", "credentials.txt", "redacted.txt", "binary.txt", "large.txt", "escape.txt", "linked.txt",
 	}}
 	template := workspace.WorkspaceTemplate{ID: input.TemplateID}
-	record := workspace.DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshot: template, TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template)}
+	record := workspaceevents.DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshot: workspaceevents.WorkspaceTemplate{ID: template.ID}, TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template)}
 	command.AuthoringInputHash = record.InputHash
 	observer := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 	queryCount := 0

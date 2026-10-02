@@ -19,7 +19,6 @@ type ApplicationPorts struct {
 
 type WorkspacePorts struct {
 	Validate                    ValidateFunc
-	CreateWorkspace             CreateWorkspaceFunc
 	DeleteWorkspace             DeleteWorkspaceFunc
 	ReadWorkspace               ReadWorkspaceFunc
 	ReadWorkspaceSnapshot       ReadWorkspaceSnapshotFunc
@@ -32,21 +31,15 @@ type WorkspacePorts struct {
 }
 
 type DefinitionPorts struct {
-	CreateDefinitionAuthoring   CreateDefinitionAuthoringFunc
-	ReadDefinitionAuthoring     ReadDefinitionAuthoringFunc
-	SaveDefinitionAuthoring     SaveDefinitionAuthoringFunc
-	CompileDefinitionAuthoring  ReadDefinitionAuthoringFunc
-	ConfirmDefinitionAuthoring  ConfirmDefinitionAuthoringFunc
-	DefineGoal                  DefineGoalFunc
-	UpdateGoal                  UpdateGoalFunc
-	ReadGoal                    ReadGoalFunc
-	ListGoals                   ListGoalsFunc
-	DefineDoD                   DefineDoDFunc
-	UpdateDoD                   UpdateDoDFunc
-	ReadDoD                     ReadDoDFunc
-	ListDoDs                    ListDoDsFunc
-	CheckGoalDoDQuality         CheckGoalDoDQualityFunc
-	GenerateWorkspaceSetupDraft GenerateWorkspaceSetupDraftFunc
+	CreateDefinitionAuthoring  CreateDefinitionAuthoringFunc
+	ReadDefinitionAuthoring    ReadDefinitionAuthoringFunc
+	SaveDefinitionAuthoring    SaveDefinitionAuthoringFunc
+	CompileDefinitionAuthoring ReadDefinitionAuthoringFunc
+	ConfirmDefinitionAuthoring ConfirmDefinitionAuthoringFunc
+	ReadGoal                   ReadGoalFunc
+	ListGoals                  ListGoalsFunc
+	ReadDoD                    ReadDoDFunc
+	ListDoDs                   ListDoDsFunc
 }
 
 type RunPorts struct {

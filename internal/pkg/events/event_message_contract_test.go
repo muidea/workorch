@@ -70,7 +70,10 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// Soul and Workspace each add an independent builtin preview query and
 	// guarded upgrade command. Only their private owner transactions may write;
 	// no cross-owner upgrade state machine or implicit activation is introduced.
-	const expectedProductionTopicCount = 287
+	// 持久 authoring 增加已审定的创建／保存／查询／资源 scope、派生 reserve/complete、
+	// 规格 reserve/complete、确认／准入合同；既有 pre-seal 规格 ledger 保留三个写入口。
+	// 无生产调用方的规格单请求 query 和五个退休 CLI 定义写 facade 不再登记。
+	const expectedProductionTopicCount = 297
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}

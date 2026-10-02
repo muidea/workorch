@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """对已启动服务验证持久创作链路；显式执行才会调用 provider，不自动启动 Run。"""
 import argparse
+import fcntl
 import json
+import os
+from pathlib import Path
+import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -38,6 +43,150 @@ def require_ready_proposal(view):
     return proposal
 
 
+class RecoveryJournal:
+    """本地私有回执，不是 owner authority；锁覆盖整个验证过程。"""
+    def __init__(self, path, base, payload):
+        self.path = Path(path).expanduser().absolute()
+        self.base = base
+        self.payload = payload
+        self.lock = None
+        self.record = None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(self.path) + '.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        self.lock = os.fdopen(fd, 'w')
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if self.path.is_symlink():
+                raise RuntimeError('恢复文件不能是符号链接')
+            if self.path.exists():
+                if self.path.stat().st_mode & 0o077:
+                    raise RuntimeError('恢复文件必须仅当前用户可读写（0600）')
+                self.record = json.loads(self.path.read_text())
+                value = self.record
+                if not isinstance(value, dict) or value.get('version') != 1 or value.get('baseUrl') != self.base or not isinstance(value.get('payload'), dict):
+                    raise RuntimeError('恢复文件版本或实例不匹配')
+                original = value['payload']
+                expected = {**self.payload, 'requestId': original.get('requestId')}
+                if original != expected or not isinstance(original.get('requestId'), str) or not original['requestId'] or (self.payload['requestId'] and self.payload['requestId'] != original['requestId']):
+                    raise RuntimeError('恢复必须使用原创建输入与 requestId，不能覆盖恢复文件')
+                if 'workspaceId' in value and (not isinstance(value['workspaceId'], str) or not value['workspaceId']):
+                    raise RuntimeError('恢复文件 Workspace 身份无效')
+                if 'confirmation' in value:
+                    validate_confirmation(value['confirmation'])
+                    if not value.get('workspaceId'):
+                        raise RuntimeError('恢复确认缺少 Workspace 身份')
+            else:
+                self.record = {'version': 1, 'baseUrl': self.base, 'payload': {**self.payload, 'requestId': self.payload['requestId'] or str(uuid.uuid4())}}
+                self.save()
+            return self
+        except BaseException:
+            self.lock.close()
+            raise
+
+    def save(self):
+        fd, temporary = tempfile.mkstemp(prefix=self.path.name + '.', dir=self.path.parent)
+        try:
+            with os.fdopen(fd, 'w') as output:
+                json.dump(self.record, output, ensure_ascii=False)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, self.path)
+            directory = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def __exit__(self, *_):
+        if self.lock is not None:
+            self.lock.close()
+
+
+def validate_confirmation(exact):
+    fields = ('inputHash', 'derivationPermitId', 'proposalHash', 'specificationHash')
+    if not isinstance(exact, dict) or any(not isinstance(exact.get(key), str) or not exact[key] for key in fields) or type(exact.get('expectedWorkspaceRevision')) is not int or exact['expectedWorkspaceRevision'] < 1:
+        raise RuntimeError('恢复确认身份无效')
+
+
+def require_admitted(view, workspace_id):
+    if view.get('workspaceId') != workspace_id or view.get('state') != 'admitted' or view.get('activationState') != 'eligible' or not isinstance(view.get('startupInputHash'), str) or not view['startupInputHash'] or type(view.get('workspaceRevision')) is not int or view['workspaceRevision'] < 1:
+        raise RuntimeError('确认后未得到 matching eligible Workspace')
+
+
+def await_confirmation(request, path, workspace_id, exact, timeout):
+    deadline = time.monotonic() + timeout
+    view = request('POST', path + '/authoring/confirm', exact)['authoring']
+    while view.get('state') in ('confirming', 'admitting'):
+        if view.get('workspaceId') != workspace_id:
+            raise RuntimeError('确认恢复返回不同 Workspace')
+        require_zero_runs(request('GET', path + '/runs'))
+        if time.monotonic() >= deadline:
+            raise RuntimeError('确认准入仍在恢复；保留原确认身份，不确认新提案')
+        time.sleep(2)
+        view = request('GET', path + '/authoring')['authoring']
+        if view.get('state') in ('confirming', 'admitting'):
+            # 查询不驱动 owner 事务；只重放原确认，保留原 expected revision。
+            view = request('POST', path + '/authoring/confirm', exact)['authoring']
+    require_admitted(view, workspace_id)
+    return view
+
+
+def verify(request, journal, timeout, confirm):
+    record = journal.record
+    payload = record['payload']
+    print(f"requestId={payload['requestId']}", flush=True)
+    view = request('POST', '/api/v1/workorch/workspace-authoring', payload)['authoring']
+    workspace_id = view['workspaceId']
+    if record.get('workspaceId', workspace_id) != workspace_id:
+        raise RuntimeError('创建重放返回不同 Workspace')
+    record['workspaceId'] = workspace_id
+    journal.save()
+    path = '/api/v1/workorch/workspaces/' + urllib.parse.quote(workspace_id, safe='')
+    print(f'workspaceId={workspace_id}', flush=True)
+    replay = request('POST', '/api/v1/workorch/workspace-authoring', payload)['authoring']
+    if replay['workspaceId'] != workspace_id or replay['inputHash'] != view['inputHash']:
+        raise RuntimeError('重复创建没有返回相同持久身份')
+    require_zero_runs(request('GET', path + '/runs'))
+    exact = record.get('confirmation')
+    if exact:
+        if not confirm:
+            raise RuntimeError('存在原确认请求，请显式加 --confirm 恢复；不会编译或确认新提案')
+    else:
+        view = request('GET', path + '/authoring')['authoring']
+        if view['state'] in ('draft', 'derived'):
+            # 恢复 drive 仍由 owner reserve 授权；已未决的 permit 不会重发。
+            view = request('POST', path + '/authoring/compile')['authoring']
+        deadline = time.monotonic() + timeout
+        while view['state'] not in ('ready_to_confirm', 'review_blocked', 'failed', 'clarification_required', 'admitted', 'confirming', 'admitting'):
+            if time.monotonic() >= deadline:
+                raise RuntimeError('编译超时或结果未决；保留原身份，不自动重发 provider')
+            time.sleep(2)
+            view = request('GET', path + '/authoring')['authoring']
+        if view['state'] in ('admitted', 'confirming', 'admitting'):
+            raise RuntimeError('owner 已进入确认事务但本地缺少原确认身份；不能构造替代确认')
+        proposal = require_ready_proposal(view)
+        require_zero_runs(request('GET', path + '/runs'))
+        if confirm:
+            exact = {'inputHash': view['inputHash'], 'derivationPermitId': view['derivationPermitId'],
+                     'proposalHash': proposal['proposalHash'], 'specificationHash': proposal['specificationHash'],
+                     'expectedWorkspaceRevision': view['workspaceRevision']}
+            validate_confirmation(exact)
+            record['confirmation'] = exact
+            journal.save()
+    if exact:
+        confirmed = await_confirmation(request, path, workspace_id, exact, timeout)
+        repeated = await_confirmation(request, path, workspace_id, exact, timeout)
+        if repeated['startupInputHash'] != confirmed['startupInputHash'] or repeated['workspaceRevision'] != confirmed['workspaceRevision']:
+            raise RuntimeError('精确确认重放发生额外变更')
+    require_zero_runs(request('GET', path + '/runs'))
+    print('PASS: 持久创建／六审查' + ('／确认准入重放' if confirm else '') + '／零自动 Run')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8080")
@@ -47,6 +196,7 @@ def main():
     parser.add_argument("--resource", action="append", default=[])
     parser.add_argument("--requirement", action="append", default=[])
     parser.add_argument("--request-id", default=None, help="响应丢失后用同一身份与原输入重放")
+    parser.add_argument('--recovery-file', required=True, help='私有恢复文件（含原输入）；必须位于仓库外，重复执行使用同一文件')
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--confirm", action="store_true", help="精确确认审查结果并要求 eligible；仍不启动 Run")
     args = parser.parse_args()
@@ -68,47 +218,20 @@ def main():
 
     request("GET", "/healthz")
     request("GET", "/readyz")
-    request_id = args.request_id or str(uuid.uuid4())
-    print(f"requestId={request_id}", flush=True)
-    payload = {"requestId": request_id, "title": "规格创作 live 验证", "templateId": args.template_id,
+    payload = {"requestId": args.request_id, "title": "规格创作 live 验证", "templateId": args.template_id,
                "deliverableDirectory": args.directory,
                "input": {"goalText": args.goal, "acceptanceRequirements": args.requirement, "resourceRefs": args.resource}}
-    view = request("POST", "/api/v1/workorch/workspace-authoring", payload)["authoring"]
-    workspace_id = view["workspaceId"]
-    path = "/api/v1/workorch/workspaces/" + workspace_id
-    print(f"workspaceId={workspace_id}", flush=True)
-    replay = request("POST", "/api/v1/workorch/workspace-authoring", payload)["authoring"]
-    if replay["workspaceId"] != workspace_id or replay["inputHash"] != view["inputHash"]:
-        raise RuntimeError("重复创建没有返回相同持久身份")
-    require_zero_runs(request("GET", path + "/runs"))
-    request("POST", path + "/authoring/compile")
-    deadline = time.monotonic() + args.timeout
-    while time.monotonic() < deadline:
-        view = request("GET", path + "/authoring")["authoring"]
-        if view["state"] in ("ready_to_confirm", "review_blocked", "failed", "clarification_required", "admitted"):
-            break
-        time.sleep(2)
-    else:
-        raise RuntimeError("编译超时或结果未决；不得以新请求自动重发 provider")
-    print("state=" + view["state"], flush=True)
-    proposal = require_ready_proposal(view)
-    require_zero_runs(request("GET", path + "/runs"))
-    if args.confirm:
-        exact = {"inputHash": view["inputHash"], "derivationPermitId": view["derivationPermitId"],
-                 "proposalHash": proposal["proposalHash"], "specificationHash": proposal["specificationHash"],
-                 "expectedWorkspaceRevision": view["workspaceRevision"]}
-        confirmed = request("POST", path + "/authoring/confirm", exact)["authoring"]
-        if confirmed["state"] != "admitted" or confirmed.get("activationState") != "eligible" or not confirmed.get("startupInputHash"):
-            raise RuntimeError("确认后未 eligible；请核对模板 proof 与准入阻塞")
-        repeated = request("POST", path + "/authoring/confirm", exact)["authoring"]
-        if repeated["startupInputHash"] != confirmed["startupInputHash"] or repeated["workspaceRevision"] != confirmed["workspaceRevision"]:
-            raise RuntimeError("精确确认重放发生额外变更")
-    require_zero_runs(request("GET", path + "/runs"))
-    print("PASS: 持久创建／六审查" + ("／确认准入重放" if args.confirm else "") + "／零自动 Run")
+    recovery_path = Path(args.recovery_file).expanduser().resolve()
+    repo = Path(__file__).resolve().parent.parent
+    if recovery_path.is_relative_to(repo):
+        parser.error("恢复文件含原输入，必须位于仓库外")
+    with RecoveryJournal(args.recovery_file, base, payload) as journal:
+        verify(request, journal, args.timeout, args.confirm)
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (RuntimeError, urllib.error.URLError, KeyError, ValueError) as error:
-        raise SystemExit(f"FAIL: {error}") from None
+    except (RuntimeError, urllib.error.URLError, KeyError, ValueError, OSError) as error:
+        message = str(error) if isinstance(error, RuntimeError) else type(error).__name__
+        raise SystemExit(f"FAIL: {message}；保留原恢复文件后重试") from None

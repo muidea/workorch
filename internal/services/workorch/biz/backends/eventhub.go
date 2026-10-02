@@ -337,17 +337,7 @@ func enrichSubjectPayload(payload map[string]any, key string, subjectID string) 
 type eventHubWorkspaceBackend struct{ parent *eventHubBackend }
 
 func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	if b == nil || b.parent == nil || b.parent.commandHub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIWorkspaceCreate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIWorkspaceCreateCommand{Request: req})
-	bindCLIEvent(event, workorchdevents.TopicCLIWorkspaceCreate, "workspace", "", "", "")
-	result, err := cliWorkspaceCreateResponse(b.parent.commandHub.Send(event))
-	if err != nil {
-		return nil, err
-	}
-	item, mapErr := workorchdeventmapping.WorkspaceProjection(result.Workspace)
-	return &item, mapErr
+	return nil, fmt.Errorf("%w: 旧创建写操作已退休，请通过 Web 持久规格创作完成审查与确认", common.ErrConflict)
 }
 func (b *eventHubWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
@@ -447,16 +437,7 @@ func (b *eventHubWorkspaceBackend) Delete(ctx context.Context, id common.Workspa
 type eventHubGoalBackend struct{ parent *eventHubBackend }
 
 func (b *eventHubGoalBackend) Define(ctx context.Context, wsID common.WorkspaceID, text string) (*workorchmanagementcontract.Goal, error) {
-	if b == nil || b.parent == nil || b.parent.commandHub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIGoalDefine, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIGoalDefineCommand{WorkspaceID: wsID, Text: text})
-	bindCLIEvent(event, workorchdevents.TopicCLIGoalDefine, "goal", "", wsID, "")
-	result, err := cliGoalDefineResponse(b.parent.commandHub.Send(event))
-	if err != nil {
-		return nil, err
-	}
-	return &result.Goal, nil
+	return nil, fmt.Errorf("%w: 旧 Goal 写操作已退休，请通过 Web 持久规格创作完成审查与确认", common.ErrConflict)
 }
 func (b *eventHubGoalBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchmanagementcontract.Goal, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
@@ -480,31 +461,13 @@ func (b *eventHubGoalBackend) Get(ctx context.Context, wsID common.WorkspaceID, 
 	return &result.Goal, nil
 }
 func (b *eventHubGoalBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.GoalID, text string) (*workorchmanagementcontract.Goal, error) {
-	if b == nil || b.parent == nil || b.parent.commandHub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIGoalUpdate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIGoalUpdateCommand{WorkspaceID: wsID, GoalID: id, Text: text})
-	bindCLIEvent(event, workorchdevents.TopicCLIGoalUpdate, "goal", string(id), wsID, "")
-	result, err := cliGoalUpdateResponse(b.parent.commandHub.Send(event))
-	if err != nil {
-		return nil, err
-	}
-	return &result.Goal, nil
+	return nil, fmt.Errorf("%w: 旧 Goal 写操作已退休，请通过 Web 持久规格创作完成审查与确认", common.ErrConflict)
 }
 
 type eventHubDoDBackend struct{ parent *eventHubBackend }
 
 func (b *eventHubDoDBackend) Define(ctx context.Context, wsID common.WorkspaceID, items []string) (*workorchmanagementcontract.DoD, error) {
-	if b == nil || b.parent == nil || b.parent.commandHub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIDoDDefine, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIDoDDefineCommand{WorkspaceID: wsID, Items: append([]string(nil), items...)})
-	bindCLIEvent(event, workorchdevents.TopicCLIDoDDefine, "dod", "", wsID, "")
-	result, err := cliDoDDefineResponse(b.parent.commandHub.Send(event))
-	if err != nil {
-		return nil, err
-	}
-	return &result.DoD, nil
+	return nil, fmt.Errorf("%w: 旧 DoD 写操作已退休，请通过 Web 持久规格创作完成审查与确认", common.ErrConflict)
 }
 func (b *eventHubDoDBackend) List(ctx context.Context, wsID common.WorkspaceID) ([]workorchmanagementcontract.DoD, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
@@ -528,16 +491,7 @@ func (b *eventHubDoDBackend) Get(ctx context.Context, wsID common.WorkspaceID, i
 	return &result.DoD, nil
 }
 func (b *eventHubDoDBackend) Update(ctx context.Context, wsID common.WorkspaceID, id common.DoDID, items []string) (*workorchmanagementcontract.DoD, error) {
-	if b == nil || b.parent == nil || b.parent.commandHub == nil {
-		return nil, common.ErrInvalidArgument
-	}
-	event := magicevent.NewEventWithContext(workorchdevents.TopicCLIDoDUpdate, "workorch-cli", workorchdevents.CommandDestination, magicevent.NewHeader(), ctx, workorchdevents.CLIDoDUpdateCommand{WorkspaceID: wsID, DoDID: id, Items: append([]string(nil), items...)})
-	bindCLIEvent(event, workorchdevents.TopicCLIDoDUpdate, "dod", string(id), wsID, "")
-	result, err := cliDoDUpdateResponse(b.parent.commandHub.Send(event))
-	if err != nil {
-		return nil, err
-	}
-	return &result.DoD, nil
+	return nil, fmt.Errorf("%w: 旧 DoD 写操作已退休，请通过 Web 持久规格创作完成审查与确认", common.ErrConflict)
 }
 
 type eventHubRunBackend struct{ parent *eventHubBackend }

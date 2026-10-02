@@ -1,6 +1,7 @@
 package workorchruntimecontract
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -36,6 +37,7 @@ func TestRuntimeCandidateContractManifestRawCanonicalRejectsNormalizationLaunder
 	if err := ValidateRuntimeCandidateContractManifestRawCanonical(manifest); err != nil {
 		t.Fatalf("built manifest is not raw-canonical: %v", err)
 	}
+	validSession := runtimeManifestBoundSessionForTest(t, manifest)
 
 	tests := []struct {
 		name   string
@@ -77,9 +79,16 @@ func TestRuntimeCandidateContractManifestRawCanonicalRejectsNormalizationLaunder
 			if err := ValidateRuntimeCandidateContractManifestRawCanonical(mutated); err == nil {
 				t.Fatal("raw-canonical validator accepted normalization laundering")
 			}
-			session := RuntimeCandidateRequestSession{CandidateManifest: &mutated}
-			if err := session.Validate(); err == nil {
-				t.Fatal("request session normalized a noncanonical persisted manifest")
+			if _, err := BuildRuntimeCandidateWireContract(mutated); err == nil {
+				t.Fatal("公开 wire compiler 接受非 canonical manifest")
+			}
+			session := validSession.Clone()
+			session.CandidateManifest = &mutated
+			session.ManifestHash = mutated.Hash
+			session.ExpectedDocument.ManifestHash = mutated.Hash
+			session.ExpectedDocument.Hash = StableRuntimeExpectedDocumentHash(*session.ExpectedDocument)
+			if err := session.Validate(); err == nil || !strings.Contains(err.Error(), "persisted operations manifest") {
+				t.Fatalf("完整合法 request session 未在原始 manifest gate 拒绝: %v", err)
 			}
 		})
 	}

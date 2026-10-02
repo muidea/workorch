@@ -1,8 +1,10 @@
 package events
 
 import (
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"testing"
+
+	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/soulbinding"
 )
 
 func TestDerivationResultRejectsForgedPermitBudgetAndCompletion(t *testing.T) {
@@ -10,7 +12,7 @@ func TestDerivationResultRejectsForgedPermitBudgetAndCompletion(t *testing.T) {
 	request := workspace.DefinitionDerivationRequest{RequestID: "r", Input: input, Template: workspace.WorkspaceTemplate{ID: "t"}, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil), ProviderBindingHash: "provider"}
 	request.PermitID = request.ExpectedPermitID()
 	command := ReserveDefinitionDerivationCommand{WorkspaceID: "ws", InputHash: input.InputHash(), RequestID: "r", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil), ProviderBindingHash: "provider"}
-	result := DefinitionDerivationRequestResult{Request: request, FreshPermitID: request.PermitID, Consumed: 1, Remaining: workspace.DefinitionDerivationRequestLimit - 1}
+	result := DefinitionDerivationRequestResult{Request: DefinitionDerivationRequest{RequestID: request.RequestID, Input: input, Template: WorkspaceTemplate{ID: "t"}, ResourceSnapshotHash: request.ResourceSnapshotHash, ProviderBindingHash: request.ProviderBindingHash, PermitID: request.PermitID}, FreshPermitID: request.PermitID, Consumed: 1, Remaining: workspace.DefinitionDerivationRequestLimit - 1}
 	if err := result.ValidateReserve(command); err != nil {
 		t.Fatal(err)
 	}
@@ -28,6 +30,16 @@ func TestDerivationResultRejectsForgedPermitBudgetAndCompletion(t *testing.T) {
 	bad.Request.FailureCode = "provider_failed"
 	if bad.ValidateReserve(command) == nil {
 		t.Fatal("completed request granted permit")
+	}
+	bad = result
+	bad.Request.Template.SoulBindings = []soulbinding.Binding{{Stage: "planning", SoulID: "planner"}, {Stage: "planning", SoulID: "planner"}}
+	if bad.ValidateReserve(command) == nil {
+		t.Fatal("重复 binding 被折叠后授予派生调用许可")
+	}
+	bad.FreshPermitID = ""
+	bad.Request.FailureCode = "provider_failed"
+	if bad.ValidateCompletion(CompleteDefinitionDerivationCommand{WorkspaceID: "ws", PermitID: request.PermitID, FailureCode: "provider_failed"}) == nil {
+		t.Fatal("完成回执忽略重复 binding")
 	}
 	result.FreshPermitID = ""
 	result.Request.FailureCode = "provider_failed"

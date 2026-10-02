@@ -7,7 +7,6 @@ func applicationOperationsFromPorts(ports ApplicationPorts) applicationOperation
 	return applicationOperations{
 		workspaceOperations: workspaceOperations{
 			validate:                        ports.Workspace.Validate,
-			createWorkspace:                 ports.Workspace.CreateWorkspace,
 			deleteWorkspace:                 ports.Workspace.DeleteWorkspace,
 			readWorkspace:                   ports.Workspace.ReadWorkspace,
 			readWorkspaceSnapshot:           ports.Workspace.ReadWorkspaceSnapshot,
@@ -24,16 +23,10 @@ func applicationOperationsFromPorts(ports ApplicationPorts) applicationOperation
 				Save: ports.Definition.SaveDefinitionAuthoring, Compile: ports.Definition.CompileDefinitionAuthoring,
 				Confirm: ports.Definition.ConfirmDefinitionAuthoring,
 			},
-			defineGoal:                  ports.Definition.DefineGoal,
-			updateGoal:                  ports.Definition.UpdateGoal,
-			readGoal:                    ports.Definition.ReadGoal,
-			listGoals:                   ports.Definition.ListGoals,
-			defineDoD:                   ports.Definition.DefineDoD,
-			updateDoD:                   ports.Definition.UpdateDoD,
-			readDoD:                     ports.Definition.ReadDoD,
-			listDoDs:                    ports.Definition.ListDoDs,
-			checkGoalDoDQuality:         ports.Definition.CheckGoalDoDQuality,
-			generateWorkspaceSetupDraft: ports.Definition.GenerateWorkspaceSetupDraft,
+			readGoal:  ports.Definition.ReadGoal,
+			listGoals: ports.Definition.ListGoals,
+			readDoD:   ports.Definition.ReadDoD,
+			listDoDs:  ports.Definition.ListDoDs,
 		},
 		runOperations: runOperations{
 			readRun:                   ports.Run.ReadRun,

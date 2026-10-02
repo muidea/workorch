@@ -1243,8 +1243,21 @@ class Handler(BaseHTTPRequestHandler):
         size = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(size)
         payload = json.loads(body)
-        provider_request = provider_request_from_payload(payload)
-        decision = semantic_plan_payload(provider_request) if provider_request.get("documentKind") == "semantic_plan" else decision_payload(provider_request)
+        from verify_authoring_mock import AuthoringMockError, authoring_response
+        try:
+            decision = authoring_response(str(payload.get("input", "")))
+        except AuthoringMockError:
+            encoded = json.dumps({"error": {"message": "authoring mock 合同无效"}}).encode("utf-8")
+            self.send_response(422)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
+        provider_request = {}
+        if decision is None:
+            provider_request = provider_request_from_payload(payload)
+            decision = semantic_plan_payload(provider_request) if provider_request.get("documentKind") == "semantic_plan" else decision_payload(provider_request)
         print("scenario=%s requiredState=%s runId=%s stepId=%s kind=%s" % (
             provider_request.get("scenario", ""),
             provider_request.get("requiredState", ""),
@@ -1304,7 +1317,7 @@ ThreadingHTTPServer((host, port), Handler).serve_forever()
 
 PY
   WORKORCH_LLM_VERIFY_MOCK_SELF_TEST=1 python3 "$TMP_DIR/llm_mock_provider.py" >/dev/null
-  WORKORCH_LLM_VERIFY_MOCK_ADDR="$MOCK_ADDR" python3 "$TMP_DIR/llm_mock_provider.py" >>"$MOCK_LOG" 2>&1 &
+  PYTHONPATH="$ROOT_DIR/scripts${PYTHONPATH:+:$PYTHONPATH}" WORKORCH_LLM_VERIFY_MOCK_ADDR="$MOCK_ADDR" python3 "$TMP_DIR/llm_mock_provider.py" >>"$MOCK_LOG" 2>&1 &
   MOCK_PID=$!
 }
 
@@ -1504,18 +1517,22 @@ create_acceptance_workspace() {
   local description="$3"
   local dod_items_json="$4"
 
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces" -H 'Content-Type: application/json' \
-    -d '{"title":"'"$title"'","description":"'"$description"'","templateId":"'"$C12_TEMPLATE_ID"'"}' >"$TMP_DIR/$prefix-workspace.json"
+  python3 - "$title" "$C12_TEMPLATE_ID" "$dod_items_json" >"$TMP_DIR/$prefix-authoring-input.json" <<'PY'
+import json
+import sys
+json.dump({'title': sys.argv[1], 'templateId': sys.argv[2],
+           'input': {'goalText': 'verify LLM driven workspace execution',
+                     'acceptanceRequirements': json.loads(sys.argv[3]), 'resourceRefs': []}}, sys.stdout)
+PY
+  local recovery_root="${WORKORCH_AUTHORING_RECOVERY_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/workorch/verification-authoring}"
+  python3 "$ROOT_DIR/scripts/create-authoring-verification-workspace.py" \
+    --base-url "$BASE_URL" --payload-file "$TMP_DIR/$prefix-authoring-input.json" \
+    --recovery-file "$recovery_root/llm-$VERIFY_SUFFIX-$prefix.json" \
+    --output-prefix "$TMP_DIR/$prefix"
   workspace_id="$(json_path "$TMP_DIR/$prefix-workspace.json" "workspace.id")"
-  [[ -n "$workspace_id" ]]
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" -H 'Content-Type: application/json' \
-    -d '{"text":"verify LLM driven workspace execution"}' >"$TMP_DIR/$prefix-goal.json"
   goal_id="$(json_path "$TMP_DIR/$prefix-goal.json" "goal.id")"
-  [[ -n "$goal_id" ]]
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" -H 'Content-Type: application/json' \
-    -d '{"items":'"$dod_items_json"'}' >"$TMP_DIR/$prefix-dod.json"
   dod_id="$(json_path "$TMP_DIR/$prefix-dod.json" "dod.id")"
-  [[ -n "$dod_id" ]]
+  [[ -n "$workspace_id" && -n "$goal_id" && -n "$dod_id" ]]
   # Seed a non-mutating validation target under the workspace deliverable root.
   deliverable_dir="$(python3 -c 'import json,sys; ws=json.load(open(sys.argv[1],encoding="utf-8")).get("workspace") or {}; print(ws.get("deliverableDirectory") or ws.get("workingDirectory") or "")' "$TMP_DIR/$prefix-workspace.json")"
   if [[ -n "$deliverable_dir" ]]; then
@@ -1947,7 +1964,7 @@ create_c12_verification_template
 
 create_acceptance_workspace "happy" "llm acceptance workspace" "verify LLM driven workspace execution" '["happy path completes"]'
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | json_grep_string_value id "$workspace_id" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | json_grep_string_value description "verify LLM driven workspace execution" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | json_grep_string_value title "llm acceptance workspace" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" | json_grep_string_value id "$goal_id" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals/$goal_id" >"$TMP_DIR/goal-read.json"
 goal_text="$(json_path "$TMP_DIR/goal-read.json" "goal.text")"

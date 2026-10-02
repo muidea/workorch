@@ -26,66 +26,55 @@ import (
 
 	appservice "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
 	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 )
 
-func TestEventHubBackendRoutesWorkspaceCreateThroughCLICommand(t *testing.T) {
+func TestEventHubBackendRejectsWorkspaceCreateBeforeCLICommand(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
-
-	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{
-		Title:                "eventhub workspace",
-		Description:          "created through cli command event",
-		DeliverableDirectory: "/tmp/eventhub-workspace",
-	})
-	if err != nil {
-		t.Fatalf("create workspace: %v", err)
+	before := len(commandHub.(*recordingEventHub).Sent())
+	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{Title: "退休创建"})
+	if ws != nil || !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("退休创建未拒绝: %+v %v", ws, err)
 	}
-	if ws == nil || ws.ID == "" {
-		t.Fatalf("workspace = %+v, want id", ws)
-	}
-
-	recordedHub, ok := commandHub.(*recordingEventHub)
-	if !ok {
-		t.Fatal("command hub does not expose sent events")
-	}
-	var sawCommand bool
-	for _, event := range recordedHub.Sent() {
-		command, ok := event.Data().(workorchdevents.CLIWorkspaceCreateCommand)
-		if ok && command.Request.Title == "eventhub workspace" {
-			sawCommand = true
-		}
-	}
-	if !sawCommand {
-		t.Fatalf("published command=%v, want workspace create command", sawCommand)
+	if after := len(commandHub.(*recordingEventHub).Sent()); after != before {
+		t.Fatalf("退休创建发送了命令: before=%d after=%d", before, after)
 	}
 }
 
 func TestEventHubBackendCLICommandUsesSynchronousTypedResult(t *testing.T) {
 	ctx := context.Background()
-	be, _ := newEventHubBackendWithDispatcher(t, ctx)
-
+	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
+	ws := seedBackendWorkspace(t, ctx, commandHub, "同步读取工作空间")
 	done := make(chan error, 1)
 	go func() {
-		_, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{
-			Title:                "eventhub sync response workspace",
-			DeliverableDirectory: "/tmp/eventhub-sync-response-workspace",
-		})
+		_, err := be.Workspace().Get(ctx, common.WorkspaceID(ws.ID))
 		done <- err
 	}()
-
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("create workspace: %v", err)
+			t.Fatalf("get workspace: %v", err)
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("workspace create blocked waiting for typed command result")
+		t.Fatal("workspace get blocked waiting for typed command result")
 	}
+}
+
+// 读取／治理测试通过 owner 合同准备夹具，不复活产品退休写入口。
+func seedBackendWorkspace(t *testing.T, ctx context.Context, hub magicevent.Hub, title string) *projectioncontract.Workspace {
+	t.Helper()
+	id := common.WorkspaceID("ws-backend-fixture")
+	if err := workspaceports.CreateWorkspaceRecord(ctx, hub, id, title, "", t.TempDir(), t.TempDir()); err != nil {
+		t.Fatalf("prepare owner workspace: %v", err)
+	}
+	return &projectioncontract.Workspace{ID: string(id), Title: title}
 }
 
 func TestEventHubProjectionEventsBackendReceivesTypedProjection(t *testing.T) {
@@ -414,10 +403,7 @@ func TestEventHubBackendReadsWorkspaceSnapshotThroughCLICommand(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{Title: "snapshot workspace"})
-	if err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
+	ws := seedBackendWorkspace(t, ctx, commandHub, "snapshot workspace")
 	snapshotBackend, ok := be.Workspace().(interface {
 		Snapshot(context.Context, common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error)
 	})
@@ -554,10 +540,7 @@ func TestEventHubWorkspaceObjectCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{Title: "workspace object scope"})
-	if err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
+	ws := seedBackendWorkspace(t, ctx, commandHub, "workspace object scope")
 	if _, err := be.Workspace().Get(ctx, common.WorkspaceID(ws.ID)); err != nil {
 		t.Fatalf("get workspace: %v", err)
 	}
@@ -613,15 +596,15 @@ func TestConvertEnvelopeMapsGoalAndDoDEvents(t *testing.T) {
 	}
 }
 
-func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
+func TestWorkspaceOwnerDefinitionUpdatesPublishEvents(t *testing.T) {
 	ctx := context.Background()
-	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
+	_, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 	goalUpdated := make(chan struct{}, 1)
 	dodUpdated := make(chan struct{}, 1)
 	const observerID = "/workspace/consumers/workorch/backend-test"
 	observer := magicevent.NewSimpleObserverWithMatchID(observerID, observerID, commandHub)
 	observer.Subscribe(workspaceevents.TopicGoalDefined, func(event magicevent.Event, result magicevent.Result) {
-		if data, ok := event.Data().(workspaceevents.GoalDefinedData); ok && data.Text == "- updated goal" {
+		if data, ok := event.Data().(workspaceevents.GoalDefinedData); ok && data.Text == "updated goal" {
 			goalUpdated <- struct{}{}
 		}
 		if result != nil {
@@ -639,23 +622,20 @@ func TestEventHubGoalAndDoDUpdatesPublishDefinitionEvents(t *testing.T) {
 	defer observer.Unsubscribe(workspaceevents.TopicGoalDefined)
 	defer observer.Unsubscribe(workspaceevents.TopicDoDDefined)
 
-	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{Title: "definition refresh workspace"})
+	ws := seedBackendWorkspace(t, ctx, commandHub, "definition refresh workspace")
+	goal, err := definitionports.DefineGoal(ctx, commandHub, common.WorkspaceID(ws.ID), "goal-fixture", "initial goal")
 	if err != nil {
-		t.Fatalf("create workspace: %v", err)
+		t.Fatalf("define goal fixture: %v", err)
 	}
-	goal, err := be.Goal().Define(ctx, common.WorkspaceID(ws.ID), "initial goal")
+	if _, err := definitionports.UpdateGoal(ctx, commandHub, common.WorkspaceID(ws.ID), goal.ID, "updated goal"); err != nil {
+		t.Fatalf("update goal fixture: %v", err)
+	}
+	dod, err := definitionports.DefineDoD(ctx, commandHub, common.WorkspaceID(ws.ID), "dod-fixture", []string{"initial dod"})
 	if err != nil {
-		t.Fatalf("define goal: %v", err)
+		t.Fatalf("define dod fixture: %v", err)
 	}
-	if _, err := be.Goal().Update(ctx, common.WorkspaceID(ws.ID), common.GoalID(goal.ID), "updated goal"); err != nil {
-		t.Fatalf("update goal: %v", err)
-	}
-	dod, err := be.DoD().Define(ctx, common.WorkspaceID(ws.ID), []string{"initial dod"})
-	if err != nil {
-		t.Fatalf("define dod: %v", err)
-	}
-	if _, err := be.DoD().Update(ctx, common.WorkspaceID(ws.ID), common.DoDID(dod.ID), []string{"updated dod"}); err != nil {
-		t.Fatalf("update dod: %v", err)
+	if _, err := definitionports.UpdateDoD(ctx, commandHub, common.WorkspaceID(ws.ID), dod.ID, []string{"updated dod"}); err != nil {
+		t.Fatalf("update dod fixture: %v", err)
 	}
 
 	select {
@@ -674,35 +654,33 @@ func TestEventHubGoalAndDoDGetUpdateCommandsCarryWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
 
-	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{Title: "definition scope workspace"})
+	ws := seedBackendWorkspace(t, ctx, commandHub, "definition scope workspace")
+	goal, err := definitionports.DefineGoal(ctx, commandHub, common.WorkspaceID(ws.ID), "goal-fixture", "scoped goal")
 	if err != nil {
-		t.Fatalf("create workspace: %v", err)
+		t.Fatalf("define goal fixture: %v", err)
 	}
-	goal, err := be.Goal().Define(ctx, common.WorkspaceID(ws.ID), "scoped goal")
-	if err != nil {
-		t.Fatalf("define goal: %v", err)
-	}
-	if _, err := be.Goal().Get(ctx, common.WorkspaceID(ws.ID), common.GoalID(goal.ID)); err != nil {
+	if _, err := be.Goal().Get(ctx, common.WorkspaceID(ws.ID), goal.ID); err != nil {
 		t.Fatalf("get goal: %v", err)
 	}
-	if _, err := be.Goal().Update(ctx, common.WorkspaceID(ws.ID), common.GoalID(goal.ID), "updated scoped goal"); err != nil {
-		t.Fatalf("update goal: %v", err)
-	}
-	dod, err := be.DoD().Define(ctx, common.WorkspaceID(ws.ID), []string{"scoped dod"})
+	dod, err := definitionports.DefineDoD(ctx, commandHub, common.WorkspaceID(ws.ID), "dod-fixture", []string{"scoped dod"})
 	if err != nil {
-		t.Fatalf("define dod: %v", err)
+		t.Fatalf("define dod fixture: %v", err)
 	}
-	if _, err := be.DoD().Get(ctx, common.WorkspaceID(ws.ID), common.DoDID(dod.ID)); err != nil {
+	if _, err := be.DoD().Get(ctx, common.WorkspaceID(ws.ID), dod.ID); err != nil {
 		t.Fatalf("get dod: %v", err)
 	}
-	if _, err := be.DoD().Update(ctx, common.WorkspaceID(ws.ID), common.DoDID(dod.ID), []string{"updated scoped dod"}); err != nil {
-		t.Fatalf("update dod: %v", err)
+	before := len(commandHub.(*recordingEventHub).Sent())
+	if _, err := be.Goal().Update(ctx, common.WorkspaceID(ws.ID), goal.ID, "updated scoped goal"); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("retired goal update: %v", err)
 	}
-
+	if _, err := be.DoD().Update(ctx, common.WorkspaceID(ws.ID), dod.ID, []string{"updated scoped dod"}); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("retired dod update: %v", err)
+	}
+	if after := len(commandHub.(*recordingEventHub).Sent()); after != before {
+		t.Fatalf("退休更新发送了命令: before=%d after=%d", before, after)
+	}
 	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIGoalGet, common.WorkspaceID(ws.ID), string(goal.ID))
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIGoalUpdate, common.WorkspaceID(ws.ID), string(goal.ID))
 	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIDoDGet, common.WorkspaceID(ws.ID), string(dod.ID))
-	assertCLICommandWorkspaceScope(t, commandHub, workorchdevents.TopicCLIDoDUpdate, common.WorkspaceID(ws.ID), string(dod.ID))
 }
 
 func TestEventHubRunReadCommandsCarryWorkspaceScope(t *testing.T) {
@@ -782,13 +760,7 @@ func TestEventHubBackendManagesWorkspaceMemoryThroughCLICommands(t *testing.T) {
 		}
 	})
 
-	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{
-		Title:                "memory workspace",
-		DeliverableDirectory: "/tmp/memory-workspace",
-	})
-	if err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
+	ws := seedBackendWorkspace(t, ctx, commandHub, "memory workspace")
 	created, err := be.Memory().Create(ctx, common.WorkspaceID(ws.ID), &workorchmanagementcontract.MemoryMutation{
 		MemoryID:   "memory-cli-1",
 		SourceType: "user",

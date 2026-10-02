@@ -1,4 +1,4 @@
-import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, CreateWorkspaceRequest, Decision, DecisionPage, DoD, EventRecord, Goal, GoalDoDQualityCheck, GoalDoDQualityCheckRequest, MCPCapability, MCPCapabilityMutation, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderInferenceSelection, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSetupDraft, WorkspaceSetupDraftSession, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, DecisionPage, DoD, EventRecord, Goal, MCPCapability, MCPCapabilityMutation, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderInferenceSelection, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import type { DefinitionAuthoringCreate, DefinitionAuthoringInput, DefinitionAuthoringView } from './types';
 import { parseWorkspaceExecutionAdmission } from './workspaceExecutionAdmission';
 
@@ -20,7 +20,7 @@ export function createWorkorchEventStream(query?: { workspaceId?: string; runId?
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const method = init?.method?.toUpperCase() || 'GET';
-  const dedupeKey = method === 'GET' ? url : '';
+  const dedupeKey = method === 'GET' && !init?.signal ? url : '';
 
   if (dedupeKey && inflightGets.has(dedupeKey)) {
     return inflightGets.get(dedupeKey) as Promise<T>;
@@ -103,19 +103,6 @@ function runPath(workspaceId: string, runId: string, action?: string) {
   return `${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/runs/${encodedRunId}${suffix}`;
 }
 
-type WorkspaceSetupDraftGenerationRequest = {
-  templateId?: string;
-  title?: string;
-  description?: string;
-  deliverableDirectory?: string;
-  draft?: WorkspaceSetupDraft;
-  dialogLanguage?: string;
-};
-
-type WorkspaceSetupDraftMessageRequest = WorkspaceSetupDraftGenerationRequest & {
-  content: string;
-};
-
 function runCommandRequestId(intent: string, workspaceId: string, runId: string) {
   const suffix = Math.random().toString(36).slice(2, 10);
   return `web-${intent}-${workspaceId || 'workspace'}-${runId || 'run'}-${Date.now()}-${suffix}`;
@@ -191,12 +178,12 @@ export const workorchApi = {
     return body.authoring;
   },
   readDefinitionAuthoring: async (id: string) => {
-    const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspaces/${encodeURIComponent(id)}/authoring`);
+    const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspaces/${encodeURIComponent(id)}/authoring`, { signal: AbortSignal.timeout(30_000) });
     return body.authoring;
   },
-  saveDefinitionAuthoring: async (id: string, input: DefinitionAuthoringInput, templateId: string, revision: number, hash: string) => {
+  saveDefinitionAuthoring: async (id: string, input: DefinitionAuthoringInput, templateId: string, revision: number, hash: string, requestId: string) => {
     const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspaces/${encodeURIComponent(id)}/authoring`, {
-      method: 'PUT', body: JSON.stringify({ input, templateId, expectedWorkspaceRevision: revision, expectedInputHash: hash })
+      method: 'PUT', body: JSON.stringify({ requestId, input, templateId, expectedWorkspaceRevision: revision, expectedInputHash: hash })
     });
     return body.authoring;
   },
@@ -210,34 +197,6 @@ export const workorchApi = {
     });
     return body.authoring;
   },
-  createWorkspace: async (requestBody: CreateWorkspaceRequest) => {
-    const body = await request<{ workspace: Workspace }>(`${apiBase}/workspaces`, {
-      method: 'POST',
-      body: JSON.stringify(requestBody)
-    });
-    return body.workspace;
-  },
-  createWorkspaceSetupDraftSession: async (requestBody: { templateId?: string; title?: string; description?: string; deliverableDirectory?: string; dialogLanguage?: string }) => {
-    const body = await request<{ draftSession: WorkspaceSetupDraftSession }>(`${apiBase}/workspace-setup-draft-sessions`, {
-      method: 'POST',
-      body: JSON.stringify(requestBody)
-    });
-    return body.draftSession;
-  },
-  appendWorkspaceSetupDraftMessage: async (sessionId: string, requestBody: WorkspaceSetupDraftMessageRequest) => {
-    const body = await request<{ draftSession: WorkspaceSetupDraftSession }>(`${apiBase}/workspace-setup-draft-sessions/${encodeURIComponent(sessionId)}/messages`, {
-      method: 'POST',
-      body: JSON.stringify(requestBody)
-    });
-    return body.draftSession;
-  },
-  regenerateWorkspaceSetupDraft: async (sessionId: string, requestBody: WorkspaceSetupDraftGenerationRequest) => {
-    const body = await request<{ draftSession: WorkspaceSetupDraftSession }>(`${apiBase}/workspace-setup-draft-sessions/${encodeURIComponent(sessionId)}/regenerate`, {
-      method: 'POST',
-      body: JSON.stringify(requestBody)
-    });
-    return body.draftSession;
-  },
   deleteWorkspace: async (workspaceId: string, purge?: boolean) => {
     // Workspace delete uses the documented query contract; the backend body path is reserved for non-browser clients.
     const suffix = purge ? `?${new URLSearchParams({ purge: 'true' }).toString()}` : '';
@@ -249,44 +208,9 @@ export const workorchApi = {
     const body = await request<{ goals: Goal[] }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/goals`);
     return body.goals ?? [];
   },
-  defineGoal: async (workspaceId: string, text: string) => {
-    const body = await request<{ goal: Goal }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/goals`, {
-      method: 'POST',
-      body: JSON.stringify({ text })
-    });
-    return body.goal;
-  },
-  updateGoal: async (workspaceId: string, goalId: string, text: string) => {
-    const body = await request<{ goal: Goal }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/goals/${encodeURIComponent(goalId)}`, {
-      method: 'PUT',
-      body: JSON.stringify({ text })
-    });
-    return body.goal;
-  },
   listDoDs: async (workspaceId: string) => {
     const body = await request<{ dods: DoD[] }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/dods`);
     return body.dods ?? [];
-  },
-  defineDoD: async (workspaceId: string, items: string[]) => {
-    const body = await request<{ dod: DoD }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/dods`, {
-      method: 'POST',
-      body: JSON.stringify({ items })
-    });
-    return body.dod;
-  },
-  updateDoD: async (workspaceId: string, dodId: string, items: string[]) => {
-    const body = await request<{ dod: DoD }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/dods/${encodeURIComponent(dodId)}`, {
-      method: 'PUT',
-      body: JSON.stringify({ items })
-    });
-    return body.dod;
-  },
-  checkGoalDoDQuality: async (workspaceId: string, requestBody: GoalDoDQualityCheckRequest) => {
-    const body = await request<{ qualityCheck: GoalDoDQualityCheck }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/goal-dod-quality-check`, {
-      method: 'POST',
-      body: JSON.stringify(requestBody)
-    });
-    return body.qualityCheck;
   },
   listRuns: async (workspaceId?: string) => {
     const body = await request<{ runs: Run[] }>(`${apiBase}/runs${querySuffix({ workspaceId })}`);

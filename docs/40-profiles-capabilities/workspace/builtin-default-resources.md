@@ -77,7 +77,10 @@ bindings。未知/定制内容、stale preview、目标 binary 已变化均返�
 
 ## Automatic Configuration Loading
 
-新 Start/Restart 自动读取当前 Template 与 Soul，不要求先手动 refresh，也不要求重新创建 Workspace：
+新 Start/Restart 读取当前 Template 与 Soul；配置加载不授权替换用户确认的规格：
+
+- Goal-only authoring 在创建／修订 owner 事务中物化完整 Template binding。确认后 Restart 核对当前模板、目录与 Definition policy，复用 exact confirmed、eligible candidate；漂移时阻塞，不自动生成新候选或重新调用创作 provider。更新规格须走受支持的显式创作修订、六审查与确认；不支持的修订状态保持阻塞。catalog 升级与 template refresh 均不是用户确认。
+- 以下自动物化与重新准入规则适用于其他受控 owner 定义路径，不能作为 Goal-only authoring 的旁路。
 
 - Workspace 的 `TemplateBindingHash` 记录当前 authoring 字段所物化的 Template 版本；模板未变时保留 Workspace 显式
   配置。模板变化时，重新物化其 profile、default/stage Soul、context hints 与 evidence policies，删除已从模板移除的旧策略。
@@ -110,7 +113,7 @@ catalog、不推测升级成功，也不触发 owner mutation。
 当前 `software-dev` 的新执行声明 `shell/project-native-validation/v4`，并显式封存
 `recipeInputReviewProtocolRef=validation/input-consistency/v2`，使逐 CWI 输入必须经过完整原准则映射的独立一致性评审与
 包范围验证；这是 Shell capability 合同，不改变模板中立身份、原 Goal/DoD 或验收集合。精确未定制的旧内置模板
-通过 reviewed fingerprint 在 owner ensure 时升级；新 Start/Restart 编译当前配置，旧 Run 的 v1/v2/v3 不被回填。
+通过 reviewed fingerprint 在 owner ensure 时升级；新 Start/Restart 核对当前配置，Goal-only authoring 的已确认模板漂移仍按上述规则阻塞，旧 Run 的 v1/v2/v3 不被回填。
 终态 Run 不因升级重新运行；需要显式 Restart。未能识别的定制模板仍须用户合并，不能借升级绕过。
 `b8447f75` 的完整旧模板来自冻结历史 fixture；memory/file owner 的重复 reopen 验证 exact upgrade 与定制内容保留，
 不从当前模板删字段伪造旧基线。review 协议版本与 native adapter 版本分别封存，不能互相推断或在恢复时补默认值。
@@ -149,7 +152,7 @@ Application/HTTP tests 验证 concrete owner result、错误 scope/hash、缺失
 未变化配置幂等、Template/Workspace 并发漂移拒绝、无效新配置阻塞、Soul 重新读取及历史 Run 文件不变。
 `TestIsolatedInputTemplateUpgradeReopensReviewedPreviousDefault` 使用冻结完整 `dfa5c1ad` 内容核对 memory/file 升级与
 定制保护；`TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition` 通过正常 HTTP authoring 和正式 restart
-compiler，核对当前内置模板生成 24 DoD / 27 CWI、25 managed requirements 与幂等 startup，不手工替换 bootstrap adapter。
+compiler，核对 24 条用户要求与 13 条模板必需项形成 37 条正式 DoD，完整生成 44 个 CWI／42 个 proof requirements，并保持幂等 startup；不手工替换 bootstrap adapter。独立显式 activation 与重放只创建一个 Run；该测试停在 SM-1 materialization，不替代 Runtime 执行。
 
 ## Related Contracts
 

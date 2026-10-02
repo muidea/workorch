@@ -6,6 +6,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
@@ -42,9 +43,17 @@ func (b *Biz) QueryDefinitionAuthoring(ctx context.Context, command workspaceeve
 		record := response.Record.Clone()
 		response.Record = &record
 	}
+	response.History = append([]workspaceevents.DefinitionAuthoringConfirmedRevision(nil), response.History...)
+	for n := range response.History {
+		response.History[n] = response.History[n].Clone()
+	}
 	if response.Confirmation != nil {
 		confirmation := response.Confirmation.Clone()
 		response.Confirmation = &confirmation
+	}
+	if response.PriorClarification != nil {
+		binding := response.PriorClarification.Clone()
+		response.PriorClarification = &binding
 	}
 	if response.AdmissionCandidate != nil {
 		candidate := response.AdmissionCandidate.Clone()
@@ -93,8 +102,18 @@ func (b *Biz) SaveDefinitionAuthoring(ctx context.Context, command workspaceeven
 	if err := response.Record.Validate(); err != nil {
 		return workspaceevents.SaveDefinitionAuthoringResult{}, err
 	}
-	if response.Record.InputHash != command.Input.InputHash() {
+	if response.Record.Input.WorkspaceID != command.Input.WorkspaceID || response.Receipt.Validate() != nil || response.Receipt.RequestID != command.RequestID || command.ExpectedWorkspaceRevision == ^uint64(0) || response.Receipt.WorkspaceRevision != command.ExpectedWorkspaceRevision+1 || response.Receipt.RequestHash != workspace.DefinitionAuthoringSaveRequestHash(command.RequestID, command.Input, command.ExpectedWorkspaceRevision, command.ExpectedInputHash, command.DeliverableDirectory) {
 		return workspaceevents.SaveDefinitionAuthoringResult{}, fmt.Errorf("%w: authoring save identity mismatch", common.ErrConflict)
+	}
+	matched := false
+	for _, receipt := range response.Record.SaveReceipts {
+		if receipt == response.Receipt {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return workspaceevents.SaveDefinitionAuthoringResult{}, fmt.Errorf("%w: missing persisted save receipt", common.ErrConflict)
 	}
 	response.Record = response.Record.Clone()
 	return response, nil

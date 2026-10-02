@@ -100,74 +100,7 @@ func (a *Agent) Close() {
 
 func (a *Agent) RunWithBackend(ctx context.Context, workspaceID string, goalText string) error {
 	defer close(a.events)
-	if a.be == nil {
-		return fmt.Errorf("agent backend is required")
-	}
-	if workspaceID == "" {
-		return fmt.Errorf("workspace id is required")
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	runDone := make(chan error, 1)
-	var runID common.RunID
-	var runIDMu sync.RWMutex
-
-	eventCtx, cancelEvents := context.WithCancel(ctx)
-	defer cancelEvents()
-	unsubscribe, err := a.be.Events().Subscribe(eventCtx, func(_ context.Context, evt backend.Event) {
-		runIDMu.RLock()
-		currentRunID := runID
-		runIDMu.RUnlock()
-		if evt.WorkspaceID != common.WorkspaceID(workspaceID) {
-			return
-		}
-		if currentRunID != "" && evt.RunID != "" && evt.RunID != currentRunID {
-			return
-		}
-		a.handleBackendEvent(ctx, evt, runDone)
-	})
-	if err != nil {
-		return fmt.Errorf("subscribe events: %w", err)
-	}
-	defer unsubscribe()
-
-	_, err = a.be.Goal().Define(ctx, common.WorkspaceID(workspaceID), goalText)
-	if err != nil {
-		return fmt.Errorf("define goal: %w", err)
-	}
-	dodItems := backend.DefaultDoDItemsForWorkspace(ctx, a.be, common.WorkspaceID(workspaceID))
-	_, err = a.be.DoD().Define(ctx, common.WorkspaceID(workspaceID), dodItems)
-	if err != nil {
-		return fmt.Errorf("define dod: %w", err)
-	}
-	admission, err := a.be.Run().Command(ctx, backend.WorkspaceRunCommand{
-		WorkspaceID: common.WorkspaceID(workspaceID),
-		Intent:      backend.RunCommandIntentRestart,
-		Reason:      "user_requested",
-		Source:      "agent",
-	})
-	if err != nil {
-		return fmt.Errorf("activate execution: %w", err)
-	}
-	if admission == nil || admission.RunID == "" {
-		return fmt.Errorf("activate execution: %w: owner admission did not identify a run", common.ErrConflict)
-	}
-
-	runIDMu.Lock()
-	runID = admission.RunID
-	runIDMu.Unlock()
-	runCreated := RunCreatedInfo{RunID: string(admission.RunID), WorkspaceID: workspaceID}
-	a.Send(Event{Type: EventRunCreated, RunCreated: &runCreated})
-
-	select {
-	case <-ctx.Done():
-		a.Send(Event{Type: EventCancelled, Error: ctx.Err()})
-		return ctx.Err()
-	case err := <-runDone:
-		return err
-	}
+	return fmt.Errorf("%w: Goal-first agent 执行已退休，请通过 Web 完成规格创作、审查与确认，再显式提交工作空间执行意图", common.ErrConflict)
 }
 
 func (a *Agent) handleBackendEvent(ctx context.Context, evt backend.Event, runDone chan<- error) {

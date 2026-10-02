@@ -12,16 +12,19 @@ import (
 // refs only after admission. A change of references here would create a new
 // specification hash that the original reviewers never judged.
 func ConfirmedAuthoringCandidateInputs(record *DefinitionAuthoringRecord, confirmation DefinitionAuthoringConfirmation, workspaceID common.WorkspaceID) (DefinitionCandidateItem, []DefinitionCandidateItem, GoalSpecification, error) {
-	if record == nil || confirmation.Phase != DefinitionAuthoringConfirmationMaterialized || confirmation.Validate(record, workspaceID) != nil {
-		return DefinitionCandidateItem{}, nil, GoalSpecification{}, fmt.Errorf("authoring candidate requires exact materialized confirmation")
+	goal, items, reviewed, _, err := ConfirmedAuthoringAdmissionSource(record, confirmation, workspaceID)
+	return goal, items, reviewed, err
+}
+
+// ConfirmedAuthoringAdmissionSource 在同一次完整来源校验中派生正式输入和准入引用。
+// 返回值只含数据；不暴露可跨调用复用的校验凭据。
+func ConfirmedAuthoringAdmissionSource(record *DefinitionAuthoringRecord, confirmation DefinitionAuthoringConfirmation, workspaceID common.WorkspaceID) (DefinitionCandidateItem, []DefinitionCandidateItem, GoalSpecification, DefinitionAuthoringAdmissionRef, error) {
+	if record == nil || confirmation.Phase != DefinitionAuthoringConfirmationMaterialized {
+		return DefinitionCandidateItem{}, nil, GoalSpecification{}, DefinitionAuthoringAdmissionRef{}, fmt.Errorf("authoring candidate requires exact materialized confirmation")
 	}
-	derivation, reviewed, err := record.ConfirmableSpecification(confirmation.DerivationPermitID, confirmation.ProposalHash)
-	if err != nil || reviewed.AdmissionHash() != confirmation.SpecificationHash {
-		return DefinitionCandidateItem{}, nil, GoalSpecification{}, fmt.Errorf("authoring candidate review no longer matches confirmation")
-	}
-	items, err := derivation.Proposal.CandidateItems(derivation.Input, &derivation.Template)
-	if err != nil || len(items) != len(confirmation.DoD.Items) {
-		return DefinitionCandidateItem{}, nil, GoalSpecification{}, fmt.Errorf("authoring candidate lost its derived items")
+	reviewed, items, err := confirmation.validatedSpecification(record, workspaceID)
+	if err != nil {
+		return DefinitionCandidateItem{}, nil, GoalSpecification{}, DefinitionAuthoringAdmissionRef{}, err
 	}
 	goal := DefinitionCandidateItem{
 		CandidateItemRef: DefinitionAuthoringGoalItemRef,
@@ -33,19 +36,18 @@ func ConfirmedAuthoringCandidateInputs(record *DefinitionAuthoringRecord, confir
 		items[index].SourceIdentity = "dod:" + string(confirmation.DoD.ID) + "@" + confirmation.DoD.DefinitionRevision
 	}
 	if err := reviewed.Validate(goal, items); err != nil {
-		return DefinitionCandidateItem{}, nil, GoalSpecification{}, err
+		return DefinitionCandidateItem{}, nil, GoalSpecification{}, DefinitionAuthoringAdmissionRef{}, err
 	}
-	return goal, items, reviewed, nil
-}
-
-func ConfirmedAuthoringAdmissionRef(record *DefinitionAuthoringRecord, confirmation DefinitionAuthoringConfirmation, workspaceID common.WorkspaceID) (DefinitionAuthoringAdmissionRef, error) {
-	if _, _, _, err := ConfirmedAuthoringCandidateInputs(record, confirmation, workspaceID); err != nil {
-		return DefinitionAuthoringAdmissionRef{}, err
-	}
-	return DefinitionAuthoringAdmissionRef{
+	ref := DefinitionAuthoringAdmissionRef{
 		InputHash:          confirmation.InputHash,
 		DerivationPermitID: confirmation.DerivationPermitID,
 		ProposalHash:       confirmation.ProposalHash,
 		SpecificationHash:  confirmation.SpecificationHash,
-	}, nil
+	}
+	return goal, items, reviewed, ref, nil
+}
+
+func ConfirmedAuthoringAdmissionRef(record *DefinitionAuthoringRecord, confirmation DefinitionAuthoringConfirmation, workspaceID common.WorkspaceID) (DefinitionAuthoringAdmissionRef, error) {
+	_, _, _, ref, err := ConfirmedAuthoringAdmissionSource(record, confirmation, workspaceID)
+	return ref, err
 }

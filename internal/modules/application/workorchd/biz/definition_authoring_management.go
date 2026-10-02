@@ -7,7 +7,6 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -15,6 +14,9 @@ import (
 )
 
 func (b *Biz) SaveDefinitionAuthoringView(ctx context.Context, id common.WorkspaceID, request workorchmanagementcontract.DefinitionAuthoringSave) (workorchmanagementcontract.DefinitionAuthoringView, error) {
+	if strings.TrimSpace(request.TemplateID) == "" {
+		return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrInvalidArgument
+	}
 	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id})
 	if err != nil {
 		return workorchmanagementcontract.DefinitionAuthoringView{}, err
@@ -24,7 +26,7 @@ func (b *Biz) SaveDefinitionAuthoringView(ctx context.Context, id common.Workspa
 	}
 	input := workspace.DefinitionAuthoringInput{
 		Version: workspace.DefinitionAuthoringInputVersionCurrent, WorkspaceID: id,
-		Revision: 1, GoalText: request.Input.GoalText,
+		Revision: 1, TemplateID: strings.TrimSpace(request.TemplateID), GoalText: request.Input.GoalText,
 		AcceptanceRequirements: request.Input.AcceptanceRequirements, ResourceRefs: request.Input.ResourceRefs,
 	}
 	var directory *string
@@ -41,44 +43,35 @@ func (b *Biz) SaveDefinitionAuthoringView(ctx context.Context, id common.Workspa
 		directory = &value
 	}
 	if view.Record != nil {
-		input.TemplateID = view.Record.Input.TemplateID
-		if request.TemplateID != "" {
-			input.TemplateID = strings.TrimSpace(request.TemplateID)
-		}
-		if request.ExpectedInputHash != view.Record.InputHash {
-			return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrConflict
-		}
 		input.Revision = view.Record.Input.Revision
-		if reflect.DeepEqual(input.Normalized(), view.Record.Input.Normalized()) && (directory == nil || *directory == view.DeliverableDirectory) && view.CurrentTemplateAvailable && view.CurrentTemplateSnapshotHash == view.Record.TemplateSnapshotHash {
-			// Retry after a lost save response returns the exact owner record.
-			return b.ReadDefinitionAuthoringView(ctx, id)
+		if !reflect.DeepEqual(input.Normalized(), view.Record.Input.Normalized()) || (directory != nil && *directory != view.DeliverableDirectory) || !view.CurrentTemplateAvailable || view.CurrentTemplateSnapshotHash != view.Record.TemplateSnapshotHash {
+			input.Revision++
 		}
-		if view.WorkspaceRevision != request.ExpectedWorkspaceRevision {
-			return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrConflict
-		}
-		input.Revision++
 	} else {
 		if request.ExpectedInputHash != "" {
 			return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrConflict
 		}
-		// The owner record has no Template selection until the Workspace is
-		// created with its template. A blank Template fails closed in Save.
-		workspaceRecord, readErr := workspaceports.ReadWorkspaceRecord(ctx, b.EventHub(), id)
-		if readErr != nil {
-			return workorchmanagementcontract.DefinitionAuthoringView{}, readErr
-		}
-		input.TemplateID = workspaceRecord.TemplateID
-		if request.TemplateID != "" {
-			input.TemplateID = strings.TrimSpace(request.TemplateID)
-		}
+
 	}
 	if input.Validate() != nil || input.Revision == 0 {
 		return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrInvalidArgument
 	}
-	if _, err := b.SaveDefinitionAuthoring(ctx, workspaceevents.SaveDefinitionAuthoringCommand{Input: input, ExpectedWorkspaceRevision: request.ExpectedWorkspaceRevision, DeliverableDirectory: directory}); err != nil {
+	saved, err := b.SaveDefinitionAuthoring(ctx, workspaceevents.SaveDefinitionAuthoringCommand{RequestID: request.RequestID, ExpectedInputHash: request.ExpectedInputHash, Input: input, ExpectedWorkspaceRevision: request.ExpectedWorkspaceRevision, DeliverableDirectory: directory})
+	if err != nil {
 		return workorchmanagementcontract.DefinitionAuthoringView{}, err
 	}
-	return b.ReadDefinitionAuthoringView(ctx, id)
+	// 原回执可供 owner 重放，但不能将被后续修订替代的保存冒充当前成功。
+	if saved.Receipt.InputHash != saved.Record.InputHash || saved.Receipt.TemplateSnapshotHash != saved.Record.TemplateSnapshotHash {
+		return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrConflict
+	}
+	current, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id})
+	if err != nil {
+		return workorchmanagementcontract.DefinitionAuthoringView{}, err
+	}
+	if current.Record == nil || current.Record.InputHash != saved.Receipt.InputHash || current.Record.TemplateSnapshotHash != saved.Receipt.TemplateSnapshotHash || current.WorkspaceRevision < saved.Receipt.WorkspaceRevision {
+		return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrConflict
+	}
+	return definitionAuthoringView(current)
 }
 
 func (b *Biz) DeriveDefinitionAuthoringView(ctx context.Context, id common.WorkspaceID) (workorchmanagementcontract.DefinitionAuthoringView, error) {
