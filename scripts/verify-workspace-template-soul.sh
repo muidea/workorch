@@ -253,7 +253,7 @@ cat >"$TMP_DIR/template-create.json" <<JSON
   "contextHints": {
     "profileContracts": {
       "template-authoring-fixture": {
-        "evidenceRequirements": [{"id": "*", "scope": "dodItem", "requiredEvidenceKinds": ["validation"], "acceptedStepKinds": ["shell/run"]}]
+        "evidenceRequirements": [{"id": "*", "scope": "dodItem", "requiredEvidenceKinds": ["validation"], "acceptedStepKinds": ["validation/managed_session"]}]
       }
     }
   },

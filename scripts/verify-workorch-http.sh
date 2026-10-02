@@ -63,8 +63,8 @@ grep '运行控制' "$TMP_DIR/workorch-console-all.js" >/dev/null
 grep '系统配置' "$TMP_DIR/workorch-console-all.js" >/dev/null
 grep '服务状态' "$TMP_DIR/workorch-console-all.js" >/dev/null
 grep '创建工作空间' "$TMP_DIR/workorch-console-all.js" >/dev/null
-grep '定义目标' "$TMP_DIR/workorch-console-all.js" >/dev/null
-grep '定义验收标准' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '六类独立审查' "$TMP_DIR/workorch-console-all.js" >/dev/null
+grep '确认规格并准入' "$TMP_DIR/workorch-console-all.js" >/dev/null
 grep '提交执行' "$TMP_DIR/workorch-console-all.js" >/dev/null
 grep '运行摘要' "$TMP_DIR/workorch-console-all.js" >/dev/null
 grep '当前运行' "$TMP_DIR/workorch-console-all.js" >/dev/null

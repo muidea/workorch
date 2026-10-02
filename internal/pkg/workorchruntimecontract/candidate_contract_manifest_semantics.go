@@ -147,6 +147,18 @@ func ValidateRuntimeCandidateAgainstManifest(manifest RuntimeCandidateContractMa
 	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" || manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
 		return &RuntimeCandidateContractDiagnostic{Path: "$", Actual: "unsealed_manifest", Cause: fmt.Errorf("runtime candidate contract manifest is invalid")}
 	}
+	return validateRuntimeCandidateAgainstNormalizedManifest(manifest, candidate)
+}
+
+func validateRuntimeCandidateAgainstValidatedManifest(validated runtimeValidatedCandidateManifest, candidate RuntimeCandidate) error {
+	manifest := validated.manifest
+	if manifest.Revision != RuntimeCandidateContractManifestRevision || manifest.Hash == "" {
+		return &RuntimeCandidateContractDiagnostic{Path: "$", Actual: "unsealed_manifest", Cause: fmt.Errorf("runtime candidate contract manifest is invalid")}
+	}
+	return validateRuntimeCandidateAgainstNormalizedManifest(manifest, candidate)
+}
+
+func validateRuntimeCandidateAgainstNormalizedManifest(manifest RuntimeCandidateContractManifest, candidate RuntimeCandidate) error {
 	if err := ValidateRuntimeCandidateManifestOperationCardinality(manifest); err != nil {
 		return &RuntimeCandidateContractDiagnostic{Path: "$.operations", Actual: "invalid_max_operation_count", Cause: err}
 	}

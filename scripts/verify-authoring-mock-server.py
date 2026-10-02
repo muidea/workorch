@@ -12,8 +12,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path not in ('/v1/models', '/models'):
             self.send_error(404)
             return
-        self.respond(200, {'data': [{'id': 'verify-model', 'object': 'model',
-                                   'context_window': 32768, 'max_output_tokens': 4096}]})
+        self.respond(200, {'object': 'list', 'data': [{'id': 'verify-model', 'object': 'model',
+                                   'supported_endpoints': ['/v1/responses'],
+                                   'contextWindowTokens': 32768, 'maxOutputTokens': 4096}]})
 
     def do_POST(self):
         if self.path != '/v1/responses':

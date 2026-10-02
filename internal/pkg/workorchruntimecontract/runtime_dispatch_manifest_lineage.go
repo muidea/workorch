@@ -42,13 +42,20 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 	}
 	sessionByRequest := make(map[string]RuntimeCandidateRequestSession, len(sessions))
 	sessionCounts := make(map[string]int, len(sessions))
+	validatedByRequest := make(map[string]runtimeValidatedCandidateManifest, len(sessions))
 	for _, rawSession := range sessions {
+		var validated *runtimeValidatedCandidateManifest
 		if rawSession.CandidateManifest != nil {
-			if err := ValidateRuntimeCandidateContractManifestRawCanonical(*rawSession.CandidateManifest); err != nil {
+			value, err := validateRuntimeCandidateManifestRawCanonical(*rawSession.CandidateManifest)
+			if err != nil {
 				return fmt.Errorf("accepted runtime candidate attempt pre-seal manifest is not raw-canonical: %w", err)
 			}
+			validated = &value
 		}
 		session := rawSession.Normalized()
+		if validated != nil {
+			validatedByRequest[session.LogicalRequestID] = *validated
+		}
 		sessionCounts[session.LogicalRequestID]++
 		sessionByRequest[session.LogicalRequestID] = session
 	}
@@ -64,12 +71,12 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 			session.StablePrefixHash != attempt.StablePrefixHash || session.ManifestHash != attempt.ManifestHash {
 			return fmt.Errorf("accepted runtime candidate attempt has no exact pre-seal operations manifest")
 		}
-		manifest := session.CandidateManifest.Clone()
-		if manifest.Hash != attempt.ManifestHash || manifest.Hash != dispatch.CandidateManifestHash ||
-			manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
+		validated := validatedByRequest[session.LogicalRequestID]
+		manifest := validated.manifest
+		if manifest.Hash != attempt.ManifestHash || manifest.Hash != dispatch.CandidateManifestHash {
 			return fmt.Errorf("accepted runtime candidate attempt manifest body/hash mismatch")
 		}
-		if err := ValidateRuntimeCandidateAgainstManifest(manifest, dispatch.Candidate); err != nil {
+		if err := validateRuntimeCandidateAgainstValidatedManifest(validated, dispatch.Candidate); err != nil {
 			return fmt.Errorf("accepted runtime candidate attempt candidate/manifest mismatch: %w", err)
 		}
 		if dispatch.Candidate.Assessment != nil {
@@ -105,7 +112,7 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 		} else if session.RepairCommitment != nil || attempt.AdmissionRepairCommitment != nil || dispatch.RepairCommitment != nil {
 			return fmt.Errorf("accepted runtime candidate attempt carries a repair commitment without manifest purpose")
 		}
-		targets, err := RuntimeCandidateAdmissionTargetAuthorizationsFromManifest(manifest, dispatch.Candidate)
+		targets, err := runtimeOperationTargetAuthorizationsFromNormalizedManifest(manifest, dispatch.Candidate)
 		if err != nil {
 			return fmt.Errorf("accepted runtime candidate attempt target projection: %w", err)
 		}
@@ -113,7 +120,7 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 		if err := ValidateCoverageEvidenceBindingProjection(bindings); err != nil {
 			return fmt.Errorf("accepted runtime candidate attempt coverage projection: %w", err)
 		}
-		recipes, err := RuntimeCandidateManagedValidationRecipeSnapshot(manifest, dispatch.Candidate)
+		recipes, err := runtimeCandidateManagedValidationRecipeSnapshotFromNormalizedManifest(manifest, dispatch.Candidate)
 		if err != nil {
 			return fmt.Errorf("accepted runtime candidate attempt validation recipe projection: %w", err)
 		}

@@ -22,6 +22,25 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, logica
 	return compileRuntimeSemanticBindingsWithValidatedManifest(validated, logicalRequestID, document, feasibilities)
 }
 
+// CompileRuntimeSemanticAcceptedBatchBindings 从精确 accepted batch 编译 binding；
+// manifest 的完整校验产物只在本次调用内部复用，不授予调用者校验凭据。
+func CompileRuntimeSemanticAcceptedBatchBindings(manifest RuntimeSemanticPlanManifest, batch RuntimeSemanticPlanBatch, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
+	validated, err := validateRuntimeSemanticPlanManifest(manifest)
+	if err != nil {
+		return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding batch: %w", err)
+	}
+	if err := validateRuntimeSemanticPlanBatchAgainstValidatedManifest(batch, validated); err != nil {
+		return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding batch: %w", err)
+	}
+	batch = batch.Normalized()
+	documentHash := StableRuntimeSemanticPlanDocumentHash(document)
+	if batch.State != RuntimeSemanticPlanBatchAccepted || batch.DocumentHash != documentHash ||
+		strings.TrimSpace(document.BatchID) != batch.BatchID || document.BatchSequence != batch.Sequence {
+		return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding requires the exact accepted batch document")
+	}
+	return compileRuntimeSemanticBindingsWithValidatedManifest(validated, batch.RequestLogicalID, document, feasibilities)
+}
+
 // 仅复用同一次调用完整校验所得的 manifest；document 与 owner facts 仍逐批完整反证。
 func compileRuntimeSemanticBindingsWithValidatedManifest(validated runtimeValidatedSemanticManifest, logicalRequestID string, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
 	manifest := validated.manifest

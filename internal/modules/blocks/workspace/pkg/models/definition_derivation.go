@@ -30,7 +30,9 @@ func (r DefinitionDerivationRequest) Clone() DefinitionDerivationRequest {
 	r.Resources = CloneDefinitionAuthoringResources(r.Resources)
 	if r.Proposal != nil {
 		p := *r.Proposal
-		p.AdditionalItems = append([]string(nil), p.AdditionalItems...)
+		if p.AdditionalItems != nil {
+			p.AdditionalItems = append([]string{}, p.AdditionalItems...)
+		}
 		r.Proposal = &p
 	}
 	return r

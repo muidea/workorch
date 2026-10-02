@@ -959,7 +959,7 @@ func semanticSealedLedgerFixture(t *testing.T) RuntimeSemanticPlanningLedger {
 // compiler and reducer; contract tests must not restore shared transition
 // authority merely to assemble a ledger fixture.
 func semanticContractTestPendingBatch(
-	t *testing.T,
+	t testing.TB,
 	manifest RuntimeSemanticPlanManifest,
 	order RuntimeSemanticPlanDocument,
 	sequence int,

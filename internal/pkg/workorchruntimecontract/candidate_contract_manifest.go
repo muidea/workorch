@@ -279,6 +279,10 @@ func RuntimeCandidateManagedValidationRecipeSnapshot(manifest RuntimeCandidateCo
 		manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
 		return nil, fmt.Errorf("runtime candidate manifest is invalid")
 	}
+	return runtimeCandidateManagedValidationRecipeSnapshotFromNormalizedManifest(manifest, candidate)
+}
+
+func runtimeCandidateManagedValidationRecipeSnapshotFromNormalizedManifest(manifest RuntimeCandidateContractManifest, candidate RuntimeCandidate) ([]RuntimeValidationRecipe, error) {
 	operations, err := runtimeCandidatePayloadOperations(candidate)
 	if err != nil {
 		// Assessment and governance candidates have no executable operation

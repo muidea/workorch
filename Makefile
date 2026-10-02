@@ -170,6 +170,7 @@ vet: go-deps
 
 console-test: console-deps
 	@cd $(CONSOLE_WEB) && $(NPM) test
+	@cd $(CONSOLE_WEB) && $(NPM) run test:components
 
 console-build: console-deps
 	@cd $(CONSOLE_WEB) && $(NPM) run build
@@ -228,6 +229,7 @@ verify-workspace-authoring-contract:
 	python3 scripts/test_verify_mock_readiness.py
 	python3 scripts/test-create-authoring-verification-workspace.py
 	python3 scripts/test-verify-workspace-authoring-live.py
+	python3 scripts/test-verify-llm-streaming-fixture.py
 	go test ./internal/pkg/events -run '^TestOwnerEvent(ContractsAreCompleteAndUnique|CommandsHaveProductionSenderAndReceiver|MessageGraphsAreConcrete)$$' -count=1
 	go test -race ./internal/modules/blocks/workspace/pkg/eventmapping -run '^TestAuthoring' -count=1 -timeout=3m
 	go test ./internal/services/workorch -run '^TestWeb(ConsoleMutatingEndpointsStayWithinProductSurfaceContract|WorkspaceSetupRequiresTemplateAndAllowsDefaultDirectory)$$' -count=1

@@ -33,6 +33,20 @@ class EncodingTest(unittest.TestCase):
         handler.do_POST()
         return statuses, headers, handler.wfile.getvalue()
 
+    def test_catalog_matches_responses_model_contract(self):
+        for path in ('/models', '/v1/models'):
+            with self.subTest(path=path):
+                handler = object.__new__(server.Handler)
+                handler.path = path
+                responses = []
+                handler.respond = lambda code, body: responses.append((code, body))
+                handler.do_GET()
+                self.assertEqual(responses, [(200, {'object': 'list', 'data': [{
+                    'id': 'verify-model', 'object': 'model',
+                    'supported_endpoints': ['/v1/responses'],
+                    'contextWindowTokens': 32768, 'maxOutputTokens': 4096,
+                }]})])
+
     def test_nonstream_and_stream_preserve_same_derivation_identity(self):
         prompt = '### C3.derivation-input\n' + json.dumps({'outputShape': {'AuthoringInputHash': 'exact', 'TemplateSnapshotHash': 'sealed'}})
         statuses, _, body = self.call({'input': prompt})

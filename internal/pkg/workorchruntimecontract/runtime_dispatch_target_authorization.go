@@ -129,6 +129,14 @@ func runtimeOperationTargetAuthorizationsFromManifest(
 	if err := ValidateRuntimeCandidateAgainstManifest(manifest, candidate); err != nil {
 		return nil, err
 	}
+	return runtimeOperationTargetAuthorizationsFromNormalizedManifest(manifest, candidate)
+}
+
+// 调用方在本次 lineage 内已完成 candidate admission；不对外提供校验凭据。
+func runtimeOperationTargetAuthorizationsFromNormalizedManifest(
+	manifest RuntimeCandidateContractManifest,
+	candidate RuntimeCandidate,
+) ([]RuntimeDispatchOperationTargetAuthorization, error) {
 	if candidate.Assessment != nil || candidate.Governance != nil {
 		return nil, nil
 	}

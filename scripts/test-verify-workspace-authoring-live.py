@@ -13,6 +13,13 @@ live = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(live)
 
 
+def owner_selection(selection):
+    value = {'target': {key: selection[key] for key in ('providerId', 'modelId')}}
+    if selection['reasoningEffort']:
+        value['reasoningEffort'] = selection['reasoningEffort']
+    return value
+
+
 def ready_view():
     return {"state": "ready_to_confirm", "templateCurrent": True, "inputHash": "input", "derivationPermitId": "permit",
             "proposal": {"derivationPermitId": "permit", "proposalHash": "proposal", "specificationHash": "spec",
@@ -21,6 +28,185 @@ def ready_view():
 
 
 class AuthoringLiveContractTest(unittest.TestCase):
+    def test_owner_selection_uses_nested_target_and_rejects_request_shape(self):
+        self.assertIsNone(live.workspace_selection({}))
+        for effort in ('', 'none', 'high'):
+            selection = {'providerId': 'ai-proxy', 'modelId': 'native', 'reasoningEffort': effort}
+            self.assertEqual(live.workspace_selection({'defaultLLMSelection': owner_selection(selection)}), selection)
+        for value in ({'providerId': 'ai-proxy', 'modelId': 'native'}, {}, {'target': None},
+                      {'target': {'providerId': 'ai-proxy'}},
+                      {'target': {'providerId': 'ai-proxy', 'modelId': ' native'}},
+                      {'target': {'providerId': 'ai-proxy', 'modelId': 'native'}, 'reasoningEffort': None}):
+            with self.subTest(value=value), self.assertRaises(RuntimeError):
+                live.workspace_selection({'defaultLLMSelection': value})
+
+    def test_selection_is_applied_before_compile_and_confirmation_reads_latest_revision(self):
+        selection = {'providerId': 'ai-proxy', 'modelId': 'native', 'reasoningEffort': ''}
+        workspace = {'id': 'ws', 'revision': 1}
+        confirmed = False
+        order = []
+        ready = {**ready_view(), 'workspaceId': 'ws', 'workspaceRevision': 2}
+        def request(method, route, body=None):
+            nonlocal confirmed
+            order.append((method, route))
+            if route.endswith('/runs'):
+                return {'runs': []}
+            if route.endswith('/workspace-authoring'):
+                return {'authoring': {**ready, 'state': 'draft'}}
+            if route.endswith('/llm-selection'):
+                self.assertFalse(confirmed)
+                workspace.update(revision=2, defaultLLMSelection=owner_selection(selection))
+                return {'workspace': copy.deepcopy(workspace)}
+            if route == '/api/v1/workorch/workspaces/ws':
+                return {'workspace': copy.deepcopy(workspace)}
+            if route.endswith('/authoring/confirm'):
+                self.assertEqual(body['expectedWorkspaceRevision'], 2)
+                confirmed = True
+                return {'authoring': {**ready, 'state': 'admitted', 'activationState': 'eligible', 'startupInputHash': 'startup'}}
+            if route.endswith('/authoring/compile'):
+                self.assertEqual(workspace.get('defaultLLMSelection'), owner_selection(selection))
+                return {'authoring': ready}
+            return {'authoring': {**ready, 'state': 'draft'}}
+        with tempfile.TemporaryDirectory() as directory:
+            with live.RecoveryJournal(Path(directory) / 'recovery.json', 'http://localhost', {'requestId': 'stable'}, selection) as journal:
+                live.verify(request, journal, 1, True)
+        self.assertEqual(sum(method == 'PUT' for method, _ in order), 1)
+        self.assertLess(next(i for i, (_, path) in enumerate(order) if path.endswith('/llm-selection')), next(i for i, (_, path) in enumerate(order) if path.endswith('/compile')))
+        self.assertFalse(any('execution-activations' in path for _, path in order))
+
+    def test_selection_response_loss_recovers_readonly_and_keeps_original_cas(self):
+        payload = {'requestId': 'stable', 'input': {'goalText': '目标'}}
+        selection = {'providerId': 'ai-proxy', 'modelId': 'native', 'reasoningEffort': ''}
+        workspace = {'id': 'ws', 'revision': 1}
+        writes = []
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'recovery.json'
+            def request(method, route, body=None):
+                if route.endswith('/authoring'):
+                    return {'authoring': {'workspaceId': 'ws', 'state': 'draft'}}
+                if method == 'PUT':
+                    persisted = live.json.loads(path.read_text())
+                    self.assertEqual(persisted['selection'], selection)
+                    self.assertEqual(persisted['selectionRequest']['expectedRevision'], body['expectedRevision'])
+                    writes.append(copy.deepcopy(body))
+                    workspace.update(revision=2, defaultLLMSelection=owner_selection(selection))
+                    raise RuntimeError('响应丢失')
+                return {'workspace': copy.deepcopy(workspace)}
+            with live.RecoveryJournal(path, 'http://localhost', payload, selection) as journal:
+                journal.record['workspaceId'] = 'ws'
+                journal.save()
+                with self.assertRaisesRegex(RuntimeError, '响应丢失'):
+                    live.ensure_preseal_selection(request, journal, '/ws')
+            with live.RecoveryJournal(path, 'http://localhost', payload, selection) as journal:
+                live.ensure_preseal_selection(request, journal, '/ws')
+                self.assertTrue(journal.record['selectionApplied'])
+                self.assertEqual(journal.record['selectionRequest']['expectedRevision'], 1)
+                journal.record['confirmation'] = {'inputHash': 'input', 'derivationPermitId': 'permit', 'proposalHash': 'proposal', 'specificationHash': 'spec', 'expectedWorkspaceRevision': 8}
+                journal.save()
+                live.ensure_preseal_selection(request, journal, '/ws')
+            self.assertEqual(writes, [{**selection, 'expectedRevision': 1}])
+            before = path.read_bytes()
+            with self.assertRaises(RuntimeError):
+                with live.RecoveryJournal(path, 'http://localhost', payload, {**selection, 'modelId': 'other'}):
+                    self.fail('不能替换原模型身份')
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_selection_matching_value_with_unrelated_revision_drift_is_not_receipt(self):
+        selection = {'providerId': 'ai-proxy', 'modelId': 'native', 'reasoningEffort': ''}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'recovery.json'
+            with live.RecoveryJournal(path, 'http://localhost', {'requestId': 'stable'}, selection) as journal:
+                journal.record.update(workspaceId='ws', selectionRequest={'workspaceId': 'ws', 'expectedRevision': 1, 'baseline': None})
+                journal.save()
+                before = path.read_bytes()
+                def request(method, route, body=None):
+                    self.assertEqual(method, 'GET')
+                    return {'workspace': {'id': 'ws', 'revision': 3, 'defaultLLMSelection': owner_selection(selection)}}
+                with self.assertRaisesRegex(RuntimeError, 'revision 冲突'):
+                    live.ensure_preseal_selection(request, journal, '/ws')
+                self.assertEqual(path.read_bytes(), before)
+                self.assertNotIn('selectionApplied', journal.record)
+
+    def test_selection_conflicting_revision_or_seal_never_writes(self):
+        selection = {'providerId': 'ai-proxy', 'modelId': 'native', 'reasoningEffort': ''}
+        for state, revision in [('draft', 2), ('admitted', 1)]:
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as directory:
+                with live.RecoveryJournal(Path(directory) / 'recovery.json', 'http://localhost', {'requestId': 'stable'}, selection) as journal:
+                    journal.record.update(workspaceId='ws', selectionRequest={'workspaceId': 'ws', 'expectedRevision': 1, 'baseline': None})
+                    journal.save()
+                    def request(method, route, body=None):
+                        self.assertEqual(method, 'GET')
+                        if route.endswith('/authoring'):
+                            return {'authoring': {'workspaceId': 'ws', 'state': state}}
+                        return {'workspace': {'id': 'ws', 'revision': revision}}
+                    with self.assertRaises(RuntimeError):
+                        live.ensure_preseal_selection(request, journal, '/ws')
+                    self.assertNotIn('selectionApplied', journal.record)
+
+    def test_selection_read_loss_and_put_conflict_preserve_original_request(self):
+        selection = {'providerId': 'ai-proxy', 'modelId': 'native', 'reasoningEffort': ''}
+        payload = {'requestId': 'stable'}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'recovery.json'
+            with live.RecoveryJournal(path, 'http://localhost', payload, selection) as journal:
+                journal.record.update(workspaceId='ws', selectionRequest={'workspaceId': 'ws', 'expectedRevision': 3, 'baseline': None})
+                journal.save()
+                original = path.read_bytes()
+                def unavailable(method, route, body=None):
+                    self.assertEqual(method, 'GET')
+                    raise RuntimeError('读取响应丢失')
+                with self.assertRaisesRegex(RuntimeError, '读取响应丢失'):
+                    live.ensure_preseal_selection(unavailable, journal, '/ws')
+                self.assertEqual(path.read_bytes(), original)
+                def conflict(method, route, body=None):
+                    if method == 'PUT':
+                        self.assertEqual(body, {**selection, 'expectedRevision': 3})
+                        raise RuntimeError('HTTP 409')
+                    if route.endswith('/authoring'):
+                        return {'authoring': {'workspaceId': 'ws', 'state': 'draft'}}
+                    return {'workspace': {'id': 'ws', 'revision': 3}}
+                with self.assertRaisesRegex(RuntimeError, 'HTTP 409'):
+                    live.ensure_preseal_selection(conflict, journal, '/ws')
+                self.assertEqual(path.read_bytes(), original)
+
+    def test_selection_corrupt_journal_and_sealed_mismatch_fail_closed(self):
+        selection = {'providerId': 'ai-proxy', 'modelId': 'native', 'reasoningEffort': ''}
+        payload = {'requestId': 'stable'}
+        exact = {'inputHash': 'input', 'derivationPermitId': 'permit', 'proposalHash': 'proposal', 'specificationHash': 'spec', 'expectedWorkspaceRevision': 8}
+        for pending in (None, {}, {'workspaceId': 'other', 'expectedRevision': 1, 'baseline': None}, {'workspaceId': 'ws', 'expectedRevision': True, 'baseline': None}):
+            with self.subTest(pending=pending), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'recovery.json'
+                with live.RecoveryJournal(path, 'http://localhost', payload, selection) as journal:
+                    journal.record.update(workspaceId='ws', selectionRequest=pending)
+                    journal.save()
+                original = path.read_bytes()
+                with self.assertRaises(RuntimeError):
+                    with live.RecoveryJournal(path, 'http://localhost', payload, selection):
+                        self.fail('损坏选择请求不能恢复')
+                self.assertEqual(path.read_bytes(), original)
+        with tempfile.TemporaryDirectory() as directory:
+            with live.RecoveryJournal(Path(directory) / 'recovery.json', 'http://localhost', payload, selection) as journal:
+                journal.record.update(workspaceId='ws', selectionApplied=True, confirmation=exact)
+                journal.save()
+                def request(method, route, body=None):
+                    self.assertEqual(method, 'GET')
+                    return {'workspace': {'id': 'ws', 'revision': 12, 'defaultLLMSelection': owner_selection({**selection, 'modelId': 'other'})}}
+                with self.assertRaisesRegex(RuntimeError, '禁止改写密封'):
+                    live.ensure_preseal_selection(request, journal, '/ws')
+                self.assertEqual(journal.record['confirmation'], exact)
+
+    def test_old_journal_schema_is_rejected_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'recovery.json'
+            with live.RecoveryJournal(path, 'http://localhost', {'requestId': 'stable'}) as journal:
+                journal.record['version'] = 1
+                journal.save()
+            before = path.read_bytes()
+            with self.assertRaises(RuntimeError):
+                with live.RecoveryJournal(path, 'http://localhost', {'requestId': 'stable'}):
+                    self.fail('旧 schema 不能恢复')
+            self.assertEqual(path.read_bytes(), before)
+
     def test_valid_ready_proposal(self):
         view = ready_view()
         self.assertEqual(live.require_ready_proposal(view), view["proposal"])

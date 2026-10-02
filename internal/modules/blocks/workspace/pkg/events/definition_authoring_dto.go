@@ -66,7 +66,9 @@ func (r DefinitionDerivationRequest) Clone() DefinitionDerivationRequest {
 	r.Resources = workspace.CloneDefinitionAuthoringResources(r.Resources)
 	if r.Proposal != nil {
 		proposal := *r.Proposal
-		proposal.AdditionalItems = append([]string(nil), proposal.AdditionalItems...)
+		if proposal.AdditionalItems != nil {
+			proposal.AdditionalItems = append([]string{}, proposal.AdditionalItems...)
+		}
 		r.Proposal = &proposal
 	}
 	return r

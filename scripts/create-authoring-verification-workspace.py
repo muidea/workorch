@@ -58,6 +58,9 @@ def main():
     parser.add_argument('--payload-file', required=True)
     parser.add_argument('--recovery-file', required=True)
     parser.add_argument('--output-prefix', required=True)
+    parser.add_argument('--provider-id')
+    parser.add_argument('--model-id')
+    parser.add_argument('--reasoning-effort', default='')
     parser.add_argument('--timeout', type=int, default=300)
     args = parser.parse_args()
     if not 1 <= args.timeout <= 3600:
@@ -82,7 +85,10 @@ def main():
                 return json.load(response)
         except urllib.error.HTTPError as error:
             raise RuntimeError(f'HTTP {error.code}: {method} {path}') from None
-    with live.RecoveryJournal(args.recovery_file, base, payload) as journal:
+    if bool(args.provider_id) != bool(args.model_id) or (args.reasoning_effort and not args.model_id):
+        parser.error('provider-id 与 model-id 必须同时指定')
+    selection = None if not args.model_id else {'providerId': args.provider_id, 'modelId': args.model_id, 'reasoningEffort': args.reasoning_effort}
+    with live.RecoveryJournal(args.recovery_file, base, payload, selection) as journal:
         live.verify(request, journal, args.timeout, True)
         workspace_id = journal.record['workspaceId']
         write_outputs(args.output_prefix, formal_outputs(request, workspace_id))

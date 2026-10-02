@@ -96,7 +96,7 @@ func TestAssessmentPurposePreimageRejectsMissingDuplicateAndDriftedProofs(t *tes
 // Builds persisted-shape semantic fixtures with the production pure compiler.
 // It is not a transition fixture; the Orchestrator mainline tests exercise the
 // owner-private events and opaque CAS that produce these records in production.
-func assessmentPurposeGenerationForTest(t *testing.T, coverageID common.CoverageWorkItemID, requestID string, repair bool) (RuntimeSemanticPlanningLedger, []CoverageEvidenceBinding) {
+func assessmentPurposeGenerationForTest(t testing.TB, coverageID common.CoverageWorkItemID, requestID string, repair bool) (RuntimeSemanticPlanningLedger, []CoverageEvidenceBinding) {
 	t.Helper()
 	definition := RuntimeDefinitionContext{
 		StartupInputHash: "startup-purpose", Revision: "definition-purpose", GoalID: "goal-purpose", GoalDefinition: "deliver behavior",

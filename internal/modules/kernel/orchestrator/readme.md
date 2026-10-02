@@ -46,7 +46,13 @@ capability resource state。
   推断成功。semantic assessment 前像重建可将同一 generation 完整校验所得的私有 manifest 产物复用于逐批 binding compiler，
   每批 document、request identity 与 owner feasibility 仍完整反证；公开 compiler 每次重新校验，
   `runtime_semantic_binding_validation_reuse_test.go` 固定产物一致性、逐批拒绝和输入不变边界。
+  accepted batch adapter 使用 `CompileRuntimeSemanticAcceptedBatchBindings`，在合同包内同次复用完整 manifest 校验产物，
+  仍校验原始 batch identity/cardinality/hash、精确 accepted document 及完整 owner facts；
+  `runtime_semantic_accepted_batch_binding_test.go` 固定产物等价、协调篡改拒绝及可重复成本对比。
   公开 manifest、wire、session 与 fresh-load 入口每次仍完整反证，不持久化成功凭据、不增加 caller 已校验标志。
+  accepted candidate lineage 在同次完整 raw-source/hash 校验后保留私有 detached manifest，candidate admission 仍逐候选
+  完整执行，再复用本次 manifest 派生 target/recipe 投影；attempt 与 dispatch 两侧身份、内容和 hash 仍独立反证。
+  `runtime_candidate_lineage_validation_reuse_test.go` 固定私有产物深拷贝、公开拒绝等价及后续调用重新验证。
   `runtime_coverage_evidence_binding_hash_test.go` 和 `runtime_candidate_session_validation_test.go` 固定 hash、重复调用、
   同版本重载、来源篡改与深拷贝边界。已规范化字符串集合仍返回 detached 副本，非规范输入保留 trim／去重／排序语义，
   由 `runtime_normalize_strings_test.go` 的 reference 与 fuzz 固定。SM-3 证据投影先反证原始 accepted/rejected exact cardinality，

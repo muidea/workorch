@@ -1430,23 +1430,6 @@ activate_workspace_execution_with_auto_memory() {
     -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e"}' >"$output_file"
 }
 
-activate_workspace_execution_with_provider() {
-  local output_file="$1"
-  local provider_id="$2"
-  local model_id="${3:-verify-model}"
-	local activation_dod_id="${4:-$dod_id}"
-	local request_id="llm-e2e-$(basename "${output_file%.json}")"
-	local workspace_revision
-	capture_runs_before_activation "$output_file"
-	workspace_revision="$(curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["revision"])')"
-  curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/llm-selection" \
-    -H 'Content-Type: application/json' \
-    -d '{"providerId":"'"$provider_id"'","modelId":"'"$model_id"'","expectedRevision":'"$workspace_revision"'}' >/dev/null
-  curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/execution-activations" \
-    -H 'Content-Type: application/json' \
-    -d '{"intent":"'"$ACTIVATION_INTENT"'","requestId":"'"$request_id"'","reason":"e2e_restart","source":"e2e"}' >"$output_file"
-}
-
 capture_runs_before_activation() {
   local output_file="$1"
   local before_file="${output_file%.json}-before-runs.json"
@@ -1525,11 +1508,12 @@ create_acceptance_workspace() {
   local title="$2"
   local description="$3"
   local dod_items_json="$4"
+  local model_id="${5:-verify-model}"
 
-  python3 - "$title" "$C12_TEMPLATE_ID" "$dod_items_json" >"$TMP_DIR/$prefix-authoring-input.json" <<'PY'
+  python3 - "$title" "$C12_TEMPLATE_ID" "$dod_items_json" "$description" >"$TMP_DIR/$prefix-authoring-input.json" <<'PY'
 import json
 import sys
-json.dump({'title': sys.argv[1], 'templateId': sys.argv[2],
+json.dump({'title': sys.argv[1], 'templateId': sys.argv[2], 'description': sys.argv[4],
            'input': {'goalText': 'verify LLM driven workspace execution',
                      'acceptanceRequirements': json.loads(sys.argv[3]), 'resourceRefs': []}}, sys.stdout)
 PY
@@ -1537,7 +1521,7 @@ PY
   python3 "$ROOT_DIR/scripts/create-authoring-verification-workspace.py" \
     --base-url "$BASE_URL" --payload-file "$TMP_DIR/$prefix-authoring-input.json" \
     --recovery-file "$recovery_root/llm-$VERIFY_SUFFIX-$prefix.json" \
-    --output-prefix "$TMP_DIR/$prefix"
+    --output-prefix "$TMP_DIR/$prefix" --provider-id ai-proxy --model-id "$model_id"
   workspace_id="$(json_path "$TMP_DIR/$prefix-workspace.json" "workspace.id")"
   goal_id="$(json_path "$TMP_DIR/$prefix-goal.json" "goal.id")"
   dod_id="$(json_path "$TMP_DIR/$prefix-dod.json" "dod.id")"
@@ -1560,6 +1544,12 @@ create_c12_verification_template() {
 {
   "id": "$C12_TEMPLATE_ID",
   "name": "Runtime C12 binding verifier $VERIFY_SUFFIX",
+  "defaultSoulId": "$SOUL_ID",
+  "soulBindings": {
+    "planning": "$SOUL_ID", "execution": "$SOUL_ID",
+    "decision": "$SOUL_ID", "approval": "$SOUL_ID",
+    "validation": "$SOUL_ID", "artifact": "$SOUL_ID"
+  },
   "description": "Ephemeral managed-verification template with an explicit C12 proof binding.",
   "contextHints": {
     "stateChangePolicy": "allowed_but_not_required",
@@ -1910,26 +1900,25 @@ PY
 
 assert_workspace_llm_usage_breakdown() {
   local workspace_id="$1"
+  local model_id="$2"
   local deadline=$((SECONDS + 15))
-  local error_file="$TMP_DIR/workspace-llm-usage-error.txt"
+  local error_file="$TMP_DIR/$model_id-workspace-llm-usage-error.txt"
   while true; do
-    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot?view=observability" >"$TMP_DIR/workspace-llm-usage-snapshot.json"
-    if python3 - "$TMP_DIR/workspace-llm-usage-snapshot.json" >"$error_file" 2>&1 <<'PY'
+    curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot?view=observability" >"$TMP_DIR/$model_id-workspace-llm-usage-snapshot.json"
+    if python3 - "$TMP_DIR/$model_id-workspace-llm-usage-snapshot.json" "$model_id" "$workspace_id" >"$error_file" 2>&1 <<'PY'
 import json
 import sys
 
 snapshot = json.load(open(sys.argv[1], encoding="utf-8")).get("snapshot") or {}
+if (snapshot.get("workspace") or {}).get("id") != sys.argv[3]:
+    raise SystemExit("workspace usage snapshot identity mismatch")
 summary = snapshot.get("llmUsageSummary") or {}
 breakdown = summary.get("providerModelBreakdown") or []
 
 if not breakdown:
     raise SystemExit(f"workspace llm usage summary missing providerModelBreakdown: {summary}")
 
-required = {
-    ("ai-proxy", "verify-model"),
-    ("ai-proxy", "verify-stream-native-model"),
-    ("ai-proxy", "verify-stream-estimated-model"),
-}
+required = {("ai-proxy", sys.argv[2])}
 present = {(item.get("providerId"), item.get("model")) for item in breakdown}
 missing = required - present
 if missing:
@@ -1969,19 +1958,6 @@ curl -fsS -X PUT "$BASE_URL/api/v1/workorch/configuration/llm" -H 'Content-Type:
   -d @"$TMP_DIR/verify-llm-update.json" >"$TMP_DIR/configuration-updated.json"
 
 run_runtime_c7_fixture
-create_c12_verification_template
-
-create_acceptance_workspace "happy" "llm acceptance workspace" "verify LLM driven workspace execution" '["happy path completes"]'
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | json_grep_string_value id "$workspace_id" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | json_grep_string_value title "llm acceptance workspace" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" | json_grep_string_value id "$goal_id" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals/$goal_id" >"$TMP_DIR/goal-read.json"
-goal_text="$(json_path "$TMP_DIR/goal-read.json" "goal.text")"
-[[ "$goal_text" == *"verify LLM driven workspace execution"* ]]
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" | json_grep_string_value id "$dod_id" >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods/$dod_id" | grep '"happy path completes"' >/dev/null
-curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/workspace-snapshot-defined.json"
-json_grep_string_value id "$workspace_id" "$TMP_DIR/workspace-snapshot-defined.json" >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/mcp/servers" -H 'Content-Type: application/json' \
   -d '{"id":"'"$MCP_SERVER_ID"'","name":"MCP Context Verify","transport":"stdio","endpoint":"context-helper","enabled":true,"allowedTools":["repo.summary"],"allowedResources":["workspace://acceptance"],"allowedPrompts":["workorch.acceptance"],"defaultApprovalPolicy":"operator","sessionPolicy":"long_lived","timeoutMillis":60000}' >"$TMP_DIR/mcp-server.json"
@@ -2004,12 +1980,20 @@ json_grep_string_value id "$SOUL_ID" "$TMP_DIR/soul.json" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/souls" | json_grep_string_value id "$SOUL_ID" >/dev/null
 curl -fsS "$BASE_URL/api/v1/workorch/souls/$SOUL_ID" | grep '"soulMd"' >/dev/null
 
-# Workspace execution activation is intentionally an intent-only ingress.  The
-# execution context is compiled from owner state, so bind the acceptance soul
-# to the workspace through its owner endpoint before issuing resume/restart.
-curl -fsS -X PUT "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/soul-bindings" \
-  -H 'Content-Type: application/json' \
-  -d '{"defaultSoulId":"'"$SOUL_ID"'","bindings":{"planning":"'"$SOUL_ID"'","execution":"'"$SOUL_ID"'","decision":"'"$SOUL_ID"'","approval":"'"$SOUL_ID"'","validation":"'"$SOUL_ID"'","artifact":"'"$SOUL_ID"'"}}' >"$TMP_DIR/workspace-soul-bindings.json"
+# Soul 与依赖先创建，再通过模板密封；确认后只核对绑定，不改写定义。
+create_c12_verification_template
+create_acceptance_workspace "happy" "llm acceptance workspace" "verify LLM driven workspace execution" '["happy path completes"]'
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces" | json_grep_string_value id "$workspace_id" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id" | json_grep_string_value title "llm acceptance workspace" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals" | json_grep_string_value id "$goal_id" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/goals/$goal_id" >"$TMP_DIR/goal-read.json"
+goal_text="$(json_path "$TMP_DIR/goal-read.json" "goal.text")"
+[[ "$goal_text" == *"verify LLM driven workspace execution"* ]]
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods" | json_grep_string_value id "$dod_id" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/dods/$dod_id" | grep '"happy path completes"' >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/snapshot" >"$TMP_DIR/workspace-snapshot-defined.json"
+json_grep_string_value id "$workspace_id" "$TMP_DIR/workspace-snapshot-defined.json" >/dev/null
+curl -fsS "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/soul-bindings" >"$TMP_DIR/workspace-soul-bindings.json"
 json_grep_string_value defaultSoulId "$SOUL_ID" "$TMP_DIR/workspace-soul-bindings.json" >/dev/null
 
 curl -fsS -X POST "$BASE_URL/api/v1/workorch/workspaces/$workspace_id/memory" -H 'Content-Type: application/json' \
@@ -2284,7 +2268,9 @@ stream_baseline_run_id="$(wait_activation_run "$TMP_DIR/stream-baseline-activati
 wait_run_state "$stream_baseline_run_id" "completed" "$TMP_DIR/stream-baseline-completed-status.json"
 assert_run_recovery_read_models "$stream_baseline_run_id" "stream-baseline" "completed" ""
 
-activate_workspace_execution_with_provider "$TMP_DIR/stream-native-activation.json" "ai-proxy" "verify-stream-native-model"
+assert_workspace_llm_usage_breakdown "$workspace_id" "verify-model"
+create_acceptance_workspace "stream-native" "llm native stream workspace" "verify native streaming usage" '["stream usage is recorded"]' "verify-stream-native-model"
+activate_workspace_execution_without_memory "$TMP_DIR/stream-native-activation.json"
 stream_native_run_id="$(wait_activation_run "$TMP_DIR/stream-native-activation.json" "$TMP_DIR/stream-native-activation-run.json")"
 wait_run_state "$stream_native_run_id" "completed" "$TMP_DIR/stream-native-completed-status.json"
 assert_run_recovery_read_models "$stream_native_run_id" "stream-native" "completed" ""
@@ -2293,7 +2279,9 @@ assert_run_recovery_read_models "$stream_native_run_id" "stream-native" "complet
 # facts rather than the compatibility-only streaming boolean.
 assert_run_llm_usage_semantics "$stream_native_run_id" "provider_native" "streaming"
 
-activate_workspace_execution_with_provider "$TMP_DIR/stream-estimated-activation.json" "ai-proxy" "verify-stream-estimated-model"
+assert_workspace_llm_usage_breakdown "$workspace_id" "verify-stream-native-model"
+create_acceptance_workspace "stream-estimated" "llm estimated stream workspace" "verify estimated streaming usage" '["stream usage is recorded"]' "verify-stream-estimated-model"
+activate_workspace_execution_without_memory "$TMP_DIR/stream-estimated-activation.json"
 stream_estimated_run_id="$(wait_activation_run "$TMP_DIR/stream-estimated-activation.json" "$TMP_DIR/stream-estimated-activation-run.json")"
 wait_run_state "$stream_estimated_run_id" "completed" "$TMP_DIR/stream-estimated-completed-status.json"
 # ai-proxy uses one Responses transport for every catalog model. This mock's
@@ -2302,7 +2290,7 @@ wait_run_state "$stream_estimated_run_id" "completed" "$TMP_DIR/stream-estimated
 assert_run_recovery_read_models "$stream_estimated_run_id" "stream-estimated" "completed" "estimated"
 assert_run_llm_usage_semantics "$stream_estimated_run_id" "estimated" "streaming"
 
-assert_workspace_llm_usage_breakdown "$workspace_id"
+assert_workspace_llm_usage_breakdown "$workspace_id" "verify-stream-estimated-model"
 assert_workspace_recovery_read_models "final"
 curl -fsS "$BASE_URL/metrics" >"$TMP_DIR/metrics.txt"
 grep 'workorch_http_requests_total{endpoint="configuration_update"}' "$TMP_DIR/metrics.txt" >/dev/null

@@ -43,9 +43,66 @@ def require_ready_proposal(view):
     return proposal
 
 
+def validate_selection(value):
+    if not isinstance(value, dict) or set(value) != {'providerId', 'modelId', 'reasoningEffort'} or any(not isinstance(value[key], str) for key in value) or not value['providerId'] or not value['modelId'] or any(text != text.strip() for text in value.values()):
+        raise RuntimeError('模型选择身份无效')
+
+
+def workspace_selection(workspace):
+    value = workspace.get('defaultLLMSelection')
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) - {'target', 'reasoningEffort'}:
+        raise RuntimeError('owner 模型选择响应无效')
+    target = value.get('target')
+    if not isinstance(target, dict) or set(target) != {'providerId', 'modelId'}:
+        raise RuntimeError('owner 模型选择 target 无效')
+    selection = {**target, 'reasoningEffort': value.get('reasoningEffort', '')}
+    validate_selection(selection)
+    return selection
+
+
+def ensure_preseal_selection(request, journal, path):
+    record = journal.record
+    desired = record['selection']
+    if desired is None:
+        return
+    workspace = request('GET', path)['workspace']
+    revision = workspace.get('revision')
+    if workspace.get('id') != record['workspaceId'] or type(revision) is not int or revision < 1:
+        raise RuntimeError('模型选择 Workspace 身份无效')
+    current = workspace_selection(workspace)
+    pending = record.get('selectionRequest')
+    if current == desired:
+        if pending is not None and not record.get('selectionApplied') and revision != pending['expectedRevision'] + 1:
+            raise RuntimeError('模型选择恢复 revision 冲突，保留原请求')
+        record['selectionApplied'] = True
+        journal.save()
+        return
+    if record.get('confirmation') or record.get('selectionApplied'):
+        raise RuntimeError('原模型选择已改变，禁止改写密封或恢复身份')
+    view = request('GET', path + '/authoring')['authoring']
+    if view.get('workspaceId') != record['workspaceId'] or view.get('state') != 'draft':
+        raise RuntimeError('模型选择必须在编译与确认前完成')
+    if pending is None:
+        pending = {'workspaceId': record['workspaceId'], 'expectedRevision': revision, 'baseline': current}
+        record['selectionRequest'] = pending
+        journal.save()
+    if pending['workspaceId'] != workspace['id'] or pending['expectedRevision'] != revision or pending['baseline'] != current:
+        raise RuntimeError('模型选择 CAS 基线冲突，保留原请求')
+    response = request('PUT', path + '/llm-selection', {**desired, 'expectedRevision': pending['expectedRevision']})['workspace']
+    if response.get('id') != workspace['id'] or response.get('revision') != revision + 1 or workspace_selection(response) != desired:
+        raise RuntimeError('模型选择回执身份不匹配')
+    record['selectionApplied'] = True
+    journal.save()
+
+
 class RecoveryJournal:
     """本地私有回执，不是 owner authority；锁覆盖整个验证过程。"""
-    def __init__(self, path, base, payload):
+    def __init__(self, path, base, payload, selection=None):
+        if selection is not None:
+            validate_selection(selection)
+        self.selection = selection
         self.path = Path(path).expanduser().absolute()
         self.base = base
         self.payload = payload
@@ -65,7 +122,7 @@ class RecoveryJournal:
                     raise RuntimeError('恢复文件必须仅当前用户可读写（0600）')
                 self.record = json.loads(self.path.read_text())
                 value = self.record
-                if not isinstance(value, dict) or value.get('version') != 1 or value.get('baseUrl') != self.base or not isinstance(value.get('payload'), dict):
+                if not isinstance(value, dict) or value.get('version') != 2 or value.get('baseUrl') != self.base or 'selection' not in value or value['selection'] != self.selection or not isinstance(value.get('payload'), dict):
                     raise RuntimeError('恢复文件版本或实例不匹配')
                 original = value['payload']
                 expected = {**self.payload, 'requestId': original.get('requestId')}
@@ -73,12 +130,22 @@ class RecoveryJournal:
                     raise RuntimeError('恢复必须使用原创建输入与 requestId，不能覆盖恢复文件')
                 if 'workspaceId' in value and (not isinstance(value['workspaceId'], str) or not value['workspaceId']):
                     raise RuntimeError('恢复文件 Workspace 身份无效')
+                if 'selectionApplied' in value and (value['selectionApplied'] is not True or self.selection is None or not value.get('workspaceId')):
+                    raise RuntimeError('模型选择恢复状态无效')
+                if 'selectionRequest' in value:
+                    pending = value['selectionRequest']
+                    if self.selection is None or not isinstance(pending, dict) or set(pending) != {'workspaceId', 'expectedRevision', 'baseline'} or pending['workspaceId'] != value.get('workspaceId') or type(pending['expectedRevision']) is not int or pending['expectedRevision'] < 1:
+                        raise RuntimeError('模型选择恢复请求无效')
+                    if pending['baseline'] is not None:
+                        validate_selection(pending['baseline'])
                 if 'confirmation' in value:
+                    if self.selection is not None and not value.get('selectionApplied'):
+                        raise RuntimeError('确认恢复缺少模型选择完成事实')
                     validate_confirmation(value['confirmation'])
                     if not value.get('workspaceId'):
                         raise RuntimeError('恢复确认缺少 Workspace 身份')
             else:
-                self.record = {'version': 1, 'baseUrl': self.base, 'payload': {**self.payload, 'requestId': self.payload['requestId'] or str(uuid.uuid4())}}
+                self.record = {'version': 2, 'baseUrl': self.base, 'selection': self.selection, 'payload': {**self.payload, 'requestId': self.payload['requestId'] or str(uuid.uuid4())}}
                 self.save()
             return self
         except BaseException:
@@ -152,6 +219,7 @@ def verify(request, journal, timeout, confirm):
     if replay['workspaceId'] != workspace_id or replay['inputHash'] != view['inputHash']:
         raise RuntimeError('重复创建没有返回相同持久身份')
     require_zero_runs(request('GET', path + '/runs'))
+    ensure_preseal_selection(request, journal, path)
     exact = record.get('confirmation')
     if exact:
         if not confirm:
@@ -183,6 +251,7 @@ def verify(request, journal, timeout, confirm):
         repeated = await_confirmation(request, path, workspace_id, exact, timeout)
         if repeated['startupInputHash'] != confirmed['startupInputHash'] or repeated['workspaceRevision'] != confirmed['workspaceRevision']:
             raise RuntimeError('精确确认重放发生额外变更')
+        ensure_preseal_selection(request, journal, path)
     require_zero_runs(request('GET', path + '/runs'))
     print('PASS: 持久创建／六审查' + ('／确认准入重放' if confirm else '') + '／零自动 Run')
 
