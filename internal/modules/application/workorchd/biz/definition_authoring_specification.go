@@ -205,6 +205,8 @@ func (b *Biz) completeAuthoringSpecification(ctx context.Context, id common.Work
 		parsed, parseErr := specifications.ParseAuthoringProposal(payload, derivation)
 		if parseErr != nil {
 			completion.FailureCode = "invalid_proposal"
+			diagnostic := workspace.NewDefinitionAuthoringDiagnostic(parseErr.Error(), payload)
+			completion.Diagnostic = &diagnostic
 		} else {
 			completion.Proposal = &parsed
 		}
@@ -212,6 +214,8 @@ func (b *Biz) completeAuthoringSpecification(ctx context.Context, id common.Work
 		parsed, parseErr := specifications.ParseAuthoringReview(payload, request.ReviewKind, *proposal, derivation)
 		if parseErr != nil {
 			completion.FailureCode = "invalid_review"
+			diagnostic := workspace.NewDefinitionAuthoringDiagnostic(parseErr.Error(), payload)
+			completion.Diagnostic = &diagnostic
 		} else {
 			completion.Review = &parsed
 		}

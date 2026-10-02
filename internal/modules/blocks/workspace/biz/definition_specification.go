@@ -16,14 +16,14 @@ import (
 const definitionSpecificationCommandSource = definitionAdmissionCommandSource
 
 func definitionSpecificationTopics() []string {
-	return []string{workspaceevents.TopicWorkspaceDerivationReserve, workspaceevents.TopicWorkspaceDerivationComplete, workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, workspaceevents.TopicWorkspaceAuthoringSpecificationComplete, workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery, workspaceevents.TopicWorkspaceDefinitionAuthoringCreate, workspaceevents.TopicWorkspaceDefinitionAuthoringSave, workspaceevents.TopicWorkspaceAuthoringConfirm, workspaceevents.TopicWorkspaceAuthoringAdmit, workspaceevents.TopicWorkspaceSpecificationBegin, workspaceevents.TopicWorkspaceSpecificationReserve, workspaceevents.TopicWorkspaceSpecificationComplete}
+	return []string{workspaceevents.TopicWorkspaceDerivationReserve, workspaceevents.TopicWorkspaceDerivationComplete, workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, workspaceevents.TopicWorkspaceAuthoringSpecificationComplete, workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery, workspaceevents.TopicWorkspaceDefinitionAuthoringCreate, workspaceevents.TopicWorkspaceDefinitionAuthoringSave, workspaceevents.TopicWorkspaceAuthoringConfirm, workspaceevents.TopicWorkspaceAuthoringAdmit, workspaceevents.TopicWorkspaceSpecificationBegin, workspaceevents.TopicWorkspaceSpecificationReserve, workspaceevents.TopicWorkspaceSpecificationComplete}
 }
 
 func (m *Biz) handleDefinitionSpecificationCommand(ev magicevent.Event, result magicevent.Result) {
 	if result == nil {
 		return
 	}
-	if ev == nil || m == nil || m.workspaces == nil || (ev.Source() != definitionSpecificationCommandSource && (ev.ID() != workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery || ev.Source() != "blocks/file")) {
+	if ev == nil || m == nil || m.workspaces == nil || (ev.Source() != definitionSpecificationCommandSource && ((ev.ID() != workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery || ev.Source() != "blocks/file") && ev.ID() != workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery)) {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
@@ -122,6 +122,13 @@ func (m *Biz) handleDefinitionSpecificationCommand(ev magicevent.Event, result m
 			err = common.ErrInvalidArgument
 		} else {
 			reply, err = m.queryDefinitionAuthoring(ev.Context(), cmd)
+		}
+	case workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery:
+		cmd, ok := ev.Data().(workspaceevents.QueryAuthoringDiagnosticCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			reply, err = m.queryAuthoringDiagnostic(ev.Context(), cmd)
 		}
 	case workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery:
 		cmd, ok := ev.Data().(workspaceevents.QueryAuthoringResourceScopeCommand)

@@ -5,6 +5,7 @@ import { errorMessage } from '../../helpers';
 import { authoringSourceLabel, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling, authoringLocalDraftKey, authoringRecoveryKey, parseAuthoringLocalDraft, restoreAuthoringRecovery } from '../../workspaceAuthoring';
 import type { AuthoringRecovery } from '../../workspaceAuthoring';
 import type { DefinitionAuthoringView, WorkspaceTemplate } from '../../types';
+import { AuthoringDiagnosticDetails } from './AuthoringDiagnosticDetails';
 
 type Props = { open: boolean; onClose: () => void; onCreated: (workspaceId: string, isCurrent: () => boolean) => void | Promise<void> };
 type Values = { title: string; templateId: string; deliverableDirectory?: string; goalText: string; requirements?: string; resources?: string };
@@ -233,7 +234,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
       <Alert type="info" showIcon message="输入目标即可，验收清单由模板与目标派生。六类审查通过后才可确认；此操作不会启动 Run。" />
       {recoveryBlocked.current && <Alert type="error" showIcon message="本地恢复记录不可用；原记录已保留，禁止创建替代事务或清理。请显式处理该记录后重新打开。" />}
       {failure && <Alert type="error" showIcon message={failure} description={recovery ? '创建身份已保留。重试将恢复原草稿，不会重新创建工作空间。' : undefined} />}
-      {view?.requests?.filter(request => request.state === 'failed').map((request, index) => <Alert key={`${request.phase}-${request.reviewKind || index}`} type="error" showIcon message={`规格请求失败：${request.phase}${request.reviewKind ? ` · ${request.reviewKind}` : ''}`} description={`${request.failureCode || '请求失败'}。当前输入不会自动重发 provider；请修订输入后重新审查。`} />)}
+      {view?.requests?.filter(request => request.state === 'failed').map((request, index) => <Alert key={`${request.phase}-${request.reviewKind || index}`} type="error" showIcon message={`规格请求失败：${request.phase}${request.reviewKind ? ` · ${request.reviewKind}` : ''}`} description={<AuthoringDiagnosticDetails workspaceId={view.workspaceId} permitId={request.permitId} phase={request.phase} failureCode={request.failureCode} diagnostic={request.diagnostic} />} />)}
       {recovery?.pendingSave && <Alert type="warning" message="保存响应尚未确认。重试将先恢复原保存请求，再处理当前编辑；不会用新身份覆盖未决修订。" action={<Button disabled={recoveryBlocked.current || busy} onClick={refreshSaveBaseline}>冲突后读取当前草稿</Button>} />}
       {edited && view?.input && <Alert type="info" message="owner 当前目标（本地编辑尚未覆盖）" description={view.input.goalText} />}
       {edited && <Alert type="info" message="本地编辑尚未保存到服务端。关闭／刷新可在此浏览器恢复，不能作为准入输入。" />}

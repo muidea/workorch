@@ -104,6 +104,14 @@ Do not commit generated runtime data: `.workorch-data`, `.workorch-workspaces`, 
 - Web: TypeScript, React, Vite, Ant Design under `web/workorch-console/src`.
 - Commits: concise imperative summaries (`fix runtime incremental artifact convergence`, `docs: reorganize workorch documentation structure`); keep scoped. PRs: behavior change, verification commands, config/migration impact, UI screenshots when relevant.
 
+## 数据保真原则
+
+- 业务输入、provider 输出及诊断材料必须保持原样；禁止为脱敏而替换、清洗或改写内容，禁止用摘要替代原始数据或静默截断，避免跨层传递产生偏差。
+- 协议必需的编码转换必须可逆。原始文档按 bytes 保全，使用字节数和 SHA256 校验存储、读取及展示链路；显式合同规定的规格规范化不得覆盖原始诊断材料。
+- 超出明确的存储或传输边界时，必须显式报告未保存/未传递及原因，不能将部分内容标为完整，也不能因此把已知失败重新标为结果未决。
+- 原始诊断通过 owner 管理的受限运行存储和读取边界保护，不通过改写数据保护。不得将原始诊断、凭据或 live 配置提交到 Git，也不得把无关配置密钥混入诊断或通用日志。
+- 诊断仅用于排查，不是规格、准入或执行权威；不得为保留原文而绕过严格校验、owner 边界、预算或人工确认。
+
 ## Testing Guidelines
 
 - Focused `*_test.go` beside changed code.

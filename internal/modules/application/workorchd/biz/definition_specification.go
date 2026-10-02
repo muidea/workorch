@@ -60,6 +60,7 @@ func (b *Biz) CompileDefinitionSpecification(ctx context.Context, candidate work
 	return candidate, nil
 }
 
+// completeDefinitionDocument returns exact provider Content bytes; callers decide how to parse them.
 func (b *Biz) completeDefinitionDocument(ctx context.Context, command llmevents.CompleteProviderCommand) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

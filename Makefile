@@ -242,6 +242,10 @@ verify-workspace-authoring-contract:
 	go test ./internal/modules/blocks/workspace/biz -run '^Test(Authoring(SaveReceiptRejectsForgedIdentityAndSurvivesABA|SaveReceiptLimitAndConcurrentCAS|ProcessConfirmationRecovery|ProcessDecisionAdmissionRecovery|ProcessDerivationPermitRecovery|FileBudgetExhaustionSurvivesRevisions|FileSpecificationBudgetExhaustionSurvivesRevisions|SpecificationConcurrentReserveUsesOneFreshPermit|RevisionFencesHistoricalSpecificationCompletion|RevisionFencesHistoricalDerivationCompletion)|DefinitionAuthoringApplication(CreationRecoversFileOwner|TemplateDirectoryReplayAfterReopen))$$' -count=1
 	go test ./internal/modules/application/workorchd/biz -run '^TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition$$' -count=1
 	go test -race ./internal/modules/application/workorchd/biz -run '^TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition$$' -count=1 -timeout=3m
+	go test ./internal/modules/blocks/workspace/pkg/events -run '^TestAuthoringDiagnosticResultRejectsScopePhaseAndContentDrift$$' -count=1
+	go test ./internal/modules/blocks/workspace/pkg/models -run '^Test(DefinitionAuthoringDiagnosticPreservesBytesAndBounds|AuthoringSpecificationFailureDiagnosticExactDuplicateAndConflict)$$' -count=1
+	go test -race ./internal/modules/blocks/workspace/biz -run '^TestAuthoringFailureDiagnosticSurvivesFileReopen$$' -count=1 -timeout=3m
+	go test ./internal/pkg/repository/file -run '^Test(SaveMapPrivatePermissionsReplaceExistingPublicFile|WorkspaceDiagnosticUsesPrivateAtomicPublish|SaveMapPermissionsRejectBeforeCommit)$$' -count=1
 	go test ./internal/modules/application/workorchd/biz -run '^TestAuthoringHTTP(FileBackedCompilationConfirmationAndRecovery|RealBackgroundRoutineFileRecovery|ConcurrentCompileUsesOnePhysicalDerivation|CompileTasksCompeteForFreshPermit)$$' -count=1
 
 verify-workspace-template-soul:

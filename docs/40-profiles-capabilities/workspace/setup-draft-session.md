@@ -1,87 +1,35 @@
-# Workspace Setup Draft Session
+# Workspace 规格创作
 
 Status: normative
 
 Type: profile-capability
 
-Last Verified: 2026-08-18
+## 创建与确认
 
-## Purpose
+Web 创建输入包含名称、Template、Goal、本地资源引用、可选工作目录和额外验收要求。工作目录留空时由 owner 解析；资源引用相对于该目录。浏览器本地编辑不是服务端已保存输入。
 
-Setup draft session 是可选的 application/UI authoring aid，用于把多轮对话整理成候选 Workspace Goal/DoD。它不是
-Workspace owner aggregate、Definition admission、Runtime activation、Run 或 recovery state machine。具体 HTTP 路由由
-[Service Command API](../../50-product-interface/service-api.md) 定义。
+Workspace owner 持久保存创作输入与请求身份；派生验收要求后生成结构化规格提案，并进行六类独立审查。只有当前 input、derivation permit、proposal/specification hash 和 revision 精确匹配且审查通过，用户才可确认并准入。创建、编译、确认均不创建 Run；执行是后续独立 intent。
 
-## Draft Semantics
+旧 process-local setup draft session、直接 Goal/DoD 写入及手工绕过审查的创建入口已退休。本文保留原路径作为文档链接，不表示旧入口仍可使用。
 
-Draft session 是 process-local、可丢失的临时会话。它可以接收 Template、标题/描述、可选目录、dialog language、用户
-消息和上一版草案，输出有界的：
+## 原始失败诊断与数据保真
 
-- Goal 文本和 DoD items；
-- assumptions、clarifying questions、warnings；
-- confidence、needs-clarification、generation summary 与来源标记。
+提案和审查文档仍执行原有严格 JSON、资源快照、Goal/验收项身份、来源及验证绑定校验。`invalid_proposal` / `invalid_review` 是解析或语义校验失败，不代表 provider 调用失败；`outcome_unresolved` 表示完成结果尚未记录，可能仍有后台任务执行，不能仅凭该状态推断请求中断。
 
-Template/Soul 内容可以作为有界生成上下文。LLM 输出必须经过 strict draft parse/normalization，且只更新当前临时
-草案；它不写 Workspace、Goal、DoD、Decision 或 Run owner 状态。
+失败诊断由 Workspace owner 随原 completion 持久记录，保留解析错误及 provider 原始响应，不脱敏、不替换、不重新序列化、不静默截断。原始响应按 bytes 存储，编码可逆，字节数和 SHA256 用于校验读取完整性。诊断不是提案、审查证据、准入或执行权威。
 
-普通 setup 可以完全手工 authoring。只有用户显式启用 assisted draft 时才调用 authoring LLM；这一选择不限制 startup
-input 封存后的 Runtime LLM processing。
+原始响应单条保存上限为 256 KiB，原始错误单条保存上限为 64 KiB；沿用既有 112 条规格请求总量上限，每条仅保留一个诊断结果。超限必须明确标记对应内容未保存，并保留原始字节数、hash 和未保存原因；不得保存片段冒充完整原文，也不得把已知解析失败降为未决。旧失败记录没有诊断时明确显示未记录，不伪造历史原因。
 
-## Hierarchical Assistance
+常规创作查询返回错误与诊断元信息，不把原始响应混入周期轮询。单条原文仅通过 Workspace 与 permit 精确限定的只读管理查询按需取得；Web 以纯文本展示并支持原字节读取，不执行 provider 返回的 HTML 或指令。诊断查看不调用 provider，不启动 Run，不恢复或更改确认身份。
 
-大量 Goal/DoD 的 authoring 采用有界逐级处理：
+包含诊断的 Workspace 文件通过原子发布使用 0600 权限。原始内容留在 owner 运行存储，不提交 Git，不额外附加配置密钥，不复制到通用日志；权限保护不能替代管理接口的部署访问边界。
 
-1. Template、用户分组、semantic role 和 requires/provides 形成确定性局部分区；
-2. 组内请求读取 exact item text 并产生草案关系；
-3. 跨组请求先比较 bounded manifest/hash，只为候选关系端点重新加载 exact text；
-4. UI 展示依赖、priority/cost、disposition、假设和 cycle/missing warning；
-5. 用户明确采用后才把选中字段复制到正式 setup form。
+## 恢复边界
 
-raw draft、数组/ID 顺序和自然语言先后关系都没有 authority。authoring schema/UI 不得提供 `one_of`/`any_of` 作为
-合法 relation；provider 返回这些 token 时只能形成不可采用 diagnostic。deterministic compile 仍有歧义时必须进入
-Workspace clarification，不能自动择支、改写为 all-of、要求 Runtime JSON 或绕过 blocking ticket。
+已 reserve 的请求不会因查询或重复 compile 自动获得第二次 provider 调用权限。完成请求重放必须包含同一原始诊断，内容变化是冲突。输入修订会产生新身份并重新审查，不是恢复或改写原失败结果。
 
-## Adoption Boundary
+## 相关合同
 
-采用草案与生成草案是两个独立动作：
-
-```text
-temporary draft
-  -> user selects and applies fields to setup form
-  -> Workspace owner persists DefinitionAdmissionCandidate
-  -> pure all-of admission
-  -> admitted promotion or blocking clarification ticket
-  -> activation eligibility
-  -> later explicit execution intent
-```
-
-只有 Workspace owner command 持久化的 candidate 才进入 admission。只有 exact-current `admitted_all_of` outcome 可以
-promotion 为 formal Definition/startup input；草案 endpoint 不得自动 promotion、Start、Restart 或创建 ticket resolution。
-
-## Runtime Boundary
-
-Draft session 不包含或生成：
-
-- `RuntimeBootstrap`、Runtime focus、target、recipe、check 或 evidence binding；
-- provider request history、candidate attempt、repair 或 governance continuation state；
-- Run ID、target Run state、replacement/successor identity；
-- `executionContext` / `ExecutionContextPatch` 或 selected Memory/capability evidence。
-
-用户采用草案、完成 admission/promotion 并显式提交 execution intent 后，workorchd 才从 canonical owner state 组装 typed
-activation。它可以封存 Soul、Skill、MCP、Memory、provider selection 和 execution policy，但这些都不是 draft-session state。
-
-## Interface Rules
-
-- manual 与 assisted authoring 可以共享 editable form，但不得静默覆盖未采用的用户输入；
-- UI 必须在“apply to form”前展示 proposal、assumptions、questions 和 warnings；
-- draft 不得被显示为 formal Definition、accepted evidence 或 activation eligibility；
-- admission violation 必须显示 typed code 与 `BlockingTicketID`，且不能由确认草案绕过；
-- generation failure 可以回到 manual editing，但不得制造成功草案或 owner acknowledgement。
-
-## Related Documents
-
+- [Service Command API](../../50-product-interface/service-api.md)
 - [Definition Admission](../../00-core/definition-convergence/definition-admission.md)
 - [Workspace Clarification](../../00-core/definition-convergence/clarification.md)
-- [Service Command API](../../50-product-interface/service-api.md)
-- [TUI Interaction Contract](../../50-product-interface/tui/interaction-contract.md)
-- [Built-in Default Resources](builtin-default-resources.md)

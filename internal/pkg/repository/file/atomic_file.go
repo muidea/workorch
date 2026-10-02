@@ -11,6 +11,13 @@ import (
 type atomicFileCommitFunc func(string, []byte, os.FileMode) (filecommit.Outcome, error)
 
 func saveMapWithCommit[K comparable, V any](path string, items map[K]V, commit atomicFileCommitFunc) error {
+	return saveMapWithPermissions(path, items, 0o644, commit)
+}
+
+func saveMapWithPermissions[K comparable, V any](path string, items map[K]V, perm os.FileMode, commit atomicFileCommitFunc) error {
+	if perm != 0o644 && perm != 0o600 {
+		return fmt.Errorf("file repository permissions invalid")
+	}
 	data, err := json.Marshal(items)
 	if err != nil {
 		return err
@@ -26,7 +33,13 @@ func saveMapWithCommit[K comparable, V any](path string, items map[K]V, commit a
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
-	outcome, err := commit(path, data, 0o644)
+	// 已收紧的文件不得因后续不再包含诊断而重新变为公开可读。
+	if info, statErr := os.Stat(path); statErr == nil && info.Mode().Perm() == 0o600 {
+		perm = 0o600
+	} else if statErr != nil && !os.IsNotExist(statErr) {
+		return statErr
+	}
+	outcome, err := commit(path, data, perm)
 	if err != nil {
 		if outcome.Published {
 			// rename already changed the canonical path. A following directory

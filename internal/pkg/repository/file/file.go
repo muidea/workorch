@@ -2046,18 +2046,54 @@ func loadWorkspacePersistenceMap(path string) (map[common.WorkspaceID]workspace.
 		return nil, err
 	}
 	items := make(map[common.WorkspaceID]workspace.Workspace, len(persisted))
+	private := false
 	for id, item := range persisted {
 		items[id] = workspace.Workspace(item)
+		if item.DefinitionAuthoring != nil && authoringContainsDiagnostic(*item.DefinitionAuthoring) {
+			private = true
+		}
+		for _, archived := range item.DefinitionAuthoringHistory {
+			if authoringContainsDiagnostic(archived.Record) {
+				private = true
+			}
+		}
+	}
+	if private {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode().Perm() != 0o600 {
+			return nil, fmt.Errorf("workspace diagnostic file requires permissions 0600")
+		}
 	}
 	return items, nil
 }
 
 func saveWorkspacePersistenceMap(path string, items map[common.WorkspaceID]workspace.Workspace) error {
 	persisted := make(map[common.WorkspaceID]workspacePersistenceValue, len(items))
+	perm := os.FileMode(0o644)
 	for id, item := range items {
 		persisted[id] = workspacePersistenceValue(item)
+		if item.DefinitionAuthoring != nil && authoringContainsDiagnostic(*item.DefinitionAuthoring) {
+			perm = 0o600
+		}
+		for _, archived := range item.DefinitionAuthoringHistory {
+			if authoringContainsDiagnostic(archived.Record) {
+				perm = 0o600
+			}
+		}
 	}
-	return saveMap(path, persisted)
+	return saveMapWithPermissions(path, persisted, perm, commitFileAtomically)
+}
+
+func authoringContainsDiagnostic(record workspace.DefinitionAuthoringRecord) bool {
+	for _, request := range record.SpecificationRequests {
+		if request.Diagnostic != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func NewWorkspaceRepository(path string) *WorkspaceRepository {

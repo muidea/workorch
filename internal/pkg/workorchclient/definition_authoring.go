@@ -28,6 +28,14 @@ func (c *Client) ConfirmDefinitionAuthoring(ctx context.Context, workspaceID str
 	return c.definitionAuthoringRequest(ctx, "POST", authoringPath(workspaceID)+"/confirm", request)
 }
 
+func (c *Client) ReadDefinitionAuthoringDiagnostic(ctx context.Context, workspaceID, permitID string) (*workorchmanagementcontract.DefinitionAuthoringDiagnosticView, error) {
+	response, err := c.do(ctx, "GET", authoringPath(workspaceID)+"/diagnostics/"+escapePath(permitID), nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeEnvelope[workorchmanagementcontract.DefinitionAuthoringDiagnosticView](response, "diagnostic")
+}
+
 func authoringPath(workspaceID string) string {
 	return "/api/v1/workorch/workspaces/" + escapePath(workspaceID) + "/authoring"
 }

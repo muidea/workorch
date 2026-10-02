@@ -112,7 +112,12 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 				} else if request.Proposal != nil || request.Review != nil {
 					state = "completed"
 				}
-				result.Requests = append(result.Requests, workorchmanagementcontract.DefinitionAuthoringRequestState{Phase: string(request.Phase), ReviewKind: request.ReviewKind, State: state, FailureCode: request.FailureCode})
+				requestState := workorchmanagementcontract.DefinitionAuthoringRequestState{PermitID: request.PermitID, Phase: string(request.Phase), ReviewKind: request.ReviewKind, State: state, FailureCode: request.FailureCode}
+				if request.Diagnostic != nil {
+					d := request.Diagnostic
+					requestState.Diagnostic = &workorchmanagementcontract.DefinitionAuthoringDiagnosticMetadata{ParseError: d.ParseError, ParseErrorSHA256: d.ParseErrorSHA256, ParseErrorBytes: d.ParseErrorBytes, ParseErrorSaved: d.ParseErrorSaved, PayloadSHA256: d.PayloadSHA256, PayloadBytes: d.PayloadBytes, PayloadSaved: d.PayloadSaved, NotSavedReason: d.NotSavedReason}
+				}
+				result.Requests = append(result.Requests, requestState)
 				if request.Proposal != nil {
 					copy := request.Proposal.Clone()
 					spec = &copy
@@ -137,12 +142,17 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 				}
 				result.State = "reviewing"
 				reviewBlocked := false
+				reviewFailed := false
 				reviewUnresolved := false
 				for _, request := range record.SpecificationRequests {
 					if request.DerivationPermitID != derivation.PermitID || request.ProposalHash != proposal.ProposalHash {
 						continue
 					}
-					if request.FailureCode != "" || request.Review == nil {
+					if request.FailureCode != "" {
+						reviewFailed = true
+						continue
+					}
+					if request.Review == nil {
 						reviewUnresolved = true
 						continue
 					}
@@ -159,6 +169,8 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 					} else {
 						result.State = "review_blocked"
 					}
+				} else if reviewFailed {
+					result.State = "failed"
 				} else if reviewUnresolved {
 					result.State = "outcome_unresolved"
 				} else if reviewBlocked {

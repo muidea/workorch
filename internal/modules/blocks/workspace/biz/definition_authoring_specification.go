@@ -30,7 +30,7 @@ func reduceAuthoringSpecification(o definitionSpecificationObservation, e defini
 		if cmd.Validate() != nil || cmd.WorkspaceID != w.ID {
 			return definitionSpecificationTransition{}, common.ErrInvalidArgument
 		}
-		next, err = record.CompleteSpecification(cmd.PermitID, cmd.Proposal, cmd.Review, cmd.FailureCode)
+		next, err = record.CompleteSpecification(cmd.PermitID, cmd.Proposal, cmd.Review, cmd.FailureCode, cmd.Diagnostic)
 		if err == nil {
 			for _, item := range next.SpecificationRequests {
 				if item.PermitID == cmd.PermitID {

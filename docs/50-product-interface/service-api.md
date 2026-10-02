@@ -92,6 +92,13 @@ LLM configuration save does not mutate the running LLM owner snapshot or any sea
 `.workorch-workspaces/<workspace-id>`。正式 Goal／DoD 仅在精确确认事务中物化，随后由 owner 准入；创建、编译、确认均不启动 Run。
 普通 setup 不要求 raw context/evidence/target/recipe/check/metric/artifact JSON。
 
+解析失败诊断随原规格请求由 Workspace owner 持久记录。普通 authoring GET 返回完整原始错误及诊断元信息；
+`GET /workspaces/:workspaceId/authoring/diagnostics/:permitId` 按精确 Workspace/permit scope 返回单条原始响应的可逆编码、
+字节数和 SHA256。读取不调用 provider、不推进确认、不启动 Run。诊断不脱敏、不替换、不静默截断；原文超限时明确
+标记未保存，已知失败仍为 failed。旧失败无诊断时不得回填猜测内容。文件私有权限和部署访问边界保护原始材料，
+Web 只作纯文本展示，原文永不作为准入或执行权威。详细边界见
+[Workspace 规格创作](../40-profiles-capabilities/workspace/setup-draft-session.md)。
+
 旧 `POST /workspaces`、Goal／DoD POST／PUT、`goal-dod-quality-check` 和内存 draft session 写路由均已退休，返回 `404`。
 正式定义 GET 保留作读取；同 Run 规格修订不通过旧 CRUD 暴露。
 Go client 只提供正式 authoring 写方法，退休创建／Goal／DoD 写方法不再存在。

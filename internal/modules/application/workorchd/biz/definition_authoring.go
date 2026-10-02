@@ -118,3 +118,32 @@ func (b *Biz) SaveDefinitionAuthoring(ctx context.Context, command workspaceeven
 	response.Record = response.Record.Clone()
 	return response, nil
 }
+
+func (b *Biz) QueryAuthoringDiagnostic(ctx context.Context, command workspaceevents.QueryAuthoringDiagnosticCommand) (workspaceevents.QueryAuthoringDiagnosticResult, error) {
+	if b == nil || b.EventHub() == nil || ctx == nil || command.Validate() != nil {
+		return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrInvalidArgument
+	}
+	if err := ctx.Err(); err != nil {
+		return workspaceevents.QueryAuthoringDiagnosticResult{}, err
+	}
+	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery, eventcontract.LaneScope{WorkspaceID: string(command.WorkspaceID)}))
+	result := b.SendEvent(ev)
+	if result == nil {
+		return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrConflict
+	}
+	if err := result.Error(); err != nil {
+		return workspaceevents.QueryAuthoringDiagnosticResult{}, err
+	}
+	value, err := result.Get()
+	if err != nil {
+		return workspaceevents.QueryAuthoringDiagnosticResult{}, err
+	}
+	response, ok := value.(workspaceevents.QueryAuthoringDiagnosticResult)
+	if !ok || response.ValidateFor(command) != nil {
+		return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrConflict
+	}
+	d := response.Diagnostic.Clone()
+	response.Diagnostic = d
+	return response, nil
+}

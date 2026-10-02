@@ -1,5 +1,5 @@
 import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, DecisionPage, DoD, EventRecord, Goal, MCPCapability, MCPCapabilityMutation, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderInferenceSelection, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
-import type { DefinitionAuthoringCreate, DefinitionAuthoringInput, DefinitionAuthoringView } from './types';
+import type { DefinitionAuthoringCreate, DefinitionAuthoringInput, DefinitionAuthoringView, AuthoringDiagnostic } from './types';
 import { parseWorkspaceExecutionAdmission } from './workspaceExecutionAdmission';
 
 const apiBase = '/api/v1/workorch';
@@ -180,6 +180,10 @@ export const workorchApi = {
   readDefinitionAuthoring: async (id: string) => {
     const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspaces/${encodeURIComponent(id)}/authoring`, { signal: AbortSignal.timeout(30_000) });
     return body.authoring;
+  },
+  readAuthoringDiagnostic: async (workspaceId: string, permitId: string) => {
+    const body = await request<{ diagnostic: AuthoringDiagnostic }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/authoring/diagnostics/${encodeURIComponent(permitId)}`, { signal: AbortSignal.timeout(30_000) });
+    return body.diagnostic;
   },
   saveDefinitionAuthoring: async (id: string, input: DefinitionAuthoringInput, templateId: string, revision: number, hash: string, requestId: string) => {
     const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspaces/${encodeURIComponent(id)}/authoring`, {

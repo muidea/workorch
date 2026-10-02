@@ -1,8 +1,78 @@
 package workspace
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestDefinitionAuthoringDiagnosticPreservesBytesAndBounds(t *testing.T) {
+	parseErr := "\n原样错误\twith spacing\n"
+	payload := []byte{0, 0xff, '\n', ' ', 'x'}
+	diagnostic := NewDefinitionAuthoringDiagnostic(parseErr, payload)
+	if err := diagnostic.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !diagnostic.ParseErrorSaved || diagnostic.ParseError != parseErr || !diagnostic.PayloadSaved || !reflect.DeepEqual(diagnostic.Payload, payload) || diagnostic.PayloadBytes != uint64(len(payload)) {
+		t.Fatalf("diagnostic changed source data: %+v", diagnostic)
+	}
+	cloned := diagnostic.Clone()
+	cloned.Payload[0] = 1
+	if diagnostic.Payload[0] != 0 {
+		t.Fatal("diagnostic clone shares payload bytes")
+	}
+	tooLarge := NewDefinitionAuthoringDiagnostic(strings.Repeat("e", DefinitionAuthoringDiagnosticErrorLimit+1), make([]byte, DefinitionAuthoringDiagnosticDocumentLimit+1))
+	if err := tooLarge.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	bad := diagnostic.Clone()
+	bad.NotSavedReason = "forged reason"
+	if bad.Validate() == nil {
+		t.Fatal("accepted caller-supplied unsaved reason")
+	}
+	bad = diagnostic.Clone()
+	bad.PayloadSHA256 = strings.ToUpper(bad.PayloadSHA256)
+	if bad.Validate() == nil {
+		t.Fatal("accepted noncanonical hash metadata")
+	}
+	bad = diagnostic.Clone()
+	bad.PayloadBytes = DefinitionAuthoringDiagnosticDocumentLimit + 1
+	if bad.Validate() == nil {
+		t.Fatal("accepted saved payload above hard boundary")
+	}
+	if tooLarge.ParseErrorSaved || tooLarge.PayloadSaved || tooLarge.Payload != nil || tooLarge.PayloadBytes != DefinitionAuthoringDiagnosticDocumentLimit+1 || tooLarge.PayloadSHA256 == "" || tooLarge.NotSavedReason == "" {
+		t.Fatalf("oversize diagnostic not explicitly withheld: %+v", tooLarge)
+	}
+}
+
+func TestAuthoringSpecificationFailureDiagnosticExactDuplicateAndConflict(t *testing.T) {
+	record, _ := authoringLedgerFixture(t)
+	derivationPermit := record.DerivationRequests[0].PermitID
+	request := DefinitionAuthoringSpecificationRequest{RequestID: "proposal-diagnostic", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
+	reservedRecord, reserved, _, err := record.ReserveSpecification(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := reservedRecord.ReserveSpecification(request); err != nil {
+		t.Fatal(err)
+	}
+	diagnostic := NewDefinitionAuthoringDiagnostic("  parse error\n", []byte("{\ninvalid\n}"))
+	failed, err := reservedRecord.CompleteSpecification(reserved.PermitID, nil, nil, "invalid_proposal", &diagnostic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := failed.CompleteSpecification(reserved.PermitID, nil, nil, "invalid_proposal", &diagnostic)
+	if err != nil || !reflect.DeepEqual(failed, replayed) {
+		t.Fatalf("exact duplicate changed diagnosis: %v", err)
+	}
+	conflict := NewDefinitionAuthoringDiagnostic("different parse error", []byte("raw"))
+	if _, err := failed.CompleteSpecification(reserved.PermitID, nil, nil, "invalid_proposal", &conflict); err == nil {
+		t.Fatal("conflicting duplicate diagnosis accepted")
+	}
+	if err := failed.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func authoringLedgerFixture(t testing.TB) (DefinitionAuthoringRecord, GoalSpecification) {
 	t.Helper()

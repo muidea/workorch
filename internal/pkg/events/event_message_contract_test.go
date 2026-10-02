@@ -73,7 +73,8 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// 持久 authoring 增加已审定的创建／保存／查询／资源 scope、派生 reserve/complete、
 	// 规格 reserve/complete、确认／准入合同；既有 pre-seal 规格 ledger 保留三个写入口。
 	// 无生产调用方的规格单请求 query 和五个退休 CLI 定义写 facade 不再登记。
-	const expectedProductionTopicCount = 297
+	// 规格失败诊断增加一个 Workspace/permit scoped 只读查询，不重发 provider 或授予准入。
+	const expectedProductionTopicCount = 298
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}

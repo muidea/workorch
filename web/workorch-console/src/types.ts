@@ -13,6 +13,25 @@ export type DefinitionAuthoringCreate = {
   input: DefinitionAuthoringInput;
 };
 
+export type AuthoringDiagnosticMetadata = {
+  parseError?: string;
+  parseErrorSHA256: string;
+  parseErrorBytes: number;
+  parseErrorSaved: boolean;
+  payloadSHA256: string;
+  payloadBytes: number;
+  payloadSaved: boolean;
+  notSavedReason?: string;
+};
+
+export type AuthoringDiagnostic = AuthoringDiagnosticMetadata & {
+  workspaceId: string;
+  permitId: string;
+  phase: string;
+  failureCode: string;
+  payloadBase64: string;
+};
+
 export type DefinitionAuthoringView = {
   workspaceId: string;
   workspaceRevision: number;
@@ -30,7 +49,7 @@ export type DefinitionAuthoringView = {
   admissionViolationCode?: string;
   admissionOffendingRefs?: string[];
   startupInputHash?: string;
-  requests?: { phase: string; reviewKind?: string; state: string; failureCode?: string }[];
+  requests?: { phase: string; reviewKind?: string; state: string; failureCode?: string; permitId?: string; diagnostic?: AuthoringDiagnosticMetadata }[];
   proposal?: {
     goalText: string;
     items: { ref: string; text: string; sourceKind: string }[];

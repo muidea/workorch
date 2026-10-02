@@ -31,15 +31,16 @@ type WorkspacePorts struct {
 }
 
 type DefinitionPorts struct {
-	CreateDefinitionAuthoring  CreateDefinitionAuthoringFunc
-	ReadDefinitionAuthoring    ReadDefinitionAuthoringFunc
-	SaveDefinitionAuthoring    SaveDefinitionAuthoringFunc
-	CompileDefinitionAuthoring ReadDefinitionAuthoringFunc
-	ConfirmDefinitionAuthoring ConfirmDefinitionAuthoringFunc
-	ReadGoal                   ReadGoalFunc
-	ListGoals                  ListGoalsFunc
-	ReadDoD                    ReadDoDFunc
-	ListDoDs                   ListDoDsFunc
+	CreateDefinitionAuthoring         CreateDefinitionAuthoringFunc
+	ReadDefinitionAuthoring           ReadDefinitionAuthoringFunc
+	SaveDefinitionAuthoring           SaveDefinitionAuthoringFunc
+	CompileDefinitionAuthoring        ReadDefinitionAuthoringFunc
+	ConfirmDefinitionAuthoring        ConfirmDefinitionAuthoringFunc
+	ReadDefinitionAuthoringDiagnostic ReadDefinitionAuthoringDiagnosticFunc
+	ReadGoal                          ReadGoalFunc
+	ListGoals                         ListGoalsFunc
+	ReadDoD                           ReadDoDFunc
+	ListDoDs                          ListDoDsFunc
 }
 
 type RunPorts struct {

@@ -110,7 +110,17 @@ func (b *Biz) StartDefinitionAuthoringCompilation(ctx context.Context, id common
 			return
 		}
 		if _, err := b.CompileDefinitionAuthoringView(taskCtx, id); err != nil {
-			slog.Warn("authoring compilation stopped; durable owner state remains queryable", "workspace", id)
+			attributes := []any{"workspace", id, "inputHash", hash}
+			if observed, readErr := b.ReadDefinitionAuthoringView(taskCtx, id); readErr == nil && observed.InputHash == hash {
+				attributes = append(attributes, "state", observed.State)
+				for _, request := range observed.Requests {
+					if request.State == "failed" {
+						attributes = append(attributes, "phase", request.Phase, "permit", request.PermitID, "failureCode", request.FailureCode)
+						break
+					}
+				}
+			}
+			slog.Warn("authoring compilation stopped; durable owner state remains queryable", attributes...)
 		}
 	}); err != nil {
 		return view, err

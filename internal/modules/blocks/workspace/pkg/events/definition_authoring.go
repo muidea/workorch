@@ -9,6 +9,40 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+const TopicWorkspaceAuthoringDiagnosticQuery = "/workspace/definition-authoring/diagnostic/query"
+
+type QueryAuthoringDiagnosticCommand struct {
+	WorkspaceID common.WorkspaceID
+	PermitID    string
+}
+
+const CommandSource = "application/workorchd"
+
+type QueryAuthoringDiagnosticResult struct {
+	WorkspaceID common.WorkspaceID
+	PermitID    string
+	Phase       workspace.DefinitionSpecificationPhase
+	FailureCode string
+	Diagnostic  workspace.DefinitionAuthoringDiagnostic
+}
+
+func (c QueryAuthoringDiagnosticCommand) Validate() error {
+	if c.WorkspaceID == "" || c.PermitID == "" || len(c.PermitID) > 256 {
+		return common.ErrInvalidArgument
+	}
+	return nil
+}
+
+func (r QueryAuthoringDiagnosticResult) ValidateFor(c QueryAuthoringDiagnosticCommand) error {
+	if c.Validate() != nil || r.WorkspaceID != c.WorkspaceID || r.PermitID != c.PermitID || r.Diagnostic.Validate() != nil {
+		return common.ErrConflict
+	}
+	if r.Phase == workspace.DefinitionSpecificationProposal && r.FailureCode == "invalid_proposal" || r.Phase == workspace.DefinitionSpecificationCritic && r.FailureCode == "invalid_review" {
+		return nil
+	}
+	return common.ErrConflict
+}
+
 type SaveDefinitionAuthoringCommand struct {
 	RequestID                 string
 	ExpectedInputHash         string

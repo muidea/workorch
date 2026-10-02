@@ -52,6 +52,9 @@ func validateDefinitionApplicationPorts(ports DefinitionPorts) error {
 	if ports.ConfirmDefinitionAuthoring == nil {
 		return fmt.Errorf("missing Definition.ConfirmDefinitionAuthoring application port")
 	}
+	if ports.ReadDefinitionAuthoringDiagnostic == nil {
+		return fmt.Errorf("missing Definition.ReadDefinitionAuthoringDiagnostic application port")
+	}
 	if ports.ReadGoal == nil {
 		return fmt.Errorf("missing Definition.ReadGoal application port")
 	}

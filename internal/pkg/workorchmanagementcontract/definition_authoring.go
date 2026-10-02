@@ -1,5 +1,32 @@
 package workorchmanagementcontract
 
+type DefinitionAuthoringDiagnosticMetadata struct {
+	ParseError       string `json:"parseError,omitempty"`
+	ParseErrorSHA256 string `json:"parseErrorSHA256,omitempty"`
+	ParseErrorBytes  uint64 `json:"parseErrorBytes"`
+	ParseErrorSaved  bool   `json:"parseErrorSaved"`
+	PayloadSHA256    string `json:"payloadSHA256"`
+	PayloadBytes     uint64 `json:"payloadBytes"`
+	PayloadSaved     bool   `json:"payloadSaved"`
+	NotSavedReason   string `json:"notSavedReason,omitempty"`
+}
+
+type DefinitionAuthoringDiagnosticView struct {
+	WorkspaceID      string `json:"workspaceId"`
+	PermitID         string `json:"permitId"`
+	Phase            string `json:"phase"`
+	FailureCode      string `json:"failureCode"`
+	ParseError       string `json:"parseError,omitempty"`
+	ParseErrorSHA256 string `json:"parseErrorSHA256,omitempty"`
+	ParseErrorBytes  uint64 `json:"parseErrorBytes"`
+	ParseErrorSaved  bool   `json:"parseErrorSaved"`
+	PayloadBase64    string `json:"payloadBase64,omitempty"`
+	PayloadSHA256    string `json:"payloadSHA256"`
+	PayloadBytes     uint64 `json:"payloadBytes"`
+	PayloadSaved     bool   `json:"payloadSaved"`
+	NotSavedReason   string `json:"notSavedReason,omitempty"`
+}
+
 // DefinitionAuthoringInput contains user-controlled Goal-only creation input.
 // Workspace and revision are assigned by the application and Workspace owner.
 type DefinitionAuthoringInput struct {
@@ -77,10 +104,12 @@ type DefinitionAuthoringProposal struct {
 }
 
 type DefinitionAuthoringRequestState struct {
-	Phase       string `json:"phase"`
-	ReviewKind  string `json:"reviewKind,omitempty"`
-	State       string `json:"state"`
-	FailureCode string `json:"failureCode,omitempty"`
+	PermitID    string                                 `json:"permitId"`
+	Phase       string                                 `json:"phase"`
+	ReviewKind  string                                 `json:"reviewKind,omitempty"`
+	State       string                                 `json:"state"`
+	FailureCode string                                 `json:"failureCode,omitempty"`
+	Diagnostic  *DefinitionAuthoringDiagnosticMetadata `json:"diagnostic,omitempty"`
 }
 
 // DefinitionAuthoringView is a bounded management read model, not a submitted

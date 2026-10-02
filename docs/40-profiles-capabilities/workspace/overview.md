@@ -8,7 +8,7 @@ Last Verified: 2026-08-18
 
 | Topic | Contract |
 | --- | --- |
-| Optional LLM-assisted setup authoring | [Setup Draft Session](setup-draft-session.md) |
+| 持久规格创作与原始失败诊断 | [Workspace 规格创作](setup-draft-session.md) |
 | Soul selection by semantic position | [Soul Routing](soul-routing.md) |
 | Built-in Template/Soul inventory and owner ensure | [Default Resources](builtin-default-resources.md) |
 

@@ -69,6 +69,12 @@ Last Verified: 2026-08-30
 - 六类审查分别覆盖维度、负路径、回归、资源环境、显式约束追踪和可验证性。FAIL/UNKNOWN、缺必需资源、缺必需维度/义务、缺 DoD 映射或不匹配的 Profile 声明不能晋升。PASS 只是有来源的评审事实，不直接授予 Runtime evidence credit，也不证明任意自然语言目标的完整性。
 - nil Specification 保留既有候选与 startup hash。此合同约束提交的规格候选，不表示所有 Web/TUI 输入已自动经过完整 Goal Compiler；正式执行仍须通过 exact CWI、owner feasibility、sealed dispatch 和 SM-2 闭包。
 
+## 原始创作诊断
+
+规格提案/审查解析失败时，Application 经既有 typed completion 提交原始 error 和响应 bytes，Workspace owner 将其与失败结果绑定并持久化。原文不脱敏、不替换、不静默截断；以 byte count/SHA256 验证完整性。单条响应保存上限256KiB、错误64KiB，沿用112条request及每阶段2次预算；超限明确记录未保存状态，不将已知失败倒退为未决。原始诊断不进入permit身份、specification hash或startup authority。
+
+请求诊断随owner Clone深拷贝，重复completion必须精确一致，变更诊断冲突；reserve不接受预填失败诊断。查询按Workspace/permit精确scope走typed EventHub，仅只读原请求，不驱动provider。普通view返回原始错误及元信息，原始响应按需单条读取；旧失败无诊断时不能虚构历史原文。包含诊断的Workspace运行文件必须0600，权限通过原子publish收紧；不写Git或通用日志。数据保护依靠访问边界而非改写数据，见 [Workspace 规格创作](../../../../docs/40-profiles-capabilities/workspace/setup-draft-session.md)。
+
 ## 能力验收
 
 | 能力/维度 | 测试证据 | 结论 |

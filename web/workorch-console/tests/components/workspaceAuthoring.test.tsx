@@ -2,13 +2,15 @@ import { StrictMode } from 'react';
 import { App } from 'antd';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { workorchApi } from '../../src/api';
 import { WorkspaceAuthoringEditor } from '../../src/pages/components/WorkspaceAuthoringEditor';
 import { WorkspaceSetupModal } from '../../src/pages/components/WorkspaceSetupModal';
+import { AuthoringDiagnosticDetails } from '../../src/pages/components/AuthoringDiagnosticDetails';
 import type { DefinitionAuthoringView } from '../../src/types';
 
 vi.mock('../../src/api', () => ({ workorchApi: {
-  listWorkspaceTemplates: vi.fn(), readDefinitionAuthoring: vi.fn(),
+  listWorkspaceTemplates: vi.fn(), readDefinitionAuthoring: vi.fn(), readAuthoringDiagnostic: vi.fn(),
   createDefinitionAuthoring: vi.fn(), saveDefinitionAuthoring: vi.fn(),
   compileDefinitionAuthoring: vi.fn(), confirmDefinitionAuthoring: vi.fn(),
   submitWorkspaceExecution: vi.fn(),
@@ -43,6 +45,11 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(workorchApi.listWorkspaceTemplates).mockResolvedValue([]);
   vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(ready());
+  vi.mocked(workorchApi.readAuthoringDiagnostic).mockImplementation(async (workspaceId, permitId) => ({
+    workspaceId, permitId, phase: 'proposal', failureCode: 'invalid_proposal', parseError: '默认解析错误',
+    parseErrorSHA256: createHash('sha256').update('默认解析错误').digest('hex'), parseErrorBytes: Buffer.byteLength('默认解析错误'), parseErrorSaved: true,
+    payloadBase64: '', payloadSHA256: createHash('sha256').digest('hex'), payloadBytes: 0, payloadSaved: true,
+  }));
 });
 
 afterEach(() => {
@@ -188,4 +195,146 @@ it('新建组件损坏恢复不得替代创建，也不自动启动 Run', async 
   expect(disabled('确认规格并准入')).toBe(true);
   expect(workorchApi.createDefinitionAuthoring).not.toHaveBeenCalled();
   expect((workorchApi as unknown as { submitWorkspaceExecution: ReturnType<typeof vi.fn> }).submitWorkspaceExecution).not.toHaveBeenCalled();
+});
+
+const diagnosticView = (withMetadata = true): DefinitionAuthoringView => ({
+  ...ready(), state: 'failed',
+  requests: [{ phase: 'proposal', state: 'failed', failureCode: 'invalid_proposal', permitId: 'permit raw/?', ...(withMetadata ? { diagnostic: {
+    parseError: '解析错误\n敏感标记: <img src=x onerror=alert(1)>\n结束',
+    parseErrorSHA256: createHash('sha256').update('解析错误\n敏感标记: <img src=x onerror=alert(1)>\n结束').digest('hex'),
+    parseErrorBytes: Buffer.byteLength('解析错误\n敏感标记: <img src=x onerror=alert(1)>\n结束'), parseErrorSaved: true,
+    payloadSHA256: '', payloadBytes: 0, payloadSaved: true,
+  } } : {}) }],
+});
+
+function browserCrypto() {
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: {
+    subtle: { digest: async (_algorithm: string, data: ArrayBuffer | ArrayBufferView) => {
+      const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data as ArrayBuffer);
+      const hash = createHash('sha256').update(bytes).digest();
+      return Uint8Array.from(hash).buffer;
+    } },
+  } as unknown as Crypto });
+}
+
+it('失败诊断原样显示多行 Unicode 和敏感 marker，按需校验原始响应且不自动运行', async () => {
+  browserCrypto();
+  const parseError = '解析错误\n敏感标记: <img src=x onerror=alert(1)>\n结束';
+  const raw = '第一行 Ω\n敏感标记: <script>raw</script>\n末行\n';
+  const bytes = new TextEncoder().encode(raw);
+  const diagnostic = {
+    workspaceId: 'ws', permitId: 'permit raw/?', phase: 'proposal', failureCode: 'invalid_proposal', parseError,
+    parseErrorSHA256: createHash('sha256').update(parseError).digest('hex'), parseErrorBytes: Buffer.byteLength(parseError), parseErrorSaved: true,
+    payloadBase64: Buffer.from(bytes).toString('base64'), payloadSHA256: createHash('sha256').update(bytes).digest('hex'), payloadBytes: bytes.byteLength, payloadSaved: true,
+  };
+  vi.mocked(workorchApi.readAuthoringDiagnostic).mockResolvedValue(diagnostic);
+  render(<AuthoringDiagnosticDetails workspaceId="ws" permitId="permit raw/?" phase="proposal" failureCode="invalid_proposal" diagnostic={diagnostic} />);
+  expect(screen.getByText((_, element) => element?.tagName === 'PRE' && element.textContent === parseError)).toBeTruthy();
+  expect(screen.getByText('invalid_proposal · proposal')).toBeTruthy();
+  expect(screen.queryByRole('img')).toBeNull();
+  expect(workorchApi.readAuthoringDiagnostic).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '按需加载并校验原始响应' }));
+  await waitFor(() => expect(workorchApi.readAuthoringDiagnostic).toHaveBeenCalledExactlyOnceWith('ws', 'permit raw/?'));
+  await waitFor(() => expect(screen.getByText((_, element) => element?.tagName === 'PRE' && element.textContent === raw)).toBeTruthy());
+  expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
+});
+
+it('原始响应 hash 不匹配时明确报错且不显示伪成功内容', async () => {
+  browserCrypto();
+  const parseError = '原样错误';
+  const diagnostic = {
+    workspaceId: 'ws', permitId: 'permit', phase: 'proposal', failureCode: 'invalid_proposal', parseError,
+    parseErrorSHA256: createHash('sha256').update(parseError).digest('hex'), parseErrorBytes: Buffer.byteLength(parseError), parseErrorSaved: true,
+    payloadBase64: Buffer.from('different raw').toString('base64'), payloadSHA256: createHash('sha256').update('expected').digest('hex'), payloadBytes: Buffer.byteLength('different raw'), payloadSaved: true,
+  };
+  vi.mocked(workorchApi.readAuthoringDiagnostic).mockResolvedValue(diagnostic);
+  render(<AuthoringDiagnosticDetails workspaceId="ws" permitId="permit" phase="proposal" failureCode="invalid_proposal" diagnostic={{ ...diagnostic }} />);
+  fireEvent.click(screen.getByRole('button', { name: '按需加载并校验原始响应' }));
+  await screen.findByText('原始响应不可用或完整性校验失败');
+  expect(screen.getByText(/原始响应 SHA-256 不匹配/)).toBeTruthy();
+  expect(screen.queryByText('different raw')).toBeNull();
+  expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
+});
+
+it('旧 failed 记录明确显示无诊断，且不加载或重发 provider', () => {
+  render(<AuthoringDiagnosticDetails workspaceId="ws" phase="proposal" failureCode="invalid_proposal" />);
+  expect(screen.getByText(/此旧失败记录没有保存诊断/)).toBeTruthy();
+  expect(screen.getByText(/原始原因未记录，且不会重新调用 provider/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /加载.*原始响应/ })).toBeNull();
+  expect(workorchApi.readAuthoringDiagnostic).not.toHaveBeenCalled();
+  expect(workorchApi.compileDefinitionAuthoring).not.toHaveBeenCalled();
+  expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
+});
+
+it('diagnostic fetch 在 workspace/permit 切换后迟到，不泄漏或覆盖新诊断', async () => {
+  const pending = deferred<Awaited<ReturnType<typeof workorchApi.readAuthoringDiagnostic>>>();
+  vi.mocked(workorchApi.readAuthoringDiagnostic).mockReturnValueOnce(pending.promise);
+  const base = {
+    parseError: '旧 parse', parseErrorSHA256: createHash('sha256').update('旧 parse').digest('hex'), parseErrorBytes: Buffer.byteLength('旧 parse'), parseErrorSaved: true,
+    payloadBase64: '', payloadSHA256: createHash('sha256').digest('hex'), payloadBytes: 0, payloadSaved: true,
+  };
+  const mounted = render(<AuthoringDiagnosticDetails workspaceId="old-ws" permitId="old-permit" phase="proposal" failureCode="invalid_proposal" diagnostic={base} />);
+  fireEvent.click(screen.getByRole('button', { name: '按需加载并校验原始响应' }));
+  mounted.rerender(<AuthoringDiagnosticDetails workspaceId="new-ws" permitId="new-permit" phase="proposal" failureCode="invalid_proposal" diagnostic={{ ...base, parseError: '新 parse', parseErrorSHA256: createHash('sha256').update('新 parse').digest('hex'), parseErrorBytes: Buffer.byteLength('新 parse') }} />);
+  await act(async () => pending.resolve({
+    workspaceId: 'old-ws', permitId: 'old-permit', phase: 'proposal', failureCode: 'invalid_proposal', ...base,
+  }));
+  expect(screen.getByText((_, element) => element?.tagName === 'PRE' && element.textContent === '新 parse')).toBeTruthy();
+  expect(screen.queryByText(/旧 parse/)).toBeNull();
+  expect(screen.queryByText('旧原始响应')).toBeNull();
+});
+
+it('diagnostic fetch workspace/permit 身份不匹配时拒绝显示', async () => {
+  browserCrypto();
+  const parseError = '身份错误诊断';
+  const diagnostic = {
+    workspaceId: 'different-ws', permitId: 'permit', phase: 'proposal', failureCode: 'invalid_proposal', parseError,
+    parseErrorSHA256: createHash('sha256').update(parseError).digest('hex'), parseErrorBytes: Buffer.byteLength(parseError), parseErrorSaved: true,
+    payloadBase64: '', payloadSHA256: createHash('sha256').digest('hex'), payloadBytes: 0, payloadSaved: true,
+  };
+  vi.mocked(workorchApi.readAuthoringDiagnostic).mockResolvedValue(diagnostic);
+  const expected = {
+    parseError, parseErrorSHA256: diagnostic.parseErrorSHA256, parseErrorBytes: diagnostic.parseErrorBytes, parseErrorSaved: true,
+    payloadSHA256: diagnostic.payloadSHA256, payloadBytes: diagnostic.payloadBytes, payloadSaved: true,
+  };
+  render(<AuthoringDiagnosticDetails workspaceId="ws" permitId="permit" phase="proposal" failureCode="invalid_proposal" diagnostic={expected} />);
+  fireEvent.click(screen.getByRole('button', { name: '按需加载并校验原始响应' }));
+  await screen.findByText(/workspace 或 permit 身份不匹配/);
+  expect(screen.queryByText((_, element) => element?.tagName === 'PRE' && element.textContent === '身份错误诊断')).toBeTruthy();
+});
+
+it('相同诊断的周期查询不丢弃正在加载的原始响应', async () => {
+  browserCrypto();
+  const parseError = '原始错误';
+  const payload = '  原始响应\r\n';
+  const result = {
+    workspaceId: 'ws', permitId: 'permit', phase: 'proposal', failureCode: 'invalid_proposal', parseError,
+    parseErrorSHA256: createHash('sha256').update(parseError).digest('hex'), parseErrorBytes: Buffer.byteLength(parseError), parseErrorSaved: true,
+    payloadBase64: Buffer.from(payload).toString('base64'), payloadSHA256: createHash('sha256').update(payload).digest('hex'), payloadBytes: Buffer.byteLength(payload), payloadSaved: true,
+  };
+  let finish!: (value: typeof result) => void;
+  vi.mocked(workorchApi.readAuthoringDiagnostic).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const props = { workspaceId: 'ws', permitId: 'permit', phase: 'proposal', failureCode: 'invalid_proposal' };
+  const { rerender } = render(<AuthoringDiagnosticDetails {...props} diagnostic={{ ...result }} />);
+  fireEvent.click(screen.getByRole('button', { name: '按需加载并校验原始响应' }));
+  rerender(<AuthoringDiagnosticDetails {...props} diagnostic={{ ...result }} />);
+  finish(result);
+  await screen.findByRole('button', { name: '下载已校验原始字节' });
+  expect(screen.getByText((_, element) => element?.tagName === 'PRE' && element.textContent === payload)).toBeTruthy();
+});
+
+it('byte 数不匹配时拒绝原始响应并明确报告', async () => {
+  browserCrypto();
+  const errorText = '完整诊断错误';
+  const diagnostic = {
+    workspaceId: 'ws', permitId: 'permit', phase: 'proposal', failureCode: 'invalid_proposal', parseError: errorText,
+    parseErrorSHA256: createHash('sha256').update(errorText).digest('hex'), parseErrorBytes: Buffer.byteLength(errorText), parseErrorSaved: true,
+    payloadBase64: Buffer.from('payload').toString('base64'), payloadSHA256: createHash('sha256').update('payload').digest('hex'), payloadBytes: 999, payloadSaved: true,
+  };
+  vi.mocked(workorchApi.readAuthoringDiagnostic).mockResolvedValue(diagnostic);
+  render(<AuthoringDiagnosticDetails workspaceId="ws" permitId="permit" phase="proposal" failureCode="invalid_proposal" diagnostic={{ ...diagnostic }} />);
+  fireEvent.click(screen.getByRole('button', { name: '按需加载并校验原始响应' }));
+  await screen.findByText('原始响应不可用或完整性校验失败');
+  expect(screen.getByText(/字节数不匹配/)).toBeTruthy();
+  expect(screen.queryByText('payload')).toBeNull();
 });

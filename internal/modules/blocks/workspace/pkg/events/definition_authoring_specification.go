@@ -44,6 +44,7 @@ type CompleteAuthoringSpecificationCommand struct {
 	Proposal    *workspace.GoalSpecification
 	Review      *workspace.GoalSpecificationCompletenessReview
 	FailureCode string
+	Diagnostic  *workspace.DefinitionAuthoringDiagnostic
 }
 
 func (c CompleteAuthoringSpecificationCommand) Validate() error {
@@ -59,6 +60,11 @@ func (c CompleteAuthoringSpecificationCommand) Validate() error {
 	}
 	if c.FailureCode != "" {
 		outcomes++
+		if c.Diagnostic != nil && (c.FailureCode == "provider_failed" || c.Diagnostic.Validate() != nil) {
+			return common.ErrInvalidArgument
+		}
+	} else if c.Diagnostic != nil {
+		return common.ErrInvalidArgument
 	}
 	if outcomes != 1 {
 		return common.ErrInvalidArgument
@@ -108,7 +114,7 @@ func (r AuthoringSpecificationRequestResult) ValidateCompletion(c CompleteAuthor
 	if err := r.validate(); err != nil {
 		return err
 	}
-	if r.FreshPermitID != "" || r.Request.PermitID != c.PermitID || r.Request.FailureCode != c.FailureCode || !reflect.DeepEqual(r.Request.Proposal, c.Proposal) || !reflect.DeepEqual(r.Request.Review, c.Review) {
+	if r.FreshPermitID != "" || r.Request.PermitID != c.PermitID || r.Request.FailureCode != c.FailureCode || !reflect.DeepEqual(r.Request.Proposal, c.Proposal) || !reflect.DeepEqual(r.Request.Review, c.Review) || !reflect.DeepEqual(r.Request.Diagnostic, c.Diagnostic) {
 		return common.ErrConflict
 	}
 	return nil

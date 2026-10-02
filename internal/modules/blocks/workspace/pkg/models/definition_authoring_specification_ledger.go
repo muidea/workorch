@@ -6,10 +6,115 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"unicode/utf8"
 )
 
 const DefinitionAuthoringSpecificationRequestLimit = 112
 const DefinitionAuthoringSpecificationAttemptLimit = 2
+
+// Provider diagnostics are bounded independently from the existing request
+// budget. Oversized values are represented by exact byte metadata, never a
+// truncated prefix.
+const DefinitionAuthoringDiagnosticDocumentLimit = 256 * 1024
+const DefinitionAuthoringDiagnosticErrorLimit = 64 * 1024
+const definitionAuthoringDiagnosticNotSavedReason = "diagnostic exceeds supported storage boundary"
+
+// DefinitionAuthoringDiagnostic preserves provider/parser failure data without
+// making it an authoring or admission authority.
+type DefinitionAuthoringDiagnostic struct {
+	ParseError       string
+	ParseErrorSHA256 string
+	ParseErrorBytes  uint64
+	ParseErrorSaved  bool
+	Payload          []byte
+	PayloadSHA256    string
+	PayloadBytes     uint64
+	PayloadSaved     bool
+	NotSavedReason   string
+}
+
+func NewDefinitionAuthoringDiagnostic(parseError string, payload []byte) DefinitionAuthoringDiagnostic {
+	d := DefinitionAuthoringDiagnostic{ParseErrorBytes: uint64(len(parseError)), PayloadBytes: uint64(len(payload))}
+	if parseError != "" {
+		h := sha256.Sum256([]byte(parseError))
+		d.ParseErrorSHA256 = hex.EncodeToString(h[:])
+		if len(parseError) <= DefinitionAuthoringDiagnosticErrorLimit {
+			d.ParseError = parseError
+			d.ParseErrorSaved = true
+		}
+	}
+	h := sha256.Sum256(payload)
+	d.PayloadSHA256 = hex.EncodeToString(h[:])
+	if len(payload) <= DefinitionAuthoringDiagnosticDocumentLimit {
+		d.Payload = append([]byte{}, payload...)
+		d.PayloadSaved = true
+	}
+	if !d.ParseErrorSaved || !d.PayloadSaved {
+		d.NotSavedReason = definitionAuthoringDiagnosticNotSavedReason
+	}
+	return d
+}
+
+func (d DefinitionAuthoringDiagnostic) Clone() DefinitionAuthoringDiagnostic {
+	if d.Payload != nil {
+		d.Payload = append([]byte{}, d.Payload...)
+	}
+	return d
+}
+
+func (d DefinitionAuthoringDiagnostic) Validate() error {
+	if !utf8.ValidString(d.ParseError) {
+		return fmt.Errorf("authoring diagnostic error is not UTF-8")
+	}
+	if d.ParseErrorBytes == 0 || d.ParseErrorSHA256 == "" || len(d.ParseErrorSHA256) != sha256.Size*2 {
+		return fmt.Errorf("authoring diagnostic requires non-empty error identity")
+	}
+	if strings.ToLower(d.ParseErrorSHA256) != d.ParseErrorSHA256 {
+		return fmt.Errorf("authoring diagnostic error hash casing invalid")
+	}
+	if _, err := hex.DecodeString(d.ParseErrorSHA256); err != nil {
+		return fmt.Errorf("authoring diagnostic error hash invalid")
+	}
+	if d.PayloadSHA256 == "" || len(d.PayloadSHA256) != sha256.Size*2 {
+		return fmt.Errorf("authoring diagnostic payload hash invalid")
+	}
+	if strings.ToLower(d.PayloadSHA256) != d.PayloadSHA256 {
+		return fmt.Errorf("authoring diagnostic payload hash casing invalid")
+	}
+	if _, err := hex.DecodeString(d.PayloadSHA256); err != nil {
+		return fmt.Errorf("authoring diagnostic payload hash invalid")
+	}
+	if d.ParseErrorSaved {
+		if d.ParseErrorBytes > DefinitionAuthoringDiagnosticErrorLimit || uint64(len(d.ParseError)) != d.ParseErrorBytes {
+			return fmt.Errorf("authoring diagnostic error byte count/limit mismatch")
+		}
+		h := sha256.Sum256([]byte(d.ParseError))
+		if hex.EncodeToString(h[:]) != d.ParseErrorSHA256 {
+			return fmt.Errorf("authoring diagnostic error hash mismatch")
+		}
+	} else if d.ParseError != "" || d.ParseErrorBytes <= DefinitionAuthoringDiagnosticErrorLimit {
+		return fmt.Errorf("authoring diagnostic error withheld without exceeding limit")
+	}
+	if d.PayloadSaved {
+		if d.PayloadBytes > DefinitionAuthoringDiagnosticDocumentLimit || uint64(len(d.Payload)) != d.PayloadBytes || d.Payload == nil {
+			return fmt.Errorf("authoring diagnostic payload byte count/limit mismatch")
+		}
+		h := sha256.Sum256(d.Payload)
+		if hex.EncodeToString(h[:]) != d.PayloadSHA256 {
+			return fmt.Errorf("authoring diagnostic payload hash mismatch")
+		}
+	} else if d.Payload != nil || d.PayloadBytes <= DefinitionAuthoringDiagnosticDocumentLimit {
+		return fmt.Errorf("authoring diagnostic payload withheld without exceeding limit")
+	}
+	if d.ParseErrorSaved && d.PayloadSaved {
+		if d.NotSavedReason != "" {
+			return fmt.Errorf("saved authoring diagnostic has unsaved reason")
+		}
+	} else if d.NotSavedReason != definitionAuthoringDiagnosticNotSavedReason {
+		return fmt.Errorf("authoring diagnostic not-saved reason mismatch")
+	}
+	return nil
+}
 
 // A specification request records a single possible physical call. Neither a
 // reserved request nor a completed review grants admission.
@@ -24,6 +129,7 @@ type DefinitionAuthoringSpecificationRequest struct {
 	Proposal            *GoalSpecification
 	Review              *GoalSpecificationCompletenessReview
 	FailureCode         string
+	Diagnostic          *DefinitionAuthoringDiagnostic
 }
 
 func (r DefinitionAuthoringSpecificationRequest) Clone() DefinitionAuthoringSpecificationRequest {
@@ -36,6 +142,10 @@ func (r DefinitionAuthoringSpecificationRequest) Clone() DefinitionAuthoringSpec
 		review.EvidenceRefs = append([]string(nil), review.EvidenceRefs...)
 		review.RequirementIDs = append([]string(nil), review.RequirementIDs...)
 		r.Review = &review
+	}
+	if r.Diagnostic != nil {
+		d := r.Diagnostic.Clone()
+		r.Diagnostic = &d
 	}
 	return r
 }
@@ -63,6 +173,9 @@ func (r DefinitionAuthoringSpecificationRequest) Validate() error {
 		return fmt.Errorf("authoring specification phase invalid")
 	}
 	if r.FailureCode != "" {
+		if r.Diagnostic != nil && (r.FailureCode == "provider_failed" || r.Diagnostic.Validate() != nil) {
+			return fmt.Errorf("authoring failure diagnostic invalid")
+		}
 		if r.FailureCode != "provider_failed" && r.FailureCode != "invalid_proposal" && r.FailureCode != "invalid_review" || r.Proposal != nil || r.Review != nil {
 			return fmt.Errorf("authoring specification failure invalid")
 		}
@@ -71,7 +184,7 @@ func (r DefinitionAuthoringSpecificationRequest) Validate() error {
 		}
 		return nil
 	}
-	if r.Proposal != nil && r.Review != nil || r.Proposal != nil && (r.Phase != DefinitionSpecificationProposal || len(r.Proposal.Reviews) != 0) || r.Review != nil && (r.Phase != DefinitionSpecificationCritic || r.Review.Kind != r.ReviewKind || r.Review.SpecificationHash != r.ProposalHash) {
+	if r.Diagnostic != nil || r.Proposal != nil && r.Review != nil || r.Proposal != nil && (r.Phase != DefinitionSpecificationProposal || len(r.Proposal.Reviews) != 0) || r.Review != nil && (r.Phase != DefinitionSpecificationCritic || r.Review.Kind != r.ReviewKind || r.Review.SpecificationHash != r.ProposalHash) {
 		return fmt.Errorf("authoring specification outcome phase mismatch")
 	}
 	return nil
@@ -222,16 +335,27 @@ func (r DefinitionAuthoringRecord) ReserveSpecification(request DefinitionAuthor
 	return next, request, true, nil
 }
 
-func (r DefinitionAuthoringRecord) CompleteSpecification(permitID string, proposal *GoalSpecification, review *GoalSpecificationCompletenessReview, failureCode string) (DefinitionAuthoringRecord, error) {
+func (r DefinitionAuthoringRecord) CompleteSpecification(permitID string, proposal *GoalSpecification, review *GoalSpecificationCompletenessReview, failureCode string, diagnostics ...*DefinitionAuthoringDiagnostic) (DefinitionAuthoringRecord, error) {
 	if err := r.Validate(); err != nil {
 		return DefinitionAuthoringRecord{}, err
+	}
+	if len(diagnostics) > 1 {
+		return DefinitionAuthoringRecord{}, fmt.Errorf("authoring completion has multiple diagnostics")
+	}
+	var diagnostic *DefinitionAuthoringDiagnostic
+	if len(diagnostics) == 1 {
+		diagnostic = diagnostics[0]
 	}
 	for n, previous := range r.SpecificationRequests {
 		if previous.PermitID != permitID {
 			continue
 		}
 		completed := previous.Clone()
-		completed.Proposal, completed.Review, completed.FailureCode = proposal, review, strings.TrimSpace(failureCode)
+		completed.Proposal, completed.Review, completed.FailureCode = proposal, review, failureCode
+		if diagnostic != nil {
+			d := diagnostic.Clone()
+			completed.Diagnostic = &d
+		}
 		completed = completed.Clone()
 		outcomes := 0
 		if completed.Proposal != nil {

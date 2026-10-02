@@ -5,6 +5,7 @@ import { errorMessage } from '../../helpers';
 import { authoringSourceLabel, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringEditorValues, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling, restoreAuthoringEditorRecovery } from '../../workspaceAuthoring';
 import type { AuthoringEditorRecovery, AuthoringEditorValues } from '../../workspaceAuthoring';
 import type { DefinitionAuthoringView, WorkspaceTemplate } from '../../types';
+import { AuthoringDiagnosticDetails } from './AuthoringDiagnosticDetails';
 
 type Props = { open: boolean; workspaceId?: string; onClose: () => void; onAdmitted: () => Promise<void> };
 type Values = AuthoringEditorValues;
@@ -202,7 +203,7 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
       {view && !view.templateCurrent && <Alert type="warning" message="模板已变化，请保存修订并重新审查。" />}
       {edited && <Alert type="warning" message="本地输入已修改，旧规格不可确认。" />}
       {view?.admissionViolationCode && <Alert type="warning" message={view.admissionViolationCode} description={view.admissionOffendingRefs?.join('、')} />}
-      {view?.requests?.filter(request => request.state === 'failed').map((request, index) => <Alert key={`${request.phase}-${request.reviewKind || index}`} type="error" message={`规格请求失败：${request.phase}`} description={request.failureCode} />)}
+      {view?.requests?.filter(request => request.state === 'failed').map((request, index) => <Alert key={`${request.phase}-${request.reviewKind || index}`} type="error" showIcon message={`规格请求失败：${request.phase}`} description={<AuthoringDiagnosticDetails workspaceId={view.workspaceId} permitId={request.permitId} phase={request.phase} failureCode={request.failureCode} diagnostic={request.diagnostic} />} />)}
       {view?.state === 'outcome_unresolved' && <Alert type="warning" message="持久请求结果未决，不会自动重发 provider；可查询恢复或修订输入。" />}
       <List dataSource={view?.proposal?.verifications || []} renderItem={item => <List.Item>{item.id} · {item.status} · {item.declaration}</List.Item>} />
       <List dataSource={view?.proposal?.items || []} renderItem={item => <List.Item><Space><Tag>{authoringSourceLabel(item.sourceKind)}</Tag>{item.text}</Space></List.Item>} />

@@ -3,8 +3,10 @@ package biz
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -33,7 +35,7 @@ import (
 
 // 使用正式 HTTP ports 和真实持久 owners；仅 provider 与任务排队由测试控制。
 func TestAuthoringHTTPFileBackedCompilationConfirmationAndRecovery(t *testing.T) {
-	for _, scenario := range []string{"pass", "review_fail", "review_unknown", "resource_drift"} {
+	for _, scenario := range []string{"pass", "review_fail", "review_unknown", "resource_drift", "invalid_proposal", "invalid_review"} {
 		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
 	}
 }
@@ -147,6 +149,9 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				payload, err = json.Marshal(struct {
 					Specification workspace.GoalSpecification `json:"specification"`
 				}{proposal})
+				if scenario == "invalid_proposal" {
+					payload = []byte("  {\"providerControlled\": true}\n")
+				}
 			default:
 				kind := strings.TrimPrefix(command.Request.Kind, "workspace/specification/review/")
 				proposal := record.SpecificationRequests[0].Proposal
@@ -169,6 +174,9 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				payload, err = json.Marshal(struct {
 					Review workspace.GoalSpecificationCompletenessReview `json:"review"`
 				}{review})
+				if scenario == "invalid_review" {
+					payload = []byte("  {\"未知审查字段\":\"sk_test_marker\"}\r\n")
+				}
 			}
 			if err != nil {
 				t.Error(err)
@@ -320,6 +328,44 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		workers.Wait()
 	} else if !realWorker {
 		routine.queued.Run()
+	}
+	if scenario == "invalid_proposal" || scenario == "invalid_review" {
+		failed := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+		requestIndex := len(failed.Requests) - 1
+		if failed.State != "failed" || requestIndex < 0 || failed.Requests[requestIndex].FailureCode != scenario || failed.Requests[requestIndex].Diagnostic == nil || failed.Requests[requestIndex].Diagnostic.ParseError == "" {
+			t.Fatalf("invalid proposal was not durably diagnosed: %+v", failed)
+		}
+		var envelope struct {
+			Diagnostic management.DefinitionAuthoringDiagnosticView `json:"diagnostic"`
+		}
+		response, err := http.Get(baseURL + path + "/diagnostics/" + failed.Requests[requestIndex].PermitID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			t.Fatalf("diagnostic status %d: %s", response.StatusCode, body)
+		}
+		if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+			response.Body.Close()
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		raw := []byte("  {\"providerControlled\": true}\n")
+		if scenario == "invalid_review" {
+			raw = []byte("  {\"未知审查字段\":\"sk_test_marker\"}\r\n")
+		}
+		if envelope.Diagnostic.ParseError != failed.Requests[requestIndex].Diagnostic.ParseError || envelope.Diagnostic.PayloadBase64 != base64.StdEncoding.EncodeToString(raw) || envelope.Diagnostic.PayloadBytes != uint64(len(raw)) || !envelope.Diagnostic.PayloadSaved {
+			t.Fatalf("raw diagnostic changed: %+v", envelope.Diagnostic)
+		}
+		before := physicalCalls.Load()
+		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusOK)
+		if physicalCalls.Load() != before {
+			t.Fatal("known failure automatically retried provider")
+		}
+		assertNoRuns()
+		return
 	}
 	ready := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
 	if realWorker {

@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"encoding/base64"
 	"reflect"
 	"strings"
 
@@ -98,4 +99,21 @@ func (b *Biz) ConfirmDefinitionAuthoringView(ctx context.Context, id common.Work
 		return workorchmanagementcontract.DefinitionAuthoringView{}, err
 	}
 	return b.ReadDefinitionAuthoringView(ctx, id)
+}
+
+func (b *Biz) ReadDefinitionAuthoringDiagnosticView(ctx context.Context, id common.WorkspaceID, permit string) (workorchmanagementcontract.DefinitionAuthoringDiagnosticView, error) {
+	command := workspaceevents.QueryAuthoringDiagnosticCommand{WorkspaceID: id, PermitID: permit}
+	result, err := b.QueryAuthoringDiagnostic(ctx, command)
+	if err != nil {
+		return workorchmanagementcontract.DefinitionAuthoringDiagnosticView{}, err
+	}
+	if err := result.ValidateFor(command); err != nil {
+		return workorchmanagementcontract.DefinitionAuthoringDiagnosticView{}, common.ErrConflict
+	}
+	d := result.Diagnostic
+	payload := ""
+	if d.PayloadSaved {
+		payload = base64.StdEncoding.EncodeToString(d.Payload)
+	}
+	return workorchmanagementcontract.DefinitionAuthoringDiagnosticView{WorkspaceID: string(result.WorkspaceID), PermitID: result.PermitID, Phase: string(result.Phase), FailureCode: result.FailureCode, ParseError: d.ParseError, ParseErrorSHA256: d.ParseErrorSHA256, ParseErrorBytes: d.ParseErrorBytes, ParseErrorSaved: d.ParseErrorSaved, PayloadBase64: payload, PayloadSHA256: d.PayloadSHA256, PayloadBytes: d.PayloadBytes, PayloadSaved: d.PayloadSaved, NotSavedReason: d.NotSavedReason}, nil
 }
