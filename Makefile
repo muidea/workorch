@@ -225,13 +225,14 @@ verify-service-file: verify-service
 verify-workspace-authoring-contract:
 	python3 scripts/test-verify-authoring-mock.py
 	python3 scripts/test-verify-authoring-mock-server.py
+	python3 scripts/test_verify_mock_readiness.py
 	python3 scripts/test-create-authoring-verification-workspace.py
 	python3 scripts/test-verify-workspace-authoring-live.py
 	go test ./internal/pkg/events -run '^TestOwnerEvent(ContractsAreCompleteAndUnique|CommandsHaveProductionSenderAndReceiver|MessageGraphsAreConcrete)$$' -count=1
 	go test -race ./internal/modules/blocks/workspace/pkg/eventmapping -run '^TestAuthoring' -count=1 -timeout=3m
 	go test ./internal/services/workorch -run '^TestWeb(ConsoleMutatingEndpointsStayWithinProductSurfaceContract|WorkspaceSetupRequiresTemplateAndAllowsDefaultDirectory)$$' -count=1
 	go test ./internal/modules/application/workorchd/biz/appservice -run '^TestCLIDispatcherRejectsRetiredDefinitionWritesWithoutOwner$$' -count=1
-	go test ./internal/modules/application/workorchd/service/server -run '^TestRetired(DefinitionWriteRoutesDoNotCallApplicationPorts|DraftRoutesHaveNoSessionSideEffects)$$' -count=1 -timeout=3m
+	go test ./internal/modules/application/workorchd/service/server -run '^TestRetired(DefinitionWriteRoutesDoNotCallApplicationPorts|DraftRoutesHaveNoOwnerSideEffects)$$' -count=1 -timeout=3m
 	go test ./internal/pkg/workorchclient -run '^TestDefinitionAuthoringClient' -count=1
 	go test ./internal/modules/application/workorchd/biz -run '^Test(SaveDefinitionAuthoringView|AuthoringApplicationRejectsMismatchedOwnerResults)' -count=1
 	go test ./internal/modules/blocks/workspace/pkg/models -run '^Test(DefinitionAuthoringSaveReceipt|ConfirmedAuthoringAdmissionSource)' -count=1

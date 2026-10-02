@@ -561,9 +561,13 @@ class Handler(BaseHTTPRequestHandler):
         print(fmt % args, flush=True)
 
 host, port_text = os.environ.get("WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR", "127.0.0.1:18181").split(":", 1)
-ThreadingHTTPServer((host, int(port_text)), Handler).serve_forever()
+server = ThreadingHTTPServer((host, int(port_text)), Handler)
+with open(os.environ["WORKORCH_VERIFY_MOCK_READY_FILE"], "x") as ready:
+    ready.write(str(os.getpid()))
+server.serve_forever()
 PY
-  PYTHONPATH="$ROOT_DIR/scripts${PYTHONPATH:+:$PYTHONPATH}" WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR="$MOCK_ADDR" WORKORCH_MCP_STDIO_VERIFY_SERVER_ID="$MCP_SERVER_ID" python3 "$TMP_DIR/llm_mock_provider.py" >>"$MOCK_LOG" 2>&1 &
+  MOCK_READY_FILE="$(mktemp -d "$TMP_DIR/mock-ready.XXXXXX")/pid"
+  PYTHONPATH="$ROOT_DIR/scripts${PYTHONPATH:+:$PYTHONPATH}" WORKORCH_VERIFY_MOCK_READY_FILE="$MOCK_READY_FILE" WORKORCH_MCP_STDIO_VERIFY_MOCK_ADDR="$MOCK_ADDR" WORKORCH_MCP_STDIO_VERIFY_SERVER_ID="$MCP_SERVER_ID" python3 "$TMP_DIR/llm_mock_provider.py" >>"$MOCK_LOG" 2>&1 &
   MOCK_PID=$!
 }
 
@@ -630,12 +634,18 @@ wait_ready() {
 
 wait_mock() {
   for _ in $(seq 1 "$CURL_READY_ATTEMPTS"); do
+    kill -0 "$MOCK_PID" 2>/dev/null || { echo "本次 mock 进程未启动，拒绝连接其它服务" >&2; return 1; }
+    if [[ ! -f "$MOCK_READY_FILE" ]] || [[ "$(<"$MOCK_READY_FILE")" != "$MOCK_PID" ]]; then
+      sleep 0.2
+      continue
+    fi
     if curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_READY_MAX_TIME" -fsS "http://$MOCK_ADDR/v1/models" >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.2
   done
-  curl --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_READY_MAX_TIME" -fsS "http://$MOCK_ADDR/v1/models" >/dev/null
+  echo "本次 mock 未在原 readiness 预算内就绪" >&2
+  return 1
 }
 
 write_llm_update_payloads() {

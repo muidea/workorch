@@ -325,11 +325,16 @@ proxy = llm.get('aiProxy') or {}
 if str(proxy.get('baseUrl') or proxy.get('baseURL') or '').rstrip('/') != sys.argv[2].rstrip('/'):
     raise SystemExit('模板验收必须连接预配置的隔离本地 mock，不调用真实 provider')
 PY
-python3 "$ROOT_DIR/scripts/verify-authoring-mock-server.py" --port "${MOCK_ADDR##*:}" >"$TMP_DIR/authoring-mock.log" 2>&1 &
+MOCK_READY_FILE="$(mktemp -d "$TMP_DIR/mock-ready.XXXXXX")/pid"
+python3 "$ROOT_DIR/scripts/verify-authoring-mock-server.py" --port "${MOCK_ADDR##*:}" --ready-file "$MOCK_READY_FILE" >"$TMP_DIR/authoring-mock.log" 2>&1 &
 MOCK_PID=$!
 mock_ready=0
 for _ in {1..30}; do
   kill -0 "$MOCK_PID" 2>/dev/null || break
+  if [[ ! -f "$MOCK_READY_FILE" ]] || [[ "$(<"$MOCK_READY_FILE")" != "$MOCK_PID" ]]; then
+    sleep 1
+    continue
+  fi
   if curl -fsS "$MOCK_BASE_URL/models" >/dev/null; then mock_ready=1; break; fi
   sleep 1
 done

@@ -25,7 +25,7 @@ user through TUI / Web / API
 
 | Product resource | User action | Authority result |
 | --- | --- | --- |
-| Workspace Definition | edit Template、Goal、DoD、optional directory | Workspace-owned immutable admission candidate and promoted startup input |
+| Workspace Definition | 提交 Template、Goal、Resources、可选用户验收要求和 directory；精确确认派生与审查结果 | Workspace-owned immutable admission candidate and promoted startup input |
 | Execution | submit `resume|restart` intent | Run owner lifecycle/replacement plus Orchestrator convergence |
 | Governance | answer Decision/Approval | corresponding owner resolution; no client auto-Resume |
 | Context resources | manage Soul、Skill、Memory、MCP registry and model selection | each resource owner revision/snapshot |
@@ -35,15 +35,17 @@ User text、UI state、HTTP response、Eventstream and projection never become R
 
 ## Fresh Execution
 
-1. User submits exact Template、Goal/DoD and resolved/default directory as pre-seal candidate。
-2. Pure admission accepts complete `all_of` only；explicit ambiguity returns a blocking clarification ticket and no Run。
-3. Workspace owner promotion seals startup input；corrected ticket lineage becomes eligible only after Decision resolution and Workspace acknowledgement。
-4. User explicitly submits execution intent；workorchd composes typed bootstrap from eligible owner state。
+1. 用户提交 Template、Goal、Resources、可选用户验收要求和 directory；Workspace owner 持久化创作输入，解析默认目录。
+2. 系统派生 DoD 并完成六类独立审查；用户精确确认当前 revision、input、permit、proposal 和 specification 身份后，
+   才物化正式 Goal/DoD 和 pre-seal candidate。
+3. Pure admission 仅接受完整 `all_of`；显式歧义产生阻塞 clarification ticket，不创建 Run。Workspace owner promotion
+   封存 startup input；修正后的 ticket lineage 只有经 Decision resolution 和 Workspace acknowledgement 才具备执行资格。
+4. 用户另行显式提交 execution intent；workorchd 从 eligible owner state 组装 typed bootstrap。
 5. Run owner activates SM-1；Orchestrator drives SM-2/3/4；capability owner executes only sealed operation。
 6. Orchestrator accepts matching evidence and seals terminal；Result→Workspace→Run owners acknowledge in order。
 
-Manual authoring does not require setup-draft LLM。After startup seal，bounded Runtime LLM processing is allowed but cannot
-rewrite inputs、choose action、grant credit or decide terminal。
+创建、编译和确认均不自动执行。TUI 不提供创作 wizard，也不接受已退休的直接定义写入。startup seal 后允许 bounded
+Runtime LLM processing，但不得改写启动输入、选择 action、授予 credit 或裁定 terminal。
 
 执行期 semantic processing 若发现隐含 one-of、undeclared prerequisite 或 Definition ambiguity，只能形成 Run-scoped
 runtime-definition clarification ticket。受影响 focus 在新 operation 前停止；客户端不能回答该票据以继续 predecessor。

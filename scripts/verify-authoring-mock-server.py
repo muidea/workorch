@@ -2,6 +2,7 @@
 """模板验收专用 authoring mock；无 Runtime 响应，无外部 provider 转发。"""
 import argparse
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from verify_authoring_mock import AuthoringMockError, authoring_response
 
@@ -61,5 +62,9 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, required=True)
+    parser.add_argument('--ready-file', required=True)
     args = parser.parse_args()
-    ThreadingHTTPServer(('127.0.0.1', args.port), Handler).serve_forever()
+    server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
+    with open(args.ready_file, 'x') as ready:
+        ready.write(str(os.getpid()))
+    server.serve_forever()

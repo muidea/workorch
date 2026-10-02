@@ -9,7 +9,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionquality"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraft"
 	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
@@ -39,7 +38,6 @@ type UpdateDoDFunc func(context.Context, string, string, string, string, []strin
 type ReadDoDFunc func(context.Context, string, string, string, string) (workorchmanagementcontract.DoD, error)
 type ListDoDsFunc func(context.Context, string, string, string) ([]workorchmanagementcontract.DoD, error)
 type CheckGoalDoDQualityFunc func(context.Context, string, string, definitionquality.Command) (definitionquality.Check, error)
-type GenerateWorkspaceSetupDraftFunc func(context.Context, string, string, setupdraft.GenerationCommand) (setupdraft.Draft, error)
 type ReadRunInstanceFunc func(context.Context, string, string, string) (appmodelcore.Run, error)
 type ReadRunSnapshotFunc func(context.Context, string, string, string) (readmodelcore.RunSnapshotState, error)
 type ListRunStepsFunc func(context.Context, string, string, workorchquerycontract.RunResourcePageQuery) (readmodelcore.StepPage, error)

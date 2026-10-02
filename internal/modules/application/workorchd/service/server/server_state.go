@@ -22,19 +22,17 @@ type serverState struct {
 	streamSubscriberSequence    uint64
 	metrics                     *serverMetrics
 	applicationOperations
-	backgroundRoutine           task.BackgroundRoutine
-	backgroundWG                sync.WaitGroup
-	backgroundCtx               context.Context
-	backgroundCancel            context.CancelFunc
-	runStatusNotifyMu           sync.Mutex
-	runStatusNotify             chan struct{}
-	eventUnsubscribes           []func()
-	workspaceProjection         WorkspaceProjection
-	workspaceProjectionWriter   WorkspaceProjectionWriter
-	runSnapshotCacheMu          sync.Mutex
-	runSnapshotEntries          map[string]*runSnapshotCacheEntry
-	workspaceSetupDraftMu       sync.Mutex
-	workspaceSetupDraftSessions map[string]*workspaceSetupDraftSession
+	backgroundRoutine         task.BackgroundRoutine
+	backgroundWG              sync.WaitGroup
+	backgroundCtx             context.Context
+	backgroundCancel          context.CancelFunc
+	runStatusNotifyMu         sync.Mutex
+	runStatusNotify           chan struct{}
+	eventUnsubscribes         []func()
+	workspaceProjection       WorkspaceProjection
+	workspaceProjectionWriter WorkspaceProjectionWriter
+	runSnapshotCacheMu        sync.Mutex
+	runSnapshotEntries        map[string]*runSnapshotCacheEntry
 }
 
 type cachedRunSnapshot struct {

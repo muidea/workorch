@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,21 +32,24 @@ func TestRetiredDefinitionWriteRoutesDoNotCallApplicationPorts(t *testing.T) {
 	}
 }
 
-func TestRetiredDraftRoutesHaveNoSessionSideEffects(t *testing.T) {
+func TestRetiredDraftRoutesHaveNoOwnerSideEffects(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
-	for _, path := range []string{
-		"/api/v1/workorch/workspace-setup-draft-sessions",
-		"/api/v1/workorch/workspace-setup-draft-sessions/retired/messages",
-		"/api/v1/workorch/workspace-setup-draft-sessions/retired/regenerate",
-	} {
-		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`)))
-		if recorder.Code != http.StatusNotFound {
-			t.Fatalf("retired route %s: %d", path, recorder.Code)
+	for _, body := range []string{`{}`, `{"templateId":"retired","title":"草稿","content":"新要求","draft":{"goalText":"旧目标","doDItems":["旧验收"]}}`} {
+		for _, path := range []string{
+			"/api/v1/workorch/workspace-setup-draft-sessions",
+			"/api/v1/workorch/workspace-setup-draft-sessions/retired/messages",
+			"/api/v1/workorch/workspace-setup-draft-sessions/retired/regenerate",
+		} {
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("retired route %s: %d", path, recorder.Code)
+			}
 		}
 	}
-	if len(state.workspaceSetupDraftSessions) != 0 {
-		t.Fatal("retired route created an in-memory session")
+	workspaces, err := state.listWorkspaces(context.Background(), state.config.Backend, state.config.DataRoot)
+	if err != nil || len(workspaces) != 0 {
+		t.Fatalf("退休草稿路由写入 Workspace owner: %+v / %v", workspaces, err)
 	}
 }

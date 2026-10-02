@@ -4,7 +4,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionquality"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraft"
 	"github.com/muidea/workorch/internal/pkg/workorchconfigurationcontract"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
@@ -80,13 +79,6 @@ type goalDoDQualityCheckResponse struct {
 	Backend      string                  `json:"backend,omitempty"`
 	DataRoot     string                  `json:"dataRoot,omitempty"`
 	QualityCheck definitionquality.Check `json:"qualityCheck"`
-}
-
-type workspaceSetupDraftSessionResponse struct {
-	Service      string                     `json:"service"`
-	Backend      string                     `json:"backend,omitempty"`
-	DataRoot     string                     `json:"dataRoot,omitempty"`
-	DraftSession workspaceSetupDraftSession `json:"draftSession"`
 }
 
 type runInstanceResponse struct {
@@ -386,24 +378,6 @@ type memoryRecallTracesResponse struct {
 
 type resolveApprovalRequest struct {
 	Payload workorcheventpayload.Payload `json:"payload,omitempty"`
-}
-
-type createWorkspaceSetupDraftSessionRequest struct {
-	TemplateID           string `json:"templateId,omitempty"`
-	Title                string `json:"title,omitempty"`
-	Description          string `json:"description,omitempty"`
-	DeliverableDirectory string `json:"deliverableDirectory,omitempty"`
-	DialogLanguage       string `json:"dialogLanguage,omitempty"`
-}
-
-type appendWorkspaceSetupDraftMessageRequest struct {
-	TemplateID           string           `json:"templateId,omitempty"`
-	Title                string           `json:"title,omitempty"`
-	Description          string           `json:"description,omitempty"`
-	DeliverableDirectory string           `json:"deliverableDirectory,omitempty"`
-	Content              string           `json:"content"`
-	Draft                setupdraft.Draft `json:"draft,omitempty"`
-	DialogLanguage       string           `json:"dialogLanguage,omitempty"`
 }
 
 type errorResponse struct {

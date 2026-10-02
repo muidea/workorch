@@ -1,15 +1,8 @@
 package server
 
 import (
-	"context"
-
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraft"
 )
-
-func defaultGenerateWorkspaceSetupDraft(ctx context.Context, backend string, dataRoot string, cmd setupdraft.GenerationCommand) (setupdraft.Draft, error) {
-	return appservice.GenerateWorkspaceSetupDraftWithBackend(ctx, backend, dataRoot, cmd)
-}
 
 // newDefaultApplicationOperations is retained for standalone/test server
 // construction. Production Biz wiring can replace this typed boundary before
@@ -35,7 +28,6 @@ func newDefaultApplicationOperations() applicationOperations {
 	operations.readDoD = defaultReadDoD
 	operations.listDoDs = defaultListDoDs
 	operations.checkGoalDoDQuality = defaultCheckGoalDoDQuality
-	operations.generateWorkspaceSetupDraft = defaultGenerateWorkspaceSetupDraft
 	operations.readRun = defaultReadRun
 	operations.readRunSnapshot = defaultReadRunSnapshot
 	operations.listRunSteps = defaultListRunSteps

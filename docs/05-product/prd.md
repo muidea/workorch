@@ -8,8 +8,9 @@ Last Verified: 2026-08-26
 
 ## Product Positioning
 
-WorkOrch 是 local-first 的长期任务编排与自治执行 Runtime。用户为 Workspace 定义 Goal 和 DoD，系统基于不可变
-Definition revision，在可审计、可治理、可恢复、fail-closed 的 Runtime 中调用 LLM、provider 与 capability，持续进行
+WorkOrch 是 local-first 的长期任务编排与自治执行 Runtime。用户提交 Workspace 创作输入，系统派生并独立审查 DoD，
+经用户精确确认和 Workspace owner 准入形成正式 Goal/DoD。用户另行显式启动后，系统基于不可变 Definition revision，
+在可审计、可治理、可恢复、fail-closed 的 Runtime 中调用 LLM、provider 与 capability，持续进行
 有界语义规划、执行、验证、修复与重新收敛，直到：
 
 - accepted evidence、coverage 与 assessment 支持成功终态；
@@ -47,10 +48,12 @@ Definition revision，在可审计、可治理、可恢复、fail-closed 的 Run
 - 执行期发现的隐含 `one_of`、undeclared prerequisite 或 semantic ambiguity 必须通过专用
   runtime-definition-clarification command/result 和 ticket binding 收口；current Run 不扩图、不改 Definition。
 - 每个 Run 绑定一个不可变 Definition revision、startup-input hash 与 typed `RuntimeBootstrap`；Resume 不得吸收新 revision。
-- 正常 setup 的必填业务输入只有 Template、Goal 和 DoD。directory 可选，空值解析为
-  `.workorch-workspaces/<workspace-id>`。
+- 正常 Web setup 的业务输入为 Template、Goal、Resources 和可选用户验收要求，不要求用户手工编写正式 DoD。
+  directory 可选，空值解析为 `.workorch-workspaces/<workspace-id>`。
+- Workspace owner 先持久化创作输入，再派生 DoD，完成六类独立审查；仅在用户精确确认当前 revision、input、permit、
+  proposal 和 specification 身份后物化正式 Goal/DoD，并执行 owner admission。创作输入不等同于已封存的启动输入。
 - 普通用户不需要编写 raw context、runtime、target、recipe、check、metric、artifact、evidence 或 provider JSON。
-- setup 可以完全手工完成且不要求 LLM；assisted draft 只有经用户采用后才成为 pre-seal candidate。
+- 创建、编译与确认均不得启动 Run；执行是单独的显式意图。TUI 不提供创作 wizard，并拒绝已退休的直接定义写入。
 - startup input 封存后，Runtime 可以在不修改启动输入的前提下调用 LLM 处理 bounded semantic proof、candidate、
   diagnosis 或 assessment。
 

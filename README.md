@@ -4,9 +4,10 @@ Status: active
 
 Last Verified: 2026-08-21
 
-WorkOrch is a local-first workspace orchestration service. Users define a Goal and Definition of Done (DoD), activate a
-workspace execution, observe convergence, and manage LLM, MCP, memory and governance resources through a TUI-first CLI
-or the embedded Web console.
+WorkOrch 是 local-first 的 Workspace 编排服务。正常 Web 创建输入为 Template、Goal、Resources 和可选用户验收要求；
+系统持久化创作输入，派生 DoD，完成六类独立审查，再由用户精确确认并通过 Workspace owner 准入，形成正式 Goal/DoD。
+创建和确认均不启动 Run；用户另行显式提交执行意图，通过 TUI-first CLI 或内嵌 Web console 观察收敛，管理 LLM、MCP、Memory 和治理资源。
+TUI 不提供创作 wizard，也不接受已退休的直接定义写入。
 
 ## Runtime Boundary
 

@@ -6,11 +6,10 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitionquality"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraft"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
-// Goal/DoD/quality/setup-draft adapters form one definition-focused slice.
+// Goal/DoD 与 quality 的 owner 适配仅供局部测试；HTTP 不注册退休定义写路由。
 func (s *serverState) configureDefinitionOperations(session *runtimecore.Session) {
 	s.defineGoal = func(ctx context.Context, _, _, workspaceID, text string) (workorchmanagementcontract.Goal, error) {
 		var ret workorchmanagementcontract.Goal
@@ -89,15 +88,6 @@ func (s *serverState) configureDefinitionOperations(session *runtimecore.Session
 		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
 			var err error
 			ret, err = appservice.CheckGoalDoDQualityWithSession(ctx, session, cmd)
-			return err
-		})
-		return ret, err
-	}
-	s.generateWorkspaceSetupDraft = func(ctx context.Context, _, _ string, cmd setupdraft.GenerationCommand) (setupdraft.Draft, error) {
-		var ret setupdraft.Draft
-		err := withBorrowedTestSession(ctx, session, func(session *runtimecore.Session) error {
-			var err error
-			ret, err = appservice.GenerateWorkspaceSetupDraftWithSession(ctx, session, cmd, nil)
 			return err
 		})
 		return ret, err

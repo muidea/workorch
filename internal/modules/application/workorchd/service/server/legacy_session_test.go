@@ -64,6 +64,7 @@ func configureSessionBackedTestOperations(s *serverState, session *runtimecore.S
 	bindTestRuntimeSession(s, session)
 	s.configureConfigurationOperations(session)
 	s.configureWorkspaceOperations(session)
+	s.configureAuthoringCreationFixture(session)
 	s.configureDefinitionOperations(session)
 	s.configureRunOperations(session)
 	s.configureGovernanceOperations(session)

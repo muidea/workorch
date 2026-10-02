@@ -1313,11 +1313,16 @@ if os.environ.get("WORKORCH_LLM_VERIFY_MOCK_SELF_TEST") == "1":
     provider_request_parser_self_test()
     print("runtime mock C3 parser self-test passed", flush=True)
     raise SystemExit(0)
-ThreadingHTTPServer((host, port), Handler).serve_forever()
+server = ThreadingHTTPServer((host, port), Handler)
+# 只有本进程成功 bind 后才发布就绪凭据，不能接受冲突端口上的其它服务。
+with open(os.environ["WORKORCH_VERIFY_MOCK_READY_FILE"], "x") as ready:
+    ready.write(str(os.getpid()))
+server.serve_forever()
 
 PY
   WORKORCH_LLM_VERIFY_MOCK_SELF_TEST=1 python3 "$TMP_DIR/llm_mock_provider.py" >/dev/null
-  PYTHONPATH="$ROOT_DIR/scripts${PYTHONPATH:+:$PYTHONPATH}" WORKORCH_LLM_VERIFY_MOCK_ADDR="$MOCK_ADDR" python3 "$TMP_DIR/llm_mock_provider.py" >>"$MOCK_LOG" 2>&1 &
+  MOCK_READY_FILE="$(mktemp -d "$TMP_DIR/mock-ready.XXXXXX")/pid"
+  PYTHONPATH="$ROOT_DIR/scripts${PYTHONPATH:+:$PYTHONPATH}" WORKORCH_VERIFY_MOCK_READY_FILE="$MOCK_READY_FILE" WORKORCH_LLM_VERIFY_MOCK_ADDR="$MOCK_ADDR" python3 "$TMP_DIR/llm_mock_provider.py" >>"$MOCK_LOG" 2>&1 &
   MOCK_PID=$!
 }
 
@@ -1333,6 +1338,11 @@ wait_ready() {
 
 wait_mock() {
   for _ in $(seq 1 50); do
+    kill -0 "$MOCK_PID" 2>/dev/null || { echo "本次 mock 进程未启动，拒绝连接其它服务" >&2; return 1; }
+    if [[ ! -f "$MOCK_READY_FILE" ]] || [[ "$(<"$MOCK_READY_FILE")" != "$MOCK_PID" ]]; then
+      sleep 0.2
+      continue
+    fi
     if curl -fsS -X POST "http://$MOCK_ADDR/v1/responses" \
       -H 'Content-Type: application/json' \
       -d '{"input":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}' >/dev/null 2>&1; then
@@ -1340,9 +1350,8 @@ wait_mock() {
     fi
     sleep 0.2
   done
-  curl -fsS -X POST "http://$MOCK_ADDR/v1/responses" \
-    -H 'Content-Type: application/json' \
-    -d '{"input":"{\"runId\": \"probe\", \"stepId\": \"probe\"}"}' >/dev/null
+  echo "本次 mock 未在原 readiness 预算内就绪" >&2
+  return 1
 }
 
 write_llm_update_payloads() {

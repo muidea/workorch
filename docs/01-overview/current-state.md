@@ -43,8 +43,10 @@ this path without a parallel compatibility authority.
 
 ## Definition And Activation
 
-- setup input consists of Template, Goal, DoD and an optional workspace directory; blank directory resolves to
-  `.workorch-workspaces/<workspace-id>` before sealing;
+- 正常 Web setup 输入为 Template、Goal、Resources 和可选用户验收要求；directory 可选，空值在封存前解析为
+  `.workorch-workspaces/<workspace-id>`。Workspace owner 先持久化创作输入，派生 DoD 并完成六类独立审查；
+  用户精确确认当前 revision、input、permit、proposal 和 specification 身份后，才物化正式 Goal/DoD；
+- 创建、编译和确认不启动 Run，执行必须另行显式提交。TUI 无创作 wizard，拒绝已退休的直接定义写入；
 - Workspace owner persists a pre-seal `DefinitionAdmissionCandidate`; pure admission accepts only complete `all_of` semantics;
 - explicit `one_of`/`any_of`, threshold or unresolved required relation creates a blocking clarification ticket and cannot create a Run;
 - promotion seals exact Goal/DoD, Template/Profile snapshot, resolved directory and `StartupInputHash`; Definition admission

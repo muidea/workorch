@@ -12,15 +12,14 @@ func newServerStateBase(config Config, backgroundRoutine task.BackgroundRoutine,
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	executionMetrics := newExecutionAdmissionMetrics()
 	state := &serverState{
-		config:                      config,
-		eventReplay:                 newSSEReplayBuffer(defaultSSEReplayLimit),
-		streamSubscribers:           make(map[uint64]chan streamEvent),
-		metrics:                     &serverMetrics{executionAdmissionMetrics: executionMetrics, observedTerminalStates: make(map[string]struct{}), observedRuntimeDrives: make(map[string]runtimeDriveMetric)},
-		applicationOperations:       operations,
-		backgroundRoutine:           backgroundRoutine,
-		backgroundCtx:               backgroundCtx,
-		backgroundCancel:            backgroundCancel,
-		workspaceSetupDraftSessions: map[string]*workspaceSetupDraftSession{},
+		config:                config,
+		eventReplay:           newSSEReplayBuffer(defaultSSEReplayLimit),
+		streamSubscribers:     make(map[uint64]chan streamEvent),
+		metrics:               &serverMetrics{executionAdmissionMetrics: executionMetrics, observedTerminalStates: make(map[string]struct{}), observedRuntimeDrives: make(map[string]runtimeDriveMetric)},
+		applicationOperations: operations,
+		backgroundRoutine:     backgroundRoutine,
+		backgroundCtx:         backgroundCtx,
+		backgroundCancel:      backgroundCancel,
 	}
 	return state
 }

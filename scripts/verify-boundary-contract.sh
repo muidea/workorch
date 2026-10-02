@@ -767,14 +767,14 @@ fi
 
 # Application execution admission is synchronous with Workspace owner. Keep
 # deleted application-local queue/state-owner surfaces from returning under a
-# different call site, and keep setup draft state a response-only derivation.
+# different call site, and reject retired process-local setup draft authority.
 application_execution_state_bypass_matches="$({
   source_matches '(runQueueWaiters|activeRunSlots|EnqueueWorkspaceExecution|RecordWorkspaceExecutionQueued|RecordWorkspaceExecutionEnqueueFailure|RecordWorkspaceExecutionTransportQueued|RecordWorkspaceExecutionTransportEnqueueFailure|RunCommandQueuedUpdate|ApplyRunCommandQueued|QueuedAt|recordCommandEnqueueFailure|scheduler_enqueue_failed|workorch_run_queue_)' \
     internal/modules/application/workorchd || true
   source_matches '(runQueueWaiting|workorch_run_queue_|workorch_scheduler_command_enqueue_failures_total|scheduler_enqueue_failed)' scripts |
     grep -v -F -- 'scripts/verify-boundary-contract.sh' || true
-  source_matches 'session\.State[[:space:]]*=|State:[[:space:]]*workspaceSetupDraftState' \
-    internal/modules/application/workorchd/service/server/workspace_setup_draft.go || true
+  source_matches '(workspaceSetupDraftSessions|registerWorkspaceSetupDraftRoutes|generateAndStoreWorkspaceSetupDraft)' \
+    internal/modules/application/workorchd/service/server || true
   source_matches '(ApplyWorkspaceExecutionAdmission|applyProjectedWorkspaceExecutionAdmission)' \
     internal/modules/application/workorchd/service/server || true
   source_matches 'ApplyWorkspaceExecutionAdmission.*int64' \

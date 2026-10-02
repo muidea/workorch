@@ -26,7 +26,6 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/content"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/setupdraft"
 	approvalevents "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/events"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
@@ -1231,7 +1230,11 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/readyz"},
 		{method: http.MethodGet, pattern: "/metrics"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/configuration"},
-		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspace-authoring"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/authoring"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/authoring"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/authoring/compile"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/authoring/confirm"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId"},
 		{method: http.MethodDelete, pattern: "/api/v1/workorch/workspaces/:workspaceId"},
@@ -1239,15 +1242,10 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory-recalls"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
 		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
-		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals/:goalId"},
-		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals/:goalId"},
-		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods/:dodId"},
-		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods/:dodId"},
-		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goal-dod-quality-check"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action"},
@@ -1301,6 +1299,12 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 
 func unsupportedMutatingAPINativeRouteSpecs() []routeSpec {
 	return []routeSpec{
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/goals/:goalId"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods"},
+		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/dods/:dodId"},
+		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/goal-dod-quality-check"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/runs/:runId/:action"},
 		{method: http.MethodPost, pattern: "/api/v1/workorch/workspaces/:workspaceId/execution-restarts"},
@@ -1854,7 +1858,8 @@ func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEvent(t *testing.T) {
 		t.Fatal("timed out waiting for stream connection")
 	}
 
-	createResp, err := http.Post(server.URL+"/api/v1/workorch/workspaces", "application/json", strings.NewReader(`{"title":"streamed workspace","deliverableDirectory":"workspaces/streamed"}`))
+	postAndExpect(t, newMuxWithState(state), "/api/v1/workorch/workspace-templates", `{"id":"stream-template","name":"流式创建模板"}`, http.StatusCreated)
+	createResp, err := http.Post(server.URL+"/api/v1/workorch/workspace-authoring", "application/json", strings.NewReader(`{"requestId":"stream-created","templateId":"stream-template","input":{"goalText":"验证创建事件"},"title":"streamed workspace","deliverableDirectory":"workspaces/streamed"}`))
 	if err != nil {
 		t.Fatalf("post workspace: %v", err)
 	}
@@ -1929,7 +1934,8 @@ func TestWorkspaceCreateEndpointStreamsWorkspaceCreatedEventToMultipleClients(t 
 	waitConnected("first", firstLines, firstErr)
 	waitConnected("second", secondLines, secondErr)
 
-	createResp, err := http.Post(server.URL+"/api/v1/workorch/workspaces", "application/json", strings.NewReader(`{"title":"streamed multi-client workspace","deliverableDirectory":"workspaces/streamed-multi"}`))
+	postAndExpect(t, newMuxWithState(state), "/api/v1/workorch/workspace-templates", `{"id":"stream-multi-template","name":"多客户端创建模板"}`, http.StatusCreated)
+	createResp, err := http.Post(server.URL+"/api/v1/workorch/workspace-authoring", "application/json", strings.NewReader(`{"requestId":"stream-multi-created","templateId":"stream-multi-template","input":{"goalText":"验证多客户端创建事件"},"title":"streamed multi-client workspace","deliverableDirectory":"workspaces/streamed-multi"}`))
 	if err != nil {
 		t.Fatalf("post workspace: %v", err)
 	}
@@ -2065,7 +2071,7 @@ func TestConsoleRoutesServeEmbeddedAssets(t *testing.T) {
 			t.Fatalf("console js body does not contain %q", want)
 		}
 	}
-	for _, want := range []string{"创建工作空间", "定义目标", "定义验收标准", "提交执行", "运行摘要", "当前运行"} {
+	for _, want := range []string{"创建工作空间", "六类独立审查", "确认规格并准入", "提交执行", "运行摘要", "当前运行"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("console js body does not contain required business action %q", want)
 		}
@@ -2108,179 +2114,12 @@ func readEmbeddedConsoleJSAssets(t *testing.T, mux http.Handler) string {
 func TestWorkspaceCreateEndpointReturnsCreatedWorkspace(t *testing.T) {
 	handler := newTestMux(t, Config{Backend: "memory"})
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"http workspace","description":"http description","deliverableDirectory":"workspaces/ws-http"}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	handler.ServeHTTP(createRec, createReq)
-
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("create status = %d, want 201, body=%s", createRec.Code, createRec.Body.String())
+	workspace := createWorkspaceForHTTP(t, handler, "http workspace", "workspaces/ws-http")
+	if !strings.HasPrefix(workspace.ID, "ws-") || workspace.Description != "http description" {
+		t.Fatalf("owner workspace identity = %q", workspace.ID)
 	}
-	var created workspaceResponse
-	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("unmarshal created workspace: %v", err)
-	}
-	if !strings.HasPrefix(created.Workspace.ID, "ws-") ||
-		created.Workspace.Title != "http workspace" ||
-		created.Workspace.Description != "http description" ||
-		created.Workspace.DeliverableDirectory != "workspaces/ws-http" ||
-		created.Workspace.State != "active" {
-		t.Fatalf("created workspace = %+v, want ws-http/http workspace/workspaces/ws-http/active", created.Workspace)
-	}
-}
-
-func TestWorkspaceSetupDraftSessionSupportsMultiTurnDraft(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	state.listWorkspaceTemplates = func(context.Context, string, string) ([]workorchmanagementcontract.WorkspaceTemplate, error) {
-		return []workorchmanagementcontract.WorkspaceTemplate{{
-			ID:       "generic-template",
-			Name:     "Generic Template",
-			GoalText: "Template goal",
-			DoDItems: []string{"Template DoD"},
-		}}, nil
-	}
-	generateCalls := 0
-	state.generateWorkspaceSetupDraft = func(_ context.Context, _, _ string, cmd setupdraft.GenerationCommand) (setupdraft.Draft, error) {
-		generateCalls++
-		if cmd.TemplateID != "generic-template" || len(cmd.Messages) == 0 {
-			t.Fatalf("draft command = %+v, want template and user messages", cmd)
-		}
-		if generateCalls == 1 && cmd.CurrentDraft.GoalText != "Template goal" {
-			t.Fatalf("first draft current draft = %+v, want template draft baseline", cmd.CurrentDraft)
-		}
-		if generateCalls == 2 {
-			if cmd.CurrentDraft.GoalText != "Generated goal from first requirement" {
-				t.Fatalf("second draft current draft = %+v, want previous generated draft", cmd.CurrentDraft)
-			}
-			if len(cmd.Messages) != 3 || cmd.Messages[1].Role != "assistant" {
-				t.Fatalf("second draft messages = %+v, want full multi-turn history with assistant draft", cmd.Messages)
-			}
-		}
-		return setupdraft.Draft{
-			GoalText:          "Generated goal from " + cmd.Messages[len(cmd.Messages)-1].Content,
-			GenerationSummary: "Draft revised from current context",
-			DoDItems: []string{`
-### Acceptance
-- [ ] **Group**:
-- [ ] first item
-- [ ] second item
-`},
-			Confidence: "high",
-		}, nil
-	}
-	handler := newMuxWithState(state)
-
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-setup-draft-sessions", strings.NewReader(`{"templateId":"generic-template","title":"draft workspace"}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	handler.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("create status = %d, want 201, body=%s", createRec.Code, createRec.Body.String())
-	}
-	var created workspaceSetupDraftSessionResponse
-	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("unmarshal created draft session: %v", err)
-	}
-	if created.DraftSession.ID == "" || created.DraftSession.Draft.GoalText != "Template goal" {
-		t.Fatalf("created draft session = %+v, want template draft", created.DraftSession)
-	}
-
-	msgReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-setup-draft-sessions/"+created.DraftSession.ID+"/messages", strings.NewReader(`{"content":"first requirement"}`))
-	msgReq.Header.Set("Content-Type", "application/json")
-	msgRec := httptest.NewRecorder()
-	handler.ServeHTTP(msgRec, msgReq)
-	if msgRec.Code != http.StatusOK {
-		t.Fatalf("message status = %d, want 200, body=%s", msgRec.Code, msgRec.Body.String())
-	}
-	var updated workspaceSetupDraftSessionResponse
-	if err := json.Unmarshal(msgRec.Body.Bytes(), &updated); err != nil {
-		t.Fatalf("unmarshal updated draft session: %v", err)
-	}
-	wantItems := []string{"Acceptance / Group： first item", "Acceptance / Group： second item"}
-	if updated.DraftSession.State != "draft_ready" ||
-		updated.DraftSession.Draft.GoalText != "Generated goal from first requirement" ||
-		len(updated.DraftSession.Messages) != 2 ||
-		!reflect.DeepEqual(updated.DraftSession.Draft.DoDItems, wantItems) {
-		t.Fatalf("updated draft session = %+v, want normalized multi-turn draft", updated.DraftSession)
-	}
-	if !strings.Contains(updated.DraftSession.Messages[1].Content, "DoD:") {
-		t.Fatalf("assistant message = %q, want DoD content for future turns", updated.DraftSession.Messages[1].Content)
-	}
-
-	secondReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-setup-draft-sessions/"+created.DraftSession.ID+"/messages", strings.NewReader(`{"content":"second requirement"}`))
-	secondReq.Header.Set("Content-Type", "application/json")
-	secondRec := httptest.NewRecorder()
-	handler.ServeHTTP(secondRec, secondReq)
-	if secondRec.Code != http.StatusOK {
-		t.Fatalf("second message status = %d, want 200, body=%s", secondRec.Code, secondRec.Body.String())
-	}
-	var second workspaceSetupDraftSessionResponse
-	if err := json.Unmarshal(secondRec.Body.Bytes(), &second); err != nil {
-		t.Fatalf("unmarshal second draft session: %v", err)
-	}
-	if second.DraftSession.Draft.GoalText != "Generated goal from second requirement" || len(second.DraftSession.Messages) != 4 {
-		t.Fatalf("second draft session = %+v, want revised draft with full history", second.DraftSession)
-	}
-	if second.DraftSession.Draft.GenerationSummary == "" {
-		t.Fatalf("second draft = %+v, want generation summary for display", second.DraftSession.Draft)
-	}
-}
-
-func TestWorkspaceSetupDraftMessageCanRestoreTemplateContext(t *testing.T) {
-	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
-	state.listWorkspaceTemplates = func(context.Context, string, string) ([]workorchmanagementcontract.WorkspaceTemplate, error) {
-		return []workorchmanagementcontract.WorkspaceTemplate{{
-			ID:       "generic-template",
-			Name:     "Generic Template",
-			GoalText: "Template goal",
-			DoDItems: []string{"Template DoD"},
-		}}, nil
-	}
-	state.generateWorkspaceSetupDraft = func(_ context.Context, _, _ string, cmd setupdraft.GenerationCommand) (setupdraft.Draft, error) {
-		if cmd.TemplateID != "generic-template" {
-			t.Fatalf("draft command template = %q, want restored template", cmd.TemplateID)
-		}
-		if cmd.CurrentDraft.GoalText != "Template goal" || !reflect.DeepEqual(cmd.CurrentDraft.DoDItems, []string{"Template DoD"}) {
-			t.Fatalf("draft command current draft = %+v, want restored template draft", cmd.CurrentDraft)
-		}
-		if len(cmd.CurrentDraft.ClarifyingQuestions) != 0 {
-			t.Fatalf("draft command current draft = %+v, want stale clarifications cleared before revision", cmd.CurrentDraft)
-		}
-		return setupdraft.Draft{ClarifyingQuestions: []string{"Need more details"}}, nil
-	}
-	handler := newMuxWithState(state)
-
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-setup-draft-sessions", strings.NewReader(`{"title":"draft workspace"}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	handler.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("create status = %d, want 201, body=%s", createRec.Code, createRec.Body.String())
-	}
-	var created workspaceSetupDraftSessionResponse
-	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("unmarshal created draft session: %v", err)
-	}
-
-	body := `{"templateId":"generic-template","title":"draft workspace","draft":{"clarifyingQuestions":["old question"]},"content":"new requirement"}`
-	msgReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-setup-draft-sessions/"+created.DraftSession.ID+"/messages", strings.NewReader(body))
-	msgReq.Header.Set("Content-Type", "application/json")
-	msgRec := httptest.NewRecorder()
-	handler.ServeHTTP(msgRec, msgReq)
-	if msgRec.Code != http.StatusOK {
-		t.Fatalf("message status = %d, want 200, body=%s", msgRec.Code, msgRec.Body.String())
-	}
-	var updated workspaceSetupDraftSessionResponse
-	if err := json.Unmarshal(msgRec.Body.Bytes(), &updated); err != nil {
-		t.Fatalf("unmarshal updated draft session: %v", err)
-	}
-	if updated.DraftSession.TemplateID != "generic-template" ||
-		updated.DraftSession.Draft.GoalText != "Template goal" ||
-		!reflect.DeepEqual(updated.DraftSession.Draft.DoDItems, []string{"Template DoD"}) {
-		t.Fatalf("updated draft session = %+v, want restored template goal and DoD", updated.DraftSession)
-	}
-	if len(updated.DraftSession.Draft.ClarifyingQuestions) == 0 {
-		t.Fatalf("updated draft = %+v, want clarification retained", updated.DraftSession.Draft)
+	if body := getAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", http.StatusOK); !strings.Contains(body, `"runs": []`) {
+		t.Fatalf("creation implicitly started a Run: %s", body)
 	}
 }
 
@@ -2288,17 +2127,7 @@ func TestWorkspaceCreateEndpointDefaultsDeliverableDirectory(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"http default directory workspace"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201, body=%s", rec.Code, rec.Body.String())
-	}
-	var body workspaceResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal workspace: %v", err)
-	}
+	body := workspaceResponse{Workspace: createWorkspaceForHTTP(t, handler, "http default directory workspace", "")}
 	if body.Workspace.ID == "" {
 		t.Fatalf("workspace id is empty")
 	}
@@ -2645,18 +2474,7 @@ func TestWorkspaceDeleteEndpointDeletesWorkspaceAndSupportsPurge(t *testing.T) {
 	dataRoot := t.TempDir()
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: dataRoot})
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"http delete workspace"}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	handler.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("workspace create status = %d, want 201, body=%s", createRec.Code, createRec.Body.String())
-	}
-	var created workspaceResponse
-	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("unmarshal created workspace: %v", err)
-	}
-	workspace := created.Workspace
+	workspace := createWorkspaceForHTTP(t, handler, "http delete workspace", "")
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/workorch/workspaces/"+workspace.ID+"?purge=true", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -2678,7 +2496,7 @@ func TestWorkspaceDeleteEndpointDeletesWorkspaceAndSupportsPurge(t *testing.T) {
 func TestWorkspaceCreateEndpointRejectsClientWorkspaceID(t *testing.T) {
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"ws-client","title":"client workspace","deliverableDirectory":"workspaces/ws-client"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-authoring", strings.NewReader(`{"workspaceId":"ws-client","title":"client workspace","deliverableDirectory":"workspaces/ws-client"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -2694,7 +2512,7 @@ func TestWorkspaceCreateEndpointRejectsRawRuntimeContractDeclaration(t *testing.
 		`{"title":"raw hints","contextHints":{"profileContracts":{}}}`,
 		`{"title":"raw policies","evidencePolicies":[{"id":"recipe"}]}`,
 	} {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-authoring", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -2705,7 +2523,7 @@ func TestWorkspaceCreateEndpointRejectsRawRuntimeContractDeclaration(t *testing.
 }
 
 func TestWorkspaceCreateEndpointReturnsBadRequestForInvalidBody(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"workspaceId":"","title":""}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-authoring", strings.NewReader(`{"title":""}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -2727,39 +2545,22 @@ func TestWorkspaceGetEndpointReturnsNotFoundWhenMissing(t *testing.T) {
 	}
 }
 
-func TestGoalAndDoDUpdateEndpointsReturnUpdatedDefinitions(t *testing.T) {
+func TestRetiredGoalAndDoDWritesCannotMaterializeDefinitions(t *testing.T) {
 	handler := newTestMux(t, Config{Backend: "file", DataRoot: t.TempDir()})
 	workspace := createWorkspaceForHTTP(t, handler, "definition update workspace", "workspaces/definition-update")
-	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
-
-	goalReq := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/"+workspace.ID+"/goals/"+goalID, strings.NewReader(`{"text":"updated goal text"}`))
-	goalReq.Header.Set("Content-Type", "application/json")
-	goalRec := httptest.NewRecorder()
-	handler.ServeHTTP(goalRec, goalReq)
-	if goalRec.Code != http.StatusOK {
-		t.Fatalf("goal update status = %d, want 200, body=%s", goalRec.Code, goalRec.Body.String())
-	}
-	var goalBody goalResponse
-	if err := json.Unmarshal(goalRec.Body.Bytes(), &goalBody); err != nil {
-		t.Fatalf("unmarshal goal response: %v", err)
-	}
-	if goalBody.Goal.ID != goalID || goalBody.Goal.Text != "- updated goal text" {
-		t.Fatalf("goal response = %+v, want normalized updated text", goalBody.Goal)
-	}
-
-	dodReq := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/"+workspace.ID+"/dods/"+dodID, strings.NewReader(`{"items":["updated dod","second dod"]}`))
-	dodReq.Header.Set("Content-Type", "application/json")
-	dodRec := httptest.NewRecorder()
-	handler.ServeHTTP(dodRec, dodReq)
-	if dodRec.Code != http.StatusOK {
-		t.Fatalf("dod update status = %d, want 200, body=%s", dodRec.Code, dodRec.Body.String())
-	}
-	var dodBody dodResponse
-	if err := json.Unmarshal(dodRec.Body.Bytes(), &dodBody); err != nil {
-		t.Fatalf("unmarshal dod response: %v", err)
-	}
-	if dodBody.DoD.ID != dodID || len(dodBody.DoD.Items) != 2 || dodBody.DoD.Items[0] != "updated dod" || dodBody.DoD.State != "ready" {
-		t.Fatalf("dod response = %+v, want updated ready DoD", dodBody.DoD)
+	// 未确认草稿不得通过旧 Goal/DoD CRUD 物化正式定义。
+	for _, resource := range []string{"goals", "dods"} {
+		postAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspace.ID+"/"+resource, `{}`, http.StatusNotFound)
+		putAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspace.ID+"/"+resource+"/retired", `{}`, http.StatusNotFound)
+		body := getAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspace.ID+"/"+resource, http.StatusOK)
+		var list map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(body), &list); err != nil {
+			t.Fatal(err)
+		}
+		var items []json.RawMessage
+		if err := json.Unmarshal(list[resource], &items); err != nil || len(items) != 0 {
+			t.Fatalf("retired writes changed %s: %s / %v", resource, body, err)
+		}
 	}
 }
 
@@ -2817,34 +2618,18 @@ func TestGoalAndDoDPathScopedEndpointsHandleDuplicateDefinitionIDs(t *testing.T)
 		t.Fatalf("goal get body = %+v, want workspace B definition", goalGetBody.Goal)
 	}
 
-	goalPutReq := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/goals/"+string(goalID), strings.NewReader(`{"text":"updated duplicate goal b"}`))
-	goalPutReq.Header.Set("Content-Type", "application/json")
-	goalPutRec := httptest.NewRecorder()
-	handler.ServeHTTP(goalPutRec, goalPutReq)
-	if goalPutRec.Code != http.StatusOK {
-		t.Fatalf("goal update status = %d, want 200, body=%s", goalPutRec.Code, goalPutRec.Body.String())
+	putAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/goals/"+string(goalID), `{"text":"updated duplicate goal b"}`, http.StatusNotFound)
+	putAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/dods/"+string(dodID), `{"items":["updated duplicate dod b"]}`, http.StatusNotFound)
+	var dodGetBody dodResponse
+	if err := json.Unmarshal([]byte(getAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/dods/"+string(dodID), http.StatusOK)), &dodGetBody); err != nil {
+		t.Fatal(err)
 	}
-	var goalPutBody goalResponse
-	if err := json.Unmarshal(goalPutRec.Body.Bytes(), &goalPutBody); err != nil {
-		t.Fatalf("unmarshal goal update: %v", err)
+	if dodGetBody.DoD.WorkspaceID != workspaceB.ID || len(dodGetBody.DoD.Items) != 1 || dodGetBody.DoD.Items[0] != "dod for "+workspaceB.ID {
+		t.Fatalf("retired write changed scoped DoD: %+v", dodGetBody.DoD)
 	}
-	if goalPutBody.Goal.WorkspaceID != workspaceB.ID || goalPutBody.Goal.Text != "- updated duplicate goal b" {
-		t.Fatalf("goal update body = %+v, want workspace B update", goalPutBody.Goal)
-	}
-
-	dodPutReq := httptest.NewRequest(http.MethodPut, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/dods/"+string(dodID), strings.NewReader(`{"items":["updated duplicate dod b"]}`))
-	dodPutReq.Header.Set("Content-Type", "application/json")
-	dodPutRec := httptest.NewRecorder()
-	handler.ServeHTTP(dodPutRec, dodPutReq)
-	if dodPutRec.Code != http.StatusOK {
-		t.Fatalf("dod update status = %d, want 200, body=%s", dodPutRec.Code, dodPutRec.Body.String())
-	}
-	var dodPutBody dodResponse
-	if err := json.Unmarshal(dodPutRec.Body.Bytes(), &dodPutBody); err != nil {
-		t.Fatalf("unmarshal dod update: %v", err)
-	}
-	if dodPutBody.DoD.WorkspaceID != workspaceB.ID || len(dodPutBody.DoD.Items) != 1 || dodPutBody.DoD.Items[0] != "updated duplicate dod b" {
-		t.Fatalf("dod update body = %+v, want workspace B update", dodPutBody.DoD)
+	var unchangedGoal goalResponse
+	if err := json.Unmarshal([]byte(getAndExpect(t, handler, "/api/v1/workorch/workspaces/"+workspaceB.ID+"/goals/"+string(goalID), http.StatusOK)), &unchangedGoal); err != nil || !reflect.DeepEqual(unchangedGoal.Goal, goalGetBody.Goal) {
+		t.Fatalf("retired write changed scoped Goal: %+v / %v", unchangedGoal.Goal, err)
 	}
 
 	session = newOwnerRuntimeSession(t, "file", dataRoot)
@@ -4617,7 +4402,7 @@ func TestWorkorchDActivationHTTPProjectsRequestID(t *testing.T) {
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "activation request id", "workspaces/activation-request-id")
-	_, _ = defineGoalAndDoDForHTTP(t, handler, workspace.ID)
+	// 当前 Workspace 只有未确认的创作输入，Resume 必须收到 owner 拒绝；不需要旧定义写入。
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
 		"intent":"resume",
@@ -4852,7 +4637,7 @@ func TestWorkorchDWorkspaceRestartHTTPProjectsAcceptedSemanticPlanningActivation
 	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
 	handler := newMuxWithState(state)
 	workspace := createWorkspaceForHTTP(t, handler, "workspace restart intent", "workspaces/workspace-restart-intent")
-	_, _ = defineGoalAndDoDForHTTP(t, handler, workspace.ID)
+	// 仅验证 HTTP 对 typed 接受事实的投影；此替身不证明真实 Restart 准入。
 	state.workspaceExecutionAdmission = sessionBackedTestExecutionAdmission{state: state, submitter: acceptedRestartWorkspaceExecutionSubmitter{}}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/execution-activations", strings.NewReader(`{
@@ -5256,26 +5041,34 @@ var runtimeHTTPFixtureSequence atomic.Uint64
 func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, deliverableDirectory string) projectioncontract.Workspace {
 	t.Helper()
 
-	// Runtime deliberately rejects an activation without an explicitly sealed
-	// acceptance-slice policy.  Keep the general HTTP fixture valid through the
-	// same template path used by production instead of reintroducing a runtime
-	// default only for tests.
+	// 通过正式创建入口持久化 owner draft；模板合同存在不代表完成六审查或获得执行准入。
 	templateID := fmt.Sprintf("runtime-http-fixture-%d", runtimeHTTPFixtureSequence.Add(1))
 	templateBody := `{"id":"` + templateID + `","name":"Runtime HTTP fixture","contextHints":{"acceptanceSlicePolicy":{"schemaVersion":"workorch.acceptance_slice_policy","maxWorkItems":1,"maxFocuses":8,"maxCandidateContextItems":4,"completionPolicy":"all_required_items_accepted","resultPolicy":"slice_result_allowed","groups":[{"id":"http-fixture-all","title":"HTTP fixture acceptance","scope":"http_fixture","priority":10,"maxWorkItems":1,"match":{"all":true}}]},"profileContracts":{"http-fixture-proof":{"evidenceRequirements":[{"id":"*","scope":"dodItem","requiredEvidenceKinds":["validation"],"acceptedStepKinds":["validation/managed_session"],"targetRole":"http_fixture_target","targetDiscoverySources":["workspace_manifest"],"targetSelectorRef":"file/http_fixture_target","targetSelectorOwnerRef":"http-fixture-proof","targetSelectorSubjectRef":"dodItem","validationRecipeId":"http-fixture-validation","requiredCheckRefs":["http-fixture-check"]}]}}}}}`
 	postAndExpect(t, handler, "/api/v1/workorch/workspace-templates", templateBody, http.StatusCreated)
 
-	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces", strings.NewReader(`{"title":"`+title+`","deliverableDirectory":"`+deliverableDirectory+`","templateId":"`+templateID+`"}`))
+	requestBody, err := json.Marshal(workorchmanagementcontract.DefinitionAuthoringCreate{RequestID: templateID, Title: title, Description: "http description", TemplateID: templateID, DeliverableDirectory: deliverableDirectory, Input: workorchmanagementcontract.DefinitionAuthoringInput{GoalText: "验证 HTTP 资源协议"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-authoring", strings.NewReader(string(requestBody)))
 	workspaceReq.Header.Set("Content-Type", "application/json")
 	workspaceRec := httptest.NewRecorder()
 	handler.ServeHTTP(workspaceRec, workspaceReq)
 	if workspaceRec.Code != http.StatusCreated {
 		t.Fatalf("workspace create status = %d, want 201, body=%s", workspaceRec.Code, workspaceRec.Body.String())
 	}
-	var body workspaceResponse
-	if err := json.Unmarshal(workspaceRec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal workspace create response: %v", err)
+	var created definitionAuthoringResponse
+	if err := json.Unmarshal(workspaceRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal authoring create response: %v", err)
 	}
-	if body.Workspace.ID == "" || body.Workspace.Title != title || body.Workspace.DeliverableDirectory != deliverableDirectory || body.Workspace.State != "active" {
+	if created.Authoring.State != "draft" || created.Authoring.InputHash == "" || created.Authoring.StartupInputHash != "" || created.Authoring.ActivationState != "" {
+		t.Fatalf("creation fabricated admission: %+v", created.Authoring)
+	}
+	var body workspaceResponse
+	if err := json.Unmarshal([]byte(getAndExpect(t, handler, "/api/v1/workorch/workspaces/"+created.Authoring.WorkspaceID, http.StatusOK)), &body); err != nil {
+		t.Fatalf("unmarshal workspace read response: %v", err)
+	}
+	if body.Workspace.ID == "" || body.Workspace.Title != title || deliverableDirectory != "" && body.Workspace.DeliverableDirectory != deliverableDirectory || body.Workspace.State != "active" {
 		t.Fatalf("workspace = %+v, want generated/%s/%s/active", body.Workspace, title, deliverableDirectory)
 	}
 	return body.Workspace
@@ -5329,22 +5122,6 @@ func deleteAndExpect(t *testing.T, handler http.Handler, path string, wantStatus
 		t.Fatalf("%s status = %d, want %d, body = %s", path, rec.Code, wantStatus, rec.Body.String())
 	}
 	return rec.Body.String()
-}
-
-func createWorkspaceAndRunForHTTP(t *testing.T, handler http.Handler, title string, runID string) projectioncontract.Workspace {
-	t.Helper()
-
-	workspace := createWorkspaceForHTTP(t, handler, title, "workspaces/"+runID)
-	goalID, dodID := defineGoalAndDoDForHTTP(t, handler, workspace.ID)
-
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspace.ID+"/runs", strings.NewReader(`{"runId":"`+runID+`","goalId":"`+goalID+`","doDId":"`+dodID+`"}`))
-	runReq.Header.Set("Content-Type", "application/json")
-	runRec := httptest.NewRecorder()
-	handler.ServeHTTP(runRec, runReq)
-	if runRec.Code != http.StatusCreated {
-		t.Fatalf("run create status = %d, want 201, body=%s", runRec.Code, runRec.Body.String())
-	}
-	return workspace
 }
 
 func seedBlockedDecisionRunForHTTP(t *testing.T, dataRoot string, title string, runID string) (appmodelcore.Workspace, appmodelcore.Run) {
@@ -5611,35 +5388,6 @@ func seedBlockedRunForHTTP(t *testing.T, dataRoot string, title string, runID st
 		t.Fatalf("get run: %v", err)
 	}
 	return appmodelcore.Workspace{ID: string(workspace.ID), Title: workspace.Title, DeliverableDirectory: workspace.DeliverableDirectory, State: string(workspace.State)}, appmodelcore.Run{ID: string(run.ID), WorkspaceID: string(run.WorkspaceID), State: string(run.State)}
-}
-
-func defineGoalAndDoDForHTTP(t *testing.T, handler http.Handler, workspaceID string) (string, string) {
-	t.Helper()
-
-	goalReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspaceID+"/goals", strings.NewReader(`{"text":"verify run goal"}`))
-	goalReq.Header.Set("Content-Type", "application/json")
-	goalRec := httptest.NewRecorder()
-	handler.ServeHTTP(goalRec, goalReq)
-	if goalRec.Code != http.StatusCreated {
-		t.Fatalf("goal define status = %d, want 201, body=%s", goalRec.Code, goalRec.Body.String())
-	}
-	var goalBody goalResponse
-	if err := json.Unmarshal(goalRec.Body.Bytes(), &goalBody); err != nil {
-		t.Fatalf("unmarshal goal response: %v", err)
-	}
-
-	dodReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/"+workspaceID+"/dods", strings.NewReader(`{"items":["verify run completed"]}`))
-	dodReq.Header.Set("Content-Type", "application/json")
-	dodRec := httptest.NewRecorder()
-	handler.ServeHTTP(dodRec, dodReq)
-	if dodRec.Code != http.StatusCreated {
-		t.Fatalf("dod define status = %d, want 201, body=%s", dodRec.Code, dodRec.Body.String())
-	}
-	var dodBody dodResponse
-	if err := json.Unmarshal(dodRec.Body.Bytes(), &dodBody); err != nil {
-		t.Fatalf("unmarshal dod response: %v", err)
-	}
-	return goalBody.Goal.ID, dodBody.DoD.ID
 }
 
 func readEventRecordsForHTTP(t *testing.T, handler http.Handler, path string) []projectioncontract.EventRecord {

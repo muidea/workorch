@@ -28,17 +28,16 @@ type workspaceOperations struct {
 }
 
 type definitionOperations struct {
-	authoring                   DefinitionAuthoringPorts
-	defineGoal                  DefineGoalFunc
-	updateGoal                  UpdateGoalFunc
-	readGoal                    ReadGoalFunc
-	listGoals                   ListGoalsFunc
-	defineDoD                   DefineDoDFunc
-	updateDoD                   UpdateDoDFunc
-	readDoD                     ReadDoDFunc
-	listDoDs                    ListDoDsFunc
-	checkGoalDoDQuality         CheckGoalDoDQualityFunc
-	generateWorkspaceSetupDraft GenerateWorkspaceSetupDraftFunc
+	authoring           DefinitionAuthoringPorts
+	defineGoal          DefineGoalFunc
+	updateGoal          UpdateGoalFunc
+	readGoal            ReadGoalFunc
+	listGoals           ListGoalsFunc
+	defineDoD           DefineDoDFunc
+	updateDoD           UpdateDoDFunc
+	readDoD             ReadDoDFunc
+	listDoDs            ListDoDsFunc
+	checkGoalDoDQuality CheckGoalDoDQualityFunc
 }
 
 type runOperations struct {
