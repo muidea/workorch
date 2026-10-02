@@ -4211,9 +4211,14 @@ if ! grep -R -q -F --include='*_test.go' -- 'TestRuntimeValidationFailureRepairC
 	exit 1
 fi
 validation_repair_profile_parser="$({
-	sed -n '/^func runtimeValidationFailureRepairConvergence(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
-	sed -n '/^func runtimeValidationFailureRepairConvergenceHasExactShape(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
+	sed -n '/^func ValidationFailureRepairConvergence(/,/^}/p' internal/pkg/runtimeprofiledecode/decode.go
+	sed -n '/^func validationFailureRepairConvergenceHasExactShape(/,/^}/p' internal/pkg/runtimeprofiledecode/decode.go
 })"
+if ! grep -q -F 'return runtimeprofiledecode.ValidationFailureRepairConvergence(input)' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go ||
+	! grep -q -F 'ret.ProfileContracts = runtimeprofiledecode.Decode(input["profileContracts"])' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go; then
+	echo "boundary contract violation: activation bypasses shared Profile decoder" >&2
+	exit 1
+fi
 for marker in \
 	'rawValue, present := input["validationFailureRepairConvergence"]' \
 	'!present' \
@@ -4248,9 +4253,9 @@ if grep -q -F -- 'byKey[value.Scope+"|"+value.ID] = value' <<<"$runtime_profile_
 	echo "boundary contract violation: Profile evidence normalization restored last-wins scope+id semantics" >&2
 	exit 1
 fi
-runtime_bootstrap_artifact_parser="$(sed -n '/^func runtimeExecutionContract(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go)"
+runtime_bootstrap_artifact_parser="$(sed -n '/^func Decode(/,/^}/p' internal/pkg/runtimeprofiledecode/decode.go)"
 if ! grep -q -F 'runtimecontract.RuntimeBootstrapArtifact{' <<<"$runtime_bootstrap_artifact_parser" ||
-	! grep -q -F 'AllowedOperationKinds: runtimeStrings(artifact["allowedOperationKinds"])' <<<"$runtime_bootstrap_artifact_parser" ||
+	! grep -q -F 'AllowedOperationKinds: Strings(artifact["allowedOperationKinds"])' <<<"$runtime_bootstrap_artifact_parser" ||
 	grep -q -i -E -- 'artifact\[[^]]*"(prospective)?targetRef"|[[:space:]](Prospective)?TargetRef[[:space:]]*:' <<<"$runtime_bootstrap_artifact_parser"; then
 	echo "boundary contract violation: pre-seal profile parser regained an exact RuntimeBootstrapArtifact target" >&2
 	exit 1
