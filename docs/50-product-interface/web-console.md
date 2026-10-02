@@ -56,10 +56,10 @@ activation form 不提供 Goal/DoD、Skill、MCP 或 Memory 的 per-run override
 Workspace 创建使用共享的 `WorkspaceSetupModal`，用户提交 Template、Goal、资源引用及可选额外验收要求，不手填正式 DoD。
 工作目录可留空，解析为 `.workorch-workspaces/<workspace-id>`。持久草稿经派生、六类独立审查与用户精确确认后，才物化
 正式 Goal／DoD 并由 owner 准入；创建、编译、确认均不启动 Run。FAIL／UNKNOWN／资源或模板漂移不得确认。
-浏览器发送前保存原创建、待保存与确认身份；关闭重开后只接受当前打开会话的回执，旧回执不得覆盖表单或清理恢复记录。
+页面发送前仅在内存保留原创建、待保存与确认身份，不使用浏览器持久存储；业务 API 请求、JSON 与 SSE 响应禁止 HTTP 缓存。新建向导重开为空，编辑已有草稿通过列表／详情明确选择 Workspace 并读取 owner。关闭有未保存输入或未决事务时须确认，刷新后页面输入与客户端身份不恢复；已接受的服务端事务不取消，用户须核对 owner 当前状态。旧回执不得覆盖新会话表单。
 恢复原保存后，创建页和详情页仅在规范化输入或模板快照变化时提交新保存；未改变输入的审查恢复直接 compile，不以 edited 标记生成新 RequestID 或消耗回执额度。
-存在 pendingConfirmation 时，两页暂停保存修订和重新审查，保留原 hashes 与 expected revision，并提供原确认恢复；本地 edited 标记不替换原确认身份。不能通过普通审查动作静默放弃确认请求。
-创建页和详情编辑页均必须拒绝损坏恢复记录，保留原记录并阻止替代保存、确认与清理；不得把解析失败当作新建空态。
+存在页面内存 pendingConfirmation 时，两页暂停保存修订和重新审查，保留原 hashes 与 expected revision，并提供原确认恢复；edited 标记和查询结果均不替换原确认身份。刷新后已开始的确认仅使用 owner 校验的 `confirmationRecovery` 参数，由用户显式恢复；缺失或身份不匹配保持阻塞，不能通过普通审查动作静默放弃确认请求。
+旧浏览器恢复记录不读取、不迁移或自动清理，不能因旧记录仍存在而锁定新向导，也不能将历史记录当作当前业务状态。
 创作查询跨 effect 单飞，发送前再次检查会话与查询代次；失效排队不得发出 GET，单次查询超时有界。已接受的写事务不因关闭页面而取消。
 已准入结果的进入操作要求 matching Workspace、eligible 与非空 StartupInputHash，不重新编译或启动 Run。
 

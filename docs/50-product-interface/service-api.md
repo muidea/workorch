@@ -193,21 +193,22 @@ Builtin upgrade body 如 `{"kind":"soul","id":"...","expectedContentHash":"...",
 
 创作查询为 `GET /workspaces/:workspaceId/authoring`；结果以 Workspace 持久 ledger 为准，不以内存会话作为权威。
 派生、提案及六 critic 分别先持久 reserve 再调用 provider；未决请求不得自动重发。FAIL／UNKNOWN 保持阻塞。
-确认必须绑定当前输入及完整审查身份。浏览器本地编辑不是 owner 草稿或准入凭据。
+确认必须绑定当前输入及完整审查身份。页面编辑不是 owner 草稿或准入凭据。Web 不使用浏览器持久存储保存输入、读模型或恢复身份；未保存编辑及客户端请求身份仅存在于当前页面内存，关闭／刷新后不恢复。已保存草稿须从 Workspace 列表／详情显式打开并读取 owner。
 
-保存请求必须显式提供非空 `templateId`，不得用现行记录补齐原请求身份。保存响应丢失时，浏览器保留原 pendingSave 的 `requestId`、模板、输入、expected revision 与 inputHash，优先重放原请求。
+保存请求必须显式提供非空 `templateId`，不得用现行记录补齐原请求身份。保存响应丢失时，当前页面内存保留原 pendingSave 的 `requestId`、模板、输入、expected revision 与 inputHash，显式重试优先重放原请求；刷新后先读取 owner 当前草稿，不自动发送替代保存。
 Workspace owner 在同一 CAS 中持久有界保存回执（最多 128 条，不淘汰迟到重放身份）；相同 RequestID 的不同 payload 返回 `409`。
 原请求精确重放不增加 revision、不调用 provider；原回执已被后续输入替代时 HTTP 返回 `409`，不能把 ABA 后相同文本当原保存成功。
 新等价保存仍校验当前 CAS，并持久其独立回执；旧 schema 或伪造 expected hash 不进入等价旁路。
 保存后的返回查询必须仍匹配原回执的输入及模板快照；同输入的编译推进可返回最新状态，被后续修订替代则返回 `409`，不得作为原保存成功。
 不同输入的过期 CAS 仍返回 `409`。冲突后用户可显式读取当前草稿并放弃原保存重放身份，保留本地编辑；
 该操作只读取，不自动保存或覆盖。用户核对 owner 当前目标后，另行提交修订并重新审查。
-详情页编辑恢复记录绑定 exact Workspace，不能跨工作空间复用保存或确认凭据。
+详情页的页面内存请求绑定 exact Workspace，不能跨工作空间复用保存或确认凭据。创作查询可返回 `confirmationRecovery`：仅从 owner 已验证的确认 journal 投影四项确认身份与当前 Workspace revision。revision 只约束首次准备，既有 journal 的恢复仍要求 exact hashes。无页面内存原确认时，用户可显式使用该参数恢复已开始的确认；读取本身不确认、不调用 provider，也不启动 Run。原页面 pendingConfirmation 不得被查询结果静默替换。
 
 ## Command Scope And Responses
 
 - path scope wins over body scope；unknown JSON fields or cross-workspace redirect are rejected；
 - owner-generated identity/revision/hash 必须从 concrete result 返回，handler 不自行生成替代 authority；
+- 业务 JSON、原始内容、SSE 和指标响应使用 `Cache-Control: no-store`，Web API 请求禁止浏览器 HTTP 缓存；页面内存中的在途 GET 合并不构成持久存储；
 - created=`201`、accepted execution=`202`、successful update=`200`、empty delete=`204`；
 - invalid=`400`、not found=`404`、blocked/stale/conflict=`409`、admission wait canceled=`408`、unexpected dependency=`500`；
 - credentials、raw prompt/provider body、unsafe diagnostic 和 internal aggregate 不进入 response。

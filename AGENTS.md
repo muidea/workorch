@@ -111,6 +111,7 @@ Do not commit generated runtime data: `.workorch-data`, `.workorch-workspaces`, 
 - 超出明确的存储或传输边界时，必须显式报告未保存/未传递及原因，不能将部分内容标为完整，也不能因此把已知失败重新标为结果未决。
 - 原始诊断通过 owner 管理的受限运行存储和读取边界保护，不通过改写数据保护。不得将原始诊断、凭据或 live 配置提交到 Git，也不得把无关配置密钥混入诊断或通用日志。
 - 诊断仅用于排查，不是规格、准入或执行权威；不得为保留原文而绕过严格校验、owner 边界、预算或人工确认。
+- Web 不得使用 localStorage、sessionStorage、IndexedDB、cookie 或其他浏览器持久机制保存业务输入、事务恢复身份或服务端数据。交互数据仅暂存在页面内存；已保存数据与恢复依据由服务端 owner 管理。未保存输入在关闭／刷新后丢失，界面必须明确说明，不能通过浏览器缓存恢复旧事务。
 
 ## Testing Guidelines
 

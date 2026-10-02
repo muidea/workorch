@@ -6,7 +6,7 @@ Type: profile-capability
 
 ## 创建与确认
 
-Web 创建输入包含名称、Template、Goal、本地资源引用、可选工作目录和额外验收要求。工作目录留空时由 owner 解析；资源引用相对于该目录。浏览器本地编辑不是服务端已保存输入。
+Web 创建输入包含名称、Template、Goal、本地资源引用、可选工作目录和额外验收要求。工作目录留空时由 owner 解析；资源引用相对于该目录。页面编辑不是服务端已保存输入。Web 不使用 localStorage、sessionStorage、IndexedDB、cookie 或其他浏览器持久机制保存业务数据；未保存输入及客户端重放身份仅暂存在页面内存。
 
 Workspace owner 持久保存创作输入与请求身份；派生验收要求后生成结构化规格提案，并进行六类独立审查。只有当前 input、derivation permit、proposal/specification hash 和 revision 精确匹配且审查通过，用户才可确认并准入。创建、编译、确认均不创建 Run；执行是后续独立 intent。
 
@@ -25,6 +25,10 @@ Workspace owner 持久保存创作输入与请求身份；派生验收要求后�
 包含诊断的 Workspace 文件通过原子发布使用 0600 权限。原始内容留在 owner 运行存储，不提交 Git，不额外附加配置密钥，不复制到通用日志；权限保护不能替代管理接口的部署访问边界。
 
 ## 恢复边界
+
+新建向导每次重新打开均为空白，不读取旧浏览器恢复记录。关闭／刷新后页面内存的未保存输入与重放身份丢失；有未保存编辑或未决请求时关闭须明确确认，已提交事务不会因此被取消。已保存草稿从 Workspace 列表／详情显式打开，服务端查询失败不能触发自动替代创建。
+
+确认恢复参数由已校验的 owner journal 投影，绑定 Workspace、input／permit／proposal／specification 身份；用户须显式选择恢复。ExpectedWorkspaceRevision 仅约束首次准备，已开始的 journal 精确重放不依赖浏览器保存原 revision。页面仍保留原确认时不得以查询结果替换，缺少合法恢复身份时保持阻塞。关闭、切换 Workspace 或删除后的迟到响应不能重新注入旧视图。
 
 已 reserve 的请求不会因查询或重复 compile 自动获得第二次 provider 调用权限。完成请求重放必须包含同一原始诊断，内容变化是冲突。输入修订会产生新身份并重新审查，不是恢复或改写原失败结果。
 

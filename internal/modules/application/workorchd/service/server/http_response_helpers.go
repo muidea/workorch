@@ -410,6 +410,7 @@ func writeArtifactContent(w http.ResponseWriter, item content.ArtifactContent) {
 		fileName = "artifact"
 	}
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": fileName}))
 	w.Header().Set("X-Workorch-Artifact-URI", item.URI)
 	if item.ContentSHA256 != "" {
@@ -429,6 +430,7 @@ func writeRuntimeRawContent(w http.ResponseWriter, item content.RuntimeRawConten
 		fileName = "payload"
 	}
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": fileName}))
 	w.Header().Set("X-Workorch-Raw-Ref", item.Ref)
 	if item.ContentSHA256 != "" {
@@ -463,6 +465,7 @@ func decodeOptionalJSON(r *http.Request, dst any) error {
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")

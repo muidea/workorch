@@ -184,6 +184,12 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 	}
 	if view.Confirmation != nil {
 		result.ConfirmationPhase = string(view.Confirmation.Phase)
+		// 只投影 owner 已校验的确认身份；revision 仅约束首次准备，重放由持久 journal 校验。
+		result.ConfirmationRecovery = &workorchmanagementcontract.DefinitionAuthoringConfirm{
+			InputHash: view.Confirmation.InputHash, DerivationPermitID: view.Confirmation.DerivationPermitID,
+			ProposalHash: view.Confirmation.ProposalHash, SpecificationHash: view.Confirmation.SpecificationHash,
+			ExpectedWorkspaceRevision: view.WorkspaceRevision,
+		}
 		result.State = "confirming"
 		if view.Confirmation.Phase == workspace.DefinitionAuthoringConfirmationMaterialized {
 			result.State = "admitting"

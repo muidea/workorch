@@ -55,6 +55,9 @@ func TestProjectionSSEWireContractMatchesRemoteDecoder(t *testing.T) {
 		t.Fatalf("stream request: %v", err)
 	}
 	defer resp.Body.Close()
+	if resp.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("business event stream permits persistent cache: %v", resp.Header)
+	}
 
 	lines := make(chan string, 32)
 	readErr := make(chan error, 1)
@@ -310,6 +313,9 @@ func TestProjectionSSEFrameConsumedByProductionRemoteDecoder(t *testing.T) {
 		t.Fatalf("stream request: %v", err)
 	}
 	defer resp.Body.Close()
+	if resp.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("business event stream permits persistent cache: %v", resp.Header)
+	}
 
 	lines := make(chan string, 32)
 	readErr := make(chan error, 1)

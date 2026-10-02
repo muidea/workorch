@@ -430,7 +430,19 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	assertNoRuns()
 	closeOwners()
 	baseURL, routine, closeOwners = open()
-	recovered := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", confirmation, http.StatusOK)
+	observed := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+	if observed.ConfirmationRecovery == nil || observed.ConfirmationRecovery.InputHash != confirmation.InputHash || observed.ConfirmationRecovery.DerivationPermitID != confirmation.DerivationPermitID || observed.ConfirmationRecovery.ProposalHash != confirmation.ProposalHash || observed.ConfirmationRecovery.SpecificationHash != confirmation.SpecificationHash || observed.ConfirmationRecovery.ExpectedWorkspaceRevision != observed.WorkspaceRevision {
+		t.Fatalf("owner confirmation recovery identity lost: %+v", observed)
+	}
+	for _, changed := range []management.DefinitionAuthoringConfirm{
+		{InputHash: "changed", DerivationPermitID: confirmation.DerivationPermitID, ProposalHash: confirmation.ProposalHash, SpecificationHash: confirmation.SpecificationHash, ExpectedWorkspaceRevision: observed.WorkspaceRevision},
+		{InputHash: confirmation.InputHash, DerivationPermitID: "changed", ProposalHash: confirmation.ProposalHash, SpecificationHash: confirmation.SpecificationHash, ExpectedWorkspaceRevision: observed.WorkspaceRevision},
+		{InputHash: confirmation.InputHash, DerivationPermitID: confirmation.DerivationPermitID, ProposalHash: "changed", SpecificationHash: confirmation.SpecificationHash, ExpectedWorkspaceRevision: observed.WorkspaceRevision},
+		{InputHash: confirmation.InputHash, DerivationPermitID: confirmation.DerivationPermitID, ProposalHash: confirmation.ProposalHash, SpecificationHash: "changed", ExpectedWorkspaceRevision: observed.WorkspaceRevision},
+	} {
+		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", changed, http.StatusConflict)
+	}
+	recovered := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", observed.ConfirmationRecovery, http.StatusOK)
 	if recovered.WorkspaceRevision != admitted.WorkspaceRevision || recovered.StartupInputHash != admitted.StartupInputHash {
 		t.Fatal("exact confirmation replay changed persisted admission")
 	}
@@ -464,6 +476,9 @@ func authoringHTTPRequest(t *testing.T, baseURL, method, path string, body any, 
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
+	if response.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("%s %s permits persistent browser cache: %v", method, path, response.Header)
+	}
 	if response.StatusCode != status {
 		var detail json.RawMessage
 		_ = json.NewDecoder(response.Body).Decode(&detail)

@@ -235,6 +235,8 @@ verify-workspace-authoring-contract:
 	go test ./internal/services/workorch -run '^TestWeb(ConsoleMutatingEndpointsStayWithinProductSurfaceContract|WorkspaceSetupRequiresTemplateAndAllowsDefaultDirectory)$$' -count=1
 	go test ./internal/modules/application/workorchd/biz/appservice -run '^TestCLIDispatcherRejectsRetiredDefinitionWritesWithoutOwner$$' -count=1
 	go test ./internal/modules/application/workorchd/service/server -run '^TestRetired(DefinitionWriteRoutesDoNotCallApplicationPorts|DraftRoutesHaveNoOwnerSideEffects)$$' -count=1 -timeout=3m
+	go test -race ./internal/modules/application/workorchd/service/server -run '^Test(BusinessJSONResponsesDisablePersistentCache|ProjectionSSEWireContractMatchesRemoteDecoder|ProjectionSSEFrameConsumedByProductionRemoteDecoder|MetricsEndpointReportsExecutionAdmissionCounters)$$' -count=1 -timeout=3m
+	go test -race ./internal/modules/blocks/workspace/biz -run '^TestAuthoringConfirmationRecoversEveryFileBackedCutpoint$$' -count=1 -timeout=3m
 	go test ./internal/pkg/workorchclient -run '^TestDefinitionAuthoringClient' -count=1
 	go test ./internal/modules/application/workorchd/biz -run '^Test(SaveDefinitionAuthoringView|AuthoringApplicationRejectsMismatchedOwnerResults)' -count=1
 	go test ./internal/modules/blocks/workspace/pkg/models -run '^Test(DefinitionAuthoringSaveReceipt|ConfirmedAuthoringAdmissionSource)' -count=1

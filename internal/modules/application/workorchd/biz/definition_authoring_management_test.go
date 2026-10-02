@@ -38,7 +38,7 @@ func TestDefinitionAuthoringViewSelectsCompletedRequestAfterFailedAttempt(t *tes
 	}
 	query := workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: "ws", WorkspaceRevision: 2, Record: authoringTestRecord(record), CurrentTemplateAvailable: true, CurrentTemplateSnapshotHash: record.TemplateSnapshotHash}
 	view, err := definitionAuthoringView(query)
-	if err != nil || view.State != "derived" || view.DerivationPermitID != second.PermitID || view.Proposal == nil || len(view.Proposal.Items) != 1 {
+	if err != nil || view.State != "derived" || view.DerivationPermitID != second.PermitID || view.Proposal == nil || len(view.Proposal.Items) != 1 || view.ConfirmationRecovery != nil {
 		t.Fatalf("historical failure masked completed request: %+v %v", view, err)
 	}
 }

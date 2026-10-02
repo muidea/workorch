@@ -5025,6 +5025,9 @@ func TestMetricsEndpointReportsExecutionAdmissionCounters(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("metrics permits persistent browser cache: %v", rec.Header())
+	}
 	body := rec.Body.String()
 	for _, want := range []string{
 		`workorch_execution_admission_commands_total{kind="workspace_run",result="accepted"} 1`,

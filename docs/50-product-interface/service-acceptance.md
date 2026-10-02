@@ -63,7 +63,9 @@ Do not reintroduce tests for `POST .../runs`, `POST .../runs/:runId/start`, `POS
 
 ## 持久规格创作 Live 验收
 
-正式创建链路为 `POST /api/v1/workorch/workspace-authoring` → workspace-scoped `authoring` 查询／修订 → `authoring/compile` → `authoring/confirm`。创建 RequestID 与原 payload 必须保存并可精确重放；编译接受的 202 只表示 BackgroundRoutine 接受任务，不代表 owner 已完成规格或准入。查询始终以 Workspace 持久 ledger 为准，结果未决不得自动重发 provider。确认绑定原 input／permit／proposal／specification hashes；确认和准入不自动启动 Run。
+正式创建链路为 `POST /api/v1/workorch/workspace-authoring` → workspace-scoped `authoring` 查询／修订 → `authoring/compile` → `authoring/confirm`。创建 RequestID 与原 payload 在当前 Web 页面内存中保留以便精确重试，不保存到浏览器持久存储；服务端 owner 持久创建身份与业务状态。编译接受的 202 只表示 BackgroundRoutine 接受任务，不代表 owner 已完成规格或准入。查询始终以 Workspace 持久 ledger 为准，结果未决不得自动重发 provider。确认绑定原 input／permit／proposal／specification hashes；确认和准入不自动启动 Run。
+
+浏览器交互验收必须证明：旧浏览器记录不再被读取或写入；新建向导重开为空，关闭有未保存输入或未决事务时明确提示；取消关闭保留页面内存原身份，确认关闭后迟到回执不能污染新会话。刷新后通过列表／详情读取 owner 已保存草稿，不自动创建、保存或确认。已开始的确认通过 owner 校验的 `confirmationRecovery` 参数由用户显式重放，不能从页面旧提案猜造；当前 revision 不改变既有 journal 的精确身份，首次准备仍受 CAS 约束。
 
 确定性验收使用正式 HTTP ports、真实 file-backed Workspace／File／Decision owners 与 mock provider，覆盖六审查、exact confirmation replay、重启、FAIL／UNKNOWN 阻塞及资源漂移拒绝。它不替代真实 provider 或浏览器交互验收：
 

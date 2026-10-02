@@ -33,7 +33,7 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Connection", "keep-alive")
 		workspaceID := strings.TrimSpace(r.URL.Query().Get("workspaceId"))
 		runID := strings.TrimSpace(r.URL.Query().Get("runId"))

@@ -42,6 +42,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 async function doRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
       ...init?.headers
@@ -68,6 +69,7 @@ async function doRequest<T>(url: string, init?: RequestInit): Promise<T> {
 async function requestText(url: string, init?: RequestInit): Promise<string> {
   const response = await fetch(url, {
     ...init,
+    cache: 'no-store',
     headers: {
       ...init?.headers
     }
@@ -330,6 +332,7 @@ export const workorchApi = {
     };
     const response = await fetch(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/execution-activations`, {
       method: 'POST',
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(commandRequest)
     });

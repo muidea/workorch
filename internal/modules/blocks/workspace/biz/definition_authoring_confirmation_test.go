@@ -134,6 +134,13 @@ func TestAuthoringConfirmationRecoversEveryFileBackedCutpoint(t *testing.T) {
 			owners.close()
 			owners = openFileDefinitionAdmissionOwners(t, root)
 			defer owners.close()
+			if cut != "before-prepare" {
+				observed, err := owners.workspace.queryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: cmd.WorkspaceID})
+				if err != nil || observed.Confirmation == nil || observed.WorkspaceRevision <= cmd.ExpectedWorkspaceRevision {
+					t.Fatalf("prepared confirmation was not queryable after reopen: %+v %v", observed, err)
+				}
+				cmd.ExpectedWorkspaceRevision = observed.WorkspaceRevision
+			}
 			first, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: cmd})
 			if err != nil {
 				t.Fatal(err)
@@ -147,6 +154,8 @@ func TestAuthoringConfirmationRecoversEveryFileBackedCutpoint(t *testing.T) {
 			}
 			owners.close()
 			owners = openFileDefinitionAdmissionOwners(t, root)
+			// 页面刷新不保留客户端请求；读取 owner 后以当前 revision 恢复同一 journal。
+			cmd.ExpectedWorkspaceRevision = current.Revision
 			second, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: cmd})
 			if err != nil || !reflect.DeepEqual(first, second) {
 				t.Fatalf("replay was not idempotent: %+v %+v %v", first, second, err)

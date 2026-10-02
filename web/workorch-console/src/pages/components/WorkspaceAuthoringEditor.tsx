@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Form, Input, List, Modal, Select, Space, Tag, Typography } from 'antd';
+import { Alert, App as AntApp, Button, Form, Input, List, Modal, Select, Space, Tag, Typography } from 'antd';
 import { workorchApi } from '../../api';
 import { errorMessage } from '../../helpers';
-import { authoringSourceLabel, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringEditorValues, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling, restoreAuthoringEditorRecovery } from '../../workspaceAuthoring';
+import { authoringSourceLabel, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringConfirmationRecovery, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling } from '../../workspaceAuthoring';
 import type { AuthoringEditorRecovery, AuthoringEditorValues } from '../../workspaceAuthoring';
 import type { DefinitionAuthoringView, WorkspaceTemplate } from '../../types';
 import { AuthoringDiagnosticDetails } from './AuthoringDiagnosticDetails';
@@ -14,6 +14,7 @@ const lines = (value?: string) => (value || '').split('\n').map(item => item.tri
 
 // 编辑已有 owner 草稿，不生成新创建身份，也不提供正式 Goal/DoD CRUD。
 export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitted }: Props) {
+  const { modal } = AntApp.useApp();
   const [form] = Form.useForm<Values>();
   const [view, setView] = useState<DefinitionAuthoringView>();
   const [templates, setTemplates] = useState<WorkspaceTemplate[]>([]);
@@ -21,19 +22,32 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
   const [edited, setEdited] = useState(false);
   const [failure, setFailure] = useState('');
   const recovery = useRef<Recovery>({});
-  const recoveryBlocked = useRef(false);
   const editVersion = useRef(0);
   const session = useRef(new AuthoringSessionFence());
   const queries = useRef(new AuthoringQueryFence());
-  const observe = (next: DefinitionAuthoringView) => setView(current => mergeAuthoringObservation(current, next));
-  const close = () => { session.current.begin(); queries.current.invalidate(); onClose(); };
-  const key = `workorch.workspace-authoring.editor.v1/${workspaceId}`;
-  const persist = (next: Recovery) => {
-    if (recoveryBlocked.current) throw new Error('本地恢复记录不可用，禁止覆盖原记录');
-    const scoped = { ...next, workspaceId };
-    localStorage.setItem(key, JSON.stringify(scoped));
-    recovery.current = scoped;
+  const observe = (next: DefinitionAuthoringView) => setView(current => current ? mergeAuthoringObservation(current, next) : next);
+  const close = (force = false) => {
+    if (!force && (edited || busy || recovery.current.pendingSave || recovery.current.pendingConfirmation || ['confirming', 'admitting'].includes(view?.state || ''))) {
+      const closeToken = session.current.current();
+      modal.confirm({
+        title: '关闭并丢弃页面内输入与重放身份？',
+        content: '关闭将丢弃页面内未提交输入和请求重放身份；已发送的服务端事务不会取消。若事务结果未决，请关闭后从工作空间列表核对服务端状态，再决定如何继续。取消可保留当前页面继续处理。',
+        okText: '关闭并丢弃',
+        cancelText: '继续编辑',
+        onOk: () => { if (session.current.matches(closeToken)) close(true); },
+      });
+      return;
+    }
+    session.current.begin(); queries.current.invalidate();
+    recovery.current = {};
+    setView(undefined);
+    setEdited(false);
+    setBusy(false);
+    setFailure('');
+    form.resetFields();
+    onClose();
   };
+  const persist = (next: Recovery) => { recovery.current = { ...next, workspaceId }; };
   const apply = (next: DefinitionAuthoringView) => {
     observe(next);
     if (next.input) form.setFieldsValue({ templateId: next.templateId, goalText: next.input.goalText, requirements: next.input.acceptanceRequirements?.join('\n'), resources: next.input.resourceRefs?.join('\n') });
@@ -44,28 +58,27 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
     if (!open || !workspaceId) return;
     const token = session.current.begin();
     queries.current.invalidate();
-    setBusy(false);
-    let disposed = false;
-    const version = editVersion.current;
+    recovery.current = { workspaceId };
     setView(undefined);
-    setFailure('');
     setEdited(false);
+    setBusy(false);
+    setFailure('');
     form.resetFields();
-    recoveryBlocked.current = false;
-    try {
-      const text = localStorage.getItem(key);
-      const validated = restoreAuthoringEditorRecovery(text, workspaceId);
-      recovery.current = validated || { workspaceId };
-      const values = authoringEditorValues(recovery.current);
-      if (values) { form.setFieldsValue(values); setEdited(true); }
-    } catch (error) { recoveryBlocked.current = true; recovery.current = {}; setFailure(errorMessage(error)); }
-    workorchApi.listWorkspaceTemplates().then(next => { if (!disposed && session.current.matches(token)) setTemplates(next); }).catch(error => { if (!disposed && session.current.matches(token)) setFailure(errorMessage(error)); });
+    const openingEditVersion = editVersion.current;
+    let disposed = false;
+    workorchApi.listWorkspaceTemplates().then(items => { if (!disposed && session.current.matches(token)) setTemplates(items); }).catch(error => { if (!disposed && session.current.matches(token)) setFailure(errorMessage(error)); });
     const query = queries.current.begin();
     queries.current.read(() => workorchApi.readDefinitionAuthoring(workspaceId), () => !disposed && session.current.matches(token) && queries.current.matches(query)).then(next => {
       if (disposed || !session.current.matches(token) || !queries.current.matches(query)) return;
       if (!next.input) { setFailure('该工作空间没有持久创作草稿；不能通过旧 CRUD 补写正式定义'); return; }
-      if (authoringEditorValues(recovery.current) || version !== editVersion.current) observe(next);
-      else apply(next);
+      if (recovery.current.pendingSave || recovery.current.pendingConfirmation) {
+        if (recovery.current.workspaceId === workspaceId) observe(next);
+      }
+      else if (editVersion.current === openingEditVersion) {
+        const serverConfirmation = authoringConfirmationRecovery(next, workspaceId);
+        if (serverConfirmation) recovery.current = { workspaceId, pendingConfirmation: serverConfirmation };
+        apply(next);
+      }
     }).catch(error => { if (!disposed && session.current.matches(token) && queries.current.matches(query)) setFailure(errorMessage(error)); });
     return () => { disposed = true; session.current.begin(); };
   }, [open, workspaceId]);
@@ -92,11 +105,13 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
 
   const generate = async () => {
     const token = session.current.current();
-    if (recoveryBlocked.current || !view) return;
+    if (!view) return;
+    try { authoringRequireNoPendingConfirmation(recovery.current); }
+    catch (error) { setFailure(errorMessage(error)); return; }
+    if (serverRecoveryInvalid) { setFailure('服务端确认恢复参数不合法或未匹配，sealed 状态禁止编辑或确认'); return; }
     queries.current.invalidate();
     setBusy(true); setFailure('');
     try {
-      authoringRequireNoPendingConfirmation(recovery.current);
       const values = await form.validateFields();
       if (!session.current.matches(token)) return;
       let current = view;
@@ -104,13 +119,13 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
       if (pending) {
         current = await workorchApi.saveDefinitionAuthoring(current.workspaceId, pending.input, pending.templateId, pending.expectedWorkspaceRevision, pending.expectedInputHash, pending.requestId);
         if (!session.current.matches(token)) return;
-        persist({ values });
+        persist({ workspaceId: view.workspaceId });
         observe(current);
       }
       const input = { goalText: values.goalText, acceptanceRequirements: lines(values.requirements), resourceRefs: lines(values.resources) };
       if (authoringNeedsSave(current, input, values.templateId)) {
         const pendingSave = { requestId: crypto.randomUUID(), input, templateId: values.templateId, expectedWorkspaceRevision: current.workspaceRevision, expectedInputHash: current.inputHash || '' };
-        persist({ values, pendingSave });
+        persist({ ...recovery.current, pendingSave });
         current = await workorchApi.saveDefinitionAuthoring(current.workspaceId, input, values.templateId, pendingSave.expectedWorkspaceRevision, pendingSave.expectedInputHash, pendingSave.requestId);
         if (!session.current.matches(token)) return;
       }
@@ -122,7 +137,7 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
     finally { if (session.current.matches(token)) setBusy(false); }
   };
   const refreshSaveBaseline = () => {
-    if (recoveryBlocked.current || !view || !recovery.current.pendingSave) return;
+    if (!view || !recovery.current.pendingSave) return;
     const token = session.current.current();
     Modal.confirm({
       title: '读取当前草稿并放弃原保存请求的重放身份？',
@@ -130,14 +145,13 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
       okText: '读取当前草稿',
       cancelText: '保留原请求',
       onOk: async () => {
-        if (recoveryBlocked.current || !session.current.matches(token)) return;
+        if (!session.current.matches(token)) return;
         queries.current.invalidate();
         setBusy(true); setFailure('');
         try {
           const next = await queries.current.read(() => workorchApi.readDefinitionAuthoring(view.workspaceId), () => session.current.matches(token));
           if (!session.current.matches(token)) return;
-          const values = form.getFieldsValue();
-          persist({ values });
+          persist({ workspaceId: view.workspaceId });
           observe(next);
           setEdited(true);
         } catch (error) { if (session.current.matches(token)) setFailure(errorMessage(error)); }
@@ -146,11 +160,12 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
     });
   };
   const exact = recovery.current.pendingConfirmation;
+  const serverRecoveryInvalid = Boolean(view && ['confirming', 'admitting'].includes(view.state) && !recovery.current.pendingConfirmation && !authoringConfirmationRecovery(view, workspaceId));
   const replayAllowed = authoringCanReplayConfirmation(view, recovery.current);
-  const canConfirm = !recovery.current.pendingSave && Boolean(exact ? replayAllowed : !edited && authoringCanConfirm(view));
+  const canConfirm = !serverRecoveryInvalid && !recovery.current.pendingSave && Boolean(exact ? replayAllowed : !edited && authoringCanConfirm(view));
   const confirm = async () => {
     const token = session.current.current();
-    if (recoveryBlocked.current || !view || !canConfirm) return;
+    if (!view || !canConfirm) return;
     queries.current.invalidate();
     setBusy(true); setFailure('');
     try {
@@ -162,38 +177,37 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
       if (authoringCanEnterAdmitted(next, view.workspaceId)) {
         await onAdmitted();
         if (!session.current.matches(token)) return;
-        localStorage.removeItem(key); recovery.current = {}; close();
+        recovery.current = {}; close(true);
       }
     } catch (error) { if (session.current.matches(token)) setFailure(errorMessage(error)); }
     finally { if (session.current.matches(token)) setBusy(false); }
   };
   const enterAdmitted = async () => {
-    if (recoveryBlocked.current || !authoringCanEnterAdmitted(view, workspaceId)) return;
+    if (!authoringCanEnterAdmitted(view, workspaceId)) return;
     const token = session.current.current();
     queries.current.invalidate();
     setBusy(true); setFailure('');
     try {
       await onAdmitted();
       if (!session.current.matches(token)) return;
-      localStorage.removeItem(key); recovery.current = {}; close();
+      recovery.current = {}; close(true);
     } catch (error) { if (session.current.matches(token)) setFailure(errorMessage(error)); }
     finally { if (session.current.matches(token)) setBusy(false); }
   };
   const sealed = ['confirming', 'admitting', 'admitted'].includes(view?.state || '');
-  return <Modal open={open} title="持久规格创作／澄清" width={850} onCancel={close} footer={<Space>
-    <Button onClick={close}>关闭（本地编辑可恢复）</Button>
-    {authoringCanEnterAdmitted(view, workspaceId) && <Button type="primary" disabled={recoveryBlocked.current || busy} onClick={enterAdmitted}>恢复已准入工作空间</Button>}
-    <Button loading={busy} disabled={recoveryBlocked.current || busy || !view || sealed || Boolean(exact)} onClick={generate}>保存修订并审查</Button>
-    <Button type="primary" loading={busy} disabled={recoveryBlocked.current || busy || !canConfirm} onClick={confirm}>{exact ? '恢复原确认并准入' : '确认并准入'}</Button>
+  return <Modal open={open} title="持久规格创作／澄清" width={850} onCancel={() => close()} footer={<Space>
+    <Button onClick={() => close()}>关闭</Button>
+    {authoringCanEnterAdmitted(view, workspaceId) && <Button type="primary" disabled={busy} onClick={enterAdmitted}>恢复已准入工作空间</Button>}
+    <Button loading={busy} disabled={serverRecoveryInvalid || busy || !view || sealed || Boolean(exact)} onClick={generate}>保存修订并审查</Button>
+    <Button type="primary" loading={busy} disabled={serverRecoveryInvalid || busy || !canConfirm} onClick={confirm}>{exact ? '恢复原确认并准入' : '确认并准入'}</Button>
   </Space>}>
     <Space direction="vertical" style={{ width: '100%' }}>
       <Alert type="info" message="修改创建期目标、模板、资源或用户验收要求后，必须重新完成六审查；此操作不会启动 Run。同 Run 规格修订不受支持。" />
-      {recoveryBlocked.current && <Alert type="error" showIcon message="本地恢复记录不可用；原记录已保留，禁止保存、确认或清理。请显式处理该记录后重新打开。" />}
-      {exact && <Alert type="warning" message="原确认请求尚未恢复；保存修订与重新审查已暂停，原 hashes 和 expected revision 保持不变。" />}
+      {serverRecoveryInvalid && !recovery.current.pendingConfirmation && <Alert type="error" message="服务端确认恢复参数缺失或不匹配；该 sealed 状态禁止编辑和确认，请核对工作空间列表中的服务端状态。" />}
       {failure && <Alert type="error" showIcon message={failure} />}
-      {recovery.current.pendingSave && <Alert type="warning" message="原保存请求尚未确认，重试先按原 CAS 身份恢复；冲突不能自动覆盖。" action={<Button disabled={recoveryBlocked.current || busy} onClick={refreshSaveBaseline}>冲突后读取当前草稿</Button>} />}
+      {recovery.current.pendingSave && <Alert type="warning" message="原保存请求尚未确认，重试先按原 CAS 身份恢复；冲突不能自动覆盖。" action={<Button disabled={busy} onClick={refreshSaveBaseline}>冲突后读取当前草稿</Button>} />}
       {edited && view?.input && <Alert type="info" message="owner 当前目标（本地编辑尚未覆盖）" description={view.input.goalText} />}
-      <Form form={form} layout="vertical" disabled={recoveryBlocked.current || busy || !view || sealed || Boolean(exact)} onValuesChange={(_, values: Values) => { if (recoveryBlocked.current || recovery.current.pendingConfirmation) return; editVersion.current++; setEdited(true); try { persist({ ...recovery.current, values }); } catch (error) { setFailure(errorMessage(error)); } }}>
+      <Form form={form} layout="vertical" disabled={serverRecoveryInvalid || busy || !view || sealed || Boolean(exact)} onValuesChange={(_, values: Values) => { if (recovery.current.pendingConfirmation || serverRecoveryInvalid) return; editVersion.current++; setEdited(true); persist({ ...recovery.current, values }); }}>
         <Form.Item name="templateId" label="模板" rules={[{ required: true }]}><Select options={templates.map(item => ({ value: item.id, label: item.name || item.id }))} /></Form.Item>
         <Form.Item name="goalText" label="目标" rules={[{ required: true }]}><Input.TextArea rows={4} /></Form.Item>
         <Form.Item name="resources" label="本地资源引用（每行一个）"><Input.TextArea rows={2} /></Form.Item>

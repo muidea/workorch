@@ -71,6 +71,8 @@ Last Verified: 2026-08-30
 
 ## 原始创作诊断
 
+Web 不以浏览器持久存储保留创作输入或事务恢复身份；已保存草稿与确认恢复依据由 owner 管理。Application 从已校验的 typed query confirmation 投影有界恢复参数，不能暴露整个 journal 或从页面旧状态重建。ExpectedWorkspaceRevision 仅限制首次确认准备，精确 journal 重放仍校验原 input／permit／proposal／specification hashes；查询不驱动确认、provider 或 Run。
+
 规格提案/审查解析失败时，Application 经既有 typed completion 提交原始 error 和响应 bytes，Workspace owner 将其与失败结果绑定并持久化。原文不脱敏、不替换、不静默截断；以 byte count/SHA256 验证完整性。单条响应保存上限256KiB、错误64KiB，沿用112条request及每阶段2次预算；超限明确记录未保存状态，不将已知失败倒退为未决。原始诊断不进入permit身份、specification hash或startup authority。
 
 请求诊断随owner Clone深拷贝，重复completion必须精确一致，变更诊断冲突；reserve不接受预填失败诊断。查询按Workspace/permit精确scope走typed EventHub，仅只读原请求，不驱动provider。普通view返回原始错误及元信息，原始响应按需单条读取；旧失败无诊断时不能虚构历史原文。包含诊断的Workspace运行文件必须0600，权限通过原子publish收紧；不写Git或通用日志。数据保护依靠访问边界而非改写数据，见 [Workspace 规格创作](../../../../docs/40-profiles-capabilities/workspace/setup-draft-session.md)。

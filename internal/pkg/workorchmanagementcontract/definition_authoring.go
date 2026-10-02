@@ -129,6 +129,7 @@ type DefinitionAuthoringView struct {
 	Requests               []DefinitionAuthoringRequestState `json:"requests,omitempty"`
 	Proposal               *DefinitionAuthoringProposal      `json:"proposal,omitempty"`
 	ConfirmationPhase      string                            `json:"confirmationPhase,omitempty"`
+	ConfirmationRecovery   *DefinitionAuthoringConfirm       `json:"confirmationRecovery,omitempty"`
 	CandidateHash          string                            `json:"candidateHash,omitempty"`
 	AdmissionDisposition   string                            `json:"admissionDisposition,omitempty"`
 	AdmissionViolationCode string                            `json:"admissionViolationCode,omitempty"`

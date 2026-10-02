@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { enterAuthoringWorkspace, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringEditorValues, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling, parseAuthoringEditorRecovery, parseAuthoringLocalDraft, restoreAuthoringRecovery, restoreAuthoringEditorRecovery, parseAuthoringRecovery } from '../src/workspaceAuthoring.ts';
+import { enterAuthoringWorkspace, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringConfirmationRecovery, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling } from '../src/workspaceAuthoring.ts';
 import type { DefinitionAuthoringView } from '../src/types.ts';
 
 test('父级刷新期间关闭或重开创作会话不得迟到导航', async () => {
@@ -56,21 +56,6 @@ test('关闭会话后排队查询不发 HTTP，新会话仍可读取', async () 
   await rejected;
   assert.equal(await current, 'fresh');
   assert.equal(calls, 1);
-});
-
-test('损坏或旧保存恢复记录不能被当作新建空态', () => {
-  assert.equal(restoreAuthoringRecovery(null), undefined);
-  for (const text of ['', 'null', '{}', '{', JSON.stringify({ request: { requestId: 'original', title: '任务', templateId: 't', input: { goalText: '目标' } }, workspaceId: 'ws', pendingSave: { input: { goalText: '修订' }, templateId: 't', expectedInputHash: 'original', expectedWorkspaceRevision: 1 } })]) {
-    assert.throws(() => restoreAuthoringRecovery(text), /禁止创建替代事务/);
-  }
-});
-
-test('详情页损坏恢复保留原记录且不能作为空态继续提交', () => {
-  assert.equal(restoreAuthoringEditorRecovery(null, 'ws'), undefined);
-  for (const text of ['', 'null', '{}', '{', JSON.stringify({ workspaceId: 'other' }), JSON.stringify({ workspaceId: 'ws', pendingSave: { input: { goalText: '修订' }, templateId: 't', expectedInputHash: 'original', expectedWorkspaceRevision: 1 } })]) {
-    assert.throws(() => restoreAuthoringEditorRecovery(text, 'ws'), /禁止提交替代事务/);
-  }
-  assert.deepEqual(restoreAuthoringEditorRecovery(JSON.stringify({ workspaceId: 'ws' }), 'ws'), { workspaceId: 'ws' });
 });
 
 const ready = (): DefinitionAuthoringView => ({
@@ -193,56 +178,24 @@ test('已接受任务及持久中间阶段继续查询，不把未决当成功',
   assert.equal(authoringNeedsPolling(ready()), false);
 });
 
-test('本地未发送编辑允许空字段恢复，不修改初始创建身份', () => {
-  const draft = { title: '', templateId: '新模板', goalText: '', requirements: '未保存验收', resources: 'input.txt' };
-  assert.deepEqual(parseAuthoringLocalDraft(JSON.stringify(draft)), draft);
-  for (const text of [null, '{}', 'null', '{', JSON.stringify({ ...draft, resources: [1] })]) assert.equal(parseAuthoringLocalDraft(text), undefined);
+test('服务端 confirmationRecovery 仅在 scope、阶段、四 hashes 和 current revision 精确匹配时可显式恢复', () => {
+  const exact = { inputHash: 'input', derivationPermitId: 'permit', proposalHash: 'proposal', specificationHash: 'spec', expectedWorkspaceRevision: 8 };
+  const view = { ...ready(), confirmationRecovery: exact };
+  assert.deepEqual(authoringConfirmationRecovery(view, 'ws'), exact);
+  assert.equal(authoringConfirmationRecovery(view), undefined);
+  for (const patch of [
+    { workspaceId: 'other' }, { state: 'draft' }, { templateCurrent: false },
+    { workspaceRevision: 9 }, { inputHash: 'changed' }, { derivationPermitId: 'changed' },
+    { proposal: { ...view.proposal, proposalHash: 'changed' } },
+    { proposal: { ...view.proposal, specificationHash: 'changed' } },
+    { confirmationRecovery: { ...exact, expectedWorkspaceRevision: 0 } },
+    { confirmationRecovery: { ...exact, proposalHash: '' } },
+  ]) assert.equal(authoringConfirmationRecovery({ ...view, ...patch }, 'ws'), undefined);
+  assert.deepEqual(authoringConfirmationRecovery({ ...view, state: 'confirming' }, 'ws'), authoringConfirmationRecovery({ ...view, state: 'confirming', confirmationRecovery: exact }, 'ws'));
+  assert.equal(authoringConfirmationRecovery({ ...view, state: 'admitting' }, 'ws')?.expectedWorkspaceRevision, 8);
+  assert.equal(authoringConfirmationRecovery({ ...view, state: 'confirming', workspaceRevision: 9 }, 'ws')?.expectedWorkspaceRevision, 8);
 });
 
-test('待保存请求保留原 CAS 身份，拒绝损坏及双重事务', () => {
-  const saved = { request: { requestId: 'stable', title: '名称', templateId: 'template', input: { goalText: '原目标' } }, workspaceId: 'ws' };
-  const pendingSave = { requestId: 'exact-save', input: { goalText: '修订目标', resourceRefs: ['input.txt'], acceptanceRequirements: ['验收'] }, templateId: 'next', expectedWorkspaceRevision: 8, expectedInputHash: 'old-input' };
-  assert.deepEqual(parseAuthoringRecovery(JSON.stringify({ ...saved, pendingSave })), { ...saved, pendingSave });
-  assert.equal(parseAuthoringRecovery(JSON.stringify({ request: saved.request, pendingSave })), undefined);
-  assert.equal(parseAuthoringRecovery(JSON.stringify({ ...saved, pendingSave: { ...pendingSave, expectedInputHash: '' } })), undefined);
-  assert.equal(parseAuthoringRecovery(JSON.stringify({ ...saved, pendingSave: { ...pendingSave, input: { goalText: '目标', resourceRefs: [1] } } })), undefined);
-  assert.equal(parseAuthoringRecovery(JSON.stringify({ ...saved, pendingSave, pendingConfirmation: { inputHash: 'input', derivationPermitId: 'permit', proposalHash: 'proposal', specificationHash: 'spec', expectedWorkspaceRevision: 8 } })), undefined);
-});
-
-test('详情页恢复绑定工作空间，无本地副本时展示原 pendingSave 输入', () => {
-  const pendingSave = { requestId: 'exact-save', input: { goalText: '修订目标', acceptanceRequirements: ['验收一', '验收二'], resourceRefs: ['input.txt'] }, templateId: 'next', expectedWorkspaceRevision: 8, expectedInputHash: 'old-input' };
-  const saved = { workspaceId: 'ws', pendingSave };
-  const parsed = parseAuthoringEditorRecovery(JSON.stringify(saved), 'ws');
-  assert.deepEqual(parsed, saved);
-  assert.deepEqual(authoringEditorValues(parsed!), { templateId: 'next', goalText: '修订目标', requirements: '验收一\n验收二', resources: 'input.txt' });
-  const values = { templateId: '', goalText: '', requirements: '尚未发送的修改' };
-  assert.deepEqual(authoringEditorValues({ ...saved, values }), values);
-  assert.equal(parseAuthoringEditorRecovery(JSON.stringify(saved), 'other'), undefined);
-  for (const text of ['null', '[]', '{}', '{', JSON.stringify({ ...saved, pendingSave: { ...pendingSave, expectedInputHash: '' } }), JSON.stringify({ ...saved, values: { ...values, resources: [1] } })]) assert.equal(parseAuthoringEditorRecovery(text, 'ws'), undefined);
-});
-
-test('详情页原确认直接使用共同事务合同，不需要伪造创建请求', () => {
-  const pendingConfirmation = { inputHash: 'input', derivationPermitId: 'permit', proposalHash: 'proposal', specificationHash: 'spec', expectedWorkspaceRevision: 8 };
-  const saved = { workspaceId: 'ws', pendingConfirmation };
-  const parsed = parseAuthoringEditorRecovery(JSON.stringify(saved), 'ws');
-  assert.deepEqual(parsed, saved);
-  assert.equal(authoringCanReplayConfirmation(ready(), parsed), true);
-  assert.equal(authoringCanReplayConfirmation({ ...ready(), inputHash: 'new' }, parsed), false);
-  assert.equal(parseAuthoringEditorRecovery(JSON.stringify({ ...saved, pendingConfirmation: { ...pendingConfirmation, proposalHash: '' } }), 'ws'), undefined);
-});
-
-test('恢复保留发送前创建身份与原 payload，拒绝损坏记录', () => {
-  const saved = { request: { requestId: 'stable', title: '名称', templateId: 'template', input: { goalText: '原目标' } }, workspaceId: 'ws' };
-  assert.deepEqual(parseAuthoringRecovery(JSON.stringify(saved)), saved);
-  assert.equal(parseAuthoringRecovery('{'), undefined);
-  assert.equal(parseAuthoringRecovery('{}'), undefined);
-  assert.equal(parseAuthoringRecovery(null), undefined);
-  for (const patch of [{ pendingSave: null }, { pendingConfirmation: false }, { workspaceId: 1 }, { request: { ...saved.request, requestId: '' } }, { request: { ...saved.request, input: { goalText: '目标', resourceRefs: [1] } } }]) assert.equal(parseAuthoringRecovery(JSON.stringify({ ...saved, ...patch })), undefined);
-  const pendingConfirmation = { inputHash: 'input', derivationPermitId: 'permit', proposalHash: 'proposal', specificationHash: 'spec', expectedWorkspaceRevision: 8 };
-  assert.deepEqual(parseAuthoringRecovery(JSON.stringify({ ...saved, pendingConfirmation })), { ...saved, pendingConfirmation });
-  assert.equal(parseAuthoringRecovery(JSON.stringify({ request: saved.request, pendingConfirmation })), undefined);
-  assert.equal(parseAuthoringRecovery(JSON.stringify({ ...saved, pendingConfirmation: { ...pendingConfirmation, specificationHash: '' } })), undefined);
-});
 
 test('原保存恢复后输入一致直接审查，不以 edited 或新请求消耗回执', () => {
  const input = { goalText: '目标', acceptanceRequirements: ['验收'], resourceRefs: ['input.txt'] };

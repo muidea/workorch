@@ -59,6 +59,13 @@ export type DefinitionAuthoringView = {
     reviews?: { kind: string; status: string; reason?: string; specificationHash: string; evidenceRefs?: string[]; requirementIds?: string[] }[];
     verifications?: { id: string; obligationId: string; declaration: string; status: string; profileId?: string }[];
   };
+  confirmationRecovery?: {
+    inputHash: string;
+    derivationPermitId: string;
+    proposalHash: string;
+    specificationHash: string;
+    expectedWorkspaceRevision: number;
+  };
 };
 
 export type ServiceConfiguration = {
