@@ -10,6 +10,167 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+func (r DefinitionAuthoringRecord) CurrentAuthoringSummary() (state, failurePhase, failureCode string, reviewCount int) {
+	input := r.Input.Normalized()
+	if r.Validate() != nil || input.InputHash() != r.InputHash {
+		return "", "", "", 0
+	}
+	state = "draft"
+	var derivation *DefinitionDerivationRequest
+	for n := range r.DerivationRequests {
+		request := &r.DerivationRequests[n]
+		if request.Input.InputHash() != r.InputHash || WorkspaceTemplateSnapshotHash(&request.Template) != r.TemplateSnapshotHash {
+			continue
+		}
+		if request.RequestID == "derive/"+r.InputHash {
+			derivation = request
+			break
+		}
+	}
+	if derivation != nil {
+		state = "deriving"
+		switch {
+		case derivation.FailureCode != "":
+			state, failurePhase, failureCode = "failed", "derivation", derivation.FailureCode
+		case derivation.Proposal == nil:
+			state = "outcome_unresolved"
+		default:
+			state = "derived"
+			var proposal *GoalSpecification
+			for _, request := range r.SpecificationRequests {
+				if request.DerivationPermitID != derivation.PermitID || request.Phase != DefinitionSpecificationProposal {
+					continue
+				}
+				if request.FailureCode != "" {
+					state, failurePhase, failureCode = "failed", "proposal", request.FailureCode
+					proposal = nil
+					break
+				}
+				if request.Proposal != nil {
+					copy := request.Proposal.Clone()
+					proposal = &copy
+				}
+			}
+			if failureCode == "" && proposal != nil {
+				proposalHash := proposal.ContentHash()
+				state = "reviewing"
+				reviewFailed, reviewUnresolved, reviewBlocked := false, false, false
+				for _, request := range r.SpecificationRequests {
+					if request.DerivationPermitID != derivation.PermitID || request.Phase != DefinitionSpecificationCritic || request.ProposalHash != proposalHash {
+						continue
+					}
+					if request.FailureCode != "" {
+						reviewFailed = true
+						if failureCode == "" {
+							failurePhase, failureCode = "review", request.FailureCode
+						}
+						continue
+					}
+					if request.Review == nil {
+						reviewUnresolved = true
+						continue
+					}
+					reviewCount++
+					if request.Review.Status != GoalReviewPass {
+						reviewBlocked = true
+					}
+				}
+				switch {
+				case reviewFailed:
+					state = "failed"
+				case reviewUnresolved:
+					state = "outcome_unresolved"
+				case reviewBlocked:
+					state = "review_blocked"
+				default:
+					if !hasCurrentPreparationDiagnostic(r, derivation) {
+						if _, _, err := r.ConfirmableSpecification(derivation.PermitID, proposalHash); err == nil {
+							state = "reviewed"
+						}
+					}
+				}
+			}
+		}
+	}
+	// 未完成许可的优先级高于已知失败，与详细创作视图保持一致。
+	for _, request := range r.DerivationRequests {
+		if request.Input.InputHash() == r.InputHash && WorkspaceTemplateSnapshotHash(&request.Template) == r.TemplateSnapshotHash && request.FailureCode == "" && request.Proposal == nil {
+			return "outcome_unresolved", "", "", reviewCount
+		}
+	}
+	if derivation != nil && derivation.Proposal != nil {
+		for _, request := range r.SpecificationRequests {
+			if request.DerivationPermitID == derivation.PermitID && request.FailureCode == "" && request.Proposal == nil && request.Review == nil {
+				return "outcome_unresolved", "", "", reviewCount
+			}
+		}
+	}
+	for _, diagnostic := range r.PreparationDiagnostics {
+		if !preparationDiagnosticCurrentForSummary(r, derivation, diagnostic) {
+			continue
+		}
+		if state == "draft" || state == "derived" || state == "reviewing" || state == "review_blocked" {
+			state, failurePhase, failureCode = "preparation_failed", string(diagnostic.Stage), diagnostic.PhaseCode
+		}
+	}
+	return state, failurePhase, failureCode, reviewCount
+}
+
+func hasCurrentPreparationDiagnostic(record DefinitionAuthoringRecord, derivation *DefinitionDerivationRequest) bool {
+	for _, diagnostic := range record.PreparationDiagnostics {
+		if preparationDiagnosticCurrentForSummary(record, derivation, diagnostic) {
+			return true
+		}
+	}
+	return false
+}
+
+func preparationDiagnosticCurrentForSummary(record DefinitionAuthoringRecord, derivation *DefinitionDerivationRequest, diagnostic DefinitionAuthoringPreparationDiagnostic) bool {
+	if diagnostic.InputHash != record.InputHash || diagnostic.TemplateSnapshotHash != record.TemplateSnapshotHash {
+		return false
+	}
+	for _, request := range record.DerivationRequests {
+		if request.Input.InputHash() == record.InputHash && WorkspaceTemplateSnapshotHash(&request.Template) == record.TemplateSnapshotHash && request.Proposal == nil && request.FailureCode == "" {
+			return false
+		}
+	}
+	if derivation == nil {
+		return diagnostic.Stage == DefinitionAuthoringPreparationDerivation && diagnostic.TargetRequestID == "derive/"+record.InputHash
+	}
+	if derivation.Proposal == nil || derivation.FailureCode != "" || diagnostic.DerivationPermitID != derivation.PermitID {
+		return false
+	}
+	var proposal *GoalSpecification
+	for _, request := range record.SpecificationRequests {
+		if request.DerivationPermitID != derivation.PermitID {
+			continue
+		}
+		if request.FailureCode != "" || request.Proposal == nil && request.Review == nil {
+			return false
+		}
+		if request.Proposal != nil {
+			proposal = request.Proposal
+		}
+	}
+	if proposal == nil {
+		return diagnostic.Stage == DefinitionAuthoringPreparationProposal && diagnostic.TargetRequestID == "proposal/"+derivation.PermitID
+	}
+	proposalHash := proposal.ContentHash()
+	for _, kind := range goalReviewKinds {
+		completed := false
+		for _, request := range record.SpecificationRequests {
+			if request.DerivationPermitID == derivation.PermitID && request.Phase == DefinitionSpecificationCritic && request.ReviewKind == kind && request.ProposalHash == proposalHash && request.Review != nil {
+				completed = true
+				break
+			}
+		}
+		if !completed {
+			return diagnostic.Stage == DefinitionAuthoringPreparationReview && diagnostic.ReviewKind == kind && diagnostic.ProposalHash == proposalHash && diagnostic.TargetRequestID == "review/"+kind+"/"+derivation.PermitID
+		}
+	}
+	return false
+}
+
 // DefinitionAuthoringInput 是尚未派生 DoD 的创作输入，不可作为准入候选。
 // 资源仅含用户引用；可用性和快照必须由能力 owner 另行提供。
 type DefinitionAuthoringInput struct {

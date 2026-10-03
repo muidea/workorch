@@ -7,6 +7,7 @@ import type { AuthoringRecovery } from '../../workspaceAuthoring';
 import type { DefinitionAuthoringView, WorkspaceTemplate } from '../../types';
 import { AuthoringDiagnosticDetails } from './AuthoringDiagnosticDetails';
 import { AuthoringPreparationDiagnosticDetails } from './AuthoringPreparationDiagnosticDetails';
+import { AuthoringFailedRecoveryNotice } from './AuthoringFailedRecoveryNotice';
 
 type Props = { open: boolean; onClose: () => void; onCreated: (workspaceId: string, isCurrent: () => boolean) => void | Promise<void> };
 type Values = { title: string; templateId: string; deliverableDirectory?: string; goalText: string; requirements?: string; resources?: string };
@@ -275,6 +276,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
         {recovery?.pendingConfirmation && !authoringCanReplayConfirmation(view, recovery) && view.state !== 'admitted' && <Alert type="warning" message="原确认请求与当前草稿不一致，不能用旧凭据确认新规格。保留原请求，先核对并恢复确认；不能自动生成替代确认。" />}
         {edited && <Alert type="warning" message="输入已修改，旧规格不可确认。请保存并重新审查。" />}
         {!view.templateCurrent && <Alert type="warning" message="模板已变化或不可用，请保存新的创作 revision。" />}
+        {view.state === 'failed' && <AuthoringFailedRecoveryNotice />}
         {view.state === 'outcome_unresolved' && <Alert type="warning" message="已有持久请求结果未决，不会自动重发 provider。可查询恢复结果或修改输入形成新 revision。" />}
         {view.admissionViolationCode && <Alert type="warning" message={`准入需澄清：${view.admissionViolationCode}`} description={view.admissionOffendingRefs?.join('、')} />}
         {view.proposal && <>

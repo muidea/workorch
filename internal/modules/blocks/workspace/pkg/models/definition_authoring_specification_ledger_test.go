@@ -91,6 +91,149 @@ func authoringLedgerFixture(t testing.TB) (DefinitionAuthoringRecord, GoalSpecif
 	return record, spec
 }
 
+func summaryAuthoringLedgerFixture(t testing.TB) (DefinitionAuthoringRecord, GoalSpecification) {
+	t.Helper()
+	record, spec := authoringLedgerFixture(t)
+	derivation := record.DerivationRequests[0].Clone()
+	derivation.RequestID = "derive/" + record.InputHash
+	derivation.PermitID = derivation.ExpectedPermitID()
+	record.DerivationRequests[0] = derivation
+	if err := record.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return record, spec
+}
+
+func TestDefinitionAuthoringSummaryUsesCurrentInputAndPendingPriority(t *testing.T) {
+	input := DefinitionAuthoringInput{Version: 1, WorkspaceID: "ws-summary", Revision: 1, GoalText: "goal", TemplateID: "template"}
+	template := WorkspaceTemplate{ID: input.TemplateID}
+	record := DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshot: template, TemplateSnapshotHash: WorkspaceTemplateSnapshotHash(&template)}
+	state, _, _, count := record.CurrentAuthoringSummary()
+	if state != "draft" || count != 0 {
+		t.Fatalf("draft summary = %q, count=%d", state, count)
+	}
+	reserved, derivation, _, err := record.ReserveDerivation("derive/"+record.InputHash, "provider", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, _, _, _ = reserved.CurrentAuthoringSummary()
+	if state != "outcome_unresolved" {
+		t.Fatalf("pending derivation must be unresolved, got %q", state)
+	}
+	completed, err := reserved.CompleteDerivation(derivation.PermitID, &DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"item"}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedPending, _, _, err := completed.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "proposal-fail", DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := failedPending.CompleteSpecification(failedPending.SpecificationRequests[0].PermitID, nil, nil, "invalid_proposal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, _, _, err := failed.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "proposal-pending", DerivationPermitID: derivation.PermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, phase, code, _ := pending.CurrentAuthoringSummary()
+	if state != "outcome_unresolved" || phase != "" || code != "" {
+		t.Fatalf("pending permit did not outrank prior failure: %+v %q %q %q", pending, state, phase, code)
+	}
+}
+
+func TestDefinitionAuthoringSummaryMatchesSixReviewViewSemantics(t *testing.T) {
+	record, proposal := summaryAuthoringLedgerFixture(t)
+	permit := record.DerivationRequests[0].PermitID
+	request := DefinitionAuthoringSpecificationRequest{RequestID: "proposal/" + permit, DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
+	var err error
+	record, request, _, err = record.ReserveSpecification(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err = record.CompleteSpecification(request.PermitID, &proposal, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checkSummary := func(wantState string, wantCount int) {
+		t.Helper()
+		state, phase, code, count := record.CurrentAuthoringSummary()
+		if state != wantState || phase != "" || code != "" || count != wantCount {
+			t.Fatalf("summary = %q/%q/%q reviews=%d, want %q/empty/empty reviews=%d", state, phase, code, count, wantState, wantCount)
+		}
+	}
+
+	for index, kind := range goalReviewKinds {
+		request = DefinitionAuthoringSpecificationRequest{RequestID: "review/" + kind + "/" + permit, DerivationPermitID: permit, Phase: DefinitionSpecificationCritic, ReviewKind: kind, ProposalHash: proposal.ContentHash(), ProviderBindingHash: "provider"}
+		record, request, _, err = record.ReserveSpecification(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		status := GoalReviewPass
+		if index == 0 {
+			status = GoalReviewFail
+		}
+		wantState := "reviewing"
+		if status == GoalReviewFail || index > 0 {
+			wantState = "review_blocked"
+		}
+		review := GoalSpecificationCompletenessReview{Kind: kind, Status: status, SpecificationHash: proposal.ContentHash(), Reason: "review", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{"goal"}}
+		record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkSummary(wantState, index+1)
+	}
+	checkSummary("review_blocked", len(goalReviewKinds))
+	if _, _, err := record.ConfirmableSpecification(permit, proposal.ContentHash()); err == nil {
+		t.Fatal("FAIL review became confirmable")
+	}
+
+	unknown := record.Clone()
+	last := len(unknown.SpecificationRequests) - 1
+	unknown.SpecificationRequests[last].Review.Status = GoalReviewUnknown
+	if err := unknown.Validate(); err != nil {
+		t.Fatalf("UNKNOWN review fixture invalid: %v", err)
+	}
+	state, phase, code, count := unknown.CurrentAuthoringSummary()
+	if state != "review_blocked" || phase != "" || code != "" || count != len(goalReviewKinds) {
+		t.Fatalf("UNKNOWN review summary = %q/%q/%q reviews=%d", state, phase, code, count)
+	}
+	if _, _, err := unknown.ConfirmableSpecification(permit, proposal.ContentHash()); err == nil {
+		t.Fatal("UNKNOWN review became confirmable")
+	}
+}
+
+func TestDefinitionAuthoringSummaryDoesNotConfuseHistoricalRequestFailure(t *testing.T) {
+	record, _ := summaryAuthoringLedgerFixture(t)
+	derivationPermit := record.DerivationRequests[0].PermitID
+	request := DefinitionAuthoringSpecificationRequest{RequestID: "proposal-fail", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
+	var err error
+	record, request, _, err = record.ReserveSpecification(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err = record.CompleteSpecification(request.PermitID, nil, nil, "invalid_proposal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, phase, code, _ := record.CurrentAuthoringSummary()
+	if state != "failed" || phase != "proposal" || code != "invalid_proposal" {
+		t.Fatalf("current failure summary = %q/%q/%q", state, phase, code)
+	}
+	// 后续输入修订保留历史记录，但当前阶段不再显示旧失败。
+	newInput := record.Input.Clone()
+	newInput.Revision++
+	newInput.GoalText = "revised goal"
+	record.Input = newInput
+	record.InputHash = newInput.InputHash()
+	state, phase, code, _ = record.CurrentAuthoringSummary()
+	if state != "draft" || phase != "" || code != "" {
+		t.Fatalf("historical failure leaked to current revision: %q/%q/%q", state, phase, code)
+	}
+}
+
 func TestAuthoringSpecificationLedgerReservesAndReplaysWithoutSecondPermit(t *testing.T) {
 	record, spec := authoringLedgerFixture(t)
 	derivationPermit := record.DerivationRequests[0].PermitID

@@ -24,6 +24,8 @@ clarification，不能创建 Run。启动输入封存后，执行期 LLM 处理�
 
 Goal-only 创作用例先保存 Workspace owner 的版本化草稿，以持久 reserve permit 调用派生和六类独立审查，确认 exact proposal/specification hash 后才物化正式定义并准入。阻塞后继沿同一候选 lineage 重新审查；Application 只协调 Decision ticket 的替换或 resolution，Workspace 验证其持久来源并独占 pending → eligible 转换。刷新投影以 owner 查询为准；pending startup 显示 `admitting`，不能显示已准入或启动 Run。当前正式创作已接稳定 management ports 和 HTTP 创建／查询／修订／编译／确认 route，创建 RequestID 由 Workspace owner 持久验证；Web 创建向导已改为单一创作／审查／确认入口，发送前保存创建身份，重新打开按 owner 查询恢复。生产 HTTP 编译由 Application 的 BackgroundRoutine 托管，接受回执返回 202，任务使用独立于 HTTP 请求的生命周期 context，Stop 取消并排空已接受任务；任务数有界，结果与预算仍只在 Workspace ledger。已 reserve 但结果未决不重发 provider。旧 public Workspace／Goal／DoD 写 REST 和 Goal-first CLI 不参与创作；正式定义只由确认事务物化。保存请求使用原 RequestID、expected revision/hash 与目标输入，owner 在同一 Workspace CAS 中持久回执；精确重放不重复写入，历史回执不能将后续替代的输入冒充当前成功。验收证据按 HTTP／owner、独立进程、Web 组件与 deployed provider 分层，局部 helper 测试或构建不能替代端到端恢复与显式启动合同。
 
+Workspace list/detail 的 `authoringSummary` 沿 owner Get/List → typed mapping → public projection 传递，不逐卡查询完整创作 ledger。创作 CAS 后既有 Workspace 通知经 Eventstream record 触发 projection 失效及 owner 重读；Store 同步更新列表条目和详情。摘要仅显示持久阶段与计数，`reviewed` 不等于当前可确认；原始诊断、恢复参数和权限仍由完整 authoring view 及 owner guard 管理。
+
 `resume` 是既有 Run 的 continuation，不携带 fresh bootstrap；`restart` 使用当前 eligible Workspace definition 编译 fresh
 bootstrap。两者都进入 Workspace owner 的 workspace-scoped execution admission，Application 不直达 Run mutation，也不创建
 replacement successor。
@@ -119,6 +121,10 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
   `os.ReadFile` 或 raw-file fallback 绕过 owner。
 
 ### 前置准备诊断与正式进度
+
+创建期 proposal／review 分别使用完整、版本化的 closed JSON Schema，稳定合同与准确字段说明位于 C0，当前身份、资源及候选项位于动态输入。Application 显式标记 schema 正文，通过既有 typed provider command 传递；schema ID 不能冒充可执行输出合同。结构约束不能替代 strict decoder、资源／来源／Profile 反证、六审查或用户确认，非法 provider 字段不做容错映射。
+
+已持久失败的同输入 compile 只返回原失败；部署新 renderer 不授予新 permit，也不迁移旧 ledger。真实修订仍受 owner CAS、累计预算和原诊断保留约束；只修代码后的新验证须由用户显式创建新事务。
 
 创作目标的资源、配置及请求构造失败在尚未 reserve 时，由 Application 保全原 error bytes，通过 Workspace concrete record command 持久诊断；它不生成 permit 或失败 completion。已 reserve 请求优先重放 ledger，完成阶段不重新构造请求，未决请求不自动调用 provider。每个新审查阶段使用最新 owner revision 保存失败，迟到结果不能重绑新输入。保存失败只记录安全定位元信息和未保存事实，不复制原文到通用日志，也不声称诊断可查。
 

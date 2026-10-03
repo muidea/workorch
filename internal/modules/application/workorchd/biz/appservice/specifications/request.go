@@ -22,11 +22,8 @@ func ProposalCommand(candidate workspace.DefinitionAdmissionCandidate, resources
 		Resources  []workspace.GoalSpecificationResource    `json:"resources"`
 		Dimensions []workspace.GoalSpecificationDimension   `json:"dimensions"`
 		GoalHash   string                                   `json:"goalTextHash"`
-		Shape      workspace.GoalSpecification              `json:"outputShape"`
 		Profiles   []runtimecontract.RuntimeProfileContract `json:"profiles"`
-	}{Goal: candidate.GoalInput, DoD: candidate.DoDInputs, Resources: resources, Dimensions: dimensions, GoalHash: workspace.StableDefinitionTextHash(candidate.GoalInput.Text), Profiles: candidate.RuntimeProfileContracts,
-		Shape: workspace.GoalSpecification{Version: 1, Requirements: []workspace.GoalSpecificationRequirement{{}}, Obligations: []workspace.GoalSpecificationObligation{{}}, Verifications: []workspace.GoalSpecificationVerification{{}}},
-	}
+	}{Goal: candidate.GoalInput, DoD: candidate.DoDInputs, Resources: resources, Dimensions: dimensions, GoalHash: workspace.StableDefinitionTextHash(candidate.GoalInput.Text), Profiles: candidate.RuntimeProfileContracts}
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
@@ -64,17 +61,18 @@ func ReviewCommand(candidate workspace.DefinitionAdmissionCandidate, specificati
 }
 
 func completionCommand(candidate workspace.DefinitionAdmissionCandidate, purpose, instructions string, payload []byte) (llmevents.CompleteProviderCommand, error) {
-	if len(payload) > maxDocumentBytes {
+	if len(payload)+len(specificationOutputContract(purpose, instructions)) > maxDocumentBytes {
 		return llmevents.CompleteProviderCommand{}, fmt.Errorf("specification request exceeds bounded context")
 	}
 	return llmevents.CompleteProviderCommand{Request: llmevents.ProviderRequest{
 		WorkspaceID:    string(candidate.WorkspaceID),
 		Kind:           "workspace/specification/" + purpose,
-		Schema:         "workorch.goal_specification.v1",
+		Schema:         specificationOutputSchema(purpose),
+		SchemaFormat:   llmmodels.ProviderSchemaFormatJSONSchema,
 		DialogLanguage: "zh-CN",
 		TraceRefs:      []llmevents.TraceReference{{Name: "candidateHash", Ref: candidate.CandidateHash}},
 		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.goal_specification_prompt.v1", Sections: []llmmodels.PromptSection{
-			{ID: "C0.specification-contract", Name: "规格编译合同", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: instructions},
+			{ID: "C0.specification-contract", Name: "规格编译合同", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: specificationOutputContract(purpose, instructions)},
 			{ID: "C3.specification-request", Name: "规格候选输入", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: string(payload)},
 		}},
 	}}, nil

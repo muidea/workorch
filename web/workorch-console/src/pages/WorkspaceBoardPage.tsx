@@ -10,6 +10,7 @@ import { workspaceDefinitionClarification } from '../governanceMutationTarget';
 import type { ControlPlaneProps, ProjectionStatus, Workspace, WorkspaceExecutionIntentRequest } from '../types';
 import { enterAuthoringWorkspace } from '../workspaceAuthoring';
 import { WorkspaceSetupModal } from './components/WorkspaceSetupModal';
+import { AuthoringSummary } from './components/AuthoringSummary';
 
 type WorkspaceBoardCardItem = {
   workspace: Workspace;
@@ -143,7 +144,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                   <div className="workorch-card-summary">
                     <div>
                       <Typography.Text type="secondary">当前运行（Run）</Typography.Text>
-                      <div>{workspace.activeRunId ? <Space>{shortId(workspace.activeRunId)}<Tag>{stateLabel(workspace.state)}</Tag></Space> : '-'}</div>
+                      <div>{workspace.activeRunId ? <Space>{shortId(workspace.activeRunId)}<Tag>{stateLabel(workspace.state)}</Tag></Space> : <Typography.Text type="secondary">无当前运行（Run）</Typography.Text>}</div>
                     </div>
                     <div>
                       <Typography.Text type="secondary">治理阻塞</Typography.Text>
@@ -155,6 +156,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
                     { key: 'activeRun', label: modelLabels.run, value: hasActiveRun ? 1 : 0 },
                     { key: 'state', label: '状态', value: stateLabel(workspace.state) }
                   ])}
+                  {workspace.authoringSummary ? <AuthoringSummary compact summary={workspace.authoringSummary} onOpenSpecification={() => onOpenWorkspace(workspace.id)} /> : null}
                   <Descriptions
                     column={1}
                     size="small"

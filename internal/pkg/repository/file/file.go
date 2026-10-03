@@ -4637,6 +4637,7 @@ func cloneStoredMap[K comparable, V any](items map[K]V) map[K]V {
 
 func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 	cloned := *item
+	cloned.AuthoringSummary = nil
 	if item.DefaultLLMSelection != nil {
 		target := item.DefaultLLMSelection.Clone()
 		cloned.DefaultLLMSelection = &target

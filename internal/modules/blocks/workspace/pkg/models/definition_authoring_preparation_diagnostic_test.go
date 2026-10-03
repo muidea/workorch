@@ -242,6 +242,39 @@ func TestPreparationDiagnosticArchiveDistinctLimitAndImmutableCopy(t *testing.T)
 	}
 }
 
+func TestAuthoringSummaryIgnoresHistoricalPreparationDiagnosticsAfterTargetCompletion(t *testing.T) {
+	record, proposal := summaryAuthoringLedgerFixture(t)
+	derivationPermit := record.DerivationRequests[0].PermitID
+	requestID := "proposal/" + derivationPermit
+	prep := NewDefinitionAuthoringPreparationDiagnostic(DefinitionAuthoringPreparationDiagnostic{
+		WorkspaceID: record.Input.WorkspaceID, InputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash,
+		ObservedWorkspaceRevision: 3, Stage: DefinitionAuthoringPreparationProposal, TargetRequestID: requestID,
+		DerivationPermitID: derivationPermit, PhaseCode: "render", ProviderBindingHash: "provider",
+	}, []byte("preparation failed"))
+	var err error
+	record, _, _, err = record.RecordPreparationDiagnostic(prep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, phase, code, _ := record.CurrentAuthoringSummary()
+	if state != "preparation_failed" || phase != "proposal" || code != "render" {
+		t.Fatalf("current preparation failure summary = %q/%q/%q", state, phase, code)
+	}
+	var request DefinitionAuthoringSpecificationRequest
+	record, request, _, err = record.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: requestID, DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err = record.CompleteSpecification(request.PermitID, &proposal, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, phase, code, _ = record.CurrentAuthoringSummary()
+	if state == "preparation_failed" || phase != "" || code != "" {
+		t.Fatalf("historical preparation failure masked completed proposal: %q/%q/%q", state, phase, code)
+	}
+}
+
 func TestPreparationDiagnosticSpecificationScopeConfigDriftAndReview(t *testing.T) {
 	r, proposal := authoringLedgerFixture(t)
 	d := NewDefinitionAuthoringPreparationDiagnostic(DefinitionAuthoringPreparationDiagnostic{WorkspaceID: r.Input.WorkspaceID, InputHash: r.InputHash, TemplateSnapshotHash: r.TemplateSnapshotHash, ObservedWorkspaceRevision: 1, Stage: DefinitionAuthoringPreparationProposal, TargetRequestID: "prep-proposal", DerivationPermitID: r.DerivationRequests[0].PermitID, PhaseCode: "config", ProviderBindingHash: "changed-provider"}, []byte("provider configuration changed"))

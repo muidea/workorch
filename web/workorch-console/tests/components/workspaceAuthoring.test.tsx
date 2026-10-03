@@ -104,6 +104,31 @@ afterEach(() => {
 });
 
 describe('持久规格编辑实际挂载', () => {
+  it('已失败请求明确说明重放边界，查看不会自动编译或确认', async () => {
+    const failed = { ...ready(), state: 'failed', proposal: undefined, requests: [{ phase: 'proposal', state: 'failed', failureCode: 'invalid_proposal', permitId: 'failed-permit' }] };
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(failed);
+    render(<App><WorkspaceAuthoringEditor open workspaceId="ws" onClose={() => {}} onAdmitted={async () => {}} /></App>);
+    await screen.findByText('原请求已失败；再次编译不会重发该请求');
+    expect(screen.getByText(/不要为了重试而制造无意义的输入变化/)).toBeTruthy();
+    expect(disabled('确认并准入')).toBe(true);
+    expect(workorchApi.compileDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(workorchApi.saveDefinitionAuthoring).not.toHaveBeenCalled();
+  });
+
+  it('新建向导收到持久失败后显示相同恢复边界且不自动再次编译', async () => {
+    const failed: DefinitionAuthoringView = { ...ready(), state: 'failed', proposal: undefined };
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockResolvedValue({ ...failed, state: 'draft' });
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValue(failed);
+    render(<App><WorkspaceSetupModal open onClose={() => {}} onCreated={() => {}} /></App>);
+    await fillSetup();
+    fireEvent.click(button('保存并生成／恢复审查'));
+    await screen.findByText('原请求已失败；再次编译不会重发该请求');
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1);
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(disabled('确认规格并准入')).toBe(true);
+  });
+
   it('显式 compile accepted 后同一旧前置失败保持有界观察，期限后停止且不声明成功', async () => {
     const oldFailure = prepFailedView();
     vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce(oldFailure);

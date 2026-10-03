@@ -22,6 +22,8 @@ func Workspace(item *workspaceevents.Workspace) *workspacemodel.Workspace {
 		DefaultSoulID:       item.DefaultSoulID, SoulBindings: soulbinding.SoulIDMap(item.SoulBindings),
 		ContextHints: item.ContextHints.Clone(), EvidencePolicies: workorcheventpayload.CloneSlice(item.EvidencePolicies),
 	}
+	ret.AuthoringSummary = cloneAuthoringSummary(item.AuthoringSummary)
+
 	ret.DefinitionAdmissionCandidates = cloneAdmissionCandidates(item.DefinitionAdmissionCandidates)
 	if item.StartupInput != nil {
 		value := item.StartupInput.Clone()
@@ -94,7 +96,18 @@ func WorkspaceDTO(item *workspacemodel.Workspace) *workspaceevents.Workspace {
 		value := *item.TerminalDelivery
 		ret.TerminalDelivery = &value
 	}
+	ret.AuthoringSummary = nil
 	return ret
+}
+
+func cloneAuthoringSummary(item *workspaceevents.AuthoringSummary) *workspacemodel.AuthoringSummary {
+	if item == nil {
+		return nil
+	}
+	return &workspacemodel.AuthoringSummary{
+		State: item.State, FailurePhase: item.FailurePhase, FailureCode: item.FailureCode,
+		ReviewCount: item.ReviewCount, InputRevision: item.InputRevision,
+	}
 }
 
 func cloneAdmissionCandidates(items []workspacemodel.DefinitionAdmissionCandidate) []workspacemodel.DefinitionAdmissionCandidate {

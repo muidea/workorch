@@ -64,7 +64,7 @@ func (m *Biz) getWorkspace(ctx context.Context, ev magicevent.Event) (workspaceC
 	if workspaceDeletionCompleted(item) {
 		return workspaceCommandResponse{}, common.ErrNotFound
 	}
-	return workspaceCommandResponse{Workspace: workspaceeventmapping.WorkspaceDTO(item)}, nil
+	return workspaceCommandResponse{Workspace: workspaceDTOWithAuthoringSummary(item)}, nil
 }
 
 func (m *Biz) listWorkspaces(ctx context.Context, ev magicevent.Event) (workspaceCommandResponse, error) {
@@ -81,7 +81,37 @@ func (m *Biz) listWorkspaces(ctx context.Context, ev magicevent.Event) (workspac
 			visible = append(visible, item)
 		}
 	}
-	return workspaceCommandResponse{Workspaces: workspaceeventmapping.WorkspaceDTOs(visible)}, nil
+	return workspaceCommandResponse{Workspaces: workspaceDTOsWithAuthoringSummary(visible)}, nil
+}
+
+func workspaceDTOWithAuthoringSummary(item *workspacemodel.Workspace) *workspaceevents.Workspace {
+	dto := workspaceeventmapping.WorkspaceDTO(item)
+	if dto != nil {
+		dto.AuthoringSummary = nil
+	}
+	if item == nil || dto == nil || item.DefinitionAuthoring == nil || item.DefinitionAuthoringConfirmation != nil || item.StartupInput != nil || item.ActivationAdmission != nil || item.ActiveRunID != "" || len(item.DefinitionAdmissionCandidates) != len(item.DefinitionAuthoringHistory) {
+		return dto
+	}
+	state, failurePhase, failureCode, reviewCount := item.DefinitionAuthoring.CurrentAuthoringSummary()
+	if state == "" {
+		return dto
+	}
+	dto.AuthoringSummary = &workspaceevents.AuthoringSummary{
+		State: state, FailurePhase: failurePhase, FailureCode: failureCode,
+		ReviewCount: reviewCount, InputRevision: item.DefinitionAuthoring.Input.Revision,
+	}
+	return dto
+}
+
+func workspaceDTOsWithAuthoringSummary(items []*workspacemodel.Workspace) []*workspaceevents.Workspace {
+	if items == nil {
+		return nil
+	}
+	ret := make([]*workspaceevents.Workspace, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, workspaceDTOWithAuthoringSummary(item))
+	}
+	return ret
 }
 
 func (m *Biz) updateWorkspace(ctx context.Context, ev magicevent.Event) (workspaceCommandResponse, error) {

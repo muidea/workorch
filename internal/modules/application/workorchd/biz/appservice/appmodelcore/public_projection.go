@@ -4,6 +4,16 @@ import (
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
+func projectAuthoringSummary(item *AuthoringSummary) *projectioncontract.WorkspaceAuthoringSummary {
+	if item == nil {
+		return nil
+	}
+	return &projectioncontract.WorkspaceAuthoringSummary{
+		State: item.State, FailurePhase: item.FailurePhase, FailureCode: item.FailureCode,
+		ReviewCount: item.ReviewCount, InputRevision: item.InputRevision,
+	}
+}
+
 func ProjectWorkspace(item Workspace) projectioncontract.Workspace {
 	return projectioncontract.CloneWorkspace(projectioncontract.Workspace{
 		Revision:                     item.Revision,
@@ -18,6 +28,7 @@ func ProjectWorkspace(item Workspace) projectioncontract.Workspace {
 		AdmittedTemplateRevision:     item.AdmittedTemplateRevision,
 		AdmittedTemplateSnapshotHash: item.AdmittedTemplateSnapshotHash,
 		ProfileID:                    item.ProfileID,
+		AuthoringSummary:             projectAuthoringSummary(item.AuthoringSummary),
 		DefaultLLMSelection:          item.DefaultLLMSelection,
 		DefaultSoulID:                item.DefaultSoulID,
 		SoulBindings:                 item.SoulBindings,

@@ -224,6 +224,11 @@ verify-service-file: verify-service
 # 仅本地 mock／持久 owner 合同测试；不连接部署实例或真实 provider。
 .PHONY: verify-workspace-authoring-contract
 verify-workspace-authoring-contract:
+	go test -race ./internal/modules/blocks/workspace/pkg/eventmapping ./internal/pkg/repository/memory ./internal/pkg/repository/file -run '^TestWorkspace.*TransientAuthoringSummary$$' -count=1 -timeout=3m
+	go test -race ./internal/modules/blocks/workspace/biz ./internal/modules/blocks/workspace/pkg/models -run '^Test(AuthoringWorkspaceGetList|AuthoringLedgerCAS|.*AuthoringSummary)' -count=1 -timeout=3m
+	go test -race ./internal/modules/application/workorchd/service/server -run '^TestAuthoringSummaryEventRecordRefreshesHTTPListAndDetail$$' -count=1 -timeout=3m
+	go test ./internal/modules/application/workorchd/biz/appservice/specifications -count=1
+	go test -race ./internal/modules/blocks/llm/pkg/events ./internal/modules/blocks/llm/biz -run '^Test(ProviderSchemaFormat|ExplicitSchema)' -count=1 -timeout=3m
 	python3 scripts/test-verify-authoring-mock.py
 	python3 scripts/test-verify-authoring-mock-server.py
 	python3 scripts/test_verify_mock_readiness.py

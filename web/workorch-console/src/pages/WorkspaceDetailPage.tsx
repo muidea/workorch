@@ -6,6 +6,7 @@ import { DownOutlined } from '@ant-design/icons';
 import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, MCPServer, MemoryItem, Patch, PatchPage, ProjectionStatus, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings } from '../types';
 import { workorchApi } from '../api';
 import { WorkspaceAuthoringEditor } from './components/WorkspaceAuthoringEditor';
+import { AuthoringSummary } from './components/AuthoringSummary';
 import { useSSE } from '../hooks';
 import { modelLabels } from '../utils/constants';
 import { originalDiagnosticLabel } from '../runtimeProgressPresentation';
@@ -1106,6 +1107,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               )}
             />
           ) : null}
+          <AuthoringSummary summary={snapshot.workspace.authoringSummary} onOpenSpecification={openDefinitionRevision} />
           <ProCard loading={loading} title={snapshot.workspace.title || snapshot.workspace.id} extra={stateTag(snapshot.workspace.state)}>
             <Descriptions
               column={2}

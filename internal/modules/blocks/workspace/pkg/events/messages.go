@@ -53,6 +53,17 @@ type Workspace struct {
 	StartupInput                  *workspacemodel.WorkspaceStartupInputContract
 	ActivationAdmission           *workspacemodel.WorkspaceActivationAdmission
 	TerminalDelivery              *runtimecontract.RuntimeTerminalDeliveryIdentity
+	// AuthoringSummary 是供列表和详情投影使用的有界、非权威观察值，不包含或重建 Workspace owner 的台账。
+	AuthoringSummary *AuthoringSummary
+}
+
+// AuthoringSummary 只暴露当前创作阶段事实，不携带台账数据。
+type AuthoringSummary struct {
+	State         string
+	FailurePhase  string
+	FailureCode   string
+	ReviewCount   int
+	InputRevision uint64
 }
 
 type WorkspaceTemplate struct {

@@ -33,6 +33,8 @@ projection 观察面，不是第二套业务实现或 Runtime owner。
 `WorkspaceBoardPage` 的主读入口是 `GET /api/v1/workorch/workspaces` 返回的聚合列表与 projection status。它不会
 为了绘制每一张卡片分别读取 Goal、DoD 或 Run child pages。
 
+概览与详情复用 Workspace 的 `authoringSummary` 展示当前创作阶段、失败类别和已记录审查数，不逐卡请求 authoring。Workspace active、创作失败和当前 Run 状态分别呈现；不能把 0 个治理 blocker 解释为创作成功，也不能把审查数量解释为全部 PASS。摘要缺失或未知时不补造草稿／完成状态，不据摘要授予确认或执行权限，具体恢复与诊断从完整创作入口核对。
+
 用户提交执行时，页面按需读取 Workspace snapshot：
 
 1. 无 active Run、active Run 已终态或 owner 已标记 `fresh_activation_required` 时，主操作提交 `restart`；
@@ -76,6 +78,8 @@ Workspace 创建使用共享的 `WorkspaceSetupModal`，用户提交 Template、
 页面支持创建期持久规格创作／澄清、Workspace LLM/Soul selection、execution activation 与 Workspace delete。
 正式 Goal／DoD 只读展示，不提供旧 CRUD 或质量评分入口。创作编辑器展示审查、验证声明、失败请求与准入阻塞。
 这些表单只组装已公开的 HTTP DTO；owner 校验、revision CAS 和状态转换全部留在服务端。
+
+`failed` 与 `preparation_failed` 的恢复规则必须分开。已 reserve 请求失败后，同输入再次编译只重放原失败，不因刷新、重开页面或部署修复重新调用 provider。创建页和编辑器统一提示保留原诊断，真实输入／模板修订仍受既有预算；仅代码修复后的验证须由用户显式新建事务，不提示通过无意义修改输入绕过失败。失败提示不授予确认或执行权限。
 
 前置准备失败与已 reserve 的规格请求失败分别展示。前者只展示 owner 返回的 metadata，原始原因从独立 diagnosticId 查询按需校验与下载；当前／历史身份不能混用，也不把 diagnosticId 填入 permit 查询。`preparation_failed` 允许用户修复资源或配置后显式 compile，已有持久请求仍按原身份恢复。相同原因重放不增加 owner revision；页面对已受理的重复准备只进行 15 秒有界内存观察，每次重新受理均以页面观察代次重建截止，独立截止不依赖查询成功。期限结束只说明最近一次可用 owner 状态仍为原准备失败；查询失败或挂起时不能冒充已重新核对当前状态，也无法单凭查询判断后台是否在途。不声称已完成、已中断或已取消，不自动重发 provider；迟到查询仍受原会话与 scope 栅栏限制。
 

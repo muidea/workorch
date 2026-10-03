@@ -71,6 +71,10 @@ Do not reintroduce tests for `POST .../runs`, `POST .../runs/:runId/start`, `POS
 
 只读进度验收须证明 active 空 Workspace 和已准入无 Run 不显示正式结果完成；旧 accepted Result 不完成 successor，draft／rejected／superseded／accepted slice 或仅 Artifact 也不得完成。成功必须匹配当前适用 Run 的 exact terminal Result 与 startup seal；Runtime overlay、TaskProgress 和 compressed context 使用同一最终事实，不从 terminal 状态或结果数量补造完成。
 
+结构化创作合同验收须覆盖 proposal/review builder 经 typed mapping 到实际 mock HTTP 请求：完整 schema 与 DTO 字段一致、所有嵌套对象闭合、原生能力开启与关闭均保留同一本地严格校验，非法显式 schema 在零 HTTP 调用下失败，旧 schema ID 调用保持兼容。用合成样例验证根及嵌套未知字段、错误类型／枚举、来源身份和自带审查拒绝，不复制 live 原始诊断到测试资产。仅改变当前输入不得改变稳定 C0 合同；provider 不支持 structured output 不得触发隐式 fallback 或第二次调用。
+
+已知提案／审查失败的文件恢复验收须证明：重复 compile 及 owners 重开后仍返回原失败、原 permit、原 revision 和完整诊断元信息，不产生新的编译受理标记、provider 调用或 Run。恢复提示须区分此路径与未 reserve 的准备失败，不能暗示部署修复自动清除历史失败。
+
 确定性验收使用正式 HTTP ports、真实 file-backed Workspace／File／Decision owners 与 mock provider，覆盖六审查、exact confirmation replay、重启、FAIL／UNKNOWN 阻塞及资源漂移拒绝。它不替代真实 provider 或浏览器交互验收：
 
 ```bash

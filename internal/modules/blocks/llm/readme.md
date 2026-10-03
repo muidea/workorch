@@ -58,6 +58,7 @@ workspace/run、logical/physical request identity、document hash、audit 与 us
 - provider/model 必须由 exact catalog/config fact 解析；capacity 不完整时 fail-closed，不按模型名猜测、不静默换 target。
 - `JSONSchemaResponse` 只有显式 capability fact 为 true 才发送；未声明时依赖同一 sealed manifest、prompt 和 local strict
   decoder，不发第二次无-format fallback call。
+- 通用 ProviderRequest 的可选 `SchemaFormat=json_schema` 明确表示 `Schema` 是 JSON Schema 正文，而不是版本名称；显式格式必须在物理调用前校验为合法对象，不能因能力关闭而忽略畸形合同。空格式保留既有 schema ID／内联 schema 兼容语义，不为旧 Runtime 请求回填新字段或改变身份。格式标记不是 provider capability，不授予第二次调用或本地准入权限。创建期 proposal／review 使用各自完整 closed schema；原生 format 仍只在能力支持时映射。
 - semantic Definition gap 仍是非权威 provider document。`undeclared_prerequisite` 必须按 schema 输出 CWI-bound
   `prerequisiteClaims` 的 exact owner/fact/operation tuple；prompt 明确禁止把 C2 已声明 requirement 描述为 undeclared，包含 C3
   已显示该 fact selectable 或已有 `ownerFactAcquisition` 的情况。LLM block 不判断 claim 真伪、不建票；同一 strict decoder 与 Orchestrator pure

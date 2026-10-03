@@ -75,10 +75,27 @@ func TestWorkspaceRepository_CRUDAndCloneIsolation(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRepositoryClearsTransientAuthoringSummary(t *testing.T) {
+	ctx := context.Background()
+	repo := NewWorkspaceRepository()
+	item := &workspacemodel.Workspace{ID: "ws-transient-summary", AuthoringSummary: &workspacemodel.AuthoringSummary{State: "failed", FailureCode: "stale"}}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	if item.AuthoringSummary == nil {
+		t.Fatal("repository unexpectedly mutated the caller's transient summary")
+	}
+	stored, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AuthoringSummary != nil {
+		t.Fatalf("memory repository restored transient summary: %+v", stored.AuthoringSummary)
+	}
+}
 func TestRunRepository_CRUD(t *testing.T) {
 	ctx := context.Background()
 	repo := NewRunRepository()
-
 	r := &runmodel.Run{
 		ID:          common.RunID("run-1"),
 		WorkspaceID: common.WorkspaceID("ws-1"),

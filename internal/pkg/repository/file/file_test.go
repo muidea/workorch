@@ -111,6 +111,34 @@ func TestWorkspaceRepositoryPersistsAndClonesDefaultLLMSelection(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRepositoryNeverPersistsTransientAuthoringSummary(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "workspace.json")
+	repo := NewWorkspaceRepository(path)
+	summary := &workspacemodel.AuthoringSummary{State: "failed", FailurePhase: "proposal", FailureCode: "stale", ReviewCount: 2, InputRevision: 4}
+	item := &workspacemodel.Workspace{ID: "ws-transient-summary", Title: "workspace", State: common.WorkspaceStateActive, AuthoringSummary: summary}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	if item.AuthoringSummary == nil {
+		t.Fatal("repository unexpectedly mutated the caller's transient summary")
+	}
+	stored, err := repo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AuthoringSummary != nil {
+		t.Fatalf("file repository restored transient summary: %+v", stored.AuthoringSummary)
+	}
+	wire, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), "authoringSummary") || strings.Contains(string(wire), "stale") {
+		t.Fatalf("file repository persisted transient summary: %s", wire)
+	}
+}
+
 func TestWorkspaceRepositoryPersistsOptionalDefaultLLMSelectionAsEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspace.json")
 	repo := NewWorkspaceRepository(path)

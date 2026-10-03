@@ -39,6 +39,7 @@ type ProviderRequest struct {
 	SystemLocale    string
 	DialogLanguage  string
 	Schema          string
+	SchemaFormat    string
 	MaxOutputTokens int
 	RawTextOutput   bool
 	TraceRefs       []TraceReference
@@ -56,12 +57,15 @@ func ProviderRequestFromModel(input llmmodel.ProviderRequest) ProviderRequest {
 	return ProviderRequest{
 		WorkspaceID: input.WorkspaceID, RunID: input.RunID, StepID: input.StepID, Kind: input.Kind,
 		Model: input.Model, ReasoningEffort: input.ReasoningEffort, SystemLocale: input.SystemLocale, DialogLanguage: input.DialogLanguage,
-		Schema: input.Schema, MaxOutputTokens: input.MaxOutputTokens, RawTextOutput: input.RawTextOutput, TraceRefs: refs, Config: input.Config,
+		Schema: input.Schema, SchemaFormat: input.SchemaFormat, MaxOutputTokens: input.MaxOutputTokens, RawTextOutput: input.RawTextOutput, TraceRefs: refs, Config: input.Config,
 		PromptContext: input.PromptContext, ContextBudget: input.ContextBudget,
 	}
 }
 
 func (r ProviderRequest) ToModel() (llmmodel.ProviderRequest, error) {
+	if err := (llmmodel.ProviderRequest{Schema: r.Schema, SchemaFormat: r.SchemaFormat, RawTextOutput: r.RawTextOutput}).ValidateSchemaFormat(); err != nil {
+		return llmmodel.ProviderRequest{}, err
+	}
 	refs := make(map[string]string, len(r.TraceRefs))
 	for _, entry := range r.TraceRefs {
 		name := strings.TrimSpace(entry.Name)
@@ -76,7 +80,7 @@ func (r ProviderRequest) ToModel() (llmmodel.ProviderRequest, error) {
 	return llmmodel.ProviderRequest{
 		WorkspaceID: r.WorkspaceID, RunID: r.RunID, StepID: r.StepID, Kind: r.Kind,
 		Model: r.Model, ReasoningEffort: r.ReasoningEffort, SystemLocale: r.SystemLocale, DialogLanguage: r.DialogLanguage,
-		Schema: r.Schema, MaxOutputTokens: r.MaxOutputTokens, RawTextOutput: r.RawTextOutput, TraceRefs: refs, Config: r.Config,
+		Schema: r.Schema, SchemaFormat: r.SchemaFormat, MaxOutputTokens: r.MaxOutputTokens, RawTextOutput: r.RawTextOutput, TraceRefs: refs, Config: r.Config,
 		PromptContext: r.PromptContext, ContextBudget: r.ContextBudget,
 	}, nil
 }

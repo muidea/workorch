@@ -195,6 +195,7 @@ Builtin upgrade body 如 `{"kind":"soul","id":"...","expectedContentHash":"...",
 
 创作查询为 `GET /workspaces/:workspaceId/authoring`；结果以 Workspace 持久 ledger 为准，不以内存会话作为权威。
 派生、提案及六 critic 分别先持久 reserve 再调用 provider；未决请求不得自动重发。FAIL／UNKNOWN 保持阻塞。
+同输入的 `failed` 编译返回原失败（HTTP 200），不是新的 202 受理或 provider 重试；刷新、重启与 renderer 升级不改变该规则。真实输入／模板修订使用既有保存合同，保留历史失败与累计预算，不得通过随机 RequestID 或无意义修订清除失败。
 确认必须绑定当前输入及完整审查身份。页面编辑不是 owner 草稿或准入凭据。Web 不使用浏览器持久存储保存输入、读模型或恢复身份；未保存编辑及客户端请求身份仅存在于当前页面内存，关闭／刷新后不恢复。已保存草稿须从 Workspace 列表／详情显式打开并读取 owner。
 
 保存请求必须显式提供非空 `templateId`，不得用现行记录补齐原请求身份。保存响应丢失时，当前页面内存保留原 pendingSave 的 `requestId`、模板、输入、expected revision 与 inputHash，显式重试优先重放原请求；刷新后先读取 owner 当前草稿，不自动发送替代保存。

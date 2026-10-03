@@ -6,6 +6,22 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+type AuthoringSummary struct {
+	State         string
+	FailurePhase  string
+	FailureCode   string
+	ReviewCount   int
+	InputRevision uint64
+}
+
+func (s *AuthoringSummary) Clone() *AuthoringSummary {
+	if s == nil {
+		return nil
+	}
+	cloned := *s
+	return &cloned
+}
+
 type Workspace struct {
 	// Revision is the owner-local persistence revision. Projection reducers use
 	// it as their CAS fence instead of relying on in-process EventHub ordering.
@@ -46,6 +62,8 @@ type Workspace struct {
 	// TerminalDelivery is the Workspace owner's persisted release fence. It is
 	// written only by the lifecycle reducer and never by generic metadata update.
 	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity
+	// AuthoringSummary 是瞬态读取观察，不参与持久化。
+	AuthoringSummary *AuthoringSummary `json:"-"`
 	// Deletion is the Workspace owner's private retirement/purge aggregate. It
 	// is deliberately omitted from public Workspace EventHub DTOs.
 	Deletion *WorkspaceDeletionRecord

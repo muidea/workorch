@@ -9,6 +9,14 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+type AuthoringSummary struct {
+	State         string `json:"state"`
+	FailurePhase  string `json:"failurePhase,omitempty"`
+	FailureCode   string `json:"failureCode,omitempty"`
+	ReviewCount   int    `json:"reviewCount"`
+	InputRevision uint64 `json:"inputRevision"`
+}
+
 type Workspace struct {
 	Revision                     uint64                                      `json:"revision"`
 	ID                           string                                      `json:"id"`
@@ -23,6 +31,7 @@ type Workspace struct {
 	AdmittedTemplateRevision     string                                      `json:"admittedTemplateRevision,omitempty"`
 	AdmittedTemplateSnapshotHash string                                      `json:"admittedTemplateSnapshotHash,omitempty"`
 	ProfileID                    string                                      `json:"profileId,omitempty"`
+	AuthoringSummary             *AuthoringSummary                           `json:"authoringSummary,omitempty"`
 	DefaultLLMSelection          *runtimecontract.ProviderInferenceSelection `json:"defaultLLMSelection,omitempty"`
 	DefaultSoulID                string                                      `json:"defaultSoulId,omitempty"`
 	SoulBindings                 map[string]string                           `json:"soulBindings,omitempty"`

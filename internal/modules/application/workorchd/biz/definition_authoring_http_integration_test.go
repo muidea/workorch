@@ -537,9 +537,20 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			t.Fatalf("raw diagnostic changed: %+v", envelope.Diagnostic)
 		}
 		before := physicalCalls.Load()
-		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusOK)
-		if physicalCalls.Load() != before {
-			t.Fatal("known failure automatically retried provider")
+		replayed := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusOK)
+		if physicalCalls.Load() != before || replayed.CompilationAccepted || replayed.WorkspaceRevision != failed.WorkspaceRevision {
+			t.Fatal("known failure automatically retried provider or changed its receipt")
+		}
+		assertNoRuns()
+		closeOwners()
+		baseURL, routine, closeOwners = open()
+		recovered := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusOK)
+		if recovered.State != "failed" || recovered.CompilationAccepted || recovered.WorkspaceRevision != failed.WorkspaceRevision || len(recovered.Requests) != len(failed.Requests) || physicalCalls.Load() != before {
+			t.Fatalf("重启后失败请求身份被替换或重新调用 provider: %+v", recovered)
+		}
+		request := recovered.Requests[requestIndex]
+		if request.PermitID != failed.Requests[requestIndex].PermitID || request.Diagnostic == nil || *request.Diagnostic != *failed.Requests[requestIndex].Diagnostic {
+			t.Fatal("重启重放丢失原 permit 或原始诊断元信息")
 		}
 		assertNoRuns()
 		return

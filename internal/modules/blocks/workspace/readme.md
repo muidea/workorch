@@ -77,6 +77,12 @@ Web 不以浏览器持久存储保留创作输入或事务恢复身份；已保�
 
 请求诊断随owner Clone深拷贝，重复completion必须精确一致，变更诊断冲突；reserve不接受预填失败诊断。查询按Workspace/permit精确scope走typed EventHub，仅只读原请求，不驱动provider。普通view返回原始错误及元信息，原始响应按需单条读取；旧失败无诊断时不能虚构历史原文。包含诊断的Workspace运行文件必须0600，权限通过原子publish收紧；不写Git或通用日志。数据保护依靠访问边界而非改写数据，见 [Workspace 规格创作](../../../../docs/40-profiles-capabilities/workspace/setup-draft-session.md)。
 
+同输入的已失败请求保持原失败及 permit；Application 重复 compile 或进程重启不授予新的调用权。软件输出合同升级不迁移或清空历史 ledger。真实输入／模板修订继续通过原 CAS 和累计预算，不以无意义输入变化或新请求 ID 绕过失败。
+
+### 创作只读摘要
+
+Get/List 从当前未确认创作 record 派生有界 `AuthoringSummary`，仅含阶段、失败 phase/code、已完成审查数和 input revision；无当前记录或已经进入确认／准入时不补造摘要。六审查完成使用 `reviewed`，不宣称模板当前性或确认资格。摘要经 typed DTO 传递，模型载体不序列化，memory/file repository clone 丢弃该观察，不能反向恢复 owner ledger。创作保存、reserve、complete 和准备诊断的成功 CAS 复用 `WorkspaceStateChanged` 通知刷新投影；无写入重放及失败 CAS 不发该通知。通知仅用于读取刷新，不是执行或恢复权威。
+
 ### 前置准备诊断
 
 前置准备失败使用独立 `DefinitionAuthoringPreparationDiagnostic`，经 `RecordPreparationDiagnosticCommand/Result` 进入既有规格私有 dispatcher/CAS，原文经 `QueryPreparationDiagnosticCommand/Result` 按 Workspace／DiagnosticID 读取；不是 provider request 或 permit。诊断绑定 input／template、目标阶段与请求身份；观察 revision 只用于首次 CAS，语义 ID 不包含该 revision。duplicate 先于 stale 校验返回原记录，迟到新失败不能重绑最新输入，已 reserve／确认后旧诊断不参与当前失败状态。

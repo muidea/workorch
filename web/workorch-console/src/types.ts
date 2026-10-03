@@ -285,6 +285,14 @@ export type GovernanceBudgetConfiguration = {
   maxRepeatedSamePrompt: number;
 };
 
+export type WorkspaceAuthoringSummary = {
+  state: string;
+  failurePhase?: string;
+  failureCode?: string;
+  reviewCount: number;
+  inputRevision: number;
+};
+
 export type Workspace = {
 	revision: number;
   id: string;
@@ -293,6 +301,7 @@ export type Workspace = {
   deliverableDirectory: string;
   state: string;
   activeRunId?: string;
+  authoringSummary?: WorkspaceAuthoringSummary;
 	admittedStartupInputHash?: string;
 	admittedTemplateRevision?: string;
 	admittedTemplateSnapshotHash?: string;

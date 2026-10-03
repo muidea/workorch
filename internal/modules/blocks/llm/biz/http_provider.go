@@ -502,6 +502,9 @@ func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderR
 }
 
 func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
+	if err := request.ValidateSchemaFormat(); err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
 	limits, err := providerCompletionResponseLimits(p.config, request)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
@@ -605,6 +608,9 @@ func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.Pro
 }
 
 func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (llmmodels.ProviderCompletionResult, error) {
+	if err := request.ValidateSchemaFormat(); err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
 	limits, err := providerCompletionResponseLimits(p.config, request)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err

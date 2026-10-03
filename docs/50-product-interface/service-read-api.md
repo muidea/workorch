@@ -56,6 +56,8 @@ TaskProgress、ContextBundle 与 compressed context 共享同一个 `RecoveryPla
 resource、workspace/run scope、state 及 owner 原样提供的 `requiredAction/allowedUserActions`。`suggestedNavigation` 只供展示；
 上述字段与兼容 blocking ID 不得进入 mutation constructor。没有 exact canonical 交集时只能输出 diagnostic，不能给出 action。
 
+Workspace list/detail 可携带 `authoringSummary`，只从 Workspace owner 当前创作记录派生阶段、失败 phase/code、已记录审查数和 input revision；无创作记录时不补造草稿。摘要经既有 Get/List 读取与投影传递，不为列表逐项查询创作接口，不包含原始诊断或完整 ledger。摘要不代表模板当前性、确认资格、预算余额或执行权限；`reviewed` 仅表示持久审查已完成，当前确认资格仍待完整查询核对。审查计数不等于 PASS 数，创作失败不改写 Workspace/Run 生命周期，也不生成治理 blocker。确认与恢复仍须读取完整 authoring view 并通过 owner 校验。
+
 TaskProgress／ContextBundle／compressed context 的 `workspace_defined` 仅以 owner 的 admitted startup hash 表示正式定义已封存。`formal_result` 完成须命中当前适用 completed Run 的 exact `TerminalResultID`，且对应 Result owner 状态为 accepted、属于 matching Workspace／Run／Goal／DoD，Run startup hash 与当前 seal 一致；accepted slice、历史结果、Artifact 存在及 Runtime terminal 本身都不能替代正式结果交付。当前运行优先，最新运行依据 owner 代次，不由旧事件或结果时间选回 predecessor。缺失精确结果不补造完成；这些内部关联字段不新增 public Run authority。
 
 Acceptance 的 `budget` 只包含 SM-2 convergence/repair 与 prerequisite refresh；SM-4 provider transport、operation recovery、

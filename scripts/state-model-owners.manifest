@@ -35,6 +35,8 @@ internal/modules/blocks/run/pkg/models/run.go|RunLineageState|owner_private_stat
 internal/modules/blocks/run/pkg/models/workspace_retirement.go|WorkspaceRetirementPhase|owner_private_state|internal/modules/blocks/run|run.workspace_retirement
 internal/pkg/workorchrepo/workspace_scoped_repositories.go|workspaceRunResourcePurgePhase|owner_private_state|internal/modules/blocks/run|run.workspace_retirement
 internal/pkg/workorchrepo/workspace_scoped_repositories.go|orchestratorEvidencePurgeJournalPhase|owner_private_state|internal/modules/kernel/orchestrator|orchestrator.workspace_deletion
+internal/modules/blocks/workspace/pkg/models/workspace.go|AuthoringSummary.State|derived_projection|internal/modules/blocks/workspace|-
+internal/modules/blocks/workspace/pkg/models/workspace.go|AuthoringSummary.FailurePhase|derived_projection|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/models/goal_specification.go|GoalSpecificationCompletenessReview.Status|immutable_outcome|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/models/goal_specification.go|GoalSpecificationVerification.Status|immutable_outcome|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/events/messages.go|DefinitionAdmissionCandidateDisposition|immutable_outcome|internal/modules/blocks/workspace|-

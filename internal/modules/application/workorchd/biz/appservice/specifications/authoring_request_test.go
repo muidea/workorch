@@ -37,6 +37,30 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 	if proposalCommand.Request.Kind != "workspace/specification/proposal" || proposalCommand.Target != target || proposalCommand.Request.Model != target.ModelID {
 		t.Fatalf("proposal request lost its provider identity: %+v", proposalCommand)
 	}
+	if proposalCommand.Request.SchemaFormat != "json_schema" || !strings.Contains(proposalCommand.Request.PromptContext.Sections[0].Content, proposalCommand.Request.Schema) {
+		t.Fatal("full typed schema missing from C0")
+	}
+	changedInput := input
+	changedInput.Revision++
+	changedInput.GoalText = "另一个目标"
+	changedRecord := workspace.DefinitionAuthoringRecord{Input: changedInput, InputHash: changedInput.InputHash(), TemplateSnapshot: template, TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template)}
+	changedRecord, changedDerivation, _, changeErr := changedRecord.ReserveDerivation("derive-changed", "provider", nil)
+	if changeErr != nil {
+		t.Fatal(changeErr)
+	}
+	changedDerived := derived
+	changedDerived.AuthoringInputHash = changedInput.InputHash()
+	changedRecord, changeErr = changedRecord.CompleteDerivation(changedDerivation.PermitID, &changedDerived, "")
+	if changeErr != nil {
+		t.Fatal(changeErr)
+	}
+	changedCommand, changeErr := AuthoringProposalCommand(changedRecord.DerivationRequests[0], target)
+	if changeErr != nil {
+		t.Fatal(changeErr)
+	}
+	if changedCommand.Request.PromptContext.Sections[0].Content != proposalCommand.Request.PromptContext.Sections[0].Content || changedCommand.Request.Schema != proposalCommand.Request.Schema || changedCommand.Request.PromptContext.Sections[1].Content == proposalCommand.Request.PromptContext.Sections[1].Content {
+		t.Fatal("dynamic input changed C0/schema or failed to change C3")
+	}
 	if len(proposalCommand.Request.PromptContext.Sections) != 2 {
 		t.Fatal("proposal did not separate stable contract from volatile input")
 	}
@@ -157,7 +181,7 @@ func TestResourceBoundAuthoringCommandsBindSameSnapshotAndRejectProviderResource
 		ResourceSnapshotHash string                                          `json:"resourceSnapshotHash"`
 		OutputShape          workspace.GoalSpecification                     `json:"outputShape"`
 	}
-	if err := json.Unmarshal([]byte(proposalCommand.Request.PromptContext.Sections[1].Content), &proposalPayload); err != nil || proposalPayload.ResourceSnapshotHash != derivation.ResourceSnapshotHash || len(proposalPayload.Resources) != 1 || proposalPayload.Resources[0].Content != content || len(proposalPayload.ExpectedResources) != 1 || proposalPayload.OutputShape.Resources[0] != proposalPayload.ExpectedResources[0] {
+	if err := json.Unmarshal([]byte(proposalCommand.Request.PromptContext.Sections[1].Content), &proposalPayload); err != nil || proposalPayload.ResourceSnapshotHash != derivation.ResourceSnapshotHash || len(proposalPayload.Resources) != 1 || proposalPayload.Resources[0].Content != content || len(proposalPayload.ExpectedResources) != 1 {
 		t.Fatalf("proposal resource context changed: %+v %v", proposalPayload, err)
 	}
 	items, err := derived.CandidateItems(input, &template)
@@ -230,4 +254,15 @@ func authoringCommandFixture(t *testing.T, input workspace.DefinitionAuthoringIn
 		t.Fatal(err)
 	}
 	return spec
+}
+
+func TestSpecificationRequestBoundIncludesStableContract(t *testing.T) {
+	target := runtimecontract.ProviderModelTarget{ProviderID: "mock", ModelID: "model"}
+	payload := []byte(strings.Repeat("x", maxDocumentBytes-len(authoringProposalInstructions)))
+	if _, err := authoringSpecificationCommand("ws", target, "proposal", authoringProposalInstructions, payload); err == nil {
+		t.Fatal("schema bytes omitted from bounded context")
+	}
+	if _, err := completionCommand(workspace.DefinitionAdmissionCandidate{}, "proposal", proposalInstructions, payload); err == nil {
+		t.Fatal("legacy builder omitted schema bytes from bounded context")
+	}
 }

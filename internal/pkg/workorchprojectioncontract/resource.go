@@ -2,6 +2,15 @@ package workorchprojectioncontract
 
 import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
+// WorkspaceAuthoringSummary 是由 owner 派生的非权威视图事实。
+type WorkspaceAuthoringSummary struct {
+	State         string `json:"state"`
+	FailurePhase  string `json:"failurePhase,omitempty"`
+	FailureCode   string `json:"failureCode,omitempty"`
+	ReviewCount   int    `json:"reviewCount"`
+	InputRevision uint64 `json:"inputRevision"`
+}
+
 // Workspace is the public, owner-neutral workspace projection. Owner-private
 // storage paths are deliberately excluded.
 type Workspace struct {
@@ -17,6 +26,7 @@ type Workspace struct {
 	AdmittedTemplateRevision     string                                      `json:"admittedTemplateRevision,omitempty"`
 	AdmittedTemplateSnapshotHash string                                      `json:"admittedTemplateSnapshotHash,omitempty"`
 	ProfileID                    string                                      `json:"profileId,omitempty"`
+	AuthoringSummary             *WorkspaceAuthoringSummary                  `json:"authoringSummary,omitempty"`
 	DefaultLLMSelection          *runtimecontract.ProviderInferenceSelection `json:"defaultLLMSelection,omitempty"`
 	DefaultSoulID                string                                      `json:"defaultSoulId,omitempty"`
 	SoulBindings                 map[string]string                           `json:"soulBindings,omitempty"`
@@ -28,6 +38,10 @@ type Workspace struct {
 
 func CloneWorkspace(item Workspace) Workspace {
 	item.DefaultLLMSelection = runtimecontract.CloneProviderInferenceSelection(item.DefaultLLMSelection)
+	if item.AuthoringSummary != nil {
+		value := *item.AuthoringSummary
+		item.AuthoringSummary = &value
+	}
 	if item.SoulBindings != nil {
 		bindings := make(map[string]string, len(item.SoulBindings))
 		for stage, soulID := range item.SoulBindings {

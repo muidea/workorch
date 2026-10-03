@@ -1,6 +1,11 @@
 package models
 
-import "github.com/muidea/workorch/internal/pkg/llmaudit"
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
+)
 
 type ProviderRequest struct {
 	WorkspaceID     string `json:"workspaceId"`
@@ -12,6 +17,7 @@ type ProviderRequest struct {
 	SystemLocale    string `json:"systemLocale,omitempty"`
 	DialogLanguage  string `json:"dialogLanguage,omitempty"`
 	Schema          string `json:"schema"`
+	SchemaFormat    string `json:"schemaFormat,omitempty"`
 	// MaxOutputTokens is an optional activation-sealed stage budget. The
 	// provider adapter clamps it to the sealed model ceiling.
 	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
@@ -188,4 +194,21 @@ type ProviderCompletionResult struct {
 	ProviderSubmitted bool `json:"-"`
 	RequestBytes      int  `json:"-"`
 	ResponseBytes     int  `json:"-"`
+}
+
+// ProviderSchemaFormatJSONSchema 显式标记 Schema 为 JSON Schema 对象。
+const ProviderSchemaFormatJSONSchema = "json_schema"
+
+func (r ProviderRequest) ValidateSchemaFormat() error {
+	if r.SchemaFormat == "" {
+		return nil
+	}
+	if r.SchemaFormat != ProviderSchemaFormatJSONSchema || r.RawTextOutput {
+		return fmt.Errorf("invalid provider schema format")
+	}
+	var schema map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(r.Schema), &schema); err != nil || schema == nil {
+		return fmt.Errorf("explicit JSON schema must be a valid object")
+	}
+	return nil
 }

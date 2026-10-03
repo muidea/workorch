@@ -34,6 +34,13 @@ func MapWorkspace(item *workspacemodel.Workspace) appmodelcore.Workspace {
 		ret.AdmittedTemplateRevision = item.StartupInput.TemplateRevision
 		ret.AdmittedTemplateSnapshotHash = item.StartupInput.TemplateSnapshotHash
 	}
+	if item.AuthoringSummary != nil {
+		summary := *item.AuthoringSummary
+		ret.AuthoringSummary = &appmodelcore.AuthoringSummary{
+			State: summary.State, FailurePhase: summary.FailurePhase, FailureCode: summary.FailureCode,
+			ReviewCount: summary.ReviewCount, InputRevision: summary.InputRevision,
+		}
+	}
 	return ret
 }
 

@@ -12,6 +12,14 @@ Workspace owner 持久保存创作输入与请求身份；派生验收要求后�
 
 旧 process-local setup draft session、直接 Goal/DoD 写入及手工绕过审查的创建入口已退休。本文保留原路径作为文档链接，不表示旧入口仍可使用。
 
+## 结构化输出合同
+
+提案与独立审查使用不同的版本化输出合同：顶层分别仅为 `specification` 与 `review`。请求提供完整 JSON Schema，根对象及所有嵌套对象均禁止未知字段；字段名、数组项、类型和枚举必须与 typed DTO 一致。提案的 `Reviews` 必须为空数组，审查结论只能来自独立审查事务。`all_of` 是现有条件的合取语义，不授权模型添加 `ConditionMode` 或其他合同之外的字段。
+
+稳定 schema 与精确字段说明放入 C0，当前 Goal、候选验收项、资源和身份放入动态请求。Verification 使用 `ObligationID`、`Declaration`、`Status`、`ProfileID`、`EvidenceRequirementID`、`Scope` 等既有字段；`DECLARED` 必须绑定可信 Profile 声明，不能把自由文本的预期证据当作声明身份。
+
+provider 原生 structured output 仅在能力明确支持时启用；不支持时仍提供完整提示合同并执行相同本地严格校验，不自动 fallback 或重发。显式 schema 构造错误必须明确失败，不能静默省略约束。JSON Schema 只约束结构，不替代原文保真、严格解析、来源／资源／Profile 校验、六类审查、用户确认或 owner 准入。
+
 ## 原始失败诊断与数据保真
 
 提案和审查文档仍执行原有严格 JSON、资源快照、Goal/验收项身份、来源及验证绑定校验。`invalid_proposal` / `invalid_review` 是解析或语义校验失败，不代表 provider 调用失败；`outcome_unresolved` 表示完成结果尚未记录，可能仍有后台任务执行，不能仅凭该状态推断请求中断。
@@ -43,6 +51,8 @@ Workspace owner 持久保存创作输入与请求身份；派生验收要求后�
 确认恢复参数由已校验的 owner journal 投影，绑定 Workspace、input／permit／proposal／specification 身份；用户须显式选择恢复。ExpectedWorkspaceRevision 仅约束首次准备，已开始的 journal 精确重放不依赖浏览器保存原 revision。页面仍保留原确认时不得以查询结果替换，缺少合法恢复身份时保持阻塞。关闭、切换 Workspace 或删除后的迟到响应不能重新注入旧视图。
 
 已 reserve 的请求不会因查询或重复 compile 自动获得第二次 provider 调用权限。完成请求重放必须包含同一原始诊断，内容变化是冲突。输入修订会产生新身份并重新审查，不是恢复或改写原失败结果。
+
+`failed` 的同输入编译只返回原失败，不调度新的 provider 请求；部署新的请求合同也不会清除旧失败或授予新 permit。只有真实输入或模板修订才应保存为新 revision，失败历史和既有预算继续保留，修订不保证解除预算耗尽。仅服务代码修复后的新验证须由用户显式创建新事务，不能靠无意义改动 Goal、随机替换请求身份或清理账本绕过原失败。`preparation_failed` 的未 reserve 目标恢复与此不同，不得混用提示或调用规则。
 
 ## 相关合同
 

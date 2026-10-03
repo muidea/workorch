@@ -22,7 +22,7 @@ class AuthoringMockTest(unittest.TestCase):
         return {'goal': {'CandidateItemRef': 'authoring:goal', 'Text': '目标'},
                 'candidateAcceptance': [{'CandidateItemRef': 'derived-dod:user:1', 'Text': '用户约束'},
                                         {'CandidateItemRef': 'derived-dod:template:1', 'Text': '模板约束'}],
-                'outputShape': {'Version': 1, 'GoalItemRef': 'authoring:goal', 'GoalTextHash': 'hash'},
+                'goalTextHash': 'hash',
                 'expectedResources': [{'ID': 'resource', 'Ref': 'file', 'SnapshotHash': 'snapshot', 'Required': True, 'Available': True}]}
 
     def test_non_authoring_is_not_intercepted(self):
@@ -43,6 +43,11 @@ class AuthoringMockTest(unittest.TestCase):
         self.assertEqual([r['Text'] for r in spec['Requirements']], ['目标', '用户约束', '模板约束'])
         self.assertTrue(all(v['Status'] == 'UNVERIFIED' for v in spec['Verifications']))
         self.assertEqual(spec['Reviews'], [])
+        self.assertEqual(spec['GoalTextHash'], value['goalTextHash'])
+        self.assertEqual(spec['GoalItemRef'], value['goal']['CandidateItemRef'])
+        self.assertTrue(all(d['ResourceIDs'] == [] for d in spec['Dimensions']))
+        self.assertTrue(all(r['ResourceIDs'] == [] for r in spec['Requirements']))
+        self.assertTrue(all(v['ProfileID'] == v['EvidenceRequirementID'] == v['Scope'] == '' for v in spec['Verifications']))
 
     def test_feasibility_is_unknown_without_profile_declaration(self):
         candidate = self.candidate()

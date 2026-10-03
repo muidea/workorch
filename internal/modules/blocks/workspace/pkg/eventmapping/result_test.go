@@ -1,7 +1,9 @@
 package eventmapping
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -31,6 +33,29 @@ func TestWorkspaceResultMappingIsStableDetachedAndRoundTrips(t *testing.T) {
 	roundTrip := Workspace(dto)
 	if !reflect.DeepEqual(roundTrip.SoulBindings, model.SoulBindings) || !reflect.DeepEqual(roundTrip.ContextHints.Map(), model.ContextHints.Map()) {
 		t.Fatalf("round trip = %+v, want %+v", roundTrip, model)
+	}
+}
+
+func TestWorkspaceDTODropsTransientAuthoringSummary(t *testing.T) {
+	item := &workspacemodel.Workspace{ID: "ws-transient-summary", AuthoringSummary: &workspacemodel.AuthoringSummary{State: "failed"}}
+	dto := WorkspaceDTO(item)
+	if dto == nil || dto.AuthoringSummary != nil {
+		t.Fatalf("owner DTO carried transient model observation: %+v", dto)
+	}
+	wire, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(string(wire)), "authoringsummary") {
+		t.Fatalf("Workspace model JSON included transient summary: %s", wire)
+	}
+	clone := item.AuthoringSummary.Clone()
+	if clone == item.AuthoringSummary || clone.State != item.AuthoringSummary.State {
+		t.Fatal("summary clone did not detach value")
+	}
+	clone.State = "changed"
+	if item.AuthoringSummary.State != "failed" {
+		t.Fatal("summary clone mutation changed original")
 	}
 }
 

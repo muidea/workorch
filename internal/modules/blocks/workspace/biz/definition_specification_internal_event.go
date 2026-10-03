@@ -171,9 +171,17 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 			}
 			return definitionSpecificationTransition{}, err
 		}
+		if definitionSpecificationChangesAuthoringRead(event) {
+			m.publishWorkspaceUpdated(bound, transition.Next)
+		}
 		return transition, nil
 	}
 	return definitionSpecificationTransition{}, common.ErrConflict
+}
+
+func definitionSpecificationChangesAuthoringRead(event definitionSpecificationInternalEvent) bool {
+	return event.Authoring != nil || event.DeriveReserve != nil || event.DeriveComplete != nil ||
+		event.AuthoringSpecReserve != nil || event.AuthoringSpecComplete != nil || event.PreparationDiagnostic != nil
 }
 
 // The reducer is pure: all mutable owner facts are captured by observation;

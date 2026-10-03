@@ -1913,6 +1913,7 @@ func (r *WorkspaceRepository) Delete(_ context.Context, id common.WorkspaceID) e
 
 func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 	cloned := *item
+	cloned.AuthoringSummary = nil
 	if item.DefaultLLMSelection != nil {
 		target := item.DefaultLLMSelection.Clone()
 		cloned.DefaultLLMSelection = &target

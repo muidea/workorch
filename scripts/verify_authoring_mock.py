@@ -74,8 +74,9 @@ def authoring_response(prompt):
         if not isinstance(items, list) or not items:
             raise AuthoringMockError('候选验收项不能为空')
         goal = request['goal']
-        spec = copy.deepcopy(request['outputShape'])
-        spec.update(Dimensions=[{'ID': 'authoring', 'Required': True, 'Activated': True}],
+        spec = {'Version': 1, 'GoalItemRef': _text(goal['CandidateItemRef']),
+                'GoalTextHash': _text(request['goalTextHash'])}
+        spec.update(Dimensions=[{'ID': 'authoring', 'Required': True, 'Activated': True, 'ResourceIDs': []}],
                     Requirements=[], Obligations=[], Verifications=[], Reviews=[])
         sources = [(goal, 'USER_EXPLICIT', 'goal')]
         for index, item in enumerate(items):
@@ -93,13 +94,14 @@ def authoring_response(prompt):
         for item, kind, identity in sources:
             ref, text = _text(item['CandidateItemRef']), _text(item['Text'])
             spec['Requirements'].append({'ID': identity, 'DimensionID': 'authoring', 'Required': True,
-                                         'SourceKind': kind, 'SourceItemRefs': [ref], 'Text': text})
+                                         'SourceKind': kind, 'SourceItemRefs': [ref], 'ResourceIDs': [], 'Text': text})
             obligation = 'obligation-' + identity
             spec['Obligations'].append({'ID': obligation, 'RequirementID': identity,
                                         'DoDItemRefs': [items[0]['CandidateItemRef'] if identity == 'goal' else ref], 'Text': text})
             verification = {'ID': 'verify-' + identity, 'ObligationID': obligation,
                             'Declaration': '按封存 Profile 验证' if binding else '请求未提供可信 Profile 声明',
-                            'Status': 'DECLARED' if binding else 'UNVERIFIED'}
+                            'Status': 'DECLARED' if binding else 'UNVERIFIED',
+                            'ProfileID': '', 'EvidenceRequirementID': '', 'Scope': ''}
             if binding:
                 verification.update(ProfileID=binding[0], EvidenceRequirementID=binding[1], Scope=binding[2])
             spec['Verifications'].append(verification)
