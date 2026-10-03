@@ -27,6 +27,9 @@ detached projection；读取、等待、缓存或 replay 不能修改 owner stat
 | --- | --- | --- |
 | `GET` | `/workspaces`; `/workspaces/:workspaceId` | Workspace list/detail |
 | `GET` | `/workspaces/:workspaceId/snapshot`; `/runtime-view` | public and Runtime-oriented Workspace projection |
+| `GET` | `/workspaces/:workspaceId/authoring` | 当前创作输入、持久请求／确认与有界诊断 metadata |
+| `GET` | `/workspaces/:workspaceId/authoring/diagnostics/:permitId` | 精确 provider permit 的原始规格失败诊断 |
+| `GET` | `/workspaces/:workspaceId/authoring/preparation-diagnostics/:diagnosticId` | 独立非 permit 前置失败的原始原因，可逆 bytes／hash 校验 |
 | `GET` | `/workspaces/:workspaceId/soul-bindings` | canonical routing projection |
 | `GET` | `/workspaces/:workspaceId/goals`; `/workspaces/:workspaceId/goals/:goalId` | scoped Goal resources |
 | `GET` | `/workspaces/:workspaceId/dods`; `/workspaces/:workspaceId/dods/:dodId` | scoped DoD resources |
@@ -52,6 +55,8 @@ handoff 偏差。三者均不能生成、阻断或选择 Resume、Restart、Driv
 TaskProgress、ContextBundle 与 compressed context 共享同一个 `RecoveryPlan.blockingResource` 事实引用，逐字段包含 owner、
 resource、workspace/run scope、state 及 owner 原样提供的 `requiredAction/allowedUserActions`。`suggestedNavigation` 只供展示；
 上述字段与兼容 blocking ID 不得进入 mutation constructor。没有 exact canonical 交集时只能输出 diagnostic，不能给出 action。
+
+TaskProgress／ContextBundle／compressed context 的 `workspace_defined` 仅以 owner 的 admitted startup hash 表示正式定义已封存。`formal_result` 完成须命中当前适用 completed Run 的 exact `TerminalResultID`，且对应 Result owner 状态为 accepted、属于 matching Workspace／Run／Goal／DoD，Run startup hash 与当前 seal 一致；accepted slice、历史结果、Artifact 存在及 Runtime terminal 本身都不能替代正式结果交付。当前运行优先，最新运行依据 owner 代次，不由旧事件或结果时间选回 predecessor。缺失精确结果不补造完成；这些内部关联字段不新增 public Run authority。
 
 Acceptance 的 `budget` 只包含 SM-2 convergence/repair 与 prerequisite refresh；SM-4 provider transport、operation recovery、
 CAS reload 和 terminal delivery 计数只在独立 `recoveryBudget`。`RuntimeAuditRepair` 不得包含

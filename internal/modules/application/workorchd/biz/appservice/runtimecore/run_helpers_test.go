@@ -1,7 +1,9 @@
 package runtimecore
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
@@ -56,6 +58,27 @@ func TestMapRunProjectsSealedProviderSelectionWithoutAliasingBootstrap(t *testin
 	got.SealedLLMSelection.Target.ModelID = "mutated-read-model"
 	if item.RuntimeBootstrap.Activation.ProviderSelection.Target.ModelID != "model-sealed" {
 		t.Fatalf("read model target mutation changed bootstrap = %+v", item.RuntimeBootstrap.Activation.ProviderSelection.Target)
+	}
+}
+
+func TestMapRunPreservesPrivateOwnerFencesWithoutJSONExposure(t *testing.T) {
+	item := &runmodel.Run{
+		ID: "run-owner", WorkspaceID: "workspace-owner", StartupInputHash: " owner startup hash ",
+		TerminalResultID: " owner terminal result ", WorkspaceRunGeneration: 41,
+		RuntimeBootstrap: &runtimecontract.RuntimeBootstrap{Definition: runtimecontract.RuntimeDefinitionContext{StartupInputHash: "must-not-rebuild-from-bootstrap"}},
+	}
+	got := MapRun(item)
+	if got.StartupInputHash != item.StartupInputHash || got.TerminalResultID != string(item.TerminalResultID) || got.WorkspaceRunGeneration != item.WorkspaceRunGeneration {
+		t.Fatalf("owner fence mapping lost original fields: %+v", got)
+	}
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"startupInputHash", "terminalResultId", "terminalResultID", "workspaceRunGeneration", "owner startup hash", "owner terminal result"} {
+		if strings.Contains(string(data), name) {
+			t.Fatalf("private owner fence exposed in JSON: %s", data)
+		}
 	}
 }
 

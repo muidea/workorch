@@ -2,6 +2,7 @@ package workorchclient
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -65,5 +66,38 @@ func TestDefinitionAuthoringClientPreservesExactTransactions(t *testing.T) {
 	want := []string{"POST /api/v1/workorch/workspace-authoring", "GET " + authoringPath("ws"), "PUT " + authoringPath("ws"), "POST " + authoringPath("ws") + "/compile", "POST " + authoringPath("ws") + "/confirm"}
 	if !reflect.DeepEqual(requests, want) {
 		t.Fatalf("创作请求路径变化: %v", requests)
+	}
+}
+
+func TestDefinitionAuthoringClientPreparationDiagnosticPreservesIndependentScope(t *testing.T) {
+	raw := []byte("原始错误\n\xff\x00")
+	want := management.DefinitionAuthoringPreparationDiagnosticView{
+		DefinitionAuthoringPreparationDiagnosticMetadata: management.DefinitionAuthoringPreparationDiagnosticMetadata{
+			WorkspaceID: "ws", DiagnosticID: "preparation-sha256:exact", InputHash: "input", TemplateSnapshotHash: "template",
+			ObservedWorkspaceRevision: 4, Stage: "review", TargetRequestID: "review/dimension_coverage/derivation",
+			DerivationPermitID: "derivation", ReviewKind: "dimension_coverage", ProposalHash: "proposal",
+			PhaseCode: "request_render_failed", CauseBytes: uint64(len(raw)), CauseSHA256: "exact-hash", CauseSaved: true,
+		},
+		CauseBase64: base64.StdEncoding.EncodeToString(raw),
+	}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != http.MethodGet || r.URL.Path != authoringPath("ws")+"/preparation-diagnostics/"+want.DiagnosticID {
+			t.Errorf("前置诊断不能混入 provider permit 路径：%s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			Diagnostic management.DefinitionAuthoringPreparationDiagnosticView `json:"diagnostic"`
+		}{Diagnostic: want})
+	}))
+	defer server.Close()
+	got, err := New(server.URL).ReadDefinitionAuthoringPreparationDiagnostic(context.Background(), "ws", want.DiagnosticID)
+	if err != nil || got == nil || !reflect.DeepEqual(*got, want) || calls != 1 {
+		t.Fatalf("诊断字节或身份被改写：%+v %v calls=%d", got, err, calls)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(got.CauseBase64)
+	if err != nil || !reflect.DeepEqual(decoded, raw) {
+		t.Fatalf("诊断原字节不能可逆恢复：%x %v", decoded, err)
 	}
 }

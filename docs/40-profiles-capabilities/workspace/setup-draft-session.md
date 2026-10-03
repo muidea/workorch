@@ -24,6 +24,18 @@ Workspace owner 持久保存创作输入与请求身份；派生验收要求后�
 
 包含诊断的 Workspace 文件通过原子发布使用 0600 权限。原始内容留在 owner 运行存储，不提交 Git，不额外附加配置密钥，不复制到通用日志；权限保护不能替代管理接口的部署访问边界。
 
+## 前置准备失败
+
+资源获取、provider 配置及请求构造发生在派生／提案／审查目标的 reserve 之前。此时失败由 Workspace owner 的独立 `PreparationDiagnostics` 保存，不能伪造 provider permit 或失败 completion。`preparation_failed` 表示当前输入、模板及尚未 reserve 的目标存在已知前置失败，不代表 provider 请求结果未决。
+
+诊断绑定 Workspace、input／template hash、目标阶段／请求身份、适用 review／proposal 身份、失败阶段和资源引用。原始原因按 bytes 保存，不脱敏、不 trim、不重写；单条原文上限 64 KiB，超限保留完整字节数、SHA256 和明确未保存原因，不保存片段。累计创作 ledger 最多 32 条诊断，原文最多 2 MiB；确认归档沿用最多 16 份历史记录，每份有界但会复制原账本，不表示整个 Workspace 的物理原文总量只有 2 MiB。集合满时明确拒绝新记录，不淘汰旧原因。
+
+诊断语义 ID 不包含观察时 Workspace revision；该 revision 仅限制首次保存。相同输入／目标／原因的重复失败返回原诊断，不重复 CAS 或消耗容量；新失败仍须通过当前 scope 和 revision 栅栏。迟到失败不得绑定新输入或覆盖已 reserve、确认或封存的事务。诊断保存失败必须明确报告，不能声称原文已持久、可查询。
+
+常规查询只提供诊断身份、阶段、hash／bytes／保存状态及当前／历史标记。原始原因通过 `GET /workspaces/:workspaceId/authoring/preparation-diagnostics/:diagnosticId` 按需读取，可逆编码并以原字节校验；非 UTF-8 内容不能用替代字符冒充原文，仍可下载原 bytes。原文继续受 0600 原子文件和管理访问边界保护，不复制到通用日志。
+
+资源修复后，用户可显式再次 compile，同输入重新观察事实；已有持久请求优先按原 ledger 恢复，不自动重发 provider。早期已完成审查为 FAIL／UNKNOWN 而下一份独立审查尚未 reserve 时，当前前置失败仍可显式恢复并仅补齐缺失审查；全部六份审查完成后仍按原 FAIL／UNKNOWN 阻止确认，不能因准备恢复改判为通过。目标已 reserve 或确认已开始时，旧前置失败仅为历史，不阻止当前正常进展。未知 reserve 冲突或响应丢失不能被猜成“未取得 permit”；只有 owner 明确返回未签发 permit 的预算拒绝可作为前置失败记录。
+
 ## 恢复边界
 
 新建向导每次重新打开均为空白，不读取旧浏览器恢复记录。关闭／刷新后页面内存的未保存输入与重放身份丢失；有未保存编辑或未决请求时关闭须明确确认，已提交事务不会因此被取消。已保存草稿从 Workspace 列表／详情显式打开，服务端查询失败不能触发自动替代创建。

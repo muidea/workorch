@@ -69,7 +69,7 @@ Last Verified: 2026-08-30
 - 六类审查分别覆盖维度、负路径、回归、资源环境、显式约束追踪和可验证性。FAIL/UNKNOWN、缺必需资源、缺必需维度/义务、缺 DoD 映射或不匹配的 Profile 声明不能晋升。PASS 只是有来源的评审事实，不直接授予 Runtime evidence credit，也不证明任意自然语言目标的完整性。
 - nil Specification 保留既有候选与 startup hash。此合同约束提交的规格候选，不表示所有 Web/TUI 输入已自动经过完整 Goal Compiler；正式执行仍须通过 exact CWI、owner feasibility、sealed dispatch 和 SM-2 闭包。
 
-## 原始创作诊断
+### 原始创作诊断
 
 Web 不以浏览器持久存储保留创作输入或事务恢复身份；已保存草稿与确认恢复依据由 owner 管理。Application 从已校验的 typed query confirmation 投影有界恢复参数，不能暴露整个 journal 或从页面旧状态重建。ExpectedWorkspaceRevision 仅限制首次确认准备，精确 journal 重放仍校验原 input／permit／proposal／specification hashes；查询不驱动确认、provider 或 Run。
 
@@ -77,10 +77,17 @@ Web 不以浏览器持久存储保留创作输入或事务恢复身份；已保�
 
 请求诊断随owner Clone深拷贝，重复completion必须精确一致，变更诊断冲突；reserve不接受预填失败诊断。查询按Workspace/permit精确scope走typed EventHub，仅只读原请求，不驱动provider。普通view返回原始错误及元信息，原始响应按需单条读取；旧失败无诊断时不能虚构历史原文。包含诊断的Workspace运行文件必须0600，权限通过原子publish收紧；不写Git或通用日志。数据保护依靠访问边界而非改写数据，见 [Workspace 规格创作](../../../../docs/40-profiles-capabilities/workspace/setup-draft-session.md)。
 
+### 前置准备诊断
+
+前置准备失败使用独立 `DefinitionAuthoringPreparationDiagnostic`，经 `RecordPreparationDiagnosticCommand/Result` 进入既有规格私有 dispatcher/CAS，原文经 `QueryPreparationDiagnosticCommand/Result` 按 Workspace／DiagnosticID 读取；不是 provider request 或 permit。诊断绑定 input／template、目标阶段与请求身份；观察 revision 只用于首次 CAS，语义 ID 不包含该 revision。duplicate 先于 stale 校验返回原记录，迟到新失败不能重绑最新输入，已 reserve／确认后旧诊断不参与当前失败状态。
+
+原始 cause 为 bytes，单条 64 KiB，超限保留完整 hash／bytes 和明确未保存状态；累计创作账本最多 32 条，满时拒绝且不淘汰。Clone／Validate／修订继承与确认归档均保持原文，当前和历史共用 0600 原子发布。普通管理 view 仅 metadata，内部 concrete DTO 仍保留完整字节供同次模型反证，不通过 public JSON 泄漏原文。仅确定未签发 permit 的 typed budget refusal 可记录为前置失败；未知 reserve 冲突、错误响应或响应丢失不能推断未 reserve。诊断不增加预算或调用许可，也不改变 SM-1～SM-4。
+
 ## 能力验收
 
 | 能力/维度 | 测试证据 | 结论 |
 | --- | --- | --- |
+| 前置准备诊断与零 permit | `pkg/models/definition_authoring_preparation_diagnostic_test.go`、`pkg/events/definition_authoring_preparation_diagnostic_test.go`、`pkg/eventmapping/definition_authoring_preparation_diagnostic_test.go`、`biz/definition_authoring_preparation_diagnostic_test.go`、`internal/pkg/repository/file/diagnostic_permissions_test.go` | 覆盖空／非 UTF-8 bytes、hash、超限未保存、32 条容量、完整 typed 校验、duplicate／stale／并发 CAS、删除栅栏、重开与历史继承、0600；不增加 provider 请求或 Run |
 | 创作 EventHub DTO 来源与隔离 | `pkg/eventmapping/definition_authoring_test.go`、`pkg/events/definition_derivation_test.go` | record／derivation／history 显式往返保留快照与 permit／预算；模板、资源、派生结果、回执与正式 after-image 深拷贝；当前／嵌套／历史的重复或空 binding 在 map 转换前拒绝 |
 | 创作阻塞后继与确认恢复 | `biz/definition_authoring_successor_test.go` | 同 CandidateID 连续 revision、旧票据 resolved／新票据 open、候选追加与 pending startup 重开、安全 resolution、prepared／Goal／DoD／materialized cutpoint 及零自动 Run；不是 HTTP/Web 闭环验收 |
 | 多父模板 DAG 与解析结果隔离 | `pkg/models/template_inheritance_dag_test.go`、`biz/template_inheritance_test.go` | 覆盖 diamond 去重、父顺序身份、共享祖先最长路径上限、父引用深拷贝及 owner 模板操作 |

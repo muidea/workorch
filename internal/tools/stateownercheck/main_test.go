@@ -307,6 +307,36 @@ type RecordApprovalResolutionCommand struct { Data ApprovalResolutionFact }
 	}
 }
 
+func TestPreparationDiagnosticStageIsObservationButTargetStateStaysForbidden(t *testing.T) {
+	for _, fields := range []string{"Stage string", "Stage string; State string", "Stage string; TargetStage string", "Stage string; DesiredState string"} {
+		t.Run(fields, func(t *testing.T) {
+			root := newEmptyVerificationRepository(t)
+			modelPath := filepath.Join(root, "internal/modules/blocks/workspace/pkg/models/diagnostic.go")
+			commandPath := filepath.Join(root, "internal/modules/blocks/workspace/pkg/events/messages.go")
+			for path, source := range map[string]string{
+				modelPath:   "package models\ntype DefinitionAuthoringPreparationDiagnostic struct { " + fields + " }\n",
+				commandPath: "package events\nimport models \"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models\"\ntype RecordPreparationDiagnosticCommand struct { Diagnostic models.DefinitionAuthoringPreparationDiagnostic }\n",
+			} {
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// 只验证精确字段例外；新增 sibling 状态仍不能成为 caller authority。
+			err := verifyCrossOwnerCommandContracts(root)
+			if fields == "Stage string" {
+				if err != nil {
+					t.Fatalf("不可变失败位置不能被当作 transition intent：%v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "RecordPreparationDiagnosticCommand") {
+				t.Fatalf("新增目标状态必须被拒绝，fields=%s，err=%v", fields, err)
+			}
+		})
+	}
+}
+
 func TestRuntimeStateRecordObservedStateIsAllowedOnlyAtRunOwnerStoreEdge(t *testing.T) {
 	writeFixture := func(t *testing.T, commandName, fields string) string {
 		t.Helper()

@@ -77,6 +77,8 @@ Workspace 创建使用共享的 `WorkspaceSetupModal`，用户提交 Template、
 正式 Goal／DoD 只读展示，不提供旧 CRUD 或质量评分入口。创作编辑器展示审查、验证声明、失败请求与准入阻塞。
 这些表单只组装已公开的 HTTP DTO；owner 校验、revision CAS 和状态转换全部留在服务端。
 
+前置准备失败与已 reserve 的规格请求失败分别展示。前者只展示 owner 返回的 metadata，原始原因从独立 diagnosticId 查询按需校验与下载；当前／历史身份不能混用，也不把 diagnosticId 填入 permit 查询。`preparation_failed` 允许用户修复资源或配置后显式 compile，已有持久请求仍按原身份恢复。相同原因重放不增加 owner revision；页面对已受理的重复准备只进行 15 秒有界内存观察，每次重新受理均以页面观察代次重建截止，独立截止不依赖查询成功。期限结束只说明最近一次可用 owner 状态仍为原准备失败；查询失败或挂起时不能冒充已重新核对当前状态，也无法单凭查询判断后台是否在途。不声称已完成、已中断或已取消，不自动重发 provider；迟到查询仍受原会话与 scope 栅栏限制。
+
 若 current Run 投影为 runtime-definition clarification，详情页显示 typed gap、offending refs，并禁用普通 Decision answer 与 Resume。
 当前 Web 不支持同 Run 规格修订，不能用创建期 authoring 或旧 CRUD 修改 Run seal。
 详情页保留独立、显式 Restart 入口，但不得根据 Goal/DoD revision、SSE、display 字段或前端比较猜测 admission eligibility；
@@ -87,6 +89,8 @@ predecessor，也不构造 replacement-resolution payload。Board 遇到 exact c
 `steps`、`runtime-checkpoints`、`taskProgress`、`taskDecompositions` 和 `artifactContinuations` 是历史/诊断或事实展示数据。
 Runtime `nextAction` 兼容字段已删除。TaskProgress/ContextBundle 只展示 exact blocker、owner 要求/允许动作与独立导航提示；
 它们不能驱动按钮可用性、恢复 Runtime authority 或替代 formal Result/evidence。
+
+`workspace_defined` 明确表示正式定义已封存，不把 active 草稿当作定义完成；`formal_result` 只展示当前适用 Run 的 owner 已验收终态结果。库存项中的 Result／Artifact 数量表示记录存在，不能解读为验收通过。Runtime 成功终态但正式 Result 尚未交付、错 scope 或只有历史成功结果时，里程碑不得显示完成；上下文与页面使用同一事实投影。
 
 详情页明确把 Workspace/Run owner `state`、Workspace `activeRunId` 与 Run blocker refs 标为 canonical；Workspace 没有
 blocker 字段。`governanceDisplay` 是只读 lifecycle handoff，`consistencyDiagnostic` 是只读偏差，`displayOutcome` 是非 owner

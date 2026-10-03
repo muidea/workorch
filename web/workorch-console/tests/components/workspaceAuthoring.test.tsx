@@ -3,15 +3,16 @@ import { App as AntApp } from 'antd';
 const App = AntApp;
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createHash } from 'node:crypto';
+import { createHash, webcrypto } from 'node:crypto';
 import { workorchApi } from '../../src/api';
 import { WorkspaceAuthoringEditor } from '../../src/pages/components/WorkspaceAuthoringEditor';
 import { WorkspaceSetupModal } from '../../src/pages/components/WorkspaceSetupModal';
 import { AuthoringDiagnosticDetails } from '../../src/pages/components/AuthoringDiagnosticDetails';
-import type { DefinitionAuthoringView } from '../../src/types';
+import { AuthoringPreparationDiagnosticDetails } from '../../src/pages/components/AuthoringPreparationDiagnosticDetails';
+import type { DefinitionAuthoringPreparationDiagnostic, DefinitionAuthoringView } from '../../src/types';
 
 vi.mock('../../src/api', () => ({ workorchApi: {
-  listWorkspaceTemplates: vi.fn(), readDefinitionAuthoring: vi.fn(), readAuthoringDiagnostic: vi.fn(),
+  listWorkspaceTemplates: vi.fn(), readDefinitionAuthoring: vi.fn(), readAuthoringDiagnostic: vi.fn(), readAuthoringPreparationDiagnostic: vi.fn(),
   createDefinitionAuthoring: vi.fn(), saveDefinitionAuthoring: vi.fn(),
   compileDefinitionAuthoring: vi.fn(), confirmDefinitionAuthoring: vi.fn(),
   submitWorkspaceExecution: vi.fn(),
@@ -28,6 +29,21 @@ const ready = (workspaceId = 'ws'): DefinitionAuthoringView => ({
       .map(kind => ({ kind, status: 'PASS', specificationHash: 'proposal' })),
   },
 });
+function preparationDiagnostic(overrides: Partial<DefinitionAuthoringPreparationDiagnostic> = {}): DefinitionAuthoringPreparationDiagnostic {
+  const cause = 'provider 原因：暂不可用';
+  return {
+    diagnosticId: 'preparation-diag', workspaceId: 'ws', inputHash: 'input', templateSnapshotHash: 'template-snapshot', observedWorkspaceRevision: 8,
+    stage: 'proposal', targetRequestId: 'target-request', derivationPermitId: 'permit', reviewKind: 'dimension_coverage', proposalHash: 'proposal', phaseCode: 'provider_unavailable',
+    resourceRef: 'input.txt', providerBindingHash: 'provider-binding',
+    causeSHA256: createHash('sha256').update(cause).digest('hex'), causeBytes: Buffer.byteLength(cause), causeSaved: true, causeBase64: Buffer.from(cause).toString('base64'), current: true,
+    ...overrides,
+  };
+}
+
+function prepFailedView(diagnostics = [preparationDiagnostic()]): DefinitionAuthoringView {
+  return { ...ready(), state: 'preparation_failed', preparationDiagnostics: diagnostics };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: Error) => void;
@@ -41,6 +57,32 @@ const button = (name: string) => {
 };
 const disabled = (name: string) => button(name).disabled;
 
+async function fillSetup() {
+  await screen.findByLabelText('名称');
+  fireEvent.change(screen.getByLabelText('名称'), { target: { value: '测试工作空间' } });
+  fireEvent.mouseDown(document.querySelector('.ant-select-selector')!);
+  fireEvent.click(await screen.findByText('模板', { selector: '.ant-select-item-option-content' }));
+  fireEvent.change(screen.getByLabelText('目标'), { target: { value: '原目标' } });
+}
+
+async function downloadedCauseBytes(): Promise<Uint8Array> {
+  let blob: Blob | undefined;
+  vi.stubGlobal('URL', {
+    createObjectURL: vi.fn((value: Blob) => { blob = value; return 'blob:diagnostic'; }),
+    revokeObjectURL: vi.fn(),
+  });
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  fireEvent.click(screen.getByRole('button', { name: '下载已校验原始字节' }));
+  expect(blob).toBeInstanceOf(Blob);
+  const buffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as ArrayBuffer);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(blob!);
+  });
+  return new Uint8Array(buffer);
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(workorchApi.listWorkspaceTemplates).mockResolvedValue([{ id: 't', name: '模板' } as never]);
@@ -50,13 +92,368 @@ beforeEach(() => {
     parseErrorSHA256: createHash('sha256').update('默认解析错误').digest('hex'), parseErrorBytes: Buffer.byteLength('默认解析错误'), parseErrorSaved: true,
     payloadBase64: '', payloadSHA256: createHash('sha256').digest('hex'), payloadBytes: 0, payloadSaved: true,
   }));
+  vi.mocked(workorchApi.readAuthoringPreparationDiagnostic).mockImplementation(async (_workspaceId, diagnosticId) => ({
+    ...preparationDiagnostic({ diagnosticId }), causeBase64: '',
+  }));
 });
 
 afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
   expect((workorchApi as unknown as { submitWorkspaceExecution: ReturnType<typeof vi.fn> }).submitWorkspaceExecution).not.toHaveBeenCalled();
 });
 
 describe('持久规格编辑实际挂载', () => {
+  it('显式 compile accepted 后同一旧前置失败保持有界观察，期限后停止且不声明成功', async () => {
+    const oldFailure = prepFailedView();
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce(oldFailure);
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValueOnce({ ...oldFailure, compilationAccepted: true });
+    render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
+    await screen.findByDisplayValue('原目标');
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(button('保存修订并审查')); });
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledWith('ws');
+    expect(screen.getByText(/本次任务已受理，正在观察 owner 状态/)).toBeTruthy();
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(1);
+
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(oldFailure);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/观察期限已到/)).toBeNull();
+    expect(disabled('确认并准入')).toBe(true);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(13_500); });
+    expect(screen.getByText(/观察期限已到，最近一次可用 owner 状态为原前置准备失败/)).toBeTruthy();
+    const callsAtDeadline = vi.mocked(workorchApi.readDefinitionAuthoring).mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(callsAtDeadline);
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
+  });
+
+  it('owner 返回 fresh preparation failure 立即停止 accepted poll 并展示新诊断', async () => {
+    const oldFailure = prepFailedView();
+    const nextFailure = prepFailedView([preparationDiagnostic({ diagnosticId: 'fresh-preparation-failure', phaseCode: 'new_failure' })]);
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce(oldFailure);
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValueOnce({ ...oldFailure, compilationAccepted: true });
+    render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
+    await screen.findByDisplayValue('原目标');
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(button('保存修订并审查')); });
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1);
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce(nextFailure);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(screen.getByText('当前前置准备失败 · proposal · dimension_coverage · new_failure')).toBeTruthy();
+    expect(screen.queryByText(/正在观察 owner 状态/)).toBeNull();
+    const callsAfterFailure = vi.mocked(workorchApi.readDefinitionAuthoring).mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(callsAfterFailure);
+    expect(screen.queryByText(/观察期限已到/)).toBeNull();
+  });
+
+  it('GET 连续失败时独立截止结束观察，保留最后已知状态和读取原始错误', async () => {
+    const oldFailure = prepFailedView();
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce(oldFailure);
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValueOnce({ ...oldFailure, compilationAccepted: true });
+    render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
+    await screen.findByDisplayValue('原目标');
+    vi.useFakeTimers();
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockRejectedValue(new Error('owner read 原始错误'));
+    await act(async () => { fireEvent.click(button('保存修订并审查')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(screen.getByText(/观察期限已到，最近一次可用 owner 状态为原前置准备失败/)).toBeTruthy();
+    expect(screen.getByText('owner read 原始错误')).toBeTruthy();
+    const callsAtDeadline = vi.mocked(workorchApi.readDefinitionAuthoring).mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(callsAtDeadline);
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1);
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+  });
+
+  it('挂起 GET 到期仍结束观察，迟到回执不修改视图或重新轮询', async () => {
+    const oldFailure = prepFailedView();
+    const pendingRead = deferred<DefinitionAuthoringView>();
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce(oldFailure).mockReturnValueOnce(pendingRead.promise);
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValueOnce({ ...oldFailure, compilationAccepted: true });
+    render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
+    await screen.findByDisplayValue('原目标');
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(button('保存修订并审查')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(13_500); });
+    expect(screen.getByText(/观察期限已到/)).toBeTruthy();
+    await act(async () => { pendingRead.resolve({ ...ready(), input: { goalText: '迟到读取' } }); });
+    expect(screen.getByText('ws · revision 1 · preparation_failed')).toBeTruthy();
+    expect(screen.queryByDisplayValue('迟到读取')).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(2);
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1);
+  });
+
+  it('重复 accepted compile 重建截止计时器，GET 连续失败时仍在新期限结束', async () => {
+    const oldFailure = prepFailedView();
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce(oldFailure);
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValue({ ...oldFailure, compilationAccepted: true });
+    render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
+    await screen.findByDisplayValue('原目标');
+    vi.useFakeTimers();
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockRejectedValue(new Error('读取失败'));
+    await act(async () => { fireEvent.click(button('保存修订并审查')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    await act(async () => { fireEvent.click(button('保存修订并审查')); });
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.queryByText(/观察期限已到/)).toBeNull();
+    expect(screen.getByText(/正在观察 owner 状态/)).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.getByText(/观察期限已到/)).toBeTruthy();
+    const callsAtDeadline = vi.mocked(workorchApi.readDefinitionAuthoring).mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(callsAtDeadline);
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(2);
+  });
+
+  it('新建向导挂起 GET 时独立截止结束观察，迟到旧视图不能恢复确认', async () => {
+    const oldFailure = prepFailedView();
+    const pendingRead = deferred<DefinitionAuthoringView>();
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockResolvedValueOnce(oldFailure);
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValueOnce({ ...oldFailure, compilationAccepted: true });
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockReturnValueOnce(pendingRead.promise);
+    render(<AntApp><WorkspaceSetupModal open onClose={vi.fn()} onCreated={vi.fn()} /></AntApp>);
+    await fillSetup();
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(button('保存并生成／恢复审查')); });
+    expect(screen.getByText(/正在观察 owner 状态/)).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(13_500); });
+    expect(screen.getByText(/观察期限已到/)).toBeTruthy();
+    await act(async () => { pendingRead.resolve(ready()); });
+    expect(screen.getByText('草稿：ws · revision 1 · preparation_failed')).toBeTruthy();
+    expect(disabled('确认规格并准入')).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(1);
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1);
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+  });
+
+  it('新建向导重复受理后按新期限截止，失败 GET 不触发替代创建或重发', async () => {
+    const oldFailure = prepFailedView();
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockResolvedValueOnce(oldFailure);
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValue({ ...oldFailure, compilationAccepted: true });
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockRejectedValue(new Error('向导读取原始错误'));
+    render(<AntApp><WorkspaceSetupModal open onClose={vi.fn()} onCreated={vi.fn()} /></AntApp>);
+    await fillSetup();
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(button('保存并生成／恢复审查')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    await act(async () => { fireEvent.click(button('保存并生成／恢复审查')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.queryByText(/观察期限已到/)).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.getByText(/观察期限已到/)).toBeTruthy();
+    expect(screen.getByText('向导读取原始错误')).toBeTruthy();
+    const callsAtDeadline = vi.mocked(workorchApi.readDefinitionAuthoring).mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(callsAtDeadline);
+    expect(workorchApi.createDefinitionAuthoring).toHaveBeenCalledTimes(1);
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(2);
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+  });
+
+  it('切换 Workspace 后旧准备观察截止不污染新会话', async () => {
+    const oldFailure = prepFailedView();
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce(oldFailure);
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValueOnce({ ...oldFailure, compilationAccepted: true });
+    const props = { open: true, onClose: vi.fn(), onAdmitted: vi.fn() };
+    const mounted = render(<AntApp><WorkspaceAuthoringEditor {...props} workspaceId="ws" /></AntApp>);
+    await screen.findByDisplayValue('原目标');
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(button('保存修订并审查')); });
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue({ ...ready('new'), input: { goalText: '新会话目标' } });
+    await act(async () => { mounted.rerender(<AntApp><WorkspaceAuthoringEditor {...props} workspaceId="new" /></AntApp>); });
+    expect(screen.getByDisplayValue('新会话目标')).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(screen.queryByText(/观察期限已到/)).toBeNull();
+    expect(screen.getByText('new · revision 1 · ready_to_confirm')).toBeTruthy();
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(2);
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1);
+  });
+
+  it('重新 compile 等待受理期间旧观察截止不推断新任务状态', async () => {
+    const oldFailure = prepFailedView();
+    const pendingCompile = deferred<DefinitionAuthoringView>();
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce(oldFailure).mockRejectedValue(new Error('读取失败'));
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValueOnce({ ...oldFailure, compilationAccepted: true }).mockReturnValueOnce(pendingCompile.promise);
+    render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
+    await screen.findByDisplayValue('原目标');
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(button('保存修订并审查')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    await act(async () => { fireEvent.click(button('保存修订并审查')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.queryByText(/观察期限已到/)).toBeNull();
+    expect(screen.queryByText(/正在观察 owner 状态/)).toBeNull();
+    await act(async () => { pendingCompile.resolve({ ...oldFailure, compilationAccepted: true }); });
+    expect(screen.getByText(/正在观察 owner 状态/)).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(screen.getByText(/观察期限已到/)).toBeTruthy();
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(2);
+  });
+
+  it('已受理准备观察关闭须确认，取消保留观察，丢弃后不注入截止提示', async () => {
+    const oldFailure = prepFailedView();
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce(oldFailure);
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValueOnce({ ...oldFailure, compilationAccepted: true });
+    const onClose = vi.fn();
+    render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={onClose} onAdmitted={vi.fn()} /></AntApp>);
+    await screen.findByDisplayValue('原目标');
+    vi.useFakeTimers();
+    await act(async () => { fireEvent.click(button('保存修订并审查')); });
+    await act(async () => { fireEvent.click(document.querySelector('.ant-modal-close')!); });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getAllByText('关闭并丢弃页面内输入与重放身份？').length).toBeGreaterThan(0);
+    await act(async () => { fireEvent.click(screen.getByText('继续编辑')); });
+    expect(screen.getByText(/正在观察 owner 状态/)).toBeTruthy();
+    await act(async () => { fireEvent.click(document.querySelector('.ant-modal-close')!); });
+    await act(async () => { fireEvent.click(screen.getByText('关闭并丢弃')); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(screen.queryByText(/观察期限已到/)).toBeNull();
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(1);
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1);
+  });
+
+  it('prep failure current 阻止确认；仅保留历史记录时 ready 仍可确认', async () => {
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce(prepFailedView());
+    const mounted = render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
+    await screen.findByText(/当前前置准备失败/);
+    expect(screen.getByText(/前置准备失败，尚未为该阶段取得 provider permit；修复后显式重试/)).toBeTruthy();
+    expect(disabled('确认并准入')).toBe(true);
+    expect(workorchApi.readAuthoringPreparationDiagnostic).not.toHaveBeenCalled();
+    mounted.unmount();
+
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce({ ...ready(), preparationDiagnostics: [preparationDiagnostic({ current: false })] });
+    const historyOnly = render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
+    await screen.findByText(/历史前置准备失败/);
+    expect(disabled('确认并准入')).toBe(false);
+    historyOnly.unmount();
+  });
+
+  it('新建创作展示 owner 前置失败，不自动重发 compile 或启动 Run', async () => {
+    const failed = prepFailedView();
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockResolvedValueOnce(failed);
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValueOnce(failed);
+    render(<AntApp><WorkspaceSetupModal open onClose={vi.fn()} onCreated={vi.fn()} /></AntApp>);
+    await fillSetup();
+    await act(async () => { fireEvent.click(button('保存并生成／恢复审查')); });
+    await screen.findByText(/当前前置准备失败/);
+    expect(workorchApi.createDefinitionAuthoring).toHaveBeenCalledTimes(1);
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1);
+    expect(workorchApi.readDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
+    expect(workorchApi.readAuthoringDiagnostic).not.toHaveBeenCalled();
+    expect(workorchApi.readAuthoringPreparationDiagnostic).not.toHaveBeenCalled();
+  });
+
+  it('prep cause 按需读取并校验；workspace 与不可变目标字段错配拒绝展示，current变化不丢已校验 bytes', async () => {
+    browserCrypto();
+    const cause = '原样前置原因：敏感 marker <raw>';
+    const bytes = new TextEncoder().encode(cause);
+    const expected = preparationDiagnostic({ causeSHA256: createHash('sha256').update(bytes).digest('hex'), causeBytes: bytes.byteLength });
+    const raw = { ...expected, causeBase64: Buffer.from(bytes).toString('base64'), current: false };
+    vi.mocked(workorchApi.readAuthoringPreparationDiagnostic).mockResolvedValue(raw);
+    const mounted = render(<AuthoringPreparationDiagnosticDetails diagnostic={expected} />);
+    expect(screen.queryByText(cause)).toBeNull();
+    expect(workorchApi.readAuthoringPreparationDiagnostic).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '按需加载并校验前置原因' }));
+    await waitFor(() => expect(workorchApi.readAuthoringPreparationDiagnostic).toHaveBeenCalledExactlyOnceWith('ws', 'preparation-diag'));
+    expect(await screen.findByText((_, element) => element?.tagName === 'PRE' && element.textContent === cause)).toBeTruthy();
+    expect(screen.queryByRole('img')).toBeNull();
+    mounted.rerender(<AuthoringPreparationDiagnosticDetails diagnostic={{ ...expected, current: false }} />);
+    expect(screen.getByText(/已校验原始字节/)).toBeTruthy();
+  });
+
+  it.each(Object.entries({
+    workspaceId: 'other-workspace', diagnosticId: 'other-diagnostic', inputHash: 'other-input', templateSnapshotHash: 'other-template',
+    observedWorkspaceRevision: 9, stage: 'review', targetRequestId: 'other-target', derivationPermitId: 'other-permit',
+    reviewKind: 'negative_path', proposalHash: 'other-proposal', phaseCode: 'other-phase', resourceRef: 'other.txt', providerBindingHash: 'other-provider',
+  }))('prep cause 身份字段 %s 错配时拒绝展示', async (field, value) => {
+    browserCrypto();
+    const expected = preparationDiagnostic();
+    vi.mocked(workorchApi.readAuthoringPreparationDiagnostic).mockResolvedValueOnce({ ...expected, [field]: value });
+    render(<AuthoringPreparationDiagnosticDetails diagnostic={expected} />);
+    fireEvent.click(screen.getByRole('button', { name: '按需加载并校验前置原因' }));
+    await screen.findByText(/workspace、diagnostic、input、template、target、stage 或 phase 身份不匹配/);
+    expect(screen.queryByRole('button', { name: '下载已校验原始字节' })).toBeNull();
+  });
+
+  it('prep cause 原 bytes 与已匹配 metadata 的 hash/bytes 不符时 fail closed', async () => {
+    browserCrypto();
+    const expected = preparationDiagnostic();
+    vi.mocked(workorchApi.readAuthoringPreparationDiagnostic).mockResolvedValueOnce({ ...expected, causeBase64: Buffer.from('different cause').toString('base64') });
+    const second = render(<AuthoringPreparationDiagnosticDetails diagnostic={expected} />);
+    fireEvent.click(screen.getByRole('button', { name: '按需加载并校验前置原因' }));
+    await screen.findByText(/前置原因字节数不匹配/);
+    expect(screen.queryByText(/provider 原因/)).toBeNull();
+    second.unmount();
+
+    const wrongHash = preparationDiagnostic({ causeSHA256: createHash('sha256').update('expected different cause').digest('hex') });
+    vi.mocked(workorchApi.readAuthoringPreparationDiagnostic).mockResolvedValueOnce(wrongHash);
+    const third = render(<AuthoringPreparationDiagnosticDetails diagnostic={wrongHash} />);
+    fireEvent.click(screen.getByRole('button', { name: '按需加载并校验前置原因' }));
+    await screen.findByText(/前置原因 SHA-256 不匹配/);
+    expect(workorchApi.compileDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
+    third.unmount();
+  });
+
+  it('UTF-8 BOM 在文本和下载原始字节中都保留', async () => {
+    browserCrypto();
+    const text = '﻿前置原文';
+    const bytes = new TextEncoder().encode(text);
+    const expected = preparationDiagnostic({ causeSHA256: createHash('sha256').update(bytes).digest('hex'), causeBytes: bytes.byteLength });
+    vi.mocked(workorchApi.readAuthoringPreparationDiagnostic).mockResolvedValueOnce({ ...expected, causeBase64: Buffer.from(bytes).toString('base64') });
+    render(<AuthoringPreparationDiagnosticDetails diagnostic={expected} />);
+    fireEvent.click(screen.getByRole('button', { name: '按需加载并校验前置原因' }));
+    expect(await screen.findByText((_, element) => element?.tagName === 'PRE' && element.textContent === text)).toBeTruthy();
+    expect(Array.from(await downloadedCauseBytes())).toEqual(Array.from(bytes));
+  });
+
+  it('零字节且 SHA-256(empty) 的已保存原因可按需校验并显示空文本', async () => {
+    browserCrypto();
+    const expected = preparationDiagnostic({ causeSHA256: createHash('sha256').digest('hex'), causeBytes: 0 });
+    vi.mocked(workorchApi.readAuthoringPreparationDiagnostic).mockResolvedValueOnce({ ...expected, causeBase64: undefined });
+    render(<AuthoringPreparationDiagnosticDetails diagnostic={expected} />);
+    fireEvent.click(screen.getByRole('button', { name: '按需加载并校验前置原因' }));
+    await screen.findByText(/原始原因为空（0 字节）/);
+    await screen.findByRole('button', { name: '下载已校验原始字节' });
+    expect(Array.from(await downloadedCauseBytes())).toEqual([]);
+    expect(screen.queryByText(/完整性校验失败/)).toBeNull();
+  });
+
+  it('非 UTF-8 前置原因不显示替换字符，保留原始 bytes 下载；超限未保存显式报告', async () => {
+    browserCrypto();
+    const bytes = new Uint8Array([0xff, 0xfe, 0x61]);
+    const expected = preparationDiagnostic({ causeBytes: bytes.byteLength, causeSHA256: createHash('sha256').update(bytes).digest('hex') });
+    vi.mocked(workorchApi.readAuthoringPreparationDiagnostic).mockResolvedValueOnce({ ...expected, causeBase64: Buffer.from(bytes).toString('base64') });
+    const mounted = render(<AuthoringPreparationDiagnosticDetails diagnostic={expected} />);
+    fireEvent.click(screen.getByRole('button', { name: '按需加载并校验前置原因' }));
+    await screen.findByText(/不是有效 UTF-8 文本；已验证原字节可下载/);
+    expect(screen.queryByText(/�/)).toBeNull();
+    expect(Array.from(await downloadedCauseBytes())).toEqual(Array.from(bytes));
+    mounted.unmount();
+
+    const unsaved = preparationDiagnostic({ causeSaved: false, notSavedReason: '超过明确存储边界' });
+    render(<AuthoringPreparationDiagnosticDetails diagnostic={unsaved} />);
+    expect(screen.getByText(/原始原因未保存：超过明确存储边界/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '按需加载并校验前置原因' })).toBeNull();
+    expect(workorchApi.readAuthoringPreparationDiagnostic).toHaveBeenCalledTimes(1);
+  });
+
   it('缺少任一独立审查不能确认', async () => {
     const incomplete = ready();
     incomplete.proposal!.reviews!.pop();
@@ -311,21 +708,30 @@ const diagnosticView = (withMetadata = true): DefinitionAuthoringView => ({
 });
 
 function browserCrypto() {
-  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: {
-    subtle: { digest: async (_algorithm: string, data: ArrayBuffer | ArrayBufferView) => {
-      const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data as ArrayBuffer);
-      const hash = createHash('sha256').update(bytes).digest();
-      return Uint8Array.from(hash).buffer;
-    } },
-  } as unknown as Crypto });
+  vi.stubGlobal('crypto', webcrypto);
 }
 
-it('editor 失败记录内嵌展示诊断原文而不主动加载', async () => {
-  vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(diagnosticView());
-  render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
-  expect(await screen.findByText((_, element) => element?.tagName === 'PRE' && element.textContent?.includes('敏感标记: <img src=x onerror=alert(1)>'))).toBeTruthy();
-  expect(workorchApi.readAuthoringDiagnostic).not.toHaveBeenCalled();
+it('prep cause GET 迟到且切换 scope 后不泄漏；相同 metadata rerender 不丢在途读取', async () => {
+  browserCrypto();
+  const expected = preparationDiagnostic();
+  const deferredRead = deferred<DefinitionAuthoringPreparationDiagnostic>();
+  vi.mocked(workorchApi.readAuthoringPreparationDiagnostic).mockReturnValueOnce(deferredRead.promise);
+  const mounted = render(<AuthoringPreparationDiagnosticDetails diagnostic={expected} />);
+  fireEvent.click(screen.getByRole('button', { name: '按需加载并校验前置原因' }));
+  mounted.rerender(<AuthoringPreparationDiagnosticDetails diagnostic={{ ...expected }} />);
+  const cause = 'provider 原因：暂不可用';
+  await act(async () => deferredRead.resolve({ ...preparationDiagnostic(), causeBase64: Buffer.from(cause).toString('base64') }));
+  expect(await screen.findByText((_, element) => element?.tagName === 'PRE' && element.textContent === cause)).toBeTruthy();
+  mounted.rerender(<AuthoringPreparationDiagnosticDetails diagnostic={preparationDiagnostic({ workspaceId: 'new-workspace', diagnosticId: 'new-diagnostic', current: false })} />);
+  expect(screen.queryByText(cause)).toBeNull();
 });
+
+  it('editor 失败记录内嵌展示诊断原文而不主动加载', async () => {
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(diagnosticView());
+    render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
+    expect(await screen.findByText((_, element) => element?.tagName === 'PRE' && element.textContent?.includes('敏感标记: <img src=x onerror=alert(1)>'))).toBeTruthy();
+    expect(workorchApi.readAuthoringDiagnostic).not.toHaveBeenCalled();
+  });
 
 it('失败诊断原样显示多行 Unicode 和敏感 marker，按需校验原始响应且不自动运行', async () => {
   browserCrypto();

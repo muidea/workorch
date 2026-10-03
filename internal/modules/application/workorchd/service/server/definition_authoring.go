@@ -13,6 +13,10 @@ type definitionAuthoringDiagnosticResponse struct {
 	Diagnostic workorchmanagementcontract.DefinitionAuthoringDiagnosticView `json:"diagnostic"`
 }
 
+type definitionAuthoringPreparationDiagnosticResponse struct {
+	Diagnostic workorchmanagementcontract.DefinitionAuthoringPreparationDiagnosticView `json:"diagnostic"`
+}
+
 type definitionAuthoringResponse struct {
 	Authoring workorchmanagementcontract.DefinitionAuthoringView `json:"authoring"`
 }
@@ -68,6 +72,23 @@ func registerDefinitionAuthoringRoutes(router engine.RouteRegistry, state *serve
 			return
 		}
 		writeJSON(w, http.StatusOK, definitionAuthoringDiagnosticResponse{Diagnostic: diagnostic})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/authoring/preparation-diagnostics/:diagnosticId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		id, diagnosticID, ok := definitionAuthoringPreparationDiagnosticFromPath(r.URL.Path)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if state.authoring.ReadPreparationDiagnostic == nil {
+			writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "规格创作前置诊断服务未配置"})
+			return
+		}
+		diagnostic, err := state.authoring.ReadPreparationDiagnostic(r.Context(), id, diagnosticID)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, definitionAuthoringPreparationDiagnosticResponse{Diagnostic: diagnostic})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/authoring", http.MethodPut, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		id, ok := definitionAuthoringWorkspaceFromPath(r.URL.Path, "")
@@ -151,6 +172,14 @@ func definitionAuthoringWorkspaceFromPath(path, action string) (string, bool) {
 func definitionAuthoringDiagnosticFromPath(path string) (string, string, bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) != 8 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "workorch" || parts[3] != "workspaces" || parts[4] == "" || parts[5] != "authoring" || parts[6] != "diagnostics" || parts[7] == "" {
+		return "", "", false
+	}
+	return parts[4], parts[7], true
+}
+
+func definitionAuthoringPreparationDiagnosticFromPath(path string) (string, string, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 8 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "workorch" || parts[3] != "workspaces" || parts[4] == "" || parts[5] != "authoring" || parts[6] != "preparation-diagnostics" || parts[7] == "" {
 		return "", "", false
 	}
 	return parts[4], parts[7], true

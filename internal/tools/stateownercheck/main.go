@@ -143,6 +143,8 @@ var observedCommandStateFields = map[string]bool{
 // newly added sibling State field then fails closed until separately audited.
 var observedStateCarrierFields = map[string]bool{
 	"internal/modules/blocks/workspace/pkg/models:DefinitionSpecificationRequestIdentity|Phase": true,
+	// 前置诊断只记录 reserve 前的失败位置，Stage 不选择 owner transition。
+	"internal/modules/blocks/workspace/pkg/models:DefinitionAuthoringPreparationDiagnostic|Stage": true,
 	// Specification critiques and declaration matches are immutable authoring
 	// facts. Workspace Compile, not either Status field, selects admission.
 	"internal/modules/blocks/workspace/pkg/models:GoalSpecificationCompletenessReview|Status":               true,

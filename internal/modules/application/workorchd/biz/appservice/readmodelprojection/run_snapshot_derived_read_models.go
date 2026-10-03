@@ -18,6 +18,7 @@ func applyRunSnapshotDerivedReadModels(ret *readmodelcore.RunSnapshotState, inpu
 	ret.UsedCapabilities = usedRuntimeCapabilities(*ret, input.Run, capabilityCatalog)
 	ret.TaskProgress = mapLocalizedTaskProgress(*ret)
 	applyRuntimeProgress(&ret.TaskProgress, input.Run)
+	ret.TaskProgress = finalizeRunFormalProgress(ret.TaskProgress, *ret)
 	ret.RepairLoop = ret.TaskProgress.RepairLoop
 	ret.TaskDecompositions = mapTaskDecompositions(*ret)
 	ret.TaskPlans = mapTaskPlansFromSnapshot(*ret)

@@ -118,6 +118,14 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
 - Artifact、Step、ToolCall 和 RuntimeCheckpoint 内容只经其 owner 的 bounded typed read；禁止以 `dataRoot/backend`、
   `os.ReadFile` 或 raw-file fallback 绕过 owner。
 
+### 前置准备诊断与正式进度
+
+创作目标的资源、配置及请求构造失败在尚未 reserve 时，由 Application 保全原 error bytes，通过 Workspace concrete record command 持久诊断；它不生成 permit 或失败 completion。已 reserve 请求优先重放 ledger，完成阶段不重新构造请求，未决请求不自动调用 provider。每个新审查阶段使用最新 owner revision 保存失败，迟到结果不能重绑新输入。保存失败只记录安全定位元信息和未保存事实，不复制原文到通用日志，也不声称诊断可查。
+
+常规创作 DTO 只展示 bounded preparation metadata；原始 cause 按 Workspace／DiagnosticID 独立只读查询、可逆编码。`preparation_failed` 只代表当前尚未 reserve 的目标已知失败，用户修复后可显式 compile；已 reserve 或确认后旧失败为历史。诊断不是恢复队列、预算或调用 authority，不改变 SM-1～SM-4。
+
+正式进度只使用 owner 已封存事实：`workspace_defined` 来自 admitted startup hash；`formal_result` 必须关联当前适用 completed Run 的 exact terminal Result，且 Result accepted、scope 和 startup seal 精确一致。Result／Artifact 存在、历史成功或 Runtime terminal 均不能补造完成；Runtime overlay 后仍经同一只读最终投影，TaskProgress 与 compressed context 一致。内部 terminal ID／startup hash／Run 代次仅用于关联，不新增 public authority。
+
 ## 不变量与非职责
 
 - Application 不写任何 sibling owner repository/service，不拥有 SM-1～SM-4 reducer、delivery phase 或 deletion phase。
@@ -137,6 +145,8 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
 
 | 验收面 | 自动化证据 | 覆盖维度 |
 | --- | --- | --- |
+| 前置准备失败与原文读取 | `biz/definition_authoring_preparation_test.go`、`biz/definition_authoring_http_integration_test.go`、`service/server/definition_authoring_preparation_test.go`、`internal/pkg/workorchclient/definition_authoring_test.go` | 捕获原始 bytes、保存失败与 typed 无 permit 拒绝、next-unreserved target、独立 raw scope、file 重开、重复失败、同输入显式修复、零自动 Run |
+| 正式进度与上下文一致性 | `biz/appservice/formal_progress_service_test.go`、`biz/appservice/readmodelprojection/progress_owner_facts_test.go`、`progress_context_test.go`、`runtimecore/run_helpers_test.go` | 空 active 草稿、startup seal、当前 Run owner 代次、exact terminal Result、历史隔离、overlay 与独立压缩上下文、私有字段不进入 public DTO |
 | Module/port/session lifecycle | `module_test.go`、`biz/application_ports_test.go`、`biz/runtime_component_test.go`、`biz/owner_stop_contract_test.go` | setup failure、port completeness、single owner、ordered/idempotent shutdown |
 | workspace-scoped execution admission | `biz/execution/*_test.go`、`biz/execution_admission_gateway_test.go`、`service/server/workspace_execution_admission_typed_test.go` | normal/rejected、scope mismatch、duplicate、concurrency、transport failure、zero queue side effect |
 | Definition/bootstrap/restart | `biz/appservice/activationports/definition_admission_test.go`、`biz/appservice/activationports/sealed_restart_snapshot_test.go`、`biz/appservice/activationcore/*_test.go`、`biz/appservice/workspacecore/directory_layout_test.go`、`service/server/http_test.go` | all-of admission、profile proof closure、bounds、directory safety、sealed snapshot、fresh restart ingress |

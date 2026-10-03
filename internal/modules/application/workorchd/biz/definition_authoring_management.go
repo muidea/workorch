@@ -101,6 +101,29 @@ func (b *Biz) ConfirmDefinitionAuthoringView(ctx context.Context, id common.Work
 	return b.ReadDefinitionAuthoringView(ctx, id)
 }
 
+func (b *Biz) ReadDefinitionAuthoringPreparationDiagnosticView(ctx context.Context, id common.WorkspaceID, diagnosticID string) (workorchmanagementcontract.DefinitionAuthoringPreparationDiagnosticView, error) {
+	command := workspaceevents.QueryPreparationDiagnosticCommand{WorkspaceID: id, DiagnosticID: diagnosticID}
+	queried, err := b.QueryPreparationDiagnostic(ctx, command)
+	if err != nil {
+		return workorchmanagementcontract.DefinitionAuthoringPreparationDiagnosticView{}, err
+	}
+	metadata := authoringPreparationDiagnosticMetadata(queried.Diagnostic, false)
+	// Current 只是可变展示提示，不属于诊断身份。
+	if view, err := b.ReadDefinitionAuthoringView(ctx, id); err == nil {
+		for _, diagnostic := range view.PreparationDiagnostics {
+			if diagnostic.DiagnosticID == diagnosticID {
+				metadata.Current = diagnostic.Current
+				break
+			}
+		}
+	}
+	raw := workorchmanagementcontract.DefinitionAuthoringPreparationDiagnosticView{DefinitionAuthoringPreparationDiagnosticMetadata: metadata}
+	if queried.Diagnostic.CauseSaved {
+		raw.CauseBase64 = base64.StdEncoding.EncodeToString(queried.Diagnostic.Cause)
+	}
+	return raw, nil
+}
+
 func (b *Biz) ReadDefinitionAuthoringDiagnosticView(ctx context.Context, id common.WorkspaceID, permit string) (workorchmanagementcontract.DefinitionAuthoringDiagnosticView, error) {
 	command := workspaceevents.QueryAuthoringDiagnosticCommand{WorkspaceID: id, PermitID: permit}
 	result, err := b.QueryAuthoringDiagnostic(ctx, command)

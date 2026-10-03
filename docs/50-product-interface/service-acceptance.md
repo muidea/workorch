@@ -67,6 +67,10 @@ Do not reintroduce tests for `POST .../runs`, `POST .../runs/:runId/start`, `POS
 
 浏览器交互验收必须证明：旧浏览器记录不再被读取或写入；新建向导重开为空，关闭有未保存输入或未决事务时明确提示；取消关闭保留页面内存原身份，确认关闭后迟到回执不能污染新会话。刷新后通过列表／详情读取 owner 已保存草稿，不自动创建、保存或确认。已开始的确认通过 owner 校验的 `confirmationRecovery` 参数由用户显式重放，不能从页面旧提案猜造；当前 revision 不改变既有 journal 的精确身份，首次准备仍受 CAS 约束。
 
+前置准备失败验收须使用本地 mock／file-backed owners，证明资源不存在／路径拒绝／大小边界、配置／请求构造及确定预算拒绝在 reserve 前被准确保存；原始 bytes、SHA256、非 UTF-8 和超限未保存说明往返一致。相同失败重复 compile 不增加诊断数或 revision，迟到新失败不得跨 input／template／目标写入；修复资源后同输入显式 compile 可以继续，已有 reserve 未决仍不重发 provider。独立诊断 GET 不调用 provider、不推进确认或创建 Run，包含当前和归档诊断的文件均为 0600；诊断保存失败和集合满必须明确报告，不能假称 owner 已有可查原文。Web 组件验收还须证明受理后 15 秒观察的截止不依赖 GET 成功：连续查询失败或挂起也会结束该观察，仅展示最后一次已知 owner 状态，不猜测后台完成／停止，不自动重发，迟到与跨会话回执仍被隔离；UTF-8 BOM 文本与下载原 bytes 不得丢失。
+
+只读进度验收须证明 active 空 Workspace 和已准入无 Run 不显示正式结果完成；旧 accepted Result 不完成 successor，draft／rejected／superseded／accepted slice 或仅 Artifact 也不得完成。成功必须匹配当前适用 Run 的 exact terminal Result 与 startup seal；Runtime overlay、TaskProgress 和 compressed context 使用同一最终事实，不从 terminal 状态或结果数量补造完成。
+
 确定性验收使用正式 HTTP ports、真实 file-backed Workspace／File／Decision owners 与 mock provider，覆盖六审查、exact confirmation replay、重启、FAIL／UNKNOWN 阻塞及资源漂移拒绝。它不替代真实 provider 或浏览器交互验收：
 
 ```bash

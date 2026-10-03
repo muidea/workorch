@@ -11,6 +11,32 @@ type DefinitionAuthoringDiagnosticMetadata struct {
 	NotSavedReason   string `json:"notSavedReason,omitempty"`
 }
 
+type DefinitionAuthoringPreparationDiagnosticMetadata struct {
+	DiagnosticID              string `json:"diagnosticId"`
+	WorkspaceID               string `json:"workspaceId"`
+	InputHash                 string `json:"inputHash"`
+	TemplateSnapshotHash      string `json:"templateSnapshotHash"`
+	ObservedWorkspaceRevision uint64 `json:"observedWorkspaceRevision"`
+	Stage                     string `json:"stage"`
+	TargetRequestID           string `json:"targetRequestId"`
+	DerivationPermitID        string `json:"derivationPermitId,omitempty"`
+	ReviewKind                string `json:"reviewKind,omitempty"`
+	ProposalHash              string `json:"proposalHash,omitempty"`
+	PhaseCode                 string `json:"phaseCode"`
+	ResourceRef               string `json:"resourceRef,omitempty"`
+	ProviderBindingHash       string `json:"providerBindingHash,omitempty"`
+	CauseSHA256               string `json:"causeSHA256"`
+	CauseBytes                uint64 `json:"causeBytes"`
+	CauseSaved                bool   `json:"causeSaved"`
+	NotSavedReason            string `json:"notSavedReason,omitempty"`
+	Current                   bool   `json:"current"`
+}
+
+type DefinitionAuthoringPreparationDiagnosticView struct {
+	DefinitionAuthoringPreparationDiagnosticMetadata
+	CauseBase64 string `json:"causeBase64,omitempty"`
+}
+
 type DefinitionAuthoringDiagnosticView struct {
 	WorkspaceID      string `json:"workspaceId"`
 	PermitID         string `json:"permitId"`
@@ -115,26 +141,27 @@ type DefinitionAuthoringRequestState struct {
 // DefinitionAuthoringView is a bounded management read model, not a submitted
 // owner record. In particular, File snapshot content never crosses this API.
 type DefinitionAuthoringView struct {
-	CompilationAccepted    bool                              `json:"compilationAccepted,omitempty"`
-	WorkspaceID            string                            `json:"workspaceId"`
-	WorkspaceRevision      uint64                            `json:"workspaceRevision"`
-	State                  string                            `json:"state"`
-	Input                  *DefinitionAuthoringInput         `json:"input,omitempty"`
-	InputRevision          uint64                            `json:"inputRevision,omitempty"`
-	InputHash              string                            `json:"inputHash,omitempty"`
-	TemplateID             string                            `json:"templateId,omitempty"`
-	TemplateCurrent        bool                              `json:"templateCurrent"`
-	Resources              []DefinitionAuthoringResource     `json:"resources,omitempty"`
-	DerivationPermitID     string                            `json:"derivationPermitId,omitempty"`
-	Requests               []DefinitionAuthoringRequestState `json:"requests,omitempty"`
-	Proposal               *DefinitionAuthoringProposal      `json:"proposal,omitempty"`
-	ConfirmationPhase      string                            `json:"confirmationPhase,omitempty"`
-	ConfirmationRecovery   *DefinitionAuthoringConfirm       `json:"confirmationRecovery,omitempty"`
-	CandidateHash          string                            `json:"candidateHash,omitempty"`
-	AdmissionDisposition   string                            `json:"admissionDisposition,omitempty"`
-	AdmissionViolationCode string                            `json:"admissionViolationCode,omitempty"`
-	AdmissionOffendingRefs []string                          `json:"admissionOffendingRefs,omitempty"`
-	BlockingTicketID       string                            `json:"blockingTicketId,omitempty"`
-	StartupInputHash       string                            `json:"startupInputHash,omitempty"`
-	ActivationState        string                            `json:"activationState,omitempty"`
+	CompilationAccepted    bool                                               `json:"compilationAccepted,omitempty"`
+	WorkspaceID            string                                             `json:"workspaceId"`
+	WorkspaceRevision      uint64                                             `json:"workspaceRevision"`
+	State                  string                                             `json:"state"`
+	Input                  *DefinitionAuthoringInput                          `json:"input,omitempty"`
+	InputRevision          uint64                                             `json:"inputRevision,omitempty"`
+	InputHash              string                                             `json:"inputHash,omitempty"`
+	TemplateID             string                                             `json:"templateId,omitempty"`
+	TemplateCurrent        bool                                               `json:"templateCurrent"`
+	Resources              []DefinitionAuthoringResource                      `json:"resources,omitempty"`
+	DerivationPermitID     string                                             `json:"derivationPermitId,omitempty"`
+	Requests               []DefinitionAuthoringRequestState                  `json:"requests,omitempty"`
+	PreparationDiagnostics []DefinitionAuthoringPreparationDiagnosticMetadata `json:"preparationDiagnostics,omitempty"`
+	Proposal               *DefinitionAuthoringProposal                       `json:"proposal,omitempty"`
+	ConfirmationPhase      string                                             `json:"confirmationPhase,omitempty"`
+	ConfirmationRecovery   *DefinitionAuthoringConfirm                        `json:"confirmationRecovery,omitempty"`
+	CandidateHash          string                                             `json:"candidateHash,omitempty"`
+	AdmissionDisposition   string                                             `json:"admissionDisposition,omitempty"`
+	AdmissionViolationCode string                                             `json:"admissionViolationCode,omitempty"`
+	AdmissionOffendingRefs []string                                           `json:"admissionOffendingRefs,omitempty"`
+	BlockingTicketID       string                                             `json:"blockingTicketId,omitempty"`
+	StartupInputHash       string                                             `json:"startupInputHash,omitempty"`
+	ActivationState        string                                             `json:"activationState,omitempty"`
 }

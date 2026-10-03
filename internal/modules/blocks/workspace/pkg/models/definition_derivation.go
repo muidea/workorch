@@ -108,7 +108,8 @@ func (r DefinitionAuthoringRecord) ReserveDerivation(requestID, providerBindingH
 		}
 	}
 	if len(r.DerivationRequests) == DefinitionDerivationRequestLimit {
-		err = fmt.Errorf("derivation request budget exhausted")
+		request = DefinitionDerivationRequest{}
+		err = &DefinitionAuthoringBudgetRefusalError{Stage: DefinitionAuthoringPreparationDerivation, RequestID: requestID, Budget: "request", Limit: DefinitionDerivationRequestLimit, Cause: fmt.Errorf("derivation request budget exhausted")}
 		return
 	}
 	attempts := 0
@@ -118,7 +119,8 @@ func (r DefinitionAuthoringRecord) ReserveDerivation(requestID, providerBindingH
 		}
 	}
 	if attempts >= DefinitionDerivationAttemptLimit {
-		err = fmt.Errorf("derivation input attempt budget exhausted")
+		request = DefinitionDerivationRequest{}
+		err = &DefinitionAuthoringBudgetRefusalError{Stage: DefinitionAuthoringPreparationDerivation, RequestID: requestID, Budget: "attempt", Limit: DefinitionDerivationAttemptLimit, Cause: fmt.Errorf("derivation input attempt budget exhausted")}
 		return
 	}
 	next = r.Clone()

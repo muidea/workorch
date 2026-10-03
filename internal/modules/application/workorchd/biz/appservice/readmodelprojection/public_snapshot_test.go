@@ -34,8 +34,10 @@ func TestPublicSnapshotsExcludePrivateStateAndDetachCollections(t *testing.T) {
 	if _, ok := reflect.TypeOf(public.Workspace).FieldByName("InternalDirectory"); ok {
 		t.Fatal("public workspace exposes InternalDirectory")
 	}
-	if _, ok := reflect.TypeOf(public.Run).FieldByName("RuntimeState"); ok {
-		t.Fatal("public run exposes RuntimeState")
+	for _, field := range []string{"RuntimeState", "StartupInputHash", "TerminalResultID", "WorkspaceRunGeneration"} {
+		if _, ok := reflect.TypeOf(public.Run).FieldByName(field); ok {
+			t.Fatalf("public run exposes %s", field)
+		}
 	}
 
 	public.Workspace.SoulBindings["execution"] = "changed"

@@ -21,13 +21,14 @@ type DefinitionDerivationRequest struct {
 }
 
 type DefinitionAuthoringRecord struct {
-	Input                 workspace.DefinitionAuthoringInput
-	InputHash             string
-	TemplateSnapshotHash  string
-	TemplateSnapshot      WorkspaceTemplate
-	DerivationRequests    []DefinitionDerivationRequest
-	SpecificationRequests []workspace.DefinitionAuthoringSpecificationRequest
-	SaveReceipts          []workspace.DefinitionAuthoringSaveReceipt
+	Input                  workspace.DefinitionAuthoringInput
+	InputHash              string
+	TemplateSnapshotHash   string
+	TemplateSnapshot       WorkspaceTemplate
+	DerivationRequests     []DefinitionDerivationRequest
+	SpecificationRequests  []workspace.DefinitionAuthoringSpecificationRequest
+	SaveReceipts           []workspace.DefinitionAuthoringSaveReceipt
+	PreparationDiagnostics []DefinitionAuthoringPreparationDiagnosticMetadata
 }
 
 type DefinitionAuthoringConfirmedRevision struct {
@@ -96,6 +97,10 @@ func (r DefinitionDerivationRequest) Validate() error {
 }
 
 func (r DefinitionAuthoringRecord) Clone() DefinitionAuthoringRecord {
+	r.PreparationDiagnostics = append([]DefinitionAuthoringPreparationDiagnosticMetadata(nil), r.PreparationDiagnostics...)
+	for n := range r.PreparationDiagnostics {
+		r.PreparationDiagnostics[n] = r.PreparationDiagnostics[n].Clone()
+	}
 	r.Input = r.Input.Clone()
 	r.TemplateSnapshot = cloneAuthoringTemplate(r.TemplateSnapshot)
 	r.DerivationRequests = append([]DefinitionDerivationRequest(nil), r.DerivationRequests...)
@@ -111,7 +116,7 @@ func (r DefinitionAuthoringRecord) Clone() DefinitionAuthoringRecord {
 }
 
 func (r DefinitionAuthoringRecord) Model() (workspace.DefinitionAuthoringRecord, error) {
-	if len(r.DerivationRequests) > workspace.DefinitionDerivationRequestLimit || len(r.SpecificationRequests) > workspace.DefinitionAuthoringSpecificationRequestLimit || len(r.SaveReceipts) > workspace.DefinitionAuthoringSaveReceiptLimit {
+	if len(r.DerivationRequests) > workspace.DefinitionDerivationRequestLimit || len(r.SpecificationRequests) > workspace.DefinitionAuthoringSpecificationRequestLimit || len(r.SaveReceipts) > workspace.DefinitionAuthoringSaveReceiptLimit || len(r.PreparationDiagnostics) > workspace.DefinitionAuthoringPreparationDiagnosticLimit {
 		return workspace.DefinitionAuthoringRecord{}, common.ErrInvalidArgument
 	}
 	template, err := authoringTemplateModel(r.TemplateSnapshot)
@@ -133,6 +138,12 @@ func (r DefinitionAuthoringRecord) Model() (workspace.DefinitionAuthoringRecord,
 	}
 	for n, request := range r.SpecificationRequests {
 		ret.SpecificationRequests[n] = request.Clone()
+	}
+	if r.PreparationDiagnostics != nil {
+		ret.PreparationDiagnostics = make([]workspace.DefinitionAuthoringPreparationDiagnostic, len(r.PreparationDiagnostics))
+	}
+	for n, diagnostic := range r.PreparationDiagnostics {
+		ret.PreparationDiagnostics[n] = diagnostic.Model()
 	}
 	return ret, nil
 }

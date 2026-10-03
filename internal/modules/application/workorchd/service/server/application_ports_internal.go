@@ -22,6 +22,7 @@ func applicationOperationsFromPorts(ports ApplicationPorts) applicationOperation
 				Create: ports.Definition.CreateDefinitionAuthoring, Read: ports.Definition.ReadDefinitionAuthoring,
 				Save: ports.Definition.SaveDefinitionAuthoring, Compile: ports.Definition.CompileDefinitionAuthoring,
 				Confirm: ports.Definition.ConfirmDefinitionAuthoring, ReadDiagnostic: ports.Definition.ReadDefinitionAuthoringDiagnostic,
+				ReadPreparationDiagnostic: ports.Definition.ReadDefinitionAuthoringPreparationDiagnostic,
 			},
 			readGoal:  ports.Definition.ReadGoal,
 			listGoals: ports.Definition.ListGoals,

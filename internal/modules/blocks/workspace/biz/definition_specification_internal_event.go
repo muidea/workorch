@@ -21,6 +21,7 @@ type definitionSpecificationInternalEvent struct {
 	DeriveComplete        *workspaceevents.CompleteDefinitionDerivationCommand
 	AuthoringSpecReserve  *workspaceevents.ReserveAuthoringSpecificationCommand
 	AuthoringSpecComplete *workspaceevents.CompleteAuthoringSpecificationCommand
+	PreparationDiagnostic *workspaceevents.RecordPreparationDiagnosticCommand
 	Begin                 *workspaceevents.BeginDefinitionSpecificationCommand
 	Reserve               *workspaceevents.ReserveDefinitionSpecificationRequestCommand
 	Complete              *workspaceevents.CompleteDefinitionSpecificationRequestCommand
@@ -30,6 +31,7 @@ type definitionSpecificationTransition struct {
 	Authoring              *workspaceevents.SaveDefinitionAuthoringResult
 	Derivation             *workspaceevents.DefinitionDerivationRequestResult
 	AuthoringSpecification *workspaceevents.AuthoringSpecificationRequestResult
+	PreparationDiagnostic  *workspaceevents.RecordPreparationDiagnosticResult
 	Next                   *workspacemodel.Workspace
 	Begin                  *workspaceevents.BeginDefinitionSpecificationResult
 	Request                *workspaceevents.DefinitionSpecificationRequestResult
@@ -61,6 +63,12 @@ func (e definitionSpecificationInternalEvent) validate() error {
 	if e.AuthoringSpecComplete != nil {
 		count++
 		if e.AuthoringSpecComplete.Validate() != nil || e.AuthoringSpecComplete.WorkspaceID != e.WorkspaceID {
+			return common.ErrInvalidArgument
+		}
+	}
+	if e.PreparationDiagnostic != nil {
+		count++
+		if e.PreparationDiagnostic.Validate() != nil || e.PreparationDiagnostic.Diagnostic.WorkspaceID != e.WorkspaceID {
 			return common.ErrInvalidArgument
 		}
 	}
@@ -123,7 +131,16 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 				return replay, err
 			}
 		}
-		if event.Authoring != nil || event.DeriveReserve != nil || event.DeriveComplete != nil || event.AuthoringSpecReserve != nil || event.AuthoringSpecComplete != nil {
+		if event.PreparationDiagnostic != nil {
+			current, readErr := m.workspaces.Get(bound, event.WorkspaceID)
+			if readErr != nil {
+				return definitionSpecificationTransition{}, readErr
+			}
+			if replay, matched, replayErr := replayPreparationDiagnostic(current, *event.PreparationDiagnostic); matched || replayErr != nil {
+				return replay, replayErr
+			}
+		}
+		if event.Authoring != nil || event.DeriveReserve != nil || event.DeriveComplete != nil || event.AuthoringSpecReserve != nil || event.AuthoringSpecComplete != nil || event.PreparationDiagnostic != nil {
 			observation, err = m.observeDefinitionAuthoring(bound, event.WorkspaceID)
 		} else {
 			observation, err = m.observeDefinitionSpecification(bound, event.WorkspaceID)
@@ -131,7 +148,7 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 		if err != nil {
 			return definitionSpecificationTransition{}, err
 		}
-		if event.Authoring != nil || event.DeriveReserve != nil || event.AuthoringSpecReserve != nil {
+		if event.Authoring != nil || event.DeriveReserve != nil || event.AuthoringSpecReserve != nil || event.PreparationDiagnostic != nil {
 			templateID := observation.workspace.TemplateID
 			if event.Authoring != nil {
 				templateID = event.Authoring.Input.Normalized().TemplateID
@@ -163,6 +180,8 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 // it neither calls a provider nor reads/writes repositories or EventHub.
 func reduceDefinitionSpecificationInternalEvent(o definitionSpecificationObservation, e definitionSpecificationInternalEvent) (definitionSpecificationTransition, error) {
 	switch {
+	case e.PreparationDiagnostic != nil:
+		return reducePreparationDiagnostic(o, *e.PreparationDiagnostic)
 	case e.AuthoringSpecReserve != nil || e.AuthoringSpecComplete != nil:
 		return reduceAuthoringSpecification(o, e)
 	case e.DeriveReserve != nil || e.DeriveComplete != nil:

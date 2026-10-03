@@ -36,6 +36,14 @@ func (c *Client) ReadDefinitionAuthoringDiagnostic(ctx context.Context, workspac
 	return decodeEnvelope[workorchmanagementcontract.DefinitionAuthoringDiagnosticView](response, "diagnostic")
 }
 
+func (c *Client) ReadDefinitionAuthoringPreparationDiagnostic(ctx context.Context, workspaceID, diagnosticID string) (*workorchmanagementcontract.DefinitionAuthoringPreparationDiagnosticView, error) {
+	response, err := c.do(ctx, "GET", authoringPath(workspaceID)+"/preparation-diagnostics/"+escapePath(diagnosticID), nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeEnvelope[workorchmanagementcontract.DefinitionAuthoringPreparationDiagnosticView](response, "diagnostic")
+}
+
 func authoringPath(workspaceID string) string {
 	return "/api/v1/workorch/workspaces/" + escapePath(workspaceID) + "/authoring"
 }

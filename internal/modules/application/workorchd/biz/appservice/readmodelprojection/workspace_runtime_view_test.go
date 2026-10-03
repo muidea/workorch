@@ -201,9 +201,10 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 			WorkspaceRevision: 21,
 		},
 		TaskProgress: projectioncontract.TaskProgress{
-			RunID:   "run-runtime",
-			State:   "running",
-			Summary: "stale step summary",
+			WorkspaceID: "ws-runtime",
+			RunID:       "run-runtime",
+			State:       "running",
+			Summary:     "stale step summary",
 			Runtime: &projectioncontract.RuntimeProgress{
 				StateRevision:    9,
 				EvidenceSequence: 4,
@@ -212,8 +213,9 @@ func TestProjectWorkspaceRuntimeViewUsesRuntimeSummaryAndDisplayRun(t *testing.T
 			},
 		},
 		Runs: []appmodelcore.Run{{
-			ID:    "run-runtime",
-			State: "running",
+			ID:          "run-runtime",
+			WorkspaceID: "ws-runtime",
+			State:       "running",
 		}},
 		DisplayOutcome: projectioncontract.WorkspaceDisplayOutcome{
 			WorkspaceID: "ws-runtime",

@@ -421,8 +421,7 @@ func mapTaskProgress(snapshot readmodelcore.RunSnapshotState, labels runTaskProg
 	ret.BlockingApprovalID = ret.Recovery.BlockingApprovalID
 	ret.RepairLoop = mapTaskProgressRepairLoop(snapshot, ret.Recovery)
 	ret.AssessmentOutcome = taskProgressAssessmentOutcome(snapshot)
-	ret.Summary = taskProgressSummary(ret, &snapshot)
-	return ret
+	return finalizeRunFormalProgress(ret, snapshot)
 }
 
 // source: progress_recovery.go
@@ -465,7 +464,7 @@ func runScopedArtifacts(snapshot readmodelcore.RunSnapshotState) []projectioncon
 // source: progress_workspace.go
 
 func mapWorkspaceTaskProgress(snapshot readmodelcore.WorkspaceSnapshotState, labels workspaceTaskProgressLabels) projectioncontract.TaskProgress {
-	if selectedRun := selectWorkspaceOutcomeRun(snapshot); selectedRun != nil && isTerminalRunState(selectedRun.State) {
+	if selectedRun := workspaceFormalProgressRun(snapshot); selectedRun != nil && isTerminalRunState(selectedRun.State) {
 		runSnapshot := readmodelcore.RunSnapshotState{
 			Workspace:             snapshot.Workspace,
 			Run:                   *selectedRun,
@@ -481,7 +480,7 @@ func mapWorkspaceTaskProgress(snapshot readmodelcore.WorkspaceSnapshotState, lab
 			ExecutionSections:     snapshot.ExecutionSections,
 			Acceptance:            snapshot.Acceptance,
 		}
-		return mapLocalizedTaskProgress(runSnapshot)
+		return finalizeWorkspaceFormalProgress(mapLocalizedTaskProgress(runSnapshot), snapshot)
 	}
 	ret := newWorkspaceTaskProgressBase(snapshot, labels)
 	applyWorkspaceProgressCurrentStep(&ret, snapshot)
@@ -491,8 +490,7 @@ func mapWorkspaceTaskProgress(snapshot readmodelcore.WorkspaceSnapshotState, lab
 	ret.CurrentMilestone = currentProgressMilestone(ret.Milestones)
 	ret.EvidenceRefs = compactUniqueStrings(append(idsFromResults(snapshot.Results), idsFromArtifacts(snapshot.Artifacts)...))
 	ret.AssessmentOutcome = workspaceTaskProgressAssessmentOutcome(snapshot)
-	ret.Summary = taskProgressSummary(ret, nil)
-	return ret
+	return finalizeWorkspaceFormalProgress(ret, snapshot)
 }
 
 // source: progress_workspace_base.go
@@ -769,7 +767,7 @@ func mapRuntimeEvidenceSummary(snapshot readmodelcore.RunSnapshotState, eventTot
 
 func runSnapshotTaskProgress(snapshot readmodelcore.RunSnapshotState) projectioncontract.TaskProgress {
 	if snapshot.TaskProgress.RunID == snapshot.Run.ID && snapshot.TaskProgress.WorkspaceID == snapshot.Run.WorkspaceID {
-		return snapshot.TaskProgress
+		return finalizeRunFormalProgress(snapshot.TaskProgress, snapshot)
 	}
 	return mapLocalizedTaskProgress(snapshot)
 }
@@ -934,15 +932,17 @@ func observedEventTimelineItems(snapshot readmodelcore.RunSnapshotState) []proje
 // source: workspace_snapshot_progress_helpers.go
 
 func workspaceSnapshotTaskProgress(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.TaskProgress {
-	if snapshot.TaskProgress.WorkspaceID != "" {
-		return snapshot.TaskProgress
+	if snapshot.TaskProgress.WorkspaceID != "" && snapshot.TaskProgress.WorkspaceID == snapshot.Workspace.ID {
+		return finalizeWorkspaceFormalProgress(snapshot.TaskProgress, snapshot)
 	}
 	return mapLocalizedWorkspaceTaskProgress(snapshot)
 }
 
 func workspaceContextBundleFromSnapshots(snapshot readmodelcore.WorkspaceSnapshotState, runSnapshot *readmodelcore.RunSnapshotState) projectioncontract.ContextBundle {
-	if snapshot.TaskProgress.RunID != "" && runSnapshot != nil {
-		return mapRunContextBundle(*runSnapshot)
+	if snapshot.TaskProgress.RunID != "" && runSnapshot != nil && snapshot.TaskProgress.RunID == runSnapshot.Run.ID && snapshot.Workspace.ID == runSnapshot.Run.WorkspaceID {
+		// Workspace 进度与独立上下文入口共享正式事实合并，不能重新丢失封存里程碑。
+		merged := workspaceSnapshotWithRunSnapshot(snapshot, runSnapshot)
+		return *merged.ContextBundle
 	}
 	return mapWorkspaceContextBundle(snapshot)
 }
@@ -978,6 +978,9 @@ func workspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshotSt
 	ret.Results = mergeWorkspaceSnapshotResults(ret.Results, runSnapshot.Results)
 	ret.Artifacts = mergeWorkspaceSnapshotArtifacts(ret.Artifacts, runSnapshot.Artifacts)
 	ret.TaskProgress = runSnapshot.TaskProgress
+	if ret.TaskProgress.WorkspaceID == "" && ret.TaskProgress.RunID == "" && ret.TaskProgress.Summary == "" && len(ret.TaskProgress.Milestones) == 0 {
+		ret.TaskProgress = runSnapshotTaskProgress(*runSnapshot)
+	}
 	ret.CoverageSummary = coverageSummaryFromRunSnapshot(*runSnapshot)
 	ret.GapBaseline = runSnapshot.GapBaseline
 	ret.AuthorityDiagnostics = append([]projectioncontract.GapDiagnostic(nil), runSnapshot.AuthorityDiagnostics...)
@@ -999,10 +1002,15 @@ func workspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshotSt
 	if runSnapshot.TaskProgress.WorkspaceID != "" {
 		ret.TaskProgress = runSnapshot.TaskProgress
 	}
+	ret.TaskProgress = finalizeWorkspaceFormalProgress(ret.TaskProgress, ret)
 	ret.RunHeartbeat = mapRunHeartbeat(ret)
 	ret.ConvergenceStatus = mapWorkspaceConvergenceStatus(ret)
 	ret = normalizeWorkspaceGovernanceProjection(ret)
-	bundle := mapRunContextBundle(*runSnapshot)
+	contextSnapshot := *runSnapshot
+	contextSnapshot.Workspace = ret.Workspace
+	contextSnapshot.Results = ret.Results
+	contextSnapshot.TaskProgress = ret.TaskProgress
+	bundle := mapRunContextBundle(contextSnapshot)
 	ret.ContextBundle = &bundle
 	return ret
 }

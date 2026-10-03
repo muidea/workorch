@@ -25,6 +25,9 @@ func (w *Workspace) ValidateDefinitionAuthoringHistory() error {
 	if w == nil {
 		return common.ErrInvalidArgument
 	}
+	if err := w.ValidatePreparationDiagnosticHistory(); err != nil {
+		return err
+	}
 	if len(w.DefinitionAuthoringHistory) == 0 {
 		return nil
 	}

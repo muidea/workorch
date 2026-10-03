@@ -15,7 +15,7 @@ func WorkspaceProgressText(language string, key string) string {
 		case "active_run":
 			return "工作空间存在活跃运行（Run）投影"
 		case "workspace_defined":
-			return "工作空间（Workspace）已定义"
+			return "工作空间（Workspace）正式定义已封存"
 		case "runs":
 			return "运行（Run）"
 		case "results":
@@ -36,7 +36,7 @@ func WorkspaceProgressText(language string, key string) string {
 	case "active_run":
 		return "workspace has an active Run projection"
 	case "workspace_defined":
-		return "Workspace defined"
+		return "Workspace formal definition sealed"
 	case "runs":
 		return "Runs"
 	case "results":

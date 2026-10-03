@@ -34,30 +34,31 @@ func (b *Biz) AcquireDefinitionAuthoringResources(ctx context.Context, id common
 	facts := make([]fileevents.AcquireAuthoringResourceResult, 0, len(view.Record.Input.ResourceRefs))
 	total := 0
 	for _, ref := range view.Record.Input.ResourceRefs {
+		resourceFailure := func(err error) error { return &authoringResourcePreparationError{ref: ref, cause: err} }
 		command := fileevents.AcquireAuthoringResourceCommand{WorkspaceID: id, AuthoringInputHash: view.Record.InputHash, ResourceRef: ref}
 		if err := command.Validate(); err != nil {
-			return nil, err
+			return nil, resourceFailure(err)
 		}
 		ev := magicevent.NewEventWithContext(fileevents.TopicAcquireAuthoringResources, ModuleID, filecommon.ModuleID, magicevent.NewHeader(), ctx, command)
 		ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(fileevents.Contracts(), fileevents.TopicAcquireAuthoringResources, eventcontract.LaneScope{WorkspaceID: string(id)}))
 		result := b.SendEvent(ev)
 		if result == nil {
-			return nil, common.ErrConflict
+			return nil, resourceFailure(common.ErrConflict)
 		}
 		if err := result.Error(); err != nil {
-			return nil, err
+			return nil, resourceFailure(err)
 		}
 		value, err := result.Get()
 		if err != nil {
-			return nil, err
+			return nil, resourceFailure(err)
 		}
 		fact, ok := value.(fileevents.AcquireAuthoringResourceResult)
 		if !ok || fact.ValidateFor(command) != nil || fact.WorkspaceRevision != view.WorkspaceRevision {
-			return nil, common.ErrConflict
+			return nil, resourceFailure(common.ErrConflict)
 		}
 		total += len(fact.Content)
 		if total > 128*1024 {
-			return nil, fmt.Errorf("%w: authoring resource context exceeds bounded size", common.ErrInvalidArgument)
+			return nil, resourceFailure(fmt.Errorf("%w: authoring resource context exceeds bounded size", common.ErrInvalidArgument))
 		}
 		facts = append(facts, fact)
 	}

@@ -90,7 +90,7 @@ func runContextBundleSections(snapshot readmodelcore.RunSnapshotState, progress 
 
 func mapWorkspaceContextBundle(snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.ContextBundle {
 	language := workspaceSnapshotLanguage(snapshot)
-	progress := snapshot.TaskProgress
+	progress := workspaceSnapshotTaskProgress(snapshot)
 	ret := projectioncontract.ContextBundle{
 		WorkspaceID:  snapshot.Workspace.ID,
 		Mode:         "workspace",

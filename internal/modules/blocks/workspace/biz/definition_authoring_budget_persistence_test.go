@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -59,8 +60,13 @@ func TestAuthoringFileBudgetExhaustionSurvivesRevisions(t *testing.T) {
 	}
 	revision := current.Revision
 	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: input.WorkspaceID, InputHash: current.DefinitionAuthoring.InputHash, RequestID: "new-request-after-restart", ProviderBindingHash: "provider", ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(nil)}
-	if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: input.WorkspaceID, DeriveReserve: &reserve}); err == nil {
+	if transition, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: input.WorkspaceID, DeriveReserve: &reserve}); err == nil {
 		t.Fatal("新 revision/requestID 重置了累计预算")
+	} else {
+		var refusal *workspace.DefinitionAuthoringBudgetRefusalError
+		if !errors.As(err, &refusal) || refusal.Budget != "request" || refusal.Stage != workspace.DefinitionAuthoringPreparationDerivation || refusal.RequestID != reserve.RequestID || refusal.Limit != workspace.DefinitionDerivationRequestLimit || transition.Derivation != nil {
+			t.Fatalf("预算拒绝没有具体 no-permit 事实: %v", err)
+		}
 	}
 	current, err = owners.repositories.Workspaces.Get(ctx, input.WorkspaceID)
 	if err != nil || current.Revision != revision || len(current.DefinitionAuthoring.DerivationRequests) != workspace.DefinitionDerivationRequestLimit || current.ActiveRunID != "" {
@@ -124,8 +130,13 @@ func TestAuthoringFileSpecificationBudgetExhaustionSurvivesRevisions(t *testing.
 			if kind != "" {
 				denied.ProposalHash = proposal.ContentHash()
 			}
-			if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &denied}); err == nil {
+			if transition, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &denied}); err == nil {
 				t.Fatal("阶段 attempt 上限被新 RequestID 绕过")
+			} else {
+				var refusal *workspace.DefinitionAuthoringBudgetRefusalError
+				if !errors.As(err, &refusal) || transition.AuthoringSpecification != nil || refusal.RequestID != denied.RequestID {
+					t.Fatalf("阶段 no-permit refusal 不具体: %v", err)
+				}
 			}
 		}
 		current, err = owners.repositories.Workspaces.Get(ctx, id)
@@ -162,8 +173,13 @@ func TestAuthoringFileSpecificationBudgetExhaustionSurvivesRevisions(t *testing.
 	}
 	revision := current.Revision
 	overflow := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: id, InputHash: current.DefinitionAuthoring.InputHash, RequestID: "new-request-after-reopen", DerivationPermitID: reserved.Derivation.FreshPermitID, ProviderBindingHash: "provider"}
-	if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &overflow}); err == nil {
+	if transition, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &overflow}); err == nil {
 		t.Fatal("新 revision/permit/requestID 重置规格累计预算")
+	} else {
+		var refusal *workspace.DefinitionAuthoringBudgetRefusalError
+		if !errors.As(err, &refusal) || refusal.Stage != workspace.DefinitionAuthoringPreparationProposal || refusal.RequestID != overflow.RequestID || refusal.Budget != "request" || refusal.Limit != workspace.DefinitionAuthoringSpecificationRequestLimit || transition.AuthoringSpecification != nil {
+			t.Fatalf("规格预算拒绝不含 no-permit typed 事实: %v", err)
+		}
 	}
 	current, err = owners.repositories.Workspaces.Get(ctx, id)
 	if err != nil || current.Revision != revision || len(current.DefinitionAuthoring.SpecificationRequests) != workspace.DefinitionAuthoringSpecificationRequestLimit || current.ActiveRunID != "" || current.StartupInput != nil {

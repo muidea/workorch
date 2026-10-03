@@ -23,16 +23,21 @@ type DefinitionAuthoringInput struct {
 }
 
 type DefinitionAuthoringRecord struct {
-	Input                 DefinitionAuthoringInput
-	InputHash             string
-	TemplateSnapshotHash  string
-	TemplateSnapshot      WorkspaceTemplate
-	DerivationRequests    []DefinitionDerivationRequest
-	SpecificationRequests []DefinitionAuthoringSpecificationRequest
-	SaveReceipts          []DefinitionAuthoringSaveReceipt
+	Input                  DefinitionAuthoringInput
+	InputHash              string
+	TemplateSnapshotHash   string
+	TemplateSnapshot       WorkspaceTemplate
+	DerivationRequests     []DefinitionDerivationRequest
+	SpecificationRequests  []DefinitionAuthoringSpecificationRequest
+	SaveReceipts           []DefinitionAuthoringSaveReceipt
+	PreparationDiagnostics []DefinitionAuthoringPreparationDiagnostic
 }
 
 func (r DefinitionAuthoringRecord) Clone() DefinitionAuthoringRecord {
+	r.PreparationDiagnostics = append([]DefinitionAuthoringPreparationDiagnostic(nil), r.PreparationDiagnostics...)
+	for n := range r.PreparationDiagnostics {
+		r.PreparationDiagnostics[n] = r.PreparationDiagnostics[n].Clone()
+	}
 	r.SaveReceipts = append([]DefinitionAuthoringSaveReceipt(nil), r.SaveReceipts...)
 	r.Input = r.Input.Clone()
 	r.TemplateSnapshot = r.TemplateSnapshot.Clone()
@@ -65,6 +70,9 @@ func (r DefinitionAuthoringRecord) Validate() error {
 		seen[receipt.RequestID] = true
 	}
 	if err := validateDerivationRequests(r.DerivationRequests, r.Input); err != nil {
+		return err
+	}
+	if err := validatePreparationDiagnostics(r); err != nil {
 		return err
 	}
 	return validateAuthoringSpecificationRequests(r)

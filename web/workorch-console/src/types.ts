@@ -24,6 +24,33 @@ export type AuthoringDiagnosticMetadata = {
   notSavedReason?: string;
 };
 
+export type AuthoringPreparationDiagnosticStage = 'derivation' | 'proposal' | 'review';
+
+export type DefinitionAuthoringPreparationDiagnosticMetadata = {
+  diagnosticId: string;
+  workspaceId: string;
+  inputHash: string;
+  templateSnapshotHash: string;
+  observedWorkspaceRevision: number;
+  stage: AuthoringPreparationDiagnosticStage;
+  targetRequestId: string;
+  derivationPermitId?: string;
+  reviewKind?: string;
+  proposalHash?: string;
+  phaseCode: string;
+  resourceRef?: string;
+  providerBindingHash?: string;
+  causeSHA256: string;
+  causeBytes: number;
+  causeSaved: boolean;
+  notSavedReason?: string;
+  current: boolean;
+};
+
+export type DefinitionAuthoringPreparationDiagnostic = DefinitionAuthoringPreparationDiagnosticMetadata & {
+  causeBase64?: string;
+};
+
 export type AuthoringDiagnostic = AuthoringDiagnosticMetadata & {
   workspaceId: string;
   permitId: string;
@@ -37,6 +64,7 @@ export type DefinitionAuthoringView = {
   workspaceRevision: number;
   state: string;
   compilationAccepted?: boolean;
+  preparationDiagnostics?: DefinitionAuthoringPreparationDiagnosticMetadata[];
   input?: DefinitionAuthoringInput;
   inputRevision?: number;
   inputHash?: string;

@@ -273,6 +273,29 @@ func TestWorkspaceContextBundleFromSnapshotsPrefersRunSnapshot(t *testing.T) {
 	}
 }
 
+func TestWorkspaceContextBundleKeepsFormalMilestonesAndRejectsCrossRunScope(t *testing.T) {
+	t.Parallel()
+	runSnapshot := formalProgressFixture()
+	workspaceSnapshot := readmodelcore.WorkspaceSnapshotState{Workspace: runSnapshot.Workspace, Run: &runSnapshot.Run, Results: runSnapshot.Results}
+	workspaceSnapshot.TaskProgress = mapLocalizedWorkspaceTaskProgress(workspaceSnapshot)
+	bundle := workspaceContextBundleFromSnapshots(workspaceSnapshot, &runSnapshot)
+	for _, id := range []string{"workspace_defined", "formal_result"} {
+		if formalMilestone(t, bundle.TaskProgress, id).State != "completed" {
+			t.Fatalf("独立上下文读取遗漏 owner 正式事实：%+v", bundle.TaskProgress)
+		}
+	}
+	other := runSnapshot
+	other.Run.ID = "cross-run"
+	if got := workspaceContextBundleFromSnapshots(workspaceSnapshot, &other); got.Mode != "workspace" {
+		t.Fatalf("错 Run 上下文不得覆盖 Workspace scope：%+v", got)
+	}
+	other = runSnapshot
+	other.Run.WorkspaceID = "cross-workspace"
+	if got := workspaceContextBundleFromSnapshots(workspaceSnapshot, &other); got.WorkspaceID != workspaceSnapshot.Workspace.ID || got.Mode != "workspace" {
+		t.Fatalf("跨 Workspace 上下文不得参与合并：%+v", got)
+	}
+}
+
 func TestWorkspaceSnapshotWithContextBundleEmbedsProjectionContext(t *testing.T) {
 	t.Parallel()
 

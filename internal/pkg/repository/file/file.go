@@ -2088,6 +2088,9 @@ func saveWorkspacePersistenceMap(path string, items map[common.WorkspaceID]works
 }
 
 func authoringContainsDiagnostic(record workspace.DefinitionAuthoringRecord) bool {
+	if len(record.PreparationDiagnostics) > 0 {
+		return true
+	}
 	for _, request := range record.SpecificationRequests {
 		if request.Diagnostic != nil {
 			return true

@@ -3,7 +3,9 @@ package biz
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server"
@@ -36,6 +39,12 @@ import (
 // 使用正式 HTTP ports 和真实持久 owners；仅 provider 与任务排队由测试控制。
 func TestAuthoringHTTPFileBackedCompilationConfirmationAndRecovery(t *testing.T) {
 	for _, scenario := range []string{"pass", "review_fail", "review_unknown", "resource_drift", "invalid_proposal", "invalid_review"} {
+		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
+	}
+}
+
+func TestAuthoringHTTPPreparationFailureFileRecovery(t *testing.T) {
+	for _, scenario := range []string{"resource_missing", "config_failure", "proposal_config_failure", "review_preparation_failure", "review_fail_preparation_failure", "review_unknown_preparation_failure", "render_failure", "request_budget", "attempt_budget"} {
 		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
 	}
 }
@@ -68,14 +77,31 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	if err := os.WriteFile(filepath.Join(directory, "requirements.txt"), []byte("可验证的资源\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if scenario == "render_failure" {
+		// 模板和资源各自合法，但组装后的请求超过 render 文档边界。
+		if err := os.WriteFile(filepath.Join(directory, "requirements.txt"), []byte(strings.Repeat("r", 30*1024)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if scenario == "resource_missing" {
+		if err := os.Remove(filepath.Join(directory, "requirements.txt")); err != nil {
+			t.Fatal(err)
+		}
+	}
 	repositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(storage)
 	hints, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"generic": map[string]any{"evidenceRequirements": []any{map[string]any{"id": "proof", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"}}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repositories.WorkspaceTemplates.Create(ctx, &workspace.WorkspaceTemplate{ID: "http-template", Name: "模板", DoDItems: []string{"模板验收"}, ContextHints: hints}); err != nil {
+	template := workspace.WorkspaceTemplate{ID: "http-template", Name: "模板", DoDItems: []string{"模板验收"}, ContextHints: hints}
+	if scenario == "render_failure" {
+		template.DoDItems = append(template.DoDItems, strings.Repeat("模板原文", 20*1024))
+	}
+	if err := repositories.WorkspaceTemplates.Create(ctx, &template); err != nil {
 		t.Fatal(err)
 	}
+	var preparationRepaired atomic.Bool
+	configurationCause := def.NewError(def.Unexpected, "mock 配置读取失败\r\n原文 sk_test_marker\n")
 	var physicalCalls atomic.Int32
 	realWorker := scenario == "real_background" || scenario == "concurrent_compile"
 	deriveStarted, releaseDerive := make(chan struct{}), make(chan struct{})
@@ -112,6 +138,11 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		provider := magicevent.NewSimpleObserver(llmevents.CommandDestination, hub)
 		target := runtimecontract.ProviderModelTarget{ProviderID: "mock", ModelID: "mock"}
 		if err := provider.Subscribe(llmevents.TopicLLMCommandGetActiveConfiguration, func(_ magicevent.Event, result magicevent.Result) {
+			fail := !preparationRepaired.Load() && (scenario == "config_failure" || scenario == "proposal_config_failure" && physicalCalls.Load() >= 1 || (scenario == "review_preparation_failure" || scenario == "review_fail_preparation_failure" || scenario == "review_unknown_preparation_failure") && physicalCalls.Load() >= 3)
+			if fail {
+				result.Set(nil, configurationCause)
+				return
+			}
 			result.Set(llmevents.GetActiveConfigurationResult{ConfigurationRevision: "http-provider", DefaultChat: target}, nil)
 		}); err != nil {
 			t.Fatal(err)
@@ -141,7 +172,12 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				}
 				payload, err = json.Marshal(workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"派生验收"}})
 			case "workspace/specification/proposal":
-				if len(record.SpecificationRequests) != 1 {
+				if scenario == "proposal_config_failure" || scenario == "review_preparation_failure" || scenario == "review_fail_preparation_failure" || scenario == "review_unknown_preparation_failure" {
+					if len(record.SpecificationRequests) < 1 {
+						t.Error("proposal permit not durable")
+						return
+					}
+				} else if len(record.SpecificationRequests) != 1 {
 					t.Error("proposal permit not durable")
 					return
 				}
@@ -163,6 +199,14 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 					t.Error("critic received earlier reviews")
 				}
 				review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{"goal"}}
+				if physicalCalls.Load() == 2 {
+					switch scenario {
+					case "review_fail_preparation_failure":
+						review.Status = workspace.GoalReviewFail
+					case "review_unknown_preparation_failure":
+						review.Status = workspace.GoalReviewUnknown
+					}
+				}
 				if kind == workspace.GoalReviewVerifierFeasibility {
 					switch scenario {
 					case "review_fail":
@@ -291,6 +335,38 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	conflictingSave.Input.GoalText = "过期不同输入"
 	authoringHTTPRequest(t, baseURL, http.MethodPut, path, conflictingSave, http.StatusConflict)
 	assertNoRuns()
+	if scenario == "request_budget" || scenario == "attempt_budget" {
+		stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		record := stored.DefinitionAuthoring.Clone()
+		count := workspace.DefinitionDerivationRequestLimit
+		if scenario == "attempt_budget" {
+			count = workspace.DefinitionDerivationAttemptLimit
+		}
+		content := "可验证的资源\n"
+		sum := sha256.Sum256([]byte(content))
+		resources := []workspace.DefinitionAuthoringResourceSnapshot{{Ref: "requirements.txt", Content: content, ContentHash: "sha256:" + hex.EncodeToString(sum[:])}}
+		configuration := llmevents.GetActiveConfigurationResult{ConfigurationRevision: "http-provider", DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: "mock", ModelID: "mock"}}
+		for n := range count {
+			input := record.Input.Clone()
+			if scenario == "request_budget" {
+				input.Revision = 1
+				input.GoalText = fmt.Sprintf("历史目标-%d", n)
+			}
+			request := workspace.DefinitionDerivationRequest{RequestID: fmt.Sprintf("historical-%d", n), Input: input, Template: record.TemplateSnapshot.Clone(), Resources: resources, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(resources), ProviderBindingHash: definitionProviderBindingHash(configuration), FailureCode: "provider_failed"}
+			request.PermitID = request.ExpectedPermitID()
+			record.DerivationRequests = append(record.DerivationRequests, request)
+		}
+		if err := record.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		stored.DefinitionAuthoring = &record
+		if err := repositories.Workspaces.CompareAndSwap(ctx, stored, stored.Revision); err != nil {
+			t.Fatal(err)
+		}
+	}
 	accepted := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusAccepted)
 	if !accepted.CompilationAccepted || accepted.State != "draft" || (!realWorker && physicalCalls.Load() != 0) {
 		t.Fatal("acceptance fabricated owner progress")
@@ -328,6 +404,107 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		workers.Wait()
 	} else if !realWorker {
 		routine.queued.Run()
+	}
+	if scenario == "resource_missing" || scenario == "config_failure" || scenario == "proposal_config_failure" || scenario == "review_preparation_failure" || scenario == "review_fail_preparation_failure" || scenario == "review_unknown_preparation_failure" || scenario == "render_failure" || scenario == "request_budget" || scenario == "attempt_budget" {
+		failed := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+		stage, phase := "derivation", "config"
+		wantCalls := int32(0)
+		switch scenario {
+		case "resource_missing":
+			phase = "resources"
+		case "proposal_config_failure":
+			stage, wantCalls = "proposal", 1
+		case "review_preparation_failure", "review_fail_preparation_failure", "review_unknown_preparation_failure":
+			stage, wantCalls = "review", 3
+		case "render_failure":
+			phase = "render"
+		case "request_budget", "attempt_budget":
+			phase = scenario
+		}
+		if failed.State != "preparation_failed" || len(failed.PreparationDiagnostics) != 1 || physicalCalls.Load() != wantCalls {
+			t.Fatalf("pre-reserve failure hidden or permit issued: %+v calls=%d", failed, physicalCalls.Load())
+		}
+		diagnostic := failed.PreparationDiagnostics[0]
+		if diagnostic.Stage != stage || diagnostic.PhaseCode != phase || !diagnostic.Current || !diagnostic.CauseSaved || diagnostic.CauseBytes == 0 || diagnostic.CauseSHA256 == "" || (scenario == "resource_missing" && diagnostic.ResourceRef != "requirements.txt") {
+			t.Fatalf("preparation metadata incomplete: %+v", diagnostic)
+		}
+		var envelope struct {
+			Diagnostic management.DefinitionAuthoringPreparationDiagnosticView `json:"diagnostic"`
+		}
+		response, err := http.Get(baseURL + path + "/preparation-diagnostics/" + diagnostic.DiagnosticID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusOK || response.Header.Get("Cache-Control") != "no-store" {
+			response.Body.Close()
+			t.Fatalf("preparation raw query status=%d headers=%v", response.StatusCode, response.Header)
+		}
+		if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+			response.Body.Close()
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		raw, err := base64.StdEncoding.DecodeString(envelope.Diagnostic.CauseBase64)
+		if err != nil || uint64(len(raw)) != diagnostic.CauseBytes || envelope.Diagnostic.CauseSHA256 != diagnostic.CauseSHA256 {
+			t.Fatalf("preparation raw integrity: %+v err=%v", envelope.Diagnostic, err)
+		}
+		if phase == "config" && !bytes.Equal(raw, []byte(configurationCause.Error())) {
+			t.Fatalf("configuration original cause rewritten: %q", raw)
+		}
+		stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+		if err != nil || stored.DefinitionAuthoring == nil || len(stored.DefinitionAuthoring.PreparationDiagnostics) != 1 || !bytes.Equal(stored.DefinitionAuthoring.PreparationDiagnostics[0].Cause, raw) {
+			t.Fatalf("owner original cause mismatch: %+v %v", stored, err)
+		}
+		if len(stored.DefinitionAuthoring.SpecificationRequests) != int(max(0, wantCalls-1)) {
+			t.Fatal("preparation failure fabricated specification permit")
+		}
+		assertNoRuns()
+		// 相同显式失败幂等，但仍可接受任务；诊断身份不含
+		// 已推进到当前值的 observed revision。
+		again := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusAccepted)
+		if !again.CompilationAccepted || again.State != "preparation_failed" {
+			t.Fatal("explicit preparation retry was not accepted")
+		}
+		routine.queued.Run()
+		duplicate := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+		if duplicate.WorkspaceRevision != failed.WorkspaceRevision || len(duplicate.PreparationDiagnostics) != 1 || duplicate.PreparationDiagnostics[0].DiagnosticID != diagnostic.DiagnosticID || physicalCalls.Load() != wantCalls {
+			t.Fatalf("duplicate preparation cause advanced owner revision: %+v", duplicate)
+		}
+		closeOwners()
+		baseURL, routine, closeOwners = open()
+		recovered := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+		if recovered.State != "preparation_failed" || recovered.WorkspaceRevision != failed.WorkspaceRevision || recovered.PreparationDiagnostics[0].DiagnosticID != diagnostic.DiagnosticID {
+			t.Fatal("preparation history lost across file-owner restart")
+		}
+		if scenario == "render_failure" || scenario == "request_budget" || scenario == "attempt_budget" {
+			return
+		}
+		if scenario == "resource_missing" {
+			if err := os.WriteFile(filepath.Join(directory, "requirements.txt"), []byte("可验证的资源\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		preparationRepaired.Store(true)
+		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusAccepted)
+		routine.queued.Run()
+		ready := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+		wantState := "ready_to_confirm"
+		if scenario == "review_fail_preparation_failure" || scenario == "review_unknown_preparation_failure" {
+			wantState = "review_blocked"
+		}
+		if ready.State != wantState || ready.InputHash != failed.InputHash || ready.Proposal == nil || len(ready.Proposal.Reviews) != 6 || physicalCalls.Load() != 8 || ready.PreparationDiagnostics[0].Current {
+			t.Fatalf("explicit same-input recovery failed or repeated completed slots: %+v calls=%d", ready, physicalCalls.Load())
+		}
+		if wantState == "review_blocked" {
+			confirmation := management.DefinitionAuthoringConfirm{InputHash: ready.InputHash, DerivationPermitID: ready.DerivationPermitID, ProposalHash: ready.Proposal.ProposalHash, SpecificationHash: ready.Proposal.SpecificationHash, ExpectedWorkspaceRevision: ready.WorkspaceRevision}
+			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", confirmation, http.StatusConflict)
+			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusOK)
+			if physicalCalls.Load() != 8 {
+				t.Fatal("完整阻塞审查重复编译重发了旧 critics")
+			}
+		}
+		assertNoRuns()
+		return
 	}
 	if scenario == "invalid_proposal" || scenario == "invalid_review" {
 		failed := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)

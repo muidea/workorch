@@ -58,7 +58,7 @@ export function authoringCanEnterAdmitted(view?: DefinitionAuthoringView, worksp
 const reviewKinds = new Set(['dimension_coverage', 'negative_path', 'regression', 'resource_environment', 'traceability', 'verifier_feasibility']);
 
 export function authoringCanConfirm(view?: DefinitionAuthoringView): boolean {
-  return Boolean(view && view.state === 'ready_to_confirm' && view.templateCurrent && view.inputHash && view.derivationPermitId && view.proposal?.proposalHash && view.proposal.specificationHash && view.proposal.derivationPermitId === view.derivationPermitId && view.proposal.items.length > 0 && view.proposal.reviews?.length === 6 && view.proposal.reviews.every(review => review.status === 'PASS' && reviewKinds.has(review.kind) && review.specificationHash === view.proposal!.proposalHash) && new Set(view.proposal.reviews.map(review => review.kind)).size === 6);
+  return Boolean(view && view.state === 'ready_to_confirm' && !(view.preparationDiagnostics || []).some(item => item.current) && view.templateCurrent && view.inputHash && view.derivationPermitId && view.proposal?.proposalHash && view.proposal.specificationHash && view.proposal.derivationPermitId === view.derivationPermitId && view.proposal.items.length > 0 && view.proposal.reviews?.length === 6 && view.proposal.reviews.every(review => review.status === 'PASS' && reviewKinds.has(review.kind) && review.specificationHash === view.proposal!.proposalHash) && new Set(view.proposal.reviews.map(review => review.kind)).size === 6);
 }
 
 export function authoringConfirmationRecovery(view?: DefinitionAuthoringView, workspaceId?: string): AuthoringConfirmation | undefined {
@@ -83,6 +83,54 @@ export function authoringNeedsSave(view: DefinitionAuthoringView, input: Definit
   return !view.input || !view.templateCurrent || view.templateId !== templateId.trim() || view.input.goalText.trim() !== input.goalText.trim() || JSON.stringify(normalized(view.input.acceptanceRequirements)) !== JSON.stringify(normalized(input.acceptanceRequirements)) || JSON.stringify(normalized(view.input.resourceRefs)) !== JSON.stringify(normalized(input.resourceRefs));
 }
 
-export function authoringNeedsPolling(view?: DefinitionAuthoringView): boolean {
-  return Boolean(view && (view.compilationAccepted || ['deriving', 'derived', 'reviewing', 'outcome_unresolved', 'confirming', 'admitting'].includes(view.state)));
+function currentPreparationLedgerSignature(view: DefinitionAuthoringView): string {
+  return JSON.stringify((view.preparationDiagnostics || []).filter(item => item.current).map(({ current: _current, ...identity }) => identity).sort((left, right) => left.diagnosticId.localeCompare(right.diagnosticId)));
+}
+
+export const AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS = 15_000;
+
+// 显式编译受理后仅在页面内存中有界观察；超时不是成功、失败或事务中断结论。
+export class AuthoringAcceptedPreparationObservation {
+  private workspaceId = '';
+  private inputHash = '';
+  private baselineDiagnosticIds = '';
+  private baselineState = '';
+  private deadline = 0;
+  private active = false;
+
+  begin(view: DefinitionAuthoringView, now = Date.now()): void {
+    this.workspaceId = view.workspaceId;
+    this.inputHash = view.inputHash || '';
+    this.baselineDiagnosticIds = currentPreparationLedgerSignature(view);
+    this.baselineState = view.state;
+    this.deadline = now + AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS;
+    this.active = view.state === 'preparation_failed';
+  }
+
+  observe(view: DefinitionAuthoringView, now = Date.now()): { active: boolean; freshLedger: boolean; exhausted: boolean } {
+    if (!this.active || view.workspaceId !== this.workspaceId || (view.inputHash || '') !== this.inputHash) return { active: false, freshLedger: false, exhausted: false };
+    const diagnosticIds = currentPreparationLedgerSignature(view);
+    const freshLedger = view.state !== this.baselineState || diagnosticIds !== this.baselineDiagnosticIds;
+    if (freshLedger) {
+      this.active = false;
+      return { active: false, freshLedger: true, exhausted: false };
+    }
+    const exhausted = now >= this.deadline;
+    if (exhausted) this.active = false;
+    return { active: !exhausted, freshLedger: false, exhausted };
+  }
+
+  isActive(): boolean { return this.active; }
+
+  expire(now = Date.now()): boolean {
+    if (!this.active || now < this.deadline) return false;
+    this.active = false;
+    return true;
+  }
+}
+
+export function authoringNeedsPolling(view?: DefinitionAuthoringView, acceptedPreparationObservation = false): boolean {
+  if (!view) return false;
+  if (view.state === 'preparation_failed') return acceptedPreparationObservation;
+  return Boolean(acceptedPreparationObservation || view.compilationAccepted || ['deriving', 'derived', 'reviewing', 'outcome_unresolved', 'confirming', 'admitting'].includes(view.state));
 }

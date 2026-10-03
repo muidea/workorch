@@ -31,11 +31,7 @@ func projectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSna
 		activity.DisplayRunID = displayRunID
 	}
 
-	progress := snapshot.TaskProgress
-	if runtimeSummary := runtimeProgressSummary(progress.Runtime); runtimeSummary != "" {
-		// Runtime progress must produce an observable summary when revision/focus/action change.
-		progress.Summary = runtimeSummary
-	}
+	progress := workspaceSnapshotTaskProgress(snapshot)
 
 	revision := workspaceRefreshRevisionFromSnapshot(snapshot, activity.ActivityRevision)
 	revision.StreamGeneration = strings.TrimSpace(activity.StreamGeneration)

@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -32,6 +33,11 @@ func (b *Biz) DeriveDefinitionAcceptance(ctx context.Context, id common.Workspac
 	}
 	record := &recordModel
 	requestID := "derive/" + record.InputHash
+	for _, previous := range record.DerivationRequests {
+		if previous.Input.InputHash() == record.InputHash && workspace.WorkspaceTemplateSnapshotHash(&previous.Template) == record.TemplateSnapshotHash && previous.Proposal == nil && previous.FailureCode == "" {
+			return derivationOutcome(previous)
+		}
+	}
 	// 历史请求只按封存身份重放，不依赖已变化或删除的现行模板。
 	for _, previous := range record.DerivationRequests {
 		if previous.RequestID == requestID {
@@ -41,32 +47,41 @@ func (b *Biz) DeriveDefinitionAcceptance(ctx context.Context, id common.Workspac
 	if !view.CurrentTemplateAvailable || record.TemplateSnapshotHash != view.CurrentTemplateSnapshotHash {
 		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
 	}
+	identity := authoringPreparationIdentity(view, workspace.DefinitionAuthoringPreparationDerivation, requestID)
 	resources := []workspace.DefinitionAuthoringResourceSnapshot(nil)
 	if len(record.Input.ResourceRefs) != 0 {
 		facts, err := b.AcquireDefinitionAuthoringResources(ctx, id)
 		if err != nil {
-			return workspace.DefinitionDerivedAcceptance{}, err
+			var resourceFailure *authoringResourcePreparationError
+			if errors.As(err, &resourceFailure) {
+				identity.ResourceRef = resourceFailure.ref
+			}
+			return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "resources", err)
 		}
 		resources, err = authoringResourceSnapshotsFor(record.Input, facts)
 		if err != nil {
-			return workspace.DefinitionDerivedAcceptance{}, err
+			return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "resources", err)
 		}
 		if len(facts) == 0 || !sameAuthoringResourceRevisions(facts, view.WorkspaceRevision) {
-			return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
+			return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "resources", common.ErrConflict)
 		}
 	}
 	configuration, err := b.activeDefinitionProviderConfiguration(ctx)
 	if err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, err
+		return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "config", err)
 	}
 	providerBindingHash := definitionProviderBindingHash(configuration)
+	identity.ProviderBindingHash = providerBindingHash
 	pending := workspace.DefinitionDerivationRequest{RequestID: requestID, Input: record.Input.Clone(), Template: record.TemplateSnapshot.Clone(), Resources: resources, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(resources), ProviderBindingHash: providerBindingHash}
 	pending.PermitID = pending.ExpectedPermitID()
 	command, err := specifications.DerivationCommand(pending, configuration.DefaultChat)
 	if err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, err
+		return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringPreparationFailure(ctx, identity, "render", err)
 	}
 	command.ExpectedConfigurationRevision = configuration.ConfigurationRevision
+	if err := ctx.Err(); err != nil {
+		return workspace.DefinitionDerivedAcceptance{}, err
+	}
 	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: id, WorkspaceRevision: view.WorkspaceRevision, InputHash: record.InputHash, RequestID: requestID, Resources: resources, ResourceSnapshotHash: pending.ResourceSnapshotHash, ProviderBindingHash: providerBindingHash}
 	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceDerivationReserve, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, reserve)
 	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceDerivationReserve, eventcontract.LaneScope{WorkspaceID: string(id)}))
@@ -75,7 +90,7 @@ func (b *Biz) DeriveDefinitionAcceptance(ctx context.Context, id common.Workspac
 		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
 	}
 	if err := result.Error(); err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, err
+		return workspace.DefinitionDerivedAcceptance{}, b.captureAuthoringBudgetRefusal(ctx, identity, err)
 	}
 	value, getErr := result.Get()
 	if getErr != nil {

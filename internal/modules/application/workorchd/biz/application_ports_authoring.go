@@ -60,6 +60,13 @@ func (p *runtimeApplicationPorts) configureAuthoringPorts() {
 			})
 			return
 		},
+		ReadPreparationDiagnostic: func(ctx context.Context, id, diagnosticID string) (view workorchmanagementcontract.DefinitionAuthoringPreparationDiagnosticView, err error) {
+			err = withAuthoring(ctx, func(b *Biz, _ *runtimecore.Session) error {
+				view, err = b.ReadDefinitionAuthoringPreparationDiagnosticView(ctx, common.WorkspaceID(id), diagnosticID)
+				return err
+			})
+			return
+		},
 		Confirm: func(ctx context.Context, id string, request workorchmanagementcontract.DefinitionAuthoringConfirm) (view workorchmanagementcontract.DefinitionAuthoringView, err error) {
 			err = withAuthoring(ctx, func(b *Biz, _ *runtimecore.Session) error {
 				view, err = b.ConfirmDefinitionAuthoringView(ctx, common.WorkspaceID(id), request)
@@ -74,4 +81,5 @@ func (p *runtimeApplicationPorts) configureAuthoringPorts() {
 	p.ports.Definition.CompileDefinitionAuthoring = authoring.Compile
 	p.ports.Definition.ConfirmDefinitionAuthoring = authoring.Confirm
 	p.ports.Definition.ReadDefinitionAuthoringDiagnostic = authoring.ReadDiagnostic
+	p.ports.Definition.ReadDefinitionAuthoringPreparationDiagnostic = authoring.ReadPreparationDiagnostic
 }

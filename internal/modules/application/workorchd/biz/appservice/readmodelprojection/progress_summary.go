@@ -8,15 +8,29 @@ import (
 )
 
 func taskProgressSummary(progress projectioncontract.TaskProgress, snapshot *readmodelcore.RunSnapshotState) string {
+	if snapshot != nil && isTerminalRunState(snapshot.Run.State) {
+		result := exactOwnerTerminalResult(snapshot.Workspace, snapshot.Run, snapshot.Results)
+		if result != nil && ((snapshot.Run.State == "completed" && result.State == "accepted") || result.State == "rejected") {
+			if result.Summary != "" {
+				return result.Summary
+			}
+		} else {
+			summary := "formal result failed: terminal Run has no exact final Result aligned with the current startup seal"
+			if snapshot.Run.FailureReason != "" {
+				summary += " | " + snapshot.Run.FailureReason
+			}
+			if runtimeSummary := runtimeProgressSummary(progress.Runtime); runtimeSummary != "" {
+				summary += " | " + runtimeSummary
+			}
+			return summary
+		}
+	}
 	if runtimeSummary := runtimeProgressSummary(progress.Runtime); runtimeSummary != "" {
 		return runtimeSummary
 	}
-	if snapshot != nil {
+	if snapshot != nil && snapshot.Run.ID != "" {
 		results := runScopedResults(*snapshot)
 		artifacts := runScopedArtifacts(*snapshot)
-		if result := primaryTaskProgressResult(results); result != nil && result.Summary != "" {
-			return result.Summary
-		}
 		if snapshot.Run.FailureReason != "" {
 			return snapshot.Run.FailureReason
 		}

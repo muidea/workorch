@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { enterAuthoringWorkspace, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringConfirmationRecovery, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling } from '../src/workspaceAuthoring.ts';
+import { enterAuthoringWorkspace, AuthoringAcceptedPreparationObservation, AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringConfirmationRecovery, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling } from '../src/workspaceAuthoring.ts';
 import type { DefinitionAuthoringView } from '../src/types.ts';
 
 test('父级刷新期间关闭或重开创作会话不得迟到导航', async () => {
@@ -103,6 +103,64 @@ test('同会话旧查询不能覆盖写回执，revision 不倒退且接受标�
   const second = queries.begin();
   assert.equal(queries.matches(first), false);
   assert.equal(queries.matches(second), true);
+});
+
+test('preparation_failed stops normal polling; explicit compile observation is session-local and bounded', () => {
+  const diagnostic = {
+    diagnosticId: 'diag', workspaceId: 'ws', inputHash: 'input', templateSnapshotHash: 'template', observedWorkspaceRevision: 8,
+    stage: 'proposal' as const, targetRequestId: 'request', phaseCode: 'provider_unavailable', causeSHA256: 'hash', causeBytes: 0, causeSaved: false, current: true,
+  };
+  const failed = { ...ready(), state: 'preparation_failed', preparationDiagnostics: [diagnostic] };
+  assert.equal(authoringNeedsPolling(failed), false);
+  const observation = new AuthoringAcceptedPreparationObservation();
+  observation.begin(failed, 10);
+  assert.equal(authoringNeedsPolling(failed, true), true);
+  assert.deepEqual(observation.observe({ ...failed }, 11), { active: true, freshLedger: false, exhausted: false });
+  assert.deepEqual(observation.observe({ ...failed, preparationDiagnostics: [{ ...diagnostic, diagnosticId: 'new-diag' }] }, 20), { active: false, freshLedger: true, exhausted: false });
+  observation.begin(failed, 100);
+  assert.deepEqual(observation.observe(failed, 100 + AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS), { active: false, freshLedger: false, exhausted: true });
+  assert.equal(authoringNeedsPolling(failed), false);
+});
+
+test('准备观察独立截止幂等，重复 begin 只重置页面期限而不授权业务调用', () => {
+  const failed = { ...ready(), state: 'preparation_failed' };
+  const observation = new AuthoringAcceptedPreparationObservation();
+  assert.equal(observation.isActive(), false);
+  observation.begin(failed, 100);
+  assert.equal(observation.isActive(), true);
+  assert.equal(observation.expire(100 + AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS - 1), false);
+  observation.begin(failed, 5000);
+  assert.equal(observation.expire(100 + AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS), false);
+  assert.equal(observation.expire(5000 + AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS), true);
+  assert.equal(observation.expire(5000 + AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS), false);
+  assert.equal(observation.observe(failed, 30_000).active, false);
+  assert.equal(authoringNeedsPolling(failed), false);
+  observation.begin(failed, 40_000);
+  assert.equal(observation.observe({ ...failed, state: 'reviewing' }, 40_001).freshLedger, true);
+  assert.equal(observation.expire(60_000), false);
+});
+
+test('same old current diagnostic after accepted compile does not stop polling before bounded deadline', () => {
+  const oldFailure = { ...ready(), state: 'preparation_failed', preparationDiagnostics: [{
+    diagnosticId: 'same-id', workspaceId: 'ws', inputHash: 'input', templateSnapshotHash: 'template', observedWorkspaceRevision: 8,
+    stage: 'review' as const, targetRequestId: 'request', phaseCode: 'failed', causeSHA256: 'hash', causeBytes: 0, causeSaved: false, current: true,
+  }] };
+  const observation = new AuthoringAcceptedPreparationObservation();
+  observation.begin(oldFailure, 1);
+  const sameFailure = observation.observe(oldFailure, 1000);
+  assert.equal(sameFailure.active, true);
+  assert.equal(sameFailure.freshLedger, false);
+  assert.equal(authoringNeedsPolling(oldFailure, sameFailure.active), true);
+  assert.deepEqual(observation.observe({ ...oldFailure, state: 'reviewing' }, 1200), { active: false, freshLedger: true, exhausted: false });
+});
+
+test('preparation_failed 阻止确认；current=false 的历史诊断不阻止 later ready', () => {
+  const diagnostic = {
+    diagnosticId: 'diag', workspaceId: 'ws', inputHash: 'input', templateSnapshotHash: 'template', observedWorkspaceRevision: 8,
+    stage: 'proposal' as const, targetRequestId: 'request', phaseCode: 'provider_unavailable', causeSHA256: 'hash', causeBytes: 0, causeSaved: false, current: true,
+  };
+  assert.equal(authoringCanConfirm({ ...ready(), preparationDiagnostics: [diagnostic] }), false);
+  assert.equal(authoringCanConfirm({ ...ready(), preparationDiagnostics: [{ ...diagnostic, current: false }] }), true);
 });
 
 test('已准入恢复出口要求 exact Workspace、eligible 与 startup seal', () => {

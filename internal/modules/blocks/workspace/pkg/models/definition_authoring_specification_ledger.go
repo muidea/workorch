@@ -316,7 +316,7 @@ func (r DefinitionAuthoringRecord) ReserveSpecification(request DefinitionAuthor
 		}
 	}
 	if len(r.SpecificationRequests) >= DefinitionAuthoringSpecificationRequestLimit {
-		return DefinitionAuthoringRecord{}, request, false, fmt.Errorf("authoring specification request budget exhausted")
+		return DefinitionAuthoringRecord{}, DefinitionAuthoringSpecificationRequest{}, false, &DefinitionAuthoringBudgetRefusalError{Stage: preparationStageForSpecification(request.Phase), RequestID: request.RequestID, Budget: "request", Limit: DefinitionAuthoringSpecificationRequestLimit, Cause: fmt.Errorf("authoring specification request budget exhausted")}
 	}
 	attempts := 0
 	for _, previous := range r.SpecificationRequests {
@@ -325,7 +325,7 @@ func (r DefinitionAuthoringRecord) ReserveSpecification(request DefinitionAuthor
 		}
 	}
 	if attempts >= DefinitionAuthoringSpecificationAttemptLimit {
-		return DefinitionAuthoringRecord{}, request, false, fmt.Errorf("authoring specification phase attempt budget exhausted")
+		return DefinitionAuthoringRecord{}, DefinitionAuthoringSpecificationRequest{}, false, &DefinitionAuthoringBudgetRefusalError{Stage: preparationStageForSpecification(request.Phase), RequestID: request.RequestID, Budget: "attempt", Limit: DefinitionAuthoringSpecificationAttemptLimit, Cause: fmt.Errorf("authoring specification phase attempt budget exhausted")}
 	}
 	if request.Phase == DefinitionSpecificationCritic && r.completedSpecificationProposal(request.DerivationPermitID, request.ProposalHash) == nil {
 		return DefinitionAuthoringRecord{}, request, false, fmt.Errorf("authoring critic requires completed proposal")

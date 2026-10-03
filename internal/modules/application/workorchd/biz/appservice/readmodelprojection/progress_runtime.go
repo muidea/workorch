@@ -236,12 +236,6 @@ func applyRuntimeProgressToMilestones(progress *projectioncontract.TaskProgress,
 					item.State = "running"
 				}
 			}
-		case "formal_result":
-			if terminalFailed {
-				item.State = "failed"
-			} else if terminalCompleted {
-				item.State = "completed"
-			}
 		}
 	}
 	progress.CurrentMilestone = currentProgressMilestone(progress.Milestones)

@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 
@@ -102,7 +103,7 @@ func (b *Biz) StartDefinitionAuthoringCompilation(ctx context.Context, id common
 			return
 		}
 		if _, err := b.DeriveDefinitionAuthoringView(taskCtx, id); err != nil {
-			slog.Warn("authoring derivation stopped; durable owner state remains queryable", "workspace", id)
+			b.logAuthoringCompilationFailure(taskCtx, id, hash, "derivation", err)
 			return
 		}
 		current, err = b.ReadDefinitionAuthoringView(taskCtx, id)
@@ -110,17 +111,7 @@ func (b *Biz) StartDefinitionAuthoringCompilation(ctx context.Context, id common
 			return
 		}
 		if _, err := b.CompileDefinitionAuthoringView(taskCtx, id); err != nil {
-			attributes := []any{"workspace", id, "inputHash", hash}
-			if observed, readErr := b.ReadDefinitionAuthoringView(taskCtx, id); readErr == nil && observed.InputHash == hash {
-				attributes = append(attributes, "state", observed.State)
-				for _, request := range observed.Requests {
-					if request.State == "failed" {
-						attributes = append(attributes, "phase", request.Phase, "permit", request.PermitID, "failureCode", request.FailureCode)
-						break
-					}
-				}
-			}
-			slog.Warn("authoring compilation stopped; durable owner state remains queryable", attributes...)
+			b.logAuthoringCompilationFailure(taskCtx, id, hash, "specification", err)
 		}
 	}); err != nil {
 		return view, err
@@ -128,4 +119,32 @@ func (b *Biz) StartDefinitionAuthoringCompilation(ctx context.Context, id common
 	// 仅表示托管任务已接受；不伪造 owner 的 compiling／成功状态。
 	view.CompilationAccepted = true
 	return view, nil
+}
+
+func (b *Biz) logAuthoringCompilationFailure(ctx context.Context, id common.WorkspaceID, hash, phase string, err error) {
+	attributes := []any{"workspace", id, "inputHash", hash, "phase", phase}
+	var preparation *authoringPreparationError
+	if errors.As(err, &preparation) {
+		attributes = append(attributes, "stage", preparation.Stage, "phaseCode", preparation.PhaseCode, "diagnosticID", preparation.DiagnosticID, "diagnosticPersisted", preparation.Persisted, "persistenceFailureClass", preparation.PersistenceFailureClass)
+		if preparation.Persisted {
+			slog.Warn("authoring preparation stopped; diagnostic persisted and owner-queryable", attributes...)
+		} else {
+			slog.Warn("authoring preparation stopped; diagnostic persistence not confirmed", attributes...)
+		}
+		return
+	}
+	ownerObserved := false
+	if observed, readErr := b.ReadDefinitionAuthoringView(ctx, id); readErr == nil && observed.InputHash == hash {
+		ownerObserved = true
+		attributes = append(attributes, "state", observed.State)
+		for _, request := range observed.Requests {
+			if request.State == "failed" || request.State == "outcome_unresolved" {
+				attributes = append(attributes, "requestPhase", request.Phase, "permit", request.PermitID, "failureCode", request.FailureCode)
+				break
+			}
+		}
+	}
+	attributes = append(attributes, "ownerObserved", ownerObserved)
+	// 原始错误和可变 provider 配置都不能进入通用日志。
+	slog.Warn("authoring compilation stopped; consult owner state before any explicit action", attributes...)
 }

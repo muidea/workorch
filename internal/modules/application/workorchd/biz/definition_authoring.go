@@ -119,6 +119,60 @@ func (b *Biz) SaveDefinitionAuthoring(ctx context.Context, command workspaceeven
 	return response, nil
 }
 
+func (b *Biz) RecordPreparationDiagnostic(ctx context.Context, command workspaceevents.RecordPreparationDiagnosticCommand) (workspaceevents.RecordPreparationDiagnosticResult, error) {
+	if b == nil || b.EventHub() == nil || ctx == nil || command.Validate() != nil {
+		return workspaceevents.RecordPreparationDiagnosticResult{}, common.ErrInvalidArgument
+	}
+	if err := ctx.Err(); err != nil {
+		return workspaceevents.RecordPreparationDiagnosticResult{}, err
+	}
+	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspacePreparationDiagnosticRecord, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspacePreparationDiagnosticRecord, eventcontract.LaneScope{WorkspaceID: string(command.Diagnostic.WorkspaceID)}))
+	result := b.SendEvent(ev)
+	if result == nil {
+		return workspaceevents.RecordPreparationDiagnosticResult{}, common.ErrConflict
+	}
+	if err := result.Error(); err != nil {
+		return workspaceevents.RecordPreparationDiagnosticResult{}, err
+	}
+	value, err := result.Get()
+	if err != nil {
+		return workspaceevents.RecordPreparationDiagnosticResult{}, err
+	}
+	response, ok := value.(workspaceevents.RecordPreparationDiagnosticResult)
+	if !ok || response.ValidateFor(command) != nil {
+		return workspaceevents.RecordPreparationDiagnosticResult{}, common.ErrConflict
+	}
+	return response.DeepClone(), nil
+}
+
+func (b *Biz) QueryPreparationDiagnostic(ctx context.Context, command workspaceevents.QueryPreparationDiagnosticCommand) (workspaceevents.QueryPreparationDiagnosticResult, error) {
+	if b == nil || b.EventHub() == nil || ctx == nil || command.Validate() != nil {
+		return workspaceevents.QueryPreparationDiagnosticResult{}, common.ErrInvalidArgument
+	}
+	if err := ctx.Err(); err != nil {
+		return workspaceevents.QueryPreparationDiagnosticResult{}, err
+	}
+	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspacePreparationDiagnosticQuery, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
+	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspacePreparationDiagnosticQuery, eventcontract.LaneScope{WorkspaceID: string(command.WorkspaceID)}))
+	result := b.SendEvent(ev)
+	if result == nil {
+		return workspaceevents.QueryPreparationDiagnosticResult{}, common.ErrConflict
+	}
+	if err := result.Error(); err != nil {
+		return workspaceevents.QueryPreparationDiagnosticResult{}, err
+	}
+	value, err := result.Get()
+	if err != nil {
+		return workspaceevents.QueryPreparationDiagnosticResult{}, err
+	}
+	response, ok := value.(workspaceevents.QueryPreparationDiagnosticResult)
+	if !ok || response.ValidateFor(command) != nil {
+		return workspaceevents.QueryPreparationDiagnosticResult{}, common.ErrConflict
+	}
+	return response.DeepClone(), nil
+}
+
 func (b *Biz) QueryAuthoringDiagnostic(ctx context.Context, command workspaceevents.QueryAuthoringDiagnosticCommand) (workspaceevents.QueryAuthoringDiagnosticResult, error) {
 	if b == nil || b.EventHub() == nil || ctx == nil || command.Validate() != nil {
 		return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrInvalidArgument

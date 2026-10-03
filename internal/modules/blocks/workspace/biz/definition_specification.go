@@ -16,7 +16,7 @@ import (
 const definitionSpecificationCommandSource = definitionAdmissionCommandSource
 
 func definitionSpecificationTopics() []string {
-	return []string{workspaceevents.TopicWorkspaceDerivationReserve, workspaceevents.TopicWorkspaceDerivationComplete, workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, workspaceevents.TopicWorkspaceAuthoringSpecificationComplete, workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery, workspaceevents.TopicWorkspaceDefinitionAuthoringCreate, workspaceevents.TopicWorkspaceDefinitionAuthoringSave, workspaceevents.TopicWorkspaceAuthoringConfirm, workspaceevents.TopicWorkspaceAuthoringAdmit, workspaceevents.TopicWorkspaceSpecificationBegin, workspaceevents.TopicWorkspaceSpecificationReserve, workspaceevents.TopicWorkspaceSpecificationComplete}
+	return []string{workspaceevents.TopicWorkspaceDerivationReserve, workspaceevents.TopicWorkspaceDerivationComplete, workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, workspaceevents.TopicWorkspaceAuthoringSpecificationComplete, workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery, workspaceevents.TopicWorkspacePreparationDiagnosticRecord, workspaceevents.TopicWorkspacePreparationDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery, workspaceevents.TopicWorkspaceDefinitionAuthoringCreate, workspaceevents.TopicWorkspaceDefinitionAuthoringSave, workspaceevents.TopicWorkspaceAuthoringConfirm, workspaceevents.TopicWorkspaceAuthoringAdmit, workspaceevents.TopicWorkspaceSpecificationBegin, workspaceevents.TopicWorkspaceSpecificationReserve, workspaceevents.TopicWorkspaceSpecificationComplete}
 }
 
 func (m *Biz) handleDefinitionSpecificationCommand(ev magicevent.Event, result magicevent.Result) {
@@ -129,6 +129,25 @@ func (m *Biz) handleDefinitionSpecificationCommand(ev magicevent.Event, result m
 			err = common.ErrInvalidArgument
 		} else {
 			reply, err = m.queryAuthoringDiagnostic(ev.Context(), cmd)
+		}
+	case workspaceevents.TopicWorkspacePreparationDiagnosticRecord:
+		cmd, ok := ev.Data().(workspaceevents.RecordPreparationDiagnosticCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			cmd = cmd.DeepClone()
+			var transition definitionSpecificationTransition
+			transition, err = m.submitDefinitionSpecificationInternalEvent(ev.Context(), definitionSpecificationInternalEvent{WorkspaceID: cmd.Diagnostic.WorkspaceID, PreparationDiagnostic: &cmd})
+			if err == nil {
+				reply = transition.PreparationDiagnostic.DeepClone()
+			}
+		}
+	case workspaceevents.TopicWorkspacePreparationDiagnosticQuery:
+		cmd, ok := ev.Data().(workspaceevents.QueryPreparationDiagnosticCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			reply, err = m.queryPreparationDiagnostic(ev.Context(), cmd)
 		}
 	case workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery:
 		cmd, ok := ev.Data().(workspaceevents.QueryAuthoringResourceScopeCommand)

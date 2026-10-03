@@ -99,6 +99,8 @@ LLM configuration save does not mutate the running LLM owner snapshot or any sea
 Web 只作纯文本展示，原文永不作为准入或执行权威。详细边界见
 [Workspace 规格创作](../40-profiles-capabilities/workspace/setup-draft-session.md)。
 
+原始前置失败与 provider permit 诊断分别管理。资源／配置／请求准备的已知失败使用 Workspace owner 的 `PreparationDiagnostics`；常规 GET 只返回有界 metadata 与 current／history 标记，`GET /workspaces/:workspaceId/authoring/preparation-diagnostics/:diagnosticId` 返回原始原因的可逆编码、字节数与 SHA256。此身份不是 permit，不授权 provider 调用。当前目标尚未 reserve 时可显示 `preparation_failed`，允许用户修复问题后显式 compile；目标已有持久请求或确认后，以其 ledger 为准，旧诊断仅历史。未知 reserve 结果不能冒充前置失败，保存失败也不能冒充可查询诊断。
+
 旧 `POST /workspaces`、Goal／DoD POST／PUT、`goal-dod-quality-check` 和内存 draft session 写路由均已退休，返回 `404`。
 正式定义 GET 保留作读取；同 Run 规格修订不通过旧 CRUD 暴露。
 Go client 只提供正式 authoring 写方法，退休创建／Goal／DoD 写方法不再存在。

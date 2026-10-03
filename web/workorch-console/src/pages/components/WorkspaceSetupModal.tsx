@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, App as AntApp, Button, Form, Input, List, Modal, Select, Space, Tag, Typography } from 'antd';
 import { workorchApi } from '../../api';
 import { errorMessage } from '../../helpers';
-import { authoringSourceLabel, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling } from '../../workspaceAuthoring';
+import { AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS, authoringSourceLabel, AuthoringAcceptedPreparationObservation, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling } from '../../workspaceAuthoring';
 import type { AuthoringRecovery } from '../../workspaceAuthoring';
 import type { DefinitionAuthoringView, WorkspaceTemplate } from '../../types';
 import { AuthoringDiagnosticDetails } from './AuthoringDiagnosticDetails';
+import { AuthoringPreparationDiagnosticDetails } from './AuthoringPreparationDiagnosticDetails';
 
 type Props = { open: boolean; onClose: () => void; onCreated: (workspaceId: string, isCurrent: () => boolean) => void | Promise<void> };
 type Values = { title: string; templateId: string; deliverableDirectory?: string; goalText: string; requirements?: string; resources?: string };
@@ -24,9 +25,13 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
   const [failure, setFailure] = useState('');
   const session = useRef(new AuthoringSessionFence());
   const queries = useRef(new AuthoringQueryFence());
+  const acceptedPreparationObservation = useRef(new AuthoringAcceptedPreparationObservation());
+  const [acceptedPreparationObservationTimedOut, setAcceptedPreparationObservationTimedOut] = useState(false);
+  const [acceptedPreparationObservationActive, setAcceptedPreparationObservationActive] = useState(false);
+  const [acceptedPreparationObservationGeneration, setAcceptedPreparationObservationGeneration] = useState(0);
   const observe = (next: DefinitionAuthoringView) => setView(current => mergeAuthoringObservation(current, next));
   const close = (force = false) => {
-    if (!force && (edited || busy || (recoveryRef.current && (!view || recoveryRef.current.pendingSave || recoveryRef.current.pendingConfirmation)) || ['confirming', 'admitting'].includes(view?.state || ''))) {
+    if (!force && (edited || busy || acceptedPreparationObservationActive || (recoveryRef.current && (!view || recoveryRef.current.pendingSave || recoveryRef.current.pendingConfirmation)) || ['confirming', 'admitting'].includes(view?.state || ''))) {
       const closeToken = session.current.current();
       modal.confirm({
         title: '关闭并丢弃页面内输入与重放身份？',
@@ -42,6 +47,9 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     setRecovery(undefined);
     setView(undefined);
     setEdited(false);
+    setAcceptedPreparationObservationActive(false);
+    setAcceptedPreparationObservationTimedOut(false);
+    acceptedPreparationObservation.current = new AuthoringAcceptedPreparationObservation();
     setBusy(false);
     form.resetFields();
     onClose();
@@ -61,6 +69,9 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     setBusy(false);
     let disposed = false;
     setFailure('');
+    setAcceptedPreparationObservationTimedOut(false);
+    setAcceptedPreparationObservationActive(false);
+    acceptedPreparationObservation.current = new AuthoringAcceptedPreparationObservation();
     setRecoveryMemory(undefined);
     setView(undefined);
     setEdited(false);
@@ -70,28 +81,52 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
   }, [open]);
 
   useEffect(() => {
-    if (!open || busy || !view || !authoringNeedsPolling(view)) return;
+    if (!open || !acceptedPreparationObservationActive) return;
+    const token = session.current.current();
+    let disposed = false;
+    const timeout = window.setTimeout(() => {
+      if (disposed || !session.current.matches(token) || !acceptedPreparationObservation.current.expire()) return;
+      queries.current.invalidate();
+      setAcceptedPreparationObservationActive(false);
+      setAcceptedPreparationObservationTimedOut(true);
+    }, AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS);
+    return () => { disposed = true; window.clearTimeout(timeout); };
+  }, [open, acceptedPreparationObservationActive, acceptedPreparationObservationGeneration]);
+
+  useEffect(() => {
+    if (!open || busy || !view || !authoringNeedsPolling(view, acceptedPreparationObservationActive)) return;
     const token = session.current.current();
     let disposed = false;
     let timer: number;
     const poll = async () => {
+      if (acceptedPreparationObservationActive && !acceptedPreparationObservation.current.isActive()) return;
       const query = queries.current.begin();
       try {
         const next = await queries.current.read(() => workorchApi.readDefinitionAuthoring(view.workspaceId), () => !disposed && session.current.matches(token) && queries.current.matches(query));
-        if (!disposed && session.current.matches(token) && queries.current.matches(query)) observe(next);
+        if (!disposed && session.current.matches(token) && queries.current.matches(query)) {
+          if (acceptedPreparationObservationActive) {
+            const acceptedObservation = acceptedPreparationObservation.current.observe(next);
+            setAcceptedPreparationObservationActive(acceptedObservation.active);
+            setAcceptedPreparationObservationTimedOut(acceptedObservation.exhausted);
+          }
+          observe(next);
+        }
       } catch (error) {
         if (!disposed && session.current.matches(token) && queries.current.matches(query)) setFailure(errorMessage(error));
       } finally {
-        if (!disposed && session.current.matches(token)) timer = window.setTimeout(poll, 1500);
+        if (!disposed && session.current.matches(token) && queries.current.matches(query) && (!acceptedPreparationObservationActive || acceptedPreparationObservation.current.isActive())) timer = window.setTimeout(poll, 1500);
       }
     };
     timer = window.setTimeout(poll, 1500);
     return () => { disposed = true; window.clearTimeout(timer); };
-  }, [open, busy, view?.workspaceId, view?.state, view?.compilationAccepted]);
+  }, [open, busy, view?.workspaceId, view?.state, view?.compilationAccepted, acceptedPreparationObservationActive, acceptedPreparationObservationGeneration]);
 
   const generate = async () => {
     const token = session.current.current();
     queries.current.invalidate();
+    acceptedPreparationObservation.current = new AuthoringAcceptedPreparationObservation();
+    setAcceptedPreparationObservationActive(false);
+    setAcceptedPreparationObservationTimedOut(false);
     setBusy(true);
     setFailure('');
     try {
@@ -132,6 +167,13 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
       applyView(current);
       const next = await workorchApi.compileDefinitionAuthoring(current.workspaceId);
       if (!session.current.matches(token)) return;
+      if (next.compilationAccepted) {
+        acceptedPreparationObservation.current.begin(current);
+        const acceptedObservation = acceptedPreparationObservation.current.observe(next);
+        setAcceptedPreparationObservationActive(acceptedObservation.active);
+        setAcceptedPreparationObservationTimedOut(false);
+        setAcceptedPreparationObservationGeneration(generation => generation + 1);
+      }
       observe(next);
     } catch (error) {
       if (session.current.matches(token)) setFailure(errorMessage(error));
@@ -212,6 +254,9 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     <Space direction="vertical" style={{ width: '100%' }}>
       <Alert type="info" showIcon message="输入目标即可，验收清单由模板与目标派生。六类审查通过后才可确认；此操作不会启动 Run。" />
       {failure && <Alert type="error" showIcon message={failure} description={recovery ? '创建身份已保留。重试将恢复原草稿，不会重新创建工作空间。' : undefined} />}
+      {view?.preparationDiagnostics?.map(diagnostic => <Alert key={diagnostic.diagnosticId} type="error" showIcon message={`${diagnostic.current ? '当前' : '历史'}前置准备失败 · ${diagnostic.stage}${diagnostic.reviewKind ? ` · ${diagnostic.reviewKind}` : ''} · ${diagnostic.phaseCode}`} description={<Space direction="vertical" style={{ width: '100%' }}><Typography.Text>前置准备失败，尚未为该阶段取得 provider permit；修复后显式重试。此提示不表示其他阶段未调用 provider。</Typography.Text><AuthoringPreparationDiagnosticDetails diagnostic={diagnostic} /></Space>} />)}
+      {acceptedPreparationObservationActive && <Alert type="info" showIcon message="本次任务已受理，正在观察 owner 状态；页面观察是临时的，不会恢复或取消服务端事务。" />}
+      {acceptedPreparationObservationTimedOut && <Alert type="warning" showIcon message="观察期限已到，最近一次可用 owner 状态为原前置准备失败；无法确认后台任务是否仍在执行。请手动刷新核对或修复后显式重试。" />}
       {view?.requests?.filter(request => request.state === 'failed').map((request, index) => <Alert key={`${request.phase}-${request.reviewKind || index}`} type="error" showIcon message={`规格请求失败：${request.phase}${request.reviewKind ? ` · ${request.reviewKind}` : ''}`} description={<AuthoringDiagnosticDetails workspaceId={view.workspaceId} permitId={request.permitId} phase={request.phase} failureCode={request.failureCode} diagnostic={request.diagnostic} />} />)}
       {recovery?.pendingSave && <Alert type="warning" message="保存响应尚未确认。重试将先恢复原保存请求，再处理当前编辑；不会用新身份覆盖未决修订。" action={<Button disabled={busy} onClick={refreshSaveBaseline}>冲突后读取当前草稿</Button>} />}
       {edited && view?.input && <Alert type="info" message="owner 当前目标（本地编辑尚未覆盖）" description={view.input.goalText} />}

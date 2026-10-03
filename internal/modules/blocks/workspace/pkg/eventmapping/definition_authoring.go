@@ -28,7 +28,24 @@ func DefinitionAuthoringRecordDTO(r workspace.DefinitionAuthoringRecord) workspa
 	for n, request := range r.DerivationRequests {
 		ret.DerivationRequests[n] = DefinitionDerivationRequestDTO(request)
 	}
+	if r.PreparationDiagnostics != nil {
+		ret.PreparationDiagnostics = make([]workspaceevents.DefinitionAuthoringPreparationDiagnosticMetadata, len(r.PreparationDiagnostics))
+	}
+	for n, diagnostic := range r.PreparationDiagnostics {
+		ret.PreparationDiagnostics[n] = DefinitionAuthoringPreparationDiagnosticMetadataDTO(diagnostic)
+	}
 	return ret
+}
+
+func DefinitionAuthoringPreparationDiagnosticMetadataDTO(d workspace.DefinitionAuthoringPreparationDiagnostic) workspaceevents.DefinitionAuthoringPreparationDiagnosticMetadata {
+	d = d.Clone()
+	return workspaceevents.DefinitionAuthoringPreparationDiagnosticMetadata{
+		DiagnosticID: d.DiagnosticID, WorkspaceID: d.WorkspaceID, InputHash: d.InputHash, TemplateSnapshotHash: d.TemplateSnapshotHash,
+		ObservedWorkspaceRevision: d.ObservedWorkspaceRevision, Stage: d.Stage, TargetRequestID: d.TargetRequestID,
+		DerivationPermitID: d.DerivationPermitID, ReviewKind: d.ReviewKind, ProposalHash: d.ProposalHash,
+		PhaseCode: d.PhaseCode, ResourceRef: d.ResourceRef, ProviderBindingHash: d.ProviderBindingHash,
+		Cause: d.Cause, CauseSHA256: d.CauseSHA256, CauseBytes: d.CauseBytes, CauseSaved: d.CauseSaved, NotSavedReason: d.NotSavedReason,
+	}
 }
 
 func DefinitionAuthoringHistoryDTOs(history []workspace.DefinitionAuthoringConfirmedRevision) []workspaceevents.DefinitionAuthoringConfirmedRevision {

@@ -90,6 +90,8 @@ Workspace owner 为每次 promotion 另存 `WorkspaceActivationAdmission`。普�
 纠正 clarification ticket 的 candidate 先进入 `pending_clarification_resolution`，只有 Decision resolution 被 Workspace owner
 通过 typed acknowledgement 验证后才转为 `eligible`。该事实不进入 `StartupInputHash`，也不是新的 Runtime 状态机。
 
+只读进度中的 `workspace_defined` 表示“正式定义已封存”，依据 Workspace owner 的 `AdmittedStartupInputHash`，不依据容器存在或生命周期 `active`。封存与 activation eligibility 是不同事实；已封存而等待澄清 acknowledgement 不得显示未封存，已创建但仍在创作的草稿也不得显示正式定义已完成。
+
 ## Directory Invariants
 
 - `DeliverableDirectory` 是 capability owner 可访问的用户交付根；具体 path scope 仍由 operation contract 校验。

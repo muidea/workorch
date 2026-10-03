@@ -110,6 +110,9 @@ func (r QueryDefinitionAuthoringResult) ValidateFor(c QueryDefinitionAuthoringCo
 	if err != nil {
 		return err
 	}
+	if (&workspace.Workspace{ID: c.WorkspaceID, Revision: r.WorkspaceRevision, DefinitionAuthoring: record, DefinitionAuthoringHistory: history}).ValidatePreparationDiagnosticHistory() != nil {
+		return common.ErrConflict
+	}
 	var goal workspace.DefinitionCandidateItem
 	var dod []workspace.DefinitionCandidateItem
 	var spec workspace.GoalSpecification

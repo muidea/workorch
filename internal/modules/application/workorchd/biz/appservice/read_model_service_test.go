@@ -2394,10 +2394,10 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 	failedStepID := common.StepID("run-task-progress-result/step-failed-before-repair")
 	resultID := common.ResultID("result-task-progress")
 	artifactID := common.ArtifactID("artifact-task-progress")
-	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "task progress", State: common.WorkspaceStateActive}); err != nil {
+	if err := exports.Repositories.Workspaces.Create(ctx, &workspacemodel.Workspace{ID: workspaceID, Title: "task progress", State: common.WorkspaceStateActive, StartupInput: &workspacemodel.WorkspaceStartupInputContract{StartupInputHash: "startup-progress-seal"}}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, State: common.RunStateCompleted}); err != nil {
+	if err := exports.Repositories.Runs.Create(ctx, &runmodel.Run{ID: runID, WorkspaceID: workspaceID, GoalID: "goal-task-progress", DoDID: "dod-task-progress", StartupInputHash: "startup-progress-seal", TerminalResultID: resultID, State: common.RunStateCompleted}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	if err := exports.Repositories.Steps.Create(ctx, &runmodel.Step{ID: stepID, RunID: runID, Kind: "llm/workspace_execution", State: common.StepStateSucceeded}); err != nil {
@@ -2430,6 +2430,8 @@ func TestReadRunTaskProgressWithBackendReturnsFormalResultProgress(t *testing.T)
 		ID:           resultID,
 		WorkspaceID:  workspaceID,
 		RunID:        runID,
+		GoalID:       "goal-task-progress",
+		DoDID:        "dod-task-progress",
 		State:        common.ResultStateAccepted,
 		Title:        "Accepted projectioncontract.Result",
 		Summary:      "formal task outcome",

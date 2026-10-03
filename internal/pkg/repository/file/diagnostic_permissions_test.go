@@ -1,6 +1,7 @@
 package file
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,36 +42,41 @@ func TestSaveMapPrivatePermissionsReplaceExistingPublicFile(t *testing.T) {
 }
 
 func TestWorkspaceDiagnosticUsesPrivateAtomicPublish(t *testing.T) {
-	for _, historical := range []bool{false, true} {
-		t.Run(map[bool]string{false: "current", true: "history"}[historical], func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "workspace.json")
-			defer EvictMapFileCache(path)
-			item := workspace.Workspace{ID: "ws-diagnostic"}
-			items := map[common.WorkspaceID]workspace.Workspace{item.ID: item}
-			if err := saveWorkspacePersistenceMap(path, items); err != nil {
-				t.Fatal(err)
-			}
-			record := workspace.DefinitionAuthoringRecord{SpecificationRequests: []workspace.DefinitionAuthoringSpecificationRequest{{Diagnostic: &workspace.DefinitionAuthoringDiagnostic{}}}}
-			if historical {
-				item.DefinitionAuthoringHistory = []workspace.DefinitionAuthoringConfirmedRevision{{Record: record}}
-			} else {
-				item.DefinitionAuthoring = &record
-			}
-			items[item.ID] = item
-			if err := saveWorkspacePersistenceMap(path, items); err != nil {
-				t.Fatal(err)
-			}
-			info, err := os.Stat(path)
-			if err != nil || info.Mode().Perm() != 0o600 {
-				t.Fatalf("Workspace 原始诊断未使用私有权限: %v %v", info, err)
-			}
-			if err := os.Chmod(path, 0o644); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := loadWorkspacePersistenceMap(path); err == nil {
-				t.Fatal("公开可读的原始诊断文件未拒绝")
-			}
-		})
+	for _, preparation := range []bool{false, true} {
+		for _, historical := range []bool{false, true} {
+			t.Run(map[bool]string{false: "current", true: "history"}[historical]+fmt.Sprint(preparation), func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "workspace.json")
+				defer EvictMapFileCache(path)
+				item := workspace.Workspace{ID: "ws-diagnostic"}
+				items := map[common.WorkspaceID]workspace.Workspace{item.ID: item}
+				if err := saveWorkspacePersistenceMap(path, items); err != nil {
+					t.Fatal(err)
+				}
+				record := workspace.DefinitionAuthoringRecord{SpecificationRequests: []workspace.DefinitionAuthoringSpecificationRequest{{Diagnostic: &workspace.DefinitionAuthoringDiagnostic{}}}}
+				if preparation {
+					record = workspace.DefinitionAuthoringRecord{PreparationDiagnostics: []workspace.DefinitionAuthoringPreparationDiagnostic{{}}}
+				}
+				if historical {
+					item.DefinitionAuthoringHistory = []workspace.DefinitionAuthoringConfirmedRevision{{Record: record}}
+				} else {
+					item.DefinitionAuthoring = &record
+				}
+				items[item.ID] = item
+				if err := saveWorkspacePersistenceMap(path, items); err != nil {
+					t.Fatal(err)
+				}
+				info, err := os.Stat(path)
+				if err != nil || info.Mode().Perm() != 0o600 {
+					t.Fatalf("Workspace 原始诊断未使用私有权限: %v %v", info, err)
+				}
+				if err := os.Chmod(path, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := loadWorkspacePersistenceMap(path); err == nil {
+					t.Fatal("公开可读的原始诊断文件未拒绝")
+				}
+			})
+		}
 	}
 }
 

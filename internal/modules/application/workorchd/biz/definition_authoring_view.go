@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governanceports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/specifications"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -182,6 +183,29 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 			result.Proposal = &proposal
 		}
 	}
+	// 已 reserve 的未决请求优先于已知失败和准备诊断。
+	// 历史准备诊断不能覆盖确认、准入或完整 ready ledger。
+	for _, request := range record.DerivationRequests {
+		if request.Input.InputHash() == record.InputHash && workspace.WorkspaceTemplateSnapshotHash(&request.Template) == record.TemplateSnapshotHash && request.FailureCode == "" && request.Proposal == nil {
+			result.State = "outcome_unresolved"
+			break
+		}
+	}
+	if derivation != nil && derivation.Proposal != nil {
+		for _, request := range record.SpecificationRequests {
+			if request.DerivationPermitID == derivation.PermitID && request.FailureCode == "" && request.Proposal == nil && request.Review == nil {
+				result.State = "outcome_unresolved"
+				break
+			}
+		}
+	}
+	for _, diagnostic := range record.PreparationDiagnostics {
+		current := view.Confirmation == nil && view.AdmissionCandidate == nil && view.ActivationAdmission == nil && authoringPreparationDiagnosticCurrent(*record, derivation, diagnostic)
+		result.PreparationDiagnostics = append(result.PreparationDiagnostics, authoringPreparationDiagnosticMetadata(diagnostic, current))
+		if current && (result.State == "draft" || result.State == "derived" || result.State == "reviewing" || result.State == "review_blocked") {
+			result.State = "preparation_failed"
+		}
+	}
 	if view.Confirmation != nil {
 		result.ConfirmationPhase = string(view.Confirmation.Phase)
 		// 只投影 owner 已校验的确认身份；revision 仅约束首次准备，重放由持久 journal 校验。
@@ -214,6 +238,61 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 		}
 	}
 	return result, nil
+}
+
+func authoringPreparationDiagnosticCurrent(record workspace.DefinitionAuthoringRecord, derivation *workspace.DefinitionDerivationRequest, diagnostic workspace.DefinitionAuthoringPreparationDiagnostic) bool {
+	if diagnostic.InputHash != record.InputHash || diagnostic.TemplateSnapshotHash != record.TemplateSnapshotHash {
+		return false
+	}
+	for _, request := range record.DerivationRequests {
+		if request.Input.InputHash() == record.InputHash && workspace.WorkspaceTemplateSnapshotHash(&request.Template) == record.TemplateSnapshotHash && request.Proposal == nil && request.FailureCode == "" {
+			return false
+		}
+	}
+	if derivation == nil {
+		return diagnostic.Stage == workspace.DefinitionAuthoringPreparationDerivation && diagnostic.TargetRequestID == "derive/"+record.InputHash
+	}
+	if derivation.Proposal == nil || derivation.FailureCode != "" || diagnostic.DerivationPermitID != derivation.PermitID {
+		return false
+	}
+	var proposal *workspace.GoalSpecification
+	for _, request := range record.SpecificationRequests {
+		if request.DerivationPermitID != derivation.PermitID {
+			continue
+		}
+		if request.FailureCode != "" || request.Proposal == nil && request.Review == nil {
+			return false
+		}
+		if request.Proposal != nil {
+			proposal = request.Proposal
+		}
+	}
+	if proposal == nil {
+		return diagnostic.Stage == workspace.DefinitionAuthoringPreparationProposal && diagnostic.TargetRequestID == "proposal/"+derivation.PermitID
+	}
+	for _, kind := range specifications.ReviewKinds() {
+		completed := false
+		for _, request := range record.SpecificationRequests {
+			if request.DerivationPermitID == derivation.PermitID && request.ReviewKind == kind && request.ProposalHash == proposal.ContentHash() && request.Review != nil {
+				completed = true
+				break
+			}
+		}
+		if !completed {
+			return diagnostic.Stage == workspace.DefinitionAuthoringPreparationReview && diagnostic.ReviewKind == kind && diagnostic.ProposalHash == proposal.ContentHash() && diagnostic.TargetRequestID == "review/"+kind+"/"+derivation.PermitID
+		}
+	}
+	return false
+}
+
+func authoringPreparationDiagnosticMetadata(d workspace.DefinitionAuthoringPreparationDiagnostic, current bool) workorchmanagementcontract.DefinitionAuthoringPreparationDiagnosticMetadata {
+	return workorchmanagementcontract.DefinitionAuthoringPreparationDiagnosticMetadata{
+		DiagnosticID: d.DiagnosticID, WorkspaceID: string(d.WorkspaceID), InputHash: d.InputHash, TemplateSnapshotHash: d.TemplateSnapshotHash,
+		ObservedWorkspaceRevision: d.ObservedWorkspaceRevision, Stage: string(d.Stage), TargetRequestID: d.TargetRequestID,
+		DerivationPermitID: d.DerivationPermitID, ReviewKind: d.ReviewKind, ProposalHash: d.ProposalHash,
+		PhaseCode: d.PhaseCode, ResourceRef: d.ResourceRef, ProviderBindingHash: d.ProviderBindingHash,
+		CauseSHA256: d.CauseSHA256, CauseBytes: d.CauseBytes, CauseSaved: d.CauseSaved, NotSavedReason: d.NotSavedReason, Current: current,
+	}
 }
 
 func authoringItemSourceKind(ref string) string {

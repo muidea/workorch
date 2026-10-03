@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, App as AntApp, Button, Form, Input, List, Modal, Select, Space, Tag, Typography } from 'antd';
 import { workorchApi } from '../../api';
 import { errorMessage } from '../../helpers';
-import { authoringSourceLabel, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringConfirmationRecovery, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling } from '../../workspaceAuthoring';
+import { AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS, authoringSourceLabel, AuthoringAcceptedPreparationObservation, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringConfirmationRecovery, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling } from '../../workspaceAuthoring';
 import type { AuthoringEditorRecovery, AuthoringEditorValues } from '../../workspaceAuthoring';
 import type { DefinitionAuthoringView, WorkspaceTemplate } from '../../types';
 import { AuthoringDiagnosticDetails } from './AuthoringDiagnosticDetails';
+import { AuthoringPreparationDiagnosticDetails } from './AuthoringPreparationDiagnosticDetails';
 
 type Props = { open: boolean; workspaceId?: string; onClose: () => void; onAdmitted: () => Promise<void> };
 type Values = AuthoringEditorValues;
@@ -25,9 +26,13 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
   const editVersion = useRef(0);
   const session = useRef(new AuthoringSessionFence());
   const queries = useRef(new AuthoringQueryFence());
+  const acceptedPreparationObservation = useRef(new AuthoringAcceptedPreparationObservation());
+  const [acceptedPreparationObservationTimedOut, setAcceptedPreparationObservationTimedOut] = useState(false);
+  const [acceptedPreparationObservationActive, setAcceptedPreparationObservationActive] = useState(false);
+  const [acceptedPreparationObservationGeneration, setAcceptedPreparationObservationGeneration] = useState(0);
   const observe = (next: DefinitionAuthoringView) => setView(current => current ? mergeAuthoringObservation(current, next) : next);
   const close = (force = false) => {
-    if (!force && (edited || busy || recovery.current.pendingSave || recovery.current.pendingConfirmation || ['confirming', 'admitting'].includes(view?.state || ''))) {
+    if (!force && (edited || busy || acceptedPreparationObservationActive || recovery.current.pendingSave || recovery.current.pendingConfirmation || ['confirming', 'admitting'].includes(view?.state || ''))) {
       const closeToken = session.current.current();
       modal.confirm({
         title: '关闭并丢弃页面内输入与重放身份？',
@@ -42,6 +47,9 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
     recovery.current = {};
     setView(undefined);
     setEdited(false);
+    setAcceptedPreparationObservationActive(false);
+    setAcceptedPreparationObservationTimedOut(false);
+    acceptedPreparationObservation.current = new AuthoringAcceptedPreparationObservation();
     setBusy(false);
     setFailure('');
     form.resetFields();
@@ -63,6 +71,9 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
     setEdited(false);
     setBusy(false);
     setFailure('');
+    acceptedPreparationObservation.current = new AuthoringAcceptedPreparationObservation();
+    setAcceptedPreparationObservationTimedOut(false);
+    setAcceptedPreparationObservationActive(false);
     form.resetFields();
     const openingEditVersion = editVersion.current;
     let disposed = false;
@@ -84,24 +95,45 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
   }, [open, workspaceId]);
 
   useEffect(() => {
-    if (!open || busy || !view || !authoringNeedsPolling(view)) return;
+    if (!open || !acceptedPreparationObservationActive) return;
+    const token = session.current.current();
+    let disposed = false;
+    const timeout = window.setTimeout(() => {
+      if (disposed || !session.current.matches(token) || !acceptedPreparationObservation.current.expire()) return;
+      queries.current.invalidate();
+      setAcceptedPreparationObservationActive(false);
+      setAcceptedPreparationObservationTimedOut(true);
+    }, AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS);
+    return () => { disposed = true; window.clearTimeout(timeout); };
+  }, [open, acceptedPreparationObservationActive, acceptedPreparationObservationGeneration]);
+
+  useEffect(() => {
+    if (!open || busy || !view || !authoringNeedsPolling(view, acceptedPreparationObservationActive)) return;
     const token = session.current.current();
     let disposed = false;
     let timer: number;
     const poll = async () => {
+      if (acceptedPreparationObservationActive && !acceptedPreparationObservation.current.isActive()) return;
       const query = queries.current.begin();
       try {
         const next = await queries.current.read(() => workorchApi.readDefinitionAuthoring(view.workspaceId), () => !disposed && session.current.matches(token) && queries.current.matches(query));
-        if (!disposed && session.current.matches(token) && queries.current.matches(query)) observe(next);
+        if (!disposed && session.current.matches(token) && queries.current.matches(query)) {
+          if (acceptedPreparationObservationActive) {
+            const acceptedObservation = acceptedPreparationObservation.current.observe(next);
+            setAcceptedPreparationObservationActive(acceptedObservation.active);
+            setAcceptedPreparationObservationTimedOut(acceptedObservation.exhausted);
+          }
+          observe(next);
+        }
       } catch (error) {
         if (!disposed && session.current.matches(token) && queries.current.matches(query)) setFailure(errorMessage(error));
       } finally {
-        if (!disposed && session.current.matches(token)) timer = window.setTimeout(poll, 1500);
+        if (!disposed && session.current.matches(token) && queries.current.matches(query) && (!acceptedPreparationObservationActive || acceptedPreparationObservation.current.isActive())) timer = window.setTimeout(poll, 1500);
       }
     };
     timer = window.setTimeout(poll, 1500);
     return () => { disposed = true; window.clearTimeout(timer); };
-  }, [open, busy, view?.workspaceId, view?.state, view?.compilationAccepted]);
+  }, [open, busy, view?.workspaceId, view?.state, view?.compilationAccepted, acceptedPreparationObservationActive, acceptedPreparationObservationGeneration]);
 
   const generate = async () => {
     const token = session.current.current();
@@ -110,6 +142,9 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
     catch (error) { setFailure(errorMessage(error)); return; }
     if (serverRecoveryInvalid) { setFailure('服务端确认恢复参数不合法或未匹配，sealed 状态禁止编辑或确认'); return; }
     queries.current.invalidate();
+    acceptedPreparationObservation.current = new AuthoringAcceptedPreparationObservation();
+    setAcceptedPreparationObservationActive(false);
+    setAcceptedPreparationObservationTimedOut(false);
     setBusy(true); setFailure('');
     try {
       const values = await form.validateFields();
@@ -132,6 +167,13 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
       persist({}); apply(current);
       const next = await workorchApi.compileDefinitionAuthoring(current.workspaceId);
       if (!session.current.matches(token)) return;
+      if (next.compilationAccepted) {
+        acceptedPreparationObservation.current.begin(current);
+        const acceptedObservation = acceptedPreparationObservation.current.observe(next);
+        setAcceptedPreparationObservationActive(acceptedObservation.active);
+        setAcceptedPreparationObservationTimedOut(false);
+        setAcceptedPreparationObservationGeneration(generation => generation + 1);
+      }
       observe(next);
     } catch (error) { if (session.current.matches(token)) setFailure(errorMessage(error)); }
     finally { if (session.current.matches(token)) setBusy(false); }
@@ -217,6 +259,9 @@ export function WorkspaceAuthoringEditor({ open, workspaceId, onClose, onAdmitte
       {view && !view.templateCurrent && <Alert type="warning" message="模板已变化，请保存修订并重新审查。" />}
       {edited && <Alert type="warning" message="本地输入已修改，旧规格不可确认。" />}
       {view?.admissionViolationCode && <Alert type="warning" message={view.admissionViolationCode} description={view.admissionOffendingRefs?.join('、')} />}
+      {view?.preparationDiagnostics?.map(diagnostic => <Alert key={diagnostic.diagnosticId} type="error" showIcon message={`${diagnostic.current ? '当前' : '历史'}前置准备失败 · ${diagnostic.stage}${diagnostic.reviewKind ? ` · ${diagnostic.reviewKind}` : ''} · ${diagnostic.phaseCode}`} description={<Space direction="vertical" style={{ width: '100%' }}><Typography.Text>前置准备失败，尚未为该阶段取得 provider permit；修复后显式重试。此提示不表示其他阶段未调用 provider。</Typography.Text><AuthoringPreparationDiagnosticDetails diagnostic={diagnostic} /></Space>} />)}
+      {acceptedPreparationObservationActive && <Alert type="info" showIcon message="本次任务已受理，正在观察 owner 状态；页面观察是临时的，不会恢复或取消服务端事务。" />}
+      {acceptedPreparationObservationTimedOut && <Alert type="warning" showIcon message="观察期限已到，最近一次可用 owner 状态为原前置准备失败；无法确认后台任务是否仍在执行。请手动刷新核对或修复后显式重试。" />}
       {view?.requests?.filter(request => request.state === 'failed').map((request, index) => <Alert key={`${request.phase}-${request.reviewKind || index}`} type="error" showIcon message={`规格请求失败：${request.phase}`} description={<AuthoringDiagnosticDetails workspaceId={view.workspaceId} permitId={request.permitId} phase={request.phase} failureCode={request.failureCode} diagnostic={request.diagnostic} />} />)}
       {view?.state === 'outcome_unresolved' && <Alert type="warning" message="持久请求结果未决，不会自动重发 provider；可查询恢复或修订输入。" />}
       <List dataSource={view?.proposal?.verifications || []} renderItem={item => <List.Item>{item.id} · {item.status} · {item.declaration}</List.Item>} />

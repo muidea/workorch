@@ -3,6 +3,7 @@ package readmodelprojection
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/definitioncore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
@@ -20,12 +21,17 @@ func workspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcor
 		Decisions:             input.Decisions,
 		Approvals:             input.Approvals,
 	}
+	if input.ProjectionRun != nil {
+		run := runtimecore.MapRun(input.ProjectionRun)
+		ret.Run = &run
+	}
 	ret.LLMUsageTraces = mapLLMUsageTracesFromEventRecords(mapEventRecords(input.LLMUsageEventRecords), "")
 	ret.LLMContextBudgetSummary = summarizeLLMContextBudgets(ret.LLMContextBudgets)
 	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
 	ret.Acceptance = mapAcceptanceProjection(input.ProjectionRun)
 	ret.TaskProgress = mapLocalizedWorkspaceTaskProgress(ret)
 	applyRuntimeProgress(&ret.TaskProgress, input.ProjectionRun)
+	ret.TaskProgress = finalizeWorkspaceFormalProgress(ret.TaskProgress, ret)
 	ret.DisplayOutcome = mapWorkspaceOutcome(ret)
 	ret.Result = workspaceSnapshotResultByID(ret.Results, ret.DisplayOutcome.ResultID)
 	ret.RunHeartbeat = mapRunHeartbeat(ret)

@@ -1,6 +1,10 @@
 package readmodelprojection
 
 import (
+	"strings"
+
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/localizationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
@@ -56,9 +60,7 @@ func primaryTaskProgressResult(items []projectioncontract.Result) *projectioncon
 }
 
 func resultProgressState(snapshot readmodelcore.RunSnapshotState) string {
-	results := runScopedResults(snapshot)
-	artifacts := runScopedArtifacts(snapshot)
-	return resultProgressStateFromOutputs(snapshot, results, artifacts)
+	return resultProgressStateFromOutputs(snapshot, snapshot.Results, nil)
 }
 
 func hasAcceptedRunResult(snapshot readmodelcore.RunSnapshotState) bool {
@@ -72,42 +74,175 @@ func hasAcceptedRunResult(snapshot readmodelcore.RunSnapshotState) bool {
 
 // source: progress_result_state_outputs.go
 
-func resultProgressStateFromOutputs(snapshot readmodelcore.RunSnapshotState, results []projectioncontract.Result, artifacts []projectioncontract.Artifact) string {
-	if len(results) == 0 && len(artifacts) == 0 {
-		if isTerminalRunState(snapshot.Run.State) {
-			return "failed"
-		}
-		return "pending"
-	}
-	for _, item := range results {
-		if item.State == string(common.ResultStateAccepted) && isTerminalOutcomeEligibleResultForSnapshot(item, snapshot) {
-			return "completed"
-		}
+func resultProgressStateFromOutputs(snapshot readmodelcore.RunSnapshotState, results []projectioncontract.Result, _ []projectioncontract.Artifact) string {
+	if result := exactOwnerTerminalResult(snapshot.Workspace, snapshot.Run, results); result != nil &&
+		snapshot.Run.State == string(common.RunStateCompleted) && result.State == string(common.ResultStateAccepted) {
+		return "completed"
 	}
 	if isTerminalRunState(snapshot.Run.State) {
-		for _, item := range results {
-			if item.State == string(common.ResultStateRejected) && isTerminalOutcomeEligibleResultForSnapshot(item, snapshot) {
-				return "failed"
-			}
-		}
-		if snapshot.Run.State == string(common.RunStateCompleted) {
-			if snapshotHasActiveCoverageWorkItems(snapshot) {
-				return "failed"
-			}
-			return "completed"
-		}
 		return "failed"
 	}
-	return "running"
+	for _, item := range results {
+		if resultMatchesRunScope(item, snapshot.Run) && isFinalOutcomeResult(item) {
+			return "running"
+		}
+	}
+	return "pending"
+}
+
+// exactOwnerTerminalResult observes the exact Result identity acknowledged by
+// the Run owner. The startup seal, not coverage/artifacts or a latest-result
+// heuristic, binds the immutable workspace/run/Goal/DoD scope.
+func exactOwnerTerminalResult(workspace appmodelcore.Workspace, run appmodelcore.Run, results []projectioncontract.Result) *projectioncontract.Result {
+	if strings.TrimSpace(workspace.ID) == "" || strings.TrimSpace(workspace.AdmittedStartupInputHash) == "" ||
+		strings.TrimSpace(run.ID) == "" || run.WorkspaceID != workspace.ID || strings.TrimSpace(run.GoalID) == "" ||
+		strings.TrimSpace(run.DoDID) == "" || run.StartupInputHash != workspace.AdmittedStartupInputHash ||
+		strings.TrimSpace(run.TerminalResultID) == "" || !isTerminalRunState(run.State) {
+		return nil
+	}
+	var selected *projectioncontract.Result
+	for idx := range results {
+		item := &results[idx]
+		if item.ID != run.TerminalResultID {
+			continue
+		}
+		// A duplicate exact identity is ambiguous even if one copy looks valid.
+		if selected != nil || !resultMatchesRunScope(*item, run) || !isFinalOutcomeResult(*item) {
+			return nil
+		}
+		selected = item
+	}
+	return selected
+}
+
+func resultMatchesRunScope(item projectioncontract.Result, run appmodelcore.Run) bool {
+	return run.ID != "" && run.WorkspaceID != "" && run.GoalID != "" && run.DoDID != "" &&
+		item.RunID == run.ID && item.WorkspaceID == run.WorkspaceID && item.GoalID == run.GoalID && item.DoDID == run.DoDID
+}
+
+// CurrentRun is the owner-selected observation. Without it (or an exact active
+// owner identity), history is ordered only by the Run owner's monotonic fence.
+// Unknown/tied generations cannot authorize selecting an accepted predecessor.
+func workspaceFormalProgressRun(snapshot readmodelcore.WorkspaceSnapshotState) *appmodelcore.Run {
+	if snapshot.Run != nil {
+		return snapshot.Run
+	}
+	if snapshot.Workspace.ActiveRunID != "" {
+		return workspaceRunByID(snapshot, snapshot.Workspace.ActiveRunID)
+	}
+	var selected *appmodelcore.Run
+	ambiguous := false
+	for idx := range snapshot.Runs {
+		run := &snapshot.Runs[idx]
+		if strings.TrimSpace(run.WorkspaceID) == "" {
+			return nil
+		}
+		if run.WorkspaceID != snapshot.Workspace.ID {
+			continue
+		}
+		if run.ID == "" || run.WorkspaceRunGeneration == 0 {
+			return nil
+		}
+		if selected == nil || run.WorkspaceRunGeneration > selected.WorkspaceRunGeneration {
+			selected = run
+			ambiguous = false
+		} else if run.WorkspaceRunGeneration == selected.WorkspaceRunGeneration && run.ID != selected.ID {
+			ambiguous = true
+		}
+	}
+	if ambiguous {
+		return nil
+	}
+	return selected
+}
+
+func workspaceFormalRunSnapshot(snapshot readmodelcore.WorkspaceSnapshotState) *readmodelcore.RunSnapshotState {
+	run := workspaceFormalProgressRun(snapshot)
+	if run == nil {
+		return nil
+	}
+	return &readmodelcore.RunSnapshotState{Workspace: snapshot.Workspace, Run: *run, Results: snapshot.Results, Artifacts: snapshot.Artifacts}
+}
+
+func preserveUnrelatedCachedProgress(progress projectioncontract.TaskProgress, results []projectioncontract.Result, terminalResultID string) bool {
+	return len(progress.Milestones) == 0 && len(results) == 0 && terminalResultID == "" && progress.Runtime == nil && progress.Summary != ""
+}
+
+func finalizeRunFormalProgress(progress projectioncontract.TaskProgress, snapshot readmodelcore.RunSnapshotState) projectioncontract.TaskProgress {
+	// Custom cached views without formal-result facts are not formal projection
+	// authority. Preserve their unrelated summary rather than rewriting it.
+	if preserveUnrelatedCachedProgress(progress, snapshot.Results, snapshot.Run.TerminalResultID) {
+		return progress
+	}
+	progress.Milestones = append([]projectioncontract.ProgressMilestone(nil), progress.Milestones...)
+	state := resultProgressState(snapshot)
+	refs := []string(nil)
+	if result := exactOwnerTerminalResult(snapshot.Workspace, snapshot.Run, snapshot.Results); result != nil {
+		refs = []string{result.ID}
+	}
+	found := false
+	for idx := range progress.Milestones {
+		if progress.Milestones[idx].ID == "formal_result" {
+			progress.Milestones[idx].State = state
+			progress.Milestones[idx].EvidenceRefs = refs
+			found = true
+		}
+	}
+	if !found {
+		progress.Milestones = append(progress.Milestones, projectioncontract.ProgressMilestone{
+			ID: "formal_result", Title: localizationcore.MilestoneTitle(snapshotLanguage(snapshot), "formal_result"), State: state, EvidenceRefs: refs,
+		})
+	}
+	progress.CurrentMilestone = currentProgressMilestone(progress.Milestones)
+	progress.Summary = taskProgressSummary(progress, &snapshot)
+	return progress
+}
+
+func finalizeWorkspaceFormalProgress(progress projectioncontract.TaskProgress, snapshot readmodelcore.WorkspaceSnapshotState) projectioncontract.TaskProgress {
+	terminalResultID := ""
+	if run := workspaceFormalProgressRun(snapshot); run != nil {
+		terminalResultID = run.TerminalResultID
+	}
+	if preserveUnrelatedCachedProgress(progress, snapshot.Results, terminalResultID) {
+		return progress
+	}
+	progress.Milestones = append([]projectioncontract.ProgressMilestone(nil), progress.Milestones...)
+	defined := projectioncontract.ProgressMilestone{
+		ID: "workspace_defined", Title: localizationcore.WorkspaceProgressText(workspaceSnapshotLanguage(snapshot), "workspace_defined"), State: "pending",
+	}
+	if strings.TrimSpace(snapshot.Workspace.AdmittedStartupInputHash) != "" {
+		defined.State = "completed"
+		defined.EvidenceRefs = []string{snapshot.Workspace.ID}
+	}
+	found := false
+	for idx := range progress.Milestones {
+		if progress.Milestones[idx].ID == defined.ID {
+			progress.Milestones[idx] = defined
+			found = true
+		}
+	}
+	if !found {
+		progress.Milestones = append([]projectioncontract.ProgressMilestone{defined}, progress.Milestones...)
+	}
+	if runSnapshot := workspaceFormalRunSnapshot(snapshot); runSnapshot != nil {
+		progress.RunID = runSnapshot.Run.ID
+		return finalizeRunFormalProgress(progress, *runSnapshot)
+	}
+	return finalizeRunFormalProgress(progress, readmodelcore.RunSnapshotState{Workspace: snapshot.Workspace})
 }
 
 // source: progress_workspace_items.go
 
 func workspaceProgressMilestones(snapshot readmodelcore.WorkspaceSnapshotState, labels workspaceTaskProgressLabels) []projectioncontract.ProgressMilestone {
-	return []projectioncontract.ProgressMilestone{
-		{ID: "workspace_defined", Title: labels.WorkspaceDefined, State: "completed", EvidenceRefs: []string{snapshot.Workspace.ID}},
-		{ID: "formal_result", Title: labels.FormalResult, State: progressStateFromCount(len(snapshot.Results), false, snapshot.Workspace.State == string(common.WorkspaceStateActive)), EvidenceRefs: idsFromResults(snapshot.Results)},
+	ret := []projectioncontract.ProgressMilestone{
+		{ID: "workspace_defined", Title: labels.WorkspaceDefined, State: "pending"},
+		{ID: "formal_result", Title: labels.FormalResult, State: "pending"},
 	}
+	if strings.TrimSpace(snapshot.Workspace.AdmittedStartupInputHash) != "" {
+		ret[0].State = "completed"
+		ret[0].EvidenceRefs = []string{snapshot.Workspace.ID}
+	}
+	return ret
 }
 
 func workspaceProgressItems(snapshot readmodelcore.WorkspaceSnapshotState, labels workspaceTaskProgressLabels) []projectioncontract.ProgressItem {
