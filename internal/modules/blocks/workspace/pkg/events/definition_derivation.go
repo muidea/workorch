@@ -32,6 +32,7 @@ type CompleteDefinitionDerivationCommand struct {
 	PermitID    string
 	Proposal    *workspace.DefinitionDerivedAcceptance
 	FailureCode string
+	Diagnostic  *workspace.DefinitionAuthoringDiagnostic
 }
 
 func (c CompleteDefinitionDerivationCommand) Validate() error {
@@ -39,6 +40,9 @@ func (c CompleteDefinitionDerivationCommand) Validate() error {
 		return common.ErrInvalidArgument
 	}
 	if c.FailureCode != "" && c.FailureCode != "provider_failed" && c.FailureCode != "invalid_proposal" {
+		return common.ErrInvalidArgument
+	}
+	if c.Diagnostic != nil && (c.FailureCode != "invalid_proposal" && c.FailureCode != "provider_failed" || c.Diagnostic.Validate() != nil || c.FailureCode == "provider_failed" && c.Diagnostic.ProviderCode == "") {
 		return common.ErrInvalidArgument
 	}
 	return nil
@@ -85,7 +89,7 @@ func (r DefinitionDerivationRequestResult) ValidateCompletion(c CompleteDefiniti
 	if err := r.validate(); err != nil {
 		return err
 	}
-	if r.FreshPermitID != "" || r.Request.Input.WorkspaceID != c.WorkspaceID || r.Request.PermitID != c.PermitID || r.Request.FailureCode != c.FailureCode || !reflect.DeepEqual(r.Request.Proposal, c.Proposal) {
+	if r.FreshPermitID != "" || r.Request.Input.WorkspaceID != c.WorkspaceID || r.Request.PermitID != c.PermitID || r.Request.FailureCode != c.FailureCode || !reflect.DeepEqual(r.Request.Proposal, c.Proposal) || !reflect.DeepEqual(r.Request.Diagnostic, c.Diagnostic) {
 		return common.ErrConflict
 	}
 	return nil

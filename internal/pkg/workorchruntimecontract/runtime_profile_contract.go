@@ -860,3 +860,345 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 	}
 	return true
 }
+
+// RuntimeSourceEvidencePolicy is the pure exact-source merge product. It is not a binding or execution authority.
+type RuntimeSourceEvidencePolicy struct {
+	RequiredEvidenceKinds                []string
+	AcceptedStepKinds                    []string
+	AcceptedOperationVariants            []RuntimeOperationVariantRef
+	RejectedStepKinds                    []string
+	EvidenceRole                         string
+	TargetRole                           string
+	TargetRefs                           []string
+	TargetDiscoverySources               []string
+	TargetSelectorRef                    string
+	TargetSelectorOwnerRef               string
+	TargetSelectorSubjectRef             string
+	TargetSelectorCandidateRefs          []string
+	ProspectiveTargetAllOfConstraintRefs []string
+	RequireTargetGrounding               bool
+	RequireDirectEvidence                bool
+	RequireClaimEvidence                 bool
+	RequireExecutableBehaviorEvidence    bool
+	RequireCoverageTargets               bool
+	RequireAssessment                    bool
+	RequiredOwnerFacts                   []RuntimeOwnerFactRequirement
+	OwnerFactConvergences                []RuntimeOwnerFactConvergence
+	ValidationFailureRepairConvergence   *RuntimeValidationFailureRepairConvergence
+	ImplementationWorkPolicy             *RuntimeImplementationWorkPolicy
+	VerificationPolicy                   *RuntimeVerificationPolicy
+	ValidationRecipeID                   string
+	RequiredCheckRefs                    []string
+	MetricConstraints                    []string
+	ArtifactRefs                         []string
+	DeclarationRef                       string
+	SemanticProofDeclarationRef          string
+	Description                          string
+}
+
+// RuntimeEvidenceDeclarationMatchesSource matches declaration selectors against source identity, never a CWI ID.
+func RuntimeEvidenceDeclarationMatchesSource(declaration RuntimeProfileEvidenceRequirement, scope, sourceID string) bool {
+	return strings.TrimSpace(declaration.Scope) == strings.TrimSpace(scope) && strings.TrimSpace(sourceID) != "" &&
+		(strings.TrimSpace(declaration.ID) == strings.TrimSpace(sourceID) || strings.TrimSpace(declaration.ID) == "*")
+}
+
+// CompileRuntimeSourceEvidencePolicy retains all exact and wildcard contributions,
+// in the same order used by activation. Wildcard recipe/check identities are not instantiated.
+// Additional requirements are adapter-owned policy projections, not owner state.
+func CompileRuntimeSourceEvidencePolicy(scope, sourceID string, profiles []RuntimeProfileContract, additional []RuntimeProfileEvidenceRequirement) (RuntimeSourceEvidencePolicy, error) {
+	scope, sourceID = strings.TrimSpace(scope), strings.TrimSpace(sourceID)
+	if scope == "" || sourceID == "" {
+		return RuntimeSourceEvidencePolicy{}, fmt.Errorf("source evidence policy requires exact scope and source identity")
+	}
+	candidates := make([]RuntimeProfileEvidenceRequirement, 0)
+	for _, profile := range NormalizeRuntimeProfileContracts(profiles) {
+		for _, requirement := range profile.EvidenceRequirements {
+			if !RuntimeEvidenceDeclarationMatchesSource(requirement, scope, sourceID) {
+				continue
+			}
+			requirement.TargetSelectorRef, requirement.TargetSelectorOwnerRef, requirement.TargetSelectorSubjectRef = ResolveRuntimeProfileTargetSelectorIdentity(profile.ID, requirement)
+			candidates = append(candidates, requirement)
+		}
+	}
+	for _, requirement := range additional {
+		if RuntimeEvidenceDeclarationMatchesSource(requirement, scope, sourceID) {
+			candidates = append(candidates, requirement)
+		}
+	}
+	for _, requirement := range candidates {
+		if err := validateRuntimeSourceAcceptedKinds(requirement); err != nil {
+			return RuntimeSourceEvidencePolicy{}, err
+		}
+	}
+	policy, err := mergeRuntimeSourceEvidencePolicy(RuntimeSourceEvidencePolicy{RequireAssessment: true}, runtimeSourceFilterRequirementsByID(candidates, sourceID))
+	if err != nil {
+		return RuntimeSourceEvidencePolicy{}, err
+	}
+	if sourceID != "*" {
+		policy, err = mergeRuntimeSourceEvidencePolicy(policy, runtimeSourceWildcardQualityRequirements(runtimeSourceFilterRequirementsByID(candidates, "*")))
+		if err != nil {
+			return RuntimeSourceEvidencePolicy{}, err
+		}
+	}
+	if len(policy.RequiredEvidenceKinds) == 0 {
+		switch scope {
+		case "dodItem", "goalCoverage", "acceptanceDimension":
+			policy.RequiredEvidenceKinds = []string{EvidenceKindValidation}
+		}
+	}
+	if err := ValidateRuntimeOwnerFactConvergences(policy.RequiredOwnerFacts, policy.OwnerFactConvergences); err != nil {
+		return RuntimeSourceEvidencePolicy{}, err
+	}
+	policy.SemanticProofDeclarationRef = CanonicalRuntimeDefinitionEvidenceDeclarationRef(scope, sourceID)
+	return policy, nil
+}
+
+func runtimeSourceWildcardQualityRequirements(values []RuntimeProfileEvidenceRequirement) []RuntimeProfileEvidenceRequirement {
+	ret := make([]RuntimeProfileEvidenceRequirement, 0, len(values))
+	for _, value := range values {
+		// A wildcard is a declarative policy template, not Runtime authority. The
+		// Application may instantiate its constraints into an already admitted
+		// exact CWI, whose later owner catalog and SM-2 binding remain necessary.
+		// Only wildcard identity and recipe/check proof identity are discarded:
+		// those must come from the canonical exact Definition and owner catalog.
+		ret = append(ret, RuntimeProfileEvidenceRequirement{
+			EvidenceRole:                         value.EvidenceRole,
+			TargetRole:                           value.TargetRole,
+			TargetRefs:                           append([]string(nil), value.TargetRefs...),
+			TargetDiscoverySources:               append([]string(nil), value.TargetDiscoverySources...),
+			TargetSelectorRef:                    value.TargetSelectorRef,
+			TargetSelectorOwnerRef:               value.TargetSelectorOwnerRef,
+			TargetSelectorSubjectRef:             value.TargetSelectorSubjectRef,
+			TargetSelectorCandidateRefs:          append([]string(nil), value.TargetSelectorCandidateRefs...),
+			ProspectiveTargetAllOfConstraintRefs: append([]string(nil), value.ProspectiveTargetAllOfConstraintRefs...),
+			RequireTargetGrounding:               value.RequireTargetGrounding,
+			RequiredEvidenceKinds:                append([]string(nil), value.RequiredEvidenceKinds...),
+			RequireDirectEvidence:                value.RequireDirectEvidence,
+			RequireClaimEvidence:                 value.RequireClaimEvidence,
+			RequireExecutableBehaviorEvidence:    value.RequireExecutableBehaviorEvidence,
+			RequireCoverageTargets:               value.RequireCoverageTargets,
+			AcceptedStepKinds:                    append([]string(nil), value.AcceptedStepKinds...),
+			AcceptedOperationVariants:            append([]RuntimeOperationVariantRef(nil), value.AcceptedOperationVariants...),
+			RejectedStepKinds:                    append([]string(nil), value.RejectedStepKinds...),
+			MetricConstraints:                    append([]string(nil), value.MetricConstraints...),
+			ArtifactRefs:                         append([]string(nil), value.ArtifactRefs...),
+			VerificationPolicy:                   value.VerificationPolicy,
+			RequiredOwnerFacts:                   append([]RuntimeOwnerFactRequirement(nil), value.RequiredOwnerFacts...),
+			OwnerFactConvergences:                CloneRuntimeOwnerFactConvergences(value.OwnerFactConvergences),
+			Description:                          value.Description,
+		})
+		if value.ValidationFailureRepairConvergence != nil {
+			clone := value.ValidationFailureRepairConvergence.Clone()
+			ret[len(ret)-1].ValidationFailureRepairConvergence = &clone
+		}
+		if value.ImplementationWorkPolicy != nil {
+			clone := value.ImplementationWorkPolicy.Clone()
+			ret[len(ret)-1].ImplementationWorkPolicy = &clone
+		}
+	}
+	return ret
+}
+
+func runtimeSourceFilterRequirementsByID(values []RuntimeProfileEvidenceRequirement, id string) []RuntimeProfileEvidenceRequirement {
+	ret := make([]RuntimeProfileEvidenceRequirement, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value.ID) == id {
+			ret = append(ret, value)
+		}
+	}
+	return ret
+}
+
+func mergeRuntimeSourceEvidencePolicy(base RuntimeSourceEvidencePolicy, requirements []RuntimeProfileEvidenceRequirement) (RuntimeSourceEvidencePolicy, error) {
+	for _, requirement := range requirements {
+		// Stable unique union for required evidence / rejected kinds.
+		base.RequiredEvidenceKinds = runtimeSourceStableStringUnion(base.RequiredEvidenceKinds, requirement.RequiredEvidenceKinds)
+		base.RejectedStepKinds = runtimeSourceStableStringUnion(base.RejectedStepKinds, requirement.RejectedStepKinds)
+		// Boolean constraints take OR and cannot be relaxed by lower-priority layers already applied.
+		base.RequireDirectEvidence = base.RequireDirectEvidence || requirement.RequireDirectEvidence
+		base.RequireClaimEvidence = base.RequireClaimEvidence || requirement.RequireClaimEvidence
+		base.RequireExecutableBehaviorEvidence = base.RequireExecutableBehaviorEvidence || requirement.RequireExecutableBehaviorEvidence
+		base.RequireCoverageTargets = base.RequireCoverageTargets || requirement.RequireCoverageTargets
+		// Roles retain first-non-empty precedence. Operation kinds/variants are
+		// proof-shape declarations instead: evidence kinds are compiled into
+		// separate binding proofs later, so dropping a lower-priority validation
+		// kind merely because a state-change rule appeared first would make a
+		// required proof impossible to express.
+		if base.EvidenceRole == "" && strings.TrimSpace(requirement.EvidenceRole) != "" {
+			base.EvidenceRole = strings.TrimSpace(requirement.EvidenceRole)
+		}
+		if base.TargetRole == "" && strings.TrimSpace(requirement.TargetRole) != "" {
+			base.TargetRole = strings.TrimSpace(requirement.TargetRole)
+		}
+		if base.TargetSelectorRef == "" && strings.TrimSpace(requirement.TargetSelectorRef) != "" {
+			base.TargetSelectorRef = strings.TrimSpace(requirement.TargetSelectorRef)
+		}
+		if base.TargetSelectorOwnerRef == "" && strings.TrimSpace(requirement.TargetSelectorOwnerRef) != "" {
+			base.TargetSelectorOwnerRef = strings.TrimSpace(requirement.TargetSelectorOwnerRef)
+		}
+		if base.TargetSelectorSubjectRef == "" && strings.TrimSpace(requirement.TargetSelectorSubjectRef) != "" {
+			base.TargetSelectorSubjectRef = strings.TrimSpace(requirement.TargetSelectorSubjectRef)
+		}
+		base.TargetSelectorCandidateRefs = runtimeSourceStableStringUnion(base.TargetSelectorCandidateRefs, requirement.TargetSelectorCandidateRefs)
+		base.ProspectiveTargetAllOfConstraintRefs = runtimeSourceStableStringUnion(base.ProspectiveTargetAllOfConstraintRefs, requirement.ProspectiveTargetAllOfConstraintRefs)
+		base.TargetRefs = runtimeSourceStableStringUnion(base.TargetRefs, requirement.TargetRefs)
+		base.TargetDiscoverySources = runtimeSourceStableStringUnion(base.TargetDiscoverySources, requirement.TargetDiscoverySources)
+		base.RequireTargetGrounding = base.RequireTargetGrounding || requirement.RequireTargetGrounding
+		base.AcceptedStepKinds = runtimeSourceStableStringUnion(base.AcceptedStepKinds, requirement.AcceptedStepKinds)
+		base.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(append(base.AcceptedOperationVariants, requirement.AcceptedOperationVariants...))
+		if base.Description == "" && strings.TrimSpace(requirement.Description) != "" {
+			base.Description = strings.TrimSpace(requirement.Description)
+		}
+		if base.ValidationRecipeID == "" && strings.TrimSpace(requirement.ValidationRecipeID) != "" {
+			base.ValidationRecipeID = strings.TrimSpace(requirement.ValidationRecipeID)
+		}
+		base.RequiredCheckRefs = runtimeSourceStableStringUnion(base.RequiredCheckRefs, requirement.RequiredCheckRefs)
+		base.MetricConstraints = runtimeSourceStableStringUnion(base.MetricConstraints, requirement.MetricConstraints)
+		base.ArtifactRefs = runtimeSourceStableStringUnion(base.ArtifactRefs, requirement.ArtifactRefs)
+		base.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(append(base.RequiredOwnerFacts, requirement.RequiredOwnerFacts...))
+		base.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(append(base.OwnerFactConvergences, requirement.OwnerFactConvergences...))
+		if requirement.ValidationFailureRepairConvergence != nil {
+			if base.ValidationFailureRepairConvergence != nil && !SameRuntimeValidationFailureRepairConvergence(base.ValidationFailureRepairConvergence, requirement.ValidationFailureRepairConvergence) {
+				return RuntimeSourceEvidencePolicy{}, fmt.Errorf("coverage evidence policy has conflicting validation failure repair convergence declarations")
+			}
+			if base.ValidationFailureRepairConvergence == nil {
+				clone := requirement.ValidationFailureRepairConvergence.Clone()
+				base.ValidationFailureRepairConvergence = &clone
+			}
+		}
+		if requirement.VerificationPolicy != nil {
+			if base.VerificationPolicy != nil && !SameRuntimeVerificationPolicy(base.VerificationPolicy, requirement.VerificationPolicy) {
+				return RuntimeSourceEvidencePolicy{}, fmt.Errorf("coverage evidence policy has conflicting verification policies")
+			}
+			base.VerificationPolicy = requirement.VerificationPolicy
+		}
+		if requirement.ImplementationWorkPolicy != nil {
+			if base.ImplementationWorkPolicy != nil && !SameRuntimeImplementationWorkPolicy(base.ImplementationWorkPolicy, requirement.ImplementationWorkPolicy) {
+				return RuntimeSourceEvidencePolicy{}, fmt.Errorf("coverage evidence policy has conflicting implementation work declarations")
+			}
+			if base.ImplementationWorkPolicy == nil {
+				clone := requirement.ImplementationWorkPolicy.Clone()
+				base.ImplementationWorkPolicy = &clone
+			}
+		}
+		// Profile explicit primary_state_change implies state-change evidence.
+		if requirement.EvidenceRole == "primary_state_change" || len(requirement.AcceptedOperationVariants) > 0 {
+			base.RequiredEvidenceKinds = runtimeSourceStableStringUnion(base.RequiredEvidenceKinds, []string{EvidenceKindStateChange})
+		}
+	}
+	return base, nil
+}
+
+func validateRuntimeSourceAcceptedKinds(requirement RuntimeProfileEvidenceRequirement) error {
+	for _, kind := range requirement.AcceptedStepKinds {
+		canonical := CanonicalRuntimeBlockKind(kind)
+		if canonical == "" {
+			continue
+		}
+		if _, ok := RuntimeOperationDescriptorForKind(canonical); !ok {
+			return fmt.Errorf("profile accepted step kind %q has no runtime operation descriptor", kind)
+		}
+	}
+	for _, kind := range requirement.RejectedStepKinds {
+		// Rejected kinds may include non-dispatch kinds; only validate non-empty trim.
+		if strings.TrimSpace(kind) == "" {
+			return fmt.Errorf("profile rejected step kind must be non-empty")
+		}
+	}
+	return nil
+}
+
+func runtimeSourceStableStringUnion(values ...[]string) []string {
+	seen := map[string]struct{}{}
+	ret := []string{}
+	for _, group := range values {
+		for _, value := range group {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			ret = append(ret, value)
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	// Keep first-seen order for authority stability.
+	return ret
+}
+
+// RuntimeSourceEvidencePolicyRetainsDeclaration checks the authored contribution,
+// not mere selector existence or fallback validation. This is static applicability,
+// never evidence that an owner has an executable recipe, passed checks, or credit.
+func RuntimeSourceEvidencePolicyRetainsDeclaration(policy RuntimeSourceEvidencePolicy, declaration RuntimeProfileEvidenceRequirement, scope, sourceID string) bool {
+	if !RuntimeEvidenceDeclarationMatchesSource(declaration, scope, sourceID) || len(declaration.RequiredEvidenceKinds) == 0 || len(declaration.AcceptedStepKinds) == 0 {
+		return false
+	}
+	// These concrete identities are deliberately discarded from wildcard templates.
+	if declaration.ID == "*" && (declaration.ValidationRecipeID != "" || len(declaration.RequiredCheckRefs) > 0) {
+		return false
+	}
+	for _, kind := range declaration.RequiredEvidenceKinds {
+		if !runtimeProfileHasProofOperation(declaration.AcceptedStepKinds, kind) {
+			return false
+		}
+	}
+	for _, pair := range [][2]string{
+		{declaration.EvidenceRole, policy.EvidenceRole}, {declaration.TargetRole, policy.TargetRole},
+		{declaration.TargetSelectorRef, policy.TargetSelectorRef}, {declaration.TargetSelectorOwnerRef, policy.TargetSelectorOwnerRef},
+		{declaration.TargetSelectorSubjectRef, policy.TargetSelectorSubjectRef}, {declaration.ValidationRecipeID, policy.ValidationRecipeID},
+	} {
+		if pair[0] != "" && pair[0] != pair[1] {
+			return false
+		}
+	}
+	for _, pair := range [][2][]string{
+		{declaration.RequiredEvidenceKinds, policy.RequiredEvidenceKinds}, {declaration.AcceptedStepKinds, policy.AcceptedStepKinds},
+		{declaration.RejectedStepKinds, policy.RejectedStepKinds}, {declaration.TargetRefs, policy.TargetRefs},
+		{declaration.TargetDiscoverySources, policy.TargetDiscoverySources}, {declaration.TargetSelectorCandidateRefs, policy.TargetSelectorCandidateRefs},
+		{declaration.ProspectiveTargetAllOfConstraintRefs, policy.ProspectiveTargetAllOfConstraintRefs},
+		{declaration.RequiredCheckRefs, policy.RequiredCheckRefs}, {declaration.MetricConstraints, policy.MetricConstraints}, {declaration.ArtifactRefs, policy.ArtifactRefs},
+	} {
+		for _, value := range pair[0] {
+			if !containsString(pair[1], value) {
+				return false
+			}
+		}
+	}
+	if declaration.RequireTargetGrounding && !policy.RequireTargetGrounding || declaration.RequireDirectEvidence && !policy.RequireDirectEvidence ||
+		declaration.RequireClaimEvidence && !policy.RequireClaimEvidence || declaration.RequireExecutableBehaviorEvidence && !policy.RequireExecutableBehaviorEvidence ||
+		declaration.RequireCoverageTargets && !policy.RequireCoverageTargets {
+		return false
+	}
+	if !SameRuntimeOperationVariantRefs(policy.AcceptedOperationVariants, append(slices.Clone(policy.AcceptedOperationVariants), declaration.AcceptedOperationVariants...)) ||
+		!sameRuntimeOwnerFactRequirements(policy.RequiredOwnerFacts, append(slices.Clone(policy.RequiredOwnerFacts), declaration.RequiredOwnerFacts...)) {
+		return false
+	}
+	for _, required := range declaration.OwnerFactConvergences {
+		found := false
+		for _, actual := range policy.OwnerFactConvergences {
+			if SameRuntimeOwnerFactConvergences([]RuntimeOwnerFactConvergence{required}, []RuntimeOwnerFactConvergence{actual}) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	if declaration.ValidationFailureRepairConvergence != nil && !SameRuntimeValidationFailureRepairConvergence(policy.ValidationFailureRepairConvergence, declaration.ValidationFailureRepairConvergence) {
+		return false
+	}
+	if declaration.VerificationPolicy != nil && !SameRuntimeVerificationPolicy(policy.VerificationPolicy, declaration.VerificationPolicy) {
+		return false
+	}
+	if declaration.ImplementationWorkPolicy != nil && !SameRuntimeImplementationWorkPolicy(policy.ImplementationWorkPolicy, declaration.ImplementationWorkPolicy) {
+		return false
+	}
+	// Capability-state identities have no item-level projection in this compiler.
+	return len(declaration.CapabilityStateRequirements) == 0
+}

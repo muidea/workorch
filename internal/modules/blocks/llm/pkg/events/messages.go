@@ -744,6 +744,7 @@ func llmCacheUsageHasNoTokens(usage llmaudit.CacheUsage) bool {
 func MessageContracts() []eventcontract.MessageContract {
 	return eventcontract.MessageContracts(
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireRuntimeCapabilities),
+		eventcontract.CommandTopic[CompleteProviderDocumentCommand, CompleteProviderDocumentResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandCompleteProviderDocument),
 		eventcontract.CommandTopic[CompleteProviderCommand, CompleteProviderResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandCompleteProvider),
 		eventcontract.CommandTopic[GenerateEmbeddingCommand, GenerateEmbeddingResult]("llm", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicLLMCommandGenerateEmbedding),
 		eventcontract.CommandTopic[GetActiveConfigurationCommand, GetActiveConfigurationResult]("llm", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicLLMCommandGetActiveConfiguration),

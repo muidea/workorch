@@ -41,9 +41,8 @@ var (
 	errProviderRequestHardDeadline = errors.New("provider request hard deadline exceeded")
 )
 
-// ProviderHTTPStatusError preserves the provider status code across adapter
-// boundaries. Upstream response bodies are intentionally not retained because
-// they are untrusted and may contain credentials or provider-private context.
+// ProviderHTTPStatusError 保持 audit-safe 状态码；文档调用的响应原文
+// 通过独立的受限 WireObservation 保全，不混入错误字符串。
 type ProviderHTTPStatusError struct {
 	StatusCode int
 	Body       string
@@ -64,6 +63,8 @@ type ProviderProtocolError struct {
 type ProviderTransportError struct {
 	Code  string
 	cause error
+	// 仅供文档调用读取的原始 transport leaf，绝不进入 Error/审计。
+	diagnosticCause error
 }
 
 func (e *ProviderTransportError) Error() string {
@@ -456,9 +457,24 @@ func providerRequestContextError(ctx context.Context) error {
 
 func providerRequestErrorWithContext(err error, ctx context.Context) error {
 	if contextual := providerRequestContextError(ctx); contextual != nil {
+		if transport, ok := contextual.(*ProviderTransportError); ok {
+			transport.diagnosticCause = providerTransportLeaf(err)
+		}
 		return contextual
 	}
 	return providerRequestError(err)
+}
+
+// net/http 的 url.Error 包装包含调用配置 URL；仅保全实际 transport
+// leaf，不将请求包装或配置拼入诊断，也不清洗 leaf 原文。
+func providerTransportLeaf(err error) error {
+	for {
+		wrapped, ok := err.(*url.Error)
+		if !ok {
+			return err
+		}
+		err = wrapped.Err
+	}
 }
 
 func providerRequestError(err error) error {
@@ -469,28 +485,32 @@ func providerRequestError(err error) error {
 	if errors.As(err, &protocolErr) && protocolErr != nil {
 		return &ProviderProtocolError{Code: protocolErr.Code, ResponseBytes: protocolErr.ResponseBytes}
 	}
+	leaf := providerTransportLeaf(err)
+	transportError := func(code string, cause error) error {
+		return &ProviderTransportError{Code: code, cause: cause, diagnosticCause: leaf}
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return &ProviderTransportError{Code: "provider_request_timeout", cause: context.DeadlineExceeded}
+		return transportError("provider_request_timeout", context.DeadlineExceeded)
 	}
 	if errors.Is(err, context.Canceled) {
-		return &ProviderTransportError{Code: "request_canceled", cause: context.Canceled}
+		return transportError("request_canceled", context.Canceled)
 	}
 	var unknownAuthority x509.UnknownAuthorityError
 	var hostnameError x509.HostnameError
 	var certificateError x509.CertificateInvalidError
 	var recordHeaderError tls.RecordHeaderError
 	if errors.As(err, &unknownAuthority) || errors.As(err, &hostnameError) || errors.As(err, &certificateError) || errors.As(err, &recordHeaderError) {
-		return &ProviderTransportError{Code: "tls_verification_failed"}
+		return transportError("tls_verification_failed", nil)
 	}
 	var dnsError *net.DNSError
 	if errors.As(err, &dnsError) {
-		return &ProviderTransportError{Code: "dns_resolution_failed"}
+		return transportError("dns_resolution_failed", nil)
 	}
 	var networkError net.Error
 	if errors.As(err, &networkError) && networkError.Timeout() {
-		return &ProviderTransportError{Code: "network_timeout"}
+		return transportError("network_timeout", nil)
 	}
-	return &ProviderTransportError{Code: "request_failed"}
+	return transportError("request_failed", nil)
 }
 
 func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderRequest) (result llmmodels.ProviderCompletionResult, err error) {
@@ -501,7 +521,7 @@ func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderR
 	return p.completeResponses(ctx, request)
 }
 
-func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.ProviderRequest) (llmmodels.ProviderCompletionResult, error) {
+func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.ProviderRequest) (result llmmodels.ProviderCompletionResult, callErr error) {
 	if err := request.ValidateSchemaFormat(); err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
@@ -525,7 +545,7 @@ func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	result := llmmodels.ProviderCompletionResult{RequestBytes: len(payload)}
+	result = llmmodels.ProviderCompletionResult{RequestBytes: len(payload)}
 	requestCtx, cancel := p.requestContext(ctx)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
@@ -541,18 +561,33 @@ func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.
 		return result, providerRequestError(err)
 	}
 	defer resp.Body.Close()
+	var responseReader io.Reader = resp.Body
+	if request.CaptureDocumentObservation {
+		observed := newProviderDocumentObservationReader(resp.Body)
+		responseReader = observed
+		defer func() { result.WireObservation = observed.observation() }()
+	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		if request.CaptureDocumentObservation {
+			_, result.ResponseBytes, _ = readBoundedProviderBody(responseReader, limits.MaxNonStreamWireBytes)
+		}
 		return result, providerHTTPStatusError(resp.StatusCode)
 	}
 	if err := validateProviderResponseMediaType(resp.Header, providerResponseMediaTypeJSON); err != nil {
 		return result, err
 	}
-	body, responseBytes, err := readBoundedProviderBody(resp.Body, limits.MaxNonStreamWireBytes)
+	body, responseBytes, err := readBoundedProviderBody(responseReader, limits.MaxNonStreamWireBytes)
 	result.ResponseBytes = responseBytes
 	if err != nil {
+		if request.CaptureDocumentObservation {
+			return result, providerRequestError(err)
+		}
 		return result, err
 	}
 	var decoded responsesResponse
+	if request.CaptureDocumentObservation && !providerJSONTextLossless(body) {
+		return result, providerProtocolError("response_text_encoding_invalid", responseBytes)
+	}
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		return result, providerProtocolError("invalid_response_json", responseBytes)
 	}
@@ -564,6 +599,9 @@ func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.
 	// budget with leading/trailing whitespace that TrimSpace subsequently
 	// removes from the delivered payload.
 	rawContent := decoded.Content()
+	if request.CaptureDocumentObservation {
+		result.DocumentObservation = providerDocumentObservation(rawContent, false)
+	}
 	if len(rawContent) > limits.MaxContentBytes {
 		return result, providerProtocolError("stream_content_limit_exceeded", responseBytes)
 	}
@@ -580,6 +618,12 @@ func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.
 		result.Payload = []byte(content)
 		result.Usage = usage
 		return result, &ProviderOutputLimitError{Payload: []byte(content), Usage: usage}
+	}
+	if request.CaptureDocumentObservation {
+		result.DocumentObservation = providerDocumentObservation(rawContent, true)
+		result.Payload = []byte(content)
+		result.Usage = usage
+		return result, nil
 	}
 	if strings.TrimSpace(content) == "" {
 		// Preserve provider-native usage for the Runtime candidate owner. The
@@ -607,7 +651,7 @@ func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.Pro
 	return p.streamResponses(ctx, request, emit)
 }
 
-func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (llmmodels.ProviderCompletionResult, error) {
+func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (result llmmodels.ProviderCompletionResult, callErr error) {
 	if err := request.ValidateSchemaFormat(); err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
@@ -632,7 +676,7 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
-	result := llmmodels.ProviderCompletionResult{RequestBytes: len(payload)}
+	result = llmmodels.ProviderCompletionResult{RequestBytes: len(payload)}
 	hardCtx, cancelHard := p.streamRequestContext(ctx)
 	defer cancelHard()
 	requestCtx, idleGuard := newProviderResponseIdleGuard(hardCtx, p.config.Timeout)
@@ -651,19 +695,36 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 	}
 	idleGuard.progress()
 	defer resp.Body.Close()
+	var responseReader io.Reader = resp.Body
+	if request.CaptureDocumentObservation {
+		observed := newProviderDocumentObservationReader(resp.Body)
+		responseReader = observed
+		defer func() { result.WireObservation = observed.observation() }()
+	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		if request.CaptureDocumentObservation {
+			progress := &providerResponseProgressReader{reader: responseReader, guard: idleGuard}
+			_, result.ResponseBytes, _ = readBoundedProviderBody(progress, limits.MaxStreamWireBytes)
+		}
 		return result, providerHTTPStatusError(resp.StatusCode)
 	}
 	if err := validateProviderResponseMediaType(resp.Header, providerResponseMediaTypeEventStream); err != nil {
 		return result, err
 	}
-	progressReader := &providerResponseProgressReader{reader: resp.Body, guard: idleGuard}
+	progressReader := &providerResponseProgressReader{reader: responseReader, guard: idleGuard}
 	limited := newProviderResponseLimitReader(progressReader, limits.MaxStreamWireBytes)
-	content, usage, err := readResponsesStream(limited, emit, providerStreamLimits{
-		MaxContentBytes: limits.MaxContentBytes,
-		MaxDataEvents:   limits.MaxDataEvents,
-		MaxLineBytes:    limits.MaxLineBytes,
-	})
+	limitsForStream := providerStreamLimits{MaxContentBytes: limits.MaxContentBytes, MaxDataEvents: limits.MaxDataEvents, MaxLineBytes: limits.MaxLineBytes}
+	var content string
+	var usage *llmaudit.ProviderUsage
+	if request.CaptureDocumentObservation {
+		stream := &responsesStreamReader{guard: newProviderStreamGuard(limitsForStream), emit: emit, preserveDocument: true}
+		content, usage, err = readResponsesStreamState(limited, limitsForStream, stream)
+		if stream.outputObserved || err == nil && stream.completed {
+			result.DocumentObservation = providerDocumentObservation(stream.builder.String(), err == nil && stream.completed)
+		}
+	} else {
+		content, usage, err = readResponsesStream(limited, emit, limitsForStream)
+	}
 	result.ResponseBytes = limited.BytesRead()
 	result.Usage = usage
 	if err != nil {
@@ -682,14 +743,20 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 		if contextual := providerRequestContextError(requestCtx); contextual != nil {
 			result.Payload = nil
 			result.Usage = nil
+			if request.CaptureDocumentObservation {
+				return result, providerRequestErrorWithContext(err, requestCtx)
+			}
 			return result, contextual
+		}
+		if request.CaptureDocumentObservation {
+			return result, providerRequestError(err)
 		}
 		content = providerCompletionContent(request, content)
 		result.Payload = []byte(content)
 		return result, withProviderProtocolResponseBytes(err, result.ResponseBytes)
 	}
 	content = providerCompletionContent(request, content)
-	if strings.TrimSpace(content) == "" {
+	if strings.TrimSpace(content) == "" && !request.CaptureDocumentObservation {
 		return result, providerProtocolError(providerFinalOutputMissingCode, result.ResponseBytes)
 	}
 	result.Payload = []byte(content)
@@ -1091,17 +1158,23 @@ type responsesStreamEvent struct {
 }
 
 type responsesStreamReader struct {
-	builder      strings.Builder
-	usage        *llmaudit.ProviderUsage
-	guard        *providerStreamGuard
-	emit         func(llmmodels.ProviderStreamEvent) error
-	completed    bool
-	terminalErr  error
-	doneReceived bool
-	doneEmitted  bool
+	builder          strings.Builder
+	usage            *llmaudit.ProviderUsage
+	guard            *providerStreamGuard
+	emit             func(llmmodels.ProviderStreamEvent) error
+	completed        bool
+	terminalErr      error
+	doneReceived     bool
+	doneEmitted      bool
+	preserveDocument bool
+	outputObserved   bool
 }
 
 func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEvent) error, limits providerStreamLimits) (string, *llmaudit.ProviderUsage, error) {
+	return readResponsesStreamState(reader, limits, &responsesStreamReader{guard: newProviderStreamGuard(limits), emit: emit})
+}
+
+func readResponsesStreamState(reader io.Reader, limits providerStreamLimits, stream *responsesStreamReader) (string, *llmaudit.ProviderUsage, error) {
 	// Scanner's maximum token buffer includes the line delimiter. Reserve the
 	// delimiter plus one probe byte, then enforce MaxLineBytes against the
 	// delimiter-free token so an exact-size line is accepted and limit+1 is
@@ -1112,7 +1185,6 @@ func readResponsesStream(reader io.Reader, emit func(llmmodels.ProviderStreamEve
 	}
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, min(64*1024, scannerLimit)), scannerLimit)
-	stream := &responsesStreamReader{guard: newProviderStreamGuard(limits), emit: emit}
 	var pendingData string
 	pending := false
 	consumePending := func() (stop bool, preservePartial bool, err error) {
@@ -1208,6 +1280,9 @@ func (s *responsesStreamReader) consume(data string) (stop bool, preservePartial
 	if err := s.guard.observeDataEvent(); err != nil {
 		return false, false, err
 	}
+	if s.preserveDocument && !providerJSONTextLossless([]byte(data)) {
+		return false, false, providerProtocolError("response_text_encoding_invalid", len(data))
+	}
 	event, err := decodeResponsesStreamEvent(data)
 	if err != nil {
 		return false, false, err
@@ -1260,6 +1335,7 @@ func (s *responsesStreamReader) appendOutput(content string, accepted bool) erro
 	if err := s.guard.observeDelta(content); err != nil {
 		return err
 	}
+	s.outputObserved = true
 	s.builder.WriteString(content)
 	if s.emit == nil {
 		return nil

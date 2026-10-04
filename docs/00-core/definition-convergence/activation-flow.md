@@ -71,9 +71,12 @@ map during Resume.
 Profile wildcard evidence declarations remain declarative policy templates for Definition-derived rows only; after an exact CWI is
 admitted, Application may instantiate their quality, target/selector, acquisition, repair and operation/evidence constraints onto that
 row. They cannot create current owner facts, recipe/native-check, dispatch or credit authority, or close a CWI. The activation compiler
-creates the row's canonical exact declaration. A
-proof-incomplete Profile never reaches bootstrap compilation. The Runtime compiler repeats the Profile validation only as a
-fail-closed SM-2 input defense if an internal caller bypasses normal admission; it does not open a second ticket or become a state owner.
+creates the row's canonical exact declaration。
+规格准入与 activation 复用中立 source matcher 和 exact／wildcard 完整合并产物，逐义务的确认 DoD source 必须保留引用声明贡献。
+wildcard recipe／check stripping 不算可执行证明，neutral fallback 不替换确认承诺；规格图和确认 after-image 顺序归 Workspace，
+shared helper 不包含 owner model、I/O 或 transition authority。证明不完整的 Profile 不得进入 bootstrap 编译。
+Runtime compiler 仅在内部调用方绕过正常准入时重复 Profile 校验，作为 fail-closed 的 SM-2 输入防御；
+它不新建第二张票据，也不成为状态 owner。
 
 ## Typed RuntimeBootstrap
 

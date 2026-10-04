@@ -6,6 +6,7 @@ func Contracts() []eventcontract.Contract {
 	ret := []eventcontract.Contract{}
 	ret = append(ret, eventcontract.Build("llm", eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute,
 		TopicLLMCommandCompleteProvider,
+		TopicLLMCommandCompleteProviderDocument,
 		TopicLLMCommandGenerateEmbedding,
 		TopicLLMCommandRefreshProviderModelCatalog,
 		TopicRequestRuntimeCandidate,
@@ -24,6 +25,7 @@ func Contracts() []eventcontract.Contract {
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM2, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicAcquireRuntimeCapabilities)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM3, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicAcquireProviderCeiling, TopicPreflightRuntimeCandidate)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassExecute, eventcontract.StateMachineSM3, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicRequestRuntimeCandidate)
+	ret = eventcontract.AnnotateLaneIdentity(ret, "llm-provider-document", TopicLLMCommandCompleteProviderDocument)
 	ret = eventcontract.AnnotateLaneIdentity(ret, "llm-provider-completion", TopicLLMCommandCompleteProvider)
 	ret = eventcontract.AnnotateLaneIdentity(ret, "llm-embedding", TopicLLMCommandGenerateEmbedding)
 	return ret

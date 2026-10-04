@@ -17,6 +17,11 @@ import (
 
 // DeriveDefinitionAcceptance 仅处理派生阶段；结果仍需规格审查与用户确认。
 func (b *Biz) DeriveDefinitionAcceptance(ctx context.Context, id common.WorkspaceID) (workspace.DefinitionDerivedAcceptance, error) {
+	ctx, release, err := b.authoringTasks.accept(ctx)
+	if err != nil {
+		return workspace.DefinitionDerivedAcceptance{}, err
+	}
+	defer release()
 	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id})
 	if err != nil {
 		return workspace.DefinitionDerivedAcceptance{}, err
@@ -110,40 +115,34 @@ func (b *Biz) DeriveDefinitionAcceptance(ctx context.Context, id common.Workspac
 	if reserved.FreshPermitID == "" {
 		return derivationOutcome(reservedRequest)
 	}
-	payload, providerErr := b.completeDefinitionDocument(ctx, command)
+	response, deliveryErr := b.completeAuthoringDocument(ctx, reserved.FreshPermitID, command)
+	if deliveryErr != nil {
+		return workspace.DefinitionDerivedAcceptance{}, deliveryErr
+	}
+	settlement, cancelSettlement := authoringSettlementContext(ctx)
+	defer cancelSettlement()
+	ctx = context.WithValue(settlement, authoringSettlementKey{}, settlement)
 	completion := workspaceevents.CompleteDefinitionDerivationCommand{WorkspaceID: id, PermitID: reserved.FreshPermitID}
-	if providerErr != nil {
+	completion.Diagnostic = authoringProviderDiagnostic(response)
+	if completion.Diagnostic != nil {
 		completion.FailureCode = "provider_failed"
 	} else {
+		payload, payloadErr := authoringCompletePayload(response)
+		if payloadErr != nil {
+			return workspace.DefinitionDerivedAcceptance{}, payloadErr
+		}
 		proposal, parseErr := specifications.ParseDerivedAcceptance(payload, reservedRequest.Input, &reservedRequest.Template)
 		if parseErr != nil {
 			completion.FailureCode = "invalid_proposal"
+			diagnostic := authoringParserDiagnostic(parseErr, payload, response)
+			completion.Diagnostic = &diagnostic
 		} else {
 			completion.Proposal = &proposal
 		}
 	}
-	if err := ctx.Err(); err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, err
-	}
-	completeEvent := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceDerivationComplete, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, completion)
-	completeEvent.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceDerivationComplete, eventcontract.LaneScope{WorkspaceID: string(id)}))
-	result = b.SendEvent(completeEvent)
-	if result == nil {
-		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
-	}
-	if err := result.Error(); err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, err
-	}
-	value, getErr = result.Get()
-	if getErr != nil {
-		return workspace.DefinitionDerivedAcceptance{}, getErr
-	}
-	completed, ok := value.(workspaceevents.DefinitionDerivationRequestResult)
-	if !ok {
-		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
-	}
-	if err := completed.ValidateCompletion(completion); err != nil {
-		return workspace.DefinitionDerivedAcceptance{}, err
+	completed, settlementErr := b.settleDerivation(ctx, completion)
+	if settlementErr != nil {
+		return workspace.DefinitionDerivedAcceptance{}, settlementErr
 	}
 	completedRequest, err := completed.Request.Model()
 	if err != nil {

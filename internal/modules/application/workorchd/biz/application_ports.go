@@ -13,12 +13,17 @@ import (
 // crosses into service/server; each call borrows a short-lived session and
 // closes it before returning.
 type runtimeApplicationPorts struct {
-	withSessionFn func(context.Context, func(*runtimecore.Session) error) error
-	ports         server.ApplicationPorts
+	withSessionFn  func(context.Context, func(*runtimecore.Session) error) error
+	ports          server.ApplicationPorts
+	authoringTasks *authoringTaskLifecycle
 }
 
-func newApplicationPorts(withSession func(context.Context, func(*runtimecore.Session) error) error) server.ApplicationPorts {
-	p := &runtimeApplicationPorts{withSessionFn: withSession}
+func newApplicationPorts(withSession func(context.Context, func(*runtimecore.Session) error) error, lifecycle ...*authoringTaskLifecycle) server.ApplicationPorts {
+	authoring := newAuthoringTaskLifecycle()
+	if len(lifecycle) == 1 && lifecycle[0] != nil {
+		authoring = lifecycle[0]
+	}
+	p := &runtimeApplicationPorts{withSessionFn: withSession, authoringTasks: authoring}
 	p.configureConfigurationPorts()
 	p.configureWorkspacePorts()
 	p.configureDefinitionPorts()

@@ -5,6 +5,7 @@ package biz
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -64,7 +65,7 @@ func (b *Biz) Setup(ctx context.Context, commandHub magicevent.Hub, backgroundRo
 	}
 	b.runtime = runtime
 	b.workspaceGate = &workspaceCommandGateway{hub: b.EventHub(), runtime: runtime}
-	b.authoringTasks = newAuthoringTaskLifecycle()
+	b.authoringTasks = runtime.authoringTasks
 	applicationPorts := runtime.applicationPorts()
 	b.configureAuthoringBackgroundPorts(&applicationPorts)
 	if err := b.service.StartupWithApplicationPorts(ctx, modulecommon.ServiceName, applicationPorts, b.BackgroundRoutine()); err != nil {
@@ -129,12 +130,14 @@ func (b *Biz) Stop(ctx context.Context) {
 		return
 	}
 	admissions := b.admissions
-	firstStop := false
 	if admissions != nil {
 		// Reject every new HTTP/CLI/TUI admission before stopping an ingress.
 		// Already-entered handlers retain all dependencies until the shared
 		// barrier is drained below.
-		firstStop = admissions.stop()
+		admissions.stop()
+	}
+	if b.authoringTasks != nil {
+		b.authoringTasks.beginStop(ctx)
 	}
 	if b.cliDispatcher != nil {
 		b.cliDispatcher.Close()
@@ -147,7 +150,10 @@ func (b *Biz) Stop(ctx context.Context) {
 		b.service.DrainHTTP(ctx)
 	}
 	if b.authoringTasks != nil {
-		b.authoringTasks.stop()
+		if err := b.authoringTasks.stopContext(ctx); err != nil {
+			slog.Warn("authoring shutdown did not drain accepted calls; dependencies retained", "failureClass", "authoring_drain_timeout")
+			return
+		}
 	}
 	if admissions != nil {
 		admissions.wait()
@@ -158,7 +164,7 @@ func (b *Biz) Stop(ctx context.Context) {
 		b.service.SetWorkspaceProjection(nil)
 		b.service.SetWorkspaceProjectionWriter(nil)
 	}
-	if b.EventHub() != nil && firstStop {
+	if b.EventHub() != nil && admissions != nil && admissions.stopping() {
 		b.UnsubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
 		b.UnsubscribeMatchedFunc(ModuleID+"/workspace-projection", workorchdevents.TopicWorkspaceProjectionChanged)
 		b.UnsubscribeMatchedFunc(ModuleID+"/run-metrics", runevents.TopicRunStateChanged)

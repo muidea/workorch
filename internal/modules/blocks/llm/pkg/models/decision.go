@@ -29,6 +29,8 @@ type ProviderRequest struct {
 	Config        RedactedProviderConfig `json:"config"`
 	PromptContext *PromptContext         `json:"promptContext,omitempty"`
 	ContextBudget *ProviderContextBudget `json:"contextBudget,omitempty"`
+	// 仅文档调用 owner 启用原始观测，不改变 native schema 或原请求身份。
+	CaptureDocumentObservation bool `json:"-"`
 }
 
 type PromptContext struct {
@@ -191,9 +193,11 @@ type ProviderCompletionResult struct {
 	// ProviderSubmitted is set by the protocol adapter exactly when it invokes
 	// the configured HTTP client's Do boundary. RequestBytes is independent
 	// measurement metadata and must never be used to infer this fact.
-	ProviderSubmitted bool `json:"-"`
-	RequestBytes      int  `json:"-"`
-	ResponseBytes     int  `json:"-"`
+	ProviderSubmitted   bool                     `json:"-"`
+	RequestBytes        int                      `json:"-"`
+	ResponseBytes       int                      `json:"-"`
+	DocumentObservation *ProviderObservedContent `json:"-"`
+	WireObservation     *ProviderObservedContent `json:"-"`
 }
 
 // ProviderSchemaFormatJSONSchema 显式标记 Schema 为 JSON Schema 对象。

@@ -88,7 +88,8 @@ Then re-run. File-backed sequences are covered by:
   make verify-runtime-positive-convergence-file
 MSG
   if [[ "${WORKORCH_E2E_LIVE_ALLOW_SKIP:-}" == "1" ]]; then
-    echo "WORKORCH_E2E_LIVE_ALLOW_SKIP=1: skipping live verification"
+    python3 "$ROOT_DIR/scripts/verify_runtime_live_contract.py" --write-skipped-positive-summary "$ARTIFACT_DIR/summary.json"
+    echo "WORKORCH_E2E_LIVE_ALLOW_SKIP=1: structured skipped result written to $ARTIFACT_DIR/summary.json"
     exit 0
   fi
   exit 3
@@ -314,6 +315,8 @@ if mode == "bounded_terminal":
     if fixture_errors:
         write_json("summary.json", {
             "mode": mode,
+            "status": "failed",
+            "classification": "fixture_preflight_failed",
             "baseline": baseline,
             "errors": fixture_errors,
             "reason": "bounded_terminal mode requires bounded fixtures; use positive or liveness for other workspaces",
@@ -383,6 +386,8 @@ if do_activate:
         missing = [label for ws, label in ((ws_a, "a"), (ws_b, "b")) if ws not in expected_run_ids]
         write_json("summary.json", {
             "mode": mode,
+            "status": "failed",
+            "classification": "fixture_preflight_failed",
             "baseline": baseline,
             "freshRunIDs": expected_run_ids,
             "errors": [f"activation did not produce a fresh Run for fixtures {missing}"],
@@ -419,6 +424,8 @@ if mode == "bounded_terminal" and do_activate:
     if activated_fixture_errors:
         write_json("summary.json", {
             "mode": mode,
+            "status": "failed",
+            "classification": "fixture_preflight_failed",
             "baseline": baseline,
             "errors": activated_fixture_errors,
             "reason": "activated bounded terminal fixtures must expose exactly two bounded focus slices",
@@ -556,6 +563,7 @@ else:
     classification = "positive_acceptance"
 
 write_json("summary.json", {
+    "status": "failed" if errors else "passed",
     "mode": mode,
     "classification": classification,
     "timedOut": timed_out and mode != "liveness",
@@ -576,4 +584,15 @@ if errors:
 print(f"runtime {classification} verification passed")
 for ws, item in results.items():
     print(ws, json.dumps(item, ensure_ascii=False))
+if mode in ("positive", "bounded_terminal"):
+    subprocess = __import__("subprocess")
+    workspaces = ",".join((ws_a, ws_b))
+    subprocess.run([
+        sys.executable,
+        os.path.join(os.getcwd(), "scripts", "verify_runtime_live_contract.py"),
+        "--validate-positive-summary",
+        os.path.join(artifact_dir, "summary.json"),
+        "--workspaces",
+        workspaces,
+    ], check=True)
 PY

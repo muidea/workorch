@@ -75,6 +75,86 @@ def has_canonical_satisfied_assessment(assessments: Any) -> bool:
     )
 
 
+def positive_summary_errors(summary: Any, workspace_ids: list[str] | None = None) -> list[str]:
+    """Validate exactly two fresh positive acceptance identities and their mode contract."""
+
+    if not isinstance(summary, dict):
+        return ["summary must be a JSON object"]
+    errors: list[str] = []
+    mode = summary.get("mode")
+    expected_classification = {
+        "positive": "positive_acceptance",
+        "bounded_terminal": "bounded_terminal_acceptance",
+    }.get(mode) if isinstance(mode, str) else None
+    if expected_classification is None:
+        errors.append(f"summary mode={mode!r} is not positive acceptance")
+    if summary.get("status") != "passed":
+        errors.append(f"summary status={summary.get('status')!r}, want 'passed'")
+    if summary.get("classification") != expected_classification:
+        errors.append(f"summary classification={summary.get('classification')!r}, want {expected_classification!r} for mode {mode!r}")
+    if summary.get("errors") != []:
+        errors.append("summary errors must be an empty array")
+
+    baseline = summary.get("baseline")
+    if not isinstance(baseline, dict):
+        errors.append("positive summary baseline must be an object")
+        baseline = {}
+    baseline_ids = set(baseline)
+    if len(baseline_ids) != 2 or any(not isinstance(item, str) or not item.strip() for item in baseline_ids):
+        errors.append("positive summary baseline must identify exactly two non-empty workspaces")
+    for workspace_id, prior in baseline.items():
+        if not isinstance(prior, dict):
+            errors.append(f"baseline[{workspace_id!r}] must be an object")
+            continue
+        if "runId" not in prior:
+            errors.append(f"baseline[{workspace_id!r}] must include runId")
+            continue
+        prior_run_id = prior["runId"]
+        if prior_run_id is not None and (not isinstance(prior_run_id, str) or not prior_run_id.strip()):
+            errors.append(f"baseline[{workspace_id!r}].runId must be null or a non-empty string")
+
+    supplied_ids = set(workspace_ids or [])
+    expected_workspaces = supplied_ids or baseline_ids
+    if supplied_ids and supplied_ids != baseline_ids:
+        errors.append("baseline must identify exactly the expected positive workspaces")
+
+    fresh = summary.get("freshRunIDs")
+    if not isinstance(fresh, dict):
+        errors.append("freshRunIDs must be an object identifying both expected positive workspaces")
+        fresh = {}
+    if set(fresh) != expected_workspaces:
+        errors.append("freshRunIDs must identify exactly both expected positive workspaces")
+    fresh_values = list(fresh.values())
+    if any(not isinstance(run_id, str) or not run_id.strip() for run_id in fresh_values):
+        errors.append("freshRunIDs contains an empty or invalid Run identity")
+    elif len(fresh_values) != len(set(fresh_values)):
+        errors.append("freshRunIDs must contain distinct Run identities for both workspaces")
+
+    for workspace_id, run_id in fresh.items():
+        prior = baseline.get(workspace_id)
+        prior_run_id = prior.get("runId") if isinstance(prior, dict) else None
+        if prior_run_id is not None and run_id == prior_run_id:
+            errors.append(f"freshRunIDs[{workspace_id!r}] is not fresh relative to baseline Run")
+
+    results = summary.get("results")
+    if not isinstance(results, dict) or set(results) != expected_workspaces:
+        errors.append("results must identify exactly both expected positive workspaces")
+    else:
+        for workspace_id in expected_workspaces:
+            result = results.get(workspace_id)
+            if not isinstance(result, dict) or result.get("runId") != fresh.get(workspace_id):
+                errors.append(f"result for {workspace_id!r} does not match its fresh Run identity")
+    return errors
+
+
+def _validate_positive_summary(path: str, workspace_ids: list[str]) -> None:
+    with open(path, encoding="utf-8") as handle:
+        summary = json.load(handle)
+    errors = positive_summary_errors(summary, workspace_ids)
+    if errors:
+        raise SystemExit("\n".join(errors))
+
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -315,7 +395,180 @@ def _accepted(variant: str, snapshot_hash: str, operation_id: str) -> dict[str, 
     }
 
 
+def _write_skipped_positive_summary(path: str) -> None:
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({
+            "mode": "positive",
+            "status": "skipped",
+            "classification": "skipped_missing_fixtures",
+            "freshRunIDs": {},
+            "errors": [],
+            "reason": "workspace fixture IDs were not supplied",
+        }, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+
+
+def _write_managed_verification_report(root: str, classification: str) -> None:
+    from pathlib import Path
+
+    path = Path(root) / "managed-verification.json"
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump({
+            "reportType": "managed_verification",
+            "status": "passed",
+            "classification": classification,
+            "positiveAcceptance": classification == "positive_acceptance_validated",
+        }, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+
+
+def _validate_managed_positive_summaries(root: str) -> str:
+    from pathlib import Path
+
+    if not Path(root).is_dir():
+        raise SystemExit(f"managed artifact directory is unavailable: {root}")
+    summaries = []
+    errors = []
+    for path in Path(root).rglob("summary.json"):
+        try:
+            with path.open(encoding="utf-8") as handle:
+                value = json.load(handle)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            errors.append(f"{path}: malformed summary: {error}")
+            continue
+        if not isinstance(value, dict):
+            errors.append(f"{path}: summary must be a JSON object")
+            continue
+        mode = value.get("mode")
+        classification = value.get("classification")
+        if (
+            isinstance(classification, str)
+            and classification in {"positive_acceptance", "bounded_terminal_acceptance"}
+        ) or (
+            isinstance(mode, str)
+            and mode in {"positive", "bounded_terminal"}
+        ):
+            summaries.append((path, value))
+        elif mode is not None and not isinstance(mode, str):
+            errors.append(f"{path}: summary mode must be a string when present")
+    for path, summary in summaries:
+        problems = positive_summary_errors(summary)
+        if problems:
+            errors.extend(f"{path}: {problem}" for problem in problems)
+    if errors:
+        raise SystemExit("\n".join(errors))
+    if summaries:
+        return "positive_acceptance_validated"
+    return "managed_commands_passed_without_positive_acceptance"
+
+
 def _self_test() -> None:
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        empty = root / "empty"
+        empty.mkdir()
+        classification = _validate_managed_positive_summaries(str(empty))
+        if classification != "managed_commands_passed_without_positive_acceptance":
+            raise AssertionError(f"ordinary managed success was classified as {classification}")
+        _write_managed_verification_report(str(empty), classification)
+        report = json.loads((empty / "managed-verification.json").read_text(encoding="utf-8"))
+        if report.get("status") != "passed" or report.get("positiveAcceptance") is not False:
+            raise AssertionError("ordinary managed success was reported as positive acceptance")
+
+        skipped = root / "skipped"
+        skipped.mkdir()
+        (skipped / "summary.json").write_text(json.dumps({
+            "status": "skipped", "mode": "positive", "classification": "skipped_missing_fixtures",
+            "freshRunIDs": {}, "errors": [],
+        }), encoding="utf-8")
+        try:
+            _validate_managed_positive_summaries(str(skipped))
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("managed skip was accepted as passed")
+
+        malformed = root / "malformed"
+        malformed.mkdir()
+        (malformed / "summary.json").write_text("{invalid json", encoding="utf-8")
+        try:
+            _validate_managed_positive_summaries(str(malformed))
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("malformed summary was silently ignored")
+
+        passing = root / "passing"
+        passing.mkdir()
+        (passing / "summary.json").write_text(json.dumps({
+            "status": "passed", "mode": "positive", "classification": "positive_acceptance", "errors": [],
+            "baseline": {"ws-a": {"runId": "old-a"}, "ws-b": {"runId": "old-b"}},
+            "freshRunIDs": {"ws-a": "run-a", "ws-b": "run-b"},
+            "results": {"ws-a": {"runId": "run-a"}, "ws-b": {"runId": "run-b"}},
+        }), encoding="utf-8")
+        classification = _validate_managed_positive_summaries(str(passing))
+        if classification != "positive_acceptance_validated":
+            raise AssertionError(f"valid positive summary was classified as {classification}")
+        _write_managed_verification_report(str(passing), classification)
+        report = json.loads((passing / "managed-verification.json").read_text(encoding="utf-8"))
+        if report.get("positiveAcceptance") is not True or report.get("classification") != "positive_acceptance_validated":
+            raise AssertionError("validated positive summary was not reflected in the managed report")
+
+        valid_summary = json.loads((passing / "summary.json").read_text(encoding="utf-8"))
+        mode_mismatch = json.loads(json.dumps(valid_summary))
+        mode_mismatch["mode"] = "bounded_terminal"
+        (passing / "summary.json").write_text(json.dumps(mode_mismatch), encoding="utf-8")
+        try:
+            _validate_managed_positive_summaries(str(passing))
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("mode/classification mismatch was accepted")
+
+        adversarial_shapes = [
+            ("list mode", {**valid_summary, "mode": ["positive"]}),
+            ("object mode", {**valid_summary, "mode": {"value": "positive"}}),
+            ("list freshRunIDs", {**valid_summary, "freshRunIDs": ["run-a", "run-b"]}),
+            ("string freshRunIDs", {**valid_summary, "freshRunIDs": "run-a"}),
+            ("non-object baseline entry", {**valid_summary, "baseline": {"ws-a": "old-a", "ws-b": {"runId": "old-b"}}}),
+            ("invalid baseline Run ID", {**valid_summary, "baseline": {"ws-a": {"runId": 42}, "ws-b": {"runId": "old-b"}}}),
+            ("duplicate fresh Run IDs", {**valid_summary, "freshRunIDs": {"ws-a": "same-run", "ws-b": "same-run"}, "results": {"ws-a": {"runId": "same-run"}, "ws-b": {"runId": "same-run"}}}),
+        ]
+        for label, malformed_shape in adversarial_shapes:
+            (passing / "summary.json").write_text(json.dumps(malformed_shape), encoding="utf-8")
+            try:
+                _validate_managed_positive_summaries(str(passing))
+            except SystemExit:
+                pass
+            except Exception as error:
+                raise AssertionError(f"{label} raised unexpected {type(error).__name__}: {error}") from error
+            else:
+                raise AssertionError(f"{label} was accepted")
+
+        invalid_mode = json.loads(json.dumps(valid_summary))
+        invalid_mode["mode"] = ["positive"]
+        (passing / "summary.json").write_text(json.dumps(invalid_mode), encoding="utf-8")
+        try:
+            _validate_managed_positive_summaries(str(passing))
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("positive classification with malformed mode was downgraded to ordinary managed success")
+
+        (passing / "summary.json").write_text(json.dumps(valid_summary), encoding="utf-8")
+        invalid = json.loads((passing / "summary.json").read_text(encoding="utf-8"))
+        invalid["errors"] = ["fresh Run failed"]
+        (passing / "summary.json").write_text(json.dumps(invalid), encoding="utf-8")
+        try:
+            _validate_managed_positive_summaries(str(passing))
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("managed summary with acceptance errors was accepted")
+
     if external_provider_unavailable_reason("target_grounding_unresolved: no target"):
         raise AssertionError("non-provider terminal was classified as external provider unavailable")
     if external_provider_unavailable_reason("provider_transport_exhausted: upstream 502") != "upstream 502":
@@ -518,7 +771,15 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args == ["--self-test"]:
         _self_test()
+    elif len(args) == 2 and args[0] == "--write-skipped-positive-summary":
+        _write_skipped_positive_summary(args[1])
+    elif len(args) == 2 and args[0] == "--validate-managed-positive-summaries":
+        classification = _validate_managed_positive_summaries(args[1])
+        _write_managed_verification_report(args[1], classification)
+        print(classification)
+    elif len(args) == 4 and args[0] == "--validate-positive-summary" and args[2] == "--workspaces":
+        _validate_positive_summary(args[1], args[3].split(","))
     elif len(args) == 7 and args[0] == "--snapshot" and args[2] == "--workspace-id" and args[4] == "--run-id" and args[6] == "--require-terminal":
         verify_snapshot(args[1], args[3], args[5], True)
     else:
-        raise SystemExit("usage: verify_runtime_live_contract.py --self-test | --snapshot PATH --workspace-id ID --run-id ID --require-terminal")
+        raise SystemExit("usage: verify_runtime_live_contract.py --self-test | --validate-managed-positive-summaries ROOT | --validate-positive-summary PATH --workspaces ID_A,ID_B | --snapshot PATH --workspace-id ID --run-id ID --require-terminal")

@@ -215,6 +215,19 @@ func (r *failOnceCASRuntimeRepository) Load(ctx context.Context, workspaceID com
 }
 
 func (r *failOnceCASRuntimeRepository) Save(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
+	return r.save(ctx, aggregate, expectedRevision, r.delegate.Save)
+}
+
+func (r *failOnceCASRuntimeRepository) SaveValidated(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
+	if delegate, ok := r.delegate.(interface {
+		SaveValidated(context.Context, runtime.RuntimeAggregate, uint64) error
+	}); ok {
+		return r.save(ctx, aggregate, expectedRevision, delegate.SaveValidated)
+	}
+	return r.Save(ctx, aggregate, expectedRevision)
+}
+
+func (r *failOnceCASRuntimeRepository) save(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64, persist func(context.Context, runtime.RuntimeAggregate, uint64) error) error {
 	if expectedRevision > 0 && r.remainingFailures > 0 {
 		r.remainingFailures--
 		// Model a real competing aggregate writer: a generic storage conflict
@@ -234,7 +247,7 @@ func (r *failOnceCASRuntimeRepository) Save(ctx context.Context, aggregate runti
 			ExpectedRevision: expectedRevision, ObservedRevision: competing.StateRevision,
 		}
 	}
-	return r.delegate.Save(ctx, aggregate, expectedRevision)
+	return persist(ctx, aggregate, expectedRevision)
 }
 
 func (r *failOnceResultRepository) Create(ctx context.Context, item *resultmodel.Result) error {
@@ -9704,7 +9717,8 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 		if time.Now().After(completionDeadline) {
 			t.Fatalf("two-focus background retry did not converge: revision=%d state=%s lease=%+v failure=%+v semantic=%+v pending=%+v recovery=%+v candidates=%d", completedAggregate.StateRevision, completedAggregate.Decision.State, completedAggregate.DriveLease, completedAggregate.Facts.Failure, completedAggregate.SemanticPlanning, completedAggregate.Facts.Prerequisites.Pending, completedAggregate.Facts.Recovery, candidateCount.Load())
 		}
-		time.Sleep(10 * time.Millisecond)
+		// 只读观察仍完整重验 aggregate；降低频率避免与后台 owner CAS 争用同一 Run lane。
+		time.Sleep(250 * time.Millisecond)
 	}
 	completed := runtimeTerminalDriveResult(completedAggregate)
 	if completed.State != runtimecontract.ConvergenceStateComplete || completed.Terminal == nil {

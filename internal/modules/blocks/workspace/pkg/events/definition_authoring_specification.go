@@ -60,7 +60,7 @@ func (c CompleteAuthoringSpecificationCommand) Validate() error {
 	}
 	if c.FailureCode != "" {
 		outcomes++
-		if c.Diagnostic != nil && (c.FailureCode == "provider_failed" || c.Diagnostic.Validate() != nil) {
+		if c.Diagnostic != nil && (c.Diagnostic.Validate() != nil || c.FailureCode == "provider_failed" && c.Diagnostic.ProviderCode == "") {
 			return common.ErrInvalidArgument
 		}
 	} else if c.Diagnostic != nil {

@@ -12,7 +12,13 @@ Last Verified: 2026-08-26
 Runtime aggregate、真实 capability owner receipt、process restart 与正式 Result；不重新定义 SM-1～SM-4 transition。
 
 脚本/target 名称只是候选执行入口。只有入口实际产生并校验本场景规定的 manifest/assertions 时，该行才通过；同名、零
-test selection、mock projection、手工改库或预制 successful payload 均不算 evidence。
+test selection、mock projection、手工改库或预制 successful payload 均不算 evidence。Runtime positive live verifier 另须保留
+`summary.json`：`status=passed`、mode 与 classification 精确对应、恰好两个 Workspace 的 baseline、互不重复的 fresh Run
+identity、最终 results 及空 errors 必须一致。允许无 fixture 跳过时写入 `status=skipped` 及结构化 classification，
+该 skip 不得计入 managed wrapper passed。managed wrapper 必须拒绝畸形报告，并严格校验发现的 positive／bounded-terminal
+summary；没有此类报告时仅记录 `managed_commands_passed_without_positive_acceptance` 及 `positiveAcceptance=false`，
+有合法报告时记录 `positive_acceptance_validated`。`managed-verification.json` 的 `status=passed` 只表示实际 managed
+命令集通过，不能将 preflight、liveness 或未运行 positive 作为完整正向证据，也不能要求 fmt／build 等普通命令产出验收 summary。
 
 ## Environment Baseline
 

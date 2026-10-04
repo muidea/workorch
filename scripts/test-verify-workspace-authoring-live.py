@@ -315,6 +315,56 @@ class AuthoringLiveContractTest(unittest.TestCase):
             with live.RecoveryJournal(path, 'http://localhost', payload) as journal:
                 self.assertEqual(journal.record['payload'], original)
 
+    def test_preparation_failed_is_known_terminal_without_automatic_recompile(self):
+        payload = {'requestId': 'stable', 'input': {'goalText': '目标'}}
+        calls = []
+
+        def request(method, route, body=None):
+            calls.append((method, route))
+            if route.endswith('/workspace-authoring'):
+                return {'authoring': {'workspaceId': 'ws', 'inputHash': 'input', 'state': 'draft'}}
+            if route.endswith('/authoring'):
+                return {'authoring': {'workspaceId': 'ws', 'state': 'preparation_failed'}}
+            if route.endswith('/runs'):
+                return {'runs': []}
+            if route.endswith('/compile'):
+                self.fail('known preparation failure must not be automatically recompiled')
+            raise AssertionError(route)
+
+        with tempfile.TemporaryDirectory() as directory:
+            with live.RecoveryJournal(Path(directory) / 'recovery.json', 'http://localhost', payload) as journal:
+                with self.assertRaisesRegex(RuntimeError, '已知失败 preparation_failed'):
+                    live.verify(request, journal, 1, False)
+        self.assertFalse(any(route.endswith('/compile') for _, route in calls))
+        self.assertFalse(any(route.endswith(('/confirm', '/execution-activations')) for _, route in calls))
+
+    def test_preparation_failed_after_compile_is_known_terminal(self):
+        payload = {'requestId': 'stable', 'input': {'goalText': '目标'}}
+        calls = []
+        reads = 0
+
+        def request(method, route, body=None):
+            nonlocal reads
+            calls.append((method, route))
+            if route.endswith('/workspace-authoring'):
+                return {'authoring': {'workspaceId': 'ws', 'inputHash': 'input', 'state': 'draft'}}
+            if route.endswith('/authoring'):
+                reads += 1
+                state = 'draft' if reads == 1 else 'preparation_failed'
+                return {'authoring': {'workspaceId': 'ws', 'state': state}}
+            if route.endswith('/runs'):
+                return {'runs': []}
+            if route.endswith('/compile'):
+                return {'authoring': {'workspaceId': 'ws', 'state': 'preparation_failed'}}
+            raise AssertionError(route)
+
+        with tempfile.TemporaryDirectory() as directory:
+            with live.RecoveryJournal(Path(directory) / 'recovery.json', 'http://localhost', payload) as journal:
+                with self.assertRaisesRegex(RuntimeError, '已知失败 preparation_failed'):
+                    live.verify(request, journal, 1, False)
+        self.assertEqual(sum(route.endswith('/compile') for _, route in calls), 1)
+        self.assertFalse(any(route.endswith(('/confirm', '/execution-activations')) for _, route in calls))
+
     def test_unresolved_result_only_polls_and_does_not_compile(self):
         payload = {'requestId': 'stable', 'input': {'goalText': '目标'}}
         def request(_method, route, _body=None):

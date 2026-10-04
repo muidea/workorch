@@ -145,6 +145,99 @@ func TestAuthoringTaskLifecycleRealWorkerCancellationAndDrain(t *testing.T) {
 	}
 }
 
+func TestAuthoringTaskLifecycleDirectCallsShareBoundedSettlementDrain(t *testing.T) {
+	lifecycle := newAuthoringTaskLifecycle()
+	caller, cancelCaller := context.WithCancel(context.Background())
+	callCtx, release, err := lifecycle.accept(caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	nested, nestedRelease, err := lifecycle.accept(callCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nestedRelease()
+	if nested != callCtx || lifecycle.active != 1 {
+		t.Fatal("nested accepted call was counted twice")
+	}
+	settlement, cancelSettlement := authoringSettlementContext(callCtx)
+	defer cancelSettlement()
+	cancelCaller()
+	if settlement.Err() != nil {
+		t.Fatal("caller cancellation discarded known-result settlement")
+	}
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancelStop()
+	if err := lifecycle.stopContext(stopCtx); err == nil {
+		t.Fatal("undrained direct call reported successful stop")
+	}
+	select {
+	case <-settlement.Done():
+	case <-time.After(time.Second):
+		t.Fatal("settlement exceeded shared stop deadline")
+	}
+	if _, _, err := lifecycle.accept(context.Background()); err == nil {
+		t.Fatal("direct call accepted after stop")
+	}
+	if _, _, err := lifecycle.accept(callCtx); err == nil {
+		t.Fatal("nested call reused accepted scope after stop")
+	}
+	started := time.Now()
+	if err := lifecycle.stopContext(context.Background()); err == nil || time.Since(started) > time.Second {
+		t.Fatal("duplicate stop refreshed drain deadline")
+	}
+	release()
+	if err := lifecycle.stopContext(context.Background()); err != nil {
+		t.Fatal("released call did not drain")
+	}
+}
+
+func TestAuthoringTaskLifecycleStopCallerCancellationBoundsExistingSettlement(t *testing.T) {
+	lifecycle := newAuthoringTaskLifecycle()
+	callCtx, release, err := lifecycle.accept(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	settlement, cancelSettlement := authoringSettlementContext(callCtx)
+	defer cancelSettlement()
+	stopCtx, cancelStop := context.WithCancel(context.Background())
+	lifecycle.beginStop(stopCtx)
+	cancelStop()
+	select {
+	case <-settlement.Done():
+	case <-time.After(time.Second):
+		t.Fatal("Stop 调用方取消后仍继续结果结算")
+	}
+	if err := lifecycle.stopContext(context.Background()); err == nil {
+		t.Fatal("未排空调用却报告成功")
+	}
+	release()
+	if err := lifecycle.stopContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAuthoringSettlementContextReusesOneKnownResultDeadline(t *testing.T) {
+	caller, cancel := context.WithCancel(context.Background())
+	cancel()
+	settlement, finish := authoringSettlementContext(caller)
+	defer finish()
+	ctx := context.WithValue(settlement, authoringSettlementKey{}, settlement)
+	reused, finishNested := authoringSettlementContext(ctx)
+	finishNested()
+	first, _ := settlement.Deadline()
+	second, _ := reused.Deadline()
+	if reused != settlement || first != second || reused.Err() != nil {
+		t.Fatal("parser／CAS／readback 刷新了结算期限或继承 caller 取消")
+	}
+	finish()
+	if reused.Err() == nil {
+		t.Fatal("复用期限失去原 scope 的取消 fence")
+	}
+}
+
 func TestAuthoringTaskLifecycleDoesNotUseHTTPRequestCancellation(t *testing.T) {
 	lifecycle := newAuthoringTaskLifecycle()
 	routine := &authoringTestRoutine{}

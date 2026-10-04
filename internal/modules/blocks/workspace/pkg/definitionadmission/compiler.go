@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -171,28 +172,113 @@ func specRequirementIsRequired(requirements []workspacemodel.GoalSpecificationRe
 	return false
 }
 
-// Profile references establish only an exact declaration identity. Neither a
-// profile match nor review PASS proves runtime owner feasibility or free-text
-// semantic completeness.
+// The graph is Workspace-owned. Resolve every DoD of this obligation to its
+// formal after-image source before asking the neutral compiler about applicability.
 func specificationVerificationProfileMatches(candidate workspacemodel.DefinitionAdmissionCandidate, verification workspacemodel.GoalSpecificationVerification) bool {
+	sources, ok := specificationDoDSources(candidate.DoDInputs)
+	if !ok {
+		return false
+	}
+	var refs []string
+	for _, obligation := range candidate.Specification.Obligations {
+		if obligation.ID == verification.ObligationID {
+			refs = obligation.DoDItemRefs
+			break
+		}
+	}
+	if len(refs) == 0 {
+		return false
+	}
+	var declaration *runtimecontract.RuntimeProfileEvidenceRequirement
 	for _, profile := range candidate.RuntimeProfileContracts {
 		if profile.ID != verification.ProfileID {
 			continue
 		}
-		for _, declaration := range profile.EvidenceRequirements {
-			if declaration.ID == verification.EvidenceRequirementID && declaration.Scope == verification.Scope && specificationProfileHasProofDeclaration(declaration) {
-				return true
+		for _, value := range profile.EvidenceRequirements {
+			if value.ID != verification.EvidenceRequirementID || value.Scope != verification.Scope {
+				continue
+			}
+			if declaration != nil {
+				return false
+			}
+			value.TargetSelectorRef, value.TargetSelectorOwnerRef, value.TargetSelectorSubjectRef = runtimecontract.ResolveRuntimeProfileTargetSelectorIdentity(profile.ID, value)
+			declaration = &value
+		}
+	}
+	if declaration == nil {
+		return false
+	}
+	for _, ref := range refs {
+		sourceID, exists := sources[ref]
+		if !exists || !runtimecontract.RuntimeEvidenceDeclarationMatchesSource(*declaration, "dodItem", sourceID) {
+			return false
+		}
+		policy, err := runtimecontract.CompileRuntimeSourceEvidencePolicy("dodItem", sourceID, candidate.RuntimeProfileContracts, nil)
+		if err != nil || !runtimecontract.RuntimeSourceEvidencePolicyRetainsDeclaration(policy, *declaration, "dodItem", sourceID) {
+			return false
+		}
+	}
+	return true
+}
+
+// Candidate normalization sorts by ref. That order is not the confirmed DoD
+// after-image order: user, template, generated are materialized in that order.
+// Formal references encode their original ordinal. Unknown identities fail closed.
+func specificationDoDSources(items []workspacemodel.DefinitionCandidateItem) (map[string]string, bool) {
+	result := make(map[string]string, len(items))
+	groups := map[string]map[int]string{"user": {}, "template": {}, "generated": {}}
+	derived, formal := false, false
+	formalOrdinals := make(map[int]bool)
+	for _, item := range items {
+		if strings.HasPrefix(item.CandidateItemRef, "derived-dod:") {
+			derived = true
+			parts := strings.Split(item.CandidateItemRef, ":")
+			if len(parts) != 3 {
+				return nil, false
+			}
+			group, exists := groups[parts[1]]
+			ordinal, err := strconv.Atoi(parts[2])
+			if !exists || err != nil || ordinal < 1 || parts[2] != fmt.Sprintf("%06d", ordinal) || group[ordinal] != "" {
+				return nil, false
+			}
+			group[ordinal] = item.CandidateItemRef
+			continue
+		}
+		formal = true
+		parts := strings.Split(item.CandidateItemRef, ":item:")
+		if len(parts) != 2 || !strings.HasPrefix(parts[0], "dod:") || len(parts[0]) <= len("dod:") {
+			return nil, false
+		}
+		ordinal, err := strconv.Atoi(parts[1])
+		if err != nil || ordinal < 1 || parts[1] != fmt.Sprintf("%06d", ordinal) || formalOrdinals[ordinal] {
+			return nil, false
+		}
+		formalOrdinals[ordinal] = true
+		result[item.CandidateItemRef] = fmt.Sprintf("dod-%03d", ordinal)
+	}
+	if derived && formal {
+		return nil, false
+	}
+	if derived {
+		ordinal := 0
+		for _, kind := range []string{"user", "template", "generated"} {
+			for n := 1; n <= len(groups[kind]); n++ {
+				ref := groups[kind][n]
+				if ref == "" {
+					return nil, false
+				}
+				ordinal++
+				result[ref] = fmt.Sprintf("dod-%03d", ordinal)
+			}
+		}
+	} else {
+		for n := 1; n <= len(items); n++ {
+			if !formalOrdinals[n] {
+				return nil, false
 			}
 		}
 	}
-	return false
-}
-
-func specificationProfileHasProofDeclaration(declaration runtimecontract.RuntimeProfileEvidenceRequirement) bool {
-	// An ID and scope alone identify a placeholder, not a proof protocol. This
-	// only checks the existence of an authored proof declaration; actual
-	// capability feasibility remains a Runtime owner observation.
-	return len(declaration.RequiredEvidenceKinds) > 0 && len(declaration.AcceptedStepKinds) > 0
+	return result, len(result) == len(items)
 }
 
 // CompileProfileOwnerFactBindings derives the exact pre-seal manifest from a

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server"
@@ -15,51 +16,159 @@ import (
 // authoringTaskLifecycle 只管理进程任务，不保存业务结果或恢复队列。
 // 重启后的重试必须重新查询 owner，已 reserve 的请求不能再调用 provider。
 type authoringTaskLifecycle struct {
-	mu       sync.Mutex
-	stopping bool
-	active   int
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	mu          sync.Mutex
+	stopping    bool
+	active      int
+	ctx         context.Context
+	cancel      context.CancelFunc
+	drained     chan struct{}
+	drainCtx    context.Context
+	drainCancel context.CancelFunc
+	drainTimer  *time.Timer
+	stopCaller  func() bool
 }
 
 func newAuthoringTaskLifecycle() *authoringTaskLifecycle {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &authoringTaskLifecycle{ctx: ctx, cancel: cancel}
+	drainCtx, drainCancel := context.WithCancel(context.Background())
+	return &authoringTaskLifecycle{ctx: ctx, cancel: cancel, drained: make(chan struct{}), drainCtx: drainCtx, drainCancel: drainCancel}
 }
 
+const authoringSettlementTimeout = 5 * time.Second
+
 func (l *authoringTaskLifecycle) stop() {
+	ctx, cancel := context.WithTimeout(context.Background(), authoringSettlementTimeout)
+	defer cancel()
+	l.stopContext(ctx)
+}
+
+func (l *authoringTaskLifecycle) stopContext(ctx context.Context) error {
+	if l == nil {
+		return nil
+	}
+	l.beginStop(ctx)
+	select {
+	case <-l.drained:
+		return nil
+	default:
+	}
+	select {
+	case <-l.drained:
+		return nil
+	case <-l.drainCtx.Done():
+		return l.drainCtx.Err()
+	}
+}
+
+// 首次 Stop 封存唯一排空窗口；重复 Stop 不延长 deadline。
+func (l *authoringTaskLifecycle) beginStop(ctx context.Context) {
 	if l == nil {
 		return
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.stopping {
+		return
+	}
 	l.stopping = true
 	l.cancel()
+	deadline := time.Now().Add(authoringSettlementTimeout)
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	// 所有已经创建的 settlement 也受这一排空 root 约束。
+	l.drainTimer = time.AfterFunc(time.Until(deadline), l.drainCancel)
+	l.stopCaller = context.AfterFunc(ctx, l.drainCancel)
+	if ctx.Err() != nil {
+		l.drainCancel()
+	}
+	if l.active == 0 {
+		l.finishDrain()
+	}
+}
+
+// 调用方持有 mu；active 首次归零后释放计时器与 caller cancellation 订阅。
+func (l *authoringTaskLifecycle) finishDrain() {
+	if l.drainTimer != nil {
+		l.drainTimer.Stop()
+	}
+	if l.stopCaller != nil {
+		l.stopCaller()
+	}
+	l.drainCancel()
+	close(l.drained)
+}
+
+type authoringCallKey struct{}
+type authoringCallScope struct{ lifecycle *authoringTaskLifecycle }
+
+func (l *authoringTaskLifecycle) accept(ctx context.Context) (context.Context, func(), error) {
+	if l == nil || ctx == nil {
+		return ctx, nil, common.ErrConflict
+	}
+	if scope, ok := ctx.Value(authoringCallKey{}).(*authoringCallScope); ok && scope.lifecycle == l {
+		l.mu.Lock()
+		stopping := l.stopping
+		l.mu.Unlock()
+		if stopping || ctx.Err() != nil {
+			return ctx, nil, common.ErrConflict
+		}
+		return ctx, func() {}, nil
+	}
+	l.mu.Lock()
+	if l.stopping || l.active >= 32 {
+		l.mu.Unlock()
+		return ctx, nil, common.ErrConflict
+	}
+	l.active++
 	l.mu.Unlock()
-	l.wg.Wait()
+	callCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(l.ctx, cancel)
+	callCtx = context.WithValue(callCtx, authoringCallKey{}, &authoringCallScope{lifecycle: l})
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			stop()
+			cancel()
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			l.active--
+			if l.stopping && l.active == 0 {
+				l.finishDrain()
+			}
+		})
+	}
+	return callCtx, release, nil
+}
+
+type authoringSettlementKey struct{}
+
+func authoringSettlementContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if settlement, ok := ctx.Value(authoringSettlementKey{}).(context.Context); ok {
+		return settlement, func() {}
+	}
+	settlement, cancel := context.WithTimeout(context.WithoutCancel(ctx), authoringSettlementTimeout)
+	if scope, ok := ctx.Value(authoringCallKey{}).(*authoringCallScope); ok {
+		stop := context.AfterFunc(scope.lifecycle.drainCtx, cancel)
+		return settlement, func() { stop(); cancel() }
+	}
+	return settlement, cancel
 }
 
 func (l *authoringTaskLifecycle) schedule(ctx context.Context, background task.BackgroundRoutine, run func(context.Context)) error {
 	if l == nil || background == nil || run == nil {
 		return common.ErrConflict
 	}
-	l.mu.Lock()
-	if l.stopping || l.active >= 32 {
-		l.mu.Unlock()
-		return common.ErrConflict
+	callCtx, release, err := l.accept(l.ctx)
+	if err != nil {
+		return err
 	}
-	l.active++
-	l.wg.Add(1)
-	l.mu.Unlock()
-	done := func() {
-		l.mu.Lock()
-		l.active--
-		l.mu.Unlock()
-		l.wg.Done()
-	}
-	accepted := &authoringBackgroundTask{ctx: l.ctx, run: run, done: done}
+	accepted := &authoringBackgroundTask{ctx: callCtx, run: run, done: release}
 	if err := background.AsyncTaskContext(ctx, accepted); err != nil {
-		done()
+		release()
 		return err
 	}
 	return nil
@@ -73,6 +182,9 @@ type authoringBackgroundTask struct {
 
 func (t *authoringBackgroundTask) Run() {
 	defer t.done()
+	if scope, ok := t.ctx.Value(authoringCallKey{}).(*authoringCallScope); ok && scope.lifecycle.ctx.Err() != nil {
+		return
+	}
 	if t.ctx.Err() == nil {
 		t.run(t.ctx)
 	}

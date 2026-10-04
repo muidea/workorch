@@ -3,6 +3,7 @@ package specifications
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 )
@@ -17,6 +18,9 @@ func ParseDerivedAcceptance(payload []byte, input workspace.DefinitionAuthoringI
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&proposal); err != nil {
 		return workspace.DefinitionDerivedAcceptance{}, err
+	}
+	if proposal.AdditionalItems == nil {
+		return workspace.DefinitionDerivedAcceptance{}, fmt.Errorf("derived acceptance requires AdditionalItems array")
 	}
 	if err := proposal.ValidateFor(input, template); err != nil {
 		return workspace.DefinitionDerivedAcceptance{}, err

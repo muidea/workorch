@@ -83,7 +83,7 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 				}
 				result.Set(response, nil)
 			case workspaceevents.CompleteAuthoringSpecificationCommand:
-				next, err := record.CompleteSpecification(command.PermitID, command.Proposal, command.Review, command.FailureCode)
+				next, err := record.CompleteSpecification(command.PermitID, command.Proposal, command.Review, command.FailureCode, command.Diagnostic)
 				if err != nil {
 					t.Error(err)
 					return
@@ -111,10 +111,10 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 	calls := 0
 	physicalCalls := 0
 	persistedPrefix := 0
-	if err := llm.Subscribe(llmevents.TopicLLMCommandCompleteProvider, func(ev magicevent.Event, result magicevent.Result) {
+	if err := llm.Subscribe(llmevents.TopicLLMCommandCompleteProviderDocument, func(ev magicevent.Event, result magicevent.Result) {
 		mu.Lock()
 		defer mu.Unlock()
-		command := ev.Data().(llmevents.CompleteProviderCommand)
+		command := ev.Data().(llmevents.CompleteProviderDocumentCommand)
 		if command.ExpectedConfigurationRevision != "revision" || command.Target != target || len(record.SpecificationRequests) != persistedPrefix+calls+1 {
 			t.Errorf("provider called without persisted permit and frozen target: %+v", command)
 		}
@@ -139,13 +139,13 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 		}
 		calls++
 		physicalCalls++
-		result.Set(llmevents.CompleteProviderResult{Target: target, Completion: llmevents.ProviderCompletionData{Content: string(payload)}}, nil)
+		result.Set(authoringTestDocumentResult(t, command, payload), nil)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	defer llm.Unsubscribe(llmevents.TopicLLMCommandCompleteProvider)
+	defer llm.Unsubscribe(llmevents.TopicLLMCommandCompleteProviderDocument)
 	for range 2 {
-		b := &Biz{Base: basebiz.New(ModuleID, hub, nil)}
+		b := &Biz{Base: basebiz.New(ModuleID, hub, nil), authoringTasks: newAuthoringTaskLifecycle()}
 		spec, err := b.CompileAuthoringSpecification(ctx, input.WorkspaceID)
 		if err != nil || len(spec.Reviews) != 6 {
 			t.Fatalf("compile: %+v %v", spec, err)
@@ -156,7 +156,7 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 	}
 	complete := record.Clone()
 	configuration.ConfigurationRevision = "changed-after-completion"
-	b := &Biz{Base: basebiz.New(ModuleID, hub, nil)}
+	b := &Biz{Base: basebiz.New(ModuleID, hub, nil), authoringTasks: newAuthoringTaskLifecycle()}
 	if replay, err := b.CompileAuthoringSpecification(ctx, input.WorkspaceID); err != nil || len(replay.Reviews) != 6 || physicalCalls != 7 {
 		t.Fatalf("sealed result was not replayed independent of provider configuration: %+v %v", replay, err)
 	}

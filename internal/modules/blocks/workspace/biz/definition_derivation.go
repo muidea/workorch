@@ -31,7 +31,7 @@ func reduceDefinitionDerivation(o definitionSpecificationObservation, e definiti
 		if cmd.Validate() != nil || cmd.WorkspaceID != w.ID {
 			return definitionSpecificationTransition{}, common.ErrInvalidArgument
 		}
-		next, err = record.CompleteDerivation(cmd.PermitID, cmd.Proposal, cmd.FailureCode)
+		next, err = record.CompleteDerivation(cmd.PermitID, cmd.Proposal, cmd.FailureCode, cmd.Diagnostic)
 		if err == nil {
 			for _, item := range next.DerivationRequests {
 				if item.PermitID == cmd.PermitID {

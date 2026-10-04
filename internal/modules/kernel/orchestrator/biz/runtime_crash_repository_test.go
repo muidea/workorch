@@ -18,6 +18,9 @@ type runtimeCrashPersistenceProbe struct {
 }
 
 func (r *runtimeCrashPersistenceProbe) Load(context.Context, common.WorkspaceID, common.RunID) (runtime.RuntimeAggregate, error) {
+	if r.lastAggregate.StateRevision != 0 {
+		return r.lastAggregate, nil
+	}
 	return runtime.RuntimeAggregate{}, common.ErrNotFound
 }
 
@@ -113,6 +116,37 @@ func TestRuntimeSaveCrashRepositoryPreservesCoordinatorPersistenceBoundary(t *te
 				}
 			})
 		}
+	}
+}
+
+func TestFailOnceCASRepositoryPreservesValidatedPathAndCompetingWrite(t *testing.T) {
+	ctx := context.Background()
+	probe := &runtimeCrashValidatedPersistenceProbe{}
+	aggregate := runtimeAggregate(t, 1)
+	probe.lastAggregate = aggregate
+	wrapper := &failOnceCASRuntimeRepository{delegate: probe, remainingFailures: 1}
+	coordinator, err := runtime.NewRuntimeTransitionCoordinator(wrapper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := aggregate
+	next.StateRevision++
+	invalid := next
+	invalid.Decision.AuthoritySnapshot.RunID = "other-run"
+	if err := coordinator.Commit(ctx, invalid, aggregate.StateRevision); err == nil || wrapper.remainingFailures != 1 || probe.saves != 0 || probe.validatedSaves != 0 {
+		t.Fatal("非法 aggregate 越过 Coordinator 或消费故障注入")
+	}
+	err = coordinator.Commit(ctx, next, aggregate.StateRevision)
+	var conflict *runtime.RuntimeCASConflictError
+	if !errors.As(err, &conflict) || conflict.ExpectedRevision != aggregate.StateRevision || conflict.ObservedRevision != next.StateRevision || probe.saves != 1 || probe.validatedSaves != 0 {
+		t.Fatalf("竞争写入未保留普通 Save 与 exact CAS conflict: err=%v saves=%d validated=%d", err, probe.saves, probe.validatedSaves)
+	}
+	next.StateRevision++
+	if err := coordinator.Commit(ctx, next, next.StateRevision-1); err != nil || probe.saves != 1 || probe.validatedSaves != 1 {
+		t.Fatalf("故障后未透传 Coordinator 已校验路径: err=%v saves=%d validated=%d", err, probe.saves, probe.validatedSaves)
+	}
+	if err := wrapper.Save(ctx, next, next.StateRevision-1); err != nil || probe.saves != 2 {
+		t.Fatal("直接 Save 绕过普通持久化入口")
 	}
 }
 

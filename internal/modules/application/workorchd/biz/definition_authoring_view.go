@@ -39,6 +39,13 @@ func (b *Biz) ReadDefinitionAuthoringView(ctx context.Context, id common.Workspa
 	return result, nil
 }
 
+func authoringDiagnosticMetadata(d *workspace.DefinitionAuthoringDiagnostic) *workorchmanagementcontract.DefinitionAuthoringDiagnosticMetadata {
+	if d == nil {
+		return nil
+	}
+	return &workorchmanagementcontract.DefinitionAuthoringDiagnosticMetadata{ParseError: d.ParseError, ParseErrorSHA256: d.ParseErrorSHA256, ParseErrorBytes: d.ParseErrorBytes, ParseErrorSaved: d.ParseErrorSaved, PayloadSHA256: d.PayloadSHA256, PayloadBytes: d.PayloadBytes, PayloadSaved: d.PayloadSaved, NotSavedReason: d.NotSavedReason, ProviderCode: d.ProviderCode, ProviderDocument: authoringProviderObservationMetadata(d.ProviderDocument), ProviderWire: authoringProviderObservationMetadata(d.ProviderWire), ProviderCause: authoringProviderObservationMetadata(d.ProviderCause)}
+}
+
 func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult) (workorchmanagementcontract.DefinitionAuthoringView, error) {
 	if view.ValidateFor(workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: view.WorkspaceID}) != nil {
 		return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrConflict
@@ -87,10 +94,10 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 		}
 		switch {
 		case derivation.FailureCode != "":
-			result.Requests = append(result.Requests, workorchmanagementcontract.DefinitionAuthoringRequestState{Phase: "derivation", State: "failed", FailureCode: derivation.FailureCode})
+			result.Requests = append(result.Requests, workorchmanagementcontract.DefinitionAuthoringRequestState{PermitID: derivation.PermitID, Phase: "derivation", State: "failed", FailureCode: derivation.FailureCode, Diagnostic: authoringDiagnosticMetadata(derivation.Diagnostic)})
 			result.State = "failed"
 		case derivation.Proposal == nil:
-			result.Requests = append(result.Requests, workorchmanagementcontract.DefinitionAuthoringRequestState{Phase: "derivation", State: "outcome_unresolved"})
+			result.Requests = append(result.Requests, workorchmanagementcontract.DefinitionAuthoringRequestState{PermitID: derivation.PermitID, Phase: "derivation", State: "outcome_unresolved"})
 			result.State = "outcome_unresolved"
 		default:
 			result.State = "derived"
@@ -114,10 +121,7 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 					state = "completed"
 				}
 				requestState := workorchmanagementcontract.DefinitionAuthoringRequestState{PermitID: request.PermitID, Phase: string(request.Phase), ReviewKind: request.ReviewKind, State: state, FailureCode: request.FailureCode}
-				if request.Diagnostic != nil {
-					d := request.Diagnostic
-					requestState.Diagnostic = &workorchmanagementcontract.DefinitionAuthoringDiagnosticMetadata{ParseError: d.ParseError, ParseErrorSHA256: d.ParseErrorSHA256, ParseErrorBytes: d.ParseErrorBytes, ParseErrorSaved: d.ParseErrorSaved, PayloadSHA256: d.PayloadSHA256, PayloadBytes: d.PayloadBytes, PayloadSaved: d.PayloadSaved, NotSavedReason: d.NotSavedReason}
-				}
+				requestState.Diagnostic = authoringDiagnosticMetadata(request.Diagnostic)
 				result.Requests = append(result.Requests, requestState)
 				if request.Proposal != nil {
 					copy := request.Proposal.Clone()

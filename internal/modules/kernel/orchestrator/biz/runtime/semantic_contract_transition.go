@@ -46,9 +46,6 @@ func (c *planningTransactionComponent) requireSemanticContract(ctx context.Conte
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -214,9 +211,6 @@ func (c *planningTransactionComponent) invalidateSemanticCatalogGeneration(ctx c
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -276,9 +270,6 @@ func (c *planningTransactionComponent) sealSemanticContract(ctx context.Context,
 			}
 			aggregate.Facts, aggregate.Decision = facts, decision
 			aggregate.StateRevision++
-			if err := aggregate.Validate(); err != nil {
-				return RuntimeAggregate{}, err
-			}
 			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 				return RuntimeAggregate{}, err
 			}
@@ -368,9 +359,6 @@ func (c *planningTransactionComponent) sealSemanticContract(ctx context.Context,
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -409,9 +397,6 @@ func (c *planningTransactionComponent) failSemanticContract(ctx context.Context,
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}

@@ -30,7 +30,7 @@ type ProviderConfigRevision func() uint64
 // is never used as a continuation prefix. Ordinary structured requests retain
 // the established whitespace normalization.
 func providerCompletionContent(request llmmodels.ProviderRequest, content string) string {
-	if request.RawTextOutput {
+	if request.RawTextOutput || request.CaptureDocumentObservation {
 		return content
 	}
 	return strings.TrimSpace(content)

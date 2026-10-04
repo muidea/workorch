@@ -2,6 +2,7 @@ package activationports
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1025,4 +1026,41 @@ func startupInputForActivationPortTest(candidate workspacemodel.DefinitionAdmiss
 		TemplateSnapshotHash: candidate.WorkspaceTemplateSnapshot.SnapshotHash, RuntimeProfileContractsHash: candidate.RuntimeProfileContractsHash,
 		ResolvedProjectWorkspaceDirectory: candidate.ResolvedProjectWorkspaceDirectory, CandidateItemToItemRefMappings: mappings,
 	}).WithHash()
+}
+
+func TestBuiltinSoftwareDevSpecificationWildcardRemainsApplicableToProductionBootstrap(t *testing.T) {
+	template := builtinSoftwareDevTemplateForTest(t)
+	w := &workspacemodel.Workspace{ID: "ws-default-spec", TemplateID: template.ID, DeliverableDirectory: t.TempDir(), EvidencePolicies: workorcheventpayload.CloneSlice(template.EvidencePolicies)}
+	goal := &workspacemodel.Goal{ID: "goal-default", WorkspaceID: w.ID, Text: "implement requested behavior", DefinitionRevision: "goal-r1"}
+	dod := &workspacemodel.DoD{ID: "dod-default", WorkspaceID: w.ID, Items: append([]string{"user criterion"}, template.DoDItems...), DefinitionRevision: "dod-r1"}
+	candidate, err := definitionAdmissionCandidate(w, goal, dod, template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := workspacemodel.GoalSpecification{Version: workspacemodel.GoalSpecificationVersionCurrent, GoalItemRef: candidate.GoalInput.CandidateItemRef, GoalTextHash: workspacemodel.StableDefinitionTextHash(goal.Text), Dimensions: []workspacemodel.GoalSpecificationDimension{{ID: "all", Required: true, Activated: true}}}
+	for n, item := range candidate.DoDInputs {
+		id := fmt.Sprintf("req-%03d", n+1)
+		spec.Requirements = append(spec.Requirements, workspacemodel.GoalSpecificationRequirement{ID: id, DimensionID: "all", Required: true, SourceKind: workspacemodel.GoalRequirementUserExplicit, SourceItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
+		spec.Obligations = append(spec.Obligations, workspacemodel.GoalSpecificationObligation{ID: "obl-" + id, RequirementID: id, DoDItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
+		spec.Verifications = append(spec.Verifications, workspacemodel.GoalSpecificationVerification{ID: "ver-" + id, ObligationID: "obl-" + id, Declaration: "按默认模板声明验证", Status: workspacemodel.GoalVerificationDeclared, ProfileID: "software-dev", EvidenceRequirementID: "*", Scope: "dodItem"})
+	}
+	hash := spec.ContentHash()
+	for _, kind := range []string{workspacemodel.GoalReviewDimensionCoverage, workspacemodel.GoalReviewNegativePath, workspacemodel.GoalReviewRegression, workspacemodel.GoalReviewResourceEnvironment, workspacemodel.GoalReviewTraceability, workspacemodel.GoalReviewVerifierFeasibility} {
+		spec.Reviews = append(spec.Reviews, workspacemodel.GoalSpecificationCompletenessReview{Kind: kind, Status: workspacemodel.GoalReviewPass, SpecificationHash: hash, Reason: "synthetic independent review", EvidenceRefs: []string{candidate.GoalInput.CandidateItemRef}, RequirementIDs: []string{spec.Requirements[0].ID}})
+	}
+	candidate.Specification = &spec
+	candidate = candidate.WithHash()
+	bootstrap := assertBuiltinSoftwareDevCandidateAndBootstrap(t, template, w, goal, dod, candidate)
+	count := 0
+	for _, focus := range bootstrap.DefinitionFocuses {
+		if focus.AssessmentScope == "dodItem" {
+			count++
+			if len(focus.AcceptedStepKinds) == 0 || len(focus.RequiredOwnerFacts) == 0 || focus.ValidationFailureRepairConvergence == nil || focus.ValidationRecipeID != "" || len(focus.RequiredCheckRefs) != 0 {
+				t.Fatalf("default template contribution lost or fabricated recipe/check: %+v", focus)
+			}
+		}
+	}
+	if count != len(dod.Items) {
+		t.Fatalf("default template incomplete sources: %d want %d", count, len(dod.Items))
+	}
 }

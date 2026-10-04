@@ -19,6 +19,11 @@ import (
 // CompileAuthoringSpecification returns a candidate for user confirmation, not
 // an admitted Definition. Each proposal and critic has its own durable permit.
 func (b *Biz) CompileAuthoringSpecification(ctx context.Context, id common.WorkspaceID) (workspace.GoalSpecification, error) {
+	ctx, release, err := b.authoringTasks.accept(ctx)
+	if err != nil {
+		return workspace.GoalSpecification{}, err
+	}
+	defer release()
 	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id})
 	if err != nil {
 		return workspace.GoalSpecification{}, err
@@ -245,15 +250,30 @@ func (b *Biz) completeAuthoringSpecification(ctx context.Context, id common.Work
 	if reserved.FreshPermitID == "" {
 		return authoringSpecificationOutcome(reserved.Request)
 	}
-	payload, providerErr := b.completeDefinitionDocument(ctx, command)
+	response, deliveryErr := b.completeAuthoringDocument(ctx, reserved.FreshPermitID, command)
+	if deliveryErr != nil {
+		return request, deliveryErr
+	}
+	settlement, cancelSettlement := authoringSettlementContext(ctx)
+	defer cancelSettlement()
+	ctx = context.WithValue(settlement, authoringSettlementKey{}, settlement)
 	completion := workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: id, PermitID: reserved.FreshPermitID}
-	if providerErr != nil {
+	completion.Diagnostic = authoringProviderDiagnostic(response)
+	var payload []byte
+	if completion.Diagnostic == nil {
+		var payloadErr error
+		payload, payloadErr = authoringCompletePayload(response)
+		if payloadErr != nil {
+			return request, payloadErr
+		}
+	}
+	if completion.Diagnostic != nil {
 		completion.FailureCode = "provider_failed"
 	} else if request.Phase == workspace.DefinitionSpecificationProposal {
 		parsed, parseErr := specifications.ParseAuthoringProposal(payload, derivation)
 		if parseErr != nil {
 			completion.FailureCode = "invalid_proposal"
-			diagnostic := workspace.NewDefinitionAuthoringDiagnostic(parseErr.Error(), payload)
+			diagnostic := authoringParserDiagnostic(parseErr, payload, response)
 			completion.Diagnostic = &diagnostic
 		} else {
 			completion.Proposal = &parsed
@@ -262,31 +282,15 @@ func (b *Biz) completeAuthoringSpecification(ctx context.Context, id common.Work
 		parsed, parseErr := specifications.ParseAuthoringReview(payload, request.ReviewKind, *proposal, derivation)
 		if parseErr != nil {
 			completion.FailureCode = "invalid_review"
-			diagnostic := workspace.NewDefinitionAuthoringDiagnostic(parseErr.Error(), payload)
+			diagnostic := authoringParserDiagnostic(parseErr, payload, response)
 			completion.Diagnostic = &diagnostic
 		} else {
 			completion.Review = &parsed
 		}
 	}
-	if err := ctx.Err(); err != nil {
-		return request, err
-	}
-	ev = magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceAuthoringSpecificationComplete, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, completion)
-	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceAuthoringSpecificationComplete, eventcontract.LaneScope{WorkspaceID: string(id)}))
-	result = b.SendEvent(ev)
-	if result == nil {
-		return request, common.ErrConflict
-	}
-	if err := result.Error(); err != nil {
-		return request, err
-	}
-	value, err = result.Get()
-	if err != nil {
-		return request, err
-	}
-	completed, ok := value.(workspaceevents.AuthoringSpecificationRequestResult)
-	if !ok || completed.ValidateCompletion(completion) != nil {
-		return request, common.ErrConflict
+	completed, settlementErr := b.settleAuthoringSpecification(ctx, completion)
+	if settlementErr != nil {
+		return request, settlementErr
 	}
 	return authoringSpecificationOutcome(completed.Request)
 }

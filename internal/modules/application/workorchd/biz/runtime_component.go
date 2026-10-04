@@ -15,16 +15,17 @@ import (
 // It exposes only typed application ports and short-lived CLI/gateway helpers;
 // the session itself never crosses the service/server transport boundary.
 type runtimeComponent struct {
-	session *runtimecore.Session
-	ports   server.ApplicationPorts
+	session        *runtimecore.Session
+	ports          server.ApplicationPorts
+	authoringTasks *authoringTaskLifecycle
 }
 
 func newRuntimeComponent(session *runtimecore.Session) *runtimeComponent {
 	if session == nil {
 		return nil
 	}
-	component := &runtimeComponent{session: session}
-	component.ports = newApplicationPorts(component.withSession)
+	component := &runtimeComponent{session: session, authoringTasks: newAuthoringTaskLifecycle()}
+	component.ports = newApplicationPorts(component.withSession, component.authoringTasks)
 	return component
 }
 
@@ -80,6 +81,9 @@ func (c *runtimeComponent) withSession(ctx context.Context, fn func(*runtimecore
 func (c *runtimeComponent) close(ctx context.Context) error {
 	if c == nil || c.session == nil {
 		return nil
+	}
+	if err := c.authoringTasks.stopContext(ctx); err != nil {
+		return err
 	}
 	err := c.session.Close(ctx)
 	c.session = nil

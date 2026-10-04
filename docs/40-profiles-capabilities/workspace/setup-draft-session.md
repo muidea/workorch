@@ -50,6 +50,8 @@ provider 原生 structured output 仅在能力明确支持时启用；不支持�
 
 确认恢复参数由已校验的 owner journal 投影，绑定 Workspace、input／permit／proposal／specification 身份；用户须显式选择恢复。ExpectedWorkspaceRevision 仅约束首次准备，已开始的 journal 精确重放不依赖浏览器保存原 revision。页面仍保留原确认时不得以查询结果替换，缺少合法恢复身份时保持阻塞。关闭、切换 Workspace 或删除后的迟到响应不能重新注入旧视图。
 
+确认 journal 已 prepared 时，模板或资源漂移会阻止继续物化；系统不提供 abandon／清空 journal，不能换 hash 或改写正式行绕过。恢复原模板内容及资源 exact bytes 后，由 owner 重新验证原快照和 input／permit／proposal／specification／configuration 身份，再显式恢复同一确认事务。prepared 阶段必须核对当前模板，materialized 的 exact 重放只返回原 after-image，不能因此获得当前 activation 资格；资源绑定的确认重放每次仍由 File 重新验证。原 snapshot 恢复也不会覆盖冲突 Goal／DoD 行：冲突保持阻塞，需要排查正式状态，不能把部分 materialization 宣称已完成。确认恢复不重新调用 provider、不自动创建 Run。
+
 已 reserve 的请求不会因查询或重复 compile 自动获得第二次 provider 调用权限。完成请求重放必须包含同一原始诊断，内容变化是冲突。输入修订会产生新身份并重新审查，不是恢复或改写原失败结果。
 
 `failed` 的同输入编译只返回原失败，不调度新的 provider 请求；部署新的请求合同也不会清除旧失败或授予新 permit。只有真实输入或模板修订才应保存为新 revision，失败历史和既有预算继续保留，修订不保证解除预算耗尽。仅服务代码修复后的新验证须由用户显式创建新事务，不能靠无意义改动 Goal、随机替换请求身份或清理账本绕过原失败。`preparation_failed` 的未 reserve 目标恢复与此不同，不得混用提示或调用规则。

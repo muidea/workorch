@@ -1,6 +1,7 @@
 package events
 
 const (
+	TopicLLMCommandCompleteProviderDocument    = "/llm/command/complete-provider-document"
 	TopicLLMCommandCompleteProvider            = "/llm/command/complete-provider"
 	TopicLLMCommandGenerateEmbedding           = "/llm/command/generate-embedding"
 	TopicLLMCommandGetActiveConfiguration      = "/llm/command/get-active-configuration"

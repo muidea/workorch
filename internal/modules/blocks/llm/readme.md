@@ -20,7 +20,7 @@ Eventstream 只记录 audit notification。
 
 | 交互方 | 方向 | typed EventHub 合同 | 调用/授权语义 |
 | --- | --- | --- | --- |
-| `application/workorchd` | Application → LLM | `CompleteProviderCommand/CompleteProviderResult`、`GenerateEmbeddingCommand/GenerateEmbeddingResult`、active config/catalog/selection commands | completion 仅接受 exact `application/workorchd/appservice`；其余 generic command 仅接受 exact `application/workorchd`，均在读取 payload/provider 前校验 |
+| `application/workorchd` | Application → LLM | `CompleteProviderCommand/CompleteProviderResult`、`CompleteProviderDocumentCommand/Result`、`GenerateEmbeddingCommand/GenerateEmbeddingResult`、active config/catalog/selection commands | generic completion 仅接受 exact `application/workorchd/appservice`；独立文档及其余 command 仅接受 exact `application/workorchd`，均在读取 payload/provider 前校验 |
 | `kernel/orchestrator` | Orchestrator → LLM | capabilities、provider ceiling、candidate preflight、`RequestRuntimeCandidateCommand/Result` | 所有 Runtime topic 仅接受 exact `kernel/orchestrator` source |
 | Eventstream | LLM → Eventstream | `LLMUsageRecordedData` | provider execution/preflight 的 bounded factual audit（包含未提交失败）；Eventstream 校验 exact LLM source |
 | ai-proxy | LLM → HTTP provider | `/v1/models`、`/v1/responses`、`/v1/embeddings` | owner-private adapter；endpoint/credential 不进入跨 owner result |
@@ -30,6 +30,15 @@ Eventstream 只记录 audit notification。
 vector 与真实 non-streaming physical response fact。owner 发布前和 Application 消费后使用同一校验。
 `RequestRuntimeCandidateResult` 则是受校验的封闭事实联合，`Stale | Feedback | DocumentOutcome` 必须恰好一个，并绑定 exact
 workspace/run、logical/physical request identity、document hash、audit 与 usage。
+
+创建期独立文档调用保留 generic completion 的既有成功合同，复用同一 adapter 且不执行 fallback call。
+`CompleteProviderDocumentResult` 的 `Document | Failure | Incomplete` 恰好一个，完整空文档仍由调用方严格解析；
+exact opaque RequestIdentity、完整 accepted command hash、target、configuration revision、submitted 与 physical mode
+由 `ValidateFor` 共同反证。LLM 不解释 Workspace phase 或 permit，不从审计重建调用结果。
+文档、wire 与实际 transport leaf 分开记录 actual observed bytes／SHA256、complete、saved 和 reason；超过 256 KiB
+不保存任何截断前缀，未读取不发明 bytes／hash。原始 leaf 只进入受限诊断，普通错误及 audit 保留安全分类，
+不混入 request URL、配置或凭据。审计发布错误单独记录，不覆盖已经确定的 typed outcome；发布不等于持久投递。
+Runtime 的原始 body／stream 禁止跨 owner 规则不变，此文档诊断合同只用于创建期 Workspace 受限查询。
 
 ## 不变量与非职责
 

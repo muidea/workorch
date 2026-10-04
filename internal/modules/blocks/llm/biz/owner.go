@@ -116,6 +116,7 @@ func (m *Biz) Start() error {
 	}
 	m.topics = []string{
 		llmevents.TopicLLMCommandCompleteProvider,
+		llmevents.TopicLLMCommandCompleteProviderDocument,
 		llmevents.TopicLLMCommandGenerateEmbedding,
 		llmevents.TopicLLMCommandGetActiveConfiguration,
 		llmevents.TopicLLMCommandGetProviderModelCatalog,
@@ -876,6 +877,9 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		return
 	}
 	switch ev.ID() {
+	case llmevents.TopicLLMCommandCompleteProviderDocument:
+		m.handleProviderDocument(ev, result)
+		return
 	case llmevents.TopicLLMCommandGetActiveConfiguration:
 		if _, ok := ev.Data().(llmevents.GetActiveConfigurationCommand); !ok {
 			setLLMMagicError(result, common.ErrInvalidArgument)

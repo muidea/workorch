@@ -3,14 +3,19 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 	"testing"
 
+	magicevent "github.com/muidea/magicCommon/event"
+	activationcore "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
+	runowner "github.com/muidea/workorch/internal/modules/blocks/run/biz"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -81,7 +86,7 @@ func TestAuthoringAdmissionSealsExactPersistedReviewsWithoutRun(t *testing.T) {
 		verification := &spec.Verifications[index]
 		verification.Status = workspace.GoalVerificationDeclared
 		verification.ProfileID = "generic"
-		verification.EvidenceRequirementID = "proof"
+		verification.EvidenceRequirementID = "*"
 		verification.Scope = "dodItem"
 	}
 	// The owner must reject even a fully self-consistent candidate if the
@@ -243,5 +248,144 @@ func TestAuthoringDraftCannotUseLegacyAdmission(t *testing.T) {
 	}
 	if w.StartupInput != nil || w.ActivationAdmission != nil {
 		t.Fatal("rejected input changed authority")
+	}
+}
+
+func TestAuthoringVerificationApplicabilityBlocksWrongDeclarationBeforeRun(t *testing.T) {
+	for _, tt := range []struct{ name, id, scope string }{{"wrongid", "proof", "dodItem"}, {"wrongscope", "*", "deliverable"}, {"otherdod", "dod-002", "dodItem"}} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			root := t.TempDir()
+			owners := openFileDefinitionAdmissionOwners(t, root)
+			defer func() { owners.close() }()
+			confirmation := seedReviewedAuthoringConfirmationWithDeclaration(t, owners, common.WorkspaceID("ws-"+tt.name), true, true, tt.id, tt.scope)
+			if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: confirmation}); err != nil {
+				t.Fatal(err)
+			}
+			current, err := owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalJournal := current.DefinitionAuthoringConfirmation.Clone()
+			candidate := authoringAdmissionCandidateFromCurrentConfiguration(t, current)
+			command := workspaceevents.AdmitDefinitionAuthoringCommand{Candidate: candidate, ExpectedWorkspaceRevision: current.Revision, ExpectedConfigurationHash: workspace.WorkspaceConfigurationHash(current)}
+			first, err := owners.workspace.submitDefinitionAuthoringAdmission(ctx, command)
+			if err != nil || first.AdmissionResult.Disposition != workspace.DefinitionAdmissionClarificationRequired || first.AdmissionResult.ViolationCode != workspace.DefinitionAdmissionSpecificationIncomplete || first.StartupInput != nil || first.ActivationAdmission != nil {
+				t.Fatalf("wrong declaration admitted: %+v %v", first, err)
+			}
+			owners.close()
+			owners = openFileDefinitionAdmissionOwners(t, root)
+			second, err := owners.workspace.submitDefinitionAuthoringAdmission(ctx, command)
+			stored, readErr := owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
+			runs, runErr := owners.repositories.Runs.List(ctx)
+			if err != nil || !reflect.DeepEqual(first, second) || readErr != nil || !reflect.DeepEqual(originalJournal, *stored.DefinitionAuthoringConfirmation) || stored.ActiveRunID != "" || runErr != nil || len(runs) != 0 {
+				t.Fatalf("blocked source replay changed authority: %v %v %v", err, readErr, runErr)
+			}
+		})
+	}
+}
+
+// Real static bootstrap and Workspace/Run Start; no SM-2/3/4 execution or credit.
+func TestAuthoringApplicableDeclarationsSurviveProductionBootstrapAndExplicitStart(t *testing.T) {
+	for _, mode := range []string{"wildcard", "exact"} {
+		t.Run(mode, func(t *testing.T) { testAuthoringApplicableBootstrapAndStart(t, mode) })
+	}
+}
+
+func testAuthoringApplicableBootstrapAndStart(t *testing.T, mode string) {
+	ctx := context.Background()
+	owners := openFileDefinitionAdmissionOwners(t, t.TempDir())
+	defer owners.close()
+	confirmation := seedReviewedAuthoringConfirmationWithTemplate(t, owners, "ws-applicable-start", true, true, "*", "dodItem", func(template *workspace.WorkspaceTemplate) {
+		hints := template.ContextHints.Map()
+		generic := hints["profileContracts"].(map[string]any)["generic"].(map[string]any)
+		declaration := generic["evidenceRequirements"].([]any)[0].(map[string]any)
+		fact := map[string]any{"ownerModuleId": runtimecontract.RuntimeModuleShell, "factKind": string(runtimecontract.RuntimeOwnerFactSelectableValidationSurface), "operationKind": runtimecontract.RuntimeBlockKindManagedValidationSession}
+		declaration["requiredOwnerFacts"] = []any{fact}
+		declaration["ownerFactConvergences"] = []any{map[string]any{"ownerModuleId": runtimecontract.RuntimeModuleShell, "factKind": string(runtimecontract.RuntimeOwnerFactSelectableValidationSurface), "operationKind": runtimecontract.RuntimeBlockKindManagedValidationSession, "requirePreexisting": true}}
+		if mode == "exact" {
+			exact := make([]any, 0, 3)
+			for n := 1; n <= 3; n++ {
+				value := make(map[string]any, len(declaration))
+				for key, item := range declaration {
+					value[key] = item
+				}
+				value["id"] = fmt.Sprintf("dod-%03d", n)
+				exact = append(exact, value)
+			}
+			// Exact proof and wildcard constraints both survive; no fallback replaces either.
+			declaration["requireDirectEvidence"] = true
+			delete(declaration, "requiredOwnerFacts")
+			delete(declaration, "ownerFactConvergences")
+			generic["evidenceRequirements"] = append(exact, declaration)
+		}
+
+		generic["bootstrapRecipes"] = []any{map[string]any{"id": "init", "requiredGoalTerms": []any{"交付"}, "artifacts": []any{map[string]any{"id": "artifact", "targetRole": "artifact", "allowedOperationKinds": []any{runtimecontract.StepKindFileWrite}}}}}
+		payload, err := workorcheventpayload.FromMap(hints)
+		if err != nil {
+			t.Fatal(err)
+		}
+		template.ContextHints = payload
+	})
+	confirmed, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: confirmation})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := authoringAdmissionCandidateFromCurrentConfiguration(t, current)
+	admitted, err := owners.workspace.submitDefinitionAuthoringAdmission(ctx, workspaceevents.AdmitDefinitionAuthoringCommand{Candidate: candidate, ExpectedWorkspaceRevision: current.Revision, ExpectedConfigurationHash: workspace.WorkspaceConfigurationHash(current)})
+	if err != nil || admitted.StartupInput == nil {
+		t.Fatalf("applicable reviewed source was blocked: %+v %v", admitted, err)
+	}
+	policy := &runtimecontract.RuntimeAcceptanceSlicePolicy{SchemaVersion: runtimecontract.RuntimeAcceptanceSlicePolicySchemaCurrent, MaxWorkItems: 4, MaxFocuses: 16, MaxCandidateContextItems: 4, CompletionPolicy: runtimecontract.RuntimeAcceptanceSliceCompletionAll, ResultPolicy: runtimecontract.RuntimeAcceptanceSliceResultAllowed}
+	bootstrap, err := activationcore.RuntimeBootstrap(&confirmed.Goal, &confirmed.DoD, admitted.StartupInput.DefinitionRevision, admitted.StartupInput.StartupInputHash, nil, runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "fixture", ModelID: "fixture"}}, ExecutionContract: runtimecontract.RuntimeExecutionContract{StateChangePolicy: runtimecontract.RuntimeStateChangeAllowedButNotRequired, AcceptanceSlicePolicy: policy, ProfileContracts: candidate.RuntimeProfileContracts}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, item := range bootstrap.CoverageItems {
+		if item.SourceScope == "dodItem" {
+			count++
+			if item.SourceID != fmt.Sprintf("dod-%03d", count) || string(item.ID) == "cwi-001" {
+				t.Fatalf("source/CWI order conflated: %+v", item)
+			}
+		}
+	}
+	if count != 3 {
+		t.Fatalf("missing confirmed sources: %d", count)
+	}
+	for _, focus := range bootstrap.DefinitionFocuses {
+		if focus.AssessmentScope != "dodItem" {
+			continue
+		}
+		if len(focus.RequiredEvidenceKinds) != 1 || focus.RequiredEvidenceKinds[0] != runtimecontract.EvidenceKindValidation || len(focus.RequiredOwnerFacts) == 0 || len(focus.AcceptedStepKinds) == 0 {
+			t.Fatalf("declared proof contribution lost: %+v", focus)
+		}
+		if mode == "exact" && !focus.RequireDirectEvidence {
+			t.Fatalf("exact declaration shadowed wildcard quality constraint: %+v", focus)
+		}
+	}
+	runs, err := owners.repositories.Runs.List(ctx)
+	if err != nil || len(runs) != 0 {
+		t.Fatal("confirmation/bootstrap automatically started Run")
+	}
+	run := runowner.New()
+	if err := run.Configure(runowner.Dependencies{OwnerRepositories: owners.repositories.RunOwner, EventHub: owners.hub}); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer run.Stop(ctx)
+	result, err := owners.workspace.executeExecutionIntent(magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandExecutionIntent, "application/workorchd", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: confirmation.WorkspaceID, RequestID: "explicit-start", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: bootstrap}))
+	if err != nil || result.RunID == "" {
+		t.Fatalf("explicit Start did not reach real Run owner: %+v %v", result, err)
+	}
+	runs, err = owners.repositories.Runs.List(ctx)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("explicit Start cardinality: %d %v", len(runs), err)
 	}
 }

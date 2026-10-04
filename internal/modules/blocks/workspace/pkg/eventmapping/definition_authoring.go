@@ -11,7 +11,7 @@ func DefinitionDerivationRequestDTO(r workspace.DefinitionDerivationRequest) wor
 		RequestID: r.RequestID, Input: r.Input, Template: *TemplateDTO(&r.Template),
 		Resources: r.Resources, ResourceSnapshotHash: r.ResourceSnapshotHash,
 		ProviderBindingHash: r.ProviderBindingHash, PermitID: r.PermitID,
-		Proposal: r.Proposal, FailureCode: r.FailureCode,
+		Proposal: r.Proposal, FailureCode: r.FailureCode, Diagnostic: r.Diagnostic,
 	}
 }
 

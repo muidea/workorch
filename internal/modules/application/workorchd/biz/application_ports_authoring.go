@@ -17,7 +17,7 @@ func (p *runtimeApplicationPorts) configureAuthoringPorts() {
 			if err != nil {
 				return err
 			}
-			b := &Biz{Base: basebiz.New(ModuleID, hub, nil)}
+			b := &Biz{Base: basebiz.New(ModuleID, hub, nil), authoringTasks: p.authoringTasks}
 			return fn(b, session)
 		})
 	}

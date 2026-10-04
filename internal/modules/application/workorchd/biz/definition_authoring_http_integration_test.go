@@ -38,7 +38,7 @@ import (
 
 // 使用正式 HTTP ports 和真实持久 owners；仅 provider 与任务排队由测试控制。
 func TestAuthoringHTTPFileBackedCompilationConfirmationAndRecovery(t *testing.T) {
-	for _, scenario := range []string{"pass", "review_fail", "review_unknown", "resource_drift", "invalid_proposal", "invalid_review"} {
+	for _, scenario := range []string{"pass", "review_fail", "review_unknown", "resource_drift", "invalid_derivation", "invalid_proposal", "invalid_review"} {
 		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
 	}
 }
@@ -89,7 +89,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		}
 	}
 	repositories := workorchrepo.NewWorkspaceScopedFileRepositorySet(storage)
-	hints, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"generic": map[string]any{"evidenceRequirements": []any{map[string]any{"id": "proof", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"}}}}}})
+	hints, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"generic": map[string]any{"evidenceRequirements": []any{map[string]any{"id": "*", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"}}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,8 +147,8 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := provider.Subscribe(llmevents.TopicLLMCommandCompleteProvider, func(ev magicevent.Event, result magicevent.Result) {
-			command := ev.Data().(llmevents.CompleteProviderCommand)
+		if err := provider.Subscribe(llmevents.TopicLLMCommandCompleteProviderDocument, func(ev magicevent.Event, result magicevent.Result) {
+			command := ev.Data().(llmevents.CompleteProviderDocumentCommand)
 			all, err := owners.Workspaces.List(ctx)
 			if err != nil || len(all) != 1 {
 				t.Errorf("provider workspace: %v", err)
@@ -171,6 +171,9 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 					return
 				}
 				payload, err = json.Marshal(workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"派生验收"}})
+				if scenario == "invalid_derivation" {
+					payload = []byte("  {\"providerControlled\": true}\n")
+				}
 			case "workspace/specification/proposal":
 				if scenario == "proposal_config_failure" || scenario == "review_preparation_failure" || scenario == "review_fail_preparation_failure" || scenario == "review_unknown_preparation_failure" {
 					if len(record.SpecificationRequests) < 1 {
@@ -227,7 +230,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				return
 			}
 			physicalCalls.Add(1)
-			result.Set(llmevents.CompleteProviderResult{Target: target, Completion: llmevents.ProviderCompletionData{Content: string(payload)}}, nil)
+			result.Set(authoringTestDocumentResult(t, command, payload), nil)
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -289,7 +292,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			if err := component.close(shutdown); err != nil {
 				t.Error(err)
 			}
-			provider.Unsubscribe(llmevents.TopicLLMCommandCompleteProvider)
+			provider.Unsubscribe(llmevents.TopicLLMCommandCompleteProviderDocument)
 			provider.Unsubscribe(llmevents.TopicLLMCommandGetActiveConfiguration)
 			file.Teardown(ctx)
 			decision.Teardown(ctx)
@@ -506,10 +509,17 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		assertNoRuns()
 		return
 	}
-	if scenario == "invalid_proposal" || scenario == "invalid_review" {
+	if scenario == "invalid_derivation" || scenario == "invalid_proposal" || scenario == "invalid_review" {
 		failed := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
 		requestIndex := len(failed.Requests) - 1
-		if failed.State != "failed" || requestIndex < 0 || failed.Requests[requestIndex].FailureCode != scenario || failed.Requests[requestIndex].Diagnostic == nil || failed.Requests[requestIndex].Diagnostic.ParseError == "" {
+		failureCode := scenario
+		if scenario == "invalid_derivation" {
+			failureCode = "invalid_proposal"
+			if physicalCalls.Load() != 1 || failed.DerivationPermitID == "" || len(failed.Requests) != 1 || failed.Requests[0].Phase != "derivation" || failed.Requests[0].PermitID != failed.DerivationPermitID {
+				t.Fatalf("派生失败继续调用或丢失诊断身份: %+v calls=%d", failed, physicalCalls.Load())
+			}
+		}
+		if failed.State != "failed" || requestIndex < 0 || failed.Requests[requestIndex].FailureCode != failureCode || failed.Requests[requestIndex].Diagnostic == nil || failed.Requests[requestIndex].Diagnostic.ParseError == "" {
 			t.Fatalf("invalid proposal was not durably diagnosed: %+v", failed)
 		}
 		var envelope struct {
@@ -705,7 +715,7 @@ func authoringHTTPProposal(t *testing.T, record *workspace.DefinitionAuthoringRe
 	}
 	proposal.Obligations = append(proposal.Obligations, workspace.GoalSpecificationObligation{ID: "goal-obligation", RequirementID: "goal", DoDItemRefs: []string{items[0].CandidateItemRef}, Text: "目标验收"})
 	for _, obligation := range proposal.Obligations {
-		proposal.Verifications = append(proposal.Verifications, workspace.GoalSpecificationVerification{ID: "verify-" + obligation.ID, ObligationID: obligation.ID, Declaration: "按模板验证", Status: workspace.GoalVerificationDeclared, ProfileID: "generic", EvidenceRequirementID: "proof", Scope: "dodItem"})
+		proposal.Verifications = append(proposal.Verifications, workspace.GoalSpecificationVerification{ID: "verify-" + obligation.ID, ObligationID: obligation.ID, Declaration: "按模板验证", Status: workspace.GoalVerificationDeclared, ProfileID: "generic", EvidenceRequirementID: "*", Scope: "dodItem"})
 	}
 	proposal.Resources, err = workspace.AuthoringSpecificationResources(record.Input, derivation.Resources)
 	if err != nil {

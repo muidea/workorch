@@ -228,7 +228,10 @@ verify-workspace-authoring-contract:
 	go test -race ./internal/modules/blocks/workspace/biz ./internal/modules/blocks/workspace/pkg/models -run '^Test(AuthoringWorkspaceGetList|AuthoringLedgerCAS|.*AuthoringSummary)' -count=1 -timeout=3m
 	go test -race ./internal/modules/application/workorchd/service/server -run '^TestAuthoringSummaryEventRecordRefreshesHTTPListAndDetail$$' -count=1 -timeout=3m
 	go test ./internal/modules/application/workorchd/biz/appservice/specifications -count=1
-	go test -race ./internal/modules/blocks/llm/pkg/events ./internal/modules/blocks/llm/biz -run '^Test(ProviderSchemaFormat|ExplicitSchema)' -count=1 -timeout=3m
+	go test -race ./internal/modules/blocks/llm/pkg/events ./internal/modules/blocks/llm/biz -run '^Test(ProviderSchemaFormat|ExplicitSchema|CompleteProviderDocument|ProviderDocument|ProviderJSONText)' -count=1 -timeout=3m
+	go test -race ./internal/modules/application/workorchd/biz -run '^Test(AuthoringProviderDocumentFaults|AuthoringParserDiagnostic|AuthoringTaskLifecycle|AuthoringSettlementContext|ApplicationStop|RuntimeComponent|DerivationApplication)' -count=1 -timeout=3m
+	go test -race ./internal/pkg/workorchruntimecontract ./internal/modules/blocks/workspace/pkg/definitionadmission ./internal/modules/application/workorchd/biz/appservice/activationcore ./internal/modules/application/workorchd/biz/appservice/activationports -run '^Test(RuntimeSourceEvidencePolicy|GoalSpecification|BuiltinSoftwareDevSpecification)' -count=1 -timeout=3m
+	go test -race ./internal/modules/blocks/workspace/biz -run '^Test(AuthoringApplicable|AuthoringVerification|AuthoringConfirmation|ResourceBoundConfirmation|DerivationFailureDiagnostic)' -count=1 -timeout=3m
 	python3 scripts/test-verify-authoring-mock.py
 	python3 scripts/test-verify-authoring-mock-server.py
 	python3 scripts/test_verify_mock_readiness.py

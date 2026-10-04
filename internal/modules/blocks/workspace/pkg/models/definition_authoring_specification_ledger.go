@@ -31,6 +31,10 @@ type DefinitionAuthoringDiagnostic struct {
 	PayloadBytes     uint64
 	PayloadSaved     bool
 	NotSavedReason   string
+	ProviderCode     string                         `json:",omitempty"`
+	ProviderDocument *DefinitionProviderObservation `json:",omitempty"`
+	ProviderWire     *DefinitionProviderObservation `json:",omitempty"`
+	ProviderCause    *DefinitionProviderObservation `json:",omitempty"`
 }
 
 func NewDefinitionAuthoringDiagnostic(parseError string, payload []byte) DefinitionAuthoringDiagnostic {
@@ -56,6 +60,18 @@ func NewDefinitionAuthoringDiagnostic(parseError string, payload []byte) Definit
 }
 
 func (d DefinitionAuthoringDiagnostic) Clone() DefinitionAuthoringDiagnostic {
+	if d.ProviderDocument != nil {
+		observation := d.ProviderDocument.Clone()
+		d.ProviderDocument = &observation
+	}
+	if d.ProviderWire != nil {
+		observation := d.ProviderWire.Clone()
+		d.ProviderWire = &observation
+	}
+	if d.ProviderCause != nil {
+		observation := d.ProviderCause.Clone()
+		d.ProviderCause = &observation
+	}
 	if d.Payload != nil {
 		d.Payload = append([]byte{}, d.Payload...)
 	}
@@ -63,6 +79,14 @@ func (d DefinitionAuthoringDiagnostic) Clone() DefinitionAuthoringDiagnostic {
 }
 
 func (d DefinitionAuthoringDiagnostic) Validate() error {
+	if d.ProviderCode != "" || d.ProviderDocument != nil || d.ProviderWire != nil || d.ProviderCause != nil {
+		if len(d.ProviderCode) > 128 || d.ProviderDocument == nil || d.ProviderWire == nil || d.ProviderDocument.Validate() != nil || d.ProviderWire.Validate() != nil || d.ProviderCause != nil && (d.ProviderCode == "" || d.ProviderCause.Validate() != nil || !d.ProviderCause.Observed || !d.ProviderCause.Complete) {
+			return fmt.Errorf("authoring provider diagnostic invalid")
+		}
+		if d.ProviderCode == "" && (!d.ProviderDocument.Observed || !d.ProviderDocument.Complete || !d.ProviderDocument.Saved) {
+			return fmt.Errorf("parser diagnostic requires a complete saved provider document")
+		}
+	}
 	if !utf8.ValidString(d.ParseError) {
 		return fmt.Errorf("authoring diagnostic error is not UTF-8")
 	}
@@ -112,6 +136,9 @@ func (d DefinitionAuthoringDiagnostic) Validate() error {
 		}
 	} else if d.NotSavedReason != definitionAuthoringDiagnosticNotSavedReason {
 		return fmt.Errorf("authoring diagnostic not-saved reason mismatch")
+	}
+	if d.ProviderCode == "" && d.ProviderDocument != nil && (d.ProviderDocument.ObservedBytes != d.PayloadBytes || d.ProviderDocument.SHA256 != d.PayloadSHA256) {
+		return fmt.Errorf("parser diagnostic document differs from original payload")
 	}
 	return nil
 }
@@ -173,7 +200,7 @@ func (r DefinitionAuthoringSpecificationRequest) Validate() error {
 		return fmt.Errorf("authoring specification phase invalid")
 	}
 	if r.FailureCode != "" {
-		if r.Diagnostic != nil && (r.FailureCode == "provider_failed" || r.Diagnostic.Validate() != nil) {
+		if r.Diagnostic != nil && (r.Diagnostic.Validate() != nil || r.FailureCode == "provider_failed" && r.Diagnostic.ProviderCode == "") {
 			return fmt.Errorf("authoring failure diagnostic invalid")
 		}
 		if r.FailureCode != "provider_failed" && r.FailureCode != "invalid_proposal" && r.FailureCode != "invalid_review" || r.Proposal != nil || r.Review != nil {

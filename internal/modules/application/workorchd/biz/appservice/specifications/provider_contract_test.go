@@ -30,6 +30,10 @@ func TestAuthoringBuilderMappingHTTPOutputContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := runtimecontract.ProviderModelTarget{ProviderID: "mock", ModelID: "model"}
+	derivation, err := DerivationCommand(derive, target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	proposal, err := AuthoringProposalCommand(record.DerivationRequests[0], target)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +46,7 @@ func TestAuthoringBuilderMappingHTTPOutputContract(t *testing.T) {
 	for _, command := range []struct {
 		name    string
 		request models.ProviderRequest
-	}{{"proposal", mustProviderModel(t, proposal.Request)}, {"review", mustProviderModel(t, review.Request)}} {
+	}{{"derivation", mustProviderModel(t, derivation.Request)}, {"proposal", mustProviderModel(t, proposal.Request)}, {"review", mustProviderModel(t, review.Request)}} {
 		for _, native := range []bool{false, true} {
 			t.Run(command.name+map[bool]string{true: "/native", false: "/prompt"}[native], func(t *testing.T) {
 				calls := 0
@@ -67,7 +71,11 @@ func TestAuthoringBuilderMappingHTTPOutputContract(t *testing.T) {
 						}
 					}
 					encoded, _ := json.Marshal(body["input"])
-					if !strings.Contains(string(encoded), "SourceItemRefs") || !strings.Contains(string(encoded), "additionalProperties") {
+					requiredField := "SourceItemRefs"
+					if command.name == "derivation" {
+						requiredField = "AdditionalItems"
+					}
+					if !strings.Contains(string(encoded), requiredField) || !strings.Contains(string(encoded), "additionalProperties") {
 						t.Error("full stable output contract missing")
 					}
 					w.Header().Set("Content-Type", "application/json")
@@ -82,7 +90,11 @@ func TestAuthoringBuilderMappingHTTPOutputContract(t *testing.T) {
 				if calls != 1 {
 					t.Fatalf("physical calls %d", calls)
 				}
-				if command.name == "proposal" {
+				if command.name == "derivation" {
+					if _, err := ParseDerivedAcceptance(result.Payload, input, &template); err == nil {
+						t.Error("local strict parser accepted unknown derivation field")
+					}
+				} else if command.name == "proposal" {
 					if _, err := ParseProposal(result.Payload, workspace.DefinitionCandidateItem{CandidateItemRef: spec.GoalItemRef, Text: input.GoalText}, nil); err == nil {
 						t.Error("local strict parser accepted unknown wrapper")
 					}

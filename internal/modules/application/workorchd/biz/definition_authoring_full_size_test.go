@@ -33,7 +33,7 @@ import (
 // 只模拟外部 provider；创作、模板、审查记账、确认与准入均使用真实 owners。
 type fullSizeAuthoringProviderHub struct {
 	magicevent.Hub
-	complete func(llmevents.CompleteProviderCommand) llmevents.CompleteProviderResult
+	complete func(llmevents.CompleteProviderDocumentCommand) llmevents.CompleteProviderDocumentResult
 }
 
 // 本测试停在 SM-1 materialization；抑制异步 drive 通知，不执行 Runtime/provider。
@@ -50,8 +50,8 @@ func (h *fullSizeAuthoringProviderHub) Send(ev magicevent.Event) magicevent.Resu
 	case llmevents.TopicLLMCommandValidateInferenceSelection:
 		command := ev.Data().(llmevents.ValidateProviderInferenceSelectionCommand)
 		result.Set(llmevents.ValidateProviderInferenceSelectionResult{Selection: command.Selection, CapabilityRevision: "test-provider-readiness"}, nil)
-	case llmevents.TopicLLMCommandCompleteProvider:
-		result.Set(h.complete(ev.Data().(llmevents.CompleteProviderCommand)), nil)
+	case llmevents.TopicLLMCommandCompleteProviderDocument:
+		result.Set(h.complete(ev.Data().(llmevents.CompleteProviderDocumentCommand)), nil)
 	default:
 		return h.Hub.Send(ev)
 	}
@@ -85,7 +85,7 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 	defer runtime.Shutdown(ctx)
 	repositories := testkit.RuntimeExports(runtime).Repositories
 	calls := 0
-	hub.complete = func(command llmevents.CompleteProviderCommand) llmevents.CompleteProviderResult {
+	hub.complete = func(command llmevents.CompleteProviderDocumentCommand) llmevents.CompleteProviderDocumentResult {
 		all, err := repositories.Workspaces.List(ctx)
 		if err != nil || len(all) != 1 || all[0].DefinitionAuthoring == nil {
 			t.Fatalf("provider 未绑定持久草稿: %v", err)
@@ -94,7 +94,7 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 		var payload any
 		switch command.Request.Kind {
 		case "workspace/specification/derive":
-			payload = workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash}
+			payload = workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{}}
 		case "workspace/specification/proposal":
 			items, err := record.DerivationRequests[0].Proposal.CandidateItems(record.Input, &record.TemplateSnapshot)
 			if err != nil {
@@ -151,7 +151,7 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 			t.Fatal(err)
 		}
 		calls++
-		return llmevents.CompleteProviderResult{Target: command.Target, Completion: llmevents.ProviderCompletionData{Content: string(encoded)}}
+		return authoringTestDocumentResult(t, command, encoded)
 	}
 	component, err := newRuntimeComponentFromCommandHub(testkit.RuntimeExports(runtime).Infrastructure.CommandHub, nil)
 	if err != nil {

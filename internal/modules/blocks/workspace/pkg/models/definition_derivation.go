@@ -22,12 +22,17 @@ type DefinitionDerivationRequest struct {
 	PermitID             string
 	Proposal             *DefinitionDerivedAcceptance
 	FailureCode          string
+	Diagnostic           *DefinitionAuthoringDiagnostic
 }
 
 func (r DefinitionDerivationRequest) Clone() DefinitionDerivationRequest {
 	r.Input = r.Input.Clone()
 	r.Template = r.Template.Clone()
 	r.Resources = CloneDefinitionAuthoringResources(r.Resources)
+	if r.Diagnostic != nil {
+		diagnostic := r.Diagnostic.Clone()
+		r.Diagnostic = &diagnostic
+	}
 	if r.Proposal != nil {
 		p := *r.Proposal
 		if p.AdditionalItems != nil {
@@ -47,6 +52,9 @@ func (r DefinitionDerivationRequest) ExpectedPermitID() string {
 func (r DefinitionDerivationRequest) Validate() error {
 	if r.Input.Validate() != nil || r.Template.ID != r.Input.Normalized().TemplateID || r.RequestID == "" || len(r.RequestID) > 128 || r.ProviderBindingHash == "" || len(r.ProviderBindingHash) > 256 || ValidateDefinitionAuthoringResources(r.Input, r.Resources) != nil || r.ResourceSnapshotHash != DefinitionAuthoringResourcesHash(r.Resources) || r.PermitID != r.ExpectedPermitID() {
 		return fmt.Errorf("derivation request identity invalid")
+	}
+	if r.Diagnostic != nil && (r.FailureCode != "invalid_proposal" && r.FailureCode != "provider_failed" || r.Diagnostic.Validate() != nil || r.FailureCode == "provider_failed" && r.Diagnostic.ProviderCode == "") {
+		return fmt.Errorf("derivation diagnostic requires a valid known failure outcome")
 	}
 	if r.Proposal != nil {
 		if r.FailureCode != "" {
@@ -128,16 +136,23 @@ func (r DefinitionAuthoringRecord) ReserveDerivation(requestID, providerBindingH
 	return next, request, true, nil
 }
 
-func (r DefinitionAuthoringRecord) CompleteDerivation(permitID string, proposal *DefinitionDerivedAcceptance, failureCode string) (DefinitionAuthoringRecord, error) {
+func (r DefinitionAuthoringRecord) CompleteDerivation(permitID string, proposal *DefinitionDerivedAcceptance, failureCode string, diagnostics ...*DefinitionAuthoringDiagnostic) (DefinitionAuthoringRecord, error) {
 	if err := r.Validate(); err != nil {
 		return DefinitionAuthoringRecord{}, err
+	}
+	if len(diagnostics) > 1 {
+		return DefinitionAuthoringRecord{}, fmt.Errorf("derivation completion requires at most one diagnostic")
+	}
+	var diagnostic *DefinitionAuthoringDiagnostic
+	if len(diagnostics) == 1 {
+		diagnostic = diagnostics[0]
 	}
 	for n, previous := range r.DerivationRequests {
 		if previous.PermitID != permitID {
 			continue
 		}
 		completed := previous.Clone()
-		completed.Proposal, completed.FailureCode = proposal, failureCode
+		completed.Proposal, completed.FailureCode, completed.Diagnostic = proposal, failureCode, diagnostic
 		completed = completed.Clone()
 		if proposal == nil && failureCode == "" {
 			return DefinitionAuthoringRecord{}, fmt.Errorf("derivation completion requires outcome")

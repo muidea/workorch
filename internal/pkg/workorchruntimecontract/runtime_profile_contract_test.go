@@ -1,6 +1,9 @@
 package workorchruntimecontract
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestRuntimeProfileEvidenceRequirementNormalizationPreservesCardinalityAndRejectsDuplicateScopeID(t *testing.T) {
 	profile := RuntimeProfileContract{ID: "software-dev", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{
@@ -352,5 +355,71 @@ func TestRuntimeBootstrapRecipeIsBoundedOrderedAndAffectsProfileEquality(t *test
 				t.Fatalf("invalid bootstrap recipe was accepted: %+v", invalid.BootstrapRecipes[0])
 			}
 		})
+	}
+}
+
+func TestRuntimeSourceEvidencePolicyPreservesExactAndWildcardContributions(t *testing.T) {
+	exact := RuntimeProfileEvidenceRequirement{ID: "dod-001", Scope: "dodItem", RequiredEvidenceKinds: []string{EvidenceKindValidation}, AcceptedStepKinds: []string{RuntimeBlockKindManagedValidationSession}, ValidationRecipeID: "exact-recipe", RequiredCheckRefs: []string{"exact-check"}, MetricConstraints: []string{"exact-metric"}}
+	wildcard := RuntimeProfileEvidenceRequirement{ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{EvidenceKindValidation}, AcceptedStepKinds: []string{StepKindMCPToolCall}, RequireDirectEvidence: true, MetricConstraints: []string{"wildcard-metric"}, ArtifactRefs: []string{"wildcard-artifact"}}
+	profiles := []RuntimeProfileContract{{ID: "generic", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{wildcard, exact}}}
+	before := CloneRuntimeProfileContracts(profiles)
+	first, err := CompileRuntimeSourceEvidencePolicy("dodItem", "dod-001", profiles, nil)
+	if err != nil || !RuntimeSourceEvidencePolicyRetainsDeclaration(first, exact, "dodItem", "dod-001") || !RuntimeSourceEvidencePolicyRetainsDeclaration(first, wildcard, "dodItem", "dod-001") {
+		t.Fatalf("lost declared contribution: %+v %v", first, err)
+	}
+	if !containsString(first.AcceptedStepKinds, StepKindMCPToolCall) || !containsString(first.MetricConstraints, "wildcard-metric") || !first.RequireDirectEvidence || first.ValidationRecipeID != "exact-recipe" || !containsString(first.RequiredCheckRefs, "exact-check") {
+		t.Fatalf("partial exact/wildcard merge: %+v", first)
+	}
+	second, err := CompileRuntimeSourceEvidencePolicy("dodItem", "dod-001", profiles, nil)
+	if err != nil || !reflect.DeepEqual(first, second) || !reflect.DeepEqual(before, profiles) {
+		t.Fatal("nondeterministic or mutating source compiler")
+	}
+	wildcard.ValidationRecipeID = "discarded"
+	wildcard.RequiredCheckRefs = []string{"discarded-check"}
+	profiles[0].EvidenceRequirements[0] = wildcard
+	stripped, err := CompileRuntimeSourceEvidencePolicy("dodItem", "dod-001", profiles, nil)
+	if err != nil || stripped.ValidationRecipeID != "exact-recipe" || containsString(stripped.RequiredCheckRefs, "discarded-check") || RuntimeSourceEvidencePolicyRetainsDeclaration(stripped, wildcard, "dodItem", "dod-001") {
+		t.Fatalf("wildcard fabricated recipe/check authority: %+v %v", stripped, err)
+	}
+	if RuntimeEvidenceDeclarationMatchesSource(exact, "dodItem", "cwi-001") || RuntimeEvidenceDeclarationMatchesSource(exact, "deliverable", "dod-001") {
+		t.Fatal("source/CWI/scope identities conflated")
+	}
+}
+
+func TestRuntimeSourceEvidencePolicyRejectsExactWildcardConflictWithoutDroppingContributions(t *testing.T) {
+	exact := RuntimeProfileEvidenceRequirement{ID: "dod-001", Scope: "dodItem", RequiredEvidenceKinds: []string{EvidenceKindValidation}, AcceptedStepKinds: []string{RuntimeBlockKindManagedValidationSession}, VerificationPolicy: &RuntimeVerificationPolicy{Version: RuntimeVerificationPolicyVersion, MinimumEvidenceLevel: 3}}
+	wildcard := exact
+	wildcard.ID = "*"
+	wildcard.VerificationPolicy = &RuntimeVerificationPolicy{Version: RuntimeVerificationPolicyVersion, MinimumEvidenceLevel: 4}
+	profiles := []RuntimeProfileContract{{ID: "a", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{exact}}, {ID: "b", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{wildcard}}}
+	before := CloneRuntimeProfileContracts(profiles)
+	if _, err := CompileRuntimeSourceEvidencePolicy("dodItem", "dod-001", profiles, nil); err == nil {
+		t.Fatal("conflicting wildcard silently replaced exact declaration")
+	}
+	if !reflect.DeepEqual(profiles, before) {
+		t.Fatal("conflict compiler rewrote source")
+	}
+}
+
+func TestRuntimeSourceEvidencePolicyRejectsDuplicateMergedOwnerFactClosure(t *testing.T) {
+	fact := RuntimeOwnerFactRequirement{OwnerModuleID: RuntimeModuleShell, FactKind: RuntimeOwnerFactSelectableValidationSurface, OperationKind: RuntimeBlockKindManagedValidationSession}
+	exact := RuntimeProfileEvidenceRequirement{
+		ID: "dod-001", Scope: "dodItem", RequiredEvidenceKinds: []string{EvidenceKindValidation}, AcceptedStepKinds: []string{RuntimeBlockKindManagedValidationSession},
+		RequiredOwnerFacts: []RuntimeOwnerFactRequirement{fact}, OwnerFactConvergences: []RuntimeOwnerFactConvergence{{Requirement: fact, RequirePreexisting: true}},
+	}
+	wildcard := exact
+	wildcard.ID = "*"
+	profiles := []RuntimeProfileContract{{ID: "generic", EvidenceRequirements: []RuntimeProfileEvidenceRequirement{exact, wildcard}}}
+	if err := ValidateRuntimeProfileContracts(profiles); err != nil {
+		t.Fatalf("individually valid declarations rejected before merge: %v", err)
+	}
+	before := CloneRuntimeProfileContracts(profiles)
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := CompileRuntimeSourceEvidencePolicy("dodItem", "dod-001", profiles, nil); err == nil {
+			t.Fatal("duplicate exact/wildcard convergence silently dropped")
+		}
+	}
+	if !reflect.DeepEqual(profiles, before) {
+		t.Fatal("merged closure rejection mutated declarations")
 	}
 }

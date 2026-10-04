@@ -13,7 +13,24 @@ export type DefinitionAuthoringCreate = {
   input: DefinitionAuthoringInput;
 };
 
+export type ProviderObservedContentMetadata = {
+  observed: boolean;
+  complete: boolean;
+  saved: boolean;
+  observedBytes: number;
+  sha256: string;
+  reason?: string;
+};
+
+export type ProviderObservedContent = ProviderObservedContentMetadata & {
+  contentBase64?: string;
+};
+
 export type AuthoringDiagnosticMetadata = {
+  providerCode?: string;
+  providerDocument?: ProviderObservedContentMetadata;
+  providerWire?: ProviderObservedContentMetadata;
+  providerCause?: ProviderObservedContentMetadata;
   parseError?: string;
   parseErrorSHA256: string;
   parseErrorBytes: number;
@@ -56,6 +73,9 @@ export type AuthoringDiagnostic = AuthoringDiagnosticMetadata & {
   permitId: string;
   phase: string;
   failureCode: string;
+  providerDocument?: ProviderObservedContent;
+  providerWire?: ProviderObservedContent;
+  providerCause?: ProviderObservedContent;
   payloadBase64: string;
 };
 

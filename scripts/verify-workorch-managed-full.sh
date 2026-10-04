@@ -366,5 +366,5 @@ if [[ "$VERIFY_TARGET" == "runtime-managed" ]]; then
 else
   run_step make "$VERIFY_TARGET"
 fi
-
-echo "managed WorkOrch verification passed for $BASE_URL target=$VERIFY_TARGET"
+managed_classification="$(python3 "$ROOT_DIR/scripts/verify_runtime_live_contract.py" --validate-managed-positive-summaries "$TMP_DIR")"
+echo "managed WorkOrch verification passed for $BASE_URL target=$VERIFY_TARGET classification=$managed_classification"

@@ -24,6 +24,22 @@ clarification，不能创建 Run。启动输入封存后，执行期 LLM 处理�
 
 Goal-only 创作用例先保存 Workspace owner 的版本化草稿，以持久 reserve permit 调用派生和六类独立审查，确认 exact proposal/specification hash 后才物化正式定义并准入。阻塞后继沿同一候选 lineage 重新审查；Application 只协调 Decision ticket 的替换或 resolution，Workspace 验证其持久来源并独占 pending → eligible 转换。刷新投影以 owner 查询为准；pending startup 显示 `admitting`，不能显示已准入或启动 Run。当前正式创作已接稳定 management ports 和 HTTP 创建／查询／修订／编译／确认 route，创建 RequestID 由 Workspace owner 持久验证；Web 创建向导已改为单一创作／审查／确认入口，发送前保存创建身份，重新打开按 owner 查询恢复。生产 HTTP 编译由 Application 的 BackgroundRoutine 托管，接受回执返回 202，任务使用独立于 HTTP 请求的生命周期 context，Stop 取消并排空已接受任务；任务数有界，结果与预算仍只在 Workspace ledger。已 reserve 但结果未决不重发 provider。旧 public Workspace／Goal／DoD 写 REST 和 Goal-first CLI 不参与创作；正式定义只由确认事务物化。保存请求使用原 RequestID、expected revision/hash 与目标输入，owner 在同一 Workspace CAS 中持久回执；精确重放不重复写入，历史回执不能将后续替代的输入冒充当前成功。验收证据按 HTTP／owner、独立进程、Web 组件与 deployed provider 分层，局部 helper 测试或构建不能替代端到端恢复与显式启动合同。
 
+### 创建期调用与结果结算
+
+派生、proposal 与六类 review 使用 `CompleteProviderDocumentCommand/Result`，绑定已 reserve 的 opaque permit
+及完整 command hash；完整输出才进入 strict parser。provider 确定失败／不完整与 parser 失败分别保存，
+文档、wire 和 transport leaf 由 Workspace 受限诊断查询保留原 bytes／SHA256／观察完整性；原文不进入通用日志或 Runtime。
+三类 closed schema 全部计入请求预算，稳定合同放 C0，动态输入放 C3；native／prompt 共用严格本地校验且零 fallback。
+
+reserve 只表示调用权已消费，LLM typed fact 可能仍在内存，诊断可读也不替代 completion；只有 Workspace completion CAS
+成功才是阶段持久结果。可信结果返回后，parser／completion／exact owner readback 共用一个最多 5 秒的 settlement scope，
+不因原 caller 取消丢弃已知结果，不重调 provider、不建立 Application 恢复队列。completion reply 丢失只在同一期限内
+对账同一 immutable permit；CAS 前崩溃且没有持久结果仍 unresolved。file reopen 不等于断电级 fsync 保证。
+
+direct ports 与后台任务共用 `runtimeComponent` 的 authoring lifecycle：Stop 先拒绝新调用并取消工作，再按唯一有限窗口
+排空；重复 Stop 不刷新期限。排空超时明确报告并保留依赖，不假称已关闭；任务释放后再次 Stop 才完成清理。
+此有限排空合同不扩大为其它 execution ingress 已有等待的时限保证，也不赋予强杀不配合取消任务的权限。
+
 Workspace list/detail 的 `authoringSummary` 沿 owner Get/List → typed mapping → public projection 传递，不逐卡查询完整创作 ledger。创作 CAS 后既有 Workspace 通知经 Eventstream record 触发 projection 失效及 owner 重读；Store 同步更新列表条目和详情。摘要仅显示持久阶段与计数，`reviewed` 不等于当前可确认；原始诊断、恢复参数和权限仍由完整 authoring view 及 owner guard 管理。
 
 `resume` 是既有 Run 的 continuation，不携带 fresh bootstrap；`restart` 使用当前 eligible Workspace definition 编译 fresh

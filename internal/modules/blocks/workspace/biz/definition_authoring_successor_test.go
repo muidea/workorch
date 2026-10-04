@@ -54,7 +54,7 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 			proof := &proposal.Verifications[index]
 			proof.Status = workspacemodel.GoalVerificationDeclared
 			proof.ProfileID = "generic"
-			proof.EvidenceRequirementID = "proof"
+			proof.EvidenceRequirementID = "*"
 			proof.Scope = "dodItem"
 		}
 	}

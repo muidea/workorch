@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 )
@@ -27,6 +28,37 @@ func TestRuntimeComponentIsTheOnlySessionOwner(t *testing.T) {
 	}
 	if component.ready() {
 		t.Fatal("runtime component retained session after close")
+	}
+}
+
+func TestRuntimeComponentRetainsDependenciesUntilAuthoringDrains(t *testing.T) {
+	component := newRuntimeComponent(&runtimecore.Session{})
+	ctx, release, err := component.authoringTasks.accept(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	settlement, cancelSettlement := authoringSettlementContext(ctx)
+	defer cancelSettlement()
+	deadline, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := component.close(deadline); err == nil {
+		t.Fatal("未排空创作调用却报告已关闭")
+	}
+	if !component.ready() || component.applicationPorts().Validate() != nil {
+		t.Fatal("排空超时清除了在途调用依赖")
+	}
+	select {
+	case <-settlement.Done():
+	case <-time.After(time.Second):
+		t.Fatal("结果结算未遵守唯一停机窗口")
+	}
+	release()
+	if err := component.close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if component.ready() {
+		t.Fatal("排空后仍保留 session")
 	}
 }
 

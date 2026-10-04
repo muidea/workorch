@@ -22,16 +22,27 @@ func seedReviewedAuthoringConfirmationWithProof(t *testing.T, owners *fileDefini
 }
 
 func seedReviewedAuthoringConfirmationWithReview(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID, templateDeclared, proposalDeclared bool) workspaceevents.ConfirmDefinitionAuthoringCommand {
+	return seedReviewedAuthoringConfirmationWithDeclaration(t, owners, id, templateDeclared, proposalDeclared, "*", "dodItem")
+}
+
+func seedReviewedAuthoringConfirmationWithDeclaration(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID, templateDeclared, proposalDeclared bool, declarationID, declarationScope string) workspaceevents.ConfirmDefinitionAuthoringCommand {
+	return seedReviewedAuthoringConfirmationWithTemplate(t, owners, id, templateDeclared, proposalDeclared, declarationID, declarationScope, nil)
+}
+
+func seedReviewedAuthoringConfirmationWithTemplate(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID, templateDeclared, proposalDeclared bool, declarationID, declarationScope string, decorate func(*workspace.WorkspaceTemplate)) workspaceevents.ConfirmDefinitionAuthoringCommand {
 	t.Helper()
 	ctx := context.Background()
 	input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: id, Revision: 1, GoalText: "交付目标", TemplateID: "template", AcceptanceRequirements: []string{"用户验收"}}
 	template := workspace.WorkspaceTemplate{ID: input.TemplateID, Name: "模板", DoDItems: []string{"模板验收"}}
 	if templateDeclared {
-		hints, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"generic": map[string]any{"evidenceRequirements": []any{map[string]any{"id": "proof", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"}}}}}})
+		hints, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"generic": map[string]any{"evidenceRequirements": []any{map[string]any{"id": declarationID, "scope": declarationScope, "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"}}}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		template.ContextHints = hints
+	}
+	if decorate != nil {
+		decorate(&template)
 	}
 	if err := owners.repositories.WorkspaceTemplates.Create(ctx, &template); err != nil {
 		t.Fatal(err)
@@ -54,8 +65,20 @@ func seedReviewedAuthoringConfirmationWithReview(t *testing.T, owners *fileDefin
 			verification := &proposal.Verifications[index]
 			verification.Status = workspace.GoalVerificationDeclared
 			verification.ProfileID = "generic"
-			verification.EvidenceRequirementID = "proof"
-			verification.Scope = "dodItem"
+			verification.EvidenceRequirementID = declarationID
+			// A fixture with three exact declarations binds each obligation to its
+			// confirmed after-image ordinal before the six reviews are produced.
+			profiles := template.ContextHints.Map()["profileContracts"].(map[string]any)
+			declarations := profiles["generic"].(map[string]any)["evidenceRequirements"].([]any)
+			if len(declarations) > 1 {
+				sourceByRef := map[string]string{"derived-dod:user:000001": "dod-001", "derived-dod:template:000001": "dod-002", "derived-dod:generated:000001": "dod-003"}
+				for _, obligation := range proposal.Obligations {
+					if obligation.ID == verification.ObligationID && len(obligation.DoDItemRefs) == 1 {
+						verification.EvidenceRequirementID = sourceByRef[obligation.DoDItemRefs[0]]
+					}
+				}
+			}
+			verification.Scope = declarationScope
 		}
 	}
 	var reserved workspace.DefinitionAuthoringSpecificationRequest
@@ -232,6 +255,7 @@ func TestAuthoringConfirmationRejectsTemplateAndConfigurationDrift(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
+			originalTemplate := template.Clone()
 			template.DoDItems = []string{"修改后的模板"}
 			if err := owners.repositories.WorkspaceTemplates.Update(ctx, template); err != nil {
 				t.Fatal(err)
@@ -249,6 +273,19 @@ func TestAuthoringConfirmationRejectsTemplateAndConfigurationDrift(t *testing.T)
 					t.Fatalf("template drift prepared a journal: %+v %v", unchanged, err)
 				}
 			}
+			if err := owners.repositories.WorkspaceTemplates.Update(ctx, &originalTemplate); err != nil {
+				t.Fatal(err)
+			}
+			first, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: cmd})
+			if err != nil {
+				t.Fatalf("original template snapshot did not restore exact journal replay: %v", err)
+			}
+			second, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: cmd})
+			stored, readErr := owners.repositories.Workspaces.Get(ctx, cmd.WorkspaceID)
+			if err != nil || !reflect.DeepEqual(first, second) || readErr != nil || stored.DefinitionAuthoringConfirmation.InputHash != cmd.InputHash || stored.DefinitionAuthoringConfirmation.SpecificationHash != cmd.SpecificationHash || stored.StartupInput != nil || stored.ActivationAdmission != nil || stored.ActiveRunID != "" {
+				t.Fatalf("restored snapshot changed identity or granted activation: %+v %v %v", stored, err, readErr)
+			}
+
 		})
 	}
 	ctx := context.Background()
@@ -304,11 +341,37 @@ func TestAuthoringConfirmationRejectsConflictingFormalRows(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			template, err := owners.repositories.WorkspaceTemplates.Get(ctx, current.TemplateID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original := template.Clone()
+			template.DoDItems = []string{"drifted"}
+			if err := owners.repositories.WorkspaceTemplates.Update(ctx, template); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: cmd}); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("drift with conflicting row was accepted: %v", err)
+			}
+			if err := owners.repositories.WorkspaceTemplates.Update(ctx, &original); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: cmd}); !errors.Is(err, common.ErrConflict) {
 				t.Fatalf("conflicting %s was accepted: %v", cut, err)
 			}
+			// Restoring the exact template does not grant permission to overwrite
+			// a conflicting formal row, change the hash, or abandon the journal.
+			rows, rowErr := owners.repositories.DoDs.ListByWorkspaceID(ctx, current.ID)
+			if rowErr != nil || cut == "dod" && (len(rows) != 1 || rows[0].Items[0] != "被改写的验收") {
+				t.Fatalf("restoration overwrote conflicting formal row: %v", rowErr)
+			}
+			goal, goalErr := owners.repositories.Goals.Get(ctx, journal.Goal.ID)
+			if goalErr != nil || cut == "goal" && goal.Text != "被改写的目标" {
+				t.Fatalf("restoration overwrote conflicting Goal: %+v %v", goal, goalErr)
+			}
+
 			unchanged, err := owners.repositories.Workspaces.Get(ctx, cmd.WorkspaceID)
-			if err != nil || unchanged.DefinitionAuthoringConfirmation.Phase != workspace.DefinitionAuthoringConfirmationPrepared || unchanged.ActivationAdmission != nil {
+			if err != nil || unchanged.DefinitionAuthoringConfirmation.Phase != workspace.DefinitionAuthoringConfirmationPrepared || unchanged.DefinitionAuthoringConfirmation.InputHash != cmd.InputHash || unchanged.DefinitionAuthoringConfirmation.SpecificationHash != cmd.SpecificationHash || unchanged.StartupInput != nil || unchanged.ActivationAdmission != nil || unchanged.ActiveRunID != "" {
 				t.Fatalf("conflicting row completed journal: %+v %v", unchanged, err)
 			}
 		})

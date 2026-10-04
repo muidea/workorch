@@ -179,9 +179,6 @@ func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context,
 		}
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
-	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}

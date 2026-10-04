@@ -18,6 +18,7 @@ type DefinitionDerivationRequest struct {
 	PermitID             string
 	Proposal             *workspace.DefinitionDerivedAcceptance
 	FailureCode          string
+	Diagnostic           *workspace.DefinitionAuthoringDiagnostic
 }
 
 type DefinitionAuthoringRecord struct {
@@ -65,6 +66,10 @@ func (r DefinitionDerivationRequest) Clone() DefinitionDerivationRequest {
 	r.Input = r.Input.Clone()
 	r.Template = cloneAuthoringTemplate(r.Template)
 	r.Resources = workspace.CloneDefinitionAuthoringResources(r.Resources)
+	if r.Diagnostic != nil {
+		diagnostic := r.Diagnostic.Clone()
+		r.Diagnostic = &diagnostic
+	}
 	if r.Proposal != nil {
 		proposal := *r.Proposal
 		if proposal.AdditionalItems != nil {
@@ -84,7 +89,7 @@ func (r DefinitionDerivationRequest) Model() (workspace.DefinitionDerivationRequ
 	return workspace.DefinitionDerivationRequest{
 		RequestID: r.RequestID, Input: r.Input, Template: template, Resources: r.Resources,
 		ResourceSnapshotHash: r.ResourceSnapshotHash, ProviderBindingHash: r.ProviderBindingHash,
-		PermitID: r.PermitID, Proposal: r.Proposal, FailureCode: r.FailureCode,
+		PermitID: r.PermitID, Proposal: r.Proposal, FailureCode: r.FailureCode, Diagnostic: r.Diagnostic,
 	}.Clone(), nil
 }
 

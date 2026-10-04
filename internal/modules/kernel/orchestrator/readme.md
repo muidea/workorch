@@ -41,6 +41,8 @@ capability resource state。
   candidate dispatch、drive delivery component 只共享该 kernel，不持有 sibling、Hub 或第二份 aggregate。
 - `RuntimeAggregate.Validate` 顺序验证 SM-2、SM-3、SM-4 及 cross-machine fence。所有合法变化经一次 semantic CAS；
   projection、timer、adapter 和 shared contract package都不能直接写 aggregate。
+  private transition 完成写集后直接提交同一 aggregate 时，由 `RuntimeTransitionCoordinator.Commit` 统一执行完整校验，
+  不在无中间变更的相邻调用处重复验证；revision fence、普通 repository Save 与 fresh-load 的原始校验仍保留。
 - 纯校验只可在同一次调用内复用本地规范化值：SM-2 binding hash 保持原字段、顺序和完整内容重算；SM-3 session
   可把本次完整 raw-canonical/source/hash 校验得到的 detached manifest 交给私有 wire compiler，不能仅凭调用者 hash
   推断成功。semantic assessment 前像重建可将同一 generation 完整校验所得的私有 manifest 产物复用于逐批 binding compiler，

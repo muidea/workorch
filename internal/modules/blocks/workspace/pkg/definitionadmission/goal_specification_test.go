@@ -1,6 +1,7 @@
 package definitionadmission
 
 import (
+	"reflect"
 	"testing"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
@@ -9,15 +10,17 @@ import (
 
 func candidateWithSpecification() workspacemodel.DefinitionAdmissionCandidate {
 	candidate := candidateWithRelation("all_of")
-	candidate.RuntimeProfileContracts = []runtimecontract.RuntimeProfileContract{{ID: "generic", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{ID: "proof", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Description: "declaration"}}}}
+	candidate.DoDInputs[0].CandidateItemRef = "dod:formal:item:000001"
+	candidate.ProposedRelationInputs[0].SourceItemRefs = []string{"dod:formal:item:000001"}
+	candidate.RuntimeProfileContracts = []runtimecontract.RuntimeProfileContract{{ID: "generic", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{ID: "dod-001", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Description: "declaration"}}}}
 	candidate.RuntimeProfileContractsHash = runtimecontract.StableRuntimeProfileContractsHash(candidate.RuntimeProfileContracts)
 	spec := workspacemodel.GoalSpecification{
 		Version: workspacemodel.GoalSpecificationVersionCurrent, GoalItemRef: "goal", GoalTextHash: workspacemodel.StableDefinitionTextHash(candidate.GoalInput.Text),
 		Resources:     []workspacemodel.GoalSpecificationResource{{ID: "input", Ref: "workspace/input", SnapshotHash: "snapshot-r1", Required: true, Available: true}},
 		Dimensions:    []workspacemodel.GoalSpecificationDimension{{ID: "value", Required: true, Activated: true, ResourceIDs: []string{"input"}}},
-		Requirements:  []workspacemodel.GoalSpecificationRequirement{{ID: "requirement", DimensionID: "value", Required: true, SourceKind: workspacemodel.GoalRequirementUserExplicit, SourceItemRefs: []string{"goal", "dod-1"}, ResourceIDs: []string{"input"}, Text: "Deliver outcome"}},
-		Obligations:   []workspacemodel.GoalSpecificationObligation{{ID: "obligation", RequirementID: "requirement", DoDItemRefs: []string{"dod-1"}, Text: "Verify outcome"}},
-		Verifications: []workspacemodel.GoalSpecificationVerification{{ID: "verification", ObligationID: "obligation", Declaration: "Exact proof declaration", Status: workspacemodel.GoalVerificationDeclared, ProfileID: "generic", EvidenceRequirementID: "proof", Scope: "dodItem"}},
+		Requirements:  []workspacemodel.GoalSpecificationRequirement{{ID: "requirement", DimensionID: "value", Required: true, SourceKind: workspacemodel.GoalRequirementUserExplicit, SourceItemRefs: []string{"goal", "dod:formal:item:000001"}, ResourceIDs: []string{"input"}, Text: "Deliver outcome"}},
+		Obligations:   []workspacemodel.GoalSpecificationObligation{{ID: "obligation", RequirementID: "requirement", DoDItemRefs: []string{"dod:formal:item:000001"}, Text: "Verify outcome"}},
+		Verifications: []workspacemodel.GoalSpecificationVerification{{ID: "verification", ObligationID: "obligation", Declaration: "Exact proof declaration", Status: workspacemodel.GoalVerificationDeclared, ProfileID: "generic", EvidenceRequirementID: "dod-001", Scope: "dodItem"}},
 	}
 	hash := spec.ContentHash()
 	for _, kind := range []string{workspacemodel.GoalReviewDimensionCoverage, workspacemodel.GoalReviewNegativePath, workspacemodel.GoalReviewRegression, workspacemodel.GoalReviewResourceEnvironment, workspacemodel.GoalReviewTraceability, workspacemodel.GoalReviewVerifierFeasibility} {
@@ -55,7 +58,7 @@ func TestCompileChecksVersionedGoalSpecificationBeforeAdmission(t *testing.T) {
 			extra.ID = "additional"
 			s.Requirements = append(s.Requirements, extra)
 		}},
-		{"missing dod mapping", "dod/dod-1", func(s *workspacemodel.GoalSpecification) { s.Obligations[0].DoDItemRefs = nil }},
+		{"missing dod mapping", "dod/dod:formal:item:000001", func(s *workspacemodel.GoalSpecification) { s.Obligations[0].DoDItemRefs = nil }},
 		{"required obligation without dod", "obligation/extra-obligation/dod_mapping", func(s *workspacemodel.GoalSpecification) {
 			s.Obligations = append(s.Obligations, workspacemodel.GoalSpecificationObligation{ID: "extra-obligation", RequirementID: "requirement", Text: "new required obligation"})
 		}},
@@ -113,5 +116,106 @@ func TestCompileChecksVersionedGoalSpecificationBeforeAdmission(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestCompileVerificationAppliesToEveryObligationDoD(t *testing.T) {
+	original := candidateWithSpecification()
+	for _, tt := range []struct {
+		name     string
+		change   func(*workspacemodel.DefinitionAdmissionCandidate)
+		admitted bool
+	}{
+		{"exact", func(c *workspacemodel.DefinitionAdmissionCandidate) {}, true},
+		{"wildcard", func(c *workspacemodel.DefinitionAdmissionCandidate) {
+			c.RuntimeProfileContracts[0].EvidenceRequirements[0].ID = "*"
+			c.Specification.Verifications[0].EvidenceRequirementID = "*"
+		}, true},
+		{"wrongid proof dodItem", func(c *workspacemodel.DefinitionAdmissionCandidate) {
+			c.RuntimeProfileContracts[0].EvidenceRequirements[0].ID = "proof"
+			c.Specification.Verifications[0].EvidenceRequirementID = "proof"
+		}, false},
+		{"wrongscope", func(c *workspacemodel.DefinitionAdmissionCandidate) {
+			c.RuntimeProfileContracts[0].EvidenceRequirements[0].Scope = "deliverable"
+			c.Specification.Verifications[0].Scope = "deliverable"
+		}, false},
+		{"otherdod", func(c *workspacemodel.DefinitionAdmissionCandidate) {
+			c.RuntimeProfileContracts[0].EvidenceRequirements[0].ID = "dod-002"
+			c.Specification.Verifications[0].EvidenceRequirementID = "dod-002"
+		}, false},
+		{"multipleobligations", func(c *workspacemodel.DefinitionAdmissionCandidate) {
+			ref := "dod:formal:item:000002"
+			c.DoDInputs = append(c.DoDInputs, workspacemodel.DefinitionCandidateItem{CandidateItemRef: ref, Text: "another obligation", SourceIdentity: "user"})
+			obligation := c.Specification.Obligations[0]
+			obligation.ID = "other"
+			obligation.DoDItemRefs = []string{ref}
+			c.Specification.Obligations = append(c.Specification.Obligations, obligation)
+			verification := c.Specification.Verifications[0]
+			verification.ID = "verify-other"
+			verification.ObligationID = "other"
+			c.Specification.Verifications = append(c.Specification.Verifications, verification)
+		}, false},
+		{"one obligation multiple DoD", func(c *workspacemodel.DefinitionAdmissionCandidate) {
+			ref := "dod:formal:item:000002"
+			c.DoDInputs = append(c.DoDInputs, workspacemodel.DefinitionCandidateItem{CandidateItemRef: ref, Text: "second", SourceIdentity: "user"})
+			c.Specification.Obligations[0].DoDItemRefs = append(c.Specification.Obligations[0].DoDItemRefs, ref)
+		}, false},
+		{"wildcard recipe stripped", func(c *workspacemodel.DefinitionAdmissionCandidate) {
+			c.RuntimeProfileContracts[0].EvidenceRequirements[0].ID = "*"
+			c.Specification.Verifications[0].EvidenceRequirementID = "*"
+			c.RuntimeProfileContracts[0].EvidenceRequirements[0].ValidationRecipeID = "claimed-recipe"
+		}, false},
+		{"wildcard checks stripped", func(c *workspacemodel.DefinitionAdmissionCandidate) {
+			c.RuntimeProfileContracts[0].EvidenceRequirements[0].ID = "*"
+			c.Specification.Verifications[0].EvidenceRequirementID = "*"
+			c.RuntimeProfileContracts[0].EvidenceRequirements[0].RequiredCheckRefs = []string{"claimed-check"}
+		}, false},
+		{"recipe shadowed", func(c *workspacemodel.DefinitionAdmissionCandidate) {
+			c.RuntimeProfileContracts[0].EvidenceRequirements[0].ValidationRecipeID = "confirmed"
+			other := runtimecontract.CloneRuntimeProfileContracts(c.RuntimeProfileContracts)[0]
+			other.ID = "aaa"
+			other.EvidenceRequirements[0].ValidationRecipeID = "shadow"
+			c.RuntimeProfileContracts = append(c.RuntimeProfileContracts, other)
+		}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := original.Clone()
+			tt.change(&c)
+			c.RuntimeProfileContractsHash = runtimecontract.StableRuntimeProfileContractsHash(c.RuntimeProfileContracts)
+			hash := c.Specification.ContentHash()
+			for i := range c.Specification.Reviews {
+				c.Specification.Reviews[i].SpecificationHash = hash
+			}
+			c = c.WithHash()
+			before := c.Clone()
+			result, err := Compile(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (result.Disposition == workspacemodel.DefinitionAdmissionAdmittedAllOf) != tt.admitted {
+				t.Fatalf("applicability result=%+v", result)
+			}
+			if !reflect.DeepEqual(c, before) {
+				t.Fatal("pure compiler changed confirmed input")
+			}
+			again, err := Compile(c)
+			if err != nil || !reflect.DeepEqual(result, again) {
+				t.Fatalf("nonexact replay: %v", err)
+			}
+		})
+	}
+}
+
+func TestSpecificationDoDSourceOrderIsConfirmationAfterImageNotNormalizedSlice(t *testing.T) {
+	items := []workspacemodel.DefinitionCandidateItem{
+		{CandidateItemRef: "derived-dod:generated:000001"}, {CandidateItemRef: "derived-dod:template:000001"}, {CandidateItemRef: "derived-dod:user:000002"}, {CandidateItemRef: "derived-dod:user:000001"},
+	}
+	mapping, ok := specificationDoDSources(items)
+	if !ok || mapping["derived-dod:user:000001"] != "dod-001" || mapping["derived-dod:user:000002"] != "dod-002" || mapping["derived-dod:template:000001"] != "dod-003" || mapping["derived-dod:generated:000001"] != "dod-004" {
+		t.Fatalf("after-image mapping=%v ok=%t", mapping, ok)
+	}
+	items[3].CandidateItemRef = "derived-dod:user:000003"
+	if _, ok := specificationDoDSources(items); ok {
+		t.Fatal("noncontiguous confirmation refs admitted")
 	}
 }

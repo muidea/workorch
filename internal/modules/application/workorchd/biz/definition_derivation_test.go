@@ -57,7 +57,7 @@ func TestDerivationApplicationAcquiresFileFactsBeforeProviderAndReplays(t *testi
 		t.Fatal(err)
 	}
 	defer file.Teardown(ctx)
-	b := &Biz{Base: basebiz.New(ModuleID, hub, nil)}
+	b := &Biz{Base: basebiz.New(ModuleID, hub, nil), authoringTasks: newAuthoringTaskLifecycle()}
 	stored, err := repositories.Workspaces.Get(ctx, input.WorkspaceID)
 	if err != nil {
 		t.Fatal(err)
@@ -74,8 +74,8 @@ func TestDerivationApplicationAcquiresFileFactsBeforeProviderAndReplays(t *testi
 	}
 	defer provider.Unsubscribe(llmevents.TopicLLMCommandGetActiveConfiguration)
 	calls := 0
-	if err := provider.Subscribe(llmevents.TopicLLMCommandCompleteProvider, func(ev magicevent.Event, result magicevent.Result) {
-		command, ok := ev.Data().(llmevents.CompleteProviderCommand)
+	if err := provider.Subscribe(llmevents.TopicLLMCommandCompleteProviderDocument, func(ev magicevent.Event, result magicevent.Result) {
+		command, ok := ev.Data().(llmevents.CompleteProviderDocumentCommand)
 		if !ok {
 			t.Error("unexpected provider command")
 			return
@@ -97,11 +97,11 @@ func TestDerivationApplicationAcquiresFileFactsBeforeProviderAndReplays(t *testi
 			t.Error(err)
 			return
 		}
-		result.Set(llmevents.CompleteProviderResult{Target: target, Completion: llmevents.ProviderCompletionData{Content: string(payload)}}, nil)
+		result.Set(authoringTestDocumentResult(t, command, payload), nil)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	defer provider.Unsubscribe(llmevents.TopicLLMCommandCompleteProvider)
+	defer provider.Unsubscribe(llmevents.TopicLLMCommandCompleteProviderDocument)
 	proposal, err := b.DeriveDefinitionAcceptance(ctx, input.WorkspaceID)
 	if err != nil || len(proposal.AdditionalItems) != 1 || calls != 1 {
 		t.Fatalf("File-derived acceptance: %+v calls=%d err=%v", proposal, calls, err)
@@ -134,7 +134,7 @@ func TestDerivationApplicationReplaysHistoricalRequestWithoutCurrentTemplate(t *
 		t.Fatal(err)
 	}
 	defer owner.Unsubscribe(workspaceevents.TopicWorkspaceDefinitionAuthoringQuery)
-	b := &Biz{Base: basebiz.New(ModuleID, hub, nil)}
+	b := &Biz{Base: basebiz.New(ModuleID, hub, nil), authoringTasks: newAuthoringTaskLifecycle()}
 	proposal, err := b.DeriveDefinitionAcceptance(ctx, input.WorkspaceID)
 	if err != nil || len(proposal.AdditionalItems) != 1 {
 		t.Fatalf("historical replay required current template or provider: %+v %v", proposal, err)
@@ -171,7 +171,7 @@ func TestDerivationApplicationCallsProviderOnceAndReplays(t *testing.T) {
 				}
 				result.Set(reply, nil)
 			case workspaceevents.CompleteDefinitionDerivationCommand:
-				next, err := record.CompleteDerivation(cmd.PermitID, cmd.Proposal, cmd.FailureCode)
+				next, err := record.CompleteDerivation(cmd.PermitID, cmd.Proposal, cmd.FailureCode, cmd.Diagnostic)
 				if err != nil {
 					t.Error(err)
 					return
@@ -193,10 +193,11 @@ func TestDerivationApplicationCallsProviderOnceAndReplays(t *testing.T) {
 	}
 	defer provider.Unsubscribe(llmevents.TopicLLMCommandGetActiveConfiguration)
 	calls := 0
-	if err := provider.Subscribe(llmevents.TopicLLMCommandCompleteProvider, func(ev magicevent.Event, result magicevent.Result) {
+	if err := provider.Subscribe(llmevents.TopicLLMCommandCompleteProviderDocument, func(ev magicevent.Event, result magicevent.Result) {
 		mu.Lock()
 		defer mu.Unlock()
-		if cmd, ok := ev.Data().(llmevents.CompleteProviderCommand); !ok || cmd.ExpectedConfigurationRevision != "revision" {
+		command, ok := ev.Data().(llmevents.CompleteProviderDocumentCommand)
+		if !ok || command.ExpectedConfigurationRevision != "revision" {
 			t.Error("provider request lost reserved configuration identity")
 		}
 		if len(record.DerivationRequests) != 1 {
@@ -208,13 +209,13 @@ func TestDerivationApplicationCallsProviderOnceAndReplays(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		result.Set(llmevents.CompleteProviderResult{Target: target, Completion: llmevents.ProviderCompletionData{Content: string(payload)}}, nil)
+		result.Set(authoringTestDocumentResult(t, command, payload), nil)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	defer provider.Unsubscribe(llmevents.TopicLLMCommandCompleteProvider)
+	defer provider.Unsubscribe(llmevents.TopicLLMCommandCompleteProviderDocument)
 	for range 2 {
-		b := &Biz{Base: basebiz.New(ModuleID, hub, nil)}
+		b := &Biz{Base: basebiz.New(ModuleID, hub, nil), authoringTasks: newAuthoringTaskLifecycle()}
 		proposal, err := b.DeriveDefinitionAcceptance(ctx, input.WorkspaceID)
 		if err != nil || len(proposal.AdditionalItems) != 1 {
 			t.Fatalf("derivation: %+v %v", proposal, err)

@@ -3,6 +3,12 @@ package specifications
 import "strings"
 
 // 版本化手写输出合同只约束结构；owner 语义校验、独立审查及确认仍不可省略。
+const derivationOutputSchema = `{"type":"object","additionalProperties":false,"required":["AuthoringInputHash","TemplateSnapshotHash","AdditionalItems"],"properties":{"AuthoringInputHash":{"type":"string"},"TemplateSnapshotHash":{"type":"string"},"AdditionalItems":{"type":"array","maxItems":128,"items":{"type":"string"}}}}`
+
+func derivationOutputContract() string {
+	return derivationInstructions + "\n输出合同 workorch.derived_acceptance_output.v1：禁止未知字段；所有字段必须提供；AdditionalItems 必须是字符串数组，不得为 null，无补充条件时使用 []。结构合法不替代原始要求、来源和预算校验。\nJSON Schema:\n" + derivationOutputSchema
+}
+
 const proposalOutputSchema = `{
  "type":"object","additionalProperties":false,"required":["specification"],"properties":{"specification":{
  "type":"object","additionalProperties":false,

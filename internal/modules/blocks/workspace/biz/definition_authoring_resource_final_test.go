@@ -84,7 +84,7 @@ func seedResourceBoundAuthoringConfirmation(t *testing.T, owners *fileDefinition
 	input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: id, Revision: 1, GoalText: "交付目标", TemplateID: "resource-template", AcceptanceRequirements: []string{"用户验收"}, ResourceRefs: []string{"requirements.txt"}}
 	template := workspace.WorkspaceTemplate{ID: input.TemplateID, Name: "模板", DoDItems: []string{"模板验收"}}
 	if len(declared) > 0 && declared[0] {
-		hints, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"generic": map[string]any{"evidenceRequirements": []any{map[string]any{"id": "proof", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"}}}}}})
+		hints, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"generic": map[string]any{"evidenceRequirements": []any{map[string]any{"id": "*", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"}}}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +113,7 @@ func seedResourceBoundAuthoringConfirmation(t *testing.T, owners *fileDefinition
 			verification := &proposal.Verifications[index]
 			verification.Status = workspace.GoalVerificationDeclared
 			verification.ProfileID = "generic"
-			verification.EvidenceRequirementID = "proof"
+			verification.EvidenceRequirementID = "*"
 			verification.Scope = "dodItem"
 		}
 	}
@@ -336,8 +336,19 @@ func TestResourceBoundConfirmationRejectsDriftBeforePrepareAndAtPreparedCut(t *t
 			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := sendResourceConfirmation(t, owners, command); err != nil {
+			first, err := sendResourceConfirmation(t, owners, command)
+			if err != nil {
 				t.Fatalf("reopening a prepared journal at same snapshot failed: %v", err)
+			}
+			closeResourceAdmissionOwners(owners, file)
+			owners, file = openResourceAdmissionOwners(t, storage)
+			second, err := sendResourceConfirmation(t, owners, command)
+			if err != nil || !reflect.DeepEqual(first, second) {
+				t.Fatalf("restored snapshot replay changed original after-image: %+v %+v %v", first, second, err)
+			}
+			stored, err = owners.repositories.Workspaces.Get(ctx, command.WorkspaceID)
+			if err != nil || stored.DefinitionAuthoringConfirmation.InputHash != command.InputHash || stored.DefinitionAuthoringConfirmation.SpecificationHash != command.SpecificationHash || stored.StartupInput != nil || stored.ActivationAdmission != nil || stored.ActiveRunID != "" {
+				t.Fatalf("restoration replaced confirmation identity or started execution: %+v %v", stored, err)
 			}
 		})
 	}

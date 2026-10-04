@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	magictask "github.com/muidea/magicCommon/task"
 	executionusecase "github.com/muidea/workorch/internal/modules/application/workorchd/biz/execution"
@@ -111,6 +112,42 @@ func TestApplicationStopDrainsDirectEventHubExecutionAdmission(t *testing.T) {
 
 	// Stop remains idempotent after every dependency and subscription is gone.
 	b.Stop(context.Background())
+}
+
+type authoringStopSubscriptionHub struct {
+	magicevent.Hub
+	unsubscribed int
+}
+
+func (h *authoringStopSubscriptionHub) Unsubscribe(topic string, observer magicevent.Observer) *cd.Error {
+	if topic == workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested {
+		h.unsubscribed++
+	}
+	return h.Hub.Unsubscribe(topic, observer)
+}
+
+func TestApplicationStopAfterAuthoringTimeoutStillUnsubscribes(t *testing.T) {
+	hub := &authoringStopSubscriptionHub{Hub: magicevent.NewHub(16)}
+	defer hub.Terminate(context.Background())
+	b := &Biz{Base: basebiz.New(ModuleID, hub, nil), admissions: newExecutionAdmissionLifecycle(), authoringTasks: newAuthoringTaskLifecycle()}
+	b.SubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, b.handleWorkspaceRunRequested)
+	_, release, err := b.authoringTasks.accept(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	stopCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	b.Stop(stopCtx)
+	if hub.unsubscribed != 0 || !b.admissions.stopping() {
+		t.Fatal("未排空调用就解除订阅或没有关闭新 admission")
+	}
+	release()
+	b.Stop(context.Background())
+	b.Stop(context.Background())
+	if hub.unsubscribed != 1 {
+		t.Fatalf("重复 Stop 未完成唯一订阅清理: %d", hub.unsubscribed)
+	}
 }
 
 func TestApplicationStopWithoutSetupIsSafe(t *testing.T) {

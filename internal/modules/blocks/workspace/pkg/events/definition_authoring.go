@@ -18,6 +18,9 @@ type QueryAuthoringDiagnosticCommand struct {
 
 const CommandSource = "application/workorchd"
 
+// 派生阶段只用于诊断观察，不扩展规格请求 ledger 的合法阶段。
+const AuthoringDiagnosticDerivation workspace.DefinitionSpecificationPhase = "derivation"
+
 type QueryAuthoringDiagnosticResult struct {
 	WorkspaceID common.WorkspaceID
 	PermitID    string
@@ -37,7 +40,10 @@ func (r QueryAuthoringDiagnosticResult) ValidateFor(c QueryAuthoringDiagnosticCo
 	if c.Validate() != nil || r.WorkspaceID != c.WorkspaceID || r.PermitID != c.PermitID || r.Diagnostic.Validate() != nil {
 		return common.ErrConflict
 	}
-	if r.Phase == workspace.DefinitionSpecificationProposal && r.FailureCode == "invalid_proposal" || r.Phase == workspace.DefinitionSpecificationCritic && r.FailureCode == "invalid_review" {
+	if r.FailureCode == "provider_failed" && r.Diagnostic.ProviderCode != "" && (r.Phase == AuthoringDiagnosticDerivation || r.Phase == workspace.DefinitionSpecificationProposal || r.Phase == workspace.DefinitionSpecificationCritic) {
+		return nil
+	}
+	if (r.Phase == AuthoringDiagnosticDerivation || r.Phase == workspace.DefinitionSpecificationProposal) && r.FailureCode == "invalid_proposal" || r.Phase == workspace.DefinitionSpecificationCritic && r.FailureCode == "invalid_review" {
 		return nil
 	}
 	return common.ErrConflict

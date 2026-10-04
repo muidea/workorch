@@ -231,6 +231,24 @@ WorkspaceStartupInputContract
 - “手工 authoring 可不调用 setup-draft LLM”只是产品输入能力，不是 Runtime 零 LLM 不变量。startup input 封存后，SM-3
   可以按现有 bounded request/session、cache、budget 和 recovery 合同调用 LLM。
 
+## 规格验证声明的纯适用性
+
+带 Specification 的 candidate 必须逐条解析 `Verification → Obligation → DoDItemRefs`。每个引用都映射到正式确认 after-image 的
+`dodItem/dod-NNN` source：正式 `dod:<id>:item:<ordinal>` 使用原 ordinal；derived 引用按 user→template→generated 及各组连续
+ordinal 重建。candidate normalize 的字典顺序不是正式 DoD 顺序，sourceID 也不是受 bootstrap/profile work units 影响的 CWI ID。
+身份无法唯一解析、wrong scope、wrong ID、只匹配其他 DoD 或义务中的部分 DoD 均保持 `goal_specification_incomplete` 阻塞。
+
+Workspace 解析自身规格图；shared runtime contract 仅纯匹配 scope/source selector 并编译 exact→wildcard 完整贡献。activation 使用
+同一 helper，不以 exact 覆盖全部 wildcard、不舍弃合取贡献或冲突。被引用声明必须具有受支持 owner-receipt proof operation，且
+其非空身份、recipe/check、target/selector、evidence/operation 集合、质量约束与 owner-fact closure 在合并产物中仍保留。
+wildcard 的具体 recipe/check 会在 activation 被剥离，故这类声明不能只靠命中 `*` 被认可；合法 recipe-neutral wildcard 仍可
+贡献 declarative validation 约束，当前默认 software-dev 模板不因此全部拒绝。没有引用声明的真实贡献，neutral fallback validation
+不能替代用户确认的验证承诺。当前 item-level 合并产物不投影 `CapabilityStateRequirements`，含非空 capability-state 的
+被引用声明也保持阻塞，不能仅凭全局 Profile seal 宣称其条目级贡献已经保留。
+
+这是 pre-seal 静态适用性，不证明当前 capability recipe 可执行、检查通过或自然语言蕴含，不提前生成 SM-2 binding。确认内容、
+六审查 hash 和旧 sealed admission 均不重写；SM-1 activation、SM-2 proof seal、SM-3 dispatch 与 SM-4 recovery ownership 不变。
+
 ## Related Contracts
 
 - canonical items、mapping、relations、all-of gates 与 completeness validation：

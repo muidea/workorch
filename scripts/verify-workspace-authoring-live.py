@@ -224,17 +224,29 @@ def verify(request, journal, timeout, confirm):
     if exact:
         if not confirm:
             raise RuntimeError('存在原确认请求，请显式加 --confirm 恢复；不会编译或确认新提案')
+        view = request('GET', path + '/authoring')['authoring']
+        if view['state'] == 'preparation_failed':
+            require_zero_runs(request('GET', path + '/runs'))
+            raise RuntimeError('创作准备已知失败 preparation_failed；保留原诊断，不自动重新编译')
     else:
         view = request('GET', path + '/authoring')['authoring']
+        if view['state'] == 'preparation_failed':
+            # Preparation failures are known terminal owner facts (before any
+            # provider permit); only explicit user action may retry them.
+            require_zero_runs(request('GET', path + '/runs'))
+            raise RuntimeError('创作准备已知失败 preparation_failed；保留原诊断，不自动重新编译')
         if view['state'] in ('draft', 'derived'):
             # 恢复 drive 仍由 owner reserve 授权；已未决的 permit 不会重发。
             view = request('POST', path + '/authoring/compile')['authoring']
         deadline = time.monotonic() + timeout
-        while view['state'] not in ('ready_to_confirm', 'review_blocked', 'failed', 'clarification_required', 'admitted', 'confirming', 'admitting'):
+        while view['state'] not in ('ready_to_confirm', 'review_blocked', 'failed', 'preparation_failed', 'clarification_required', 'admitted', 'confirming', 'admitting'):
             if time.monotonic() >= deadline:
                 raise RuntimeError('编译超时或结果未决；保留原身份，不自动重发 provider')
             time.sleep(2)
             view = request('GET', path + '/authoring')['authoring']
+        if view['state'] == 'preparation_failed':
+            require_zero_runs(request('GET', path + '/runs'))
+            raise RuntimeError('创作准备已知失败 preparation_failed；保留原诊断，不自动重新编译')
         if view['state'] in ('admitted', 'confirming', 'admitting'):
             raise RuntimeError('owner 已进入确认事务但本地缺少原确认身份；不能构造替代确认')
         proposal = require_ready_proposal(view)

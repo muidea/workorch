@@ -31,48 +31,12 @@ type workUnit struct {
 type resolvedCoverageItem struct {
 	unit   workUnit
 	itemID common.CoverageWorkItemID
-	policy compiledEvidencePolicy
+	policy runtimecontract.RuntimeSourceEvidencePolicy
 }
 
 type coverageSliceBucket struct {
 	group runtimecontract.RuntimeAcceptanceSliceGroupPolicy
 	items []resolvedCoverageItem
-}
-
-// compiledEvidencePolicy is the neutral merge result for one coverage focus.
-// Description is audit-only and never enters reducer authority.
-type compiledEvidencePolicy struct {
-	RequiredEvidenceKinds                []string
-	AcceptedStepKinds                    []string
-	AcceptedOperationVariants            []runtimecontract.RuntimeOperationVariantRef
-	RejectedStepKinds                    []string
-	EvidenceRole                         string
-	TargetRole                           string
-	TargetRefs                           []string
-	TargetDiscoverySources               []string
-	TargetSelectorRef                    string
-	TargetSelectorOwnerRef               string
-	TargetSelectorSubjectRef             string
-	TargetSelectorCandidateRefs          []string
-	ProspectiveTargetAllOfConstraintRefs []string
-	RequireTargetGrounding               bool
-	RequireDirectEvidence                bool
-	RequireClaimEvidence                 bool
-	RequireExecutableBehaviorEvidence    bool
-	RequireCoverageTargets               bool
-	RequireAssessment                    bool
-	RequiredOwnerFacts                   []runtimecontract.RuntimeOwnerFactRequirement
-	OwnerFactConvergences                []runtimecontract.RuntimeOwnerFactConvergence
-	ValidationFailureRepairConvergence   *runtimecontract.RuntimeValidationFailureRepairConvergence
-	ImplementationWorkPolicy             *runtimecontract.RuntimeImplementationWorkPolicy
-	VerificationPolicy                   *runtimecontract.RuntimeVerificationPolicy
-	ValidationRecipeID                   string
-	RequiredCheckRefs                    []string
-	MetricConstraints                    []string
-	ArtifactRefs                         []string
-	DeclarationRef                       string
-	SemanticProofDeclarationRef          string
-	Description                          string
 }
 
 // compileRuntimeCoverageFocuses builds the deterministic focus queue for one activation.
@@ -192,7 +156,7 @@ func resolveRuntimeCoverageItems(units []workUnit, activation runtimecontract.Ru
 	return resolved, nil
 }
 
-func resolveRuntimeCoverageItemPolicy(unit workUnit, activation runtimecontract.RuntimeActivationContext, stateChangeRequired bool) (compiledEvidencePolicy, error) {
+func resolveRuntimeCoverageItemPolicy(unit workUnit, activation runtimecontract.RuntimeActivationContext, stateChangeRequired bool) (runtimecontract.RuntimeSourceEvidencePolicy, error) {
 	if unit.bootstrapArtifact != nil {
 		return compileRuntimeBootstrapArtifactPolicy(unit)
 	}
@@ -367,7 +331,7 @@ func newCompiledCoverageFocus(id, sliceID, groupScope string, item resolvedCover
 // the immutable activation surface while the mutable CoverageFocus remains a
 // generation cursor. In particular, validation-failure repair convergence is
 // never copied into mutable focus state.
-func newCompiledRuntimeDefinitionFocus(focus runtimecontract.CoverageFocus, policy compiledEvidencePolicy) (runtimecontract.RuntimeDefinitionFocus, error) {
+func newCompiledRuntimeDefinitionFocus(focus runtimecontract.CoverageFocus, policy runtimecontract.RuntimeSourceEvidencePolicy) (runtimecontract.RuntimeDefinitionFocus, error) {
 	compiled := runtimecontract.CompileRuntimeDefinitionFocuses([]runtimecontract.CoverageFocus{focus})
 	if len(compiled) != 1 {
 		return runtimecontract.RuntimeDefinitionFocus{}, fmt.Errorf("runtime Definition focus compiler requires exactly one focus")
@@ -455,15 +419,15 @@ func runtimeBootstrapTextContainsAll(text string, terms []string) bool {
 	return true
 }
 
-func compileRuntimeBootstrapArtifactPolicy(unit workUnit) (compiledEvidencePolicy, error) {
+func compileRuntimeBootstrapArtifactPolicy(unit workUnit) (runtimecontract.RuntimeSourceEvidencePolicy, error) {
 	if unit.bootstrapArtifact == nil || strings.TrimSpace(unit.bootstrapProfile) == "" || strings.TrimSpace(unit.bootstrapRecipe) == "" {
-		return compiledEvidencePolicy{}, fmt.Errorf("bootstrap work unit requires profile, recipe and artifact")
+		return runtimecontract.RuntimeSourceEvidencePolicy{}, fmt.Errorf("bootstrap work unit requires profile, recipe and artifact")
 	}
 	artifact := unit.bootstrapArtifact.Normalized()
 	if artifact.ID == "" || artifact.TargetRole == "" || len(artifact.AllowedOperationKinds) == 0 {
-		return compiledEvidencePolicy{}, fmt.Errorf("bootstrap artifact work unit is incomplete")
+		return runtimecontract.RuntimeSourceEvidencePolicy{}, fmt.Errorf("bootstrap artifact work unit is incomplete")
 	}
-	return compiledEvidencePolicy{
+	return runtimecontract.RuntimeSourceEvidencePolicy{
 		RequiredEvidenceKinds:    []string{runtimecontract.EvidenceKindStateChange},
 		AcceptedStepKinds:        append([]string(nil), artifact.AllowedOperationKinds...),
 		EvidenceRole:             "bootstrap_artifact",
@@ -479,7 +443,7 @@ func compileRuntimeBootstrapArtifactPolicy(unit workUnit) (compiledEvidencePolic
 	}, nil
 }
 
-func matchAcceptanceSliceGroup(group runtimecontract.RuntimeAcceptanceSliceGroupPolicy, sourceScope, sourceID string, policy compiledEvidencePolicy) bool {
+func matchAcceptanceSliceGroup(group runtimecontract.RuntimeAcceptanceSliceGroupPolicy, sourceScope, sourceID string, policy runtimecontract.RuntimeSourceEvidencePolicy) bool {
 	match := group.Match
 	if match.All {
 		return true
@@ -632,51 +596,10 @@ func coverageItemsForDependencyBinding(items []runtimecontract.RuntimeCoverageIt
 	return ret
 }
 
-func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.RuntimeActivationContext, stateChangeRequired bool) (compiledEvidencePolicy, error) {
-	scope = strings.TrimSpace(scope)
-	id = strings.TrimSpace(id)
-	if scope == "" {
-		return compiledEvidencePolicy{}, fmt.Errorf("coverage evidence policy requires scope")
-	}
-	// Neutral runtime default: Goal/DoD/acceptance coverage requires assessment.
-	// Validation is only the fallback proof when the selected template/profile
-	// has no explicit evidence kind for this CWI. Applying it before explicit
-	// declarations would turn a state-change CWI into an impossible cross-owner
-	// state_change+validation binding. Run-level must_produce_state_change is NOT
-	// applied to every DoD focus; only an explicit declaration or later repair
-	// elevates state_change.
-	policy := compiledEvidencePolicy{RequireAssessment: true}
-	defaultEvidenceKinds := []string{}
-	switch scope {
-	case "dodItem", "goalCoverage", "acceptanceDimension":
-		defaultEvidenceKinds = []string{runtimecontract.EvidenceKindValidation}
-	default:
-		// unknown scopes keep assessment-only neutral default
-	}
+func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.RuntimeActivationContext, stateChangeRequired bool) (runtimecontract.RuntimeSourceEvidencePolicy, error) {
+	// Evidence-policy aliases remain adapter-owned; the neutral helper consumes canonical source selectors.
 	_ = stateChangeRequired
-
-	// Collect profile requirements and evidence-policy coverage requirements as neutral inputs.
-	candidates := make([]runtimecontract.RuntimeProfileEvidenceRequirement, 0, 8)
-	for _, profile := range runtimecontract.NormalizeRuntimeProfileContracts(activation.ExecutionContract.ProfileContracts) {
-		for _, requirement := range profile.EvidenceRequirements {
-			if strings.TrimSpace(requirement.Scope) != scope {
-				continue
-			}
-			reqID := strings.TrimSpace(requirement.ID)
-			if reqID == "" {
-				return compiledEvidencePolicy{}, fmt.Errorf("profile evidence requirement for scope %q has empty id", scope)
-			}
-			if reqID != id && reqID != "*" {
-				continue
-			}
-			if err := validateProfileAcceptedKinds(requirement); err != nil {
-				return compiledEvidencePolicy{}, err
-			}
-			requirement.TargetSelectorRef, requirement.TargetSelectorOwnerRef, requirement.TargetSelectorSubjectRef =
-				runtimecontract.ResolveRuntimeProfileTargetSelectorIdentity(profile.ID, requirement)
-			candidates = append(candidates, requirement)
-		}
-	}
+	candidates := make([]runtimecontract.RuntimeProfileEvidenceRequirement, 0)
 	for _, evidencePolicy := range runtimecontract.NormalizeRuntimeEvidencePolicies(activation.EvidencePolicies) {
 		for _, requirement := range evidencePolicy.CoverageRequirements {
 			reqScope := normalizeEvidenceScope(requirement.Scope)
@@ -685,7 +608,7 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 			}
 			reqID := strings.TrimSpace(requirement.ID)
 			if reqID == "" {
-				return compiledEvidencePolicy{}, fmt.Errorf("evidence policy coverage requirement for scope %q has empty id", scope)
+				return runtimecontract.RuntimeSourceEvidencePolicy{}, fmt.Errorf("evidence policy coverage requirement for scope %q has empty id", scope)
 			}
 			if reqID != id && reqID != "*" {
 				continue
@@ -718,181 +641,14 @@ func resolveCoverageEvidencePolicy(scope, id string, activation runtimecontract.
 				VerificationPolicy:                   requirement.VerificationPolicy,
 				Description:                          requirement.Description,
 			}
-			if err := validateProfileAcceptedKinds(mapped); err != nil {
-				return compiledEvidencePolicy{}, err
-			}
 			candidates = append(candidates, mapped)
 		}
 	}
 
-	// Precedence within same scope: exact id first, then wildcard "*".
-	// Within the same precedence tier, merge with stable union / first-non-empty rules.
-	exact := filterRequirementsByID(candidates, id)
-	wildcard := filterRequirementsByID(candidates, "*")
-	var err error
-	if id != "*" {
-		policy, err = mergeCompiledEvidencePolicy(policy, exact)
-		if err != nil {
-			return compiledEvidencePolicy{}, err
-		}
-		policy, err = mergeCompiledEvidencePolicy(policy, wildcardQualityRequirements(wildcard))
-		if err != nil {
-			return compiledEvidencePolicy{}, err
-		}
-	} else {
-		policy, err = mergeCompiledEvidencePolicy(policy, exact)
-		if err != nil {
-			return compiledEvidencePolicy{}, err
-		}
-	}
-	if len(policy.RequiredEvidenceKinds) == 0 {
-		policy.RequiredEvidenceKinds = defaultEvidenceKinds
-	}
-	// This exact identity is compiled only after the Application has resolved an
-	// admitted CWI. A wildcard may contribute declarative constraints above,
-	// including an owner-fact postcondition, but never survives as Definition
-	// identity or supplies recipe/check/current-owner authority for a CWI.
-	policy.SemanticProofDeclarationRef = runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(scope, id)
-	return policy, nil
+	return runtimecontract.CompileRuntimeSourceEvidencePolicy(scope, id, activation.ExecutionContract.ProfileContracts, candidates)
 }
 
-func wildcardQualityRequirements(values []runtimecontract.RuntimeProfileEvidenceRequirement) []runtimecontract.RuntimeProfileEvidenceRequirement {
-	ret := make([]runtimecontract.RuntimeProfileEvidenceRequirement, 0, len(values))
-	for _, value := range values {
-		// A wildcard is a declarative policy template, not Runtime authority. The
-		// Application may instantiate its constraints into an already admitted
-		// exact CWI, whose later owner catalog and SM-2 binding remain necessary.
-		// Only wildcard identity and recipe/check proof identity are discarded:
-		// those must come from the canonical exact Definition and owner catalog.
-		ret = append(ret, runtimecontract.RuntimeProfileEvidenceRequirement{
-			EvidenceRole:                         value.EvidenceRole,
-			TargetRole:                           value.TargetRole,
-			TargetRefs:                           append([]string(nil), value.TargetRefs...),
-			TargetDiscoverySources:               append([]string(nil), value.TargetDiscoverySources...),
-			TargetSelectorRef:                    value.TargetSelectorRef,
-			TargetSelectorOwnerRef:               value.TargetSelectorOwnerRef,
-			TargetSelectorSubjectRef:             value.TargetSelectorSubjectRef,
-			TargetSelectorCandidateRefs:          append([]string(nil), value.TargetSelectorCandidateRefs...),
-			ProspectiveTargetAllOfConstraintRefs: append([]string(nil), value.ProspectiveTargetAllOfConstraintRefs...),
-			RequireTargetGrounding:               value.RequireTargetGrounding,
-			RequiredEvidenceKinds:                append([]string(nil), value.RequiredEvidenceKinds...),
-			RequireDirectEvidence:                value.RequireDirectEvidence,
-			RequireClaimEvidence:                 value.RequireClaimEvidence,
-			RequireExecutableBehaviorEvidence:    value.RequireExecutableBehaviorEvidence,
-			RequireCoverageTargets:               value.RequireCoverageTargets,
-			AcceptedStepKinds:                    append([]string(nil), value.AcceptedStepKinds...),
-			AcceptedOperationVariants:            append([]runtimecontract.RuntimeOperationVariantRef(nil), value.AcceptedOperationVariants...),
-			RejectedStepKinds:                    append([]string(nil), value.RejectedStepKinds...),
-			MetricConstraints:                    append([]string(nil), value.MetricConstraints...),
-			ArtifactRefs:                         append([]string(nil), value.ArtifactRefs...),
-			VerificationPolicy:                   value.VerificationPolicy,
-			RequiredOwnerFacts:                   append([]runtimecontract.RuntimeOwnerFactRequirement(nil), value.RequiredOwnerFacts...),
-			OwnerFactConvergences:                runtimecontract.CloneRuntimeOwnerFactConvergences(value.OwnerFactConvergences),
-			Description:                          value.Description,
-		})
-		if value.ValidationFailureRepairConvergence != nil {
-			clone := value.ValidationFailureRepairConvergence.Clone()
-			ret[len(ret)-1].ValidationFailureRepairConvergence = &clone
-		}
-		if value.ImplementationWorkPolicy != nil {
-			clone := value.ImplementationWorkPolicy.Clone()
-			ret[len(ret)-1].ImplementationWorkPolicy = &clone
-		}
-	}
-	return ret
-}
-
-func filterRequirementsByID(values []runtimecontract.RuntimeProfileEvidenceRequirement, id string) []runtimecontract.RuntimeProfileEvidenceRequirement {
-	ret := make([]runtimecontract.RuntimeProfileEvidenceRequirement, 0, len(values))
-	for _, value := range values {
-		if strings.TrimSpace(value.ID) == id {
-			ret = append(ret, value)
-		}
-	}
-	return ret
-}
-
-func mergeCompiledEvidencePolicy(base compiledEvidencePolicy, requirements []runtimecontract.RuntimeProfileEvidenceRequirement) (compiledEvidencePolicy, error) {
-	for _, requirement := range requirements {
-		// Stable unique union for required evidence / rejected kinds.
-		base.RequiredEvidenceKinds = stableStringUnion(base.RequiredEvidenceKinds, requirement.RequiredEvidenceKinds)
-		base.RejectedStepKinds = stableStringUnion(base.RejectedStepKinds, requirement.RejectedStepKinds)
-		// Boolean constraints take OR and cannot be relaxed by lower-priority layers already applied.
-		base.RequireDirectEvidence = base.RequireDirectEvidence || requirement.RequireDirectEvidence
-		base.RequireClaimEvidence = base.RequireClaimEvidence || requirement.RequireClaimEvidence
-		base.RequireExecutableBehaviorEvidence = base.RequireExecutableBehaviorEvidence || requirement.RequireExecutableBehaviorEvidence
-		base.RequireCoverageTargets = base.RequireCoverageTargets || requirement.RequireCoverageTargets
-		// Roles retain first-non-empty precedence. Operation kinds/variants are
-		// proof-shape declarations instead: evidence kinds are compiled into
-		// separate binding proofs later, so dropping a lower-priority validation
-		// kind merely because a state-change rule appeared first would make a
-		// required proof impossible to express.
-		if base.EvidenceRole == "" && strings.TrimSpace(requirement.EvidenceRole) != "" {
-			base.EvidenceRole = strings.TrimSpace(requirement.EvidenceRole)
-		}
-		if base.TargetRole == "" && strings.TrimSpace(requirement.TargetRole) != "" {
-			base.TargetRole = strings.TrimSpace(requirement.TargetRole)
-		}
-		if base.TargetSelectorRef == "" && strings.TrimSpace(requirement.TargetSelectorRef) != "" {
-			base.TargetSelectorRef = strings.TrimSpace(requirement.TargetSelectorRef)
-		}
-		if base.TargetSelectorOwnerRef == "" && strings.TrimSpace(requirement.TargetSelectorOwnerRef) != "" {
-			base.TargetSelectorOwnerRef = strings.TrimSpace(requirement.TargetSelectorOwnerRef)
-		}
-		if base.TargetSelectorSubjectRef == "" && strings.TrimSpace(requirement.TargetSelectorSubjectRef) != "" {
-			base.TargetSelectorSubjectRef = strings.TrimSpace(requirement.TargetSelectorSubjectRef)
-		}
-		base.TargetSelectorCandidateRefs = stableStringUnion(base.TargetSelectorCandidateRefs, requirement.TargetSelectorCandidateRefs)
-		base.ProspectiveTargetAllOfConstraintRefs = stableStringUnion(base.ProspectiveTargetAllOfConstraintRefs, requirement.ProspectiveTargetAllOfConstraintRefs)
-		base.TargetRefs = stableStringUnion(base.TargetRefs, requirement.TargetRefs)
-		base.TargetDiscoverySources = stableStringUnion(base.TargetDiscoverySources, requirement.TargetDiscoverySources)
-		base.RequireTargetGrounding = base.RequireTargetGrounding || requirement.RequireTargetGrounding
-		base.AcceptedStepKinds = stableStringUnion(base.AcceptedStepKinds, requirement.AcceptedStepKinds)
-		base.AcceptedOperationVariants = runtimecontract.NormalizeRuntimeOperationVariantRefs(append(base.AcceptedOperationVariants, requirement.AcceptedOperationVariants...))
-		if base.Description == "" && strings.TrimSpace(requirement.Description) != "" {
-			base.Description = strings.TrimSpace(requirement.Description)
-		}
-		if base.ValidationRecipeID == "" && strings.TrimSpace(requirement.ValidationRecipeID) != "" {
-			base.ValidationRecipeID = strings.TrimSpace(requirement.ValidationRecipeID)
-		}
-		base.RequiredCheckRefs = stableStringUnion(base.RequiredCheckRefs, requirement.RequiredCheckRefs)
-		base.MetricConstraints = stableStringUnion(base.MetricConstraints, requirement.MetricConstraints)
-		base.ArtifactRefs = stableStringUnion(base.ArtifactRefs, requirement.ArtifactRefs)
-		base.RequiredOwnerFacts = runtimecontract.NormalizeRuntimeOwnerFactRequirements(append(base.RequiredOwnerFacts, requirement.RequiredOwnerFacts...))
-		base.OwnerFactConvergences = runtimecontract.NormalizeRuntimeOwnerFactConvergences(append(base.OwnerFactConvergences, requirement.OwnerFactConvergences...))
-		if requirement.ValidationFailureRepairConvergence != nil {
-			if base.ValidationFailureRepairConvergence != nil && !runtimecontract.SameRuntimeValidationFailureRepairConvergence(base.ValidationFailureRepairConvergence, requirement.ValidationFailureRepairConvergence) {
-				return compiledEvidencePolicy{}, fmt.Errorf("coverage evidence policy has conflicting validation failure repair convergence declarations")
-			}
-			if base.ValidationFailureRepairConvergence == nil {
-				clone := requirement.ValidationFailureRepairConvergence.Clone()
-				base.ValidationFailureRepairConvergence = &clone
-			}
-		}
-		if requirement.VerificationPolicy != nil {
-			if base.VerificationPolicy != nil && !runtimecontract.SameRuntimeVerificationPolicy(base.VerificationPolicy, requirement.VerificationPolicy) {
-				return compiledEvidencePolicy{}, fmt.Errorf("coverage evidence policy has conflicting verification policies")
-			}
-			base.VerificationPolicy = requirement.VerificationPolicy
-		}
-		if requirement.ImplementationWorkPolicy != nil {
-			if base.ImplementationWorkPolicy != nil && !runtimecontract.SameRuntimeImplementationWorkPolicy(base.ImplementationWorkPolicy, requirement.ImplementationWorkPolicy) {
-				return compiledEvidencePolicy{}, fmt.Errorf("coverage evidence policy has conflicting implementation work declarations")
-			}
-			if base.ImplementationWorkPolicy == nil {
-				clone := requirement.ImplementationWorkPolicy.Clone()
-				base.ImplementationWorkPolicy = &clone
-			}
-		}
-		// Profile explicit primary_state_change implies state-change evidence.
-		if requirement.EvidenceRole == "primary_state_change" || len(requirement.AcceptedOperationVariants) > 0 {
-			base.RequiredEvidenceKinds = stableStringUnion(base.RequiredEvidenceKinds, []string{runtimecontract.EvidenceKindStateChange})
-		}
-	}
-	return base, nil
-}
-
-func applyCompiledEvidencePolicy(focus runtimecontract.CoverageFocus, policy compiledEvidencePolicy) runtimecontract.CoverageFocus {
+func applyCompiledEvidencePolicy(focus runtimecontract.CoverageFocus, policy runtimecontract.RuntimeSourceEvidencePolicy) runtimecontract.CoverageFocus {
 	focus.RequiredEvidenceKinds = append([]string(nil), policy.RequiredEvidenceKinds...)
 	focus.AcceptedStepKinds = append([]string(nil), policy.AcceptedStepKinds...)
 	focus.AcceptedOperationVariants = append([]runtimecontract.RuntimeOperationVariantRef(nil), policy.AcceptedOperationVariants...)
@@ -921,25 +677,6 @@ func applyCompiledEvidencePolicy(focus runtimecontract.CoverageFocus, policy com
 	focus.OwnerFactConvergences = runtimecontract.CloneRuntimeOwnerFactConvergences(policy.OwnerFactConvergences)
 	focus.RequireAssessment = policy.RequireAssessment || focus.RequireAssessment
 	return focus.Normalized()
-}
-
-func validateProfileAcceptedKinds(requirement runtimecontract.RuntimeProfileEvidenceRequirement) error {
-	for _, kind := range requirement.AcceptedStepKinds {
-		canonical := runtimecontract.CanonicalRuntimeBlockKind(kind)
-		if canonical == "" {
-			continue
-		}
-		if _, ok := runtimecontract.RuntimeOperationDescriptorForKind(canonical); !ok {
-			return fmt.Errorf("profile accepted step kind %q has no runtime operation descriptor", kind)
-		}
-	}
-	for _, kind := range requirement.RejectedStepKinds {
-		// Rejected kinds may include non-dispatch kinds; only validate non-empty trim.
-		if strings.TrimSpace(kind) == "" {
-			return fmt.Errorf("profile rejected step kind must be non-empty")
-		}
-	}
-	return nil
 }
 
 func normalizeEvidenceScope(scope string) string {
