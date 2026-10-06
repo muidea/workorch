@@ -1,6 +1,9 @@
 package workorchruntimecontract
 
-import "fmt"
+import (
+	"fmt"
+	"reflect"
+)
 
 // ValidateRuntimeAcceptedCandidateManifestLineage re-derives every accepted
 // dispatch projection from the complete operations manifest persisted on its
@@ -85,6 +88,18 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 				manifest.AssessmentPurposeManifestHash == "" {
 				return fmt.Errorf("accepted runtime assessment dispatch purpose does not match its pre-seal manifest")
 			}
+		}
+		if manifest.ImplementationWorkingBinding != nil {
+			if attempt.AdmissionImplementationWorkCommitment == nil || dispatch.ImplementationWorkCommitment == nil ||
+				!runtimeImplementationWorkCommitmentsEqual(attempt.AdmissionImplementationWorkCommitment, dispatch.ImplementationWorkCommitment) ||
+				!reflect.DeepEqual(manifest.ImplementationWorkingBinding, dispatch.ImplementationWorkCommitment.WorkingBinding) {
+				return fmt.Errorf("accepted implementation dispatch differs from original pre-seal working manifest")
+			}
+			if err := ValidateRuntimeImplementationWorkDispatchCommitment(dispatch); err != nil {
+				return err
+			}
+		} else if attempt.AdmissionImplementationWorkCommitment != nil || dispatch.ImplementationWorkCommitment != nil {
+			return fmt.Errorf("non-working manifest cannot carry implementation commitment")
 		}
 		if dispatch.CandidateHash != attempt.CandidateHash || dispatch.CandidateHash != StableRuntimeCandidateHash(dispatch.Candidate) {
 			return fmt.Errorf("accepted runtime candidate attempt candidate hash mismatch")

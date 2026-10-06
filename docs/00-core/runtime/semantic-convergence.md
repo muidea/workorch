@@ -69,6 +69,22 @@ bootstrap 独立拒绝清单或 prerequisite 缺失、owner/class 不符。该�
 单轮可修改目标数裁剪，unsupported 是负事实，revision 漂移不能作为当前范围接受。范围中出现验证输入仅是观察，
 不解除普通 mutation exclusions；取得范围观察也不表示已封存工作 binding、消费轮次或获得 dispatch 权限。
 
+工作事务在同一 aggregate 与原 SM-2/3/4 私有事件边界内运行。scope 需求先 CAS 封存只读 preview，再取得 receiving owner 的
+完整观察；原 accepted semantic order 的 `implementation_effect | terminal_proof` 只提出 purpose。SM-2 接受 effect 时才
+reserve 原 CWI 有界 round，后续原 accepted proof batch 和 owner feasibility 才能 seal 独立 working binding；它不是
+`CoverageEvidenceBinding`。工作 purpose 保留全部已声明 owner catalogs 与输入排除，仅延后当前 focus 的终验 target/scratch；
+terminal purpose 恢复原完整前置、validation input review 和 all-of 终验。
+
+SM-3 每轮使用独立 request/dispatch 和完整 working commitment；一次 receipt CAS 协调 execution、预算、working effect、
+collective round 结算与 resource observation retirement。工作 receipt 零 validation/terminal/CWI credit，不补造 quality。
+下一轮必须 fresh observation、新的 semantic proposal/owner feasibility 和原 collective receipt lineage；达到轮次上限只关闭
+effect 选择，不豁免终验。逻辑 durable dispatch 按原 working CWI 与 accepted attempt 来源计数，归档不退款。
+无原 durable receipt 的 unknown 不自动重发；exact original started key/fence 的迟到事实只入账与失效观察，不重开 round、
+不改原 physical unknown allocation/consumption，也不授终验 credit。SM-1 不新增迁移；SM-4 仅重驱原 aggregate。
+具体 implementation 与不同测试证据范围见 [Orchestrator implementation contract](../../../internal/modules/kernel/orchestrator/readme.md#能力验收)；
+private startup 的真实 owner 两轮测试不替代公开 authoring/activation、完整工程终验和 Run-owner fresh-process 恢复，执行 availability
+仍按原准入门禁关闭。
+
 SM-3 使用同一 request-session、complete-document evaluator 与 attempt-0/1 预算请求一个无副作用
 `semantic_plan` document。它只能逐 CWI 提出 owner、operation/effect、三种 target policy 之一、target/selector、
 owner catalog 中兼容的 recipe 与适用 metric/artifact；不能编写 declaration/check，也不能携带 Runtime action、coverage state、credit、terminal、retry、ticket 或

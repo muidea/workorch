@@ -32,6 +32,7 @@ type RuntimeCompleteAdmissionInput struct {
 	Facts               RuntimeFacts
 	Decision            RuntimeDecision
 	SemanticPlanning    RuntimeSemanticPlanningLedger
+	ImplementationWork  RuntimeImplementationWorkLedger
 	Reconciliation      RuntimeCWIReconciliationLedger
 	Manifest            RuntimeCandidateContractManifest
 	Candidate           RuntimeCandidate
@@ -45,6 +46,7 @@ func (i RuntimeCompleteAdmissionInput) Clone() RuntimeCompleteAdmissionInput {
 	i.Facts = i.Facts.Normalized()
 	i.Decision = cloneRuntimeDecision(i.Decision)
 	i.SemanticPlanning = i.SemanticPlanning.Clone()
+	i.ImplementationWork = i.ImplementationWork.Clone()
 	i.Reconciliation = i.Reconciliation.Clone()
 	i.Manifest = i.Manifest.Clone()
 	i.Candidate = cloneRuntimeCandidate(i.Candidate)
@@ -129,7 +131,12 @@ func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) Runtime
 	if blocked := runtimeCurrentFocusBlockedPrerequisites(input.Facts); len(blocked) != 0 {
 		return completeAdmissionFailure(RuntimeCompleteAdmissionPrerequisiteBlocked, "cwi_prerequisite_blocked", fmt.Errorf("runtime current CWI prerequisites are not settled: %s", strings.Join(blocked, ",")))
 	}
-	if disposition, err := validateRuntimeCompleteAdmissionSemanticAuthority(input.Facts, input.SemanticPlanning); err != nil {
+	workPurpose := input.Decision.RequiredOutput.ImplementationWorkBindingHash != ""
+	if workPurpose {
+		if _, err := ValidateRuntimeImplementationWorkAdmission(input.Facts, input.Decision, input.SemanticPlanning, input.ImplementationWork, input.Manifest); err != nil {
+			return completeAdmissionFailure(RuntimeCompleteAdmissionStaleConflict, "implementation_work_authority_invalid", err)
+		}
+	} else if disposition, err := validateRuntimeCompleteAdmissionSemanticAuthority(input.Facts, input.SemanticPlanning); err != nil {
 		code := "semantic_authority_invalid"
 		if disposition == RuntimeCompleteAdmissionStaleConflict {
 			code = "semantic_authority_unsealed"
@@ -137,6 +144,12 @@ func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) Runtime
 		return completeAdmissionFailure(disposition, code, err)
 	}
 	ownerFacts := RuntimeCandidateManifestOwnerFactsFromContext(RuntimeCandidateContextForDecision(input.Facts, input.Decision, nil))
+	if workPurpose {
+		binding := input.Manifest.ImplementationWorkingBinding.Clone()
+		ownerFacts.ImplementationWorkingBinding = &binding
+		ownerFacts.TargetSelection = nil
+		ownerFacts.OperationAdmissibilities = []RuntimeOperationAdmissibility{binding.OwnerCatalog.Clone()}
+	}
 	if input.Decision.State == ConvergenceStateNeedAssessment {
 		focus := input.Decision.Focus.Normalized()
 		if _, err := RuntimeAssessmentSourceProjection(input.Facts, focus.ID, focus.CoverageWorkItemIDs); err != nil {

@@ -33,5 +33,5 @@ func specificationOutputSchema(purpose string) string {
 }
 
 func specificationOutputContract(purpose, instructions string) string {
-	return instructions + "\n输出合同 workorch.goal_specification_output.v1（所有对象禁止未知字段；数组必须是数组，不得为 null；proposal 的 Reviews 必须为 []；Verification 为平面字段；SourceItemRefs 为数组）。all_of 是所有必需条件共同成立的语义，不是 JSON 字段；不得添加 ConditionMode、Authority 或 ProfileAssessment。仅约束结构，不替代来源、Profile、独立审查、确认与准入校验。\nJSON Schema:\n" + specificationOutputSchema(purpose)
+	return instructions + "\n输出合同 workorch.goal_specification_output.v1（所有字段必须存在且精确区分大小写；所有对象禁止未知字段、重复字段；标量和数组均不得为 null；仅接受合法 UTF-8 与成对 Unicode surrogate；数组必须是数组；proposal 的 Reviews 必须为 []；Verification 为平面字段；SourceItemRefs 为数组）。all_of 是所有必需条件共同成立的语义，不是 JSON 字段；不得添加 ConditionMode、Authority 或 ProfileAssessment。仅约束结构，不替代来源、Profile、独立审查、确认与准入校验。\nJSON Schema:\n" + specificationOutputSchema(purpose)
 }

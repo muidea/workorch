@@ -175,7 +175,7 @@ operations = ["responses"]
 		}
 		productionJSON(t, client, http.MethodGet, path+"/authoring", nil, &envelope)
 		reviewed = envelope.Authoring
-		if reviewed.State == "reviewed" {
+		if reviewed.State == "ready_to_confirm" {
 			break
 		}
 		if reviewed.State == "failed" || reviewed.State == "preparation_failed" {
@@ -557,7 +557,16 @@ func productionProposal(record *workspace.DefinitionAuthoringRecord) (workspace.
 	if err != nil {
 		return workspace.GoalSpecification{}, err
 	}
-	proposal := workspace.GoalSpecification{Version: 1, GoalItemRef: workspace.DefinitionAuthoringGoalItemRef, GoalTextHash: workspace.StableDefinitionTextHash(record.Input.GoalText), Dimensions: []workspace.GoalSpecificationDimension{{ID: "all", Required: true, Activated: true}}, Requirements: []workspace.GoalSpecificationRequirement{{ID: "goal", DimensionID: "all", Required: true, SourceKind: workspace.GoalRequirementUserExplicit, SourceItemRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, Text: record.Input.GoalText}}}
+	proposal := workspace.GoalSpecification{
+		Version: 1, GoalItemRef: workspace.DefinitionAuthoringGoalItemRef,
+		GoalTextHash: workspace.StableDefinitionTextHash(record.Input.GoalText),
+		Dimensions:   []workspace.GoalSpecificationDimension{{ID: "all", Required: true, Activated: true, ResourceIDs: []string{}}},
+		Requirements: []workspace.GoalSpecificationRequirement{{
+			ID: "goal", DimensionID: "all", Required: true, SourceKind: workspace.GoalRequirementUserExplicit,
+			SourceItemRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, ResourceIDs: []string{}, Text: record.Input.GoalText,
+		}},
+		Reviews: []workspace.GoalSpecificationCompletenessReview{},
+	}
 	for n, item := range items {
 		kind := workspace.GoalRequirementDerived
 		if strings.HasPrefix(item.CandidateItemRef, "derived-dod:user:") {
@@ -566,7 +575,7 @@ func productionProposal(record *workspace.DefinitionAuthoringRecord) (workspace.
 			kind = workspace.GoalRequirementTemplateRequired
 		}
 		id := fmt.Sprintf("item-%03d", n+1)
-		proposal.Requirements = append(proposal.Requirements, workspace.GoalSpecificationRequirement{ID: id, DimensionID: "all", Required: true, SourceKind: kind, SourceItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
+		proposal.Requirements = append(proposal.Requirements, workspace.GoalSpecificationRequirement{ID: id, DimensionID: "all", Required: true, SourceKind: kind, SourceItemRefs: []string{item.CandidateItemRef}, ResourceIDs: []string{}, Text: item.Text})
 		proposal.Obligations = append(proposal.Obligations, workspace.GoalSpecificationObligation{ID: "obl-" + id, RequirementID: id, DoDItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
 	}
 	proposal.Obligations = append(proposal.Obligations, workspace.GoalSpecificationObligation{ID: "obl-goal", RequirementID: "goal", DoDItemRefs: []string{items[0].CandidateItemRef}, Text: record.Input.GoalText})

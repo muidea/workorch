@@ -6,6 +6,8 @@ APP := ./application/workorch
 PKGS := ./...
 GOFMT ?= gofmt
 GOTEST_FLAGS ?=
+# 真实 owner/file 恢复矩阵按包串行，避免跨包争用；每包原测试期限不变。
+GOTEST_PACKAGE_PARALLELISM ?= 1
 # Per-package test deadline for the combined file-backed recovery matrices.
 # This is harness configuration, never a workspace Runtime/repair budget.
 GOTEST_TIMEOUT ?= 15m
@@ -160,10 +162,10 @@ go-test-timeout:
 	@printf '%s\n' '$(GOTEST_TIMEOUT)'
 
 test: go-deps
-	$(GO) test -timeout=$(GOTEST_TIMEOUT) $(GOTEST_FLAGS) $(PKGS)
+	$(GO) test -p=$(GOTEST_PACKAGE_PARALLELISM) -timeout=$(GOTEST_TIMEOUT) $(GOTEST_FLAGS) $(PKGS)
 
 test-race: go-deps
-	$(GO) test -race -timeout=$(GOTEST_TIMEOUT) $(GOTEST_FLAGS) $(PKGS)
+	$(GO) test -p=$(GOTEST_PACKAGE_PARALLELISM) -race -timeout=$(GOTEST_TIMEOUT) $(GOTEST_FLAGS) $(PKGS)
 
 vet: go-deps
 	$(GO) vet $(PKGS)
@@ -224,46 +226,51 @@ verify-service-file: verify-service
 # 仅本地 mock／持久 owner 合同测试；不连接部署实例或真实 provider。
 .PHONY: verify-workspace-authoring-contract
 verify-workspace-authoring-contract:
-	go test -race ./internal/modules/blocks/workspace/pkg/eventmapping ./internal/pkg/repository/memory ./internal/pkg/repository/file -run '^TestWorkspace.*TransientAuthoringSummary$$' -count=1 -timeout=3m
-	go test -race ./internal/modules/blocks/workspace/biz ./internal/modules/blocks/workspace/pkg/models -run '^Test(AuthoringWorkspaceGetList|AuthoringLedgerCAS|.*AuthoringSummary)' -count=1 -timeout=3m
-	go test -race ./internal/modules/application/workorchd/service/server -run '^TestAuthoringSummaryEventRecordRefreshesHTTPListAndDetail$$' -count=1 -timeout=3m
-	go test ./internal/modules/application/workorchd/biz/appservice/specifications -count=1
-	go test -race ./internal/modules/blocks/llm/pkg/events ./internal/modules/blocks/llm/biz -run '^Test(ProviderSchemaFormat|ExplicitSchema|CompleteProviderDocument|ProviderDocument|ProviderJSONText)' -count=1 -timeout=3m
-	go test -race ./internal/modules/application/workorchd/biz -run '^Test(AuthoringProviderDocumentFaults|AuthoringParserDiagnostic|AuthoringTaskLifecycle|AuthoringSettlementContext|ApplicationStop|RuntimeComponent|DerivationApplication)' -count=1 -timeout=3m
-	go test -race ./internal/pkg/workorchruntimecontract ./internal/modules/blocks/workspace/pkg/definitionadmission ./internal/modules/application/workorchd/biz/appservice/activationcore ./internal/modules/application/workorchd/biz/appservice/activationports -run '^Test(RuntimeSourceEvidencePolicy|GoalSpecification|BuiltinSoftwareDevSpecification)' -count=1 -timeout=3m
-	go test -race ./internal/modules/blocks/workspace/biz -run '^Test(AuthoringApplicable|AuthoringVerification|AuthoringConfirmation|ResourceBoundConfirmation|DerivationFailureDiagnostic)' -count=1 -timeout=3m
+	python3 scripts/test_go_test_each_package.py
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/blocks/workspace/pkg/eventmapping ./internal/pkg/repository/memory ./internal/pkg/repository/file -run '^TestWorkspace.*TransientAuthoringSummary$$' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/blocks/workspace/biz ./internal/modules/blocks/workspace/pkg/models -run '^Test(AuthoringWorkspaceGetList|AuthoringLedgerCAS|.*AuthoringSummary)' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/application/workorchd/service/server -run '^TestAuthoringSummaryEventRecordRefreshesHTTPListAndDetail$$' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/application/workorchd/biz/appservice/specifications -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/application/workorchd/biz/appservice/readmodelprojection -run '^TestProjectWorkspaceRuntimeViewRunStateRequiresActualWorkspaceRun$$' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/services/workorch/service/tui -run '^TestInspectNoRunDoesNotPromoteWorkspaceProgressToRunOwnerState$$' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/blocks/llm/pkg/events ./internal/modules/blocks/llm/biz -run '^Test(ProviderSchemaFormat|ExplicitSchema|CompleteProviderDocument|ProviderDocument|ProviderJSONText)' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/application/workorchd/biz -run '^Test(AuthoringMalformedTyped|AuthoringProviderDocumentFaults|AuthoringParserDiagnostic|AuthoringTaskLifecycle|AuthoringSettlementContext|ApplicationStop|RuntimeComponent|DerivationApplication)' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/pkg/workorchruntimecontract ./internal/modules/blocks/workspace/pkg/definitionadmission ./internal/modules/application/workorchd/biz/appservice/activationcore ./internal/modules/application/workorchd/biz/appservice/activationports -run '^Test(RuntimeSourceEvidencePolicy|GoalSpecification|BuiltinSoftwareDevSpecification|CompileChecksVersionedGoalSpecification|CompileRuntimeCoverage|ResolveCoverageEvidencePolicy)' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/blocks/workspace/biz ./internal/modules/blocks/workspace/pkg/models -run '^Test(AuthoringOwnerCompletion|AuthoringKnownProposalCAS|AuthoringKnownFailureCAS|AuthoringUnverifiedDraft|SixPASSReviewsWithUnverified|DeclaredEmptyVerification|AuthoringConfirmationRechecksProfile)' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/blocks/workspace/pkg/definitionadmission -run '^Test(Specification|ValidateAuthoringVerification)' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/blocks/workspace/biz -run '^Test(AuthoringApplicable|AuthoringVerification|AuthoringConfirmation|ResourceBoundConfirmation|DerivationFailureDiagnostic)' -count=1 -timeout=3m
 	python3 scripts/test-verify-authoring-mock.py
 	python3 scripts/test-verify-authoring-mock-server.py
 	python3 scripts/test_verify_mock_readiness.py
 	python3 scripts/test-create-authoring-verification-workspace.py
 	python3 scripts/test-verify-workspace-authoring-live.py
 	python3 scripts/test-verify-llm-streaming-fixture.py
-	go test ./internal/pkg/events -run '^TestOwnerEvent(ContractsAreCompleteAndUnique|CommandsHaveProductionSenderAndReceiver|MessageGraphsAreConcrete)$$' -count=1
-	go test -race ./internal/modules/blocks/workspace/pkg/eventmapping -run '^Test(Authoring|PreparationDiagnostic)' -count=1 -timeout=3m
-	go test -race ./internal/modules/blocks/workspace/pkg/models ./internal/modules/blocks/workspace/pkg/events ./internal/modules/blocks/workspace/biz -run '^TestPreparationDiagnostic' -count=1 -timeout=3m
-	go test -race ./internal/modules/application/workorchd/biz -run '^Test(AuthoringPreparation|AuthoringHTTPPreparationFailureFileRecovery|AuthoringSpecificationPersists)' -count=1 -timeout=3m
-	go test ./internal/tools/stateownercheck -run '^TestPreparationDiagnosticStageIsObservationButTargetStateStaysForbidden$$' -count=1
-	go test ./internal/services/workorch -run '^TestWeb(ConsoleMutatingEndpointsStayWithinProductSurfaceContract|WorkspaceSetupRequiresTemplateAndAllowsDefaultDirectory)$$' -count=1
-	go test ./internal/modules/application/workorchd/biz/appservice -run '^TestCLIDispatcherRejectsRetiredDefinitionWritesWithoutOwner$$' -count=1
-	go test ./internal/modules/application/workorchd/service/server -run '^TestRetired(DefinitionWriteRoutesDoNotCallApplicationPorts|DraftRoutesHaveNoOwnerSideEffects)$$' -count=1 -timeout=3m
-	go test -race ./internal/modules/application/workorchd/service/server -run '^Test(BusinessJSONResponsesDisablePersistentCache|ProjectionSSEWireContractMatchesRemoteDecoder|ProjectionSSEFrameConsumedByProductionRemoteDecoder|MetricsEndpointReportsExecutionAdmissionCounters)$$' -count=1 -timeout=3m
-	go test -race ./internal/modules/blocks/workspace/biz -run '^TestAuthoringConfirmationRecoversEveryFileBackedCutpoint$$' -count=1 -timeout=3m
-	go test -race ./internal/modules/application/workorchd/service/server -run '^Test(DefinitionAuthoringPreparationDiagnostic|DefinitionAuthoringHTTPRoutes|ApplicationPortsValidate)' -count=1 -timeout=3m
-	go test -race ./internal/modules/application/workorchd/biz/appservice/readmodelprojection ./internal/modules/application/workorchd/biz/appservice/runtimecore -run '^Test(Workspace.*(Progress|Milestone|Formal|ContextBundle)|Formal|Runtime.*Formal|MapRun)' -count=1 -timeout=3m
-	go test ./internal/modules/application/workorchd/biz/appservice/readmodelports -run '^TestWorkspaceSnapshotUsesCachedRunSnapshotForProjectionRun$$' -count=1
-	go test ./internal/modules/application/workorchd/biz/appservice -run '^TestRead(WorkspaceProgress|RunTaskProgressWithBackendReturnsFormalResultProgress)' -count=1 -timeout=3m
-	go test ./internal/pkg/workorchclient -run '^TestDefinitionAuthoringClient' -count=1
-	go test ./internal/modules/application/workorchd/biz -run '^Test(SaveDefinitionAuthoringView|AuthoringApplicationRejectsMismatchedOwnerResults)' -count=1
-	go test ./internal/modules/blocks/workspace/pkg/models -run '^Test(DefinitionAuthoringSaveReceipt|ConfirmedAuthoringAdmissionSource)' -count=1
-	go test -race ./internal/modules/blocks/workspace/biz -run '^TestAuthoring(QueryAndAdmissionRejectSourceTampering|QueryRejectsCorruptArchivedSource)$$' -count=1 -timeout=3m
-	go test ./internal/modules/blocks/workspace/biz -run '^Test(Authoring(SaveReceiptRejectsForgedIdentityAndSurvivesABA|SaveReceiptLimitAndConcurrentCAS|ProcessConfirmationRecovery|ProcessDecisionAdmissionRecovery|ProcessDerivationPermitRecovery|FileBudgetExhaustionSurvivesRevisions|FileSpecificationBudgetExhaustionSurvivesRevisions|SpecificationConcurrentReserveUsesOneFreshPermit|RevisionFencesHistoricalSpecificationCompletion|RevisionFencesHistoricalDerivationCompletion)|DefinitionAuthoringApplication(CreationRecoversFileOwner|TemplateDirectoryReplayAfterReopen))$$' -count=1
-	go test ./internal/modules/application/workorchd/biz -run '^TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition$$' -count=1
-	go test -race ./internal/modules/application/workorchd/biz -run '^TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition$$' -count=1 -timeout=3m
-	go test ./internal/modules/blocks/workspace/pkg/events -run '^TestAuthoringDiagnosticResultRejectsScopePhaseAndContentDrift$$' -count=1
-	go test ./internal/modules/blocks/workspace/pkg/models -run '^Test(DefinitionAuthoringDiagnosticPreservesBytesAndBounds|AuthoringSpecificationFailureDiagnosticExactDuplicateAndConflict)$$' -count=1
-	go test -race ./internal/modules/blocks/workspace/biz -run '^TestAuthoringFailureDiagnosticSurvivesFileReopen$$' -count=1 -timeout=3m
-	go test ./internal/pkg/repository/file -run '^Test(SaveMapPrivatePermissionsReplaceExistingPublicFile|WorkspaceDiagnosticUsesPrivateAtomicPublish|SaveMapPermissionsRejectBeforeCommit)$$' -count=1
-	go test ./internal/modules/application/workorchd/biz -run '^TestAuthoringHTTP(FileBackedCompilationConfirmationAndRecovery|RealBackgroundRoutineFileRecovery|ConcurrentCompileUsesOnePhysicalDerivation|CompileTasksCompeteForFreshPermit)$$' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/pkg/events -run '^TestOwnerEvent(ContractsAreCompleteAndUnique|CommandsHaveProductionSenderAndReceiver|MessageGraphsAreConcrete)$$' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/blocks/workspace/pkg/eventmapping -run '^Test(Authoring|PreparationDiagnostic)' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/blocks/workspace/pkg/models ./internal/modules/blocks/workspace/pkg/events ./internal/modules/blocks/workspace/biz -run '^TestPreparationDiagnostic' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/application/workorchd/biz -run '^Test(AuthoringPreparation|AuthoringHTTPPreparationFailureFileRecovery|AuthoringSpecificationPersists)' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/tools/stateownercheck -run '^TestPreparationDiagnosticStageIsObservationButTargetStateStaysForbidden$$' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/services/workorch -run '^TestWeb(ConsoleMutatingEndpointsStayWithinProductSurfaceContract|WorkspaceSetupRequiresTemplateAndAllowsDefaultDirectory)$$' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/application/workorchd/biz/appservice -run '^TestCLIDispatcherRejectsRetiredDefinitionWritesWithoutOwner$$' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/application/workorchd/service/server -run '^TestRetired(DefinitionWriteRoutesDoNotCallApplicationPorts|DraftRoutesHaveNoOwnerSideEffects)$$' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/application/workorchd/service/server -run '^Test(BusinessJSONResponsesDisablePersistentCache|ProjectionSSEWireContractMatchesRemoteDecoder|ProjectionSSEFrameConsumedByProductionRemoteDecoder|MetricsEndpointReportsExecutionAdmissionCounters)$$' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/blocks/workspace/biz -run '^TestAuthoringConfirmationRecoversEveryFileBackedCutpoint$$' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/application/workorchd/service/server -run '^Test(DefinitionAuthoringPreparationDiagnostic|DefinitionAuthoringHTTPRoutes|ApplicationPortsValidate)' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/application/workorchd/biz/appservice/readmodelprojection ./internal/modules/application/workorchd/biz/appservice/runtimecore -run '^Test(Workspace.*(Progress|Milestone|Formal|ContextBundle)|Formal|Runtime.*Formal|MapRun)' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/application/workorchd/biz/appservice/readmodelports -run '^TestWorkspaceSnapshotUsesCachedRunSnapshotForProjectionRun$$' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/application/workorchd/biz/appservice -run '^TestRead(WorkspaceProgress|RunTaskProgressWithBackendReturnsFormalResultProgress)' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/pkg/workorchclient -run '^TestDefinitionAuthoringClient' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/application/workorchd/biz -run '^Test(SaveDefinitionAuthoringView|AuthoringApplicationRejectsMismatchedOwnerResults)' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/blocks/workspace/pkg/models -run '^Test(DefinitionAuthoringSaveReceipt|ConfirmedAuthoringAdmissionSource)' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/blocks/workspace/biz -run '^TestAuthoring(QueryAndAdmissionRejectSourceTampering|QueryRejectsCorruptArchivedSource)$$' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/blocks/workspace/biz -run '^Test(Authoring(SaveReceiptRejectsForgedIdentityAndSurvivesABA|SaveReceiptLimitAndConcurrentCAS|ProcessConfirmationRecovery|ProcessDecisionAdmissionRecovery|ProcessDerivationPermitRecovery|FileBudgetExhaustionSurvivesRevisions|FileSpecificationBudgetExhaustionSurvivesRevisions|SpecificationConcurrentReserveUsesOneFreshPermit|RevisionFencesHistoricalSpecificationCompletion|RevisionFencesHistoricalDerivationCompletion)|DefinitionAuthoringApplication(CreationRecoversFileOwner|TemplateDirectoryReplayAfterReopen))$$' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/application/workorchd/biz -run '^TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition$$' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/application/workorchd/biz -run '^TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition$$' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/blocks/workspace/pkg/events -run '^TestAuthoringDiagnosticResultRejectsScopePhaseAndContentDrift$$' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/blocks/workspace/pkg/models -run '^Test(DefinitionAuthoringDiagnosticPreservesBytesAndBounds|AuthoringSpecificationFailureDiagnosticExactDuplicateAndConflict)$$' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package -race ./internal/modules/blocks/workspace/biz -run '^TestAuthoringFailureDiagnosticSurvivesFileReopen$$' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/pkg/repository/file -run '^Test(SaveMapPrivatePermissionsReplaceExistingPublicFile|WorkspaceDiagnosticUsesPrivateAtomicPublish|SaveMapPermissionsRejectBeforeCommit)$$' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/application/workorchd/biz -run '^TestAuthoringHTTP(FileBackedCompilationConfirmationAndRecovery|RealBackgroundRoutineFileRecovery|ConcurrentCompileUsesOnePhysicalDerivation|CompileTasksCompeteForFreshPermit)$$' -count=1
 
 verify-workspace-template-soul:
 	./scripts/verify-workspace-template-soul.sh
@@ -376,8 +383,11 @@ verify-web-console-projection-visual: console-build
 verify-e2e-template-contract:
 	./scripts/verify-e2e-template-contract.sh
 
+# readiness 必须包含公开完整正例；scope/private driver 通过不代表可执行发布支持。
 verify-runtime-implementation-work-readiness:
-	go test ./internal/pkg/workorchruntimecontract ./internal/modules/kernel/orchestrator/biz -run 'Test(RuntimeImplementationWork|ImplementationWorkScope)' -count=1
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/pkg/workorchruntimecontract ./internal/modules/kernel/orchestrator/biz/runtime ./internal/modules/kernel/orchestrator/biz -run 'Test(RuntimeImplementationWork|ImplementationWork|RuntimeSemantic.*Implementation|RuntimeSemantic.*Purpose)' -count=1 -timeout=$(GOTEST_TIMEOUT)
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/pkg/workorchruntimecontract -run '^Test(CoverageEvidenceBindingCannotConjoinIndependentValidationRecipes|ValidationObservationCannotBorrowPassedChecksAcrossRecipes)$$' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/integration -run '^TestImplementationWork(PublicAuthoringFullFlow|FullflowUnsupportedCombinationStaysClosed|CommitEvidence.*)$$' -count=1 -timeout=$(GOTEST_TIMEOUT)
 
 verify-ci-mvp: verify-runtime-implementation-work-readiness verify-service verify-workspace-template-soul verify-llm verify-mcp-stdio
 
@@ -415,9 +425,21 @@ DEPLOYED_CONVERGENCE_REPORT ?= .ci-artifacts/deployed-convergence-aggregate.json
 DEPLOYED_CONVERGENCE_PROFILE ?= full
 DEPLOYED_CONVERGENCE_PROFILE_ID ?=
 
-verify-deployed-convergence-manifest-tests:
+verify-deployed-convergence-manifest-tests: verify-build-identity-tests verify-lsp-bridge-prd-evidence-tests
 	python3 ./scripts/test_verify_deployed_convergence_manifest.py
 	python3 ./scripts/test_release_convergence_gate.py
+
+.PHONY: verify-build-identity-tests verify-lsp-bridge-prd-evidence-tests verify-lsp-bridge-prd-evidence
+verify-build-identity-tests:
+	python3 ./scripts/test_build_identity.py
+
+# synthetic 校准只验证拒绝/保真合同，不构建 live 证据或授予验收。
+verify-lsp-bridge-prd-evidence-tests:
+	python3 ./scripts/test_verify_lsp_bridge_prd_evidence.py
+	python3 ./scripts/test_lsp_bridge_blackbox_producer.py
+
+verify-lsp-bridge-prd-evidence:
+	python3 ./scripts/verify_lsp_bridge_prd_evidence.py "$(LSP_BRIDGE_PRD_EVIDENCE)" --mode live --expected-identities "$(LSP_BRIDGE_EXPECTED_IDENTITIES)"
 
 verify-deployed-convergence-ci-safe:
 	python3 ./scripts/verify_deployed_convergence_manifest.py \

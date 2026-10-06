@@ -157,15 +157,7 @@ func (c *candidateDispatchComponent) recordOperationGovernanceRequired(ctx conte
 	if aggregate.ActiveDispatch == nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: operation governance requires active dispatch", common.ErrConflict)
 	}
-	execution, found := operationExecutionRecord(aggregate.ActiveDispatch.OperationExecutions, operationID)
-	if !found {
-		return RuntimeAggregate{}, fmt.Errorf("%w: operation governance requires sealed execution", common.ErrConflict)
-	}
-	persisted, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, execution.ExecutionKey, execution.Fence)
-	if !found {
-		return RuntimeAggregate{}, fmt.Errorf("%w: operation governance requires persisted governance receipt", common.ErrConflict)
-	}
-	finding, findingErr := governancecheck.EvaluateOperationSuspension(aggregate.ActiveDispatch.ID, execution, persisted, result.Receipt, *result.Governance)
+	finding, findingErr := runtimeOperationSuspensionFinding(aggregate, *aggregate.ActiveDispatch, operationID, result.Receipt, *result.Governance)
 	if findingErr != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: operation governance receipt mismatch: %v", common.ErrConflict, findingErr)
 	}
@@ -206,6 +198,19 @@ func (c *candidateDispatchComponent) recordOperationGovernanceRequired(ctx conte
 		return RuntimeAggregate{}, err
 	}
 	return aggregate, nil
+}
+
+// 两条私有事务共享同一 exact persisted receipt / execution 校验，仍由调用方在原 CAS 提交写集。
+func runtimeOperationSuspensionFinding(aggregate RuntimeAggregate, dispatch SealedDispatch, operationID string, response runtimecontract.RuntimeOperationReceipt, requirement runtimecontract.RuntimeGovernanceRequirement) (governancecheck.OperationSuspensionFinding, error) {
+	execution, found := operationExecutionRecord(dispatch.OperationExecutions, operationID)
+	if !found {
+		return governancecheck.OperationSuspensionFinding{}, fmt.Errorf("%w: operation governance requires sealed execution", common.ErrConflict)
+	}
+	persisted, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(aggregate.OperationReceipts, execution.ExecutionKey, execution.Fence)
+	if !found {
+		return governancecheck.OperationSuspensionFinding{}, fmt.Errorf("%w: operation governance requires persisted governance receipt", common.ErrConflict)
+	}
+	return governancecheck.EvaluateOperationSuspension(dispatch.ID, execution, persisted, response, requirement)
 }
 
 func operationExecutionState(values []runtimecontract.RuntimeOperationExecutionRecord, operationID string) (runtimecontract.RuntimeOperationExecutionState, bool) {
@@ -322,7 +327,7 @@ func (c *candidateDispatchComponent) claimOperationExecution(ctx context.Context
 	if aggregate.ActiveDispatch == nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: no active dispatch for claim", common.ErrConflict)
 	}
-	if err := validateCurrentCWIBindingFenceForEvidenceCommit(aggregate.Facts); err != nil {
+	if err := validateRuntimeExecutionPurposeFence(aggregate); err != nil {
 		return RuntimeAggregate{}, fmt.Errorf("%w: operation claim binding fence: %v", common.ErrConflict, err)
 	}
 	expectedRevision := aggregate.StateRevision
@@ -437,6 +442,36 @@ func (c *candidateDispatchComponent) markOperationExecutionOutcomeUnknown(ctx co
 	}
 	if !found {
 		return RuntimeAggregate{}, fmt.Errorf("%w: operation %q execution ledger is missing", common.ErrConflict, operationID)
+	}
+	if aggregate.ActiveDispatch.ImplementationWorkCommitment != nil {
+		dispatch := *aggregate.ActiveDispatch
+		matched := false
+		for i := range aggregate.ImplementationWork.Rounds {
+			round := &aggregate.ImplementationWork.Rounds[i]
+			if round.DispatchID != dispatch.ID {
+				continue
+			}
+			execution, _ := operationExecutionRecord(dispatch.OperationExecutions, operationID)
+			round.OutcomeUnknownExecutionKey, round.OutcomeUnknownFence = execution.ExecutionKey, execution.Fence
+			round.Hash = runtimecontract.StableRuntimeImplementationWorkRoundHash(*round)
+			matched = true
+		}
+		if !matched {
+			return RuntimeAggregate{}, fmt.Errorf("implementation unknown claim has no original round")
+		}
+		dispatch.State = DispatchStateInvalidated
+		aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
+		aggregate.ActiveDispatch = nil
+		retireImplementationWorkRecoveryAuthorizations(&aggregate, dispatch.ID)
+		failure := runtimecontract.FailureFact{Class: runtimecontract.FailureClassOperationOutcomeUnknown, Code: "implementation_work_outcome_unknown", Signature: "implementation-work-unknown/" + dispatch.ID + "/" + operationID, Message: "started owner operation has no trustworthy terminal receipt; physical consumption remains unknown"}
+		if err := replaceRuntimeFailureAuthority(&aggregate.Facts, failure, runtimeFailureAuthorityRetire, nil); err != nil {
+			return RuntimeAggregate{}, err
+		}
+		var err error
+		aggregate.Facts, aggregate.Decision, err = reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, nil)
+		if err != nil {
+			return RuntimeAggregate{}, err
+		}
 	}
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {

@@ -83,12 +83,21 @@ func seedResourceBoundAuthoringConfirmation(t *testing.T, owners *fileDefinition
 	ctx := context.Background()
 	input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: id, Revision: 1, GoalText: "交付目标", TemplateID: "resource-template", AcceptanceRequirements: []string{"用户验收"}, ResourceRefs: []string{"requirements.txt"}}
 	template := workspace.WorkspaceTemplate{ID: input.TemplateID, Name: "模板", DoDItems: []string{"模板验收"}}
-	if len(declared) > 0 && declared[0] {
-		hints, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"generic": map[string]any{"evidenceRequirements": []any{map[string]any{"id": "*", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"}}}}}})
+	eligible := len(declared) > 0 && declared[0]
+	hints, hintErr := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"generic": map[string]any{"evidenceRequirements": []any{map[string]any{"id": "*", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"}}}}}})
+	if hintErr != nil {
+		t.Fatal(hintErr)
+	}
+	template.ContextHints = hints
+	if !eligible {
+		hints := template.ContextHints.Map()
+		generic := hints["profileContracts"].(map[string]any)["generic"].(map[string]any)
+		generic["deliverableExpectations"] = []any{map[string]any{"id": "required-delivery", "required": true}}
+		var err error
+		template.ContextHints, err = workorcheventpayload.FromMap(hints)
 		if err != nil {
 			t.Fatal(err)
 		}
-		template.ContextHints = hints
 	}
 	if err := owners.repositories.WorkspaceTemplates.Create(ctx, &template); err != nil {
 		t.Fatal(err)
@@ -108,14 +117,12 @@ func seedResourceBoundAuthoringConfirmation(t *testing.T, owners *fileDefinition
 		t.Fatal(err)
 	}
 	proposal := authoringOwnerProposal(t, input, template, derived)
-	if len(declared) > 0 && declared[0] {
-		for index := range proposal.Verifications {
-			verification := &proposal.Verifications[index]
-			verification.Status = workspace.GoalVerificationDeclared
-			verification.ProfileID = "generic"
-			verification.EvidenceRequirementID = "*"
-			verification.Scope = "dodItem"
-		}
+	for index := range proposal.Verifications {
+		verification := &proposal.Verifications[index]
+		verification.Status = workspace.GoalVerificationDeclared
+		verification.ProfileID = "generic"
+		verification.EvidenceRequirementID = "*"
+		verification.Scope = "dodItem"
 	}
 	proposal.Resources, err = workspace.AuthoringSpecificationResources(input, resources)
 	if err != nil {

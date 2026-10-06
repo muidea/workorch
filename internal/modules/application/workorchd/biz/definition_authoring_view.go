@@ -7,9 +7,11 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/governanceports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/specifications"
 	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
@@ -37,6 +39,12 @@ func (b *Biz) ReadDefinitionAuthoringView(ctx context.Context, id common.Workspa
 		}
 	}
 	return result, nil
+}
+
+// 展示只复用纯声明检查，不生成确认身份、binding 或 credit；owner 仍独立校验。
+func authoringViewVerificationApplicable(derivation workspace.DefinitionDerivationRequest, specification workspace.GoalSpecification, items []workspace.DefinitionCandidateItem) bool {
+	bindings, err := definitionconfiguration.Compile(&workspace.Workspace{}, &derivation.Template)
+	return err == nil && definitionadmission.ValidateAuthoringVerificationApplicability(specification, items, bindings.ProfileContracts) == nil
 }
 
 func authoringDiagnosticMetadata(d *workspace.DefinitionAuthoringDiagnostic) *workorchmanagementcontract.DefinitionAuthoringDiagnosticMetadata {
@@ -169,7 +177,7 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 				}
 				if reviewed, complete, reviewErr := compiledAuthoringSpecification(*record, *derivation); reviewErr == nil && complete {
 					proposal.SpecificationHash = reviewed.AdmissionHash()
-					if _, _, confirmErr := record.ConfirmableSpecification(derivation.PermitID, proposal.ProposalHash); confirmErr == nil {
+					if _, _, confirmErr := record.ConfirmableSpecification(derivation.PermitID, proposal.ProposalHash); confirmErr == nil && authoringViewVerificationApplicable(*derivation, reviewed, items) {
 						result.State = "ready_to_confirm"
 					} else {
 						result.State = "review_blocked"

@@ -11,6 +11,18 @@ import (
 // share the controller kernel and cannot be called as mutation entries.
 func (c *RuntimeController) applyAuthorityInternalEvent(ctx context.Context, event RuntimeInternalEvent) (RuntimeInternalEventResult, error) {
 	switch event.Kind {
+	case RuntimeInternalEventImplementationWorkScopeRequired:
+		if event.Authority.ImplementationWorkScopeRequest == nil || event.Authority.ImplementationWorkScopeObservation != nil {
+			return RuntimeInternalEventResult{}, common.ErrInvalidArgument
+		}
+		aggregate, err := c.authority.reserveImplementationWorkScope(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Authority.ImplementationWorkScopeRequest)
+		return RuntimeInternalEventResult{Aggregate: aggregate}, err
+	case RuntimeInternalEventImplementationWorkScopeObserved:
+		if event.Authority.ImplementationWorkScopeObservation == nil || event.Authority.ImplementationWorkScopeRequest != nil {
+			return RuntimeInternalEventResult{}, common.ErrInvalidArgument
+		}
+		aggregate, err := c.authority.observeImplementationWorkScope(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Authority.ImplementationWorkScopeObservation)
+		return RuntimeInternalEventResult{Aggregate: aggregate}, err
 	case RuntimeInternalEventSemanticContractRequired,
 		RuntimeInternalEventSemanticCatalogInvalidated,
 		RuntimeInternalEventSemanticFeasibilityRequired,

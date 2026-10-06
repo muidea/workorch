@@ -138,18 +138,17 @@ func selectDisplayRun(snapshot readmodelcore.WorkspaceSnapshotState) *appmodelco
 	if displayRunID == "" {
 		return nil
 	}
-	if snapshot.Run != nil && strings.TrimSpace(snapshot.Run.ID) == displayRunID {
+	if snapshot.Run != nil && strings.TrimSpace(snapshot.Run.ID) == displayRunID &&
+		strings.TrimSpace(snapshot.Run.WorkspaceID) == strings.TrimSpace(snapshot.Workspace.ID) {
 		run := *snapshot.Run
 		return &run
 	}
 	for idx := range snapshot.Runs {
-		if strings.TrimSpace(snapshot.Runs[idx].ID) == displayRunID {
+		if strings.TrimSpace(snapshot.Runs[idx].ID) == displayRunID &&
+			strings.TrimSpace(snapshot.Runs[idx].WorkspaceID) == strings.TrimSpace(snapshot.Workspace.ID) {
 			run := snapshot.Runs[idx]
 			return &run
 		}
 	}
-	return &appmodelcore.Run{
-		ID:          displayRunID,
-		WorkspaceID: strings.TrimSpace(snapshot.Workspace.ID),
-	}
+	return nil
 }

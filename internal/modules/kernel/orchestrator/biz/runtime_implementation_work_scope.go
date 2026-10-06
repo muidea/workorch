@@ -6,8 +6,62 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+// driveRuntimeImplementationWorkScope re-drives only a durable SM-2 scope
+// reservation. It never selects a CWI, creates a round or authorizes effects.
+func (m *Biz) driveRuntimeImplementationWorkScope(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, bool, error) {
+	round, err := runtime.CurrentRuntimeImplementationWorkReservation(aggregate)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, false, err
+	}
+	preview := aggregate.ImplementationWork.ScopePreview
+	if round == nil && preview == nil {
+		request, requestErr := runtime.NextRuntimeImplementationWorkScopeRequest(aggregate)
+		if requestErr != nil || request == nil {
+			return aggregate, false, requestErr
+		}
+		// SM-4 只递送 SM-2 的只读 scope 需求；先 CAS，再 owner query。
+		updated, reserveErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+			Kind:      runtime.RuntimeInternalEventImplementationWorkScopeRequired,
+			Scope:     runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+			Authority: &runtime.RuntimeInternalAuthorityPayload{ImplementationWorkScopeRequest: request},
+		})
+		return updated.Aggregate, true, reserveErr
+	}
+	var request runtimecontract.RuntimeImplementationWorkScopeRequest
+	if preview != nil {
+		if preview.Observation != nil {
+			return aggregate, false, nil
+		}
+		request = preview.Request
+	} else {
+		if round.ScopeObservation != nil {
+			return aggregate, false, nil
+		}
+		request = round.ScopeRequest
+	}
+	sources, err := runtime.RuntimeImplementationWorkScopeForCurrentSources(aggregate, request.CoverageWorkItemID)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, true, err
+	}
+	workspace, err := (workspaceSnapshotReader{hub: m.EventHub()}).Read(ctx, aggregate.Facts.WorkspaceID)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, true, err
+	}
+	observation, err := acquireRuntimeImplementationWorkScope(ctx, m.EventHub(), workspace.DeliverableDirectory, request, sources)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, true, err
+	}
+	updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind:      runtime.RuntimeInternalEventImplementationWorkScopeObserved,
+		Scope:     runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+		Authority: &runtime.RuntimeInternalAuthorityPayload{ImplementationWorkScopeObservation: &observation},
+	})
+	return updated.Aggregate, true, err
+}
 
 // acquireRuntimeImplementationWorkScope is a read-only owner adapter. It does
 // not commit terminal-proof TargetSelection, select work, or bypass activation.

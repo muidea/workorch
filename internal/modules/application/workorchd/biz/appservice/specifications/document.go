@@ -21,13 +21,16 @@ func validateDocumentShape(payload []byte) error {
 	if !utf8.Valid(payload) {
 		return fmt.Errorf("specification document requires valid UTF-8")
 	}
+	if err := validateStringEscapes(payload); err != nil {
+		return err
+	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
 	first, err := decoder.Token()
 	if err != nil || first != json.Delim('{') {
 		return fmt.Errorf("specification document requires one JSON object")
 	}
-	if err := readObject(decoder, 1); err != nil {
+	if err := readObject(decoder, 1, "$"); err != nil {
 		return err
 	}
 	if _, err := decoder.Token(); err != io.EOF {
@@ -36,7 +39,7 @@ func validateDocumentShape(payload []byte) error {
 	return nil
 }
 
-func readObject(decoder *json.Decoder, depth int) error {
+func readObject(decoder *json.Decoder, depth int, path string) error {
 	seen := make(map[string]struct{})
 	for decoder.More() {
 		token, err := decoder.Token()
@@ -48,12 +51,12 @@ func readObject(decoder *json.Decoder, depth int) error {
 			return fmt.Errorf("specification document object key is invalid")
 		}
 		// encoding/json 对结构体字段名不区分大小写，必须拒绝这类覆盖歧义。
-		key = strings.ToLower(key)
-		if _, exists := seen[key]; exists {
-			return fmt.Errorf("specification document contains duplicate field")
+		canonical := strings.ToLower(key)
+		if _, exists := seen[canonical]; exists {
+			return fmt.Errorf("%s.%s: duplicate_field", path, key)
 		}
-		seen[key] = struct{}{}
-		if err := readValue(decoder, depth); err != nil {
+		seen[canonical] = struct{}{}
+		if err := readValue(decoder, depth, path+"."+key); err != nil {
 			return err
 		}
 	}
@@ -64,7 +67,7 @@ func readObject(decoder *json.Decoder, depth int) error {
 	return nil
 }
 
-func readValue(decoder *json.Decoder, depth int) error {
+func readValue(decoder *json.Decoder, depth int, path string) error {
 	token, err := decoder.Token()
 	if err != nil {
 		return err
@@ -78,10 +81,10 @@ func readValue(decoder *json.Decoder, depth int) error {
 	}
 	switch delim {
 	case '{':
-		return readObject(decoder, depth+1)
+		return readObject(decoder, depth+1, path)
 	case '[':
-		for decoder.More() {
-			if err := readValue(decoder, depth+1); err != nil {
+		for index := 0; decoder.More(); index++ {
+			if err := readValue(decoder, depth+1, fmt.Sprintf("%s[%d]", path, index)); err != nil {
 				return err
 			}
 		}

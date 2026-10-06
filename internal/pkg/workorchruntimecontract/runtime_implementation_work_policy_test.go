@@ -196,8 +196,11 @@ func TestRuntimeImplementationWorkPolicyCannotEnableAnIncompleteProtocol(t *test
 		t.Fatalf("invalid declaration was not diagnosed: %#v", invalidReport)
 	}
 	execution := RuntimeExecutionContract{StateChangePolicy: RuntimeStateChangeAllowedButNotRequired, ProfileContracts: profiles}
-	if err := execution.Validate(); !errors.Is(err, ErrRuntimeImplementationWorkUnavailable) {
-		t.Fatalf("execution bypassed readiness: %v", err)
+	if err := execution.Validate(); err != nil {
+		t.Fatalf("pure execution source contract rejected valid declaration: %v", err)
+	}
+	if err := execution.ValidateExecutableAdmission(); !errors.Is(err, ErrRuntimeImplementationWorkUnavailable) {
+		t.Fatalf("executable ingress bypassed readiness: %v", err)
 	}
 	profiles[0].EvidenceRequirements[0].ImplementationWorkPolicy = nil
 	if report := ExplainRuntimeImplementationWorkAvailability(profiles); !report.Available || len(report.Blockers) != 0 {

@@ -167,7 +167,7 @@ func TestAuthoringProcessDecisionAdmissionRecovery(t *testing.T) {
 	ctx := context.Background()
 	if root := os.Getenv(rootKey); root != "" {
 		owners := openFileDefinitionAdmissionOwners(t, root)
-		first := seedReviewedAuthoringConfirmationWithReview(t, owners, "ws-process-decision", true, false)
+		first := seedReviewedAuthoringConfirmationWithAdmissionBlocker(t, owners, "ws-process-decision")
 		if err := owners.workspace.Start(); err != nil {
 			t.Fatal(err)
 		}

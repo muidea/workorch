@@ -10,7 +10,7 @@ import (
 
 // ParseDerivedAcceptance 不接受模型修改原始 Goal、用户条件或模板条件。
 func ParseDerivedAcceptance(payload []byte, input workspace.DefinitionAuthoringInput, template *workspace.WorkspaceTemplate) (workspace.DefinitionDerivedAcceptance, error) {
-	if err := validateDocumentShape(payload); err != nil {
+	if err := validateCurrentDocument(payload, derivationShape); err != nil {
 		return workspace.DefinitionDerivedAcceptance{}, err
 	}
 	var proposal workspace.DefinitionDerivedAcceptance

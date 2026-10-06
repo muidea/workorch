@@ -42,9 +42,6 @@ func projectWorkspaceRuntimeViewWithActivity(snapshot readmodelcore.WorkspaceSna
 	if run := selectDisplayRun(snapshot); run != nil {
 		runState = strings.TrimSpace(run.State)
 	}
-	if runState == "" {
-		runState = strings.TrimSpace(progress.State)
-	}
 
 	return projectioncontract.WorkspaceRuntimeView{
 		WorkspaceID:           strings.TrimSpace(snapshot.Workspace.ID),

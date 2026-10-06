@@ -15,17 +15,17 @@ type VerifiedDiagnostic = AuthoringDiagnostic & { bytes?: Uint8Array; text?: str
 type VerifiedProviderContent = ProviderObservedContent & { bytes: Uint8Array; text?: string };
 
 function decodeAndVerify(diagnostic: AuthoringDiagnostic): VerifiedDiagnostic {
-  if (!diagnostic.payloadSaved) throw new Error(diagnostic.notSavedReason || '原始响应未保存，无法加载。');
+  if (!diagnostic.payloadSaved) throw new Error(diagnostic.notSavedReason || '解析器输入 payload未保存，无法加载。');
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(diagnostic.payloadBase64)) {
-    throw new Error('Base64 格式无效，原始响应完整性校验失败。');
+    throw new Error('Base64 格式无效，解析器输入 payload完整性校验失败。');
   }
   let binary: string;
   try { binary = atob(diagnostic.payloadBase64); }
-  catch { throw new Error('Base64 解码失败，原始响应完整性校验失败。'); }
+  catch { throw new Error('Base64 解码失败，解析器输入 payload完整性校验失败。'); }
   const bytes = new Uint8Array(new ArrayBuffer(binary.length));
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   if (bytes.byteLength !== diagnostic.payloadBytes) {
-    throw new Error(`原始响应字节数不匹配（收到 ${bytes.byteLength}，记录 ${diagnostic.payloadBytes}），完整性校验失败。`);
+    throw new Error(`解析器输入 payload字节数不匹配（收到 ${bytes.byteLength}，记录 ${diagnostic.payloadBytes}），完整性校验失败。`);
   }
   return { ...diagnostic, bytes } as VerifiedDiagnostic;
 }
@@ -123,14 +123,15 @@ function matchesMetadata(actual: AuthoringDiagnosticMetadata, expected: Authorin
 }
 
 async function verifyPayloadHash(record: VerifiedDiagnostic): Promise<void> {
-  if (!record.bytes) throw new Error('原始响应字节不可用，无法校验。');
-  await verifyHash(record.bytes, record.payloadSHA256, '原始响应');
+  if (!record.bytes) throw new Error('解析器输入 payload字节不可用，无法校验。');
+  await verifyHash(record.bytes, record.payloadSHA256, '解析器输入 payload');
 }
 
 export function AuthoringDiagnosticDetails({ workspaceId, permitId, phase, failureCode, diagnostic }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [record, setRecord] = useState<VerifiedDiagnostic>();
+  const [recordScope, setRecordScope] = useState('');
   const [providerDocument, setProviderDocument] = useState<VerifiedProviderContent>();
   const [providerWire, setProviderWire] = useState<VerifiedProviderContent>();
   const [providerCause, setProviderCause] = useState<VerifiedProviderContent>();
@@ -139,12 +140,22 @@ export function AuthoringDiagnosticDetails({ workspaceId, permitId, phase, failu
   const [displayError, setDisplayError] = useState('');
   const generation = useRef(0);
   const displayCheck = useRef(0);
+  const observationIdentity = (content?: ProviderObservedContentMetadata) => content
+    ? [content.observed, content.complete, content.saved, content.observedBytes, content.sha256, content.reason]
+    : null;
+  const scopeKey = JSON.stringify([workspaceId, permitId, phase, failureCode,
+    diagnostic?.parseError, diagnostic?.parseErrorSHA256, diagnostic?.parseErrorBytes, diagnostic?.parseErrorSaved,
+    diagnostic?.payloadSHA256, diagnostic?.payloadBytes, diagnostic?.payloadSaved, diagnostic?.notSavedReason, diagnostic?.providerCode,
+    observationIdentity(diagnostic?.providerDocument), observationIdentity(diagnostic?.providerWire), observationIdentity(diagnostic?.providerCause)]);
+  const currentScope = useRef(scopeKey);
+  currentScope.current = scopeKey;
 
   useEffect(() => {
     generation.current++;
     setExpanded(false);
     setLoading(false);
     setRecord(undefined);
+    setRecordScope('');
     setProviderDocument(undefined);
     setProviderWire(undefined);
     setProviderCause(undefined);
@@ -154,7 +165,7 @@ export function AuthoringDiagnosticDetails({ workspaceId, permitId, phase, failu
     const check = ++displayCheck.current;
     if (diagnostic?.parseErrorSaved) {
       void verifyDiagnosticIntegrity(diagnostic).catch(error => {
-        if (displayCheck.current === check) setDisplayError(error instanceof Error ? error.message : String(error));
+        if (displayCheck.current === check && currentScope.current === scopeKey) setDisplayError(error instanceof Error ? error.message : String(error));
       });
     }
     return () => { generation.current++; displayCheck.current++; };
@@ -167,8 +178,8 @@ export function AuthoringDiagnosticDetails({ workspaceId, permitId, phase, failu
     setLoadError('');
     try {
       const result = await workorchApi.readAuthoringDiagnostic(workspaceId, permitId);
-      if (generation.current !== token || result.workspaceId !== workspaceId || result.permitId !== permitId) {
-        if (generation.current === token) setLoadError('诊断响应的 workspace 或 permit 身份不匹配，已拒绝显示。');
+      if (generation.current !== token || currentScope.current !== scopeKey || result.workspaceId !== workspaceId || result.permitId !== permitId) {
+        if (generation.current === token && currentScope.current === scopeKey) setLoadError('诊断响应的 workspace 或 permit 身份不匹配，已拒绝显示。');
         return;
       }
       await verifyDiagnosticIntegrity(result);
@@ -192,23 +203,30 @@ export function AuthoringDiagnosticDetails({ workspaceId, permitId, phase, failu
         try { decoded = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(verified.bytes); }
         catch { /* 保留已校验原字节供下载，不以替换字符冒充原文。 */ }
       }
-      if (generation.current !== token) return;
+      if (!result.providerCode && verifiedDocument && (!verifiedDocument.complete || !verified.bytes
+        || verified.bytes.length !== verifiedDocument.bytes.length
+        || !verified.bytes.every((byte, index) => byte === verifiedDocument.bytes[index]))) {
+        throw new Error('解析器输入 payload 与 Provider 文档的原始 bytes 不一致，已拒绝显示。');
+      }
+      if (generation.current !== token || currentScope.current !== scopeKey) return;
       setRecord(verified);
+      setRecordScope(scopeKey);
       setProviderDocument(verifiedDocument);
       setProviderWire(verifiedWire);
       setProviderCause(verifiedCause);
       setRawText(decoded);
       setExpanded(true);
     } catch (error) {
-      if (generation.current === token) setLoadError(error instanceof Error ? error.message : String(error));
+      if (generation.current === token && currentScope.current === scopeKey) setLoadError(error instanceof Error ? error.message : String(error));
     } finally {
-      if (generation.current === token) setLoading(false);
+      if (generation.current === token && currentScope.current === scopeKey) setLoading(false);
     }
   };
 
+  const showRecord = expanded && recordScope === scopeKey;
   const download = () => {
-    if (!record?.bytes) return;
-    downloadBytes(record.bytes, `authoring-${permitId}-response.bin`);
+    if (!showRecord || !record?.bytes) return;
+    downloadBytes(record.bytes, `authoring-${permitId}-parser-payload.bin`);
   };
 
   const canLoad = Boolean(diagnostic?.payloadSaved
@@ -216,7 +234,7 @@ export function AuthoringDiagnosticDetails({ workspaceId, permitId, phase, failu
     || (diagnostic?.providerWire?.observed && diagnostic.providerWire.saved)
     || (diagnostic?.providerCause?.observed && diagnostic.providerCause.saved));
   const downloadProvider = (content: VerifiedProviderContent | undefined, name: string) => {
-    if (!content) return;
+    if (!showRecord || !content) return;
     downloadBytes(content.bytes, `authoring-${permitId}-${name}.bin`);
   };
 
@@ -228,31 +246,31 @@ export function AuthoringDiagnosticDetails({ workspaceId, permitId, phase, failu
         ? <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: 0 }}>{diagnostic.parseError ?? ''}</pre>
         : <Typography.Text>原始解析错误未保存（{diagnostic.parseErrorBytes} 字节）；{diagnostic.notSavedReason || '原因未提供'}。</Typography.Text>}
       <Typography.Text type="secondary">
-        解析错误 SHA-256 {diagnostic.parseErrorSHA256} · {diagnostic.parseErrorBytes} 字节；历史 payload SHA-256 {diagnostic.payloadSHA256} · {diagnostic.payloadBytes} 字节。
-        {diagnostic.payloadSaved ? '历史 payload 已保存。' : `历史 payload 未保存：${diagnostic.notSavedReason || '原因未提供'}。`}
+        解析错误 SHA-256 {diagnostic.parseErrorSHA256} · {diagnostic.parseErrorBytes} 字节；解析器输入 payload SHA-256 {diagnostic.payloadSHA256} · {diagnostic.payloadBytes} 字节。
+        {diagnostic.payloadSaved ? '解析器输入 payload 已保存。' : `解析器输入 payload 未保存：${diagnostic.notSavedReason || '原因未提供'}。`}
       </Typography.Text>
-      {(diagnostic.providerCode || diagnostic.providerDocument || diagnostic.providerWire || diagnostic.providerCause) && (!diagnostic.payloadSaved || diagnostic.payloadBytes === 0) && <Typography.Text type="secondary">历史 payload 未保存或为空；不以其表示 provider 输出。请按 provider 观测记录核对实际内容。</Typography.Text>}
+      {(['providerDocument', 'providerWire', 'providerCause'] as const).filter(key => !diagnostic[key]).map(key => <Typography.Text type="secondary" key={key}>{key} 未提供观测 metadata；不能据此判断是否观察、完整或保存。解析器输入 payload 不替代 Provider 观测。</Typography.Text>)}
       {diagnostic.providerCode && <Typography.Text type="secondary">Provider code {diagnostic.providerCode}</Typography.Text>}
       {diagnostic.providerDocument && <Typography.Text type="secondary">{contentStatus(diagnostic.providerDocument, 'Provider 文档')}</Typography.Text>}
       {diagnostic.providerWire && <Typography.Text type="secondary">{contentStatus(diagnostic.providerWire, 'Provider wire')}</Typography.Text>}
       {diagnostic.providerCause && <Typography.Text type="secondary">安全失败分类与传输错误原文分离。{contentStatus(diagnostic.providerCause, '传输错误原文')}</Typography.Text>}
-      {permitId && canLoad && <Button size="small" loading={loading} onClick={() => { if (expanded) { setExpanded(false); return; } void load(); }}>
-        {expanded ? '收起原始响应' : '按需加载并校验原始响应'}
+      {permitId && canLoad && <Button size="small" loading={loading} onClick={() => { if (showRecord) { setExpanded(false); return; } void load(); }}>
+        {showRecord ? '收起诊断原文' : '按需加载并校验诊断原文'}
       </Button>}
-      {loadError && <Alert type="error" showIcon message="原始响应不可用或完整性校验失败" description={loadError} />}
-      {expanded && record && rawText === undefined && record.bytes && <Alert type="warning" showIcon message="原始响应不是有效 UTF-8 文本；已验证原字节可下载，界面不进行字符替换。" />}
-      {expanded && record && !record.bytes && <Alert type="warning" showIcon message="历史 payload 未保存或为空；不以其表示 provider 输出。请按下方 provider 观测记录核对实际内容。" description={diagnostic.notSavedReason} />}
-      {expanded && record && rawText !== undefined && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 320, overflow: 'auto', margin: 0 }}>{rawText}</pre>}
-      {expanded && record?.bytes && <Button size="small" onClick={download}>下载已校验原始字节</Button>}
-      {expanded && providerDocument?.text === undefined && providerDocument && <Alert type="warning" showIcon message="Provider 文档不是有效 UTF-8 文本；已验证观测字节仍可下载。" />}
-      {expanded && providerDocument?.text !== undefined && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 320, overflow: 'auto', margin: 0 }}>{providerDocument.text}</pre>}
-      {expanded && providerDocument && <Button size="small" onClick={() => downloadProvider(providerDocument, 'provider-document')}>下载已校验 Provider 文档 bytes</Button>}
-      {expanded && providerWire?.text === undefined && providerWire && <Alert type="warning" showIcon message="Provider wire 不是有效 UTF-8 文本；已验证观测字节仍可下载。" />}
-      {expanded && providerWire?.text !== undefined && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 320, overflow: 'auto', margin: 0 }}>{providerWire.text}</pre>}
-      {expanded && providerWire && <Button size="small" onClick={() => downloadProvider(providerWire, 'provider-wire')}>下载已校验 Provider wire bytes</Button>}
-      {expanded && providerCause?.text === undefined && providerCause && <Alert type="warning" showIcon message="传输错误原文不是有效 UTF-8 文本；已验证观测字节仍可下载。" />}
-      {expanded && providerCause?.text !== undefined && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 320, overflow: 'auto', margin: 0 }}>{providerCause.text}</pre>}
-      {expanded && providerCause && <Button size="small" onClick={() => downloadProvider(providerCause, 'provider-cause')}>下载已校验传输错误原文 bytes</Button>}
-    </> : <Typography.Text>此旧失败记录没有保存诊断；原始原因未记录，且不会重新调用 provider。</Typography.Text>}
+      {loadError && <Alert type="error" showIcon message="诊断原文不可用或完整性校验失败" description={loadError} />}
+      {showRecord && record && rawText === undefined && record.bytes && <Alert type="warning" showIcon message="解析器输入 payload不是有效 UTF-8 文本；已验证原字节可下载，界面不进行字符替换。" />}
+      {showRecord && record && !record.bytes && <Alert type="warning" showIcon message="解析器输入 payload 未保存；Provider 内容仅依据各自观测记录展示。" description={diagnostic.notSavedReason} />}
+      {showRecord && record && rawText !== undefined && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 320, overflow: 'auto', margin: 0 }}>{rawText}</pre>}
+      {showRecord && record?.bytes && <Button size="small" onClick={download}>下载已校验原始字节</Button>}
+      {showRecord && providerDocument?.text === undefined && providerDocument && <Alert type="warning" showIcon message="Provider 文档不是有效 UTF-8 文本；已验证观测字节仍可下载。" />}
+      {showRecord && providerDocument?.text !== undefined && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 320, overflow: 'auto', margin: 0 }}>{providerDocument.text}</pre>}
+      {showRecord && providerDocument && <Button size="small" onClick={() => downloadProvider(providerDocument, 'provider-document')}>下载已校验 Provider 文档 bytes</Button>}
+      {showRecord && providerWire?.text === undefined && providerWire && <Alert type="warning" showIcon message="Provider wire 不是有效 UTF-8 文本；已验证观测字节仍可下载。" />}
+      {showRecord && providerWire?.text !== undefined && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 320, overflow: 'auto', margin: 0 }}>{providerWire.text}</pre>}
+      {showRecord && providerWire && <Button size="small" onClick={() => downloadProvider(providerWire, 'provider-wire')}>下载已校验 Provider wire bytes</Button>}
+      {showRecord && providerCause?.text === undefined && providerCause && <Alert type="warning" showIcon message="传输错误原文不是有效 UTF-8 文本；已验证观测字节仍可下载。" />}
+      {showRecord && providerCause?.text !== undefined && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 320, overflow: 'auto', margin: 0 }}>{providerCause.text}</pre>}
+      {showRecord && providerCause && <Button size="small" onClick={() => downloadProvider(providerCause, 'provider-cause')}>下载已校验传输错误原文 bytes</Button>}
+    </> : <Typography.Text>此失败记录没有可用诊断；原始原因未记录，且不会重新调用 provider。</Typography.Text>}
   </Space>;
 }

@@ -133,7 +133,9 @@ func (p CoverageEvidenceProof) Validate() error {
 func RuntimeOperationKindSupportsCoverageEvidence(kind, evidenceKind string) bool {
 	kind = CanonicalRuntimeBlockKind(kind)
 	evidenceKind = strings.TrimSpace(evidenceKind)
-	descriptor, found := RuntimeOperationDescriptorForKind(kind)
+	// 静态库存仅在 init 构造；此资格查询不返回或修改任何 slice。
+	// 公开 getter 仍深拷贝，避免外部调用方修改库存。
+	descriptor, found := runtimeOperationDescriptorByKind[kind]
 	if !found || !descriptor.RequiresOwnerReceipt {
 		return false
 	}

@@ -135,7 +135,7 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 			}
 			payload = struct {
 				Specification workspace.GoalSpecification `json:"specification"`
-			}{proposal}
+			}{authoringWireSpecificationFixture(proposal)}
 		default:
 			kind := strings.TrimPrefix(command.Request.Kind, "workspace/specification/review/")
 			proposal := record.SpecificationRequests[0].Proposal

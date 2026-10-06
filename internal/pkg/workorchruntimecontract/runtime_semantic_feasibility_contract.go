@@ -58,6 +58,13 @@ func ValidateRuntimeSemanticProofFeasibilityRequest(command RuntimeSemanticProof
 			return err
 		}
 	}
+	for _, obligation := range manifest.ProofObligations {
+		if obligation.CoverageWorkItemID == proposal.CoverageWorkItemID && obligation.ImplementationWork != nil {
+			if err := validateRuntimeSemanticImplementationWorkProofSet(RuntimeSemanticCWIProofSet{CoverageWorkItemID: proposal.CoverageWorkItemID, Proposals: []RuntimeSemanticProofProposal{proposal}}, obligation.ImplementationWork); err != nil {
+				return err
+			}
+		}
+	}
 	if !runtimeSemanticManifestContainsProposal(manifest, proposal) {
 		return fmt.Errorf("runtime semantic feasibility proposal is outside sealed manifest")
 	}

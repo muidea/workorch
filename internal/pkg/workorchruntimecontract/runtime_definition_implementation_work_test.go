@@ -191,7 +191,10 @@ func TestRuntimeSemanticManifestRejectsInjectedOrUnavailableImplementationWorkBe
 		t.Fatalf("semantic compiler did not reject source injection before owner catalog acquisition: %v", err)
 	}
 	execution.ProfileContracts = profiles
-	if _, err := CompileRuntimeSemanticPlanManifest("ws-1", "run-1", definition, seed, focuses, execution, nil); !errors.Is(err, ErrRuntimeImplementationWorkUnavailable) {
-		t.Fatalf("matching declaration bypassed semantic execution readiness: %v", err)
+	if _, err := CompileRuntimeSemanticPlanManifest("ws-1", "run-1", definition, seed, focuses, execution, nil); err == nil || !strings.Contains(err.Error(), "has no sealed admissibility catalog") {
+		t.Fatalf("matching declaration invented owner facts: %v", err)
+	}
+	if err := execution.ValidateExecutableAdmission(); !errors.Is(err, ErrRuntimeImplementationWorkUnavailable) {
+		t.Fatalf("matching declaration bypassed executable ingress readiness: %v", err)
 	}
 }

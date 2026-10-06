@@ -55,6 +55,8 @@ capability resource state。
   accepted candidate lineage 在同次完整 raw-source/hash 校验后保留私有 detached manifest，candidate admission 仍逐候选
   完整执行，再复用本次 manifest 派生 target/recipe 投影；attempt 与 dispatch 两侧身份、内容和 hash 仍独立反证。
   `runtime_candidate_lineage_validation_reuse_test.go` 固定私有产物深拷贝、公开拒绝等价及后续调用重新验证。
+  静态 operation descriptor 的内部证据资格查询只读初始化库存，不复制随后丢弃的 `AllowedStates`；公开 getter 仍深拷贝。
+  `runtime_coverage_evidence_descriptor_lookup_test.go` 以旧 getter 路径为 reference 覆盖全部 kind、未知与非规范输入、重复调用和公开副本隔离；不减少任何 proof、raw 或 aggregate 校验。
   `runtime_coverage_evidence_binding_hash_test.go` 和 `runtime_candidate_session_validation_test.go` 固定 hash、重复调用、
   同版本重载、来源篡改与深拷贝边界。已规范化字符串集合仍返回 detached 副本，非规范输入保留 trim／去重／排序语义，
   由 `runtime_normalize_strings_test.go` 的 reference 与 fuzz 固定。SM-3 证据投影先反证原始 accepted/rejected exact cardinality，
@@ -570,34 +572,24 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
 
 ## 能力验收
 
-Profile 可携带独立的 `RuntimeImplementationWorkPolicy` 声明（`runtime-implementation-work/v1`），但当前
-`RuntimeExecutionContract.Validate` 拒绝该协议执行；Workspace promotion 同样在 Run 前拒绝。
-声明有界的 owner/operation/selector/轮次、fresh observation/validation 与输入保护，进入 Profile 身份与 exact CWI 的不可变 Definition 投影，
-不是 SM-2 工作 binding、SM-3 dispatch 权限或 SM-4 下一动作。普通 terminal proof、owner-fact acquisition、
-validation-failure repair 的现行 purpose 不变；不能用新声明借用这两种专用中间工作的状态转换。
-Definition 投影由 Application 编译，Runtime 在 bootstrap、facts 重载与 semantic manifest 编译边界独立校验其
-exact Profile source；丢失、注入、跨 CWI 或策略漂移不得读取时修补。raw clone/同版本 JSON 重载保留全部值，
-bootstrap equality 包含 policy；SM-1/2/3/4 无新增 transition、工作计数器或执行权限。
-工作能力清单从已匹配 exact CWI policy 编译，bootstrap 独立核对 Definition capability contract 与对应
-owner 的全局 state-change capability / operation-admissibility prerequisites；缺失或 owner/class 错配拒绝。
-既有 typed capability acquisition 返回 inventory observation，不授予 scope、variant、dispatch 或验收 credit。
-`runtime_implementation_work_capabilities_test.go` 覆盖投影与重载反证，
-`biz/runtime_implementation_work_capability_test.go` 只证明真实 File owner 的能力事实获取，不证明工作循环。
-独立的 `RuntimeImplementationWorkScopeRequest` 从 exact CWI/封存 Profile 和当前 resource-owner manifest 纯编译；
-请求身份绑定 workspace/run、authority、Definition seed、CWI、完整 policy 与 owner manifest 前像，不以观察时间刷新身份。
-请求自校验 hash 不构成来源授权：适配器在 owner I/O 前使用独立的 `RuntimeImplementationWorkScopeSources`
-重新编译比对，观察重载亦提供同一来源校验。生产 consumer 必须从 owner 当前 aggregate 提供这些输入，
-不得从待验证请求反向构造 sources；该输入不是新的持久化权威。
-Biz 只读适配层复用 File 的 typed target-selection 合同，保留完整有界 inventory、unsupported 负事实和可识别的 stale 错误；
-单轮工作目标上限不能裁剪 owner 观察。返回的 scope observation 不是工作授权，不写入 terminal-proof 的
-`Resources.TargetSelection`，不绕过验证输入排除、operation admissibility/feasibility 或 SM-2 binding seal。
-该适配层尚未接入 drive/private-event consumer；没有新增 SM-1/2/3/4 writer、CAS、工作消费或 dispatch。
-`runtime_implementation_work_scope_test.go`（shared 与 Biz）验证 source/身份/前像、raw clone/重载、真实 File
-只读查询、owner 重建、revision 漂移和完整范围；这些测试不替代工作回执、CAS 或两轮实现正例。
-合同与准入测试为 `runtime_implementation_work_policy_test.go`（shared/activationports）、
-`runtime_definition_implementation_work_test.go`、Application `runtime_implementation_work_test.go`、
-`biz/runtime/definition_implementation_work_test.go` 和 Workspace `definition_implementation_work_admission_test.go`，
-不证明同 CWI 实现闭环。
+Profile 的独立 `RuntimeImplementationWorkPolicy`（`runtime-implementation-work/v1`）声明有界的 owner、operation、selector、轮次、fresh observation/validation 与输入保护，进入 Profile 身份和 exact CWI 的不可变 Definition 投影。声明本身不授予 effect；`RuntimeExecutionContract.ValidateExecutableAdmission` 与 Workspace promotion 仍通过 availability gate 拒绝尚未开放的协议执行。纯 `Validate` 保留合法声明供合同校验，不代表可执行准入。
+
+工作事务复用 SM-2/3/4 和同一个 Runtime aggregate，SM-1 不新增迁移。SM-2 私有 scope 事件先 CAS 封存只读 `ScopePreview` 需求，再接收真实 owner 观察；独立来源由 sealed Profile、Definition seed、exact CWI 与当前 manifest 前像重新编译，不能从待验证请求反向构造。File 适配层保留完整有界 inventory、unsupported 负事实和 typed stale；单轮目标上限不能裁剪观察。scope 不写入终验 `Resources.TargetSelection`，也不授 variant、dispatch 或 credit。
+
+原 accepted semantic `coverage_order` 提议 `implementation_effect` 或 `terminal_proof`。SM-2 消费该文档并原子退休原请求 generation：effect 才 reserve 原 CWI 的有界 round，terminal 只恢复原完整终验前置。工作 purpose 必须取得 manifest、provider ceiling、capability、capability state 和全部已声明 owner catalogs；仅延后当前 focus 的终验 target/scratch，working binding 点名的 exact snapshot 仍须取得。sealed capability inventory 独立反查 owner 输入保护 catalog，不能通过协调删除 Pending/Satisfied/catalog 缩小 exclusions。普通无工作策略路径保持原前置合同。
+
+SM-3 复用完整 semantic proof、owner feasibility、request session、candidate、sealed dispatch 与 execution。只有原 accepted proof batch 和 matching owner facts 能经 SM-2 私有事务封存 `RuntimeImplementationWorkingBinding`；它与 `CoverageEvidenceBinding` 分离，完整 policy、scope/catalog 前像、输入排除、原 semantic lineage 和前轮 collective receipt 身份进入 working commitment、manifest 与 dispatch。每轮独立请求/dispatch，不能借用 owner-fact acquisition 或 confirmed validation repair 权限。
+
+`OperationReceiptObserved` 的一次 aggregate CAS 同时提交 SM-3 execution/receipt/budget、SM-2 working effect/round 和 SM-4 必要 retirement。完整 collective receipts 齐全并反证资源失效后才结轮；工作 effect 保留 owner 原 quality，零 validation/terminal/CWI credit。后续轮须 fresh owner observation 和新的 accepted semantic proposal/feasibility，预算不重置；逻辑 durable dispatch 使用原 sealed working CWI 和 accepted attempt 来源计数，归档不退款。进入 terminal purpose 后恢复原 all-of 终验、输入审查和 exact repair 合同。
+
+rejected、stale、missing invalidation 与 unknown 关闭原工作权限，不通过新轮重发；governance continuation 保留同轮原 execution key，新的 fence/dispatch hop 必须与原 grant/receipt lineage 匹配。无 receipt 的原 started claim 进入 unknown 后，只允许 exact original key/fence 的迟到 owner receipt 入账与资源失效同 CAS；不能重开 round、补 terminal credit 或将原 physical unknown consumption 改成 confirmed。fresh-load 同时反证原 unknown allocation/consumption，不能从文件存在、provider 文本或重写 hash 推断 effect 成功。
+
+合同测试包括 `runtime_implementation_work_policy_test.go`、`runtime_definition_implementation_work_test.go`、`runtime_implementation_work_ledger_test.go`、`runtime_implementation_work_receipt_hop_test.go` 与原各 owner 准入反例。`biz/runtime/implementation_work_*_test.go` 覆盖 private transition、完整写集、duplicate/stale、来源篡改、CAS 前后回复丢失和预算；unknown receipt 的独立测试进程使用 test-owned repository，不是公开 Run-owner 全链恢复。
+`biz/runtime_implementation_work_scope_test.go` 校验真实 File 只读 scope、完整 inventory 与 revision fence；`biz/runtime_implementation_work_two_round_drive_test.go` 在 private startup fixture 后使用 production outer driver 和真实 File owner 完成同 CWI 两轮，不能替代公开 authoring/activation、终验、Git、正式 Result 和全部 delivery ack 的完整工程验收。availability 不因这些局部证据自动开放。
+
+`make verify-runtime-implementation-work-readiness` 对每个目标包拒绝零测试选择，并包含公开 `internal/integration/implementation_work_fullflow_test.go` 完整正例及 unsupported 反例。公开正例的 failure 使 readiness 和依赖它的 CI 验收失败，不能作为 expected failure、skip 或 bounded-terminal 成功。Git 交付必须将 sealed execution 的 exact key/fence/receipt hash 与实际 commit 对象、最终 HEAD、完整 tree/blob bytes、已评审输入 hash 和正式 Result 的同一 evidence ref 联结；仅 `evidence_committed` 状态、`.git` 存在或 commit 文本不构成该证明。
+
+同一个 `CoverageEvidenceBinding` 的 proof 按 evidence kind 唯一，不能用多个 validation recipe proof 冒未支持的 build/test/race 合取。validation observation 必须匹配 exact recipe、protocol 与 native-check attestation；另一 recipe 的 passed checks 不授予本 proof credit。复合执行须由 capability owner 实际生产并持久化完整事实；命令名称、检查标签、验证输入内子命令或 README 自述不替代 sealed owner execution 的证明。
 
 | 验收面 | 自动化证据 | 必需维度 |
 | --- | --- | --- |

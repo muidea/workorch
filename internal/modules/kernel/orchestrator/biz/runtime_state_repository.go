@@ -167,6 +167,7 @@ func runtimeStateRecordFromAggregate(aggregate runtime.RuntimeAggregate) runtime
 		Definition:                      aggregate.Definition,
 		Facts:                           aggregate.Facts,
 		SemanticPlanning:                aggregate.SemanticPlanning.Clone(),
+		ImplementationWork:              aggregate.ImplementationWork.Clone(),
 		Reconciliation:                  aggregate.Reconciliation.Clone(),
 		CoverageProofLineage:            runtimecontract.NormalizeRuntimeCoverageProofLineage(aggregate.CoverageProofLineage),
 		Decision:                        aggregate.Decision,
@@ -216,6 +217,7 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 		Definition:                      record.Definition,
 		Facts:                           record.Facts,
 		SemanticPlanning:                record.SemanticPlanning.Clone(),
+		ImplementationWork:              record.ImplementationWork.Clone(),
 		Reconciliation:                  record.Reconciliation.Clone(),
 		CoverageProofLineage:            runtimecontract.NormalizeRuntimeCoverageProofLineage(record.CoverageProofLineage),
 		Decision:                        record.Decision,
@@ -301,6 +303,14 @@ func cloneRuntimeOperationGovernanceBindings(values []runtimecontract.RuntimeOpe
 	return ret
 }
 
+func cloneRuntimeImplementationWorkCommitmentRecord(round *runtimecontract.RuntimeImplementationWorkRound) *runtimecontract.RuntimeImplementationWorkRound {
+	if round == nil {
+		return nil
+	}
+	copy := round.Clone()
+	return &copy
+}
+
 // cloneRuntimeCandidateRequestSessions keeps the Run-owner record conversion
 // ownership-neutral. Request-session state is advanced only by runtime's
 // controller; this adapter merely preserves its persisted value across a
@@ -321,6 +331,7 @@ func runtimeDispatchRecordFromAggregate(dispatch runtime.SealedDispatch) runtime
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
 		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
 		CandidateManifestHash:              dispatch.CandidateManifestHash,
+		ImplementationWorkCommitment:       cloneRuntimeImplementationWorkCommitmentRecord(dispatch.ImplementationWorkCommitment),
 		CoverageBindingHash:                dispatch.CoverageBindingHash,
 		CoverageBindings:                   runtimecontract.CloneCoverageEvidenceBindings(dispatch.CoverageBindings),
 		OperationTargetAuthorizations:      runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(dispatch.OperationTargetAuthorizations),
@@ -346,6 +357,7 @@ func runtimeDispatchFromRecord(dispatch runtimecontract.RuntimeDispatchRecord) r
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
 		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
 		CandidateManifestHash:              dispatch.CandidateManifestHash,
+		ImplementationWorkCommitment:       cloneRuntimeImplementationWorkCommitmentRecord(dispatch.ImplementationWorkCommitment),
 		CoverageBindingHash:                dispatch.CoverageBindingHash,
 		CoverageBindings:                   runtimecontract.CloneCoverageEvidenceBindings(dispatch.CoverageBindings),
 		OperationTargetAuthorizations:      runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(dispatch.OperationTargetAuthorizations),

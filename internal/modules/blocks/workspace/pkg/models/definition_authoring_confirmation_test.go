@@ -7,7 +7,7 @@ import (
 )
 
 func TestConfirmableSpecificationRequiresUniqueCompletedPASSReviews(t *testing.T) {
-	record, proposal := authoringLedgerFixture(t)
+	record, proposal := declaredAuthoringLedgerFixture(t)
 	permit := record.DerivationRequests[0].PermitID
 	proposalHash := proposal.ContentHash()
 	request := DefinitionAuthoringSpecificationRequest{RequestID: "proposal", DerivationPermitID: permit, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
@@ -66,7 +66,7 @@ func TestConfirmableSpecificationRequiresUniqueCompletedPASSReviews(t *testing.T
 }
 
 func TestAuthoringConfirmationJournalRejectsChangedAfterImages(t *testing.T) {
-	record, proposal := authoringLedgerFixture(t)
+	record, proposal := declaredAuthoringLedgerFixture(t)
 	permit := record.DerivationRequests[0].PermitID
 	var err error
 	var request DefinitionAuthoringSpecificationRequest
@@ -125,9 +125,9 @@ func TestAuthoringConfirmationJournalRejectsChangedAfterImages(t *testing.T) {
 	if err != nil || ref.InputHash != journal.InputHash || ref.SpecificationHash != formal.AdmissionHash() {
 		t.Fatalf("admission reference lost persisted review provenance: %+v %v", ref, err)
 	}
-	for _, verification := range formal.Verifications {
-		if verification.Status != GoalVerificationUnverified || verification.ProfileID != "" {
-			t.Fatalf("formal translation invented proof authority: %+v", verification)
+	for index, verification := range formal.Verifications {
+		if verification != reviewed.Verifications[index] {
+			t.Fatalf("formal translation changed reviewed declaration: %+v", verification)
 		}
 	}
 	for _, change := range []func(*DefinitionAuthoringRecord){

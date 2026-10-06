@@ -962,7 +962,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     }
   ];
   const activeRun = snapshot?.workspace.activeRunId
-    ? snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId)
+    ? snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId && item.workspaceId === snapshot.workspace.id)
     : undefined;
   const definitionClarificationDecision = workspaceDefinitionClarification(snapshot);
   const definitionClarification = definitionClarificationDecision?.definitionClarification;
@@ -1117,7 +1117,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 { key: 'nextRunLLMTarget', label: '下次运行默认模型', children: providerModelTargetLabel(snapshot.workspace.defaultLLMSelection) },
                 { key: 'activeRunSealedLLMSelection', label: '当前运行封存模型', children: providerModelTargetLabel(activeRun?.sealedLLMSelection) },
                 { key: 'displayOutcome', label: '展示结果（非 Owner 状态）', children: snapshot.displayOutcome?.runId ? `${snapshot.displayOutcome.runId} / ${stateLabel(snapshot.displayOutcome.state)}` : '-' },
-                { key: 'canonicalRunState', label: 'Run Owner 状态', children: activeRun ? `${activeRun.id} / ${stateLabel(activeRun.state)}` : '-' },
+                { key: 'canonicalRunState', label: 'Run Owner 状态', children: activeRun ? `${activeRun.id} / ${stateLabel(activeRun.state)}` : '尚未启动执行' },
                 { key: 'governanceDisplay', label: '治理等待（只读）', children: snapshot.governanceDisplay?.decisionId || snapshot.governanceDisplay?.approvalId || '-' },
                 ...(snapshot.consistencyDiagnostic?.code ? [{ key: 'consistencyDiagnostic', label: 'Owner 一致性诊断', children: `${snapshot.consistencyDiagnostic.code}: ${snapshot.consistencyDiagnostic.summary || '-'}` }] : []),
                 { key: 'projection', label: '投影摘要', children: projectionStatusSummary(workspaceProjection) },

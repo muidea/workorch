@@ -66,9 +66,11 @@ Last Verified: 2026-08-30
 - Template 的 `ParentTemplateIDs` 由 Workspace owner 解析为有界 DAG；父声明顺序决定稳定拓扑顺序，共享祖先只合并一次。循环、缺失、重复父、深度/规模超限或无法安全合并的冲突拒绝。DoD 合取，不允许子模板覆盖父验收要求；同路径 context、同 ID evidence policy 的不一致当前直接拒绝，不猜测哪个更严格。
 - 模板读取返回 effective 内容及只读 `EffectiveSources`。父内容及拓扑参与派生快照身份；create/update 只能提交原始声明，不能自报 effective 来源。新 Start/Restart 在 owner mutation lock 内核对整个有效快照，既有 Run 不热替换；无父模板保留既有 snapshot hash 算法。
 - `DefinitionAdmissionCandidate.Specification` 是可选、版本化的规格提案。资源、维度、需求来源、义务、exact Profile 验证声明和六类 completeness review 全部进入候选身份；审查绑定不含审查自身的 content hash，startup 的 `SpecificationHash` 绑定包含审查的 admission hash。
+- provider 的 derive/proposal/review 文档仅接受当前封闭 wire 形状：所有字段必填、精确大小写，标量与数组不得为 null；未知／重复字段、多 root、超出 256 KiB／32 层、非法 UTF-8 与孤立 UTF-16 surrogate 均拒绝。不修复或重写原始输出；结构拒绝保留 field path／错误分类，owner 来源、声明、独立审查及精确确认仍独立校验。`SourceItemRefs`、`ResourceIDs` 与候选 `DoDItemRefs` 是分离的身份空间，资源路径／章节不能充当来源。`UNVERIFIED` 的三个 Profile 绑定字段必须为空，不能静默清空非法绑定再继续。
 - 六类审查分别覆盖维度、负路径、回归、资源环境、显式约束追踪和可验证性。FAIL/UNKNOWN、缺必需资源、缺必需维度/义务、缺 DoD 映射或不匹配的 Profile 声明不能晋升。PASS 只是有来源的评审事实，不直接授予 Runtime evidence credit，也不证明任意自然语言目标的完整性。
 - 验证声明适用性必须逐项沿 `Verification → Obligation → DoDItemRefs → 正式 DoD sourceID → Profile(scope,id|*)` 反证；一个义务引用多个 DoD 时全部检查，不因同名 declaration 存在或另一个 DoD 命中而通过。正式候选引用中的 `:item:NNNNNN` 保留原序号；derived 引用按确认 after-image 的 user、template、generated 分组及组内原序号解析，不能使用准入 normalize 后的 slice 位置。`dod-001` 是 sourceID，不是 `cwi-001`；Profile bootstrap artifact 和其他 work unit 独立占用 CWI 序号。
 - Workspace 保留规格图解析；中立 `workorchruntimecontract.CompileRuntimeSourceEvidencePolicy` 与 activation 共用 exact→wildcard 的完整合并及 source selector matcher。所有命中声明共同贡献 evidence／operation 集合、约束及 owner-fact closure，冲突不能被 exact 优先级隐藏；被引用声明的非空角色、selector、recipe／check、合取约束和 closure 必须在最终产物保留。wildcard 的 recipe／check 被剥离，带这些具体身份的 wildcard 不能据 selector 命中冒充适用验证；无具体 recipe／check 的合法 wildcard 可贡献声明约束，默认 software-dev 模板仍可准入。此门禁不读取 capability catalog、不证明实际可执行／通过，不生成 `CoverageEvidenceBinding`，不改确认 hash 或旧封存准入。
+- 无绑定 `UNVERIFIED` 可持久表达草稿缺口，但六份 PASS 也不能取得确认资格：全部 Verification 必须为 `DECLARED` 且声明非空，每个 Obligation 必须有声明。owner 在提案 completion、确认准备和 prepared 恢复时核对原封存 Template 的实际 Profile 适用性，准入再核对当前 Workspace／Template 合同；逐项覆盖全部确认后 DoD source 并保留最终合并贡献。上述检查不产生 owner fact、proof 或 credit。
 - 确认 journal 遇模板／资源漂移保持阻塞，不新增 abandon／清 journal 协议。恢复原 exact snapshot 后，owner 重新核对原 input／permit／proposal／specification／configuration identity，沿 prepared→materialized after-image 幂等续写；任何冲突正式行仍阻塞、不得覆盖。prepared 必须匹配当前 Template snapshot；materialized 的 exact confirmation replay 不重新物化模板，但不等同于 activation eligible：准入和显式 Start 仍校验当前模板，资源绑定的 replay 每次仍向 File 重验。不得制造新 hash 绕过已准备事务。
 - nil Specification 保留既有候选与 startup hash。此合同约束提交的规格候选，不表示所有 Web/TUI 输入已自动经过完整 Goal Compiler；正式执行仍须通过 exact CWI、owner feasibility、sealed dispatch 和 SM-2 闭包。
 
@@ -90,7 +92,7 @@ transport leaf 另存 bytes；parser 失败不补造 provider failure code，完
 
 ### 创作只读摘要
 
-Get/List 从当前未确认创作 record 派生有界 `AuthoringSummary`，仅含阶段、失败 phase/code、已完成审查数和 input revision；无当前记录或已经进入确认／准入时不补造摘要。六审查完成使用 `reviewed`，不宣称模板当前性或确认资格。摘要经 typed DTO 传递，模型载体不序列化，memory/file repository clone 丢弃该观察，不能反向恢复 owner ledger。创作保存、reserve、complete 和准备诊断的成功 CAS 复用 `WorkspaceStateChanged` 通知刷新投影；无写入重放及失败 CAS 不发该通知。通知仅用于读取刷新，不是执行或恢复权威。
+Get/List 从当前未确认创作 record 派生有界 `AuthoringSummary`，仅含阶段、失败 phase/code、已完成审查数和 input revision；无当前记录或已经进入确认／准入时不补造摘要。只有六审查 PASS、全部声明满足确认结构门禁且适用于原封存 Template 实际 Profile 时使用 `reviewed`；未声明或自报绑定不适用均为 `review_blocked`。列表与详情复用同一声明适用性边界，摘要仍不宣称模板当前性、当前 capability readiness 或正式确认资格。摘要经 typed DTO 传递，模型载体不序列化，memory/file repository clone 丢弃该观察，不能反向恢复 owner ledger。创作保存、reserve、complete 和准备诊断的成功 CAS 复用 `WorkspaceStateChanged` 通知刷新投影；无写入重放及失败 CAS 不发该通知。通知仅用于读取刷新，不是执行或恢复权威。
 
 ### 前置准备诊断
 

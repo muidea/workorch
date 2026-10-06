@@ -10,7 +10,7 @@ import (
 
 func confirmedAuthoringSourceFixture(t testing.TB) (DefinitionAuthoringRecord, DefinitionAuthoringConfirmation) {
 	t.Helper()
-	record, proposal := authoringLedgerFixture(t)
+	record, proposal := declaredAuthoringLedgerFixture(t)
 	permit := record.DerivationRequests[0].PermitID
 	var request DefinitionAuthoringSpecificationRequest
 	var err error

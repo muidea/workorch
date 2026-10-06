@@ -51,6 +51,10 @@ func (b RuntimeBootstrap) Validate() error {
 	if err := b.Activation.Validate(); err != nil {
 		return err
 	}
+	// 外部 activation availability 与内部原始合同校验分离；当前支持仍关闭。
+	if err := b.Activation.ExecutionContract.ValidateExecutableAdmission(); err != nil {
+		return err
+	}
 	if err := b.DefinitionSeed.Validate(); err != nil {
 		return fmt.Errorf("runtime bootstrap definition seed: %w", err)
 	}

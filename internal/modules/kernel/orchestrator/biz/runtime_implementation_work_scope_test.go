@@ -35,11 +35,6 @@ func TestImplementationWorkScopeRealOwnerReadOnlyAndRevisionFence(t *testing.T) 
 	owner := startOwner()
 	defer func() { _ = owner.Stop(ctx) }()
 	directory := t.TempDir()
-	for _, name := range []string{"implementation.txt", "acceptance.txt"} {
-		if err := os.WriteFile(filepath.Join(directory, name), []byte(name), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
 	manifest := func() runtimecontract.RuntimeWorkspaceManifestBinding {
 		facts := runtime.PreflightRuntimeFacts(runtimecontract.RuntimeFacts{WorkspaceID: "ws", RunID: "run", DefinitionRevision: "definition-1", EvidenceRevision: "evidence-1"},
 			[]runtimecontract.RuntimeRequirement{{Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile}})
@@ -67,9 +62,17 @@ func TestImplementationWorkScopeRealOwnerReadOnlyAndRevisionFence(t *testing.T) 
 	seed.Hash = runtimecontract.StableRuntimeDefinitionSeedHash(seed)
 	policy := runtimecontract.RuntimeImplementationWorkPolicy{
 		ProtocolRef: runtimecontract.RuntimeImplementationWorkProtocolV1, OwnerModuleID: runtimecontract.RuntimeModuleFile,
-		AllowedOperations:     []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "text_replace"}},
-		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
-		TargetSelectorRef:     "file/workspace_deliverable", TargetSelectorOwnerRef: "profile", TargetSelectorSubjectRef: "work",
+		AllowedOperations: []runtimecontract.RuntimeOperationVariantRef{
+			{Kind: runtimecontract.StepKindFileWrite},
+			{Kind: runtimecontract.StepKindFileEdit},
+			{Kind: runtimecontract.RuntimeBlockKindPatchApply, VariantID: "text_replace"},
+		},
+		AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{
+			runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope,
+			runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
+		},
+		ProspectiveTargetAllOfConstraintRefs: []string{"workspace-relative-path", "new-target-requires-owner-selector"},
+		TargetSelectorRef:                    "file/workspace_deliverable", TargetSelectorOwnerRef: "profile", TargetSelectorSubjectRef: "work",
 		MaxRoundsPerCWI: 2, MaxTargetsPerRound: 1, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true,
 	}
 	sources := map[string]runtimecontract.RuntimeImplementationWorkScopeSources{}
@@ -91,6 +94,38 @@ func TestImplementationWorkScopeRealOwnerReadOnlyAndRevisionFence(t *testing.T) 
 		}
 		sources[request.RequestID] = source
 		return request
+	}
+	// 空目录只取得完整只读 scope；prospective 工作目标仍须由后续 semantic/feasibility 封存。
+	emptyRequest := compile(policy.TargetSelectorRef, manifest())
+	emptyObserved, err := acquireRuntimeImplementationWorkScope(ctx, hub, directory, emptyRequest, sources[emptyRequest.RequestID])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if emptyObserved.Selection.Disposition != runtimecontract.RuntimeTargetSelectionScope || emptyObserved.Selection.CandidateCount != 0 || len(emptyObserved.Selection.TargetRefs) != 0 || len(emptyObserved.Selection.CandidateTargetRefs) != 0 || emptyObserved.Selection.ProspectiveTargetRef != "" {
+		t.Fatalf("empty owner scope invented a selected working target: %#v", emptyObserved.Selection)
+	}
+	if entries, err := os.ReadDir(directory); err != nil || len(entries) != 0 {
+		t.Fatalf("empty scope observation wrote deliverable content: entries=%v err=%v", entries, err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "implementation.txt"), []byte("implementation.txt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acquireRuntimeImplementationWorkScope(ctx, hub, directory, emptyRequest, sources[emptyRequest.RequestID]); !errors.Is(err, runtimecontract.ErrRuntimeImplementationWorkScopeStale) {
+		t.Fatalf("empty scope stayed current after real creation: %v", err)
+	}
+	singleRequest := compile(policy.TargetSelectorRef, manifest())
+	singleObserved, err := acquireRuntimeImplementationWorkScope(ctx, hub, directory, singleRequest, sources[singleRequest.RequestID])
+	if err != nil || singleObserved.Selection.Disposition != runtimecontract.RuntimeTargetSelectionSelected || singleObserved.Selection.CandidateCount != 1 || !reflect.DeepEqual(singleObserved.Selection.TargetRefs, []string{"implementation.txt"}) {
+		t.Fatalf("single existing target owner scope incomplete: selection=%#v err=%v", singleObserved.Selection, err)
+	}
+	if singleRequest.RequestID == emptyRequest.RequestID || singleObserved.Selection.ObservedRevision == emptyObserved.Selection.ObservedRevision {
+		t.Fatal("real creation reused the empty scope identity or owner revision")
+	}
+	if err := os.WriteFile(filepath.Join(directory, "acceptance.txt"), []byte("acceptance.txt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acquireRuntimeImplementationWorkScope(ctx, hub, directory, singleRequest, sources[singleRequest.RequestID]); !errors.Is(err, runtimecontract.ErrRuntimeImplementationWorkScopeStale) {
+		t.Fatalf("single target scope stayed current after another creation: %v", err)
 	}
 	request := compile(policy.TargetSelectorRef, manifest())
 	before, _ := json.Marshal(request)

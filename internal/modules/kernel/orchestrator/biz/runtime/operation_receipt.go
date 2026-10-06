@@ -123,6 +123,9 @@ func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context,
 		}
 		return aggregate, existing, nil
 	}
+	if dispatch, active, found := operationReceiptDispatch(aggregate, dispatchID); found && !active && dispatch.ImplementationWorkCommitment != nil {
+		return c.commitArchivedImplementationWorkReceipt(ctx, aggregate, dispatch, ownerModuleID, receipt)
+	}
 	if err := rejectRuntimeProgressAfterTermination(aggregate); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
@@ -131,7 +134,7 @@ func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context,
 	// lost its canonical binding: evidence cannot legally attribute it and a
 	// later retry must not turn that stale fact into a second execution path.
 	// Existing matching receipts remain idempotent above.
-	if err := validateCurrentCWIBindingFenceForEvidenceCommit(aggregate.Facts); err != nil {
+	if err := validateRuntimeExecutionPurposeFence(aggregate); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: operation receipt binding fence: %v", common.ErrConflict, err)
 	}
 	if err := validateOperationReceiptFeedback(aggregate, workspaceID, runID, dispatchID, receipt); err != nil {
@@ -178,8 +181,85 @@ func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context,
 			aggregate.OperationRecoveryAuthorizations[idx] = authorization
 		}
 	}
+	if aggregate.ActiveDispatch.ImplementationWorkCommitment != nil {
+		if err := settleImplementationWorkReceipt(&aggregate, operation, receipt); err != nil {
+			return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
+		}
+	}
 	aggregate.StateRevision++
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
+	}
+	return aggregate, receipt, nil
+}
+
+// commitArchivedImplementationWorkReceipt 仅接收关闭前已 claim 的原 owner callback。
+// 不授新调用、不重新打开 round、不产生 terminal/effect credit；结算与资源退休同 CAS。
+func (c *candidateDispatchComponent) commitArchivedImplementationWorkReceipt(ctx context.Context, aggregate RuntimeAggregate, dispatch SealedDispatch, ownerModuleID string, receipt runtimecontract.RuntimeOperationReceipt) (RuntimeAggregate, runtimecontract.RuntimeOperationReceipt, error) {
+	if dispatch.State != DispatchStateInvalidated && dispatch.State != DispatchStateCommitted {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: archived implementation receipt requires a closed original dispatch", common.ErrConflict)
+	}
+	if err := validateOperationReceiptOwnerSource(aggregate, dispatch.ID, receipt.OperationID, ownerModuleID); err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
+	}
+	operation, found := candidateOperationByID(dispatch.Candidate, receipt.OperationID)
+	if !found {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, common.ErrConflict
+	}
+	if !sameStringSet(receipt.TargetRefs, operation.TargetRefs) {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: archived callback targets differ from original sealed operation", common.ErrConflict)
+	}
+	execution, found := operationExecutionRecord(dispatch.OperationExecutions, receipt.OperationID)
+	unknownClaim := execution.State == runtimecontract.OperationExecutionOutcomeUnknown
+	if !found || (execution.State != runtimecontract.OperationExecutionClaimed && !unknownClaim) || execution.ExecutionKey != receipt.ExecutionKey || execution.Fence != receipt.Fence || !runtimecontract.ValidRuntimeOperationClaimMarker(execution.ClaimedAt) || execution.ClaimedAt == runtimecontract.RuntimeOperationClaimMarkerGovernanceGranted {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: archived callback has no original started claim/key/fence", common.ErrConflict)
+	}
+	if unknownClaim {
+		matches := 0
+		for _, round := range aggregate.ImplementationWork.Rounds {
+			if round.DispatchID == dispatch.ID && round.OutcomeUnknownExecutionKey == execution.ExecutionKey && round.OutcomeUnknownFence == execution.Fence {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: archived unknown callback has no exact original round closure", common.ErrConflict)
+		}
+	}
+	if receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
+		if receipt.Feedback == nil || receipt.Feedback.Domain != runtimecontract.RuntimeFeedbackDomainOperation || receipt.Feedback.StableCategory != runtimecontract.RuntimeFeedbackCategory(receipt.Outcome) || receipt.Feedback.OriginalDiagnostic == nil || receipt.Feedback.OriginalDiagnostic.OperationID != operation.ID {
+			return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("archived rejected callback requires exact original diagnostic feedback")
+		}
+		if err := validateOperationReceiptFeedbackAgainstDispatch(aggregate, dispatch, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, receipt); err != nil {
+			return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
+		}
+	}
+	expected := aggregate.StateRevision
+	execution.State = runtimecontract.OperationExecutionOwnerCommitted
+	execution.OwnerReceiptRef = "runtime-receipt/" + receipt.ExecutionKey
+	execution.OwnerReceiptHash = runtimecontract.StableRuntimeOperationReceiptHash(receipt)
+	// 迟到事实不是 physical consumption reconciliation；关闭时的 unknown 原样保留。
+	if !unknownClaim {
+		if _, err := joinRuntimeOperationExecutionBudget(&aggregate, operation, execution, &receipt, false); err != nil {
+			return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
+		}
+	}
+	for i := range dispatch.OperationExecutions {
+		if dispatch.OperationExecutions[i].OperationID == execution.OperationID {
+			dispatch.OperationExecutions[i] = execution
+		}
+	}
+	for i := range aggregate.CompletedDispatches {
+		if aggregate.CompletedDispatches[i].ID == dispatch.ID {
+			aggregate.CompletedDispatches[i] = dispatch
+		}
+	}
+	aggregate.OperationReceipts = append(aggregate.OperationReceipts, receipt.Clone())
+	if _, err := applyReceiptResourceChangeInvalidation(&aggregate, dispatch.ID, operation.ID, receipt); err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
+	}
+	retireImplementationWorkRecoveryAuthorizations(&aggregate, dispatch.ID)
+	aggregate.StateRevision++
+	if err := c.transitions.Commit(ctx, aggregate, expected); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
 	return aggregate, receipt, nil

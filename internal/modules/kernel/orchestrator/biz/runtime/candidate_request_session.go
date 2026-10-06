@@ -279,8 +279,13 @@ func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKi
 		return fmt.Errorf("%w: current runtime authority does not accept a candidate request", common.ErrConflict)
 	}
 	if documentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
-		if SemanticPlanningPrerequisitesPending(aggregate.Facts.Prerequisites.Pending) {
+		if RuntimeSemanticPrerequisitesPendingForAggregate(aggregate) {
 			return fmt.Errorf("%w: semantic plan request requires settled owner prerequisites", common.ErrConflict)
+		}
+		if RuntimeImplementationWorkPurposePending(aggregate) {
+			if err := runtimecontract.ValidateRuntimeImplementationWorkInputCatalogs(aggregate.Facts, aggregate.Definition.CapabilityContract); err != nil {
+				return err
+			}
 		}
 		// Catalog retirement can make the binding-free reducer view terminal
 		// before the next semantic generation has sealed the current CWI. That

@@ -75,6 +75,7 @@ payload hash、operation identity 与 execution scope，handler 不能从自由�
 - feasibility 必须按 sealed target policy 对资源事实进行完备分类：prospective target 已存在，以及 exact/existing target
   已缺失，返回 `policy_disallowed + sealed_target_authorization_contradicted` 和 exact owner policy/revision；candidate-local
   patch conflict 不得冒充 binding contradiction。
+- File 的 target-selection 在 owner 封存前统一合同规定的 canonical 集合表示，snapshot hash 与返回前像一致；空 scope 的 target/candidate 集合保留 canonical absence。该规格规范化不覆盖原始诊断或业务文档，也不授 effect。`file/workspace_deliverable` 只读声明 scope 可涵盖空目录、唯一目标或完整有界多文件 inventory；工作轮目标上限不能裁剪它。
 - `workspace-relative-new-file-target` 是 create-only selector：prospective path 缺失时返回 `create`；File effect 后相同 path
   已存在时必须返回 `unsupported`，不能把它重解释为普通 existing-target `selected`。
 - `workspace-relative-existing-file-target` 是 `file/edit` 与 `patch/apply:text_replace` 的 existing/exact owner authorization；它只授权 manifest 中已列出的
@@ -99,6 +100,7 @@ payload hash、operation identity 与 execution scope，handler 不能从自由�
 | 维度 | 可执行证据 | 覆盖结论 |
 | --- | --- | --- |
 | normal list/read/write/edit/preview/apply | [`module_test.go`](module_test.go)、[`biz/file_runtime_adapter_test.go`](biz/file_runtime_adapter_test.go) | 覆盖 create-only 与 existing-target selector、读写编辑及 patch 主路径 |
+| canonical scope preimage | [`biz/file_runtime_target_canonical_test.go`](biz/file_runtime_target_canonical_test.go)、`kernel/orchestrator/biz/runtime_implementation_work_scope_test.go` | 真实 File 空／唯一／完整多文件 scope、unsupported、canonical hash/当前 JSON 重载、只读与 stale revision；不替代 working binding、公开 activation 或终验权限 |
 | text edit applicability | [`edit_applicability_test.go`](edit_applicability_test.go) | `file/edit` 与 `patch/apply|patch/preview` text_replace 的真实 EventHub 矩阵：exact/byte-exact、空 replacement、occurrence、缺失/歧义/越界、baseHash/binary 与 duplicate；probe 零写入/receipt，owner constraint 不含执行或纠正权限 |
 | exact validation input delta | [`biz/validation_input_repair_test.go`](biz/validation_input_repair_test.go) | EventHub feasibility 的 exact/夹带断言/旧输入/旧诊断矩阵，零预检副作用，真实 apply、重启重放与 newer input 保护 |
 | target-bound parameter preimage | [`target_parameter_test.go`](target_parameter_test.go)、`workorchruntimecontract/runtime_target_parameter_binding_test.go` | 多文件 exact target hash、provider echo 拒绝、required/auxiliary 与 prospective 编译、catalog/manifest/wire hash、真实 owner restart、direct ingress drift 拒绝与外部修改后的 stale；read-only probe 零 effect |

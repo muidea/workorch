@@ -44,6 +44,9 @@ func RuntimeDurableDispatchUsage(active *RuntimeDispatchRecord, completed []Runt
 		if !found || seen[attempt.DispatchID] {
 			return nil, fmt.Errorf("missing or duplicate accepted dispatch in durable budget inventory: %q", attempt.DispatchID)
 		}
+		if dispatch.ImplementationWorkCommitment != nil && !RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt, dispatch) {
+			return nil, fmt.Errorf("implementation durable budget requires original exact accepted admission lineage")
+		}
 		seen[attempt.DispatchID] = true
 		ids, err := runtimeDurableDispatchCoverage(dispatch)
 		if err != nil {
@@ -65,6 +68,12 @@ func runtimeDurableDispatchCoverage(dispatch RuntimeDispatchRecord) ([]common.Co
 	}
 	if !durable {
 		return nil, nil
+	}
+	if dispatch.ImplementationWorkCommitment != nil {
+		if err := ValidateRuntimeImplementationWorkDispatchCommitment(dispatch); err != nil {
+			return nil, err
+		}
+		return []common.CoverageWorkItemID{dispatch.ImplementationWorkCommitment.CoverageWorkItemID}, nil
 	}
 	seen := make(map[common.CoverageWorkItemID]bool)
 	var ids []common.CoverageWorkItemID

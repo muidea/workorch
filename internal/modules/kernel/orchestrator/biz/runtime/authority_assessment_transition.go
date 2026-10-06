@@ -480,6 +480,7 @@ func sealedDispatchToRuntimeRecord(value SealedDispatch) runtimecontract.Runtime
 		ID: value.ID, WorkspaceID: value.WorkspaceID, RunID: value.RunID,
 		Transaction: value.Transaction, CandidateHash: value.CandidateHash, Candidate: value.Candidate,
 		CandidateManifestHash:              value.CandidateManifestHash,
+		ImplementationWorkCommitment:       cloneImplementationWorkCommitment(value.ImplementationWorkCommitment),
 		CoverageBindingHash:                value.CoverageBindingHash,
 		CoverageBindings:                   value.CoverageBindings,
 		OperationTargetAuthorizations:      value.OperationTargetAuthorizations,

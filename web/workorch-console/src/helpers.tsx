@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Alert, App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
 import type { AcceptanceProjection, AcceptanceSlice, ContextBundle, ContextCompressionCandidate, ContextEvidence, ContextSection, ConvergenceStatus, Decision, DoD, EventPayload, EventPayloadValue, EventRecord, ExecutionSection, GapBaseline, GapTodoItem, Goal, LLMContextBudgetSummary, LLMContextBudgetTrace, LLMUsageProviderModelBreakdown, LLMUsageSummary, LLMUsageTrace, MemoryRecallTrace, ProgressBlocker, ProgressItem, ProjectionStatus, RepairLoop, Result, Run, RunHeartbeat, RunObservability, RunSnapshot, RuntimeCapability, RuntimeTimelineItem, RuntimeAuditAssessment, RuntimeAuditCoverageBinding, RuntimeAuditDispatch, RuntimeAuditEvidence, RuntimeAuditOperationReceipt, RuntimeSemanticPlanningItem, ServiceConfiguration, Skill, Soul, TaskDecomposition, TaskDecompositionNode, TaskPlan, TaskProgress, UpdateLLMConfigurationRequest, UpdateWebSearchConfigurationRequest, UpdateWebSearchProviderConfiguration, WebSearchProviderTemplate, WebSourceTrace, WorkspaceExecutionIntent, WorkspaceExecutionIntentRequest, WorkspaceSetupDraft, WorkspaceSnapshot, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
+import { errorMessage } from './utils/errorMessage';
 import { workorchApi } from './api';
 import { modelLabels, progressKindLabels, recoveryModeLabels, repairLoopStateLabels, soulBindingStageLabels } from './utils/constants';
 import { stateLabel as canonicalStateLabel } from './utils/format';
@@ -85,9 +86,7 @@ export function shortId(value?: string, keep = 10) {
   return value.length > keep ? `${value.slice(0, keep)}…` : value;
 }
 
-export function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '操作失败';
-}
+export { errorMessage } from './utils/errorMessage';
 
 export function isNotFoundError(error: unknown) {
   return /(^|\s)404(\s|$)|not found|不存在/i.test(errorMessage(error));
@@ -115,24 +114,25 @@ export function workspaceProjectionRun(snapshot?: WorkspaceSnapshot) {
   if (!snapshot) {
     return undefined;
   }
-  const activeRun = snapshot.runs?.find((item) => item.id === snapshot.workspace.activeRunId);
+  const runs = snapshot.runs?.filter(item => item.workspaceId === snapshot.workspace.id);
+  const activeRun = runs?.find((item) => item.id === snapshot.workspace.activeRunId);
   if (activeRun) {
     return activeRun;
   }
-  const outcomeRun = snapshot.runs?.find((item) => item.id === snapshot.displayOutcome?.runId);
+  const outcomeRun = runs?.find((item) => item.id === snapshot.displayOutcome?.runId);
   if (outcomeRun) {
     return outcomeRun;
   }
-  const progressRun = snapshot.runs?.find((item) => item.id === snapshot.taskProgress?.runId);
+  const progressRun = runs?.find((item) => item.id === snapshot.taskProgress?.runId);
   if (progressRun) {
     return progressRun;
   }
-  return runStateSummary(snapshot.runs).latest;
+  return runStateSummary(runs).latest;
 }
 
 export function workspaceProjectionRunLabel(snapshot?: WorkspaceSnapshot) {
   const run = workspaceProjectionRun(snapshot);
-  return run ? `${run.id} / ${stateLabel(run.state)}` : '-';
+  return run ? `${run.id} / ${stateLabel(run.state)}` : '尚未启动执行';
 }
 
 export function projectionStatusSummary(status?: ProjectionStatus) {

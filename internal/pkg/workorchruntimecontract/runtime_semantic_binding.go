@@ -108,6 +108,9 @@ func compileRuntimeSemanticBindingsWithValidatedManifest(validated runtimeValida
 			return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding has no proof obligation for coverage %q", proofSet.CoverageWorkItemID)
 		}
 		evidenceObligation := resolveValidatedRuntimeSemanticEvidenceObligation(obligation)
+		if obligation.ImplementationWork != nil {
+			return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("implementation work cannot compile terminal coverage bindings")
+		}
 		if err := validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet, source, evidenceObligation.CurrentRequiredEvidenceKinds); err != nil {
 			return nil, RuntimeCWIReconciliationContract{}, err
 		}
@@ -149,7 +152,11 @@ func validateRuntimeSemanticPlanProofObligations(document RuntimeSemanticPlanDoc
 		evidenceObligation := resolveValidatedRuntimeSemanticEvidenceObligation(obligation)
 		sourceValue := runtimeSemanticProofObligationSourceFocus(obligation)
 		source := &sourceValue
-		if err := validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet, source, evidenceObligation.CurrentRequiredEvidenceKinds); err != nil {
+		if obligation.ImplementationWork != nil {
+			if err := validateRuntimeSemanticImplementationWorkProofSet(proofSet, obligation.ImplementationWork); err != nil {
+				return err
+			}
+		} else if err := validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet, source, evidenceObligation.CurrentRequiredEvidenceKinds); err != nil {
 			return err
 		}
 		currentDeclarationRef := RuntimeSemanticCurrentDeclarationRef(obligation)
@@ -217,6 +224,10 @@ func resolveValidatedRuntimeSemanticEvidenceObligation(obligation RuntimeSemanti
 	}
 	if obligation.ValidationFailureRepair != nil {
 		ret.Purpose = RuntimeSemanticEvidenceObligationValidationFailureRepair
+		ret.CurrentRequiredEvidenceKinds = []string{EvidenceKindStateChange}
+	}
+	if obligation.ImplementationWork != nil {
+		ret.Purpose = RuntimeSemanticEvidenceObligationImplementationWork
 		ret.CurrentRequiredEvidenceKinds = []string{EvidenceKindStateChange}
 	}
 	return ret

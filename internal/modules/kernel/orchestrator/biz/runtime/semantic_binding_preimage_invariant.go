@@ -183,6 +183,23 @@ func addRuntimeSemanticLedgerBindingPreimages(inventory *runtimeSemanticBindingP
 			// set). Any projection that tries to use it will fail the lookup below.
 			continue
 		}
+		if len(manifest.ProofObligations) == 1 && manifest.ProofObligations[0].ImplementationWork != nil {
+			// working proof 的 accepted provider/owner preimage 不编译 terminal binding。
+			// seal 后的 working authority 另由完整 ImplementationWork source join 验证。
+			if manifest.ProofObligations[0].ImplementationWork.PurposeChoiceOnly {
+				return fmt.Errorf("implementation purpose-choice cannot contain an accepted proof batch")
+			}
+			if err := document.ValidateAgainstManifest(manifest); err != nil {
+				return err
+			}
+			if document.BatchID != batch.BatchID || document.BatchSequence != batch.Sequence || batch.DocumentHash != runtimecontract.StableRuntimeSemanticPlanDocumentHash(document) || !sameCoverageIDs(document.BatchCoverageWorkItemIDs, batch.CoverageWorkItemIDs) {
+				return fmt.Errorf("implementation accepted batch differs from original provider document")
+			}
+			if err := runtimecontract.ValidateRuntimeSemanticFeasibilitySet(manifest, document, feasibilities, true); err != nil {
+				return err
+			}
+			continue
+		}
 		focuses, _, err := compileRuntimeSemanticAcceptedBatchBindings(manifest, batch, document, feasibilities)
 		if err != nil {
 			return fmt.Errorf("runtime aggregate semantic binding preimage %s batch %q: %w", label, batch.BatchID, err)

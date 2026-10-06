@@ -52,6 +52,24 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 	if json.Unmarshal([]byte(contents["C4"]), &tail) != nil || !reflect.DeepEqual(tail.ExecutionBudget, context.ExecutionBudget) {
 		missing = append(missing, "P3.semantic_execution_budget")
 	}
+	for _, obligation := range manifest.ProofObligations {
+		if obligation.ImplementationWork == nil {
+			continue
+		}
+		// work choice 与 proof 两支均独立反证完整 C3 投影；模型不得猜测遗漏的 scope。
+		projection, err := runtimeSemanticManifestForProvider(manifest, context.PlanStep, context.BatchCoverageWorkItemIDs)
+		if err != nil {
+			return err
+		}
+		var actual runtimeSemanticAuthorityProjection
+		if json.Unmarshal([]byte(contents["C3"]), &actual) != nil || !reflect.DeepEqual(actual.Manifest, projection) {
+			missing = append(missing, "P0.implementation_work_preimage")
+		}
+		if contents["C0"] != runtimeSemanticPlanContractCatalog() {
+			missing = append(missing, "P0.implementation_work_static_contract")
+		}
+		break
+	}
 	if context.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
 		projection, err := runtimeSemanticManifestForProvider(manifest, context.PlanStep, context.BatchCoverageWorkItemIDs)
 		if err != nil {

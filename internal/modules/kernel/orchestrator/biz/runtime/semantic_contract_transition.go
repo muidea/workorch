@@ -276,6 +276,15 @@ func (c *planningTransactionComponent) sealSemanticContract(ctx context.Context,
 			return aggregate, nil
 		}
 	}
+	if current, workErr := CurrentRuntimeImplementationWorkReservation(aggregate); workErr != nil {
+		return RuntimeAggregate{}, workErr
+	} else if current != nil && current.ScopeObservation != nil && ledger.Manifest != nil {
+		for _, obligation := range ledger.Manifest.ProofObligations {
+			if obligation.ImplementationWork != nil {
+				return c.sealImplementationWorkingBinding(ctx, aggregate, *current, ledger)
+			}
+		}
+	}
 	if ledger.Phase == runtimecontract.RuntimeSemanticPlanningSealed {
 		if aggregate.Facts.ReconciliationContract.BindingSetHash != ledger.SealedBindingSetHash {
 			return RuntimeAggregate{}, fmt.Errorf("%w: sealed semantic ledger and reconciliation contract differ", common.ErrConflict)

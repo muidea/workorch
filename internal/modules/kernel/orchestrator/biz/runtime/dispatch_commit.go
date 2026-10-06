@@ -31,6 +31,7 @@ type SealedDispatch struct {
 	// CandidateManifestHash and OperationTargetAuthorizations are the exact
 	// immutable manifest identity/target projection used by final SM-3 seal.
 	CandidateManifestHash         string
+	ImplementationWorkCommitment  *runtimecontract.RuntimeImplementationWorkRound
 	CoverageBindingHash           string
 	CoverageBindings              []runtimecontract.CoverageEvidenceBinding
 	OperationTargetAuthorizations []runtimecontract.RuntimeDispatchOperationTargetAuthorization
@@ -102,7 +103,8 @@ type DispatchStepInput struct {
 // to the one SM-3 seal transaction.  Neither field may be injected or rehashed
 // after SealDispatch returns.
 type RuntimeDispatchPreSealAuthority struct {
-	RepairCommitment *runtimecontract.RuntimeDispatchRepairCommitment
+	ImplementationWorkCommitment *runtimecontract.RuntimeImplementationWorkRound
+	RepairCommitment             *runtimecontract.RuntimeDispatchRepairCommitment
 	// RepairCommitmentOriginDispatchID is empty for an origin seal. Governance
 	// resume sets it to the exact committed source dispatch whose immutable
 	// commitment is inherited before the new hash is computed.
@@ -158,6 +160,9 @@ type RuntimeAggregate struct {
 	Definition            runtimecontract.RuntimeDefinitionContext
 	Facts                 runtimecontract.RuntimeFacts
 	SemanticPlanning      runtimecontract.RuntimeSemanticPlanningLedger
+	// ImplementationWork retains bounded references to the same semantic,
+	// candidate, dispatch and receipt transactions. It never grants terminal credit.
+	ImplementationWork runtimecontract.RuntimeImplementationWorkLedger
 	// Reconciliation is SM-2-owned request/batch lineage. Capability owner
 	// observations enter only through RuntimeInternalEvent and never mutate
 	// Facts directly.
@@ -292,6 +297,14 @@ func SealDispatchWithManifestAndPreSealAuthority(
 	authority RuntimeDispatchPreSealAuthority,
 ) (SealedDispatch, error) {
 	manifest = manifest.Normalized()
+	if manifest.ImplementationWorkingBinding != nil {
+		work := authority.ImplementationWorkCommitment
+		if work == nil || work.WorkingBinding == nil || work.WorkingBinding.Hash != manifest.ImplementationWorkingBinding.Hash || work.DispatchID != "" || work.CompletedReceiptSetHash != "" || work.Validate() != nil || authority.RepairCommitment != nil || authority.AssessmentAuthorityInput != nil || authority.GovernanceResume != nil {
+			return SealedDispatch{}, fmt.Errorf("implementation dispatch has no exact original pre-seal working commitment")
+		}
+	} else if authority.ImplementationWorkCommitment != nil {
+		return SealedDispatch{}, fmt.Errorf("unexpected implementation work dispatch authority")
+	}
 	for _, authorization := range manifest.Operations {
 		if authorization.InputRepair == nil {
 			continue
@@ -467,6 +480,7 @@ func sealDispatchWithActivationAndFeasibilities(
 		CandidateHash:                      candidateHash,
 		Candidate:                          candidate,
 		CandidateManifestHash:              strings.TrimSpace(candidateManifestHash),
+		ImplementationWorkCommitment:       cloneImplementationWorkCommitment(authority.ImplementationWorkCommitment),
 		CoverageBindingHash:                runtimecontract.StableRuntimeCoverageEvidenceBindingSnapshotHash(coverageBindings),
 		CoverageBindings:                   coverageBindings,
 		OperationTargetAuthorizations:      runtimecontract.CloneRuntimeDispatchOperationTargetAuthorizations(operationTargetAuthorizations),

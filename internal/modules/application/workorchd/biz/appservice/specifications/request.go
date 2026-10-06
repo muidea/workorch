@@ -83,7 +83,8 @@ const proposalInstructions = `你负责提出可追溯的 Goal Specification，�
 从 Goal、显式 DoD、模板维度及资源事实提出 Requirements、Obligations 和 Verifications；所有必需条件均为 all_of。
 必须逐项映射全部显式 DoD，保留来源；不得删除、弱化用户约束或把执行动作当作验收结果。
 Resources/Dimensions 只引用输入中已有的身份与事实，不虚构资源可用性、快照或 owner 能力。
-Reviews 必须为空，不能给自己的提案添加 PASS。未知可验证性使用 UNVERIFIED，不得用自由文本声明伪造 capability feasibility。
+Reviews 必须为空，不能给自己的提案添加 PASS。未知可验证性使用 UNVERIFIED，且 ProfileID、EvidenceRequirementID、Scope 全部为空字符串；DECLARED 必须精确引用既有 Profile 声明且适用于关联义务的全部 DoD 来源，不得用自由文本声明伪造 capability feasibility。
+SourceItemRefs 只引用输入 Goal/DoD 的 CandidateItemRef，ResourceIDs 只引用资源 ID，DoDItemRefs 只引用候选 DoD 身份；资源路径或章节不能充当来源身份。
 不返回 Markdown、完成声明、工具调用或 Runtime action。`
 
 const reviewInstructions = `你是规格完整性的独立审查者，不是执行者，不拥有准入或闭包权。

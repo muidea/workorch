@@ -93,6 +93,23 @@ func workspaceDTOWithAuthoringSummary(item *workspacemodel.Workspace) *workspace
 		return dto
 	}
 	state, failurePhase, failureCode, reviewCount := item.DefinitionAuthoring.CurrentAuthoringSummary()
+	if state == "reviewed" {
+		// 列表与详情使用同一封存 Profile 边界；六审 PASS 不证明自报绑定适用。
+		state = "review_blocked"
+		for _, request := range item.DefinitionAuthoring.SpecificationRequests {
+			if request.Proposal == nil {
+				continue
+			}
+			derivation, specification, err := item.DefinitionAuthoring.ConfirmableSpecification(request.DerivationPermitID, request.Proposal.ContentHash())
+			if err != nil {
+				continue
+			}
+			if validateAuthoringVerificationAgainstSealedTemplate(item.DefinitionAuthoring.TemplateSnapshotHash, derivation, specification) == nil {
+				state = "reviewed"
+			}
+			break
+		}
+	}
 	if state == "" {
 		return dto
 	}

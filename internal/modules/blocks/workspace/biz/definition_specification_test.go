@@ -514,7 +514,7 @@ func TestSpecificationLedgerBeginReplayAfterReserve(t *testing.T) {
 func TestSpecificationLedgerCompiledSixCriticAdmission(t *testing.T) {
 	f, close := openSpecificationLedgerFixture(t, t.TempDir())
 	defer close()
-	f.candidate.RuntimeProfileContracts = []runtimecontract.RuntimeProfileContract{{ID: "generic", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{ID: "proof", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Description: "declaration"}}}}
+	f.candidate.RuntimeProfileContracts = []runtimecontract.RuntimeProfileContract{{ID: "generic", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{ID: "dod-001", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Description: "declaration"}}}}
 	f.candidate.RuntimeProfileContractsHash = runtimecontract.StableRuntimeProfileContractsHash(f.candidate.RuntimeProfileContracts)
 	f.candidate = f.candidate.WithHash()
 	f.begin.Candidate = f.candidate
@@ -526,7 +526,7 @@ func TestSpecificationLedgerCompiledSixCriticAdmission(t *testing.T) {
 		Dimensions:    []workspacemodel.GoalSpecificationDimension{{ID: "dimension", Required: true, Activated: true}},
 		Requirements:  []workspacemodel.GoalSpecificationRequirement{{ID: "requirement", DimensionID: "dimension", Required: true, SourceKind: workspacemodel.GoalRequirementUserExplicit, SourceItemRefs: []string{f.candidate.GoalInput.CandidateItemRef}, Text: "deliver"}},
 		Obligations:   []workspacemodel.GoalSpecificationObligation{{ID: "obligation", RequirementID: "requirement", DoDItemRefs: []string{f.candidate.DoDInputs[0].CandidateItemRef}, Text: "verify"}},
-		Verifications: []workspacemodel.GoalSpecificationVerification{{ID: "verification", ObligationID: "obligation", Status: workspacemodel.GoalVerificationDeclared, Declaration: "exact proof", ProfileID: "generic", EvidenceRequirementID: "proof", Scope: "dodItem"}},
+		Verifications: []workspacemodel.GoalSpecificationVerification{{ID: "verification", ObligationID: "obligation", Status: workspacemodel.GoalVerificationDeclared, Declaration: "exact proof", ProfileID: "generic", EvidenceRequirementID: "dod-001", Scope: "dodItem"}},
 	}
 	proposalID := specLedgerIdentity(f.candidate, workspacemodel.DefinitionSpecificationProposal, "", "proposal", "")
 	proposalPermit, err := f.owner.reserveDefinitionSpecificationRequest(f.ctx, workspaceevents.ReserveDefinitionSpecificationRequestCommand{Identity: proposalID})

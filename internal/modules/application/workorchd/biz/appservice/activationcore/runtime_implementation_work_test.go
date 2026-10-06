@@ -107,9 +107,11 @@ func TestCompileRuntimeCoverageInstantiatesImplementationWorkWithoutChangingTerm
 			if withSeed.Hash == withoutSeed.Hash || withSeed.PolicyHash == withoutSeed.PolicyHash {
 				t.Fatal("sealed seed identity ignored the policy source")
 			}
-			// Compilable declarations remain deliberately unavailable for Runtime
-			// activation until working-binding/receipt/re-observation is complete.
-			if err := activation.ExecutionContract.Validate(); !errors.Is(err, runtimecontract.ErrRuntimeImplementationWorkUnavailable) {
+			// 纯声明校验不授执行权；新 activation 必须独立经过 executable gate。
+			if err := activation.ExecutionContract.Validate(); err != nil {
+				t.Fatalf("合法声明被纯合同校验拒绝: %v", err)
+			}
+			if err := activation.ExecutionContract.ValidateExecutableAdmission(); !errors.Is(err, runtimecontract.ErrRuntimeImplementationWorkUnavailable) {
 				t.Fatalf("declaration projection bypassed execution gate: %v", err)
 			}
 			compiled.DefinitionFocuses[0].ImplementationWorkPolicy.TargetSelectorCandidateRefs[0] = "changed"

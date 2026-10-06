@@ -11,7 +11,7 @@ import (
 func TestProposalCannotApproveItselfOrChangeGoal(t *testing.T) {
 	goal := workspace.DefinitionCandidateItem{CandidateItemRef: "goal:1", Text: "生成文档并保留来源", SourceIdentity: "goal:1@1"}
 	dod := []workspace.DefinitionCandidateItem{{CandidateItemRef: "dod:1", Text: "来源可追溯", SourceIdentity: "dod:1@1"}}
-	spec := workspace.GoalSpecification{Version: 1, GoalItemRef: goal.CandidateItemRef, GoalTextHash: workspace.StableDefinitionTextHash(goal.Text)}
+	spec := workspace.GoalSpecification{Version: 1, GoalItemRef: goal.CandidateItemRef, GoalTextHash: workspace.StableDefinitionTextHash(goal.Text), Resources: []workspace.GoalSpecificationResource{}, Dimensions: []workspace.GoalSpecificationDimension{}, Requirements: []workspace.GoalSpecificationRequirement{}, Obligations: []workspace.GoalSpecificationObligation{}, Verifications: []workspace.GoalSpecificationVerification{}, Reviews: []workspace.GoalSpecificationCompletenessReview{}}
 	encode := func(value workspace.GoalSpecification) []byte {
 		t.Helper()
 		data, err := json.Marshal(struct {
@@ -58,7 +58,7 @@ func TestReviewRequiresExactKindHashAndTriState(t *testing.T) {
 	spec := workspace.GoalSpecification{Version: 1, GoalItemRef: "goal:1", GoalTextHash: "hash"}
 	kind := workspace.GoalReviewRegression
 	for _, status := range []string{workspace.GoalReviewPass, workspace.GoalReviewFail, workspace.GoalReviewUnknown} {
-		review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: status, SpecificationHash: spec.ContentHash()}
+		review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: status, SpecificationHash: spec.ContentHash(), EvidenceRefs: []string{}, RequirementIDs: []string{}}
 		payload, err := json.Marshal(struct {
 			Review workspace.GoalSpecificationCompletenessReview `json:"review"`
 		}{review})

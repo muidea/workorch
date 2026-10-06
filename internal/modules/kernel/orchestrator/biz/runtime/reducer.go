@@ -53,9 +53,20 @@ func reduceAndSealRuntimeState(
 			}
 			confirmationPending = obligation.OwnerModuleID != ""
 		}
-		decision, err = reduce(facts, proofLineage, confirmationPending)
-		if err != nil {
-			return runtimecontract.RuntimeDecision{}, false, err
+		if lineage != nil {
+			current := *lineage
+			current.Facts = facts
+			if workDecision, handled, workErr := reduceImplementationWork(current); workErr != nil {
+				return runtimecontract.RuntimeDecision{}, false, workErr
+			} else if handled {
+				decision, eventHandled = workDecision, true
+			}
+		}
+		if !eventHandled {
+			decision, err = reduce(facts, proofLineage, confirmationPending)
+			if err != nil {
+				return runtimecontract.RuntimeDecision{}, false, err
+			}
 		}
 	}
 	attempt := 0
@@ -258,6 +269,13 @@ func reduceOwnerInternalEvent(
 		}
 		closureID = commitment.Closure.ID
 		purpose = commitment.Purpose
+	}
+	if source.ImplementationWorkCommitment != nil {
+		commitment := source.ImplementationWorkCommitment
+		if source.RepairCommitment != nil || commitment.WorkingBinding == nil || len(source.CoverageBindings) != 0 || runtimecontract.ValidateRuntimeImplementationWorkDispatchCommitment(sealedDispatchToRuntimeRecord(source)) != nil {
+			return runtimecontract.RuntimeDecision{}, false, fmt.Errorf("implementation governance continuation lost exact no-credit working seal")
+		}
+		return runtimecontract.RuntimeDecision{State: runtimecontract.ConvergenceStateNeedStateChange, Focus: facts.Focus, RequiredOutput: runtimecontract.RequiredOutputContract{ImplementationWorkBindingHash: commitment.WorkingBinding.Hash, AcceptedKinds: operationKinds, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, AcceptedEffectScopes: effectScopes, RequiredEffectScopes: effectScopes, TargetRefs: targetRefs, RequiredOperationSequence: requiredSequence}}, true, nil
 	}
 	return runtimecontract.RuntimeDecision{
 		State: runtimecontract.ConvergenceStateNeedStateChange,

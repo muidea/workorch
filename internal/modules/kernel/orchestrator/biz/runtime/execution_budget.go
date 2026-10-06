@@ -297,8 +297,11 @@ func joinRuntimeOperationExecutionBudget(aggregate *RuntimeAggregate, operation 
 	resultRef := "runtime-receipt/" + execution.ExecutionKey
 	resultHash := "runtime-operation-outcome-unknown/" + scopeRef
 	confirmed, unknown := int64(1), int64(0)
-	if outcomeUnknown {
+	if outcomeUnknown || receipt != nil && receipt.Outcome == runtimecontract.RuntimeOperationOutcomeUnknown {
 		confirmed, unknown = 0, 1
+		if receipt != nil {
+			resultHash = runtimecontract.StableRuntimeOperationReceiptHash(*receipt)
+		}
 	} else {
 		if receipt == nil {
 			return false, fmt.Errorf("runtime operation budget confirmation requires receipt")

@@ -16,7 +16,11 @@ Workspace owner 持久保存创作输入与请求身份；派生验收要求后�
 
 提案与独立审查使用不同的版本化输出合同：顶层分别仅为 `specification` 与 `review`。请求提供完整 JSON Schema，根对象及所有嵌套对象均禁止未知字段；字段名、数组项、类型和枚举必须与 typed DTO 一致。提案的 `Reviews` 必须为空数组，审查结论只能来自独立审查事务。`all_of` 是现有条件的合取语义，不授权模型添加 `ConditionMode` 或其他合同之外的字段。
 
-稳定 schema 与精确字段说明放入 C0，当前 Goal、候选验收项、资源和身份放入动态请求。Verification 使用 `ObligationID`、`Declaration`、`Status`、`ProfileID`、`EvidenceRequirementID`、`Scope` 等既有字段；`DECLARED` 必须绑定可信 Profile 声明，不能把自由文本的预期证据当作声明身份。
+稳定 schema 与精确字段说明放入 C0，当前 Goal、候选验收项、资源和身份放入动态请求。派生、提案和审查均使用当前 DTO 的闭合字段形状：所有必填字段必须出现，字段名大小写精确，数组、对象和标量均不得为 `null`；布尔值与整数不得使用字符串、浮点数或指数表示替代。解析在 256 KiB、32 层的边界内拒绝未知／重复字段、多 root、尾随内容、非法 UTF-8 和孤立 UTF-16 surrogate，不提取 fenced JSON，不修复或改写 provider 原文。
+
+`SourceItemRefs` 仅引用持久 Goal／候选验收项身份，`ResourceIDs` 仅引用当前资源 ID，`DoDItemRefs` 仅引用候选验收项；资源章节、路径或 CWI 身份不能替代候选来源。Verification 使用 `ObligationID`、`Declaration`、`Status`、`ProfileID`、`EvidenceRequirementID`、`Scope` 等既有字段；`UNVERIFIED` 的三个绑定字段必须全空，`DECLARED` 必须绑定可信 Profile 声明，不能把自由文本的预期证据当作声明身份。
+
+无绑定 `UNVERIFIED` 可以保存在草稿中，但即使六类审查全部 PASS，也必须显示为 `review_blocked`，不得确认或物化正式 Goal／DoD。确认要求所有 Verification 为 `DECLARED` 且声明非空，每个 Obligation 至少有一份声明。Workspace owner 在提案 completion、确认准备及 prepared 恢复时独立核对封存 Template 实际编译的 Profile，正式准入再核对当前 Workspace／Template 实际合同。列表摘要与详情也须核对该封存 Profile，不能因六审查 PASS 把不适用的自报声明显示为已审查或可确认。声明适用性必须覆盖该义务的全部确认后 DoD source，并在最终合并策略中保留贡献；声明通过不代表当前 capability／owner fact 已就绪，也不授予执行 proof 或终验 credit。
 
 provider 原生 structured output 仅在能力明确支持时启用；不支持时仍提供完整提示合同并执行相同本地严格校验，不自动 fallback 或重发。显式 schema 构造错误必须明确失败，不能静默省略约束。JSON Schema 只约束结构，不替代原文保真、严格解析、来源／资源／Profile 校验、六类审查、用户确认或 owner 准入。
 

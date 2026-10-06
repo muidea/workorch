@@ -121,7 +121,7 @@ func prepareActiveDispatchExecution(ctx context.Context, component *candidateDis
 	}
 	// Owner execution is downstream of the same canonical CWI fence used by
 	// candidate, dispatch, receipt, and evidence admission.
-	if err := validateCurrentCWIBindingFenceForEvidenceCommit(aggregate.Facts); err != nil {
+	if err := validateRuntimeExecutionPurposeFence(aggregate); err != nil {
 		return nil, fmt.Errorf("%w: operation execution binding fence: %v", common.ErrConflict, err)
 	}
 	dispatch := *aggregate.ActiveDispatch

@@ -33,6 +33,7 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 		RequiredOutput            runtimecontract.RequiredOutputContract
 		Terminal                  *runtimecontract.RuntimeTerminalDecision
 		SemanticPlanning          runtimecontract.RuntimeSemanticPlanningLedger
+		ImplementationWork        runtimecontract.RuntimeImplementationWorkLedger
 		CandidateAdmissions       []runtimeConvergenceCandidateAdmission
 		ActiveDispatch            *runtimeConvergenceDispatchProgress
 		CompletedDispatches       []runtimeConvergenceDispatchProgress
@@ -49,6 +50,7 @@ func RuntimeConvergenceProgressSignature(aggregate RuntimeAggregate) string {
 		State:          decision.State,
 		RequiredOutput: decision.RequiredOutput.Normalized(), Terminal: decision.Terminal,
 		SemanticPlanning:      aggregate.SemanticPlanning.Clone(),
+		ImplementationWork:    aggregate.ImplementationWork.Clone(),
 		GovernanceRequests:    append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), aggregate.GovernanceRequests...),
 		GovernanceResolutions: runtimecontract.CloneRuntimeGovernanceResolutionRecords(aggregate.GovernanceResolutions),
 	}

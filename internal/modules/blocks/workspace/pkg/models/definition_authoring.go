@@ -86,6 +86,8 @@ func (r DefinitionAuthoringRecord) CurrentAuthoringSummary() (state, failurePhas
 					if !hasCurrentPreparationDiagnostic(r, derivation) {
 						if _, _, err := r.ConfirmableSpecification(derivation.PermitID, proposalHash); err == nil {
 							state = "reviewed"
+						} else if reviewCount == len(goalReviewKinds) {
+							state = "review_blocked"
 						}
 					}
 				}

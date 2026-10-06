@@ -1,4 +1,4 @@
-"""The release packager cannot bypass missing deployed convergence evidence."""
+"""发布打包不得绕过缺失的部署收敛证据。"""
 
 from pathlib import Path
 import subprocess
@@ -28,9 +28,36 @@ class ReleaseConvergenceGateTest(unittest.TestCase):
                         cwd=repo, capture_output=True, text=True, timeout=10, check=True,
                     )
                     self.assertIn(
-                        f"go test {race}-timeout={timeout} -count=1 ./internal/pkg/workorchruntimecontract",
+                        f"go test -p=1 {race}-timeout={timeout} -count=1 ./internal/pkg/workorchruntimecontract",
                         command.stdout,
                     )
+
+    def test_implementation_work_readiness_requires_public_fullflow_and_each_package(self):
+        repo = Path(__file__).resolve().parent.parent
+        result = subprocess.run(
+            ["make", "--no-print-directory", "-n", "verify-runtime-implementation-work-readiness"],
+            cwd=repo, capture_output=True, text=True, timeout=10, check=True,
+        )
+        commands = result.stdout.splitlines()
+        self.assertEqual(len(commands), 3)
+        for command in commands:
+            self.assertIn("bash scripts/lib/go-test-must-run.sh --each-package", command)
+            self.assertIn("-count=1", command)
+        self.assertIn("./internal/modules/kernel/orchestrator/biz/runtime", commands[0])
+        self.assertIn("-timeout=15m", commands[0])
+        self.assertIn("CoverageEvidenceBindingCannotConjoinIndependentValidationRecipes", commands[1])
+        self.assertIn("ValidationObservationCannotBorrowPassedChecksAcrossRecipes", commands[1])
+        self.assertIn("./internal/integration", commands[2])
+        self.assertIn("PublicAuthoringFullFlow", commands[2])
+        self.assertIn("FullflowUnsupportedCombinationStaysClosed", commands[2])
+        self.assertIn("CommitEvidence.*", commands[2])
+        self.assertIn("-timeout=15m", commands[2])
+        self.assertNotIn("||", result.stdout)
+        dependency = subprocess.run(
+            ["make", "--no-print-directory", "-n", "verify-ci-mvp"],
+            cwd=repo, capture_output=True, text=True, timeout=10, check=True,
+        )
+        self.assertTrue(dependency.stdout.startswith(result.stdout), "CI 验收不得移除或后置完整 readiness")
 
     def test_missing_evidence_stops_before_packaging_or_dependency_install(self):
         for jobs in (1, 2):

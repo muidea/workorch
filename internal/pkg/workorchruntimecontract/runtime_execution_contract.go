@@ -93,9 +93,6 @@ func (c RuntimeExecutionContract) Validate() error {
 	if err := ValidateRuntimeProfileContracts(c.ProfileContracts); err != nil {
 		return err
 	}
-	if err := ValidateRuntimeImplementationWorkAvailability(c.ProfileContracts); err != nil {
-		return err
-	}
 	if c.AcceptanceSlicePolicy != nil {
 		if err := c.AcceptanceSlicePolicy.Validate(); err != nil {
 			return err
@@ -107,6 +104,15 @@ func (c RuntimeExecutionContract) Validate() error {
 		}
 	}
 	return nil
+}
+
+// ValidateExecutableAdmission 用于新 activation ingress；内部重载/CAS 校验
+// 保留纯 shape/source 合同，不能借纯校验结果绕过外部 availability。
+func (c RuntimeExecutionContract) ValidateExecutableAdmission() error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	return ValidateRuntimeImplementationWorkAvailability(c.ProfileContracts)
 }
 
 func SameRuntimeExecutionContract(left RuntimeExecutionContract, right RuntimeExecutionContract) bool {

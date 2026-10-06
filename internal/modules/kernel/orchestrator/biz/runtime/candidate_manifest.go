@@ -18,6 +18,16 @@ func BuildRuntimeCandidateContractManifestForAggregate(aggregate RuntimeAggregat
 	ownerFacts := runtimecontract.RuntimeCandidateManifestOwnerFactsFromContext(
 		runtimecontract.RuntimeCandidateContextForDecision(aggregate.Facts, aggregate.Decision, nil),
 	)
+	if aggregate.Decision.RequiredOutput.ImplementationWorkBindingHash != "" {
+		round, err := CurrentRuntimeImplementationWorkReservation(aggregate)
+		if err != nil || round == nil || round.WorkingBinding == nil || round.WorkingBinding.Hash != aggregate.Decision.RequiredOutput.ImplementationWorkBindingHash {
+			return runtimecontract.RuntimeCandidateContractManifest{}, fmt.Errorf("implementation candidate has no private working commitment")
+		}
+		copy := round.WorkingBinding.Clone()
+		ownerFacts.ImplementationWorkingBinding = &copy
+		ownerFacts.TargetSelection = nil
+		ownerFacts.OperationAdmissibilities = []runtimecontract.RuntimeOperationAdmissibility{copy.OwnerCatalog.Clone()}
+	}
 	if aggregate.Decision.State == runtimecontract.ConvergenceStateNeedAssessment {
 		focus := aggregate.Decision.Focus.Normalized()
 		if _, err := runtimecontract.RuntimeAssessmentSourceProjection(aggregate.Facts, focus.ID, focus.CoverageWorkItemIDs); err != nil {

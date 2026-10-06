@@ -12,7 +12,7 @@ import (
 // ParseProposal decodes a complete specification proposal, not an admitted
 // definition. Reviews must be supplied by separate review transactions.
 func ParseProposal(payload []byte, goal workspace.DefinitionCandidateItem, dod []workspace.DefinitionCandidateItem) (workspace.GoalSpecification, error) {
-	if err := validateDocumentShape(payload); err != nil {
+	if err := validateCurrentDocument(payload, proposalShape); err != nil {
 		return workspace.GoalSpecification{}, err
 	}
 	var document struct {
@@ -45,7 +45,7 @@ func ParseReview(payload []byte, kind string, specification workspace.GoalSpecif
 	if !slices.Contains(ReviewKinds(), kind) {
 		return workspace.GoalSpecificationCompletenessReview{}, fmt.Errorf("unknown specification review kind")
 	}
-	if err := validateDocumentShape(payload); err != nil {
+	if err := validateCurrentDocument(payload, objectShape(map[string]documentShape{"review": reviewShape})); err != nil {
 		return workspace.GoalSpecificationCompletenessReview{}, err
 	}
 	var document struct {

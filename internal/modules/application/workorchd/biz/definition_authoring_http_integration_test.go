@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -559,7 +560,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			t.Fatalf("重启后失败请求身份被替换或重新调用 provider: %+v", recovered)
 		}
 		request := recovered.Requests[requestIndex]
-		if request.PermitID != failed.Requests[requestIndex].PermitID || request.Diagnostic == nil || *request.Diagnostic != *failed.Requests[requestIndex].Diagnostic {
+		if request.PermitID != failed.Requests[requestIndex].PermitID || request.Diagnostic == nil || !reflect.DeepEqual(request.Diagnostic, failed.Requests[requestIndex].Diagnostic) {
 			t.Fatal("重启重放丢失原 permit 或原始诊断元信息")
 		}
 		assertNoRuns()
@@ -721,5 +722,5 @@ func authoringHTTPProposal(t *testing.T, record *workspace.DefinitionAuthoringRe
 	if err != nil {
 		t.Fatal(err)
 	}
-	return proposal
+	return authoringWireSpecificationFixture(proposal)
 }

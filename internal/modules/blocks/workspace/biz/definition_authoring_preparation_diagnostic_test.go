@@ -312,7 +312,7 @@ func TestPreparationDiagnosticSuccessorArchiveAndCurrentScope(t *testing.T) {
 	ctx, root := context.Background(), t.TempDir()
 	owners := openFileDefinitionAdmissionOwners(t, root)
 	defer func() { owners.close() }()
-	confirmation := seedReviewedAuthoringConfirmation(t, owners, "ws-prep-history")
+	confirmation := seedReviewedAuthoringConfirmationWithAdmissionBlocker(t, owners, "ws-prep-history")
 	current, err := owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
 	if err != nil {
 		t.Fatal(err)

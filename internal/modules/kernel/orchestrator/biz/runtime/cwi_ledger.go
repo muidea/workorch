@@ -1029,6 +1029,35 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 		return RuntimeAggregate{}, err
 	}
 	manifestHash = strings.TrimSpace(manifestHash)
+	if ledger := aggregate.SemanticPlanning; ledger.Manifest != nil && ledger.Manifest.Hash == manifestHash && ledger.CoverageOrderDocument != nil && sameCoverageIDs(ledger.CoverageOrderDocument.CoverageOrder, acceptedOrder) && ledger.CoverageOrderDocument.ImplementationPurpose != "" {
+		expected := aggregate.StateRevision
+		changed, purposeErr := projectImplementationPurpose(&aggregate)
+		if purposeErr != nil {
+			return RuntimeAggregate{}, purposeErr
+		}
+		if !changed {
+			return aggregate, nil
+		}
+		aggregate.Facts, aggregate.Decision, purposeErr = reduceRuntimeAggregateWithDirective(aggregate, aggregate.Facts, nil)
+		if purposeErr != nil {
+			return RuntimeAggregate{}, purposeErr
+		}
+		aggregate.StateRevision++
+		if err := c.transitions.Commit(ctx, aggregate, expected); err != nil {
+			return RuntimeAggregate{}, err
+		}
+		return aggregate, nil
+	}
+	for _, choice := range aggregate.ImplementationWork.PurposeChoices {
+		if choice.SemanticManifestHash == manifestHash {
+			for _, retired := range aggregate.SemanticPlanning.History {
+				if retired.Reason == runtimecontract.RuntimeSemanticPlanningRetirementImplementationPurpose && retired.Snapshot.Manifest != nil && retired.Snapshot.Manifest.Hash == manifestHash && retired.Snapshot.CoverageOrderDocument != nil && sameCoverageIDs(retired.Snapshot.CoverageOrderDocument.CoverageOrder, acceptedOrder) {
+					return aggregate, nil
+				}
+			}
+			return RuntimeAggregate{}, common.ErrConflict
+		}
+	}
 	projectionOrder := append([]common.CoverageWorkItemID(nil), acceptedOrder...)
 	var generationEligible []common.CoverageWorkItemID
 	semanticGenerationProjection := false

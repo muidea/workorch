@@ -32,6 +32,9 @@ type RuntimeDispatchRecord struct {
 	// authority was projected into OperationTargetAuthorizations. It is retained
 	// across recovery/governance continuation and never rebuilt from current facts.
 	CandidateManifestHash string
+	// ImplementationWorkCommitment is the immutable pre-dispatch round/binding
+	// snapshot; dispatch/progress/completion fields inside it remain empty.
+	ImplementationWorkCommitment *RuntimeImplementationWorkRound
 	// CoverageBindings is the complete immutable binding projection selected by
 	// the exact candidate manifest.  Evidence adjudication and recovery consume
 	// this dispatch-local snapshot, never mutable current Focus state.
@@ -164,9 +167,10 @@ type RuntimeCandidateAttemptRecord struct {
 	// AdmissionRepairCommitment is the accepted admission's independent copy of
 	// the dispatch repair purpose.  It cannot be reconstructed from a later
 	// mutable FailureTarget, RepairDirective or confirmation scan.
-	RepairCommitmentHash      string
-	AdmissionRepairCommitment *RuntimeDispatchRepairCommitment
-	DispatchAuthorityHash     string
+	RepairCommitmentHash                  string
+	AdmissionRepairCommitment             *RuntimeDispatchRepairCommitment
+	AdmissionImplementationWorkCommitment *RuntimeImplementationWorkRound
+	DispatchAuthorityHash                 string
 	// Proposal is the strictly decoded, unsealed candidate persisted after
 	// provider generation. A failed attempt may retain a manifest-rejected value
 	// solely as its finite correction frontier; only a pending proposal may be
@@ -222,6 +226,10 @@ func (r RuntimeCandidateAttemptRecord) Normalized() RuntimeCandidateAttemptRecor
 	if r.AdmissionRepairCommitment != nil {
 		value := r.AdmissionRepairCommitment.Normalized()
 		r.AdmissionRepairCommitment = &value
+	}
+	if r.AdmissionImplementationWorkCommitment != nil {
+		value := r.AdmissionImplementationWorkCommitment.Clone()
+		r.AdmissionImplementationWorkCommitment = &value
 	}
 	r.DispatchAuthorityHash = strings.TrimSpace(r.DispatchAuthorityHash)
 	return r
@@ -292,6 +300,9 @@ type RuntimeStateRecord struct {
 	// SemanticPlanning is the sole persisted semantic-plan request/proposal/
 	// feasibility/seal ledger. Run stores it opaquely with the aggregate.
 	SemanticPlanning RuntimeSemanticPlanningLedger
+	// ImplementationWork is the bounded Orchestrator-owned work transaction
+	// lineage. Run stores it opaquely with the one Runtime aggregate.
+	ImplementationWork RuntimeImplementationWorkLedger
 	// Reconciliation is the Orchestrator-owned SM-2 request/batch lineage. It
 	// is kept separate from Facts so owner observations never become coverage
 	// credit by deserialization alone.
@@ -351,6 +362,20 @@ func (r RuntimeStateRecord) Validate() error {
 	}
 	if r.Facts.WorkspaceID == "" || r.Facts.RunID == "" {
 		return fmt.Errorf("runtime state requires workspace and run scope")
+	}
+	if r.Decision.RequiredOutput.ImplementationWorkBindingHash != "" {
+		matches := 0
+		for _, round := range r.ImplementationWork.Rounds {
+			if round.WorkingBinding != nil && round.WorkingBinding.Hash == r.Decision.RequiredOutput.ImplementationWorkBindingHash && round.CompletedReceiptSetHash == "" && round.FailedReceiptHash == "" && round.GovernanceReceiptHash == "" && len(r.Facts.Focus.CoverageWorkItemIDs) == 1 && r.Facts.Focus.CoverageWorkItemIDs[0] == round.CoverageWorkItemID && r.Facts.Failure == nil && r.Facts.RepairDirective == nil {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return fmt.Errorf("runtime state working output has no unique live original semantic work commitment")
+		}
+	}
+	if err := ValidateRuntimeImplementationWorkState(r.Definition, r.Facts, r.ImplementationWork, r.SemanticPlanning, r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts, r.OperationGovernanceBindings, r.ExecutionBudget); err != nil {
+		return fmt.Errorf("runtime state implementation work: %w", err)
 	}
 	if err := ValidateRuntimeDispatchHistoryShape(r.Facts.WorkspaceID, r.Facts.RunID, r.ActiveDispatch, r.CompletedDispatches); err != nil {
 		return fmt.Errorf("runtime state dispatch history: %w", err)
@@ -907,10 +932,16 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 						return fmt.Errorf("accepted runtime candidate attempt %s validation-recipe hash does not match admission projection", key)
 					}
 				}
+				if value.AdmissionImplementationWorkCommitment != nil {
+					work := value.AdmissionImplementationWorkCommitment
+					if work.Validate() != nil || work.WorkingBinding == nil || work.DispatchID != "" || work.CompletedReceiptSetHash != "" || value.AdmissionRepairCommitment != nil || len(value.AdmissionCoverageBindings) != 0 || len(value.AdmissionValidationRecipes) != 0 || value.Transaction.State != ConvergenceStateNeedStateChange {
+						return fmt.Errorf("accepted runtime candidate attempt %s has invalid working commitment", key)
+					}
+				}
 				if err := ValidateRuntimeDispatchRepairCommitmentProjection(value.RepairCommitmentHash, value.AdmissionRepairCommitment); err != nil {
 					return fmt.Errorf("accepted runtime candidate attempt %s repair commitment: %w", key, err)
 				}
-			} else if value.CandidateHash != "" || value.DispatchID != "" || value.TargetAuthorizationHash != "" || len(value.AdmissionTargetAuthorizations) != 0 || value.AdmissionCoverageBindingHash != "" || len(value.AdmissionCoverageBindings) != 0 || value.ValidationRecipeHash != "" || len(value.AdmissionValidationRecipes) != 0 || value.RepairCommitmentHash != "" || value.AdmissionRepairCommitment != nil || value.DispatchAuthorityHash != "" {
+			} else if value.CandidateHash != "" || value.DispatchID != "" || value.TargetAuthorizationHash != "" || len(value.AdmissionTargetAuthorizations) != 0 || value.AdmissionCoverageBindingHash != "" || len(value.AdmissionCoverageBindings) != 0 || value.ValidationRecipeHash != "" || len(value.AdmissionValidationRecipes) != 0 || value.RepairCommitmentHash != "" || value.AdmissionRepairCommitment != nil || value.AdmissionImplementationWorkCommitment != nil || value.DispatchAuthorityHash != "" {
 				return fmt.Errorf("pending runtime candidate attempt %s cannot carry dispatch authority", key)
 			}
 		case RuntimeCandidateAttemptStateFailed:
@@ -920,7 +951,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if value.Stale != nil || value.PrerequisiteRequest != nil || value.OwnerFeasibility != nil {
 				return fmt.Errorf("failed runtime candidate attempt %s cannot carry freshness stale", key)
 			}
-			if value.CandidateHash != "" || value.DispatchID != "" || value.TargetAuthorizationHash != "" || len(value.AdmissionTargetAuthorizations) != 0 || value.AdmissionCoverageBindingHash != "" || len(value.AdmissionCoverageBindings) != 0 || value.ValidationRecipeHash != "" || len(value.AdmissionValidationRecipes) != 0 || value.RepairCommitmentHash != "" || value.AdmissionRepairCommitment != nil || value.DispatchAuthorityHash != "" {
+			if value.CandidateHash != "" || value.DispatchID != "" || value.TargetAuthorizationHash != "" || len(value.AdmissionTargetAuthorizations) != 0 || value.AdmissionCoverageBindingHash != "" || len(value.AdmissionCoverageBindings) != 0 || value.ValidationRecipeHash != "" || len(value.AdmissionValidationRecipes) != 0 || value.RepairCommitmentHash != "" || value.AdmissionRepairCommitment != nil || value.AdmissionImplementationWorkCommitment != nil || value.DispatchAuthorityHash != "" {
 				return fmt.Errorf("failed runtime candidate attempt %s cannot carry dispatch authority", key)
 			}
 			if err := value.Correction.Validate(); err != nil {
@@ -950,7 +981,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 				}
 			}
 		case RuntimeCandidateAttemptStateInvalidated:
-			if value.CandidateHash != "" || value.DispatchID != "" || value.TargetAuthorizationHash != "" || len(value.AdmissionTargetAuthorizations) != 0 || value.AdmissionCoverageBindingHash != "" || len(value.AdmissionCoverageBindings) != 0 || value.ValidationRecipeHash != "" || len(value.AdmissionValidationRecipes) != 0 || value.RepairCommitmentHash != "" || value.AdmissionRepairCommitment != nil || value.DispatchAuthorityHash != "" {
+			if value.CandidateHash != "" || value.DispatchID != "" || value.TargetAuthorizationHash != "" || len(value.AdmissionTargetAuthorizations) != 0 || value.AdmissionCoverageBindingHash != "" || len(value.AdmissionCoverageBindings) != 0 || value.ValidationRecipeHash != "" || len(value.AdmissionValidationRecipes) != 0 || value.RepairCommitmentHash != "" || value.AdmissionRepairCommitment != nil || value.AdmissionImplementationWorkCommitment != nil || value.DispatchAuthorityHash != "" {
 				return fmt.Errorf("invalidated runtime candidate attempt %s cannot carry dispatch authority", key)
 			}
 			reasonCount := 0
@@ -1289,6 +1320,9 @@ func (d RuntimeDispatchRecord) ValidateIntrinsic() error {
 	if err := ValidateRuntimeCandidateManagedValidationRecipeSnapshot(d.Candidate, d.ValidationRecipes); err != nil {
 		return fmt.Errorf("runtime dispatch validation recipe snapshot: %w", err)
 	}
+	if err := ValidateRuntimeImplementationWorkDispatchCommitment(d); err != nil {
+		return fmt.Errorf("runtime implementation dispatch commitment: %w", err)
+	}
 	if err := ValidateRuntimeDispatchRepairCommitmentProjection(d.RepairCommitmentHash, d.RepairCommitment); err != nil {
 		return fmt.Errorf("runtime dispatch repair commitment: %w", err)
 	}
@@ -1405,6 +1439,9 @@ func StableRuntimeDispatchAuthorityHash(dispatch RuntimeDispatchRecord) string {
 	writeHashString(h, fmt.Sprintf("%d", transaction.Attempt))
 	writeHashString(h, StableRuntimeCandidateHash(dispatch.Candidate))
 	writeHashString(h, strings.TrimSpace(dispatch.CandidateManifestHash))
+	if dispatch.ImplementationWorkCommitment != nil {
+		writeHashString(h, dispatch.ImplementationWorkCommitment.Hash)
+	}
 	writeHashString(h, StableRuntimeCoverageEvidenceBindingSnapshotHash(dispatch.CoverageBindings))
 	writeHashString(h, StableRuntimeDispatchOperationTargetAuthorizationsHash(dispatch.OperationTargetAuthorizations))
 	writeHashString(h, StableRuntimeValidationRecipeSnapshotHash(dispatch.ValidationRecipes))
@@ -1544,6 +1581,10 @@ func (d RuntimeDispatchRecord) Clone() RuntimeDispatchRecord {
 	if d.RepairCommitment != nil {
 		value := d.RepairCommitment.Clone()
 		ret.RepairCommitment = &value
+	}
+	if d.ImplementationWorkCommitment != nil {
+		value := d.ImplementationWorkCommitment.Clone()
+		ret.ImplementationWorkCommitment = &value
 	}
 	if d.AssessmentAuthorityInput != nil {
 		value := d.AssessmentAuthorityInput.Clone()

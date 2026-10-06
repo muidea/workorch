@@ -841,6 +841,20 @@ func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest,
 		if _, duplicate := obligationCoverage[obligation.CoverageWorkItemID]; duplicate {
 			return runtimeValidatedSemanticManifest{}, fmt.Errorf("runtime semantic manifest duplicates obligation coverage %q", obligation.CoverageWorkItemID)
 		}
+		if obligation.ImplementationWork != nil {
+			work := obligation.ImplementationWork
+			if err := work.Validate(); err != nil {
+				return runtimeValidatedSemanticManifest{}, err
+			}
+			request := work.Scope.Request
+			catalog, found := ownerCatalogs[request.Policy.OwnerModuleID]
+			if request.WorkspaceID != m.WorkspaceID || request.RunID != m.RunID || request.DefinitionSeedHash != m.DefinitionSeedHash || request.CoverageWorkItemID != obligation.CoverageWorkItemID || !found || catalog.ObservedRevision != work.Scope.Selection.ObservedRevision {
+				return runtimeValidatedSemanticManifest{}, fmt.Errorf("runtime semantic work has no exact manifest/scope/catalog identity")
+			}
+			if len(m.CoverageItems) != 1 || len(m.AllowedOwnerModuleIDs) != 1 || m.AllowedOwnerModuleIDs[0] != request.Policy.OwnerModuleID || !reflect.DeepEqual(m.AllowedTargetPolicies, request.Policy.AllowedTargetPolicies) {
+				return runtimeValidatedSemanticManifest{}, fmt.Errorf("runtime semantic work cannot mix other CWI owners or purposes")
+			}
+		}
 		if obligation.ValidationFailureRepair != nil {
 			repair := *obligation.ValidationFailureRepair
 			catalog := ownerCatalogs[repair.RepairOwnerModuleID]
@@ -1360,6 +1374,18 @@ func ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest RuntimeSemant
 		if !found {
 			return fmt.Errorf("runtime semantic manifest proof obligation coverage %q has no immutable Definition focus", actual.CoverageWorkItemID)
 		}
+		if actual.ImplementationWork != nil {
+			expectedBase, compileErr := compileRuntimeSemanticDefinitionProofObligation(manifest.DefinitionRevision, item, source)
+			if compileErr != nil {
+				return compileErr
+			}
+			actualBase := actual.Clone()
+			actualBase.ImplementationWork = nil
+			if !sameRuntimeSemanticProofObligations([]RuntimeSemanticProofObligation{actualBase}, []RuntimeSemanticProofObligation{expectedBase}) || source.ImplementationWorkPolicy == nil || actual.ImplementationWork.PolicyHash != StableRuntimeImplementationWorkPolicyHash(*source.ImplementationWorkPolicy) {
+				return fmt.Errorf("runtime semantic work terminal declaration/policy differs from immutable Definition")
+			}
+			continue
+		}
 		if actual.ValidationFailureRepair == nil {
 			recompiled, compileErr := compileRuntimeSemanticProofObligations(
 				manifest.DefinitionRevision,
@@ -1648,8 +1674,9 @@ type RuntimeSemanticPlanDocument struct {
 	// CoverageOrder is the provider-authored planning step. It is not an
 	// authority source: the orchestrator only accepts it after checking that it
 	// is a complete permutation whose dependency edges point backwards.
-	CoverageOrder []common.CoverageWorkItemID
-	Proposals     []RuntimeSemanticProofProposal
+	CoverageOrder         []common.CoverageWorkItemID
+	ImplementationPurpose RuntimeImplementationWorkPurpose
+	Proposals             []RuntimeSemanticProofProposal
 }
 
 func (d RuntimeSemanticPlanDocument) Normalized() RuntimeSemanticPlanDocument {
@@ -1705,6 +1732,22 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(d RuntimeSemant
 		}
 	}
 	items := validated.coverageByID
+	var purposeWork *RuntimeSemanticImplementationWork
+	for _, obligation := range manifest.ProofObligations {
+		if obligation.ImplementationWork != nil && obligation.ImplementationWork.PurposeChoiceOnly {
+			if purposeWork != nil || len(manifest.ProofObligations) != 1 {
+				return fmt.Errorf("implementation purpose document requires one exact original CWI")
+			}
+			purposeWork = obligation.ImplementationWork
+		}
+	}
+	if purposeWork != nil {
+		if d.PlanStep != RuntimeSemanticPlanStepCoverageOrder || (d.ImplementationPurpose != RuntimeImplementationWorkPurposeTerminal && (d.ImplementationPurpose != RuntimeImplementationWorkPurposeEffect || !purposeWork.EffectAvailable)) {
+			return fmt.Errorf("implementation purpose document exceeds sealed purpose vocabulary")
+		}
+	} else if d.ImplementationPurpose != "" {
+		return fmt.Errorf("non-choice semantic document cannot inject implementation purpose")
+	}
 	switch d.PlanStep {
 	case RuntimeSemanticPlanStepCoverageOrder:
 		if len(d.CoverageOrder) != len(manifest.CoverageItems) || len(d.Proposals) != 0 || d.BatchID != "" || len(d.BatchCoverageWorkItemIDs) != 0 || d.BatchSequence != 0 {
@@ -1901,6 +1944,10 @@ func StableRuntimeSemanticPlanDocumentHash(document RuntimeSemanticPlanDocument)
 	}
 	for _, coverageID := range document.CoverageOrder {
 		writeHashString(h, string(coverageID))
+	}
+	if document.ImplementationPurpose != "" {
+		writeHashString(h, "implementation-purpose")
+		writeHashString(h, string(document.ImplementationPurpose))
 	}
 	for _, proposal := range document.Proposals {
 		writeHashString(h, StableRuntimeSemanticProofProposalHash(proposal))
@@ -2194,6 +2241,7 @@ const (
 	// coverage order were accepted. The next generation must recompile the
 	// complete closure; the old provider order is audit lineage only.
 	RuntimeSemanticPlanningRetirementEligibleClosureChanged RuntimeSemanticPlanningRetirementReason = "eligible_closure_changed"
+	RuntimeSemanticPlanningRetirementImplementationPurpose  RuntimeSemanticPlanningRetirementReason = "implementation_purpose_selected"
 	RuntimeSemanticPlanningRetirementInputReviewInformation RuntimeSemanticPlanningRetirementReason = "input_review_information"
 )
 
@@ -2353,6 +2401,10 @@ func validateRuntimeSemanticPlanningGenerationNormalized(raw, g RuntimeSemanticP
 		return fmt.Errorf("runtime semantic planning generation requires retirement identity and reason")
 	}
 	switch g.Reason {
+	case RuntimeSemanticPlanningRetirementImplementationPurpose:
+		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 || g.Snapshot.Phase != RuntimeSemanticPlanningOrderAccepted || g.Snapshot.CoverageOrderDocument == nil || g.Snapshot.CoverageOrderDocument.ImplementationPurpose == "" {
+			return fmt.Errorf("implementation purpose retirement requires exact original accepted order only")
+		}
 	case RuntimeSemanticPlanningRetirementInputReviewInformation:
 		if g.InputReviewResolutionID == "" || len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
 			return fmt.Errorf("runtime input review retirement requires only exact information resolution lineage")

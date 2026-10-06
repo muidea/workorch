@@ -246,6 +246,8 @@ func runtimeTargetSelectionForManifest(request runtimeTargetSelectionRequest, ma
 }
 
 func sealRuntimeTargetSelection(selection runtimemodel.RuntimeTargetSelection) (runtimemodel.RuntimeTargetSelection, error) {
+	// owner 在封存事实前统一合同规定的集合表示；hash 与返回前像必须完全一致。
+	selection = selection.Normalized()
 	selection.SnapshotID = runtimemodel.StableRuntimeTargetSelectionSnapshotID(selection)
 	if err := selection.Validate(); err != nil {
 		return runtimemodel.RuntimeTargetSelection{}, err

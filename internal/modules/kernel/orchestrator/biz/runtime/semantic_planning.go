@@ -58,6 +58,30 @@ func validateSemanticManifestIdentity(aggregate RuntimeAggregate, manifest runti
 		identity.EligibleCoverage = []common.CoverageWorkItemID{repairInput.CoverageWorkItemID}
 		identity.ValidationFailureRepair = &repairInput
 	}
+	if current, workErr := CurrentRuntimeImplementationWorkReservation(aggregate); workErr != nil {
+		return workErr
+	} else if current != nil {
+		if repairRequired || current.ScopeObservation == nil {
+			return fmt.Errorf("%w: semantic work has no settled scope or conflicts with exact repair", common.ErrConflict)
+		}
+		reservation := current.Clone()
+		reservation.WorkingBinding = nil
+		reservation.DispatchID, reservation.DispatchAuthorityHash, reservation.CompletedReceiptSetHash, reservation.FailedReceiptHash = "", "", "", ""
+		reservation.ReceiptDisposition = ""
+		reservation.GovernanceReceiptHash, reservation.GovernanceDispatchIDs = "", nil
+		reservation.OutcomeUnknownExecutionKey, reservation.OutcomeUnknownFence = "", 0
+		reservation.Hash = runtimecontract.StableRuntimeImplementationWorkRoundHash(reservation)
+		identity.ImplementationWork = &reservation
+		identity.EligibleCoverage = []common.CoverageWorkItemID{current.CoverageWorkItemID}
+	}
+	if preview := aggregate.ImplementationWork.ScopePreview; preview != nil {
+		if repairRequired || preview.Observation == nil {
+			return fmt.Errorf("%w: implementation purpose preview is incomplete or conflicts with exact repair", common.ErrConflict)
+		}
+		identity.ImplementationPurposePreview = preview
+		identity.ImplementationWorkRounds = aggregate.ImplementationWork.Rounds
+		identity.EligibleCoverage = []common.CoverageWorkItemID{preview.Request.CoverageWorkItemID}
+	}
 	return semanticplan.ValidateManifestIdentity(identity, manifest)
 }
 

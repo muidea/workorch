@@ -2,6 +2,7 @@ package workorchruntimecontract
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -43,6 +44,7 @@ type RuntimeSemanticOwnerFactAcquisition struct {
 type RuntimeSemanticEvidenceObligationPurpose string
 
 const (
+	RuntimeSemanticEvidenceObligationImplementationWork      RuntimeSemanticEvidenceObligationPurpose = "implementation_work"
 	RuntimeSemanticEvidenceObligationDefinitionProof         RuntimeSemanticEvidenceObligationPurpose = "definition_proof"
 	RuntimeSemanticEvidenceObligationOwnerFactAcquisition    RuntimeSemanticEvidenceObligationPurpose = "owner_fact_acquisition"
 	RuntimeSemanticEvidenceObligationValidationFailureRepair RuntimeSemanticEvidenceObligationPurpose = "validation_failure_repair"
@@ -84,6 +86,10 @@ func ResolveRuntimeSemanticEvidenceObligation(obligation RuntimeSemanticProofObl
 	}
 	if obligation.ValidationFailureRepair != nil {
 		ret.Purpose = RuntimeSemanticEvidenceObligationValidationFailureRepair
+		ret.CurrentRequiredEvidenceKinds = []string{EvidenceKindStateChange}
+	}
+	if obligation.ImplementationWork != nil {
+		ret.Purpose = RuntimeSemanticEvidenceObligationImplementationWork
 		ret.CurrentRequiredEvidenceKinds = []string{EvidenceKindStateChange}
 	}
 	return ret, nil
@@ -209,6 +215,7 @@ type RuntimeSemanticProofObligation struct {
 	VerificationPolicy                              *RuntimeVerificationPolicy `json:",omitempty"`
 	OwnerFactAcquisition                            *RuntimeSemanticOwnerFactAcquisition
 	ValidationFailureRepair                         *RuntimeSemanticValidationFailureRepair
+	ImplementationWork                              *RuntimeSemanticImplementationWork
 }
 
 func (o RuntimeSemanticProofObligation) Normalized() RuntimeSemanticProofObligation {
@@ -239,6 +246,10 @@ func (o RuntimeSemanticProofObligation) Normalized() RuntimeSemanticProofObligat
 	if o.OwnerFactAcquisition != nil {
 		value := o.OwnerFactAcquisition.Normalized()
 		o.OwnerFactAcquisition = &value
+	}
+	if o.ImplementationWork != nil {
+		value := o.ImplementationWork.Clone()
+		o.ImplementationWork = &value
 	}
 	if o.ValidationFailureRepair != nil {
 		value := o.ValidationFailureRepair.Normalized()
@@ -325,6 +336,14 @@ func (o RuntimeSemanticProofObligation) Validate() error {
 			return fmt.Errorf("runtime semantic owner-fact acquisition declaration does not match proof obligation")
 		}
 	}
+	if o.ImplementationWork != nil {
+		if o.OwnerFactAcquisition != nil || o.ValidationFailureRepair != nil || o.ImplementationWork.Scope.Request.CoverageWorkItemID != o.CoverageWorkItemID {
+			return fmt.Errorf("runtime semantic implementation work purpose cannot acquire owner facts or bypass exact repair")
+		}
+		if err := o.ImplementationWork.Validate(); err != nil {
+			return err
+		}
+	}
 	if o.OwnerFactAcquisition != nil && o.ValidationFailureRepair != nil {
 		return fmt.Errorf("runtime semantic proof obligation cannot acquire an owner fact and repair a validation failure in one generation")
 	}
@@ -388,6 +407,7 @@ func sameRuntimeSemanticProofObligations(left, right []RuntimeSemanticProofOblig
 			!sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) ||
 			!SameRuntimeVerificationPolicy(l.VerificationPolicy, r.VerificationPolicy) ||
 			!sameRuntimeSemanticOwnerFactAcquisition(l.OwnerFactAcquisition, r.OwnerFactAcquisition) ||
+			!reflect.DeepEqual(l.ImplementationWork, r.ImplementationWork) ||
 			!sameRuntimeSemanticValidationFailureRepair(l.ValidationFailureRepair, r.ValidationFailureRepair) {
 			return false
 		}
@@ -583,6 +603,9 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 			writeHashString(h, acquisition.ReobserveOwnerModuleID)
 			writeHashString(h, string(acquisition.ReobserveFactKind))
 			writeHashString(h, strconv.Itoa(acquisition.MaxAcquisitionAttempts))
+		}
+		if value.ImplementationWork != nil {
+			writeHashString(h, StableRuntimeSemanticImplementationWorkHash(*value.ImplementationWork))
 		}
 		if value.ValidationFailureRepair == nil {
 			writeHashString(h, "no-validation-failure-repair")

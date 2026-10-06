@@ -85,7 +85,9 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 	case RuntimeInternalEventActivationObserved:
 		return c.applyActivationInternalEvent(ctx, event)
 
-	case RuntimeInternalEventReconcileAuthority,
+	case RuntimeInternalEventImplementationWorkScopeRequired,
+		RuntimeInternalEventImplementationWorkScopeObserved,
+		RuntimeInternalEventReconcileAuthority,
 		RuntimeInternalEventReconciliationBatchObserved,
 		RuntimeInternalEventSemanticContractRequired,
 		RuntimeInternalEventSemanticCatalogInvalidated,

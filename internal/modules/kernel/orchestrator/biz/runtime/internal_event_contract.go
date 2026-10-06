@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -26,7 +27,9 @@ func runtimeInternalFactPayloadClass(kind RuntimeInternalEventKind) (runtimeInte
 	case RuntimeInternalEventActivationObserved:
 		return runtimeInternalEventPayloadActivation, true
 
-	case RuntimeInternalEventReconcileAuthority,
+	case RuntimeInternalEventImplementationWorkScopeRequired,
+		RuntimeInternalEventImplementationWorkScopeObserved,
+		RuntimeInternalEventReconcileAuthority,
 		RuntimeInternalEventReconciliationBatchObserved,
 		RuntimeInternalEventSemanticContractRequired,
 		RuntimeInternalEventSemanticCatalogInvalidated,
@@ -141,6 +144,9 @@ func (event RuntimeInternalEvent) validateEnvelope() error {
 	if !matched {
 		return fmt.Errorf("%w: runtime internal event %q requires %s payload", common.ErrInvalidArgument, event.Kind, expected)
 	}
+	if err := event.validateImplementationWorkScopeEnvelope(); err != nil {
+		return err
+	}
 	if err := event.validateRecoveryAuthorization(); err != nil {
 		return err
 	}
@@ -149,6 +155,29 @@ func (event RuntimeInternalEvent) validateEnvelope() error {
 	}
 	if err := event.validateExecutionTransaction(); err != nil {
 		return err
+	}
+	return nil
+}
+
+// 工作 scope payload 不能夹带别的 SM-2 权威，也不能附在其他 kind 上。
+func (event RuntimeInternalEvent) validateImplementationWorkScopeEnvelope() error {
+	if event.Authority == nil {
+		return nil
+	}
+	payload := *event.Authority
+	request, observation := payload.ImplementationWorkScopeRequest, payload.ImplementationWorkScopeObservation
+	payload.ImplementationWorkScopeRequest, payload.ImplementationWorkScopeObservation = nil, nil
+	switch event.Kind {
+	case RuntimeInternalEventImplementationWorkScopeRequired, RuntimeInternalEventImplementationWorkScopeObserved:
+		if !reflect.DeepEqual(payload, RuntimeInternalAuthorityPayload{}) ||
+			(event.Kind == RuntimeInternalEventImplementationWorkScopeRequired && (request == nil || observation != nil)) ||
+			(event.Kind == RuntimeInternalEventImplementationWorkScopeObserved && (observation == nil || request != nil)) {
+			return fmt.Errorf("%w: implementation scope event requires only its exact scope payload", common.ErrInvalidArgument)
+		}
+	default:
+		if request != nil || observation != nil {
+			return fmt.Errorf("%w: non-scope event cannot carry implementation scope facts", common.ErrInvalidArgument)
+		}
 	}
 	return nil
 }
@@ -326,6 +355,8 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 
 	switch kind {
 	case RuntimeInternalEventActivationObserved,
+		RuntimeInternalEventImplementationWorkScopeRequired,
+		RuntimeInternalEventImplementationWorkScopeObserved,
 		RuntimeInternalEventReconcileAuthority,
 		RuntimeInternalEventReconciliationBatchObserved,
 		RuntimeInternalEventSemanticContractRequired,

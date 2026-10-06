@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "diagnosticMessage", "documentKind", "gapKind", "manifestHash", "offendingItemRefs", "planStep", "prerequisiteClaims", "proposals", "resultKind", "schemaVersion"}
+	runtimeSemanticTopLevelFields = []string{"batchCoverageWorkItemIds", "batchId", "batchSequence", "coverageOrder", "definitionSeedHash", "diagnosticMessage", "documentKind", "gapKind", "implementationPurpose", "manifestHash", "offendingItemRefs", "planStep", "prerequisiteClaims", "proposals", "resultKind", "schemaVersion"}
 	runtimeSemanticProposalFields = []string{"coverageWorkItemId", "declarationRef", "operationKind", "operationVariantId", "ownerModuleId", "requiredEvidenceKinds", "target", "validationRecipeId", "validationInputReview"}
 	runtimeSemanticTargetFields   = []string{"exactTargetRefs", "ownerScopeTargetRefs", "ownerSelectorRefs", "policy", "prospectiveConstraintRefs", "prospectiveTargetRefs"}
 )
@@ -27,6 +27,7 @@ type runtimeSemanticPlanPayload struct {
 	BatchSequence            *int                             `json:"batchSequence,omitempty"`
 	BatchCoverageWorkItemIDs []common.CoverageWorkItemID      `json:"batchCoverageWorkItemIds,omitempty"`
 	CoverageOrder            []common.CoverageWorkItemID      `json:"coverageOrder,omitempty"`
+	ImplementationPurpose    RuntimeImplementationWorkPurpose `json:"implementationPurpose,omitempty"`
 	Proposals                []runtimeSemanticProposalPayload `json:"proposals"`
 }
 
@@ -123,9 +124,10 @@ func DecodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 	document := RuntimeSemanticPlanDocument{
 		SchemaVersion: wire.SchemaVersion, ManifestHash: wire.ManifestHash, DefinitionSeedHash: wire.DefinitionSeedHash,
 		BatchID: wire.BatchID, BatchSequence: runtimeSemanticBatchSequence(wire.BatchSequence), BatchCoverageWorkItemIDs: wire.BatchCoverageWorkItemIDs,
-		PlanStep:      wire.PlanStep,
-		CoverageOrder: wire.CoverageOrder,
-		Proposals:     make([]RuntimeSemanticProofProposal, 0, len(wire.Proposals)),
+		PlanStep:              wire.PlanStep,
+		CoverageOrder:         wire.CoverageOrder,
+		ImplementationPurpose: wire.ImplementationPurpose,
+		Proposals:             make([]RuntimeSemanticProofProposal, 0, len(wire.Proposals)),
 	}
 	for _, value := range wire.Proposals {
 		document.Proposals = append(document.Proposals, RuntimeSemanticProofProposal{
@@ -180,8 +182,9 @@ func EncodeRuntimeSemanticPlanPayloadWithManifest(manifest RuntimeSemanticPlanMa
 		DocumentKind: RuntimeProviderDocumentSemanticPlan, SchemaVersion: document.SchemaVersion,
 		ManifestHash: document.ManifestHash, DefinitionSeedHash: document.DefinitionSeedHash,
 		BatchID: document.BatchID, BatchCoverageWorkItemIDs: append([]common.CoverageWorkItemID(nil), document.BatchCoverageWorkItemIDs...),
-		PlanStep:  document.PlanStep,
-		Proposals: make([]runtimeSemanticProposalPayload, 0, len(document.Proposals)),
+		PlanStep:              document.PlanStep,
+		ImplementationPurpose: document.ImplementationPurpose,
+		Proposals:             make([]runtimeSemanticProposalPayload, 0, len(document.Proposals)),
 	}
 	if document.PlanStep == RuntimeSemanticPlanStepCoverageOrder {
 		wire.CoverageOrder = append([]common.CoverageWorkItemID(nil), document.CoverageOrder...)
@@ -606,6 +609,16 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 		delete(properties, "batchSequence")
 		delete(properties, "batchCoverageWorkItemIds")
 		properties["proposals"] = map[string]any{"type": "array", "maxItems": 0}
+		for _, obligation := range manifest.ProofObligations {
+			if work := obligation.ImplementationWork; work != nil && work.PurposeChoiceOnly {
+				purposes := []string{string(RuntimeImplementationWorkPurposeTerminal)}
+				if work.EffectAvailable {
+					purposes = append(purposes, string(RuntimeImplementationWorkPurposeEffect))
+				}
+				properties["implementationPurpose"] = map[string]any{"type": "string", "enum": purposes}
+				normalRequired = append(normalRequired, "implementationPurpose")
+			}
+		}
 		attachRuntimeDefinitionGapSchemaForRequest(schema, normalRequired, nil)
 	case RuntimeSemanticPlanStepProofBatch:
 		batchID = strings.TrimSpace(batchID)
@@ -717,6 +730,49 @@ func attachRuntimeSemanticProofObligationSchema(items map[string]any, manifest R
 			},
 			"then": map[string]any{"properties": thenProperties},
 		})
+		if obligation.ImplementationWork != nil {
+			work := obligation.ImplementationWork
+			policy := work.Scope.Request.Policy
+			variants := make([]any, 0, len(policy.AllowedOperations))
+			operationKinds := make([]string, 0, len(policy.AllowedOperations))
+			for _, variant := range policy.AllowedOperations {
+				operationKinds = append(operationKinds, variant.Kind)
+				variantBranch := map[string]any{"properties": map[string]any{"operationKind": map[string]any{"const": variant.Kind}}}
+				if variant.VariantID != "" {
+					variantBranch["required"] = []string{"operationVariantId"}
+					variantBranch["properties"].(map[string]any)["operationVariantId"] = map[string]any{"const": variant.VariantID}
+				} else {
+					variantBranch["not"] = map[string]any{"required": []string{"operationVariantId"}}
+				}
+				variants = append(variants, variantBranch)
+			}
+			targetPolicies := make([]string, 0, len(policy.AllowedTargetPolicies))
+			for _, targetPolicy := range policy.AllowedTargetPolicies {
+				targetPolicies = append(targetPolicies, string(targetPolicy))
+			}
+			workingThen := map[string]any{"properties": map[string]any{
+				"ownerModuleId":         map[string]any{"const": policy.OwnerModuleID},
+				"operationKind":         stringEnumSchemaWithMinimum(normalizeStrings(operationKinds), 1),
+				"requiredEvidenceKinds": exactStringArraySchema([]string{EvidenceKindStateChange}),
+				"target": map[string]any{"properties": map[string]any{
+					"policy":                    stringEnumSchemaWithMinimum(targetPolicies, 1),
+					"ownerSelectorRefs":         exactStringArraySchema([]string{policy.TargetSelectorRef}),
+					"prospectiveConstraintRefs": exactStringArraySchema(policy.ProspectiveTargetAllOfConstraintRefs),
+				}},
+			}, "not": map[string]any{"anyOf": []any{
+				map[string]any{"required": []string{"validationRecipeId"}},
+				map[string]any{"required": []string{"validationInputReview"}},
+			}}}
+			if len(variants) != 0 {
+				workingThen["anyOf"] = variants
+			}
+			allOf = append(allOf, map[string]any{
+				"if":   map[string]any{"required": []string{"coverageWorkItemId"}, "properties": map[string]any{"coverageWorkItemId": map[string]any{"const": string(coverageID)}}},
+				"then": workingThen,
+			})
+			// 工作 schema 不借原 terminal recipe/check 或 acquisition 分支。
+			continue
+		}
 		if obligation.ValidationProofRequirement != nil && obligation.ValidationFailureRepair == nil && obligation.OwnerFactAcquisition == nil {
 			requirement := obligation.ValidationProofRequirement.Normalized()
 			selectableRecipes := RuntimeSelectableValidationRecipeRefsForProofRequirementInCatalogs(manifest.OwnerCatalogs, requirement)

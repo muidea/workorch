@@ -3,7 +3,9 @@ package specifications
 import (
 	"fmt"
 
+	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 )
 
 func ParseAuthoringProposal(payload []byte, derivation workspace.DefinitionDerivationRequest) (workspace.GoalSpecification, error) {
@@ -22,10 +24,20 @@ func ParseAuthoringProposal(payload []byte, derivation workspace.DefinitionDeriv
 	if err := workspace.ValidateAuthoringSpecification(derivation.Input, &derivation.Template, *derivation.Proposal, derivation.Resources, proposal); err != nil {
 		return workspace.GoalSpecification{}, err
 	}
+	bindings, err := definitionconfiguration.Compile(&workspace.Workspace{}, &derivation.Template)
+	if err != nil {
+		return workspace.GoalSpecification{}, fmt.Errorf("compile sealed template profiles: %w", err)
+	}
+	if err := definitionadmission.ValidateAuthoringVerificationApplicability(proposal, items, bindings.ProfileContracts); err != nil {
+		return workspace.GoalSpecification{}, err
+	}
 	return proposal, nil
 }
 
 func ParseAuthoringReview(payload []byte, kind string, proposal workspace.GoalSpecification, derivation workspace.DefinitionDerivationRequest) (workspace.GoalSpecificationCompletenessReview, error) {
+	if derivation.Validate() != nil || derivation.Proposal == nil {
+		return workspace.GoalSpecificationCompletenessReview{}, fmt.Errorf("authoring review requires completed derivation")
+	}
 	review, err := ParseReview(payload, kind, proposal)
 	if err != nil {
 		return workspace.GoalSpecificationCompletenessReview{}, err

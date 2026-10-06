@@ -105,7 +105,7 @@ func validateCandidateAttemptBeginAuthority(aggregate RuntimeAggregate) error {
 	default:
 		return fmt.Errorf("%w: current runtime action does not request a candidate", common.ErrConflict)
 	}
-	if err := validateCurrentCWIBindingFence(aggregate.Facts); err != nil {
+	if err := validateRuntimeCandidatePurposeFence(aggregate); err != nil {
 		return fmt.Errorf("%w: candidate request binding fence: %v", common.ErrConflict, err)
 	}
 	return nil
@@ -357,7 +357,7 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 	if err := validateCandidateAttemptSessionBinding(aggregate, "", manifest, logicalRequestID); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
-	if err := validateCurrentCWIBindingFence(aggregate.Facts); err != nil {
+	if err := validateRuntimeCandidatePurposeFence(aggregate); err != nil {
 		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate proposal binding fence: %v", common.ErrConflict, err)
 	}
 	if record.ManifestHash != manifest.Hash || record.LogicalRequestID != logicalRequestID {
@@ -712,7 +712,7 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 	if err := validateCandidateAttemptSessionBinding(aggregate, "", manifest, logicalRequestID); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
-	if err := validateCurrentCWIBindingFence(aggregate.Facts); err != nil {
+	if err := validateRuntimeCandidatePurposeFence(aggregate); err != nil {
 		return CandidateAdmissionCommitResult{}, fmt.Errorf("%w: candidate dispatch binding fence: %v", common.ErrConflict, err)
 	}
 	if record.ManifestHash != manifest.Hash || record.LogicalRequestID != logicalRequestID {
@@ -812,6 +812,17 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 	aggregate.CandidateAttempts[idx].AdmissionRepairCommitment = cloneRuntimeDispatchRepairCommitment(repairCommitment)
 	aggregate.CandidateAttempts[idx].RepairCommitmentHash = wantRepairCommitmentHash
 	aggregate.CandidateAttempts[idx].DispatchAuthorityHash = dispatch.DispatchAuthorityHash
+	if dispatch.ImplementationWorkCommitment != nil {
+		aggregate.CandidateAttempts[idx].AdmissionImplementationWorkCommitment = cloneImplementationWorkCommitment(dispatch.ImplementationWorkCommitment)
+		aggregate.ImplementationWork = aggregate.ImplementationWork.Clone()
+		for index := range aggregate.ImplementationWork.Rounds {
+			round := &aggregate.ImplementationWork.Rounds[index]
+			if round.Hash == dispatch.ImplementationWorkCommitment.Hash {
+				round.DispatchID, round.DispatchAuthorityHash = dispatch.ID, dispatch.DispatchAuthorityHash
+				round.Hash = runtimecontract.StableRuntimeImplementationWorkRoundHash(*round)
+			}
+		}
+	}
 	aggregate.ActiveDispatch = &dispatch
 	aggregate.StateRevision++
 	if err := aggregate.Validate(); err != nil {
@@ -907,7 +918,7 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 	var feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord
 	if attempt != nil {
 		complete := runtimecontract.EvaluateRuntimeCompleteAdmission(runtimecontract.RuntimeCompleteAdmissionInput{
-			Facts: aggregate.Facts, Decision: aggregate.Decision, SemanticPlanning: aggregate.SemanticPlanning,
+			Facts: aggregate.Facts, Decision: aggregate.Decision, SemanticPlanning: aggregate.SemanticPlanning, ImplementationWork: aggregate.ImplementationWork,
 			Reconciliation: aggregate.Reconciliation, Manifest: manifest, Candidate: candidate, Attempt: *attempt,
 			ActiveDispatch:      sealedDispatchRecord(aggregate.ActiveDispatch),
 			CompletedDispatches: sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
@@ -920,6 +931,13 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 	}
 	preSealAuthority := RuntimeDispatchPreSealAuthority{
 		RepairCommitment: cloneRuntimeDispatchRepairCommitment(repairCommitment),
+	}
+	if manifest.ImplementationWorkingBinding != nil {
+		round, workErr := CurrentRuntimeImplementationWorkReservation(aggregate)
+		if workErr != nil || round == nil || round.WorkingBinding == nil || round.WorkingBinding.Hash != manifest.ImplementationWorkingBinding.Hash {
+			return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure, Code: "implementation_work_commitment_missing"}, fmt.Errorf("implementation dispatch has no original round")
+		}
+		preSealAuthority.ImplementationWorkCommitment = cloneImplementationWorkCommitment(round)
 	}
 	if candidate.Assessment != nil {
 		source, sourceErr := runtimecontract.RuntimeAssessmentSourceProjection(aggregate.Facts, aggregate.Decision.Focus.ID, candidate.Assessment.CoverageWorkItemIDs)

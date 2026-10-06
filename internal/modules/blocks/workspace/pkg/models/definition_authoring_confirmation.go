@@ -1,6 +1,9 @@
 package workspace
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ConfirmableSpecification reconstructs the reviewed result exclusively from
 // persisted requests. A caller's copy of a proposal or review is never an
@@ -54,6 +57,24 @@ func (r DefinitionAuthoringRecord) confirmableSpecification(derivationPermitID, 
 	}
 	if err := ValidateAuthoringSpecification(derivation.Input, &derivation.Template, *derivation.Proposal, derivation.Resources, *proposal); err != nil {
 		return DefinitionDerivationRequest{}, GoalSpecification{}, err
+	}
+	// 六类审查不替代验证声明；草稿可以表达缺口，确认不能把缺口固化为正式定义。
+	for _, verification := range proposal.Verifications {
+		if verification.Status != GoalVerificationDeclared || strings.TrimSpace(verification.Declaration) == "" {
+			return DefinitionDerivationRequest{}, GoalSpecification{}, fmt.Errorf("authoring confirmation verification %q is not declared", verification.ID)
+		}
+	}
+	for _, obligation := range proposal.Obligations {
+		declared := false
+		for _, verification := range proposal.Verifications {
+			if verification.ObligationID == obligation.ID && verification.Status == GoalVerificationDeclared {
+				declared = true
+				break
+			}
+		}
+		if !declared {
+			return DefinitionDerivationRequest{}, GoalSpecification{}, fmt.Errorf("authoring confirmation obligation %q lacks a declared verification", obligation.ID)
+		}
 	}
 	return derivation.Clone(), proposal.Clone(), nil
 }

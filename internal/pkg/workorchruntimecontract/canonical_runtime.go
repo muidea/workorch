@@ -1643,8 +1643,11 @@ func SameProviderCeiling(left *ProviderCeiling, right *ProviderCeiling) bool {
 }
 
 type RequiredOutputContract struct {
-	AcceptedKinds             []string
-	AcceptedOperationVariants []RuntimeOperationVariantRef
+	AcceptedKinds []string
+	// ImplementationWorkBindingHash is the private working commitment, never
+	// a terminal coverage binding or validation-repair permission.
+	ImplementationWorkBindingHash string
+	AcceptedOperationVariants     []RuntimeOperationVariantRef
 	// AcceptedEffectScopes are the effect scopes that may appear in a sealed candidate.
 	// RequiredEffectScopes must be satisfied by at least one operation for state-change.
 	AcceptedEffectScopes  []RuntimeEffectScope
@@ -2363,6 +2366,7 @@ func normalizeRequiredOperationVariants(values []RuntimeRequiredOperationVariant
 
 func (c RequiredOutputContract) Normalized() RequiredOutputContract {
 	c.AcceptedKinds = normalizeStrings(c.AcceptedKinds)
+	c.ImplementationWorkBindingHash = strings.TrimSpace(c.ImplementationWorkBindingHash)
 	c.AcceptedOperationVariants = NormalizeRuntimeOperationVariantRefs(c.AcceptedOperationVariants)
 	c.AcceptedEffectScopes = NormalizeRuntimeEffectScopes(c.AcceptedEffectScopes)
 	c.RequiredEffectScopes = NormalizeRuntimeEffectScopes(c.RequiredEffectScopes)
@@ -2376,6 +2380,11 @@ func (c RequiredOutputContract) Normalized() RequiredOutputContract {
 	return c
 }
 func (c RequiredOutputContract) Validate() error {
+	if c.ImplementationWorkBindingHash != "" {
+		if !implementationWorkExactRef(c.ImplementationWorkBindingHash) || c.RepairPurpose != "" || c.RepairClosureID != "" || len(c.CoverageWorkItemIDs) != 0 || !sameStrings(c.RequiredEvidenceKinds, []string{EvidenceKindStateChange}) || !sameStrings(RuntimeEffectScopesAsStrings(c.RequiredEffectScopes), []string{string(RuntimeEffectWorkspaceDurable)}) {
+			return fmt.Errorf("required output work commitment cannot confer coverage or bypass exact repair")
+		}
+	}
 	if c.RepairPurpose != "" {
 		if c.RepairPurpose != RuntimeDispatchRepairPurposeConfirmedValidation || strings.TrimSpace(c.RepairClosureID) == "" {
 			return fmt.Errorf("required output has invalid repair purpose %q", c.RepairPurpose)
@@ -2472,6 +2481,9 @@ func ValidateRequiredOutputForState(state ConvergenceState, contract RequiredOut
 		return err
 	}
 	contract = contract.Normalized()
+	if contract.ImplementationWorkBindingHash != "" && state != ConvergenceStateNeedStateChange {
+		return fmt.Errorf("implementation working output requires need_state_change")
+	}
 	if contract.RepairPurpose != "" && state != ConvergenceStateNeedStateChange {
 		return fmt.Errorf("required output repair purpose %q requires need_state_change", contract.RepairPurpose)
 	}
@@ -2489,7 +2501,7 @@ func ValidateRequiredOutputForState(state ConvergenceState, contract RequiredOut
 		if len(contract.AcceptedKinds) == 0 {
 			return fmt.Errorf("%s convergence state requires accepted operation kinds", state)
 		}
-		if len(contract.CoverageWorkItemIDs) == 0 {
+		if len(contract.CoverageWorkItemIDs) == 0 && contract.ImplementationWorkBindingHash == "" {
 			return fmt.Errorf("%s convergence state requires coverage work items", state)
 		}
 		if len(contract.RequiredEffectScopes) == 0 || len(contract.AcceptedEffectScopes) == 0 {
@@ -2519,6 +2531,9 @@ func StableRequiredOutputHash(contract RequiredOutputContract) string {
 	contract = contract.Normalized()
 	h := sha256.New()
 	writeHashStrings(h, contract.AcceptedKinds)
+	if contract.ImplementationWorkBindingHash != "" {
+		writeHashString(h, contract.ImplementationWorkBindingHash)
+	}
 	for _, variant := range contract.AcceptedOperationVariants {
 		writeHashString(h, variant.Kind)
 		writeHashString(h, variant.VariantID)

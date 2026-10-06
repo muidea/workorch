@@ -24,7 +24,11 @@ func ValidateOpaqueRuntimeStateCAS(current, next *Run, expectedRuntimeStateRevis
 	if currentRuntimeRevision != expectedRuntimeStateRevision || next.RuntimeState.StateRevision != expectedRuntimeStateRevision+1 {
 		return common.ErrConflict
 	}
-	expected := CloneRun(current)
+	// 当前 opaque aggregate 会被新值完整替换；不复制随后丢弃的旧账本。
+	// 其余 Run 字段仍使用原深拷贝及完整比较，物理写集边界不变。
+	currentWithoutRuntimeState := *current
+	currentWithoutRuntimeState.RuntimeState = nil
+	expected := CloneRun(&currentWithoutRuntimeState)
 	expected.RuntimeState = cloneOpaqueRuntimeState(next.RuntimeState)
 	expected.RuntimeLifecycleFence = cloneOpaqueRuntimeLifecycleFence(next.RuntimeLifecycleFence)
 	if !reflect.DeepEqual(expected, next) {

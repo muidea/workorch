@@ -58,11 +58,12 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 
 	switch kind {
 	case RuntimeInternalEventActivationObserved,
+		RuntimeInternalEventImplementationWorkScopeRequired,
+		RuntimeInternalEventImplementationWorkScopeObserved,
 		RuntimeInternalEventReconcileAuthority,
 		RuntimeInternalEventReconciliationBatchObserved,
 		RuntimeInternalEventSemanticCatalogScopeInvalidated,
 		RuntimeInternalEventCWIBindingRetired,
-		RuntimeInternalEventEligibleFocusProjected,
 		RuntimeInternalEventFeasibilityObserved,
 		RuntimeInternalEventAssessmentObserved,
 		RuntimeInternalEventGovernanceRequestObserved,
@@ -77,6 +78,7 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 		return runtimeInternalTransitionDescriptor{Primary: eventcontract.StateMachineSM2, WriteSet: runtimeInternalWriteSM2 | runtimeInternalWriteSM3 | runtimeInternalWriteSM4}, true
 
 	case RuntimeInternalEventSemanticCatalogInvalidated,
+		RuntimeInternalEventEligibleFocusProjected,
 		RuntimeInternalEventSemanticFeasibilityRequired,
 		RuntimeInternalEventSemanticFeasibilityObserved,
 		RuntimeInternalEventSemanticContractSealed,
@@ -113,11 +115,10 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 		return sm3, true
 
 	case RuntimeInternalEventOperationReceiptObserved:
-		// The owner receipt advances the SM-3 execution ledger and, when the
-		// physical call consumed an in-flight replay claim, settles that exact
-		// SM-4 authorization in the same CAS. Leaving the claim in-flight after a
-		// durable receipt would retain a false recovery blocker after restart.
-		return runtimeInternalTransitionDescriptor{Primary: eventcontract.StateMachineSM3, WriteSet: runtimeInternalWriteSM3 | runtimeInternalWriteSM4}, true
+		// 工作 receipt 在同一 CAS 内结算 SM-3 receipt/预算、SM-2 不授终验
+		// credit 的效果与轮次，以及 SM-4 replay authorization/观察退休。
+		// 普通终验仍保持既有 receipt→evidence 路径，不重建终验权威。
+		return runtimeInternalTransitionDescriptor{Primary: eventcontract.StateMachineSM3, WriteSet: runtimeInternalWriteSM2 | runtimeInternalWriteSM3 | runtimeInternalWriteSM4}, true
 
 	case RuntimeInternalEventOperationEvidenceObserved:
 		return runtimeInternalTransitionDescriptor{Primary: eventcontract.StateMachineSM2, WriteSet: runtimeInternalWriteSM2 | runtimeInternalWriteSM3}, true
@@ -129,7 +130,7 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 		return runtimeInternalTransitionDescriptor{Primary: eventcontract.StateMachineSM2, WriteSet: runtimeInternalWriteSM2 | runtimeInternalWriteSM3}, true
 
 	case RuntimeInternalEventOperationExecutionOutcomeUnknownObserved:
-		return sm3, true
+		return runtimeInternalTransitionDescriptor{Primary: eventcontract.StateMachineSM3, WriteSet: runtimeInternalWriteSM2 | runtimeInternalWriteSM3 | runtimeInternalWriteSM4}, true
 
 	case RuntimeInternalEventCandidateDocumentRejected,
 		RuntimeInternalEventCandidateProposalObserved,

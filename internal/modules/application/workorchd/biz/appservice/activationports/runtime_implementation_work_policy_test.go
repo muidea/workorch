@@ -59,7 +59,10 @@ func TestRuntimeImplementationWorkPolicyInputIsLosslessAndUnavailable(t *testing
 	if err := runtimecontract.ValidateRuntimeProfileContracts(contract.ProfileContracts); err != nil {
 		t.Fatal(err)
 	}
-	if err := contract.Validate(); !errors.Is(err, runtimecontract.ErrRuntimeImplementationWorkUnavailable) {
+	if err := contract.Validate(); err != nil {
+		t.Fatalf("合法声明被纯合同校验拒绝: %v", err)
+	}
+	if err := contract.ValidateExecutableAdmission(); !errors.Is(err, runtimecontract.ErrRuntimeImplementationWorkUnavailable) {
 		t.Fatalf("unimplemented execution accepted: %v", err)
 	}
 	// Keep the closed wire shape and all typed fields in lockstep. A newly

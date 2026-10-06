@@ -8,8 +8,10 @@ import (
 // RuntimeInternalAuthorityPayload contains only SM-2 authority/focus facts.
 // It cannot carry an executor, request transport state or delivery ledger.
 type RuntimeInternalAuthorityPayload struct {
-	ReconciliationBatch *runtimecontract.RuntimeCWIReconciliationBatch
-	DefinitionGap       *runtimecontract.RuntimeDefinitionGapObservation
+	ReconciliationBatch                *runtimecontract.RuntimeCWIReconciliationBatch
+	ImplementationWorkScopeRequest     *runtimecontract.RuntimeImplementationWorkScopeRequest
+	ImplementationWorkScopeObservation *runtimecontract.RuntimeImplementationWorkScopeObservation
+	DefinitionGap                      *runtimecontract.RuntimeDefinitionGapObservation
 
 	SemanticFeasibility *runtimecontract.RuntimeSemanticProofFeasibility
 	SemanticDiagnostic  *runtimecontract.RuntimeOriginalDiagnostic
@@ -42,9 +44,11 @@ type RuntimeInternalAuthorityPayload struct {
 // SM-2 facts are observations used by authority/focus convergence. They never
 // execute operations or project another owner's state.
 const (
-	RuntimeInternalEventReconcileAuthority          RuntimeInternalEventKind = "reconcile_authority"
-	RuntimeInternalEventReconciliationBatchObserved RuntimeInternalEventKind = "reconciliation_batch_observed"
-	RuntimeInternalEventSemanticContractRequired    RuntimeInternalEventKind = "semantic_contract_required"
+	RuntimeInternalEventImplementationWorkScopeRequired RuntimeInternalEventKind = "implementation_work_scope_required"
+	RuntimeInternalEventImplementationWorkScopeObserved RuntimeInternalEventKind = "implementation_work_scope_observed"
+	RuntimeInternalEventReconcileAuthority              RuntimeInternalEventKind = "reconcile_authority"
+	RuntimeInternalEventReconciliationBatchObserved     RuntimeInternalEventKind = "reconciliation_batch_observed"
+	RuntimeInternalEventSemanticContractRequired        RuntimeInternalEventKind = "semantic_contract_required"
 	// SemanticCatalogInvalidated is an Orchestrator-private SM-2 fact
 	// transition. It retires a manifest whose owner observation is no longer
 	// current; it never carries a destination state or provider repair choice.

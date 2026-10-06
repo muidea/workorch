@@ -13,9 +13,10 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 
-func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID, declared bool) workspaceevents.ConfirmDefinitionAuthoringCommand {
+func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID, closeProofGap bool) workspaceevents.ConfirmDefinitionAuthoringCommand {
 	t.Helper()
 	ctx := context.Background()
 	current, err := owners.repositories.Workspaces.Get(ctx, id)
@@ -24,6 +25,24 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 	}
 	if current.DefinitionAuthoring == nil || current.DefinitionAuthoringConfirmation == nil || len(current.DefinitionAdmissionCandidates) == 0 {
 		t.Fatal("blocked predecessor missing")
+	}
+	if closeProofGap {
+		// 用新模板的 exact proof 补齐闭包；保留原必需交付物，不降低义务。
+		template, err := owners.repositories.WorkspaceTemplates.Get(ctx, current.TemplateID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hints := template.ContextHints.Map()
+		generic := hints["profileContracts"].(map[string]any)["generic"].(map[string]any)
+		declarations := generic["evidenceRequirements"].([]any)
+		generic["evidenceRequirements"] = append(declarations, map[string]any{"id": "required-delivery", "scope": "deliverable", "requiredEvidenceKinds": []any{"state_change"}, "acceptedStepKinds": []any{"file/write"}})
+		template.ContextHints, err = workorcheventpayload.FromMap(hints)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := owners.repositories.WorkspaceTemplates.Update(ctx, template); err != nil {
+			t.Fatal(err)
+		}
 	}
 	input := current.DefinitionAuthoring.Input.Clone()
 	input.Revision++
@@ -49,14 +68,12 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 		t.Fatal(err)
 	}
 	proposal := authoringOwnerProposal(t, input, record.TemplateSnapshot, derived)
-	if declared {
-		for index := range proposal.Verifications {
-			proof := &proposal.Verifications[index]
-			proof.Status = workspacemodel.GoalVerificationDeclared
-			proof.ProfileID = "generic"
-			proof.EvidenceRequirementID = "*"
-			proof.Scope = "dodItem"
-		}
+	for index := range proposal.Verifications {
+		proof := &proposal.Verifications[index]
+		proof.Status = workspacemodel.GoalVerificationDeclared
+		proof.ProfileID = "generic"
+		proof.EvidenceRequirementID = "*"
+		proof.Scope = "dodItem"
 	}
 	reserveProposal := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: id, InputHash: record.InputHash, RequestID: "proposal-successor/" + record.InputHash, DerivationPermitID: derivation.PermitID, ProviderBindingHash: "provider"}
 	reservedProposal, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecReserve: &reserveProposal})
@@ -95,7 +112,7 @@ func TestAuthoringMultipleBlockedSuccessorsRetainCumulativeBudget(t *testing.T) 
 	root := t.TempDir()
 	owners := openFileDefinitionAdmissionOwners(t, root)
 	defer func() { owners.close() }()
-	command := seedReviewedAuthoringConfirmation(t, owners, "ws-multiple-successors")
+	command := seedReviewedAuthoringConfirmationWithAdmissionBlocker(t, owners, "ws-multiple-successors")
 	if err := owners.workspace.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +146,7 @@ func TestAuthoringBlockedSuccessorReconcilesTicketAndRetainsLineage(t *testing.T
 	root := t.TempDir()
 	owners := openFileDefinitionAdmissionOwners(t, root)
 	defer func() { owners.close() }()
-	firstCommand := seedReviewedAuthoringConfirmation(t, owners, "ws-authoring-successor-blocked")
+	firstCommand := seedReviewedAuthoringConfirmationWithAdmissionBlocker(t, owners, "ws-authoring-successor-blocked")
 	if err := owners.workspace.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +198,7 @@ func TestAuthoringBlockedSuccessorPromotesOnlyAfterDecisionResolution(t *testing
 	root := t.TempDir()
 	owners := openFileDefinitionAdmissionOwners(t, root)
 	defer func() { owners.close() }()
-	firstCommand := seedReviewedAuthoringConfirmationWithReview(t, owners, "ws-authoring-successor-resolution", true, false)
+	firstCommand := seedReviewedAuthoringConfirmationWithAdmissionBlocker(t, owners, "ws-authoring-successor-resolution")
 	if err := owners.workspace.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +285,7 @@ func TestAuthoringSuccessorConfirmationRecoversFileCuts(t *testing.T) {
 			root := t.TempDir()
 			owners := openFileDefinitionAdmissionOwners(t, root)
 			defer func() { owners.close() }()
-			initial := seedReviewedAuthoringConfirmation(t, owners, "ws-successor-cuts")
+			initial := seedReviewedAuthoringConfirmationWithAdmissionBlocker(t, owners, "ws-successor-cuts")
 			if err := owners.workspace.Start(); err != nil {
 				t.Fatal(err)
 			}

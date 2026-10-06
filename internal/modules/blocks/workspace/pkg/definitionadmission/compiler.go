@@ -175,50 +175,7 @@ func specRequirementIsRequired(requirements []workspacemodel.GoalSpecificationRe
 // The graph is Workspace-owned. Resolve every DoD of this obligation to its
 // formal after-image source before asking the neutral compiler about applicability.
 func specificationVerificationProfileMatches(candidate workspacemodel.DefinitionAdmissionCandidate, verification workspacemodel.GoalSpecificationVerification) bool {
-	sources, ok := specificationDoDSources(candidate.DoDInputs)
-	if !ok {
-		return false
-	}
-	var refs []string
-	for _, obligation := range candidate.Specification.Obligations {
-		if obligation.ID == verification.ObligationID {
-			refs = obligation.DoDItemRefs
-			break
-		}
-	}
-	if len(refs) == 0 {
-		return false
-	}
-	var declaration *runtimecontract.RuntimeProfileEvidenceRequirement
-	for _, profile := range candidate.RuntimeProfileContracts {
-		if profile.ID != verification.ProfileID {
-			continue
-		}
-		for _, value := range profile.EvidenceRequirements {
-			if value.ID != verification.EvidenceRequirementID || value.Scope != verification.Scope {
-				continue
-			}
-			if declaration != nil {
-				return false
-			}
-			value.TargetSelectorRef, value.TargetSelectorOwnerRef, value.TargetSelectorSubjectRef = runtimecontract.ResolveRuntimeProfileTargetSelectorIdentity(profile.ID, value)
-			declaration = &value
-		}
-	}
-	if declaration == nil {
-		return false
-	}
-	for _, ref := range refs {
-		sourceID, exists := sources[ref]
-		if !exists || !runtimecontract.RuntimeEvidenceDeclarationMatchesSource(*declaration, "dodItem", sourceID) {
-			return false
-		}
-		policy, err := runtimecontract.CompileRuntimeSourceEvidencePolicy("dodItem", sourceID, candidate.RuntimeProfileContracts, nil)
-		if err != nil || !runtimecontract.RuntimeSourceEvidencePolicyRetainsDeclaration(policy, *declaration, "dodItem", sourceID) {
-			return false
-		}
-	}
-	return true
+	return SpecificationVerificationApplies(*candidate.Specification, verification, candidate.DoDInputs, candidate.RuntimeProfileContracts)
 }
 
 // Candidate normalization sorts by ref. That order is not the confirmed DoD

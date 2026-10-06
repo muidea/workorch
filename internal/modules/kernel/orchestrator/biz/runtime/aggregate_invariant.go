@@ -24,6 +24,20 @@ func (a RuntimeAggregate) Validate() error {
 		active = &value
 	}
 	completed := sealedDispatchesToRuntimeRecords(a.CompletedDispatches)
+	if err := runtimecontract.ValidateRuntimeImplementationWorkState(a.Definition, a.Facts, a.ImplementationWork, a.SemanticPlanning, active, completed, a.OperationReceipts, a.OperationGovernanceBindings, a.ExecutionBudget); err != nil {
+		return fmt.Errorf("runtime aggregate implementation work: %w", err)
+	}
+	if a.Decision.RequiredOutput.ImplementationWorkBindingHash != "" {
+		matches := 0
+		for _, round := range a.ImplementationWork.Rounds {
+			if round.WorkingBinding != nil && round.WorkingBinding.Hash == a.Decision.RequiredOutput.ImplementationWorkBindingHash && round.CompletedReceiptSetHash == "" && round.FailedReceiptHash == "" && round.GovernanceReceiptHash == "" && len(a.Facts.Focus.CoverageWorkItemIDs) == 1 && a.Facts.Focus.CoverageWorkItemIDs[0] == round.CoverageWorkItemID && a.Facts.Failure == nil && a.Facts.RepairDirective == nil {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return fmt.Errorf("runtime aggregate working output has no unique original live semantic work commitment")
+		}
+	}
 	if err := runtimecontract.ValidateRuntimeDispatchHistoryShape(a.Facts.WorkspaceID, a.Facts.RunID, active, completed); err != nil {
 		return fmt.Errorf("runtime aggregate dispatch history: %w", err)
 	}

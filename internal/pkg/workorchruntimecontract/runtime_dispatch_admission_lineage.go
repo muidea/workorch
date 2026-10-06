@@ -21,6 +21,7 @@ func RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt RuntimeCandidateAtte
 		dispatch.CoverageBindingHash != StableRuntimeCoverageEvidenceBindingSnapshotHash(dispatch.CoverageBindings) ||
 		!RuntimeCoverageEvidenceBindingProjectionsEqual(attempt.AdmissionCoverageBindings, dispatch.CoverageBindings) ||
 		!runtimeAcceptedCandidateAttemptValidationRecipeMatchesDispatch(attempt, dispatch) ||
+		!runtimeImplementationWorkCommitmentsEqual(attempt.AdmissionImplementationWorkCommitment, dispatch.ImplementationWorkCommitment) ||
 		!runtimeAcceptedCandidateAttemptRepairCommitmentMatchesDispatch(attempt, dispatch) {
 		return false
 	}
@@ -115,6 +116,7 @@ func runtimeGovernanceResumeAdmissionInheritsAuthorityCommitments(binding Runtim
 			return false
 		}
 		return source.CandidateHash == resume.CandidateHash &&
+			runtimeImplementationWorkCommitmentsEqual(source.ImplementationWorkCommitment, resume.ImplementationWorkCommitment) &&
 			source.CandidateManifestHash == resume.CandidateManifestHash &&
 			source.RepairCommitmentHash == resume.RepairCommitmentHash &&
 			SameRuntimeDispatchRepairCommitment(source.RepairCommitment, resume.RepairCommitment) &&

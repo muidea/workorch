@@ -549,6 +549,9 @@ func cloneRuntimeCandidateRaw(in RuntimeCandidate) RuntimeCandidate {
 func cloneRuntimeCandidateContractManifestRaw(in RuntimeCandidateContractManifest) RuntimeCandidateContractManifest {
 	out := in
 	out.MutationInputCatalogs = cloneRuntimeStateRawSlice(in.MutationInputCatalogs, cloneRuntimeOperationAdmissibilityRaw)
+	out.ImplementationWorkingBinding = cloneRuntimeStateRawPointer(in.ImplementationWorkingBinding, func(item RuntimeImplementationWorkingBinding) RuntimeImplementationWorkingBinding {
+		return item.Clone()
+	})
 	out.EffectPolicy.AllowedOperationEffects = cloneRuntimeStateRawSlice(in.EffectPolicy.AllowedOperationEffects, func(item RuntimeEffectScope) RuntimeEffectScope { return item })
 	out.EffectPolicy.AllowedAcceptedReceiptEffects = cloneRuntimeStateRawSlice(in.EffectPolicy.AllowedAcceptedReceiptEffects, func(item RuntimeEffectScope) RuntimeEffectScope { return item })
 	out.RequiredTopLevelFields = cloneRuntimeStateRawSlice(in.RequiredTopLevelFields, func(item string) string { return item })
@@ -629,6 +632,9 @@ func cloneRuntimeCandidateAttemptRecordRaw(in RuntimeCandidateAttemptRecord) Run
 	})
 	out.AdmissionRepairCommitment = cloneRuntimeStateRawPointer(in.AdmissionRepairCommitment, func(item RuntimeDispatchRepairCommitment) RuntimeDispatchRepairCommitment {
 		return cloneRuntimeDispatchRepairCommitmentRaw(item)
+	})
+	out.AdmissionImplementationWorkCommitment = cloneRuntimeStateRawPointer(in.AdmissionImplementationWorkCommitment, func(item RuntimeImplementationWorkRound) RuntimeImplementationWorkRound {
+		return item.Clone()
 	})
 	out.Proposal = cloneRuntimeStateRawPointer(in.Proposal, func(item RuntimeCandidate) RuntimeCandidate { return cloneRuntimeCandidateRaw(item) })
 	out.Conformances = cloneRuntimeStateRawSlice(in.Conformances, func(item RuntimeCandidateConformanceRecord) RuntimeCandidateConformanceRecord {
@@ -1038,6 +1044,9 @@ func cloneRuntimeDispatchRecordRaw(in RuntimeDispatchRecord) RuntimeDispatchReco
 	})
 	out.RepairCommitment = cloneRuntimeStateRawPointer(in.RepairCommitment, func(item RuntimeDispatchRepairCommitment) RuntimeDispatchRepairCommitment {
 		return cloneRuntimeDispatchRepairCommitmentRaw(item)
+	})
+	out.ImplementationWorkCommitment = cloneRuntimeStateRawPointer(in.ImplementationWorkCommitment, func(item RuntimeImplementationWorkRound) RuntimeImplementationWorkRound {
+		return item.Clone()
 	})
 	out.AssessmentAuthorityInput = cloneRuntimeStateRawPointer(in.AssessmentAuthorityInput, func(item RuntimeAssessmentAuthorityInput) RuntimeAssessmentAuthorityInput {
 		return cloneRuntimeAssessmentAuthorityInputRaw(item)
@@ -1910,6 +1919,7 @@ func cloneRuntimeSemanticProofObligationRaw(in RuntimeSemanticProofObligation) R
 	out.OwnerFactAcquisition = cloneRuntimeStateRawPointer(in.OwnerFactAcquisition, func(item RuntimeSemanticOwnerFactAcquisition) RuntimeSemanticOwnerFactAcquisition {
 		return cloneRuntimeSemanticOwnerFactAcquisitionRaw(item)
 	})
+	out.ImplementationWork = cloneRuntimeStateRawPointer(in.ImplementationWork, func(item RuntimeSemanticImplementationWork) RuntimeSemanticImplementationWork { return item.Clone() })
 	out.ValidationFailureRepair = cloneRuntimeStateRawPointer(in.ValidationFailureRepair, func(item RuntimeSemanticValidationFailureRepair) RuntimeSemanticValidationFailureRepair {
 		return cloneRuntimeSemanticValidationFailureRepairRaw(item)
 	})
@@ -1979,6 +1989,7 @@ func cloneRuntimeStateRecordRaw(in RuntimeStateRecord) RuntimeStateRecord {
 	out.Definition = cloneRuntimeDefinitionContextRaw(in.Definition)
 	out.Facts = cloneRuntimeFactsRaw(in.Facts)
 	out.SemanticPlanning = cloneRuntimeSemanticPlanningLedgerRaw(in.SemanticPlanning)
+	out.ImplementationWork = in.ImplementationWork.Clone()
 	out.Reconciliation = cloneRuntimeCWIReconciliationLedgerRaw(in.Reconciliation)
 	out.CoverageProofLineage = cloneRuntimeStateRawSlice(in.CoverageProofLineage, func(item RuntimeCoverageProofLineage) RuntimeCoverageProofLineage {
 		return cloneRuntimeCoverageProofLineageRaw(item)

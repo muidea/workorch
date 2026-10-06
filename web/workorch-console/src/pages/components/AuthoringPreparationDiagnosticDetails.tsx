@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Space, Typography } from 'antd';
 import { workorchApi } from '../../api';
 import type { DefinitionAuthoringPreparationDiagnostic, DefinitionAuthoringPreparationDiagnosticMetadata } from '../../types';
@@ -51,21 +51,25 @@ function downloadCause(record: VerifiedCause): void {
   URL.revokeObjectURL(url);
 }
 
-export function AuthoringPreparationDiagnosticDetails({ diagnostic }: Props) {
+export const AuthoringPreparationDiagnosticDetails = memo(function AuthoringPreparationDiagnosticDetails({ diagnostic }: Props) {
   const scopeKey = JSON.stringify(metadataKeys.map(key => diagnostic[key]));
   const scope = useRef(scopeKey);
   scope.current = scopeKey;
   const generation = useRef(0);
   const [loading, setLoading] = useState(false);
   const [record, setRecord] = useState<VerifiedCause>();
+  const [recordScope, setRecordScope] = useState('');
   const [error, setError] = useState('');
+  const [errorScope, setErrorScope] = useState('');
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     generation.current++;
     setLoading(false);
     setRecord(undefined);
+    setRecordScope('');
     setError('');
+    setErrorScope('');
     setExpanded(false);
     return () => { generation.current++; };
   }, [scopeKey]);
@@ -81,14 +85,19 @@ export function AuthoringPreparationDiagnosticDetails({ diagnostic }: Props) {
       const verified = await verifyCause(raw, diagnostic);
       if (generation.current !== token || scope.current !== requestedScope) return;
       setRecord(verified);
+      setRecordScope(requestedScope);
       setExpanded(true);
     } catch (cause) {
-      if (generation.current === token && scope.current === requestedScope) setError(cause instanceof Error ? cause.message : String(cause));
+      if (generation.current === token && scope.current === requestedScope) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+        setErrorScope(requestedScope);
+      }
     } finally {
       if (generation.current === token && scope.current === requestedScope) setLoading(false);
     }
   };
 
+  const showRecord = expanded && recordScope === scopeKey;
   return <Space direction="vertical" style={{ width: '100%' }} size="small">
     <Typography.Text strong>{diagnostic.stage}{diagnostic.reviewKind ? ` · ${diagnostic.reviewKind}` : ''} · {diagnostic.phaseCode}</Typography.Text>
     <Typography.Text type="secondary">
@@ -99,13 +108,13 @@ export function AuthoringPreparationDiagnosticDetails({ diagnostic }: Props) {
       {diagnostic.providerBindingHash ? ` · provider binding ${diagnostic.providerBindingHash}` : ''}
     </Typography.Text>
     <Typography.Text type="secondary">前置原因 SHA-256 {diagnostic.causeSHA256} · {diagnostic.causeBytes} 字节。{diagnostic.causeSaved ? '原始原因已保存。' : `原始原因未保存：${diagnostic.notSavedReason || '原因未提供'}。`}</Typography.Text>
-    {diagnostic.causeSaved && <Button size="small" loading={loading} onClick={() => { if (expanded) { setExpanded(false); return; } void load(); }}>
-      {expanded ? '收起前置原因' : '按需加载并校验前置原因'}
+    {diagnostic.causeSaved && <Button size="small" loading={loading} onClick={() => { if (showRecord) { setExpanded(false); return; } void load(); }}>
+      {showRecord ? '收起前置原因' : '按需加载并校验前置原因'}
     </Button>}
-    {error && <Alert type="error" showIcon message="前置原因不可用或完整性校验失败" description={error} />}
-    {expanded && record && record.text === undefined && <Alert type="warning" showIcon message="前置原因不是有效 UTF-8 文本；已验证原字节可下载，界面不进行字符替换。" />}
-    {expanded && record && record.bytes.byteLength === 0 && <Typography.Text type="secondary">原始原因为空（0 字节）；下载内容保留为空原始字节。</Typography.Text>}
-    {expanded && record && record.text !== undefined && record.text.length > 0 && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 320, overflow: 'auto', margin: 0 }}>{record.text}</pre>}
-    {expanded && record && <Button size="small" onClick={() => downloadCause(record)}>下载已校验原始字节</Button>}
+    {error && errorScope === scopeKey && <Alert type="error" showIcon message="前置原因不可用或完整性校验失败" description={error} />}
+    {showRecord && record && record.text === undefined && <Alert type="warning" showIcon message="前置原因不是有效 UTF-8 文本；已验证原字节可下载，界面不进行字符替换。" />}
+    {showRecord && record && record.bytes.byteLength === 0 && <Typography.Text type="secondary">原始原因为空（0 字节）；下载内容保留为空原始字节。</Typography.Text>}
+    {showRecord && record && record.text !== undefined && record.text.length > 0 && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 320, overflow: 'auto', margin: 0 }}>{record.text}</pre>}
+    {showRecord && record && <Button size="small" onClick={() => downloadCause(record)}>下载已校验原始字节</Button>}
   </Space>;
-}
+}, (previous, next) => metadataMatches(previous.diagnostic, next.diagnostic));

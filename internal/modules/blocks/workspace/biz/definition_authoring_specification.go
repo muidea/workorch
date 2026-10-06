@@ -30,6 +30,28 @@ func reduceAuthoringSpecification(o definitionSpecificationObservation, e defini
 		if cmd.Validate() != nil || cmd.WorkspaceID != w.ID {
 			return definitionSpecificationTransition{}, common.ErrInvalidArgument
 		}
+		if cmd.Proposal != nil {
+			var derivation *workspace.DefinitionDerivationRequest
+			for _, item := range record.SpecificationRequests {
+				if item.PermitID != cmd.PermitID {
+					continue
+				}
+				for index := range record.DerivationRequests {
+					candidate := &record.DerivationRequests[index]
+					if candidate.PermitID == item.DerivationPermitID {
+						derivation = candidate
+						break
+					}
+				}
+				break
+			}
+			if derivation == nil {
+				return definitionSpecificationTransition{}, common.ErrConflict
+			}
+			if err := validateAuthoringVerificationAgainstSealedTemplate(workspace.WorkspaceTemplateSnapshotHash(&derivation.Template), *derivation, *cmd.Proposal); err != nil {
+				return definitionSpecificationTransition{}, err
+			}
+		}
 		next, err = record.CompleteSpecification(cmd.PermitID, cmd.Proposal, cmd.Review, cmd.FailureCode, cmd.Diagnostic)
 		if err == nil {
 			for _, item := range next.SpecificationRequests {

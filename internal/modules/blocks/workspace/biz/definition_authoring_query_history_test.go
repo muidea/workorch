@@ -15,7 +15,7 @@ func TestAuthoringQueryRejectsCorruptArchivedSource(t *testing.T) {
 	ctx := context.Background()
 	owners := openFileDefinitionAdmissionOwners(t, t.TempDir())
 	defer owners.close()
-	command := seedReviewedAuthoringConfirmation(t, owners, "ws-query-history")
+	command := seedReviewedAuthoringConfirmationWithAdmissionBlocker(t, owners, "ws-query-history")
 	if err := owners.workspace.Start(); err != nil {
 		t.Fatal(err)
 	}

@@ -56,6 +56,7 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 	}
 	proposal.Obligations = append(proposal.Obligations, workspace.GoalSpecificationObligation{ID: "goal-obligation", RequirementID: "goal", DoDItemRefs: []string{candidateItems[0].CandidateItemRef}, Text: "验证目标"})
 	proposal.Verifications = append(proposal.Verifications, workspace.GoalSpecificationVerification{ID: "verify-goal", ObligationID: "goal-obligation", Status: workspace.GoalVerificationUnverified, Declaration: "待评估"})
+	proposal = authoringWireSpecificationFixture(proposal)
 	if err := workspace.ValidateAuthoringSpecification(input, &template, *acceptance, nil, proposal); err != nil {
 		t.Fatal(err)
 	}
@@ -155,6 +156,46 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 		t.Fatalf("physical calls=%d, durable records=%d", physicalCalls, len(record.SpecificationRequests))
 	}
 	complete := record.Clone()
+	blockedView, err := definitionAuthoringView(workspaceevents.QueryDefinitionAuthoringResult{
+		WorkspaceID: input.WorkspaceID, WorkspaceRevision: 1, Record: authoringTestRecord(complete),
+		CurrentTemplateAvailable: true, CurrentTemplateSnapshotHash: complete.TemplateSnapshotHash,
+	})
+	if err != nil || blockedView.State != "review_blocked" || blockedView.Proposal == nil || len(blockedView.Proposal.Reviews) != 6 {
+		t.Fatalf("six PASS reviews with UNVERIFIED became ready: %+v %v", blockedView, err)
+	}
+	// 协调修改完整 ledger 身份后仍然缺少实际 Profile，不能仅凭自洽 DECLARED 展示 ready。
+	selfDeclared := complete.Clone()
+	for index := range selfDeclared.SpecificationRequests {
+		request := &selfDeclared.SpecificationRequests[index]
+		if request.Proposal == nil {
+			continue
+		}
+		for verificationIndex := range request.Proposal.Verifications {
+			verification := &request.Proposal.Verifications[verificationIndex]
+			verification.Status = workspace.GoalVerificationDeclared
+			verification.ProfileID, verification.EvidenceRequirementID, verification.Scope = "invented", "*", "dodItem"
+		}
+		changedHash := request.Proposal.ContentHash()
+		for reviewIndex := range selfDeclared.SpecificationRequests {
+			reviewRequest := &selfDeclared.SpecificationRequests[reviewIndex]
+			if reviewRequest.Review == nil {
+				continue
+			}
+			reviewRequest.ProposalHash = changedHash
+			reviewRequest.Review.SpecificationHash = changedHash
+			reviewRequest.PermitID = reviewRequest.ExpectedPermitID()
+		}
+	}
+	if err := selfDeclared.Validate(); err != nil {
+		t.Fatalf("self-declared fixture must remain model-valid: %v", err)
+	}
+	selfDeclaredView, err := definitionAuthoringView(workspaceevents.QueryDefinitionAuthoringResult{
+		WorkspaceID: input.WorkspaceID, WorkspaceRevision: 1, Record: authoringTestRecord(selfDeclared),
+		CurrentTemplateAvailable: true, CurrentTemplateSnapshotHash: selfDeclared.TemplateSnapshotHash,
+	})
+	if err != nil || selfDeclaredView.State != "review_blocked" {
+		t.Fatalf("self-declared Profile became ready: %+v %v", selfDeclaredView, err)
+	}
 	configuration.ConfigurationRevision = "changed-after-completion"
 	b := &Biz{Base: basebiz.New(ModuleID, hub, nil), authoringTasks: newAuthoringTaskLifecycle()}
 	if replay, err := b.CompileAuthoringSpecification(ctx, input.WorkspaceID); err != nil || len(replay.Reviews) != 6 || physicalCalls != 7 {

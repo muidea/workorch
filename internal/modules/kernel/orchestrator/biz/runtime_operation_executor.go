@@ -436,6 +436,26 @@ func (m *Biz) executeRuntimeActiveDispatch(ctx context.Context, aggregate runtim
 			}
 			aggregate = updated.Aggregate
 			_, operationCallErr = (eventRuntimeOperationExecutor{hub: m.EventHub()}).ExecuteRuntimeOperation(ctx, call.Request)
+			// 工作 receipt 已在 owner callback 的唯一 CAS 中结算。重新读取原
+			// dispatch/receipt/execution，不能第二次 evidence CAS 或凭 response 判成功。
+			if aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.ImplementationWorkCommitment != nil {
+				loaded, loadErr := m.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+				if loadErr != nil {
+					return runtime.RuntimeAggregate{}, loadErr
+				}
+				if receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(loaded.OperationReceipts, call.Request.Execution.ExecutionKey, call.Request.Execution.Fence); found {
+					if receipt.OperationID != call.Request.Operation.ID {
+						return loaded, common.ErrConflict
+					}
+					operationCallErr = nil
+					aggregate = loaded
+					if aggregate.ActiveDispatch == nil {
+						return aggregate, nil
+					}
+					continue
+				}
+				aggregate = loaded
+			}
 			if call.RecoveryClaimID != "" {
 				returned, returnErr := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 					Kind:  runtime.RuntimeInternalEventOperationRecoveryCallReturned,

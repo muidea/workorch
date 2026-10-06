@@ -1,28 +1,60 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, App as AntApp, Button, Form, Input, List, Modal, Select, Space, Tag, Typography } from 'antd';
+import type { FormInstance } from 'antd';
 import { workorchApi } from '../../api';
-import { errorMessage } from '../../helpers';
+import { errorMessage } from '../../utils/errorMessage';
 import { AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS, authoringSourceLabel, AuthoringAcceptedPreparationObservation, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling } from '../../workspaceAuthoring';
 import type { AuthoringRecovery } from '../../workspaceAuthoring';
 import type { DefinitionAuthoringView, WorkspaceTemplate } from '../../types';
 import { AuthoringDiagnosticDetails } from './AuthoringDiagnosticDetails';
-import { AuthoringPreparationDiagnosticDetails } from './AuthoringPreparationDiagnosticDetails';
+import { AuthoringPreparationFailure } from './AuthoringPreparationFailure';
 import { AuthoringFailedRecoveryNotice } from './AuthoringFailedRecoveryNotice';
 
 type Props = { open: boolean; onClose: () => void; onCreated: (workspaceId: string, isCurrent: () => boolean) => void | Promise<void> };
 type Values = { title: string; templateId: string; deliverableDirectory?: string; goalText: string; requirements?: string; resources?: string };
 const lines = (value?: string) => (value || '').split('\n').map(line => line.trim()).filter(Boolean);
 
+const SetupInputForm = memo(function SetupInputForm({ form, templateOptions, disabled, created, onValuesChange }: {
+  form: FormInstance<Values>;
+  templateOptions: { value: string; label: string }[];
+  disabled: boolean;
+  created: boolean;
+  onValuesChange: () => void;
+}) {
+  return <Form form={form} layout="vertical" onValuesChange={onValuesChange} disabled={disabled}>
+    <Form.Item name="title" label="名称" rules={[{ required: true }]}><Input disabled={created} /></Form.Item>
+    <Form.Item name="templateId" label="模板" rules={[{ required: true }]}><Select options={templateOptions} /></Form.Item>
+    <Form.Item name="deliverableDirectory" label="工作目录（可留空，自动解析）"><Input disabled={created} /></Form.Item>
+    <Form.Item name="goalText" label="目标" rules={[{ required: true }]}><Input.TextArea rows={4} /></Form.Item>
+    <Form.Item name="resources" label="本地资源引用（每行一个，最多 8 个，相对于工作目录）"><Input.TextArea rows={2} /></Form.Item>
+    <Form.Item name="requirements" label="额外验收要求（可选，每行一条）"><Input.TextArea rows={3} /></Form.Item>
+  </Form>;
+});
+
+const SetupProposal = memo(function SetupProposal({ proposal }: { proposal: NonNullable<DefinitionAuthoringView['proposal']> }) {
+  return <>
+    <Typography.Title level={5}>待确认验收清单</Typography.Title>
+    <List dataSource={proposal.items} renderItem={item => <List.Item><Space align="start"><Tag>{authoringSourceLabel(item.sourceKind)}</Tag><Typography.Text>{item.text}</Typography.Text></Space></List.Item>} />
+    <Typography.Title level={5}>六类独立审查</Typography.Title>
+    <List dataSource={proposal.reviews || []} renderItem={review => <List.Item><Space><Tag color={review.status === 'PASS' ? 'green' : 'orange'}>{review.status}</Tag><Typography.Text>{review.kind}：{review.reason || '无附加说明'}</Typography.Text></Space></List.Item>} />
+    <Typography.Title level={5}>验证声明</Typography.Title>
+    <List dataSource={proposal.verifications || []} renderItem={item => <List.Item><Typography.Text>{item.id} · {item.status} · {item.declaration}</Typography.Text></List.Item>} />
+  </>;
+});
+
 export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
   const { message, modal } = AntApp.useApp();
   const [form] = Form.useForm<Values>();
+  const formOpened = useRef(false);
   const [templates, setTemplates] = useState<WorkspaceTemplate[]>([]);
+  const templateOptions = useMemo(() => templates.map(item => ({ value: item.id, label: item.name || item.id })), [templates]);
   const [view, setView] = useState<DefinitionAuthoringView>();
   const [recovery, setRecovery] = useState<AuthoringRecovery>();
   const recoveryRef = useRef<AuthoringRecovery | undefined>(undefined);
   const setRecoveryMemory = (next: AuthoringRecovery | undefined) => { recoveryRef.current = next; setRecovery(next); };
   const [busy, setBusy] = useState(false);
   const [edited, setEdited] = useState(false);
+  const onValuesChange = useCallback(() => { setEdited(true); }, []);
   const [failure, setFailure] = useState('');
   const session = useRef(new AuthoringSessionFence());
   const queries = useRef(new AuthoringQueryFence());
@@ -53,6 +85,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     acceptedPreparationObservation.current = new AuthoringAcceptedPreparationObservation();
     setBusy(false);
     form.resetFields();
+    formOpened.current = false;
     onClose();
   };
 
@@ -60,7 +93,12 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
   const applyView = (next: DefinitionAuthoringView) => {
     observe(next);
     setEdited(false);
-    if (next.input) form.setFieldsValue({ templateId: next.templateId, goalText: next.input.goalText, requirements: next.input.acceptanceRequirements?.join('\n'), resources: next.input.resourceRefs?.join('\n') });
+    if (next.input) {
+      const values = { templateId: next.templateId, goalText: next.input.goalText, requirements: next.input.acceptanceRequirements?.join('\n'), resources: next.input.resourceRefs?.join('\n') };
+      // 原草稿重试不重复发布相同字段；owner 规范化后的变化仍逐项更新。
+      const changed = Object.fromEntries(Object.entries(values).filter(([name, value]) => !Object.is(form.getFieldValue(name as keyof Values), value)));
+      if (Object.keys(changed).length) form.setFieldsValue(changed);
+    }
   };
 
   useEffect(() => {
@@ -76,7 +114,9 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     setRecoveryMemory(undefined);
     setView(undefined);
     setEdited(false);
-    form.resetFields();
+    // 首次或已在关闭时清空的表单无需重挂；外部重开仍清空字段与校验状态。
+    if (formOpened.current) form.resetFields();
+    formOpened.current = true;
     workorchApi.listWorkspaceTemplates().then(items => { if (!disposed && session.current.matches(token)) setTemplates(items); }).catch(error => { if (!disposed && session.current.matches(token)) setFailure(errorMessage(error)); });
     return () => { disposed = true; session.current.begin(); };
   }, [open]);
@@ -255,7 +295,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     <Space direction="vertical" style={{ width: '100%' }}>
       <Alert type="info" showIcon message="输入目标即可，验收清单由模板与目标派生。六类审查通过后才可确认；此操作不会启动 Run。" />
       {failure && <Alert type="error" showIcon message={failure} description={recovery ? '创建身份已保留。重试将恢复原草稿，不会重新创建工作空间。' : undefined} />}
-      {view?.preparationDiagnostics?.map(diagnostic => <Alert key={diagnostic.diagnosticId} type="error" showIcon message={`${diagnostic.current ? '当前' : '历史'}前置准备失败 · ${diagnostic.stage}${diagnostic.reviewKind ? ` · ${diagnostic.reviewKind}` : ''} · ${diagnostic.phaseCode}`} description={<Space direction="vertical" style={{ width: '100%' }}><Typography.Text>前置准备失败，尚未为该阶段取得 provider permit；修复后显式重试。此提示不表示其他阶段未调用 provider。</Typography.Text><AuthoringPreparationDiagnosticDetails diagnostic={diagnostic} /></Space>} />)}
+      {view?.preparationDiagnostics?.map(diagnostic => <AuthoringPreparationFailure key={diagnostic.diagnosticId} diagnostic={diagnostic} />)}
       {acceptedPreparationObservationActive && <Alert type="info" showIcon message="本次任务已受理，正在观察 owner 状态；页面观察是临时的，不会恢复或取消服务端事务。" />}
       {acceptedPreparationObservationTimedOut && <Alert type="warning" showIcon message="观察期限已到，最近一次可用 owner 状态为原前置准备失败；无法确认后台任务是否仍在执行。请手动刷新核对或修复后显式重试。" />}
       {view?.requests?.filter(request => request.state === 'failed').map((request, index) => <Alert key={`${request.phase}-${request.reviewKind || index}`} type="error" showIcon message={`规格请求失败：${request.phase}${request.reviewKind ? ` · ${request.reviewKind}` : ''}`} description={<AuthoringDiagnosticDetails workspaceId={view.workspaceId} permitId={request.permitId} phase={request.phase} failureCode={request.failureCode} diagnostic={request.diagnostic} />} />)}
@@ -263,14 +303,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
       {edited && view?.input && <Alert type="info" message="owner 当前目标（本地编辑尚未覆盖）" description={view.input.goalText} />}
       {edited && <Alert type="info" message="本地编辑尚未保存到服务端，关闭将丢弃。" />}
       {recovery && !view && <Alert type="warning" message="存在未完成的创建请求。将先以原 payload 恢复，再保存当前修改。" />}
-      <Form form={form} layout="vertical" onValuesChange={() => { setEdited(true); }} disabled={busy || Boolean(recovery?.pendingConfirmation) || ['confirming', 'admitting', 'admitted'].includes(view?.state || '')}>
-        <Form.Item name="title" label="名称" rules={[{ required: true }]}><Input disabled={Boolean(recovery?.workspaceId)} /></Form.Item>
-        <Form.Item name="templateId" label="模板" rules={[{ required: true }]}><Select options={templates.map(item => ({ value: item.id, label: item.name || item.id }))} /></Form.Item>
-        <Form.Item name="deliverableDirectory" label="工作目录（可留空，自动解析）"><Input disabled={Boolean(recovery?.workspaceId)} /></Form.Item>
-        <Form.Item name="goalText" label="目标" rules={[{ required: true }]}><Input.TextArea rows={4} /></Form.Item>
-        <Form.Item name="resources" label="本地资源引用（每行一个，最多 8 个，相对于工作目录）"><Input.TextArea rows={2} /></Form.Item>
-        <Form.Item name="requirements" label="额外验收要求（可选，每行一条）"><Input.TextArea rows={3} /></Form.Item>
-      </Form>
+      <SetupInputForm form={form} templateOptions={templateOptions} onValuesChange={onValuesChange} created={Boolean(recovery?.workspaceId)} disabled={busy || Boolean(recovery?.pendingConfirmation) || ['confirming', 'admitting', 'admitted'].includes(view?.state || '')} />
       {view && <>
         <Typography.Text>草稿：{view.workspaceId} · revision {view.inputRevision} · {view.state}</Typography.Text>
         {recovery?.pendingConfirmation && !authoringCanReplayConfirmation(view, recovery) && view.state !== 'admitted' && <Alert type="warning" message="原确认请求与当前草稿不一致，不能用旧凭据确认新规格。保留原请求，先核对并恢复确认；不能自动生成替代确认。" />}
@@ -279,14 +312,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
         {view.state === 'failed' && <AuthoringFailedRecoveryNotice />}
         {view.state === 'outcome_unresolved' && <Alert type="warning" message="已有持久请求结果未决，不会自动重发 provider。可查询恢复结果或修改输入形成新 revision。" />}
         {view.admissionViolationCode && <Alert type="warning" message={`准入需澄清：${view.admissionViolationCode}`} description={view.admissionOffendingRefs?.join('、')} />}
-        {view.proposal && <>
-          <Typography.Title level={5}>待确认验收清单</Typography.Title>
-          <List dataSource={view.proposal.items} renderItem={item => <List.Item><Space align="start"><Tag>{authoringSourceLabel(item.sourceKind)}</Tag><Typography.Text>{item.text}</Typography.Text></Space></List.Item>} />
-          <Typography.Title level={5}>六类独立审查</Typography.Title>
-          <List dataSource={view.proposal.reviews || []} renderItem={review => <List.Item><Space><Tag color={review.status === 'PASS' ? 'green' : 'orange'}>{review.status}</Tag><Typography.Text>{review.kind}：{review.reason || '无附加说明'}</Typography.Text></Space></List.Item>} />
-          <Typography.Title level={5}>验证声明</Typography.Title>
-          <List dataSource={view.proposal.verifications || []} renderItem={item => <List.Item><Typography.Text>{item.id} · {item.status} · {item.declaration}</Typography.Text></List.Item>} />
-        </>}
+        {view.proposal && <SetupProposal proposal={view.proposal} />}
       </>}
     </Space>
   </Modal>;

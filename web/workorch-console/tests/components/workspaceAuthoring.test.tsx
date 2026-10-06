@@ -1,7 +1,15 @@
-import { StrictMode } from 'react';
-import { App as AntApp } from 'antd';
+import { StrictMode, useLayoutEffect } from 'react';
+import { App as AntApp, ConfigProvider } from 'antd';
 const App = AntApp;
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render as mount, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import type { RenderOptions } from '@testing-library/react';
+
+// jsdom 不验证布局动画；保留真实组件与交互，避免动画计时器干扰业务截止断言。
+const render = (ui: ReactNode, options?: RenderOptions) => mount(ui, {
+  wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }} wave={{ disabled: true }}>{children}</ConfigProvider>,
+  ...options,
+});
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash, webcrypto } from 'node:crypto';
 import { workorchApi } from '../../src/api';
@@ -51,9 +59,10 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const button = (name: string) => {
-  const element = screen.getByText(name, { exact: true }).closest('button');
-  if (!element) throw new Error(`按钮不存在：${name}`);
-  return element;
+  const elements = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+    .filter(item => item.textContent === name && !item.closest('[aria-hidden="true"]'));
+  if (elements.length !== 1) throw new Error(`应有唯一当前按钮：${name}，实际 ${elements.length}`);
+  return elements[0];
 };
 const disabled = (name: string) => button(name).disabled;
 
@@ -84,6 +93,7 @@ async function downloadedCauseBytes(buttonName = '下载已校验原始字节'):
 }
 
 beforeEach(() => {
+  vi.restoreAllMocks();
   vi.resetAllMocks();
   vi.mocked(workorchApi.listWorkspaceTemplates).mockResolvedValue([{ id: 't', name: '模板' } as never]);
   vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(ready());
@@ -479,6 +489,26 @@ describe('持久规格编辑实际挂载', () => {
     expect(workorchApi.readAuthoringPreparationDiagnostic).toHaveBeenCalledTimes(1);
   });
 
+  it('owner 发布新 proposal 时 memo 列表更新，不保留旧验收或审查', async () => {
+    const initial = { ...ready(), state: 'reviewing' };
+    const fresh = ready();
+    fresh.proposal = {
+      ...fresh.proposal!, items: [{ ref: 'new-item', text: '新验收条目', sourceKind: 'DERIVED' }],
+      reviews: fresh.proposal!.reviews!.map(item => ({ ...item, reason: '新审查理由' })),
+    };
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce(initial).mockResolvedValue(fresh);
+    vi.useFakeTimers();
+    render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
+    await act(async () => {});
+    expect(screen.getByText('验收')).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(screen.queryByText('验收')).toBeNull();
+    expect(screen.getByText('新验收条目')).toBeTruthy();
+    expect(screen.getAllByText(/新审查理由/)).toHaveLength(6);
+    expect(workorchApi.compileDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+  });
+
   it('缺少任一独立审查不能确认', async () => {
     const incomplete = ready();
     incomplete.proposal!.reviews!.pop();
@@ -606,6 +636,7 @@ describe('持久规格编辑实际挂载', () => {
     vi.mocked(workorchApi.confirmDefinitionAuthoring).mockReturnValueOnce(pending.promise);
     const mounted = render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
     await screen.findByDisplayValue('原目标');
+    await waitFor(() => expect(disabled('确认并准入')).toBe(false));
     fireEvent.click(button('确认并准入'));
     await waitFor(() => expect(workorchApi.confirmDefinitionAuthoring).toHaveBeenCalledTimes(1));
     mounted.rerender(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
@@ -732,6 +763,11 @@ const diagnosticView = (withMetadata = true): DefinitionAuthoringView => ({
   } } : {}) }],
 });
 
+function FirstCommitObservation({ children, observe }: { children: ReactNode; observe: () => void }) {
+  useLayoutEffect(observe, [observe]);
+  return children;
+}
+
 function browserCrypto() {
   vi.stubGlobal('crypto', webcrypto);
 }
@@ -748,7 +784,7 @@ it('UTF-8 BOM 在规格原始响应文本和下载原始字节中都保留', asy
   };
   vi.mocked(workorchApi.readAuthoringDiagnostic).mockResolvedValue(diagnostic);
   render(<AuthoringDiagnosticDetails workspaceId="ws" permitId="permit" phase="proposal" failureCode="invalid_proposal" diagnostic={diagnostic} />);
-  fireEvent.click(button('按需加载并校验原始响应'));
+  fireEvent.click(button('按需加载并校验诊断原文'));
   expect(await screen.findByText((_, element) => element?.tagName === 'PRE' && element.textContent === text)).toBeTruthy();
   expect(Array.from(await downloadedCauseBytes())).toEqual(Array.from(bytes));
 });
@@ -764,7 +800,7 @@ it('非 UTF-8 原始规格响应拒绝文本但仍可下载原始 bytes', async 
   };
   vi.mocked(workorchApi.readAuthoringDiagnostic).mockResolvedValue(diagnostic);
   render(<AuthoringDiagnosticDetails workspaceId="ws" permitId="permit" phase="proposal" failureCode="invalid_proposal" diagnostic={diagnostic} />);
-  fireEvent.click(button('按需加载并校验原始响应'));
+  fireEvent.click(button('按需加载并校验诊断原文'));
   expect(await screen.findByText(/不是有效 UTF-8 文本；已验证原字节可下载/)).toBeTruthy();
   expect(screen.queryByText(/�/)).toBeNull();
   expect(Array.from(await downloadedCauseBytes())).toEqual(Array.from(bytes));
@@ -790,7 +826,7 @@ it('Provider document/wire 只显示有据可依的观测状态，并校验、�
   expect(screen.getByText(/Provider 文档已完整观察.*并已保存/)).toBeTruthy();
   expect(screen.getByText(/Provider wire仅部分观察/)).toBeTruthy();
   expect(screen.getByText(/安全失败分类与传输错误原文分离。传输错误原文已完整观察/)).toBeTruthy();
-  fireEvent.click(button('按需加载并校验原始响应'));
+  fireEvent.click(button('按需加载并校验诊断原文'));
   expect(await screen.findByText((_, element) => element?.tagName === 'PRE' && element.textContent === documentText)).toBeTruthy();
   expect(await screen.findByText(/Provider wire 不是有效 UTF-8 文本/)).toBeTruthy();
   expect(Array.from(await downloadedCauseBytes('下载已校验 Provider 文档 bytes'))).toEqual(Array.from(documentBytes));
@@ -814,8 +850,8 @@ it('Provider 未观察及未保存信息不被空 payload 冒充为 provider 输
   expect(screen.getByText(/Provider 文档未观察/)).toBeTruthy();
   expect(screen.getByText(/Provider wire已完整观察（12 字节，SHA-256 actual-observation-hash），但未保存：存储上限/)).toBeTruthy();
   expect(screen.getByText(/传输错误原文已完整观察（11 字节，SHA-256 leaf-error-hash），但未保存：诊断存储边界/)).toBeTruthy();
-  expect(screen.getByText(/历史 payload 未保存或为空；不以其表示 provider 输出/)).toBeTruthy();
-  expect(screen.queryByRole('button', { name: '按需加载并校验原始响应' })).toBeNull();
+  expect(screen.getByText(/解析器输入 payload 未保存：payload 空不是文档/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '按需加载并校验诊断原文' })).toBeNull();
   expect(workorchApi.readAuthoringDiagnostic).not.toHaveBeenCalled();
 });
 
@@ -830,11 +866,28 @@ it('Provider 文档 SHA-256 错配时 fail closed，不显示或提供下载', a
   };
   vi.mocked(workorchApi.readAuthoringDiagnostic).mockResolvedValue(diagnostic);
   render(<AuthoringDiagnosticDetails workspaceId="ws" permitId="permit" phase="proposal" failureCode="invalid_proposal" diagnostic={diagnostic} />);
-  fireEvent.click(button('按需加载并校验原始响应'));
-  await screen.findByText(/原始响应不可用或完整性校验失败/);
+  fireEvent.click(button('按需加载并校验诊断原文'));
+  await screen.findByText(/诊断原文不可用或完整性校验失败/);
   expect(screen.getByText(/provider 文档 SHA-256 不匹配/)).toBeTruthy();
   expect(screen.queryByText((_, element) => element?.tagName === 'PRE' && element.textContent === 'provider document')).toBeNull();
   expect(screen.queryByRole('button', { name: '下载已校验 Provider 文档 bytes' })).toBeNull();
+});
+
+it('prep cause 失败原文在 scope 切换首帧即隔离，不等待 passive cleanup', async () => {
+  const expected = preparationDiagnostic();
+  vi.mocked(workorchApi.readAuthoringPreparationDiagnostic).mockRejectedValueOnce(new Error('旧 scope 独有失败 Ω'));
+  const unchanged = () => {};
+  const mounted = render(<FirstCommitObservation observe={unchanged}><AuthoringPreparationDiagnosticDetails diagnostic={expected} /></FirstCommitObservation>);
+  fireEvent.click(button('按需加载并校验前置原因'));
+  await screen.findByText('旧 scope 独有失败 Ω');
+  let observedFirstCommit = false;
+  mounted.rerender(<FirstCommitObservation observe={() => {
+    observedFirstCommit = true;
+    expect(screen.queryByText('旧 scope 独有失败 Ω')).toBeNull();
+    expect(screen.queryByText('前置原因不可用或完整性校验失败')).toBeNull();
+  }}><AuthoringPreparationDiagnosticDetails diagnostic={preparationDiagnostic({ workspaceId: 'new-workspace', diagnosticId: 'new-diagnostic' })} /></FirstCommitObservation>);
+  expect(observedFirstCommit).toBe(true);
+  expect(workorchApi.readAuthoringPreparationDiagnostic).toHaveBeenCalledTimes(1);
 });
 
 it('prep cause GET 迟到且切换 scope 后不泄漏；相同 metadata rerender 不丢在途读取', async () => {
@@ -842,13 +895,21 @@ it('prep cause GET 迟到且切换 scope 后不泄漏；相同 metadata rerender
   const expected = preparationDiagnostic();
   const deferredRead = deferred<DefinitionAuthoringPreparationDiagnostic>();
   vi.mocked(workorchApi.readAuthoringPreparationDiagnostic).mockReturnValueOnce(deferredRead.promise);
-  const mounted = render(<AuthoringPreparationDiagnosticDetails diagnostic={expected} />);
-  fireEvent.click(screen.getByRole('button', { name: '按需加载并校验前置原因' }));
-  mounted.rerender(<AuthoringPreparationDiagnosticDetails diagnostic={{ ...expected }} />);
+  const observeUnchangedCommit = () => {};
+  const mounted = render(<FirstCommitObservation observe={observeUnchangedCommit}><AuthoringPreparationDiagnosticDetails diagnostic={expected} /></FirstCommitObservation>);
+  fireEvent.click(button('按需加载并校验前置原因'));
+  mounted.rerender(<FirstCommitObservation observe={observeUnchangedCommit}><AuthoringPreparationDiagnosticDetails diagnostic={{ ...expected }} /></FirstCommitObservation>);
   const cause = 'provider 原因：暂不可用';
   await act(async () => deferredRead.resolve({ ...preparationDiagnostic(), causeBase64: Buffer.from(cause).toString('base64') }));
   expect(await screen.findByText((_, element) => element?.tagName === 'PRE' && element.textContent === cause)).toBeTruthy();
-  mounted.rerender(<AuthoringPreparationDiagnosticDetails diagnostic={preparationDiagnostic({ workspaceId: 'new-workspace', diagnosticId: 'new-diagnostic', current: false })} />);
+  let observedFirstCommit = false;
+  mounted.rerender(<FirstCommitObservation observe={() => {
+    observedFirstCommit = true;
+    expect(screen.queryByText(cause)).toBeNull();
+    expect(document.querySelector('pre')).toBeNull();
+    expect(document.querySelectorAll('button').length).toBe(1);
+  }}><AuthoringPreparationDiagnosticDetails diagnostic={preparationDiagnostic({ workspaceId: 'new-workspace', diagnosticId: 'new-diagnostic', current: false })} /></FirstCommitObservation>);
+  expect(observedFirstCommit).toBe(true);
   expect(screen.queryByText(cause)).toBeNull();
 });
 
@@ -875,7 +936,7 @@ it('失败诊断原样显示多行 Unicode 和敏感 marker，按需校验原始
   expect(screen.getByText('invalid_proposal · proposal')).toBeTruthy();
   expect(screen.queryByRole('img')).toBeNull();
   expect(workorchApi.readAuthoringDiagnostic).not.toHaveBeenCalled();
-  fireEvent.click(button('按需加载并校验原始响应'));
+  fireEvent.click(button('按需加载并校验诊断原文'));
   await waitFor(() => expect(workorchApi.readAuthoringDiagnostic).toHaveBeenCalledExactlyOnceWith('ws', 'permit raw/?'));
   await waitFor(() => expect(screen.getByText((_, element) => element?.tagName === 'PRE' && element.textContent === raw)).toBeTruthy());
   expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
@@ -891,16 +952,16 @@ it('原始响应 hash 不匹配时明确报错且不显示伪成功内容', asyn
   };
   vi.mocked(workorchApi.readAuthoringDiagnostic).mockResolvedValue(diagnostic);
   render(<AuthoringDiagnosticDetails workspaceId="ws" permitId="permit" phase="proposal" failureCode="invalid_proposal" diagnostic={{ ...diagnostic }} />);
-  fireEvent.click(button('按需加载并校验原始响应'));
-  await screen.findByText('原始响应不可用或完整性校验失败');
-  expect(screen.getByText(/原始响应 SHA-256 不匹配/)).toBeTruthy();
+  fireEvent.click(button('按需加载并校验诊断原文'));
+  await screen.findByText('诊断原文不可用或完整性校验失败');
+  expect(screen.getByText(/解析器输入 payload SHA-256 不匹配/)).toBeTruthy();
   expect(screen.queryByText('different raw')).toBeNull();
   expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
 });
 
 it('旧 failed 记录明确显示无诊断，且不加载或重发 provider', () => {
   render(<AuthoringDiagnosticDetails workspaceId="ws" phase="proposal" failureCode="invalid_proposal" />);
-  expect(screen.getByText(/此旧失败记录没有保存诊断/)).toBeTruthy();
+  expect(screen.getByText(/此失败记录没有可用诊断/)).toBeTruthy();
   expect(screen.getByText(/原始原因未记录，且不会重新调用 provider/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: /加载.*原始响应/ })).toBeNull();
   expect(workorchApi.readAuthoringDiagnostic).not.toHaveBeenCalled();
@@ -916,7 +977,7 @@ it('diagnostic fetch 在 workspace/permit 切换后迟到，不泄漏或覆盖�
     payloadBase64: '', payloadSHA256: createHash('sha256').digest('hex'), payloadBytes: 0, payloadSaved: true,
   };
   const mounted = render(<AuthoringDiagnosticDetails workspaceId="old-ws" permitId="old-permit" phase="proposal" failureCode="invalid_proposal" diagnostic={base} />);
-  fireEvent.click(button('按需加载并校验原始响应'));
+  fireEvent.click(button('按需加载并校验诊断原文'));
   mounted.rerender(<AuthoringDiagnosticDetails workspaceId="new-ws" permitId="new-permit" phase="proposal" failureCode="invalid_proposal" diagnostic={{ ...base, parseError: '新 parse', parseErrorSHA256: createHash('sha256').update('新 parse').digest('hex'), parseErrorBytes: Buffer.byteLength('新 parse') }} />);
   await act(async () => pending.resolve({ workspaceId: 'old-ws', permitId: 'old-permit', phase: 'proposal', failureCode: 'invalid_proposal', ...base }));
   expect(screen.getByText((_, element) => element?.tagName === 'PRE' && element.textContent === '新 parse')).toBeTruthy();
@@ -933,7 +994,7 @@ it('diagnostic fetch workspace/permit 身份不匹配时拒绝显示', async () 
   };
   vi.mocked(workorchApi.readAuthoringDiagnostic).mockResolvedValue(diagnostic);
   render(<AuthoringDiagnosticDetails workspaceId="ws" permitId="permit" phase="proposal" failureCode="invalid_proposal" diagnostic={{ ...diagnostic, workspaceId: undefined, permitId: undefined } as never} />);
-  fireEvent.click(button('按需加载并校验原始响应'));
+  fireEvent.click(button('按需加载并校验诊断原文'));
   await screen.findByText(/workspace 或 permit 身份不匹配/);
   expect(screen.getByText((_, element) => element?.tagName === 'PRE' && element.textContent === parseError)).toBeTruthy();
 });
@@ -951,7 +1012,7 @@ it('相同诊断的周期查询不丢弃正在加载的原始响应', async () =
   vi.mocked(workorchApi.readAuthoringDiagnostic).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
   const props = { workspaceId: 'ws', permitId: 'permit', phase: 'proposal', failureCode: 'invalid_proposal' };
   const { rerender } = render(<AuthoringDiagnosticDetails {...props} diagnostic={{ ...result }} />);
-  fireEvent.click(button('按需加载并校验原始响应'));
+  fireEvent.click(button('按需加载并校验诊断原文'));
   rerender(<AuthoringDiagnosticDetails {...props} diagnostic={{ ...result }} />);
   await act(async () => finish(result));
   await screen.findByText('下载已校验原始字节');
@@ -968,8 +1029,8 @@ it('byte 数不匹配时拒绝原始响应并明确报告', async () => {
   };
   vi.mocked(workorchApi.readAuthoringDiagnostic).mockResolvedValue(diagnostic);
   render(<AuthoringDiagnosticDetails workspaceId="ws" permitId="permit" phase="proposal" failureCode="invalid_proposal" diagnostic={{ ...diagnostic }} />);
-  fireEvent.click(button('按需加载并校验原始响应'));
-  await screen.findByText('原始响应不可用或完整性校验失败');
+  fireEvent.click(button('按需加载并校验诊断原文'));
+  await screen.findByText('诊断原文不可用或完整性校验失败');
   expect(screen.getByText(/字节数不匹配/)).toBeTruthy();
   expect(screen.queryByText('payload')).toBeNull();
 });

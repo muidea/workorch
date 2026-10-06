@@ -44,6 +44,9 @@ func (m *Biz) driveRuntimeSemanticPlanning(ctx context.Context, aggregate runtim
 }
 
 func (m *Biz) driveRuntimeSemanticRequired(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
+	if updated, handled, err := m.driveRuntimeImplementationWorkScope(ctx, aggregate); handled || err != nil {
+		return updated, err
+	}
 	if retirement, found := runtime.NextRuntimeCWIBindingRetirementFact(aggregate); found {
 		updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 			Kind: runtime.RuntimeInternalEventCWIBindingRetired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &runtime.RuntimeInternalAuthorityPayload{CWIBindingRetirement: &retirement},
@@ -56,8 +59,20 @@ func (m *Biz) driveRuntimeSemanticRequired(ctx context.Context, aggregate runtim
 		})
 		return updated.Aggregate, err
 	}
-	if runtimeSemanticPrerequisitesPending(aggregate.Facts.Prerequisites.Pending) {
-		return m.prepareRuntimePrerequisites(ctx, aggregate)
+	if runtime.RuntimeSemanticPrerequisitesPendingForAggregate(aggregate) {
+		return m.prepareRuntimeSemanticPrerequisites(ctx, aggregate)
+	}
+	if runtime.RuntimeImplementationWorkPurposePending(aggregate) && aggregate.ImplementationWork.ScopePreview == nil {
+		if current, err := runtime.CurrentRuntimeImplementationWorkReservation(aggregate); err != nil {
+			return runtime.RuntimeAggregate{}, err
+		} else if current == nil {
+			return m.failRuntimeSemanticContract(ctx, aggregate, "implementation_work_scope_missing", "implementation purpose requires complete current owner scope before a semantic generation", nil)
+		}
+	}
+	if runtime.RuntimeImplementationWorkPurposePending(aggregate) {
+		if err := runtimecontract.ValidateRuntimeImplementationWorkInputCatalogs(aggregate.Facts, aggregate.Definition.CapabilityContract); err != nil {
+			return runtime.RuntimeAggregate{}, err
+		}
 	}
 	if aggregate.Facts.Resources.ProviderCeiling == nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_provider_ceiling_missing", "semantic planning has no sealed provider ceiling prerequisite", nil)
@@ -86,6 +101,23 @@ func (m *Biz) driveRuntimeSemanticRequired(ctx context.Context, aggregate runtim
 		// Definition proofs in the same generation.
 		identity.EligibleCoverage = []common.CoverageWorkItemID{repairInput.CoverageWorkItemID}
 		identity.ValidationFailureRepair = &repairInput
+	}
+	if current, workErr := runtime.CurrentRuntimeImplementationWorkReservation(aggregate); workErr != nil {
+		return runtime.RuntimeAggregate{}, workErr
+	} else if current != nil {
+		if repairRequired || current.ScopeObservation == nil {
+			return runtime.RuntimeAggregate{}, fmt.Errorf("%w: semantic work scope is unsettled or exact repair is current", common.ErrConflict)
+		}
+		identity.ImplementationWork = current
+		identity.EligibleCoverage = []common.CoverageWorkItemID{current.CoverageWorkItemID}
+	}
+	if preview := aggregate.ImplementationWork.ScopePreview; preview != nil {
+		if repairRequired || preview.Observation == nil {
+			return runtime.RuntimeAggregate{}, fmt.Errorf("%w: implementation purpose preview is incomplete or conflicts with exact repair", common.ErrConflict)
+		}
+		identity.ImplementationPurposePreview = preview
+		identity.ImplementationWorkRounds = aggregate.ImplementationWork.Rounds
+		identity.EligibleCoverage = []common.CoverageWorkItemID{preview.Request.CoverageWorkItemID}
 	}
 	manifest, err := semanticplan.CompileManifest(identity)
 	if err != nil {
@@ -135,8 +167,8 @@ func (m *Biz) driveRuntimeSemanticOrderAccepted(ctx context.Context, aggregate r
 	// owner fact is part of the authority transaction used to derive the next
 	// proof batch's immutable RequestLogicalID, so it must settle before batch
 	// compilation—not merely before the physical provider call.
-	if runtimeSemanticPrerequisitesPending(aggregate.Facts.Prerequisites.Pending) {
-		return m.prepareRuntimePrerequisites(ctx, aggregate)
+	if runtime.RuntimeSemanticPrerequisitesPendingForAggregate(aggregate) {
+		return m.prepareRuntimeSemanticPrerequisites(ctx, aggregate)
 	}
 	batchRequestKey := fmt.Sprintf("semantic-proof-batch-%d", ledger.NextBatchSequence)
 	logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, batchRequestKey)

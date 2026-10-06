@@ -17,7 +17,7 @@ func TestAuthoringConfirmAndAdmitReplaysAfterDecisionFailure(t *testing.T) {
 	root := t.TempDir()
 	owners := openFileDefinitionAdmissionOwners(t, root)
 	defer func() { owners.close() }()
-	confirmation := seedReviewedAuthoringConfirmation(t, owners, "ws-authoring-composed-decision-cut")
+	confirmation := seedReviewedAuthoringConfirmationWithAdmissionBlocker(t, owners, "ws-authoring-composed-decision-cut")
 	if err := owners.workspace.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestAuthoringConfirmAndAdmitReplaysBlockedOwnerAndDecisionCuts(t *testing.T
 	root := t.TempDir()
 	owners := openFileDefinitionAdmissionOwners(t, root)
 	defer func() { owners.close() }()
-	confirmation := seedReviewedAuthoringConfirmation(t, owners, "ws-authoring-composed-replay")
+	confirmation := seedReviewedAuthoringConfirmationWithAdmissionBlocker(t, owners, "ws-authoring-composed-replay")
 	if err := owners.workspace.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestAuthoringBlockedAdmissionDecisionFailureReplaysAfterReopen(t *testing.T
 	root := t.TempDir()
 	owners := openFileDefinitionAdmissionOwners(t, root)
 	defer func() { owners.close() }()
-	confirmation := seedReviewedAuthoringConfirmation(t, owners, "ws-authoring-decision-unavailable")
+	confirmation := seedReviewedAuthoringConfirmationWithAdmissionBlocker(t, owners, "ws-authoring-decision-unavailable")
 	if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: confirmation}); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestAuthoringBlockedAdmissionDecisionTicketRecoversEveryOwnerCut(t *testing
 	root := t.TempDir()
 	owners := openFileDefinitionAdmissionOwners(t, root)
 	defer func() { owners.close() }()
-	confirmation := seedReviewedAuthoringConfirmation(t, owners, "ws-authoring-decision-recovery")
+	confirmation := seedReviewedAuthoringConfirmationWithAdmissionBlocker(t, owners, "ws-authoring-decision-recovery")
 	if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: confirmation}); err != nil {
 		t.Fatal(err)
 	}

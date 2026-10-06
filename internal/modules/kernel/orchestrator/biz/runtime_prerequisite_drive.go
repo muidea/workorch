@@ -16,6 +16,14 @@ import (
 )
 
 func (m *Biz) prepareRuntimePrerequisites(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
+	return m.prepareRuntimePrerequisitesForPurpose(ctx, aggregate, runtime.RuntimeImplementationWorkPurposePending(aggregate))
+}
+
+func (m *Biz) prepareRuntimeSemanticPrerequisites(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, error) {
+	return m.prepareRuntimePrerequisitesForPurpose(ctx, aggregate, true)
+}
+
+func (m *Biz) prepareRuntimePrerequisitesForPurpose(ctx context.Context, aggregate runtime.RuntimeAggregate, semantic bool) (runtime.RuntimeAggregate, error) {
 	if m == nil || m.runtimeController == nil || m.EventHub() == nil {
 		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
 	}
@@ -25,6 +33,14 @@ func (m *Biz) prepareRuntimePrerequisites(ctx context.Context, aggregate runtime
 	}
 	for {
 		pending := append([]runtimecontract.RuntimePrerequisite(nil), aggregate.Facts.Prerequisites.Pending...)
+		if semantic {
+			pending = nil
+			for _, value := range aggregate.Facts.Prerequisites.Pending {
+				if runtime.RuntimeSemanticPrerequisiteRequiredForAggregate(aggregate, value) {
+					pending = append(pending, value)
+				}
+			}
+		}
 		if len(pending) == 0 {
 			return aggregate, nil
 		}

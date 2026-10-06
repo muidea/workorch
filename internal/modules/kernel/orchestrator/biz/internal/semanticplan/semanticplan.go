@@ -28,8 +28,11 @@ type ManifestIdentity struct {
 	// ValidationFailureRepair is present only after a private SM-2 CWI reopen
 	// persisted the exact typed rejection and Profile convergence. It selects
 	// the shared repair-purpose compiler; it is never synthesized here.
-	ValidationFailureRepair *runtimecontract.RuntimeValidationFailureRepairGenerationInput
-	InputReviewInformation  []runtimecontract.RuntimeValidationInputReviewInformation
+	ValidationFailureRepair      *runtimecontract.RuntimeValidationFailureRepairGenerationInput
+	InputReviewInformation       []runtimecontract.RuntimeValidationInputReviewInformation
+	ImplementationWork           *runtimecontract.RuntimeImplementationWorkRound
+	ImplementationPurposePreview *runtimecontract.RuntimeImplementationWorkScopePreview
+	ImplementationWorkRounds     []runtimecontract.RuntimeImplementationWorkRound
 }
 
 // CompileManifest is the single focused-package entry for compiling a
@@ -50,6 +53,18 @@ func CompileManifest(identity ManifestIdentity) (runtimecontract.RuntimeSemantic
 }
 
 func compileManifestBase(identity ManifestIdentity) (runtimecontract.RuntimeSemanticPlanManifest, error) {
+	if identity.ImplementationPurposePreview != nil {
+		if identity.ValidationFailureRepair != nil || identity.ImplementationWork != nil {
+			return runtimecontract.RuntimeSemanticPlanManifest{}, fmt.Errorf("implementation purpose choice cannot mix effect or exact repair")
+		}
+		return runtimecontract.CompileRuntimeSemanticImplementationPurposeManifest(identity.WorkspaceID, identity.RunID, identity.Definition, identity.DefinitionSeed, identity.DefinitionFocuses, identity.Execution, identity.Admissibilities, *identity.ImplementationPurposePreview, identity.ImplementationWorkRounds)
+	}
+	if identity.ImplementationWork != nil {
+		if identity.ValidationFailureRepair != nil {
+			return runtimecontract.RuntimeSemanticPlanManifest{}, fmt.Errorf("ordinary implementation work cannot mix exact validation repair")
+		}
+		return runtimecontract.CompileRuntimeSemanticPlanManifestForImplementationWork(identity.WorkspaceID, identity.RunID, identity.Definition, identity.DefinitionSeed, identity.DefinitionFocuses, identity.Execution, identity.Admissibilities, *identity.ImplementationWork)
+	}
 	if identity.ValidationFailureRepair != nil {
 		input := identity.ValidationFailureRepair.Normalized()
 		return runtimecontract.CompileRuntimeSemanticPlanManifestForCoverageWithValidationFailureRepair(

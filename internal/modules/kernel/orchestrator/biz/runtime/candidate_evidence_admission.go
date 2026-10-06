@@ -35,7 +35,7 @@ func admitExecutionEvidenceIdentity(aggregate RuntimeAggregate, evidence Executi
 	if !candidateContainsOperation(aggregate.ActiveDispatch.Candidate, evidence.OperationID) {
 		return executionEvidenceAdmission{}, fmt.Errorf("execution evidence operation %q is not present in the sealed candidate", evidence.OperationID)
 	}
-	if err := validateCurrentCWIBindingFenceForEvidenceCommit(aggregate.Facts); err != nil {
+	if err := validateRuntimeExecutionPurposeFence(aggregate); err != nil {
 		return executionEvidenceAdmission{}, fmt.Errorf("%w: execution evidence binding fence: %v", common.ErrConflict, err)
 	}
 

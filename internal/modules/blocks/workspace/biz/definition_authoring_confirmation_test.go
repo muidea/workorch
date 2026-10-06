@@ -14,7 +14,21 @@ import (
 )
 
 func seedReviewedAuthoringConfirmation(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID) workspaceevents.ConfirmDefinitionAuthoringCommand {
-	return seedReviewedAuthoringConfirmationWithProof(t, owners, id, false)
+	return seedReviewedAuthoringConfirmationWithProof(t, owners, id, true)
+}
+
+// 声明适用且六审通过，但必需交付物缺少 exact proof 合同，正式准入仍须澄清。
+func seedReviewedAuthoringConfirmationWithAdmissionBlocker(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID) workspaceevents.ConfirmDefinitionAuthoringCommand {
+	return seedReviewedAuthoringConfirmationWithTemplate(t, owners, id, true, true, "*", "dodItem", func(template *workspace.WorkspaceTemplate) {
+		hints := template.ContextHints.Map()
+		generic := hints["profileContracts"].(map[string]any)["generic"].(map[string]any)
+		generic["deliverableExpectations"] = []any{map[string]any{"id": "required-delivery", "required": true}}
+		var err error
+		template.ContextHints, err = workorcheventpayload.FromMap(hints)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func seedReviewedAuthoringConfirmationWithProof(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID, declared bool) workspaceevents.ConfirmDefinitionAuthoringCommand {
@@ -51,7 +65,7 @@ func seedReviewedAuthoringConfirmationWithTemplate(t *testing.T, owners *fileDef
 	derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"补充验收"}}
 	var err error
 	var derivation workspace.DefinitionDerivationRequest
-	record, derivation, _, err = record.ReserveDerivation("derive", "provider", nil)
+	record, derivation, _, err = record.ReserveDerivation("derive/"+record.InputHash, "provider", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,11 +122,42 @@ func seedReviewedAuthoringConfirmationWithTemplate(t *testing.T, owners *fileDef
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, reviewed, err := record.ConfirmableSpecification(derivation.PermitID, proposal.ContentHash())
-	if err != nil {
+	return authoringConfirmationCommandFromPersistedLedger(t, w)
+}
+
+// 构造客户端提交身份而不调用确认门禁，负例才能证明 receiving owner 独立拒绝。
+func authoringConfirmationCommandFromPersistedLedger(t *testing.T, current *workspace.Workspace) workspaceevents.ConfirmDefinitionAuthoringCommand {
+	t.Helper()
+	record := current.DefinitionAuthoring
+	var derivationPermitID, proposalHash string
+	var reviewed workspace.GoalSpecification
+	var derivation *workspace.DefinitionDerivationRequest
+	for index := range record.DerivationRequests {
+		request := &record.DerivationRequests[index]
+		if request.Input.InputHash() == record.InputHash && request.Proposal != nil {
+			derivation = request
+			derivationPermitID = request.PermitID
+		}
+	}
+	if derivation == nil {
+		t.Fatal("current completed derivation missing")
+	}
+	for _, request := range record.SpecificationRequests {
+		if request.Proposal != nil && request.DerivationPermitID == derivationPermitID {
+			reviewed = request.Proposal.Clone()
+			proposalHash = reviewed.ContentHash()
+			break
+		}
+	}
+	for _, request := range record.SpecificationRequests {
+		if request.Review != nil && request.DerivationPermitID == derivationPermitID && request.ProposalHash == proposalHash {
+			reviewed.Reviews = append(reviewed.Reviews, *request.Review)
+		}
+	}
+	if err := workspace.ValidateAuthoringSpecification(derivation.Input, &derivation.Template, *derivation.Proposal, derivation.Resources, reviewed); err != nil {
 		t.Fatal(err)
 	}
-	return workspaceevents.ConfirmDefinitionAuthoringCommand{WorkspaceID: id, InputHash: record.InputHash, DerivationPermitID: derivation.PermitID, ProposalHash: proposal.ContentHash(), SpecificationHash: reviewed.AdmissionHash(), ExpectedWorkspaceRevision: w.Revision}
+	return workspaceevents.ConfirmDefinitionAuthoringCommand{WorkspaceID: current.ID, InputHash: record.InputHash, DerivationPermitID: derivationPermitID, ProposalHash: proposalHash, SpecificationHash: reviewed.AdmissionHash(), ExpectedWorkspaceRevision: current.Revision}
 }
 
 func TestAuthoringConfirmationRecoversEveryFileBackedCutpoint(t *testing.T) {

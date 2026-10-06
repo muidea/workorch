@@ -322,6 +322,12 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 		}
 		if matched {
 			ownerReductionEvent = event
+		} else {
+			for _, source := range aggregate.CompletedDispatches {
+				if source.ID == binding.OperationDispatchID && source.ImplementationWorkCommitment != nil {
+					ownerReductionEvent = &runtimeOwnerInternalReductionEvent{Kind: RuntimeInternalEventGovernanceResolutionObserved, GovernanceResolution: resolution, SourceDispatch: source, OperationBinding: binding}
+				}
+			}
 		}
 	}
 	facts, decision, err := reduceRuntimeStateWithLineage(
@@ -350,6 +356,25 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 		// consumed the allocation for the earlier fence.
 		if err := reserveRuntimeOperationExecutionBudget(&aggregate, resumeExecution, resumeExecution.Fence); err != nil {
 			return EvidenceCommitResult{}, err
+		}
+		if resume.ImplementationWorkCommitment != nil {
+			matched := false
+			for i := range aggregate.ImplementationWork.Rounds {
+				round := &aggregate.ImplementationWork.Rounds[i]
+				if round.DispatchID != binding.OperationDispatchID {
+					continue
+				}
+				if round.GovernanceReceiptHash != binding.GovernanceReceiptHash || round.CompletedReceiptSetHash != "" || round.FailedReceiptHash != "" || len(round.GovernanceDispatchIDs) >= runtimecontract.MaxRuntimeImplementationWorkRounds {
+					return EvidenceCommitResult{}, fmt.Errorf("implementation governance continuation differs from suspended round")
+				}
+				round.GovernanceDispatchIDs = append(round.GovernanceDispatchIDs, round.DispatchID)
+				round.DispatchID, round.DispatchAuthorityHash, round.GovernanceReceiptHash = resume.ID, resume.DispatchAuthorityHash, ""
+				round.Hash = runtimecontract.StableRuntimeImplementationWorkRoundHash(*round)
+				matched = true
+			}
+			if !matched {
+				return EvidenceCommitResult{}, fmt.Errorf("implementation governance continuation has no suspended round")
+			}
 		}
 		aggregate.ActiveDispatch = &resume
 	}
@@ -485,8 +510,9 @@ func buildGovernanceResumeDispatch(aggregate RuntimeAggregate, binding runtimeco
 	effectiveActivation := runtimecontract.RuntimeActivationForFacts(aggregate.Facts)
 	effectiveActivation.OperationPolicies = runtimecontract.RuntimeDispatchSealedOperationPolicies(sealedDispatchToRuntimeRecord(*source))
 	preSealAuthority := RuntimeDispatchPreSealAuthority{
-		RepairCommitment:         cloneRuntimeDispatchRepairCommitment(source.RepairCommitment),
-		AssessmentAuthorityInput: cloneRuntimeAssessmentAuthorityInput(source.AssessmentAuthorityInput),
+		ImplementationWorkCommitment: cloneImplementationWorkCommitment(source.ImplementationWorkCommitment),
+		RepairCommitment:             cloneRuntimeDispatchRepairCommitment(source.RepairCommitment),
+		AssessmentAuthorityInput:     cloneRuntimeAssessmentAuthorityInput(source.AssessmentAuthorityInput),
 		GovernanceResume: &RuntimeGovernanceResumePreSealAuthority{
 			Source:  *source,
 			Binding: binding,

@@ -25,10 +25,11 @@ func TestSpecificationCompilerSeparatesProposalAndSixCritics(t *testing.T) {
 			spec := workspace.GoalSpecification{
 				Version: workspace.GoalSpecificationVersionCurrent, GoalItemRef: "goal", GoalTextHash: workspace.StableDefinitionTextHash(candidate.GoalInput.Text),
 				Dimensions:    []workspace.GoalSpecificationDimension{{ID: "coverage", Required: true, Activated: true}},
-				Requirements:  []workspace.GoalSpecificationRequirement{{ID: "requirement", DimensionID: "coverage", Required: true, SourceKind: workspace.GoalRequirementUserExplicit, SourceItemRefs: []string{"goal", "dod"}, Text: "来源可追溯"}},
-				Obligations:   []workspace.GoalSpecificationObligation{{ID: "obligation", RequirementID: "requirement", DoDItemRefs: []string{"dod"}, Text: "文档引用原始来源"}},
-				Verifications: []workspace.GoalSpecificationVerification{{ID: "verification", ObligationID: "obligation", Declaration: "检查来源", Status: workspace.GoalVerificationDeclared, ProfileID: "generic", EvidenceRequirementID: "proof", Scope: "dodItem"}},
+				Requirements:  []workspace.GoalSpecificationRequirement{{ID: "requirement", DimensionID: "coverage", Required: true, SourceKind: workspace.GoalRequirementUserExplicit, SourceItemRefs: []string{"goal", "dod:test-source:item:000001"}, Text: "来源可追溯"}},
+				Obligations:   []workspace.GoalSpecificationObligation{{ID: "obligation", RequirementID: "requirement", DoDItemRefs: []string{"dod:test-source:item:000001"}, Text: "文档引用原始来源"}},
+				Verifications: []workspace.GoalSpecificationVerification{{ID: "verification", ObligationID: "obligation", Declaration: "检查来源", Status: workspace.GoalVerificationDeclared, ProfileID: "generic", EvidenceRequirementID: "dod-001", Scope: "dodItem"}},
 			}
+			spec = authoringWireSpecificationFixture(spec)
 			calls := 0
 			observer := magicevent.NewSimpleObserver(llmevents.CommandDestination, hub)
 			if err := observer.Subscribe(llmevents.TopicLLMCommandCompleteProvider, func(ev magicevent.Event, result magicevent.Result) {
@@ -49,7 +50,7 @@ func TestSpecificationCompilerSeparatesProposalAndSixCritics(t *testing.T) {
 					if unknown && kind == workspace.GoalReviewNegativePath {
 						status = workspace.GoalReviewUnknown
 					}
-					review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: status, SpecificationHash: spec.ContentHash(), Reason: "逐项核对原约束", EvidenceRefs: []string{"goal", "dod"}, RequirementIDs: []string{"requirement"}}
+					review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: status, SpecificationHash: spec.ContentHash(), Reason: "逐项核对原约束", EvidenceRefs: []string{"goal", "dod:test-source:item:000001"}, RequirementIDs: []string{"requirement"}}
 					payload, _ = json.Marshal(struct {
 						Review workspace.GoalSpecificationCompletenessReview `json:"review"`
 					}{review})
@@ -65,7 +66,7 @@ func TestSpecificationCompilerSeparatesProposalAndSixCritics(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer observer.Unsubscribe(llmevents.TopicLLMCommandCompleteProvider)
-			got, err := b.CompileDefinitionSpecification(ctx, candidate, nil, spec.Dimensions)
+			got, err := b.CompileDefinitionSpecification(ctx, candidate, spec.Resources, spec.Dimensions)
 			if err != nil || calls != 7 || got.Specification == nil {
 				t.Fatalf("compile: calls=%d candidate=%+v err=%v", calls, got, err)
 			}
@@ -129,14 +130,14 @@ func TestSpecificationCompilerCancelledRequestDoesNotCallProvider(t *testing.T) 
 }
 
 func specificationCandidateFixture() workspace.DefinitionAdmissionCandidate {
-	profiles := []runtimecontract.RuntimeProfileContract{{ID: "generic", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{ID: "proof", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Description: "proof declaration"}}}}
+	profiles := []runtimecontract.RuntimeProfileContract{{ID: "generic", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{ID: "dod-001", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, Description: "dod-001 declaration"}}}}
 	return (workspace.DefinitionAdmissionCandidate{
 		SchemaVersion: workspace.DefinitionAdmissionCandidateSchemaVersionCurrent, WorkspaceID: "ws", CandidateID: "candidate", CandidateRevision: 1,
 		GoalInput:                 workspace.DefinitionCandidateItem{CandidateItemRef: "goal", Text: "生成可追溯文档", SourceIdentity: "goal@1"},
-		DoDInputs:                 []workspace.DefinitionCandidateItem{{CandidateItemRef: "dod", Text: "来源可追溯", SourceIdentity: "dod@1"}},
+		DoDInputs:                 []workspace.DefinitionCandidateItem{{CandidateItemRef: "dod:test-source:item:000001", Text: "来源可追溯", SourceIdentity: "dod@1"}},
 		WorkspaceTemplateSnapshot: workspace.DefinitionTemplateSnapshot{TemplateRef: "template", Revision: "r1", SnapshotHash: "hash"},
 		RuntimeProfileContracts:   profiles, RuntimeProfileContractsHash: runtimecontract.StableRuntimeProfileContractsHash(profiles),
 		AdmissionCompilerVersion: workspace.DefinitionAdmissionCompilerVersionCurrent, ResolvedProjectWorkspaceDirectory: "/workspace",
-		ProposedRelationInputs: []workspace.DefinitionProposedRelationInput{{RelationRef: "all", RelationKind: "all_of", SourceItemRefs: []string{"dod"}, TargetItemRefs: []string{"goal"}}},
+		ProposedRelationInputs: []workspace.DefinitionProposedRelationInput{{RelationRef: "all", RelationKind: "all_of", SourceItemRefs: []string{"dod:test-source:item:000001"}, TargetItemRefs: []string{"goal"}}},
 	}).WithHash()
 }

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sort"
 
+	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -79,6 +80,9 @@ func (m *Biz) verifyConfirmedAuthoringAdmission(ctx context.Context, current *wo
 	bindings, err := definitionconfiguration.Compile(current, template)
 	if err != nil {
 		return fmt.Errorf("%w: current Workspace and Template configuration is invalid: %v", common.ErrConflict, err)
+	}
+	if err := definitionadmission.ValidateAuthoringVerificationApplicability(spec, dod, bindings.ProfileContracts); err != nil {
+		return fmt.Errorf("%w: confirmed verification is not applicable to current profiles: %v", common.ErrConflict, err)
 	}
 	fromOwner := workspacemodel.DefinitionAdmissionCandidate{
 		AdmissionPolicyBindings:      bindings.PolicyBindings,

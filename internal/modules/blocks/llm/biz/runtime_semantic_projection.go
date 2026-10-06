@@ -46,6 +46,66 @@ type runtimeSemanticManifestProjection struct {
 	AllowedTargetPolicies     []runtimecontract.RuntimeOperationTargetPolicy `json:"allowedTargetPolicies,omitempty"`
 	ProofObligations          []runtimeSemanticProofObligationProjection     `json:"proofObligations,omitempty"`
 	OwnerCatalogs             []runtimeSemanticOwnerCatalogProjection        `json:"ownerCatalogs,omitempty"`
+	ImplementationPurpose     *runtimeSemanticImplementationWorkProjection   `json:"implementationPurpose,omitempty"`
+}
+
+// 工作 C3 只投影完整有界 vocabulary 与 exact owner scope；不携带 receipt、预算权限或原始诊断。
+// policy 为 immutable Profile 声明，scope 只为提议约束，不是工作/终验 dispatch authority。
+type runtimeSemanticImplementationWorkProjection struct {
+	CoverageWorkItemID      common.CoverageWorkItemID                       `json:"coverageWorkItemId"`
+	PurposeChoiceOnly       bool                                            `json:"purposeChoiceOnly"`
+	EffectAvailable         bool                                            `json:"effectAvailable"`
+	RoundHash               string                                          `json:"roundHash"`
+	Ordinal                 int                                             `json:"ordinal"`
+	PrecedingReceiptSetHash string                                          `json:"precedingReceiptSetHash,omitempty"`
+	PolicyHash              string                                          `json:"policyHash"`
+	Policy                  runtimecontract.RuntimeImplementationWorkPolicy `json:"policy"`
+	Scope                   runtimeSemanticImplementationScopeProjection    `json:"scope"`
+	ExcludedTargetRefs      []string                                        `json:"excludedTargetRefs,omitempty"`
+	TerminalEvidenceCredit  bool                                            `json:"terminalEvidenceCredit"`
+}
+
+type runtimeSemanticImplementationScopeProjection struct {
+	RequestID                            string                                            `json:"requestId"`
+	SnapshotID                           string                                            `json:"snapshotId"`
+	OwnerModuleID                        string                                            `json:"ownerModuleId"`
+	TargetRole                           string                                            `json:"targetRole"`
+	SelectorRef                          string                                            `json:"selectorRef"`
+	SelectorOwnerRef                     string                                            `json:"selectorOwnerRef"`
+	SelectorSubjectRef                   string                                            `json:"selectorSubjectRef"`
+	SelectorCandidateRefs                []string                                          `json:"selectorCandidateRefs,omitempty"`
+	ProspectiveTargetAllOfConstraintRefs []string                                          `json:"prospectiveTargetAllOfConstraintRefs,omitempty"`
+	Disposition                          runtimecontract.RuntimeTargetSelectionDisposition `json:"disposition"`
+	TargetRefs                           []string                                          `json:"targetRefs"`
+	CandidateTargetRefs                  []string                                          `json:"candidateTargetRefs"`
+	CandidateCount                       int                                               `json:"candidateCount"`
+	ObservedRevision                     string                                            `json:"observedRevision"`
+}
+
+func runtimeSemanticImplementationWorkForProvider(work *runtimecontract.RuntimeSemanticImplementationWork) (*runtimeSemanticImplementationWorkProjection, error) {
+	if work == nil {
+		return nil, nil
+	}
+	if err := work.Validate(); err != nil {
+		return nil, err
+	}
+	selection := work.Scope.Selection
+	return &runtimeSemanticImplementationWorkProjection{
+		CoverageWorkItemID: work.Scope.Request.CoverageWorkItemID,
+		PurposeChoiceOnly:  work.PurposeChoiceOnly, EffectAvailable: work.EffectAvailable,
+		RoundHash: work.RoundHash, Ordinal: work.Ordinal, PrecedingReceiptSetHash: work.PrecedingReceiptSetHash,
+		PolicyHash: work.PolicyHash, Policy: work.Scope.Request.Policy.Clone(),
+		ExcludedTargetRefs: append([]string(nil), work.ExcludedTargetRefs...),
+		Scope: runtimeSemanticImplementationScopeProjection{
+			RequestID: work.Scope.Request.RequestID, SnapshotID: selection.SnapshotID, OwnerModuleID: selection.OwnerModuleID,
+			TargetRole: selection.TargetRole, SelectorRef: selection.SelectorRef, SelectorOwnerRef: selection.SelectorOwnerRef,
+			SelectorSubjectRef: selection.SelectorSubjectRef, SelectorCandidateRefs: append([]string(nil), selection.SelectorCandidateRefs...),
+			ProspectiveTargetAllOfConstraintRefs: append([]string(nil), selection.ProspectiveTargetAllOfConstraintRefs...),
+			Disposition:                          selection.Disposition, TargetRefs: append([]string(nil), selection.TargetRefs...),
+			CandidateTargetRefs: append([]string(nil), selection.CandidateTargetRefs...), CandidateCount: selection.CandidateCount,
+			ObservedRevision: selection.ObservedRevision,
+		},
+	}, nil
 }
 
 type runtimeSemanticProofObligationProjection struct {
@@ -62,6 +122,7 @@ type runtimeSemanticProofObligationProjection struct {
 	DeclarationProspectiveTargetAllOfConstraintRefs []string                                                 `json:"declarationProspectiveTargetAllOfConstraintRefs,omitempty"`
 	OwnerFactAcquisition                            *runtimeSemanticOwnerFactAcquisitionProjection           `json:"ownerFactAcquisition,omitempty"`
 	ValidationFailureRepair                         *runtimeSemanticValidationFailureRepairProjection        `json:"validationFailureRepair,omitempty"`
+	ImplementationWork                              *runtimeSemanticImplementationWorkProjection             `json:"implementationWork,omitempty"`
 }
 
 type runtimeSemanticValidationProofRequirementProjection struct {
@@ -227,6 +288,21 @@ func runtimeSemanticManifestForProvider(manifest runtimecontract.RuntimeSemantic
 		DefinitionRevision: manifest.DefinitionRevision, DefinitionSeedHash: manifest.DefinitionSeedHash,
 		OperationContractRevision: manifest.OperationContractRevision, CoverageItems: items,
 	}
+	if step == runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
+		for _, obligation := range manifest.ProofObligations {
+			if obligation.ImplementationWork == nil || !obligation.ImplementationWork.PurposeChoiceOnly {
+				continue
+			}
+			if projection.ImplementationPurpose != nil {
+				return runtimeSemanticManifestProjection{}, fmt.Errorf("implementation purpose projection requires one exact work scope")
+			}
+			var err error
+			projection.ImplementationPurpose, err = runtimeSemanticImplementationWorkForProvider(obligation.ImplementationWork)
+			if err != nil {
+				return runtimeSemanticManifestProjection{}, err
+			}
+		}
+	}
 	if step != runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
 		projection.AllowedOwnerModuleIDs = append([]string(nil), manifest.AllowedOwnerModuleIDs...)
 		projection.AllowedOperationKinds = append([]string(nil), manifest.AllowedOperationKinds...)
@@ -280,6 +356,10 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 			DeclarationTargetSelectorSubjectRef:             value.DeclarationTargetSelectorSubjectRef,
 			DeclarationTargetSelectorCandidates:             append([]string(nil), value.DeclarationTargetSelectorCandidateRefs...),
 			DeclarationProspectiveTargetAllOfConstraintRefs: append([]string(nil), value.DeclarationProspectiveTargetAllOfConstraintRefs...),
+		}
+		projection.ImplementationWork, err = runtimeSemanticImplementationWorkForProvider(value.ImplementationWork)
+		if err != nil {
+			return nil, err
 		}
 		if value.ValidationProofRequirement != nil {
 			requirement := value.ValidationProofRequirement.Normalized()

@@ -18,6 +18,9 @@ func (c *RuntimeController) applyActivationInternalEvent(ctx context.Context, ev
 			event.Activation.ActivationFacts.RunID != event.Scope.RunID {
 			return result, common.ErrInvalidArgument
 		}
+		if err := event.Activation.ActivationFacts.Activation.ExecutionContract.ValidateExecutableAdmission(); err != nil {
+			return result, err
+		}
 		aggregate, err := c.initialize(ctx, *event.Activation.ActivationFacts, event.Activation.ActivationDefinition.Clone(), append([]runtimecontract.RuntimeRequirement(nil), event.Activation.ActivationRequirements...))
 		result.Aggregate = aggregate
 		return result, err

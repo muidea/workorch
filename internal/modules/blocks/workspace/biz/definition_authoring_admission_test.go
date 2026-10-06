@@ -195,7 +195,7 @@ func TestAuthoringAdmissionBlockedCandidatePersistsAcrossReopen(t *testing.T) {
 	root := t.TempDir()
 	owners := openFileDefinitionAdmissionOwners(t, root)
 	defer owners.close()
-	confirmation := seedReviewedAuthoringConfirmation(t, owners, "ws-authoring-blocked")
+	confirmation := seedReviewedAuthoringConfirmationWithAdmissionBlocker(t, owners, "ws-authoring-blocked")
 	if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: confirmation}); err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestAuthoringAdmissionBlockedCandidatePersistsAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	first, err := owners.workspace.submitDefinitionAuthoringAdmission(ctx, command)
-	if err != nil || first.AdmissionResult.Disposition != workspace.DefinitionAdmissionClarificationRequired || first.StartupInput != nil || first.ActivationAdmission != nil {
+	if err != nil || first.AdmissionResult.Disposition != workspace.DefinitionAdmissionClarificationRequired || first.AdmissionResult.ViolationCode != workspace.DefinitionAdmissionProfileContractInvalid || first.StartupInput != nil || first.ActivationAdmission != nil {
 		t.Fatalf("blocked candidate gained startup: %+v %v", first, err)
 	}
 	stored, err := owners.repositories.Workspaces.Get(ctx, current.ID)
@@ -259,27 +259,27 @@ func TestAuthoringVerificationApplicabilityBlocksWrongDeclarationBeforeRun(t *te
 			owners := openFileDefinitionAdmissionOwners(t, root)
 			defer func() { owners.close() }()
 			confirmation := seedReviewedAuthoringConfirmationWithDeclaration(t, owners, common.WorkspaceID("ws-"+tt.name), true, true, tt.id, tt.scope)
-			if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: confirmation}); err != nil {
-				t.Fatal(err)
-			}
-			current, err := owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
+			before, err := owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			originalJournal := current.DefinitionAuthoringConfirmation.Clone()
-			candidate := authoringAdmissionCandidateFromCurrentConfiguration(t, current)
-			command := workspaceevents.AdmitDefinitionAuthoringCommand{Candidate: candidate, ExpectedWorkspaceRevision: current.Revision, ExpectedConfigurationHash: workspace.WorkspaceConfigurationHash(current)}
-			first, err := owners.workspace.submitDefinitionAuthoringAdmission(ctx, command)
-			if err != nil || first.AdmissionResult.Disposition != workspace.DefinitionAdmissionClarificationRequired || first.AdmissionResult.ViolationCode != workspace.DefinitionAdmissionSpecificationIncomplete || first.StartupInput != nil || first.ActivationAdmission != nil {
-				t.Fatalf("wrong declaration admitted: %+v %v", first, err)
+			if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: confirmation}); err == nil {
+				t.Fatal("wrong declaration materialized formal definitions")
 			}
 			owners.close()
 			owners = openFileDefinitionAdmissionOwners(t, root)
-			second, err := owners.workspace.submitDefinitionAuthoringAdmission(ctx, command)
-			stored, readErr := owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
+			if _, err := owners.workspace.submitDefinitionAuthoringConfirmationInternalEvent(ctx, definitionAuthoringConfirmationInternalEvent{Command: confirmation}); err == nil {
+				t.Fatal("reopen bypassed declaration applicability")
+			}
+			stored, err := owners.repositories.Workspaces.Get(ctx, confirmation.WorkspaceID)
+			if err != nil || !reflect.DeepEqual(before, stored) {
+				t.Fatalf("rejected declaration changed owner state: %+v %v", stored, err)
+			}
+			goals, goalErr := owners.repositories.Goals.ListByWorkspaceID(ctx, confirmation.WorkspaceID)
+			dods, dodErr := owners.repositories.DoDs.ListByWorkspaceID(ctx, confirmation.WorkspaceID)
 			runs, runErr := owners.repositories.Runs.List(ctx)
-			if err != nil || !reflect.DeepEqual(first, second) || readErr != nil || !reflect.DeepEqual(originalJournal, *stored.DefinitionAuthoringConfirmation) || stored.ActiveRunID != "" || runErr != nil || len(runs) != 0 {
-				t.Fatalf("blocked source replay changed authority: %v %v %v", err, readErr, runErr)
+			if goalErr != nil || dodErr != nil || runErr != nil || len(goals) != 0 || len(dods) != 0 || len(runs) != 0 || stored.DefinitionAuthoringConfirmation != nil || len(stored.DefinitionAdmissionCandidates) != 0 || stored.StartupInput != nil || stored.ActivationAdmission != nil || stored.ActiveRunID != "" {
+				t.Fatalf("invalid declaration gained formal authority: goals=%d dods=%d runs=%d errors=%v/%v/%v", len(goals), len(dods), len(runs), goalErr, dodErr, runErr)
 			}
 		})
 	}

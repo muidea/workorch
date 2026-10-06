@@ -75,7 +75,8 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// 无生产调用方的规格单请求 query 和五个退休 CLI 定义写 facade 不再登记。
 	// 规格失败诊断增加一个 Workspace/permit scoped 只读查询，不重发 provider 或授予准入。
 	// 前置准备失败增加仅记录与独立 scoped 查询两个 typed topic，不消耗 provider permit。
-	const expectedProductionTopicCount = 300
+	// 当前创作使用独立 typed provider-document 执行合同；generic completion 的其他消费者保留。
+	const expectedProductionTopicCount = 301
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}

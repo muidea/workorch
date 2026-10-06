@@ -86,6 +86,9 @@ func (m *Biz) prepareDefinitionAuthoringConfirmationWithProof(ctx context.Contex
 	if err != nil || workspace.WorkspaceTemplateSnapshotHash(template) != record.TemplateSnapshotHash {
 		return workspace.DefinitionAuthoringConfirmation{}, common.ErrConflict
 	}
+	if err := validateAuthoringVerificationAgainstSealedTemplate(record.TemplateSnapshotHash, derivation, specification); err != nil {
+		return workspace.DefinitionAuthoringConfirmation{}, err
+	}
 	goals, err := m.goals.ListByWorkspaceID(ctx, cmd.WorkspaceID)
 	if err != nil {
 		return workspace.DefinitionAuthoringConfirmation{}, err
@@ -176,6 +179,13 @@ func (m *Biz) driveDefinitionAuthoringConfirmation(ctx context.Context, cmd work
 		template, err := m.resolvedTemplate(ctx, initial.TemplateID)
 		if err != nil || workspace.WorkspaceTemplateSnapshotHash(template) != journal.TemplateSnapshotHash {
 			return workspaceevents.ConfirmDefinitionAuthoringResult{}, common.ErrConflict
+		}
+		derivation, specification, err := initial.DefinitionAuthoring.ConfirmableSpecification(journal.DerivationPermitID, journal.ProposalHash)
+		if err != nil {
+			return workspaceevents.ConfirmDefinitionAuthoringResult{}, err
+		}
+		if err := validateAuthoringVerificationAgainstSealedTemplate(journal.TemplateSnapshotHash, derivation, specification); err != nil {
+			return workspaceevents.ConfirmDefinitionAuthoringResult{}, err
 		}
 	}
 	if err := m.ensureConfirmationGoal(ctx, journal.Goal); err != nil {

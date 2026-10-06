@@ -89,14 +89,15 @@ type RuntimeCandidateContractManifest struct {
 	// OperationSetPolicy is the sole candidate-wide authorization rule. It is
 	// compiled before provider I/O and prevents consumers from reconstructing
 	// owner/target cardinality from mutable facts or global descriptors.
-	OperationSetPolicy      RuntimeCandidateOperationSetPolicy
-	RequiredTopLevelFields  []string
-	AllowedTopLevelFields   []string
-	ForbiddenTopLevelFields []string
-	Bindings                []CoverageEvidenceBinding
-	TargetRefs              []string
-	RepairClosureID         string
-	RepairPurpose           RuntimeDispatchRepairPurpose
+	OperationSetPolicy           RuntimeCandidateOperationSetPolicy
+	RequiredTopLevelFields       []string
+	AllowedTopLevelFields        []string
+	ForbiddenTopLevelFields      []string
+	Bindings                     []CoverageEvidenceBinding
+	ImplementationWorkingBinding *RuntimeImplementationWorkingBinding
+	TargetRefs                   []string
+	RepairClosureID              string
+	RepairPurpose                RuntimeDispatchRepairPurpose
 	// AssessmentPurpose is rooted in the earlier semantic provider/owner batch
 	// named by AssessmentPurposeManifestHash. Both fields are empty outside an
 	// assessment transaction.
@@ -215,6 +216,7 @@ func (a RuntimeOperationBindingAuthorization) Normalized() RuntimeOperationBindi
 // lists, and never invents domain paths.
 type RuntimeCandidateManifestOwnerFacts struct {
 	InputRepair                   *RuntimeValidationInputRepair
+	ImplementationWorkingBinding  *RuntimeImplementationWorkingBinding
 	TargetSelection               *RuntimeTargetSelection
 	OperationAdmissibilities      []RuntimeOperationAdmissibility
 	ValidationRecipes             []RuntimeValidationRecipe
@@ -350,10 +352,24 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 		RequiredOperationSequence: cloneRuntimeRequiredOperationVariants(required.RequiredOperationSequence),
 	}
 	bindings := NormalizeCoverageEvidenceBindings(decision.Focus.CoverageEvidenceBindings)
+	if required.ImplementationWorkBindingHash != "" {
+		binding := ownerFacts.ImplementationWorkingBinding
+		if binding == nil || binding.Hash != required.ImplementationWorkBindingHash || binding.Hash != StableRuntimeImplementationWorkingBindingHash(*binding) || decision.State != ConvergenceStateNeedStateChange || ownerFacts.InputRepair != nil || required.RepairPurpose != "" {
+			return RuntimeCandidateContractManifest{}, fmt.Errorf("implementation work manifest has no exact private working commitment")
+		}
+		copy := binding.Clone()
+		manifest.ImplementationWorkingBinding = &copy
+		bindings = nil
+	} else if ownerFacts.ImplementationWorkingBinding != nil {
+		return RuntimeCandidateContractManifest{}, fmt.Errorf("implementation work commitment is not selected by sealed decision")
+	}
 	manifest.RequiredTopLevelFields, manifest.AllowedTopLevelFields, manifest.ForbiddenTopLevelFields = runtimeCandidateEnvelopeFields(decision.State)
 	switch decision.State {
 	case ConvergenceStateNeedStateChange, ConvergenceStateNeedValidation:
 		manifest.MaxOperationCount = RuntimeCandidateOperationMaxCount
+		if manifest.ImplementationWorkingBinding != nil {
+			manifest.MaxOperationCount = len(required.RequiredOperationSequence)
+		}
 		if ownerFacts.InputRepair != nil {
 			manifest.MaxOperationCount = 1
 		}
@@ -378,7 +394,11 @@ func BuildRuntimeCandidateContractManifest(decision RuntimeDecision, ownerFacts 
 			manifest.Operations = append(manifest.Operations, operation)
 		}
 		if decision.State == ConvergenceStateNeedStateChange {
-			manifest.MutationInputCatalogs = runtimeValidationInputProtectionCatalogs(ownerFacts.OperationAdmissibilities, manifest.Operations)
+			if manifest.ImplementationWorkingBinding != nil {
+				manifest.MutationInputCatalogs = runtimeValidationInputProtectionCatalogs(manifest.ImplementationWorkingBinding.MutationInputCatalogs, manifest.Operations)
+			} else {
+				manifest.MutationInputCatalogs = runtimeValidationInputProtectionCatalogs(ownerFacts.OperationAdmissibilities, manifest.Operations)
+			}
 		}
 	case ConvergenceStateNeedAssessment:
 		// Assessment has a closed non-operation envelope, but its post-seal
@@ -484,6 +504,14 @@ func ValidateRuntimeCandidateContractManifestForSealedDecision(manifest RuntimeC
 		if len(manifest.Operations) == 1 && manifest.Operations[0].InputRepair != nil {
 			maxOperations = 1
 		}
+		if stateWork := required.ImplementationWorkBindingHash; stateWork != "" {
+			if manifest.ImplementationWorkingBinding == nil || manifest.ImplementationWorkingBinding.Hash != stateWork || len(manifest.Bindings) != 0 || decision.State != ConvergenceStateNeedStateChange {
+				return fmt.Errorf("implementation work manifest purpose differs from sealed decision")
+			}
+			maxOperations = len(required.RequiredOperationSequence)
+		} else if manifest.ImplementationWorkingBinding != nil {
+			return fmt.Errorf("unexpected implementation working manifest purpose")
+		}
 		if manifest.MaxOperationCount != maxOperations {
 			return fmt.Errorf("runtime operation candidate manifest has invalid cardinality ceiling")
 		}
@@ -569,6 +597,10 @@ func RuntimeCandidateAllowedOperationKinds(decision RuntimeDecision, selection *
 }
 
 func (m RuntimeCandidateContractManifest) Normalized() RuntimeCandidateContractManifest {
+	if m.ImplementationWorkingBinding != nil {
+		copy := m.ImplementationWorkingBinding.Clone()
+		m.ImplementationWorkingBinding = &copy
+	}
 	m.MutationInputCatalogs = NormalizeRuntimeOperationAdmissibilities(m.MutationInputCatalogs)
 	m.Revision = strings.TrimSpace(m.Revision)
 	m.Hash = strings.TrimSpace(m.Hash)
@@ -760,6 +792,12 @@ func validateRuntimeCandidateManifestRawCanonical(manifest RuntimeCandidateContr
 			return runtimeValidatedCandidateManifest{}, err
 		}
 	}
+	if manifest.ImplementationWorkingBinding != nil {
+		binding := manifest.ImplementationWorkingBinding
+		if binding.Hash != StableRuntimeImplementationWorkingBindingHash(*binding) || manifest.State != ConvergenceStateNeedStateChange || len(manifest.Bindings) != 0 || manifest.RepairPurpose != "" || manifest.RepairClosureID != "" || len(manifest.RequiredOperationSequence) != manifest.MaxOperationCount {
+			return runtimeValidatedCandidateManifest{}, fmt.Errorf("invalid implementation working manifest commitment")
+		}
+	}
 	if err := ValidateCoverageEvidenceBindingProjection(manifest.Bindings); err != nil {
 		return runtimeValidatedCandidateManifest{}, fmt.Errorf("runtime candidate contract manifest bindings: %w", err)
 	}
@@ -866,6 +904,9 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 	for _, binding := range manifest.Bindings {
 		writeHashString(h, binding.ID)
 		writeHashString(h, binding.Hash)
+	}
+	if manifest.ImplementationWorkingBinding != nil {
+		writeHashString(h, manifest.ImplementationWorkingBinding.Hash)
 	}
 	writeHashStrings(h, manifest.TargetRefs)
 	if len(manifest.MutationInputCatalogs) != 0 {
@@ -1039,11 +1080,22 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 		fields = append(fields, "requiredOperationRef")
 	}
 	allowedBindingRefs := runtimeOperationBindingAuthorizationRefs(bindingAuthorizations)
-	target, prerequisiteRefs, admissibilityRefs, err := runtimeCandidateTargetAuthorizationForKind(
-		descriptor, contract, required, ownerFacts, bindings, evidenceKind, allowedBindingRefs,
-	)
-	if err != nil {
-		return RuntimeCandidateOperationManifest{}, err
+	var target RuntimeOperationTargetAuthorization
+	var prerequisiteRefs, admissibilityRefs []string
+	if ownerFacts.ImplementationWorkingBinding == nil {
+		target, prerequisiteRefs, admissibilityRefs, err = runtimeCandidateTargetAuthorizationForKind(
+			descriptor, contract, required, ownerFacts, bindings, evidenceKind, allowedBindingRefs,
+		)
+		if err != nil {
+			return RuntimeCandidateOperationManifest{}, err
+		}
+	} else {
+		// 工作 target 必须先取自已封存 proposal；不能先把所有 kind 的目标并集当作 existing preimage。
+		working, workErr := implementationWorkingOperationManifest(RuntimeCandidateOperationManifest{Kind: contract.Kind, OwnerModuleID: descriptor.OwnerModuleID}, *ownerFacts.ImplementationWorkingBinding)
+		if workErr != nil {
+			return RuntimeCandidateOperationManifest{}, workErr
+		}
+		target, prerequisiteRefs, admissibilityRefs = working.Target, working.PrerequisiteSnapshotRefs, working.AdmissibilitySnapshotRefs
 	}
 	if state == ConvergenceStateNeedStateChange {
 		target.ExcludedTargetRefs = runtimeValidationInputMutationExclusions(descriptor.OwnerModuleID, ownerFacts, required, bindings)
@@ -1093,6 +1145,12 @@ func runtimeCandidateOperationManifestForKind(kind string, state ConvergenceStat
 	}.Normalized()
 	if err := validateRuntimeOperationValueRuleDeclarations(operationManifest.Kind, operationManifest.Parameters, operationManifest.ValueRules, operationManifest.Variants); err != nil {
 		return RuntimeCandidateOperationManifest{}, fmt.Errorf("candidate manifest operation kind %q value rules: %w", kind, err)
+	}
+	if ownerFacts.ImplementationWorkingBinding != nil {
+		operationManifest, err = implementationWorkingOperationManifest(operationManifest, *ownerFacts.ImplementationWorkingBinding)
+		if err != nil {
+			return RuntimeCandidateOperationManifest{}, err
+		}
 	}
 	operationManifest.RequiredOperationFields = runtimeCandidateRequiredOperationFields(operationManifest)
 	if err := validateRuntimeCandidateTargetParameterBindings(operationManifest); err != nil {
