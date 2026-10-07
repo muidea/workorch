@@ -9,6 +9,7 @@ import { WorkspaceAuthoringEditor } from './components/WorkspaceAuthoringEditor'
 import { AuthoringSummary } from './components/AuthoringSummary';
 import { useSSE } from '../hooks';
 import { modelLabels } from '../utils/constants';
+import { llmUsageValue } from '../llmUsagePresentation';
 import { originalDiagnosticLabel } from '../runtimeProgressPresentation';
 import { RuntimeInputReviewDetails } from '../components/RuntimeInputReviewDetails';
 import * as helpers from '../helpers';
@@ -1152,7 +1153,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               { key: 'artifactContinuation', label: 'Artifact Continuation', value: currentArtifactContinuations.length, color: currentArtifactContinuations.length ? '#08979c' : undefined },
               { key: 'webSources', label: 'Web 来源', value: webSourceCount, color: webSourceCount ? '#08979c' : undefined },
               { key: 'llmContext', label: 'LLM Context', value: runLLMContextBudgets?.length ?? 0, color: (runLLMContextBudgets?.length ?? 0) > 0 ? '#1677ff' : undefined },
-              { key: 'llmUsage', label: modelLabels.llmUsage, value: runLLMUsageSummary?.entryTotal ?? 0, color: runLLMUsageSummary?.entryTotal ? '#d48806' : undefined },
+              { key: 'llmUsage', label: modelLabels.llmUsage, value: llmUsageValue(runLLMUsageSummary, 'entryTotal'), color: runLLMUsageSummary?.entryTotal ? '#d48806' : undefined },
               { key: 'tool', label: modelLabels.toolCall, value: runSnapshot?.toolCalls?.length ?? 0 },
               { key: 'patch', label: modelLabels.patch, value: runPatchRecords.length || runSnapshot?.patches?.length || 0 },
               { key: 'validation', label: modelLabels.validationResult, value: runValidationRecords.length || runSnapshot?.validationResults?.length || 0 },
@@ -1169,13 +1170,13 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                 { key: 'validating', label: '验收中', value: runSummary.validating, color: '#08979c' },
                 { key: 'completed', label: '已完成', value: runSummary.completed, color: '#389e0d' },
                 { key: 'failed', label: '失败/终止', value: runSummary.failed, color: '#cf1322' },
-                { key: 'llmCalls', label: 'LLM 调用总数', value: summaryLLMUsage?.entryTotal ?? 0, color: summaryLLMUsage?.entryTotal ? '#d48806' : undefined },
-                { key: 'llmInputTokens', label: 'LLM 输入 Token', value: numberText(summaryLLMUsage?.inputTokens) },
-                { key: 'llmOutputTokens', label: 'LLM 输出 Token', value: numberText(summaryLLMUsage?.outputTokens) },
-                { key: 'llmTotalTokens', label: 'LLM Token 总量', value: numberText(summaryLLMUsage?.totalTokens), color: summaryLLMUsage?.totalTokens ? '#0958d9' : undefined },
-                { key: 'llmCacheReadTokens', label: 'LLM Cache Read Token', value: numberText(summaryLLMUsage?.cacheReadTokens) },
-                { key: 'llmCacheWriteTokens', label: 'LLM Cache Write Token', value: numberText(summaryLLMUsage?.cacheWriteTokens) },
-                { key: 'llmCacheReadRatio', label: 'LLM Cache Read/Input', value: percentText(summaryLLMUsage?.cacheReadInputRatio), color: summaryLLMUsage?.cacheReadInputRatio ? '#389e0d' : undefined },
+                { key: 'llmCalls', label: 'LLM 调用（查询窗口）', value: llmUsageValue(summaryLLMUsage, 'entryTotal'), color: summaryLLMUsage?.entryTotal ? '#d48806' : undefined },
+                { key: 'llmInputTokens', label: 'LLM 输入 Token', value: llmUsageValue(summaryLLMUsage, 'inputTokens') },
+                { key: 'llmOutputTokens', label: 'LLM 输出 Token', value: llmUsageValue(summaryLLMUsage, 'outputTokens') },
+                { key: 'llmTotalTokens', label: 'LLM Token 总量', value: llmUsageValue(summaryLLMUsage, 'totalTokens'), color: summaryLLMUsage?.totalTokens ? '#0958d9' : undefined },
+                { key: 'llmCacheReadTokens', label: 'LLM Cache Read Token', value: llmUsageValue(summaryLLMUsage, 'cacheReadTokens') },
+                { key: 'llmCacheWriteTokens', label: 'LLM Cache Write Token', value: llmUsageValue(summaryLLMUsage, 'cacheWriteTokens') },
+                { key: 'llmCacheReadRatio', label: 'LLM Cache Read/Input', value: !summaryLLMUsage || summaryLLMUsage.availability === 'not_loaded' ? '未加载' : `${percentText(summaryLLMUsage.cacheReadInputRatio)}（查询窗口）`, color: summaryLLMUsage?.cacheReadInputRatio ? '#389e0d' : undefined },
                 { key: 'decisions', label: '待处理决策', value: pendingCount(snapshot.decisions), color: pendingCount(snapshot.decisions) ? '#d48806' : undefined },
                 { key: 'approvals', label: '待处理审批', value: pendingCount(snapshot.approvals), color: pendingCount(snapshot.approvals) ? '#d48806' : undefined }
               ])}
@@ -1567,7 +1568,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                   { key: 'artifacts', label: modelLabels.artifact, value: runObservability?.evidence.artifactTotal ?? (runArtifactRecords.length || runSnapshot.artifacts?.length || 0) },
                   { key: 'webSources', label: 'Web 来源', value: webSourceCount, color: webSourceCount ? '#08979c' : undefined },
                   { key: 'llmContextBudgets', label: 'LLM Context', value: runLLMContextBudgets?.length ?? 0, color: (runLLMContextBudgets?.length ?? 0) > 0 ? '#1677ff' : undefined },
-                  { key: 'llmUsage', label: modelLabels.llmUsage, value: runLLMUsageSummary?.entryTotal ?? 0, color: runLLMUsageSummary?.entryTotal ? '#d48806' : undefined }
+                  { key: 'llmUsage', label: modelLabels.llmUsage, value: llmUsageValue(runLLMUsageSummary, 'entryTotal'), color: runLLMUsageSummary?.entryTotal ? '#d48806' : undefined }
                 ])}
                 <Descriptions
                   column={3}
@@ -1585,7 +1586,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                     { key: 'artifacts', label: modelLabels.artifact, children: runObservability?.evidence.artifactTotal ?? (runArtifactRecords.length || runSnapshot.artifacts?.length || 0) },
                     { key: 'webSources', label: 'Web 来源', children: webSourceCount },
                     { key: 'llmContextBudgets', label: 'LLM Context', children: runLLMContextBudgets?.length ?? 0 },
-                    { key: 'llmUsage', label: modelLabels.llmUsage, children: `${numberText(runLLMUsageSummary?.entryTotal)} 次 / ${numberText(runLLMUsageSummary?.inputTokens)} 输入 / ${numberText(runLLMUsageSummary?.outputTokens)} 输出 / ${numberText(runLLMUsageSummary?.totalTokens)} 总量` },
+                    { key: 'llmUsage', label: modelLabels.llmUsage, children: `${llmUsageValue(runLLMUsageSummary, 'entryTotal')} 次 / ${llmUsageValue(runLLMUsageSummary, 'inputTokens')} 输入 / ${llmUsageValue(runLLMUsageSummary, 'outputTokens')} 输出 / ${llmUsageValue(runLLMUsageSummary, 'totalTokens')} 总量` },
                     { key: 'selectedCapabilities', label: '选择能力', children: runObservability?.selectedCapabilities?.length ?? runSnapshot.selectedCapabilities?.length ?? 0 },
                     { key: 'usedCapabilities', label: '使用能力', children: runObservability?.usedCapabilities?.length ?? runSnapshot.usedCapabilities?.length ?? 0 },
                     { key: 'events', label: '事件', children: runObservability?.evidence.eventTotal ?? 0 },
@@ -1712,7 +1713,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                     },
                     {
                       key: 'llmUsage',
-                      label: `LLM 使用量 ${runLLMUsageSummary?.entryTotal ?? 0}`,
+                      label: `LLM 使用量 ${llmUsageValue(runLLMUsageSummary, 'entryTotal')}`,
                       children: llmUsageCard(runLLMUsageSummary, runLLMUsageTraces)
                     },
                     {

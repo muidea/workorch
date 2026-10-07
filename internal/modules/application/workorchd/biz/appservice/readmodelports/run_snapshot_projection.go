@@ -20,6 +20,8 @@ func (models runSnapshotModels) projectionInput(item *runmodel.Run) readmodelpro
 		CoverageWorkItems:     models.CoverageWorkItems,
 		EventRecords:          models.EventRecords,
 		LLMUsageEventRecords:  models.LLMUsageEventRecords,
+		LLMUsageLoaded:        models.LLMUsageLoaded,
+		LLMUsageLimited:       models.LLMUsageLimited,
 		MemoryRecallTraces:    models.MemoryRecallTraces,
 		Decisions:             models.Decisions.Items,
 		Approvals:             models.Approvals.Items,

@@ -68,10 +68,13 @@ const disabled = (name: string) => button(name).disabled;
 
 async function fillSetup() {
   await screen.findByLabelText('名称');
-  fireEvent.change(screen.getByLabelText('名称'), { target: { value: '测试工作空间' } });
+  // 同步文本输入在一次 act 内提交，保留真实 Select 交互与必填校验。
+  await act(async () => {
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '测试工作空间' } });
+    fireEvent.change(screen.getByLabelText('目标'), { target: { value: '原目标' } });
+  });
   fireEvent.mouseDown(document.querySelector('.ant-select-selector')!);
   fireEvent.click(await screen.findByText('模板', { selector: '.ant-select-item-option-content' }));
-  fireEvent.change(screen.getByLabelText('目标'), { target: { value: '原目标' } });
 }
 
 async function downloadedCauseBytes(buttonName = '下载已校验原始字节'): Promise<Uint8Array> {

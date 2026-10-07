@@ -3854,7 +3854,7 @@ func TestModelWorkspaceContextRendersBusinessSectionsFromSnapshot(t *testing.T) 
 		"按计划推进当前收敛项",
 		"Memory Recall",
 		"vector/execution: selected",
-		"LLM Usage",
+		"LLM 用量（查询窗口）",
 		"tokens 1200/300/1500",
 		"Governance",
 		"decision",

@@ -22,6 +22,8 @@ type WorkspaceSnapshotModelInput struct {
 	Patches               []*runtimeevidencemodel.Patch
 	EventRecords          []*eventstreammodel.EventRecord
 	LLMUsageEventRecords  []*eventstreammodel.EventRecord
+	LLMUsageLoaded        bool
+	LLMUsageLimited       bool
 	Decisions             []projectioncontract.Decision
 	Approvals             []projectioncontract.Approval
 }

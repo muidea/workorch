@@ -3,11 +3,15 @@ package readmodelprojection
 import (
 	"strconv"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 
 func taskProgressSummary(progress projectioncontract.TaskProgress, snapshot *readmodelcore.RunSnapshotState) string {
+	if snapshot != nil && snapshot.Run.ID == "" && !isTerminalRunState(snapshot.Run.State) {
+		return workspaceWithoutRunSummary(snapshot.Workspace)
+	}
 	if snapshot != nil && isTerminalRunState(snapshot.Run.State) {
 		result := exactOwnerTerminalResult(snapshot.Workspace, snapshot.Run, snapshot.Results)
 		if result != nil && ((snapshot.Run.State == "completed" && result.State == "accepted") || result.State == "rejected") {
@@ -41,5 +45,34 @@ func taskProgressSummary(progress projectioncontract.TaskProgress, snapshot *rea
 		}
 		return summary
 	}
-	return "workspace " + progress.State + " with " + strconv.Itoa(len(progress.Blockers)) + " open blockers"
+	if snapshot != nil {
+		return workspaceWithoutRunSummary(snapshot.Workspace)
+	}
+	return "执行未启动；Result 未验收"
+}
+
+func workspaceWithoutRunSummary(workspace appmodelcore.Workspace) string {
+	summary := "执行未启动；Result 未验收"
+	if workspace.AuthoringSummary == nil {
+		return summary
+	}
+	authoring := workspace.AuthoringSummary
+	label := "创作状态：" + authoring.State
+	switch authoring.State {
+	case "failed":
+		label = "创作失败"
+	case "preparation_failed":
+		label = "创作准备失败"
+	case "eligible":
+		label = "已具备执行准入"
+	case "outcome_unresolved":
+		label = "创作结果未决"
+	}
+	if authoring.FailurePhase != "" {
+		label += "；失败阶段：" + authoring.FailurePhase
+	}
+	if authoring.FailureCode != "" {
+		label += "；原因代码：" + authoring.FailureCode
+	}
+	return label + "；" + summary
 }

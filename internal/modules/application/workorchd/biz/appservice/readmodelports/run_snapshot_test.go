@@ -148,6 +148,9 @@ func TestRunObservabilityHydratesLLMUsagePayloads(t *testing.T) {
 	if got.LLMUsageSummary.EntryTotal != 1 || got.LLMUsageSummary.TotalTokens != 44 {
 		t.Fatalf("llm usage summary = %+v, want one explicit usage payload", got.LLMUsageSummary)
 	}
+	if got.LLMUsageSummary.Availability != "complete" || got.LLMUsageSummary.Scope != "run" || got.LLMUsageSummary.ObservedRecords != 1 {
+		t.Fatalf("usage query availability = %+v", got.LLMUsageSummary)
+	}
 	var usageQuerySeen bool
 	for _, query := range eventReader.queries {
 		if query.Topic == "/llm/usage/recorded" && query.IncludePayload {

@@ -27,7 +27,7 @@ func workspaceSnapshotFromModels(input WorkspaceSnapshotModelInput) readmodelcor
 	}
 	ret.LLMUsageTraces = mapLLMUsageTracesFromEventRecords(mapEventRecords(input.LLMUsageEventRecords), "")
 	ret.LLMContextBudgetSummary = summarizeLLMContextBudgets(ret.LLMContextBudgets)
-	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
+	ret.LLMUsageSummary = summarizeQueriedLLMUsage(ret.LLMUsageTraces, len(input.LLMUsageEventRecords), input.LLMUsageLoaded, input.LLMUsageLimited, readmodelcore.DefaultLLMUsageEventRecordLimit, "workspace")
 	ret.Acceptance = mapAcceptanceProjection(input.ProjectionRun)
 	ret.TaskProgress = mapLocalizedWorkspaceTaskProgress(ret)
 	applyRuntimeProgress(&ret.TaskProgress, input.ProjectionRun)

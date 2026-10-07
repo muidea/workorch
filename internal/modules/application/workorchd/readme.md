@@ -148,6 +148,8 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
 
 正式进度只使用 owner 已封存事实：`workspace_defined` 来自 admitted startup hash；`formal_result` 必须关联当前适用 completed Run 的 exact terminal Result，且 Result accepted、scope 和 startup seal 精确一致。Result／Artifact 存在、历史成功或 Runtime terminal 均不能补造完成；Runtime overlay 后仍经同一只读最终投影，TaskProgress 与 compressed context 一致。内部 terminal ID／startup hash／Run 代次仅用于关联，不新增 public authority。
 
+无适用 Run 时，进度摘要独立显示持久 `authoringSummary`、执行未启动与 Result 未验收，不把 Workspace `active` 或零 blocker 当作执行正常；RunState 只来自同 Workspace 的实际 Run owner 对象。用量摘要的 `availability` 区分 `not_loaded`、`partial` 与 `complete`，并携带查询 `scope`、单次 `recordLimit` 和 `observedRecords`。`complete` 仅表示当前有界查询没有触及上限且返回记录全部可解析，不代表完整历史；上限命中、缺失／无效 payload 或仅有 Run 补充数据时不得冒充完整 Workspace 用量。detail／summary 保持不增加 Workspace usage payload 查询，未加载不显示零调用或零 Token。显示、clone 与 projection diff 保留这些范围信息，不从普通 event topic 推算调用或 Token。
+
 ## 不变量与非职责
 
 - Application 不写任何 sibling owner repository/service，不拥有 SM-1～SM-4 reducer、delivery phase 或 deletion phase。

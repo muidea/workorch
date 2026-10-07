@@ -1147,6 +1147,10 @@ export type LLMUsageTrace = {
 };
 
 export type LLMUsageSummary = {
+  availability: 'not_loaded' | 'partial' | 'complete';
+  scope: 'workspace' | 'run';
+  recordLimit: number;
+  observedRecords: number;
   entryTotal: number;
   inputTokens: number;
   outputTokens: number;

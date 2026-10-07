@@ -21,6 +21,8 @@ func appendRunSnapshotObservabilityTasks(ctx context.Context, tasks []func() err
 	tasks = append(tasks, namedLoadTask("runSnapshot.llmUsageEventRecords", func() error {
 		var err error
 		models.LLMUsageEventRecords, err = readers.EventRecords.List(ctx, readmodelcore.RunLLMUsageEventRecordOwnerQuery(item.ID, readmodelcore.DefaultLLMUsageEventRecordLimit))
+		models.LLMUsageLoaded = err == nil
+		models.LLMUsageLimited = len(models.LLMUsageEventRecords) >= readmodelcore.DefaultLLMUsageEventRecordLimit
 		return err
 	}))
 	tasks = append(tasks, namedLoadTask("runSnapshot.memoryRecalls", func() error {

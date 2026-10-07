@@ -31,6 +31,8 @@ func workspaceSnapshotBaseLoadTasks(ctx context.Context, readers WorkspaceSnapsh
 		tasks = append(tasks, namedLoadTask("workspaceSnapshot.llmUsageEventRecords", func() error {
 			var err error
 			models.LLMUsageEventRecords, err = readers.EventRecords.List(ctx, readmodelcore.WorkspaceLLMUsageEventRecordOwnerQuery(workspaceID, readmodelcore.DefaultLLMUsageEventRecordLimit))
+			models.LLMUsageLoaded = err == nil
+			models.LLMUsageLimited = len(models.LLMUsageEventRecords) >= readmodelcore.DefaultLLMUsageEventRecordLimit
 			return err
 		}))
 	}

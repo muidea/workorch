@@ -24,6 +24,8 @@ type runSnapshotModels struct {
 	CoverageWorkItems     []*orchestratormodel.CoverageWorkItem
 	EventRecords          []*eventstreammodel.EventRecord
 	LLMUsageEventRecords  []*eventstreammodel.EventRecord
+	LLMUsageLoaded        bool
+	LLMUsageLimited       bool
 	MemoryRecallTraces    []*memorymodel.MemoryRecallTrace
 	Decisions             RunDecisions
 	Approvals             RunApprovals

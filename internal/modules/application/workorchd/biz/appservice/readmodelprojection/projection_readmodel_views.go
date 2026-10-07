@@ -997,7 +997,7 @@ func workspaceSnapshotWithRunSnapshot(snapshot readmodelcore.WorkspaceSnapshotSt
 	ret.LLMContextBudgets = runSnapshot.LLMContextBudgets
 	ret.LLMContextBudgetSummary = runSnapshot.LLMContextBudgetSummary
 	ret.LLMUsageTraces = mergeWorkspaceLLMUsageTraces(ret.LLMUsageTraces, runSnapshot.LLMUsageTraces)
-	ret.LLMUsageSummary = summarizeLLMUsage(ret.LLMUsageTraces)
+	ret.LLMUsageSummary = mergeWorkspaceLLMUsageSummary(ret.LLMUsageTraces, snapshot.LLMUsageSummary, runSnapshot.LLMUsageSummary)
 	ret.DisplayOutcome = mapWorkspaceOutcome(ret)
 	if runSnapshot.TaskProgress.WorkspaceID != "" {
 		ret.TaskProgress = runSnapshot.TaskProgress

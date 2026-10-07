@@ -493,7 +493,7 @@ func readModelRatio(part, total int) float64 {
 // source: llm_usage_summary.go
 
 func summarizeLLMUsage(items []projectioncontract.LLMUsageTrace) projectioncontract.LLMUsageSummary {
-	ret := projectioncontract.LLMUsageSummary{}
+	ret := projectioncontract.LLMUsageSummary{Availability: "partial", Scope: "run"}
 	breakdownByKey := map[string]*projectioncontract.LLMUsageProviderModelBreakdown{}
 	for _, item := range items {
 		addLLMUsageTraceSummary(&ret, breakdownByKey, item)

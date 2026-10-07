@@ -51,6 +51,9 @@ func TestWorkspaceSnapshotBuildsSnapshotFromReaders(t *testing.T) {
 	if events.calls != 2 {
 		t.Fatalf("event reader calls = %d, want workspace events and workspace llm usage queries", events.calls)
 	}
+	if got.LLMUsageSummary.Availability != "complete" || got.LLMUsageSummary.Scope != "workspace" || got.LLMUsageSummary.ObservedRecords != 0 {
+		t.Fatalf("queried empty usage = %+v", got.LLMUsageSummary)
+	}
 }
 
 func TestWorkspaceSnapshotMergesRunScopedLLMUsageEvents(t *testing.T) {

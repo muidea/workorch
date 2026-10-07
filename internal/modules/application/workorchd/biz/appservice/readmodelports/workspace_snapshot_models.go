@@ -24,6 +24,8 @@ type workspaceSnapshotModels struct {
 	Patches               []*runtimeevidencemodel.Patch
 	EventRecords          []*eventstreammodel.EventRecord
 	LLMUsageEventRecords  []*eventstreammodel.EventRecord
+	LLMUsageLoaded        bool
+	LLMUsageLimited       bool
 	Tickets               []*decisionmodel.Ticket
 	ApprovalsRaw          []*approvalmodel.Approval
 	Decisions             []projectioncontract.Decision
@@ -47,6 +49,8 @@ func (models workspaceSnapshotModels) projectionInput(projectionRun *runmodel.Ru
 		Patches:               models.Patches,
 		EventRecords:          models.EventRecords,
 		LLMUsageEventRecords:  models.LLMUsageEventRecords,
+		LLMUsageLoaded:        models.LLMUsageLoaded,
+		LLMUsageLimited:       models.LLMUsageLimited,
 		Decisions:             models.Decisions,
 		Approvals:             models.Approvals,
 	}

@@ -1300,21 +1300,23 @@ export function llmUsageProviderModelKey(item: LLMUsageProviderModelBreakdown, i
 }
 
 export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]) {
-  const usageSummary = summary ?? {
-    entryTotal: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    totalTokens: 0,
-    estimatedEntries: 0,
-    providerNativeEntries: 0,
-    failedEntries: 0
-  };
+  if (!summary || summary.availability === 'not_loaded') {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="LLM 用量未加载；未加载不代表零调用" />;
+  }
+  const usageSummary = summary;
   const usageTraces = traces ?? [];
+  const scopeLabel = summary.scope === 'workspace' ? 'Workspace' : 'Run';
+  const incomplete = summary.availability !== 'complete';
+  const queryDescription = `仅显示已查询的 ${scopeLabel} 用量窗口（上限 ${summary.recordLimit} 条，返回 ${summary.observedRecords} 条）；不代表全部历史调用。`;
   if (usageSummary.entryTotal === 0 && usageTraces.length === 0) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`当前${modelLabels.run}未记录${modelLabels.llmUsage}`} />;
+    if (incomplete) {
+      return <Alert type="warning" showIcon message="LLM 用量数据不完整" description={`${queryDescription} 返回记录尚不能形成完整用量汇总，不能视为零调用。`} />;
+    }
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`已查询的 ${scopeLabel} 用量窗口内没有记录；不代表全部历史调用`} />;
   }
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Alert type={incomplete ? 'warning' : 'info'} showIcon message={incomplete ? 'LLM 用量数据不完整' : 'LLM 用量查询范围'} description={queryDescription} />
       {metricGrid([
         { key: 'calls', label: 'LLM 调用', value: numberText(usageSummary.entryTotal), color: '#1668dc' },
         { key: 'tokens', label: 'Token 总量', value: numberText(usageSummary.totalTokens), color: '#0958d9' },

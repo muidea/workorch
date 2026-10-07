@@ -87,7 +87,7 @@ func appendInitialWorkspaceProjectionSections(sections *workspaceProjectionSecti
 	if len(candidate.MemoryRecallTraces) > 0 {
 		sections.add("memory")
 	}
-	if len(candidate.LLMUsageTraces) > 0 || candidate.LLMUsageSummary.EntryTotal > 0 {
+	if len(candidate.LLMUsageTraces) > 0 || candidate.LLMUsageSummary.EntryTotal > 0 || candidate.LLMUsageSummary.Availability != "" {
 		sections.add("llm_usage")
 	}
 	return true

@@ -522,15 +522,28 @@ func renderMemoryRecallCompact(items []projectioncontract.MemoryRecallTrace, wid
 }
 
 func renderLLMUsageCompact(summary projectioncontract.LLMUsageSummary, width int) string {
-	if summary.EntryTotal == 0 || width <= 0 {
+	if width <= 0 {
 		return ""
 	}
+	if summary.Availability == "not_loaded" || (summary.Availability == "" && summary.EntryTotal == 0) {
+		return truncateDisplay("LLM 用量未加载；不代表零调用", width) + "\n"
+	}
+	if summary.EntryTotal == 0 {
+		message := "已查询的 LLM 用量窗口内没有记录；不代表全部历史"
+		if summary.Availability != "complete" {
+			message = "LLM 用量数据不完整；不能视为零调用"
+		}
+		return truncateDisplay(message, width) + "\n"
+	}
 	var b strings.Builder
-	b.WriteString(Heading.Render("LLM Usage"))
+	b.WriteString(Heading.Render("LLM 用量（查询窗口）"))
 	b.WriteString("\n")
 	parts := []string{
 		fmt.Sprintf("calls %d", summary.EntryTotal),
 		fmt.Sprintf("tokens %d/%d/%d", summary.InputTokens, summary.OutputTokens, summary.TotalTokens),
+	}
+	if summary.Availability != "complete" {
+		parts = append(parts, "数据不完整")
 	}
 	if summary.ProviderNativeEntries > 0 || summary.EstimatedEntries > 0 {
 		parts = append(parts, fmt.Sprintf("native/estimated %d/%d", summary.ProviderNativeEntries, summary.EstimatedEntries))

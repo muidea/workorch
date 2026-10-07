@@ -36,6 +36,7 @@ func (models *workspaceSnapshotModels) loadRunDerivedItems(ctx context.Context, 
 			if err != nil {
 				return err
 			}
+			models.LLMUsageLimited = models.LLMUsageLimited || len(items) >= readmodelcore.DefaultLLMUsageEventRecordLimit
 			models.appendLLMUsageEventRecords(items...)
 		}
 	}
@@ -55,6 +56,7 @@ func (models *workspaceSnapshotModels) appendLLMUsageEventRecords(items ...*even
 	}
 	for _, item := range items {
 		if item == nil || item.ID == "" {
+			models.LLMUsageLimited = true
 			continue
 		}
 		if _, ok := seen[item.ID]; ok {

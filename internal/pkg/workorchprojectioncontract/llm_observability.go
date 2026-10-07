@@ -139,6 +139,11 @@ type LLMUsageTrace struct {
 }
 
 type LLMUsageSummary struct {
+	// Availability 仅描述当前有界查询窗口，不表示完整历史或真实调用总数。
+	Availability            string                           `json:"availability"`
+	Scope                   string                           `json:"scope"`
+	RecordLimit             int                              `json:"recordLimit"`
+	ObservedRecords         int                              `json:"observedRecords"`
 	EntryTotal              int                              `json:"entryTotal"`
 	InputTokens             int                              `json:"inputTokens"`
 	OutputTokens            int                              `json:"outputTokens"`
