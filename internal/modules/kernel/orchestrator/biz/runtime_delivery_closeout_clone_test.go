@@ -36,5 +36,4 @@ func TestRuntimeDeliveryCloseoutRepositoryCopiesAreDetached(t *testing.T) {
 			t.Fatal("空回执集合改变 nil/empty 身份")
 		}
 	}
-	_ = runtime.RuntimeAggregate{}
 }
