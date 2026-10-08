@@ -148,6 +148,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 
 	case RuntimeInternalEventReconciliationRequested,
 		RuntimeInternalEventDriveFailureObserved,
+		RuntimeInternalEventTerminalMaterialSealRequired,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
 		RuntimeInternalEventRecoveryBudgetConsumed,
 		RuntimeInternalEventNonTerminalRecoveryScheduled,

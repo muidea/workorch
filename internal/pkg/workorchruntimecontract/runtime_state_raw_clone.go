@@ -1015,6 +1015,9 @@ func cloneRuntimeDeliverableExpectationRaw(in RuntimeDeliverableExpectation) Run
 func cloneRuntimeDeliveryAcknowledgementRaw(in RuntimeDeliveryAcknowledgement) RuntimeDeliveryAcknowledgement {
 	out := in
 	out.Outcome = cloneTerminalOutcomeRaw(in.Outcome)
+	out.ResultCloseout = cloneRuntimeStateRawPointer(in.ResultCloseout, func(item RuntimeResultCloseout) RuntimeResultCloseout {
+		return item.CloneRaw()
+	})
 	return out
 }
 
@@ -2031,6 +2034,9 @@ func cloneRuntimeStateRecordRaw(in RuntimeStateRecord) RuntimeStateRecord {
 	})
 	out.OperationReceipts = cloneRuntimeStateRawSlice(in.OperationReceipts, func(item RuntimeOperationReceipt) RuntimeOperationReceipt {
 		return cloneRuntimeOperationReceiptRaw(item)
+	})
+	out.TerminalMaterialSeal = cloneRuntimeStateRawPointer(in.TerminalMaterialSeal, func(item RuntimeTerminalMaterialSeal) RuntimeTerminalMaterialSeal {
+		return item.CloneRaw()
 	})
 	out.DeliveryAcknowledgements = cloneRuntimeStateRawSlice(in.DeliveryAcknowledgements, func(item RuntimeDeliveryAcknowledgement) RuntimeDeliveryAcknowledgement {
 		return cloneRuntimeDeliveryAcknowledgementRaw(item)

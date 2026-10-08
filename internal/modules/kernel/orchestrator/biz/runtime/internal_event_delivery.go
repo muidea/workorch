@@ -36,6 +36,7 @@ type RuntimeInternalDeliveryPayload struct {
 const (
 	RuntimeInternalEventReconciliationRequested       RuntimeInternalEventKind = "reconciliation_requested"
 	RuntimeInternalEventDriveFailureObserved          RuntimeInternalEventKind = "drive_failure_observed"
+	RuntimeInternalEventTerminalMaterialSealRequired   RuntimeInternalEventKind = "terminal_material_seal_required"
 	RuntimeInternalEventTerminalDeliveryAcknowledged  RuntimeInternalEventKind = "terminal_delivery_ack_observed"
 	RuntimeInternalEventRecoveryBudgetConsumed        RuntimeInternalEventKind = "recovery_budget_consumed"
 	RuntimeInternalEventNonTerminalRecoveryScheduled  RuntimeInternalEventKind = "nonterminal_recovery_scheduled"

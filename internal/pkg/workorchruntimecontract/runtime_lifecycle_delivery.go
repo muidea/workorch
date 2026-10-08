@@ -163,7 +163,9 @@ type RuntimeDeliveryAcknowledgement struct {
 	// ResultID is present only on the Result-owner acknowledgement. It is the
 	// exact owner-derived terminal Result identity that SM-4 may relay to the Run
 	// owner as immutable lineage input; it grants no Result mutation authority.
-	ResultID            common.ResultID
+	ResultID common.ResultID
+	// ResultCloseout 仅由 Result owner 返回其实际保存的终态材料。
+	ResultCloseout      *RuntimeResultCloseout `json:",omitempty"`
 	TerminalDeliveryID  string
 	Owner               RuntimeDeliveryOwner
 	AcknowledgedState   RuntimeDeliveryAcknowledgedState
@@ -173,6 +175,7 @@ type RuntimeDeliveryAcknowledgement struct {
 }
 
 func (a RuntimeDeliveryAcknowledgement) Normalized() RuntimeDeliveryAcknowledgement {
+	a = a.CloneRaw()
 	a.ResultID = common.ResultID(strings.TrimSpace(string(a.ResultID)))
 	a.TerminalDeliveryID = strings.TrimSpace(a.TerminalDeliveryID)
 	a.Owner = RuntimeDeliveryOwner(strings.TrimSpace(string(a.Owner)))
@@ -199,9 +202,17 @@ func (a RuntimeDeliveryAcknowledgement) Validate() error {
 		if a.ResultID == "" {
 			return fmt.Errorf("result delivery acknowledgement requires result identity")
 		}
+		if a.ResultCloseout != nil {
+			if err := a.ResultCloseout.ValidateRaw(); err != nil {
+				return fmt.Errorf("result delivery acknowledgement closeout: %w", err)
+			}
+			if a.ResultCloseout.CloseoutID != "" && a.ResultCloseout.TerminalOutcome != a.Outcome {
+				return fmt.Errorf("result delivery acknowledgement closeout outcome mismatch")
+			}
+		}
 	case RuntimeDeliveryOwnerWorkspace, RuntimeDeliveryOwnerRun:
-		if a.ResultID != "" {
-			return fmt.Errorf("non-result delivery acknowledgement cannot carry result identity")
+		if a.ResultID != "" || a.ResultCloseout != nil {
+			return fmt.Errorf("non-result delivery acknowledgement cannot carry result identity or material")
 		}
 	default:
 		return fmt.Errorf("delivery acknowledgement has invalid owner %q", a.Owner)

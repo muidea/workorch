@@ -4789,6 +4789,14 @@ func cloneResult(item *resultmodel.Result) *resultmodel.Result {
 	}
 	cloned.DoDAssessment = cloneResultDoDAssessment(item.DoDAssessment)
 	cloned.SummaryDetail = cloneResultSummary(item.SummaryDetail)
+	if item.RuntimeCloseout != nil {
+		closeout := item.RuntimeCloseout.CloneRaw()
+		cloned.RuntimeCloseout = &closeout
+	}
+	if item.TerminalDelivery != nil {
+		identity := *item.TerminalDelivery
+		cloned.TerminalDelivery = &identity
+	}
 	return &cloned
 }
 

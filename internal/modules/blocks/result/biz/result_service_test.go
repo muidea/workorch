@@ -29,6 +29,47 @@ func TestServiceRejectsInvalidResultAndArtifact(t *testing.T) {
 	}
 }
 
+func TestServiceRejectsNoncanonicalCloseoutBeforePersistence(t *testing.T) {
+	ctx := context.Background()
+	service := newService(memory.NewResultRepository(), memory.NewArtifactRepository())
+	item := validTestResult()
+	item.RuntimeCloseout = &runtimecontract.RuntimeResultCloseout{
+		SchemaVersion: runtimecontract.RuntimeResultCloseoutSchemaVersionCurrent,
+		RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),
+		EvidenceRefs: []string{"evidence", "evidence"},
+	}
+	if err := service.CreateResult(ctx, item); err == nil {
+		t.Fatal("Result owner 保存了通过规范化掩盖重复引用的材料")
+	}
+	if _, err := service.GetResult(ctx, item.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("拒绝后仍有持久副作用: %v", err)
+	}
+}
+
+func TestServiceRejectsNoncanonicalCloseoutOnRead(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.NewResultRepository()
+	service := newService(repository, memory.NewArtifactRepository())
+	item := validTestResult()
+	item.RuntimeCloseout = &runtimecontract.RuntimeResultCloseout{
+		SchemaVersion:  runtimecontract.RuntimeResultCloseoutSchemaVersionCurrent,
+		RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),
+		EvidenceRefs:   []string{"evidence", "evidence"},
+	}
+	if err := repository.Create(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.GetResult(ctx, item.ID); err == nil {
+		t.Fatal("单条读取返回了损坏的原始材料")
+	}
+	if _, err := service.ListResultsByWorkspace(ctx, item.WorkspaceID); err == nil {
+		t.Fatal("Workspace 列表返回了损坏的原始材料")
+	}
+	if _, err := service.ListResultsByRun(ctx, item.RunID); err == nil {
+		t.Fatal("Run 列表返回了损坏的原始材料")
+	}
+}
+
 func TestServiceReadsBoundedArtifactContentFromOwnerState(t *testing.T) {
 	ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "ws-result-test")
 	service := newService(memory.NewResultRepository(), memory.NewArtifactRepository())

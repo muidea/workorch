@@ -1073,7 +1073,7 @@ func operationReceiptFeedbackDispatch(a RuntimeAggregate, receipt runtimecontrac
 }
 
 func validateRuntimeAggregateSM4DeliveryAcknowledgements(a RuntimeAggregate) error {
-	if err := runtimecontract.ValidateRuntimeStateTerminalDeliveryLedger(a.Decision, a.Termination, a.DeliveryAcknowledgements, a.Facts.Recovery); err != nil {
+	if err := runtimecontract.ValidateRuntimeTerminalMaterialSeal(a.TerminalMaterialSeal, terminalMaterialSource(a)); err != nil {
 		return err
 	}
 	for _, acknowledgement := range a.DeliveryAcknowledgements {

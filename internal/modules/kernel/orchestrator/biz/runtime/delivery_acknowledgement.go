@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -17,10 +18,10 @@ func (c *driveDeliveryComponent) recordDeliveryAcknowledgement(ctx context.Conte
 	if c == nil || c.repository == nil {
 		return RuntimeAggregate{}, false, common.ErrInvalidArgument
 	}
-	acknowledgement = acknowledgement.Normalized()
-	if err := acknowledgement.Validate(); err != nil {
+	if err := acknowledgement.ValidateRaw(); err != nil {
 		return RuntimeAggregate{}, false, err
 	}
+	acknowledgement = acknowledgement.CloneRaw()
 	aggregate, err := c.repository.Load(ctx, acknowledgement.WorkspaceID, acknowledgement.RunID)
 	if err != nil {
 		return RuntimeAggregate{}, false, err
@@ -56,6 +57,27 @@ func (c *driveDeliveryComponent) recordDeliveryAcknowledgement(ctx context.Conte
 func validateDeliveryAcknowledgementAgainstAggregate(aggregate RuntimeAggregate, acknowledgement runtimecontract.RuntimeDeliveryAcknowledgement) error {
 	if aggregate.Decision.Terminal == nil && aggregate.Termination == nil {
 		return fmt.Errorf("%w: terminal delivery acknowledgement has no sealed terminal", common.ErrConflict)
+	}
+	if aggregate.TerminalMaterialSeal == nil {
+		return fmt.Errorf("%w: terminal delivery acknowledgement requires original material seal", common.ErrConflict)
+	}
+	prospective := append([]runtimecontract.RuntimeDeliveryAcknowledgement(nil), aggregate.DeliveryAcknowledgements...)
+	found := false
+	for _, existing := range prospective {
+		if existing.Owner == acknowledgement.Owner {
+			found = true
+			if !sameDeliveryAcknowledgementIdentity(existing, acknowledgement) {
+				return fmt.Errorf("%w: conflicting terminal delivery acknowledgement", common.ErrConflict)
+			}
+		}
+	}
+	if !found {
+		prospective = append(prospective, acknowledgement)
+	}
+	source := terminalMaterialSource(aggregate)
+	source.DeliveryAcknowledgements = prospective
+	if err := runtimecontract.ValidateRuntimeTerminalMaterialSeal(aggregate.TerminalMaterialSeal, source); err != nil {
+		return err
 	}
 	acknowledgement = acknowledgement.Normalized()
 	outcome, terminal, err := DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
@@ -111,6 +133,15 @@ func terminalDeliveryOwnerAcknowledged(aggregate RuntimeAggregate, deliveryID st
 // the delivery identity from sealed terminal authority; unrelated or malformed
 // acknowledgement rows can never make the predicate true.
 func TerminalDeliveryFullyAcknowledged(aggregate RuntimeAggregate) bool {
+	if aggregate.TerminalMaterialSeal == nil {
+		return false
+	}
+	if err := runtimecontract.ValidateRuntimeTerminalMaterialSeal(aggregate.TerminalMaterialSeal, terminalMaterialSource(aggregate)); err != nil {
+		return false
+	}
+	if aggregate.Decision.AuthoritySnapshot.WorkspaceID != aggregate.Facts.WorkspaceID || aggregate.Decision.AuthoritySnapshot.RunID != aggregate.Facts.RunID {
+		return false
+	}
 	outcome, terminal, err := DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
 	if err != nil || !terminal {
 		return false
@@ -147,5 +178,6 @@ func sameDeliveryAcknowledgementIdentity(left, right runtimecontract.RuntimeDeli
 		left.Owner == right.Owner &&
 		left.AuthoritySnapshotID == right.AuthoritySnapshotID &&
 		left.CausationID == right.CausationID &&
-		left.Outcome == right.Outcome
+		left.Outcome == right.Outcome &&
+		reflect.DeepEqual(left.ResultCloseout, right.ResultCloseout)
 }

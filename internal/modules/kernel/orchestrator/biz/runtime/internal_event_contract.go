@@ -90,6 +90,7 @@ func runtimeInternalFactPayloadClass(kind RuntimeInternalEventKind) (runtimeInte
 
 	case RuntimeInternalEventReconciliationRequested,
 		RuntimeInternalEventDriveFailureObserved,
+		RuntimeInternalEventTerminalMaterialSealRequired,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
 		RuntimeInternalEventRecoveryBudgetConsumed,
 		RuntimeInternalEventNonTerminalRecoveryScheduled,
@@ -144,6 +145,9 @@ func (event RuntimeInternalEvent) validateEnvelope() error {
 	if !matched {
 		return fmt.Errorf("%w: runtime internal event %q requires %s payload", common.ErrInvalidArgument, event.Kind, expected)
 	}
+	if err := event.validateTerminalMaterialSealEnvelope(); err != nil {
+		return err
+	}
 	if err := event.validateImplementationWorkScopeEnvelope(); err != nil {
 		return err
 	}
@@ -155,6 +159,13 @@ func (event RuntimeInternalEvent) validateEnvelope() error {
 	}
 	if err := event.validateExecutionTransaction(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (event RuntimeInternalEvent) validateTerminalMaterialSealEnvelope() error {
+	if event.Kind == RuntimeInternalEventTerminalMaterialSealRequired && (event.Delivery == nil || !reflect.DeepEqual(*event.Delivery, RuntimeInternalDeliveryPayload{})) {
+		return fmt.Errorf("%w: material seal event accepts only owner-local scope, not caller material", common.ErrInvalidArgument)
 	}
 	return nil
 }
@@ -418,6 +429,7 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 	case RuntimeInternalEventReconciliationRequested,
 		RuntimeInternalEventProviderRequestRecoveryCoordinated,
 		RuntimeInternalEventDriveFailureObserved,
+		RuntimeInternalEventTerminalMaterialSealRequired,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
 		RuntimeInternalEventRecoveryBudgetConsumed,
 		RuntimeInternalEventNonTerminalRecoveryScheduled,

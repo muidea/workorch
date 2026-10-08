@@ -30,6 +30,18 @@ func (m *Biz) deliverRuntimeTerminal(ctx context.Context, aggregate runtime.Runt
 	if err := aggregate.Validate(); err != nil {
 		return fmt.Errorf("persisted Runtime terminal aggregate is invalid: %w", err)
 	}
+	sealed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventTerminalMaterialSealRequired,
+		Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+		Delivery: &runtime.RuntimeInternalDeliveryPayload{},
+	})
+	if err != nil {
+		return err
+	}
+	aggregate = sealed.Aggregate
+	if aggregate.TerminalMaterialSeal == nil {
+		return fmt.Errorf("%w: terminal delivery has no original material seal", common.ErrConflict)
+	}
 	request, err := terminalDeliveryRequest(aggregate)
 	if err != nil {
 		return err
@@ -38,10 +50,7 @@ func (m *Biz) deliverRuntimeTerminal(ctx context.Context, aggregate runtime.Runt
 		return err
 	}
 	if !deliveryAcknowledged(aggregate, request.TerminalDeliveryID, runtimecontract.RuntimeDeliveryOwnerResult) {
-		material, materialErr := runtimeResultMaterialFromAggregate(aggregate, request.Outcome)
-		if materialErr != nil {
-			return materialErr
-		}
+		material := resultMaterialFromTerminalSeal(*aggregate.TerminalMaterialSeal)
 		if err := m.deliverRuntimeResult(ctx, request, material); err != nil {
 			return err
 		}
@@ -112,7 +121,24 @@ func (m *Biz) persistedTerminalDeliveryResultID(ctx context.Context, aggregate r
 	return "", false
 }
 
+func resultMaterialFromTerminalSeal(seal runtimecontract.RuntimeTerminalMaterialSeal) resultevents.ResultMaterial {
+	material := seal.Material.CloneRaw()
+	return resultevents.ResultMaterial{
+		WorkspaceID: material.WorkspaceID, RunID: material.RunID, GoalID: material.GoalID, DoDID: material.DoDID,
+		Title: material.Title, Summary: material.Summary, SourceType: material.SourceType, SourceRef: material.SourceRef,
+		EvidenceRefs: material.EvidenceRefs, ArtifactRefs: material.ArtifactRefs,
+		DoDAssessment: material.DoDAssessment, SummaryDetail: material.SummaryDetail, RuntimeCloseout: material.RuntimeCloseout,
+	}
+}
+
 func terminalDeliveryRequest(aggregate runtime.RuntimeAggregate) (orchestratorevents.RuntimeTerminalDeliveryRequestData, error) {
+	if aggregate.TerminalMaterialSeal != nil {
+		return orchestratorevents.RuntimeTerminalDeliveryRequestData{
+			RuntimeTerminalDeliveryIdentity: aggregate.TerminalMaterialSeal.Identity,
+			SourceOwner: ModuleID, CausationID: "terminal-delivery/" + aggregate.TerminalMaterialSeal.Identity.TerminalDeliveryID,
+			StateRevision: aggregate.TerminalMaterialSeal.GenerationStateRevision,
+		}, nil
+	}
 	outcome, terminal, err := runtime.DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
 	if err != nil {
 		return orchestratorevents.RuntimeTerminalDeliveryRequestData{}, err

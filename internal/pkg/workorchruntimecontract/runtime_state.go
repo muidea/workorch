@@ -345,6 +345,8 @@ type RuntimeStateRecord struct {
 	// DeliveryAcknowledgements are SM-4-only durable receipts for the terminal
 	// Result -> Workspace -> Run saga. They never alter the sealed SM-2 decision.
 	DeliveryAcknowledgements []RuntimeDeliveryAcknowledgement
+	// TerminalMaterialSeal 是 SM-4 首次交付材料的不可变前像，Run 仅 opaque 保存。
+	TerminalMaterialSeal *RuntimeTerminalMaterialSeal
 	// PrerequisiteInvalidations provide a persisted idempotency fence for
 	// freshness refreshes across duplicate events, CAS retries and restart.
 	PrerequisiteInvalidations []RuntimePrerequisiteInvalidationRecord
@@ -722,7 +724,7 @@ func (r RuntimeStateRecord) Validate() error {
 			return fmt.Errorf("runtime state termination revision exceeds state revision")
 		}
 	}
-	if err := ValidateRuntimeStateTerminalDeliveryLedger(r.Decision, r.Termination, r.DeliveryAcknowledgements, r.Facts.Recovery); err != nil {
+	if err := ValidateRuntimeTerminalMaterialSeal(r.TerminalMaterialSeal, r); err != nil {
 		return err
 	}
 	if err := ValidateRuntimeOperationRecoveryAuthorizations(r.Facts.WorkspaceID, r.Facts.RunID, r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts, r.OperationRecoveryAuthorizations, r.Facts.Recovery, r.StateRevision); err != nil {
@@ -808,8 +810,7 @@ func ValidateRuntimeStateTerminalDeliveryLedger(
 		return fmt.Errorf("runtime state terminal delivery acknowledgement ledger is over-complete")
 	}
 	for idx, acknowledgement := range acknowledgements {
-		acknowledgement = acknowledgement.Normalized()
-		if err := acknowledgement.Validate(); err != nil {
+		if err := acknowledgement.ValidateRaw(); err != nil {
 			return fmt.Errorf("terminal delivery acknowledgement: %w", err)
 		}
 		if acknowledgement.WorkspaceID != workspaceID || acknowledgement.RunID != runID ||

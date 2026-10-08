@@ -35,28 +35,52 @@ func (s *service) GetResult(ctx context.Context, id common.ResultID) (*resultmod
 	if id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	return s.results.Get(ctx, id)
+	item, err := s.results.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateResult(item); err != nil {
+		return nil, err
+	}
+	return item, nil
 }
 
 func (s *service) ListResultsByWorkspace(ctx context.Context, workspaceID common.WorkspaceID) ([]*resultmodel.Result, error) {
 	if workspaceID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	return s.results.ListByWorkspace(ctx, workspaceID)
+	items, err := s.results.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return validateResultList(items)
 }
 
 func (s *service) ListResultsByRun(ctx context.Context, runID common.RunID) ([]*resultmodel.Result, error) {
 	if runID == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	return s.results.ListByRun(ctx, runID)
+	items, err := s.results.ListByRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	return validateResultList(items)
+}
+
+func validateResultList(items []*resultmodel.Result) ([]*resultmodel.Result, error) {
+	for _, item := range items {
+		if err := validateResult(item); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
 }
 
 func (s *service) UpdateResult(ctx context.Context, item *resultmodel.Result) error {
 	if err := validateResult(item); err != nil {
 		return err
 	}
-	current, err := s.results.Get(ctx, item.ID)
+	current, err := s.GetResult(ctx, item.ID)
 	if err != nil {
 		return err
 	}
@@ -78,7 +102,7 @@ func (s *service) CreateArtifact(ctx context.Context, item *resultmodel.Artifact
 	if err != nil {
 		return err
 	}
-	parent, err := s.results.Get(ctx, item.ResultID)
+	parent, err := s.GetResult(ctx, item.ResultID)
 	if err != nil {
 		return err
 	}
@@ -193,7 +217,7 @@ func validateResult(item *resultmodel.Result) error {
 		return common.ErrInvalidArgument
 	}
 	if item.RuntimeCloseout != nil {
-		if err := item.RuntimeCloseout.Validate(); err != nil {
+		if err := item.RuntimeCloseout.ValidateRaw(); err != nil {
 			return err
 		}
 	}

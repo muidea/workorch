@@ -185,6 +185,10 @@ func runtimeStateRecordFromAggregate(aggregate runtime.RuntimeAggregate) runtime
 		DeliveryAcknowledgements:        cloneRuntimeDeliveryAcknowledgements(aggregate.DeliveryAcknowledgements),
 		PrerequisiteInvalidations:       runtimecontract.NormalizeRuntimePrerequisiteInvalidations(aggregate.PrerequisiteInvalidations),
 	}
+	if aggregate.TerminalMaterialSeal != nil {
+		value := aggregate.TerminalMaterialSeal.CloneRaw()
+		ret.TerminalMaterialSeal = &value
+	}
 	if aggregate.DefinitionClarification != nil {
 		value := aggregate.DefinitionClarification.Clone()
 		ret.DefinitionClarification = &value
@@ -234,6 +238,10 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 		OperationReceipts:               runtimecontract.NormalizeRuntimeOperationReceipts(record.OperationReceipts),
 		DeliveryAcknowledgements:        cloneRuntimeDeliveryAcknowledgements(record.DeliveryAcknowledgements),
 		PrerequisiteInvalidations:       runtimecontract.NormalizeRuntimePrerequisiteInvalidations(record.PrerequisiteInvalidations),
+	}
+	if record.TerminalMaterialSeal != nil {
+		value := record.TerminalMaterialSeal.CloneRaw()
+		ret.TerminalMaterialSeal = &value
 	}
 	if record.DefinitionClarification != nil {
 		value := record.DefinitionClarification.Clone()

@@ -92,6 +92,11 @@ func normalizeResultSummaryMaterial(item workorchresultcontract.ResultSummary) w
 }
 
 func (m ResultMaterial) Validate() error {
+	if m.RuntimeCloseout != nil {
+		if err := m.RuntimeCloseout.ValidateRaw(); err != nil {
+			return fmt.Errorf("%w: invalid raw runtime closeout: %v", common.ErrInvalidArgument, err)
+		}
+	}
 	m = m.Normalized()
 	if m.WorkspaceID == "" || m.RunID == "" || m.GoalID == "" || m.DoDID == "" || m.Summary == "" {
 		return fmt.Errorf("%w: result material requires scope, definition and summary", common.ErrInvalidArgument)
@@ -222,6 +227,9 @@ func (c RuntimeTerminalDeliveryFact) Normalized() RuntimeTerminalDeliveryFact {
 }
 
 func (c RuntimeTerminalDeliveryFact) Validate() error {
+	if err := c.Material.Validate(); err != nil {
+		return err
+	}
 	c = c.Normalized()
 	if c.SourceOwner != "kernel/orchestrator" {
 		return fmt.Errorf("%w: result terminal delivery requires workspace, run and source", common.ErrInvalidArgument)

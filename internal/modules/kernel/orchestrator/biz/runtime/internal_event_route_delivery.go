@@ -26,6 +26,10 @@ func (c *RuntimeController) applyDeliveryInternalEvent(ctx context.Context, even
 		aggregate, err := c.authority.recordDriveFailureFact(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Delivery.FailureFact)
 		result.Aggregate = aggregate
 		return result, err
+	case RuntimeInternalEventTerminalMaterialSealRequired:
+		aggregate, err := c.driveDelivery.sealTerminalMaterial(ctx, event.Scope.WorkspaceID, event.Scope.RunID)
+		result.Aggregate = aggregate
+		return result, err
 	case RuntimeInternalEventTerminalDeliveryAcknowledged:
 		if event.Delivery.DeliveryAcknowledgement == nil {
 			return result, common.ErrInvalidArgument

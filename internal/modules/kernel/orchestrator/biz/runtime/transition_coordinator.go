@@ -43,6 +43,25 @@ func (c *RuntimeTransitionCoordinator) Commit(ctx context.Context, aggregate Run
 	if err := aggregate.Validate(); err != nil {
 		return fmt.Errorf("runtime transition invariant: %w", err)
 	}
+	if expectedRevision == 0 {
+		if aggregate.TerminalMaterialSeal != nil {
+			return fmt.Errorf("%w: initial aggregate cannot carry a terminal material seal", common.ErrConflict)
+		}
+	} else {
+		previous, err := c.repository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+		if err != nil {
+			return err
+		}
+		if previous.StateRevision != expectedRevision {
+			return &RuntimeCASConflictError{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, ExpectedRevision: expectedRevision, ObservedRevision: previous.StateRevision}
+		}
+		if err := previous.Validate(); err != nil {
+			return fmt.Errorf("runtime transition preimage invariant: %w", err)
+		}
+		if err := validateTerminalMaterialSealTransition(previous, aggregate); err != nil {
+			return err
+		}
+	}
 	var err error
 	if repository, ok := c.repository.(validatedRuntimeStateRepository); ok {
 		err = repository.SaveValidated(ctx, aggregate, expectedRevision)

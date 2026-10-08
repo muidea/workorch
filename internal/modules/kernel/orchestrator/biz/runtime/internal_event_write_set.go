@@ -152,6 +152,7 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 		return runtimeInternalTransitionDescriptor{Primary: eventcontract.StateMachineSM3, WriteSet: runtimeInternalWriteSM2 | runtimeInternalWriteSM3 | runtimeInternalWriteSM4}, true
 
 	case RuntimeInternalEventReconciliationRequested,
+		RuntimeInternalEventTerminalMaterialSealRequired,
 		RuntimeInternalEventTerminalDeliveryAcknowledged,
 		RuntimeInternalEventNonTerminalRecoveryScheduled,
 		RuntimeInternalEventDriveLeaseScheduled,

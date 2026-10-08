@@ -12,7 +12,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchresultcontract"
-	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const definitionPackage = "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
@@ -257,33 +256,7 @@ func CloneResult(item *resultmodel.Result) *resultmodel.Result {
 	cloned.DoDAssessment = cloneDoDAssessment(item.DoDAssessment)
 	cloned.SummaryDetail = cloneResultSummary(item.SummaryDetail)
 	if item.RuntimeCloseout != nil {
-		closeout := *item.RuntimeCloseout
-		closeout.RequirementOutcomes = append([]runtimecontract.RuntimeRequirementOutcome(nil), item.RuntimeCloseout.RequirementOutcomes...)
-		for idx := range closeout.RequirementOutcomes {
-			closeout.RequirementOutcomes[idx].MissingEvidenceKinds = append([]string(nil), closeout.RequirementOutcomes[idx].MissingEvidenceKinds...)
-			closeout.RequirementOutcomes[idx].EvidenceItems = append([]runtimecontract.RuntimeRequirementEvidenceItem(nil), closeout.RequirementOutcomes[idx].EvidenceItems...)
-			closeout.RequirementOutcomes[idx].AcceptedEvidenceRefs = append([]string(nil), closeout.RequirementOutcomes[idx].AcceptedEvidenceRefs...)
-		}
-		closeout.AcceptedEvidenceRefs = append([]string(nil), item.RuntimeCloseout.AcceptedEvidenceRefs...)
-		closeout.DeliverableRefs = append([]string(nil), item.RuntimeCloseout.DeliverableRefs...)
-		closeout.KnownLimitations = append([]string(nil), item.RuntimeCloseout.KnownLimitations...)
-		closeout.OwnerRevisionSet.Entries = append([]runtimecontract.RuntimeOwnerRevisionRef(nil), item.RuntimeCloseout.OwnerRevisionSet.Entries...)
-		closeout.SatisfiedCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), item.RuntimeCloseout.SatisfiedCoverageWorkItemIDs...)
-		closeout.UnsatisfiedCoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), item.RuntimeCloseout.UnsatisfiedCoverageWorkItemIDs...)
-		closeout.MissingEvidenceKinds = append([]string(nil), item.RuntimeCloseout.MissingEvidenceKinds...)
-		closeout.TargetRefs = append([]string(nil), item.RuntimeCloseout.TargetRefs...)
-		closeout.EvidenceRefs = append([]string(nil), item.RuntimeCloseout.EvidenceRefs...)
-		closeout.ArtifactRefs = append([]common.ArtifactID(nil), item.RuntimeCloseout.ArtifactRefs...)
-		closeout.OperationOutcomes = append(closeout.OperationOutcomes[:0:0], item.RuntimeCloseout.OperationOutcomes...)
-		if item.RuntimeCloseout.Gaps != nil {
-			closeout.Gaps = append(closeout.Gaps[:0:0], item.RuntimeCloseout.Gaps...)
-			for idx := range closeout.Gaps {
-				closeout.Gaps[idx].CoverageWorkItemIDs = append([]common.CoverageWorkItemID(nil), item.RuntimeCloseout.Gaps[idx].CoverageWorkItemIDs...)
-				closeout.Gaps[idx].MissingEvidenceKinds = append([]string(nil), item.RuntimeCloseout.Gaps[idx].MissingEvidenceKinds...)
-				closeout.Gaps[idx].TargetRefs = append([]string(nil), item.RuntimeCloseout.Gaps[idx].TargetRefs...)
-				closeout.Gaps[idx].EvidenceRefs = append([]string(nil), item.RuntimeCloseout.Gaps[idx].EvidenceRefs...)
-			}
-		}
+		closeout := item.RuntimeCloseout.CloneRaw()
 		cloned.RuntimeCloseout = &closeout
 	}
 	if item.TerminalDelivery != nil {

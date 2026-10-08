@@ -28,6 +28,9 @@ canonical Result ID 由 workspace/run 派生；Artifact ID 由 Result ID 与 sea
 
 - Result/Artifact scope 必须与 terminal material 的 workspace/run/result 完全一致；返回值和 notification 必须深拷贝。
 - formal closeout、material hash、artifact ref 映射和 terminal delivery identity 一经封存不可漂移。
+  terminal ingress 在任何规范化前校验 closeout 原值；规范化可消除的空白、重复集合或 hash 漂移不得被当成合法材料。
+  Result acknowledgement 携带 owner 实际保存的 detached `ResultCloseout`，noop 重放返回同一材料；该回执不是当前 Runtime
+  authority 的替代品。回执和 opaque record 的原值克隆保留 bytes 与 nil/empty 身份，不重新派生历史材料。
 - 原始 owner diagnostic、逐项 DoD 与实现/验证/限制/风险反馈是 Orchestrator 已裁决的 sealed material；Result 不根据
   diagnostic 选择 retry 或重判验收。Result renderer 版本只由 Orchestrator 在 Run 初始化时封存；旧 Run pending delivery
   必须复用旧 material，不能由 Result owner 在升级或重放时补写新字段或重算另一份摘要。
