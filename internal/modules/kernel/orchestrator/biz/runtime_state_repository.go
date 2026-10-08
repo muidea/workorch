@@ -182,7 +182,7 @@ func runtimeStateRecordFromAggregate(aggregate runtime.RuntimeAggregate) runtime
 		GovernanceResolutions:           runtimecontract.CloneRuntimeGovernanceResolutionRecords(aggregate.GovernanceResolutions),
 		OperationGovernanceBindings:     cloneRuntimeOperationGovernanceBindings(aggregate.OperationGovernanceBindings),
 		OperationReceipts:               runtimecontract.NormalizeRuntimeOperationReceipts(aggregate.OperationReceipts),
-		DeliveryAcknowledgements:        append([]runtimecontract.RuntimeDeliveryAcknowledgement(nil), aggregate.DeliveryAcknowledgements...),
+		DeliveryAcknowledgements:        cloneRuntimeDeliveryAcknowledgements(aggregate.DeliveryAcknowledgements),
 		PrerequisiteInvalidations:       runtimecontract.NormalizeRuntimePrerequisiteInvalidations(aggregate.PrerequisiteInvalidations),
 	}
 	if aggregate.DefinitionClarification != nil {
@@ -232,7 +232,7 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 		GovernanceResolutions:           runtimecontract.CloneRuntimeGovernanceResolutionRecords(record.GovernanceResolutions),
 		OperationGovernanceBindings:     cloneRuntimeOperationGovernanceBindings(record.OperationGovernanceBindings),
 		OperationReceipts:               runtimecontract.NormalizeRuntimeOperationReceipts(record.OperationReceipts),
-		DeliveryAcknowledgements:        append([]runtimecontract.RuntimeDeliveryAcknowledgement(nil), record.DeliveryAcknowledgements...),
+		DeliveryAcknowledgements:        cloneRuntimeDeliveryAcknowledgements(record.DeliveryAcknowledgements),
 		PrerequisiteInvalidations:       runtimecontract.NormalizeRuntimePrerequisiteInvalidations(record.PrerequisiteInvalidations),
 	}
 	if record.DefinitionClarification != nil {
@@ -256,6 +256,17 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 		ret.CompletedDispatches[idx] = runtimeDispatchFromRecord(record.CompletedDispatches[idx])
 	}
 	ret.Diagnostics = append([]runtimecontract.RuntimeDiagnosticRecord(nil), record.Diagnostics...)
+	return ret
+}
+
+func cloneRuntimeDeliveryAcknowledgements(values []runtimecontract.RuntimeDeliveryAcknowledgement) []runtimecontract.RuntimeDeliveryAcknowledgement {
+	if values == nil {
+		return nil
+	}
+	ret := make([]runtimecontract.RuntimeDeliveryAcknowledgement, len(values))
+	for index := range values {
+		ret[index] = values[index].CloneRaw()
+	}
 	return ret
 }
 

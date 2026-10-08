@@ -231,7 +231,7 @@ func (r RunLifecycleCommandResult) Clone() RunLifecycleCommandResult {
 	cloned := r
 	cloned.Run = runmodel.CloneRun(r.Run)
 	if r.DeliveryAck != nil {
-		ack := *r.DeliveryAck
+		ack := r.DeliveryAck.CloneRaw()
 		cloned.DeliveryAck = &ack
 	}
 	return cloned

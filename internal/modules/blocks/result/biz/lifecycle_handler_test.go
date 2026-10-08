@@ -3,6 +3,7 @@ package result
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -310,6 +311,22 @@ func TestTerminalDeliveryPreservesFormalCloseoutArtifactHashAndMapsChildProjecti
 	}
 	if err := created.Result.RuntimeCloseout.Validate(); err != nil {
 		t.Fatalf("stored formal closeout no longer validates: %v", err)
+	}
+	if created.DeliveryAck == nil || created.DeliveryAck.ResultCloseout == nil ||
+		!reflect.DeepEqual(*created.DeliveryAck.ResultCloseout, *created.Result.RuntimeCloseout) {
+		t.Fatalf("Result 回执未携带实际持久化的完整 closeout: %+v", created.DeliveryAck)
+	}
+	created.DeliveryAck.ResultCloseout.RequirementOutcomes[0].AcceptedEvidenceRefs[0] = "caller-tampered"
+	stored, err := results.Get(common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID), created.Result.ID)
+	if err != nil || stored.RuntimeCloseout == nil || stored.RuntimeCloseout.CloseoutHash != sealedHash ||
+		stored.RuntimeCloseout.RequirementOutcomes[0].AcceptedEvidenceRefs[0] != "evidence-1" {
+		t.Fatalf("回执别名污染了 Result owner 存储: stored=%+v err=%v", stored, err)
+	}
+	replayed, err := biz.applyTerminalDelivery(ctx, command)
+	if err != nil || replayed.DeliveryAck == nil || replayed.DeliveryAck.ResultCloseout == nil ||
+		replayed.DeliveryAck.AcknowledgedState != runtimecontract.RuntimeDeliveryAcknowledgedNoop ||
+		!reflect.DeepEqual(*replayed.DeliveryAck.ResultCloseout, *stored.RuntimeCloseout) {
+		t.Fatalf("noop 回执未重放相同持久材料: %+v err=%v", replayed, err)
 	}
 	children, err := artifacts.ListByResult(common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID), created.Result.ID)
 	if err != nil || len(children) != 1 || children[0].SourceRef != string(sourceRef) || children[0].ID != created.Result.ArtifactRefs[0] {

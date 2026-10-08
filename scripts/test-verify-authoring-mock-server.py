@@ -59,6 +59,24 @@ class EncodingTest(unittest.TestCase):
         self.assertEqual(json.loads(events[0]['delta']), expected)
         self.assertEqual(events[-1]['type'], 'response.completed')
 
+    def test_nonstream_and_stream_preserve_current_mapping_document(self):
+        value = {'goal': {'CandidateItemRef': 'authoring-goal', 'Text': '原目标'},
+                 'candidateAcceptance': [{'CandidateItemRef': 'derived-dod:user:000001', 'Text': '完整验收原文'}],
+                 'inputHash': 'input', 'templateHash': 'template', 'resourceSnapshotHash': 'resources',
+                 'expectedResources': []}
+        prompt = '### C3.specification-request\n' + json.dumps(value, ensure_ascii=False)
+        statuses, _, body = self.call({'input': prompt})
+        self.assertEqual(statuses, [200])
+        document = json.loads(body)['output_text']
+        self.assertEqual(set(json.loads(document)), {'mapping'})
+        self.assertEqual(json.loads(document)['mapping']['Protocol'], 'workorch.authoring.sealed-ref-mapping/v1')
+        statuses, _, body = self.call({'input': prompt, 'stream': True})
+        self.assertEqual(statuses, [200])
+        events = [json.loads(line.removeprefix('data: ')) for line in body.decode().splitlines() if line.startswith('data: ')]
+        self.assertEqual(events[0]['delta'], document)
+        self.assertEqual(events[-1]['type'], 'response.completed')
+        self.assertEqual(events[-1]['response']['status'], 'completed')
+
     def test_invalid_and_runtime_requests_are_redacted_422(self):
         for payload in ([], {'input': '### C3.specification-request\n秘密损坏正文'}, {'input': '### C3.semantic-authority\n{}'}):
             statuses, _, body = self.call(payload)

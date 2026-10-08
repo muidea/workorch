@@ -75,7 +75,7 @@ func setResultLifecycleResult(result magicevent.Result, data resultevents.Result
 	}
 	data.Result = resultevents.CloneResult(data.Result)
 	if data.DeliveryAck != nil {
-		ack := *data.DeliveryAck
+		ack := data.DeliveryAck.CloneRaw()
 		data.DeliveryAck = &ack
 	}
 	result.Set(data, nil)
@@ -398,7 +398,14 @@ func resultTerminalDeliveryAck(
 		return nil
 	}
 	cmd = cmd.Normalized()
+	var closeout *runtimecontract.RuntimeResultCloseout
+	if item.RuntimeCloseout != nil {
+		// 回执携带 owner 实际持久化的材料，noop 重放不能改用调用方新派生的 hash。
+		value := item.RuntimeCloseout.CloneRaw()
+		closeout = &value
+	}
 	ack := runtimecontract.RuntimeDeliveryAcknowledgement{
+		ResultCloseout:      closeout,
 		WorkspaceID:         item.WorkspaceID,
 		RunID:               item.RunID,
 		ResultID:            item.ID,

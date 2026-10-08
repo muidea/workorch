@@ -1,5 +1,6 @@
 """共享 authoring mock 的本地合同测试，不连接服务。"""
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -19,11 +20,38 @@ def prompt(value, section='C3.specification-request'):
 
 class AuthoringMockTest(unittest.TestCase):
     def candidate(self):
-        return {'goal': {'CandidateItemRef': 'authoring:goal', 'Text': '目标'},
+        return {'goal': {'CandidateItemRef': 'authoring-goal', 'Text': '目标'},
                 'candidateAcceptance': [{'CandidateItemRef': 'derived-dod:user:1', 'Text': '用户约束'},
                                         {'CandidateItemRef': 'derived-dod:template:1', 'Text': '模板约束'}],
-                'goalTextHash': 'hash',
+                'inputHash': 'input', 'templateHash': 'template', 'resourceSnapshotHash': 'resources',
                 'expectedResources': [{'ID': 'resource', 'Ref': 'file', 'SnapshotHash': 'snapshot', 'Required': True, 'Available': True}]}
+
+    def profile(self):
+        return {'ID': 'fixture', 'EvidenceRequirements': [
+            {'ID': '*', 'Scope': 'dodItem', 'RequiredEvidenceKinds': ['validation'],
+             'AcceptedStepKinds': ['shell/run']}]}
+
+    def canonical_review_fixture(self, value):
+        # 仅构造 critic 输入，不能绕过 Go owner compiler 或声称正式准入。
+        mapping = authoring_response(prompt(value))['mapping']
+        goal = value['goal']
+        spec = {'Version': 1, 'GoalItemRef': goal['CandidateItemRef'],
+                'GoalTextHash': 'definition-text-sha256:' + hashlib.sha256(goal['Text'].encode()).hexdigest(),
+                'Dimensions': [{'ID': 'dimension', 'Required': True, 'Activated': True, 'ResourceIDs': []}],
+                'Requirements': [{'ID': 'goal', 'DimensionID': 'dimension', 'Required': True,
+                                  'SourceKind': 'USER_EXPLICIT', 'SourceItemRefs': [goal['CandidateItemRef']],
+                                  'ResourceIDs': [], 'Text': goal['Text']}],
+                'Obligations': [], 'Verifications': [], 'Resources': copy.deepcopy(value['expectedResources']), 'Reviews': []}
+        for index, item in enumerate(value['candidateAcceptance']):
+            requirement, obligation = f'canonical-{index}', f'obligation-{index}'
+            spec['Requirements'].append({'ID': requirement, 'DimensionID': 'dimension', 'Required': True,
+                                         'SourceKind': mock._source_kind(item['CandidateItemRef']),
+                                         'SourceItemRefs': [item['CandidateItemRef']], 'ResourceIDs': [], 'Text': item['Text']})
+            spec['Obligations'].append({'ID': obligation, 'RequirementID': requirement,
+                                        'DoDItemRefs': [item['CandidateItemRef']], 'Text': item['Text']})
+            spec['Verifications'].append({'ID': f'verification-{index}', 'ObligationID': obligation,
+                                          **mapping['Obligations'][index]['Verification']})
+        return {**value, 'kind': 'verifier_feasibility', 'proposalHash': 'exact', 'specification': spec}
 
     def test_non_authoring_is_not_intercepted(self):
         self.assertIsNone(authoring_response('### C3.semantic-authority\n{}'))
@@ -33,58 +61,178 @@ class AuthoringMockTest(unittest.TestCase):
         self.assertEqual(authoring_response(prompt(value, 'C3.derivation-input')),
                          {**value['outputShape'], 'AdditionalItems': []})
 
-    def test_proposal_preserves_sources_resources_and_unverified_status(self):
+    def test_proposal_only_maps_sealed_sources(self):
         value = self.candidate()
         original = copy.deepcopy(value)
-        spec = authoring_response(prompt(value))['specification']
+        response = authoring_response(prompt(value))
         self.assertEqual(value, original)
-        self.assertEqual(spec['Resources'], value['expectedResources'])
-        self.assertEqual([r['SourceKind'] for r in spec['Requirements']], ['USER_EXPLICIT', 'USER_EXPLICIT', 'TEMPLATE_REQUIRED'])
-        self.assertEqual([r['Text'] for r in spec['Requirements']], ['目标', '用户约束', '模板约束'])
-        self.assertTrue(all(v['Status'] == 'UNVERIFIED' for v in spec['Verifications']))
-        self.assertEqual(spec['Reviews'], [])
-        self.assertEqual(spec['GoalTextHash'], value['goalTextHash'])
-        self.assertEqual(spec['GoalItemRef'], value['goal']['CandidateItemRef'])
-        self.assertTrue(all(d['ResourceIDs'] == [] for d in spec['Dimensions']))
-        self.assertTrue(all(r['ResourceIDs'] == [] for r in spec['Requirements']))
-        self.assertTrue(all(v['ProfileID'] == v['EvidenceRequirementID'] == v['Scope'] == '' for v in spec['Verifications']))
+        self.assertEqual(set(response), {'mapping'})
+        mapping = response['mapping']
+        self.assertEqual(mapping['Protocol'], 'workorch.authoring.sealed-ref-mapping/v1')
+        self.assertEqual((mapping['InputHash'], mapping['TemplateSnapshotHash'], mapping['ResourceSnapshotHash']),
+                         ('input', 'template', 'resources'))
+        refs = [item['CandidateItemRef'] for item in value['candidateAcceptance']]
+        self.assertEqual([r['SourceItemRefs'] for r in mapping['Requirements']], [[ref] for ref in refs])
+        self.assertEqual([o['CandidateItemRef'] for o in mapping['Obligations']], refs)
+        self.assertEqual(mapping['GoalRequirement'], {'DimensionRef': 'all', 'ResourceIDs': []})
+        self.assertNotIn(value['goal']['CandidateItemRef'], refs)
+        for row in mapping['Obligations']:
+            self.assertEqual(set(row), {'CandidateItemRef', 'RequirementRef', 'Verification'})
+            verification = row['Verification']
+            self.assertEqual(verification['Status'], 'UNVERIFIED')
+            self.assertTrue(verification['ProfileID'] == verification['EvidenceRequirementID'] == verification['Scope'] == '')
+        for field in ('Resources', 'Reviews', 'GoalTextHash', 'Version', 'SourceKind', 'Required'):
+            self.assertNotIn(field, mapping)
 
     def test_feasibility_is_unknown_without_profile_declaration(self):
-        candidate = self.candidate()
-        spec = authoring_response(prompt(candidate))['specification']
-        value = {**candidate, 'kind': 'verifier_feasibility', 'proposalHash': 'proposal', 'specification': spec}
-        review = authoring_response(prompt(value))['review']
-        self.assertEqual(review['Status'], 'UNKNOWN')
-        self.assertEqual(review['SpecificationHash'], 'proposal')
-        for verification in spec['Verifications']:
+        review = self.canonical_review_fixture(self.candidate())
+        self.assertEqual(authoring_response(prompt(review))['review']['Status'], 'UNKNOWN')
+        for verification in review['specification']['Verifications']:
             verification['Status'] = 'DECLARED'
-        self.assertEqual(authoring_response(prompt(value))['review']['Status'], 'UNKNOWN')
-        spec['Reviews'] = [{'Status': 'PASS'}]
+        self.assertEqual(authoring_response(prompt(review))['review']['Status'], 'UNKNOWN')
+        review['specification']['Reviews'] = [{'Status': 'PASS'}]
         with self.assertRaises(AuthoringMockError):
-            authoring_response(prompt(value))
+            authoring_response(prompt(review))
 
     def test_exact_profile_binding_and_forged_declaration(self):
         value = self.candidate()
-        value['profiles'] = [{'ID': 'fixture', 'EvidenceRequirements': [
-            {'ID': '*', 'Scope': 'dodItem', 'RequiredEvidenceKinds': ['validation'],
-             'AcceptedStepKinds': ['shell/run']}]}]
-        spec = authoring_response(prompt(value))['specification']
-        self.assertTrue(all(v['Status'] == 'DECLARED' and v['ProfileID'] == 'fixture' for v in spec['Verifications']))
-        review = {**value, 'kind': 'verifier_feasibility', 'proposalHash': 'exact', 'specification': spec}
-        self.assertEqual(authoring_response(prompt(review))['review']['Status'], 'PASS')
+        value['profiles'] = [self.profile()]
+        mapping = authoring_response(prompt(value))['mapping']
+        self.assertTrue(all(o['Verification']['Status'] == 'DECLARED' and o['Verification']['ProfileID'] == 'fixture'
+                            for o in mapping['Obligations']))
+        review = self.canonical_review_fixture(value)
+        result = authoring_response(prompt(review))['review']
+        self.assertEqual(result['Status'], 'PASS')
+        self.assertEqual(result['SpecificationHash'], 'exact')
+        self.assertEqual(result['RequirementIDs'], [r['ID'] for r in review['specification']['Requirements']])
         for field in ('ProfileID', 'EvidenceRequirementID', 'Scope', 'Status'):
             forged = copy.deepcopy(review)
             forged['specification']['Verifications'][0][field] = 'invented'
             self.assertEqual(authoring_response(prompt(forged))['review']['Status'], 'UNKNOWN')
         value['profiles'].append(copy.deepcopy(value['profiles'][0]))
-        self.assertTrue(all(v['Status'] == 'UNVERIFIED' for v in authoring_response(prompt(value))['specification']['Verifications']))
+        self.assertTrue(all(o['Verification']['Status'] == 'UNVERIFIED'
+                            for o in authoring_response(prompt(value))['mapping']['Obligations']))
         value['profiles'] = [None]
         with self.assertRaises(AuthoringMockError):
             authoring_response(prompt(value))
 
+    def test_full_37_candidates_and_six_independent_reviews(self):
+        value = self.candidate()
+        value['candidateAcceptance'] = [
+            {'CandidateItemRef': f'derived-dod:{kind}:{index:06d}', 'Text': f'{kind}完整原文\n条目{index}'}
+            for kind, count in (('user', 5), ('template', 13), ('generated', 19))
+            for index in range(1, count + 1)]
+        value['profiles'] = [self.profile()]
+        mapping = authoring_response(prompt(value))['mapping']
+        self.assertEqual(len(mapping['Obligations']), 37)
+        review = self.canonical_review_fixture(value)
+        original = copy.deepcopy(review['specification'])
+        for kind in mock.KINDS:
+            review['kind'] = kind
+            self.assertEqual(authoring_response(prompt(review))['review']['Status'], 'PASS')
+        self.assertEqual(review['specification'], original)
+
+    def test_six_reviews_reject_omission_changed_text_and_wrong_source(self):
+        value = self.candidate()
+        value['profiles'] = [self.profile()]
+        review = self.canonical_review_fixture(value)
+        for kind in mock.KINDS:
+            for defect in ('missing', 'changed', 'source', 'goal', 'hash', 'duplicate'):
+                forged = copy.deepcopy(review)
+                forged['kind'] = kind
+                spec = forged['specification']
+                if defect == 'missing':
+                    spec['Obligations'].pop()
+                elif defect == 'changed':
+                    spec['Obligations'][0]['Text'] = '弱化后的文字'
+                elif defect == 'source':
+                    spec['Requirements'][1]['SourceKind'] = 'DERIVED'
+                elif defect == 'goal':
+                    spec['Requirements'][0]['Text'] = '改变目标'
+                elif defect == 'hash':
+                    spec['GoalTextHash'] = 'wrong'
+                else:
+                    spec['Requirements'].append(copy.deepcopy(spec['Requirements'][1]))
+                with self.subTest(kind=kind, defect=defect):
+                    self.assertEqual(authoring_response(prompt(forged))['review']['Status'], 'FAIL')
+
+    def test_six_reviews_reject_invalid_canonical_node_identities(self):
+        value = self.candidate()
+        value['profiles'] = [self.profile()]
+        review = self.canonical_review_fixture(value)
+        for kind in mock.KINDS:
+            for defect in ('duplicate_dimension', 'missing_dimension_id', 'missing_obligation_id',
+                           'duplicate_verification_id', 'missing_verification_id'):
+                forged = copy.deepcopy(review)
+                forged['kind'] = kind
+                spec = forged['specification']
+                if defect == 'duplicate_dimension':
+                    spec['Dimensions'].append(copy.deepcopy(spec['Dimensions'][0]))
+                elif defect == 'missing_dimension_id':
+                    spec['Dimensions'][0].pop('ID')
+                elif defect == 'missing_obligation_id':
+                    spec['Obligations'][0].pop('ID')
+                    spec['Verifications'][0].pop('ObligationID')
+                elif defect == 'duplicate_verification_id':
+                    spec['Verifications'][1]['ID'] = spec['Verifications'][0]['ID']
+                else:
+                    spec['Verifications'][0].pop('ID')
+                with self.subTest(kind=kind, defect=defect):
+                    self.assertEqual(authoring_response(prompt(forged))['review']['Status'], 'FAIL')
+
+    def test_resource_review_rejects_changed_sealed_facts(self):
+        value = self.candidate()
+        value['profiles'] = [self.profile()]
+        review = self.canonical_review_fixture(value)
+        review['kind'] = 'resource_environment'
+        self.assertEqual(authoring_response(prompt(review))['review']['Status'], 'PASS')
+        for field, changed in (('Ref', 'other'), ('SnapshotHash', 'other'), ('Required', False), ('Available', False)):
+            forged = copy.deepcopy(review)
+            forged['specification']['Resources'][0][field] = changed
+            with self.subTest(field=field):
+                self.assertEqual(authoring_response(prompt(forged))['review']['Status'], 'FAIL')
+        review.pop('expectedResources')
+        review['resources'] = [{'Ref': 'file', 'ContentHash': 'snapshot'}]
+        review['specification']['Resources'][0]['ID'] = 'authoring-resource:000001'
+        self.assertEqual(authoring_response(prompt(review))['review']['Status'], 'PASS')
+        review['specification']['Resources'][0]['SnapshotHash'] = 'changed'
+        self.assertEqual(authoring_response(prompt(review))['review']['Status'], 'FAIL')
+
+    def test_review_requires_sealed_resources_and_nonempty_declaration(self):
+        value = self.candidate()
+        value['profiles'] = [self.profile()]
+        review = self.canonical_review_fixture(value)
+        for declaration in ('', '   ', None):
+            forged = copy.deepcopy(review)
+            forged['specification']['Verifications'][0]['Declaration'] = declaration
+            with self.subTest(declaration=declaration):
+                self.assertEqual(authoring_response(prompt(forged))['review']['Status'], 'UNKNOWN')
+        review.pop('expectedResources')
+        with self.assertRaises(AuthoringMockError):
+            authoring_response(prompt(review))
+
+    def test_review_accepts_grouping_without_replacing_obligation_text(self):
+        value = self.candidate()
+        value['profiles'] = [self.profile()]
+        value['candidateAcceptance'].append({'CandidateItemRef': 'derived-dod:user:2', 'Text': '另一条独立原文'})
+        review = self.canonical_review_fixture(value)
+        requirements = review['specification']['Requirements']
+        grouped = requirements[1]
+        grouped['SourceItemRefs'].append('derived-dod:user:2')
+        grouped['Text'] = '同来源的分组说明，不是任何一条义务原文'
+        requirements.pop()
+        review['specification']['Obligations'][-1]['RequirementID'] = grouped['ID']
+        for kind in mock.KINDS:
+            review['kind'] = kind
+            with self.subTest(kind=kind):
+                self.assertEqual(authoring_response(prompt(review))['review']['Status'], 'PASS')
+
     def test_invalid_contract_fails_closed(self):
-        for value in ({}, {**self.candidate(), 'candidateAcceptance': []},
-                      {**self.candidate(), 'kind': 'invented'}):
+        candidate = self.candidate()
+        duplicate = copy.deepcopy(candidate)
+        duplicate['candidateAcceptance'].append(copy.deepcopy(duplicate['candidateAcceptance'][0]))
+        for value in ({}, {**candidate, 'candidateAcceptance': []}, {**candidate, 'kind': 'invented'},
+                      {**candidate, 'candidateAcceptance': [None]}, duplicate):
             with self.subTest(value=value), self.assertRaises(AuthoringMockError):
                 authoring_response(prompt(value))
 
