@@ -35,15 +35,15 @@ func terminalMaterialSealFromAggregate(previous RuntimeAggregate) (runtimecontra
 	seal := runtimecontract.RuntimeTerminalMaterialSeal{
 		Identity: runtimecontract.RuntimeTerminalDeliveryIdentity{
 			TerminalDeliveryID: runtimecontract.StableTerminalDeliveryID(previous.Facts.WorkspaceID, previous.Facts.RunID, previous.Decision.AuthoritySnapshot.ID, outcome),
-			WorkspaceID: previous.Facts.WorkspaceID, RunID: previous.Facts.RunID,
+			WorkspaceID:        previous.Facts.WorkspaceID, RunID: previous.Facts.RunID,
 			AuthoritySnapshotID: previous.Decision.AuthoritySnapshot.ID,
-			DefinitionRevision: previous.Facts.DefinitionRevision, EvidenceRevision: previous.Facts.EvidenceRevision,
+			DefinitionRevision:  previous.Facts.DefinitionRevision, EvidenceRevision: previous.Facts.EvidenceRevision,
 			DispatchID: previous.Decision.AuthoritySnapshot.ID, Outcome: outcome,
 		},
 		GenerationStateRevision: generation,
-		RecoveryPolicy: previous.Facts.RecoveryPolicy,
-		RecoveryLedger: previous.Facts.Recovery,
-		Material: material.CloneRaw(), MaterialHash: hash,
+		RecoveryPolicy:          previous.Facts.RecoveryPolicy,
+		RecoveryLedger:          previous.Facts.Recovery,
+		Material:                material.CloneRaw(), MaterialHash: hash,
 	}
 	return seal, seal.ValidateRaw()
 }
@@ -85,7 +85,7 @@ func terminalMaterialSource(aggregate RuntimeAggregate) runtimecontract.RuntimeS
 		Definition: aggregate.Definition, Facts: aggregate.Facts, Decision: aggregate.Decision,
 		Termination: aggregate.Termination, StateRevision: aggregate.StateRevision,
 		ResultFeedbackVersion: aggregate.ResultFeedbackVersion,
-		ActiveDispatch: active, CompletedDispatches: sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
+		ActiveDispatch:        active, CompletedDispatches: sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
 		OperationReceipts: aggregate.OperationReceipts, DeliveryAcknowledgements: aggregate.DeliveryAcknowledgements,
 	}
 }

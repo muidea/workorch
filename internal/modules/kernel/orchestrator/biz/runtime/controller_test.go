@@ -41,7 +41,7 @@ func (r *scopedControllerRepository) Load(_ context.Context, workspaceID common.
 	if !found {
 		return RuntimeAggregate{}, common.ErrNotFound
 	}
-	return aggregate, nil
+	return aggregate.CloneRaw(), nil
 }
 
 func (r *scopedControllerRepository) Save(_ context.Context, aggregate RuntimeAggregate, expectedRevision uint64) error {
@@ -55,7 +55,7 @@ func (r *scopedControllerRepository) Save(_ context.Context, aggregate RuntimeAg
 	if !found && expectedRevision != 0 {
 		return common.ErrConflict
 	}
-	r.aggregates[key] = aggregate
+	r.aggregates[key] = aggregate.CloneRaw()
 	return nil
 }
 
@@ -138,7 +138,7 @@ func (r *controllerRepository) Load(_ context.Context, workspaceID common.Worksp
 	if r.aggregate.Facts.WorkspaceID != workspaceID || r.aggregate.Facts.RunID != runID {
 		return RuntimeAggregate{}, common.ErrNotFound
 	}
-	return *r.aggregate, nil
+	return r.aggregate.CloneRaw(), nil
 }
 
 func (r *controllerRepository) Save(_ context.Context, aggregate RuntimeAggregate, expectedRevision uint64) error {
@@ -149,7 +149,7 @@ func (r *controllerRepository) Save(_ context.Context, aggregate RuntimeAggregat
 	if currentRevision != expectedRevision {
 		return common.ErrConflict
 	}
-	value := aggregate
+	value := aggregate.CloneRaw()
 	r.aggregate = &value
 	r.saves++
 	return nil

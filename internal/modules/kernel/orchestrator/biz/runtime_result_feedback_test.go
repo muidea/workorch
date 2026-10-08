@@ -55,7 +55,7 @@ func TestRuntimeTerminalFeedbackPreservesOwnerCauseAndUnassessedRequirements(t *
 	if item.RuntimeCloseout.FailureCode != "equivalent_authority_no_progress" || !reflect.DeepEqual(item.RuntimeCloseout.OriginalDiagnostic, diagnostic) {
 		t.Fatalf("closeout lost terminal/root-cause distinction: got=%+v want=%+v", item.RuntimeCloseout.OriginalDiagnostic, diagnostic)
 	}
-	if !strings.Contains(item.SummaryDetail.VerificationSummary, "No validation evidence") || item.DoDAssessment.Satisfied || len(item.DoDAssessment.Items) == 0 {
+	if !strings.Contains(item.SummaryDetail.VerificationSummary, "尚未记录验证证据") || item.DoDAssessment.Satisfied || len(item.DoDAssessment.Items) == 0 {
 		t.Fatalf("result omitted unexecuted/unassessed facts: %+v", item)
 	}
 	for _, assessment := range item.DoDAssessment.Items {

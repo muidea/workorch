@@ -11,9 +11,9 @@ import (
 func TestResultCloneDetachesOriginalTerminalMaterial(t *testing.T) {
 	item := &resultmodel.Result{
 		RuntimeCloseout: &runtimecontract.RuntimeResultCloseout{
-			OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{TargetRefs: []string{" 原始目标 "}},
+			OriginalDiagnostic:   &runtimecontract.RuntimeOriginalDiagnostic{TargetRefs: []string{" 原始目标 "}},
 			AcceptedEvidenceRefs: []string{},
-			RequirementOutcomes: []runtimecontract.RuntimeRequirementOutcome{{AcceptedEvidenceRefs: []string{"evidence"}}},
+			RequirementOutcomes:  []runtimecontract.RuntimeRequirementOutcome{{AcceptedEvidenceRefs: []string{"evidence"}}},
 		},
 		TerminalDelivery: &runtimecontract.RuntimeTerminalDeliveryIdentity{TerminalDeliveryID: "delivery"},
 	}

@@ -61,11 +61,9 @@ func TestExecuteActiveDispatchKeepsOwnerCallAndCASCounts(t *testing.T) {
 	if completed.ActiveDispatch != nil || executor.called != 1 {
 		t.Fatalf("dispatch result active=%v owner calls=%d, want nil/1", completed.ActiveDispatch != nil, executor.called)
 	}
-	// One preflight load, one claim load/CAS, one owner-receipt load/CAS, one
-	// post-call receipt projection load and one evidence load/CAS. The physical
-	// call cannot carry authority back into SM-3, so the persisted receipt is
-	// deliberately reloaded before the owner-private evidence transition.
-	if repository.loads != 5 || repository.saves != 3 {
-		t.Fatalf("dispatch repository calls: loads=%d saves=%d, want 5/3", repository.loads, repository.saves)
+	// 原有五次 load 仍围住 preflight、claim、owner receipt 与 evidence 投影；
+	// 三次 transition CAS 各独立重载持久前像，不增加 owner effect 或 CAS 次数。
+	if repository.loads != 8 || repository.saves != 3 {
+		t.Fatalf("dispatch repository calls: loads=%d saves=%d, want 8/3", repository.loads, repository.saves)
 	}
 }

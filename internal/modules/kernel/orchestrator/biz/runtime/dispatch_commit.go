@@ -201,8 +201,8 @@ type RuntimeAggregate struct {
 	OperationReceipts           []runtimecontract.RuntimeOperationReceipt
 	DeliveryAcknowledgements    []runtimecontract.RuntimeDeliveryAcknowledgement
 	// TerminalMaterialSeal 只在首次交付前由 SM-4 封存，后续 CAS 不得改写。
-	TerminalMaterialSeal       *runtimecontract.RuntimeTerminalMaterialSeal
-	PrerequisiteInvalidations   []runtimecontract.RuntimePrerequisiteInvalidationRecord
+	TerminalMaterialSeal      *runtimecontract.RuntimeTerminalMaterialSeal
+	PrerequisiteInvalidations []runtimecontract.RuntimePrerequisiteInvalidationRecord
 	// DriveLease is SM-4 owner-local recovery state. It is persisted with the
 	// aggregate so a process-local timer cannot become a second retry authority.
 	DriveLease *runtimecontract.RuntimeDriveLease
@@ -210,6 +210,7 @@ type RuntimeAggregate struct {
 	Termination *runtimecontract.RuntimeTerminationRecord
 }
 
+// RuntimeStateRepository 读写均传递独立原值副本；不得共享指针或 slice，使 mutation 提前污染持久前像。
 type RuntimeStateRepository interface {
 	Load(context.Context, common.WorkspaceID, common.RunID) (RuntimeAggregate, error)
 	Save(context.Context, RuntimeAggregate, uint64) error

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"reflect"
 
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
@@ -77,6 +78,12 @@ func (m *Biz) validateRuntimeInternalEventWorkspaceRetirementAdmission(ctx conte
 	}
 	delivery := event.Delivery
 	switch event.Kind {
+	case runtime.RuntimeInternalEventTerminalMaterialSealRequired:
+		// draining 只允许为已封存终态首次固定材料，不接受 caller 材料或其它写集。
+		if !reflect.DeepEqual(*delivery, runtime.RuntimeInternalDeliveryPayload{}) {
+			return common.ErrConflict
+		}
+		return nil
 	case runtime.RuntimeInternalEventTerminalDeliveryAcknowledged:
 		ack := delivery.DeliveryAcknowledgement
 		if ack == nil || ack.WorkspaceID != event.Scope.WorkspaceID || ack.RunID != event.Scope.RunID || ack.TerminalDeliveryID != request.TerminalDeliveryID {

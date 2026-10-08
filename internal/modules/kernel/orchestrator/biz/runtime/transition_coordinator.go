@@ -37,7 +37,7 @@ func (c *RuntimeTransitionCoordinator) Commit(ctx context.Context, aggregate Run
 	if c == nil || c.repository == nil {
 		return common.ErrInvalidArgument
 	}
-	if aggregate.StateRevision != expectedRevision+1 {
+	if expectedRevision == ^uint64(0) || aggregate.StateRevision != expectedRevision+1 {
 		return fmt.Errorf("%w: runtime transition revision %d does not follow expected revision %d", common.ErrConflict, aggregate.StateRevision, expectedRevision)
 	}
 	if err := aggregate.Validate(); err != nil {
@@ -51,6 +51,9 @@ func (c *RuntimeTransitionCoordinator) Commit(ctx context.Context, aggregate Run
 		previous, err := c.repository.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 		if err != nil {
 			return err
+		}
+		if previous.Facts.WorkspaceID != aggregate.Facts.WorkspaceID || previous.Facts.RunID != aggregate.Facts.RunID {
+			return fmt.Errorf("%w: runtime transition preimage scope mismatch", common.ErrConflict)
 		}
 		if previous.StateRevision != expectedRevision {
 			return &RuntimeCASConflictError{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID, ExpectedRevision: expectedRevision, ObservedRevision: previous.StateRevision}

@@ -34,9 +34,9 @@ func TestServiceRejectsNoncanonicalCloseoutBeforePersistence(t *testing.T) {
 	service := newService(memory.NewResultRepository(), memory.NewArtifactRepository())
 	item := validTestResult()
 	item.RuntimeCloseout = &runtimecontract.RuntimeResultCloseout{
-		SchemaVersion: runtimecontract.RuntimeResultCloseoutSchemaVersionCurrent,
+		SchemaVersion:  runtimecontract.RuntimeResultCloseoutSchemaVersionCurrent,
 		RecoveryPolicy: runtimecontract.DefaultRuntimeRecoveryPolicy(),
-		EvidenceRefs: []string{"evidence", "evidence"},
+		EvidenceRefs:   []string{"evidence", "evidence"},
 	}
 	if err := service.CreateResult(ctx, item); err == nil {
 		t.Fatal("Result owner 保存了通过规范化掩盖重复引用的材料")

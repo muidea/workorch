@@ -19,14 +19,14 @@ func (r *durableRuntimeStateRepository) Load(_ context.Context, workspaceID comm
 	if r.aggregate.Facts.WorkspaceID != workspaceID || r.aggregate.Facts.RunID != runID {
 		return RuntimeAggregate{}, common.ErrNotFound
 	}
-	return r.aggregate, nil
+	return r.aggregate.CloneRaw(), nil
 }
 
 func (r *durableRuntimeStateRepository) Save(_ context.Context, aggregate RuntimeAggregate, expectedRevision uint64) error {
 	if r.aggregate.StateRevision != expectedRevision {
 		return fmt.Errorf("%w: runtime aggregate revision changed", common.ErrConflict)
 	}
-	r.aggregate = aggregate
+	r.aggregate = aggregate.CloneRaw()
 	return nil
 }
 

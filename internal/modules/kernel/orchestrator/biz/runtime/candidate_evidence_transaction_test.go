@@ -20,7 +20,7 @@ func (r *evidenceCommitCountingRepository) Load(_ context.Context, workspaceID c
 	if r.aggregate.Facts.WorkspaceID != workspaceID || r.aggregate.Facts.RunID != runID {
 		return RuntimeAggregate{}, common.ErrNotFound
 	}
-	return r.aggregate, nil
+	return r.aggregate.CloneRaw(), nil
 }
 
 func (r *evidenceCommitCountingRepository) Save(_ context.Context, aggregate RuntimeAggregate, expectedRevision uint64) error {
@@ -28,7 +28,7 @@ func (r *evidenceCommitCountingRepository) Save(_ context.Context, aggregate Run
 	if r.aggregate.StateRevision != expectedRevision {
 		return fmt.Errorf("%w: runtime aggregate revision changed", common.ErrConflict)
 	}
-	r.aggregate = aggregate
+	r.aggregate = aggregate.CloneRaw()
 	return nil
 }
 
@@ -37,7 +37,7 @@ func (r *evidenceCommitCountingRepository) resetCounts() {
 	r.saves = 0
 }
 
-func TestCommitEvidenceKeepsOneLoadAndOneTransitionCAS(t *testing.T) {
+func TestCommitEvidenceKeepsIndependentPreimageLoadsAndOneTransitionCAS(t *testing.T) {
 	seed := &durableRuntimeStateRepository{aggregate: stateChangeAggregate(t)}
 	sealed := sealCandidateForTest(t, seed, stateChangeCandidate())
 	operationID := runtimeTestActiveOperationID(t, sealed, 0)
@@ -57,8 +57,8 @@ func TestCommitEvidenceKeepsOneLoadAndOneTransitionCAS(t *testing.T) {
 	if err != nil || committed.Disposition != CommitDispositionCommitted {
 		t.Fatalf("commit evidence = %+v err=%v", committed, err)
 	}
-	if repository.loads != 1 || repository.saves != 1 {
-		t.Fatalf("committed owner calls: loads=%d saves=%d, want 1/1", repository.loads, repository.saves)
+	if repository.loads != 2 || repository.saves != 1 {
+		t.Fatalf("committed owner calls: loads=%d saves=%d, want 2/1", repository.loads, repository.saves)
 	}
 
 	repository.resetCounts()
@@ -79,7 +79,7 @@ func TestCommitEvidenceKeepsOneLoadAndOneTransitionCAS(t *testing.T) {
 	if err != nil || stale.Disposition != CommitDispositionStale {
 		t.Fatalf("stale evidence = %+v err=%v", stale, err)
 	}
-	if repository.loads != 1 || repository.saves != 1 {
-		t.Fatalf("stale owner calls: loads=%d saves=%d, want 1/1", repository.loads, repository.saves)
+	if repository.loads != 2 || repository.saves != 1 {
+		t.Fatalf("stale owner calls: loads=%d saves=%d, want 2/1", repository.loads, repository.saves)
 	}
 }

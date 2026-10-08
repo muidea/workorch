@@ -64,13 +64,17 @@ func ValidateRuntimeTerminalMaterialSeal(seal *RuntimeTerminalMaterialSeal, sour
 	if err := seal.ValidateRaw(); err != nil {
 		return err
 	}
+	if decision.AuthoritySnapshot.WorkspaceID != facts.WorkspaceID || decision.AuthoritySnapshot.RunID != facts.RunID ||
+		decision.AuthoritySnapshot.DefinitionRevision != facts.DefinitionRevision || decision.AuthoritySnapshot.EvidenceRevision != facts.EvidenceRevision {
+		return fmt.Errorf("terminal material seal authority scope or revision mismatch")
+	}
 	outcome, terminal, err := DeriveRuntimeTerminalOutcome(decision, termination)
 	if err != nil {
 		return err
 	}
 	expected := RuntimeTerminalDeliveryIdentity{
 		TerminalDeliveryID: StableTerminalDeliveryID(facts.WorkspaceID, facts.RunID, decision.AuthoritySnapshot.ID, outcome),
-		WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: decision.AuthoritySnapshot.ID,
+		WorkspaceID:        facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: decision.AuthoritySnapshot.ID,
 		DefinitionRevision: facts.DefinitionRevision, EvidenceRevision: facts.EvidenceRevision,
 		DispatchID: decision.AuthoritySnapshot.ID, Outcome: outcome,
 	}
