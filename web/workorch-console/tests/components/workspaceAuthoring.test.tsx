@@ -1,13 +1,15 @@
 import { StrictMode, useLayoutEffect } from 'react';
 import { App as AntApp, ConfigProvider } from 'antd';
+import { StyleProvider } from '@ant-design/cssinjs';
 const App = AntApp;
 import { act, fireEvent, render as mount, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type { RenderOptions } from '@testing-library/react';
 
-// jsdom 不验证布局动画；保留真实组件与交互，避免动画计时器干扰业务截止断言。
+// jsdom 不验证 CSS 布局；真实组件照常生成样式，但注入独立容器，避免全局 selector 扫描。
+const styleContainer = document.createElement('div');
 const render = (ui: ReactNode, options?: RenderOptions) => mount(ui, {
-  wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }} wave={{ disabled: true }}>{children}</ConfigProvider>,
+  wrapper: ({ children }) => <StyleProvider container={styleContainer}><ConfigProvider theme={{ hashed: false, token: { motion: false } }} wave={{ disabled: true }}>{children}</ConfigProvider></StyleProvider>,
   ...options,
 });
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -67,14 +69,17 @@ const button = (name: string) => {
 const disabled = (name: string) => button(name).disabled;
 
 async function fillSetup() {
-  await screen.findByLabelText('名称');
-  // 同步文本输入在一次 act 内提交，保留真实 Select 交互与必填校验。
+  // 先结算模板读取，避免 MutationObserver 在表单重绘期间反复遍历整棵 Modal。
+  await act(async () => {});
+  expect(screen.getByLabelText('名称')).toBeTruthy();
+  // 保留真实 Select 与必填校验；选择模板后，将同步输入合并在一次提交中。
+  await act(async () => { fireEvent.mouseDown(document.querySelector('.ant-select-selector')!); });
+  const templateOption = screen.getByText('模板', { selector: '.ant-select-item-option-content' });
   await act(async () => {
+    fireEvent.click(templateOption);
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: '测试工作空间' } });
     fireEvent.change(screen.getByLabelText('目标'), { target: { value: '原目标' } });
   });
-  fireEvent.mouseDown(document.querySelector('.ant-select-selector')!);
-  fireEvent.click(await screen.findByText('模板', { selector: '.ant-select-item-option-content' }));
 }
 
 async function downloadedCauseBytes(buttonName = '下载已校验原始字节'): Promise<Uint8Array> {
@@ -120,8 +125,10 @@ describe('持久规格编辑实际挂载', () => {
   it('已失败请求明确说明重放边界，查看不会自动编译或确认', async () => {
     const failed = { ...ready(), state: 'failed', proposal: undefined, requests: [{ phase: 'proposal', state: 'failed', failureCode: 'invalid_proposal', permitId: 'failed-permit' }] };
     vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(failed);
-    render(<App><WorkspaceAuthoringEditor open workspaceId="ws" onClose={() => {}} onAdmitted={async () => {}} /></App>);
-    await screen.findByText('原请求已失败；再次编译不会重发该请求');
+    await act(async () => {
+      render(<App><WorkspaceAuthoringEditor open workspaceId="ws" onClose={() => {}} onAdmitted={async () => {}} /></App>);
+    });
+    expect(screen.getByText('原请求已失败；再次编译不会重发该请求')).toBeTruthy();
     expect(screen.getByText(/不要为了重试而制造无意义的输入变化/)).toBeTruthy();
     expect(disabled('确认并准入')).toBe(true);
     expect(workorchApi.compileDefinitionAuthoring).not.toHaveBeenCalled();
@@ -133,10 +140,12 @@ describe('持久规格编辑实际挂载', () => {
     const failed: DefinitionAuthoringView = { ...ready(), state: 'failed', proposal: undefined };
     vi.mocked(workorchApi.createDefinitionAuthoring).mockResolvedValue({ ...failed, state: 'draft' });
     vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValue(failed);
-    render(<App><WorkspaceSetupModal open onClose={() => {}} onCreated={() => {}} /></App>);
+    await act(async () => {
+      render(<App><WorkspaceSetupModal open onClose={() => {}} onCreated={() => {}} /></App>);
+    });
     await fillSetup();
-    fireEvent.click(button('保存并生成／恢复审查'));
-    await screen.findByText('原请求已失败；再次编译不会重发该请求');
+    await act(async () => { fireEvent.click(button('保存并生成／恢复审查')); });
+    expect(screen.getByText('原请求已失败；再次编译不会重发该请求')).toBeTruthy();
     expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1);
     expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
     expect(disabled('确认规格并准入')).toBe(true);
@@ -619,18 +628,31 @@ describe('持久规格编辑实际挂载', () => {
   });
 
   it('pendingSave 在内存中先按原 request/CAS 重放，再审查且不创建替代 workspace', async () => {
-    vi.mocked(workorchApi.saveDefinitionAuthoring).mockResolvedValue({ ...ready(), input: { goalText: '修订目标' }, workspaceRevision: 9, inputHash: 'new' });
+    vi.mocked(workorchApi.saveDefinitionAuthoring)
+      .mockRejectedValueOnce(new Error('原保存响应丢失'))
+      .mockResolvedValueOnce({ ...ready(), input: { goalText: '修订目标' }, workspaceRevision: 9, inputHash: 'new' });
     vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValue(ready());
-    render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
-    await screen.findByDisplayValue('原目标');
-    fireEvent.change(screen.getByLabelText('目标'), { target: { value: '修订目标' } });
-    fireEvent.click(button('保存修订并审查'));
-    await waitFor(() => expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledWith('ws'));
-    const [, , , revision, hash, requestId] = vi.mocked(workorchApi.saveDefinitionAuthoring).mock.calls[0];
-    expect(revision).toBe(8);
-    expect(hash).toBe('input');
-    expect(requestId).toBeTruthy();
+    await act(async () => {
+      render(<AntApp><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn()} /></AntApp>);
+    });
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('目标'), { target: { value: '修订目标' } });
+      fireEvent.click(button('保存修订并审查'));
+    });
+    expect(screen.getByText('原保存响应丢失')).toBeTruthy();
+    const saveMock = vi.mocked(workorchApi.saveDefinitionAuthoring);
+    expect(saveMock).toHaveBeenCalledTimes(1);
+    const original = saveMock.mock.calls[0];
+    expect(original.slice(0, 5)).toEqual(['ws', { goalText: '修订目标', acceptanceRequirements: [], resourceRefs: [] }, 't', 8, 'input']);
+    expect(original[5]).toBeTruthy();
+    expect(workorchApi.compileDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(disabled('确认并准入')).toBe(true);
+    await act(async () => { fireEvent.click(button('保存修订并审查')); });
+    expect(saveMock).toHaveBeenCalledTimes(2);
+    expect(saveMock.mock.calls[1]).toEqual(original);
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledExactlyOnceWith('ws');
     expect(workorchApi.createDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
   });
 
   it('内存 pendingConfirmation 存在时同 scope GET 不替换或丢弃原确认身份', async () => {
@@ -923,10 +945,11 @@ it('prep cause GET 迟到且切换 scope 后不泄漏；相同 metadata rerender
     expect(workorchApi.readAuthoringDiagnostic).not.toHaveBeenCalled();
   });
 
-it('失败诊断原样显示多行 Unicode 和敏感 marker，按需校验原始响应且不自动运行', async () => {
+it.each([
+  { name: '真实 LF/CRLF', parseError: '解析错误\n敏感标记: <img src=x onerror=alert(1)>\n结束', raw: '第一行 Ω\r\n敏感标记: <script>raw</script>\n末行\n' },
+  { name: '字面转义字符', parseError: '解析错误\\n敏感标记: <img src=x onerror=alert(1)>\\n结束', raw: '第一行 Ω\\n敏感标记: <script>raw</script>\\n末行\\n' },
+])('失败诊断原样显示 $name、Unicode 和敏感 marker，按需校验原始响应且不自动运行', async ({ parseError, raw }) => {
   browserCrypto();
-  const parseError = '解析错误\\n敏感标记: <img src=x onerror=alert(1)>\\n结束';
-  const raw = '第一行 Ω\\n敏感标记: <script>raw</script>\\n末行\\n';
   const bytes = new TextEncoder().encode(raw);
   const diagnostic = {
     workspaceId: 'ws', permitId: 'permit raw/?', phase: 'proposal', failureCode: 'invalid_proposal', parseError,
@@ -973,11 +996,13 @@ it('旧 failed 记录明确显示无诊断，且不加载或重发 provider', ()
 });
 
 it('diagnostic fetch 在 workspace/permit 切换后迟到，不泄漏或覆盖新诊断', async () => {
+  browserCrypto();
   const pending = deferred<Awaited<ReturnType<typeof workorchApi.readAuthoringDiagnostic>>>();
   vi.mocked(workorchApi.readAuthoringDiagnostic).mockReturnValueOnce(pending.promise);
+  const oldPayload = '旧原始响应\r\nΩ';
   const base = {
     parseError: '旧 parse', parseErrorSHA256: createHash('sha256').update('旧 parse').digest('hex'), parseErrorBytes: Buffer.byteLength('旧 parse'), parseErrorSaved: true,
-    payloadBase64: '', payloadSHA256: createHash('sha256').digest('hex'), payloadBytes: 0, payloadSaved: true,
+    payloadBase64: Buffer.from(oldPayload).toString('base64'), payloadSHA256: createHash('sha256').update(oldPayload).digest('hex'), payloadBytes: Buffer.byteLength(oldPayload), payloadSaved: true,
   };
   const mounted = render(<AuthoringDiagnosticDetails workspaceId="old-ws" permitId="old-permit" phase="proposal" failureCode="invalid_proposal" diagnostic={base} />);
   fireEvent.click(button('按需加载并校验诊断原文'));
@@ -985,6 +1010,8 @@ it('diagnostic fetch 在 workspace/permit 切换后迟到，不泄漏或覆盖�
   await act(async () => pending.resolve({ workspaceId: 'old-ws', permitId: 'old-permit', phase: 'proposal', failureCode: 'invalid_proposal', ...base }));
   expect(screen.getByText((_, element) => element?.tagName === 'PRE' && element.textContent === '新 parse')).toBeTruthy();
   expect(screen.queryByText(/旧 parse/)).toBeNull();
+  expect(screen.queryByText((_, element) => element?.tagName === 'PRE' && element.textContent === oldPayload)).toBeNull();
+  expect(screen.queryByRole('button', { name: '下载已校验原始字节' })).toBeNull();
 });
 
 it('diagnostic fetch workspace/permit 身份不匹配时拒绝显示', async () => {
