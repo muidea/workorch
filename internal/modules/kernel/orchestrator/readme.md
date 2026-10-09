@@ -51,6 +51,8 @@ capability resource state。
   accepted batch adapter 使用 `CompileRuntimeSemanticAcceptedBatchBindings`，在合同包内同次复用完整 manifest 校验产物，
   仍校验原始 batch identity/cardinality/hash、精确 accepted document 及完整 owner facts；
   `runtime_semantic_accepted_batch_binding_test.go` 固定产物等价、协调篡改拒绝及可重复成本对比。
+  assessment-purpose 的 archived batch owner-result 校验复用本代同次完整 manifest 校验产物；batch、document、result identity 与完整 owner feasibility 仍逐项反证，公开入口仍重新验证。
+  `runtime_assessment_result_validation_reuse_test.go` 对照公开 result validator 固定接受／拒绝等价、原始 ledger 字节不变和返回副本隔离。
   公开 manifest、wire、session 与 fresh-load 入口每次仍完整反证，不持久化成功凭据、不增加 caller 已校验标志。
   accepted candidate lineage 在同次完整 raw-source/hash 校验后保留私有 detached manifest，candidate admission 仍逐候选
   完整执行，再复用本次 manifest 派生 target/recipe 投影；attempt 与 dispatch 两侧身份、内容和 hash 仍独立反证。

@@ -514,7 +514,8 @@ func cloneValues(values []Value) []Value {
 }
 
 func (payload Payload) sortedFields() []Field {
-	fields := cloneFields(payload.Fields)
+	// 排序只修改本层副本；嵌套值由只读比较／编码递归消费，无需重复深拷贝。
+	fields := append([]Field(nil), payload.Fields...)
 	sort.Slice(fields, func(i, j int) bool { return fields[i].Name < fields[j].Name })
 	return fields
 }

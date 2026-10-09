@@ -105,11 +105,11 @@ func runtimeAssessmentPurposePreimagesFromSemanticGeneration(
 	if ledger.Manifest == nil {
 		return nil, nil
 	}
-	manifest := ledger.Manifest.Normalized()
-	validated, err := validateRuntimeSemanticPlanManifest(manifest)
+	validated, err := validateRuntimeSemanticPlanManifest(*ledger.Manifest)
 	if err != nil {
 		return nil, fmt.Errorf("runtime assessment purpose semantic manifest: %w", err)
 	}
+	manifest := validated.manifest
 	documents := make(map[string]RuntimeSemanticPlanDocument, len(ledger.BatchDocuments))
 	for _, document := range ledger.BatchDocuments {
 		if _, duplicate := documents[document.BatchID]; duplicate {
@@ -135,7 +135,7 @@ func runtimeAssessmentPurposePreimagesFromSemanticGeneration(
 		if !found {
 			continue
 		}
-		feasibilities, found := runtimeAssessmentPurposeBatchFeasibilities(ledger, batch, document, results)
+		feasibilities, found := runtimeAssessmentPurposeBatchFeasibilities(ledger, batch, document, results, validated)
 		if !found {
 			continue
 		}
@@ -220,9 +220,13 @@ func runtimeAssessmentPurposeBatchFeasibilities(
 	batch RuntimeSemanticPlanBatch,
 	document RuntimeSemanticPlanDocument,
 	results map[string]RuntimeSemanticPlanBatchFeasibilityResult,
+	validated runtimeValidatedSemanticManifest,
 ) ([]RuntimeSemanticProofFeasibility, bool) {
 	if result, found := results[batch.BatchID]; found {
-		if result.Validate(batch, document, *ledger.Manifest) != nil {
+		// 复用本代同次完整 manifest 校验；batch、document 和 owner result 仍逐项反证。
+		if validateRuntimeSemanticPlanBatchAgainstValidatedManifest(batch, validated) != nil ||
+			validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(document, validated) != nil ||
+			validateRuntimeSemanticPlanBatchFeasibilityResultWithValidatedManifest(result, batch, document, validated) != nil {
 			return nil, false
 		}
 		return append([]RuntimeSemanticProofFeasibility(nil), result.Feasibilities...), true
