@@ -85,6 +85,10 @@ func Decode(value any) []runtimecontract.RuntimeProfileContract {
 					MaxAcquisitionAttempts: Int(convergence["maxAcquisitionAttempts"]), DependsOnRequirementRefs: Strings(convergence["dependsOnRequirementRefs"]),
 				})
 			}
+			var lineageAssertions []runtimecontract.RuntimeLineageAssertionRule
+			for _, rule := range MapSlice(item["lineageAssertions"]) {
+				lineageAssertions = append(lineageAssertions, runtimecontract.RuntimeLineageAssertionRule{Ref: String(rule["ref"]), Kind: runtimecontract.RuntimeLineageAssertionKind(String(rule["kind"])), ConsumptionPoint: runtimecontract.RuntimeProofPhase(String(rule["consumptionPoint"])), MinCompletedRounds: Int(rule["minCompletedRounds"]), OwnerModuleID: String(rule["ownerModuleId"]), OperationKind: String(rule["operationKind"]), OperationVariantID: String(rule["operationVariantId"]), RequiredEffectScope: runtimecontract.RuntimeEffectScope(String(rule["requiredEffectScope"]))})
+			}
 			repair := ValidationFailureRepairConvergence(item)
 			implementation := ImplementationWorkPolicy(item)
 			contract.EvidenceRequirements = append(contract.EvidenceRequirements, runtimecontract.RuntimeProfileEvidenceRequirement{
@@ -99,6 +103,7 @@ func Decode(value any) []runtimecontract.RuntimeProfileContract {
 				AcceptedOperationVariants: acceptedVariants, ValidationRecipeID: String(item["validationRecipeId"]),
 				RequiredCheckRefs: Strings(item["requiredCheckRefs"]), MetricConstraints: Strings(item["metricConstraints"]), ArtifactRefs: Strings(item["artifactRefs"]),
 				RequiredOwnerFacts: ownerFacts, OwnerFactConvergences: ownerFactConvergences,
+				LineageAssertions: lineageAssertions,
 				ValidationFailureRepairConvergence: repair, ImplementationWorkPolicy: implementation,
 				CapabilityStateRequirements: stateRequirements, RejectedStepKinds: Strings(item["rejectedStepKinds"]), Description: String(item["description"]),
 			})

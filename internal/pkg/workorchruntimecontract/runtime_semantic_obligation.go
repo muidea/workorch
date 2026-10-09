@@ -212,6 +212,7 @@ type RuntimeSemanticProofObligation struct {
 	OwnerFactConvergences                           []RuntimeOwnerFactConvergence
 	MetricConstraints                               []string
 	ArtifactRefs                                    []string
+	LineageAssertions                               []RuntimeLineageAssertionRule `json:",omitempty"`
 	VerificationPolicy                              *RuntimeVerificationPolicy `json:",omitempty"`
 	OwnerFactAcquisition                            *RuntimeSemanticOwnerFactAcquisition
 	ValidationFailureRepair                         *RuntimeSemanticValidationFailureRepair
@@ -236,6 +237,7 @@ func (o RuntimeSemanticProofObligation) Normalized() RuntimeSemanticProofObligat
 	o.DeclarationTargetSelectorCandidateRefs = normalizeStrings(o.DeclarationTargetSelectorCandidateRefs)
 	o.DeclarationProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(o.DeclarationProspectiveTargetAllOfConstraintRefs)
 	o.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(o.RequiredOwnerFacts)
+	o.LineageAssertions = append([]RuntimeLineageAssertionRule(nil), o.LineageAssertions...)
 	o.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(o.OwnerFactConvergences)
 	o.MetricConstraints = normalizeStrings(o.MetricConstraints)
 	o.ArtifactRefs = normalizeStrings(o.ArtifactRefs)
@@ -283,6 +285,7 @@ func (o RuntimeSemanticProofObligation) Clone() RuntimeSemanticProofObligation {
 }
 
 func (o RuntimeSemanticProofObligation) Validate() error {
+	if err := ValidateRuntimeLineageAssertionRules(o.LineageAssertions); err != nil { return err }
 	if o.VerificationPolicy != nil {
 		if err := o.VerificationPolicy.Validate(); err != nil {
 			return err
@@ -405,7 +408,7 @@ func sameRuntimeSemanticProofObligations(left, right []RuntimeSemanticProofOblig
 			!sameRuntimeOwnerFactRequirements(l.RequiredOwnerFacts, r.RequiredOwnerFacts) ||
 			!SameRuntimeOwnerFactConvergences(l.OwnerFactConvergences, r.OwnerFactConvergences) ||
 			!sameStrings(l.MetricConstraints, r.MetricConstraints) || !sameStrings(l.ArtifactRefs, r.ArtifactRefs) ||
-			!SameRuntimeVerificationPolicy(l.VerificationPolicy, r.VerificationPolicy) ||
+			!reflect.DeepEqual(l.LineageAssertions, r.LineageAssertions) || !SameRuntimeVerificationPolicy(l.VerificationPolicy, r.VerificationPolicy) ||
 			!sameRuntimeSemanticOwnerFactAcquisition(l.OwnerFactAcquisition, r.OwnerFactAcquisition) ||
 			!reflect.DeepEqual(l.ImplementationWork, r.ImplementationWork) ||
 			!sameRuntimeSemanticValidationFailureRepair(l.ValidationFailureRepair, r.ValidationFailureRepair) {
@@ -574,6 +577,7 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 		}
 		writeHashStrings(h, value.MetricConstraints)
 		writeHashStrings(h, value.ArtifactRefs)
+		for _, rule := range value.LineageAssertions { writeHashString(h, "lineage-assertion"); writeHashString(h, StableRuntimeLineageAssertionRuleHash(rule)) }
 		if value.VerificationPolicy != nil {
 			writeHashString(h, "verification-policy")
 			writeHashString(h, StableRuntimeVerificationPolicyHash(*value.VerificationPolicy))
@@ -651,6 +655,7 @@ func compileRuntimeSemanticDefinitionProofObligation(definitionRevision string, 
 		OwnerFactConvergences:                           CloneRuntimeOwnerFactConvergences(source.OwnerFactConvergences),
 		MetricConstraints:                               append([]string(nil), source.MetricConstraints...),
 		ArtifactRefs:                                    append([]string(nil), source.ArtifactRefs...),
+		LineageAssertions:                              append([]RuntimeLineageAssertionRule(nil), source.LineageAssertions...),
 		VerificationPolicy:                              cloneRuntimeVerificationPolicy(source.VerificationPolicy),
 	}
 	validationRequirements, err := CompileRuntimeValidationProofRequirements(definitionRevision, []RuntimeCoverageItem{item}, []RuntimeDefinitionFocus{source})

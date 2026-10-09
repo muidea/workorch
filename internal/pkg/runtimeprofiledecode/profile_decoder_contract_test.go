@@ -106,7 +106,13 @@ func TestRuntimeProfileShapeMatchesTypedDecoderFields(t *testing.T) {
 		seen[kind] = true
 		return true
 	})
-	if len(seen) != 11 {
+	expectedKinds := []string{"profile", "recipe", "evidence", "deliverable", "dimension", "artifact", "variant", "capability", "dependency", "ownerFact", "convergence", "lineageAssertion"}
+	for _, kind := range expectedKinds {
+		if !seen[kind] {
+			t.Errorf("missing typed decoder coverage: %s", kind)
+		}
+	}
+	if len(seen) != len(expectedKinds) {
 		t.Fatalf("incomplete decoder coverage: %v", seen)
 	}
 }

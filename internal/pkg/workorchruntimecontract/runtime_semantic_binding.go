@@ -584,6 +584,14 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 		Proofs: proofs, TargetRefs: targetRefs, TargetSelectorRef: selectorRef, DeclarationRef: declarationRef,
 		ProspectiveTargetRefs: prospectiveTargetRefs, PrerequisiteRefs: prerequisiteRefs,
 	}
+	if evidenceObligation.Purpose == RuntimeSemanticEvidenceObligationDefinitionProof {
+		for _, obligation := range manifest.ProofObligations {
+			if obligation.CoverageWorkItemID != item.ID { continue }
+			var err error
+			binding.LineageAssertions, err = CompileRuntimeLineageAssertions(obligation.LineageAssertions, declarationRef, item)
+			if err != nil { return CoverageFocus{}, err }
+		}
+	}
 	if source != nil {
 		binding.VerificationPolicy = cloneRuntimeVerificationPolicy(source.VerificationPolicy)
 	}

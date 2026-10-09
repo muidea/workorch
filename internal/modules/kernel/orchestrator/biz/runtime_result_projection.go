@@ -74,20 +74,7 @@ func deliveryAcknowledged(aggregate runtime.RuntimeAggregate, deliveryID string,
 }
 
 func runtimeTerminalDeliveryFullyAcknowledged(aggregate runtime.RuntimeAggregate) bool {
-	if !runtime.TerminalDeliveryFullyAcknowledged(aggregate) {
-		return false
-	}
-	bindings, err := runtime.RuntimeDeliveryLineageBindings(aggregate)
-	if err != nil {
-		return false
-	}
-	for _, binding := range bindings {
-		state, err := runtime.EvaluateRuntimeDeliveryLineageAssertion(aggregate, binding)
-		if err != nil || state != runtimecontract.RuntimeDeliveryLineageSatisfied {
-			return false
-		}
-	}
-	return true
+	return runtime.TerminalDeliveryFullyAcknowledged(aggregate)
 }
 
 func (m *Biz) persistedDeliveryAcknowledged(ctx context.Context, aggregate runtime.RuntimeAggregate, deliveryID string, owner runtimecontract.RuntimeDeliveryOwner) bool {

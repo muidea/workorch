@@ -76,8 +76,10 @@ func Fields(kind string) InputFields {
 			Text:       "id scope evidenceRole targetRole targetSelectorRef targetSelectorOwnerRef targetSelectorSubjectRef validationRecipeId description",
 			Boolean:    "requireTargetGrounding requireDirectEvidence requireClaimEvidence requireExecutableBehaviorEvidence requireCoverageTargets",
 			StringList: "targetRefs targetDiscoverySources targetSelectorCandidateRefs prospectiveTargetAllOfConstraintRefs requiredEvidenceKinds acceptedStepKinds requiredCheckRefs metricConstraints artifactRefs rejectedStepKinds",
-			Arrays:     map[string]string{"acceptedOperationVariants": "variant", "capabilityStateRequirements": "capability", "requiredOwnerFacts": "ownerFact", "ownerFactConvergences": "convergence"},
+			Arrays:     map[string]string{"lineageAssertions": "lineageAssertion", "acceptedOperationVariants": "variant", "capabilityStateRequirements": "capability", "requiredOwnerFacts": "ownerFact", "ownerFactConvergences": "convergence"},
 		}
+	case "lineageAssertion":
+		return InputFields{Text: "ref kind consumptionPoint ownerModuleId operationKind operationVariantId requiredEffectScope", Integer: "minCompletedRounds"}
 	case "variant":
 		return InputFields{Text: "kind variantId"}
 	case "implementationWork":

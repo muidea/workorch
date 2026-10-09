@@ -15,6 +15,7 @@ import (
 // validators are ordered to preserve the historical fail-fast sequence while
 // making each state-machine responsibility reviewable in isolation.
 func (a RuntimeAggregate) Validate() error {
+	if err := runtimecontract.ValidateRuntimeDefinitionLineageAssertions(a.Facts.DefinitionFocuses, a.Facts.Activation.ExecutionContract.ProfileContracts); err != nil { return err }
 	if err := runtimecontract.ValidateRuntimeResultFeedbackVersion(a.ResultFeedbackVersion); err != nil {
 		return err
 	}
@@ -47,7 +48,7 @@ func (a RuntimeAggregate) Validate() error {
 	if err := runtimecontract.ValidateRuntimeAssessmentAuthoritySources(a.Facts, active, completed); err != nil {
 		return fmt.Errorf("runtime aggregate assessment authority: %w", err)
 	}
-	if err := runtimecontract.ValidateRuntimeAssessmentAdjudications(a.Facts, completed, a.CoverageProofLineage); err != nil {
+	if err := runtimecontract.ValidateRuntimeAssessmentAdjudications(a.Facts, completed, a.CoverageProofLineage, runtimeLineageAssertionSources(a)); err != nil {
 		return fmt.Errorf("runtime aggregate assessment adjudication: %w", err)
 	}
 	if err := validateRuntimeAggregateSM2Authority(a); err != nil {

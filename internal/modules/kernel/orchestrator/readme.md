@@ -454,6 +454,27 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
   error 时先 reload：若 revision 已推进则返回 current aggregate，不得把 termination 或并发 confirmation 误分类为新 drive failure。
   termination 前已持久化的 exact confirmation replay 仍为零 CAS；termination 后到达的新 in-flight response 必须 fail closed。
 
+### 附加 lineage guards
+
+- `RuntimeLineageAssertionRule` 是 sealed Profile 的 opt-in all-of 声明；`ConsumptionPoint`（配置字段
+  `consumptionPoint`）只区分 `execution` 与 `post_terminal_delivery` 的消费时点，不是 Runtime phase、目标状态或
+  跨 owner transition command。旧 `phase` 字段不属于当前闭合 wire，必须拒绝，不做兼容读取或持久记录回填。
+- SM-3 的 Definition → semantic obligation → `CoverageEvidenceBinding` 保留 exact CWI/source/declaration、完整
+  `TargetText` 的字节 hash 与 rule hash。SM-2 在原 assessment CAS 内将普通 proof 与 execution guards 合取；归档复核
+  同样使用原 assessment dispatch 的 `Transaction.EvidenceRevision`，未来 receipt/round 不得补成旧 credit。
+- `completed_work_rounds` 消费既有 distinct ordinal/dispatch/execution、完整 changed durable receipt set 与 fresh
+  observation/input-protection 前像；`owner_operation_receipt` 消费 canonical owner/kind/variant/effect inventory、
+  sealed operation、execution fence、唯一 receipt/evidence 和 processed-event 链。guard 不独立授 credit，也不放宽
+  rejected receipt 的 effect 校验、ordinary proof、预算或 immutable source。
+- `repair_then_fresh_validation` 只接受同一原 rejected validation、exact route/confirmation/closure、全部 changed
+  repair receipts 与严格更晚的同 source ordinary all-of validation。fresh binding 的评审必须回指产生该 binding 的
+  exact accepted generation/batch/document/request/owner feasibility；不能扫描旧报告或凭 consumed/satisfied 标签恢复成功。
+- SM-4 的 `RuntimeDeliveryLineageState` 是只读投影：preterminal `deferred`，terminal 无 seal 或不足有序三 ack 为
+  `pending`，exact immutable seal 与 Result → Workspace → Run 三 ack 全部通过共享校验才为 `satisfied`；无声明为
+  `not_applicable`。projection 不改变 terminal、Result material 或 coverage credit，不引入 Result-before-Result 循环。
+- 纯消费者不持有 I/O/CAS，fresh-load 从完整原值前像反证；仓储 `Load`/`Save` 必须传递 detached raw 深拷贝。
+  `RuntimeAggregate.CloneRaw` 保留 nil/empty、全部 dispatch/receipt/seal 内容，不通过 normalization 修复非法前像。
+
 ### Recovery, governance and delivery
 
 - 可选 `MaxDurableDispatchesPerCWI` 复用 accepted attempt → original dispatch 的 sealed ledger；SM-3 final admission
@@ -525,20 +546,26 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
 - Decision/Approval owner 持久化 resolution；Orchestrator只暴露 ticket-resolution 与 approval-resolution 两个具体 typed ingress，
   先从 aggregate 重建 exact persisted binding，再在 owner-private value adapter 中提交 continuation或terminal。不存在 generic
   governance-resolution EventHub command/topic；Application和Governance都不发布 Resume。
-- terminal outcome先由 SM-2 seal，再由 SM-4按 Result→Workspace→Run顺序交付。各 owner只执行自身 private reducer并返回 exact
-  acknowledgement；partial/response-loss从同一 delivery ledger幂等续驱，不改写 terminal decision。
+- terminal outcome先由 SM-2 seal（administrative termination 由 SM-4 保存 SM-1 intent 的 typed handoff），
+  SM-4 在首次 owner I/O 前通过 scope-only private event 封存不可变 `RuntimeTerminalMaterialSeal`，再按
+  Result→Workspace→Run 顺序交付。generation 是首次 seal CAS 的 after-image revision；同次 CAS 只增加 seal 与 revision，
+  独立加载并校验的持久前像证明材料来源。后续 lease、recovery 与 ack 可以推进，但不能删除或修改 seal。
+  各 owner 只执行自身 private reducer；Result ack 携 exact 已持久化 `ResultID` 和完整 `ResultCloseout`，Workspace/Run ack
+  不携 Result body/ID。partial/response-loss 重用同一 seal 幂等续驱，不重编材料、不改写 terminal decision。
+  terminal 未 seal 且无 ack 可以等待首次交付；无 seal 却有 ack、Result body 缺失或不等于 seal 均 fail closed，不回填旧归档。
 - SM-4 的 Result material 从已裁决的 requirement outcomes、evidence 与 receipts 投影逐项 DoD、实现/验证摘要、限制、
   风险和仅供阅读的后续建议；没有 validation evidence 不能描述为验证已执行或失败。terminal guard 与原始 owner cause
   分别保存，Result owner 不重判验收。新 aggregate 初始化时一次封存 `ResultFeedbackVersion=3`；以当前 SM-2
   coverage 判断历史 satisfied assessment 的适用性，当前未满足时显示 indeterminate，不删除历史评估或证据。
   v3 的 input-review terminal diagnostic 另保留完整 blocking batch 的 typed reports（CWI、requirement、subject、review ref/hash、
   逐 check/obligation 事实），并从原 persisted document/binding 反证；删除或篡改反馈不得在 fresh-load 被接受。
-  敏感文本/控制字符只在 detached feedback 中脱敏，保留原报告引用/hash，不复制输入文件内容。Result、Web 和 TUI 仅展示，
-  不能据此选择 action；完整详情不能只剩被裁剪的通用摘要。
+  原始报告、诊断文本与控制字符按原值保全，不为脱敏改写；受限读取边界和可逆展示编码保护原文。Result、Web 和 TUI
+  仅展示，不能据此选择 action；完整详情不能只剩被裁剪的通用摘要。
   当前只允许版本 3；缺失、旧版或未知版本均在 Run record、aggregate、initialize 和 Result material 入口 fail closed，
   不 fallback、不回填、不改写旧 Result/Run 归档。同版本 response loss、重启及 pending delivery replay 的内容与 hash 必须相同。
-- Workspace deletion只允许在 Run owner `draining` fence后排空既有 terminal delivery。Orchestrator独占自身 quiescence/purge
-  private reducer，不终止 Run、不推进 Workspace deletion phase、不跨 owner删除资源。
+- Workspace deletion只允许在 Run owner `draining` fence后排空既有 terminal delivery，包括为已封存终态首次固定 material seal；
+  此时仍拒绝 caller material、SM-2/SM-3 推进与普通恢复。Orchestrator 独占自身 quiescence/purge private reducer，
+  不终止 Run、不推进 Workspace deletion phase、不跨 owner 删除资源。
 
 ## 组件交互及合同
 
@@ -567,6 +594,8 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
 - Orchestrator不暴露Start/Resume service facade；生产execution ingress是Workspace-scoped intent，经Run owner SM-1 notification
   触发Drive。
 - current persistence只接受current shape；没有legacy decoder、migration/backfill或由projection修复invalid aggregate的路径。
+  候选前 authority reconciliation 也必须先校验完整持久前像；历史 focus 的 prerequisite/resource 退休由原 SM-2
+  transition 的协调写集完成，不能先加载非法归档再以一个看似合法的 after-image 绕过独立前像 CAS gate。
 - provider-facing cache保持C0 system/schema/runtime、C1 Goal/DoD、C2 declarative capability/governance、C3～C5 volatile runtime
   分层；unexpected stable-prefix drift是rendering defect。
 

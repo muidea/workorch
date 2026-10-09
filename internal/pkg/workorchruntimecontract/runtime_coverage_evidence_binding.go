@@ -219,6 +219,7 @@ type CoverageEvidenceBinding struct {
 	FocusID                  string
 	DefinitionRevision       string
 	Proofs                   []CoverageEvidenceProof
+	LineageAssertions        []RuntimeLineageAssertion `json:",omitempty"`
 	VerificationPolicy       *RuntimeVerificationPolicy `json:",omitempty"`
 	TargetRefs               []string
 	TargetSelectorRef        string
@@ -246,6 +247,7 @@ func (b CoverageEvidenceBinding) Normalized() CoverageEvidenceBinding {
 	b.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(b.CoverageWorkItemID)))
 	b.FocusID = strings.TrimSpace(b.FocusID)
 	b.DefinitionRevision = strings.TrimSpace(b.DefinitionRevision)
+	b.LineageAssertions = append([]RuntimeLineageAssertion(nil), b.LineageAssertions...)
 	b.Proofs = NormalizeCoverageEvidenceProofs(b.Proofs)
 	if b.VerificationPolicy != nil {
 		value := b.VerificationPolicy.Normalized()
@@ -280,6 +282,7 @@ func (b CoverageEvidenceBinding) Clone() CoverageEvidenceBinding {
 }
 
 func (b CoverageEvidenceBinding) Validate() error {
+	if err := ValidateRuntimeLineageAssertions(b.LineageAssertions, b.CoverageWorkItemID, b.DeclarationRef); err != nil { return err }
 	seenProofKinds := make(map[string]struct{}, len(b.Proofs))
 	for _, proof := range b.Proofs {
 		kind := strings.TrimSpace(proof.EvidenceKind)
@@ -374,6 +377,16 @@ func stableCoverageEvidenceBindingHashNormalized(binding CoverageEvidenceBinding
 		}
 		writeHashStrings(h, proof.MetricConstraints)
 		writeHashStrings(h, proof.ArtifactRefs)
+	}
+	for _, assertion := range binding.LineageAssertions {
+		writeHashString(h, "lineage-assertion")
+		writeHashString(h, StableRuntimeLineageAssertionRuleHash(assertion.Rule))
+		writeHashString(h, assertion.RuleHash)
+		writeHashString(h, assertion.DeclarationRef)
+		writeHashString(h, string(assertion.CoverageWorkItemID))
+		writeHashString(h, assertion.SourceScope)
+		writeHashString(h, assertion.SourceID)
+		writeHashString(h, assertion.SourceTextHash)
 	}
 	if binding.VerificationPolicy != nil {
 		writeHashString(h, "verification-policy")

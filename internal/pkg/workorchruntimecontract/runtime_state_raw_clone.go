@@ -78,6 +78,7 @@ func cloneAuthorityTransactionRaw(in AuthorityTransaction) AuthorityTransaction 
 
 func cloneCoverageEvidenceBindingRaw(in CoverageEvidenceBinding) CoverageEvidenceBinding {
 	out := in
+	out.LineageAssertions = cloneRuntimeStateRawSlice(in.LineageAssertions, func(assertion RuntimeLineageAssertion) RuntimeLineageAssertion { return assertion })
 	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.Proofs = cloneRuntimeStateRawSlice(in.Proofs, func(item CoverageEvidenceProof) CoverageEvidenceProof { return cloneCoverageEvidenceProofRaw(item) })
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
@@ -965,6 +966,7 @@ func cloneRuntimeDefinitionContextRaw(in RuntimeDefinitionContext) RuntimeDefini
 
 func cloneRuntimeDefinitionFocusRaw(in RuntimeDefinitionFocus) RuntimeDefinitionFocus {
 	out := in
+	out.LineageAssertions = cloneRuntimeStateRawSlice(in.LineageAssertions, func(rule RuntimeLineageAssertionRule) RuntimeLineageAssertionRule { return rule })
 	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.ImplementationWorkPolicy = cloneRuntimeImplementationWorkPolicy(in.ImplementationWorkPolicy)
 	out.CoverageWorkItemIDs = cloneRuntimeStateRawSlice(in.CoverageWorkItemIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
@@ -1544,6 +1546,7 @@ func cloneRuntimeProfileContractRaw(in RuntimeProfileContract) RuntimeProfileCon
 
 func cloneRuntimeProfileEvidenceRequirementRaw(in RuntimeProfileEvidenceRequirement) RuntimeProfileEvidenceRequirement {
 	out := in
+	out.LineageAssertions = cloneRuntimeStateRawSlice(in.LineageAssertions, func(rule RuntimeLineageAssertionRule) RuntimeLineageAssertionRule { return rule })
 	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.ImplementationWorkPolicy = cloneRuntimeImplementationWorkPolicy(in.ImplementationWorkPolicy)
 	out.TargetRefs = cloneRuntimeStateRawSlice(in.TargetRefs, func(item string) string { return item })
@@ -1901,6 +1904,7 @@ func cloneRuntimeSemanticProofFeasibilityRaw(in RuntimeSemanticProofFeasibility)
 
 func cloneRuntimeSemanticProofObligationRaw(in RuntimeSemanticProofObligation) RuntimeSemanticProofObligation {
 	out := in
+	out.LineageAssertions = cloneRuntimeStateRawSlice(in.LineageAssertions, func(rule RuntimeLineageAssertionRule) RuntimeLineageAssertionRule { return rule })
 	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.ValidationProofRequirement = cloneRuntimeStateRawPointer(in.ValidationProofRequirement, func(item RuntimeValidationProofRequirement) RuntimeValidationProofRequirement {
 		item.RequiredCheckRefs = cloneRuntimeStateRawSlice(item.RequiredCheckRefs, func(value string) string { return value })

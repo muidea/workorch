@@ -9,6 +9,8 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+// reconcileAuthorityBeforeCandidate 仅从合法持久前像协调 SM-2 prerequisite，不消费候选或恢复预算。
+// 旧 focus 的退休属于原 transition 的协调写集；本入口不能修复非法归档或兼容旧结构。
 func (c *authorityComponent) reconcileAuthorityBeforeCandidate(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
@@ -16,6 +18,9 @@ func (c *authorityComponent) reconcileAuthorityBeforeCandidate(ctx context.Conte
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
+	}
+	if err := aggregate.Validate(); err != nil {
+		return RuntimeAggregate{}, fmt.Errorf("runtime authority reconciliation preimage invariant: %w", err)
 	}
 	if aggregate.ActiveDispatch != nil || isTerminalConvergenceState(aggregate.Decision.State) {
 		return aggregate, nil

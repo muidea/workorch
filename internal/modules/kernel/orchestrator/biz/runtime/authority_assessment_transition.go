@@ -108,6 +108,7 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 		aggregate.Facts,
 		sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
 		aggregate.CoverageProofLineage,
+		runtimeLineageAssertionSources(aggregate),
 	)
 	if err != nil {
 		return RuntimeAggregate{}, err
@@ -393,6 +394,10 @@ func canonicalAssessmentEvidenceWithoutOwnerFactsForCoverageForPurpose(
 	}
 	if purpose == runtimecontract.RuntimeAssessmentPurposeDefinitionProof && bound &&
 		!runtimeVerificationPolicySatisfied(aggregate, binding, coverageID, refs) {
+		return nil, false
+	}
+	if purpose == runtimecontract.RuntimeAssessmentPurposeDefinitionProof && bound &&
+		!runtimecontract.RuntimeExecutionLineageAssertionsSatisfied(binding, runtimeLineageAssertionSources(aggregate), runtimeAssessmentLineageCutoff(aggregate)) {
 		return nil, false
 	}
 	return refs, true

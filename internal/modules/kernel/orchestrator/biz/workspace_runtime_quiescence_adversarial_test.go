@@ -226,12 +226,24 @@ func TestWorkspaceRuntimeQuiescenceFinalAckBeforeRetiredGenerationScheduleReleas
 			if err != nil || afterFailure.Facts.Recovery.TerminalDeliveryAttempts != fixture.terminated.Facts.Recovery.TerminalDeliveryAttempts+1 {
 				t.Fatalf("terminal delivery failure budget=%+v initial=%+v err=%v", afterFailure.Facts.Recovery, fixture.terminated.Facts.Recovery, err)
 			}
+			sealed, err := fixture.module.submitRuntimeInternalEvent(fixture.ctx, runtime.RuntimeInternalEvent{
+				Kind: runtime.RuntimeInternalEventTerminalMaterialSealRequired,
+				Scope: runtime.RuntimeInternalEventScope{WorkspaceID: fixture.item.WorkspaceID, RunID: fixture.item.ID},
+				Delivery: &runtime.RuntimeInternalDeliveryPayload{},
+			})
+			if err != nil || sealed.Aggregate.TerminalMaterialSeal == nil {
+				t.Fatalf("draining final-ack race 首次 seal: %v", err)
+			}
 			for _, owner := range []runtimecontract.RuntimeDeliveryOwner{
 				runtimecontract.RuntimeDeliveryOwnerResult,
 				runtimecontract.RuntimeDeliveryOwnerWorkspace,
 				runtimecontract.RuntimeDeliveryOwnerRun,
 			} {
 				acknowledgement := adversarialTerminalAcknowledgement(fixture.request, owner)
+				if owner == runtimecontract.RuntimeDeliveryOwnerResult {
+					body := sealed.Aggregate.TerminalMaterialSeal.Material.RuntimeCloseout.CloneRaw()
+					acknowledgement.ResultCloseout = &body
+				}
 				if err := fixture.module.recordRuntimeDeliveryAcknowledgement(fixture.ctx, &acknowledgement); err != nil {
 					t.Fatalf("record final-ack race owner %q: %v", owner, err)
 				}
@@ -677,14 +689,24 @@ func newAdversarialRuntimeQuiescenceFixture(t *testing.T, fullyAcknowledged bool
 func adversarialTerminalRun(t *testing.T, fullyAcknowledged bool) (runtime.RuntimeAggregate, orchestratorevents.RuntimeTerminalDeliveryRequestData, *runmodel.Run) {
 	t.Helper()
 	aggregate := runtimeTerminalAggregate(t)
+	repository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	aggregate = runtimeSealTerminalMaterialForTest(t, repository, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	request := mustTerminalDeliveryRequest(t, aggregate)
 	owners := []runtimecontract.RuntimeDeliveryOwner{runtimecontract.RuntimeDeliveryOwnerResult, runtimecontract.RuntimeDeliveryOwnerWorkspace}
 	if fullyAcknowledged {
 		owners = append(owners, runtimecontract.RuntimeDeliveryOwnerRun)
 	}
 	for _, deliveryOwner := range owners {
-		aggregate.DeliveryAcknowledgements = append(aggregate.DeliveryAcknowledgements, adversarialTerminalAcknowledgement(request, deliveryOwner))
-		aggregate.StateRevision++
+		acknowledgement := adversarialTerminalAcknowledgement(request, deliveryOwner)
+		if deliveryOwner == runtimecontract.RuntimeDeliveryOwnerResult {
+			body := aggregate.TerminalMaterialSeal.Material.RuntimeCloseout.CloneRaw()
+			acknowledgement.ResultCloseout = &body
+		}
+		result, err := runtimeCommitTerminalAcknowledgementForCASTest(context.Background(), repository, acknowledgement)
+		if err != nil {
+			t.Fatalf("terminal fixture acknowledgement %s: %v", deliveryOwner, err)
+		}
+		aggregate = result
 	}
 	if err := aggregate.Validate(); err != nil {
 		t.Fatalf("terminal aggregate fixture: %v", err)

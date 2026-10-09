@@ -156,6 +156,7 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 				writeHashString(h, "validation-failure-repair:present")
 				writeHashString(h, StableRuntimeValidationFailureRepairConvergenceHash(*requirement.ValidationFailureRepairConvergence))
 			}
+			for _, rule := range requirement.LineageAssertions { writeHashString(h, "lineage-assertion"); writeHashString(h, StableRuntimeLineageAssertionRuleHash(rule)) }
 			if requirement.ImplementationWorkPolicy != nil {
 				writeHashString(h, "implementation-work-policy")
 				writeHashString(h, StableRuntimeImplementationWorkPolicyHash(*requirement.ImplementationWorkPolicy))

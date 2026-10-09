@@ -2,7 +2,7 @@ package runtime
 
 import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 
-// CloneRaw 仅为测试 repository 提供独立副本，不规范化、不校验或重建 authority。
+// CloneRaw 返回 aggregate 的独立原值副本，不规范化、不校验或重建 authority。
 // 独立前像 CAS 不能读取被调用方通过共享指针或 slice 提前改写的存储值。
 func (a RuntimeAggregate) CloneRaw() RuntimeAggregate {
 	record := runtimecontract.RuntimeStateRecord{

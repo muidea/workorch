@@ -204,7 +204,7 @@ func TestRuntimeAssessmentDoubleEntryAppliesOnlyToCommittedDispatches(t *testing
 		if err := ValidateRuntimeEvidenceLedgerSequence(2, facts, active, completed, resolutions); err != nil {
 			t.Fatalf("invalidated assessment dispatch required a fact: %v", err)
 		}
-		if err := ValidateRuntimeAssessmentAdjudications(facts, completed, nil); err != nil {
+		if err := ValidateRuntimeAssessmentAdjudications(facts, completed, nil, RuntimeLineageAssertionSources{Facts: facts, Completed: completed}); err != nil {
 			t.Fatalf("invalidated assessment dispatch required adjudication: %v", err)
 		}
 	})
@@ -212,14 +212,14 @@ func TestRuntimeAssessmentDoubleEntryAppliesOnlyToCommittedDispatches(t *testing
 	t.Run("committed dispatch requires fact", func(t *testing.T) {
 		_, facts, _, completed, _ := runtimeEvidenceSequenceFixture(t)
 		facts.Assessments = nil
-		if err := ValidateRuntimeAssessmentAdjudications(facts, completed, nil); err == nil || !strings.Contains(err.Error(), "no assessment fact") {
+		if err := ValidateRuntimeAssessmentAdjudications(facts, completed, nil, RuntimeLineageAssertionSources{Facts: facts, Completed: completed}); err == nil || !strings.Contains(err.Error(), "no assessment fact") {
 			t.Fatalf("committed assessment missing-fact error = %v", err)
 		}
 	})
 
 	t.Run("committed dispatch requires adjudication", func(t *testing.T) {
 		_, facts, _, completed, _ := runtimeEvidenceSequenceFixture(t)
-		if err := ValidateRuntimeAssessmentAdjudications(facts, completed, nil); err == nil || !strings.Contains(err.Error(), "double-entry adjudication") {
+		if err := ValidateRuntimeAssessmentAdjudications(facts, completed, nil, RuntimeLineageAssertionSources{Facts: facts, Completed: completed}); err == nil || !strings.Contains(err.Error(), "double-entry adjudication") {
 			t.Fatalf("committed assessment missing-adjudication error = %v", err)
 		}
 	})

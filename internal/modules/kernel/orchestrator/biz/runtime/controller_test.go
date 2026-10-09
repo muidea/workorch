@@ -967,7 +967,7 @@ func TestRuntimeControllerCommitsPrerequisiteAndReducesAtomically(t *testing.T) 
 	}
 }
 
-func TestRuntimeControllerReconcilesHistoricalFocusAuthorityBeforeCandidate(t *testing.T) {
+func TestRuntimeControllerRejectsPersistedHistoricalFocusCorruptionBeforeCandidate(t *testing.T) {
 	ctx := context.Background()
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
@@ -975,10 +975,8 @@ func TestRuntimeControllerReconcilesHistoricalFocusAuthorityBeforeCandidate(t *t
 		t.Fatal(err)
 	}
 
-	// Start from the current Focus's normal prerequisite acquisition. The
-	// historical satisfied selection is then injected as a persisted corruption
-	// representative of a delayed/reacquired predecessor result. It must be
-	// resolved entirely by SM-2 before any provider-facing candidate path.
+	// 纯 SM-2 在协调写集中退休旧 focus；已持久化的非法前像不能通过候选前协调静默修复。
+	// 同时保留退休、预算和目标隔离正例，验证拒绝路径不修改仓储。
 	facts := controllerFacts()
 	facts.Focus.TargetRefs = nil
 	facts.Focus.TargetRole = "implementation"
@@ -1013,6 +1011,12 @@ func TestRuntimeControllerReconcilesHistoricalFocusAuthorityBeforeCandidate(t *t
 	}
 	if preparedAggregate.Decision.State != runtimecontract.ConvergenceStateNeedStateChange {
 		t.Fatalf("prepared decision = %+v", preparedAggregate.Decision)
+	}
+	preparedBefore := preparedAggregate.CloneRaw()
+	savesBeforePrepared := repository.saves
+	unchanged, err := controller.reconcileAuthorityBeforeCandidate(ctx, facts.WorkspaceID, facts.RunID)
+	if err != nil || !reflect.DeepEqual(unchanged, preparedBefore) || repository.saves != savesBeforePrepared {
+		t.Fatalf("合法当前 focus 协调应原样返回且不消耗 CAS: err=%v saves=%d", err, repository.saves)
 	}
 	preparedFacts := preparedAggregate.Facts
 	preparedDecision := preparedAggregate.Decision
@@ -1052,9 +1056,27 @@ func TestRuntimeControllerReconcilesHistoricalFocusAuthorityBeforeCandidate(t *t
 	repository.aggregate = &preparedAggregate
 	revisionBeforeReconcile := preparedAggregate.StateRevision
 
-	reconciled, err := controller.reconcileAuthorityBeforeCandidate(ctx, facts.WorkspaceID, facts.RunID)
+	if err := preparedAggregate.Validate(); err == nil {
+		t.Fatal("历史 focus 损坏 fixture 意外符合持久化合同")
+	}
+	before := preparedAggregate.CloneRaw()
+	savesBefore := repository.saves
+	if _, err := controller.reconcileAuthorityBeforeCandidate(ctx, facts.WorkspaceID, facts.RunID); err == nil || !strings.Contains(err.Error(), "reconciliation preimage invariant") {
+		t.Fatalf("持久化损坏前像未在协调入口拒绝: %v", err)
+	}
+	if repository.saves != savesBefore || !reflect.DeepEqual(*repository.aggregate, before) {
+		t.Fatal("拒绝损坏前像仍修改了持久化材料、revision 或预算")
+	}
+
+	// 在写入任何 after-image 前，原 SM-2 纯归约仍必须隔离历史目标并完整退休旧观察。
+	reconciled := before.CloneRaw()
+	reconciled.Facts, reconciled.Decision, err = reduceRuntimeAggregateWithDirective(reconciled, reconciled.Facts, &reconciled.Decision.AuthoritySnapshot)
 	if err != nil {
-		t.Fatalf("reconcileAuthorityBeforeCandidate: %v", err)
+		t.Fatalf("reduce historical focus authority: %v", err)
+	}
+	reconciled.StateRevision++
+	if err := reconciled.Validate(); err != nil {
+		t.Fatalf("退休后的纯 after-image 不合法: %v", err)
 	}
 	if reconciled.StateRevision != revisionBeforeReconcile+1 || reconciled.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 		len(reconciled.CandidateAttempts) != 0 || reconciled.Facts.Repair.RepairAttempts != 0 ||

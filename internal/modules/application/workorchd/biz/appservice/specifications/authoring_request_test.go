@@ -209,11 +209,35 @@ func TestResourceBoundAuthoringCommandsBindSameSnapshotAndRejectProviderResource
 	}
 	var reviewPayload struct {
 		Resources            []workspace.DefinitionAuthoringResourceSnapshot `json:"resources"`
+		ExpectedResources    []workspace.GoalSpecificationResource           `json:"expectedResources"`
 		ResourceSnapshotHash string                                          `json:"resourceSnapshotHash"`
 		Specification        workspace.GoalSpecification                     `json:"specification"`
 	}
 	if err := json.Unmarshal([]byte(reviewCommand.Request.PromptContext.Sections[1].Content), &reviewPayload); err != nil || reviewPayload.ResourceSnapshotHash != derivation.ResourceSnapshotHash || len(reviewPayload.Resources) != 1 || reviewPayload.Resources[0].Content != content || len(reviewPayload.Specification.Reviews) != 0 {
 		t.Fatalf("critic resource context changed: %+v %v", reviewPayload, err)
+	}
+	if len(reviewPayload.ExpectedResources) != len(proposalPayload.ExpectedResources) || len(reviewPayload.ExpectedResources) != 1 || reviewPayload.ExpectedResources[0] != proposalPayload.ExpectedResources[0] || reviewPayload.ExpectedResources[0] != reviewPayload.Specification.Resources[0] {
+		t.Fatal("critic 未读取同一 owner 派生的 ExpectedResources，不能只在指令中引用不存在的输入")
+	}
+	for _, kind := range ReviewKinds() {
+		critic, err := AuthoringReviewCommand(derivation, spec, kind, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var input struct {
+			ExpectedResources []workspace.GoalSpecificationResource `json:"expectedResources"`
+			Specification workspace.GoalSpecification `json:"specification"`
+			ProposalHash string `json:"proposalHash"`
+		}
+		if err := json.Unmarshal([]byte(critic.Request.PromptContext.Sections[1].Content), &input); err != nil {
+			t.Fatal(err)
+		}
+		if len(input.ExpectedResources) != 1 || input.ExpectedResources[0] != proposalPayload.ExpectedResources[0] || len(input.Specification.Reviews) != 0 || input.ProposalHash != spec.ContentHash() {
+			t.Fatalf("独立 critic %s 读取不同资源、其他结论或非 exact proposal", kind)
+		}
+		if !strings.Contains(critic.Request.PromptContext.Sections[0].Content, "审查 Specification.Resources 是否精确等于 ExpectedResources") || strings.Contains(critic.Request.PromptContext.Sections[0].Content, "Verification 使用 UNVERIFIED") {
+			t.Fatal("review 指令不能要求修改不可变 proposal 或回显不属于 review wire 的字段")
+		}
 	}
 	changed := spec.Clone()
 	changed.Resources[0].Available = false

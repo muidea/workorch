@@ -54,6 +54,15 @@ patch、terminal 回到 active、projection 反向驱动 lifecycle。
 
 SM-2 是 `RuntimeFacts -> RuntimeDecision + AuthoritySnapshot + AuthorityTransaction` 的唯一权威。
 
+sealed Profile 可声明有界 `LineageAssertions`，但它们只是 ordinary proof 的附加 all-of guards，不是另一份
+success/credit ledger。`ConsumptionPoint`（Profile wire 的 `consumptionPoint`）仅声明 `execution` 或
+`post_terminal_delivery` 消费时点，不新增持久化 phase、Runtime 状态机或跨 owner 目标状态字段；旧 `phase` wire 拒绝。
+SM-3 必须保全从 sealed Definition source 编译的 exact CWI/declaration、完整 TargetText 字节 hash 与 rule hash；
+SM-2 assessment 和 archive 必须重编同一来源并使用原 dispatch 的 evidence cutoff。两侧无声明免除 guard，单侧缺失
+或来源漂移 fail closed；无关 source 不收紧当前无规则 CWI。completed rounds、owner receipt、repair/fresh validation
+只消费既有正式账本及其反向证明，future facts 不补旧 credit，ordinary proof 不可跳过。delivery 声明在执行期延期，
+由 SM-4 只读投影消费 immutable material seal 与 exact ordered 三 owner ack，不回写 coverage 或终态。
+
 ```text
 load facts
   -> prerequisite missing: acquire + typed commit + reduce
@@ -681,12 +690,20 @@ sealed authority + preflight ready
   不得通过倒置 startup 权重来修复 teardown 顺序。
 - inventory pagination必须有cursor visited-set、page/item hard limit并拒绝`A -> B -> A`循环；duplicate commands-ready只释放
   同一owner-local handoff一次，不能重复drive或跳过inventory completeness。
-- reducer terminal 已 sealed 后，SM-4 仅重试已持久化 terminal delivery request，等待 Result、Workspace、Run
-  owner acknowledgement。Result owner acknowledgement 必须携带其按 sealed material 派生并已持久化的 exact `ResultID`；
-  SM-4 只把该 fact 原样交给最终 Run delivery，Run owner将其封存为 `TerminalResultID`，不得自行派生或查询 Result。
-  Workspace/Run acknowledgement 禁止携带 `ResultID`。projection health 不参与 reducer，也不是 runtime blocker。
+- reducer terminal 已 sealed 后，SM-4 在首次 Result I/O 前以 scope-only private event 编译并 CAS 保存不可变
+  `RuntimeTerminalMaterialSeal`。唯一共享纯 compiler 从独立加载、已校验的持久 aggregate 生成完整 Result material；
+  generation revision 是 seal CAS 的 after-image（previous + 1），同次 CAS 禁止混写 authority、recovery、lease 或 ack。
+  seal 保存 exact delivery identity、完整材料/hash 与当时 RecoveryPolicy/Ledger；初始化不得注入，后续 CAS 不得删除或修改。
+  terminal 无 seal 且零 ack 是合法待交付状态；有 ack 却无 seal 拒绝，不静默补写历史材料。
+- SM-4 重试只重用原 seal，再依 Result→Workspace→Run 等待 exact ordered acknowledgement。Result ack 必须携带按
+  sealed material 派生并已持久化的 exact `ResultID` 和完整 `ResultCloseout`；body 缺失、漂移或不同于原 seal 均拒绝。
+  SM-4 只把该 ResultID 原样交给最终 Run delivery，Run owner 将其封存为 `TerminalResultID`，不得自行派生或查询 Result。
+  Workspace/Run acknowledgement 禁止携带 Result body/ID。raw clone 保持 nil/empty 与原诊断；先校验原值，不能先
+  normalize 掩盖错误。fresh-load、回执准入及完成谓词共用不递归 aggregate 校验的 seal validator；0/1/2 ack 均未完成。
+  后续 recovery/lease/ack revision 可以推进，但不重编旧材料。owner seal 与独立 CAS 证明生产来源和不可变性，
+  同档 body/hash 不构成任意整档协同篡改的外部证明。projection health 不参与 reducer，也不是 runtime blocker。
 - Result feedback 只允许当前封存版本；缺失、旧版及未知版在 Run record/aggregate/initialize/material 入口拒绝，不由
-  recovery 升级或补写。SM-4 同版本重启从原 aggregate 重投完全相同的 Result material/hash，仍按既有 delivery ledger
+  recovery 升级或补写。SM-4 同版本重启从原 material seal 重投完全相同的 Result material/hash，仍按既有 delivery ledger
   等待三 owner ack；此版本门禁不改变 SM-2 验收裁决或 SM-1 生命周期 owner。
 - catalog retirement 后若旧 no-effect binding 仍为 current binding，SM-4 必须先投递 typed `CWIBindingRetired` fact，由
   SM-2 唯一 reducer 退休 exact catalog lineage 并 reopen CWI；事件完成前旧 binding 不可作为 operation authority，也不能把

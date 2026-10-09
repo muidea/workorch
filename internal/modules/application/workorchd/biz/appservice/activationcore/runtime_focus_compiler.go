@@ -296,6 +296,7 @@ func finalizeRuntimeCoverage(compiled compiledCoverage, allUnits []workUnit, pro
 	if err := runtimecontract.ValidateRuntimeDefinitionImplementationWorkPolicies(compiled.DefinitionFocuses, profiles); err != nil {
 		return compiledCoverage{}, err
 	}
+	if err := runtimecontract.ValidateRuntimeDefinitionLineageAssertions(compiled.DefinitionFocuses, profiles); err != nil { return compiledCoverage{}, err }
 	if err := runtimecontract.ValidateRuntimeDefinitionVerificationPolicies(compiled.DefinitionFocuses, profiles); err != nil {
 		return compiledCoverage{}, err
 	}
@@ -337,6 +338,7 @@ func newCompiledRuntimeDefinitionFocus(focus runtimecontract.CoverageFocus, poli
 		return runtimecontract.RuntimeDefinitionFocus{}, fmt.Errorf("runtime Definition focus compiler requires exactly one focus")
 	}
 	definition := compiled[0]
+	definition.LineageAssertions = append([]runtimecontract.RuntimeLineageAssertionRule(nil), policy.LineageAssertions...)
 	if policy.ValidationFailureRepairConvergence != nil {
 		value := policy.ValidationFailureRepairConvergence.Clone()
 		definition.ValidationFailureRepairConvergence = &value

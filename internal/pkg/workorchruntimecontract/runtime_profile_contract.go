@@ -104,6 +104,8 @@ type RuntimeProfileEvidenceRequirement struct {
 	// terminal proof requirement and therefore cannot add state_change to the
 	// DoD terminal evidence kinds.
 	ValidationFailureRepairConvergence *RuntimeValidationFailureRepairConvergence
+	// LineageAssertions 是普通 proof 之外的 all-of guard，不授予独立 evidence credit。
+	LineageAssertions []RuntimeLineageAssertionRule `json:",omitempty"`
 	// ImplementationWorkPolicy is a separate, default-absent declaration. It
 	// cannot borrow the rejected-validation trigger or change terminal proof.
 	ImplementationWorkPolicy    *RuntimeImplementationWorkPolicy
@@ -383,6 +385,12 @@ func ValidateRuntimeProfileContracts(values []RuntimeProfileContract) error {
 				if err := item.VerificationPolicy.Validate(); err != nil {
 					return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
 				}
+			}
+			if err := ValidateRuntimeLineageAssertionRules(item.LineageAssertions); err != nil {
+				return fmt.Errorf("runtime profile evidence requirement %q: %w", item.ID, err)
+			}
+			if len(item.LineageAssertions) != 0 && len(item.RequiredEvidenceKinds) == 0 {
+				return fmt.Errorf("lineage assertions cannot provide standalone evidence credit")
 			}
 			if item.ImplementationWorkPolicy != nil {
 				if len(item.RequiredEvidenceKinds) != 1 || item.RequiredEvidenceKinds[0] != EvidenceKindValidation {
@@ -735,6 +743,7 @@ func normalizeRuntimeProfileEvidenceRequirements(values []RuntimeProfileEvidence
 		})
 		value.RequiredOwnerFacts = nilIfEmpty(facts)
 		value.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(value.OwnerFactConvergences)
+		value.LineageAssertions = slices.Clone(value.LineageAssertions)
 		value.ValidationFailureRepairConvergence = cloneRuntimeValidationFailureRepairConvergence(value.ValidationFailureRepairConvergence)
 		if value.ImplementationWorkPolicy != nil {
 			policy := value.ImplementationWorkPolicy.Normalized()
@@ -815,7 +824,7 @@ func sameRuntimeProfileContract(left RuntimeProfileContract, right RuntimeProfil
 	}
 	for idx := range left.EvidenceRequirements {
 		l, r := left.EvidenceRequirements[idx], right.EvidenceRequirements[idx]
-		if !SameRuntimeImplementationWorkPolicy(l.ImplementationWorkPolicy, r.ImplementationWorkPolicy) ||
+		if !slices.Equal(l.LineageAssertions, r.LineageAssertions) || !SameRuntimeImplementationWorkPolicy(l.ImplementationWorkPolicy, r.ImplementationWorkPolicy) ||
 			!SameRuntimeVerificationPolicy(l.VerificationPolicy, r.VerificationPolicy) {
 			return false
 		}
@@ -885,6 +894,7 @@ type RuntimeSourceEvidencePolicy struct {
 	RequiredOwnerFacts                   []RuntimeOwnerFactRequirement
 	OwnerFactConvergences                []RuntimeOwnerFactConvergence
 	ValidationFailureRepairConvergence   *RuntimeValidationFailureRepairConvergence
+	LineageAssertions                   []RuntimeLineageAssertionRule
 	ImplementationWorkPolicy             *RuntimeImplementationWorkPolicy
 	VerificationPolicy                   *RuntimeVerificationPolicy
 	ValidationRecipeID                   string
@@ -982,6 +992,7 @@ func runtimeSourceWildcardQualityRequirements(values []RuntimeProfileEvidenceReq
 			RejectedStepKinds:                    append([]string(nil), value.RejectedStepKinds...),
 			MetricConstraints:                    append([]string(nil), value.MetricConstraints...),
 			ArtifactRefs:                         append([]string(nil), value.ArtifactRefs...),
+			LineageAssertions:                    slices.Clone(value.LineageAssertions),
 			VerificationPolicy:                   value.VerificationPolicy,
 			RequiredOwnerFacts:                   append([]RuntimeOwnerFactRequirement(nil), value.RequiredOwnerFacts...),
 			OwnerFactConvergences:                CloneRuntimeOwnerFactConvergences(value.OwnerFactConvergences),
@@ -1011,6 +1022,9 @@ func runtimeSourceFilterRequirementsByID(values []RuntimeProfileEvidenceRequirem
 
 func mergeRuntimeSourceEvidencePolicy(base RuntimeSourceEvidencePolicy, requirements []RuntimeProfileEvidenceRequirement) (RuntimeSourceEvidencePolicy, error) {
 	for _, requirement := range requirements {
+		var lineageErr error
+		base.LineageAssertions, lineageErr = mergeRuntimeLineageAssertionRules(base.LineageAssertions, requirement.LineageAssertions)
+		if lineageErr != nil { return RuntimeSourceEvidencePolicy{}, lineageErr }
 		// Stable unique union for required evidence / rejected kinds.
 		base.RequiredEvidenceKinds = runtimeSourceStableStringUnion(base.RequiredEvidenceKinds, requirement.RequiredEvidenceKinds)
 		base.RejectedStepKinds = runtimeSourceStableStringUnion(base.RejectedStepKinds, requirement.RejectedStepKinds)
@@ -1199,6 +1213,8 @@ func RuntimeSourceEvidencePolicyRetainsDeclaration(policy RuntimeSourceEvidenceP
 	if declaration.ImplementationWorkPolicy != nil && !SameRuntimeImplementationWorkPolicy(policy.ImplementationWorkPolicy, declaration.ImplementationWorkPolicy) {
 		return false
 	}
+	mergedRules, lineageErr := mergeRuntimeLineageAssertionRules(policy.LineageAssertions, declaration.LineageAssertions)
+	if lineageErr != nil || !slices.Equal(mergedRules, policy.LineageAssertions) { return false }
 	// Capability-state identities have no item-level projection in this compiler.
 	return len(declaration.CapabilityStateRequirements) == 0
 }

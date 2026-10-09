@@ -39,6 +39,43 @@ func mustRuntimeLifecycleFence(t *testing.T, run *runmodel.Run) *runtimecontract
 	return fence
 }
 
+// runtimeSealTerminalMaterialForTest 经真实 SM-4 私有事件封存首次材料，不补造 seal 或历史回执。
+func runtimeSealTerminalMaterialForTest(t *testing.T, repository runtime.RuntimeStateRepository, workspaceID common.WorkspaceID, runID common.RunID) runtime.RuntimeAggregate {
+	t.Helper()
+	controller, err := runtime.NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := repository.Load(context.Background(), workspaceID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := before.Validate(); err != nil {
+		t.Fatalf("首次 seal 前像非法: %v", err)
+	}
+	result, err := controller.ApplyInternalEvent(context.Background(), runtime.RuntimeInternalEvent{
+		Kind: runtime.RuntimeInternalEventTerminalMaterialSealRequired,
+		Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
+		Delivery: &runtime.RuntimeInternalDeliveryPayload{},
+	})
+	if err != nil {
+		t.Fatalf("首次 terminal material seal: %v", err)
+	}
+	if result.Aggregate.TerminalMaterialSeal == nil {
+		t.Fatal("SM-4 未持久化 terminal material seal")
+	}
+	if before.TerminalMaterialSeal != nil || result.Aggregate.StateRevision != before.StateRevision+1 || result.Aggregate.TerminalMaterialSeal.GenerationStateRevision != result.Aggregate.StateRevision {
+		t.Fatal("fixture 必须执行首次独立 seal CAS，不能复用已有材料或补造 revision")
+	}
+	withoutSeal := result.Aggregate.CloneRaw()
+	withoutSeal.TerminalMaterialSeal = nil
+	withoutSeal.StateRevision = before.StateRevision
+	if !reflect.DeepEqual(before, withoutSeal) {
+		t.Fatal("首次 seal 改写 authority、预算、lease 或原诊断")
+	}
+	return result.Aggregate
+}
+
 func mustTerminalDeliveryRequest(t *testing.T, aggregate runtime.RuntimeAggregate) orchestratorevents.RuntimeTerminalDeliveryRequestData {
 	t.Helper()
 	request, err := terminalDeliveryRequest(aggregate)
@@ -90,7 +127,7 @@ func (r *failAfterResultCreateRepository) Get(ctx context.Context, id common.Res
 	return r.ResultRepository.Get(ctx, id)
 }
 
-func startTerminalDeliveryResourceOwners(t *testing.T, ctx context.Context, hub magicevent.Hub, runs repository.RunRepository, workspaces repository.WorkspaceRepository, cleaner repository.WorkspaceDeletionMaterialCleaner) {
+func startTerminalDeliveryResourceOwners(t *testing.T, ctx context.Context, hub magicevent.Hub, runs repository.RunRepository, workspaces repository.WorkspaceRepository, cleaner repository.WorkspaceDeletionMaterialCleaner) func() {
 	t.Helper()
 	runOwner := runmodule.New()
 	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
@@ -99,7 +136,14 @@ func startTerminalDeliveryResourceOwners(t *testing.T, ctx context.Context, hub 
 	if err := runOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
+	var runStopped bool
+	stopRun := func() {
+		if !runStopped {
+			if err := runOwner.Stop(ctx); err != nil { t.Fatal(err) }
+			runStopped = true
+		}
+	}
+	t.Cleanup(stopRun)
 	workspaceOwner := workspacemodule.New()
 	if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(hub, workspaces, cleaner, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 		t.Fatal(err)
@@ -107,7 +151,15 @@ func startTerminalDeliveryResourceOwners(t *testing.T, ctx context.Context, hub 
 	if err := workspaceOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = workspaceOwner.Stop(ctx) })
+	var workspaceStopped bool
+	stopWorkspace := func() {
+		if !workspaceStopped {
+			if err := workspaceOwner.Stop(ctx); err != nil { t.Fatal(err) }
+			workspaceStopped = true
+		}
+	}
+	t.Cleanup(stopWorkspace)
+	return func() { stopWorkspace(); stopRun() }
 }
 
 func (r *failAfterResultCreateRepository) Create(ctx context.Context, item *resultmodel.Result) error {
@@ -1213,6 +1265,7 @@ func testTerminalResultPersistenceRestart(t *testing.T, feedbackVersion uint32) 
 	if err := workspaces.Create(ctx, runtimeWorkspaceForPersistedRunTest(t, ctx, runs, "ws-v2", "run-v2", "", "")); err != nil {
 		t.Fatal(err)
 	}
+	stopFirstResourceOwners := startTerminalDeliveryResourceOwners(t, ctx, firstHub, runs, workspaces, workspaces)
 	firstModule := newRuntimeProjectionTestModule(t, firstHub)
 	if err := firstModule.deliverRuntimeTerminal(ctx, aggregate); err == nil {
 		t.Fatal("expected Result-persisted delivery interruption")
@@ -1237,6 +1290,7 @@ func testTerminalResultPersistenceRestart(t *testing.T, feedbackVersion uint32) 
 	if err := resultOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
+	stopFirstResourceOwners()
 	firstHub.Terminate(ctx)
 
 	// The Result has already reached durable storage. Recreate the complete
@@ -1427,6 +1481,7 @@ func TestDeliverRuntimePrerequisiteRefreshExhaustedRestartsAfterTerminalPersiste
 	if err := firstOwner.Start(); err != nil {
 		t.Fatal(err)
 	}
+	stopFirstResourceOwners := startTerminalDeliveryResourceOwners(t, ctx, firstHub, runs, workspaces, workspaces)
 	firstModule := newRuntimeProjectionTestModule(t, firstHub)
 	if err := firstModule.deliverRuntimeTerminal(ctx, aggregate); err == nil {
 		t.Fatal("expected terminal delivery interruption before Result persistence")
@@ -1446,6 +1501,7 @@ func TestDeliverRuntimePrerequisiteRefreshExhaustedRestartsAfterTerminalPersiste
 	if err := firstOwner.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
+	stopFirstResourceOwners()
 	firstHub.Terminate(ctx)
 
 	// Recreate the EventHub, owner and delivery Biz, then reload the terminal

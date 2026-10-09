@@ -111,6 +111,14 @@ func specificationAdmissionViolations(candidate workspacemodel.DefinitionAdmissi
 		}
 	}
 	mappedDoD := make(map[string]bool, len(candidate.DoDInputs))
+	goalSourceCount := 0
+	for _, requirement := range spec.Requirements {
+		for _, ref := range requirement.SourceItemRefs {
+			if ref == spec.GoalItemRef {
+				goalSourceCount++
+			}
+		}
+	}
 	for _, requirement := range spec.Requirements {
 		if !requirement.Required {
 			continue
@@ -127,7 +135,9 @@ func specificationAdmissionViolations(candidate workspacemodel.DefinitionAdmissi
 				}
 			}
 		}
-		if !found {
+		// 独立 exact Goal 不是 DoD obligation；其来源、原文及六审仍必须完整。
+		independentGoal := goalSourceCount == 1 && len(requirement.SourceItemRefs) == 1 && requirement.SourceItemRefs[0] == spec.GoalItemRef && requirement.SourceKind == workspacemodel.GoalRequirementUserExplicit && requirement.Text == candidate.GoalInput.Text
+		if !found && !independentGoal {
 			violations = append(violations, "requirement/"+requirement.ID+"/obligation")
 		}
 	}

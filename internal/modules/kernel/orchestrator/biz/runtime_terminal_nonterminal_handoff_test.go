@@ -67,7 +67,9 @@ func runtimeTerminalNonterminalHandoffSubscribeOwners(
 			return
 		}
 		calls[0]++
+		body := command.Material.RuntimeCloseout.CloneRaw()
 		ack := runtimecontract.RuntimeDeliveryAcknowledgement{
+			ResultCloseout: &body,
 			WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID,
 			ResultID:           common.ResultID(string(delivery.WorkspaceID) + "/" + string(delivery.RunID) + "/result/dod-assessment"),
 			TerminalDeliveryID: delivery.TerminalDeliveryID, Owner: runtimecontract.RuntimeDeliveryOwnerResult,
@@ -235,7 +237,9 @@ func TestRuntimeRunningNonterminalRecoveryTerminalWorkerExitAndRestartMatrix(t *
 			persisted, err := base.Load(ctx, terminal.Facts.WorkspaceID, terminal.Facts.RunID)
 			if err != nil || persisted.DriveLease != nil || !runtimeTerminalDeliveryFullyAcknowledged(persisted) ||
 				persisted.Facts.Recovery.CASReloadAttempts != 1 || persisted.Facts.Recovery.TerminalDeliveryAttempts != 0 ||
-				persisted.StateRevision != terminal.StateRevision+4 || *calls != [3]int{1, 1, 1} ||
+				// 首次材料 seal、三条 owner ack 和 running lease release 各一次 CAS。
+				persisted.StateRevision != terminal.StateRevision+5 || persisted.TerminalMaterialSeal == nil ||
+				persisted.TerminalMaterialSeal.GenerationStateRevision != persisted.TerminalMaterialSeal.Material.RuntimeCloseout.RuntimeStateRevision || *calls != [3]int{1, 1, 1} ||
 				background.asyncFunctionCalls != 0 {
 				t.Fatalf("worker exit did not atomically release/deliver: aggregate=%+v calls=%v timers=%d err=%v", persisted, *calls, background.asyncFunctionCalls, err)
 			}

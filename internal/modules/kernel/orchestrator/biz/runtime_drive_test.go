@@ -8013,9 +8013,13 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 	}
 	t.Cleanup(func() { _ = restartedResultOwner.Stop(ctx) })
 	persistedTerminal, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
-	if err != nil || persistedTerminal.StateRevision != terminalAggregate.RuntimeState.StateRevision || persistedTerminal.Decision.State != runtimecontract.ConvergenceStateComplete {
-		t.Fatalf("P3/P5 restart did not retain terminal authority=%+v err=%v", persistedTerminal, err)
+	if err != nil || persistedTerminal.StateRevision != terminalAggregate.RuntimeState.StateRevision+1 ||
+		persistedTerminal.TerminalMaterialSeal == nil || persistedTerminal.TerminalMaterialSeal.GenerationStateRevision != persistedTerminal.StateRevision ||
+		len(persistedTerminal.DeliveryAcknowledgements) != 0 || !reflect.DeepEqual(persistedTerminal.Decision, terminalAggregate.RuntimeState.Decision) ||
+		persistedTerminal.Decision.State != runtimecontract.ConvergenceStateComplete {
+		t.Fatalf("P3/P5 restart 未保留原 terminal authority 和独立 seal CAS: %v", err)
 	}
+	originalSeal := persistedTerminal.TerminalMaterialSeal.CloneRaw()
 	if err := deliveryModule.deliverRuntimeTerminal(ctx, persistedTerminal); err != nil {
 		t.Fatalf("P3/P5 terminal replay: %v", err)
 	}
@@ -8029,7 +8033,9 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 		t.Fatalf("P3/P5 Workspace replay=%+v err=%v", workspace, err)
 	}
 	finalAggregate, err := restartedBiz.loadRuntime(ctx, "ws-v2", "run-v2")
-	if err != nil || finalAggregate.StateRevision != terminalAggregate.RuntimeState.StateRevision+3 || len(finalAggregate.DeliveryAcknowledgements) != 3 ||
+	if err != nil || finalAggregate.StateRevision != terminalAggregate.RuntimeState.StateRevision+4 || len(finalAggregate.DeliveryAcknowledgements) != 3 ||
+		finalAggregate.TerminalMaterialSeal == nil || !reflect.DeepEqual(originalSeal, *finalAggregate.TerminalMaterialSeal) ||
+		!reflect.DeepEqual(finalAggregate.Decision, persistedTerminal.Decision) ||
 		len(finalAggregate.OperationReceipts) != 1 || len(finalAggregate.Facts.Evidence.Accepted) != 1 ||
 		providerCalls != 2 || stateChangeCalls != 1 {
 		t.Fatalf("P3/P5 replay rewrote authority=%+v provider=%d stateChanges=%d err=%v", finalAggregate, providerCalls, stateChangeCalls, err)
@@ -12211,7 +12217,7 @@ func TestRuntimeDecisionTerminatesBeforeProviderWhenShellConfirmsNoValidationRec
 	}
 }
 
-func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T) {
+func TestRuntimeDecisionRejectsPersistedHistoricalAuthorityBeforeProvider(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
 		Activation: runtimecontract.RuntimeActivationContext{
 			ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "gpt-4o"}},
@@ -12326,10 +12332,18 @@ func TestRuntimeDecisionReconcilesHistoricalAuthorityBeforeProvider(t *testing.T
 	t.Cleanup(func() { observer.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
 	module := newTestBiz(biz, hub, nil)
 
-	next, err := module.driveRuntimeDecision(context.Background(), repository.aggregate, "unused-prefix")
-	if err != nil {
-		t.Fatal(err)
+	before := repository.aggregate.CloneRaw()
+	if err := before.Validate(); err == nil { t.Fatal("损坏持久前像未触发 invariant") }
+	if _, err := module.driveRuntimeDecision(context.Background(), before.CloneRaw(), "unused-prefix"); err == nil || !strings.Contains(err.Error(), "reconciliation preimage invariant") {
+		t.Fatalf("损坏前像未在 provider 前拒绝: %v", err)
 	}
+	if providerCalls != 0 || !reflect.DeepEqual(before, repository.aggregate) { t.Fatal("拒绝损坏前像仍调用 provider 或改写持久材料") }
+	// 原退休正例属于未持久化 SM-2 纯归约，不能将其冒充非法前像的成功 CAS。
+	next := before.CloneRaw()
+	next.Facts, next.Decision, err = runtime.ReduceRuntimeStateWithDirective(next.Facts, &next.Decision.AuthoritySnapshot, next.CoverageProofLineage)
+	if err != nil { t.Fatal(err) }
+	next.StateRevision++
+	if err := next.Validate(); err != nil { t.Fatalf("纯归约退休后像非法: %v", err) }
 	if providerCalls != 0 || next.StateRevision != 8 || next.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 		len(next.CandidateAttempts) != 0 || next.Facts.Repair.RepairAttempts != 0 ||
 		next.Facts.Recovery.PrerequisiteRefreshes != 0 {
@@ -13181,13 +13195,13 @@ func (r *runtimeDriveRepository) Load(_ context.Context, workspaceID common.Work
 	if r == nil || r.aggregate.Facts.WorkspaceID != workspaceID || r.aggregate.Facts.RunID != runID {
 		return runtime.RuntimeAggregate{}, common.ErrNotFound
 	}
-	return r.aggregate, nil
+	return r.aggregate.CloneRaw(), nil
 }
 
 func (r *runtimeDriveRepository) Save(_ context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
 	if r == nil || r.aggregate.StateRevision != expectedRevision {
 		return common.ErrConflict
 	}
-	r.aggregate = aggregate
+	r.aggregate = aggregate.CloneRaw()
 	return nil
 }

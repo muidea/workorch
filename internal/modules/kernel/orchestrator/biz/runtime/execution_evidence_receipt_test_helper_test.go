@@ -1974,6 +1974,9 @@ func runtimeTestDefinitionFocuses(facts runtimecontract.RuntimeFacts) []runtimec
 		if declared, found := profileOnlyByCoverage[item.ID]; found {
 			compiled.ValidationFailureRepairConvergence = declared.ValidationFailureRepairConvergence
 		}
+		sourcePolicy, err := runtimecontract.CompileRuntimeSourceEvidencePolicy(item.SourceScope, item.SourceID, facts.Activation.ExecutionContract.ProfileContracts, nil)
+		if err != nil { panic(err) }
+		compiled.LineageAssertions = append([]runtimecontract.RuntimeLineageAssertionRule(nil), sourcePolicy.LineageAssertions...)
 		ret = append(ret, compiled)
 	}
 	return ret

@@ -3312,7 +3312,9 @@ func TestRuntimeGovernanceFailureUsesAtomicTerminalSuccessorAcrossPartialAckAndR
 			return
 		}
 		identity := command.Identity()
+		body := command.Material.RuntimeCloseout.CloneRaw()
 		ack := runtimecontract.RuntimeDeliveryAcknowledgement{
+			ResultCloseout: &body,
 			WorkspaceID: identity.WorkspaceID, RunID: identity.RunID, TerminalDeliveryID: identity.TerminalDeliveryID,
 			Owner: runtimecontract.RuntimeDeliveryOwnerResult, ResultID: common.ResultID(string(identity.WorkspaceID) + "/" + string(identity.RunID) + "/result/dod-assessment"), AcknowledgedState: runtimecontract.RuntimeDeliveryAcknowledgedResultRecorded,
 			AuthoritySnapshotID: identity.AuthoritySnapshotID, CausationID: command.CausationID, Outcome: identity.Outcome,
@@ -3800,12 +3802,17 @@ func runtimeAdministrativeTerminalPartialAckFixture(
 	if err != nil || !runtime.AdministrativeTerminationAwaitsTerminalDelivery(terminated) || terminated.DriveLease != nil {
 		t.Fatalf("prepare administrative terminal: aggregate=%+v err=%v", terminated, err)
 	}
+	terminated = runtimeSealTerminalMaterialForTest(t, repository, initial.Facts.WorkspaceID, initial.Facts.RunID)
 	delivery := mustTerminalDeliveryRequest(t, terminated)
 	for _, deliveryOwner := range []runtimecontract.RuntimeDeliveryOwner{
 		runtimecontract.RuntimeDeliveryOwnerResult,
 		runtimecontract.RuntimeDeliveryOwnerWorkspace,
 	} {
 		acknowledgement := adversarialTerminalAcknowledgement(delivery, deliveryOwner)
+		if deliveryOwner == runtimecontract.RuntimeDeliveryOwnerResult {
+			body := terminated.TerminalMaterialSeal.Material.RuntimeCloseout.CloneRaw()
+			acknowledgement.ResultCloseout = &body
+		}
 		terminated, err = runtimeCommitTerminalAcknowledgementForCASTest(ctx, repository, acknowledgement)
 		if err != nil {
 			t.Fatalf("prepare partial terminal acknowledgement %q: %v", deliveryOwner, err)
@@ -3900,12 +3907,16 @@ func TestTerminalDeliveryLeaseScheduleCASRebasesFinalAcknowledgementAndReleasesG
 func TestTerminalDeliveryRecoveryBudgetCASRebasesPartialAcknowledgementOnce(t *testing.T) {
 	ctx := context.Background()
 	aggregate := runtimeTerminalAggregate(t)
-	delivery := mustTerminalDeliveryRequest(t, aggregate)
 	baseRepository := &inMemoryRuntimeStateRepository{aggregate: &aggregate}
+	aggregate = runtimeSealTerminalMaterialForTest(t, baseRepository, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+	delivery := mustTerminalDeliveryRequest(t, aggregate)
+	acknowledgement := adversarialTerminalAcknowledgement(delivery, runtimecontract.RuntimeDeliveryOwnerResult)
+	body := aggregate.TerminalMaterialSeal.Material.RuntimeCloseout.CloneRaw()
+	acknowledgement.ResultCloseout = &body
 	beforeRecovery := aggregate.Facts.Recovery
 	repository := &runtimeAcknowledgementCASWinnerRepository{
 		delegate:        baseRepository,
-		acknowledgement: adversarialTerminalAcknowledgement(delivery, runtimecontract.RuntimeDeliveryOwnerResult),
+		acknowledgement: acknowledgement,
 		match: func(candidate runtime.RuntimeAggregate) bool {
 			return candidate.DriveLease == nil &&
 				candidate.Facts.Recovery.TerminalDeliveryAttempts == beforeRecovery.TerminalDeliveryAttempts+1

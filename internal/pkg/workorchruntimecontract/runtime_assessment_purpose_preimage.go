@@ -20,6 +20,9 @@ type runtimeAssessmentPurposeBindingPreimage struct {
 	bindings             []CoverageEvidenceBinding
 	semanticManifestHash string
 	obligation           RuntimeSemanticProofObligation
+	// 原 accepted batch 的完整评审前像，只在同次纯反证中使用。
+	acceptedDocument     RuntimeSemanticPlanDocument
+	ownerCatalogs        []RuntimeOperationAdmissibility
 }
 
 func (p RuntimeAssessmentPurposePreimage) Clone() RuntimeAssessmentPurposePreimage {
@@ -109,10 +112,16 @@ func runtimeAssessmentPurposePreimagesFromSemanticGeneration(
 	}
 	documents := make(map[string]RuntimeSemanticPlanDocument, len(ledger.BatchDocuments))
 	for _, document := range ledger.BatchDocuments {
+		if _, duplicate := documents[document.BatchID]; duplicate {
+			return nil, fmt.Errorf("runtime assessment purpose has duplicate batch document")
+		}
 		documents[document.BatchID] = document.Clone()
 	}
 	results := make(map[string]RuntimeSemanticPlanBatchFeasibilityResult, len(ledger.BatchFeasibilityResults))
 	for _, result := range ledger.BatchFeasibilityResults {
+		if _, duplicate := results[result.BatchID]; duplicate {
+			return nil, fmt.Errorf("runtime assessment purpose has duplicate batch feasibility")
+		}
 		results[result.BatchID] = result.Normalized()
 	}
 
@@ -130,6 +139,12 @@ func runtimeAssessmentPurposePreimagesFromSemanticGeneration(
 		if !found {
 			continue
 		}
+		if err := validateRuntimeSemanticPlanBatchAgainstValidatedManifest(rawBatch, validated); err != nil {
+			return nil, err
+		}
+		if batch.DocumentHash != StableRuntimeSemanticPlanDocumentHash(document) || document.BatchID != batch.BatchID || document.BatchSequence != batch.Sequence {
+			return nil, fmt.Errorf("runtime assessment purpose requires exact accepted batch document")
+		}
 		focuses, _, err := compileRuntimeSemanticBindingsWithValidatedManifest(validated, batch.RequestLogicalID, document, feasibilities)
 		if err != nil {
 			return nil, fmt.Errorf("runtime assessment purpose semantic batch %q: %w", batch.BatchID, err)
@@ -140,6 +155,8 @@ func runtimeAssessmentPurposePreimagesFromSemanticGeneration(
 			if err != nil {
 				return nil, err
 			}
+			preimage.acceptedDocument = document.Clone()
+			preimage.ownerCatalogs = CloneRuntimeOperationAdmissibilities(manifest.OwnerCatalogs)
 			ret = append(ret, preimage)
 		}
 	}
@@ -205,6 +222,9 @@ func runtimeAssessmentPurposeBatchFeasibilities(
 	results map[string]RuntimeSemanticPlanBatchFeasibilityResult,
 ) ([]RuntimeSemanticProofFeasibility, bool) {
 	if result, found := results[batch.BatchID]; found {
+		if result.Validate(batch, document, *ledger.Manifest) != nil {
+			return nil, false
+		}
 		return append([]RuntimeSemanticProofFeasibility(nil), result.Feasibilities...), true
 	}
 	if ledger.Document != nil && ledger.Document.BatchID == batch.BatchID &&

@@ -2,6 +2,7 @@ package workorchruntimecontract
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -47,6 +48,7 @@ type RuntimeDefinitionFocus struct {
 	ValidationRecipeID                 string
 	RequiredCheckRefs                  []string
 	ValidationFailureRepairConvergence *RuntimeValidationFailureRepairConvergence
+	LineageAssertions []RuntimeLineageAssertionRule `json:",omitempty"`
 	// ImplementationWorkPolicy is an exact-CWI projection of the sealed
 	// Profile declaration, not a working binding or executable operation.
 	ImplementationWorkPolicy *RuntimeImplementationWorkPolicy `json:",omitempty"`
@@ -86,6 +88,7 @@ func (f RuntimeDefinitionFocus) Normalized() RuntimeDefinitionFocus {
 	f.TargetSelectorCandidateRefs = normalizeStrings(f.TargetSelectorCandidateRefs)
 	f.ProspectiveTargetAllOfConstraintRefs = NormalizeRuntimeProspectiveTargetAllOfConstraintRefs(f.ProspectiveTargetAllOfConstraintRefs)
 	f.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(f.RequiredOwnerFacts)
+	f.LineageAssertions = append([]RuntimeLineageAssertionRule(nil), f.LineageAssertions...)
 	f.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(f.OwnerFactConvergences)
 	f.EvidenceDeclarationRef = strings.TrimSpace(f.EvidenceDeclarationRef)
 	f.ValidationRecipeID = strings.TrimSpace(f.ValidationRecipeID)
@@ -358,6 +361,7 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Runt
 				return fmt.Errorf("runtime definition focus %q owner-fact acquisition selector does not match its declaration", focus.ID)
 			}
 		}
+		if err := ValidateRuntimeLineageAssertionRules(focus.LineageAssertions); err != nil { return err }
 		if focus.VerificationPolicy != nil {
 			if err := focus.VerificationPolicy.Validate(); err != nil {
 				return fmt.Errorf("runtime definition focus %q: %w", focus.ID, err)
@@ -388,6 +392,6 @@ func sameRuntimeDefinitionFocus(left, right RuntimeDefinitionFocus) bool {
 		left.EvidenceDeclarationRef == right.EvidenceDeclarationRef && left.ValidationRecipeID == right.ValidationRecipeID && sameStrings(left.RequiredCheckRefs, right.RequiredCheckRefs) &&
 		SameRuntimeValidationFailureRepairConvergence(left.ValidationFailureRepairConvergence, right.ValidationFailureRepairConvergence) &&
 		SameRuntimeImplementationWorkPolicy(left.ImplementationWorkPolicy, right.ImplementationWorkPolicy) &&
-		SameRuntimeVerificationPolicy(left.VerificationPolicy, right.VerificationPolicy) &&
+		slices.Equal(left.LineageAssertions, right.LineageAssertions) && SameRuntimeVerificationPolicy(left.VerificationPolicy, right.VerificationPolicy) &&
 		sameStrings(left.MetricConstraints, right.MetricConstraints) && sameStrings(left.ArtifactRefs, right.ArtifactRefs)
 }

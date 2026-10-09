@@ -44,7 +44,8 @@ Workspace owner seals admitted startup input
   -> SM-3 persists/evaluates candidate, obtains manifest-declared static conformance and dynamic applicability facts, then seals dispatch
   -> capability owner returns factual result/receipt
   -> SM-2 credits evidence, settles/reopens CWI or seals terminal
-  -> SM-4 delivers Result -> Workspace -> Run; Result acknowledgement relays the exact owner-derived ResultID
+  -> SM-4 CAS-seals immutable terminal material before owner I/O, then delivers Result -> Workspace -> Run
+  -> Result acknowledgement relays the exact owner-derived ResultID and persisted ResultCloseout
 ```
 
 administrative cancellation/replacement 使用独立但同方向的交接链：

@@ -208,6 +208,7 @@ func DeriveRuntimeAssessmentAdjudication(
 	facts RuntimeFacts,
 	completed []RuntimeDispatchRecord,
 	lineage []RuntimeCoverageProofLineage,
+	lineageSources RuntimeLineageAssertionSources,
 ) (RuntimeAssessmentAdjudication, error) {
 	if dispatch.Candidate.Assessment == nil || dispatch.AssessmentAuthorityInput == nil {
 		return RuntimeAssessmentAdjudication{}, fmt.Errorf("runtime assessment adjudication requires assessment dispatch authority")
@@ -238,6 +239,12 @@ func DeriveRuntimeAssessmentAdjudication(
 			continue
 		}
 		coverageProofs, complete := deriveAssessmentCoverageProofs(dispatch, authority.Purpose, authority.Focus, binding, facts.Evidence.Accepted, completed, lineage)
+		if authority.Purpose == RuntimeAssessmentPurposeDefinitionProof {
+			if !reflect.DeepEqual(lineageSources.Facts, facts) {
+				return RuntimeAssessmentAdjudication{}, fmt.Errorf("lineage assertion facts differ from assessment source")
+			}
+			if !RuntimeExecutionLineageAssertionsSatisfied(binding, lineageSources, dispatch.Transaction.EvidenceRevision) { complete = false }
+		}
 		result.Proofs = append(result.Proofs, coverageProofs...)
 		if !complete {
 			result.Disposition = AssessmentDispositionRepairableGap
@@ -252,6 +259,7 @@ func ValidateRuntimeAssessmentAdjudication(
 	facts RuntimeFacts,
 	completed []RuntimeDispatchRecord,
 	lineage []RuntimeCoverageProofLineage,
+	lineageSources RuntimeLineageAssertionSources,
 ) error {
 	if dispatch.AssessmentAdjudication == nil || dispatch.AssessmentAdjudicationHash == "" || fact.AdjudicationHash == "" {
 		return fmt.Errorf("committed runtime assessment dispatch %q requires double-entry adjudication", dispatch.ID)
@@ -273,7 +281,7 @@ func ValidateRuntimeAssessmentAdjudication(
 		!sameCoverageWorkItemIDs(authority.Focus.CoverageWorkItemIDs, fact.CoverageWorkItemIDs) {
 		return fmt.Errorf("runtime assessment dispatch %q authority source does not match definition seed", dispatch.ID)
 	}
-	expected, err := DeriveRuntimeAssessmentAdjudication(dispatch, facts, completed, lineage)
+	expected, err := DeriveRuntimeAssessmentAdjudication(dispatch, facts, completed, lineage, lineageSources)
 	if err != nil {
 		return err
 	}
@@ -286,7 +294,7 @@ func ValidateRuntimeAssessmentAdjudication(
 // ValidateRuntimeAssessmentAdjudications enforces the completed-dispatch side
 // of the assessment double entry after the global evidence ledger has proved
 // the one-to-one fact/dispatch chronology.
-func ValidateRuntimeAssessmentAdjudications(facts RuntimeFacts, completed []RuntimeDispatchRecord, lineage []RuntimeCoverageProofLineage) error {
+func ValidateRuntimeAssessmentAdjudications(facts RuntimeFacts, completed []RuntimeDispatchRecord, lineage []RuntimeCoverageProofLineage, lineageSources RuntimeLineageAssertionSources) error {
 	byID := make(map[string]RuntimeAssessmentFact, len(facts.Assessments))
 	for _, fact := range facts.Assessments {
 		byID[fact.ID] = fact
@@ -304,7 +312,7 @@ func ValidateRuntimeAssessmentAdjudications(facts RuntimeFacts, completed []Runt
 		if !found {
 			return fmt.Errorf("committed runtime assessment dispatch %q has no assessment fact", dispatch.ID)
 		}
-		if err := ValidateRuntimeAssessmentAdjudication(dispatch, fact, facts, completed, lineage); err != nil {
+		if err := ValidateRuntimeAssessmentAdjudication(dispatch, fact, facts, completed, lineage, lineageSources); err != nil {
 			return err
 		}
 	}

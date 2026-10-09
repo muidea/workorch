@@ -155,12 +155,6 @@ func (c *RuntimeController) Load(ctx context.Context, workspaceID common.Workspa
 	return c.repository.Load(ctx, workspaceID, runID)
 }
 
-// reconcileAuthorityBeforeCandidate CAS-persists the deterministic SM-2
-// cleanup required when a loaded aggregate still contains a no-longer-current
-// focus-scoped prerequisite/resource. It is intentionally narrower than
-// candidate admission: no provider request, candidate attempt, repair budget,
-// or owner operation is involved.
-
 // commitAssessment is invoked only by RuntimeInternalEventAssessmentObserved.
 // It is deliberately private so external adapters cannot bypass the
 // Orchestrator's single internal-event mutation boundary.

@@ -152,9 +152,22 @@ func TerminalDeliveryFullyAcknowledged(aggregate RuntimeAggregate) bool {
 		aggregate.Decision.AuthoritySnapshot.ID,
 		outcome,
 	)
-	return terminalDeliveryOwnerAcknowledged(aggregate, deliveryID, runtimecontract.RuntimeDeliveryOwnerResult) &&
-		terminalDeliveryOwnerAcknowledged(aggregate, deliveryID, runtimecontract.RuntimeDeliveryOwnerWorkspace) &&
-		terminalDeliveryOwnerAcknowledged(aggregate, deliveryID, runtimecontract.RuntimeDeliveryOwnerRun)
+	if !terminalDeliveryOwnerAcknowledged(aggregate, deliveryID, runtimecontract.RuntimeDeliveryOwnerResult) ||
+		!terminalDeliveryOwnerAcknowledged(aggregate, deliveryID, runtimecontract.RuntimeDeliveryOwnerWorkspace) ||
+		!terminalDeliveryOwnerAcknowledged(aggregate, deliveryID, runtimecontract.RuntimeDeliveryOwnerRun) {
+		return false
+	}
+	bindings, err := RuntimeDeliveryLineageBindings(aggregate)
+	if err != nil {
+		return false
+	}
+	for _, binding := range bindings {
+		state, err := EvaluateRuntimeDeliveryLineageAssertion(aggregate, binding)
+		if err != nil || state != runtimecontract.RuntimeDeliveryLineageSatisfied {
+			return false
+		}
+	}
+	return true
 }
 
 // AdministrativeTerminationAwaitsTerminalDelivery identifies the sole legal

@@ -130,6 +130,7 @@ func (b RuntimeBootstrap) Validate() error {
 	if err := ValidateRuntimeDefinitionFocuses(b.DefinitionSeed, b.DefinitionFocuses); err != nil {
 		return fmt.Errorf("runtime bootstrap definition focuses: %w", err)
 	}
+	if err := ValidateRuntimeDefinitionLineageAssertions(b.DefinitionFocuses, b.Activation.ExecutionContract.ProfileContracts); err != nil { return err }
 	if err := ValidateRuntimeDefinitionVerificationPolicies(b.DefinitionFocuses, b.Activation.ExecutionContract.ProfileContracts); err != nil {
 		return fmt.Errorf("runtime bootstrap verification policies: %w", err)
 	}
