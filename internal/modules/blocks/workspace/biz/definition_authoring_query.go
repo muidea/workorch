@@ -30,6 +30,9 @@ func (m *Biz) queryDefinitionAuthoring(ctx context.Context, cmd workspaceevents.
 	if err := workspaceDeletionRejectsMutation(w); err != nil {
 		return workspaceevents.QueryDefinitionAuthoringResult{}, err
 	}
+	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+		return workspaceevents.QueryDefinitionAuthoringResult{}, err
+	}
 	result := workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: cmd.WorkspaceID, WorkspaceRevision: w.Revision, DeliverableDirectory: w.DeliverableDirectory}
 	if template, templateErr := m.resolvedTemplate(bound, w.TemplateID); templateErr == nil {
 		result.CurrentTemplateSnapshotHash = workspacemodel.WorkspaceTemplateSnapshotHash(template)

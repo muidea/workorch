@@ -22,10 +22,16 @@ func (r DefinitionAuthoringConfirmedRevision) Clone() DefinitionAuthoringConfirm
 }
 
 func (w *Workspace) ValidateDefinitionAuthoringHistory() error {
+	return w.validateDefinitionAuthoringHistory(false)
+}
+func (w *Workspace) ValidateDefinitionAuthoringHistoryView() error {
+	return w.validateDefinitionAuthoringHistory(true)
+}
+func (w *Workspace) validateDefinitionAuthoringHistory(view bool) error {
 	if w == nil {
 		return common.ErrInvalidArgument
 	}
-	if err := w.ValidatePreparationDiagnosticHistory(); err != nil {
+	if err := w.validatePreparationDiagnosticHistory(view); err != nil {
 		return err
 	}
 	if len(w.DefinitionAuthoringHistory) == 0 {
@@ -35,7 +41,7 @@ func (w *Workspace) ValidateDefinitionAuthoringHistory() error {
 		return fmt.Errorf("authoring history lacks current draft or confirmed candidate")
 	}
 	for index, archived := range w.DefinitionAuthoringHistory {
-		goal, dod, specification, ref, err := ConfirmedAuthoringAdmissionSource(&archived.Record, archived.Confirmation, w.ID)
+		goal, dod, specification, ref, err := confirmedAuthoringAdmissionSourceMode(&archived.Record, archived.Confirmation, w.ID, view)
 		if err != nil {
 			return fmt.Errorf("authoring history %d has invalid sealed revision", index)
 		}

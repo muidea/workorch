@@ -106,8 +106,8 @@ func TestAuthoringProviderDocumentFaultsPersistAcrossFileReopen(t *testing.T) {
 						payload, err = json.Marshal(workspace.DefinitionDerivedAcceptance{AuthoringInputHash: record.InputHash, TemplateSnapshotHash: record.TemplateSnapshotHash, AdditionalItems: []string{"补充验收"}})
 					} else if call == 2 {
 						payload, err = json.Marshal(struct {
-							Specification workspace.GoalSpecification `json:"specification"`
-						}{authoringHTTPProposal(t, record)})
+							Mapping workspace.DefinitionAuthoringMapping `json:"mapping"`
+						}{authoringHTTPMapping(t, record)})
 					} else if call != failureCall {
 						t.Error("fault matrix unexpectedly continued beyond first critic")
 						return

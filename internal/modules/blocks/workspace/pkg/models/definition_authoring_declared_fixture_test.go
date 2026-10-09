@@ -39,5 +39,6 @@ func declaredAuthoringLedgerFixture(t testing.TB) (DefinitionAuthoringRecord, Go
 		verification.Declaration = "由 generic Profile 的 validation 声明验证"
 		verification.ProfileID, verification.EvidenceRequirementID, verification.Scope = "generic", "*", "dodItem"
 	}
+	_, _, proposal = currentProposalFixture(t, record.DerivationRequests[0], proposal)
 	return record, proposal
 }

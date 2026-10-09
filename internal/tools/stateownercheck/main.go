@@ -147,8 +147,10 @@ var observedStateCarrierFields = map[string]bool{
 	"internal/modules/blocks/workspace/pkg/models:DefinitionAuthoringPreparationDiagnostic|Stage": true,
 	// Specification critiques and declaration matches are immutable authoring
 	// facts. Workspace Compile, not either Status field, selects admission.
-	"internal/modules/blocks/workspace/pkg/models:GoalSpecificationCompletenessReview|Status":               true,
-	"internal/modules/blocks/workspace/pkg/models:GoalSpecificationVerification|Status":                     true,
+	"internal/modules/blocks/workspace/pkg/models:GoalSpecificationCompletenessReview|Status": true,
+	"internal/modules/blocks/workspace/pkg/models:GoalSpecificationVerification|Status":       true,
+	// 当前 mapping 的 Status 只是 provider 验证声明；owner 重编译与准入仍独立裁决。
+	"internal/modules/blocks/workspace/pkg/models:DefinitionAuthoringVerificationMapping|Status":            true,
 	"internal/modules/blocks/llm/pkg/models:ProviderAdapterCacheHint|Mode":                                  true,
 	"internal/modules/blocks/llm/pkg/models:ProviderContextBudget|ProfileMode":                              true,
 	"internal/modules/blocks/llm/pkg/models:ProviderContextProfile|ProfileMode":                             true,

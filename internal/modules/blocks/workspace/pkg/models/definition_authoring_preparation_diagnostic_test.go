@@ -265,7 +265,7 @@ func TestAuthoringSummaryIgnoresHistoricalPreparationDiagnosticsAfterTargetCompl
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteSpecification(request.PermitID, &proposal, nil, "")
+	record, err = completeCurrentProposalFixture(t, record, request.PermitID, &proposal)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestPreparationDiagnosticSpecificationScopeConfigDriftAndReview(t *testing.
 	request := DefinitionAuthoringSpecificationRequest{RequestID: "proposal", DerivationPermitID: d.DerivationPermitID, Phase: DefinitionSpecificationProposal, ProviderBindingHash: "provider"}
 	r, request, _, _ = r.ReserveSpecification(request)
 	var err error
-	r, err = r.CompleteSpecification(request.PermitID, &proposal, nil, "")
+	r, err = completeCurrentProposalFixture(t, r, request.PermitID, &proposal)
 	if err != nil {
 		t.Fatal(err)
 	}

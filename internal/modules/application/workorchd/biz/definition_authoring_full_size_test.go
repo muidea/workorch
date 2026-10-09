@@ -23,6 +23,7 @@ import (
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspacetestkit "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -100,6 +101,9 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
+			if len(items) != 37 {
+				t.Fatalf("完整候选数量=%d，want 37", len(items))
+			}
 			bindings, err := definitionconfiguration.Compile(all[0], &record.TemplateSnapshot)
 			if err != nil {
 				t.Fatal(err)
@@ -115,27 +119,13 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 			if profileID == "" || evidenceID == "" {
 				t.Fatal("模板缺少 dodItem proof 合同")
 			}
-			proposal := workspace.GoalSpecification{Version: 1, GoalItemRef: workspace.DefinitionAuthoringGoalItemRef, GoalTextHash: workspace.StableDefinitionTextHash(record.Input.GoalText), Dimensions: []workspace.GoalSpecificationDimension{{ID: "delivery", Required: true, Activated: true}}, Requirements: []workspace.GoalSpecificationRequirement{{ID: "goal", DimensionID: "delivery", Required: true, SourceKind: workspace.GoalRequirementUserExplicit, SourceItemRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, Text: record.Input.GoalText}}}
-			for index, item := range items {
-				kind := workspace.GoalRequirementTemplateRequired
-				if index < len(record.Input.AcceptanceRequirements) {
-					kind = workspace.GoalRequirementUserExplicit
-				}
-				id := fmt.Sprintf("item-%d", index)
-				proposal.Requirements = append(proposal.Requirements, workspace.GoalSpecificationRequirement{ID: id, DimensionID: "delivery", Required: true, SourceKind: kind, SourceItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
-				proposal.Obligations = append(proposal.Obligations, workspace.GoalSpecificationObligation{ID: "obligation-" + id, RequirementID: id, DoDItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
-			}
-			proposal.Obligations = append(proposal.Obligations, workspace.GoalSpecificationObligation{ID: "goal-obligation", RequirementID: "goal", DoDItemRefs: []string{items[0].CandidateItemRef}, Text: "目标验收"})
-			for _, obligation := range proposal.Obligations {
-				proposal.Verifications = append(proposal.Verifications, workspace.GoalSpecificationVerification{ID: "verify-" + obligation.ID, ObligationID: obligation.ID, Declaration: "按已封存模板验证", Status: workspace.GoalVerificationDeclared, ProfileID: profileID, EvidenceRequirementID: evidenceID, Scope: "dodItem"})
-			}
-			proposal.Resources, err = workspace.AuthoringSpecificationResources(record.Input, record.DerivationRequests[0].Resources)
+			mapping, _, _, err := workspacetestkit.Proposal(record.DerivationRequests[0], workspace.DefinitionAuthoringVerificationMapping{Declaration: "按已封存模板验证", Status: workspace.GoalVerificationDeclared, ProfileID: profileID, EvidenceRequirementID: evidenceID, Scope: "dodItem"})
 			if err != nil {
 				t.Fatal(err)
 			}
 			payload = struct {
-				Specification workspace.GoalSpecification `json:"specification"`
-			}{authoringWireSpecificationFixture(proposal)}
+				Mapping workspace.DefinitionAuthoringMapping `json:"mapping"`
+			}{mapping}
 		default:
 			kind := strings.TrimPrefix(command.Request.Kind, "workspace/specification/review/")
 			proposal := record.SpecificationRequests[0].Proposal
@@ -144,7 +134,7 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 			}
 			payload = struct {
 				Review workspace.GoalSpecificationCompletenessReview `json:"review"`
-			}{workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立审查", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{"goal"}}}
+			}{workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立审查", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{authoringHTTPGoalRequirementID(t, *proposal)}}}
 		}
 		encoded, err := json.Marshal(payload)
 		if err != nil {

@@ -39,6 +39,7 @@ internal/modules/blocks/workspace/pkg/models/workspace.go|AuthoringSummary.State
 internal/modules/blocks/workspace/pkg/models/workspace.go|AuthoringSummary.FailurePhase|derived_projection|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/models/goal_specification.go|GoalSpecificationCompletenessReview.Status|immutable_outcome|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/models/goal_specification.go|GoalSpecificationVerification.Status|immutable_outcome|internal/modules/blocks/workspace|-
+internal/modules/blocks/workspace/pkg/models/definition_authoring_mapping.go|DefinitionAuthoringVerificationMapping.Status|immutable_outcome|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/events/messages.go|DefinitionAdmissionCandidateDisposition|immutable_outcome|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/events/messages.go|DefinitionAdmissionIntentDisposition|immutable_outcome|internal/modules/blocks/workspace|-
 internal/modules/blocks/workspace/pkg/events/messages.go|DeleteWorkspaceDisposition|immutable_outcome|internal/modules/blocks/workspace|-

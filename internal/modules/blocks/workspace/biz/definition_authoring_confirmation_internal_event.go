@@ -72,7 +72,7 @@ func (m *Biz) prepareDefinitionAuthoringConfirmationWithProof(ctx context.Contex
 		return workspace.DefinitionAuthoringConfirmation{}, common.ErrConflict
 	}
 	record := current.DefinitionAuthoring
-	if err := record.Validate(); err != nil || record.InputHash != cmd.InputHash {
+	if err := validateWorkspaceAuthoringMappingOutcomes(current); err != nil || record.InputHash != cmd.InputHash {
 		return workspace.DefinitionAuthoringConfirmation{}, common.ErrConflict
 	}
 	derivation, specification, err := record.ConfirmableSpecification(cmd.DerivationPermitID, cmd.ProposalHash)
@@ -201,6 +201,9 @@ func (m *Biz) driveDefinitionAuthoringConfirmation(ctx context.Context, cmd work
 	if err := workspaceDeletionRejectsMutation(current); err != nil {
 		return workspaceevents.ConfirmDefinitionAuthoringResult{}, err
 	}
+	if err := validateWorkspaceAuthoringMappingOutcomes(current); err != nil {
+		return workspaceevents.ConfirmDefinitionAuthoringResult{}, err
+	}
 	if journal.Phase == workspace.DefinitionAuthoringConfirmationPrepared {
 		updated := *current
 		completed := journal.Clone()
@@ -219,6 +222,9 @@ func (m *Biz) driveDefinitionAuthoringConfirmation(ctx context.Context, cmd work
 }
 
 func validateConfirmationAdmissionReplay(current *workspace.Workspace, journal workspace.DefinitionAuthoringConfirmation) error {
+	if err := validateWorkspaceAuthoringMappingOutcomes(current); err != nil {
+		return err
+	}
 	if current == nil || current.ValidateDefinitionAuthoringHistory() != nil || len(current.DefinitionAdmissionCandidates) > len(current.DefinitionAuthoringHistory)+1 {
 		return common.ErrConflict
 	}

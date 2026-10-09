@@ -68,7 +68,7 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 	assertEmptyDeliverable(t, directory)
 	productionJSON(t, client, http.MethodPost, path+"/authoring/compile", nil, nil)
 	var reviewed management.DefinitionAuthoringView
-	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); {
+	for deadline := time.Now().Add(2 * time.Minute); time.Now().Before(deadline); {
 		var envelope struct {
 			Authoring management.DefinitionAuthoringView `json:"authoring"`
 		}

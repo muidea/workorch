@@ -215,7 +215,12 @@ func (r DefinitionAuthoringRecord) Clone() DefinitionAuthoringRecord {
 	return r
 }
 
-func (r DefinitionAuthoringRecord) Validate() error {
+func (r DefinitionAuthoringRecord) Validate() error { return r.validate(false) }
+
+// ValidateView validates only the canonical/metadata projection. It is not raw
+// persistence validation and cannot authorize an owner mutation.
+func (r DefinitionAuthoringRecord) ValidateView() error { return r.validate(true) }
+func (r DefinitionAuthoringRecord) validate(view bool) error {
 	if err := r.Input.Validate(); err != nil {
 		return err
 	}
@@ -232,13 +237,13 @@ func (r DefinitionAuthoringRecord) Validate() error {
 		}
 		seen[receipt.RequestID] = true
 	}
-	if err := validateDerivationRequests(r.DerivationRequests, r.Input); err != nil {
+	if err := validateDerivationRequestsMode(r.DerivationRequests, r.Input, view); err != nil {
 		return err
 	}
-	if err := validatePreparationDiagnostics(r); err != nil {
+	if err := validatePreparationDiagnosticsMode(r, view); err != nil {
 		return err
 	}
-	return validateAuthoringSpecificationRequests(r)
+	return validateAuthoringSpecificationRequestsMode(r, view)
 }
 
 const DefinitionAuthoringInputVersionCurrent uint32 = 1

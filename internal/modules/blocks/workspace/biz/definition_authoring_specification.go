@@ -14,7 +14,7 @@ func reduceAuthoringSpecification(o definitionSpecificationObservation, e defini
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
 	record := w.DefinitionAuthoring
-	if err := record.Validate(); err != nil {
+	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
 		return definitionSpecificationTransition{}, err
 	}
 	var next workspace.DefinitionAuthoringRecord
@@ -30,11 +30,14 @@ func reduceAuthoringSpecification(o definitionSpecificationObservation, e defini
 		if cmd.Validate() != nil || cmd.WorkspaceID != w.ID {
 			return definitionSpecificationTransition{}, common.ErrInvalidArgument
 		}
-		if cmd.Proposal != nil {
+		if cmd.Mapping != nil {
 			var derivation *workspace.DefinitionDerivationRequest
 			for _, item := range record.SpecificationRequests {
 				if item.PermitID != cmd.PermitID {
 					continue
+				}
+				if item.Phase != workspace.DefinitionSpecificationProposal {
+					return definitionSpecificationTransition{}, common.ErrConflict
 				}
 				for index := range record.DerivationRequests {
 					candidate := &record.DerivationRequests[index]
@@ -48,11 +51,26 @@ func reduceAuthoringSpecification(o definitionSpecificationObservation, e defini
 			if derivation == nil {
 				return definitionSpecificationTransition{}, common.ErrConflict
 			}
-			if err := validateAuthoringVerificationAgainstSealedTemplate(workspace.WorkspaceTemplateSnapshotHash(&derivation.Template), *derivation, *cmd.Proposal); err != nil {
-				return definitionSpecificationTransition{}, err
+			decoded, decodeErr := workspace.DecodeDefinitionAuthoringMapping(cmd.SuccessAudit.Document.Content)
+			if decodeErr != nil || !reflect.DeepEqual(decoded, *cmd.Mapping) {
+				return definitionSpecificationTransition{}, common.ErrConflict
 			}
+			proposal, semanticErr := workspace.CompileDefinitionAuthoringMapping(*derivation, decoded)
+			if semanticErr == nil && cmd.Proposal != nil && !reflect.DeepEqual(proposal, *cmd.Proposal) {
+				return definitionSpecificationTransition{}, common.ErrConflict
+			}
+			if semanticErr == nil {
+				semanticErr = validateAuthoringVerificationAgainstSealedTemplate(workspace.WorkspaceTemplateSnapshotHash(&derivation.Template), *derivation, proposal)
+			}
+			if semanticErr != nil {
+				diagnostic := workspace.MappingFailureDiagnostic(semanticErr, *cmd.SuccessAudit)
+				next, err = record.CompleteMappingFailure(cmd.PermitID, decoded, *cmd.SuccessAudit, diagnostic)
+			} else {
+				next, err = record.CompleteSpecificationMapping(cmd.PermitID, decoded, *cmd.SuccessAudit)
+			}
+		} else {
+			next, err = record.CompleteSpecification(cmd.PermitID, cmd.Proposal, cmd.Review, cmd.FailureCode, cmd.Diagnostic)
 		}
-		next, err = record.CompleteSpecification(cmd.PermitID, cmd.Proposal, cmd.Review, cmd.FailureCode, cmd.Diagnostic)
 		if err == nil {
 			for _, item := range next.SpecificationRequests {
 				if item.PermitID == cmd.PermitID {
@@ -67,7 +85,10 @@ func reduceAuthoringSpecification(o definitionSpecificationObservation, e defini
 	if err != nil {
 		return definitionSpecificationTransition{}, err
 	}
-	result := workspaceevents.AuthoringSpecificationRequestResult{Request: request.Clone(), Consumed: uint32(len(next.SpecificationRequests)), Remaining: uint32(workspace.DefinitionAuthoringSpecificationRequestLimit - len(next.SpecificationRequests))}
+	if err := validateAuthoringMappingOutcomes(next); err != nil {
+		return definitionSpecificationTransition{}, err
+	}
+	result := workspaceevents.AuthoringSpecificationRequestResult{Request: request.Metadata(), Consumed: uint32(len(next.SpecificationRequests)), Remaining: uint32(workspace.DefinitionAuthoringSpecificationRequestLimit - len(next.SpecificationRequests))}
 	if fresh {
 		result.FreshPermitID = request.PermitID
 	}

@@ -119,8 +119,11 @@ func TestAuthoringFileSpecificationBudgetExhaustionSurvivesRevisions(t *testing.
 				}
 				done := workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: id, PermitID: reserved.AuthoringSpecification.FreshPermitID, FailureCode: "provider_failed"}
 				if kind == "" {
-					done.FailureCode = ""
-					done.Proposal = &proposal
+					sealed, err := owners.repositories.Workspaces.Get(ctx, id)
+					if err != nil {
+						t.Fatal(err)
+					}
+					done = authoringOwnerCompletion(t, *sealed, done.PermitID, proposal)
 				}
 				if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecComplete: &done}); err != nil {
 					t.Fatal(err)

@@ -15,7 +15,7 @@ func reduceDefinitionDerivation(o definitionSpecificationObservation, e definiti
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
 	record := w.DefinitionAuthoring
-	if err := record.Validate(); err != nil {
+	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
 		return definitionSpecificationTransition{}, err
 	}
 	var next workspace.DefinitionAuthoringRecord
@@ -44,6 +44,9 @@ func reduceDefinitionDerivation(o definitionSpecificationObservation, e definiti
 		return definitionSpecificationTransition{}, common.ErrInvalidArgument
 	}
 	if err != nil {
+		return definitionSpecificationTransition{}, err
+	}
+	if err := validateAuthoringMappingOutcomes(next); err != nil {
 		return definitionSpecificationTransition{}, err
 	}
 	result := workspaceevents.DefinitionDerivationRequestResult{Request: workspaceeventmapping.DefinitionDerivationRequestDTO(request), Consumed: uint32(len(next.DerivationRequests)), Remaining: uint32(workspace.DefinitionDerivationRequestLimit - len(next.DerivationRequests))}

@@ -23,6 +23,7 @@ func Contracts() []eventcontract.Contract {
 		TopicWorkspaceTemplateCommandQueryBuiltinDefaults,
 		TopicWorkspaceDefinitionAuthoringQuery,
 		TopicWorkspaceAuthoringDiagnosticQuery,
+		TopicWorkspaceAuthoringSuccessAuditQuery,
 		TopicWorkspacePreparationDiagnosticQuery,
 		TopicWorkspaceAuthoringResourceScopeQuery,
 	)...)

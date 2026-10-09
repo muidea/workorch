@@ -89,7 +89,12 @@ func (r DefinitionDerivationRequestResult) ValidateCompletion(c CompleteDefiniti
 	if err := r.validate(); err != nil {
 		return err
 	}
-	if r.FreshPermitID != "" || r.Request.Input.WorkspaceID != c.WorkspaceID || r.Request.PermitID != c.PermitID || r.Request.FailureCode != c.FailureCode || !reflect.DeepEqual(r.Request.Proposal, c.Proposal) || !reflect.DeepEqual(r.Request.Diagnostic, c.Diagnostic) {
+	var diagnostic *workspace.DefinitionAuthoringDiagnostic
+	if c.Diagnostic != nil {
+		d := c.Diagnostic.Metadata()
+		diagnostic = &d
+	}
+	if r.FreshPermitID != "" || r.Request.Input.WorkspaceID != c.WorkspaceID || r.Request.PermitID != c.PermitID || r.Request.FailureCode != c.FailureCode || !reflect.DeepEqual(r.Request.Proposal, c.Proposal) || !reflect.DeepEqual(r.Request.Diagnostic, diagnostic) {
 		return common.ErrConflict
 	}
 	return nil

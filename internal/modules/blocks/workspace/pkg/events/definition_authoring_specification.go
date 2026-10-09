@@ -39,12 +39,14 @@ func (c ReserveAuthoringSpecificationCommand) Validate() error {
 }
 
 type CompleteAuthoringSpecificationCommand struct {
-	WorkspaceID common.WorkspaceID
-	PermitID    string
-	Proposal    *workspace.GoalSpecification
-	Review      *workspace.GoalSpecificationCompletenessReview
-	FailureCode string
-	Diagnostic  *workspace.DefinitionAuthoringDiagnostic
+	WorkspaceID  common.WorkspaceID
+	PermitID     string
+	Proposal     *workspace.GoalSpecification // canonical claim, checked against owner compilation when supplied
+	Mapping      *workspace.DefinitionAuthoringMapping
+	SuccessAudit *workspace.DefinitionAuthoringSuccessByteAudit
+	Review       *workspace.GoalSpecificationCompletenessReview
+	FailureCode  string
+	Diagnostic   *workspace.DefinitionAuthoringDiagnostic
 }
 
 func (c CompleteAuthoringSpecificationCommand) Validate() error {
@@ -52,8 +54,13 @@ func (c CompleteAuthoringSpecificationCommand) Validate() error {
 		return common.ErrInvalidArgument
 	}
 	outcomes := 0
-	if c.Proposal != nil {
+	if c.Mapping != nil {
 		outcomes++
+		if c.SuccessAudit == nil || c.SuccessAudit.Validate() != nil {
+			return common.ErrInvalidArgument
+		}
+	} else if c.Proposal != nil || c.SuccessAudit != nil {
+		return common.ErrInvalidArgument
 	}
 	if c.Review != nil {
 		outcomes++
@@ -82,7 +89,7 @@ type AuthoringSpecificationRequestResult struct {
 }
 
 func (r AuthoringSpecificationRequestResult) validate() error {
-	if err := r.Request.Validate(); err != nil {
+	if err := r.Request.ValidateView(); err != nil {
 		return err
 	}
 	if r.Consumed == 0 || r.Consumed > workspace.DefinitionAuthoringSpecificationRequestLimit || r.Remaining != workspace.DefinitionAuthoringSpecificationRequestLimit-r.Consumed {
@@ -114,7 +121,31 @@ func (r AuthoringSpecificationRequestResult) ValidateCompletion(c CompleteAuthor
 	if err := r.validate(); err != nil {
 		return err
 	}
-	if r.FreshPermitID != "" || r.Request.PermitID != c.PermitID || r.Request.FailureCode != c.FailureCode || !reflect.DeepEqual(r.Request.Proposal, c.Proposal) || !reflect.DeepEqual(r.Request.Review, c.Review) || !reflect.DeepEqual(r.Request.Diagnostic, c.Diagnostic) {
+	if r.FreshPermitID != "" || r.Request.PermitID != c.PermitID {
+		return common.ErrConflict
+	}
+	if c.Mapping != nil {
+		if r.Request.Phase != workspace.DefinitionSpecificationProposal || r.Request.CompletionIdentity != workspace.MappingCompletionIdentity(c.PermitID, *c.Mapping, *c.SuccessAudit) {
+			return common.ErrConflict
+		}
+		if r.Request.FailureCode == "invalid_proposal" {
+			d := r.Request.Diagnostic
+			if r.Request.Proposal != nil || d == nil || d.ProviderCode != "" || d.PayloadBytes != c.SuccessAudit.Document.ObservedBytes || d.PayloadSHA256 != c.SuccessAudit.Document.SHA256 || d.ProviderDocument == nil || d.ProviderWire == nil || !reflect.DeepEqual(*d.ProviderDocument, c.SuccessAudit.Metadata().Document) || !reflect.DeepEqual(*d.ProviderWire, c.SuccessAudit.Metadata().Wire) {
+				return common.ErrConflict
+			}
+			return nil
+		}
+		if r.Request.Proposal == nil || !reflect.DeepEqual(r.Request.Mapping, c.Mapping) || r.Request.SuccessAudit == nil || !reflect.DeepEqual(*r.Request.SuccessAudit, c.SuccessAudit.Metadata()) || c.Proposal != nil && !reflect.DeepEqual(r.Request.Proposal, c.Proposal) {
+			return common.ErrConflict
+		}
+		return nil
+	}
+	var diagnostic *workspace.DefinitionAuthoringDiagnostic
+	if c.Diagnostic != nil {
+		d := c.Diagnostic.Metadata()
+		diagnostic = &d
+	}
+	if r.Request.FailureCode != c.FailureCode || !reflect.DeepEqual(r.Request.Review, c.Review) || !reflect.DeepEqual(r.Request.Diagnostic, diagnostic) {
 		return common.ErrConflict
 	}
 	return nil

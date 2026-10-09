@@ -17,7 +17,7 @@ func TestConfirmableSpecificationRequiresUniqueCompletedPASSReviews(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteSpecification(reserved.PermitID, &proposal, nil, "")
+	record, err = completeCurrentProposalFixture(t, record, reserved.PermitID, &proposal)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestConfirmableSpecificationRequiresUniqueCompletedPASSReviews(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposalHash, Reason: "覆盖", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{"goal"}}
+		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposalHash, Reason: "覆盖", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{currentGoalRequirementFixture(proposal)}}
 		record, err = record.CompleteSpecification(reserved.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)
@@ -74,7 +74,7 @@ func TestAuthoringConfirmationJournalRejectsChangedAfterImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteSpecification(request.PermitID, &proposal, nil, "")
+	record, err = completeCurrentProposalFixture(t, record, request.PermitID, &proposal)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestAuthoringConfirmationJournalRejectsChangedAfterImages(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "覆盖", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{"goal"}}
+		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "覆盖", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{currentGoalRequirementFixture(proposal)}}
 		record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)

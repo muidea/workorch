@@ -56,7 +56,13 @@ func (l *authoringTaskLifecycle) stopContext(ctx context.Context) error {
 	case <-l.drained:
 		return nil
 	case <-l.drainCtx.Done():
-		return l.drainCtx.Err()
+		// finishDrain 同时取消排空 root；取消分支被选中时仍须核对真实退出。
+		select {
+		case <-l.drained:
+			return nil
+		default:
+			return l.drainCtx.Err()
+		}
 	}
 }
 
@@ -98,8 +104,8 @@ func (l *authoringTaskLifecycle) finishDrain() {
 	if l.stopCaller != nil {
 		l.stopCaller()
 	}
-	l.drainCancel()
 	close(l.drained)
+	l.drainCancel()
 }
 
 type authoringCallKey struct{}

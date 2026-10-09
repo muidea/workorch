@@ -116,7 +116,7 @@ func seedResourceBoundAuthoringConfirmation(t *testing.T, owners *fileDefinition
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposal := authoringOwnerProposal(t, input, template, derived)
+	proposal := authoringOwnerProposal(t, input, template, derived, resources)
 	for index := range proposal.Verifications {
 		verification := &proposal.Verifications[index]
 		verification.Status = workspace.GoalVerificationDeclared
@@ -132,7 +132,8 @@ func seedResourceBoundAuthoringConfirmation(t *testing.T, owners *fileDefinition
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteSpecification(request.PermitID, &proposal, nil, "")
+	mapping, audit := authoringOwnerMapping(t, record.DerivationRequests[0], proposal)
+	record, err = record.CompleteSpecificationMapping(request.PermitID, mapping, audit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +142,7 @@ func seedResourceBoundAuthoringConfirmation(t *testing.T, owners *fileDefinition
 		if err != nil {
 			t.Fatal(err)
 		}
-		review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{"goal-req"}}
+		review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{authoringGoalRequirementID(t, proposal)}}
 		record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)

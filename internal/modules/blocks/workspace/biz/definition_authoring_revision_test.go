@@ -236,9 +236,9 @@ func TestAuthoringRevisionFencesHistoricalSpecificationCompletion(t *testing.T) 
 			}
 			complete := workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: current.ID, PermitID: reserved.AuthoringSpecification.FreshPermitID}
 			if kind == "" {
-				complete.Proposal = &proposal
+				complete = authoringOwnerCompletion(t, *current, complete.PermitID, proposal)
 			} else {
-				complete.Review = &workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{"goal-req"}}
+				complete.Review = &workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{authoringGoalRequirementID(t, proposal)}}
 			}
 			if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: current.ID, AuthoringSpecComplete: &complete}); err != nil {
 				t.Fatal(err)

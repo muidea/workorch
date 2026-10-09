@@ -61,8 +61,19 @@ func (c DefinitionAuthoringConfirmation) Validate(record *DefinitionAuthoringRec
 	return err
 }
 
+func (c DefinitionAuthoringConfirmation) validateMode(record *DefinitionAuthoringRecord, workspaceID common.WorkspaceID, view bool) error {
+	_, _, err := c.validatedSpecificationMode(record, workspaceID, view)
+	return err
+}
+func (c DefinitionAuthoringConfirmation) ValidateView(record *DefinitionAuthoringRecord, workspaceID common.WorkspaceID) error {
+	_, _, err := c.validatedSpecificationMode(record, workspaceID, true)
+	return err
+}
 func (c DefinitionAuthoringConfirmation) validatedSpecification(record *DefinitionAuthoringRecord, workspaceID common.WorkspaceID) (GoalSpecification, []DefinitionCandidateItem, error) {
-	if record == nil || record.Input.WorkspaceID != workspaceID || record.Validate() != nil || workspaceID == "" || c.InputHash != record.InputHash || c.TemplateSnapshotHash != record.TemplateSnapshotHash || c.ConfigurationHash == "" ||
+	return c.validatedSpecificationMode(record, workspaceID, false)
+}
+func (c DefinitionAuthoringConfirmation) validatedSpecificationMode(record *DefinitionAuthoringRecord, workspaceID common.WorkspaceID, view bool) (GoalSpecification, []DefinitionCandidateItem, error) {
+	if record == nil || record.Input.WorkspaceID != workspaceID || record.validate(view) != nil || workspaceID == "" || c.InputHash != record.InputHash || c.TemplateSnapshotHash != record.TemplateSnapshotHash || c.ConfigurationHash == "" ||
 		(c.Phase != DefinitionAuthoringConfirmationPrepared && c.Phase != DefinitionAuthoringConfirmationMaterialized) {
 		return GoalSpecification{}, nil, fmt.Errorf("authoring confirmation journal has invalid input or phase")
 	}

@@ -246,7 +246,7 @@ func TestWD5ProductionProjectionUsesSemanticFacades(t *testing.T) {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == "node_modules" || strings.Contains(path, string(filepath.Separator)+"readmodelprojection") {
+			if entry.Name() == ".git" || entry.Name() == ".claude" || entry.Name() == "node_modules" || strings.Contains(path, string(filepath.Separator)+"readmodelprojection") {
 				return filepath.SkipDir
 			}
 			return nil

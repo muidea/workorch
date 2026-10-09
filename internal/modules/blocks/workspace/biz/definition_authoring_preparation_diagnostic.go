@@ -13,6 +13,9 @@ func preparationDiagnosticInWorkspace(w *workspace.Workspace, id string) (worksp
 	if w == nil || w.DefinitionAuthoring == nil {
 		return workspace.DefinitionAuthoringPreparationDiagnostic{}, false, common.ErrNotFound
 	}
+	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+		return workspace.DefinitionAuthoringPreparationDiagnostic{}, false, err
+	}
 	if w.DefinitionAuthoring.Input.WorkspaceID != w.ID || w.DefinitionAuthoring.Validate() != nil || w.ValidateDefinitionAuthoringHistory() != nil {
 		return workspace.DefinitionAuthoringPreparationDiagnostic{}, false, common.ErrConflict
 	}

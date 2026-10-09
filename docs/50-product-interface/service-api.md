@@ -92,12 +92,14 @@ LLM configuration save does not mutate the running LLM owner snapshot or any sea
 `.workorch-workspaces/<workspace-id>`。正式 Goal／DoD 仅在精确确认事务中物化，随后由 owner 准入；创建、编译、确认均不启动 Run。
 普通 setup 不要求 raw context/evidence/target/recipe/check/metric/artifact JSON。
 
-解析失败诊断随原规格请求由 Workspace owner 持久记录。普通 authoring GET 返回完整原始错误及诊断元信息；
-`GET /workspaces/:workspaceId/authoring/diagnostics/:permitId` 按精确 Workspace/permit scope 返回单条原始响应的可逆编码、
+解析失败诊断随原规格请求由 Workspace owner 持久记录。普通 authoring GET 仅返回错误分类及诊断元信息；
+`GET /workspaces/:workspaceId/authoring/diagnostics/:permitId` 按精确 Workspace/permit scope 返回单条原始错误与响应的可逆编码、
 字节数和 SHA256。读取不调用 provider、不推进确认、不启动 Run。诊断不脱敏、不替换、不静默截断；原文超限时明确
 标记未保存，已知失败仍为 failed。旧失败无诊断时不得回填猜测内容。文件私有权限和部署访问边界保护原始材料，
 Web 只作纯文本展示，原文永不作为准入或执行权威。详细边界见
 [Workspace 规格创作](../40-profiles-capabilities/workspace/setup-draft-session.md)。
+
+成功提案原文独立使用 `GET /workspaces/:workspaceId/authoring/success-byte-audits/:permitId` 受限读取。Application 经 concrete typed EventHub 查询 Workspace owner；返回该当前已完成提案的 canonical hash、document／wire 可逆编码及 observed／complete／saved／hash／bytes／reason。普通创作 DTO 只携 metadata，不复用失败诊断、不接受跨 scope；重复及重开读取均不写 owner、不调用 provider、不创建 Run，响应禁止缓存，沿用管理接口部署访问边界。
 
 原始前置失败与 provider permit 诊断分别管理。资源／配置／请求准备的已知失败使用 Workspace owner 的 `PreparationDiagnostics`；常规 GET 只返回有界 metadata 与 current／history 标记，`GET /workspaces/:workspaceId/authoring/preparation-diagnostics/:diagnosticId` 返回原始原因的可逆编码、字节数与 SHA256。此身份不是 permit，不授权 provider 调用。当前目标尚未 reserve 时可显示 `preparation_failed`，允许用户修复问题后显式 compile；目标已有持久请求或确认后，以其 ledger 为准，旧诊断仅历史。未知 reserve 结果不能冒充前置失败，保存失败也不能冒充可查询诊断。
 

@@ -24,6 +24,37 @@ func (r *authoringTestRoutine) AsyncTaskContext(_ context.Context, work task.Tas
 	return nil
 }
 
+type authoringDrainCompletionCutContext struct {
+	context.Context
+	release func()
+}
+
+func (c authoringDrainCompletionCutContext) Done() <-chan struct{} {
+	// 等待方已进入 select，真实退出恰在取消分支求值时发生。
+	c.release()
+	return c.Context.Done()
+}
+
+func TestAuthoringTaskLifecycleCompletedDrainWinsConcurrentCancellation(t *testing.T) {
+	for range 64 {
+		lifecycle := newAuthoringTaskLifecycle()
+		_, release, err := lifecycle.accept(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		lifecycle.beginStop(context.Background())
+		cancelled, cancel := context.WithCancel(context.Background())
+		cancel()
+		lifecycle.drainCtx = authoringDrainCompletionCutContext{Context: cancelled, release: release}
+		if err := lifecycle.stopContext(context.Background()); err != nil {
+			t.Fatalf("真实任务已退出，取消分支不得误报排空失败：%v", err)
+		}
+		if lifecycle.active != 0 {
+			t.Fatal("任务未实际退出")
+		}
+	}
+}
+
 func TestAuthoringTaskLifecycleDrainsQueuedCancellationAndRejectsLateWork(t *testing.T) {
 	lifecycle := newAuthoringTaskLifecycle()
 	routine := &authoringTestRoutine{}

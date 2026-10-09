@@ -16,7 +16,7 @@ import (
 const definitionSpecificationCommandSource = definitionAdmissionCommandSource
 
 func definitionSpecificationTopics() []string {
-	return []string{workspaceevents.TopicWorkspaceDerivationReserve, workspaceevents.TopicWorkspaceDerivationComplete, workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, workspaceevents.TopicWorkspaceAuthoringSpecificationComplete, workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery, workspaceevents.TopicWorkspacePreparationDiagnosticRecord, workspaceevents.TopicWorkspacePreparationDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery, workspaceevents.TopicWorkspaceDefinitionAuthoringCreate, workspaceevents.TopicWorkspaceDefinitionAuthoringSave, workspaceevents.TopicWorkspaceAuthoringConfirm, workspaceevents.TopicWorkspaceAuthoringAdmit, workspaceevents.TopicWorkspaceSpecificationBegin, workspaceevents.TopicWorkspaceSpecificationReserve, workspaceevents.TopicWorkspaceSpecificationComplete}
+	return []string{workspaceevents.TopicWorkspaceDerivationReserve, workspaceevents.TopicWorkspaceDerivationComplete, workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, workspaceevents.TopicWorkspaceAuthoringSpecificationComplete, workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringSuccessAuditQuery, workspaceevents.TopicWorkspacePreparationDiagnosticRecord, workspaceevents.TopicWorkspacePreparationDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery, workspaceevents.TopicWorkspaceDefinitionAuthoringCreate, workspaceevents.TopicWorkspaceDefinitionAuthoringSave, workspaceevents.TopicWorkspaceAuthoringConfirm, workspaceevents.TopicWorkspaceAuthoringAdmit, workspaceevents.TopicWorkspaceSpecificationBegin, workspaceevents.TopicWorkspaceSpecificationReserve, workspaceevents.TopicWorkspaceSpecificationComplete}
 }
 
 func (m *Biz) handleDefinitionSpecificationCommand(ev magicevent.Event, result magicevent.Result) {
@@ -129,6 +129,13 @@ func (m *Biz) handleDefinitionSpecificationCommand(ev magicevent.Event, result m
 			err = common.ErrInvalidArgument
 		} else {
 			reply, err = m.queryAuthoringDiagnostic(ev.Context(), cmd)
+		}
+	case workspaceevents.TopicWorkspaceAuthoringSuccessAuditQuery:
+		cmd, ok := ev.Data().(workspaceevents.QueryAuthoringSuccessAuditCommand)
+		if !ok || ev.Source() != definitionSpecificationCommandSource {
+			err = common.ErrInvalidArgument
+		} else {
+			reply, err = m.queryAuthoringSuccessAudit(ev.Context(), cmd)
 		}
 	case workspaceevents.TopicWorkspacePreparationDiagnosticRecord:
 		cmd, ok := ev.Data().(workspaceevents.RecordPreparationDiagnosticCommand)

@@ -70,7 +70,7 @@ func (b *Biz) CompileAuthoringSpecification(ctx context.Context, id common.Works
 }
 
 func compiledAuthoringSpecification(record workspace.DefinitionAuthoringRecord, derivation workspace.DefinitionDerivationRequest) (workspace.GoalSpecification, bool, error) {
-	if err := record.Validate(); err != nil {
+	if err := record.ValidateView(); err != nil {
 		return workspace.GoalSpecification{}, false, err
 	}
 	// 任意已 reserve 未决槽位优先于已知失败和准备观察，
@@ -270,13 +270,14 @@ func (b *Biz) completeAuthoringSpecification(ctx context.Context, id common.Work
 	if completion.Diagnostic != nil {
 		completion.FailureCode = "provider_failed"
 	} else if request.Phase == workspace.DefinitionSpecificationProposal {
-		parsed, parseErr := specifications.ParseAuthoringProposal(payload, derivation)
+		parsed, parseErr := specifications.ParseAuthoringMapping(payload)
 		if parseErr != nil {
 			completion.FailureCode = "invalid_proposal"
 			diagnostic := authoringParserDiagnostic(parseErr, payload, response)
 			completion.Diagnostic = &diagnostic
 		} else {
-			completion.Proposal = &parsed
+			completion.Mapping = &parsed
+			completion.SuccessAudit = &workspace.DefinitionAuthoringSuccessByteAudit{Document: authoringProviderObservation(response.ObservedDocument), Wire: authoringProviderObservation(response.Wire)}
 		}
 	} else {
 		parsed, parseErr := specifications.ParseAuthoringReview(payload, request.ReviewKind, *proposal, derivation)
@@ -296,7 +297,7 @@ func (b *Biz) completeAuthoringSpecification(ctx context.Context, id common.Work
 }
 
 func authoringSpecificationOutcome(request workspace.DefinitionAuthoringSpecificationRequest) (workspace.DefinitionAuthoringSpecificationRequest, error) {
-	if err := request.Validate(); err != nil {
+	if err := request.ValidateView(); err != nil {
 		return request, err
 	}
 	if request.FailureCode != "" {

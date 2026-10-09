@@ -88,6 +88,7 @@ func authoringLedgerFixture(t testing.TB) (DefinitionAuthoringRecord, GoalSpecif
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, _, spec = currentProposalFixture(t, record.DerivationRequests[0], spec)
 	return record, spec
 }
 
@@ -151,7 +152,7 @@ func TestDefinitionAuthoringSummaryMatchesSixReviewViewSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteSpecification(request.PermitID, &proposal, nil, "")
+	record, err = completeCurrentProposalFixture(t, record, request.PermitID, &proposal)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +179,7 @@ func TestDefinitionAuthoringSummaryMatchesSixReviewViewSemantics(t *testing.T) {
 		if status == GoalReviewFail || index > 0 {
 			wantState = "review_blocked"
 		}
-		review := GoalSpecificationCompletenessReview{Kind: kind, Status: status, SpecificationHash: proposal.ContentHash(), Reason: "review", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{"goal"}}
+		review := GoalSpecificationCompletenessReview{Kind: kind, Status: status, SpecificationHash: proposal.ContentHash(), Reason: "review", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{currentGoalRequirementFixture(proposal)}}
 		record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)
@@ -255,18 +256,19 @@ func TestAuthoringSpecificationLedgerReservesAndReplaysWithoutSecondPermit(t *te
 	if _, _, _, err := first.ReserveSpecification(DefinitionAuthoringSpecificationRequest{RequestID: "critic-early", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationCritic, ReviewKind: GoalReviewTraceability, ProposalHash: spec.ContentHash(), ProviderBindingHash: "provider"}); err == nil {
 		t.Fatal("critic reserved without completed proposal")
 	}
-	completed, err := first.CompleteSpecification(reserved.PermitID, &spec, nil, "")
+	completed, err := completeCurrentProposalFixture(t, first, reserved.PermitID, &spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := completed.CompleteSpecification(reserved.PermitID, &spec, nil, ""); err != nil {
+	if _, err := completeCurrentProposalFixture(t, completed, reserved.PermitID, &spec); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := completed.CompleteSpecification(reserved.PermitID, nil, nil, "provider_failed"); err == nil {
 		t.Fatal("completed proposal changed outcome")
 	}
+	originalText := completed.SpecificationRequests[0].Proposal.Requirements[0].Text
 	spec.Requirements[0].Text = "篡改"
-	if completed.SpecificationRequests[0].Proposal.Requirements[0].Text != "交付结果" {
+	if completed.SpecificationRequests[0].Proposal.Requirements[0].Text != originalText {
 		t.Fatal("completion retained mutable caller proposal")
 	}
 	critic := DefinitionAuthoringSpecificationRequest{RequestID: "critic-1", DerivationPermitID: derivationPermit, Phase: DefinitionSpecificationCritic, ReviewKind: GoalReviewTraceability, ProposalHash: completed.SpecificationRequests[0].Proposal.ContentHash(), ProviderBindingHash: "provider"}

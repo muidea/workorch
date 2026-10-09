@@ -80,7 +80,11 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 	if err != nil || reservedProposal.AuthoringSpecification == nil || reservedProposal.AuthoringSpecification.FreshPermitID == "" {
 		t.Fatalf("reserve successor proposal: %v", err)
 	}
-	completeProposal := workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: id, PermitID: reservedProposal.AuthoringSpecification.FreshPermitID, Proposal: &proposal}
+	current, err = owners.repositories.Workspaces.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeProposal := authoringOwnerCompletion(t, *current, reservedProposal.AuthoringSpecification.FreshPermitID, proposal)
 	if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecComplete: &completeProposal}); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +94,7 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 		if err != nil || reservedReview.AuthoringSpecification == nil || reservedReview.AuthoringSpecification.FreshPermitID == "" {
 			t.Fatalf("reserve successor review %s: %v", kind, err)
 		}
-		review := workspacemodel.GoalSpecificationCompletenessReview{Kind: kind, Status: workspacemodel.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspacemodel.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{"goal-req"}}
+		review := workspacemodel.GoalSpecificationCompletenessReview{Kind: kind, Status: workspacemodel.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspacemodel.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{authoringGoalRequirementID(t, proposal)}}
 		completeReview := workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: id, PermitID: reservedReview.AuthoringSpecification.FreshPermitID, Review: &review}
 		if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecComplete: &completeReview}); err != nil {
 			t.Fatal(err)

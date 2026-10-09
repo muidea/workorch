@@ -14,6 +14,14 @@ type DefinitionProviderObservationView struct {
 	ContentBase64 string `json:"contentBase64"`
 }
 
+type DefinitionAuthoringSuccessAuditView struct {
+	WorkspaceID   string                            `json:"workspaceId"`
+	PermitID      string                            `json:"permitId"`
+	CanonicalHash string                            `json:"canonicalHash"`
+	Document      DefinitionProviderObservationView `json:"document"`
+	Wire          DefinitionProviderObservationView `json:"wire"`
+}
+
 type DefinitionAuthoringDiagnosticMetadata struct {
 	ParseError       string                                 `json:"parseError,omitempty"`
 	ParseErrorSHA256 string                                 `json:"parseErrorSHA256,omitempty"`

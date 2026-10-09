@@ -47,6 +47,7 @@ func TestAuthoringSummaryRechecksSealedProfileWithoutMutatingLedger(t *testing.T
 					request.PermitID = request.ExpectedPermitID()
 				}
 			}
+			resealAuthoringProposalClaimForTest(t, &record, proposal)
 			if err := record.Validate(); err != nil {
 				t.Fatalf("协调伪造必须通过结构校验：%v", err)
 			}

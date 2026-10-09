@@ -9,6 +9,10 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
+type definitionAuthoringSuccessAuditResponse struct {
+	Audit workorchmanagementcontract.DefinitionAuthoringSuccessAuditView `json:"audit"`
+}
+
 type definitionAuthoringDiagnosticResponse struct {
 	Diagnostic workorchmanagementcontract.DefinitionAuthoringDiagnosticView `json:"diagnostic"`
 }
@@ -55,6 +59,23 @@ func registerDefinitionAuthoringRoutes(router engine.RouteRegistry, state *serve
 			return
 		}
 		writeJSON(w, http.StatusOK, definitionAuthoringResponse{Authoring: view})
+	})
+	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/authoring/success-byte-audits/:permitId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		id, permit, ok := definitionAuthoringSuccessAuditFromPath(r.URL.Path)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if state.authoring.ReadSuccessAudit == nil {
+			writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "规格创作原文审计服务未配置"})
+			return
+		}
+		audit, err := state.authoring.ReadSuccessAudit(r.Context(), id, permit)
+		if err != nil {
+			writeBusinessError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, definitionAuthoringSuccessAuditResponse{Audit: audit})
 	})
 	router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/authoring/diagnostics/:permitId", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 		id, permit, ok := definitionAuthoringDiagnosticFromPath(r.URL.Path)
@@ -167,6 +188,14 @@ func definitionAuthoringWorkspaceFromPath(path, action string) (string, bool) {
 		return "", false
 	}
 	return parts[4], true
+}
+
+func definitionAuthoringSuccessAuditFromPath(path string) (string, string, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 8 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "workorch" || parts[3] != "workspaces" || parts[4] == "" || parts[5] != "authoring" || parts[6] != "success-byte-audits" || parts[7] == "" {
+		return "", "", false
+	}
+	return parts[4], parts[7], true
 }
 
 func definitionAuthoringDiagnosticFromPath(path string) (string, string, bool) {

@@ -49,11 +49,22 @@ func (r DefinitionDerivationRequest) ExpectedPermitID() string {
 	return "derivation-permit-sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
-func (r DefinitionDerivationRequest) Validate() error {
+func (r DefinitionDerivationRequest) Validate() error     { return r.validate(false) }
+func (r DefinitionDerivationRequest) ValidateView() error { return r.validate(true) }
+func (r DefinitionDerivationRequest) validate(view bool) error {
+	if r.Diagnostic != nil {
+		if view {
+			if r.Diagnostic.ValidateMetadata() != nil {
+				return fmt.Errorf("derivation diagnostic metadata invalid")
+			}
+		} else if r.Diagnostic.Validate() != nil {
+			return fmt.Errorf("derivation diagnostic invalid")
+		}
+	}
 	if r.Input.Validate() != nil || r.Template.ID != r.Input.Normalized().TemplateID || r.RequestID == "" || len(r.RequestID) > 128 || r.ProviderBindingHash == "" || len(r.ProviderBindingHash) > 256 || ValidateDefinitionAuthoringResources(r.Input, r.Resources) != nil || r.ResourceSnapshotHash != DefinitionAuthoringResourcesHash(r.Resources) || r.PermitID != r.ExpectedPermitID() {
 		return fmt.Errorf("derivation request identity invalid")
 	}
-	if r.Diagnostic != nil && (r.FailureCode != "invalid_proposal" && r.FailureCode != "provider_failed" || r.Diagnostic.Validate() != nil || r.FailureCode == "provider_failed" && r.Diagnostic.ProviderCode == "") {
+	if r.Diagnostic != nil && (r.FailureCode != "invalid_proposal" && r.FailureCode != "provider_failed" || r.FailureCode == "provider_failed" && r.Diagnostic.ProviderCode == "") {
 		return fmt.Errorf("derivation diagnostic requires a valid known failure outcome")
 	}
 	if r.Proposal != nil {
@@ -71,13 +82,16 @@ func (r DefinitionDerivationRequest) Validate() error {
 }
 
 func validateDerivationRequests(records []DefinitionDerivationRequest, input DefinitionAuthoringInput) error {
+	return validateDerivationRequestsMode(records, input, false)
+}
+func validateDerivationRequestsMode(records []DefinitionDerivationRequest, input DefinitionAuthoringInput, view bool) error {
 	if len(records) > DefinitionDerivationRequestLimit {
 		return fmt.Errorf("derivation request budget exceeded")
 	}
 	seen := map[string]bool{}
 	attempts := map[string]int{}
 	for _, record := range records {
-		if err := record.Validate(); err != nil {
+		if err := record.validate(view); err != nil {
 			return err
 		}
 		if record.Input.WorkspaceID != input.WorkspaceID || record.Input.Revision > input.Revision || seen[record.RequestID] {

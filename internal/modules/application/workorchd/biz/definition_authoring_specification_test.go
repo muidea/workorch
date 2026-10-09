@@ -12,6 +12,7 @@ import (
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/testkit"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -40,23 +41,10 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposal := workspace.GoalSpecification{Version: 1, GoalItemRef: workspace.DefinitionAuthoringGoalItemRef, GoalTextHash: workspace.StableDefinitionTextHash(input.GoalText), Dimensions: []workspace.GoalSpecificationDimension{{ID: "dimension", Required: true, Activated: true}}, Requirements: []workspace.GoalSpecificationRequirement{{ID: "goal", DimensionID: "dimension", Required: true, SourceKind: workspace.GoalRequirementUserExplicit, SourceItemRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, Text: input.GoalText}}}
-	for idx, item := range candidateItems {
-		kind := workspace.GoalRequirementDerived
-		if idx == 0 {
-			kind = workspace.GoalRequirementUserExplicit
-		} else if idx == 1 {
-			kind = workspace.GoalRequirementTemplateRequired
-		}
-		id := "requirement-" + string(rune('a'+idx))
-		obligationID := "obligation-" + string(rune('a'+idx))
-		proposal.Requirements = append(proposal.Requirements, workspace.GoalSpecificationRequirement{ID: id, DimensionID: "dimension", Required: true, SourceKind: kind, SourceItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
-		proposal.Obligations = append(proposal.Obligations, workspace.GoalSpecificationObligation{ID: obligationID, RequirementID: id, DoDItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
-		proposal.Verifications = append(proposal.Verifications, workspace.GoalSpecificationVerification{ID: "verify-" + id, ObligationID: obligationID, Status: workspace.GoalVerificationUnverified, Declaration: "待评估"})
+	mapping, _, proposal, err := testkit.Proposal(record.DerivationRequests[0], workspace.DefinitionAuthoringVerificationMapping{Status: workspace.GoalVerificationUnverified, Declaration: "待评估"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	proposal.Obligations = append(proposal.Obligations, workspace.GoalSpecificationObligation{ID: "goal-obligation", RequirementID: "goal", DoDItemRefs: []string{candidateItems[0].CandidateItemRef}, Text: "验证目标"})
-	proposal.Verifications = append(proposal.Verifications, workspace.GoalSpecificationVerification{ID: "verify-goal", ObligationID: "goal-obligation", Status: workspace.GoalVerificationUnverified, Declaration: "待评估"})
-	proposal = authoringWireSpecificationFixture(proposal)
 	if err := workspace.ValidateAuthoringSpecification(input, &template, *acceptance, nil, proposal); err != nil {
 		t.Fatal(err)
 	}
@@ -78,13 +66,16 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 					return
 				}
 				record = next
-				response := workspaceevents.AuthoringSpecificationRequestResult{Request: request, Consumed: uint32(len(record.SpecificationRequests)), Remaining: uint32(workspace.DefinitionAuthoringSpecificationRequestLimit - len(record.SpecificationRequests))}
+				response := workspaceevents.AuthoringSpecificationRequestResult{Request: request.Metadata(), Consumed: uint32(len(record.SpecificationRequests)), Remaining: uint32(workspace.DefinitionAuthoringSpecificationRequestLimit - len(record.SpecificationRequests))}
 				if fresh {
 					response.FreshPermitID = request.PermitID
 				}
 				result.Set(response, nil)
 			case workspaceevents.CompleteAuthoringSpecificationCommand:
 				next, err := record.CompleteSpecification(command.PermitID, command.Proposal, command.Review, command.FailureCode, command.Diagnostic)
+				if command.Mapping != nil {
+					next, err = record.CompleteSpecificationMapping(command.PermitID, *command.Mapping, *command.SuccessAudit)
+				}
 				if err != nil {
 					t.Error(err)
 					return
@@ -92,7 +83,7 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 				record = next
 				for _, request := range record.SpecificationRequests {
 					if request.PermitID == command.PermitID {
-						result.Set(workspaceevents.AuthoringSpecificationRequestResult{Request: request, Consumed: uint32(len(record.SpecificationRequests)), Remaining: uint32(workspace.DefinitionAuthoringSpecificationRequestLimit - len(record.SpecificationRequests))}, nil)
+						result.Set(workspaceevents.AuthoringSpecificationRequestResult{Request: request.Metadata(), Consumed: uint32(len(record.SpecificationRequests)), Remaining: uint32(workspace.DefinitionAuthoringSpecificationRequestLimit - len(record.SpecificationRequests))}, nil)
 						return
 					}
 				}
@@ -123,8 +114,8 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 		var err error
 		if command.Request.Kind == "workspace/specification/proposal" {
 			payload, err = json.Marshal(struct {
-				Specification workspace.GoalSpecification `json:"specification"`
-			}{proposal})
+				Mapping workspace.DefinitionAuthoringMapping `json:"mapping"`
+			}{mapping})
 		} else {
 			kind := strings.TrimPrefix(command.Request.Kind, "workspace/specification/review/")
 			if strings.Contains(command.Request.PromptContext.Sections[1].Content, `"Reviews":[{`) {
@@ -175,6 +166,17 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 			verification.Status = workspace.GoalVerificationDeclared
 			verification.ProfileID, verification.EvidenceRequirementID, verification.Scope = "invented", "*", "dodItem"
 		}
+		for i := range request.Mapping.Obligations {
+			verification := &request.Mapping.Obligations[i].Verification
+			verification.Status = workspace.GoalVerificationDeclared
+			verification.ProfileID, verification.EvidenceRequirementID, verification.Scope = "invented", "*", "dodItem"
+		}
+		audit, err := testkit.Audit(*request.Mapping)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.SuccessAudit = &audit
+		request.CompletionIdentity = workspace.MappingCompletionIdentity(request.PermitID, *request.Mapping, audit)
 		changedHash := request.Proposal.ContentHash()
 		for reviewIndex := range selfDeclared.SpecificationRequests {
 			reviewRequest := &selfDeclared.SpecificationRequests[reviewIndex]

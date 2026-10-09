@@ -66,7 +66,8 @@ Last Verified: 2026-08-30
 - Template 的 `ParentTemplateIDs` 由 Workspace owner 解析为有界 DAG；父声明顺序决定稳定拓扑顺序，共享祖先只合并一次。循环、缺失、重复父、深度/规模超限或无法安全合并的冲突拒绝。DoD 合取，不允许子模板覆盖父验收要求；同路径 context、同 ID evidence policy 的不一致当前直接拒绝，不猜测哪个更严格。
 - 模板读取返回 effective 内容及只读 `EffectiveSources`。父内容及拓扑参与派生快照身份；create/update 只能提交原始声明，不能自报 effective 来源。新 Start/Restart 在 owner mutation lock 内核对整个有效快照，既有 Run 不热替换；无父模板保留既有 snapshot hash 算法。
 - `DefinitionAdmissionCandidate.Specification` 是可选、版本化的规格提案。资源、维度、需求来源、义务、exact Profile 验证声明和六类 completeness review 全部进入候选身份；审查绑定不含审查自身的 content hash，startup 的 `SpecificationHash` 绑定包含审查的 admission hash。
-- 独立 Goal requirement 必须唯一绑定 `GoalItemRef`、`USER_EXPLICIT` 与完整原 Goal 文本；它不是候选 DoD，不要求借用或补造 DoD obligation。非 exact、重复或混来源的无义务 requirement 仍阻断；各 DoD 的义务、验证声明、Profile 适用性和六份唯一 PASS 审查保持完整合取。Application 的六审请求携带同一 owner 派生的 `ExpectedResources` 和无 Reviews 的 immutable proposal；critic 只判断，不修改 proposal 或回显不属于 review wire 的资源字段。
+- 独立 Goal requirement 必须唯一绑定 `GoalItemRef`、`USER_EXPLICIT` 与完整原 Goal 文本；它不是候选 DoD，不要求借用或补造 DoD obligation。仅 Required 且精确独立绑定的 Goal 沿用输入的 32 KiB 字节上限，普通 requirement 与 obligation 保持 4096 字节；不截断或扩大请求预算。非 exact、重复或混来源的无义务 requirement 仍阻断；各 DoD 的义务、验证声明、Profile 适用性和六份唯一 PASS 审查保持完整合取。Application 的六审请求携带同一 owner 派生的 `ExpectedResources` 和无 Reviews 的 immutable proposal；critic 只判断，不修改 proposal 或回显不属于 review wire 的资源字段。
+- Authoring 提案只接收 `workorch.authoring.sealed-ref-mapping/v1` 的顶层 `mapping`：provider 提出分组、来源与资源引用以及验证声明，owner 按封存 input／derivation 编译 canonical 规格。每个候选恰好属于一个分组并有一个 obligation，Goal 单独绑定；provider 不指定义务原文、SourceKind、Required、资源事实或 canonical IDs。成功 completion 必须从完整原文重新解码，与 typed mapping 精确相同，再重新编译验证 canonical proposal；原文与 wire 的 byte count／SHA256 进入 completion 身份，但不成为准入或执行权威。普通 DTO 仅带 metadata，受限 success-byte-audit query 才返回原 bytes；save／replay／archive／derivation／preparation／私有 reducer 与 CAS 前后像均反证 current/history 的原封存来源。
 - provider 的 derive/proposal/review 文档仅接受当前封闭 wire 形状：所有字段必填、精确大小写，标量与数组不得为 null；未知／重复字段、多 root、超出 256 KiB／32 层、非法 UTF-8 与孤立 UTF-16 surrogate 均拒绝。不修复或重写原始输出；结构拒绝保留 field path／错误分类，owner 来源、声明、独立审查及精确确认仍独立校验。`SourceItemRefs`、`ResourceIDs` 与候选 `DoDItemRefs` 是分离的身份空间，资源路径／章节不能充当来源。`UNVERIFIED` 的三个 Profile 绑定字段必须为空，不能静默清空非法绑定再继续。
 - 六类审查分别覆盖维度、负路径、回归、资源环境、显式约束追踪和可验证性。FAIL/UNKNOWN、缺必需资源、缺必需维度/义务、缺 DoD 映射或不匹配的 Profile 声明不能晋升。PASS 只是有来源的评审事实，不直接授予 Runtime evidence credit，也不证明任意自然语言目标的完整性。
 - 验证声明适用性必须逐项沿 `Verification → Obligation → DoDItemRefs → 正式 DoD sourceID → Profile(scope,id|*)` 反证；一个义务引用多个 DoD 时全部检查，不因同名 declaration 存在或另一个 DoD 命中而通过。正式候选引用中的 `:item:NNNNNN` 保留原序号；derived 引用按确认 after-image 的 user、template、generated 分组及组内原序号解析，不能使用准入 normalize 后的 slice 位置。`dod-001` 是 sourceID，不是 `cwi-001`；Profile bootstrap artifact 和其他 work unit 独立占用 CWI 序号。
@@ -87,7 +88,7 @@ transport leaf 另存 bytes；parser 失败不补造 provider failure code，完
 派生沿用 16 条 request，proposal／review 沿用 112 条 request 及各阶段 2 次预算。超限不保存截断前缀并明确报告，
 不将已知失败倒退为未决。原始诊断不进入 permit 身份、specification hash 或 startup authority。
 
-请求诊断随owner Clone深拷贝，重复completion必须精确一致，变更诊断冲突；reserve不接受预填失败诊断。查询按Workspace/permit精确scope走typed EventHub，仅只读原请求，不驱动provider。普通view返回原始错误及元信息，原始响应按需单条读取；旧失败无诊断时不能虚构历史原文。包含诊断的Workspace运行文件必须0600，权限通过原子publish收紧；不写Git或通用日志。数据保护依靠访问边界而非改写数据，见 [Workspace 规格创作](../../../../docs/40-profiles-capabilities/workspace/setup-draft-session.md)。
+请求诊断随owner Clone深拷贝，重复completion必须精确一致，变更诊断冲突；reserve不接受预填失败诊断。查询按Workspace/permit精确scope走typed EventHub，仅只读原请求，不驱动provider。普通 view 仅返回错误分类及 hash／bytes／保存状态，原始错误、响应和 provider 观察通过受限查询按需单条读取；旧失败无诊断时不能虚构历史原文。包含诊断的Workspace运行文件必须0600，权限通过原子publish收紧；不写Git或通用日志。数据保护依靠访问边界而非改写数据，见 [Workspace 规格创作](../../../../docs/40-profiles-capabilities/workspace/setup-draft-session.md)。
 
 同输入的已失败请求保持原失败及 permit；Application 重复 compile 或进程重启不授予新的调用权。软件输出合同升级不迁移或清空历史 ledger。真实输入／模板修订继续通过原 CAS 和累计预算，不以无意义输入变化或新请求 ID 绕过失败。
 
@@ -99,7 +100,7 @@ Get/List 从当前未确认创作 record 派生有界 `AuthoringSummary`，仅�
 
 前置准备失败使用独立 `DefinitionAuthoringPreparationDiagnostic`，经 `RecordPreparationDiagnosticCommand/Result` 进入既有规格私有 dispatcher/CAS，原文经 `QueryPreparationDiagnosticCommand/Result` 按 Workspace／DiagnosticID 读取；不是 provider request 或 permit。诊断绑定 input／template、目标阶段与请求身份；观察 revision 只用于首次 CAS，语义 ID 不包含该 revision。duplicate 先于 stale 校验返回原记录，迟到新失败不能重绑最新输入，已 reserve／确认后旧诊断不参与当前失败状态。
 
-原始 cause 为 bytes，单条 64 KiB，超限保留完整 hash／bytes 和明确未保存状态；累计创作账本最多 32 条，满时拒绝且不淘汰。Clone／Validate／修订继承与确认归档均保持原文，当前和历史共用 0600 原子发布。普通管理 view 仅 metadata，内部 concrete DTO 仍保留完整字节供同次模型反证，不通过 public JSON 泄漏原文。仅确定未签发 permit 的 typed budget refusal 可记录为前置失败；未知 reserve 冲突、错误响应或响应丢失不能推断未 reserve。诊断不增加预算或调用许可，也不改变 SM-1～SM-4。
+原始 cause 为 bytes，单条 64 KiB，超限保留完整 hash／bytes 和明确未保存状态；累计创作账本最多 32 条，满时拒绝且不淘汰。Clone／Validate／修订继承与确认归档均保持原文，当前和历史共用 0600 原子发布。普通管理 view 与普通 concrete DTO 均仅携带 metadata，不得以 metadata 校验冒充 owner 完整持久化反证；原始字节仅经受限 scoped query 返回，不进入 public JSON 周期轮询。仅确定未签发 permit 的 typed budget refusal 可记录为前置失败；未知 reserve 冲突、错误响应或响应丢失不能推断未 reserve。诊断不增加预算或调用许可，也不改变 SM-1～SM-4。
 
 ## 能力验收
 

@@ -10,14 +10,17 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	application "github.com/muidea/workorch/internal/modules/application/workorchd"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
 	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
 	decisionmodule "github.com/muidea/workorch/internal/modules/blocks/decision"
@@ -26,12 +29,15 @@ import (
 	eventstreambiz "github.com/muidea/workorch/internal/modules/blocks/eventstream/biz"
 	filemodule "github.com/muidea/workorch/internal/modules/blocks/file"
 	filebiz "github.com/muidea/workorch/internal/modules/blocks/file/biz"
+	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	gitmodule "github.com/muidea/workorch/internal/modules/blocks/git"
 	gitbiz "github.com/muidea/workorch/internal/modules/blocks/git/biz"
+	gitevents "github.com/muidea/workorch/internal/modules/blocks/git/pkg/events"
 	llmmodule "github.com/muidea/workorch/internal/modules/blocks/llm"
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	mcpblockmodule "github.com/muidea/workorch/internal/modules/blocks/mcp"
 	mcpblockbiz "github.com/muidea/workorch/internal/modules/blocks/mcp/biz"
+	mcpblockevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcpregistry"
 	mcpbiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
 	memorymodule "github.com/muidea/workorch/internal/modules/blocks/memory"
@@ -43,17 +49,22 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	skillmodule "github.com/muidea/workorch/internal/modules/blocks/skill"
 	skillbiz "github.com/muidea/workorch/internal/modules/blocks/skill/biz"
 	soulmodule "github.com/muidea/workorch/internal/modules/blocks/soul"
 	soulbiz "github.com/muidea/workorch/internal/modules/blocks/soul/biz"
 	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	sshbiz "github.com/muidea/workorch/internal/modules/blocks/ssh/biz"
+	sshevents "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/events"
 	webmodule "github.com/muidea/workorch/internal/modules/blocks/web"
 	webbiz "github.com/muidea/workorch/internal/modules/blocks/web/biz"
+	webevents "github.com/muidea/workorch/internal/modules/blocks/web/pkg/events"
 	workspacemodule "github.com/muidea/workorch/internal/modules/blocks/workspace"
 	workspacebiz "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
+	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/testkit"
 	governancemodule "github.com/muidea/workorch/internal/modules/kernel/governance"
 	governancebiz "github.com/muidea/workorch/internal/modules/kernel/governance/biz"
 	orchestratormodule "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
@@ -61,8 +72,11 @@ import (
 	systemmodule "github.com/muidea/workorch/internal/modules/kernel/system"
 	systembiz "github.com/muidea/workorch/internal/modules/kernel/system/biz"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
+	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	management "github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -72,6 +86,15 @@ import (
 // 所有配置和业务存储均由测试合成，仅 provider 是 localhost scripted HTTP。
 // 不写交付源码，不手工创建 bootstrap/Run，不移除 availability gate。
 func TestDefaultSoftwareDevEmptyDirectoryProductionBootstrapOnly(t *testing.T) {
+	testEmptyDirectoryProduction(t, false)
+}
+
+// 公开创作与 exact 确认合法，显式工作策略仍必须在 owner 准入阻塞。
+func TestSameCWIImplementationWorkProductionAvailabilityBlocksBeforeRun(t *testing.T) {
+	testEmptyDirectoryProduction(t, true)
+}
+
+func testEmptyDirectoryProduction(t *testing.T, requireImplementationWork bool) {
 	ctx := context.Background()
 	storage, directory, configDir := t.TempDir(), t.TempDir(), t.TempDir()
 	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(storage)
@@ -143,6 +166,35 @@ operations = ["responses"]
 	baseURL := "http://" + address
 	client := &http.Client{Timeout: 10 * time.Second}
 	waitForHTTP(t, client, baseURL)
+	var executeCalls atomic.Int64
+	if requireImplementationWork {
+		observer := magicevent.NewSimpleObserver("*", hub)
+		var topics []string
+		contracts := append(fileevents.Contracts(), gitevents.Contracts()...)
+		contracts = append(contracts, shellevents.Contracts()...)
+		contracts = append(contracts, mcpblockevents.Contracts()...)
+		contracts = append(contracts, webevents.Contracts()...)
+		contracts = append(contracts, sshevents.Contracts()...)
+		t.Cleanup(func() {
+			for _, topic := range topics {
+				if err := observer.Unsubscribe(topic); err != nil {
+					t.Errorf("execute observer 清理失败：%v", err)
+				}
+			}
+		})
+		for _, contract := range contracts {
+			if contract.CommandClass != eventcontract.CommandClassExecute {
+				continue
+			}
+			if err := observer.Subscribe(contract.Topic, func(_ magicevent.Event, _ magicevent.Result) { executeCalls.Add(1) }); err != nil {
+				t.Fatal(err)
+			}
+			topics = append(topics, contract.Topic)
+		}
+		if len(topics) == 0 {
+			t.Fatal("capability execute 观察未订阅任何合同")
+		}
+	}
 
 	template, err := repos.WorkspaceTemplates.Get(ctx, "software-dev")
 	if err != nil {
@@ -163,12 +215,70 @@ operations = ["responses"]
 		t.Fatal("production 创建未返回 Workspace 身份")
 	}
 	workspaceID := common.WorkspaceID(created.Authoring.WorkspaceID)
+	if requireImplementationWork {
+		current, err := repos.Workspaces.Get(ctx, workspaceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// 完整复制模板声明，仅增加显式工作策略，不丢失原 proof 或默认约束。
+		hints := template.ContextHints.Map()
+		profiles, ok := hints["profileContracts"].(map[string]any)
+		if !ok {
+			t.Fatal("默认模板缺 profileContracts")
+		}
+		profile, ok := profiles["software-dev"].(map[string]any)
+		if !ok {
+			t.Fatal("默认模板缺 software-dev Profile")
+		}
+		requirements, ok := profile["evidenceRequirements"].([]any)
+		if !ok {
+			t.Fatal("默认模板缺 evidenceRequirements")
+		}
+		selected := 0
+		for _, value := range requirements {
+			requirement, ok := value.(map[string]any)
+			if !ok || requirement["id"] != "*" || requirement["scope"] != "dodItem" {
+				continue
+			}
+			requirement["implementationWorkPolicy"] = map[string]any{
+				"protocolRef": runtimecontract.RuntimeImplementationWorkProtocolV1, "ownerModuleId": runtimecontract.RuntimeModuleFile,
+				"allowedOperations":     []any{map[string]any{"kind": runtimecontract.StepKindFileWrite}},
+				"allowedTargetPolicies": []string{string(runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget), string(runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope)},
+				"targetSelectorRef":     "file/profile_declared_candidates", "targetSelectorOwnerRef": "profile/software-dev", "targetSelectorSubjectRef": "implementation",
+				"targetSelectorCandidateRefs": []string{"resource-a"}, "prospectiveTargetAllOfConstraintRefs": []string{},
+				"maxRoundsPerCWI": 2, "maxTargetsPerRound": 1, "requireFreshObservation": true, "requireFreshValidation": true, "protectValidationInputs": true,
+			}
+			selected++
+		}
+		if selected != 1 {
+			t.Fatal("工作策略必须绑定唯一原 wildcard 声明")
+		}
+		workspaceHints := current.ContextHints.Map()
+		workspaceHints["profileContracts"] = profiles
+		current.ContextHints, err = workorcheventpayload.FromMap(workspaceHints)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bindings, err := definitionconfiguration.Compile(current, template)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := runtimecontract.ValidateRuntimeProfileContracts(bindings.ProfileContracts); err != nil {
+			t.Fatalf("反例须为合法声明而非结构错误：%v", err)
+		}
+		if runtimecontract.ExplainRuntimeImplementationWorkAvailability(bindings.ProfileContracts).Available {
+			t.Fatal("显式工作策略未进入完整有效 Profile")
+		}
+		if err := workspaceports.UpdateWorkspaceRecord(ctx, hub, current); err != nil {
+			t.Fatalf("typed Workspace 策略更新：%v", err)
+		}
+	}
 	assertNoRun(t, repos)
 	assertEmptyDeliverable(t, directory)
 	path := baseURL + "/api/v1/workorch/workspaces/" + created.Authoring.WorkspaceID
 	productionJSON(t, client, http.MethodPost, path+"/authoring/compile", nil, nil)
 	var reviewed management.DefinitionAuthoringView
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
 		var envelope struct {
 			Authoring management.DefinitionAuthoringView `json:"authoring"`
@@ -181,10 +291,11 @@ operations = ["responses"]
 		if reviewed.State == "failed" || reviewed.State == "preparation_failed" {
 			t.Fatalf("创建编译失败: %+v provider=%v", reviewed, provider.snapshot())
 		}
-		time.Sleep(150 * time.Millisecond)
+		// 每次 GET 都经 receiving-owner 完整校验；沿用 Web 观察间隔，避免测试读压挤占六审写入。
+		time.Sleep(1500 * time.Millisecond)
 	}
-	if reviewed.Proposal == nil || len(reviewed.Proposal.Reviews) != 6 {
-		t.Fatalf("完整六审查不可达: %+v provider=%v", reviewed, provider.snapshot())
+	if reviewed.State != "ready_to_confirm" || reviewed.Proposal == nil || len(reviewed.Proposal.Reviews) != 6 {
+		t.Fatalf("完整可确认六审查不可达: %+v provider=%v", reviewed, provider.snapshot())
 	}
 	for _, review := range reviewed.Proposal.Reviews {
 		if review.Status != workspace.GoalReviewPass {
@@ -193,6 +304,91 @@ operations = ["responses"]
 	}
 	assertNoRun(t, repos)
 	confirmation := management.DefinitionAuthoringConfirm{InputHash: reviewed.InputHash, DerivationPermitID: reviewed.Proposal.DerivationPermitID, ProposalHash: reviewed.Proposal.ProposalHash, SpecificationHash: reviewed.Proposal.SpecificationHash, ExpectedWorkspaceRevision: reviewed.WorkspaceRevision}
+	if requireImplementationWork {
+		// 只提交一次公开确认；独立 ticket 交付可能超时，持久 owner 事实仍须可查。
+		wire, err := json.Marshal(confirmation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, requestErr := client.Post(path+"/authoring/confirm", "application/json", strings.NewReader(string(wire)))
+		if response != nil {
+			_, readErr := io.ReadAll(response.Body)
+			response.Body.Close()
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+		}
+		var blocked management.DefinitionAuthoringView
+		deadline = time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			var envelope struct {
+				Authoring management.DefinitionAuthoringView `json:"authoring"`
+			}
+			productionJSON(t, client, http.MethodGet, path+"/authoring", nil, &envelope)
+			blocked = envelope.Authoring
+			if blocked.State == "clarification_required" && blocked.AdmissionViolationCode == workspace.DefinitionAdmissionProfileContractInvalid {
+				break
+			}
+			time.Sleep(150 * time.Millisecond)
+		}
+		if blocked.State != "clarification_required" || blocked.AdmissionViolationCode != workspace.DefinitionAdmissionProfileContractInvalid {
+			t.Fatalf("工作策略未到达持久准入阻塞：%+v requestErr=%v", blocked, requestErr)
+		}
+		current, err := repos.Workspaces.Get(ctx, workspaceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.DefinitionAuthoringConfirmation == nil || current.DefinitionAuthoringConfirmation.Phase != workspace.DefinitionAuthoringConfirmationMaterialized ||
+			current.DefinitionAuthoringConfirmation.InputHash != confirmation.InputHash || current.DefinitionAuthoringConfirmation.SpecificationHash != confirmation.SpecificationHash || len(current.DefinitionAdmissionCandidates) != 1 {
+			t.Fatal("负例未保留 exact 物化确认与唯一持久 candidate")
+		}
+		candidate := current.DefinitionAdmissionCandidates[0]
+		admission, err := definitionadmission.Compile(candidate)
+		if err != nil || admission.Disposition != workspace.DefinitionAdmissionClarificationRequired || admission.ViolationCode != workspace.DefinitionAdmissionProfileContractInvalid || !strings.Contains(admission.CanonicalViolation, "implementation_work_protocol_unavailable") {
+			t.Fatalf("持久 candidate 的阻塞并非工作协议不可用：%+v %v", admission, err)
+		}
+		if current.StartupInput != nil || current.ActivationAdmission != nil || current.ActiveRunID != "" {
+			t.Fatal("阻塞准入生成执行身份")
+		}
+		if _, present, err := current.ValidateActivationAdmissionPersistence(); err != nil || present {
+			t.Fatalf("阻塞前像不合法或被视为准入：present=%t %v", present, err)
+		}
+		reopened := workorchrepo.NewWorkspaceScopedFileRepositorySet(storage)
+		restored, err := reopened.Workspaces.Get(ctx, workspaceID)
+		if err != nil || !reflect.DeepEqual(current, restored) {
+			t.Fatalf("file 重开改变原准入候选：%v", err)
+		}
+		replayed, err := definitionadmission.Compile(restored.DefinitionAdmissionCandidates[0])
+		if err != nil || !reflect.DeepEqual(admission, replayed) {
+			t.Fatalf("file 重开改变阻塞判定：%v", err)
+		}
+		originalTemplate, err := reopened.WorkspaceTemplates.Get(ctx, template.ID)
+		if err != nil || !reflect.DeepEqual(template, originalTemplate) {
+			t.Fatalf("负例改写默认模板：%v", err)
+		}
+		assertNoRun(t, reopened)
+		assertEmptyDeliverable(t, directory)
+		calls := provider.snapshot()
+		if len(calls) != 8 || calls[0] != "derive" || calls[1] != "proposal" {
+			t.Fatalf("准入负例必须只有八次创作调用：%v", calls)
+		}
+		for _, kind := range []string{workspace.GoalReviewDimensionCoverage, workspace.GoalReviewNegativePath, workspace.GoalReviewRegression, workspace.GoalReviewResourceEnvironment, workspace.GoalReviewTraceability, workspace.GoalReviewVerifierFeasibility} {
+			count := 0
+			for _, call := range calls {
+				if call == "review/"+kind {
+					count++
+				}
+			}
+			if count != 1 {
+				t.Fatalf("六审查未 exact-once：%s count=%d", kind, count)
+			}
+		}
+		if executeCalls.Load() != 0 {
+			t.Fatal("阻塞准入发出 capability execute")
+		}
+		t.Log("availability_negative：公开创作与确认后持久阻塞，零 Run/Runtime provider/capability execute；不是两轮工程交付正例。")
+		return
+	}
 	productionJSON(t, client, http.MethodPost, path+"/authoring/confirm", confirmation, nil)
 	current, err := repos.Workspaces.Get(ctx, workspaceID)
 	if err != nil {
@@ -417,14 +613,14 @@ func (p *emptyDirectoryProvider) serveHTTP(w http.ResponseWriter, r *http.Reques
 			}
 			if pending.ReviewKind == "" {
 				kind = "proposal"
-				proposal, buildErr := productionProposal(record)
+				mapping, buildErr := productionMapping(record)
 				if buildErr != nil {
 					err = buildErr
 					break
 				}
 				payload, err = json.Marshal(struct {
-					Specification workspace.GoalSpecification `json:"specification"`
-				}{proposal})
+					Mapping workspace.DefinitionAuthoringMapping `json:"mapping"`
+				}{mapping})
 			} else {
 				kind = "review/" + pending.ReviewKind
 				proposal := record.SpecificationRequests[0].Proposal
@@ -432,9 +628,19 @@ func (p *emptyDirectoryProvider) serveHTTP(w http.ResponseWriter, r *http.Reques
 					err = fmt.Errorf("missing persisted proposal")
 					break
 				}
+				goalRequirement := ""
+				for _, requirement := range proposal.Requirements {
+					if len(requirement.SourceItemRefs) == 1 && requirement.SourceItemRefs[0] == workspace.DefinitionAuthoringGoalItemRef {
+						goalRequirement = requirement.ID
+					}
+				}
+				if goalRequirement == "" {
+					err = fmt.Errorf("missing owner-compiled independent Goal requirement")
+					break
+				}
 				payload, err = json.Marshal(struct {
 					Review workspace.GoalSpecificationCompletenessReview `json:"review"`
-				}{workspace.GoalSpecificationCompletenessReview{Kind: pending.ReviewKind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立 scripted 审查", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{"goal"}}})
+				}{workspace.GoalSpecificationCompletenessReview{Kind: pending.ReviewKind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立 scripted 审查", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{goalRequirement}}})
 			}
 			break
 		}
@@ -551,39 +757,11 @@ func emptyDirectoryRuntimeDocument(input string) ([]byte, string, error) {
 	return nil, "runtime", fmt.Errorf("当前 scripted provider 未识别真实 Runtime prompt 文档")
 }
 
-func productionProposal(record *workspace.DefinitionAuthoringRecord) (workspace.GoalSpecification, error) {
-	derivation := record.DerivationRequests[0]
-	items, err := derivation.Proposal.CandidateItems(record.Input, &record.TemplateSnapshot)
-	if err != nil {
-		return workspace.GoalSpecification{}, err
-	}
-	proposal := workspace.GoalSpecification{
-		Version: 1, GoalItemRef: workspace.DefinitionAuthoringGoalItemRef,
-		GoalTextHash: workspace.StableDefinitionTextHash(record.Input.GoalText),
-		Dimensions:   []workspace.GoalSpecificationDimension{{ID: "all", Required: true, Activated: true, ResourceIDs: []string{}}},
-		Requirements: []workspace.GoalSpecificationRequirement{{
-			ID: "goal", DimensionID: "all", Required: true, SourceKind: workspace.GoalRequirementUserExplicit,
-			SourceItemRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, ResourceIDs: []string{}, Text: record.Input.GoalText,
-		}},
-		Reviews: []workspace.GoalSpecificationCompletenessReview{},
-	}
-	for n, item := range items {
-		kind := workspace.GoalRequirementDerived
-		if strings.HasPrefix(item.CandidateItemRef, "derived-dod:user:") {
-			kind = workspace.GoalRequirementUserExplicit
-		} else if strings.HasPrefix(item.CandidateItemRef, "derived-dod:template:") {
-			kind = workspace.GoalRequirementTemplateRequired
-		}
-		id := fmt.Sprintf("item-%03d", n+1)
-		proposal.Requirements = append(proposal.Requirements, workspace.GoalSpecificationRequirement{ID: id, DimensionID: "all", Required: true, SourceKind: kind, SourceItemRefs: []string{item.CandidateItemRef}, ResourceIDs: []string{}, Text: item.Text})
-		proposal.Obligations = append(proposal.Obligations, workspace.GoalSpecificationObligation{ID: "obl-" + id, RequirementID: id, DoDItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
-	}
-	proposal.Obligations = append(proposal.Obligations, workspace.GoalSpecificationObligation{ID: "obl-goal", RequirementID: "goal", DoDItemRefs: []string{items[0].CandidateItemRef}, Text: record.Input.GoalText})
-	for _, obligation := range proposal.Obligations {
-		proposal.Verifications = append(proposal.Verifications, workspace.GoalSpecificationVerification{ID: "ver-" + obligation.ID, ObligationID: obligation.ID, Declaration: "完整保留默认模板验证约束", Status: workspace.GoalVerificationDeclared, ProfileID: "software-dev", EvidenceRequirementID: "*", Scope: "dodItem"})
-	}
-	proposal.Resources, err = workspace.AuthoringSpecificationResources(record.Input, derivation.Resources)
-	return proposal, err
+func productionMapping(record *workspace.DefinitionAuthoringRecord) (workspace.DefinitionAuthoringMapping, error) {
+	return testkit.Mapping(record.DerivationRequests[0], workspace.DefinitionAuthoringVerificationMapping{
+		Declaration: "完整保留默认模板验证约束", Status: workspace.GoalVerificationDeclared,
+		ProfileID: "software-dev", EvidenceRequirementID: "*", Scope: "dodItem",
+	})
 }
 
 func productionJSON(t *testing.T, client *http.Client, method, url string, body, output any) {

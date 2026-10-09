@@ -6,6 +6,7 @@ import (
 
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/testkit"
 )
 
 func TestAuthoringSpecificationPermitAndReviewSurviveFileReopen(t *testing.T) {
@@ -66,7 +67,11 @@ func TestAuthoringSpecificationPermitAndReviewSurviveFileReopen(t *testing.T) {
 		t.Fatalf("reopen granted second physical permit: %+v %v", replay, err)
 	}
 	spec := authoringOwnerProposal(t, input, template, *acceptance)
-	complete := workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: input.WorkspaceID, PermitID: first.AuthoringSpecification.FreshPermitID, Proposal: &spec}
+	current, err := owners.repositories.Workspaces.Get(ctx, input.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete := authoringOwnerCompletion(t, *current, first.AuthoringSpecification.FreshPermitID, spec)
 	done, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: input.WorkspaceID, AuthoringSpecComplete: &complete})
 	if err != nil || done.AuthoringSpecification.Request.Proposal == nil {
 		t.Fatalf("complete proposal: %+v %v", done, err)
@@ -94,27 +99,78 @@ func TestAuthoringSpecificationPermitAndReviewSurviveFileReopen(t *testing.T) {
 	}
 }
 
-func authoringOwnerProposal(t *testing.T, input workspace.DefinitionAuthoringInput, template workspace.WorkspaceTemplate, derived workspace.DefinitionDerivedAcceptance) workspace.GoalSpecification {
+func authoringOwnerProposal(t *testing.T, input workspace.DefinitionAuthoringInput, template workspace.WorkspaceTemplate, derived workspace.DefinitionDerivedAcceptance, snapshots ...[]workspace.DefinitionAuthoringResourceSnapshot) workspace.GoalSpecification {
 	t.Helper()
-	items, err := derived.CandidateItems(input, &template)
+	var resources []workspace.DefinitionAuthoringResourceSnapshot
+	if len(snapshots) > 0 {
+		resources = snapshots[0]
+	}
+	record := workspace.DefinitionAuthoringRecord{Input: input, InputHash: input.InputHash(), TemplateSnapshot: template, TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template)}
+	record, d, _, err := record.ReserveDerivation("synthetic/current", "provider", resources)
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec := workspace.GoalSpecification{Version: 1, GoalItemRef: workspace.DefinitionAuthoringGoalItemRef, GoalTextHash: workspace.StableDefinitionTextHash(input.GoalText), Dimensions: []workspace.GoalSpecificationDimension{{ID: "dimension", Required: true, Activated: true}}}
-	spec.Requirements = append(spec.Requirements, workspace.GoalSpecificationRequirement{ID: "goal-req", DimensionID: "dimension", Required: true, SourceKind: workspace.GoalRequirementUserExplicit, SourceItemRefs: []string{spec.GoalItemRef}, Text: input.GoalText})
-	for n, item := range items {
-		kind := workspace.GoalRequirementDerived
-		if n == 0 {
-			kind = workspace.GoalRequirementUserExplicit
-		} else if n == 1 {
-			kind = workspace.GoalRequirementTemplateRequired
-		}
-		id := item.CandidateItemRef
-		spec.Requirements = append(spec.Requirements, workspace.GoalSpecificationRequirement{ID: "req-" + id, DimensionID: "dimension", Required: true, SourceKind: kind, SourceItemRefs: []string{id}, Text: item.Text})
-		spec.Obligations = append(spec.Obligations, workspace.GoalSpecificationObligation{ID: "obl-" + id, RequirementID: "req-" + id, DoDItemRefs: []string{id}, Text: item.Text})
-		spec.Verifications = append(spec.Verifications, workspace.GoalSpecificationVerification{ID: "verification-" + id, ObligationID: "obl-" + id, Declaration: "待评估", Status: workspace.GoalVerificationUnverified})
+	record, err = record.CompleteDerivation(d.PermitID, &derived, "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	spec.Obligations = append(spec.Obligations, workspace.GoalSpecificationObligation{ID: "goal-obligation", RequirementID: "goal-req", DoDItemRefs: []string{items[0].CandidateItemRef}, Text: "目标验收"})
-	spec.Verifications = append(spec.Verifications, workspace.GoalSpecificationVerification{ID: "goal-verification", ObligationID: "goal-obligation", Declaration: "待评估", Status: workspace.GoalVerificationUnverified})
-	return spec
+	_, _, proposal, err := testkit.Proposal(record.DerivationRequests[0], workspace.DefinitionAuthoringVerificationMapping{Declaration: "待评估", Status: workspace.GoalVerificationUnverified})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return proposal
+}
+
+// 从 synthetic canonical 样本中只提取声明；生产路径不接受 canonical 成功回退。
+func authoringOwnerMapping(t *testing.T, d workspace.DefinitionDerivationRequest, proposal workspace.GoalSpecification) (workspace.DefinitionAuthoringMapping, workspace.DefinitionAuthoringSuccessByteAudit) {
+	t.Helper()
+	mapping, err := testkit.Mapping(d, workspace.DefinitionAuthoringVerificationMapping{Declaration: "待评估", Status: workspace.GoalVerificationUnverified})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range mapping.Obligations {
+		for _, obligation := range proposal.Obligations {
+			if len(obligation.DoDItemRefs) != 1 || obligation.DoDItemRefs[0] != mapping.Obligations[i].CandidateItemRef {
+				continue
+			}
+			for _, verification := range proposal.Verifications {
+				if verification.ObligationID == obligation.ID {
+					mapping.Obligations[i].Verification = workspace.DefinitionAuthoringVerificationMapping{Declaration: verification.Declaration, Status: verification.Status, ProfileID: verification.ProfileID, EvidenceRequirementID: verification.EvidenceRequirementID, Scope: verification.Scope}
+				}
+			}
+		}
+	}
+	audit, err := testkit.Audit(mapping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mapping, audit
+}
+
+func authoringOwnerCompletion(t *testing.T, w workspace.Workspace, permit string, proposal workspace.GoalSpecification) workspaceevents.CompleteAuthoringSpecificationCommand {
+	t.Helper()
+	for _, request := range w.DefinitionAuthoring.SpecificationRequests {
+		if request.PermitID != permit {
+			continue
+		}
+		for _, d := range w.DefinitionAuthoring.DerivationRequests {
+			if d.PermitID == request.DerivationPermitID {
+				mapping, audit := authoringOwnerMapping(t, d, proposal)
+				return workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: w.ID, PermitID: permit, Mapping: &mapping, SuccessAudit: &audit, Proposal: &proposal}
+			}
+		}
+	}
+	t.Fatal("synthetic completion has no sealed reservation")
+	return workspaceevents.CompleteAuthoringSpecificationCommand{}
+}
+
+func authoringGoalRequirementID(t *testing.T, proposal workspace.GoalSpecification) string {
+	t.Helper()
+	for _, requirement := range proposal.Requirements {
+		if len(requirement.SourceItemRefs) == 1 && requirement.SourceItemRefs[0] == workspace.DefinitionAuthoringGoalItemRef {
+			return requirement.ID
+		}
+	}
+	t.Fatal("independent Goal requirement missing")
+	return ""
 }

@@ -7,6 +7,10 @@ import (
 
 func DefinitionDerivationRequestDTO(r workspace.DefinitionDerivationRequest) workspaceevents.DefinitionDerivationRequest {
 	r = r.Clone()
+	if r.Diagnostic != nil {
+		d := r.Diagnostic.Metadata()
+		r.Diagnostic = &d
+	}
 	return workspaceevents.DefinitionDerivationRequest{
 		RequestID: r.RequestID, Input: r.Input, Template: *TemplateDTO(&r.Template),
 		Resources: r.Resources, ResourceSnapshotHash: r.ResourceSnapshotHash,
@@ -21,6 +25,9 @@ func DefinitionAuthoringRecordDTO(r workspace.DefinitionAuthoringRecord) workspa
 		Input: r.Input, InputHash: r.InputHash, TemplateSnapshotHash: r.TemplateSnapshotHash,
 		TemplateSnapshot: *TemplateDTO(&r.TemplateSnapshot), SpecificationRequests: r.SpecificationRequests,
 		SaveReceipts: r.SaveReceipts,
+	}
+	for n := range ret.SpecificationRequests {
+		ret.SpecificationRequests[n] = ret.SpecificationRequests[n].Metadata()
 	}
 	if r.DerivationRequests != nil {
 		ret.DerivationRequests = make([]workspaceevents.DefinitionDerivationRequest, len(r.DerivationRequests))
@@ -38,7 +45,7 @@ func DefinitionAuthoringRecordDTO(r workspace.DefinitionAuthoringRecord) workspa
 }
 
 func DefinitionAuthoringPreparationDiagnosticMetadataDTO(d workspace.DefinitionAuthoringPreparationDiagnostic) workspaceevents.DefinitionAuthoringPreparationDiagnosticMetadata {
-	d = d.Clone()
+	d = d.Metadata()
 	return workspaceevents.DefinitionAuthoringPreparationDiagnosticMetadata{
 		DiagnosticID: d.DiagnosticID, WorkspaceID: d.WorkspaceID, InputHash: d.InputHash, TemplateSnapshotHash: d.TemplateSnapshotHash,
 		ObservedWorkspaceRevision: d.ObservedWorkspaceRevision, Stage: d.Stage, TargetRequestID: d.TargetRequestID,

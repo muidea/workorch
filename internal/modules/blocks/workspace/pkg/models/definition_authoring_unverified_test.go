@@ -11,7 +11,7 @@ func TestAuthoringUnverifiedDraftWithSixPASSCannotConfirm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteSpecification(request.PermitID, &proposal, nil, "")
+	record, err = completeCurrentProposalFixture(t, record, request.PermitID, &proposal)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,7 +20,7 @@ func TestAuthoringUnverifiedDraftWithSixPASSCannotConfirm(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立审查", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{"goal"}}
+		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立审查", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{currentGoalRequirementFixture(proposal)}}
 		record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)

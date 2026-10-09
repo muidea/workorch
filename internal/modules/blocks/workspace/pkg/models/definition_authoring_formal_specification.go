@@ -18,11 +18,17 @@ func ConfirmedAuthoringCandidateInputs(record *DefinitionAuthoringRecord, confir
 
 // ConfirmedAuthoringAdmissionSource 在同一次完整来源校验中派生正式输入和准入引用。
 // 返回值只含数据；不暴露可跨调用复用的校验凭据。
+func ConfirmedAuthoringAdmissionSourceView(record *DefinitionAuthoringRecord, confirmation DefinitionAuthoringConfirmation, workspaceID common.WorkspaceID) (DefinitionCandidateItem, []DefinitionCandidateItem, GoalSpecification, DefinitionAuthoringAdmissionRef, error) {
+	return confirmedAuthoringAdmissionSourceMode(record, confirmation, workspaceID, true)
+}
 func ConfirmedAuthoringAdmissionSource(record *DefinitionAuthoringRecord, confirmation DefinitionAuthoringConfirmation, workspaceID common.WorkspaceID) (DefinitionCandidateItem, []DefinitionCandidateItem, GoalSpecification, DefinitionAuthoringAdmissionRef, error) {
+	return confirmedAuthoringAdmissionSourceMode(record, confirmation, workspaceID, false)
+}
+func confirmedAuthoringAdmissionSourceMode(record *DefinitionAuthoringRecord, confirmation DefinitionAuthoringConfirmation, workspaceID common.WorkspaceID, view bool) (DefinitionCandidateItem, []DefinitionCandidateItem, GoalSpecification, DefinitionAuthoringAdmissionRef, error) {
 	if record == nil || confirmation.Phase != DefinitionAuthoringConfirmationMaterialized {
 		return DefinitionCandidateItem{}, nil, GoalSpecification{}, DefinitionAuthoringAdmissionRef{}, fmt.Errorf("authoring candidate requires exact materialized confirmation")
 	}
-	reviewed, items, err := confirmation.validatedSpecification(record, workspaceID)
+	reviewed, items, err := confirmation.validatedSpecificationMode(record, workspaceID, view)
 	if err != nil {
 		return DefinitionCandidateItem{}, nil, GoalSpecification{}, DefinitionAuthoringAdmissionRef{}, err
 	}

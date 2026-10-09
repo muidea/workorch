@@ -45,6 +45,7 @@ func TestAuthoringConfirmationRechecksProfileAtPrepareAndPreparedRecovery(t *tes
 						request.PermitID = request.ExpectedPermitID()
 					}
 				}
+				resealAuthoringProposalClaimForTest(t, &record, proposal)
 				if err := record.Validate(); err != nil {
 					t.Fatalf("协调伪造必须通过结构校验，才能验证独立 Profile 门禁：%v", err)
 				}

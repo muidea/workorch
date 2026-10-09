@@ -573,7 +573,7 @@ func repairAttemptProjection(steps []projectioncontract.StepView) (count int, la
 			lastStepID = step.ID
 		}
 	}
-	if count > 0 && lastAttempt == 0 {
+	if count > lastAttempt {
 		lastAttempt = count
 	}
 	return count, lastAttempt, lastStepID

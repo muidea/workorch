@@ -116,7 +116,7 @@ func (r QueryDefinitionAuthoringResult) ValidateFor(c QueryDefinitionAuthoringCo
 	if err != nil {
 		return err
 	}
-	if (&workspace.Workspace{ID: c.WorkspaceID, Revision: r.WorkspaceRevision, DefinitionAuthoring: record, DefinitionAuthoringHistory: history}).ValidatePreparationDiagnosticHistory() != nil {
+	if (&workspace.Workspace{ID: c.WorkspaceID, Revision: r.WorkspaceRevision, DefinitionAuthoring: record, DefinitionAuthoringHistory: history}).ValidatePreparationDiagnosticHistoryView() != nil {
 		return common.ErrConflict
 	}
 	var goal workspace.DefinitionCandidateItem
@@ -133,15 +133,15 @@ func (r QueryDefinitionAuthoringResult) ValidateFor(c QueryDefinitionAuthoringCo
 		}
 		if r.AdmissionCandidate != nil {
 			var err error
-			goal, dod, spec, ref, err = workspace.ConfirmedAuthoringAdmissionSource(record, *r.Confirmation, c.WorkspaceID)
+			goal, dod, spec, ref, err = workspace.ConfirmedAuthoringAdmissionSourceView(record, *r.Confirmation, c.WorkspaceID)
 			if err != nil {
 				return fmt.Errorf("authoring query confirmation lacks exact record: %w", err)
 			}
-		} else if r.Confirmation.Validate(record, c.WorkspaceID) != nil {
+		} else if r.Confirmation.ValidateView(record, c.WorkspaceID) != nil {
 			return fmt.Errorf("authoring query confirmation lacks exact record")
 		}
 	} else if r.Record != nil {
-		if err := record.Validate(); err != nil {
+		if err := record.ValidateView(); err != nil {
 			return err
 		}
 	}
@@ -151,7 +151,7 @@ func (r QueryDefinitionAuthoringResult) ValidateFor(c QueryDefinitionAuthoringCo
 		}
 		previousRevision := uint64(0)
 		for index, archived := range history {
-			if archived.Record.Input.Revision <= previousRevision || archived.Confirmation.Phase != workspace.DefinitionAuthoringConfirmationMaterialized || archived.Confirmation.Validate(&archived.Record, c.WorkspaceID) != nil {
+			if archived.Record.Input.Revision <= previousRevision || archived.Confirmation.Phase != workspace.DefinitionAuthoringConfirmationMaterialized || archived.Confirmation.ValidateView(&archived.Record, c.WorkspaceID) != nil {
 				return fmt.Errorf("authoring query history is invalid")
 			}
 			previousRevision = archived.Record.Input.Revision

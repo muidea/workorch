@@ -8,20 +8,21 @@ import (
 	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 )
 
+func ParseAuthoringMapping(payload []byte) (workspace.DefinitionAuthoringMapping, error) {
+	return workspace.DecodeDefinitionAuthoringMapping(payload)
+}
+
 func ParseAuthoringProposal(payload []byte, derivation workspace.DefinitionDerivationRequest) (workspace.GoalSpecification, error) {
-	if derivation.Validate() != nil || derivation.Proposal == nil {
-		return workspace.GoalSpecification{}, fmt.Errorf("authoring proposal requires completed derivation")
+	mapping, err := ParseAuthoringMapping(payload)
+	if err != nil {
+		return workspace.GoalSpecification{}, err
 	}
-	goal := workspace.DefinitionCandidateItem{CandidateItemRef: workspace.DefinitionAuthoringGoalItemRef, Text: derivation.Input.GoalText, SourceIdentity: derivation.Input.InputHash()}
+	proposal, err := workspace.CompileDefinitionAuthoringMapping(derivation, mapping)
+	if err != nil {
+		return workspace.GoalSpecification{}, err
+	}
 	items, err := derivation.Proposal.CandidateItems(derivation.Input, &derivation.Template)
 	if err != nil {
-		return workspace.GoalSpecification{}, err
-	}
-	proposal, err := ParseProposal(payload, goal, items)
-	if err != nil {
-		return workspace.GoalSpecification{}, err
-	}
-	if err := workspace.ValidateAuthoringSpecification(derivation.Input, &derivation.Template, *derivation.Proposal, derivation.Resources, proposal); err != nil {
 		return workspace.GoalSpecification{}, err
 	}
 	bindings, err := definitionconfiguration.Compile(&workspace.Workspace{}, &derivation.Template)

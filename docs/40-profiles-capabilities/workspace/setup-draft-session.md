@@ -14,15 +14,23 @@ Workspace owner 持久保存创作输入与请求身份；派生验收要求后�
 
 ## 结构化输出合同
 
-提案与独立审查使用不同的版本化输出合同：顶层分别仅为 `specification` 与 `review`。请求提供完整 JSON Schema，根对象及所有嵌套对象均禁止未知字段；字段名、数组项、类型和枚举必须与 typed DTO 一致。提案的 `Reviews` 必须为空数组，审查结论只能来自独立审查事务。`all_of` 是现有条件的合取语义，不授权模型添加 `ConditionMode` 或其他合同之外的字段。
+提案与独立审查使用不同的版本化输出合同：提案顶层仅为 `mapping`，其 `Protocol` 必须是 `workorch.authoring.sealed-ref-mapping/v1`；审查顶层仅为 `review`。请求提供完整 JSON Schema，根对象及所有嵌套对象均禁止未知字段。provider 仅提出维度／分组引用、候选来源分组、资源 ID 引用及验证声明；Workspace owner 从封存 input／derivation 编译 canonical 规格，保留完整原 Goal、各候选原文与来源，并生成 Required、资源事实和 canonical IDs。provider 不返回 canonical `specification`、资源事实、义务原文或 `Reviews`，也不接受旧提案 wire fallback。审查结论只能来自独立审查事务。`all_of` 是现有条件的合取语义，不授权模型添加 `ConditionMode` 或其他合同之外的字段。
 
 稳定 schema 与精确字段说明放入 C0，当前 Goal、候选验收项、资源和身份放入动态请求。派生、提案和审查均使用当前 DTO 的闭合字段形状：所有必填字段必须出现，字段名大小写精确，数组、对象和标量均不得为 `null`；布尔值与整数不得使用字符串、浮点数或指数表示替代。解析在 256 KiB、32 层的边界内拒绝未知／重复字段、多 root、尾随内容、非法 UTF-8 和孤立 UTF-16 surrogate，不提取 fenced JSON，不修复或改写 provider 原文。
 
-`SourceItemRefs` 仅引用持久 Goal／候选验收项身份，`ResourceIDs` 仅引用当前资源 ID，`DoDItemRefs` 仅引用候选验收项；资源章节、路径或 CWI 身份不能替代候选来源。Verification 使用 `ObligationID`、`Declaration`、`Status`、`ProfileID`、`EvidenceRequirementID`、`Scope` 等既有字段；`UNVERIFIED` 的三个绑定字段必须全空，`DECLARED` 必须绑定可信 Profile 声明，不能把自由文本的预期证据当作声明身份。
+`Requirements.SourceItemRefs` 仅引用封存候选验收项，每项恰好属于一个分组；`Obligations.CandidateItemRef` 对每个候选恰好出现一次，并引用包含该候选的 requirement。`GoalRequirement` 单独引用维度与资源，不把 Goal 混入候选分组或伪造成 DoD obligation。`ResourceIDs` 仅引用 owner 派生的当前资源 ID；资源章节、路径或 CWI 身份不能替代候选来源。Verification 仅提出 `Declaration`、`Status`、`ProfileID`、`EvidenceRequirementID`、`Scope`；`UNVERIFIED` 的三个绑定字段必须全空，`DECLARED` 必须绑定可信 Profile 声明，不能把自由文本的预期证据当作声明身份。
+
+独立 Goal requirement 仅在 Required、`USER_EXPLICIT`、唯一 Goal 来源和全文精确一致时沿用 Goal 输入的 32 KiB 字节上限；普通分组 requirement、候选验收项及 obligation 仍为 4096 字节。边界在既有输入规格规范化后检查，不截断、摘要或改写超长文本，不扩大 provider 文档、请求或阶段预算。原 provider 文档独立按 bytes 保存，规格规范化不能覆盖诊断原文。
 
 无绑定 `UNVERIFIED` 可以保存在草稿中，但即使六类审查全部 PASS，也必须显示为 `review_blocked`，不得确认或物化正式 Goal／DoD。确认要求所有 Verification 为 `DECLARED` 且声明非空，每个 Obligation 至少有一份声明。Workspace owner 在提案 completion、确认准备及 prepared 恢复时独立核对封存 Template 实际编译的 Profile，正式准入再核对当前 Workspace／Template 实际合同。列表摘要与详情也须核对该封存 Profile，不能因六审查 PASS 把不适用的自报声明显示为已审查或可确认。声明适用性必须覆盖该义务的全部确认后 DoD source，并在最终合并策略中保留贡献；声明通过不代表当前 capability／owner fact 已就绪，也不授予执行 proof 或终验 credit。
 
 provider 原生 structured output 仅在能力明确支持时启用；不支持时仍提供完整提示合同并执行相同本地严格校验，不自动 fallback 或重发。显式 schema 构造错误必须明确失败，不能静默省略约束。JSON Schema 只约束结构，不替代原文保真、严格解析、来源／资源／Profile 校验、六类审查、用户确认或 owner 准入。
+
+## 成功提案原文审计
+
+成功提案 completion 同时保存完整 provider document 和独立 wire 观察；owner 重开时从原 document 严格解码 current mapping，与 typed mapping 精确比较并重新编译 canonical proposal。原文 byte count／SHA256 与 permit、mapping 共同绑定 completion 身份，但不是准入或执行权威。document 必须完整且已保存，wire 可未观察、部分观察或超限未保存，必须明确标记 observed／complete／saved／reason；不得用 wire 缺口覆盖已知成功文档。
+
+普通创作记录及 DTO 只携带审计 metadata。显式 `GET /workspaces/:workspaceId/authoring/success-byte-audits/:permitId` 经 Application 的 concrete typed EventHub command/result 向 Workspace owner 读取当前记录中该已完成提案的原文；不复用失败诊断，不接受跨 Workspace 或未知 permit。响应以 Base64 可逆编码返回 document／wire 与完整性 metadata，使用 `Cache-Control: no-store`，沿用管理接口部署访问边界与 owner 0600 存储保护；未保存内容不伪装为完整原文。重复读取及进程重开后的读取不写 Workspace、不增加预算、不调用 provider、不创建 Run。
 
 ## 原始失败诊断与数据保真
 
@@ -32,7 +40,7 @@ provider 原生 structured output 仅在能力明确支持时启用；不支持�
 
 原始响应单条保存上限为 256 KiB，原始错误单条保存上限为 64 KiB；沿用既有 112 条规格请求总量上限，每条仅保留一个诊断结果。超限必须明确标记对应内容未保存，并保留原始字节数、hash 和未保存原因；不得保存片段冒充完整原文，也不得把已知解析失败降为未决。旧失败记录没有诊断时明确显示未记录，不伪造历史原因。
 
-常规创作查询返回错误与诊断元信息，不把原始响应混入周期轮询。单条原文仅通过 Workspace 与 permit 精确限定的只读管理查询按需取得；Web 以纯文本展示并支持原字节读取，不执行 provider 返回的 HTML 或指令。诊断查看不调用 provider，不启动 Run，不恢复或更改确认身份。
+常规创作查询返回错误分类与诊断元信息，不把原始错误、响应或 provider 观察混入周期轮询。单条原文仅通过 Workspace 与 permit 精确限定的只读管理查询按需取得；Web 以纯文本展示并支持原字节读取，不执行 provider 返回的 HTML 或指令。诊断查看不调用 provider，不启动 Run，不恢复或更改确认身份。
 
 包含诊断的 Workspace 文件通过原子发布使用 0600 权限。原始内容留在 owner 运行存储，不提交 Git，不额外附加配置密钥，不复制到通用日志；权限保护不能替代管理接口的部署访问边界。
 

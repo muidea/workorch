@@ -292,7 +292,12 @@ func (s GoalSpecification) Validate(goal DefinitionCandidateItem, dod []Definiti
 	requirements := map[string]GoalSpecificationRequirement{}
 	for _, r := range s.Requirements {
 		_, hasDimension := dimensions[r.DimensionID]
-		if !claimID(r.ID) || len(r.ID) > 128 || !hasDimension || len(r.Text) > 4096 || len(r.SourceItemRefs) > 32 || len(r.ResourceIDs) > 128 || !specRefsExist(r.SourceItemRefs, func(ref string) bool { return items[ref] }) || !specRefsExist(r.ResourceIDs, func(ref string) bool { _, ok := resources[ref]; return ok }) {
+		textLimit := 4096
+		// 独立 Goal 保留输入的既有字节边界；分组、改写或重新标记的文本不能借用该边界。
+		if r.Required && r.SourceKind == GoalRequirementUserExplicit && slices.Equal(r.SourceItemRefs, []string{goal.CandidateItemRef}) && r.Text == goal.Text {
+			textLimit = 32 * 1024
+		}
+		if !claimID(r.ID) || len(r.ID) > 128 || !hasDimension || len(r.Text) > textLimit || len(r.SourceItemRefs) > 32 || len(r.ResourceIDs) > 128 || !specRefsExist(r.SourceItemRefs, func(ref string) bool { return items[ref] }) || !specRefsExist(r.ResourceIDs, func(ref string) bool { _, ok := resources[ref]; return ok }) {
 			return fmt.Errorf("goal specification requirement is incomplete: %q", r.ID)
 		}
 		switch r.SourceKind {
@@ -334,38 +339,45 @@ func (s GoalSpecification) Validate(goal DefinitionCandidateItem, dod []Definiti
 	for _, kind := range goalReviewKinds {
 		allowedReview[kind] = true
 	}
-	validEvidence := func(ref string) bool {
-		if items[ref] || verifications[ref] {
-			return true
-		}
-		if _, ok := resources[ref]; ok {
-			return true
-		}
-		if _, ok := dimensions[ref]; ok {
-			return true
-		}
-		if _, ok := requirements[ref]; ok {
-			return true
-		}
-		_, ok := obligations[ref]
-		return ok
-	}
-	contentHash := s.ContentHash()
+	context := goalSpecificationReviewContext{contentHash: s.ContentHash(), evidence: identities, requirements: requirements}
 	reviews := map[string]bool{}
 	for _, r := range s.Reviews {
-		if !allowedReview[r.Kind] || reviews[r.Kind] || r.SpecificationHash != contentHash || r.Status == "" || len(r.Reason) > 4096 || len(r.EvidenceRefs) > 64 || len(r.RequirementIDs) > 256 || !specRefsExist(r.EvidenceRefs, validEvidence) || !specRefsExist(r.RequirementIDs, func(ref string) bool { _, ok := requirements[ref]; return ok }) {
+		if !allowedReview[r.Kind] || reviews[r.Kind] {
 			return fmt.Errorf("goal specification review %q has invalid identity or provenance", r.Kind)
 		}
-		switch r.Status {
-		case GoalReviewPass:
-			if r.Reason == "" || len(r.EvidenceRefs) == 0 || len(r.RequirementIDs) == 0 {
-				return fmt.Errorf("goal specification PASS review %q lacks traceable evidence", r.Kind)
-			}
-		case GoalReviewFail, GoalReviewUnknown:
-		default:
-			return fmt.Errorf("goal specification review %q has unknown status", r.Kind)
+		if err := context.validate(r); err != nil {
+			return err
 		}
 		reviews[r.Kind] = true
+	}
+	return nil
+}
+
+// 仅在同次校验中复用已通过结构检查的 body，不跨 record/revision 保存。
+type goalSpecificationReviewContext struct {
+	contentHash  string
+	evidence     map[string]bool
+	requirements map[string]GoalSpecificationRequirement
+}
+
+func (c goalSpecificationReviewContext) validate(r GoalSpecificationCompletenessReview) error {
+	r.Kind = strings.TrimSpace(r.Kind)
+	r.Status = strings.TrimSpace(r.Status)
+	r.SpecificationHash = strings.TrimSpace(r.SpecificationHash)
+	r.Reason = strings.TrimSpace(r.Reason)
+	r.EvidenceRefs = normalizedSpecRefs(r.EvidenceRefs)
+	r.RequirementIDs = normalizedSpecRefs(r.RequirementIDs)
+	if !GoalSpecificationReviewKind(r.Kind) || r.SpecificationHash != c.contentHash || r.Status == "" || len(r.Reason) > 4096 || len(r.EvidenceRefs) > 64 || len(r.RequirementIDs) > 256 || !specRefsExist(r.EvidenceRefs, func(ref string) bool { return c.evidence[ref] }) || !specRefsExist(r.RequirementIDs, func(ref string) bool { _, ok := c.requirements[ref]; return ok }) {
+		return fmt.Errorf("goal specification review %q has invalid identity or provenance", r.Kind)
+	}
+	switch r.Status {
+	case GoalReviewPass:
+		if r.Reason == "" || len(r.EvidenceRefs) == 0 || len(r.RequirementIDs) == 0 {
+			return fmt.Errorf("goal specification PASS review %q lacks traceable evidence", r.Kind)
+		}
+	case GoalReviewFail, GoalReviewUnknown:
+	default:
+		return fmt.Errorf("goal specification review %q has unknown status", r.Kind)
 	}
 	return nil
 }

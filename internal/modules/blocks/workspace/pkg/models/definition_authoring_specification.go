@@ -97,7 +97,7 @@ func (c authoringSpecificationContext) validate(spec GoalSpecification) error {
 		if !requirement.Required || requirement.Text == "" || len(requirement.SourceItemRefs) == 0 {
 			return fmt.Errorf("authoring specification requirement %q is not required or sourced", requirement.ID)
 		}
-		if !authoringRequirementVerified(requirement, spec.Obligations, spec.Verifications) {
+		if !slices.Equal(requirement.SourceItemRefs, []string{DefinitionAuthoringGoalItemRef}) && !authoringRequirementVerified(requirement, spec.Obligations, spec.Verifications) {
 			return fmt.Errorf("authoring specification requirement %q has no traceable obligation and verification", requirement.ID)
 		}
 	}

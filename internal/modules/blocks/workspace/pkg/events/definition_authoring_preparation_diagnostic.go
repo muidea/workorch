@@ -49,7 +49,7 @@ func (d DefinitionAuthoringPreparationDiagnosticMetadata) Clone() DefinitionAuth
 	return d
 }
 func (d DefinitionAuthoringPreparationDiagnosticMetadata) Validate() error {
-	return d.Model().Validate()
+	return d.Model().ValidateMetadata()
 }
 
 type RecordPreparationDiagnosticCommand struct {
@@ -77,7 +77,7 @@ func (r RecordPreparationDiagnosticResult) ValidateFor(c RecordPreparationDiagno
 	if c.Validate() != nil || r.Diagnostic.Validate() != nil || r.WorkspaceID != c.Diagnostic.WorkspaceID || r.Diagnostic.WorkspaceID != r.WorkspaceID || r.WorkspaceRevision == 0 || r.Diagnostic.ObservedWorkspaceRevision > r.WorkspaceRevision {
 		return common.ErrConflict
 	}
-	actual, expected := r.Diagnostic.Model(), c.Diagnostic.Clone()
+	actual, expected := r.Diagnostic.Model(), c.Diagnostic.Metadata()
 	if r.Duplicate {
 		// 重放可观察较新 Workspace revision，但不能重写首份 observation。
 		expected.ObservedWorkspaceRevision = actual.ObservedWorkspaceRevision

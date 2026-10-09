@@ -83,7 +83,18 @@ func preparationIdentityText(value string, limit int, required bool) bool {
 	return (!required || value != "") && len(value) <= limit && utf8.ValidString(value) && !strings.ContainsRune(value, 0) && strings.TrimSpace(value) == value
 }
 
-func (d DefinitionAuthoringPreparationDiagnostic) Validate() error {
+func (d DefinitionAuthoringPreparationDiagnostic) Validate() error { return d.validate(false) }
+
+// ValidateMetadata 不读取未投递的原文，不能代替 owner 的 bytes/hash 校验。
+func (d DefinitionAuthoringPreparationDiagnostic) ValidateMetadata() error { return d.validate(true) }
+func (d DefinitionAuthoringPreparationDiagnostic) Metadata() DefinitionAuthoringPreparationDiagnostic {
+	d.Cause = nil
+	return d
+}
+func (d DefinitionAuthoringPreparationDiagnostic) validate(view bool) error {
+	if view && d.Cause != nil {
+		return fmt.Errorf("preparation metadata contains raw bytes")
+	}
 	if !preparationIdentityText(string(d.WorkspaceID), 256, true) || !preparationIdentityText(d.InputHash, 256, true) || !preparationIdentityText(d.TemplateSnapshotHash, 256, true) || d.ObservedWorkspaceRevision == 0 || !preparationIdentityText(d.TargetRequestID, 128, true) || !preparationIdentityText(d.PhaseCode, 128, true) || !preparationIdentityText(d.ResourceRef, 1024, false) || !preparationIdentityText(d.ProviderBindingHash, 256, false) || !preparationIdentityText(d.DerivationPermitID, 256, false) || !preparationIdentityText(d.ProposalHash, 256, false) {
 		return fmt.Errorf("preparation diagnostic identity invalid")
 	}
@@ -119,12 +130,14 @@ func (d DefinitionAuthoringPreparationDiagnostic) Validate() error {
 		return fmt.Errorf("preparation diagnostic cause hash invalid")
 	}
 	if d.CauseSaved {
-		if d.Cause == nil || d.CauseBytes > DefinitionAuthoringPreparationCauseLimit || uint64(len(d.Cause)) != d.CauseBytes || d.NotSavedReason != "" {
+		if d.CauseBytes > DefinitionAuthoringPreparationCauseLimit || d.NotSavedReason != "" || !view && (d.Cause == nil || uint64(len(d.Cause)) != d.CauseBytes) {
 			return fmt.Errorf("preparation diagnostic saved cause byte boundary invalid")
 		}
-		h := sha256.Sum256(d.Cause)
-		if hex.EncodeToString(h[:]) != d.CauseSHA256 {
-			return fmt.Errorf("preparation diagnostic cause hash mismatch")
+		if !view {
+			h := sha256.Sum256(d.Cause)
+			if hex.EncodeToString(h[:]) != d.CauseSHA256 {
+				return fmt.Errorf("preparation diagnostic cause hash mismatch")
+			}
 		}
 	} else if d.Cause != nil || d.CauseBytes <= DefinitionAuthoringPreparationCauseLimit || d.NotSavedReason != DefinitionAuthoringPreparationCauseNotSavedReason {
 		return fmt.Errorf("preparation diagnostic withheld cause boundary invalid")
@@ -144,12 +157,15 @@ func (e *PreparationDiagnosticLimitError) Error() string {
 func (e *PreparationDiagnosticLimitError) Unwrap() error { return common.ErrConflict }
 
 func validatePreparationDiagnostics(r DefinitionAuthoringRecord) error {
+	return validatePreparationDiagnosticsMode(r, false)
+}
+func validatePreparationDiagnosticsMode(r DefinitionAuthoringRecord, view bool) error {
 	if len(r.PreparationDiagnostics) > DefinitionAuthoringPreparationDiagnosticLimit {
 		return fmt.Errorf("preparation diagnostic lineage limit exceeded")
 	}
 	seen := make(map[string]bool, len(r.PreparationDiagnostics))
 	for _, d := range r.PreparationDiagnostics {
-		if d.Validate() != nil || d.WorkspaceID != r.Input.WorkspaceID || seen[d.DiagnosticID] {
+		if d.validate(view) != nil || d.WorkspaceID != r.Input.WorkspaceID || seen[d.DiagnosticID] {
 			return fmt.Errorf("preparation diagnostic lineage scope or identity invalid")
 		}
 		knownInput := d.InputHash == r.InputHash && d.TemplateSnapshotHash == r.TemplateSnapshotHash
@@ -182,6 +198,12 @@ func validatePreparationDiagnostics(r DefinitionAuthoringRecord) error {
 
 // ValidatePreparationDiagnosticHistory 对整条 lineage 去重限额，并反证继承与归档副本保留首写原值。
 func (w *Workspace) ValidatePreparationDiagnosticHistory() error {
+	return w.validatePreparationDiagnosticHistory(false)
+}
+func (w *Workspace) ValidatePreparationDiagnosticHistoryView() error {
+	return w.validatePreparationDiagnosticHistory(true)
+}
+func (w *Workspace) validatePreparationDiagnosticHistory(view bool) error {
 	if w == nil || len(w.DefinitionAuthoringHistory) > DefinitionDerivationRequestLimit {
 		return common.ErrInvalidArgument
 	}
@@ -197,7 +219,7 @@ func (w *Workspace) ValidatePreparationDiagnosticHistory() error {
 	}
 	seen := make(map[string]DefinitionAuthoringPreparationDiagnostic)
 	for _, record := range records {
-		if validatePreparationDiagnostics(record) != nil {
+		if validatePreparationDiagnosticsMode(record, view) != nil {
 			return common.ErrConflict
 		}
 		for _, diagnostic := range record.PreparationDiagnostics {

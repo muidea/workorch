@@ -165,6 +165,9 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 		if transition.Next == nil {
 			return transition, nil
 		}
+		if err := validateWorkspaceAuthoringMappingOutcomes(transition.Next); err != nil {
+			return definitionSpecificationTransition{}, err
+		}
 		if err := m.workspaces.CompareAndSwap(bound, transition.Next, observation.workspace.Revision); err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue
@@ -187,6 +190,22 @@ func definitionSpecificationChangesAuthoringRead(event definitionSpecificationIn
 // The reducer is pure: all mutable owner facts are captured by observation;
 // it neither calls a provider nor reads/writes repositories or EventHub.
 func reduceDefinitionSpecificationInternalEvent(o definitionSpecificationObservation, e definitionSpecificationInternalEvent) (definitionSpecificationTransition, error) {
+	if err := validateWorkspaceAuthoringMappingOutcomes(o.workspace); err != nil {
+		return definitionSpecificationTransition{}, err
+	}
+	transition, err := reduceObservedDefinitionSpecificationInternalEvent(o, e)
+	if err != nil {
+		return definitionSpecificationTransition{}, err
+	}
+	if transition.Next != nil {
+		if err := validateWorkspaceAuthoringMappingOutcomes(transition.Next); err != nil {
+			return definitionSpecificationTransition{}, err
+		}
+	}
+	return transition, nil
+}
+
+func reduceObservedDefinitionSpecificationInternalEvent(o definitionSpecificationObservation, e definitionSpecificationInternalEvent) (definitionSpecificationTransition, error) {
 	switch {
 	case e.PreparationDiagnostic != nil:
 		return reducePreparationDiagnostic(o, *e.PreparationDiagnostic)

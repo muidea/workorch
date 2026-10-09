@@ -6,6 +6,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
+type ReadDefinitionAuthoringSuccessAuditFunc func(context.Context, string, string) (workorchmanagementcontract.DefinitionAuthoringSuccessAuditView, error)
 type ReadDefinitionAuthoringDiagnosticFunc func(context.Context, string, string) (workorchmanagementcontract.DefinitionAuthoringDiagnosticView, error)
 type ReadDefinitionAuthoringPreparationDiagnosticFunc func(context.Context, string, string) (workorchmanagementcontract.DefinitionAuthoringPreparationDiagnosticView, error)
 
@@ -20,6 +21,7 @@ type DefinitionAuthoringPorts struct {
 	Save                      SaveDefinitionAuthoringFunc
 	Compile                   ReadDefinitionAuthoringFunc
 	Confirm                   ConfirmDefinitionAuthoringFunc
+	ReadSuccessAudit          ReadDefinitionAuthoringSuccessAuditFunc
 	ReadDiagnostic            ReadDefinitionAuthoringDiagnosticFunc
 	ReadPreparationDiagnostic ReadDefinitionAuthoringPreparationDiagnosticFunc
 }

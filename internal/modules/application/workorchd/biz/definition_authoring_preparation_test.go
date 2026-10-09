@@ -16,6 +16,7 @@ import (
 	workspaceeventmapping "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/eventmapping"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -172,19 +173,15 @@ func TestAuthoringPreparationCurrentTracksNextUnreservedTargetOnly(t *testing.T)
 	if authoringPreparationDiagnosticCurrent(record, &derivation, deriveFailure) {
 		t.Fatal("reserved derivation retained current preparation failure")
 	}
-	// 测试 helper 取首派生，改为当前完整派生后构建规格。
-	proposalRecord := record.Clone()
-	proposalRecord.DerivationRequests = []workspace.DefinitionDerivationRequest{derivation}
-	proposal := authoringHTTPProposal(t, &proposalRecord)
-	for n := range proposal.Verifications {
-		proposal.Verifications[n].Status = workspace.GoalVerificationUnverified
-		proposal.Verifications[n].ProfileID, proposal.Verifications[n].EvidenceRequirementID, proposal.Verifications[n].Scope = "", "", ""
+	mapping, audit, proposal, err := testkit.Proposal(derivation, workspace.DefinitionAuthoringVerificationMapping{Status: workspace.GoalVerificationUnverified, Declaration: "待评估"})
+	if err != nil {
+		t.Fatal(err)
 	}
 	record, request, _, err := record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{RequestID: "proposal/" + derivation.PermitID, DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "binding"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteSpecification(request.PermitID, &proposal, nil, "")
+	record, err = record.CompleteSpecificationMapping(request.PermitID, mapping, audit)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -29,7 +29,7 @@ func (m *Biz) queryAuthoringDiagnostic(ctx context.Context, command workspaceeve
 	if w.DefinitionAuthoring == nil {
 		return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrNotFound
 	}
-	if err := w.DefinitionAuthoring.Validate(); err != nil {
+	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
 		return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrConflict
 	}
 	if w.ID != command.WorkspaceID || w.ValidateDefinitionAuthoringHistory() != nil {

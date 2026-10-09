@@ -80,8 +80,7 @@ func seedReviewedAuthoringConfirmationWithTemplate(t *testing.T, owners *fileDef
 			verification.Status = workspace.GoalVerificationDeclared
 			verification.ProfileID = "generic"
 			verification.EvidenceRequirementID = declarationID
-			// A fixture with three exact declarations binds each obligation to its
-			// confirmed after-image ordinal before the six reviews are produced.
+			// 三个 exact 声明分别绑定对应 obligation 的确认后 DoD 身份，随后才生成六审。
 			profiles := template.ContextHints.Map()["profileContracts"].(map[string]any)
 			declarations := profiles["generic"].(map[string]any)["evidenceRequirements"].([]any)
 			if len(declarations) > 1 {
@@ -100,7 +99,8 @@ func seedReviewedAuthoringConfirmationWithTemplate(t *testing.T, owners *fileDef
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteSpecification(reserved.PermitID, &proposal, nil, "")
+	mapping, audit := authoringOwnerMapping(t, record.DerivationRequests[0], proposal)
+	record, err = record.CompleteSpecificationMapping(reserved.PermitID, mapping, audit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func seedReviewedAuthoringConfirmationWithTemplate(t *testing.T, owners *fileDef
 		if err != nil {
 			t.Fatal(err)
 		}
-		review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{"goal-req"}}
+		review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{authoringGoalRequirementID(t, proposal)}}
 		record, err = record.CompleteSpecification(reserved.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)

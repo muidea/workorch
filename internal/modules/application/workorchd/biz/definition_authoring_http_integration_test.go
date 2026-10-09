@@ -30,6 +30,7 @@ import (
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	workspaceowner "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	management "github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
@@ -185,10 +186,10 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 					t.Error("proposal permit not durable")
 					return
 				}
-				proposal := authoringHTTPProposal(t, record)
+				mapping := authoringHTTPMapping(t, record)
 				payload, err = json.Marshal(struct {
-					Specification workspace.GoalSpecification `json:"specification"`
-				}{proposal})
+					Mapping workspace.DefinitionAuthoringMapping `json:"mapping"`
+				}{mapping})
 				if scenario == "invalid_proposal" {
 					payload = []byte("  {\"providerControlled\": true}\n")
 				}
@@ -202,7 +203,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				if strings.Contains(command.Request.PromptContext.Sections[1].Content, `"Reviews":[{`) {
 					t.Error("critic received earlier reviews")
 				}
-				review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{"goal"}}
+				review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{authoringHTTPGoalRequirementID(t, *proposal)}}
 				if physicalCalls.Load() == 2 {
 					switch scenario {
 					case "review_fail_preparation_failure":
@@ -520,7 +521,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				t.Fatalf("派生失败继续调用或丢失诊断身份: %+v calls=%d", failed, physicalCalls.Load())
 			}
 		}
-		if failed.State != "failed" || requestIndex < 0 || failed.Requests[requestIndex].FailureCode != failureCode || failed.Requests[requestIndex].Diagnostic == nil || failed.Requests[requestIndex].Diagnostic.ParseError == "" {
+		if failed.State != "failed" || requestIndex < 0 || failed.Requests[requestIndex].FailureCode != failureCode || failed.Requests[requestIndex].Diagnostic == nil || failed.Requests[requestIndex].Diagnostic.ParseError != "" || failed.Requests[requestIndex].Diagnostic.ParseErrorBytes == 0 || !failed.Requests[requestIndex].Diagnostic.ParseErrorSaved {
 			t.Fatalf("invalid proposal was not durably diagnosed: %+v", failed)
 		}
 		var envelope struct {
@@ -544,7 +545,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		if scenario == "invalid_review" {
 			raw = []byte("  {\"未知审查字段\":\"sk_test_marker\"}\r\n")
 		}
-		if envelope.Diagnostic.ParseError != failed.Requests[requestIndex].Diagnostic.ParseError || envelope.Diagnostic.PayloadBase64 != base64.StdEncoding.EncodeToString(raw) || envelope.Diagnostic.PayloadBytes != uint64(len(raw)) || !envelope.Diagnostic.PayloadSaved {
+		if envelope.Diagnostic.ParseError == "" || envelope.Diagnostic.ParseErrorSHA256 != failed.Requests[requestIndex].Diagnostic.ParseErrorSHA256 || envelope.Diagnostic.ParseErrorBytes != failed.Requests[requestIndex].Diagnostic.ParseErrorBytes || envelope.Diagnostic.PayloadBase64 != base64.StdEncoding.EncodeToString(raw) || envelope.Diagnostic.PayloadBytes != uint64(len(raw)) || !envelope.Diagnostic.PayloadSaved {
 			t.Fatalf("raw diagnostic changed: %+v", envelope.Diagnostic)
 		}
 		before := physicalCalls.Load()
@@ -587,6 +588,62 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		}
 	}
 	assertNoRuns()
+	assertSuccessAudit := func() {
+		t.Helper()
+		stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+		if err != nil || stored.DefinitionAuthoring == nil {
+			t.Fatalf("读取成功审计前像失败：%v", err)
+		}
+		request := stored.DefinitionAuthoring.SpecificationRequests[0]
+		if request.SuccessAudit == nil || request.Proposal == nil {
+			t.Fatal("已完成提案缺少 owner 原文审计")
+		}
+		before := stored
+		readAudit := func(workspaceID, permit string, status int) management.DefinitionAuthoringSuccessAuditView {
+			t.Helper()
+			response, err := http.Get(baseURL + "/api/v1/workorch/workspaces/" + workspaceID + "/authoring/success-byte-audits/" + permit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != status || response.Header.Get("Cache-Control") != "no-store" {
+				t.Fatalf("受限审计响应：%d %v", response.StatusCode, response.Header)
+			}
+			if status != http.StatusOK {
+				return management.DefinitionAuthoringSuccessAuditView{}
+			}
+			var envelope struct {
+				Audit management.DefinitionAuthoringSuccessAuditView `json:"audit"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+				t.Fatal(err)
+			}
+			return envelope.Audit
+		}
+		for range 2 {
+			audit := readAudit(created.WorkspaceID, request.PermitID, http.StatusOK)
+			if audit.WorkspaceID != created.WorkspaceID || audit.PermitID != request.PermitID || audit.CanonicalHash != request.Proposal.ContentHash() {
+				t.Fatal("受限审计身份变化")
+			}
+			for _, pair := range []struct {
+				view management.DefinitionProviderObservationView
+				raw  workspace.DefinitionProviderObservation
+			}{{audit.Document, request.SuccessAudit.Document}, {audit.Wire, request.SuccessAudit.Wire}} {
+				content, err := base64.StdEncoding.DecodeString(pair.view.ContentBase64)
+				if err != nil || !bytes.Equal(content, pair.raw.Content) || !reflect.DeepEqual(pair.view.DefinitionProviderObservationMetadata, *authoringProviderObservationMetadata(&pair.raw)) {
+					t.Fatal("受限审计未保全原 bytes 与 metadata")
+				}
+			}
+		}
+		readAudit(created.WorkspaceID, "unknown-permit", http.StatusNotFound)
+		readAudit("other-workspace", request.PermitID, http.StatusNotFound)
+		after, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+		if err != nil || !reflect.DeepEqual(before, after) || physicalCalls.Load() != 8 {
+			t.Fatal("受限审计读取发生写入或重复 provider 调用")
+		}
+		assertNoRuns()
+	}
+	assertSuccessAudit()
 	confirmation := management.DefinitionAuthoringConfirm{InputHash: ready.InputHash, DerivationPermitID: ready.DerivationPermitID, ProposalHash: ready.Proposal.ProposalHash, SpecificationHash: ready.Proposal.SpecificationHash, ExpectedWorkspaceRevision: ready.WorkspaceRevision}
 	if wantState == "review_blocked" {
 		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", confirmation, http.StatusConflict)
@@ -629,6 +686,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	assertNoRuns()
 	closeOwners()
 	baseURL, routine, closeOwners = open()
+	assertSuccessAudit()
 	observed := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
 	if observed.ConfirmationRecovery == nil || observed.ConfirmationRecovery.InputHash != confirmation.InputHash || observed.ConfirmationRecovery.DerivationPermitID != confirmation.DerivationPermitID || observed.ConfirmationRecovery.ProposalHash != confirmation.ProposalHash || observed.ConfirmationRecovery.SpecificationHash != confirmation.SpecificationHash || observed.ConfirmationRecovery.ExpectedWorkspaceRevision != observed.WorkspaceRevision {
 		t.Fatalf("owner confirmation recovery identity lost: %+v", observed)
@@ -695,32 +753,31 @@ func authoringHTTPRequest(t *testing.T, baseURL, method, path string, body any, 
 	return envelope.Authoring
 }
 
+func authoringHTTPMapping(t *testing.T, record *workspace.DefinitionAuthoringRecord) workspace.DefinitionAuthoringMapping {
+	t.Helper()
+	mapping, err := testkit.Mapping(record.DerivationRequests[0], workspace.DefinitionAuthoringVerificationMapping{Declaration: "按模板验证", Status: workspace.GoalVerificationDeclared, ProfileID: "generic", EvidenceRequirementID: "*", Scope: "dodItem"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mapping
+}
+
 func authoringHTTPProposal(t *testing.T, record *workspace.DefinitionAuthoringRecord) workspace.GoalSpecification {
 	t.Helper()
-	derivation := record.DerivationRequests[0]
-	items, err := derivation.Proposal.CandidateItems(record.Input, &record.TemplateSnapshot)
+	proposal, err := workspace.CompileDefinitionAuthoringMapping(record.DerivationRequests[0], authoringHTTPMapping(t, record))
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposal := workspace.GoalSpecification{Version: 1, GoalItemRef: workspace.DefinitionAuthoringGoalItemRef, GoalTextHash: workspace.StableDefinitionTextHash(record.Input.GoalText), Dimensions: []workspace.GoalSpecificationDimension{{ID: "dimension", Required: true, Activated: true}}, Requirements: []workspace.GoalSpecificationRequirement{{ID: "goal", DimensionID: "dimension", Required: true, SourceKind: workspace.GoalRequirementUserExplicit, SourceItemRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, Text: record.Input.GoalText}}}
-	for index, item := range items {
-		kind := workspace.GoalRequirementDerived
-		if index == 0 {
-			kind = workspace.GoalRequirementUserExplicit
-		} else if index == 1 {
-			kind = workspace.GoalRequirementTemplateRequired
+	return proposal
+}
+
+func authoringHTTPGoalRequirementID(t *testing.T, proposal workspace.GoalSpecification) string {
+	t.Helper()
+	for _, requirement := range proposal.Requirements {
+		if len(requirement.SourceItemRefs) == 1 && requirement.SourceItemRefs[0] == workspace.DefinitionAuthoringGoalItemRef {
+			return requirement.ID
 		}
-		id := fmt.Sprintf("item-%d", index)
-		proposal.Requirements = append(proposal.Requirements, workspace.GoalSpecificationRequirement{ID: id, DimensionID: "dimension", Required: true, SourceKind: kind, SourceItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
-		proposal.Obligations = append(proposal.Obligations, workspace.GoalSpecificationObligation{ID: "obligation-" + id, RequirementID: id, DoDItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
 	}
-	proposal.Obligations = append(proposal.Obligations, workspace.GoalSpecificationObligation{ID: "goal-obligation", RequirementID: "goal", DoDItemRefs: []string{items[0].CandidateItemRef}, Text: "目标验收"})
-	for _, obligation := range proposal.Obligations {
-		proposal.Verifications = append(proposal.Verifications, workspace.GoalSpecificationVerification{ID: "verify-" + obligation.ID, ObligationID: obligation.ID, Declaration: "按模板验证", Status: workspace.GoalVerificationDeclared, ProfileID: "generic", EvidenceRequirementID: "*", Scope: "dodItem"})
-	}
-	proposal.Resources, err = workspace.AuthoringSpecificationResources(record.Input, derivation.Resources)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return authoringWireSpecificationFixture(proposal)
+	t.Fatal("当前 compiler 未保留独立 Goal requirement")
+	return ""
 }

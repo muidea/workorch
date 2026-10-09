@@ -70,6 +70,7 @@ func TestDeclaredEmptyVerificationCannotConfirm(t *testing.T) {
 			request.PermitID = request.ExpectedPermitID()
 		}
 	}
+	resealAuthoringProposalClaimForTest(t, &record, proposal)
 	if err := record.Validate(); err != nil {
 		t.Fatalf("空声明草稿的结构校验应独立于确认资格：%v", err)
 	}

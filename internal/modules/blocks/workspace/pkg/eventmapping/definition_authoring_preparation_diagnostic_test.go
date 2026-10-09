@@ -19,20 +19,22 @@ func preparationDTOFixture() (workspace.DefinitionAuthoringRecord, workspace.Def
 	return r, d
 }
 
-func TestPreparationDiagnosticDTOCompleteInternalModelMetadataOnlyJSON(t *testing.T) {
+func TestPreparationDiagnosticDTORequiresMetadataAndRestrictedRawQuery(t *testing.T) {
 	r, d := preparationDTOFixture()
 	dto := DefinitionAuthoringRecordDTO(r)
 	if err := dto.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	expected := r.Clone()
+	expected.PreparationDiagnostics[0] = d.Metadata()
 	model, err := dto.Model()
-	if err != nil || !reflect.DeepEqual(model, r) {
-		t.Fatalf("internal typed reconstruction not exact: %v", err)
+	if err != nil || !reflect.DeepEqual(model, expected) || model.ValidateView() != nil || model.Validate() == nil {
+		t.Fatalf("普通 typed DTO 必须保持 metadata 身份且不能冒充完整 owner 存储：%v", err)
 	}
 	cloned := dto.Clone()
-	cloned.PreparationDiagnostics[0].Cause[0]++
+	cloned.PreparationDiagnostics[0].Cause = []byte("伪造原文")
 	if dto.Validate() != nil || cloned.Validate() == nil {
-		t.Fatal("DTO clone or raw validation bypass")
+		t.Fatal("metadata DTO 接受了额外 raw bytes 或存在 clone 别名")
 	}
 	wire, err := json.Marshal(dto)
 	if err != nil || bytes.Contains(wire, []byte("\"Cause\"")) || bytes.Contains(wire, []byte("exact cause")) {
@@ -42,8 +44,12 @@ func TestPreparationDiagnosticDTOCompleteInternalModelMetadataOnlyJSON(t *testin
 	if err := json.Unmarshal(wire, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Validate() == nil {
-		t.Fatal("metadata-only HTTP observation claimed complete stored rawcause")
+	if decoded.Validate() != nil {
+		t.Fatal("metadata-only HTTP observation 丢失了合法观察身份")
+	}
+	decodedModel, err := decoded.Model()
+	if err != nil || decodedModel.Validate() == nil {
+		t.Fatal("metadata-only HTTP observation 冒充完整 owner rawcause")
 	}
 	cmd := workspaceevents.RecordPreparationDiagnosticCommand{Diagnostic: d}
 	result := workspaceevents.RecordPreparationDiagnosticResult{WorkspaceID: "ws", WorkspaceRevision: 2, Diagnostic: DefinitionAuthoringPreparationDiagnosticMetadataDTO(d)}
@@ -56,7 +62,7 @@ func TestPreparationDiagnosticDTOCompleteInternalModelMetadataOnlyJSON(t *testin
 		t.Fatal("new observation duplicate rejected or rebound")
 	}
 	copy := result.DeepClone()
-	copy.Diagnostic.Cause[0]++
+	copy.Diagnostic.CauseSHA256 = "changed"
 	if result.ValidateFor(cmd) != nil || copy.ValidateFor(cmd) == nil {
 		t.Fatal("receipt clone alias")
 	}

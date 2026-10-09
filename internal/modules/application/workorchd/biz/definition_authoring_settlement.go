@@ -2,7 +2,6 @@ package biz
 
 import (
 	"context"
-	"reflect"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
@@ -78,7 +77,7 @@ func (b *Biz) settleAuthoringSpecification(ctx context.Context, completion works
 	view, err := b.QueryDefinitionAuthoring(settlement, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: completion.WorkspaceID})
 	if err == nil && view.Record != nil {
 		for _, request := range view.Record.SpecificationRequests {
-			if request.PermitID == completion.PermitID && request.FailureCode == completion.FailureCode && reflect.DeepEqual(request.Proposal, completion.Proposal) && reflect.DeepEqual(request.Review, completion.Review) && reflect.DeepEqual(request.Diagnostic, completion.Diagnostic) && (request.FailureCode != "" || request.Proposal != nil || request.Review != nil) {
+			if request.PermitID == completion.PermitID && (request.FailureCode != "" || request.Proposal != nil || request.Review != nil) {
 				response := workspaceevents.AuthoringSpecificationRequestResult{Request: request.Clone(), Consumed: uint32(len(view.Record.SpecificationRequests)), Remaining: uint32(workspace.DefinitionAuthoringSpecificationRequestLimit - len(view.Record.SpecificationRequests))}
 				if response.ValidateCompletion(completion) == nil {
 					return response, nil

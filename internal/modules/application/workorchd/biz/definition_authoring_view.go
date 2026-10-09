@@ -177,7 +177,7 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 				}
 				if reviewed, complete, reviewErr := compiledAuthoringSpecification(*record, *derivation); reviewErr == nil && complete {
 					proposal.SpecificationHash = reviewed.AdmissionHash()
-					if _, _, confirmErr := record.ConfirmableSpecification(derivation.PermitID, proposal.ProposalHash); confirmErr == nil && authoringViewVerificationApplicable(*derivation, reviewed, items) {
+					if _, _, confirmErr := record.ConfirmableSpecificationView(derivation.PermitID, proposal.ProposalHash); confirmErr == nil && authoringViewVerificationApplicable(*derivation, reviewed, items) {
 						result.State = "ready_to_confirm"
 					} else {
 						result.State = "review_blocked"

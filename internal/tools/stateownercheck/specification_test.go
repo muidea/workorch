@@ -8,7 +8,7 @@ import (
 )
 
 func TestSpecificationReviewObservationDoesNotAuthorizeSiblingState(t *testing.T) {
-	for _, model := range []string{"GoalSpecificationCompletenessReview", "GoalSpecificationVerification"} {
+	for _, model := range []string{"GoalSpecificationCompletenessReview", "GoalSpecificationVerification", "DefinitionAuthoringVerificationMapping"} {
 		for _, forbidden := range []bool{false, true} {
 			t.Run(model+map[bool]string{false: "/observation", true: "/target"}[forbidden], func(t *testing.T) {
 				root := newEmptyVerificationRepository(t)

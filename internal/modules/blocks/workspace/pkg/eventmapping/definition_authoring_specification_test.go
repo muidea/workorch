@@ -1,12 +1,11 @@
 package eventmapping
 
 import (
-	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/testkit"
 )
 
 func TestAuthoringDTOClonesPersistedProposalAndReviewWithoutRehashing(t *testing.T) {
@@ -16,36 +15,15 @@ func TestAuthoringDTOClonesPersistedProposalAndReviewWithoutRehashing(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	resources, err := workspace.AuthoringSpecificationResources(derivation.Input, derivation.Resources)
+	mapping, audit, proposal, err := testkit.Proposal(derivation, workspace.DefinitionAuthoringVerificationMapping{Declaration: "尚未声明", Status: workspace.GoalVerificationUnverified})
 	if err != nil {
 		t.Fatal(err)
-	}
-	proposal := workspace.GoalSpecification{
-		Version: workspace.GoalSpecificationVersionCurrent, GoalItemRef: workspace.DefinitionAuthoringGoalItemRef,
-		GoalTextHash: workspace.StableDefinitionTextHash(record.Input.GoalText), Resources: resources,
-		Dimensions:    []workspace.GoalSpecificationDimension{{ID: "dimension", Required: true, Activated: true}},
-		Requirements:  []workspace.GoalSpecificationRequirement{{ID: "goal", DimensionID: "dimension", Required: true, Text: record.Input.GoalText, SourceKind: workspace.GoalRequirementUserExplicit, SourceItemRefs: []string{workspace.DefinitionAuthoringGoalItemRef}}},
-		Obligations:   []workspace.GoalSpecificationObligation{{ID: "goal-obligation", RequirementID: "goal", Text: "验证原目标", DoDItemRefs: []string{items[0].CandidateItemRef}}},
-		Verifications: []workspace.GoalSpecificationVerification{{ID: "goal-verification", ObligationID: "goal-obligation", Declaration: "尚未声明", Status: workspace.GoalVerificationUnverified}},
-	}
-	for n, item := range items {
-		kind := workspace.GoalRequirementDerived
-		if strings.HasPrefix(item.CandidateItemRef, "derived-dod:user:") {
-			kind = workspace.GoalRequirementUserExplicit
-		} else if strings.HasPrefix(item.CandidateItemRef, "derived-dod:template:") {
-			kind = workspace.GoalRequirementTemplateRequired
-		}
-		id := fmt.Sprintf("requirement-%d", n)
-		obligation := fmt.Sprintf("obligation-%d", n)
-		proposal.Requirements = append(proposal.Requirements, workspace.GoalSpecificationRequirement{ID: id, DimensionID: "dimension", Required: true, Text: item.Text, SourceKind: kind, SourceItemRefs: []string{item.CandidateItemRef}})
-		proposal.Obligations = append(proposal.Obligations, workspace.GoalSpecificationObligation{ID: obligation, RequirementID: id, Text: item.Text, DoDItemRefs: []string{item.CandidateItemRef}})
-		proposal.Verifications = append(proposal.Verifications, workspace.GoalSpecificationVerification{ID: "verification-" + id, ObligationID: obligation, Declaration: "尚未声明", Status: workspace.GoalVerificationUnverified})
 	}
 	record, request, _, err := record.ReserveSpecification(workspace.DefinitionAuthoringSpecificationRequest{RequestID: "second-proposal", DerivationPermitID: derivation.PermitID, Phase: workspace.DefinitionSpecificationProposal, ProviderBindingHash: "provider"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err = record.CompleteSpecification(request.PermitID, &proposal, nil, "")
+	record, err = record.CompleteSpecificationMapping(request.PermitID, mapping, audit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,15 +31,22 @@ func TestAuthoringDTOClonesPersistedProposalAndReviewWithoutRehashing(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	review := workspace.GoalSpecificationCompletenessReview{Kind: request.ReviewKind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立审查", EvidenceRefs: []string{items[0].CandidateItemRef}, RequirementIDs: []string{"goal"}}
+	review := workspace.GoalSpecificationCompletenessReview{Kind: request.ReviewKind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立审查", EvidenceRefs: []string{items[0].CandidateItemRef}, RequirementIDs: []string{proposal.Requirements[0].ID}}
 	record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	dto := DefinitionAuthoringRecordDTO(record)
+	expected := record.Clone()
+	for i := range expected.SpecificationRequests {
+		expected.SpecificationRequests[i] = expected.SpecificationRequests[i].Metadata()
+	}
 	model, err := dto.Model()
-	if err != nil || model.Validate() != nil || !reflect.DeepEqual(model, record) {
-		t.Fatalf("proposal／review 往返改变封存身份: %v", err)
+	if err != nil || model.ValidateView() != nil || model.Validate() == nil || !reflect.DeepEqual(model, expected) {
+		t.Fatalf("proposal／review metadata 往返改变封存身份或冒充完整存储: %v", err)
+	}
+	if dto.SpecificationRequests[1].SuccessAudit.Document.Content != nil || dto.SpecificationRequests[1].SuccessAudit.Wire.Content != nil {
+		t.Fatal("普通 typed DTO 泄漏成功原文")
 	}
 	clone := dto.Clone()
 	clone.SpecificationRequests[1].Proposal.Requirements[0].SourceItemRefs[0] = "changed"

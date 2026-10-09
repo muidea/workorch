@@ -608,6 +608,14 @@ func (a WorkspaceActivationAdmission) ValidateCandidate(startup WorkspaceStartup
 // Workspace has not persisted either fact yet. Partial, duplicated, stale-shape
 // or mismatched persistence fails closed.
 func (w *Workspace) ValidateActivationAdmissionPersistence() (DefinitionAdmissionCandidate, bool, error) {
+	return w.validateActivationAdmissionPersistence(false)
+}
+
+// ValidateActivationAdmissionView 只校验普通 detached 观察，不能代替 owner 原文反证。
+func (w *Workspace) ValidateActivationAdmissionView() (DefinitionAdmissionCandidate, bool, error) {
+	return w.validateActivationAdmissionPersistence(true)
+}
+func (w *Workspace) validateActivationAdmissionPersistence(view bool) (DefinitionAdmissionCandidate, bool, error) {
 	if w == nil {
 		return DefinitionAdmissionCandidate{}, false, common.ErrInvalidArgument
 	}
@@ -623,7 +631,7 @@ func (w *Workspace) ValidateActivationAdmissionPersistence() (DefinitionAdmissio
 	}
 	if w.StartupInput == nil && w.ActivationAdmission == nil {
 		if len(w.DefinitionAuthoringHistory) > 0 {
-			if err := w.ValidateDefinitionAuthoringHistory(); err != nil {
+			if err := w.validateDefinitionAuthoringHistory(view); err != nil {
 				return DefinitionAdmissionCandidate{}, false, err
 			}
 			if w.DefinitionAuthoringConfirmation == nil {
@@ -637,7 +645,7 @@ func (w *Workspace) ValidateActivationAdmissionPersistence() (DefinitionAdmissio
 				return DefinitionAdmissionCandidate{}, false, nil
 			}
 			if len(w.DefinitionAdmissionCandidates) == len(w.DefinitionAuthoringHistory) {
-				if w.DefinitionAuthoringConfirmation.Validate(w.DefinitionAuthoring, w.ID) != nil || w.DefinitionAuthoringConfirmation.ValidateSuccessor(w.DefinitionAuthoringHistory[len(w.DefinitionAuthoringHistory)-1].Confirmation) != nil {
+				if w.DefinitionAuthoringConfirmation.validateMode(w.DefinitionAuthoring, w.ID, view) != nil || w.DefinitionAuthoringConfirmation.ValidateSuccessor(w.DefinitionAuthoringHistory[len(w.DefinitionAuthoringHistory)-1].Confirmation) != nil {
 					return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring successor confirmation lost reviewed source")
 				}
 				return DefinitionAdmissionCandidate{}, false, nil
@@ -649,7 +657,7 @@ func (w *Workspace) ValidateActivationAdmissionPersistence() (DefinitionAdmissio
 			if candidate.Validate() != nil || candidate.AuthoringRef == nil || candidate.CandidateID != w.DefinitionAdmissionCandidates[0].CandidateID || candidate.CandidateRevision != uint64(len(w.DefinitionAdmissionCandidates)) {
 				return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring successor candidate is invalid")
 			}
-			goal, dod, reviewed, ref, err := ConfirmedAuthoringAdmissionSource(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID)
+			goal, dod, reviewed, ref, err := confirmedAuthoringAdmissionSourceMode(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID, view)
 			if err != nil || *candidate.AuthoringRef != ref || w.DefinitionAuthoringConfirmation.ValidateSuccessor(w.DefinitionAuthoringHistory[len(w.DefinitionAuthoringHistory)-1].Confirmation) != nil {
 				return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring successor lost reviewed source")
 			}
@@ -666,7 +674,7 @@ func (w *Workspace) ValidateActivationAdmissionPersistence() (DefinitionAdmissio
 			if err := candidate.Validate(); err != nil || candidate.AuthoringRef == nil {
 				return DefinitionAdmissionCandidate{}, false, fmt.Errorf("blocked authoring candidate is invalid")
 			}
-			goal, dod, reviewed, ref, err := ConfirmedAuthoringAdmissionSource(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID)
+			goal, dod, reviewed, ref, err := confirmedAuthoringAdmissionSourceMode(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID, view)
 			if err != nil || *candidate.AuthoringRef != ref {
 				return DefinitionAdmissionCandidate{}, false, fmt.Errorf("blocked authoring candidate lost reviewed source")
 			}
@@ -682,7 +690,7 @@ func (w *Workspace) ValidateActivationAdmissionPersistence() (DefinitionAdmissio
 	if w.DefinitionAuthoringConfirmation != nil && w.DefinitionAuthoringConfirmation.Phase != DefinitionAuthoringConfirmationMaterialized {
 		return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring confirmation is not materialized")
 	}
-	if len(w.DefinitionAuthoringHistory) > 0 && w.ValidateDefinitionAuthoringHistory() != nil {
+	if len(w.DefinitionAuthoringHistory) > 0 && w.validateDefinitionAuthoringHistory(view) != nil {
 		return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring admission has invalid predecessor history")
 	}
 	admission := w.ActivationAdmission.Normalized()
@@ -707,7 +715,7 @@ func (w *Workspace) ValidateActivationAdmissionPersistence() (DefinitionAdmissio
 		if w.DefinitionAuthoring == nil || matched.AuthoringRef == nil || len(w.DefinitionAdmissionCandidates) != len(w.DefinitionAuthoringHistory)+1 || matched.CandidateRevision != uint64(len(w.DefinitionAdmissionCandidates)) || len(w.DefinitionAuthoringHistory) > 0 && (matched.CandidateID != w.DefinitionAdmissionCandidates[0].CandidateID || w.DefinitionAuthoringConfirmation.ValidateSuccessor(w.DefinitionAuthoringHistory[len(w.DefinitionAuthoringHistory)-1].Confirmation) != nil) {
 			return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring admission lacks exact persisted confirmation")
 		}
-		goal, dod, reviewed, ref, err := ConfirmedAuthoringAdmissionSource(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID)
+		goal, dod, reviewed, ref, err := confirmedAuthoringAdmissionSourceMode(w.DefinitionAuthoring, *w.DefinitionAuthoringConfirmation, w.ID, view)
 		if err != nil || *matched.AuthoringRef != ref {
 			return DefinitionAdmissionCandidate{}, false, fmt.Errorf("authoring admission lost original review provenance")
 		}

@@ -19,6 +19,9 @@ func (m *Biz) observeDefinitionAuthoring(ctx context.Context, id common.Workspac
 	if err := workspaceDeletionRejectsMutation(w); err != nil {
 		return definitionSpecificationObservation{}, err
 	}
+	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+		return definitionSpecificationObservation{}, err
+	}
 	goals, err := m.goals.ListByWorkspaceID(ctx, id)
 	if err != nil {
 		return definitionSpecificationObservation{}, err
@@ -55,6 +58,9 @@ func reduceDefinitionAuthoring(o definitionSpecificationObservation, cmd workspa
 	}
 	input := cmd.Input.Normalized()
 	w := o.workspace
+	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+		return definitionSpecificationTransition{}, err
+	}
 	if replay, matched, err := replayDefinitionAuthoringSave(w, cmd); matched || err != nil {
 		return replay, err
 	}
@@ -165,6 +171,9 @@ func applyAuthoringConfiguration(w *workspacemodel.Workspace, template *workspac
 func replayDefinitionAuthoringSave(w *workspacemodel.Workspace, cmd workspaceevents.SaveDefinitionAuthoringCommand) (definitionSpecificationTransition, bool, error) {
 	if w == nil || w.ID != cmd.Input.WorkspaceID {
 		return definitionSpecificationTransition{}, false, common.ErrConflict
+	}
+	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
+		return definitionSpecificationTransition{}, false, err
 	}
 	if w.DefinitionAuthoring == nil {
 		return definitionSpecificationTransition{}, false, nil

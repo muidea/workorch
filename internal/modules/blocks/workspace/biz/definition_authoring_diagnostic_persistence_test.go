@@ -99,7 +99,13 @@ func TestAuthoringFailureDiagnosticSurvivesFileReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := []byte("  {\"未知字段\":\"sk_test_marker\"}\r\n")
-	diagnostic := workspace.NewDefinitionAuthoringDiagnostic("decode: 未知字段\n原始错误", raw)
+	_, parseErr := workspace.DecodeDefinitionAuthoringMapping(raw)
+	if parseErr == nil {
+		t.Fatal("非法当前文档被解码")
+	}
+	diagnostic := workspace.NewDefinitionAuthoringDiagnostic(parseErr.Error(), raw)
+	document, wire := originalAuthoringObservation(raw), originalAuthoringObservation(raw)
+	diagnostic.ProviderDocument, diagnostic.ProviderWire = &document, &wire
 	completion := workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: input.WorkspaceID, PermitID: specRequest.PermitID, FailureCode: "invalid_proposal", Diagnostic: &diagnostic}
 	if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: input.WorkspaceID, AuthoringSpecComplete: &completion}); err != nil {
 		t.Fatal(err)

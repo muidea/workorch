@@ -1,6 +1,22 @@
 package specifications
 
-import "strings"
+import (
+	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"strings"
+)
+
+func authoringSpecificationOutputSchema(purpose string) string {
+	if strings.HasPrefix(purpose, "review/") {
+		return specificationOutputSchema(purpose)
+	}
+	return workspace.DefinitionAuthoringMappingSchema
+}
+func authoringSpecificationOutputContract(purpose, instructions string) string {
+	if strings.HasPrefix(purpose, "review/") {
+		return specificationOutputContract(purpose, instructions)
+	}
+	return instructions + "\n当前输出协议 " + workspace.DefinitionAuthoringMappingProtocol + "；所有字段必填、大小写精确、禁止未知/重复/null字段，256KiB/32层完整文档边界；local Workspace strict decoder/compiler 是最终权威，无旧形状 fallback。\nJSON Schema:\n" + workspace.DefinitionAuthoringMappingSchema
+}
 
 // 版本化手写输出合同只约束结构；owner 语义校验、独立审查及确认仍不可省略。
 const derivationOutputSchema = `{"type":"object","additionalProperties":false,"required":["AuthoringInputHash","TemplateSnapshotHash","AdditionalItems"],"properties":{"AuthoringInputHash":{"type":"string"},"TemplateSnapshotHash":{"type":"string"},"AdditionalItems":{"type":"array","maxItems":128,"items":{"type":"string"}}}}`

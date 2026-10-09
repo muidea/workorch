@@ -98,7 +98,7 @@ func (r DefinitionDerivationRequest) Validate() error {
 	if err != nil {
 		return err
 	}
-	return model.Validate()
+	return model.ValidateView()
 }
 
 func (r DefinitionAuthoringRecord) Clone() DefinitionAuthoringRecord {
@@ -158,7 +158,7 @@ func (r DefinitionAuthoringRecord) Validate() error {
 	if err != nil {
 		return err
 	}
-	return model.Validate()
+	return model.ValidateView()
 }
 
 func (r DefinitionAuthoringConfirmedRevision) Clone() DefinitionAuthoringConfirmedRevision {

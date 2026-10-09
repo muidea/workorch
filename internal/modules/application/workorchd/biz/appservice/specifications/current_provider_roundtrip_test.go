@@ -12,6 +12,7 @@ import (
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/testkit"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -29,33 +30,32 @@ func TestAuthoringHTTPCurrentProposalRoundTripAndSemanticRejects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec := authoringCommandFixture(t, input, template, derived)
-	spec.Resources = []workspace.GoalSpecificationResource{}
-	spec.Reviews = []workspace.GoalSpecificationCompletenessReview{}
-	for i := range spec.Dimensions {
-		spec.Dimensions[i].ResourceIDs = []string{}
-	}
-	for i := range spec.Requirements {
-		spec.Requirements[i].ResourceIDs = []string{}
+	mapping, _, spec, err := testkit.Proposal(request, workspace.DefinitionAuthoringVerificationMapping{Status: workspace.GoalVerificationUnverified, Declaration: "待评估"})
+	if err != nil {
+		t.Fatal(err)
 	}
 	for _, native := range []bool{false, true} {
 		for _, scenario := range []string{"valid", "resource_chapter_as_source", "unverified_claims_binding", "wrong_source_kind", "wrong_field_case"} {
 			t.Run(scenario+map[bool]string{false: "/prompt", true: "/native"}[native], func(t *testing.T) {
-				proposal := spec.Clone()
+				proposal := mapping.Clone()
 				switch scenario {
 				case "resource_chapter_as_source":
 					proposal.Requirements[0].SourceItemRefs = append(proposal.Requirements[0].SourceItemRefs, "prd.md#2.5")
 				case "unverified_claims_binding":
-					proposal.Verifications[0].ProfileID, proposal.Verifications[0].EvidenceRequirementID, proposal.Verifications[0].Scope = "invented", "*", "dodItem"
-				case "wrong_source_kind":
-					proposal.Requirements[0].SourceKind = workspace.GoalRequirementDerived
+					proposal.Obligations[0].Verification.ProfileID, proposal.Obligations[0].Verification.EvidenceRequirementID, proposal.Obligations[0].Verification.Scope = "invented", "*", "dodItem"
 				}
-				payload, err := json.Marshal(map[string]any{"specification": proposal})
+				payload, err := json.Marshal(struct {
+					Mapping workspace.DefinitionAuthoringMapping `json:"mapping"`
+				}{proposal})
 				if err != nil {
 					t.Fatal(err)
 				}
+				if scenario == "wrong_source_kind" {
+					// 来源由 owner 编译；provider 连自报同名字段也不能混入当前 wire。
+					payload = []byte(strings.Replace(string(payload), `"SourceItemRefs":`, `"SourceKind":"DERIVED","SourceItemRefs":`, 1))
+				}
 				if scenario == "wrong_field_case" {
-					payload = []byte(strings.Replace(string(payload), `"GoalItemRef"`, `"goalitemref"`, 1))
+					payload = []byte(strings.Replace(string(payload), `"GoalRequirement"`, `"goalrequirement"`, 1))
 				}
 				calls := 0
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

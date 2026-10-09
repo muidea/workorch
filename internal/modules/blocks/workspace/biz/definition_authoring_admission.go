@@ -43,6 +43,9 @@ func (m *Biz) verifyConfirmedAuthoringAdmission(ctx context.Context, current *wo
 	if current == nil || current.DefinitionAuthoring == nil || current.DefinitionAuthoringConfirmation == nil || current.DefinitionAuthoringConfirmation.Phase != workspacemodel.DefinitionAuthoringConfirmationMaterialized || current.ActiveRunID != "" || current.DefinitionSpecificationLedger != nil || candidate.AuthoringRef == nil || candidate.CompilationRef != nil || candidate.BaseDefinitionRevision != "" || candidate.BaseStartupInputHash != "" || candidate.CandidateRevision != uint64(len(current.DefinitionAuthoringHistory)+1) || current.ValidateDefinitionAuthoringHistory() != nil {
 		return common.ErrConflict
 	}
+	if err := validateWorkspaceAuthoringMappingOutcomes(current); err != nil {
+		return err
+	}
 	if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
 		return common.ErrConflict
 	}

@@ -81,7 +81,7 @@ func (b *Biz) ConfirmAndAdmitDefinitionAuthoring(ctx context.Context, command wo
 }
 
 func (b *Biz) replayConfirmedDefinitionAuthoringAdmission(ctx context.Context, confirmation workspaceevents.ConfirmDefinitionAuthoringCommand, current *workspace.Workspace) (workspaceevents.AdmitDefinitionAuthoringResult, error) {
-	if current == nil || current.ID != confirmation.WorkspaceID || current.DefinitionAuthoring == nil || current.DefinitionAuthoringConfirmation == nil || len(current.DefinitionAdmissionCandidates) != len(current.DefinitionAuthoringHistory)+1 || current.ValidateDefinitionAuthoringHistory() != nil {
+	if current == nil || current.ID != confirmation.WorkspaceID || current.DefinitionAuthoring == nil || current.DefinitionAuthoringConfirmation == nil || len(current.DefinitionAdmissionCandidates) != len(current.DefinitionAuthoringHistory)+1 || current.ValidateDefinitionAuthoringHistoryView() != nil {
 		return workspaceevents.AdmitDefinitionAuthoringResult{}, common.ErrConflict
 	}
 	journal := current.DefinitionAuthoringConfirmation
@@ -92,7 +92,7 @@ func (b *Biz) replayConfirmedDefinitionAuthoringAdmission(ctx context.Context, c
 	if candidate.AuthoringRef == nil || candidate.AuthoringRef.InputHash != confirmation.InputHash || candidate.AuthoringRef.DerivationPermitID != confirmation.DerivationPermitID || candidate.AuthoringRef.ProposalHash != confirmation.ProposalHash || candidate.AuthoringRef.SpecificationHash != confirmation.SpecificationHash {
 		return workspaceevents.AdmitDefinitionAuthoringResult{}, common.ErrConflict
 	}
-	if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
+	if _, _, err := current.ValidateActivationAdmissionView(); err != nil {
 		return workspaceevents.AdmitDefinitionAuthoringResult{}, err
 	}
 	return b.AdmitConfirmedDefinitionAuthoring(ctx, current, candidate)
