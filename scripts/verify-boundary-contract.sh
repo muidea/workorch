@@ -2889,12 +2889,13 @@ fi
 # fixture can conceal a production prompt/contract drift until a later state
 # (typically assessment) receives the wrong JSON shape.
 # go test -json 的 Action 是 Go 测试协议字段，不是 RuntimeDecision 权威。
-# 仅豁免逐包测试解析器及其 synthetic 校准；其余 provider fixture 继续全扫描。
+# 仅豁免逐包解析器和 LSP 黑盒 Go 测试协议解析及其 synthetic 校准；
+# 其余 provider fixture 继续全扫描。
 if ! python3 scripts/test_go_test_each_package.py; then
   exit 1
 fi
 runtime_candidate_fixture_action_pattern='"Action"|\["Action"\]|sealed Action|action_match'
-matches="$(grep -R -n -E --include='*.sh' --include='*.py' --exclude='verify-boundary-contract.sh' -- "$runtime_candidate_fixture_action_pattern" scripts | grep -v -E '^scripts/(lib/go-test-each-package\.py|test_go_test_each_package\.py):' || true)"
+matches="$(grep -R -n -E --include='*.sh' --include='*.py' --exclude='verify-boundary-contract.sh' -- "$runtime_candidate_fixture_action_pattern" scripts | grep -v -E '^scripts/(lib/go-test-each-package\.py|test_go_test_each_package\.py|lsp_bridge_prd_suite\.py|test_lsp_bridge_prd_suite\.py):' || true)"
 if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: Runtime provider fixture depends on retired
