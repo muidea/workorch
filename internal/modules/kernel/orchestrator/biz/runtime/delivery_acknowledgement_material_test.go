@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -8,30 +9,60 @@ import (
 )
 
 func TestTerminalDeliveryCompletionRejectsMalformedLedger(t *testing.T) {
-	aggregate := RuntimeAggregate{
-		Facts: runtimecontract.RuntimeFacts{WorkspaceID: "workspace", RunID: "run"},
-		Decision: runtimecontract.RuntimeDecision{
-			State:             runtimecontract.ConvergenceStateComplete,
-			AuthoritySnapshot: runtimecontract.AuthoritySnapshot{ID: "authority", WorkspaceID: "workspace", RunID: "run"},
-			Terminal:          &runtimecontract.RuntimeTerminalDecision{Code: "completed", Summary: "sealed"},
-		},
-	}
-	outcome, _, err := DeriveTerminalOutcome(aggregate.Decision, nil)
+	aggregate := materialSealTerminalAggregate(t)
+	repository := &sealTransitionRepository{aggregate: aggregate}
+	controller, err := NewRuntimeController(repository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	deliveryID := runtimecontract.StableTerminalDeliveryID("workspace", "run", "authority", outcome)
+	sealed, err := controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
+		Kind: RuntimeInternalEventTerminalMaterialSealRequired,
+		Scope: RuntimeInternalEventScope{
+			WorkspaceID: aggregate.Facts.WorkspaceID,
+			RunID:       aggregate.Facts.RunID,
+		},
+		Delivery: &RuntimeInternalDeliveryPayload{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregate = sealed.Aggregate
+	seal := aggregate.TerminalMaterialSeal
+	if seal == nil {
+		t.Fatal("SM-4 seal event did not persist terminal material")
+	}
+	deliveryID := seal.Identity.TerminalDeliveryID
 	owners := []runtimecontract.RuntimeDeliveryOwner{runtimecontract.RuntimeDeliveryOwnerResult, runtimecontract.RuntimeDeliveryOwnerWorkspace, runtimecontract.RuntimeDeliveryOwnerRun}
 	for _, owner := range owners {
 		ack := runtimecontract.RuntimeDeliveryAcknowledgement{
-			WorkspaceID: "workspace", RunID: "run", TerminalDeliveryID: deliveryID, Owner: owner,
-			AuthoritySnapshotID: "authority", CausationID: "terminal-delivery/" + deliveryID,
-			AcknowledgedState: runtimecontract.RuntimeDeliveryAcknowledgedNoop, Outcome: outcome,
+			WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID,
+			TerminalDeliveryID: deliveryID, Owner: owner,
+			AuthoritySnapshotID: seal.Identity.AuthoritySnapshotID, CausationID: "terminal-delivery/" + deliveryID,
+			Outcome: seal.Identity.Outcome,
 		}
-		if owner == runtimecontract.RuntimeDeliveryOwnerResult {
-			ack.ResultID = runtimecontract.RuntimeTerminalResultID("workspace", "run")
+		switch owner {
+		case runtimecontract.RuntimeDeliveryOwnerResult:
+			ack.ResultID = runtimecontract.RuntimeTerminalResultID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			closeout := seal.Material.RuntimeCloseout.CloneRaw()
+			ack.ResultCloseout = &closeout
+			ack.AcknowledgedState = runtimecontract.RuntimeDeliveryAcknowledgedResultRecorded
+		case runtimecontract.RuntimeDeliveryOwnerWorkspace:
+			ack.AcknowledgedState = runtimecontract.RuntimeDeliveryAcknowledgedWorkspaceReleased
+		case runtimecontract.RuntimeDeliveryOwnerRun:
+			ack.AcknowledgedState = runtimecontract.RuntimeDeliveryAcknowledgedRunTerminal
 		}
-		aggregate.DeliveryAcknowledgements = append(aggregate.DeliveryAcknowledgements, ack)
+		acknowledged, err := controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
+			Kind: RuntimeInternalEventTerminalDeliveryAcknowledged,
+			Scope: RuntimeInternalEventScope{
+				WorkspaceID: aggregate.Facts.WorkspaceID,
+				RunID:       aggregate.Facts.RunID,
+			},
+			Delivery: &RuntimeInternalDeliveryPayload{DeliveryAcknowledgement: &ack},
+		})
+		if err != nil {
+			t.Fatalf("record %s acknowledgement through SM-4 event: %v", owner, err)
+		}
+		aggregate = acknowledged.Aggregate
 	}
 	if !TerminalDeliveryFullyAcknowledged(aggregate) {
 		t.Fatal("合法有序三 owner 回执未完成交付")

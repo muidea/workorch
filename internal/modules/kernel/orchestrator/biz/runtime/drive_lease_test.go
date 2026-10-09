@@ -200,6 +200,18 @@ func TestRuntimeDriveLeaseAdministrativeTerminationReissuesRetiredGenerationOnly
 	if err != nil || terminated.DriveLease != nil || !AdministrativeTerminationAwaitsTerminalDelivery(terminated) {
 		t.Fatalf("termination did not retire running generation: aggregate=%+v err=%v", terminated, err)
 	}
+	sealed, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+		Kind: RuntimeInternalEventTerminalMaterialSealRequired,
+		Scope: RuntimeInternalEventScope{
+			WorkspaceID: terminated.Facts.WorkspaceID,
+			RunID:       terminated.Facts.RunID,
+		},
+		Delivery: &RuntimeInternalDeliveryPayload{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminated = sealed.Aggregate
 	outcome, terminal, err := DeriveTerminalOutcome(terminated.Decision, terminated.Termination)
 	if err != nil || !terminal {
 		t.Fatalf("derive administrative terminal outcome=%+v terminal=%v err=%v", outcome, terminal, err)
@@ -241,81 +253,57 @@ func TestRuntimeDriveLeaseAdministrativeTerminationReissuesRetiredGenerationOnly
 		t.Fatal("administratively terminated aggregate accepted a non-canonical delivery lease on fresh validation")
 	}
 
-	// Model the tighter response-loss race on a separately terminated aggregate:
-	// another delivery path completes all owner acknowledgements before the stale
-	// worker reaches its scheduling CAS. A fully delivered terminal must reject
-	// the retired-generation exception as a zero-write stale request.
-	fullyAcknowledged := reissuedAggregate
-	fullyAcknowledged.DriveLease = nil
-	outcome, terminal, err = DeriveTerminalOutcome(fullyAcknowledged.Decision, fullyAcknowledged.Termination)
-	if err != nil || !terminal {
-		t.Fatalf("derive administrative terminal outcome=%+v terminal=%v err=%v", outcome, terminal, err)
+	// Claim the scheduled terminal lease before acknowledgements arrive, so the
+	// later completion path exercises retirement of an exact running generation.
+	fullyAcknowledged, runningTerminalLease, claimed, err := controller.claimDriveLease(ctx,
+		initialized.Facts.WorkspaceID, initialized.Facts.RunID, reissued, reissued.DueAt)
+	if err != nil || !claimed || runningTerminalLease.State != runtimecontract.RuntimeDriveLeaseRunning {
+		t.Fatalf("claim terminal lease before delivery acknowledgements: aggregate=%+v lease=%+v claimed=%v err=%v", fullyAcknowledged, runningTerminalLease, claimed, err)
 	}
-	deliveryID = runtimecontract.StableTerminalDeliveryID(
-		fullyAcknowledged.Facts.WorkspaceID,
-		fullyAcknowledged.Facts.RunID,
-		fullyAcknowledged.Decision.AuthoritySnapshot.ID,
-		outcome,
-	)
-	fullyAcknowledged.DeliveryAcknowledgements = nil
-	for _, owner := range []runtimecontract.RuntimeDeliveryOwner{
-		runtimecontract.RuntimeDeliveryOwnerResult,
-		runtimecontract.RuntimeDeliveryOwnerWorkspace,
-		runtimecontract.RuntimeDeliveryOwnerRun,
-	} {
-		state := runtimecontract.RuntimeDeliveryAcknowledgedNoop
-		resultID := common.ResultID("")
-		switch owner {
-		case runtimecontract.RuntimeDeliveryOwnerResult:
-			state = runtimecontract.RuntimeDeliveryAcknowledgedResultRecorded
-			resultID = runtimecontract.RuntimeTerminalResultID(fullyAcknowledged.Facts.WorkspaceID, fullyAcknowledged.Facts.RunID)
-		case runtimecontract.RuntimeDeliveryOwnerWorkspace:
-			state = runtimecontract.RuntimeDeliveryAcknowledgedWorkspaceReleased
-		case runtimecontract.RuntimeDeliveryOwnerRun:
-			state = runtimecontract.RuntimeDeliveryAcknowledgedRunTerminal
-		}
-		fullyAcknowledged.DeliveryAcknowledgements = append(fullyAcknowledged.DeliveryAcknowledgements, runtimecontract.RuntimeDeliveryAcknowledgement{
-			WorkspaceID:         fullyAcknowledged.Facts.WorkspaceID,
-			RunID:               fullyAcknowledged.Facts.RunID,
-			ResultID:            resultID,
-			TerminalDeliveryID:  deliveryID,
-			Owner:               owner,
-			AcknowledgedState:   state,
-			AuthoritySnapshotID: fullyAcknowledged.Decision.AuthoritySnapshot.ID,
-			CausationID:         "terminal-delivery/" + deliveryID,
-			Outcome:             outcome,
-		})
-	}
-	fullyAcknowledged.StateRevision++
-	if err := fullyAcknowledged.Validate(); err != nil {
-		t.Fatalf("fully acknowledged administrative terminal: %v", err)
-	}
-	repository.aggregate = &fullyAcknowledged
-	saves = repository.saves
-	unchanged, absent, changed, err := controller.driveDelivery.scheduleDriveLease(ctx,
-		initialized.Facts.WorkspaceID, initialized.Facts.RunID, retry, running.RecoveryGeneration)
-	if err != nil || changed || absent.WorkspaceID != "" || unchanged.StateRevision != fullyAcknowledged.StateRevision ||
-		unchanged.DriveLease != nil || repository.saves != saves || !TerminalDeliveryFullyAcknowledged(unchanged) {
-		t.Fatalf("fully acknowledged terminal admitted stale successor: aggregate=%+v lease=%+v changed=%v saves=%d/%d err=%v", unchanged, absent, changed, repository.saves, saves, err)
+	fullyAcknowledged = acknowledgeAdministrativeTerminalOwnersForLeaseTest(t, ctx, controller, fullyAcknowledged)
+	if !TerminalDeliveryFullyAcknowledged(fullyAcknowledged) {
+		t.Fatal("formal owner acknowledgement path did not complete terminal delivery")
 	}
 
-	fullyAcknowledgedRunning := fullyAcknowledged
-	fullyAcknowledgedRunning.StateRevision++
-	runningTerminalLease := reissued.Clone()
-	runningTerminalLease.AggregateRevision = fullyAcknowledgedRunning.StateRevision
-	runningTerminalLease.State = runtimecontract.RuntimeDriveLeaseRunning
-	fullyAcknowledgedRunning.DriveLease = &runningTerminalLease
-	if err := fullyAcknowledgedRunning.Validate(); err != nil {
-		t.Fatalf("fully acknowledged terminal with exact running lease: %v", err)
-	}
-	repository.aggregate = &fullyAcknowledgedRunning
+	// An old worker generation cannot alter the exact running successor after
+	// completion; the matching generation then retires that running lease.
+	repository.aggregate = &fullyAcknowledged
 	saves = repository.saves
+	unchanged, current, changed, err := controller.driveDelivery.scheduleDriveLease(ctx,
+		initialized.Facts.WorkspaceID, initialized.Facts.RunID, retry, running.RecoveryGeneration)
+	if err != nil || changed || current.WorkspaceID == "" || !runtimecontract.SameRuntimeDriveLeaseIdentity(current, runningTerminalLease) ||
+		unchanged.StateRevision != fullyAcknowledged.StateRevision || unchanged.DriveLease == nil ||
+		!runtimecontract.SameRuntimeDriveLeaseIdentity(*unchanged.DriveLease, runningTerminalLease) || repository.saves != saves || !TerminalDeliveryFullyAcknowledged(unchanged) {
+		t.Fatalf("fully acknowledged terminal allowed stale generation to alter exact running lease: aggregate=%+v lease=%+v changed=%v saves=%d/%d err=%v", unchanged, current, changed, repository.saves, saves, err)
+	}
 	retired, absent, changed, err := controller.driveDelivery.scheduleDriveLease(ctx,
 		initialized.Facts.WorkspaceID, initialized.Facts.RunID, retry, runningTerminalLease.RecoveryGeneration)
 	if err != nil || !changed || absent.WorkspaceID != "" || retired.DriveLease != nil ||
-		retired.StateRevision != fullyAcknowledgedRunning.StateRevision+1 || repository.saves != saves+1 ||
+		retired.StateRevision != fullyAcknowledged.StateRevision+1 || repository.saves != saves+1 ||
 		!TerminalDeliveryFullyAcknowledged(retired) {
-		t.Fatalf("fully acknowledged terminal retained exact running lease: aggregate=%+v lease=%+v changed=%v saves=%d/%d err=%v", retired, absent, changed, repository.saves, saves, err)
+		t.Fatalf("fully acknowledged terminal retained exact running lease: aggregate=%+v lease=%+v changed=%v saves=%d/%d err=%v", retired, absent, changed, repository.saves, saves+1, err)
+	}
+
+	// Independently cover a scheduled lease whose aggregate revision was advanced
+	// by owner acknowledgements: claiming that stale schedule clears it without a
+	// worker handoff or a fabricated running lease.
+	scheduledAggregate := reissuedAggregate.CloneRaw()
+	scheduledRepository := &controllerRepository{aggregate: &scheduledAggregate}
+	scheduledController, err := NewRuntimeController(scheduledRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduledFullyAcknowledged := acknowledgeAdministrativeTerminalOwnersForLeaseTest(t, ctx, scheduledController, scheduledAggregate)
+	if !TerminalDeliveryFullyAcknowledged(scheduledFullyAcknowledged) {
+		t.Fatal("scheduled-lease fixture did not complete terminal delivery")
+	}
+	scheduledSaves := scheduledRepository.saves
+	scheduledRetired, absent, claimed, err := scheduledController.claimDriveLease(ctx,
+		initialized.Facts.WorkspaceID, initialized.Facts.RunID, reissued, reissued.DueAt)
+	if err != nil || claimed || absent.WorkspaceID != "" || scheduledRetired.DriveLease != nil ||
+		scheduledRetired.StateRevision != scheduledFullyAcknowledged.StateRevision+1 || scheduledRepository.saves != scheduledSaves+1 ||
+		!TerminalDeliveryFullyAcknowledged(scheduledRetired) {
+		t.Fatalf("claim of fully acknowledged stale scheduled lease was not retired: aggregate=%+v lease=%+v claimed=%v saves=%d/%d err=%v", scheduledRetired, absent, claimed, scheduledRepository.saves, scheduledSaves+1, err)
 	}
 
 	saves = repository.saves
@@ -326,6 +314,57 @@ func TestRuntimeDriveLeaseAdministrativeTerminationReissuesRetiredGenerationOnly
 		budgetReplay.Facts.Recovery != retired.Facts.Recovery || repository.saves != saves {
 		t.Fatalf("fully acknowledged terminal consumed delivery budget: aggregate=%+v consumed=%v saves=%d/%d err=%v", budgetReplay, consumed, repository.saves, saves, err)
 	}
+}
+
+func acknowledgeAdministrativeTerminalOwnersForLeaseTest(t *testing.T, ctx context.Context, controller *RuntimeController, aggregate RuntimeAggregate) RuntimeAggregate {
+	t.Helper()
+	if aggregate.TerminalMaterialSeal == nil {
+		t.Fatal("administrative terminal acknowledgement fixture requires SM-4 material seal")
+	}
+	outcome, terminal, err := DeriveTerminalOutcome(aggregate.Decision, aggregate.Termination)
+	if err != nil || !terminal {
+		t.Fatalf("derive administrative terminal outcome=%+v terminal=%v err=%v", outcome, terminal, err)
+	}
+	deliveryID := aggregate.TerminalMaterialSeal.Identity.TerminalDeliveryID
+	for _, owner := range []runtimecontract.RuntimeDeliveryOwner{
+		runtimecontract.RuntimeDeliveryOwnerResult,
+		runtimecontract.RuntimeDeliveryOwnerWorkspace,
+		runtimecontract.RuntimeDeliveryOwnerRun,
+	} {
+		ack := runtimecontract.RuntimeDeliveryAcknowledgement{
+			WorkspaceID:         aggregate.Facts.WorkspaceID,
+			RunID:               aggregate.Facts.RunID,
+			TerminalDeliveryID:  deliveryID,
+			Owner:               owner,
+			AuthoritySnapshotID: aggregate.TerminalMaterialSeal.Identity.AuthoritySnapshotID,
+			CausationID:         "terminal-delivery/" + deliveryID,
+			Outcome:             outcome,
+		}
+		switch owner {
+		case runtimecontract.RuntimeDeliveryOwnerResult:
+			ack.ResultID = runtimecontract.RuntimeTerminalResultID(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+			closeout := aggregate.TerminalMaterialSeal.Material.RuntimeCloseout.CloneRaw()
+			ack.ResultCloseout = &closeout
+			ack.AcknowledgedState = runtimecontract.RuntimeDeliveryAcknowledgedResultRecorded
+		case runtimecontract.RuntimeDeliveryOwnerWorkspace:
+			ack.AcknowledgedState = runtimecontract.RuntimeDeliveryAcknowledgedWorkspaceReleased
+		case runtimecontract.RuntimeDeliveryOwnerRun:
+			ack.AcknowledgedState = runtimecontract.RuntimeDeliveryAcknowledgedRunTerminal
+		}
+		result, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{
+			Kind: RuntimeInternalEventTerminalDeliveryAcknowledged,
+			Scope: RuntimeInternalEventScope{
+				WorkspaceID: aggregate.Facts.WorkspaceID,
+				RunID:       aggregate.Facts.RunID,
+			},
+			Delivery: &RuntimeInternalDeliveryPayload{DeliveryAcknowledgement: &ack},
+		})
+		if err != nil {
+			t.Fatalf("record %s acknowledgement through SM-4 event: %v", owner, err)
+		}
+		aggregate = result.Aggregate
+	}
+	return aggregate
 }
 
 func TestRuntimeTerminalDeliveryBudgetExhaustionPersistsExactInterventionOnce(t *testing.T) {
