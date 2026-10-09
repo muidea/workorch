@@ -58,16 +58,6 @@ func compileRuntimeSemanticBindingsWithValidatedManifest(validated runtimeValida
 	if err := validateRuntimeSemanticFeasibilitySetWithValidatedManifest(validated, document, feasibilities, true); err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
-	sourceByCoverage := make(map[common.CoverageWorkItemID]CoverageFocus, len(manifest.ProofObligations))
-	obligationByCoverage := make(map[common.CoverageWorkItemID]RuntimeSemanticProofObligation, len(manifest.ProofObligations))
-	for _, obligation := range manifest.ProofObligations {
-		sourceByCoverage[obligation.CoverageWorkItemID] = runtimeSemanticProofObligationSourceFocus(obligation)
-		obligationByCoverage[obligation.CoverageWorkItemID] = obligation.Clone()
-	}
-	items := make(map[string]RuntimeCoverageItem, len(manifest.CoverageItems))
-	for _, item := range manifest.CoverageItems {
-		items[string(item.ID)] = item
-	}
 	facts := make(map[string]RuntimeSemanticProofFeasibility, len(feasibilities))
 	for _, fact := range feasibilities {
 		fact = fact.Clone()
@@ -85,7 +75,7 @@ func compileRuntimeSemanticBindingsWithValidatedManifest(validated runtimeValida
 	}
 	focuses := make([]CoverageFocus, 0, len(proofSets))
 	for _, proofSet := range proofSets {
-		item, found := items[string(proofSet.CoverageWorkItemID)]
+		item, found := validated.coverageByID[proofSet.CoverageWorkItemID]
 		if !found {
 			return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding references unknown coverage %q", proofSet.CoverageWorkItemID)
 		}
@@ -98,15 +88,13 @@ func compileRuntimeSemanticBindingsWithValidatedManifest(validated runtimeValida
 			}
 			proofFacts[proposalHash] = fact
 		}
-		var source *CoverageFocus
-		if value, found := sourceByCoverage[proofSet.CoverageWorkItemID]; found {
-			value := value
-			source = &value
-		}
-		obligation, found := obligationByCoverage[proofSet.CoverageWorkItemID]
+		obligation, found := validated.obligationByCoverage[proofSet.CoverageWorkItemID]
 		if !found {
 			return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding has no proof obligation for coverage %q", proofSet.CoverageWorkItemID)
 		}
+		// 只为本批 CWI 构造 detached source；完整 manifest 索引已在本次校验中建立。
+		sourceValue := runtimeSemanticProofObligationSourceFocus(obligation)
+		source := &sourceValue
 		evidenceObligation := resolveValidatedRuntimeSemanticEvidenceObligation(obligation)
 		if obligation.ImplementationWork != nil {
 			return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("implementation work cannot compile terminal coverage bindings")
@@ -114,7 +102,7 @@ func compileRuntimeSemanticBindingsWithValidatedManifest(validated runtimeValida
 		if err := validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet, source, evidenceObligation.CurrentRequiredEvidenceKinds); err != nil {
 			return nil, RuntimeCWIReconciliationContract{}, err
 		}
-		focus, err := compileRuntimeSemanticFocus(manifest, generationID, item, proofSet, proofFacts, source, evidenceObligation)
+		focus, err := compileRuntimeSemanticFocus(validated, generationID, item, proofSet, proofFacts, source, evidenceObligation)
 		if err != nil {
 			return nil, RuntimeCWIReconciliationContract{}, err
 		}
@@ -452,8 +440,8 @@ func validateRuntimeSemanticProposalDeclarationTargetSurface(coverageID common.C
 	)
 }
 
-func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generationID string, item RuntimeCoverageItem, proofSet RuntimeSemanticCWIProofSet, facts map[string]RuntimeSemanticProofFeasibility, source *CoverageFocus, evidenceObligation RuntimeSemanticEvidenceObligation) (CoverageFocus, error) {
-	manifest = manifest.Normalized()
+func compileRuntimeSemanticFocus(validated runtimeValidatedSemanticManifest, generationID string, item RuntimeCoverageItem, proofSet RuntimeSemanticCWIProofSet, facts map[string]RuntimeSemanticProofFeasibility, source *CoverageFocus, evidenceObligation RuntimeSemanticEvidenceObligation) (CoverageFocus, error) {
+	manifest := validated.manifest
 	proofSetHash := StableRuntimeSemanticCWIProofSetHash(proofSet.CoverageWorkItemID, proofSet.Proposals)
 	idSuffix := strings.TrimPrefix(proofSetHash, "runtime-semantic-cwi-proof-set-")
 	generationSuffix := strings.TrimPrefix(strings.TrimSpace(generationID), "runtime-semantic-generation-")
