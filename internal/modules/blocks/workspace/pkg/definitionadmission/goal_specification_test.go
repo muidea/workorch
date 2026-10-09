@@ -94,6 +94,13 @@ func TestCompileChecksVersionedGoalSpecificationBeforeAdmission(t *testing.T) {
 			hash := candidate.Specification.ContentHash()
 			for i := range candidate.Specification.Reviews {
 				candidate.Specification.Reviews[i].SpecificationHash = hash
+				ids, err := candidate.Specification.RequiredReviewRequirementIDs(candidate.Specification.Reviews[i].Kind)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(ids) > 0 {
+					candidate.Specification.Reviews[i].RequirementIDs = ids
+				}
 			}
 			candidate = candidate.WithHash()
 			result, err := Compile(candidate)

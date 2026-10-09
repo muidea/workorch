@@ -30,7 +30,7 @@ func TestConfirmableSpecificationRequiresUniqueCompletedPASSReviews(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposalHash, Reason: "覆盖", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{currentGoalRequirementFixture(proposal)}}
+		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposalHash, Reason: "覆盖", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: currentRequiredRequirementIDsFixture(proposal)}
 		record, err = record.CompleteSpecification(reserved.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)
@@ -83,7 +83,7 @@ func TestAuthoringConfirmationJournalRejectsChangedAfterImages(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "覆盖", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{currentGoalRequirementFixture(proposal)}}
+		review := GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "覆盖", EvidenceRefs: []string{DefinitionAuthoringGoalItemRef}, RequirementIDs: currentRequiredRequirementIDsFixture(proposal)}
 		record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)

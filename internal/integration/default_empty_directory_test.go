@@ -628,19 +628,18 @@ func (p *emptyDirectoryProvider) serveHTTP(w http.ResponseWriter, r *http.Reques
 					err = fmt.Errorf("missing persisted proposal")
 					break
 				}
-				goalRequirement := ""
-				for _, requirement := range proposal.Requirements {
-					if len(requirement.SourceItemRefs) == 1 && requirement.SourceItemRefs[0] == workspace.DefinitionAuthoringGoalItemRef {
-						goalRequirement = requirement.ID
-					}
+				goalRequirementIDs, requirementsErr := proposal.RequiredReviewRequirementIDs(pending.ReviewKind)
+				if requirementsErr != nil {
+					err = requirementsErr
+					break
 				}
-				if goalRequirement == "" {
-					err = fmt.Errorf("missing owner-compiled independent Goal requirement")
+				if len(goalRequirementIDs) == 0 {
+					err = fmt.Errorf("missing owner-compiled required review requirements")
 					break
 				}
 				payload, err = json.Marshal(struct {
 					Review workspace.GoalSpecificationCompletenessReview `json:"review"`
-				}{workspace.GoalSpecificationCompletenessReview{Kind: pending.ReviewKind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立 scripted 审查", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{goalRequirement}}})
+				}{workspace.GoalSpecificationCompletenessReview{Kind: pending.ReviewKind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立 scripted 审查", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: goalRequirementIDs}})
 			}
 			break
 		}

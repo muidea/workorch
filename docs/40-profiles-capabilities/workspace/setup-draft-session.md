@@ -22,6 +22,8 @@ Workspace owner 持久保存创作输入与请求身份；派生验收要求后�
 
 独立 Goal requirement 仅在 Required、`USER_EXPLICIT`、唯一 Goal 来源和全文精确一致时沿用 Goal 输入的 32 KiB 字节上限；普通分组 requirement、候选验收项及 obligation 仍为 4096 字节。边界在既有输入规格规范化后检查，不截断、摘要或改写超长文本，不扩大 provider 文档、请求或阶段预算。原 provider 文档独立按 bytes 保存，规格规范化不能覆盖诊断原文。
 
+六类审查的应审集合由 Workspace owner 从 canonical proposal 的全部 Required requirements 派生，包含独立 exact Goal。每个 critic 请求以 `requiredRequirementIDs` 明确提供同一候选的完整集合；PASS 的 `RequirementIDs` 必须覆盖该集合，允许额外审查合法 optional 项，但不能替代缺失 required 项。没有资源引用、负面路径或回归声明不能据此免审，仍须检查相应约束是否遗漏；不接受 provider 自行声明 N/A 或空范围豁免。FAIL／UNKNOWN 可以保留实际未完成的审查范围，但不能确认。模型、持久 ledger、provider 本地解析和确认准入执行同一覆盖规则，漏审诊断保留 review kind 与缺失 Requirement IDs，不补写原结果。此门禁仅证明记录范围齐备，不证明自然语言语义充分性、不授予运行 credit，也不表示 M3 创建完成。
+
 无绑定 `UNVERIFIED` 可以保存在草稿中，但即使六类审查全部 PASS，也必须显示为 `review_blocked`，不得确认或物化正式 Goal／DoD。确认要求所有 Verification 为 `DECLARED` 且声明非空，每个 Obligation 至少有一份声明。Workspace owner 在提案 completion、确认准备及 prepared 恢复时独立核对封存 Template 实际编译的 Profile，正式准入再核对当前 Workspace／Template 实际合同。列表摘要与详情也须核对该封存 Profile，不能因六审查 PASS 把不适用的自报声明显示为已审查或可确认。声明适用性必须覆盖该义务的全部确认后 DoD source，并在最终合并策略中保留贡献；声明通过不代表当前 capability／owner fact 已就绪，也不授予执行 proof 或终验 credit。
 
 provider 原生 structured output 仅在能力明确支持时启用；不支持时仍提供完整提示合同并执行相同本地严格校验，不自动 fallback 或重发。显式 schema 构造错误必须明确失败，不能静默省略约束。JSON Schema 只约束结构，不替代原文保真、严格解析、来源／资源／Profile 校验、六类审查、用户确认或 owner 准入。

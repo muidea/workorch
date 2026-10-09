@@ -24,6 +24,11 @@ func resealIndependentGoalSpecification(candidate workspace.DefinitionAdmissionC
 	hash := candidate.Specification.ContentHash()
 	for index := range candidate.Specification.Reviews {
 		candidate.Specification.Reviews[index].SpecificationHash = hash
+		ids, err := candidate.Specification.RequiredReviewRequirementIDs(candidate.Specification.Reviews[index].Kind)
+		if err != nil {
+			panic(err)
+		}
+		candidate.Specification.Reviews[index].RequirementIDs = ids
 	}
 	return candidate.WithHash()
 }

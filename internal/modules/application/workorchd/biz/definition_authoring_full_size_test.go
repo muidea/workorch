@@ -132,9 +132,13 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 			if proposal == nil || len(record.SpecificationRequests) != calls {
 				t.Fatal("critic permit 未先持久化")
 			}
+			requirementIDs, requirementsErr := proposal.RequiredReviewRequirementIDs(kind)
+			if requirementsErr != nil {
+				t.Fatal(requirementsErr)
+			}
 			payload = struct {
 				Review workspace.GoalSpecificationCompletenessReview `json:"review"`
-			}{workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立审查", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{authoringHTTPGoalRequirementID(t, *proposal)}}}
+			}{workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立审查", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: requirementIDs}}
 		}
 		encoded, err := json.Marshal(payload)
 		if err != nil {

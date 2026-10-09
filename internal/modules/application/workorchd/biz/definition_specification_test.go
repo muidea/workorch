@@ -50,7 +50,12 @@ func TestSpecificationCompilerSeparatesProposalAndSixCritics(t *testing.T) {
 					if unknown && kind == workspace.GoalReviewNegativePath {
 						status = workspace.GoalReviewUnknown
 					}
-					review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: status, SpecificationHash: spec.ContentHash(), Reason: "逐项核对原约束", EvidenceRefs: []string{"goal", "dod:test-source:item:000001"}, RequirementIDs: []string{"requirement"}}
+					requirementIDs, err := spec.RequiredReviewRequirementIDs(kind)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: status, SpecificationHash: spec.ContentHash(), Reason: "逐项核对原约束", EvidenceRefs: []string{"goal", "dod:test-source:item:000001"}, RequirementIDs: requirementIDs}
 					payload, _ = json.Marshal(struct {
 						Review workspace.GoalSpecificationCompletenessReview `json:"review"`
 					}{review})

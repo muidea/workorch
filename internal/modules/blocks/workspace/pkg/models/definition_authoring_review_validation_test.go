@@ -12,7 +12,7 @@ func TestAuthoringReviewValidationRetainsFullSpecificationChecks(t *testing.T) {
 	proposal.Reviews = nil
 	context := authoringSpecificationContext{goal: candidate.GoalInput, items: candidate.DoDInputs}
 	hash := proposal.ContentHash()
-	valid := GoalSpecificationCompletenessReview{Kind: GoalReviewTraceability, Status: GoalReviewPass, SpecificationHash: hash, Reason: "独立审查", EvidenceRefs: []string{"goal"}, RequirementIDs: []string{"req"}}
+	valid := GoalSpecificationCompletenessReview{Kind: GoalReviewTraceability, Status: GoalReviewPass, SpecificationHash: hash, Reason: "独立审查", EvidenceRefs: []string{"goal"}, RequirementIDs: currentRequiredRequirementIDsFixture(proposal)}
 	for name, mutate := range map[string]func(*GoalSpecificationCompletenessReview){
 		"pass": func(*GoalSpecificationCompletenessReview) {},
 		"fail": func(r *GoalSpecificationCompletenessReview) {

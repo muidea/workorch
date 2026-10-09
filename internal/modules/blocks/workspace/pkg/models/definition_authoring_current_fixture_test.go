@@ -45,6 +45,16 @@ func completeCurrentProposalFixture(t testing.TB, r DefinitionAuthoringRecord, p
 	*proposal = s
 	return r.CompleteSpecificationMapping(permit, m, a)
 }
+func currentRequiredRequirementIDsFixture(s GoalSpecification) []string {
+	ids := make([]string, 0, len(s.Requirements))
+	for _, req := range s.Requirements {
+		if req.Required {
+			ids = append(ids, req.ID)
+		}
+	}
+	return ids
+}
+
 func currentGoalRequirementFixture(s GoalSpecification) string {
 	for _, req := range s.Requirements {
 		if len(req.SourceItemRefs) == 1 && req.SourceItemRefs[0] == DefinitionAuthoringGoalItemRef {

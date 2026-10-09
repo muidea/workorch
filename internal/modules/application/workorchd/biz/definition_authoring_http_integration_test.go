@@ -40,7 +40,7 @@ import (
 
 // 使用正式 HTTP ports 和真实持久 owners；仅 provider 与任务排队由测试控制。
 func TestAuthoringHTTPFileBackedCompilationConfirmationAndRecovery(t *testing.T) {
-	for _, scenario := range []string{"pass", "review_fail", "review_unknown", "resource_drift", "invalid_derivation", "invalid_proposal", "invalid_review"} {
+	for _, scenario := range []string{"pass", "review_fail", "review_unknown", "review_missing_required", "resource_drift", "invalid_derivation", "invalid_proposal", "invalid_review"} {
 		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
 	}
 }
@@ -105,6 +105,8 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	var preparationRepaired atomic.Bool
 	configurationCause := def.NewError(def.Unexpected, "mock 配置读取失败\r\n原文 sk_test_marker\n")
 	var physicalCalls atomic.Int32
+	var missingReviewPayload []byte
+	var missingRequirementID string
 	realWorker := scenario == "real_background" || scenario == "concurrent_compile"
 	deriveStarted, releaseDerive := make(chan struct{}), make(chan struct{})
 	var concurrentRoutine *authoringConcurrentRoutine
@@ -203,7 +205,17 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				if strings.Contains(command.Request.PromptContext.Sections[1].Content, `"Reviews":[{`) {
 					t.Error("critic received earlier reviews")
 				}
-				review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{authoringHTTPGoalRequirementID(t, *proposal)}}
+				review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: authoringHTTPRequiredReviewRequirementIDs(t, *proposal, kind)}
+				if scenario == "review_missing_required" && kind == workspace.GoalReviewVerifierFeasibility {
+					goalRequirement := authoringHTTPGoalRequirementID(t, *proposal)
+					missingRequirementID = goalRequirement
+					review.RequirementIDs = review.RequirementIDs[:0]
+					for _, id := range authoringHTTPRequiredReviewRequirementIDs(t, *proposal, kind) {
+						if id != goalRequirement {
+							review.RequirementIDs = append(review.RequirementIDs, id)
+						}
+					}
+				}
 				if physicalCalls.Load() == 2 {
 					switch scenario {
 					case "review_fail_preparation_failure":
@@ -223,6 +235,9 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				payload, err = json.Marshal(struct {
 					Review workspace.GoalSpecificationCompletenessReview `json:"review"`
 				}{review})
+				if scenario == "review_missing_required" && kind == workspace.GoalReviewVerifierFeasibility {
+					missingReviewPayload = append([]byte(nil), payload...)
+				}
 				if scenario == "invalid_review" {
 					payload = []byte("  {\"未知审查字段\":\"sk_test_marker\"}\r\n")
 				}
@@ -511,10 +526,13 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		assertNoRuns()
 		return
 	}
-	if scenario == "invalid_derivation" || scenario == "invalid_proposal" || scenario == "invalid_review" {
+	if scenario == "invalid_derivation" || scenario == "invalid_proposal" || scenario == "invalid_review" || scenario == "review_missing_required" {
 		failed := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
 		requestIndex := len(failed.Requests) - 1
 		failureCode := scenario
+		if scenario == "review_missing_required" {
+			failureCode = "invalid_review"
+		}
 		if scenario == "invalid_derivation" {
 			failureCode = "invalid_proposal"
 			if physicalCalls.Load() != 1 || failed.DerivationPermitID == "" || len(failed.Requests) != 1 || failed.Requests[0].Phase != "derivation" || failed.Requests[0].PermitID != failed.DerivationPermitID {
@@ -545,6 +563,12 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		if scenario == "invalid_review" {
 			raw = []byte("  {\"未知审查字段\":\"sk_test_marker\"}\r\n")
 		}
+		if scenario == "review_missing_required" {
+			raw = missingReviewPayload
+			if len(raw) == 0 {
+				t.Fatal("missing-required review payload was not captured")
+			}
+		}
 		if envelope.Diagnostic.ParseError == "" || envelope.Diagnostic.ParseErrorSHA256 != failed.Requests[requestIndex].Diagnostic.ParseErrorSHA256 || envelope.Diagnostic.ParseErrorBytes != failed.Requests[requestIndex].Diagnostic.ParseErrorBytes || envelope.Diagnostic.PayloadBase64 != base64.StdEncoding.EncodeToString(raw) || envelope.Diagnostic.PayloadBytes != uint64(len(raw)) || !envelope.Diagnostic.PayloadSaved {
 			t.Fatalf("raw diagnostic changed: %+v", envelope.Diagnostic)
 		}
@@ -565,6 +589,42 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			t.Fatal("重启重放丢失原 permit 或原始诊断元信息")
 		}
 		assertNoRuns()
+		if scenario == "review_missing_required" {
+			if failed.Proposal == nil || failed.State != "failed" || len(failed.Proposal.Reviews) != 5 {
+				t.Fatalf("漏 required 的 PASS critic 未作为失败阻塞: %+v", failed)
+			}
+			if !strings.Contains(envelope.Diagnostic.ParseError, workspace.GoalReviewVerifierFeasibility) || missingRequirementID == "" || !strings.Contains(envelope.Diagnostic.ParseError, missingRequirementID) {
+				t.Fatalf("漏审诊断未定位维度和 required ID: %s", envelope.Diagnostic.ParseError)
+			}
+			for _, review := range failed.Proposal.Reviews {
+				if review.Status != workspace.GoalReviewPass {
+					t.Fatalf("失败结果改写已完成 critic 原 status: %+v", review)
+				}
+			}
+			if failed.Proposal.SpecificationHash != "" {
+				t.Fatal("漏审候选获得可确认的 specification hash")
+			}
+			// 提供非空的自报身份，确保请求进入 owner 冲突门禁而不是仅因空字段被拒绝。
+			confirmation := management.DefinitionAuthoringConfirm{InputHash: failed.InputHash, DerivationPermitID: failed.Proposal.DerivationPermitID, ProposalHash: failed.Proposal.ProposalHash, SpecificationHash: failed.Proposal.ProposalHash, ExpectedWorkspaceRevision: failed.WorkspaceRevision}
+			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", confirmation, http.StatusConflict)
+			stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+			if err != nil || stored.StartupInput != nil || stored.ActivationAdmission != nil || stored.DefinitionAuthoringConfirmation != nil || len(stored.DefinitionAuthoringHistory) != 0 {
+				t.Fatalf("漏 required 的 PASS critic 产生正式 Goal/DoD 或确认身份: %+v %v", stored, err)
+			}
+			goals, goalErr := repositories.Goals.ListByWorkspaceID(ctx, common.WorkspaceID(created.WorkspaceID))
+			dods, dodErr := repositories.DoDs.ListByWorkspaceID(ctx, common.WorkspaceID(created.WorkspaceID))
+			if goalErr != nil || dodErr != nil || len(goals) != 0 || len(dods) != 0 {
+				t.Fatalf("漏审确认留下正式定义: goals=%d dods=%d errors=%v/%v", len(goals), len(dods), goalErr, dodErr)
+			}
+			closeOwners()
+			baseURL, routine, closeOwners = open()
+			recovered := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+			if recovered.State != "failed" || recovered.WorkspaceRevision != failed.WorkspaceRevision || recovered.Proposal == nil || len(recovered.Proposal.Reviews) != 5 || physicalCalls.Load() != before {
+				t.Fatalf("file 重开后无效 PASS 被重审、改判或移除: %+v calls=%d", recovered, physicalCalls.Load())
+			}
+			assertNoRuns()
+			return
+		}
 		return
 	}
 	ready := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
@@ -769,6 +829,22 @@ func authoringHTTPProposal(t *testing.T, record *workspace.DefinitionAuthoringRe
 		t.Fatal(err)
 	}
 	return proposal
+}
+
+func authoringHTTPRequiredReviewRequirementIDs(t *testing.T, proposal workspace.GoalSpecification, kind string) []string {
+	t.Helper()
+	required, err := proposal.RequiredReviewRequirementIDs(kind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(required))
+	for _, id := range required {
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		t.Fatalf("review kind %q has no required requirement IDs", kind)
+	}
+	return ids
 }
 
 func authoringHTTPGoalRequirementID(t *testing.T, proposal workspace.GoalSpecification) string {

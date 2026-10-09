@@ -60,7 +60,11 @@ func ParseReview(payload []byte, kind string, specification workspace.GoalSpecif
 		return workspace.GoalSpecificationCompletenessReview{}, fmt.Errorf("specification review identity mismatch")
 	}
 	switch document.Review.Status {
-	case workspace.GoalReviewPass, workspace.GoalReviewFail, workspace.GoalReviewUnknown:
+	case workspace.GoalReviewPass:
+		if err := specification.ValidateReviewCoverage(*document.Review); err != nil {
+			return workspace.GoalSpecificationCompletenessReview{}, err
+		}
+	case workspace.GoalReviewFail, workspace.GoalReviewUnknown:
 	default:
 		return workspace.GoalSpecificationCompletenessReview{}, fmt.Errorf("specification review status is invalid")
 	}

@@ -94,7 +94,7 @@ func reviewedAuthoringSuccessor(t *testing.T, owners *fileDefinitionAdmissionOwn
 		if err != nil || reservedReview.AuthoringSpecification == nil || reservedReview.AuthoringSpecification.FreshPermitID == "" {
 			t.Fatalf("reserve successor review %s: %v", kind, err)
 		}
-		review := workspacemodel.GoalSpecificationCompletenessReview{Kind: kind, Status: workspacemodel.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspacemodel.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{authoringGoalRequirementID(t, proposal)}}
+		review := workspacemodel.GoalSpecificationCompletenessReview{Kind: kind, Status: workspacemodel.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspacemodel.DefinitionAuthoringGoalItemRef}, RequirementIDs: authoringRequiredRequirementIDs(t, proposal, kind)}
 		completeReview := workspaceevents.CompleteAuthoringSpecificationCommand{WorkspaceID: id, PermitID: reservedReview.AuthoringSpecification.FreshPermitID, Review: &review}
 		if _, err := owners.workspace.submitDefinitionSpecificationInternalEvent(ctx, definitionSpecificationInternalEvent{WorkspaceID: id, AuthoringSpecComplete: &completeReview}); err != nil {
 			t.Fatal(err)

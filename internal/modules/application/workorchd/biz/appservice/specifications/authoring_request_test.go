@@ -108,18 +108,23 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 		t.Fatalf("critic lacks independent review and unknown-resource contract: %+v", command.Request)
 	}
 	var reviewPayload struct {
-		Kind                string                                   `json:"kind"`
-		ProposalHash        string                                   `json:"proposalHash"`
-		Goal                workspace.DefinitionCandidateItem        `json:"goal"`
-		CandidateAcceptance []workspace.DefinitionCandidateItem      `json:"candidateAcceptance"`
-		Specification       workspace.GoalSpecification              `json:"specification"`
-		Profiles            []runtimecontract.RuntimeProfileContract `json:"profiles"`
+		RequiredRequirementIDs []string                                 `json:"requiredRequirementIDs"`
+		Kind                   string                                   `json:"kind"`
+		ProposalHash           string                                   `json:"proposalHash"`
+		Goal                   workspace.DefinitionCandidateItem        `json:"goal"`
+		CandidateAcceptance    []workspace.DefinitionCandidateItem      `json:"candidateAcceptance"`
+		Specification          workspace.GoalSpecification              `json:"specification"`
+		Profiles               []runtimecontract.RuntimeProfileContract `json:"profiles"`
 	}
 	if err := json.Unmarshal([]byte(command.Request.PromptContext.Sections[1].Content), &reviewPayload); err != nil {
 		t.Fatal(err)
 	}
 	if reviewPayload.Kind != workspace.GoalReviewTraceability || reviewPayload.ProposalHash != spec.ContentHash() || reviewPayload.Goal.Text != input.GoalText || len(reviewPayload.CandidateAcceptance) != 3 || len(reviewPayload.Specification.Reviews) != 0 {
 		t.Fatalf("critic received wrong or contaminated proposal: %+v", reviewPayload)
+	}
+	requiredIDs, err := spec.RequiredReviewRequirementIDs(workspace.GoalReviewTraceability)
+	if err != nil || strings.Join(reviewPayload.RequiredRequirementIDs, "\n") != strings.Join(requiredIDs, "\n") || len(requiredIDs) != 4 {
+		t.Fatalf("critic 未取得全部 required 要求: got=%v want=%v err=%v", reviewPayload.RequiredRequirementIDs, requiredIDs, err)
 	}
 	if runtimecontract.StableRuntimeProfileContractsHash(reviewPayload.Profiles) != runtimecontract.StableRuntimeProfileContractsHash(proposalPayload.Profiles) || strings.Contains(command.Request.PromptContext.Sections[0].Content, "sealed-profile") {
 		t.Fatal("独立审查读取了不同 Profile 声明或改变了稳定前缀")

@@ -121,7 +121,7 @@ func TestAuthoringSpecificationPersistsProposalAndSixIndependentReviews(t *testi
 			if strings.Contains(command.Request.PromptContext.Sections[1].Content, `"Reviews":[{`) {
 				t.Error("critic received a previous critic's conclusion")
 			}
-			review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "覆盖", EvidenceRefs: []string{candidateItems[0].CandidateItemRef}, RequirementIDs: []string{proposal.Requirements[0].ID}}
+			review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "覆盖", EvidenceRefs: []string{candidateItems[0].CandidateItemRef}, RequirementIDs: authoringHTTPRequiredReviewRequirementIDs(t, proposal, kind)}
 			payload, err = json.Marshal(struct {
 				Review workspace.GoalSpecificationCompletenessReview `json:"review"`
 			}{review})

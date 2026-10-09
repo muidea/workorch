@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"reflect"
+	"slices"
 	"testing"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -25,12 +27,12 @@ func testGoalSpecificationCandidate() DefinitionAdmissionCandidate {
 	}
 	hash := candidate.Specification.ContentHash()
 	candidate.Specification.Reviews = []GoalSpecificationCompletenessReview{
-		{Kind: GoalReviewDimensionCoverage, Status: GoalReviewPass, SpecificationHash: hash, Reason: "reviewed outcome", EvidenceRefs: []string{"goal"}, RequirementIDs: []string{"req"}},
-		{Kind: GoalReviewNegativePath, Status: GoalReviewPass, SpecificationHash: hash, Reason: "reviewed negative paths", EvidenceRefs: []string{"goal"}, RequirementIDs: []string{"req"}},
-		{Kind: GoalReviewRegression, Status: GoalReviewPass, SpecificationHash: hash, Reason: "reviewed regression", EvidenceRefs: []string{"goal"}, RequirementIDs: []string{"req"}},
-		{Kind: GoalReviewResourceEnvironment, Status: GoalReviewPass, SpecificationHash: hash, Reason: "reviewed resources", EvidenceRefs: []string{"goal"}, RequirementIDs: []string{"req"}},
-		{Kind: GoalReviewTraceability, Status: GoalReviewPass, SpecificationHash: hash, Reason: "reviewed traceability", EvidenceRefs: []string{"goal"}, RequirementIDs: []string{"req"}},
-		{Kind: GoalReviewVerifierFeasibility, Status: GoalReviewPass, SpecificationHash: hash, Reason: "reviewed declaration", EvidenceRefs: []string{"goal"}, RequirementIDs: []string{"req"}},
+		{Kind: GoalReviewDimensionCoverage, Status: GoalReviewPass, SpecificationHash: hash, Reason: "reviewed outcome", EvidenceRefs: []string{"goal"}, RequirementIDs: currentRequiredRequirementIDsFixture(*candidate.Specification)},
+		{Kind: GoalReviewNegativePath, Status: GoalReviewPass, SpecificationHash: hash, Reason: "reviewed negative paths", EvidenceRefs: []string{"goal"}, RequirementIDs: currentRequiredRequirementIDsFixture(*candidate.Specification)},
+		{Kind: GoalReviewRegression, Status: GoalReviewPass, SpecificationHash: hash, Reason: "reviewed regression", EvidenceRefs: []string{"goal"}, RequirementIDs: currentRequiredRequirementIDsFixture(*candidate.Specification)},
+		{Kind: GoalReviewResourceEnvironment, Status: GoalReviewPass, SpecificationHash: hash, Reason: "reviewed resources", EvidenceRefs: []string{"goal"}, RequirementIDs: currentRequiredRequirementIDsFixture(*candidate.Specification)},
+		{Kind: GoalReviewTraceability, Status: GoalReviewPass, SpecificationHash: hash, Reason: "reviewed traceability", EvidenceRefs: []string{"goal"}, RequirementIDs: currentRequiredRequirementIDsFixture(*candidate.Specification)},
+		{Kind: GoalReviewVerifierFeasibility, Status: GoalReviewPass, SpecificationHash: hash, Reason: "reviewed declaration", EvidenceRefs: []string{"goal"}, RequirementIDs: currentRequiredRequirementIDsFixture(*candidate.Specification)},
 	}
 	return candidate.WithHash()
 }
@@ -62,6 +64,82 @@ func TestGoalSpecificationSealsReviewsAndPreservesNilLegacyHash(t *testing.T) {
 	}
 	if err := legacy.Validate(); err != nil {
 		t.Fatalf("legacy candidate: %v", err)
+	}
+}
+
+func reviewCoverageCandidateFixture() DefinitionAdmissionCandidate {
+	candidate := testGoalSpecificationCandidate()
+	candidate.Specification.Requirements[0].SourceItemRefs = []string{"dod"}
+	candidate.Specification.Requirements = append(candidate.Specification.Requirements,
+		GoalSpecificationRequirement{ID: "independent-goal", DimensionID: "outcome", Required: true, SourceKind: GoalRequirementUserExplicit, SourceItemRefs: []string{"goal"}, Text: candidate.GoalInput.Text},
+		GoalSpecificationRequirement{ID: "optional", DimensionID: "outcome", SourceKind: GoalRequirementDerived, SourceItemRefs: []string{"dod"}, Text: "可选补充"},
+	)
+	for i := range candidate.Specification.Reviews {
+		candidate.Specification.Reviews[i].SpecificationHash = candidate.Specification.ContentHash()
+		candidate.Specification.Reviews[i].RequirementIDs = currentRequiredRequirementIDsFixture(*candidate.Specification)
+	}
+	return candidate.WithHash()
+}
+
+func TestGoalSpecificationPASSReviewsRequireEveryRequiredRequirement(t *testing.T) {
+	candidate := reviewCoverageCandidateFixture()
+	base := candidate.Clone()
+	for _, kind := range goalReviewKinds {
+		t.Run(kind, func(t *testing.T) {
+			missing := base.Clone()
+			for i := range missing.Specification.Reviews {
+				if missing.Specification.Reviews[i].Kind == kind {
+					missing.Specification.Reviews[i].RequirementIDs = []string{"req"}
+				}
+			}
+			missing = missing.WithHash()
+			if err := missing.Validate(); err == nil {
+				t.Fatal("PASS review missing a required requirement was accepted")
+			}
+		})
+	}
+
+	t.Run("optional cannot substitute", func(t *testing.T) {
+		missing := base.Clone()
+		for i := range missing.Specification.Reviews {
+			missing.Specification.Reviews[i].RequirementIDs = []string{"optional"}
+		}
+		missing = missing.WithHash()
+		if err := missing.Validate(); err == nil {
+			t.Fatal("optional requirement substituted for required requirement")
+		}
+	})
+
+	t.Run("all required including independent goal requirement pass", func(t *testing.T) {
+		if err := base.Validate(); err != nil {
+			t.Fatalf("complete required review coverage rejected: %v", err)
+		}
+		for _, review := range base.Specification.Reviews {
+			if !reflect.DeepEqual(review.RequirementIDs, currentRequiredRequirementIDsFixture(*base.Specification)) {
+				t.Fatalf("PASS review did not cover every required requirement: %+v", review.RequirementIDs)
+			}
+		}
+	})
+}
+
+func TestGoalSpecificationReviewCloneAndOrderingAreDeterministic(t *testing.T) {
+	candidate := reviewCoverageCandidateFixture()
+	original := candidate.Specification.Clone()
+	clone := original.Clone()
+	clone.Reviews[0].RequirementIDs[0] = "changed"
+	if reflect.DeepEqual(original.Reviews[0].RequirementIDs, clone.Reviews[0].RequirementIDs) {
+		t.Fatal("cloned review shares requirement ID storage")
+	}
+	left := original.Clone()
+	right := original.Clone()
+	for i := range right.Reviews {
+		slices.Reverse(right.Reviews[i].RequirementIDs)
+	}
+	if left.AdmissionHash() != right.AdmissionHash() {
+		t.Fatal("requirement ordering changed deterministic admission hash")
+	}
+	if !reflect.DeepEqual(left.Normalized(), right.Normalized()) {
+		t.Fatal("normalized review ordering is not deterministic")
 	}
 }
 

@@ -31,7 +31,11 @@ func TestAuthoringDTOClonesPersistedProposalAndReviewWithoutRehashing(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	review := workspace.GoalSpecificationCompletenessReview{Kind: request.ReviewKind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立审查", EvidenceRefs: []string{items[0].CandidateItemRef}, RequirementIDs: []string{proposal.Requirements[0].ID}}
+	ids, err := proposal.RequiredReviewRequirementIDs(request.ReviewKind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review := workspace.GoalSpecificationCompletenessReview{Kind: request.ReviewKind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "独立审查", EvidenceRefs: []string{items[0].CandidateItemRef}, RequirementIDs: ids}
 	record, err = record.CompleteSpecification(request.PermitID, nil, &review, "")
 	if err != nil {
 		t.Fatal(err)

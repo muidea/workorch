@@ -109,7 +109,7 @@ func seedReviewedAuthoringConfirmationWithTemplate(t *testing.T, owners *fileDef
 		if err != nil {
 			t.Fatal(err)
 		}
-		review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: []string{authoringGoalRequirementID(t, proposal)}}
+		review := workspace.GoalSpecificationCompletenessReview{Kind: kind, Status: workspace.GoalReviewPass, SpecificationHash: proposal.ContentHash(), Reason: "逐项覆盖", EvidenceRefs: []string{workspace.DefinitionAuthoringGoalItemRef}, RequirementIDs: authoringRequiredRequirementIDs(t, proposal, kind)}
 		record, err = record.CompleteSpecification(reserved.PermitID, nil, &review, "")
 		if err != nil {
 			t.Fatal(err)

@@ -1046,7 +1046,11 @@ func TestBuiltinSoftwareDevSpecificationWildcardRemainsApplicableToProductionBoo
 	}
 	hash := spec.ContentHash()
 	for _, kind := range []string{workspacemodel.GoalReviewDimensionCoverage, workspacemodel.GoalReviewNegativePath, workspacemodel.GoalReviewRegression, workspacemodel.GoalReviewResourceEnvironment, workspacemodel.GoalReviewTraceability, workspacemodel.GoalReviewVerifierFeasibility} {
-		spec.Reviews = append(spec.Reviews, workspacemodel.GoalSpecificationCompletenessReview{Kind: kind, Status: workspacemodel.GoalReviewPass, SpecificationHash: hash, Reason: "synthetic independent review", EvidenceRefs: []string{candidate.GoalInput.CandidateItemRef}, RequirementIDs: []string{spec.Requirements[0].ID}})
+		ids, err := spec.RequiredReviewRequirementIDs(kind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec.Reviews = append(spec.Reviews, workspacemodel.GoalSpecificationCompletenessReview{Kind: kind, Status: workspacemodel.GoalReviewPass, SpecificationHash: hash, Reason: "synthetic independent review", EvidenceRefs: []string{candidate.GoalInput.CandidateItemRef}, RequirementIDs: ids})
 	}
 	candidate.Specification = &spec
 	candidate = candidate.WithHash()

@@ -31,8 +31,8 @@ const (
 
 // GoalSpecification is an optional, versioned Workspace admission proposal, not
 // a Runtime authority or a proof of natural-language semantic completeness.
-// Reviews report externally authored judgments; static validation only checks
-// their structure, provenance and exact content identity.
+// Reviews report externally authored judgments; static validation checks their
+// structure, provenance, exact identity and complete required review scope.
 type GoalSpecification struct {
 	Version       uint32
 	GoalItemRef   string
@@ -374,6 +374,13 @@ func (c goalSpecificationReviewContext) validate(r GoalSpecificationCompleteness
 	case GoalReviewPass:
 		if r.Reason == "" || len(r.EvidenceRefs) == 0 || len(r.RequirementIDs) == 0 {
 			return fmt.Errorf("goal specification PASS review %q lacks traceable evidence", r.Kind)
+		}
+		scope := GoalSpecification{Requirements: make([]GoalSpecificationRequirement, 0, len(c.requirements))}
+		for _, requirement := range c.requirements {
+			scope.Requirements = append(scope.Requirements, requirement)
+		}
+		if err := scope.ValidateReviewCoverage(r); err != nil {
+			return err
 		}
 	case GoalReviewFail, GoalReviewUnknown:
 	default:
