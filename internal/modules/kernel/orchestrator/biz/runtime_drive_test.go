@@ -12333,17 +12333,25 @@ func TestRuntimeDecisionRejectsPersistedHistoricalAuthorityBeforeProvider(t *tes
 	module := newTestBiz(biz, hub, nil)
 
 	before := repository.aggregate.CloneRaw()
-	if err := before.Validate(); err == nil { t.Fatal("损坏持久前像未触发 invariant") }
+	if err := before.Validate(); err == nil {
+		t.Fatal("损坏持久前像未触发 invariant")
+	}
 	if _, err := module.driveRuntimeDecision(context.Background(), before.CloneRaw(), "unused-prefix"); err == nil || !strings.Contains(err.Error(), "reconciliation preimage invariant") {
 		t.Fatalf("损坏前像未在 provider 前拒绝: %v", err)
 	}
-	if providerCalls != 0 || !reflect.DeepEqual(before, repository.aggregate) { t.Fatal("拒绝损坏前像仍调用 provider 或改写持久材料") }
+	if providerCalls != 0 || !reflect.DeepEqual(before, repository.aggregate) {
+		t.Fatal("拒绝损坏前像仍调用 provider 或改写持久材料")
+	}
 	// 原退休正例属于未持久化 SM-2 纯归约，不能将其冒充非法前像的成功 CAS。
 	next := before.CloneRaw()
 	next.Facts, next.Decision, err = runtime.ReduceRuntimeStateWithDirective(next.Facts, &next.Decision.AuthoritySnapshot, next.CoverageProofLineage)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	next.StateRevision++
-	if err := next.Validate(); err != nil { t.Fatalf("纯归约退休后像非法: %v", err) }
+	if err := next.Validate(); err != nil {
+		t.Fatalf("纯归约退休后像非法: %v", err)
+	}
 	if providerCalls != 0 || next.StateRevision != 8 || next.Decision.State != runtimecontract.ConvergenceStateNeedStateChange ||
 		len(next.CandidateAttempts) != 0 || next.Facts.Repair.RepairAttempts != 0 ||
 		next.Facts.Recovery.PrerequisiteRefreshes != 0 {

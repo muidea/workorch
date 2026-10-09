@@ -103,7 +103,7 @@ func Decode(value any) []runtimecontract.RuntimeProfileContract {
 				AcceptedOperationVariants: acceptedVariants, ValidationRecipeID: String(item["validationRecipeId"]),
 				RequiredCheckRefs: Strings(item["requiredCheckRefs"]), MetricConstraints: Strings(item["metricConstraints"]), ArtifactRefs: Strings(item["artifactRefs"]),
 				RequiredOwnerFacts: ownerFacts, OwnerFactConvergences: ownerFactConvergences,
-				LineageAssertions: lineageAssertions,
+				LineageAssertions:                  lineageAssertions,
 				ValidationFailureRepairConvergence: repair, ImplementationWorkPolicy: implementation,
 				CapabilityStateRequirements: stateRequirements, RejectedStepKinds: Strings(item["rejectedStepKinds"]), Description: String(item["description"]),
 			})

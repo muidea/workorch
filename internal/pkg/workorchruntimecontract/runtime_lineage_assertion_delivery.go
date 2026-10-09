@@ -19,8 +19,8 @@ const (
 // RuntimeDeliveryLineageBinding 是封存来源声明的只读投影，不是 executable binding 或 coverage credit。
 type RuntimeDeliveryLineageBinding struct {
 	CoverageWorkItemID common.CoverageWorkItemID
-	DeclarationRef    string
-	Assertions        []RuntimeLineageAssertion
+	DeclarationRef     string
+	Assertions         []RuntimeLineageAssertion
 }
 
 // RuntimeDeliveryLineageBindingsFromState 从完整封存 CWI 编译交付声明，不要求先生成 Result。
@@ -31,10 +31,14 @@ func RuntimeDeliveryLineageBindingsFromState(source RuntimeStateRecord) ([]Runti
 	declared := false
 	for _, profile := range source.Facts.Activation.ExecutionContract.ProfileContracts {
 		for _, requirement := range profile.EvidenceRequirements {
-			for _, rule := range requirement.LineageAssertions { declared = declared || rule.Kind == RuntimeLineageDeliveryAcknowledgements }
+			for _, rule := range requirement.LineageAssertions {
+				declared = declared || rule.Kind == RuntimeLineageDeliveryAcknowledgements
+			}
 		}
 	}
-	if !declared { return nil, nil }
+	if !declared {
+		return nil, nil
+	}
 	if len(source.Facts.DefinitionSeed.CoverageItems) == 0 {
 		return nil, fmt.Errorf("delivery lineage declaration requires sealed CWI inventory")
 	}

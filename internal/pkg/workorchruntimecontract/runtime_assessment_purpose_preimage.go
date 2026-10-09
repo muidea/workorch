@@ -21,8 +21,8 @@ type runtimeAssessmentPurposeBindingPreimage struct {
 	semanticManifestHash string
 	obligation           RuntimeSemanticProofObligation
 	// 原 accepted batch 的完整评审前像，只在同次纯反证中使用。
-	acceptedDocument     RuntimeSemanticPlanDocument
-	ownerCatalogs        []RuntimeOperationAdmissibility
+	acceptedDocument RuntimeSemanticPlanDocument
+	ownerCatalogs    []RuntimeOperationAdmissibility
 }
 
 func (p RuntimeAssessmentPurposePreimage) Clone() RuntimeAssessmentPurposePreimage {

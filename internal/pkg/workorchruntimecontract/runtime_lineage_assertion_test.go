@@ -45,9 +45,15 @@ func TestRuntimeLineageAssertionsExactSourceAndOptInBoundary(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*CoverageEvidenceBinding, *RuntimeLineageAssertionSources){
 		"stripped assertions": func(b *CoverageEvidenceBinding, s *RuntimeLineageAssertionSources) { b.LineageAssertions = nil },
-		"invented assertions": func(b *CoverageEvidenceBinding, s *RuntimeLineageAssertionSources) { s.Facts.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].LineageAssertions = nil },
-		"summarized text": func(b *CoverageEvidenceBinding, s *RuntimeLineageAssertionSources) { s.Facts.DefinitionSeed.CoverageItems[0].TargetText = "完整封存要求" },
-		"different CWI": func(b *CoverageEvidenceBinding, s *RuntimeLineageAssertionSources) { b.CoverageWorkItemID = "cwi-other" },
+		"invented assertions": func(b *CoverageEvidenceBinding, s *RuntimeLineageAssertionSources) {
+			s.Facts.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].LineageAssertions = nil
+		},
+		"summarized text": func(b *CoverageEvidenceBinding, s *RuntimeLineageAssertionSources) {
+			s.Facts.DefinitionSeed.CoverageItems[0].TargetText = "完整封存要求"
+		},
+		"different CWI": func(b *CoverageEvidenceBinding, s *RuntimeLineageAssertionSources) {
+			b.CoverageWorkItemID = "cwi-other"
+		},
 		"changed declaration": func(b *CoverageEvidenceBinding, s *RuntimeLineageAssertionSources) {
 			b.DeclarationRef = "invented-declaration"
 			b.LineageAssertions[0].DeclarationRef = b.DeclarationRef
@@ -91,11 +97,17 @@ func TestRuntimeLineageRulesMergeHashAndRawClone(t *testing.T) {
 	}
 	invalidProfile := NormalizeRuntimeProfileContracts(profiles)
 	invalidProfile[0].EvidenceRequirements[0].RequiredEvidenceKinds = nil
-	if err := ValidateRuntimeProfileContracts(invalidProfile); err == nil { t.Fatal("guard 不能替代普通 evidence proof") }
+	if err := ValidateRuntimeProfileContracts(invalidProfile); err == nil {
+		t.Fatal("guard 不能替代普通 evidence proof")
+	}
 	focuses := []RuntimeDefinitionFocus{{AssessmentScope: "dodItem", AssessmentID: "requirement-1", LineageAssertions: policy.LineageAssertions}}
-	if err := ValidateRuntimeDefinitionLineageAssertions(focuses, profiles); err != nil { t.Fatal(err) }
+	if err := ValidateRuntimeDefinitionLineageAssertions(focuses, profiles); err != nil {
+		t.Fatal(err)
+	}
 	focuses[0].LineageAssertions = nil
-	if err := ValidateRuntimeDefinitionLineageAssertions(focuses, profiles); err == nil { t.Fatal("Definition guard 被剥空后未拒绝") }
+	if err := ValidateRuntimeDefinitionLineageAssertions(focuses, profiles); err == nil {
+		t.Fatal("Definition guard 被剥空后未拒绝")
+	}
 	conflicting := NormalizeRuntimeProfileContracts(profiles)
 	conflicting[0].EvidenceRequirements[0].LineageAssertions = []RuntimeLineageAssertionRule{exact}
 	conflicting[0].EvidenceRequirements[0].LineageAssertions[0].MinCompletedRounds++
@@ -108,7 +120,9 @@ func TestRuntimeLineageRulesMergeHashAndRawClone(t *testing.T) {
 	record.Facts.Focus.CoverageEvidenceBindings = []CoverageEvidenceBinding{binding}
 	record.Facts.DefinitionFocuses = []RuntimeDefinitionFocus{{LineageAssertions: []RuntimeLineageAssertionRule{exact}}}
 	cloned := record.Clone()
-	if !reflect.DeepEqual(cloned, record) { t.Fatal("raw clone 规范化了规则来源") }
+	if !reflect.DeepEqual(cloned, record) {
+		t.Fatal("raw clone 规范化了规则来源")
+	}
 	cloned.Facts.Focus.CoverageEvidenceBindings[0].LineageAssertions[0].Rule.Ref = "changed"
 	cloned.Facts.DefinitionFocuses[0].LineageAssertions[0].Ref = "changed"
 	cloned.Facts.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].LineageAssertions[0].Ref = "changed"
@@ -116,13 +130,21 @@ func TestRuntimeLineageRulesMergeHashAndRawClone(t *testing.T) {
 		t.Fatal("规则或断言 raw clone 共享原切片")
 	}
 	decoded, err := json.Marshal(record)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	var reloaded RuntimeStateRecord
-	if err := json.Unmarshal(decoded, &reloaded); err != nil { t.Fatal(err) }
-	if _, err := runtimeExpectedLineageAssertions(reloaded.Facts.Focus.CoverageEvidenceBindings[0], RuntimeLineageAssertionSources{Facts: reloaded.Facts}); err != nil { t.Fatalf("序列化丢失 exact guard 来源: %v", err) }
+	if err := json.Unmarshal(decoded, &reloaded); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtimeExpectedLineageAssertions(reloaded.Facts.Focus.CoverageEvidenceBindings[0], RuntimeLineageAssertionSources{Facts: reloaded.Facts}); err != nil {
+		t.Fatalf("序列化丢失 exact guard 来源: %v", err)
+	}
 	changed := binding.Clone()
 	changed.LineageAssertions[0].SourceTextHash = RuntimeLineageSourceTextHash("another exact source")
-	if StableCoverageEvidenceBindingHash(changed) == binding.Hash { t.Fatal("binding hash 未封存 full source hash") }
+	if StableCoverageEvidenceBindingHash(changed) == binding.Hash {
+		t.Fatal("binding hash 未封存 full source hash")
+	}
 }
 
 func TestRuntimeLineageAssertionsInventoryAndCanonicalCutoff(t *testing.T) {
@@ -175,12 +197,16 @@ func TestRuntimeDeliveryLineageNotApplicableAndSourceDrift(t *testing.T) {
 	source, binding := deliveryLineageSourceFixture(t)
 	missingInventory := source.Clone()
 	missingInventory.Facts.DefinitionSeed.CoverageItems = nil
-	if _, err := RuntimeDeliveryLineageBindingsFromState(missingInventory); err == nil { t.Fatal("delivery declaration 缺封存 CWI inventory 未拒绝") }
+	if _, err := RuntimeDeliveryLineageBindingsFromState(missingInventory); err == nil {
+		t.Fatal("delivery declaration 缺封存 CWI inventory 未拒绝")
+	}
 	before := source.Clone()
 	for _, mutate := range []func(*RuntimeDeliveryLineageBinding){
 		func(b *RuntimeDeliveryLineageBinding) { b.Assertions = nil },
 		func(b *RuntimeDeliveryLineageBinding) { b.DeclarationRef = "another-source" },
-		func(b *RuntimeDeliveryLineageBinding) { b.Assertions[0].SourceTextHash = RuntimeLineageSourceTextHash("摘要") },
+		func(b *RuntimeDeliveryLineageBinding) {
+			b.Assertions[0].SourceTextHash = RuntimeLineageSourceTextHash("摘要")
+		},
 	} {
 		copyBinding := binding
 		copyBinding.Assertions = append([]RuntimeLineageAssertion(nil), binding.Assertions...)
@@ -249,22 +275,36 @@ func TestRuntimeDeliveryLineageDeferredPendingExactSealAndRestart(t *testing.T) 
 		source.DeliveryAcknowledgements = append(source.DeliveryAcknowledgements, ack)
 		source.StateRevision++
 		want := RuntimeDeliveryLineagePending
-		if index == 2 { want = RuntimeDeliveryLineageSatisfied }
+		if index == 2 {
+			want = RuntimeDeliveryLineageSatisfied
+		}
 		check(want)
 	}
 	encoded, err := json.Marshal(source)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	var reloaded RuntimeStateRecord
-	if err := json.Unmarshal(encoded, &reloaded); err != nil { t.Fatal(err) }
+	if err := json.Unmarshal(encoded, &reloaded); err != nil {
+		t.Fatal(err)
+	}
 	if got, err := EvaluateRuntimeDeliveryLineageAssertionFromState(reloaded, binding); err != nil || got != RuntimeDeliveryLineageSatisfied {
 		t.Fatalf("restart 丢失原 seal 满足证明: %s %v", got, err)
 	}
 	for _, mutate := range []func(*RuntimeStateRecord){
 		func(s *RuntimeStateRecord) { s.TerminalMaterialSeal = nil },
 		func(s *RuntimeStateRecord) { s.DeliveryAcknowledgements[0].ResultCloseout = nil },
-		func(s *RuntimeStateRecord) { s.DeliveryAcknowledgements[0], s.DeliveryAcknowledgements[1] = s.DeliveryAcknowledgements[1], s.DeliveryAcknowledgements[0] },
-		func(s *RuntimeStateRecord) { s.DeliveryAcknowledgements = append(s.DeliveryAcknowledgements, s.DeliveryAcknowledgements[2]) },
-		func(s *RuntimeStateRecord) { s.DeliveryAcknowledgements[0].ResultCloseout.RuntimeStateRevision++; body := s.DeliveryAcknowledgements[0].ResultCloseout.WithCloseoutHash(); s.DeliveryAcknowledgements[0].ResultCloseout = &body },
+		func(s *RuntimeStateRecord) {
+			s.DeliveryAcknowledgements[0], s.DeliveryAcknowledgements[1] = s.DeliveryAcknowledgements[1], s.DeliveryAcknowledgements[0]
+		},
+		func(s *RuntimeStateRecord) {
+			s.DeliveryAcknowledgements = append(s.DeliveryAcknowledgements, s.DeliveryAcknowledgements[2])
+		},
+		func(s *RuntimeStateRecord) {
+			s.DeliveryAcknowledgements[0].ResultCloseout.RuntimeStateRevision++
+			body := s.DeliveryAcknowledgements[0].ResultCloseout.WithCloseoutHash()
+			s.DeliveryAcknowledgements[0].ResultCloseout = &body
+		},
 	} {
 		invalid := source.Clone()
 		mutate(&invalid)

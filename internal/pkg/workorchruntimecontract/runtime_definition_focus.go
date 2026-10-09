@@ -48,7 +48,7 @@ type RuntimeDefinitionFocus struct {
 	ValidationRecipeID                 string
 	RequiredCheckRefs                  []string
 	ValidationFailureRepairConvergence *RuntimeValidationFailureRepairConvergence
-	LineageAssertions []RuntimeLineageAssertionRule `json:",omitempty"`
+	LineageAssertions                  []RuntimeLineageAssertionRule `json:",omitempty"`
 	// ImplementationWorkPolicy is an exact-CWI projection of the sealed
 	// Profile declaration, not a working binding or executable operation.
 	ImplementationWorkPolicy *RuntimeImplementationWorkPolicy `json:",omitempty"`
@@ -361,7 +361,9 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Runt
 				return fmt.Errorf("runtime definition focus %q owner-fact acquisition selector does not match its declaration", focus.ID)
 			}
 		}
-		if err := ValidateRuntimeLineageAssertionRules(focus.LineageAssertions); err != nil { return err }
+		if err := ValidateRuntimeLineageAssertionRules(focus.LineageAssertions); err != nil {
+			return err
+		}
 		if focus.VerificationPolicy != nil {
 			if err := focus.VerificationPolicy.Validate(); err != nil {
 				return fmt.Errorf("runtime definition focus %q: %w", focus.ID, err)

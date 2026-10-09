@@ -586,10 +586,14 @@ func compileRuntimeSemanticFocus(manifest RuntimeSemanticPlanManifest, generatio
 	}
 	if evidenceObligation.Purpose == RuntimeSemanticEvidenceObligationDefinitionProof {
 		for _, obligation := range manifest.ProofObligations {
-			if obligation.CoverageWorkItemID != item.ID { continue }
+			if obligation.CoverageWorkItemID != item.ID {
+				continue
+			}
 			var err error
 			binding.LineageAssertions, err = CompileRuntimeLineageAssertions(obligation.LineageAssertions, declarationRef, item)
-			if err != nil { return CoverageFocus{}, err }
+			if err != nil {
+				return CoverageFocus{}, err
+			}
 		}
 	}
 	if source != nil {

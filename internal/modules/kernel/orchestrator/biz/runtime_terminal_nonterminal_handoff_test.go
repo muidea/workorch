@@ -70,7 +70,7 @@ func runtimeTerminalNonterminalHandoffSubscribeOwners(
 		body := command.Material.RuntimeCloseout.CloneRaw()
 		ack := runtimecontract.RuntimeDeliveryAcknowledgement{
 			ResultCloseout: &body,
-			WorkspaceID: delivery.WorkspaceID, RunID: delivery.RunID,
+			WorkspaceID:    delivery.WorkspaceID, RunID: delivery.RunID,
 			ResultID:           common.ResultID(string(delivery.WorkspaceID) + "/" + string(delivery.RunID) + "/result/dod-assessment"),
 			TerminalDeliveryID: delivery.TerminalDeliveryID, Owner: runtimecontract.RuntimeDeliveryOwnerResult,
 			AcknowledgedState:   runtimecontract.RuntimeDeliveryAcknowledgedResultRecorded,

@@ -226,8 +226,8 @@ func TestResourceBoundAuthoringCommandsBindSameSnapshotAndRejectProviderResource
 		}
 		var input struct {
 			ExpectedResources []workspace.GoalSpecificationResource `json:"expectedResources"`
-			Specification workspace.GoalSpecification `json:"specification"`
-			ProposalHash string `json:"proposalHash"`
+			Specification     workspace.GoalSpecification           `json:"specification"`
+			ProposalHash      string                                `json:"proposalHash"`
 		}
 		if err := json.Unmarshal([]byte(critic.Request.PromptContext.Sections[1].Content), &input); err != nil {
 			t.Fatal(err)

@@ -54,8 +54,8 @@ func runtimeSealTerminalMaterialForTest(t *testing.T, repository runtime.Runtime
 		t.Fatalf("首次 seal 前像非法: %v", err)
 	}
 	result, err := controller.ApplyInternalEvent(context.Background(), runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventTerminalMaterialSealRequired,
-		Scope: runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
+		Kind:     runtime.RuntimeInternalEventTerminalMaterialSealRequired,
+		Scope:    runtime.RuntimeInternalEventScope{WorkspaceID: workspaceID, RunID: runID},
 		Delivery: &runtime.RuntimeInternalDeliveryPayload{},
 	})
 	if err != nil {
@@ -139,7 +139,9 @@ func startTerminalDeliveryResourceOwners(t *testing.T, ctx context.Context, hub 
 	var runStopped bool
 	stopRun := func() {
 		if !runStopped {
-			if err := runOwner.Stop(ctx); err != nil { t.Fatal(err) }
+			if err := runOwner.Stop(ctx); err != nil {
+				t.Fatal(err)
+			}
 			runStopped = true
 		}
 	}
@@ -154,7 +156,9 @@ func startTerminalDeliveryResourceOwners(t *testing.T, ctx context.Context, hub 
 	var workspaceStopped bool
 	stopWorkspace := func() {
 		if !workspaceStopped {
-			if err := workspaceOwner.Stop(ctx); err != nil { t.Fatal(err) }
+			if err := workspaceOwner.Stop(ctx); err != nil {
+				t.Fatal(err)
+			}
 			workspaceStopped = true
 		}
 	}

@@ -15,7 +15,7 @@ func TestRuntimeAggregateCloneRawPreservesShapeAndDetachesPreimage(t *testing.T)
 	aggregate.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{{State: runtimecontract.RuntimeCandidateAttemptStatePending}}
 	aggregate.ActiveDispatch = &SealedDispatch{
 		CompletedOperationIDs: []string{},
-		OperationExecutions: []runtimecontract.RuntimeOperationExecutionRecord{{OperationID: "original", State: runtimecontract.OperationExecutionSealed}},
+		OperationExecutions:   []runtimecontract.RuntimeOperationExecutionRecord{{OperationID: "original", State: runtimecontract.OperationExecutionSealed}},
 	}
 	aggregate.TerminalMaterialSeal = &runtimecontract.RuntimeTerminalMaterialSeal{
 		Material: runtimecontract.RuntimeTerminalResultMaterial{

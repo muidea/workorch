@@ -37,7 +37,7 @@ func TestRuntimeLineageCandidateSealIndependentPreimageAndResponseLoss(t *testin
 	rule := runtimecontract.RuntimeLineageAssertionRule{
 		Ref: "exact-file-receipt", Kind: runtimecontract.RuntimeLineageOwnerOperationReceipt,
 		ConsumptionPoint: runtimecontract.RuntimeProofPhaseExecution,
-		OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite,
+		OwnerModuleID:    runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite,
 		RequiredEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
 	}
 	var previous RuntimeAggregate
@@ -62,7 +62,7 @@ func TestRuntimeLineageCandidateSealIndependentPreimageAndResponseLoss(t *testin
 			initial := previous.CloneRaw()
 			repository := &lineageCandidateSealFaultRepository{
 				controllerRepository: controllerRepository{aggregate: &initial},
-				failBefore: !after, failAfter: after,
+				failBefore:           !after, failAfter: after,
 			}
 			controller, err := NewRuntimeController(repository)
 			if err != nil {

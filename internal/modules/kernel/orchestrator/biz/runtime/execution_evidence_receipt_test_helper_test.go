@@ -1975,7 +1975,9 @@ func runtimeTestDefinitionFocuses(facts runtimecontract.RuntimeFacts) []runtimec
 			compiled.ValidationFailureRepairConvergence = declared.ValidationFailureRepairConvergence
 		}
 		sourcePolicy, err := runtimecontract.CompileRuntimeSourceEvidencePolicy(item.SourceScope, item.SourceID, facts.Activation.ExecutionContract.ProfileContracts, nil)
-		if err != nil { panic(err) }
+		if err != nil {
+			panic(err)
+		}
 		compiled.LineageAssertions = append([]runtimecontract.RuntimeLineageAssertionRule(nil), sourcePolicy.LineageAssertions...)
 		ret = append(ret, compiled)
 	}

@@ -1855,7 +1855,9 @@ func (f RuntimeFacts) Validate() error {
 			if err := ValidateRuntimeDefinitionImplementationWorkPolicies(f.DefinitionFocuses, f.Activation.ExecutionContract.ProfileContracts); err != nil {
 				return fmt.Errorf("runtime facts definition work policies: %w", err)
 			}
-			if err := ValidateRuntimeDefinitionLineageAssertions(f.DefinitionFocuses, f.Activation.ExecutionContract.ProfileContracts); err != nil { return err }
+			if err := ValidateRuntimeDefinitionLineageAssertions(f.DefinitionFocuses, f.Activation.ExecutionContract.ProfileContracts); err != nil {
+				return err
+			}
 			if err := ValidateRuntimeDefinitionVerificationPolicies(f.DefinitionFocuses, f.Activation.ExecutionContract.ProfileContracts); err != nil {
 				return fmt.Errorf("runtime facts definition verification policies: %w", err)
 			}

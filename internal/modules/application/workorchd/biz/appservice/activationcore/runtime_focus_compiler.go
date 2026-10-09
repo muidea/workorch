@@ -296,7 +296,9 @@ func finalizeRuntimeCoverage(compiled compiledCoverage, allUnits []workUnit, pro
 	if err := runtimecontract.ValidateRuntimeDefinitionImplementationWorkPolicies(compiled.DefinitionFocuses, profiles); err != nil {
 		return compiledCoverage{}, err
 	}
-	if err := runtimecontract.ValidateRuntimeDefinitionLineageAssertions(compiled.DefinitionFocuses, profiles); err != nil { return compiledCoverage{}, err }
+	if err := runtimecontract.ValidateRuntimeDefinitionLineageAssertions(compiled.DefinitionFocuses, profiles); err != nil {
+		return compiledCoverage{}, err
+	}
 	if err := runtimecontract.ValidateRuntimeDefinitionVerificationPolicies(compiled.DefinitionFocuses, profiles); err != nil {
 		return compiledCoverage{}, err
 	}

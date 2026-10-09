@@ -12,7 +12,7 @@ func runtimeLineageAssertionSources(aggregate RuntimeAggregate) runtimecontract.
 		Definition: aggregate.Definition, Facts: aggregate.Facts, Work: aggregate.ImplementationWork,
 		Semantic: aggregate.SemanticPlanning, Active: active,
 		Completed: sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
-		Receipts: aggregate.OperationReceipts, Governance: aggregate.OperationGovernanceBindings,
+		Receipts:  aggregate.OperationReceipts, Governance: aggregate.OperationGovernanceBindings,
 		Budget: aggregate.ExecutionBudget, EvidenceSequence: aggregate.EvidenceSequence,
 		Resolutions: aggregate.GovernanceResolutions, Attempts: aggregate.CandidateAttempts,
 		Sessions: aggregate.CandidateRequestSessions, ProcessedEventIDs: aggregate.ProcessedEventIDs,
@@ -22,7 +22,8 @@ func runtimeLineageAssertionSources(aggregate RuntimeAggregate) runtimecontract.
 
 // runtimeAssessmentLineageCutoff 固定原 assessment seal；非 assessment 查询沿用当前序列。
 func runtimeAssessmentLineageCutoff(aggregate RuntimeAggregate) string {
-	if aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Candidate.Assessment != nil { return aggregate.ActiveDispatch.Transaction.EvidenceRevision }
+	if aggregate.ActiveDispatch != nil && aggregate.ActiveDispatch.Candidate.Assessment != nil {
+		return aggregate.ActiveDispatch.Transaction.EvidenceRevision
+	}
 	return aggregate.Facts.EvidenceRevision
 }
-

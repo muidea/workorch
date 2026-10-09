@@ -227,8 +227,8 @@ func TestWorkspaceRuntimeQuiescenceFinalAckBeforeRetiredGenerationScheduleReleas
 				t.Fatalf("terminal delivery failure budget=%+v initial=%+v err=%v", afterFailure.Facts.Recovery, fixture.terminated.Facts.Recovery, err)
 			}
 			sealed, err := fixture.module.submitRuntimeInternalEvent(fixture.ctx, runtime.RuntimeInternalEvent{
-				Kind: runtime.RuntimeInternalEventTerminalMaterialSealRequired,
-				Scope: runtime.RuntimeInternalEventScope{WorkspaceID: fixture.item.WorkspaceID, RunID: fixture.item.ID},
+				Kind:     runtime.RuntimeInternalEventTerminalMaterialSealRequired,
+				Scope:    runtime.RuntimeInternalEventScope{WorkspaceID: fixture.item.WorkspaceID, RunID: fixture.item.ID},
 				Delivery: &runtime.RuntimeInternalDeliveryPayload{},
 			})
 			if err != nil || sealed.Aggregate.TerminalMaterialSeal == nil {

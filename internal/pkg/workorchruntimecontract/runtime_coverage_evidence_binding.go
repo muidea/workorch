@@ -219,7 +219,7 @@ type CoverageEvidenceBinding struct {
 	FocusID                  string
 	DefinitionRevision       string
 	Proofs                   []CoverageEvidenceProof
-	LineageAssertions        []RuntimeLineageAssertion `json:",omitempty"`
+	LineageAssertions        []RuntimeLineageAssertion  `json:",omitempty"`
 	VerificationPolicy       *RuntimeVerificationPolicy `json:",omitempty"`
 	TargetRefs               []string
 	TargetSelectorRef        string
@@ -282,7 +282,9 @@ func (b CoverageEvidenceBinding) Clone() CoverageEvidenceBinding {
 }
 
 func (b CoverageEvidenceBinding) Validate() error {
-	if err := ValidateRuntimeLineageAssertions(b.LineageAssertions, b.CoverageWorkItemID, b.DeclarationRef); err != nil { return err }
+	if err := ValidateRuntimeLineageAssertions(b.LineageAssertions, b.CoverageWorkItemID, b.DeclarationRef); err != nil {
+		return err
+	}
 	seenProofKinds := make(map[string]struct{}, len(b.Proofs))
 	for _, proof := range b.Proofs {
 		kind := strings.TrimSpace(proof.EvidenceKind)

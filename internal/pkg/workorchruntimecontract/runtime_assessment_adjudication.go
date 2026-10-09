@@ -243,7 +243,9 @@ func DeriveRuntimeAssessmentAdjudication(
 			if !reflect.DeepEqual(lineageSources.Facts, facts) {
 				return RuntimeAssessmentAdjudication{}, fmt.Errorf("lineage assertion facts differ from assessment source")
 			}
-			if !RuntimeExecutionLineageAssertionsSatisfied(binding, lineageSources, dispatch.Transaction.EvidenceRevision) { complete = false }
+			if !RuntimeExecutionLineageAssertionsSatisfied(binding, lineageSources, dispatch.Transaction.EvidenceRevision) {
+				complete = false
+			}
 		}
 		result.Proofs = append(result.Proofs, coverageProofs...)
 		if !complete {

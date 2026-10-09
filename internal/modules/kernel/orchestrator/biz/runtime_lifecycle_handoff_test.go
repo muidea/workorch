@@ -3315,7 +3315,7 @@ func TestRuntimeGovernanceFailureUsesAtomicTerminalSuccessorAcrossPartialAckAndR
 		body := command.Material.RuntimeCloseout.CloneRaw()
 		ack := runtimecontract.RuntimeDeliveryAcknowledgement{
 			ResultCloseout: &body,
-			WorkspaceID: identity.WorkspaceID, RunID: identity.RunID, TerminalDeliveryID: identity.TerminalDeliveryID,
+			WorkspaceID:    identity.WorkspaceID, RunID: identity.RunID, TerminalDeliveryID: identity.TerminalDeliveryID,
 			Owner: runtimecontract.RuntimeDeliveryOwnerResult, ResultID: common.ResultID(string(identity.WorkspaceID) + "/" + string(identity.RunID) + "/result/dod-assessment"), AcknowledgedState: runtimecontract.RuntimeDeliveryAcknowledgedResultRecorded,
 			AuthoritySnapshotID: identity.AuthoritySnapshotID, CausationID: command.CausationID, Outcome: identity.Outcome,
 		}

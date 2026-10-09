@@ -26,7 +26,9 @@ func TestRuntimeDeliveryLineageUsesSharedSealAndRejectsDeclarationDrift(t *testi
 		}}}}
 	})
 	aggregate.Termination = &runtimecontract.RuntimeTerminationRecord{Kind: runtimecontract.RuntimeTerminationCancelled, RequestedBy: "blocks/run", Reason: "取消", Revision: aggregate.StateRevision}
-	if err := aggregate.Validate(); err != nil { t.Fatal(err) }
+	if err := aggregate.Validate(); err != nil {
+		t.Fatal(err)
+	}
 	bindings, err := RuntimeDeliveryLineageBindings(aggregate)
 	if err != nil || len(bindings) != 1 {
 		t.Fatalf("adapter 丢失 exact source: %v %+v", err, bindings)
@@ -36,7 +38,9 @@ func TestRuntimeDeliveryLineageUsesSharedSealAndRejectsDeclarationDrift(t *testi
 		t.Fatalf("未封存材料应 pending: %s %v", state, err)
 	}
 	seal, err := terminalMaterialSealFromAggregate(aggregate)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	aggregate.TerminalMaterialSeal = &seal
 	aggregate.StateRevision++
 	before := aggregate.CloneRaw()

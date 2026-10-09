@@ -149,8 +149,8 @@ func TestTerminalMaterialSealCompletionRequiresExactSavedBody(t *testing.T) {
 			WorkspaceID: seal.Identity.WorkspaceID, RunID: seal.Identity.RunID,
 			TerminalDeliveryID: seal.Identity.TerminalDeliveryID, Owner: owner,
 			AuthoritySnapshotID: seal.Identity.AuthoritySnapshotID,
-			CausationID: "terminal-delivery/" + seal.Identity.TerminalDeliveryID,
-			Outcome: seal.Identity.Outcome,
+			CausationID:         "terminal-delivery/" + seal.Identity.TerminalDeliveryID,
+			Outcome:             seal.Identity.Outcome,
 		}
 		switch owner {
 		case runtimecontract.RuntimeDeliveryOwnerResult:
@@ -290,8 +290,8 @@ func TestTerminalMaterialSealPrivateEventIsIdempotentAndBudgetNeutral(t *testing
 		t.Fatal(err)
 	}
 	event := RuntimeInternalEvent{
-		Kind: RuntimeInternalEventTerminalMaterialSealRequired,
-		Scope: RuntimeInternalEventScope{WorkspaceID: previous.Facts.WorkspaceID, RunID: previous.Facts.RunID},
+		Kind:     RuntimeInternalEventTerminalMaterialSealRequired,
+		Scope:    RuntimeInternalEventScope{WorkspaceID: previous.Facts.WorkspaceID, RunID: previous.Facts.RunID},
 		Delivery: &RuntimeInternalDeliveryPayload{},
 	}
 	sealed, err := controller.ApplyInternalEvent(context.Background(), event)

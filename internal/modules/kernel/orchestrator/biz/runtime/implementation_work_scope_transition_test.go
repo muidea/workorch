@@ -189,11 +189,11 @@ func TestImplementationWorkPurposeFirstPrivateCASAndTerminalEntry(t *testing.T) 
 }
 
 type implementationWorkRealFileFixture struct {
-	hub        magicevent.Hub
-	directory  string
-	controller *RuntimeController
-	repository *implementationWorkDetachedRepository
-	aggregate  *RuntimeAggregate
+	hub          magicevent.Hub
+	directory    string
+	controller   *RuntimeController
+	repository   *implementationWorkDetachedRepository
+	aggregate    *RuntimeAggregate
 	lineageRules []runtimecontract.RuntimeLineageAssertionRule
 }
 
@@ -354,30 +354,50 @@ func TestRuntimeLineageCompletedRoundsUsesRealFileReceiptsAndOriginalCutoff(t *t
 	testImplementationWorkRealFileTwoRounds(t, []runtimecontract.RuntimeLineageAssertionRule{rule}, func(second RuntimeAggregate, firstCutoff string) {
 		coverageID := second.ImplementationWork.Rounds[0].CoverageWorkItemID
 		var item runtimecontract.RuntimeCoverageItem
-		for _, candidate := range second.Facts.DefinitionSeed.CoverageItems { if candidate.ID == coverageID { item = candidate } }
+		for _, candidate := range second.Facts.DefinitionSeed.CoverageItems {
+			if candidate.ID == coverageID {
+				item = candidate
+			}
+		}
 		declaration := runtimecontract.CanonicalRuntimeDefinitionEvidenceDeclarationRef(item.SourceScope, item.SourceID)
 		assertions, err := runtimecontract.CompileRuntimeLineageAssertions([]runtimecontract.RuntimeLineageAssertionRule{rule}, declaration, item)
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		// 此只读投影只检验 guard；普通 terminal proof 必须由独立 assessment 另行证明。
 		binding := runtimecontract.CoverageEvidenceBinding{ID: "read-only-round-guard", CoverageWorkItemID: coverageID, FocusID: "round-guard", DefinitionRevision: second.Facts.DefinitionRevision, DeclarationRef: declaration, TargetRefs: []string{"target.txt"}, LineageAssertions: assertions,
 			Proofs: []runtimecontract.CoverageEvidenceProof{{EvidenceKind: runtimecontract.EvidenceKindStateChange, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, AllowedOperationKinds: []string{runtimecontract.StepKindFileEdit}}}}
 		binding.Hash = runtimecontract.StableCoverageEvidenceBindingHash(binding)
 		before := second.CloneRaw()
 		sources := runtimeLineageAssertionSources(second)
-		if !runtimecontract.RuntimeExecutionLineageAssertionsSatisfied(binding, sources, second.Facts.EvidenceRevision) { t.Fatal("两轮真实 changed receipt 未满足附加 round guard") }
-		if !runtimecontract.EvidenceRevisionAfter(second.Facts.EvidenceRevision, firstCutoff) { t.Fatal("第二轮没有推进原始 evidence cutoff") }
-		if runtimecontract.RuntimeExecutionLineageAssertionsSatisfied(binding, sources, firstCutoff) { t.Fatal("未来第二轮回执补进了原第一轮 cutoff") }
+		if !runtimecontract.RuntimeExecutionLineageAssertionsSatisfied(binding, sources, second.Facts.EvidenceRevision) {
+			t.Fatal("两轮真实 changed receipt 未满足附加 round guard")
+		}
+		if !runtimecontract.EvidenceRevisionAfter(second.Facts.EvidenceRevision, firstCutoff) {
+			t.Fatal("第二轮没有推进原始 evidence cutoff")
+		}
+		if runtimecontract.RuntimeExecutionLineageAssertionsSatisfied(binding, sources, firstCutoff) {
+			t.Fatal("未来第二轮回执补进了原第一轮 cutoff")
+		}
 		for _, mutate := range []func(*RuntimeAggregate){
 			func(a *RuntimeAggregate) { a.ImplementationWork.Rounds[1].CompletedReceiptSetHash = "" },
-			func(a *RuntimeAggregate) { a.ImplementationWork.Rounds[1].Ordinal = a.ImplementationWork.Rounds[0].Ordinal },
+			func(a *RuntimeAggregate) {
+				a.ImplementationWork.Rounds[1].Ordinal = a.ImplementationWork.Rounds[0].Ordinal
+			},
 			func(a *RuntimeAggregate) { a.OperationReceipts[0].Changed = false },
-			func(a *RuntimeAggregate) { a.ImplementationWork.Rounds[1].ScopeRequest.Policy.RequireFreshObservation = false },
+			func(a *RuntimeAggregate) {
+				a.ImplementationWork.Rounds[1].ScopeRequest.Policy.RequireFreshObservation = false
+			},
 		} {
 			invalid := second.CloneRaw()
 			mutate(&invalid)
-			if runtimecontract.RuntimeExecutionLineageAssertionsSatisfied(binding, runtimeLineageAssertionSources(invalid), second.Facts.EvidenceRevision) { t.Fatal("不完整、重复、no-change 或非 fresh round 满足了 guard") }
+			if runtimecontract.RuntimeExecutionLineageAssertionsSatisfied(binding, runtimeLineageAssertionSources(invalid), second.Facts.EvidenceRevision) {
+				t.Fatal("不完整、重复、no-change 或非 fresh round 满足了 guard")
+			}
 		}
-		if !reflect.DeepEqual(before, second) { t.Fatal("只读 guard 修改了原 aggregate") }
+		if !reflect.DeepEqual(before, second) {
+			t.Fatal("只读 guard 修改了原 aggregate")
+		}
 	})
 }
 
@@ -427,7 +447,9 @@ func testImplementationWorkRealFileTwoRounds(t *testing.T, rules []runtimecontra
 	if data, err := os.ReadFile(filepath.Join(directory, "target.txt")); err != nil || string(data) != "实际工作内容-2" {
 		t.Fatalf("second real owner content: %q %v", data, err)
 	}
-	if verify != nil { verify(second, first.Facts.EvidenceRevision) }
+	if verify != nil {
+		verify(second, first.Facts.EvidenceRevision)
+	}
 }
 
 func implementationWorkFirstDifference(a, b reflect.Value, path string) string {
@@ -464,7 +486,9 @@ func implementationWorkFirstDifference(a, b reflect.Value, path string) string {
 func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.RuntimeImplementationWorkPurpose, targets []string, owner *implementationWorkRealFileFixture) RuntimeAggregate {
 	t.Helper()
 	var rules []runtimecontract.RuntimeLineageAssertionRule
-	if owner != nil { rules = owner.lineageRules }
+	if owner != nil {
+		rules = owner.lineageRules
+	}
 	controller, repository, aggregate := implementationWorkPurposeControllerWithLineage(t, targets, rules)
 	if owner != nil {
 		controller, repository, aggregate = owner.current(t, aggregate)

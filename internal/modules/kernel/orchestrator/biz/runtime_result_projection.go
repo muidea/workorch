@@ -25,8 +25,8 @@ func (m *Biz) deliverRuntimeTerminal(ctx context.Context, aggregate runtime.Runt
 		return fmt.Errorf("persisted Runtime terminal aggregate is invalid: %w", err)
 	}
 	sealed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventTerminalMaterialSealRequired,
-		Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
+		Kind:     runtime.RuntimeInternalEventTerminalMaterialSealRequired,
+		Scope:    runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
 		Delivery: &runtime.RuntimeInternalDeliveryPayload{},
 	})
 	if err != nil {
@@ -109,7 +109,7 @@ func terminalDeliveryRequest(aggregate runtime.RuntimeAggregate) (orchestratorev
 	if aggregate.TerminalMaterialSeal != nil {
 		return orchestratorevents.RuntimeTerminalDeliveryRequestData{
 			RuntimeTerminalDeliveryIdentity: aggregate.TerminalMaterialSeal.Identity,
-			SourceOwner: ModuleID, CausationID: "terminal-delivery/" + aggregate.TerminalMaterialSeal.Identity.TerminalDeliveryID,
+			SourceOwner:                     ModuleID, CausationID: "terminal-delivery/" + aggregate.TerminalMaterialSeal.Identity.TerminalDeliveryID,
 			StateRevision: aggregate.TerminalMaterialSeal.GenerationStateRevision,
 		}, nil
 	}
@@ -138,7 +138,7 @@ func (m *Biz) deliverRuntimeResult(ctx context.Context, request orchestratoreven
 	}
 	command := resultevents.RuntimeTerminalDeliveryFact{
 		RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID},
-		Material: material,
+		Material:                    material,
 	}
 	event := magicevent.NewEventWithContext(resultevents.TopicResultFactTerminalDelivery, ModuleID, resultevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, resultevents.Contracts(), resultevents.TopicResultFactTerminalDelivery, "terminal-delivery", request.TerminalDeliveryID, request.WorkspaceID, request.RunID)
@@ -185,7 +185,7 @@ func (m *Biz) deliverRuntimeWorkspace(ctx context.Context, request orchestratore
 func (m *Biz) deliverRuntimeRun(ctx context.Context, request orchestratorevents.RuntimeTerminalDeliveryRequestData, resultID common.ResultID) error {
 	command := runevents.RuntimeTerminalDeliveryFact{
 		RuntimeTerminalDeliveryFact: runtimecontract.RuntimeTerminalDeliveryFact{RuntimeTerminalDeliveryIdentity: request.Identity(), SourceOwner: ModuleID, CausationID: request.CausationID},
-		ResultID: resultID,
+		ResultID:                    resultID,
 	}
 	event := magicevent.NewEventWithContext(runevents.TopicRunFactTerminalDelivery, ModuleID, runevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunFactTerminalDelivery, "run", string(request.RunID), request.WorkspaceID, request.RunID)
@@ -203,8 +203,8 @@ func (m *Biz) recordRuntimeDeliveryAcknowledgement(ctx context.Context, acknowle
 		return common.ErrInvalidArgument
 	}
 	_, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
-		Kind: runtime.RuntimeInternalEventTerminalDeliveryAcknowledged,
-		Scope: runtime.RuntimeInternalEventScope{WorkspaceID: acknowledgement.WorkspaceID, RunID: acknowledgement.RunID},
+		Kind:     runtime.RuntimeInternalEventTerminalDeliveryAcknowledged,
+		Scope:    runtime.RuntimeInternalEventScope{WorkspaceID: acknowledgement.WorkspaceID, RunID: acknowledgement.RunID},
 		Delivery: &runtime.RuntimeInternalDeliveryPayload{DeliveryAcknowledgement: acknowledgement},
 	})
 	return err

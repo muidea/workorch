@@ -14,39 +14,40 @@ import (
 // RuntimeLineageAssertionRule 是 Profile 拥有的附加 all-of 门禁，不是证据种类、
 // operation、provider fact 或独立覆盖证明。未知或不可用的消费者保持封闭。
 type RuntimeLineageAssertionKind string
+
 // RuntimeProofPhase 仅区分 guard 消费时点，不是新的 Runtime 状态机 phase。
 type RuntimeProofPhase string
 
 const (
-	RuntimeLineageCompletedWorkRounds RuntimeLineageAssertionKind = "completed_work_rounds"
+	RuntimeLineageCompletedWorkRounds       RuntimeLineageAssertionKind = "completed_work_rounds"
 	RuntimeLineageRepairThenFreshValidation RuntimeLineageAssertionKind = "repair_then_fresh_validation"
-	RuntimeLineageOwnerOperationReceipt RuntimeLineageAssertionKind = "owner_operation_receipt"
-	RuntimeLineageDeliveryAcknowledgements RuntimeLineageAssertionKind = "delivery_acknowledgements"
-	RuntimeProofPhaseExecution RuntimeProofPhase = "execution"
-	RuntimeProofPhasePostTerminalDelivery RuntimeProofPhase = "post_terminal_delivery"
-	MaxRuntimeLineageAssertions = 16
+	RuntimeLineageOwnerOperationReceipt     RuntimeLineageAssertionKind = "owner_operation_receipt"
+	RuntimeLineageDeliveryAcknowledgements  RuntimeLineageAssertionKind = "delivery_acknowledgements"
+	RuntimeProofPhaseExecution              RuntimeProofPhase           = "execution"
+	RuntimeProofPhasePostTerminalDelivery   RuntimeProofPhase           = "post_terminal_delivery"
+	MaxRuntimeLineageAssertions                                         = 16
 )
 
 type RuntimeLineageAssertionRule struct {
-	Ref string
+	Ref  string
 	Kind RuntimeLineageAssertionKind
 	// ConsumptionPoint 是封存声明的消费时点，不是调用方选择的 Runtime 目标状态。
-	ConsumptionPoint RuntimeProofPhase
-	MinCompletedRounds int `json:",omitempty"`
-	OwnerModuleID string `json:",omitempty"`
-	OperationKind string `json:",omitempty"`
-	OperationVariantID string `json:",omitempty"`
+	ConsumptionPoint    RuntimeProofPhase
+	MinCompletedRounds  int                `json:",omitempty"`
+	OwnerModuleID       string             `json:",omitempty"`
+	OperationKind       string             `json:",omitempty"`
+	OperationVariantID  string             `json:",omitempty"`
 	RequiredEffectScope RuntimeEffectScope `json:",omitempty"`
 }
 
 type RuntimeLineageAssertion struct {
-	Rule RuntimeLineageAssertionRule
-	RuleHash string
-	DeclarationRef string
+	Rule               RuntimeLineageAssertionRule
+	RuleHash           string
+	DeclarationRef     string
 	CoverageWorkItemID common.CoverageWorkItemID
-	SourceScope string
-	SourceID string
-	SourceTextHash string
+	SourceScope        string
+	SourceID           string
+	SourceTextHash     string
 }
 
 func (r RuntimeLineageAssertionRule) Validate() error {
@@ -118,20 +119,32 @@ func RuntimeLineageSourceTextHash(text string) string {
 }
 
 func ValidateRuntimeLineageAssertionRules(rules []RuntimeLineageAssertionRule) error {
-	if len(rules) > MaxRuntimeLineageAssertions { return fmt.Errorf("lineage assertion rules exceed bounded count") }
+	if len(rules) > MaxRuntimeLineageAssertions {
+		return fmt.Errorf("lineage assertion rules exceed bounded count")
+	}
 	seen := map[string]bool{}
 	for _, rule := range rules {
-		if err := rule.Validate(); err != nil { return err }
-		if seen[rule.Ref] { return fmt.Errorf("duplicate lineage rule %q", rule.Ref) }
+		if err := rule.Validate(); err != nil {
+			return err
+		}
+		if seen[rule.Ref] {
+			return fmt.Errorf("duplicate lineage rule %q", rule.Ref)
+		}
 		seen[rule.Ref] = true
 	}
 	return nil
 }
 
 func CompileRuntimeLineageAssertions(rules []RuntimeLineageAssertionRule, declarationRef string, item RuntimeCoverageItem) ([]RuntimeLineageAssertion, error) {
-	if err := ValidateRuntimeLineageAssertionRules(rules); err != nil { return nil, err }
-	if len(rules) == 0 { return nil, nil }
-	if declarationRef == "" || item.ID == "" || item.SourceScope == "" || item.SourceID == "" || item.TargetText == "" { return nil, fmt.Errorf("lineage assertion requires complete original CWI source") }
+	if err := ValidateRuntimeLineageAssertionRules(rules); err != nil {
+		return nil, err
+	}
+	if len(rules) == 0 {
+		return nil, nil
+	}
+	if declarationRef == "" || item.ID == "" || item.SourceScope == "" || item.SourceID == "" || item.TargetText == "" {
+		return nil, fmt.Errorf("lineage assertion requires complete original CWI source")
+	}
 	ret := make([]RuntimeLineageAssertion, 0, len(rules))
 	for _, rule := range rules {
 		ret = append(ret, RuntimeLineageAssertion{Rule: rule, RuleHash: StableRuntimeLineageAssertionRuleHash(rule), DeclarationRef: declarationRef, CoverageWorkItemID: item.ID, SourceScope: item.SourceScope, SourceID: item.SourceID, SourceTextHash: RuntimeLineageSourceTextHash(item.TargetText)})
@@ -140,13 +153,21 @@ func CompileRuntimeLineageAssertions(rules []RuntimeLineageAssertionRule, declar
 }
 
 func ValidateRuntimeLineageAssertions(values []RuntimeLineageAssertion, coverageID common.CoverageWorkItemID, declarationRef string) error {
-	if len(values) > MaxRuntimeLineageAssertions { return fmt.Errorf("lineage assertions exceed bounded count") }
+	if len(values) > MaxRuntimeLineageAssertions {
+		return fmt.Errorf("lineage assertions exceed bounded count")
+	}
 	seen := map[string]bool{}
 	for _, value := range values {
-		if err := value.Rule.Validate(); err != nil { return err }
-		if seen[value.Rule.Ref] || value.RuleHash != StableRuntimeLineageAssertionRuleHash(value.Rule) || value.CoverageWorkItemID != coverageID || value.DeclarationRef != declarationRef || value.SourceScope == "" || value.SourceID == "" || len(value.SourceTextHash) != 64 { return fmt.Errorf("lineage assertion source/rule identity mismatch") }
+		if err := value.Rule.Validate(); err != nil {
+			return err
+		}
+		if seen[value.Rule.Ref] || value.RuleHash != StableRuntimeLineageAssertionRuleHash(value.Rule) || value.CoverageWorkItemID != coverageID || value.DeclarationRef != declarationRef || value.SourceScope == "" || value.SourceID == "" || len(value.SourceTextHash) != 64 {
+			return fmt.Errorf("lineage assertion source/rule identity mismatch")
+		}
 		decoded, err := hex.DecodeString(value.SourceTextHash)
-		if err != nil || len(decoded) != sha256.Size || hex.EncodeToString(decoded) != value.SourceTextHash { return fmt.Errorf("lineage assertion source text hash is not canonical SHA256") }
+		if err != nil || len(decoded) != sha256.Size || hex.EncodeToString(decoded) != value.SourceTextHash {
+			return fmt.Errorf("lineage assertion source text hash is not canonical SHA256")
+		}
 		seen[value.Rule.Ref] = true
 	}
 	return nil
@@ -157,20 +178,30 @@ func mergeRuntimeLineageAssertionRules(base, added []RuntimeLineageAssertionRule
 	for _, rule := range added {
 		found := false
 		for _, prior := range ret {
-			if prior.Ref != rule.Ref { continue }
-			if prior != rule { return nil, fmt.Errorf("conflicting lineage assertion rule %q", rule.Ref) }
+			if prior.Ref != rule.Ref {
+				continue
+			}
+			if prior != rule {
+				return nil, fmt.Errorf("conflicting lineage assertion rule %q", rule.Ref)
+			}
 			found = true
 		}
-		if !found { ret = append(ret, rule) }
+		if !found {
+			ret = append(ret, rule)
+		}
 	}
-	if err := ValidateRuntimeLineageAssertionRules(ret); err != nil { return nil, err }
+	if err := ValidateRuntimeLineageAssertionRules(ret); err != nil {
+		return nil, err
+	}
 	return ret, nil
 }
 
 func runtimeProfilesDeclareLineageAssertions(profiles []RuntimeProfileContract) bool {
 	for _, profile := range profiles {
 		for _, requirement := range profile.EvidenceRequirements {
-			if len(requirement.LineageAssertions) != 0 { return true }
+			if len(requirement.LineageAssertions) != 0 {
+				return true
+			}
 		}
 	}
 	return false
@@ -181,8 +212,12 @@ func runtimeProfilesDeclareLineageAssertions(profiles []RuntimeProfileContract) 
 func ValidateRuntimeDefinitionLineageAssertions(focuses []RuntimeDefinitionFocus, profiles []RuntimeProfileContract) error {
 	for _, focus := range focuses {
 		policy, err := CompileRuntimeSourceEvidencePolicy(focus.AssessmentScope, focus.AssessmentID, profiles, nil)
-		if err != nil { return err }
-		if !slices.Equal(focus.LineageAssertions, policy.LineageAssertions) { return fmt.Errorf("definition lineage rules differ from original sealed Profile") }
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(focus.LineageAssertions, policy.LineageAssertions) {
+			return fmt.Errorf("definition lineage rules differ from original sealed Profile")
+		}
 	}
 	return nil
 }

@@ -13,7 +13,7 @@ func independentGoalSpecificationCandidate() workspace.DefinitionAdmissionCandid
 	spec.Requirements[0].SourceItemRefs = []string{candidate.DoDInputs[0].CandidateItemRef}
 	goal := workspace.GoalSpecificationRequirement{
 		ID: "independent-goal", DimensionID: spec.Dimensions[0].ID, Required: true,
-		SourceKind: workspace.GoalRequirementUserExplicit,
+		SourceKind:     workspace.GoalRequirementUserExplicit,
 		SourceItemRefs: []string{spec.GoalItemRef}, Text: candidate.GoalInput.Text,
 	}
 	spec.Requirements = append(spec.Requirements, goal)
@@ -52,16 +52,35 @@ func TestCompileIndependentExactGoalDoesNotInventDoDObligation(t *testing.T) {
 		t.Fatalf("exact Goal 重放不一致: %v", err)
 	}
 	for _, test := range []struct {
-		name string
+		name   string
 		mutate func(*workspace.DefinitionAdmissionCandidate)
 	}{
-		{"different_goal_text", func(c *workspace.DefinitionAdmissionCandidate) { independentGoalRequirement(c).Text = "改写后的目标" }},
-		{"different_source_kind", func(c *workspace.DefinitionAdmissionCandidate) { independentGoalRequirement(c).SourceKind = workspace.GoalRequirementDerived }},
-		{"mixed_goal_and_dod", func(c *workspace.DefinitionAdmissionCandidate) { independentGoalRequirement(c).SourceItemRefs = append(independentGoalRequirement(c).SourceItemRefs, c.DoDInputs[0].CandidateItemRef) }},
-		{"duplicate_goal_source", func(c *workspace.DefinitionAdmissionCandidate) { extra := *independentGoalRequirement(c); extra.ID = "duplicate-goal"; c.Specification.Requirements = append(c.Specification.Requirements, extra) }},
-		{"missing_dod_obligation", func(c *workspace.DefinitionAdmissionCandidate) { c.Specification.Obligations = nil; c.Specification.Verifications = nil }},
-		{"unverified_dod", func(c *workspace.DefinitionAdmissionCandidate) { v := &c.Specification.Verifications[0]; v.Status = workspace.GoalVerificationUnverified; v.ProfileID, v.EvidenceRequirementID, v.Scope = "", "", "" }},
-		{"unknown_review", func(c *workspace.DefinitionAdmissionCandidate) { c.Specification.Reviews[0].Status = workspace.GoalReviewUnknown }},
+		{"different_goal_text", func(c *workspace.DefinitionAdmissionCandidate) {
+			independentGoalRequirement(c).Text = "改写后的目标"
+		}},
+		{"different_source_kind", func(c *workspace.DefinitionAdmissionCandidate) {
+			independentGoalRequirement(c).SourceKind = workspace.GoalRequirementDerived
+		}},
+		{"mixed_goal_and_dod", func(c *workspace.DefinitionAdmissionCandidate) {
+			independentGoalRequirement(c).SourceItemRefs = append(independentGoalRequirement(c).SourceItemRefs, c.DoDInputs[0].CandidateItemRef)
+		}},
+		{"duplicate_goal_source", func(c *workspace.DefinitionAdmissionCandidate) {
+			extra := *independentGoalRequirement(c)
+			extra.ID = "duplicate-goal"
+			c.Specification.Requirements = append(c.Specification.Requirements, extra)
+		}},
+		{"missing_dod_obligation", func(c *workspace.DefinitionAdmissionCandidate) {
+			c.Specification.Obligations = nil
+			c.Specification.Verifications = nil
+		}},
+		{"unverified_dod", func(c *workspace.DefinitionAdmissionCandidate) {
+			v := &c.Specification.Verifications[0]
+			v.Status = workspace.GoalVerificationUnverified
+			v.ProfileID, v.EvidenceRequirementID, v.Scope = "", "", ""
+		}},
+		{"unknown_review", func(c *workspace.DefinitionAdmissionCandidate) {
+			c.Specification.Reviews[0].Status = workspace.GoalReviewUnknown
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			invalid := candidate.Clone()

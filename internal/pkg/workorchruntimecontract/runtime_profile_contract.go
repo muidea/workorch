@@ -894,7 +894,7 @@ type RuntimeSourceEvidencePolicy struct {
 	RequiredOwnerFacts                   []RuntimeOwnerFactRequirement
 	OwnerFactConvergences                []RuntimeOwnerFactConvergence
 	ValidationFailureRepairConvergence   *RuntimeValidationFailureRepairConvergence
-	LineageAssertions                   []RuntimeLineageAssertionRule
+	LineageAssertions                    []RuntimeLineageAssertionRule
 	ImplementationWorkPolicy             *RuntimeImplementationWorkPolicy
 	VerificationPolicy                   *RuntimeVerificationPolicy
 	ValidationRecipeID                   string
@@ -1024,7 +1024,9 @@ func mergeRuntimeSourceEvidencePolicy(base RuntimeSourceEvidencePolicy, requirem
 	for _, requirement := range requirements {
 		var lineageErr error
 		base.LineageAssertions, lineageErr = mergeRuntimeLineageAssertionRules(base.LineageAssertions, requirement.LineageAssertions)
-		if lineageErr != nil { return RuntimeSourceEvidencePolicy{}, lineageErr }
+		if lineageErr != nil {
+			return RuntimeSourceEvidencePolicy{}, lineageErr
+		}
 		// Stable unique union for required evidence / rejected kinds.
 		base.RequiredEvidenceKinds = runtimeSourceStableStringUnion(base.RequiredEvidenceKinds, requirement.RequiredEvidenceKinds)
 		base.RejectedStepKinds = runtimeSourceStableStringUnion(base.RejectedStepKinds, requirement.RejectedStepKinds)
@@ -1214,7 +1216,9 @@ func RuntimeSourceEvidencePolicyRetainsDeclaration(policy RuntimeSourceEvidenceP
 		return false
 	}
 	mergedRules, lineageErr := mergeRuntimeLineageAssertionRules(policy.LineageAssertions, declaration.LineageAssertions)
-	if lineageErr != nil || !slices.Equal(mergedRules, policy.LineageAssertions) { return false }
+	if lineageErr != nil || !slices.Equal(mergedRules, policy.LineageAssertions) {
+		return false
+	}
 	// Capability-state identities have no item-level projection in this compiler.
 	return len(declaration.CapabilityStateRequirements) == 0
 }
