@@ -531,7 +531,7 @@ func (s *Biz) subscribeDecisionNotifications() {
 		topic := topic
 		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(decisionevents.TicketChangedData)
-			if !ok || event.Source() != decisioncommon.ModuleID || !validTicketChangedData(data) {
+			if !ok || event.Source() != decisioncommon.ModuleID || !validTicketCreatedData(data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
@@ -623,11 +623,34 @@ func validGovernanceData(data governanceevents.GovernanceData) bool {
 }
 
 func validTicketChangedData(data decisionevents.TicketChangedData) bool {
-	return strings.TrimSpace(data.NotificationID) != "" && data.TicketID != "" && data.WorkspaceID != "" && data.RunID != "" && data.State != ""
+	if strings.TrimSpace(data.NotificationID) == "" || data.TicketID == "" || data.WorkspaceID == "" || data.State == "" {
+		return false
+	}
+	if data.DecisionKind == "workspace_definition_clarification" {
+		// pre-seal 澄清只属于 Workspace；审计不得补造 Run/Step。
+		return data.RunID == "" && data.StepID == "" &&
+			data.NotificationID == fmt.Sprintf("decision-notification/created/%s/%s", data.WorkspaceID, data.TicketID)
+	}
+	return data.RunID != ""
+}
+
+func validTicketCreatedData(data decisionevents.TicketChangedData) bool {
+	return validTicketChangedData(data) &&
+		(data.DecisionKind != "workspace_definition_clarification" || data.State == common.DecisionTicketStateOpen)
 }
 
 func validTicketResolvedData(data decisionevents.TicketResolvedData) bool {
-	return strings.TrimSpace(data.NotificationID) != "" && validTicketChangedData(data.Ticket) && data.ResolutionID != "" && strings.TrimSpace(data.ResolutionType) != ""
+	if strings.TrimSpace(data.NotificationID) == "" || !validTicketChangedData(data.Ticket) || data.ResolutionID == "" || strings.TrimSpace(data.ResolutionType) == "" {
+		return false
+	}
+	if data.Ticket.DecisionKind != "workspace_definition_clarification" {
+		return true
+	}
+	return data.Ticket.State == common.DecisionTicketStateResolved &&
+		(data.ResolutionType == decisionevents.DefinitionClarificationResolutionCandidateAdjusted ||
+			data.ResolutionType == decisionevents.DefinitionClarificationResolutionCandidateSuperseded) &&
+		data.NotificationID == fmt.Sprintf("decision-notification/resolved/%s/%s/%s", data.Ticket.WorkspaceID, data.Ticket.TicketID, data.ResolutionID) &&
+		data.ContinuationAction == "" && data.ResumeRunID == "" && data.SuccessorRunID == ""
 }
 
 func (s *Biz) finishRecordAppend(event magicevent.Event, record *eventstreammodel.EventRecord, inputErr error) {

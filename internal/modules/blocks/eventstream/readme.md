@@ -43,6 +43,10 @@ duplicate 按首次出现折叠，result 再按 workspace ID 排序。
   `/run/state/changed` 即使 causation 相同也具有不同 ID。
 - 同一稳定 ID 仅在 persisted source、topic、scope、subject 与 payload 全等时视为 exact replay；任一不等保留 conflict 并记录错误。
   producer source/topic/payload validation 仍可在 append 前更早 fail-closed。
+  `workspace_definition_clarification` 的 pre-seal 通知保持 workspace-only scope（RunID/StepID 均空）：created 必须
+  为 open，resolved 必须为 resolved，结束类型仅 `definition_candidate_adjusted` 或
+  `definition_candidate_revision_superseded`，不得携带 Run continuation/resume/successor。两类通知均校验 exact
+  workspace/ticket/resolution notification identity；普通 run-scoped ticket 仍要求 RunID。审计不授予准入或执行权威。
   未声明稳定 identity 的其它 notification 保持 append-per-delivery，不伪装成已去重。
 - payload 在 persistence 前执行 typed validation、secret removal、string/slice/aggregate bound；list 默认不 hydrate payload。
 - deletion tombstone 永久阻止该 workspace 再 append；purge 不能删除其它 workspace，也不能重置全局 position。
