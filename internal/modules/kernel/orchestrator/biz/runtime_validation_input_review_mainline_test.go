@@ -569,6 +569,9 @@ func %s(t *testing.T) {
 	}
 	if options.SourceObligations {
 		assertSharedSourceObligationOwnerObservation(t, completed, requirements[0], mode == "source_B_failure")
+		if success {
+			assertActualShellAssessmentProofDependencies(t, runtimeStateRecordFromAggregate(completed))
+		}
 	}
 	if (mode == "conflict" || mode == "omission" || mode == "malformed") && len(completed.GovernanceRequests) != 0 {
 		t.Fatal("conflict/format error created clarification ticket")
@@ -642,6 +645,9 @@ func %s(t *testing.T) {
 	stored, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || stored.RuntimeState == nil || !runtimeTerminalDeliveryFullyAcknowledged(runtimeAggregateFromRecord(*stored.RuntimeState)) {
 		t.Fatalf("terminal owner delivery incomplete: %v", err)
+	}
+	if options.SourceObligations && success {
+		assertActualShellAssessmentProofDependencies(t, *stored.RuntimeState)
 	}
 	wantRun, wantResult, wantCoverage := common.RunStateFailed, common.ResultStateRejected, 1
 	if success {

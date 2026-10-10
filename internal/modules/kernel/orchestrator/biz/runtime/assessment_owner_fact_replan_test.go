@@ -383,6 +383,11 @@ func prepareOwnerFactAssessment(t *testing.T, ownerFactReady bool, operationKind
 
 func prepareOwnerFactAssessmentWithDiagnostic(t *testing.T, ownerFactReady bool, diagnostic *runtimecontract.RuntimeOriginalDiagnostic, operationKinds ...string) (*RuntimeController, *controllerRepository, runtimecontract.RuntimeFacts) {
 	t.Helper()
+	return prepareOwnerFactAssessmentWithOwnerDependencies(t, ownerFactReady, diagnostic, nil, operationKinds...)
+}
+
+func prepareOwnerFactAssessmentWithOwnerDependencies(t *testing.T, ownerFactReady bool, diagnostic *runtimecontract.RuntimeOriginalDiagnostic, dependencies *runtimecontract.RuntimeOwnerRevisionSet, operationKinds ...string) (*RuntimeController, *controllerRepository, runtimecontract.RuntimeFacts) {
+	t.Helper()
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
@@ -525,6 +530,7 @@ func prepareOwnerFactAssessmentWithDiagnostic(t *testing.T, ownerFactReady bool,
 			Quality: common.EvidenceQualityValid,
 		}
 	}
+	evidence.Evidence.OwnerRevisionSet = runtimecontract.CloneRuntimeOwnerRevisionSet(dependencies)
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &evidence)
 	committed, err := controller.commitEvidence(context.Background(), evidence)
 	if err != nil || committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {

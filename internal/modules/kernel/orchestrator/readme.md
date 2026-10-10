@@ -125,6 +125,18 @@ File existing-read 与 Shell managed-validation scratch copy 是该事实的具�
 相交资源失效/reopen 或 terminal 的真实 dependency union。终态 compiler 的 synthetic `runtime_authority` 集合
 不是 actual-read 来源，该来源问题不能由一个 optional 字段或纯 applicability matcher 自动解决。
 
+assessment 的 `RuntimeAssessmentAdjudicationProof.OwnerRevisionSet` detached 保留 classifier 实际选中 evidence 的
+原集合。SM-2 commit 与 SM-3 completed dispatch 双账 hash 绑定完整 proof 正文；fresh-load 用原 dispatch evidence cutoff、
+sealed binding、completed operation、原 fact hash 和 receipt 来源重编后 exact-match。删除依赖或同时重算两侧 hash
+不能代替原来源。proof normalization/raw clone 保留非法 raw 与 nil/empty 表示，独立集合/hash/Definition 门禁仍执行。
+逐 proof 集合不被强行合并或任取同资源版本，也不代表 classifier 读取的 catalog/owner postcondition、artifact 或
+完整 assessment 依赖；nil 不补造无依赖，现有 disposition、credit、预算、reopen 与 SM-1/SM-4 transition 不变。
+`biz/runtime/assessment_proof_dependencies_test.go` 固定 satisfied/repairable、cutoff、重载、隔离与协调篡改；
+`biz/runtime/assessment_proof_dependencies_recovery_test.go` 固定完整 aggregate 门禁下的 CAS 前失败与 CAS 后响应丢失，
+重启不重复提交或替换原 proof 来源。
+`biz/runtime_assessment_proof_dependencies_mainline_test.go` 在既有真实 Shell/File/Run 装配及三 owner ACK 恢复中
+反查 receipt→fact→selected proof。provider 仍是脚本替身，这些验证不替代公开正式累计验收或 live。
+
 ### 逐源义务与共同 CWI
 
 Workspace eligible candidate 的 immutable `RuntimeSourceObligationInventory` 随 Definition/seed/startup/hash

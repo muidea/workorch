@@ -114,6 +114,8 @@ type RuntimeAssessmentAdjudicationProof struct {
 	EvidenceKind       string
 	EvidenceFactID     common.EvidenceRecordID
 	EvidenceFactHash   string
+	// 原选中 evidence 的完整读取依赖；不代表 assessment 的全部依赖。
+	OwnerRevisionSet *RuntimeOwnerRevisionSet `json:",omitempty"`
 }
 
 func (p RuntimeAssessmentAdjudicationProof) Normalized() RuntimeAssessmentAdjudicationProof {
@@ -121,6 +123,7 @@ func (p RuntimeAssessmentAdjudicationProof) Normalized() RuntimeAssessmentAdjudi
 	p.EvidenceKind = strings.TrimSpace(p.EvidenceKind)
 	p.EvidenceFactID = common.EvidenceRecordID(strings.TrimSpace(string(p.EvidenceFactID)))
 	p.EvidenceFactHash = strings.TrimSpace(p.EvidenceFactHash)
+	p.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(p.OwnerRevisionSet)
 	return p
 }
 
@@ -192,8 +195,11 @@ func (a RuntimeAssessmentAdjudication) ValidateRaw() error {
 		return fmt.Errorf("satisfied runtime assessment adjudication requires proof")
 	}
 	for _, proof := range a.Proofs {
-		if proof != proof.Normalized() || proof.CoverageWorkItemID == "" || proof.EvidenceKind == "" || proof.EvidenceFactID == "" || proof.EvidenceFactHash == "" {
+		if !reflect.DeepEqual(proof, proof.Normalized()) || proof.CoverageWorkItemID == "" || proof.EvidenceKind == "" || proof.EvidenceFactID == "" || proof.EvidenceFactHash == "" {
 			return fmt.Errorf("runtime assessment adjudication contains malformed proof")
+		}
+		if err := validateRuntimeOwnerRevisionSetRaw(proof.OwnerRevisionSet); err != nil {
+			return fmt.Errorf("runtime assessment proof owner dependencies: %w", err)
 		}
 	}
 	return nil
@@ -258,7 +264,16 @@ func DeriveRuntimeAssessmentAdjudication(
 			result.Disposition = AssessmentDispositionRepairableGap
 		}
 	}
-	return result.Normalized(), nil
+	result = result.Normalized()
+	for _, proof := range result.Proofs {
+		if err := validateRuntimeOwnerRevisionSetRaw(proof.OwnerRevisionSet); err != nil {
+			return RuntimeAssessmentAdjudication{}, fmt.Errorf("runtime assessment selected proof dependencies: %w", err)
+		}
+		if proof.OwnerRevisionSet != nil && proof.OwnerRevisionSet.DefinitionRevision != facts.DefinitionRevision {
+			return RuntimeAssessmentAdjudication{}, fmt.Errorf("runtime assessment selected proof dependencies definition mismatch")
+		}
+	}
+	return result, nil
 }
 
 func ValidateRuntimeAssessmentAdjudication(
@@ -452,6 +467,7 @@ func deriveAssessmentCoverageProofs(
 		proofs = append(proofs, RuntimeAssessmentAdjudicationProof{
 			CoverageWorkItemID: binding.CoverageWorkItemID, EvidenceKind: fact.Kind,
 			EvidenceFactID: fact.ID, EvidenceFactHash: StableRuntimeEvidenceFactHash(fact),
+			OwnerRevisionSet: CloneRuntimeOwnerRevisionSet(fact.OwnerRevisionSet),
 		})
 	}
 	return proofs, true

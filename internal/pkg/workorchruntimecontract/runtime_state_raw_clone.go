@@ -358,7 +358,10 @@ func cloneRuntimeAssessmentAuthorityInputRaw(in RuntimeAssessmentAuthorityInput)
 func cloneRuntimeAssessmentAdjudicationRaw(in RuntimeAssessmentAdjudication) RuntimeAssessmentAdjudication {
 	out := in
 	out.CoverageWorkItemIDs = cloneRuntimeStateRawSlice(in.CoverageWorkItemIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
-	out.Proofs = cloneRuntimeStateRawSlice(in.Proofs, func(item RuntimeAssessmentAdjudicationProof) RuntimeAssessmentAdjudicationProof { return item })
+	out.Proofs = cloneRuntimeStateRawSlice(in.Proofs, func(item RuntimeAssessmentAdjudicationProof) RuntimeAssessmentAdjudicationProof {
+		item.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(item.OwnerRevisionSet)
+		return item
+	})
 	return out
 }
 

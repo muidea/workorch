@@ -317,6 +317,10 @@ current manifest 临时补全 scope；没有 matching sealed fallback 时按 typ
   `AdjudicationHash` 在同一 CAS 双记账；post-seal adjudication 不进入 immutable dispatch authority hash。fresh-load 必须重放
   classification 并 exact-match disposition、逐 CWI proof、`EvidenceFactID + EvidenceFactHash` 与两侧 hash；raw normalization
   laundering、seed/source 漂移、proof 删除/替换或协调改写 disposition/fact/hash 均 fail closed。
+  每个选中 proof 还 detached 保留原 evidence 的 `OwnerRevisionSet`；完整正文进入 adjudication hash，raw set/hash 与
+  Definition 必须合法，并在 fresh-load 从同 cutoff 的原 fact/receipt 来源精确重编。该逐 proof 来源不替代
+  assessment 的 catalog/postcondition 或 artifact 依赖，也不证明 current freshness；不从当前 catalog 或 producer
+  claim 补造依赖，不新增 credit、预算、reopen 或 SM-1/SM-4 transition。
 - assessment 必须先独立证明 sealed binding 的其余 evidence/effect/quality 条件，再检查 current owner-fact postcondition。
   只有“其余 proof 全部成立、owner fact 是唯一缺口”时，SM-2 才能在提交 assessment dispatch 的同一 CAS 中把 current
   bound CWI 记为 `reopened`、清除 current binding、更新 reconciliation contract，并以 typed reopen lineage 退休当前
