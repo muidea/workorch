@@ -2,12 +2,41 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
+
+func TestWriteBusinessErrorPreservesCreationRecoveryWithoutPublishingCause(t *testing.T) {
+	cause := errors.New("原始诊断 sk_test_do_not_publish\r\n")
+	for _, persistence := range []string{"unknown", "persisted"} {
+		t.Run(persistence, func(t *testing.T) {
+			failure := &workorchmanagementcontract.DefinitionAuthoringCreationError{
+				Recovery: workorchmanagementcontract.DefinitionAuthoringCreationRecovery{WorkspaceID: "ws-create", RequestID: "create-request", Persistence: persistence, Phase: "owner_persistence", RetrySameRequest: true}, Cause: cause,
+			}
+			if !errors.Is(failure, cause) {
+				t.Fatal("internal cause lost")
+			}
+			recorder := httptest.NewRecorder()
+			writeBusinessError(recorder, failure)
+			var response errorResponse
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != http.StatusServiceUnavailable || response.Code != "workspace_creation_incomplete" || response.CreationRecovery == nil || *response.CreationRecovery != failure.Recovery || response.Remediation == "" {
+				t.Fatalf("missing recovery response: %d %+v", recorder.Code, response)
+			}
+			if strings.Contains(recorder.Body.String(), "sk_test_do_not_publish") {
+				t.Fatal("diagnostic cause published through generic HTTP error")
+			}
+		})
+	}
+}
 
 func TestWriteBusinessErrorMapsTicketActionConflictToActionableHTTP409(t *testing.T) {
 	recorder := httptest.NewRecorder()

@@ -381,10 +381,11 @@ type resolveApprovalRequest struct {
 }
 
 type errorResponse struct {
-	Error                   string   `json:"error"`
-	Code                    string   `json:"code,omitempty"`
-	TicketID                string   `json:"ticketId,omitempty"`
-	RequestedResolutionType string   `json:"requestedResolutionType,omitempty"`
-	AllowedActions          []string `json:"allowedActions,omitempty"`
-	Remediation             string   `json:"remediation,omitempty"`
+	Error                   string                                                          `json:"error"`
+	Code                    string                                                          `json:"code,omitempty"`
+	TicketID                string                                                          `json:"ticketId,omitempty"`
+	RequestedResolutionType string                                                          `json:"requestedResolutionType,omitempty"`
+	AllowedActions          []string                                                        `json:"allowedActions,omitempty"`
+	CreationRecovery        *workorchmanagementcontract.DefinitionAuthoringCreationRecovery `json:"creationRecovery,omitempty"`
+	Remediation             string                                                          `json:"remediation,omitempty"`
 }

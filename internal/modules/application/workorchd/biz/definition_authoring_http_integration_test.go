@@ -45,6 +45,12 @@ func TestAuthoringHTTPFileBackedCompilationConfirmationAndRecovery(t *testing.T)
 	}
 }
 
+func TestAuthoringHTTPCreationCutpointRecovery(t *testing.T) {
+	for _, scenario := range []string{"creation_binding", "creation_index", "creation_directory"} {
+		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
+	}
+}
+
 func TestAuthoringHTTPPreparationFailureFileRecovery(t *testing.T) {
 	for _, scenario := range []string{"resource_missing", "config_failure", "proposal_config_failure", "review_preparation_failure", "review_fail_preparation_failure", "review_unknown_preparation_failure", "render_failure", "request_budget", "attempt_budget"} {
 		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
@@ -331,6 +337,70 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		if err != nil || len(runs) != 0 {
 			t.Fatalf("创作链路自动创建 Run: %v %v", runs, err)
 		}
+	}
+	if strings.HasPrefix(scenario, "creation_") {
+		id := workspace.DefinitionAuthoringWorkspaceID(request.RequestID)
+		obstacle := filepath.Join(storage, "internal", "workspaces", string(id), "config")
+		if scenario == "creation_index" {
+			obstacle = filepath.Join(storage, "system", "workspace_index.json")
+		}
+		if scenario == "creation_directory" {
+			obstacle = filepath.Join(directory, "blocked")
+			request.DeliverableDirectory = filepath.Join(obstacle, "project")
+		}
+		if scenario == "creation_index" {
+			if err := os.MkdirAll(obstacle, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err := os.MkdirAll(filepath.Dir(obstacle), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(obstacle, []byte("创建恢复测试障碍"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		payload, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.Post(baseURL+"/api/v1/workorch/workspace-authoring", "application/json", bytes.NewReader(payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var recovery struct {
+			Code     string                                          `json:"code"`
+			Recovery *management.DefinitionAuthoringCreationRecovery `json:"creationRecovery"`
+		}
+		err = json.NewDecoder(response.Body).Decode(&recovery)
+		response.Body.Close()
+		if err != nil || response.StatusCode != http.StatusServiceUnavailable || recovery.Code != "workspace_creation_incomplete" || recovery.Recovery == nil || recovery.Recovery.WorkspaceID != string(id) || recovery.Recovery.RequestID != request.RequestID || !recovery.Recovery.RetrySameRequest {
+			t.Fatalf("missing public creation recovery: %d %+v %v", response.StatusCode, recovery, err)
+		}
+		expectedPersistence, expectedPhase := "unknown", "owner_persistence"
+		if scenario == "creation_directory" {
+			expectedPersistence, expectedPhase = "persisted", "directory_preparation"
+		}
+		if recovery.Recovery.Persistence != expectedPersistence || recovery.Recovery.Phase != expectedPhase {
+			t.Fatalf("fabricated committed stage: %+v", recovery.Recovery)
+		}
+		assertNoRuns()
+		closeOwners()
+		// 仅移开测试故障障碍，保全内容；生产恢复没有删除动作。
+		if err := os.Rename(obstacle, obstacle+".preserved"); err != nil {
+			t.Fatal(err)
+		}
+		baseURL, routine, closeOwners = open()
+		created := authoringHTTPRequest(t, baseURL, http.MethodPost, "/api/v1/workorch/workspace-authoring", request, http.StatusCreated)
+		if created.WorkspaceID != string(id) {
+			t.Fatal("recovery created different identity")
+		}
+		items, err := repositories.Workspaces.List(ctx)
+		if err != nil || len(items) != 1 {
+			t.Fatalf("public recovery missing index: %+v %v", items, err)
+		}
+		assertNoRuns()
+		return
 	}
 	created := authoringHTTPRequest(t, baseURL, http.MethodPost, "/api/v1/workorch/workspace-authoring", request, http.StatusCreated)
 	assertNoRuns()

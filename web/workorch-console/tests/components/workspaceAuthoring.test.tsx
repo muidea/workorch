@@ -15,6 +15,7 @@ const render = (ui: ReactNode, options?: RenderOptions) => mount(ui, {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash, webcrypto } from 'node:crypto';
 import { workorchApi } from '../../src/api';
+import { WorkorchRequestError } from '../../src/creationRecovery';
 import { WorkspaceAuthoringEditor } from '../../src/pages/components/WorkspaceAuthoringEditor';
 import { WorkspaceSetupModal } from '../../src/pages/components/WorkspaceSetupModal';
 import { AuthoringDiagnosticDetails } from '../../src/pages/components/AuthoringDiagnosticDetails';
@@ -717,6 +718,28 @@ describe('持久规格编辑实际挂载', () => {
     await act(async () => refresh.resolve());
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+});
+
+it('已持久但目录失败的创建仍重放原 payload，不以 ID 查询跳过目录准备', async () => {
+  vi.mocked(workorchApi.createDefinitionAuthoring).mockImplementationOnce(async request => {
+    throw new WorkorchRequestError('目录准备失败', { workspaceId: 'ws', requestId: request.requestId, persistence: 'persisted', phase: 'directory_preparation', retrySameRequest: true });
+  }).mockResolvedValueOnce({ ...ready(), state: 'draft', proposal: undefined });
+  vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValue(ready());
+  render(<App><WorkspaceSetupModal open onClose={vi.fn()} onCreated={vi.fn()} /></App>);
+  await screen.findByLabelText('名称');
+  fireEvent.change(screen.getByLabelText('名称'), { target: { value: '恢复工作空间' } });
+  fireEvent.mouseDown(document.querySelector('.ant-select-selector')!);
+  fireEvent.click(await screen.findByText('模板', { selector: '.ant-select-item-option-content' }));
+  fireEvent.change(screen.getByLabelText('目标'), { target: { value: '原目标' } });
+  await act(async () => { fireEvent.click(button('保存并生成／恢复审查')); });
+  await screen.findByText('Workspace 身份已持久，创建准备待恢复');
+  expect(workorchApi.compileDefinitionAuthoring).not.toHaveBeenCalled();
+  fireEvent.click(button('保存并生成／恢复审查'));
+  await screen.findByText('草稿：ws · revision 1 · ready_to_confirm');
+  expect(workorchApi.createDefinitionAuthoring).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(workorchApi.createDefinitionAuthoring).mock.calls[1][0]).toEqual(vi.mocked(workorchApi.createDefinitionAuthoring).mock.calls[0][0]);
+  expect(workorchApi.readDefinitionAuthoring).not.toHaveBeenCalled();
+  expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
 });
 
 it('新建组件 fresh open 忽略旧 storage keys，内存 payload 经 create/save/confirm 重试保留且不自动启动 Run', async () => {

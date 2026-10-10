@@ -2,6 +2,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, App as AntApp, Button, Form, Input, List, Modal, Select, Space, Tag, Typography } from 'antd';
 import type { FormInstance } from 'antd';
 import { workorchApi } from '../../api';
+import { WorkorchRequestError } from '../../creationRecovery';
+import type { CreationRecovery } from '../../creationRecovery';
 import { errorMessage } from '../../utils/errorMessage';
 import { AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS, authoringSourceLabel, AuthoringAcceptedPreparationObservation, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling } from '../../workspaceAuthoring';
 import type { AuthoringRecovery } from '../../workspaceAuthoring';
@@ -56,6 +58,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
   const [edited, setEdited] = useState(false);
   const onValuesChange = useCallback(() => { setEdited(true); }, []);
   const [failure, setFailure] = useState('');
+  const [creationFailure, setCreationFailure] = useState<CreationRecovery>();
   const session = useRef(new AuthoringSessionFence());
   const queries = useRef(new AuthoringQueryFence());
   const acceptedPreparationObservation = useRef(new AuthoringAcceptedPreparationObservation());
@@ -79,6 +82,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     recoveryRef.current = undefined;
     setRecovery(undefined);
     setView(undefined);
+    setCreationFailure(undefined);
     setEdited(false);
     setAcceptedPreparationObservationActive(false);
     setAcceptedPreparationObservationTimedOut(false);
@@ -113,6 +117,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     acceptedPreparationObservation.current = new AuthoringAcceptedPreparationObservation();
     setRecoveryMemory(undefined);
     setView(undefined);
+    setCreationFailure(undefined);
     setEdited(false);
     // 首次或已在关闭时清空的表单无需重挂；外部重开仍清空字段与校验状态。
     if (formOpened.current) form.resetFields();
@@ -184,6 +189,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
         current = saved.workspaceId ? await queries.current.read(() => workorchApi.readDefinitionAuthoring(saved!.workspaceId!), () => session.current.matches(token)) : await workorchApi.createDefinitionAuthoring(saved.request);
         if (!session.current.matches(token)) return;
         saved = { ...saved, workspaceId: current.workspaceId };
+        setCreationFailure(undefined);
         persist(saved);
         observe(current);
       }
@@ -217,7 +223,10 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
       }
       observe(next);
     } catch (error) {
-      if (session.current.matches(token)) setFailure(errorMessage(error));
+      if (session.current.matches(token)) {
+        setFailure(errorMessage(error));
+        if (error instanceof WorkorchRequestError && error.creationRecovery?.requestId === recoveryRef.current?.request.requestId) setCreationFailure(error.creationRecovery);
+      }
     } finally {
       if (session.current.matches(token)) setBusy(false);
     }
@@ -294,6 +303,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
   </Space>}>
     <Space direction="vertical" style={{ width: '100%' }}>
       <Alert type="info" showIcon message="输入目标即可，验收清单由模板与目标派生。六类审查通过后才可确认；此操作不会启动 Run。" />
+      {creationFailure && <Alert type="warning" showIcon message={creationFailure.persistence === 'persisted' ? 'Workspace 身份已持久，创建准备待恢复' : '创建结果未知，请先核对原请求'} description={`Workspace：${creationFailure.workspaceId}；requestId：${creationFailure.requestId}；阶段：${creationFailure.phase}。重试沿用原 payload，补齐准备后才继续；请勿更换请求重复创建。`} />}
       {failure && <Alert type="error" showIcon message={failure} description={recovery ? '创建身份已保留。重试将恢复原草稿，不会重新创建工作空间。' : undefined} />}
       {view?.preparationDiagnostics?.map(diagnostic => <AuthoringPreparationFailure key={diagnostic.diagnosticId} diagnostic={diagnostic} />)}
       {acceptedPreparationObservationActive && <Alert type="info" showIcon message="本次任务已受理，正在观察 owner 状态；页面观察是临时的，不会恢复或取消服务端事务。" />}

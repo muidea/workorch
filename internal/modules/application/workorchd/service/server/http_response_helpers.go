@@ -16,6 +16,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
@@ -374,7 +375,13 @@ func writeMethodNotAllowed(w http.ResponseWriter) {
 
 func writeBusinessError(w http.ResponseWriter, err error) {
 	var actionConflict *decisioncommon.ResolutionActionConflictError
+	var creationFailure *workorchmanagementcontract.DefinitionAuthoringCreationError
 	switch {
+	case errors.As(err, &creationFailure):
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{
+			Error: creationFailure.Error(), Code: "workspace_creation_incomplete", CreationRecovery: &creationFailure.Recovery,
+			Remediation: "保留原 requestId 和创建内容；先查询服务端状态，再以同一请求恢复，勿新建重复容器",
+		})
 	case errors.As(err, &actionConflict):
 		writeJSON(w, http.StatusConflict, errorResponse{
 			Error:                   actionConflict.Error(),

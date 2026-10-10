@@ -1,6 +1,7 @@
 import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, DecisionPage, DoD, EventRecord, Goal, MCPCapability, MCPCapabilityMutation, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderInferenceSelection, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import type { DefinitionAuthoringCreate, DefinitionAuthoringInput, DefinitionAuthoringView, AuthoringDiagnostic, DefinitionAuthoringPreparationDiagnostic } from './types';
 import { parseWorkspaceExecutionAdmission } from './workspaceExecutionAdmission';
+import { creationRecoveryFromResponse, WorkorchRequestError } from './creationRecovery';
 
 const apiBase = '/api/v1/workorch';
 
@@ -51,15 +52,17 @@ async function doRequest<T>(url: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
+    let recovery;
     try {
       const body = await response.json();
       if (body?.error) {
         message = body.error;
       }
+      recovery = creationRecoveryFromResponse(body);
     } catch {
       // Keep the HTTP status as the error message when the response is not JSON.
     }
-    throw new Error(message);
+    throw new WorkorchRequestError(message, recovery);
   }
 
   const text = await response.text();

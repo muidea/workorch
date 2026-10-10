@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -36,24 +37,39 @@ func (b *Biz) CreateDefinitionAuthoringView(ctx context.Context, backend, dataDi
 	}
 	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceDefinitionAuthoringCreate, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, cmd)
 	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceDefinitionAuthoringCreate, eventcontract.LaneScope{WorkspaceID: string(id)}))
+	recoveryError := func(cause error, persistence, phase string) error {
+		return &workorchmanagementcontract.DefinitionAuthoringCreationError{
+			Recovery: workorchmanagementcontract.DefinitionAuthoringCreationRecovery{
+				WorkspaceID: string(id), RequestID: cmd.RequestID, Persistence: persistence, Phase: phase, RetrySameRequest: true,
+			}, Cause: cause,
+		}
+	}
 	result := b.SendEvent(ev)
 	if result == nil {
-		return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrConflict
+		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(common.ErrConflict, "unknown", "owner_persistence")
 	}
 	if err := result.Error(); err != nil {
-		return workorchmanagementcontract.DefinitionAuthoringView{}, err
+		// 明确的输入／身份拒绝不提供可能泄露既有对象的恢复描述。
+		if errors.Is(err, common.ErrInvalidArgument) || errors.Is(err, common.ErrConflict) || errors.Is(err, common.ErrNotFound) {
+			return workorchmanagementcontract.DefinitionAuthoringView{}, err
+		}
+		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(err, "unknown", "owner_persistence")
 	}
 	value, getErr := result.Get()
 	if getErr != nil {
-		return workorchmanagementcontract.DefinitionAuthoringView{}, getErr
+		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(getErr, "unknown", "owner_persistence")
 	}
 	receipt, ok := value.(workspaceevents.CreateDefinitionAuthoringResult)
 	if !ok || receipt.ValidateFor(cmd) != nil {
-		return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrConflict
+		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(common.ErrConflict, "unknown", "owner_receipt")
 	}
 	// 先持久身份，目录初始化失败后同一创建请求仍能恢复原 Workspace。
 	if err := workspacecore.EnsureDirectoryLayout(layout); err != nil {
-		return workorchmanagementcontract.DefinitionAuthoringView{}, err
+		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(err, "persisted", "directory_preparation")
 	}
-	return b.ReadDefinitionAuthoringView(ctx, id)
+	view, err := b.ReadDefinitionAuthoringView(ctx, id)
+	if err != nil {
+		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(err, "persisted", "authoring_read")
+	}
+	return view, nil
 }
