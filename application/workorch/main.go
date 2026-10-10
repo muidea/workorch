@@ -27,10 +27,10 @@ import (
 	_ "github.com/muidea/workorch/internal/modules/blocks/soul"
 	_ "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	_ "github.com/muidea/workorch/internal/modules/blocks/web"
-	_ "github.com/muidea/workorch/internal/modules/blocks/workspace"
 	_ "github.com/muidea/workorch/internal/modules/kernel/governance"
 	_ "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
 	_ "github.com/muidea/workorch/internal/modules/kernel/system"
+	_ "github.com/muidea/workorch/internal/modules/kernel/workspace"
 )
 
 func main() {

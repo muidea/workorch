@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	activationcore "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
-	definitionadmission "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	definitionadmission "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"

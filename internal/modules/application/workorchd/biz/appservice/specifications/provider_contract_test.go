@@ -12,7 +12,7 @@ import (
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	events "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	models "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 

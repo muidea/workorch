@@ -15,8 +15,8 @@ import (
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
 

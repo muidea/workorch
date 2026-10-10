@@ -17,8 +17,8 @@ func TestSpecificationReviewObservationDoesNotAuthorizeSiblingState(t *testing.T
 					fields += "; TargetState string"
 				}
 				files := map[string]string{
-					"internal/modules/blocks/workspace/pkg/models/specification.go": "package models\ntype " + model + " struct { " + fields + " }\n",
-					"internal/modules/blocks/workspace/pkg/events/messages.go":      "package events\nimport models \"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models\"\ntype SubmitCommand struct { Fact models." + model + " }\n",
+					"internal/modules/kernel/workspace/pkg/models/specification.go": "package models\ntype " + model + " struct { " + fields + " }\n",
+					"internal/modules/kernel/workspace/pkg/events/messages.go":      "package events\nimport models \"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models\"\ntype SubmitCommand struct { Fact models." + model + " }\n",
 				}
 				for name, content := range files {
 					path := filepath.Join(root, name)

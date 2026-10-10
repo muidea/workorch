@@ -12,8 +12,8 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 )
 
 func TestAuthoringResourceOwnerRequiresSafeCompleteScopedFile(t *testing.T) {

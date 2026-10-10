@@ -7,8 +7,8 @@ import (
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	orchestratormodel "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )

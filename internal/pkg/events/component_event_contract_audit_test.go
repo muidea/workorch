@@ -21,9 +21,9 @@ import (
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 )
 
@@ -460,11 +460,11 @@ func TestEventHubPostSitesRemainNotificationOnly(t *testing.T) {
 		"internal/modules/blocks/run/biz/lifecycle_handler.go:publishLifecycleTransition":              2,
 		"internal/modules/blocks/run/biz/owner.go:publishRuntimeCommandsReady":                         1,
 		"internal/modules/blocks/run/biz/run_service.go:PublishRunState":                               1,
-		"internal/modules/blocks/workspace/biz/goal_dod_manager.go:publishDoDEvent":                    1,
-		"internal/modules/blocks/workspace/biz/goal_dod_manager.go:publishGoalEvent":                   1,
-		"internal/modules/blocks/workspace/biz/goal_dod_manager.go:publishWorkspaceEvent":              1,
-		"internal/modules/blocks/workspace/biz/goal_dod_manager.go:publishWorkspaceDeleted":            1,
-		"internal/modules/blocks/workspace/biz/owner.go:publishWorkspaceUpdated":                       1,
+		"internal/modules/kernel/workspace/biz/goal_dod_manager.go:publishDoDEvent":                    1,
+		"internal/modules/kernel/workspace/biz/goal_dod_manager.go:publishGoalEvent":                   1,
+		"internal/modules/kernel/workspace/biz/goal_dod_manager.go:publishWorkspaceEvent":              1,
+		"internal/modules/kernel/workspace/biz/goal_dod_manager.go:publishWorkspaceDeleted":            1,
+		"internal/modules/kernel/workspace/biz/owner.go:publishWorkspaceUpdated":                       1,
 		"internal/modules/kernel/governance/biz/governance_support.go:publishGovernanceEvent":          1,
 		"internal/modules/kernel/orchestrator/biz/runtime_observability.go:observeRuntimeDrive":        1,
 	}

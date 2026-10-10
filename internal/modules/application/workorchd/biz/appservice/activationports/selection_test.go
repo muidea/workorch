@@ -8,7 +8,7 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"

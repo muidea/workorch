@@ -27,7 +27,7 @@ The exact 1+4+17 framework inventory and physical paths are maintained by
 
 | Machine/concern | Sole owner | External contribution |
 | --- | --- | --- |
-| Workspace Definition/startup eligibility | Workspace block | application submits candidate/admission outcome and typed clarification acknowledgement |
+| Workspace Definition/startup eligibility | Workspace Module | application submits candidate/admission outcome and typed clarification acknowledgement |
 | SM-1 Run lifecycle/lineage/replacement | Run block | Workspace/application submit eligible intent; Orchestrator delivers immutable wait facts and exact SM-4 terminal handoff |
 | SM-2 authority/focus convergence | Orchestrator | application compiles from owner-sealed startup input; other owners return facts |
 | SM-3 candidate/sealed dispatch transaction | Orchestrator | LLM returns exactly one factual `Stale\|Feedback\|DocumentOutcome`; Orchestrator alone decodes/evaluates a complete authority document into a candidate, and the capability owner executes only a sealed operation |

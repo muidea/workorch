@@ -10,8 +10,8 @@ import (
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 )
 
 const (

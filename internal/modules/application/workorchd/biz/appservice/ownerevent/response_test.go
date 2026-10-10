@@ -14,9 +14,9 @@ import (
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

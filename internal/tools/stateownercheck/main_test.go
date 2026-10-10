@@ -311,11 +311,11 @@ func TestPreparationDiagnosticStageIsObservationButTargetStateStaysForbidden(t *
 	for _, fields := range []string{"Stage string", "Stage string; State string", "Stage string; TargetStage string", "Stage string; DesiredState string"} {
 		t.Run(fields, func(t *testing.T) {
 			root := newEmptyVerificationRepository(t)
-			modelPath := filepath.Join(root, "internal/modules/blocks/workspace/pkg/models/diagnostic.go")
-			commandPath := filepath.Join(root, "internal/modules/blocks/workspace/pkg/events/messages.go")
+			modelPath := filepath.Join(root, "internal/modules/kernel/workspace/pkg/models/diagnostic.go")
+			commandPath := filepath.Join(root, "internal/modules/kernel/workspace/pkg/events/messages.go")
 			for path, source := range map[string]string{
 				modelPath:   "package models\ntype DefinitionAuthoringPreparationDiagnostic struct { " + fields + " }\n",
-				commandPath: "package events\nimport models \"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models\"\ntype RecordPreparationDiagnosticCommand struct { Diagnostic models.DefinitionAuthoringPreparationDiagnostic }\n",
+				commandPath: "package events\nimport models \"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models\"\ntype RecordPreparationDiagnosticCommand struct { Diagnostic models.DefinitionAuthoringPreparationDiagnostic }\n",
 			} {
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 					t.Fatal(err)

@@ -23,7 +23,7 @@ import (
 	"github.com/muidea/magicCommon/task"
 	application "github.com/muidea/workorch/internal/modules/application/workorchd"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	management "github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"

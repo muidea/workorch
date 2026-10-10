@@ -3,7 +3,7 @@ package specifications
 import (
 	"testing"
 
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 )
 
 func TestAuthoringReviewRequiresCompletedSealedDerivation(t *testing.T) {

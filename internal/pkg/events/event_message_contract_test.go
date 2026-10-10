@@ -23,9 +23,9 @@ import (
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
 	sshevents "github.com/muidea/workorch/internal/modules/blocks/ssh/pkg/events"
 	webevents "github.com/muidea/workorch/internal/modules/blocks/web/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 )
 

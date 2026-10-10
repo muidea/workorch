@@ -9,9 +9,9 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"

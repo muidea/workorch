@@ -62,7 +62,7 @@ run_pkg ./internal/pkg/repository/file \
 
 # Workspace persists its owner-private RunProjectionCursor without publishing
 # an indistinguishable public WorkspaceStateChanged event.
-run_pkg ./internal/modules/blocks/workspace/biz \
+run_pkg ./internal/modules/kernel/workspace/biz \
   -run '^(TestWorkspaceRunProjectionPersistsCursorWithoutRepublishingUnchangedPublicState|TestWorkspaceRunProjectionFreshOwnerAdvancesCursorWithoutPublicStateNotification)$'
 
 # RVC-R9/R10 seal executions + evidence adjudication + claim/fence path via controller fixtures.

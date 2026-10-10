@@ -2,7 +2,7 @@ package orchestrator
 
 import (
 	magicevent "github.com/muidea/magicCommon/event"
-	workspacebiz "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
+	workspacebiz "github.com/muidea/workorch/internal/modules/kernel/workspace/biz"
 	"github.com/muidea/workorch/internal/pkg/repository"
 )
 

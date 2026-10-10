@@ -114,4 +114,4 @@ the Definition, and provider diagnostics do not become compiler facts or capabil
 | `blocks/run` | opaque aggregate persistence and ticket/startup-bound replacement transaction | decode schedule, choose focus, terminate predecessor before acknowledgement or continue old Run |
 | projection/Web/TUI | typed startup/ticket/rank/context explanation | offer one-of, parse display text into action or drive Runtime |
 
-No new framework unit is introduced; all responsibilities remain within the existing 1 Initiator, 4 Modules and 17 Blocks.
+No new framework unit is introduced; all responsibilities remain within the existing 1 Initiator, 5 Modules and 16 Blocks.

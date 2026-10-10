@@ -140,7 +140,7 @@ Fresh Start/Restart resolves exact Template/Soul revisions into immutable activa
 ## Verification
 
 - `go test ./internal/pkg/workorchdefaults -count=1`；
-- `go test ./internal/modules/blocks/soul/... ./internal/modules/blocks/workspace/... -count=1`；
+- `go test ./internal/modules/blocks/soul/... ./internal/modules/kernel/workspace/... -count=1`；
 - `make verify-workspace-template-soul`；
 - `make verify-runtime-profile-software-dev`。
 

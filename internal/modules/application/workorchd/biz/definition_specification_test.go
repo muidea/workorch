@@ -9,8 +9,8 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
-	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 

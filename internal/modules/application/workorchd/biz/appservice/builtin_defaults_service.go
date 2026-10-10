@@ -9,7 +9,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )

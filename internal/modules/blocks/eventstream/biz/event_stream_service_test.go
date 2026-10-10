@@ -28,11 +28,11 @@ import (
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runcommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	workspacecommon "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/common"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	governanceevents "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/events"
 	governancemodel "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/models"
+	workspacecommon "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/common"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"

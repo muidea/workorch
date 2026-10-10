@@ -14,9 +14,9 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

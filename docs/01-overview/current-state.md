@@ -150,7 +150,7 @@ See [Request And Cache](../00-core/runtime-request-cache-note.md) and
 
 ## Repository Shape
 
-The repository has **1 Initiator + 4 Modules + 17 Blocks = 22 framework units**, plus the non-framework
+The repository has **1 Initiator + 5 Modules + 16 Blocks = 22 framework units**, plus the non-framework
 `internal/services/workorch` process shell. The canonical directory/contract mapping is
 [Component Contract Inventory](component-documentation-alignment.md).
 

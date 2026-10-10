@@ -14,9 +14,9 @@ import (
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )

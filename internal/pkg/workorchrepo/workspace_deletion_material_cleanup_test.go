@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	fileRepo "github.com/muidea/workorch/internal/pkg/repository/file"

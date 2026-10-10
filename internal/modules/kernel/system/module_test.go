@@ -8,13 +8,13 @@ import (
 
 	mcpregistrybiz "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
 	soulbiz "github.com/muidea/workorch/internal/modules/blocks/soul/biz"
-	workspacebiz "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
 	systembiz "github.com/muidea/workorch/internal/modules/kernel/system/biz"
+	workspacebiz "github.com/muidea/workorch/internal/modules/kernel/workspace/biz"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcpregistry"
 	soulmodule "github.com/muidea/workorch/internal/modules/blocks/soul"
-	workspacemodule "github.com/muidea/workorch/internal/modules/blocks/workspace"
+	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
 	filerepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"

@@ -14,9 +14,9 @@ import (
 	runcommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
 	skillcommon "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/common"
 	soulcommon "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/common"
-	workspacecommon "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/common"
 	governancecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
 	orchestratorcommon "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/common"
+	workspacecommon "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/common"
 )
 
 func TestRepositoryConsumerIDsMatchOwnerModuleIDs(t *testing.T) {

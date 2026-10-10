@@ -5,8 +5,8 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/run/pkg/common"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	"github.com/muidea/workorch/internal/pkg/events"

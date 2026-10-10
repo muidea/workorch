@@ -8,7 +8,7 @@ Last Verified: 2026-08-30
 
 ## Purpose
 
-本文是 registered framework units 与各自 component contract 的唯一规范目录。它陈述 1 Initiator、4 Modules、17
+本文是 registered framework units 与各自 component contract 的唯一规范目录。它陈述 1 Initiator、5 Modules、16
 Blocks 的 owner 边界，不保存历史偏差、重构过程或 closure 记录。Runtime 语义仍以
 [Runtime Core](../00-core/runtime-stage-contract.md)、[Orchestrator Contract](../../internal/modules/kernel/orchestrator/readme.md)
 和 `internal/pkg/workorchruntimecontract` 为准。
@@ -27,12 +27,12 @@ Blocks 的 owner 边界，不保存历史偏差、重构过程或 closure 记录
 | `kernel/orchestrator` | sole SM-2/SM-3/SM-4 reducer, drive, evidence, governance resolution and delivery authority | [contract](../../internal/modules/kernel/orchestrator/readme.md) |
 | `kernel/governance` | policy/risk evaluation, immutable governance facts and owner-local AutoGovernanceTrace coordination/recovery | [contract](../../internal/modules/kernel/governance/readme.md) |
 | `kernel/system` | startup coordination for owner-defined default-resource ensure commands | [contract](../../internal/modules/kernel/system/readme.md) |
+| `kernel/workspace` | Workspace/Goal/DoD/Template、定义与准入、active slot 及跨 owner 删除协调；稳定 owner ID 为 `blocks/workspace` | [contract](../../internal/modules/kernel/workspace/readme.md) |
 
 ## Resource Owner Blocks
 
 | Unit | Owned state | Component contract |
 | --- | --- | --- |
-| `workspace` | Workspace/Goal/DoD/Template、pre-seal admission candidate、sealed startup input、activation admission、active-run projection、execution intent and deletion journal | [contract](../../internal/modules/blocks/workspace/readme.md) |
 | `run` | SM-1 lifecycle、lineage/replacement、Step/Checkpoint、Workspace retirement fence and opaque Runtime aggregate persistence | [contract](../../internal/modules/blocks/run/readme.md) |
 | `result` | formal Result/Artifact、sealed terminal material and deletion tombstone | [contract](../../internal/modules/blocks/result/readme.md) |
 | `decision` | DecisionTicket/Resolution、Definition clarification binding、Runtime governance proposal/delivery checkpoint and deletion tombstone | [contract](../../internal/modules/blocks/decision/readme.md) |

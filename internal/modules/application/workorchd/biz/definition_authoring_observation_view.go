@@ -3,7 +3,7 @@ package biz
 import (
 	"encoding/base64"
 
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 

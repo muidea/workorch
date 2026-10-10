@@ -59,8 +59,8 @@ func TestComponentContractMatrixCoversRegisteredComponents(t *testing.T) {
 		}
 		assertComponentContractShape(t, root, readmeRel, string(readmeBytes), testSymbols)
 	}
-	if initiators != 1 || modules != 4 || blocks != 17 {
-		t.Fatalf("registered unit classification = %d initiator, %d modules, %d blocks; want 1/4/17", initiators, modules, blocks)
+	if initiators != 1 || modules != 5 || blocks != 16 {
+		t.Fatalf("registered unit classification = %d initiator, %d modules, %d blocks; want 1/5/16", initiators, modules, blocks)
 	}
 }
 

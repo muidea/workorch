@@ -9,8 +9,8 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	fileowner "github.com/muidea/workorch/internal/modules/blocks/file/biz"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 )
 
 func TestAuthoringResourcesUseRealFileOwnerAndFailOnStaleOrUnsafeInput(t *testing.T) {

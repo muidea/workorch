@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
 

@@ -16,8 +16,8 @@ import (
 	shellmodule "github.com/muidea/workorch/internal/modules/blocks/shell"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
 	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )

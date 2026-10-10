@@ -7,7 +7,7 @@ import (
 	"github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/recordpayload"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 )
 
 const sseStateSummaryKey = "stateSummary"

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/runtimeprofiledecode"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"

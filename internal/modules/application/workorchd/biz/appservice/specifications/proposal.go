@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"slices"
 
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 )
 
 // ParseProposal decodes a complete specification proposal, not an admitted

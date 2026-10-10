@@ -36,7 +36,7 @@ func TestRepositoryConsumersUseTheirOwnerRepositoryGroups(t *testing.T) {
 		"internal/modules/blocks/run":          "ResolveRunRepositories",
 		"internal/modules/blocks/skill":        "ResolveSkillRepositories",
 		"internal/modules/blocks/soul":         "ResolveSoulRepositories",
-		"internal/modules/blocks/workspace":    "ResolveWorkspaceRepositories",
+		"internal/modules/kernel/workspace":    "ResolveWorkspaceRepositories",
 		"internal/modules/kernel/governance":   "ResolveGovernanceRepositories",
 		"internal/modules/kernel/orchestrator": "ResolveOrchestratorRepositories",
 	}

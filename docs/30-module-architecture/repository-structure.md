@@ -10,7 +10,7 @@ Last Verified: 2026-08-16
 
 WorkOrch 是单 `go.mod` 仓库。这里的 “Module/Block” 是 framework 运行单元分类，不是多个 Go module。
 
-当前 22-unit baseline：1 Initiator、4 Modules、17 Blocks。
+当前 22-unit baseline：1 Initiator、5 Modules、16 Blocks。
 
 ```text
 application/workorch/                    binary entry
@@ -18,11 +18,11 @@ internal/
   initiators/workorchruntime/            repository provider/factory (1 Initiator)
   modules/
     application/workorchd/               HTTP/SSE/bootstrap/projection (1 Module)
-    kernel/{orchestrator,governance,system}/                 (3 Modules)
+    kernel/{orchestrator,governance,system,workspace}/                 (4 Modules)
     blocks/
-      {workspace,run,result,decision,approval,memory}/
+      {run,result,decision,approval,memory}/
       {skill,soul,mcpregistry,eventstream}/
-      {llm,file,git,shell,ssh,web,mcp}/                       (17 Blocks)
+      {llm,file,git,shell,ssh,web,mcp}/                       (16 Blocks)
     base/                              shared Base Biz; not a framework unit
   pkg/                                 shared values/contracts/infrastructure
   services/workorch/                   process CLI/TUI/session; not a framework unit

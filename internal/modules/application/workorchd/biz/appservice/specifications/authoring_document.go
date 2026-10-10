@@ -3,8 +3,8 @@ package specifications
 import (
 	"fmt"
 
-	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/definitionadmission"
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 )
 

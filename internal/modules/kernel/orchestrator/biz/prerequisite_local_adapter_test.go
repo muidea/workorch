@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	activationcore "github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )

@@ -10,7 +10,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	mcpregistryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

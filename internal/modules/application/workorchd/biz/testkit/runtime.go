@@ -22,10 +22,10 @@ import (
 	soulbiz "github.com/muidea/workorch/internal/modules/blocks/soul/biz"
 	sshbiz "github.com/muidea/workorch/internal/modules/blocks/ssh/biz"
 	webbiz "github.com/muidea/workorch/internal/modules/blocks/web/biz"
-	workspacebiz "github.com/muidea/workorch/internal/modules/blocks/workspace/biz"
 	governancebiz "github.com/muidea/workorch/internal/modules/kernel/governance/biz"
 	orchestratorbiz "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz"
 	systembiz "github.com/muidea/workorch/internal/modules/kernel/system/biz"
+	workspacebiz "github.com/muidea/workorch/internal/modules/kernel/workspace/biz"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
@@ -46,10 +46,10 @@ import (
 	soulmodule "github.com/muidea/workorch/internal/modules/blocks/soul"
 	sshmodule "github.com/muidea/workorch/internal/modules/blocks/ssh"
 	webmodule "github.com/muidea/workorch/internal/modules/blocks/web"
-	workspacemodule "github.com/muidea/workorch/internal/modules/blocks/workspace"
 	governancemodule "github.com/muidea/workorch/internal/modules/kernel/governance"
 	orchestratormodule "github.com/muidea/workorch/internal/modules/kernel/orchestrator"
 	systemmodule "github.com/muidea/workorch/internal/modules/kernel/system"
+	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 )

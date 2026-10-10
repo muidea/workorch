@@ -25,7 +25,7 @@ func TestOwnerBoundaryWorktreeExclusionDoesNotExcludeProduction(t *testing.T) {
 		{".claude", false},
 		{"internal", false},
 		{filepath.Join("internal", ".claude", "worktrees"), false},
-		{filepath.Join("internal", "modules", "blocks", "workspace"), false},
+		{filepath.Join("internal", "modules", "kernel", "workspace"), false},
 	} {
 		if got := isIsolatedWorktreeDirectory(root, filepath.Join(root, tc.path)); got != tc.skip {
 			t.Errorf("scan exclusion %q = %v, want %v", tc.path, got, tc.skip)

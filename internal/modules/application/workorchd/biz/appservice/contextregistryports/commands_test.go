@@ -12,7 +12,7 @@ import (
 	memoryevents "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/events"
 	skillevents "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/events"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"

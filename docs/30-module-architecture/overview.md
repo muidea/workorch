@@ -25,7 +25,7 @@ Last Verified: 2026-08-18
 
 ## Architecture Rules
 
-- 1 Initiator、4 Modules、17 Blocks 是当前 framework unit baseline；`internal/services/workorch` 是 process shell，不是 Module。
+- 1 Initiator、5 Modules、16 Blocks 是当前 framework unit baseline；`internal/services/workorch` 是 process shell，不是 Module。
 - Module 组合多个 owner contract 完成业务闭环；Block 只拥有一个资源聚合或技术能力；Initiator 只提供一种无业务状态基础设施能力。
 - 使用 EventHub 的 Module/Block 在自身 `biz/` 内嵌 Base；`module.go` 只接线，protocol `service/` 不持有 Hub。
 - 跨 owner runtime I/O 使用接收 owner 定义的 concrete typed EventHub contract；禁止 service/repository 直连和通用 envelope。

@@ -11,8 +11,8 @@ import (
 
 	llmbiz "github.com/muidea/workorch/internal/modules/blocks/llm/biz"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
-	"github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/testkit"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/testkit"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 

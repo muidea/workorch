@@ -7,8 +7,8 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/specifications"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

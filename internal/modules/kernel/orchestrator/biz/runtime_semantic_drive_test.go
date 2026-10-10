@@ -8,7 +8,7 @@ import (
 
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/semanticplan"

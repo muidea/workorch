@@ -60,6 +60,7 @@ module_class_roots=(
   "internal/modules/kernel/governance"
   "internal/modules/kernel/orchestrator"
   "internal/modules/kernel/system"
+  "internal/modules/kernel/workspace"
 )
 block_class_roots=(
   "internal/modules/blocks/eventstream"
@@ -78,11 +79,10 @@ block_class_roots=(
   "internal/modules/blocks/soul"
   "internal/modules/blocks/ssh"
   "internal/modules/blocks/web"
-  "internal/modules/blocks/workspace"
 )
 
-if ((${#initiator_class_roots[@]} != 1 || ${#module_class_roots[@]} != 4 || ${#block_class_roots[@]} != 17)); then
-  echo "boundary contract violation: unit inventory must remain 1 Initiator / 4 Module / 17 Block" >&2
+if ((${#initiator_class_roots[@]} != 1 || ${#module_class_roots[@]} != 5 || ${#block_class_roots[@]} != 16)); then
+  echo "boundary contract violation: unit inventory must remain 1 Initiator / 5 Module / 16 Block" >&2
   exit 1
 fi
 
@@ -120,7 +120,7 @@ mapfile -t declared_component_roots < <(printf '%s\n' "${module_class_roots[@]}"
 if [[ "$(printf '%s\n' "${component_roots[@]}")" != "$(printf '%s\n' "${declared_component_roots[@]}")" ]]; then
   cat >&2 <<EOF
 Boundary contract violation: framework component inventory differs from the
-declared 4 Module / 17 Block type baseline.
+declared 5 Module / 16 Block type baseline.
 
 Discovered:
 $(printf '%s\n' "${component_roots[@]}")
@@ -531,7 +531,7 @@ fi
 workspace_scope_bindings=(
   "internal/modules/blocks/run/biz/command_router.go"
   "internal/modules/blocks/run/biz/lifecycle_handler.go"
-  "internal/modules/blocks/workspace/biz/command_router.go"
+  "internal/modules/kernel/workspace/biz/command_router.go"
   "internal/modules/blocks/result/biz/owner.go"
   "internal/modules/blocks/result/biz/lifecycle_handler.go"
   "internal/modules/blocks/decision/biz/command_router.go"
@@ -560,8 +560,8 @@ owner_private_reducer_matches="$({
   source_matches 'applyLifecycleLocked\(' internal/modules/blocks/run/biz |
     grep -v -F -- 'internal/modules/blocks/run/biz/lifecycle_internal_event.go' |
     grep -v -E -- 'func \(m \*Biz\) applyLifecycleLocked\(' || true
-  source_matches '(applyTerminalDelivery|applyRunProjection|releaseFreshActivationRunSlot)\(' internal/modules/blocks/workspace/biz |
-    grep -v -F -- 'internal/modules/blocks/workspace/biz/lifecycle_internal_event.go' |
+  source_matches '(applyTerminalDelivery|applyRunProjection|releaseFreshActivationRunSlot)\(' internal/modules/kernel/workspace/biz |
+    grep -v -F -- 'internal/modules/kernel/workspace/biz/lifecycle_internal_event.go' |
     grep -v -E -- 'func \(m \*Biz\) (applyTerminalDelivery|applyRunProjection|releaseFreshActivationRunSlot)\(' || true
   source_matches 'applyTerminalDelivery\(' internal/modules/blocks/result/biz |
     grep -v -F -- 'internal/modules/blocks/result/biz/lifecycle_internal_event.go' |
@@ -585,8 +585,8 @@ fi
 # public services historically bypassed the private dispatcher because the
 # assignment form above only saw later mutations.
 owner_initial_state_bypass_matches="$({
-  source_matches 'State:[[:space:]]*common\.WorkspaceState' internal/modules/blocks/workspace/biz |
-    grep -v -F -- 'internal/modules/blocks/workspace/biz/creation_internal_event.go' || true
+  source_matches 'State:[[:space:]]*common\.WorkspaceState' internal/modules/kernel/workspace/biz |
+    grep -v -F -- 'internal/modules/kernel/workspace/biz/creation_internal_event.go' || true
   source_matches 'State:[[:space:]]*common\.RunState' internal/modules/blocks/run/biz |
     grep -v -F -- 'internal/modules/blocks/run/biz/creation_internal_event.go' || true
   source_matches 'State:[[:space:]]*common\.DecisionTicketState' internal/modules/blocks/decision/biz |
@@ -600,7 +600,7 @@ owner_initial_state_bypass_matches="$({
   source_matches 'LineageState:[[:space:]]*"active"' internal/modules/blocks/run/biz |
     grep -v -F -- 'internal/modules/blocks/run/biz/creation_internal_event.go' || true
   source_matches '(workspaces|runs|tickets|approvals)\.Create\(' \
-    internal/modules/blocks/workspace/biz internal/modules/blocks/run/biz internal/modules/blocks/decision/biz internal/modules/blocks/approval/biz |
+    internal/modules/kernel/workspace/biz internal/modules/blocks/run/biz internal/modules/blocks/decision/biz internal/modules/blocks/approval/biz |
     grep -v -E -- '/(creation|lifecycle)_internal_event\.go:' || true
   source_matches '(binding|oldBinding)\.(ResolutionID|ResolutionBindingHash|DefinitionRevision|StartupInputHash|ReplacementIntentID|ReplacementIntentHash|SuccessorDefinitionRevision|SuccessorStartupInputHash)[[:space:]]*=[[:space:]]*[^=]' \
     internal/modules/blocks/decision/biz |
@@ -620,7 +620,7 @@ fi
 # service. Cross-owner callers use typed EventHub commands; owner-local code
 # reaches private helpers and private internal-event dispatchers only.
 resource_owner_biz_roots=(
-  internal/modules/blocks/workspace/biz
+  internal/modules/kernel/workspace/biz
   internal/modules/blocks/run/biz
   internal/modules/blocks/result/biz
   internal/modules/blocks/decision/biz
@@ -675,7 +675,7 @@ owner_mutation_facade_matches="$({
   source_matches '^[[:space:]]*\*Service$|func \([^)]*\) (CreateRun|EnsureRun)\(' \
     internal/modules/blocks/run/biz internal/modules/blocks/result/biz || true
   source_matches '^type GoalDoDManager struct|^func NewGoalDoDManager' \
-    internal/modules/blocks/workspace/biz || true
+    internal/modules/kernel/workspace/biz || true
   source_matches 'PurgeWorkspaceEvents' \
     internal/modules/blocks/eventstream/biz || true
   source_matches 'eventstreambiz\.Service|eventstreambiz\.New([A-Z][A-Za-z0-9]*)?Service' \
@@ -809,7 +809,7 @@ execution_priority_contract_matches="$({
     sed -n '/^type WorkspaceExecutionCommandRequest struct {/,/^}/p' internal/pkg/workorchmanagementcontract/definition.go
     sed -n '/^type WorkspaceRunCommand struct {/,/^}/p' internal/pkg/workorchport/run.go
     sed -n '/^type WorkspaceRunRequestedCommand struct {/,/^}/p' internal/modules/application/workorchd/pkg/events/messages.go
-    sed -n '/^type WorkspaceExecutionIntentCommand struct {/,/^}/p' internal/modules/blocks/workspace/pkg/events/lifecycle_messages.go
+    sed -n '/^type WorkspaceExecutionIntentCommand struct {/,/^}/p' internal/modules/kernel/workspace/pkg/events/lifecycle_messages.go
     sed -n '/^type WorkspaceExecutionIntentCommand struct {/,/^}/p' internal/modules/blocks/run/pkg/events/lifecycle_messages.go
     sed -n '/^type ReplacementIntent struct {/,/^}/p' internal/modules/blocks/run/pkg/models/run.go
     sed -n '/^type Run struct {/,/^}/p' internal/modules/blocks/run/pkg/models/run.go
@@ -848,8 +848,8 @@ fi
 # Multiple coordinated transition IDs are allowed only inside that same owner.
 owner_secondary_state_bypass_matches="$({
   source_matches '\.(DefinitionAdmissionCandidates|StartupInput|ActivationAdmission)(\.[A-Za-z0-9_]+)?[[:space:]]*=[[:space:]]*[^=]' \
-    internal/modules/blocks/workspace/biz |
-    grep -v -F -- 'internal/modules/blocks/workspace/biz/definition_admission_internal_event.go' || true
+    internal/modules/kernel/workspace/biz |
+    grep -v -F -- 'internal/modules/kernel/workspace/biz/definition_admission_internal_event.go' || true
   source_matches '\.(ReplacementIntent(\.[A-Za-z0-9_]+)?|Lineage\.SuccessorRunID)[[:space:]]*=[[:space:]]*[^=]|[A-Za-z0-9_]+\.State[[:space:]]*=[[:space:]]*runmodel\.ReplacementIntent|State:[[:space:]]*runmodel\.ReplacementIntent|updateReplacementIntent' \
     internal/modules/blocks/run/biz |
     grep -v -F -- 'internal/modules/blocks/run/biz/replacement_internal_event.go' || true
@@ -1048,8 +1048,8 @@ done < <(find internal/modules -type f ! -name '*_test.go' \( -name '*_internal_
 # second owner inventory. These call sites historically bypassed, or are the
 # only public translators into, their private dispatcher.
 owner_secondary_ingress_dispatcher_assertions=(
-  "internal/modules/blocks/workspace/biz/goal_dod_manager.go:submitWorkspaceCreationInternalEvent"
-  "internal/modules/blocks/workspace/biz/definition_admission.go:submitDefinitionAdmissionInternalEvent"
+  "internal/modules/kernel/workspace/biz/goal_dod_manager.go:submitWorkspaceCreationInternalEvent"
+  "internal/modules/kernel/workspace/biz/definition_admission.go:submitDefinitionAdmissionInternalEvent"
   "internal/modules/blocks/run/biz/workspace_execution_intent.go:submitRunCreationInternalEvent"
   "internal/modules/blocks/run/biz/workspace_execution_intent.go:submitReplacementInternalEvent"
   "internal/modules/blocks/decision/biz/decision_service.go:applyLifecycleInternalEvent"
@@ -1882,7 +1882,7 @@ fi
 if ! grep -q -F -- 'TestRuntimePersistenceRejectsRetiredAndUnknownFields' internal/pkg/workorchruntimecontract/runtime_state_schema_test.go ||
 	! grep -q -F -- 'TestRuntimePolicyNormalizationDoesNotBackfillMissingPersistedFields' internal/pkg/workorchruntimecontract/runtime_state_schema_test.go ||
    ! grep -q -F -- 'TestRunPersistenceRejectsRetiredAndUnknownFields' internal/modules/blocks/run/pkg/models/replacement_intent_test.go ||
-   ! grep -q -F -- 'TestGoalDoDManagerRejectsMissingLineageInsteadOfUpgrading' internal/modules/blocks/workspace/biz/goal_dod_manager_test.go ||
+   ! grep -q -F -- 'TestGoalDoDManagerRejectsMissingLineageInsteadOfUpgrading' internal/modules/kernel/workspace/biz/goal_dod_manager_test.go ||
    ! grep -q -F -- 'TestReduceTerminalDeliveryRejectsMissingRunLineageInsteadOfUpgrading' internal/modules/blocks/run/biz/lifecycle_reducer_test.go ||
    ! grep -q -F -- 'TestPersistedRejectsRetiredGitCapabilityFlags' internal/pkg/workorchconfig/config_test.go; then
 	echo "boundary contract violation: strict current Runtime/Run persistence regression is missing" >&2
@@ -1914,7 +1914,7 @@ if [[ -n "$runtime_persistence_compatibility_matches" ]]; then
 	echo "$runtime_persistence_compatibility_matches" >&2
 	exit 1
 fi
-if grep -q -E -- 'LineageState[[:space:]]*==[[:space:]]*""' internal/modules/blocks/workspace/biz/goal_dod_manager.go internal/modules/blocks/run/biz/lifecycle_reducer.go; then
+if grep -q -E -- 'LineageState[[:space:]]*==[[:space:]]*""' internal/modules/kernel/workspace/biz/goal_dod_manager.go internal/modules/blocks/run/biz/lifecycle_reducer.go; then
 	echo "boundary contract violation: Workspace/Run owner silently upgrades a missing current lineage" >&2
 	exit 1
 fi
@@ -1925,18 +1925,18 @@ fi
 # Decision-owner commands, but it cannot submit promotion/eligibility targets.
 # Neither side may reseal caller/persisted bytes, and Restart must reject that
 # shape before materializing managed files or sending an owner execution intent.
-definition_candidate_hash_shape="$(sed -n '/^func (c DefinitionAdmissionCandidate) computeHash()/,/^}/p' internal/modules/blocks/workspace/pkg/models/definition_admission.go)"
+definition_candidate_hash_shape="$(sed -n '/^func (c DefinitionAdmissionCandidate) computeHash()/,/^}/p' internal/modules/kernel/workspace/pkg/models/definition_admission.go)"
 for required_field in AdmissionPolicyBindings AcquisitionOperationVariantID AcquisitionTargetPolicy AcquisitionTargetSelectorRef; do
 	if ! grep -q -F -- "$required_field" <<<"$definition_candidate_hash_shape"; then
 		echo "boundary contract violation: Definition candidate hash omits $required_field" >&2
 		exit 1
 	fi
 done
-definition_compiler="internal/modules/blocks/workspace/pkg/definitionadmission/compiler.go"
-definition_compiler_test="internal/modules/blocks/workspace/pkg/definitionadmission/compiler_test.go"
-definition_intent_command_shape="$(sed -n '/^type DefinitionAdmissionIntentCommand struct {/,/^}/p' internal/modules/blocks/workspace/pkg/events/messages.go)"
-definition_intent_result_shape="$(sed -n '/^type DefinitionAdmissionIntentResult struct {/,/^}/p' internal/modules/blocks/workspace/pkg/events/messages.go)"
-definition_intent_reducer="$(sed -n '/^func reduceDefinitionAdmissionIntent(/,/^}/p' internal/modules/blocks/workspace/biz/definition_admission_internal_event.go)"
+definition_compiler="internal/modules/kernel/workspace/pkg/definitionadmission/compiler.go"
+definition_compiler_test="internal/modules/kernel/workspace/pkg/definitionadmission/compiler_test.go"
+definition_intent_command_shape="$(sed -n '/^type DefinitionAdmissionIntentCommand struct {/,/^}/p' internal/modules/kernel/workspace/pkg/events/messages.go)"
+definition_intent_result_shape="$(sed -n '/^type DefinitionAdmissionIntentResult struct {/,/^}/p' internal/modules/kernel/workspace/pkg/events/messages.go)"
+definition_intent_reducer="$(sed -n '/^func reduceDefinitionAdmissionIntent(/,/^}/p' internal/modules/kernel/workspace/biz/definition_admission_internal_event.go)"
 definition_legacy_target_commands="$(source_matches 'SubmitDefinitionAdmissionCandidate(Command|Result)|PromoteDefinitionAdmissionCandidate(Command|Result)|AcknowledgeWorkspaceDefinitionClarificationResolution(Command|Result)|TopicWorkspaceCommandSubmitDefinitionAdmissionCandidate|TopicWorkspaceCommandPromoteDefinitionAdmissionCandidate|TopicWorkspaceCommandAcknowledgeDefinitionClarification|/workspace/definition-admission/command/(submit-candidate|promote-candidate|acknowledge-clarification)' internal/modules || true)"
 if [[ -f internal/modules/application/workorchd/biz/appservice/definitionadmissioncore/compiler.go ]] ||
 	[[ ! -f "$definition_compiler" ]] ||
@@ -1947,12 +1947,12 @@ if [[ -f internal/modules/application/workorchd/biz/appservice/definitionadmissi
 	[[ -n "$definition_legacy_target_commands" ]] ||
 	! grep -q -F -- 'definitionadmission.Compile(candidate)' <<<"$definition_intent_reducer" ||
 	grep -q -F -- 'candidate = candidate.WithHash()' "$definition_compiler" ||
-	grep -q -F -- 'command.Candidate = command.Candidate.WithHash()' internal/modules/blocks/workspace/biz/definition_admission_internal_event.go ||
+	grep -q -F -- 'command.Candidate = command.Candidate.WithHash()' internal/modules/kernel/workspace/biz/definition_admission_internal_event.go ||
 	! grep -q -F -- 'TestCompileRejectsCandidateHashDriftInsteadOfResealingCallerInput' "$definition_compiler_test" ||
-	! grep -q -F -- 'TestDefinitionAdmissionOwnerDoesNotResealCallerCandidate' internal/modules/blocks/workspace/biz/definition_admission_test.go ||
-	! grep -q -F -- 'TestDefinitionAdmissionIntentAutomaticallyPromotesEligibleCandidate' internal/modules/blocks/workspace/biz/definition_admission_test.go ||
-	! grep -q -F -- 'TestDefinitionAdmissionIntentAloneSelectsTicketPromotionAndResolution' internal/modules/blocks/workspace/biz/definition_admission_test.go ||
-	! grep -q -F -- 'TestWorkspaceExecutionRestartRequiresCurrentAdmissionCandidateBeforeRunOwner' internal/modules/blocks/workspace/biz/execution_intent_test.go; then
+	! grep -q -F -- 'TestDefinitionAdmissionOwnerDoesNotResealCallerCandidate' internal/modules/kernel/workspace/biz/definition_admission_test.go ||
+	! grep -q -F -- 'TestDefinitionAdmissionIntentAutomaticallyPromotesEligibleCandidate' internal/modules/kernel/workspace/biz/definition_admission_test.go ||
+	! grep -q -F -- 'TestDefinitionAdmissionIntentAloneSelectsTicketPromotionAndResolution' internal/modules/kernel/workspace/biz/definition_admission_test.go ||
+	! grep -q -F -- 'TestWorkspaceExecutionRestartRequiresCurrentAdmissionCandidateBeforeRunOwner' internal/modules/kernel/workspace/biz/execution_intent_test.go; then
 	echo "boundary contract violation: Definition admission escaped Workspace ownership, regained caller outcome/resealing, or lost strict Restart regressions" >&2
 	exit 1
 fi
@@ -2623,7 +2623,7 @@ struct_body() {
 }
 
 forbidden_workspace_update_fields='(^|[[:space:]])(State|ActiveRunID)([[:space:]]|$)'
-workspace_update_body="$(struct_body internal/modules/blocks/workspace/pkg/events/messages.go UpdateWorkspaceCommand)"
+workspace_update_body="$(struct_body internal/modules/kernel/workspace/pkg/events/messages.go UpdateWorkspaceCommand)"
 if grep -q -E -- "$forbidden_workspace_update_fields" <<<"$workspace_update_body"; then
   echo "boundary contract violation: generic Workspace update exposes lifecycle fields" >&2
   exit 1
@@ -2683,7 +2683,7 @@ done
 # coordinator is a legitimate typed sender of Orchestrator quiescence/purge
 # commands; no other Workspace production file may import that target-owner
 # package.
-matches="$(source_matches 'internal/modules/kernel/orchestrator/pkg/events' internal/modules/blocks/workspace/biz | sed '/internal\/modules\/blocks\/workspace\/biz\/deletion_coordinator\.go:/d')"
+matches="$(source_matches 'internal/modules/kernel/orchestrator/pkg/events' internal/modules/kernel/workspace/biz | sed '/internal\/modules\/kernel\/workspace\/biz\/deletion_coordinator\.go:/d')"
 if [[ -n "$matches" ]]; then
   echo "boundary contract violation: workspace lifecycle owner imports Orchestrator event contracts" >&2
   echo "$matches" >&2
@@ -2691,7 +2691,7 @@ if [[ -n "$matches" ]]; then
 fi
 if ! grep -q -F -- 'TopicRunFactTerminalDelivery' internal/modules/blocks/run/pkg/events/topics.go ||
    ! grep -q -F -- 'TopicResultFactTerminalDelivery' internal/modules/blocks/result/pkg/events/topics.go ||
-   ! grep -q -F -- 'TopicWorkspaceFactTerminalDelivery' internal/modules/blocks/workspace/pkg/events/topics.go ||
+   ! grep -q -F -- 'TopicWorkspaceFactTerminalDelivery' internal/modules/kernel/workspace/pkg/events/topics.go ||
    ! grep -q -F -- 'runevents.TopicRunFactTerminalDelivery' internal/modules/kernel/orchestrator/biz/runtime_result_projection.go ||
    ! grep -q -F -- 'resultevents.TopicResultFactTerminalDelivery' internal/modules/kernel/orchestrator/biz/runtime_result_projection.go ||
    ! grep -q -F -- 'workspaceevents.TopicWorkspaceFactTerminalDelivery' internal/modules/kernel/orchestrator/biz/runtime_result_projection.go; then
@@ -3109,8 +3109,13 @@ if grep -q -E -- '(RequestID|Status)[[:space:]]+string' <<<"$llm_candidate_model
   echo "boundary contract violation: LLM RuntimeCandidateResponse must use sealed audit/error provider identity and status without duplicate RequestID/Status fields" >&2
   exit 1
 fi
+declare -A lifecycle_contract_roots=(
+  [run]="internal/modules/blocks/run/pkg/events"
+  [workspace]="internal/modules/kernel/workspace/pkg/events"
+  [result]="internal/modules/blocks/result/pkg/events"
+)
 for terminal_owner in run workspace result; do
-  terminal_delivery_shape="$(sed -n '/^type RuntimeTerminalDeliveryFact struct {/,/^}/p' "internal/modules/blocks/${terminal_owner}/pkg/events/lifecycle_messages.go")"
+  terminal_delivery_shape="$(sed -n '/^type RuntimeTerminalDeliveryFact struct {/,/^}/p' "${lifecycle_contract_roots[$terminal_owner]}/lifecycle_messages.go")"
   if ! grep -q -E -- 'runtimecontract\.RuntimeTerminalDeliveryFact' <<<"$terminal_delivery_shape" ||
      grep -q -E -- 'FailureReason[[:space:]]+string' <<<"$terminal_delivery_shape"; then
     echo "boundary contract violation: ${terminal_owner} terminal delivery must carry one canonical immutable fact without a parallel failure reason" >&2
@@ -3161,14 +3166,14 @@ if grep -q -E -- '(Disposition|Diagnostic)[[:space:]]+string' <<<"$execution_int
 fi
 
 for execution_intent_owner in run workspace; do
-  execution_intent_command_shape="$(sed -n '/^type WorkspaceExecutionIntentCommand struct {/,/^}/p' "internal/modules/blocks/${execution_intent_owner}/pkg/events/lifecycle_messages.go")"
+  execution_intent_command_shape="$(sed -n '/^type WorkspaceExecutionIntentCommand struct {/,/^}/p' "${lifecycle_contract_roots[$execution_intent_owner]}/lifecycle_messages.go")"
   if ! grep -q -E -- 'Kind[[:space:]]+runtimecontract\.RuntimeExecutionIntentKind' <<<"$execution_intent_command_shape"; then
     echo "boundary contract violation: ${execution_intent_owner} execution-intent Command must carry the typed intent kind" >&2
     exit 1
   fi
 done
 
-if ! grep -q -E -- '^type WorkspaceExecutionIntentResult runtimecontract\.RuntimeExecutionIntentAdmission$' internal/modules/blocks/workspace/pkg/events/lifecycle_messages.go ||
+if ! grep -q -E -- '^type WorkspaceExecutionIntentResult runtimecontract\.RuntimeExecutionIntentAdmission$' internal/modules/kernel/workspace/pkg/events/lifecycle_messages.go ||
    ! sed -n '/^type WorkspaceExecutionIntentResult struct {/,/^}/p' internal/modules/blocks/run/pkg/events/lifecycle_messages.go | grep -q -E -- 'runtimecontract\.RuntimeExecutionIntentAdmission' ||
    ! grep -q -E -- '^type WorkspaceRunRequestedResult runtimecontract\.RuntimeExecutionIntentAdmission$' internal/modules/application/workorchd/pkg/events/messages.go ||
    ! grep -q -E -- '^type RunCommandResult runtimecontract\.RuntimeExecutionIntentAdmission$' internal/pkg/workorchport/run.go; then
@@ -3186,7 +3191,7 @@ for lifecycle_owner in run workspace result; do
     workspace) lifecycle_result_name='WorkspaceLifecycleCommandResult' ;;
     result) lifecycle_result_name='ResultLifecycleCommandResult' ;;
   esac
-  lifecycle_result_shape="$(sed -n "/^type ${lifecycle_result_name} struct {/,/^}/p" "internal/modules/blocks/${lifecycle_owner}/pkg/events/lifecycle_messages.go")"
+  lifecycle_result_shape="$(sed -n "/^type ${lifecycle_result_name} struct {/,/^}/p" "${lifecycle_contract_roots[$lifecycle_owner]}/lifecycle_messages.go")"
   if grep -q -E -- 'Diagnostic[[:space:]]+string' <<<"$lifecycle_result_shape"; then
     echo "boundary contract violation: ${lifecycle_owner} lifecycle Result must expose owner state/ack facts without a parallel free-form diagnostic" >&2
     exit 1
@@ -3373,7 +3378,7 @@ fi
 # contracts may reference those stable values, but must not recreate a second
 # isomorphic struct plus field-by-field mappers inside the same owner.
 duplicate_owner_dto_matches="$({
-  grep -Hn -E '^type (Goal|DoD) struct' internal/modules/blocks/workspace/pkg/events/messages.go || true
+  grep -Hn -E '^type (Goal|DoD) struct' internal/modules/kernel/workspace/pkg/events/messages.go || true
   grep -Hn -E '^type (MemoryRecallHit|MemoryRecallSelectionScore) struct' internal/modules/blocks/memory/pkg/events/messages.go || true
   grep -Hn -E '^type ProviderUsageData struct' internal/modules/blocks/llm/pkg/events/messages.go || true
 	grep -Hn -E '^type ProviderUsage(View)? struct' \
@@ -3518,7 +3523,7 @@ if grep -q -E -- '^type MCPCommandResult struct' internal/modules/blocks/mcpregi
 	echo "boundary contract violation: MCP Registry topics must use concrete result types, not MCPCommandResult" >&2
 	exit 1
 fi
-if grep -q -E -- '^type WorkspaceCommandResult struct' internal/modules/blocks/workspace/pkg/events/messages.go; then
+if grep -q -E -- '^type WorkspaceCommandResult struct' internal/modules/kernel/workspace/pkg/events/messages.go; then
 	echo "boundary contract violation: Workspace management topics must use concrete result types, not WorkspaceCommandResult" >&2
 	exit 1
 fi
@@ -3530,7 +3535,7 @@ fi
 workspace_management_result_pattern='workspaceevents\.(WorkspaceResult|WorkspaceListResult|WorkspaceLLMSelectionResult|GoalResult|GoalListResult|DeleteGoalResult|DoDResult|DoDListResult|DeleteDoDResult|WorkspaceTemplateResult|WorkspaceTemplateListResult|DeleteWorkspaceTemplateResult|EnsureWorkspaceTemplateDefaultsResult)'
 workspace_management_result_uses="$({
 	grep -R -Hn -E --include='*.go' --exclude='*_test.go' -- "$workspace_management_result_pattern" internal || true
-} | grep -v -E '^internal/modules/blocks/workspace/(biz|pkg/events)/' || true)"
+} | grep -v -E '^internal/modules/kernel/workspace/(biz|pkg/events)/' || true)"
 if [[ -z "$workspace_management_result_uses" ]]; then
 	echo "boundary contract violation: Workspace management result consumers disappeared from command-bound validation audit" >&2
 	exit 1
@@ -3549,7 +3554,7 @@ if [[ -n "$workspace_management_unbound_uses" ]]; then
 	exit 1
 fi
 for sealed_method in workspaceResultWorkspaceID goalResultIdentity doDResultIdentity workspaceTemplateResultID; do
-	if ! grep -q -E -- "^[[:space:]]*${sealed_method}\(\)" internal/modules/blocks/workspace/pkg/events/management_result_validation.go; then
+	if ! grep -q -E -- "^[[:space:]]*${sealed_method}\(\)" internal/modules/kernel/workspace/pkg/events/management_result_validation.go; then
 		echo "boundary contract violation: Workspace command-bound result interface is no longer package-sealed: ${sealed_method}" >&2
 		exit 1
 	fi
@@ -4141,8 +4146,8 @@ fi
 # closure; Runtime may consume that sealed fact but no application/capability
 # projection may invent an action after Run creation.
 definition_owner_fact_contract="$(cat \
-	internal/modules/blocks/workspace/pkg/models/definition_admission.go \
-	internal/modules/blocks/workspace/pkg/definitionadmission/compiler.go \
+	internal/modules/kernel/workspace/pkg/models/definition_admission.go \
+	internal/modules/kernel/workspace/pkg/definitionadmission/compiler.go \
 	internal/pkg/workorchruntimecontract/runtime_owner_fact.go)"
 for marker in RequiredOwnerFactBindings OwnerFactConvergenceBindings RuntimeProfileContractsHash RuntimeOwnerFactMissingTrigger AcquisitionOperationVariantID AcquisitionTargetPolicy AcquisitionTargetSelectorRef MaxAcquisitionAttempts; do
 	if ! grep -q -F "$marker" <<<"$definition_owner_fact_contract"; then
@@ -4397,7 +4402,7 @@ for marker in \
 done
 definition_configuration_call="$(sed -n '/^func definitionAdmissionProfileBindings(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/definition_admission.go)"
 if ! grep -q -F 'definitionconfiguration.Compile(workspace, template)' <<<"$definition_configuration_call" ||
-	! grep -q -F 'definitionconfiguration.Compile(current, template)' internal/modules/blocks/workspace/biz/definition_authoring_admission.go; then
+	! grep -q -F 'definitionconfiguration.Compile(current, template)' internal/modules/kernel/workspace/biz/definition_authoring_admission.go; then
 	echo "boundary contract violation: Definition policy snapshot compiler is not checked by both Application and Workspace" >&2
 	exit 1
 fi
@@ -5911,7 +5916,7 @@ done
 # Workspace owns its Run projection cursor, but that private delivery fence is
 # not a public Workspace state transition. Persist cursor-only advances while
 # suppressing duplicate WorkspaceStateChanged payloads.
-workspace_projection_handler="$(sed -n '/^func (m \*Biz) applyRunProjection(/,/^}/p' internal/modules/blocks/workspace/biz/lifecycle_handler.go)"
+workspace_projection_handler="$(sed -n '/^func (m \*Biz) applyRunProjection(/,/^}/p' internal/modules/kernel/workspace/biz/lifecycle_handler.go)"
 if ! grep -q -F 'publicProjectionChanged := !sameWorkspaceChangedNotification' <<<"$workspace_projection_handler" ||
 	! grep -q -F 'if publicProjectionChanged {' <<<"$workspace_projection_handler" ||
 	! grep -q -F 'm.publishWorkspaceUpdated(ctx, next)' <<<"$workspace_projection_handler"; then
@@ -5921,7 +5926,7 @@ fi
 for regression in \
 	'TestWorkspaceRunProjectionPersistsCursorWithoutRepublishingUnchangedPublicState' \
 	'TestWorkspaceRunProjectionFreshOwnerAdvancesCursorWithoutPublicStateNotification'; do
-	if ! grep -q -F -- "$regression" internal/modules/blocks/workspace/biz/run_projection_notification_test.go; then
+	if ! grep -q -F -- "$regression" internal/modules/kernel/workspace/biz/run_projection_notification_test.go; then
 		echo "boundary contract violation: Workspace private-cursor notification regression is missing ($regression)" >&2
 		exit 1
 	fi

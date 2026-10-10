@@ -1,6 +1,6 @@
 package biz
 
-import workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+import workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 
 // synthetic provider fixture 显式提供当前 wire 合同的全部数组，不修复生产输出。
 func authoringWireSpecificationFixture(spec workspace.GoalSpecification) workspace.GoalSpecification {

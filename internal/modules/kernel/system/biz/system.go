@@ -10,8 +10,8 @@ import (
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	mcpregistryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	soulevents "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/system/pkg/common"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 

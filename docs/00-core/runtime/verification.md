@@ -72,8 +72,8 @@ budget/guard 以及适用的跨状态机合同测试。
 
 | Resource | Sole owner | Verification must reject |
 | --- | --- | --- |
-| Workspace candidate/Definition/startup/active slot | Workspace Block | projection/Run/Application direct mutation or unresolved activation |
-| Workspace deletion coordinator | Workspace Block | Application/participant phase journal、cross-owner partial ack authority或projection recovery |
+| Workspace candidate/Definition/startup/active slot | Workspace Module | projection/Run/Application direct mutation or unresolved activation |
+| Workspace deletion coordinator | Workspace Module | Application/participant phase journal、cross-owner partial ack authority或projection recovery |
 | Run lifecycle/opaque record/replacement/retirement | Run Block | caller target state、Orchestrator lifecycle choice、把 same-owner transaction 注册为另一状态机、duplicate successor、跳过 `draining -> retired` token seal |
 | Runtime quiescing/evidence deletion | Orchestrator | process-only gate、Run permanent fence前关闭opaque drain、伪造quiescence inventory或跨owner purge |
 | Result formal outcome | Result Block | Result recomputing acceptance or generic entity write bypass |

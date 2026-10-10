@@ -15,7 +15,7 @@ owner implementation detail；HTTP pagination、wait、raw-content 由 [Service 
 
 | Data | Sole writer | Persistence meaning |
 | --- | --- | --- |
-| Workspace candidate/Definition/startup/active slot | Workspace Block | formal Workspace authority |
+| Workspace candidate/Definition/startup/active slot | Workspace Module | formal Workspace authority |
 | Run lifecycle/lineage/replacement and opaque Runtime record | Run Block | SM-1 authority plus SM-2/3/4 opaque CAS storage |
 | Runtime semantic facts/authority/candidate/evidence/delivery | Orchestrator | serialized inside opaque Runtime record; semantically Orchestrator-owned |
 | Result/Artifact formal outcome | Result Block | already-judged terminal material |

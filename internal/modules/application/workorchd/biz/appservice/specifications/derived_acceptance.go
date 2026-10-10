@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	workspace "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 )
 
 // ParseDerivedAcceptance 不接受模型修改原始 Goal、用户条件或模板条件。

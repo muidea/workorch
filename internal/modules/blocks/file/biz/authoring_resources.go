@@ -12,7 +12,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
-	workspaceevents "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"

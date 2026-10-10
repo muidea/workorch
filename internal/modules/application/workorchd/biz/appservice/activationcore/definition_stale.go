@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
-	workspacemodel "github.com/muidea/workorch/internal/modules/blocks/workspace/pkg/models"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 )
 
 func ActiveRunDefinitionContextStale(run *runmodel.Run, effectiveGoal *workspacemodel.Goal, effectiveDoD *workspacemodel.DoD) bool {
