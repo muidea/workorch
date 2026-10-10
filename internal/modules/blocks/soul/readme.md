@@ -52,6 +52,15 @@ transition。
 - `Start` 幂等注册，`Stop` 反向退订并 fence 后续 delivery；Application publisher source 是 owner ingress 合同，错误 source
   在 repository I/O 前拒绝。
 
+## 生命周期合同
+
+- `Start` 逐成功订阅记账；部分失败保留 topic、service 与 repository，未清理前拒绝再次注册。
+- `BeginShutdown` 非等待式关闭 create/update/delete、ensure/upgrade；Get/List、ValidateCapability 和 QueryBuiltinDefaults 保留原 typed/source 校验，作为只读 drain 通路，不扩大许可。
+- 生命周期票覆盖真实 handler 返回。`Quiesce(ctx)` 等真实退出；取消或超时不授权释放资源，可用新预算重试。
+- `Stop` 排空后封闭最终准入并复核，逆序 checked 退订成功才移除账本，全部成功才清引用；未知 panic 不吞掉，也不遗留清理锁。
+- 本地排空不能替代共享任务/Hub 屏障。调用方串行 Configure/Start/Stop，禁止覆盖未释放 owner；plugin guard 保留失败 cause，SM-1～SM-4 业务权威不变。
+- 回归入口：`biz/owner_lifecycle_test.go`、`module_lifecycle_test.go`，覆盖逐项失败、真实执行超时重试、fresh/drain 与 guard cause。
+
 ## 能力验收
 
 | 维度 | 可执行证据 | 覆盖结论 |

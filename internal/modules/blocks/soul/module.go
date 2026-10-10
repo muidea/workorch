@@ -19,6 +19,9 @@ func (m *Module) configure(d soulbiz.Dependencies) error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
+	if m.bizPtr != nil {
+		return common.ErrConflict
+	}
 	if d.Souls == nil || d.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
@@ -37,7 +40,9 @@ func (m *Module) Start() error {
 }
 func (m *Module) Stop(c context.Context) error {
 	if m != nil && m.bizPtr != nil {
-		m.bizPtr.Teardown(c)
+		if err := m.bizPtr.Teardown(c); err != nil {
+			return err
+		}
 		m.bizPtr = nil
 	}
 	return nil

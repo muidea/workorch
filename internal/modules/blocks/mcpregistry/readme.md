@@ -43,6 +43,15 @@ secret reference、不执行 operation，也不修改 Runtime aggregate。
   trim 后授权。
 - Registry 不推断 effect/risk/readiness，不选择 Runtime action；transport 与 reference resolution 归 `blocks/mcp`。
 
+## 生命周期合同
+
+- `Start` 逐成功订阅记账；部分失败保留 topic 和 service，未清理前拒绝再次注册。
+- `BeginShutdown` 非等待式关闭 create/update/ensure；Get/List、ReadRegistrySnapshot 与 ReadSelectionSnapshot 保留原 typed/source 校验，作为既有事务的一致读取 drain，不授权新执行。
+- 准入票追踪真实 handler 返回。`Quiesce(ctx)` 超时不清依赖，允许新预算重试；取消等待不等于工作退出。
+- `Stop` 先排空、封最终准入再复核，逆序 checked 退订成功才移除账本；全部成功才释放 service/Module 引用。未知 panic 不吞掉，不遗留清理锁。
+- 正式最终释放仍依赖共享任务与 Hub 屏障，本地 Quiesce 不能替代它。Configure/Start/Stop 由调用方串行执行，不覆盖未释放 owner；plugin guard 保留原 cause，SM-1～SM-4 业务权威不变。
+- 回归入口：`biz/owner_lifecycle_test.go`、`module_lifecycle_test.go`，覆盖逐项失败、真实执行超时重试、fresh/drain 与 guard cause。
+
 ## 能力验收
 
 | 维度 | 可执行证据 | 覆盖结论 |

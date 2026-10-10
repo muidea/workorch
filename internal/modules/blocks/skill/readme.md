@@ -40,6 +40,16 @@ topic、command 和 result 的唯一实现入口是 [`pkg/events`](pkg/events)�
 - Skill 不解释 Goal/DoD，不选择 Soul/MCP，不修改 activation 或 Runtime aggregate。
 - Skill 不根据 `TriggerRules` 路由请求；Application/profile 只能读取 owner 返回的 detached 声明后在自身用例中选择。
 
+## 生命周期合同
+
+- `Start` 逐成功订阅记账；部分失败保留已取得的 topic 和 service，未清理前拒绝再次注册。
+- `BeginShutdown` 非等待式关闭 fresh create；Get/List 保留原 typed/source 校验，作为既有事务的只读 drain 通路。
+- 所有订阅 handler 从准入到真实返回持有生命周期票，context 取消不等于完成。`Quiesce(ctx)` 超时保留资源，允许新预算重试。
+- `Stop` 先排空，再关闭最终准入并复核；逆序退订仅成功才移除账本，全部成功才释放 service/Module 引用。未知 panic 不吞掉，也不遗留清理锁。
+- 本地 Quiesce 不是全进程屏障；正式最终释放仍要求共享任务与 Hub 排空。调用方串行执行 Configure/Start/Stop；Configure 不覆盖未释放 owner。
+- plugin void Teardown 通过 guard 传播包含原 cause 的失败；SM-1～SM-4 的业务转换、权限和预算不变。
+- 回归入口：`biz/owner_lifecycle_test.go`、`module_lifecycle_test.go`，覆盖逐项订阅/退订失败、真实执行超时重试、fresh/drain 与 guard cause。
+
 ## 能力验收
 
 | 维度 | 可执行证据 | 覆盖结论 |
