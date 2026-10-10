@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -146,6 +148,45 @@ func TestCoverageProofLineageEquivalentResealRetainsOnlyMatchingProofKind(t *tes
 	}
 	if len(aggregate.CoverageProofLineage) != before {
 		t.Fatalf("duplicate re-seal appended a resolution: before=%d after=%d", before, len(aggregate.CoverageProofLineage))
+	}
+}
+
+func TestTerminalMaterialAdapterRetainsEquivalentLineage(t *testing.T) {
+	oldBinding := coverageProofLineageTestBinding("binding/old", "main.go")
+	currentBinding := coverageProofLineageTestBinding("binding/current", "main.go")
+	aggregate, fact, receipt := coverageProofLineageTestAggregate(oldBinding)
+	coverageProofLineageSynchronizeLedger(t, &aggregate)
+	if err := appendAcceptedCoverageProofLineage(&aggregate, fact, receipt); err != nil {
+		t.Fatal(err)
+	}
+	aggregate.ActiveDispatch = nil
+	aggregate.Facts.Focus = coverageProofLineageTestFocus(currentBinding)
+	coverageProofLineageSynchronizeLedger(t, &aggregate)
+	if err := resolveCoverageProofLineageForFocus(&aggregate, aggregate.Facts.Focus); err != nil {
+		t.Fatal(err)
+	}
+	source := terminalMaterialSource(aggregate)
+	if !reflect.DeepEqual(source.CoverageProofLineage, aggregate.CoverageProofLineage) {
+		t.Fatal("终态适配遗漏原始 lineage")
+	}
+	outcomes := DeriveRuntimeTerminalRequirementOutcomes(aggregate, runtimecontract.RuntimeOwnerRevisionSet{})
+	if len(outcomes) != 1 || len(outcomes[0].AcceptedEvidenceRefs) != 1 || outcomes[0].AcceptedEvidenceRefs[0] != string(fact.ID) {
+		t.Fatalf("exact equivalent 来源被终态投影丢弃: %+v", outcomes)
+	}
+	before, err := json.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reloaded runtimecontract.RuntimeStateRecord
+	if err := json.Unmarshal(before, &reloaded); err != nil {
+		t.Fatal(err)
+	}
+	reloadedOutcomes := runtimecontract.DeriveRuntimeTerminalRequirementOutcomesFromState(reloaded, runtimecontract.RuntimeOwnerRevisionSet{})
+	if !reflect.DeepEqual(outcomes, reloadedOutcomes) {
+		t.Fatal("owner-local adapter 与独立重载的终态 lineage 投影不一致")
+	}
+	if !reflect.DeepEqual(source.CoverageProofLineage, reloaded.CoverageProofLineage) {
+		t.Fatal("独立重载丢失完整 lineage 来源／resolution")
 	}
 }
 

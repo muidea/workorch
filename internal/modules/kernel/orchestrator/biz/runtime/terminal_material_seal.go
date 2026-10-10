@@ -87,6 +87,7 @@ func terminalMaterialSource(aggregate RuntimeAggregate) runtimecontract.RuntimeS
 		ResultFeedbackVersion: aggregate.ResultFeedbackVersion,
 		ActiveDispatch:        active, CompletedDispatches: sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
 		OperationReceipts: aggregate.OperationReceipts, DeliveryAcknowledgements: aggregate.DeliveryAcknowledgements,
+		CoverageProofLineage: aggregate.CoverageProofLineage,
 	}
 }
 
