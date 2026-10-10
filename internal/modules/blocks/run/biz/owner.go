@@ -29,9 +29,11 @@ type Dependencies struct {
 
 type Biz struct {
 	basebiz.Base
-	// commandMu only coordinates in-flight EventHub owner commands with Stop.
-	// Framework serializes Configure/Start/Stop lifecycle calls.
+	// commandMu 只保护短暂的准入/依赖与订阅账本更新。
+	// Hub 操作和 handler 主体不得持有此锁。
+	// framework 串行执行 Configure/Start/Stop 生命周期调用。
 	commandMu sync.RWMutex
+	lifecycle basebiz.Lifecycle
 	// workspaceExecutionMu serializes Workspace-scoped restart admission with
 	// successor materialization. Durable repository guards remain the final
 	// fence; this lock prevents two owner-private workflows from racing toward
@@ -54,7 +56,6 @@ type Biz struct {
 	replacementRecoveryCtx    context.Context
 	replacementRecoveryCancel context.CancelFunc
 	replacementRecoveryEpoch  uint64
-	replacementRecoveryWG     sync.WaitGroup
 }
 
 func New() *Biz { return &Biz{} }
@@ -69,6 +70,12 @@ func (m *Biz) Configure(deps Dependencies) error {
 		return common.ErrInvalidArgument
 	}
 	if err := deps.OwnerRepositories.Validate(); err != nil {
+		return err
+	}
+	if m.runs != nil {
+		return common.ErrConflict
+	}
+	if err := m.lifecycle.Reset(); err != nil {
 		return err
 	}
 	m.runs = deps.OwnerRepositories.Runs()
@@ -102,44 +109,41 @@ func (m *Biz) Start() error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
-	m.commandMu.Lock()
-	if m.stopping || m.runs == nil || m.EventHub() == nil {
-		m.commandMu.Unlock()
-		return common.ErrInvalidArgument
-	}
-	if m.started {
-		m.commandMu.Unlock()
-		return nil
-	}
-	if err := m.ensureRuntimeRecoveryInventoryLocked(); err != nil {
-		m.commandMu.Unlock()
+	leave, err := m.enterOwnerCommand(false)
+	if err != nil {
 		return err
 	}
-	regularTopics := runCommandTopics()
-	for _, topic := range regularTopics {
+	defer leave()
+	m.commandMu.RLock()
+	started := m.started
+	m.commandMu.RUnlock()
+	if started {
+		return nil
+	}
+	if err := m.prepareRuntimeRecoveryInventory(); err != nil {
+		return err
+	}
+	for _, topic := range runCommandTopics() {
 		if topic == runevents.TopicRunCommandWorkspaceRetirementFact {
 			continue
 		}
-		m.SubscribeFunc(topic, m.handleCommand)
-		m.topics = append(m.topics, topic)
+		if err := m.subscribeOwnerTopic(topic, m.handleCommand); err != nil {
+			return err
+		}
 	}
 	for _, topic := range m.lifecycleTopics() {
-		m.SubscribeFunc(topic, m.handleLifecycleCommand)
-		m.topics = append(m.topics, topic)
+		if err := m.subscribeOwnerTopic(topic, m.handleLifecycleCommand); err != nil {
+			return err
+		}
 	}
-	m.SubscribeFunc(runevents.TopicRunCommandWorkspaceExecutionIntent, m.handleWorkspaceExecutionIntent)
-	m.topics = append(m.topics, runevents.TopicRunCommandWorkspaceExecutionIntent)
+	if err := m.subscribeOwnerTopic(runevents.TopicRunCommandWorkspaceExecutionIntent, m.handleWorkspaceExecutionIntent); err != nil {
+		return err
+	}
+	m.commandMu.Lock()
 	m.started = true
 	m.commandMu.Unlock()
-	// Re-scan Run-owned records for two durable handoffs that may have been
-	// interrupted by a crash: replacement termination delivery and the
-	// create-once activation-memory audit. Neither path reconstructs Runtime
-	// authority or advances an SM-2/SM-3 decision.
+	// 保留既有 Run-private recovery 事务及 readiness 线性化边界。
 	m.recoverPendingWorkspaceExecutionSuccessors()
-	// The readiness fact is published only after all regular Run commands are
-	// subscribed. Startup recovery may have loaded opaque state during Setup,
-	// but it must not drive (and therefore save aggregate state) before this
-	// owner-local readiness boundary is true.
 	m.publishRuntimeCommandsReady()
 	return nil
 }
@@ -150,41 +154,42 @@ func (m *Biz) prepareRuntimeRecoveryInventory() error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
-	m.commandMu.Lock()
-	defer m.commandMu.Unlock()
-	if m.stopping || m.runs == nil || m.EventHub() == nil {
-		return common.ErrInvalidArgument
+	leave, err := m.enterOwnerCommand(false)
+	if err != nil {
+		return err
 	}
-	return m.ensureRuntimeRecoveryInventoryLocked()
+	defer leave()
+	m.commandMu.RLock()
+	ready := m.recoveryReady
+	m.commandMu.RUnlock()
+	if ready {
+		return nil
+	}
+	if err := m.subscribeOwnerTopic(runevents.TopicRunCommandRuntimeRecoveryInventory, m.handleRuntimeRecoveryInventory); err != nil {
+		return err
+	}
+	if err := m.subscribeOwnerTopic(runevents.TopicRunCommandRuntimeStateRecordReadiness, m.handleRuntimeStateRecordReadiness); err != nil {
+		return err
+	}
+	if err := m.subscribeOwnerTopic(runevents.TopicRunCommandRuntimeStateRecord, m.handleRuntimeStateRecord); err != nil {
+		return err
+	}
+	if err := m.subscribeOwnerTopic(runevents.TopicRunCommandWorkspaceRetirementInventory, m.handleWorkspaceRetirementInventory); err != nil {
+		return err
+	}
+	if err := m.subscribeOwnerTopic(runevents.TopicRunCommandWorkspaceRetirementFact, m.handleCommand); err != nil {
+		return err
+	}
+	m.commandMu.Lock()
+	m.recoveryReady = true
+	m.commandMu.Unlock()
+	return nil
 }
 
 // PrepareRuntimeRecoveryInventory establishes the SM-4 read subscription
 // during framework Setup, before Orchestrator starts startup recovery.
 func (m *Biz) PrepareRuntimeRecoveryInventory() error {
 	return m.prepareRuntimeRecoveryInventory()
-}
-
-func (m *Biz) ensureRuntimeRecoveryInventoryLocked() error {
-	if m.recoveryReady {
-		return nil
-	}
-	m.SubscribeFunc(runevents.TopicRunCommandRuntimeRecoveryInventory, m.handleRuntimeRecoveryInventory)
-	m.SubscribeFunc(runevents.TopicRunCommandRuntimeStateRecordReadiness, m.handleRuntimeStateRecordReadiness)
-	m.SubscribeFunc(runevents.TopicRunCommandRuntimeStateRecord, m.handleRuntimeStateRecord)
-	m.SubscribeFunc(runevents.TopicRunCommandWorkspaceRetirementInventory, m.handleWorkspaceRetirementInventory)
-	// Orchestrator starts before Run by framework weight. A persisted draining
-	// or retired head therefore needs both the inventory and its exact physical
-	// Run fact during Setup, before ordinary Run commands are exposed.
-	m.SubscribeFunc(runevents.TopicRunCommandWorkspaceRetirementFact, m.handleCommand)
-	m.topics = append(m.topics,
-		runevents.TopicRunCommandRuntimeRecoveryInventory,
-		runevents.TopicRunCommandRuntimeStateRecordReadiness,
-		runevents.TopicRunCommandRuntimeStateRecord,
-		runevents.TopicRunCommandWorkspaceRetirementInventory,
-		runevents.TopicRunCommandWorkspaceRetirementFact,
-	)
-	m.recoveryReady = true
-	return nil
 }
 
 func (m *Biz) handleRuntimeRecoveryInventory(ev magicevent.Event, result magicevent.Result) {
@@ -200,12 +205,12 @@ func (m *Biz) handleRuntimeRecoveryInventory(ev magicevent.Event, result magicev
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
-	m.commandMu.RLock()
-	defer m.commandMu.RUnlock()
-	if m.stopping || m.runs == nil {
+	leave, admissionErr := m.enterOwnerCommand(true)
+	if admissionErr != nil {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
+	defer leave()
 	// Runtime recovery inventory and retirement finalization share the Run
 	// owner's workflow lock. A successful inventory response therefore cannot
 	// cross the retired visibility linearization point in this process.
@@ -251,12 +256,12 @@ func (m *Biz) handleWorkspaceRetirementInventory(ev magicevent.Event, result mag
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
-	m.commandMu.RLock()
-	defer m.commandMu.RUnlock()
-	if m.stopping || m.runs == nil {
+	leave, admissionErr := m.enterOwnerCommand(true)
+	if admissionErr != nil {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
+	defer leave()
 	items, err := m.runs.ListWorkspaceRetirements(ev.Context())
 	if err != nil {
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
@@ -283,13 +288,16 @@ func (m *Biz) handleRuntimeStateRecordReadiness(ev magicevent.Event, result magi
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
-	m.commandMu.RLock()
-	defer m.commandMu.RUnlock()
-	if m.stopping || m.runs == nil || m.EventHub() == nil {
+	leave, admissionErr := m.enterOwnerCommand(true)
+	if admissionErr != nil {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
-	result.Set(runevents.QueryRuntimeStateRecordReadinessResult{Ready: m.started}, nil)
+	defer leave()
+	m.commandMu.RLock()
+	ready := m.started
+	m.commandMu.RUnlock()
+	result.Set(runevents.QueryRuntimeStateRecordReadinessResult{Ready: ready}, nil)
 }
 
 func (m *Biz) handleRuntimeStateRecord(ev magicevent.Event, result magicevent.Result) {
@@ -305,12 +313,12 @@ func (m *Biz) handleRuntimeStateRecord(ev magicevent.Event, result magicevent.Re
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
-	m.commandMu.RLock()
-	defer m.commandMu.RUnlock()
-	if m.stopping || m.runs == nil {
+	leave, admissionErr := m.enterOwnerCommand(true)
+	if admissionErr != nil {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}
+	defer leave()
 	m.workspaceExecutionMu.Lock()
 	defer m.workspaceExecutionMu.Unlock()
 	ctx, err := common.BindRuntimeWorkspaceContext(ev.Context(), cmd.WorkspaceID)
@@ -447,39 +455,54 @@ func runStateIsTerminal(state common.RunState) bool {
 	}
 }
 
+// Stop 是最终检查式释放。生产调用方必须先完成全进程 owner 与共享 Hub/task
+// 排空屏障；仅局部 Quiesce 不能证明跨 owner receipt 已不可能到达。
 func (m *Biz) Stop(ctx context.Context) error {
-	_ = ctx
 	if m == nil {
 		return nil
 	}
+	m.BeginShutdown()
+	if err := m.Quiesce(ctx); err != nil {
+		return err
+	}
+	// 局部排空后关闭最终准入，再检查两者之间已进入的 drain handler。
+	// 超时保留全部释放状态。
 	m.commandMu.Lock()
-	topics := append([]string(nil), m.topics...)
 	m.stopping = true
-	m.topics = nil
+	m.commandMu.Unlock()
+	if err := m.Quiesce(ctx); err != nil {
+		return err
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		m.commandMu.RLock()
+		count := len(m.topics)
+		var topic string
+		if count > 0 {
+			topic = m.topics[count-1]
+		}
+		m.commandMu.RUnlock()
+		if count == 0 {
+			break
+		}
+		if err := checkedOwnerSubscription(func() { m.UnsubscribeFunc(topic) }); err != nil {
+			return err
+		}
+		m.commandMu.Lock()
+		m.topics = m.topics[:count-1]
+		m.commandMu.Unlock()
+	}
+	m.replacementRecoveryMu.Lock()
+	m.replacementRecoveryCtx = nil
+	m.replacementRecoveryCancel = nil
+	m.replacementRecoveryTasks = nil
+	m.replacementRecoveryEpoch++
+	m.replacementRecoveryMu.Unlock()
+	m.commandMu.Lock()
 	m.recoveryReady = false
 	m.started = false
-	m.commandMu.Unlock()
-
-	m.replacementRecoveryMu.Lock()
-	cancelReplacementRecovery := m.replacementRecoveryCancel
-	m.replacementRecoveryCancel = nil
-	m.replacementRecoveryCtx = nil
-	m.replacementRecoveryEpoch++
-	m.replacementRecoveryTasks = nil
-	m.replacementRecoveryMu.Unlock()
-	if cancelReplacementRecovery != nil {
-		cancelReplacementRecovery()
-	}
-	// A process-local wakeup may already be reducing a persisted Run-owned
-	// recovery generation. Drain that owner-local work before dependencies are
-	// cleared; canceled timers never enter the reducer, while an already claimed
-	// generation completes or leaves its durable running lease for startup
-	// recovery.
-	m.replacementRecoveryWG.Wait()
-	for idx := len(topics) - 1; idx >= 0; idx-- {
-		m.UnsubscribeFunc(topics[idx])
-	}
-	m.commandMu.Lock()
 	m.runs = nil
 	m.steps = nil
 	m.checkpoints = nil

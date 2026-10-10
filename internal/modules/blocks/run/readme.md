@@ -37,11 +37,26 @@ Last Verified: 2026-08-30
 - retirement fence 一旦进入 draining/retired，新的 creation、普通 SM-1 和 Step/Checkpoint mutation必须 fail closed；retired owner facts仍可供恢复校验。
 - 不拥有 Workspace activation、Orchestrator SM-2/SM-3/SM-4、Decision/Approval 或 Result aggregate；不提供跨 owner repository/service。
 
+## 进程生命周期（不改变 Runtime 状态机）
+
+Run 使用共享 `basebiz.Lifecycle` 跟踪真实 handler、恢复扫描、提交过程和已接受后台 callback，而不是以 cancel 或 Send 等待结束代替完成。恢复 callback 在入队前登记，真实返回（包括取消 timer、排队后执行或 panic 的 defer）才退账；拒绝提交立即退账，没有 `WaitGroup.Add/Wait` 竞争。
+
+- `Configure` 在任何 owner 初始化/订阅前由 Module 保留 Biz；Setup、Start 每项订阅成功立即记账，部分失败保留已取得资源，不能用再次 Configure 覆盖未释放 owner。
+- `BeginShutdown` 非阻塞关闭新的 Start、Workspace 执行意图、continuation 及 replacement 调度，取消进程内 replacement context，但不退订、不清 repos、cancel/context/ledger，也不改变 persisted SM-1 recovery lease。
+- drain 按具体操作分类：只读 inventory/readiness/Run/Step/Checkpoint、opaque Runtime CAS、已有 governance wait 和 exact terminal delivery 保持原 typed source/scope/revision/private reducer 验证。Orchestrator 的 Source 不是广泛新执行授权；Workspace 新执行及 retirement mutation 不走 drain。ready 仍描述已有 Run command 订阅，不能因 BeginShutdown 提前置 false。
+- `Quiesce(ctx)` 等待本 owner 的真实在途归零；超时返回原始原因并保留依赖和句柄，可用独立预算重试。归零后仍可接收已验证的跨 owner 收尾，不能把局部 Quiesce 当全局屏障。
+- final `Stop(ctx)` 只在调用方完成所有 owner 与共享 Hub/task 排空之后释放；standalone Stop 仍执行 owner-local BeginShutdown/Quiesce。最终关闭本 owner drain，逆序取消订阅，只有 Hub 成功回执后才 pop；失败/未知 panic 保留剩余 ledger 与 owner/repos。`commandMu` 不跨 Hub 操作或 handler body 持有。
+- plugin 暴露 Run 专属阶段方法；void Teardown 把 Stop 错误以 `cd.WrapError` panic 交真实 manager guard，并保留 errors.Is 因果链。未知 panic 不在 Biz 改写。本批不切换进程全局 Quiescer，也不修改其他 owner 或共享 Base/task API。
+
+影响边界是 SM-1 的进程内 admission/完成跟踪和 SM-4 依赖的 Run read/CAS/receipt 保活；不新增或改变 SM-1～SM-4 的业务 transition、authority、private transaction、预算或重启依据。
+
 ## 能力验收
 
 | 能力/维度 | 测试证据 | 结论 |
 | --- | --- | --- |
 | module lifecycle、重复 Start/Stop、in-flight Stop | `module_test.go::TestModuleIdentityConfigureStartStopContract`、`module_test.go::TestModuleStopWaitsForInFlightOwnerCommand` | 已覆盖 |
+| staged lifecycle、部分获取、checked retry | `plugin_lifecycle_test.go::TestRunLifecyclePartialSubscriptionsRemainReachableAndReleaseInReverse`、`TestRunLifecycleFailedUnsubscribeKeepsOwnerAndResumesLedger`、`TestRunLifecycleUnknownSubscriptionPanicPreservedWithoutLockedCleanup`、`TestRunLifecycleBeginShutdownKeepsReadinessAndAcceptedCASUntilRealHandlerExit` | Run owner 局部阶段已覆盖；不代表全进程屏障已切换或其他 owner 合规 |
+| recovery 真实完成及 typed drain | `biz/owner_lifecycle_test.go::TestRunLifecycleCanceledQueuedRecoveryIsNotCompletedUntilCallbackReturns`、`TestRunLifecycleRejectedRecoverySubmissionDoesNotLeakInflight`、`TestRunLifecycleShutdownAdmitsOnlyValidatedCompletionNotNewExecution`、`TestRunLifecycleNestedSendRetainsParentContextThroughShutdown` | 排队取消不冒充完成，超时保留/重试、零 fresh recovery、terminal duplicate/source 拒绝及同 Hub nested Send 已覆盖 |
 | canonical production dependency bundle | `module_test.go::TestModuleConfigureRequiresRunRepositoryAndEventHub`、`internal/pkg/repository/memory/workspace_retirement_two_phase_adversarial_test.go::TestMemoryRunOwnerBundleRejectsMixedRepositorySets`、`internal/pkg/workorchrepo/workspace_retirement_two_phase_adversarial_test.go::TestWorkspaceScopedFileRunOwnerBundleRejectsMixedStores` | 已覆盖 memory/file mixed binding rejection |
 | public Run/Step/Checkpoint read scope | `module_test.go::TestRunCommandGetHonorsWorkspaceScope`、`module_test.go::TestRunStepReadCommandsHonorWorkspaceScope`、`module_test.go::TestRunCheckpointReadCommandsHonorWorkspaceScope` | 已覆盖 |
 | SM-1 normal/duplicate/stale/terminal invariants | `biz/lifecycle_reducer_test.go::TestReduceActivateRunPendingToActive`、`biz/lifecycle_reducer_test.go::TestReduceActivateRunDuplicateIsNoop`、`biz/lifecycle_reducer_test.go::TestLifecycleHandlerStaleTerminalDoesNotChangeRun`、`biz/state_transitions_test.go::TestRunStateTransitionsRemainOwnedByRunBlock` | 已覆盖 |

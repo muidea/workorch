@@ -31,12 +31,14 @@ func (m *Module) Configure(deps runbiz.Dependencies) error {
 	if err := deps.OwnerRepositories.Validate(); err != nil {
 		return err
 	}
-	owner := runbiz.New()
-	if err := owner.Configure(deps); err != nil {
-		return err
+	if m.bizPtr != nil {
+		return common.ErrConflict
 	}
+	owner := runbiz.New()
+	// 在任何订阅/recovery 失败或 panic 前保留部分 Configure 的 owner，
+	// 确保 framework 清理始终能访问其释放账本。
 	m.bizPtr = owner
-	return nil
+	return owner.Configure(deps)
 }
 
 func (m *Module) Start() error {

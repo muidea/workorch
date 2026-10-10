@@ -71,14 +71,21 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 }
 
 func (m *Biz) executeCommand(ev magicevent.Event) (any, error) {
-	if m == nil {
+	if m == nil || ev == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	m.commandMu.RLock()
-	defer m.commandMu.RUnlock()
-	if m.stopping || m.runs == nil {
+	family, ok := runCommandFamilyForTopic(ev.ID())
+	if !ok {
 		return nil, common.ErrInvalidArgument
 	}
+	// 只读入口及 opaque Runtime CAS 为已接受的跨 owner 工作保活。
+	// retirement mutation 属于新的 root intent。
+	drain := family != runCommandFamilyWorkspaceRetirement || ev.ID() == runevents.TopicRunCommandWorkspaceRetirementFact
+	leave, err := m.enterOwnerCommand(drain)
+	if err != nil {
+		return nil, err
+	}
+	defer leave()
 	ctx := ev.Context()
 	workspaceID := workspaceScopeFromRunCommand(ev.Data())
 	if workspaceID != "" {
@@ -87,10 +94,6 @@ func (m *Biz) executeCommand(ev magicevent.Event) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-	}
-	family, ok := runCommandFamilyForTopic(ev.ID())
-	if !ok {
-		return nil, common.ErrInvalidArgument
 	}
 	switch family {
 	case runCommandFamilyRunQuery:

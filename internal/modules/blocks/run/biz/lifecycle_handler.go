@@ -47,14 +47,17 @@ func setRunLifecycleResult(result magicevent.Result, data runevents.RunLifecycle
 }
 
 func (m *Biz) executeLifecycleCommand(ev magicevent.Event) (runevents.RunLifecycleCommandResult, error) {
-	if m == nil {
+	if m == nil || ev == nil {
 		return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
 	}
-	m.commandMu.RLock()
-	defer m.commandMu.RUnlock()
-	if m.stopping || m.runs == nil {
-		return runevents.RunLifecycleCommandResult{}, common.ErrInvalidArgument
+	// continuation eligibility 可重新开启执行；不同于已接受 Runtime 工作的
+	// governance-wait/terminal delivery 收尾。
+	drain := ev.ID() == runevents.TopicRunFactGovernanceWait || ev.ID() == runevents.TopicRunFactTerminalDelivery
+	leave, err := m.enterOwnerCommand(drain)
+	if err != nil {
+		return runevents.RunLifecycleCommandResult{}, err
 	}
+	defer leave()
 	ctx := ev.Context()
 	topic := ev.ID()
 	data := ev.Data()

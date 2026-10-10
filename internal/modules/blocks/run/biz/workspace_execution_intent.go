@@ -43,14 +43,14 @@ func (m *Biz) handleWorkspaceExecutionIntent(ev magicevent.Event, result magicev
 // all activation, replacement, and continuation choices are made by Run
 // against its own persisted records.
 func (m *Biz) executeWorkspaceExecutionIntent(ev magicevent.Event) (runevents.WorkspaceExecutionIntentResult, error) {
-	if m == nil {
+	if m == nil || ev == nil {
 		return runevents.WorkspaceExecutionIntentResult{}, common.ErrInvalidArgument
 	}
-	m.commandMu.RLock()
-	defer m.commandMu.RUnlock()
-	if m.runs == nil || m.EventHub() == nil {
-		return runevents.WorkspaceExecutionIntentResult{}, common.ErrInvalidArgument
+	leave, err := m.enterOwnerCommand(false)
+	if err != nil {
+		return runevents.WorkspaceExecutionIntentResult{}, err
 	}
+	defer leave()
 	cmd, ok := ev.Data().(runevents.WorkspaceExecutionIntentCommand)
 	if !ok || ev.Source() != workspaceExecutionIntentRunSource {
 		return runevents.WorkspaceExecutionIntentResult{}, common.ErrInvalidArgument
@@ -62,9 +62,6 @@ func (m *Biz) executeWorkspaceExecutionIntent(ev magicevent.Event) (runevents.Wo
 	ctx, err := common.BindRuntimeWorkspaceContext(ev.Context(), cmd.WorkspaceID)
 	if err != nil {
 		return runevents.WorkspaceExecutionIntentResult{}, err
-	}
-	if m.stopping {
-		return runevents.WorkspaceExecutionIntentResult{}, common.ErrConflict
 	}
 	switch cmd.Kind {
 	case runtimecontract.RuntimeExecutionIntentResume:
@@ -636,11 +633,11 @@ func (m *Biz) scheduleReplacementRecovery(workspaceID common.WorkspaceID, predec
 	if m == nil || workspaceID == "" || predecessorRunID == "" {
 		return
 	}
-	lifecycleCtx, lifecycleEpoch, runs, ok := m.beginReplacementRecoveryLifecycle()
+	lifecycleCtx, lifecycleEpoch, runs, leave, ok := m.beginReplacementRecoveryLifecycle()
 	if !ok {
 		return
 	}
-	defer m.replacementRecoveryWG.Done()
+	defer leave()
 	background := m.BackgroundRoutine()
 	if background == nil {
 		return
@@ -667,7 +664,15 @@ func (m *Biz) scheduleReplacementRecovery(workspaceID common.WorkspaceID, predec
 	m.replacementRecoveryTasks[key] = lease.Generation
 	m.replacementRecoveryMu.Unlock()
 
-	err = background.AsyncFunction(func() {
+	// 提交前登记，而不是 callback 开始时登记。排队或等待 timer 的任务
+	// 即使 context 已取消，仍是实际已接受的工作。
+	taskLeave, admissionErr := m.enterOwnerCommand(false)
+	if admissionErr != nil {
+		m.clearReplacementRecoveryWakeup(lifecycleEpoch, key, lease.Generation)
+		return
+	}
+	err = background.AsyncTaskContext(lifecycleCtx, &replacementRecoveryTask{run: func() {
+		defer taskLeave()
 		clearOnReturn := true
 		defer func() {
 			if clearOnReturn {
@@ -689,30 +694,36 @@ func (m *Biz) scheduleReplacementRecovery(workspaceID common.WorkspaceID, predec
 			return
 		}
 		_ = m.driveReplacementRecoveryGeneration(workspaceID, predecessorRunID, lease.Generation)
-		m.replacementRecoveryWG.Done()
 		m.clearReplacementRecoveryWakeup(lifecycleEpoch, key, lease.Generation)
 		clearOnReturn = false
 		m.scheduleReplacementRecovery(workspaceID, predecessorRunID)
-	})
+	}})
 	if err != nil {
+		// 检查式 task API 拒绝准入后不会执行 callback。
+		taskLeave()
 		m.clearReplacementRecoveryWakeup(lifecycleEpoch, key, lease.Generation)
 	}
 }
 
-// beginReplacementRecoveryLifecycle joins the owner-local Stop drain before
-// reading Run dependencies. The returned context/epoch are wakeup identity,
-// never recovery authority; stage/generation/due time remain persisted in Run.
-func (m *Biz) beginReplacementRecoveryLifecycle() (context.Context, uint64, repository.RunRepository, bool) {
-	if m == nil {
-		return nil, 0, nil, false
+type replacementRecoveryTask struct{ run func() }
+
+func (t *replacementRecoveryTask) Run() { t.run() }
+
+// beginReplacementRecoveryLifecycle 在读取依赖前登记调度主体。
+// Lifecycle Enter/BeginShutdown 共用线性化点；不存在 WaitGroup Add/Wait
+// 竞争，也不能把 cancel 当成完成。
+func (m *Biz) beginReplacementRecoveryLifecycle() (context.Context, uint64, repository.RunRepository, func(), bool) {
+	leave, err := m.enterOwnerCommand(false)
+	if err != nil {
+		return nil, 0, nil, nil, false
 	}
 	m.replacementRecoveryMu.Lock()
 	defer m.replacementRecoveryMu.Unlock()
-	if m.replacementRecoveryCtx == nil || m.replacementRecoveryTasks == nil || m.replacementRecoveryCtx.Err() != nil || m.runs == nil {
-		return nil, 0, nil, false
+	if m.replacementRecoveryCtx == nil || m.replacementRecoveryTasks == nil || m.replacementRecoveryCtx.Err() != nil {
+		leave()
+		return nil, 0, nil, nil, false
 	}
-	m.replacementRecoveryWG.Add(1)
-	return m.replacementRecoveryCtx, m.replacementRecoveryEpoch, m.runs, true
+	return m.replacementRecoveryCtx, m.replacementRecoveryEpoch, m.runs, leave, true
 }
 
 func (m *Biz) beginReplacementRecoveryGeneration(lifecycleCtx context.Context, lifecycleEpoch uint64, key string, generation uint64) bool {
@@ -724,7 +735,6 @@ func (m *Biz) beginReplacementRecoveryGeneration(lifecycleCtx context.Context, l
 	if lifecycleCtx.Err() != nil || m.replacementRecoveryCtx == nil || m.replacementRecoveryEpoch != lifecycleEpoch || m.replacementRecoveryTasks == nil || m.replacementRecoveryTasks[key] != generation {
 		return false
 	}
-	m.replacementRecoveryWG.Add(1)
 	return true
 }
 
@@ -948,13 +958,12 @@ func (m *Biz) recoverPendingWorkspaceExecutionSuccessors() {
 	if m == nil {
 		return
 	}
-	m.commandMu.RLock()
-	if m.stopping || m.runs == nil || m.EventHub() == nil {
-		m.commandMu.RUnlock()
+	leave, admissionErr := m.enterOwnerCommand(false)
+	if admissionErr != nil {
 		return
 	}
+	defer leave()
 	runs := m.runs
-	m.commandMu.RUnlock()
 	items, err := runs.List(context.Background())
 	if err != nil {
 		return

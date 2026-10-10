@@ -5491,6 +5491,7 @@ fi
 run_replacement_recovery_contract="$(cat \
 	internal/modules/blocks/run/pkg/models/run.go \
 	internal/modules/blocks/run/biz/owner.go \
+	internal/modules/blocks/run/biz/owner_lifecycle.go \
 	internal/modules/blocks/run/biz/replacement_internal_event.go \
 	internal/modules/blocks/run/biz/workspace_execution_intent.go)"
 for marker in ReplacementRecoveryLease ReplacementRecoveryClarificationResolution ReplacementRecoveryAdministrativeTermination ReplacementRecoverySuccessorMaterialization ReplacementRecoveryScheduled ReplacementRecoveryRunning; do
@@ -5499,7 +5500,7 @@ for marker in ReplacementRecoveryLease ReplacementRecoveryClarificationResolutio
 		exit 1
 	fi
 done
-for marker in replacementRecoveryCtx replacementRecoveryCancel replacementRecoveryWG beginReplacementRecoveryGeneration; do
+for marker in replacementRecoveryCtx replacementRecoveryCancel 'lifecycle.Quiesce(ctx)' 'taskLeave, admissionErr := m.enterOwnerCommand(false)' 'defer taskLeave()' beginReplacementRecoveryGeneration; do
 	if ! grep -q -F "$marker" <<<"$run_replacement_recovery_contract"; then
 		echo "boundary contract violation: Run replacement wakeup is not bound to owner Stop/drain ($marker)" >&2
 		exit 1
