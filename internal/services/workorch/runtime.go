@@ -78,8 +78,11 @@ func (s *frameworkRuntime) Shutdown(ctx context.Context) error {
 	if !s.started {
 		return nil
 	}
+	if ctx == nil {
+		return common.ErrInvalidArgument
+	}
 	timeout := applicationShutdownTimeout()
-	shutdownCtx, cancel := context.WithTimeout(ctx, timeout)
+	shutdownCtx, cancel := newApplicationShutdownContext(ctx, timeout)
 	defer cancel()
 	if s.serverStopObserver != nil {
 		if err := s.serverStopObserver.Unsubscribe(workorchdevents.TopicWorkorchDServiceStopped); err != nil {
@@ -93,6 +96,10 @@ func (s *frameworkRuntime) Shutdown(ctx context.Context) error {
 	}
 	s.started = false
 	return nil
+}
+
+func newApplicationShutdownContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), timeout)
 }
 
 func applicationShutdownTimeout() time.Duration {

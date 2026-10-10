@@ -10,6 +10,25 @@ import (
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
 )
 
+func TestApplicationShutdownBudgetIsIndependentAndBounded(t *testing.T) {
+	type contextKey struct{}
+	parent := context.WithValue(context.Background(), contextKey{}, "retained")
+	parent, cancel := context.WithCancel(parent)
+	cancel()
+	shutdown, finish := newApplicationShutdownContext(parent, 10*time.Millisecond)
+	defer finish()
+	if shutdown.Err() != nil || shutdown.Value(contextKey{}) != "retained" {
+		t.Fatal("shutdown inherited run cancellation or lost context values")
+	}
+	if _, ok := shutdown.Deadline(); !ok {
+		t.Fatal("shutdown budget is unbounded")
+	}
+	<-shutdown.Done()
+	if shutdown.Err() != context.DeadlineExceeded {
+		t.Fatal(shutdown.Err())
+	}
+}
+
 func TestFrameworkRuntimeServerStoppedNotificationIsChannelFreeAndIdempotent(t *testing.T) {
 	runtime := &frameworkRuntime{serverStopped: make(chan struct{})}
 	first := workorchdevents.ServiceStoppedData{ServiceName: "workorch", State: "failed", ErrorCode: "server_failed", ErrorMessage: "first failure", StoppedAt: time.Now().UTC()}

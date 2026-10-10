@@ -23,11 +23,13 @@ magicCommon v1.5.17 的订阅/取消订阅结果必须检查；失败不得发�
 记录失败或发布 degraded 观察，不能伪造取消成功。资源 owner 的必需订阅沿共享 Base Biz fail-fast，
 由 framework lifecycle guard 处理；端侧可恢复订阅直接消费 checked Hub/SimpleObserver 结果。
 
-进程通过 `frameworkModuleService` 委托 DefaultService，不继承其 `Quiescer` 接口：当前各 owner 的
-Stop/Teardown 自己负责取消与排空工作，尚不提供独立 BeginShutdown/Quiesce 阶段。Application 必须先
-调用该 shell 的检查式模块关闭，保留既有 owner 停机顺序，再排空/释放共享 BackgroundRoutine 和 Hub；
-不能在尚未调用 owner Stop 时先等待其常驻 worker。该 shell 不遍历插件、不维护第二份 owner 状态。
-Setup 失败也必须清理已进入阶段；`ShutdownChecked` 失败原样返回，不能清空本地 started 标记并伪装已关闭。
+进程通过 `frameworkModuleService` 显式委托 DefaultService 的 `Quiescer` 与 `CheckedShutdown`。
+全部 owner 先 BeginShutdown 关闭 fresh 入站并取消工作，再 Quiesce 等待真实退出；随后 Application
+排空共享 BackgroundRoutine 与 Hub，最后执行检查式 Module Teardown、Initiator 释放和 Hub terminate。
+该 shell 不遍历插件、不维护第二份 owner 状态。Setup/Run 返回错误或 panic 都进入同一检查式停止路径，
+原失败与停止失败保持 cause；停止 panic 也必须作为失败返回，不能当作成功。停机预算独立于已取消的
+运行 context，并受配置超时限制。`ShutdownChecked` 失败保留 started 标记；端侧 close 失败保留
+backend/close 句柄，framework 停止失败保留 logging 句柄，允许新预算重试。
 SM-1～SM-4、归档和 owner authority 不受该基础设施接线影响。
 
 回归入口：`framework_service_test.go` 的 checked error/worker drain、`runtime_test.go` 的 server-stop

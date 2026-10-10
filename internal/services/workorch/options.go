@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	frameworkservice "github.com/muidea/magicCommon/framework/service"
 )
 
 type Mode string
@@ -40,11 +42,39 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if err := svc.Startup(ctx); err != nil {
-		return errors.Join(err, svc.Shutdown(context.Background()))
+	return runLifecycle(ctx, svc)
+}
+
+func runLifecycle(ctx context.Context, svc frameworkservice.LifecycleService) (err error) {
+	// Startup 已可能进入部分阶段；普通错误与 panic 都必须走同一检查式停止路径。
+	defer func() {
+		recovered := recover()
+		if recovered != nil {
+			if cause, ok := recovered.(error); ok {
+				err = errors.Join(err, fmt.Errorf("service lifecycle panic: %w", cause))
+			} else {
+				err = errors.Join(err, fmt.Errorf("service lifecycle panic: %v", recovered))
+			}
+		}
+		err = errors.Join(err, shutdownLifecycle(svc))
+	}()
+	if err = svc.Startup(ctx); err != nil {
+		return err
 	}
-	runErr := svc.Run(ctx)
-	return errors.Join(runErr, svc.Shutdown(context.Background()))
+	return svc.Run(ctx)
+}
+
+func shutdownLifecycle(svc frameworkservice.LifecycleService) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if cause, ok := recovered.(error); ok {
+				err = fmt.Errorf("service shutdown panic: %w", cause)
+			} else {
+				err = fmt.Errorf("service shutdown panic: %v", recovered)
+			}
+		}
+	}()
+	return svc.Shutdown(context.Background())
 }
 
 func ParseStartupArgs(args []string, forceServer bool) (StartupArgs, error) {

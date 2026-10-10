@@ -2,7 +2,6 @@ package workorch
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 
@@ -135,15 +134,18 @@ func (s *interactiveService) Run(ctx context.Context) error {
 }
 
 func (s *interactiveService) Shutdown(ctx context.Context) error {
-	var err error
 	if s.closeBackend != nil {
-		err = errors.Join(err, s.closeBackend(ctx))
+		if err := s.closeBackend(ctx); err != nil {
+			return err
+		}
 		s.closeBackend = nil
 		s.be = nil
 	}
-	err = errors.Join(err, s.framework.Shutdown(ctx))
+	if err := s.framework.Shutdown(ctx); err != nil {
+		return err
+	}
 	s.closeLogging()
-	return err
+	return nil
 }
 
 func (s *interactiveService) closeLogging() {
