@@ -98,6 +98,16 @@ func NormalizeRuntimeEffectScopes(values []RuntimeEffectScope) []RuntimeEffectSc
 	if len(values) == 0 {
 		return nil
 	}
+	canonical := true
+	for index, value := range values {
+		if value == "" || NormalizeRuntimeEffectScope(value) != value || (index > 0 && values[index-1] >= value) {
+			canonical = false
+			break
+		}
+	}
+	if canonical {
+		return append([]RuntimeEffectScope(nil), values...)
+	}
 	raw := make([]string, 0, len(values))
 	for _, value := range values {
 		scope := NormalizeRuntimeEffectScope(value)

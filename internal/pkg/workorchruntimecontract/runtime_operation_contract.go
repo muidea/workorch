@@ -204,6 +204,22 @@ func RuntimeOperationVariantRuleID(kind, variantID, rule, parameter string) stri
 }
 
 func NormalizeRuntimeOperationVariantRefs(values []RuntimeOperationVariantRef) []RuntimeOperationVariantRef {
+	canonical := true
+	last := ""
+	for index, value := range values {
+		key := value.Kind + "|" + value.VariantID
+		if value.Kind == "" || CanonicalRuntimeBlockKind(value.Kind) != value.Kind || value.VariantID == "" || strings.TrimSpace(value.VariantID) != value.VariantID || (index > 0 && last >= key) {
+			canonical = false
+			break
+		}
+		last = key
+	}
+	if canonical {
+		// 保留既有 non-nil empty 产物，且完整分离调用方 slice。
+		ret := make([]RuntimeOperationVariantRef, len(values))
+		copy(ret, values)
+		return ret
+	}
 	byKey := map[string]RuntimeOperationVariantRef{}
 	for _, value := range values {
 		value.Kind = CanonicalRuntimeBlockKind(value.Kind)

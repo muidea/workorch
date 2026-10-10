@@ -47,14 +47,9 @@ func (p CoverageEvidenceProof) Normalized() CoverageEvidenceProof {
 }
 
 func (p CoverageEvidenceProof) Clone() CoverageEvidenceProof {
+	// Normalized 已分离全部 slice；仅保留 Clone 既有的空 variants 表示。
 	p = p.Normalized()
-	p.RequiredEffectScopes = append([]RuntimeEffectScope(nil), p.RequiredEffectScopes...)
-	p.AllowedOperationKinds = append([]string(nil), p.AllowedOperationKinds...)
-	p.AllowedOperationVariants = append([]RuntimeOperationVariantRef(nil), p.AllowedOperationVariants...)
-	p.RequiredCheckRefs = append([]string(nil), p.RequiredCheckRefs...)
-	p.ValidationCheckAttestations = CloneRuntimeValidationCheckAttestationBindings(p.ValidationCheckAttestations)
-	p.MetricConstraints = append([]string(nil), p.MetricConstraints...)
-	p.ArtifactRefs = append([]string(nil), p.ArtifactRefs...)
+	p.AllowedOperationVariants = nilIfEmpty(p.AllowedOperationVariants)
 	return p
 }
 
@@ -267,18 +262,8 @@ func (b CoverageEvidenceBinding) Normalized() CoverageEvidenceBinding {
 }
 
 func (b CoverageEvidenceBinding) Clone() CoverageEvidenceBinding {
-	b = b.Normalized()
-	b.Proofs = append([]CoverageEvidenceProof(nil), b.Proofs...)
-	for index := range b.Proofs {
-		b.Proofs[index] = b.Proofs[index].Clone()
-	}
-	b.VerificationPolicy = cloneRuntimeVerificationPolicy(b.VerificationPolicy)
-	b.TargetRefs = append([]string(nil), b.TargetRefs...)
-	b.TargetSelectorCandidateRefs = append([]string(nil), b.TargetSelectorCandidateRefs...)
-	b.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), b.ProspectiveTargetAllOfConstraintRefs...)
-	b.ProspectiveTargetRefs = append([]string(nil), b.ProspectiveTargetRefs...)
-	b.PrerequisiteRefs = append([]string(nil), b.PrerequisiteRefs...)
-	return b
+	// Proofs、policy 与全部集合已由 Normalized 分离；不重复规范化和复制。
+	return b.Normalized()
 }
 
 func (b CoverageEvidenceBinding) Validate() error {
@@ -453,7 +438,11 @@ func ValidateCoverageEvidenceBindingProjection(values []CoverageEvidenceBinding)
 // canonical binding bodies. Individual binding hashes are included as audit
 // identities, while every body field is already committed by that hash.
 func StableRuntimeCoverageEvidenceBindingSnapshotHash(values []CoverageEvidenceBinding) string {
-	bindings := NormalizeCoverageEvidenceBindings(values)
+	return stableRuntimeCoverageEvidenceBindingSnapshotHashNormalized(NormalizeCoverageEvidenceBindings(values))
+}
+
+// 仅消费本次调用完整规范化所得的 binding；不接受调用方声明的成功标志。
+func stableRuntimeCoverageEvidenceBindingSnapshotHashNormalized(bindings []CoverageEvidenceBinding) string {
 	h := sha256.New()
 	writeHashString(h, "runtime-coverage-evidence-binding-snapshot/v1")
 	writeHashString(h, fmt.Sprintf("%d", len(bindings)))
