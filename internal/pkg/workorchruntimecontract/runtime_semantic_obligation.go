@@ -678,21 +678,40 @@ func compileRuntimeSemanticDefinitionProofObligation(definitionRevision string, 
 	return obligation, nil
 }
 
+type runtimeSemanticProofCatalogs struct {
+	values  []RuntimeOperationAdmissibility
+	byOwner map[string]RuntimeOperationAdmissibility
+}
+
+func validateRuntimeSemanticProofCatalogs(catalogs []RuntimeOperationAdmissibility) (runtimeSemanticProofCatalogs, error) {
+	if err := validateRuntimeSemanticOwnerCatalogCollection(catalogs); err != nil {
+		return runtimeSemanticProofCatalogs{}, err
+	}
+	// 集合门禁已完整校验每条 raw catalog；本次只构造 detached 规范化索引。
+	validated := runtimeSemanticProofCatalogs{
+		values:  NormalizeRuntimeOperationAdmissibilities(catalogs),
+		byOwner: make(map[string]RuntimeOperationAdmissibility, len(catalogs)),
+	}
+	for _, value := range validated.values {
+		validated.byOwner[value.OwnerModuleID] = value
+	}
+	return validated, nil
+}
+
 func compileRuntimeSemanticProofObligations(definitionRevision string, sourceFocuses []RuntimeDefinitionFocus, coverageItems []RuntimeCoverageItem, catalogs []RuntimeOperationAdmissibility) ([]RuntimeSemanticProofObligation, error) {
 	sourceByCoverage, err := runtimeSemanticBindingSourceFocuses(sourceFocuses)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateRuntimeSemanticOwnerCatalogCollection(catalogs); err != nil {
+	validated, err := validateRuntimeSemanticProofCatalogs(catalogs)
+	if err != nil {
 		return nil, err
 	}
-	catalogByOwner := make(map[string]RuntimeOperationAdmissibility, len(catalogs))
-	for _, raw := range NormalizeRuntimeOperationAdmissibilities(catalogs) {
-		if err := raw.Validate(); err != nil {
-			return nil, err
-		}
-		catalogByOwner[raw.OwnerModuleID] = raw
-	}
+	return compileRuntimeSemanticProofObligationsWithValidatedCatalogs(definitionRevision, sourceByCoverage, coverageItems, validated)
+}
+
+func compileRuntimeSemanticProofObligationsWithValidatedCatalogs(definitionRevision string, sourceByCoverage map[common.CoverageWorkItemID]RuntimeDefinitionFocus, coverageItems []RuntimeCoverageItem, validated runtimeSemanticProofCatalogs) ([]RuntimeSemanticProofObligation, error) {
+	catalogs, catalogByOwner := validated.values, validated.byOwner
 	ret := make([]RuntimeSemanticProofObligation, 0, len(coverageItems))
 	for _, item := range NormalizeRuntimeCoverageItems(coverageItems) {
 		source, found := sourceByCoverage[item.ID]
@@ -753,10 +772,14 @@ func compileRuntimeSemanticProofObligations(definitionRevision string, sourceFoc
 				if !found {
 					return nil, fmt.Errorf("runtime semantic proof obligation for coverage %q has no required owner dependency catalog", item.ID)
 				}
-				resolved, resolveErr := ResolveRuntimeProspectiveTargetSatisfactionConstraint(
+				// requiredOwnerCatalog 来自本次 raw 门禁后的 detached 索引；不重复校验整份目录。
+				if err := convergence.Requirement.Validate(); err != nil {
+					return nil, fmt.Errorf("runtime semantic proof obligation for coverage %q prospective target constraint: %w", item.ID, err)
+				}
+				resolved, _, resolveErr := resolveRuntimeProspectiveTargetSatisfactionConstraintNormalized(
 					requiredOwnerCatalog,
-					convergence.Requirement,
-					convergence.ProspectiveSatisfactionContractRef,
+					convergence.Requirement.Normalized(),
+					strings.TrimSpace(convergence.ProspectiveSatisfactionContractRef),
 				)
 				if resolveErr != nil {
 					return nil, fmt.Errorf("runtime semantic proof obligation for coverage %q prospective target constraint: %w", item.ID, resolveErr)

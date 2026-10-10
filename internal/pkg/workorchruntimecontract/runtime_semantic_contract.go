@@ -1314,13 +1314,14 @@ func sameRuntimeSemanticNormalizedStrings(left, right []string) bool {
 // activation-owned DefinitionFocuses, never with source facts reconstructed
 // from the manifest itself.
 func ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest RuntimeSemanticPlanManifest, seed RuntimeDefinitionSeed, definitionFocuses []RuntimeDefinitionFocus) error {
-	if err := manifest.Validate(); err != nil {
+	validated, err := validateRuntimeSemanticPlanManifest(manifest)
+	if err != nil {
 		return err
 	}
 	if err := seed.Validate(); err != nil {
 		return fmt.Errorf("runtime semantic manifest authoritative Definition seed: %w", err)
 	}
-	manifest = manifest.Normalized()
+	manifest = validated.manifest
 	seed = seed.Clone()
 	if manifest.DefinitionRevision != seed.DefinitionRevision || manifest.DefinitionSeedHash != seed.Hash {
 		return fmt.Errorf("runtime semantic manifest does not match authoritative Definition seed identity")
@@ -1368,6 +1369,7 @@ func ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest RuntimeSemant
 		seenCatalogOwners[catalog.OwnerModuleID] = struct{}{}
 		catalogs = append(catalogs, catalog)
 	}
+	var proofCatalogs *runtimeSemanticProofCatalogs
 	for _, actual := range manifest.ProofObligations {
 		item, found := runtimeCoverageItemForID(manifest.CoverageItems, actual.CoverageWorkItemID)
 		if !found {
@@ -1390,11 +1392,19 @@ func ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest RuntimeSemant
 			continue
 		}
 		if actual.ValidationFailureRepair == nil {
-			recompiled, compileErr := compileRuntimeSemanticProofObligations(
+			// 同一 manifest 的各 CWI 共用本次完整 raw 门禁后的目录，不保存成功状态。
+			if proofCatalogs == nil {
+				validated, err := validateRuntimeSemanticProofCatalogs(catalogs)
+				if err != nil {
+					return fmt.Errorf("runtime semantic manifest Definition proof obligation coverage %q: %w", actual.CoverageWorkItemID, err)
+				}
+				proofCatalogs = &validated
+			}
+			recompiled, compileErr := compileRuntimeSemanticProofObligationsWithValidatedCatalogs(
 				manifest.DefinitionRevision,
-				[]RuntimeDefinitionFocus{source},
+				map[common.CoverageWorkItemID]RuntimeDefinitionFocus{item.ID: source},
 				[]RuntimeCoverageItem{item},
-				catalogs,
+				*proofCatalogs,
 			)
 			if compileErr != nil {
 				return fmt.Errorf("runtime semantic manifest Definition proof obligation coverage %q: %w", actual.CoverageWorkItemID, compileErr)
