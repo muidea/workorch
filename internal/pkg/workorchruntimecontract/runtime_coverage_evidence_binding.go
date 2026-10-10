@@ -267,6 +267,20 @@ func (b CoverageEvidenceBinding) Clone() CoverageEvidenceBinding {
 }
 
 func (b CoverageEvidenceBinding) Validate() error {
+	if err := validateCoverageEvidenceBindingRawProofs(b); err != nil {
+		return err
+	}
+	b = b.Normalized()
+	if err := validateCoverageEvidenceBindingNormalizedBody(b); err != nil {
+		return err
+	}
+	if b.Hash != "" && b.Hash != stableCoverageEvidenceBindingHashNormalized(b) {
+		return fmt.Errorf("coverage evidence binding %q hash does not match contents", b.ID)
+	}
+	return nil
+}
+
+func validateCoverageEvidenceBindingRawProofs(b CoverageEvidenceBinding) error {
 	if err := ValidateRuntimeLineageAssertions(b.LineageAssertions, b.CoverageWorkItemID, b.DeclarationRef); err != nil {
 		return err
 	}
@@ -284,7 +298,11 @@ func (b CoverageEvidenceBinding) Validate() error {
 			return fmt.Errorf("coverage evidence binding %q: %w", strings.TrimSpace(b.ID), err)
 		}
 	}
-	b = b.Normalized()
+	return nil
+}
+
+// 只接收本次调用的 detached 规范化正文；原始 proof 与 hash 由调用入口独立反证。
+func validateCoverageEvidenceBindingNormalizedBody(b CoverageEvidenceBinding) error {
 	if b.ID == "" || b.CoverageWorkItemID == "" || b.FocusID == "" || b.DefinitionRevision == "" || b.DeclarationRef == "" {
 		return fmt.Errorf("coverage evidence binding requires identity, coverage item, focus, definition and declaration")
 	}
@@ -325,9 +343,6 @@ func (b CoverageEvidenceBinding) Validate() error {
 				return fmt.Errorf("coverage evidence binding %q prospective target %q is outside selector candidates", b.ID, targetRef)
 			}
 		}
-	}
-	if b.Hash != "" && b.Hash != stableCoverageEvidenceBindingHashNormalized(b) {
-		return fmt.Errorf("coverage evidence binding %q hash does not match contents", b.ID)
 	}
 	return nil
 }
@@ -422,12 +437,16 @@ func ValidateCoverageEvidenceBindingProjection(values []CoverageEvidenceBinding)
 		return fmt.Errorf("coverage evidence binding projection is not canonical")
 	}
 	seen := make(map[string]struct{}, len(values))
-	for _, binding := range values {
+	for idx, binding := range values {
 		if _, duplicate := seen[binding.ID]; duplicate {
 			return fmt.Errorf("coverage evidence binding projection duplicates %q", binding.ID)
 		}
 		seen[binding.ID] = struct{}{}
-		if err := binding.Validate(); err != nil {
+		if err := validateCoverageEvidenceBindingRawProofs(binding); err != nil {
+			return fmt.Errorf("coverage evidence binding projection %q: %w", binding.ID, err)
+		}
+		// 上面的原值比较已反证完整正文及重算 hash；仅在本次调用复用其 detached 正文。
+		if err := validateCoverageEvidenceBindingNormalizedBody(normalized[idx]); err != nil {
 			return fmt.Errorf("coverage evidence binding projection %q: %w", binding.ID, err)
 		}
 	}

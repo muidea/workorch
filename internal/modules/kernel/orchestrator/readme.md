@@ -74,7 +74,10 @@ capability resource state。
   静态 operation descriptor 的内部证据资格查询只读初始化库存，不复制随后丢弃的 `AllowedStates`；公开 getter 仍深拷贝。
   `runtime_coverage_evidence_descriptor_lookup_test.go` 以旧 getter 路径为 reference 覆盖全部 kind、未知与非规范输入、重复调用和公开副本隔离；不减少任何 proof、raw 或 aggregate 校验。
   `runtime_coverage_evidence_binding_hash_test.go` 和 `runtime_candidate_session_validation_test.go` 固定 hash、重复调用、
-  同版本重载、来源篡改与深拷贝边界。已规范化字符串集合仍返回 detached 副本，非规范输入保留 trim／去重／排序语义，
+  同版本重载、来源篡改与深拷贝边界。binding projection 在同次完整 raw-canonical 正文／hash 比较后复用 detached
+  规范化正文，仍逐项验证原始 proof、重复身份、目标与 policy；公开 binding 校验与后续调用重新反证，不保存成功缓存。
+  `runtime_binding_projection_validation_reuse_test.go` 以旧校验路径固定接受／拒绝原因等价、原值、重载、fuzz 和分配成本。
+  已规范化字符串集合仍返回 detached 副本，非规范输入保留 trim／去重／排序语义，
   由 `runtime_normalize_strings_test.go` 的 reference 与 fuzz 固定。SM-3 证据投影先反证原始 accepted/rejected exact cardinality，
   再仅规范化匹配的单条证据，并逐次检查 exact processed-event fence；不复制无关 Facts，也不缓存成功结果，
   由 `biz/runtime/evidence_projection_normalization_test.go` 与既有 fresh-load 账本篡改测试固定。崩溃注入 wrapper 保留 production Coordinator 的完整 aggregate gate 和
