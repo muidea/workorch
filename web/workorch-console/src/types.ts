@@ -915,8 +915,44 @@ export type RuntimeCheckpointPage = {
   hasMore: boolean;
 };
 
+export type RuntimeSourceObligationCheck = {
+  InventoryHash: string;
+  ObligationID: string;
+  RequirementID: string;
+  VerificationID: string;
+  Criterion: string;
+  Declaration: string;
+  CheckRef: string;
+};
+
+export type RuntimeSourceObligationOutcome = {
+  Check: RuntimeSourceObligationCheck;
+  CoverageState: string;
+  AssessmentState: string;
+  AssessmentReasonCode: string;
+  AcceptedEvidenceRefs?: string[];
+  CurrentBindingRef?: {
+    BindingID: string;
+    BindingHash: string;
+    FocusID: string;
+    SemanticManifestHash: string;
+  };
+};
+
+export type RuntimeResultCloseout = {
+  CloseoutID: string;
+  StartupInputHash: string;
+  DefinitionRevision: string;
+  CloseoutHash: string;
+  RequirementOutcomes?: {
+    CoverageWorkItemID: string;
+    SourceObligations?: RuntimeSourceObligationOutcome[];
+  }[];
+};
+
 export type Result = {
   originalDiagnostic?: RuntimeOriginalDiagnostic;
+  runtimeCloseout?: RuntimeResultCloseout;
   id: string;
   workspaceId: string;
   runId: string;

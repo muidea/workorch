@@ -12,6 +12,7 @@ import { modelLabels } from '../utils/constants';
 import { llmUsageValue } from '../llmUsagePresentation';
 import { originalDiagnosticLabel } from '../runtimeProgressPresentation';
 import { RuntimeInputReviewDetails } from '../components/RuntimeInputReviewDetails';
+import { RuntimeSourceObligationDetails } from '../components/RuntimeSourceObligationDetails';
 import * as helpers from '../helpers';
 import { canonicalActiveRunIsGovernanceBlocked, canonicalDefinitionClarification, workspaceDefinitionClarification, workspaceExecutionIntentAllowed } from '../governanceMutationTarget';
 
@@ -1309,6 +1310,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
                   ]}
                 />
                 <RuntimeInputReviewDetails diagnostic={outcomeResult?.originalDiagnostic} />
+                <RuntimeSourceObligationDetails closeout={outcomeResult?.runtimeCloseout} />
                 <CardGrid>
                   <ProCard title={modelLabels.doDAssessment} colSpan={{ xs: 24, lg: 12 }}>
                     {outcomeDoDItems.length ? (

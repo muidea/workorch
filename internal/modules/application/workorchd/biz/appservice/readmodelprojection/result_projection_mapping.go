@@ -30,6 +30,8 @@ func mapResult(item *resultmodel.Result) projectioncontract.Result {
 	}
 	if item.RuntimeCloseout != nil {
 		result.OriginalDiagnostic = item.RuntimeCloseout.OriginalDiagnostic.CloneOriginal()
+		closeout := item.RuntimeCloseout.CloneRaw()
+		result.RuntimeCloseout = &closeout
 	}
 	return result
 }
@@ -77,6 +79,8 @@ func projectResult(item *resultmodel.Result) projectioncontract.Result {
 	}
 	if item.RuntimeCloseout != nil {
 		result.OriginalDiagnostic = item.RuntimeCloseout.OriginalDiagnostic.CloneOriginal()
+		closeout := item.RuntimeCloseout.CloneRaw()
+		result.RuntimeCloseout = &closeout
 	}
 	return result
 }

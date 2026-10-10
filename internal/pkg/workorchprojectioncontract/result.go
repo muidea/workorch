@@ -7,6 +7,7 @@ import (
 
 type Result struct {
 	OriginalDiagnostic *runtimecontract.RuntimeOriginalDiagnostic `json:"originalDiagnostic,omitempty"`
+	RuntimeCloseout    *runtimecontract.RuntimeResultCloseout     `json:"runtimeCloseout,omitempty"`
 	ID                 string                                     `json:"id"`
 	WorkspaceID        string                                     `json:"workspaceId"`
 	RunID              string                                     `json:"runId"`
@@ -27,6 +28,10 @@ type Result struct {
 
 func CloneResult(item Result) Result {
 	item.OriginalDiagnostic = item.OriginalDiagnostic.CloneOriginal()
+	if item.RuntimeCloseout != nil {
+		closeout := item.RuntimeCloseout.CloneRaw()
+		item.RuntimeCloseout = &closeout
+	}
 	item.EvidenceRefs = append([]string(nil), item.EvidenceRefs...)
 	item.ArtifactRefs = append([]string(nil), item.ArtifactRefs...)
 	if item.DoDAssessment != nil {
