@@ -40,6 +40,14 @@ exact opaque RequestIdentity、完整 accepted command hash、target、configura
 不混入 request URL、配置或凭据。审计发布错误单独记录，不覆盖已经确定的 typed outcome；发布不等于持久投递。
 Runtime 的原始 body／stream 禁止跨 owner 规则不变，此文档诊断合同只用于创建期 Workspace 受限查询。
 
+## 生命周期合同
+
+- 普通及 matched 订阅按每次成功获取登记；部分 Start 失败保留冻结配置、provider 和订阅账本，未清理前不能重复注册。退订成功才移除对应项。
+- BeginShutdown 非等待式关闭新请求；只有冻结 active configuration 查询允许只读 drain。catalog、selection、ceiling 可能触发 refresh，不能因名字为查询就放行；candidate/preflight 和新 provider 请求同样拒绝。
+- handler 票覆盖真实 provider/catalog 返回及同一 handler 的审计发布，不以调用方取消或 HTTP 关闭证明远端未执行。Quiesce 超时保留配置、physical submission guard 和依赖，可用新预算重试。
+- 最终 Stop 封全部入站并再次排空，逆序 checked 退订全部成功后才清 owner/Module 引用。未知 panic 保留原因并释放清理 claim；调用方串行 Configure/Start/Stop，不能覆盖未释放 owner。
+- 本地排空不替代共享任务与 Hub 屏障，不更改 SM-1～SM-4、提交身份、预算/unknown、原始诊断或 C0～C2/cache 合同。`biz/owner_lifecycle_test.go` 和 `module_lifecycle_test.go` 覆盖订阅切点、失败重试、真实 mock transport 返回及 framework guard。
+
 ## 不变量与非职责
 
 - semantic 请求必须携带 Orchestrator 的只读 coverage progress：完整 sealed inventory 的验收计数、当前 manifest/

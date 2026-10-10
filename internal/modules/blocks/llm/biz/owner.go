@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -18,7 +19,6 @@ import (
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	llmproviderconfig "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/providerconfig"
-	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
@@ -44,8 +44,12 @@ type Biz struct {
 	activeLLMConfigurationRevision    string
 	activeLLMConfigurationInitialized bool
 	physicalSubmissionGuard           *runtimePhysicalSubmissionGuard
-	topics                            []string
+	subscriptions                     []ownerSubscription
 	started                           bool
+	lifecycle                         basebiz.Lifecycle
+	shutdownMu                        sync.Mutex
+	releasing                         bool
+	released                          bool
 }
 
 type Dependencies struct {
@@ -106,15 +110,23 @@ func (m *Biz) Start() error {
 	if m == nil || m.catalogService == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	leave, err := m.enterOwner(false)
+	if err != nil {
+		return err
+	}
+	defer leave()
 	if m.started {
 		return nil
+	}
+	if len(m.subscriptions) != 0 {
+		return common.ErrConflict
 	}
 	if !m.activeLLMConfigurationInitialized {
 		if err := m.captureActiveLLMConfiguration(); err != nil {
 			return err
 		}
 	}
-	m.topics = []string{
+	topics := []string{
 		llmevents.TopicLLMCommandCompleteProvider,
 		llmevents.TopicLLMCommandCompleteProviderDocument,
 		llmevents.TopicLLMCommandGenerateEmbedding,
@@ -123,18 +135,25 @@ func (m *Biz) Start() error {
 		llmevents.TopicLLMCommandRefreshProviderModelCatalog,
 		llmevents.TopicLLMCommandValidateInferenceSelection,
 	}
-	for _, topic := range m.topics {
-		m.SubscribeFunc(topic, m.handleCommand)
+	for _, topic := range topics {
+		if err := m.subscribeOwner(topic, m.handleCommand, false); err != nil {
+			return err
+		}
 	}
-	m.SubscribeFunc(llmevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.topics = append(m.topics, llmevents.TopicAcquireRuntimeCapabilities)
-	m.SubscribeFunc(llmevents.TopicPreflightRuntimeCandidate, m.handleRuntimeCandidatePreflight)
-	m.topics = append(m.topics, llmevents.TopicPreflightRuntimeCandidate)
+	if err := m.subscribeOwner(llmevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities, false); err != nil {
+		return err
+	}
+	if err := m.subscribeOwner(llmevents.TopicPreflightRuntimeCandidate, m.handleRuntimeCandidatePreflight, false); err != nil {
+		return err
+	}
 	if m.candidateProvider != nil {
-		m.SubscribeFunc(llmevents.TopicRequestRuntimeCandidate, m.handleRuntimeCandidate)
-		m.topics = append(m.topics, llmevents.TopicRequestRuntimeCandidate)
+		if err := m.subscribeOwner(llmevents.TopicRequestRuntimeCandidate, m.handleRuntimeCandidate, false); err != nil {
+			return err
+		}
 	}
-	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", orchestratorevents.PrerequisiteCommandDestination, llmevents.TopicAcquireProviderCeiling, m.handleProviderCeilingPrerequisite)
+	if err := m.subscribeOwner(llmevents.TopicAcquireProviderCeiling, m.handleProviderCeilingPrerequisite, true); err != nil {
+		return err
+	}
 	m.started = true
 	return nil
 }
@@ -210,15 +229,46 @@ func (m *Biz) handleRuntimeCapabilities(event magicevent.Event, result magiceven
 	result.Set(response, nil)
 }
 
-func (m *Biz) Teardown(context.Context) {
+func (m *Biz) Teardown(ctx context.Context) error {
 	if m == nil {
-		return
+		return nil
 	}
-	for idx := len(m.topics) - 1; idx >= 0; idx-- {
-		m.UnsubscribeFunc(m.topics[idx])
+	m.BeginShutdown(ctx)
+	if err := m.Quiesce(ctx); err != nil {
+		return err
 	}
-	m.topics = nil
-	m.UnsubscribeMatchedFunc(ModuleID+"/prerequisite", llmevents.TopicAcquireProviderCeiling)
+	m.shutdownMu.Lock()
+	if m.releasing {
+		m.shutdownMu.Unlock()
+		return common.ErrConflict
+	}
+	m.releasing = true
+	m.shutdownMu.Unlock()
+	defer func() {
+		m.shutdownMu.Lock()
+		m.releasing = false
+		m.shutdownMu.Unlock()
+	}()
+	if err := m.Quiesce(ctx); err != nil {
+		return err
+	}
+	for len(m.subscriptions) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		last := len(m.subscriptions) - 1
+		entry := m.subscriptions[last]
+		var err error
+		if entry.matched {
+			err = m.UnsubscribeMatchedFuncChecked(ModuleID+"/prerequisite", entry.topic)
+		} else {
+			err = m.UnsubscribeFuncChecked(entry.topic)
+		}
+		if err != nil {
+			return err
+		}
+		m.subscriptions = m.subscriptions[:last]
+	}
 	m.catalogService = nil
 	m.candidateProvider = nil
 	m.activeLLMConfig = workorchconfig.LLMConfig{}
@@ -226,6 +276,10 @@ func (m *Biz) Teardown(context.Context) {
 	m.activeLLMConfigurationInitialized = false
 	m.physicalSubmissionGuard.clear()
 	m.started = false
+	m.shutdownMu.Lock()
+	m.released = true
+	m.shutdownMu.Unlock()
+	return nil
 }
 
 // handleRuntimeCandidatePreflight renders the sealed C0-C5 request and runs

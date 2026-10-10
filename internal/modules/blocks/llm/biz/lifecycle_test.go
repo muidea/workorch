@@ -30,19 +30,19 @@ func TestLLMOwnerStartIsIdempotentAndTeardownClearsLifecycle(t *testing.T) {
 	if err := owner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	topicCount := len(owner.topics)
+	topicCount := len(owner.subscriptions)
 	if !owner.started || topicCount == 0 {
 		t.Fatalf("owner lifecycle = started:%t topics:%d", owner.started, topicCount)
 	}
 	if err := owner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if len(owner.topics) != topicCount {
-		t.Fatalf("second Start changed subscriptions: %d -> %d", topicCount, len(owner.topics))
+	if len(owner.subscriptions) != topicCount {
+		t.Fatalf("second Start changed subscriptions: %d -> %d", topicCount, len(owner.subscriptions))
 	}
 	owner.Teardown(ctx)
-	if owner.started || len(owner.topics) != 0 || owner.catalogService != nil || owner.candidateProvider != nil {
-		t.Fatalf("owner teardown retained lifecycle resources: started=%t topics=%d", owner.started, len(owner.topics))
+	if owner.started || len(owner.subscriptions) != 0 || owner.catalogService != nil || owner.candidateProvider != nil {
+		t.Fatalf("owner teardown retained lifecycle resources: started=%t topics=%d", owner.started, len(owner.subscriptions))
 	}
 }
 
