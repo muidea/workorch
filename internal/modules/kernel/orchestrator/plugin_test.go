@@ -184,6 +184,7 @@ func TestModuleTeardownCheckedRetainsBlockedOwnerAndRetriesWithoutDuplicateRelea
 
 	// 即使 framework Run context 已取消，独立停机预算仍须报告真实阻塞的 reader。
 	// 第二次失败证明第一次没有将实际 Module 标记为 released。
+	// 新阶段协议要求全部 Quiesce 成功后才进入任何最终释放；即使较高权重的 probe 也不能提前释放。
 	for attempt := 1; attempt <= 2; attempt++ {
 		stopCtx, cancelStop := context.WithTimeout(context.Background(), 20*time.Millisecond)
 		err := manager.TeardownChecked(stopCtx)
@@ -194,7 +195,7 @@ func TestModuleTeardownCheckedRetainsBlockedOwnerAndRetriesWithoutDuplicateRelea
 		if module.bizPtr != originalBiz {
 			t.Fatalf("teardown attempt %d discarded or replaced original Biz", attempt)
 		}
-		if before.teardownCalls != 1 || downstream.teardownCalls != 0 {
+		if before.teardownCalls != 0 || downstream.teardownCalls != 0 {
 			t.Fatalf("teardown attempt %d released wrong owners: before=%d downstream=%d",
 				attempt, before.teardownCalls, downstream.teardownCalls)
 		}

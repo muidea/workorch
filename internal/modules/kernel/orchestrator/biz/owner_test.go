@@ -68,20 +68,20 @@ func TestModuleIdentityConfigureStartStopContract(t *testing.T) {
 	if err := module.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	firstSubscriptionCount := len(module.rawTopics)
+	firstSubscriptionCount := len(module.subscriptions)
 	if firstSubscriptionCount == 0 {
 		t.Fatal("Start did not subscribe orchestrator commands")
 	}
 	if err := module.Start(); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if len(module.rawTopics) != firstSubscriptionCount {
-		t.Fatalf("second Start subscription count = %d, want %d", len(module.rawTopics), firstSubscriptionCount)
+	if len(module.subscriptions) != firstSubscriptionCount {
+		t.Fatalf("second Start subscription count = %d, want %d", len(module.subscriptions), firstSubscriptionCount)
 	}
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if module.runtimeController != nil || module.started || len(module.rawTopics) != 0 {
+	if module.runtimeController != nil || module.started || len(module.subscriptions) != 0 {
 		t.Fatalf("module was not cleared after Stop: %+v", module)
 	}
 	if err := module.Stop(context.Background()); err != nil {
@@ -165,8 +165,8 @@ func TestFailedStartRemovesAllIngressAndCancelsLifecycle(t *testing.T) {
 	if err := module.StartContext(context.Background()); err == nil {
 		t.Fatal("Start succeeded without recovery inventory")
 	}
-	if module.started || len(module.rawTopics) != 0 || module.lifecycleCtx != nil || module.lifecycleCancel != nil {
-		t.Fatalf("failed Start retained ingress/lifecycle: started=%v topics=%d lifecycle=%v", module.started, len(module.rawTopics), module.lifecycleCtx)
+	if module.started || len(module.subscriptions) == 0 || module.lifecycleCtx == nil || module.lifecycleCancel == nil {
+		t.Fatalf("failed Start lost partial resources: started=%v topics=%d lifecycle=%v", module.started, len(module.subscriptions), module.lifecycleCtx)
 	}
 	module.driveMu.Lock()
 	closing := module.runtimeLeaseTimerClosing
@@ -193,10 +193,20 @@ func TestFailedStartRemovesAllIngressAndCancelsLifecycle(t *testing.T) {
 			result.Set(runevents.QueryRuntimeRecoveryInventoryResult{}, nil)
 		}
 	})
-	if err := module.StartContext(context.Background()); err != nil {
-		t.Fatalf("Start retry after recovery repair: %v", err)
+	if err := module.StartContext(context.Background()); err == nil {
+		t.Fatal("partial Start reopened resources")
 	}
-	if !module.started || len(module.rawTopics) == 0 {
+	if err := module.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	module = New()
+	if err := module.Configure(deps); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.StartContext(context.Background()); err != nil {
+		t.Fatalf("new owner Start after checked cleanup: %v", err)
+	}
+	if !module.started || len(module.subscriptions) == 0 {
 		t.Fatal("Start retry did not restore lifecycle ingress")
 	}
 	module.driveMu.Lock()

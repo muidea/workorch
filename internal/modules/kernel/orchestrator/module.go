@@ -24,6 +24,9 @@ func (m *Module) Configure(deps orchestratorbiz.Dependencies) error {
 	if m == nil || deps.CommandHub == nil {
 		return common.ErrInvalidArgument
 	}
+	if m.bizPtr != nil {
+		return common.ErrConflict
+	}
 	owner := orchestratorbiz.New()
 	if err := owner.Configure(deps); err != nil {
 		return err

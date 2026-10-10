@@ -534,8 +534,8 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
   dormancy。历史 administrative retired marker 只绑定首代 terminal handoff，不阻止 current exact later-generation request 重物化。
   Stop 清理本地等待但不删除 durable lease，fresh startup从 Run owner inventory恢复。
 - framework `Setup` 必须同时注入 EventHub 与 `BackgroundRoutine`，`Run(ctx)` 把 framework context 绑定到全部 owner-local drive、
-  timer 和 startup recovery。startup 任一步失败必须撤销订阅并取消本地 lifecycle；`Stop(ctx)` 先取消 context、关闭 ingress，
-  再按 deadline 等待既有 handler/drive 退出并清空本地依赖。该锁与 context 只做 Module 生命周期同步，不是 SM-1/SM-4 authority；
+  timer 和 startup recovery。startup 失败关闭 fresh admission、取消后续本地调度，但保留已获得的逐项订阅、cancel、gate 与依赖，不能提前清理 accepted 队列工作；检查式 Stop 成功后由新实例重试启动。`BeginShutdown` 非等待地关闭新 drive／新事务／新调度，保留原 source、scope、dispatch、grant、binding 与 CAS 校验下的 receipt、治理结果和只读查询入口。`Quiesce` 等待 handler、提交中的工作及 accepted 队列 callback 真实结束，并检查原 lifecycle 读锁；cancel、Timer.Stop 或 Send 超时不等于真实退出。
+  `Stop(ctx)` 在预算内排空后封闭全部入站，再次排空，逆序 checked 退订并逐成功移除账本；任何失败或未知 panic 保留剩余账本与依赖供新预算重试。异步 drive、lease timer 与 settlement task 在提交前取生命周期票，拒绝释放票，accepted callback 真实退出才释放。该锁与 context 只做 Module 生命周期同步，不是 SM-1/SM-4 authority；
   durable successor仍只来自 aggregate lease/authorization，重启从 Run owner inventory 恢复。Module 保持 startup weight 30、
   teardown weight 90：前者保证 Orchestrator ingress 先于 Run recovery，后者保证 Orchestrator worker 先于 Run/capability teardown
   停止；两个依赖顺序不得再复用同一个反向权重推导。

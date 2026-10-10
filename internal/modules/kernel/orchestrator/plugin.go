@@ -37,7 +37,7 @@ func (m *Module) Setup(_ context.Context, rawEventHub event.Hub, backgroundRouti
 		CommandHub:        rawEventHub,
 		BackgroundRoutine: backgroundRoutine,
 	}); setupErr != nil {
-		return cd.NewError(cd.Unexpected, setupErr.Error())
+		return cd.WrapError(cd.Unexpected, setupErr, "orchestrator setup failed")
 	}
 	return nil
 }
@@ -47,7 +47,22 @@ func (m *Module) Run(ctx context.Context) *cd.Error {
 		return cd.NewError(cd.IllegalParam, "orchestrator module is not configured")
 	}
 	if err := m.bizPtr.StartContext(ctx); err != nil {
-		return cd.NewError(cd.Unexpected, err.Error())
+		return cd.WrapError(cd.Unexpected, err, "orchestrator start failed")
+	}
+	return nil
+}
+
+func (m *Module) BeginShutdown(ctx context.Context) {
+	if m != nil && m.bizPtr != nil {
+		m.bizPtr.BeginShutdown(ctx)
+	}
+}
+
+func (m *Module) Quiesce(ctx context.Context) *cd.Error {
+	if m != nil && m.bizPtr != nil {
+		if err := m.bizPtr.Quiesce(ctx); err != nil {
+			return cd.WrapError(cd.Unexpected, err, "orchestrator quiesce failed")
+		}
 	}
 	return nil
 }
