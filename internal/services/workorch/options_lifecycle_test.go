@@ -3,7 +3,9 @@ package workorch
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type lifecycleFailureService struct {
@@ -34,10 +36,13 @@ func (s *lifecycleFailureService) Shutdown(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if s.panicStage == "shutdown" {
+	if s.panicStage == "shutdown" && s.shutdowns == 1 {
 		panic(s.panicValue)
 	}
-	return s.shutdownError
+	if s.shutdowns == 1 {
+		return s.shutdownError
+	}
+	return nil
 }
 
 func TestRunLifecycleAlwaysPerformsCheckedShutdownAndPreservesCauses(t *testing.T) {
@@ -56,8 +61,12 @@ func TestRunLifecycleAlwaysPerformsCheckedShutdownAndPreservesCauses(t *testing.
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
-			err := runLifecycle(ctx, svc)
-			if svc.shutdowns != 1 {
+			err := runLifecycleWithRetry(ctx, svc, 0)
+			wantShutdowns := 1
+			if svc.shutdownError != nil || stage == "shutdown" {
+				wantShutdowns = 2
+			}
+			if svc.shutdowns != wantShutdowns {
 				t.Fatalf("shutdowns=%d", svc.shutdowns)
 			}
 			if stage == "success" {
@@ -74,6 +83,45 @@ func TestRunLifecycleAlwaysPerformsCheckedShutdownAndPreservesCauses(t *testing.
 				t.Fatal("Run entered after failed Startup")
 			}
 		})
+	}
+}
+
+type retryBlockedService struct {
+	attempts atomic.Int32
+	entered  chan struct{}
+	release  chan struct{}
+}
+
+func (*retryBlockedService) Startup(context.Context) error { return nil }
+func (*retryBlockedService) Run(context.Context) error     { return nil }
+func (s *retryBlockedService) Shutdown(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if s.attempts.Add(1) == 1 {
+		close(s.entered)
+		return context.DeadlineExceeded
+	}
+	<-s.release
+	return nil
+}
+
+func TestRunLifecycleCannotReturnBeforeSuccessfulShutdownRetry(t *testing.T) {
+	svc := &retryBlockedService{entered: make(chan struct{}), release: make(chan struct{})}
+	done := make(chan error, 1)
+	go func() { done <- runLifecycleWithRetry(context.Background(), svc, 0) }()
+	<-svc.entered
+	select {
+	case err := <-done:
+		t.Fatalf("returned before release: %v", err)
+	case <-time.After(10 * time.Millisecond):
+	}
+	close(svc.release)
+	if err := <-done; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	if svc.attempts.Load() != 2 {
+		t.Fatalf("attempts=%d", svc.attempts.Load())
 	}
 }
 

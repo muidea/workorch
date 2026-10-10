@@ -29,7 +29,9 @@ magicCommon v1.5.17 的订阅/取消订阅结果必须检查；失败不得发�
 该 shell 不遍历插件、不维护第二份 owner 状态。Setup/Run 返回错误或 panic 都进入同一检查式停止路径，
 原失败与停止失败保持 cause；停止 panic 也必须作为失败返回，不能当作成功。停机预算独立于已取消的
 运行 context，并受配置超时限制。`ShutdownChecked` 失败保留 started 标记；端侧 close 失败保留
-backend/close 句柄，framework 停止失败保留 logging 句柄，允许新预算重试。
+backend/close 句柄，framework 停止失败保留 logging 句柄。正式 Run 入口每隔一秒对同一实例以新预算重试
+停止，包含停止 panic；真正停止成功前不返回给 main，不允许 log.Fatal 提前退出。返回错误保留首个
+停止失败 cause，不随持续重试累积无界错误树。
 SM-1～SM-4、归档和 owner authority 不受该基础设施接线影响。
 
 回归入口：`framework_service_test.go` 的 checked error/worker drain、`runtime_test.go` 的 server-stop

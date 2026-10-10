@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"time"
 
 	frameworkservice "github.com/muidea/magicCommon/framework/service"
 )
@@ -45,7 +47,12 @@ func Run(ctx context.Context, opts Options) error {
 	return runLifecycle(ctx, svc)
 }
 
-func runLifecycle(ctx context.Context, svc frameworkservice.LifecycleService) (err error) {
+func runLifecycle(ctx context.Context, svc frameworkservice.LifecycleService) error {
+	return runLifecycleWithRetry(ctx, svc, time.Second)
+}
+
+func runLifecycleWithRetry(ctx context.Context, svc frameworkservice.LifecycleService, retryDelay time.Duration) (err error) {
+	shutdownFailed := false
 	// Startup 已可能进入部分阶段；普通错误与 panic 都必须走同一检查式停止路径。
 	defer func() {
 		recovered := recover()
@@ -56,7 +63,19 @@ func runLifecycle(ctx context.Context, svc frameworkservice.LifecycleService) (e
 				err = errors.Join(err, fmt.Errorf("service lifecycle panic: %v", recovered))
 			}
 		}
-		err = errors.Join(err, shutdownLifecycle(svc))
+		for {
+			shutdownErr := shutdownLifecycle(svc)
+			if shutdownErr == nil {
+				break
+			}
+			// 保留首个停止失败 cause，不随无限重试累积错误树；未排空不得退出。
+			if !shutdownFailed {
+				err = errors.Join(err, shutdownErr)
+				shutdownFailed = true
+			}
+			slog.Error("shutdown incomplete; retaining service and retrying", "error", shutdownErr)
+			time.Sleep(retryDelay)
+		}
 	}()
 	if err = svc.Startup(ctx); err != nil {
 		return err
