@@ -94,9 +94,15 @@ func (a RuntimeAssessmentAuthorityInput) Validate(transaction AuthorityTransacti
 }
 
 func StableRuntimeAssessmentAuthorityInputHash(value RuntimeAssessmentAuthorityInput) string {
+	// 保持原 JSON 编码，复用同次 marshal 缓冲容纳域前缀，不另建前缀＋正文缓冲。
+	const prefix = "runtime-assessment-authority-input/v1\x00"
 	value = value.Normalized()
 	payload, _ := json.Marshal(value)
-	digest := sha256.Sum256(append([]byte("runtime-assessment-authority-input/v1\x00"), payload...))
+	bodyLength := len(payload)
+	payload = append(payload, prefix...)
+	copy(payload[len(prefix):], payload[:bodyLength])
+	copy(payload, prefix)
+	digest := sha256.Sum256(payload)
 	return hex.EncodeToString(digest[:])
 }
 

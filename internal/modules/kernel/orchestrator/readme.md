@@ -58,6 +58,8 @@ capability resource state。
   accepted candidate lineage 在同次完整 raw-source/hash 校验后保留私有 detached manifest，candidate admission 仍逐候选
   完整执行，再复用本次 manifest 派生 target/recipe 投影；attempt 与 dispatch 两侧身份、内容和 hash 仍独立反证。
   `runtime_candidate_lineage_validation_reuse_test.go` 固定私有产物深拷贝、公开拒绝等价及后续调用重新验证。
+  assessment authority hash 保持原 Normalized、JSON 和域前缀编码，复用同次 marshal 缓冲，不增加跨调用缓存；
+  `runtime_assessment_authority_hash_test.go` 以旧编码 reference、JSON 重载、fuzz 和分配对照固定等价边界。
   静态 operation descriptor 的内部证据资格查询只读初始化库存，不复制随后丢弃的 `AllowedStates`；公开 getter 仍深拷贝。
   `runtime_coverage_evidence_descriptor_lookup_test.go` 以旧 getter 路径为 reference 覆盖全部 kind、未知与非规范输入、重复调用和公开副本隔离；不减少任何 proof、raw 或 aggregate 校验。
   `runtime_coverage_evidence_binding_hash_test.go` 和 `runtime_candidate_session_validation_test.go` 固定 hash、重复调用、
