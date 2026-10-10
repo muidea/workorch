@@ -19,7 +19,6 @@ import (
 	"github.com/muidea/workorch/internal/pkg/governancesemantics"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	executioncontract "github.com/muidea/workorch/internal/pkg/workorchexecutioncontract"
-	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -472,21 +471,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.requestWorkspaceContextFor(requestWorkspaceID, false))
 		}
 		return m, tea.Batch(cmds...)
-	case WorkspaceCreatedMsg:
-		if msg.Error != nil {
-			m.setLastError(msg.Error)
-			return m, nil
-		}
-		if msg.Workspace != nil {
-			m.upsertWorkspace(*msg.Workspace)
-			m.setActiveWorkspace(string(msg.Workspace.ID))
-			m.progress = progressIdle
-			m.progressText = "Workspace created"
-			m.result = fmt.Sprintf("Workspace created: %s", workspaceLabel(*msg.Workspace))
-			m.lastError = nil
-			return m, tea.Batch(m.requestWorkspaceListRefresh(), m.requestWorkspaceContextFor(string(msg.Workspace.ID), true))
-		}
-		return m, nil
 	case DecisionListMsg:
 		if !m.workspaceMessageBelongsToActiveWorkspace(msg.WorkspaceID) {
 			return m, nil
@@ -1073,18 +1057,11 @@ func (m *AppModel) handleSlashCommand(text string) (tea.Model, tea.Cmd, bool) {
 	case "workspace", "ws":
 		m.addInputHistory(text)
 		args := strings.TrimSpace(strings.TrimPrefix(cmd, strings.Fields(cmd)[0]))
-		if strings.HasPrefix(strings.ToLower(args), "create") {
-			req, err := parseWorkspaceCreateArgs(strings.TrimSpace(strings.TrimPrefix(args, strings.Fields(args)[0])))
-			if err != nil {
-				m.lastError = err
-				return m, nil, true
-			}
+		subcommand, _ := splitSlashSubcommand(args)
+		if subcommand == "create" {
 			m.clearInput()
-			m.cancelWorkspaceSelection()
-			m.progress = progressSubmitting
-			m.progressText = "Creating workspace"
-			m.lastError = nil
-			return m, CreateWorkspace(m.be, req), true
+			m.setWorkspaceCommandError(fmt.Errorf("%w: 终端不支持创建 Workspace，请通过 Web 完成规格创作、审查与确认", common.ErrConflict))
+			return m, nil, true
 		}
 		m.clearInput()
 		m.toggleWorkspaceSelectMode()
@@ -1762,66 +1739,6 @@ func renderDoDItems(items []string, width int, limit int) string {
 		b.WriteString("\n")
 	}
 	return b.String()
-}
-
-func parseWorkspaceCreateArgs(value string) (workorchmanagementcontract.WorkspaceCreateRequest, error) {
-	fields := strings.Fields(value)
-	req := workorchmanagementcontract.WorkspaceCreateRequest{}
-	titleParts := make([]string, 0, len(fields))
-	for idx := 0; idx < len(fields); idx++ {
-		field := fields[idx]
-		switch {
-		case field == "--template" || field == "-template":
-			idx++
-			if idx >= len(fields) {
-				return req, fmt.Errorf("workspace create requires a template value")
-			}
-			req.TemplateID = fields[idx]
-		case strings.HasPrefix(field, "--template="):
-			req.TemplateID = strings.TrimPrefix(field, "--template=")
-		case strings.HasPrefix(field, "template="):
-			req.TemplateID = strings.TrimPrefix(field, "template=")
-		case field == "--dir" || field == "--working-dir" || field == "-dir":
-			idx++
-			if idx >= len(fields) {
-				return req, fmt.Errorf("workspace create requires a directory value")
-			}
-			req.DeliverableDirectory = fields[idx]
-		case strings.HasPrefix(field, "--dir="):
-			req.DeliverableDirectory = strings.TrimPrefix(field, "--dir=")
-		case strings.HasPrefix(field, "--working-dir="):
-			req.DeliverableDirectory = strings.TrimPrefix(field, "--working-dir=")
-		case strings.HasPrefix(field, "dir="):
-			req.DeliverableDirectory = strings.TrimPrefix(field, "dir=")
-		case field == "--description" || field == "--desc":
-			idx++
-			if idx >= len(fields) {
-				return req, fmt.Errorf("workspace create requires a description value")
-			}
-			req.Description = fields[idx]
-		case strings.HasPrefix(field, "--description="):
-			req.Description = strings.TrimPrefix(field, "--description=")
-		case strings.HasPrefix(field, "--desc="):
-			req.Description = strings.TrimPrefix(field, "--desc=")
-		case strings.HasPrefix(field, "description="):
-			req.Description = strings.TrimPrefix(field, "description=")
-		default:
-			titleParts = append(titleParts, field)
-		}
-	}
-	req.Title = strings.TrimSpace(strings.Join(titleParts, " "))
-	if req.Title == "" {
-		return req, fmt.Errorf("workspace create requires a title")
-	}
-	req.TemplateID = strings.TrimSpace(req.TemplateID)
-	if req.TemplateID == "" {
-		return req, fmt.Errorf("workspace create requires --template <template-id>")
-	}
-	req.DeliverableDirectory = strings.TrimSpace(req.DeliverableDirectory)
-	if req.Description == "" {
-		req.Description = req.Title
-	}
-	return req, nil
 }
 
 func workspaceBindingSummary(bindings map[string]string) string {

@@ -166,12 +166,6 @@ func optionalRequestSeq(values []int64) int64 {
 	return values[0]
 }
 
-func CreateWorkspace(be backend.Backend, req workorchmanagementcontract.WorkspaceCreateRequest) tea.Cmd {
-	return func() tea.Msg {
-		return WorkspaceCreatedMsg{Error: fmt.Errorf("%w: TUI 创建向导尚未接入持久规格创作，请使用 Web 创建入口", common.ErrConflict)}
-	}
-}
-
 func FetchDecisions(be backend.Backend, workspaceID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

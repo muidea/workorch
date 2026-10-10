@@ -6,18 +6,12 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-
-	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 func TestRetiredLocalDefinitionWritesNeverSendEvent(t *testing.T) {
 	// nil parent 确保拒绝发生在任何 EventHub 依赖检查或发送之前。
 	ctx := context.Background()
 	calls := []func() error{
-		func() error {
-			_, err := (&eventHubWorkspaceBackend{}).Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{})
-			return err
-		},
 		func() error { _, err := (&eventHubGoalBackend{}).Define(ctx, "ws", "目标"); return err },
 		func() error { _, err := (&eventHubGoalBackend{}).Update(ctx, "ws", "goal", "目标"); return err },
 		func() error { _, err := (&eventHubDoDBackend{}).Define(ctx, "ws", []string{"验收"}); return err },
@@ -36,9 +30,6 @@ func TestRetiredLocalDefinitionWritesNeverSendEvent(t *testing.T) {
 func TestRetiredRemoteDefinitionWritesNeverUseHTTPClient(t *testing.T) {
 	// nil client 在误发 HTTP 时必然失败，确保拒绝发生在任何网络调用之前。
 	ctx := context.Background()
-	if _, err := (&remoteWorkspaceBackend{}).Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{}); err == nil {
-		t.Fatal("退休创建未拒绝")
-	}
 	goal := &remoteGoalBackend{}
 	if _, err := goal.Define(ctx, "ws", "目标"); err == nil {
 		t.Fatal("退休目标创建未拒绝")

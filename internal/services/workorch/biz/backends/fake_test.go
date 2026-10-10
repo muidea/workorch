@@ -26,16 +26,14 @@ type fakeBackend struct {
 	templates  []workorchmanagementcontract.WorkspaceTemplate
 
 	// Recorded commands for assertion.
-	ResolveCalls         []workorchport.ResolveDecisionRequest
-	ApproveCalls         []string
-	RejectCalls          []string
-	CreateWorkspaceCalls []workorchmanagementcontract.WorkspaceCreateRequest
+	ResolveCalls []workorchport.ResolveDecisionRequest
+	ApproveCalls []string
+	RejectCalls  []string
 
 	// Pre-configured responses.
-	NextRunID       string
-	NextGoalID      string
-	NextDoDID       string
-	NextWorkspaceID string
+	NextRunID  string
+	NextGoalID string
+	NextDoDID  string
 
 	eventHandlers []workorchport.EventHandler
 }
@@ -83,21 +81,6 @@ func (b *fakeBackend) Emit(ctx context.Context, evt workorchport.Event) {
 
 type fakeWS struct{ b *fakeBackend }
 
-func (f *fakeWS) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	f.b.mu.Lock()
-	defer f.b.mu.Unlock()
-	f.b.CreateWorkspaceCalls = append(f.b.CreateWorkspaceCalls, req)
-	id := common.WorkspaceID("ws-test-001")
-	if req.Title != "" {
-		id = common.WorkspaceID("ws-" + req.Title)
-	}
-	ws := &projectioncontract.Workspace{
-		ID: string(id), Title: req.Title, Description: req.Description,
-		DeliverableDirectory: req.DeliverableDirectory, State: "active",
-	}
-	f.b.workspaces = append(f.b.workspaces, *ws)
-	return ws, nil
-}
 func (f *fakeWS) Get(ctx context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	for _, w := range f.b.workspaces {
 		if w.ID == string(id) {

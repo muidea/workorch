@@ -13,7 +13,7 @@ TUI 是默认 binary mode。local mode embeds WorkOrch units and shared backend/
 和 governance intent并消费 projection；TUI 不拥有 Runtime、Run lifecycle 或 resource state。
 
 启动选择顺序为：current directory 精确匹配的 Workspace、configured last-active Workspace、无选择。前两项均未命中时
-必须等待用户选择或创建，不能静默创建 Workspace。
+必须等待用户选择已有 Workspace，或通过 Web 创建后再选择；终端不能静默或显式创建 Workspace。
 
 ## Layout
 
@@ -44,7 +44,7 @@ Base commands implemented by the current TUI:
 /config               /model
 /model show           /model clear
 /model reasoning      /workspace
-/workspace create     /goal
+/ws                   /goal
 /dod                  /status
 /coverage             /steps
 /timeline             /patches
@@ -65,9 +65,11 @@ remote HTTP 409 不得被 TUI 重判为 transport failure 或 governance/progres
 runCommand 的全部 canonical 字段与互斥时间戳，不因相同 revision 丢失 owner fact 变化。
 TUI 不发送 caller Run priority。
 
-Normal TUI creation uses `/workspace create <title> --template <template-id> [--dir <path>]`. Template is required; when
-`--dir` is omitted, the application resolves and creates the default `.workorch-workspaces/<workspace-id>` directory.
-Goal、DoD 和 template admission完成且 activation eligible 后，用户仍需显式执行 intent。Static clarification必须显示
+Workspace 创建仅通过 Web 完成。TUI 的 `/workspace create`、`/ws create`（含大小写变体与旧 flags）直接显示中文 Web
+创建提示，不解析创建参数、不访问 backend、不进入创建进度或成功分支，也不回退为 Workspace 选择。
+CLI 不注册 `workspace create`；此命令及 `ws create` 在参数解析和未知命令 TUI fallback 前直接返回中文 Web 提示。
+`/workspace`、`/ws` 保留已有 Workspace 选择；读取、Run 观察与 template 创建能力不受此限制。
+Goal、DoD 和 template admission 完成且 activation eligible 后，用户仍需显式执行 intent。Static clarification 必须显示
 typed violation 与 `BlockingTicketID`；TUI 不提供 one-of branch selection 或“确认后放行”。
 
 ## Keyboard

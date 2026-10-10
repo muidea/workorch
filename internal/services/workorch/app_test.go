@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
@@ -151,10 +150,6 @@ func (b serviceDefaultWorkspaceBackend) ProjectionEvents() backend.WorkspaceProj
 
 type serviceDefaultWorkspaceWorkspaceBackend struct {
 	workspaces []projectioncontract.Workspace
-}
-
-func (b serviceDefaultWorkspaceWorkspaceBackend) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	return nil, nil
 }
 
 func (b serviceDefaultWorkspaceWorkspaceBackend) Get(_ context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {

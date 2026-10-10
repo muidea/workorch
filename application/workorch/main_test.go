@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
@@ -28,8 +27,8 @@ func TestResolveDefaultWorkspacePrefersCurrentDirectoryBinding(t *testing.T) {
 	if got.ID != "ws-current" {
 		t.Fatalf("workspace = %s, want ws-current", got.ID)
 	}
-	if be.created != 0 {
-		t.Fatalf("created = %d, want 0", be.created)
+	if be.workspaceWrites != 0 {
+		t.Fatalf("workspace writes = %d, want 0", be.workspaceWrites)
 	}
 }
 
@@ -44,8 +43,8 @@ func TestResolveDefaultWorkspaceUsesLastActiveWhenCurrentDirectoryUnbound(t *tes
 	if got.ID != "ws-last" {
 		t.Fatalf("workspace = %s, want ws-last", got.ID)
 	}
-	if be.created != 0 {
-		t.Fatalf("created = %d, want 0", be.created)
+	if be.workspaceWrites != 0 {
+		t.Fatalf("workspace writes = %d, want 0", be.workspaceWrites)
 	}
 }
 
@@ -59,8 +58,8 @@ func TestResolveDefaultWorkspaceDoesNotCreateWhenNoReusableWorkspace(t *testing.
 	if got.ID != "" {
 		t.Fatalf("workspace = %s, want empty", got.ID)
 	}
-	if be.created != 0 {
-		t.Fatalf("created = %d, want 0", be.created)
+	if be.workspaceWrites != 0 {
+		t.Fatalf("workspace writes = %d, want 0", be.workspaceWrites)
 	}
 }
 
@@ -77,8 +76,8 @@ func TestResolveDefaultWorkspaceDoesNotCreateForCodeDirectory(t *testing.T) {
 	if got.ID != "" {
 		t.Fatalf("workspace = %s, want empty", got.ID)
 	}
-	if be.created != 0 {
-		t.Fatalf("created = %d, want 0", be.created)
+	if be.workspaceWrites != 0 {
+		t.Fatalf("workspace writes = %d, want 0", be.workspaceWrites)
 	}
 }
 
@@ -94,9 +93,8 @@ func writeCLIConfig(t *testing.T, lastActive string) string {
 }
 
 type startupFakeBackend struct {
-	workspaces []projectioncontract.Workspace
-	created    int
-	lastCreate workorchmanagementcontract.WorkspaceCreateRequest
+	workspaces      []projectioncontract.Workspace
+	workspaceWrites int
 }
 
 func (b *startupFakeBackend) Workspace() backend.WorkspaceBackend {
@@ -118,13 +116,6 @@ func (b *startupFakeBackend) ProjectionEvents() backend.WorkspaceProjectionEvent
 
 type startupFakeWorkspace struct{ parent *startupFakeBackend }
 
-func (b *startupFakeWorkspace) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	b.parent.created++
-	b.parent.lastCreate = req
-	ws := projectioncontract.Workspace{ID: "ws-created", Title: req.Title, DeliverableDirectory: req.DeliverableDirectory}
-	b.parent.workspaces = append(b.parent.workspaces, ws)
-	return &ws, nil
-}
 func (b *startupFakeWorkspace) Get(ctx context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	for _, ws := range b.parent.workspaces {
 		if ws.ID == string(id) {
@@ -149,9 +140,11 @@ func (b *startupFakeWorkspace) RuntimeView(context.Context, workorchquerycontrac
 }
 
 func (b *startupFakeWorkspace) UpdateLLMSelection(ctx context.Context, id common.WorkspaceID, _ *runtimecontract.ProviderInferenceSelection, _ uint64) (*projectioncontract.Workspace, error) {
+	b.parent.workspaceWrites++
 	return b.Get(ctx, id)
 }
 
 func (b *startupFakeWorkspace) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
+	b.parent.workspaceWrites++
 	return nil
 }

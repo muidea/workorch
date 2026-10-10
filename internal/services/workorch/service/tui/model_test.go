@@ -5519,33 +5519,67 @@ func TestModelDodSlashCommandPersistsDoDToActiveWorkspaceRejectsRetiredWrite(t *
 	}
 }
 
-func TestModelWorkspaceCreateCommandUsesTemplateAndActivatesWorkspaceRejectsRetiredWrite(t *testing.T) {
-	be := &workspaceCreateFake{fakeBE: newFake(t)}
-	m := NewAppModel(be, "ws-1", "")
-	m.setInput("/workspace create task --template template-a")
-	_, cmd := m.submitInput()
-	if cmd == nil {
-		t.Fatal("退休命令应提供明确提示")
-	}
-	msg, ok := cmd().(WorkspaceCreatedMsg)
-	if !ok || msg.Error == nil || msg.Workspace != nil {
-		t.Fatalf("退休写入未拒绝: %#v", msg)
-	}
-	if be.createReq.Title != "" {
-		t.Fatal("退休创建调用 backend")
+func TestModelWorkspaceCreateCommandsRedirectToWebWithoutBackendAccess(t *testing.T) {
+	for _, command := range []string{
+		"/workspace create task --template template-a",
+		"/workspace create",
+		"/ws create",
+		"/WORKSPACE CREATE",
+		"/Ws CrEaTe task",
+		"/workspace create task",
+		"/workspace create --template",
+		"/ws create --dir",
+		"/workspace create task -template template-a -dir /tmp/retired --desc",
+		"/ws create --title task --description text --working-dir /tmp/retired --template template-a",
+		"/workspace create template=template-a dir=/tmp/retired description=text",
+		"/workspace create --unknown-flag=unused",
+	} {
+		t.Run(command, func(t *testing.T) {
+			// nil 嵌入 backend 使任何非 Workspace 依赖访问也立即失败。
+			be := &workspaceAccessBE{}
+			m := NewAppModel(nil, "ws-1", "")
+			m.be = be
+			m.width, m.height = 120, 24
+			m.progressText = "existing progress"
+			m.result = "existing result"
+			m.setInput(command)
+			updated, cmd := m.submitInput()
+			got := updated.(*AppModel)
+			if cmd != nil {
+				t.Fatal("退休创建必须直接提示，不得返回异步创建命令")
+			}
+			if !errors.Is(got.lastError, common.ErrConflict) || !strings.Contains(got.lastError.Error(), "请通过 Web") {
+				t.Fatalf("退休创建未直接提示 Web: %v", got.lastError)
+			}
+			if be.workspaceCalls != 0 {
+				t.Fatalf("退休创建访问 backend %d 次", be.workspaceCalls)
+			}
+			if got.activeWorkspaceID != "ws-1" || got.workspaceSelectMode || len(got.workspaces) != 0 {
+				t.Fatalf("退休创建修改选择或工作空间: active=%q selecting=%t workspaces=%+v", got.activeWorkspaceID, got.workspaceSelectMode, got.workspaces)
+			}
+			if got.progressText != "existing progress" || got.result != "existing result" || got.progress == progressSubmitting {
+				t.Fatalf("退休创建进入创建进度或成功分支: progress=%q result=%q", got.progressText, got.result)
+			}
+			view := stripANSI(got.View())
+			if !strings.Contains(view, "请通过 Web") || strings.Contains(view, "Creating workspace") || strings.Contains(view, "Workspace created") {
+				t.Fatalf("退休创建界面未正确提示:\n%s", view)
+			}
+		})
 	}
 }
 
-func TestParseWorkspaceCreateArgsRequiresTemplateAndAllowsDefaultDirectory(t *testing.T) {
-	if _, err := parseWorkspaceCreateArgs("workspace --dir /tmp/workspace"); err == nil || !strings.Contains(err.Error(), "--template") {
-		t.Fatalf("missing template error = %v, want --template", err)
-	}
-	req, err := parseWorkspaceCreateArgs("workspace --template template-a")
-	if err != nil {
-		t.Fatalf("parse workspace with default directory: %v", err)
-	}
-	if req.DeliverableDirectory != "" {
-		t.Fatalf("deliverableDirectory = %q, want empty owner-default input", req.DeliverableDirectory)
+func TestModelWorkspaceSelectionAliasesRemainAvailable(t *testing.T) {
+	for _, command := range []string{"/workspace", "/ws", "/WORKSPACE", "/WS"} {
+		t.Run(command, func(t *testing.T) {
+			m := NewAppModel(newFake(t), "ws-1", "")
+			m.workspaces = []projectioncontract.Workspace{{ID: "ws-1", Title: "已有工作空间"}}
+			m.setInput(command)
+			updated, _ := m.submitInput()
+			got := updated.(*AppModel)
+			if !got.workspaceSelectMode || got.lastError != nil {
+				t.Fatalf("工作空间选择不可用: selecting=%t error=%v", got.workspaceSelectMode, got.lastError)
+			}
+		})
 	}
 }
 
@@ -5744,63 +5778,14 @@ func (f *subscriptionCaptureEvents) Subscribe(ctx context.Context, handler backe
 	return func() {}, nil
 }
 
-type workspaceCreateFake struct {
-	*fakeBE
-	createReq workorchmanagementcontract.WorkspaceCreateRequest
-	workspace *projectioncontract.Workspace
+// 只记录 Workspace port 的访问；其余依赖保持 nil，阻止创建绕路。
+type workspaceAccessBE struct {
+	backend.Backend
+	workspaceCalls int
 }
 
-func (b *workspaceCreateFake) Workspace() backend.WorkspaceBackend {
-	return &workspaceCreateWS{parent: b}
-}
-
-type workspaceCreateWS struct{ parent *workspaceCreateFake }
-
-func (f *workspaceCreateWS) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	f.parent.createReq = req
-	ws := &projectioncontract.Workspace{
-		ID:                   "ws-created",
-		Title:                req.Title,
-		Description:          req.Description,
-		DeliverableDirectory: req.DeliverableDirectory,
-		State:                string(common.WorkspaceStateActive),
-		SoulBindings: map[string]string{
-			"planning":  "soul-planning",
-			"execution": "soul-execution",
-		},
-	}
-	f.parent.workspace = ws
-	return ws, nil
-}
-func (f *workspaceCreateWS) Get(ctx context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
-	if f.parent.workspace != nil && f.parent.workspace.ID == string(id) {
-		return f.parent.workspace, nil
-	}
-	return nil, common.ErrNotFound
-}
-func (f *workspaceCreateWS) List(ctx context.Context) ([]projectioncontract.Workspace, error) {
-	if f.parent.workspace == nil {
-		return nil, nil
-	}
-	return []projectioncontract.Workspace{*f.parent.workspace}, nil
-}
-func (f *workspaceCreateWS) Snapshot(ctx context.Context, id common.WorkspaceID) (*projectioncontract.WorkspaceSnapshot, error) {
-	workspace, err := f.Get(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return &projectioncontract.WorkspaceSnapshot{Workspace: *workspace}, nil
-}
-
-func (f *workspaceCreateWS) RuntimeView(context.Context, workorchquerycontract.WorkspaceRuntimeViewQuery) (*projectioncontract.WorkspaceRuntimeView, error) {
-	return nil, nil
-}
-
-func (f *workspaceCreateWS) UpdateLLMSelection(ctx context.Context, id common.WorkspaceID, target *runtimecontract.ProviderInferenceSelection, _ uint64) (*projectioncontract.Workspace, error) {
-	return f.Get(ctx, id)
-}
-
-func (f *workspaceCreateWS) Delete(ctx context.Context, id common.WorkspaceID, purge bool) error {
+func (b *workspaceAccessBE) Workspace() backend.WorkspaceBackend {
+	b.workspaceCalls++
 	return nil
 }
 
@@ -5860,9 +5845,6 @@ func (b *recordingBE) Workspace() backend.WorkspaceBackend {
 
 type recordingWorkspace struct{ parent *recordingBE }
 
-func (f *recordingWorkspace) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	return (&fakeWS{}).Create(ctx, req)
-}
 func (f *recordingWorkspace) Get(ctx context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	f.parent.lastGetWorkspace = id
 	return &projectioncontract.Workspace{ID: string(id), ActiveRunID: "run-resume"}, nil
@@ -5987,9 +5969,6 @@ func (b *conflictApprovalBE) Workspace() backend.WorkspaceBackend {
 
 type conflictWorkspaceBackend struct{ parent *conflictApprovalBE }
 
-func (f *conflictWorkspaceBackend) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	return (&fakeWS{}).Create(ctx, req)
-}
 func (f *conflictWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	return &projectioncontract.Workspace{ID: string(id), ActiveRunID: "run-1"}, nil
 }
@@ -6117,9 +6096,6 @@ func (b *recordingTUIApprovalBackend) Get(context.Context, common.WorkspaceID, c
 
 type fakeWS struct{}
 
-func (f *fakeWS) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	return &projectioncontract.Workspace{ID: "ws-new", Title: req.Title, State: "active"}, nil
-}
 func (f *fakeWS) Get(ctx context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	return &projectioncontract.Workspace{ID: string(id)}, nil
 }

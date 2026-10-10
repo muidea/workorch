@@ -20,24 +20,6 @@ func bindCLIEvent(event magicevent.Event, topic string, subjectType string, subj
 	}))
 }
 
-func cliWorkspaceCreateResponse(response magicevent.Result) (workorchdevents.CLIWorkspaceCreateResult, error) {
-	if response == nil {
-		return workorchdevents.CLIWorkspaceCreateResult{}, common.ErrInvalidArgument
-	}
-	if err := cd.ToStdError(response.Error()); err != nil {
-		return workorchdevents.CLIWorkspaceCreateResult{}, err
-	}
-	data, resultErr := response.Get()
-	if err := cd.ToStdError(resultErr); err != nil {
-		return workorchdevents.CLIWorkspaceCreateResult{}, err
-	}
-	result, ok := data.(workorchdevents.CLIWorkspaceCreateResult)
-	if !ok {
-		return workorchdevents.CLIWorkspaceCreateResult{}, fmt.Errorf("%w: workspace create result type %T", common.ErrInvalidArgument, data)
-	}
-	return result, nil
-}
-
 func cliWorkspaceGetResponse(response magicevent.Result) (workorchdevents.CLIWorkspaceGetResult, error) {
 	if response == nil {
 		return workorchdevents.CLIWorkspaceGetResult{}, common.ErrInvalidArgument

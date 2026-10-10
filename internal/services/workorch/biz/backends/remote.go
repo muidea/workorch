@@ -114,10 +114,6 @@ func workspaceProjectionFromClient(ws *projectioncontract.Workspace) projectionc
 	return projectioncontract.CloneWorkspace(*ws)
 }
 
-func (b *remoteWorkspaceBackend) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	return nil, fmt.Errorf("%w: 旧创建／定义写操作已退休，请通过 Web 持久规格创作完成审查与确认", common.ErrConflict)
-}
-
 func (b *remoteWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	ws, err := b.cl.GetWorkspace(ctx, string(id))
 	if err != nil {

@@ -52,11 +52,6 @@ type WorkspaceContextRetryMsg struct {
 	ResetMainViewport bool
 }
 
-type WorkspaceCreatedMsg struct {
-	Workspace *projectioncontract.Workspace
-	Error     error
-}
-
 type DecisionListMsg struct {
 	WorkspaceID string
 	Decisions   []projectioncontract.Decision

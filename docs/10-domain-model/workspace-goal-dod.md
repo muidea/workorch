@@ -42,7 +42,7 @@ Workspace 是长期业务容器。当前 owner model 包含：
 | `DefaultSoulID`, `SoulBindings` | 默认 Soul 与按语义位置的 Soul 绑定 |
 | `ContextHints`, `EvidencePolicies` | 模板/管理接口维护的可选声明式策略 |
 
-正常 TUI/Web 创建流程不要求用户手写 `ContextHints` 或 `EvidencePolicies`；它们通常来自模板或管理接口。
+正常 Web 创建流程不要求用户手写 `ContextHints` 或 `EvidencePolicies`；它们通常来自模板或管理接口。TUI/CLI 不提供 Workspace 创建入口。
 Definition admission 会分别规范化 Template 与 Workspace 的 `EvidencePolicies` snapshots，并把双方 exact
 ref/revision/hash 封存到 candidate 的 `AdmissionPolicyBindings`。任一侧出现退役 `prospectiveTargetRef` 都在 promotion
 前拒绝；policy binding 不携带或预选 Runtime exact target set。运行期只有一份 bounded SM-3 semantic proposal 可以提交

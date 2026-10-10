@@ -183,9 +183,6 @@ func (b *fakeBackend) emit(evt backend.Event) {
 
 type fakeWorkspace struct{}
 
-func (fakeWorkspace) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	return &projectioncontract.Workspace{ID: "ws-1"}, nil
-}
 func (fakeWorkspace) Get(context.Context, common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	return &projectioncontract.Workspace{ID: "ws-1"}, nil
 }

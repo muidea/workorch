@@ -336,9 +336,6 @@ func enrichSubjectPayload(payload map[string]any, key string, subjectID string) 
 
 type eventHubWorkspaceBackend struct{ parent *eventHubBackend }
 
-func (b *eventHubWorkspaceBackend) Create(ctx context.Context, req workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	return nil, fmt.Errorf("%w: 旧创建写操作已退休，请通过 Web 持久规格创作完成审查与确认", common.ErrConflict)
-}
 func (b *eventHubWorkspaceBackend) Get(ctx context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	if b == nil || b.parent == nil || b.parent.commandHub == nil {
 		return nil, common.ErrInvalidArgument

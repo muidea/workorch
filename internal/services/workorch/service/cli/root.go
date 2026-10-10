@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"github.com/muidea/workorch/internal/pkg/common"
 	backend "github.com/muidea/workorch/internal/pkg/workorchport"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	"github.com/muidea/workorch/internal/services/workorch/biz/config"
@@ -67,6 +68,10 @@ to a running workorch --server service.`,
 }
 
 func ExecuteWithBackend(be backend.Backend, defaultWS projectioncontract.Workspace) error {
+	// 创建命令不再注册；在 Cobra 解析旧 flags 和未知命令的 TUI fallback 前拒绝。
+	if isRetiredWorkspaceCreate(os.Args[1:]) {
+		return fmt.Errorf("%w: 终端不支持创建 Workspace，请通过 Web 完成规格创作、审查与确认", common.ErrConflict)
+	}
 	cliBackend = be
 
 	// Store default workspace for TUI/agent use.
@@ -85,6 +90,38 @@ func ExecuteWithBackend(be backend.Backend, defaultWS projectioncontract.Workspa
 	}
 
 	return err
+}
+
+// 只识别命令身份；不解析已退休创建命令的参数，也不把 flag 值当成命令。
+func isRetiredWorkspaceCreate(args []string) bool {
+	var command []string
+	flagsEnded := false
+	for len(args) > 0 && len(command) < 2 {
+		arg := args[0]
+		args = args[1:]
+		if !flagsEnded && arg == "--" {
+			flagsEnded = true
+			continue
+		}
+		if flagsEnded || !strings.HasPrefix(arg, "-") {
+			command = append(command, arg)
+			continue
+		}
+		name, _, hasValue := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
+		flag := rootCmd.PersistentFlags().Lookup(name)
+		if flag == nil {
+			return false
+		}
+		if !hasValue && flag.NoOptDefVal == "" {
+			if len(args) == 0 {
+				return false
+			}
+			args = args[1:]
+		}
+	}
+	return len(command) == 2 &&
+		(strings.EqualFold(command[0], "workspace") || strings.EqualFold(command[0], "ws")) &&
+		strings.EqualFold(command[1], "create")
 }
 
 func isUnknownCommandError(err error) bool {

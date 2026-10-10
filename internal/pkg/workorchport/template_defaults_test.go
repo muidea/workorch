@@ -75,10 +75,6 @@ type fakeWorkspaceBackend struct {
 	b *fakeBackend
 }
 
-func (b fakeWorkspaceBackend) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	return nil, common.ErrInvalidArgument
-}
-
 func (b fakeWorkspaceBackend) Get(_ context.Context, id common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	for idx := range b.b.workspaces {
 		if b.b.workspaces[idx].ID == string(id) {

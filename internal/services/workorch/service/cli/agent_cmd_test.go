@@ -3,10 +3,9 @@ package cli
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
-
-	"github.com/spf13/cobra"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -31,15 +30,85 @@ func TestRetiredCLICommandsRejectBeforeBackendAccess(t *testing.T) {
 		if err := runAgent(nil, []string{"执行目标"}); !errors.Is(err, common.ErrConflict) {
 			t.Fatalf("退休 agent 未直接拒绝: %v", err)
 		}
-		if err := workspaceCreateCmd.RunE(workspaceCreateCmd, nil); !errors.Is(err, common.ErrConflict) {
-			t.Fatalf("退休创建未直接拒绝: %v", err)
+	}
+	if !agentCmd.Hidden || !strings.Contains(agentCmd.Short, "已退休") {
+		t.Fatalf("退休命令仍作为正常功能显示: %s", agentCmd.Name())
+	}
+}
+
+func TestCLIWorkspaceCreateRedirectsToWebBeforeParsingOrFallback(t *testing.T) {
+	previousArgs, previousBackend := os.Args, cliBackend
+	t.Cleanup(func() { os.Args, cliBackend = previousArgs, previousBackend })
+	for _, args := range [][]string{
+		{"workspace", "create"},
+		{"ws", "create"},
+		{"WORKSPACE", "CREATE"},
+		{"Ws", "CrEaTe", "task"},
+		{"workspace", "create", "--title", "task", "--template", "template-a"},
+		{"workspace", "create", "--title"},
+		{"ws", "create", "--template"},
+		{"workspace", "create", "--working-dir", "/tmp/retired", "--description", "text"},
+		{"ws", "create", "-template", "template-a", "-dir", "/tmp/retired"},
+		{"workspace", "create", "--unknown-flag=unused"},
+		{"--json", "ws", "create", "--template"},
+		{"--remote", "http://invalid.test", "workspace", "create", "--title"},
+		{"--config=/missing/config", "WORKSPACE", "CREATE"},
+		{"workspace", "--json", "create", "--title"},
+		{"ws", "--remote", "http://invalid.test", "create", "--template"},
+		{"--", "workspace", "create"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			be := &cliWorkspaceAccessBackend{}
+			os.Args = append([]string{"workorch"}, args...)
+			err := ExecuteWithBackend(be, projectioncontract.Workspace{})
+			if !errors.Is(err, common.ErrConflict) || !strings.Contains(err.Error(), "请通过 Web") {
+				t.Fatalf("退休创建未在参数解析／TUI fallback 前拒绝: %v", err)
+			}
+			if be.workspaceCalls != 0 {
+				t.Fatalf("退休创建访问 backend %d 次", be.workspaceCalls)
+			}
+		})
+	}
+	for _, command := range workspaceCmd.Commands() {
+		if command.Name() == "create" || command.HasAlias("create") {
+			t.Fatal("退休 create 仍注册在 CLI 命令树")
 		}
 	}
-	for _, command := range []*cobra.Command{agentCmd, workspaceCreateCmd} {
-		if !command.Hidden || !strings.Contains(command.Short, "已退休") {
-			t.Fatalf("退休命令仍作为正常功能显示: %s", command.Name())
+}
+
+func TestCLIWorkspaceCreateDetectionPreservesOtherCommands(t *testing.T) {
+	for _, args := range [][]string{
+		{"workspace", "list"},
+		{"ws", "show", "create"},
+		{"workspace", "snapshot", "create"},
+		{"template", "create"},
+		{"run", "status", "create"},
+		{"--config", "workspace", "create"},
+		{"--remote=workspace", "create"},
+		{"workspace", "--config", "create"},
+		{"workspace", "--config", "create", "list"},
+		{"create", "workspace"},
+	} {
+		if isRetiredWorkspaceCreate(args) {
+			t.Fatalf("误拦截保留命令或 flag 值: %v", args)
 		}
 	}
+	for _, name := range []string{"list", "show", "snapshot"} {
+		command, _, err := rootCmd.Find([]string{"ws", name})
+		if err != nil || command.Name() != name {
+			t.Fatalf("读取别名 ws %s 不可用: command=%v error=%v", name, command, err)
+		}
+	}
+}
+
+type cliWorkspaceAccessBackend struct {
+	backend.Backend
+	workspaceCalls int
+}
+
+func (b *cliWorkspaceAccessBackend) Workspace() backend.WorkspaceBackend {
+	b.workspaceCalls++
+	return nil
 }
 
 type agentCommandFailureBackend struct {
@@ -81,9 +150,6 @@ func (b agentCommandFailureBackend) ProjectionEvents() backend.WorkspaceProjecti
 
 type agentCommandWorkspaceBackend struct{}
 
-func (agentCommandWorkspaceBackend) Create(context.Context, workorchmanagementcontract.WorkspaceCreateRequest) (*projectioncontract.Workspace, error) {
-	return &projectioncontract.Workspace{ID: "ws-agent"}, nil
-}
 func (agentCommandWorkspaceBackend) Get(context.Context, common.WorkspaceID) (*projectioncontract.Workspace, error) {
 	return nil, common.ErrNotFound
 }

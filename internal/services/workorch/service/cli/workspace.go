@@ -48,15 +48,6 @@ var workspaceListCmd = &cobra.Command{
 	},
 }
 
-var workspaceCreateCmd = &cobra.Command{
-	Use:    "create",
-	Short:  "已退休：请通过 Web 创作规格",
-	Hidden: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("%w: 旧创建写操作已退休，请通过 Web 完成规格创作、审查与确认", common.ErrConflict)
-	},
-}
-
 var workspaceShowCmd = &cobra.Command{
 	Use:   "show <id>",
 	Short: "Show workspace details",
@@ -136,15 +127,9 @@ func printWorkspaceDetail(ws *projectioncontract.Workspace) {
 func init() {
 	rootCmd.AddCommand(workspaceCmd)
 	workspaceCmd.AddCommand(workspaceListCmd)
-	workspaceCmd.AddCommand(workspaceCreateCmd)
 	workspaceCmd.AddCommand(workspaceShowCmd)
 	workspaceCmd.AddCommand(workspaceDeleteCmd)
 	workspaceCmd.AddCommand(workspaceSnapshotCmd)
-
-	workspaceCreateCmd.Flags().String("title", "", "Workspace title (required)")
-	workspaceCreateCmd.Flags().String("description", "", "Workspace description")
-	workspaceCreateCmd.Flags().String("working-dir", "", "Deliverable directory path")
-	workspaceCreateCmd.Flags().String("template", "", "Workspace template ID")
 
 	workspaceDeleteCmd.Flags().Bool("purge", false, "Purge all related data")
 }

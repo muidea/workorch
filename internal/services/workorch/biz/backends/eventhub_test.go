@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -35,16 +36,30 @@ import (
 	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
 )
 
-func TestEventHubBackendRejectsWorkspaceCreateBeforeCLICommand(t *testing.T) {
-	ctx := context.Background()
-	be, commandHub := newEventHubBackendWithDispatcher(t, ctx)
-	before := len(commandHub.(*recordingEventHub).Sent())
-	ws, err := be.Workspace().Create(ctx, workorchmanagementcontract.WorkspaceCreateRequest{Title: "退休创建"})
-	if ws != nil || !errors.Is(err, common.ErrConflict) {
-		t.Fatalf("退休创建未拒绝: %+v %v", ws, err)
+func TestWorkspaceBackendsDoNotExposeRetiredCreate(t *testing.T) {
+	for name, backendType := range map[string]reflect.Type{
+		"port":     reflect.TypeOf((*port.WorkspaceBackend)(nil)).Elem(),
+		"eventhub": reflect.TypeOf((*eventHubWorkspaceBackend)(nil)),
+		"remote":   reflect.TypeOf((*remoteWorkspaceBackend)(nil)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, exists := backendType.MethodByName("Create"); exists {
+				t.Fatal("终端 Workspace backend 仍暴露退休 Create 能力")
+			}
+		})
 	}
-	if after := len(commandHub.(*recordingEventHub).Sent()); after != before {
-		t.Fatalf("退休创建发送了命令: before=%d after=%d", before, after)
+}
+
+func TestEventHubTemplateCreateRemainsAvailable(t *testing.T) {
+	ctx := context.Background()
+	be, _ := newEventHubBackendWithDispatcher(t, ctx)
+	created, err := be.Template().Create(ctx, &workorchmanagementcontract.WorkspaceTemplate{ID: "template-terminal", Name: "终端模板"})
+	if err != nil || created == nil || created.ID != "template-terminal" {
+		t.Fatalf("保留模板创建失败: created=%+v error=%v", created, err)
+	}
+	stored, err := be.Template().Get(ctx, created.ID)
+	if err != nil || stored == nil || stored.Name != "终端模板" {
+		t.Fatalf("模板创建未持久化: stored=%+v error=%v", stored, err)
 	}
 }
 

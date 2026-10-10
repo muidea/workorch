@@ -108,8 +108,8 @@ Web 只作纯文本展示，原文永不作为准入或执行权威。详细边�
 Go client 只提供正式 authoring 写方法，退休创建／Goal／DoD 写方法不再存在。
 TUI 的旧创建、目标提交及 DoD 保存命令明确拒绝，不调用 backend 写操作、不生成默认 DoD，也不自动 Restart；
 当前 TUI 未提供完整创作向导，帮助、空态和补全不推荐退休写命令；用户通过 Web 完成规格创作后，可在 TUI 读取并显式提交执行。
-CLI 的 `workspace create` 与 Goal-first `agent [goal]` 已隐藏，并在访问 backend 或订阅事件之前直接拒绝；agent 不再生成默认 DoD 或自动提交 Restart。CLI／TUI 尚未交付完整规格创作向导。保留旧命令解析仅用于返回明确退休提示，不构成兼容创建路径。
-local EventHub 与 remote backend 对退休写接口均在发送前返回冲突提示；五个退休 CLI 定义写 topic 不再注册为 production facade 或 dispatcher 订阅，handler 的直接防御分支仍拒绝，不能绕过 backend 调用旧创建或 Goal／DoD 写用例。Workspace owner 内部 typed command 保留供受控事务与测试夹具使用。
+CLI 不注册 `workspace create`；`workspace create`、`ws create`（含大小写变体与旧 flags）在参数解析与未知命令 TUI fallback 前直接返回中文 Web 提示，不访问 backend、不回退为列表或选择。Goal-first `agent [goal]` 保持隐藏，并在访问 backend 或订阅事件之前直接拒绝；agent 不生成默认 DoD 或自动提交 Restart。Workspace 创建仅通过 Web 完成，终端保留已有 Workspace 的读取、选择、执行与观察能力，不提供创建向导。
+终端 `WorkspaceBackend` 不暴露 `Create`；local EventHub 与 remote backend 无对应实现或创建回执 decoder。退休 Goal／DoD 写接口仍在发送前返回冲突提示；五个退休 CLI 定义写 topic 不注册为 production facade 或 dispatcher 订阅，handler 的直接防御分支仍拒绝，不能绕过 backend 调用旧创建或 Goal／DoD 写用例。Workspace owner 内部 typed command 保留供受控事务与测试夹具使用。
 
 Workspace delete 默认为 retain：完成后隐藏 Workspace 及各 owner 的 workspace-scoped 资源，保留物理
 记录与永久 fence。显式 purge 仅请求每个 owner 幂等清理自身数据。Application 不执行
