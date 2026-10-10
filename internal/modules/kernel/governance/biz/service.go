@@ -3,7 +3,6 @@ package governance
 import (
 	"context"
 	"sync"
-	"time"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -90,11 +89,18 @@ type Service struct {
 	loadConfig      func() (workorchconfig.Config, error)
 	mu              sync.Mutex
 	traceMu         sync.Mutex
-	unsubscribes    []func()
+	lifecycle       basebiz.Lifecycle
+	startAttempted  bool
+	started         bool
+	closing         bool
+	releasing       bool
+	released        bool
+	unsubscribes    []func() error
 	topics          []string
 	workCtx         context.Context
 	workCancel      context.CancelFunc
 	workQueue       chan governanceWork
+	workEnqueue     sync.WaitGroup
 	workDone        chan struct{}
 	reconcileCancel context.CancelFunc
 	reconcileDone   chan struct{}
@@ -143,89 +149,106 @@ func (s *Service) Start() error {
 	if s == nil || s.EventHub() == nil || s.tickets == nil || s.approvals == nil || s.runs == nil || s.workspaceDefs == nil || s.memoryItems == nil || s.traces == nil || s.resolve == nil || s.resolveApproval == nil {
 		return common.ErrInvalidArgument
 	}
+	s.mu.Lock()
+	if s.closing {
+		s.mu.Unlock()
+		return basebiz.ErrLifecycleClosing
+	}
+	if s.startAttempted {
+		started := s.started
+		s.mu.Unlock()
+		if started {
+			return nil
+		}
+		return common.ErrConflict
+	}
+	if err := s.lifecycle.Reset(); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	leave, err := s.lifecycle.Enter()
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	s.startAttempted = true
 	if s.loadConfig == nil {
 		s.loadConfig = workorchconfig.Current
 	}
+	workCtx, workCancel := context.WithCancel(context.Background())
+	workQueue, workDone := make(chan governanceWork, 256), make(chan struct{})
+	s.workCtx, s.workCancel, s.workQueue, s.workDone = workCtx, workCancel, workQueue, workDone
+	s.mu.Unlock()
+	defer leave()
+	if err := s.startGovernanceWorker(workCtx, workQueue, workDone); err != nil {
+		return err
+	}
+	const ticketObserverID = "/decision/consumers/kernel/governance"
+	if err := s.SubscribeMatchedFuncChecked(ticketObserverID, ticketObserverID, decisionevents.TopicTicketCreated, func(event magicevent.Event, _ magicevent.Result) {
+		if data, ok := governanceTicketCreatedData(event); ok {
+			if data.DecisionKind == "workspace_definition_clarification" || data.DecisionKind == "runtime_definition_clarification" {
+				return
+			}
+			s.enqueueGovernanceWork(func(workCtx context.Context) { s.processTicketCreated(workCtx, data) })
+		}
+	}); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.unsubscribes = append(s.unsubscribes, func() error {
+		return s.UnsubscribeMatchedFuncChecked(ticketObserverID, decisionevents.TopicTicketCreated)
+	})
+	s.mu.Unlock()
+	const runObserverID = "/run/consumers/kernel/governance"
+	if err := s.SubscribeMatchedFuncChecked(runObserverID, runObserverID, runevents.TopicRunStateChanged, func(event magicevent.Event, _ magicevent.Result) {
+		if data, ok := governanceRunStateChangedData(event); ok {
+			s.enqueueGovernanceWork(func(workCtx context.Context) { s.processRunStateChanged(workCtx, data) })
+		}
+	}); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.unsubscribes = append(s.unsubscribes, func() error { return s.UnsubscribeMatchedFuncChecked(runObserverID, runevents.TopicRunStateChanged) })
+	s.mu.Unlock()
+	const topic = governanceevents.TopicGovernanceAutoCommandListTraces
+	if err := s.SubscribeFuncChecked(topic, func(ev magicevent.Event, result magicevent.Result) {
+		leave, err := s.enterOwner(true)
+		if err != nil {
+			if result != nil {
+				result.Set(nil, cd.WrapError(cd.Unexpected, err, "governance is closing"))
+			}
+			return
+		}
+		defer leave()
+		s.handleCommand(ev, result)
+	}); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.topics = append(s.topics, topic)
+	s.mu.Unlock()
+	if err := s.scheduleBlockedRunReconciliationLocked(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.unsubscribes) > 0 {
-		return nil
+	if s.closing {
+		return basebiz.ErrLifecycleClosing
 	}
-	workCtx, workCancel := context.WithCancel(context.Background())
-	workQueue := make(chan governanceWork, 256)
-	workDone := make(chan struct{})
-	s.workCtx = workCtx
-	s.workCancel = workCancel
-	s.workQueue = workQueue
-	s.workDone = workDone
-	if err := s.startGovernanceWorker(workCtx, workQueue, workDone); err != nil {
-		s.workCtx = nil
-		s.workCancel = nil
-		s.workQueue = nil
-		s.workDone = nil
-		workCancel()
-		return err
-	}
-	var unsubTicket func()
-	if s.EventHub() != nil {
-		const observerID = "/decision/consumers/kernel/governance"
-		s.SubscribeMatchedFunc(observerID, observerID, decisionevents.TopicTicketCreated, func(event magicevent.Event, _ magicevent.Result) {
-			if data, ok := governanceTicketCreatedData(event); ok {
-				if data.DecisionKind == "workspace_definition_clarification" || data.DecisionKind == "runtime_definition_clarification" {
-					return
-				}
-				s.enqueueGovernanceWork(func(workCtx context.Context) {
-					s.processTicketCreated(workCtx, data)
-				})
-			}
-		})
-		unsubTicket = func() { s.UnsubscribeMatchedFunc(observerID, decisionevents.TopicTicketCreated) }
-	}
-	var unsubRunState func()
-	if s.EventHub() != nil {
-		const observerID = "/run/consumers/kernel/governance"
-		s.SubscribeMatchedFunc(observerID, observerID, runevents.TopicRunStateChanged, func(event magicevent.Event, _ magicevent.Result) {
-			if data, ok := governanceRunStateChangedData(event); ok {
-				s.enqueueGovernanceWork(func(workCtx context.Context) {
-					s.processRunStateChanged(workCtx, data)
-				})
-			}
-		})
-		unsubRunState = func() { s.UnsubscribeMatchedFunc(observerID, runevents.TopicRunStateChanged) }
-	}
-	s.unsubscribes = []func(){unsubTicket, unsubRunState}
-	s.topics = []string{governanceevents.TopicGovernanceAutoCommandListTraces}
-	for _, topic := range s.topics {
-		s.SubscribeFunc(topic, s.handleCommand)
-	}
-	if err := s.scheduleBlockedRunReconciliationLocked(); err != nil {
-		for idx := len(s.topics) - 1; idx >= 0; idx-- {
-			s.UnsubscribeFunc(s.topics[idx])
-		}
-		s.topics = nil
-		for _, unsub := range s.unsubscribes {
-			if unsub != nil {
-				unsub()
-			}
-		}
-		s.unsubscribes = nil
-		if s.reconcileCancel != nil {
-			s.reconcileCancel()
-		}
-		s.reconcileCancel = nil
-		s.reconcileDone = nil
-		workCancel()
-		select {
-		case <-workDone:
-		case <-time.After(2 * time.Second):
-		}
-		s.workCtx = nil
-		s.workCancel = nil
-		s.workQueue = nil
-		s.workDone = nil
-		return err
-	}
+	s.started = true
 	return nil
+}
+
+func (s *Service) enterOwner(drain bool) (func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.releasing || s.released {
+		return nil, basebiz.ErrLifecycleClosing
+	}
+	if drain {
+		return s.lifecycle.EnterDrain()
+	}
+	return s.lifecycle.Enter()
 }
 
 func governanceTicketCreatedData(event magicevent.Event) (decisionevents.TicketChangedData, bool) {
@@ -244,47 +267,120 @@ func governanceRunStateChangedData(event magicevent.Event) (runevents.RunStateCh
 	return data, ok
 }
 
-func (s *Service) Stop() {
+func (s *Service) BeginShutdown() {
+	if s == nil {
+		return
+	}
 	s.mu.Lock()
-	for idx := len(s.topics) - 1; idx >= 0; idx-- {
-		s.UnsubscribeFunc(s.topics[idx])
-	}
-	s.topics = nil
-	for _, unsub := range s.unsubscribes {
-		if unsub != nil {
-			unsub()
-		}
-	}
-	s.unsubscribes = nil
-	cancel := s.reconcileCancel
-	done := s.reconcileDone
-	workCancel := s.workCancel
-	workDone := s.workDone
-	s.reconcileCancel = nil
-	s.reconcileDone = nil
-	s.workCtx = nil
-	s.workCancel = nil
-	s.workQueue = nil
-	s.workDone = nil
+	s.closing = true
+	s.lifecycle.BeginShutdown()
+	cancel, workCancel := s.reconcileCancel, s.workCancel
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	if done != nil {
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-		}
-	}
 	if workCancel != nil {
 		workCancel()
 	}
-	if workDone != nil {
-		select {
-		case <-workDone:
-		case <-time.After(2 * time.Second):
+}
+
+func (s *Service) Quiesce(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		return basebiz.ErrNilLifecycleContext
+	}
+	if err := s.lifecycle.Quiesce(ctx); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	done, workDone := s.reconcileDone, s.workDone
+	s.mu.Unlock()
+	for _, ch := range []chan struct{}{done, workDone} {
+		if ch != nil {
+			select {
+			case <-ch:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 	}
+	return nil
+}
+
+// Stop 保留旧版必需生命周期助手合同；生产路径使用 StopChecked。
+func (s *Service) Stop() {
+	if err := s.StopChecked(context.Background()); err != nil {
+		panic(cd.WrapError(cd.Unexpected, err, "governance shutdown failed"))
+	}
+}
+
+func (s *Service) StopChecked(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.BeginShutdown()
+	if err := s.Quiesce(ctx); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.released {
+		s.mu.Unlock()
+		return nil
+	}
+	if s.releasing {
+		s.mu.Unlock()
+		return common.ErrConflict
+	}
+	s.releasing = true
+	s.mu.Unlock()
+	defer func() { s.mu.Lock(); s.releasing = false; s.mu.Unlock() }()
+	if err := s.lifecycle.Quiesce(ctx); err != nil {
+		return err
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		if len(s.topics) == 0 {
+			s.mu.Unlock()
+			break
+		}
+		topic := s.topics[len(s.topics)-1]
+		s.mu.Unlock()
+		if err := s.UnsubscribeFuncChecked(topic); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.topics = s.topics[:len(s.topics)-1]
+		s.mu.Unlock()
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		if len(s.unsubscribes) == 0 {
+			s.mu.Unlock()
+			break
+		}
+		unsub := s.unsubscribes[len(s.unsubscribes)-1]
+		s.mu.Unlock()
+		if err := unsub(); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.unsubscribes = s.unsubscribes[:len(s.unsubscribes)-1]
+		s.mu.Unlock()
+	}
+	s.mu.Lock()
+	s.workCtx, s.workCancel, s.workQueue, s.workDone = nil, nil, nil, nil
+	s.reconcileCancel, s.reconcileDone = nil, nil
+	s.started, s.released = false, true
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *Service) handleCommand(ev magicevent.Event, result magicevent.Result) {

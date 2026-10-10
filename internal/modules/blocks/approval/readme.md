@@ -35,6 +35,14 @@ Web capability 与 Approval owner 没有直接 EventHub query 合同。`blocks/w
 - Workspace fence后普通 mutation和late delivery fail closed；purge只由 Approval-private dispatcher调用。
 - 不拥有 SM-1～SM-4，不执行 Web/SSH/Shell/File副作用，不直接服务Web，也不暴露 repository/service。
 
+## 进程生命周期合同
+
+- Biz 持有 owner-neutral `basebiz.Lifecycle`，首次 Start 开一代；重复 Start 不 Reset，部分 Start 失败保留已获取订阅与任务句柄，Module 先保存 Biz，必须检查式清理后重新 Configure。
+- `BeginShutdown` 立即关闭 fresh Runtime open/capability/deletion 入口并取消 reconciliation，不等待、不退订。既有 resolution 与只读 query 使用显式 drain 入口，仍执行原 source、principal、scope 和持久身份校验；不能因调用 Source 可信而放行新的 root。
+- `Quiesce(ctx)` 等待真实 handler/任务结束；timeout/cancel 保留 done/cancel、订阅 ledger 和依赖，允许新停机预算重试。任务入队前记在途，不能在等待方超时后提前 leave。
+- final `Teardown(ctx) error` 封闭 drain 后再次复核真实排空，按逆序逐项 checked 取消；只在取消成功后移除该 ledger 项。失败/未知 panic 保留 owner 与未完成依赖，未知 panic 原样上抛，不持锁跨 Hub。
+- Module 暴露 BeginShutdown/Quiesce；void plugin Teardown 把 Stop 错误经 `cd.WrapError` panic 交给 framework guard，成功后才清空 Biz。final release 仍依赖应用先完成共享 Hub/任务屏障；本 owner 接线不单独宣告整进程 S1–S5 完成，不改业务 SM 或预算。
+
 ## 能力验收
 
 | 能力/维度 | 测试证据 | 结论 |

@@ -47,6 +47,8 @@ func (m *Module) Run(_ context.Context) *cd.Error {
 
 func (m *Module) Teardown(ctx context.Context) {
 	if m != nil {
-		_ = m.Stop(ctx)
+		if err := m.Stop(ctx); err != nil {
+			panic(cd.WrapError(cd.Unexpected, err, "governance shutdown failed"))
+		}
 	}
 }

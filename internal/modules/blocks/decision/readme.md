@@ -42,6 +42,14 @@ input subject 和具体问题；Decision 只管理 ticket/proposal lifecycle。`
 - Workspace deletion fence 后普通读写/late delivery fail closed；physical purge 只由 Decision-private dispatcher触发。
 - 不拥有 Run SM-1、Runtime SM-2～SM-4、Workspace admission、Approval 或 Result 状态机；不选择下一动作，不暴露 repository/service。
 
+## 进程生命周期合同
+
+- Biz 首次 Start 使用 `basebiz.Lifecycle` 开一代；重复 Start 不 Reset，部分订阅/任务提交失败保留逐成功 ledger，Module 持有原 owner 供检查式清理，不能直接重开失败代次。
+- `BeginShutdown` 关 fresh open/reconcile/capability/deletion 并取消 recovery loop，不等待、不退订。ordinary resolution、clarification resolution 与 query 是显式 drain；原 concrete DTO、source/scope、持久 binding 校验不变，不按 Source 扩大新的 root 授权。
+- `Quiesce(ctx)` 按调用预算等待真实 handler 与 accepted task 退出，timeout/cancel 不清 done/cancel/依赖、不虚构完成，可重试。task 在提交前记在途，实际任务 defer 释放。
+- final `Teardown(ctx) error` 关 drain 并复核在途，逆序 checked 取消且逐成功移除 ledger；失败保留未完成项和 Module owner。未知 panic 原样上抛；锁只护本地状态，不跨 Hub I/O。
+- Module BeginShutdown/Quiesce 与 plugin error guard 贯通，void Teardown 通过 `cd.WrapError` panic 传递 Stop cause，成功后才清 owner。依赖应用共享 Hub/task 排空屏障；这不是单独的全局生命周期完成声明，SM-1～SM-4、budget 与 formal ticket/proposal transition 不变。
+
 ## 能力验收
 
 | 能力/维度 | 测试证据 | 结论 |

@@ -2,6 +2,7 @@ package governance
 
 import (
 	"context"
+	"sync"
 
 	governancebiz "github.com/muidea/workorch/internal/modules/kernel/governance/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/kernel/governance/pkg/common"
@@ -11,19 +12,22 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-// Module only bridges the framework lifecycle. Governance use cases,
-// subscriptions, and typed EventHub I/O live in governancebiz.Service.
+// Module 只桥接生命周期；Hub 与 owner 状态仍由 Biz 持有。
 type Module struct {
+	mu     sync.Mutex
 	bizPtr *governancebiz.Service
 }
 
-func New() *Module { return &Module{} }
-
+func New() *Module           { return &Module{} }
 func (m *Module) ID() string { return ModuleID }
-
 func (m *Module) Configure(deps governancebiz.EventDependencies) error {
 	if m == nil || deps.AutoGovernanceTraces == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.bizPtr != nil {
+		return common.ErrConflict
 	}
 	if deps.LoadConfig == nil {
 		deps.LoadConfig = workorchconfig.Current
@@ -31,21 +35,44 @@ func (m *Module) Configure(deps governancebiz.EventDependencies) error {
 	m.bizPtr = governancebiz.NewEventServiceWithDependencies(deps)
 	return nil
 }
-
-func (m *Module) Start() error {
-	if m == nil || m.bizPtr == nil {
-		return common.ErrInvalidArgument
-	}
-	return m.bizPtr.Start()
-}
-
-func (m *Module) Stop(context.Context) error {
+func (m *Module) owner() *governancebiz.Service {
 	if m == nil {
 		return nil
 	}
-	if m.bizPtr != nil {
-		m.bizPtr.Stop()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.bizPtr
+}
+func (m *Module) Start() error {
+	owner := m.owner()
+	if owner == nil {
+		return common.ErrInvalidArgument
 	}
-	m.bizPtr = nil
+	return owner.Start()
+}
+func (m *Module) BeginShutdown() {
+	if owner := m.owner(); owner != nil {
+		owner.BeginShutdown()
+	}
+}
+func (m *Module) Quiesce(ctx context.Context) error {
+	if owner := m.owner(); owner != nil {
+		return owner.Quiesce(ctx)
+	}
+	return nil
+}
+func (m *Module) Stop(ctx context.Context) error {
+	owner := m.owner()
+	if owner == nil {
+		return nil
+	}
+	if err := owner.StopChecked(ctx); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	if m.bizPtr == owner {
+		m.bizPtr = nil
+	}
+	m.mu.Unlock()
 	return nil
 }

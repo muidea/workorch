@@ -19,6 +19,14 @@ const runtimeGovernanceProposalReconciliationInterval = time.Second
 // Lifecycle callers use the scheduled loop; tests and controlled recovery may
 // invoke a single pass without introducing a second runtime authority.
 func (m *Biz) ReconcileRuntimeGovernanceProposals(ctx context.Context) error {
+	if m == nil {
+		return common.ErrInvalidArgument
+	}
+	leave, err := m.enterOwner(true)
+	if err != nil {
+		return err
+	}
+	defer leave()
 	return m.reconcileRuntimeGovernanceProposals(ctx)
 }
 
@@ -27,16 +35,28 @@ func (m *Biz) startRuntimeGovernanceProposalReconciliation() error {
 		return nil
 	}
 	m.reconcileMu.Lock()
-	defer m.reconcileMu.Unlock()
 	if m.reconcileCancel != nil {
+		m.reconcileMu.Unlock()
 		return nil
+	}
+	leave, err := m.enterOwner(false)
+	if err != nil {
+		m.reconcileMu.Unlock()
+		return err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	m.reconcileCancel = cancel
-	m.reconcileDone = done
-	if err := m.BackgroundRoutine().AsyncFunction(func() {
+	m.reconcileCancel, m.reconcileDone = cancel, done
+	m.reconcileMu.Unlock()
+	m.shutdownMu.Lock()
+	closing := m.closing
+	m.shutdownMu.Unlock()
+	if closing {
+		cancel()
+	}
+	if err := m.AsyncTask(func() {
 		defer close(done)
+		defer leave()
 		m.logRuntimeGovernanceReconciliationError(m.reconcileRuntimeGovernanceProposals(ctx))
 		ticker := time.NewTicker(runtimeGovernanceProposalReconciliationInterval)
 		defer ticker.Stop()
@@ -49,9 +69,9 @@ func (m *Biz) startRuntimeGovernanceProposalReconciliation() error {
 			}
 		}
 	}); err != nil {
-		m.reconcileCancel = nil
-		m.reconcileDone = nil
 		cancel()
+		leave()
+		close(done)
 		return err
 	}
 	return nil
@@ -63,18 +83,9 @@ func (m *Biz) stopRuntimeGovernanceProposalReconciliation() {
 	}
 	m.reconcileMu.Lock()
 	cancel := m.reconcileCancel
-	done := m.reconcileDone
-	m.reconcileCancel = nil
-	m.reconcileDone = nil
 	m.reconcileMu.Unlock()
 	if cancel != nil {
 		cancel()
-	}
-	if done != nil {
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-		}
 	}
 }
 

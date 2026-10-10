@@ -22,17 +22,42 @@ import (
 const governanceRecoveryInventoryMaxItems = 100_000
 
 func (s *Service) startGovernanceWorker(ctx context.Context, queue <-chan governanceWork, done chan<- struct{}) error {
-	if background := s.BackgroundRoutine(); background != nil {
-		return background.AsyncFunction(func() {
-			s.runWorkLoop(ctx, queue, done)
-		})
+	leave, err := s.enterOwner(false)
+	if err != nil {
+		close(done)
+		return err
 	}
-	go s.runWorkLoop(ctx, queue, done)
+	run := func() { defer leave(); s.runWorkLoop(ctx, queue, done) }
+	if background := s.BackgroundRoutine(); background != nil {
+		if err := s.AsyncTask(run); err != nil {
+			leave()
+			close(done)
+			return err
+		}
+		return nil
+	}
+	go run()
 	return nil
 }
 
 func (s *Service) runWorkLoop(ctx context.Context, queue <-chan governanceWork, done chan<- struct{}) {
 	defer close(done)
+	defer func() {
+		// worker panic 时仍保留安全清理路径，不捕获或替换原 panic；
+		// 已取消的队列回调只释放自身真实回执。
+		s.BeginShutdown()
+		s.workEnqueue.Wait()
+		for {
+			select {
+			case work := <-queue:
+				if work != nil {
+					work(ctx)
+				}
+			default:
+				return
+			}
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -50,24 +75,51 @@ func (s *Service) enqueueGovernanceWork(work governanceWork) {
 		return
 	}
 	s.mu.Lock()
-	ctx := s.workCtx
-	queue := s.workQueue
-	s.mu.Unlock()
-	if ctx == nil || queue == nil {
+	ctx, queue := s.workCtx, s.workQueue
+	if s.closing || s.releasing || ctx == nil || queue == nil {
+		s.mu.Unlock()
 		return
 	}
+	leave, err := s.lifecycle.Enter()
+	if err != nil {
+		s.mu.Unlock()
+		return
+	}
+	s.workEnqueue.Add(1)
+	s.mu.Unlock()
+	defer s.workEnqueue.Done()
+	queued := governanceWork(func(ctx context.Context) {
+		defer leave()
+		if ctx.Err() == nil {
+			work(ctx)
+		}
+	})
 	select {
-	case queue <- work:
+	case queue <- queued:
 	case <-ctx.Done():
+		leave()
 	case <-time.After(100 * time.Millisecond):
+		leave()
 	}
 }
 
 func (s *Service) scheduleBlockedRunReconciliationLocked() error {
+	leave, err := s.enterOwner(false)
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	s.mu.Lock()
+	s.reconcileCancel, s.reconcileDone = cancel, done
+	closing := s.closing
+	s.mu.Unlock()
+	if closing {
+		cancel()
+	}
 	reconcile := func() {
 		defer close(done)
+		defer leave()
 		timer := time.NewTimer(500 * time.Millisecond)
 		defer timer.Stop()
 		select {
@@ -83,16 +135,14 @@ func (s *Service) scheduleBlockedRunReconciliationLocked() error {
 		}
 	}
 	if background := s.BackgroundRoutine(); background != nil {
-		if err := background.AsyncFunction(reconcile); err != nil {
+		if err := s.AsyncTask(reconcile); err != nil {
 			cancel()
+			leave()
+			close(done)
 			return err
 		}
-		s.reconcileCancel = cancel
-		s.reconcileDone = done
 		return nil
 	}
-	s.reconcileCancel = cancel
-	s.reconcileDone = done
 	go reconcile()
 	return nil
 }

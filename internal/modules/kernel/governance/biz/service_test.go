@@ -244,7 +244,7 @@ func (r *recordingBackgroundRoutine) Shutdown(ctx context.Context) bool {
 	return true
 }
 
-func TestServiceStartRollsBackEverySubscriptionAndWorkerWhenReconciliationRegistrationFails(t *testing.T) {
+func TestServiceStartRetainsPartialStateUntilCheckedCleanupWhenReconciliationRegistrationFails(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	routine := &recordingBackgroundRoutine{failAsyncAt: 2}
@@ -264,15 +264,22 @@ func TestServiceStartRollsBackEverySubscriptionAndWorkerWhenReconciliationRegist
 	if err := svc.Start(); err == nil {
 		t.Fatal("Start succeeded despite injected reconciliation registration failure")
 	}
-	if len(svc.topics) != 0 || len(svc.unsubscribes) != 0 || svc.workCtx != nil || svc.workCancel != nil || svc.workQueue != nil || svc.workDone != nil || svc.reconcileCancel != nil || svc.reconcileDone != nil {
-		t.Fatalf("failed Start retained lifecycle state: topics=%v unsubscribes=%d workCtx=%v workCancel=%v workQueue=%v workDone=%v reconcileCancel=%v reconcileDone=%v", svc.topics, len(svc.unsubscribes), svc.workCtx, svc.workCancel, svc.workQueue, svc.workDone, svc.reconcileCancel, svc.reconcileDone)
+	if len(svc.topics) != 1 || len(svc.unsubscribes) != 2 || svc.workDone == nil || svc.workCancel == nil || svc.reconcileDone == nil {
+		t.Fatal("failed Start lost acquired cleanup state")
 	}
-	// The injected failure is one-shot. A retry must establish exactly one fresh
-	// worker/reconciliation pair rather than inheriting partial Start state.
-	if err := svc.Start(); err != nil {
-		t.Fatalf("retry Start after full rollback: %v", err)
+	if err := svc.Start(); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("partial Start reopened lifecycle: %v", err)
 	}
-	svc.Stop()
+	svc.BeginShutdown()
+	if err := svc.StopChecked(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(svc.topics) != 0 || len(svc.unsubscribes) != 0 || svc.workDone != nil || svc.workCancel != nil || svc.reconcileDone != nil {
+		t.Fatal("checked cleanup retained released handles")
+	}
+	if err := svc.Start(); err == nil {
+		t.Fatal("Start reopened stopped owner")
+	}
 	if !routine.Shutdown(ctx) {
 		t.Fatal("background routine tasks did not stop after retry")
 	}

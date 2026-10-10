@@ -2,6 +2,7 @@ package approval
 
 import (
 	"context"
+	"sync"
 
 	approvalbiz "github.com/muidea/workorch/internal/modules/blocks/approval/biz"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/common"
@@ -10,38 +11,68 @@ import (
 
 const ModuleID = modulecommon.ModuleID
 
-type Module struct{ bizPtr *approvalbiz.Biz }
+type Module struct {
+	mu     sync.Mutex
+	bizPtr *approvalbiz.Biz
+}
 
 func New() *Module                                              { return &Module{} }
 func (m *Module) ID() string                                    { return ModuleID }
 func (m *Module) Configure(deps approvalbiz.Dependencies) error { return m.configure(deps) }
-
 func (m *Module) configure(deps approvalbiz.Dependencies) error {
 	if m == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
-	if err := deps.OwnerRepositories.Validate(); err != nil {
-		return err
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.bizPtr != nil {
+		return common.ErrConflict
 	}
-	bizPtr, err := approvalbiz.New(deps.EventHub, deps.BackgroundRoutine, deps)
+	owner, err := approvalbiz.New(deps.EventHub, deps.BackgroundRoutine, deps)
 	if err != nil {
 		return err
 	}
-	m.bizPtr = bizPtr
+	m.bizPtr = owner
 	return nil
 }
-
+func (m *Module) owner() *approvalbiz.Biz {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.bizPtr
+}
 func (m *Module) Start() error {
-	if m == nil || m.bizPtr == nil {
+	owner := m.owner()
+	if owner == nil {
 		return common.ErrInvalidArgument
 	}
-	return m.bizPtr.Start()
+	return owner.Start()
 }
-
+func (m *Module) BeginShutdown() {
+	if owner := m.owner(); owner != nil {
+		owner.BeginShutdown()
+	}
+}
+func (m *Module) Quiesce(ctx context.Context) error {
+	if owner := m.owner(); owner != nil {
+		return owner.Quiesce(ctx)
+	}
+	return nil
+}
 func (m *Module) Stop(ctx context.Context) error {
-	if m != nil && m.bizPtr != nil {
-		m.bizPtr.Teardown(ctx)
+	owner := m.owner()
+	if owner == nil {
+		return nil
+	}
+	if err := owner.Teardown(ctx); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	if m.bizPtr == owner {
 		m.bizPtr = nil
 	}
+	m.mu.Unlock()
 	return nil
 }

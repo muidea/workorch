@@ -59,6 +59,14 @@ Governance 与 Orchestrator 没有直接 EventHub I/O。Governance 只向 Decisi
 - consecutive-failure history 由 Governance 按 `OccurredAt + trace ID` 稳定排序，不依赖 repository 迭代顺序；通过自动 Approval 策略与置信度门槛后，evaluated trace 不得残留 `policyBlocked`。
 - Governance 不得绕过 Orchestrator 的 stage、evidence、coverage、requiredOutput 与四状态机合同；Governance 自身协调事务不得修改 SM-1～SM-4 transition。
 
+## 进程生命周期合同
+
+- 首次 Start 建立 owner-local `basebiz.Lifecycle` 代次；重复 Start 不 Reset。Module 先持有 Service，worker/订阅逐成功记账，部分 Start 失败保留清理入口，不在失败分支提前退订/丢任务句柄。
+- `BeginShutdown` 非阻塞关 fresh notification/work enqueue 并取消 worker/reconciliation，不等待、不退订。已接纳任务/handler 用真实退出回执计数；取消后队列剩余项仅释放回执、不发新 owner I/O。只读 trace query 保留显式 drain，原 producer/scope/limit 校验不变。
+- `Quiesce(ctx)` 等待 worker、scheduler 与在途 handler 真正结束；timeout/cancel 保留 work/reconcile done/cancel、queue 与订阅/依赖，允许用新停机预算重试。
+- `StopChecked(ctx) error` 为 final release：封闭 drain 后复核在途，逆序 checked 取消 topic 与 matched observer，成功一项才移除一项 ledger，失败保留原 Service。Hub 调用不持 `mu`；未知 panic 原样上抛且锁/cleanup claim 不被毒化。
+- Module 暴露 BeginShutdown/Quiesce，plugin void Teardown 检查 Stop error 并通过 `cd.WrapError` panic 交给 framework guard，成功后才清空 owner。必须配合应用共享 Hub/task 屏障，不能将本批适配声明为完整 S1–S5；不改 Governance formal trace transition、Runtime SM 或预算。
+
 ## 能力验收
 
 | 验收面 | 自动化证据 | 覆盖维度 |
