@@ -74,4 +74,5 @@ var reviewedBuiltinRevisions = [...]struct{ kind, id, contentHash, revision stri
 	{"workspace_template", "doc-generator", "workspace-template-content-sha256:f225868bd8a54b65b3759e8b093bf5740fc6d53a2d3ea783461c2472a348601f", "fe73385d"},
 	{"workspace_template", "data-analysis", "workspace-template-content-sha256:b0267c093a0bd46f8bba9bc5330adf40fd1d5ceaf6f924f95fc2c10ee2d320aa", "fe73385d"},
 	{"workspace_template", "software-dev", "workspace-template-content-sha256:d8e7d5a2a69e76373023eefae3b788fbe24beed8dd2bdc6a84ca7a9b2feb36f1", "3090726f"},
+	{"workspace_template", "software-dev", "workspace-template-content-sha256:151e7e0550e0c2bd4ccd879ba0ee7960c79284376bf6e0ab248815e6d1c67221", "14e0f779"},
 }

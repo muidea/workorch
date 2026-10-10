@@ -10,8 +10,8 @@ Last Verified: 2026-09-10
 
 This document defines the built-in software-development evidence specialization. Its stable template ID and product
 presentation remain language- and framework-neutral. Shell's current Go-native validation adapter
-(`shell/go-test-json/workspace-behavior/v5` for the `shell/project-native-validation/v4` adapter, with
-sealed `shell/go-test-json/v1` and behavior v2/v3/v4 replay retained) is one typed capability-owner implementation, not part of the template identity or Runtime-core
+(`shell/go-test-json/workspace-behavior/v6` for the `shell/project-native-validation/v5` adapter, with
+sealed `shell/go-test-json/v1` and behavior v2/v3/v4/v5 replay retained) is one typed capability-owner implementation, not part of the template identity or Runtime-core
 language. The neutral CWI/focus/evidence machinery remains owned by Orchestrator and
 [the core Runtime contract](../../00-core/runtime-stage-contract.md).
 
@@ -187,8 +187,11 @@ credit. This is criterion-preserving input maintenance, not a general test-repai
 
 ### Versioned entrypoint observation and unchanged-input reuse
 
-New template activations select `shell/project-native-validation/v4`. Its Go behavior v5 contract isolates each CWI in
-`workorch_validation/v4/<lowercase-native-identity>/input_test.go`; a conjunctive supplement stays in that same package.
+新模板 activation 选择 `shell/project-native-validation/v5`，使用 Go behavior v6。
+完整 requirement 的 canonical SHA256 固定 `workorch_validation/v5/<requirement-digest>/input_test.go`；
+同一 CWI 的共同检查与每项源义务 verification 具有不同 `_Check_<check-identity>_InputV5`，
+全部同 package 评审并合取执行。每个 supplement 使用同 package 中独立 exact 文件。
+v3/v4 仍是显式单检查合同，不接受多检查声明，也不隐式升级原 seal。
 It allows named same-package assertion helpers, types, constants and data-only variables. Runner overrides (`init` or
 `TestMain`), extra test definitions, methods and effectful global initializers remain inadmissible. The bounded native walker
 still requires reachable real `testing.T` assertions. This is a new observation/input contract, not permission to revise criteria:
@@ -262,7 +265,7 @@ repair authority. Duplicate trigger tuples or cross-owner operations fail pre-se
 capability set; it is not a Goal/DoD `one_of` terminal relation, and an accepted repair receipt cannot itself satisfy the DoD
 validation requirement.
 
-The software-dev template seals `shell/project-native-validation/v4`, not a language command, argument vector or environment.
+模板封存 `shell/project-native-validation/v5`，不封存语言 command、argument vector 或 environment。
 Shell alone resolves that declaration against the exact File-owner manifest and publishes the concrete executable recipe; the
 current Shell adapter can recognize Go project facts and keeps all Go grammar private to the owner. The managed-validation wire
 then contains only the sealed `recipeId`; it does not carry a caller-selected command or failure class. Unrecognized failures

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -231,7 +232,7 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 	}
 	found := false
 	for _, recipe := range runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(first.Activation.EvidencePolicies) {
-		if recipe.AdapterRef != shellcommon.ValidationRecipeAdapterIsolatedEntrypoint || recipe.InputReviewProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV2 {
+		if recipe.AdapterRef != shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint || recipe.InputReviewProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV2 {
 			t.Fatalf("未使用已审查 adapter/protocol: %+v", recipe)
 		}
 		found = true
@@ -240,12 +241,47 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 		t.Fatal("缺少已审查 adapter")
 	}
 	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(first.Definition.Revision, first.CoverageItems, first.DefinitionFocuses)
-	if err != nil || len(requirements) != 42 || len(first.CoverageItems) != 44 {
+	if err != nil || len(requirements) != 38 || len(first.CoverageItems) != 40 {
 		t.Fatalf("完整规格覆盖不完整: proof=%d CWI=%d err=%v", len(requirements), len(first.CoverageItems), err)
+	}
+	var exactDoD []string
+	for _, item := range first.CoverageItems {
+		if item.SourceScope == "dodItem" {
+			exactDoD = append(exactDoD, item.TargetText)
+		}
+	}
+	if first.DefinitionSeed.SourceObligations == nil || !reflect.DeepEqual(first.DefinitionSeed.SourceObligations, second.DefinitionSeed.SourceObligations) {
+		t.Fatal("公开创作未保全完整封存来源清单")
+	}
+	expected := make(map[string]bool)
+	for _, verification := range first.DefinitionSeed.SourceObligations.Verifications {
+		expected[verification.ID] = true
+	}
+	observed := make(map[string]bool)
+	for _, requirement := range requirements {
+		for _, check := range requirement.SourceObligationChecks {
+			if !expected[check.VerificationID] {
+				t.Fatal("runtime proof 引入未准入来源")
+			}
+			found := false
+			for _, ref := range requirement.RequiredCheckRefs {
+				found = found || ref == check.CheckRef
+			}
+			if !found {
+				t.Fatal("来源 verification 未进入完整 proof")
+			}
+			observed[check.VerificationID] = true
+		}
+	}
+	if len(expected) == 0 || !reflect.DeepEqual(expected, observed) {
+		t.Fatal("公开创作到 Runtime proof 遗漏源 verification")
 	}
 	stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
 	if err != nil || stored.TemplateBindingHash != stored.DefinitionAuthoring.TemplateSnapshotHash || len(stored.DefinitionAuthoring.TemplateSnapshot.DoDItems) != 13 || len(ready.Proposal.Items) != 37 {
 		t.Fatalf("模板必需项或物化身份丢失: %+v %v", stored, err)
+	}
+	if !reflect.DeepEqual(exactDoD, stored.DefinitionAuthoringConfirmation.DoD.Items) {
+		t.Fatal("sealed DoD 原文被 effective compiler 拆分、去重或改写")
 	}
 	beforeRevision := stored.Revision
 	for _, mutation := range []string{"goal", "dod", "template", "directory", "policy", "profile"} {

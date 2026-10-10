@@ -1238,7 +1238,7 @@
         "profile": "software-dev",
         "rule": "software_dev_test_zero_work_is_inconclusive",
         "appliesTo": "shell/command",
-        "recipeAdapterRef": "shell/project-native-validation/v4",
+        "recipeAdapterRef": "shell/project-native-validation/v5",
         "recipeInputReviewProtocolRef": "validation/input-consistency/v2",
         "recipeDeclared": true,
         "recipeTimeoutMillis": 60000,

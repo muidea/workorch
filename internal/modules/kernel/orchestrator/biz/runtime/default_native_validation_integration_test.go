@@ -150,9 +150,8 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 	if len(moduleReceipt.TargetRefs) != 1 || moduleReceipt.TargetRefs[0] != "go.mod" {
 		t.Fatalf("File module preparation did not attest Shell's exact module target: %+v", moduleReceipt)
 	}
-	// This fixture proves the owner protocol, not arbitrary template semantics.
-	// Its fixed subject is separate from the native validation inputs and must
-	// really execute under the default adapter's v4 observation contract.
+	// 夹具校准 owner 协议，不自证任意模板语义；实际交付入口独立于验证输入，
+	// 必须在默认 adapter v5 的完整合取 observation 合同下真实执行。
 	subject := "package fixture\nfunc DeliveredValue() int { return 4 }\n"
 	executeFileWrite(runtimecontract.RuntimeOperation{ID: "fixture-subject", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{"fixture.go"},
 		Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &subject}}}, "dispatch-fixture-subject")
@@ -206,7 +205,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 		if !found {
 			t.Fatalf("reobserved catalog has no exact ready binding for %q: %+v", requirement.Hash, catalog.ValidationSurfaces)
 		}
-		if len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].ObservationProtocolRef != "shell/go-test-json/workspace-behavior/v5" || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != "" || ownerBinding.InputReview == nil || ownerBinding.InputReview.ValidateAgainstBinding(ownerBinding) != nil || len(ownerBinding.InputReview.Files) != 2 {
+		if len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].ObservationProtocolRef != "shell/go-test-json/workspace-behavior/v6" || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != "" || ownerBinding.InputReview == nil || ownerBinding.InputReview.ValidateAgainstBinding(ownerBinding) != nil || len(ownerBinding.InputReview.Files) != 2 {
 			t.Fatalf("default adapter did not publish an exact isolated review subject: %+v", ownerBinding)
 		}
 		focus, found := focusByCoverage[requirement.CoverageWorkItemID]
@@ -252,7 +251,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 			}
 			diagnostic := response.Receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic
 			addition := diagnostic.InputAddition
-			if addition.ContentContractRef != "shell/go-test-input/isolated-entrypoint/v1" {
+			if addition.ContentContractRef != "shell/go-test-input/conjunctive-entrypoint/v1" {
 				t.Fatalf("default adapter did not publish the versioned entrypoint input contract: %+v", addition)
 			}
 			convergence := focus.ValidationFailureRepairConvergence

@@ -133,7 +133,7 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 		t.Fatalf("software-dev evidencePolicies missing")
 	}
 	policy := item.EvidencePolicies[0]
-	if policy["recipeAdapterRef"] != "shell/project-native-validation/v4" {
+	if policy["recipeAdapterRef"] != "shell/project-native-validation/v5" {
 		t.Fatalf("software-dev evidence policy recipeAdapterRef = %v, want neutral Shell adapter", policy["recipeAdapterRef"])
 	}
 	if policy["recipeInputReviewProtocolRef"] != "validation/input-consistency/v2" {

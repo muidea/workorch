@@ -110,8 +110,8 @@ bindings。未知/定制内容、stale preview、目标 binary 已变化均返�
 projection clone 必须 detached，display metadata 不得反向构造 admission。没有这些历史封存字段时展示未知，不回填当前
 catalog、不推测升级成功，也不触发 owner mutation。
 
-当前 `software-dev` 的新执行声明 `shell/project-native-validation/v4`，并显式封存
-`recipeInputReviewProtocolRef=validation/input-consistency/v2`，使逐 CWI 输入必须经过完整原准则映射的独立一致性评审与
+当前 `software-dev` 的新执行声明 `shell/project-native-validation/v5`，并显式封存
+`recipeInputReviewProtocolRef=validation/input-consistency/v2`，使逐 CWI 的完整多检查输入包必须经过完整原准则映射的独立一致性评审与
 包范围验证；这是 Shell capability 合同，不改变模板中立身份、原 Goal/DoD 或验收集合。精确未定制的旧内置模板
 通过 reviewed fingerprint 在 owner ensure 时升级；新 Start/Restart 核对当前配置，Goal-only authoring 的已确认模板漂移仍按上述规则阻塞，旧 Run 的 v1/v2/v3 不被回填。
 终态 Run 不因升级重新运行；需要显式 Restart。未能识别的定制模板仍须用户合并，不能借升级绕过。

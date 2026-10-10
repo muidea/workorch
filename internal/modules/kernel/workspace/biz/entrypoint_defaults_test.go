@@ -30,6 +30,13 @@ var preIsolatedInputTemplateJSON []byte
 //go:embed testdata/software-dev-template-b8447f75.json
 var preObligationReviewTemplateJSON []byte
 
+//go:embed testdata/software-dev-template-14e0f779.json
+var preConjunctiveInputTemplateJSON []byte
+
+func TestConjunctiveInputTemplateUpgradeReopensReviewedPreviousDefault(t *testing.T) {
+	assertReviewedTemplateUpgrade(t, preConjunctiveInputTemplateJSON, "14e0f779")
+}
+
 func TestObligationReviewTemplateUpgradeReopensReviewedPreviousDefault(t *testing.T) {
 	assertReviewedTemplateUpgrade(t, preObligationReviewTemplateJSON, "b8447f75")
 }

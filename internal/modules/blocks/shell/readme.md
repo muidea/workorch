@@ -138,8 +138,8 @@ covers the read-only selection and downgrade boundary.
 
 #### Per-CWI review and execution scope
 
-New built-in software-development activations select `shell/project-native-validation/v4`,
-with `shell/go-test-json/workspace-behavior/v5` and a `_InputV4` native identity.
+单检查 v4 显式声明为 `shell/project-native-validation/v4`，
+使用 `shell/go-test-json/workspace-behavior/v5` 与 `_InputV4` native identity；它保持原单检查限制。
 Each check has an independent package:
 `workorch_validation/v4/<lowercase-native-identity>/input_test.go`.
 Its optional conjunctive supplement is `behavior_test.go` in the same package.
@@ -199,7 +199,7 @@ that an arbitrary verification input preserves the workspace's Goal/DoD semantic
 
 #### 多检查 requirement 输入包
 
-显式选择 `shell/project-native-validation/v5`，且必须显式声明
+新内置软件开发 activation 选择 `shell/project-native-validation/v5`，且必须显式声明
 `validation/input-consistency/v2`；缺失或降级 review protocol 在 recipe 解析与检查映射前拒绝。
 其 native observation 为 `shell/go-test-json/workspace-behavior/v6`。完整 canonical requirement 的
 SHA256 固定一个 `workorch_validation/v5/<requirement-digest>/input_test.go`，每个 required check
