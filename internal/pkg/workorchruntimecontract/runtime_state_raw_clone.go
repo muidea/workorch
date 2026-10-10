@@ -362,6 +362,7 @@ func cloneRuntimeAssessmentAdjudicationRaw(in RuntimeAssessmentAdjudication) Run
 		item.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(item.OwnerRevisionSet)
 		return item
 	})
+	out.OwnerFactSources = cloneRuntimeAssessmentOwnerFactSources(in.OwnerFactSources)
 	return out
 }
 

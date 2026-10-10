@@ -139,6 +139,18 @@ sealed binding、completed operation、原 fact hash 和 receipt 来源重编后
 `biz/runtime_assessment_proof_dependencies_mainline_test.go` 在既有真实 Shell/File/Run 装配及三 owner ACK 恢复中
 反查 receipt→fact→selected proof。provider 仍是脚本替身，这些验证不替代公开正式累计验收或 live。
 
+`RuntimeAssessmentAdjudication.OwnerFactSources` 在同一 SM-2/SM-3 assessment CAS 中保全实际消费的逐 required
+owner postcondition：exact requirement 与 pre-seal catalog snapshot 单独记录，`OwnerRevisionSet` 只绑定该 operation kind
+的 surface identity/readiness/proof applicability/ready publication/exact requirement binding observation。scope/selector 与
+observation 分域 hash；classifier 与 dependency projection 共用同一字段观察，独立旧 classifier reference 固定布尔结果等价。
+整 catalog observed revision、无关 targets 或 diagnostic 不进入 scoped dependency revision。
+matching catalog 缺失保留 requirement 和 nil source，不伪造 absence。来源与完整依赖正文进入 adjudication hash，raw clone、
+normalization 和 JSON reload 保全 detached 正文，fresh-load 从原 `AssessmentAuthorityInput` 重编后 exact-match。
+`runtime_assessment_owner_fact_sources_test.go` 与 `biz/runtime/assessment_owner_fact_sources_test.go` 固定独立 observation
+oracle、无关变化、相交变化、raw/hash/重复/Definition 门禁和协调篡改；既有 recovery 测试覆盖 CAS 前失败与响应丢失。
+真实 File/Shell/Run mainline 与三 owner ACK 恢复验证原 catalog 来源。这仍不覆盖 classifier 的所有 binding/lineage/guard
+输入、formal artifact、current query 或 terminal union，不改变 disposition、credit、budget、reopen 或 availability。
+
 ### 逐源义务与共同 CWI
 
 Workspace eligible candidate 的 immutable `RuntimeSourceObligationInventory` 随 Definition/seed/startup/hash

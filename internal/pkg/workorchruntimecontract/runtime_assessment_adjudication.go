@@ -137,6 +137,7 @@ type RuntimeAssessmentAdjudication struct {
 	FocusID             string
 	CoverageWorkItemIDs []common.CoverageWorkItemID
 	Proofs              []RuntimeAssessmentAdjudicationProof
+	OwnerFactSources    []RuntimeAssessmentOwnerFactSource `json:",omitempty"`
 	Disposition         AssessmentDisposition
 }
 
@@ -169,6 +170,7 @@ func (a RuntimeAssessmentAdjudication) Normalized() RuntimeAssessmentAdjudicatio
 		return proofs[i].EvidenceFactID < proofs[j].EvidenceFactID
 	})
 	a.Proofs = nilIfEmpty(proofs)
+	a.OwnerFactSources = cloneRuntimeAssessmentOwnerFactSources(a.OwnerFactSources)
 	a.Disposition = a.Disposition.Normalized()
 	return a
 }
@@ -202,6 +204,25 @@ func (a RuntimeAssessmentAdjudication) ValidateRaw() error {
 			return fmt.Errorf("runtime assessment proof owner dependencies: %w", err)
 		}
 	}
+	seenRequirements := make(map[RuntimeOwnerFactRequirement]struct{}, len(a.OwnerFactSources))
+	for _, source := range a.OwnerFactSources {
+		if source.Requirement != source.Requirement.Normalized() || source.Requirement.Validate() != nil {
+			return fmt.Errorf("runtime assessment owner-fact source has malformed requirement")
+		}
+		if _, duplicate := seenRequirements[source.Requirement]; duplicate {
+			return fmt.Errorf("runtime assessment owner-fact source duplicates requirement")
+		}
+		seenRequirements[source.Requirement] = struct{}{}
+		if source.CatalogSnapshotID != strings.TrimSpace(source.CatalogSnapshotID) || (source.CatalogSnapshotID == "") != (source.OwnerRevisionSet == nil) {
+			return fmt.Errorf("runtime assessment owner-fact source catalog identity mismatch")
+		}
+		if source.OwnerRevisionSet != nil && len(source.OwnerRevisionSet.Entries) != 1 {
+			return fmt.Errorf("runtime assessment owner-fact source must identify one exact observation")
+		}
+		if err := validateRuntimeOwnerRevisionSetRaw(source.OwnerRevisionSet); err != nil {
+			return fmt.Errorf("runtime assessment owner-fact source dependencies: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -230,10 +251,14 @@ func DeriveRuntimeAssessmentAdjudication(
 	}
 	candidate := dispatch.Candidate.Assessment.Normalized()
 	authority := dispatch.AssessmentAuthorityInput.Normalized()
+	ownerFactSources, err := deriveRuntimeAssessmentOwnerFactSources(facts.DefinitionRevision, string(facts.WorkspaceID), *dispatch.AssessmentAuthorityInput)
+	if err != nil {
+		return RuntimeAssessmentAdjudication{}, err
+	}
 	result := RuntimeAssessmentAdjudication{
 		DispatchID: dispatch.ID, AuthorityInputID: dispatch.Transaction.AuthorityInputID,
 		FocusID: dispatch.Transaction.FocusID, CoverageWorkItemIDs: candidate.CoverageWorkItemIDs,
-		Disposition: AssessmentDispositionSatisfied,
+		Disposition: AssessmentDispositionSatisfied, OwnerFactSources: ownerFactSources,
 	}
 	// The assessment dispatch is sealed after the operation receipt and any
 	// owner-fact re-observation. Its catalog snapshot is therefore the immutable

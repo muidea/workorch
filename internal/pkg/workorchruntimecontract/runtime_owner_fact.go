@@ -433,33 +433,53 @@ func runtimeOwnerFactRequirementSatisfied(requirement RuntimeOwnerFactRequiremen
 		if catalog.OwnerModuleID != requirement.OwnerModuleID || !runtimeOperationKindsContain(catalog.OperationKinds, requirement.OperationKind) {
 			continue
 		}
-		switch requirement.FactKind {
-		case RuntimeOwnerFactSelectableValidationSurface:
-			selectable := make(map[string]struct{}, len(catalog.ValidationRecipeRefs))
-			for _, ref := range catalog.ValidationRecipeRefs {
-				selectable[ref] = struct{}{}
-			}
-			for _, surface := range catalog.ValidationSurfaces {
-				surface = surface.Normalized()
-				if surface.OperationKind != requirement.OperationKind || surface.Readiness != RuntimeValidationSurfaceReady ||
-					surface.ProofApplicability != RuntimeValidationProofDirect {
-					continue
-				}
-				if _, published := selectable[surface.ID]; !published {
-					continue
-				}
-				if requirement.ValidationProofRequirementHash == "" {
-					return true
-				}
-				for _, binding := range surface.ProofRequirementBindings {
-					if binding.RequirementHash == requirement.ValidationProofRequirementHash {
-						return true
-					}
-				}
-			}
+		_, satisfied := observeRuntimeOwnerFactRequirementCatalog(requirement, catalog)
+		if satisfied {
+			return true
 		}
 	}
 	return false
+}
+
+type runtimeOwnerFactSurfaceObservation struct {
+	ID                 string
+	Readiness          RuntimeValidationSurfaceReadiness
+	ProofApplicability RuntimeValidationProofApplicability
+	Published          bool
+	RequirementBound   bool
+}
+
+// classifier 与 dependency projection 消费同一字段观察，不维护第二套 postcondition 语义。
+func observeRuntimeOwnerFactRequirementCatalog(requirement RuntimeOwnerFactRequirement, catalog RuntimeOperationAdmissibility) ([]runtimeOwnerFactSurfaceObservation, bool) {
+	observations := make([]runtimeOwnerFactSurfaceObservation, 0)
+	satisfied := false
+	if requirement.FactKind != RuntimeOwnerFactSelectableValidationSurface {
+		return observations, false
+	}
+	selectable := make(map[string]struct{}, len(catalog.ValidationRecipeRefs))
+	for _, ref := range catalog.ValidationRecipeRefs {
+		selectable[ref] = struct{}{}
+	}
+	for _, surface := range catalog.ValidationSurfaces {
+		if surface.OperationKind != requirement.OperationKind {
+			continue
+		}
+		_, published := selectable[surface.ID]
+		observation := runtimeOwnerFactSurfaceObservation{ID: surface.ID, Readiness: surface.Readiness, ProofApplicability: surface.ProofApplicability, Published: published}
+		if requirement.ValidationProofRequirementHash != "" {
+			for _, binding := range surface.ProofRequirementBindings {
+				if binding.RequirementHash == requirement.ValidationProofRequirementHash {
+					observation.RequirementBound = true
+				}
+			}
+		}
+		observations = append(observations, observation)
+		if surface.Readiness == RuntimeValidationSurfaceReady && surface.ProofApplicability == RuntimeValidationProofDirect && published &&
+			(requirement.ValidationProofRequirementHash == "" || observation.RequirementBound) {
+			satisfied = true
+		}
+	}
+	return observations, satisfied
 }
 
 func sameRuntimeOwnerFactRequirements(left, right []RuntimeOwnerFactRequirement) bool {

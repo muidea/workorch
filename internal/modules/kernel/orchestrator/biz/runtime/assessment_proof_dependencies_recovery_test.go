@@ -51,7 +51,12 @@ func TestRuntimeAssessmentSelectedProofDependenciesSurviveCASFailureAndReplyLoss
 				persisted = result.Aggregate
 			}
 			dispatchIndex, _ := runtimeAssessmentAdjudicationIndexes(t, persisted)
-			proofs := persisted.CompletedDispatches[dispatchIndex].AssessmentAdjudication.Proofs
+			adjudication := persisted.CompletedDispatches[dispatchIndex].AssessmentAdjudication
+			proofs := adjudication.Proofs
+			expectedSource, err := runtimecontract.DeriveRuntimeAssessmentAdjudication(sealedDispatchToRuntimeRecord(*before.ActiveDispatch), before.Facts, sealedDispatchesToRuntimeRecords(before.CompletedDispatches), before.CoverageProofLineage, runtimeLineageAssertionSources(before))
+			if err != nil || len(expectedSource.OwnerFactSources) != 1 || !reflect.DeepEqual(adjudication.OwnerFactSources, expectedSource.OwnerFactSources) {
+				t.Fatalf("assessment recovery changed sealed owner postcondition source: %v", err)
+			}
 			if repository.saves != 1 || persisted.StateRevision != before.StateRevision+1 || len(persisted.Facts.Assessments) != 1 || len(proofs) != 1 || !reflect.DeepEqual(proofs[0].OwnerRevisionSet, &dependencies) {
 				t.Fatal("assessment recovery repeated commit or replaced original selected dependencies")
 			}

@@ -321,6 +321,12 @@ current manifest 临时补全 scope；没有 matching sealed fallback 时按 typ
   Definition 必须合法，并在 fresh-load 从同 cutoff 的原 fact/receipt 来源精确重编。该逐 proof 来源不替代
   assessment 的 catalog/postcondition 或 artifact 依赖，也不证明 current freshness；不从当前 catalog 或 producer
   claim 补造依赖，不新增 credit、预算、reopen 或 SM-1/SM-4 transition。
+  `OwnerFactSources` 另保全逐 required postcondition 的 exact requirement 与原 pre-seal catalog snapshot 来源；dependency
+  revision 只绑定该 operation kind 的 surface identity、readiness、proof applicability、ready publication 与 exact
+  requirement binding observation，不把整 catalog/repository revision 当 world counter。无关 target/diagnostic/owner revision
+  变化不改变该 scoped dependency，来源 snapshot 仍单独进入 adjudication hash；matching catalog 缺失保持 nil，不补造
+  absence proof。fresh-load 从原 authority input 重编并 exact-match，协调改写双账 hash 不能替换来源。此投影不是完整
+  assessment dependency、current owner query 或 freshness/stale/reopen 裁决。
 - assessment 必须先独立证明 sealed binding 的其余 evidence/effect/quality 条件，再检查 current owner-fact postcondition。
   只有“其余 proof 全部成立、owner fact 是唯一缺口”时，SM-2 才能在提交 assessment dispatch 的同一 CAS 中把 current
   bound CWI 记为 `reopened`、清除 current binding、更新 reconciliation contract，并以 typed reopen lineage 退休当前

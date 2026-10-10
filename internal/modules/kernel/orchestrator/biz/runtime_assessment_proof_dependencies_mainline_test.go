@@ -61,10 +61,25 @@ func assertActualShellAssessmentProofDependencies(t *testing.T, record runtimeco
 	if fileMembers != 1 {
 		t.Fatalf("actual mainline did not exercise unique File mutation dependency: members=%d", fileMembers)
 	}
-	members := 0
+	members, ownerFactMembers := 0, 0
 	for _, dispatch := range record.CompletedDispatches {
 		if dispatch.AssessmentAdjudication == nil {
 			continue
+		}
+		if dispatch.AssessmentAuthorityInput == nil || len(dispatch.AssessmentAdjudication.OwnerFactSources) != len(dispatch.AssessmentAuthorityInput.Focus.RequiredOwnerFacts) {
+			t.Fatal("actual assessment lost required owner postcondition sources")
+		}
+		for _, source := range dispatch.AssessmentAdjudication.OwnerFactSources {
+			matches := 0
+			for _, catalog := range dispatch.AssessmentAuthorityInput.OperationAdmissibilities {
+				if catalog.SnapshotID == source.CatalogSnapshotID && catalog.OwnerModuleID == source.Requirement.OwnerModuleID {
+					matches++
+				}
+			}
+			if matches != 1 || source.OwnerRevisionSet == nil || source.OwnerRevisionSet.Validate() != nil || source.OwnerRevisionSet.DefinitionRevision != record.Facts.DefinitionRevision || len(source.OwnerRevisionSet.Entries) != 1 || source.OwnerRevisionSet.Entries[0].OwnerInstanceID != source.Requirement.OwnerModuleID+"/"+string(record.Facts.WorkspaceID) {
+				t.Fatal("actual owner postcondition source differs from sealed catalog")
+			}
+			ownerFactMembers++
 		}
 		for _, proof := range dispatch.AssessmentAdjudication.Proofs {
 			if proof.EvidenceKind != runtimecontract.EvidenceKindValidation {
@@ -122,7 +137,7 @@ func assertActualShellAssessmentProofDependencies(t *testing.T, record runtimeco
 			members++
 		}
 	}
-	if members == 0 {
-		t.Fatal("actual Shell mainline did not exercise assessment dependency projection")
+	if members == 0 || ownerFactMembers == 0 {
+		t.Fatal("actual Shell mainline did not exercise proof and owner postcondition dependency projection")
 	}
 }
