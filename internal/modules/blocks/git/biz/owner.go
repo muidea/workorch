@@ -34,6 +34,7 @@ type Biz struct {
 	runtimeAdapter     *RuntimeAdapter
 	capabilityReceipts *CapabilityStateReceiptStore
 	started            bool
+	subscribedTopics   []string
 }
 
 type Dependencies struct {
@@ -77,42 +78,88 @@ func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine, deps
 }
 
 func (m *Biz) Start() error {
-	if m == nil || m.runtimeAdapter == nil {
-		return common.ErrInvalidArgument
-	}
-	if m.EventHub() == nil {
+	if m == nil || m.runtimeAdapter == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
 	if m.started {
 		return nil
 	}
-	m.SubscribeFunc(gitevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.SubscribeFunc(gitevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
-	m.SubscribeFunc(gitevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
-	m.SubscribeFunc(gitevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
-	m.SubscribeFunc(gitevents.TopicAcquireCapabilityState, m.handleGitCapabilityState)
-	m.SubscribeFunc(gitevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
-	m.SubscribeFunc(gitevents.TopicExecuteOperation, m.handleGitOperation)
+	subscriptions := []struct {
+		topic   string
+		handler magicevent.ObserverFunc
+	}{
+		{gitevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities},
+		{gitevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility},
+		{gitevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility},
+		{gitevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility},
+		{gitevents.TopicAcquireCapabilityState, m.handleGitCapabilityState},
+		{gitevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery},
+		{gitevents.TopicExecuteOperation, m.handleGitOperation},
+	}
+	// A failed Start keeps every completed subscription reachable. Retrying
+	// resumes at the first unfinished topic rather than registering duplicates.
+	for _, subscription := range subscriptions[len(m.subscribedTopics):] {
+		if err := checkedLifecycleSubscription(func() {
+			m.SubscribeFunc(subscription.topic, subscription.handler)
+		}); err != nil {
+			return err
+		}
+		m.subscribedTopics = append(m.subscribedTopics, subscription.topic)
+	}
 	m.started = true
 	return nil
 }
 
-func (m *Biz) Teardown(context.Context) {
+func (m *Biz) Teardown(ctx context.Context) error {
 	if m == nil {
-		return
+		return nil
 	}
-	if m.started {
-		m.UnsubscribeFunc(gitevents.TopicExecuteOperation)
-		m.UnsubscribeFunc(gitevents.TopicAcquireRuntimeCapabilities)
-		m.UnsubscribeFunc(gitevents.TopicAcquireRuntimeOperationAdmissibility)
-		m.UnsubscribeFunc(gitevents.TopicProbeRuntimeOperationFeasibility)
-		m.UnsubscribeFunc(gitevents.TopicProbeRuntimeSemanticProofFeasibility)
-		m.UnsubscribeFunc(gitevents.TopicAcquireCapabilityState)
-		m.UnsubscribeFunc(gitevents.TopicQueryRuntimeCWIReconciliation)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Lifecycle calls are serialized by their caller. Do not hold an owner
+	// lock across Hub control actions. Unsubscribe completion is a resource
+	// receipt, not proof of handler quiescence; the caller must drain first.
+	for len(m.subscribedTopics) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		last := len(m.subscribedTopics) - 1
+		if err := checkedLifecycleSubscription(func() {
+			m.UnsubscribeFunc(m.subscribedTopics[last])
+		}); err != nil {
+			return err
+		}
+		m.subscribedTopics = m.subscribedTopics[:last]
 		m.started = false
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.started = false
 	m.runtimeAdapter = nil
 	m.capabilityReceipts = nil
+	return ctx.Err()
+}
+
+// Base's void helpers panic on checked SimpleObserver errors. Keep that exact
+// error recoverable for explicit Start/Stop callers; programming panics remain
+// visible to the framework guard. No resource ledger is advanced on failure.
+func checkedLifecycleSubscription(action func()) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			if checkedErr, ok := value.(*cd.Error); ok {
+				err = checkedErr
+				return
+			}
+			panic(value)
+		}
+	}()
+	action()
+	return nil
 }
 
 // handleRuntimeCWIReconciliationQuery reports only the current Git owner

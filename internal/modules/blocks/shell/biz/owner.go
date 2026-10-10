@@ -22,8 +22,9 @@ const StepKindCommand = modulecommon.StepKindCommand
 
 type Biz struct {
 	basebiz.Base
-	runtimeAdapter *RuntimeAdapter
-	started        bool
+	runtimeAdapter   *RuntimeAdapter
+	started          bool
+	subscribedTopics []string
 }
 
 type Dependencies struct {
@@ -63,32 +64,81 @@ func (m *Biz) Start() error {
 	if m.started {
 		return nil
 	}
-	m.SubscribeFunc(shellevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.SubscribeFunc(shellevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
-	m.SubscribeFunc(shellevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
-	m.SubscribeFunc(shellevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
-	m.SubscribeFunc(shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction, m.handleRuntimeOwnerFactProspectiveSatisfaction)
-	m.SubscribeFunc(shellevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
-	m.SubscribeFunc(shellevents.TopicExecuteOperation, m.handleShellOperation)
+	subscriptions := []struct {
+		topic   string
+		handler magicevent.ObserverFunc
+	}{
+		{shellevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities},
+		{shellevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility},
+		{shellevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility},
+		{shellevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility},
+		{shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction, m.handleRuntimeOwnerFactProspectiveSatisfaction},
+		{shellevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery},
+		{shellevents.TopicExecuteOperation, m.handleShellOperation},
+	}
+	// A failed Start keeps every completed subscription reachable. Retrying
+	// resumes at the first unfinished topic rather than registering duplicates.
+	for _, subscription := range subscriptions[len(m.subscribedTopics):] {
+		if err := checkedLifecycleSubscription(func() {
+			m.SubscribeFunc(subscription.topic, subscription.handler)
+		}); err != nil {
+			return err
+		}
+		m.subscribedTopics = append(m.subscribedTopics, subscription.topic)
+	}
 	m.started = true
 	return nil
 }
 
-func (m *Biz) Teardown(context.Context) {
+func (m *Biz) Teardown(ctx context.Context) error {
 	if m == nil {
-		return
+		return nil
 	}
-	if m.started {
-		m.UnsubscribeFunc(shellevents.TopicExecuteOperation)
-		m.UnsubscribeFunc(shellevents.TopicAcquireRuntimeCapabilities)
-		m.UnsubscribeFunc(shellevents.TopicAcquireRuntimeOperationAdmissibility)
-		m.UnsubscribeFunc(shellevents.TopicProbeRuntimeOperationFeasibility)
-		m.UnsubscribeFunc(shellevents.TopicProbeRuntimeSemanticProofFeasibility)
-		m.UnsubscribeFunc(shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction)
-		m.UnsubscribeFunc(shellevents.TopicQueryRuntimeCWIReconciliation)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Lifecycle calls are serialized by their caller. Do not hold an owner
+	// lock across Hub control actions. Unsubscribe completion is a resource
+	// receipt, not proof of handler quiescence; the caller must drain first.
+	for len(m.subscribedTopics) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		last := len(m.subscribedTopics) - 1
+		if err := checkedLifecycleSubscription(func() {
+			m.UnsubscribeFunc(m.subscribedTopics[last])
+		}); err != nil {
+			return err
+		}
+		m.subscribedTopics = m.subscribedTopics[:last]
 		m.started = false
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.started = false
 	m.runtimeAdapter = nil
+	return ctx.Err()
+}
+
+// Base's void helpers panic on checked SimpleObserver errors. Keep that exact
+// error recoverable for explicit Start/Stop callers; programming panics remain
+// visible to the framework guard. No resource ledger is advanced on failure.
+func checkedLifecycleSubscription(action func()) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			if checkedErr, ok := value.(*cd.Error); ok {
+				err = checkedErr
+				return
+			}
+			panic(value)
+		}
+	}()
+	action()
+	return nil
 }
 
 // handleRuntimeCWIReconciliationQuery executes only the recipes sealed for

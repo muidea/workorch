@@ -38,6 +38,13 @@ Owner topic、Command/Result 与 seal 类型的定义源是 `blocks/git/pkg/even
 - 本组件不拥有 Run、Result、CWI credit、retry、governance 或 terminal 状态；Git fact/evidence 不能直接判定 DoD。
 - CWI reconciliation 只可陈述 repository fact；repository revision 不能替代 check、metric、artifact 或 semantic proof。
 
+## 本地生命周期资源合同
+
+- `Start` 只在 SimpleObserver/Hub 实际完成订阅后逐 topic 记账；第 N 个订阅失败返回原 checked error，已成功资源和 owner 引用保留，可检查式清理或从未完成 topic 重试。
+- `Biz.Teardown(ctx)` 返回 error，按账本逆序退订，每次成功才移除该项；失败或 context 取消保留剩余订阅、adapter 和 capability receipt store。`Module.Stop` 只有完整清理成功才清空同一 owner 引用，plugin 的 void `Teardown(ctx)` 将错误交给 framework guard。
+- 生命周期调用由调用方串行化；账本不持有跨 Hub control action 的 owner 锁，也不替代输入停止与在途 handler 排空。最终释放 adapter/store 的前提是调用方已完成真实排空，退订完成不等于 quiescence。本组件尚未提供全局停机屏障或阶段准入 guard。
+- `TestGitOwnerResourceLedgerEveryStartFailureCanTeardown`、`TestGitOwnerResourceLedgerEveryTeardownFailureRetainsDependenciesAndRetries`、`TestGitOwnerResourceLedgerCancellationRetainsUnreleasedResources` 及 Module resource-ledger tests 覆盖逐 N 故障、取消、retry 和同 owner 引用保留；这些测试不是全局生命周期完成证明。
+
 ## 能力验收
 
 | 验收维度 | 自动化证据 | 状态 |

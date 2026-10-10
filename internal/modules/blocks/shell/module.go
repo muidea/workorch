@@ -46,8 +46,15 @@ func (m *Module) Start() error {
 }
 
 func (m *Module) Stop(ctx context.Context) error {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
 	if m != nil && m.bizPtr != nil {
-		m.bizPtr.Teardown(ctx)
+		if err := m.bizPtr.Teardown(ctx); err != nil {
+			return err
+		}
 		m.bizPtr = nil
 	}
 	return nil

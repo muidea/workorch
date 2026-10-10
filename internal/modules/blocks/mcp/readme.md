@@ -39,6 +39,13 @@ Callable capability 与 validation surface 是不同 fact：只有 owner 明确�
 - 全部六个 Runtime ingress 都是 strong call：必须先确认同步 `Result` 与 exact `kernel/orchestrator` producer，再解析 concrete
   Command；Post/nil Result、错误 producer 或错误 concrete payload 均不得查询 Registry、启动 session、调用 endpoint 或访问 receipt。
 
+## 本地生命周期资源合同
+
+- `Start` 只在 SimpleObserver/Hub 实际完成订阅后逐 topic 记账；第 N 个订阅失败返回原 checked error，已成功资源和 owner 引用保留，可检查式清理或从未完成 topic 重试。
+- `Biz.Teardown(ctx)` 返回 error，按账本逆序退订，每次成功才移除该项；失败或 context 取消保留剩余订阅与 adapter/session。全部退订实际完成且 context 有效后才调用 adapter `Close`；成功后清空引用，重复清理不再次关闭 adapter。`Module.Stop` 只有完整清理成功才清空同一 owner 引用，plugin 的 void `Teardown(ctx)` 将错误交给 framework guard。
+- 生命周期调用由调用方串行化；账本不持有跨 Hub control action 的 owner 锁，也不替代输入停止与在途 handler/session 排空。最终 adapter 关闭的前提是调用方已完成真实排空，退订完成不等于 quiescence。本组件尚未提供全局停机屏障或阶段准入 guard；adapter 的既有无 context `Close` 不能被此账本变成有预算的排空协议。
+- `TestMCPOwnerResourceLedgerEveryStartFailureCanTeardown`、`TestMCPOwnerResourceLedgerEveryTeardownFailureRetainsDependenciesAndRetries`、`TestMCPOwnerResourceLedgerCancellationRetainsUnreleasedResources` 及 Module resource-ledger tests 覆盖逐 N 故障、取消、retry 和同 owner 引用保留；这些测试不是全局生命周期完成证明。
+
 ## 能力验收
 
 | 验收维度 | 自动化证据 | 状态 |

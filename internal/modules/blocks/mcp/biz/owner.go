@@ -27,8 +27,9 @@ const StepKindPromptGet = modulecommon.StepKindPromptGet
 
 type Biz struct {
 	basebiz.Base
-	runtimeAdapter *RuntimeAdapter
-	started        bool
+	runtimeAdapter   *RuntimeAdapter
+	started          bool
+	subscribedTopics []string
 }
 
 type Dependencies struct {
@@ -68,33 +69,83 @@ func (m *Biz) Start() error {
 	if m.started {
 		return nil
 	}
-	m.SubscribeFunc(mcpevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.SubscribeFunc(mcpevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
-	m.SubscribeFunc(mcpevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
-	m.SubscribeFunc(mcpevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
-	m.SubscribeFunc(mcpevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
-	m.SubscribeFunc(mcpevents.TopicExecuteOperation, m.handleMCPOperation)
+	subscriptions := []struct {
+		topic   string
+		handler magicevent.ObserverFunc
+	}{
+		{mcpevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities},
+		{mcpevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility},
+		{mcpevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility},
+		{mcpevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility},
+		{mcpevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery},
+		{mcpevents.TopicExecuteOperation, m.handleMCPOperation},
+	}
+	// A failed Start keeps every completed subscription reachable. Retrying
+	// resumes at the first unfinished topic rather than registering duplicates.
+	for _, subscription := range subscriptions[len(m.subscribedTopics):] {
+		if err := checkedLifecycleSubscription(func() {
+			m.SubscribeFunc(subscription.topic, subscription.handler)
+		}); err != nil {
+			return err
+		}
+		m.subscribedTopics = append(m.subscribedTopics, subscription.topic)
+	}
 	m.started = true
 	return nil
 }
 
-func (m *Biz) Teardown(context.Context) {
+func (m *Biz) Teardown(ctx context.Context) error {
 	if m == nil {
-		return
+		return nil
 	}
-	if m.started {
-		m.UnsubscribeFunc(mcpevents.TopicExecuteOperation)
-		m.UnsubscribeFunc(mcpevents.TopicAcquireRuntimeCapabilities)
-		m.UnsubscribeFunc(mcpevents.TopicAcquireRuntimeOperationAdmissibility)
-		m.UnsubscribeFunc(mcpevents.TopicProbeRuntimeOperationFeasibility)
-		m.UnsubscribeFunc(mcpevents.TopicProbeRuntimeSemanticProofFeasibility)
-		m.UnsubscribeFunc(mcpevents.TopicQueryRuntimeCWIReconciliation)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Lifecycle calls are serialized by their caller. Do not hold an owner
+	// lock across Hub control actions. Unsubscribe completion is a resource
+	// receipt, not proof of handler quiescence; the caller must drain first.
+	for len(m.subscribedTopics) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		last := len(m.subscribedTopics) - 1
+		if err := checkedLifecycleSubscription(func() {
+			m.UnsubscribeFunc(m.subscribedTopics[last])
+		}); err != nil {
+			return err
+		}
+		m.subscribedTopics = m.subscribedTopics[:last]
 		m.started = false
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.started = false
 	if m.runtimeAdapter != nil {
 		m.runtimeAdapter.Close()
+		m.runtimeAdapter = nil
 	}
-	m.runtimeAdapter = nil
+	return ctx.Err()
+}
+
+// Base's void helpers panic on checked SimpleObserver errors. Keep that exact
+// error recoverable for explicit Start/Stop callers; programming panics remain
+// visible to the framework guard. No resource ledger is advanced on failure.
+func checkedLifecycleSubscription(action func()) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			if checkedErr, ok := value.(*cd.Error); ok {
+				err = checkedErr
+				return
+			}
+			panic(value)
+		}
+	}()
+	action()
+	return nil
 }
 
 // handleRuntimeCWIReconciliationQuery reports MCP readiness separately from
