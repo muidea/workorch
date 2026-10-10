@@ -27,6 +27,10 @@ func shellValidationInputAddition(check runtimecontract.RuntimeValidationCheckAt
 		addition.ContentContractRef = shellIsolatedInputContentContractRef
 		addition.ContentRequirements = shellIsolatedInputContentRequirements + " Preserve originalNativeCheckRef; original and supplemental checks must execute and pass conjunctively in this same package."
 	}
+	if check.ObservationProtocolRef == shellGoConjunctiveEntrypointObservationProtocolRef {
+		addition.ContentContractRef = shellConjunctiveInputContentContractRef
+		addition.ContentRequirements = shellConjunctiveInputContentRequirements + " Create only this supplemental nativeCheckRef, preserving every original check in the same package."
+	}
 	addition.ContentRequirements += shellAssertionFeedbackRequirements
 	return addition
 }
@@ -37,6 +41,10 @@ func shellValidationInputAddition(check runtimecontract.RuntimeValidationCheckAt
 func shellSupplementCheckRef(native string) string { return native + "_Behavior" }
 
 func shellSupplementTargetRef(native string) string {
+	if pkg := shellConjunctiveNativePackage(native); pkg != "" {
+		digest := strings.ToLower(strings.TrimPrefix(native, "TestWorkOrchCWI_"))
+		return pkg + "/behavior_" + digest + "_test.go"
+	}
 	if shellIsolatedNativeIdentity.MatchString(native) {
 		return shellIsolatedNativePackage(native) + "/behavior_test.go"
 	}

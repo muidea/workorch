@@ -120,11 +120,15 @@ func inspectShellNativeValidationChecks(directory string, targetRefs []string, a
 				if ref == shellSupplementTargetRef(native) && check.SupplementalNativeCheckRef != "" {
 					native = check.SupplementalNativeCheckRef
 				}
-				if !shellIsolatedInputDeclarations(file, native) {
+				valid := shellIsolatedInputDeclarations(file, native)
+				if check.ObservationProtocolRef == shellGoConjunctiveEntrypointObservationProtocolRef {
+					valid = shellConjunctiveInputDeclarations(file, attestations)
+				}
+				if !valid {
 					return shellNativeCheckInspection{Code: "native_check_versioned_contract_invalid", CheckRef: native, TargetRefs: []string{ref}}
 				}
 			}
-			if shellVersionedNativeCheck(check) && ref == shellVersionedNativeCheckTarget(check.NativeCheckRef) && !shellEntrypointSupplementDeclarations(file, check.NativeCheckRef) {
+			if shellVersionedNativeCheck(check) && check.ObservationProtocolRef != shellGoConjunctiveEntrypointObservationProtocolRef && ref == shellVersionedNativeCheckTarget(check.NativeCheckRef) && !shellEntrypointSupplementDeclarations(file, check.NativeCheckRef) {
 				return shellNativeCheckInspection{Code: "native_check_versioned_contract_invalid", CheckRef: check.NativeCheckRef, TargetRefs: []string{ref}}
 			}
 			if shellEntrypointObservationProtocol(check.ObservationProtocolRef) && strings.HasSuffix(ref, "_test.go") && shellNativeRunnerOverride(file) {

@@ -33,6 +33,9 @@ func resolveRuntimeValidationRecipeDeclarations(recipes []runtimemodel.RuntimeVa
 	manifest.TargetRefs = normalizeShellStrings(manifest.TargetRefs)
 	resolved := make([]runtimemodel.RuntimeValidationRecipe, 0, len(recipes))
 	for _, declaration := range runtimemodel.NormalizeRuntimeValidationRecipeDeclarations(recipes) {
+		if declaration.AdapterRef == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint && declaration.InputReviewProtocolRef != runtimemodel.RuntimeValidationInputReviewProtocolV2 {
+			continue
+		}
 		if declaration.InputReviewProtocolRef != "" && !shellValidationInputReviewRequired(declaration.AdapterRef) {
 			continue
 		}
@@ -41,7 +44,7 @@ func resolveRuntimeValidationRecipeDeclarations(recipes []runtimemodel.RuntimeVa
 			continue
 		}
 		switch declaration.AdapterRef {
-		case modulecommon.ValidationRecipeAdapterProjectNative, modulecommon.ValidationRecipeAdapterProjectEntrypoint, modulecommon.ValidationRecipeAdapterVersionedEntrypoint, modulecommon.ValidationRecipeAdapterIsolatedEntrypoint:
+		case modulecommon.ValidationRecipeAdapterProjectNative, modulecommon.ValidationRecipeAdapterProjectEntrypoint, modulecommon.ValidationRecipeAdapterVersionedEntrypoint, modulecommon.ValidationRecipeAdapterIsolatedEntrypoint, modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint:
 			// An empty workspace has no competing project fact. The currently
 			// registered owner implementation may therefore publish its bounded
 			// prerequisite contract; once any project files exist, resolution is
@@ -270,6 +273,9 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 // without a structured native observation protocol remain executable owner
 // tools, but cannot become direct per-CWI proof surfaces.
 func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecipe, requirement runtimemodel.RuntimeValidationProofRequirement) ([]runtimemodel.RuntimeValidationCheckAttestationBinding, bool) {
+	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint && (requirement.Validate() != nil || recipe.InputReviewProtocolRef != runtimemodel.RuntimeValidationInputReviewProtocolV2) {
+		return nil, false
+	}
 	command, args, err := shellCommandSpec(recipe.Command, recipe.Args)
 	if err != nil {
 		return nil, false
@@ -282,7 +288,7 @@ func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecip
 	// The current versioned acquisition has one exact input target per CWI.
 	// A multi-check declaration needs an explicit multi-input contract; never
 	// publish a partially preparable all-of binding.
-	if shellValidationInputReviewRequired(recipe.AdapterRef) && len(requirement.RequiredCheckRefs) != 1 {
+	if (recipe.AdapterRef == modulecommon.ValidationRecipeAdapterVersionedEntrypoint || recipe.AdapterRef == modulecommon.ValidationRecipeAdapterIsolatedEntrypoint) && len(requirement.RequiredCheckRefs) != 1 {
 		return nil, false
 	}
 	// Only the project-native adapter owns this stronger execution contract.
@@ -295,6 +301,9 @@ func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecip
 		}
 		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterIsolatedEntrypoint {
 			protocol = shellGoIsolatedEntrypointObservationProtocolRef
+		}
+		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint {
+			protocol = shellGoConjunctiveEntrypointObservationProtocolRef
 		}
 		if len(requirement.RequiredCheckRefs) == 0 || len(requirement.RequiredCheckRefs) > maxShellBehaviorNativeChecks || validateShellBehaviorRecipeArgs(args) != nil {
 			return nil, false
@@ -309,6 +318,14 @@ func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecip
 	ret := make([]runtimemodel.RuntimeValidationCheckAttestationBinding, 0, len(requirement.RequiredCheckRefs))
 	for _, required := range requirement.Normalized().RequiredCheckRefs {
 		suffix := strings.TrimPrefix(required, "workorch-cwi-check-")
+		if suffix == required {
+			for _, source := range requirement.SourceObligationChecks {
+				if source.CheckRef == required {
+					suffix = "OBLIGATION_" + strings.TrimPrefix(required, "workorch-obligation-check-")
+					break
+				}
+			}
+		}
 		if suffix == required || suffix == "" {
 			return nil, false
 		}
@@ -319,6 +336,12 @@ func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecip
 		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterIsolatedEntrypoint {
 			native += "_InputV4"
 			if !shellIsolatedNativeIdentity.MatchString(native) {
+				return nil, false
+			}
+		}
+		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint {
+			native = "TestWorkOrchCWI_" + strings.ToUpper(shellConjunctiveRequirementIdentity(requirement)) + "_Check_" + strings.ToUpper(suffix) + "_InputV5"
+			if shellConjunctiveNativePackage(native) == "" {
 				return nil, false
 			}
 		}
@@ -393,6 +416,10 @@ func shellValidationProofPreparationFromInspection(inspection shellNativeCheckIn
 	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterIsolatedEntrypoint && targetRef != "" {
 		preparation.ContentContractRef = shellIsolatedInputContentContractRef
 		preparation.ContentRequirements = shellIsolatedInputContentRequirements + shellAssertionFeedbackRequirements
+	}
+	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint && targetRef != "" {
+		preparation.ContentContractRef = shellConjunctiveInputContentContractRef
+		preparation.ContentRequirements = shellConjunctiveInputContentRequirements + shellAssertionFeedbackRequirements
 	}
 	if preparation.Validate() != nil {
 		return runtimemodel.RuntimeValidationProofPreparation{}, false, false

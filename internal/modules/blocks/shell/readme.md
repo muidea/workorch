@@ -44,7 +44,7 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
 - `shell/command` 不得伪装成 `effect=none` validation；managed validation 不能退化为任意命令字符串。
 - execute 前必须验证 producer、同步 Result、sealed payload、owner catalog、target scope、execution key/fence 和 receipt authority。
 - managed validation 必须在隔离副本中运行；临时 effect 不得写回 deliverable，scratch 和进程组必须按策略释放。
-- activation-declared recipe 可以是固定 transport 或版本化的 `shell/project-native-validation/v1|v2|v3|v4` owner-adapter ref；模板不得携带
+- activation-declared recipe 可以是固定 transport 或版本化的 `shell/project-native-validation/v1|v2|v3|v4|v5` owner-adapter ref；模板不得携带
   语言 command/args/env。Shell 只依据同一 request 绑定的 File-owner manifest 解析具体 recipe，且该解析只产生 owner fact，
   不触发 Runtime 状态。Shell 只有在 Orchestrator request 携带 exact Definition-owned
   `RuntimeValidationProofRequirement` 时，才可对 matching recipe 发布逐 CWI applicability binding；recipe ID、进程 exit 0、
@@ -196,6 +196,31 @@ calibration state machine in the template, File owner, Soul or projection.
 An external reference repository is optional supporting material, not a prerequisite
 for ordinary workspace execution. Neither its CI result nor process coverage proves
 that an arbitrary verification input preserves the workspace's Goal/DoD semantics.
+
+#### 多检查 requirement 输入包
+
+显式选择 `shell/project-native-validation/v5`，且必须显式声明
+`validation/input-consistency/v2`；缺失或降级 review protocol 在 recipe 解析与检查映射前拒绝。
+其 native observation 为 `shell/go-test-json/workspace-behavior/v6`。完整 canonical requirement 的
+SHA256 固定一个 `workorch_validation/v5/<requirement-digest>/input_test.go`，每个 required check
+具有不同 `_Check_<check-identity>_InputV5` native identity。共同 CWI 检查及各源 Obligation verification
+全部进入同一 package、完整 review 和同一合取执行；缺项、重复、别名或跨 requirement/protocol 混合均不可用。
+
+create-only preparation 返回一个 exact target 与完整 native mapping、
+`shell/go-test-input/conjunctive-entrypoint/v1`；不是逐项补造部分 proof。
+全部 package helpers/fixtures 与根定义合计仍限 16 files / 64 KiB，native checks 仍限 32；
+超界显式 unavailable，不截断或提高限制。结构检查只允许已声明的原／补充 Test，拒绝额外 Test、init、
+TestMain、effectful initializer 和跨 harness 引用；每项仍需真实 testing.T 断言、逐判据一致性评审与实际行为观察。
+各成员的 supplement 使用同 package 中不同 exact 文件，不得别名；旧单输入 compile-repair 不因 v5 获得多成员修复权限。
+当前能力不提供任意输入替换或一般多成员 compile-repair，不能用实现修复绕过输入保护。
+
+完整 scope contract `shell/go-test-input/conjunctive-package-review/v1` 随 catalog/hash/review 封存。
+实际执行只选择该 package 的所有 exact checks；任一 failed/skipped/incomplete、输出截断或 source drift
+均不能满足完整 proof。源 Criterion/Declaration 原文由 Definition 提供；Shell 不解释自然语言、裁决 credit
+或重建 authority。v3/v4 的单检查、native identity 与 scope 保持不变，旧 seal 不隐式升级。
+
+`validation_input_conjunction_test.go` 覆盖完整 preparation/review、B 改判据后的新 package、mixed identity 拒绝、
+容量与降级拒绝、实际 A+B 执行、B 缺失／失败／跳过、extra Test、unlisted helper 与独立 supplement。
 
 #### Executable input-maintenance contracts
 
