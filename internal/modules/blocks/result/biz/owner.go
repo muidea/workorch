@@ -34,6 +34,11 @@ type Biz struct {
 	service                    *service
 	topics                     []string
 	started                    bool
+	startComplete              bool
+	lifecycle                  basebiz.Lifecycle
+	shutdownMu                 sync.Mutex
+	releasing                  bool
+	released                   bool
 	notificationRecoveryMu     sync.Mutex
 	notificationRecoveryCancel context.CancelFunc
 	workspaceDeletions         repository.ResultWorkspaceDeletionRepository
@@ -63,10 +68,18 @@ func (m *Biz) Start() error {
 	if m == nil || m.service == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
-	if m.started {
+	leave, err := m.enterOwner(false)
+	if err != nil {
+		return err
+	}
+	defer leave()
+	if m.startComplete {
 		return nil
 	}
-	m.topics = []string{
+	if len(m.topics) != 0 {
+		return common.ErrConflict
+	}
+	topics := []string{
 		resultevents.TopicResultCommandGet,
 		resultevents.TopicResultCommandListByWorkspace,
 		resultevents.TopicResultCommandListByRun,
@@ -75,12 +88,15 @@ func (m *Biz) Start() error {
 		resultevents.TopicArtifactCommandListByResult,
 		resultevents.TopicArtifactCommandReadContent,
 	}
-	for _, topic := range m.topics {
-		m.SubscribeFunc(topic, m.handleCommand)
+	for _, topic := range topics {
+		if err := m.subscribeOwner(topic, m.handleCommand); err != nil {
+			return err
+		}
 	}
 	for _, topic := range m.lifecycleTopics() {
-		m.SubscribeFunc(topic, m.handleLifecycleCommand)
-		m.topics = append(m.topics, topic)
+		if err := m.subscribeOwner(topic, m.handleLifecycleCommand); err != nil {
+			return err
+		}
 	}
 	m.started = true
 	if err := m.replayTerminalNotifications(context.Background()); err != nil {
@@ -88,38 +104,72 @@ func (m *Biz) Start() error {
 	}
 	if m.BackgroundRoutine() != nil {
 		recoveryCtx, cancel := context.WithCancel(context.Background())
+		m.shutdownMu.Lock()
 		m.notificationRecoveryCancel = cancel
+		leaveSchedule, scheduleErr := m.lifecycle.Enter()
+		m.shutdownMu.Unlock()
+		if scheduleErr != nil {
+			cancel()
+			return scheduleErr
+		}
+		defer leaveSchedule()
 		if err := m.Timer(recoveryCtx, resultNotificationRecoveryInterval, 0, func() {
+			leave, err := m.enterOwner(false)
+			if err != nil {
+				return
+			}
+			defer leave()
 			if err := m.replayTerminalNotifications(recoveryCtx); err != nil && recoveryCtx.Err() == nil {
 				slog.Warn("workorch Result notification recovery failed", "err", err)
 			}
 		}); err != nil {
-			// Keep the partial-start state and cleanup handles. The caller must
-			// clean up before starting again; this error is not timer completion.
+			// 注册失败不等于已接纳 callback 完成；保留部分启动账本供清理。
 			return err
 		}
 	}
+	m.startComplete = true
 	return nil
 }
 
-func (m *Biz) Teardown(context.Context) {
+func (m *Biz) Teardown(ctx context.Context) error {
 	if m == nil {
-		return
+		return nil
 	}
-	if m.notificationRecoveryCancel != nil {
-		m.notificationRecoveryCancel()
+	m.BeginShutdown(ctx)
+	if err := m.Quiesce(ctx); err != nil {
+		return err
 	}
-	for idx := len(m.topics) - 1; idx >= 0; idx-- {
-		m.UnsubscribeFunc(m.topics[idx])
+	m.shutdownMu.Lock()
+	if m.releasing {
+		m.shutdownMu.Unlock()
+		return common.ErrConflict
 	}
-	m.notificationRecoveryMu.Lock()
-	defer m.notificationRecoveryMu.Unlock()
-	m.topics = nil
+	m.releasing = true
+	m.shutdownMu.Unlock()
+	defer func() { m.shutdownMu.Lock(); m.releasing = false; m.shutdownMu.Unlock() }()
+	if err := m.Quiesce(ctx); err != nil {
+		return err
+	}
+	for len(m.topics) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		last := len(m.topics) - 1
+		if err := m.UnsubscribeFuncChecked(m.topics[last]); err != nil {
+			return err
+		}
+		m.topics = m.topics[:last]
+	}
 	m.service = nil
 	m.started = false
-	m.notificationRecoveryCancel = nil
+	m.startComplete = false
 	m.workspaceDeletions = nil
 	m.workspaceLocks = nil
+	m.shutdownMu.Lock()
+	m.notificationRecoveryCancel = nil
+	m.released = true
+	m.shutdownMu.Unlock()
+	return nil
 }
 
 func (m *Biz) replayTerminalNotifications(ctx context.Context) error {

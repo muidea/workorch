@@ -26,6 +26,14 @@ canonical Result ID 由 workspace/run 派生；Artifact ID 由 Result ID 与 sea
 
 后台 Timer 注册失败由 `Start` 原样返回；已经取得的订阅、service 与 cancel 句柄必须保留用于清理，不能把任务提交失败当作启动成功。失败后先完成 owner 清理再重新启动。该任务错误合同不单独证明完整的进程输入／排空／释放屏障。
 
+## 生命周期合同
+
+- 10 项订阅逐成功登记；部分订阅或 Timer 注册失败保留 service、cancel 与账本，未清理前再次 Start 返回冲突，不把部分启动当作完整成功。退订成功才移除对应项。
+- BeginShutdown 非等待式关闭新删除和新 recovery 调度并取消 Timer context，保留只读查询及 exact Orchestrator terminal delivery；原 scope/source/sealed material/fence 校验不变。
+- Start 与已进入 recovery callback、真实 handler 持票直到 repository、锁等待及通知发布返回；调用方取消、Timer 取消和队列提交成功都不等于真实退出。关闭后迟到 queued callback 不再访问 repository；共享 Timer goroutine/队列最终由 BackgroundRoutine.Shutdown 排空，本地 Quiesce 不能替代该屏障。
+- Stop 超时保留 owner、cancel 与依赖；最终封全部入站并再次排空，逆序 checked 退订全部成功才清 Module 引用。Configure 不能覆盖未释放 owner，plugin guard 保留 cause，未知 panic 不吞且释放清理 claim。
+- 调用方串行 Configure/Start/Stop；不更改 SM-1～SM-4、终态材料或 credit。`biz/owner_lifecycle_test.go` 与 `module_lifecycle_test.go` 覆盖订阅切点、超时重试、callback 实际退出/迟到拒绝及 framework guard。
+
 ## 不变量与非职责
 
 - Result/Artifact scope 必须与 terminal material 的 workspace/run/result 完全一致；返回值和 notification 必须深拷贝。

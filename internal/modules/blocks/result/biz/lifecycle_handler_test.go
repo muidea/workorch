@@ -52,6 +52,9 @@ func TestResultStartReturnsTimerFailureAndRetainsPartialStartCleanup(t *testing.
 	if background.ctx == nil || background.ctx.Err() != nil {
 		t.Fatalf("timer failure lost uncanceled cleanup context: %v", background.ctx)
 	}
+	if err := owner.Start(); !errors.Is(err, common.ErrConflict) {
+		t.Fatalf("partial Timer failure restart = %v, want conflict", err)
+	}
 	query := func() *cd.Error {
 		return hub.Send(magicevent.NewEventWithContext(
 			resultevents.TopicResultCommandListByWorkspace, "test", resultevents.CommandDestination,
