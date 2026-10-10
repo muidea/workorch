@@ -310,6 +310,7 @@ func runtimeTestPrepareNativeValidationThroughOwners(
 					WorkspaceID: workspaceID, RunID: runID, DispatchID: dispatchID,
 					Transaction: runtimecontract.AuthorityTransaction{
 						AuthoritySnapshotID: authoritySnapshotID,
+						DefinitionRevision:  bootstrap.Definition.Revision,
 						RequiredOutputHash:  "required-output-native-preparation",
 					},
 					OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...),

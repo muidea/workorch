@@ -308,6 +308,10 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 		return
 	}
 	defer leaveFresh()
+	if command.Transaction.DefinitionRevision == "" || command.Transaction.DefinitionRevision != strings.TrimSpace(command.Transaction.DefinitionRevision) {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
 	if err := validateFileReplayProof(command.Execution.ReplayProof, command.OperationID, data.Path); err != nil {
 		setPrerequisiteError(result, err)
 		return
@@ -324,6 +328,12 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 	operationResult, executeErr := m.submitEffectInternalEvent(effectInternalEvent{Kind: effectInternalEventApplyPatch, Patch: &patchRequest})
 	status := runtimeOperationStatus(executeErr)
 	evidence := fileOperationEvidence(operationResult)
+	dependencies, dependencyErr := filePatchOwnerDependencies(command.RuntimeOperationExecutionContext, operation, operationResult.patchRead)
+	if dependencyErr != nil {
+		setPrerequisiteError(result, dependencyErr)
+		return
+	}
+	evidence.OwnerRevisionSet = dependencies
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileEdit, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
@@ -377,6 +387,10 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 		return
 	}
 	defer leaveFresh()
+	if command.Transaction.DefinitionRevision == "" || command.Transaction.DefinitionRevision != strings.TrimSpace(command.Transaction.DefinitionRevision) {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
 	if err := validateFileReplayProof(command.Execution.ReplayProof, command.OperationID, data.TargetRef); err != nil {
 		setPrerequisiteError(result, err)
 		return
@@ -393,6 +407,12 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 	operationResult, executeErr := m.submitEffectInternalEvent(effectInternalEvent{Kind: effectInternalEventApplyPatch, Patch: &patchRequest})
 	status := runtimeOperationStatus(executeErr)
 	evidence := fileOperationEvidence(operationResult)
+	dependencies, dependencyErr := filePatchOwnerDependencies(command.RuntimeOperationExecutionContext, operation, operationResult.patchRead)
+	if dependencyErr != nil {
+		setPrerequisiteError(result, dependencyErr)
+		return
+	}
+	evidence.OwnerRevisionSet = dependencies
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileWrite, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
@@ -446,6 +466,10 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		return
 	}
 	defer leaveFresh()
+	if command.Transaction.DefinitionRevision == "" || command.Transaction.DefinitionRevision != strings.TrimSpace(command.Transaction.DefinitionRevision) {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
 	if err := validateFileReplayProof(command.Execution.ReplayProof, command.OperationID, data.TargetRef); err != nil {
 		setPrerequisiteError(result, err)
 		return
@@ -464,6 +488,12 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 	operationResult, executeErr := m.submitEffectInternalEvent(effectInternalEvent{Kind: effectInternalEventApplyPatch, Patch: &patchRequest})
 	status := runtimeOperationStatus(executeErr)
 	evidence := fileOperationEvidence(operationResult)
+	dependencies, dependencyErr := filePatchOwnerDependencies(command.RuntimeOperationExecutionContext, operation, operationResult.patchRead)
+	if dependencyErr != nil {
+		setPrerequisiteError(result, dependencyErr)
+		return
+	}
+	evidence.OwnerRevisionSet = dependencies
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.RuntimeBlockKindPatchApply, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)

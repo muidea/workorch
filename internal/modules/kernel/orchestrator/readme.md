@@ -117,8 +117,10 @@ fresh-load、accepted/rejected lineage、confirmed repair、implementation-work 
 producer 由 File owner 的独立回归验证。
 
 此合同不新增 SM-1～SM-4 transition，不用 nil 集合伪造无依赖或当前有效证明，不开放 capability availability。
-File existing-read 与 Shell managed-validation scratch copy 是该事实的具体 producer；前者保留 full-stream read，
-后者保留本次实际复制的逐文件 bytes/selector，成功和已完成复制后的失败回执均可由原 evidence transaction 接收。
+File existing-read、mutation 的最终 existing patch-input/readback 与 Shell managed-validation scratch copy 是具体 producer。
+File 的 mutation/recovery 读取事实从 actual bytes 生成，不能借用 receipt 的历史 `BeforeHash`；恢复确认后像与原
+执行读前像保持不同 dependency identity。它不枚举全部 preview/manifest/metadata 读取或补造 absence。
+Shell 保留本次实际复制的逐文件 bytes/selector，成功和已完成复制后的失败回执均可由原 evidence transaction 接收。
 `biz/runtime/shell_owner_receipt_integration_test.go` 配对真实 Shell 失败 receipt、原始文件 hash 与 rejected fact 的完整
 依赖投影；复制不是子进程全部读取追踪或跨文件原子快照。
 这些事实不替代 assessment/artifact 的实际依赖、current owner observation、

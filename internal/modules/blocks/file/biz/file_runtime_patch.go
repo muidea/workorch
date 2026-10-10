@@ -72,6 +72,7 @@ type patchExecutionResult struct {
 	MatchCount       int64
 	FailureCode      string
 	FailureMessage   string
+	patchRead        *filePatchReadObservation
 }
 
 type patchUnifiedDiffFilePatch struct {
@@ -128,11 +129,15 @@ func (a *RuntimeAdapter) executePatchRequest(workspaceDirectory string, patchReq
 	}
 }
 
-func executeFileWritePatch(root string, target string, req patchExecutionRequest, apply bool) (patchExecutionResult, error) {
+func executeFileWritePatch(root string, target string, req patchExecutionRequest, apply bool) (ret patchExecutionResult, executeErr error) {
 	if err := ensurePatchParentDirectory(root, target, req.TargetRef, req.PatchType, apply); err != nil {
 		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_parent_conflict"), err
 	}
 	before, exists, err := readPatchTarget(target)
+	if err == nil && exists {
+		observation := observedFilePatchRead(req.TargetRef, before, "patch_input")
+		defer func() { ret.patchRead = observation }()
+	}
 	if err != nil {
 		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_read_failed"), err
 	}
@@ -165,9 +170,13 @@ func executeFileWritePatch(root string, target string, req patchExecutionRequest
 	return patchSuccessResult(req, before, after, exists, sha256Hex(after), "", addedLines, deletedLines), nil
 }
 
-func executeTextReplacePatch(root string, target string, req patchExecutionRequest, apply bool) (patchExecutionResult, error) {
+func executeTextReplacePatch(root string, target string, req patchExecutionRequest, apply bool) (ret patchExecutionResult, executeErr error) {
 	_ = root
 	before, exists, err := readPatchTarget(target)
+	if err == nil && exists {
+		observation := observedFilePatchRead(req.TargetRef, before, "patch_input")
+		defer func() { ret.patchRead = observation }()
+	}
 	if err != nil || !exists {
 		if err == nil {
 			err = fmt.Errorf("%w: patch text_replace target does not exist", common.ErrNotFound)
@@ -197,7 +206,7 @@ func executeTextReplacePatch(root string, target string, req patchExecutionReque
 	return result, nil
 }
 
-func executeUnifiedDiffPatch(root string, target string, req patchExecutionRequest, apply bool) (patchExecutionResult, error) {
+func executeUnifiedDiffPatch(root string, target string, req patchExecutionRequest, apply bool) (ret patchExecutionResult, executeErr error) {
 	filePatch, err := parsePatchUnifiedDiff(req.Diff)
 	if err != nil {
 		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "unified_diff_invalid"), err
@@ -210,6 +219,10 @@ func executeUnifiedDiffPatch(root string, target string, req patchExecutionReque
 		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_parent_conflict"), err
 	}
 	before, exists, err := readPatchTarget(target)
+	if err == nil && exists {
+		observation := observedFilePatchRead(req.TargetRef, before, "patch_input")
+		defer func() { ret.patchRead = observation }()
+	}
 	if err != nil {
 		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_read_failed"), err
 	}

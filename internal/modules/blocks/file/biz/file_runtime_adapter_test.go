@@ -2155,6 +2155,7 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 		BeforeHash: baseHash, AfterHash: sha256Hex([]byte("after\n")), AdmissibilitySnapshotID: "admissibility-1",
 	}
 	commitCalls := 0
+	var attemptedReceipt runtimecontract.RuntimeOperationReceipt
 	receipts := map[string]runtimecontract.RuntimeOperationReceipt{}
 	receiptObserver := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
 	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
@@ -2169,6 +2170,7 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 	receiptObserver.Subscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		commitCalls++
 		if commitCalls == 1 {
+			attemptedReceipt = event.Data().(orchestratorevents.CommitRuntimeOperationReceiptCommand).Receipt.Clone()
 			result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "injected receipt CAS loss", Cause: errors.New("injected receipt CAS loss")})
 			return
 		}
@@ -2204,7 +2206,7 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 				AdmissibilitySnapshotID: proof.AdmissibilitySnapshotID, ReplayProof: &proof,
 			}),
 			WorkspaceID: "ws-1", RunID: "run-1", DispatchID: "dispatch-1",
-			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1"},
+			Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", DefinitionRevision: "definition-1"},
 			OperationID: "write-1", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-1"}, TargetRefs: []string{"README.md"},
 			EvidenceKind: runtimecontract.EvidenceKindStateChange, WorkspaceDeliverableDirectory: workspace,
 		},
@@ -2227,6 +2229,13 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 	response, ok := data.(fileevents.ExecuteOperationResult)
 	if !ok || response.Receipt.ExecutionKey != command.Execution.ExecutionKey || !response.Receipt.Changed || response.Receipt.BeforeHash != baseHash || response.Receipt.AfterHash == baseHash || commitCalls != 2 {
 		t.Fatalf("owner replay did not commit the sealed logical delta once: response=%+v calls=%d", response, commitCalls)
+	}
+	originalDependencies, recoveryDependencies := attemptedReceipt.Evidence.OwnerRevisionSet, response.Receipt.Evidence.OwnerRevisionSet
+	if originalDependencies == nil || recoveryDependencies == nil || originalDependencies.Validate() != nil || recoveryDependencies.Validate() != nil ||
+		originalDependencies.DefinitionRevision != "definition-1" || recoveryDependencies.DefinitionRevision != "definition-1" ||
+		len(originalDependencies.Entries) != 1 || len(recoveryDependencies.Entries) != 1 || originalDependencies.Entries[0].Revision != baseHash ||
+		recoveryDependencies.Entries[0].Revision != proof.AfterHash || originalDependencies.SetHash == recoveryDependencies.SetHash {
+		t.Fatal("actual owner receipt confused original read with recovery postcondition or manufactured historical bytes")
 	}
 	content, err = os.ReadFile(filepath.Join(workspace, "README.md"))
 	if err != nil || string(content) != "after\n" {

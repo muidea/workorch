@@ -46,10 +46,23 @@ File 不重新打开文件来补造历史版本，不从 `ResourceChanges` 或 c
 保存该原始集合；exact persisted receipt replay 返回原依赖，不受后来文件内容或停机影响。未封存 exact Definition
 的新读取在文件 I/O 和 receipt commit 前拒绝。集合是本次读取事实，不是 CWI credit 或跨时刻 freshness 凭证。
 
-optional missing read、list/preview、mutation、validation、assessment 和正式 artifact 不由该读取合同补造依赖；
+optional missing read、list/preview、validation、assessment 和正式 artifact 不由该读取合同补造依赖；
 它也不提供 current owner 查询或 stale/reopen 裁决。现行 Runtime 路径检查与读取仍不是跨文件原子快照，
 该依赖字段不证明所有 filesystem TOCTOU 已被防住。独立 producer 回归见
 [`biz/file_read_dependencies_test.go`](biz/file_read_dependencies_test.go)。
+
+`file/edit`、`file/write` 与 `patch/apply` 在 exact Definition 门禁后保留最终 patch 执行读取的 existing 输入：
+owner-private observation 直接取自 `readPatchTarget` 返回的原 bytes，绑定目标、全内容 SHA-256、字节数及
+`patch_input` purpose。成功、no-op 和完整读取后发生的 binary/baseHash/replace/write 等失败均保留该事实；
+未实际读取现存 bytes、缺失目标或读取失败不补造依赖。`DependencyHash` 绑定 Workspace、完整 sealed operation hash
+和 observation；typed receipt 与原 evidence transaction 保全集合，不把 `ResourceChanges` 当 actual-read 来源。
+
+lost-receipt recovery 若确认 sealed 后像，只保留本次实际读取的 `replay_postcondition` hash，不把 receipt 的历史
+`BeforeHash` 或 replay proof 值伪装为本次读取。已保存 receipt 的 duplicate 仍重放原集合，不重读 newer 文件。
+该事实不表示所有 preview/feasibility/manifest/metadata 读取已枚举，也不提供 absence、原始未保存回执的读前像恢复、
+跨文件快照、formal artifact 或 current freshness 证明；既有 effect/unknown/权限/fence 和 SM-1～SM-4 transition 不变。
+独立原字节 oracle 和三种 variant 的读取/恢复/失败见 [`biz/file_patch_read_dependencies_test.go`](biz/file_patch_read_dependencies_test.go)；
+真实 receipt CAS loss/replay 及 edit/rejected-write 的配对回归见 `biz/file_runtime_adapter_test.go` 和 `module_test.go`。
 
 ### 生命周期合同
 
@@ -127,6 +140,7 @@ optional missing read、list/preview、mutation、validation、assessment 和正
 | --- | --- | --- |
 | normal list/read/write/edit/preview/apply | [`module_test.go`](module_test.go)、[`biz/file_runtime_adapter_test.go`](biz/file_runtime_adapter_test.go) | 覆盖 create-only 与 existing-target selector、读写编辑及 patch 主路径 |
 | actual existing-read dependency | [`biz/file_read_dependencies_test.go`](biz/file_read_dependencies_test.go)、`kernel/orchestrator/biz/runtime/owner_read_dependencies_test.go`、`workorchruntimecontract/runtime_receipt_owner_dependencies_test.go` | 真实全流 bytes hash、独立 selected-content/selector 前像、exact Definition 拒绝、typed receipt 保存和停机重放；消费者覆盖 CAS 前失败/响应丢失、原集合 hash/clone/reload 与来源篡改，非 current applicability 或 terminal union 证明 |
+| actual patch-read dependency | [`biz/file_patch_read_dependencies_test.go`](biz/file_patch_read_dependencies_test.go)、`module_test.go`、`biz/file_runtime_adapter_test.go::TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure` | 三种 variant 原 bytes/独立 hash、读取后失败、创建/缺失不补造、exact Definition 零 effect、原输入与 recovery 后像区分、typed receipt 丢失恢复与停机重放；非完整读取 inventory/current applicability 证明 |
 | canonical scope preimage | [`biz/file_runtime_target_canonical_test.go`](biz/file_runtime_target_canonical_test.go)、`kernel/orchestrator/biz/runtime_implementation_work_scope_test.go` | 真实 File 空／唯一／完整多文件 scope、unsupported、canonical hash/当前 JSON 重载、只读与 stale revision；不替代 working binding、公开 activation 或终验权限 |
 | text edit applicability | [`edit_applicability_test.go`](edit_applicability_test.go) | `file/edit` 与 `patch/apply|patch/preview` text_replace 的真实 EventHub 矩阵：exact/byte-exact、空 replacement、occurrence、缺失/歧义/越界、baseHash/binary 与 duplicate；probe 零写入/receipt，owner constraint 不含执行或纠正权限 |
 | exact validation input delta | [`biz/validation_input_repair_test.go`](biz/validation_input_repair_test.go) | EventHub feasibility 的 exact/夹带断言/旧输入/旧诊断矩阵，零预检副作用，真实 apply、重启重放与 newer input 保护 |

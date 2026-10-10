@@ -138,6 +138,7 @@ type RuntimeFileOperationResult struct {
 	TargetRefs     []string
 	FailureCode    string
 	FailureMessage string
+	patchRead      *filePatchReadObservation
 }
 
 func (a *RuntimeAdapter) ListFiles(request FileListRequest) (FileListResult, error) {
@@ -527,6 +528,7 @@ func confirmPatchReplayProof(request PatchApplyRequest, proof runtimecontract.Ru
 		Stage: "patch_apply", Summary: "patch replay proof confirmed",
 		BeforeHash: proof.BeforeHash, AfterHash: proof.AfterHash, ContentHash: proof.AfterHash,
 		TargetRefs: []string{ref}, EvidenceRefs: []string{"workorch://workspace/" + ref},
+		patchRead: observedFilePatchRead(ref, content, "replay_postcondition"),
 	}, true, nil
 }
 
@@ -560,6 +562,7 @@ func confirmFileWritePatchReplay(request PatchApplyRequest) (RuntimeFileOperatio
 		// the original durable resource delta after a lost CAS response.
 		BeforeHash: baseHash, AfterHash: actualHash, ContentHash: actualHash,
 		TargetRefs: []string{ref}, EvidenceRefs: []string{"workorch://workspace/" + ref},
+		patchRead: observedFilePatchRead(ref, content, "replay_postcondition"),
 	}, true, nil
 }
 
@@ -568,6 +571,10 @@ func runtimeFileOperationResultFromExecution(result patchExecutionResult, fallba
 		Stage: result.Stage, BeforeHash: result.BeforeHash, ContentHash: result.ContentHash, AfterHash: result.AfterHash, DiffHash: result.DiffHash,
 		AddedLines: result.AddedLines, DeletedLines: result.DeletedLines,
 		TargetRefs: []string{strings.TrimSpace(fallbackTarget)},
+	}
+	if result.patchRead != nil {
+		observation := *result.patchRead
+		ret.patchRead = &observation
 	}
 	ret.Summary = strings.TrimSpace(result.Summary)
 	if ret.Summary == "" {
