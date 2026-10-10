@@ -106,6 +106,12 @@ Result/UI 只读投影，不执行 proof 或重裁成功；当前 all-of 投影�
 Shell v5 多检查输入包合同归该 capability owner，不在 Core 硬编码 native grammar、软件栈或 adapter identity；
 这些回归不代表公开 authoring、非 managed proof、真实模型或 release 验收。
 
+`biz/runtime_execution_handoff_barrier_test.go` 验证 SM-1／SM-4 交接屏障：真实 Workspace handoff 已持久、
+slot 为空而 Run 尚 active 时，合法 Restart 只能保留原 Run 的 replacement intent，不能首次激活第二 Run。
+无 predecessor 的同请求正例可激活；空 slot Resume 不创建 Run，竞争 request identity 拒绝且不改持久前像。
+owner 重启后的原 request 重放仍守住屏障，恢复只交付同一 seal／Result 和有序三个 ACK。
+该回归不驱动后继 materialization，也不证明首次 activation 的手动／自动语义去重或真实 provider 验收。
+
 ### Semantic and candidate authority
 
 - 输入维护的可执行范围以 Shell 的 [input-maintenance contracts](../../blocks/shell/readme.md#executable-input-maintenance-contracts)
