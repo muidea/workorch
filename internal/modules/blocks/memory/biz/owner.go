@@ -26,6 +26,10 @@ type Biz struct {
 	workspaceDeletions repository.MemoryWorkspaceDeletionRepository
 	topics             []string
 	started            bool
+	lifecycle          basebiz.Lifecycle
+	shutdownMu         sync.Mutex
+	releasing          bool
+	released           bool
 	workspaceLocksMu   sync.Mutex
 	workspaceLocks     map[common.WorkspaceID]*sync.Mutex
 }
@@ -44,27 +48,61 @@ func (m *Biz) Start() error {
 	if m == nil || m.service == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	leave, err := m.enterOwner(false)
+	if err != nil {
+		return err
+	}
+	defer leave()
 	if m.started {
 		return nil
 	}
-	m.topics = memoryCommandTopics()
-	for _, topic := range m.topics {
-		m.SubscribeFunc(topic, m.handleCommand)
+	if len(m.topics) != 0 {
+		return common.ErrConflict
+	}
+	for _, topic := range memoryCommandTopics() {
+		if err := m.subscribeOwner(topic, m.handleCommand); err != nil {
+			return err
+		}
 	}
 	m.started = true
 	return nil
 }
 
-func (m *Biz) Teardown(context.Context) {
+func (m *Biz) Teardown(ctx context.Context) error {
 	if m == nil {
-		return
+		return nil
 	}
-	for idx := len(m.topics) - 1; idx >= 0; idx-- {
-		m.UnsubscribeFunc(m.topics[idx])
+	m.BeginShutdown(ctx)
+	if err := m.Quiesce(ctx); err != nil {
+		return err
 	}
-	m.topics = nil
+	m.shutdownMu.Lock()
+	if m.releasing {
+		m.shutdownMu.Unlock()
+		return common.ErrConflict
+	}
+	m.releasing = true
+	m.shutdownMu.Unlock()
+	defer func() { m.shutdownMu.Lock(); m.releasing = false; m.shutdownMu.Unlock() }()
+	if err := m.Quiesce(ctx); err != nil {
+		return err
+	}
+	for len(m.topics) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		last := len(m.topics) - 1
+		if err := m.UnsubscribeFuncChecked(m.topics[last]); err != nil {
+			return err
+		}
+		m.topics = m.topics[:last]
+	}
 	m.service = nil
 	m.workspaceDeletions = nil
 	m.workspaceLocks = nil
 	m.started = false
+	m.shutdownMu.Lock()
+	m.released = true
+	m.shutdownMu.Unlock()
+	return nil
 }
