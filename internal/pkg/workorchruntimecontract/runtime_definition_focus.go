@@ -296,6 +296,11 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Runt
 		if focus.AssessmentScope != item.SourceScope || focus.AssessmentID != item.SourceID || focus.AssessmentText != item.TargetText {
 			return fmt.Errorf("runtime definition focus %q assessment source does not exactly match definition seed coverage %q", focus.ID, coverageID)
 		}
+		if len(item.SourceObligationChecks) != 0 &&
+			(!containsString(focus.RequiredEvidenceKinds, EvidenceKindValidation) ||
+				!runtimeOperationKindsContain(focus.AcceptedStepKinds, RuntimeBlockKindManagedValidationSession)) {
+			return fmt.Errorf("runtime definition focus %q source obligations require exact owner-attested validation checks", focus.ID)
+		}
 		if _, duplicate := seenCoverage[coverageID]; duplicate {
 			return fmt.Errorf("runtime definition focuses duplicate coverage %q", coverageID)
 		}

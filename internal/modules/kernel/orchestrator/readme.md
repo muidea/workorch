@@ -82,6 +82,22 @@ capability resource state。
 - `internal/pkg/workorchruntimecontract` 只包含 DTO、enum、normalize/validate/clone/hash、manifest compiler 和纯 matcher；
   不持有 Hub/I/O/CAS，也不选择 retry、terminal 或 Runtime action。
 
+### 逐源义务与共同 CWI
+
+immutable `RuntimeSourceObligationInventory` 随 Definition/seed/startup/hash 封存；每项 verification 的
+check identity 绑定完整 inventory、Definition、CWI、ObligationID、RequirementID、VerificationID 和原
+Criterion/Declaration。同 CWI 的全部 source checks 与共同检查进入原 validation requirement 的 all-of
+集合，不增加可变闭包 ledger。bootstrap、fresh facts 与 semantic request 逐次反查 exact
+`ProfileID + EvidenceRequirementID + Scope` 及每个 DoD source 的合取声明贡献；库存自洽 hash 不免除适用性
+校验，声明存在也不代表 owner readiness 或 proof。
+
+SM-2 仍独占 current binding、evidence credit、assessment、reopen 与 terminal；SM-3 持久化完整输入评审和
+封存 dispatch，V2 每 source check 必须使用该源 Criterion 而非共同 CWI 或另一义务的文本。
+SM-4 从 aggregate 派生完整源 closeout；SM-1 lifecycle 无新增 transition。纯 compiler 从 closeout inventory
+重编逐源集合，current proof 缺 B、旧 binding 或 CWI 重开不能恢复 credit；当前 all-of 投影不报告独立部分源 credit。
+`runtime_source_obligation_applicability_test.go` 固定 exact 声明与重载；`biz/runtime/source_obligation_test.go`
+固定 receipt→assessment→terminal、A-only 拒绝、协调删来源的独立前像反证和 fresh-load。
+
 ### Semantic and candidate authority
 
 - 输入维护的可执行范围以 Shell 的 [input-maintenance contracts](../../blocks/shell/readme.md#executable-input-maintenance-contracts)

@@ -58,8 +58,17 @@ func (b RuntimeBootstrap) Validate() error {
 	if err := b.DefinitionSeed.Validate(); err != nil {
 		return fmt.Errorf("runtime bootstrap definition seed: %w", err)
 	}
+	if err := ValidateRuntimeSourceObligationApplicability(b.DefinitionSeed.SourceObligations, b.Activation.ExecutionContract.ProfileContracts); err != nil {
+		return fmt.Errorf("runtime bootstrap source applicability: %w", err)
+	}
 	if b.DefinitionSeed.DefinitionRevision != b.Definition.Revision {
 		return fmt.Errorf("runtime bootstrap definition seed revision mismatch")
+	}
+	if !SameRuntimeSourceObligationInventory(b.Definition.SourceObligations, b.DefinitionSeed.SourceObligations) {
+		return fmt.Errorf("runtime bootstrap Definition and seed source obligation inventory mismatch")
+	}
+	if b.DefinitionSeed.SourceObligations != nil && b.DefinitionSeed.SourceObligations.StartupInputHash != b.Definition.StartupInputHash {
+		return fmt.Errorf("runtime bootstrap source obligations startup input mismatch")
 	}
 	if err := b.ConvergencePolicy.Validate(); err != nil {
 		return err
@@ -319,6 +328,7 @@ func sameRuntimeCoverageItem(left, right RuntimeCoverageItem) bool {
 	right = right.Normalized()
 	if left.ID != right.ID || left.SliceID != right.SliceID || left.SourceScope != right.SourceScope ||
 		left.SourceID != right.SourceID || left.TargetText != right.TargetText || left.Order != right.Order ||
+		!sameRuntimeSourceObligationChecks(left.SourceObligationChecks, right.SourceObligationChecks) ||
 		!sameCoverageWorkItemIDs(left.PrerequisiteCoverageWorkItemIDs, right.PrerequisiteCoverageWorkItemIDs) ||
 		len(left.ReopenDependencies) != len(right.ReopenDependencies) {
 		return false

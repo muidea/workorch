@@ -32,6 +32,13 @@ func runtimeCompleteResultFeedback(item *RuntimeTerminalResultMaterial, source R
 				assessment.FailureReason = "此要求尚未记录验收评估。"
 			}
 			assessmentItems = append(assessmentItems, assessment)
+			for _, obligation := range outcome.SourceObligations {
+				assessmentItems = append(assessmentItems, workorchresultcontract.DoDAssessmentItem{
+					Item: obligation.Check.Criterion, State: string(obligation.AssessmentState),
+					SourceNote:   "obligation/" + obligation.Check.ObligationID + "/verification/" + obligation.Check.VerificationID,
+					EvidenceRefs: append([]string(nil), obligation.AcceptedEvidenceRefs...), FailureReason: obligation.AssessmentReasonCode,
+				})
+			}
 		}
 	}
 	if len(assessmentItems) != 0 {

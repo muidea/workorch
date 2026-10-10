@@ -94,6 +94,29 @@ validation all-of、metric/artifact 和同 Workspace/Run 的来源。无 rollove
 `stale_or_superseded`，不进入 current `AcceptedEvidenceRefs`。此只读 compiler 不回写 coverage/assessment，
 terminal seal 与 fresh-load 仍从独立持久前像反证材料；receipt/dispatch 完整来源门禁不因投影而省略。
 
+## 逐源义务终态投影
+
+Workspace 的 eligible exact candidate 编译不可变 `RuntimeSourceObligationInventory`，保留 Requirement、
+Obligation、Verification、原判据、原声明及 candidate/specification/Definition/startup 身份。
+多项义务可以共用一个 CWI；每项 verification 编译不同 check identity，进入该 CWI 的完整 all-of proof。
+SM-2 仍以原 CWI ledger 裁决，不增加第二份可变义务闭包账本。
+
+`RuntimeResultCloseout.SourceObligations` 保留完整封存 inventory；每个 requirement outcome 的
+`SourceObligations[]` 分别携带 exact check、CoverageState、AssessmentState、reason、current binding 与
+accepted evidence refs。closeout 校验从 inventory 重编完整检查集合，缺项或改判据不能靠重新计算 hash 通过。
+Result 与 workorchd detached 透传已裁决材料；UI 不从共同 DoD 猜来源或自行判断完成。
+
+当前源结论遵循共同 CWI 的 all-of 门禁：只有父 CWI covered+satisfied 且 current binding 的完整 proof
+由 accepted evidence 满足，源检查才投影 covered+satisfied。仅 A、旧 binding、reopened CWI 或历史 assessment
+不能恢复任一源义务的当前 credit；投影不提供 A 部分通过的独立 credit ledger。
+原 Criterion/Declaration 文本不 trim、不摘要；review、creation、exit 0 与单项 native PASS 均不能替代整体证明。
+requirement 与逐源 evidence 投影共用 exact current binding/proof 适用性检查：无 rollover 时反查同 Workspace/Run 的
+原 completed dispatch binding；有来源 lineage 时匹配原 dispatch/operation、binding hash 及 current proof identity。
+同 ID 新 hash 只能通过该 scope 内 exact equivalent resolution 重新获得适用性；incompatible、跨 Run/Workspace、
+重复来源、缺失当前 binding、弱证据或不完整 all-of 均保留为历史审计，不进入 current accepted refs。
+这些纯投影不重新裁决 coverage/assessment；terminal seal 与 fresh-load 仍从独立持久前像反证全部材料。
+原始 provider/process 材料仍由诊断 owner 的受限读取边界保护，closeout 不携带该私有原始存储内容。
+
 ## Formal Result Value Contract
 
 ```text

@@ -102,6 +102,10 @@ func runtimeResultCloseout(source RuntimeStateRecord, outcome TerminalOutcome, a
 	}
 	closeout.OwnerRevisionSet = runtimeCloseoutOwnerRevisionSet(source)
 	closeout.RequirementOutcomes = DeriveRuntimeTerminalRequirementOutcomesFromState(source, closeout.OwnerRevisionSet)
+	if source.Facts.DefinitionSeed.SourceObligations != nil {
+		inventory := source.Facts.DefinitionSeed.SourceObligations.Clone()
+		closeout.SourceObligations = &inventory
+	}
 	for _, outcome := range closeout.RequirementOutcomes {
 		closeout.AcceptedEvidenceRefs = append(closeout.AcceptedEvidenceRefs, outcome.AcceptedEvidenceRefs...)
 	}
@@ -211,6 +215,7 @@ func DeriveRuntimeTerminalRequirementOutcomesFromState(source RuntimeStateRecord
 		if outcome.AssessmentState != RuntimeRequirementIndeterminate {
 			outcome.MissingEvidenceKinds = nil
 		}
+		outcome.SourceObligations = runtimeTerminalSourceObligationOutcomes(source, coverage, outcome)
 		ret = append(ret, outcome)
 	}
 	sort.Slice(ret, func(i, j int) bool { return ret[i].CoverageWorkItemID < ret[j].CoverageWorkItemID })

@@ -56,6 +56,25 @@ type RuntimeRequirementEvidenceItem struct {
 	OwnerRevisionSetHash string
 }
 
+type RuntimeSourceObligationOutcome struct {
+	Check                RuntimeSourceObligationCheck
+	CoverageState        RuntimeRequirementCoverageState
+	AssessmentState      RuntimeRequirementAssessmentState
+	AssessmentReasonCode string
+	AcceptedEvidenceRefs []string
+	CurrentBindingRef    *RuntimeCWIBindingRef
+}
+
+// 源义务结论只投影同一 SM-2 CWI 的独立 all_of 检查，不形成第二份闭包账本。
+func (o RuntimeSourceObligationOutcome) Normalized() RuntimeSourceObligationOutcome {
+	o.AcceptedEvidenceRefs = normalizeStrings(o.AcceptedEvidenceRefs)
+	if o.CurrentBindingRef != nil {
+		ref := o.CurrentBindingRef.Clone()
+		o.CurrentBindingRef = &ref
+	}
+	return o
+}
+
 type RuntimeRequirementOutcome struct {
 	RequirementRef       string
 	SourceItemRef        string
@@ -68,6 +87,7 @@ type RuntimeRequirementOutcome struct {
 	EvidenceItems        []RuntimeRequirementEvidenceItem
 	AcceptedEvidenceRefs []string
 	OwnerRevisionSetHash string
+	SourceObligations    []RuntimeSourceObligationOutcome `json:",omitempty"`
 }
 
 func (s RuntimeOwnerRevisionSet) Normalized() RuntimeOwnerRevisionSet {
@@ -137,6 +157,10 @@ func (o RuntimeRequirementOutcome) Normalized() RuntimeRequirementOutcome {
 	sort.Slice(o.EvidenceItems, func(i, j int) bool { return o.EvidenceItems[i].EvidenceRef < o.EvidenceItems[j].EvidenceRef })
 	o.AcceptedEvidenceRefs = normalizeStrings(o.AcceptedEvidenceRefs)
 	o.OwnerRevisionSetHash = strings.TrimSpace(o.OwnerRevisionSetHash)
+	o.SourceObligations = append([]RuntimeSourceObligationOutcome(nil), o.SourceObligations...)
+	for idx := range o.SourceObligations {
+		o.SourceObligations[idx] = o.SourceObligations[idx].Normalized()
+	}
 	return o
 }
 
@@ -182,6 +206,42 @@ func (o RuntimeRequirementOutcome) Validate() error {
 	}
 	if strings.Join(normalizeStrings(accepted), "\x00") != strings.Join(o.AcceptedEvidenceRefs, "\x00") {
 		return fmt.Errorf("runtime requirement accepted evidence union mismatch")
+	}
+	checks := make([]RuntimeSourceObligationCheck, 0, len(o.SourceObligations))
+	for _, source := range o.SourceObligations {
+		checks = append(checks, source.Check)
+		switch source.CoverageState {
+		case RuntimeRequirementUncovered, RuntimeRequirementPartiallyCovered, RuntimeRequirementCovered:
+		default:
+			return fmt.Errorf("runtime source obligation has invalid coverage state")
+		}
+		switch source.AssessmentState {
+		case RuntimeRequirementUnassessed, RuntimeRequirementSatisfied, RuntimeRequirementUnsatisfied:
+		case RuntimeRequirementIndeterminate:
+			if source.AssessmentReasonCode == "" {
+				return fmt.Errorf("indeterminate source obligation requires reason")
+			}
+		default:
+			return fmt.Errorf("runtime source obligation has invalid assessment state")
+		}
+		for _, ref := range source.AcceptedEvidenceRefs {
+			if !containsString(o.AcceptedEvidenceRefs, ref) {
+				return fmt.Errorf("runtime source obligation evidence is outside requirement credit")
+			}
+		}
+		if source.CurrentBindingRef != nil {
+			if err := source.CurrentBindingRef.Validate(); err != nil {
+				return err
+			}
+		}
+		if source.CoverageState == RuntimeRequirementCovered || source.AssessmentState == RuntimeRequirementSatisfied {
+			if o.CoverageState != RuntimeRequirementCovered || o.AssessmentState != RuntimeRequirementSatisfied || source.CoverageState != RuntimeRequirementCovered || source.AssessmentState != RuntimeRequirementSatisfied || source.CurrentBindingRef == nil || len(source.AcceptedEvidenceRefs) == 0 {
+				return fmt.Errorf("runtime source obligation cannot restore absent current CWI credit")
+			}
+		}
+	}
+	if err := ValidateRuntimeSourceObligationChecks(o.DefinitionRevision, o.CoverageWorkItemID, checks); err != nil {
+		return err
 	}
 	return nil
 }

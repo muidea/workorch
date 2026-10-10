@@ -19,6 +19,7 @@ type RuntimeResultCloseout struct {
 	RuntimeStateRevision           uint64
 	TerminalOutcome                TerminalOutcome
 	RequirementOutcomes            []RuntimeRequirementOutcome
+	SourceObligations              *RuntimeSourceObligationInventory `json:",omitempty"`
 	AcceptedEvidenceRefs           []string
 	DeliverableRefs                []string
 	OwnerRevisionSet               RuntimeOwnerRevisionSet
@@ -79,6 +80,10 @@ func (c RuntimeResultCloseout) Normalized() RuntimeResultCloseout {
 	c.StartupInputHash = strings.TrimSpace(c.StartupInputHash)
 	c.DefinitionRevision = strings.TrimSpace(c.DefinitionRevision)
 	c.TerminalOutcome = c.TerminalOutcome.Normalized()
+	if c.SourceObligations != nil {
+		inventory := c.SourceObligations.Clone()
+		c.SourceObligations = &inventory
+	}
 	c.RequirementOutcomes = append([]RuntimeRequirementOutcome(nil), c.RequirementOutcomes...)
 	for idx := range c.RequirementOutcomes {
 		c.RequirementOutcomes[idx] = c.RequirementOutcomes[idx].Normalized()
@@ -227,9 +232,17 @@ func (c RuntimeResultCloseout) validateFormalCloseout() error {
 		if c.TerminalOutcome.Kind == TerminalOutcomeKindCompleted && (outcome.CoverageState != RuntimeRequirementCovered || outcome.AssessmentState != RuntimeRequirementSatisfied || len(outcome.AcceptedEvidenceRefs) == 0) {
 			return fmt.Errorf("successful runtime closeout has incomplete requirement %q", outcome.CoverageWorkItemID)
 		}
+		for _, source := range outcome.SourceObligations {
+			if c.TerminalOutcome.Kind == TerminalOutcomeKindCompleted && (source.CoverageState != RuntimeRequirementCovered || source.AssessmentState != RuntimeRequirementSatisfied || len(source.AcceptedEvidenceRefs) == 0) {
+				return fmt.Errorf("successful runtime closeout has incomplete source obligation %q", source.Check.ObligationID)
+			}
+		}
 	}
 	if len(c.RequirementOutcomes) == 0 {
 		return fmt.Errorf("formal runtime closeout requires requirement outcomes")
+	}
+	if err := validateRuntimeCloseoutSourceObligations(c); err != nil {
+		return err
 	}
 	if len(accepted) > 0 && len(c.OwnerRevisionSet.Entries) == 0 {
 		return fmt.Errorf("formal runtime closeout accepted evidence requires owner revision entries")

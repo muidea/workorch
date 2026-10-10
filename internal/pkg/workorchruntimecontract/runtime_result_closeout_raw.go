@@ -18,10 +18,16 @@ func (c RuntimeResultCloseout) ValidateRaw() error {
 // CloneRaw 保全原始材料及 nil/empty 身份，不执行规范化或重新派生 hash。
 func (c RuntimeResultCloseout) CloneRaw() RuntimeResultCloseout {
 	c.OriginalDiagnostic = cloneRuntimeStateRawPointer(c.OriginalDiagnostic, cloneRuntimeOriginalDiagnosticRaw)
+	c.SourceObligations = cloneRuntimeStateRawPointer(c.SourceObligations, func(value RuntimeSourceObligationInventory) RuntimeSourceObligationInventory { return value.Clone() })
 	c.RequirementOutcomes = cloneRuntimeStateRawSlice(c.RequirementOutcomes, func(value RuntimeRequirementOutcome) RuntimeRequirementOutcome {
 		value.MissingEvidenceKinds = cloneRuntimeStateRawSlice(value.MissingEvidenceKinds, func(item string) string { return item })
 		value.EvidenceItems = cloneRuntimeStateRawSlice(value.EvidenceItems, func(item RuntimeRequirementEvidenceItem) RuntimeRequirementEvidenceItem { return item })
 		value.AcceptedEvidenceRefs = cloneRuntimeStateRawSlice(value.AcceptedEvidenceRefs, func(item string) string { return item })
+		value.SourceObligations = cloneRuntimeStateRawSlice(value.SourceObligations, func(item RuntimeSourceObligationOutcome) RuntimeSourceObligationOutcome {
+			item.AcceptedEvidenceRefs = cloneRuntimeStateRawSlice(item.AcceptedEvidenceRefs, func(ref string) string { return ref })
+			item.CurrentBindingRef = cloneRuntimeStateRawPointer(item.CurrentBindingRef, func(ref RuntimeCWIBindingRef) RuntimeCWIBindingRef { return ref })
+			return item
+		})
 		return value
 	})
 	c.AcceptedEvidenceRefs = cloneRuntimeStateRawSlice(c.AcceptedEvidenceRefs, func(item string) string { return item })

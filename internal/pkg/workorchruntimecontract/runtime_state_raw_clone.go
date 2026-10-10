@@ -855,6 +855,7 @@ func cloneRuntimeCoverageEvidenceRequirementRaw(in RuntimeCoverageEvidenceRequir
 
 func cloneRuntimeCoverageItemRaw(in RuntimeCoverageItem) RuntimeCoverageItem {
 	out := in
+	out.SourceObligationChecks = CloneRuntimeSourceObligationChecks(in.SourceObligationChecks)
 	out.PrerequisiteCoverageWorkItemIDs = cloneRuntimeStateRawSlice(in.PrerequisiteCoverageWorkItemIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
 	out.ReopenDependencies = cloneRuntimeStateRawSlice(in.ReopenDependencies, func(item RuntimeCoverageReopenDependency) RuntimeCoverageReopenDependency {
 		return cloneRuntimeCoverageReopenDependencyRaw(item)
@@ -957,6 +958,7 @@ func cloneRuntimeDefinitionClarificationStateRaw(in RuntimeDefinitionClarificati
 
 func cloneRuntimeDefinitionContextRaw(in RuntimeDefinitionContext) RuntimeDefinitionContext {
 	out := in
+	out.SourceObligations = cloneRuntimeStateRawPointer(in.SourceObligations, func(item RuntimeSourceObligationInventory) RuntimeSourceObligationInventory { return item.Clone() })
 	out.CapabilityContract = cloneRuntimeStateRawSlice(in.CapabilityContract, func(item string) string { return item })
 	out.ChangeImpact = cloneRuntimeStateRawPointer(in.ChangeImpact, func(item RuntimeDefinitionChangeImpact) RuntimeDefinitionChangeImpact {
 		return cloneRuntimeDefinitionChangeImpactRaw(item)
@@ -1004,6 +1006,7 @@ func cloneRuntimeDefinitionRevisionRaw(in RuntimeDefinitionRevision) RuntimeDefi
 
 func cloneRuntimeDefinitionSeedRaw(in RuntimeDefinitionSeed) RuntimeDefinitionSeed {
 	out := in
+	out.SourceObligations = cloneRuntimeStateRawPointer(in.SourceObligations, func(item RuntimeSourceObligationInventory) RuntimeSourceObligationInventory { return item.Clone() })
 	out.CoverageItems = cloneRuntimeStateRawSlice(in.CoverageItems, func(item RuntimeCoverageItem) RuntimeCoverageItem { return cloneRuntimeCoverageItemRaw(item) })
 	out.Slices = cloneRuntimeStateRawSlice(in.Slices, func(item RuntimeAcceptanceSlice) RuntimeAcceptanceSlice { return cloneRuntimeAcceptanceSliceRaw(item) })
 	return out
@@ -1908,6 +1911,7 @@ func cloneRuntimeSemanticProofObligationRaw(in RuntimeSemanticProofObligation) R
 	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.ValidationProofRequirement = cloneRuntimeStateRawPointer(in.ValidationProofRequirement, func(item RuntimeValidationProofRequirement) RuntimeValidationProofRequirement {
 		item.RequiredCheckRefs = cloneRuntimeStateRawSlice(item.RequiredCheckRefs, func(value string) string { return value })
+		item.SourceObligationChecks = CloneRuntimeSourceObligationChecks(item.SourceObligationChecks)
 		return item
 	})
 	out.RequiredEvidenceKinds = cloneRuntimeStateRawSlice(in.RequiredEvidenceKinds, func(item string) string { return item })
@@ -2165,6 +2169,7 @@ func cloneRuntimeValidationSurfaceRaw(in RuntimeValidationSurface) RuntimeValida
 	out.InputTargetRefs = cloneRuntimeStateRawSlice(in.InputTargetRefs, func(item string) string { return item })
 	out.ProofRequirementUnavailabilities = cloneRuntimeStateRawSlice(in.ProofRequirementUnavailabilities, func(item RuntimeValidationProofUnavailability) RuntimeValidationProofUnavailability {
 		item.Requirement.RequiredCheckRefs = cloneRuntimeStateRawSlice(item.Requirement.RequiredCheckRefs, func(value string) string { return value })
+		item.Requirement.SourceObligationChecks = CloneRuntimeSourceObligationChecks(item.Requirement.SourceObligationChecks)
 		item.OriginalDiagnostic = item.OriginalDiagnostic.CloneOriginal()
 		return item
 	})

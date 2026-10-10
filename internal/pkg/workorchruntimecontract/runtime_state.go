@@ -424,6 +424,12 @@ func (r RuntimeStateRecord) Validate() error {
 	if r.Definition.Normalized().Revision != r.Facts.Normalized().DefinitionRevision {
 		return fmt.Errorf("runtime state definition revision mismatch")
 	}
+	if !SameRuntimeSourceObligationInventory(r.Definition.SourceObligations, r.Facts.DefinitionSeed.SourceObligations) {
+		return fmt.Errorf("runtime state Definition and seed source obligations mismatch")
+	}
+	if r.Facts.DefinitionSeed.SourceObligations != nil && r.Facts.DefinitionSeed.SourceObligations.StartupInputHash != r.Definition.StartupInputHash {
+		return fmt.Errorf("runtime state source obligations startup input mismatch")
+	}
 	if err := r.Decision.Validate(); err != nil {
 		return err
 	}

@@ -47,9 +47,14 @@ type RuntimeDefinitionSeed struct {
 	PolicyHash         string
 	CoverageItems      []RuntimeCoverageItem
 	Slices             []RuntimeAcceptanceSlice
+	SourceObligations  *RuntimeSourceObligationInventory `json:",omitempty"`
 }
 
 func CompileRuntimeDefinitionSeed(definition RuntimeDefinitionContext, activation RuntimeActivationContext, items []RuntimeCoverageItem, slices []RuntimeAcceptanceSlice) (RuntimeDefinitionSeed, error) {
+	return CompileRuntimeDefinitionSeedWithSourceObligations(definition, activation, items, slices, nil)
+}
+
+func CompileRuntimeDefinitionSeedWithSourceObligations(definition RuntimeDefinitionContext, activation RuntimeActivationContext, items []RuntimeCoverageItem, slices []RuntimeAcceptanceSlice, inventory *RuntimeSourceObligationInventory) (RuntimeDefinitionSeed, error) {
 	definition = definition.Normalized()
 	activation = activation.Normalized()
 	seed := RuntimeDefinitionSeed{
@@ -58,6 +63,16 @@ func CompileRuntimeDefinitionSeed(definition RuntimeDefinitionContext, activatio
 		PolicyHash:         StableRuntimeCandidatePrefixHashWithExecutionContract(definition, activation.ExecutionContract),
 		CoverageItems:      NormalizeRuntimeCoverageItems(items),
 		Slices:             NormalizeRuntimeAcceptanceSlices(slices),
+	}
+	if inventory != nil {
+		value := inventory.Clone()
+		if value.DefinitionRevision != definition.Revision || value.StartupInputHash != definition.StartupInputHash {
+			return RuntimeDefinitionSeed{}, fmt.Errorf("runtime source obligation inventory does not bind Definition startup input")
+		}
+		seed.SourceObligations = &value
+	}
+	if !SameRuntimeSourceObligationInventory(definition.SourceObligations, seed.SourceObligations) {
+		return RuntimeDefinitionSeed{}, fmt.Errorf("runtime Definition and seed source obligation inventory mismatch")
 	}
 	seed.Hash = StableRuntimeDefinitionSeedHash(seed)
 	if err := seed.Validate(); err != nil {
@@ -71,6 +86,10 @@ func (s RuntimeDefinitionSeed) Normalized() RuntimeDefinitionSeed {
 	s.Hash = strings.TrimSpace(s.Hash)
 	s.DefinitionRevision = strings.TrimSpace(s.DefinitionRevision)
 	s.PolicyHash = strings.TrimSpace(s.PolicyHash)
+	if s.SourceObligations != nil {
+		inventory := s.SourceObligations.Clone()
+		s.SourceObligations = &inventory
+	}
 	s.CoverageItems = NormalizeRuntimeCoverageItems(s.CoverageItems)
 	s.Slices = NormalizeRuntimeAcceptanceSlices(s.Slices)
 	return s
@@ -94,6 +113,17 @@ func (s RuntimeDefinitionSeed) Validate() error {
 	s = s.Normalized()
 	if s.SchemaVersion != RuntimeDefinitionSeedSchemaCurrent || s.DefinitionRevision == "" || s.PolicyHash == "" || len(s.CoverageItems) == 0 || len(s.Slices) == 0 {
 		return fmt.Errorf("runtime definition seed requires current schema, definition, policy, coverage and slices")
+	}
+	if s.SourceObligations != nil {
+		if err := ValidateRuntimeSourceObligationSeed(s); err != nil {
+			return err
+		}
+	} else {
+		for _, item := range s.CoverageItems {
+			if len(item.SourceObligationChecks) != 0 {
+				return fmt.Errorf("runtime definition seed source checks require sealed inventory")
+			}
+		}
 	}
 	items := make(map[common.CoverageWorkItemID]RuntimeCoverageItem, len(s.CoverageItems))
 	for _, item := range s.CoverageItems {
@@ -145,6 +175,9 @@ func StableRuntimeDefinitionSeedHash(seed RuntimeDefinitionSeed) string {
 	writeHashString(h, seed.DefinitionRevision)
 	writeHashString(h, seed.PolicyHash)
 	writeRuntimeSemanticCoverageHash(h, seed.CoverageItems, seed.Slices)
+	if seed.SourceObligations != nil {
+		writeHashString(h, seed.SourceObligations.Hash)
+	}
 	return "runtime-definition-seed-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
@@ -225,6 +258,9 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	if err := seed.Validate(); err != nil {
+		return RuntimeSemanticPlanManifest{}, err
+	}
+	if err := ValidateRuntimeSourceObligationApplicability(seed.SourceObligations, execution.ProfileContracts); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	if err := ValidateRuntimeDefinitionFocuses(seed, definitionFocuses); err != nil {
@@ -639,6 +675,9 @@ func (c RuntimeSemanticPlanRequestContext) Validate(manifest RuntimeSemanticPlan
 	if err := c.DefinitionSeed.Validate(); err != nil {
 		return err
 	}
+	if err := ValidateRuntimeSourceObligationApplicability(c.DefinitionSeed.SourceObligations, c.Activation.ExecutionContract.ProfileContracts); err != nil {
+		return err
+	}
 	if err := c.Activation.ProviderSelection.Target.Validate(); err != nil {
 		return err
 	}
@@ -843,6 +882,11 @@ func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest,
 		}
 		if _, duplicate := obligationCoverage[obligation.CoverageWorkItemID]; duplicate {
 			return runtimeValidatedSemanticManifest{}, fmt.Errorf("runtime semantic manifest duplicates obligation coverage %q", obligation.CoverageWorkItemID)
+		}
+		item := coverage[obligation.CoverageWorkItemID]
+		if len(item.SourceObligationChecks) != 0 && (obligation.ValidationProofRequirement == nil ||
+			!sameRuntimeSourceObligationChecks(item.SourceObligationChecks, obligation.ValidationProofRequirement.SourceObligationChecks)) {
+			return runtimeValidatedSemanticManifest{}, fmt.Errorf("runtime semantic obligation coverage %q omits exact source obligations", item.ID)
 		}
 		if obligation.ImplementationWork != nil {
 			work := obligation.ImplementationWork
@@ -1874,7 +1918,7 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(d RuntimeSemant
 				"incomplete_or_unbound_review", []string{"complete exact owner-bound input review"}, nil, err)
 		}
 		if proposal.ValidationInputReview != nil {
-			if err := proposal.ValidationInputReview.ValidateCriterionText(items[proposal.CoverageWorkItemID].TargetText); err != nil {
+			if err := proposal.ValidationInputReview.ValidateCoverageCriteria(items[proposal.CoverageWorkItemID]); err != nil {
 				return runtimeSemanticProposalViolation(proposal, proposalIndex, "validationInputReview", RuntimeSemanticConstraintRelational,
 					"incomplete_or_foreign_criterion_mapping", []string{"complete exact original criterion excerpts"}, nil, err)
 			}
@@ -3826,6 +3870,9 @@ func writeRuntimeSemanticCoverageItemsHash(h hashStringWriter, items []RuntimeCo
 		writeHashString(h, item.SourceScope)
 		writeHashString(h, item.SourceID)
 		writeHashString(h, item.TargetText)
+		if len(item.SourceObligationChecks) != 0 {
+			writeRuntimeSourceObligationChecksHash(h, item.SourceObligationChecks)
+		}
 		writeHashString(h, fmt.Sprintf("%d", item.Order))
 		for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
 			writeHashString(h, "prerequisite:"+string(prerequisiteID))

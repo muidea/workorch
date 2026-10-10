@@ -35,6 +35,9 @@ func StableRuntimeCandidatePrefixHashWithExecutionContract(definition RuntimeDef
 	writeHashString(h, definition.DoDDefinition)
 	writeHashStrings(h, definition.CapabilityContract)
 	writeRuntimeDefinitionChangeImpactHash(h, definition.ChangeImpact)
+	if definition.SourceObligations != nil {
+		writeHashString(h, definition.SourceObligations.Hash)
+	}
 	writeHashString(h, execution.OperationContractRevision)
 	writeHashString(h, string(execution.StateChangePolicy))
 	writeHashString(h, fmt.Sprintf("%d", execution.MaxRepairAttemptsPerFocus))
@@ -259,6 +262,7 @@ type RuntimeDefinitionContext struct {
 	DoDDefinition      string
 	CapabilityContract []string
 	ChangeImpact       *RuntimeDefinitionChangeImpact
+	SourceObligations  *RuntimeSourceObligationInventory `json:",omitempty"`
 }
 
 func (c RuntimeDefinitionContext) Normalized() RuntimeDefinitionContext {
@@ -267,6 +271,10 @@ func (c RuntimeDefinitionContext) Normalized() RuntimeDefinitionContext {
 	c.GoalDefinition = strings.TrimSpace(c.GoalDefinition)
 	c.DoDDefinition = strings.TrimSpace(c.DoDDefinition)
 	c.CapabilityContract = normalizeStrings(c.CapabilityContract)
+	if c.SourceObligations != nil {
+		inventory := c.SourceObligations.Clone()
+		c.SourceObligations = &inventory
+	}
 	if c.ChangeImpact != nil {
 		impact := c.ChangeImpact.Normalized()
 		c.ChangeImpact = &impact
@@ -284,6 +292,14 @@ func (c RuntimeDefinitionContext) Validate() error {
 	}
 	if len(c.CapabilityContract) == 0 {
 		return fmt.Errorf("runtime definition context requires a capability contract")
+	}
+	if c.SourceObligations != nil {
+		if err := c.SourceObligations.Validate(); err != nil {
+			return err
+		}
+		if c.SourceObligations.DefinitionRevision != c.Revision || c.SourceObligations.StartupInputHash != c.StartupInputHash {
+			return fmt.Errorf("runtime Definition source obligations startup identity mismatch")
+		}
 	}
 	if c.ChangeImpact != nil {
 		if err := c.ChangeImpact.Validate(); err != nil {
@@ -304,6 +320,7 @@ func SameRuntimeDefinitionContext(left RuntimeDefinitionContext, right RuntimeDe
 	right = right.Normalized()
 	if left.StartupInputHash != right.StartupInputHash || left.Revision != right.Revision || left.GoalID != right.GoalID || left.GoalDefinition != right.GoalDefinition ||
 		left.DoDID != right.DoDID || left.DoDDefinition != right.DoDDefinition || len(left.CapabilityContract) != len(right.CapabilityContract) ||
+		!SameRuntimeSourceObligationInventory(left.SourceObligations, right.SourceObligations) ||
 		!SameRuntimeDefinitionChangeImpact(left.ChangeImpact, right.ChangeImpact) {
 		return false
 	}

@@ -22,16 +22,17 @@ const (
 // prevents one broad successful recipe from receiving credit for unrelated
 // requirements.
 type RuntimeValidationProofRequirement struct {
-	SchemaVersion      string
-	Hash               string
-	DefinitionRevision string
-	CoverageWorkItemID common.CoverageWorkItemID
-	SourceScope        string
-	SourceID           string
-	SourceTextHash     string
-	DeclarationRef     string
-	ValidationRecipeID string
-	RequiredCheckRefs  []string
+	SchemaVersion          string
+	Hash                   string
+	DefinitionRevision     string
+	CoverageWorkItemID     common.CoverageWorkItemID
+	SourceScope            string
+	SourceID               string
+	SourceTextHash         string
+	DeclarationRef         string
+	ValidationRecipeID     string
+	RequiredCheckRefs      []string
+	SourceObligationChecks []RuntimeSourceObligationCheck `json:",omitempty"`
 }
 
 func (r RuntimeValidationProofRequirement) Normalized() RuntimeValidationProofRequirement {
@@ -45,6 +46,7 @@ func (r RuntimeValidationProofRequirement) Normalized() RuntimeValidationProofRe
 	r.DeclarationRef = strings.TrimSpace(r.DeclarationRef)
 	r.ValidationRecipeID = strings.TrimSpace(r.ValidationRecipeID)
 	r.RequiredCheckRefs = normalizeRuntimeValidationProofCheckRefs(r.RequiredCheckRefs)
+	r.SourceObligationChecks = CloneRuntimeSourceObligationChecks(r.SourceObligationChecks)
 	return r
 }
 
@@ -67,6 +69,14 @@ func (r RuntimeValidationProofRequirement) Validate() error {
 	canonicalDeclarationRef := CanonicalRuntimeDefinitionEvidenceDeclarationRef(r.SourceScope, r.SourceID)
 	if r.DeclarationRef != canonicalDeclarationRef {
 		return fmt.Errorf("runtime validation proof requirement declaration %q does not match canonical admitted-CWI declaration %q", r.DeclarationRef, canonicalDeclarationRef)
+	}
+	if err := ValidateRuntimeSourceObligationChecks(r.DefinitionRevision, r.CoverageWorkItemID, r.SourceObligationChecks); err != nil {
+		return err
+	}
+	for _, check := range r.SourceObligationChecks {
+		if !containsString(r.RequiredCheckRefs, check.CheckRef) {
+			return fmt.Errorf("runtime validation proof requirement omits source obligation %q", check.ObligationID)
+		}
 	}
 	if r.Hash != StableRuntimeValidationProofRequirementHash(r) {
 		return fmt.Errorf("runtime validation proof requirement hash does not match contents")
@@ -153,6 +163,12 @@ func CompileRuntimeValidationProofRequirements(definitionRevision string, covera
 			return nil, fmt.Errorf("runtime validation proof declaration %q source does not exactly match coverage %q", focus.ID, item.ID)
 		}
 		checks := append([]string(nil), focus.RequiredCheckRefs...)
+		if err := ValidateRuntimeSourceObligationChecks(definitionRevision, item.ID, item.SourceObligationChecks); err != nil {
+			return nil, err
+		}
+		for _, check := range item.SourceObligationChecks {
+			checks = append(checks, check.CheckRef)
+		}
 		cwiCheck := StableRuntimeCWIValidationCheckRef(definitionRevision, item)
 		if !containsString(checks, cwiCheck) {
 			checks = append(checks, cwiCheck)
@@ -163,7 +179,8 @@ func CompileRuntimeValidationProofRequirements(definitionRevision string, covera
 			SourceScope: item.SourceScope, SourceID: item.SourceID,
 			SourceTextHash: stableRuntimeValidationSourceTextHash(item.TargetText),
 			DeclarationRef: focus.EvidenceDeclarationRef, ValidationRecipeID: focus.ValidationRecipeID,
-			RequiredCheckRefs: checks,
+			RequiredCheckRefs:      checks,
+			SourceObligationChecks: CloneRuntimeSourceObligationChecks(item.SourceObligationChecks),
 		}.Normalized()
 		requirement.Hash = StableRuntimeValidationProofRequirementHash(requirement)
 		if err := requirement.Validate(); err != nil {
@@ -206,6 +223,9 @@ func StableRuntimeValidationProofRequirementHash(requirement RuntimeValidationPr
 	writeHashString(h, requirement.DeclarationRef)
 	writeHashString(h, requirement.ValidationRecipeID)
 	writeHashStrings(h, requirement.RequiredCheckRefs)
+	if len(requirement.SourceObligationChecks) != 0 {
+		writeRuntimeSourceObligationChecksHash(h, requirement.SourceObligationChecks)
+	}
 	return RuntimeValidationProofRequirementHashPrefix + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
@@ -270,5 +290,6 @@ func sameRuntimeValidationProofRequirement(left, right RuntimeValidationProofReq
 		left.CoverageWorkItemID == right.CoverageWorkItemID && left.SourceScope == right.SourceScope &&
 		left.SourceID == right.SourceID && left.SourceTextHash == right.SourceTextHash &&
 		left.DeclarationRef == right.DeclarationRef && left.ValidationRecipeID == right.ValidationRecipeID &&
+		sameRuntimeSourceObligationChecks(left.SourceObligationChecks, right.SourceObligationChecks) &&
 		sameStrings(left.RequiredCheckRefs, right.RequiredCheckRefs)
 }

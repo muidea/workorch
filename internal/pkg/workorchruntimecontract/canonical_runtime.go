@@ -1845,6 +1845,9 @@ func (f RuntimeFacts) Validate() error {
 		if err := f.DefinitionSeed.Validate(); err != nil {
 			return fmt.Errorf("runtime facts definition seed: %w", err)
 		}
+		if err := ValidateRuntimeSourceObligationApplicability(f.DefinitionSeed.SourceObligations, f.Activation.ExecutionContract.ProfileContracts); err != nil {
+			return fmt.Errorf("runtime facts source applicability: %w", err)
+		}
 		if f.DefinitionSeed.DefinitionRevision != f.DefinitionRevision {
 			return fmt.Errorf("runtime facts definition seed revision mismatch")
 		}

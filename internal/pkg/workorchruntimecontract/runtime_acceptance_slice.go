@@ -78,6 +78,8 @@ type RuntimeCoverageItem struct {
 	SourceID    string
 	TargetText  string
 	Order       int
+	// SourceObligationChecks 保留共享工作上的独立来源判据，不授予 credit。
+	SourceObligationChecks []RuntimeSourceObligationCheck `json:",omitempty"`
 	// PrerequisiteCoverageWorkItemIDs constrain semantic-plan admission only;
 	// they never reopen an already satisfied CWI.
 	PrerequisiteCoverageWorkItemIDs []common.CoverageWorkItemID
@@ -267,6 +269,7 @@ func (c RuntimeCoverageItem) Normalized() RuntimeCoverageItem {
 	c.SourceScope = strings.TrimSpace(c.SourceScope)
 	c.SourceID = strings.TrimSpace(c.SourceID)
 	c.TargetText = strings.TrimSpace(c.TargetText)
+	c.SourceObligationChecks = CloneRuntimeSourceObligationChecks(c.SourceObligationChecks)
 	c.PrerequisiteCoverageWorkItemIDs = normalizeRuntimeCoveragePrerequisiteIDs(c.PrerequisiteCoverageWorkItemIDs)
 	c.ReopenDependencies = normalizeRuntimeCoverageReopenDependencies(c.ReopenDependencies)
 	return c

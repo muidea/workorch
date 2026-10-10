@@ -224,6 +224,12 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
 	if strings.TrimSpace(a.Definition.Revision) != strings.TrimSpace(a.Facts.DefinitionRevision) {
 		return fmt.Errorf("runtime aggregate definition revision mismatch")
 	}
+	if !runtimecontract.SameRuntimeSourceObligationInventory(a.Definition.SourceObligations, a.Facts.DefinitionSeed.SourceObligations) {
+		return fmt.Errorf("runtime aggregate Definition and seed source obligations mismatch")
+	}
+	if a.Facts.DefinitionSeed.SourceObligations != nil && a.Facts.DefinitionSeed.SourceObligations.StartupInputHash != a.Definition.StartupInputHash {
+		return fmt.Errorf("runtime aggregate source obligations startup input mismatch")
+	}
 	if err := a.Decision.Validate(); err != nil {
 		return err
 	}

@@ -98,6 +98,24 @@ func (r RuntimeValidationInputReview) ValidateCriterionText(original string) err
 	return nil
 }
 
+// ValidateCoverageCriteria 为每个 exact source check 核对其独立原判据。
+// CWI 自身及 Profile 附加检查仍使用共同 CWI 判据，不能以共同文本替代源义务。
+func (r RuntimeValidationInputReview) ValidateCoverageCriteria(item RuntimeCoverageItem) error {
+	for _, check := range r.Checks {
+		criterion := item.TargetText
+		for _, source := range item.SourceObligationChecks {
+			if source.CheckRef == check.RequiredCheckRef {
+				criterion = source.Criterion
+				break
+			}
+		}
+		if err := (RuntimeValidationInputReview{Checks: []RuntimeValidationInputCheckReview{check}}).ValidateCriterionText(criterion); err != nil {
+			return fmt.Errorf("input review check %q: %w", check.RequiredCheckRef, err)
+		}
+	}
+	return nil
+}
+
 // RuntimeValidationInputReviewOnlyCoverageOmissions classifies an already
 // admitted v2 report. It does not choose repair, grant write authority, or turn
 // an omission into validation credit. Unknown facts and contradictions prohibit
