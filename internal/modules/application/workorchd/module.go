@@ -38,10 +38,11 @@ func (m *Module) Setup(ctx context.Context, commandHub magicevent.Hub, backgroun
 		return cd.NewError(cd.IllegalParam, "workorch module is nil")
 	}
 	owner := workorchdbiz.New()
+	// Setup 部分失败也必须保留 owner，交给检查式停机清理已取得的资源。
+	m.bizPtr = owner
 	if err := owner.Setup(ctx, commandHub, backgroundRoutine); err != nil {
 		return err
 	}
-	m.bizPtr = owner
 	return nil
 }
 
@@ -52,12 +53,30 @@ func (m *Module) Run(ctx context.Context) *cd.Error {
 	return m.bizPtr.Start(ctx)
 }
 
+func (m *Module) BeginShutdown(ctx context.Context) {
+	if m != nil && m.bizPtr != nil {
+		m.bizPtr.BeginShutdown(ctx)
+	}
+}
+
+func (m *Module) Quiesce(ctx context.Context) *cd.Error {
+	if m == nil || m.bizPtr == nil {
+		return nil
+	}
+	if err := m.bizPtr.Quiesce(ctx); err != nil {
+		return cd.WrapError(cd.Unexpected, err, "workorch quiescence failed")
+	}
+	return nil
+}
+
 func (m *Module) Teardown(ctx context.Context) {
 	if m == nil {
 		return
 	}
 	if m.bizPtr != nil {
-		m.bizPtr.Stop(ctx)
+		if err := m.bizPtr.Stop(ctx); err != nil {
+			panic(cd.WrapError(cd.Unexpected, err, "workorch teardown failed"))
+		}
 		m.bizPtr = nil
 	}
 }

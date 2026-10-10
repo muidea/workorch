@@ -33,8 +33,21 @@ func TestModuleSetupReturnsConfigError(t *testing.T) {
 	useWorkorchModuleTestConfig(t, "127.0.0.1:0", "memory", "", "not-a-duration")
 	mod := New()
 
-	if err := mod.Setup(context.Background(), magicevent.NewHub(8), task.NewBackgroundRoutine(8)); err == nil {
+	hub, background := magicevent.NewHub(8), task.NewBackgroundRoutine(8)
+	t.Cleanup(func() {
+		mod.Teardown(context.Background())
+		hub.Terminate(context.Background())
+		background.Shutdown(context.Background())
+	})
+	if err := mod.Setup(context.Background(), hub, background); err == nil {
 		t.Fatal("expected setup error")
+	}
+	if mod.bizPtr == nil {
+		t.Fatal("部分 Setup 失败丢失了 owner 清理入口")
+	}
+	mod.Teardown(context.Background())
+	if mod.bizPtr != nil {
+		t.Fatal("部分 Setup 清理成功后仍保留 owner")
 	}
 }
 

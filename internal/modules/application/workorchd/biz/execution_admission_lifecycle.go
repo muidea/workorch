@@ -1,6 +1,10 @@
 package biz
 
-import "sync/atomic"
+import (
+	"context"
+	"errors"
+	"sync/atomic"
+)
 
 const executionAdmissionStoppingBit uint64 = 1 << 63
 
@@ -81,10 +85,33 @@ func (l *executionAdmissionLifecycle) stop() bool {
 }
 
 func (l *executionAdmissionLifecycle) wait() {
+	_ = l.waitContext(context.Background())
+}
+
+// 停机等待超时不代表已接纳 handler 退出；保留排空信号供下一次等待。
+func (l *executionAdmissionLifecycle) waitContext(ctx context.Context) error {
 	if l == nil || l.drained == nil {
-		return
+		return nil
 	}
-	<-l.drained
+	if ctx == nil {
+		return errors.New("execution admission wait context is nil")
+	}
+	select {
+	case <-l.drained:
+		return nil
+	default:
+	}
+	select {
+	case <-l.drained:
+		return nil
+	case <-ctx.Done():
+		select {
+		case <-l.drained:
+			return nil
+		default:
+			return ctx.Err()
+		}
+	}
 }
 
 func (l *executionAdmissionLifecycle) stopping() bool {

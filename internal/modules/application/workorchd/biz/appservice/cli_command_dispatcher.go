@@ -19,6 +19,8 @@ type CLICommandDispatcher struct {
 	session    *runtimecore.Session
 	viewReader WorkspaceViewReader
 	typedReady bool
+	topics     []string
+	lifecycle  basebiz.Lifecycle
 }
 
 type WorkspaceViewReader interface {
@@ -45,11 +47,34 @@ func (d *CLICommandDispatcher) Run() error {
 	return d.runTypedCLI()
 }
 
-func (d *CLICommandDispatcher) Close() {
-	if d == nil {
-		return
+func (d *CLICommandDispatcher) BeginShutdown() {
+	if d != nil {
+		d.lifecycle.BeginShutdown()
 	}
-	d.closeTypedCLI()
+}
+
+func (d *CLICommandDispatcher) Quiesce(ctx context.Context) error {
+	if d == nil {
+		return nil
+	}
+	return d.lifecycle.Quiesce(ctx)
+}
+
+func (d *CLICommandDispatcher) Close() {
+	if err := d.CloseContext(context.Background()); err != nil {
+		panic(err)
+	}
+}
+
+func (d *CLICommandDispatcher) CloseContext(ctx context.Context) error {
+	if d == nil {
+		return nil
+	}
+	d.BeginShutdown()
+	if err := d.Quiesce(ctx); err != nil {
+		return err
+	}
+	return d.closeTypedCLI()
 }
 
 func (d *CLICommandDispatcher) borrow() *runtimecore.Session {

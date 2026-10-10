@@ -7,12 +7,27 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func (d *CLICommandDispatcher) runTypedCLI() error {
+func (d *CLICommandDispatcher) runTypedCLI() (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			if failure, ok := value.(*cd.Error); ok {
+				err = failure
+				return
+			}
+			panic(value)
+		}
+	}()
 	if d == nil || d.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
 	if d.typedReady {
 		return nil
+	}
+	if len(d.topics) != 0 {
+		return common.ErrConflict
+	}
+	if err := d.lifecycle.Reset(); err != nil {
+		return err
 	}
 	for _, topic := range []string{
 		workorchdevents.TopicCLIWorkspaceGet,
@@ -21,23 +36,23 @@ func (d *CLICommandDispatcher) runTypedCLI() error {
 		workorchdevents.TopicCLIWorkspaceDelete,
 		workorchdevents.TopicCLIWorkspaceUpdateLLMSelection,
 	} {
-		d.SubscribeFunc(topic, d.handleTypedCLIWorkspace)
+		d.subscribeTypedCLI(topic, d.handleTypedCLIWorkspace)
 	}
-	d.SubscribeFunc(workorchdevents.TopicWorkorchDCommandReadWorkspaceRuntimeView, d.handleTypedWorkspaceRuntimeView)
+	d.subscribeTypedCLI(workorchdevents.TopicWorkorchDCommandReadWorkspaceRuntimeView, d.handleTypedWorkspaceRuntimeView)
 	for _, topic := range []string{
 		workorchdevents.TopicCLIGoalList,
 		workorchdevents.TopicCLIGoalGet,
 		workorchdevents.TopicCLIDoDList,
 		workorchdevents.TopicCLIDoDGet,
 	} {
-		d.SubscribeFunc(topic, d.handleTypedCLIDefinition)
+		d.subscribeTypedCLI(topic, d.handleTypedCLIDefinition)
 	}
 	for _, topic := range []string{
 		workorchdevents.TopicCLIRunGet,
 		workorchdevents.TopicCLIRunList,
 		workorchdevents.TopicCLIRunStatus,
 	} {
-		d.SubscribeFunc(topic, d.handleTypedCLIRun)
+		d.subscribeTypedCLI(topic, d.handleTypedCLIRun)
 	}
 	for _, topic := range []string{
 		workorchdevents.TopicCLIDecisionResolve,
@@ -50,7 +65,7 @@ func (d *CLICommandDispatcher) runTypedCLI() error {
 		workorchdevents.TopicCLIApprovalList,
 		workorchdevents.TopicCLIApprovalGet,
 	} {
-		d.SubscribeFunc(topic, d.handleTypedCLIGovernance)
+		d.subscribeTypedCLI(topic, d.handleTypedCLIGovernance)
 	}
 	for _, topic := range []string{
 		workorchdevents.TopicCLISoulCreate,
@@ -67,7 +82,7 @@ func (d *CLICommandDispatcher) runTypedCLI() error {
 		workorchdevents.TopicCLIMCPServerUpdate,
 		workorchdevents.TopicCLIMCPCapabilityList,
 	} {
-		d.SubscribeFunc(topic, d.handleTypedCLIContextRegistry)
+		d.subscribeTypedCLI(topic, d.handleTypedCLIContextRegistry)
 	}
 	for _, topic := range []string{
 		workorchdevents.TopicCLIMemoryCreate,
@@ -77,7 +92,7 @@ func (d *CLICommandDispatcher) runTypedCLI() error {
 		workorchdevents.TopicCLIMemoryList,
 		workorchdevents.TopicCLIMemorySearch,
 	} {
-		d.SubscribeFunc(topic, d.handleTypedCLIMemory)
+		d.subscribeTypedCLI(topic, d.handleTypedCLIMemory)
 	}
 	for _, topic := range []string{
 		workorchdevents.TopicCLITemplateCreate,
@@ -86,23 +101,45 @@ func (d *CLICommandDispatcher) runTypedCLI() error {
 		workorchdevents.TopicCLITemplateUpdate,
 		workorchdevents.TopicCLITemplateDelete,
 	} {
-		d.SubscribeFunc(topic, d.handleTypedCLITemplate)
+		d.subscribeTypedCLI(topic, d.handleTypedCLITemplate)
 	}
-	d.SubscribeFunc(workorchdevents.TopicCLIConfigurationGet, d.handleTypedCLIConfiguration)
-	d.SubscribeFunc(workorchdevents.TopicCLIConfigurationRefreshChatModels, d.handleTypedCLIConfiguration)
+	d.subscribeTypedCLI(workorchdevents.TopicCLIConfigurationGet, d.handleTypedCLIConfiguration)
+	d.subscribeTypedCLI(workorchdevents.TopicCLIConfigurationRefreshChatModels, d.handleTypedCLIConfiguration)
 	d.typedReady = true
 	return nil
 }
 
-func (d *CLICommandDispatcher) closeTypedCLI() {
-	if d == nil || !d.typedReady {
-		return
+func (d *CLICommandDispatcher) subscribeTypedCLI(topic string, handler magicevent.ObserverFunc) {
+	err := d.SubscribeFuncChecked(topic, func(event magicevent.Event, result magicevent.Result) {
+		leave, err := d.lifecycle.Enter()
+		if err != nil {
+			if result != nil {
+				result.Set(nil, cd.WrapError(cd.ServiceUnavailable, err, "cli ingress is closing"))
+			}
+			return
+		}
+		defer leave()
+		handler(event, result)
+	})
+	if err != nil {
+		panic(err)
 	}
-	for _, topic := range workorchdevents.CLITopics() {
-		d.UnsubscribeFunc(topic)
+	d.topics = append(d.topics, topic)
+}
+
+func (d *CLICommandDispatcher) closeTypedCLI() error {
+	if d == nil {
+		return nil
 	}
-	d.UnsubscribeFunc(workorchdevents.TopicWorkorchDCommandReadWorkspaceRuntimeView)
+	for len(d.topics) > 0 {
+		last := len(d.topics) - 1
+		if err := d.UnsubscribeFuncChecked(d.topics[last]); err != nil {
+			return err
+		}
+		d.topics = d.topics[:last]
+	}
 	d.typedReady = false
+	return nil
 }
 
 func setTypedCLIError(result magicevent.Result, err error) bool {

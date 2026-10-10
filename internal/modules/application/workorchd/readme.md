@@ -36,9 +36,9 @@ reserve 只表示调用权已消费，LLM typed fact 可能仍在内存，诊断
 不因原 caller 取消丢弃已知结果，不重调 provider、不建立 Application 恢复队列。completion reply 丢失只在同一期限内
 对账同一 immutable permit；CAS 前崩溃且没有持久结果仍 unresolved。file reopen 不等于断电级 fsync 保证。
 
-direct ports 与后台任务共用 `runtimeComponent` 的 authoring lifecycle：Stop 先拒绝新调用并取消工作，再按唯一有限窗口
-排空；重复 Stop 不刷新期限。排空超时明确报告并保留依赖，不假称已关闭；任务释放后再次 Stop 才完成清理。
-此有限排空合同不扩大为其它 execution ingress 已有等待的时限保证，也不赋予强杀不配合取消任务的权限。
+direct ports 与后台任务共用 `runtimeComponent` 的 authoring lifecycle：Stop 先拒绝新调用并取消工作，首次 Stop 封存唯一有限的 settlement 窗口，重试不刷新该期限。等待真实退出使用每次停机调用的独立 context 预算；settlement root 取消不等于实际调用结束。等待超时返回失败并保留依赖，实际任务释放后允许新预算重试清理。execution admission 与 CLI dispatcher 同样追踪真实 handler 返回，超时不清除在途记账；CLI 部分订阅逐成功登记，取消失败保留清理项。
+
+Module 在 Setup 前保存 Biz，部分 Setup/Run 失败不丢 owner 或提前释放依赖。Biz Stop 错误通过 plugin guard 传播，只有检查式清理完整成功才清空 Biz 引用。projection 的后台 callback 未退出前不能关闭 manager。上述 owner 局部合同不单独证明全应用共享任务／Hub／Initiator 屏障已完成，也不赋予强杀不配合取消任务的权限。
 
 Workspace list/detail 的 `authoringSummary` 沿 owner Get/List → typed mapping → public projection 传递，不逐卡查询完整创作 ledger。创作 CAS 后既有 Workspace 通知经 Eventstream record 触发 projection 失效及 owner 重读；Store 同步更新列表条目和详情。摘要仅显示持久阶段与计数，`reviewed` 不等于当前可确认；原始诊断、恢复参数和权限仍由完整 authoring view 及 owner guard 管理。
 

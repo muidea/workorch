@@ -561,19 +561,17 @@ func TestPprofRoutesAreExposed(t *testing.T) {
 	}
 }
 
-func TestHTTPServerShutdownForceClosesAfterDeadline(t *testing.T) {
+func TestHTTPServerShutdownDeadlineRetainsHandlersForRetry(t *testing.T) {
 	handlerStarted := make(chan struct{})
 	releaseHandler := make(chan struct{})
-	dependencyClosedWhileHandling := make(chan bool, 1)
 	state := newServerStateBase(Config{}, nil, applicationOperations{})
 	srv := newHTTPServerWithHandler(Config{}, state, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		close(handlerStarted)
 		<-releaseHandler
 		select {
 		case <-state.backgroundCtx.Done():
-			dependencyClosedWhileHandling <- true
+			t.Error("handler dependency closed before handler return")
 		default:
-			dependencyClosedWhileHandling <- false
 		}
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -582,9 +580,7 @@ func TestHTTPServerShutdownForceClosesAfterDeadline(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	serveDone := make(chan error, 1)
-	go func() {
-		serveDone <- srv.http.Serve(listener)
-	}()
+	go func() { serveDone <- srv.serve(listener) }()
 	clientDone := make(chan error, 1)
 	go func() {
 		resp, err := http.Get("http://" + listener.Addr().String())
@@ -598,59 +594,97 @@ func TestHTTPServerShutdownForceClosesAfterDeadline(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("handler did not start")
 	}
+	t.Cleanup(func() {
+		select {
+		case <-releaseHandler:
+		default:
+			close(releaseHandler)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	})
 
+	beginDone := make(chan error, 1)
+	go func() { beginDone <- srv.BeginShutdown(context.Background()) }()
+	select {
+	case err := <-beginDone:
+		if err != nil {
+			t.Fatalf("BeginShutdown: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("BeginShutdown waited for the blocked handler")
+	}
+	select {
+	case err := <-serveDone:
+		if err != nil {
+			t.Fatalf("serve error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("BeginShutdown did not close listener")
+	}
+	if conn, err := net.DialTimeout("tcp", listener.Addr().String(), time.Second); err == nil {
+		_ = conn.Close()
+		t.Fatal("new network ingress accepted after BeginShutdown")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	shutdownDone := make(chan error, 1)
 	go func() { shutdownDone <- srv.Shutdown(ctx) }()
 	select {
-	case err := <-serveDone:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			t.Fatalf("serve error = %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("http server did not stop after forced close")
-	}
-	select {
-	case <-ctx.Done():
-	case <-time.After(time.Second):
-		t.Fatal("shutdown context did not reach its forced-close deadline")
-	}
-	// Context expiry and handler release may otherwise race inside
-	// net/http.Shutdown: wait until the forced Close has reached the client
-	// before allowing the handler to return. This proves that Drain observed
-	// the deadline instead of accepting either side of that race.
-	select {
-	case <-clientDone:
-	case <-time.After(time.Second):
-		t.Fatal("client connection was not force-closed after the shutdown deadline")
-	}
-	select {
-	case err := <-shutdownDone:
-		t.Fatalf("shutdown returned before the force-closed handler exited: %v", err)
-	default:
-	}
-	close(releaseHandler)
-	select {
-	case closed := <-dependencyClosedWhileHandling:
-		if closed {
-			t.Fatal("handler dependency was closed before the in-flight handler returned")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("in-flight handler did not return after release")
-	}
-	select {
 	case err := <-shutdownDone:
 		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("shutdown error = %v, want context deadline exceeded", err)
+			t.Fatalf("shutdown error = %v, want deadline exceeded", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("shutdown did not finish after the in-flight handler returned")
+		t.Fatal("shutdown did not return on deadline")
+	}
+	select {
+	case <-state.backgroundCtx.Done():
+		t.Fatal("timeout released transport dependencies")
+	default:
+	}
+	select {
+	case err := <-clientDone:
+		t.Fatalf("timeout force-closed active client connection: %v", err)
+	default:
+	}
+	srv.mu.Lock()
+	active, connections := srv.activeHandlers, len(srv.connections)
+	shutdownOperation := srv.shutdown
+	srv.mu.Unlock()
+	if active != 1 || connections != 1 {
+		t.Fatalf("timeout lost exit ledger: handlers=%d connections=%d", active, connections)
+	}
+	retryTimeout, retryTimeoutCancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer retryTimeoutCancel()
+	if err := srv.Drain(retryTimeout); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second blocked drain = %v", err)
+	}
+	srv.mu.Lock()
+	sameOperation := srv.shutdown == shutdownOperation
+	srv.mu.Unlock()
+	if shutdownOperation == nil || !sameOperation {
+		t.Fatal("timeout discarded or duplicated the real net/http shutdown operation")
+	}
+	close(releaseHandler)
+	retryCtx, retryCancel := context.WithTimeout(context.Background(), time.Second)
+	defer retryCancel()
+	if err := srv.Shutdown(retryCtx); err != nil {
+		t.Fatalf("retry shutdown: %v", err)
+	}
+	select {
+	case err := <-clientDone:
+		if err != nil {
+			t.Fatalf("accepted request did not finish: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("accepted request did not return")
 	}
 	select {
 	case <-state.backgroundCtx.Done():
 	default:
-		t.Fatal("handler dependencies were not closed after transport drain")
+		t.Fatal("retry did not close dependencies after true drain")
 	}
 }
 

@@ -32,14 +32,14 @@ func TestApplicationStopPreservesTransportProjectionRuntimeOrder(t *testing.T) {
 	}
 	wanted := []string{
 		"admissions.stop",
-		"b.cliDispatcher.Close",
-		"b.service.DrainHTTP",
-		"admissions.wait",
-		"b.service.CloseTransportState",
+		"b.cliDispatcher.CloseContext",
+		"b.service.DrainHTTPChecked",
+		"admissions.waitContext",
+		"b.service.CloseTransportStateChecked",
 		"b.service.SetWorkspaceExecutionAdmission",
 		"b.service.SetWorkspaceProjection",
 		"b.service.SetWorkspaceProjectionWriter",
-		"b.UnsubscribeFunc",
+		"b.subscriptions[last]",
 		"b.projection.CloseContext",
 		"b.runtime.close",
 	}
@@ -71,6 +71,8 @@ func applicationSelectorName(expression ast.Expr) string {
 	switch value := expression.(type) {
 	case *ast.Ident:
 		return value.Name
+	case *ast.IndexExpr:
+		return applicationSelectorName(value.X) + "[" + applicationSelectorName(value.Index) + "]"
 	case *ast.SelectorExpr:
 		prefix := applicationSelectorName(value.X)
 		if prefix == "" {

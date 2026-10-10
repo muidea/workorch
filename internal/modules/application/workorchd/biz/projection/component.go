@@ -31,9 +31,10 @@ type Component struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 
-	mu      sync.RWMutex
-	closed  bool
-	pending sync.WaitGroup
+	mu        sync.RWMutex
+	closed    bool
+	pending   sync.WaitGroup
+	drainDone chan struct{}
 }
 
 func New(loader workspaceviewcore.Loader, background task.BackgroundRoutine, ports workspaceviewcore.EventPorts) *Component {
@@ -65,17 +66,14 @@ func (c *Component) Start(ctx context.Context) error {
 func (c *Component) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = c.CloseContext(ctx)
+	if err := c.CloseContext(ctx); err != nil {
+		panic(err)
+	}
 }
 
-// CloseContext prevents new projection work and waits for already accepted
-// callbacks without shutting down the shared framework routine.
-func (c *Component) CloseContext(ctx context.Context) error {
+func (c *Component) BeginShutdown() {
 	if c == nil {
-		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
+		return
 	}
 	c.mu.Lock()
 	if !c.closed {
@@ -83,22 +81,55 @@ func (c *Component) CloseContext(ctx context.Context) error {
 		if c.cancel != nil {
 			c.cancel()
 		}
+		c.drainDone = make(chan struct{})
+		go func() {
+			c.pending.Wait()
+			close(c.drainDone)
+		}()
 	}
 	c.mu.Unlock()
-	if c.manager != nil {
-		c.manager.Close()
+}
+
+// Quiesce 等待已接纳 callback 真正退出，不关闭 manager 或共享 routine。
+func (c *Component) Quiesce(ctx context.Context) error {
+	if c == nil {
+		return nil
 	}
-	done := make(chan struct{})
-	go func() {
-		c.pending.Wait()
-		close(done)
-	}()
+	if ctx == nil {
+		return errors.New("projection quiescence context is nil")
+	}
+	c.mu.RLock()
+	done := c.drainDone
+	c.mu.RUnlock()
+	if done == nil {
+		return errors.New("projection shutdown has not begun")
+	}
+	select {
+	case <-done:
+		return nil
+	default:
+	}
 	select {
 	case <-done:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// CloseContext 仅在 callback 真实排空后关闭 manager，超时保留依赖供重试。
+func (c *Component) CloseContext(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+	c.BeginShutdown()
+	if err := c.Quiesce(ctx); err != nil {
+		return err
+	}
+	if c.manager != nil {
+		c.manager.Close()
+	}
+	return nil
 }
 
 func (c *Component) Status() projectioncontract.ProjectionStatus {

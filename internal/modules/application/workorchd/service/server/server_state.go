@@ -23,7 +23,13 @@ type serverState struct {
 	metrics                     *serverMetrics
 	applicationOperations
 	backgroundRoutine         task.BackgroundRoutine
-	backgroundWG              sync.WaitGroup
+	backgroundMu              sync.Mutex
+	backgroundStopping        bool
+	backgroundActive          int
+	backgroundChanged         chan struct{}
+	closeMu                   sync.Mutex
+	closeGate                 chan struct{}
+	closed                    bool
 	backgroundCtx             context.Context
 	backgroundCancel          context.CancelFunc
 	runStatusNotifyMu         sync.Mutex

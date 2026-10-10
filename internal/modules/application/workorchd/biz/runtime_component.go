@@ -82,13 +82,16 @@ func (c *runtimeComponent) close(ctx context.Context) error {
 	if c == nil || c.session == nil {
 		return nil
 	}
-	if err := c.authoringTasks.stopContext(ctx); err != nil {
+	c.authoringTasks.beginStop(ctx)
+	if err := c.authoringTasks.waitContext(ctx); err != nil {
 		return err
 	}
-	err := c.session.Close(ctx)
+	if err := c.session.Close(ctx); err != nil {
+		return err
+	}
 	c.session = nil
 	c.ports = server.ApplicationPorts{}
-	return err
+	return nil
 }
 
 var errRuntimeComponentUnavailable = errors.New("workorch runtime component is not configured")

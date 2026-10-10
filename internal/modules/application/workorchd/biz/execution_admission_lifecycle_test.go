@@ -56,7 +56,9 @@ func TestApplicationStopDrainsDirectEventHubExecutionAdmission(t *testing.T) {
 		execution:  executionusecase.New(submitter, projection),
 		admissions: admissions,
 	}
-	b.SubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, b.handleWorkspaceRunRequested)
+	if err := b.subscribeCommand(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, b.handleWorkspaceRunRequested); err != nil {
+		t.Fatal(err)
+	}
 
 	firstResult := make(chan magicevent.Result, 1)
 	go func() {
@@ -130,7 +132,9 @@ func TestApplicationStopAfterAuthoringTimeoutStillUnsubscribes(t *testing.T) {
 	hub := &authoringStopSubscriptionHub{Hub: magicevent.NewHub(16)}
 	defer hub.Terminate(context.Background())
 	b := &Biz{Base: basebiz.New(ModuleID, hub, nil), admissions: newExecutionAdmissionLifecycle(), authoringTasks: newAuthoringTaskLifecycle()}
-	b.SubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, b.handleWorkspaceRunRequested)
+	if err := b.subscribeCommand(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, b.handleWorkspaceRunRequested); err != nil {
+		t.Fatal(err)
+	}
 	_, release, err := b.authoringTasks.accept(context.Background())
 	if err != nil {
 		t.Fatal(err)

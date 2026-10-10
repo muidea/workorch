@@ -44,6 +44,8 @@ type Biz struct {
 	admissions     *executionAdmissionLifecycle
 	projection     *projectioncomponent.Component
 	authoringTasks *authoringTaskLifecycle
+	subscriptions  []func() error
+	shutdownErr    error
 }
 
 func New() *Biz { return &Biz{} }
@@ -69,10 +71,7 @@ func (b *Biz) Setup(ctx context.Context, commandHub magicevent.Hub, backgroundRo
 	applicationPorts := runtime.applicationPorts()
 	b.configureAuthoringBackgroundPorts(&applicationPorts)
 	if err := b.service.StartupWithApplicationPorts(ctx, modulecommon.ServiceName, applicationPorts, b.BackgroundRoutine()); err != nil {
-		_ = b.runtime.close(ctx)
-		b.runtime = nil
-		b.workspaceGate = nil
-		b.service = nil
+		// 保留部分启动取得的 session/service，由检查式停机统一排空和清理。
 		return err
 	}
 	b.projection = projectioncomponent.New(applicationProjectionLoader{config: config, ports: applicationPorts.Workspace}, b.BackgroundRoutine(), workspaceviewcore.EventPorts{
@@ -85,15 +84,39 @@ func (b *Biz) Setup(ctx context.Context, commandHub magicevent.Hub, backgroundRo
 	b.admissions = newExecutionAdmissionLifecycle()
 	b.service.SetWorkspaceExecutionAdmission(newExecutionAdmissionGateway(b))
 	b.service.SetServiceStoppedNotifier(b.publishServiceStopped)
-	b.SubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, b.handleWorkspaceRunRequested)
-	b.SubscribeMatchedFunc(ModuleID+"/workspace-projection", workorchdevents.NotificationDestination, workorchdevents.TopicWorkspaceProjectionChanged, b.handleWorkspaceProjectionChanged)
-	b.SubscribeMatchedFunc(ModuleID+"/run-metrics", runevents.NotificationDestination, runevents.TopicRunStateChanged, b.handleRunStateChanged)
-	b.SubscribeMatchedFunc(ModuleID+"/runtime-drive-metrics", orchestratorevents.NotificationDestination, orchestratorevents.TopicOrchestratorRuntimeDriveObserved, b.handleRuntimeDriveObserved)
-	b.SubscribeMatchedFunc(ModuleID+"/eventstream", eventstreamevents.NotificationDestination, eventstreamevents.TopicEventStreamRecordAppended, b.handleEventRecordAppended)
-	// WorkspaceDeleted is intentionally emitted after Eventstream's final
-	// deletion fence. Application consumes this immutable receipt directly for
-	// SSE/remote transport only; it never feeds owner state or durable audit.
-	b.SubscribeMatchedFunc(ModuleID+"/workspace-deletion-transport", workspaceevents.NotificationDestination, workspaceevents.TopicWorkspaceDeleted, b.handleWorkspaceDeleted)
+	if err := b.subscribeCommand(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested, b.handleWorkspaceRunRequested); err != nil {
+		return cd.WrapError(cd.Unexpected, err, "workorch command subscription failed")
+	}
+	for _, subscription := range []struct {
+		id, destination, topic string
+		handler                magicevent.ObserverFunc
+	}{
+		{ModuleID + "/workspace-projection", workorchdevents.NotificationDestination, workorchdevents.TopicWorkspaceProjectionChanged, b.handleWorkspaceProjectionChanged},
+		{ModuleID + "/run-metrics", runevents.NotificationDestination, runevents.TopicRunStateChanged, b.handleRunStateChanged},
+		{ModuleID + "/runtime-drive-metrics", orchestratorevents.NotificationDestination, orchestratorevents.TopicOrchestratorRuntimeDriveObserved, b.handleRuntimeDriveObserved},
+		{ModuleID + "/eventstream", eventstreamevents.NotificationDestination, eventstreamevents.TopicEventStreamRecordAppended, b.handleEventRecordAppended},
+		{ModuleID + "/workspace-deletion-transport", workspaceevents.NotificationDestination, workspaceevents.TopicWorkspaceDeleted, b.handleWorkspaceDeleted},
+	} {
+		if err := b.subscribeNotification(subscription.id, subscription.destination, subscription.topic, subscription.handler); err != nil {
+			return cd.WrapError(cd.Unexpected, err, "workorch notification subscription failed")
+		}
+	}
+	return nil
+}
+
+func (b *Biz) subscribeCommand(topic string, handler magicevent.ObserverFunc) error {
+	if err := b.SubscribeFuncChecked(topic, handler); err != nil {
+		return err
+	}
+	b.subscriptions = append(b.subscriptions, func() error { return b.UnsubscribeFuncChecked(topic) })
+	return nil
+}
+
+func (b *Biz) subscribeNotification(id, destination, topic string, handler magicevent.ObserverFunc) error {
+	if err := b.SubscribeMatchedFuncChecked(id, destination, topic, handler); err != nil {
+		return err
+	}
+	b.subscriptions = append(b.subscriptions, func() error { return b.UnsubscribeMatchedFuncChecked(id, topic) })
 	return nil
 }
 
@@ -112,22 +135,83 @@ func (b *Biz) Start(ctx context.Context) *cd.Error {
 		return cd.NewError(cd.Unexpected, fmt.Sprintf("workspace projection start failed: %v", err))
 	}
 	if err := b.service.Run(ctx); err != nil {
-		b.projection.Close()
-		return cd.NewError(err.Code, fmt.Sprintf("workorch service run failed: %s", err.Message))
+		return cd.WrapError(err.Code, err, "workorch service run failed")
 	}
 	b.cliDispatcher = b.runtime.newCLICommandDispatcher(b.EventHub(), b.service)
 	if err := b.cliDispatcher.Run(); err != nil {
-		b.cliDispatcher = nil
-		b.service.Shutdown(ctx)
-		b.projection.Close()
-		return cd.NewError(cd.IllegalParam, fmt.Sprintf("workorch cli dispatcher run failed: %v", err))
+		// 保留部分注册的 dispatcher，不能在 Run 失败分支提前释放依赖。
+		return cd.WrapError(cd.IllegalParam, err, "workorch cli dispatcher run failed")
 	}
 	return nil
 }
 
-func (b *Biz) Stop(ctx context.Context) {
+func (b *Biz) BeginShutdown(ctx context.Context) {
 	if b == nil {
 		return
+	}
+	if b.admissions != nil {
+		b.admissions.stop()
+	}
+	if b.authoringTasks != nil {
+		b.authoringTasks.beginStop(ctx)
+	}
+	if b.cliDispatcher != nil {
+		b.cliDispatcher.BeginShutdown()
+	}
+	if b.projection != nil {
+		b.projection.BeginShutdown()
+	}
+	if b.service != nil {
+		// listener 关闭失败仍保留 service，Quiesce 将检查并重试该动作。
+		b.shutdownErr = b.service.BeginShutdown(ctx)
+	}
+}
+
+func (b *Biz) Quiesce(ctx context.Context) error {
+	if b == nil {
+		return nil
+	}
+	if ctx == nil {
+		return common.ErrInvalidArgument
+	}
+	if b.service != nil {
+		if err := b.service.Quiesce(ctx); err != nil {
+			return err
+		}
+		b.shutdownErr = nil
+	}
+	if b.shutdownErr != nil {
+		return b.shutdownErr
+	}
+	if b.authoringTasks != nil {
+		if err := b.authoringTasks.waitContext(ctx); err != nil {
+			return err
+		}
+	}
+	if err := b.admissions.waitContext(ctx); err != nil {
+		return err
+	}
+	if b.cliDispatcher != nil {
+		if err := b.cliDispatcher.Quiesce(ctx); err != nil {
+			return err
+		}
+	}
+	if b.projection != nil {
+		return b.projection.Quiesce(ctx)
+	}
+	return nil
+}
+
+func (b *Biz) Stop(ctx context.Context) error {
+	if b == nil {
+		return nil
+	}
+	if ctx == nil {
+		return common.ErrInvalidArgument
+	}
+	b.BeginShutdown(ctx)
+	if err := b.Quiesce(ctx); err != nil {
+		return err
 	}
 	admissions := b.admissions
 	if admissions != nil {
@@ -140,49 +224,61 @@ func (b *Biz) Stop(ctx context.Context) {
 		b.authoringTasks.beginStop(ctx)
 	}
 	if b.cliDispatcher != nil {
-		b.cliDispatcher.Close()
+		if err := b.cliDispatcher.CloseContext(ctx); err != nil {
+			return err
+		}
 		b.cliDispatcher = nil
 	}
 	if b.service != nil {
 		// Stop accepting HTTP requests and wait for in-flight admissions while
 		// the Workorchd command subscription, execution use case and projection
 		// are still live. This preserves the lane transaction through shutdown.
-		b.service.DrainHTTP(ctx)
+		if err := b.service.DrainHTTPChecked(ctx); err != nil {
+			return err
+		}
 	}
 	if b.authoringTasks != nil {
-		if err := b.authoringTasks.stopContext(ctx); err != nil {
+		if err := b.authoringTasks.waitContext(ctx); err != nil {
 			slog.Warn("authoring shutdown did not drain accepted calls; dependencies retained", "failureClass", "authoring_drain_timeout")
-			return
+			return err
 		}
 	}
 	if admissions != nil {
-		admissions.wait()
+		if err := admissions.waitContext(ctx); err != nil {
+			return err
+		}
 	}
 	if b.service != nil {
-		b.service.CloseTransportState(ctx)
+		if err := b.service.CloseTransportStateChecked(ctx); err != nil {
+			return err
+		}
 		b.service.SetWorkspaceExecutionAdmission(nil)
 		b.service.SetWorkspaceProjection(nil)
 		b.service.SetWorkspaceProjectionWriter(nil)
 	}
-	if b.EventHub() != nil && admissions != nil && admissions.stopping() {
-		b.UnsubscribeFunc(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
-		b.UnsubscribeMatchedFunc(ModuleID+"/workspace-projection", workorchdevents.TopicWorkspaceProjectionChanged)
-		b.UnsubscribeMatchedFunc(ModuleID+"/run-metrics", runevents.TopicRunStateChanged)
-		b.UnsubscribeMatchedFunc(ModuleID+"/runtime-drive-metrics", orchestratorevents.TopicOrchestratorRuntimeDriveObserved)
-		b.UnsubscribeMatchedFunc(ModuleID+"/eventstream", eventstreamevents.TopicEventStreamRecordAppended)
-		b.UnsubscribeMatchedFunc(ModuleID+"/workspace-deletion-transport", workspaceevents.TopicWorkspaceDeleted)
+	for len(b.subscriptions) > 0 {
+		last := len(b.subscriptions) - 1
+		if err := b.subscriptions[last](); err != nil {
+			return err
+		}
+		b.subscriptions = b.subscriptions[:last]
 	}
 	b.execution = nil
 	if b.projection != nil {
-		_ = b.projection.CloseContext(ctx)
+		if err := b.projection.CloseContext(ctx); err != nil {
+			return err
+		}
+		b.projection = nil
 	}
-	b.projection = nil
 	if b.runtime != nil {
-		_ = b.runtime.close(ctx)
+		if err := b.runtime.close(ctx); err != nil {
+			return err
+		}
 		b.runtime = nil
 	}
 	b.workspaceGate = nil
 	b.service = nil
+	return nil
 }
 
 func (b *Biz) handleWorkspaceProjectionChanged(event magicevent.Event, _ magicevent.Result) {

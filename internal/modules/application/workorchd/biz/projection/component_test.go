@@ -70,6 +70,50 @@ func TestComponentOwnsProjectionStartAndCloseLifecycle(t *testing.T) {
 	}
 }
 
+func TestComponentShutdownTimeoutRetainsManagerUntilCallbackExits(t *testing.T) {
+	background := task.NewBackgroundRoutine(8)
+	t.Cleanup(func() { background.Shutdown(context.Background()) })
+	component := New(loaderFixture{}, background, workspaceviewcore.EventPorts{})
+	entered, release := make(chan struct{}), make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	if !component.schedule("blocked", func(context.Context) {
+		close(entered)
+		<-release
+	}) {
+		t.Fatal("未接纳 callback")
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("callback 未进入")
+	}
+	component.BeginShutdown()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := component.CloseContext(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("真实 callback 未退出时应返回超时: %v", err)
+	}
+	if component.Status().State == workspaceviewcore.StateStopped {
+		t.Fatal("未排空就关闭 manager")
+	}
+	if component.schedule("fresh", func(context.Context) { t.Error("关门后执行新 callback") }) {
+		t.Fatal("关门后接纳新 callback")
+	}
+	close(release)
+	if err := component.CloseContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if component.Status().State != workspaceviewcore.StateStopped {
+		t.Fatal("真实退出后未关闭 manager")
+	}
+}
+
 func TestComponentFailsClosedWhenBackgroundRoutineIsUnavailable(t *testing.T) {
 	background := task.NewBackgroundRoutine(1)
 	if !background.Shutdown(context.Background()) {

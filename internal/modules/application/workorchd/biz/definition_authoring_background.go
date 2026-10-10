@@ -66,6 +66,33 @@ func (l *authoringTaskLifecycle) stopContext(ctx context.Context) error {
 	}
 }
 
+// 等待真实退出使用本次停机预算；已封存的 settlement 窗口不会被重试延长。
+// settlement root 取消只是停止工作的请求，不能替代 active 归零的事实。
+func (l *authoringTaskLifecycle) waitContext(ctx context.Context) error {
+	if l == nil {
+		return nil
+	}
+	if ctx == nil {
+		return common.ErrInvalidArgument
+	}
+	select {
+	case <-l.drained:
+		return nil
+	default:
+	}
+	select {
+	case <-l.drained:
+		return nil
+	case <-ctx.Done():
+		select {
+		case <-l.drained:
+			return nil
+		default:
+			return ctx.Err()
+		}
+	}
+}
+
 // 首次 Stop 封存唯一排空窗口；重复 Stop 不延长 deadline。
 func (l *authoringTaskLifecycle) beginStop(ctx context.Context) {
 	if l == nil {
