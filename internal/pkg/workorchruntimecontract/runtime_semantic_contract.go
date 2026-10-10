@@ -1035,10 +1035,11 @@ func validateRuntimeSemanticOwnerCatalogCollectionInSession(catalogs []RuntimeOp
 			}
 		}
 		if !found {
-			if err := raw.Validate(); err != nil {
+			var err error
+			value, err = validateAndNormalizeRuntimeOperationAdmissibility(raw)
+			if err != nil {
 				return nil, fmt.Errorf("runtime semantic owner catalogs: %w", err)
 			}
-			value = raw.Normalized()
 			session.catalogs[key] = append(session.catalogs[key], runtimeSemanticCatalogValidationEntry{raw: raw, normalized: value})
 		}
 		if _, duplicate := seenPrerequisites[value.PrerequisiteID]; duplicate {

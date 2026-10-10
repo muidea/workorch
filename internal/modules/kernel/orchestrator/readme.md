@@ -72,6 +72,9 @@ capability resource state。
   semantic proof compiler 的 raw owner catalog 集合门禁保持完整，仅复用本次 detached 目录索引解析 prospective all-of 约束，
   不重复校验未变的整份目录；公开 resolver 仍完整校验，每次 compiler 调用重新反证 raw、重复 owner/surface、hash 和 exact requirement。
   `runtime_semantic_proof_catalog_reuse_test.go` 固定公开／私有 resolver 等价、完整产物、原值、重载及后续调用拒绝。
+  semantic owner catalog 校验直接复用同次完整 raw／嵌套 proof／snapshot 校验产生的 detached 规范化目录，
+  不再次规范化未变的整份目录；重复 prerequisite／owner 门禁保留，公开 `Validate` 与后续调用仍完整重验。
+  `runtime_owner_catalog_validation_reuse_test.go` 与独立旧 validator 固定产物、完整拒绝原因、原值、重载、隔离、fuzz 和分配成本。
   assessment authority hash 保持原 Normalized、JSON 和域前缀编码，复用同次 marshal 缓冲，不增加跨调用缓存；
   `runtime_assessment_authority_hash_test.go` 以旧编码 reference、JSON 重载、fuzz 和分配对照固定等价边界。
   静态 operation descriptor 的内部证据资格查询只读初始化库存，不复制随后丢弃的 `AllowedStates`；公开 getter 仍深拷贝。
