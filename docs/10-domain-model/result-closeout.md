@@ -48,6 +48,12 @@ set/hash 校验，Definition 必须 exact-match；不同集合中完全相同的
 空 union 不补造 owner fact。此 helper 不证明传入集合确实来自 producer；receiving owner 的实际读取、typed receipt、
 aggregate 来源反证和 current applicability 仍须独立成立，不能用 self-hash 或 synthetic evidence revision 替代。
 
+`RuntimeOwnerRevisionSetMatchesCurrent` 是 current applicability 的严格纯值比较入口：依赖与 current 集合分别保持
+raw canonical 正文并通过完整 set/hash 校验，Definition exact-match；current 中每个被依赖的四字段资源键必须存在，
+且完整 snapshot/revision/fence/dependency 字段一致。无关资源新增、移除或改变不影响比较；缺失或相交版本变化返回
+不匹配，非法／冲突集合返回错误。它不证明 owner 观察的来源或 freshness，不发起查询，不选择 stale/reopen transition，
+也不能使没有 actual producer 来源的集合获得 evidence credit。
+
 ## Three-Axis Requirement Projection
 
 ```text
