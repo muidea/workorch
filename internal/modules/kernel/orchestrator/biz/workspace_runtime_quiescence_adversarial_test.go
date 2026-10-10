@@ -381,8 +381,14 @@ func TestWorkspaceRuntimeQuiescenceStartupSetupFactsClassifyDrainingOnly(t *test
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = orchestratorOwner.Stop(ctx)
-		_ = runOwner.Stop(ctx)
+		orchestratorOwner.BeginShutdown(ctx)
+		background.completeQueued()
+		if err := orchestratorOwner.Stop(ctx); err != nil {
+			t.Error(err)
+		}
+		if err := runOwner.Stop(ctx); err != nil {
+			t.Error(err)
+		}
 		hub.Terminate(ctx)
 	})
 	if err := orchestratorOwner.Start(); err != nil {
@@ -444,8 +450,14 @@ func TestWorkspaceRuntimeQuiescenceStartupSetupFactsClassifyPendingDeliveryLease
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = orchestratorOwner.Stop(ctx)
-		_ = runOwner.Stop(ctx)
+		orchestratorOwner.BeginShutdown(ctx)
+		background.completeQueued()
+		if err := orchestratorOwner.Stop(ctx); err != nil {
+			t.Error(err)
+		}
+		if err := runOwner.Stop(ctx); err != nil {
+			t.Error(err)
+		}
 		hub.Terminate(ctx)
 	})
 	if err := orchestratorOwner.Start(); err != nil {
@@ -500,8 +512,14 @@ func TestWorkspaceRuntimeQuiescenceStartupSetupFactsSkipRetired(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = orchestratorOwner.Stop(ctx)
-		_ = runOwner.Stop(ctx)
+		orchestratorOwner.BeginShutdown(ctx)
+		background.completeQueued()
+		if err := orchestratorOwner.Stop(ctx); err != nil {
+			t.Error(err)
+		}
+		if err := runOwner.Stop(ctx); err != nil {
+			t.Error(err)
+		}
 		hub.Terminate(ctx)
 	})
 	if err := orchestratorOwner.Start(); err != nil {

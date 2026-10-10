@@ -478,9 +478,10 @@ func TestScheduledRuntimeDrivePanicPersistsSingleOwnerSuccessorAndRestartMountsO
 				t.Fatalf("duplicate ingress mounted a second timer/drive: calls=%d", background.asyncFunctionCalls)
 			}
 
-			// Stop discards only local gate/timer machinery. A fresh owner must
-			// adopt the exact persisted generation once; duplicate restart ingress
-			// cannot create another worker or lease transition.
+			// 先取消 timer，再真实执行记录式调度器接纳的 callback；不能以
+			// 取消等待冒充工作完成。持久 lease 仍由重启后的 owner 接管。
+			module.BeginShutdown(ctx)
+			background.lastAsyncFunction()
 			if err := module.Stop(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -490,7 +491,15 @@ func TestScheduledRuntimeDrivePanicPersistsSingleOwnerSuccessorAndRestartMountsO
 			}
 			restartedBackground := &recordingBackgroundRoutine{}
 			restarted := newTestBiz(restartedOwner, hub, restartedBackground)
-			t.Cleanup(func() { _ = restarted.Stop(context.Background()) })
+			t.Cleanup(func() {
+				restarted.BeginShutdown(context.Background())
+				if restartedBackground.lastAsyncFunction != nil {
+					restartedBackground.lastAsyncFunction()
+				}
+				if err := restarted.Stop(context.Background()); err != nil {
+					t.Error(err)
+				}
+			})
 			if err := restarted.scheduleRuntimeDrive(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, "restart_after_panic"); err != nil {
 				t.Fatal(err)
 			}
@@ -2213,8 +2222,9 @@ func TestRuntimeLifecycleLeasePersistedBehindDriveGateIsMountedByOwnerExit(t *te
 		t.Fatalf("duplicate/stale handoff changed lease=%+v calls=%d recovery=%+v err=%v", afterDuplicate.DriveLease, background.asyncFunctionCalls, afterDuplicate.Facts.Recovery, err)
 	}
 
-	// Stop discards only process-local gate/timer hints. The scheduled lease is
-	// still durable for the already-covered fresh-process inventory recovery.
+	// Stop 只释放真实完成后的本地 machinery；关门后完成已接纳的 timer callback。
+	module.BeginShutdown(ctx)
+	background.lastAsyncFunction()
 	if err := module.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -3012,6 +3022,8 @@ func TestRuntimeGovernanceContinuationSuccessHandoffRetainsDurableSingleSuccesso
 		t.Fatal("mounted successor did not retain the run gate")
 	}
 
+	module.BeginShutdown(ctx)
+	background.lastAsyncFunction()
 	if err := module.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -3400,6 +3412,8 @@ func TestRuntimeGovernanceFailureUsesAtomicTerminalSuccessorAcrossPartialAckAndR
 		t.Fatalf("partial-ack duplicate did not join exact terminal successor: response=%+v revision=%d/%d lease=%+v resultCalls=%d timers=%d err=%v loadErr=%v", partialDuplicateData, partialRevision, afterPartialDuplicate.StateRevision, afterPartialDuplicate.DriveLease, resultCalls, background.asyncFunctionCalls, partialDuplicateErr, loadErr)
 	}
 	partialLease := partial.DriveLease.Clone()
+	module.BeginShutdown(ctx)
+	background.lastAsyncFunction()
 	if err := module.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}

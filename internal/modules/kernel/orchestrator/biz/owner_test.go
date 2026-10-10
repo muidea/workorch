@@ -268,6 +268,8 @@ func TestGMMR1SM4StartupRecoverySchedulesBootstrapOnlyActiveRun(t *testing.T) {
 	if background.asyncFunctionCalls != 1 || background.lastAsyncFunction == nil {
 		t.Fatalf("startup recovery schedules = %d, want one bootstrap-only drive", background.asyncFunctionCalls)
 	}
+	module.BeginShutdown(context.Background())
+	background.lastAsyncFunction()
 	if err := module.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
@@ -293,8 +295,14 @@ func TestGMMR3StartupRecoveryWaitsForRunCommandsReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = module.Stop(context.Background())
-		_ = runOwner.Stop(context.Background())
+		module.BeginShutdown(context.Background())
+		background.completeQueued()
+		if err := module.Stop(context.Background()); err != nil {
+			t.Error(err)
+		}
+		if err := runOwner.Stop(context.Background()); err != nil {
+			t.Error(err)
+		}
 		deps.CommandHub.Terminate(context.Background())
 	})
 	if err := module.Start(); err != nil {
@@ -985,11 +993,12 @@ func (b *rejectFirstRuntimeOneShotBackground) snapshot() (int, func()) {
 	return b.oneShotCalls, b.lastAsyncFunction
 }
 
-// startupReadyRecordingBackgroundRoutine observes scheduling without running
-// the drive. It makes the startup handoff test independent from capability
-// owner setup and avoids a test-local second recovery path.
+// startupReadyRecordingBackgroundRoutine 只观察启动调度；关门后由测试执行
+// 已接纳队列，真实 callback 返回才释放生命周期票，不自证 capability 执行。
 type startupReadyRecordingBackgroundRoutine struct {
 	recordingBackgroundRoutine
+	mu        sync.Mutex
+	queued    []func()
 	scheduled chan struct{}
 }
 
@@ -997,11 +1006,24 @@ func (r *startupReadyRecordingBackgroundRoutine) AsyncFunction(function func()) 
 	if function == nil {
 		return errors.New("function is nil")
 	}
+	r.mu.Lock()
+	r.queued = append(r.queued, function)
+	r.mu.Unlock()
 	select {
 	case r.scheduled <- struct{}{}:
 	default:
 	}
 	return nil
+}
+
+func (r *startupReadyRecordingBackgroundRoutine) completeQueued() {
+	r.mu.Lock()
+	queued := r.queued
+	r.queued = nil
+	r.mu.Unlock()
+	for _, callback := range queued {
+		callback()
+	}
 }
 
 func (r *recordingBackgroundRoutine) AsyncTask(task magictask.Task) error {

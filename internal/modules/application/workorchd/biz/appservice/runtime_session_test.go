@@ -48,6 +48,16 @@ func (h *countingActivationEventHub) Send(event magicevent.Event) magicevent.Res
 
 func (h *countingActivationEventHub) Terminate(ctx context.Context) { h.base.Terminate(ctx) }
 
+func (h *countingActivationEventHub) Drain(ctx context.Context) *frameworkdef.Error {
+	return h.base.(magicevent.DrainingHub).Drain(ctx)
+}
+
+func (h *countingActivationEventHub) TerminateChecked(ctx context.Context) *frameworkdef.Error {
+	return h.base.(magicevent.DrainingHub).TerminateChecked(ctx)
+}
+
+var _ magicevent.DrainingHub = (*countingActivationEventHub)(nil)
+
 func (h *countingActivationEventHub) capture(event magicevent.Event) {
 	h.mu.Lock()
 	if h.counts == nil {
