@@ -50,6 +50,7 @@ Runtime 的原始 body／stream 禁止跨 owner 规则不变，此文档诊断�
 
 ## 不变量与非职责
 
+- immutable source obligation inventory 随 Definition 在 semantic／operations 的 C1 原样渲染；当前 proof batch 的 C3 保留全部 source checks、原 Criterion／Declaration 与完整 required check 集合。V2 按每项源判据评审，不以共同 CWI 或另一义务的文本替代。post-render integrity 独立比对 C1 inventory 和 C3 requirement，缺失／改写在物理 provider 调用前拒绝；保护预算超界显式失败，不截断正文。`biz/runtime_source_obligation_projection_test.go` 固定 exact 投影、删 B／改正文拒绝、same-contract correction 的 C0～C3 不变及 owner generation 变化时 C0～C2 稳定；这些渲染与来源约束不证明自然语言语义或授予 credit。
 - semantic 请求必须携带 Orchestrator 的只读 coverage progress：完整 sealed inventory 的验收计数、当前 manifest/
   batch CWI 的当前证据引用数与重开数，以及 scope/revision/hash。接收前校验完整绑定，C4 渲染后逐值保护，
   缺失/裁剪/篡改在 provider 前拒绝；64 KiB 上限与 provider ceiling 同时生效。LLM 不把记录数量解释为 credit，

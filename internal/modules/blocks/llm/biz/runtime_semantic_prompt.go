@@ -22,6 +22,7 @@ func buildRuntimeSemanticPrompt(request llmmodels.RuntimeCandidateRequest, prepa
 		Revision: prepared.context.Definition.Revision, GoalID: prepared.context.Definition.GoalID,
 		GoalDefinition: prepared.context.Definition.GoalDefinition, DoDID: prepared.context.Definition.DoDID,
 		DoDDefinition: prepared.context.Definition.DoDDefinition, ChangeImpact: prepared.context.Definition.ChangeImpact,
+		SourceObligations: prepared.context.Definition.SourceObligations,
 	})
 	if err != nil {
 		return runtimeSemanticPrompt{}, err

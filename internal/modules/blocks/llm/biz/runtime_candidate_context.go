@@ -9,12 +9,13 @@ import (
 )
 
 type runtimeCandidateDefinitionProjection struct {
-	Revision       string                                         `json:"revision"`
-	GoalID         common.GoalID                                  `json:"goalId"`
-	GoalDefinition string                                         `json:"goalDefinition"`
-	DoDID          common.DoDID                                   `json:"doDId"`
-	DoDDefinition  string                                         `json:"doDDefinition"`
-	ChangeImpact   *runtimecontract.RuntimeDefinitionChangeImpact `json:"changeImpact,omitempty"`
+	Revision          string                                            `json:"revision"`
+	GoalID            common.GoalID                                     `json:"goalId"`
+	GoalDefinition    string                                            `json:"goalDefinition"`
+	DoDID             common.DoDID                                      `json:"doDId"`
+	DoDDefinition     string                                            `json:"doDDefinition"`
+	ChangeImpact      *runtimecontract.RuntimeDefinitionChangeImpact    `json:"changeImpact,omitempty"`
+	SourceObligations *runtimecontract.RuntimeSourceObligationInventory `json:"sourceObligations,omitempty"`
 }
 
 // runtimeCandidateAuthorityResourceProjection is the provider-facing C3 view

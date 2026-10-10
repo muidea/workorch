@@ -132,8 +132,33 @@ type runtimeSemanticValidationProofRequirementProjection struct {
 	ValidationRecipeID            string                                            `json:"validationRecipeId,omitempty"`
 	SelectableValidationRecipeIDs []string                                          `json:"selectableValidationRecipeIds,omitempty"`
 	RequiredCheckRefs             []string                                          `json:"requiredCheckRefs"`
+	SourceObligationChecks        []runtimeSemanticSourceObligationCheckProjection  `json:"sourceObligationChecks,omitempty"`
 	OwnerNativeCheckAttestations  []runtimeSemanticNativeCheckAttestationProjection `json:"ownerNativeCheckAttestations,omitempty"`
 	InputReviews                  []runtimeSemanticInputReviewProjection            `json:"inputReviews,omitempty"`
+}
+
+type runtimeSemanticSourceObligationCheckProjection struct {
+	InventoryHash  string `json:"inventoryHash"`
+	ObligationID   string `json:"obligationId"`
+	RequirementID  string `json:"requirementId"`
+	VerificationID string `json:"verificationId"`
+	Criterion      string `json:"criterion"`
+	Declaration    string `json:"declaration"`
+	CheckRef       string `json:"checkRef"`
+}
+
+func runtimeSemanticSourceObligationChecksForProvider(values []runtimecontract.RuntimeSourceObligationCheck) []runtimeSemanticSourceObligationCheckProjection {
+	if len(values) == 0 {
+		return nil
+	}
+	ret := make([]runtimeSemanticSourceObligationCheckProjection, 0, len(values))
+	for _, value := range values {
+		ret = append(ret, runtimeSemanticSourceObligationCheckProjection{
+			InventoryHash: value.InventoryHash, ObligationID: value.ObligationID, RequirementID: value.RequirementID,
+			VerificationID: value.VerificationID, Criterion: value.Criterion, Declaration: value.Declaration, CheckRef: value.CheckRef,
+		})
+	}
+	return ret
 }
 
 type runtimeSemanticInputReviewProjection struct {
@@ -368,6 +393,7 @@ func runtimeSemanticProofObligationsForProvider(values []runtimecontract.Runtime
 				DeclarationRef: requirement.DeclarationRef, ValidationRecipeID: requirement.ValidationRecipeID,
 				SelectableValidationRecipeIDs: runtimecontract.RuntimeSelectableValidationRecipeRefsForProofRequirementInCatalogs(ownerCatalogs, requirement),
 				RequiredCheckRefs:             append([]string(nil), requirement.RequiredCheckRefs...),
+				SourceObligationChecks:        runtimeSemanticSourceObligationChecksForProvider(requirement.SourceObligationChecks),
 				OwnerNativeCheckAttestations:  runtimeSemanticNativeCheckAttestationsForRequirement(ownerCatalogs, requirement),
 				InputReviews:                  runtimeSemanticInputReviewsForRequirement(ownerCatalogs, requirement),
 			}

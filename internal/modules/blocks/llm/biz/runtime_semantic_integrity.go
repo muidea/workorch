@@ -39,6 +39,12 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 	if len(budget.RedactedPaths) > 0 && budget.RedactionApplied {
 		missing = append(missing, "protected_context_redacted")
 	}
+	if context.Definition.SourceObligations != nil {
+		var definition runtimeCandidateDefinitionProjection
+		if json.Unmarshal([]byte(contents["C1"]), &definition) != nil || !runtimecontract.SameRuntimeSourceObligationInventory(definition.SourceObligations, context.Definition.SourceObligations) {
+			missing = append(missing, "P0.source_obligation_inventory")
+		}
+	}
 	var tail runtimeSemanticTailProjection
 	if json.Unmarshal([]byte(contents["C4"]), &tail) != nil || !reflect.DeepEqual(tail.CoverageProgress, context.CoverageProgress) {
 		missing = append(missing, "P2.semantic_coverage_progress")
@@ -80,7 +86,7 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 			missing = append(missing, "P0.semantic_authority")
 		} else {
 			for _, obligation := range projection.ProofObligations {
-				if obligation.ValidationProofRequirement == nil || len(obligation.ValidationProofRequirement.InputReviews) == 0 {
+				if obligation.ValidationProofRequirement == nil || (len(obligation.ValidationProofRequirement.InputReviews) == 0 && len(obligation.ValidationProofRequirement.SourceObligationChecks) == 0) {
 					continue
 				}
 				found := false

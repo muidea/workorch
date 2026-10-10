@@ -78,6 +78,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		Revision: definitionContext.Revision, GoalID: definitionContext.GoalID,
 		GoalDefinition: definitionContext.GoalDefinition, DoDID: definitionContext.DoDID,
 		DoDDefinition: definitionContext.DoDDefinition, ChangeImpact: definitionContext.ChangeImpact,
+		SourceObligations: definitionContext.SourceObligations,
 	})
 	if err != nil {
 		return llmmodels.ProviderRequest{}, err
@@ -253,6 +254,12 @@ func validateRuntimeCandidateContextIntegrity(
 	context = context.Normalized()
 	if definition.GoalDefinition == "" || definition.DoDDefinition == "" || context.RequiredState == "" {
 		missing = append(missing, "P0.contract")
+	}
+	if definition.SourceObligations != nil {
+		var rendered runtimeCandidateDefinitionProjection
+		if json.Unmarshal([]byte(contents["C1"]), &rendered) != nil || !runtimecontract.SameRuntimeSourceObligationInventory(rendered.SourceObligations, definition.SourceObligations) {
+			missing = append(missing, "P0.source_obligation_inventory")
+		}
 	}
 	if context.Focus.ID == "" || len(context.Focus.CoverageWorkItemIDs) == 0 {
 		missing = append(missing, "P2.coverage_scope")
