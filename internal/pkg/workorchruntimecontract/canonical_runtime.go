@@ -2792,10 +2792,11 @@ func writeHashStrings(w hashStringWriter, values []string) {
 }
 
 func writeHashString(w hashStringWriter, value string) {
-	var size [8]byte
-	binary.BigEndian.PutUint64(size[:], uint64(len(value)))
-	_, _ = w.Write(size[:])
-	_, _ = w.Write([]byte(value))
+	// 保持原长度前缀和正文 bytes，仅合并同一次编码的缓冲与 Write。
+	encoded := make([]byte, 8+len(value))
+	binary.BigEndian.PutUint64(encoded[:8], uint64(len(value)))
+	copy(encoded[8:], value)
+	_, _ = w.Write(encoded)
 }
 
 func normalizeStrings(values []string) []string {
