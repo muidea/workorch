@@ -24,6 +24,8 @@ Last Verified: 2026-09-10
 canonical Result ID 由 workspace/run 派生；Artifact ID 由 Result ID 与 sealed source ref 派生。相同 terminal identity/material 是幂等重放，任一 identity 或 material 漂移均 conflict。每个 EventHub topic 使用 `pkg/events` 中的具体 result。
 生产 `Configure` 只接受通过 `Validate()` 的 canonical `ResultOwnerRepositories` 与 EventHub；公开面没有 generic create/update/delete。
 
+后台 Timer 注册失败由 `Start` 原样返回；已经取得的订阅、service 与 cancel 句柄必须保留用于清理，不能把任务提交失败当作启动成功。失败后先完成 owner 清理再重新启动。该任务错误合同不单独证明完整的进程输入／排空／释放屏障。
+
 ## 不变量与非职责
 
 - Result/Artifact scope 必须与 terminal material 的 workspace/run/result 完全一致；返回值和 notification 必须深拷贝。
@@ -48,6 +50,7 @@ canonical Result ID 由 workspace/run 派生；Artifact ID 由 Result ID 与 sea
 | 能力/维度 | 测试证据 | 结论 |
 | --- | --- | --- |
 | module lifecycle、依赖校验、重复 Run | `module_test.go::TestModuleIdentityConfigureStartStopContract`、`module_test.go::TestModuleSetupRequiresRepositories`、`module_test.go::TestModuleRunIsIdempotent` | 已覆盖 |
+| Timer 注册错误与部分启动资源保留 | `biz/lifecycle_handler_test.go::TestResultStartReturnsTimerFailureAndRetainsPartialStartCleanup` | 返回原始提交错误；保留并清理已取得订阅和 cancel |
 | owner-private terminal materialization；public Result/Artifact query、scope、clone、list bound | `module_test.go::TestModuleManagesResultsAndArtifacts`、`module_test.go::TestResultOwnerListContractsAreBoundedAndCursorBased`、`biz/result_service_test.go::TestServiceEnforcesArtifactParentScope`、`pkg/events/messages_test.go::TestCloneResultAndArtifactIsolateEventHubBoundary` | 已覆盖；测试中的 seed 不是 public CRUD |
 | terminal normal/duplicate/material drift/partial recovery | `biz/lifecycle_handler_test.go::TestTerminalDeliveryDerivesCanonicalResultAndRejectsMaterialDrift`、`biz/lifecycle_handler_test.go::TestTerminalDeliveryRecoversDraftAndPartialArtifactMaterialization`、`biz/lifecycle_handler_test.go::TestTerminalDeliveryReplayReemitsStableNotification` | 已覆盖 |
 | privileged terminal/seal/purge sources与零 mutation | `biz/lifecycle_handler_test.go::TestResultPrivilegedIngressRejectsForgedSourcesWithoutOwnerMutation` | 已覆盖 |

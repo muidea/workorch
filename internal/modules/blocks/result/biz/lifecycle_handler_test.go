@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/magicCommon/task"
 	resultevents "github.com/muidea/workorch/internal/modules/blocks/result/pkg/events"
 	resultmodel "github.com/muidea/workorch/internal/modules/blocks/result/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -17,6 +19,59 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+type rejectedRecoveryTimer struct {
+	task.BackgroundRoutine
+	err error
+	ctx context.Context
+}
+
+func (b *rejectedRecoveryTimer) Timer(ctx context.Context, _ task.Task, _, _ time.Duration) error {
+	b.ctx = ctx
+	return b.err
+}
+
+func TestResultStartReturnsTimerFailureAndRetainsPartialStartCleanup(t *testing.T) {
+	ctx := context.Background()
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	rejection := errors.New("injected recovery timer registration failure")
+	background := &rejectedRecoveryTimer{err: rejection}
+	repositories := memory.NewResultOwnerRepositorySet()
+	owner, err := New(hub, background, Dependencies{OwnerRepositories: repositories.OwnerRepositories(), EventHub: hub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	if err := owner.Start(); err != rejection {
+		t.Fatalf("Start timer failure = %v, want original error", err)
+	}
+	if !owner.started || owner.service == nil || len(owner.topics) == 0 || owner.notificationRecoveryCancel == nil {
+		t.Fatal("timer failure discarded acquired cleanup state")
+	}
+	if background.ctx == nil || background.ctx.Err() != nil {
+		t.Fatalf("timer failure lost uncanceled cleanup context: %v", background.ctx)
+	}
+	query := func() *cd.Error {
+		return hub.Send(magicevent.NewEventWithContext(
+			resultevents.TopicResultCommandListByWorkspace, "test", resultevents.CommandDestination,
+			magicevent.NewHeader(), ctx, resultevents.ListResultsByWorkspaceCommand{WorkspaceID: "workspace-timer-failure"},
+		)).Error()
+	}
+	if err := query(); err != nil {
+		t.Fatalf("timer failure prematurely removed acquired subscription: %v", err)
+	}
+	owner.Teardown(ctx)
+	if !errors.Is(background.ctx.Err(), context.Canceled) {
+		t.Fatalf("partial-start cleanup did not cancel timer context: %v", background.ctx.Err())
+	}
+	if owner.started || owner.service != nil || len(owner.topics) != 0 || owner.notificationRecoveryCancel != nil {
+		t.Fatal("partial-start cleanup left acquired resources")
+	}
+	if err := query(); err == nil {
+		t.Fatal("partial-start cleanup did not remove command subscriptions")
+	}
+}
 
 func TestResultPrivilegedIngressRejectsForgedSourcesWithoutOwnerMutation(t *testing.T) {
 	ctx := context.Background()

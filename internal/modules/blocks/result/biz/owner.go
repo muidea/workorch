@@ -89,11 +89,15 @@ func (m *Biz) Start() error {
 	if m.BackgroundRoutine() != nil {
 		recoveryCtx, cancel := context.WithCancel(context.Background())
 		m.notificationRecoveryCancel = cancel
-		m.Timer(recoveryCtx, resultNotificationRecoveryInterval, 0, func() {
+		if err := m.Timer(recoveryCtx, resultNotificationRecoveryInterval, 0, func() {
 			if err := m.replayTerminalNotifications(recoveryCtx); err != nil && recoveryCtx.Err() == nil {
 				slog.Warn("workorch Result notification recovery failed", "err", err)
 			}
-		})
+		}); err != nil {
+			// Keep the partial-start state and cleanup handles. The caller must
+			// clean up before starting again; this error is not timer completion.
+			return err
+		}
 	}
 	return nil
 }
