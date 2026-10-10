@@ -35,7 +35,7 @@ and converges through the same neutral Runtime owner model. It must not make leg
   separate declaration/operation selectors. A route whose repair operations do not publish one concrete owner confirmation protocol
   fails pre-seal. Duplicate/partial triggers, cross-owner kinds, non-state-change evidence, incomplete selectors, disabled fresh validation or an
   out-of-range bound fail pre-seal and create no Run/provider/capability work;
-- the template validation declaration selects `shell/project-native-validation/v4` and the explicit independent review protocol
+- 模板 validation declaration 选择 `shell/project-native-validation/v5`，并显式封存独立评审协议
   `validation/input-consistency/v2`, with no language command, arguments or
   environment, and its validation-environment policy contains no language profile. Shell resolves the declaration from the exact File manifest, and the default managed-validation wire contains
   only `recipeId`. Shell alone emits exact `module_manifest_parse_failed`, `source_compile_failed` or `test_failed` owner facts
@@ -48,6 +48,17 @@ and converges through the same neutral Runtime owner model. It must not make leg
 - current provider guidance uses current semantic-plan/candidate schemas.
 
 ### Operations And Evidence
+
+- `TestConjunctiveInputPreparationReviewAndIdentity` 固定完整 CWI+A+B preparation、exact input bytes、
+  requirement package identity 及错源混合拒绝；`TestConjunctiveInputRejectsReviewDowngradeAndCapacityOverflow`
+  固定 v5 必需 V2、16 files / 64 KiB 不变与超界显式拒绝。
+- `TestConjunctiveInputExecutesEverySourceAndRejectsUnreviewedMembers` 使用真实 Go 执行核验完整 A/B、缺 B、
+  B 失败／skip、额外 Test、未列 helper 与独立 supplement；package isolation 不代表完整项目验收或 OS sandbox。
+- `TestDriveRuntimeSharedSourceObligationOwnerMainline` 通过真实 File/Shell、Run CAS、三 owner 终态交接与
+  review-binding restart 验证逐源 closeout；Result／Workspace／Run 各自落盘后 ACK 丢失必须从独立持久前像
+  恢复同一 seal、完整 A/B outcome、exact Result 身份和有序三个 ACK，重复交付不增加 provider 消费。
+  B 实际失败的 rejected closeout 在 Result 响应丢失恢复后仍不得恢复 A/B credit。
+  provider 为脚本替身，不代表公开 authoring 或真实模型验收。
 
 - `TestIsolatedInputReviewScalesAcrossTwentyFiveCWIs` proves complete independent review subjects and protection for 25 CWI
   inputs, plus exact helper freshness without global accumulation; capacity is not raised or truncated;
@@ -62,8 +73,10 @@ and converges through the same neutral Runtime owner model. It must not make leg
 - `TestDriveRuntimeIsolatedInputReviewMainline` covers multiple CWI completion, all three review outcomes, bounded factual
   tickets/re-review, malformed/rejected paths, five restart cuts, unchanged inputs/startup and duplicate three-owner terminal
   delivery. Scripted provider results are not real-model, arbitrary-Goal semantic calibration or release DCE evidence;
-- `TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition` uses normal HTTP authoring and the production restart
-  compiler with 24 criteria / 27 CWIs / 25 managed proof requirements, without patching bootstrap selection;
+- `TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition` 通过正常 HTTP authoring 与生产 restart compiler，
+  将 24 条用户验收要求和 13 条模板默认 DoD 封存为 37 条原文 DoD，生成 40 个 CWI 与 38 份 managed proof requirement；
+  不替换 bootstrap selection。回归逐项反证全部来源 verification 进入对应 all-of proof、确认 DoD 原文未重新解析或去重、
+  重复编译保持 exact startup/inventory identity；该场景验证公开创建与 SM-1 materialization，不代表完整公开执行或真实模型验收。
 - `TestDriveRuntimeInputReviewV2OmissionAndRestart` and the current-template isolated mainline cover complete original-criterion mappings, consistent review followed by
   actual validation, distinct omission/conflict outcomes, bounded factual clarification, malformed documents, rejection,
   restart cuts and duplicate three-owner delivery. Negative reviews execute no validation and grant no DoD credit;

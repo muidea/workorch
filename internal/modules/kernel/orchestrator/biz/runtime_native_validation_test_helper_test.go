@@ -221,7 +221,7 @@ func runtimeTestPrepareNativeValidationThroughOwners(
 	t *testing.T,
 	bootstrap runtimecontract.RuntimeBootstrap,
 	workspaceDirectory string,
-) {
+) map[string]runtimecontract.RuntimeValidationProofPreparation {
 	t.Helper()
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go is not available")
@@ -372,6 +372,7 @@ func runtimeTestPrepareNativeValidationThroughOwners(
 	); err != nil {
 		t.Fatalf("Shell owner did not reobserve exact native proof applicability: %v", err)
 	}
+	return preparations
 }
 
 func runtimeTestAcquireNativePreparationManifest(

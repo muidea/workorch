@@ -29,6 +29,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
 	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
 	"github.com/muidea/workorch/internal/pkg/repository/memory"
 	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
@@ -56,9 +57,10 @@ func TestDriveRuntimeValidationInputReviewRestart(t *testing.T) {
 }
 
 type validationInputReviewMainlineOptions struct {
-	Adapter         string
-	ValidationCount int
-	ProtocolRef     string
+	Adapter           string
+	ValidationCount   int
+	ProtocolRef       string
+	SourceObligations bool
 }
 
 func TestDriveRuntimeInputReviewV2OmissionAndRestart(t *testing.T) {
@@ -105,8 +107,8 @@ func TestDriveRuntimeIsolatedInputReviewMainline(t *testing.T) {
 			}
 		}
 	}
-	if adapter != shellcommon.ValidationRecipeAdapterIsolatedEntrypoint {
-		t.Fatal("default template does not enable reviewed isolated inputs")
+	if adapter != shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint {
+		t.Fatal("default template does not enable reviewed conjunctive inputs")
 	}
 	if protocol != runtimecontract.RuntimeValidationInputReviewProtocolV2 {
 		t.Fatal("default template does not seal the obligation-review protocol")
@@ -166,7 +168,10 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	bootstrap.Definition.CapabilityContract = append(bootstrap.Definition.CapabilityContract, runtimecontract.RuntimeBlockKindDecisionRequest)
 	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleDecision, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindDecisionRequest}})
 	bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
-	runtimeTestPrepareNativeValidationThroughOwners(t, bootstrap, directory)
+	if options.SourceObligations {
+		bootstrap = withSharedSourceObligationBootstrap(t, bootstrap)
+	}
+	preparations := runtimeTestPrepareNativeValidationThroughOwners(t, bootstrap, directory)
 	requirements, err := runtimecontract.CompileRuntimeValidationProofRequirements(bootstrap.Definition.Revision, bootstrap.CoverageItems, bootstrap.DefinitionFocuses)
 	if err != nil || len(requirements) != options.ValidationCount {
 		t.Fatal(err)
@@ -178,15 +183,14 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	}
 	inputTargets := map[common.CoverageWorkItemID]string{}
 	for _, requirement := range requirements {
-		native := "TestWorkOrchCWI_" + strings.ToUpper(strings.TrimPrefix(requirement.RequiredCheckRefs[0], "workorch-cwi-check-"))
-		parent, suffix := "../..", "_InputV3"
-		if options.Adapter == shellcommon.ValidationRecipeAdapterIsolatedEntrypoint {
-			parent, suffix = "../../..", "_InputV4"
+		preparation := preparations[requirement.Hash]
+		if len(preparation.CheckAttestations) != 1 && !options.SourceObligations {
+			t.Fatal("single-criterion fixture lost its exact owner mapping")
 		}
-		native += suffix
-		inputTarget := "workorch_validation/v3/" + strings.ToLower(native) + "_test.go"
-		if options.Adapter == shellcommon.ValidationRecipeAdapterIsolatedEntrypoint {
-			inputTarget = "workorch_validation/v4/" + strings.ToLower(native) + "/input_test.go"
+		native, inputTarget := preparation.CheckAttestations[0].NativeCheckRef, preparation.TargetRef
+		parent := "../.."
+		if options.Adapter == shellcommon.ValidationRecipeAdapterIsolatedEntrypoint || options.Adapter == shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint {
+			parent = "../../.."
 		}
 		if _, err := os.Stat(filepath.Join(directory, inputTarget)); err != nil {
 			t.Fatalf("owner did not prepare exact input: %v", err)
@@ -202,6 +206,21 @@ func %s(t *testing.T) {
 }
 
 `, native, parent)
+		if options.SourceObligations {
+			body := initialFiles[inputTarget]
+			var source strings.Builder
+			for index, check := range preparation.CheckAttestations {
+				part := strings.Replace(body, native, check.NativeCheckRef, 1)
+				if mode == "source_B_failure" && check.RequiredCheckRef == requirement.SourceObligationChecks[1].CheckRef {
+					part = strings.Replace(part, `!="4"`, `!="5"`, 1)
+				}
+				if index != 0 {
+					part = part[strings.Index(part, "func "):]
+				}
+				source.WriteString(part)
+			}
+			initialFiles[inputTarget] = source.String()
+		}
 	}
 	for ref, content := range initialFiles {
 		path := filepath.Join(directory, ref)
@@ -220,8 +239,20 @@ func %s(t *testing.T) {
 	if err := workspaces.Create(ctx, runtimeWorkspaceForPersistedRunTest(t, ctx, runs, "ws-v2", "run-v2", directory, internalDir)); err != nil {
 		t.Fatal(err)
 	}
+	var runRepository repository.RunRepository = runs
+	var workspaceRepository repository.WorkspaceRepository = workspaces
+	var interruptedWorkspace *failAfterWorkspaceUpdateRepository
+	var interruptedRun *failAfterRunUpdateRepository
+	if cut == "after_workspace_persistence" {
+		interruptedWorkspace = &failAfterWorkspaceUpdateRepository{WorkspaceRepository: workspaces}
+		workspaceRepository = interruptedWorkspace
+	}
+	if cut == "after_run_persistence" {
+		interruptedRun = &failAfterRunUpdateRepository{RunRepository: runs}
+		runRepository = interruptedRun
+	}
 	runOwner := runmodule.New()
-	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
+	if err := runOwner.Configure(runOwnerTestDependencies(runRepository, nil, nil, hub)); err != nil {
 		t.Fatal(err)
 	}
 	if err := runOwner.Start(); err != nil {
@@ -229,7 +260,7 @@ func %s(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runOwner.Stop(ctx) })
 	workspaceOwner := workspacemodule.New()
-	if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(hub, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
+	if err := workspaceOwner.Configure(workspaceOwnerTestDependencies(hub, workspaceRepository, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository())); err != nil {
 		t.Fatal(err)
 	}
 	if err := workspaceOwner.Start(); err != nil {
@@ -248,8 +279,20 @@ func %s(t *testing.T) {
 	startRuntimeManagedValidationTestOwner(t, hub)
 	startRuntimeProviderCeilingTestOwner(t, hub)
 	resultOwner := resultmodule.New()
-	results := memory.NewResultRepository()
-	if err := resultOwner.Configure(resultbiz.Dependencies{OwnerRepositories: testResultOwnerRepositories(results, memory.NewArtifactRepository(), memory.NewResultWorkspaceDeletionRepository()), EventHub: hub}); err != nil {
+	var results repository.ResultRepository = memory.NewResultRepository()
+	resultRepositories := testResultOwnerRepositories(results, memory.NewArtifactRepository(), memory.NewResultWorkspaceDeletionRepository())
+	var interruptedResults *failAfterResultCreateRepository
+	deliveryCut := cut == "after_result_persistence" || cut == "after_workspace_persistence" || cut == "after_run_persistence"
+	if deliveryCut {
+		results = filerepository.NewResultRepository(filepath.Join(root, "results.json"))
+		resultRepository := results
+		if cut == "after_result_persistence" {
+			interruptedResults = &failAfterResultCreateRepository{ResultRepository: results}
+			resultRepository = interruptedResults
+		}
+		resultRepositories = testResultOwnerRepositories(resultRepository, filerepository.NewArtifactRepository(filepath.Join(root, "artifacts.json")), memory.NewResultWorkspaceDeletionRepository())
+	}
+	if err := resultOwner.Configure(resultbiz.Dependencies{OwnerRepositories: resultRepositories, EventHub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if err := resultOwner.Start(); err != nil {
@@ -311,7 +354,13 @@ func %s(t *testing.T) {
 						}
 						for _, coverage := range command.SemanticManifest.CoverageItems {
 							if coverage.ID == proposal.CoverageWorkItemID {
-								item.Obligations = []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: coverage.TargetText, Finding: finding, Reason: item.Reason, InputTargetRefs: item.InputTargetRefs}}
+								criterion := coverage.TargetText
+								for _, source := range coverage.SourceObligationChecks {
+									if source.CheckRef == check {
+										criterion = source.Criterion
+									}
+								}
+								item.Obligations = []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: criterion, Finding: finding, Reason: item.Reason, InputTargetRefs: item.InputTargetRefs}}
 							}
 						}
 						if mode == "omission" {
@@ -376,7 +425,7 @@ func %s(t *testing.T) {
 		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 	})
 	var crash *runtimeSaveCrashRepository
-	if cut != "" {
+	if cut != "" && !deliveryCut {
 		crash = &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: true, marker: cut, match: func(a runtime.RuntimeAggregate) bool {
 			switch cut {
 			case "after_review_document":
@@ -515,8 +564,11 @@ func %s(t *testing.T) {
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
 		t.Fatalf("mode=%s state=%s terminal=%+v failure=%+v", mode, completed.Decision.State, completed.Decision.Terminal, completed.Facts.Failure)
 	}
-	if success && validationCalls != options.ValidationCount || !success && validationCalls != 0 {
+	if success && validationCalls != options.ValidationCount || !success && mode != "source_B_failure" && validationCalls != 0 || mode == "source_B_failure" && validationCalls != 1 {
 		t.Fatalf("unexpected validation calls: %d", validationCalls)
+	}
+	if options.SourceObligations {
+		assertSharedSourceObligationOwnerObservation(t, completed, requirements[0], mode == "source_B_failure")
 	}
 	if (mode == "conflict" || mode == "omission" || mode == "malformed") && len(completed.GovernanceRequests) != 0 {
 		t.Fatal("conflict/format error created clarification ticket")
@@ -557,8 +609,29 @@ func %s(t *testing.T) {
 			t.Fatal("review path rewrote existing input")
 		}
 	}
-	if cut != "" && !crash.fired {
+	if cut != "" && !deliveryCut && !crash.fired {
 		t.Fatalf("restart cut not reached: %s", cut)
+	}
+	if deliveryCut {
+		fired := func() bool {
+			switch cut {
+			case "after_result_persistence":
+				return interruptedResults.fired
+			case "after_workspace_persistence":
+				return interruptedWorkspace.fired
+			default:
+				return interruptedRun.fired
+			}
+		}
+		stopResources := func() {
+			if err := workspaceOwner.Stop(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := runOwner.Stop(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		module, results = restartSourceObligationTerminalDelivery(t, ctx, module, completed, resultOwner, stopResources, fired, cut, root)
 	}
 	command := orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}
 	for range 2 {
@@ -577,6 +650,27 @@ func %s(t *testing.T) {
 	closeouts, err := results.ListByRun(ctx, "run-v2")
 	if err != nil || stored.State != wantRun || len(closeouts) != 1 || closeouts[0].State != wantResult || closeouts[0].RuntimeCloseout == nil || len(closeouts[0].RuntimeCloseout.SatisfiedCoverageWorkItemIDs) != wantCoverage {
 		t.Fatalf("review/validation/acceptance conflated: run=%s result=%+v err=%v", stored.State, closeouts, err)
+	}
+	if options.SourceObligations {
+		closeout := closeouts[0].RuntimeCloseout
+		if closeout.SourceObligations == nil || closeout.SourceObligations.Hash != bootstrap.Definition.SourceObligations.Hash {
+			t.Fatal("terminal delivery omitted immutable source inventory")
+		}
+		members := 0
+		for _, outcome := range closeout.RequirementOutcomes {
+			for _, source := range outcome.SourceObligations {
+				members++
+				if success && (source.AssessmentState != runtimecontract.RuntimeRequirementSatisfied || source.CurrentBindingRef == nil || len(source.AcceptedEvidenceRefs) == 0) {
+					t.Fatal("source outcome has no current accepted proof")
+				}
+				if !success && (source.AssessmentState == runtimecontract.RuntimeRequirementSatisfied || len(source.AcceptedEvidenceRefs) != 0) {
+					t.Fatal("failed B restored source credit from A")
+				}
+			}
+		}
+		if members != 2 || closeout.ValidateRaw() != nil {
+			t.Fatal("Result lost complete independently bound source outcomes")
+		}
 	}
 	if mode == "conflict" || mode == "omission" || mode == "exhausted" {
 		diagnostic := closeouts[0].RuntimeCloseout.OriginalDiagnostic

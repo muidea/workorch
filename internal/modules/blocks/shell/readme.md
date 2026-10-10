@@ -221,6 +221,8 @@ TestMain、effectful initializer 和跨 harness 引用；每项仍需真实 test
 
 `validation_input_conjunction_test.go` 覆盖完整 preparation/review、B 改判据后的新 package、mixed identity 拒绝、
 容量与降级拒绝、实际 A+B 执行、B 缺失／失败／跳过、extra Test、unlisted helper 与独立 supplement。
+`TestDriveRuntimeSharedSourceObligationOwnerMainline` 使用真实 File/Shell、Run CAS 和 Result→Workspace→Run，
+provider 为脚本替身；它不代替公开 authoring、真实模型、任意领域 proof 或 release DCE 验收。
 
 #### Executable input-maintenance contracts
 

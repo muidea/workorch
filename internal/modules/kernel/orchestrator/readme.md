@@ -84,19 +84,27 @@ capability resource state。
 
 ### 逐源义务与共同 CWI
 
-immutable `RuntimeSourceObligationInventory` 随 Definition/seed/startup/hash 封存；每项 verification 的
-check identity 绑定完整 inventory、Definition、CWI、ObligationID、RequirementID、VerificationID 和原
-Criterion/Declaration。同 CWI 的全部 source checks 与共同检查进入原 validation requirement 的 all-of
-集合，不增加可变闭包 ledger。bootstrap、fresh facts 与 semantic request 逐次反查 exact
-`ProfileID + EvidenceRequirementID + Scope` 及每个 DoD source 的合取声明贡献；库存自洽 hash 不免除适用性
-校验，声明存在也不代表 owner readiness 或 proof。
+Workspace eligible candidate 的 immutable `RuntimeSourceObligationInventory` 随 Definition/seed/startup/hash
+封存；Application 只编译 exact source checks，不创建运行期 authority。每项 verification 的 check identity
+绑定完整 inventory、Definition、CWI、ObligationID、RequirementID、VerificationID 和原 Criterion/Declaration。
+同 CWI 的全部 source checks 与共同检查进入原 validation requirement 的 all-of 集合，不增加可变闭包 ledger。
+Workspace compiler、Runtime bootstrap、fresh facts 与 semantic request 逐次反查 exact
+`ProfileID + EvidenceRequirementID + Scope` 及每个 DoD source 的合取声明贡献；库存自洽 hash 不免除适用性校验，
+声明存在也不代表 owner readiness 或 proof。`runtime_source_obligation_applicability_test.go` 覆盖缺失、重复、错源、
+无 proof operation、wildcard 冒充 exact recipe 与同版本重载；activationcore 回归独立证明启动／fresh facts 的拒绝落点。
 
 SM-2 仍独占 current binding、evidence credit、assessment、reopen 与 terminal；SM-3 持久化完整输入评审和
 封存 dispatch，V2 每 source check 必须使用该源 Criterion 而非共同 CWI 或另一义务的文本。
-SM-4 从 aggregate 派生完整源 closeout；SM-1 lifecycle 无新增 transition。纯 compiler 从 closeout inventory
-重编逐源集合，current proof 缺 B、旧 binding 或 CWI 重开不能恢复 credit；当前 all-of 投影不报告独立部分源 credit。
-`runtime_source_obligation_applicability_test.go` 固定 exact 声明与重载；`biz/runtime/source_obligation_test.go`
-固定 receipt→assessment→terminal、A-only 拒绝、协调删来源的独立前像反证和 fresh-load。
+SM-4 从 aggregate 派生完整源 closeout 并幂等交付；SM-1 lifecycle 无新增 transition。
+纯 compiler 从 closeout inventory 重编逐源集合，current proof 缺 B、旧 binding 或 CWI 重开不能恢复 credit。
+Result/UI 只读投影，不执行 proof 或重裁成功；当前 all-of 投影不报告独立部分源 credit。
+
+`biz/runtime/source_obligation_test.go` 校验 receipt→assessment→terminal、A-only 拒绝与重载；
+`biz/runtime_source_obligation_owner_mainline_test.go` 使用实际 File/Shell、Run CAS 和三 owner 交接，provider 为脚本替身。
+各交付 owner 持久化后 ACK 丢失从独立 file-backed 前像恢复：保持原 seal、逐源 outcomes、ResultID 和 ordered ACK，
+重复投递不增加 provider 消费；B 失败的 rejected closeout 也保持无逐源 credit。
+Shell v5 多检查输入包合同归该 capability owner，不在 Core 硬编码 native grammar、软件栈或 adapter identity；
+这些回归不代表公开 authoring、非 managed proof、真实模型或 release 验收。
 
 ### Semantic and candidate authority
 

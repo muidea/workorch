@@ -2605,7 +2605,7 @@ func runtimeTestBootstrapWithBindings(bootstrap runtimecontract.RuntimeBootstrap
 			convergence.TargetSelectorSubjectRef = bootstrap.DefinitionFocuses[index].TargetSelectorSubjectRef
 		}
 	}
-	seed, err := runtimecontract.CompileRuntimeDefinitionSeed(bootstrap.Definition, bootstrap.Activation, bootstrap.CoverageItems, bootstrap.Slices)
+	seed, err := runtimecontract.CompileRuntimeDefinitionSeedWithSourceObligations(bootstrap.Definition, bootstrap.Activation, bootstrap.CoverageItems, bootstrap.Slices, bootstrap.Definition.SourceObligations)
 	if err == nil {
 		bootstrap.DefinitionSeed = seed
 		requirements, requirementErr := runtimecontract.CompileRuntimeValidationProofRequirements(
