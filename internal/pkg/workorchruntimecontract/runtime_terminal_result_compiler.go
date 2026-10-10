@@ -201,7 +201,7 @@ func DeriveRuntimeTerminalRequirementOutcomesFromState(source RuntimeStateRecord
 			outcome.AssessmentReasonCode = "current_coverage_not_satisfied"
 		}
 		outcome.MissingEvidenceKinds = append(outcome.MissingEvidenceKinds, requiredKinds[coverage.ID]...)
-		outcome.EvidenceItems = runtimeRequirementEvidenceItems(source.Facts.Evidence, coverage, ownerSet.SetHash)
+		outcome.EvidenceItems = runtimeRequirementEvidenceItems(source, coverage, ownerSet.SetHash)
 		for _, item := range outcome.EvidenceItems {
 			if item.State == RuntimeRequirementEvidenceAccepted {
 				outcome.AcceptedEvidenceRefs = append(outcome.AcceptedEvidenceRefs, item.EvidenceRef)
@@ -217,8 +217,9 @@ func DeriveRuntimeTerminalRequirementOutcomesFromState(source RuntimeStateRecord
 	return ret
 }
 
-func runtimeRequirementEvidenceItems(ledger EvidenceLedger, coverage RuntimeCoverageItemFact, ownerSetHash string) []RuntimeRequirementEvidenceItem {
+func runtimeRequirementEvidenceItems(source RuntimeStateRecord, coverage RuntimeCoverageItemFact, ownerSetHash string) []RuntimeRequirementEvidenceItem {
 	ret := make([]RuntimeRequirementEvidenceItem, 0)
+	binding, hasBinding := runtimeTerminalCurrentCoverageBinding(source.Facts, coverage)
 	appendLedger := func(values []EvidenceFact, state RuntimeRequirementEvidenceState) {
 		for _, evidence := range values {
 			if !runtimeEvidenceAppliesToCoverage(evidence, coverage) {
@@ -230,13 +231,18 @@ func runtimeRequirementEvidenceItems(ledger EvidenceLedger, coverage RuntimeCove
 			}
 			item := RuntimeRequirementEvidenceItem{EvidenceRef: string(evidence.ID), BindingRef: bindingRef, State: state, ReasonCode: evidence.FailureCode}
 			if state == RuntimeRequirementEvidenceAccepted {
-				item.OwnerRevisionSetHash = ownerSetHash
+				if hasBinding && runtimeTerminalEvidenceMatchesCurrentProof(source, evidence, binding) {
+					item.OwnerRevisionSetHash = ownerSetHash
+				} else {
+					item.State = RuntimeRequirementEvidenceStaleOrSuperseded
+					item.ReasonCode = "current_binding_proof_not_applicable"
+				}
 			}
 			ret = append(ret, item)
 		}
 	}
-	appendLedger(ledger.Accepted, RuntimeRequirementEvidenceAccepted)
-	appendLedger(ledger.Rejected, RuntimeRequirementEvidenceRejected)
+	appendLedger(source.Facts.Evidence.Accepted, RuntimeRequirementEvidenceAccepted)
+	appendLedger(source.Facts.Evidence.Rejected, RuntimeRequirementEvidenceRejected)
 	return ret
 }
 

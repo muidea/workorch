@@ -67,6 +67,11 @@ capability resource state。
   由 `biz/runtime/evidence_projection_normalization_test.go` 与既有 fresh-load 账本篡改测试固定。崩溃注入 wrapper 保留 production Coordinator 的完整 aggregate gate 和
   `SaveValidated` 写入路径；CAS 前后切点、普通 `Save`、失败回执与非法 aggregate 拒绝由
   `biz/runtime_crash_repository_test.go` 固定。SM-1～SM-4 的 transition、authority、预算和恢复规则均不改变。
+- SM-4 终态材料保全 persisted `CoverageProofLineage`，owner-local adapter 与独立重载产物一致。
+  requirement evidence 只把 exact current binding/proof、完整 all-of 和唯一 equivalent lineage 来源列为 current accepted；
+  历史不适用项保留为 `stale_or_superseded`，不回写 SM-2 coverage/assessment，不改变 SM-1/SM-3 transition。
+  `biz/runtime/coverage_proof_lineage_test.go` 固定 adapter/reload 一致；
+  `runtime_terminal_evidence_applicability_test.go` 固定 binding/hash/scope 漂移、弱证据、完整 proof 与重复／冲突 resolution。
 - `Facts.Failure` 的替换只能经过 `replaceRuntimeFailureAuthority`，并必须显式选择三种 policy 之一：
   `runtimeFailureAuthorityRetainInterlude` 仅在同一原子事务的有界中间态保留既有 target/directive；
   `runtimeFailureAuthorityRetire` 同时清除旧 `FailureTarget + RepairDirective`；

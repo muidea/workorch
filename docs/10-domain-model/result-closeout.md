@@ -87,6 +87,13 @@ RuntimeRequirementEvidenceItem
   基线下它永远不支持successful terminal。
 - owner revision set/hash、Definition revision或binding mismatch的item只能是`stale_or_superseded`；不能回退为candidate或继续credit。
 
+终态 evidence 投影必须解析 exact current CWI binding（Definition、ID、hash、focus），并验证当前 proof、完整
+validation all-of、metric/artifact 和同 Workspace/Run 的来源。无 rollover 时反查原 completed dispatch binding；
+同 binding ID 新 hash 不直接继承旧来源，只有唯一 exact equivalent resolution 与完整 proof identity 一致时适用。
+历史 accepted 保留审计；旧 binding、弱证据、不完整 proof、跨 scope 或重复／冲突 resolution 投影为
+`stale_or_superseded`，不进入 current `AcceptedEvidenceRefs`。此只读 compiler 不回写 coverage/assessment，
+terminal seal 与 fresh-load 仍从独立持久前像反证材料；receipt/dispatch 完整来源门禁不因投影而省略。
+
 ## Formal Result Value Contract
 
 ```text
