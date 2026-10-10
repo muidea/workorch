@@ -558,6 +558,7 @@ func ValidateRuntimeImplementationWorkReceiptSet(r RuntimeImplementationWorkRoun
 			evidence.DispatchID != effectDispatchID || evidence.OperationID != op.ID || evidence.SourceRef != execution.OwnerReceiptRef || !slices.Equal(evidence.TargetRefs, op.TargetRefs) ||
 			len(evidence.CoverageWorkItemIDs) != 0 || len(evidence.BindingRefs) != 0 || evidence.Validation != nil || !runtimeImplementationWorkEffectQualityAcceptable(evidence.Quality) || evidence.Quality != receipt.Evidence.Quality || evidence.ZeroWork ||
 			evidence.ContentHash != receipt.Evidence.ContentHash || !slices.Equal(evidence.EvidenceRefs, receipt.Evidence.EvidenceRefs) || evidence.EvidenceReason != receipt.Evidence.EvidenceReason ||
+			!reflect.DeepEqual(evidence.OwnerRevisionSet, receipt.Evidence.OwnerRevisionSet) ||
 			!reflect.DeepEqual(evidence.ContentAddress, receipt.Evidence.ContentAddress) || !reflect.DeepEqual(evidence.ExitCode, receipt.Evidence.ExitCode) ||
 			!slices.Equal(evidence.EvidenceTags, receipt.Evidence.EvidenceTags) || evidence.Summary != receipt.Evidence.Summary || evidence.FailureClass != "" || evidence.FailureCode != "" {
 			return "", fmt.Errorf("implementation work effect evidence cannot grant coverage/validation or drift from exact receipt")

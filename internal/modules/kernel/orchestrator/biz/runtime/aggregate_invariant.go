@@ -953,6 +953,7 @@ func validateRuntimeAggregateEvidenceCommitFact(
 	}
 	receiptEvidence := receipt.Normalized().Evidence
 	if fact.Summary != receiptEvidence.Summary || fact.ContentHash != receiptEvidence.ContentHash ||
+		!reflect.DeepEqual(fact.OwnerRevisionSet, receiptEvidence.OwnerRevisionSet) ||
 		!reflect.DeepEqual(fact.ContentAddress, receiptEvidence.ContentAddress) || !reflect.DeepEqual(fact.ExitCode, receiptEvidence.ExitCode) ||
 		!sameRuntimeTargetRefs(fact.EvidenceRefs, receiptEvidence.EvidenceRefs) || fact.Quality != receiptEvidence.Quality ||
 		fact.ZeroWork != receiptEvidence.ZeroWork || !sameRuntimeTargetRefs(fact.EvidenceTags, receiptEvidence.EvidenceTags) ||
@@ -1694,6 +1695,7 @@ func validateRuntimeReceiptEvidenceRejectedLineage(a RuntimeAggregate, dispatch 
 	}
 	receiptEvidence := receipt.Normalized().Evidence
 	if evidence.Summary != receiptEvidence.Summary || evidence.ContentHash != receiptEvidence.ContentHash ||
+		!reflect.DeepEqual(evidence.OwnerRevisionSet, receiptEvidence.OwnerRevisionSet) ||
 		!reflect.DeepEqual(evidence.ContentAddress, receiptEvidence.ContentAddress) ||
 		!reflect.DeepEqual(evidence.ExitCode, receiptEvidence.ExitCode) || !sameRuntimeTargetRefs(evidence.EvidenceRefs, receiptEvidence.EvidenceRefs) ||
 		evidence.Quality != receiptEvidence.Quality || evidence.ZeroWork != receiptEvidence.ZeroWork ||

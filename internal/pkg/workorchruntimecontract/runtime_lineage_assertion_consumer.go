@@ -290,7 +290,7 @@ func runtimeLineageOperationFact(dispatch RuntimeDispatchRecord, operation Runti
 		return EvidenceFact{}, RuntimeOperationReceipt{}, false
 	}
 	evidence := receipt.Evidence
-	if fact.Summary != evidence.Summary || fact.ContentHash != evidence.ContentHash || !reflect.DeepEqual(fact.ContentAddress, evidence.ContentAddress) || !reflect.DeepEqual(fact.ExitCode, evidence.ExitCode) || !slices.Equal(fact.EvidenceRefs, evidence.EvidenceRefs) || fact.Quality != evidence.Quality || fact.ZeroWork != evidence.ZeroWork || fact.EvidenceReason != evidence.EvidenceReason || !slices.Equal(fact.EvidenceTags, evidence.EvidenceTags) || !reflect.DeepEqual(fact.Validation, evidence.Validation) {
+	if fact.Summary != evidence.Summary || fact.ContentHash != evidence.ContentHash || !reflect.DeepEqual(fact.OwnerRevisionSet, evidence.OwnerRevisionSet) || !reflect.DeepEqual(fact.ContentAddress, evidence.ContentAddress) || !reflect.DeepEqual(fact.ExitCode, evidence.ExitCode) || !slices.Equal(fact.EvidenceRefs, evidence.EvidenceRefs) || fact.Quality != evidence.Quality || fact.ZeroWork != evidence.ZeroWork || fact.EvidenceReason != evidence.EvidenceReason || !slices.Equal(fact.EvidenceTags, evidence.EvidenceTags) || !reflect.DeepEqual(fact.Validation, evidence.Validation) {
 		return EvidenceFact{}, RuntimeOperationReceipt{}, false
 	}
 	return fact, receipt, true

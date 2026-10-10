@@ -150,6 +150,7 @@ type EvidenceFact struct {
 	EvidenceReason      string
 	EvidenceTags        []string
 	Validation          *RuntimeValidationObservation
+	OwnerRevisionSet    *RuntimeOwnerRevisionSet `json:",omitempty"`
 }
 
 type RuntimeOperationEvidence struct {
@@ -163,6 +164,8 @@ type RuntimeOperationEvidence struct {
 	EvidenceReason string
 	EvidenceTags   []string
 	Validation     *RuntimeValidationObservation
+	// 实际读取依赖由 capability owner 产生，不从 ResourceChanges 或 current catalog 补造。
+	OwnerRevisionSet *RuntimeOwnerRevisionSet `json:",omitempty"`
 }
 
 type RuntimeEvidenceDigestAlgorithm string
@@ -2988,6 +2991,7 @@ func normalizeEvidenceFacts(values []EvidenceFact) []EvidenceFact {
 		value.FailureMessage = strings.TrimSpace(value.FailureMessage)
 		value.Summary = strings.TrimSpace(value.Summary)
 		value.ContentHash = strings.TrimSpace(value.ContentHash)
+		value.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(value.OwnerRevisionSet)
 		if value.ContentAddress != nil {
 			address := value.ContentAddress.Clone()
 			value.ContentAddress = &address

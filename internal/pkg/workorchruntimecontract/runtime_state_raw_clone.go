@@ -156,6 +156,7 @@ func cloneCoverageFocusRaw(in CoverageFocus) CoverageFocus {
 
 func cloneEvidenceFactRaw(in EvidenceFact) EvidenceFact {
 	out := in
+	out.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(in.OwnerRevisionSet)
 	out.ContentAddress = cloneRuntimeStateRawPointer(in.ContentAddress, func(item RuntimeEvidenceContentAddress) RuntimeEvidenceContentAddress {
 		return cloneRuntimeEvidenceContentAddressRaw(item)
 	})
@@ -1321,6 +1322,7 @@ func cloneRuntimeOperationAdmissibilityVariantRaw(in RuntimeOperationAdmissibili
 
 func cloneRuntimeOperationEvidenceRaw(in RuntimeOperationEvidence) RuntimeOperationEvidence {
 	out := in
+	out.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(in.OwnerRevisionSet)
 	out.ContentAddress = cloneRuntimeStateRawPointer(in.ContentAddress, func(item RuntimeEvidenceContentAddress) RuntimeEvidenceContentAddress {
 		return cloneRuntimeEvidenceContentAddressRaw(item)
 	})

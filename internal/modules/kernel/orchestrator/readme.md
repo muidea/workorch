@@ -102,6 +102,25 @@ capability resource state。
 - `internal/pkg/workorchruntimecontract` 只包含 DTO、enum、normalize/validate/clone/hash、manifest compiler 和纯 matcher；
   不持有 Hub/I/O/CAS，也不选择 retry、terminal 或 Runtime action。
 
+### 原回执的实际读取依赖
+
+capability owner 可在 `RuntimeOperationEvidence.OwnerRevisionSet` 返回本次实际读取的 Definition-bound 依赖。
+SM-3 receipt commit 对非空集合执行完整 raw-canonical、集合/hash 及 exact dispatch/aggregate Definition 校验；
+receipt identity 绑定完整依赖正文，而不只绑定调用方提供的 `SetHash`。SM-2/SM-3 私有 evidence transaction 仅从
+persisted receipt 将该集合 detached 投影到 `EvidenceFact`，fact identity 同样绑定完整正文。
+
+raw clone、receipt/fact normalization 和当前 schema JSON reload 保留原依赖表示，不通过规范化清洗非法输入。
+fresh-load、accepted/rejected lineage、confirmed repair、implementation-work receipt members 与 lineage guard
+反查原 receipt 的 exact payload；同步重算 fact hash 不能绕过该来源反证。duplicate 不增加 CAS、evidence revision
+或 credit，错 Definition 的提交零变更拒绝。`biz/runtime/owner_read_dependencies_test.go` 和
+`workorchruntimecontract/runtime_receipt_owner_dependencies_test.go` 固定原值、重载、隔离和篡改反例；真实 File bytes
+producer 由 File owner 的独立回归验证。
+
+此合同不新增 SM-1～SM-4 transition，不用 nil 集合伪造无依赖或当前有效证明，不开放 capability availability。
+File existing-read 是该事实的具体 producer；它不替代 assessment/artifact 的实际依赖、current owner observation、
+相交资源失效/reopen 或 terminal 的真实 dependency union。终态 compiler 的 synthetic `runtime_authority` 集合
+不是 actual-read 来源，该来源问题不能由一个 optional 字段或纯 applicability matcher 自动解决。
+
 ### 逐源义务与共同 CWI
 
 Workspace eligible candidate 的 immutable `RuntimeSourceObligationInventory` 随 Definition/seed/startup/hash

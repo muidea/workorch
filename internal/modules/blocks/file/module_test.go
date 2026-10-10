@@ -574,7 +574,7 @@ func TestFileModuleExecutesConcreteInspectionAndPreviewEvents(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, "main.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", RequiredOutputHash: "required-output-1"}
+	transaction := runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-1", DefinitionRevision: "definition-1", RequiredOutputHash: "required-output-1"}
 	listOperation := runtimecontract.RuntimeOperation{ID: "list-1", Kind: runtimecontract.StepKindFileList, Parameters: []runtimecontract.OperationParameter{fileStringParameter("path", "."), fileIntegerParameter("maxEntries", 10)}}
 
 	listResult := hub.Send(magicevent.NewEventWithContext(

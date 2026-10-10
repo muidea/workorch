@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 
@@ -51,6 +52,7 @@ func runtimeVerificationPolicySatisfied(aggregate RuntimeAggregate, binding runt
 				for _, receipt := range aggregate.OperationReceipts {
 					if receipt.ExecutionKey == execution.ExecutionKey && receipt.Fence == execution.Fence &&
 						receipt.OperationID == operation.ID && receipt.Outcome == runtimecontract.RuntimeOperationOutcomeAccepted &&
+						reflect.DeepEqual(receipt.Evidence.OwnerRevisionSet, fact.OwnerRevisionSet) &&
 						((receipt.Evidence.Validation == nil && fact.Validation == nil) ||
 							(receipt.Evidence.Validation != nil && fact.Validation != nil &&
 								receipt.Evidence.Validation.ObservationProtocolRef == fact.Validation.ObservationProtocolRef &&

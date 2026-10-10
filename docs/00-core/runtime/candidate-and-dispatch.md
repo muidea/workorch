@@ -612,6 +612,13 @@ stale revision或grant drift均保持零外部动作。
 original diagnostic，禁止再以 rejected receipt 的 `ObservedEffectScope=unknown` 覆盖成 Orchestrator effect mismatch；只有
 `accepted | no_op` 才继续执行 sealed effect compatibility 与 evidence-quality gate。未知 outcome 直接 fail-closed。
 
+owner receipt 可携带本次实际读取的 `RuntimeOperationEvidence.OwnerRevisionSet`；非空集合必须 raw-canonical、完整
+set/hash 合法且 exact-match 原 dispatch 与 aggregate 的 Definition。receipt hash 和所派生 EvidenceFact hash 均绑定
+完整依赖正文，不只消费 `SetHash`。SM-3 保存原 receipt，SM-2/SM-3 evidence CAS 仅从它生成 detached exact 投影；
+fresh-load 和来源消费者反查原 receipt，不能靠重算 fact hash、`ResourceChanges` 或 current catalog 替换历史读取。
+raw clone 和 normalization 保全原集合，缺失集合不证明无依赖或当前适用性。该事实不选择 stale/reopen、增加 credit、
+开放 capability 或改变 SM-1/SM-4 transition；assessment、artifact 与终态仍须有各自真实来源和 current 适用性证明。
+
 claimed operation没有receipt时，只有sealed replay class为`safe_to_replay | owner_managed`或owner给出exact replay proof，
 才可进入SM-4 recovery-budget handoff；`at_most_once | unknown`直接持久化`outcome_unknown`，零owner重放且不消费replay
 budget。recovery不能因为operation被称为validation/read-only就放宽该规则。

@@ -555,6 +555,7 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 		observation := r.Evidence.Validation.Clone()
 		r.Evidence.Validation = &observation
 	}
+	r.Evidence.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(r.Evidence.OwnerRevisionSet)
 	r.ResourceChanges = NormalizeRuntimeResourceChanges(r.ResourceChanges)
 	if r.Feedback != nil {
 		feedback := r.Feedback.CloneOriginal()
@@ -573,6 +574,9 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 }
 
 func (r RuntimeOperationReceipt) Validate() error {
+	if err := validateRuntimeOwnerRevisionSetRaw(r.Evidence.OwnerRevisionSet); err != nil {
+		return fmt.Errorf("operation receipt owner dependencies: %w", err)
+	}
 	r = r.Normalized()
 	if r.ExecutionKey == "" || r.Fence == 0 || r.OperationID == "" {
 		return fmt.Errorf("operation receipt requires execution key, fence and operation id")
@@ -765,6 +769,10 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 	writeHashString(h, receipt.AfterHash)
 	writeHashString(h, receipt.Evidence.Summary)
 	writeHashString(h, receipt.Evidence.ContentHash)
+	if receipt.Evidence.OwnerRevisionSet != nil {
+		writeHashString(h, "owner-read-dependencies/v1")
+		writeHashString(h, stableFormalValueHash("runtime-owner-read-dependencies", *receipt.Evidence.OwnerRevisionSet))
+	}
 	if receipt.Evidence.ContentAddress == nil {
 		writeHashString(h, "content-address:nil")
 	} else {

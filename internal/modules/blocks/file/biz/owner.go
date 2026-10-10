@@ -241,12 +241,24 @@ func (m *Biz) handleFileReadOperation(event magicevent.Event, result magicevent.
 		return
 	}
 	defer leaveFresh()
+	if command.Transaction.DefinitionRevision == "" || command.Transaction.DefinitionRevision != strings.TrimSpace(command.Transaction.DefinitionRevision) {
+		setPrerequisiteError(result, common.ErrInvalidArgument)
+		return
+	}
 	operationResult, executeErr := m.runtimeAdapter.ReadFile(event.Context(), FileReadRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory, Path: data.Path, Optional: data.Optional,
 		MaxBytes: data.MaxBytes, StartLine: data.StartLine, EndLine: data.EndLine,
 	})
 	status := runtimeOperationStatus(executeErr)
 	evidence := operationResult.Evidence
+	if executeErr == nil && operationResult.Exists {
+		dependencies, dependencyErr := fileReadOwnerDependencies(command, operationResult, data.StartLine, data.EndLine, data.MaxBytes)
+		if dependencyErr != nil {
+			setPrerequisiteError(result, dependencyErr)
+			return
+		}
+		evidence.OwnerRevisionSet = &dependencies
+	}
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileRead, operationResult.FailureCode, operationResult.FailureMessage, command.TargetRefs)

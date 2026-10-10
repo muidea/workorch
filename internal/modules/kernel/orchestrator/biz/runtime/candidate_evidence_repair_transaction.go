@@ -701,6 +701,7 @@ func confirmedRepairSourceRejection(
 		return runtimecontract.EvidenceFact{}, runtimecontract.RuntimeOperationReceipt{}, runtimecontract.RuntimeOperation{}, fmt.Errorf("%w: confirmed owner repair source failure does not match its exact validation-owner receipt", common.ErrConflict)
 	}
 	if fact.Summary != receiptEvidence.Summary || fact.ContentHash != receiptEvidence.ContentHash ||
+		!reflect.DeepEqual(fact.OwnerRevisionSet, receiptEvidence.OwnerRevisionSet) ||
 		!reflect.DeepEqual(fact.ContentAddress, receiptEvidence.ContentAddress) ||
 		!reflect.DeepEqual(fact.ExitCode, receiptEvidence.ExitCode) || !sameRuntimeTargetRefs(fact.EvidenceRefs, receiptEvidence.EvidenceRefs) ||
 		fact.Quality != receiptEvidence.Quality || fact.ZeroWork != receiptEvidence.ZeroWork ||
@@ -1126,6 +1127,7 @@ func validateConfirmedRepairAcceptedEvidenceLineage(
 		!sameRuntimeTargetRefs(evidence.TargetRefs, operation.TargetRefs) ||
 		!sameRuntimeStringSet(evidence.BindingRefs, operation.BindingRefs) || evidence.Summary != receiptEvidence.Summary ||
 		evidence.ContentHash != receiptEvidence.ContentHash || !reflect.DeepEqual(evidence.ContentAddress, receiptEvidence.ContentAddress) ||
+		!reflect.DeepEqual(evidence.OwnerRevisionSet, receiptEvidence.OwnerRevisionSet) ||
 		!reflect.DeepEqual(evidence.ExitCode, receiptEvidence.ExitCode) ||
 		!sameRuntimeTargetRefs(evidence.EvidenceRefs, receiptEvidence.EvidenceRefs) || evidence.Quality != receiptEvidence.Quality ||
 		evidence.ZeroWork != receiptEvidence.ZeroWork || evidence.EvidenceReason != receiptEvidence.EvidenceReason ||

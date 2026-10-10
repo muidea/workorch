@@ -50,6 +50,12 @@ func ValidateRuntimeEvidenceLedgerSequence(
 		"rejected": facts.Evidence.Rejected,
 	} {
 		for _, fact := range values {
+			if err := validateRuntimeOwnerRevisionSetRaw(fact.OwnerRevisionSet); err != nil {
+				return fmt.Errorf("runtime %s evidence owner dependencies: %w", ledger, err)
+			}
+			if fact.OwnerRevisionSet != nil && fact.OwnerRevisionSet.DefinitionRevision != facts.DefinitionRevision {
+				return fmt.Errorf("runtime %s evidence owner dependencies definition mismatch", ledger)
+			}
 			if fact.ID == "" || fact.Revision == "" {
 				return fmt.Errorf("runtime %s evidence fact requires identity and revision", ledger)
 			}

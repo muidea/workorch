@@ -110,6 +110,9 @@ func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context,
 	if err := validateOperationReceiptOwnerSource(aggregate, dispatchID, receipt.OperationID, ownerModuleID); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
+	if receipt.Evidence.OwnerRevisionSet != nil && receipt.Evidence.OwnerRevisionSet.DefinitionRevision != aggregate.Facts.DefinitionRevision {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: owner read dependencies definition mismatch", common.ErrConflict)
+	}
 	// Producer authority is independent of receipt outcome shape. Reject a
 	// forged owner before interpreting accepted/no-op/rejected content so every
 	// terminal variant has the same sealed-source gate.

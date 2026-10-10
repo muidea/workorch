@@ -39,6 +39,9 @@ func ValidateRuntimeOperationReceiptExecutionLineage(
 			if !found {
 				return fmt.Errorf("%s dispatch %q operation %q committed execution %s has no owner receipt", label, dispatch.ID, execution.OperationID, identity)
 			}
+			if receipt.Evidence.OwnerRevisionSet != nil && receipt.Evidence.OwnerRevisionSet.DefinitionRevision != dispatch.Transaction.DefinitionRevision {
+				return fmt.Errorf("%s dispatch %q owner dependencies definition mismatch", label, dispatch.ID)
+			}
 			if receipt.OperationID != execution.OperationID {
 				return fmt.Errorf("%s dispatch %q operation %q owner receipt operation mismatch", label, dispatch.ID, execution.OperationID)
 			}

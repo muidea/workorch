@@ -29,6 +29,12 @@ func TestVerificationPolicySealedOwnerModalityAndScope(t *testing.T) {
 	receipt := runtimecontract.RuntimeOperationReceipt{ExecutionKey: "execution-claim", Fence: 1, OperationID: fact.OperationID,
 		Outcome: runtimecontract.RuntimeOperationOutcomeAccepted, ObservedEffectScope: runtimecontract.RuntimeEffectNone,
 		Evidence: runtimecontract.RuntimeOperationEvidence{Validation: &observation}}
+	dependencies := (runtimecontract.RuntimeOwnerRevisionSet{
+		DefinitionRevision: aggregate.Facts.DefinitionRevision,
+		Entries:            []runtimecontract.RuntimeOwnerRevisionRef{{OwnerKind: "capability", OwnerInstanceID: "typed-owner/workspace", ResourceKind: "workspace_target", ResourceID: "target.txt", Revision: "original-content", DependencyHash: "original-selector"}},
+	}).WithHash()
+	receipt.Evidence.OwnerRevisionSet = runtimecontract.CloneRuntimeOwnerRevisionSet(&dependencies)
+	fact.OwnerRevisionSet = runtimecontract.CloneRuntimeOwnerRevisionSet(&dependencies)
 	aggregate.OperationReceipts = []runtimecontract.RuntimeOperationReceipt{receipt}
 	dispatch.OperationExecutions = []runtimecontract.RuntimeOperationExecutionRecord{{
 		OperationID: fact.OperationID, ExecutionKey: receipt.ExecutionKey, Fence: receipt.Fence,
@@ -57,6 +63,15 @@ func TestVerificationPolicySealedOwnerModalityAndScope(t *testing.T) {
 			a.Facts.Evidence.Accepted[0].Validation.ProofClass = runtimecontract.RuntimeValidationProofExecuted
 		}},
 		{"stale fence", func(a *RuntimeAggregate) { a.OperationReceipts[0].Fence++ }},
+		{"missing owner dependencies coherent fact hash", func(a *RuntimeAggregate) {
+			a.Facts.Evidence.Accepted[0].OwnerRevisionSet = nil
+			a.CompletedDispatches[0].OperationExecutions[0].EvidenceFactHash = runtimecontract.StableRuntimeEvidenceFactHash(a.Facts.Evidence.Accepted[0])
+		}},
+		{"changed owner dependencies coherent fact hash", func(a *RuntimeAggregate) {
+			a.Facts.Evidence.Accepted[0].OwnerRevisionSet.Entries[0].Revision = "changed"
+			*a.Facts.Evidence.Accepted[0].OwnerRevisionSet = a.Facts.Evidence.Accepted[0].OwnerRevisionSet.WithHash()
+			a.CompletedDispatches[0].OperationExecutions[0].EvidenceFactHash = runtimecontract.StableRuntimeEvidenceFactHash(a.Facts.Evidence.Accepted[0])
+		}},
 		{"missing context", func(a *RuntimeAggregate) { a.Facts.Evidence.Accepted[0].AuthoritySnapshotID = "" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -65,6 +80,8 @@ func TestVerificationPolicySealedOwnerModalityAndScope(t *testing.T) {
 			copy.Facts.Evidence.Accepted = append([]runtimecontract.EvidenceFact(nil), aggregate.Facts.Evidence.Accepted...)
 			copy.CompletedDispatches = append([]SealedDispatch(nil), aggregate.CompletedDispatches...)
 			copy.CompletedDispatches[0].ValidationRecipes = append([]runtimecontract.RuntimeValidationRecipe(nil), aggregate.CompletedDispatches[0].ValidationRecipes...)
+			copy.CompletedDispatches[0].OperationExecutions = append([]runtimecontract.RuntimeOperationExecutionRecord(nil), aggregate.CompletedDispatches[0].OperationExecutions...)
+			copy.Facts.Evidence.Accepted[0].OwnerRevisionSet = runtimecontract.CloneRuntimeOwnerRevisionSet(aggregate.Facts.Evidence.Accepted[0].OwnerRevisionSet)
 			copy.CompletedDispatches[0].Candidate.Validation = &runtimecontract.ValidationCandidate{Operations: append([]runtimecontract.ValidationOperation(nil), aggregate.CompletedDispatches[0].Candidate.Validation.Operations...)}
 			copy.CompletedDispatches[0].Candidate.Validation.Operations[0].Operation.Parameters = append([]runtimecontract.OperationParameter(nil), aggregate.CompletedDispatches[0].Candidate.Validation.Operations[0].Operation.Parameters...)
 			copy.OperationReceipts[0].Evidence.Validation = pointerValidationObservation(*aggregate.OperationReceipts[0].Evidence.Validation)

@@ -34,6 +34,23 @@ Runtime candidate conformance 是 SM-3 pre-seal owner observation，其余 Runti
 execute 合同属于 SM-3 sealed operation participation；它们都不是 reducer API。`SealedRuntimeOperation` 绑定 canonical
 payload hash、operation identity 与 execution scope，handler 不能从自由文本重建 operation。
 
+### 实际读取依赖
+
+成功且目标存在的 `file/read` 从本次完整流式读取的原始 bytes SHA-256 生成
+`RuntimeOperationEvidence.OwnerRevisionSet`。集合绑定 sealed transaction 的 exact `DefinitionRevision`，资源身份为
+`capability / blocks/file/<WorkspaceID> / workspace_target / <TargetRef>`；`Revision` 是全流内容 hash，
+`DependencyHash` 另外绑定 Workspace、target、全流 hash、本次 selected content、行范围、字节上限及
+truncated/binary/content-complete 标志。即使返回内容有界，也不能用返回前缀 hash 替代全流 hash。
+
+File 不重新打开文件来补造历史版本，不从 `ResourceChanges` 或 current catalog 推断本次读取。typed receipt commit
+保存该原始集合；exact persisted receipt replay 返回原依赖，不受后来文件内容或停机影响。未封存 exact Definition
+的新读取在文件 I/O 和 receipt commit 前拒绝。集合是本次读取事实，不是 CWI credit 或跨时刻 freshness 凭证。
+
+optional missing read、list/preview、mutation、validation、assessment 和正式 artifact 不由该读取合同补造依赖；
+它也不提供 current owner 查询或 stale/reopen 裁决。现行 Runtime 路径检查与读取仍不是跨文件原子快照，
+该依赖字段不证明所有 filesystem TOCTOU 已被防住。独立 producer 回归见
+[`biz/file_read_dependencies_test.go`](biz/file_read_dependencies_test.go)。
+
 ### 生命周期合同
 
 - 普通及 matched 订阅统一按成功获取顺序登记，部分 Start 失败保留 adapter/清单，未清理前不重复注册；退订成功才移除对应项。
@@ -109,6 +126,7 @@ payload hash、operation identity 与 execution scope，handler 不能从自由�
 | 维度 | 可执行证据 | 覆盖结论 |
 | --- | --- | --- |
 | normal list/read/write/edit/preview/apply | [`module_test.go`](module_test.go)、[`biz/file_runtime_adapter_test.go`](biz/file_runtime_adapter_test.go) | 覆盖 create-only 与 existing-target selector、读写编辑及 patch 主路径 |
+| actual existing-read dependency | [`biz/file_read_dependencies_test.go`](biz/file_read_dependencies_test.go)、`kernel/orchestrator/biz/runtime/owner_read_dependencies_test.go`、`workorchruntimecontract/runtime_receipt_owner_dependencies_test.go` | 真实全流 bytes hash、独立 selected-content/selector 前像、exact Definition 拒绝、typed receipt 保存和停机重放；消费者覆盖 CAS 前失败/响应丢失、原集合 hash/clone/reload 与来源篡改，非 current applicability 或 terminal union 证明 |
 | canonical scope preimage | [`biz/file_runtime_target_canonical_test.go`](biz/file_runtime_target_canonical_test.go)、`kernel/orchestrator/biz/runtime_implementation_work_scope_test.go` | 真实 File 空／唯一／完整多文件 scope、unsupported、canonical hash/当前 JSON 重载、只读与 stale revision；不替代 working binding、公开 activation 或终验权限 |
 | text edit applicability | [`edit_applicability_test.go`](edit_applicability_test.go) | `file/edit` 与 `patch/apply|patch/preview` text_replace 的真实 EventHub 矩阵：exact/byte-exact、空 replacement、occurrence、缺失/歧义/越界、baseHash/binary 与 duplicate；probe 零写入/receipt，owner constraint 不含执行或纠正权限 |
 | exact validation input delta | [`biz/validation_input_repair_test.go`](biz/validation_input_repair_test.go) | EventHub feasibility 的 exact/夹带断言/旧输入/旧诊断矩阵，零预检副作用，真实 apply、重启重放与 newer input 保护 |
