@@ -231,6 +231,9 @@ func TestMCPOwnerEmitsStructuredFailureTargetObservationThroughTypedReceipt(t *t
 		response.Receipt.Feedback.OriginalDiagnostic.OriginalMessage != diagnostic.OriginalMessage {
 		t.Fatalf("MCP owner receipt lost scoped original feedback: %+v", response.Receipt.Feedback)
 	}
+	if err := owner.BeginShutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
 	duplicateResult := hub.Send(magicevent.NewEventWithContext(
 		mcpevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
 		magicevent.NewHeader(), ctx, command,

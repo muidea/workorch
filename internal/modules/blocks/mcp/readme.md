@@ -39,12 +39,15 @@ Callable capability 与 validation surface 是不同 fact：只有 owner 明确�
 - 全部六个 Runtime ingress 都是 strong call：必须先确认同步 `Result` 与 exact `kernel/orchestrator` producer，再解析 concrete
   Command；Post/nil Result、错误 producer 或错误 concrete payload 均不得查询 Registry、启动 session、调用 endpoint 或访问 receipt。
 
-## 本地生命周期资源合同
+## 生命周期与排空合同
 
-- `Start` 只在 SimpleObserver/Hub 实际完成订阅后逐 topic 记账；第 N 个订阅失败返回原 checked error，已成功资源和 owner 引用保留，可检查式清理或从未完成 topic 重试。
-- `Biz.Teardown(ctx)` 返回 error，按账本逆序退订，每次成功才移除该项；失败或 context 取消保留剩余订阅与 adapter/session。全部退订实际完成且 context 有效后才调用 adapter `Close`；成功后清空引用，重复清理不再次关闭 adapter。`Module.Stop` 只有完整清理成功才清空同一 owner 引用，plugin 的 void `Teardown(ctx)` 将错误交给 framework guard。
-- 生命周期调用由调用方串行化；账本不持有跨 Hub control action 的 owner 锁，也不替代输入停止与在途 handler/session 排空。最终 adapter 关闭的前提是调用方已完成真实排空，退订完成不等于 quiescence。本组件尚未提供全局停机屏障或阶段准入 guard；adapter 的既有无 context `Close` 不能被此账本变成有预算的排空协议。
-- `TestMCPOwnerResourceLedgerEveryStartFailureCanTeardown`、`TestMCPOwnerResourceLedgerEveryTeardownFailureRetainsDependenciesAndRetries`、`TestMCPOwnerResourceLedgerCancellationRetainsUnreleasedResources` 及 Module resource-ledger tests 覆盖逐 N 故障、取消、retry 和同 owner 引用保留；这些测试不是全局生命周期完成证明。
+- `Start` 通过 Base checked SimpleObserver API 逐成功 topic 记账；第 N 个失败保留同一 owner 与成功订阅。Start 关闭后不可重新打开代次。
+- `BeginShutdown` 关闭 fresh root 准入；每个实际 EventHub handler 从准入到真实返回都持有 owner Lifecycle 票。cancel/调用者等待超时不释放票，因此子进程等待和 nested receipt commit 都留在实际执行 handler 的排空范围。
+- Execute 的显式 drain 只做 sealed command 校验与 exact persisted receipt 查询/重放；未命中必须另取 fresh 票，不能借 drain 创建新 effect、governance receipt 或重新执行。其他 capability/admissibility/feasibility/reconciliation 查询在关门后拒绝 fresh root。
+- `Quiesce(ctx)` 等待本 owner 真实在途归零；超时保留 adapter、订阅和同一 owner 引用，可使用独立预算重试。局部归零不封闭合法 drain，最终 Teardown 仍必须由应用共享 Hub/任务全局屏障后的调用方授权，不能把退订当作排空。
+- `Biz.Teardown(ctx)` 返回 error，每项退订真实成功才 pop，失败或取消保留未释放依赖。`Module.Stop` 成功才清空 owner；public void `Teardown` 的失败交给 framework guard。生命周期配置/最终释放调用由调用方串行化，不持有跨 Hub action 的 owner 锁。
+- MCP idle timer 调度前计数，关门阻止再调度；只有 `Timer.Stop()==true` 才直接释放计数，已开始 eviction 必须等待 session Close 与 callback 真实退出。adapter `CloseChecked` 仅发起一次真实关闭，预算超时保留 completion/session，重试不重复关闭。
+- `OwnerQuiescenceWaitsForRealHandlerAndRetainsRetryDependencies`、`OwnerQuiescenceExplicitReceiptDrainStillWaitsForCompletion` 与 ResourceLedger/Module tests 验证本地阻塞、取消、关门、retry 和 partial Start；这些测试不证明全进程所有 owner 已适配，也不改变 SM-1～SM-4 业务合同。
 
 ## 能力验收
 

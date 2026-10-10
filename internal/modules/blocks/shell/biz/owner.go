@@ -22,6 +22,7 @@ const StepKindCommand = modulecommon.StepKindCommand
 
 type Biz struct {
 	basebiz.Base
+	lifecycle        basebiz.Lifecycle
 	runtimeAdapter   *RuntimeAdapter
 	started          bool
 	subscribedTopics []string
@@ -61,6 +62,11 @@ func (m *Biz) Start() error {
 	if m == nil || m.runtimeAdapter == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	leaveStart, err := m.lifecycle.Enter()
+	if err != nil {
+		return err
+	}
+	defer leaveStart()
 	if m.started {
 		return nil
 	}
@@ -79,9 +85,7 @@ func (m *Biz) Start() error {
 	// A failed Start keeps every completed subscription reachable. Retrying
 	// resumes at the first unfinished topic rather than registering duplicates.
 	for _, subscription := range subscriptions[len(m.subscribedTopics):] {
-		if err := checkedLifecycleSubscription(func() {
-			m.SubscribeFunc(subscription.topic, subscription.handler)
-		}); err != nil {
+		if err := m.SubscribeFuncChecked(subscription.topic, m.lifecycleHandler(subscription.handler, subscription.topic == shellevents.TopicExecuteOperation)); err != nil {
 			return err
 		}
 		m.subscribedTopics = append(m.subscribedTopics, subscription.topic)
@@ -100,6 +104,13 @@ func (m *Biz) Teardown(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// 最终释放仍由应用共享 Hub/任务屏障后的调用方授权；本地等待只是防御。
+	if err := m.BeginShutdown(ctx); err != nil {
+		return err
+	}
+	if err := m.Quiesce(ctx); err != nil {
+		return err
+	}
 	// Lifecycle calls are serialized by their caller. Do not hold an owner
 	// lock across Hub control actions. Unsubscribe completion is a resource
 	// receipt, not proof of handler quiescence; the caller must drain first.
@@ -108,9 +119,7 @@ func (m *Biz) Teardown(ctx context.Context) error {
 			return err
 		}
 		last := len(m.subscribedTopics) - 1
-		if err := checkedLifecycleSubscription(func() {
-			m.UnsubscribeFunc(m.subscribedTopics[last])
-		}); err != nil {
+		if err := m.UnsubscribeFuncChecked(m.subscribedTopics[last]); err != nil {
 			return err
 		}
 		m.subscribedTopics = m.subscribedTopics[:last]
@@ -122,23 +131,6 @@ func (m *Biz) Teardown(ctx context.Context) error {
 	m.started = false
 	m.runtimeAdapter = nil
 	return ctx.Err()
-}
-
-// Base's void helpers panic on checked SimpleObserver errors. Keep that exact
-// error recoverable for explicit Start/Stop callers; programming panics remain
-// visible to the framework guard. No resource ledger is advanced on failure.
-func checkedLifecycleSubscription(action func()) (err error) {
-	defer func() {
-		if value := recover(); value != nil {
-			if checkedErr, ok := value.(*cd.Error); ok {
-				err = checkedErr
-				return
-			}
-			panic(value)
-		}
-	}()
-	action()
-	return nil
 }
 
 // handleRuntimeCWIReconciliationQuery executes only the recipes sealed for
@@ -342,6 +334,14 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		result.Set(shellevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
+	// 未命中的回执查询不能借 drain 准入产生新 effect 或新 receipt。
+	leaveFresh, admissionErr := m.lifecycle.Enter()
+	if admissionErr != nil {
+		setCapabilityError(result, admissionErr)
+		return
+	}
+	defer leaveFresh()
+
 	currentRevision := m.runtimeAdapter.runtimeAdmissibilityPolicyRevision()
 	if currentRevision != authorization.OwnerRevision {
 		message := "Shell owner policy changed after operation seal"
@@ -897,5 +897,57 @@ func setShellRuntimeIngressInvalid(result magicevent.Result, message string) {
 func setCapabilityError(result magicevent.Result, err error) {
 	if result != nil {
 		result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: err.Error(), Cause: err})
+	}
+}
+
+// BeginShutdown 关停新 root，不取消已接纳 handler；其 nested receipt/query
+// 仍保留真实调用 context，只有实际返回时才释放在途记账。
+func (m *Biz) BeginShutdown(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	m.lifecycle.BeginShutdown()
+
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
+}
+
+func (m *Biz) Quiesce(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	if err := m.lifecycle.Quiesce(ctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Execute 的 drain 入口仅执行 sealed command 校验与 exact persisted receipt
+// 查询；receipt 未命中必须另取 fresh 票，不能回退扩大停机期间的执行权限。
+func (m *Biz) lifecycleHandler(handler magicevent.ObserverFunc, receiptDrain bool) magicevent.ObserverFunc {
+	return func(ev magicevent.Event, result magicevent.Result) {
+		if result == nil || ev == nil {
+			return
+		}
+		if ev.Source() != runtimecontract.RuntimeModuleOrchestrator {
+			setShellRuntimeIngressInvalid(result, "runtime command source must be kernel/orchestrator")
+			return
+		}
+		var leave func()
+		var err error
+		if receiptDrain {
+			leave, err = m.lifecycle.EnterDrain()
+		} else {
+			leave, err = m.lifecycle.Enter()
+		}
+		if err != nil {
+			setCapabilityError(result, err)
+			return
+		}
+		defer leave()
+		handler(ev, result)
 	}
 }

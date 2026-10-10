@@ -69,6 +69,9 @@ func TestSSHOwnerRequiresExactApprovalBeforeNetworkAndCommitsObservedChange(t *t
 	if err := receipt.Validate(); err != nil {
 		t.Fatalf("receipt validation: %v", err)
 	}
+	if err := owner.BeginShutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
 	captureBeforeReplay := readFile(t, captureFile)
 	duplicateResult := hub.Send(magicevent.NewEventWithContext(sshevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, second))
 	duplicateData, err := duplicateResult.Get()

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -25,8 +26,13 @@ type RuntimeAdapter struct {
 	// test and race with another adapter's configuration.
 	idleSessionTimeout time.Duration
 
-	sessionMu sync.Mutex
-	sessions  map[string]*stdioSession
+	sessionMu     sync.Mutex
+	sessions      map[string]*stdioSession
+	idleTimers    map[*idleEvictionTimer]struct{}
+	idleLifecycle basebiz.Lifecycle
+	closing       bool
+	closeOnce     sync.Once
+	closeDone     chan struct{}
 }
 
 type serverGetter interface {

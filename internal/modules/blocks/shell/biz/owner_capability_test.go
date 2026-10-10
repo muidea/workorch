@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
@@ -274,8 +275,8 @@ func TestShellOwnerResourceLedgerEveryTeardownFailureRetainsDependenciesAndRetri
 			if err := owner.Teardown(ctx); err != failure {
 				t.Fatalf("Teardown error = %v, want exact checked failure", err)
 			}
-			if got := resourceLedgerCapabilityReads(hub); got != 1 {
-				t.Fatalf("failed unsubscribe lost remaining handler: reads=%d", got)
+			if got := resourceLedgerCapabilityReads(hub); got != 0 {
+				t.Fatalf("停机后仍接受 fresh capability query: reads=%d", got)
 			}
 			remaining := 7 - n + 1
 			if !reflect.DeepEqual(owner.subscribedTopics, topics[:remaining]) || owner.runtimeAdapter != adapter {
@@ -331,16 +332,6 @@ func TestShellOwnerResourceLedgerCancellationRetainsUnreleasedResources(t *testi
 	}
 }
 
-func TestShellOwnerResourceLedgerUnknownPanicRemainsVisible(t *testing.T) {
-	marker := &struct{}{}
-	defer func() {
-		if value := recover(); value != marker {
-			t.Fatalf("panic = %v, want exact unknown panic", value)
-		}
-	}()
-	_ = checkedLifecycleSubscription(func() { panic(marker) })
-}
-
 func resourceLedgerCapabilityReads(hub magicevent.Hub) int32 {
 	ev := &shellLifecycleEvent{Event: magicevent.NewEventWithContext(
 		shellevents.TopicAcquireRuntimeCapabilities, runtimecontract.RuntimeModuleOrchestrator, ModuleID,
@@ -348,4 +339,84 @@ func resourceLedgerCapabilityReads(hub magicevent.Hub) int32 {
 	)}
 	hub.Send(ev)
 	return ev.dataReads.Load()
+}
+
+func TestShellOwnerQuiescenceWaitsForRealHandlerAndRetainsRetryDependencies(t *testing.T) {
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	owner := newResourceLedgerOwner(hub)
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	adapter := owner.runtimeAdapter
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	handler := owner.lifecycleHandler(func(ev magicevent.Event, result magicevent.Result) {
+		close(entered)
+		<-release
+		result.Set(nil, nil)
+	}, false)
+	callCtx, cancelCall := context.WithCancel(context.Background())
+	ev := magicevent.NewEventWithContext("quiescence-test", runtimecontract.RuntimeModuleOrchestrator, ModuleID, nil, callCtx, nil)
+	go func() { defer close(done); handler(ev, magicevent.NewResult(ev.ID(), ev.Source(), ev.Destination())) }()
+	<-entered
+	cancelCall()
+	if err := owner.BeginShutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	budget, cancelBudget := context.WithTimeout(context.Background(), 15*time.Millisecond)
+	defer cancelBudget()
+	if err := owner.Quiesce(budget); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Quiesce = %v, want timeout while canceled handler still runs", err)
+	}
+	if err := owner.Teardown(budget); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Teardown = %v", err)
+	}
+	if owner.runtimeAdapter != adapter || len(owner.subscribedTopics) == 0 {
+		t.Fatal("timeout released dependencies")
+	}
+	var freshCalls int
+	fresh := owner.lifecycleHandler(func(magicevent.Event, magicevent.Result) { freshCalls++ }, false)
+	result := magicevent.NewResult(ev.ID(), ev.Source(), ev.Destination())
+	fresh(ev, result)
+	if freshCalls != 0 || result.Error() == nil {
+		t.Fatal("BeginShutdown accepted new root")
+	}
+	if err := owner.Start(); !errors.Is(err, basebiz.ErrLifecycleClosing) {
+		t.Fatalf("Start reopened shutdown generation: %v", err)
+	}
+	close(release)
+	<-done
+	if err := owner.Quiesce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Teardown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestShellOwnerQuiescenceExplicitReceiptDrainStillWaitsForCompletion(t *testing.T) {
+	hub := magicevent.NewHub(8)
+	t.Cleanup(func() { hub.Terminate(context.Background()) })
+	owner := newResourceLedgerOwner(hub)
+	if err := owner.BeginShutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	receipt := owner.lifecycleHandler(func(magicevent.Event, magicevent.Result) {
+		close(entered)
+		<-release
+	}, true)
+	ev := magicevent.NewEvent("receipt-drain-test", runtimecontract.RuntimeModuleOrchestrator, ModuleID, nil, nil)
+	go func() { defer close(done); receipt(ev, magicevent.NewResult(ev.ID(), ev.Source(), ev.Destination())) }()
+	<-entered
+	budget, cancel := context.WithTimeout(context.Background(), 15*time.Millisecond)
+	defer cancel()
+	if err := owner.Quiesce(budget); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("drain not counted: %v", err)
+	}
+	close(release)
+	<-done
+	if err := owner.Quiesce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }

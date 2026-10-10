@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -16,6 +17,8 @@ type RuntimeAdapter struct {
 	targets     map[string]sshTargetSnapshot
 	sessions    map[string]sshSessionSnapshot
 	credentials map[string]sshCredentialSnapshot
+	closeOnce   sync.Once
+	closeDone   chan struct{}
 	revision    string
 }
 
@@ -150,20 +153,40 @@ func (a *RuntimeAdapter) admissibilityRevision() string {
 	return stableSSHOwnerPolicyRevisionForEmpty(a.defaultTimeout())
 }
 
-func (a *RuntimeAdapter) Close() {
+// CloseChecked 独立等待同一次真实清理，超时不清空 owner 引用或重复关闭。
+func (a *RuntimeAdapter) CloseChecked(ctx context.Context) error {
 	if a == nil {
-		return
+		return nil
 	}
-	for ref, credential := range a.credentials {
-		credential.password = ""
-		credential.privateKey = ""
-		credential.secretHash = ""
-		a.credentials[ref] = credential
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	a.targets = nil
-	a.sessions = nil
-	a.credentials = nil
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	a.closeOnce.Do(func() {
+		a.closeDone = make(chan struct{})
+		go func() {
+			for ref, credential := range a.credentials {
+				credential.password = ""
+				credential.privateKey = ""
+				credential.secretHash = ""
+				a.credentials[ref] = credential
+			}
+			a.targets = nil
+			a.sessions = nil
+			a.credentials = nil
+			close(a.closeDone)
+		}()
+	})
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-a.closeDone:
+		return ctx.Err()
+	}
 }
+func (a *RuntimeAdapter) Close() { _ = a.CloseChecked(context.Background()) }
 
 func stableSSHOwnerPolicyRevisionForEmpty(timeout time.Duration) string {
 	hash := sha256.Sum256([]byte("ssh-owner-policy|timeout=" + timeout.String() + "|strict-host-key|owner-observation|approval"))

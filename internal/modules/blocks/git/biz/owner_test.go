@@ -179,6 +179,13 @@ func TestGitOwnerStateChangingReceiptReplaysWithoutSecondOperationAfterOwnerRecr
 		t.Fatalf("first owner effect staged = %q, want generated.txt", staged)
 	}
 
+	if err := owner.BeginShutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	shutdownReplay := sendGitStateChangingReceiptCommand(t, ctx, hub, command)
+	if !runtimecontract.SameRuntimeOperationReceipt(shutdownReplay.Receipt, first.Receipt) {
+		t.Fatal("停机期间未重放exact既有receipt")
+	}
 	// Recreate the owner after the durable receipt has been committed. A new
 	// delivery with the same key/fence and exact sealed payload must return the
 	// persisted receipt before it can alter the repository again.

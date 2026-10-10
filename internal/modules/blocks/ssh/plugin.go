@@ -41,3 +41,20 @@ func (m *Module) Teardown(ctx context.Context) {
 		}
 	}
 }
+
+func (m *Module) BeginShutdown(ctx context.Context) {
+	if m != nil && m.bizPtr != nil {
+		if err := m.bizPtr.BeginShutdown(ctx); err != nil {
+			panic(err)
+		}
+	}
+}
+func (m *Module) Quiesce(ctx context.Context) *cd.Error {
+	if m == nil || m.bizPtr == nil {
+		return nil
+	}
+	if err := m.bizPtr.Quiesce(ctx); err != nil {
+		return cd.NewError(cd.Unexpected, err.Error())
+	}
+	return nil
+}
