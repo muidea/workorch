@@ -168,10 +168,17 @@ func TestTerminalEvidenceProjectionDoesNotRestoreHistoricalBindingCredit(t *test
 				binding.Hash = StableCoverageEvidenceBindingHash(binding)
 				source.Facts.Focus.CoverageEvidenceBindings[0] = binding
 				source.Facts.Coverage[0].CurrentBindingRef.BindingHash = binding.Hash
+				source.CompletedDispatches[0].CoverageBindings = []CoverageEvidenceBinding{binding.Clone()}
 			case "weak evidence":
 				source.Facts.Evidence.Accepted[0].ZeroWork = true
 			case "only A":
 				source.Facts.Evidence.Accepted[0].Validation.PassedChecks = nil
+			}
+			if name == "missing metric" || name == "missing artifact" {
+				proof := source.Facts.Focus.CoverageEvidenceBindings[0].Proofs[0]
+				if !RuntimeValidationObservationSatisfiesCoverageProof(proof, *source.Facts.Evidence.Accepted[0].Validation) {
+					t.Fatal("metric/artifact 反例必须先满足独立 validation all-of")
+				}
 			}
 			before, _ := json.Marshal(source)
 			outcomes := DeriveRuntimeTerminalRequirementOutcomesFromState(source, RuntimeOwnerRevisionSet{})
@@ -185,6 +192,15 @@ func TestTerminalEvidenceProjectionDoesNotRestoreHistoricalBindingCredit(t *test
 			after, _ := json.Marshal(source)
 			if !reflect.DeepEqual(before, after) {
 				t.Fatal("投影改写原始账本")
+			}
+			if name == "missing metric" || name == "missing artifact" {
+				proof := source.Facts.Focus.CoverageEvidenceBindings[0].Proofs[0]
+				source.Facts.Evidence.Accepted[0].EvidenceTags = append([]string(nil), proof.MetricConstraints...)
+				source.Facts.Evidence.Accepted[0].EvidenceRefs = append([]string(nil), proof.ArtifactRefs...)
+				current := DeriveRuntimeTerminalRequirementOutcomesFromState(source, RuntimeOwnerRevisionSet{})
+				if len(current[0].AcceptedEvidenceRefs) != 1 {
+					t.Fatal("补齐 exact metric/artifact 后仍未恢复当前适用性")
+				}
 			}
 		})
 	}
