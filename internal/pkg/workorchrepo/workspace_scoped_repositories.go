@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -109,6 +110,17 @@ type workspaceScopedFileStore struct {
 var workspaceRunGenerationLocks sync.Map
 
 var workspaceIndexLocks sync.Map
+
+var workspacePersistenceLocks sync.Map
+
+func workspacePersistenceLock(path string) *sync.Mutex {
+	key, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		key = filepath.Clean(path)
+	}
+	value, _ := workspacePersistenceLocks.LoadOrStore(key, &sync.Mutex{})
+	return value.(*sync.Mutex)
+}
 
 func workspaceRunGenerationLock(path string) *sync.Mutex {
 	key, err := filepath.Abs(filepath.Clean(path))
@@ -1246,6 +1258,33 @@ func (s *workspaceScopedFileStore) upsertWorkspaceIndex(item *workspacemodel.Wor
 	return s.saveWorkspaceIndexLocked(idx)
 }
 
+func (s *workspaceScopedFileStore) ensureCreationWorkspaceIndex(item *workspacemodel.Workspace) error {
+	shared := workspaceIndexLock(s.workspaceIndexPath())
+	shared.Lock()
+	defer shared.Unlock()
+	s.indexMu.Lock()
+	defer s.indexMu.Unlock()
+	idx, err := s.loadWorkspaceIndexLocked()
+	if err != nil {
+		return err
+	}
+	for _, entry := range idx.Workspaces {
+		if entry.WorkspaceID != item.ID {
+			continue
+		}
+		if entry.InternalRoot != s.workspaceRootRef(item.ID) || entry.DeliverableDirectory != item.DeliverableDirectory || entry.InternalDirectory != item.InternalDirectory || entry.State != item.State || entry.ActiveRunID != item.ActiveRunID {
+			return common.ErrConflict
+		}
+		return nil
+	}
+	idx.Workspaces = append(idx.Workspaces, workspaceIndexEntry{
+		WorkspaceID: item.ID, InternalRoot: s.workspaceRootRef(item.ID),
+		DeliverableDirectory: item.DeliverableDirectory, InternalDirectory: item.InternalDirectory,
+		State: item.State, ActiveRunID: item.ActiveRunID, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	return s.saveWorkspaceIndexLocked(idx)
+}
+
 func (s *workspaceScopedFileStore) listWorkspaceIndexEntries() ([]workspaceIndexEntry, error) {
 	shared := workspaceIndexLock(s.workspaceIndexPath())
 	shared.Lock()
@@ -1384,13 +1423,82 @@ func (r *workspaceScopedWorkspaceRepository) Create(ctx context.Context, item *w
 		return common.ErrInvalidArgument
 	}
 	path := filepath.Join(r.store.workspaceRoot(item.ID), workspaceScopedWorkspaceFile)
-	if err := r.store.workspaceRepo(path).Create(ctx, workspaceMetadata(item)); err != nil {
+	lock := workspacePersistenceLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+	metadata := workspaceMetadata(item)
+	if item.DefinitionAuthoringCreation != nil {
+		if item.DefinitionAuthoringCreation.Validate(item.ID) != nil || item.DefinitionAuthoringCreation.PendingPersistence != nil || item.Deletion != nil || item.Revision > 1 {
+			return common.ErrInvalidArgument
+		}
+		creation := item.DefinitionAuthoringCreation.Clone()
+		creation.PendingPersistence = &workspacemodel.DefinitionAuthoringCreationPersistence{
+			WorkspaceRevision: 1, DefaultSoulID: item.DefaultSoulID, SoulBindings: maps.Clone(item.SoulBindings),
+		}
+		metadata.DefinitionAuthoringCreation = &creation
+	}
+	if err := r.store.workspaceRepo(path).Create(ctx, metadata); err != nil {
 		return err
 	}
+	if metadata.DefinitionAuthoringCreation != nil {
+		completed, err := r.completeCreationPersistence(ctx, path, metadata)
+		if err != nil {
+			return err
+		}
+		item.Revision = completed.Revision
+		return nil
+	}
+	item.Revision = metadata.Revision
 	if err := r.store.saveWorkspaceSoulBindings(item); err != nil {
 		return err
 	}
 	return r.store.upsertWorkspaceIndex(item)
+}
+
+// completeCreationPersistence 只续写 metadata 封存的创建 after-image；不重放用户输入。
+// 调用者持同路径锁，普通写入／删除不能穿过绑定、索引与完成标记之间的窗口。
+func (r *workspaceScopedWorkspaceRepository) completeCreationPersistence(ctx context.Context, path string, item *workspacemodel.Workspace) (*workspacemodel.Workspace, error) {
+	creation := item.DefinitionAuthoringCreation
+	if creation == nil || creation.PendingPersistence == nil {
+		return r.store.attachWorkspaceSoulBindings(item)
+	}
+	pending := creation.PendingPersistence
+	if creation.Validate(item.ID) != nil || pending.WorkspaceRevision != 1 || item.Revision != pending.WorkspaceRevision || item.Deletion != nil {
+		return nil, common.ErrConflict
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	bindingsPath := r.store.workspaceSoulBindingsPath(item.ID)
+	if _, err := os.Stat(bindingsPath); err == nil {
+		bindings, err := r.store.loadWorkspaceSoulBindings(item.ID)
+		if err != nil {
+			return nil, err
+		}
+		if bindings.DefaultSoulID != pending.DefaultSoulID || !maps.Equal(bindings.Bindings, pending.SoulBindings) {
+			return nil, common.ErrConflict
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	} else {
+		afterImage := *item
+		afterImage.DefaultSoulID = pending.DefaultSoulID
+		afterImage.SoulBindings = maps.Clone(pending.SoulBindings)
+		if err := r.store.saveWorkspaceSoulBindings(&afterImage); err != nil {
+			return nil, err
+		}
+	}
+	if err := r.store.ensureCreationWorkspaceIndex(item); err != nil {
+		return nil, err
+	}
+	completed := *item
+	identity := creation.Clone()
+	identity.PendingPersistence = nil
+	completed.DefinitionAuthoringCreation = &identity
+	if err := r.store.workspaceRepo(path).CompareAndSwap(ctx, &completed, pending.WorkspaceRevision); err != nil {
+		return nil, err
+	}
+	return r.store.attachWorkspaceSoulBindings(&completed)
 }
 
 func (r *workspaceScopedWorkspaceRepository) Get(ctx context.Context, id common.WorkspaceID) (*workspacemodel.Workspace, error) {
@@ -1398,15 +1506,52 @@ func (r *workspaceScopedWorkspaceRepository) Get(ctx context.Context, id common.
 		return nil, common.ErrInvalidArgument
 	}
 	path := filepath.Join(r.store.workspaceRoot(id), workspaceScopedWorkspaceFile)
+	lock := workspacePersistenceLock(path)
+	lock.Lock()
+	defer lock.Unlock()
 	item, err := r.store.workspaceRepo(path).Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return r.store.attachWorkspaceSoulBindings(item)
+	return r.completeCreationPersistence(ctx, path, item)
 }
 
 func (r *workspaceScopedWorkspaceRepository) List(ctx context.Context) ([]*workspacemodel.Workspace, error) {
 	entries, err := r.store.listWorkspaceIndexEntries()
+	if err != nil {
+		return nil, err
+	}
+	indexed := make(map[common.WorkspaceID]bool, len(entries))
+	for _, entry := range entries {
+		indexed[entry.WorkspaceID] = true
+	}
+	// 创建可能尚未提交共享索引；只读取未索引目录中的唯一 Workspace metadata。
+	// 已索引记录由下面的 Get 核对，避免重复解码完整创作账本。
+	roots, err := os.ReadDir(filepath.Join(r.store.dataRoot, "internal", "workspaces"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	for _, root := range roots {
+		if !root.IsDir() {
+			continue
+		}
+		id := common.WorkspaceID(root.Name())
+		if indexed[id] {
+			continue
+		}
+		path := filepath.Join(r.store.workspaceRoot(id), workspaceScopedWorkspaceFile)
+		lock := workspacePersistenceLock(path)
+		lock.Lock()
+		item, readErr := r.store.workspaceRepo(path).Get(ctx, id)
+		if readErr == nil && item.DefinitionAuthoringCreation != nil && item.DefinitionAuthoringCreation.PendingPersistence != nil {
+			_, readErr = r.completeCreationPersistence(ctx, path, item)
+		}
+		lock.Unlock()
+		if readErr != nil && !errors.Is(readErr, common.ErrNotFound) {
+			return nil, readErr
+		}
+	}
+	entries, err = r.store.listWorkspaceIndexEntries()
 	if err != nil {
 		return nil, err
 	}
@@ -1433,6 +1578,12 @@ func (r *workspaceScopedWorkspaceRepository) Update(ctx context.Context, item *w
 		return common.ErrInvalidArgument
 	}
 	path := filepath.Join(r.store.workspaceRoot(item.ID), workspaceScopedWorkspaceFile)
+	lock := workspacePersistenceLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := r.checkCreationPersistenceMutation(ctx, path, item); err != nil {
+		return err
+	}
 	if err := r.store.workspaceRepo(path).Update(ctx, workspaceMetadata(item)); err != nil {
 		return err
 	}
@@ -1447,6 +1598,12 @@ func (r *workspaceScopedWorkspaceRepository) CompareAndSwap(ctx context.Context,
 		return common.ErrInvalidArgument
 	}
 	path := filepath.Join(r.store.workspaceRoot(item.ID), workspaceScopedWorkspaceFile)
+	lock := workspacePersistenceLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := r.checkCreationPersistenceMutation(ctx, path, item); err != nil {
+		return err
+	}
 	if err := r.store.workspaceRepo(path).CompareAndSwap(ctx, workspaceMetadata(item), expectedRevision); err != nil {
 		return err
 	}
@@ -1457,6 +1614,20 @@ func (r *workspaceScopedWorkspaceRepository) CompareAndSwap(ctx context.Context,
 	return r.store.upsertWorkspaceIndex(item)
 }
 
+func (r *workspaceScopedWorkspaceRepository) checkCreationPersistenceMutation(ctx context.Context, path string, item *workspacemodel.Workspace) error {
+	current, err := r.store.workspaceRepo(path).Get(ctx, item.ID)
+	if err != nil {
+		return err
+	}
+	if current.DefinitionAuthoringCreation != nil && current.DefinitionAuthoringCreation.PendingPersistence != nil {
+		return common.ErrConflict
+	}
+	if item.DefinitionAuthoringCreation != nil && item.DefinitionAuthoringCreation.PendingPersistence != nil {
+		return common.ErrConflict
+	}
+	return nil
+}
+
 func (r *workspaceScopedWorkspaceRepository) CleanupDeletionMaterial(ctx context.Context, scope repository.WorkspaceDeletionMaterialCleanupScope) error {
 	if r == nil || r.store == nil {
 		return common.ErrInvalidArgument
@@ -1465,6 +1636,9 @@ func (r *workspaceScopedWorkspaceRepository) CleanupDeletionMaterial(ctx context
 		return err
 	}
 	path := filepath.Join(r.store.workspaceRoot(scope.WorkspaceID), workspaceScopedWorkspaceFile)
+	lock := workspacePersistenceLock(path)
+	lock.Lock()
+	defer lock.Unlock()
 	current, err := r.store.workspaceRepo(path).Get(ctx, scope.WorkspaceID)
 	if errors.Is(err, common.ErrNotFound) {
 		return common.ErrConflict
@@ -1493,8 +1667,15 @@ func (r *workspaceScopedWorkspaceRepository) Delete(ctx context.Context, id comm
 		return common.ErrInvalidArgument
 	}
 	path := filepath.Join(r.store.workspaceRoot(id), workspaceScopedWorkspaceFile)
-	if _, err := r.store.workspaceRepo(path).Get(ctx, id); err != nil {
+	lock := workspacePersistenceLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+	current, err := r.store.workspaceRepo(path).Get(ctx, id)
+	if err != nil {
 		return err
+	}
+	if current.DefinitionAuthoringCreation != nil && current.DefinitionAuthoringCreation.PendingPersistence != nil {
+		return common.ErrConflict
 	}
 	if err := r.store.workspaceRepo(path).Delete(ctx, id); err != nil {
 		return err
@@ -1521,6 +1702,11 @@ func workspaceMetadata(item *workspacemodel.Workspace) *workspacemodel.Workspace
 func (s *workspaceScopedFileStore) attachWorkspaceSoulBindings(item *workspacemodel.Workspace) (*workspacemodel.Workspace, error) {
 	if item == nil {
 		return nil, nil
+	}
+	if item.DefinitionAuthoringCreation != nil {
+		if _, err := os.Stat(s.workspaceSoulBindingsPath(item.ID)); err != nil {
+			return nil, err
+		}
 	}
 	bindings, err := s.loadWorkspaceSoulBindings(item.ID)
 	if err != nil {

@@ -4657,7 +4657,7 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 		}
 	}
 	if item.DefinitionAuthoringCreation != nil {
-		creation := *item.DefinitionAuthoringCreation
+		creation := item.DefinitionAuthoringCreation.Clone()
 		cloned.DefinitionAuthoringCreation = &creation
 	}
 	if item.DefinitionAuthoring != nil {

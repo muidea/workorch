@@ -34,10 +34,9 @@ func (m *Biz) createDefinitionAuthoring(ctx context.Context, cmd workspaceevents
 	if err != nil {
 		return workspaceevents.CreateDefinitionAuthoringResult{}, err
 	}
-	if fresh {
-		if err := m.manager.publishWorkspaceEvent(bound, workspaceevents.TopicWorkspaceCreated, created); err != nil {
-			return workspaceevents.CreateDefinitionAuthoringResult{}, err
-		}
+	// 通知只是读取刷新提示；重放也补发当前事实，不把 Post 当持久完成回执。
+	if err := m.manager.publishWorkspaceEvent(bound, workspaceevents.TopicWorkspaceCreated, created); err != nil {
+		return workspaceevents.CreateDefinitionAuthoringResult{}, err
 	}
 	result := workspaceevents.CreateDefinitionAuthoringResult{WorkspaceID: cmd.WorkspaceID, RequestID: cmd.RequestID, InputHash: cmd.CreationInputHash()}
 	return result, result.ValidateFor(cmd)
