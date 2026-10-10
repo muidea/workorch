@@ -70,8 +70,12 @@ func compileRuntimeSemanticBindingsWithValidatedManifest(validated runtimeValida
 	if err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, err
 	}
-	if err := validateRuntimeSemanticPlanProofObligations(document, manifest); err != nil {
-		return nil, RuntimeCWIReconciliationContract{}, err
+	// proof_batch 的完整义务门禁已由本次 document 校验执行；未改变的正文不重复整份校验。
+	// 其它 step 保留既有 compiler 路径，不用调用者声明或跨调用缓存替代证明。
+	if document.PlanStep != RuntimeSemanticPlanStepProofBatch {
+		if err := validateRuntimeSemanticPlanProofObligations(document, manifest); err != nil {
+			return nil, RuntimeCWIReconciliationContract{}, err
+		}
 	}
 	focuses := make([]CoverageFocus, 0, len(proofSets))
 	for _, proofSet := range proofSets {
