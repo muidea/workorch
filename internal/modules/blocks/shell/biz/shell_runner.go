@@ -13,14 +13,19 @@ import (
 )
 
 func shellBaseOutput(request RuntimeCommandRequest, command string, args []string, workingDir string, commandNormalization string, execCommand string) RuntimeCommandResult {
+	var copiedInputs []shellValidationCopiedInput
+	if request.validationCopiedInputs != nil {
+		copiedInputs = append(make([]shellValidationCopiedInput, 0, len(request.validationCopiedInputs)), request.validationCopiedInputs...)
+	}
 	output := RuntimeCommandResult{
-		Command:            command,
-		ValidationRecipeID: strings.TrimSpace(request.ValidationRecipeID),
-		Args:               append([]string(nil), args...),
-		WorkingDirectory:   workingDir,
-		TargetRefs:         normalizeShellStrings(request.TargetRefs),
-		ValidationEvidence: cloneRuntimeValidationEvidence(request.ValidationEvidence),
-		ManagedValidation:  request.ManagedValidation,
+		Command:                command,
+		ValidationRecipeID:     strings.TrimSpace(request.ValidationRecipeID),
+		Args:                   append([]string(nil), args...),
+		WorkingDirectory:       workingDir,
+		TargetRefs:             normalizeShellStrings(request.TargetRefs),
+		ValidationEvidence:     cloneRuntimeValidationEvidence(request.ValidationEvidence),
+		ManagedValidation:      request.ManagedValidation,
+		validationCopiedInputs: copiedInputs,
 	}
 	if commandNormalization != "" {
 		output.ActualCommand = filepath.Base(execCommand)

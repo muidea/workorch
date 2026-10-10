@@ -342,6 +342,10 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 	}
 	defer leaveFresh()
 
+	if operation.Kind == runtimecontract.RuntimeBlockKindManagedValidationSession && (command.Transaction.DefinitionRevision == "" || command.Transaction.DefinitionRevision != strings.TrimSpace(command.Transaction.DefinitionRevision)) {
+		setCapabilityError(result, common.ErrInvalidArgument)
+		return
+	}
 	currentRevision := m.runtimeAdapter.runtimeAdmissibilityPolicyRevision()
 	if currentRevision != authorization.OwnerRevision {
 		message := "Shell owner policy changed after operation seal"
@@ -393,6 +397,14 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 	}
 	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
 	evidence := operationResult.Evidence
+	if operationResult.validationCopiedInputs != nil {
+		dependencies, dependencyErr := shellValidationOwnerDependencies(command.Transaction.DefinitionRevision, runtimeRequest, operationResult.validationCopiedInputs)
+		if dependencyErr != nil {
+			setCapabilityError(result, dependencyErr)
+			return
+		}
+		evidence.OwnerRevisionSet = &dependencies
+	}
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		status = runtimecontract.RuntimeOperationExecutionStatusRejected

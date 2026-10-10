@@ -16,6 +16,8 @@ import (
 )
 
 func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCommandRequest) (RuntimeCommandResult, error) {
+	// 只能由本次 scratch copy 生成，禁止沿用上次 adapter 调用的观察。
+	request.validationCopiedInputs = nil
 	command, args, err := shellCommandSpec(request.Command, request.Args)
 	if err != nil {
 		return RuntimeCommandResult{}, err

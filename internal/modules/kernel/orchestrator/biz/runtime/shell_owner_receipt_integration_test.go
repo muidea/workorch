@@ -2,11 +2,14 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -244,6 +247,32 @@ func testObservedShellRepair(t *testing.T, validationEntry string, failsAgain, s
 	}
 	if !found {
 		t.Fatalf("Shell failure receipt is missing: execution=%+v receipts=%+v", sealedExecution, persisted.OperationReceipts)
+	}
+	dependencies := receipt.Evidence.OwnerRevisionSet
+	if dependencies == nil || dependencies.Validate() != nil || dependencies.DefinitionRevision != persisted.Facts.DefinitionRevision || len(dependencies.Entries) == 0 {
+		t.Fatal("真实 Shell 已执行的失败回执缺少 actual copied-input 依赖")
+	}
+	for _, entry := range dependencies.Entries {
+		body, err := os.ReadFile(filepath.Join(workspaceDirectory, entry.ResourceID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(body)
+		if entry.OwnerInstanceID != runtimecontract.RuntimeModuleShell+"/"+string(persisted.Facts.WorkspaceID) || entry.Revision != hex.EncodeToString(digest[:]) {
+			t.Fatal("真实 Shell 依赖不是本次复制原字节")
+		}
+	}
+	matchedEvidence := false
+	for _, fact := range persisted.Facts.Evidence.Rejected {
+		if fact.OperationID == receipt.OperationID && fact.DispatchID == sealedAggregate.ActiveDispatch.ID {
+			matchedEvidence = true
+			if !reflect.DeepEqual(fact.OwnerRevisionSet, dependencies) {
+				t.Fatal("真实 receipt-to-rejected-fact 丢失复制输入依赖")
+			}
+		}
+	}
+	if !matchedEvidence {
+		t.Fatal("真实 Shell 失败缺少原 rejected EvidenceFact")
 	}
 	receipt = receipt.Normalized()
 	if receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || receipt.Evidence.ZeroWork ||

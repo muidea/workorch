@@ -130,7 +130,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 			RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
 				Execution:   defaultNativeProofExecutionEnvelope(workspaceID, runID, dispatchID, operation, nil),
 				WorkspaceID: workspaceID, RunID: runID, DispatchID: dispatchID,
-				Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, RequiredOutputHash: "required-output-default-native-proof"},
+				Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision, RequiredOutputHash: "required-output-default-native-proof"},
 				OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...),
 				EvidenceKind: runtimecontract.EvidenceKindStateChange, WorkspaceDeliverableDirectory: workspaceDirectory,
 			},
@@ -237,7 +237,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 				RuntimeOperationExecutionContext: runtimecontract.RuntimeOperationExecutionContext{
 					Execution:   defaultNativeProofExecutionEnvelope(workspaceID, runID, dispatchID, operation, &catalog),
 					WorkspaceID: workspaceID, RunID: runID, DispatchID: dispatchID,
-					Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, RequiredOutputHash: "required-output-default-native-proof"},
+					Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision, RequiredOutputHash: "required-output-default-native-proof"},
 					OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), EvidenceKind: runtimecontract.EvidenceKindValidation,
 					WorkspaceDeliverableDirectory: workspaceDirectory,
 				},

@@ -41,6 +41,26 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
 - `Biz.Teardown(ctx)` 返回 error，每项退订真实成功才 pop，失败或取消保留未释放依赖。`Module.Stop` 成功才清空 owner；public void `Teardown` 的失败交给 framework guard。生命周期配置/最终释放调用由调用方串行化，不持有跨 Hub action 的 owner 锁。
 - `OwnerQuiescenceWaitsForRealHandlerAndRetainsRetryDependencies`、`OwnerQuiescenceExplicitReceiptDrainStillWaitsForCompletion` 与 ResourceLedger/Module tests 验证本地阻塞、取消、关门、retry 和 partial Start；这些测试不证明全进程所有 owner 已适配，也不改变 SM-1～SM-4 业务合同。
 
+### 实际复制输入依赖
+
+managed validation 的 scratch 复制同时记录每个实际复制文件的全流 bytes SHA-256、字节数、目标和复制权限；
+同一次 `io.Copy` 将原字节写入副本并计算 hash，不从先前 catalog、sealed `TargetRefs` 或执行后的 newer 文件猜前像。
+文件数与累计实际复制字节受既有 8192 files／256 MiB 边界约束；复制中超限或任何错误均拒绝返回完整依赖集合。
+原始字节不因 hash 记录被替换或清洗。
+
+新 managed execute 必须在物理执行前具有 exact transaction `DefinitionRevision`。Shell 将实际复制集合转为
+`RuntimeOperationEvidence.OwnerRevisionSet`，资源身份为 `capability / blocks/shell/<WorkspaceID> / workspace_target /
+<TargetRef>`，`Revision` 为复制流 hash；`DependencyHash` 绑定 Workspace、文件 bytes/size/mode、resolved recipe、
+command/args、exact check attestations 与 validation scope。typed receipt 保存原集合，后续 exact replay 不重新复制。
+执行失败但已完成复制时同样保留该读取来源；未完成复制不补造完整集合。receipt-to-fact/hash/reload 的接收合同由
+Orchestrator 的原事务负责，不增加 SM-1～SM-4 transition、availability 或 credit。
+
+这是 Shell 复制输入的 owner observation，不是子进程 syscall 读取追踪，也不证明外部 module/cache、网络或环境
+全部依赖已被枚举。完整 workspace 复制会实际读取未被 native check 选中的文件；不能按 operation targets 裁去这些
+事实，也不能将这些读取称为逐 CWI semantic proof。scratch 不是 OS／网络／凭据强隔离，复制和 source version 观察
+不构成跨文件原子快照；该集合也不替代 current owner query、stale/reopen、assessment/artifact 或 terminal union。
+独立字节与真实 typed owner 回归见 `biz/validation_read_dependencies_test.go`。
+
 ### 执行与证明不变量
 
 - `shell/command` 不得伪装成 `effect=none` validation；managed validation 不能退化为任意命令字符串。

@@ -62,7 +62,7 @@ func TestShellOwnerZeroWorkValidationReceiptReplaysQualityWithoutReexecution(t *
 			ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession,
 		},
 		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
-		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", DefinitionRevision: "definition-shell", RequiredOutputHash: "output-shell"},
 		OperationID: "validate", EvidenceKind: runtimecontract.EvidenceKindValidation,
 		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"fixture_test.go"},
 		EvidencePolicies: []runtimecontract.RuntimeEvidencePolicy{{
@@ -519,7 +519,7 @@ func shellStateChangingReceiptCommand(t *testing.T, adapter *RuntimeAdapter, wor
 			ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable,
 		},
 		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
-		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", DefinitionRevision: "definition-shell", RequiredOutputHash: "output-shell"},
 		OperationID: "shell-write", EvidenceKind: runtimecontract.EvidenceKindStateChange,
 		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"generated.txt"},
 	}

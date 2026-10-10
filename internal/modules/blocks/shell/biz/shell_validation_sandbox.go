@@ -1,6 +1,8 @@
 package shell
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -45,9 +47,11 @@ func prepareManagedValidationSandbox(request *RuntimeCommandRequest, deliverable
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", err
 	}
-	if err := copyManagedValidationWorkspace(deliverableDirectory, root); err != nil {
+	inputs, err := copyManagedValidationWorkspace(deliverableDirectory, root)
+	if err != nil {
 		return "", err
 	}
+	request.validationCopiedInputs = inputs
 	for _, directory := range []string{filepath.Join(scratch, "home"), filepath.Join(scratch, "tmp"), filepath.Join(scratch, "cache")} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return "", err
@@ -75,14 +79,15 @@ func validateManagedValidationScratchPath(deliverableDirectory, scratch string) 
 	return nil
 }
 
-func copyManagedValidationWorkspace(source, destination string) error {
+func copyManagedValidationWorkspace(source, destination string) ([]shellValidationCopiedInput, error) {
 	source, err := filepath.Abs(strings.TrimSpace(source))
 	if err != nil || source == "" {
-		return common.ErrInvalidArgument
+		return nil, common.ErrInvalidArgument
 	}
+	inputs := make([]shellValidationCopiedInput, 0)
 	var fileCount int
 	var totalBytes int64
-	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -111,8 +116,7 @@ func copyManagedValidationWorkspace(source, destination string) error {
 			return err
 		}
 		fileCount++
-		totalBytes += info.Size()
-		if fileCount > maxObservedWorkspaceFiles || totalBytes > maxObservedWorkspaceBytes {
+		if fileCount > maxObservedWorkspaceFiles || info.Size() > maxObservedWorkspaceBytes-totalBytes {
 			return fmt.Errorf("managed validation sandbox exceeds bounded file or byte limit")
 		}
 		target := filepath.Join(destination, rel)
@@ -128,17 +132,31 @@ func copyManagedValidationWorkspace(source, destination string) error {
 			_ = input.Close()
 			return createErr
 		}
-		_, copyErr := io.Copy(output, input)
+		digest := sha256.New()
+		remaining := maxObservedWorkspaceBytes - totalBytes
+		copied, copyErr := io.Copy(io.MultiWriter(output, digest), io.LimitReader(input, remaining+1))
 		closeOutputErr := output.Close()
 		closeInputErr := input.Close()
 		if copyErr != nil {
 			return copyErr
 		}
+		if copied > remaining {
+			return fmt.Errorf("managed validation sandbox exceeds bounded file or byte limit during copy")
+		}
 		if closeOutputErr != nil {
 			return closeOutputErr
 		}
-		return closeInputErr
+		if closeInputErr != nil {
+			return closeInputErr
+		}
+		totalBytes += copied
+		inputs = append(inputs, shellValidationCopiedInput{TargetRef: clean, ContentHash: hex.EncodeToString(digest.Sum(nil)), Size: copied, Mode: uint32(info.Mode().Perm() & 0o777)})
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return inputs, nil
 }
 
 func managedValidationSandboxPathExcluded(ref string) bool {

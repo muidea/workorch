@@ -64,7 +64,7 @@ func TestShellOwnerDoesNotInferFailureTargetFromValidationCommand(t *testing.T) 
 			ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession,
 		},
 		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell",
-		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+		Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", DefinitionRevision: "definition-shell", RequiredOutputHash: "output-shell"},
 		OperationID: "validate-entry", EvidenceKind: runtimecontract.EvidenceKindValidation,
 		WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"validation-entry.go"},
 	}
@@ -355,7 +355,7 @@ func TestShellOwnerEmitsOnlySealedScopeValidationFailureObservation(t *testing.T
 	}
 	executionContext := runtimecontract.RuntimeOperationExecutionContext{
 		Execution:   runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-shell/run-shell/dispatch-shell/structured", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession},
-		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+		WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: "dispatch-shell", Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", DefinitionRevision: "definition-shell", RequiredOutputHash: "output-shell"},
 		OperationID: "structured", EvidenceKind: runtimecontract.EvidenceKindValidation, WorkspaceDeliverableDirectory: t.TempDir(),
 	}
 	command := sealedShellTestCommand(t, owner.runtimeAdapter, executionContext, runtimecontract.RuntimeBlockKindManagedValidationSession, shellevents.OperationData{
@@ -469,7 +469,7 @@ func main() {
 					ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession,
 				},
 				WorkspaceID: "ws-shell", RunID: "run-shell", DispatchID: dispatchID,
-				Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", RequiredOutputHash: "output-shell"},
+				Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: "authority-shell", DefinitionRevision: "definition-shell", RequiredOutputHash: "output-shell"},
 				OperationID: operationID, EvidenceKind: runtimecontract.EvidenceKindValidation,
 				WorkspaceDeliverableDirectory: workspace, TargetRefs: []string{"main.go"},
 			}
