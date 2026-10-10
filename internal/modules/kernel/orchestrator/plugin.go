@@ -54,6 +54,10 @@ func (m *Module) Run(ctx context.Context) *cd.Error {
 
 func (m *Module) Teardown(ctx context.Context) {
 	if m != nil {
-		_ = m.Stop(ctx)
+		if err := m.Stop(ctx); err != nil {
+			// 无返回值的 hook 通过框架 guard 报告失败；
+			// manager 必须保留该 owner 及其下游依赖。
+			panic(cd.WrapError(cd.Unexpected, err, "orchestrator teardown failed"))
+		}
 	}
 }
