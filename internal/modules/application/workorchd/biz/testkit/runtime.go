@@ -27,6 +27,7 @@ import (
 	systembiz "github.com/muidea/workorch/internal/modules/kernel/system/biz"
 	workspacebiz "github.com/muidea/workorch/internal/modules/kernel/workspace/biz"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	approvalmodule "github.com/muidea/workorch/internal/modules/blocks/approval"
@@ -57,21 +58,29 @@ import (
 type lifecycle interface {
 	Start() error
 	Stop(context.Context) error
+	BeginShutdown(context.Context)
+	Quiesce(context.Context) *cd.Error
 }
 
 type contextLifecycle struct {
-	start func(context.Context) error
-	stop  func(context.Context) error
+	start   func(context.Context) error
+	stop    func(context.Context) error
+	begin   func(context.Context)
+	quiesce func(context.Context) *cd.Error
 }
 
-func (l contextLifecycle) Start() error                   { return l.start(context.Background()) }
-func (l contextLifecycle) Stop(ctx context.Context) error { return l.stop(ctx) }
+func (l contextLifecycle) Start() error                          { return l.start(context.Background()) }
+func (l contextLifecycle) Stop(ctx context.Context) error        { return l.stop(ctx) }
+func (l contextLifecycle) BeginShutdown(ctx context.Context)     { l.begin(ctx) }
+func (l contextLifecycle) Quiesce(ctx context.Context) *cd.Error { return l.quiesce(ctx) }
 
 type runtimeHub struct {
 	magicevent.Hub
-	repos   RepositoryExports
-	modules []lifecycle
-	once    sync.Once
+	repos      RepositoryExports
+	modules    []lifecycle
+	shutdownMu sync.Mutex
+	quiesced   bool
+	hubDrained bool
 }
 
 func (h *runtimeHub) testRepositories() RepositoryExports {
@@ -88,20 +97,95 @@ func newRuntimeHub(commandHub magicevent.Hub) *runtimeHub {
 	return &runtimeHub{Hub: commandHub}
 }
 
-func (h *runtimeHub) Terminate(ctx context.Context) {
-	h.once.Do(func() {
-		// 先停止 owner workers 并取消订阅，期间 Hub 仍接受控制面操作；
-		// 随后终止 Hub，由 bootstrap.Runtime.Shutdown 最后 drain BackgroundRoutine。
-		for idx := len(h.modules) - 1; idx >= 0; idx-- {
-			_ = h.modules[idx].Stop(ctx)
+func (h *runtimeHub) Quiesce(ctx context.Context) error {
+	h.shutdownMu.Lock()
+	defer h.shutdownMu.Unlock()
+	if ctx == nil {
+		return fmt.Errorf("shutdown context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, module := range h.modules {
+		module.BeginShutdown(ctx)
+	}
+	for idx := len(h.modules) - 1; idx >= 0; idx-- {
+		if err := h.modules[idx].Quiesce(ctx); err != nil {
+			return err
 		}
-		h.modules = nil
-		h.repos = RepositoryExports{}
-		if h.Hub != nil {
-			h.Hub.Terminate(ctx)
-		}
-	})
+	}
+	h.quiesced = true
+	return nil
 }
+
+func (h *runtimeHub) Release(ctx context.Context) error {
+	h.shutdownMu.Lock()
+	defer h.shutdownMu.Unlock()
+	if ctx == nil {
+		return fmt.Errorf("shutdown context is required")
+	}
+	if !h.quiesced || !h.hubDrained {
+		return fmt.Errorf("local owners require quiesce and Hub drain before release")
+	}
+	for len(h.modules) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		last := len(h.modules) - 1
+		if err := h.modules[last].Stop(ctx); err != nil {
+			return err
+		}
+		h.modules = h.modules[:last]
+	}
+	h.repos = RepositoryExports{}
+	return nil
+}
+
+func (h *runtimeHub) Drain(ctx context.Context) *cd.Error {
+	h.shutdownMu.Lock()
+	defer h.shutdownMu.Unlock()
+	if !h.quiesced {
+		return cd.NewError(cd.ServiceUnavailable, "local owners have not quiesced")
+	}
+	if drain, ok := h.Hub.(magicevent.DrainingHub); ok {
+		if err := drain.Drain(ctx); err != nil {
+			return err
+		}
+		h.hubDrained = true
+		return nil
+	}
+	return cd.NewError(cd.ServiceUnavailable, "local runtime requires a draining Hub")
+}
+
+func (h *runtimeHub) TerminateChecked(ctx context.Context) *cd.Error {
+	// owner 释放只能发生在 bootstrap 完成共享任务和 Hub 屏障之后。
+	h.shutdownMu.Lock()
+	remaining := len(h.modules)
+	h.shutdownMu.Unlock()
+	if remaining != 0 {
+		return cd.NewError(cd.ServiceUnavailable, "local owners have not been released")
+	}
+	if drain, ok := h.Hub.(magicevent.DrainingHub); ok {
+		return drain.TerminateChecked(ctx)
+	}
+	return cd.NewError(cd.ServiceUnavailable, "local runtime requires a draining Hub")
+}
+
+func (h *runtimeHub) Terminate(ctx context.Context) {
+	if err := h.TerminateChecked(ctx); err != nil {
+		panic(err)
+	}
+}
+
+type runtimeStartupError struct {
+	Runtime *bootstrap.Runtime
+	Cause   error
+}
+
+func (e *runtimeStartupError) Error() string {
+	return fmt.Sprintf("start application test owner modules: %v", e.Cause)
+}
+func (e *runtimeStartupError) Unwrap() error { return e.Cause }
 
 // NewRuntime creates a repository runtime and explicitly starts all owner modules
 // required by application integration tests. Production bootstrap intentionally
@@ -115,8 +199,12 @@ func NewRuntime(backend string, dataRoot string, commandHub magicevent.Hub) *boo
 func TryNewRuntime(backend string, dataRoot string, commandHub magicevent.Hub) (runtime *bootstrap.Runtime, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("build application test runtime: %v", recovered)
-			runtime = nil
+			if failure, ok := recovered.(*runtimeStartupError); ok {
+				runtime, err = failure.Runtime, failure.Cause
+			} else {
+				err = fmt.Errorf("build application test runtime: %v", recovered)
+				runtime = nil
+			}
 		}
 	}()
 	return newRuntime(backend, dataRoot, commandHub), nil
@@ -128,11 +216,20 @@ func newRuntime(backend string, dataRoot string, commandHub magicevent.Hub) *boo
 	hub := newRuntimeHub(commandHub)
 	hub.repos = buildRepositories(backend, dataRoot)
 	runtime := bootstrap.NewWithBackendAndCommandHub(backend, dataRoot, hub)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			cause, ok := recovered.(error)
+			if !ok {
+				cause = fmt.Errorf("start application test owners panic: %v", recovered)
+			}
+			panic(&runtimeStartupError{Runtime: runtime, Cause: cause})
+		}
+	}()
 	modules, err := startOwnerModules(RuntimeExports(runtime), hub, dataRoot)
-	if err != nil {
-		panic(fmt.Errorf("start application test owner modules: %w", err))
-	}
 	hub.modules = modules
+	if err != nil {
+		panic(err)
+	}
 	return runtime
 }
 
@@ -156,7 +253,13 @@ func testRuntimeDataRoot(backend string, dataRoot string) string {
 func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) ([]lifecycle, error) {
 	background := exports.Infrastructure.BackgroundRoutine
 	repositories := exports.Repositories
-	configured := make([]lifecycle, 0, 21)
+	configured := make([]lifecycle, 0, 20)
+	// 在 Start 返回错误或 panic 前发布已配置账本，保留同一实例用于检查式停止。
+	defer func() {
+		if hub, ok := rawHub.(*runtimeHub); ok {
+			hub.modules = configured
+		}
+	}()
 	configure := func(module lifecycle, err error) error {
 		if err != nil {
 			return err
@@ -167,7 +270,7 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 
 	fileModule := filemodule.New()
 	if err := configure(fileModule, fileModule.Configure(filebiz.Dependencies{EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	gitModule := gitmodule.New()
 	// Test runtimes must not depend on a process-global repository.dataDir.
@@ -176,71 +279,71 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 	// configuration value into the test session.
 	gitReceipts, err := gitbiz.NewCapabilityStateReceiptStore(filepath.Join(dataRoot, "runtime", "git-receipts"))
 	if err != nil {
-		return nil, err
+		return configured, err
 	}
 	if err := configure(gitModule, gitModule.Configure(gitbiz.Dependencies{
 		EventHub: rawHub, RuntimeAdapter: gitbiz.NewRuntimeAdapter(), CapabilityStateReceipts: gitReceipts,
 	})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	shellModule := shellmodule.New()
 	if err := configure(shellModule, shellModule.Configure(shellbiz.Dependencies{EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	sshModule := sshmodule.New()
 	if err := configure(sshModule, sshModule.Configure(sshbiz.Dependencies{EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	webModule := webmodule.New()
 	if err := configure(webModule, webModule.Configure(webbiz.Dependencies{EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	llmModule := llmmodule.New()
 	if err := configure(llmModule, llmModule.Configure(llmbiz.Dependencies{EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	mcpBlockModule := mcpblockmodule.New()
 	if err := configure(mcpBlockModule, mcpBlockModule.Configure(mcpblockbiz.Dependencies{EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 
 	soulModule := soulmodule.New()
 	if err := configure(soulModule, soulModule.Configure(soulbiz.Dependencies{Souls: repositories.Souls, EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	memoryModule := memorymodule.New()
 	if err := configure(memoryModule, memoryModule.Configure(memorybiz.Dependencies{OwnerRepositories: repositories.MemoryOwner, EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	skillModule := skillmodule.New()
 	if err := configure(skillModule, skillModule.Configure(skillbiz.Dependencies{Skills: repositories.Skills, EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	mcpModule := mcpmodule.New()
 	if err := configure(mcpModule, mcpModule.Configure(mcpregistrybiz.Dependencies{Registry: repositories.MCPRegistry, EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	eventStreamModule := eventstreammodule.New()
 	if err := configure(eventStreamModule, eventStreamModule.Configure(eventstreambiz.Dependencies{
 		OwnerRepositories: repositories.EventStreamOwner, EventHub: rawHub,
 	})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	workspaceModule := workspacemodule.New()
 	if err := configure(workspaceModule, workspaceModule.Configure(workspacebiz.Dependencies{OwnerRepositories: repositories.WorkspaceOwner, EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	decisionModule := decisionmodule.New()
 	if err := configure(decisionModule, decisionModule.Configure(decisionbiz.Dependencies{OwnerRepositories: repositories.DecisionOwner, EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	approvalModule := approvalmodule.New()
 	if err := configure(approvalModule, approvalModule.Configure(approvalbiz.Dependencies{OwnerRepositories: repositories.ApprovalOwner, EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	resultModule := resultmodule.New()
 	if err := configure(resultModule, resultModule.Configure(resultbiz.Dependencies{OwnerRepositories: repositories.ResultOwner, EventHub: rawHub})); err != nil {
-		return nil, err
+		return configured, err
 	}
 
 	// Run starts before Orchestrator so Run-owner pending activation and
@@ -248,37 +351,34 @@ func startOwnerModules(exports Exports, rawHub magicevent.Hub, dataRoot string) 
 	// inventory. Orchestrator then observes the already-recovered current facts;
 	// it must not rely on a best-effort Run notification sent before subscription.
 	runModule := runmodule.New()
-	if err := configure(runModule, runModule.Configure(runbiz.Dependencies{OwnerRepositories: repositories.RunOwner, EventHub: rawHub})); err != nil {
-		return nil, err
+	// Run.Configure 已可能登记订阅；调用前纳入账本，错误和 panic 都不能丢失该 owner。
+	configured = append(configured, runModule)
+	if err := runModule.Configure(runbiz.Dependencies{OwnerRepositories: repositories.RunOwner, EventHub: rawHub}); err != nil {
+		return configured, err
 	}
 	orchestratorModule := orchestratormodule.New()
 	if err := configure(orchestratorModule, orchestratorModule.Configure(orchestratorbiz.Dependencies{
 		Evidence:   repositories.OrchestratorEvidence,
 		CommandHub: rawHub, BackgroundRoutine: background,
 	})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	governanceModule := governancemodule.New()
 	if err := configure(governanceModule, governanceModule.Configure(governancebiz.EventDependencies{AutoGovernanceTraces: repositories.AutoGovernanceTraces, EventHub: rawHub, LoadConfig: exports.Infrastructure.LoadConfig, BackgroundRoutine: background})); err != nil {
-		return nil, err
+		return configured, err
 	}
 	systemModule := systemmodule.New()
 	if err := systemModule.Configure(systembiz.Dependencies{EventHub: rawHub}); err != nil {
-		return nil, err
+		return configured, err
 	}
-	configured = append(configured, contextLifecycle{start: systemModule.Start, stop: systemModule.Stop})
+	configured = append(configured, contextLifecycle{start: systemModule.Start, stop: systemModule.Stop, begin: systemModule.BeginShutdown, quiesce: systemModule.Quiesce})
 
-	started := make([]lifecycle, 0, len(configured))
 	for _, module := range configured {
 		if err := module.Start(); err != nil {
-			for idx := len(started) - 1; idx >= 0; idx-- {
-				_ = started[idx].Stop(context.Background())
-			}
-			return nil, err
+			return configured, err
 		}
-		started = append(started, module)
 	}
-	return started, nil
+	return configured, nil
 }
 
 func ensureTestLLMConfig() {

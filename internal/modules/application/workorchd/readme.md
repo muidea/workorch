@@ -165,6 +165,19 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
 - `WorkspaceProjectionChangedData` 是 Application self-notification；consumer 只接受 exact `application/workorchd` source 与
   concrete data，forged/noncanonical source 不得进入 SSE transport。
 
+## 局部 Runtime 生命周期
+
+`biz/bootstrap.Runtime` 只管理共享调度器与 Hub；测试装配由 `biz/testkit` 显式列出 20 个业务 owner，
+不扫描全局 plugin 注册表，也不替代生产的 21 个 Hub owner 与 Repository Initiator 装配。
+局部停止遵循全体 `BeginShutdown` → 全体 `Quiesce` → 共享任务 Shutdown → Hub Drain → 逆序检查式
+owner Stop → Hub TerminateChecked。缺少 DrainingHub 的装配明确拒绝停止，不能以 void Terminate 冒充完成。
+
+部分 Configure/Start 的错误或 panic 必须保留已配置 owner；Run.Configure 已登记订阅时，Run 也在调用前纳入账本。
+`TryNewRuntime` 在 owner 装配失败时同时返回原 Runtime 与错误，调用方必须对该实例执行检查式 Shutdown。
+共享任务或 Hub 排空失败不释放 owner；最终 Stop 逐成功移除账本，失败保留剩余 owner 与 repository 引用，
+新预算重试不重复释放已完成项。只有完整停止成功才清除 Hub 导出；取消请求不代表真实 handler 已退出。
+这些阶段不改变 SM-1～SM-4 的业务权威、转换或持久恢复语义。
+
 ## 能力验收
 
 | 验收面 | 自动化证据 | 覆盖维度 |
