@@ -19,6 +19,7 @@ import (
 // expressed only through the typed System EventHub contracts.
 type System struct {
 	basebiz.Base
+	lifecycle basebiz.Lifecycle
 }
 
 type Dependencies struct {
@@ -37,6 +38,11 @@ func (s *System) Start(ctx context.Context) error {
 	if s == nil || s.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	leave, err := s.lifecycle.Enter()
+	if err != nil {
+		return err
+	}
+	defer leave()
 	if err := s.ensureSoulDefaults(ctx); err != nil {
 		return err
 	}
@@ -46,7 +52,21 @@ func (s *System) Start(ctx context.Context) error {
 	return s.ensureMCPDefaults(ctx)
 }
 
-func (s *System) Teardown(context.Context) {}
+func (s *System) BeginShutdown(context.Context) {
+	if s != nil {
+		s.lifecycle.BeginShutdown()
+	}
+}
+func (s *System) Quiesce(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.lifecycle.Quiesce(ctx)
+}
+func (s *System) Teardown(ctx context.Context) error {
+	s.BeginShutdown(ctx)
+	return s.Quiesce(ctx)
+}
 
 func (s *System) ensureSoulDefaults(ctx context.Context) error {
 	result, err := s.sendEnsure(event.NewEventWithContext(soulevents.TopicSoulCommandEnsureDefaults, modulecommon.ModuleID, soulevents.CommandDestination, event.NewHeader(), ctx, soulevents.EnsureDefaultsCommand{}))
