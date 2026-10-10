@@ -191,6 +191,7 @@ func TestWebOwnerFailsClosedBeforeNetworkAndCommitsRecoverableEvidence(t *testin
 	if err := receipt.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	owner.BeginShutdown(ctx)
 	duplicate := hub.Send(event)
 	duplicateData, err := duplicate.Get()
 	if err != nil {
@@ -201,7 +202,15 @@ func TestWebOwnerFailsClosedBeforeNetworkAndCommitsRecoverableEvidence(t *testin
 		t.Fatalf("duplicate Web execution crossed provider fence: first=%+v duplicate=%+v calls=%d", receipt, duplicateReceipt, providerCalls.Load())
 	}
 
-	owner.Teardown(ctx)
+	missing := command
+	missing.Execution.Fence++
+	missingResult := hub.Send(magicevent.NewEventWithContext(webevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, missing))
+	if _, err := missingResult.Get(); !errors.Is(err, basebiz.ErrLifecycleClosing) || providerCalls.Load() != 1 {
+		t.Fatalf("shutdown receipt miss err=%v calls=%d", err, providerCalls.Load())
+	}
+	if err := owner.Teardown(ctx); err != nil {
+		t.Fatal(err)
+	}
 	restarted := &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: adapter}
 	if err := restarted.Start(); err != nil {
 		t.Fatal(err)

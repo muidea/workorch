@@ -38,6 +38,15 @@ Web-owner evidence file；EventHub 只携带 summary、hash、opaque source/raw 
   Command；Post/nil Result、错误 producer 或错误 concrete payload 均不得加载 provider、访问网络或读取/提交 receipt。
 - Web 只提供 context/evidence candidate，不拥有 action、CWI credit、retry、governance resolution 或 terminal。
 
+## 生命周期合同
+
+- `Start` 逐成功订阅记账；部分失败保留 adapter/topic，未清理前拒绝再次注册。Configure 不覆盖未释放 owner。
+- `BeginShutdown` 非等待式停止新 catalog/probe 和新外部访问，不取消已接纳执行，不提前退订 receipt 所需通路。
+- Execute 的 drain 票仅用于原 sealed/producer/scope 校验与 exact persisted receipt 查询重放；未命中必须另取 fresh 票，关闭后零新网络请求、零新 receipt 提交。`effect=none` 不构成停机访问豁免。
+- 票持续到真实 handler 返回（含 nested receipt commit）；Quiesce 超时保留依赖，可用新预算重试。Stop 封最终准入并再次排空后逆序 checked 退订，成功才移除资源账本、清 adapter/Module 引用。
+- 未知 panic 不吞掉，不遗留清理 claim；plugin guard 保留原 cause。调用方串行 Configure/Start/Stop；本地 Quiesce 不替代全进程共享 task/Hub 屏障。
+- 回归由 `biz/owner_lifecycle_test.go`、`module_lifecycle_test.go` 和既有 exact receipt 测试固定。SM-1～SM-4 的权威、预算、网络授权与 at-most-once 合同不改变。
+
 ## 能力验收
 
 | 验收维度 | 自动化证据 | 状态 |

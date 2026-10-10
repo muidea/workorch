@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -27,6 +28,11 @@ type Biz struct {
 	basebiz.Base
 	runtimeAdapter *RuntimeAdapter
 	started        bool
+	topics         []string
+	lifecycle      basebiz.Lifecycle
+	shutdownMu     sync.Mutex
+	releasing      bool
+	released       bool
 }
 
 type Dependencies struct {
@@ -49,29 +55,70 @@ func (m *Biz) Start() error {
 	if m == nil || m.runtimeAdapter == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	leave, err := m.enterOwner(false)
+	if err != nil {
+		return err
+	}
+	defer leave()
 	if m.started {
 		return nil
 	}
-	m.SubscribeFunc(webevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.SubscribeFunc(webevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
-	m.SubscribeFunc(webevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
-	m.SubscribeFunc(webevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
-	m.SubscribeFunc(webevents.TopicExecuteOperation, m.handleWebOperation)
+	if len(m.topics) != 0 {
+		return common.ErrConflict
+	}
+	for _, entry := range []struct {
+		topic   string
+		handler magicevent.ObserverFunc
+	}{
+		{webevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities},
+		{webevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility},
+		{webevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility},
+		{webevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility},
+		{webevents.TopicExecuteOperation, m.handleWebOperation},
+	} {
+		if err := m.subscribeOwner(entry.topic, entry.handler); err != nil {
+			return err
+		}
+	}
 	m.started = true
 	return nil
 }
 
-func (m *Biz) Teardown(context.Context) {
+func (m *Biz) Teardown(ctx context.Context) error {
 	if m == nil {
-		return
+		return nil
 	}
-	m.UnsubscribeFunc(webevents.TopicExecuteOperation)
-	m.UnsubscribeFunc(webevents.TopicAcquireRuntimeCapabilities)
-	m.UnsubscribeFunc(webevents.TopicAcquireRuntimeOperationAdmissibility)
-	m.UnsubscribeFunc(webevents.TopicProbeRuntimeOperationFeasibility)
-	m.UnsubscribeFunc(webevents.TopicProbeRuntimeSemanticProofFeasibility)
+	m.BeginShutdown(ctx)
+	if err := m.Quiesce(ctx); err != nil {
+		return err
+	}
+	m.shutdownMu.Lock()
+	if m.releasing {
+		m.shutdownMu.Unlock()
+		return common.ErrConflict
+	}
+	m.releasing = true
+	m.shutdownMu.Unlock()
+	defer func() { m.shutdownMu.Lock(); m.releasing = false; m.shutdownMu.Unlock() }()
+	if err := m.Quiesce(ctx); err != nil {
+		return err
+	}
+	for len(m.topics) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		last := len(m.topics) - 1
+		if err := m.UnsubscribeFuncChecked(m.topics[last]); err != nil {
+			return err
+		}
+		m.topics = m.topics[:last]
+	}
 	m.runtimeAdapter = nil
 	m.started = false
+	m.shutdownMu.Lock()
+	m.released = true
+	m.shutdownMu.Unlock()
+	return nil
 }
 
 func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Result) {
@@ -116,6 +163,12 @@ func (m *Biz) handleWebOperation(event magicevent.Event, result magicevent.Resul
 		result.Set(webevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
+	leaveFresh, admissionErr := m.enterOwner(false)
+	if admissionErr != nil {
+		setCapabilityError(result, admissionErr)
+		return
+	}
+	defer leaveFresh()
 	runtimeRequest := RuntimeOperationRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
 		Kind: operation.Kind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
