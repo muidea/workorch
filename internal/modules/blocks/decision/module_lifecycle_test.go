@@ -33,7 +33,7 @@ func TestModuleTeardownFailurePreservesOwnerAndFrameworkCause(t *testing.T) {
 		t.Fatal(err)
 	}
 	owner := module.bizPtr
-	module.BeginShutdown()
+	module.BeginShutdown(context.Background())
 	if err := module.Quiesce(context.Background()); err != nil {
 		t.Fatal(err)
 	}

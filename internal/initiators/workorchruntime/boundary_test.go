@@ -179,6 +179,8 @@ func TestRepositoryInitiatorExportSurfaceStaysRepositoryOnly(t *testing.T) {
 			"Weight":              true,
 			"Setup":               true,
 			"Run":                 true,
+			"BeginShutdown":       true,
+			"Quiesce":             true,
 			"Teardown":            true,
 			"RepositoryProvider":  true,
 		},
@@ -370,13 +372,27 @@ func assertRepositoryInitiatorStorage(t *testing.T, path string, typeSpec *ast.T
 		t.Errorf("repository Initiator %s must remain a struct", filepath.Base(path))
 		return
 	}
-	if len(structure.Fields.List) != 1 {
-		t.Errorf("repository Initiator %s field count = %d, want one private repository reference", filepath.Base(path), len(structure.Fields.List))
+	if len(structure.Fields.List) != 3 {
+		t.Errorf("repository Initiator %s must retain exactly repository storage and two lifecycle fields", filepath.Base(path))
 		return
 	}
-	field := structure.Fields.List[0]
-	if len(field.Names) != 1 || field.Names[0].Name != "repositories" || !isPointerToIdentifier(field.Type, "repositorySet") {
-		t.Errorf("repository Initiator %s may retain only private *repositorySet storage", filepath.Base(path))
+	for _, field := range structure.Fields.List {
+		if len(field.Names) != 1 {
+			t.Fatal("Initiator lifecycle fields must be explicit")
+		}
+		valid := false
+		switch field.Names[0].Name {
+		case "repositories":
+			valid = isPointerToIdentifier(field.Type, "repositorySet")
+		case "closing":
+			valid = isIdentifier(field.Type, "bool")
+		case "mu":
+			selector, ok := field.Type.(*ast.SelectorExpr)
+			valid = ok && isIdentifier(selector.X, "sync") && selector.Sel.Name == "Mutex"
+		}
+		if !valid {
+			t.Errorf("repository Initiator %s retains unreviewed storage %s", filepath.Base(path), field.Names[0].Name)
+		}
 	}
 }
 

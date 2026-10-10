@@ -2,6 +2,7 @@ package governance
 
 import (
 	"context"
+	cd "github.com/muidea/magicCommon/def"
 	"sync"
 
 	governancebiz "github.com/muidea/workorch/internal/modules/kernel/governance/biz"
@@ -50,14 +51,16 @@ func (m *Module) Start() error {
 	}
 	return owner.Start()
 }
-func (m *Module) BeginShutdown() {
+func (m *Module) BeginShutdown(_ context.Context) {
 	if owner := m.owner(); owner != nil {
 		owner.BeginShutdown()
 	}
 }
-func (m *Module) Quiesce(ctx context.Context) error {
+func (m *Module) Quiesce(ctx context.Context) *cd.Error {
 	if owner := m.owner(); owner != nil {
-		return owner.Quiesce(ctx)
+		if err := owner.Quiesce(ctx); err != nil {
+			return cd.WrapError(cd.Unexpected, err, "owner quiesce failed")
+		}
 	}
 	return nil
 }

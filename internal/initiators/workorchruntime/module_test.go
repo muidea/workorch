@@ -2,7 +2,9 @@ package workorchruntime
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	plugincommon "github.com/muidea/magicCommon/framework/plugin/common"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -175,6 +177,11 @@ func TestRuntimeInitiatorSetupFailureLeavesRepositoriesEmpty(t *testing.T) {
 				}
 			})
 
+			originalProvider := runtime.RepositoryProvider()
+			if err := runtime.Setup(context.Background(), nil, nil); err == nil || runtime.RepositoryProvider() != originalProvider {
+				t.Fatal("repeated Setup revoked a live provider")
+			}
+			runtime.Teardown(context.Background())
 			setupErr := runtime.Setup(context.Background(), nil, nil)
 			if setupErr == nil {
 				t.Fatal("Setup returned nil error")
@@ -189,6 +196,46 @@ func TestRuntimeInitiatorSetupFailureLeavesRepositoriesEmpty(t *testing.T) {
 				t.Fatal("failed Setup retained stale repository references")
 			}
 		})
+	}
+}
+
+func TestRuntimeInitiatorStagesRetainProviderUntilCheckedRelease(t *testing.T) {
+	repositories, err := buildRepositories("memory", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := New()
+	runtime.repositories = &repositories
+	provider := runtime.RepositoryProvider()
+	manager := plugincommon.NewPluginMgr("repository-stages-test")
+	if err := manager.Register(runtime); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := manager.BeginShutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.RepositoryProvider() != provider {
+		t.Fatal("BeginShutdown released provider")
+	}
+	if err := manager.TeardownChecked(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled teardown=%v", err)
+	}
+	if runtime.RepositoryProvider() != provider {
+		t.Fatal("failed shutdown released provider")
+	}
+	if err := runtime.Setup(context.Background(), nil, nil); err == nil || runtime.RepositoryProvider() != provider {
+		t.Fatal("closing Setup replaced provider")
+	}
+	if err := manager.TeardownChecked(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.RepositoryProvider() != nil {
+		t.Fatal("checked release retained provider")
+	}
+	if err := manager.TeardownChecked(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 

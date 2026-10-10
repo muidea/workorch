@@ -28,8 +28,9 @@ owner 分组的 `RepositoryProvider` 暴露仓储基础设施。
 
 ## 不变量与非职责
 
-- `Setup` 先撤销旧 provider，只有配置读取和全部 repository 构造成功后才一次性发布新 provider；失败必须保持不可用。
-- `RepositoryProvider` 在成功 `Setup` 前、失败 `Setup` 后及 `Teardown` 后必须返回 `nil`。
+- `Setup` 仅在未发布 provider 且不处于 closing 时准备；重复 Setup 返回冲突并保留当前 provider，不撤销仍被消费者使用的引用。首次配置读取或构造失败保持不可用。
+- `RepositoryProvider` 在成功 `Setup` 前、首次失败 `Setup` 后及最终 `Teardown` 后返回 `nil`；BeginShutdown／Quiesce 和失败停止期间保留原 provider。
+- `BeginShutdown(context.Context)` 只关闭重复准备，不等待、不释放；Initiator 无自有任务，`Quiesce` 检查调用预算但不冒充全体 owner／共享队列排空。最终 Teardown 必须由进程协调者在 owner、BackgroundRoutine 和 Hub 屏障成功后调用，取消预算通过 framework guard 返回原 cause 并保留引用。成功释放后允许建立新 provider。
 - `Run` 不创建业务状态；`Teardown` 只撤销 provider 引用，并允许重复调用。
 - Initiator 不保存 EventHub、BackgroundRoutine、Base Biz、runtime policy、owner service 或业务 facade。
 - 生产代码不得绕过 `workorchdeps` 直接调用 `RepositoryProvider()`；consumer identity 与 repository family 必须精确匹配。

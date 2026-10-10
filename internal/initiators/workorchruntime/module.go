@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sync"
 
 	cd "github.com/muidea/magicCommon/def"
 	"github.com/muidea/magicCommon/event"
@@ -23,6 +24,8 @@ func init() {
 
 type RepositoryInitiator struct {
 	repositories *repositorySet
+	mu           sync.Mutex
+	closing      bool
 }
 
 var _ common.Provider = (*RepositoryInitiator)(nil)
@@ -66,9 +69,15 @@ func (r *RepositoryInitiator) Weight() int {
 }
 
 func (r *RepositoryInitiator) Setup(_ context.Context, _ event.Hub, _ task.BackgroundRoutine) *cd.Error {
-	// Revoke any previously published provider before attempting a fresh
-	// setup. A failed repeated Setup must not leave stale repositories visible.
-	r.repositories = nil
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// 已发布 provider 在消费者释放前不得被重复 Setup 撤销。
+	if r.repositories != nil {
+		return cd.WrapError(cd.Unexpected, fmt.Errorf("repository provider is already configured"), "repository setup rejected")
+	}
+	if r.closing {
+		return cd.NewError(cd.ServiceUnavailable, "repository provider is shutting down")
+	}
 	cfg, err := workorchconfig.Current()
 	if err != nil {
 		return cd.NewError(cd.IllegalParam, "invalid argument: "+err.Error())
@@ -85,12 +94,40 @@ func (r *RepositoryInitiator) Run(_ context.Context) *cd.Error {
 	return nil
 }
 
-func (r *RepositoryInitiator) Teardown(_ context.Context) {
+func (r *RepositoryInitiator) BeginShutdown(context.Context) {
+	r.mu.Lock()
+	r.closing = true
+	r.mu.Unlock()
+}
+
+func (r *RepositoryInitiator) Quiesce(ctx context.Context) *cd.Error {
+	if ctx == nil {
+		return cd.NewError(cd.IllegalParam, "shutdown context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return cd.WrapError(cd.Unexpected, err, "repository quiesce failed")
+	}
+	// 无自有任务；全体 owner 和共享队列屏障由进程协调者完成。
+	return nil
+}
+
+func (r *RepositoryInitiator) Teardown(ctx context.Context) {
+	if err := r.Quiesce(ctx); err != nil {
+		panic(err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.repositories = nil
+	r.closing = false
 }
 
 func (r *RepositoryInitiator) RepositoryProvider() common.RepositoryProvider {
-	if r == nil || r.repositories == nil {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.repositories == nil {
 		return nil
 	}
 	return r.repositories
