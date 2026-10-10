@@ -24,6 +24,9 @@ func (m *Module) Configure(deps eventstreambiz.Dependencies) error {
 	if m == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
+	if m.bizPtr != nil {
+		return common.ErrConflict
+	}
 	if err := deps.OwnerRepositories.Validate(); err != nil {
 		return err
 	}
@@ -38,12 +41,14 @@ func (m *Module) Start() error {
 	return m.bizPtr.Start()
 }
 
-func (m *Module) Stop(context.Context) error {
+func (m *Module) Stop(ctx context.Context) error {
 	if m == nil {
 		return nil
 	}
 	if m.bizPtr != nil {
-		m.bizPtr.Stop()
+		if err := m.bizPtr.StopChecked(ctx); err != nil {
+			return err
+		}
 	}
 	m.bizPtr = nil
 	return nil

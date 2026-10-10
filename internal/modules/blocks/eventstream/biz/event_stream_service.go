@@ -54,8 +54,12 @@ type Biz struct {
 	repo               repository.EventRecordRepository
 	workspaceDeletions repository.EventStreamWorkspaceDeletionRepository
 	workspacePurger    repository.EventStreamWorkspacePurger
-	unsubscribers      []func()
-	topics             []string
+	subscriptions      []ownerSubscription
+	started            bool
+	lifecycle          basebiz.Lifecycle
+	shutdownMu         sync.Mutex
+	releasing          bool
+	released           bool
 	appendMu           sync.Mutex
 	revisions          map[common.WorkspaceID]int64
 }
@@ -131,27 +135,40 @@ func (s *Biz) Start() error {
 	if s == nil || s.repo == nil || s.workspaceDeletions == nil || s.workspacePurger == nil || s.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
-	if len(s.unsubscribers) > 0 {
+	leave, err := s.enterOwner(false)
+	if err != nil {
+		return err
+	}
+	defer leave()
+	if s.started {
 		return nil
 	}
-	s.subscribeDecisionNotifications()
-	s.subscribeApprovalNotifications()
-	s.subscribeGovernanceNotifications()
-	s.subscribeRunStateNotifications()
-	s.subscribeWorkspaceNotifications()
-	s.subscribeResultNotifications()
-	s.subscribeMemoryNotifications()
-	s.subscribeLLMNotifications()
-	s.topics = []string{
+	if len(s.subscriptions) != 0 {
+		return common.ErrConflict
+	}
+	for _, subscribe := range []func() error{
+		s.subscribeDecisionNotifications, s.subscribeApprovalNotifications,
+		s.subscribeGovernanceNotifications, s.subscribeRunStateNotifications,
+		s.subscribeWorkspaceNotifications, s.subscribeResultNotifications,
+		s.subscribeMemoryNotifications, s.subscribeLLMNotifications,
+	} {
+		if err := subscribe(); err != nil {
+			return err
+		}
+	}
+	topics := []string{
 		eventstreamevents.TopicEventStreamCommandList,
 		eventstreamevents.TopicEventStreamCommandHighWatermarks,
 		eventstreamevents.TopicEventStreamCommandSealWorkspaceDeletion,
 		eventstreamevents.TopicEventStreamCommandPurgeWorkspace,
 		eventstreamevents.TopicEventStreamCommandRecordApprovalResolution,
 	}
-	for _, topic := range s.topics {
-		s.SubscribeFunc(topic, s.handleCommand)
+	for _, topic := range topics {
+		if err := s.subscribeOwnerCommand(topic, s.handleCommand); err != nil {
+			return err
+		}
 	}
+	s.started = true
 	return nil
 }
 
@@ -298,60 +315,59 @@ func repositoryEventRecordQuery(query eventstreamevents.EventQuery) workorchquer
 	}
 }
 
-func (s *Biz) subscribeMemoryNotifications() {
+func (s *Biz) subscribeMemoryNotifications() error {
 	if s == nil || s.EventHub() == nil {
-		return
+		return common.ErrInvalidArgument
 	}
 	const observerID = "/memory/consumers/blocks/eventstream"
 	memoryTopics := []string{memoryevents.TopicMemoryCreated, memoryevents.TopicMemoryUpdated, memoryevents.TopicMemoryDeleted}
 	for _, topic := range memoryTopics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
+		if err := s.subscribeOwnerNotification(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(memoryevents.MemoryChangedData)
 			if !ok || event.Source() != memorycommon.ModuleID || !validMemoryChangedData(data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
 			s.finishRecordAppend(event, memoryRecord(topic, event.Source(), data), nil)
-		})
+		}); err != nil {
+			return err
+		}
 	}
-	s.SubscribeMatchedFunc(observerID, observerID, memoryevents.TopicMemoryRecallRecorded, func(event magicevent.Event, _ magicevent.Result) {
+	if err := s.subscribeOwnerNotification(observerID, observerID, memoryevents.TopicMemoryRecallRecorded, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(memoryevents.MemoryRecallRecordedData)
 		if !ok || event.Source() != memorycommon.ModuleID || !validMemoryRecallRecordedData(data) {
 			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 			return
 		}
 		s.finishRecordAppend(event, memoryRecallRecord(event.Source(), data), nil)
-	})
-	s.unsubscribers = append(s.unsubscribers, func() {
-		for _, topic := range memoryTopics {
-			s.UnsubscribeMatchedFunc(observerID, topic)
-		}
-		s.UnsubscribeMatchedFunc(observerID, memoryevents.TopicMemoryRecallRecorded)
-	})
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (s *Biz) subscribeLLMNotifications() {
+func (s *Biz) subscribeLLMNotifications() error {
 	if s == nil || s.EventHub() == nil {
-		return
+		return common.ErrInvalidArgument
 	}
 	const observerID = "/llm/consumers/blocks/eventstream"
-	s.SubscribeMatchedFunc(observerID, observerID, llmevents.TopicLLMUsageRecorded, func(event magicevent.Event, _ magicevent.Result) {
+	if err := s.subscribeOwnerNotification(observerID, observerID, llmevents.TopicLLMUsageRecorded, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(llmevents.LLMUsageRecordedData)
 		if !ok || event.Source() != llmcommon.ModuleID || !validLLMUsageRecordedData(data) {
 			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 			return
 		}
 		s.finishRecordAppend(event, llmUsageRecord(event.Source(), data), nil)
-	})
-	s.unsubscribers = append(s.unsubscribers, func() {
-		s.UnsubscribeMatchedFunc(observerID, llmevents.TopicLLMUsageRecorded)
-	})
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (s *Biz) subscribeResultNotifications() {
+func (s *Biz) subscribeResultNotifications() error {
 	if s == nil || s.EventHub() == nil {
-		return
+		return common.ErrInvalidArgument
 	}
 	const observerID = "/result/consumers/blocks/eventstream"
 	resultTopics := []string{
@@ -362,7 +378,7 @@ func (s *Biz) subscribeResultNotifications() {
 	}
 	for _, topic := range resultTopics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
+		if err := s.subscribeOwnerNotification(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			if event.Source() != resultcommon.ModuleID {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
@@ -373,18 +389,16 @@ func (s *Biz) subscribeResultNotifications() {
 				return
 			}
 			s.finishRecordAppend(event, resultRecord(topic, event.Source(), data), nil)
-		})
-	}
-	s.unsubscribers = append(s.unsubscribers, func() {
-		for _, topic := range resultTopics {
-			s.UnsubscribeMatchedFunc(observerID, topic)
+		}); err != nil {
+			return err
 		}
-	})
+	}
+	return nil
 }
 
-func (s *Biz) subscribeWorkspaceNotifications() {
+func (s *Biz) subscribeWorkspaceNotifications() error {
 	if s == nil || s.EventHub() == nil {
-		return
+		return common.ErrInvalidArgument
 	}
 	const observerID = "/workspace/consumers/blocks/eventstream"
 	// TopicWorkspaceDeleted is a post-seal transport receipt. The permanent
@@ -396,43 +410,43 @@ func (s *Biz) subscribeWorkspaceNotifications() {
 	}
 	for _, topic := range workspaceTopics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
+		if err := s.subscribeOwnerNotification(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(workspaceevents.WorkspaceChangedData)
 			if !ok || event.Source() != workspacecommon.ModuleID || !validWorkspaceChangedData(data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
 			s.finishRecordAppend(event, workspaceRecord(topic, event.Source(), data), nil)
-		})
+		}); err != nil {
+			return err
+		}
 	}
-	s.SubscribeMatchedFunc(observerID, observerID, workspaceevents.TopicGoalDefined, func(event magicevent.Event, _ magicevent.Result) {
+	if err := s.subscribeOwnerNotification(observerID, observerID, workspaceevents.TopicGoalDefined, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(workspaceevents.GoalDefinedData)
 		if !ok || event.Source() != workspacecommon.ModuleID || !validGoalDefinedData(data) {
 			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 			return
 		}
 		s.finishRecordAppend(event, goalRecord(event.Source(), data), nil)
-	})
-	s.SubscribeMatchedFunc(observerID, observerID, workspaceevents.TopicDoDDefined, func(event magicevent.Event, _ magicevent.Result) {
+	}); err != nil {
+		return err
+	}
+	if err := s.subscribeOwnerNotification(observerID, observerID, workspaceevents.TopicDoDDefined, func(event magicevent.Event, _ magicevent.Result) {
 		data, ok := event.Data().(workspaceevents.DoDDefinedData)
 		if !ok || event.Source() != workspacecommon.ModuleID || !validDoDDefinedData(data) {
 			s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 			return
 		}
 		s.finishRecordAppend(event, dodRecord(event.Source(), data), nil)
-	})
-	s.unsubscribers = append(s.unsubscribers, func() {
-		for _, topic := range workspaceTopics {
-			s.UnsubscribeMatchedFunc(observerID, topic)
-		}
-		s.UnsubscribeMatchedFunc(observerID, workspaceevents.TopicGoalDefined)
-		s.UnsubscribeMatchedFunc(observerID, workspaceevents.TopicDoDDefined)
-	})
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (s *Biz) subscribeRunStateNotifications() {
+func (s *Biz) subscribeRunStateNotifications() error {
 	if s == nil || s.EventHub() == nil {
-		return
+		return common.ErrInvalidArgument
 	}
 	const observerID = "/run/consumers/blocks/eventstream"
 	topics := []string{
@@ -448,25 +462,23 @@ func (s *Biz) subscribeRunStateNotifications() {
 	}
 	for _, topic := range topics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
+		if err := s.subscribeOwnerNotification(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(runevents.RunStateChangedData)
 			if !ok || event.Source() != runcommon.ModuleID || !validRunStateNotification(topic, data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
 			s.finishRecordAppend(event, runStateRecord(topic, event.Source(), data), nil)
-		})
-	}
-	s.unsubscribers = append(s.unsubscribers, func() {
-		for _, topic := range topics {
-			s.UnsubscribeMatchedFunc(observerID, topic)
+		}); err != nil {
+			return err
 		}
-	})
+	}
+	return nil
 }
 
-func (s *Biz) subscribeGovernanceNotifications() {
+func (s *Biz) subscribeGovernanceNotifications() error {
 	if s == nil || s.EventHub() == nil {
-		return
+		return common.ErrInvalidArgument
 	}
 	const observerID = "/governance/consumers/blocks/eventstream"
 	topics := []string{
@@ -477,25 +489,23 @@ func (s *Biz) subscribeGovernanceNotifications() {
 	}
 	for _, topic := range topics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
+		if err := s.subscribeOwnerNotification(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(governanceevents.GovernanceData)
 			if !ok || event.Source() != governancecommon.ModuleID || !validGovernanceData(data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
 			s.finishRecordAppend(event, governanceRecord(topic, data), nil)
-		})
-	}
-	s.unsubscribers = append(s.unsubscribers, func() {
-		for _, topic := range topics {
-			s.UnsubscribeMatchedFunc(observerID, topic)
+		}); err != nil {
+			return err
 		}
-	})
+	}
+	return nil
 }
 
-func (s *Biz) subscribeApprovalNotifications() {
+func (s *Biz) subscribeApprovalNotifications() error {
 	if s == nil || s.EventHub() == nil {
-		return
+		return common.ErrInvalidArgument
 	}
 	const observerID = "/approval/consumers/blocks/eventstream"
 	topics := []string{
@@ -503,25 +513,23 @@ func (s *Biz) subscribeApprovalNotifications() {
 	}
 	for _, topic := range topics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
+		if err := s.subscribeOwnerNotification(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(approvalevents.ApprovalChangedData)
 			if !ok || event.Source() != approvalcommon.ModuleID || data.Validate() != nil {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
 			s.finishRecordAppend(event, approvalRecord(topic, data), nil)
-		})
-	}
-	s.unsubscribers = append(s.unsubscribers, func() {
-		for _, topic := range topics {
-			s.UnsubscribeMatchedFunc(observerID, topic)
+		}); err != nil {
+			return err
 		}
-	})
+	}
+	return nil
 }
 
-func (s *Biz) subscribeDecisionNotifications() {
+func (s *Biz) subscribeDecisionNotifications() error {
 	if s == nil || s.EventHub() == nil {
-		return
+		return common.ErrInvalidArgument
 	}
 	const observerID = "/decision/consumers/blocks/eventstream"
 	changedTopics := []string{
@@ -529,35 +537,32 @@ func (s *Biz) subscribeDecisionNotifications() {
 	}
 	for _, topic := range changedTopics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
+		if err := s.subscribeOwnerNotification(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(decisionevents.TicketChangedData)
 			if !ok || event.Source() != decisioncommon.ModuleID || !validTicketCreatedData(data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
 			s.finishRecordAppend(event, decisionTicketRecord(topic, data), nil)
-		})
+		}); err != nil {
+			return err
+		}
 	}
 	resolvedTopics := []string{decisionevents.TopicTicketResolved}
 	for _, topic := range resolvedTopics {
 		topic := topic
-		s.SubscribeMatchedFunc(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
+		if err := s.subscribeOwnerNotification(observerID, observerID, topic, func(event magicevent.Event, _ magicevent.Result) {
 			data, ok := event.Data().(decisionevents.TicketResolvedData)
 			if !ok || event.Source() != decisioncommon.ModuleID || !validTicketResolvedData(data) {
 				s.finishRecordAppend(event, nil, common.ErrInvalidArgument)
 				return
 			}
 			s.finishRecordAppend(event, decisionResolvedRecord(topic, data), nil)
-		})
+		}); err != nil {
+			return err
+		}
 	}
-	s.unsubscribers = append(s.unsubscribers, func() {
-		for _, topic := range changedTopics {
-			s.UnsubscribeMatchedFunc(observerID, topic)
-		}
-		for _, topic := range resolvedTopics {
-			s.UnsubscribeMatchedFunc(observerID, topic)
-		}
-	})
+	return nil
 }
 
 func validMemoryChangedData(data memoryevents.MemoryChangedData) bool {
@@ -1117,20 +1122,13 @@ func (s *Biz) publishRecordAppended(ctx context.Context, record *eventstreammode
 }
 
 func (s *Biz) Stop() {
-	if s == nil {
-		return
+	if err := s.StopChecked(context.Background()); err != nil {
+		panic(err)
 	}
-	for idx := len(s.topics) - 1; idx >= 0; idx-- {
-		s.UnsubscribeFunc(s.topics[idx])
-	}
-	s.topics = nil
-	unsubscribers := s.unsubscribers
-	s.unsubscribers = nil
-	for _, unsubscribe := range unsubscribers {
-		if unsubscribe != nil {
-			unsubscribe()
-		}
-	}
+}
+
+func (s *Biz) StopChecked(ctx context.Context) error {
+	return s.stopChecked(ctx)
 }
 
 func (s *Biz) listEvents(ctx context.Context, query workorchquerycontract.EventRecordQuery) ([]*eventstreammodel.EventRecord, error) {

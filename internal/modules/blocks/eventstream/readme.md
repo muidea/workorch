@@ -34,6 +34,14 @@ RFC3339Nano；repository 拒绝非当前形态，读取损坏时间时 fail-clos
 先完成全量校验再做任何 repository/deletion I/O。ID 经 trim 形成 canonical identity，空值 fail-closed，canonical
 duplicate 按首次出现折叠，result 再按 workspace ID 排序。
 
+## 生命周期合同
+
+- 普通 command 与所有 matched notification 逐成功登记 topic/observer identity；部分 Start 失败保留 repository/订阅，未清理前不重复注册，退订成功才移除对应项。
+- BeginShutdown 非等待关闭新删除命令；审计通知、Approval durable checkpoint 及只读 query 保留 drain，仍执行原 exact source/payload/scope/tombstone 校验，不从通知重建业务权威。
+- handler 票覆盖真实 append/query 和后续通知；Post 的 nil Result 不影响真实完成记账。Quiesce 超时保留依赖；最终 StopChecked 封全部入站并再次排空，逆序 checked 退订全部成功才清 owner/Module 引用。
+- Configure 不能覆盖未释放 owner；plugin guard 保留 cause，未知 panic 不吞且释放清理 claim。调用方串行 Configure/Start/Stop；本地排空不替代共享任务与 Hub 屏障，不更改 SM-1～SM-4。
+- `biz/owner_lifecycle_test.go`、`module_lifecycle_test.go` 覆盖普通/matched 全部切点、失败退订、真实 Send/Post 排空、超时重试与 framework guard。
+
 ## 不变量与非职责
 
 - `StreamPosition` 是跨 workspace 的全局单调 replay identity；预留失败可留空洞，但重启或 purge 后不得复用。

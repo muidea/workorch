@@ -709,7 +709,7 @@ eventstream_exported_biz_surface_matches="$({
   source_matches '^func[[:space:]]+[A-Z][A-Za-z0-9_]*([[:space:]]*\[[^]]+\])?[[:space:]]*\(' internal/modules/blocks/eventstream/biz |
     grep -v -E -- ':func[[:space:]]+New\(' || true
   source_matches '^func[[:space:]]+\([^)]*\)[[:space:]]+[A-Z][A-Za-z0-9_]*\(' internal/modules/blocks/eventstream/biz |
-    grep -v -E -- ':func[[:space:]]+\([^)]*\*?Biz\)[[:space:]]+(Start|Stop)\(' || true
+    grep -v -E -- ':func[[:space:]]+\([^)]*\*?Biz\)[[:space:]]+(Start|Stop|StopChecked|BeginShutdown|Quiesce)\(' || true
 } | sed '/^[[:space:]]*$/d')"
 eventstream_deletion_ingress_implementation_matches="$(source_matches '^func[[:space:]]+\([^)]*\)[[:space:]]+executeWorkspaceDeletionCommand\(' internal/modules/blocks/eventstream/biz)"
 eventstream_deletion_ingress_call_matches="$(source_matches '\.executeWorkspaceDeletionCommand([[:space:]]|\(|$)' internal/modules/blocks/eventstream/biz)"
@@ -739,7 +739,7 @@ if [[ -n "$eventstream_exported_biz_surface_matches" ]] ||
    ! grep -q -F -- 'cmd, ok := ev.Data().(eventstreamevents.SealWorkspaceEventStreamDeletionCommand)' "$eventstream_deletion_file" ||
    ! grep -q -F -- 'cmd, ok := ev.Data().(eventstreamevents.PurgeWorkspaceCommand)' "$eventstream_deletion_file" ||
    ! grep -q -F -- 'ev.Source() != workspaceDeletionCommandSource' "$eventstream_deletion_file"; then
-  echo "boundary contract violation: Eventstream Biz may export only New/Start/Stop and deletion must use one Workspace-owned typed ingress plus the exact fenced purge sink" >&2
+  echo "boundary contract violation: Eventstream Biz may export only New and explicit lifecycle methods; deletion must use one Workspace-owned typed ingress plus the exact fenced purge sink" >&2
   if [[ -n "$eventstream_exported_biz_surface_matches" ]]; then
     echo "$eventstream_exported_biz_surface_matches" >&2
   fi
