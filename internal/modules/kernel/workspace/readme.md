@@ -29,7 +29,7 @@ Last Verified: 2026-08-30
 
 公开 EventHub 合同均位于 `pkg/events`，每个 topic 使用具体 command/result；创作 record、派生 request 与历史回执使用 concrete DTO，嵌套 Template 的 Soul binding 为有序 typed slice；转换到同 owner model 前拒绝空／重复 binding，不允许 map 覆盖隐藏原 cardinality。显式转换不更改持久 schema 或 hash，也不授予已校验身份；查询、确认与准入仍完整反证 ledger。派生 reserve／complete、authoring 保存／查询／规格 reserve／complete／确认／准入均登记 delivery 与 typed message 合同。既有 pre-seal 规格 ledger 保留 begin／reserve／complete 三个受控写入口；无生产调用方的单请求 query 不注册 EventHub，owner-private 查询 helper 只作内部校验与测试。跨 owner 不暴露 repository/service。`biz.New` 只接收 backend factory 生成的 `WorkspaceOwnerRepositories` aggregate；Workspace、Goal、DoD、Template repository 与 deletion cleaner 必须携带同一个 opaque owner binding，独立构造、跨 backend 或跨 factory 混装在 owner 启动前拒绝。
 
-## 阶段生命周期
+### 阶段生命周期
 
 `BeginShutdown` 关闭新创建、修改、确认、准入、执行、删除及后台调度，并取消 projection Timer 的后续触发；不等待、不退订、不清除 repository、cancel 或订阅账本。必要只读查询、既有 permit 的规格／派生完成、诊断交付、sealed terminal delivery 与 Run 事实接收保留原 source、scope、hash、预算及 CAS 校验，不授予新事务权限。Run 通知仍只是提示，关闭后不启动新的 inventory；普通通知不能释放 slot。
 

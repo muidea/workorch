@@ -34,7 +34,7 @@ RFC3339Nano；repository 拒绝非当前形态，读取损坏时间时 fail-clos
 先完成全量校验再做任何 repository/deletion I/O。ID 经 trim 形成 canonical identity，空值 fail-closed，canonical
 duplicate 按首次出现折叠，result 再按 workspace ID 排序。
 
-## 生命周期合同
+### 生命周期合同
 
 - 普通 command 与所有 matched notification 逐成功登记 topic/observer identity；部分 Start 失败保留 repository/订阅，未清理前不重复注册，退订成功才移除对应项。
 - BeginShutdown 非等待关闭新删除命令；审计通知、Approval durable checkpoint 及只读 query 保留 drain，仍执行原 exact source/payload/scope/tombstone 校验，不从通知重建业务权威。

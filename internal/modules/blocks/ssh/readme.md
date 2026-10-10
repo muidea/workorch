@@ -37,7 +37,7 @@ secret/host identity hash，不包含明文。
   Command；Post/nil Result、错误 producer 或错误 concrete payload 均不得解析 secret、建立连接或访问 receipt authority。
 - SSH 不拥有 Runtime action、retry、governance resolution、CWI credit 或 terminal 状态。
 
-## 生命周期与排空合同
+### 生命周期与排空合同
 
 - `Start` 通过 Base checked SimpleObserver API 逐成功 topic 记账；第 N 个失败保留同一 owner 与成功订阅。Start 关闭后不可重新打开代次。
 - `BeginShutdown` 关闭 fresh root 准入；每个实际 EventHub handler 从准入到真实返回都持有 owner Lifecycle 票。cancel/调用者等待超时不释放票，因此子进程等待和 nested receipt commit 都留在实际执行 handler 的排空范围。

@@ -34,7 +34,7 @@ Runtime candidate conformance 是 SM-3 pre-seal owner observation，其余 Runti
 execute 合同属于 SM-3 sealed operation participation；它们都不是 reducer API。`SealedRuntimeOperation` 绑定 canonical
 payload hash、operation identity 与 execution scope，handler 不能从自由文本重建 operation。
 
-## 生命周期合同
+### 生命周期合同
 
 - 普通及 matched 订阅统一按成功获取顺序登记，部分 Start 失败保留 adapter/清单，未清理前不重复注册；退订成功才移除对应项。
 - BeginShutdown 非等待式关闭新规划/执行。既有 authoring read/verify、workspace manifest 与 post-effect reconciliation 保留原 typed/source/scope 校验供 drain；不以 Source 泛放行新工作。

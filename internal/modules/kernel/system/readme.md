@@ -26,7 +26,7 @@ System 不解释 default 内容或版本、不自行写入/升级持久化对象
 三组 Command/Result 都由接收 owner 定义并同步返回。System 逐项校验 missing subscriber、nil/wrong concrete result、
 `Ensured=false` 与 owner error；任一失败立即停止，且不保存中间 System 状态。
 
-## 生命周期合同
+### 生命周期合同
 
 - Start 的 owner 票覆盖三项同步 ensure 的真实返回，保留原失败即停止与幂等重试语义，不新增业务进度账本。
 - BeginShutdown 非等待式拒绝新 Start；取消调用方不等于 nested handler 完成。Quiesce 超时保留 System/Module 引用，最终 checked Stop 仅在真实排空后释放。

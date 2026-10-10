@@ -42,7 +42,7 @@ input subject 和具体问题；Decision 只管理 ticket/proposal lifecycle。`
 - Workspace deletion fence 后普通读写/late delivery fail closed；physical purge 只由 Decision-private dispatcher触发。
 - 不拥有 Run SM-1、Runtime SM-2～SM-4、Workspace admission、Approval 或 Result 状态机；不选择下一动作，不暴露 repository/service。
 
-## 进程生命周期合同
+### 进程生命周期合同
 
 - Biz 首次 Start 使用 `basebiz.Lifecycle` 开一代；重复 Start 不 Reset，部分订阅/任务提交失败保留逐成功 ledger，Module 持有原 owner 供检查式清理，不能直接重开失败代次。
 - `BeginShutdown` 关 fresh open/reconcile/capability/deletion 并取消 recovery loop，不等待、不退订。ordinary resolution、clarification resolution 与 query 是显式 drain；原 concrete DTO、source/scope、持久 binding 校验不变，不按 Source 扩大新的 root 授权。

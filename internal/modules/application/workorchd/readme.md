@@ -171,7 +171,7 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
 - `WorkspaceProjectionChangedData` 是 Application self-notification；consumer 只接受 exact `application/workorchd` source 与
   concrete data，forged/noncanonical source 不得进入 SSE transport。
 
-## 局部 Runtime 生命周期
+### 局部 Runtime 生命周期
 
 `biz/bootstrap.Runtime` 只管理共享调度器与 Hub；测试装配由 `biz/testkit` 显式列出 20 个业务 owner，
 不扫描全局 plugin 注册表，也不替代生产的 21 个 Hub owner 与 Repository Initiator 装配。

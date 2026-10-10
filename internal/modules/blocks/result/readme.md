@@ -26,7 +26,7 @@ canonical Result ID 由 workspace/run 派生；Artifact ID 由 Result ID 与 sea
 
 后台 Timer 注册失败由 `Start` 原样返回；已经取得的订阅、service 与 cancel 句柄必须保留用于清理，不能把任务提交失败当作启动成功。失败后先完成 owner 清理再重新启动。该任务错误合同不单独证明完整的进程输入／排空／释放屏障。
 
-## 生命周期合同
+### 生命周期合同
 
 - 10 项订阅逐成功登记；部分订阅或 Timer 注册失败保留 service、cancel 与账本，未清理前再次 Start 返回冲突，不把部分启动当作完整成功。退订成功才移除对应项。
 - BeginShutdown 非等待式关闭新删除和新 recovery 调度并取消 Timer context，保留只读查询及 exact Orchestrator terminal delivery；原 scope/source/sealed material/fence 校验不变。

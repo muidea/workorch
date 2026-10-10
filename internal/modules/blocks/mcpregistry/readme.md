@@ -43,7 +43,7 @@ secret reference、不执行 operation，也不修改 Runtime aggregate。
   trim 后授权。
 - Registry 不推断 effect/risk/readiness，不选择 Runtime action；transport 与 reference resolution 归 `blocks/mcp`。
 
-## 生命周期合同
+### 生命周期合同
 
 - `Start` 逐成功订阅记账；部分失败保留 topic 和 service，未清理前拒绝再次注册。
 - `BeginShutdown` 非等待式关闭 create/update/ensure；Get/List、ReadRegistrySnapshot 与 ReadSelectionSnapshot 保留原 typed/source 校验，作为既有事务的一致读取 drain，不授权新执行。

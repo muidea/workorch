@@ -38,7 +38,7 @@ Web-owner evidence file；EventHub 只携带 summary、hash、opaque source/raw 
   Command；Post/nil Result、错误 producer 或错误 concrete payload 均不得加载 provider、访问网络或读取/提交 receipt。
 - Web 只提供 context/evidence candidate，不拥有 action、CWI credit、retry、governance resolution 或 terminal。
 
-## 生命周期合同
+### 生命周期合同
 
 - `Start` 逐成功订阅记账；部分失败保留 adapter/topic，未清理前拒绝再次注册。Configure 不覆盖未释放 owner。
 - `BeginShutdown` 非等待式停止新 catalog/probe 和新外部访问，不取消已接纳执行，不提前退订 receipt 所需通路。

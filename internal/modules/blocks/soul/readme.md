@@ -52,7 +52,7 @@ transition。
 - `Start` 幂等注册，`Stop` 反向退订并 fence 后续 delivery；Application publisher source 是 owner ingress 合同，错误 source
   在 repository I/O 前拒绝。
 
-## 生命周期合同
+### 生命周期合同
 
 - `Start` 逐成功订阅记账；部分失败保留 topic、service 与 repository，未清理前拒绝再次注册。
 - `BeginShutdown` 非等待式关闭 create/update/delete、ensure/upgrade；Get/List、ValidateCapability 和 QueryBuiltinDefaults 保留原 typed/source 校验，作为只读 drain 通路，不扩大许可。

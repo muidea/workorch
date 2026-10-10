@@ -37,7 +37,7 @@ Last Verified: 2026-08-30
 - retirement fence 一旦进入 draining/retired，新的 creation、普通 SM-1 和 Step/Checkpoint mutation必须 fail closed；retired owner facts仍可供恢复校验。
 - 不拥有 Workspace activation、Orchestrator SM-2/SM-3/SM-4、Decision/Approval 或 Result aggregate；不提供跨 owner repository/service。
 
-## 进程生命周期（不改变 Runtime 状态机）
+### 进程生命周期（不改变 Runtime 状态机）
 
 Run 使用共享 `basebiz.Lifecycle` 跟踪真实 handler、恢复扫描、提交过程和已接受后台 callback，而不是以 cancel 或 Send 等待结束代替完成。恢复 callback 在入队前登记，真实返回（包括取消 timer、排队后执行或 panic 的 defer）才退账；拒绝提交立即退账，没有 `WaitGroup.Add/Wait` 竞争。
 

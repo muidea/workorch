@@ -35,7 +35,7 @@ Web capability 与 Approval owner 没有直接 EventHub query 合同。`blocks/w
 - Workspace fence后普通 mutation和late delivery fail closed；purge只由 Approval-private dispatcher调用。
 - 不拥有 SM-1～SM-4，不执行 Web/SSH/Shell/File副作用，不直接服务Web，也不暴露 repository/service。
 
-## 进程生命周期合同
+### 进程生命周期合同
 
 - Biz 持有 owner-neutral `basebiz.Lifecycle`，首次 Start 开一代；重复 Start 不 Reset，部分 Start 失败保留已获取订阅与任务句柄，Module 先保存 Biz，必须检查式清理后重新 Configure。
 - `BeginShutdown` 立即关闭 fresh Runtime open/capability/deletion 入口并取消 reconciliation，不等待、不退订。既有 resolution 与只读 query 使用显式 drain 入口，仍执行原 source、principal、scope 和持久身份校验；不能因调用 Source 可信而放行新的 root。

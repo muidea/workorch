@@ -59,7 +59,7 @@ Governance 与 Orchestrator 没有直接 EventHub I/O。Governance 只向 Decisi
 - consecutive-failure history 由 Governance 按 `OccurredAt + trace ID` 稳定排序，不依赖 repository 迭代顺序；通过自动 Approval 策略与置信度门槛后，evaluated trace 不得残留 `policyBlocked`。
 - Governance 不得绕过 Orchestrator 的 stage、evidence、coverage、requiredOutput 与四状态机合同；Governance 自身协调事务不得修改 SM-1～SM-4 transition。
 
-## 进程生命周期合同
+### 进程生命周期合同
 
 - 首次 Start 建立 owner-local `basebiz.Lifecycle` 代次；重复 Start 不 Reset。Module 先持有 Service，worker/订阅逐成功记账，部分 Start 失败保留清理入口，不在失败分支提前退订/丢任务句柄。
 - `BeginShutdown` 非阻塞关 fresh notification/work enqueue 并取消 worker/reconciliation，不等待、不退订。已接纳任务/handler 用真实退出回执计数；取消后队列剩余项仅释放回执、不发新 owner I/O。只读 trace query 保留显式 drain，原 producer/scope/limit 校验不变。

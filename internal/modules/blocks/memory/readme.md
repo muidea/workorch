@@ -24,7 +24,7 @@ Memory purge 不是分页算法。owner-private sink 每一 pass 直接读取该
 
 10 个 command topics分别使用具体 result：item Create/Get/List/Search/Update/Delete、trace Upsert/List、Workspace Seal/Purge。生产构造只接受同一 backend binding 的 canonical `MemoryOwnerRepositories` 与 EventHub，不提供独立 repository fallback。
 
-## 生命周期合同
+### 生命周期合同
 
 - 10 项订阅逐成功登记；部分启动失败保留 service、删除 fence 和锁账本，未清理前不能重复注册。退订成功才移除对应项。
 - BeginShutdown 关闭新 item 修改及新删除操作；纯查询与 Run 已接纳的 RecallTrace 交付保留 drain。原 exact Run source、scope、immutable duplicate/conflict 和 tombstone 校验不变，不按 Source 泛放行其他写入。

@@ -40,7 +40,7 @@ exact opaque RequestIdentity、完整 accepted command hash、target、configura
 不混入 request URL、配置或凭据。审计发布错误单独记录，不覆盖已经确定的 typed outcome；发布不等于持久投递。
 Runtime 的原始 body／stream 禁止跨 owner 规则不变，此文档诊断合同只用于创建期 Workspace 受限查询。
 
-## 生命周期合同
+### 生命周期合同
 
 - 普通及 matched 订阅按每次成功获取登记；部分 Start 失败保留冻结配置、provider 和订阅账本，未清理前不能重复注册。退订成功才移除对应项。
 - BeginShutdown 非等待式关闭新请求；只有冻结 active configuration 查询允许只读 drain。catalog、selection、ceiling 可能触发 refresh，不能因名字为查询就放行；candidate/preflight 和新 provider 请求同样拒绝。
