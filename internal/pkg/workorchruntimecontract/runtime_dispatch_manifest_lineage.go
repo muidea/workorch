@@ -55,8 +55,11 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 			}
 			validated = &value
 		}
+		// 完整 raw 校验已生成 detached manifest，仅规范化其余 session 字段。
+		rawSession.CandidateManifest = nil
 		session := rawSession.Normalized()
 		if validated != nil {
+			session.CandidateManifest = &validated.manifest
 			validatedByRequest[session.LogicalRequestID] = *validated
 		}
 		sessionCounts[session.LogicalRequestID]++
@@ -131,10 +134,10 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 		if err != nil {
 			return fmt.Errorf("accepted runtime candidate attempt target projection: %w", err)
 		}
-		bindings := CloneCoverageEvidenceBindings(manifest.Bindings)
-		if err := ValidateCoverageEvidenceBindingProjection(bindings); err != nil {
-			return fmt.Errorf("accepted runtime candidate attempt coverage projection: %w", err)
-		}
+		// manifest 的完整 raw-canonical/source/hash 校验已反证 binding。
+		// attempt/dispatch 两侧仍各自规范化并比较完整正文，不能只比较 hash。
+		bindings := manifest.Bindings
+		bindingHash := stableRuntimeCoverageEvidenceBindingSnapshotHashNormalized(bindings)
 		recipes, err := runtimeCandidateManagedValidationRecipeSnapshotFromNormalizedManifest(manifest, dispatch.Candidate)
 		if err != nil {
 			return fmt.Errorf("accepted runtime candidate attempt validation recipe projection: %w", err)
@@ -142,10 +145,10 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 		if !RuntimeDispatchOperationTargetAuthorizationProjectionsEqual(targets, attempt.AdmissionTargetAuthorizations) ||
 			!RuntimeDispatchOperationTargetAuthorizationProjectionsEqual(targets, dispatch.OperationTargetAuthorizations) ||
 			attempt.TargetAuthorizationHash != StableRuntimeDispatchOperationTargetAuthorizationsHash(targets) ||
-			!RuntimeCoverageEvidenceBindingProjectionsEqual(bindings, attempt.AdmissionCoverageBindings) ||
-			!RuntimeCoverageEvidenceBindingProjectionsEqual(bindings, dispatch.CoverageBindings) ||
-			attempt.AdmissionCoverageBindingHash != StableRuntimeCoverageEvidenceBindingSnapshotHash(bindings) ||
-			dispatch.CoverageBindingHash != StableRuntimeCoverageEvidenceBindingSnapshotHash(bindings) ||
+			!reflect.DeepEqual(bindings, attempt.AdmissionCoverageBindings) ||
+			!reflect.DeepEqual(bindings, NormalizeCoverageEvidenceBindings(dispatch.CoverageBindings)) ||
+			attempt.AdmissionCoverageBindingHash != bindingHash ||
+			dispatch.CoverageBindingHash != bindingHash ||
 			!RuntimeValidationRecipeProjectionsEqual(recipes, attempt.AdmissionValidationRecipes) ||
 			!RuntimeValidationRecipeProjectionsEqual(recipes, dispatch.ValidationRecipes) {
 			return fmt.Errorf("accepted runtime candidate attempt projections do not match pre-seal manifest")

@@ -49,6 +49,25 @@ func TestRuntimeCandidateLineagePrivateValidationReuseIsDetachedAndEquivalent(t 
 	if !reflect.DeepEqual(manifest, before) {
 		t.Fatal("validation mutated source")
 	}
+	// 私有路径仅复用本次完整校验的正文；public oracle 仍逐次规范化并重算。
+	wantBindingHash := StableRuntimeCoverageEvidenceBindingSnapshotHash(manifest.Bindings)
+	if got := stableRuntimeCoverageEvidenceBindingSnapshotHashNormalized(validated.manifest.Bindings); got != wantBindingHash {
+		t.Fatalf("binding snapshot identity changed: got=%s want=%s", got, wantBindingHash)
+	}
+	for _, changed := range []func([]CoverageEvidenceBinding){
+		func(values []CoverageEvidenceBinding) { values[0].DeclarationRef = "changed" },
+		func(values []CoverageEvidenceBinding) { values[0].TargetRefs = []string{"other.txt"} },
+		func(values []CoverageEvidenceBinding) { values[0].Proofs[0].ArtifactRefs = []string{"other-artifact"} },
+	} {
+		projection := CloneCoverageEvidenceBindings(manifest.Bindings)
+		changed(projection)
+		projection = NormalizeCoverageEvidenceBindings(projection)
+		if reflect.DeepEqual(validated.manifest.Bindings, projection) ||
+			stableRuntimeCoverageEvidenceBindingSnapshotHashNormalized(projection) == wantBindingHash ||
+			StableRuntimeCoverageEvidenceBindingSnapshotHash(projection) != stableRuntimeCoverageEvidenceBindingSnapshotHashNormalized(projection) {
+			t.Fatal("binding body drift escaped full projection/hash comparison")
+		}
+	}
 	manifest.Operations[0].OwnerModuleID = "tampered"
 	if !reflect.DeepEqual(validated.manifest, before) {
 		t.Fatal("validated manifest aliases caller")
