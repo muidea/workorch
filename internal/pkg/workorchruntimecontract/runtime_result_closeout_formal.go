@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -103,7 +104,7 @@ func (s RuntimeOwnerRevisionSet) Normalized() RuntimeOwnerRevisionSet {
 		e.Revision = strings.TrimSpace(e.Revision)
 		e.DependencyHash = strings.TrimSpace(e.DependencyHash)
 	}
-	sort.Slice(s.Entries, func(i, j int) bool { return ownerRevisionRefKey(s.Entries[i]) < ownerRevisionRefKey(s.Entries[j]) })
+	sort.Slice(s.Entries, func(i, j int) bool { return ownerRevisionRefLess(s.Entries[i], s.Entries[j]) })
 	s.SetHash = strings.TrimSpace(s.SetHash)
 	return s
 }
@@ -117,14 +118,46 @@ func (s RuntimeOwnerRevisionSet) WithHash() RuntimeOwnerRevisionSet {
 	return s
 }
 
+// CompileRuntimeOwnerRevisionSetUnion 只合并调用方提供的实际依赖，不补造 owner fact。
+// 每份输入先反证原始 canonical 正文与 hash；跨集合的相同事实幂等，冲突版本拒绝。
+func CompileRuntimeOwnerRevisionSetUnion(definitionRevision string, sets ...RuntimeOwnerRevisionSet) (RuntimeOwnerRevisionSet, error) {
+	if definitionRevision == "" || definitionRevision != strings.TrimSpace(definitionRevision) {
+		return RuntimeOwnerRevisionSet{}, fmt.Errorf("runtime owner revision union requires an exact definition revision")
+	}
+	entries := make(map[[4]string]RuntimeOwnerRevisionRef)
+	for _, set := range sets {
+		if !reflect.DeepEqual(set, set.Normalized()) {
+			return RuntimeOwnerRevisionSet{}, fmt.Errorf("runtime owner revision union source is not raw canonical")
+		}
+		if err := set.Validate(); err != nil {
+			return RuntimeOwnerRevisionSet{}, err
+		}
+		if set.DefinitionRevision != definitionRevision {
+			return RuntimeOwnerRevisionSet{}, fmt.Errorf("runtime owner revision union definition mismatch")
+		}
+		for _, entry := range set.Entries {
+			key := ownerRevisionResourceKey(entry)
+			if previous, exists := entries[key]; exists && previous != entry {
+				return RuntimeOwnerRevisionSet{}, fmt.Errorf("runtime owner revision union resource %q has conflicting dependencies", key)
+			}
+			entries[key] = entry
+		}
+	}
+	result := RuntimeOwnerRevisionSet{DefinitionRevision: definitionRevision}
+	for _, entry := range entries {
+		result.Entries = append(result.Entries, entry)
+	}
+	return result.WithHash(), nil
+}
+
 func (s RuntimeOwnerRevisionSet) Validate() error {
 	s = s.Normalized()
 	if s.DefinitionRevision == "" || s.SetHash == "" || s.SetHash != s.WithHash().SetHash {
 		return fmt.Errorf("runtime owner revision set identity/hash is invalid")
 	}
-	seen := map[string]struct{}{}
+	seen := map[[4]string]struct{}{}
 	for _, entry := range s.Entries {
-		key := strings.Join([]string{entry.OwnerKind, entry.OwnerInstanceID, entry.ResourceKind, entry.ResourceID}, "\x00")
+		key := ownerRevisionResourceKey(entry)
 		if entry.OwnerKind == "" || entry.OwnerInstanceID == "" || entry.ResourceKind == "" || entry.ResourceID == "" || entry.DependencyHash == "" || (entry.SnapshotID == "" && entry.Revision == "" && entry.Fence == 0) {
 			return fmt.Errorf("runtime owner revision entry is incomplete")
 		}
@@ -246,8 +279,19 @@ func (o RuntimeRequirementOutcome) Validate() error {
 	return nil
 }
 
-func ownerRevisionRefKey(e RuntimeOwnerRevisionRef) string {
-	return strings.Join([]string{e.OwnerKind, e.OwnerInstanceID, e.ResourceKind, e.ResourceID, e.SnapshotID, e.Revision, fmt.Sprintf("%020d", e.Fence)}, "\x00")
+func ownerRevisionResourceKey(e RuntimeOwnerRevisionRef) [4]string {
+	return [4]string{e.OwnerKind, e.OwnerInstanceID, e.ResourceKind, e.ResourceID}
+}
+
+func ownerRevisionRefLess(left, right RuntimeOwnerRevisionRef) bool {
+	leftFields := [...]string{left.OwnerKind, left.OwnerInstanceID, left.ResourceKind, left.ResourceID, left.SnapshotID, left.Revision}
+	rightFields := [...]string{right.OwnerKind, right.OwnerInstanceID, right.ResourceKind, right.ResourceID, right.SnapshotID, right.Revision}
+	for idx, value := range leftFields {
+		if value != rightFields[idx] {
+			return value < rightFields[idx]
+		}
+	}
+	return left.Fence < right.Fence
 }
 
 func stableFormalValueHash(kind string, value any) string {

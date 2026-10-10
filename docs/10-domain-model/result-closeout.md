@@ -42,6 +42,12 @@ counter。owner mutation 只使 dependency set 精确相交的 evidence/binding 
 每个 evidence item保存自身 `RuntimeOwnerRevisionSet` 或其可解引用 immutable hash。Result closeout的set是所有 current
 accepted evidence、accepted assessment和正式artifact dependency set的canonical union；union不能把未依赖owner加入其中。
 
+`CompileRuntimeOwnerRevisionSetUnion` 是此 union 的纯值入口：每份输入必须保持原始 canonical 正文并通过完整
+set/hash 校验，Definition 必须 exact-match；不同集合中完全相同的 entry 幂等合并，同资源的 snapshot、revision、fence
+或 dependency hash 冲突必须拒绝，不能任取一个版本。资源键按四个独立字段比较，不通过分隔符拼接形成歧义。
+空 union 不补造 owner fact。此 helper 不证明传入集合确实来自 producer；receiving owner 的实际读取、typed receipt、
+aggregate 来源反证和 current applicability 仍须独立成立，不能用 self-hash 或 synthetic evidence revision 替代。
+
 ## Three-Axis Requirement Projection
 
 ```text
