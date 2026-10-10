@@ -29,6 +29,13 @@ func (m *Biz) startRunProjectionReconciliation() error {
 	if m == nil {
 		return common.ErrInvalidArgument
 	}
+	m.shutdownMu.Lock()
+	leaveSchedule, admissionErr := m.lifecycle.Enter()
+	if admissionErr != nil {
+		m.shutdownMu.Unlock()
+		return admissionErr
+	}
+	defer leaveSchedule()
 	m.runProjectionStateMu.Lock()
 	if m.runProjectionCancel != nil {
 		m.runProjectionCancel()
@@ -40,6 +47,7 @@ func (m *Biz) startRunProjectionReconciliation() error {
 	m.runProjectionGeneration++
 	m.runProjectionLastError = nil
 	m.runProjectionStateMu.Unlock()
+	m.shutdownMu.Unlock()
 
 	background := m.BackgroundRoutine()
 	if background == nil {
@@ -51,14 +59,12 @@ func (m *Biz) startRunProjectionReconciliation() error {
 		return nil
 	}
 	if err := background.Timer(ctx, &workspaceRunProjectionReconciliationTask{owner: m}, runProjectionReconciliationInterval, 0); err != nil {
-		m.stopRunProjectionReconciliation()
 		return err
 	}
-	if err := background.AsyncFunction(func() {
+	if err := m.scheduleProjectionWork(func() {
 		m.reconcileRunProjections()
 		m.reconcileWorkspaceDeletionInventory(ctx)
 	}); err != nil {
-		m.stopRunProjectionReconciliation()
 		return err
 	}
 	return nil
@@ -68,6 +74,11 @@ type workspaceRunProjectionReconciliationTask struct{ owner *Biz }
 
 func (t *workspaceRunProjectionReconciliationTask) Run() {
 	if t != nil && t.owner != nil {
+		leave, err := t.owner.enterOwner(false)
+		if err != nil {
+			return
+		}
+		defer leave()
 		t.owner.heartbeatRunProjectionReconciliation()
 		t.owner.runProjectionStateMu.Lock()
 		ctx := t.owner.runProjectionCtx
@@ -87,6 +98,11 @@ func (m *Biz) heartbeatRunProjectionReconciliation() {
 	if m == nil {
 		return
 	}
+	leave, admissionErr := m.enterOwner(false)
+	if admissionErr != nil {
+		return
+	}
+	defer leave()
 	m.runProjectionStateMu.Lock()
 	if m.runProjectionCtx == nil || m.runProjectionCtx.Err() != nil {
 		m.runProjectionStateMu.Unlock()
@@ -98,34 +114,15 @@ func (m *Biz) heartbeatRunProjectionReconciliation() {
 	m.reconcileRunProjections()
 }
 
-func (m *Biz) stopRunProjectionReconciliation() {
-	if m == nil {
-		return
-	}
-	m.runProjectionStateMu.Lock()
-	cancel := m.runProjectionCancel
-	m.runProjectionCancel = nil
-	m.runProjectionCtx = nil
-	m.runProjectionPending = false
-	m.runProjectionGeneration++
-	m.runProjectionStateMu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-	// Wait for a current inventory/reducer pass before repositories are cleared.
-	m.runProjectionWorkMu.Lock()
-	m.runProjectionWorkMu.Unlock()
-	// The same owner-local worker also drives persisted deletion journals. Wait
-	// for an in-flight cross-owner fact/reducer pass before Teardown clears the
-	// Workspace repositories.
-	m.deletionWorkMu.Lock()
-	m.deletionWorkMu.Unlock()
-}
-
 func (m *Biz) requestRunProjectionReconciliation(cause error) {
 	if m == nil {
 		return
 	}
+	leave, admissionErr := m.enterOwner(false)
+	if admissionErr != nil {
+		return
+	}
+	defer leave()
 	m.runProjectionStateMu.Lock()
 	if m.runProjectionCtx == nil || m.runProjectionCtx.Err() != nil {
 		m.runProjectionStateMu.Unlock()
@@ -143,7 +140,7 @@ func (m *Biz) requestRunProjectionReconciliation(cause error) {
 		m.reconcileRunProjections()
 		return
 	}
-	if err := background.AsyncFunction(func() { m.reconcileRunProjections() }); err != nil {
+	if err := m.scheduleProjectionWork(func() { m.reconcileRunProjections() }); err != nil {
 		m.runProjectionStateMu.Lock()
 		m.runProjectionLastError = err
 		m.runProjectionStateMu.Unlock()

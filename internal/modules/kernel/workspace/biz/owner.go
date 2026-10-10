@@ -38,7 +38,11 @@ type Biz struct {
 	goals              repository.GoalRepository
 	dods               repository.DoDRepository
 	templates          repository.WorkspaceTemplateRepository
-	topics             []string
+	subscriptions      []ownerSubscription
+	lifecycle          basebiz.Lifecycle
+	shutdownMu         sync.Mutex
+	releasing          bool
+	released           bool
 	started            bool
 	templateMutationMu sync.Mutex
 	// deletionIngressMu serializes the initial Workspace deletion admission
@@ -83,40 +87,56 @@ func (m *Biz) Start() error {
 	if m == nil || m.manager == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	leave, err := m.enterOwner(false)
+	if err != nil {
+		return err
+	}
+	defer leave()
 	if m.started {
 		return nil
 	}
-	m.topics = workspaceCommandTopics()
-	for _, topic := range m.topics {
-		m.SubscribeFunc(topic, m.handleCommand)
+	if len(m.subscriptions) != 0 {
+		return common.ErrConflict
+	}
+	for _, topic := range workspaceCommandTopics() {
+		if err := m.subscribeOwner(topic, m.handleCommand, false); err != nil {
+			return err
+		}
 	}
 	for _, topic := range m.lifecycleTopics() {
-		m.SubscribeFunc(topic, m.handleLifecycleCommand)
-		m.topics = append(m.topics, topic)
+		if err := m.subscribeOwner(topic, m.handleLifecycleCommand, false); err != nil {
+			return err
+		}
 	}
 	for _, topic := range definitionAdmissionTopics() {
-		m.SubscribeFunc(topic, m.handleDefinitionAdmissionCommand)
-		m.topics = append(m.topics, topic)
+		if err := m.subscribeOwner(topic, m.handleDefinitionAdmissionCommand, false); err != nil {
+			return err
+		}
 	}
 	for _, topic := range definitionSpecificationTopics() {
-		m.SubscribeFunc(topic, m.handleDefinitionSpecificationCommand)
-		m.topics = append(m.topics, topic)
+		if err := m.subscribeOwner(topic, m.handleDefinitionSpecificationCommand, false); err != nil {
+			return err
+		}
 	}
-	m.SubscribeFunc(workspaceevents.TopicWorkspaceCommandExecutionIntent, m.handleExecutionIntentCommand)
-	m.topics = append(m.topics, workspaceevents.TopicWorkspaceCommandExecutionIntent)
-	// Run owner is the sole publisher of lifecycle facts. Workspace consumes a
-	// fact and posts an owner-local projection command; it never accepts an
-	// Orchestrator-written Workspace model.
-	m.SubscribeMatchedFunc(ModuleID+"/run-projection", runevents.NotificationDestination, runevents.TopicRunStateChanged, m.handleRunStateChanged)
-	m.SubscribeMatchedFunc(ModuleID+"/run-projection", runevents.NotificationDestination, runevents.TopicRunRuntimeCommandsReady, m.handleRunRuntimeCommandsReady)
-	m.topics = append(m.topics, workspaceevents.TopicWorkspaceTemplateCommandEnsureDefaults)
-	m.SubscribeFunc(workspaceevents.TopicWorkspaceTemplateCommandEnsureDefaults, m.handleSystemDefaultsCommand)
+	if err := m.subscribeOwner(workspaceevents.TopicWorkspaceCommandExecutionIntent, m.handleExecutionIntentCommand, false); err != nil {
+		return err
+	}
+	// Run 事实仅供原 owner 投影合同，不从通知重建执行权威。
+	if err := m.subscribeOwner(runevents.TopicRunStateChanged, m.handleRunStateChanged, true); err != nil {
+		return err
+	}
+	if err := m.subscribeOwner(runevents.TopicRunRuntimeCommandsReady, m.handleRunRuntimeCommandsReady, true); err != nil {
+		return err
+	}
+	if err := m.subscribeOwner(workspaceevents.TopicWorkspaceTemplateCommandEnsureDefaults, m.handleSystemDefaultsCommand, false); err != nil {
+		return err
+	}
 	for _, topic := range []string{workspaceevents.TopicWorkspaceTemplateCommandQueryBuiltinDefaults, workspaceevents.TopicWorkspaceTemplateCommandUpgradeBuiltinDefault} {
-		m.topics = append(m.topics, topic)
-		m.SubscribeFunc(topic, m.handleBuiltinTemplateDefaultsCommand)
+		if err := m.subscribeOwner(topic, m.handleBuiltinTemplateDefaultsCommand, false); err != nil {
+			return err
+		}
 	}
 	if err := m.startRunProjectionReconciliation(); err != nil {
-		m.unsubscribeOwnerTopics()
 		return err
 	}
 	m.started = true
@@ -149,12 +169,42 @@ func setSystemWorkspaceTemplateDefaultsResult(result magicevent.Result, err erro
 	result.Set(workspaceevents.EnsureWorkspaceTemplateDefaultsResult{Ensured: true}, nil)
 }
 
-func (m *Biz) Teardown(context.Context) {
+func (m *Biz) Teardown(ctx context.Context) error {
 	if m == nil {
-		return
+		return nil
 	}
-	m.stopRunProjectionReconciliation()
-	m.unsubscribeOwnerTopics()
+	m.BeginShutdown(ctx)
+	if err := m.Quiesce(ctx); err != nil {
+		return err
+	}
+	m.shutdownMu.Lock()
+	if m.releasing {
+		m.shutdownMu.Unlock()
+		return common.ErrConflict
+	}
+	m.releasing = true
+	m.shutdownMu.Unlock()
+	defer func() { m.shutdownMu.Lock(); m.releasing = false; m.shutdownMu.Unlock() }()
+	if err := m.Quiesce(ctx); err != nil {
+		return err
+	}
+	for len(m.subscriptions) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		last := len(m.subscriptions) - 1
+		entry := m.subscriptions[last]
+		var err error
+		if entry.matched {
+			err = m.UnsubscribeMatchedFuncChecked(ModuleID+"/run-projection", entry.topic)
+		} else {
+			err = m.UnsubscribeFuncChecked(entry.topic)
+		}
+		if err != nil {
+			return err
+		}
+		m.subscriptions = m.subscriptions[:last]
+	}
 	m.manager = nil
 	m.workspaces = nil
 	m.cleaner = nil
@@ -162,18 +212,15 @@ func (m *Biz) Teardown(context.Context) {
 	m.dods = nil
 	m.templates = nil
 	m.started = false
-}
-
-func (m *Biz) unsubscribeOwnerTopics() {
-	if m == nil {
-		return
-	}
-	for idx := len(m.topics) - 1; idx >= 0; idx-- {
-		m.UnsubscribeFunc(m.topics[idx])
-	}
-	m.UnsubscribeMatchedFunc(ModuleID+"/run-projection", runevents.TopicRunStateChanged)
-	m.UnsubscribeMatchedFunc(ModuleID+"/run-projection", runevents.TopicRunRuntimeCommandsReady)
-	m.topics = nil
+	m.runProjectionStateMu.Lock()
+	m.runProjectionCancel = nil
+	m.runProjectionCtx = nil
+	m.runProjectionPending = false
+	m.runProjectionStateMu.Unlock()
+	m.shutdownMu.Lock()
+	m.released = true
+	m.shutdownMu.Unlock()
+	return nil
 }
 
 func (m *Biz) handleRunStateChanged(ev magicevent.Event, _ magicevent.Result) {

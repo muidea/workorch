@@ -20,6 +20,9 @@ func (m *Module) configure(deps workspacebiz.Dependencies) error {
 	if m == nil || deps.EventHub == nil {
 		return common.ErrInvalidArgument
 	}
+	if m.bizPtr != nil {
+		return common.ErrConflict
+	}
 	if err := deps.OwnerRepositories.Validate(); err != nil {
 		return err
 	}
@@ -40,7 +43,9 @@ func (m *Module) Start() error {
 
 func (m *Module) Stop(ctx context.Context) error {
 	if m != nil && m.bizPtr != nil {
-		m.bizPtr.Teardown(ctx)
+		if err := m.bizPtr.Teardown(ctx); err != nil {
+			return err
+		}
 		m.bizPtr = nil
 	}
 	return nil

@@ -314,14 +314,29 @@ func TestWorkspaceRunProjectionStartRollsBackWorkerInstallationFailure(t *testin
 			owner.runProjectionStateMu.Lock()
 			projectionCtx := owner.runProjectionCtx
 			owner.runProjectionStateMu.Unlock()
-			if owner.started || len(owner.topics) != 0 || projectionCtx != nil {
-				t.Fatalf("half-started owner: started=%t topics=%v projectionCtx=%v", owner.started, owner.topics, projectionCtx)
+			if owner.started || len(owner.subscriptions) == 0 || projectionCtx == nil || projectionCtx.Err() != nil {
+				t.Fatalf("partial start lost resources: started=%t subscriptions=%v projectionCtx=%v", owner.started, owner.subscriptions, projectionCtx)
+			}
+			if err := owner.Start(); !errors.Is(err, common.ErrConflict) {
+				t.Fatalf("partial Start retry error=%v, want conflict", err)
+			}
+			if err := owner.Teardown(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if projectionCtx.Err() != context.Canceled || len(owner.subscriptions) != 0 || owner.manager != nil {
+				t.Fatal("checked cleanup did not release partial start")
 			}
 
 			background.timerErr = nil
 			background.asyncErr = nil
-			if err := owner.Start(); err != nil || !owner.started || len(owner.topics) == 0 {
-				t.Fatalf("clean retry Start error=%v started=%t topics=%v", err, owner.started, owner.topics)
+			owner, err = New(hub, background, workspaceOwnerTestDependencies(
+				hub, background, workspaces, workspaces, memory.NewGoalRepository(), memory.NewDoDRepository(), memory.NewWorkspaceTemplateRepository(),
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := owner.Start(); err != nil || !owner.started || len(owner.subscriptions) == 0 {
+				t.Fatalf("new owner Start error=%v started=%t subscriptions=%v", err, owner.started, owner.subscriptions)
 			}
 		})
 	}

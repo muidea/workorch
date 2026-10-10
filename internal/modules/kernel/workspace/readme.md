@@ -29,6 +29,16 @@ Last Verified: 2026-08-30
 
 公开 EventHub 合同均位于 `pkg/events`，每个 topic 使用具体 command/result；创作 record、派生 request 与历史回执使用 concrete DTO，嵌套 Template 的 Soul binding 为有序 typed slice；转换到同 owner model 前拒绝空／重复 binding，不允许 map 覆盖隐藏原 cardinality。显式转换不更改持久 schema 或 hash，也不授予已校验身份；查询、确认与准入仍完整反证 ledger。派生 reserve／complete、authoring 保存／查询／规格 reserve／complete／确认／准入均登记 delivery 与 typed message 合同。既有 pre-seal 规格 ledger 保留 begin／reserve／complete 三个受控写入口；无生产调用方的单请求 query 不注册 EventHub，owner-private 查询 helper 只作内部校验与测试。跨 owner 不暴露 repository/service。`biz.New` 只接收 backend factory 生成的 `WorkspaceOwnerRepositories` aggregate；Workspace、Goal、DoD、Template repository 与 deletion cleaner 必须携带同一个 opaque owner binding，独立构造、跨 backend 或跨 factory 混装在 owner 启动前拒绝。
 
+## 阶段生命周期
+
+`BeginShutdown` 关闭新创建、修改、确认、准入、执行、删除及后台调度，并取消 projection Timer 的后续触发；不等待、不退订、不清除 repository、cancel 或订阅账本。必要只读查询、既有 permit 的规格／派生完成、诊断交付、sealed terminal delivery 与 Run 事实接收保留原 source、scope、hash、预算及 CAS 校验，不授予新事务权限。Run 通知仍只是提示，关闭后不启动新的 inventory；普通通知不能释放 slot。
+
+每项普通／matched 订阅仅在 checked 注册成功后加入账本。部分 Start 失败保留已获得的订阅与调度句柄，不在原实例重复注册。同步 handler 持生命周期票直到真实返回，包括锁等待与嵌套 Send；一次性 AsyncFunction 在提交前取票，accepted 排队任务到 callback 真实结束才释放，提交拒绝才由提交方释放。Timer callback 先检查 fresh admission，closing 后迟到的 callback 不访问已释放依赖。context 取消不是 handler 或 accepted task 完成事实。
+
+`Quiesce` 按调用预算等待真实在途工作；超时保留全部未释放资源以便新预算重试。最终 `Teardown` 封闭所有入站，再次排空并逆序 checked 退订，逐成功移除账本，全部成功后才清除依赖。Module 的 Stop 错误保留原 cause 和 Biz；无返回值 plugin Teardown 通过 framework guard 暴露失败，不吞错误。Configure 不覆盖尚未释放的实例。
+
+上述 owner-local 排空不替代全进程的共享 BackgroundRoutine Shutdown、Hub Drain 与最后的 Initiator 释放屏障；Timer 取消不证明共享队列排空。本合同不新增或改变 Definition、删除 journal、slot 及 SM-1～SM-4 的业务转换或权威。
+
 ## 不变量与非职责
 
 - 正式创作创建入口接受稳定 RequestID，Workspace ID 由该身份确定。初始草稿与不可变创建回执在同一次 owner repository Create 中保存；同身份不同内容拒绝，响应丢失／file reopen 后重放不增写，后续修订也不会被初始创建重放覆盖。目录初始化由 Application 在身份持久后执行，失败可用同一请求重试；创建不物化正式 Goal／DoD、不准入、不创建 Run。模板与目录修改通过创作保存事件随新 input revision 一次 CAS 更新，不以普通配置修改替代创作输入。
