@@ -48,6 +48,21 @@ func selectWorkspaceExecutionDefinitions(ctx context.Context, hub magicevent.Hub
 	return goal, dod, nil
 }
 
+// 封存定义只能使用已准入的原值；前序身份用于变更说明，不合并旧承诺或重新解析文本。
+func sealedWorkspaceExecutionDefinitionsContext(goal *workspacemodel.Goal, dod *workspacemodel.DoD) WorkspaceExecutionDefinitionContext {
+	effectiveGoal := workspacemodel.CloneGoal(goal)
+	effectiveDoD := workspacemodel.CloneDoD(dod)
+	goalContexts := []map[string]any{activationcore.GoalContext(effectiveGoal)}
+	dodContexts := []map[string]any{activationcore.DoDContext(effectiveDoD)}
+	return WorkspaceExecutionDefinitionContext{
+		EffectiveGoal:          effectiveGoal,
+		EffectiveDoD:           effectiveDoD,
+		GoalContexts:           goalContexts,
+		DoDContexts:            dodContexts,
+		DefinitionChangeImpact: activationcore.DefinitionChangeImpactFromDefinitions(effectiveGoal, goalContexts, nil, effectiveDoD, dodContexts, nil),
+	}
+}
+
 func WorkspaceExecutionDefinitionsContext(ctx context.Context, hub magicevent.Hub, workspaceID common.WorkspaceID, goal *workspacemodel.Goal, dod *workspacemodel.DoD) (WorkspaceExecutionDefinitionContext, error) {
 	if hub == nil || workspaceID == "" || goal == nil || dod == nil {
 		return WorkspaceExecutionDefinitionContext{}, common.ErrInvalidArgument

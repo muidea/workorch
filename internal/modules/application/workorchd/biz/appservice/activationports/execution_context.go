@@ -30,9 +30,15 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 	if request.Hub == nil || workspace == nil || template == nil || goal == nil || dod == nil || goal.WorkspaceID != workspace.ID || dod.WorkspaceID != workspace.ID || strings.TrimSpace(template.ID) != strings.TrimSpace(workspace.TemplateID) {
 		return workspaceRuntimeActivationBuild{}, common.ErrInvalidArgument
 	}
-	definitions, err := WorkspaceExecutionDefinitionsContext(ctx, request.Hub, workspace.ID, goal, dod)
-	if err != nil {
-		return workspaceRuntimeActivationBuild{}, err
+	var definitions WorkspaceExecutionDefinitionContext
+	if workspace.StartupInput != nil && workspace.ActivationAdmission != nil && workspace.ActivationAdmission.State == workspacemodel.WorkspaceActivationEligible {
+		definitions = sealedWorkspaceExecutionDefinitionsContext(goal, dod)
+	} else {
+		var err error
+		definitions, err = WorkspaceExecutionDefinitionsContext(ctx, request.Hub, workspace.ID, goal, dod)
+		if err != nil {
+			return workspaceRuntimeActivationBuild{}, err
+		}
 	}
 	effectiveGoal := definitions.EffectiveGoal
 	effectiveDoD := definitions.EffectiveDoD

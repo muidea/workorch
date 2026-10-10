@@ -3,10 +3,12 @@ package activationports
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceports"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -42,13 +44,21 @@ func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request Acti
 	if err != nil {
 		return nil, err
 	}
-	bootstrap, err := activationcore.RuntimeBootstrap(
+	if workspace.StartupInput == nil || workspace.ActivationAdmission == nil {
+		return nil, common.ErrConflict
+	}
+	inventory, err := definitionadmission.CompileRuntimeSourceObligationInventory(admissionSnapshot.Candidate, *workspace.StartupInput, *workspace.ActivationAdmission)
+	if err != nil {
+		return nil, err
+	}
+	bootstrap, err := activationcore.RuntimeBootstrapWithSourceObligations(
 		activationBuild.EffectiveGoal,
 		activationBuild.EffectiveDoD,
 		activationBuild.DefinitionRevision,
 		workspaceStartupInputHash(workspace, activationBuild.DefinitionRevision),
 		activationBuild.DefinitionChangeImpact,
 		activationBuild.RuntimeActivation,
+		inventory,
 	)
 	if err != nil {
 		return nil, err
@@ -70,6 +80,10 @@ func validateRuntimeBootstrapStartupSeal(workspace *workspacemodel.Workspace, te
 	}
 	if startup.ValidateCandidate(candidate) != nil || admission.ValidateCandidate(startup, candidate) != nil || admission.State != workspacemodel.WorkspaceActivationEligible {
 		return fmt.Errorf("%w: Runtime bootstrap does not bind an eligible Workspace Definition admission", common.ErrConflict)
+	}
+	expectedInventory, err := definitionadmission.CompileRuntimeSourceObligationInventory(candidate, startup, admission)
+	if err != nil || !reflect.DeepEqual(expectedInventory, bootstrap.DefinitionSeed.SourceObligations) {
+		return fmt.Errorf("%w: Runtime bootstrap source obligations drifted from exact eligible specification", common.ErrConflict)
 	}
 	if startup.WorkspaceTemplateRef != strings.TrimSpace(template.ID) || startup.TemplateSnapshotHash != workspaceTemplateSnapshotHash(template) {
 		return fmt.Errorf("%w: Runtime bootstrap Template snapshot drifted after Definition admission", common.ErrConflict)

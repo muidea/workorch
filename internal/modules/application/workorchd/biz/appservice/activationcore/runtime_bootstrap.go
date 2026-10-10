@@ -11,6 +11,10 @@ import (
 )
 
 func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, definitionRevision string, startupInputHash string, changeImpact *runtimecontract.RuntimeDefinitionChangeImpact, activation runtimecontract.RuntimeActivationContext) (*runtimecontract.RuntimeBootstrap, error) {
+	return RuntimeBootstrapWithSourceObligations(goal, dod, definitionRevision, startupInputHash, changeImpact, activation, nil)
+}
+
+func RuntimeBootstrapWithSourceObligations(goal *workspacemodel.Goal, dod *workspacemodel.DoD, definitionRevision string, startupInputHash string, changeImpact *runtimecontract.RuntimeDefinitionChangeImpact, activation runtimecontract.RuntimeActivationContext, inventory *runtimecontract.RuntimeSourceObligationInventory) (*runtimecontract.RuntimeBootstrap, error) {
 	definitionRevision = strings.TrimSpace(definitionRevision)
 	startupInputHash = strings.TrimSpace(startupInputHash)
 	if goal == nil || dod == nil || goal.ID == "" || dod.ID == "" || goal.WorkspaceID == "" || goal.WorkspaceID != dod.WorkspaceID ||
@@ -32,9 +36,26 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	if err != nil {
 		return nil, err
 	}
+	if inventory != nil {
+		if inventory.DefinitionRevision != definitionRevision || inventory.StartupInputHash != startupInputHash {
+			return nil, fmt.Errorf("runtime source obligations do not bind sealed Definition")
+		}
+		for n := range compiled.CoverageItems {
+			item := &compiled.CoverageItems[n]
+			checks, err := runtimecontract.CompileRuntimeSourceObligationChecks(*inventory, *item)
+			if err != nil {
+				return nil, err
+			}
+			item.SourceObligationChecks = checks
+		}
+	}
 	definition := runtimecontract.RuntimeDefinitionContext{
 		StartupInputHash: startupInputHash, Revision: definitionRevision, GoalID: goal.ID, GoalDefinition: goal.Text,
 		DoDID: dod.ID, DoDDefinition: strings.Join(dodLines, "\n"),
+	}
+	if inventory != nil {
+		value := inventory.Clone()
+		definition.SourceObligations = &value
 	}
 	// Goal/DoD compilation declares the required role and bounded discovery
 	// source. Runtime then asks the owning File block to select from the actual
@@ -76,7 +97,7 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 	}
 	definition.CapabilityContract = capabilityContract
 	definition.ChangeImpact = changeImpact
-	definitionSeed, err := runtimecontract.CompileRuntimeDefinitionSeed(definition, activation, compiled.CoverageItems, compiled.Slices)
+	definitionSeed, err := runtimecontract.CompileRuntimeDefinitionSeedWithSourceObligations(definition, activation, compiled.CoverageItems, compiled.Slices, inventory)
 	if err != nil {
 		return nil, fmt.Errorf("runtime definition seed: %w", err)
 	}
