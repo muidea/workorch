@@ -8,14 +8,14 @@ Last Verified: 2026-08-26
 
 ## Purpose
 
-本文只定义 17 个 Block 的分类、共同结构和跨 owner 交互边界。每个 Block 的正式状态、topic、command/result 与
+本文只定义 16 个 Block 的分类、共同结构和跨 owner 交互边界。每个 Block 的正式状态、topic、command/result 与
 私有 lifecycle 以对应 `internal/modules/blocks/<unit>/readme.md` 和 `pkg/events` 为实现 SoT；本文不复制组件内部流程。
 
 ## Block Classification
 
 | Class | Units | Owner rule |
 | --- | --- | --- |
-| resource/state owner | `workspace`, `run`, `result`, `decision`, `approval`, `memory`, `skill`, `soul`, `mcpregistry`, `eventstream` | each owns one resource aggregate or audit resource |
+| resource/state owner | `run`, `result`, `decision`, `approval`, `memory`, `skill`, `soul`, `mcpregistry`, `eventstream` | each owns one resource aggregate or audit resource |
 | capability owner | `llm`, `file`, `git`, `shell`, `ssh`, `web`, `mcp` | each owns one technical capability, admissibility and factual execution result |
 
 Block 是否有 repository、调用方数量或代码规模不改变分类。需要组合多个 owner command 完成业务闭环的是 Module；
@@ -47,6 +47,8 @@ module.go
   `biz.Biz` 生命周期对象。
 
 ## Resource Owner Responsibilities
+
+资源 owner 边界同样约束 `kernel/workspace` Module：它保留 Workspace 定义、准入、slot 和删除 journal 的唯一权威，但跨 owner 协调职责使其不属于上述 Block 清单。稳定事件 owner ID 为 `blocks/workspace`。
 
 | Owner | Sole authority | Accepted cross-owner contribution |
 | --- | --- | --- |
