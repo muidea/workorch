@@ -34,6 +34,15 @@ Runtime candidate conformance 是 SM-3 pre-seal owner observation，其余 Runti
 execute 合同属于 SM-3 sealed operation participation；它们都不是 reducer API。`SealedRuntimeOperation` 绑定 canonical
 payload hash、operation identity 与 execution scope，handler 不能从自由文本重建 operation。
 
+## 生命周期合同
+
+- 普通及 matched 订阅统一按成功获取顺序登记，部分 Start 失败保留 adapter/清单，未清理前不重复注册；退订成功才移除对应项。
+- BeginShutdown 非等待式关闭新规划/执行。既有 authoring read/verify、workspace manifest 与 post-effect reconciliation 保留原 typed/source/scope 校验供 drain；不以 Source 泛放行新工作。
+- 六种 execute 外层 drain 只支持 sealed 校验和 exact persisted receipt 重放；未命中必须另取 fresh 票，关闭后零新文件操作/receipt commit，包括 read/list/preview。
+- handler 票持有至真实返回及 nested receipt I/O 完成。Quiesce 超时保留全部依赖；Stop 封最终准入后再次排空，逆序 checked 退订，全部成功才清 adapter/Module 引用。未知 panic 不吞掉，不遗留清理 claim。
+- 调用方串行 Configure/Start/Stop，不能覆盖未释放 owner；plugin guard 保留 cause。本地排空不替代共享任务/Hub 屏障，SM-1～SM-4 的业务权威、scope、fence、replay/权限合同不变。
+- `biz/owner_lifecycle_test.go`、`module_lifecycle_test.go` 覆盖全部普通/matched 订阅切点、失败退订、超时重试与 guard；既有 patch receipt-loss 回归同时验证停机 exact 重放及未命中拒绝。
+
 ## 不变量与非职责
 
 - `Configure` 缺 EventHub 立即失败；`Start` 重复调用不重复订阅，`Stop` 释放订阅和 adapter。

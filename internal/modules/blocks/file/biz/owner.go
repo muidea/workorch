@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
@@ -32,6 +33,11 @@ type Biz struct {
 	basebiz.Base
 	runtimeAdapter *RuntimeAdapter
 	started        bool
+	subscriptions  []ownerSubscription
+	lifecycle      basebiz.Lifecycle
+	shutdownMu     sync.Mutex
+	releasing      bool
+	released       bool
 }
 
 type Dependencies struct {
@@ -57,55 +63,91 @@ func (m *Biz) Start() error {
 	if m == nil || m.runtimeAdapter == nil || m.EventHub() == nil {
 		return common.ErrInvalidArgument
 	}
+	leave, err := m.enterOwner(false)
+	if err != nil {
+		return err
+	}
+	defer leave()
 	if m.started {
 		return nil
 	}
-	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", fileevents.PrerequisiteCommandDestination, fileevents.TopicAcquireTargetSnapshot, m.handleAcquireTargetSnapshot)
-	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", fileevents.PrerequisiteCommandDestination, fileevents.TopicAcquireRuntimeTargetSelection, m.handleAcquireRuntimeTargetSelection)
-	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", fileevents.PrerequisiteCommandDestination, fileevents.TopicAcquireWorkspaceManifest, m.handleAcquireWorkspaceManifest)
-	m.SubscribeMatchedFunc(ModuleID+"/prerequisite", fileevents.PrerequisiteCommandDestination, fileevents.TopicConfirmRuntimeRepairSurface, m.handleConfirmRuntimeRepairSurface)
-	m.SubscribeFunc(fileevents.TopicAcquireAuthoringResources, m.handleAcquireAuthoringResource)
-	m.SubscribeFunc(fileevents.TopicVerifyAuthoringResource, m.handleVerifyAuthoringResource)
-	m.SubscribeFunc(fileevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities)
-	m.SubscribeFunc(fileevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility)
-	m.SubscribeFunc(fileevents.TopicValidateRuntimeOperationCandidateConformance, m.handleRuntimeOperationCandidateConformance)
-	m.SubscribeFunc(fileevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility)
-	m.SubscribeFunc(fileevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility)
-	m.SubscribeFunc(fileevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery)
-	m.SubscribeFunc(fileevents.TopicExecuteFileListOperation, m.handleFileListOperation)
-	m.SubscribeFunc(fileevents.TopicExecuteFileReadOperation, m.handleFileReadOperation)
-	m.SubscribeFunc(fileevents.TopicExecuteFileEditOperation, m.handleFileEditOperation)
-	m.SubscribeFunc(fileevents.TopicExecuteFileWriteOperation, m.handleFileWriteOperation)
-	m.SubscribeFunc(fileevents.TopicExecutePatchApplyOperation, m.handlePatchApplyOperation)
-	m.SubscribeFunc(fileevents.TopicExecutePatchPreviewOperation, m.handlePatchPreviewOperation)
+	if len(m.subscriptions) != 0 {
+		return common.ErrConflict
+	}
+	for _, entry := range []struct {
+		topic   string
+		handler magicevent.ObserverFunc
+		matched bool
+	}{
+		{fileevents.TopicAcquireTargetSnapshot, m.handleAcquireTargetSnapshot, true},
+		{fileevents.TopicAcquireRuntimeTargetSelection, m.handleAcquireRuntimeTargetSelection, true},
+		{fileevents.TopicAcquireWorkspaceManifest, m.handleAcquireWorkspaceManifest, true},
+		{fileevents.TopicConfirmRuntimeRepairSurface, m.handleConfirmRuntimeRepairSurface, true},
+		{fileevents.TopicAcquireAuthoringResources, m.handleAcquireAuthoringResource, false},
+		{fileevents.TopicVerifyAuthoringResource, m.handleVerifyAuthoringResource, false},
+		{fileevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities, false},
+		{fileevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility, false},
+		{fileevents.TopicValidateRuntimeOperationCandidateConformance, m.handleRuntimeOperationCandidateConformance, false},
+		{fileevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility, false},
+		{fileevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility, false},
+		{fileevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery, false},
+		{fileevents.TopicExecuteFileListOperation, m.handleFileListOperation, false},
+		{fileevents.TopicExecuteFileReadOperation, m.handleFileReadOperation, false},
+		{fileevents.TopicExecuteFileEditOperation, m.handleFileEditOperation, false},
+		{fileevents.TopicExecuteFileWriteOperation, m.handleFileWriteOperation, false},
+		{fileevents.TopicExecutePatchApplyOperation, m.handlePatchApplyOperation, false},
+		{fileevents.TopicExecutePatchPreviewOperation, m.handlePatchPreviewOperation, false},
+	} {
+		if err := m.subscribeOwner(entry.topic, entry.handler, entry.matched); err != nil {
+			return err
+		}
+	}
 	m.started = true
 	return nil
 }
 
-func (m *Biz) Teardown(context.Context) {
+func (m *Biz) Teardown(ctx context.Context) error {
 	if m == nil {
-		return
+		return nil
 	}
-	m.UnsubscribeMatchedFunc(ModuleID+"/prerequisite", fileevents.TopicAcquireWorkspaceManifest)
-	m.UnsubscribeMatchedFunc(ModuleID+"/prerequisite", fileevents.TopicConfirmRuntimeRepairSurface)
-	m.UnsubscribeMatchedFunc(ModuleID+"/prerequisite", fileevents.TopicAcquireTargetSnapshot)
-	m.UnsubscribeMatchedFunc(ModuleID+"/prerequisite", fileevents.TopicAcquireRuntimeTargetSelection)
-	m.UnsubscribeFunc(fileevents.TopicAcquireAuthoringResources)
-	m.UnsubscribeFunc(fileevents.TopicVerifyAuthoringResource)
-	m.UnsubscribeFunc(fileevents.TopicExecutePatchPreviewOperation)
-	m.UnsubscribeFunc(fileevents.TopicExecutePatchApplyOperation)
-	m.UnsubscribeFunc(fileevents.TopicExecuteFileEditOperation)
-	m.UnsubscribeFunc(fileevents.TopicExecuteFileWriteOperation)
-	m.UnsubscribeFunc(fileevents.TopicExecuteFileReadOperation)
-	m.UnsubscribeFunc(fileevents.TopicExecuteFileListOperation)
-	m.UnsubscribeFunc(fileevents.TopicAcquireRuntimeCapabilities)
-	m.UnsubscribeFunc(fileevents.TopicAcquireRuntimeOperationAdmissibility)
-	m.UnsubscribeFunc(fileevents.TopicValidateRuntimeOperationCandidateConformance)
-	m.UnsubscribeFunc(fileevents.TopicProbeRuntimeOperationFeasibility)
-	m.UnsubscribeFunc(fileevents.TopicProbeRuntimeSemanticProofFeasibility)
-	m.UnsubscribeFunc(fileevents.TopicQueryRuntimeCWIReconciliation)
+	m.BeginShutdown(ctx)
+	if err := m.Quiesce(ctx); err != nil {
+		return err
+	}
+	m.shutdownMu.Lock()
+	if m.releasing {
+		m.shutdownMu.Unlock()
+		return common.ErrConflict
+	}
+	m.releasing = true
+	m.shutdownMu.Unlock()
+	defer func() { m.shutdownMu.Lock(); m.releasing = false; m.shutdownMu.Unlock() }()
+	if err := m.Quiesce(ctx); err != nil {
+		return err
+	}
+	for len(m.subscriptions) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		last := len(m.subscriptions) - 1
+		entry := m.subscriptions[last]
+		var err error
+		if entry.matched {
+			err = m.UnsubscribeMatchedFuncChecked(ModuleID+"/prerequisite", entry.topic)
+		} else {
+			err = m.UnsubscribeFuncChecked(entry.topic)
+		}
+		if err != nil {
+			return err
+		}
+		m.subscriptions = m.subscriptions[:last]
+	}
 	m.runtimeAdapter = nil
 	m.started = false
+	m.shutdownMu.Lock()
+	m.released = true
+	m.shutdownMu.Unlock()
+	return nil
 }
 
 func (m *Biz) handleFileListOperation(event magicevent.Event, result magicevent.Result) {
@@ -138,6 +180,12 @@ func (m *Biz) handleFileListOperation(event magicevent.Event, result magicevent.
 		result.Set(fileevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
+	leaveFresh, admissionErr := m.enterOwner(false)
+	if admissionErr != nil {
+		setPrerequisiteError(result, admissionErr)
+		return
+	}
+	defer leaveFresh()
 	operationResult, executeErr := m.runtimeAdapter.ListFiles(FileListRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory, Path: data.Path,
 		Recursive: data.Recursive, MaxEntries: data.MaxEntries,
@@ -187,6 +235,12 @@ func (m *Biz) handleFileReadOperation(event magicevent.Event, result magicevent.
 		result.Set(fileevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
+	leaveFresh, admissionErr := m.enterOwner(false)
+	if admissionErr != nil {
+		setPrerequisiteError(result, admissionErr)
+		return
+	}
+	defer leaveFresh()
 	operationResult, executeErr := m.runtimeAdapter.ReadFile(event.Context(), FileReadRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory, Path: data.Path, Optional: data.Optional,
 		MaxBytes: data.MaxBytes, StartLine: data.StartLine, EndLine: data.EndLine,
@@ -236,6 +290,12 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 		result.Set(fileevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
+	leaveFresh, admissionErr := m.enterOwner(false)
+	if admissionErr != nil {
+		setPrerequisiteError(result, admissionErr)
+		return
+	}
+	defer leaveFresh()
 	if err := validateFileReplayProof(command.Execution.ReplayProof, command.OperationID, data.Path); err != nil {
 		setPrerequisiteError(result, err)
 		return
@@ -299,6 +359,12 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 		result.Set(fileevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
+	leaveFresh, admissionErr := m.enterOwner(false)
+	if admissionErr != nil {
+		setPrerequisiteError(result, admissionErr)
+		return
+	}
+	defer leaveFresh()
 	if err := validateFileReplayProof(command.Execution.ReplayProof, command.OperationID, data.TargetRef); err != nil {
 		setPrerequisiteError(result, err)
 		return
@@ -362,6 +428,12 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		result.Set(fileevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
+	leaveFresh, admissionErr := m.enterOwner(false)
+	if admissionErr != nil {
+		setPrerequisiteError(result, admissionErr)
+		return
+	}
+	defer leaveFresh()
 	if err := validateFileReplayProof(command.Execution.ReplayProof, command.OperationID, data.TargetRef); err != nil {
 		setPrerequisiteError(result, err)
 		return
@@ -469,6 +541,12 @@ func (m *Biz) handlePatchPreviewOperation(event magicevent.Event, result magicev
 		result.Set(fileevents.ExecuteOperationResult{Receipt: receipt}, nil)
 		return
 	}
+	leaveFresh, admissionErr := m.enterOwner(false)
+	if admissionErr != nil {
+		setPrerequisiteError(result, admissionErr)
+		return
+	}
+	defer leaveFresh()
 	operationResult, executeErr := m.runtimeAdapter.PreviewPatch(PatchApplyRequest{
 		WorkspaceDirectory: command.WorkspaceDeliverableDirectory,
 		TargetRef:          data.TargetRef, PatchType: data.PatchType,

@@ -16,6 +16,7 @@ import (
 
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
+	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -2234,6 +2235,7 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 	if err := os.WriteFile(filepath.Join(workspace, "README.md"), []byte("external-change\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	owner.BeginShutdown(ctx)
 	data, resultErr = send().Get()
 	if resultErr != nil {
 		t.Fatalf("duplicate persisted receipt: %v", resultErr)
@@ -2245,6 +2247,14 @@ func TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure(t *testi
 	content, err = os.ReadFile(filepath.Join(workspace, "README.md"))
 	if err != nil || string(content) != "external-change\n" {
 		t.Fatalf("duplicate persisted receipt applied a second file effect: content=%q err=%v", content, err)
+	}
+	missing := command
+	missing.DispatchID = "dispatch-missing"
+	missing.Execution.ExecutionKey = "exec/ws-1/run-1/dispatch-missing/write-1"
+	missing.Execution = fileBizTestExecutionEnvelope(operation, missing.Execution)
+	missingResult := hub.Send(magicevent.NewEventWithContext(fileevents.TopicExecutePatchApplyOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, missing))
+	if _, err := missingResult.Get(); !errors.Is(err, basebiz.ErrLifecycleClosing) || commitCalls != 2 {
+		t.Fatalf("shutdown receipt miss err=%v commits=%d", err, commitCalls)
 	}
 }
 
