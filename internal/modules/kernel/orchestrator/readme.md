@@ -177,8 +177,13 @@ receipt miss 不授执行；current bytes 按原 range/MaxBytes selector 重读�
 该接口尚未接入 SM-2 private applicability/stale/reopen 事务，不提供持续 freshness、mutation/Shell/assessment/artifact
 current observation 或终态 union；不新增 SM-1～SM-4 transition、credit、预算或 availability。
 `biz/runtime_file_read_dependency_event_adapter_test.go` 使用实际 File 与 typed Workspace/receipt fixture；
-`biz/runtime_operation_receipt_source_test.go` 和 `biz/runtime/operation_receipt_test.go` 独立反证原 persisted 来源，
-这些局部配对不冒充完整公开 drive 或 live 验证。
+`biz/runtime_file_read_dependency_receipt_integration_test.go` 在同一 Hub 连接实际 File、execution adapter、Orchestrator
+receipt handler/controller 与 current-query adapter，原 read 经 candidate/claim/receipt/evidence 完整门禁，逐 CAS 校验
+完整 aggregate。Workspace、CAS repository、pre-seal semantic 输入与非授信 auxiliary decision 是显式 fixture，
+不声称 production reducer 已选择读取。独立 actual bytes/range/bound selector oracle 固定无关／相交变化；协调重算
+Definition/operation/dependency 身份不能替代原 receipt，重载／owner 重建、missing/error 和 BeginShutdown 查询均零写入。
+`biz/runtime_operation_receipt_source_test.go` 和 `biz/runtime/operation_receipt_test.go` 独立反证原 persisted 来源；
+这些组合与局部配对不冒充完整公开 drive、SM-2 freshness 闭环或 live 验证。
 
 ### 逐源义务与共同 CWI
 
