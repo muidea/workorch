@@ -302,8 +302,11 @@ receipt miss、未保存流、错 hash/scope/类型、异常文件均返回明�
 每次最多返回该原流的 64KiB 已保存 bytes；不完整前缀保持原 incomplete/omission，不改写或摘要原文。
 查询沿原 context/lane 进行，BeginShutdown 后拒绝新读取，已接纳的 nested receipt/Workspace/read 等真实结束后才释放依赖。
 `validation_raw_output_query_test.go` 配对实际私有 producer/raw store 与 typed receipt/Workspace fixture，
-`pkg/events/validation_raw_output_test.go` 固定原 bytes、bounds 与 detached result；这不代替实际 receipt-owner 全装配、
-公开执行/恢复或 live 验收。该 read topic 不产生新的 SM-1～SM-4 transition、预算或 availability。
+`pkg/events/validation_raw_output_test.go` 固定原 bytes、bounds 与 detached result。
+Orchestrator 的 `runtime_shell_raw_output_receipt_integration_test.go` 配对实际 Shell read、receipt handler/controller
+和文件型 Run owner，沿完整 semantic/candidate/claim/receipt 准入验证原持久来源、零变更读取、异引用冲突、句柄重建及退休拒绝；
+原文 wire 和 Workspace 为显式 fixture，不代表公开 project producer、fresh-process 恢复或 live 验收。
+该 read topic 不产生新的 SM-1～SM-4 transition、预算或 availability。
 
 #### Executable input-maintenance contracts
 
