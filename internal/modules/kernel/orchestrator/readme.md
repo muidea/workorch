@@ -106,6 +106,11 @@ capability resource state。
   需要重绑时仍完整走原 Definition seed 投影比较，其它 aggregate 门禁不变。
   `biz/runtime/semantic_rebinding_projection_applicability_test.go` 以原完整路径固定接受／拒绝原因、原值及分配等价。
   这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
+  current focus 的 target-selection 纯投影只规范化实际返回的 selection，并按原 trim／首个同 ID prerequisite
+  语义比较 Kind／Scope／FocusID，不复制无关 Definition、证据、catalog 或 coverage。原完整 aggregate/raw/hash
+  校验不变，不增加已校验标志或跨调用缓存；`biz/internal/grounding/target_projection_reference_test.go`
+  以旧完整 Facts.Normalized 路径固定 duplicate／stale／raw 表示、原值、返回隔离、重载、fuzz 与分配对照。
+  此纯值投影参与既有 SM-2 authority 与 SM-3 admission，SM-1／SM-4 的转换和恢复规则不变。
   execution-budget policy 在一次完整 `Validate` 中复用已规范化的 detached policy 编码 hash，使用同次短字段缓冲，
   不重复深拷贝／排序；公开 hash 入口仍先规范化，所有维度、数值、duplicate、scope、restart 和 hash 门禁及拒绝顺序不变。
   `runtime_execution_budget_policy_single_pass_test.go` 以完整旧 validator/hash reference 固定原 bytes、长字段、非法输入、

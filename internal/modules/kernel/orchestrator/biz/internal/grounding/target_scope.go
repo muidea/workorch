@@ -46,18 +46,25 @@ func SameTargetRefs(left, right []string) bool {
 // satisfied Focus-scoped prerequisite for the current Focus. A raw resource
 // pointer is audit lineage, not target authority.
 func CurrentFocusTargetSelection(facts runtimecontract.RuntimeFacts) *runtimecontract.RuntimeTargetSelection {
-	facts = facts.Normalized()
 	if facts.Resources.TargetSelection == nil {
 		return nil
 	}
 	selection := facts.Resources.TargetSelection.Normalized()
+	if selection.PrerequisiteID == "" {
+		return nil
+	}
+	// 仅投影实际比较的字段；保持原 prerequisite 规范化的首个同 ID 成员语义。
+	// 这是纯读取，不取代调用方的完整 aggregate/raw/hash 校验。
 	for _, prerequisite := range facts.Prerequisites.Satisfied {
-		if prerequisite.ID == selection.PrerequisiteID &&
-			prerequisite.Kind == runtimecontract.PrerequisiteKindTargetSelection &&
-			prerequisite.Scope == runtimecontract.RuntimePrerequisiteScopeFocus &&
-			prerequisite.FocusID == facts.Focus.ID {
+		if strings.TrimSpace(prerequisite.ID) != selection.PrerequisiteID {
+			continue
+		}
+		if runtimecontract.PrerequisiteKind(strings.TrimSpace(string(prerequisite.Kind))) == runtimecontract.PrerequisiteKindTargetSelection &&
+			runtimecontract.RuntimePrerequisiteScope(strings.TrimSpace(string(prerequisite.Scope))) == runtimecontract.RuntimePrerequisiteScopeFocus &&
+			strings.TrimSpace(prerequisite.FocusID) == strings.TrimSpace(facts.Focus.ID) {
 			return &selection
 		}
+		return nil
 	}
 	return nil
 }
