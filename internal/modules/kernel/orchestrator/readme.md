@@ -134,6 +134,10 @@ capability resource state。
   allocation／consumption／unknown／exhaustion 门禁不变；`runtime_budget_dimension_projection_test.go` 以旧完整投影及
   allocation validator 固定 duplicate/raw/非法值、完整错误顺序、原输入、JSON 重载、后续漂移、fuzz 和分配，
   此查询不是预算批准或成功缓存。
+  allocation／consumption／reconciliation 的 ID/hash 与 budget view hash 复用每次编码私有的短字段缓冲，
+  长字段仍完整编码原 bytes；规范化、原长度前缀、字段次序、十进制／布尔表示、view 的原 dimension 顺序均不变。
+  `runtime_budget_buffered_hash_test.go` 以独立旧非缓冲编码固定逐字段、边界整数、非法 bytes、长正文、nil/empty、
+  原输入、完整 ledger 重载与后续篡改、fuzz 和分配；不保存 hash/校验成功缓存，也不改预算上限或 unknown 责任。
   这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
   current focus 的 target-selection 纯投影只规范化实际返回的 selection，并按原 trim／首个同 ID prerequisite
   语义比较 Kind／Scope／FocusID，不复制无关 Definition、证据、catalog 或 coverage。原完整 aggregate/raw/hash

@@ -1,7 +1,6 @@
 package workorchruntimecontract
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"sort"
@@ -321,7 +320,7 @@ func (a RuntimeBudgetAllocation) Validate(policy RuntimeExecutionBudgetPolicy) e
 
 func StableRuntimeBudgetAllocationID(allocation RuntimeBudgetAllocation) string {
 	a := allocation.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-budget-allocation")
 	writeHashString(h, a.PolicyRevision)
 	writeHashString(h, string(a.Dimension))
@@ -332,7 +331,7 @@ func StableRuntimeBudgetAllocationID(allocation RuntimeBudgetAllocation) string 
 
 func StableRuntimeBudgetAllocationHash(allocation RuntimeBudgetAllocation) string {
 	a := allocation.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-budget-allocation-value")
 	writeHashString(h, a.AllocationID)
 	writeHashString(h, string(a.Dimension))
@@ -396,7 +395,7 @@ func (f RuntimeBudgetConsumptionFact) Validate(allocation RuntimeBudgetAllocatio
 
 func StableRuntimeBudgetConsumptionID(fact RuntimeBudgetConsumptionFact) string {
 	f := fact.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-budget-consumption")
 	writeHashString(h, f.AllocationID)
 	writeHashString(h, f.Owner)
@@ -406,7 +405,7 @@ func StableRuntimeBudgetConsumptionID(fact RuntimeBudgetConsumptionFact) string 
 
 func StableRuntimeBudgetConsumptionHash(fact RuntimeBudgetConsumptionFact) string {
 	f := fact.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-budget-consumption-value")
 	writeHashString(h, f.ConsumptionID)
 	writeHashString(h, f.AllocationID)
@@ -511,7 +510,7 @@ func (r RuntimeBudgetReconciliationRecord) Validate(allocations []RuntimeBudgetA
 
 func StableRuntimeBudgetReconciliationID(record RuntimeBudgetReconciliationRecord) string {
 	r := record.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-budget-reconciliation")
 	writeHashString(h, r.AllocationID)
 	writeHashString(h, r.ProbeKind)
@@ -523,7 +522,7 @@ func StableRuntimeBudgetReconciliationID(record RuntimeBudgetReconciliationRecor
 
 func StableRuntimeBudgetReconciliationHash(record RuntimeBudgetReconciliationRecord) string {
 	r := record.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-budget-reconciliation-value")
 	writeHashString(h, r.ReconciliationID)
 	writeHashString(h, r.AllocationID)
@@ -1327,7 +1326,7 @@ func BuildRuntimeExecutionBudgetView(workspaceID common.WorkspaceID, runID commo
 }
 
 func StableRuntimeExecutionBudgetViewHash(view RuntimeExecutionBudgetView) string {
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-execution-budget-view")
 	writeHashString(h, string(view.WorkspaceID))
 	writeHashString(h, string(view.RunID))
