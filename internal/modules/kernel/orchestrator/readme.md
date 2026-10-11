@@ -73,6 +73,10 @@ capability resource state。
   persisted revision 每次仍独立比较并返回 exact mismatch，不缓存 Run、manifest、raw/hash 或 aggregate 校验成功。
   `runtime_operation_contract_revision_reference_test.go` 保全原完整编码；
   `runtime_operation_contract_revision_static_test.go` 固定并发身份、公开库存副本隔离、后续 persisted 漂移拒绝与分配对照。
+  assessment purpose 前像在一次 ledger 遍历内使用同一 private semantic validation session；历史 generation 仍完整校验，
+  manifest/catalog 仅在 exact raw 相等时复用本次产物，batch、document、owner feasibility 与唯一 binding 前像仍独立反证。
+  `runtime_assessment_preimage_session_reference_test.go` 保留原逐代独立校验路径；
+  `runtime_assessment_preimage_session_test.go` 固定完整前像、原 bytes、同 hash raw 篡改、后续调用、重载、隔离、fuzz 与分配。
   semantic proof compiler 的 raw owner catalog 集合门禁保持完整，仅复用本次 detached 目录索引解析 prospective all-of 约束，
   不重复校验未变的整份目录；公开 resolver 仍完整校验，每次 compiler 调用重新反证 raw、重复 owner/surface、hash 和 exact requirement。
   `runtime_semantic_proof_catalog_reuse_test.go` 固定公开／私有 resolver 等价、完整产物、原值、重载及后续调用拒绝。

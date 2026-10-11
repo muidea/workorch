@@ -49,24 +49,26 @@ func ResolveRuntimeAssessmentPurposePreimage(
 
 func runtimeAssessmentPurposePreimagesFromSemanticLedger(ledger RuntimeSemanticPlanningLedger, semanticLedgerAlreadyValidated bool) ([]runtimeAssessmentPurposeBindingPreimage, error) {
 	ret := make([]runtimeAssessmentPurposeBindingPreimage, 0)
+	// session 仅属于本次前像遍历；复用要求 exact raw 相等，不凭 manifest hash 授信。
+	session := newRuntimeSemanticValidationSession()
 	// Detach only the active generation. Cloning the ledger before clearing
 	// History needlessly clones every immutable snapshot that is traversed
 	// separately below.
 	active := ledger
 	active.History = nil
 	active = active.Clone()
-	activeEntries, err := runtimeAssessmentPurposePreimagesFromSemanticGeneration(active)
+	activeEntries, err := runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(active, session)
 	if err != nil {
 		return nil, err
 	}
 	ret = append(ret, activeEntries...)
 	for index, generation := range ledger.History {
 		if !semanticLedgerAlreadyValidated {
-			if err := generation.Validate(); err != nil {
+			if err := validateRuntimeSemanticPlanningGenerationNormalized(generation, generation.Normalized(), session); err != nil {
 				return nil, fmt.Errorf("runtime assessment purpose semantic history %d: %w", index, err)
 			}
 		}
-		entries, err := runtimeAssessmentPurposePreimagesFromSemanticGeneration(generation.Snapshot)
+		entries, err := runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(generation.Snapshot, session)
 		if err != nil {
 			return nil, fmt.Errorf("runtime assessment purpose semantic history %d: %w", index, err)
 		}
@@ -102,10 +104,17 @@ func resolveRuntimeAssessmentPurposePreimage(entries []runtimeAssessmentPurposeB
 func runtimeAssessmentPurposePreimagesFromSemanticGeneration(
 	ledger RuntimeSemanticPlanningLedger,
 ) ([]runtimeAssessmentPurposeBindingPreimage, error) {
+	return runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(ledger, newRuntimeSemanticValidationSession())
+}
+
+func runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(
+	ledger RuntimeSemanticPlanningLedger,
+	session *runtimeSemanticValidationSession,
+) ([]runtimeAssessmentPurposeBindingPreimage, error) {
 	if ledger.Manifest == nil {
 		return nil, nil
 	}
-	validated, err := validateRuntimeSemanticPlanManifest(*ledger.Manifest)
+	validated, err := validateRuntimeSemanticPlanManifestInSession(*ledger.Manifest, session)
 	if err != nil {
 		return nil, fmt.Errorf("runtime assessment purpose semantic manifest: %w", err)
 	}
