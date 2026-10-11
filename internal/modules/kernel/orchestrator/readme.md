@@ -143,6 +143,12 @@ capability resource state。
   `runtime_state_revision_projection_test.go` 对照旧完整规范化，固定原 bytes、重载、fuzz 和零分配投影，
   `biz/runtime/state_revision_projection_test.go` 从合法初始化记录固定 trim、mismatch、前置正文拒绝、重载与后续漂移。
   此纯读取不提供成功凭据、不改变 SM-1～SM-4 转换、CAS、持久化或恢复权威。
+  target-parameter declaration 校验只读从同一编译期 operation 合同派生的私有参数／variant 冲突规则，
+  不为规则查询构造完整 value rules、描述或 candidate constraints。公开 operation 合同仍返回独立值；原 owner/kind、
+  singleton target、optional string、variant conflict/discriminator、inventory bound、exact preimage 与拒绝次序完整保留。
+  `runtime_target_parameter_static_contract_test.go` 保留旧完整 validator 并接入旧 catalog oracle，固定全库存、
+  raw 表示、反例、原值、JSON 重载、公开副本污染、并发、fuzz 和分配；不缓存 owner facts/preimage/校验成功，
+  此静态查询不改变 SM-1～SM-4 转换、sealed target authority、持久化、预算或恢复规则。
   这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
   current focus 的 target-selection 纯投影只规范化实际返回的 selection，并按原 trim／首个同 ID prerequisite
   语义比较 Kind／Scope／FocusID，不复制无关 Definition、证据、catalog 或 coverage。原完整 aggregate/raw/hash

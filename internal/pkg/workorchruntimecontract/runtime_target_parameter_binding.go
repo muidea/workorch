@@ -53,23 +53,23 @@ func validateRuntimeTargetParameterBindings(values []RuntimeTargetParameterBindi
 	seen := make(map[string]bool, len(values))
 	for _, binding := range values {
 		key := binding.Kind + "\x00" + binding.Name
-		contract, ok := RuntimeOperationContractForKind(binding.Kind)
+		contract := runtimeTargetParameterContractForKind(binding.Kind)
 		descriptor, found := RuntimeOperationDescriptorForKind(binding.Kind)
-		parameter, declared := runtimeCandidateWireParameter(contract.Parameters, binding.Name)
-		if seen[key] || !ok || !found || descriptor.OwnerModuleID != owner ||
+		parameter, declared := runtimeCandidateWireParameter(contract.parameters, binding.Name)
+		if seen[key] || !contract.known || !found || descriptor.OwnerModuleID != owner ||
 			!runtimeOperationKindsContain(kinds, binding.Kind) || !declared || parameter.Required ||
-			parameter.Type != RuntimeOperationParameterTypeString || !contract.RequireTargetRefs ||
+			parameter.Type != RuntimeOperationParameterTypeString || !contract.requireTargetRefs ||
 			descriptor.TargetCardinality != RuntimeOperationTargetCardinalityOne ||
-			containsString(contract.ForbiddenParameters, binding.Name) || containsString(contract.RequireOneOfParameters, binding.Name) {
+			containsString(contract.forbidden, binding.Name) || containsString(contract.requireOneOf, binding.Name) {
 			return fmt.Errorf("invalid owner target parameter declaration %q/%q", binding.Kind, binding.Name)
 		}
 		seen[key] = true
-		for _, variant := range contract.Variants {
-			if containsString(variant.ForbiddenParameters, binding.Name) || containsString(variant.RequiredParameters, binding.Name) || containsString(variant.RequiredNonEmpty, binding.Name) {
-				return fmt.Errorf("target parameter %q conflicts with variant %q", binding.Name, variant.ID)
+		for _, variant := range contract.variants {
+			if containsString(variant.conflicting, binding.Name) {
+				return fmt.Errorf("target parameter %q conflicts with variant %q", binding.Name, variant.id)
 			}
-			for _, discriminator := range variant.Discriminators {
-				if discriminator.Name == binding.Name {
+			for _, discriminator := range variant.discriminators {
+				if discriminator == binding.Name {
 					return fmt.Errorf("target parameter %q cannot select a variant", binding.Name)
 				}
 			}

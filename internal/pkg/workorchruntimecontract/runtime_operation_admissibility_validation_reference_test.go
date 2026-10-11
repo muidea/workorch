@@ -58,7 +58,7 @@ func referenceRuntimeOperationAdmissibilityValidate(a RuntimeOperationAdmissibil
 		return err
 	}
 	a = a.Normalized()
-	if err := validateRuntimeTargetParameterBindings(a.TargetParameterBindings, a.OwnerModuleID, a.OperationKinds, a.TargetRefs); err != nil {
+	if err := referenceRuntimeTargetParameterBindingsValidate(a.TargetParameterBindings, a.OwnerModuleID, a.OperationKinds, a.TargetRefs); err != nil {
 		return err
 	}
 	if a.PrerequisiteID == "" || a.SnapshotID == "" || a.OwnerModuleID == "" || len(a.OperationKinds) == 0 || a.ObservedRevision == "" {
