@@ -43,8 +43,8 @@ func TestSaveMapPrivatePermissionsReplaceExistingPublicFile(t *testing.T) {
 
 func TestWorkspaceDiagnosticUsesPrivateAtomicPublish(t *testing.T) {
 	for _, preparation := range []bool{false, true} {
-		for _, historical := range []bool{false, true} {
-			t.Run(map[bool]string{false: "current", true: "history"}[historical]+fmt.Sprint(preparation), func(t *testing.T) {
+		for _, location := range []string{"current", "history", "candidate"} {
+			t.Run(location+fmt.Sprint(preparation), func(t *testing.T) {
 				path := filepath.Join(t.TempDir(), "workspace.json")
 				defer EvictMapFileCache(path)
 				item := workspace.Workspace{ID: "ws-diagnostic"}
@@ -56,8 +56,10 @@ func TestWorkspaceDiagnosticUsesPrivateAtomicPublish(t *testing.T) {
 				if preparation {
 					record = workspace.DefinitionAuthoringRecord{PreparationDiagnostics: []workspace.DefinitionAuthoringPreparationDiagnostic{{}}}
 				}
-				if historical {
+				if location == "history" {
 					item.DefinitionAuthoringHistory = []workspace.DefinitionAuthoringConfirmedRevision{{Record: record}}
+				} else if location == "candidate" {
+					item.DefinitionChangeCandidate = &workspace.DefinitionChangeCandidate{Record: record}
 				} else {
 					item.DefinitionAuthoring = &record
 				}

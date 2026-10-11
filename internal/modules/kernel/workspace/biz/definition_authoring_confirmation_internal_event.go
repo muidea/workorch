@@ -68,7 +68,7 @@ func (m *Biz) prepareDefinitionAuthoringConfirmation(ctx context.Context, curren
 }
 
 func (m *Biz) prepareDefinitionAuthoringConfirmationWithProof(ctx context.Context, current *workspace.Workspace, cmd workspaceevents.ConfirmDefinitionAuthoringCommand, proof *verifiedAuthoringResources) (workspace.DefinitionAuthoringConfirmation, error) {
-	if current == nil || current.ID != cmd.WorkspaceID || current.Revision != cmd.ExpectedWorkspaceRevision || current.DefinitionAuthoring == nil || current.StartupInput != nil || current.ActivationAdmission != nil || current.ActiveRunID != "" || current.DefinitionSpecificationLedger != nil || len(current.DefinitionAdmissionCandidates) > 0 && !authoringSuccessorDraft(current) {
+	if current == nil || current.ID != cmd.WorkspaceID || current.Revision != cmd.ExpectedWorkspaceRevision || current.DefinitionAuthoring == nil || current.DefinitionChangeCandidate != nil || current.StartupInput != nil || current.ActivationAdmission != nil || current.ActiveRunID != "" || current.DefinitionSpecificationLedger != nil || len(current.DefinitionAdmissionCandidates) > 0 && !authoringSuccessorDraft(current) {
 		return workspace.DefinitionAuthoringConfirmation{}, common.ErrConflict
 	}
 	record := current.DefinitionAuthoring

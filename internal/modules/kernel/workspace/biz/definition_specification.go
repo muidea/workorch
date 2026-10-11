@@ -16,7 +16,7 @@ import (
 const definitionSpecificationCommandSource = definitionAdmissionCommandSource
 
 func definitionSpecificationTopics() []string {
-	return []string{workspaceevents.TopicWorkspaceDerivationReserve, workspaceevents.TopicWorkspaceDerivationComplete, workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, workspaceevents.TopicWorkspaceAuthoringSpecificationComplete, workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringSuccessAuditQuery, workspaceevents.TopicWorkspacePreparationDiagnosticRecord, workspaceevents.TopicWorkspacePreparationDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery, workspaceevents.TopicWorkspaceDefinitionAuthoringCreate, workspaceevents.TopicWorkspaceDefinitionAuthoringSave, workspaceevents.TopicWorkspaceAuthoringConfirm, workspaceevents.TopicWorkspaceAuthoringAdmit, workspaceevents.TopicWorkspaceSpecificationBegin, workspaceevents.TopicWorkspaceSpecificationReserve, workspaceevents.TopicWorkspaceSpecificationComplete}
+	return []string{workspaceevents.TopicWorkspaceDefinitionChangePrepare, workspaceevents.TopicWorkspaceDefinitionChangeQuery, workspaceevents.TopicWorkspaceDerivationReserve, workspaceevents.TopicWorkspaceDerivationComplete, workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, workspaceevents.TopicWorkspaceAuthoringSpecificationComplete, workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringSuccessAuditQuery, workspaceevents.TopicWorkspacePreparationDiagnosticRecord, workspaceevents.TopicWorkspacePreparationDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery, workspaceevents.TopicWorkspaceDefinitionAuthoringCreate, workspaceevents.TopicWorkspaceDefinitionAuthoringSave, workspaceevents.TopicWorkspaceAuthoringConfirm, workspaceevents.TopicWorkspaceAuthoringAdmit, workspaceevents.TopicWorkspaceSpecificationBegin, workspaceevents.TopicWorkspaceSpecificationReserve, workspaceevents.TopicWorkspaceSpecificationComplete}
 }
 
 func (m *Biz) handleDefinitionSpecificationCommand(ev magicevent.Event, result magicevent.Result) {
@@ -73,6 +73,24 @@ func (m *Biz) handleDefinitionSpecificationCommand(ev magicevent.Event, result m
 	var reply any
 	var err error
 	switch ev.ID() {
+	case workspaceevents.TopicWorkspaceDefinitionChangePrepare:
+		cmd, ok := ev.Data().(workspaceevents.PrepareDefinitionChangeCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			var transition definitionSpecificationTransition
+			transition, err = m.submitDefinitionSpecificationInternalEvent(ev.Context(), definitionSpecificationInternalEvent{WorkspaceID: cmd.WorkspaceID, DefinitionChange: &cmd})
+			if err == nil {
+				reply = *transition.DefinitionChange
+			}
+		}
+	case workspaceevents.TopicWorkspaceDefinitionChangeQuery:
+		cmd, ok := ev.Data().(workspaceevents.QueryDefinitionChangeCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			reply, err = m.queryDefinitionChange(ev.Context(), cmd)
+		}
 	case workspaceevents.TopicWorkspaceDerivationReserve:
 		if derivationReserve == nil {
 			err = common.ErrInvalidArgument

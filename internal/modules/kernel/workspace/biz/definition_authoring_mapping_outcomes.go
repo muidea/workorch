@@ -81,6 +81,14 @@ func validateWorkspaceAuthoringMappingOutcomes(w *workspacemodel.Workspace) erro
 			return err
 		}
 	}
+	if w.DefinitionChangeCandidate != nil {
+		if err := w.DefinitionChangeCandidate.Validate(w); err != nil {
+			return err
+		}
+		if err := validateAuthoringMappingOutcomes(w.DefinitionChangeCandidate.Record); err != nil {
+			return err
+		}
+	}
 	for _, h := range w.DefinitionAuthoringHistory {
 		if err := validateAuthoringMappingOutcomes(h.Record); err != nil {
 			return err

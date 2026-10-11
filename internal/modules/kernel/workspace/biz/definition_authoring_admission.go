@@ -40,7 +40,7 @@ func (m *Biz) submitDefinitionAuthoringAdmissionWithProof(ctx context.Context, c
 }
 
 func (m *Biz) verifyConfirmedAuthoringAdmission(ctx context.Context, current *workspacemodel.Workspace, candidate workspacemodel.DefinitionAdmissionCandidate, command workspaceevents.AdmitDefinitionAuthoringCommand, proof *verifiedAuthoringResources) error {
-	if current == nil || current.DefinitionAuthoring == nil || current.DefinitionAuthoringConfirmation == nil || current.DefinitionAuthoringConfirmation.Phase != workspacemodel.DefinitionAuthoringConfirmationMaterialized || current.ActiveRunID != "" || current.DefinitionSpecificationLedger != nil || candidate.AuthoringRef == nil || candidate.CompilationRef != nil || candidate.BaseDefinitionRevision != "" || candidate.BaseStartupInputHash != "" || candidate.CandidateRevision != uint64(len(current.DefinitionAuthoringHistory)+1) || current.ValidateDefinitionAuthoringHistory() != nil {
+	if current == nil || current.DefinitionAuthoring == nil || current.DefinitionChangeCandidate != nil || current.DefinitionAuthoringConfirmation == nil || current.DefinitionAuthoringConfirmation.Phase != workspacemodel.DefinitionAuthoringConfirmationMaterialized || current.ActiveRunID != "" || current.DefinitionSpecificationLedger != nil || candidate.AuthoringRef == nil || candidate.CompilationRef != nil || candidate.BaseDefinitionRevision != "" || candidate.BaseStartupInputHash != "" || candidate.CandidateRevision != uint64(len(current.DefinitionAuthoringHistory)+1) || current.ValidateDefinitionAuthoringHistory() != nil {
 		return common.ErrConflict
 	}
 	if err := validateWorkspaceAuthoringMappingOutcomes(current); err != nil {

@@ -2049,6 +2049,9 @@ func loadWorkspacePersistenceMap(path string) (map[common.WorkspaceID]workspace.
 	private := false
 	for id, item := range persisted {
 		items[id] = workspace.Workspace(item)
+		if item.DefinitionChangeCandidate != nil && authoringContainsDiagnostic(item.DefinitionChangeCandidate.Record) {
+			private = true
+		}
 		if item.DefinitionAuthoring != nil && authoringContainsDiagnostic(*item.DefinitionAuthoring) {
 			private = true
 		}
@@ -2075,6 +2078,9 @@ func saveWorkspacePersistenceMap(path string, items map[common.WorkspaceID]works
 	perm := os.FileMode(0o644)
 	for id, item := range items {
 		persisted[id] = workspacePersistenceValue(item)
+		if item.DefinitionChangeCandidate != nil && authoringContainsDiagnostic(item.DefinitionChangeCandidate.Record) {
+			perm = 0o600
+		}
 		if item.DefinitionAuthoring != nil && authoringContainsDiagnostic(*item.DefinitionAuthoring) {
 			perm = 0o600
 		}
@@ -4678,6 +4684,10 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 	if item.DefinitionAuthoring != nil {
 		record := item.DefinitionAuthoring.Clone()
 		cloned.DefinitionAuthoring = &record
+	}
+	if item.DefinitionChangeCandidate != nil {
+		candidate := item.DefinitionChangeCandidate.Clone()
+		cloned.DefinitionChangeCandidate = &candidate
 	}
 	if item.DefinitionAuthoringConfirmation != nil {
 		confirmation := item.DefinitionAuthoringConfirmation.Clone()

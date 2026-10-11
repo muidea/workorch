@@ -29,6 +29,14 @@ Last Verified: 2026-08-30
 
 公开 EventHub 合同均位于 `pkg/events`，每个 topic 使用具体 command/result；创作 record、派生 request 与历史回执使用 concrete DTO，嵌套 Template 的 Soul binding 为有序 typed slice；转换到同 owner model 前拒绝空／重复 binding，不允许 map 覆盖隐藏原 cardinality。显式转换不更改持久 schema 或 hash，也不授予已校验身份；查询、确认与准入仍完整反证 ledger。派生 reserve／complete、authoring 保存／查询／规格 reserve／complete／确认／准入均登记 delivery 与 typed message 合同。既有 pre-seal 规格 ledger 保留 begin／reserve／complete 三个受控写入口；无生产调用方的单请求 query 不注册 EventHub，owner-private 查询 helper 只作内部校验与测试。跨 owner 不暴露 repository/service。`biz.New` 只接收 backend factory 生成的 `WorkspaceOwnerRepositories` aggregate；Workspace、Goal、DoD、Template repository 与 deletion cleaner 必须携带同一个 opaque owner binding，独立构造、跨 backend 或跨 factory 混装在 owner 启动前拒绝。
 
+### 合同变更待审输入
+
+`PrepareDefinitionChangeCommand/Result` 与 `QueryDefinitionChangeCommand/Result` 只接受 Application source。准备命令仅传 Ticket/version/hash 与 Workspace CAS 身份；Workspace 在自身 mutation lock 外读取 Decision 原持久最新版本和 Run inventory，再在原规格 private dispatcher 内核对输入、模板和定义基线并 CAS。读取是原版本观察，不保证与并发 Decision 修订或启动构成跨 owner 原子事务，不能用于批准或激活。
+
+`DefinitionChangeCandidate` 保存既有 `DefinitionAuthoringRecord` 的独立待审输入，不新增 confirmation journal、批准副本或正式定义权威。当前仅映射 exact `authoring-goal` 修改及 `derived-dod:user:NNNNNN` 用户验收的增删改；原文必须匹配当前输入，模板／生成判据和约束等不能映射的变更明确拒绝，不猜测语义。原当前 record、Goal／DoD、startup、admission 和 materialized journal 均保持不变；全部旧 permit、审查、诊断及预算历史继承，新 input revision/hash 不能借用旧六审确认。原始候选记录 detached，包含诊断时沿原 0600 原子发布与读取门禁保护。
+
+当前只允许一个 exact preparation；同 RequestID/version/hash 重放恢复原回执，异请求覆盖或迟到旧提案拒绝。原 ledger 存在尚待结算的 permit 时拒绝准备，不冻结其 completion 或清除 unknown；结算后可重新提出同一准备请求，既有消费预算与结果原样继承。新候选派生／六审、修订／替换、可信主体 exact approve、原 journal 应用及 Run 交接尚未开放，普通保存不会消费该候选，普通确认／准入在候选存在时拒绝改变原定义基线。准备不调用 provider、不创建 Run，不改变 SM-1～SM-4。Application 提供实际 typed sender 和查询，但没有 HTTP/Web/CLI route。
+
 ### 阶段生命周期
 
 `BeginShutdown` 关闭新创建、修改、确认、准入、执行、删除及后台调度，并取消 projection Timer 的后续触发；不等待、不退订、不清除 repository、cancel 或订阅账本。必要只读查询、既有 permit 的规格／派生完成、诊断交付、sealed terminal delivery 与 Run 事实接收保留原 source、scope、hash、预算及 CAS 校验，不授予新事务权限。Run 通知仍只是提示，关闭后不启动新的 inventory；普通通知不能释放 slot。

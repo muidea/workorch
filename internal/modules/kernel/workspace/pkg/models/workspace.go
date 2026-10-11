@@ -54,6 +54,7 @@ type Workspace struct {
 	// It neither promotes a Definition nor authorizes Runtime execution.
 	DefinitionAuthoringCreation     *DefinitionAuthoringCreation
 	DefinitionAuthoring             *DefinitionAuthoringRecord
+	DefinitionChangeCandidate       *DefinitionChangeCandidate
 	DefinitionAuthoringConfirmation *DefinitionAuthoringConfirmation
 	DefinitionAuthoringHistory      []DefinitionAuthoringConfirmedRevision
 	DefinitionSpecificationLedger   *DefinitionSpecificationRequestLedger

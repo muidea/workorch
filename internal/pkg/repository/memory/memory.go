@@ -1940,6 +1940,10 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 		record := item.DefinitionAuthoring.Clone()
 		cloned.DefinitionAuthoring = &record
 	}
+	if item.DefinitionChangeCandidate != nil {
+		candidate := item.DefinitionChangeCandidate.Clone()
+		cloned.DefinitionChangeCandidate = &candidate
+	}
 	if item.DefinitionAuthoringConfirmation != nil {
 		confirmation := item.DefinitionAuthoringConfirmation.Clone()
 		cloned.DefinitionAuthoringConfirmation = &confirmation

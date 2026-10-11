@@ -28,6 +28,8 @@ Goal-only 创作用例先保存 Workspace owner 的版本化草稿，以持久 r
 
 Application `RegisterContractChangeProposal` 以 Workspace owner 的原 Input/Definition 查询和 Run owner inventory 独立核对 baseline，当前仅接受零 Run Workspace；typed Decision command 保存原文和版本，不修改草稿、封存输入或启动 Run。该用例尚未暴露 HTTP/Web/CLI route，不把 caller `ProposedBy` 当授权证明，也不提供 approve、matching acceptance、定义应用或后继启动。Decision exact 回执必须校验；新能力完整就绪前普通治理入口仍拒绝该 kind。跨 owner 读取只是登记前的观察，不构成跨 owner 原子准入，应用时必须重新核对当前权威。
 
+Application 的 `PrepareDefinitionChange`／`QueryDefinitionChange` 只发送 Workspace-owned typed 合同并校验 detached 回执，不提交 candidate after-image、批准或 target state。接收 Workspace 从实际 Decision/Run 读取反证来源，独立准备待审输入；原 authoring/current Definition 不变。当前仅支持原 Goal 和用户验收项的 exact 映射，其他差异拒绝；没有候选派生／审查／确认／应用或公开 route，不能把准备成功显示为 approved、M3 完成或 Run 已执行。
+
 ### 创建恢复响应
 
 公开创建在有效请求发送至 Workspace owner 后失败，返回 `workspace_creation_incomplete` 和 typed `creationRecovery`：原 `requestId`、确定性 Workspace ID、`unknown`／`persisted`、失败阶段及原请求重放要求。owner 回执缺失或 transport／持久化失败只记 `unknown`，不能推断尚未创建；收到有效创建回执后目录准备／读取失败可记 `persisted`，仍不代表 M3 完成。输入／身份明确拒绝不附带既有对象恢复描述。内部 cause 原样保留在错误链，不混入通用 HTTP 错误；HTTP 提示不作为准入或执行权威。

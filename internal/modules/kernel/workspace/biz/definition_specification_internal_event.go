@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -14,20 +15,23 @@ import (
 // definitionSpecificationInternalEvent is an owner-private, typed mutation
 // intent. No EventHub caller can directly select a ledger transition.
 type definitionSpecificationInternalEvent struct {
-	WorkspaceID           common.WorkspaceID
-	Authoring             *workspaceevents.SaveDefinitionAuthoringCommand
-	DeriveReserve         *workspaceevents.ReserveDefinitionDerivationCommand
-	VerifiedResources     bool
-	DeriveComplete        *workspaceevents.CompleteDefinitionDerivationCommand
-	AuthoringSpecReserve  *workspaceevents.ReserveAuthoringSpecificationCommand
-	AuthoringSpecComplete *workspaceevents.CompleteAuthoringSpecificationCommand
-	PreparationDiagnostic *workspaceevents.RecordPreparationDiagnosticCommand
-	Begin                 *workspaceevents.BeginDefinitionSpecificationCommand
-	Reserve               *workspaceevents.ReserveDefinitionSpecificationRequestCommand
-	Complete              *workspaceevents.CompleteDefinitionSpecificationRequestCommand
+	WorkspaceID            common.WorkspaceID
+	DefinitionChange       *workspaceevents.PrepareDefinitionChangeCommand
+	ObservedChangeProposal *decisionmodel.ContractChangeProposal
+	Authoring              *workspaceevents.SaveDefinitionAuthoringCommand
+	DeriveReserve          *workspaceevents.ReserveDefinitionDerivationCommand
+	VerifiedResources      bool
+	DeriveComplete         *workspaceevents.CompleteDefinitionDerivationCommand
+	AuthoringSpecReserve   *workspaceevents.ReserveAuthoringSpecificationCommand
+	AuthoringSpecComplete  *workspaceevents.CompleteAuthoringSpecificationCommand
+	PreparationDiagnostic  *workspaceevents.RecordPreparationDiagnosticCommand
+	Begin                  *workspaceevents.BeginDefinitionSpecificationCommand
+	Reserve                *workspaceevents.ReserveDefinitionSpecificationRequestCommand
+	Complete               *workspaceevents.CompleteDefinitionSpecificationRequestCommand
 }
 
 type definitionSpecificationTransition struct {
+	DefinitionChange       *workspaceevents.PrepareDefinitionChangeResult
 	Authoring              *workspaceevents.SaveDefinitionAuthoringResult
 	Derivation             *workspaceevents.DefinitionDerivationRequestResult
 	AuthoringSpecification *workspaceevents.AuthoringSpecificationRequestResult
@@ -38,7 +42,16 @@ type definitionSpecificationTransition struct {
 }
 
 func (e definitionSpecificationInternalEvent) validate() error {
+	if e.ObservedChangeProposal != nil && e.DefinitionChange == nil {
+		return common.ErrInvalidArgument
+	}
 	count := 0
+	if e.DefinitionChange != nil {
+		count++
+		if e.DefinitionChange.Validate() != nil || e.DefinitionChange.WorkspaceID != e.WorkspaceID {
+			return common.ErrInvalidArgument
+		}
+	}
 	if e.VerifiedResources && (e.DeriveReserve == nil || len(e.DeriveReserve.Resources) == 0) {
 		return common.ErrInvalidArgument
 	}
@@ -111,6 +124,14 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 	if err := event.validate(); err != nil {
 		return definitionSpecificationTransition{}, err
 	}
+	var changeProposal *decisionmodel.ContractChangeProposal
+	if event.DefinitionChange != nil {
+		proposal, err := m.observeDefinitionChangeProposal(ctx, *event.DefinitionChange)
+		if err != nil {
+			return definitionSpecificationTransition{}, err
+		}
+		changeProposal = &proposal
+	}
 	m.manager.definitionMu.Lock()
 	defer m.manager.definitionMu.Unlock()
 	m.templateMutationMu.Lock()
@@ -140,7 +161,7 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 				return replay, replayErr
 			}
 		}
-		if event.Authoring != nil || event.DeriveReserve != nil || event.DeriveComplete != nil || event.AuthoringSpecReserve != nil || event.AuthoringSpecComplete != nil || event.PreparationDiagnostic != nil {
+		if event.DefinitionChange != nil || event.Authoring != nil || event.DeriveReserve != nil || event.DeriveComplete != nil || event.AuthoringSpecReserve != nil || event.AuthoringSpecComplete != nil || event.PreparationDiagnostic != nil {
 			observation, err = m.observeDefinitionAuthoring(bound, event.WorkspaceID)
 		} else {
 			observation, err = m.observeDefinitionSpecification(bound, event.WorkspaceID)
@@ -148,7 +169,7 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 		if err != nil {
 			return definitionSpecificationTransition{}, err
 		}
-		if event.Authoring != nil || event.DeriveReserve != nil || event.AuthoringSpecReserve != nil || event.PreparationDiagnostic != nil {
+		if event.DefinitionChange != nil || event.Authoring != nil || event.DeriveReserve != nil || event.AuthoringSpecReserve != nil || event.PreparationDiagnostic != nil {
 			templateID := observation.workspace.TemplateID
 			if event.Authoring != nil {
 				templateID = event.Authoring.Input.Normalized().TemplateID
@@ -158,6 +179,7 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 				return definitionSpecificationTransition{}, err
 			}
 		}
+		event.ObservedChangeProposal = changeProposal
 		transition, err := reduceDefinitionSpecificationInternalEvent(observation, event)
 		if err != nil {
 			return definitionSpecificationTransition{}, err
@@ -207,6 +229,11 @@ func reduceDefinitionSpecificationInternalEvent(o definitionSpecificationObserva
 
 func reduceObservedDefinitionSpecificationInternalEvent(o definitionSpecificationObservation, e definitionSpecificationInternalEvent) (definitionSpecificationTransition, error) {
 	switch {
+	case e.DefinitionChange != nil:
+		if e.ObservedChangeProposal == nil {
+			return definitionSpecificationTransition{}, common.ErrConflict
+		}
+		return reduceDefinitionChangePreparation(o, *e.DefinitionChange, *e.ObservedChangeProposal)
 	case e.PreparationDiagnostic != nil:
 		return reducePreparationDiagnostic(o, *e.PreparationDiagnostic)
 	case e.AuthoringSpecReserve != nil || e.AuthoringSpecComplete != nil:
