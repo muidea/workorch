@@ -272,7 +272,7 @@ func TestValidateRuntimeDispatchHistoryShapeEnforcesActiveCompletedPartition(t *
 	})
 }
 
-func runtimeDispatchIntrinsicFixture(t *testing.T, attempt int) RuntimeDispatchRecord {
+func runtimeDispatchIntrinsicFixture(t testing.TB, attempt int) RuntimeDispatchRecord {
 	t.Helper()
 
 	transaction := AuthorityTransaction{
@@ -333,7 +333,7 @@ func runtimeDispatchIntrinsicFixture(t *testing.T, attempt int) RuntimeDispatchR
 	return dispatch
 }
 
-func runtimeManagedValidationDispatchIntrinsicFixture(t *testing.T) RuntimeDispatchRecord {
+func runtimeManagedValidationDispatchIntrinsicFixture(t testing.TB) RuntimeDispatchRecord {
 	t.Helper()
 	dispatch := runtimeDispatchIntrinsicFixture(t, 0)
 	dispatch.Transaction.State = ConvergenceStateNeedValidation

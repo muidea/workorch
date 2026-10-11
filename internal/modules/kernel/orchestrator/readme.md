@@ -182,6 +182,10 @@ capability resource state。
   `biz/runtime/aggregate_dispatch_projection_reference_test.go` 保留原完整调用次序及各阶段重复投影；
   `biz/runtime/aggregate_dispatch_projection_reuse_test.go` 固定完整拒绝、原值、投影隔离、重载、后续篡改、CAS、fuzz 与分配，
   不改变 SM-1～SM-4 转换、持久化、预算或恢复权威。
+  accepted-attempt/dispatch 的纯 matcher 先排除原完整 matcher 最终也会返回 false 的非同一精确身份；
+  身份相同不授信，target、binding、recipe、work/repair commitment 与最终 dispatch authority hash 门禁仍完整逐次执行。
+  `runtime_admission_identity_prefilter_test.go` 保留原完整 matcher，固定有效配对、raw/duplicate/hash 反例、
+  原输入、JSON 重载、后续变化、fuzz 与无关配对零分配；不改变 aggregate 门禁、四机转换或公开 availability。
   missing-owner-fact 查询复用同次完整规范化已生成的 detached catalog，不按每条 requirement 再复制整份 catalog；
   shared surface observation、ready/direct/published/exact requirement 语义和 missing 集合顺序保留，查询不替代完整 proof 校验。
   `runtime_missing_owner_fact_catalog_reuse_test.go` 以旧完整查询及独立 classifier 固定原值、非法声明、重复、nil/empty、

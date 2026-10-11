@@ -9,6 +9,12 @@ import "fmt"
 // but it cannot thereby rewrite the accepted document's independently
 // persisted target scope or executable recipe body.
 func RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt RuntimeCandidateAttemptRecord, dispatch RuntimeDispatchRecord) bool {
+	// 先排除原 matcher 最终也会拒绝的非同一配对；精确身份不授信，后续完整投影门禁仍逐次执行。
+	if attempt.Transaction != dispatch.Transaction || attempt.DispatchID != dispatch.ID ||
+		attempt.CandidateHash != dispatch.CandidateHash || attempt.ManifestHash != dispatch.CandidateManifestHash ||
+		attempt.DispatchAuthorityHash != dispatch.DispatchAuthorityHash {
+		return false
+	}
 	if attempt.State != RuntimeCandidateAttemptStateAccepted ||
 		ValidateRuntimeDispatchOperationTargetAuthorizationProjection(attempt.AdmissionTargetAuthorizations) != nil ||
 		ValidateRuntimeDispatchOperationTargetAuthorizationProjection(dispatch.OperationTargetAuthorizations) != nil ||
@@ -25,10 +31,7 @@ func RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt RuntimeCandidateAtte
 		!runtimeAcceptedCandidateAttemptRepairCommitmentMatchesDispatch(attempt, dispatch) {
 		return false
 	}
-	return attempt.Transaction == dispatch.Transaction && attempt.DispatchID == dispatch.ID &&
-		attempt.CandidateHash == dispatch.CandidateHash && attempt.ManifestHash == dispatch.CandidateManifestHash &&
-		attempt.DispatchAuthorityHash == dispatch.DispatchAuthorityHash &&
-		dispatch.DispatchAuthorityHash == StableRuntimeDispatchAuthorityHash(dispatch)
+	return dispatch.DispatchAuthorityHash == StableRuntimeDispatchAuthorityHash(dispatch)
 }
 
 func runtimeAcceptedCandidateAttemptRepairCommitmentMatchesDispatch(attempt RuntimeCandidateAttemptRecord, dispatch RuntimeDispatchRecord) bool {
