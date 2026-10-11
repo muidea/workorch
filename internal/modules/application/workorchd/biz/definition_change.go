@@ -6,6 +6,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerevent"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
@@ -30,6 +31,29 @@ func (b *Biz) PrepareDefinitionChange(ctx context.Context, command workspaceeven
 	}
 	response.Candidate = response.Candidate.Clone()
 	return response, nil
+}
+
+// 派生与六审仍只是待审材料，不执行精确批准或定义应用。
+func (b *Biz) DeriveDefinitionChangeAcceptance(ctx context.Context, id common.WorkspaceID, inputHash string) (workspace.DefinitionDerivedAcceptance, error) {
+	view, err := b.QueryDefinitionChange(ctx, workspaceevents.QueryDefinitionChangeCommand{WorkspaceID: id})
+	if err != nil {
+		return workspace.DefinitionDerivedAcceptance{}, err
+	}
+	if inputHash == "" || view.Candidate == nil || view.Candidate.Record.InputHash != inputHash {
+		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
+	}
+	return b.deriveDefinitionAcceptance(ctx, id, inputHash)
+}
+
+func (b *Biz) CompileDefinitionChangeSpecification(ctx context.Context, id common.WorkspaceID, inputHash string) (workspace.GoalSpecification, error) {
+	view, err := b.QueryDefinitionChange(ctx, workspaceevents.QueryDefinitionChangeCommand{WorkspaceID: id})
+	if err != nil {
+		return workspace.GoalSpecification{}, err
+	}
+	if inputHash == "" || view.Candidate == nil || view.Candidate.Record.InputHash != inputHash {
+		return workspace.GoalSpecification{}, common.ErrConflict
+	}
+	return b.compileAuthoringSpecification(ctx, id, inputHash)
 }
 
 func (b *Biz) QueryDefinitionChange(ctx context.Context, command workspaceevents.QueryDefinitionChangeCommand) (workspaceevents.QueryDefinitionChangeResult, error) {

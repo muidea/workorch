@@ -36,7 +36,7 @@ func (b *Biz) settleDerivation(ctx context.Context, completion workspaceevents.C
 			deliveryErr = resultErr
 		}
 	}
-	view, err := b.QueryDefinitionAuthoring(settlement, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: completion.WorkspaceID})
+	view, err := b.queryAuthoringSettlementRecord(settlement, completion.WorkspaceID, completion.PermitID, false)
 	if err == nil && view.Record != nil {
 		for _, request := range view.Record.DerivationRequests {
 			if request.PermitID != completion.PermitID {
@@ -49,6 +49,35 @@ func (b *Biz) settleDerivation(ctx context.Context, completion workspaceevents.C
 		}
 	}
 	return workspaceevents.DefinitionDerivationRequestResult{}, deliveryErr
+}
+
+// 对账只查询原 owner 已保存事实；没有任何 provider 重发或应用层恢复队列。
+func (b *Biz) queryAuthoringSettlementRecord(ctx context.Context, id common.WorkspaceID, permitID string, specification bool) (workspaceevents.QueryDefinitionAuthoringResult, error) {
+	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id})
+	if err != nil {
+		return view, err
+	}
+	if view.Record != nil {
+		if specification {
+			for _, request := range view.Record.SpecificationRequests {
+				if request.PermitID == permitID {
+					return view, nil
+				}
+			}
+		} else {
+			for _, request := range view.Record.DerivationRequests {
+				if request.PermitID == permitID {
+					return view, nil
+				}
+			}
+		}
+	}
+	change, err := b.QueryDefinitionChange(ctx, workspaceevents.QueryDefinitionChangeCommand{WorkspaceID: id})
+	if err != nil || change.Candidate == nil {
+		return view, err
+	}
+	record := change.Candidate.Record.Clone()
+	return workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: id, WorkspaceRevision: change.WorkspaceRevision, Record: &record}, nil
 }
 
 func (b *Biz) settleAuthoringSpecification(ctx context.Context, completion workspaceevents.CompleteAuthoringSpecificationCommand) (workspaceevents.AuthoringSpecificationRequestResult, error) {
@@ -74,7 +103,7 @@ func (b *Biz) settleAuthoringSpecification(ctx context.Context, completion works
 			deliveryErr = resultErr
 		}
 	}
-	view, err := b.QueryDefinitionAuthoring(settlement, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: completion.WorkspaceID})
+	view, err := b.queryAuthoringSettlementRecord(settlement, completion.WorkspaceID, completion.PermitID, true)
 	if err == nil && view.Record != nil {
 		for _, request := range view.Record.SpecificationRequests {
 			if request.PermitID == completion.PermitID && (request.FailureCode != "" || request.Proposal != nil || request.Review != nil) {

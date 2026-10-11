@@ -94,5 +94,5 @@ func validateWorkspaceAuthoringMappingOutcomes(w *workspacemodel.Workspace) erro
 			return err
 		}
 	}
-	return nil
+	return w.ValidatePreparationDiagnosticHistory()
 }

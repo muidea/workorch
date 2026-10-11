@@ -180,7 +180,7 @@ func (m *Biz) handleDefinitionSpecificationCommand(ev magicevent.Event, result m
 			err = common.ErrInvalidArgument
 		} else {
 			var view workspaceevents.QueryDefinitionAuthoringResult
-			view, err = m.queryDefinitionAuthoring(ev.Context(), workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: cmd.WorkspaceID})
+			view, err = m.queryDefinitionAuthoring(ev.Context(), workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: cmd.WorkspaceID, InputHash: cmd.InputHash})
 			if err == nil {
 				reply, err = workspaceevents.AuthoringResourceScopeFor(view, cmd)
 			}

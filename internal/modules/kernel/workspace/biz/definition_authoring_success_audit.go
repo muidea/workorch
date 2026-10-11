@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -33,18 +34,24 @@ func (m *Biz) queryAuthoringSuccessAudit(ctx context.Context, c workspaceevents.
 	if w.ID != c.WorkspaceID || w.DefinitionAuthoring == nil || w.DefinitionAuthoring.Validate() != nil || w.ValidateDefinitionAuthoringHistory() != nil {
 		return workspaceevents.QueryAuthoringSuccessAuditResult{}, common.ErrConflict
 	}
-	for _, request := range w.DefinitionAuthoring.SpecificationRequests {
-		if request.PermitID != c.PermitID {
-			continue
+	records := []*workspace.DefinitionAuthoringRecord{w.DefinitionAuthoring}
+	if w.DefinitionChangeCandidate != nil {
+		records = append(records, &w.DefinitionChangeCandidate.Record)
+	}
+	for _, record := range records {
+		for _, request := range record.SpecificationRequests {
+			if request.PermitID != c.PermitID {
+				continue
+			}
+			if request.Proposal == nil || request.SuccessAudit == nil {
+				return workspaceevents.QueryAuthoringSuccessAuditResult{}, common.ErrNotFound
+			}
+			r := workspaceevents.QueryAuthoringSuccessAuditResult{WorkspaceID: c.WorkspaceID, PermitID: c.PermitID, CanonicalHash: request.Proposal.ContentHash(), Audit: request.SuccessAudit.Clone()}
+			if r.ValidateFor(c) != nil {
+				return workspaceevents.QueryAuthoringSuccessAuditResult{}, common.ErrConflict
+			}
+			return r, nil
 		}
-		if request.Proposal == nil || request.SuccessAudit == nil {
-			return workspaceevents.QueryAuthoringSuccessAuditResult{}, common.ErrNotFound
-		}
-		r := workspaceevents.QueryAuthoringSuccessAuditResult{WorkspaceID: c.WorkspaceID, PermitID: c.PermitID, CanonicalHash: request.Proposal.ContentHash(), Audit: request.SuccessAudit.Clone()}
-		if r.ValidateFor(c) != nil {
-			return workspaceevents.QueryAuthoringSuccessAuditResult{}, common.ErrConflict
-		}
-		return r, nil
 	}
 	return workspaceevents.QueryAuthoringSuccessAuditResult{}, common.ErrNotFound
 }

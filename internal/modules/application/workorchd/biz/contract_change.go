@@ -49,8 +49,13 @@ func (b *Biz) RegisterContractChangeProposal(ctx context.Context, command decisi
 		return decisionevents.RegisterContractChangeProposalResult{}, common.ErrConflict
 	}
 	if command.Proposal.BaseDefinitionRevision != "" {
-		if _, _, err := current.ValidateActivationAdmissionPersistence(); err != nil {
+		// 普通 Workspace DTO 有意不携带原 authoring/journal；不能在裁剪副本上重建持久权威。
+		view, err := b.QueryDefinitionAuthoring(bound, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: command.Proposal.WorkspaceID})
+		if err != nil {
 			return decisionevents.RegisterContractChangeProposalResult{}, err
+		}
+		if view.WorkspaceRevision != current.Revision || view.Confirmation == nil || view.ActivationAdmission == nil {
+			return decisionevents.RegisterContractChangeProposalResult{}, common.ErrConflict
 		}
 		if current.StartupInput == nil || current.StartupInput.DefinitionRevision != command.Proposal.BaseDefinitionRevision || current.StartupInput.StartupInputHash != command.Proposal.BaseStartupInputHash {
 			return decisionevents.RegisterContractChangeProposalResult{}, common.ErrConflict

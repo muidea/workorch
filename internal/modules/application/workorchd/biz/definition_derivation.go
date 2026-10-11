@@ -17,12 +17,16 @@ import (
 
 // DeriveDefinitionAcceptance 仅处理派生阶段；结果仍需规格审查与用户确认。
 func (b *Biz) DeriveDefinitionAcceptance(ctx context.Context, id common.WorkspaceID) (workspace.DefinitionDerivedAcceptance, error) {
+	return b.deriveDefinitionAcceptance(ctx, id, "")
+}
+
+func (b *Biz) deriveDefinitionAcceptance(ctx context.Context, id common.WorkspaceID, inputHash string) (workspace.DefinitionDerivedAcceptance, error) {
 	ctx, release, err := b.authoringTasks.accept(ctx)
 	if err != nil {
 		return workspace.DefinitionDerivedAcceptance{}, err
 	}
 	defer release()
-	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id})
+	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id, InputHash: inputHash})
 	if err != nil {
 		return workspace.DefinitionDerivedAcceptance{}, err
 	}
@@ -55,7 +59,7 @@ func (b *Biz) DeriveDefinitionAcceptance(ctx context.Context, id common.Workspac
 	identity := authoringPreparationIdentity(view, workspace.DefinitionAuthoringPreparationDerivation, requestID)
 	resources := []workspace.DefinitionAuthoringResourceSnapshot(nil)
 	if len(record.Input.ResourceRefs) != 0 {
-		facts, err := b.AcquireDefinitionAuthoringResources(ctx, id)
+		facts, err := b.acquireDefinitionAuthoringResources(ctx, id, inputHash)
 		if err != nil {
 			var resourceFailure *authoringResourcePreparationError
 			if errors.As(err, &resourceFailure) {

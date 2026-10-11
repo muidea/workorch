@@ -214,6 +214,9 @@ func (w *Workspace) validatePreparationDiagnosticHistory(view bool) error {
 		return nil
 	}
 	records := []DefinitionAuthoringRecord{*w.DefinitionAuthoring}
+	if w.DefinitionChangeCandidate != nil {
+		records = append(records, w.DefinitionChangeCandidate.Record)
+	}
 	for _, archived := range w.DefinitionAuthoringHistory {
 		records = append(records, archived.Record)
 	}

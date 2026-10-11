@@ -18,10 +18,14 @@ import (
 // current file facts. A returned snapshot is not persisted authoring authority:
 // before confirmation the same refs and hashes must be observed again.
 func (b *Biz) AcquireDefinitionAuthoringResources(ctx context.Context, id common.WorkspaceID) ([]fileevents.AcquireAuthoringResourceResult, error) {
+	return b.acquireDefinitionAuthoringResources(ctx, id, "")
+}
+
+func (b *Biz) acquireDefinitionAuthoringResources(ctx context.Context, id common.WorkspaceID, inputHash string) ([]fileevents.AcquireAuthoringResourceResult, error) {
 	if b == nil || b.EventHub() == nil || ctx == nil || id == "" {
 		return nil, common.ErrInvalidArgument
 	}
-	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id})
+	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id, InputHash: inputHash})
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +66,7 @@ func (b *Biz) AcquireDefinitionAuthoringResources(ctx context.Context, id common
 		}
 		facts = append(facts, fact)
 	}
-	latest, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id})
+	latest, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id, InputHash: inputHash})
 	if err != nil {
 		return nil, err
 	}

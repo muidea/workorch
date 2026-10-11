@@ -20,6 +20,9 @@ func preparationDiagnosticInWorkspace(w *workspace.Workspace, id string) (worksp
 		return workspace.DefinitionAuthoringPreparationDiagnostic{}, false, common.ErrConflict
 	}
 	records := []*workspace.DefinitionAuthoringRecord{w.DefinitionAuthoring}
+	if w.DefinitionChangeCandidate != nil {
+		records = append(records, &w.DefinitionChangeCandidate.Record)
+	}
 	for n := range w.DefinitionAuthoringHistory {
 		records = append(records, &w.DefinitionAuthoringHistory[n].Record)
 	}
@@ -67,10 +70,13 @@ func reducePreparationDiagnostic(o definitionSpecificationObservation, cmd works
 	if replay, matched, err := replayPreparationDiagnostic(w, cmd); matched || err != nil {
 		return replay, err
 	}
-	if w.DefinitionAuthoringConfirmation != nil || w.StartupInput != nil || w.ActivationAdmission != nil || w.ActiveRunID != "" || len(w.DefinitionAdmissionCandidates) != 0 && !authoringSuccessorDraft(w) || w.DefinitionSpecificationLedger != nil || workspaceDeletionRejectsMutation(w) != nil {
+	if w.ActiveRunID != "" || w.DefinitionSpecificationLedger != nil || workspaceDeletionRejectsMutation(w) != nil {
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
-	r := w.DefinitionAuthoring
+	r, candidate, err := authoringMutationRecord(w, d.InputHash, "", false)
+	if err != nil {
+		return definitionSpecificationTransition{}, err
+	}
 	if w.Revision != d.ObservedWorkspaceRevision || w.Revision == ^uint64(0) || d.InputHash != r.InputHash || d.TemplateSnapshotHash != r.TemplateSnapshotHash || o.template == nil || workspace.WorkspaceTemplateSnapshotHash(o.template) != r.TemplateSnapshotHash {
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
@@ -82,13 +88,12 @@ func reducePreparationDiagnostic(o definitionSpecificationObservation, cmd works
 	if duplicate {
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
-	next := *w
-	next.DefinitionAuthoring = &nextRecord
+	next := withAuthoringMutationRecord(w, nextRecord, candidate)
 	result := workspaceevents.RecordPreparationDiagnosticResult{WorkspaceID: w.ID, WorkspaceRevision: w.Revision + 1, Diagnostic: workspaceeventmapping.DefinitionAuthoringPreparationDiagnosticMetadataDTO(stored)}
 	if result.ValidateFor(cmd) != nil {
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
-	return definitionSpecificationTransition{Next: &next, PreparationDiagnostic: &result}, nil
+	return definitionSpecificationTransition{Next: next, PreparationDiagnostic: &result}, nil
 }
 
 func (m *Biz) queryPreparationDiagnostic(ctx context.Context, cmd workspaceevents.QueryPreparationDiagnosticCommand) (workspaceevents.QueryPreparationDiagnosticResult, error) {

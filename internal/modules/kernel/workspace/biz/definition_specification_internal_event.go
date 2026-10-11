@@ -15,19 +15,20 @@ import (
 // definitionSpecificationInternalEvent is an owner-private, typed mutation
 // intent. No EventHub caller can directly select a ledger transition.
 type definitionSpecificationInternalEvent struct {
-	WorkspaceID            common.WorkspaceID
-	DefinitionChange       *workspaceevents.PrepareDefinitionChangeCommand
-	ObservedChangeProposal *decisionmodel.ContractChangeProposal
-	Authoring              *workspaceevents.SaveDefinitionAuthoringCommand
-	DeriveReserve          *workspaceevents.ReserveDefinitionDerivationCommand
-	VerifiedResources      bool
-	DeriveComplete         *workspaceevents.CompleteDefinitionDerivationCommand
-	AuthoringSpecReserve   *workspaceevents.ReserveAuthoringSpecificationCommand
-	AuthoringSpecComplete  *workspaceevents.CompleteAuthoringSpecificationCommand
-	PreparationDiagnostic  *workspaceevents.RecordPreparationDiagnosticCommand
-	Begin                  *workspaceevents.BeginDefinitionSpecificationCommand
-	Reserve                *workspaceevents.ReserveDefinitionSpecificationRequestCommand
-	Complete               *workspaceevents.CompleteDefinitionSpecificationRequestCommand
+	WorkspaceID             common.WorkspaceID
+	DefinitionChange        *workspaceevents.PrepareDefinitionChangeCommand
+	ObservedChangeProposal  *decisionmodel.ContractChangeProposal
+	ObservedChangeInputHash string
+	Authoring               *workspaceevents.SaveDefinitionAuthoringCommand
+	DeriveReserve           *workspaceevents.ReserveDefinitionDerivationCommand
+	VerifiedResources       bool
+	DeriveComplete          *workspaceevents.CompleteDefinitionDerivationCommand
+	AuthoringSpecReserve    *workspaceevents.ReserveAuthoringSpecificationCommand
+	AuthoringSpecComplete   *workspaceevents.CompleteAuthoringSpecificationCommand
+	PreparationDiagnostic   *workspaceevents.RecordPreparationDiagnosticCommand
+	Begin                   *workspaceevents.BeginDefinitionSpecificationCommand
+	Reserve                 *workspaceevents.ReserveDefinitionSpecificationRequestCommand
+	Complete                *workspaceevents.CompleteDefinitionSpecificationRequestCommand
 }
 
 type definitionSpecificationTransition struct {
@@ -132,6 +133,11 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 		}
 		changeProposal = &proposal
 	}
+	changeInputHash, err := m.observeDefinitionChangeAuthoring(ctx, event)
+	if err != nil {
+		return definitionSpecificationTransition{}, err
+	}
+	event.ObservedChangeInputHash = changeInputHash
 	m.manager.definitionMu.Lock()
 	defer m.manager.definitionMu.Unlock()
 	m.templateMutationMu.Lock()
@@ -178,6 +184,10 @@ func (m *Biz) submitDefinitionSpecificationInternalEvent(ctx context.Context, ev
 			if err != nil {
 				return definitionSpecificationTransition{}, err
 			}
+		}
+		caseCandidateDiagnostic := event.PreparationDiagnostic != nil && observation.workspace.DefinitionChangeCandidate != nil && event.PreparationDiagnostic.Diagnostic.InputHash == observation.workspace.DefinitionChangeCandidate.Record.InputHash
+		if caseCandidateDiagnostic && event.ObservedChangeInputHash != event.PreparationDiagnostic.Diagnostic.InputHash {
+			return definitionSpecificationTransition{}, common.ErrConflict
 		}
 		event.ObservedChangeProposal = changeProposal
 		transition, err := reduceDefinitionSpecificationInternalEvent(observation, event)

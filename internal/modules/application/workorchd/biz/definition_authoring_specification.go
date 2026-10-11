@@ -19,12 +19,16 @@ import (
 // CompileAuthoringSpecification returns a candidate for user confirmation, not
 // an admitted Definition. Each proposal and critic has its own durable permit.
 func (b *Biz) CompileAuthoringSpecification(ctx context.Context, id common.WorkspaceID) (workspace.GoalSpecification, error) {
+	return b.compileAuthoringSpecification(ctx, id, "")
+}
+
+func (b *Biz) compileAuthoringSpecification(ctx context.Context, id common.WorkspaceID, inputHash string) (workspace.GoalSpecification, error) {
 	ctx, release, err := b.authoringTasks.accept(ctx)
 	if err != nil {
 		return workspace.GoalSpecification{}, err
 	}
 	defer release()
-	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id})
+	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id, InputHash: inputHash})
 	if err != nil {
 		return workspace.GoalSpecification{}, err
 	}
@@ -165,7 +169,7 @@ func definitionProviderBindingHash(configuration llmevents.GetActiveConfiguratio
 // prepareAuthoringSpecification 先重放 current ledger，再读取可变配置或渲染。
 // 每个新 review 都重新观察 owner revision，包括前序 permit/completion 推进。
 func (b *Biz) prepareAuthoringSpecification(ctx context.Context, id common.WorkspaceID, expected workspace.DefinitionAuthoringRecord, request workspace.DefinitionAuthoringSpecificationRequest, derivation workspace.DefinitionDerivationRequest, proposal *workspace.GoalSpecification) (workspace.DefinitionAuthoringSpecificationRequest, error) {
-	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id})
+	view, err := b.QueryDefinitionAuthoring(ctx, workspaceevents.QueryDefinitionAuthoringCommand{WorkspaceID: id, InputHash: expected.InputHash})
 	if err != nil {
 		return request, err
 	}

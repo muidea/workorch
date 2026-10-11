@@ -28,7 +28,7 @@ Goal-only 创作用例先保存 Workspace owner 的版本化草稿，以持久 r
 
 Application `RegisterContractChangeProposal` 以 Workspace owner 的原 Input/Definition 查询和 Run owner inventory 独立核对 baseline，当前仅接受零 Run Workspace；typed Decision command 保存原文和版本，不修改草稿、封存输入或启动 Run。该用例尚未暴露 HTTP/Web/CLI route，不把 caller `ProposedBy` 当授权证明，也不提供 approve、matching acceptance、定义应用或后继启动。Decision exact 回执必须校验；新能力完整就绪前普通治理入口仍拒绝该 kind。跨 owner 读取只是登记前的观察，不构成跨 owner 原子准入，应用时必须重新核对当前权威。
 
-Application 的 `PrepareDefinitionChange`／`QueryDefinitionChange` 只发送 Workspace-owned typed 合同并校验 detached 回执，不提交 candidate after-image、批准或 target state。接收 Workspace 从实际 Decision/Run 读取反证来源，独立准备待审输入；原 authoring/current Definition 不变。当前仅支持原 Goal 和用户验收项的 exact 映射，其他差异拒绝；没有候选派生／审查／确认／应用或公开 route，不能把准备成功显示为 approved、M3 完成或 Run 已执行。
+Application 的 `PrepareDefinitionChange`／`QueryDefinitionChange` 只发送 Workspace-owned typed 合同并校验 detached 回执，不提交 candidate after-image、批准或 target state。接收 Workspace 从实际 Decision/Run 读取反证来源，独立准备待审输入；原 authoring/current Definition 不变。当前仅支持原 Goal 和用户验收项的 exact 映射，其他差异拒绝。`DeriveDefinitionChangeAcceptance`／`CompileDefinitionChangeSpecification` 显式接收候选 input hash，复用原有界 task、File 资源事实、provider binding、strict mapping parser、独立六审及 permit settlement；未决 reserve 不重发，completion 响应丢失只查询原 owner 候选 ledger。普通查询仍返回原定义，候选输入查询不借用原 confirmation/admission；封存定义的材料登记通过原 owner 查询验证确认／准入，而不在裁剪的普通 Workspace DTO 上重建权威。尚无候选确认／approve／应用或公开 route，不能把准备或六审成功显示为 approved、M3 完成或 Run 已执行。
 
 ### 创建恢复响应
 

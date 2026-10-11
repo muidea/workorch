@@ -68,7 +68,7 @@ func reduceDefinitionAuthoring(o definitionSpecificationObservation, cmd workspa
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
 	// 此入口仅服务新建草稿，不是同 Run 规格修订或旧准入的降级通道。
-	if w.StartupInput != nil || w.ActivationAdmission != nil || w.ActiveRunID != "" || w.DefinitionSpecificationLedger != nil {
+	if w.DefinitionChangeCandidate != nil || w.StartupInput != nil || w.ActivationAdmission != nil || w.ActiveRunID != "" || w.DefinitionSpecificationLedger != nil {
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
 	if len(w.DefinitionAdmissionCandidates) != 0 || w.DefinitionAuthoringConfirmation != nil || len(w.DefinitionAuthoringHistory) != 0 {

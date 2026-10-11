@@ -66,6 +66,44 @@ func (m *Biz) observeDefinitionChangeProposal(ctx context.Context, cmd workspace
 	return latest.Proposal.Clone(), nil
 }
 
+// 只观察新 reserve 的实际来源。已接纳 permit 的结算不依赖之后变化的提案。
+func (m *Biz) observeDefinitionChangeAuthoring(ctx context.Context, event definitionSpecificationInternalEvent) (string, error) {
+	inputHash := ""
+	if event.DeriveReserve != nil {
+		inputHash = event.DeriveReserve.InputHash
+	} else if event.AuthoringSpecReserve != nil {
+		inputHash = event.AuthoringSpecReserve.InputHash
+	} else if event.PreparationDiagnostic != nil {
+		inputHash = event.PreparationDiagnostic.Diagnostic.InputHash
+	}
+	if inputHash == "" {
+		return "", nil
+	}
+	bound, err := common.BindRuntimeWorkspaceContext(ctx, event.WorkspaceID)
+	if err != nil {
+		return "", err
+	}
+	w, err := m.workspaces.Get(bound, event.WorkspaceID)
+	if err != nil {
+		return "", err
+	}
+	c := w.DefinitionChangeCandidate
+	if c == nil || c.Record.InputHash != inputHash {
+		return "", nil
+	}
+	if c.Validate(w) != nil || workspaceDeletionRejectsMutation(w) != nil {
+		return "", common.ErrConflict
+	}
+	_, err = m.observeDefinitionChangeProposal(ctx, workspaceevents.PrepareDefinitionChangeCommand{
+		WorkspaceID: w.ID, RequestID: c.RequestID, ExpectedWorkspaceRevision: c.ExpectedWorkspaceRevision,
+		TicketID: c.TicketID, ProposalRevision: c.ProposalRevision, ProposalHash: c.ProposalHash,
+	})
+	if err != nil {
+		return "", err
+	}
+	return inputHash, nil
+}
+
 func (m *Biz) queryDefinitionChange(ctx context.Context, cmd workspaceevents.QueryDefinitionChangeCommand) (workspaceevents.QueryDefinitionChangeResult, error) {
 	if m == nil || m.manager == nil || m.workspaces == nil || ctx == nil || cmd.WorkspaceID == "" {
 		return workspaceevents.QueryDefinitionChangeResult{}, common.ErrInvalidArgument

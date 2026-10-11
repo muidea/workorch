@@ -11,10 +11,22 @@ import (
 
 func reduceDefinitionDerivation(o definitionSpecificationObservation, e definitionSpecificationInternalEvent) (definitionSpecificationTransition, error) {
 	w := o.workspace
-	if w == nil || w.ID != e.WorkspaceID || w.DefinitionAuthoring == nil || w.StartupInput != nil || w.ActivationAdmission != nil || w.ActiveRunID != "" || w.DefinitionAuthoringConfirmation != nil || len(w.DefinitionAdmissionCandidates) > 0 && !authoringSuccessorDraft(w) {
+	if w == nil || w.ID != e.WorkspaceID {
 		return definitionSpecificationTransition{}, common.ErrConflict
 	}
-	record := w.DefinitionAuthoring
+	inputHash, permitID := "", ""
+	if e.DeriveReserve != nil {
+		inputHash = e.DeriveReserve.InputHash
+	} else if e.DeriveComplete != nil {
+		permitID = e.DeriveComplete.PermitID
+	}
+	record, candidate, selectErr := authoringMutationRecord(w, inputHash, permitID, false)
+	if selectErr != nil {
+		return definitionSpecificationTransition{}, selectErr
+	}
+	if candidate && e.DeriveReserve != nil && e.ObservedChangeInputHash != record.InputHash {
+		return definitionSpecificationTransition{}, common.ErrConflict
+	}
 	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
 		return definitionSpecificationTransition{}, err
 	}
@@ -55,9 +67,7 @@ func reduceDefinitionDerivation(o definitionSpecificationObservation, e definiti
 	}
 	transition := definitionSpecificationTransition{Derivation: &result}
 	if !reflect.DeepEqual(*record, next) {
-		updated := *w
-		updated.DefinitionAuthoring = &next
-		transition.Next = &updated
+		transition.Next = withAuthoringMutationRecord(w, next, candidate)
 	}
 	return transition, nil
 }

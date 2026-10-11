@@ -4,6 +4,7 @@ import (
 	"context"
 
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -38,34 +39,40 @@ func (m *Biz) queryAuthoringDiagnostic(ctx context.Context, command workspaceeve
 	if w.DefinitionAuthoring.Input.WorkspaceID != command.WorkspaceID {
 		return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrConflict
 	}
-	for _, request := range w.DefinitionAuthoring.DerivationRequests {
-		if request.PermitID != command.PermitID {
-			continue
-		}
-		if request.FailureCode == "" || request.Diagnostic == nil {
-			return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrNotFound
-		}
-		result := workspaceevents.QueryAuthoringDiagnosticResult{WorkspaceID: command.WorkspaceID, PermitID: request.PermitID, Phase: workspaceevents.AuthoringDiagnosticDerivation, FailureCode: request.FailureCode, Diagnostic: request.Diagnostic.Clone()}
-		if err := result.ValidateFor(command); err != nil {
-			return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrConflict
-		}
-		return result, nil
+	records := []*workspace.DefinitionAuthoringRecord{w.DefinitionAuthoring}
+	if w.DefinitionChangeCandidate != nil {
+		records = append(records, &w.DefinitionChangeCandidate.Record)
 	}
-	for _, request := range w.DefinitionAuthoring.SpecificationRequests {
-		if request.PermitID != command.PermitID {
-			continue
+	for _, record := range records {
+		for _, request := range record.DerivationRequests {
+			if request.PermitID != command.PermitID {
+				continue
+			}
+			if request.FailureCode == "" || request.Diagnostic == nil {
+				return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrNotFound
+			}
+			result := workspaceevents.QueryAuthoringDiagnosticResult{WorkspaceID: command.WorkspaceID, PermitID: request.PermitID, Phase: workspaceevents.AuthoringDiagnosticDerivation, FailureCode: request.FailureCode, Diagnostic: request.Diagnostic.Clone()}
+			if err := result.ValidateFor(command); err != nil {
+				return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrConflict
+			}
+			return result, nil
 		}
-		if request.FailureCode == "" {
-			return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrNotFound
+		for _, request := range record.SpecificationRequests {
+			if request.PermitID != command.PermitID {
+				continue
+			}
+			if request.FailureCode == "" {
+				return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrNotFound
+			}
+			if request.Diagnostic == nil {
+				return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrNotFound
+			}
+			result := workspaceevents.QueryAuthoringDiagnosticResult{WorkspaceID: command.WorkspaceID, PermitID: request.PermitID, Phase: request.Phase, FailureCode: request.FailureCode, Diagnostic: request.Diagnostic.Clone()}
+			if err := result.ValidateFor(command); err != nil {
+				return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrConflict
+			}
+			return result, nil
 		}
-		if request.Diagnostic == nil {
-			return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrNotFound
-		}
-		result := workspaceevents.QueryAuthoringDiagnosticResult{WorkspaceID: command.WorkspaceID, PermitID: request.PermitID, Phase: request.Phase, FailureCode: request.FailureCode, Diagnostic: request.Diagnostic.Clone()}
-		if err := result.ValidateFor(command); err != nil {
-			return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrConflict
-		}
-		return result, nil
 	}
 	return workspaceevents.QueryAuthoringDiagnosticResult{}, common.ErrNotFound
 }

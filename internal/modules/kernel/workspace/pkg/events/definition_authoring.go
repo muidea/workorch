@@ -80,6 +80,8 @@ type SaveDefinitionAuthoringResult struct {
 
 type QueryDefinitionAuthoringCommand struct {
 	WorkspaceID common.WorkspaceID
+	// InputHash 显式选择原输入或独立待审输入；空值仍只查询原输入。
+	InputHash string
 }
 
 type QueryDefinitionAuthoringResult struct {
@@ -100,6 +102,9 @@ type QueryDefinitionAuthoringResult struct {
 func (r QueryDefinitionAuthoringResult) ValidateFor(c QueryDefinitionAuthoringCommand) error {
 	if c.WorkspaceID == "" || r.WorkspaceID != c.WorkspaceID || r.WorkspaceRevision == 0 || r.CurrentTemplateAvailable != (r.CurrentTemplateSnapshotHash != "") {
 		return fmt.Errorf("authoring query result scope is invalid")
+	}
+	if c.InputHash != "" && (len(c.InputHash) > 256 || r.Record == nil || r.Record.InputHash != c.InputHash || r.Confirmation != nil || r.AdmissionCandidate != nil || r.ActivationAdmission != nil || len(r.History) != 0) {
+		return common.ErrConflict
 	}
 	if r.Record != nil && r.Record.Input.WorkspaceID != c.WorkspaceID {
 		return fmt.Errorf("authoring query record scope mismatch")

@@ -35,7 +35,9 @@ Last Verified: 2026-08-30
 
 `DefinitionChangeCandidate` 保存既有 `DefinitionAuthoringRecord` 的独立待审输入，不新增 confirmation journal、批准副本或正式定义权威。当前仅映射 exact `authoring-goal` 修改及 `derived-dod:user:NNNNNN` 用户验收的增删改；原文必须匹配当前输入，模板／生成判据和约束等不能映射的变更明确拒绝，不猜测语义。原当前 record、Goal／DoD、startup、admission 和 materialized journal 均保持不变；全部旧 permit、审查、诊断及预算历史继承，新 input revision/hash 不能借用旧六审确认。原始候选记录 detached，包含诊断时沿原 0600 原子发布与读取门禁保护。
 
-当前只允许一个 exact preparation；同 RequestID/version/hash 重放恢复原回执，异请求覆盖或迟到旧提案拒绝。原 ledger 存在尚待结算的 permit 时拒绝准备，不冻结其 completion 或清除 unknown；结算后可重新提出同一准备请求，既有消费预算与结果原样继承。新候选派生／六审、修订／替换、可信主体 exact approve、原 journal 应用及 Run 交接尚未开放，普通保存不会消费该候选，普通确认／准入在候选存在时拒绝改变原定义基线。准备不调用 provider、不创建 Run，不改变 SM-1～SM-4。Application 提供实际 typed sender 和查询，但没有 HTTP/Web/CLI route。
+当前只允许一个 exact preparation；同 RequestID/version/hash 重放恢复原回执，异请求覆盖或迟到旧提案拒绝。原 ledger 存在尚待结算的 permit 时拒绝准备，不冻结其 completion 或清除 unknown；结算后可重新提出同一准备请求，既有消费预算与结果原样继承。候选派生／mapping／六审复用原 reserve/complete 合同与唯一 private CAS dispatcher；新 reserve 显式绑定候选 InputHash，Workspace 再读取 Decision 最新提案和零 Run inventory，并保留模板、预算、资源 owner 核对与 CAS 栅栏。观察不是跨 owner 原子事务，不能作为批准或激活事实。已接纳 permit 按原持久身份结算，之后提案漂移不会丢弃已知结果；响应丢失只查询原 ledger，不重发 provider。普通原输入不再接纳新工作，普通确认／准入拒绝改变基线。
+
+原 authoring 查询空 InputHash 仍返回原定义来源；显式 InputHash 只返回选中 record 和当前模板／目录观察，不复制原 confirmation/admission。File 资源 scope 使用同一选中输入核对 refs，两端沿原具体合同；成功审计、失败与准备诊断受限查询覆盖候选 permit，原文及继承副本完整反证，跨历史与候选诊断总预算不重开。候选修订／替换、可信主体 exact approve、原 journal 应用及 Run 交接尚未开放；六审成功不代表 approved、M3 完成或可启动。准备不调用 provider，审查仅调用有界 provider transaction，均不创建 Run、不改变 SM-1～SM-4。Application 提供实际 typed sender 和查询，但没有 HTTP/Web/CLI route。
 
 ### 阶段生命周期
 

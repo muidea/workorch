@@ -45,6 +45,21 @@ func (m *Biz) queryDefinitionAuthoring(ctx context.Context, cmd workspaceevents.
 		record := workspaceeventmapping.DefinitionAuthoringRecordDTO(*w.DefinitionAuthoring)
 		result.Record = &record
 	}
+	if cmd.InputHash != "" {
+		var selected *workspacemodel.DefinitionAuthoringRecord
+		if w.DefinitionAuthoring != nil && w.DefinitionAuthoring.InputHash == cmd.InputHash {
+			selected = w.DefinitionAuthoring
+		} else if c := w.DefinitionChangeCandidate; c != nil && c.Record.InputHash == cmd.InputHash {
+			selected = &c.Record
+		}
+		if selected == nil {
+			return workspaceevents.QueryDefinitionAuthoringResult{}, common.ErrConflict
+		}
+		record := workspaceeventmapping.DefinitionAuthoringRecordDTO(*selected)
+		result.Record = &record
+		// 输入查询不是原 confirmation/admission 的副本，也不表明可批准。
+		return result, result.ValidateFor(cmd)
+	}
 	candidate, present, err := w.ValidateActivationAdmissionPersistence()
 	if err != nil {
 		return workspaceevents.QueryDefinitionAuthoringResult{}, err
