@@ -420,7 +420,7 @@ func RuntimeMissingOwnerFactRequirements(requirements []RuntimeOwnerFactRequirem
 func runtimeOwnerFactRequirementSatisfied(requirement RuntimeOwnerFactRequirement, catalogs []RuntimeOperationAdmissibility) bool {
 	requirement = requirement.Normalized()
 	for _, catalog := range catalogs {
-		catalog = catalog.Normalized()
+		// 仅消费本次查询已规范化的 detached catalog，不再次复制未读取的 proof/诊断。
 		if catalog.OwnerModuleID != requirement.OwnerModuleID || !runtimeOperationKindsContain(catalog.OperationKinds, requirement.OperationKind) {
 			continue
 		}

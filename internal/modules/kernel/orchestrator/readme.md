@@ -182,6 +182,10 @@ capability resource state。
   `biz/runtime/aggregate_dispatch_projection_reference_test.go` 保留原完整调用次序及各阶段重复投影；
   `biz/runtime/aggregate_dispatch_projection_reuse_test.go` 固定完整拒绝、原值、投影隔离、重载、后续篡改、CAS、fuzz 与分配，
   不改变 SM-1～SM-4 转换、持久化、预算或恢复权威。
+  missing-owner-fact 查询复用同次完整规范化已生成的 detached catalog，不按每条 requirement 再复制整份 catalog；
+  shared surface observation、ready/direct/published/exact requirement 语义和 missing 集合顺序保留，查询不替代完整 proof 校验。
+  `runtime_missing_owner_fact_catalog_reuse_test.go` 以旧完整查询及独立 classifier 固定原值、非法声明、重复、nil/empty、
+  重载、后续变化、完整 owner 门禁、fuzz 与分配；不改变 SM-1～SM-4 转换、credit、预算、持久化或恢复权威。
   这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
   current focus 的 target-selection 纯投影只规范化实际返回的 selection，并按原 trim／首个同 ID prerequisite
   语义比较 Kind／Scope／FocusID，不复制无关 Definition、证据、catalog 或 coverage。原完整 aggregate/raw/hash
