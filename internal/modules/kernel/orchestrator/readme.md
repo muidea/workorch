@@ -229,6 +229,10 @@ capability resource state。
   由 `biz/runtime/evidence_projection_normalization_test.go` 与既有 fresh-load 账本篡改测试固定。崩溃注入 wrapper 保留 production Coordinator 的完整 aggregate gate 和
   `SaveValidated` 写入路径；CAS 前后切点、普通 `Save`、失败回执与非法 aggregate 拒绝由
   `biz/runtime_crash_repository_test.go` 固定。SM-1～SM-4 的 transition、authority、预算和恢复规则均不改变。
+  CWI focus-binding 校验只规范化实际消费的 Definition revision 与 focus queue，不复制无关 resources/evidence/recovery；
+  保留原队列过滤、顺序、逐 focus 规范化及完整 binding validator，每次调用重新反证。
+  `runtime_cwi_focus_binding_projection_test.go` 对照修改前完整 Facts 路径，固定接受／拒绝顺序、nil/empty/重复队列、
+  原输入、JSON 重载、后续篡改、任意 bytes、fuzz 与分配；不缓存成功凭据或减免完整 aggregate gate。
 - SM-4 终态材料保全 persisted `CoverageProofLineage`，owner-local adapter 与独立重载产物一致。
   requirement evidence 只把 exact current binding/proof、完整 all-of 和唯一 equivalent lineage 来源列为 current accepted；
   历史不适用项保留为 `stale_or_superseded`，不回写 SM-2 coverage/assessment，不改变 SM-1/SM-3 transition。

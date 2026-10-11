@@ -465,7 +465,12 @@ func ValidateRuntimeCWILedger(facts RuntimeFacts) error {
 // for unbound/planning/reopened rows, so an activation focus can remain
 // intentionally unbound until SM-2 seals the semantic contract.
 func ValidateRuntimeCWIFocusBindings(facts RuntimeFacts) error {
-	facts = facts.Normalized()
+	// 此纯校验只消费 focus queue 和 Definition revision，不复制无关 resources/evidence/recovery。
+	// 保持原 queue 过滤与逐 focus 规范化次序，完整 binding validator 每次仍执行。
+	facts.DefinitionRevision = strings.TrimSpace(facts.DefinitionRevision)
+	facts.Focus = facts.Focus.Normalized()
+	facts.RemainingFocuses = normalizeCoverageFocusQueue(facts.RemainingFocuses)
+	facts.CompletedFocuses = normalizeCoverageFocusQueue(facts.CompletedFocuses)
 	for _, focus := range runtimeCWIFocusQueue(facts) {
 		focus = focus.Normalized()
 		if len(focus.CoverageEvidenceBindings) == 0 {
