@@ -547,7 +547,12 @@ func ValidateCoverageEvidenceBindingsForFocus(focus CoverageFocus, definitionRev
 // invariant. It rejects a semantic proof copied from a wildcard quality rule
 // before any owner receipt, Run, or provider request can exist.
 func ValidateRuntimeFocusEvidenceDeclaration(focus CoverageFocus) error {
-	focus = focus.Normalized()
+	// 只规范化本门禁读取的声明字段；proof/binding 正文仍由各自完整门禁校验。
+	focus.ID = strings.TrimSpace(focus.ID)
+	focus.CoverageWorkItemIDs = normalizeCoverageWorkItemIDs(focus.CoverageWorkItemIDs)
+	focus.EvidenceDeclarationRef = strings.TrimSpace(focus.EvidenceDeclarationRef)
+	focus.RequiredOwnerFacts = NormalizeRuntimeOwnerFactRequirements(focus.RequiredOwnerFacts)
+	focus.OwnerFactConvergences = NormalizeRuntimeOwnerFactConvergences(focus.OwnerFactConvergences)
 	if focus.VerificationPolicy != nil {
 		if err := focus.VerificationPolicy.Validate(); err != nil {
 			return fmt.Errorf("coverage focus %q: %w", focus.ID, err)

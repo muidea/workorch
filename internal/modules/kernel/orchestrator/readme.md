@@ -159,6 +159,10 @@ capability resource state。
   不复制无关的完整 proof、target、lineage 或 policy；此查询不校验或授予 proof，完整 binding/raw/hash 门禁保留。
   `runtime_binding_evidence_kinds_projection_test.go` 对照旧完整规范化路径，固定 nil/empty、非法 bytes、重复声明、
   原输入、返回隔离、JSON 重载、后续变化、完整拒绝、fuzz 与分配；SM-1～SM-4 转换和恢复权威不变。
+  focus evidence declaration 门禁只规范化实际消费的 focus ID、CWI 集合、declaration 与 owner/convergence 声明，
+  verification policy 仍由自身完整 Validate 规范化校验；不复制该门禁未读取的 binding、proof、target 或诊断。
+  `runtime_focus_declaration_projection_test.go` 与原完整 validator 固定接受／拒绝、字段空白、重复 CWI、原输入、
+  JSON 重载、后续变化、完整 raw proof/hash 拒绝优先、fuzz 与分配；不删除任何声明门禁或改变 SM-1～SM-4 权威。
   这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
   current focus 的 target-selection 纯投影只规范化实际返回的 selection，并按原 trim／首个同 ID prerequisite
   语义比较 Kind／Scope／FocusID，不复制无关 Definition、证据、catalog 或 coverage。原完整 aggregate/raw/hash
