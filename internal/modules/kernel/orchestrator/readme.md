@@ -95,10 +95,19 @@ capability resource state。
   `runtime_validation_surface_reference_test.go` 保留修改前完整旧校验；
   `runtime_validation_surface_single_pass_test.go` 固定接受／拒绝顺序、原 bytes、V2 input-review、重复／交叉身份、
   JSON 重载、fuzz 与逐分配对照。此复用不改变任何 SM transition、预算或 current applicability。
+  surface 在逐项完整 proof 校验之后的 duplicate 查询只投影 trim 后的 requirement hash／CWI identity，
+  不为这两个字段再次深拷贝整份 binding／preparation 与原诊断；后续 surface 正文规范化和全部身份门禁保持不变。
+  `runtime_validation_surface_identity_projection_test.go` 对照旧完整 validator 固定 multi-preparation、raw trim、
+  duplicate、完整 proof 失败优先顺序、owner 漂移、JSON 重载、后续篡改与分配；nested fuzz 继续走独立旧路径。
+  此纯读取不提供已校验标志、缓存或新 SM-1～SM-4 转换。
   assessment authority hash 保持原 Normalized、JSON 和域前缀编码，复用同次 marshal 缓冲，不增加跨调用缓存；
   `runtime_assessment_authority_hash_test.go` 以旧编码 reference、JSON 重载、fuzz 和分配对照固定等价边界。
   lineage rule hash 同样保持原完整 JSON／域前缀编码，只在 marshal 缓冲有余量时复用；容量不足仍走原编码路径，
   不缓存规则或校验结果。`runtime_lineage_rule_hash_encoding_test.go` 固定逐字段变动、非法原 bytes、重载、fuzz 与分配对照。
+  原诊断的比较副本只对 `FieldViolations` 执行一次原有规范化，不先 raw-clone 再重复复制随后丢弃的有序集合；
+  `CloneOriginal`、原诊断保存与 exact feedback hash 仍保全原 bytes、顺序、multiplicity 及 nil/empty，完整安全与身份门禁不变。
+  `runtime_feedback_field_normalization_test.go` 对照旧完整规范化路径固定长原文、非法 bytes、所有嵌套副本隔离、
+  原 hash、JSON 重载、后续变化、fuzz 和分配；这不是诊断脱敏或成功缓存，不改变 SM-1～SM-4 转换或权威。
   semantic planning transaction 完成 after-image 后直接交唯一 coordinator 执行完整 aggregate、独立前像及 revision 门禁，
   不在紧邻 Commit 前重复同一未变 aggregate 校验；原 ledger 门禁仍保留。
   `biz/runtime/semantic_planning_transaction_gate_test.go` 固定非法 ledger／after-image／前像、stale、保存失败和无变化事务。

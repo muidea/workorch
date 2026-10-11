@@ -127,7 +127,8 @@ func (s RuntimeValidationSurface) Validate() error {
 	seenRequirementHashes := make(map[string]struct{}, len(raw.ProofRequirementBindings))
 	seenRequirementCoverage := make(map[common.CoverageWorkItemID]struct{}, len(raw.ProofRequirementBindings))
 	for _, binding := range raw.ProofRequirementBindings {
-		binding = binding.Normalized()
+		binding.RequirementHash = strings.TrimSpace(binding.RequirementHash)
+		binding.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(binding.CoverageWorkItemID)))
 		if _, duplicate := seenRequirementHashes[binding.RequirementHash]; duplicate {
 			return fmt.Errorf("runtime validation surface %q duplicates proof requirement %q", strings.TrimSpace(raw.ID), binding.RequirementHash)
 		}
@@ -138,7 +139,9 @@ func (s RuntimeValidationSurface) Validate() error {
 		seenRequirementCoverage[binding.CoverageWorkItemID] = struct{}{}
 	}
 	for _, preparation := range raw.ProofRequirementPreparations {
-		preparation = preparation.Normalized()
+		// 完整 proof 校验已执行；duplicate 查询只读取两个规范化身份字段。
+		preparation.RequirementHash = strings.TrimSpace(preparation.RequirementHash)
+		preparation.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(preparation.CoverageWorkItemID)))
 		if _, duplicate := seenRequirementHashes[preparation.RequirementHash]; duplicate {
 			return fmt.Errorf("runtime validation surface %q publishes proof requirement %q as both ready and prerequisite", strings.TrimSpace(raw.ID), preparation.RequirementHash)
 		}

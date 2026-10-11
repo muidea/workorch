@@ -427,7 +427,13 @@ func (d *RuntimeOriginalDiagnostic) Normalized() *RuntimeOriginalDiagnostic {
 	if d == nil {
 		return nil
 	}
-	canonical := d.CloneOriginal()
+	// 字段违规各自规范化时已分离所有有序集合，不先复制随后丢弃的嵌套副本。
+	input := *d
+	input.FieldViolations = nil
+	canonical := input.CloneOriginal()
+	canonical.FieldViolations = cloneRuntimeStateRawSlice(d.FieldViolations, func(value RuntimeFieldViolation) RuntimeFieldViolation {
+		return value.Normalized()
+	})
 	canonical.SchemaVersion = strings.TrimSpace(canonical.SchemaVersion)
 	canonical.OwnerModuleID = strings.TrimSpace(canonical.OwnerModuleID)
 	canonical.OriginalClass = strings.TrimSpace(canonical.OriginalClass)
@@ -438,9 +444,6 @@ func (d *RuntimeOriginalDiagnostic) Normalized() *RuntimeOriginalDiagnostic {
 	canonical.TargetRefs = normalizeOrderedStrings(canonical.TargetRefs)
 	canonical.ExpectedRevision = strings.TrimSpace(canonical.ExpectedRevision)
 	canonical.ObservedRevision = strings.TrimSpace(canonical.ObservedRevision)
-	for index := range canonical.FieldViolations {
-		canonical.FieldViolations[index] = canonical.FieldViolations[index].Normalized()
-	}
 	canonical.SemanticViolations = normalizeRuntimeSemanticContractViolations(canonical.SemanticViolations)
 	canonical.DetailsRef = strings.TrimSpace(canonical.DetailsRef)
 	canonical.DetailsHash = strings.TrimSpace(canonical.DetailsHash)
@@ -562,7 +565,6 @@ func (v RuntimeFieldViolation) CloneOriginal() RuntimeFieldViolation {
 }
 
 func (v RuntimeFieldViolation) Normalized() RuntimeFieldViolation {
-	v = v.CloneOriginal()
 	v.Path = strings.TrimSpace(v.Path)
 	v.Actual = strings.TrimSpace(v.Actual)
 	v.Allowed = normalizeOrderedStrings(v.Allowed)
