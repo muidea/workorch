@@ -398,6 +398,22 @@ func RuntimeValidationAttestationPassed(observation RuntimeValidationObservation
 	return true
 }
 
+type runtimeValidationCheckAttestationSort []RuntimeValidationCheckAttestationBinding
+
+func (values runtimeValidationCheckAttestationSort) Len() int { return len(values) }
+func (values runtimeValidationCheckAttestationSort) Less(left, right int) bool {
+	if values[left].RequiredCheckRef != values[right].RequiredCheckRef {
+		return values[left].RequiredCheckRef < values[right].RequiredCheckRef
+	}
+	if values[left].ObservationProtocolRef != values[right].ObservationProtocolRef {
+		return values[left].ObservationProtocolRef < values[right].ObservationProtocolRef
+	}
+	return values[left].NativeCheckRef < values[right].NativeCheckRef
+}
+func (values runtimeValidationCheckAttestationSort) Swap(left, right int) {
+	values[left], values[right] = values[right], values[left]
+}
+
 func NormalizeRuntimeValidationCheckAttestationBindings(values []RuntimeValidationCheckAttestationBinding) []RuntimeValidationCheckAttestationBinding {
 	ret := make([]RuntimeValidationCheckAttestationBinding, 0, len(values))
 	for _, raw := range values {
@@ -406,15 +422,9 @@ func NormalizeRuntimeValidationCheckAttestationBindings(values []RuntimeValidati
 			ret = append(ret, value)
 		}
 	}
-	sort.SliceStable(ret, func(i, j int) bool {
-		if ret[i].RequiredCheckRef != ret[j].RequiredCheckRef {
-			return ret[i].RequiredCheckRef < ret[j].RequiredCheckRef
-		}
-		if ret[i].ObservationProtocolRef != ret[j].ObservationProtocolRef {
-			return ret[i].ObservationProtocolRef < ret[j].ObservationProtocolRef
-		}
-		return ret[i].NativeCheckRef < ret[j].NativeCheckRef
-	})
+	if len(ret) > 1 {
+		sort.Stable(runtimeValidationCheckAttestationSort(ret))
+	}
 	return nilIfEmpty(ret)
 }
 

@@ -171,6 +171,10 @@ capability resource state。
   二项集合仅在后项 kind 严格小于前项时交换，相同 kind 的原相对顺序和重复项全部保留，完整 raw proof/duplicate/hash 门禁不变。
   `runtime_proof_typed_stable_sort_test.go` 对照旧 `sort.SliceStable` 路径固定任意 kind、长集合、nil/empty、
   嵌套隔离、重载、后续变化、重复原权威拒绝、fuzz 与分配；不改变 SM-1～SM-4 转换或持久化表示。
+  native check attestation 同样只替换反射稳定排序，原逐项规范化、空 RequiredCheckRef 丢弃、三字段排序键及同键原顺序保留；
+  supplemental check 与 execution stages hash 不参与排序、不被改写，返回集合仍 detached，完整重复／协议门禁不变。
+  `runtime_attestation_typed_stable_sort_test.go` 对照旧完整排序固定多键、重复、原值、Clone 隔离、重载、后续变化、
+  fuzz 与分配；不改 SM-1～SM-4 转换、native proof 或持久化权威。
   这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
   current focus 的 target-selection 纯投影只规范化实际返回的 selection，并按原 trim／首个同 ID prerequisite
   语义比较 Kind／Scope／FocusID，不复制无关 Definition、证据、catalog 或 coverage。原完整 aggregate/raw/hash
