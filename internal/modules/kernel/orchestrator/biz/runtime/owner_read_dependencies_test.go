@@ -124,6 +124,13 @@ func TestRuntimeOwnerReadDependenciesSurviveReceiptCASFailureAndReplyLoss(t *tes
 			if afterCommit && (len(persisted.OperationReceipts) != 1 || !reflect.DeepEqual(persisted.OperationReceipts[0].Evidence.OwnerRevisionSet, &dependencies)) {
 				t.Fatal("响应丢失未保存原完整读取依赖")
 			}
+			source, sourceErr := CompileRuntimeOperationReadSource(persisted, claimed.ActiveDispatch.ID, receipt.OperationID, runtimecontract.StableRuntimeOperationReceiptHash(receipt))
+			if !afterCommit && sourceErr == nil {
+				t.Fatal("CAS 前失败的 receipt 被重编为已保存来源")
+			}
+			if afterCommit && (sourceErr != nil || !reflect.DeepEqual(source.OriginalDependencies, dependencies)) {
+				t.Fatalf("响应丢失后不能从已保存 receipt 重编原来源: %v", sourceErr)
+			}
 			restarted, err := NewRuntimeController(repository)
 			if err != nil {
 				t.Fatal(err)

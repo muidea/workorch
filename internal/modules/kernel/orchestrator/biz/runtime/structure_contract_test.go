@@ -477,16 +477,17 @@ func TestO5ProofAndGroundingComparisonsUseFocusedEntries(t *testing.T) {
 func TestO6GovernanceComparisonsUseFocusedEntries(t *testing.T) {
 	t.Parallel()
 	expected := map[string]int{
-		"governancecheck.SameRequestRecord":                                   1,
-		"governancecheck.RequestRecordConflicts":                              1,
-		"governancecheck.SuspendedBindingMatchesRequest":                      1,
-		"governancecheck.RequestBindsResolution":                              1,
-		"governancecheck.BindingMatchesResolution":                            1,
-		"governancecheck.BindingStateAllowsOutcome":                           2,
-		"governancecheck.ExternalDependencyMatches":                           1,
-		"governancecheck.GovernedDispatchMatches":                             2,
-		"governancecheck.DependencyMatches":                                   2,
-		"governancecheck.GrantForExecution":                                   3,
+		"governancecheck.SameRequestRecord":              1,
+		"governancecheck.RequestRecordConflicts":         1,
+		"governancecheck.SuspendedBindingMatchesRequest": 1,
+		"governancecheck.RequestBindsResolution":         1,
+		"governancecheck.BindingMatchesResolution":       1,
+		"governancecheck.BindingStateAllowsOutcome":      2,
+		"governancecheck.ExternalDependencyMatches":      1,
+		"governancecheck.GovernedDispatchMatches":        2,
+		"governancecheck.DependencyMatches":              2,
+		// 原执行/回执查询及只读来源重编都必须反查同一 persisted governance grant。
+		"governancecheck.GrantForExecution":                                   4,
 		"runtimecontract.ValidateRuntimeOperationGovernanceExecutionBindings": 1,
 		"governancecheck.SameGrant":                                           1,
 		"governancecheck.EvaluateOperationSuspension":                         1,
@@ -499,10 +500,28 @@ func TestO6GovernanceComparisonsUseFocusedEntries(t *testing.T) {
 		"governancecheck.ResolutionRecordMatchesDispatch":                     1,
 	}
 	actual := make(map[string]int, len(expected))
+	readSourceGrantCalls := 0
 	recordSuspensionReceiver := ""
 	for _, file := range parseRuntimeProductionSources(t) {
 		for _, declaration := range file.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
+			if ok && function.Name.Name == "CompileRuntimeOperationReadSource" {
+				ast.Inspect(function.Body, func(node ast.Node) bool {
+					call, ok := node.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					selector, ok := call.Fun.(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					qualifier, ok := selector.X.(*ast.Ident)
+					if ok && qualifier.Name == "governancecheck" && selector.Sel.Name == "GrantForExecution" {
+						readSourceGrantCalls++
+					}
+					return true
+				})
+			}
 			if !ok || function.Name.Name != "recordOperationGovernanceRequired" || function.Recv == nil || len(function.Recv.List) != 1 {
 				continue
 			}
@@ -535,6 +554,9 @@ func TestO6GovernanceComparisonsUseFocusedEntries(t *testing.T) {
 		if actual[key] != count {
 			t.Fatalf("focused O6 entry %s production call sites = %d, want %d", key, actual[key], count)
 		}
+	}
+	if readSourceGrantCalls != 1 {
+		t.Fatalf("只读来源必须恰好反查一次 persisted governance grant: got=%d", readSourceGrantCalls)
 	}
 	if recordSuspensionReceiver != "candidateDispatchComponent" {
 		t.Fatalf("operation governance receipt closeout receiver = %q, want candidateDispatchComponent", recordSuspensionReceiver)

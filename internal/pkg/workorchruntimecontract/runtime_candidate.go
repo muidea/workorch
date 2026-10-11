@@ -946,6 +946,11 @@ func operationStringParameter(parameters []OperationParameter, name string) stri
 	return ""
 }
 
+// Clone 保留原 operation 正文及 nil/empty 表示，并隔离参数指针和集合。
+func (o RuntimeOperation) Clone() RuntimeOperation {
+	return cloneRuntimeOperationRaw(o)
+}
+
 func (o RuntimeOperation) Normalized() RuntimeOperation {
 	o.ID = strings.TrimSpace(o.ID)
 	o.Kind = strings.TrimSpace(o.Kind)

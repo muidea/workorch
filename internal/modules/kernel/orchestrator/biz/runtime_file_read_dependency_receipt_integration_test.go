@@ -171,10 +171,63 @@ func TestRuntimeFileReadDependencyQueryPairsActualReceiptAuthority(t *testing.T)
 	}
 	before := runtimeStateRecordFromAggregate(repository.aggregate)
 	saves := repository.saves
+	compiled, err := runtime.CompileRuntimeOperationReadSource(aggregate, command.DispatchID, command.OperationID, command.SourceReceiptHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedContext := runtimecontract.CloneRuntimeOperationExecutionContext(command.RuntimeOperationExecutionContext)
+	expectedContext.WorkspaceDeliverableDirectory = ""
+	if !reflect.DeepEqual(compiled.Context, expectedContext) || !reflect.DeepEqual(compiled.Operation, request.Operation) ||
+		!reflect.DeepEqual(compiled.OriginalDependencies, command.OriginalDependencies) || compiled.SourceReceiptHash != command.SourceReceiptHash {
+		t.Fatal("重编来源不等于实际原执行 request/receipt")
+	}
+	compiled.Context.TargetRefs[0] = "caller-context"
+	compiled.Operation.TargetRefs[0] = "caller-operation"
+	*compiled.Operation.Parameters[0].Integer = 999
+	compiled.OriginalDependencies.Entries[0].Revision = "caller-dependency"
+	if !reflect.DeepEqual(runtimeStateRecordFromAggregate(repository.aggregate), before) || !reflect.DeepEqual(runtimeStateRecordFromAggregate(aggregate), before) {
+		t.Fatal("重编返回值污染原 aggregate")
+	}
+	for _, scenario := range []string{"dispatch", "operation", "receipt", "canonical", "missing_receipt", "raw_dependency", "coherent_dependency", "nil_dependency", "execution_hash"} {
+		t.Run("compiler_"+scenario, func(t *testing.T) {
+			value := runtimeAggregateFromRecord(runtimeStateRecordFromAggregate(aggregate))
+			dispatchID, operationID, hash := command.DispatchID, command.OperationID, command.SourceReceiptHash
+			switch scenario {
+			case "dispatch":
+				dispatchID = "missing-dispatch"
+			case "operation":
+				operationID = "missing-operation"
+			case "receipt":
+				hash = "coherently-forged"
+			case "canonical":
+				dispatchID = " " + dispatchID
+			case "missing_receipt":
+				value.OperationReceipts = nil
+			case "raw_dependency":
+				value.OperationReceipts[0].Evidence.OwnerRevisionSet.Entries[0].ResourceID += " "
+			case "coherent_dependency":
+				set := value.OperationReceipts[0].Evidence.OwnerRevisionSet
+				set.Entries[0].Revision = "forged"
+				*set = set.WithHash()
+				hash = runtimecontract.StableRuntimeOperationReceiptHash(value.OperationReceipts[0])
+			case "nil_dependency":
+				value.OperationReceipts[0].Evidence.OwnerRevisionSet = nil
+			case "execution_hash":
+				value.CompletedDispatches[0].OperationExecutions[0].OperationHash = "forged"
+			}
+			input := runtimeStateRecordFromAggregate(value)
+			if _, err := runtime.CompileRuntimeOperationReadSource(value, dispatchID, operationID, hash); err == nil {
+				t.Fatal("非法来源被重编为完整读取来源")
+			}
+			if !reflect.DeepEqual(runtimeStateRecordFromAggregate(value), input) || repository.saves != saves {
+				t.Fatal("编译拒绝改写输入或保存 aggregate")
+			}
+		})
+	}
 	assertCurrent := func(bytes []byte, selected string, match bool) {
 		t.Helper()
 		loads := repository.loads
-		current, observed, err := owner.queryRuntimeFileReadDependencies(ctx, command)
+		current, observed, err := owner.queryRuntimeFileReadDependenciesFromAggregate(ctx, repository.aggregate, command.DispatchID, command.OperationID, command.SourceReceiptHash, command.RequestID)
 		if err != nil || !observed || current == nil || repository.loads != loads+1 {
 			t.Fatalf("actual receipt authority current query: observed=%v loads=%d err=%v", observed, repository.loads-loads, err)
 		}
@@ -270,6 +323,10 @@ func TestRuntimeFileReadDependencyQueryPairsActualReceiptAuthority(t *testing.T)
 		t.Fatal(err)
 	}
 	owner.runtimeController = controller
+	rebuilt, err := runtime.CompileRuntimeOperationReadSource(reloaded, command.DispatchID, command.OperationID, command.SourceReceiptHash)
+	if err != nil || !reflect.DeepEqual(rebuilt.Context, expectedContext) || !reflect.DeepEqual(rebuilt.Operation, request.Operation) || !reflect.DeepEqual(rebuilt.OriginalDependencies, command.OriginalDependencies) {
+		t.Fatalf("JSON 重载后未从原持久来源重编: err=%v", err)
+	}
 	if err := file.Teardown(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -284,19 +341,19 @@ func TestRuntimeFileReadDependencyQueryPairsActualReceiptAuthority(t *testing.T)
 	if err := os.Remove(filepath.Join(directory, target)); err != nil {
 		t.Fatal(err)
 	}
-	current, observed, err := owner.queryRuntimeFileReadDependencies(ctx, command)
+	current, observed, err := owner.queryRuntimeFileReadDependenciesFromAggregate(ctx, repository.aggregate, command.DispatchID, command.OperationID, command.SourceReceiptHash, command.RequestID)
 	if err != nil || observed || current != nil {
 		t.Fatalf("实际 missing 被当完整 observation: observed=%v err=%v", observed, err)
 	}
 	if err := os.Mkdir(filepath.Join(directory, target), 0700); err != nil {
 		t.Fatal(err)
 	}
-	current, observed, err = owner.queryRuntimeFileReadDependencies(ctx, command)
+	current, observed, err = owner.queryRuntimeFileReadDependenciesFromAggregate(ctx, repository.aggregate, command.DispatchID, command.OperationID, command.SourceReceiptHash, command.RequestID)
 	if err == nil || observed || current != nil {
 		t.Fatal("非普通 target 错误被当 missing 或 observed")
 	}
 	file.BeginShutdown(ctx)
-	if _, observed, err := owner.queryRuntimeFileReadDependencies(ctx, command); err == nil || observed {
+	if _, observed, err := owner.queryRuntimeFileReadDependenciesFromAggregate(ctx, repository.aggregate, command.DispatchID, command.OperationID, command.SourceReceiptHash, command.RequestID); err == nil || observed {
 		t.Fatal("BeginShutdown 后接纳新 current query")
 	}
 	if repository.saves != saves || !reflect.DeepEqual(runtimeStateRecordFromAggregate(repository.aggregate), before) {

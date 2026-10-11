@@ -77,7 +77,8 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// 前置准备失败增加仅记录与独立 scoped 查询两个 typed topic，不消耗 provider permit。
 	// 当前创作使用独立 typed provider-document 执行合同；generic completion 的其他消费者保留。
 	// 成功提案原文增加一个 Workspace/permit scoped 受限只读查询；仅返回已保存审计，不授予执行权威。
-	const expectedProductionTopicCount = 302
+	// File 增加原 sealed file/read 回执的只读依赖重观察，零 receipt/CAS/credit；不授 SM-2 transition。
+	const expectedProductionTopicCount = 303
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}
@@ -137,6 +138,22 @@ func isWorkspaceRetirementResourceTopic(topic string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func TestFileReadDependencyQueryRemainsOwnerObservationOnly(t *testing.T) {
+	contracts, messages := testContractCatalog(t)
+	topic := fileevents.TopicQueryRuntimeFileReadDependencies
+	contract, found := contracts[topic]
+	message, declared := messages[topic]
+	// OwnerObservation 专指 reducer owner 发布的 notify；File read query 是 Participant，不能成为 OwnerIngress。
+	if !found || !declared || contract.Owner != "file" || message.Owner != "file" || !slices.Equal(contract.ReceiverOwners, []string{"file"}) ||
+		contract.CommandClass != eventcontract.CommandClassRead || contract.LanePolicy != eventcontract.LanePolicyQuery ||
+		contract.Metadata.StateMachine != eventcontract.StateMachineSM3 || contract.Metadata.ReducerOwner != "orchestrator" ||
+		contract.Metadata.MachineRole != eventcontract.StateMachineRoleParticipant || contract.Metadata.EffectClass != eventcontract.EffectClassReadOnly ||
+		contract.Metadata.TransitionTarget != eventcontract.TransitionTargetReceiverOwnerPrivate || contract.Metadata.ScopePolicy != eventcontract.ScopePolicyWorkspaceRunStep ||
+		contract.Metadata.IdentityPolicy != eventcontract.IdentityPolicyRuntimeOperation {
+		t.Fatalf("File 原读取依赖 query 被扩大为 execution 或 transition 权威: contract=%+v message=%+v", contract, message)
 	}
 }
 

@@ -192,6 +192,15 @@ Definition/operation/dependency 身份不能替代原 receipt，重载／owner �
 `biz/runtime_operation_receipt_source_test.go` 和 `biz/runtime/operation_receipt_test.go` 独立反证原 persisted 来源；
 这些组合与局部配对不冒充完整公开 drive、SM-2 freshness 闭环或 live 验证。
 
+`CompileRuntimeOperationReadSource` 从完整有效的 persisted aggregate 重编原 dispatch/operation/execution/receipt
+读取来源，反证 exact receipt hash、key/fence、governance binding 与 sealed operation policies；只有原回执带实际依赖
+才能返回 detached context、operation 和原集合。它不使用当前 decision、目录投影或进程内原 request，nil 依赖不补造
+无依赖证明；`RuntimeOperation.Clone` 复用原 raw-clone helper，隔离参数指针并保留正文与 nil/empty 表示。
+File adapter 仅在具体 `file/read` owner 边界封装 query，当前目录仍由 Workspace typed read 提供，owner 再反查原回执。
+`biz/runtime/operation_read_source_compiler_test.go` 固定 claimed/missing/nil 来源拒绝、owner-committed 与重载等价；
+实际 File 组合回归对照原执行 request，覆盖 completed dispatch、来源篡改、返回隔离与 owner 重建后重编。
+此只读路径不新增 SM-1～SM-4 transition、CAS、credit、预算或 availability，也不代替持久 applicability/stale/reopen 事务。
+
 ### 逐源义务与共同 CWI
 
 Workspace eligible candidate 的 immutable `RuntimeSourceObligationInventory` 随 Definition/seed/startup/hash
