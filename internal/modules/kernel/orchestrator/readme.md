@@ -75,6 +75,10 @@ capability resource state。
   semantic owner catalog 校验直接复用同次完整 raw／嵌套 proof／snapshot 校验产生的 detached 规范化目录，
   不再次规范化未变的整份目录；重复 prerequisite／owner 门禁保留，公开 `Validate` 与后续调用仍完整重验。
   `runtime_owner_catalog_validation_reuse_test.go` 与独立旧 validator 固定产物、完整拒绝原因、原值、重载、隔离、fuzz 和分配成本。
+  catalog 内逐项完整校验后产生的 detached surface 仅按原 ID 稳定排序再复用，不在整 catalog 规范化时重复深拷贝；
+  raw input-review、重复 surface、owner/revision、recipe 与 snapshot 门禁及其拒绝顺序不变。
+  `runtime_owner_catalog_surface_reuse_test.go` 固定 ready/preparation 多 surface 排序、嵌套隔离、V2 原读取前像、
+  后续变更重新拒绝、重载、nested fuzz 与分配对照；不新增成功缓存或改变 SM-1～SM-4 转换。
   validation surface 在同次完整 raw proof-binding/preparation 校验后，仅继续反证跨 surface recipe、native-check、
   readiness/applicability 与 constraint 身份，不再次调用未变 proof 的完整 validator；公开 surface 入口及后续调用仍重验。
   `runtime_validation_surface_reference_test.go` 保留修改前完整旧校验；

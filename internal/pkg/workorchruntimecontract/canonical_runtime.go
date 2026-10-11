@@ -1103,6 +1103,7 @@ func validateAndNormalizeRuntimeOperationAdmissibility(a RuntimeOperationAdmissi
 		seenVariants[key] = struct{}{}
 	}
 	seenSurfaces := make(map[string]struct{}, len(a.ValidationSurfaces))
+	validatedSurfaces := make([]RuntimeValidationSurface, 0, len(a.ValidationSurfaces))
 	reviewInputVersions := make(map[string]string)
 	for _, raw := range a.ValidationSurfaces {
 		if err := raw.Validate(); err != nil {
@@ -1116,6 +1117,7 @@ func validateAndNormalizeRuntimeOperationAdmissibility(a RuntimeOperationAdmissi
 			return RuntimeOperationAdmissibility{}, fmt.Errorf("runtime operation admissibility duplicates validation surface %q", value.ID)
 		}
 		seenSurfaces[value.ID] = struct{}{}
+		validatedSurfaces = append(validatedSurfaces, value)
 		recipe, _ := RuntimeValidationRecipeForID(a.ValidationRecipes, value.ID)
 		for _, binding := range raw.ProofRequirementBindings {
 			if recipe.InputReviewProtocolRef != "" && (binding.InputReview == nil || binding.InputReview.ProtocolRef != recipe.InputReviewProtocolRef) {
@@ -1138,7 +1140,11 @@ func validateAndNormalizeRuntimeOperationAdmissibility(a RuntimeOperationAdmissi
 	if err := ValidateRuntimeOperationPolicyFacts(a.OperationPolicies); err != nil {
 		return RuntimeOperationAdmissibility{}, err
 	}
+	// 逐项完整校验与规范化已产生 detached surface；保留原排序，不再次深拷贝同次未变正文。
+	sort.SliceStable(validatedSurfaces, func(i, j int) bool { return validatedSurfaces[i].ID < validatedSurfaces[j].ID })
+	a.ValidationSurfaces = nil
 	a = a.Normalized()
+	a.ValidationSurfaces = nilIfEmpty(validatedSurfaces)
 	if err := validateRuntimeTargetParameterBindings(a.TargetParameterBindings, a.OwnerModuleID, a.OperationKinds, a.TargetRefs); err != nil {
 		return RuntimeOperationAdmissibility{}, err
 	}
