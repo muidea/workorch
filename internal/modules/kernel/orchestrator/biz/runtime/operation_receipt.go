@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/internal/governancecheck"
@@ -10,7 +11,18 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func (c *RuntimeController) QueryOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID, executionKey string, fence uint64, ownerModuleID string, grant *runtimecontract.RuntimeOperationGovernanceGrant) (runtimecontract.RuntimeOperationReceipt, bool, error) {
+func (c *RuntimeController) QueryOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID, executionKey string, fence uint64, ownerModuleID string, grant *runtimecontract.RuntimeOperationGovernanceGrant, readSource ...runtimecontract.RuntimeOperationExecutionContext) (runtimecontract.RuntimeOperationReceipt, bool, error) {
+	if len(readSource) > 1 {
+		return runtimecontract.RuntimeOperationReceipt{}, false, common.ErrInvalidArgument
+	}
+	if len(readSource) == 1 {
+		source := readSource[0]
+		if source.WorkspaceID != workspaceID || source.RunID != runID || source.DispatchID != dispatchID || source.OperationID != operationID || source.Execution.ExecutionKey != executionKey || source.Execution.Fence != fence || !reflect.DeepEqual(source.Execution.GovernanceGrant, grant) {
+			return runtimecontract.RuntimeOperationReceipt{}, false, common.ErrInvalidArgument
+		}
+		receipt, err := c.queryOperationReceiptWithReadSource(ctx, source, ownerModuleID)
+		return receipt, err == nil, err
+	}
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" || strings.TrimSpace(operationID) == "" || strings.TrimSpace(executionKey) == "" || fence == 0 || !exactOperationReceiptOwnerSource(ownerModuleID) {
 		return runtimecontract.RuntimeOperationReceipt{}, false, common.ErrInvalidArgument
 	}
@@ -18,6 +30,10 @@ func (c *RuntimeController) QueryOperationReceipt(ctx context.Context, workspace
 	if err != nil {
 		return runtimecontract.RuntimeOperationReceipt{}, false, err
 	}
+	return queryOperationReceiptFromAggregate(aggregate, dispatchID, operationID, executionKey, fence, ownerModuleID, grant)
+}
+
+func queryOperationReceiptFromAggregate(aggregate RuntimeAggregate, dispatchID, operationID, executionKey string, fence uint64, ownerModuleID string, grant *runtimecontract.RuntimeOperationGovernanceGrant) (runtimecontract.RuntimeOperationReceipt, bool, error) {
 	if err := validateOperationReceiptOwnerSource(aggregate, dispatchID, operationID, ownerModuleID); err != nil {
 		return runtimecontract.RuntimeOperationReceipt{}, false, err
 	}

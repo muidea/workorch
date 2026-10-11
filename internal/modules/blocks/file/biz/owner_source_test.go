@@ -37,6 +37,7 @@ func TestFileRuntimeOwnerCommandsRejectUntrustedSources(t *testing.T) {
 		{fileevents.TopicValidateRuntimeOperationCandidateConformance, fileevents.ValidateRuntimeOperationCandidateConformanceCommand{}, owner.handleRuntimeOperationCandidateConformance},
 		{fileevents.TopicProbeRuntimeOperationFeasibility, fileevents.ProbeRuntimeOperationFeasibilityCommand{}, owner.handleRuntimeOperationFeasibility},
 		{fileevents.TopicProbeRuntimeSemanticProofFeasibility, fileevents.ProbeRuntimeSemanticProofFeasibilityCommand{}, owner.handleRuntimeSemanticProofFeasibility},
+		{fileevents.TopicQueryRuntimeFileReadDependencies, fileevents.QueryRuntimeFileReadDependenciesCommand{}, owner.handleRuntimeFileReadDependenciesQuery},
 		{fileevents.TopicQueryRuntimeCWIReconciliation, fileevents.QueryRuntimeCWIReconciliationCommand{}, owner.handleRuntimeCWIReconciliationQuery},
 		{fileevents.TopicAcquireTargetSnapshot, fileevents.AcquireTargetSnapshotCommand{}, owner.handleAcquireTargetSnapshot},
 		{fileevents.TopicAcquireRuntimeTargetSelection, fileevents.AcquireRuntimeTargetSelectionCommand{}, owner.handleAcquireRuntimeTargetSelection},
@@ -107,7 +108,7 @@ func TestFileOwnerStartIsIdempotentAndTeardownClearsLifecycle(t *testing.T) {
 	}
 }
 
-func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllEighteenTopics(t *testing.T) {
+func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllNineteenTopics(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -128,6 +129,7 @@ func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllEighteenTopics(t *testing.T
 		{fileevents.TopicProbeRuntimeOperationFeasibility, ModuleID},
 		{fileevents.TopicProbeRuntimeSemanticProofFeasibility, ModuleID},
 		{fileevents.TopicQueryRuntimeCWIReconciliation, ModuleID},
+		{fileevents.TopicQueryRuntimeFileReadDependencies, ModuleID},
 		{fileevents.TopicAcquireTargetSnapshot, fileevents.PrerequisiteCommandDestination},
 		{fileevents.TopicAcquireAuthoringResources, ModuleID},
 		{fileevents.TopicVerifyAuthoringResource, ModuleID},
@@ -140,6 +142,9 @@ func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllEighteenTopics(t *testing.T
 		{fileevents.TopicExecuteFileWriteOperation, ModuleID},
 		{fileevents.TopicExecutePatchApplyOperation, ModuleID},
 		{fileevents.TopicExecutePatchPreviewOperation, ModuleID},
+	}
+	if len(topics) != len(fileevents.Contracts()) {
+		t.Fatalf("DTO/lifecycle matrix topic count=%d contracts=%d", len(topics), len(fileevents.Contracts()))
 	}
 	for _, item := range topics {
 		source := runtimecontract.RuntimeModuleOrchestrator

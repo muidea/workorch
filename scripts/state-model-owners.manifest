@@ -9,6 +9,7 @@
 # transition_ids="-". Bare state-like string or *string fields are allowed only
 # in owner pkg/models and only when explicitly classified as immutable_outcome,
 # immutable_trace or derived_projection; transition state must use a named type.
+internal/modules/blocks/file/pkg/events/read_dependencies.go|RuntimeFileReadDependencyObservationStatus|immutable_outcome|internal/modules/blocks/file|-
 internal/modules/blocks/approval/pkg/models/runtime_governance.go|ResolutionProposalState|owner_private_state|internal/modules/blocks/approval|approval.lifecycle
 internal/modules/blocks/decision/pkg/events/definition_clarification.go|DefinitionClarificationDisposition|immutable_outcome|internal/modules/blocks/decision|-
 internal/pkg/workorchdefinitioncontract/clarification.go|DefinitionClarificationDisposition|immutable_outcome|internal/modules/blocks/decision|-

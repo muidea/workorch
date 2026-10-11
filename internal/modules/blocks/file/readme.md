@@ -20,7 +20,7 @@ validation verdict。它不解释 Goal/DoD，不调用其它 capability owner，
 
 | 交互方 | 方向 | typed EventHub 合同 | 调用/授权语义 |
 | --- | --- | --- | --- |
-| `kernel/orchestrator` | Orchestrator → File | 10 个 Runtime read/conformance/feasibility command/result；6 个 sealed execute command，统一 `ExecuteOperationResult` | 接受 exact `kernel/orchestrator` source |
+| `kernel/orchestrator` | Orchestrator → File | 11 个 Runtime read/conformance/feasibility command/result；6 个 sealed execute command，统一 `ExecuteOperationResult` | 接受 exact `kernel/orchestrator` source |
 | `blocks/git` | Git → File | `AcquireWorkspaceManifestCommand/Result` | Git 在 capability-state/feasibility/effect freshness 中读取 File-owned tree revision；该 topic 额外接受 exact `blocks/git` source |
 | `application/workorchd` | Application → File | `AcquireAuthoringResourceCommand/Result` | 创建期单文件有界只读事实；仅接受 exact Application source，不冒充 Runtime prerequisite；File 再按 Workspace owner 的资源范围合同查当前目录和草稿身份，不信任调用方目录；不替代确认时的漂移复核 |
 | `blocks/workspace` | Workspace → File | `VerifyAuthoringResourceCommand/Result` | Workspace 派生 reserve、确认 journal 和最终准入前分别要求 File 重新观察 exact 内容与当前草稿 revision；Workspace 随后用 revision-CAS 封存，不是资源的持续有效性保证 |
@@ -28,9 +28,9 @@ validation verdict。它不解释 Goal/DoD，不调用其它 capability owner，
 | `kernel/orchestrator` | File → Orchestrator | `QueryRuntimeOperationReceiptCommand/Result`、`CommitRuntimeOperationReceiptCommand/Result` | replay fence 与 receipt persistence；File 不直接写 Orchestrator state |
 | workspace filesystem | File ↔ filesystem | owner-private `RuntimeAdapter` | effect 只能落在 resolved deliverable root 内 |
 
-File owner 自定义的 18 组入站 command/result（10 组 Runtime read、2 组创建期 read/verify、6 组 execute）位于 [`pkg/events`](pkg/events)；File 出站使用的 2 组
-receipt query/commit 由 Orchestrator 定义，不计入这 18 组。创建期资源查询与验证不属于 SM-1～SM-4；其结果不授予准入。
-Runtime candidate conformance 是 SM-3 pre-seal owner observation，其余 Runtime read/feasibility 合同属于 SM-2 owner observation，
+File owner 自定义的 19 组入站 command/result（11 组 Runtime read、2 组创建期 read/verify、6 组 execute）位于 [`pkg/events`](pkg/events)；File 出站使用的 2 组
+receipt query/commit 由 Orchestrator 定义，不计入这 19 组。创建期资源查询与验证不属于 SM-1～SM-4；其结果不授予准入。
+Runtime candidate conformance 与原读取依赖重观察是 SM-3 owner observation，其余 Runtime read/feasibility 合同属于 SM-2 owner observation，
 execute 合同属于 SM-3 sealed operation participation；它们都不是 reducer API。`SealedRuntimeOperation` 绑定 canonical
 payload hash、operation identity 与 execution scope，handler 不能从自由文本重建 operation。
 
@@ -47,9 +47,20 @@ File 不重新打开文件来补造历史版本，不从 `ResourceChanges` 或 c
 的新读取在文件 I/O 和 receipt commit 前拒绝。集合是本次读取事实，不是 CWI credit 或跨时刻 freshness 凭证。
 
 optional missing read、list/preview、validation、assessment 和正式 artifact 不由该读取合同补造依赖；
-它也不提供 current owner 查询或 stale/reopen 裁决。现行 Runtime 路径检查与读取仍不是跨文件原子快照，
-该依赖字段不证明所有 filesystem TOCTOU 已被防住。独立 producer 回归见
-[`biz/file_read_dependencies_test.go`](biz/file_read_dependencies_test.go)。
+现行 Runtime 路径检查与读取仍不是跨文件原子快照，该依赖字段不证明所有 filesystem TOCTOU 已被防住。
+独立 producer 回归见 [`biz/file_read_dependencies_test.go`](biz/file_read_dependencies_test.go)。
+
+`QueryRuntimeFileReadDependenciesCommand/Result` 仅对原 `file/read` 提供当前重新观察：必须有 exact sealed operation、
+transaction Definition、原完整 dependency set、source receipt hash 与 request/state-revision echo。File 经 typed
+Orchestrator receipt query 的 `ReadSource` 反查原 persisted dispatch/operation/transaction/execution；错 source、
+receipt miss/hash/set 漂移均在新读取前拒绝。然后用原 range/MaxBytes 参数读取 current bytes，重新生成完整集合，
+不能只回显旧 selector hash。`missing` 显式返回 nil set；目录、工作区缺失、读取错误不伪装为完整观察或 absence proof。
+调用端从 Workspace typed read 获取当前目录，不使用自由调用方目录；原 receipt 保持不变，查询不生成新 receipt。
+新 query 在 BeginShutdown 后拒绝，已接纳 query 与 nested receipt 查询持票至真实返回。它不提供跨时刻保证或
+SM-2 stale/reopen 裁决，不覆盖 mutation、Shell copy、owner postcondition、assessment 或 artifact current dependencies。
+独立 bytes/range oracle、无关/相交变化、missing/error、重启和零额外 commit 见
+[`biz/file_read_dependency_query_test.go`](biz/file_read_dependency_query_test.go)；返回端 full raw/hash/identity gate 见
+[`pkg/events/read_dependencies_test.go`](pkg/events/read_dependencies_test.go)。
 
 `file/edit`、`file/write` 与 `patch/apply` 在 exact Definition 门禁后保留最终 patch 执行读取的 existing 输入：
 owner-private observation 直接取自 `readPatchTarget` 返回的原 bytes，绑定目标、全内容 SHA-256、字节数及
@@ -145,15 +156,15 @@ lost-receipt recovery 若确认 sealed 后像，只保留本次实际读取的 `
 | text edit applicability | [`edit_applicability_test.go`](edit_applicability_test.go) | `file/edit` 与 `patch/apply|patch/preview` text_replace 的真实 EventHub 矩阵：exact/byte-exact、空 replacement、occurrence、缺失/歧义/越界、baseHash/binary 与 duplicate；probe 零写入/receipt，owner constraint 不含执行或纠正权限 |
 | exact validation input delta | [`biz/validation_input_repair_test.go`](biz/validation_input_repair_test.go) | EventHub feasibility 的 exact/夹带断言/旧输入/旧诊断矩阵，零预检副作用，真实 apply、重启重放与 newer input 保护 |
 | target-bound parameter preimage | [`target_parameter_test.go`](target_parameter_test.go)、`workorchruntimecontract/runtime_target_parameter_binding_test.go` | 多文件 exact target hash、provider echo 拒绝、required/auxiliary 与 prospective 编译、catalog/manifest/wire hash、真实 owner restart、direct ingress drift 拒绝与外部修改后的 stale；read-only probe 零 effect |
-| typed contract / sealed identity | [`pkg/events/operation_test.go`](pkg/events/operation_test.go)、`kernel/orchestrator/biz/prerequisite_event_adapter_test.go::TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract` | 18 topic inventory、payload/scope binding、create-only selector effect 前 `create`/effect 后 `unsupported` 覆盖 |
+| typed contract / sealed identity | [`pkg/events/operation_test.go`](pkg/events/operation_test.go)、`kernel/orchestrator/biz/prerequisite_event_adapter_test.go::TestAcquireRuntimeTargetSelectionPrerequisiteUsesTypedEventHubContract` | 19 topic inventory、payload/scope binding、create-only selector effect 前 `create`/effect 后 `unsupported` 覆盖 |
 | candidate constraints | [`biz/file_runtime_candidate_conformance_test.go`](biz/file_runtime_candidate_conformance_test.go)、`biz/file_runtime_adapter_test.go::TestRuntimeAdapterRuntimeFeasibilityRejectsStaleUnifiedDiff`、`module_test.go::TestFileModuleReportsUnifiedDiffTargetApplicabilityAsTypedCandidateConstraint`、[`pkg/events/operation_test.go`](pkg/events/operation_test.go) | static valid/invalid unified diff、target/target-policy mode、零 workspace I/O conformance，以及真实 owner EventHub 路径中 current target conflict 的 manifest/revision-bound typed applicability violation 与零 effect 覆盖 |
-| exact source | `TestFileRuntimeOwnerCommandsRejectUntrustedSources`、`TestFileWorkspaceManifestAllowsGitOwnerSource`、`TestFileModuleRejectsDriftedSealedOperationBeforeEffect` | 10 个 read topic 的 producer matrix 与 execute wrong-source 覆盖 |
+| exact source | `TestFileRuntimeOwnerCommandsRejectUntrustedSources`、`TestFileWorkspaceManifestAllowsGitOwnerSource`、`TestFileModuleRejectsDriftedSealedOperationBeforeEffect` | 11 个 read topic 的 producer matrix 与 execute wrong-source 覆盖 |
 | path/binary/symlink/ambiguous negative | `TestRuntimeAdapterRejectsPathEscape`、`TestRuntimeAdapterRejectsSymlinkEscape`、`TestRuntimeAdapterEditRejectsBinaryFile`、`TestRuntimeAdapterEditRejectsAmbiguousMatch` | 覆盖拒绝且零 effect |
 | stale/freshness / manifest revision | `TestRuntimeAdapterProbeRejectsStaleAdmissibilitySnapshotWithoutMutation`、`TestRuntimeAdapterProbeReportsTypedStaleAfterExternalWorkspaceMutation`、`TestRuntimeAdapterEditRejectsBaseHashMismatch`、`TestAcquireWorkspaceManifestRevisionTracksContent`、`TestOwnerFeasibilityCategoriesAreTotal` | 覆盖 stale、resource state 与 sealed target policy contradiction 的完备分类 |
 | duplicate/idempotency/receipt loss | `TestFileOwnerStateChangingReceiptReplaysWithoutSecondWrite`、`TestRuntimeAdapterPatchApplyFileWriteConfirmsSealedReplayAfterReceiptLoss`、`TestFileOwnerPatchApplyReplaysSealedWriteAfterReceiptCommitFailure` | 覆盖 |
 | reconciliation / restart | [`biz/owner_reconciliation_test.go`](biz/owner_reconciliation_test.go) | fresh owner restart、changed/deleted target 覆盖 |
 | repair confirmation | [`biz/repair_surface_confirmation_test.go`](biz/repair_surface_confirmation_test.go) 中的 `TestFileOwnerConfirmsOnlyCurrentRegularRepairSurface`、`kernel/orchestrator/biz/prerequisite_event_adapter_test.go::TestConfirmFileRuntimeRepairSurfaceRequiresExactRequestFence`、`kernel/orchestrator/biz/runtime/shell_owner_receipt_integration_test.go::TestShellOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot`、`kernel/orchestrator/biz/runtime/repair_surface_confirmation_plan_test.go::TestRuntimeRepairSurfaceConfirmationRequestIDBindsRevisionAndRefreshLineage`、`workorchruntimecontract::TestRuntimeRepairSurfaceConfirmationRecordProvidesTypedReplayFence` | expected workspace-tree revision 与 current 相同时的 regular target confirmed/rejected、mutation 后 stale+零 target、request/issued/expected revision exact echo、stale refresh 新 fence与旧 response 越窗拒绝、protocol-bound subject、recorded revision 及 cross-owner/unsupported 拒绝覆盖 |
-| lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestFileOwnerStartIsIdempotentAndTeardownClearsLifecycle`、`TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllEighteenTopics` | 覆盖 18 topic 的重复 Start 单次投递与 Stop 后零 payload/effect |
-| wrong DTO matrix | `TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllEighteenTopics` | 覆盖全部 18 topic 的 wrong concrete command，并校验每次恰有一个 owner subscription |
+| lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestFileOwnerStartIsIdempotentAndTeardownClearsLifecycle`、`TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllNineteenTopics` | 覆盖 19 topic 的重复 Start 单次投递与 Stop 后零 payload/effect |
+| wrong DTO matrix | `TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllNineteenTopics` | 覆盖全部 19 topic 的 wrong concrete command，并校验每次恰有一个 owner subscription |
 | creation-time resource facts | [`biz/authoring_resources_test.go`](biz/authoring_resources_test.go)、`workspace/biz/definition_derivation_persistence_test.go`、`application/workorchd/biz/definition_authoring_resources_test.go` | exact source、受限路径/字节/敏感内容拒绝、File 核验调用方内容与 Workspace revision、重启后派生 reserve 不重发 permit；正式资源 provider 路径尚未启用 |
 | provider / external network | 不适用 | 不适用 |

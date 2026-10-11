@@ -151,6 +151,18 @@ oracle、无关变化、相交变化、raw/hash/重复/Definition 门禁和协�
 真实 File/Shell/Run mainline 与三 owner ACK 恢复验证原 catalog 来源。这仍不覆盖 classifier 的所有 binding/lineage/guard
 输入、formal artifact、current query 或 terminal union，不改变 disposition、credit、budget、reopen 或 availability。
 
+File 的 `QueryRuntimeFileReadDependencies` 是只读 concrete owner query：adapter 经 Workspace typed read 取得当前目录，
+File 核对原 sealed `file/read`、exact Definition、原集合和 receipt hash，再通过 receipt-owner query 的 `ReadSource`
+从同次 loaded aggregate 反证原 transaction、operation scope、execution authority/key/fence 与 receipt ledger。
+receipt miss 不授执行；current bytes 按原 range/MaxBytes selector 重读并重算 dependency hash，missing 不返回完整 set，
+失败不作为 missing。回应 exact echo request/state revision/source receipt hash，adapter 完整校验并 detached 返回。
+新查询在 BeginShutdown 后拒绝，已接纳 query 连同 nested source read 等真实结束；原 receipt replay 的 drain 不变。
+该接口尚未接入 SM-2 private applicability/stale/reopen 事务，不提供持续 freshness、mutation/Shell/assessment/artifact
+current observation 或终态 union；不新增 SM-1～SM-4 transition、credit、预算或 availability。
+`biz/runtime_file_read_dependency_event_adapter_test.go` 使用实际 File 与 typed Workspace/receipt fixture；
+`biz/runtime_operation_receipt_source_test.go` 和 `biz/runtime/operation_receipt_test.go` 独立反证原 persisted 来源，
+这些局部配对不冒充完整公开 drive 或 live 验证。
+
 ### 逐源义务与共同 CWI
 
 Workspace eligible candidate 的 immutable `RuntimeSourceObligationInventory` 随 Definition/seed/startup/hash

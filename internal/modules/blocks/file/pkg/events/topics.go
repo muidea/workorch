@@ -9,6 +9,7 @@ const (
 	TopicValidateRuntimeOperationCandidateConformance = "/file/runtime-operation/validate-candidate-conformance"
 	TopicProbeRuntimeSemanticProofFeasibility         = "/file/runtime-semantic/probe-proof-feasibility"
 	TopicQueryRuntimeCWIReconciliation                = "/file/reconciliation/query-cwi"
+	TopicQueryRuntimeFileReadDependencies             = "/file/runtime-query/read-dependencies"
 	TopicAcquireTargetSnapshot                        = "/file/runtime-prerequisite/acquire-target-snapshot"
 	TopicAcquireRuntimeTargetSelection                = "/file/runtime-prerequisite/acquire-target-selection"
 	TopicAcquireWorkspaceManifest                     = "/file/runtime-prerequisite/acquire-workspace-manifest"

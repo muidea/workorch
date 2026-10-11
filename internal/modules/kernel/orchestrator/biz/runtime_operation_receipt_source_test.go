@@ -439,6 +439,31 @@ func testExactFileOwnerReceiptHandlerTransition(t *testing.T, outcome runtimecon
 			if commitErr != nil || !ok || committed.StateRevision == 0 || repository.loads != beforeCommitLoads+1 || repository.saves != beforeCommitSaves+1 {
 				return runtime.RuntimeOperationExecutionResult{}, errors.New("exact owner did not reach receipt SM-3 CAS")
 			}
+			readSource := runtimeOperationExecutionContext(request, "source-query-directory", "")
+			for _, mismatch := range []bool{false, true} {
+				value := runtimecontract.CloneRuntimeOperationExecutionContext(readSource)
+				if mismatch {
+					value.Transaction.DefinitionRevision = "other"
+				}
+				event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, runtimecontract.RuntimeModuleFile, orchestratorevents.CommandDestination, magicevent.NewHeader(), callCtx, orchestratorevents.QueryRuntimeOperationReceiptCommand{
+					WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID,
+					OperationID: request.Operation.ID, ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, ReadSource: &value,
+				})
+				result := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
+				loads, saves := repository.loads, repository.saves
+				owner.handleRuntimeOperationReceipt(event, result)
+				data, err := result.Get()
+				if mismatch {
+					if err == nil || repository.saves != saves {
+						return runtime.RuntimeOperationExecutionResult{}, errors.New("read source mismatch accepted")
+					}
+				} else {
+					response, ok := data.(orchestratorevents.QueryRuntimeOperationReceiptResult)
+					if err != nil || !ok || !response.Found || response.Receipt == nil || !runtimecontract.SameRuntimeOperationReceipt(*response.Receipt, committed.Receipt) || repository.loads != loads+1 || repository.saves != saves {
+						return runtime.RuntimeOperationExecutionResult{}, errors.New("exact read source did not return original receipt in one read")
+					}
+				}
+			}
 			// Exercise the normal response-loss path as well: Runtime must recover
 			// the just-persisted receipt rather than execute a second owner call.
 			return runtime.RuntimeOperationExecutionResult{}, errors.New("simulated owner response loss after receipt CAS")

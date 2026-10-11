@@ -58,6 +58,8 @@ type QueryRuntimeOperationReceiptCommand struct {
 	ExecutionKey    string
 	Fence           uint64
 	GovernanceGrant *runtimecontract.RuntimeOperationGovernanceGrant
+	// ReadSource 用于历史读取依赖重观察；owner 必须反查原 dispatch/operation/authority。
+	ReadSource *runtimecontract.RuntimeOperationExecutionContext
 }
 
 type QueryRuntimeOperationReceiptResult struct {

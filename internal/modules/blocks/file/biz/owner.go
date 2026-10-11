@@ -91,6 +91,7 @@ func (m *Biz) Start() error {
 		{fileevents.TopicProbeRuntimeOperationFeasibility, m.handleRuntimeOperationFeasibility, false},
 		{fileevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility, false},
 		{fileevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery, false},
+		{fileevents.TopicQueryRuntimeFileReadDependencies, m.handleRuntimeFileReadDependenciesQuery, false},
 		{fileevents.TopicExecuteFileListOperation, m.handleFileListOperation, false},
 		{fileevents.TopicExecuteFileReadOperation, m.handleFileReadOperation, false},
 		{fileevents.TopicExecuteFileEditOperation, m.handleFileEditOperation, false},

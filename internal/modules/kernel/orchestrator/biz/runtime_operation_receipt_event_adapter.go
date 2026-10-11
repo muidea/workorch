@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"context"
+	"reflect"
 	"strings"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -48,6 +49,15 @@ func (m *Biz) handleRuntimeOperationReceipt(event magicevent.Event, result magic
 		var found bool
 		err := m.withOrchestratorWorkspaceResourceRead(event.Context(), command.WorkspaceID, func(guarded context.Context) error {
 			var queryErr error
+			if command.ReadSource != nil {
+				source := command.ReadSource
+				if source.WorkspaceID != command.WorkspaceID || source.RunID != command.RunID || source.DispatchID != command.DispatchID || source.OperationID != command.OperationID ||
+					source.Execution.ExecutionKey != command.ExecutionKey || source.Execution.Fence != command.Fence || !reflect.DeepEqual(source.Execution.GovernanceGrant, command.GovernanceGrant) {
+					return common.ErrInvalidArgument
+				}
+				receipt, found, queryErr = m.runtimeController.QueryOperationReceipt(guarded, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, event.Source(), command.GovernanceGrant, *source)
+				return queryErr
+			}
 			receipt, found, queryErr = m.runtimeController.QueryOperationReceipt(guarded, command.WorkspaceID, command.RunID, command.DispatchID, command.OperationID, command.ExecutionKey, command.Fence, event.Source(), command.GovernanceGrant)
 			return queryErr
 		})

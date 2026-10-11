@@ -105,6 +105,78 @@ func TestRuntimeControllerOperationReceiptFenceAndTerminalUniqueness(t *testing.
 		t.Fatalf("committed receipt query found=%v receipt=%+v err=%v", found, queried, err)
 	}
 	saves := repository.saves
+	operation, found := candidateOperationByID(claimed.ActiveDispatch.Candidate, operationID)
+	if !found {
+		t.Fatal("missing original operation")
+	}
+	source := runtimecontract.RuntimeOperationExecutionContext{
+		WorkspaceID: claimed.Facts.WorkspaceID, RunID: claimed.Facts.RunID, DispatchID: claimed.ActiveDispatch.ID, OperationID: operationID,
+		Transaction: claimed.ActiveDispatch.Transaction, TargetRefs: operation.TargetRefs, CoverageWorkItemIDs: operation.CoverageWorkItemIDs,
+		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
+			ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, OperationHash: execution.OperationHash,
+			ExpectedEffectScope: execution.ExpectedEffectScope, IdempotencyClass: execution.IdempotencyClass,
+			AuthorityHash: execution.AuthorityHash, AdmissibilitySnapshotID: execution.AdmissibilitySnapshotID, AcquisitionBinding: execution.AcquisitionBinding, ReplayProof: execution.ReplayProof,
+		},
+	}
+	if read, err := controller.queryOperationReceiptWithReadSource(context.Background(), source, runtimecontract.RuntimeModuleFile); err != nil || !runtimecontract.SameRuntimeOperationReceipt(read, first) || repository.saves != saves {
+		t.Fatalf("original source read err=%v saves=%d", err, repository.saves)
+	}
+	if read, found, err := controller.QueryOperationReceipt(context.Background(), source.WorkspaceID, source.RunID, source.DispatchID, source.OperationID, source.Execution.ExecutionKey, source.Execution.Fence, runtimecontract.RuntimeModuleFile, nil, source); err != nil || !found || !runtimecontract.SameRuntimeOperationReceipt(read, first) || repository.saves != saves {
+		t.Fatalf("source query facade err=%v saves=%d", err, repository.saves)
+	}
+	if _, _, err := controller.QueryOperationReceipt(context.Background(), source.WorkspaceID, source.RunID, source.DispatchID, source.OperationID, source.Execution.ExecutionKey, source.Execution.Fence, runtimecontract.RuntimeModuleFile, nil, source, source); err == nil {
+		t.Fatal("multiple source identities accepted")
+	}
+	restarted, err := NewRuntimeController(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read, err := restarted.queryOperationReceiptWithReadSource(context.Background(), source, runtimecontract.RuntimeModuleFile); err != nil || !runtimecontract.SameRuntimeOperationReceipt(read, first) || repository.saves != saves {
+		t.Fatalf("source reload err=%v saves=%d", err, repository.saves)
+	}
+	for _, scenario := range []string{"definition", "transaction", "operation", "target", "coverage", "authority", "fence", "source", "coherent_operation", "coherent_catalog"} {
+		t.Run("read_source_"+scenario, func(t *testing.T) {
+			value := runtimecontract.CloneRuntimeOperationExecutionContext(source)
+			owner := runtimecontract.RuntimeModuleFile
+			switch scenario {
+			case "definition":
+				value.Transaction.DefinitionRevision = "other"
+			case "transaction":
+				value.Transaction.EvidenceRevision = "other"
+			case "operation":
+				value.Execution.OperationHash = "other"
+			case "target":
+				value.TargetRefs = []string{"other.txt"}
+			case "coverage":
+				value.CoverageWorkItemIDs = []common.CoverageWorkItemID{"other"}
+			case "authority":
+				value.Execution.AuthorityHash = "other"
+			case "fence":
+				value.Execution.Fence++
+			case "source":
+				owner = runtimecontract.RuntimeModuleShell
+			case "coherent_operation":
+				changed := operation
+				changed.Parameters = runtimeFileWriteParameters("different")
+				value.Execution.OperationHash = runtimecontract.StableRuntimeOperationHash(changed)
+				value.Execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(runtimecontract.RuntimeOperationExecutionRecord{
+					OperationID: changed.ID, OperationHash: value.Execution.OperationHash, ExecutionKey: value.Execution.ExecutionKey,
+					ExpectedEffectScope: value.Execution.ExpectedEffectScope, IdempotencyClass: value.Execution.IdempotencyClass,
+					AdmissibilitySnapshotID: value.Execution.AdmissibilitySnapshotID, AcquisitionBinding: value.Execution.AcquisitionBinding, ReplayProof: value.Execution.ReplayProof,
+				})
+			case "coherent_catalog":
+				value.Execution.AdmissibilitySnapshotID = "different"
+				value.Execution.AuthorityHash = runtimecontract.StableRuntimeOperationExecutionAuthorityHash(runtimecontract.RuntimeOperationExecutionRecord{
+					OperationID: operation.ID, OperationHash: value.Execution.OperationHash, ExecutionKey: value.Execution.ExecutionKey,
+					ExpectedEffectScope: value.Execution.ExpectedEffectScope, IdempotencyClass: value.Execution.IdempotencyClass,
+					AdmissibilitySnapshotID: value.Execution.AdmissibilitySnapshotID, AcquisitionBinding: value.Execution.AcquisitionBinding, ReplayProof: value.Execution.ReplayProof,
+				})
+			}
+			if _, err := controller.queryOperationReceiptWithReadSource(context.Background(), value, owner); err == nil || repository.saves != saves {
+				t.Fatalf("source drift accepted err=%v saves=%d", err, repository.saves)
+			}
+		})
+	}
 	replayed, duplicate, err := controller.commitOperationReceipt(context.Background(), "ws-v2", "run-v2", sealed.ActiveDispatch.ID, execution.Fence, runtimecontract.RuntimeModuleFile, receipt)
 	if err != nil || !runtimecontract.SameRuntimeOperationReceipt(first, duplicate) || replayed.StateRevision != committed.StateRevision || repository.saves != saves {
 		t.Fatalf("duplicate receipt was not idempotent: aggregate=%+v receipt=%+v saves=%d err=%v", replayed, duplicate, repository.saves, err)

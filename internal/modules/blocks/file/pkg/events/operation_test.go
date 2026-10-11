@@ -11,8 +11,8 @@ import (
 
 func TestContractsDeclareFileAsQueryAndExecutionReceiver(t *testing.T) {
 	contracts := Contracts()
-	if len(contracts) != 18 {
-		t.Fatalf("contract count = %d, want 18", len(contracts))
+	if len(contracts) != 19 {
+		t.Fatalf("contract count = %d, want 19", len(contracts))
 	}
 	queryTopics := map[string]struct{}{
 		TopicAcquireRuntimeCapabilities:                   {},
@@ -21,6 +21,7 @@ func TestContractsDeclareFileAsQueryAndExecutionReceiver(t *testing.T) {
 		TopicProbeRuntimeOperationFeasibility:             {},
 		TopicProbeRuntimeSemanticProofFeasibility:         {},
 		TopicQueryRuntimeCWIReconciliation:                {},
+		TopicQueryRuntimeFileReadDependencies:             {},
 		TopicAcquireTargetSnapshot:                        {}, TopicAcquireRuntimeTargetSelection: {},
 		TopicAcquireWorkspaceManifest: {}, TopicConfirmRuntimeRepairSurface: {},
 		TopicAcquireAuthoringResources: {}, TopicVerifyAuthoringResource: {},
