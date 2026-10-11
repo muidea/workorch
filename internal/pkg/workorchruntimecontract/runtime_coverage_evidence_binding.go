@@ -375,6 +375,7 @@ func stableCoverageEvidenceBindingHashNormalized(binding CoverageEvidenceBinding
 			writeHashString(h, attestation.ObservationProtocolRef)
 			writeHashString(h, attestation.NativeCheckRef)
 			writeRuntimeSupplementalNativeCheckHash(h, attestation)
+			writeRuntimeValidationExecutionRequirementHash(h, attestation)
 		}
 		writeHashStrings(h, proof.MetricConstraints)
 		writeHashStrings(h, proof.ArtifactRefs)

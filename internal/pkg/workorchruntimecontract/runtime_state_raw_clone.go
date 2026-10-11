@@ -2145,6 +2145,9 @@ func cloneRuntimeValidationFailureRepairConvergenceRaw(in RuntimeValidationFailu
 
 func cloneRuntimeValidationObservationRaw(in RuntimeValidationObservation) RuntimeValidationObservation {
 	out := in
+	out.ExecutionConjunction = cloneRuntimeStateRawPointer(in.ExecutionConjunction, func(value RuntimeValidationExecutionConjunction) RuntimeValidationExecutionConjunction {
+		return value.Clone()
+	})
 	out.CheckFailures = cloneRuntimeStateRawSlice(in.CheckFailures, func(item RuntimeValidationCheckFailure) RuntimeValidationCheckFailure { return item })
 	out.IncompleteChecks = cloneRuntimeStateRawSlice(in.IncompleteChecks, func(item string) string { return item })
 	out.ExecutedChecks = cloneRuntimeStateRawSlice(in.ExecutedChecks, func(item string) string { return item })

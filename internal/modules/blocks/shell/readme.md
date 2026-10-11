@@ -263,6 +263,11 @@ Shell-private `runShellProjectConjunction` 复用 `validation_project_conjunctio
 当前 runner 仍是 owner-private，未进入公开 adapter/catalog、Runtime receipt 或 coverage credit；
 既有 v3/v4/v5 recipe/native/scope 的公开语义不变，implementation-work availability 不因此开放。
 正式接线仍须完整映射 sealed recipe、typed all-of 执行事实、原文保全／读取边界与 receipt 恢复链。
+`shellProjectConjunctionObservation` 将实际阶段事实 detached 映射为中立
+`RuntimeValidationExecutionConjunction`，核对原四阶段身份、准确 argv 和 owner raw bytes/hash；
+缺阶段的已知失败只保全为 incomplete，不能变成完整合取。该映射仍未由公开 adapter 调用；
+`validation_project_conjunction_observation_test.go` 验证完整映射、身份／原 bytes 篡改拒绝和副本隔离。
+中立接收合同封存有序 stage hash，要求 native PASS 与完整 all-of 同时成立，仍不表示输出原文已持久保存或可读取。
 本节不表示公开 authoring/activation/fullflow、fresh-process 或 live 已验收。
 
 #### Executable input-maintenance contracts

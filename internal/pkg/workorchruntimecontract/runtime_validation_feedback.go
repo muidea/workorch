@@ -114,6 +114,14 @@ func normalizeRuntimeValidationCheckFailures(values []RuntimeValidationCheckFail
 // diagnostics. If supplied, they must be bounded, safe and attached to an actual
 // failed check. Missing details remain explicitly observable at the renderer.
 func (o RuntimeValidationObservation) ValidateFailureDetails() error {
+	if o.ExecutionConjunction != nil {
+		if err := o.ExecutionConjunction.Validate(); err != nil {
+			return err
+		}
+		if o.ExecutionConjunction.ProtocolRef != o.ObservationProtocolRef || o.ProofClass != "" && !o.ExecutionConjunction.Complete {
+			return fmt.Errorf("validation execution conjunction protocol or proof completeness mismatch")
+		}
+	}
 	switch o.ProofClass {
 	case "", RuntimeValidationProofStatic, RuntimeValidationProofExecuted, RuntimeValidationProofBehavioral:
 	default:

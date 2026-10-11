@@ -336,6 +336,8 @@ type RuntimeValidationCheckAttestationBinding struct {
 	// Optional conjunctive input: never replaces the original native check.
 	// Empty preserves the identity and behavior of already sealed bindings.
 	SupplementalNativeCheckRef string `json:",omitempty"`
+	// 非空时所有准确 native checks 还须通过 owner 声明的有序执行合取。
+	ExecutionStagesHash string `json:",omitempty"`
 }
 
 func (b RuntimeValidationCheckAttestationBinding) Normalized() RuntimeValidationCheckAttestationBinding {
@@ -350,6 +352,9 @@ func (b RuntimeValidationCheckAttestationBinding) Validate() error {
 	b = b.Normalized()
 	if b.RequiredCheckRef == "" || b.ObservationProtocolRef == "" || b.NativeCheckRef == "" {
 		return fmt.Errorf("runtime validation check attestation requires Definition check, observation protocol and native check")
+	}
+	if b.ExecutionStagesHash != "" && !validationExecutionDigest(b.ExecutionStagesHash) {
+		return fmt.Errorf("runtime validation check execution stages identity invalid")
 	}
 	if b.SupplementalNativeCheckRef != "" && (b.SupplementalNativeCheckRef == b.NativeCheckRef || len(b.SupplementalNativeCheckRef) > 512 || strings.IndexFunc(b.SupplementalNativeCheckRef, func(r rune) bool { return r < 32 || r == 127 }) >= 0) {
 		return fmt.Errorf("supplemental native check must be distinct and bounded")
@@ -374,6 +379,12 @@ func RuntimeValidationAttestationPassed(observation RuntimeValidationObservation
 	observation = observation.Normalized()
 	if binding.Validate() != nil || observation.ObservationProtocolRef != binding.ObservationProtocolRef {
 		return false
+	}
+	if binding.ExecutionStagesHash != "" {
+		conjunction := observation.ExecutionConjunction
+		if conjunction == nil || conjunction.Validate() != nil || !conjunction.Complete || conjunction.ProtocolRef != binding.ObservationProtocolRef || conjunction.RequiredStagesHash != binding.ExecutionStagesHash {
+			return false
+		}
 	}
 	for _, ref := range binding.NativeCheckRefs() {
 		if !RuntimeValidationCheckPassed(observation, ref) {
@@ -424,11 +435,17 @@ func SameRuntimeValidationCheckAttestationBindings(left, right []RuntimeValidati
 func ValidateRuntimeValidationCheckAttestationBindings(values []RuntimeValidationCheckAttestationBinding, requiredCheckRefs []string) error {
 	seenRequired := make(map[string]struct{}, len(values))
 	seenNative := make(map[string]struct{}, len(values))
-	for _, raw := range values {
+	executionStagesHash := ""
+	for index, raw := range values {
 		if err := raw.Validate(); err != nil {
 			return err
 		}
 		value := raw.Normalized()
+		if index == 0 {
+			executionStagesHash = value.ExecutionStagesHash
+		} else if value.ExecutionStagesHash != executionStagesHash {
+			return fmt.Errorf("runtime validation check attestations mix execution conjunction contracts")
+		}
 		if _, duplicate := seenRequired[value.RequiredCheckRef]; duplicate {
 			return fmt.Errorf("runtime validation check attestation duplicates Definition check %q", value.RequiredCheckRef)
 		}

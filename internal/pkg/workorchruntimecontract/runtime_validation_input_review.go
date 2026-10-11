@@ -197,6 +197,7 @@ func StableRuntimeValidationInputReviewSubjectHash(s RuntimeValidationInputRevie
 		writeHashString(h, check.ObservationProtocolRef)
 		writeHashString(h, check.NativeCheckRef)
 		writeHashString(h, check.SupplementalNativeCheckRef)
+		writeRuntimeValidationExecutionRequirementHash(h, check)
 	}
 	for _, file := range s.Files {
 		writeHashString(h, file.TargetRef)

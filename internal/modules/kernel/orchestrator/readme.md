@@ -126,6 +126,27 @@ capability resource state。
 - `internal/pkg/workorchruntimecontract` 只包含 DTO、enum、normalize/validate/clone/hash、manifest compiler 和纯 matcher；
   不持有 Hub/I/O/CAS，也不选择 retry、terminal 或 Runtime action。
 
+### Owner 验证执行合取事实
+
+`RuntimeValidationCheckAttestationBinding.ExecutionStagesHash` 可由 validation owner 显式封存有序的
+`ID + Scope + RequireTests + RequireBehavior` all-of 合同；空值保持既有 native mapping 语义和旧 hash。
+非空声明的准确 native PASS 还必须匹配同 protocol、同 stage hash 的完整
+`RuntimeValidationObservation.ExecutionConjunction`。Core 只验证中立身份、完整成员、执行完成、测试计数、
+输出完整性、source 前后／跨阶段一致性和实际行为要求，不识别 Shell、Go 或软件开发准则。
+同一 requirement 不得混用带合取和无合取的 mappings，阶段顺序、测试／行为要求不得降级。
+
+receipt、EvidenceFact、catalog ready/preparation、coverage binding、proof lineage、reconciliation 与输入评审
+身份均绑定完整相应正文；Clone/Normalized/raw clone 保留原事实并隔离嵌套 argv/stages/targets，
+非法 raw 不能通过规范化洗成合法。准确 duplicate 返回原 persisted receipt；fact 自洽 hash 仍须反查原 receipt，
+不能删除或替换 stage argv、source 或 output identity。`runtime_validation_execution_conjunction*_test.go`
+固定合同反例、旧空扩展、hash、重载和隔离；`biz/runtime/validation_execution_conjunction_receipt_test.go`
+验证原 receipt→fact 来源、重载、duplicate、自洽 fact 篡改拒绝，以及 CAS 前失败／CAS 后响应丢失
+沿原 aggregate 恢复且不重复提交的边界。
+
+该扩展只参与原 SM-2 证明匹配／SM-3 receipt 事务及 SM-4 原 aggregate 重载，不新增转换或账本；
+SM-1 不变。typed 接收端测试不等于实际 owner producer 或公开 fullflow，当前不因此开放
+implementation-work availability，也不将输出身份当作原始诊断已持久保存／可读取的证明。
+
 ### 原回执的实际读取依赖
 
 capability owner 可在 `RuntimeOperationEvidence.OwnerRevisionSet` 返回本次实际读取的 Definition-bound 依赖。

@@ -240,6 +240,8 @@ type RuntimeValidationObservation struct {
 	// IncompleteChecks identifies checks with skipped required subchecks. A
 	// top-level pass does not prove that all of its behavior was exercised.
 	IncompleteChecks []string `json:",omitempty"`
+	// 可选 owner 执行合取，完整成员由 sealed native mapping 精确绑定。
+	ExecutionConjunction *RuntimeValidationExecutionConjunction `json:",omitempty"`
 }
 
 func (o RuntimeValidationObservation) Normalized() RuntimeValidationObservation {
@@ -253,6 +255,10 @@ func (o RuntimeValidationObservation) Normalized() RuntimeValidationObservation 
 	o.OutputPreview = strings.TrimSpace(o.OutputPreview)
 	o.CheckFailures = normalizeRuntimeValidationCheckFailures(o.CheckFailures)
 	o.IncompleteChecks = normalizeStrings(o.IncompleteChecks)
+	if o.ExecutionConjunction != nil {
+		value := o.ExecutionConjunction.Clone()
+		o.ExecutionConjunction = &value
+	}
 	return o
 }
 
@@ -1277,6 +1283,7 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 				writeHashString(h, attestation.ObservationProtocolRef)
 				writeHashString(h, attestation.NativeCheckRef)
 				writeRuntimeSupplementalNativeCheckHash(h, attestation)
+				writeRuntimeValidationExecutionRequirementHash(h, attestation)
 			}
 		}
 		for _, preparation := range surface.ProofRequirementPreparations {
@@ -1291,6 +1298,7 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 				writeHashString(h, attestation.ObservationProtocolRef)
 				writeHashString(h, attestation.NativeCheckRef)
 				writeRuntimeSupplementalNativeCheckHash(h, attestation)
+				writeRuntimeValidationExecutionRequirementHash(h, attestation)
 			}
 			writeHashString(h, stableRuntimeProspectiveTargetSatisfactionConstraintHashCanonical(preparation.ProspectiveTargetSatisfactionConstraint))
 			if preparation.OriginalDiagnostic != nil {

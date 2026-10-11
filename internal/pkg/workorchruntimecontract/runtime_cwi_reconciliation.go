@@ -329,6 +329,7 @@ func StableRuntimeCWIReconciliationContractHash(contract RuntimeCWIReconciliatio
 			writeHashString(h, attestation.ObservationProtocolRef)
 			writeHashString(h, attestation.NativeCheckRef)
 			writeRuntimeSupplementalNativeCheckHash(h, attestation)
+			writeRuntimeValidationExecutionRequirementHash(h, attestation)
 		}
 		writeHashStrings(h, binding.MetricConstraints)
 		writeHashStrings(h, binding.ArtifactRefs)
