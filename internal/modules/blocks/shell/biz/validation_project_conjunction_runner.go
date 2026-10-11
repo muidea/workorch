@@ -52,6 +52,7 @@ func runShellProjectConjunction(ctx context.Context, directory string, env []str
 	}
 	behaviorArgs = shellProcessBehaviorArgs(behaviorArgs, processPath)
 	specs := shellProjectFixedStages(behaviorArgs, pkg)
+	output.projectStageSpecs = specs
 	var stages []shellProjectStageFact
 	var executeErr error
 	for index, spec := range specs {

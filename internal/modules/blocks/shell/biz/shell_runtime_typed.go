@@ -84,6 +84,8 @@ type RuntimeCommandResult struct {
 	workspaceProcessBehaviorError      error
 	validationSourcesUnchanged         bool
 	validationCopiedInputs             []shellValidationCopiedInput
+	// 新合取 runner 在实际执行前编译的 owner-local 精确阶段规格，不跨 owner。
+	projectStageSpecs []shellProjectStageSpec
 	// validationFailureTargetCandidatesInvalid records that the owner-private
 	// structured-output parser observed more candidates than the bounded
 	// validation-failure protocol permits. An empty TargetRefs slice alone cannot

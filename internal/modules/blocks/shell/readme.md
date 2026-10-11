@@ -282,6 +282,16 @@ Shell-private `runShellProjectConjunction` 复用 `validation_project_conjunctio
 这只证明私有存储前置，公开接线仍须绑定原 receipt、受限读取准入、总期限、cleanup 和 fresh-process 恢复。
 本节不表示公开 authoring/activation/fullflow、fresh-process 或 live 已验收。
 
+`validation_project_execution.go` 将准备、四阶段、行为转换、原文发布、句柄关闭和实际 scratch cleanup
+纳入从私有封套入口开始的同一最早 deadline。只接受原 execution scope 的 ephemeral managed validation，
+不接受 caller scratch 或超过既有 60000ms 的期限；阶段规格从执行前的 owner 编译产物取得，不从结果反推。
+首次执行事实与 raw refs 绑定同一 Workspace／Run／原 ExecutionKey；未保存的流显式保留 omission 原因。
+cleanup、原文发布或总期限失败使合取 incomplete／quality invalid，已知阶段失败的原 exit/code 不因此改成未决。
+启动前失败保留实际空 stdout/stderr 的 bytes/hash，不补造 Started。该 helper 仍未接入公开 dispatch、catalog 或 read topic；
+它不提供 replay/读取准入，不创建第二 journal，也不修改 SM-1～SM-4 的转换或预算。
+`validation_project_execution_test.go` 覆盖真实四阶段／旧工程失败、原 execution scope 重载、实际 scratch 消失、
+前置 scope/budget 拒绝和 cleanup/deadline/raw gap 反例；这些私有测试仍不代替原 seal/receipt 的公开恢复验收。
+
 #### Executable input-maintenance contracts
 
 Shell reports observed validation inputs through each surface's typed
