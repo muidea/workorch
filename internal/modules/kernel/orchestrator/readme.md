@@ -128,6 +128,12 @@ capability resource state。
   semantic-rebinding projection 门禁先按原 reopen state／最后 lineage reason 判断是否适用，无需重绑时不复制无关 focus/binding；
   需要重绑时仍完整走原 Definition seed 投影比较，其它 aggregate 门禁不变。
   `biz/runtime/semantic_rebinding_projection_applicability_test.go` 以原完整路径固定接受／拒绝原因、原值及分配等价。
+  预算 dimension 的纯查询按原顺序读取逐项规范化的标量，保留完整 policy 稳定排序后的首个同 dimension 匹配，
+  不为返回一个值复制／排序整份 policy，也不 trim 调用者的查询 identity。allocation 校验的 policy revision
+  比较只规范化该标量，不构造无关的完整 policy 副本。公开 policy Clone、完整 Validate／hash、
+  allocation／consumption／unknown／exhaustion 门禁不变；`runtime_budget_dimension_projection_test.go` 以旧完整投影及
+  allocation validator 固定 duplicate/raw/非法值、完整错误顺序、原输入、JSON 重载、后续漂移、fuzz 和分配，
+  此查询不是预算批准或成功缓存。
   这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
   current focus 的 target-selection 纯投影只规范化实际返回的 selection，并按原 trim／首个同 ID prerequisite
   语义比较 Kind／Scope／FocusID，不复制无关 Definition、证据、catalog 或 coverage。原完整 aggregate/raw/hash

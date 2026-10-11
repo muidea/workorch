@@ -245,7 +245,9 @@ func SameRuntimeExecutionBudgetPolicy(left, right RuntimeExecutionBudgetPolicy) 
 }
 
 func RuntimeBudgetDimensionPolicyFor(policy RuntimeExecutionBudgetPolicy, dimension RuntimeBudgetDimension) (RuntimeBudgetDimensionPolicy, bool) {
-	for _, value := range policy.Normalized().Dimensions {
+	// 同 dimension 的稳定排序保持原先后；只读查询不复制随后丢弃的整份 policy。
+	for _, value := range policy.Dimensions {
+		value = value.Normalized()
 		if value.Dimension == dimension {
 			return value, true
 		}
@@ -295,7 +297,7 @@ func (a RuntimeBudgetAllocation) Validate(policy RuntimeExecutionBudgetPolicy) e
 	a = a.Normalized()
 	dimension, found := RuntimeBudgetDimensionPolicyFor(policy, a.Dimension)
 	if !found || a.AllocationID == "" || a.Unit != dimension.Unit || a.LogicalConsumptionID == "" || a.ScopeRef == "" ||
-		a.PolicyRevision != policy.Normalized().PolicyRevision || a.LimitAtAllocation != dimension.Limit || a.MaxIncrement != dimension.MaxIncrement ||
+		a.PolicyRevision != strings.TrimSpace(policy.PolicyRevision) || a.LimitAtAllocation != dimension.Limit || a.MaxIncrement != dimension.MaxIncrement ||
 		a.ReservedAmount <= 0 || a.ReservedAmount > a.MaxIncrement || a.AllocationHash == "" {
 		return fmt.Errorf("runtime budget allocation is incomplete or does not match policy")
 	}
