@@ -69,6 +69,10 @@ capability resource state。
   `runtime_proof_canonical_collections_test.go` 用独立 reference 与 fuzz 校验非规范输入和返回隔离。
   hash 字符串编码合并同次长度前缀与正文写入，不改变 big-endian 长度、集合 cardinality 或任意原始 bytes；
   `runtime_hash_string_encoding_test.go` 固定无效 UTF-8、NUL、长原文与重复 hash，并以 fuzz 对照旧编码。
+  executable operation contract revision 只标识本 binary 的编译期静态库存，在 descriptor init 完成后按原完整编码计算一次；
+  persisted revision 每次仍独立比较并返回 exact mismatch，不缓存 Run、manifest、raw/hash 或 aggregate 校验成功。
+  `runtime_operation_contract_revision_reference_test.go` 保全原完整编码；
+  `runtime_operation_contract_revision_static_test.go` 固定并发身份、公开库存副本隔离、后续 persisted 漂移拒绝与分配对照。
   semantic proof compiler 的 raw owner catalog 集合门禁保持完整，仅复用本次 detached 目录索引解析 prospective all-of 约束，
   不重复校验未变的整份目录；公开 resolver 仍完整校验，每次 compiler 调用重新反证 raw、重复 owner/surface、hash 和 exact requirement。
   `runtime_semantic_proof_catalog_reuse_test.go` 固定公开／私有 resolver 等价、完整产物、原值、重载及后续调用拒绝。

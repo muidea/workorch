@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // ErrRuntimeOperationContractRevisionMismatch identifies a persisted Runtime
@@ -53,6 +54,14 @@ func ValidateRuntimeOperationContractRevision(persistedRevision string) error {
 // into this binary. It intentionally excludes prose descriptions and Rules:
 // only fields consumed by matcher/effect/idempotency/correction authority participate.
 func RuntimeOperationContractRevision() string {
+	return runtimeBinaryOperationContractRevision()
+}
+
+// 只复用本 binary 的静态库存标识，不缓存任何 persisted 输入的校验结果。
+// 延迟计算确保 descriptor 的 init 库存已完成装配。
+var runtimeBinaryOperationContractRevision = sync.OnceValue(compileRuntimeOperationContractRevision)
+
+func compileRuntimeOperationContractRevision() string {
 	kinds := []string{StepKindFileList, StepKindFileRead, StepKindFileWrite, StepKindFileEdit, RuntimeBlockKindPatchApply, RuntimeBlockKindPatchPreview, StepKindShellCommand, RuntimeBlockKindManagedValidationSession, StepKindGitRead, StepKindGitWrite, StepKindMCPToolCall, StepKindMCPResourceRead, StepKindMCPPromptGet, StepKindSSHCommand, StepKindWebSearch, StepKindWebFetch}
 	h := sha256.New()
 	for _, kind := range kinds {
