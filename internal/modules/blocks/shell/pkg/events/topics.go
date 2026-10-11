@@ -7,5 +7,6 @@ const (
 	TopicProbeRuntimeSemanticProofFeasibility         = "/shell/runtime-semantic/probe-proof-feasibility"
 	TopicProbeRuntimeOwnerFactProspectiveSatisfaction = "/shell/runtime-owner-fact/probe-prospective-satisfaction"
 	TopicQueryRuntimeCWIReconciliation                = "/shell/reconciliation/query-cwi"
+	TopicQueryRuntimeValidationRawOutput              = "/shell/validation/query-raw-output"
 	TopicExecuteOperation                             = "/shell/runtime-operation/execute"
 )

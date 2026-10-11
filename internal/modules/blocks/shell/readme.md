@@ -293,8 +293,17 @@ cleanup、原文发布或总期限失败使合取 incomplete／quality invalid�
 前置 scope/budget 拒绝和 cleanup/deadline/raw gap 反例；这些私有测试仍不代替原 seal/receipt 的公开恢复验收。
 封套将每流的已发布原 ref 或明确 omission 投影到中立输出身份的 `Storage`，使其能够随原 receipt/fact
 保全和绑定 hash；stderr 发布失败不丢弃已发布 stdout。原接收 bytes/hash/容量事实不因持久失败改写，
-未保存引用不标为完整合取。`Storage` 只提供数据身份，不允许 caller 指定目录读取，公开 owner read topic
-与 adapter/catalog 仍未接线；受限读取必须重新反证原 persisted receipt、scope 与 owner 保存正文。
+未保存引用不标为完整合取。`Storage` 只提供数据身份，不允许 caller 指定目录读取，公开 adapter/catalog 仍未接线。
+`QueryRuntimeValidationRawOutput` 是仅接受 exact Orchestrator strong-call 的受限 owner read topic：caller 只提供
+Workspace／Run／Dispatch／Operation／原 ExecutionKey／Fence、原 receipt hash 和 stage/stream selector，不能传目录或 ref。
+Shell 经原 receipt-owner query 反查同 owner 的 persisted receipt，从原合取事实取得 ref，再从 Workspace typed query
+取得当前 internal directory；原 scope、引用正文、bytes、全输出 SHA256 与已保存 bytes SHA256 均须匹配。
+receipt miss、未保存流、错 hash/scope/类型、异常文件均返回明确错误，不授 execute、credit 或恢复权限。
+每次最多返回该原流的 64KiB 已保存 bytes；不完整前缀保持原 incomplete/omission，不改写或摘要原文。
+查询沿原 context/lane 进行，BeginShutdown 后拒绝新读取，已接纳的 nested receipt/Workspace/read 等真实结束后才释放依赖。
+`validation_raw_output_query_test.go` 配对实际私有 producer/raw store 与 typed receipt/Workspace fixture，
+`pkg/events/validation_raw_output_test.go` 固定原 bytes、bounds 与 detached result；这不代替实际 receipt-owner 全装配、
+公开执行/恢复或 live 验收。该 read topic 不产生新的 SM-1～SM-4 transition、预算或 availability。
 
 #### Executable input-maintenance contracts
 

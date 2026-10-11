@@ -80,6 +80,7 @@ func (m *Biz) Start() error {
 		{shellevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility},
 		{shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction, m.handleRuntimeOwnerFactProspectiveSatisfaction},
 		{shellevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery},
+		{shellevents.TopicQueryRuntimeValidationRawOutput, m.handleRuntimeValidationRawOutput},
 		{shellevents.TopicExecuteOperation, m.handleShellOperation},
 	}
 	// A failed Start keeps every completed subscription reachable. Retrying

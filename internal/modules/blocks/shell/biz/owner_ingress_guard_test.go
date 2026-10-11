@@ -52,6 +52,7 @@ func TestShellRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls(t *testin
 		{"semantic-proof", shellevents.TopicProbeRuntimeSemanticProofFeasibility, owner.handleRuntimeSemanticProofFeasibility},
 		{"prospective-satisfaction", shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction, owner.handleRuntimeOwnerFactProspectiveSatisfaction},
 		{"cwi-reconciliation", shellevents.TopicQueryRuntimeCWIReconciliation, owner.handleRuntimeCWIReconciliationQuery},
+		{"validation-raw-output", shellevents.TopicQueryRuntimeValidationRawOutput, owner.handleRuntimeValidationRawOutput},
 		{"execute", shellevents.TopicExecuteOperation, owner.handleShellOperation},
 	}
 	for _, item := range topics {
@@ -86,6 +87,7 @@ func TestShellOwnerLifecycleCoversEveryRuntimeTopic(t *testing.T) {
 		shellevents.TopicProbeRuntimeSemanticProofFeasibility,
 		shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction,
 		shellevents.TopicQueryRuntimeCWIReconciliation,
+		shellevents.TopicQueryRuntimeValidationRawOutput,
 		shellevents.TopicExecuteOperation,
 	}
 	for _, topic := range topics {
