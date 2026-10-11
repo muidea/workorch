@@ -246,6 +246,25 @@ TestMain、effectful initializer 和跨 harness 引用；每项仍需真实 test
 `TestDriveRuntimeSharedSourceObligationOwnerMainline` 使用真实 File/Shell、Run CAS 和 Result→Workspace→Run，
 provider 为脚本替身；它不代替公开 authoring、真实模型、任意领域 proof 或 release DCE 验收。
 
+#### 根 module 与逐 CWI 验证合取
+
+Shell-private `runShellProjectConjunction` 复用 `validation_project_conjunction.go` 的事实生产器，
+在同一 managed workspace 副本和同一不超过 60000ms 的原 operation deadline 内依次运行
+`go build ./...`、`go test -json -count=1 ./...`、`go test -race -json -count=1 ./...`，
+最后独立运行准确映射的当前 requirement 原／补充检查及实现行为观察。
+前三阶段不使用最后阶段的 coverage；完整项目成功不能替代当前 CWI 的准确检查通过或实际行为。
+最后行为转换之后再次反证完整 source/member 身份和总期限；所有阶段仍保留原始 stdout/stderr bytes、
+总字节数、SHA256、容量不足标记、实际 argv/scope、测试数、进程组清理及 source 前后身份。
+旧输入或相邻 harness 失败、skip、race、source 变化、缺检查映射或行为未观测均不能完成合取。
+已知工程失败保留真实 exit code，不能因当前 CWI 尚未执行而降成结果未决。
+
+`validation_project_conjunction_runner_test.go` 使用真实 Go 和真实 managed copy 验证完整四阶段正例、
+旧输入失败、相邻编译失败、跳过、race、前三阶段成功而最后行为失败、source 变化、缺映射及准确期限。
+当前 runner 仍是 owner-private，未进入公开 adapter/catalog、Runtime receipt 或 coverage credit；
+既有 v3/v4/v5 recipe/native/scope 的公开语义不变，implementation-work availability 不因此开放。
+正式接线仍须完整映射 sealed recipe、typed all-of 执行事实、原文保全／读取边界与 receipt 恢复链。
+本节不表示公开 authoring/activation/fullflow、fresh-process 或 live 已验收。
+
 #### Executable input-maintenance contracts
 
 Shell reports observed validation inputs through each surface's typed
