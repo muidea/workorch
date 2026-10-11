@@ -195,9 +195,7 @@ func (s RuntimeValidationSurface) Validate() error {
 	boundChecks := make([]string, 0)
 	boundNativeChecks := make(map[string]common.CoverageWorkItemID)
 	for _, binding := range s.ProofRequirementBindings {
-		if err := binding.Validate(); err != nil {
-			return err
-		}
+		// 原始逐项完整校验已在上方执行；这里只反证 surface 间身份约束。
 		if binding.ValidationRecipeID != s.ID {
 			return fmt.Errorf("runtime validation surface %q proof requirement recipe mismatch", s.ID)
 		}
@@ -229,9 +227,7 @@ func (s RuntimeValidationSurface) Validate() error {
 		return fmt.Errorf("runtime validation surface %q checks do not match exact proof requirement bindings", s.ID)
 	}
 	for _, preparation := range s.ProofRequirementPreparations {
-		if err := preparation.Validate(); err != nil {
-			return err
-		}
+		// 本次已完整校验原 preparation；不重验未改变的规范化 proof 正文。
 		for _, attestation := range preparation.CheckAttestations {
 			attestation = attestation.Normalized()
 			for _, ref := range attestation.NativeCheckRefs() {

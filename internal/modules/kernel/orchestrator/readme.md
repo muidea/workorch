@@ -75,6 +75,11 @@ capability resource state。
   semantic owner catalog 校验直接复用同次完整 raw／嵌套 proof／snapshot 校验产生的 detached 规范化目录，
   不再次规范化未变的整份目录；重复 prerequisite／owner 门禁保留，公开 `Validate` 与后续调用仍完整重验。
   `runtime_owner_catalog_validation_reuse_test.go` 与独立旧 validator 固定产物、完整拒绝原因、原值、重载、隔离、fuzz 和分配成本。
+  validation surface 在同次完整 raw proof-binding/preparation 校验后，仅继续反证跨 surface recipe、native-check、
+  readiness/applicability 与 constraint 身份，不再次调用未变 proof 的完整 validator；公开 surface 入口及后续调用仍重验。
+  `runtime_validation_surface_reference_test.go` 保留修改前完整旧校验；
+  `runtime_validation_surface_single_pass_test.go` 固定接受／拒绝顺序、原 bytes、V2 input-review、重复／交叉身份、
+  JSON 重载、fuzz 与逐分配对照。此复用不改变任何 SM transition、预算或 current applicability。
   assessment authority hash 保持原 Normalized、JSON 和域前缀编码，复用同次 marshal 缓冲，不增加跨调用缓存；
   `runtime_assessment_authority_hash_test.go` 以旧编码 reference、JSON 重载、fuzz 和分配对照固定等价边界。
   静态 operation descriptor 的内部证据资格查询只读初始化库存，不复制随后丢弃的 `AllowedStates`；公开 getter 仍深拷贝。
