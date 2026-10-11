@@ -49,9 +49,7 @@ func (c *planningTransactionComponent) commitSemanticPlanningMutation(ctx contex
 	}
 	transaction.aggregate.SemanticPlanning = transaction.ledger
 	transaction.aggregate.StateRevision++
-	if err := transaction.aggregate.Validate(); err != nil {
-		return RuntimeAggregate{}, err
-	}
+	// 同一未变 after-image 交由唯一 CAS coordinator 完整校验；不保留或传递校验成功凭据。
 	if err := c.transitions.Commit(ctx, transaction.aggregate, transaction.expectedRevision); err != nil {
 		return RuntimeAggregate{}, err
 	}

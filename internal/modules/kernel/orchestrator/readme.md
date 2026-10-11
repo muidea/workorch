@@ -97,6 +97,15 @@ capability resource state。
   JSON 重载、fuzz 与逐分配对照。此复用不改变任何 SM transition、预算或 current applicability。
   assessment authority hash 保持原 Normalized、JSON 和域前缀编码，复用同次 marshal 缓冲，不增加跨调用缓存；
   `runtime_assessment_authority_hash_test.go` 以旧编码 reference、JSON 重载、fuzz 和分配对照固定等价边界。
+  lineage rule hash 同样保持原完整 JSON／域前缀编码，只在 marshal 缓冲有余量时复用；容量不足仍走原编码路径，
+  不缓存规则或校验结果。`runtime_lineage_rule_hash_encoding_test.go` 固定逐字段变动、非法原 bytes、重载、fuzz 与分配对照。
+  semantic planning transaction 完成 after-image 后直接交唯一 coordinator 执行完整 aggregate、独立前像及 revision 门禁，
+  不在紧邻 Commit 前重复同一未变 aggregate 校验；原 ledger 门禁仍保留。
+  `biz/runtime/semantic_planning_transaction_gate_test.go` 固定非法 ledger／after-image／前像、stale、保存失败和无变化事务。
+  semantic-rebinding projection 门禁先按原 reopen state／最后 lineage reason 判断是否适用，无需重绑时不复制无关 focus/binding；
+  需要重绑时仍完整走原 Definition seed 投影比较，其它 aggregate 门禁不变。
+  `biz/runtime/semantic_rebinding_projection_applicability_test.go` 以原完整路径固定接受／拒绝原因、原值及分配等价。
+  这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
   execution-budget policy 在一次完整 `Validate` 中复用已规范化的 detached policy 编码 hash，使用同次短字段缓冲，
   不重复深拷贝／排序；公开 hash 入口仍先规范化，所有维度、数值、duplicate、scope、restart 和 hash 门禁及拒绝顺序不变。
   `runtime_execution_budget_policy_single_pass_test.go` 以完整旧 validator/hash reference 固定原 bytes、长字段、非法输入、

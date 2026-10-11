@@ -276,6 +276,17 @@ func TargetGroundingTerminalSemanticReDrivePending(aggregate RuntimeAggregate) b
 // Runtime contract validates the generic CWI shape while this owner-local
 // invariant requires the exact positive projection from immutable Definition.
 func validateRuntimeCWISemanticRebindingFocusProjections(facts runtimecontract.RuntimeFacts) error {
+	requiresRebinding := false
+	for _, item := range facts.Coverage {
+		if item.CWIConvergenceState == runtimecontract.RuntimeCWIConvergenceStateReopened && len(item.ReopenLineage) != 0 &&
+			runtimeCWIReopenRequiresSemanticRebinding(item.ReopenLineage[len(item.ReopenLineage)-1].Normalized().Reason) {
+			requiresRebinding = true
+			break
+		}
+	}
+	if !requiresRebinding {
+		return nil
+	}
 	focuses := append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...)
 	byCoverage := make(map[common.CoverageWorkItemID]runtimecontract.CoverageFocus, len(focuses))
 	for _, focus := range focuses {

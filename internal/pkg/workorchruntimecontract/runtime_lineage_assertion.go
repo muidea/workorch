@@ -108,8 +108,18 @@ func runtimeLineageReceiptInventoryMatches(rule RuntimeLineageAssertionRule, des
 }
 
 func StableRuntimeLineageAssertionRuleHash(rule RuntimeLineageAssertionRule) string {
+	// 保持原 JSON 与域前缀编码，只复用本次 marshal 缓冲，不缓存规则或校验结果。
+	const prefix = "runtime-lineage-rule/v1\x00"
 	payload, _ := json.Marshal(rule)
-	digest := sha256.Sum256(append([]byte("runtime-lineage-rule/v1\x00"), payload...))
+	bodyLength := len(payload)
+	if cap(payload)-bodyLength < len(prefix) {
+		payload = append([]byte(prefix), payload...)
+	} else {
+		payload = append(payload, prefix...)
+		copy(payload[len(prefix):], payload[:bodyLength])
+		copy(payload, prefix)
+	}
+	digest := sha256.Sum256(payload)
 	return hex.EncodeToString(digest[:])
 }
 
