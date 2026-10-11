@@ -22,12 +22,20 @@ type RuntimeValidationExecutionStageIdentity struct {
 	RequireBehavior bool
 }
 
+// 引用由 validation owner 发布；不包含目录或原文，也不授予调用方读取权限。
+// 未保存原因与输出容量不足是不同事实，不能把完整接收误标为完整持久保存。
+type RuntimeValidationOutputStorage struct {
+	Reference     string
+	OmittedReason string
+}
+
 type RuntimeValidationOutputIdentity struct {
 	Bytes         int64
 	SHA256        string
 	SavedBytes    int64
 	Complete      bool
 	OmittedReason string
+	Storage       *RuntimeValidationOutputStorage `json:",omitempty"`
 }
 
 type RuntimeValidationExecutionStage struct {
@@ -91,6 +99,8 @@ func (c RuntimeValidationExecutionConjunction) Clone() RuntimeValidationExecutio
 			if c.Stages[index].Argv != nil {
 				c.Stages[index].Argv = append(make([]string, 0, len(c.Stages[index].Argv)), c.Stages[index].Argv...)
 			}
+			c.Stages[index].Stdout = c.Stages[index].Stdout.Clone()
+			c.Stages[index].Stderr = c.Stages[index].Stderr.Clone()
 		}
 	}
 	if c.BehaviorTargetRefs != nil {
@@ -99,11 +109,28 @@ func (c RuntimeValidationExecutionConjunction) Clone() RuntimeValidationExecutio
 	return c
 }
 
+func (o RuntimeValidationOutputIdentity) Clone() RuntimeValidationOutputIdentity {
+	if o.Storage != nil {
+		value := *o.Storage
+		o.Storage = &value
+	}
+	return o
+}
+
 func (o RuntimeValidationOutputIdentity) Validate() error {
 	if o.Bytes < 0 || o.SavedBytes < 0 || o.SavedBytes > o.Bytes || !validationExecutionDigest(o.SHA256) ||
 		(o.Complete && (o.Bytes != o.SavedBytes || o.OmittedReason != "")) ||
 		(!o.Complete && !boundedValidationExecutionRef(o.OmittedReason, 512)) {
 		return fmt.Errorf("validation execution output identity or completeness invalid")
+	}
+	if o.Storage != nil {
+		if o.Storage.Reference == "" {
+			if !boundedValidationExecutionRef(o.Storage.OmittedReason, 512) {
+				return fmt.Errorf("validation execution output storage requires reference or omission reason")
+			}
+		} else if !boundedValidationExecutionRef(o.Storage.Reference, 1024) || o.Storage.OmittedReason != "" {
+			return fmt.Errorf("validation execution output storage reference invalid")
+		}
 	}
 	return nil
 }
@@ -116,6 +143,10 @@ func (c RuntimeValidationExecutionConjunction) Validate() error {
 		if !boundedValidationExecutionRef(ref, 1024) {
 			return fmt.Errorf("validation execution behavior target identity invalid")
 		}
+	}
+	storageDeclared := false
+	for _, stage := range c.Stages {
+		storageDeclared = storageDeclared || stage.Stdout.Storage != nil || stage.Stderr.Storage != nil
 	}
 	seen := make(map[string]bool)
 	var identities []RuntimeValidationExecutionStageIdentity
@@ -152,6 +183,9 @@ func (c RuntimeValidationExecutionConjunction) Validate() error {
 		}
 		if !c.Complete {
 			continue
+		}
+		if storageDeclared && (stage.Stdout.Storage == nil || stage.Stderr.Storage == nil || stage.Stdout.Storage.Reference == "" || stage.Stderr.Storage.Reference == "") {
+			return fmt.Errorf("complete validation execution conjunction lacks declared output storage")
 		}
 		start, startErr := time.Parse(time.RFC3339Nano, stage.StartedAt)
 		end, endErr := time.Parse(time.RFC3339Nano, stage.FinishedAt)

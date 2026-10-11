@@ -23,6 +23,8 @@ func validationConjunctionReceiptFixture() runtimecontract.RuntimeValidationObse
 		Complete: true, BehaviorTargetRefs: []string{"implementation"},
 		Stages: []runtimecontract.RuntimeValidationExecutionStage{{Identity: identity, Argv: []string{"owner-tool", "exact"}, Started: true, StartedAt: now.Format(time.RFC3339Nano), FinishedAt: now.Add(time.Second).Format(time.RFC3339Nano), TerminalComplete: true, SourceBefore: empty.SHA256, SourceAfter: empty.SHA256, Stdout: empty, Stderr: empty, Tests: 1, PassedTests: 1}},
 	}
+	conjunction.Stages[0].Stdout.Storage = &runtimecontract.RuntimeValidationOutputStorage{Reference: "owner-output/stdout"}
+	conjunction.Stages[0].Stderr.Storage = &runtimecontract.RuntimeValidationOutputStorage{Reference: "owner-output/stderr"}
 	return runtimecontract.RuntimeValidationObservation{RecipeID: "owner-recipe", ObservationProtocolRef: conjunction.ProtocolRef, ExecutedChecks: []string{"native"}, PassedChecks: []string{"native"}, ExecutionConjunction: &conjunction}
 }
 
@@ -57,7 +59,13 @@ func TestRuntimeValidationExecutionConjunctionReceiptSourceSurvivesReload(t *tes
 	if saves != repository.saves || !reflect.DeepEqual(duplicate, reloaded) {
 		t.Fatal("重载后 duplicate 改写原 receipt 或重复 CAS")
 	}
-	for _, scenario := range []string{"missing", "argv", "source", "output"} {
+	conflicting := receipt.Clone()
+	conflicting.Evidence.Validation.ExecutionConjunction.Stages[0].Stdout.Storage.Reference = "owner-output/conflicting"
+	before := runtimeTestEvidenceAggregateRoundTrip(t, *repository.aggregate)
+	if _, err := reopened.ApplyInternalEvent(context.Background(), lineageReceiptEvent(reloaded, conflicting)); err == nil || repository.saves != saves || !reflect.DeepEqual(before, runtimeTestEvidenceAggregateRoundTrip(t, *repository.aggregate)) {
+		t.Fatal("同 execution 异 raw 引用未零变更拒绝")
+	}
+	for _, scenario := range []string{"missing", "argv", "source", "output", "storage-reference", "storage-drop-all"} {
 		changed := aggregate.CloneRaw()
 		fact := &changed.Facts.Evidence.Accepted[0]
 		c := fact.Validation.ExecutionConjunction
@@ -70,6 +78,10 @@ func TestRuntimeValidationExecutionConjunctionReceiptSourceSurvivesReload(t *tes
 			c.Stages[0].SourceBefore, c.Stages[0].SourceAfter = conjunction.RequiredStagesHash, conjunction.RequiredStagesHash
 		case "output":
 			c.Stages[0].Stdout.SHA256 = conjunction.RequiredStagesHash
+		case "storage-reference":
+			c.Stages[0].Stdout.Storage.Reference = "owner-output/other"
+		case "storage-drop-all":
+			c.Stages[0].Stdout.Storage, c.Stages[0].Stderr.Storage = nil, nil
 		}
 		runtimeTestRebindEvidenceFactHash(t, &changed, fact.ID)
 		if err := changed.Validate(); err == nil {

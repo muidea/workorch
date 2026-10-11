@@ -291,6 +291,10 @@ cleanup、原文发布或总期限失败使合取 incomplete／quality invalid�
 它不提供 replay/读取准入，不创建第二 journal，也不修改 SM-1～SM-4 的转换或预算。
 `validation_project_execution_test.go` 覆盖真实四阶段／旧工程失败、原 execution scope 重载、实际 scratch 消失、
 前置 scope/budget 拒绝和 cleanup/deadline/raw gap 反例；这些私有测试仍不代替原 seal/receipt 的公开恢复验收。
+封套将每流的已发布原 ref 或明确 omission 投影到中立输出身份的 `Storage`，使其能够随原 receipt/fact
+保全和绑定 hash；stderr 发布失败不丢弃已发布 stdout。原接收 bytes/hash/容量事实不因持久失败改写，
+未保存引用不标为完整合取。`Storage` 只提供数据身份，不允许 caller 指定目录读取，公开 owner read topic
+与 adapter/catalog 仍未接线；受限读取必须重新反证原 persisted receipt、scope 与 owner 保存正文。
 
 #### Executable input-maintenance contracts
 

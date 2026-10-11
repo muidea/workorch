@@ -85,6 +85,10 @@ func TestProjectExecutionEnvelopePreservesFactsRawScopeAndCleanup(t *testing.T) 
 					if stream == "stderr" {
 						identity = result.Conjunction.Stages[index].Stderr
 					}
+					if identity.Storage == nil || identity.Storage.Reference != ref || identity.Storage.OmittedReason != "" {
+						t.Fatal("持久执行事实未绑定原 owner raw 引用")
+					}
+					identity.Storage = nil
 					if err != nil || shellProjectOutputIdentity(raw) != identity {
 						t.Fatalf("原执行输出身份丢失：%v", err)
 					}
@@ -203,6 +207,18 @@ func TestProjectExecutionCompletionKeepsKnownFailureAndRejectsCleanupDeadlineOrR
 			err = finishShellProjectExecution(&result, executeErr, cleanupErr, contextErr)
 			if err == nil || result.Conjunction.Complete || result.Result.Evidence.Quality == common.EvidenceQualityValid || result.Result.ValidationObservation.ProofClass != "" {
 				t.Fatal("未完整 cleanup/deadline/raw 仍完成 proof")
+			}
+			if err := result.Conjunction.Validate(); err != nil {
+				t.Fatalf("失败合取丢失可保全的原执行事实：%v", err)
+			}
+			if scenario == "raw-gap" {
+				output := result.Conjunction.Stages[2].Stderr
+				if !output.Complete || output.Storage == nil || output.Storage.Reference != "" || output.Storage.OmittedReason != "shell_stage_raw_storage_unavailable" {
+					t.Fatal("持久引用缺失被隐藏或改写为接收容量不足")
+				}
+				if result.Conjunction.Stages[2].Stdout.Storage.Reference != source {
+					t.Fatal("缺失 stderr 丢弃了已保存 stdout 的原引用")
+				}
 			}
 			if scenario == "known-failure" && (!errors.Is(err, known) || result.Result.ExitCode != 7 || result.Result.FailureCode != "original_known_failure") {
 				t.Fatal("已知失败被 cleanup/timeout 覆盖")

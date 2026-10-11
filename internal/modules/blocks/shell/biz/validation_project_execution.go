@@ -133,7 +133,28 @@ func (a *RuntimeAdapter) executeShellProjectConjunction(ctx context.Context, req
 	return result, executeErr
 }
 
+func shellProjectOutputStorage(ref, omittedReason string) *runtimecontract.RuntimeValidationOutputStorage {
+	if ref != "" {
+		return &runtimecontract.RuntimeValidationOutputStorage{Reference: ref}
+	}
+	if omittedReason == "" {
+		omittedReason = "shell_stage_raw_storage_unavailable"
+	}
+	return &runtimecontract.RuntimeValidationOutputStorage{OmittedReason: omittedReason}
+}
+
 func finishShellProjectExecution(result *shellProjectExecutionResult, executeErr, cleanupErr, contextErr error) error {
+	if result.Conjunction != nil {
+		for index := range result.Conjunction.Stages {
+			stage := &result.Conjunction.Stages[index]
+			refs := shellProjectStageRawReferences{OmittedReason: "shell_stage_raw_storage_unavailable"}
+			if index < len(result.Raw) && result.Raw[index].StageID == stage.Identity.ID {
+				refs = result.Raw[index]
+			}
+			stage.Stdout.Storage = shellProjectOutputStorage(refs.Stdout, refs.OmittedReason)
+			stage.Stderr.Storage = shellProjectOutputStorage(refs.Stderr, refs.OmittedReason)
+		}
+	}
 	if executeErr == nil {
 		executeErr = cleanupErr
 	}

@@ -263,6 +263,16 @@ receipt、EvidenceFact、catalog ready/preparation、coverage binding、proof li
 SM-1 不变。typed 接收端测试不等于实际 owner producer 或公开 fullflow，当前不因此开放
 implementation-work availability，也不将输出身份当作原始诊断已持久保存／可读取的证明。
 
+`RuntimeValidationOutputIdentity.Storage` 可保全 validation owner 的有界原文引用或明确未保存原因，
+不包含原 bytes、路径或读取授权；接收完整性与持久保存失败分开记录。声明 storage 后的完整合取必须逐阶段
+具有 stdout/stderr 引用，缺失、混合、非法引用或未保存均不能完整通过；未声明扩展保留原 JSON/hash，
+不得把历史输出身份自动提升为已保存。完整 storage 正文进入原 receipt/fact hash，Clone/raw clone 隔离指针，
+原 receipt 来源反证拒绝同时重算 fact hash 的引用替换／全删。`runtime_validation_output_storage_test.go`
+固定旧 wire/hash、非法 raw、重载、隔离和 fuzz；receipt 恢复回归覆盖原 CAS 前失败、响应丢失及 duplicate。
+`biz/runtime/validation_output_storage_receipt_test.go` 固定 rejected receipt 的已知 exit/code、已保存流与未保存原因，
+以及 rejected fact 重载／来源篡改拒绝；既有前置 accepted evidence 不被删除，失败不新增 accepted credit。
+该数据合同不提供 owner raw read 准入，也不开放 adapter、availability 或新的 SM 转换。
+
 ### 原回执的实际读取依赖
 
 capability owner 可在 `RuntimeOperationEvidence.OwnerRevisionSet` 返回本次实际读取的 Definition-bound 依赖。
