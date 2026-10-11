@@ -620,7 +620,7 @@ func CoverageEvidenceBindingForRef(values []CoverageEvidenceBinding, ref string)
 // EvidenceKinds returns the exactly sealed proof kind set. It is a read-only
 // pure helper for manifest/evidence validation and never interprets coverage.
 func (b CoverageEvidenceBinding) EvidenceKinds() []string {
-	b = b.Normalized()
+	// 返回集合自身仍规范化并隔离，不为 kind 查询复制整份 proof/binding。
 	ret := make([]string, 0, len(b.Proofs))
 	for _, proof := range b.Proofs {
 		ret = append(ret, proof.EvidenceKind)

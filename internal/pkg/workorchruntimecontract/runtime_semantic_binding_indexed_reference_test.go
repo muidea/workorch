@@ -477,7 +477,7 @@ func semanticBindingIndexedReferenceFocus(manifest RuntimeSemanticPlanManifest, 
 	focus := CoverageFocus{
 		ID: focusID, SliceID: item.SliceID, AssessmentScope: item.SourceScope, AssessmentID: item.SourceID, AssessmentText: item.TargetText,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{proofSet.CoverageWorkItemID}, CoverageEvidenceBindings: []CoverageEvidenceBinding{binding},
-		EvidenceDeclarationRef: declarationRef, RequiredEvidenceKinds: binding.EvidenceKinds(),
+		EvidenceDeclarationRef: declarationRef, RequiredEvidenceKinds: referenceCoverageBindingEvidenceKinds(binding),
 		TargetRefs: targetRefs, TargetRole: "semantic_proof_target", TargetSelectorRef: selectorRef,
 		TargetSelectorOwnerRef: binding.TargetSelectorOwnerRef, TargetSelectorSubjectRef: binding.TargetSelectorSubjectRef,
 		ProspectiveTargetRefs: prospectiveTargetRefs, RequireTargetGrounding: true,

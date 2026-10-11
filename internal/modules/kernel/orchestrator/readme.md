@@ -155,6 +155,10 @@ capability resource state。
   `runtime_independent_binding_predicate_test.go` 对照旧完整规范化谓词与声明 validator，固定原输入、nil/empty、
   非法声明、公开副本隔离、JSON 重载、后续变化、fuzz 和零分配；此纯查询不授 credit、不缓存校验成功，
   不改变 SM-1～SM-4 转换、持久化、预算或恢复权威。
+  binding 的 `EvidenceKinds` 仅从原 proof 投影 kind 集合，保留 trim、空白丢弃、排序去重及 detached 返回，
+  不复制无关的完整 proof、target、lineage 或 policy；此查询不校验或授予 proof，完整 binding/raw/hash 门禁保留。
+  `runtime_binding_evidence_kinds_projection_test.go` 对照旧完整规范化路径，固定 nil/empty、非法 bytes、重复声明、
+  原输入、返回隔离、JSON 重载、后续变化、完整拒绝、fuzz 与分配；SM-1～SM-4 转换和恢复权威不变。
   这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
   current focus 的 target-selection 纯投影只规范化实际返回的 selection，并按原 trim／首个同 ID prerequisite
   语义比较 Kind／Scope／FocusID，不复制无关 Definition、证据、catalog 或 coverage。原完整 aggregate/raw/hash
