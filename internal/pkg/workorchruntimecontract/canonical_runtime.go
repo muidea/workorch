@@ -1224,7 +1224,7 @@ func StableRuntimeOperationAdmissibilitySnapshotID(value RuntimeOperationAdmissi
 // has already passed the catalog's canonicalization boundary. Keeping this
 // helper private prevents callers from bypassing raw fail-closed validation.
 func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperationAdmissibility) string {
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, value.PrerequisiteID)
 	writeHashString(h, value.OwnerModuleID)
 	writeHashString(h, value.AcquisitionBinding)
@@ -1561,7 +1561,7 @@ func (s RuntimeTargetSelection) Validate() error {
 
 func StableRuntimeTargetSelectionSnapshotID(value RuntimeTargetSelection) string {
 	value = value.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, value.PrerequisiteID)
 	writeHashString(h, value.OwnerModuleID)
 	writeHashString(h, value.TargetRole)
@@ -2325,7 +2325,7 @@ func NormalizeRuntimeCapabilityStateSnapshots(values []RuntimeCapabilityStateSna
 
 func StableRuntimeCapabilityStateHash(values []RuntimeCapabilityStateSnapshot) string {
 	values = NormalizeRuntimeCapabilityStateSnapshots(values)
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	for _, value := range values {
 		writeHashString(h, value.RequirementID)
 		writeHashString(h, value.SnapshotID)
@@ -2352,7 +2352,7 @@ func StableRuntimeCapabilityStateHash(values []RuntimeCapabilityStateSnapshot) s
 
 func StableRuntimeCapabilityStateSnapshotID(value RuntimeCapabilityStateSnapshot) string {
 	value = NormalizeRuntimeCapabilityStateSnapshots([]RuntimeCapabilityStateSnapshot{value})[0]
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, value.AcquisitionKey)
 	writeHashString(h, value.AcquisitionBinding)
 	writeHashString(h, value.OwnerModuleID)
@@ -2549,7 +2549,7 @@ func ValidateRequiredOutputForState(state ConvergenceState, contract RequiredOut
 
 func StableRequiredOutputHash(contract RequiredOutputContract) string {
 	contract = contract.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashStrings(h, contract.AcceptedKinds)
 	if contract.ImplementationWorkBindingHash != "" {
 		writeHashString(h, contract.ImplementationWorkBindingHash)
@@ -2721,7 +2721,7 @@ func stableAuthoritySnapshotID(snapshot AuthoritySnapshot) string {
 }
 
 func StableAuthoritySnapshotIDForTransaction(workspaceID common.WorkspaceID, runID common.RunID, transaction AuthorityTransaction) string {
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, string(workspaceID))
 	writeHashString(h, string(runID))
 	writeHashString(h, string(transaction.State))
@@ -2741,7 +2741,7 @@ func StableAuthoritySnapshotIDForTransaction(workspaceID common.WorkspaceID, run
 
 func runtimeEquivalentAuthorityInput(facts RuntimeFacts) RuntimeEquivalentAuthorityInputIdentity {
 	facts = facts.Normalized()
-	observationHash := sha256.New()
+	observationHash := newRuntimeHashWriter()
 	for _, observation := range facts.Resources.PrerequisiteObservations {
 		writeHashString(observationHash, observation.ObservationID)
 		writeHashString(observationHash, observation.ContentHash)
@@ -2763,7 +2763,7 @@ func runtimeEquivalentAuthorityInput(facts RuntimeFacts) RuntimeEquivalentAuthor
 // that have always participated in RuntimeEquivalentAuthorityInputIdentity.
 func StableRuntimeAuthorityFocusHash(focus CoverageFocus) string {
 	focus = focus.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, focus.ID)
 	writeHashString(h, focus.SliceID)
 	for _, id := range focus.CoverageWorkItemIDs {
@@ -2786,7 +2786,7 @@ func StableRuntimeAuthorityFocusHash(focus CoverageFocus) string {
 // without consulting mutable current resources.
 func StableRuntimeOperationAdmissibilityCatalogRevisionHash(values []RuntimeOperationAdmissibility) string {
 	values = NormalizeRuntimeOperationAdmissibilities(values)
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	for _, inventory := range values {
 		writeHashString(h, inventory.OwnerModuleID)
 		writeHashString(h, inventory.SnapshotID)
@@ -2800,6 +2800,13 @@ type hashStringWriter interface {
 }
 
 func writeHashStrings(w hashStringWriter, values []string) {
+	if buffered, ok := w.(*runtimeHashWriter); ok {
+		buffered.writeCount(uint64(len(values)))
+		for _, value := range values {
+			buffered.writeString(value)
+		}
+		return
+	}
 	var size [8]byte
 	binary.BigEndian.PutUint64(size[:], uint64(len(values)))
 	_, _ = w.Write(size[:])
@@ -2809,6 +2816,10 @@ func writeHashStrings(w hashStringWriter, values []string) {
 }
 
 func writeHashString(w hashStringWriter, value string) {
+	if buffered, ok := w.(*runtimeHashWriter); ok {
+		buffered.writeString(value)
+		return
+	}
 	// 保持原长度前缀和正文 bytes，仅合并同一次编码的缓冲与 Write。
 	encoded := make([]byte, 8+len(value))
 	binary.BigEndian.PutUint64(encoded[:8], uint64(len(value)))

@@ -69,6 +69,9 @@ capability resource state。
   `runtime_proof_canonical_collections_test.go` 用独立 reference 与 fuzz 校验非规范输入和返回隔离。
   hash 字符串编码合并同次长度前缀与正文写入，不改变 big-endian 长度、集合 cardinality 或任意原始 bytes；
   `runtime_hash_string_encoding_test.go` 固定无效 UTF-8、NUL、长原文与重复 hash，并以 fuzz 对照旧编码。
+  canonical authority/catalog 与 coverage binding 的 hash writer 使用单次编码私有短字段缓冲，长字段仍完整写入；
+  不跨调用共享、缓存输入或改动任何 SM-1～SM-4 transition。`runtime_hash_writer_test.go` 对照旧完整编码，
+  固定边界、长短交替、Write/Sum/Reset、并行独立实例、fuzz 与分配成本，所有 raw/hash 门禁保持原样。
   executable operation contract revision 只标识本 binary 的编译期静态库存，在 descriptor init 完成后按原完整编码计算一次；
   persisted revision 每次仍独立比较并返回 exact mismatch，不缓存 Run、manifest、raw/hash 或 aggregate 校验成功。
   `runtime_operation_contract_revision_reference_test.go` 保全原完整编码；

@@ -1,7 +1,6 @@
 package workorchruntimecontract
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"reflect"
@@ -355,7 +354,7 @@ func StableCoverageEvidenceBindingHash(binding CoverageEvidenceBinding) string {
 
 // 仅复用本次调用的规范化值；公开 hash 与校验入口仍完整处理原始输入。
 func stableCoverageEvidenceBindingHashNormalized(binding CoverageEvidenceBinding) string {
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, binding.ID)
 	writeHashString(h, string(binding.CoverageWorkItemID))
 	writeHashString(h, binding.FocusID)
@@ -462,7 +461,7 @@ func StableRuntimeCoverageEvidenceBindingSnapshotHash(values []CoverageEvidenceB
 
 // 仅消费本次调用完整规范化所得的 binding；不接受调用方声明的成功标志。
 func stableRuntimeCoverageEvidenceBindingSnapshotHashNormalized(bindings []CoverageEvidenceBinding) string {
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-coverage-evidence-binding-snapshot/v1")
 	writeHashString(h, fmt.Sprintf("%d", len(bindings)))
 	for _, binding := range bindings {
