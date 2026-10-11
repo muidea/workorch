@@ -233,6 +233,13 @@ capability resource state。
   保留原队列过滤、顺序、逐 focus 规范化及完整 binding validator，每次调用重新反证。
   `runtime_cwi_focus_binding_projection_test.go` 对照修改前完整 Facts 路径，固定接受／拒绝顺序、nil/empty/重复队列、
   原输入、JSON 重载、后续篡改、任意 bytes、fuzz 与分配；不缓存成功凭据或减免完整 aggregate gate。
+  semantic target policy 的三项封闭集合使用同次位集合，保留原 trim、未知值过滤、去重、字典序、nil 与 detached 返回语义；
+  `runtime_semantic_target_policy_closed_set_test.go` 以旧 map／排序路径覆盖全部子集、重复／非法 bytes、原输入、
+  JSON 重载、返回副本、后续调用、fuzz 与分配成本。不改变完整 policy 校验、公开 availability 或四机转换。
+  proof-obligation 的私有校验在本次完整 manifest 校验后复用 detached 规范化正文，不再次复制未变 owner catalog；
+  document、每项原义务、source、declaration、recipe/surface、owner-fact acquisition 与 repair 门禁按原顺序全部执行。
+  `runtime_semantic_proof_obligation_validation_reuse_test.go` 保留旧完整校验路径，固定多批、独立 proof、repair/acquisition、
+  反例与拒绝顺序、原值、重载、后续变化、fuzz 和分配；原入口仍规范化完整 manifest，不授调用者已验证标志。
 - SM-4 终态材料保全 persisted `CoverageProofLineage`，owner-local adapter 与独立重载产物一致。
   requirement evidence 只把 exact current binding/proof、完整 all-of 和唯一 equivalent lineage 来源列为 current accepted；
   历史不适用项保留为 `stale_or_superseded`，不回写 SM-2 coverage/assessment，不改变 SM-1/SM-3 transition。

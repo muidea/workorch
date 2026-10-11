@@ -73,7 +73,7 @@ func compileRuntimeSemanticBindingsWithValidatedManifest(validated runtimeValida
 	// proof_batch 的完整义务门禁已由本次 document 校验执行；未改变的正文不重复整份校验。
 	// 其它 step 保留既有 compiler 路径，不用调用者声明或跨调用缓存替代证明。
 	if document.PlanStep != RuntimeSemanticPlanStepProofBatch {
-		if err := validateRuntimeSemanticPlanProofObligations(document, manifest); err != nil {
+		if err := validateRuntimeSemanticPlanProofObligationsWithValidatedManifest(document, validated); err != nil {
 			return nil, RuntimeCWIReconciliationContract{}, err
 		}
 	}
@@ -126,8 +126,18 @@ func compileRuntimeSemanticBindingsWithValidatedManifest(validated runtimeValida
 // to the exact per-CWI obligation already sealed in the manifest. It performs
 // no aggregate read and therefore cannot create a second Definition authority.
 func validateRuntimeSemanticPlanProofObligations(document RuntimeSemanticPlanDocument, manifest RuntimeSemanticPlanManifest) error {
-	document = document.Normalized()
-	manifest = manifest.Normalized()
+	return validateRuntimeSemanticPlanProofObligationsNormalized(document.Normalized(), manifest.Normalized())
+}
+
+// 私有入口仅消费本次完整 manifest 校验产物；document 和逐项义务门禁不省略。
+func validateRuntimeSemanticPlanProofObligationsWithValidatedManifest(document RuntimeSemanticPlanDocument, validated runtimeValidatedSemanticManifest) error {
+	manifest := validated.manifest
+	// 嵌套 acquisition 路径不假定幂等，保留原义务集合的规范化次数。
+	manifest.ProofObligations = normalizeRuntimeSemanticProofObligations(manifest.ProofObligations)
+	return validateRuntimeSemanticPlanProofObligationsNormalized(document.Normalized(), manifest)
+}
+
+func validateRuntimeSemanticPlanProofObligationsNormalized(document RuntimeSemanticPlanDocument, manifest RuntimeSemanticPlanManifest) error {
 	obligations := make(map[common.CoverageWorkItemID]RuntimeSemanticProofObligation, len(manifest.ProofObligations))
 	for _, obligation := range manifest.ProofObligations {
 		obligations[obligation.CoverageWorkItemID] = obligation

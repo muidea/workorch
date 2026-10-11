@@ -1939,7 +1939,7 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(d RuntimeSemant
 		}
 	}
 	if d.PlanStep == RuntimeSemanticPlanStepProofBatch {
-		if err := validateRuntimeSemanticPlanProofObligations(d, manifest); err != nil {
+		if err := validateRuntimeSemanticPlanProofObligationsWithValidatedManifest(d, validated); err != nil {
 			return err
 		}
 	}
@@ -3815,21 +3815,30 @@ func normalizeRuntimeSemanticFeasibilities(values []RuntimeSemanticProofFeasibil
 }
 
 func normalizeRuntimeSemanticTargetPolicies(values []RuntimeOperationTargetPolicy) []RuntimeOperationTargetPolicy {
-	seen := map[RuntimeOperationTargetPolicy]struct{}{}
+	// 三项封闭词汇使用同次位集合；返回顺序仍为原字典序，不共享可变库存。
+	var present uint8
 	for _, value := range values {
-		value = RuntimeOperationTargetPolicy(strings.TrimSpace(string(value)))
-		switch value {
-		case RuntimeOperationTargetPolicyExactTarget, RuntimeOperationTargetPolicyExistingOwnerScope, RuntimeOperationTargetPolicyProspectiveOwnerTarget:
-			seen[value] = struct{}{}
+		switch RuntimeOperationTargetPolicy(strings.TrimSpace(string(value))) {
+		case RuntimeOperationTargetPolicyExactTarget:
+			present |= 1
+		case RuntimeOperationTargetPolicyExistingOwnerScope:
+			present |= 2
+		case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+			present |= 4
 		}
 	}
-	ret := make([]RuntimeOperationTargetPolicy, 0, len(seen))
-	for value := range seen {
-		ret = append(ret, value)
-	}
-	sort.Slice(ret, func(i, j int) bool { return ret[i] < ret[j] })
-	if len(ret) == 0 {
+	if present == 0 {
 		return nil
+	}
+	ret := make([]RuntimeOperationTargetPolicy, 0, 3)
+	if present&1 != 0 {
+		ret = append(ret, RuntimeOperationTargetPolicyExactTarget)
+	}
+	if present&2 != 0 {
+		ret = append(ret, RuntimeOperationTargetPolicyExistingOwnerScope)
+	}
+	if present&4 != 0 {
+		ret = append(ret, RuntimeOperationTargetPolicyProspectiveOwnerTarget)
 	}
 	return ret
 }
