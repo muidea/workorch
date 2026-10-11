@@ -293,15 +293,16 @@ func ValidateRuntimeValidationProofPreparations(values []RuntimeValidationProofP
 		if err := raw.Validate(); err != nil {
 			return err
 		}
-		value := raw.Normalized()
-		if _, duplicate := seenHash[value.RequirementHash]; duplicate {
-			return fmt.Errorf("runtime validation proof preparation %q is duplicated", value.RequirementHash)
+		requirementHash := strings.TrimSpace(raw.RequirementHash)
+		coverageID := common.CoverageWorkItemID(strings.TrimSpace(string(raw.CoverageWorkItemID)))
+		if _, duplicate := seenHash[requirementHash]; duplicate {
+			return fmt.Errorf("runtime validation proof preparation %q is duplicated", requirementHash)
 		}
-		if _, duplicate := seenCoverage[value.CoverageWorkItemID]; duplicate {
-			return fmt.Errorf("runtime validation proof preparation coverage %q is duplicated", value.CoverageWorkItemID)
+		if _, duplicate := seenCoverage[coverageID]; duplicate {
+			return fmt.Errorf("runtime validation proof preparation coverage %q is duplicated", coverageID)
 		}
-		seenHash[value.RequirementHash] = struct{}{}
-		seenCoverage[value.CoverageWorkItemID] = struct{}{}
+		seenHash[requirementHash] = struct{}{}
+		seenCoverage[coverageID] = struct{}{}
 	}
 	return nil
 }
@@ -572,15 +573,16 @@ func ValidateRuntimeValidationProofRequirementBindings(values []RuntimeValidatio
 		if err := raw.Validate(); err != nil {
 			return err
 		}
-		value := raw.Normalized()
-		if _, duplicate := seenHashes[value.RequirementHash]; duplicate {
-			return fmt.Errorf("runtime validation proof requirement binding %q is duplicated", value.RequirementHash)
+		requirementHash := strings.TrimSpace(raw.RequirementHash)
+		coverageID := common.CoverageWorkItemID(strings.TrimSpace(string(raw.CoverageWorkItemID)))
+		if _, duplicate := seenHashes[requirementHash]; duplicate {
+			return fmt.Errorf("runtime validation proof requirement binding %q is duplicated", requirementHash)
 		}
-		if _, duplicate := seenCoverage[value.CoverageWorkItemID]; duplicate {
-			return fmt.Errorf("runtime validation proof requirement binding coverage %q is duplicated", value.CoverageWorkItemID)
+		if _, duplicate := seenCoverage[coverageID]; duplicate {
+			return fmt.Errorf("runtime validation proof requirement binding coverage %q is duplicated", coverageID)
 		}
-		seenHashes[value.RequirementHash] = struct{}{}
-		seenCoverage[value.CoverageWorkItemID] = struct{}{}
+		seenHashes[requirementHash] = struct{}{}
+		seenCoverage[coverageID] = struct{}{}
 	}
 	return nil
 }

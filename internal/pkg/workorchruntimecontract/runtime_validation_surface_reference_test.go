@@ -16,10 +16,10 @@ func referenceRuntimeValidationSurfaceValidate(s RuntimeValidationSurface) error
 	if duplicate := duplicateRuntimeValidationProofCheckRef(raw.CheckRefs); duplicate != "" {
 		return fmt.Errorf("runtime validation surface %q duplicates check %q", strings.TrimSpace(raw.ID), duplicate)
 	}
-	if err := ValidateRuntimeValidationProofRequirementBindings(raw.ProofRequirementBindings); err != nil {
+	if err := referenceRuntimeValidationProofRequirementBindings(raw.ProofRequirementBindings); err != nil {
 		return fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
 	}
-	if err := ValidateRuntimeValidationProofPreparations(raw.ProofRequirementPreparations); err != nil {
+	if err := referenceRuntimeValidationProofPreparations(raw.ProofRequirementPreparations); err != nil {
 		return fmt.Errorf("runtime validation surface %q: %w", strings.TrimSpace(raw.ID), err)
 	}
 	seenRequirementHashes := make(map[string]struct{}, len(raw.ProofRequirementBindings))
