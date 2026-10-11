@@ -115,6 +115,12 @@ capability resource state。
   字段顺序、集合 cardinality、长原文和 nested input-review/target/obligation 编码；规范化与完整校验不变。
   `runtime_semantic_buffered_hash_test.go` 使用原非缓冲 hash 路径固定原 bytes、有效 sealed ledger 重载、
   fuzz 和长短字段分配；不缓存 proposal 身份或 validation 成功，不改任何 SM 转换、预算或恢复规则。
+  semantic document 的 proposal 集合仍逐项规范化并按 CWI／proposal hash 稳定排序；只在本次排序首次比较同 CWI 时
+  编码该成员的 hash，随成员交换保留本地 key，不再次规范化整个 proposal 或在 comparator 内重复编码。
+  不同 CWI 的比较不产生无用 hash，原空集合、duplicate 与同 hash 的 raw review 先后保持不变；公开 hash 仍重新规范化。
+  `runtime_semantic_proposal_sort_test.go` 对照原稳定排序与独立完整编码，固定原 bytes、nil/empty、嵌套隔离、
+  sealed ledger 重载、后续输入变化、fuzz 和分配；此纯值复用只参与既有 SM-2／SM-3 合同读取，
+  不新增 SM-1～SM-4 转换、保存凭据、authority cache、预算或恢复规则。
   execution-budget policy 在一次完整 `Validate` 中复用已规范化的 detached policy 编码 hash，使用同次短字段缓冲，
   不重复深拷贝／排序；公开 hash 入口仍先规范化，所有维度、数值、duplicate、scope、restart 和 hash 门禁及拒绝顺序不变。
   `runtime_execution_budget_policy_single_pass_test.go` 以完整旧 validator/hash reference 固定原 bytes、长字段、非法输入、

@@ -1704,7 +1704,10 @@ func (p RuntimeSemanticProofProposal) Validate() error {
 }
 
 func StableRuntimeSemanticProofProposalHash(proposal RuntimeSemanticProofProposal) string {
-	proposal = proposal.Normalized()
+	return stableRuntimeSemanticProofProposalHashCanonical(proposal.Normalized())
+}
+
+func stableRuntimeSemanticProofProposalHashCanonical(proposal RuntimeSemanticProofProposal) string {
 	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-semantic-proof-proposal")
 	writeHashString(h, string(proposal.CoverageWorkItemID))
@@ -3697,16 +3700,43 @@ func normalizeRuntimeSemanticProofProposals(values []RuntimeSemanticProofProposa
 			ret = append(ret, value)
 		}
 	}
-	sort.SliceStable(ret, func(i, j int) bool {
-		if ret[i].CoverageWorkItemID != ret[j].CoverageWorkItemID {
-			return ret[i].CoverageWorkItemID < ret[j].CoverageWorkItemID
-		}
-		return StableRuntimeSemanticProofProposalHash(ret[i]) < StableRuntimeSemanticProofProposalHash(ret[j])
-	})
 	if len(ret) == 0 {
 		return nil
 	}
+	if len(ret) > 1 {
+		sort.Stable(&runtimeSemanticProofProposalSort{values: ret})
+	}
 	return ret
+}
+
+type runtimeSemanticProofProposalSort struct {
+	values []RuntimeSemanticProofProposal
+	hashes []string
+}
+
+func (s *runtimeSemanticProofProposalSort) Len() int { return len(s.values) }
+
+func (s *runtimeSemanticProofProposalSort) Less(i, j int) bool {
+	if s.values[i].CoverageWorkItemID != s.values[j].CoverageWorkItemID {
+		return s.values[i].CoverageWorkItemID < s.values[j].CoverageWorkItemID
+	}
+	// 仅同 CWI 比较需要 hash；本次排序随成员交换保留编码值，不跨调用复用。
+	if s.hashes == nil {
+		s.hashes = make([]string, len(s.values))
+	}
+	for _, index := range [2]int{i, j} {
+		if s.hashes[index] == "" {
+			s.hashes[index] = stableRuntimeSemanticProofProposalHashCanonical(s.values[index])
+		}
+	}
+	return s.hashes[i] < s.hashes[j]
+}
+
+func (s *runtimeSemanticProofProposalSort) Swap(i, j int) {
+	s.values[i], s.values[j] = s.values[j], s.values[i]
+	if s.hashes != nil {
+		s.hashes[i], s.hashes[j] = s.hashes[j], s.hashes[i]
+	}
 }
 
 func normalizeOrderedCoverageWorkItemIDs(values []common.CoverageWorkItemID) []common.CoverageWorkItemID {
