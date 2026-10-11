@@ -268,6 +268,18 @@ Shell-private `runShellProjectConjunction` 复用 `validation_project_conjunctio
 缺阶段的已知失败只保全为 incomplete，不能变成完整合取。该映射仍未由公开 adapter 调用；
 `validation_project_conjunction_observation_test.go` 验证完整映射、身份／原 bytes 篡改拒绝和副本隔离。
 中立接收合同封存有序 stage hash，要求 native PASS 与完整 all-of 同时成立，仍不表示输出原文已持久保存或可读取。
+
+`validation_project_raw_store.go` 提供 owner-private 的受限原文存储／读取边界，仍未进入公开 adapter 或 read topic。
+它只接受现有绝对 Workspace internal directory，并用 `os.Root` 固定目录句柄；owner 子目录拒绝 symlink 和宽权限，
+逐次复核实际打开 inode，文件仅以 0600 保存。每条原文以 Workspace／Run／原 ExecutionKey／stage／stdout 或 stderr
+完整 scope 隔离，原 `[]byte` 使用可逆 base64 JSON 保存，独立校验全部接收 bytes 的 SHA256 与实际已保存前缀的 SHA256。
+每流沿用 64KiB 上界；超界保留明确 incomplete／omitted reason，不能变成 PASS 或完整诊断。
+发布使用已 fsync 的临时文件和不可覆盖的 hard-link，再删除临时别名及同步目录；任何失败不返回持久成功 ref，
+重试核对原 canonical bytes 后才确认，异常已存在文件不覆盖。它不是第二 operation journal，也不提供执行恢复权威。
+`validation_project_raw_store_test.go` 覆盖原 bytes（中文／CRLF／NUL／非法 UTF-8）、空输出、并发 duplicate、scope 漂移、
+容量、symlink／权限／篡改拒绝、发布前／后故障重载，以及首次／duplicate 同步期间取消不返回成功引用；
+真实四阶段 runner 测试同时保存并 fresh-store 读回全部实际输出。
+这只证明私有存储前置，公开接线仍须绑定原 receipt、受限读取准入、总期限、cleanup 和 fresh-process 恢复。
 本节不表示公开 authoring/activation/fullflow、fresh-process 或 live 已验收。
 
 #### Executable input-maintenance contracts

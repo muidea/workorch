@@ -111,6 +111,32 @@ func TestProjectConjunctionOwnerRunnerKeepsProjectAndCWIAllOf(t *testing.T) {
 					t.Fatal("stage 原文输出丢失 bytes/hash")
 				}
 			}
+			rawDirectory := t.TempDir()
+			store, err := openShellProjectRawStore(rawDirectory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, stage := range fact.Stages {
+				for stream, raw := range map[string]shellProjectRawFact{"stdout": stage.Stdout, "stderr": stage.Stderr} {
+					scope := shellProjectRawScope{WorkspaceID: "ws", RunID: "run", ExecutionKey: "private-runner/original", StageID: stage.ID, Stream: stream}
+					ref, err := store.Store(context.Background(), scope, raw)
+					if err != nil {
+						t.Fatal(err)
+					}
+					reopened, err := openShellProjectRawStore(rawDirectory)
+					if err != nil {
+						t.Fatal(err)
+					}
+					got, err := reopened.Read(context.Background(), scope, ref)
+					closeErr := reopened.Close()
+					if err != nil || closeErr != nil || !reflect.DeepEqual(got, raw) {
+						t.Fatalf("真实阶段原输出持久重载失真：%s/%s err=%v", stage.ID, stream, err)
+					}
+				}
+			}
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
 			for ref, want := range files {
 				got, err := os.ReadFile(filepath.Join(root, ref))
 				if err != nil || string(got) != want {
