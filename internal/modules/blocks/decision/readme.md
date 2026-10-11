@@ -37,6 +37,7 @@ input subject 和具体问题；Decision 只管理 ticket/proposal lifecycle。`
 
 - Ticket、Resolution、clarification/proposal/checkpoint 的转换只由 Decision-private lifecycle event/reducer触发；外部 command 不得携带 target state或 owner timestamp。
 - 相同 sealed identity/fingerprint 重放幂等；payload、scope、candidate revision、replacement intent 或 binding hash 漂移必须 conflict/stale。
+- memory/file Ticket repository 的 Create/Update/Get/List 统一复用 Decision 模型 `CloneTicket`，隔离 `AllowedRecoveryActions`、`DefinitionClarification` 及其 `OffendingRefs`、Runtime proposal 和 payload。调用方修改写入或读取副本不得绕过 owner dispatcher 改变原票据；当前格式 file reopen 保留原正文和来源。本合同不新增决议类型、D2 批准、启动权限或 SM-1～SM-4 转换。
 - Definition clarification 与 ordinary resolution 是两条显式合同；background reconciliation 不得把 clarification 降级为普通 resolved ticket。
 - Runtime governance proposal 只有 Orchestrator 返回 committed/duplicate 后才能 finalize；失败保留可恢复 pending，不能假装跨 owner transaction 已完成。
 - Workspace deletion fence 后普通读写/late delivery fail closed；physical purge 只由 Decision-private dispatcher触发。

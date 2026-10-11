@@ -4868,14 +4868,7 @@ func cloneEventRecord(item *eventstream.EventRecord) *eventstream.EventRecord {
 }
 
 func cloneDecisionTicket(item *decision.Ticket) *decision.Ticket {
-	cloned := *item
-	cloned.Context = item.Context.Clone()
-	cloned.AutoGovernance = item.AutoGovernance.Clone()
-	if item.RuntimeGovernanceProposal != nil {
-		proposal := item.RuntimeGovernanceProposal.Clone()
-		cloned.RuntimeGovernanceProposal = &proposal
-	}
-	return &cloned
+	return decision.CloneTicket(item)
 }
 
 func validateDecisionTicketPersistence(item *decision.Ticket) error {
