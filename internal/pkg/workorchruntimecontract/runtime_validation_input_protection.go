@@ -64,7 +64,7 @@ func validateRuntimeValidationInputTargets(surface RuntimeValidationSurface) err
 		return nil
 	}
 	knownOwner := false
-	for _, descriptor := range RuntimeOperationDescriptors() {
+	for _, descriptor := range runtimeOperationDescriptorInventory {
 		knownOwner = knownOwner || descriptor.OwnerModuleID == surface.InputTargetOwnerModuleID
 	}
 	if !knownOwner || len(surface.InputTargetRefs) > RuntimeValidationInputTargetsMaxCount {

@@ -121,12 +121,23 @@ capability resource state。
   `runtime_semantic_proposal_sort_test.go` 对照原稳定排序与独立完整编码，固定原 bytes、nil/empty、嵌套隔离、
   sealed ledger 重载、后续输入变化、fuzz 和分配；此纯值复用只参与既有 SM-2／SM-3 合同读取，
   不新增 SM-1～SM-4 转换、保存凭据、authority cache、预算或恢复规则。
+  semantic proof obligation 的 Clone 复用自身 `Normalized` 已分离的集合与嵌套合同，不再次复制原 owner convergence、
+  validation requirement、repair 或 verification policy；acquisition 的嵌套路径规范化对非法输入并非幂等，
+  仍保留原 Clone 次序和拒绝表示，不以“正常路径应幂等”为由改变原始输入的处理。
+  原 nil/empty 与源义务原判据表示保持不变；
+  `runtime_semantic_obligation_clone_test.go` 以旧完整 Clone 固定所有嵌套副本隔离、完整拒绝原因、有效 manifest／
+  sealed ledger 重载、原 hash、后续调用、fuzz 与分配；完整 SM-2／SM-3 admission、raw/hash、aggregate 门禁不变，
+  不增加任何 SM 转换、持久化成功凭据或跨调用缓存。
   execution-budget policy 在一次完整 `Validate` 中复用已规范化的 detached policy 编码 hash，使用同次短字段缓冲，
   不重复深拷贝／排序；公开 hash 入口仍先规范化，所有维度、数值、duplicate、scope、restart 和 hash 门禁及拒绝顺序不变。
   `runtime_execution_budget_policy_single_pass_test.go` 以完整旧 validator/hash reference 固定原 bytes、长字段、非法输入、
   JSON 重载、后续篡改重验、公开副本隔离与 fuzz；不缓存校验成功、不改变 SM-1～SM-4 转换、预算上限或扣费规则。
   静态 operation descriptor 的内部证据资格查询只读初始化库存，不复制随后丢弃的 `AllowedStates`；公开 getter 仍深拷贝。
   `runtime_coverage_evidence_descriptor_lookup_test.go` 以旧 getter 路径为 reference 覆盖全部 kind、未知与非规范输入、重复调用和公开副本隔离；不减少任何 proof、raw 或 aggregate 校验。
+  validation input targets 的 owner 存在性校验只读同一静态 descriptor inventory，不复制随后丢弃的完整库存；
+  owner 原值比较、512 项上界、2048 bytes／控制字符／duplicate 门禁及拒绝顺序不变，公开库存 getter 仍返回深拷贝。
+  `runtime_validation_input_inventory_test.go` 对照旧完整库存路径固定所有 owner、边界、非法原 bytes、重载、后续篡改、
+  公开副本隔离、fuzz 与分配；不缓存 surface 校验成功、不改变 SM-1～SM-4 权威、转换、预算或恢复规则。
   `runtime_coverage_evidence_binding_hash_test.go` 和 `runtime_candidate_session_validation_test.go` 固定 hash、重复调用、
   同版本重载、来源篡改与深拷贝边界。binding projection 在同次完整 raw-canonical 正文／hash 比较后复用 detached
   规范化正文，仍逐项验证原始 proof、重复身份、目标与 policy；公开 binding 校验与后续调用重新反证，不保存成功缓存。

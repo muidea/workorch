@@ -246,14 +246,6 @@ func sameRuntimeSemanticValidationFailureRepair(left, right *RuntimeSemanticVali
 	return StableRuntimeSemanticValidationFailureRepairHash(*left) == StableRuntimeSemanticValidationFailureRepairHash(*right)
 }
 
-func cloneRuntimeSemanticValidationFailureRepair(value *RuntimeSemanticValidationFailureRepair) *RuntimeSemanticValidationFailureRepair {
-	if value == nil {
-		return nil
-	}
-	clone := value.Clone()
-	return &clone
-}
-
 func compileRuntimeSemanticValidationFailureRepairObligation(
 	base RuntimeSemanticProofObligation,
 	source RuntimeDefinitionFocus,

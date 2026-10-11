@@ -262,25 +262,11 @@ func (o RuntimeSemanticProofObligation) Normalized() RuntimeSemanticProofObligat
 
 func (o RuntimeSemanticProofObligation) Clone() RuntimeSemanticProofObligation {
 	o = o.Normalized()
-	o.RequiredEvidenceKinds = append([]string(nil), o.RequiredEvidenceKinds...)
-	o.DeclarationAcceptedStepKinds = append([]string(nil), o.DeclarationAcceptedStepKinds...)
-	if o.ValidationProofRequirement != nil {
-		value := o.ValidationProofRequirement.Clone()
-		o.ValidationProofRequirement = &value
-	}
-	o.DeclarationTargetDiscoverySources = append([]string(nil), o.DeclarationTargetDiscoverySources...)
-	o.DeclarationTargetSelectorCandidateRefs = append([]string(nil), o.DeclarationTargetSelectorCandidateRefs...)
-	o.DeclarationProspectiveTargetAllOfConstraintRefs = append([]string(nil), o.DeclarationProspectiveTargetAllOfConstraintRefs...)
-	o.RequiredOwnerFacts = append([]RuntimeOwnerFactRequirement(nil), o.RequiredOwnerFacts...)
-	o.OwnerFactConvergences = CloneRuntimeOwnerFactConvergences(o.OwnerFactConvergences)
-	o.MetricConstraints = append([]string(nil), o.MetricConstraints...)
-	o.ArtifactRefs = append([]string(nil), o.ArtifactRefs...)
-	o.VerificationPolicy = cloneRuntimeVerificationPolicy(o.VerificationPolicy)
+	// acquisition 的嵌套路径规范化并非对所有原始输入幂等，保留原 Clone 次序。
 	if o.OwnerFactAcquisition != nil {
 		value := o.OwnerFactAcquisition.Clone()
 		o.OwnerFactAcquisition = &value
 	}
-	o.ValidationFailureRepair = cloneRuntimeSemanticValidationFailureRepair(o.ValidationFailureRepair)
 	return o
 }
 
