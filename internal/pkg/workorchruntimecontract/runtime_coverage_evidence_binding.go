@@ -190,6 +190,16 @@ func RuntimeMCPToolValidationRecipeID(serverID, tool string) string {
 	return "mcp/tool_call/" + serverID + "/" + tool
 }
 
+type runtimeCoverageEvidenceProofSort []CoverageEvidenceProof
+
+func (values runtimeCoverageEvidenceProofSort) Len() int { return len(values) }
+func (values runtimeCoverageEvidenceProofSort) Less(left, right int) bool {
+	return values[left].EvidenceKind < values[right].EvidenceKind
+}
+func (values runtimeCoverageEvidenceProofSort) Swap(left, right int) {
+	values[left], values[right] = values[right], values[left]
+}
+
 func NormalizeCoverageEvidenceProofs(values []CoverageEvidenceProof) []CoverageEvidenceProof {
 	ret := make([]CoverageEvidenceProof, 0, len(values))
 	for _, raw := range values {
@@ -199,7 +209,13 @@ func NormalizeCoverageEvidenceProofs(values []CoverageEvidenceProof) []CoverageE
 		}
 		ret = append(ret, value)
 	}
-	sort.SliceStable(ret, func(i, j int) bool { return ret[i].EvidenceKind < ret[j].EvidenceKind })
+	if len(ret) == 2 {
+		if ret[1].EvidenceKind < ret[0].EvidenceKind {
+			ret[0], ret[1] = ret[1], ret[0]
+		}
+	} else if len(ret) > 2 {
+		sort.Stable(runtimeCoverageEvidenceProofSort(ret))
+	}
 	return nilIfEmpty(ret)
 }
 

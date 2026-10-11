@@ -167,6 +167,10 @@ capability resource state。
   原 raw binding/proof/hash、重复 ID 及后续逐 binding 完整 Validate、focus/revision/policy/kind/target/CWI 门禁全部保留。
   `runtime_binding_focus_normalization_reuse_test.go` 保留独立旧完整 validator 并接入旧 semantic compiler oracle，
   固定接受／拒绝顺序、原输入、重载、后续篡改、fuzz 与分配；不提供已校验凭据或跨调用缓存，不改变四机权威。
+  proof 集合仍逐项 Clone／规范化、丢弃空 kind 并返回 detached 完整正文，只以按索引的 typed stable sort 替代反射排序；
+  二项集合仅在后项 kind 严格小于前项时交换，相同 kind 的原相对顺序和重复项全部保留，完整 raw proof/duplicate/hash 门禁不变。
+  `runtime_proof_typed_stable_sort_test.go` 对照旧 `sort.SliceStable` 路径固定任意 kind、长集合、nil/empty、
+  嵌套隔离、重载、后续变化、重复原权威拒绝、fuzz 与分配；不改变 SM-1～SM-4 转换或持久化表示。
   这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
   current focus 的 target-selection 纯投影只规范化实际返回的 selection，并按原 trim／首个同 ID prerequisite
   语义比较 Kind／Scope／FocusID，不复制无关 Definition、证据、catalog 或 coverage。原完整 aggregate/raw/hash
