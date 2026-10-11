@@ -127,7 +127,7 @@ func referenceRuntimeValidationSurfaceValidate(s RuntimeValidationSurface) error
 		return fmt.Errorf("runtime validation surface %q checks do not match exact proof requirement bindings", s.ID)
 	}
 	for _, preparation := range s.ProofRequirementPreparations {
-		if err := preparation.Validate(); err != nil {
+		if err := referenceRuntimeValidationProofPreparationValidate(preparation); err != nil {
 			return err
 		}
 		for _, attestation := range preparation.CheckAttestations {

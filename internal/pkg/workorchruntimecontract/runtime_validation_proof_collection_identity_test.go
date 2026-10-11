@@ -15,7 +15,7 @@ func referenceRuntimeValidationProofPreparations(values []RuntimeValidationProof
 	seenHash := make(map[string]struct{}, len(values))
 	seenCoverage := make(map[common.CoverageWorkItemID]struct{}, len(values))
 	for _, raw := range values {
-		if err := raw.Validate(); err != nil {
+		if err := referenceRuntimeValidationProofPreparationValidate(raw); err != nil {
 			return err
 		}
 		value := raw.Normalized()

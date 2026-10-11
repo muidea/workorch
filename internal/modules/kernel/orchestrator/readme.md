@@ -104,6 +104,11 @@ capability resource state。
   不为身份集合再次规范化整份 proof、input review 或原诊断。`runtime_validation_proof_collection_identity_test.go`
   保留两个旧完整集合 validator，并供旧 surface oracle 使用，固定 nil/empty、raw trim、完整正文失败与 duplicate 的先后、
   后续篡改、JSON 重载、任意 bytes、fuzz 和分配对照；不改变任何机器转换、proof 门禁或持久化权威。
+  preparation 的纯 Validate 只读原 `OriginalDiagnostic`，由诊断自身完整 Validate 构造比较副本，
+  不先 raw-clone 随后丢弃；公开 preparation `Normalized`／`Clone` 仍返回 detached raw 诊断，
+  owner／catalog revision 比较仍使用原诊断字段，不 trim 放宽。`runtime_validation_preparation_diagnostic_read_test.go`
+  保留独立旧完整 validator 并接入集合／surface oracle，固定原值、公开 Clone 隔离、原安全／identity 拒绝顺序、
+  后续变化、任意 bytes、fuzz 与分配；此纯只读路径不改变 SM-1～SM-4 转换、原诊断保存或 proof authority。
   assessment authority hash 保持原 Normalized、JSON 和域前缀编码，复用同次 marshal 缓冲，不增加跨调用缓存；
   `runtime_assessment_authority_hash_test.go` 以旧编码 reference、JSON 重载、fuzz 和分配对照固定等价边界。
   lineage rule hash 同样保持原完整 JSON／域前缀编码，只在 marshal 缓冲有余量时复用；容量不足仍走原编码路径，

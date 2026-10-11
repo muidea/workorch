@@ -229,7 +229,11 @@ func (p RuntimeValidationProofPreparation) Clone() RuntimeValidationProofPrepara
 
 func (p RuntimeValidationProofPreparation) Validate() error {
 	rawAttestations := p.CheckAttestations
+	// 纯校验只读原诊断；其 Validate 自行构造比较副本，不先 raw-clone 随后丢弃。
+	originalDiagnostic := p.OriginalDiagnostic
+	p.OriginalDiagnostic = nil
 	p = p.Normalized()
+	p.OriginalDiagnostic = originalDiagnostic
 	if p.RequirementHash == "" || p.DefinitionRevision == "" || p.CoverageWorkItemID == "" || p.DeclarationRef == "" ||
 		p.ValidationRecipeID == "" || (p.TargetRef != "" && !runtimeProspectiveTargetRefValid(p.TargetRef)) || len(p.CheckAttestations) == 0 {
 		return fmt.Errorf("runtime validation proof preparation requires exact requirement, CWI, recipe and native attestations")
