@@ -1506,7 +1506,7 @@ func StableRuntimeSemanticPlanManifestHash(manifest RuntimeSemanticPlanManifest)
 }
 
 func stableRuntimeSemanticPlanManifestHashCanonical(manifest RuntimeSemanticPlanManifest) string {
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeRuntimeSemanticInputReviewInformationHash(h, manifest.InputReviewInformation)
 	writeHashString(h, RuntimeSemanticPlanManifestSchemaCurrent)
 	writeHashString(h, string(manifest.WorkspaceID))
@@ -1705,7 +1705,7 @@ func (p RuntimeSemanticProofProposal) Validate() error {
 
 func StableRuntimeSemanticProofProposalHash(proposal RuntimeSemanticProofProposal) string {
 	proposal = proposal.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-semantic-proof-proposal")
 	writeHashString(h, string(proposal.CoverageWorkItemID))
 	writeHashString(h, proposal.OwnerModuleID)
@@ -1990,7 +1990,7 @@ func runtimeSemanticVariantIDs(contract RuntimeOperationContract) []string {
 
 func StableRuntimeSemanticPlanDocumentHash(document RuntimeSemanticPlanDocument) string {
 	document = document.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, RuntimeSemanticPlanDocumentSchemaCurrent)
 	writeHashString(h, document.ManifestHash)
 	writeHashString(h, document.DefinitionSeedHash)

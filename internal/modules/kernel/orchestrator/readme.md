@@ -111,6 +111,10 @@ capability resource state。
   校验不变，不增加已校验标志或跨调用缓存；`biz/internal/grounding/target_projection_reference_test.go`
   以旧完整 Facts.Normalized 路径固定 duplicate／stale／raw 表示、原值、返回隔离、重载、fuzz 与分配对照。
   此纯值投影参与既有 SM-2 authority 与 SM-3 admission，SM-1／SM-4 的转换和恢复规则不变。
+  semantic manifest／proposal／document hash 复用同次 `runtimeHashWriter` 短字段缓冲，仍保持原完整长度前缀、
+  字段顺序、集合 cardinality、长原文和 nested input-review/target/obligation 编码；规范化与完整校验不变。
+  `runtime_semantic_buffered_hash_test.go` 使用原非缓冲 hash 路径固定原 bytes、有效 sealed ledger 重载、
+  fuzz 和长短字段分配；不缓存 proposal 身份或 validation 成功，不改任何 SM 转换、预算或恢复规则。
   execution-budget policy 在一次完整 `Validate` 中复用已规范化的 detached policy 编码 hash，使用同次短字段缓冲，
   不重复深拷贝／排序；公开 hash 入口仍先规范化，所有维度、数值、duplicate、scope、restart 和 hash 门禁及拒绝顺序不变。
   `runtime_execution_budget_policy_single_pass_test.go` 以完整旧 validator/hash reference 固定原 bytes、长字段、非法输入、
