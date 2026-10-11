@@ -131,6 +131,9 @@ func (m *Biz) queryDefinitionChange(ctx context.Context, cmd workspaceevents.Que
 		}
 		value := definitionChangePreparationResult(w, *c).Candidate
 		result.Candidate = &value
+		if identity, err := c.ReviewedIdentity(w); err == nil {
+			result.Reviewed = &identity
+		}
 	}
 	return result, result.ValidateFor(cmd)
 }

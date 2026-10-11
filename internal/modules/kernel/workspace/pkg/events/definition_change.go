@@ -4,6 +4,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -75,6 +77,7 @@ type QueryDefinitionChangeResult struct {
 	WorkspaceID       common.WorkspaceID
 	WorkspaceRevision uint64
 	Candidate         *DefinitionChangeCandidate
+	Reviewed          *workspace.DefinitionChangeReviewedIdentity
 }
 
 func (r QueryDefinitionChangeResult) ValidateFor(c QueryDefinitionChangeCommand) error {
@@ -82,9 +85,23 @@ func (r QueryDefinitionChangeResult) ValidateFor(c QueryDefinitionChangeCommand)
 		return common.ErrConflict
 	}
 	if r.Candidate == nil {
+		if r.Reviewed != nil {
+			return common.ErrConflict
+		}
 		return nil
 	}
 	v := r.Candidate
+	if r.Reviewed != nil {
+		record, err := v.Record.Model()
+		if err != nil {
+			return common.ErrConflict
+		}
+		model := workspace.DefinitionChangeCandidate{RequestID: v.RequestID, TicketID: v.TicketID, BaseDefinitionRevision: v.BaseDefinitionRevision, BaseStartupInputHash: v.BaseStartupInputHash, BaseInputHash: v.BaseInputHash, Record: record}
+		identity, err := model.ReviewedIdentityView(r.WorkspaceID)
+		if err != nil || identity != *r.Reviewed {
+			return common.ErrConflict
+		}
+	}
 	return (PrepareDefinitionChangeResult{WorkspaceID: r.WorkspaceID, WorkspaceRevision: r.WorkspaceRevision, Candidate: *v}).ValidateFor(PrepareDefinitionChangeCommand{
 		WorkspaceID: c.WorkspaceID, RequestID: v.RequestID, ExpectedWorkspaceRevision: v.ExpectedWorkspaceRevision,
 		TicketID: v.TicketID, ProposalRevision: v.ProposalRevision, ProposalHash: v.ProposalHash,

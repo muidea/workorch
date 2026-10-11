@@ -31,7 +31,9 @@ Last Verified: 2026-08-30
 
 ### 合同变更待审输入
 
-`PrepareDefinitionChangeCommand/Result` 与 `QueryDefinitionChangeCommand/Result` 只接受 Application source。准备命令仅传 Ticket/version/hash 与 Workspace CAS 身份；Workspace 在自身 mutation lock 外读取 Decision 原持久最新版本和 Run inventory，再在原规格 private dispatcher 内核对输入、模板和定义基线并 CAS。读取是原版本观察，不保证与并发 Decision 修订或启动构成跨 owner 原子事务，不能用于批准或激活。
+`PrepareDefinitionChangeCommand/Result` 只接受 Application source；`QueryDefinitionChangeCommand/Result` 另允许 exact `blocks/decision` 只读反证最终材料。准备命令仅传 Ticket/version/hash 与 Workspace CAS 身份；Workspace 在自身 mutation lock 外读取 Decision 原持久最新版本和 Run inventory，再在原规格 private dispatcher 内核对输入、模板和定义基线并 CAS。读取是原版本观察，不保证与并发 Decision 修订或启动构成跨 owner 原子事务，不能用于批准或激活。
+
+查询从持久原文账本重建 `DefinitionChangeReviewedIdentity`：当前唯一完整派生、唯一 strict mapping 提案、六份独立完整 PASS 和逐义务验证声明全部满足时才返回身份。未决、失败、漏审、歧义或陈旧输入不产生已审身份；detached DTO 重编同一身份并核对所有字段，但不能替代 owner 对原 mapping bytes 的重验。ID/hash 绑定 Workspace、Ticket、准备请求、原基线、候选输入、模板、资源快照、派生 permit、proposal 与六审规格；不绑定随后 Decision 追加版，避免循环身份。它是持久审查材料身份，不是当前资源／模板 readiness、批准、confirmation journal 或启动回执；查询不产生任何持久写入。
 
 `DefinitionChangeCandidate` 保存既有 `DefinitionAuthoringRecord` 的独立待审输入，不新增 confirmation journal、批准副本或正式定义权威。当前仅映射 exact `authoring-goal` 修改及 `derived-dod:user:NNNNNN` 用户验收的增删改；原文必须匹配当前输入，模板／生成判据和约束等不能映射的变更明确拒绝，不猜测语义。原当前 record、Goal／DoD、startup、admission 和 materialized journal 均保持不变；全部旧 permit、审查、诊断及预算历史继承，新 input revision/hash 不能借用旧六审确认。原始候选记录 detached，包含诊断时沿原 0600 原子发布与读取门禁保护。
 

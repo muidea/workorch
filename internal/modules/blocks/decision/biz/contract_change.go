@@ -26,18 +26,37 @@ func (m *Biz) handleRegisterContractChangeProposal(ev magicevent.Event, result m
 		setDefinitionClarificationResult(result, decisionevents.RegisterContractChangeProposalResult{}, err)
 		return
 	}
-	unlock := m.lockWorkspaceMutation(cmd.Proposal.WorkspaceID)
-	defer unlock()
-	if err := m.rejectFencedWorkspace(ev.Context(), cmd.Proposal.WorkspaceID); err != nil {
-		setDefinitionClarificationResult(result, decisionevents.RegisterContractChangeProposalResult{}, err)
-		return
-	}
 	response, err := m.registerContractChangeProposal(ev.Context(), cmd)
 	setDefinitionClarificationResult(result, response, err)
 }
 
 func (m *Biz) registerContractChangeProposal(ctx context.Context, cmd decisionevents.RegisterContractChangeProposalCommand) (decisionevents.RegisterContractChangeProposalResult, error) {
 	if err := cmd.Validate(); err != nil {
+		return decisionevents.RegisterContractChangeProposalResult{}, err
+	}
+	// 跨 owner 查询先于本 owner mutation 锁，避免与 Workspace 删除协调互等。
+	if cmd.Proposal.FinalCandidate != nil {
+		bound, err := common.BindRuntimeWorkspaceContext(ctx, cmd.Proposal.WorkspaceID)
+		if err != nil {
+			return decisionevents.RegisterContractChangeProposalResult{}, err
+		}
+		existing, err := m.tickets.Get(bound, cmd.TicketID)
+		if err != nil {
+			return decisionevents.RegisterContractChangeProposalResult{}, err
+		}
+		replay := false
+		for _, revision := range existing.ContractChangeRevisions {
+			replay = replay || revision.RequestID == cmd.RequestID
+		}
+		if !replay {
+			if err := m.verifyContractChangeFinalCandidate(ctx, cmd); err != nil {
+				return decisionevents.RegisterContractChangeProposalResult{}, err
+			}
+		}
+	}
+	unlock := m.lockWorkspaceMutation(cmd.Proposal.WorkspaceID)
+	defer unlock()
+	if err := m.rejectFencedWorkspace(ctx, cmd.Proposal.WorkspaceID); err != nil {
 		return decisionevents.RegisterContractChangeProposalResult{}, err
 	}
 	bound, err := common.BindRuntimeWorkspaceContext(ctx, cmd.Proposal.WorkspaceID)
@@ -80,7 +99,7 @@ func (m *Biz) registerContractChangeProposal(ctx context.Context, cmd decisionev
 			ContractChange: &decisionmodel.ContractChangeRevision{RequestID: cmd.RequestID, Revision: cmd.ExpectedRevision + 1, Hash: cmd.Proposal.Hash(), Proposal: cmd.Proposal.Clone()},
 		})
 	} else {
-		if cmd.ExpectedRevision != 0 {
+		if cmd.ExpectedRevision != 0 || cmd.Proposal.FinalCandidate != nil {
 			return decisionevents.RegisterContractChangeProposalResult{}, common.ErrConflict
 		}
 		seed := &decisionmodel.Ticket{ID: cmd.TicketID, WorkspaceID: cmd.Proposal.WorkspaceID, RunID: cmd.Proposal.RunID,

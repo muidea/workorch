@@ -89,7 +89,12 @@ func TestContractChangeRegistrationMountedOwnerKeepsHistoryWithoutApproval(t *te
 			next.ExpectedHash = first.Hash
 			next.Proposal = cmd.Proposal.Clone()
 			next.Proposal.WhyChange += "\r\n补充原因"
-			next.Proposal.FinalCandidate = &decisionmodel.ContractChangeCandidate{ID: "final-candidate", Revision: 2, Hash: "final-hash"}
+			selfDeclared := next
+			selfDeclared.Proposal = next.Proposal.Clone()
+			selfDeclared.Proposal.FinalCandidate = &decisionmodel.ContractChangeCandidate{ID: "final-candidate", Revision: 2, Hash: "final-hash"}
+			if _, err := sendDecisionOwnerContractCommand(ctx, hub, decisionevents.TopicRegisterContractChangeProposal, workspaceDefinitionClarificationSource, selfDeclared); err == nil {
+				t.Fatal("自报最终候选未经 Workspace 原事实登记")
+			}
 			register(next, "registered")
 			register(cmd, "duplicate")
 			conflict := next

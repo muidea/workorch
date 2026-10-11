@@ -23,7 +23,7 @@ func (m *Biz) handleDefinitionSpecificationCommand(ev magicevent.Event, result m
 	if result == nil {
 		return
 	}
-	if ev == nil || m == nil || m.workspaces == nil || (ev.Source() != definitionSpecificationCommandSource && ((ev.ID() != workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery || ev.Source() != "blocks/file") && ev.ID() != workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery)) {
+	if ev == nil || m == nil || m.workspaces == nil || (ev.Source() != definitionSpecificationCommandSource && !(ev.ID() == workspaceevents.TopicWorkspaceDefinitionChangeQuery && ev.Source() == "blocks/decision") && ((ev.ID() != workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery || ev.Source() != "blocks/file") && ev.ID() != workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery)) {
 		result.Set(nil, &cd.Error{Code: cd.IllegalParam, Message: common.ErrInvalidArgument.Error(), Cause: common.ErrInvalidArgument})
 		return
 	}

@@ -27,14 +27,15 @@ import (
 
 type definitionChangeReviewProviderHub struct {
 	*fullSizeAuthoringProviderHub
-	loseCompletion  bool
-	loseReserve     bool
-	lostCompletions int
+	loseCompletion   bool
+	loseReserve      bool
+	loseRegistration bool
+	lostCompletions  int
 }
 
 func (h *definitionChangeReviewProviderHub) Send(ev magicevent.Event) magicevent.Result {
 	response := h.fullSizeAuthoringProviderHub.Send(ev)
-	if h.loseCompletion && (ev.ID() == workspaceevents.TopicWorkspaceDerivationComplete || ev.ID() == workspaceevents.TopicWorkspaceAuthoringSpecificationComplete) || h.loseReserve && ev.ID() == workspaceevents.TopicWorkspaceDerivationReserve {
+	if h.loseCompletion && (ev.ID() == workspaceevents.TopicWorkspaceDerivationComplete || ev.ID() == workspaceevents.TopicWorkspaceAuthoringSpecificationComplete) || h.loseReserve && ev.ID() == workspaceevents.TopicWorkspaceDerivationReserve || h.loseRegistration && ev.ID() == decisionevents.TopicRegisterContractChangeProposal {
 		h.lostCompletions++
 		lost := magicevent.NewResult(ev.ID(), ev.Source(), ev.Destination())
 		lost.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "实际 completion 持久写后响应丢失"})
@@ -190,6 +191,9 @@ func testDefinitionChangeCandidateReview(t *testing.T, scenario string) {
 		t.Fatal(err)
 	}
 	hash := prepared.Candidate.Record.InputHash
+	if _, err := app.RegisterReviewedDefinitionChange(ctx, id, "premature-final"); err == nil || calls != 8 {
+		t.Fatal("未审候选登记最终身份")
+	}
 	hub.loseCompletion = scenario == "complete_lost"
 	if scenario == "reserve_lost" || scenario == "proposal_drift" {
 		if scenario == "reserve_lost" {
@@ -300,6 +304,63 @@ func testDefinitionChangeCandidateReview(t *testing.T, scenario string) {
 			if err != nil || audit.Audit.Document.SHA256 != request.SuccessAudit.Document.SHA256 {
 				t.Fatalf("候选原文审计=%v", err)
 			}
+		}
+	}
+	if scenario == "complete_lost" {
+		view, err := app.QueryDefinitionChange(ctx, workspaceevents.QueryDefinitionChangeCommand{WorkspaceID: id})
+		if err != nil || view.Reviewed == nil {
+			t.Fatalf("最终候选 identity=%v", err)
+		}
+		identity := *view.Reviewed
+		view.Reviewed.Hash = "污染副本"
+		if view.ValidateFor(workspaceevents.QueryDefinitionChangeCommand{WorkspaceID: id}) == nil {
+			t.Fatal("detached reviewed hash 未反证")
+		}
+		for name, mutate := range map[string]func(*decisionmodel.ContractChangeProposal){
+			"self_hash":          func(p *decisionmodel.ContractChangeProposal) { p.FinalCandidate.Hash = "self-declared" },
+			"wrong_id":           func(p *decisionmodel.ContractChangeProposal) { p.FinalCandidate.ID = "other-candidate" },
+			"wrong_revision":     func(p *decisionmodel.ContractChangeProposal) { p.FinalCandidate.Revision++ },
+			"changed_reason":     func(p *decisionmodel.ContractChangeProposal) { p.WhyChange = "未重新审查的新原因" },
+			"changed_difference": func(p *decisionmodel.ContractChangeProposal) { p.Differences[0].ProposedText = "未审新目标" },
+		} {
+			forged := proposal.Clone()
+			forged.FinalCandidate = &decisionmodel.ContractChangeCandidate{ID: identity.ID, Revision: identity.Revision, Hash: identity.Hash}
+			mutate(&forged)
+			if _, err := app.RegisterContractChangeProposal(ctx, decisionevents.RegisterContractChangeProposalCommand{TicketID: registration.TicketID, RequestID: "forged-final-" + name, ExpectedRevision: registration.Revision, ExpectedHash: registration.Hash, Proposal: forged}); err == nil {
+				t.Fatalf("错误最终材料登记=%s", name)
+			}
+		}
+		unchanged, err := repos.Tickets.Get(common.ContextWithRuntimeWorkspaceID(ctx, id), registration.TicketID)
+		if err != nil || len(unchanged.ContractChangeRevisions) != 1 {
+			t.Fatalf("最终登记拒绝仍追加版本=%v", err)
+		}
+		hub.loseRegistration = true
+		if _, err := app.RegisterReviewedDefinitionChange(ctx, id, "final-register"); err == nil {
+			t.Fatal("登记实际写后丢响应未模拟")
+		}
+		hub.loseRegistration = false
+		final, err := app.RegisterReviewedDefinitionChange(ctx, id, "final-register")
+		if err != nil || final.Disposition != "duplicate" || final.Revision != registration.Revision+1 {
+			t.Fatalf("最终登记=%v", err)
+		}
+		duplicate, err := freshApp.RegisterReviewedDefinitionChange(ctx, id, "final-register")
+		if err != nil || duplicate.Disposition != "duplicate" || duplicate.Revision != final.Revision || duplicate.Hash != final.Hash {
+			t.Fatalf("最终登记重放=%v", err)
+		}
+		current, err := app.QueryDefinitionChange(ctx, workspaceevents.QueryDefinitionChangeCommand{WorkspaceID: id})
+		if err != nil || current.Reviewed == nil || *current.Reviewed != identity || calls != 16 {
+			t.Fatalf("登记后候选 identity 漂移=%v", err)
+		}
+		ticket, err := repos.Tickets.Get(common.ContextWithRuntimeWorkspaceID(ctx, id), registration.TicketID)
+		if err != nil || len(ticket.ContractChangeRevisions) != 2 || ticket.ContractChangeRevisions[1].Proposal.FinalCandidate.Hash != identity.Hash {
+			t.Fatalf("原版本 append=%v", err)
+		}
+		if resolution, err := repos.Resolutions.GetByTicketID(common.ContextWithRuntimeWorkspaceID(ctx, id), registration.TicketID); resolution != nil || !errors.Is(err, common.ErrNotFound) {
+			t.Fatalf("登记偷生批准=%v", err)
+		}
+		persisted, err := repos.Workspaces.Get(ctx, id)
+		if err != nil || !reflect.DeepEqual(after, persisted) {
+			t.Fatalf("最终登记改写 Workspace=%v", err)
 		}
 	}
 }
