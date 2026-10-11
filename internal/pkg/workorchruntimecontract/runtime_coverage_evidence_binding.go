@@ -577,9 +577,24 @@ func ValidateRuntimeFocusEvidenceDeclaration(focus CoverageFocus) error {
 // validation uses it to reject an invalid persisted shape.  It never observes
 // an owner receipt or grants coverage credit.
 func RuntimeFocusRequiresIndependentEvidenceBinding(focus CoverageFocus) bool {
-	focus = focus.Normalized()
-	return containsEvidenceKind(focus.RequiredEvidenceKinds, EvidenceKindValidation) ||
-		focus.RequireExecutableBehaviorEvidence || len(focus.RequiredOwnerFacts) != 0 || len(focus.MetricConstraints) != 0 || len(focus.ArtifactRefs) != 0
+	if containsEvidenceKind(focus.RequiredEvidenceKinds, EvidenceKindValidation) || focus.RequireExecutableBehaviorEvidence {
+		return true
+	}
+	// 仅投影原规范化后是否仍有声明；不复制无关 binding、proof 或诊断。
+	for _, raw := range focus.RequiredOwnerFacts {
+		value := raw.Normalized()
+		if value.OwnerModuleID != "" && value.FactKind != "" && value.OperationKind != "" {
+			return true
+		}
+	}
+	for _, values := range [][]string{focus.MetricConstraints, focus.ArtifactRefs} {
+		for _, value := range values {
+			if strings.TrimSpace(value) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func containsEvidenceKind(values []string, wanted string) bool {

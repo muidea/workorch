@@ -149,6 +149,12 @@ capability resource state。
   `runtime_target_parameter_static_contract_test.go` 保留旧完整 validator 并接入旧 catalog oracle，固定全库存、
   raw 表示、反例、原值、JSON 重载、公开副本污染、并发、fuzz 和分配；不缓存 owner facts/preimage/校验成功，
   此静态查询不改变 SM-1～SM-4 转换、sealed target authority、持久化、预算或恢复规则。
+  independent-binding 谓词只投影原规范化后声明的存在性，不复制无关 focus binding、proof 或诊断；
+  空白 metric/artifact 与缺失 owner/fact/operation identity 的条目仍按原规范化丢弃，非空非法声明不在谓词中静默过滤。
+  完整 focus declaration 的 verification、owner requirement、convergence、单 CWI 与 wildcard 门禁及拒绝顺序保留。
+  `runtime_independent_binding_predicate_test.go` 对照旧完整规范化谓词与声明 validator，固定原输入、nil/empty、
+  非法声明、公开副本隔离、JSON 重载、后续变化、fuzz 和零分配；此纯查询不授 credit、不缓存校验成功，
+  不改变 SM-1～SM-4 转换、持久化、预算或恢复权威。
   这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
   current focus 的 target-selection 纯投影只规范化实际返回的 selection，并按原 trim／首个同 ID prerequisite
   语义比较 Kind／Scope／FocusID，不复制无关 Definition、证据、catalog 或 coverage。原完整 aggregate/raw/hash
