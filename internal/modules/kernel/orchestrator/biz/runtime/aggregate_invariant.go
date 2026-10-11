@@ -21,6 +21,7 @@ func (a RuntimeAggregate) Validate() error {
 	if err := runtimecontract.ValidateRuntimeResultFeedbackVersion(a.ResultFeedbackVersion); err != nil {
 		return err
 	}
+	// 同次完整门禁只生成一次 detached dispatch；各阶段仍执行原完整校验。
 	var active *runtimecontract.RuntimeDispatchRecord
 	if a.ActiveDispatch != nil {
 		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
@@ -53,7 +54,7 @@ func (a RuntimeAggregate) Validate() error {
 	if err := runtimecontract.ValidateRuntimeAssessmentAdjudications(a.Facts, completed, a.CoverageProofLineage, runtimeLineageAssertionSources(a)); err != nil {
 		return fmt.Errorf("runtime aggregate assessment adjudication: %w", err)
 	}
-	if err := validateRuntimeAggregateSM2Authority(a); err != nil {
+	if err := validateRuntimeAggregateSM2Authority(a, active, completed); err != nil {
 		return err
 	}
 	if err := validateRuntimeAggregateSM3ActiveDispatch(a); err != nil {
@@ -62,7 +63,7 @@ func (a RuntimeAggregate) Validate() error {
 	if err := validateRuntimeAggregateActivationFence(a); err != nil {
 		return err
 	}
-	if err := validateRuntimeAggregateSM3CandidateTransaction(a); err != nil {
+	if err := validateRuntimeAggregateSM3CandidateTransaction(a, active, completed); err != nil {
 		return err
 	}
 	if err := validateRuntimeAggregateExecutionBudget(a); err != nil {
@@ -71,10 +72,10 @@ func (a RuntimeAggregate) Validate() error {
 	if err := validateRuntimeAggregateRecoverableWaits(a); err != nil {
 		return err
 	}
-	if err := validateRuntimeAggregateOperationRecoveryAuthorizations(a); err != nil {
+	if err := validateRuntimeAggregateOperationRecoveryAuthorizations(a, active, completed); err != nil {
 		return err
 	}
-	if err := validateRuntimeAggregateGovernanceLedgers(a); err != nil {
+	if err := validateRuntimeAggregateGovernanceLedgers(a, active, completed); err != nil {
 		return err
 	}
 	if err := validateRuntimeAggregateSM4DeliveryAcknowledgements(a); err != nil {
@@ -86,20 +87,15 @@ func (a RuntimeAggregate) Validate() error {
 	if err := validateRuntimeAggregateSM4DriveLease(a); err != nil {
 		return err
 	}
-	return validateRuntimeAggregateCrossMachineFences(a)
+	return validateRuntimeAggregateCrossMachineFences(a, active, completed)
 }
 
-func validateRuntimeAggregateOperationRecoveryAuthorizations(a RuntimeAggregate) error {
-	var active *runtimecontract.RuntimeDispatchRecord
-	if a.ActiveDispatch != nil {
-		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
-		active = &value
-	}
+func validateRuntimeAggregateOperationRecoveryAuthorizations(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
 	if err := runtimecontract.ValidateRuntimeOperationRecoveryAuthorizations(
 		a.Facts.WorkspaceID,
 		a.Facts.RunID,
 		active,
-		sealedDispatchesToRuntimeRecords(a.CompletedDispatches),
+		completed,
 		a.OperationReceipts,
 		a.OperationRecoveryAuthorizations,
 		a.Facts.Recovery,
@@ -155,7 +151,7 @@ func validateRuntimeAggregateExecutionBudget(a RuntimeAggregate) error {
 	return nil
 }
 
-func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
+func validateRuntimeAggregateSM2Authority(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
 	if a.Facts.WorkspaceID == "" || a.Facts.RunID == "" {
 		return fmt.Errorf("runtime aggregate requires workspace and run scope")
 	}
@@ -165,12 +161,6 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate) error {
 	if err := validateRuntimeCWISemanticRebindingFocusProjections(a.Facts); err != nil {
 		return err
 	}
-	var active *runtimecontract.RuntimeDispatchRecord
-	if a.ActiveDispatch != nil {
-		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
-		active = &value
-	}
-	completed := sealedDispatchesToRuntimeRecords(a.CompletedDispatches)
 	if err := runtimecontract.ValidateRuntimeCWIBindingRetirementsAgainstExecution(a.Facts, active, completed, a.OperationReceipts); err != nil {
 		return err
 	}
@@ -482,7 +472,7 @@ func validateRuntimeAggregateActivationFence(a RuntimeAggregate) error {
 	return nil
 }
 
-func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate) error {
+func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
 	if err := runtimecontract.ValidateRuntimeCandidateAttemptRecordsForScope(a.Facts.WorkspaceID, a.Facts.RunID, a.CandidateAttempts); err != nil {
 		return err
 	}
@@ -504,15 +494,9 @@ func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate) error {
 	if hasUnreducedCurrentCandidateRetryFailure(a.Decision, a.CandidateAttempts) {
 		return fmt.Errorf("current runtime authority retains a failed candidate attempt 1 without reducer transition")
 	}
-	if err := validateAcceptedCandidateDispatchBindings(a); err != nil {
+	if err := validateAcceptedCandidateDispatchBindings(a.CandidateAttempts, active, completed); err != nil {
 		return err
 	}
-	var active *runtimecontract.RuntimeDispatchRecord
-	if a.ActiveDispatch != nil {
-		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
-		active = &value
-	}
-	completed := sealedDispatchesToRuntimeRecords(a.CompletedDispatches)
 	if err := runtimecontract.ValidateRuntimeDispatchAdmissionLineage(
 		active,
 		completed,
@@ -695,15 +679,15 @@ func validateRuntimeCandidateAttemptSessionBindings(attempts []runtimecontract.R
 	return nil
 }
 
-func validateAcceptedCandidateDispatchBindings(a RuntimeAggregate) error {
-	for _, attempt := range a.CandidateAttempts {
+func validateAcceptedCandidateDispatchBindings(attempts []runtimecontract.RuntimeCandidateAttemptRecord, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
+	for _, attempt := range attempts {
 		if attempt.State != runtimecontract.RuntimeCandidateAttemptStateAccepted {
 			continue
 		}
-		matched := a.ActiveDispatch != nil && runtimecontract.RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt, sealedDispatchToRuntimeRecord(*a.ActiveDispatch))
+		matched := active != nil && runtimecontract.RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt, *active)
 		if !matched {
-			for _, dispatch := range a.CompletedDispatches {
-				if runtimecontract.RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt, sealedDispatchToRuntimeRecord(dispatch)) {
+			for _, dispatch := range completed {
+				if runtimecontract.RuntimeAcceptedCandidateAttemptMatchesDispatch(attempt, dispatch) {
 					matched = true
 					break
 				}
@@ -716,7 +700,7 @@ func validateAcceptedCandidateDispatchBindings(a RuntimeAggregate) error {
 	return nil
 }
 
-func validateRuntimeAggregateGovernanceLedgers(a RuntimeAggregate) error {
+func validateRuntimeAggregateGovernanceLedgers(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
 	if err := validateRuntimeInputReviewAggregate(a); err != nil {
 		return err
 	}
@@ -757,12 +741,7 @@ func validateRuntimeAggregateGovernanceLedgers(a RuntimeAggregate) error {
 			}
 		}
 	}
-	var active *runtimecontract.RuntimeDispatchRecord
-	if a.ActiveDispatch != nil {
-		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
-		active = &value
-	}
-	if err := runtimecontract.ValidateRuntimeOperationReceiptExecutionLineage(active, sealedDispatchesToRuntimeRecords(a.CompletedDispatches), a.OperationReceipts); err != nil {
+	if err := runtimecontract.ValidateRuntimeOperationReceiptExecutionLineage(active, completed, a.OperationReceipts); err != nil {
 		return err
 	}
 	return validateRuntimeAggregateEvidenceCommitLedger(a)
@@ -2214,36 +2193,26 @@ func validateRuntimeAggregateSM4DriveLease(a RuntimeAggregate) error {
 	return nil
 }
 
-func validateRuntimeAggregateCrossMachineFences(a RuntimeAggregate) error {
-	if err := validateRuntimeGovernanceRequestDispatchBindings(a); err != nil {
+func validateRuntimeAggregateCrossMachineFences(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
+	if err := validateRuntimeGovernanceRequestDispatchBindings(a, active, completed); err != nil {
 		return err
 	}
-	if err := validateRuntimeOperationGovernanceBindingFences(a); err != nil {
+	if err := validateRuntimeOperationGovernanceBindingFences(a, active, completed); err != nil {
 		return err
 	}
 	return validateRuntimeGovernanceResolutionBindings(a)
 }
 
-func validateRuntimeGovernanceRequestDispatchBindings(a RuntimeAggregate) error {
-	var active *runtimecontract.RuntimeDispatchRecord
-	if a.ActiveDispatch != nil {
-		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
-		active = &value
-	}
-	return runtimecontract.ValidateRuntimeGovernanceRequestDispatchLineage(a.GovernanceRequests, active, sealedDispatchesToRuntimeRecords(a.CompletedDispatches))
+func validateRuntimeGovernanceRequestDispatchBindings(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
+	return runtimecontract.ValidateRuntimeGovernanceRequestDispatchLineage(a.GovernanceRequests, active, completed)
 }
 
-func validateRuntimeOperationGovernanceBindingFences(a RuntimeAggregate) error {
-	var active *runtimecontract.RuntimeDispatchRecord
-	if a.ActiveDispatch != nil {
-		value := sealedDispatchToRuntimeRecord(*a.ActiveDispatch)
-		active = &value
-	}
+func validateRuntimeOperationGovernanceBindingFences(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
 	if err := runtimecontract.ValidateRuntimeDispatchExecutionKeyLineage(
 		a.Facts.WorkspaceID,
 		a.Facts.RunID,
 		active,
-		sealedDispatchesToRuntimeRecords(a.CompletedDispatches),
+		completed,
 		a.OperationGovernanceBindings,
 	); err != nil {
 		return err

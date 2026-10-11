@@ -828,7 +828,10 @@ func TestRuntimeAggregateValidationPhasesRejectOwnedInvalidState(t *testing.T) {
 			mutate: func(value *RuntimeAggregate) {
 				value.Facts.WorkspaceID = ""
 			},
-			validate: validateRuntimeAggregateSM2Authority,
+			validate: func(a RuntimeAggregate) error {
+				active, completed := referenceAggregateDispatchProjection(a)
+				return validateRuntimeAggregateSM2Authority(a, active, completed)
+			},
 		},
 		{
 			name: "sm3 active dispatch",
@@ -849,14 +852,20 @@ func TestRuntimeAggregateValidationPhasesRejectOwnedInvalidState(t *testing.T) {
 			mutate: func(value *RuntimeAggregate) {
 				value.CandidateAttempts = []runtimecontract.RuntimeCandidateAttemptRecord{{}}
 			},
-			validate: validateRuntimeAggregateSM3CandidateTransaction,
+			validate: func(a RuntimeAggregate) error {
+				active, completed := referenceAggregateDispatchProjection(a)
+				return validateRuntimeAggregateSM3CandidateTransaction(a, active, completed)
+			},
 		},
 		{
 			name: "governance ledger",
 			mutate: func(value *RuntimeAggregate) {
 				value.GovernanceRequests = []runtimecontract.RuntimeGovernanceRequestRecord{{}}
 			},
-			validate: validateRuntimeAggregateGovernanceLedgers,
+			validate: func(a RuntimeAggregate) error {
+				active, completed := referenceAggregateDispatchProjection(a)
+				return validateRuntimeAggregateGovernanceLedgers(a, active, completed)
+			},
 		},
 		{
 			name: "sm4 delivery acknowledgement",
@@ -891,7 +900,10 @@ func TestRuntimeAggregateValidationPhasesRejectOwnedInvalidState(t *testing.T) {
 			mutate: func(value *RuntimeAggregate) {
 				value.GovernanceRequests = []runtimecontract.RuntimeGovernanceRequestRecord{{}}
 			},
-			validate: validateRuntimeAggregateCrossMachineFences,
+			validate: func(a RuntimeAggregate) error {
+				active, completed := referenceAggregateDispatchProjection(a)
+				return validateRuntimeAggregateCrossMachineFences(a, active, completed)
+			},
 		},
 	}
 

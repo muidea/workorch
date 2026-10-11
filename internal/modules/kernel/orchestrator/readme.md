@@ -175,6 +175,13 @@ capability resource state。
   supplemental check 与 execution stages hash 不参与排序、不被改写，返回集合仍 detached，完整重复／协议门禁不变。
   `runtime_attestation_typed_stable_sort_test.go` 对照旧完整排序固定多键、重复、原值、Clone 隔离、重载、后续变化、
   fuzz 与分配；不改 SM-1～SM-4 转换、native proof 或持久化权威。
+  aggregate 完整门禁内只生成一次 detached active/completed dispatch 原值投影，并交各私有阶段只读复用；
+  SM-2、SM-3、operation recovery、receipt/governance 与 cross-machine 校验及原拒绝顺序仍全部执行。
+  accepted-candidate 精确匹配复用同一投影，不从 dispatch 回填独立 admission 前像；公开后续 Validate 与 Coordinator
+  after-image／独立前像／revision fence 仍重验，不保存成功凭据或跨调用缓存。
+  `biz/runtime/aggregate_dispatch_projection_reference_test.go` 保留原完整调用次序及各阶段重复投影；
+  `biz/runtime/aggregate_dispatch_projection_reuse_test.go` 固定完整拒绝、原值、投影隔离、重载、后续篡改、CAS、fuzz 与分配，
+  不改变 SM-1～SM-4 转换、持久化、预算或恢复权威。
   这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
   current focus 的 target-selection 纯投影只规范化实际返回的 selection，并按原 trim／首个同 ID prerequisite
   语义比较 Kind／Scope／FocusID，不复制无关 Definition、证据、catalog 或 coverage。原完整 aggregate/raw/hash
