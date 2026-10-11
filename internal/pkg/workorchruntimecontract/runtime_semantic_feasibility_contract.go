@@ -251,16 +251,6 @@ func runtimeSemanticOwnerTargetPolicies(catalog RuntimeOperationAdmissibility, k
 	return ret
 }
 
-func runtimeSemanticVariantExists(contract RuntimeOperationContract, variantID string) bool {
-	variantID = strings.TrimSpace(variantID)
-	for _, variant := range contract.Variants {
-		if variant.ID == variantID {
-			return true
-		}
-	}
-	return false
-}
-
 func containsCanonicalOperationKind(values []string, wanted string) bool {
 	wanted = CanonicalRuntimeBlockKind(wanted)
 	for _, value := range values {

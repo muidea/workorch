@@ -107,21 +107,12 @@ func (c RuntimeOwnerFactConvergence) Validate() error {
 	if !found || descriptor.OwnerModuleID != c.AcquisitionOwnerModuleID {
 		return fmt.Errorf("owner-fact acquisition operation %q does not belong to owner %q", c.AcquisitionOperationKind, c.AcquisitionOwnerModuleID)
 	}
-	if contract, found := RuntimeOperationContractForKind(c.AcquisitionOperationKind); found {
-		if len(contract.Variants) == 0 && c.AcquisitionOperationVariantID != "" {
+	if known, hasVariants, containsVariant := runtimeOperationVariantIdentity(c.AcquisitionOperationKind, c.AcquisitionOperationVariantID); known {
+		if !hasVariants && c.AcquisitionOperationVariantID != "" {
 			return fmt.Errorf("owner-fact acquisition operation %q does not declare a static variant", c.AcquisitionOperationKind)
 		}
-		if len(contract.Variants) != 0 {
-			matched := false
-			for _, variant := range contract.Variants {
-				if variant.ID == c.AcquisitionOperationVariantID {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				return fmt.Errorf("owner-fact acquisition operation %q requires one exact static variant", c.AcquisitionOperationKind)
-			}
+		if hasVariants && !containsVariant {
+			return fmt.Errorf("owner-fact acquisition operation %q requires one exact static variant", c.AcquisitionOperationKind)
 		}
 	}
 	switch c.AcquisitionTargetPolicy {

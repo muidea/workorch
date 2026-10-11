@@ -76,6 +76,11 @@ capability resource state。
   persisted revision 每次仍独立比较并返回 exact mismatch，不缓存 Run、manifest、raw/hash 或 aggregate 校验成功。
   `runtime_operation_contract_revision_reference_test.go` 保全原完整编码；
   `runtime_operation_contract_revision_static_test.go` 固定并发身份、公开库存副本隔离、后续 persisted 漂移拒绝与分配对照。
+  owner variant／convergence 的纯存在性查询从公开编译期 operation 合同派生本 binary 私有 variant ID 表，
+  不再为 known／has-variants／contains 查询构造完整参数、value rules 与约束；公开合同仍每次返回独立值，
+  owner、target policy、selector、constraint 和 acquisition 门禁仍逐项完整执行。
+  `runtime_operation_variant_identity_test.go` 保留两个旧完整 validator，以全部 descriptor/variant、非规范 kind、
+  任意 bytes、公开副本修改、并发、后续漂移、fuzz 与分配固定等价；不缓存运行数据或校验成功，SM-1～SM-4 转换不变。
   assessment purpose 前像在一次 ledger 遍历内使用同一 private semantic validation session；历史 generation 仍完整校验，
   manifest/catalog 仅在 exact raw 相等时复用本次产物，batch、document、owner feasibility 与唯一 binding 前像仍独立反证。
   `runtime_assessment_preimage_session_reference_test.go` 保留原逐代独立校验路径；

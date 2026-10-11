@@ -849,11 +849,11 @@ func (v RuntimeOperationAdmissibilityVariant) Validate(owner string, operationKi
 	if !ok || descriptor.OwnerModuleID != owner {
 		return fmt.Errorf("runtime operation admissibility variant %q does not belong to owner %q", v.Kind, owner)
 	}
-	contract, found := RuntimeOperationContractForKind(v.Kind)
-	if found && len(contract.Variants) != 0 && v.VariantID == "" {
+	known, hasVariants, containsVariant := runtimeOperationVariantIdentity(v.Kind, v.VariantID)
+	if known && hasVariants && v.VariantID == "" {
 		return fmt.Errorf("runtime operation admissibility kind %q requires a concrete variant fact", v.Kind)
 	}
-	if v.VariantID != "" && (!found || !runtimeSemanticVariantExists(contract, v.VariantID)) {
+	if v.VariantID != "" && (!known || !containsVariant) {
 		return fmt.Errorf("runtime operation admissibility variant %q/%q is outside owner operation contract", v.Kind, v.VariantID)
 	}
 	for _, raw := range rawPolicies {
