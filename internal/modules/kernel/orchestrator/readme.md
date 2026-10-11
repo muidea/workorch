@@ -138,6 +138,11 @@ capability resource state。
   长字段仍完整编码原 bytes；规范化、原长度前缀、字段次序、十进制／布尔表示、view 的原 dimension 顺序均不变。
   `runtime_budget_buffered_hash_test.go` 以独立旧非缓冲编码固定逐字段、边界整数、非法 bytes、长正文、nil/empty、
   原输入、完整 ledger 重载与后续篡改、fuzz 和分配；不保存 hash/校验成功缓存，也不改预算上限或 unknown 责任。
+  opaque `RuntimeStateRecord.Validate` 的 Definition/facts revision 比较只 trim 两个标量，不为身份读取
+  规范化无关的完整 Definition、catalog、proof 或诊断。前面的完整 raw facts、semantic、Definition 等门禁和错误顺序不变；
+  `runtime_state_revision_projection_test.go` 对照旧完整规范化，固定原 bytes、重载、fuzz 和零分配投影，
+  `biz/runtime/state_revision_projection_test.go` 从合法初始化记录固定 trim、mismatch、前置正文拒绝、重载与后续漂移。
+  此纯读取不提供成功凭据、不改变 SM-1～SM-4 转换、CAS、持久化或恢复权威。
   这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
   current focus 的 target-selection 纯投影只规范化实际返回的 selection，并按原 trim／首个同 ID prerequisite
   语义比较 Kind／Scope／FocusID，不复制无关 Definition、证据、catalog 或 coverage。原完整 aggregate/raw/hash

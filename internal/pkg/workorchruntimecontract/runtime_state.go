@@ -421,7 +421,7 @@ func (r RuntimeStateRecord) Validate() error {
 	if err := r.Definition.Validate(); err != nil {
 		return err
 	}
-	if r.Definition.Normalized().Revision != r.Facts.Normalized().DefinitionRevision {
+	if strings.TrimSpace(r.Definition.Revision) != strings.TrimSpace(r.Facts.DefinitionRevision) {
 		return fmt.Errorf("runtime state definition revision mismatch")
 	}
 	if !SameRuntimeSourceObligationInventory(r.Definition.SourceObligations, r.Facts.DefinitionSeed.SourceObligations) {
