@@ -10,7 +10,16 @@ Last Verified: 2026-08-30
 
 `blocks/decision` 是 DecisionTicket、DecisionResolution、Workspace/Runtime Definition clarification binding、Runtime governance resolution proposal、交付 checkpoint 和 Workspace deletion tombstone 的唯一 owner。它负责 ticket 的 `open → resolved`、resolution identity/fingerprint、clarification 与 Runtime governance 两阶段提交后的 owner-local恢复。
 
-Decision 的公开 surface 包含 8 个 ordinary command topics、1 个 Runtime governance open、1 个 capability acquisition 及 6 个 Definition clarification topics。每个 topic 使用独立 concrete command/result；不存在 generic ticket mutation envelope。
+Decision 的公开 surface 包含 8 个 ordinary command topics、1 个 Runtime governance open、1 个 capability acquisition、6 个 Definition clarification topics 及 1 个合同变更提案登记 topic。每个 topic 使用独立 concrete command/result；不存在 generic ticket mutation envelope。
+
+### 合同变更提案登记
+
+`RegisterContractChangeProposalCommand/Result` 只接受 exact `application/workorchd` source，使用既有 Ticket 保存 `contract_change` 的 append-only `ContractChangeRevisions`。每版绑定原请求、完整原因、逐项原文差异、影响、效果/receipt、未结成本和预算、授权及应用限制；可记录缺证据/unknown与拟议最终 candidate，但材料不构成批准、readiness 或 owner 已验证事实。无 Run 时使用真实 Input 或 Definition 基线，不伪造 Run；有 Run 必须携带封存 Definition 基线。登记不修改原 Definition/Run，也不新增 SM-1～SM-4 转换。影响条目的 `ProposedHandling` 仅为提出者建议（retain/recheck/invalidate_reopen/unknown），不裁定现有证据、CWI 或闭包的适用性；后续处理必须由相应 owner 根据已批准合同判断。
+
+首次 expected revision/hash 为空；修订须 exact 前版 CAS，且保持 Workspace/Run/base 身份。Ticket history 保存所有原版本和请求，同 key 异内容冲突，迟到 exact 请求返回原版回执。每份材料最多 128 KiB JSON bytes、32 版本、累计 1 MiB JSON bytes；超界显式拒绝整版，不截断。原文保留 CRLF/NUL，UTF-8 无效时拒绝而不经 JSON 替换。repository 在写锁内只接受旧历史完整一致的单版追加；file 同路径实例共用锁，持久写仍用原 atomic publish。当前支持同进程多 repository 实例及退出后的 file reopen，不宣称多进程并行写授权。
+
+本片尚无最终候选审查、可信授权主体 exact approve、Workspace 原 confirmation journal 应用或新 Run 激活入口。ordinary resolution、private 普通 resolved/recovered 转换、Governance auto policy 和 background reconciliation 均不得将此类材料降级为批准。也不发布 ordinary created/resolved 通知；Eventstream 拒绝该 kind 的普通通知。读取复用既有 scoped Get/List，副本 detached；响应丢失后沿原 TicketID/RequestID/version 查询及重放。缺 Resolution 的 open 登记不授任何权力；若出现非本合同 Resolution，登记 fail closed。旧一般票据不迁移为变更提案。
+
 
 ## 组件交互及合同
 
@@ -56,7 +65,7 @@ input subject 和具体问题；Decision 只管理 ticket/proposal lifecycle。`
 | 能力/维度 | 测试证据 | 结论 |
 | --- | --- | --- |
 | module lifecycle与核心依赖校验 | `module_test.go::TestModuleIdentityConfigureStartStopContract`、`module_test.go::TestModuleConfigureRequiresCoreDependencies` | 已覆盖 |
-| 16-topic inventory、ordinary semantic family、bounded scope/cursor | `biz/command_router_test.go::TestDecisionOwnerCommandInventoryCoversAllSixteenTypedTopics`、`biz/command_router_test.go::TestDecisionCommandTopicsHaveOneSemanticFamily`、`module_test.go::TestDecisionTicketListsAreExplicitBoundedAndCompositeCursorPaged` | 已覆盖完整公开command inventory与ordinary query边界 |
+| 17-topic inventory、ordinary semantic family、bounded scope/cursor | `biz/command_router_test.go::TestDecisionOwnerCommandInventoryCoversAllSeventeenTypedTopics`、`biz/command_router_test.go::TestDecisionCommandTopicsHaveOneSemanticFamily`、`module_test.go::TestDecisionTicketListsAreExplicitBoundedAndCompositeCursorPaged` | 已覆盖完整公开command inventory与ordinary query边界 |
 | ordinary ticket/resolution normal/duplicate/conflict/recovery | `biz/decision_service_test.go::TestService_ResolveTicket_OpenToResolvedAndPersistsResolution`、`biz/decision_service_test.go::TestService_EnsureResolvedTicket_IsIdempotentAndRejectsResolutionMismatch`、`biz/decision_service_test.go::TestBiz_ReconciliationClosesOrdinaryResolutionWriteCut` | 已覆盖 |
 | ordinary EnsureResolved exact source与零 mutation | `biz/owner_contract_test.go::TestDecisionOrdinaryResolutionAcceptsOnlyApplicationOrGovernanceSources` | 已覆盖；仅 `application/workorchd/appservice`、`kernel/governance` |
 | capability 与 clarification source matrix/zero mutation | `biz/owner_contract_test.go::TestDecisionRuntimeCapabilityAcquisitionIsOrchestratorOnly`、`biz/owner_contract_test.go::TestDecisionPrivilegedIngressRejectsForgedSourcesWithoutMutation`、`module_test.go::TestRuntimeGovernanceOpenRequiresOrchestratorSourceAndMatchingWorkspaceContext` | 已覆盖；fixture 可进入真实 owner mutation path |

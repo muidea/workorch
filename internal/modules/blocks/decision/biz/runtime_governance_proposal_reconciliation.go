@@ -152,7 +152,7 @@ func (m *Biz) reconcileDecisionTicket(ctx context.Context, observed *decisionmod
 	// Resolution as an ordinary resolution: the exact Workspace/Run owner
 	// command will idempotently re-drive the private clarification reducer and
 	// its delivery cut point.
-	if ticket.DefinitionClarification != nil || ticket.DecisionKind == "workspace_definition_clarification" || ticket.DecisionKind == "runtime_definition_clarification" {
+	if ticket.IsContractChange() || ticket.DefinitionClarification != nil || ticket.DecisionKind == "workspace_definition_clarification" || ticket.DecisionKind == "runtime_definition_clarification" {
 		return nil
 	}
 

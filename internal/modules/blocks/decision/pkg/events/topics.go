@@ -3,8 +3,9 @@ package events
 const NotificationDestination = "/decision/consumers/#"
 
 const (
-	TopicTicketCreated  = "/ticket/created"
-	TopicTicketResolved = "/ticket/resolved"
+	TopicRegisterContractChangeProposal = "/decision/contract-change/register-proposal"
+	TopicTicketCreated                  = "/ticket/created"
+	TopicTicketResolved                 = "/ticket/resolved"
 
 	TopicDecisionCommandGetTicket                           = "/decision/command/get-ticket"
 	TopicDecisionCommandListTickets                         = "/decision/command/list-tickets"

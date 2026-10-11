@@ -21,6 +21,7 @@ type Ticket struct {
 	AllowedRecoveryActions            []string
 	DefinitionClarification           *DefinitionClarificationBinding
 	RuntimeGovernanceProposal         *RuntimeGovernanceResolutionProposal
+	ContractChangeRevisions           []ContractChangeRevision
 	ResolvedAt                        string
 	ResolvedBy                        string
 	CreatedAt                         string
@@ -37,6 +38,7 @@ func CloneTicket(item *Ticket) *Ticket {
 	cloned.Context = item.Context.Clone()
 	cloned.AutoGovernance = item.AutoGovernance.Clone()
 	cloned.AllowedRecoveryActions = append([]string(nil), item.AllowedRecoveryActions...)
+	cloned.ContractChangeRevisions = CloneContractChangeRevisions(item.ContractChangeRevisions)
 	if item.DefinitionClarification != nil {
 		cloned.DefinitionClarification = item.DefinitionClarification.Clone()
 	}

@@ -193,6 +193,7 @@ func TicketCursor(item *decisionmodel.Ticket) string {
 
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
+		eventcontract.CommandTopic[RegisterContractChangeProposalCommand, RegisterContractChangeProposalResult]("decision", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicRegisterContractChangeProposal).MessageContract(),
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireRuntimeCapabilities).MessageContract(),
 		eventcontract.CommandTopic[GetTicketCommand, GetTicketResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandGetTicket).MessageContract(),
 		eventcontract.CommandTopic[ListTicketsCommand, ListTicketsResult]("decision", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicDecisionCommandListTickets).MessageContract(),

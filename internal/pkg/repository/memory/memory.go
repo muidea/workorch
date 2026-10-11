@@ -3403,6 +3403,9 @@ func (r *DecisionTicketRepository) Create(ctx context.Context, item *decision.Ti
 	if strings.TrimSpace(item.UpdatedAt) == "" {
 		item.UpdatedAt = item.CreatedAt
 	}
+	if item.IsContractChange() && (item.ValidateContractChange() != nil || len(item.ContractChangeRevisions) != 1) {
+		return common.ErrInvalidArgument
+	}
 	r.items[key] = cloneDecisionTicket(item)
 	return nil
 }
@@ -3536,8 +3539,12 @@ func (r *DecisionTicketRepository) Update(ctx context.Context, item *decision.Ti
 			item.WorkspaceID = r.items[key].WorkspaceID
 		}
 	}
-	if _, ok := r.items[key]; !ok {
+	if current, ok := r.items[key]; !ok {
 		return common.ErrNotFound
+	} else if current.IsContractChange() || item.IsContractChange() {
+		if err := decision.ValidateContractChangeAppend(current, item); err != nil {
+			return err
+		}
 	}
 	if strings.TrimSpace(item.CreatedAt) == "" {
 		item.CreatedAt = r.items[key].CreatedAt

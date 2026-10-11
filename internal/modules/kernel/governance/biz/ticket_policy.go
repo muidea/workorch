@@ -44,6 +44,11 @@ func (s *Service) evaluateTicket(ctx context.Context, ticket *decisionmodel.Tick
 		ret.policyBlocked = "invalid_ticket"
 		return ret
 	}
+	if ticket.IsContractChange() {
+		ret.policyBlocked = "contract_change_requires_exact_approval"
+		ret.reason = "合同变更登记不授予自动批准或应用权限"
+		return ret
+	}
 	if ticket.DefinitionClarification != nil || ticket.DecisionKind == "workspace_definition_clarification" || ticket.DecisionKind == "runtime_definition_clarification" {
 		ret.policyBlocked = "definition_clarification_requires_owner_contract"
 		ret.reason = "Definition clarification can only be resolved by corrected admission or a Run-owned replacement intent"

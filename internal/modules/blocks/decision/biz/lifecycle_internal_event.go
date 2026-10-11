@@ -13,15 +13,16 @@ import (
 // commands provide facts; only this owner-local reducer chooses ticket and
 // proposal states.
 type lifecycleInternalEvent struct {
-	Kind          lifecycleInternalEventKind
-	TicketID      common.TicketID
-	Ticket        *decisionModel.Ticket
-	Proposal      *decisionModel.RuntimeGovernanceResolutionProposal
-	Clarification *definitionClarificationResolutionFact
-	ResolvedAt    string
-	ResolvedBy    string
-	FailureClass  string
-	FailureReason string
+	Kind           lifecycleInternalEventKind
+	TicketID       common.TicketID
+	Ticket         *decisionModel.Ticket
+	Proposal       *decisionModel.RuntimeGovernanceResolutionProposal
+	ContractChange *decisionModel.ContractChangeRevision
+	Clarification  *definitionClarificationResolutionFact
+	ResolvedAt     string
+	ResolvedBy     string
+	FailureClass   string
+	FailureReason  string
 }
 
 // definitionClarificationResolutionFact is the bounded Decision-owner input
@@ -45,6 +46,7 @@ type definitionClarificationResolutionFact struct {
 type lifecycleInternalEventKind string
 
 const (
+	lifecycleInternalEventContractChangeRegistered        lifecycleInternalEventKind = "contract_change_registered"
 	lifecycleInternalEventOpened                          lifecycleInternalEventKind = "opened"
 	lifecycleInternalEventResolutionObserved              lifecycleInternalEventKind = "resolution_observed"
 	lifecycleInternalEventResolutionRecovered             lifecycleInternalEventKind = "resolution_recovered"
@@ -110,9 +112,40 @@ func reduceDecisionLifecycle(current *decisionModel.Ticket, event lifecycleInter
 		next.State = common.DecisionTicketStateOpen
 		next.CreatedAt = now
 		next.UpdatedAt = now
+		if next.IsContractChange() {
+			if len(next.ContractChangeRevisions) != 1 || next.ContractChangeRevisions[0].RegisteredAt != "" || event.ContractChange != nil {
+				return nil, common.ErrInvalidArgument
+			}
+			next.ContractChangeRevisions[0].RegisteredAt = now
+			if err := next.ValidateContractChange(); err != nil {
+				return nil, err
+			}
+		}
 		return next, nil
 	}
 	if current == nil || current.ID == "" || current.ID != event.TicketID {
+		return nil, common.ErrInvalidArgument
+	}
+	if current.IsContractChange() {
+		if current.ValidateContractChange() != nil || event.Kind != lifecycleInternalEventContractChangeRegistered || event.ContractChange == nil ||
+			event.Proposal != nil || event.Clarification != nil || event.ResolvedAt != "" || event.ResolvedBy != "" || event.FailureClass != "" || event.FailureReason != "" {
+			return nil, common.ErrConflict
+		}
+		next := decisionModel.CloneTicket(current)
+		revision := *event.ContractChange
+		if revision.RegisteredAt != "" || revision.Revision != uint64(len(next.ContractChangeRevisions)+1) {
+			return nil, common.ErrConflict
+		}
+		revision.Proposal = revision.Proposal.Clone()
+		revision.RegisteredAt = now
+		next.ContractChangeRevisions = append(next.ContractChangeRevisions, revision)
+		next.UpdatedAt = now
+		if err := next.ValidateContractChange(); err != nil {
+			return nil, err
+		}
+		return next, nil
+	}
+	if event.ContractChange != nil || event.Kind == lifecycleInternalEventContractChangeRegistered {
 		return nil, common.ErrInvalidArgument
 	}
 	next := decisionModel.CloneTicket(current)

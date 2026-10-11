@@ -21,6 +21,7 @@ import (
 	approvalmodel "github.com/muidea/workorch/internal/modules/blocks/approval/pkg/models"
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
 	decisionevents "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/events"
+	decisionmodel "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/models"
 	modulecommon "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/common"
 	eventstreamevents "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/events"
 	eventstreammodel "github.com/muidea/workorch/internal/modules/blocks/eventstream/pkg/models"
@@ -628,6 +629,10 @@ func validGovernanceData(data governanceevents.GovernanceData) bool {
 }
 
 func validTicketChangedData(data decisionevents.TicketChangedData) bool {
+	// 提案登记未开放 created/resolved 交付合同，拒绝伪造普通通知。
+	if data.DecisionKind == decisionmodel.ContractChangeDecisionKind {
+		return false
+	}
 	if strings.TrimSpace(data.NotificationID) == "" || data.TicketID == "" || data.WorkspaceID == "" || data.State == "" {
 		return false
 	}

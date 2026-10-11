@@ -20,6 +20,7 @@ Governance 与 Orchestrator 没有直接 EventHub I/O。Governance 只向 Decisi
 - `workspace_definition_clarification` 与 `runtime_definition_clarification` 不属于自动治理输入。Governance 对两类 ticket
   均 fail-closed 为人工定义修订 blocker，不发送 generic `EnsureResolvedCommand`，也不生成 continue/fail Runtime proposal；
   它们只能由 Decision owner 的 admission/replacement 专用合同收口。
+- `contract_change` 及携带 `ContractChangeRevisions` 的 Ticket 不属于自动治理输入，policy 在预算/LLM 处理前返回 `contract_change_requires_exact_approval`。提案登记、拟议 candidate 和 unknown 原文不构成自动批准或定义应用权；ordinary notification 也不能启用该能力。
 - `pkg/events.GovernanceData` 发布 evaluated、resolved、escalated、blocked 通知；`ListAutoGovernanceTracesCommand` / `GovernanceCommandResult` 提供 trace 查询。
 - `ListAutoGovernanceTracesCommand.Query` 使用共享的 owner-neutral `workorchquerycontract.AutoGovernanceTraceQuery`；只接受 exact `application/workorchd/appservice` producer、canonical non-empty Workspace scope 和 `1..500` limit，完整门禁通过后才进入 Governance repository。owner-private 启动恢复继续直接读取有独立硬上限的全局 inventory。
 - application 按 Workspace / Run / item scope 查询 trace；Eventstream 消费 Governance 通知形成审计投影。两者都不能用 trace 替代 Decision、Approval 或 Run 的权威状态。

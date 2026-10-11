@@ -4065,8 +4065,11 @@ func (r *workspaceScopedDecisionTicketRepository) OwnerRepositoryBinding() repos
 }
 
 func (r *workspaceScopedDecisionTicketRepository) Create(ctx context.Context, item *decisionmodel.Ticket) error {
+	if item != nil && item.IsContractChange() && item.ValidateContractChange() != nil {
+		return common.ErrInvalidArgument
+	}
 	if item == nil || item.WorkspaceID == "" || item.ID == "" ||
-		(item.RunID == "" && (item.DefinitionClarification == nil || item.DefinitionClarification.Class != decisionmodel.DefinitionClarificationWorkspacePreSeal)) {
+		(item.RunID == "" && !item.IsContractChange() && (item.DefinitionClarification == nil || item.DefinitionClarification.Class != decisionmodel.DefinitionClarificationWorkspacePreSeal)) {
 		return common.ErrInvalidArgument
 	}
 	return withWorkspaceDeletionMutation(ctx, r.store.dataRoot, "decision", item.WorkspaceID, func(guarded context.Context) error {

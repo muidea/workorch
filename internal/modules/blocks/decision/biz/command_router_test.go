@@ -40,9 +40,10 @@ func TestDecisionCommandTopicsHaveOneSemanticFamily(t *testing.T) {
 	}
 }
 
-func TestDecisionOwnerCommandInventoryCoversAllSixteenTypedTopics(t *testing.T) {
+func TestDecisionOwnerCommandInventoryCoversAllSeventeenTypedTopics(t *testing.T) {
 	expected := map[string]struct{}{
-		decisionevents.TopicDecisionCommandGetTicket: {}, decisionevents.TopicDecisionCommandListTickets: {},
+		decisionevents.TopicRegisterContractChangeProposal: {},
+		decisionevents.TopicDecisionCommandGetTicket:       {}, decisionevents.TopicDecisionCommandListTickets: {},
 		decisionevents.TopicDecisionCommandListTicketsByRun: {}, decisionevents.TopicDecisionCommandListTicketsByWS: {},
 		decisionevents.TopicDecisionCommandEnsureResolved: {}, decisionevents.TopicDecisionCommandGetResolution: {},
 		decisionevents.TopicDecisionCommandPurgeWorkspace: {}, decisionevents.TopicDecisionCommandSealWorkspaceDeletion: {},
@@ -52,7 +53,7 @@ func TestDecisionOwnerCommandInventoryCoversAllSixteenTypedTopics(t *testing.T) 
 		decisionevents.TopicOpenRuntimeDefinitionClarification: {}, decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement: {},
 	}
 	topics := append([]string(nil), decisionCommandTopics()...)
-	topics = append(topics, decisionevents.TopicOpenRuntimeGovernanceRequest)
+	topics = append(topics, decisionevents.TopicOpenRuntimeGovernanceRequest, decisionevents.TopicRegisterContractChangeProposal)
 	topics = append(topics, definitionClarificationTopics()...)
 	topics = append(topics, decisionevents.TopicAcquireRuntimeCapabilities)
 	if len(topics) != len(expected) {

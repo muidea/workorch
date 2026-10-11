@@ -116,7 +116,7 @@ type runGovernanceAdmission struct {
 }
 
 func definitionDecisionUsesDedicatedAdmission(ticket *decisionmodel.Ticket) bool {
-	return ticket != nil && ticket.DefinitionClarification != nil
+	return ticket != nil && (ticket.DefinitionClarification != nil || ticket.IsContractChange())
 }
 
 func governanceOwnerReadError(resourceKind, resourceID string, err error) error {

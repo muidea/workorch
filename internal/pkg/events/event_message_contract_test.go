@@ -78,7 +78,8 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// 当前创作使用独立 typed provider-document 执行合同；generic completion 的其他消费者保留。
 	// 成功提案原文增加一个 Workspace/permit scoped 受限只读查询；仅返回已保存审计，不授予执行权威。
 	// File 增加原 sealed file/read 回执的只读依赖重观察，零 receipt/CAS/credit；不授 SM-2 transition。
-	const expectedProductionTopicCount = 303
+	// Decision 增加只登记版本材料的合同变更写入口；无批准、应用或 Runtime transition。
+	const expectedProductionTopicCount = 304
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}

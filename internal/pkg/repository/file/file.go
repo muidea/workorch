@@ -4113,12 +4113,19 @@ func (r *RuntimeCheckpointRepository) list(matches func(run.RuntimeCheckpoint) b
 }
 
 type DecisionTicketRepository struct {
-	mu   sync.RWMutex
+	mu   *sync.RWMutex
 	path string
 }
 
+var decisionTicketFileLocks sync.Map
+
 func NewDecisionTicketRepository(path string) *DecisionTicketRepository {
-	return &DecisionTicketRepository{path: path}
+	key, err := filepath.Abs(path)
+	if err != nil {
+		key = filepath.Clean(path)
+	}
+	lock, _ := decisionTicketFileLocks.LoadOrStore(key, &sync.RWMutex{})
+	return &DecisionTicketRepository{path: path, mu: lock.(*sync.RWMutex)}
 }
 
 func (r *DecisionTicketRepository) Create(_ context.Context, item *decision.Ticket) error {
@@ -4140,6 +4147,9 @@ func (r *DecisionTicketRepository) Create(_ context.Context, item *decision.Tick
 	}
 	if strings.TrimSpace(item.UpdatedAt) == "" {
 		item.UpdatedAt = item.CreatedAt
+	}
+	if item.IsContractChange() && (item.ValidateContractChange() != nil || len(item.ContractChangeRevisions) != 1) {
+		return common.ErrInvalidArgument
 	}
 	return writeJSONFileAtomic(path, cloneDecisionTicket(item))
 }
@@ -4198,6 +4208,11 @@ func (r *DecisionTicketRepository) Update(_ context.Context, item *decision.Tick
 	}
 	if err := validateDecisionTicketPersistence(&existing); err != nil {
 		return err
+	}
+	if existing.IsContractChange() || item.IsContractChange() {
+		if err := decision.ValidateContractChangeAppend(&existing, item); err != nil {
+			return err
+		}
 	}
 	if strings.TrimSpace(item.CreatedAt) == "" {
 		item.CreatedAt = existing.CreatedAt

@@ -121,7 +121,7 @@ func (s *mutationService) ResolveTicketAndReturn(ctx context.Context, cmd decisi
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, common.ErrNotFound
 	}
-	if ticket.DecisionKind == "runtime_governance" || ticket.DefinitionClarification != nil {
+	if ticket.DecisionKind == "runtime_governance" || ticket.DefinitionClarification != nil || ticket.IsContractChange() {
 		return nil, nil, common.ErrConflict
 	}
 	if err := validateResolutionTypeForTicket(ticket, cmd.Type); err != nil {
@@ -192,7 +192,7 @@ func (s *mutationService) EnsureResolvedTicketAndReturnWithTransition(ctx contex
 	if !ticketMatchesResolveScope(ticket, cmd) {
 		return nil, nil, false, common.ErrNotFound
 	}
-	if ticket.DecisionKind == "runtime_governance" || ticket.DefinitionClarification != nil {
+	if ticket.DecisionKind == "runtime_governance" || ticket.DefinitionClarification != nil || ticket.IsContractChange() {
 		return nil, nil, false, common.ErrConflict
 	}
 	if err := validateResolutionTypeForTicket(ticket, cmd.Type); err != nil {

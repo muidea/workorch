@@ -97,6 +97,9 @@ func (m *Biz) Start() error {
 	if err := m.subscribeOwner(decisionevents.TopicOpenRuntimeGovernanceRequest, m.handleRuntimeGovernanceRequest); err != nil {
 		return err
 	}
+	if err := m.subscribeOwner(decisionevents.TopicRegisterContractChangeProposal, m.handleRegisterContractChangeProposal); err != nil {
+		return err
+	}
 	for _, topic := range definitionClarificationTopics() {
 		var handler magicevent.ObserverFunc
 		switch topic {

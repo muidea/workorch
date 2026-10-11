@@ -24,6 +24,10 @@ clarification，不能创建 Run。启动输入封存后，执行期 LLM 处理�
 
 Goal-only 创作用例先保存 Workspace owner 的版本化草稿，以持久 reserve permit 调用派生和六类独立审查，确认 exact proposal/specification hash 后才物化正式定义并准入。阻塞后继沿同一候选 lineage 重新审查；Application 只协调 Decision ticket 的替换或 resolution，Workspace 验证其持久来源并独占 pending → eligible 转换。刷新投影以 owner 查询为准；pending startup 显示 `admitting`，不能显示已准入或启动 Run。当前正式创作已接稳定 management ports 和 HTTP 创建／查询／修订／编译／确认 route，创建 RequestID 由 Workspace owner 持久验证；Web 创建向导已改为单一创作／审查／确认入口，发送前保存创建身份，重新打开按 owner 查询恢复。生产 HTTP 编译由 Application 的 BackgroundRoutine 托管，接受回执返回 202，任务使用独立于 HTTP 请求的生命周期 context，Stop 取消并排空已接受任务；任务数有界，结果与预算仍只在 Workspace ledger。已 reserve 但结果未决不重发 provider。旧 public Workspace／Goal／DoD 写 REST 和 Goal-first CLI 不参与创作；正式定义只由确认事务物化。保存请求使用原 RequestID、expected revision/hash 与目标输入，owner 在同一 Workspace CAS 中持久回执；精确重放不重复写入，历史回执不能将后续替代的输入冒充当前成功。验收证据按 HTTP／owner、独立进程、Web 组件与 deployed provider 分层，局部 helper 测试或构建不能替代端到端恢复与显式启动合同。
 
+### 合同变更材料登记
+
+Application `RegisterContractChangeProposal` 以 Workspace owner 的原 Input/Definition 查询和 Run owner inventory 独立核对 baseline，当前仅接受零 Run Workspace；typed Decision command 保存原文和版本，不修改草稿、封存输入或启动 Run。该用例尚未暴露 HTTP/Web/CLI route，不把 caller `ProposedBy` 当授权证明，也不提供 approve、matching acceptance、定义应用或后继启动。Decision exact 回执必须校验；新能力完整就绪前普通治理入口仍拒绝该 kind。跨 owner 读取只是登记前的观察，不构成跨 owner 原子准入，应用时必须重新核对当前权威。
+
 ### 创建恢复响应
 
 公开创建在有效请求发送至 Workspace owner 后失败，返回 `workspace_creation_incomplete` 和 typed `creationRecovery`：原 `requestId`、确定性 Workspace ID、`unknown`／`persisted`、失败阶段及原请求重放要求。owner 回执缺失或 transport／持久化失败只记 `unknown`，不能推断尚未创建；收到有效创建回执后目录准备／读取失败可记 `persisted`，仍不代表 M3 完成。输入／身份明确拒绝不附带既有对象恢复描述。内部 cause 原样保留在错误链，不混入通用 HTTP 错误；HTTP 提示不作为准入或执行权威。

@@ -189,7 +189,7 @@ func (s *Service) processPendingTicket(ctx context.Context, ticketID common.Tick
 	if err != nil {
 		return err
 	}
-	if ticket == nil || ticket.State != common.DecisionTicketStateOpen {
+	if ticket == nil || ticket.State != common.DecisionTicketStateOpen || ticket.IsContractChange() {
 		return nil
 	}
 	ctx, err = common.BindRuntimeWorkspaceContext(ctx, ticket.WorkspaceID)
