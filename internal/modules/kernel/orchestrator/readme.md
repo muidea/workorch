@@ -163,6 +163,10 @@ capability resource state。
   verification policy 仍由自身完整 Validate 规范化校验；不复制该门禁未读取的 binding、proof、target 或诊断。
   `runtime_focus_declaration_projection_test.go` 与原完整 validator 固定接受／拒绝、字段空白、重复 CWI、原输入、
   JSON 重载、后续变化、完整 raw proof/hash 拒绝优先、fuzz 与分配；不删除任何声明门禁或改变 SM-1～SM-4 权威。
+  binding-focus 校验复用同次 `focus.Normalized` 已建立的 detached binding 集合，不再次规范化未变集合；
+  原 raw binding/proof/hash、重复 ID 及后续逐 binding 完整 Validate、focus/revision/policy/kind/target/CWI 门禁全部保留。
+  `runtime_binding_focus_normalization_reuse_test.go` 保留独立旧完整 validator 并接入旧 semantic compiler oracle，
+  固定接受／拒绝顺序、原输入、重载、后续篡改、fuzz 与分配；不提供已校验凭据或跨调用缓存，不改变四机权威。
   这些纯校验成本收口不改变 SM-1～SM-4 转换、预算、保存或恢复权威，也不证明累计整包已通过。
   current focus 的 target-selection 纯投影只规范化实际返回的 selection，并按原 trim／首个同 ID prerequisite
   语义比较 Kind／Scope／FocusID，不复制无关 Definition、证据、catalog 或 coverage。原完整 aggregate/raw/hash

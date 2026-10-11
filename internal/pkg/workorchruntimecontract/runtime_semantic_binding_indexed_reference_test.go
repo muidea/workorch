@@ -525,7 +525,7 @@ func semanticBindingIndexedReferenceFocus(manifest RuntimeSemanticPlanManifest, 
 		}
 	}
 	focus = focus.Normalized()
-	if err := ValidateCoverageEvidenceBindingsForFocus(focus, manifest.DefinitionRevision); err != nil {
+	if err := referenceCoverageBindingsForFocusValidate(focus, manifest.DefinitionRevision); err != nil {
 		return CoverageFocus{}, err
 	}
 	return focus, nil

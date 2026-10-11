@@ -501,7 +501,8 @@ func ValidateCoverageEvidenceBindingsForFocus(focus CoverageFocus, definitionRev
 	if err := ValidateRuntimeFocusEvidenceDeclaration(focus); err != nil {
 		return err
 	}
-	bindings := NormalizeCoverageEvidenceBindings(focus.CoverageEvidenceBindings)
+	// focus.Normalized 已建立本次 detached 集合；后续完整 Validate 与身份门禁仍逐项执行。
+	bindings := focus.CoverageEvidenceBindings
 	if len(bindings) != len(focus.CoverageWorkItemIDs) {
 		return fmt.Errorf("coverage binding unavailable for focus %q: requires exactly one binding per coverage item", focus.ID)
 	}
