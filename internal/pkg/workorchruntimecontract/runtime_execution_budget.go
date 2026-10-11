@@ -144,15 +144,19 @@ func (p RuntimeExecutionBudgetPolicy) Validate() error {
 		}
 		seen[dimension.Dimension] = struct{}{}
 	}
-	if p.PolicyHash != StableRuntimeExecutionBudgetPolicyHash(p) {
+	if p.PolicyHash != stableRuntimeExecutionBudgetPolicyHashNormalized(p) {
 		return fmt.Errorf("runtime execution budget policy hash mismatch")
 	}
 	return nil
 }
 
 func StableRuntimeExecutionBudgetPolicyHash(policy RuntimeExecutionBudgetPolicy) string {
-	p := policy.Normalized()
-	h := sha256.New()
+	return stableRuntimeExecutionBudgetPolicyHashNormalized(policy.Normalized())
+}
+
+// 仅复用本次调用已规范化的 detached policy；不缓存预算校验或跨调用输入。
+func stableRuntimeExecutionBudgetPolicyHashNormalized(p RuntimeExecutionBudgetPolicy) string {
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-execution-budget-policy")
 	writeHashString(h, p.SchemaVersion)
 	writeHashString(h, p.PolicyRevision)

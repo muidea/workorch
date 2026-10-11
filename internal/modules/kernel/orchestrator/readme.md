@@ -97,6 +97,10 @@ capability resource state。
   JSON 重载、fuzz 与逐分配对照。此复用不改变任何 SM transition、预算或 current applicability。
   assessment authority hash 保持原 Normalized、JSON 和域前缀编码，复用同次 marshal 缓冲，不增加跨调用缓存；
   `runtime_assessment_authority_hash_test.go` 以旧编码 reference、JSON 重载、fuzz 和分配对照固定等价边界。
+  execution-budget policy 在一次完整 `Validate` 中复用已规范化的 detached policy 编码 hash，使用同次短字段缓冲，
+  不重复深拷贝／排序；公开 hash 入口仍先规范化，所有维度、数值、duplicate、scope、restart 和 hash 门禁及拒绝顺序不变。
+  `runtime_execution_budget_policy_single_pass_test.go` 以完整旧 validator/hash reference 固定原 bytes、长字段、非法输入、
+  JSON 重载、后续篡改重验、公开副本隔离与 fuzz；不缓存校验成功、不改变 SM-1～SM-4 转换、预算上限或扣费规则。
   静态 operation descriptor 的内部证据资格查询只读初始化库存，不复制随后丢弃的 `AllowedStates`；公开 getter 仍深拷贝。
   `runtime_coverage_evidence_descriptor_lookup_test.go` 以旧 getter 路径为 reference 覆盖全部 kind、未知与非规范输入、重复调用和公开副本隔离；不减少任何 proof、raw 或 aggregate 校验。
   `runtime_coverage_evidence_binding_hash_test.go` 和 `runtime_candidate_session_validation_test.go` 固定 hash、重复调用、
