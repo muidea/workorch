@@ -331,7 +331,12 @@ Orchestrator 的 `runtime_project_conjunction_owner_mainline_test.go` 使用真�
 Result→Workspace→Run；实际 producer 的合取/raw identity 必须与 persisted receipt、EvidenceFact 和 exact stage mapping
 相等。重建 Shell owner、重新打开 Run repository 后，duplicate 仍返回原 receipt，全部实际 stage/stream 经原 receipt
 与真实 Workspace owner 读取，错误 fence 拒绝且 aggregate/预算零变化；旧工程失败保留 rejected/unknown receipt 和
-未完成合取，不授当前 native proof。provider 为脚本替身；这不是公开 authoring、fresh-process 或 live 验收。
+未完成合取，不授当前 native proof。测试还在真实 validation sealed dispatch 上执行原 Shell operation，
+于 SM-3 owner receipt/消费 CAS 已保存、SM-2 evidence/CWI credit 尚未产生时丢失响应；成功四阶段与原工程
+known failure 都重建 Shell/驱动对象并独立重读 Run 前像，再沿原 receipt 续驱。实际原工程测试写出外部计数，
+成功的 ordinary/race 恰各一次、ordinary 失败恰一次；恢复和 duplicate 不增加计数、receipt、原 execution 分配/
+消费或 recovery authorization。既有消费事实、原 rejected/unknown effect 与全部 raw 引用保持不变。
+provider 为脚本替身且使用同一 Hub；这不是公开 authoring、fresh-process 或 live 验收。
 
 #### Executable input-maintenance contracts
 

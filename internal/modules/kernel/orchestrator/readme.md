@@ -712,6 +712,11 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
   `uncertain`；active claim 禁止新 grant，lease expiry/restart 也必须先持久化 uncertain 才可消费下一预算。counter/ledger、顺序、
   identity、claim lease 与 dispatch reverse proof 在 fresh load 全量校验；at-most-once/unknown effect 进入 `outcome_unknown`。
   exact receipt duplicate零 effect、零 evidence revision、零 credit。
+  `biz/runtime_project_conjunction_owner_mainline_test.go` 配对真实 Shell 四阶段/原工程失败与文件型 Run CAS，
+  在 SM-3 `owner_committed` 原 receipt 已保存但 SM-2 evidence/credit 尚未形成时丢失响应，重建 Shell 和驱动对象后
+  沿原 receipt 续驱；实际工程执行计数、原 key/fence/receipt/raw identity、单次 operation 分配/消费、recovery ledger
+  和既有 confirmed/unknown 消费事实均独立核验。该回归不改变 SM-1～SM-4 transition、预算或 availability；provider
+  是脚本替身且未重建 Hub/进程，不能替代公开 authoring、fresh-process 或 live 验收。
 - `Facts.RepairDirective` 是同 focus 唯一 repair action authority。LLM assessment 的文本、missing claim 和 owner diagnostic
   只作为 observation，不能选择 state change、validation、retry 或 terminal。
 - owner-grounded repair 必须区分 diagnostic observer 与 effect owner。repair owner 只能由 sealed Profile exact route 的

@@ -184,6 +184,26 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	if mode == "project_history_failure" {
 		initialFiles["historical_test.go"] = "package fixture\nimport \"testing\"\nfunc TestHistorical(t *testing.T){t.Fatal(\"原工程判据失败\")}\n"
 	}
+	projectExecutionCounter := filepath.Join(root, "project-executions")
+	// 成功合取的 ordinary/race 两阶段均执行原工程；已知 ordinary 失败则不进入 race。
+	projectExecutionCount := "executed\nexecuted\n"
+	if mode == "project_history_failure" {
+		projectExecutionCount = "executed\n"
+	}
+	if options.Adapter == shellcommon.ValidationRecipeAdapterProjectConjunction {
+		outcome := ""
+		if mode == "project_history_failure" {
+			outcome = `t.Fatal("原工程判据失败")`
+		}
+		initialFiles["historical_test.go"] = fmt.Sprintf(`package fixture
+import ("os"; "testing")
+func TestHistorical(t *testing.T) {
+ f,err:=os.OpenFile(%q,os.O_CREATE|os.O_WRONLY|os.O_APPEND,0600); if err!=nil { t.Fatal(err) }
+ if _,err:=f.WriteString("executed\n"); err!=nil { t.Fatal(err) }; if err:=f.Close(); err!=nil { t.Fatal(err) }
+ %s
+}
+`, projectExecutionCounter, outcome)
+	}
 	inputTargets := map[common.CoverageWorkItemID]string{}
 	for _, requirement := range requirements {
 		preparation := preparations[requirement.Hash]
@@ -443,6 +463,8 @@ func %s(t *testing.T) {
 				return false // cut on the calling thread after Decision's reply
 			case "after_review_binding":
 				return a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningSealed && a.Facts.Focus.CoverageWorkItemIDs[0] == "cwi-2"
+			case "after_project_receipt":
+				return a.ActiveDispatch != nil && a.ActiveDispatch.Candidate.Validation != nil && a.ActiveDispatch.State == runtime.DispatchStateSealed
 			}
 			return false
 		}}
@@ -450,6 +472,8 @@ func %s(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	var receiptBeforeRecovery *runtime.RuntimeAggregate
+	var originalProjectReceipt runtimecontract.RuntimeOperationReceipt
 	var sealedDefinition runtimecontract.RuntimeDefinitionContext
 	var resolved bool
 	var completed runtime.RuntimeAggregate
@@ -550,6 +574,39 @@ func %s(t *testing.T) {
 			loaded, err := module.loadRuntime(ctx, "ws-v2", "run-v2")
 			if err != nil || loaded.Validate() != nil {
 				t.Fatalf("restart invalid: %v", err)
+			}
+			if cut == "after_project_receipt" {
+				if loaded.ActiveDispatch == nil || loaded.ActiveDispatch.Candidate.Validation == nil || len(loaded.ActiveDispatch.OperationExecutions) != 1 {
+					t.Fatal("未到达原 v6 validation sealed dispatch")
+				}
+				func() {
+					defer func() {
+						if recovered := recover(); recovered != "runtime-test-crash-after-owner-receipt" {
+							t.Fatalf("实际 receipt 后响应丢失未到达: %v", recovered)
+						}
+					}()
+					_, _ = module.ExecuteRuntimeDispatch(ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
+					t.Fatal("实际 Shell receipt 后未中断")
+				}()
+				before, err := module.loadRuntime(ctx, "ws-v2", "run-v2")
+				if err != nil {
+					t.Fatal(err)
+				}
+				originalProjectReceipt = assertProjectReceiptReplyLossBoundary(t, before, mode != "project_history_failure")
+				receiptBeforeRecovery = &before
+				counter, err := os.ReadFile(projectExecutionCounter)
+				if err != nil || string(counter) != projectExecutionCount {
+					t.Fatalf("receipt 切点未取得唯一原工程实际执行事实: %q / %v", counter, err)
+				}
+				if err := shellOwner.Stop(ctx); err != nil {
+					t.Fatal(err)
+				}
+				shellOwner = startRuntimeManagedValidationTestOwner(t, hub)
+				module = newModule()
+				reopened, err := filerepository.NewRunRepository(filepath.Join(root, "runs.json")).GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+				if err != nil || reopened.RuntimeState == nil || !reflect.DeepEqual(runtimeStateRecordFromAggregate(before), *reopened.RuntimeState) {
+					t.Fatal("独立 Run repository 重载改变原 receipt／预算前像")
+				}
 			}
 			continue
 		}
@@ -667,6 +724,16 @@ func %s(t *testing.T) {
 			t.Fatal("reopened Run lost original persisted conjunction")
 		}
 		assertProjectConjunctionPersistedOwnerOutputs(t, ctx, hub, module, *reopened.RuntimeState, success)
+		counter, err := os.ReadFile(projectExecutionCounter)
+		if err != nil || string(counter) != projectExecutionCount {
+			t.Fatalf("恢复或 duplicate 重复执行原工程判据: %q / %v", counter, err)
+		}
+		if cut == "after_project_receipt" {
+			if receiptBeforeRecovery == nil {
+				t.Fatal("未观察到实际 receipt 响应丢失边界")
+			}
+			assertProjectReceiptPreservedAfterRecovery(t, *receiptBeforeRecovery, runtimeAggregateFromRecord(*reopened.RuntimeState), originalProjectReceipt)
+		}
 	}
 	if options.SourceObligations && success {
 		assertActualShellAssessmentProofDependencies(t, *stored.RuntimeState)
