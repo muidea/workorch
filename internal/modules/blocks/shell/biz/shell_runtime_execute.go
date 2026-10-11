@@ -16,6 +16,13 @@ import (
 )
 
 func (a *RuntimeAdapter) ExecuteOperation(ctx context.Context, request RuntimeCommandRequest) (RuntimeCommandResult, error) {
+	// 无原 execution 身份的局部调用不得降级执行新的四阶段合同。
+	if selected, err := shellProjectRequestSelected(request); selected || err != nil {
+		if err == nil {
+			err = fmt.Errorf("project conjunction requires original sealed owner execution")
+		}
+		return validationRecipeUnavailableResult(request, err), err
+	}
 	// 只能由本次 scratch copy 生成，禁止沿用上次 adapter 调用的观察。
 	request.validationCopiedInputs = nil
 	command, args, err := shellCommandSpec(request.Command, request.Args)

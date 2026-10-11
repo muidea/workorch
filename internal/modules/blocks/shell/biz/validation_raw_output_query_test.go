@@ -113,7 +113,7 @@ func TestValidationRawOutputQueryDerivesOriginalReceiptScopeAndBytes(t *testing.
 			}
 		}
 	}
-	for _, scenario := range []string{"missing", "type", "wrong-hash", "stage", "omitted", "workspace", "directory", "output-identity", "cross-stage-ref", "receipt-key", "receipt-fence", "effect"} {
+	for _, scenario := range []string{"missing", "type", "wrong-hash", "stage", "omitted", "workspace", "directory", "output-identity", "cross-stage-ref", "receipt-key", "receipt-fence", "effect", "accepted-unknown"} {
 		t.Run(scenario, func(t *testing.T) {
 			c := command
 			originalQuery, originalWorkspace := queryResponse, workspaceResponse
@@ -148,6 +148,9 @@ func TestValidationRawOutputQueryDerivesOriginalReceiptScopeAndBytes(t *testing.
 			case "effect":
 				changed.ObservedEffectScope = runtimecontract.RuntimeEffectWorkspaceDurable
 				queryResponse.Receipt, c.SourceReceiptHash = &changed, runtimecontract.StableRuntimeOperationReceiptHash(changed)
+			case "accepted-unknown":
+				changed.ObservedEffectScope = runtimecontract.RuntimeEffectUnknown
+				queryResponse.Receipt, c.SourceReceiptHash = &changed, runtimecontract.StableRuntimeOperationReceiptHash(changed)
 			case "receipt-fence":
 				changed.Fence++
 				queryResponse.Receipt, c.SourceReceiptHash = &changed, runtimecontract.StableRuntimeOperationReceiptHash(changed)
@@ -173,11 +176,14 @@ func TestValidationRawOutputQueryDerivesOriginalReceiptScopeAndBytes(t *testing.
 	}
 	feedback.OriginalDiagnostic.OperationID = command.OperationID
 	rejected.Feedback = &feedback
-	queryResponse.Receipt = &rejected
-	rejectedCommand := command
-	rejectedCommand.SourceReceiptHash = runtimecontract.StableRuntimeOperationReceiptHash(rejected)
-	if response := send(rejectedCommand); response == nil || response.Error() != nil {
-		t.Fatal("rejected 原回执的已保存输出不能读取")
+	for _, effect := range []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectEphemeralSession, runtimecontract.RuntimeEffectUnknown} {
+		rejected.ObservedEffectScope = effect
+		queryResponse.Receipt = &rejected
+		rejectedCommand := command
+		rejectedCommand.SourceReceiptHash = runtimecontract.StableRuntimeOperationReceiptHash(rejected)
+		if response := send(rejectedCommand); response == nil || response.Error() != nil {
+			t.Fatal("rejected 原回执的已保存输出不能读取")
+		}
 	}
 	queryResponse = originalResponse
 	before := queryCalls.Load()

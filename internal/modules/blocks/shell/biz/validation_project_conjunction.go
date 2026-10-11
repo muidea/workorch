@@ -305,7 +305,7 @@ func runShellProjectStage(ctx context.Context, directory string, env []string, s
 
 // commit 仅对固定四阶段全部真实成功签署合取，包含实际 argv/scope、原 bytes
 // 身份和 source pre/post。没有 stage 字符串/marker 的替代通过路径。
-// 此值尚未进入 Runtime receipt；接线前不能声称 restart/replay 证明已完成。
+// 此私有事实不提供 dispatch/replay 权威；恢复必须使用原 Runtime aggregate/receipt。
 func sealShellProjectConjunction(stages []shellProjectStageFact, expected []shellProjectStageSpec, behavior []string) shellProjectConjunctionFact {
 	fact := shellProjectConjunctionFact{ProtocolRef: shellProjectConjunctionProtocolRef, Stages: stages, BehaviorTargetRefs: canonicalShellBehaviorTargets(behavior)}
 	if len(stages) != 4 || len(expected) != 4 || len(fact.BehaviorTargetRefs) == 0 {

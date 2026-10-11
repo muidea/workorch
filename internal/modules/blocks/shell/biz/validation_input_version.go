@@ -10,12 +10,16 @@ import (
 // proof binding. It is not inferred from current defaults during execution or
 // replay, and does not create a separate Runtime state machine.
 func shellVersionedNativeCheck(check runtimecontract.RuntimeValidationCheckAttestationBinding) bool {
-	return check.ObservationProtocolRef == shellGoConjunctiveEntrypointObservationProtocolRef && shellConjunctiveNativePackage(check.NativeCheckRef) != "" ||
+	return check.ObservationProtocolRef == shellProjectConjunctionProtocolRef && shellProjectNativePackage(check.NativeCheckRef) != "" ||
+		check.ObservationProtocolRef == shellGoConjunctiveEntrypointObservationProtocolRef && shellConjunctiveNativePackage(check.NativeCheckRef) != "" ||
 		shellIsolatedNativeCheck(check) || check.ObservationProtocolRef == shellGoEntrypointObservationProtocolRef &&
 		strings.HasPrefix(check.NativeCheckRef, "TestWorkOrchCWI_") && strings.HasSuffix(check.NativeCheckRef, "_InputV3")
 }
 
 func shellVersionedNativeCheckTarget(native string) string {
+	if pkg := shellProjectNativePackage(native); pkg != "" {
+		return pkg + "/input_test.go"
+	}
 	if pkg := shellConjunctiveNativePackage(native); pkg != "" {
 		return pkg + "/input_test.go"
 	}

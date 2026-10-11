@@ -49,8 +49,10 @@ func (m *Biz) handleRuntimeValidationRawOutput(event magicevent.Event, result ma
 		setCapabilityError(result, err)
 		return
 	}
+	// rejected managed validation 的 effect 仍可能是 unknown；仅允许读取原诊断，绝不借此清除 unknown 或授权重执行。
 	if !found || runtimecontract.StableRuntimeOperationReceiptHash(receipt) != command.SourceReceiptHash || receipt.Evidence.Validation == nil ||
-		receipt.ObservedEffectScope != runtimecontract.RuntimeEffectEphemeralSession ||
+		(receipt.ObservedEffectScope != runtimecontract.RuntimeEffectEphemeralSession &&
+			!(receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected && receipt.ObservedEffectScope == runtimecontract.RuntimeEffectUnknown)) ||
 		(receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted && receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected) ||
 		receipt.Evidence.Validation.ObservationProtocolRef != shellProjectConjunctionProtocolRef || receipt.Evidence.Validation.ExecutionConjunction == nil {
 		setCapabilityError(result, fmt.Errorf("%w: raw output requires exact persisted project validation receipt", common.ErrConflict))

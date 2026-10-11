@@ -24,11 +24,11 @@ const shellIsolatedInputContentRequirements = "Create exactly targetRef as a Go 
 var shellIsolatedNativeIdentity = regexp.MustCompile(`^TestWorkOrchCWI_[A-Z0-9_]+_InputV4$`)
 
 func shellValidationInputReviewRequired(adapter string) bool {
-	return adapter == modulecommon.ValidationRecipeAdapterVersionedEntrypoint || adapter == modulecommon.ValidationRecipeAdapterIsolatedEntrypoint || adapter == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint
+	return adapter == modulecommon.ValidationRecipeAdapterVersionedEntrypoint || adapter == modulecommon.ValidationRecipeAdapterIsolatedEntrypoint || adapter == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint || adapter == modulecommon.ValidationRecipeAdapterProjectConjunction
 }
 
 func shellEntrypointObservationProtocol(ref string) bool {
-	return ref == shellGoEntrypointObservationProtocolRef || ref == shellGoIsolatedEntrypointObservationProtocolRef || ref == shellGoConjunctiveEntrypointObservationProtocolRef
+	return ref == shellGoEntrypointObservationProtocolRef || ref == shellGoIsolatedEntrypointObservationProtocolRef || ref == shellGoConjunctiveEntrypointObservationProtocolRef || ref == shellProjectConjunctionProtocolRef
 }
 
 func shellIsolatedNativeCheck(check runtimecontract.RuntimeValidationCheckAttestationBinding) bool {
@@ -42,6 +42,26 @@ func shellIsolatedNativePackage(native string) string {
 // v5 owns one exact Go package per immutable CWI mapping. Older protocols keep
 // their original package selection and namespace-wide review semantics.
 func shellIsolatedValidationPackage(checks []runtimecontract.RuntimeValidationCheckAttestationBinding) (string, error) {
+	for _, check := range checks {
+		if check.ObservationProtocolRef == shellProjectConjunctionProtocolRef {
+			pkg := shellProjectNativePackage(check.NativeCheckRef)
+			if pkg == "" || strings.HasSuffix(check.NativeCheckRef, "_Behavior") || len(checks) > maxShellBehaviorNativeChecks {
+				return "", fmt.Errorf("project conjunction requires exact bounded native mappings")
+			}
+			hash := runtimecontract.StableRuntimeValidationExecutionStagesHash(shellProjectExecutionStageIdentities(pkg))
+			var required []string
+			for _, member := range checks {
+				if member.ObservationProtocolRef != shellProjectConjunctionProtocolRef || shellProjectNativePackage(member.NativeCheckRef) != pkg || member.ExecutionStagesHash != hash || strings.HasSuffix(member.NativeCheckRef, "_Behavior") {
+					return "", fmt.Errorf("project conjunction cannot mix packages, protocols or execution stages")
+				}
+				required = append(required, member.RequiredCheckRef)
+			}
+			if err := runtimecontract.ValidateRuntimeValidationCheckAttestationBindings(checks, required); err != nil {
+				return "", err
+			}
+			return pkg, nil
+		}
+	}
 	for _, check := range checks {
 		if check.ObservationProtocolRef == shellGoConjunctiveEntrypointObservationProtocolRef {
 			pkg := shellConjunctiveNativePackage(check.NativeCheckRef)

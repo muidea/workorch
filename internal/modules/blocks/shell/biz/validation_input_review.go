@@ -48,6 +48,9 @@ func shellVersionedInputReview(directory string, targets []string, binding runti
 	subject := &runtimecontract.RuntimeValidationInputReviewSubject{ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}
 	if pkg != "" {
 		subject.ScopeContractRef, subject.ScopeRequirements = shellIsolatedReviewScopeContractRef, shellIsolatedReviewScopeRequirements
+		if binding.CheckAttestations[0].ObservationProtocolRef == shellProjectConjunctionProtocolRef {
+			subject.ScopeContractRef, subject.ScopeRequirements = shellProjectReviewScopeContractRef, shellProjectReviewScopeRequirements
+		}
 		if binding.CheckAttestations[0].ObservationProtocolRef == shellGoConjunctiveEntrypointObservationProtocolRef {
 			subject.ScopeContractRef, subject.ScopeRequirements = shellConjunctiveReviewScopeContractRef, shellConjunctiveReviewScopeRequirements
 		}

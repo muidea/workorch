@@ -66,7 +66,7 @@ Orchestrator 的原事务负责，不增加 SM-1～SM-4 transition、availabilit
 - `shell/command` 不得伪装成 `effect=none` validation；managed validation 不能退化为任意命令字符串。
 - execute 前必须验证 producer、同步 Result、sealed payload、owner catalog、target scope、execution key/fence 和 receipt authority。
 - managed validation 必须在隔离副本中运行；临时 effect 不得写回 deliverable，scratch 和进程组必须按策略释放。
-- activation-declared recipe 可以是固定 transport 或版本化的 `shell/project-native-validation/v1|v2|v3|v4|v5` owner-adapter ref；模板不得携带
+- activation-declared recipe 可以是固定 transport 或版本化的 `shell/project-native-validation/v1|v2|v3|v4|v5|v6` owner-adapter ref；模板不得携带
   语言 command/args/env。Shell 只依据同一 request 绑定的 File-owner manifest 解析具体 recipe，且该解析只产生 owner fact，
   不触发 Runtime 状态。Shell 只有在 Orchestrator request 携带 exact Definition-owned
   `RuntimeValidationProofRequirement` 时，才可对 matching recipe 发布逐 CWI applicability binding；recipe ID、进程 exit 0、
@@ -83,7 +83,7 @@ Orchestrator 的原事务负责，不增加 SM-1～SM-4 transition、availabilit
   workspace manifest 并重新发布 binding；旧 preparation、别的 CWI 或别的 protocol mapping 不得复用。
 - workspace-durable command 的 observed change 必须落在 sealed targets 内；未声明 effect 必须 rejected。
 - prospective constraint 只支持 bounded `all_of`；不发布 clause `any_of`、surface `one_of` 或隐式可选 recipe。
-- 全部七个 Runtime ingress 都是 strong call：必须先确认同步 `Result` 与 exact `kernel/orchestrator` producer，再解析 concrete
+- 全部八个 Runtime ingress 都是 strong call：必须先确认同步 `Result` 与 exact `kernel/orchestrator` producer，再解析 concrete
   Command；Post/nil Result、错误 producer 或错误 concrete payload 均不得启动进程、读取 workspace 或访问 receipt authority。
 - Shell 只署名 capability、feasibility、validation、effect 和 receipt fact；不拥有 CWI credit、repair、retry、governance 或 terminal。
 - managed Go validation 的 bounded tool output 若明确报告依赖元数据问题，Shell 必须发布
@@ -260,16 +260,28 @@ Shell-private `runShellProjectConjunction` 复用 `validation_project_conjunctio
 
 `validation_project_conjunction_runner_test.go` 使用真实 Go 和真实 managed copy 验证完整四阶段正例、
 旧输入失败、相邻编译失败、跳过、race、前三阶段成功而最后行为失败、source 变化、缺映射及准确期限。
-当前 runner 仍是 owner-private，未进入公开 adapter/catalog、Runtime receipt 或 coverage credit；
-既有 v3/v4/v5 recipe/native/scope 的公开语义不变，implementation-work availability 不因此开放。
-正式接线仍须完整映射 sealed recipe、typed all-of 执行事实、原文保全／读取边界与 receipt 恢复链。
+显式新 activation 可声明 `shell/project-native-validation/v6` 和 `validation/input-consistency/v2`。
+它使用 `shell/go-test-json/project-conjunction-behavior/v1`、`_InputV6` native identity 及
+`workorch_validation/v6/<canonical-requirement-digest>/`，每个原／源义务检查完整映射同一 requirement package。
+每项 attestation 封存有序四阶段的 `ExecutionStagesHash`；content/review 合同分别为
+`shell/go-test-input/project-conjunction/v1` 与 `shell/go-test-input/project-conjunction-review/v1`，
+仍要求完整当前 package/helpers/fixtures 与根定义、16 files / 64 KiB，并且不替相邻 harness 补造评审。
+旧 v1～v5 recipe/native/scope 不升级；内置默认仍为 v5，implementation-work availability 不因此开放。
+
+公开 Shell owner 在原 seal、scope、receipt miss、生命周期票与 catalog revision 核验之后选择该私有 runner；
+无原 execution 的 direct adapter 调用拒绝降级执行。reconciliation 使用 completed dispatch 的原 scope、recipe 和
+binding stage hash，经同一封套执行全部四阶段；它不产生 operation receipt 或 CWI credit。
+reconciliation 原文使用绑定 Workspace/Run、request/generation、Definition、binding-set/binding、baseline 与 recipe 的
+独立 `reconciliation/<digest>` scope；它不是执行恢复账本，也不能借原 receipt read topic 读取。
+
 `shellProjectConjunctionObservation` 将实际阶段事实 detached 映射为中立
 `RuntimeValidationExecutionConjunction`，核对原四阶段身份、准确 argv 和 owner raw bytes/hash；
-缺阶段的已知失败只保全为 incomplete，不能变成完整合取。该映射仍未由公开 adapter 调用；
+缺阶段的已知失败只保全为 incomplete，不能变成完整合取。最终事实随实际 observation/receipt 保全；
+前三阶段的 PASS 不投影为当前 CWI 的 exact native proof。
 `validation_project_conjunction_observation_test.go` 验证完整映射、身份／原 bytes 篡改拒绝和副本隔离。
-中立接收合同封存有序 stage hash，要求 native PASS 与完整 all-of 同时成立，仍不表示输出原文已持久保存或可读取。
+中立接收合同要求 native PASS 与完整 all-of 同时成立；事实本身仍不授予 CWI credit。
 
-`validation_project_raw_store.go` 提供 owner-private 的受限原文存储／读取边界，仍未进入公开 adapter 或 read topic。
+`validation_project_raw_store.go` 提供 owner-private 的受限原文存储／读取边界，由执行封套与受限 read topic 使用。
 它只接受现有绝对 Workspace internal directory，并用 `os.Root` 固定目录句柄；owner 子目录拒绝 symlink 和宽权限，
 逐次复核实际打开 inode，文件仅以 0600 保存。每条原文以 Workspace／Run／原 ExecutionKey／stage／stdout 或 stderr
 完整 scope 隔离，原 `[]byte` 使用可逆 base64 JSON 保存，独立校验全部接收 bytes 的 SHA256 与实际已保存前缀的 SHA256。
@@ -279,7 +291,7 @@ Shell-private `runShellProjectConjunction` 复用 `validation_project_conjunctio
 `validation_project_raw_store_test.go` 覆盖原 bytes（中文／CRLF／NUL／非法 UTF-8）、空输出、并发 duplicate、scope 漂移、
 容量、symlink／权限／篡改拒绝、发布前／后故障重载，以及首次／duplicate 同步期间取消不返回成功引用；
 真实四阶段 runner 测试同时保存并 fresh-store 读回全部实际输出。
-这只证明私有存储前置，公开接线仍须绑定原 receipt、受限读取准入、总期限、cleanup 和 fresh-process 恢复。
+受限存储只保全诊断，不替代原 receipt/aggregate 恢复权威；fresh-process 恢复另行验收。
 本节不表示公开 authoring/activation/fullflow、fresh-process 或 live 已验收。
 
 `validation_project_execution.go` 将准备、四阶段、行为转换、原文发布、句柄关闭和实际 scratch cleanup
@@ -287,18 +299,24 @@ Shell-private `runShellProjectConjunction` 复用 `validation_project_conjunctio
 不接受 caller scratch 或超过既有 60000ms 的期限；阶段规格从执行前的 owner 编译产物取得，不从结果反推。
 首次执行事实与 raw refs 绑定同一 Workspace／Run／原 ExecutionKey；未保存的流显式保留 omission 原因。
 cleanup、原文发布或总期限失败使合取 incomplete／quality invalid，已知阶段失败的原 exit/code 不因此改成未决。
-启动前失败保留实际空 stdout/stderr 的 bytes/hash，不补造 Started。该 helper 仍未接入公开 dispatch、catalog 或 read topic；
-它不提供 replay/读取准入，不创建第二 journal，也不修改 SM-1～SM-4 的转换或预算。
+启动前失败保留实际空 stdout/stderr 的 bytes/hash，不补造 Started。该封套不提供 replay/读取准入；
+公开 execute 仍复用原 receipt query/commit，reconciliation 只返回当前事实，不创建第二 journal。
+SM-3 仍独占 sealed dispatch/receipt，SM-2 仍裁决 proof/current reconciliation，SM-4 仍从原 aggregate 恢复；
+SM-1、既有转换和预算不变。
 `validation_project_execution_test.go` 覆盖真实四阶段／旧工程失败、原 execution scope 重载、实际 scratch 消失、
 前置 scope/budget 拒绝和 cleanup/deadline/raw gap 反例；这些私有测试仍不代替原 seal/receipt 的公开恢复验收。
 封套将每流的已发布原 ref 或明确 omission 投影到中立输出身份的 `Storage`，使其能够随原 receipt/fact
 保全和绑定 hash；stderr 发布失败不丢弃已发布 stdout。原接收 bytes/hash/容量事实不因持久失败改写，
-未保存引用不标为完整合取。`Storage` 只提供数据身份，不允许 caller 指定目录读取，公开 adapter/catalog 仍未接线。
+未保存引用不标为完整合取。`Storage` 只提供数据身份，不允许 caller 指定目录读取。
 `QueryRuntimeValidationRawOutput` 是仅接受 exact Orchestrator strong-call 的受限 owner read topic：caller 只提供
 Workspace／Run／Dispatch／Operation／原 ExecutionKey／Fence、原 receipt hash 和 stage/stream selector，不能传目录或 ref。
 Shell 经原 receipt-owner query 反查同 owner 的 persisted receipt，从原合取事实取得 ref，再从 Workspace typed query
 取得当前 internal directory；原 scope、引用正文、bytes、全输出 SHA256 与已保存 bytes SHA256 均须匹配。
 receipt miss、未保存流、错 hash/scope/类型、异常文件均返回明确错误，不授 execute、credit 或恢复权限。
+rejected managed validation 原 receipt 的 effect 可以仍为 unknown；原诊断读取不清除 unknown、不改预算，
+也不把已知阶段失败改成结果未决。accepted unknown 与 workspace-durable 等其他 scope 仍拒绝。
+新 project observation 的通用 Runtime summary 只含 owner code/stage/exit 事实，不拷贝或生成原 stdout/stderr 摘要；
+原 bytes 独立保全在受限 store。
 每次最多返回该原流的 64KiB 已保存 bytes；不完整前缀保持原 incomplete/omission，不改写或摘要原文。
 查询沿原 context/lane 进行，BeginShutdown 后拒绝新读取，已接纳的 nested receipt/Workspace/read 等真实结束后才释放依赖。
 `validation_raw_output_query_test.go` 配对实际私有 producer/raw store 与 typed receipt/Workspace fixture，
@@ -307,6 +325,13 @@ Orchestrator 的 `runtime_shell_raw_output_receipt_integration_test.go` 配对�
 和文件型 Run owner，沿完整 semantic/candidate/claim/receipt 准入验证原持久来源、零变更读取、异引用冲突、句柄重建及退休拒绝；
 原文 wire 和 Workspace 为显式 fixture，不代表公开 project producer、fresh-process 恢复或 live 验收。
 该 read topic 不产生新的 SM-1～SM-4 transition、预算或 availability。
+`validation_project_adapter_test.go` 覆盖显式 v6 映射、完整 preparation/review 容量、公开 Shell 四阶段与旧工程失败、
+原 receipt duplicate、reconciliation scope/budget 拒绝及诊断域隔离。
+Orchestrator 的 `runtime_project_conjunction_owner_mainline_test.go` 使用真实准备、File/Shell、文件型 Run CAS 和
+Result→Workspace→Run；实际 producer 的合取/raw identity 必须与 persisted receipt、EvidenceFact 和 exact stage mapping
+相等。重建 Shell owner、重新打开 Run repository 后，duplicate 仍返回原 receipt，全部实际 stage/stream 经原 receipt
+与真实 Workspace owner 读取，错误 fence 拒绝且 aggregate/预算零变化；旧工程失败保留 rejected/unknown receipt 和
+未完成合取，不授当前 native proof。provider 为脚本替身；这不是公开 authoring、fresh-process 或 live 验收。
 
 #### Executable input-maintenance contracts
 

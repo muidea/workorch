@@ -181,6 +181,9 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 		"cmd/delivery/main.go": "package main\nimport (\"fmt\"; subject \"example.com/workorch-runtime-native-fixture\")\nfunc main(){fmt.Print(subject.DeliveredValue())}\n",
 		"historical_test.go":   "package fixture\n// Immutable prior input; not selected by the versioned adapter.\n",
 	}
+	if mode == "project_history_failure" {
+		initialFiles["historical_test.go"] = "package fixture\nimport \"testing\"\nfunc TestHistorical(t *testing.T){t.Fatal(\"原工程判据失败\")}\n"
+	}
 	inputTargets := map[common.CoverageWorkItemID]string{}
 	for _, requirement := range requirements {
 		preparation := preparations[requirement.Hash]
@@ -189,7 +192,7 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 		}
 		native, inputTarget := preparation.CheckAttestations[0].NativeCheckRef, preparation.TargetRef
 		parent := "../.."
-		if options.Adapter == shellcommon.ValidationRecipeAdapterIsolatedEntrypoint || options.Adapter == shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint {
+		if options.Adapter == shellcommon.ValidationRecipeAdapterIsolatedEntrypoint || options.Adapter == shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint || options.Adapter == shellcommon.ValidationRecipeAdapterProjectConjunction {
 			parent = "../../.."
 		}
 		if _, err := os.Stat(filepath.Join(directory, inputTarget)); err != nil {
@@ -276,7 +279,7 @@ func %s(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
-	startRuntimeManagedValidationTestOwner(t, hub)
+	shellOwner := startRuntimeManagedValidationTestOwner(t, hub)
 	startRuntimeProviderCeilingTestOwner(t, hub)
 	resultOwner := resultmodule.New()
 	var results repository.ResultRepository = memory.NewResultRepository()
@@ -564,11 +567,18 @@ func %s(t *testing.T) {
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
 		t.Fatalf("mode=%s state=%s terminal=%+v failure=%+v", mode, completed.Decision.State, completed.Decision.Terminal, completed.Facts.Failure)
 	}
-	if success && validationCalls != options.ValidationCount || !success && mode != "source_B_failure" && validationCalls != 0 || mode == "source_B_failure" && validationCalls != 1 {
+	if success && validationCalls != options.ValidationCount || !success && mode != "source_B_failure" && mode != "project_history_failure" && validationCalls != 0 || mode == "source_B_failure" && validationCalls != 1 {
 		t.Fatalf("unexpected validation calls: %d", validationCalls)
 	}
+	if mode == "project_history_failure" && (validationCalls != 2 || completed.Facts.Failure == nil || completed.Facts.Failure.Code != "candidate_authority_exhausted" || len(completed.Facts.Evidence.Rejected) != 1) {
+		// 这里计数的是 provider candidate 请求：第二个相同候选必须在 owner I/O 前被原拒绝重放门禁终止。
+		// 实际 receipt/阶段次数由 assertProjectConjunctionPersistedOwnerOutputs 独立反证。
+		t.Fatal("original project failure retried owner execution or lost bounded candidate rejection")
+	}
 	if options.SourceObligations {
-		assertSharedSourceObligationOwnerObservation(t, completed, requirements[0], mode == "source_B_failure")
+		if mode != "project_history_failure" {
+			assertSharedSourceObligationOwnerObservation(t, completed, requirements[0], mode == "source_B_failure")
+		}
 		if success {
 			assertActualShellAssessmentProofDependencies(t, runtimeStateRecordFromAggregate(completed))
 		}
@@ -645,6 +655,18 @@ func %s(t *testing.T) {
 	stored, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || stored.RuntimeState == nil || !runtimeTerminalDeliveryFullyAcknowledged(runtimeAggregateFromRecord(*stored.RuntimeState)) {
 		t.Fatalf("terminal owner delivery incomplete: %v", err)
+	}
+	if options.Adapter == shellcommon.ValidationRecipeAdapterProjectConjunction {
+		// 重建 capability owner 及文件型 Run repository 读取前像；不是 fresh-process 验收。
+		if err := shellOwner.Stop(ctx); err != nil {
+			t.Fatal(err)
+		}
+		shellOwner = startRuntimeManagedValidationTestOwner(t, hub)
+		reopened, err := filerepository.NewRunRepository(filepath.Join(root, "runs.json")).GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+		if err != nil || reopened.RuntimeState == nil || !reflect.DeepEqual(stored.RuntimeState, reopened.RuntimeState) {
+			t.Fatal("reopened Run lost original persisted conjunction")
+		}
+		assertProjectConjunctionPersistedOwnerOutputs(t, ctx, hub, module, *reopened.RuntimeState, success)
 	}
 	if options.SourceObligations && success {
 		assertActualShellAssessmentProofDependencies(t, *stored.RuntimeState)

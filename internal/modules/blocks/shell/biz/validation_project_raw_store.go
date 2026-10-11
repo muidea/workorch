@@ -22,7 +22,7 @@ const shellProjectRawStoreProtocol = "shell/project-stage-raw/v1"
 const shellProjectRawStoreMaxBytes = 2*MaxCommandOutputBytes + 8192
 
 // 仅保全 owner 的原输出，不是 operation journal 或 Runtime authority。
-// 公开 adapter/read topic 尚未接线；scope 必须由原 sealed execution 提供。
+// scope 仅来自已核验的原 execution 或 owner 内部 reconciliation identity。
 type shellProjectRawScope struct {
 	WorkspaceID  common.WorkspaceID
 	RunID        common.RunID

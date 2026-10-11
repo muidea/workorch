@@ -25,6 +25,9 @@ const ValidationRecipeAdapterIsolatedEntrypoint = "shell/project-native-validati
 // 多检查包以完整 requirement 固定成员，不扩大既有单检查协议。
 const ValidationRecipeAdapterConjunctiveEntrypoint = "shell/project-native-validation/v5"
 
+// 显式新 activation 选择根 module 四阶段合取，不升级旧 package-only 协议。
+const ValidationRecipeAdapterProjectConjunction = "shell/project-native-validation/v6"
+
 // Validation owner diagnostic codes are Shell-owned, stable facts. Profiles
 // may match these exact values; Runtime core must not infer them from stderr.
 const (

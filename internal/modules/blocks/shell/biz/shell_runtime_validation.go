@@ -33,6 +33,9 @@ func resolveRuntimeValidationRecipeDeclarations(recipes []runtimemodel.RuntimeVa
 	manifest.TargetRefs = normalizeShellStrings(manifest.TargetRefs)
 	resolved := make([]runtimemodel.RuntimeValidationRecipe, 0, len(recipes))
 	for _, declaration := range runtimemodel.NormalizeRuntimeValidationRecipeDeclarations(recipes) {
+		if declaration.AdapterRef == modulecommon.ValidationRecipeAdapterProjectConjunction && !shellProjectRecipeDeclared(declaration) {
+			continue
+		}
 		if declaration.AdapterRef == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint && declaration.InputReviewProtocolRef != runtimemodel.RuntimeValidationInputReviewProtocolV2 {
 			continue
 		}
@@ -44,7 +47,7 @@ func resolveRuntimeValidationRecipeDeclarations(recipes []runtimemodel.RuntimeVa
 			continue
 		}
 		switch declaration.AdapterRef {
-		case modulecommon.ValidationRecipeAdapterProjectNative, modulecommon.ValidationRecipeAdapterProjectEntrypoint, modulecommon.ValidationRecipeAdapterVersionedEntrypoint, modulecommon.ValidationRecipeAdapterIsolatedEntrypoint, modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint:
+		case modulecommon.ValidationRecipeAdapterProjectNative, modulecommon.ValidationRecipeAdapterProjectEntrypoint, modulecommon.ValidationRecipeAdapterVersionedEntrypoint, modulecommon.ValidationRecipeAdapterIsolatedEntrypoint, modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint, modulecommon.ValidationRecipeAdapterProjectConjunction:
 			// An empty workspace has no competing project fact. The currently
 			// registered owner implementation may therefore publish its bounded
 			// prerequisite contract; once any project files exist, resolution is
@@ -84,6 +87,9 @@ func (a *RuntimeAdapter) PreflightRuntimeValidationRecipes(workspaceDirectory st
 	}
 	confirmed := make([]runtimemodel.RuntimeValidationRecipe, 0, len(recipes))
 	for _, recipe := range runtimemodel.NormalizeRuntimeValidationRecipes(recipes) {
+		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectConjunction && !shellProjectRecipeDeclared(recipe) {
+			continue
+		}
 		command, args, specErr := shellCommandSpec(recipe.Command, recipe.Args)
 		if specErr != nil {
 			continue
@@ -273,6 +279,10 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 // without a structured native observation protocol remain executable owner
 // tools, but cannot become direct per-CWI proof surfaces.
 func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecipe, requirement runtimemodel.RuntimeValidationProofRequirement) ([]runtimemodel.RuntimeValidationCheckAttestationBinding, bool) {
+	project := recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectConjunction
+	if project && (!shellProjectRecipeDeclared(recipe) || requirement.Validate() != nil) {
+		return nil, false
+	}
 	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint && (requirement.Validate() != nil || recipe.InputReviewProtocolRef != runtimemodel.RuntimeValidationInputReviewProtocolV2) {
 		return nil, false
 	}
@@ -304,6 +314,9 @@ func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecip
 		}
 		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint {
 			protocol = shellGoConjunctiveEntrypointObservationProtocolRef
+		}
+		if project {
+			protocol = shellProjectConjunctionProtocolRef
 		}
 		if len(requirement.RequiredCheckRefs) == 0 || len(requirement.RequiredCheckRefs) > maxShellBehaviorNativeChecks || validateShellBehaviorRecipeArgs(args) != nil {
 			return nil, false
@@ -345,9 +358,18 @@ func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecip
 				return nil, false
 			}
 		}
+		stagesHash := ""
+		if project {
+			native = "TestWorkOrchCWI_" + strings.ToUpper(shellProjectRequirementIdentity(requirement)) + "_Check_" + strings.ToUpper(suffix) + "_InputV6"
+			pkg := shellProjectNativePackage(native)
+			if pkg == "" {
+				return nil, false
+			}
+			stagesHash = runtimemodel.StableRuntimeValidationExecutionStagesHash(shellProjectExecutionStageIdentities(pkg))
+		}
 		ret = append(ret, runtimemodel.RuntimeValidationCheckAttestationBinding{
 			RequiredCheckRef: required, ObservationProtocolRef: protocol,
-			NativeCheckRef: native,
+			NativeCheckRef: native, ExecutionStagesHash: stagesHash,
 		})
 	}
 	return runtimemodel.NormalizeRuntimeValidationCheckAttestationBindings(ret), len(ret) != 0
@@ -420,6 +442,10 @@ func shellValidationProofPreparationFromInspection(inspection shellNativeCheckIn
 	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint && targetRef != "" {
 		preparation.ContentContractRef = shellConjunctiveInputContentContractRef
 		preparation.ContentRequirements = shellConjunctiveInputContentRequirements + shellAssertionFeedbackRequirements
+	}
+	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectConjunction && targetRef != "" {
+		preparation.ContentContractRef = shellProjectInputContentContractRef
+		preparation.ContentRequirements = shellProjectInputContentRequirements + shellAssertionFeedbackRequirements
 	}
 	if preparation.Validate() != nil {
 		return runtimemodel.RuntimeValidationProofPreparation{}, false, false

@@ -9,11 +9,15 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// 在正式 recipe 接线前只允许 owner 内部调用。前三阶段不使用当前 CWI 的
+// 仅由 owner 内部的执行封套调用。前三阶段不使用当前 CWI 的
 // coverage；最后阶段单独解析原生检查和行为，不能借全项目测试的 coverage 授予 credit。
 func runShellProjectConjunction(ctx context.Context, directory string, env []string, request RuntimeCommandRequest) (RuntimeCommandResult, shellProjectConjunctionFact, error) {
 	output := shellBaseOutput(request, request.Command, request.Args, directory, "", "go")
 	output.Status = "completed"
+	projectSelected := len(request.ValidationCheckAttestations) != 0 && request.ValidationCheckAttestations[0].ObservationProtocolRef == shellProjectConjunctionProtocolRef
+	if projectSelected {
+		output.ValidationObservation = &runtimecontract.RuntimeValidationObservation{RecipeID: request.ValidationRecipeID, ObservationProtocolRef: shellProjectConjunctionProtocolRef}
+	}
 	output.TimeoutMillis = request.TimeoutMillis
 	startedAt := time.Now()
 	if ctx == nil {
@@ -73,6 +77,10 @@ func runShellProjectConjunction(ctx context.Context, directory string, env []str
 			output.ZeroWork, output.goTestJSONFacts = false, nil
 			attachShellValidationObservation(&output, "go", spec.Args, request.ValidationRecipeID, true)
 			attachShellValidationCheckFailures(&output, request)
+			if projectSelected && index < len(specs)-1 {
+				// 前三阶段的 PASS 不投影为当前 CWI 的 exact native proof。
+				output.ValidationObservation = &runtimecontract.RuntimeValidationObservation{RecipeID: request.ValidationRecipeID, ObservationProtocolRef: shellProjectConjunctionProtocolRef}
+			}
 		}
 		if index == len(specs)-1 {
 			output.workspaceProcessBehaviorTargetRefs, output.workspaceProcessBehaviorError = shellProcessBehaviorTargets(ctx, "go", directory, processPath, stageEnv, request.ValidationScopeTargetRefs)

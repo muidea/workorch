@@ -37,6 +37,18 @@ func (a *RuntimeAdapter) executeShellProjectConjunction(ctx context.Context, req
 		request.ValidationScratchDirectory != "" || !shellRequiresEntrypointBehavior(request) {
 		return result, common.ErrInvalidArgument
 	}
+	return a.executeShellProjectScope(ctx, request, shellProjectRawScope{WorkspaceID: execution.WorkspaceID, RunID: execution.RunID, ExecutionKey: execution.Execution.ExecutionKey})
+}
+
+// scope 来自已核验的 execute seal 或现有 reconciliation identity，不提供 caller 路径/引用入口。
+func (a *RuntimeAdapter) executeShellProjectScope(ctx context.Context, request RuntimeCommandRequest, scope shellProjectRawScope) (result shellProjectExecutionResult, executeErr error) {
+	result.StartedAt = time.Now().UTC()
+	probe := scope
+	probe.StageID, probe.Stream = "scope-check", "stdout"
+	if a == nil || ctx == nil || probe.Validate() != nil || request.WorkspaceID != scope.WorkspaceID || request.RunID != scope.RunID ||
+		request.StateChanging || !shellInputHasManagedValidation(request) || request.ValidationScratchDirectory != "" || !shellRequiresEntrypointBehavior(request) {
+		return result, common.ErrInvalidArgument
+	}
 	timeout, err := shellCommandTimeout(request.TimeoutMillis, a.timeout)
 	if err != nil || timeout > DefaultCommandTimeout {
 		return result, common.ErrInvalidArgument
@@ -106,8 +118,9 @@ func (a *RuntimeAdapter) executeShellProjectConjunction(ctx context.Context, req
 			if stream == "stderr" {
 				raw = stage.Stderr
 			}
-			scope := shellProjectRawScope{WorkspaceID: execution.WorkspaceID, RunID: execution.RunID, ExecutionKey: execution.Execution.ExecutionKey, StageID: stage.ID, Stream: stream}
-			ref, err := store.Store(runCtx, scope, raw)
+			streamScope := scope
+			streamScope.StageID, streamScope.Stream = stage.ID, stream
+			ref, err := store.Store(runCtx, streamScope, raw)
 			if err != nil {
 				if executeErr == nil {
 					executeErr = err
@@ -189,6 +202,10 @@ func finishShellProjectExecution(result *shellProjectExecutionResult, executeErr
 		}
 	} else {
 		result.Result.Status = "completed"
+	}
+	if result.Conjunction != nil && result.Result.ValidationObservation != nil && result.Result.ValidationObservation.ObservationProtocolRef == shellProjectConjunctionProtocolRef {
+		conjunction := result.Conjunction.Clone()
+		result.Result.ValidationObservation.ExecutionConjunction = &conjunction
 	}
 	result.Result.DurationMillis = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
 	result.Result, executeErr = finalizeShellResult(result.Result, executeErr)

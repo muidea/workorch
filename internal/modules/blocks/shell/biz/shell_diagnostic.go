@@ -668,6 +668,10 @@ func finalizeShellResult(output RuntimeCommandResult, executeErr error) (Runtime
 }
 
 func enrichShellFailureMessage(base string, output RuntimeCommandResult) string {
+	if output.ValidationObservation != nil && output.ValidationObservation.ObservationProtocolRef == shellProjectConjunctionProtocolRef {
+		// 新协议仅投影 owner 阶段事实；原文保留在受限存储，不生成截断/改写的 stdout/stderr 摘要。
+		return fmt.Sprintf("复合验证阶段事实：code=%s; stage=%s; exitCode=%d", output.FailureCode, output.Stage, output.ExitCode)
+	}
 	base = strings.TrimSpace(base)
 	// Redact before preview so secrets never enter FailureMessage / RuntimeFacts / LLM context.
 	stderrPreview := shellPreview(common.RedactSensitiveString(output.Stderr), 512)

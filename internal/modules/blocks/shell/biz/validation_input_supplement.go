@@ -31,6 +31,10 @@ func shellValidationInputAddition(check runtimecontract.RuntimeValidationCheckAt
 		addition.ContentContractRef = shellConjunctiveInputContentContractRef
 		addition.ContentRequirements = shellConjunctiveInputContentRequirements + " Create only this supplemental nativeCheckRef, preserving every original check in the same package."
 	}
+	if check.ObservationProtocolRef == shellProjectConjunctionProtocolRef {
+		addition.ContentContractRef = shellProjectInputContentContractRef
+		addition.ContentRequirements = shellProjectInputContentRequirements + " 仅创建此 supplemental nativeCheckRef，保留同包全部 original checks，四阶段及 original/supplement 均为 all-of。"
+	}
 	addition.ContentRequirements += shellAssertionFeedbackRequirements
 	return addition
 }
@@ -41,6 +45,10 @@ func shellValidationInputAddition(check runtimecontract.RuntimeValidationCheckAt
 func shellSupplementCheckRef(native string) string { return native + "_Behavior" }
 
 func shellSupplementTargetRef(native string) string {
+	if pkg := shellProjectNativePackage(native); pkg != "" {
+		digest := strings.ToLower(strings.TrimPrefix(native, "TestWorkOrchCWI_"))
+		return pkg + "/behavior_" + digest + "_test.go"
+	}
 	if pkg := shellConjunctiveNativePackage(native); pkg != "" {
 		digest := strings.ToLower(strings.TrimPrefix(native, "TestWorkOrchCWI_"))
 		return pkg + "/behavior_" + digest + "_test.go"

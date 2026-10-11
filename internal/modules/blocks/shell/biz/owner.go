@@ -191,7 +191,16 @@ func (m *Biz) handleRuntimeCWIReconciliationQuery(event magicevent.Event, result
 			}
 			continue
 		}
-		output, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), request)
+		output := RuntimeCommandResult{}
+		var executeErr error
+		if selected, selectErr := shellProjectRequestSelected(request); selectErr != nil {
+			output, executeErr = validationRecipeUnavailableResult(request, selectErr), selectErr
+		} else if selected {
+			produced, err := m.runtimeAdapter.executeShellProjectScope(event.Context(), request, shellProjectReconciliationRawScope(command, recipe.ID))
+			output, executeErr = produced.Result, err
+		} else {
+			output, executeErr = m.runtimeAdapter.ExecuteOperation(event.Context(), request)
+		}
 		if executeErr != nil || output.Status != "completed" || output.ExitCode != 0 || output.ZeroWork || output.ValidationObservation == nil || output.Evidence.Quality != common.EvidenceQualityValid {
 			allPassed = false
 			if failureCode == "" && output.FailureCode != "" {
@@ -393,6 +402,11 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 	var executeErr error
 	if executeErr = resolveManagedValidationRecipe(&runtimeRequest); executeErr != nil {
 		operationResult = validationRecipeUnavailableResult(runtimeRequest, executeErr)
+	} else if selected, selectErr := shellProjectRequestSelected(runtimeRequest); selectErr != nil {
+		operationResult, executeErr = validationRecipeUnavailableResult(runtimeRequest, selectErr), selectErr
+	} else if selected {
+		produced, err := m.runtimeAdapter.executeShellProjectConjunction(event.Context(), runtimeRequest, command.RuntimeOperationExecutionContext)
+		operationResult, executeErr = produced.Result, err
 	} else {
 		operationResult, executeErr = m.runtimeAdapter.ExecuteOperation(event.Context(), runtimeRequest)
 	}
