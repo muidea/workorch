@@ -1,7 +1,7 @@
 package workorchruntimecontract
 
 import (
-	"crypto/sha256"
+	"hash"
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
@@ -265,7 +265,10 @@ func (d RuntimeCandidateFailureDiagnostic) Normalized() RuntimeCandidateFailureD
 }
 
 func StableRuntimeCandidateHash(candidate RuntimeCandidate) string {
-	h := sha256.New()
+	return encodeRuntimeCandidateHash(candidate, newRuntimeHashWriter())
+}
+
+func encodeRuntimeCandidateHash(candidate RuntimeCandidate, h hash.Hash) string {
 	switch {
 	case candidate.StateChange != nil:
 		writeHashString(h, "state_change")
@@ -329,7 +332,10 @@ func StableRuntimeCandidateHash(candidate RuntimeCandidate) string {
 // dependencies, proof binding, targets and every typed parameter; display-only
 // anti-replay shape rules do not apply to execution authority.
 func StableRuntimeOperationHash(operation RuntimeOperation) string {
-	h := sha256.New()
+	return encodeRuntimeOperationHash(operation, newRuntimeHashWriter())
+}
+
+func encodeRuntimeOperationHash(operation RuntimeOperation, h hash.Hash) string {
 	writeHashString(h, "runtime-operation/v1")
 	writeCandidateOperations(h, []RuntimeOperation{operation})
 	return hex.EncodeToString(h.Sum(nil))
