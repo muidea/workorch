@@ -816,7 +816,7 @@ func validateRuntimeCandidateManifestRawCanonical(manifest RuntimeCandidateContr
 	} else if manifest.AssessmentPurpose != "" || manifest.AssessmentPurposeManifestHash != "" {
 		return runtimeValidatedCandidateManifest{}, fmt.Errorf("non-assessment runtime candidate contract manifest carries assessment purpose")
 	}
-	if manifest.Hash == "" || manifest.Hash != StableRuntimeCandidateContractManifestHash(manifest) {
+	if manifest.Hash == "" || manifest.Hash != stableRuntimeCandidateContractManifestHashNormalized(canonical) {
 		return runtimeValidatedCandidateManifest{}, fmt.Errorf("runtime candidate contract manifest hash mismatch")
 	}
 	return runtimeValidatedCandidateManifest{manifest: canonical}, nil
@@ -881,7 +881,11 @@ func ValidateRuntimeCandidateManifestOperationCardinality(manifest RuntimeCandid
 // and uses only normalized typed values. It is safe to expose in request audit
 // metadata; it contains neither provider payload nor workspace content.
 func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContractManifest) string {
-	manifest = manifest.Normalized()
+	return stableRuntimeCandidateContractManifestHashNormalized(manifest.Normalized())
+}
+
+// 仅消费本次规范化产物；公开 hash 入口仍执行完整 Normalized。
+func stableRuntimeCandidateContractManifestHashNormalized(manifest RuntimeCandidateContractManifest) string {
 	manifest.Hash = ""
 	h := sha256.New()
 	writeHashString(h, manifest.Revision)

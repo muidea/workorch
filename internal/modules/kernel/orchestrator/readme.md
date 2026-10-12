@@ -62,6 +62,10 @@ capability resource state。
   完整执行，再复用本次 manifest 派生 target/recipe 投影；attempt 与 dispatch 两侧身份、内容和 hash 仍独立反证。
   `runtime_candidate_lineage_validation_reuse_test.go` 固定私有产物深拷贝、公开拒绝等价及后续调用重新验证。
   accepted lineage 同次复用完整校验的 detached manifest，不再次 Clone session manifest 或重验未变 binding；
+  raw-canonical candidate manifest 门禁在完整正文比较后复用已规范化产物计算 hash，公开 hash 入口仍完整规范化；
+  input-protection、repair、value-rule、target binding、coverage projection 和 working commitment 门禁及首个错误顺序不变。
+  `runtime_candidate_manifest_hash_reuse_test.go` 对照原规范化后再调用公开 hash 的路径，固定嵌套 recipe/variant、
+  重复/空集/原 bytes、hash 篡改、reload、detached 返回与实际 fuzz；仅减少重复复制，不跨调用缓存或改变 SM/预算。
   attempt 与 dispatch 两侧仍独立规范化、比较完整 binding 正文与 snapshot hash，不以自洽 hash 代替来源反证。
   proof/binding Clone 复用自身 Normalized 的 detached 产物，保持既有 nil/empty 语义；
   `runtime_coverage_proof_clone_reuse_test.go` 对照旧实现验证原值、嵌套隔离、重载与分配成本。
