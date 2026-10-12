@@ -724,6 +724,12 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 		result.Set(gitevents.ExecuteOperationResult{Receipt: committed}, nil)
 		return
 	}
+	if data.Operation == modulecommon.OperationCommit {
+		if err := validateGitCommitDependencyScope(command.RuntimeOperationExecutionContext); err != nil {
+			setCapabilityError(result, err)
+			return
+		}
+	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeOperationRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
 		Kind: operation.Kind, WorkspaceDeliverableDirectory: command.WorkspaceDeliverableDirectory,
@@ -734,6 +740,15 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 	})
 	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
 	evidence := operationResult.Evidence
+	if executeErr == nil {
+		dependencies, dependencyErr := m.runtimeAdapter.commitOwnerDependencies(event.Context(), command.RuntimeOperationExecutionContext, operationResult)
+		if dependencyErr != nil {
+			// effect 可能已经完成；不伪造 rejected/no-op receipt，交由原 unknown 对账路径处理。
+			setCapabilityError(result, dependencyErr)
+			return
+		}
+		evidence.OwnerRevisionSet = dependencies
+	}
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		status = runtimecontract.RuntimeOperationExecutionStatusRejected

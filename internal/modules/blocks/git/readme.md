@@ -38,6 +38,21 @@ Owner topic、Command/Result 与 seal 类型的定义源是 `blocks/git/pkg/even
 - 本组件不拥有 Run、Result、CWI credit、retry、governance 或 terminal 状态；Git fact/evidence 不能直接判定 DoD。
 - CWI reconciliation 只可陈述 repository fact；repository revision 不能替代 check、metric、artifact 或 semantic proof。
 
+### 本地 commit 的实际对象依赖
+
+- production Execute 在 effect 前要求 exact Workspace/Definition 身份。非 no-op commit 成功后，由同一 Git owner
+  完整读取观察到的 immutable commit 和其根 tree，按 Git object header/body 反查 SHA-1 或 SHA-256 对象身份，
+  并以完整原 bytes 的 SHA256 与字段/对象 selector 编译 receipt `Evidence.OwnerRevisionSet`。
+- 对象读取禁用 replace refs；缺失、损坏、类型不符、取消或超过明确 64KiB 读取边界均返回错误，不把部分对象标为完整。
+  effect 可能已经发生的读取失败不发布 fabricated completed/rejected/no-op receipt；原 SM-3 unknown 身份、预算与对账路径保留。
+- 该集合只证明 owner 实际读取的 commit/root-tree 对象，不代表全部 blob、递归子树、工作树、子模块、测试或终验结果。
+  不读取整个 repository hash，不从 authority/evidence revision 合成来源；无关工作树变化不改变 immutable 对象依赖。
+- 已持久 receipt 的 shutdown drain/owner 重建重放保持原对象集合，不重新 commit 或用当前 HEAD 替换归档。
+  `git_commit_read_dependencies_test.go` 覆盖完整原 bytes、raw/重载/返回隔离、非法 scope、缺失/超限对象、
+  真实 EventHub commit 与 exact receipt 重放。Orchestrator receipt/evidence 现有完整 hash/raw/source 门禁继续适用。
+- 本片不改变 SM-1～SM-4 transition、不授 CWI credit、不开放 implementation-work availability；
+  current owner 查询及 terminal 全部 actual dependency union 仍由各自合同单独负责。
+
 ### 生命周期与排空合同
 
 - `Start` 通过 Base checked SimpleObserver API 逐成功 topic 记账；第 N 个失败保留同一 owner 与成功订阅。Start 关闭后不可重新打开代次。
