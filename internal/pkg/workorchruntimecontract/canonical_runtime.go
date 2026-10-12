@@ -2888,6 +2888,16 @@ func normalizeOrderedStrings(values []string) []string {
 }
 
 func normalizeCoverageWorkItemIDs(values []common.CoverageWorkItemID) []common.CoverageWorkItemID {
+	canonical := true
+	for index, value := range values {
+		if value == "" || strings.TrimSpace(string(value)) != string(value) || (index > 0 && values[index-1] >= value) {
+			canonical = false
+			break
+		}
+	}
+	if canonical {
+		return append([]common.CoverageWorkItemID(nil), values...)
+	}
 	stringsValue := make([]string, 0, len(values))
 	for _, value := range values {
 		stringsValue = append(stringsValue, string(value))

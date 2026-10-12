@@ -73,6 +73,9 @@ capability resource state。
   `runtime_coverage_proof_clone_reuse_test.go` 对照旧实现验证原值、嵌套隔离、重载与分配成本。
   effect scope 和 operation variant 集合的 canonical 快路径仍返回 detached 副本，保持旧排序、去重及 nil/empty 表示；
   `runtime_proof_canonical_collections_test.go` 用独立 reference 与 fuzz 校验非规范输入和返回隔离。
+  CWI ID 集合的 canonical 快路径仅复制原 typed 集合，非规范输入仍走原 string 集合转换与去重排序；
+  `runtime_coverage_ids_canonical_test.go` 对照独立原算法固定 Unicode/任意 bytes、空集、重复、原值、重载、隔离、fuzz 与分配，
+  不改变原规范化/hash identity、raw 门禁或 SM-1～SM-4 转换和预算。
   hash 字符串编码合并同次长度前缀与正文写入，不改变 big-endian 长度、集合 cardinality 或任意原始 bytes；
   `runtime_hash_string_encoding_test.go` 固定无效 UTF-8、NUL、长原文与重复 hash，并以 fuzz 对照旧编码。
   canonical authority/catalog 与 coverage binding 的 hash writer 使用单次编码私有短字段缓冲，长字段仍完整写入；
