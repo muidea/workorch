@@ -85,6 +85,9 @@ capability resource state。
   manifest/catalog 仅在 exact raw 相等时复用本次产物，batch、document、owner feasibility 与唯一 binding 前像仍独立反证。
   `runtime_assessment_preimage_session_reference_test.go` 保留原逐代独立校验路径；
   `runtime_assessment_preimage_session_test.go` 固定完整前像、原 bytes、同 hash raw 篡改、后续调用、重载、隔离、fuzz 与分配。
+  assessment focus 的义务查找先按 exact CWI 比较，再仅复制匹配条目；仍扫描完整集合并拒绝重复/缺失义务，
+  不省略 enclosing manifest raw/hash 校验。`runtime_assessment_matched_obligation_test.go` 保留逐条先复制的原算法，
+  对照完整产物、首个错误、无关原始正文和 detached nested 返回值，并验证减少无关复制；SM-1～SM-4 与预算不变。
   同次完整 manifest 校验产物可保存已成功反证的 exact raw semantic document；首次成功时才复制 manifest/document 原值，
   再次使用前分别比较完整 manifest 与原始 document，不按 hash 或规范化后正文命中。失败不缓存，公开入口及后续调用
   仍重新完整校验；batch、owner feasibility、input review、binding 和 reconciliation 门禁不省略。

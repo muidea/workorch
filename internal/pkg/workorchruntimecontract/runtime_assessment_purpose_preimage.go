@@ -179,14 +179,15 @@ func runtimeAssessmentPurposeBindingPreimageForFocus(manifest RuntimeSemanticPla
 	coverageID := focus.CoverageWorkItemIDs[0]
 	var obligation *RuntimeSemanticProofObligation
 	for index := range manifest.ProofObligations {
-		candidate := manifest.ProofObligations[index].Clone()
+		candidate := manifest.ProofObligations[index]
 		if candidate.CoverageWorkItemID != coverageID {
 			continue
 		}
 		if obligation != nil {
 			return runtimeAssessmentPurposeBindingPreimage{}, fmt.Errorf("runtime assessment purpose semantic manifest has duplicate CWI obligations")
 		}
-		obligation = &candidate
+		value := candidate.Clone()
+		obligation = &value
 	}
 	if obligation == nil {
 		return runtimeAssessmentPurposeBindingPreimage{}, fmt.Errorf("runtime assessment purpose semantic manifest has no CWI obligation")
