@@ -85,6 +85,11 @@ capability resource state。
   manifest/catalog 仅在 exact raw 相等时复用本次产物，batch、document、owner feasibility 与唯一 binding 前像仍独立反证。
   `runtime_assessment_preimage_session_reference_test.go` 保留原逐代独立校验路径；
   `runtime_assessment_preimage_session_test.go` 固定完整前像、原 bytes、同 hash raw 篡改、后续调用、重载、隔离、fuzz 与分配。
+  同次完整 manifest 校验产物可保存已成功反证的 exact raw semantic document；首次成功时才复制 manifest/document 原值，
+  再次使用前分别比较完整 manifest 与原始 document，不按 hash 或规范化后正文命中。失败不缓存，公开入口及后续调用
+  仍重新完整校验；batch、owner feasibility、input review、binding 和 reconciliation 门禁不省略。
+  `runtime_semantic_document_session_test.go` 对照禁用 session 的原完整 document 路径，固定首个错误、原值/重载/后续 mutation、
+  detached 前像、compiler 完整产物与 owner-fact 反例、fuzz 和包含首次校验成本的分配对照；不改变 SM-1～SM-4 转换或预算。
   semantic proof compiler 的 raw owner catalog 集合门禁保持完整，仅复用本次 detached 目录索引解析 prospective all-of 约束，
   不重复校验未变的整份目录；公开 resolver 仍完整校验，每次 compiler 调用重新反证 raw、重复 owner/surface、hash 和 exact requirement。
   `runtime_semantic_proof_catalog_reuse_test.go` 固定公开／私有 resolver 等价、完整产物、原值、重载及后续调用拒绝。

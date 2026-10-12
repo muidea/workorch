@@ -777,6 +777,13 @@ type runtimeValidatedSemanticManifest struct {
 	obligationByCoverage     map[common.CoverageWorkItemID]RuntimeSemanticProofObligation
 	ownerCatalogByOwner      map[string]RuntimeOperationAdmissibility
 	dependencyCatalogByOwner map[string]RuntimeOperationAdmissibility
+	documents                *runtimeSemanticDocumentValidationSession
+}
+
+// 每个完整 manifest 校验产物独占一份同次成功集合；原值副本防止后续 mutation 借用旧结果。
+type runtimeSemanticDocumentValidationSession struct {
+	manifest RuntimeSemanticPlanManifest
+	values   []RuntimeSemanticPlanDocument
 }
 
 type runtimeSemanticManifestValidationEntry struct {
@@ -1015,6 +1022,7 @@ func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest,
 	validated := runtimeValidatedSemanticManifest{
 		manifest: m, coverageByID: coverage, obligationByCoverage: obligationCoverage,
 		ownerCatalogByOwner: ownerCatalogs, dependencyCatalogByOwner: dependencyCatalogs,
+		documents: &runtimeSemanticDocumentValidationSession{},
 	}
 	session.manifests[manifestKey] = append(session.manifests[manifestKey], runtimeSemanticManifestValidationEntry{raw: rawManifest, validated: validated})
 	return validated, nil
@@ -1773,6 +1781,27 @@ func (d RuntimeSemanticPlanDocument) ValidateAgainstManifest(manifest RuntimeSem
 }
 
 func validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(d RuntimeSemanticPlanDocument, validated runtimeValidatedSemanticManifest) error {
+	// 只有同一完整 manifest 的 exact raw document 可复用；不能靠 Hash 或规范化后的正文命中。
+	session := validated.documents
+	if session == nil || len(session.values) != 0 && !reflect.DeepEqual(session.manifest, validated.manifest) {
+		return validateRuntimeSemanticPlanDocumentAgainstValidatedManifestUncached(d, validated)
+	}
+	for _, previous := range session.values {
+		if reflect.DeepEqual(previous, d) {
+			return nil
+		}
+	}
+	if err := validateRuntimeSemanticPlanDocumentAgainstValidatedManifestUncached(d, validated); err != nil {
+		return err
+	}
+	if len(session.values) == 0 {
+		session.manifest = cloneRuntimeSemanticPlanManifestRaw(validated.manifest)
+	}
+	session.values = append(session.values, cloneRuntimeSemanticPlanDocumentRaw(d))
+	return nil
+}
+
+func validateRuntimeSemanticPlanDocumentAgainstValidatedManifestUncached(d RuntimeSemanticPlanDocument, validated runtimeValidatedSemanticManifest) error {
 	raw := d
 	d = d.Normalized()
 	manifest := validated.manifest
