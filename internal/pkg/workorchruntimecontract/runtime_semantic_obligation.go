@@ -670,12 +670,36 @@ type runtimeSemanticProofCatalogs struct {
 }
 
 func validateRuntimeSemanticProofCatalogs(catalogs []RuntimeOperationAdmissibility) (runtimeSemanticProofCatalogs, error) {
-	if err := validateRuntimeSemanticOwnerCatalogCollection(catalogs); err != nil {
-		return runtimeSemanticProofCatalogs{}, err
+	values := make([]RuntimeOperationAdmissibility, 0, len(catalogs))
+	seenPrerequisites := make(map[string]struct{}, len(catalogs))
+	for _, raw := range catalogs {
+		value, err := validateAndNormalizeRuntimeOperationAdmissibility(raw)
+		if err != nil {
+			return runtimeSemanticProofCatalogs{}, fmt.Errorf("runtime semantic owner catalogs: %w", err)
+		}
+		if _, duplicate := seenPrerequisites[value.PrerequisiteID]; duplicate {
+			return runtimeSemanticProofCatalogs{}, fmt.Errorf("runtime semantic owner catalogs: runtime operation admissibility duplicates prerequisite %q", value.PrerequisiteID)
+		}
+		seenPrerequisites[value.PrerequisiteID] = struct{}{}
+		values = append(values, value)
 	}
-	// 集合门禁已完整校验每条 raw catalog；本次只构造 detached 规范化索引。
+	// owner 重复仍在全部条目与 prerequisite 门禁后检查，保持原首个错误顺序。
+	seenOwners := make(map[string]struct{}, len(catalogs))
+	for _, raw := range catalogs {
+		owner := strings.TrimSpace(raw.OwnerModuleID)
+		if _, duplicate := seenOwners[owner]; duplicate {
+			return runtimeSemanticProofCatalogs{}, fmt.Errorf("runtime semantic owner catalogs duplicate owner %q", owner)
+		}
+		seenOwners[owner] = struct{}{}
+	}
+	sort.SliceStable(values, func(i, j int) bool {
+		if values[i].PrerequisiteID != values[j].PrerequisiteID {
+			return values[i].PrerequisiteID < values[j].PrerequisiteID
+		}
+		return values[i].OwnerModuleID < values[j].OwnerModuleID
+	})
 	validated := runtimeSemanticProofCatalogs{
-		values:  NormalizeRuntimeOperationAdmissibilities(catalogs),
+		values:  nilIfEmpty(values),
 		byOwner: make(map[string]RuntimeOperationAdmissibility, len(catalogs)),
 	}
 	for _, value := range validated.values {

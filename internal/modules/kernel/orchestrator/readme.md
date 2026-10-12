@@ -93,6 +93,10 @@ capability resource state。
   semantic proof compiler 的 raw owner catalog 集合门禁保持完整，仅复用本次 detached 目录索引解析 prospective all-of 约束，
   不重复校验未变的整份目录；公开 resolver 仍完整校验，每次 compiler 调用重新反证 raw、重复 owner/surface、hash 和 exact requirement。
   `runtime_semantic_proof_catalog_reuse_test.go` 固定公开／私有 resolver 等价、完整产物、原值、重载及后续调用拒绝。
+  proof catalog 索引直接复用本次逐条完整校验返回的 detached 规范化值；prerequisite 重复仍逐条检查，owner 重复仍在
+  全部条目校验后检查，不提前返回而改变首个错误。排序、空集合、嵌套 proof/snapshot 和公开 compiler 门禁保持不变。
+  `runtime_semantic_proof_catalog_values_test.go` 对照原集合门禁后独立规范化路径，核验完整产物、混合反例错误顺序、
+  raw/重载/输入保全、返回隔离、后续变化、fuzz 与完整校验分配；不改变 SM-1～SM-4 转换、预算或 availability。
   semantic owner catalog 校验直接复用同次完整 raw／嵌套 proof／snapshot 校验产生的 detached 规范化目录，
   不再次规范化未变的整份目录；重复 prerequisite／owner 门禁保留，公开 `Validate` 与后续调用仍完整重验。
   `runtime_owner_catalog_validation_reuse_test.go` 与独立旧 validator 固定产物、完整拒绝原因、原值、重载、隔离、fuzz 和分配成本。
