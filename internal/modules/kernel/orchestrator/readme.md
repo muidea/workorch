@@ -695,6 +695,12 @@ File 输入修改、review 或执行 credit。脚本化 provider 主线只能证
   receipt 原诊断、confirmation、commitment 与 evidence lineage 保持不可变；普通拒绝不授权恢复旧修复范围或自动 successor。
   candidate-local applicability 在 dispatch 前使用唯一 attempt 0/1；typed stale、governance 与 unknown effect 仍各走既有独立事件。
 
+- prospective File delta/required-owner satisfaction 的纯 proposal 校验只规范化实际读取的 scope/hash 和 dependency
+  catalog 投影，不再为此复制无关 Coverage、义务及普通 owner catalog。原读取字段的规范化次数、value.Validate、
+  exact proposal/File delta/catalog 身份、stale 和完整 feasibility/manifest gate 均保留；不新增持久校验位或跨调用缓存。
+  `runtime_prospective_manifest_projection_test.go` 使用优化前完整规范化 oracle 对照首个错误、raw/重复/空值、
+  accepted/stale、JSON 重载、原值保全、后续变化、返回隔离、fuzz 和分配；此片不改变 SM-1～SM-4 transition 或预算。
+
 - capability owner 只返回 factual catalog/feasibility/receipt。receipt 必须绑定 exact dispatch、operation、execution key/fence、
   target authorization、effect、binding 与 recipe/check；只有 SM-2 private event 可以裁决 evidence kind、credit、CWI settlement
   或 terminal。

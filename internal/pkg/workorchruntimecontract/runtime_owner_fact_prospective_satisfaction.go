@@ -590,16 +590,42 @@ func validateRuntimeOwnerFactProspectiveSatisfactionStaleForRequest(value Runtim
 	return nil
 }
 
+func normalizeRuntimeProspectiveManifestIdentity(manifest RuntimeSemanticPlanManifest) RuntimeSemanticPlanManifest {
+	return RuntimeSemanticPlanManifest{
+		WorkspaceID:        common.WorkspaceID(strings.TrimSpace(string(manifest.WorkspaceID))),
+		RunID:              common.RunID(strings.TrimSpace(string(manifest.RunID))),
+		Hash:               strings.TrimSpace(manifest.Hash),
+		DefinitionSeedHash: strings.TrimSpace(manifest.DefinitionSeedHash),
+	}
+}
+
+// 仅规范化这些纯校验实际读取的字段；dependency catalog 保留原规范化次数，不授予校验凭据。
+func normalizeRuntimeProspectiveManifestProjection(manifest RuntimeSemanticPlanManifest) RuntimeSemanticPlanManifest {
+	projection := normalizeRuntimeProspectiveManifestIdentity(manifest)
+	projection.OwnerFactDependencyCatalogs = NormalizeRuntimeOperationAdmissibilities(manifest.OwnerFactDependencyCatalogs)
+	return projection
+}
+
+func runtimeProspectiveDependencyCatalogFor(manifest RuntimeSemanticPlanManifest, ownerModuleID string) (RuntimeOperationAdmissibility, bool) {
+	ownerModuleID = strings.TrimSpace(ownerModuleID)
+	for _, catalog := range NormalizeRuntimeOperationAdmissibilities(manifest.OwnerFactDependencyCatalogs) {
+		if catalog.OwnerModuleID == ownerModuleID {
+			return catalog.Normalized(), true
+		}
+	}
+	return RuntimeOperationAdmissibility{}, false
+}
+
 func validateRuntimeOwnerFactProspectiveSatisfactionObservationForProposal(value RuntimeOwnerFactProspectiveSatisfactionObservation, manifest RuntimeSemanticPlanManifest, proposal RuntimeSemanticProofProposal, acquisition RuntimeSemanticOwnerFactAcquisition, delta RuntimeProspectiveWorkspaceManifestDelta) error {
 	value = value.Normalized()
-	manifest = manifest.Normalized()
+	manifest = normalizeRuntimeProspectiveManifestProjection(manifest)
 	if err := value.Validate(); err != nil {
 		return err
 	}
 	if value.Satisfaction != nil {
 		return validateRuntimeOwnerFactProspectiveSatisfactionForProposal(*value.Satisfaction, manifest, proposal, acquisition, delta)
 	}
-	catalog, found := runtimeSemanticOwnerFactDependencyCatalogFor(manifest, acquisition.Requirement.OwnerModuleID)
+	catalog, found := runtimeProspectiveDependencyCatalogFor(manifest, acquisition.Requirement.OwnerModuleID)
 	if !found || value.Stale.PrerequisiteID != catalog.PrerequisiteID || value.Stale.OwnerModuleID != catalog.OwnerModuleID ||
 		value.Stale.ExpectedRevision != catalog.ObservedRevision {
 		return fmt.Errorf("runtime owner-fact prospective satisfaction stale result does not match sealed dependency catalog")
@@ -609,7 +635,7 @@ func validateRuntimeOwnerFactProspectiveSatisfactionObservationForProposal(value
 
 func validateRuntimeOwnerFactProspectiveSatisfactionForProposal(value RuntimeOwnerFactProspectiveSatisfaction, manifest RuntimeSemanticPlanManifest, proposal RuntimeSemanticProofProposal, acquisition RuntimeSemanticOwnerFactAcquisition, delta RuntimeProspectiveWorkspaceManifestDelta) error {
 	value = value.Normalized()
-	manifest = manifest.Normalized()
+	manifest = normalizeRuntimeProspectiveManifestProjection(manifest)
 	proposal = proposal.Normalized()
 	acquisition = acquisition.Normalized()
 	delta = delta.Normalized()
@@ -624,7 +650,7 @@ func validateRuntimeOwnerFactProspectiveSatisfactionForProposal(value RuntimeOwn
 		value.ProspectiveWorkspaceManifestDeltaHash != StableRuntimeProspectiveWorkspaceManifestDeltaHash(delta) {
 		return fmt.Errorf("runtime owner-fact prospective satisfaction does not match sealed proposal and File delta")
 	}
-	dependencyCatalog, found := runtimeSemanticOwnerFactDependencyCatalogFor(manifest, acquisition.Requirement.OwnerModuleID)
+	dependencyCatalog, found := runtimeProspectiveDependencyCatalogFor(manifest, acquisition.Requirement.OwnerModuleID)
 	if !found || value.CatalogSnapshotID != dependencyCatalog.SnapshotID || value.ObservedRevision != dependencyCatalog.ObservedRevision {
 		return fmt.Errorf("runtime owner-fact prospective satisfaction does not match sealed dependency catalog")
 	}
@@ -633,7 +659,7 @@ func validateRuntimeOwnerFactProspectiveSatisfactionForProposal(value RuntimeOwn
 
 func validateRuntimeProspectiveWorkspaceManifestDeltaForProposal(delta RuntimeProspectiveWorkspaceManifestDelta, manifest RuntimeSemanticPlanManifest, proposal RuntimeSemanticProofProposal, acquisition RuntimeSemanticOwnerFactAcquisition) error {
 	delta = delta.Normalized()
-	manifest = manifest.Normalized()
+	manifest = normalizeRuntimeProspectiveManifestIdentity(manifest)
 	proposal = proposal.Normalized()
 	acquisition = acquisition.Normalized()
 	if delta.WorkspaceID != manifest.WorkspaceID || delta.RunID != manifest.RunID || delta.ManifestHash != manifest.Hash ||
