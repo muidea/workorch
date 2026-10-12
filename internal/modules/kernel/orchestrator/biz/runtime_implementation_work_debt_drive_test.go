@@ -30,8 +30,12 @@ func implementationWorkPurposeDebtDriverFixture(t *testing.T) (*Biz, *runtimeDri
 
 func implementationWorkPurposeDebtDriverFixtureWithEmptyDirectory(t *testing.T, empty bool) (*Biz, *runtimeDriveRepository, runtime.RuntimeAggregate) {
 	t.Helper()
+	return implementationWorkPurposeDebtDriverFixtureWithDirectory(t, empty, t.TempDir())
+}
+
+func implementationWorkPurposeDebtDriverFixtureWithDirectory(t *testing.T, empty bool, directory string) (*Biz, *runtimeDriveRepository, runtime.RuntimeAggregate) {
+	t.Helper()
 	ctx := context.Background()
-	directory := t.TempDir()
 	if !empty {
 		if err := os.WriteFile(filepath.Join(directory, "resource-a"), []byte("original implementation"), 0o600); err != nil {
 			t.Fatal(err)
