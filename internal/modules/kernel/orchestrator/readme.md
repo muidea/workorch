@@ -98,6 +98,10 @@ capability resource state。
   manifest/catalog 仅在 exact raw 相等时复用本次产物，batch、document、owner feasibility 与唯一 binding 前像仍独立反证。
   `runtime_assessment_preimage_session_reference_test.go` 保留原逐代独立校验路径；
   `runtime_assessment_preimage_session_test.go` 固定完整前像、原 bytes、同 hash raw 篡改、后续调用、重载、隔离、fuzz 与分配。
+  同次前像 document 索引保留既有完整 Normalized 表示，不在索引时再 Clone 未变 proposals；
+  私有 binding compiler 已规范化的 focus 只读消费，返回前像仍分别复制 binding、obligation、document 和 owner catalogs。
+  `runtime_assessment_preimage_copy_reuse_test.go` 与原逐代路径对照非规范输入、完整产物/首个错误、raw/重载、隔离、fuzz 和分配；
+  active ledger 的原 Clone 语义、全部 manifest/batch/document/owner 门禁及 SM-1～SM-4/预算保持不变。
   assessment focus 的义务查找先按 exact CWI 比较，再仅复制匹配条目；仍扫描完整集合并拒绝重复/缺失义务，
   不省略 enclosing manifest raw/hash 校验。`runtime_assessment_matched_obligation_test.go` 保留逐条先复制的原算法，
   对照完整产物、首个错误、无关原始正文和 detached nested 返回值，并验证减少无关复制；SM-1～SM-4 与预算不变。

@@ -124,7 +124,7 @@ func runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(
 		if _, duplicate := documents[document.BatchID]; duplicate {
 			return nil, fmt.Errorf("runtime assessment purpose has duplicate batch document")
 		}
-		documents[document.BatchID] = document.Clone()
+		documents[document.BatchID] = document.Normalized()
 	}
 	results := make(map[string]RuntimeSemanticPlanBatchFeasibilityResult, len(ledger.BatchFeasibilityResults))
 	for _, result := range ledger.BatchFeasibilityResults {
@@ -159,7 +159,7 @@ func runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(
 			return nil, fmt.Errorf("runtime assessment purpose semantic batch %q: %w", batch.BatchID, err)
 		}
 		for _, focus := range focuses {
-			focus = focus.Normalized()
+			// 私有 compiler 已返回完整 Normalized focus；此处仅消费，不再次复制。
 			preimage, err := runtimeAssessmentPurposeBindingPreimageForFocus(manifest, focus)
 			if err != nil {
 				return nil, err
