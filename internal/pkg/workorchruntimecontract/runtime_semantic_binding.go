@@ -500,6 +500,11 @@ func compileRuntimeSemanticFocus(validated runtimeValidatedSemanticManifest, gen
 			return CoverageFocus{}, err
 		}
 	}
+	var declaration CoverageFocus
+	if source != nil {
+		// 同次只读 source 的完整规范化产物；返回 focus/binding 仍独立分离嵌套值。
+		declaration = source.Normalized()
+	}
 	for proofIndex, rawProposal := range proofSet.Proposals {
 		proposal := rawProposal.Normalized()
 		proposal.RequiredEffectScopes = deriveRuntimeSemanticProposalEffects(manifest, runtimeSemanticProposalPayload{
@@ -522,7 +527,6 @@ func compileRuntimeSemanticFocus(validated runtimeValidatedSemanticManifest, gen
 			AllowedOperationKinds: []string{proposal.OperationKind},
 		}
 		if source != nil && proofIndex == proofRequirementIndex {
-			declaration := source.Normalized()
 			proof.MetricConstraints = append([]string(nil), declaration.MetricConstraints...)
 			proof.ArtifactRefs = append([]string(nil), declaration.ArtifactRefs...)
 		}
@@ -556,7 +560,6 @@ func compileRuntimeSemanticFocus(validated runtimeValidatedSemanticManifest, gen
 		}
 		currentSelectorOwner := proposal.OwnerModuleID
 		if source != nil && currentSelector != "" {
-			declaration := source.Normalized()
 			if declaration.TargetSelectorRef == currentSelector && declaration.TargetSelectorOwnerRef != "" {
 				currentSelectorOwner = declaration.TargetSelectorOwnerRef
 			}
@@ -615,7 +618,6 @@ func compileRuntimeSemanticFocus(validated runtimeValidatedSemanticManifest, gen
 		binding.TargetSelectorOwnerRef = selectorOwner
 		binding.TargetSelectorSubjectRef = "workspace_deliverable"
 		if source != nil {
-			declaration := source.Normalized()
 			if declaration.TargetSelectorRef == selectorRef {
 				binding.TargetSelectorOwnerRef = declaration.TargetSelectorOwnerRef
 				binding.TargetSelectorSubjectRef = declaration.TargetSelectorSubjectRef
@@ -631,7 +633,6 @@ func compileRuntimeSemanticFocus(validated runtimeValidatedSemanticManifest, gen
 		}
 	}
 	if source != nil && len(prospectiveTargetRefs) != 0 {
-		declaration := source.Normalized()
 		binding.ProspectiveTargetAllOfConstraintRefs = append([]string(nil), declaration.ProspectiveTargetAllOfConstraintRefs...)
 	}
 	binding = binding.Normalized()
@@ -650,7 +651,6 @@ func compileRuntimeSemanticFocus(validated runtimeValidatedSemanticManifest, gen
 		ValidationRecipeID: validationRecipeID, RequiredCheckRefs: validationChecks,
 	}
 	if source != nil {
-		declaration := source.Normalized()
 		focus.EvidenceRole = declaration.EvidenceRole
 		if declaration.TargetRole != "" {
 			focus.TargetRole = declaration.TargetRole
@@ -678,7 +678,6 @@ func compileRuntimeSemanticFocus(validated runtimeValidatedSemanticManifest, gen
 		focus.RequireTargetGrounding = true
 	}
 	if source != nil {
-		declaration := source.Normalized()
 		if selectorRef != "" && declaration.TargetSelectorRef == selectorRef {
 			focus.TargetRole = declaration.TargetRole
 			focus.TargetDiscoverySources = append([]string(nil), declaration.TargetDiscoverySources...)

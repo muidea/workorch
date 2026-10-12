@@ -49,6 +49,10 @@ capability resource state。
   每批 document、request identity 与 owner feasibility 仍完整反证；公开 compiler 每次重新校验，
   `runtime_semantic_binding_validation_reuse_test.go` 固定产物一致性、逐批拒绝和输入不变边界。
   binding compiler 只读本次完整校验建立的 coverage/obligation 索引，仅为当前批次构造 detached source；私有 focus compiler 消费同一 validated manifest，不再次规范化整个 generation。document、proof obligation、owner feasibility 与 reconciliation 的完整校验保留，公开入口和后续调用仍重新验证；`runtime_semantic_binding_indexed_reference_test.go` 保留旧 compiler 路径，固定完整产物、拒绝原因、返回隔离与重载等价。
+  私有 focus compiler 在一次调用内仅完整规范化 source 一次，复用于 proof/selector 与最终 focus 投影；
+  返回的 focus/binding 仍逐项分离，document、owner facts、binding 与 reconciliation 校验和首个错误顺序不变。
+  `runtime_semantic_focus_source_reuse_test.go` 复用独立旧 compiler 对照 definition/repair/多批/独立 proof 的完整产物、原值、fuzz 及分配；
+  既有 raw/owner 反例与重载合同继续适用，不新增跨调用缓存或改变 SM-1～SM-4 和预算。
   accepted batch adapter 使用 `CompileRuntimeSemanticAcceptedBatchBindings`，在合同包内同次复用完整 manifest 校验产物，
   仍校验原始 batch identity/cardinality/hash、精确 accepted document 及完整 owner facts；
   proof-batch binding compiler 复用本次完整 document 校验中已执行的 obligation gate，不对未变正文重复整份校验；
