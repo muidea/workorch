@@ -1,9 +1,9 @@
 package workorchruntimecontract
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"reflect"
 	"sort"
 	"strings"
@@ -886,8 +886,11 @@ func StableRuntimeCandidateContractManifestHash(manifest RuntimeCandidateContrac
 
 // 仅消费本次规范化产物；公开 hash 入口仍执行完整 Normalized。
 func stableRuntimeCandidateContractManifestHashNormalized(manifest RuntimeCandidateContractManifest) string {
+	return encodeRuntimeCandidateContractManifestHashNormalized(manifest, newRuntimeHashWriter())
+}
+
+func encodeRuntimeCandidateContractManifestHashNormalized(manifest RuntimeCandidateContractManifest, h hash.Hash) string {
 	manifest.Hash = ""
-	h := sha256.New()
 	writeHashString(h, manifest.Revision)
 	writeHashString(h, string(manifest.State))
 	writeHashString(h, string(manifest.EffectPolicy.State))

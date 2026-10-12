@@ -1,6 +1,7 @@
 package workorchruntimecontract
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -112,6 +113,23 @@ func TestCandidateManifestRawGateReusesNormalizedHashInput(t *testing.T) {
 	}
 }
 
+func TestCandidateManifestHashBufferMatchesOriginalWriter(t *testing.T) {
+	manifest := candidateManifestHashReuseFixture(t)
+	for _, value := range []string{"", "短字段", string(make([]byte, 120)), string(make([]byte, 121)), string(make([]byte, 4096))} {
+		changed := cloneRuntimeCandidateContractManifestRaw(manifest)
+		changed.Operations[0].ValidationRecipes[0].Args = append(changed.Operations[0].ValidationRecipes[0].Args, value)
+		canonical := changed.Normalized()
+		if got, want := stableRuntimeCandidateContractManifestHashNormalized(canonical), encodeRuntimeCandidateContractManifestHashNormalized(canonical, sha256.New()); got != want {
+			t.Fatalf("原完整 manifest 编码 bytes 漂移: got=%s want=%s", got, want)
+		}
+	}
+	current := testing.AllocsPerRun(20, func() { _ = stableRuntimeCandidateContractManifestHashNormalized(manifest) })
+	reference := testing.AllocsPerRun(20, func() { _ = encodeRuntimeCandidateContractManifestHashNormalized(manifest, sha256.New()) })
+	if current >= reference {
+		t.Fatalf("完整 hash 短字段编码未减少分配: current=%v reference=%v", current, reference)
+	}
+}
+
 func FuzzCandidateManifestNormalizedHashMatchesOriginalPath(f *testing.F) {
 	base := candidateManifestHashReuseFixture(f)
 	for selector := range uint8(5) {
@@ -132,5 +150,9 @@ func FuzzCandidateManifestNormalizedHashMatchesOriginalPath(f *testing.F) {
 			manifest.Bindings[0].DeclarationRef = value
 		}
 		assertCandidateManifestHashReuseEquivalent(t, manifest)
+		canonical := manifest.Normalized()
+		if stableRuntimeCandidateContractManifestHashNormalized(canonical) != encodeRuntimeCandidateContractManifestHashNormalized(canonical, sha256.New()) {
+			t.Fatal("完整 manifest buffered hash 与原 writer 漂移")
+		}
 	})
 }
