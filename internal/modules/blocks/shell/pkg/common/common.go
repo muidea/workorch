@@ -28,6 +28,11 @@ const ValidationRecipeAdapterConjunctiveEntrypoint = "shell/project-native-valid
 // 显式新 activation 选择根 module 四阶段合取，不升级旧 package-only 协议。
 const ValidationRecipeAdapterProjectConjunction = "shell/project-native-validation/v6"
 
+// Explicit opt-in; v6 and archived executions keep their original fail-closed
+// project-stage behavior without an additional diagnostic process.
+const ValidationRecipeAdapterProjectFailureDiagnostic = "shell/project-native-validation/v7"
+const ValidationRecipeAdapterProjectMultiFailureDiagnostic = "shell/project-native-validation/v8"
+
 // Validation owner diagnostic codes are Shell-owned, stable facts. Profiles
 // may match these exact values; Runtime core must not infer them from stderr.
 const (

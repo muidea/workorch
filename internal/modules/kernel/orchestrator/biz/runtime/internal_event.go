@@ -77,6 +77,9 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 	if err := event.validateEnvelope(); err != nil {
 		return RuntimeInternalEventResult{}, err
 	}
+	if original, ok := c.repository.(ownerStateOriginalRepository); ok {
+		return c.applyOwnerStateTransaction(ctx, event, original)
+	}
 
 	// Keep every concrete kind at this one exported gate. Grouped cases lower
 	// dispatcher control-flow complexity without creating a registry, callback
@@ -86,6 +89,7 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		return c.applyActivationInternalEvent(ctx, event)
 
 	case RuntimeInternalEventImplementationWorkScopeRequired,
+		RuntimeInternalEventEvidenceApplicabilityObserved,
 		RuntimeInternalEventImplementationWorkScopeObserved,
 		RuntimeInternalEventReconcileAuthority,
 		RuntimeInternalEventReconciliationBatchObserved,

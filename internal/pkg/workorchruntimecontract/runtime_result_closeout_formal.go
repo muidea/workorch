@@ -55,6 +55,10 @@ type RuntimeRequirementEvidenceItem struct {
 	State                RuntimeRequirementEvidenceState
 	ReasonCode           string
 	OwnerRevisionSetHash string
+	// Original owner-authored read snapshot, not a currentness assertion or
+	// a replacement for the requirement's aggregate authority set.
+	OwnerRevisionSet          *RuntimeOwnerRevisionSet                  `json:",omitempty"`
+	ApplicabilityDependencies *RuntimeEvidenceApplicabilityDependencies `json:",omitempty"`
 }
 
 type RuntimeSourceObligationOutcome struct {
@@ -186,6 +190,8 @@ func (o RuntimeRequirementOutcome) Normalized() RuntimeRequirementOutcome {
 		e.State = RuntimeRequirementEvidenceState(strings.TrimSpace(string(e.State)))
 		e.ReasonCode = strings.TrimSpace(e.ReasonCode)
 		e.OwnerRevisionSetHash = strings.TrimSpace(e.OwnerRevisionSetHash)
+		e.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(e.OwnerRevisionSet)
+		e.ApplicabilityDependencies = CloneRuntimeEvidenceApplicabilityDependencies(e.ApplicabilityDependencies)
 	}
 	sort.Slice(o.EvidenceItems, func(i, j int) bool { return o.EvidenceItems[i].EvidenceRef < o.EvidenceItems[j].EvidenceRef })
 	o.AcceptedEvidenceRefs = normalizeStrings(o.AcceptedEvidenceRefs)
@@ -219,6 +225,12 @@ func (o RuntimeRequirementOutcome) Validate() error {
 	accepted := make([]string, 0)
 	seen := map[string]struct{}{}
 	for _, item := range o.EvidenceItems {
+		if err := ValidateRuntimeEvidenceDependencyPair(item.OwnerRevisionSet, item.ApplicabilityDependencies, o.DefinitionRevision); err != nil {
+			return fmt.Errorf("runtime requirement evidence read dependencies: %w", err)
+		}
+		if item.OwnerRevisionSet != nil && item.OwnerRevisionSet.DefinitionRevision != o.DefinitionRevision {
+			return fmt.Errorf("runtime requirement evidence read dependencies definition mismatch")
+		}
 		if item.EvidenceRef == "" {
 			return fmt.Errorf("runtime requirement evidence item requires identity")
 		}

@@ -193,7 +193,7 @@ func newResourceLedgerOwner(hub magicevent.Hub) *Biz {
 }
 
 func TestGitOwnerResourceLedgerEveryStartFailureCanTeardown(t *testing.T) {
-	for n := 1; n <= 7; n++ {
+	for n := 1; n <= len(gitevents.Contracts()); n++ {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
 			ctx := context.Background()
 			failure := frameworkdef.NewError(frameworkdef.ResourceExhausted, "required subscription failed")
@@ -249,7 +249,7 @@ func TestGitOwnerResourceLedgerStartRetrySkipsCompletedTopics(t *testing.T) {
 	if err := owner.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if !owner.started || hub.subscribeCalls != 7+1 || !reflect.DeepEqual(prefix, owner.subscribedTopics[:len(prefix)]) {
+	if !owner.started || hub.subscribeCalls != len(gitevents.Contracts())+1 || !reflect.DeepEqual(prefix, owner.subscribedTopics[:len(prefix)]) {
 		t.Fatalf("Start retry duplicated successful topics: calls=%d topics=%v", hub.subscribeCalls, owner.subscribedTopics)
 	}
 	if err := owner.Teardown(ctx); err != nil {
@@ -258,7 +258,7 @@ func TestGitOwnerResourceLedgerStartRetrySkipsCompletedTopics(t *testing.T) {
 }
 
 func TestGitOwnerResourceLedgerEveryTeardownFailureRetainsDependenciesAndRetries(t *testing.T) {
-	for n := 1; n <= 7; n++ {
+	for n := 1; n <= len(gitevents.Contracts()); n++ {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
 			ctx := context.Background()
 			failure := frameworkdef.NewError(frameworkdef.ResourceExhausted, "required unsubscribe failed")
@@ -276,7 +276,7 @@ func TestGitOwnerResourceLedgerEveryTeardownFailureRetainsDependenciesAndRetries
 			if got := resourceLedgerCapabilityReads(hub); got != 0 {
 				t.Fatalf("停机后仍接受 fresh capability query: reads=%d", got)
 			}
-			remaining := 7 - n + 1
+			remaining := len(topics) - n + 1
 			if !reflect.DeepEqual(owner.subscribedTopics, topics[:remaining]) || owner.runtimeAdapter != adapter {
 				t.Fatalf("failed cleanup discarded live resources: topics=%v adapter=%p", owner.subscribedTopics, owner.runtimeAdapter)
 			}
@@ -286,13 +286,13 @@ func TestGitOwnerResourceLedgerEveryTeardownFailureRetainsDependenciesAndRetries
 			if err := owner.Teardown(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if hub.unsubscribeCalls != 7+1 || owner.runtimeAdapter != nil || owner.started || len(owner.subscribedTopics) != 0 {
+			if hub.unsubscribeCalls != len(topics)+1 || owner.runtimeAdapter != nil || owner.started || len(owner.subscribedTopics) != 0 {
 				t.Fatalf("retry did not finish remaining resources: calls=%d topics=%v adapter=%p", hub.unsubscribeCalls, owner.subscribedTopics, owner.runtimeAdapter)
 			}
 			if err := owner.Teardown(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if hub.unsubscribeCalls != 7+1 {
+			if hub.unsubscribeCalls != len(topics)+1 {
 				t.Fatal("completed resources released again")
 			}
 		})
@@ -321,14 +321,14 @@ func TestGitOwnerResourceLedgerCancellationRetainsUnreleasedResources(t *testing
 	if err := owner.Teardown(interrupted); !errors.Is(err, context.Canceled) {
 		t.Fatalf("interrupted teardown = %v", err)
 	}
-	if hub.unsubscribeCalls != 1 || len(owner.subscribedTopics) != 7-1 || owner.runtimeAdapter != adapter {
+	if hub.unsubscribeCalls != 1 || len(owner.subscribedTopics) != len(gitevents.Contracts())-1 || owner.runtimeAdapter != adapter {
 		t.Fatal("cancellation after completion lost exact resource receipt")
 	}
 	hub.cancelAfterUnsubscribe = nil
 	if err := owner.Teardown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if hub.unsubscribeCalls != 7 {
+	if hub.unsubscribeCalls != len(gitevents.Contracts()) {
 		t.Fatal("retry repeated completed unsubscribe")
 	}
 }

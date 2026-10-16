@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,9 +50,10 @@ func DecodeDefinitionAuthoringMapping(payload []byte) (DefinitionAuthoringMappin
 }
 
 type mappingShape struct {
-	kind   byte
-	fields map[string]mappingShape
-	item   *mappingShape
+	kind     byte
+	fields   map[string]mappingShape
+	item     *mappingShape
+	optional bool
 }
 
 func mappingObject(fields map[string]mappingShape) mappingShape {
@@ -61,12 +63,29 @@ func mappingArray(item mappingShape) mappingShape { return mappingShape{kind: 'a
 
 var mappingString = mappingShape{kind: 's'}
 var mappingStrings = mappingArray(mappingString)
+var executionProofMappingsShape = func() mappingShape {
+	optionalString := mappingString
+	optionalString.optional = true
+	shape := mappingArray(mappingObject(map[string]mappingShape{"ContractRef": mappingString, "ConsumerItemRef": mappingString, "RuleRef": mappingString, "SourceItemRef": mappingString, "ConsumerGoalText": optionalString}))
+	shape.optional = true
+	return shape
+}()
+var evidencePurposeMappingsShape = func() mappingShape {
+	optionalString := mappingString
+	optionalString.optional = true
+	shape := mappingArray(mappingObject(map[string]mappingShape{"ContractRef": mappingString, "HistoricalItemRef": mappingString, "AcceptanceItemRef": mappingString,
+		"HistoricalProfileID": optionalString, "HistoricalDeliverableID": optionalString, "HistoricalProfileHash": optionalString, "HistoricalText": optionalString}))
+	shape.optional = true
+	return shape
+}()
 var authoringMappingShape = mappingObject(map[string]mappingShape{"mapping": mappingObject(map[string]mappingShape{
 	"Protocol": mappingString, "InputHash": mappingString, "TemplateSnapshotHash": mappingString, "ResourceSnapshotHash": mappingString,
-	"GoalRequirement": mappingObject(map[string]mappingShape{"DimensionRef": mappingString, "ResourceIDs": mappingStrings}),
-	"Dimensions":      mappingArray(mappingObject(map[string]mappingShape{"Ref": mappingString, "ResourceIDs": mappingStrings})),
-	"Requirements":    mappingArray(mappingObject(map[string]mappingShape{"Ref": mappingString, "DimensionRef": mappingString, "SourceItemRefs": mappingStrings, "ResourceIDs": mappingStrings, "Text": mappingString})),
-	"Obligations":     mappingArray(mappingObject(map[string]mappingShape{"CandidateItemRef": mappingString, "RequirementRef": mappingString, "Verification": mappingObject(map[string]mappingShape{"Declaration": mappingString, "Status": mappingString, "ProfileID": mappingString, "EvidenceRequirementID": mappingString, "Scope": mappingString})})),
+	"GoalRequirement":         mappingObject(map[string]mappingShape{"DimensionRef": mappingString, "ResourceIDs": mappingStrings}),
+	"Dimensions":              mappingArray(mappingObject(map[string]mappingShape{"Ref": mappingString, "ResourceIDs": mappingStrings})),
+	"Requirements":            mappingArray(mappingObject(map[string]mappingShape{"Ref": mappingString, "DimensionRef": mappingString, "SourceItemRefs": mappingStrings, "ResourceIDs": mappingStrings, "Text": mappingString})),
+	"Obligations":             mappingArray(mappingObject(map[string]mappingShape{"CandidateItemRef": mappingString, "RequirementRef": mappingString, "Verification": mappingObject(map[string]mappingShape{"Declaration": mappingString, "Status": mappingString, "ProfileID": mappingString, "EvidenceRequirementID": mappingString, "Scope": mappingString})})),
+	"ExecutionProofMappings":  executionProofMappingsShape,
+	"EvidencePurposeMappings": evidencePurposeMappingsShape,
 })})
 
 func (s mappingShape) validate(raw json.RawMessage, path string) error {
@@ -78,6 +97,16 @@ func (s mappingShape) validate(raw json.RawMessage, path string) error {
 	case 'o':
 		if len(raw) == 0 || raw[0] != '{' {
 			return fmt.Errorf("%s: expected_object", path)
+		}
+		if _, mapping := s.fields["HistoricalItemRef"]; mapping {
+			if err := ValidateEvidencePurposeMappingWireFields(raw); err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+		}
+		if _, mapping := s.fields["ConsumerItemRef"]; mapping {
+			if err := ValidateExecutionProofMappingWireFields(raw); err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
 		}
 		seen := map[string]bool{}
 		d := json.NewDecoder(bytes.NewReader(raw))
@@ -107,7 +136,7 @@ func (s mappingShape) validate(raw json.RawMessage, path string) error {
 		}
 		sort.Strings(keys)
 		for _, name := range keys {
-			if !seen[name] {
+			if !seen[name] && !s.fields[name].optional {
 				return fmt.Errorf("%s.%s: required_field_missing", path, name)
 			}
 		}
@@ -130,6 +159,27 @@ func (s mappingShape) validate(raw json.RawMessage, path string) error {
 		}
 	default:
 		return fmt.Errorf("%s: unsupported_shape", path)
+	}
+	return nil
+}
+
+// Protocol presence check: empty/absent extensions cannot smuggle a Profile
+// source into legacy wire. Semantic snapshot/source verification stays in the
+// Workspace admission compiler, never in this JSON shape reader.
+func ValidateEvidencePurposeMappingWireFields(raw []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	var contract string
+	if err := json.Unmarshal(fields["ContractRef"], &contract); err != nil {
+		return err
+	}
+	for _, name := range []string{"HistoricalProfileID", "HistoricalDeliverableID", "HistoricalProfileHash", "HistoricalText"} {
+		_, present := fields[name]
+		if present != (contract == runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2) {
+			return fmt.Errorf("evidence purpose version does not permit field presence %s", name)
+		}
 	}
 	return nil
 }
@@ -237,6 +287,6 @@ func mappingUnicodeEscape(payload []byte, u int) (uint64, bool) {
 	return v, err == nil
 }
 
-// 稳定 schema／协议身份进入 provider 请求 C0 和命令 hash。
-// schema 只用于传输加速，不是 compiler 权威。
-const DefinitionAuthoringMappingSchema = `{"type":"object","additionalProperties":false,"required":["mapping"],"properties":{"mapping":{"type":"object","additionalProperties":false,"required":["Protocol","InputHash","TemplateSnapshotHash","ResourceSnapshotHash","GoalRequirement","Dimensions","Requirements","Obligations"],"properties":{"Protocol":{"type":"string","enum":["workorch.authoring.sealed-ref-mapping/v1"]},"InputHash":{"type":"string"},"TemplateSnapshotHash":{"type":"string"},"ResourceSnapshotHash":{"type":"string"},"GoalRequirement":{"type":"object","additionalProperties":false,"required":["DimensionRef","ResourceIDs"],"properties":{"DimensionRef":{"type":"string"},"ResourceIDs":{"type":"array","items":{"type":"string"}}}},"Dimensions":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"object","additionalProperties":false,"required":["Ref","ResourceIDs"],"properties":{"Ref":{"type":"string"},"ResourceIDs":{"type":"array","items":{"type":"string"}}}}},"Requirements":{"type":"array","minItems":1,"maxItems":255,"items":{"type":"object","additionalProperties":false,"required":["Ref","DimensionRef","SourceItemRefs","ResourceIDs","Text"],"properties":{"Ref":{"type":"string"},"DimensionRef":{"type":"string"},"SourceItemRefs":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"string"}},"ResourceIDs":{"type":"array","items":{"type":"string"}},"Text":{"type":"string"}}}},"Obligations":{"type":"array","maxItems":512,"items":{"type":"object","additionalProperties":false,"required":["CandidateItemRef","RequirementRef","Verification"],"properties":{"CandidateItemRef":{"type":"string"},"RequirementRef":{"type":"string"},"Verification":{"type":"object","additionalProperties":false,"required":["Declaration","Status","ProfileID","EvidenceRequirementID","Scope"],"properties":{"Declaration":{"type":"string"},"Status":{"type":"string","enum":["DECLARED","UNVERIFIED"]},"ProfileID":{"type":"string"},"EvidenceRequirementID":{"type":"string"},"Scope":{"type":"string"}}}}}}}}}}`
+// The versioned extension is optional for legacy requests; receiving Profile
+// rules make exact entries mandatory before confirmation. The schema is immutable.
+const DefinitionAuthoringMappingSchema = `{"type":"object","additionalProperties":false,"required":["mapping"],"properties":{"mapping":{"type":"object","additionalProperties":false,"required":["Protocol","InputHash","TemplateSnapshotHash","ResourceSnapshotHash","GoalRequirement","Dimensions","Requirements","Obligations"],"properties":{"Protocol":{"type":"string","enum":["workorch.authoring.sealed-ref-mapping/v1"]},"InputHash":{"type":"string"},"TemplateSnapshotHash":{"type":"string"},"ResourceSnapshotHash":{"type":"string"},"GoalRequirement":{"type":"object","additionalProperties":false,"required":["DimensionRef","ResourceIDs"],"properties":{"DimensionRef":{"type":"string"},"ResourceIDs":{"type":"array","items":{"type":"string"}}}},"Dimensions":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"object","additionalProperties":false,"required":["Ref","ResourceIDs"],"properties":{"Ref":{"type":"string"},"ResourceIDs":{"type":"array","items":{"type":"string"}}}}},"Requirements":{"type":"array","minItems":1,"maxItems":255,"items":{"type":"object","additionalProperties":false,"required":["Ref","DimensionRef","SourceItemRefs","ResourceIDs","Text"],"properties":{"Ref":{"type":"string"},"DimensionRef":{"type":"string"},"SourceItemRefs":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"string"}},"ResourceIDs":{"type":"array","items":{"type":"string"}},"Text":{"type":"string"}}}},"EvidencePurposeMappings":{"type":"array","maxItems":512,"items":{"type":"object","additionalProperties":false,"required":["ContractRef","HistoricalItemRef","AcceptanceItemRef"],"properties":{"ContractRef":{"type":"string","enum":["runtime/cross-cwi-evidence-purpose/v1","runtime/profile-deliverable-evidence-purpose/v2"]},"HistoricalItemRef":{"type":"string"},"AcceptanceItemRef":{"type":"string"},"HistoricalProfileID":{"type":"string"},"HistoricalDeliverableID":{"type":"string"},"HistoricalProfileHash":{"type":"string"},"HistoricalText":{"type":"string"}},"allOf":[{"if":{"properties":{"ContractRef":{"const":"runtime/profile-deliverable-evidence-purpose/v2"}}},"then":{"required":["HistoricalProfileID","HistoricalDeliverableID","HistoricalProfileHash","HistoricalText"]},"else":{"not":{"anyOf":[{"required":["HistoricalProfileID"]},{"required":["HistoricalDeliverableID"]},{"required":["HistoricalProfileHash"]},{"required":["HistoricalText"]}]}}}]}},"ExecutionProofMappings":{"type":"array","maxItems":512,"items":{"type":"object","additionalProperties":false,"required":["ContractRef","ConsumerItemRef","RuleRef","SourceItemRef"],"properties":{"ContractRef":{"type":"string","enum":["runtime/cross-source-execution-proof/v1","runtime/goal-source-execution-proof/v2"]},"ConsumerItemRef":{"type":"string"},"RuleRef":{"type":"string"},"SourceItemRef":{"type":"string"},"ConsumerGoalText":{"type":"string","minLength":1,"maxLength":4096}},"allOf":[{"if":{"properties":{"ContractRef":{"const":"runtime/goal-source-execution-proof/v2"}}},"then":{"required":["ConsumerGoalText"]},"else":{"not":{"required":["ConsumerGoalText"]}}}]}},"Obligations":{"type":"array","maxItems":512,"items":{"type":"object","additionalProperties":false,"required":["CandidateItemRef","RequirementRef","Verification"],"properties":{"CandidateItemRef":{"type":"string"},"RequirementRef":{"type":"string"},"Verification":{"type":"object","additionalProperties":false,"required":["Declaration","Status","ProfileID","EvidenceRequirementID","Scope"],"properties":{"Declaration":{"type":"string"},"Status":{"type":"string","enum":["DECLARED","UNVERIFIED"]},"ProfileID":{"type":"string"},"EvidenceRequirementID":{"type":"string"},"Scope":{"type":"string"}}}}}}}}}}`

@@ -10,7 +10,7 @@ import (
 )
 
 // terminalMaterialSealFromAggregate 是唯一 SM-4 生成入口，传入的是独立加载的前像。
-func terminalMaterialSealFromAggregate(previous RuntimeAggregate) (runtimecontract.RuntimeTerminalMaterialSeal, error) {
+func terminalMaterialSealFromAggregate(previous RuntimeAggregate, observations ...[]runtimecontract.RuntimeTerminalSnapshotProof) (runtimecontract.RuntimeTerminalMaterialSeal, error) {
 	if previous.TerminalMaterialSeal != nil || len(previous.DeliveryAcknowledgements) != 0 || previous.StateRevision == ^uint64(0) {
 		return runtimecontract.RuntimeTerminalMaterialSeal{}, fmt.Errorf("%w: terminal material generation requires unsealed original aggregate", common.ErrConflict)
 	}
@@ -26,6 +26,20 @@ func terminalMaterialSealFromAggregate(previous RuntimeAggregate) (runtimecontra
 	source.StateRevision = generation
 	material, err := DeriveRuntimeTerminalResultMaterial(source)
 	if err != nil {
+		return runtimecontract.RuntimeTerminalMaterialSeal{}, err
+	}
+	var proofs []runtimecontract.RuntimeTerminalSnapshotProof
+	if len(observations) > 1 {
+		return runtimecontract.RuntimeTerminalMaterialSeal{}, common.ErrInvalidArgument
+	}
+	if len(observations) == 1 {
+		proofs = observations[0]
+	}
+	material, err = runtimecontract.ApplyRuntimeTerminalSnapshotProofs(terminalMaterialSource(source), material, proofs)
+	if err != nil {
+		return runtimecontract.RuntimeTerminalMaterialSeal{}, err
+	}
+	if err := runtimecontract.ValidateRuntimeTerminalProofMaterial(terminalMaterialSource(source), material); err != nil {
 		return runtimecontract.RuntimeTerminalMaterialSeal{}, err
 	}
 	hash, err := material.CanonicalHash()
@@ -48,21 +62,31 @@ func terminalMaterialSealFromAggregate(previous RuntimeAggregate) (runtimecontra
 	return seal, seal.ValidateRaw()
 }
 
-func (c *driveDeliveryComponent) sealTerminalMaterial(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
+func (c *driveDeliveryComponent) sealTerminalMaterial(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, observations ...[]runtimecontract.RuntimeTerminalSnapshotProof) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	if len(observations) > 1 {
+		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	var proofs []runtimecontract.RuntimeTerminalSnapshotProof
+	if len(observations) == 1 {
+		proofs = observations[0]
 	}
 	aggregate, err := c.repository.Load(ctx, workspaceID, runID)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if aggregate.TerminalMaterialSeal != nil {
+		if proofs != nil && !reflect.DeepEqual(proofs, aggregate.TerminalMaterialSeal.Material.RuntimeCloseout.TerminalSnapshotProofs) {
+			return RuntimeAggregate{}, common.ErrConflict
+		}
 		return aggregate, nil
 	}
-	seal, err := terminalMaterialSealFromAggregate(aggregate)
+	seal, err := terminalMaterialSealFromAggregate(aggregate, proofs)
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
@@ -88,6 +112,12 @@ func terminalMaterialSource(aggregate RuntimeAggregate) runtimecontract.RuntimeS
 		ActiveDispatch:        active, CompletedDispatches: sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
 		OperationReceipts: aggregate.OperationReceipts, DeliveryAcknowledgements: aggregate.DeliveryAcknowledgements,
 		CoverageProofLineage: aggregate.CoverageProofLineage,
+		SemanticPlanning:     aggregate.SemanticPlanning, ImplementationWork: aggregate.ImplementationWork,
+		Reconciliation:  aggregate.Reconciliation,
+		ExecutionBudget: aggregate.ExecutionBudget, EvidenceSequence: aggregate.EvidenceSequence,
+		GovernanceResolutions: aggregate.GovernanceResolutions, OperationGovernanceBindings: aggregate.OperationGovernanceBindings,
+		CandidateAttempts: aggregate.CandidateAttempts, CandidateRequestSessions: aggregate.CandidateRequestSessions,
+		ProcessedEventIDs: aggregate.ProcessedEventIDs, RepairSurfaceConfirmations: aggregate.RepairSurfaceConfirmations,
 	}
 }
 
@@ -102,7 +132,10 @@ func validateTerminalMaterialSealTransition(previous, next RuntimeAggregate) err
 	if next.TerminalMaterialSeal == nil {
 		return nil
 	}
-	expected, err := terminalMaterialSealFromAggregate(previous)
+	if next.TerminalMaterialSeal.Material.RuntimeCloseout == nil {
+		return common.ErrConflict
+	}
+	expected, err := terminalMaterialSealFromAggregate(previous, next.TerminalMaterialSeal.Material.RuntimeCloseout.TerminalSnapshotProofs)
 	if err != nil {
 		return err
 	}

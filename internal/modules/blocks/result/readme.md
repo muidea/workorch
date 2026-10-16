@@ -42,12 +42,14 @@ canonical Result ID 由 workspace/run 派生；Artifact ID 由 Result ID 与 sea
   Result acknowledgement 携带 owner 实际保存的 detached `ResultCloseout`，noop 重放返回同一材料；该回执不是当前 Runtime
   authority 的替代品。回执和 opaque record 的原值克隆保留 bytes 与 nil/empty 身份，不重新派生历史材料。
 - 原始 owner diagnostic、逐项 DoD 与实现/验证/限制/风险反馈是 Orchestrator 已裁决的 sealed material；Result 不根据
-  diagnostic 选择 retry 或重判验收。Result renderer 版本只由 Orchestrator 在 Run 初始化时封存；旧 Run pending delivery
-  必须复用旧 material，不能由 Result owner 在升级或重放时补写新字段或重算另一份摘要。
-- 新 Run 的 Result feedback v3 保留 Orchestrator 已封存的 blocking input-review batch 逐 check/obligation 事实，
-  包括输入 refs、subject/report hash、原 CWI/requirement、结论及原因；安全投影可脱敏，但保留原报告 hash。
+  diagnostic 选择 retry 或重判验收。Result renderer 版本只由 Orchestrator 在 Run 初始化时封存；同版本 pending delivery
+  必须复用原 material，不能由 Result owner 在重放时补写新字段或重算另一份摘要。
+- 新 Run 的 Result feedback v5 保留 Orchestrator 已封存的 blocking input-review batch 逐 check/obligation 事实，
+  包括输入 refs、subject/report hash、原 CWI/requirement、结论及原因；原报告按原值保全，由受限读取边界保护。
+  terminal 逐 evidence 另保全原 owner 读取快照（包括 rejected/stale 项），正文进入 closeout/material hash。
+  原 snapshot 不等于当前 owner 观察；Result 不合并版本、不修复冲突、不增加 credit，返回值与 ACK 均 detached。
   Result 只存储和返回这份 typed material，不读原输入、不再次调用 LLM、不产生重试、审批或验收 credit。
-  feedback v0/v1/v2 保持各自的历史渲染与 delivery hash。
+  feedback v0/v1/v2/v3 aggregate 在 Runtime 入口拒绝，不自动升级、回填或重驱旧归档。
 - Result 状态同状态重放幂等；`draft → accepted|rejected`，已终态只允许 owner-internal `→ superseded`，不存在外围 generic update/delete。
 - Workspace tombstone 后普通读写永久 fail closed；purge 物理 sink 只能由 Result-private deletion dispatcher 调用。
 - 不拥有 evidence quality、DoD coverage credit、terminal outcome 选择、Run SM-1 或 Runtime SM-2～SM-4。

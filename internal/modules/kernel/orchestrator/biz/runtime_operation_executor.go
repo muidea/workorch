@@ -366,18 +366,19 @@ func runtimeOperationExecutionEnvelope(execution runtimecontract.RuntimeOperatio
 
 func runtimeOperationExecutionContext(request runtime.RuntimeOperationExecutionRequest, deliverableDirectory, internalDirectory string) runtimecontract.RuntimeOperationExecutionContext {
 	return runtimecontract.CloneRuntimeOperationExecutionContext(runtimecontract.RuntimeOperationExecutionContext{
-		Execution:                     runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
-		WorkspaceID:                   request.WorkspaceID,
-		RunID:                         request.RunID,
-		DispatchID:                    request.DispatchID,
-		Transaction:                   request.Transaction,
-		OperationID:                   request.Operation.ID,
-		CoverageWorkItemIDs:           append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
-		TargetRefs:                    append([]string(nil), request.Operation.TargetRefs...),
-		EvidenceKind:                  request.EvidenceKind,
-		EvidencePolicies:              append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
-		WorkspaceDeliverableDirectory: deliverableDirectory,
-		WorkspaceInternalDirectory:    internalDirectory,
+		Execution:                        runtimeOperationExecutionEnvelope(request.Execution, request.GovernanceGrant),
+		WorkspaceID:                      request.WorkspaceID,
+		RunID:                            request.RunID,
+		DispatchID:                       request.DispatchID,
+		Transaction:                      request.Transaction,
+		OperationID:                      request.Operation.ID,
+		CoverageWorkItemIDs:              append([]common.CoverageWorkItemID(nil), request.Operation.CoverageWorkItemIDs...),
+		TargetRefs:                       append([]string(nil), request.Operation.TargetRefs...),
+		EvidenceKind:                     request.EvidenceKind,
+		HistoricalEffectProofContractRef: request.HistoricalEffectProofContractRef,
+		EvidencePolicies:                 append([]runtimecontract.RuntimeEvidencePolicy(nil), request.EvidencePolicies...),
+		WorkspaceDeliverableDirectory:    deliverableDirectory,
+		WorkspaceInternalDirectory:       internalDirectory,
 	})
 }
 

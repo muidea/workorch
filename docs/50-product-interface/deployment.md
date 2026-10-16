@@ -25,6 +25,10 @@ Configuration directory precedence is explicit `-config-dir`/`--config-dir`, the
 `$HOME/.workorch`. The directory contains `application.toml`. `CONFIG_PATH` is an internal framework/image environment value,
 not the documented CLI selection mechanism.
 
+The first live release is [local-operator only](local-operator-access.md). Set `server.addr` to an explicit loopback address;
+wildcard and non-loopback listeners are rejected. Remote exposure via reverse proxy, relay or published container port is
+outside this identity contract. A local CLI may use the same loopback endpoint without browser Origin headers.
+
 ## Supplied Configuration Sets
 
 | Directory/file | Purpose |
@@ -61,7 +65,8 @@ backend at `/var/lib/workorch/.workorch-data`.
 
 - `make docker-run` uses that file backend inside an ephemeral container; data disappears with `--rm`.
 - `make docker-run-file` mounts host `./.workorch-data` at `/var/lib/workorch` for persistence.
-- the service runs as an unprivileged `workorch` user and exposes port 8080.
+- the service runs as an unprivileged `workorch` user and listens on container loopback port 8080. Bridge-network port
+  publication does not provide supported external access under the local-operator contract; use in-container local access.
 
 The builder copies `web/consoleassets`, caches `go mod download`, and accepts `WORKORCH_DOCKER_GOPROXY` plus
 `WORKORCH_DOCKER_BUILD_NETWORK` overrides for constrained build networks. The container verifier uses Workspace/Goal/DoD plus

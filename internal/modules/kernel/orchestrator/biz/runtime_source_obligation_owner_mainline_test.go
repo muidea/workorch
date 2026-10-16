@@ -119,7 +119,7 @@ func restartSourceObligationTerminalDelivery(t *testing.T, ctx context.Context, 
 	}
 	results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
 	beforeResults, err := results.ListByRun(ctx, "run-v2")
-	if err != nil || len(beforeResults) != 1 || beforeResults[0].RuntimeCloseout == nil || beforeResults[0].RuntimeCloseout.SourceObligations == nil {
+	if err != nil || len(beforeResults) != 1 || beforeResults[0].RuntimeCloseout == nil || !reflect.DeepEqual(beforeResults[0].RuntimeCloseout.SourceObligations, completed.Facts.DefinitionSeed.SourceObligations) || len(beforeResults[0].RuntimeCloseout.RequirementOutcomes) != len(completed.Facts.DefinitionSeed.CoverageItems) {
 		t.Fatalf("独立读取未取得完整逐源 closeout: %+v err=%v", beforeResults, err)
 	}
 	runs := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))

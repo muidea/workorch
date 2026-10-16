@@ -3,7 +3,10 @@ package workorchruntimecontract
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -33,6 +36,7 @@ type RuntimeValidationProofRequirement struct {
 	ValidationRecipeID     string
 	RequiredCheckRefs      []string
 	SourceObligationChecks []RuntimeSourceObligationCheck `json:",omitempty"`
+	LineageAssertions      []RuntimeLineageAssertion      `json:",omitempty"`
 }
 
 func (r RuntimeValidationProofRequirement) Normalized() RuntimeValidationProofRequirement {
@@ -47,6 +51,7 @@ func (r RuntimeValidationProofRequirement) Normalized() RuntimeValidationProofRe
 	r.ValidationRecipeID = strings.TrimSpace(r.ValidationRecipeID)
 	r.RequiredCheckRefs = normalizeRuntimeValidationProofCheckRefs(r.RequiredCheckRefs)
 	r.SourceObligationChecks = CloneRuntimeSourceObligationChecks(r.SourceObligationChecks)
+	r.LineageAssertions = slices.Clone(r.LineageAssertions)
 	return r
 }
 
@@ -76,6 +81,15 @@ func (r RuntimeValidationProofRequirement) Validate() error {
 	for _, check := range r.SourceObligationChecks {
 		if !containsString(r.RequiredCheckRefs, check.CheckRef) {
 			return fmt.Errorf("runtime validation proof requirement omits source obligation %q", check.ObligationID)
+		}
+	}
+	if err := ValidateRuntimeLineageAssertions(r.LineageAssertions, r.CoverageWorkItemID, r.DeclarationRef); err != nil {
+		return err
+	}
+	for _, assertion := range r.LineageAssertions {
+		goalConsumer := assertion.Rule.ExecutionSourceContractRef == RuntimeGoalSourceExecutionProofV2 && assertion.SourceScope == "goal" && r.SourceScope == "dodItem"
+		if !goalConsumer && (assertion.SourceScope != r.SourceScope || assertion.SourceID != r.SourceID) {
+			return fmt.Errorf("validation composition assertion differs from original CWI source")
 		}
 	}
 	if r.Hash != StableRuntimeValidationProofRequirementHash(r) {
@@ -173,6 +187,10 @@ func CompileRuntimeValidationProofRequirements(definitionRevision string, covera
 		if !containsString(checks, cwiCheck) {
 			checks = append(checks, cwiCheck)
 		}
+		assertions, err := CompileRuntimeCWILineageAssertions(focus.LineageAssertions, focus.EvidenceDeclarationRef, item)
+		if err != nil {
+			return nil, err
+		}
 		requirement := RuntimeValidationProofRequirement{
 			SchemaVersion:      RuntimeValidationProofRequirementSchemaCurrent,
 			DefinitionRevision: definitionRevision, CoverageWorkItemID: item.ID,
@@ -181,6 +199,7 @@ func CompileRuntimeValidationProofRequirements(definitionRevision string, covera
 			DeclarationRef: focus.EvidenceDeclarationRef, ValidationRecipeID: focus.ValidationRecipeID,
 			RequiredCheckRefs:      checks,
 			SourceObligationChecks: CloneRuntimeSourceObligationChecks(item.SourceObligationChecks),
+			LineageAssertions:      assertions,
 		}.Normalized()
 		requirement.Hash = StableRuntimeValidationProofRequirementHash(requirement)
 		if err := requirement.Validate(); err != nil {
@@ -213,7 +232,7 @@ func StableRuntimeCWIValidationCheckRef(definitionRevision string, item RuntimeC
 
 func StableRuntimeValidationProofRequirementHash(requirement RuntimeValidationProofRequirement) string {
 	requirement = requirement.Normalized()
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, RuntimeValidationProofRequirementSchemaCurrent)
 	writeHashString(h, requirement.DefinitionRevision)
 	writeHashString(h, string(requirement.CoverageWorkItemID))
@@ -225,6 +244,11 @@ func StableRuntimeValidationProofRequirementHash(requirement RuntimeValidationPr
 	writeHashStrings(h, requirement.RequiredCheckRefs)
 	if len(requirement.SourceObligationChecks) != 0 {
 		writeRuntimeSourceObligationChecksHash(h, requirement.SourceObligationChecks)
+	}
+	if len(requirement.LineageAssertions) != 0 {
+		payload, _ := json.Marshal(requirement.LineageAssertions)
+		writeHashString(h, "validation-proof-composition/v1")
+		writeHashString(h, string(payload))
 	}
 	return RuntimeValidationProofRequirementHashPrefix + hex.EncodeToString(h.Sum(nil))[:20]
 }
@@ -290,6 +314,7 @@ func sameRuntimeValidationProofRequirement(left, right RuntimeValidationProofReq
 		left.CoverageWorkItemID == right.CoverageWorkItemID && left.SourceScope == right.SourceScope &&
 		left.SourceID == right.SourceID && left.SourceTextHash == right.SourceTextHash &&
 		left.DeclarationRef == right.DeclarationRef && left.ValidationRecipeID == right.ValidationRecipeID &&
+		reflect.DeepEqual(left.LineageAssertions, right.LineageAssertions) &&
 		sameRuntimeSourceObligationChecks(left.SourceObligationChecks, right.SourceObligationChecks) &&
 		sameStrings(left.RequiredCheckRefs, right.RequiredCheckRefs)
 }

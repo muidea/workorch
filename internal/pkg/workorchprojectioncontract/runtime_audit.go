@@ -307,6 +307,19 @@ type RuntimeAuditOperationReceipt struct {
 	CheckFailures            []runtimecontract.RuntimeValidationCheckFailure `json:"checkFailures,omitempty"`
 	FailureDetailsTruncated  bool                                            `json:"failureDetailsTruncated,omitempty"`
 	OutputTruncated          bool                                            `json:"outputTruncated,omitempty"`
+	ValidationOutputs        []RuntimeAuditValidationOutput                  `json:"validationOutputs,omitempty"`
+}
+
+type RuntimeAuditValidationOutput struct {
+	StageID              string `json:"stageId"`
+	Stream               string `json:"stream"`
+	Bytes                int64  `json:"bytes"`
+	SHA256               string `json:"sha256"`
+	SavedBytes           int64  `json:"savedBytes"`
+	Complete             bool   `json:"complete"`
+	OmittedReason        string `json:"omittedReason,omitempty"`
+	StorageOmittedReason string `json:"storageOmittedReason,omitempty"`
+	Ref                  string `json:"ref,omitempty"`
 }
 
 type RuntimeAuditRepair struct {
@@ -522,6 +535,7 @@ func cloneRuntimeAuditOperationReceipts(items []RuntimeAuditOperationReceipt) []
 		item.SkippedChecks = append([]string(nil), item.SkippedChecks...)
 		item.IncompleteChecks = append([]string(nil), item.IncompleteChecks...)
 		item.CheckFailures = append([]runtimecontract.RuntimeValidationCheckFailure(nil), item.CheckFailures...)
+		item.ValidationOutputs = append([]RuntimeAuditValidationOutput(nil), item.ValidationOutputs...)
 		ret = append(ret, item)
 	}
 	return ret

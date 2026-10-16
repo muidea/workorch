@@ -29,7 +29,7 @@ func ParseAuthoringProposal(payload []byte, derivation workspace.DefinitionDeriv
 	if err != nil {
 		return workspace.GoalSpecification{}, fmt.Errorf("compile sealed template profiles: %w", err)
 	}
-	if err := definitionadmission.ValidateAuthoringVerificationApplicability(proposal, items, bindings.ProfileContracts); err != nil {
+	if err := definitionadmission.ValidateAuthoringVerificationApplicability(proposal, items, bindings.ProfileContracts, workspace.DefinitionCandidateItem{CandidateItemRef: proposal.GoalItemRef, Text: derivation.Input.GoalText}); err != nil {
 		return workspace.GoalSpecification{}, err
 	}
 	return proposal, nil

@@ -28,10 +28,14 @@ type RuntimeLineageAssertionSources struct {
 	ProcessedEventIDs []string
 	ProofLineage      []RuntimeCoverageProofLineage
 	Confirmations     []RuntimeRepairSurfaceConfirmationRecord
+	Reconciliation    RuntimeCWIReconciliationLedger
 }
 
 // runtimeExpectedLineageAssertions 只重编当前 CWI 的封存来源；其他 source 的规则不参与。
 func runtimeExpectedLineageAssertions(binding CoverageEvidenceBinding, sources RuntimeLineageAssertionSources) ([]RuntimeLineageAssertion, error) {
+	if err := ValidateRuntimeGoalExecutionAssertionSeed(sources.Facts.DefinitionSeed, sources.Facts.Activation.ExecutionContract.ProfileContracts); err != nil {
+		return nil, err
+	}
 	var item RuntimeCoverageItem
 	matches := 0
 	for _, candidate := range sources.Facts.DefinitionSeed.CoverageItems {
@@ -58,7 +62,7 @@ func runtimeExpectedLineageAssertions(binding CoverageEvidenceBinding, sources R
 	if err != nil {
 		return nil, err
 	}
-	expected, err := CompileRuntimeLineageAssertions(policy.LineageAssertions, policy.SemanticProofDeclarationRef, item)
+	expected, err := CompileRuntimeCWILineageAssertions(policy.LineageAssertions, policy.SemanticProofDeclarationRef, item)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +76,10 @@ func runtimeExpectedLineageAssertions(binding CoverageEvidenceBinding, sources R
 // RuntimeExecutionLineageAssertionsSatisfied 仅在普通 proof 之后附加 AND。
 // delivery 在执行期延期，不在这里授予交付或终验 credit。
 func RuntimeExecutionLineageAssertionsSatisfied(binding CoverageEvidenceBinding, sources RuntimeLineageAssertionSources, evidenceRevision string) bool {
+	return runtimeExecutionLineageAssertionsInSession(binding, sources, evidenceRevision, &runtimeHistoricalPreimageSession{})
+}
+
+func runtimeExecutionLineageAssertionsInSession(binding CoverageEvidenceBinding, sources RuntimeLineageAssertionSources, evidenceRevision string, session *runtimeHistoricalPreimageSession) bool {
 	// 未有任何 Profile guard 且 binding 也为空时，新增门禁不改变普通证明。
 	if len(binding.LineageAssertions) == 0 && !runtimeProfilesDeclareLineageAssertions(sources.Facts.Activation.ExecutionContract.ProfileContracts) {
 		return true
@@ -100,17 +108,31 @@ func RuntimeExecutionLineageAssertionsSatisfied(binding CoverageEvidenceBinding,
 		if assertion.Rule.ConsumptionPoint == RuntimeProofPhasePostTerminalDelivery {
 			continue
 		}
+		proofBinding := binding
+		if assertion.Rule.ExecutionSourceContractRef != "" {
+			var err error
+			proofBinding, err = runtimeExecutionProofSourceBindingInSession(assertion, sources, session)
+			if err != nil {
+				return false
+			}
+		}
 		switch assertion.Rule.Kind {
 		case RuntimeLineageCompletedWorkRounds:
-			if !runtimeCompletedWorkRoundsSatisfied(binding.CoverageWorkItemID, assertion.Rule.MinCompletedRounds, sources, evidenceRevision) {
+			if !runtimeCompletedWorkRoundsInSession(proofBinding.CoverageWorkItemID, assertion.Rule.MinCompletedRounds, sources, evidenceRevision, session) {
 				return false
 			}
 		case RuntimeLineageOwnerOperationReceipt:
-			if !runtimeOwnerOperationReceiptSatisfied(binding.CoverageWorkItemID, assertion.Rule, sources, evidenceRevision) {
+			if !runtimeOwnerOperationReceiptInSession(binding.CoverageWorkItemID, assertion.Rule, sources, evidenceRevision, session) {
 				return false
 			}
 		case RuntimeLineageRepairThenFreshValidation:
-			if !runtimeRepairThenFreshValidationSatisfied(binding, sources, evidenceRevision) {
+			satisfied := false
+			if assertion.Rule.RepairHistoryContractRef == RuntimeConfirmedBindingRepairProofV1 {
+				satisfied = runtimeConfirmedBindingRepairInSession(proofBinding, sources, evidenceRevision, session)
+			} else if assertion.Rule.RepairHistoryContractRef == "" {
+				satisfied = runtimeRepairThenFreshValidationInSession(proofBinding, sources, evidenceRevision, session)
+			}
+			if !satisfied {
 				return false
 			}
 		default:
@@ -121,7 +143,18 @@ func RuntimeExecutionLineageAssertionsSatisfied(binding CoverageEvidenceBinding,
 }
 
 func runtimeCompletedWorkRoundsSatisfied(coverageID common.CoverageWorkItemID, minimum int, sources RuntimeLineageAssertionSources, revision string) bool {
-	if ValidateRuntimeImplementationWorkState(sources.Definition, sources.Facts, sources.Work, sources.Semantic, sources.Active, sources.Completed, sources.Receipts, sources.Governance, sources.Budget) != nil {
+	return runtimeCompletedWorkRoundsInSession(coverageID, minimum, sources, revision, nil)
+}
+
+func runtimeCompletedWorkRoundsInSession(coverageID common.CoverageWorkItemID, minimum int, sources RuntimeLineageAssertionSources, revision string, session *runtimeHistoricalPreimageSession) bool {
+	semanticSession := newRuntimeSemanticValidationSession()
+	if session != nil {
+		if session.semantic == nil {
+			session.semantic = semanticSession
+		}
+		semanticSession = session.semantic
+	}
+	if validateRuntimeImplementationWorkStateInSession(sources.Definition, sources.Facts, sources.Work, sources.Semantic, sources.Active, sources.Completed, sources.Receipts, sources.Governance, sources.Budget, semanticSession) != nil {
 		return false
 	}
 	ordinals, dispatches, keys := map[int]bool{}, map[string]bool{}, map[string]bool{}
@@ -146,7 +179,7 @@ func runtimeCompletedWorkRoundsSatisfied(coverageID common.CoverageWorkItemID, m
 		if err != nil {
 			return false
 		}
-		hash, err := ValidateRuntimeImplementationWorkReceiptSet(round, members)
+		hash, err := validateRuntimeImplementationWorkReceiptSetInSession(round, members, semanticSession)
 		if err != nil || hash != round.CompletedReceiptSetHash {
 			return false
 		}
@@ -171,7 +204,11 @@ func runtimeCompletedWorkRoundsSatisfied(coverageID common.CoverageWorkItemID, m
 }
 
 func runtimeOwnerOperationReceiptSatisfied(coverageID common.CoverageWorkItemID, rule RuntimeLineageAssertionRule, sources RuntimeLineageAssertionSources, revision string) bool {
-	if runtimeValidateLineageOperations(sources) != nil {
+	return runtimeOwnerOperationReceiptInSession(coverageID, rule, sources, revision, nil)
+}
+
+func runtimeOwnerOperationReceiptInSession(coverageID common.CoverageWorkItemID, rule RuntimeLineageAssertionRule, sources RuntimeLineageAssertionSources, revision string, session *runtimeHistoricalPreimageSession) bool {
+	if runtimeValidateLineageOperationsInSession(sources, session) != nil {
 		return false
 	}
 	for _, dispatch := range sources.Completed {
@@ -198,7 +235,7 @@ func runtimeOwnerOperationReceiptSatisfied(coverageID common.CoverageWorkItemID,
 			if variantID != rule.OperationVariantID {
 				continue
 			}
-			fact, receipt, valid := runtimeLineageOperationFact(dispatch, operation, sources, true)
+			fact, receipt, valid := runtimeLineageOperationFactFromLedgersInIndex(dispatch, operation, sources, true, false, false, session.lineageIndex())
 			if !valid || EvidenceRevisionAfter(fact.Revision, revision) || receipt.ObservedEffectScope != rule.RequiredEffectScope || !slices.Contains(fact.CoverageWorkItemIDs, coverageID) {
 				continue
 			}
@@ -214,13 +251,25 @@ func runtimeOwnerOperationReceiptSatisfied(coverageID common.CoverageWorkItemID,
 
 // runtimeValidateLineageOperations 复用原 SM-3 封存、准入及 owner 回执边界，不递归 aggregate。
 func runtimeValidateLineageOperations(sources RuntimeLineageAssertionSources) error {
-	if err := ValidateRuntimeDispatchHistoryShape(sources.Facts.WorkspaceID, sources.Facts.RunID, sources.Active, sources.Completed); err != nil {
+	return runtimeValidateLineageOperationsInIndex(sources, nil)
+}
+
+func runtimeValidateLineageOperationsInIndex(sources RuntimeLineageAssertionSources, index *runtimeOwnerLineageIndex) error {
+	return runtimeValidateLineageOperationsWithCompilers(sources, index, nil)
+}
+
+func runtimeValidateLineageOperationsInSemanticSession(sources RuntimeLineageAssertionSources, semantic *runtimeSemanticValidationSession) error {
+	return runtimeValidateLineageOperationsWithCompilers(sources, runtimeOwnerLineageIndexFor(semantic), semantic)
+}
+
+func runtimeValidateLineageOperationsWithCompilers(sources RuntimeLineageAssertionSources, index *runtimeOwnerLineageIndex, semantic *runtimeSemanticValidationSession) error {
+	if err := validateRuntimeDispatchHistoryShapeInIndex(sources.Facts.WorkspaceID, sources.Facts.RunID, sources.Active, sources.Completed, index); err != nil {
 		return err
 	}
 	if err := ValidateRuntimeCandidateAttemptRecords(sources.Attempts); err != nil {
 		return err
 	}
-	if err := ValidateRuntimeAcceptedCandidateManifestLineage(sources.Active, sources.Completed, sources.Attempts, sources.Sessions); err != nil {
+	if err := validateRuntimeAcceptedCandidateManifestLineageInSession(sources.Active, sources.Completed, sources.Attempts, sources.Sessions, semantic); err != nil {
 		return err
 	}
 	if err := ValidateRuntimeDispatchAdmissionLineage(sources.Active, sources.Completed, sources.Attempts, sources.Governance); err != nil {
@@ -232,11 +281,22 @@ func runtimeValidateLineageOperations(sources RuntimeLineageAssertionSources) er
 	if err := ValidateRuntimeOperationGovernanceGrantLineage(sources.Governance, sources.Resolutions, sources.Facts.Evidence.Accepted, sources.Facts.Evidence.Rejected); err != nil {
 		return err
 	}
-	return ValidateRuntimeOperationReceiptExecutionLineage(sources.Active, sources.Completed, sources.Receipts)
+	return validateRuntimeOperationReceiptExecutionLineageInIndex(sources.Active, sources.Completed, sources.Receipts, index)
 }
 
 // runtimeLineageOperationFact 反查唯一 receipt/evidence/processed fence 与完整原文投影。
 func runtimeLineageOperationFact(dispatch RuntimeDispatchRecord, operation RuntimeOperation, sources RuntimeLineageAssertionSources, accepted bool) (EvidenceFact, RuntimeOperationReceipt, bool) {
+	return runtimeLineageOperationFactFromLedgers(dispatch, operation, sources, accepted, false, false)
+}
+
+// Only the versioned confirmed-repair consumer uses accepted owner receipts
+// whose historical behavior fact is explicitly uncredited in its original ledger.
+// Ordinary accepted/rejected proof matchers retain their original semantics.
+func runtimeLineageOperationFactFromLedgers(dispatch RuntimeDispatchRecord, operation RuntimeOperation, sources RuntimeLineageAssertionSources, accepted, uncreditedRepair, diagnosticRejection bool) (EvidenceFact, RuntimeOperationReceipt, bool) {
+	return runtimeLineageOperationFactFromLedgersInIndex(dispatch, operation, sources, accepted, uncreditedRepair, diagnosticRejection, nil)
+}
+
+func runtimeLineageOperationFactFromLedgersInIndex(dispatch RuntimeDispatchRecord, operation RuntimeOperation, sources RuntimeLineageAssertionSources, accepted, uncreditedRepair, diagnosticRejection bool, index *runtimeOwnerLineageIndex) (EvidenceFact, RuntimeOperationReceipt, bool) {
 	execution, found := runtimeDispatchExecutionForOperation(dispatch, operation.ID)
 	if !found || execution.State != OperationExecutionEvidenceCommitted || execution.OperationHash != StableRuntimeOperationHash(operation) {
 		return EvidenceFact{}, RuntimeOperationReceipt{}, false
@@ -248,7 +308,10 @@ func runtimeLineageOperationFact(dispatch RuntimeDispatchRecord, operation Runti
 			receipt, matches = candidate, matches+1
 		}
 	}
-	if matches != 1 || receipt.Validate() != nil || receipt.OperationID != operation.ID || receipt.PrerequisiteStale != nil || receipt.ObservedEffectScope != execution.ExpectedEffectScope || StableRuntimeOperationReceiptHash(receipt) != execution.OwnerReceiptHash || execution.OwnerReceiptRef != "runtime-receipt/"+receipt.ExecutionKey || !slices.Equal(receipt.TargetRefs, operation.TargetRefs) {
+	// Rejected validation may truthfully report unknown effect. It is only a
+	// historical diagnostic origin, never an accepted effect or replay proof.
+	diagnosticUnknown := diagnosticRejection && !accepted && !uncreditedRepair && receipt.Outcome == RuntimeOperationOutcomeRejected && receipt.ObservedEffectScope == RuntimeEffectUnknown && !RuntimeEffectIsDurable(execution.ExpectedEffectScope) && !receipt.Changed
+	if matches != 1 || index.receipt(receipt) != nil || receipt.OperationID != operation.ID || receipt.PrerequisiteStale != nil || receipt.ObservedEffectScope != execution.ExpectedEffectScope && !diagnosticUnknown || index.receiptHash(receipt) != execution.OwnerReceiptHash || execution.OwnerReceiptRef != "runtime-receipt/"+receipt.ExecutionKey || !slices.Equal(receipt.TargetRefs, operation.TargetRefs) {
 		return EvidenceFact{}, RuntimeOperationReceipt{}, false
 	}
 	if accepted && (receipt.Outcome != RuntimeOperationOutcomeAccepted || (RuntimeEffectIsDurable(receipt.ObservedEffectScope) && (!receipt.Changed || receipt.BeforeHash == receipt.AfterHash || receipt.AfterHash == ""))) {
@@ -280,17 +343,20 @@ func runtimeLineageOperationFact(dispatch RuntimeDispatchRecord, operation Runti
 	if !accepted {
 		ledger = sources.Facts.Evidence.Rejected
 	}
+	if uncreditedRepair {
+		ledger = append(slices.Clone(sources.Facts.Evidence.Accepted), sources.Facts.Evidence.Rejected...)
+	}
 	present := 0
 	for _, candidate := range ledger {
 		if candidate.ID == fact.ID {
 			present++
 		}
 	}
-	if present != 1 || (accepted && assessmentEvidenceWeak(fact)) {
+	if present != 1 || (accepted && assessmentEvidenceWeak(fact)) || uncreditedRepair && (!accepted || dispatch.RepairCommitment == nil || len(fact.CoverageWorkItemIDs) != 0 || fact.Kind != EvidenceKindStateChange) {
 		return EvidenceFact{}, RuntimeOperationReceipt{}, false
 	}
 	evidence := receipt.Evidence
-	if fact.Summary != evidence.Summary || fact.ContentHash != evidence.ContentHash || !reflect.DeepEqual(fact.OwnerRevisionSet, evidence.OwnerRevisionSet) || !reflect.DeepEqual(fact.ContentAddress, evidence.ContentAddress) || !reflect.DeepEqual(fact.ExitCode, evidence.ExitCode) || !slices.Equal(fact.EvidenceRefs, evidence.EvidenceRefs) || fact.Quality != evidence.Quality || fact.ZeroWork != evidence.ZeroWork || fact.EvidenceReason != evidence.EvidenceReason || !slices.Equal(fact.EvidenceTags, evidence.EvidenceTags) || !reflect.DeepEqual(fact.Validation, evidence.Validation) {
+	if fact.Summary != evidence.Summary || fact.ContentHash != evidence.ContentHash || !reflect.DeepEqual(fact.OwnerRevisionSet, evidence.OwnerRevisionSet) || !reflect.DeepEqual(fact.ApplicabilityDependencies, evidence.ApplicabilityDependencies) || !reflect.DeepEqual(fact.ContentAddress, evidence.ContentAddress) || !reflect.DeepEqual(fact.ExitCode, evidence.ExitCode) || !slices.Equal(fact.EvidenceRefs, evidence.EvidenceRefs) || fact.Quality != evidence.Quality || fact.ZeroWork != evidence.ZeroWork || fact.EvidenceReason != evidence.EvidenceReason || !slices.Equal(fact.EvidenceTags, evidence.EvidenceTags) || !reflect.DeepEqual(fact.Validation, evidence.Validation) {
 		return EvidenceFact{}, RuntimeOperationReceipt{}, false
 	}
 	return fact, receipt, true

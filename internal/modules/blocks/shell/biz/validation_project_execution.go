@@ -106,11 +106,20 @@ func (a *RuntimeAdapter) executeShellProjectScope(ctx context.Context, request R
 		return result, executeErr
 	}
 	// 规格取自 runner 在启动进程前编译的精确合同，不从结果 argv 反推声明。
-	conjunction, err := shellProjectConjunctionObservation(fact, output.projectStageSpecs)
+	conjunction, err := shellProjectConjunctionObservation(fact, output.projectStageSpecs, output.projectDiagnosticStageSpecs...)
 	if err != nil {
 		return result, err
 	}
 	result.Conjunction = &conjunction
+	if err := persistShellProjectStageRaw(runCtx, store, scope, fact, &result); err != nil && executeErr == nil {
+		executeErr = err
+	}
+	return result, executeErr
+}
+
+// Shared by the execution envelope and its real-store failure regression. It
+// publishes original bytes only; it does not judge evidence or grant repair.
+func persistShellProjectStageRaw(ctx context.Context, store *shellProjectRawStore, scope shellProjectRawScope, fact shellProjectConjunctionFact, result *shellProjectExecutionResult) error {
 	for _, stage := range fact.Stages {
 		refs := shellProjectStageRawReferences{StageID: stage.ID}
 		for _, stream := range []string{"stdout", "stderr"} {
@@ -120,20 +129,17 @@ func (a *RuntimeAdapter) executeShellProjectScope(ctx context.Context, request R
 			}
 			streamScope := scope
 			streamScope.StageID, streamScope.Stream = stage.ID, stream
-			ref, err := store.Store(runCtx, streamScope, raw)
+			ref, err := store.Store(ctx, streamScope, raw)
 			if err != nil {
-				if executeErr == nil {
-					executeErr = err
-				}
 				refs.OmittedReason = "shell_stage_raw_storage_failed"
-				if runCtx.Err() != nil {
+				if ctx.Err() != nil {
 					refs.OmittedReason = "shell_stage_raw_operation_context_expired"
 				}
 				result.Raw = append(result.Raw, refs)
 				for _, pending := range fact.Stages[len(result.Raw):] {
 					result.Raw = append(result.Raw, shellProjectStageRawReferences{StageID: pending.ID, OmittedReason: refs.OmittedReason})
 				}
-				return result, executeErr
+				return err
 			}
 			if stream == "stdout" {
 				refs.Stdout = ref
@@ -143,7 +149,7 @@ func (a *RuntimeAdapter) executeShellProjectScope(ctx context.Context, request R
 		}
 		result.Raw = append(result.Raw, refs)
 	}
-	return result, executeErr
+	return nil
 }
 
 func shellProjectOutputStorage(ref, omittedReason string) *runtimecontract.RuntimeValidationOutputStorage {
@@ -157,6 +163,13 @@ func shellProjectOutputStorage(ref, omittedReason string) *runtimecontract.Runti
 }
 
 func finishShellProjectExecution(result *shellProjectExecutionResult, executeErr, cleanupErr, contextErr error) error {
+	if cleanupErr != nil || contextErr != nil {
+		// A reproduced failure is not usable repair attribution if the original
+		// operation failed its cleanup/deadline boundary.
+		result.Result.ValidationFailureDiagnostic = nil
+		result.Result.RuntimeDiagnostics.ValidationFailureDiagnostic = nil
+		result.Result.workspaceBehaviorTargetRefs = nil
+	}
 	if result.Conjunction != nil {
 		for index := range result.Conjunction.Stages {
 			stage := &result.Conjunction.Stages[index]
@@ -166,6 +179,11 @@ func finishShellProjectExecution(result *shellProjectExecutionResult, executeErr
 			}
 			stage.Stdout.Storage = shellProjectOutputStorage(refs.Stdout, refs.OmittedReason)
 			stage.Stderr.Storage = shellProjectOutputStorage(refs.Stderr, refs.OmittedReason)
+			if refs.Stdout == "" || refs.Stderr == "" || refs.OmittedReason != "" {
+				result.Result.ValidationFailureDiagnostic = nil
+				result.Result.RuntimeDiagnostics.ValidationFailureDiagnostic = nil
+				result.Result.workspaceBehaviorTargetRefs = nil
+			}
 		}
 	}
 	if executeErr == nil {
@@ -203,7 +221,7 @@ func finishShellProjectExecution(result *shellProjectExecutionResult, executeErr
 	} else {
 		result.Result.Status = "completed"
 	}
-	if result.Conjunction != nil && result.Result.ValidationObservation != nil && result.Result.ValidationObservation.ObservationProtocolRef == shellProjectConjunctionProtocolRef {
+	if result.Conjunction != nil && result.Result.ValidationObservation != nil && shellProjectObservationProtocol(result.Result.ValidationObservation.ObservationProtocolRef) {
 		conjunction := result.Conjunction.Clone()
 		result.Result.ValidationObservation.ExecutionConjunction = &conjunction
 	}

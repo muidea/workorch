@@ -37,6 +37,34 @@ func (m *Biz) queryRuntimeFileReadDependenciesFromAggregate(ctx context.Context,
 }
 
 // 具体 owner query 留在 EventHub adapter；此入口不写 aggregate，也不授 stale/reopen 或 credit。
+func (m *Biz) queryRuntimeFileMutationApplicabilityFromAggregate(ctx context.Context, aggregate runtime.RuntimeAggregate, dispatchID, operationID, receiptHash, requestID string) (*runtimecontract.RuntimeOwnerRevisionSet, bool, error) {
+	if requestID == "" || requestID != strings.TrimSpace(requestID) {
+		return nil, false, common.ErrInvalidArgument
+	}
+	source, err := runtime.CompileRuntimeOperationReadSource(aggregate, dispatchID, operationID, receiptHash)
+	if err != nil {
+		return nil, false, err
+	}
+	if source.ApplicabilitySource == nil {
+		return nil, false, fmt.Errorf("File mutation has no original versioned applicability source")
+	}
+	switch source.Operation.Kind {
+	case runtimecontract.StepKindFileEdit, runtimecontract.StepKindFileWrite, runtimecontract.RuntimeBlockKindPatchApply:
+	default:
+		return nil, false, common.ErrInvalidArgument
+	}
+	sealed, err := fileevents.SealRuntimeOperation(source.Operation)
+	if err != nil {
+		return nil, false, err
+	}
+	return m.queryRuntimeFileReadDependencies(ctx, fileevents.QueryRuntimeFileReadDependenciesCommand{
+		RuntimeOperationExecutionContext: source.Context, SealedOperation: sealed,
+		RequestID: requestID, IssuedAtStateRevision: aggregate.StateRevision,
+		SourceReceiptHash: source.SourceReceiptHash, OriginalDependencies: source.OriginalDependencies,
+		ApplicabilitySource: runtimecontract.CloneRuntimeEvidenceApplicabilityDependencies(source.ApplicabilitySource),
+	})
+}
+
 func (m *Biz) queryRuntimeFileReadDependencies(ctx context.Context, command fileevents.QueryRuntimeFileReadDependenciesCommand) (*runtimecontract.RuntimeOwnerRevisionSet, bool, error) {
 	if m == nil || m.EventHub() == nil {
 		return nil, false, common.ErrInvalidArgument
@@ -51,6 +79,7 @@ func (m *Biz) queryRuntimeFileReadDependencies(ctx context.Context, command file
 	}
 	command.RuntimeOperationExecutionContext = runtimecontract.CloneRuntimeOperationExecutionContext(command.RuntimeOperationExecutionContext)
 	command.OriginalDependencies = *runtimecontract.CloneRuntimeOwnerRevisionSet(&command.OriginalDependencies)
+	command.ApplicabilitySource = runtimecontract.CloneRuntimeEvidenceApplicabilityDependencies(command.ApplicabilitySource)
 	command.WorkspaceDeliverableDirectory = workspace.DeliverableDirectory
 	command.WorkspaceInternalDirectory = workspace.InternalDirectory
 	event := magicevent.NewEventWithContext(fileevents.TopicQueryRuntimeFileReadDependencies, ModuleID, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command)

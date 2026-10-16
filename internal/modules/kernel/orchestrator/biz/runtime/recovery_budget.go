@@ -179,7 +179,7 @@ func (c *driveDeliveryComponent) consumeRecoveryBudget(ctx context.Context, work
 			}
 			aggregate.Facts.Recovery.TerminalDeliveryIntervention = terminalRequest
 			aggregate.StateRevision++
-			if err := aggregate.Validate(); err != nil {
+			if err := c.validateAggregate(aggregate); err != nil {
 				return RuntimeAggregate{}, false, fmt.Errorf("seal terminal delivery intervention: %w", err)
 			}
 			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -189,7 +189,7 @@ func (c *driveDeliveryComponent) consumeRecoveryBudget(ctx context.Context, work
 		}
 		if authorizationExpired {
 			aggregate.StateRevision++
-			if err := aggregate.Validate(); err != nil {
+			if err := c.validateAggregate(aggregate); err != nil {
 				return RuntimeAggregate{}, false, fmt.Errorf("expire runtime operation recovery claim: %w", err)
 			}
 			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -213,7 +213,7 @@ func (c *driveDeliveryComponent) consumeRecoveryBudget(ctx context.Context, work
 		aggregate.OperationRecoveryAuthorizations = append(aggregate.OperationRecoveryAuthorizations, authorization)
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, false, fmt.Errorf("runtime recovery budget: %w", err)
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -263,7 +263,7 @@ func (c *driveDeliveryComponent) completeOperationRecoveryCall(ctx context.Conte
 	expectedRevision := aggregate.StateRevision
 	aggregate.OperationRecoveryAuthorizations[idx] = authorization
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, false, fmt.Errorf("complete runtime operation recovery call: %w", err)
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -321,7 +321,7 @@ func (c *driveDeliveryComponent) claimOperationRecoveryAuthorization(ctx context
 	authorization.ClaimID = runtimecontract.StableRuntimeOperationRecoveryClaimID(authorization)
 	aggregate.OperationRecoveryAuthorizations[idx] = authorization
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, "", false, fmt.Errorf("claim runtime operation recovery authorization: %w", err)
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {

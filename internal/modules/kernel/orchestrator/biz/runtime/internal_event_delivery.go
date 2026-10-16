@@ -6,8 +6,9 @@ import runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimec
 // drive and terminal-delivery facts. It cannot rebuild SM-2 authority or carry
 // an SM-3 operation executor.
 type RuntimeInternalDeliveryPayload struct {
-	ReconciliationRequest *runtimecontract.RuntimeCWIReconciliationRequest
-	FailureFact           *runtimecontract.FailureFact
+	TerminalSnapshotProofs []runtimecontract.RuntimeTerminalSnapshotProof
+	ReconciliationRequest  *runtimecontract.RuntimeCWIReconciliationRequest
+	FailureFact            *runtimecontract.FailureFact
 
 	DeliveryAcknowledgement         *runtimecontract.RuntimeDeliveryAcknowledgement
 	RecoveryBudgetKind              runtimecontract.RuntimeRecoveryBudgetKind

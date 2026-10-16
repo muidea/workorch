@@ -14,6 +14,7 @@ const (
 	RuntimeDeliveryLineageDeferred      RuntimeDeliveryLineageState = "deferred"
 	RuntimeDeliveryLineagePending       RuntimeDeliveryLineageState = "pending"
 	RuntimeDeliveryLineageSatisfied     RuntimeDeliveryLineageState = "satisfied"
+	RuntimeDeliveryLineageUnsatisfied   RuntimeDeliveryLineageState = "unsatisfied"
 )
 
 // RuntimeDeliveryLineageBinding 是封存来源声明的只读投影，不是 executable binding 或 coverage credit。
@@ -25,6 +26,9 @@ type RuntimeDeliveryLineageBinding struct {
 
 // RuntimeDeliveryLineageBindingsFromState 从完整封存 CWI 编译交付声明，不要求先生成 Result。
 func RuntimeDeliveryLineageBindingsFromState(source RuntimeStateRecord) ([]RuntimeDeliveryLineageBinding, error) {
+	if err := ValidateRuntimeTerminalProofDeclarationSources(source.Facts.DefinitionSeed.CoverageItems, source.Facts.Activation.ExecutionContract.ProfileContracts); err != nil {
+		return nil, err
+	}
 	if err := ValidateRuntimeDefinitionLineageAssertions(source.Facts.DefinitionFocuses, source.Facts.Activation.ExecutionContract.ProfileContracts); err != nil {
 		return nil, err
 	}
@@ -32,7 +36,7 @@ func RuntimeDeliveryLineageBindingsFromState(source RuntimeStateRecord) ([]Runti
 	for _, profile := range source.Facts.Activation.ExecutionContract.ProfileContracts {
 		for _, requirement := range profile.EvidenceRequirements {
 			for _, rule := range requirement.LineageAssertions {
-				declared = declared || rule.Kind == RuntimeLineageDeliveryAcknowledgements
+				declared = declared || rule.ConsumptionPoint == RuntimeProofPhasePostTerminalDelivery
 			}
 		}
 	}
@@ -67,7 +71,7 @@ func runtimeDeliveryLineageBinding(item RuntimeCoverageItem, profiles []RuntimeP
 	}
 	var rules []RuntimeLineageAssertionRule
 	for _, rule := range policy.LineageAssertions {
-		if rule.Kind == RuntimeLineageDeliveryAcknowledgements {
+		if rule.ConsumptionPoint == RuntimeProofPhasePostTerminalDelivery {
 			rules = append(rules, rule)
 		}
 	}
@@ -115,6 +119,20 @@ func EvaluateRuntimeDeliveryLineageAssertionFromState(source RuntimeStateRecord,
 	}
 	if source.TerminalMaterialSeal == nil || len(source.DeliveryAcknowledgements) != 3 {
 		return RuntimeDeliveryLineagePending, nil
+	}
+	for _, assertion := range expected.Assertions {
+		if assertion.Rule.Kind == RuntimeLineageDeliveryAcknowledgements {
+			continue
+		}
+		if source.TerminalMaterialSeal.Identity.Outcome.Kind != TerminalOutcomeKindCompleted {
+			return RuntimeDeliveryLineageUnsatisfied, nil
+		}
+		if err := runtimeTerminalMaterialAssertion(source, source.TerminalMaterialSeal.Material, assertion.Rule); err != nil {
+			// Material obligations are a post-seal success consumer. A failed
+			// terminal remains faithfully deliverable; it is unsatisfied, not a
+			// malformed delivery ledger that should trap SM-4 recovery.
+			return RuntimeDeliveryLineageUnsatisfied, nil
+		}
 	}
 	return RuntimeDeliveryLineageSatisfied, nil
 }

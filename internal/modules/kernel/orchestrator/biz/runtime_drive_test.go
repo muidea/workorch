@@ -3,14 +3,17 @@ package orchestrator
 // Owner Biz drive tests.
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -610,14 +613,19 @@ func testRuntimeFileBackedFocusScopedTargets(t *testing.T, validationOnly map[co
 				}
 				selection := persistedRun.RuntimeState.Facts.Resources.TargetSelection
 				wantTarget := targets[currentCoverageID]
-				if selection == nil || selection.Disposition != runtimecontract.RuntimeTargetSelectionScope ||
-					!containsRuntimeString(selection.TargetRefs, wantTarget) {
-					t.Errorf("proof-batch provider preceded current target selection: coverage=%s selection=%+v want=%q", currentCoverageID, selection, wantTarget)
+				selected := selection != nil && selection.Disposition == runtimecontract.RuntimeTargetSelectionScope && containsRuntimeString(selection.TargetRefs, wantTarget)
+				// A stale ordinary validation retires the old selector and binding.
+				// The exact original target survives in the Definition seed; this
+				// is not permission to reissue a consumed selector or skip its first
+				// observation. Independently prove the persisted stale/reopen chain.
+				reopened := selection == nil && runtimeTestCurrentProofReopenHasFreshTarget(*persistedRun.RuntimeState, currentCoverageID, wantTarget)
+				if !selected && !reopened {
+					t.Errorf("proof-batch provider preceded current target selection: coverage=%s selection=%+v want=%q focus=%+v coverageRows=%+v pending=%+v", currentCoverageID, selection, wantTarget, persistedRun.RuntimeState.Facts.Focus, persistedRun.RuntimeState.Facts.Coverage, persistedRun.RuntimeState.Facts.Prerequisites.Pending)
 					return
 				}
 				for _, pending := range persistedRun.RuntimeState.Facts.Prerequisites.Pending {
-					if pending.Kind == runtimecontract.PrerequisiteKindTargetSelection {
-						t.Errorf("proof-batch provider crossed pending target selection: coverage=%s prerequisite=%+v", currentCoverageID, pending)
+					if pending.Kind == runtimecontract.PrerequisiteKindTargetSelection || pending.Kind == runtimecontract.PrerequisiteKindTargetSnapshot {
+						t.Errorf("proof-batch provider crossed pending target owner fact: coverage=%s prerequisite=%+v", currentCoverageID, pending)
 						return
 					}
 				}
@@ -798,24 +806,68 @@ func testRuntimeFileBackedFocusScopedTargets(t *testing.T, validationOnly map[co
 	if err != nil || completed.Terminal == nil || completed.State != runtimecontract.ConvergenceStateComplete {
 		t.Fatalf("focus-scoped sequence completion=%+v terminal=%+v err=%v", completed, completed.Terminal, err)
 	}
-	wantProviderCalls := 0
-	for coverageID := range targets {
-		wantProviderCalls += 4 // acquisition write/assessment, validation and terminal assessment
-		if !validationOnly[coverageID] {
-			wantProviderCalls++ // durable state change
-		}
-	}
-	if providerCalls != wantProviderCalls {
-		t.Fatalf("provider calls=%d, want %d for focus-specific evidence requirements", providerCalls, wantProviderCalls)
-	}
 	persisted, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || persisted.RuntimeState == nil {
 		t.Fatalf("persisted focus-scoped aggregate=%+v err=%v", persisted, err)
 	}
 	state := persisted.RuntimeState
-	if len(state.Facts.Focus.CoverageWorkItemIDs) != 1 || state.Facts.Focus.CoverageWorkItemIDs[0] != "cwi-test" ||
-		len(state.Facts.Resources.TargetSnapshots) != 1 || state.Facts.Resources.TargetSnapshots[0].TargetRef != targets["cwi-test"] || !state.Facts.Resources.TargetSnapshots[0].Complete() {
-		t.Fatalf("current target authority=%+v", state.Facts)
+	// A reopen does not require a fresh state-change request if the original
+	// effect has exact equivalent-binding lineage. Count only causally justified
+	// original dispatches, rather than assuming every reopen executes all phases.
+	wantProviderCalls := len(state.CompletedDispatches)
+	dispatchRequests := map[string]bool{}
+	bindingActions := map[string]bool{}
+	for _, dispatch := range state.CompletedDispatches {
+		requestID := ""
+		for _, attempt := range state.CandidateAttempts {
+			if attempt.DispatchID == dispatch.ID && attempt.State == runtimecontract.RuntimeCandidateAttemptStateAccepted && attempt.Transaction == dispatch.Transaction {
+				if requestID != "" {
+					t.Fatal("dispatch has more than one original accepted request")
+				}
+				requestID = attempt.LogicalRequestID
+			}
+		}
+		if requestID == "" || dispatchRequests[requestID] || len(dispatch.CoverageBindings) != 1 {
+			t.Fatal("duplicate dispatch/request or missing exact per-CWI proof binding")
+		}
+		dispatchRequests[requestID] = true
+		binding := dispatch.CoverageBindings[0]
+		if binding.Validate() != nil || targets[binding.CoverageWorkItemID] == "" {
+			t.Fatal("operations request invented a proof source")
+		}
+		key := binding.ID + "/" + string(dispatch.Transaction.State)
+		if bindingActions[key] {
+			t.Fatal("same exact binding requested the same operation phase twice")
+		}
+		bindingActions[key] = true
+		if dispatch.Transaction.State != runtimecontract.ConvergenceStateNeedStateChange && dispatch.Transaction.State != runtimecontract.ConvergenceStateNeedValidation && dispatch.Transaction.State != runtimecontract.ConvergenceStateNeedAssessment {
+			t.Fatal("completed operations request has no ordinary proof phase")
+		}
+	}
+	operationSessions := 0
+	for _, session := range state.CandidateRequestSessions {
+		if session.DocumentKind != runtimecontract.RuntimeProviderDocumentOperations {
+			continue
+		}
+		if !dispatchRequests[session.LogicalRequestID] {
+			t.Fatal("operations provider call produced no exact original dispatch")
+		}
+		if !session.ProviderSubmitted || session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete || session.NextSequence != 1 ||
+			session.DocumentRecoveryOutcomes != 0 || session.TransportOutcomes != 0 ||
+			session.LastPhysicalCallID != runtimecontract.StableRuntimeCandidatePhysicalCallID(session.LogicalRequestID, 1) {
+			t.Fatalf("operations request was retried, incomplete or unsubmitted: %+v", session)
+		}
+		operationSessions++
+	}
+	if providerCalls != wantProviderCalls || operationSessions != providerCalls {
+		t.Fatalf("provider calls=%d sessions=%d, want %d from original requirements and exact stale/reopen lineage", providerCalls, operationSessions, wantProviderCalls)
+	}
+	if len(state.Facts.Focus.CoverageWorkItemIDs) != 1 || len(state.Facts.Resources.TargetSnapshots) != 1 {
+		t.Fatal("terminal current focus must retain one exact target snapshot")
+	}
+	currentCoverageID := state.Facts.Focus.CoverageWorkItemIDs[0]
+	if targets[currentCoverageID] == "" || state.Facts.Resources.TargetSnapshots[0].TargetRef != targets[currentCoverageID] || !state.Facts.Resources.TargetSnapshots[0].Complete() {
+		t.Fatalf("current target snapshot does not belong to the final legitimately revisited CWI %s", currentCoverageID)
 	}
 	activeIDs := map[string]bool{}
 	for _, prerequisite := range append(append([]runtimecontract.RuntimePrerequisite(nil), state.Facts.Prerequisites.Pending...), state.Facts.Prerequisites.Satisfied...) {
@@ -841,6 +893,19 @@ func testRuntimeFileBackedFocusScopedTargets(t *testing.T, validationOnly map[co
 		}
 	}
 	for coverageID, target := range targets {
+		changedEffects := 0
+		for _, receipt := range state.OperationReceipts {
+			if receipt.Changed && runtimecontract.RuntimeEffectIsDurable(receipt.ObservedEffectScope) && containsRuntimeString(receipt.TargetRefs, target) {
+				changedEffects++
+			}
+		}
+		wantEffects := 1
+		if validationOnly[coverageID] {
+			wantEffects = 0
+		}
+		if changedEffects != wantEffects {
+			t.Fatalf("%s changed durable effects=%d, want %d; proof reopen must not repeat the original effect", coverageID, changedEffects, wantEffects)
+		}
 		content, readErr := os.ReadFile(filepath.Join(deliverable, target))
 		if validationOnly[coverageID] && (readErr != nil || string(content) != beforeContents[coverageID]) {
 			t.Fatalf("%s validation-only content=%q err=%v", coverageID, content, readErr)
@@ -5948,6 +6013,22 @@ func TestRuntimeFileBackedGitSnapshotCommitResponseLossRestartReusesCommittedSna
 }
 
 func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
+	runRuntimeFileBackedFreshFileShellGitAcceptance(t, "uninterrupted")
+}
+
+func TestDriveRuntimeCrossCWIHistoricalAcceptanceOwnerCASRecovery(t *testing.T) {
+	for _, cut := range []string{"before_behavior", "after_behavior", "before_acceptance", "after_acceptance", "after_validation_stale", "after_acceptance_stale"} {
+		t.Run(cut, func(t *testing.T) { runRuntimeFileBackedFreshFileShellGitAcceptance(t, cut) })
+	}
+}
+
+func TestDriveRuntimeProfileDeliverableHistoricalAcceptanceOwnerCASRecovery(t *testing.T) {
+	for _, cut := range []string{"uninterrupted", "before_behavior", "after_behavior", "before_acceptance", "after_acceptance", "after_validation_stale", "after_acceptance_stale"} {
+		t.Run(cut, func(t *testing.T) { runRuntimeFileBackedFreshFileShellGitAcceptance(t, cut, true) })
+	}
+}
+
+func runRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T, cut string, profileDomain ...bool) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
@@ -5955,6 +6036,13 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	hub := magicevent.NewHub(64)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	root := t.TempDir()
+	processStage := os.Getenv("WORKORCH_CROSS_CWI_TEST_STAGE")
+	if processStage != "" {
+		root = os.Getenv("WORKORCH_CROSS_CWI_TEST_ROOT")
+		if !filepath.IsAbs(root) || !strings.HasPrefix(filepath.Base(root), "workorch-cross-cwi-process-") || (processStage != "seed" && processStage != "resume") {
+			t.Fatal("cross-CWI process fixture requires exact parent-owned temporary directory and stage")
+		}
+	}
 	deliverable, internalDir := filepath.Join(root, "workspace"), filepath.Join(root, "internal")
 	if err := os.MkdirAll(deliverable, 0o755); err != nil {
 		t.Fatal(err)
@@ -5966,16 +6054,26 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	workspaces := filerepository.NewWorkspaceRepository(filepath.Join(root, "workspaces.json"))
 	results := filerepository.NewResultRepository(filepath.Join(root, "results.json"))
 	artifacts := filerepository.NewArtifactRepository(filepath.Join(root, "artifacts.json"))
-	bootstrap := runtimeFileShellGitBootstrap()
-	runtimeTestPrepareNativeValidationThroughOwners(t, bootstrap, deliverable)
-	if err := runs.Create(ctx, &runmodel.Run{
-		ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2",
-		DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, State: common.RunStateActive,
-	}); err != nil {
-		t.Fatal(err)
+	if len(profileDomain) == 0 && os.Getenv("WORKORCH_CROSS_CWI_PROFILE_SOURCE") == "1" {
+		profileDomain = []bool{true}
 	}
-	if err := workspaces.Create(ctx, runtimeWorkspaceForPersistedRunTest(t, ctx, runs, "ws-v2", "run-v2", deliverable, internalDir)); err != nil {
-		t.Fatal(err)
+	bootstrap := runtimeFileShellGitMappedBootstrap(t, profileDomain...)
+	if processStage != "resume" {
+		runtimeTestPrepareNativeValidationThroughOwners(t, bootstrap, deliverable)
+		if err := runs.Create(ctx, &runmodel.Run{
+			ID: "run-v2", WorkspaceID: "ws-v2", GoalID: "goal-v2", DoDID: "dod-v2",
+			DefinitionRevision: "definition-v2", RuntimeBootstrap: &bootstrap, ReconciliationScope: runtimecontract.RuntimeCWIReconciliationScopeCurrentRun, State: common.RunStateActive,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := workspaces.Create(ctx, runtimeWorkspaceForPersistedRunTest(t, ctx, runs, "ws-v2", "run-v2", deliverable, internalDir)); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		original, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+		if err != nil || original.RuntimeBootstrap == nil || !runtimecontract.SameRuntimeBootstrap(*original.RuntimeBootstrap, bootstrap) {
+			t.Fatal("fresh process bootstrap differs from original admitted source")
+		}
 	}
 	runOwner := runmodule.New()
 	if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
@@ -6033,9 +6131,25 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	startRuntimeProviderCeilingTestOwner(t, hub)
 
 	candidateAttempts := map[string][]int{}
+	physicalProviderCalls := map[string]int{}
+	if processStage == "resume" {
+		original, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+		if err != nil || original.RuntimeState == nil {
+			t.Fatal("fresh process has no original aggregate")
+		}
+		for _, session := range original.RuntimeState.CandidateRequestSessions {
+			if session.LastPhysicalCallID != "" {
+				physicalProviderCalls[session.LastPhysicalCallID] = 1
+			}
+		}
+	}
 	llmObserver := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	llmObserver.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
+		physicalProviderCalls[command.RequestIdentity.PhysicalCallID]++
+		if physicalProviderCalls[command.RequestIdentity.PhysicalCallID] != 1 {
+			t.Error("recovery repeated an already submitted physical provider call")
+		}
 		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 			response, responseErr := runtimeFileShellGitSemanticResult(command)
 			if responseErr != nil {
@@ -6066,8 +6180,115 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
 	t.Cleanup(func() { llmObserver.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
-	runtimeTestPersistBootstrappedOperationFixture(t, ctx, hub, "ws-v2", "run-v2", bootstrap)
+	initialFacts, err := bootstrap.InitialFacts("ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialOwner := newTestBiz(newRuntimeTestOwner(), hub, nil)
+	if err := initialOwner.ConfigureRuntimeRepository(runtimeStateRepository{hub: hub}); err != nil {
+		t.Fatal(err)
+	}
+	if processStage != "resume" {
+		if _, err := initialOwner.InitializeRuntime(ctx, initialFacts, bootstrap.Definition, bootstrap.Requirements); err != nil {
+			t.Fatal(err)
+		}
+	}
 	module := newRuntimeDriveTestModule(t, hub)
+	if cut != "uninterrupted" && processStage != "resume" {
+		crash := &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, marker: cut, after: strings.HasPrefix(cut, "after_"), match: func(aggregate runtime.RuntimeAggregate) bool {
+			if cut == "after_validation_stale" {
+				for _, fact := range aggregate.Facts.Evidence.Accepted {
+					if fact.Kind == runtimecontract.EvidenceKindValidation && aggregate.ActiveDispatch == nil {
+						return true
+					}
+				}
+				return false
+			}
+			for _, row := range aggregate.Facts.Coverage {
+				if row.ID != "cwi-file" || row.HistoricalBehavior == nil {
+					continue
+				}
+				if strings.HasSuffix(cut, "behavior") {
+					return len(row.HistoricalAcceptanceProofs) == 0 && aggregate.ActiveDispatch == nil
+				}
+				return len(row.HistoricalAcceptanceProofs) == 1 && aggregate.ActiveDispatch == nil
+			}
+			return false
+		}}
+		if err := module.ConfigureRuntimeRepository(crash); err != nil {
+			t.Fatal(err)
+		}
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != cut {
+					t.Fatalf("expected exact historical CAS cut %s, got %v", cut, recovered)
+				}
+			}()
+			response, err := module.driveRuntimeLocked(ctx, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"})
+			t.Fatalf("historical CAS cut was not reached: response=%+v err=%v", response, err)
+		}()
+		if processStage == "seed" {
+			os.Exit(crossCWIProcessCutExit) // Real process loss after the exact committed behavior CAS.
+		}
+		if cut == "after_validation_stale" || cut == "after_acceptance_stale" {
+			// Shell's actual copied selector includes mode as well as bytes.
+			// Preserve the original deliverable contents and criteria, but force
+			// a real intersecting owner observation before acceptance. A fixed
+			// 0600 is a no-op under umask 077; toggle group-read instead while
+			// preserving the owner's read/write access and all original bytes.
+			path := filepath.Join(deliverable, "main.go")
+			before, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			changedMode := before.Mode().Perm() ^ 0o040
+			if err := os.Chmod(path, changedMode); err != nil {
+				t.Fatal(err)
+			}
+			after, err := os.Stat(path)
+			if err != nil || after.Mode().Perm() != changedMode || after.Mode().Perm() == before.Mode().Perm() {
+				t.Fatalf("stale injection did not change exact resource mode: %v", err)
+			}
+		}
+		// Rebuild real effect/proof owners and the file-backed Run store. This
+		// models owner reconstruction, not a fresh OS process or live provider.
+		if err := fileOwner.Stop(ctx); err != nil {
+			t.Fatal(err)
+		}
+		fileOwner = filemodule.New()
+		if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
+			t.Fatal(err)
+		}
+		if err := fileOwner.Start(); err != nil {
+			t.Fatal(err)
+		}
+		if err := shellOwner.Stop(ctx); err != nil {
+			t.Fatal(err)
+		}
+		shellOwner = shellmodule.New()
+		if err := shellOwner.Configure(shellbiz.Dependencies{EventHub: hub, RuntimeAdapter: shellbiz.NewRuntimeAdapter()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := shellOwner.Start(); err != nil {
+			t.Fatal(err)
+		}
+		if err := runOwner.Stop(ctx); err != nil {
+			t.Fatal(err)
+		}
+		runs = filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
+		runOwner = runmodule.New()
+		if err := runOwner.Configure(runOwnerTestDependencies(runs, nil, nil, hub)); err != nil {
+			t.Fatal(err)
+		}
+		if err := runOwner.Start(); err != nil {
+			t.Fatal(err)
+		}
+		module = newRuntimeDriveTestModule(t, hub)
+		reloaded, err := module.loadRuntime(ctx, "ws-v2", "run-v2")
+		if err != nil || reloaded.Validate() != nil {
+			t.Fatalf("historical CAS cut did not retain restart-valid original aggregate: %v", err)
+		}
+	}
 	driveObserver := magicevent.NewSimpleObserver(ModuleID, hub)
 	driveObserver.Subscribe(orchestratorevents.TopicOrchestratorDriveRuntime, module.handleRuntimeDrive)
 	t.Cleanup(func() { driveObserver.Unsubscribe(orchestratorevents.TopicOrchestratorDriveRuntime) })
@@ -6088,6 +6309,22 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 		t.Fatalf("persisted file-shell-git run=%+v err=%v", persisted, err)
 	}
 	state := persisted.RuntimeState
+	for _, row := range state.Facts.Coverage {
+		if row.ID != "cwi-file" {
+			continue
+		}
+		wantProofs := 1
+		if cut == "after_acceptance_stale" {
+			wantProofs = 2
+		}
+		if row.HistoricalBehavior == nil || len(row.HistoricalAcceptanceProofs) != wantProofs || row.State != runtimecontract.RuntimeCoverageItemStateSatisfied || row.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled {
+			t.Fatalf("create effect was not independently settled by original ordinary consumer: %+v", row)
+		}
+		proof := row.HistoricalAcceptanceProofs[0]
+		if proof.Source.AcceptanceCoverageWorkItemID != "cwi-edit" || proof.BehaviorDispatchID == proof.AssessmentDispatchID || len(proof.AcceptanceEvidenceRefs) == 0 || len(proof.BehaviorEvidenceRefs) == 0 {
+			t.Fatal("historical create replaced ordinary edit acceptance")
+		}
+	}
 	if state.Facts.Recovery.PrerequisiteRefreshes != 0 || len(state.PrerequisiteInvalidations) < 3 {
 		t.Fatalf("durable effects did not trigger persisted freshness re-acquisition: recovery=%+v invalidations=%+v", state.Facts.Recovery, state.PrerequisiteInvalidations)
 	}
@@ -6103,6 +6340,18 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	}
 	if attempts := candidateAttempts["cwi-git/"+string(runtimecontract.ConvergenceStateNeedStateChange)]; len(attempts) != 1 {
 		t.Fatalf("Git sequence did not remain one sealed transaction: %+v", candidateAttempts)
+	}
+	for _, key := range []string{"cwi-file/" + string(runtimecontract.ConvergenceStateNeedStateChange), "cwi-edit/" + string(runtimecontract.ConvergenceStateNeedStateChange), "cwi-edit/" + string(runtimecontract.ConvergenceStateNeedValidation)} {
+		want := 1
+		if processStage == "resume" && strings.HasPrefix(key, "cwi-file/") {
+			want = 0
+		}
+		if (cut == "after_validation_stale" || cut == "after_acceptance_stale") && key == "cwi-edit/"+string(runtimecontract.ConvergenceStateNeedValidation) {
+			want = 2
+		}
+		if len(candidateAttempts[key]) != want {
+			t.Fatalf("recovery repeated historical effect or ordinary validation: %s=%v", key, candidateAttempts[key])
+		}
 	}
 	for _, receipt := range state.OperationReceipts {
 		if receipt.PrerequisiteStale != nil || receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
@@ -6129,10 +6378,108 @@ func TestDriveRuntimeFileBackedFreshFileShellGitAcceptance(t *testing.T) {
 	if err != nil || terminalRun.State != common.RunStateCompleted {
 		t.Fatalf("terminal Run=%+v err=%v", terminalRun, err)
 	}
+	beforeDuplicate, err := json.Marshal(terminalRun.RuntimeState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerCallsBeforeDuplicate := len(physicalProviderCalls)
+	if repeated, err := DriveRuntime(ctx, hub, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}); err != nil || repeated.State != runtimecontract.ConvergenceStateComplete {
+		t.Fatalf("completed mapping did not replay idempotently: %+v %v", repeated, err)
+	}
+	duplicateRun, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterDuplicate, err := json.Marshal(duplicateRun.RuntimeState)
+	if err != nil || !bytes.Equal(beforeDuplicate, afterDuplicate) || len(physicalProviderCalls) != providerCallsBeforeDuplicate {
+		t.Fatal("duplicate mapping drive changed original receipt/effect/budget/material or called provider")
+	}
+	runtimeAssertGitCommitSnapshotMaterial(t, *terminalRun.RuntimeState, deliverable, internalDir, *resultItem)
+	runtimeAssertGitCommitSnapshotOwnerQuery(t, ctx, module, deliverable)
 	workspace, err := workspaces.Get(ctx, "ws-v2")
 	if err != nil || workspace.ActiveRunID != "" {
 		t.Fatalf("terminal Workspace=%+v err=%v", workspace, err)
 	}
+}
+
+// Retains the original positive create/edit/Git criteria and effect sequence.
+// The create source has no local validation: its confirmed ordinary consumer
+// must independently check both sources before either can close terminally.
+func runtimeFileShellGitMappedBootstrap(t *testing.T, profileDomain ...bool) runtimecontract.RuntimeBootstrap {
+	t.Helper()
+	bootstrap := runtimeFileShellGitBootstrap()
+	inventory := runtimecontract.RuntimeSourceObligationInventory{
+		SchemaVersion: runtimecontract.RuntimeSourceObligationInventorySchemaCurrent,
+		CandidateHash: "file-shell-git-original-candidate", SpecificationHash: "file-shell-git-confirmed-specification",
+		DefinitionRevision: bootstrap.Definition.Revision, StartupInputHash: bootstrap.Definition.StartupInputHash,
+		Sources:                 []runtimecontract.RuntimeDefinitionSource{{CandidateItemRef: "original-goal", ItemRef: "formal-goal", SourceScope: "goal", SourceID: "goal", Text: bootstrap.Definition.GoalDefinition}},
+		EvidencePurposeMappings: []runtimecontract.RuntimeEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeCrossCWIEvidencePurposeV1, HistoricalItemRef: "cwi-file", AcceptanceItemRef: "cwi-edit"}},
+	}
+	for index := range bootstrap.CoverageItems {
+		item := &bootstrap.CoverageItems[index]
+		if item.ID == "cwi-git" {
+			continue // Existing independent Git receipt proof remains unchanged.
+		}
+		item.SourceScope = "dodItem"
+		ref := string(item.ID)
+		inventory.Sources = append(inventory.Sources, runtimecontract.RuntimeDefinitionSource{CandidateItemRef: ref, ItemRef: "formal/" + ref, SourceScope: item.SourceScope, SourceID: item.SourceID, Text: item.TargetText})
+		inventory.Requirements = append(inventory.Requirements, runtimecontract.RuntimeSourceRequirement{ID: "requirement/" + ref, DimensionID: "dimension/" + ref, Required: true, SourceKind: "USER_EXPLICIT", SourceItemRefs: []string{ref}, Text: item.TargetText})
+		inventory.Obligations = append(inventory.Obligations, runtimecontract.RuntimeSourceObligation{ID: "obligation/" + ref, RequirementID: "requirement/" + ref, DoDItemRefs: []string{ref}, Text: item.TargetText})
+		inventory.Verifications = append(inventory.Verifications, runtimecontract.RuntimeSourceVerification{ID: "verification/" + ref, ObligationID: "obligation/" + ref, Declaration: item.TargetText, ProfileID: "test-file-shell-git", EvidenceRequirementID: item.SourceID, Scope: item.SourceScope})
+	}
+	for index := range bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements {
+		if bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[index].ID != "cwi-git" {
+			bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[index].Scope = "dodItem"
+		}
+	}
+	bootstrap.DefinitionFocuses[0].AcceptedStepKinds = []string{runtimecontract.StepKindFileWrite}
+	bootstrap.DefinitionFocuses[1].AcceptedStepKinds = []string{runtimecontract.StepKindFileEdit, runtimecontract.RuntimeBlockKindManagedValidationSession}
+	// The original finite create candidate is not an existing-file selector.
+	// Observe the real owner scope, then seal main.go prospectively through
+	// semantic feasibility; no synthetic existing target is installed.
+	bootstrap.DefinitionFocuses[0].TargetSelectorRef = "file/workspace_deliverable"
+	bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].TargetSelectorRef = "file/workspace_deliverable"
+	bootstrap.DefinitionFocuses[0].ProspectiveTargetAllOfConstraintRefs = []string{"workspace-relative-path", "new-target-requires-owner-selector"}
+	bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].ProspectiveTargetAllOfConstraintRefs = []string{"workspace-relative-path", "new-target-requires-owner-selector"}
+	if len(profileDomain) != 0 && profileDomain[0] {
+		profile := &bootstrap.Activation.ExecutionContract.ProfileContracts[0]
+		history := &bootstrap.CoverageItems[0]
+		history.SourceScope = "deliverable"
+		profile.EvidenceRequirements[0].Scope = "deliverable"
+		profile.DeliverableExpectations = []runtimecontract.RuntimeDeliverableExpectation{{ID: history.SourceID, Required: true, Description: history.TargetText}}
+		inventory.Sources = slices.DeleteFunc(inventory.Sources, func(s runtimecontract.RuntimeDefinitionSource) bool { return s.CandidateItemRef == "cwi-file" })
+		inventory.Requirements = slices.DeleteFunc(inventory.Requirements, func(s runtimecontract.RuntimeSourceRequirement) bool { return s.ID == "requirement/cwi-file" })
+		inventory.Obligations = slices.DeleteFunc(inventory.Obligations, func(s runtimecontract.RuntimeSourceObligation) bool { return s.ID == "obligation/cwi-file" })
+		inventory.Verifications = slices.DeleteFunc(inventory.Verifications, func(s runtimecontract.RuntimeSourceVerification) bool { return s.ID == "verification/cwi-file" })
+		inventory.EvidencePurposeMappings = []runtimecontract.RuntimeEvidencePurposeMapping{{ContractRef: runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2,
+			HistoricalItemRef: runtimecontract.RuntimeProfileDeliverablePurposeRef(profile.ID, history.SourceID), AcceptanceItemRef: "cwi-edit",
+			HistoricalProfileID: profile.ID, HistoricalDeliverableID: history.SourceID, HistoricalText: history.TargetText,
+			HistoricalProfileHash: runtimecontract.StableRuntimeProfileContractsHash([]runtimecontract.RuntimeProfileContract{*profile})}}
+	}
+	inventory = inventory.WithHash()
+	if err := inventory.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	bootstrap.Definition.SourceObligations = &inventory
+	items, err := runtimecontract.CompileRuntimeEvidencePurposeMappingCoverage(inventory, bootstrap.CoverageItems)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range items {
+		items[index].SourceObligationChecks, err = runtimecontract.CompileRuntimeSourceObligationChecks(inventory, items[index])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	bootstrap.CoverageItems = items
+	bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
+	if err := bootstrap.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if bootstrap.DefinitionSeed.Hash != runtimecontract.StableRuntimeDefinitionSeedHash(bootstrap.DefinitionSeed) || bootstrap.DefinitionSeed.SourceObligations == nil || len(bootstrap.CoverageItems[1].SourceObligationChecks) != 2 {
+		t.Fatal("bootstrap compiler lost original all-of source inventory")
+	}
+	return bootstrap
 }
 
 func runtimeFileShellGitBootstrap() runtimecontract.RuntimeBootstrap {
@@ -6343,6 +6690,14 @@ func runtimeFileShellGitSemanticProposals(manifest runtimecontract.RuntimeSemant
 	}
 	switch coverageID {
 	case "cwi-file":
+		for _, obligation := range manifest.ProofObligations {
+			if obligation.CoverageWorkItemID == coverageID && obligation.HistoricalAcceptance != nil {
+				return []runtimecontract.RuntimeSemanticProofProposal{
+					proposal(runtimecontract.RuntimeModuleFile, runtimecontract.StepKindFileWrite, "", runtimecontract.EvidenceKindStateChange, "", runtimecontract.RuntimeEffectWorkspaceDurable,
+						runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget, OwnerSelectorRefs: []string{"workspace-relative-new-file-target"}, ProspectiveTargetRefs: []string{"main.go"}, ProspectiveConstraintRefs: obligation.DeclarationProspectiveTargetAllOfConstraintRefs}),
+				}, nil
+			}
+		}
 		return []runtimecontract.RuntimeSemanticProofProposal{
 			proposal(runtimecontract.RuntimeModuleFile, runtimecontract.StepKindFileEdit, "", runtimecontract.EvidenceKindStateChange, "", runtimecontract.RuntimeEffectWorkspaceDurable, exactTarget),
 		}, nil
@@ -7863,6 +8218,9 @@ func testRuntimeFileBackedPatchReplayProofRestartsAfterOwnerReceiptCASFailure(t 
 		restartedReceiptObserver.Unsubscribe(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt)
 	})
 	completed, err := restartedBiz.ExecuteRuntimeDispatch(ctx, "ws-v2", "run-v2", eventRuntimeOperationExecutor{hub: restartedHub})
+	if err == nil {
+		completed = settleRuntimeOwnerApplicabilityForTest(t, ctx, restartedModule, completed)
+	}
 	if err != nil || completed.ActiveDispatch != nil || completed.Decision.State != runtimecontract.ConvergenceStateNeedAssessment || completed.Facts.Recovery.OperationRecoveryAttempts != 1 || len(completed.OperationReceipts) != 1 || len(completed.Facts.Evidence.Accepted) != 1 {
 		t.Fatalf("restart did not recover proof-bound receipt exactly once aggregate=%+v err=%v", completed, err)
 	}
@@ -8708,8 +9066,9 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 				}
 				return
 			}
+			restartedModule := newRuntimeDriveTestModule(t, restartedHub)
+			loaded = settleRuntimeOwnerApplicabilityForTest(t, ctx, restartedModule, loaded)
 			if loaded.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite {
-				restartedModule := newRuntimeDriveTestModule(t, restartedHub)
 				loaded, err = restartedModule.prepareRuntimePrerequisites(ctx, loaded)
 				if err != nil {
 					t.Fatalf("reacquire owner facts after recovered receipt: %v", err)
@@ -8734,6 +9093,10 @@ func TestRuntimeFileBackedClaimEvidenceAndDispatchCloseCrashMatrix(t *testing.T)
 					t.Fatal(err)
 				}
 			}
+			// The assessment advances EvidenceSequence. Its immutable proof is
+			// retained, but terminal consumption needs that new revision's actual
+			// owner read, exactly as in the production SM-4 drive.
+			loaded = settleRuntimeOwnerApplicabilityForTest(t, ctx, restartedModule, loaded)
 			wantSequence, wantAssessments := uint64(2), 1
 			if loaded.Decision.State != runtimecontract.ConvergenceStateComplete || len(loaded.OperationReceipts) != 1 || len(loaded.Facts.Evidence.Accepted) != 1 ||
 				loaded.EvidenceSequence != wantSequence || len(loaded.Facts.Assessments) != wantAssessments {
@@ -9842,7 +10205,9 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 			continue
 		}
 		if prior, exists := semanticFocusByCoverage[binding.CoverageWorkItemID]; exists && prior != binding.FocusID {
-			t.Fatalf("two-focus coverage %q crossed semantic focus identities %q and %q", binding.CoverageWorkItemID, prior, binding.FocusID)
+			if !runtimeTestProofReopenHasExactStaleSource(*persisted.RuntimeState, binding.CoverageWorkItemID, prior) {
+				t.Fatalf("two-focus coverage %q crossed semantic focus identities without exact stale/reopen source %q and %q", binding.CoverageWorkItemID, prior, binding.FocusID)
+			}
 		}
 		semanticFocusByCoverage[binding.CoverageWorkItemID] = binding.FocusID
 	}
@@ -9910,6 +10275,8 @@ func TestDriveRuntimeFileBackedTwoFocusStateValidationAssessmentAndRestart(t *te
 	if err != nil || resultItem.State != common.ResultStateAccepted || resultItem.RuntimeCloseout == nil || len(resultItem.RuntimeCloseout.SatisfiedCoverageWorkItemIDs) != 2 {
 		t.Fatalf("two-focus result=%+v err=%v", resultItem, err)
 	}
+	runtimeAssertHistoricalEffectTerminalSeparation(t, *persisted.RuntimeState, *resultItem.RuntimeCloseout, []byte("TOKEN=granted\n"))
+	runtimeAssertHistoricalEffectActualReadRemainsStale(t, ctx, restarted, aggregate)
 	terminalRun, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
 	if err != nil || terminalRun.State != common.RunStateCompleted {
 		t.Fatalf("two-focus terminal run=%+v err=%v", terminalRun, err)

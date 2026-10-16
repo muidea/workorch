@@ -15,6 +15,8 @@ func AllowedRuntimeRawContentFile(collection string, fileName string) bool {
 		return collection == "runtime-checkpoints"
 	case "dod-assessment.json", "summary-detail.json":
 		return collection == "results"
+	case "stdout.bin", "stderr.bin":
+		return collection == "validation-output"
 	default:
 		return false
 	}

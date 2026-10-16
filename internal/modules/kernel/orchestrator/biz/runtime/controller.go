@@ -11,10 +11,19 @@ import (
 
 type RuntimeController struct {
 	*runtimeMutationKernel
-	authority         *authorityComponent
-	planning          *planningTransactionComponent
-	candidateDispatch *candidateDispatchComponent
-	driveDelivery     *driveDeliveryComponent
+	authority          *authorityComponent
+	planning           *planningTransactionComponent
+	candidateDispatch  *candidateDispatchComponent
+	driveDelivery      *driveDeliveryComponent
+	historicalCompiler runtimecontract.RuntimeOwnerHistoricalCompiler
+}
+
+// ReleaseHistoricalCompilation is called only after the owner has drained.
+// It releases optional pure subresults, not Runtime state or recovery authority.
+func (c *RuntimeController) ReleaseHistoricalCompilation() {
+	if c != nil {
+		c.historicalCompiler.Close()
+	}
 }
 
 // CandidateAdmissionCommitResult couples the persisted aggregate with the
@@ -124,7 +133,7 @@ func (c *RuntimeController) initialize(ctx context.Context, facts runtimecontrac
 		ExecutionBudget:       executionBudget,
 		Decision:              decision,
 	}
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, 0); err != nil {
@@ -151,6 +160,9 @@ func rejectRuntimeProgressAfterTermination(aggregate RuntimeAggregate) error {
 func (c *RuntimeController) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
 	if c == nil || c.repository == nil || workspaceID == "" || runID == "" {
 		return RuntimeAggregate{}, common.ErrInvalidArgument
+	}
+	if original, ok := c.repository.(ownerStateOriginalRepository); ok {
+		return loadOwnerStateQuery(ctx, c, original, workspaceID, runID)
 	}
 	return c.repository.Load(ctx, workspaceID, runID)
 }

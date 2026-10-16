@@ -6,6 +6,15 @@ import "fmt"
 // 已封存的 Profile 声明适用性，不从声明存在推导 owner readiness、binding 或 credit。
 func ValidateRuntimeSourceObligationApplicability(inventory *RuntimeSourceObligationInventory, profiles []RuntimeProfileContract) error {
 	if inventory == nil {
+		for _, profile := range profiles {
+			for _, requirement := range profile.EvidenceRequirements {
+				for _, rule := range requirement.LineageAssertions {
+					if rule.ExecutionSourceContractRef != "" {
+						return fmt.Errorf("cross-source execution Profile requires confirmed source inventory")
+					}
+				}
+			}
+		}
 		return nil
 	}
 	if err := inventory.Validate(); err != nil {
@@ -53,5 +62,8 @@ func ValidateRuntimeSourceObligationApplicability(inventory *RuntimeSourceObliga
 			}
 		}
 	}
-	return nil
+	if err := ValidateRuntimeEvidencePurposeMappings(*inventory, profiles); err != nil {
+		return err
+	}
+	return ValidateRuntimeExecutionProofMappings(*inventory, profiles)
 }

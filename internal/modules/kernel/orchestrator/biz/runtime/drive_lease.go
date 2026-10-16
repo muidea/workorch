@@ -48,7 +48,7 @@ func (c *driveDeliveryComponent) scheduleDriveLease(ctx context.Context, workspa
 			expectedRevision := aggregate.StateRevision
 			aggregate.DriveLease = nil
 			aggregate.StateRevision++
-			if err := aggregate.Validate(); err != nil {
+			if err := c.validateAggregate(aggregate); err != nil {
 				return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, fmt.Errorf("retire fully acknowledged runtime drive lease: %w", err)
 			}
 			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -114,7 +114,7 @@ func (c *driveDeliveryComponent) scheduleDriveLease(ctx context.Context, workspa
 	if retiredRunningGeneration {
 		aggregate.Facts.Recovery.RetiredTerminalDeliveryLeaseRecoveryRequestID = requested.RecoveryRequestID
 	}
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, fmt.Errorf("schedule runtime drive lease: %w", err)
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -214,7 +214,7 @@ func (c *driveDeliveryComponent) claimDriveLease(ctx context.Context, workspaceI
 		expectedRevision := aggregate.StateRevision
 		aggregate.DriveLease = nil
 		aggregate.StateRevision++
-		if err := aggregate.Validate(); err != nil {
+		if err := c.validateAggregate(aggregate); err != nil {
 			return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, fmt.Errorf("expire stale runtime drive lease: %w", err)
 		}
 		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -233,7 +233,7 @@ func (c *driveDeliveryComponent) claimDriveLease(ctx context.Context, workspaceI
 	claimed.State = runtimecontract.RuntimeDriveLeaseRunning
 	claimed.AggregateRevision = aggregate.StateRevision
 	aggregate.DriveLease = &claimed
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, fmt.Errorf("claim runtime drive lease: %w", err)
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -259,7 +259,7 @@ func (c *driveDeliveryComponent) releaseDriveLease(ctx context.Context, workspac
 	expectedRevision := aggregate.StateRevision
 	aggregate.DriveLease = nil
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, false, fmt.Errorf("release runtime drive lease: %w", err)
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -296,7 +296,7 @@ func (c *driveDeliveryComponent) recoverDriveLease(ctx context.Context, workspac
 	lease.RecoveryGeneration++
 	lease.DueAt = strings.TrimSpace(dueAt)
 	aggregate.DriveLease = &lease
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeDriveLease{}, false, fmt.Errorf("recover runtime drive lease: %w", err)
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {

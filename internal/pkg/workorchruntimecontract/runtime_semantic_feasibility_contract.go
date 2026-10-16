@@ -60,7 +60,7 @@ func ValidateRuntimeSemanticProofFeasibilityRequest(command RuntimeSemanticProof
 	}
 	for _, obligation := range manifest.ProofObligations {
 		if obligation.CoverageWorkItemID == proposal.CoverageWorkItemID && obligation.ImplementationWork != nil {
-			if err := validateRuntimeSemanticImplementationWorkProofSet(RuntimeSemanticCWIProofSet{CoverageWorkItemID: proposal.CoverageWorkItemID, Proposals: []RuntimeSemanticProofProposal{proposal}}, obligation.ImplementationWork); err != nil {
+			if err := validateRuntimeSemanticImplementationWorkProofSetAgainstValidatedWork(RuntimeSemanticCWIProofSet{CoverageWorkItemID: proposal.CoverageWorkItemID, Proposals: []RuntimeSemanticProofProposal{proposal}}, obligation.ImplementationWork); err != nil {
 				return err
 			}
 		}

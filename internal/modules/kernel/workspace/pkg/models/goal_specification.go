@@ -34,15 +34,39 @@ const (
 // Reviews report externally authored judgments; static validation checks their
 // structure, provenance, exact identity and complete required review scope.
 type GoalSpecification struct {
-	Version       uint32
-	GoalItemRef   string
-	GoalTextHash  string
-	Resources     []GoalSpecificationResource
-	Dimensions    []GoalSpecificationDimension
-	Requirements  []GoalSpecificationRequirement
-	Obligations   []GoalSpecificationObligation
-	Verifications []GoalSpecificationVerification
-	Reviews       []GoalSpecificationCompletenessReview
+	Version                 uint32
+	GoalItemRef             string
+	GoalTextHash            string
+	Resources               []GoalSpecificationResource
+	Dimensions              []GoalSpecificationDimension
+	Requirements            []GoalSpecificationRequirement
+	Obligations             []GoalSpecificationObligation
+	Verifications           []GoalSpecificationVerification
+	Reviews                 []GoalSpecificationCompletenessReview
+	ExecutionProofMappings  []GoalExecutionProofMapping  `json:",omitempty"`
+	EvidencePurposeMappings []GoalEvidencePurposeMapping `json:",omitempty"`
+}
+
+// Candidate refs, not provider-chosen Runtime CWI IDs. Confirmation seals the
+// exact mapping together with the original specification and all six reviews.
+type GoalExecutionProofMapping struct {
+	ContractRef      string
+	ConsumerItemRef  string
+	RuleRef          string
+	SourceItemRef    string
+	ConsumerGoalText string `json:",omitempty"`
+}
+
+// The original historical criterion and its unique ordinary acceptance source
+// are confirmed together. This value does not supply evidence or CWI credit.
+type GoalEvidencePurposeMapping struct {
+	ContractRef             string
+	HistoricalItemRef       string
+	AcceptanceItemRef       string
+	HistoricalProfileID     string `json:",omitempty"`
+	HistoricalDeliverableID string `json:",omitempty"`
+	HistoricalProfileHash   string `json:",omitempty"`
+	HistoricalText          string `json:",omitempty"`
 }
 
 type GoalSpecificationResource struct {
@@ -102,6 +126,8 @@ type GoalSpecificationCompletenessReview struct {
 var goalReviewKinds = []string{GoalReviewDimensionCoverage, GoalReviewNegativePath, GoalReviewRegression, GoalReviewResourceEnvironment, GoalReviewTraceability, GoalReviewVerifierFeasibility}
 
 func (s GoalSpecification) Clone() GoalSpecification {
+	s.EvidencePurposeMappings = slices.Clone(s.EvidencePurposeMappings)
+	s.ExecutionProofMappings = slices.Clone(s.ExecutionProofMappings)
 	s.Resources = slices.Clone(s.Resources)
 	s.Dimensions = slices.Clone(s.Dimensions)
 	for i := range s.Dimensions {
@@ -181,6 +207,16 @@ func (s GoalSpecification) Normalized() GoalSpecification {
 		r.RequirementIDs = normalizedSpecRefs(r.RequirementIDs)
 	}
 	sort.Slice(s.Reviews, func(i, j int) bool { return s.Reviews[i].Kind < s.Reviews[j].Kind })
+	sort.Slice(s.ExecutionProofMappings, func(i, j int) bool {
+		left, right := s.ExecutionProofMappings[i], s.ExecutionProofMappings[j]
+		if left.ConsumerItemRef != right.ConsumerItemRef {
+			return left.ConsumerItemRef < right.ConsumerItemRef
+		}
+		return left.RuleRef < right.RuleRef
+	})
+	sort.Slice(s.EvidencePurposeMappings, func(i, j int) bool {
+		return s.EvidencePurposeMappings[i].HistoricalItemRef < s.EvidencePurposeMappings[j].HistoricalItemRef
+	})
 	return s
 }
 
@@ -229,6 +265,25 @@ func (s GoalSpecification) ContentHash() string {
 	for _, v := range s.Verifications {
 		specHashFields(h, v.ID, v.ObligationID, v.Declaration, v.Status, v.ProfileID, v.EvidenceRequirementID, v.Scope)
 	}
+	// Empty opt-in extension preserves all existing specification hashes.
+	if len(s.ExecutionProofMappings) != 0 {
+		specHashFields(h, "runtime/cross-source-execution-proof/v1", fmt.Sprint(len(s.ExecutionProofMappings)))
+		for _, mapping := range s.ExecutionProofMappings {
+			specHashFields(h, mapping.ContractRef, mapping.ConsumerItemRef, mapping.RuleRef, mapping.SourceItemRef)
+			if mapping.ConsumerGoalText != "" {
+				specHashFields(h, "runtime/goal-source-execution-proof/v2", mapping.ConsumerGoalText)
+			}
+		}
+	}
+	if len(s.EvidencePurposeMappings) != 0 {
+		specHashFields(h, "runtime/cross-cwi-evidence-purpose/v1", fmt.Sprint(len(s.EvidencePurposeMappings)))
+		for _, mapping := range s.EvidencePurposeMappings {
+			specHashFields(h, mapping.ContractRef, mapping.HistoricalItemRef, mapping.AcceptanceItemRef)
+			if mapping.HistoricalProfileID != "" || mapping.HistoricalDeliverableID != "" || mapping.HistoricalProfileHash != "" || mapping.HistoricalText != "" {
+				specHashFields(h, "profile-deliverable-source/v2", mapping.HistoricalProfileID, mapping.HistoricalDeliverableID, mapping.HistoricalProfileHash, mapping.HistoricalText)
+			}
+		}
+	}
 	return "goal-specification-sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
@@ -249,6 +304,9 @@ func (s GoalSpecification) AdmissionHash() string {
 // Validate checks bounded identities and structural traceability only. It does
 // not infer whether the original natural-language Goal is fully represented.
 func (s GoalSpecification) Validate(goal DefinitionCandidateItem, dod []DefinitionCandidateItem) error {
+	if err := validateGoalEvidencePurposeMappings(s.EvidencePurposeMappings, dod); err != nil {
+		return err
+	}
 	s = s.Normalized()
 	if s.Version != GoalSpecificationVersionCurrent || s.GoalItemRef != goal.CandidateItemRef || s.GoalTextHash != StableDefinitionTextHash(goal.Text) {
 		return fmt.Errorf("goal specification version or exact Goal binding mismatch")
@@ -261,6 +319,26 @@ func (s GoalSpecification) Validate(goal DefinitionCandidateItem, dod []Definiti
 	for _, item := range dod {
 		items[item.CandidateItemRef] = true
 		dodRefs[item.CandidateItemRef] = true
+	}
+	if len(s.ExecutionProofMappings) > 512 {
+		return fmt.Errorf("execution proof mappings exceed bound")
+	}
+	proofKeys := map[string]bool{}
+	goalProofSource := ""
+	for _, mapping := range s.ExecutionProofMappings {
+		key := mapping.ConsumerItemRef + "\x00" + mapping.RuleRef
+		validConsumer := mapping.ContractRef == "runtime/cross-source-execution-proof/v1" && dodRefs[mapping.ConsumerItemRef] && mapping.ConsumerGoalText == ""
+		validConsumer = validConsumer || (mapping.ContractRef == "runtime/goal-source-execution-proof/v2" && mapping.ConsumerItemRef == goal.CandidateItemRef && mapping.ConsumerGoalText == goal.Text && strings.TrimSpace(goal.Text) != "" && len(goal.Text) <= 4096)
+		if !validConsumer || !dodRefs[mapping.SourceItemRef] || mapping.ConsumerItemRef == mapping.SourceItemRef || mapping.RuleRef == "" || strings.TrimSpace(mapping.RuleRef) != mapping.RuleRef || len(mapping.RuleRef) > 512 || strings.ContainsRune(mapping.RuleRef, 0) || proofKeys[key] {
+			return fmt.Errorf("execution proof mapping requires unique exact original consumer/rule/DoD source")
+		}
+		proofKeys[key] = true
+		if mapping.ContractRef == "runtime/goal-source-execution-proof/v2" {
+			if goalProofSource != "" && goalProofSource != mapping.SourceItemRef {
+				return fmt.Errorf("Goal mappings have ambiguous original execution sources")
+			}
+			goalProofSource = mapping.SourceItemRef
+		}
 	}
 	// Review evidence refs are unqualified IDs. They must resolve to exactly
 	// one candidate item or specification object, never an ambiguous namespace.

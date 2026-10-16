@@ -71,8 +71,12 @@ func (o RuntimeSemanticEvidenceObligation) Clone() RuntimeSemanticEvidenceObliga
 // is acquired only through state-change evidence; that intermediate evidence
 // never weakens or replaces the Definition's terminal evidence kinds.
 func ResolveRuntimeSemanticEvidenceObligation(obligation RuntimeSemanticProofObligation) (RuntimeSemanticEvidenceObligation, error) {
+	return resolveRuntimeSemanticEvidenceObligationInSession(obligation, newRuntimeSemanticValidationSession())
+}
+
+func resolveRuntimeSemanticEvidenceObligationInSession(obligation RuntimeSemanticProofObligation, session *runtimeSemanticValidationSession) (RuntimeSemanticEvidenceObligation, error) {
 	obligation = obligation.Normalized()
-	if err := obligation.Validate(); err != nil {
+	if err := obligation.validateInSemanticSession(session); err != nil {
 		return RuntimeSemanticEvidenceObligation{}, err
 	}
 	ret := RuntimeSemanticEvidenceObligation{
@@ -192,6 +196,7 @@ type RuntimeSemanticProofObligation struct {
 	// to the unique CWI check that may receive validation credit.
 	DeclarationRef                                  string
 	ValidationProofRequirement                      *RuntimeValidationProofRequirement
+	HistoricalAcceptance                            *RuntimeHistoricalAcceptanceSource `json:",omitempty"`
 	RequiredEvidenceKinds                           []string
 	DeclarationAcceptedStepKinds                    []string
 	DeclarationEvidenceRole                         string
@@ -220,6 +225,7 @@ type RuntimeSemanticProofObligation struct {
 }
 
 func (o RuntimeSemanticProofObligation) Normalized() RuntimeSemanticProofObligation {
+	o.HistoricalAcceptance = cloneRuntimeHistoricalAcceptanceSource(o.HistoricalAcceptance)
 	o.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(o.CoverageWorkItemID)))
 	o.DeclarationRef = strings.TrimSpace(o.DeclarationRef)
 	if o.ValidationProofRequirement != nil {
@@ -271,6 +277,28 @@ func (o RuntimeSemanticProofObligation) Clone() RuntimeSemanticProofObligation {
 }
 
 func (o RuntimeSemanticProofObligation) Validate() error {
+	return o.validateInSemanticSession(newRuntimeSemanticValidationSession())
+}
+
+func (o RuntimeSemanticProofObligation) validateInSemanticSession(session *runtimeSemanticValidationSession) error {
+	if o.HistoricalAcceptance != nil {
+		if err := o.HistoricalAcceptance.Validate(o.CoverageWorkItemID); err != nil {
+			return err
+		}
+		if !sameStrings(o.RequiredEvidenceKinds, []string{EvidenceKindStateChange}) || o.ValidationProofRequirement != nil ||
+			o.OwnerFactAcquisition != nil || o.ValidationFailureRepair != nil || o.ImplementationWork != nil {
+			return fmt.Errorf("historical acceptance declaration requires ordinary state-change-only Definition proof")
+		}
+		if len(o.DeclarationAcceptedStepKinds) == 0 {
+			return fmt.Errorf("historical acceptance declaration requires published owner purpose operations")
+		}
+		for _, kind := range o.DeclarationAcceptedStepKinds {
+			descriptor, found := RuntimeOperationDescriptorForKind(kind)
+			if !found || descriptor.HistoricalEffectProofContractRef == "" {
+				return fmt.Errorf("historical acceptance declaration lacks published owner purpose")
+			}
+		}
+	}
 	if err := ValidateRuntimeLineageAssertionRules(o.LineageAssertions); err != nil {
 		return err
 	}
@@ -331,7 +359,7 @@ func (o RuntimeSemanticProofObligation) Validate() error {
 		if o.OwnerFactAcquisition != nil || o.ValidationFailureRepair != nil || o.ImplementationWork.Scope.Request.CoverageWorkItemID != o.CoverageWorkItemID {
 			return fmt.Errorf("runtime semantic implementation work purpose cannot acquire owner facts or bypass exact repair")
 		}
-		if err := o.ImplementationWork.Validate(); err != nil {
+		if err := o.ImplementationWork.validateInSemanticSession(session); err != nil {
 			return err
 		}
 	}
@@ -377,6 +405,7 @@ func sameRuntimeSemanticProofObligations(left, right []RuntimeSemanticProofOblig
 		if l.CoverageWorkItemID != r.CoverageWorkItemID ||
 			l.DeclarationRef != r.DeclarationRef ||
 			!sameOptionalRuntimeValidationProofRequirement(l.ValidationProofRequirement, r.ValidationProofRequirement) ||
+			!sameRuntimeHistoricalAcceptanceSource(l.HistoricalAcceptance, r.HistoricalAcceptance) ||
 			!sameStrings(l.RequiredEvidenceKinds, r.RequiredEvidenceKinds) ||
 			!sameStrings(l.DeclarationAcceptedStepKinds, r.DeclarationAcceptedStepKinds) ||
 			l.DeclarationEvidenceRole != r.DeclarationEvidenceRole ||
@@ -520,6 +549,7 @@ func writeRuntimeSemanticProofObligationsHash(h hashStringWriter, values []Runti
 		value := raw.Normalized()
 		writeHashString(h, string(value.CoverageWorkItemID))
 		writeHashString(h, value.DeclarationRef)
+		writeRuntimeHistoricalAcceptanceSourceHash(h, value.HistoricalAcceptance)
 		if value.ValidationProofRequirement == nil {
 			writeHashString(h, "no-validation-proof-requirement")
 		} else {
@@ -625,6 +655,7 @@ func compileRuntimeSemanticDefinitionProofObligation(definitionRevision string, 
 	}
 	obligation := RuntimeSemanticProofObligation{
 		CoverageWorkItemID:                              item.ID,
+		HistoricalAcceptance:                            cloneRuntimeHistoricalAcceptanceSource(item.HistoricalAcceptance),
 		DeclarationRef:                                  declarationRef,
 		RequiredEvidenceKinds:                           append([]string(nil), source.RequiredEvidenceKinds...),
 		DeclarationAcceptedStepKinds:                    append([]string(nil), source.AcceptedStepKinds...),
@@ -670,10 +701,20 @@ type runtimeSemanticProofCatalogs struct {
 }
 
 func validateRuntimeSemanticProofCatalogs(catalogs []RuntimeOperationAdmissibility) (runtimeSemanticProofCatalogs, error) {
+	return validateRuntimeSemanticProofCatalogsInSession(catalogs, nil)
+}
+
+func validateRuntimeSemanticProofCatalogsInSession(catalogs []RuntimeOperationAdmissibility, session *runtimeSemanticValidationSession) (runtimeSemanticProofCatalogs, error) {
 	values := make([]RuntimeOperationAdmissibility, 0, len(catalogs))
 	seenPrerequisites := make(map[string]struct{}, len(catalogs))
 	for _, raw := range catalogs {
-		value, err := validateAndNormalizeRuntimeOperationAdmissibility(raw)
+		var value RuntimeOperationAdmissibility
+		var err error
+		if session == nil {
+			value, err = validateAndNormalizeRuntimeOperationAdmissibility(raw)
+		} else {
+			value, err = validateRuntimeAdmissibilityInSemanticSession(raw, session)
+		}
 		if err != nil {
 			return runtimeSemanticProofCatalogs{}, fmt.Errorf("runtime semantic owner catalogs: %w", err)
 		}

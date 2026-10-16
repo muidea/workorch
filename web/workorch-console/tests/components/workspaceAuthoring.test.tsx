@@ -123,6 +123,48 @@ afterEach(() => {
 });
 
 describe('持久规格编辑实际挂载', () => {
+  it('确认前保留 Profile 来源全文及快照身份，不推测或自动确认', async () => {
+    const view = ready();
+    const original = '完整 Profile 交付准则\n包括原限定词和验收义务。';
+    view.proposal!.evidencePurposeMappings = [{ contractRef: 'runtime/profile-deliverable-evidence-purpose/v2', historicalItemRef: 'profile/p/deliverable/d', acceptanceItemRef: 'original-dod', historicalProfileId: 'p', historicalDeliverableId: 'd', historicalProfileHash: 'original-snapshot', historicalText: original }];
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(view);
+    render(<App><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn(async () => {})} /></App>);
+    await waitFor(() => expect(screen.getByLabelText('跨 CWI 证据用途映射')).toBeTruthy());
+    expect(screen.getByText('Profile p · deliverable d · 快照 original-snapshot')).toBeTruthy();
+    expect(screen.getByText(original, { normalizer: value => value })).toBeTruthy();
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+  });
+  it('确认前完整展示跨 CWI 历史用途映射，查看不产生确认或执行', async () => {
+    const view = ready();
+    view.proposal!.evidencePurposeMappings = [{ contractRef: 'runtime/cross-cwi-evidence-purpose/v1', historicalItemRef: 'original-create', acceptanceItemRef: 'successor-validation' }];
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(view);
+    render(<App><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn(async () => {})} /></App>);
+    await waitFor(() => expect(screen.getByLabelText('跨 CWI 证据用途映射')).toBeTruthy());
+    expect(screen.getByText('历史行为 original-create → 当前验收 successor-validation · runtime/cross-cwi-evidence-purpose/v1')).toBeTruthy();
+    expect(screen.getByText('跨 CWI 用途映射随本规格一并确认：前驱历史行为仅解锁精确后继，终验仍须全部原准则与真实当前普通证明。')).toBeTruthy();
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+  });
+  it('确认前展示 exact 跨源映射，查看不自动确认', async () => {
+    const view = ready();
+    view.proposal!.executionProofMappings = [{ contractRef: 'runtime/cross-source-execution-proof/v1', consumerItemRef: 'consumer-dod', ruleRef: 'two-rounds', sourceItemRef: 'original-dod' }];
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(view);
+    vi.mocked(workorchApi.confirmDefinitionAuthoring).mockResolvedValue({ ...view, state: 'admitted' });
+    render(<App><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn(async () => {})} /></App>);
+    await waitFor(() => expect(screen.getByLabelText('跨源执行证明映射')).toBeTruthy());
+    expect(screen.getByText('consumer-dod · two-rounds → 原来源 original-dod · runtime/cross-source-execution-proof/v1')).toBeTruthy();
+    expect(screen.getByText('跨源执行证明映射随本规格一并确认；它不代替原准则和普通工程验证。')).toBeTruthy();
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+  });
+  it('Goal 来源映射保留完整原文，查看不产生确认或执行', async () => {
+    const view = ready();
+    const goalText = ' 完整 Goal\r\n两轮与修复，普通工程证明仍 mandatory。 ';
+    view.proposal!.executionProofMappings = [{ contractRef: 'runtime/goal-source-execution-proof/v2', consumerItemRef: 'original-goal', ruleRef: 'two-rounds', sourceItemRef: 'original-dod', consumerGoalText: goalText }];
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(view);
+    render(<App><WorkspaceAuthoringEditor open workspaceId="ws" onClose={vi.fn()} onAdmitted={vi.fn(async () => {})} /></App>);
+    await waitFor(() => expect(screen.getByLabelText('映射的完整 Goal 原文')).toBeTruthy());
+    expect(screen.getByLabelText('映射的完整 Goal 原文').textContent).toBe(goalText);
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+  });
   it('已失败请求明确说明重放边界，查看不会自动编译或确认', async () => {
     const failed = { ...ready(), state: 'failed', proposal: undefined, requests: [{ phase: 'proposal', state: 'failed', failureCode: 'invalid_proposal', permitId: 'failed-permit' }] };
     vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(failed);

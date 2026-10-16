@@ -91,8 +91,15 @@ func ValidateRuntimeTerminalMaterialSeal(seal *RuntimeTerminalMaterialSeal, sour
 	if err != nil {
 		return err
 	}
+	material, err = ApplyRuntimeTerminalSnapshotProofs(preimage, material, seal.Material.RuntimeCloseout.TerminalSnapshotProofs)
+	if err != nil {
+		return err
+	}
 	if !reflect.DeepEqual(material, seal.Material) {
 		return fmt.Errorf("terminal material seal does not match original authority material")
+	}
+	if err := ValidateRuntimeTerminalProofMaterial(preimage, seal.Material); err != nil {
+		return err
 	}
 	for _, acknowledgement := range acknowledgements {
 		if acknowledgement.Owner == RuntimeDeliveryOwnerResult &&

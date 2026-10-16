@@ -161,12 +161,17 @@ func copyManagedValidationWorkspace(source, destination string) ([]shellValidati
 
 func managedValidationSandboxPathExcluded(ref string) bool {
 	for _, part := range strings.Split(filepath.ToSlash(ref), "/") {
-		switch part {
-		case ".git", "node_modules", "vendor", "dist", "build", ".workorch-data", ".workorch-workspaces":
-			return true
+		for _, excluded := range managedValidationSandboxExcludedDirectories() {
+			if part == excluded {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+func managedValidationSandboxExcludedDirectories() []string {
+	return []string{".git", "node_modules", "vendor", "dist", "build", ".workorch-data", ".workorch-workspaces"}
 }
 
 func managedValidationEnvironment(base []string, scratch string) []string {

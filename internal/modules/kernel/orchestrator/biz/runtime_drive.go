@@ -381,6 +381,14 @@ func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, 
 	if _, waiting := runtimeCurrentRecoverableWait(aggregate); waiting {
 		return m.driveRuntimeRecoverableWait(ctx, aggregate, command.RecoveryLeaseGeneration)
 	}
+	// A recovered submitted call has no durable document/outcome. Close its
+	// original SM-3 responsibility and retain unknown budget before a new
+	// reconciliation generation can change SM-2 authority or sample owners.
+	if updated, changed, err := m.settleRuntimeSubmittedProviderBeforeObservation(ctx, aggregate); err != nil {
+		return runtimeDriveTransitionOutcome{}, err
+	} else if changed {
+		return runtimeDriveTransitionOutcome{aggregate: updated}, nil
+	}
 	if aggregate.DefinitionClarification != nil {
 		if aggregate.DefinitionClarification.Request != nil {
 			result, resultErr := runtimeDefinitionClarificationWaitDriveResult(aggregate)
@@ -396,6 +404,11 @@ func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, 
 		if updated.StateRevision <= previousRevision {
 			return runtimeDriveTransitionOutcome{}, &runtimeInvariantError{Message: fmt.Sprintf("Runtime Definition clarification made no persisted progress at revision %d", previousRevision)}
 		}
+		return runtimeDriveTransitionOutcome{aggregate: updated}, nil
+	}
+	if updated, changed, err := m.driveRuntimeEvidenceApplicability(ctx, aggregate); err != nil {
+		return runtimeDriveTransitionOutcome{}, err
+	} else if changed {
 		return runtimeDriveTransitionOutcome{aggregate: updated}, nil
 	}
 	if semanticAuthorityPending && aggregate.Decision.State != runtimecontract.ConvergenceStateNeedGovernance {

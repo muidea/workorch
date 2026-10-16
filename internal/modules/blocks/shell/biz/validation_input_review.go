@@ -37,25 +37,30 @@ func shellVersionedInputReview(directory string, targets []string, binding runti
 	}
 	var refs []string
 	for _, target := range normalizeShellStrings(targets) {
-		if strings.HasPrefix(target, prefix) || target == "go.mod" || target == "go.sum" || target == "go.work" || target == "go.work.sum" {
+		projectInput := binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef && (!strings.HasSuffix(target, ".go") || strings.HasSuffix(target, "_test.go") || strings.HasPrefix(target, "workorch_validation/"))
+		if projectInput || strings.HasPrefix(target, prefix) || target == "go.mod" || target == "go.sum" || target == "go.work" || target == "go.work.sum" {
 			refs = append(refs, target)
 		}
 	}
-	if len(refs) == 0 || len(refs) > runtimecontract.RuntimeValidationInputReviewMaxFiles {
+	maxFiles, maxBytes := runtimecontract.RuntimeValidationInputReviewMaxFiles, runtimecontract.RuntimeValidationInputReviewMaxBytes
+	if binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef {
+		maxFiles, maxBytes = runtimecontract.RuntimeValidationDiagnosticSourceMaxFiles, runtimecontract.RuntimeValidationDiagnosticSourceMaxBytes
+	}
+	if len(refs) == 0 || len(refs) > maxFiles {
 		return nil, "validation_input_review_capacity_exceeded"
 	}
 	slices.Sort(refs)
 	subject := &runtimecontract.RuntimeValidationInputReviewSubject{ProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocol}
 	if pkg != "" {
 		subject.ScopeContractRef, subject.ScopeRequirements = shellIsolatedReviewScopeContractRef, shellIsolatedReviewScopeRequirements
-		if binding.CheckAttestations[0].ObservationProtocolRef == shellProjectConjunctionProtocolRef {
+		if shellProjectObservationProtocol(binding.CheckAttestations[0].ObservationProtocolRef) {
 			subject.ScopeContractRef, subject.ScopeRequirements = shellProjectReviewScopeContractRef, shellProjectReviewScopeRequirements
 		}
 		if binding.CheckAttestations[0].ObservationProtocolRef == shellGoConjunctiveEntrypointObservationProtocolRef {
 			subject.ScopeContractRef, subject.ScopeRequirements = shellConjunctiveReviewScopeContractRef, shellConjunctiveReviewScopeRequirements
 		}
 	}
-	remaining := int64(runtimecontract.RuntimeValidationInputReviewMaxBytes)
+	remaining := int64(maxBytes)
 	for _, ref := range refs {
 		info, err := root.Lstat(filepath.FromSlash(ref))
 		if err != nil || !info.Mode().IsRegular() {
@@ -85,6 +90,16 @@ func shellVersionedInputReview(directory string, targets []string, binding runti
 		}
 		if pkg != "" && check.SupplementalNativeCheckRef != "" && !slices.Contains(refs, shellSupplementTargetRef(check.NativeCheckRef)) {
 			return nil, "validation_input_review_source_unavailable"
+		}
+	}
+	if binding.CheckAttestations[0].ObservationProtocolRef == shellProjectMultiFailureDiagnosticProtocolRef {
+		subject.ProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+		subject.ScopeContractRef, subject.ScopeRequirements = shellProjectMultiFailureReviewScopeRef, shellProjectMultiFailureRequirements
+		subject.DiagnosticSourceContractRef = runtimecontract.RuntimeValidationDiagnosticSourceReviewV1
+		var code string
+		subject.DiagnosticSources, code = shellProjectDiagnosticSourceInventory(subject.Files)
+		if code != "" {
+			return nil, code
 		}
 	}
 	subject.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*subject, binding)

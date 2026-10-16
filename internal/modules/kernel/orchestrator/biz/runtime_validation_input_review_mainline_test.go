@@ -25,6 +25,7 @@ import (
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	shellcommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
+	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	workspacemodule "github.com/muidea/workorch/internal/modules/kernel/workspace"
@@ -57,10 +58,16 @@ func TestDriveRuntimeValidationInputReviewRestart(t *testing.T) {
 }
 
 type validationInputReviewMainlineOptions struct {
-	Adapter           string
-	ValidationCount   int
-	ProtocolRef       string
-	SourceObligations bool
+	Adapter                            string
+	ValidationCount                    int
+	ProtocolRef                        string
+	SourceObligations                  bool
+	DeliveryGuard                      bool
+	TerminalMaterialGuards             bool
+	SnapshotInputSources               bool
+	TerminalSnapshot                   bool
+	AdditionalTerminalSnapshotConsumer bool
+	SubmittedSettlementFault           string
 }
 
 func TestDriveRuntimeInputReviewV2OmissionAndRestart(t *testing.T) {
@@ -136,6 +143,11 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	if len(requested) != 0 {
 		options = requested[0]
 	}
+	projectAdapter := options.Adapter == shellcommon.ValidationRecipeAdapterProjectConjunction || options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
+	projectBehaviorRepair := mode == "project_behavior_failure"
+	if projectBehaviorRepair && options.Adapter != shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
+		t.Fatal("multi-source repair fixture requires explicitly selected v8")
+	}
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -149,6 +161,30 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	bootstrap := validationInputAdditionMainlineBootstrap()
 	bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = options.Adapter
 	bootstrap.Activation.EvidencePolicies[0].RecipeInputReviewProtocolRef = options.ProtocolRef
+	if projectBehaviorRepair {
+		convergence := bootstrap.DefinitionFocuses[1].ValidationFailureRepairConvergence.Clone()
+		route := convergence.Routes[0].Clone()
+		route.ID, route.RequireInputAddition = "multi-source-failure-to-confirmed-file-edit", false
+		route.TriggerDiagnosticClass, route.TriggerEvidenceTargetType, route.TriggerOwnerDiagnosticCode = runtimecontract.ValidationDiagnosticTestFailed, runtimecontract.ValidationEvidenceTargetBehaviorEvidence, "test_failed"
+		route.RepairOperationKinds, route.RepairTargetPolicy = []string{runtimecontract.StepKindFileEdit}, runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope
+		route.RepairTargetRole, route.RepairOperationTargetSelectorRef = "deliverable_implementation", "workspace-relative-existing-file-target"
+		convergence.Routes = []runtimecontract.RuntimeValidationFailureRepairRoute{route}
+		bootstrap.DefinitionFocuses[1].ValidationFailureRepairConvergence = &convergence
+		bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].ValidationFailureRepairConvergence = &convergence
+	}
+	if options.TerminalSnapshot {
+		bootstrap = runtimeReviewedGitSnapshotBootstrap(bootstrap, options.AdditionalTerminalSnapshotConsumer)
+	}
+	if options.DeliveryGuard || options.TerminalMaterialGuards {
+		rules := []runtimecontract.RuntimeLineageAssertionRule{{Ref: "original-delivery", Kind: runtimecontract.RuntimeLineageDeliveryAcknowledgements, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery}}
+		if options.TerminalMaterialGuards {
+			rules = append(rules,
+				runtimecontract.RuntimeLineageAssertionRule{Ref: "formal-result-index", Kind: runtimecontract.RuntimeLineageTerminalResultIndex, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: runtimecontract.RuntimeTerminalProofContractV1},
+				runtimecontract.RuntimeLineageAssertionRule{Ref: "original-validation-receipt", Kind: runtimecontract.RuntimeLineageTerminalOwnerReceipt, ConsumptionPoint: runtimecontract.RuntimeProofPhasePostTerminalDelivery, TerminalContractRef: runtimecontract.RuntimeTerminalProofContractV1, ReceiptSourceScope: "dodItem", ReceiptSourceID: "cwi-2", OwnerModuleID: runtimecontract.RuntimeModuleShell, OperationKind: runtimecontract.RuntimeBlockKindManagedValidationSession, RequiredEffectScope: runtimecontract.RuntimeEffectEphemeralSession})
+		}
+		bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].LineageAssertions = rules
+		bootstrap.DefinitionFocuses[1].LineageAssertions = rules
+	}
 	if mode == "omission" {
 		bootstrap.CoverageItems[1].TargetText = "invoke the delivered program and document its output"
 	}
@@ -168,6 +204,9 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	bootstrap.Definition.CapabilityContract = append(bootstrap.Definition.CapabilityContract, runtimecontract.RuntimeBlockKindDecisionRequest)
 	bootstrap.Requirements = append(bootstrap.Requirements, runtimecontract.RuntimeRequirement{Kind: runtimecontract.PrerequisiteKindCapability, OwnerModuleID: runtimecontract.RuntimeModuleDecision, CapabilityClass: runtimecontract.RuntimeCapabilityClassGovernance, RequiredCapabilities: []string{runtimecontract.RuntimeBlockKindDecisionRequest}})
 	bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
+	if projectBehaviorRepair {
+		bootstrap = runtimeTestWithHistoricalPurposeMapping(t, bootstrap, "cwi-1", "cwi-2")
+	}
 	if options.SourceObligations {
 		bootstrap = withSharedSourceObligationBootstrap(t, bootstrap)
 	}
@@ -189,11 +228,16 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	projectExecutionCount := "executed\nexecuted\n"
 	if mode == "project_history_failure" {
 		projectExecutionCount = "executed\n"
+		if options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
+			projectExecutionCount += "executed\n" // real independent attribution attempt; still no repair authority
+		}
 	}
-	if options.Adapter == shellcommon.ValidationRecipeAdapterProjectConjunction {
+	if projectAdapter {
 		outcome := ""
 		if mode == "project_history_failure" {
 			outcome = `t.Fatal("原工程判据失败")`
+		} else if projectBehaviorRepair {
+			outcome = `if DeliveredValue()!=4 { t.Fatal("WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3") }`
 		}
 		initialFiles["historical_test.go"] = fmt.Sprintf(`package fixture
 import ("os"; "testing")
@@ -203,16 +247,19 @@ func TestHistorical(t *testing.T) {
  %s
 }
 `, projectExecutionCounter, outcome)
+		if projectBehaviorRepair {
+			projectExecutionCount = "executed\nexecuted\nexecuted\nexecuted\n"
+		}
 	}
 	inputTargets := map[common.CoverageWorkItemID]string{}
 	for _, requirement := range requirements {
 		preparation := preparations[requirement.Hash]
-		if len(preparation.CheckAttestations) != 1 && !options.SourceObligations {
+		if len(preparation.CheckAttestations) != 1 && !options.SourceObligations && !projectBehaviorRepair {
 			t.Fatal("single-criterion fixture lost its exact owner mapping")
 		}
 		native, inputTarget := preparation.CheckAttestations[0].NativeCheckRef, preparation.TargetRef
 		parent := "../.."
-		if options.Adapter == shellcommon.ValidationRecipeAdapterIsolatedEntrypoint || options.Adapter == shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint || options.Adapter == shellcommon.ValidationRecipeAdapterProjectConjunction {
+		if options.Adapter == shellcommon.ValidationRecipeAdapterIsolatedEntrypoint || options.Adapter == shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint || projectAdapter {
 			parent = "../../.."
 		}
 		if _, err := os.Stat(filepath.Join(directory, inputTarget)); err != nil {
@@ -229,7 +276,10 @@ func %s(t *testing.T) {
 }
 
 `, native, parent)
-		if options.SourceObligations {
+		if projectBehaviorRepair {
+			initialFiles[inputTarget] = strings.Replace(initialFiles[inputTarget], "wrong delivered behavior", "WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3", 1)
+		}
+		if options.SourceObligations || projectBehaviorRepair {
 			body := initialFiles[inputTarget]
 			var source strings.Builder
 			for index, check := range preparation.CheckAttestations {
@@ -300,12 +350,16 @@ func %s(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = fileOwner.Stop(ctx) })
 	shellOwner := startRuntimeManagedValidationTestOwner(t, hub)
+	if options.TerminalSnapshot {
+		startRuntimeReviewedGitSnapshotOwner(t, hub, root)
+	}
 	startRuntimeProviderCeilingTestOwner(t, hub)
 	resultOwner := resultmodule.New()
 	var results repository.ResultRepository = memory.NewResultRepository()
 	resultRepositories := testResultOwnerRepositories(results, memory.NewArtifactRepository(), memory.NewResultWorkspaceDeletionRepository())
 	var interruptedResults *failAfterResultCreateRepository
 	deliveryCut := cut == "after_result_persistence" || cut == "after_workspace_persistence" || cut == "after_run_persistence"
+	materialCut := cut == "before_material_seal" || cut == "after_material_seal"
 	if deliveryCut {
 		results = filerepository.NewResultRepository(filepath.Join(root, "results.json"))
 		resultRepository := results
@@ -333,14 +387,22 @@ func %s(t *testing.T) {
 	t.Cleanup(func() { _ = decisionOwner.Stop(ctx) })
 
 	var calls atomic.Int64
+	behaviorRepairs := 0
 	var reviewCalls, validationCalls int
 	var firstReviewManifest string
+	var snapshotPaths []string
+	if options.TerminalSnapshot {
+		snapshotPaths = runtimeReviewedGitSnapshotPaths(t, directory)
+	}
 	provider := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	provider.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		calls.Add(1)
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 			document := validationInputAdditionMainlineSemanticDocument(command)
+			if options.TerminalSnapshot {
+				runtimeReviewedGitSnapshotSemanticDocument(&document, command)
+			}
 			for i := range document.Proposals {
 				proposal := &document.Proposals[i]
 				binding, found := runtimecontract.RuntimeSemanticValidationInputReviewBinding(*proposal, command.SemanticManifest.OwnerCatalogs)
@@ -367,7 +429,7 @@ func %s(t *testing.T) {
 				review := &runtimecontract.RuntimeValidationInputReview{SubjectHash: binding.InputReview.Hash}
 				for _, check := range binding.RequiredCheckRefs {
 					review.Checks = append(review.Checks, runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: conclusion, Reason: "Confirm whether this input invokes the delivered program without bypassing the original requirement.", InputTargetRefs: []string{inputTargets[proposal.CoverageWorkItemID]}})
-					if binding.InputReview.ProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocolV2 {
+					if binding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocol {
 						item := &review.Checks[len(review.Checks)-1]
 						finding := runtimecontract.RuntimeValidationInputCovered
 						if conclusion == runtimecontract.RuntimeValidationInputConflict {
@@ -386,16 +448,44 @@ func %s(t *testing.T) {
 								item.Obligations = []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: criterion, Finding: finding, Reason: item.Reason, InputTargetRefs: item.InputTargetRefs}}
 							}
 						}
-						if mode == "omission" {
+						if mode == "omission" && strings.HasPrefix(check, "workorch-obligation-check-") {
+							// Source A/B have their own behavioral criteria, not the
+							// shared CWI's additional documentation requirement.
+							item.Conclusion = runtimecontract.RuntimeValidationInputConsistent
+							for i := range item.Obligations {
+								item.Obligations[i].Finding = runtimecontract.RuntimeValidationInputCovered
+							}
+						} else if mode == "omission" {
 							item.Reason = "The input invokes the delivered program but does not check the required documentation."
 							item.Obligations = []runtimecontract.RuntimeValidationInputObligationReview{
 								{CriterionText: "invoke the delivered program", Finding: runtimecontract.RuntimeValidationInputCovered, Reason: "The input builds and invokes the delivery process.", InputTargetRefs: item.InputTargetRefs},
 								{CriterionText: "and document its output", Finding: runtimecontract.RuntimeValidationInputMissing, Reason: "No documentation assertion exists in the reviewed input.", InputTargetRefs: item.InputTargetRefs},
 							}
 						}
+						if binding.InputReview.ProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocolV3 {
+							for i := range item.Obligations {
+								item.Obligations[i].ProofConsumerRefs = runtimecontract.RuntimeValidationProofConsumerRefs(*binding.InputReview)
+							}
+						}
 					}
 				}
 				proposal.ValidationInputReview = review
+				for _, source := range binding.InputReview.DiagnosticSources {
+					// Scripted independent reviewer consumes the exact owner corpus.
+					// Native names alone are not evidence of compatible assertions.
+					body, supplied := initialFiles[source.InputTargetRef]
+					matched := false
+					for _, input := range binding.InputReview.Files {
+						if input.TargetRef == source.InputTargetRef && input.Content == body {
+							matched = true
+						}
+					}
+					if !supplied || !matched || !strings.Contains(body, "func "+source.NativeCaseRef[strings.LastIndex(source.NativeCaseRef, "/")+1:]+"(") {
+						result.Set(nil, cd.NewError(cd.Unexpected, "diagnostic source is not an exact supplied test input"))
+						return
+					}
+					review.DiagnosticSources = append(review.DiagnosticSources, runtimecontract.RuntimeValidationDiagnosticSourceReview{SourceRef: source.SourceRef, Conclusion: conclusion, Reason: "The exact supplied fixture asserts the delivered value or preserves the original independent project constraint, without replacing the original criterion.", InputTargetRefs: []string{source.InputTargetRef}})
+				}
 			}
 			payload, err := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(command.SemanticManifest, document)
 			if err != nil {
@@ -411,7 +501,26 @@ func %s(t *testing.T) {
 		var candidate runtimecontract.RuntimeCandidate
 		switch command.Decision.State {
 		case runtimecontract.ConvergenceStateNeedStateChange:
+			if options.TerminalSnapshot && command.Decision.Focus.CoverageWorkItemIDs[0] == "cwi-git" {
+				candidate = runtimeGitStateCandidateForCoverage(requiredOperationRefs(command.Decision.RequiredOutput.RequiredOperationSequence), "cwi-git", "workspace-repository")
+				for i := range candidate.StateChange.Operations {
+					for j := range candidate.StateChange.Operations[i].Operation.Parameters {
+						parameter := &candidate.StateChange.Operations[i].Operation.Parameters[j]
+						if parameter.Name == "pathspecs" {
+							parameter.StringList = append([]string(nil), snapshotPaths...)
+						}
+					}
+				}
+				break
+			}
 			oldText, newText := "return 2", "return 4"
+			if projectBehaviorRepair {
+				newText = "return 3"
+				if command.Decision.Focus.CoverageWorkItemIDs[0] == "cwi-2" {
+					oldText, newText = "return 3", "return 4"
+					behaviorRepairs++
+				}
+			}
 			candidate.StateChange = &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{ID: "deliver", Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"subject.go"}, CoverageWorkItemIDs: command.Decision.Focus.CoverageWorkItemIDs, Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}}}}}}
 		case runtimecontract.ConvergenceStateNeedValidation:
 			validationCalls++
@@ -448,9 +557,23 @@ func %s(t *testing.T) {
 		observer.Unsubscribe(orchestratorevents.TopicOrchestratorCommandRecordDecisionEvidence)
 	})
 	var crash *runtimeSaveCrashRepository
-	if cut != "" && !deliveryCut {
-		crash = &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: true, marker: cut, match: func(a runtime.RuntimeAggregate) bool {
+	if cut != "" && !deliveryCut && !materialCut {
+		crash = &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: cut != "before_shell_applicability", marker: cut, match: func(a runtime.RuntimeAggregate) bool {
 			switch cut {
+			case "after_assessment_submission":
+				for _, session := range a.CandidateRequestSessions {
+					if a.Decision.State == runtimecontract.ConvergenceStateNeedAssessment && containsRuntimeCoverageID(a.Facts.Focus.CoverageWorkItemIDs, "cwi-2") && session.Transaction == a.Decision.AuthorityTransaction() && session.ProviderSubmitted && session.State != runtimecontract.RuntimeCandidateRequestSessionDocumentComplete && session.State != runtimecontract.RuntimeCandidateRequestSessionTerminal {
+						return true
+					}
+				}
+				return false
+			case "before_shell_applicability", "after_shell_applicability":
+				for _, value := range a.Facts.EvidenceApplicabilityObservations {
+					if value.CurrentDependencies != nil && len(value.CurrentDependencies.Entries) != 0 && strings.HasPrefix(value.CurrentDependencies.Entries[0].OwnerInstanceID, runtimecontract.RuntimeModuleShell+"/") {
+						return true
+					}
+				}
+				return false
 			case "after_review_document":
 				return a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningProofBatchDocumentAccepted && len(a.SemanticPlanning.BatchDocuments) != 0 && a.SemanticPlanning.BatchDocuments[0].Proposals[0].ValidationInputReview != nil
 			case "after_review_classification":
@@ -465,6 +588,8 @@ func %s(t *testing.T) {
 				return a.SemanticPlanning.Phase == runtimecontract.RuntimeSemanticPlanningSealed && a.Facts.Focus.CoverageWorkItemIDs[0] == "cwi-2"
 			case "after_project_receipt":
 				return a.ActiveDispatch != nil && a.ActiveDispatch.Candidate.Validation != nil && a.ActiveDispatch.State == runtime.DispatchStateSealed
+			case "after_repair_receipt":
+				return a.ActiveDispatch != nil && a.ActiveDispatch.RepairCommitment != nil && a.ActiveDispatch.Candidate.StateChange != nil && a.ActiveDispatch.State == runtime.DispatchStateSealed
 			}
 			return false
 		}}
@@ -474,6 +599,7 @@ func %s(t *testing.T) {
 	}
 	var receiptBeforeRecovery *runtime.RuntimeAggregate
 	var originalProjectReceipt runtimecontract.RuntimeOperationReceipt
+	var originalRepairReceipt *runtimecontract.RuntimeOperationReceipt
 	var sealedDefinition runtimecontract.RuntimeDefinitionContext
 	var resolved bool
 	var completed runtime.RuntimeAggregate
@@ -575,6 +701,113 @@ func %s(t *testing.T) {
 			if err != nil || loaded.Validate() != nil {
 				t.Fatalf("restart invalid: %v", err)
 			}
+			if cut == "after_repair_receipt" {
+				if loaded.ActiveDispatch == nil || loaded.ActiveDispatch.RepairCommitment == nil || len(loaded.ActiveDispatch.OperationExecutions) != 1 {
+					t.Fatal("未到达唯一原 confirmed repair dispatch")
+				}
+				key := loaded.ActiveDispatch.OperationExecutions[0].ExecutionKey
+				func() {
+					defer func() {
+						if recovered := recover(); recovered != "runtime-test-crash-after-owner-receipt" {
+							t.Fatalf("真实 File receipt 响应丢失切点未到达: %v", recovered)
+						}
+					}()
+					_, _ = module.ExecuteRuntimeDispatch(ctx, "ws-v2", "run-v2", panicAfterOwnerReceiptExecutor{delegate: eventRuntimeOperationExecutor{hub: hub}})
+					t.Fatal("File accepted receipt 后未中断")
+				}()
+				before, err := module.loadRuntime(ctx, "ws-v2", "run-v2")
+				if err != nil || before.Validate() != nil {
+					t.Fatal("真实 repair receipt 后 aggregate 无效", err)
+				}
+				if before.ActiveDispatch == nil || len(before.ActiveDispatch.OperationExecutions) != 1 || before.ActiveDispatch.OperationExecutions[0].ExecutionKey != key {
+					t.Fatal("repair receipt 未保留原 execution key 与真实 claim fence")
+				}
+				receipt, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(before.OperationReceipts, key, before.ActiveDispatch.OperationExecutions[0].Fence)
+				if !found || receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || !receipt.Changed {
+					t.Fatal("未封存真实唯一 accepted File receipt")
+				}
+				originalRepairReceipt = &receipt
+				if err := fileOwner.Stop(ctx); err != nil {
+					t.Fatal(err)
+				}
+				fileOwner = filemodule.New()
+				if err := fileOwner.Configure(filebiz.Dependencies{EventHub: hub}); err != nil {
+					t.Fatal(err)
+				}
+				if err := fileOwner.Start(); err != nil {
+					t.Fatal(err)
+				}
+				module = newModule()
+				reopened, err := filerepository.NewRunRepository(filepath.Join(root, "runs.json")).GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+				if err != nil || reopened.RuntimeState == nil || !reflect.DeepEqual(runtimeStateRecordFromAggregate(before), *reopened.RuntimeState) {
+					t.Fatal("File/Run owner 重建改变原 repair receipt 或预算")
+				}
+			}
+			if cut == "before_shell_applicability" || cut == "after_shell_applicability" {
+				if err := shellOwner.Stop(ctx); err != nil {
+					t.Fatal(err)
+				}
+				shellOwner = startRuntimeManagedValidationTestOwner(t, hub)
+				module = newModule()
+				reopened, err := filerepository.NewRunRepository(filepath.Join(root, "runs.json")).GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+				if err != nil || reopened.RuntimeState == nil || !reflect.DeepEqual(runtimeStateRecordFromAggregate(loaded), *reopened.RuntimeState) {
+					t.Fatal("owner/repository rebuild changed original applicability transaction")
+				}
+			}
+			if cut == "after_assessment_submission" {
+				original := loaded.CloneRaw()
+				if _, required, err := runtime.NextRuntimeEvidenceApplicabilityRequest(loaded); err != nil || required {
+					t.Fatalf("unsettled submission allowed fresh dependency query: %v", err)
+				}
+				run, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Seal a genuine new SM-4 reconciliation generation without yet
+				// sampling owners or rewriting the submitted SM-3 authority.
+				resumed, changed, err := module.reconcileRuntimeWorkspaceWithCommand(ctx, run, loaded, orchestratorevents.DriveRuntimeCommand{ReconciliationRequestID: "submitted-restart-current-read"})
+				if err != nil || !changed || resumed.Reconciliation.RequestHash == loaded.Reconciliation.RequestHash {
+					t.Fatalf("Resume generation did not seal: %v", err)
+				}
+				var settlementFault *runtimeSubmittedSettlementFaultRepository
+				if options.SubmittedSettlementFault != "" {
+					settlementFault = &runtimeSubmittedSettlementFaultRepository{delegate: runtimeStateRepository{hub: hub}, afterCAS: options.SubmittedSettlementFault == "after_cas"}
+					if err := module.ConfigureRuntimeRepository(settlementFault); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := module.driveOneRuntimeTransition(ctx, run, resumed, orchestratorevents.DriveRuntimeCommand{}, ""); err == nil || !settlementFault.fired {
+						t.Fatal("submitted settlement CAS fault was not reached")
+					}
+					module = newModule()
+					resumed, err = module.loadRuntime(ctx, "ws-v2", "run-v2")
+					if err != nil || resumed.Validate() != nil {
+						t.Fatalf("settlement reload failed: %v", err)
+					}
+				}
+				outcome, err := module.driveOneRuntimeTransition(ctx, run, resumed, orchestratorevents.DriveRuntimeCommand{}, "")
+				if err != nil {
+					t.Fatalf("submitted settlement was displaced by current-read debt: %v", err)
+				}
+				settled := outcome.aggregate
+				if settled.Decision.Terminal == nil || settled.Decision.Terminal.Code != "provider_submission_unknown" || !reflect.DeepEqual(settled.OperationReceipts, original.OperationReceipts) || !reflect.DeepEqual(settled.Facts.EvidenceApplicabilityObservations, original.Facts.EvidenceApplicabilityObservations) || !reflect.DeepEqual(settled.Facts.Evidence, original.Facts.Evidence) || !reflect.DeepEqual(settled.Facts.Coverage, original.Facts.Coverage) {
+					t.Fatal("fresh observation/reconciliation displaced original submission or invented credit")
+				}
+				unknown := 0
+				for _, consumption := range settled.ExecutionBudget.Consumptions {
+					if consumption.UnknownAmount > 0 {
+						unknown++
+					}
+				}
+				if unknown == 0 {
+					t.Fatal("submission settlement discarded reserved unknown cost")
+				}
+				// Exact terminal re-drive is a zero-write no-op. Owner receipts,
+				// unknown costs and observation history cannot be regenerated.
+				duplicate, err := module.driveOneRuntimeTransition(ctx, run, settled, orchestratorevents.DriveRuntimeCommand{}, "")
+				if err != nil || !reflect.DeepEqual(duplicate.aggregate, settled) {
+					t.Fatal("duplicate submitted settlement changed original terminal")
+				}
+			}
 			if cut == "after_project_receipt" {
 				if loaded.ActiveDispatch == nil || loaded.ActiveDispatch.Candidate.Validation == nil || len(loaded.ActiveDispatch.OperationExecutions) != 1 {
 					t.Fatal("未到达原 v6 validation sealed dispatch")
@@ -592,10 +825,22 @@ func %s(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				originalProjectReceipt = assertProjectReceiptReplyLossBoundary(t, before, mode != "project_history_failure")
+				if options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
+					expectation := projectConjunctionExpectation{ProtocolRef: "shell/go-test-json/project-conjunction-behavior/v3"}
+					if projectBehaviorRepair {
+						expectation.RepairSources = len(preparations[requirements[0].Hash].CheckAttestations) + 1
+					}
+					originalProjectReceipt = assertProjectReceiptReplyLossBoundary(t, before, mode != "project_history_failure" && !projectBehaviorRepair, expectation)
+				} else {
+					originalProjectReceipt = assertProjectReceiptReplyLossBoundary(t, before, mode != "project_history_failure")
+				}
 				receiptBeforeRecovery = &before
 				counter, err := os.ReadFile(projectExecutionCounter)
-				if err != nil || string(counter) != projectExecutionCount {
+				expectedCount := projectExecutionCount
+				if projectBehaviorRepair {
+					expectedCount = "executed\nexecuted\n"
+				}
+				if err != nil || string(counter) != expectedCount {
 					t.Fatalf("receipt 切点未取得唯一原工程实际执行事实: %q / %v", counter, err)
 				}
 				if err := shellOwner.Stop(ctx); err != nil {
@@ -620,12 +865,41 @@ func %s(t *testing.T) {
 	if !reflect.DeepEqual(sealedDefinition, completed.Definition) {
 		t.Fatal("review or ticket rewrote sealed startup definition")
 	}
-	success := mode == "consistent" || mode == "clarify"
+	submissionUnknown := cut == "after_assessment_submission"
+	success := (mode == "consistent" || mode == "clarify" || projectBehaviorRepair) && !submissionUnknown
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
+		for _, receipt := range completed.OperationReceipts {
+			if receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
+				t.Logf("rejected owner receipt: feedback=%+v validation=%+v", receipt.Feedback, receipt.Evidence.Validation)
+				if receipt.Feedback.OriginalDiagnostic != nil {
+					t.Logf("owner diagnostic: %+v", *receipt.Feedback.OriginalDiagnostic)
+				}
+				if receipt.Evidence.Validation != nil && receipt.Evidence.Validation.ExecutionConjunction != nil {
+					t.Logf("owner stages: %+v", receipt.Evidence.Validation.ExecutionConjunction.Stages)
+					origin, originErr := runtimecontract.RuntimeOperationExecutionKeyOrigin(completed.Facts.WorkspaceID, completed.Facts.RunID, receipt.ExecutionKey, receipt.OperationID)
+					if originErr == nil {
+						for _, stage := range receipt.Evidence.Validation.ExecutionConjunction.Stages {
+							command := shellevents.QueryRuntimeValidationRawOutputCommand{WorkspaceID: completed.Facts.WorkspaceID, RunID: completed.Facts.RunID, DispatchID: origin, OperationID: receipt.OperationID, ExecutionKey: receipt.ExecutionKey, Fence: receipt.Fence, SourceReceiptHash: runtimecontract.StableRuntimeOperationReceiptHash(receipt), StageID: stage.Identity.ID, Stream: "stderr"}
+							response := hub.Send(magicevent.NewEventWithContext(shellevents.TopicQueryRuntimeValidationRawOutput, ModuleID, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, command))
+							if response != nil {
+								data, readErr := response.Get()
+								if output, ok := data.(shellevents.QueryRuntimeValidationRawOutputResult); ok && readErr == nil && output.ValidateFor(command) == nil {
+									t.Logf("owner stage %s original stderr: %s", stage.Identity.ID, output.Raw)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 		t.Fatalf("mode=%s state=%s terminal=%+v failure=%+v", mode, completed.Decision.State, completed.Decision.Terminal, completed.Facts.Failure)
 	}
-	if success && validationCalls != options.ValidationCount || !success && mode != "source_B_failure" && mode != "project_history_failure" && validationCalls != 0 || mode == "source_B_failure" && validationCalls != 1 {
-		t.Fatalf("unexpected validation calls: %d", validationCalls)
+	expectedValidations := options.ValidationCount
+	if projectBehaviorRepair {
+		expectedValidations++
+	}
+	if success && validationCalls != expectedValidations || !success && !submissionUnknown && mode != "source_B_failure" && mode != "project_history_failure" && validationCalls != 0 || (mode == "source_B_failure" || submissionUnknown) && validationCalls != 1 {
+		t.Fatalf("unexpected validation calls: %d; state=%s terminal=%+v failure=%+v evidenceRevision=%s observations=%+v", validationCalls, completed.Decision.State, completed.Decision.Terminal, completed.Facts.Failure, completed.Facts.EvidenceRevision, completed.Facts.EvidenceApplicabilityObservations)
 	}
 	if mode == "project_history_failure" && (validationCalls != 2 || completed.Facts.Failure == nil || completed.Facts.Failure.Code != "candidate_authority_exhausted" || len(completed.Facts.Evidence.Rejected) != 1) {
 		// 这里计数的是 provider candidate 请求：第二个相同候选必须在 owner I/O 前被原拒绝重放门禁终止。
@@ -633,7 +907,7 @@ func %s(t *testing.T) {
 		t.Fatal("original project failure retried owner execution or lost bounded candidate rejection")
 	}
 	if options.SourceObligations {
-		if mode != "project_history_failure" {
+		if success || mode == "source_B_failure" {
 			assertSharedSourceObligationOwnerObservation(t, completed, requirements[0], mode == "source_B_failure")
 		}
 		if success {
@@ -679,8 +953,103 @@ func %s(t *testing.T) {
 			t.Fatal("review path rewrote existing input")
 		}
 	}
-	if cut != "" && !deliveryCut && !crash.fired {
+	if cut != "" && !deliveryCut && !materialCut && !crash.fired {
 		t.Fatalf("restart cut not reached: %s", cut)
+	}
+	if projectBehaviorRepair && behaviorRepairs != 1 {
+		t.Fatal("same-binding implementation repair was missing or repeated")
+	}
+	if projectBehaviorRepair {
+		assertMultiFailureConfirmedRepairFacts(t, runtimeStateRecordFromAggregate(completed))
+		if originalRepairReceipt != nil {
+			current, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(completed.OperationReceipts, originalRepairReceipt.ExecutionKey, originalRepairReceipt.Fence)
+			if !found || !runtimecontract.SameRuntimeOperationReceipt(current, *originalRepairReceipt) {
+				t.Fatal("恢复改写了原 accepted repair receipt")
+			}
+		}
+	}
+	if projectAdapter && (success || mode == "project_history_failure") {
+		if options.TerminalSnapshot && success {
+			projectExecutionCount = runtimeReviewedGitProjectExecutionCount(t, runtimeStateRecordFromAggregate(completed))
+		}
+		// Replay/raw-read requires the original resource owners. Check before a
+		// delivery cut replaces those owners with a separate Hub.
+		if err := shellOwner.Stop(ctx); err != nil {
+			t.Fatal(err)
+		}
+		shellOwner = startRuntimeManagedValidationTestOwner(t, hub)
+		reopened, err := filerepository.NewRunRepository(filepath.Join(root, "runs.json")).GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+		if err != nil || reopened.RuntimeState == nil || !reflect.DeepEqual(runtimeStateRecordFromAggregate(completed), *reopened.RuntimeState) {
+			t.Fatal("reopened Run lost original persisted conjunction")
+		}
+		protocol := "shell/go-test-json/project-conjunction-behavior/v1"
+		if options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
+			protocol = "shell/go-test-json/project-conjunction-behavior/v3"
+		}
+		expectation := projectConjunctionExpectation{ProtocolRef: protocol}
+		if projectBehaviorRepair {
+			expectation.RepairSources = len(preparations[requirements[0].Hash].CheckAttestations) + 1
+		}
+		assertProjectConjunctionPersistedOwnerOutputs(t, ctx, hub, module, *reopened.RuntimeState, success, expectation)
+		counter, err := os.ReadFile(projectExecutionCounter)
+		if err != nil || string(counter) != projectExecutionCount {
+			t.Fatalf("恢复或 duplicate 重复执行原工程判据: %q / %v", counter, err)
+		}
+		if cut == "after_project_receipt" {
+			if receiptBeforeRecovery == nil {
+				t.Fatal("未观察到实际 receipt 响应丢失边界")
+			}
+			if projectBehaviorRepair {
+				current, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(reopened.RuntimeState.OperationReceipts, originalProjectReceipt.ExecutionKey, originalProjectReceipt.Fence)
+				if !found || !runtimecontract.SameRuntimeOperationReceipt(current, originalProjectReceipt) {
+					t.Fatal("repair recovery rewrote original rejected receipt")
+				}
+				assertProjectReceiptBudgetConsumption(t, runtimeAggregateFromRecord(*reopened.RuntimeState), current)
+			} else {
+				assertProjectReceiptPreservedAfterRecovery(t, *receiptBeforeRecovery, runtimeAggregateFromRecord(*reopened.RuntimeState), originalProjectReceipt)
+			}
+		}
+	}
+	if materialCut {
+		before := completed.CloneRaw()
+		crash = &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: cut == "after_material_seal", marker: cut, match: func(a runtime.RuntimeAggregate) bool { return a.TerminalMaterialSeal != nil }}
+		if err := module.ConfigureRuntimeRepository(crash); err != nil {
+			t.Fatal(err)
+		}
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != cut {
+					t.Fatalf("material seal CAS cut not reached: %v", recovered)
+				}
+			}()
+			proofs, err := module.observeRuntimeTerminalSnapshotProofs(ctx, completed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = module.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{Kind: runtime.RuntimeInternalEventTerminalMaterialSealRequired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: completed.Facts.WorkspaceID, RunID: completed.Facts.RunID}, Delivery: &runtime.RuntimeInternalDeliveryPayload{TerminalSnapshotProofs: proofs}})
+			t.Fatal("material seal CAS cut did not interrupt")
+		}()
+		if !crash.fired {
+			t.Fatal("material seal crash wrapper did not fire")
+		}
+		reloadedRun, err := filerepository.NewRunRepository(filepath.Join(root, "runs.json")).GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+		if err != nil || reloadedRun.RuntimeState == nil {
+			t.Fatalf("material seal fresh Run load: %v", err)
+		}
+		reloaded := runtimeAggregateFromRecord(*reloadedRun.RuntimeState)
+		if err := reloaded.Validate(); err != nil || len(reloaded.DeliveryAcknowledgements) != 0 || (reloaded.TerminalMaterialSeal != nil) != (cut == "after_material_seal") {
+			t.Fatalf("material cut lost original seal/no-ACK distinction: %v", err)
+		}
+		withoutSeal := reloaded.CloneRaw()
+		withoutSeal.TerminalMaterialSeal, withoutSeal.StateRevision = nil, before.StateRevision
+		if !reflect.DeepEqual(before, withoutSeal) {
+			t.Fatal("material seal CAS changed authority, provider budget or original receipts")
+		}
+		items, err := results.ListByRun(ctx, "run-v2")
+		if err != nil || len(items) != 0 {
+			t.Fatal("material seal CAS executed Result I/O before returning")
+		}
+		module = newModule()
 	}
 	if deliveryCut {
 		fired := func() bool {
@@ -713,34 +1082,48 @@ func %s(t *testing.T) {
 	if err != nil || stored.RuntimeState == nil || !runtimeTerminalDeliveryFullyAcknowledged(runtimeAggregateFromRecord(*stored.RuntimeState)) {
 		t.Fatalf("terminal owner delivery incomplete: %v", err)
 	}
-	if options.Adapter == shellcommon.ValidationRecipeAdapterProjectConjunction {
-		// 重建 capability owner 及文件型 Run repository 读取前像；不是 fresh-process 验收。
-		if err := shellOwner.Stop(ctx); err != nil {
-			t.Fatal(err)
+	if (options.DeliveryGuard || options.TerminalMaterialGuards) && success {
+		bindings, err := runtimecontract.RuntimeDeliveryLineageBindingsFromState(*stored.RuntimeState)
+		if err != nil || len(bindings) != 1 {
+			t.Fatalf("delivery source: %v %+v", err, bindings)
 		}
-		shellOwner = startRuntimeManagedValidationTestOwner(t, hub)
-		reopened, err := filerepository.NewRunRepository(filepath.Join(root, "runs.json")).GetByWorkspaceID(ctx, "ws-v2", "run-v2")
-		if err != nil || reopened.RuntimeState == nil || !reflect.DeepEqual(stored.RuntimeState, reopened.RuntimeState) {
-			t.Fatal("reopened Run lost original persisted conjunction")
+		state, err := runtimecontract.EvaluateRuntimeDeliveryLineageAssertionFromState(*stored.RuntimeState, bindings[0])
+		if err != nil || state != runtimecontract.RuntimeDeliveryLineageSatisfied {
+			t.Fatalf("delivery guard not independently consumed: %s %v", state, err)
 		}
-		assertProjectConjunctionPersistedOwnerOutputs(t, ctx, hub, module, *reopened.RuntimeState, success)
-		counter, err := os.ReadFile(projectExecutionCounter)
-		if err != nil || string(counter) != projectExecutionCount {
-			t.Fatalf("恢复或 duplicate 重复执行原工程判据: %q / %v", counter, err)
+		if options.TerminalMaterialGuards {
+			assertTerminalMaterialConsumerTamper(t, *stored.RuntimeState, bindings[0])
 		}
-		if cut == "after_project_receipt" {
-			if receiptBeforeRecovery == nil {
-				t.Fatal("未观察到实际 receipt 响应丢失边界")
-			}
-			assertProjectReceiptPreservedAfterRecovery(t, *receiptBeforeRecovery, runtimeAggregateFromRecord(*reopened.RuntimeState), originalProjectReceipt)
+	}
+	if options.TerminalMaterialGuards && !success {
+		bindings, err := runtimecontract.RuntimeDeliveryLineageBindingsFromState(*stored.RuntimeState)
+		if err != nil || len(bindings) != 1 {
+			t.Fatalf("failed terminal obligation source: %v", err)
+		}
+		state, err := runtimecontract.EvaluateRuntimeDeliveryLineageAssertionFromState(*stored.RuntimeState, bindings[0])
+		if err != nil || state != runtimecontract.RuntimeDeliveryLineageUnsatisfied {
+			t.Fatalf("failed delivery invented success-material satisfaction: %s %v", state, err)
 		}
 	}
 	if options.SourceObligations && success {
 		assertActualShellAssessmentProofDependencies(t, *stored.RuntimeState)
 	}
+	if options.SnapshotInputSources && success {
+		assertRuntimeReviewedInputSnapshotSources(t, runtimeAggregateFromRecord(*stored.RuntimeState))
+	}
+	if options.TerminalSnapshot && success {
+		assertRuntimeTerminalSnapshotProof(t, *stored.RuntimeState, directory)
+		counter, err := os.ReadFile(projectExecutionCounter)
+		if err != nil || string(counter) != projectExecutionCount {
+			t.Fatalf("terminal retry repeated original/reconciliation project checks: %q / %v", counter, err)
+		}
+	}
 	wantRun, wantResult, wantCoverage := common.RunStateFailed, common.ResultStateRejected, 1
 	if success {
 		wantRun, wantResult, wantCoverage = common.RunStateCompleted, common.ResultStateAccepted, options.ValidationCount+1
+		if options.TerminalSnapshot {
+			wantCoverage++
+		}
 	}
 	closeouts, err := results.ListByRun(ctx, "run-v2")
 	if err != nil || stored.State != wantRun || len(closeouts) != 1 || closeouts[0].State != wantResult || closeouts[0].RuntimeCloseout == nil || len(closeouts[0].RuntimeCloseout.SatisfiedCoverageWorkItemIDs) != wantCoverage {
@@ -770,6 +1153,7 @@ func %s(t *testing.T) {
 	if mode == "conflict" || mode == "omission" || mode == "exhausted" {
 		diagnostic := closeouts[0].RuntimeCloseout.OriginalDiagnostic
 		if diagnostic == nil || len(diagnostic.ValidationInputReviews) != 1 || !strings.Contains(strings.Join(closeouts[0].SummaryDetail.KnownLimitations, "\n"), diagnostic.ValidationInputReviews[0].Report.Checks[0].Reason) {
+			t.Logf("review terminal source: failure=%+v diagnostic=%+v limitations=%+v", completed.Facts.Failure, diagnostic, closeouts[0].SummaryDetail.KnownLimitations)
 			t.Fatal("Result omitted the original input review reason or exact report identity")
 		}
 		if mode == "omission" && diagnostic.OriginalCode != "validation_input_review_coverage_incomplete" {

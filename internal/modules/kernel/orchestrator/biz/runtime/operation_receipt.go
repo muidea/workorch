@@ -126,6 +126,21 @@ func (c *candidateDispatchComponent) commitOperationReceipt(ctx context.Context,
 	if err := validateOperationReceiptOwnerSource(aggregate, dispatchID, receipt.OperationID, ownerModuleID); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
 	}
+	dispatch, _, _ := operationReceiptDispatch(aggregate, dispatchID)
+	operation, _ := candidateOperationByID(dispatch.Candidate, receipt.OperationID)
+	if err := runtimecontract.ValidateRuntimeHistoricalEffectReceiptPurpose(runtimeHistoricalEffectPurposeDispatch(dispatch), operation, receipt.Evidence.ApplicabilityDependencies); err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: %v", common.ErrConflict, err)
+	}
+	evidenceKind := ""
+	if dispatch.Transaction.State == runtimecontract.ConvergenceStateNeedStateChange {
+		evidenceKind = runtimecontract.EvidenceKindStateChange
+	}
+	if err := runtimecontract.ValidateRuntimeEvidencePurposeForOperation(receipt.Evidence.ApplicabilityDependencies, operation.Kind, evidenceKind); err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
+	}
+	if err := runtimecontract.ValidateRuntimeEvidenceDependencyPair(receipt.Evidence.OwnerRevisionSet, receipt.Evidence.ApplicabilityDependencies, aggregate.Facts.DefinitionRevision); err != nil {
+		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, err
+	}
 	if receipt.Evidence.OwnerRevisionSet != nil && receipt.Evidence.OwnerRevisionSet.DefinitionRevision != aggregate.Facts.DefinitionRevision {
 		return RuntimeAggregate{}, runtimecontract.RuntimeOperationReceipt{}, fmt.Errorf("%w: owner read dependencies definition mismatch", common.ErrConflict)
 	}
@@ -322,6 +337,25 @@ func validateOperationReceiptFeedbackAgainstDispatch(aggregate RuntimeAggregate,
 	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(operation.Kind)
 	if !found || feedback.OriginalDiagnostic.OwnerModuleID != descriptor.OwnerModuleID || feedback.AuthoritySnapshotID != dispatch.Transaction.AuthoritySnapshotID {
 		return fmt.Errorf("operation receipt feedback does not match sealed owner or authority")
+	}
+	observation := receipt.Evidence.Validation
+	failureObservation := feedback.OriginalDiagnostic.ValidationFailureObservation
+	if (observation != nil && observation.ExecutionConjunction != nil) || failureObservation != nil {
+		execution, found := operationExecutionRecord(dispatch.OperationExecutions, receipt.OperationID)
+		if !found {
+			return fmt.Errorf("diagnostic receipt has no sealed execution")
+		}
+		catalog := runtimeOwnerCatalogForOperation(dispatch.OperationAdmissibilities, dispatch.OperationAdmissibilityObservations, operation, execution.AdmissibilitySnapshotID, execution.AcquisitionBinding)
+		if catalog == nil {
+			return fmt.Errorf("diagnostic receipt has no original sealed owner catalog")
+		}
+		binding, err := runtimeValidationProofBindingForOperation(dispatch, operation, catalog)
+		if err != nil {
+			return err
+		}
+		if err := runtimecontract.ValidateRuntimeValidationDiagnosticFailureObservation(observation, binding, catalog.TargetRefs, failureObservation); err != nil {
+			return err
+		}
 	}
 	if err := validateOperationReceiptDiagnosticOwner(aggregate, dispatch, operation, *feedback.OriginalDiagnostic); err != nil {
 		return err

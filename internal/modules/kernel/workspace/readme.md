@@ -101,6 +101,22 @@ Last Verified: 2026-08-30
 - Workspace 的 `pkg/definitionadmission.CompileRuntimeSourceObligationInventory` 只从 eligible exact candidate 与 startup/admission 身份投影完整来源图；保留原 Requirement、Obligation、Verification 正文及正式 item ref，不读取草稿、不授予 Runtime binding 或 credit。声明逐项反查封存 Profile 的完整适用贡献；`runtime_source_obligation_test.go` 固定共享 DoD、多源身份、原文、独立副本及 seal／声明漂移拒绝。Application 最终 bootstrap gate 从原 candidate 独立重编 inventory；自洽删 B 或删除整份 inventory 不能通过该前像反证。
 - nil Specification 保留既有候选与 startup hash。此合同约束提交的规格候选，不表示所有 Web/TUI 输入已自动经过完整 Goal Compiler；正式执行仍须通过 exact CWI、owner feasibility、sealed dispatch 和 SM-2 闭包。
 
+### 跨源 execution 证明映射
+
+规格可选 `ExecutionProofMappings` 随完整 proposal hash、六审及 exact confirmation 封存，只有声明
+`runtime/cross-source-execution-proof/v1` 的 execution work/repair rule 可以消费。consumer/source 必须是不同原 DoD
+candidate refs；缺失、重复、未知、未声明或未重新评审的映射阻断准入。库存完整保留原文与映射，不授予 proof。
+详见 [跨源证明合同](../../../../docs/00-core/runtime/cross-source-execution-proof.md)。wire 扩展可省略；存在时每个字段
+仍必须精确且非 null，旧基础字段的必填门禁不变。
+
+独立 `EvidencePurposeMappings` 使用 `runtime/cross-cwi-evidence-purpose/v1`，封存原历史行为 DoD 与唯一普通当前
+验收 DoD candidate ref；不借用 execution work/repair rule。完整映射进入相同 proposal／六审／confirmation／startup
+身份，原文不改写，clone／inventory 不共享来源存储；未知、自映射、重复历史来源、映射链及无用途资格／普通验收的
+声明拒绝。`evidence_purpose_mapping_test.go` 证明 pre-seal 原图、exact admission 投影与身份替换拒绝，不证明 Runtime
+延期终验已执行；mapped bootstrap／seed 的 executable availability 独立保持 fail-closed。
+
+Profile deliverable 来源另使用 `runtime/profile-deliverable-evidence-purpose/v2`：原 Profile ID、唯一 required deliverable ID、单 Profile 完整快照 hash 和原 Description 全文随六审／用户确认封存，不将其伪装成原 DoD。接受端仍为唯一原 DoD，运行期独立反查原快照；完整字段进入 content/admission/startup hash，v1 不接受扩展。普通验收及双用途依赖闭包不放宽。
+
 ### 原始创作诊断
 
 Web 不以浏览器持久存储保留创作输入或事务恢复身份；已保存草稿与确认恢复依据由 owner 管理。Application 从已校验的 typed query confirmation 投影有界恢复参数，不能暴露整个 journal 或从页面旧状态重建。ExpectedWorkspaceRevision 仅限制首次确认准备，精确 journal 重放仍校验原 input／permit／proposal／specification hashes；查询不驱动确认、provider 或 Run。

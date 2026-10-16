@@ -28,6 +28,7 @@ func runtimeInternalFactPayloadClass(kind RuntimeInternalEventKind) (runtimeInte
 		return runtimeInternalEventPayloadActivation, true
 
 	case RuntimeInternalEventImplementationWorkScopeRequired,
+		RuntimeInternalEventEvidenceApplicabilityObserved,
 		RuntimeInternalEventImplementationWorkScopeObserved,
 		RuntimeInternalEventReconcileAuthority,
 		RuntimeInternalEventReconciliationBatchObserved,
@@ -151,6 +152,9 @@ func (event RuntimeInternalEvent) validateEnvelope() error {
 	if err := event.validateImplementationWorkScopeEnvelope(); err != nil {
 		return err
 	}
+	if err := event.validateEvidenceApplicabilityEnvelope(); err != nil {
+		return err
+	}
 	if err := event.validateRecoveryAuthorization(); err != nil {
 		return err
 	}
@@ -164,8 +168,23 @@ func (event RuntimeInternalEvent) validateEnvelope() error {
 }
 
 func (event RuntimeInternalEvent) validateTerminalMaterialSealEnvelope() error {
-	if event.Kind == RuntimeInternalEventTerminalMaterialSealRequired && (event.Delivery == nil || !reflect.DeepEqual(*event.Delivery, RuntimeInternalDeliveryPayload{})) {
-		return fmt.Errorf("%w: material seal event accepts only owner-local scope, not caller material", common.ErrInvalidArgument)
+	if event.Delivery == nil {
+		return nil
+	}
+	payload := *event.Delivery
+	proofs := payload.TerminalSnapshotProofs
+	payload.TerminalSnapshotProofs = nil
+	if event.Kind == RuntimeInternalEventTerminalMaterialSealRequired {
+		if !reflect.DeepEqual(payload, RuntimeInternalDeliveryPayload{}) || len(proofs) > runtimecontract.MaxRuntimeLineageAssertions || (proofs != nil && len(proofs) == 0) {
+			return fmt.Errorf("%w: material seal accepts only scope and versioned owner observations, never caller material", common.ErrInvalidArgument)
+		}
+		for _, proof := range proofs {
+			if err := proof.ValidateRaw(); err != nil {
+				return err
+			}
+		}
+	} else if proofs != nil {
+		return fmt.Errorf("%w: snapshot material observations require material seal event", common.ErrInvalidArgument)
 	}
 	return nil
 }
@@ -366,6 +385,7 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 
 	switch kind {
 	case RuntimeInternalEventActivationObserved,
+		RuntimeInternalEventEvidenceApplicabilityObserved,
 		RuntimeInternalEventImplementationWorkScopeRequired,
 		RuntimeInternalEventImplementationWorkScopeObserved,
 		RuntimeInternalEventReconcileAuthority,
@@ -457,6 +477,7 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 	switch kind {
 	case RuntimeInternalEventActivationObserved,
 		RuntimeInternalEventReconciliationBatchObserved,
+		RuntimeInternalEventEvidenceApplicabilityObserved,
 		RuntimeInternalEventSemanticPlanEvaluated,
 		RuntimeInternalEventSemanticFeasibilityObserved,
 		RuntimeInternalEventPrerequisiteObserved,
@@ -500,6 +521,7 @@ func runtimeInternalFactMetadata(kind RuntimeInternalEventKind) (eventcontract.M
 		RuntimeInternalEventDefinitionClarificationDispatchSealed:
 		metadata.IdentityPolicy = eventcontract.IdentityPolicyRuntimeDispatch
 	case RuntimeInternalEventOperationReceiptObserved,
+		RuntimeInternalEventEvidenceApplicabilityObserved,
 		RuntimeInternalEventCandidateConformanceObserved,
 		RuntimeInternalEventOperationEvidenceObserved,
 		RuntimeInternalEventOperationPrerequisiteStaleObserved,

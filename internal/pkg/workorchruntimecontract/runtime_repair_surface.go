@@ -208,12 +208,16 @@ func (r RuntimeRepairSurfaceConfirmationRecord) Clone() RuntimeRepairSurfaceConf
 // responses for one observation. The maps are scoped to this aggregate value;
 // no process-wide event/confirmation index is introduced.
 func ValidateRuntimeRepairSurfaceConfirmationRecords(values []RuntimeRepairSurfaceConfirmationRecord) error {
+	return validateRuntimeRepairSurfaceConfirmationRecordsInIndex(values, nil)
+}
+
+func validateRuntimeRepairSurfaceConfirmationRecordsInIndex(values []RuntimeRepairSurfaceConfirmationRecord, index *runtimeOwnerLineageIndex) error {
 	exact := make(map[string]struct{}, len(values))
 	identity := make(map[string]struct{}, len(values))
 	sequenceSubjects := make(map[string]string, len(values))
 	terminalSequence := make(map[string]int, len(values))
 	for idx, record := range values {
-		if err := record.Validate(); err != nil {
+		if err := index.confirmation(record); err != nil {
 			return fmt.Errorf("runtime repair surface confirmation %d: %w", idx, err)
 		}
 		record = record.Normalized()

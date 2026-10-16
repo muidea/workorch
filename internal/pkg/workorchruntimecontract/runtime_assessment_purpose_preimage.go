@@ -48,9 +48,12 @@ func ResolveRuntimeAssessmentPurposePreimage(
 }
 
 func runtimeAssessmentPurposePreimagesFromSemanticLedger(ledger RuntimeSemanticPlanningLedger, semanticLedgerAlreadyValidated bool) ([]runtimeAssessmentPurposeBindingPreimage, error) {
+	return runtimeAssessmentPurposePreimagesFromSemanticLedgerInSession(ledger, semanticLedgerAlreadyValidated, newRuntimeSemanticValidationSession())
+}
+
+func runtimeAssessmentPurposePreimagesFromSemanticLedgerInSession(ledger RuntimeSemanticPlanningLedger, semanticLedgerAlreadyValidated bool, session *runtimeSemanticValidationSession) ([]runtimeAssessmentPurposeBindingPreimage, error) {
 	ret := make([]runtimeAssessmentPurposeBindingPreimage, 0)
-	// session 仅属于本次前像遍历；复用要求 exact raw 相等，不凭 manifest hash 授信。
-	session := newRuntimeSemanticValidationSession()
+	// The enclosing call owns the session; each hit still requires exact raw equality.
 	// Detach only the active generation. Cloning the ledger before clearing
 	// History needlessly clones every immutable snapshot that is traversed
 	// separately below.
@@ -68,7 +71,7 @@ func runtimeAssessmentPurposePreimagesFromSemanticLedger(ledger RuntimeSemanticP
 				return nil, fmt.Errorf("runtime assessment purpose semantic history %d: %w", index, err)
 			}
 		}
-		entries, err := runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(generation.Snapshot, session)
+		entries, err := runtimeHistoricalPurposeInOwnerCompiler(generation.Snapshot, session)
 		if err != nil {
 			return nil, fmt.Errorf("runtime assessment purpose semantic history %d: %w", index, err)
 		}
@@ -81,6 +84,10 @@ func runtimeAssessmentPurposePreimagesFromSemanticLedger(ledger RuntimeSemanticP
 // the uniquely matched binding determines whether an assessment is authorized;
 // unrelated current or historical generations cannot redefine that purpose.
 func resolveRuntimeAssessmentPurposePreimage(entries []runtimeAssessmentPurposeBindingPreimage, bindings []CoverageEvidenceBinding) (RuntimeAssessmentPurposePreimage, error) {
+	return resolveRuntimeAssessmentPurposePreimageInSession(entries, bindings, newRuntimeSemanticValidationSession())
+}
+
+func resolveRuntimeAssessmentPurposePreimageInSession(entries []runtimeAssessmentPurposeBindingPreimage, bindings []CoverageEvidenceBinding, session *runtimeSemanticValidationSession) (RuntimeAssessmentPurposePreimage, error) {
 	if len(bindings) == 0 {
 		return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment purpose requires a sealed semantic binding preimage")
 	}
@@ -98,7 +105,7 @@ func resolveRuntimeAssessmentPurposePreimage(entries []runtimeAssessmentPurposeB
 	if count != 1 {
 		return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment purpose has %d exact semantic binding preimages", count)
 	}
-	return matched.assessmentPurpose()
+	return matched.assessmentPurposeInSession(session)
 }
 
 func runtimeAssessmentPurposePreimagesFromSemanticGeneration(
@@ -154,6 +161,15 @@ func runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(
 		if batch.DocumentHash != StableRuntimeSemanticPlanDocumentHash(document) || document.BatchID != batch.BatchID || document.BatchSequence != batch.Sequence {
 			return nil, fmt.Errorf("runtime assessment purpose requires exact accepted batch document")
 		}
+		// Implementation-work batches seal a working binding for a bounded
+		// mutation round. They deliberately cannot compile terminal coverage
+		// bindings and therefore are not assessment-purpose preimages. Their
+		// exact document/feasibility lineage remains validated by the semantic
+		// ledger and implementation-work ledger before this read-only index is
+		// built.
+		if runtimeAssessmentPurposeBatchIsImplementationWork(validated, batch) {
+			continue
+		}
 		focuses, _, err := compileRuntimeSemanticBindingsWithValidatedManifest(validated, batch.RequestLogicalID, document, feasibilities)
 		if err != nil {
 			return nil, fmt.Errorf("runtime assessment purpose semantic batch %q: %w", batch.BatchID, err)
@@ -170,6 +186,16 @@ func runtimeAssessmentPurposePreimagesFromSemanticGenerationInSession(
 		}
 	}
 	return ret, nil
+}
+
+func runtimeAssessmentPurposeBatchIsImplementationWork(validated runtimeValidatedSemanticManifest, batch RuntimeSemanticPlanBatch) bool {
+	for _, coverageID := range batch.Normalized().CoverageWorkItemIDs {
+		obligation, found := validated.obligationByCoverage[coverageID]
+		if found && obligation.ImplementationWork != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeAssessmentPurposeBindingPreimageForFocus(manifest RuntimeSemanticPlanManifest, focus CoverageFocus) (runtimeAssessmentPurposeBindingPreimage, error) {
@@ -200,8 +226,12 @@ func runtimeAssessmentPurposeBindingPreimageForFocus(manifest RuntimeSemanticPla
 }
 
 func (entry runtimeAssessmentPurposeBindingPreimage) assessmentPurpose() (RuntimeAssessmentPurposePreimage, error) {
+	return entry.assessmentPurposeInSession(newRuntimeSemanticValidationSession())
+}
+
+func (entry runtimeAssessmentPurposeBindingPreimage) assessmentPurposeInSession(session *runtimeSemanticValidationSession) (RuntimeAssessmentPurposePreimage, error) {
 	obligation := entry.obligation
-	resolved, err := ResolveRuntimeSemanticEvidenceObligation(obligation)
+	resolved, err := resolveRuntimeSemanticEvidenceObligationInSession(obligation, session)
 	if err != nil {
 		return RuntimeAssessmentPurposePreimage{}, fmt.Errorf("runtime assessment purpose evidence obligation: %w", err)
 	}

@@ -228,6 +228,7 @@ type CoverageEvidenceBinding struct {
 	CoverageWorkItemID       common.CoverageWorkItemID
 	FocusID                  string
 	DefinitionRevision       string
+	HistoricalAcceptance     *RuntimeHistoricalAcceptanceSource `json:",omitempty"`
 	Proofs                   []CoverageEvidenceProof
 	LineageAssertions        []RuntimeLineageAssertion  `json:",omitempty"`
 	VerificationPolicy       *RuntimeVerificationPolicy `json:",omitempty"`
@@ -253,6 +254,7 @@ type CoverageEvidenceBinding struct {
 }
 
 func (b CoverageEvidenceBinding) Normalized() CoverageEvidenceBinding {
+	b.HistoricalAcceptance = cloneRuntimeHistoricalAcceptanceSource(b.HistoricalAcceptance)
 	b.ID = strings.TrimSpace(b.ID)
 	b.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(b.CoverageWorkItemID)))
 	b.FocusID = strings.TrimSpace(b.FocusID)
@@ -296,6 +298,20 @@ func (b CoverageEvidenceBinding) Validate() error {
 }
 
 func validateCoverageEvidenceBindingRawProofs(b CoverageEvidenceBinding) error {
+	if b.HistoricalAcceptance != nil {
+		if err := b.HistoricalAcceptance.Validate(b.CoverageWorkItemID); err != nil {
+			return err
+		}
+		if len(b.Proofs) != 1 || b.Proofs[0].EvidenceKind != EvidenceKindStateChange {
+			return fmt.Errorf("mapped historical binding must preserve state-change-only source proof")
+		}
+		for _, kind := range b.Proofs[0].AllowedOperationKinds {
+			descriptor, found := RuntimeOperationDescriptorForKind(kind)
+			if !found || descriptor.HistoricalEffectProofContractRef == "" {
+				return fmt.Errorf("mapped historical binding lacks published owner purpose operation")
+			}
+		}
+	}
 	if err := ValidateRuntimeLineageAssertions(b.LineageAssertions, b.CoverageWorkItemID, b.DeclarationRef); err != nil {
 		return err
 	}
@@ -375,6 +391,7 @@ func stableCoverageEvidenceBindingHashNormalized(binding CoverageEvidenceBinding
 	writeHashString(h, string(binding.CoverageWorkItemID))
 	writeHashString(h, binding.FocusID)
 	writeHashString(h, binding.DefinitionRevision)
+	writeRuntimeHistoricalAcceptanceSourceHash(h, binding.HistoricalAcceptance)
 	for _, proof := range binding.Proofs {
 		writeHashString(h, proof.EvidenceKind)
 		writeHashStrings(h, RuntimeEffectScopesAsStrings(proof.RequiredEffectScopes))

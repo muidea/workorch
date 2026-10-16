@@ -202,6 +202,18 @@ func validateRuntimeCandidateManifestSupportingFacts(
 					return fmt.Errorf("prerequisite snapshot %q has drifted content", snapshotRef)
 				}
 			}
+			for _, observation := range resources.PrerequisiteObservations {
+				if observation.ObservationID != snapshotRef {
+					continue
+				}
+				matched = true
+				if err := observation.Validate(); err != nil {
+					return fmt.Errorf("prerequisite snapshot %q is invalid: %w", snapshotRef, err)
+				}
+				if observation.OwnerModuleID != operation.OwnerModuleID || !slices.Contains(operation.AdmissibilitySnapshotRefs, observation.ContentHash) {
+					return fmt.Errorf("prerequisite snapshot %q does not support manifest owner/admissibility %s", snapshotRef, operation.OwnerModuleID)
+				}
+			}
 			if !matched {
 				return fmt.Errorf("prerequisite snapshot %q is missing", snapshotRef)
 			}

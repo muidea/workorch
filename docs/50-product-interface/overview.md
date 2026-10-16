@@ -30,6 +30,7 @@ Run endpoints remain available for status, snapshots and diagnostics.
 ## Documents
 
 - [Deployment](deployment.md)
+- [Local Operator Access](local-operator-access.md)
 - [Service Command API](service-api.md)
 - [Service Read API](service-read-api.md)
 - [Service Acceptance](service-acceptance.md)

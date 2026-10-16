@@ -11,6 +11,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorCommandListCoverageWorkItemsByRun,
 		TopicOrchestratorCommandListArtifactContinuationsByRun,
 		TopicOrchestratorQueryRuntimeOperationReceipt,
+		TopicOrchestratorQueryRuntimeValidationOutput,
 	)...)
 	ret = append(ret, eventcontract.Build("orchestrator", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicOrchestratorCommandBeginWorkspaceRuntimeQuiescence,
@@ -34,6 +35,7 @@ func Contracts() []eventcontract.Contract {
 		TopicOrchestratorCommandListToolCallsByRun, TopicOrchestratorCommandListPatchesByRun,
 		TopicOrchestratorCommandListValidationResultsByRun, TopicOrchestratorCommandListCoverageWorkItemsByRun,
 		TopicOrchestratorCommandListArtifactContinuationsByRun, TopicOrchestratorQueryRuntimeOperationReceipt,
+		TopicOrchestratorQueryRuntimeValidationOutput,
 	)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassWrite, eventcontract.StateMachineSM2, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true),
 		TopicOrchestratorCommitRuntimeGovernanceTicket, TopicOrchestratorCommitRuntimeGovernanceApproval,

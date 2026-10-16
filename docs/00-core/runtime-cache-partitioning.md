@@ -108,6 +108,12 @@ subject hash 与事实澄清信息只属于当前 proof batch 的 C3。协议选
 同一 activation 内输入、评审或信息变化不得改写 C0～C2/`StablePrefixHash`。完整受保护内容不能截断为摘要；
 V1 的缺省字段、schema 与历史请求哈希保持不变。
 
+显式 `validation/input-consistency/v3` 的完整同 CWI lineage declarations、逐 obligation `proofConsumerRefs`、
+组合评审 schema/instruction 同样仅进入当前 proof batch C3。C2 只保留原 sealed Profile 声明，不混入
+owner subject、评审发现或未来 delivery ACK；实际消费者事实也不由 LLM 生成。输入或映射变化不得改变
+C0～C2/StablePrefixHash；v1/v2 不注入该扩展，细则见
+[Validation Proof Composition](runtime/validation-proof-composition.md)。
+
 semantic owner 的 `stale|prerequisite_required` original diagnostic 只进入 aggregate audit，不进入 C4。只有带 exact
 revision fence 的 stale 可触发 SM-2 有界重获；当前无 owner-defined acquisition contract 的 prerequisite-required
 必须保留事实并 fail-closed，不能伪装为 refresh。generation history 与完整 owner diagnostic 不进入 C0～C5。

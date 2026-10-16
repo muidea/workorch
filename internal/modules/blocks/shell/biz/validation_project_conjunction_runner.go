@@ -14,9 +14,13 @@ import (
 func runShellProjectConjunction(ctx context.Context, directory string, env []string, request RuntimeCommandRequest) (RuntimeCommandResult, shellProjectConjunctionFact, error) {
 	output := shellBaseOutput(request, request.Command, request.Args, directory, "", "go")
 	output.Status = "completed"
-	projectSelected := len(request.ValidationCheckAttestations) != 0 && request.ValidationCheckAttestations[0].ObservationProtocolRef == shellProjectConjunctionProtocolRef
+	protocol := shellProjectConjunctionProtocolRef
+	projectSelected := len(request.ValidationCheckAttestations) != 0 && shellProjectObservationProtocol(request.ValidationCheckAttestations[0].ObservationProtocolRef)
 	if projectSelected {
-		output.ValidationObservation = &runtimecontract.RuntimeValidationObservation{RecipeID: request.ValidationRecipeID, ObservationProtocolRef: shellProjectConjunctionProtocolRef}
+		protocol = request.ValidationCheckAttestations[0].ObservationProtocolRef
+	}
+	if projectSelected {
+		output.ValidationObservation = &runtimecontract.RuntimeValidationObservation{RecipeID: request.ValidationRecipeID, ObservationProtocolRef: protocol}
 	}
 	output.TimeoutMillis = request.TimeoutMillis
 	startedAt := time.Now()
@@ -79,7 +83,7 @@ func runShellProjectConjunction(ctx context.Context, directory string, env []str
 			attachShellValidationCheckFailures(&output, request)
 			if projectSelected && index < len(specs)-1 {
 				// 前三阶段的 PASS 不投影为当前 CWI 的 exact native proof。
-				output.ValidationObservation = &runtimecontract.RuntimeValidationObservation{RecipeID: request.ValidationRecipeID, ObservationProtocolRef: shellProjectConjunctionProtocolRef}
+				output.ValidationObservation = &runtimecontract.RuntimeValidationObservation{RecipeID: request.ValidationRecipeID, ObservationProtocolRef: protocol}
 			}
 		}
 		if index == len(specs)-1 {
@@ -116,10 +120,60 @@ func runShellProjectConjunction(ctx context.Context, directory string, env []str
 				output.Status = "timeout"
 			}
 			output.FailureCode = stages[len(stages)-1].FailureCode
+			if protocol == shellProjectFailureDiagnosticProtocolRef && (spec.ID == "project-test" || spec.ID == "project-race") {
+				diagnosticEnv := shellProcessBehaviorEnvironment(shellBehaviorEnvironment(env), processPath, behaviorArgs)
+				diagnosticStage, diagnostic := runShellProjectFailureDiagnostic(ctx, directory, diagnosticEnv, request, stage, specs[3], coveragePath, processPath)
+				if diagnosticStage.ID != "" {
+					stages = append(stages, diagnosticStage)
+				}
+				if diagnostic != nil {
+					// Original stage/raw/exit stay intact. Only a bounded independently
+					// reproduced diagnostic may supply implementation candidates.
+					output.ValidationObservation = diagnostic.ValidationObservation
+					output.workspaceBehaviorTargetRefs = diagnostic.workspaceBehaviorTargetRefs
+					diagnostic.FailureCode = ""
+					attachShellValidationFailureDiagnostic(diagnostic, request, "go", diagnosticStage.ExitCode, false, false, stageErr)
+					output.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
+					output.RuntimeDiagnostics.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
+				}
+			}
+			if protocol == shellProjectMultiFailureDiagnosticProtocolRef && (spec.ID == "project-test" || spec.ID == "project-race") {
+				diagnosticStages, diagnosticSpecs, diagnostic := runShellProjectMultiFailureDiagnostic(ctx, directory, env, request, stage, len(stages))
+				stages = append(stages, diagnosticStages...)
+				output.projectDiagnosticStageSpecs = diagnosticSpecs
+				if diagnostic != nil {
+					output.ValidationObservation = diagnostic.ValidationObservation
+					output.workspaceBehaviorTargetRefs = diagnostic.workspaceBehaviorTargetRefs
+					attachShellValidationFailureDiagnostic(diagnostic, request, "go", stage.ExitCode, false, false, stageErr)
+					output.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
+					output.RuntimeDiagnostics.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
+				}
+			}
 			break
 		}
 	}
-	fact := sealShellProjectConjunction(stages, specs, output.workspaceBehaviorTargetRefs)
+	behavior := output.workspaceBehaviorTargetRefs
+	if protocol == shellProjectMultiFailureDiagnosticProtocolRef {
+		// Partial attribution is still historical fact. A later unobserved source
+		// cannot erase earlier independently observed behavior, and that union
+		// never supplies repair authority unless every failed source completed.
+		var attributed []string
+		hasSources := false
+		for _, stage := range stages {
+			if stage.DiagnosticSourceRef != "" {
+				hasSources = true
+				attributed = append(attributed, stage.BehaviorTargetRefs...)
+			}
+		}
+		if hasSources {
+			behavior = canonicalShellBehaviorTargets(attributed)
+		}
+	}
+	fact := sealShellProjectConjunction(stages, specs, behavior)
+	if protocol != fact.ProtocolRef {
+		fact.ProtocolRef = protocol
+		fact.CommitmentHash = shellProjectConjunctionCommitmentHash(fact)
+	}
 	if executeErr == nil && !fact.Complete {
 		executeErr = fmt.Errorf("复合验证未完成：%s", fact.FailureCode)
 		output.Status, output.FailureCode = "failed", fact.FailureCode

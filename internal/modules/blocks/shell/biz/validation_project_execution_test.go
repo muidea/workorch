@@ -7,17 +7,26 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	modulecommon "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-func projectExecutionFixture(t *testing.T, failed bool) (RuntimeCommandRequest, runtimecontract.RuntimeOperationExecutionContext) {
+func projectExecutionFixture(t *testing.T, failed bool, adapters ...string) (RuntimeCommandRequest, runtimecontract.RuntimeOperationExecutionContext) {
 	t.Helper()
 	root, internal := t.TempDir(), t.TempDir()
 	recipe := isolatedInputRecipe()
+	if len(adapters) != 0 {
+		recipe.AdapterRef = adapters[0]
+		recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV2
+		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
+			recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+		}
+	}
 	requirement := shellValidationProofRequirementForTest(t, recipe.ID, "execution-cwi")
 	checks, ok := shellValidationCheckAttestations(recipe, requirement)
 	if !ok {
@@ -46,6 +55,99 @@ func projectExecutionFixture(t *testing.T, failed bool) (RuntimeCommandRequest, 
 	execution := runtimecontract.RuntimeOperationExecutionContext{WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: "dispatch", OperationID: "op", WorkspaceDeliverableDirectory: root, WorkspaceInternalDirectory: internal,
 		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: runtimecontract.StableRuntimeOperationExecutionKey(request.WorkspaceID, request.RunID, "dispatch", "op"), Fence: 1, OperationHash: "private-fixture-hash", AuthorityHash: "private-fixture-authority", ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce}}
 	return request, execution
+}
+
+func TestProjectDiagnosticPublicationFailureKeepsActualSourceHistory(t *testing.T) {
+	for _, scenario := range []string{"storage", "deadline"} {
+		t.Run(scenario, func(t *testing.T) {
+			request, execution := projectExecutionFixture(t, false, modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic)
+			recipe := isolatedInputRecipe()
+			recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
+			recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV3
+			request.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{recipe}
+			target := request.TargetRefs[0]
+			body, err := os.ReadFile(filepath.Join(request.WorkspaceDeliverableDirectory, target))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeNativeStructureSource(t, request.WorkspaceDeliverableDirectory, target, strings.Replace(string(body), `t.Fatal("wrong")`, `t.Fatal("WORKORCH_ASSERTION_V1 code=value_mismatch expected=4 actual=3")`, 1))
+			writeNativeStructureSource(t, request.WorkspaceDeliverableDirectory, "delivery/value.go", "package delivery\nfunc Value() int{return 3}\n")
+			requirement := shellValidationProofRequirementForTest(t, recipe.ID, "execution-cwi")
+			binding, err := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(requirement, recipe.ID, request.ValidationCheckAttestations...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			binding.InputReview, _ = shellVersionedInputReview(request.WorkspaceDeliverableDirectory, request.ValidationScopeTargetRefs, binding)
+			if binding.InputReview == nil {
+				t.Fatal("exact source input was not published")
+			}
+			request.validationProofBinding = binding
+			directory, err := prepareManagedValidationSandbox(&request, request.WorkspaceDeliverableDirectory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				output := shellBaseOutput(request, "go", request.Args, directory, "", "go")
+				attachManagedValidationResources(&output, request, 0, time.Now(), time.Now(), "released")
+			}()
+			ctx, cancel := context.WithTimeout(context.Background(), DefaultCommandTimeout)
+			defer cancel()
+			output, fact, known := runShellProjectConjunction(ctx, directory, managedValidationEnvironment(NewRuntimeAdapter().filteredEnv(), request.ValidationScratchDirectory), request)
+			if known == nil || output.ValidationFailureDiagnostic == nil || len(fact.Stages) != 3 || fact.Stages[2].DiagnosticSourceRef == "" {
+				t.Fatal("fixture did not produce real original failure and independent attribution", known)
+			}
+			conjunction, err := shellProjectConjunctionObservation(fact, output.projectStageSpecs, output.projectDiagnosticStageSpecs...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store, err := openShellProjectRawStore(request.WorkspaceInternalDirectory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			links := 0
+			link := store.linkFile
+			publication := errors.New("actual diagnostic stream publication failed")
+			store.linkFile = func(root *os.Root, old, new string) error {
+				links++
+				if links == 6 { // diagnostic stderr, after its real stdout was published
+					if scenario == "deadline" {
+						cancel()
+					}
+					return publication
+				}
+				return link(root, old, new)
+			}
+			result := shellProjectExecutionResult{Result: output, Conjunction: &conjunction, StartedAt: time.Now(), FinishedAt: time.Now()}
+			scope := shellProjectRawScope{WorkspaceID: request.WorkspaceID, RunID: request.RunID, ExecutionKey: execution.Execution.ExecutionKey}
+			if err := persistShellProjectStageRaw(ctx, store, scope, fact, &result); !errors.Is(err, publication) {
+				t.Fatal("real storage failure was hidden", err)
+			}
+			if err := finishShellProjectExecution(&result, known, nil, ctx.Err()); !errors.Is(err, known) {
+				t.Fatal("known project failure was replaced", err)
+			}
+			if result.Conjunction.Validate() != nil || result.Result.ValidationFailureDiagnostic != nil || result.Result.RuntimeDiagnostics.ValidationFailureDiagnostic != nil || result.Result.Evidence.Quality == common.EvidenceQualityValid || result.Conjunction.Complete {
+				t.Fatal("publication failure lost historical shape or granted authority")
+			}
+			stage := result.Conjunction.Stages[2]
+			if stage.DiagnosticSourceRef != fact.Stages[2].DiagnosticSourceRef || !reflect.DeepEqual(stage.BehaviorTargetRefs, fact.Stages[2].BehaviorTargetRefs) || stage.Stderr.Storage.OmittedReason == "" || stage.Stdout.Storage.Reference == "" {
+				t.Fatal("real source attribution or explicit publication omission was erased")
+			}
+			scope.StageID, scope.Stream = stage.Identity.ID, "stdout"
+			raw, err := store.Read(context.Background(), scope, stage.Stdout.Storage.Reference)
+			if err != nil || !reflect.DeepEqual(raw, fact.Stages[2].Stdout) {
+				t.Fatal("published source output no longer contains its complete original bytes", err)
+			}
+			observation := result.Result.Evidence.Validation
+			if err := runtimecontract.ValidateRuntimeValidationDiagnosticFailureObservation(observation, binding, request.ValidationScopeTargetRefs, nil); err != nil {
+				t.Fatal("rejected receipt cannot preserve actual diagnostic history", err)
+			}
+			failure := runtimecontract.RuntimeValidationFailureObservation{CandidateTargetRefs: result.Conjunction.BehaviorTargetRefs}
+			if runtimecontract.ValidateRuntimeValidationDiagnosticFailureObservation(observation, binding, request.ValidationScopeTargetRefs, &failure) == nil {
+				t.Fatal("missing original stream acquired repair authority")
+			}
+		})
+	}
 }
 
 // 真实执行封套与 fresh-store 读取，不代替公开 seal/receipt 或 fresh-process 验收。

@@ -31,6 +31,33 @@ func prepareProofBudgetBatch(t *testing.T, controller *RuntimeController, aggreg
 	if err != nil {
 		t.Fatal(err)
 	}
+	if RuntimeSemanticPrerequisitesPendingForAggregate(aggregate) {
+		before := aggregate.CloneRaw()
+		if _, err := controller.compileSemanticPlanBatch(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, batch); err == nil {
+			t.Fatal("proof batch crossed pending owner facts")
+		}
+		loaded, err := controller.Load(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
+		if err != nil || !reflect.DeepEqual(before, loaded) {
+			t.Fatalf("blocked batch changed authority/budget/session: %v", err)
+		}
+		// This is an isolated owner-fact fixture, not a real File producer.
+		// Commit the exact target debt before testing the independent budget.
+		for _, prerequisite := range aggregate.Facts.Prerequisites.Pending {
+			if prerequisite.Kind != runtimecontract.PrerequisiteKindTargetSnapshot {
+				t.Fatalf("unsupported budget fixture prerequisite: %+v", prerequisite)
+			}
+			snapshot := runtimecontract.TargetSnapshot{TargetRef: prerequisite.SubjectRef, Content: "semantic budget fixture", ContentHash: "budget-target/" + prerequisite.SubjectRef, ContentState: runtimecontract.SnapshotContentStateComplete}
+			observation := runtimecontract.RuntimePrerequisiteObservation{
+				PrerequisiteID: prerequisite.ID, Kind: prerequisite.Kind, OwnerModuleID: prerequisite.OwnerModuleID, ContentHash: snapshot.ContentHash,
+				Dependencies: []runtimecontract.RuntimeFreshnessDependency{{Domain: runtimecontract.RuntimeResourceWorkspaceTarget, OwnerModuleID: prerequisite.OwnerModuleID, SubjectRef: prerequisite.SubjectRef, Revision: snapshot.ContentHash}},
+			}
+			observation.ObservationID = runtimecontract.StableRuntimePrerequisiteObservationID(observation)
+			aggregate, err = controller.commitPrerequisite(context.Background(), aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, PrerequisiteResult{PrerequisiteID: prerequisite.ID, TargetSnapshot: &snapshot, Observation: &observation})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	return aggregate, batch
 }
 

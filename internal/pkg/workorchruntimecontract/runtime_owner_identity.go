@@ -57,6 +57,9 @@ type RuntimeEquivalentAuthorityInputIdentity struct {
 	CatalogRevisionHash       string
 	PrerequisiteFreshnessHash string
 	OwnerObservationHash      string
+	// Semantic dependency observations, excluding request/CAS identity. Repeated
+	// reads of the same source/result must not reset the no-progress guard.
+	ApplicabilityObservationHash string `json:",omitempty"`
 }
 
 func (v RuntimeEquivalentAuthorityInputIdentity) Normalized() RuntimeEquivalentAuthorityInputIdentity {
@@ -68,6 +71,7 @@ func (v RuntimeEquivalentAuthorityInputIdentity) Normalized() RuntimeEquivalentA
 	v.CatalogRevisionHash = strings.TrimSpace(v.CatalogRevisionHash)
 	v.PrerequisiteFreshnessHash = strings.TrimSpace(v.PrerequisiteFreshnessHash)
 	v.OwnerObservationHash = strings.TrimSpace(v.OwnerObservationHash)
+	v.ApplicabilityObservationHash = strings.TrimSpace(v.ApplicabilityObservationHash)
 	return v
 }
 
@@ -90,6 +94,10 @@ func StableRuntimeEquivalentAuthorityInputID(v RuntimeEquivalentAuthorityInputId
 	writeHashString(h, v.CatalogRevisionHash)
 	writeHashString(h, v.PrerequisiteFreshnessHash)
 	writeHashString(h, v.OwnerObservationHash)
+	if v.ApplicabilityObservationHash != "" {
+		writeHashString(h, "evidence-applicability/v1")
+		writeHashString(h, v.ApplicabilityObservationHash)
+	}
 	return "authority-input-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 

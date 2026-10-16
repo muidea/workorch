@@ -1,9 +1,9 @@
 package workorchruntimecontract
 
 import (
-	"hash"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -515,6 +515,12 @@ type RuntimeCandidate struct {
 	Validation  *ValidationCandidate
 	Assessment  *AssessmentCandidate
 	Governance  *GovernanceCandidate
+}
+
+// CloneRaw detaches the exact typed graph without canonicalizing, admitting or
+// repairing a candidate. Trust-boundary validation remains a separate gate.
+func (candidate RuntimeCandidate) CloneRaw() RuntimeCandidate {
+	return cloneRuntimeCandidateRaw(candidate)
 }
 
 // CanonicalRuntimeCandidate returns the value-only shape persisted at the SM-3

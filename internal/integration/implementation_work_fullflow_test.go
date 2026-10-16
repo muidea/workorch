@@ -25,6 +25,7 @@ import (
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	management "github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
@@ -40,7 +41,7 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 	ctx := context.Background()
 	storage, directory := t.TempDir(), t.TempDir()
 	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(storage)
-	provider := &implementationWorkFullflowProvider{authoring: emptyDirectoryProvider{repos: repos}, reviewedInputs: map[string]string{}}
+	provider := &implementationWorkFullflowProvider{authoring: emptyDirectoryProvider{repos: repos, mappingProposal: implementationWorkFullflowAuthoringMapping}, reviewedInputs: map[string]string{}}
 	proxy := httptest.NewServer(http.HandlerFunc(provider.serveHTTP))
 	t.Cleanup(proxy.Close)
 	baseURL, client := implementationWorkFullflowStart(t, ctx, storage, proxy.URL, repos)
@@ -118,7 +119,11 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 
 	var first *runmodel.Run
 	var initialBootstrap []byte
-	for deadline := time.Now().Add(3 * time.Minute); time.Now().Before(deadline); {
+	var lastRevision uint64
+	for deadline := time.Now().Add(10 * time.Minute); time.Now().Before(deadline); {
+		if observed := provider.snapshot(); len(observed.Failures) != 0 {
+			t.Fatalf("scripted provider 合同失败: %+v", observed)
+		}
 		runs, err := repos.Runs.List(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -128,6 +133,13 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 		}
 		if len(runs) == 1 {
 			first = runs[0]
+			if first.Revision != lastRevision {
+				lastRevision = first.Revision
+				t.Logf("Runtime revision=%d state=%s provider=%+v", first.Revision, first.State, provider.snapshot())
+			}
+			if first.State == common.RunStateBlockedOnDecision || first.State == common.RunStateBlockedOnApproval {
+				t.Fatalf("公开正例被正式治理阻塞，不能当已完成: state=%s ticket=%s approval=%s provider=%+v", first.State, first.BlockingTicketID, first.BlockingApprovalID, provider.snapshot())
+			}
 			if first.RuntimeBootstrap != nil && len(initialBootstrap) == 0 {
 				initialBootstrap, err = json.Marshal(first.RuntimeBootstrap)
 				if err != nil {
@@ -144,15 +156,33 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 				}
 			}
 			if first.State == common.RunStateFailed {
-				t.Fatalf("真实 Runtime 失败，不能当正例通过: state=%+v provider=%+v", first.RuntimeState, provider.snapshot())
+				implementationWorkFullflowSaveFailureSnapshot(t, first)
+				for _, row := range first.RuntimeState.Facts.Coverage {
+					t.Logf("failure CWI=%s state=%s convergence=%s prerequisites=%v binding=%+v", row.ID, row.State, row.CWIConvergenceState, row.PrerequisiteCoverageWorkItemIDs, row.CurrentBindingRef)
+				}
+				failures := []runtimecontract.RuntimeCandidateFailure{}
+				diagnostics := []runtimecontract.RuntimeCandidateFailureDiagnostic{}
+				for _, attempt := range first.RuntimeState.CandidateAttempts {
+					if attempt.Failure != nil {
+						failures = append(failures, *attempt.Failure)
+						if attempt.Failure.Diagnostic != nil {
+							diagnostics = append(diagnostics, *attempt.Failure.Diagnostic)
+						}
+					}
+				}
+				t.Fatalf("真实 Runtime 失败，不能当正例通过: candidateFailures=%+v candidateDiagnostics=%+v semantic=%+v sessions=%+v failure=%+v work=%+v provider=%+v", failures, diagnostics, first.RuntimeState.SemanticPlanning, first.RuntimeState.CandidateRequestSessions, first.RuntimeState.Facts.Failure, first.RuntimeState.ImplementationWork, provider.snapshot())
 			}
 			if first.State == common.RunStateCompleted && first.RuntimeState != nil && len(first.RuntimeState.DeliveryAcknowledgements) == 3 {
 				break
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 	if first == nil || first.RuntimeState == nil || first.State != common.RunStateCompleted {
+		if first != nil && first.RuntimeState != nil {
+			t.Logf("未完成原 aggregate invariant: %v", first.RuntimeState.Validate())
+			implementationWorkFullflowSaveFailureSnapshot(t, first)
+		}
 		t.Fatalf("完整公开 DriveRuntime 未完成: run=%+v provider=%+v", first, provider.snapshot())
 	}
 	if err := first.RuntimeState.Validate(); err != nil {
@@ -214,6 +244,97 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 			t.Fatalf("公共 authoring 请求不是 exact-once: %s=%d", kind, count)
 		}
 	}
+}
+
+// Explicit proposal for this test's original first user DoD, not a runtime
+// source selector. The public owner still independently reviews, confirms and
+// seals the complete Profile snapshot and all original DoD obligations.
+// Explicit synthetic-test diagnostics only. Keep the complete owner-backed
+// Run archive outside Git for independent diagnosis of timeout AND known
+// terminal failures; a diagnostic write failure never replaces the known FAIL.
+// This exports the Run and its opaque output references, not the temporary
+// Shell raw-output store. Raw-output files remain under that owner's test scope.
+func implementationWorkFullflowSaveFailureSnapshot(t *testing.T, run *runmodel.Run) {
+	t.Helper()
+	target := os.Getenv("WORKORCH_PUBLIC_WORK_TEST_FAILURE_SNAPSHOT")
+	if target == "" || run == nil {
+		return
+	}
+	if filepath.Dir(target) != os.TempDir() || !strings.HasPrefix(filepath.Base(target), "workorch-public-work-") {
+		t.Error("failure snapshot requires exact test temporary path; original failure remains failed")
+		return
+	}
+	body, err := json.Marshal(map[string]*runmodel.Run{string(run.ID): run})
+	if err != nil {
+		t.Errorf("complete failure snapshot not saved: %v", err)
+		return
+	}
+	if err := os.WriteFile(target, body, 0o600); err != nil {
+		t.Errorf("complete failure snapshot not saved: %v", err)
+	}
+}
+
+func implementationWorkFullflowAuthoringMapping(record *workspace.DefinitionAuthoringRecord) (workspace.DefinitionAuthoringMapping, error) {
+	m, err := productionMapping(record)
+	if err != nil {
+		return m, err
+	}
+	d := record.DerivationRequests[0]
+	b, err := definitionconfiguration.Compile(&workspace.Workspace{}, &d.Template)
+	if err != nil {
+		return m, err
+	}
+	workAvailable := false
+	for _, p := range b.ProfileContracts {
+		for _, r := range p.EvidenceRequirements {
+			workAvailable = workAvailable || (r.Scope == "dodItem" && r.ImplementationWorkPolicy != nil)
+		}
+	}
+	if !workAvailable {
+		return m, nil
+	} // Preserve the default fail-first policy gate.
+	consumer := "derived-dod:user:000001"
+	matches := 0
+	for _, item := range m.Obligations {
+		if item.CandidateItemRef == consumer {
+			matches++
+		}
+	}
+	if matches != 1 {
+		return m, fmt.Errorf("public work proposal lacks its exact original user acceptance source")
+	}
+	for _, p := range b.ProfileContracts {
+		if p.ID != "software-dev" {
+			continue
+		}
+		for _, source := range p.DeliverableExpectations {
+			if source.ID == "source_change" && source.Required {
+				m.EvidencePurposeMappings = append(m.EvidencePurposeMappings, workspace.GoalEvidencePurposeMapping{
+					ContractRef:       runtimecontract.RuntimeProfileDeliverableEvidencePurposeV2,
+					HistoricalItemRef: runtimecontract.RuntimeProfileDeliverablePurposeRef(p.ID, source.ID), AcceptanceItemRef: consumer,
+					HistoricalProfileID: p.ID, HistoricalDeliverableID: source.ID, HistoricalProfileHash: runtimecontract.StableRuntimeProfileContractsHash([]runtimecontract.RuntimeProfileContract{p}), HistoricalText: source.Description})
+			}
+		}
+	}
+	if len(m.EvidencePurposeMappings) != 1 {
+		return m, fmt.Errorf("public work proposal lacks unique Profile deliverable source")
+	}
+	// Only explicit test Profile declarations authorize these exact mappings.
+	// The default closed Profile has no such rules and is left unchanged.
+	for _, profile := range b.ProfileContracts {
+		for _, requirement := range profile.EvidenceRequirements {
+			for _, rule := range requirement.LineageAssertions {
+				if rule.ExecutionSourceContractRef == runtimecontract.RuntimeGoalSourceExecutionProofV2 && requirement.Scope == "goal" {
+					m.ExecutionProofMappings = append(m.ExecutionProofMappings, workspace.GoalExecutionProofMapping{ContractRef: rule.ExecutionSourceContractRef, ConsumerItemRef: workspace.DefinitionAuthoringGoalItemRef, RuleRef: rule.Ref, SourceItemRef: consumer, ConsumerGoalText: d.Input.GoalText})
+				} else if rule.ExecutionSourceContractRef == runtimecontract.RuntimeCrossSourceExecutionProofV1 && requirement.Scope == "dodItem" && requirement.ID == "dod-002" {
+					m.ExecutionProofMappings = append(m.ExecutionProofMappings, workspace.GoalExecutionProofMapping{ContractRef: rule.ExecutionSourceContractRef, ConsumerItemRef: "derived-dod:user:000002", RuleRef: rule.Ref, SourceItemRef: consumer})
+				} else if rule.ExecutionSourceContractRef != "" {
+					return m, fmt.Errorf("public fixture has no declared exact source mapping for %s/%s/%s", requirement.Scope, requirement.ID, rule.Ref)
+				}
+			}
+		}
+	}
+	return m, nil
 }
 
 // 负例保留真正不受支持的 selector，日后仅开放具体组合也不能一概 available。
@@ -396,16 +517,24 @@ type implementationWorkFullflowPreparation struct {
 	ContentContractRef string `json:"contentContractRef"`
 }
 type implementationWorkFullflowValidation struct {
-	Recipe  string   `json:"validationRecipeId"`
-	Recipes []string `json:"selectableValidationRecipeIds"`
-	Checks  []string `json:"requiredCheckRefs"`
-	Inputs  []struct {
-		Recipe            string                                             `json:"validationRecipeId"`
-		Hash              string                                             `json:"subjectHash"`
-		Protocol          string                                             `json:"protocolRef"`
-		ScopeContractRef  string                                             `json:"scopeContractRef"`
-		ScopeRequirements string                                             `json:"scopeRequirements"`
-		Files             []runtimecontract.RuntimeValidationInputReviewFile `json:"files"`
+	Recipe       string   `json:"validationRecipeId"`
+	Recipes      []string `json:"selectableValidationRecipeIds"`
+	Checks       []string `json:"requiredCheckRefs"`
+	SourceChecks []struct {
+		CheckRef    string `json:"checkRef"`
+		Criterion   string `json:"criterion"`
+		Declaration string `json:"declaration"`
+	} `json:"sourceObligationChecks"`
+	Inputs []struct {
+		Recipe                      string                                              `json:"validationRecipeId"`
+		Hash                        string                                              `json:"subjectHash"`
+		Protocol                    string                                              `json:"protocolRef"`
+		ScopeContractRef            string                                              `json:"scopeContractRef"`
+		ScopeRequirements           string                                              `json:"scopeRequirements"`
+		Files                       []runtimecontract.RuntimeValidationInputReviewFile  `json:"files"`
+		LineageAssertions           []runtimecontract.RuntimeLineageAssertion           `json:"lineageAssertions"`
+		DiagnosticSourceContractRef string                                              `json:"diagnosticSourceContractRef"`
+		DiagnosticSources           []runtimecontract.RuntimeValidationDiagnosticSource `json:"diagnosticSources"`
 	} `json:"inputReviews"`
 }
 type implementationWorkFullflowObligation struct {
@@ -531,11 +660,21 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 				target = map[string]any{"policy": repair.Policy, "ownerSelectorRefs": []string{repair.Selector}, "ownerScopeTargetRefs": []string{"internal/logic/logic.go"}}
 			case obligation.Acquisition != nil:
 				acquisition := obligation.Acquisition
-				if acquisition.Prospective == nil || len(acquisition.Prospective.Preparations) != 1 || acquisition.Prospective.Preparations[0].TargetRef == "" {
-					return nil, kind, fmt.Errorf("owner 必须发布唯一 exact input preparation，不能猜验证目标")
+				if acquisition.Prospective == nil || len(acquisition.Prospective.Preparations) == 0 {
+					return nil, kind, fmt.Errorf("owner 必须发布唯一 exact input preparation，不能猜验证目标: cwi=%s owner=%s kind=%s prospective=%+v", obligation.CoverageID, acquisition.Owner, acquisition.Kind, acquisition.Prospective)
 				}
 				proposal["ownerModuleId"], proposal["operationKind"] = acquisition.Owner, acquisition.Kind
 				prepared := acquisition.Prospective.Preparations[0]
+				if prepared.TargetRef == "" || prepared.NativeCheckRef == "" || prepared.ContentContractRef == "" {
+					return nil, kind, fmt.Errorf("owner preparation 缺 exact target/native/content identity: cwi=%s preparation=%+v", obligation.CoverageID, prepared)
+				}
+				seenNative := map[string]bool{prepared.NativeCheckRef: true}
+				for _, member := range acquisition.Prospective.Preparations[1:] {
+					if member.TargetRef != prepared.TargetRef || member.ContentContractRef != prepared.ContentContractRef || member.NativeCheckRef == "" || seenNative[member.NativeCheckRef] {
+						return nil, kind, fmt.Errorf("owner preparation 不是同一 exact target 的完整唯一检查集: cwi=%s preparations=%+v", obligation.CoverageID, acquisition.Prospective.Preparations)
+					}
+					seenNative[member.NativeCheckRef] = true
+				}
 				p.inputCriteria[prepared.TargetRef] = p.criteria[obligation.CoverageID]
 				target = map[string]any{"policy": acquisition.Policy, "ownerSelectorRefs": []string{acquisition.Selector}, "prospectiveConstraintRefs": acquisition.Constraints, "prospectiveTargetRefs": []string{prepared.TargetRef}}
 			case obligation.Validation != nil:
@@ -566,16 +705,30 @@ func (p *implementationWorkFullflowProvider) semantic(raw map[string]json.RawMes
 							return nil, kind, fmt.Errorf("input 原文/hash 错配")
 						}
 						refs = append(refs, file.TargetRef)
-						if before, exists := p.reviewedInputs[file.TargetRef]; exists && before != file.ContentHash {
+						protected := strings.HasSuffix(file.TargetRef, "_test.go") || strings.HasPrefix(file.TargetRef, "workorch_validation/") || file.TargetRef == "go.mod" || file.TargetRef == "go.sum" || file.TargetRef == "go.work" || file.TargetRef == "go.work.sum"
+						if before, exists := p.reviewedInputs[file.TargetRef]; protected && exists && before != file.ContentHash {
 							return nil, kind, fmt.Errorf("已发布验证输入发生变化 %s", file.TargetRef)
 						}
-						p.reviewedInputs[file.TargetRef] = file.ContentHash
+						if protected {
+							p.reviewedInputs[file.TargetRef] = file.ContentHash
+						}
 					}
-					conclusion, finding, reason := implementationWorkFullflowReviewInput(criterion, input.Files, input.ScopeRequirements)
+					if input.DiagnosticSourceContractRef != "" {
+						if input.DiagnosticSourceContractRef != runtimecontract.RuntimeValidationDiagnosticSourceReviewV1 || input.Protocol != runtimecontract.RuntimeValidationInputReviewProtocolV3 || len(input.DiagnosticSources) == 0 {
+							return nil, kind, fmt.Errorf("unsupported project diagnostic source review")
+						}
+						for _, source := range input.DiagnosticSources {
+							item, err := p.reviewProjectDiagnosticSource(source, input.DiagnosticSources, input.Files, refs)
+							if err != nil {
+								return nil, kind, err
+							}
+							review.DiagnosticSources = append(review.DiagnosticSources, item)
+						}
+					}
 					for _, check := range validation.Checks {
-						item := runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: conclusion, Reason: reason, InputTargetRefs: refs}
-						if input.Protocol == runtimecontract.RuntimeValidationInputReviewProtocolV2 {
-							item.Obligations = []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: criterion, Finding: finding, Reason: item.Reason, InputTargetRefs: refs}}
+						item, err := implementationWorkFullflowReviewCheck(validation, check, criterion, input.Protocol, input.Files, input.ScopeRequirements, refs, input.LineageAssertions)
+						if err != nil {
+							return nil, kind, err
 						}
 						review.Checks = append(review.Checks, item)
 					}
@@ -726,8 +879,27 @@ func (p *implementationWorkFullflowProvider) candidate(raw map[string]json.RawMe
 		if len(refs) == 0 {
 			refs = append([]string(nil), allowedTargets...)
 		}
+		// A required wire slot is already bound to one exact operation/target by
+		// SM-2. The broader operation contract inventory is only vocabulary; it
+		// must not be fanned out into duplicate uses of the same required ref.
+		if rule.Ref != "" {
+			matched := false
+			for _, required := range request.Decision.RequiredOutput.RequiredOperationSequence {
+				if required.RequirementID != rule.Ref {
+					continue
+				}
+				if required.Kind != rule.Kind || required.VariantID != rule.Variant {
+					return nil, kind, fmt.Errorf("required wire slot 与 SM-2 sequence 漂移: %s", rule.Ref)
+				}
+				refs, matched = []string{required.TargetRef}, true
+				break
+			}
+			if !matched {
+				return nil, kind, fmt.Errorf("required wire slot 无 SM-2 sequence: %s", rule.Ref)
+			}
+		}
 		refs = slices.DeleteFunc(refs, func(ref string) bool { return slices.Contains(target.ExcludedTargetRefs, ref) })
-		if len(refs) == 0 {
+		if len(refs) == 0 || (len(refs) == 1 && refs[0] == "" && slices.Contains(rule.Fields, "targetRefs")) {
 			return nil, kind, fmt.Errorf("owner 未给 candidate target inventory: %s", rule.Kind)
 		}
 		if rule.Kind == runtimecontract.StepKindFileEdit {
@@ -772,12 +944,17 @@ func (p *implementationWorkFullflowProvider) candidate(raw map[string]json.RawMe
 			case runtimecontract.StepKindFileWrite:
 				content, exists := implementationWorkFullflowProjectFiles()[ref]
 				if !exists {
+					nativeChecks := []string{}
 					for _, preparation := range request.Context.Preparations {
 						if preparation.TargetRef == ref && preparation.NativeCheckRef != "" {
-							content = implementationWorkFullflowInput(ref, preparation.NativeCheckRef, p.inputCriteria[ref])
-							exists = true
-							break
+							if !slices.Contains(nativeChecks, preparation.NativeCheckRef) {
+								nativeChecks = append(nativeChecks, preparation.NativeCheckRef)
+							}
 						}
+					}
+					if len(nativeChecks) != 0 {
+						content = implementationWorkFullflowInput(ref, nativeChecks, p.inputCriteria[ref])
+						exists = true
 					}
 				}
 				if !exists {
@@ -861,21 +1038,25 @@ func TestDeliveredValueConcurrent(t *testing.T) {
 }
 
 // 验证文件作为 provider content 提议交给真实 File owner；测试本身不预写输入。
-// 仅一个 top-level Test，调用实际生产实现并构建/执行最终 CLI。
-func implementationWorkFullflowInput(target, native, criterion string) string {
+// 每个 owner-native check 一个 top-level Test，调用实际生产实现并构建/执行最终 CLI。
+func implementationWorkFullflowInput(target string, nativeChecks []string, criterion string) string {
 	depth := strings.Count(target, "/")
 	root := strings.TrimSuffix(strings.Repeat("../", depth), "/")
 	if root == "" {
 		root = "."
 	}
+	entrypoints := strings.Builder{}
+	for _, native := range nativeChecks {
+		_, _ = fmt.Fprintf(&entrypoints, "func %s(t *testing.T) { verifyDelivery(t, %q) }\n", native, criterion)
+	}
 	return fmt.Sprintf(`package checks
 import ("testing"; "os"; "os/exec"; "path/filepath"; "strings"; "example.com/workorch-fullflow/internal/logic")
-func %s(t *testing.T) {
- criterion := %q
+%s
+func verifyDelivery(t *testing.T, criterion string) {
  root := %q
  if logic.DeliveredValue()!=4 { t.Fatal("WORKORCH_ASSERTION_V1 code=value_mismatch expected=equal observed=different") }
  // 执行真实工程的生产包，不使用常量或 native-check marker 代替。
- for _, args := range [][]string{{"build","-buildvcs=false","./..."},{"test","./internal/...","./cmd/..."},{"test","-race","./internal/...","./cmd/..."},{"vet","./internal/...","./cmd/..."}} {
+ for _, args := range [][]string{{"build","./..."},{"test","./internal/...","./cmd/..."},{"test","-race","./internal/...","./cmd/..."},{"vet","./internal/...","./cmd/..."}} {
   command:=exec.Command("go",args...); command.Dir=root
   if output,err:=command.CombinedOutput(); err!=nil { t.Fatalf("real project command %%v: %%v %%s",args,err,output) }
  }
@@ -884,15 +1065,124 @@ func %s(t *testing.T) {
   if !strings.Contains(string(documentation),required) { t.Fatalf("documentation lacks %%s for %%s",required,criterion) }
  }
  bin:=filepath.Join(t.TempDir(),"delivery")
- build:=exec.Command("go","build","-buildvcs=false","-o",bin,"./cmd/delivery"); build.Dir=root
+ build:=exec.Command("go","build","-o",bin,"./cmd/delivery"); build.Dir=root
  if output,err:=build.CombinedOutput(); err!=nil { t.Fatalf("build: %%v %%s",err,output) }
  output,err:=exec.Command(bin).Output(); if err!=nil || strings.TrimSpace(string(output))!="4" { t.Fatal("WORKORCH_ASSERTION_V1 code=value_mismatch expected=equal observed=different") }
 }
-`, native, criterion, root)
+`, entrypoints.String(), root)
 }
 
 // 独立review仅分析owner给出的exact input bytes/scope；不把目标文本包含某关键字
 // 当已满足，不读取Run repo，不把README自述当receipts或Git提交事实。
+func implementationWorkFullflowReviewCheck(validation *implementationWorkFullflowValidation, check, sharedCriterion, protocol string, files []runtimecontract.RuntimeValidationInputReviewFile, scope string, refs []string, assertionSets ...[]runtimecontract.RuntimeLineageAssertion) (runtimecontract.RuntimeValidationInputCheckReview, error) {
+	var assertions []runtimecontract.RuntimeLineageAssertion
+	if len(assertionSets) > 1 {
+		return runtimecontract.RuntimeValidationInputCheckReview{}, fmt.Errorf("multiple composition subjects")
+	}
+	if len(assertionSets) == 1 {
+		assertions = assertionSets[0]
+	}
+	if protocol != runtimecontract.RuntimeValidationInputReviewProtocolV3 && len(assertions) != 0 {
+		return runtimecontract.RuntimeValidationInputCheckReview{}, fmt.Errorf("legacy review cannot carry composition consumers")
+	}
+	criterion, declaration := sharedCriterion, ""
+	seen := map[string]bool{}
+	for _, source := range validation.SourceChecks {
+		if source.CheckRef == "" || strings.TrimSpace(source.Criterion) == "" || strings.TrimSpace(source.Declaration) == "" || seen[source.CheckRef] || !slices.Contains(validation.Checks, source.CheckRef) {
+			return runtimecontract.RuntimeValidationInputCheckReview{}, fmt.Errorf("source check 缺 exact criterion/declaration/required identity 或重复")
+		}
+		seen[source.CheckRef] = true
+		if source.CheckRef == check {
+			criterion, declaration = source.Criterion, source.Declaration
+		}
+	}
+	if !slices.Contains(validation.Checks, check) || strings.TrimSpace(criterion) == "" || (strings.HasPrefix(check, "workorch-obligation-check-") && !seen[check]) {
+		return runtimecontract.RuntimeValidationInputCheckReview{}, fmt.Errorf("source check 缺原判据，不能回退共同 CWI: %s", check)
+	}
+	reviewInput := func(text string) (string, string, string) {
+		if protocol == runtimecontract.RuntimeValidationInputReviewProtocolV3 {
+			return implementationWorkFullflowReviewComposition(text, files, scope, assertions)
+		}
+		return implementationWorkFullflowReviewInput(text, files, scope)
+	}
+	conclusion, finding, reason := reviewInput(criterion)
+	if declaration != "" {
+		declConclusion, declFinding, declReason := reviewInput(declaration)
+		if declConclusion != runtimecontract.RuntimeValidationInputConsistent {
+			conclusion, finding, reason = declConclusion, declFinding, declReason
+		}
+	}
+	item := runtimecontract.RuntimeValidationInputCheckReview{RequiredCheckRef: check, Conclusion: conclusion, Reason: reason, InputTargetRefs: refs}
+	if protocol == runtimecontract.RuntimeValidationInputReviewProtocolV2 {
+		item.Obligations = []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: criterion, Finding: finding, Reason: reason, InputTargetRefs: refs}}
+	} else if protocol == runtimecontract.RuntimeValidationInputReviewProtocolV3 {
+		consumers := []string{runtimecontract.RuntimeValidationInputConsumer}
+		for _, assertion := range assertions {
+			consumers = append(consumers, assertion.Rule.Ref)
+		}
+		slices.Sort(consumers)
+		item.Obligations = []runtimecontract.RuntimeValidationInputObligationReview{{CriterionText: criterion, Finding: finding, Reason: reason, InputTargetRefs: refs, ProofConsumerRefs: consumers}}
+	}
+	return item, nil
+}
+
+// This synthetic independent reviewer maps responsibilities, not execution
+// success. Every declared consumer is still checked by the production reducer
+// at its original cutoff or after real terminal material and ordered ACKs.
+func implementationWorkFullflowReviewComposition(criterion string, files []runtimecontract.RuntimeValidationInputReviewFile, scope string, assertions []runtimecontract.RuntimeLineageAssertion) (string, string, string) {
+	ordinary, finding, reason := implementationWorkFullflowReviewInput("工程行为", files, scope)
+	if ordinary != runtimecontract.RuntimeValidationInputConsistent {
+		return ordinary, finding, reason
+	}
+	if len(assertions) != 0 {
+		if err := runtimecontract.ValidateRuntimeLineageAssertions(assertions, assertions[0].CoverageWorkItemID, assertions[0].DeclarationRef); err != nil {
+			return runtimecontract.RuntimeValidationInputConflict, runtimecontract.RuntimeValidationInputMissing, "组合声明缺完整同CWI原来源身份。"
+		}
+	}
+	seen := map[string]bool{}
+	has := func(kind runtimecontract.RuntimeLineageAssertionKind) bool {
+		for _, assertion := range assertions {
+			if assertion.Rule.Kind == kind {
+				return true
+			}
+		}
+		return false
+	}
+	for _, assertion := range assertions {
+		if err := assertion.Rule.Validate(); err != nil || seen[assertion.Rule.Ref] || assertion.RuleHash != runtimecontract.StableRuntimeLineageAssertionRuleHash(assertion.Rule) || assertion.DeclarationRef == "" || assertion.CoverageWorkItemID == "" || len(assertion.SourceTextHash) != 64 {
+			return runtimecontract.RuntimeValidationInputConflict, runtimecontract.RuntimeValidationInputMissing, "组合声明来源无效或重复；不得借规则名称假定消费者存在。"
+		}
+		seen[assertion.Rule.Ref] = true
+		if assertion.Rule.Kind == runtimecontract.RuntimeLineageCompletedWorkRounds && assertion.Rule.MinCompletedRounds < 2 {
+			return runtimecontract.RuntimeValidationInputConflict, runtimecontract.RuntimeValidationInputMissing, "两轮义务不能由单轮声明覆盖。"
+		}
+	}
+	for _, obligation := range []struct {
+		terms []string
+		kind  runtimecontract.RuntimeLineageAssertionKind
+	}{
+		{[]string{"两轮"}, runtimecontract.RuntimeLineageCompletedWorkRounds},
+		{[]string{"修复"}, runtimecontract.RuntimeLineageRepairThenFreshValidation},
+		{[]string{"Git", "git/write", "版本控制"}, runtimecontract.RuntimeLineageTerminalOwnerSnapshot},
+		{[]string{"owner receipt", "capability-owner receipt"}, runtimecontract.RuntimeLineageTerminalOwnerReceipt},
+		{[]string{"evidenceRefs", "DoD 验收评估"}, runtimecontract.RuntimeLineageTerminalResultIndex},
+		{[]string{"全部交付确认"}, runtimecontract.RuntimeLineageDeliveryAcknowledgements},
+	} {
+		for _, term := range obligation.terms {
+			if strings.Contains(criterion, term) && !has(obligation.kind) {
+				return runtimecontract.RuntimeValidationInputInconclusive, runtimecontract.RuntimeValidationInputUnknown, "原义务缺相应版本化typed消费者；工程输入与README不能替代Runtime/Git/Result事实。"
+			}
+		}
+	}
+	if strings.Contains(criterion, "决策工单") || strings.Contains(criterion, "审批工单") {
+		return runtimecontract.RuntimeValidationInputInconclusive, runtimecontract.RuntimeValidationInputUnknown, "当前组合不提供Decision/Approval工单证明消费者。"
+	}
+	if (strings.Contains(criterion, "完整") || strings.Contains(criterion, "全")) && !strings.Contains(scope, "Shell 的根 module build/test/race 另外实际执行") && !strings.Contains(scope, "Root build/test/race and independently reviewed CWI behavior remain mandatory") {
+		return runtimecontract.RuntimeValidationInputInconclusive, runtimecontract.RuntimeValidationInputUnknown, "完整工程义务缺owner声明的实际项目级合取，不能从隔离包推定。"
+	}
+	return runtimecontract.RuntimeValidationInputConsistent, runtimecontract.RuntimeValidationInputCovered, "原全文义务由真实工程断言与subject中封存的typed消费者合取：输入直接调用生产实现并构建运行CLI；Shell声明根module build/test/race；工作/修复账本在原执行cutoff独立核验；Git历史receipt与最终snapshot、正式Result逐项索引及有序ACK在终态材料产生后核验。此评审仅封存职责，不声明未来事实存在，不授credit。"
+}
+
 func implementationWorkFullflowReviewInput(criterion string, files []runtimecontract.RuntimeValidationInputReviewFile, scope string) (string, string, string) {
 	input := ""
 	for _, file := range files {
@@ -900,7 +1190,7 @@ func implementationWorkFullflowReviewInput(criterion string, files []runtimecont
 			input += file.Content
 		}
 	}
-	checks := []string{"logic.DeliveredValue()!=4", `exec.Command("go",args...)`, `{"build","-buildvcs=false","./..."}`, `{"test","./internal/...","./cmd/..."}`, `{"test","-race","./internal/...","./cmd/..."}`, `{"vet","./internal/...","./cmd/..."}`, `os.ReadFile(filepath.Join(root,"README.md"))`, `exec.Command(bin).Output()`, `strings.TrimSpace(string(output))!="4"`}
+	checks := []string{"logic.DeliveredValue()!=4", `exec.Command("go",args...)`, `{"build","./..."}`, `{"test","./internal/...","./cmd/..."}`, `{"test","-race","./internal/...","./cmd/..."}`, `{"vet","./internal/...","./cmd/..."}`, `os.ReadFile(filepath.Join(root,"README.md"))`, `exec.Command(bin).Output()`, `strings.TrimSpace(string(output))!="4"`}
 	for _, expression := range checks {
 		if !strings.Contains(input, expression) {
 			return runtimecontract.RuntimeValidationInputConflict, runtimecontract.RuntimeValidationInputMissing, "owner原文缺少实际生产实现、构建/测试/并发/文档或最终CLI断言，不能报告完整覆盖。"

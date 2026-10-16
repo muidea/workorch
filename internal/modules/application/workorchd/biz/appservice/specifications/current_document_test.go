@@ -99,7 +99,13 @@ func checkCurrentShapeSchema(t *testing.T, shape documentShape, schema map[strin
 	if shape.kind == 'o' {
 		properties := schema["properties"].(map[string]any)
 		required := schema["required"].([]any)
-		if len(properties) != len(shape.fields) || len(required) != len(shape.fields) || schema["additionalProperties"] != false {
+		count := 0
+		for _, child := range shape.fields {
+			if !child.optional {
+				count++
+			}
+		}
+		if len(properties) != len(shape.fields) || len(required) != count || schema["additionalProperties"] != false {
 			t.Fatalf("%s shape/schema 字段数量漂移", path)
 		}
 		for name, child := range shape.fields {
@@ -111,7 +117,7 @@ func checkCurrentShapeSchema(t *testing.T, shape documentShape, schema map[strin
 			for _, value := range required {
 				found = found || value == name
 			}
-			if !found {
+			if found == child.optional {
 				t.Fatalf("%s.%s schema 未要求字段", path, name)
 			}
 			checkCurrentShapeSchema(t, child, property, path+"."+name)

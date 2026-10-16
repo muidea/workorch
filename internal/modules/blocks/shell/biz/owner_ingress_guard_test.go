@@ -53,6 +53,7 @@ func TestShellRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls(t *testin
 		{"prospective-satisfaction", shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction, owner.handleRuntimeOwnerFactProspectiveSatisfaction},
 		{"cwi-reconciliation", shellevents.TopicQueryRuntimeCWIReconciliation, owner.handleRuntimeCWIReconciliationQuery},
 		{"validation-raw-output", shellevents.TopicQueryRuntimeValidationRawOutput, owner.handleRuntimeValidationRawOutput},
+		{"validation-read-dependencies", shellevents.TopicQueryRuntimeValidationReadDependencies, owner.handleRuntimeValidationReadDependencies},
 		{"execute", shellevents.TopicExecuteOperation, owner.handleShellOperation},
 	}
 	for _, item := range topics {
@@ -88,6 +89,7 @@ func TestShellOwnerLifecycleCoversEveryRuntimeTopic(t *testing.T) {
 		shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction,
 		shellevents.TopicQueryRuntimeCWIReconciliation,
 		shellevents.TopicQueryRuntimeValidationRawOutput,
+		shellevents.TopicQueryRuntimeValidationReadDependencies,
 		shellevents.TopicExecuteOperation,
 	}
 	for _, topic := range topics {

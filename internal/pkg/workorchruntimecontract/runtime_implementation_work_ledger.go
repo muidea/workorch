@@ -1,9 +1,6 @@
 package workorchruntimecontract
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"slices"
@@ -177,15 +174,33 @@ func StableRuntimeImplementationWorkRoundHash(r RuntimeImplementationWorkRound) 
 }
 
 func implementationWorkRawHash(prefix string, value any) string {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return ""
-	}
-	digest := sha256.Sum256(data)
-	return prefix + hex.EncodeToString(digest[:])
+	return runtimeJSONValueHash(prefix, value)
 }
 
 func (r RuntimeImplementationWorkRound) Validate() error {
+	return r.validateInSemanticSession(nil)
+}
+
+func (r RuntimeImplementationWorkRound) validateInSemanticSession(session *runtimeSemanticValidationSession) error {
+	if session != nil {
+		for _, prior := range session.workRounds {
+			if reflect.DeepEqual(prior, r) {
+				return nil
+			}
+		}
+	}
+	if err := r.validateCompleteInSemanticSession(session); err != nil {
+		return err
+	}
+	if session != nil {
+		// Only a complete successful gate may contribute an exact detached raw
+		// preimage. Hash equality alone, normalization and failed gates cannot.
+		session.workRounds = append(session.workRounds, r.Clone())
+	}
+	return nil
+}
+
+func (r RuntimeImplementationWorkRound) validateCompleteInSemanticSession(session *runtimeSemanticValidationSession) error {
 	for _, ref := range []string{string(r.WorkspaceID), string(r.RunID), r.StartupInputHash, r.DefinitionSeedHash, string(r.CoverageWorkItemID), r.PolicyHash} {
 		if !implementationWorkExactRef(ref) {
 			return fmt.Errorf("implementation work round requires exact bounded startup/CWI identity")
@@ -221,7 +236,7 @@ func (r RuntimeImplementationWorkRound) Validate() error {
 		if r.ScopeObservation == nil {
 			return fmt.Errorf("implementation working binding has no scope observation")
 		}
-		if err := r.WorkingBinding.ValidateForRound(r); err != nil {
+		if err := r.WorkingBinding.validateForRoundInSemanticSession(r, session); err != nil {
 			return err
 		}
 	}
@@ -268,6 +283,10 @@ func (r RuntimeImplementationWorkRound) Validate() error {
 }
 
 func (b RuntimeImplementationWorkingBinding) ValidateForRound(r RuntimeImplementationWorkRound) error {
+	return b.validateForRoundInSemanticSession(r, nil)
+}
+
+func (b RuntimeImplementationWorkingBinding) validateForRoundInSemanticSession(r RuntimeImplementationWorkRound, session *runtimeSemanticValidationSession) error {
 	for _, ref := range []string{b.SemanticGenerationID, b.SemanticManifestHash, b.LogicalRequestID} {
 		if !implementationWorkExactRef(ref) {
 			return fmt.Errorf("implementation working binding requires exact semantic request identity")
@@ -281,10 +300,11 @@ func (b RuntimeImplementationWorkingBinding) ValidateForRound(r RuntimeImplement
 		return fmt.Errorf("implementation working binding cannot use unresolved/unsupported scope")
 	}
 	catalog := b.OwnerCatalog
-	if err := catalog.Validate(); err != nil {
+	validatedCatalog, err := validateWorkRoundCatalogInSession(catalog, session)
+	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(catalog, catalog.Normalized()) || catalog.OwnerModuleID != r.ScopeRequest.Policy.OwnerModuleID || catalog.ObservedRevision != selection.ObservedRevision {
+	if !reflect.DeepEqual(catalog, validatedCatalog) || catalog.OwnerModuleID != r.ScopeRequest.Policy.OwnerModuleID || catalog.ObservedRevision != selection.ObservedRevision {
 		return fmt.Errorf("implementation working binding requires exact current resource owner catalog")
 	}
 	if err := b.CatalogObservation.Validate(); err != nil {
@@ -299,7 +319,7 @@ func (b RuntimeImplementationWorkingBinding) ValidateForRound(r RuntimeImplement
 	if len(b.Proposals) == 0 || len(b.Proposals) > r.ScopeRequest.Policy.MaxTargetsPerRound || len(b.Proposals) != len(b.Feasibilities) {
 		return fmt.Errorf("implementation working binding requires bounded complete proposal/feasibility set")
 	}
-	if err := ValidateRuntimeOperationAdmissibilities(b.MutationInputCatalogs); err != nil {
+	if err := validateWorkRoundInputCatalogsInSession(b.MutationInputCatalogs, session); err != nil {
 		return err
 	}
 	for _, inputCatalog := range b.MutationInputCatalogs {
@@ -375,22 +395,20 @@ func (b RuntimeImplementationWorkingBinding) ValidateForRound(r RuntimeImplement
 }
 
 func (l RuntimeImplementationWorkLedger) ValidateForSources(s RuntimeImplementationWorkLedgerSources) error {
+	return l.validateForSourcesInSemanticSession(s, newRuntimeSemanticValidationSession())
+}
+
+func (l RuntimeImplementationWorkLedger) validateForSourcesInSemanticSession(s RuntimeImplementationWorkLedgerSources, session *runtimeSemanticValidationSession) error {
 	if !implementationWorkExactRef(s.StartupInputHash) || !implementationWorkExactRef(string(s.WorkspaceID)) || !implementationWorkExactRef(string(s.RunID)) || s.MaxRecords < 1 || len(l.Rounds) > s.MaxRecords {
 		return fmt.Errorf("implementation work ledger requires bounded exact startup sources")
 	}
-	if err := s.Seed.Validate(); err != nil {
-		return err
-	}
-	if err := ValidateRuntimeDefinitionFocuses(s.Seed, s.Focuses); err != nil {
-		return err
-	}
-	if err := ValidateRuntimeDefinitionImplementationWorkPolicies(s.Focuses, s.Profiles); err != nil {
+	if err := validateRuntimeWorkDefinitionSourcesInSession(s.Seed, s.Focuses, s.Profiles, session); err != nil {
 		return err
 	}
 	previous := map[common.CoverageWorkItemID]RuntimeImplementationWorkRound{}
 	requests, bindings, dispatches := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for index, r := range l.Rounds {
-		if err := r.Validate(); err != nil {
+		if err := r.validateInSemanticSession(session); err != nil {
 			return fmt.Errorf("implementation work round %d: %w", index, err)
 		}
 		if r.WorkspaceID != s.WorkspaceID || r.RunID != s.RunID || r.StartupInputHash != s.StartupInputHash || r.DefinitionSeedHash != s.Seed.Hash {
@@ -398,7 +416,7 @@ func (l RuntimeImplementationWorkLedger) ValidateForSources(s RuntimeImplementat
 		}
 		scopeSources := RuntimeImplementationWorkScopeSources{WorkspaceID: s.WorkspaceID, RunID: s.RunID, AuthoritySnapshotID: r.ScopeRequest.AuthoritySnapshotID,
 			Seed: s.Seed, Focuses: s.Focuses, Profiles: s.Profiles, CoverageWorkItemID: r.CoverageWorkItemID, ManifestBinding: r.ScopeRequest.ManifestBinding}
-		if err := r.ScopeRequest.ValidateForSources(scopeSources); err != nil {
+		if err := validateRuntimeWorkScopeInSession(r.ScopeRequest, scopeSources, session); err != nil {
 			return err
 		}
 		if r.WorkingBinding != nil {
@@ -419,7 +437,7 @@ func (l RuntimeImplementationWorkLedger) ValidateForSources(s RuntimeImplementat
 			for _, set := range s.ReceiptSets {
 				if set.DispatchID == r.DispatchID {
 					matches++
-					if _, err := ValidateRuntimeImplementationWorkReceiptSet(r, set.Members); err != nil {
+					if _, err := validateRuntimeImplementationWorkReceiptSetInSession(r, set.Members, session); err != nil {
 						return err
 					}
 				}
@@ -474,7 +492,11 @@ type RuntimeImplementationWorkReceiptMember struct {
 // these detached members against the original sealed dispatch and evidence
 // ledger in the SAME private aggregate transaction.
 func ValidateRuntimeImplementationWorkReceiptSet(r RuntimeImplementationWorkRound, members []RuntimeImplementationWorkReceiptMember) (string, error) {
-	if err := r.Validate(); err != nil {
+	return validateRuntimeImplementationWorkReceiptSetInSession(r, members, nil)
+}
+
+func validateRuntimeImplementationWorkReceiptSetInSession(r RuntimeImplementationWorkRound, members []RuntimeImplementationWorkReceiptMember, session *runtimeSemanticValidationSession) (string, error) {
+	if err := r.validateInSemanticSession(session); err != nil {
 		return "", err
 	}
 	if r.DispatchID == "" || r.WorkingBinding == nil || len(members) == 0 || len(members) > r.ScopeRequest.Policy.MaxTargetsPerRound {
@@ -559,6 +581,7 @@ func ValidateRuntimeImplementationWorkReceiptSet(r RuntimeImplementationWorkRoun
 			len(evidence.CoverageWorkItemIDs) != 0 || len(evidence.BindingRefs) != 0 || evidence.Validation != nil || !runtimeImplementationWorkEffectQualityAcceptable(evidence.Quality) || evidence.Quality != receipt.Evidence.Quality || evidence.ZeroWork ||
 			evidence.ContentHash != receipt.Evidence.ContentHash || !slices.Equal(evidence.EvidenceRefs, receipt.Evidence.EvidenceRefs) || evidence.EvidenceReason != receipt.Evidence.EvidenceReason ||
 			!reflect.DeepEqual(evidence.OwnerRevisionSet, receipt.Evidence.OwnerRevisionSet) ||
+			!reflect.DeepEqual(evidence.ApplicabilityDependencies, receipt.Evidence.ApplicabilityDependencies) ||
 			!reflect.DeepEqual(evidence.ContentAddress, receipt.Evidence.ContentAddress) || !reflect.DeepEqual(evidence.ExitCode, receipt.Evidence.ExitCode) ||
 			!slices.Equal(evidence.EvidenceTags, receipt.Evidence.EvidenceTags) || evidence.Summary != receipt.Evidence.Summary || evidence.FailureClass != "" || evidence.FailureCode != "" {
 			return "", fmt.Errorf("implementation work effect evidence cannot grant coverage/validation or drift from exact receipt")

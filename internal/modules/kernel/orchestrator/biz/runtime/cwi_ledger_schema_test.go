@@ -357,7 +357,7 @@ func TestCurrentRuntimeCWIOrderFromSemanticLineageDropsOnlySettledPredecessor(t 
 	}
 }
 
-func TestCurrentRuntimeCWIOrderFromSemanticLineageScopesValidationRepairGeneration(t *testing.T) {
+func TestCurrentRuntimeCWIOrderFromSemanticLineageScopesSingleCWIGenerations(t *testing.T) {
 	facts := runtimecontract.RuntimeFacts{
 		DefinitionSeed: runtimecontract.RuntimeDefinitionSeed{CoverageItems: []runtimecontract.RuntimeCoverageItem{
 			{ID: "cwi-001", Order: 1}, {ID: "cwi-002", Order: 2}, {ID: "cwi-003", Order: 3},
@@ -379,8 +379,19 @@ func TestCurrentRuntimeCWIOrderFromSemanticLineageScopesValidationRepairGenerati
 	if err != nil || len(order) != 1 || order[0] != "cwi-001" || len(changed) != 0 {
 		t.Fatalf("repair generation closure = order=%v changed=%v err=%v", order, changed, err)
 	}
+	workManifest := runtimecontract.RuntimeSemanticPlanManifest{
+		Hash:          "manifest-work-cwi-001",
+		CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-001"}},
+		ProofObligations: []runtimecontract.RuntimeSemanticProofObligation{{
+			CoverageWorkItemID: "cwi-001", ImplementationWork: &runtimecontract.RuntimeSemanticImplementationWork{},
+		}},
+	}
+	order, changed, err = currentRuntimeCWIOrderFromSemanticLineage(facts, workManifest, []common.CoverageWorkItemID{"cwi-001"})
+	if err != nil || len(order) != 1 || order[0] != "cwi-001" || len(changed) != 0 {
+		t.Fatalf("implementation-work generation closure = order=%v changed=%v err=%v", order, changed, err)
+	}
 
-	// The same single-CWI manifest shape without a repair obligation is a
+	// The same single-CWI manifest shape without a scoped obligation is a
 	// normal Definition generation. It must see concurrently eligible rows as
 	// a real closure change instead of silently narrowing global authority.
 	normalManifest := runtimecontract.RuntimeSemanticPlanManifest{Hash: "manifest-normal-cwi-001", CoverageItems: []runtimecontract.RuntimeCoverageItem{{ID: "cwi-001"}}}

@@ -63,6 +63,13 @@ SM-2 assessment 和 archive 必须重编同一来源并使用原 dispatch 的 ev
 只消费既有正式账本及其反向证明，future facts 不补旧 credit，ordinary proof 不可跳过。delivery 声明在执行期延期，
 由 SM-4 只读投影消费 immutable material seal 与 exact ordered 三 owner ack，不回写 coverage 或终态。
 
+显式 `runtime/cross-cwi-evidence-purpose/v1` 的行为／当前验收遵守
+[Evidence Proof Purpose](evidence-proof-purpose.md)：原完整 effect evidence CAS 只保存不可变行为完成事实，前驱
+保持 `bound/open` 并只解锁原唯一验收 consumer；其它本已 eligible 的 CWI 不借终验 credit 继续。原普通 assessment
+CAS 独立反查两端完整 lineage 和全部原检查，才可追加不可变 acceptance proof 并授予前驱 terminal credit。
+consumer stale/reopen 在同 CAS 撤销该 credit，保留行为及 proof history，只重开普通验收，不重复历史 effect。
+SM-3 不选择用途或结算，SM-4 不能从旧 assessment／projection 恢复 credit，SM-1 无新增生命周期。
+
 ```text
 load facts
   -> prerequisite missing: acquire + typed commit + reduce
@@ -124,6 +131,20 @@ load facts
   attestation。SM-2 只能从 sealed dispatch 的 `BindingRef`、owner receipt 与 persisted binding
   逐字段匹配后派生 CWI coverage；candidate 的 raw `coverageWorkItemIds`、assessment claim、非空 `PassedChecks`、
   exit code 0、历史 summary、memory、projection 和前一 focus evidence 都不能关闭当前 coverage。
+- versioned applicability 的只读重采样债务投影为既有 `need_prerequisite`，使用 decision-only
+  `evidence_applicability/v1` prerequisite identity，绑定原 evidence/hash、evidence revision 和 reconciliation generation。
+  它不进入普通 `Pending/Satisfied` acquisition ledger，不是新状态机、执行授权、proof gap 或新预算。
+  current/remaining/completed focus 的仍适用原来源都必须完成本轮采样；不能因最后 CWI 先被采样而提前终态。
+  SM-4 仅续驱原 capability-owner concrete query，SM-2 的 `EvidenceApplicabilityObserved` 单 CAS 留存观察、
+  stale/reopen 和普通 focus advance；matching 观察不得把 focus-level complete 当作 whole-Run complete。
+  缺采样不创建 state-change/target-grounding failure 或重复 validation。新 candidate/provider 入口在债务解除前拒绝，
+  已 submitted 调用仍先完成原 settlement，历史 authority 的未结算责任也不能因 focus/transaction 变化而被忽略。
+  SM-4 恢复若加载到唯一 current-authority 的 submitted session、但没有 durable complete document/outcome，必须先
+  使用原 `ProviderRequestTerminalCoordinated` 单 CAS 结算 unknown 和 SM-2 failure，再处理新 reconciliation batch、
+  applicability query 或新 semantic/candidate。已封存新 request generation不改变这一顺序；complete document不进入
+  unknown lane。非唯一／非 matching authority保持 fail-closed，不把历史 session 重绑定到 current decision。
+  exact generation 由 aggregate reducer、SM-3 seal 和成功终态 material boundary独立核验；无 assessment 或
+  verification policy 的 CWI 也不得省略。历史 receipt/effect/预算与原依赖两集合不可改写。
 - recipe-wide readiness 不得代表所有 CWI ready。同一 capability surface 可以对 ready CWI 持 binding、对 missing CWI 持
   preparation；两者必须按 requirement hash 分离，且所有 binding/preparation 的 native identity 跨 CWI 唯一。
   preparation 只可通过 Profile 显式声明的 acquisition→owner reobserve closure 推进，不能由 Application、provider、
@@ -300,6 +321,22 @@ Profile 指定的 repair-owner confirmation 与 SM-2 private event 封存真实 
 `TargetRefs` 为空时没有 finite diagnostic scope；无论 operation 是否因 `RequireTargets`/owner feasibility 而可执行，
 Shell 都必须保持零 scope-bound structured observation。失败只可进入已封存的 Profile semantic fallback，任何组件都不得用
 current manifest 临时补全 scope；没有 matching sealed fallback 时按 typed contract fail closed。
+- versioned evidence 的 `ApplicabilityDependencies` 是待检验的实际 owner 快照，不是 currentness certificate。
+  SM-4 只能从原 aggregate 编译 exact request，调用 concrete owner query；SM-2 private
+  `EvidenceApplicabilityObserved` 在原 state/evidence/reconciliation fence 下反证原 fact/receipt/body，并单 CAS
+  追加观察与精确 stale/reopen。读取失败不生成 missing，不改历史 receipt/effect/预算。
+  query/CAS fence 与相同结果重查不改变 equivalent-authority semantic identity；不同结果和曾出现 stale 的事实保留。
+  新 evidence revision 或 Resume/reconciliation generation 需要重采样。未有 matching 真实观察的 versioned
+  evidence 不能授 current credit、满足 assessment 或消费 fresh-validation continuation；nil 历史协议不自动升级。
+  assessment seal 保留当时观察的原 append-only prefix，未来同 EvidenceRevision 的观察不能倒灌旧评审。
+  新 assessment 的 attempt-begin 与 final seal 均须先完成当前 generation 的观察；coordinator 从独立持久前像
+  反证完整观察 prefix 和 reconciliation request hash，不能由 caller 同时重封存两侧绕过。
+  观察的 semantic identity 改变时，同一次 CAS 退休该 transaction 的未封存 candidate 和尚未 bound 的
+  prepared/document-complete request，并绑定 exact 原观察 request；bound 完整 document 保持不可变审计。
+  这不是 candidate correction，不授权 attempt 1，也不退款。submitted 未结算 provider responsibility 必须先经原
+  document/unknown settlement lane 收口，观察不得清除其 allocation；退休后的延迟 proposal/seal 零写拒绝。
+  SM-4 成功材料只消费 exact evidence revision/reconciliation generation 的已裁决集合；缺失观察不得静默省略
+  current proof 并交付成功。失败/administrative 材料仍完整保留历史，不因成功证明义务缺失阻止交付。
 - assessment evidence gate 只验证 current-run/focus、binding-matched owner receipt、effect、quality 与封存的
   focus evidence policy；它不得把 assessment observation、claim signal 或 `PassedChecks` 非空解释为 CWI credit，
   也不得改写 observation 的 disposition、items、gap 或 refs。profile 的 observable validation recipe 只能约束候选
@@ -712,6 +749,14 @@ sealed authority + preflight ready
   normalize 掩盖错误。fresh-load、回执准入及完成谓词共用不递归 aggregate 校验的 seal validator；0/1/2 ack 均未完成。
   后续 recovery/lease/ack revision 可以推进，但不重编旧材料。owner seal 与独立 CAS 证明生产来源和不可变性，
   同档 body/hash 不构成任意整档协同篡改的外部证明。projection health 不参与 reducer，也不是 runtime blocker。
+- opt-in [Terminal Material Proof](terminal-material-proof.md) 在同一 material-seal transaction 检查 completed
+  材料的原 source-bound receipt 与正式 Result 逐项索引；fresh-load 重验原前像。评审只映射义务，实际满足还需原 seal 和
+  三 owner 有序 ACK。failed/cancelled/superseded 的成功材料义务为 `unsatisfied`，交付完成不得冒验收满足，也不得无限重驱。
+  不新增 SM-1～SM-4 transition、authority、budget 或 terminal rewrite。
+  V2 snapshot rule 允许首次 CAS 携带有界 owner-neutral observation；不允许 caller Result body。SM-4 先读取真实 owner，
+  SM-4 private reducer 再独立反证原 receipt/source/current binding、previous revision、全部 original validation bytes 与
+  reviewed input membership，并将原 observation 封存进材料。draining 仅保留这一 exact terminal lane；seal 后恢复不重读
+  owner、不改原材料，仍等待三真实 ACK。观察是有界时点，不冒全 owner 持续当前性。
 - Result feedback 只允许当前封存版本；缺失、旧版及未知版在 Run record/aggregate/initialize/material 入口拒绝，不由
   recovery 升级或补写。SM-4 同版本重启从原 material seal 重投完全相同的 Result material/hash，仍按既有 delivery ledger
   等待三 owner ack；此版本门禁不改变 SM-2 验收裁决或 SM-1 生命周期 owner。

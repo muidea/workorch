@@ -2,6 +2,7 @@ package workorchruntimecontract
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -79,7 +80,9 @@ type RuntimeCoverageItem struct {
 	TargetText  string
 	Order       int
 	// SourceObligationChecks 保留共享工作上的独立来源判据，不授予 credit。
-	SourceObligationChecks []RuntimeSourceObligationCheck `json:",omitempty"`
+	SourceObligationChecks  []RuntimeSourceObligationCheck     `json:",omitempty"`
+	GoalExecutionAssertions []RuntimeLineageAssertion          `json:",omitempty"`
+	HistoricalAcceptance    *RuntimeHistoricalAcceptanceSource `json:",omitempty"`
 	// PrerequisiteCoverageWorkItemIDs constrain semantic-plan admission only;
 	// they never reopen an already satisfied CWI.
 	PrerequisiteCoverageWorkItemIDs []common.CoverageWorkItemID
@@ -118,9 +121,11 @@ type RuntimeCoverageItemFact struct {
 	BindingLineage      []RuntimeCWIBindingRef
 	// BindingRetirementLineage records the only legal pre-effect removal of a
 	// current binding. It is append-only SM-2 audit, not a second binding owner.
-	BindingRetirementLineage []RuntimeCWIBindingRetirementLineage
-	FocusID                  string
-	ReopenLineage            []RuntimeCWIReopenLineage
+	BindingRetirementLineage   []RuntimeCWIBindingRetirementLineage
+	FocusID                    string
+	ReopenLineage              []RuntimeCWIReopenLineage
+	HistoricalBehavior         *RuntimeHistoricalBehaviorCompletion `json:",omitempty"`
+	HistoricalAcceptanceProofs []RuntimeHistoricalAcceptanceProof   `json:",omitempty"`
 }
 
 // InitialRuntimeCoverageFacts materializes the item closure ledger from the
@@ -264,12 +269,14 @@ func (s RuntimeAcceptanceSlice) Normalized() RuntimeAcceptanceSlice {
 }
 
 func (c RuntimeCoverageItem) Normalized() RuntimeCoverageItem {
+	c.HistoricalAcceptance = cloneRuntimeHistoricalAcceptanceSource(c.HistoricalAcceptance)
 	c.ID = common.CoverageWorkItemID(strings.TrimSpace(string(c.ID)))
 	c.SliceID = strings.TrimSpace(c.SliceID)
 	c.SourceScope = strings.TrimSpace(c.SourceScope)
 	c.SourceID = strings.TrimSpace(c.SourceID)
 	c.TargetText = strings.TrimSpace(c.TargetText)
 	c.SourceObligationChecks = CloneRuntimeSourceObligationChecks(c.SourceObligationChecks)
+	c.GoalExecutionAssertions = slices.Clone(c.GoalExecutionAssertions)
 	c.PrerequisiteCoverageWorkItemIDs = normalizeRuntimeCoveragePrerequisiteIDs(c.PrerequisiteCoverageWorkItemIDs)
 	c.ReopenDependencies = normalizeRuntimeCoverageReopenDependencies(c.ReopenDependencies)
 	return c

@@ -188,6 +188,9 @@ func repairDirectiveEvidenceSatisfied(facts runtimecontract.RuntimeFacts, direct
 	accepted := map[string]struct{}{}
 	baseline := strings.TrimSpace(directive.SupersedesEvidenceRevision)
 	for _, evidence := range facts.Evidence.Accepted {
+		if !runtimecontract.RuntimeEvidenceHasProofApplicabilityAtRevision(evidence, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision) {
+			continue
+		}
 		if len(evidence.CoverageWorkItemIDs) == 0 {
 			continue
 		} else if len(directive.CoverageWorkItemIDs) != 0 {

@@ -8,6 +8,7 @@ import (
 // RuntimeInternalAuthorityPayload contains only SM-2 authority/focus facts.
 // It cannot carry an executor, request transport state or delivery ledger.
 type RuntimeInternalAuthorityPayload struct {
+	EvidenceApplicability              *runtimecontract.RuntimeEvidenceApplicabilityObservation
 	ReconciliationBatch                *runtimecontract.RuntimeCWIReconciliationBatch
 	ImplementationWorkScopeRequest     *runtimecontract.RuntimeImplementationWorkScopeRequest
 	ImplementationWorkScopeObservation *runtimecontract.RuntimeImplementationWorkScopeObservation
@@ -44,6 +45,7 @@ type RuntimeInternalAuthorityPayload struct {
 // SM-2 facts are observations used by authority/focus convergence. They never
 // execute operations or project another owner's state.
 const (
+	RuntimeInternalEventEvidenceApplicabilityObserved   RuntimeInternalEventKind = "evidence_applicability_observed"
 	RuntimeInternalEventImplementationWorkScopeRequired RuntimeInternalEventKind = "implementation_work_scope_required"
 	RuntimeInternalEventImplementationWorkScopeObserved RuntimeInternalEventKind = "implementation_work_scope_observed"
 	RuntimeInternalEventReconcileAuthority              RuntimeInternalEventKind = "reconcile_authority"

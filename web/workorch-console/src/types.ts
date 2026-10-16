@@ -106,6 +106,8 @@ export type DefinitionAuthoringView = {
     derivationPermitId: string;
     reviews?: { kind: string; status: string; reason?: string; specificationHash: string; evidenceRefs?: string[]; requirementIds?: string[] }[];
     verifications?: { id: string; obligationId: string; declaration: string; status: string; profileId?: string }[];
+    executionProofMappings?: { contractRef: string; consumerItemRef: string; ruleRef: string; sourceItemRef: string; consumerGoalText?: string }[];
+    evidencePurposeMappings?: { contractRef: string; historicalItemRef: string; acceptanceItemRef: string; historicalProfileId?: string; historicalDeliverableId?: string; historicalProfileHash?: string; historicalText?: string }[];
   };
   confirmationRecovery?: {
     inputHash: string;
@@ -1456,6 +1458,7 @@ export type RuntimeValidationInputReviewFeedback = {
       inputTargetRefs: string[];
       obligations?: Array<{
         criterionText: string;
+        proofConsumerRefs?: string[];
         finding: 'covered' | 'missing' | 'conflicting' | 'unknown';
         reason: string;
         inputTargetRefs: string[];
@@ -1706,6 +1709,17 @@ export type RuntimeAuditOperationReceipt = {
   failureDetailProtocolRef?: string;
   failureDetailsTruncated?: boolean;
   outputTruncated?: boolean;
+  validationOutputs?: {
+    stageId: string;
+    stream: string;
+    bytes: number;
+    sha256: string;
+    savedBytes: number;
+    complete: boolean;
+    omittedReason?: string;
+    storageOmittedReason?: string;
+    ref?: string;
+  }[];
 };
 
 export type RuntimeAuditRepair = {

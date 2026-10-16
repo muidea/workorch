@@ -1,7 +1,6 @@
 package workorchruntimecontract
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"reflect"
@@ -15,17 +14,27 @@ const RuntimeSourceObligationInventorySchemaCurrent = "workorch.runtime_source_o
 // RuntimeSourceObligationInventory 是 exact Workspace candidate 的不可变来源投影。
 // 它没有 target、recipe、binding 或闭包状态；存在映射不代表已经取得证明。
 type RuntimeSourceObligationInventory struct {
-	SchemaVersion      string
-	Hash               string
-	CandidateHash      string
-	SpecificationHash  string
-	DefinitionRevision string
-	StartupInputHash   string
-	Sources            []RuntimeDefinitionSource
-	Resources          []RuntimeSourceResource
-	Requirements       []RuntimeSourceRequirement
-	Obligations        []RuntimeSourceObligation
-	Verifications      []RuntimeSourceVerification
+	SchemaVersion           string
+	Hash                    string
+	CandidateHash           string
+	SpecificationHash       string
+	DefinitionRevision      string
+	StartupInputHash        string
+	Sources                 []RuntimeDefinitionSource
+	Resources               []RuntimeSourceResource
+	Requirements            []RuntimeSourceRequirement
+	Obligations             []RuntimeSourceObligation
+	Verifications           []RuntimeSourceVerification
+	ExecutionProofMappings  []RuntimeExecutionProofMapping  `json:",omitempty"`
+	EvidencePurposeMappings []RuntimeEvidencePurposeMapping `json:",omitempty"`
+}
+
+type RuntimeExecutionProofMapping struct {
+	ContractRef      string
+	ConsumerItemRef  string
+	RuleRef          string
+	SourceItemRef    string
+	ConsumerGoalText string `json:",omitempty"`
 }
 
 type RuntimeDefinitionSource struct {
@@ -72,6 +81,8 @@ type RuntimeSourceVerification struct {
 
 // Clone 不执行正文规范化，也不让调用方与来源数组共享底层存储。
 func (i RuntimeSourceObligationInventory) Clone() RuntimeSourceObligationInventory {
+	i.EvidencePurposeMappings = slices.Clone(i.EvidencePurposeMappings)
+	i.ExecutionProofMappings = slices.Clone(i.ExecutionProofMappings)
 	i.Sources = slices.Clone(i.Sources)
 	i.Resources = slices.Clone(i.Resources)
 	i.Requirements = slices.Clone(i.Requirements)
@@ -102,12 +113,22 @@ func (i RuntimeSourceObligationInventory) WithHash() RuntimeSourceObligationInve
 		sort.Strings(i.Obligations[n].DoDItemRefs)
 	}
 	sort.Slice(i.Verifications, func(a, b int) bool { return i.Verifications[a].ID < i.Verifications[b].ID })
+	sort.Slice(i.ExecutionProofMappings, func(a, b int) bool {
+		left, right := i.ExecutionProofMappings[a], i.ExecutionProofMappings[b]
+		if left.ConsumerItemRef != right.ConsumerItemRef {
+			return left.ConsumerItemRef < right.ConsumerItemRef
+		}
+		return left.RuleRef < right.RuleRef
+	})
+	sort.Slice(i.EvidencePurposeMappings, func(a, b int) bool {
+		return i.EvidencePurposeMappings[a].HistoricalItemRef < i.EvidencePurposeMappings[b].HistoricalItemRef
+	})
 	i.Hash = StableRuntimeSourceObligationInventoryHash(i)
 	return i
 }
 
 func StableRuntimeSourceObligationInventoryHash(i RuntimeSourceObligationInventory) string {
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, i.SchemaVersion)
 	writeHashString(h, i.CandidateHash)
 	writeHashString(h, i.SpecificationHash)
@@ -155,6 +176,36 @@ func StableRuntimeSourceObligationInventoryHash(i RuntimeSourceObligationInvento
 		writeHashString(h, verification.EvidenceRequirementID)
 		writeHashString(h, verification.Scope)
 	}
+	if len(i.ExecutionProofMappings) != 0 {
+		writeHashString(h, RuntimeCrossSourceExecutionProofV1)
+		writeHashString(h, fmt.Sprint(len(i.ExecutionProofMappings)))
+		for _, mapping := range i.ExecutionProofMappings {
+			writeHashString(h, mapping.ContractRef)
+			writeHashString(h, mapping.ConsumerItemRef)
+			writeHashString(h, mapping.RuleRef)
+			writeHashString(h, mapping.SourceItemRef)
+			if mapping.ConsumerGoalText != "" {
+				writeHashString(h, RuntimeGoalSourceExecutionProofV2)
+				writeHashString(h, mapping.ConsumerGoalText)
+			}
+		}
+	}
+	if len(i.EvidencePurposeMappings) != 0 {
+		writeHashString(h, RuntimeCrossCWIEvidencePurposeV1)
+		writeHashString(h, fmt.Sprint(len(i.EvidencePurposeMappings)))
+		for _, mapping := range i.EvidencePurposeMappings {
+			writeHashString(h, mapping.ContractRef)
+			writeHashString(h, mapping.HistoricalItemRef)
+			writeHashString(h, mapping.AcceptanceItemRef)
+			if runtimeEvidencePurposeHasProfileFields(mapping) {
+				writeHashString(h, "profile-deliverable-source/v2")
+				writeHashString(h, mapping.HistoricalProfileID)
+				writeHashString(h, mapping.HistoricalDeliverableID)
+				writeHashString(h, mapping.HistoricalProfileHash)
+				writeHashString(h, mapping.HistoricalText)
+			}
+		}
+	}
 	return "runtime-source-obligation-inventory-sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
@@ -198,7 +249,28 @@ func (i RuntimeSourceObligationInventory) Validate() error {
 	if goalCount != 1 {
 		return fmt.Errorf("runtime source obligation inventory requires exactly one Goal source")
 	}
+	if len(i.ExecutionProofMappings) > 512 {
+		return fmt.Errorf("runtime execution proof mappings exceed bound")
+	}
+	proofKeys := map[string]bool{}
+	goalProofSources := map[string]string{}
+	for _, mapping := range i.ExecutionProofMappings {
+		key := mapping.ConsumerItemRef + "\x00" + mapping.RuleRef
+		if validateRuntimeExecutionProofMappingSource(mapping, sources[mapping.ConsumerItemRef], sources[mapping.SourceItemRef]) != nil || proofKeys[key] {
+			return fmt.Errorf("runtime execution proof mapping requires unique exact original consumer/rule/DoD source")
+		}
+		proofKeys[key] = true
+		if mapping.ContractRef == RuntimeGoalSourceExecutionProofV2 {
+			if prior := goalProofSources[mapping.ConsumerItemRef]; prior != "" && prior != mapping.SourceItemRef {
+				return fmt.Errorf("Goal mappings have ambiguous execution sources")
+			}
+			goalProofSources[mapping.ConsumerItemRef] = mapping.SourceItemRef
+		}
+	}
 	resources := make(map[string]bool, len(i.Resources))
+	if err := validateRuntimeEvidencePurposeMappingSources(i); err != nil {
+		return err
+	}
 	for _, resource := range i.Resources {
 		if !claimIdentity(resource.ID, 128) || !runtimeSourceIdentity(resource.Ref, 1024) || resources[resource.ID] ||
 			len(resource.SnapshotHash) > 256 || (resource.Required && (!resource.Available || resource.SnapshotHash == "")) {

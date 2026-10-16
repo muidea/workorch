@@ -21,6 +21,7 @@ import (
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
 	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -823,9 +824,67 @@ func testObservedShellRepair(t *testing.T, validationEntry string, failsAgain, s
 	if !acceptedValidation {
 		t.Fatalf("fresh real validation did not prove the original CWI: state=%s failure=%+v", validated.Decision.State, validated.Facts.Failure)
 	}
+	if validated.Facts.RepairDirective == nil {
+		t.Fatal("unobserved fresh-validation receipt prematurely consumed repair continuation")
+	}
+	validated = testObserveActualShellCopiedInputs(t, ctx, hub, controller, validated, workspaceDirectory)
+	if validated.Facts.RepairDirective != nil {
+		t.Fatal("matching actual current observation did not consume fresh-validation continuation")
+	}
 	if err := validated.Validate(); err != nil {
 		t.Fatalf("fresh validation reload: %v", err)
 	}
+	testConfirmedRepairValidationConsumptionHistory(t, validated, *restartedFinal.Facts.RepairDirective)
+}
+
+func testObserveActualShellCopiedInputs(t *testing.T, ctx context.Context, hub magicevent.Hub, controller *RuntimeController, aggregate RuntimeAggregate, directory string) RuntimeAggregate {
+	t.Helper()
+	observer := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	if err := observer.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(workspaceevents.GetWorkspaceCommand)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: command.WorkspaceID, DeliverableDirectory: directory}}, nil)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer observer.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet)
+	for index := len(aggregate.Facts.Evidence.Accepted) - 1; index >= 0; index-- {
+		fact := aggregate.Facts.Evidence.Accepted[index]
+		if fact.Kind != runtimecontract.EvidenceKindValidation || fact.ApplicabilityDependencies == nil {
+			continue
+		}
+		request, err := CompileRuntimeEvidenceApplicabilityRequest(aggregate, fact.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source, err := CompileRuntimeOperationReadSource(aggregate, request.DispatchID, request.OperationID, request.SourceReceiptHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		command := shellevents.QueryRuntimeValidationReadDependenciesCommand{RuntimeOperationExecutionContext: source.Context, Operation: source.Operation, RequestID: request.RequestID, IssuedAtStateRevision: request.IssuedAtStateRevision, SourceReceiptHash: request.SourceReceiptHash, OriginalDependencies: source.OriginalDependencies, ApplicabilitySource: source.ApplicabilitySource}
+		data, queryErr := hub.Send(magicevent.NewEventWithContext(shellevents.TopicQueryRuntimeValidationReadDependencies, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, command)).Get()
+		if queryErr != nil {
+			t.Fatal(queryErr)
+		}
+		response, ok := data.(shellevents.QueryRuntimeValidationReadDependenciesResult)
+		if !ok {
+			t.Fatalf("invalid copied-input owner response %T", data)
+		}
+		current, observed, err := response.ValidateFor(command)
+		if err != nil || !observed {
+			t.Fatalf("actual current copy unavailable: %v", err)
+		}
+		observation := runtimecontract.RuntimeEvidenceApplicabilityObservation{Request: request, RecordedAtStateRevision: request.IssuedAtStateRevision + 1, CurrentDependencies: current}
+		result, err := controller.ApplyInternalEvent(ctx, RuntimeInternalEvent{Kind: RuntimeInternalEventEvidenceApplicabilityObserved, Scope: RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{EvidenceApplicability: &observation}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(result.Aggregate.OperationReceipts, aggregate.OperationReceipts) || !reflect.DeepEqual(result.Aggregate.ExecutionBudget, aggregate.ExecutionBudget) {
+			t.Fatal("query repeated effect/receipt/budget")
+		}
+		return result.Aggregate
+	}
+	t.Fatal("no actual versioned Shell copy source")
+	return RuntimeAggregate{}
 }
 
 // Final sealing alone does not exercise the production pre-probe evaluator.

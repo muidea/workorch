@@ -48,7 +48,11 @@ type runtimeSemanticBindingPreimageInventory struct {
 // This is an aggregate-only invariant.  It performs no I/O, normalization
 // repair, owner call, action selection or aggregate mutation.
 func validateRuntimeSemanticBindingPreimages(a RuntimeAggregate) error {
-	inventory, err := buildRuntimeSemanticBindingPreimageInventory(a.SemanticPlanning)
+	return validateRuntimeSemanticBindingPreimagesInGate(a, nil)
+}
+
+func validateRuntimeSemanticBindingPreimagesInGate(a RuntimeAggregate, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
+	inventory, err := buildRuntimeSemanticBindingPreimageInventoryInGate(a.SemanticPlanning, gate)
 	if err != nil {
 		return runtimeSemanticBindingPreimageViolation(err)
 	}
@@ -131,6 +135,10 @@ func runtimeSemanticBindingProjectionState(state runtimecontract.ConvergenceStat
 }
 
 func buildRuntimeSemanticBindingPreimageInventory(ledger runtimecontract.RuntimeSemanticPlanningLedger) (runtimeSemanticBindingPreimageInventory, error) {
+	return buildRuntimeSemanticBindingPreimageInventoryInGate(ledger, nil)
+}
+
+func buildRuntimeSemanticBindingPreimageInventoryInGate(ledger runtimecontract.RuntimeSemanticPlanningLedger, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) (runtimeSemanticBindingPreimageInventory, error) {
 	inventory := runtimeSemanticBindingPreimageInventory{
 		byBindingID: make(map[string]runtimeSemanticBindingPreimage),
 		byFocusID:   make(map[string][]runtimeSemanticBindingPreimage),
@@ -142,11 +150,11 @@ func buildRuntimeSemanticBindingPreimageInventory(ledger runtimecontract.Runtime
 	active := ledger
 	active.History = nil
 	active = active.Clone()
-	if err := addRuntimeSemanticLedgerBindingPreimages(&inventory, "active", active); err != nil {
+	if err := addRuntimeSemanticLedgerBindingPreimagesInGate(&inventory, "active", active, gate); err != nil {
 		return runtimeSemanticBindingPreimageInventory{}, err
 	}
 	for index, generation := range ledger.History {
-		if err := addRuntimeSemanticLedgerBindingPreimages(&inventory, fmt.Sprintf("history %d", index), generation.Snapshot); err != nil {
+		if err := addRuntimeSemanticLedgerBindingPreimagesInGate(&inventory, fmt.Sprintf("history %d", index), generation.Snapshot, gate); err != nil {
 			return runtimeSemanticBindingPreimageInventory{}, err
 		}
 	}
@@ -154,6 +162,10 @@ func buildRuntimeSemanticBindingPreimageInventory(ledger runtimecontract.Runtime
 }
 
 func addRuntimeSemanticLedgerBindingPreimages(inventory *runtimeSemanticBindingPreimageInventory, label string, ledger runtimecontract.RuntimeSemanticPlanningLedger) error {
+	return addRuntimeSemanticLedgerBindingPreimagesInGate(inventory, label, ledger, nil)
+}
+
+func addRuntimeSemanticLedgerBindingPreimagesInGate(inventory *runtimeSemanticBindingPreimageInventory, label string, ledger runtimecontract.RuntimeSemanticPlanningLedger, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
 	if inventory == nil || ledger.Manifest == nil {
 		return nil
 	}
@@ -189,18 +201,18 @@ func addRuntimeSemanticLedgerBindingPreimages(inventory *runtimeSemanticBindingP
 			if manifest.ProofObligations[0].ImplementationWork.PurposeChoiceOnly {
 				return fmt.Errorf("implementation purpose-choice cannot contain an accepted proof batch")
 			}
-			if err := document.ValidateAgainstManifest(manifest); err != nil {
+			if err := gate.ValidateDocument(manifest, document); err != nil {
 				return err
 			}
 			if document.BatchID != batch.BatchID || document.BatchSequence != batch.Sequence || batch.DocumentHash != runtimecontract.StableRuntimeSemanticPlanDocumentHash(document) || !sameCoverageIDs(document.BatchCoverageWorkItemIDs, batch.CoverageWorkItemIDs) {
 				return fmt.Errorf("implementation accepted batch differs from original provider document")
 			}
-			if err := runtimecontract.ValidateRuntimeSemanticFeasibilitySet(manifest, document, feasibilities, true); err != nil {
+			if err := gate.ValidateFeasibilities(manifest, document, feasibilities, true); err != nil {
 				return err
 			}
 			continue
 		}
-		focuses, _, err := compileRuntimeSemanticAcceptedBatchBindings(manifest, batch, document, feasibilities)
+		focuses, _, err := gate.CompileAcceptedBatch(manifest, batch, document, feasibilities)
 		if err != nil {
 			return fmt.Errorf("runtime aggregate semantic binding preimage %s batch %q: %w", label, batch.BatchID, err)
 		}
@@ -249,6 +261,9 @@ func runtimeSemanticBatchPreimageFeasibilities(
 
 func validateRuntimeSemanticFocusPreimages(facts runtimecontract.RuntimeFacts, inventory runtimeSemanticBindingPreimageInventory) error {
 	focuses := append(append([]runtimecontract.CoverageFocus{facts.Focus}, facts.RemainingFocuses...), facts.CompletedFocuses...)
+	for _, pause := range facts.CWISuspensions {
+		focuses = append(focuses, pause.FrozenFocus)
+	}
 	for index, rawFocus := range focuses {
 		focus := rawFocus.Normalized()
 		if len(focus.CoverageEvidenceBindings) == 0 {

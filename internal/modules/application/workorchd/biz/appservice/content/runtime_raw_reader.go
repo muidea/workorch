@@ -32,6 +32,8 @@ func (r *Reader) ReadRuntimeRaw(ctx context.Context, ref string) (RuntimeRawCont
 		return r.readRuntimeCheckpointRaw(readCtx, parsed)
 	case "results":
 		return r.readResultRaw(readCtx, parsed)
+	case "validation-output":
+		return r.readRuntimeValidationOutput(readCtx, parsed)
 	default:
 		return RuntimeRawContent{}, common.ErrInvalidArgument
 	}

@@ -11,6 +11,7 @@ import { presentWorkspaceRunCommand } from './workspaceRunCommand';
 import { validationRepairPolicyLabel } from './runtimeProgressPresentation';
 import { originalDiagnosticLabel } from './runtimeProgressPresentation';
 import { RuntimeInputReviewDetails } from './components/RuntimeInputReviewDetails';
+import { RuntimeValidationOutputLinks } from './components/RuntimeValidationOutputLinks';
 import type { RuntimeAuditCandidateAttempt } from './types';
 import { canonicalActiveRunIsGovernanceBlocked, canonicalDefinitionClarification, workspaceBoardExecutionIntentAllowed, workspaceDefinitionClarification } from './governanceMutationTarget';
 
@@ -607,7 +608,8 @@ export function acceptanceCard(acceptance?: AcceptanceProjection) {
             { title: 'Targets', dataIndex: 'targetRefs', ellipsis: true, render: (_, item) => compactTags(item.targetRefs ?? [], 3) },
             { title: 'Recipe / Checks', dataIndex: 'validationRecipeId', ellipsis: true, render: (_, item) => compactTags([item.validationRecipeId, ...(item.passedChecks ?? [])].filter(Boolean) as string[], 3) },
             { title: 'Owner Feedback', dataIndex: 'stableCategory', ellipsis: true, render: (_, item) => [item.originalDiagnostic?.ownerModuleId, item.stableCategory, item.originalDiagnostic?.originalCode, item.originalDiagnostic?.originalMessage].filter(Boolean).join(' / ') || '-' },
-            { title: 'Receipt', dataIndex: 'executionKey', ellipsis: true, render: (_, item) => shortId(item.executionKey) }
+            { title: 'Receipt', dataIndex: 'executionKey', ellipsis: true, render: (_, item) => shortId(item.executionKey) },
+            { title: '验证原始输出', dataIndex: 'validationOutputs', render: (_, item) => <RuntimeValidationOutputLinks outputs={item.validationOutputs} /> }
           ]}
           dataSource={operationReceipts}
         />

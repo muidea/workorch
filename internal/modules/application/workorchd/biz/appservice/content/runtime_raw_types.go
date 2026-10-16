@@ -6,16 +6,18 @@ import (
 	"fmt"
 
 	"github.com/muidea/workorch/internal/pkg/common"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 const MaxRuntimePayloadBytes = 1 << 20
 
 type RuntimeRawContent struct {
-	Ref           string
-	FileName      string
-	ContentType   string
-	Content       []byte
-	ContentSHA256 string
+	Ref            string
+	FileName       string
+	ContentType    string
+	Content        []byte
+	ContentSHA256  string
+	OutputIdentity *runtimecontract.RuntimeValidationOutputIdentity
 }
 
 func newRuntimeRawContent(ref RuntimeRawRef, body []byte) (RuntimeRawContent, error) {

@@ -28,33 +28,20 @@ func (a RuntimeAggregate) Validate() error {
 		active = &value
 	}
 	completed := sealedDispatchesToRuntimeRecords(a.CompletedDispatches)
-	if err := runtimecontract.ValidateRuntimeImplementationWorkState(a.Definition, a.Facts, a.ImplementationWork, a.SemanticPlanning, active, completed, a.OperationReceipts, a.OperationGovernanceBindings, a.ExecutionBudget); err != nil {
-		return fmt.Errorf("runtime aggregate implementation work: %w", err)
-	}
-	if a.Decision.RequiredOutput.ImplementationWorkBindingHash != "" {
-		matches := 0
-		for _, round := range a.ImplementationWork.Rounds {
-			if round.WorkingBinding != nil && round.WorkingBinding.Hash == a.Decision.RequiredOutput.ImplementationWorkBindingHash && round.CompletedReceiptSetHash == "" && round.FailedReceiptHash == "" && round.GovernanceReceiptHash == "" && len(a.Facts.Focus.CoverageWorkItemIDs) == 1 && a.Facts.Focus.CoverageWorkItemIDs[0] == round.CoverageWorkItemID && a.Facts.Failure == nil && a.Facts.RepairDirective == nil {
-				matches++
-			}
-		}
-		if matches != 1 {
-			return fmt.Errorf("runtime aggregate working output has no unique original live semantic work commitment")
-		}
-	}
-	if err := runtimecontract.ValidateRuntimeDispatchHistoryShape(a.Facts.WorkspaceID, a.Facts.RunID, active, completed); err != nil {
-		return fmt.Errorf("runtime aggregate dispatch history: %w", err)
-	}
-	if err := runtimecontract.ValidateRuntimeEvidenceLedgerSequence(a.EvidenceSequence, a.Facts, active, completed, a.GovernanceResolutions); err != nil {
-		return fmt.Errorf("runtime aggregate evidence ledger: %w", err)
-	}
-	if err := runtimecontract.ValidateRuntimeAssessmentAuthoritySources(a.Facts, active, completed); err != nil {
-		return fmt.Errorf("runtime aggregate assessment authority: %w", err)
-	}
-	if err := runtimecontract.ValidateRuntimeAssessmentAdjudications(a.Facts, completed, a.CoverageProofLineage, runtimeLineageAssertionSources(a)); err != nil {
-		return fmt.Errorf("runtime aggregate assessment adjudication: %w", err)
-	}
-	if err := validateRuntimeAggregateSM2Authority(a, active, completed); err != nil {
+	return runtimecontract.ValidateRuntimeConvergenceSourcesAndSemanticLedger(
+		runtimeLineageAssertionSourcesWithDispatches(a, active, completed), a.Decision.RequiredOutput, a.StateRevision,
+		func() error { return validateRuntimeAggregateSM2BeforeSemantic(a, active, completed) },
+		func() error { return a.validateAfterSemanticSources(active, completed) })
+}
+
+// Only Validate and the complete owner-local DTO/aggregate compiler call this
+// continuation, immediately after their complete ordered source gates.
+func (a RuntimeAggregate) validateAfterSemanticSources(active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
+	return a.validateAfterSemanticSourcesInGate(active, completed, nil)
+}
+
+func (a RuntimeAggregate) validateAfterSemanticSourcesInGate(active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
+	if err := validateRuntimeAggregateSM2AfterSemanticInGate(a, gate); err != nil {
 		return err
 	}
 	if err := validateRuntimeAggregateSM3ActiveDispatch(a); err != nil {
@@ -63,7 +50,7 @@ func (a RuntimeAggregate) Validate() error {
 	if err := validateRuntimeAggregateActivationFence(a); err != nil {
 		return err
 	}
-	if err := validateRuntimeAggregateSM3CandidateTransaction(a, active, completed); err != nil {
+	if err := validateRuntimeAggregateSM3CandidateTransactionInGate(a, active, completed, gate); err != nil {
 		return err
 	}
 	if err := validateRuntimeAggregateExecutionBudget(a); err != nil {
@@ -151,7 +138,7 @@ func validateRuntimeAggregateExecutionBudget(a RuntimeAggregate) error {
 	return nil
 }
 
-func validateRuntimeAggregateSM2Authority(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
+func validateRuntimeAggregateSM2BeforeSemantic(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
 	if a.Facts.WorkspaceID == "" || a.Facts.RunID == "" {
 		return fmt.Errorf("runtime aggregate requires workspace and run scope")
 	}
@@ -173,13 +160,18 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate, active *runtimecon
 	if err := validateRuntimeAggregateValidationProofApplicability(a); err != nil {
 		return err
 	}
-	if err := a.SemanticPlanning.Validate(); err != nil {
-		return fmt.Errorf("runtime aggregate semantic planning ledger: %w", err)
-	}
+	return nil
+}
+
+func validateRuntimeAggregateSM2AfterSemantic(a RuntimeAggregate) error {
+	return validateRuntimeAggregateSM2AfterSemanticInGate(a, nil)
+}
+
+func validateRuntimeAggregateSM2AfterSemanticInGate(a RuntimeAggregate, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
 	if err := runtimecontract.ValidateRuntimeSemanticProofBatchLimits(a.SemanticPlanning, a.Facts.Activation.ExecutionContract.ExecutionLimits); err != nil {
 		return err
 	}
-	if err := validateRuntimeAggregateSemanticValidationProofRequirements(a); err != nil {
+	if err := gate.ValidateDefinitionSources(a.SemanticPlanning, a.Facts.DefinitionSeed, a.Facts.DefinitionFocuses); err != nil {
 		return err
 	}
 	for idx, history := range a.SemanticPlanning.History {
@@ -193,10 +185,10 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate, active *runtimecon
 			return fmt.Errorf("runtime aggregate semantic generation %d scope mismatch", idx)
 		}
 	}
-	if err := validateRuntimeSemanticBindingPreimages(a); err != nil {
+	if err := validateRuntimeSemanticBindingPreimagesInGate(a, gate); err != nil {
 		return err
 	}
-	if err := validateRuntimeSemanticBindingPurposeInvariant(a); err != nil {
+	if err := validateRuntimeSemanticBindingPurposeInvariantInGate(a, gate); err != nil {
 		return err
 	}
 	if a.SemanticPlanning.DefinitionSeed.Hash != a.Facts.DefinitionSeed.Hash {
@@ -221,6 +213,9 @@ func validateRuntimeAggregateSM2Authority(a RuntimeAggregate, active *runtimecon
 		return fmt.Errorf("runtime aggregate source obligations startup input mismatch")
 	}
 	if err := a.Decision.Validate(); err != nil {
+		return err
+	}
+	if err := validateRuntimeApplicabilityPrerequisiteProjection(a); err != nil {
 		return err
 	}
 	if terminal := a.Decision.Terminal; terminal != nil && (terminal.OriginalDiagnostic != nil ||
@@ -267,13 +262,8 @@ func validateRuntimeValidationProofApplicability(facts runtimecontract.RuntimeFa
 	// contract validator is the sole interpreter of binding/preparation
 	// applicability; aggregate recovery only supplies immutable Definition
 	// requirements and retained owner catalogs.
-	if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogApplicability(requirements, facts.Resources.OperationAdmissibilities); err != nil {
-		return fmt.Errorf("runtime aggregate current validation proof applicability: %w", err)
-	}
-	for index, catalog := range sealedCatalogs {
-		if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogApplicability(requirements, []runtimecontract.RuntimeOperationAdmissibility{catalog}); err != nil {
-			return fmt.Errorf("runtime aggregate sealed validation proof applicability %d: %w", index, err)
-		}
+	if err := runtimecontract.ValidateRuntimeValidationProofRequirementCatalogHistory(requirements, facts.Resources.OperationAdmissibilities, sealedCatalogs); err != nil {
+		return err
 	}
 
 	currentCatalogs := runtimecontract.NormalizeRuntimeOperationAdmissibilities(facts.Resources.OperationAdmissibilities)
@@ -320,26 +310,7 @@ func runtimeManagedValidationShellCatalogs(values []runtimecontract.RuntimeOpera
 // input. RuntimeSemanticPlanManifest cannot prove this relationship from its
 // own obligation copy; doing so would let a coordinated rewrite self-attest.
 func validateRuntimeAggregateSemanticValidationProofRequirements(a RuntimeAggregate) error {
-	validateManifest := func(label string, manifest runtimecontract.RuntimeSemanticPlanManifest) error {
-		if err := runtimecontract.ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest, a.Facts.DefinitionSeed, a.Facts.DefinitionFocuses); err != nil {
-			return fmt.Errorf("runtime aggregate semantic %s: %w", label, err)
-		}
-		return nil
-	}
-	if a.SemanticPlanning.Manifest != nil {
-		if err := validateManifest("active manifest", *a.SemanticPlanning.Manifest); err != nil {
-			return err
-		}
-	}
-	for index, generation := range a.SemanticPlanning.History {
-		if generation.Snapshot.Manifest == nil {
-			continue
-		}
-		if err := validateManifest(fmt.Sprintf("history manifest %d", index), *generation.Snapshot.Manifest); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runtimecontract.ValidateRuntimeSemanticLedgerDefinitionSources(a.SemanticPlanning, a.Facts.DefinitionSeed, a.Facts.DefinitionFocuses)
 }
 
 // validateRuntimeSemanticBindingPurposeInvariant prevents an intermediate
@@ -350,6 +321,10 @@ func validateRuntimeAggregateSemanticValidationProofRequirements(a RuntimeAggreg
 // only to recover the exact per-CWI purpose; they never authorize a candidate,
 // operation, dispatch, or transition.
 func validateRuntimeSemanticBindingPurposeInvariant(a RuntimeAggregate) error {
+	return validateRuntimeSemanticBindingPurposeInvariantInGate(a, nil)
+}
+
+func validateRuntimeSemanticBindingPurposeInvariantInGate(a RuntimeAggregate, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
 	type bindingPurposeKey struct {
 		manifestHash string
 		coverageID   string
@@ -359,7 +334,7 @@ func validateRuntimeSemanticBindingPurposeInvariant(a RuntimeAggregate) error {
 	addManifest := func(manifest runtimecontract.RuntimeSemanticPlanManifest) error {
 		manifest = manifest.Normalized()
 		for _, obligation := range manifest.ProofObligations {
-			resolved, err := runtimecontract.ResolveRuntimeSemanticEvidenceObligation(obligation)
+			resolved, err := gate.ResolveObligation(obligation)
 			if err != nil {
 				return fmt.Errorf("runtime aggregate semantic binding purpose: %w", err)
 			}
@@ -473,6 +448,10 @@ func validateRuntimeAggregateActivationFence(a RuntimeAggregate) error {
 }
 
 func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) error {
+	return validateRuntimeAggregateSM3CandidateTransactionInGate(a, active, completed, nil)
+}
+
+func validateRuntimeAggregateSM3CandidateTransactionInGate(a RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord, gate *runtimecontract.RuntimeOwnerInvariantSourceGate) error {
 	if err := runtimecontract.ValidateRuntimeCandidateAttemptRecordsForScope(a.Facts.WorkspaceID, a.Facts.RunID, a.CandidateAttempts); err != nil {
 		return err
 	}
@@ -510,6 +489,9 @@ func validateRuntimeAggregateSM3CandidateTransaction(a RuntimeAggregate, active 
 	}
 	if err := runtimecontract.ValidateRuntimeDurableDispatchLimits(a.Facts.Activation.ExecutionContract.ExecutionLimits, active, completed, a.CandidateAttempts); err != nil {
 		return err
+	}
+	if gate != nil {
+		return gate.ValidateAssessmentSources(a.SemanticPlanning, active, completed, a.CandidateAttempts, a.CandidateRequestSessions)
 	}
 	return runtimecontract.ValidateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedger(a.SemanticPlanning, active, completed, a.CandidateAttempts, a.CandidateRequestSessions)
 }
@@ -933,6 +915,7 @@ func validateRuntimeAggregateEvidenceCommitFact(
 	receiptEvidence := receipt.Normalized().Evidence
 	if fact.Summary != receiptEvidence.Summary || fact.ContentHash != receiptEvidence.ContentHash ||
 		!reflect.DeepEqual(fact.OwnerRevisionSet, receiptEvidence.OwnerRevisionSet) ||
+		!reflect.DeepEqual(fact.ApplicabilityDependencies, receiptEvidence.ApplicabilityDependencies) ||
 		!reflect.DeepEqual(fact.ContentAddress, receiptEvidence.ContentAddress) || !reflect.DeepEqual(fact.ExitCode, receiptEvidence.ExitCode) ||
 		!sameRuntimeTargetRefs(fact.EvidenceRefs, receiptEvidence.EvidenceRefs) || fact.Quality != receiptEvidence.Quality ||
 		fact.ZeroWork != receiptEvidence.ZeroWork || !sameRuntimeTargetRefs(fact.EvidenceTags, receiptEvidence.EvidenceTags) ||
@@ -1675,6 +1658,7 @@ func validateRuntimeReceiptEvidenceRejectedLineage(a RuntimeAggregate, dispatch 
 	receiptEvidence := receipt.Normalized().Evidence
 	if evidence.Summary != receiptEvidence.Summary || evidence.ContentHash != receiptEvidence.ContentHash ||
 		!reflect.DeepEqual(evidence.OwnerRevisionSet, receiptEvidence.OwnerRevisionSet) ||
+		!reflect.DeepEqual(evidence.ApplicabilityDependencies, receiptEvidence.ApplicabilityDependencies) ||
 		!reflect.DeepEqual(evidence.ContentAddress, receiptEvidence.ContentAddress) ||
 		!reflect.DeepEqual(evidence.ExitCode, receiptEvidence.ExitCode) || !sameRuntimeTargetRefs(evidence.EvidenceRefs, receiptEvidence.EvidenceRefs) ||
 		evidence.Quality != receiptEvidence.Quality || evidence.ZeroWork != receiptEvidence.ZeroWork ||

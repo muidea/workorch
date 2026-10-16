@@ -50,7 +50,7 @@ func (c *candidateDispatchComponent) beginCandidateAttempt(ctx context.Context, 
 	aggregate.CandidateRequestSessions[sessionIndex].CandidateManifest = &manifestCopy
 	applyCandidateAttemptBegin(&aggregate, plan, contractID, transaction, attempt, stablePrefixHash, manifest.Hash, logicalRequestID)
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -108,6 +108,9 @@ func validateCandidateAttemptBeginAuthority(aggregate RuntimeAggregate) error {
 	if err := validateRuntimeCandidatePurposeFence(aggregate); err != nil {
 		return fmt.Errorf("%w: candidate request binding fence: %v", common.ErrConflict, err)
 	}
+	if _, required, err := NextRuntimeEvidenceApplicabilityRequest(aggregate); err != nil || required {
+		return fmt.Errorf("%w: candidate awaits current-generation applicability: %v", common.ErrConflict, err)
+	}
 	return nil
 }
 
@@ -119,7 +122,7 @@ func planCandidateAttemptBegin(aggregate RuntimeAggregate, workspaceID common.Wo
 		if record.State == runtimecontract.RuntimeCandidateAttemptStatePending && record.StablePrefixHash == stablePrefixHash && record.Transaction == transaction && record.ManifestHash == manifestHash && record.LogicalRequestID == logicalRequestID {
 			return candidateAttemptBeginPlan{duplicate: true}, nil
 		}
-		if attempt == 0 && record.State == runtimecontract.RuntimeCandidateAttemptStateInvalidated && record.StablePrefixHash == stablePrefixHash {
+		if attempt == 0 && record.State == runtimecontract.RuntimeCandidateAttemptStateInvalidated && record.ApplicabilityInvalidationRequest == nil && record.StablePrefixHash == stablePrefixHash {
 			idx, ok := candidateAttemptIndex(aggregate.CandidateAttempts, workspaceID, runID, contractID, attempt)
 			if ok {
 				return candidateAttemptBeginPlan{recycleIndex: idx}, nil
@@ -265,7 +268,7 @@ func (c *candidateDispatchComponent) rejectCompletedCandidateDocument(ctx contex
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -382,7 +385,7 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 			return CandidateAdmissionCommitResult{}, err
 		}
 		aggregate.StateRevision++
-		if err := aggregate.Validate(); err != nil {
+		if err := c.validateAggregate(aggregate); err != nil {
 			return CandidateAdmissionCommitResult{}, err
 		}
 		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -420,7 +423,7 @@ func (c *candidateDispatchComponent) admitCandidateProposal(ctx context.Context,
 		aggregate.CandidateRequestSessions[sessionIndex].RepairCommitmentHash = runtimecontract.StableRuntimeDispatchRepairCommitmentHash(*repairCommitment)
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -531,7 +534,7 @@ func (c *candidateDispatchComponent) recordCandidateFeasibility(ctx context.Cont
 		return RuntimeAggregate{}, common.ErrInvalidArgument
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -736,7 +739,7 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 			return CandidateAdmissionCommitResult{}, err
 		}
 		aggregate.StateRevision++
-		if err := aggregate.Validate(); err != nil {
+		if err := c.validateAggregate(aggregate); err != nil {
 			return CandidateAdmissionCommitResult{}, err
 		}
 		if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -825,7 +828,7 @@ func (c *candidateDispatchComponent) admitAndSealCandidateAttempt(ctx context.Co
 	}
 	aggregate.ActiveDispatch = &dispatch
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return CandidateAdmissionCommitResult{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -877,7 +880,7 @@ func (c *candidateDispatchComponent) sealGovernanceDispatch(ctx context.Context,
 	expectedRevision := aggregate.StateRevision
 	aggregate.ActiveDispatch = &dispatch
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -918,11 +921,16 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 	var feasibilities []runtimecontract.RuntimeCandidateFeasibilityRecord
 	if attempt != nil {
 		complete := runtimecontract.EvaluateRuntimeCompleteAdmission(runtimecontract.RuntimeCompleteAdmissionInput{
+			Definition: aggregate.Definition, ProcessedEventIDs: aggregate.ProcessedEventIDs,
 			Facts: aggregate.Facts, Decision: aggregate.Decision, SemanticPlanning: aggregate.SemanticPlanning, ImplementationWork: aggregate.ImplementationWork,
 			Reconciliation: aggregate.Reconciliation, Manifest: manifest, Candidate: candidate, Attempt: *attempt,
 			ActiveDispatch:      sealedDispatchRecord(aggregate.ActiveDispatch),
 			CompletedDispatches: sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
 			OperationReceipts:   aggregate.OperationReceipts,
+			ProofLineage:        aggregate.CoverageProofLineage, Governance: aggregate.OperationGovernanceBindings,
+			Budget: aggregate.ExecutionBudget, EvidenceSequence: aggregate.EvidenceSequence,
+			Resolutions: aggregate.GovernanceResolutions, Attempts: aggregate.CandidateAttempts,
+			Sessions: aggregate.CandidateRequestSessions, Confirmations: aggregate.RepairSurfaceConfirmations,
 		})
 		if !complete.Admitted() {
 			return SealedDispatch{}, complete, nil
@@ -940,6 +948,10 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 		preSealAuthority.ImplementationWorkCommitment = cloneImplementationWorkCommitment(round)
 	}
 	if candidate.Assessment != nil {
+		if _, required, readErr := NextRuntimeEvidenceApplicabilityRequest(aggregate); readErr != nil || required {
+			err := fmt.Errorf("%w: assessment requires current-generation owner applicability observations: %v", common.ErrConflict, readErr)
+			return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{Disposition: runtimecontract.RuntimeCompleteAdmissionTerminalContractFailure, Code: "assessment_source_invalid", Message: err.Error()}, err
+		}
 		source, sourceErr := runtimecontract.RuntimeAssessmentSourceProjection(aggregate.Facts, aggregate.Decision.Focus.ID, candidate.Assessment.CoverageWorkItemIDs)
 		if sourceErr != nil {
 			return SealedDispatch{}, runtimecontract.RuntimeCompleteAdmissionDecision{
@@ -970,14 +982,16 @@ func admitRuntimeDispatch(aggregate RuntimeAggregate, manifest runtimecontract.R
 		focus.AssessmentID = source.AssessmentID
 		focus.AssessmentText = source.AssessmentText
 		value := runtimecontract.RuntimeAssessmentAuthorityInput{
-			AuthorityInput:           aggregate.Decision.AuthoritySnapshot.AuthorityInput,
-			Purpose:                  purpose.Purpose,
-			SourceSliceID:            source.SliceID,
-			SourceScope:              source.AssessmentScope,
-			SourceID:                 source.AssessmentID,
-			SourceText:               source.AssessmentText,
-			Focus:                    focus,
-			OperationAdmissibilities: runtimecontract.CloneRuntimeOperationAdmissibilities(aggregate.Facts.Resources.OperationAdmissibilities),
+			AuthorityInput:                         aggregate.Decision.AuthoritySnapshot.AuthorityInput,
+			Purpose:                                purpose.Purpose,
+			SourceSliceID:                          source.SliceID,
+			SourceScope:                            source.AssessmentScope,
+			SourceID:                               source.AssessmentID,
+			SourceText:                             source.AssessmentText,
+			Focus:                                  focus,
+			OperationAdmissibilities:               runtimecontract.CloneRuntimeOperationAdmissibilities(aggregate.Facts.Resources.OperationAdmissibilities),
+			ApplicabilityObservations:              runtimecontract.CloneRuntimeEvidenceApplicabilityObservations(aggregate.Facts.EvidenceApplicabilityObservations),
+			ApplicabilityReconciliationRequestHash: aggregate.Reconciliation.RequestHash,
 		}.Normalized()
 		preSealAuthority.AssessmentAuthorityInput = &value
 	}
@@ -1097,7 +1111,7 @@ func (c *candidateDispatchComponent) failCandidateAttempt(ctx context.Context, w
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {

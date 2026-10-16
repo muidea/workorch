@@ -6,7 +6,127 @@ Type: verification
 
 Last Verified: 2026-09-04
 
+The versioned applicability boundary is verified by
+`workorchruntimecontract/runtime_evidence_applicability_identity_test.go` (semantic identity and original assessment prefix),
+`runtime/evidence_applicability_transition_test.go` (source/fence, duplicate, exact reopen, CAS and reload),
+`biz/runtime_file_applicability_mainline_test.go` (actual File mutation/read and SM-2),
+`shell/biz/validation_read_dependencies_test.go` (actual original copied selector and missing/error), and
+`biz/runtime_shell_applicability_mainline_test.go` (real-owner query CAS cuts/rebuild and no repeated provider/process).
+The confirmed-repair integration additionally requires actual current observation before consuming fresh-validation handoff.
+These tests do not substitute for public shared-target convergence, complete artifact/catalog currentness or live acceptance.
+Fresh consumption additionally requires `runtime_evidence_applicability_freshness_test.go`,
+`runtime/assessment_applicability_seal_test.go` and the terminal-owner-read exact revision/Resume-generation matrix.
+`runtime/evidence_applicability_candidate_window_test.go` covers coordinated unsealed retirement across prepared,
+document-complete, pending and proposal windows, before/after-CAS reload, duplicate, forged source and late proposal/seal
+with zero new writes; submitted allocations must retain their original settlement responsibility.
+The completed-focus revision and no-assessment read-debt predicates require
+`TestApplicabilityRevisionFenceIncludesCompletedFocusBeforeCurrentClosure`; the Resume matrix also checks that a new
+generation yields decision-only `need_prerequisite`, never executable proof debt or early success.
+`TestEvidenceApplicabilityUnsettledProviderGuardIncludesHistoricalAuthority` is a predicate-only historical-responsibility
+test, not a production late-settlement/recovery proof. Decision-only debt cannot enter generic prerequisite acquisition.
+`TestApplicabilityReadDebtRejectsForgedProjectionAndGenericAcquisition` rejects substituted source/owner/identity and
+executable output even after coordinated projection hashing, with zero CAS/budget changes.
+`TestMCPOwnerObservedFailureTargetBindsThroughEventHubAndFileSnapshot` independently refreshes the real File mutation's
+postcondition using the current Workspace directory, rather than treating decision-only debt as ordinary acquisition.
+`TestDriveRuntimeShellApplicabilityResumeSettlesSubmittedRequestBeforeSampling` covers actual File/Shell receipts,
+file-backed Run and production drive: submitted-session restart plus a new reconciliation generation must first close
+the original unknown call/budget without sampling, changing receipt history or granting credit. Settlement before-CAS and
+after-CAS response loss rebuild the controller from the persisted record; duplicate is unchanged. Provider documents are
+scripted and the submission crash is at the durable submission boundary, not proof that a remote call physically occurred.
+The terminal-snapshot mainline independently compares the current dependency union with original exact-generation SM-2
+observations, and separately verifies preservation of each historical/current pair on formal evidence items.
+The File mainline includes actual matching/changed/missing owner responses across query/CAS response-loss cuts and owner
+rebuild, without claiming a fresh OS process. Shell descriptor tests reject parent/final links, noncanonical selectors and
+special files; non-Unix current queries fail closed until an equally safe implementation exists.
+
+[Evidence Proof Purpose](evidence-proof-purpose.md) 的 v2 用途还必须验证普通 all-of dispatch、repair/work 中间 transaction
+隔离、owner/kind/raw pair 门禁及原读取／后像保全。共享 File/Shell/Run/Result 主链须保留两次相同文件的真实 effect；
+正式逐项材料保全两份历史，旧后像不得进入 terminal current union。普通 validation stale 仍必须精确重开与真实重验，
+新请求逐项反查原 stale/reopen 与已提交 session，原 durable effect 不重复；这些不替代 state-change-only 跨源映射或 live。
+`evidence_historical_audit_recovery_test.go` 使用明确 typed owner-fact fixture 固定历史 changed／missing 审计：
+prepared／document-complete／pending／proposal 四窗口、CAS 前失败／CAS 后响应丢失、原 JSON 重载与 duplicate，
+观察保存但 current authority／action attempt／candidate／receipt／budget 不变；独立 transition gate 拒绝夹带写入。
+审计提交及原 JSON 重载后，普通 session／attempt 还须沿原 transaction 完成 feasibility 与 dispatch seal；
+只比较对象标签未变不能替代该可恢复准入证明，seal 仍零 effect／validation credit。
+request 用途必须反查原 receipt／fact，协调重哈希也不能删除或伪造。共享文件主链另由实际 File 查询旧后像，
+保持 stale 与完整正式材料、terminal aggregate 零写；该终态只读查询不是真实观察 writer 的恢复或 fresh OS-process。
+
+Profile 来源域 `runtime/profile-deliverable-evidence-purpose/v2` 必须另外验证 required 交付来源的完整快照与原全文、
+全 Profile source ID 唯一性、唯一原 DoD consumer、未确认／optional／漂移／旧 wire 扩展拒绝及全部原准则合取。
+`TestProfileEvidencePurpose*` 覆盖共享 compiler、Workspace admission 和 strict wire；确认界面必须展示完整来源而非摘要。
+`TestDriveRuntimeProfileDeliverableHistoricalAcceptanceOwnerCASRecovery` 覆盖真实 File/Shell/Git/Run/Workspace/Result
+主链、行为与验收 CAS 前后恢复及 validation/acceptance stale 撤销再验；
+`TestDriveRuntimeProfileDeliverableHistoricalAcceptanceProcessRecovery` 必须真实退出首个进程，以独立 Hub/owners
+从原 file-backed aggregate 恢复并反查原 key/fence/hash、预算及有序三 ACK。private startup/scripted provider
+只证明用途来源和事务恢复，不代替公开 authoring fullflow 或 live。readiness 选择必须拒绝目标包零测试命中。
+
+semantic repair 的准确 ordinary validation receipt 消费与当前依赖重新采样是不同门禁。
+`semantic_repair_receipt_consumption_test.go` 必须从原 sealed repair fixture 反查完整 manifest/closure/binding、
+completed execution、原 receipt 和全部 repair evidence，仅允许原 receipt CAS 清旧 directive；采样债务和零 credit
+边界保持不变。来源缺失／漂移零变更、非匹配 receipt 零消费、CAS 前失败／后响应丢失、JSON 重载及 duplicate
+零写必须与完整 aggregate gate 配对，不能只以 directive 为 nil 判定恢复成功。
+
+[CWI Suspension](cwi-suspension.md) 的版本化暂停／普通重验必须逐项反查唯一已声明 validation-only 前驱、
+原 stale observation、frozen binding/effect、repair debt 和 owner prerequisite archive；暂停中只允许精确前驱进入
+planning，不能选择其它 ready CWI。`runtime/cwi_suspension_test.go` 固定 detached projection、duplicate、unsafe、
+unknown、无来源和容量 guard；`runtime/cwi_suspension_transition_test.go` 独立拒绝夹带 receipt/effect/budget、
+预填 resume、原记录／焦点／债务改写及 unsafe 持久前像。这些不是实际 owner/CAS 证明。
+`TestDriveRuntimeCWISuspensionRevalidatesOrdinaryPredecessorWithinOriginalBudget` 使用真实 File/Shell/Run/Workspace/Result，
+保留 provider 64、capability 32、durable dispatch/CWI 2 的原参数，配对暂停／恢复 CAS 前后四切点与不中断基线。
+必须证明单次 durable effect、新普通 binding/assessment/current sampling、来源篡改拒绝、有序三 ACK、
+duplicate 零 provider/effect/budget 和原 startup 保全。
+`TestDriveRuntimeCWISuspensionProcessRecovery` 必须在暂停与恢复 CAS 后分别真实退出首个进程，
+以新 Hub/owners 从原 JSON 续驱；原 pause/receipt/key/fence、allocation/consumption 不能改写、退款或重复。
+`TestDriveRuntimeDurableDispatchBudgetRejectsUndeclaredPredecessorRevalidation` 和
+`TestDriveRuntimeAssertionFeedbackCannotInventPredecessorRevalidationAcrossRestart` 保留原 state-change-only 输入，
+合法后继修复产生 stale 后明确失败，不自动补 mapping，不重放 effect 或授予旧 credit；终态 CAS 前后恢复及
+duplicate 仍须完整交付。已声明用途的修复正例由 `TestDriveRuntimeMappedHistoricalBehaviorRepairsAcceptanceAcrossRestart`
+独立证明。全部采用 private admitted startup/scripted provider，不替代公开 authoring fullflow、真实模型或 live。
+
+版本化终态材料证明由 `runtime_terminal_proof_consumer_test.go`、
+`runtimeprofiledecode/lineage_assertion_test.go`、LLM `runtime_proof_composition_test.go` 与
+Orchestrator `runtime_terminal_proof_mainline_test.go` 验证：原准则/source/版本/索引/receipt 来源，未产生 ACK 不提前满足，
+八个真实 owner CAS／响应丢失／重启切点与零重复 provider，failed 交付与验收满足严格分开。
+完整规范及证据边界见 [Terminal Material Proof](terminal-material-proof.md)；该回归不证明最终 Git snapshot、
+公开 implementation-work admission、fresh OS-process 或 live provider。
+
 ## Purpose
+
+`runtime-owner-state-joint-preimage/v1` 必须用独立 DTO＋aggregate 路径对照完整接受／拒绝与首错顺序，
+包含 raw DTO 和转换后 aggregate 分别篡改、同 hash 不同原文、后续调用、序列化／重复／跨调用／关闭后拒绝。
+`biz/runtime_owner_state_joint_preimage_test.go`、`runtime/transition_preimage_test.go` 与
+`runtime/aggregate_source_session_reference_test.go` 固定原值／返回隔离、私有 source→semantic 重用和全部
+interstitial／剩余门禁；公开归档只读对照不能改写原数据。实际 Run-owner CAS 前失败／后响应丢失和
+并发写入继续由 `biz/runtime_transition_preimage_owner_test.go` 验证。benchmark 必须计入首次完整校验与
+迁移／CAS 调用，不把局部性能、合法 active aggregate 或脚本 provider 当作公开 fullflow／live 验收通过。
+
+`runtime-owner-state-transition-transaction/v1` 还须覆盖首次真实 Load→具体 typed reducer→完整 after-image→
+Commit 再次真实读取→迁移／CAS 的原有次序。`runtime/owner_state_transaction_test.go` 必须与独立完整
+DTO／aggregate gate 对照，分别篡改两侧原文、semantic、dispatch、预算、scope/revision 及 owner remainder；
+验证两组 owner invariant 不互代、成功前像与输入隔离、失败不登记、首错包装、退出／panic 撤销、递归／并发
+拒绝、跨事件重新校验和 exact duplicate 零 CAS。真实 Run-owner 回归必须实际重建文件 repository 与 owner，
+覆盖 CAS 前失败／后响应丢失和预算／receipt 不变；原并发 CAS fence 回归继续适用。
+benchmark 必须比较同一原输入、同一具体事件，包含首次完整校验、两次 Load 和一次 CAS，不把未真实发生的
+owner I/O 计为 CPU 性能证明；公开十分钟 fullflow、生产 availability 和 live 判据不变。
+
+`runtime-owner-historical-subtree-compiler/v1` 还必须对照每次冷编译的完整 gate，覆盖同 hash 原文漂移、
+nil／empty、输入隔离、独立当前门禁、scope 切换、失败／panic 淘汰、关闭／重启冷启动、gate 撤销、并发／递归
+冷路径及条目超限整体淘汰。`runtime_owner_historical_compiler_test.go` 与
+`runtime/owner_historical_compiler_test.go` 固定纯产物白名单和完整事件三 image 次序；只读公开归档需与冷路径
+核对全部结果／首错并保全原 bytes，真实 Run owner 两次重读、CAS、预算与响应丢失恢复仍须通过。
+owner lifecycle 只可在实际排空后丢弃缓存；`TestOwnerHistoricalCompilerReleaseHasOnlyPureDiscardBody` 必须静态
+限制清理方法只调用 compiler Close，`TestOwnerHistoricalCompilerReleaseOnlyDiscardsPureInputs` 验证零 owner I/O／
+零 Runtime 状态变化以及关闭后仍执行完整事件／CAS。边界扫描仅允许 drained owner shell 的这一精确清理调用，
+不得扩展 adapter 的 Runtime mutation/read surface。
+成本对照同时包含首次编译，不能只测热命中；成本改善不能替代原十分钟公开全链路或真实 provider live。
+
+`runtime_historical_source_compiler_test.go` 须对照独立旧历史行为／验收及 assessment-history 消费者，
+覆盖完整 raw 来源的每个字段、显式独立参数分歧、嵌套 alias、失败不登记、JSON 重载、后续变化和 fuzz；
+`runtime_assessment_missing_authority_test.go` 覆盖独立 consumer 缺少 assessment authority 时显式拒绝而非 panic；先行的 adjudication／hash
+门禁及其首错顺序保持不变，已有成功前像不能遮蔽该缺失。
+完整来源 copier 的结构遍历必须拒绝任何遗漏／共享存储。`runtime_state_raw_clone_test.go` 额外验证未经
+手工替换字段的完整 typed graph，以及 receipt governance／external dependency 授权上下文的原 bytes、
+嵌套 object／array 与 nil／empty。事务撤销、真实重读、CAS／恢复与预算门禁仍须使用上述完整 owner 回归。
 
 本文定义 Runtime 当前唯一的 core 验证合同。验证对象是四状态机、单 owner、typed EventHub 边界、
 canonical decision、无损反馈、sealed dispatch、receipt 与 terminal delivery；禁止的 graph/step/checkpoint 与
@@ -86,7 +206,33 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
 
 ## Contract-Normalization Assertions
 
+### Composite Validation Review
+
+显式 v3 必须验证原 Definition → compiled requirement → owner subject/catalog → semantic manifest/report 的
+完整来源链，不能仅重验自洽 hash。ordinary input 消费者不可省略或以 lineage 代替；foreign、duplicate、
+缺 guard、旧协议注入（包括 null/empty wire）、source/rule 协调改写均须拒绝。全文映射只证明来源/完整性，
+实际普通验证、assessment、execution guard 和未来三方 ACK 各自仍从原 owner 前像消费。
+
+合同回归为 `internal/pkg/workorchruntimecontract/runtime_validation_proof_composition_test.go`；
+Shell publication 与 LLM C3/cache 回归分别为各自 `biz/*proof_composition_test.go`。
+`internal/modules/kernel/orchestrator/biz/runtime_proof_composition_mainline_test.go` 覆盖真实 owner 正例、
+冲突/遗漏零验证、信息重评、review/binding/receipt 与 Result/Workspace/Run 三方 response-loss 重载，
+budget 回归位于 `biz/runtime/validation_input_review_test.go`。这些 private-startup/scripted-provider 证据
+不代替公开 authoring/activation/fullflow，更不代表真实 provider 或 live readiness 已通过。
+
 ### Canonical Decision And Terminal
+
+`biz/runtime/assessment_owner_fact_preimage_test.go` verifies the owner-private same-CAS proof boundary: exact original
+dispatch/adjudication and assessment, Definition/focus/receipt/evidence drift, later revision/sequence, duplicate records,
+before-save interruption and after-save response loss. Recovery preserves receipts and budget, reopens once and grants no
+terminal credit. It does not authorize historical submitted-call settlement or bypass later current-read obligations.
+Cross-source mapping verification and its public-fullflow evidence boundary are specified in
+[Cross-Source Execution Proof](cross-source-execution-proof.md).
+
+Goal/root v2 additionally requires complete original Goal wire/admission checks, exact one-DoD source anchoring, ordinary
+full-Goal checks AND original obligations, Profile reverse compilation and same-source real repair/receipt consumption.
+`runtime_goal_execution_source_mainline_test.go` covers production private-owner drive and persisted CAS cuts; it does not
+prove public activation or live availability. Original v1 Goal-domain rejection remains mandatory.
 
 - aggregate、authority snapshot、transaction、request identity 不持久化独立 `RuntimeAction` 或
   `RequiredOutput.Kind`；
@@ -111,10 +257,15 @@ Cross-owner regression必须证明 concrete receiving-owner Command/Result、wor
   terminal 不得生成 SM-4 drive result、startup classification 或 delivery request，旧 binding 也不得执行；restart/duplicate
   必须只退休一次并使 CWI 重新 eligible。已有 effect credit 的 binding 不得被 catalog refresh 退休；其它
   contract/budget/owner terminal 必须原样交付，administrative termination 继续使用独立 lane；
-- multi-batch target-grounding matrix 必须覆盖 accepted order 内 current CWI 推进后新投影的 TargetSelection：owner result 与
+- multi-batch target-grounding matrix 必须覆盖 accepted order 内 current CWI 推进后新投影的 TargetSelection，以及普通证明 stale
+  重开后投影的 existing TargetSnapshot：owner result 与
   SM-2 CAS 必须先于下一 proof batch identity/request session/provider call；在 prerequisite pending 窗口保持零 attempt、零
   provider budget debit。duplicate、response loss 与 fresh-worker restart 必须复用同一 owner fact transaction，且 terminal replay
   不得重新取得已退役 selection 或产生额外 provider call；
+- `TestPresemanticTargetSnapshotOwnerFactFencesSemanticRequest` 固定请求准入的只读 snapshot debt 门禁；
+  `TestSemanticProofBudgetRetiredGenerationExhaustsBeforeNewSession` 先证明批次编译被未结算 owner fact 零写拒绝，再提交
+  isolated owner snapshot fixture 后核验原历史预算不退款。真实 File/Shell 多焦点 drive 独立反查原 stale observation、
+  binding target 和新 snapshot/observation；新增普通重验请求必须逐项对应 reopen，且每个原请求只提交一次。
 - Run/Workspace/Result 不解释 Orchestrator decision，只执行各自 owner-local typed outcome transition。
 
 ### Feedback Preservation

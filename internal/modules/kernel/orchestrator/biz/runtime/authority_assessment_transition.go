@@ -52,6 +52,9 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 		return RuntimeAggregate{}, fmt.Errorf("%w: assessment purpose does not match current semantic obligation", common.ErrConflict)
 	}
 	proofCompleteWithoutOwnerFacts := canonicalAssessmentProofCompleteWithoutOwnerFactsForPurpose(aggregate, assessmentPurpose)
+	// Keep this exact owner-private preimage for the post-adjudication owner-fact
+	// handoff. Advancing the assessment sequence is not a new owner observation.
+	assessmentProofPreimage := aggregate.CloneRaw()
 	ownerFactAcquisitionSettled := hasOwnerFactAcquisition && len(missingOwnerFacts) == 0 && proofCompleteWithoutOwnerFacts
 	ownerFactOnlyGap := len(missingOwnerFacts) != 0 && proofCompleteWithoutOwnerFacts
 	canonicalCoverage := applyCanonicalAssessmentCoverage(aggregate, aggregate.ActiveDispatch.ID, assessmentPurpose)
@@ -166,15 +169,20 @@ func (c *authorityComponent) commitAssessment(ctx context.Context, workspaceID c
 	aggregate.Facts.EvidenceRevision = assessmentRevision
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
+	if canonicalDisposition == runtimecontract.AssessmentDispositionSatisfied && !hasOwnerFactAcquisition {
+		if err := settleHistoricalAcceptanceConsumers(&aggregate, dispatch.ID); err != nil {
+			return RuntimeAggregate{}, err
+		}
+	}
 	previousFocusID := aggregate.Facts.Focus.ID
 	replanned := false
 	if ownerFactAcquisitionSettled {
-		replanned, err = settleRuntimeOwnerFactAcquisition(&aggregate, fact.ID, ownerFactAcquisition)
+		replanned, err = settleRuntimeOwnerFactAcquisition(&aggregate, fact.ID, ownerFactAcquisition, assessmentProofPreimage)
 		if err != nil {
 			return RuntimeAggregate{}, err
 		}
 	} else if canonicalDisposition == runtimecontract.AssessmentDispositionRepairableGap && ownerFactOnlyGap {
-		replanned, err = replanRuntimeCWIForUnmetOwnerFacts(&aggregate, fact.ID, assessmentPurpose)
+		replanned, err = replanRuntimeCWIForUnmetOwnerFacts(&aggregate, fact.ID, assessmentPurpose, assessmentProofPreimage)
 		if err != nil {
 			return RuntimeAggregate{}, err
 		}

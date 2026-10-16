@@ -79,7 +79,7 @@ func Fields(kind string) InputFields {
 			Arrays:     map[string]string{"lineageAssertions": "lineageAssertion", "acceptedOperationVariants": "variant", "capabilityStateRequirements": "capability", "requiredOwnerFacts": "ownerFact", "ownerFactConvergences": "convergence"},
 		}
 	case "lineageAssertion":
-		return InputFields{Text: "ref kind consumptionPoint ownerModuleId operationKind operationVariantId requiredEffectScope", Integer: "minCompletedRounds"}
+		return InputFields{Text: "ref kind consumptionPoint ownerModuleId operationKind operationVariantId requiredEffectScope terminalContractRef receiptSourceScope receiptSourceId validationSourceScope validationSourceId executionSourceContractRef repairHistoryContractRef", Integer: "minCompletedRounds"}
 	case "variant":
 		return InputFields{Text: "kind variantId"}
 	case "implementationWork":

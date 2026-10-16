@@ -441,8 +441,11 @@ func TestFileModuleExecutesConcreteFileWriteEventAndWritesState(t *testing.T) {
 	if response.Receipt.Evidence.ContentHash == "" {
 		t.Fatalf("file/write response = %+v", response)
 	}
-	if response.Receipt.Evidence.OwnerRevisionSet != nil {
-		t.Fatal("create-only absence 被补造为 existing bytes 依赖")
+	absence := response.Receipt.Evidence.OwnerRevisionSet
+	digest := sha256.Sum256([]byte("file-target-existence/v1\x00absent"))
+	if absence == nil || absence.Validate() != nil || absence.DefinitionRevision != transaction.DefinitionRevision || len(absence.Entries) != 1 ||
+		absence.Entries[0].ResourceKind != "workspace_target_existence" || absence.Entries[0].ResourceID != "README.md" || absence.Entries[0].Revision != hex.EncodeToString(digest[:]) {
+		t.Fatal("create-only 实际 absence 未按独立 existence 身份保存")
 	}
 	content, err := os.ReadFile(filepath.Join(workspace, "README.md"))
 	if err != nil || string(content) != "durable\n" {

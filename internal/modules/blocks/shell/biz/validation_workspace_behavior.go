@@ -129,7 +129,7 @@ func prepareShellBehaviorObservation(request RuntimeCommandRequest, args []strin
 	if err := file.Close(); err != nil {
 		return nil, "", err
 	}
-	instrumented := []string{args[0], "-coverpkg=" + coveragePackages, "-covermode=count", "-coverprofile=" + name}
+	instrumented := []string{args[0], "-coverpkg=" + coveragePackages, "-covermode=atomic", "-coverprofile=" + name}
 	return append(instrumented, args[1:]...), name, nil
 }
 
@@ -191,7 +191,7 @@ func shellWorkspaceBehaviorTargets(directory, coveragePath string, refs []string
 	defer coverage.Close()
 	reader := &io.LimitedReader{R: coverage, N: maxNativeCheckSourceBytes + 1}
 	scanner := bufio.NewScanner(reader)
-	if !scanner.Scan() || scanner.Text() != "mode: count" {
+	if !scanner.Scan() || (scanner.Text() != "mode: count" && scanner.Text() != "mode: atomic") {
 		return nil, fmt.Errorf("workspace behavior coverage is missing its tool header")
 	}
 	var observed []string

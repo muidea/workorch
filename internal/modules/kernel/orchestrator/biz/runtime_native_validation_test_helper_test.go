@@ -221,6 +221,7 @@ func runtimeTestPrepareNativeValidationThroughOwners(
 	t *testing.T,
 	bootstrap runtimecontract.RuntimeBootstrap,
 	workspaceDirectory string,
+	sourceBuilders ...func(runtimecontract.RuntimeValidationProofPreparation) string,
 ) map[string]runtimecontract.RuntimeValidationProofPreparation {
 	t.Helper()
 	if _, err := exec.LookPath("go"); err != nil {
@@ -352,6 +353,9 @@ func runtimeTestPrepareNativeValidationThroughOwners(
 			source.WriteString("}\n\n")
 		}
 		content := source.String()
+		if len(sourceBuilders) != 0 {
+			content = sourceBuilders[0](preparation.Clone())
+		}
 		executeFileWrite(runtimecontract.RuntimeOperation{
 			ID: fmt.Sprintf("prepare-native-cwi-%02d", index+1), Kind: runtimecontract.StepKindFileWrite,
 			RequiredOperationRef: "prepare-validation-proof/" + requirement.Hash,

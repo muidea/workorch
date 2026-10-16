@@ -32,6 +32,9 @@ func ParseRuntimeRawRef(ref string) (RuntimeRawRef, error) {
 		return RuntimeRawRef{}, common.ErrInvalidArgument
 	}
 	itemID, err := decodeRuntimeRawItemID(itemParts[0])
+	if collection == "validation-output" {
+		itemID, err = decodeRuntimeValidationOutputSelector(itemParts[0])
+	}
 	if err != nil {
 		return RuntimeRawRef{}, err
 	}

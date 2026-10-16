@@ -4,14 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"strconv"
 )
 
 // 当前 DTO 的封闭形状，不解释 provider JSON Schema，也不授予业务身份或准入权。
 type documentShape struct {
-	kind   byte
-	fields map[string]documentShape
-	item   *documentShape
+	kind     byte
+	fields   map[string]documentShape
+	item     *documentShape
+	optional bool
 }
 
 var (
@@ -42,7 +44,10 @@ var (
 			"ID": stringShape, "ObligationID": stringShape, "Declaration": stringShape, "Status": stringShape,
 			"ProfileID": stringShape, "EvidenceRequirementID": stringShape, "Scope": stringShape,
 		})),
-		"Reviews": arrayShape(reviewShape),
+		"Reviews":                arrayShape(reviewShape),
+		"ExecutionProofMappings": optionalShape(arrayShape(objectShape(map[string]documentShape{"ContractRef": stringShape, "ConsumerItemRef": stringShape, "RuleRef": stringShape, "SourceItemRef": stringShape, "ConsumerGoalText": optionalShape(stringShape)}))),
+		"EvidencePurposeMappings": optionalShape(arrayShape(objectShape(map[string]documentShape{"ContractRef": stringShape, "HistoricalItemRef": stringShape, "AcceptanceItemRef": stringShape,
+			"HistoricalProfileID": optionalShape(stringShape), "HistoricalDeliverableID": optionalShape(stringShape), "HistoricalProfileHash": optionalShape(stringShape), "HistoricalText": optionalShape(stringShape)}))),
 	})})
 	derivationShape = objectShape(map[string]documentShape{
 		"AuthoringInputHash": stringShape, "TemplateSnapshotHash": stringShape, "AdditionalItems": stringsShape,
@@ -52,6 +57,8 @@ var (
 func objectShape(fields map[string]documentShape) documentShape {
 	return documentShape{kind: 'o', fields: fields}
 }
+
+func optionalShape(shape documentShape) documentShape { shape.optional = true; return shape }
 
 func arrayShape(item documentShape) documentShape {
 	return documentShape{kind: 'a', item: &item}
@@ -73,6 +80,16 @@ func (s documentShape) validate(raw json.RawMessage, path string) error {
 	case 'o':
 		if len(raw) == 0 || raw[0] != '{' {
 			return fmt.Errorf("%s: expected_object", path)
+		}
+		if _, mapping := s.fields["HistoricalItemRef"]; mapping {
+			if err := workspace.ValidateEvidencePurposeMappingWireFields(raw); err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+		}
+		if _, mapping := s.fields["ConsumerItemRef"]; mapping {
+			if err := workspace.ValidateExecutionProofMappingWireFields(raw); err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
 		}
 		fields := make(map[string]struct{}, len(s.fields))
 		// 按 wire 顺序定位错误，避免 map 遍历导致诊断不确定。
@@ -100,12 +117,14 @@ func (s documentShape) validate(raw json.RawMessage, path string) error {
 		if len(fields) != len(s.fields) {
 			// 缺字段诊断按固定字典序选择，不依赖进程 map seed。
 			missing := ""
-			for name := range s.fields {
-				if _, exists := fields[name]; !exists && (missing == "" || name < missing) {
+			for name, child := range s.fields {
+				if _, exists := fields[name]; !exists && !child.optional && (missing == "" || name < missing) {
 					missing = name
 				}
 			}
-			return fmt.Errorf("%s.%s: required_field_missing", path, missing)
+			if missing != "" {
+				return fmt.Errorf("%s.%s: required_field_missing", path, missing)
+			}
 		}
 	case 'a':
 		if len(raw) == 0 || raw[0] != '[' {

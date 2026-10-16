@@ -18,13 +18,21 @@ const (
 	RuntimeImplementationWorkProtocolV1 = "runtime-implementation-work/v1"
 	MaxRuntimeImplementationWorkRounds  = 8
 	MaxRuntimeImplementationWorkTargets = 8
+
+	// RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef identifies
+	// the bounded owner-backed implementation-work scope. Its presence does not
+	// open executable admission before the public terminal closure is proven.
+	// It is a capability identity, not software-development behavior: File owns
+	// the neutral bounded workspace scope and all concrete target decisions.
+	RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef = "file/workspace_deliverable"
+	RuntimeImplementationWorkConstraintWorkspaceRelativePath     = "workspace-relative-path"
+	RuntimeImplementationWorkConstraintNewTargetOwnerSelector    = "new-target-requires-owner-selector"
 )
 
 // ErrRuntimeImplementationWorkUnavailable is a capability boundary, not an
 // invitation to borrow owner-fact acquisition or rejected-validation repair.
-// Remove the admission gate only with the same-CWI seal/receipt/re-observation
-// transaction and its restart tests. A syntactically valid policy is not an
-// executable protocol.
+// A syntactically valid policy is not an executable protocol. Admission stays
+// closed until owner adapters, terminal consumers and public closure are proven.
 var ErrRuntimeImplementationWorkUnavailable = errors.New("runtime implementation work protocol is not executable")
 
 // RuntimeImplementationWorkAvailability is a detached, deterministic report
@@ -41,7 +49,7 @@ type RuntimeImplementationWorkBlocker struct {
 	Reason        string
 }
 
-// ExplainRuntimeImplementationWorkAvailability exposes the exact reason the
+// ExplainRuntimeImplementationWorkAvailability exposes the exact reason an
 // execution gate remains closed without weakening the gate itself.
 func ExplainRuntimeImplementationWorkAvailability(profiles []RuntimeProfileContract) RuntimeImplementationWorkAvailability {
 	report := RuntimeImplementationWorkAvailability{Available: true}
@@ -50,11 +58,12 @@ func ExplainRuntimeImplementationWorkAvailability(profiles []RuntimeProfileContr
 			if requirement.ImplementationWorkPolicy == nil {
 				continue
 			}
-			report.Available = false
-			reason := ErrRuntimeImplementationWorkUnavailable.Error()
-			if err := requirement.ImplementationWorkPolicy.Validate(); err != nil {
+			policy := requirement.ImplementationWorkPolicy
+			reason := ErrRuntimeImplementationWorkUnavailable.Error() + ": terminal proof consumers and public full-flow closure remain unverified"
+			if err := policy.Validate(); err != nil {
 				reason = fmt.Sprintf("invalid implementation work declaration: %v", err)
 			}
+			report.Available = false
 			report.Blockers = append(report.Blockers, RuntimeImplementationWorkBlocker{
 				ProfileID: profile.ID, RequirementID: requirement.ID,
 				Reason: reason,

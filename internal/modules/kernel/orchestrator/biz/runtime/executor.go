@@ -12,18 +12,19 @@ import (
 )
 
 type RuntimeOperationExecutionRequest struct {
-	WorkspaceID               common.WorkspaceID
-	RunID                     common.RunID
-	DispatchID                string
-	Transaction               runtimecontract.AuthorityTransaction
-	Operation                 runtimecontract.RuntimeOperation
-	Execution                 runtimecontract.RuntimeOperationExecutionRecord
-	GovernanceGrant           *runtimecontract.RuntimeOperationGovernanceGrant
-	EvidenceKind              string
-	TargetRole                string
-	EvidencePolicies          []runtimecontract.RuntimeEvidencePolicy
-	ValidationRecipes         []runtimecontract.RuntimeValidationRecipe
-	ValidationScopeTargetRefs []string
+	WorkspaceID                      common.WorkspaceID
+	RunID                            common.RunID
+	DispatchID                       string
+	Transaction                      runtimecontract.AuthorityTransaction
+	Operation                        runtimecontract.RuntimeOperation
+	Execution                        runtimecontract.RuntimeOperationExecutionRecord
+	GovernanceGrant                  *runtimecontract.RuntimeOperationGovernanceGrant
+	EvidenceKind                     string
+	HistoricalEffectProofContractRef string
+	TargetRole                       string
+	EvidencePolicies                 []runtimecontract.RuntimeEvidencePolicy
+	ValidationRecipes                []runtimecontract.RuntimeValidationRecipe
+	ValidationScopeTargetRefs        []string
 	// ValidationProofBinding is the exact owner-native check mapping already
 	// sealed by SM-2 for a managed-validation CWI. It is selected only from the
 	// persisted CoverageEvidenceBinding and its persisted owner catalog; the
@@ -191,7 +192,7 @@ func (c *candidateDispatchComponent) recordOperationGovernanceRequired(ctx conte
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -362,7 +363,7 @@ func (c *candidateDispatchComponent) claimOperationExecution(ctx context.Context
 		return RuntimeAggregate{}, fmt.Errorf("%w: operation %q execution ledger is missing", common.ErrConflict, operationID)
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -403,7 +404,7 @@ func (c *candidateDispatchComponent) markGovernanceResumeExecutionStarted(ctx co
 		return RuntimeAggregate{}, nil, fmt.Errorf("%w: governance resume operation %q is missing", common.ErrConflict, operationID)
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, nil, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -474,7 +475,7 @@ func (c *candidateDispatchComponent) markOperationExecutionOutcomeUnknown(ctx co
 		}
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {

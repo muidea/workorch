@@ -29,7 +29,7 @@ func currentFocusHasEvidenceKind(facts RuntimeFacts, evidenceKind string) bool {
 		return false
 	}
 	for _, evidence := range facts.Evidence.Accepted {
-		if strings.TrimSpace(evidence.Kind) != evidenceKind {
+		if strings.TrimSpace(evidence.Kind) != evidenceKind || !RuntimeEvidenceHasProofApplicabilityAtRevision(evidence, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision) {
 			continue
 		}
 		for _, coverageID := range facts.Focus.CoverageWorkItemIDs {

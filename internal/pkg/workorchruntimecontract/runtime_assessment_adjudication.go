@@ -25,6 +25,12 @@ type RuntimeAssessmentAuthorityInput struct {
 	SourceText               string
 	Focus                    CoverageFocus
 	OperationAdmissibilities []RuntimeOperationAdmissibility
+	// Immutable SM-2 observation prefix at admission. Later
+	// observations cannot change a historical assessment's classification.
+	ApplicabilityObservations []RuntimeEvidenceApplicabilityObservation `json:",omitempty"`
+	// Original generation at assessment admission; later Resume cannot upgrade
+	// old observations, while historical classification retains this fence.
+	ApplicabilityReconciliationRequestHash string `json:",omitempty"`
 }
 
 type RuntimeAssessmentPurpose string
@@ -57,6 +63,8 @@ func (a RuntimeAssessmentAuthorityInput) Normalized() RuntimeAssessmentAuthority
 	a.SourceText = strings.TrimSpace(a.SourceText)
 	a.Focus = a.Focus.Normalized()
 	a.OperationAdmissibilities = NormalizeRuntimeOperationAdmissibilities(a.OperationAdmissibilities)
+	a.ApplicabilityObservations = CloneRuntimeEvidenceApplicabilityObservations(a.ApplicabilityObservations)
+	a.ApplicabilityReconciliationRequestHash = strings.TrimSpace(a.ApplicabilityReconciliationRequestHash)
 	return a
 }
 
@@ -90,6 +98,17 @@ func (a RuntimeAssessmentAuthorityInput) Validate(transaction AuthorityTransacti
 	if !RuntimeCoverageEvidenceBindingProjectionsEqual(a.Focus.CoverageEvidenceBindings, bindings) {
 		return fmt.Errorf("runtime assessment authority input binding preimage mismatch")
 	}
+	for _, observation := range a.ApplicabilityObservations {
+		if err := observation.ValidateRaw(); err != nil {
+			return err
+		}
+		if observation.Request.EvidenceRevision > transaction.EvidenceRevision {
+			return fmt.Errorf("assessment contains future applicability observation")
+		}
+	}
+	if StableRuntimeEvidenceApplicabilitySemanticHash(a.ApplicabilityObservations) != a.AuthorityInput.ApplicabilityObservationHash {
+		return fmt.Errorf("assessment applicability observations do not match sealed authority identity")
+	}
 	return nil
 }
 
@@ -115,7 +134,8 @@ type RuntimeAssessmentAdjudicationProof struct {
 	EvidenceFactID     common.EvidenceRecordID
 	EvidenceFactHash   string
 	// 原选中 evidence 的完整读取依赖；不代表 assessment 的全部依赖。
-	OwnerRevisionSet *RuntimeOwnerRevisionSet `json:",omitempty"`
+	OwnerRevisionSet          *RuntimeOwnerRevisionSet                  `json:",omitempty"`
+	ApplicabilityDependencies *RuntimeEvidenceApplicabilityDependencies `json:",omitempty"`
 }
 
 func (p RuntimeAssessmentAdjudicationProof) Normalized() RuntimeAssessmentAdjudicationProof {
@@ -124,6 +144,7 @@ func (p RuntimeAssessmentAdjudicationProof) Normalized() RuntimeAssessmentAdjudi
 	p.EvidenceFactID = common.EvidenceRecordID(strings.TrimSpace(string(p.EvidenceFactID)))
 	p.EvidenceFactHash = strings.TrimSpace(p.EvidenceFactHash)
 	p.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(p.OwnerRevisionSet)
+	p.ApplicabilityDependencies = CloneRuntimeEvidenceApplicabilityDependencies(p.ApplicabilityDependencies)
 	return p
 }
 
@@ -197,10 +218,13 @@ func (a RuntimeAssessmentAdjudication) ValidateRaw() error {
 		return fmt.Errorf("satisfied runtime assessment adjudication requires proof")
 	}
 	for _, proof := range a.Proofs {
+		if err := ValidateRuntimeEvidencePurposeKind(proof.ApplicabilityDependencies, proof.EvidenceKind); err != nil {
+			return err
+		}
 		if !reflect.DeepEqual(proof, proof.Normalized()) || proof.CoverageWorkItemID == "" || proof.EvidenceKind == "" || proof.EvidenceFactID == "" || proof.EvidenceFactHash == "" {
 			return fmt.Errorf("runtime assessment adjudication contains malformed proof")
 		}
-		if err := validateRuntimeOwnerRevisionSetRaw(proof.OwnerRevisionSet); err != nil {
+		if err := ValidateRuntimeEvidenceDependencyPair(proof.OwnerRevisionSet, proof.ApplicabilityDependencies, ""); err != nil {
 			return fmt.Errorf("runtime assessment proof owner dependencies: %w", err)
 		}
 	}
@@ -243,6 +267,10 @@ func DeriveRuntimeAssessmentAdjudication(
 	lineage []RuntimeCoverageProofLineage,
 	lineageSources RuntimeLineageAssertionSources,
 ) (RuntimeAssessmentAdjudication, error) {
+	return deriveRuntimeAssessmentAdjudicationInSession(dispatch, facts, completed, lineage, lineageSources, &runtimeHistoricalPreimageSession{})
+}
+
+func deriveRuntimeAssessmentAdjudicationInSession(dispatch RuntimeDispatchRecord, facts RuntimeFacts, completed []RuntimeDispatchRecord, lineage []RuntimeCoverageProofLineage, lineageSources RuntimeLineageAssertionSources, session *runtimeHistoricalPreimageSession) (RuntimeAssessmentAdjudication, error) {
 	if dispatch.Candidate.Assessment == nil || dispatch.AssessmentAuthorityInput == nil {
 		return RuntimeAssessmentAdjudication{}, fmt.Errorf("runtime assessment adjudication requires assessment dispatch authority")
 	}
@@ -251,7 +279,7 @@ func DeriveRuntimeAssessmentAdjudication(
 	}
 	candidate := dispatch.Candidate.Assessment.Normalized()
 	authority := dispatch.AssessmentAuthorityInput.Normalized()
-	ownerFactSources, err := deriveRuntimeAssessmentOwnerFactSources(facts.DefinitionRevision, string(facts.WorkspaceID), *dispatch.AssessmentAuthorityInput)
+	ownerFactSources, err := deriveRuntimeAssessmentOwnerFactSourcesInSession(facts.DefinitionRevision, string(facts.WorkspaceID), *dispatch.AssessmentAuthorityInput, session.semanticSession())
 	if err != nil {
 		return RuntimeAssessmentAdjudication{}, err
 	}
@@ -280,7 +308,7 @@ func DeriveRuntimeAssessmentAdjudication(
 			if !reflect.DeepEqual(lineageSources.Facts, facts) {
 				return RuntimeAssessmentAdjudication{}, fmt.Errorf("lineage assertion facts differ from assessment source")
 			}
-			if !RuntimeExecutionLineageAssertionsSatisfied(binding, lineageSources, dispatch.Transaction.EvidenceRevision) {
+			if !runtimeExecutionLineageAssertionsInSession(binding, lineageSources, dispatch.Transaction.EvidenceRevision, session) {
 				complete = false
 			}
 		}
@@ -291,7 +319,7 @@ func DeriveRuntimeAssessmentAdjudication(
 	}
 	result = result.Normalized()
 	for _, proof := range result.Proofs {
-		if err := validateRuntimeOwnerRevisionSetRaw(proof.OwnerRevisionSet); err != nil {
+		if err := ValidateRuntimeEvidenceDependencyPair(proof.OwnerRevisionSet, proof.ApplicabilityDependencies, facts.DefinitionRevision); err != nil {
 			return RuntimeAssessmentAdjudication{}, fmt.Errorf("runtime assessment selected proof dependencies: %w", err)
 		}
 		if proof.OwnerRevisionSet != nil && proof.OwnerRevisionSet.DefinitionRevision != facts.DefinitionRevision {
@@ -309,6 +337,10 @@ func ValidateRuntimeAssessmentAdjudication(
 	lineage []RuntimeCoverageProofLineage,
 	lineageSources RuntimeLineageAssertionSources,
 ) error {
+	return validateRuntimeAssessmentAdjudicationInSession(dispatch, fact, facts, completed, lineage, lineageSources, &runtimeHistoricalPreimageSession{})
+}
+
+func validateRuntimeAssessmentAdjudicationInSession(dispatch RuntimeDispatchRecord, fact RuntimeAssessmentFact, facts RuntimeFacts, completed []RuntimeDispatchRecord, lineage []RuntimeCoverageProofLineage, lineageSources RuntimeLineageAssertionSources, session *runtimeHistoricalPreimageSession) error {
 	if dispatch.AssessmentAdjudication == nil || dispatch.AssessmentAdjudicationHash == "" || fact.AdjudicationHash == "" {
 		return fmt.Errorf("committed runtime assessment dispatch %q requires double-entry adjudication", dispatch.ID)
 	}
@@ -318,6 +350,9 @@ func ValidateRuntimeAssessmentAdjudication(
 	}
 	if dispatch.AssessmentAdjudicationHash != StableRuntimeAssessmentAdjudicationHash(actual) || fact.AdjudicationHash != dispatch.AssessmentAdjudicationHash {
 		return fmt.Errorf("runtime assessment dispatch %q adjudication hash mismatch", dispatch.ID)
+	}
+	if dispatch.AssessmentAuthorityInput == nil {
+		return fmt.Errorf("runtime assessment adjudication requires assessment dispatch authority")
 	}
 	authority := dispatch.AssessmentAuthorityInput.Normalized()
 	source, err := RuntimeAssessmentSourceProjection(facts, fact.FocusID, fact.CoverageWorkItemIDs)
@@ -329,7 +364,7 @@ func ValidateRuntimeAssessmentAdjudication(
 		!sameCoverageWorkItemIDs(authority.Focus.CoverageWorkItemIDs, fact.CoverageWorkItemIDs) {
 		return fmt.Errorf("runtime assessment dispatch %q authority source does not match definition seed", dispatch.ID)
 	}
-	expected, err := DeriveRuntimeAssessmentAdjudication(dispatch, facts, completed, lineage, lineageSources)
+	expected, err := deriveRuntimeAssessmentAdjudicationInSession(dispatch, facts, completed, lineage, lineageSources, session)
 	if err != nil {
 		return err
 	}
@@ -343,6 +378,23 @@ func ValidateRuntimeAssessmentAdjudication(
 // of the assessment double entry after the global evidence ledger has proved
 // the one-to-one fact/dispatch chronology.
 func ValidateRuntimeAssessmentAdjudications(facts RuntimeFacts, completed []RuntimeDispatchRecord, lineage []RuntimeCoverageProofLineage, lineageSources RuntimeLineageAssertionSources) error {
+	return validateRuntimeAssessmentAdjudicationsInSession(facts, completed, lineage, lineageSources, &runtimeHistoricalPreimageSession{})
+}
+
+func validateRuntimeAssessmentAdjudicationsInSession(facts RuntimeFacts, completed []RuntimeDispatchRecord, lineage []RuntimeCoverageProofLineage, lineageSources RuntimeLineageAssertionSources, session *runtimeHistoricalPreimageSession) error {
+	// The explicit arguments remain independent inputs. Only exact agreement
+	// with the complete source permits its private raw preimage to represent
+	// them; mismatching arguments execute the original full consumer unchanged.
+	if session != nil && session.sourceCompiler != nil && reflect.DeepEqual(facts, lineageSources.Facts) &&
+		reflect.DeepEqual(completed, lineageSources.Completed) && reflect.DeepEqual(lineage, lineageSources.ProofLineage) {
+		return session.sourceCompiler.validate(lineageSources, true, func() error {
+			return validateRuntimeAssessmentAdjudicationsComplete(facts, completed, lineage, lineageSources, session)
+		})
+	}
+	return validateRuntimeAssessmentAdjudicationsComplete(facts, completed, lineage, lineageSources, session)
+}
+
+func validateRuntimeAssessmentAdjudicationsComplete(facts RuntimeFacts, completed []RuntimeDispatchRecord, lineage []RuntimeCoverageProofLineage, lineageSources RuntimeLineageAssertionSources, session *runtimeHistoricalPreimageSession) error {
 	byID := make(map[string]RuntimeAssessmentFact, len(facts.Assessments))
 	for _, fact := range facts.Assessments {
 		byID[fact.ID] = fact
@@ -360,7 +412,7 @@ func ValidateRuntimeAssessmentAdjudications(facts RuntimeFacts, completed []Runt
 		if !found {
 			return fmt.Errorf("committed runtime assessment dispatch %q has no assessment fact", dispatch.ID)
 		}
-		if err := ValidateRuntimeAssessmentAdjudication(dispatch, fact, facts, completed, lineage, lineageSources); err != nil {
+		if err := validateRuntimeAssessmentAdjudicationInSession(dispatch, fact, facts, completed, lineage, lineageSources, session); err != nil {
 			return err
 		}
 	}
@@ -386,6 +438,24 @@ func ValidateRuntimeAssessmentAuthoritySources(facts RuntimeFacts, active *Runti
 			return err
 		}
 		authority := dispatch.AssessmentAuthorityInput.Normalized()
+		// Evidence revision is not a temporal cutoff: an invalidated assessment
+		// can be followed by new observations without a new evidence fact. Match
+		// the original append-only prefix and its independently sealed semantic
+		// authority instead of pulling future observations into historical proof.
+		count := len(authority.ApplicabilityObservations)
+		if count > len(facts.EvidenceApplicabilityObservations) {
+			return fmt.Errorf("runtime assessment dispatch %q applicability prefix is missing", dispatch.ID)
+		}
+		var originalObservations []RuntimeEvidenceApplicabilityObservation
+		if count > 0 {
+			originalObservations = facts.EvidenceApplicabilityObservations[:count]
+		}
+		if !reflect.DeepEqual(authority.ApplicabilityObservations, originalObservations) {
+			return fmt.Errorf("runtime assessment dispatch %q applicability prefix does not match original SM-2 observations", dispatch.ID)
+		}
+		if StableRuntimeEvidenceApplicabilitySemanticHash(originalObservations) != authority.AuthorityInput.ApplicabilityObservationHash {
+			return fmt.Errorf("runtime assessment dispatch %q applicability authority identity mismatch", dispatch.ID)
+		}
 		if authority.SourceSliceID != source.SliceID || authority.SourceScope != source.AssessmentScope ||
 			authority.SourceID != source.AssessmentID || authority.SourceText != source.AssessmentText {
 			return fmt.Errorf("runtime assessment dispatch %q authority source does not match definition seed", dispatch.ID)
@@ -400,6 +470,32 @@ func ValidateRuntimeAssessmentAuthoritySources(facts RuntimeFacts, active *Runti
 	for _, dispatch := range completed {
 		if err := validate(dispatch); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// The generation remains an original read fence after Resume. It must resolve
+// in the same immutable reconciliation ledger, never in caller-supplied state.
+func ValidateRuntimeAssessmentApplicabilityGenerations(ledger RuntimeCWIReconciliationLedger, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord) error {
+	dispatches := append([]RuntimeDispatchRecord(nil), completed...)
+	if active != nil {
+		dispatches = append(dispatches, *active)
+	}
+	for _, dispatch := range dispatches {
+		if dispatch.AssessmentAuthorityInput == nil {
+			continue
+		}
+		hash := dispatch.AssessmentAuthorityInput.ApplicabilityReconciliationRequestHash
+		if hash == "" {
+			continue // Original pre-Resume generation; not currentness by itself.
+		}
+		found := ledger.Request != nil && ledger.RequestHash == hash
+		for _, historical := range ledger.History {
+			found = found || historical.RequestHash == hash
+		}
+		if !found {
+			return fmt.Errorf("assessment applicability has no original reconciliation generation")
 		}
 	}
 	return nil
@@ -432,6 +528,7 @@ func deriveAssessmentCoverageProofs(
 	byKind := make(map[string][]EvidenceFact)
 	for _, fact := range normalizeEvidenceFacts(accepted) {
 		if fact.Revision > assessmentDispatch.Transaction.EvidenceRevision || assessmentEvidenceWeak(fact) ||
+			!RuntimeEvidenceHasFreshProofApplicability(fact, assessmentDispatch.AssessmentAuthorityInput.ApplicabilityObservations, assessmentDispatch.Transaction.EvidenceRevision, assessmentDispatch.AssessmentAuthorityInput.ApplicabilityReconciliationRequestHash) ||
 			!coverageWorkItemIDInAssessment(fact.CoverageWorkItemIDs, binding.CoverageWorkItemID) {
 			continue
 		}
@@ -487,12 +584,16 @@ func deriveAssessmentCoverageProofs(
 			return nil, false
 		}
 	}
+	if purpose == RuntimeAssessmentPurposeDefinitionProof && !RuntimeHistoricalEffectsHaveCurrentAcceptanceProof(selected) {
+		return nil, false
+	}
 	proofs := make([]RuntimeAssessmentAdjudicationProof, 0, len(selected))
 	for _, fact := range selected {
 		proofs = append(proofs, RuntimeAssessmentAdjudicationProof{
 			CoverageWorkItemID: binding.CoverageWorkItemID, EvidenceKind: fact.Kind,
 			EvidenceFactID: fact.ID, EvidenceFactHash: StableRuntimeEvidenceFactHash(fact),
-			OwnerRevisionSet: CloneRuntimeOwnerRevisionSet(fact.OwnerRevisionSet),
+			OwnerRevisionSet:          CloneRuntimeOwnerRevisionSet(fact.OwnerRevisionSet),
+			ApplicabilityDependencies: CloneRuntimeEvidenceApplicabilityDependencies(fact.ApplicabilityDependencies),
 		})
 	}
 	return proofs, true

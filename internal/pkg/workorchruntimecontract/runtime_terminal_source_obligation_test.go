@@ -38,7 +38,10 @@ func terminalSourceObligationFixture(t *testing.T) RuntimeStateRecord {
 		observation.ExecutedChecks = append(observation.ExecutedChecks, attestation.NativeCheckRef)
 		observation.PassedChecks = append(observation.PassedChecks, attestation.NativeCheckRef)
 	}
-	source.Facts.Evidence.Accepted = []EvidenceFact{{ID: "evidence", Kind: EvidenceKindValidation, DispatchID: "source-dispatch", OperationID: "source-validation", CoverageWorkItemIDs: []common.CoverageWorkItemID{item.ID}, BindingRefs: []string{binding.ID}, AuthoritySnapshotID: "authority", Revision: "evidence:1", ContentHash: "content", Validation: &observation}}
+	ownerDependencies := (RuntimeOwnerRevisionSet{DefinitionRevision: inventory.DefinitionRevision, Entries: []RuntimeOwnerRevisionRef{{
+		OwnerKind: "capability", OwnerInstanceID: "blocks/file/ws-1", ResourceKind: "workspace_target", ResourceID: "target", Revision: "bytes:1", DependencyHash: "selector:target",
+	}}}).WithHash()
+	source.Facts.Evidence.Accepted = []EvidenceFact{{ID: "evidence", Kind: EvidenceKindValidation, DispatchID: "source-dispatch", OperationID: "source-validation", CoverageWorkItemIDs: []common.CoverageWorkItemID{item.ID}, BindingRefs: []string{binding.ID}, AuthoritySnapshotID: "authority", Revision: "evidence:1", ContentHash: "content", OwnerRevisionSet: &ownerDependencies, Validation: &observation}}
 	source.CompletedDispatches = []RuntimeDispatchRecord{{ID: "source-dispatch", WorkspaceID: source.Facts.WorkspaceID, RunID: source.Facts.RunID, CoverageBindings: []CoverageEvidenceBinding{binding.Clone()}}}
 	source.Facts.Evidence.Rejected = nil
 	source.Decision.State = ConvergenceStateComplete
@@ -56,6 +59,9 @@ func TestRuntimeTerminalSourceObligationsPreserveAllOfAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	outcome := material.RuntimeCloseout.RequirementOutcomes[0]
+	if !reflect.DeepEqual(outcome.EvidenceItems[0].OwnerRevisionSet, source.Facts.Evidence.Accepted[0].OwnerRevisionSet) {
+		t.Fatalf("terminal evidence dropped original owner dependencies: %+v", outcome.EvidenceItems[0])
+	}
 	if len(outcome.SourceObligations) != 2 || len(material.DoDAssessment.Items) != 3 {
 		t.Fatal("terminal material lost shared CWI source obligations")
 	}
@@ -83,8 +89,53 @@ func TestRuntimeTerminalSourceObligationsPreserveAllOfAndRestart(t *testing.T) {
 	clone.RuntimeCloseout.RequirementOutcomes[0].SourceObligations[0].AcceptedEvidenceRefs[0] = "changed"
 	clone.RuntimeCloseout.RequirementOutcomes[0].SourceObligations[0].CurrentBindingRef.BindingHash = "changed"
 	clone.RuntimeCloseout.SourceObligations.Obligations[0].DoDItemRefs[0] = "changed"
+	clone.RuntimeCloseout.RequirementOutcomes[0].EvidenceItems[0].OwnerRevisionSet.Entries[0].Revision = "changed"
 	if !reflect.DeepEqual(material, repeated) {
 		t.Fatal("raw terminal clone aliases source outcomes or inventory")
+	}
+}
+
+func TestRuntimeTerminalEvidencePreservesDistinctReadSnapshots(t *testing.T) {
+	source := terminalSourceObligationFixture(t)
+	source.Decision.State = ConvergenceStateFailed
+	second := source.Facts.Evidence.Accepted[0]
+	second.ID = "evidence-conflict"
+	second.OperationID = "source-validation-conflict"
+	second.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(second.OwnerRevisionSet)
+	second.OwnerRevisionSet.Entries[0].Revision = "bytes:2"
+	*second.OwnerRevisionSet = second.OwnerRevisionSet.WithHash()
+	second.BindingRefs = []string{"historical-binding"}
+	source.Facts.Evidence.Accepted = append(source.Facts.Evidence.Accepted, second)
+	before := source.Clone()
+	material, err := DeriveRuntimeTerminalResultMaterialFromState(source)
+	if err != nil || material.RuntimeCloseout.ValidateRaw() != nil {
+		t.Fatalf("original read snapshots cannot be compiled: %v", err)
+	}
+	items := material.RuntimeCloseout.RequirementOutcomes[0].EvidenceItems
+	if len(items) != 2 || items[1].State != RuntimeRequirementEvidenceStaleOrSuperseded ||
+		!reflect.DeepEqual(items[0].OwnerRevisionSet, source.Facts.Evidence.Accepted[0].OwnerRevisionSet) ||
+		!reflect.DeepEqual(items[1].OwnerRevisionSet, second.OwnerRevisionSet) {
+		t.Fatal("terminal projection selected one read version or restored historical credit")
+	}
+	if !reflect.DeepEqual(source, before) {
+		t.Fatal("terminal compiler rewrote read history")
+	}
+	encoded, err := json.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reloaded RuntimeStateRecord
+	if err := json.Unmarshal(encoded, &reloaded); err != nil {
+		t.Fatal(err)
+	}
+	repeated, err := DeriveRuntimeTerminalResultMaterialFromState(reloaded)
+	if err != nil || !reflect.DeepEqual(material, repeated) {
+		t.Fatalf("restart changed original terminal evidence reads: %v", err)
+	}
+	changed := material.CloneRaw()
+	changed.RuntimeCloseout.RequirementOutcomes[0].EvidenceItems[0].OwnerRevisionSet.Entries[0].Revision = "tamper"
+	if changed.RuntimeCloseout.ValidateRaw() == nil {
+		t.Fatal("dependency tamper passed terminal hash/raw validation")
 	}
 }
 

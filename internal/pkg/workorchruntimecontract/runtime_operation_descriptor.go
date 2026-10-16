@@ -83,6 +83,7 @@ type RuntimeOperationDescriptor struct {
 	TargetCardinality                 RuntimeOperationTargetCardinality
 	FailureTargetProtocol             RuntimeFailureTargetProtocol
 	RepairSurfaceConfirmationProtocol RuntimeRepairSurfaceConfirmationProtocol
+	HistoricalEffectProofContractRef  string
 }
 
 // RuntimeOperationDescriptors returns the complete normalized, stably sorted descriptor inventory.
@@ -285,7 +286,8 @@ func init() {
 		},
 		{
 			Kind: StepKindFileEdit, OwnerModuleID: RuntimeModuleFile,
-			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+			HistoricalEffectProofContractRef: RuntimeFileHistoricalEffectProofV1,
+			DefaultEffectScope:               RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
 			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 			RepairSurfaceConfirmationProtocol: RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets,
@@ -293,14 +295,16 @@ func init() {
 		{
 			// Historical durable file mutation kind used by fixtures/capability contracts.
 			Kind: StepKindFileWrite, OwnerModuleID: RuntimeModuleFile,
-			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+			HistoricalEffectProofContractRef: RuntimeFileHistoricalEffectProofV1,
+			DefaultEffectScope:               RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
 			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 			RepairSurfaceConfirmationProtocol: RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets,
 		},
 		{
 			Kind: RuntimeBlockKindPatchApply, OwnerModuleID: RuntimeModuleFile,
-			DefaultEffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
+			HistoricalEffectProofContractRef: RuntimeFileHistoricalEffectProofV1,
+			DefaultEffectScope:               RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce,
 			AllowedStates: []ConvergenceState{ConvergenceStateNeedStateChange}, CapabilityClass: RuntimeCapabilityClassStateChange,
 			RequiresOwnerReceipt: true, TargetCardinality: RuntimeOperationTargetCardinalityOne, FailureTargetProtocol: RuntimeFailureTargetProtocolSealedOperation,
 			RepairSurfaceConfirmationProtocol: RuntimeRepairSurfaceConfirmationProtocolFileWorkspaceRegularTargets,

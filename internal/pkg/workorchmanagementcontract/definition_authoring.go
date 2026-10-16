@@ -149,14 +149,34 @@ type DefinitionAuthoringReview struct {
 }
 
 type DefinitionAuthoringProposal struct {
-	GoalText           string                            `json:"goalText"`
-	Items              []DefinitionAuthoringItem         `json:"items"`
-	Resources          []DefinitionAuthoringResource     `json:"resources,omitempty"`
-	Verifications      []DefinitionAuthoringVerification `json:"verifications,omitempty"`
-	Reviews            []DefinitionAuthoringReview       `json:"reviews,omitempty"`
-	ProposalHash       string                            `json:"proposalHash"`
-	SpecificationHash  string                            `json:"specificationHash,omitempty"`
-	DerivationPermitID string                            `json:"derivationPermitId"`
+	GoalText                string                                      `json:"goalText"`
+	Items                   []DefinitionAuthoringItem                   `json:"items"`
+	Resources               []DefinitionAuthoringResource               `json:"resources,omitempty"`
+	Verifications           []DefinitionAuthoringVerification           `json:"verifications,omitempty"`
+	Reviews                 []DefinitionAuthoringReview                 `json:"reviews,omitempty"`
+	ExecutionProofMappings  []DefinitionAuthoringExecutionProofMapping  `json:"executionProofMappings,omitempty"`
+	EvidencePurposeMappings []DefinitionAuthoringEvidencePurposeMapping `json:"evidencePurposeMappings,omitempty"`
+	ProposalHash            string                                      `json:"proposalHash"`
+	SpecificationHash       string                                      `json:"specificationHash,omitempty"`
+	DerivationPermitID      string                                      `json:"derivationPermitId"`
+}
+
+type DefinitionAuthoringExecutionProofMapping struct {
+	ConsumerGoalText string `json:"consumerGoalText,omitempty"`
+	ContractRef      string `json:"contractRef"`
+	ConsumerItemRef  string `json:"consumerItemRef"`
+	RuleRef          string `json:"ruleRef"`
+	SourceItemRef    string `json:"sourceItemRef"`
+}
+
+type DefinitionAuthoringEvidencePurposeMapping struct {
+	ContractRef             string `json:"contractRef"`
+	HistoricalItemRef       string `json:"historicalItemRef"`
+	AcceptanceItemRef       string `json:"acceptanceItemRef"`
+	HistoricalProfileID     string `json:"historicalProfileId,omitempty"`
+	HistoricalDeliverableID string `json:"historicalDeliverableId,omitempty"`
+	HistoricalProfileHash   string `json:"historicalProfileHash,omitempty"`
+	HistoricalText          string `json:"historicalText,omitempty"`
 }
 
 type DefinitionAuthoringRequestState struct {

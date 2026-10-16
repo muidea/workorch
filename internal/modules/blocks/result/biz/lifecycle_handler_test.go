@@ -340,7 +340,7 @@ func TestTerminalDeliveryPreservesFormalCloseoutArtifactHashAndMapsChildProjecti
 		RequirementOutcomes: []runtimecontract.RuntimeRequirementOutcome{{
 			RequirementRef: "requirement-1", SourceItemRef: "dod-item-1", CoverageWorkItemID: "cwi-1", DefinitionRevision: command.DefinitionRevision,
 			CoverageState: runtimecontract.RuntimeRequirementCovered, AssessmentState: runtimecontract.RuntimeRequirementSatisfied,
-			EvidenceItems:        []runtimecontract.RuntimeRequirementEvidenceItem{{EvidenceRef: "evidence-1", BindingRef: "binding-1", State: runtimecontract.RuntimeRequirementEvidenceAccepted, OwnerRevisionSetHash: revisions.SetHash}},
+			EvidenceItems:        []runtimecontract.RuntimeRequirementEvidenceItem{{EvidenceRef: "evidence-1", BindingRef: "binding-1", State: runtimecontract.RuntimeRequirementEvidenceAccepted, OwnerRevisionSetHash: revisions.SetHash, OwnerRevisionSet: runtimecontract.CloneRuntimeOwnerRevisionSet(&revisions)}},
 			AcceptedEvidenceRefs: []string{"evidence-1"}, OwnerRevisionSetHash: revisions.SetHash,
 		}},
 		AcceptedEvidenceRefs: []string{"evidence-1"}, OwnerRevisionSet: revisions, ArtifactRefs: []common.ArtifactID{sourceRef},
@@ -375,9 +375,11 @@ func TestTerminalDeliveryPreservesFormalCloseoutArtifactHashAndMapsChildProjecti
 		t.Fatalf("Result 回执未携带实际持久化的完整 closeout: %+v", created.DeliveryAck)
 	}
 	created.DeliveryAck.ResultCloseout.RequirementOutcomes[0].AcceptedEvidenceRefs[0] = "caller-tampered"
+	created.DeliveryAck.ResultCloseout.RequirementOutcomes[0].EvidenceItems[0].OwnerRevisionSet.Entries[0].Revision = "caller-tampered"
 	stored, err := results.Get(common.ContextWithRuntimeWorkspaceID(ctx, command.WorkspaceID), created.Result.ID)
 	if err != nil || stored.RuntimeCloseout == nil || stored.RuntimeCloseout.CloseoutHash != sealedHash ||
-		stored.RuntimeCloseout.RequirementOutcomes[0].AcceptedEvidenceRefs[0] != "evidence-1" {
+		stored.RuntimeCloseout.RequirementOutcomes[0].AcceptedEvidenceRefs[0] != "evidence-1" ||
+		!reflect.DeepEqual(stored.RuntimeCloseout.RequirementOutcomes[0].EvidenceItems[0].OwnerRevisionSet, &revisions) {
 		t.Fatalf("回执别名污染了 Result owner 存储: stored=%+v err=%v", stored, err)
 	}
 	replayed, err := biz.applyTerminalDelivery(ctx, command)

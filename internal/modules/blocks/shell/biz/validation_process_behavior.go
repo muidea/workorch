@@ -81,7 +81,10 @@ func shellProcessBehaviorEnvironment(env []string, directory string, testArgs []
 			break
 		}
 	}
-	return append(ret, "GOFLAGS=-cover -covermode=count "+coverage, "GOCOVERDIR="+directory, "WORKORCH_PROCESS_COVERDIR="+directory)
+	// Atomic retains real execution counts and is compatible with inherited
+	// nested go test -race. Count mode would make valid reviewed race commands
+	// fail solely because of owner instrumentation, not the delivery behavior.
+	return append(ret, "GOFLAGS=-cover -covermode=atomic "+coverage, "GOCOVERDIR="+directory, "WORKORCH_PROCESS_COVERDIR="+directory)
 }
 
 // This observation supplies execution grounding only. The native test must

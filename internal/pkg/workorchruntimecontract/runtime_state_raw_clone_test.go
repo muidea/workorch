@@ -4,7 +4,47 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 )
+
+func TestRuntimeStateRecordCloneCompletePopulatedGraph(t *testing.T) {
+	var original RuntimeStateRecord
+	sequence := 0
+	populateRuntimeStateRawCloneFixture(reflect.ValueOf(&original).Elem(), map[reflect.Type]int{}, &sequence)
+	cloned := original.Clone()
+	if !reflect.DeepEqual(original, cloned) {
+		t.Fatal("complete populated raw graph changed")
+	}
+	assertRuntimeStateRawCloneDetached(t, reflect.ValueOf(original), reflect.ValueOf(cloned), "complete RuntimeStateRecord")
+}
+
+func TestRuntimeStateRecordCloneGovernanceAuthorizationRawShape(t *testing.T) {
+	for _, fields := range [][]workorcheventpayload.Field{nil, {}, {
+		{Name: " raw field \x00", Value: workorcheventpayload.Value{
+			Kind:   workorcheventpayload.ValueArray,
+			Object: []workorcheventpayload.Field{},
+			Array: []workorcheventpayload.Value{{Kind: workorcheventpayload.ValueObject,
+				Object: []workorcheventpayload.Field{{Name: "nested", Value: workorcheventpayload.Value{Kind: workorcheventpayload.ValueString, String: " original \x00", Array: []workorcheventpayload.Value{}}}},
+			}},
+		}},
+	}} {
+		payload := workorcheventpayload.Payload{Fields: fields}
+		original := RuntimeStateRecord{OperationReceipts: []RuntimeOperationReceipt{{Governance: &RuntimeGovernanceRequirement{AuthorizationContext: payload}}}}
+		original.Facts.Failure = &FailureFact{GovernanceDependency: &ExternalDependency{AuthorizationContext: payload}}
+		cloned := original.Clone()
+		if !reflect.DeepEqual(original, cloned) {
+			t.Fatal("raw authorization nil/empty, ordering or original bytes changed")
+		}
+		assertRuntimeStateRawCloneDetached(t, reflect.ValueOf(original), reflect.ValueOf(cloned), "governance authorization")
+		if len(fields) > 0 {
+			cloned.OperationReceipts[0].Governance.AuthorizationContext.Fields[0].Value.Array[0].Object[0].Value.String = "caller mutation"
+			if fields[0].Value.Array[0].Object[0].Value.String != " original \x00" {
+				t.Fatal("receipt authorization mutation changed original context")
+			}
+		}
+	}
+}
 
 func TestRuntimeStateRecordClonePreservesRawShapeAndDetachesAllReferences(t *testing.T) {
 	t.Parallel()

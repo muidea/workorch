@@ -2432,7 +2432,7 @@ func TestWorkspaceGetEndpointOverlaysProjectedViewModel(t *testing.T) {
 		t.Fatalf("RebuildWorkspace: %v", err)
 	}
 
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID, nil)
+	getReq := newLocalOperatorTestRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+workspace.ID, nil)
 	getRec := httptest.NewRecorder()
 	handler.ServeHTTP(getRec, getReq)
 
@@ -5075,6 +5075,15 @@ func TestMetricsEndpointReportsExecutionAdmissionCounters(t *testing.T) {
 
 var runtimeHTTPFixtureSequence atomic.Uint64
 
+// Positive production-handler fixtures carry explicit local transport identity;
+// boundary rejection tests continue to use their own untrusted requests.
+func newLocalOperatorTestRequest(method, path string, body io.Reader) *http.Request {
+	req := httptest.NewRequest(method, path, body)
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Host = "127.0.0.1:8080"
+	return req
+}
+
 func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, deliverableDirectory string) projectioncontract.Workspace {
 	t.Helper()
 
@@ -5087,7 +5096,7 @@ func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, de
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspaceReq := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspace-authoring", strings.NewReader(string(requestBody)))
+	workspaceReq := newLocalOperatorTestRequest(http.MethodPost, "/api/v1/workorch/workspace-authoring", strings.NewReader(string(requestBody)))
 	workspaceReq.Header.Set("Content-Type", "application/json")
 	workspaceRec := httptest.NewRecorder()
 	handler.ServeHTTP(workspaceRec, workspaceReq)
@@ -5114,7 +5123,7 @@ func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, de
 func getAndExpect(t *testing.T, handler http.Handler, path string, wantStatus int) string {
 	t.Helper()
 
-	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req := newLocalOperatorTestRequest(http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != wantStatus {
@@ -5126,7 +5135,7 @@ func getAndExpect(t *testing.T, handler http.Handler, path string, wantStatus in
 func postAndExpect(t *testing.T, handler http.Handler, path string, body string, wantStatus int) string {
 	t.Helper()
 
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req := newLocalOperatorTestRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -5139,7 +5148,7 @@ func postAndExpect(t *testing.T, handler http.Handler, path string, body string,
 func putAndExpect(t *testing.T, handler http.Handler, path string, body string, wantStatus int) string {
 	t.Helper()
 
-	req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
+	req := newLocalOperatorTestRequest(http.MethodPut, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -5152,7 +5161,7 @@ func putAndExpect(t *testing.T, handler http.Handler, path string, body string, 
 func deleteAndExpect(t *testing.T, handler http.Handler, path string, wantStatus int) string {
 	t.Helper()
 
-	req := httptest.NewRequest(http.MethodDelete, path, nil)
+	req := newLocalOperatorTestRequest(http.MethodDelete, path, nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != wantStatus {

@@ -5,6 +5,7 @@ package workorchruntimecontract
 
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 )
 
@@ -78,6 +79,7 @@ func cloneAuthorityTransactionRaw(in AuthorityTransaction) AuthorityTransaction 
 
 func cloneCoverageEvidenceBindingRaw(in CoverageEvidenceBinding) CoverageEvidenceBinding {
 	out := in
+	out.HistoricalAcceptance = cloneRuntimeHistoricalAcceptanceSource(in.HistoricalAcceptance)
 	out.LineageAssertions = cloneRuntimeStateRawSlice(in.LineageAssertions, func(assertion RuntimeLineageAssertion) RuntimeLineageAssertion { return assertion })
 	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.Proofs = cloneRuntimeStateRawSlice(in.Proofs, func(item CoverageEvidenceProof) CoverageEvidenceProof { return cloneCoverageEvidenceProofRaw(item) })
@@ -107,6 +109,7 @@ func cloneCoverageEvidenceProofRaw(in CoverageEvidenceProof) CoverageEvidencePro
 
 func cloneCoverageEvidenceProofIdentityRaw(in CoverageEvidenceProofIdentity) CoverageEvidenceProofIdentity {
 	out := in
+	out.HistoricalAcceptance = cloneRuntimeHistoricalAcceptanceSource(in.HistoricalAcceptance)
 	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.AllowedOperationKinds = cloneRuntimeStateRawSlice(in.AllowedOperationKinds, func(item string) string { return item })
 	out.AllowedOperationVariants = cloneRuntimeStateRawSlice(in.AllowedOperationVariants, func(item RuntimeOperationVariantRef) RuntimeOperationVariantRef {
@@ -157,6 +160,7 @@ func cloneCoverageFocusRaw(in CoverageFocus) CoverageFocus {
 func cloneEvidenceFactRaw(in EvidenceFact) EvidenceFact {
 	out := in
 	out.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(in.OwnerRevisionSet)
+	out.ApplicabilityDependencies = CloneRuntimeEvidenceApplicabilityDependencies(in.ApplicabilityDependencies)
 	out.ContentAddress = cloneRuntimeStateRawPointer(in.ContentAddress, func(item RuntimeEvidenceContentAddress) RuntimeEvidenceContentAddress {
 		return cloneRuntimeEvidenceContentAddressRaw(item)
 	})
@@ -181,8 +185,23 @@ func cloneEvidenceLedgerRaw(in EvidenceLedger) EvidenceLedger {
 
 func cloneExternalDependencyRaw(in ExternalDependency) ExternalDependency {
 	out := in
-	out.AuthorizationContext = in.AuthorizationContext.Clone()
+	out.AuthorizationContext = cloneRuntimeAuthorizationContextRaw(in.AuthorizationContext)
 	return out
+}
+
+func cloneRuntimeAuthorizationContextRaw(in workorcheventpayload.Payload) workorcheventpayload.Payload {
+	return workorcheventpayload.Payload{Fields: cloneRuntimeStateRawSlice(in.Fields, cloneRuntimeAuthorizationFieldRaw)}
+}
+
+func cloneRuntimeAuthorizationFieldRaw(in workorcheventpayload.Field) workorcheventpayload.Field {
+	in.Value = cloneRuntimeAuthorizationValueRaw(in.Value)
+	return in
+}
+
+func cloneRuntimeAuthorizationValueRaw(in workorcheventpayload.Value) workorcheventpayload.Value {
+	in.Object = cloneRuntimeStateRawSlice(in.Object, cloneRuntimeAuthorizationFieldRaw)
+	in.Array = cloneRuntimeStateRawSlice(in.Array, cloneRuntimeAuthorizationValueRaw)
+	return in
 }
 
 func cloneFailureFactRaw(in FailureFact) FailureFact {
@@ -348,6 +367,7 @@ func cloneRuntimeAssessmentFactRaw(in RuntimeAssessmentFact) RuntimeAssessmentFa
 
 func cloneRuntimeAssessmentAuthorityInputRaw(in RuntimeAssessmentAuthorityInput) RuntimeAssessmentAuthorityInput {
 	out := in
+	out.ApplicabilityObservations = CloneRuntimeEvidenceApplicabilityObservations(in.ApplicabilityObservations)
 	out.Focus = cloneCoverageFocusRaw(in.Focus)
 	out.OperationAdmissibilities = cloneRuntimeStateRawSlice(in.OperationAdmissibilities, func(item RuntimeOperationAdmissibility) RuntimeOperationAdmissibility {
 		return cloneRuntimeOperationAdmissibilityRaw(item)
@@ -360,6 +380,7 @@ func cloneRuntimeAssessmentAdjudicationRaw(in RuntimeAssessmentAdjudication) Run
 	out.CoverageWorkItemIDs = cloneRuntimeStateRawSlice(in.CoverageWorkItemIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
 	out.Proofs = cloneRuntimeStateRawSlice(in.Proofs, func(item RuntimeAssessmentAdjudicationProof) RuntimeAssessmentAdjudicationProof {
 		item.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(item.OwnerRevisionSet)
+		item.ApplicabilityDependencies = CloneRuntimeEvidenceApplicabilityDependencies(item.ApplicabilityDependencies)
 		return item
 	})
 	out.OwnerFactSources = cloneRuntimeAssessmentOwnerFactSources(in.OwnerFactSources)
@@ -673,6 +694,7 @@ func cloneRuntimeCandidateAttemptRecordRaw(in RuntimeCandidateAttemptRecord) Run
 	out.PrerequisiteRequest = cloneRuntimeStateRawPointer(in.PrerequisiteRequest, func(item RuntimeOperationPrerequisiteRequest) RuntimeOperationPrerequisiteRequest {
 		return cloneRuntimeOperationPrerequisiteRequestRaw(item)
 	})
+	out.ApplicabilityInvalidationRequest = cloneRuntimeStateRawPointer(in.ApplicabilityInvalidationRequest, func(item RuntimeEvidenceApplicabilityRequest) RuntimeEvidenceApplicabilityRequest { return item })
 	return out
 }
 
@@ -860,7 +882,9 @@ func cloneRuntimeCoverageEvidenceRequirementRaw(in RuntimeCoverageEvidenceRequir
 
 func cloneRuntimeCoverageItemRaw(in RuntimeCoverageItem) RuntimeCoverageItem {
 	out := in
+	out.HistoricalAcceptance = cloneRuntimeHistoricalAcceptanceSource(in.HistoricalAcceptance)
 	out.SourceObligationChecks = CloneRuntimeSourceObligationChecks(in.SourceObligationChecks)
+	out.GoalExecutionAssertions = cloneRuntimeStateRawSlice(in.GoalExecutionAssertions, func(item RuntimeLineageAssertion) RuntimeLineageAssertion { return item })
 	out.PrerequisiteCoverageWorkItemIDs = cloneRuntimeStateRawSlice(in.PrerequisiteCoverageWorkItemIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
 	out.ReopenDependencies = cloneRuntimeStateRawSlice(in.ReopenDependencies, func(item RuntimeCoverageReopenDependency) RuntimeCoverageReopenDependency {
 		return cloneRuntimeCoverageReopenDependencyRaw(item)
@@ -870,6 +894,8 @@ func cloneRuntimeCoverageItemRaw(in RuntimeCoverageItem) RuntimeCoverageItem {
 
 func cloneRuntimeCoverageItemFactRaw(in RuntimeCoverageItemFact) RuntimeCoverageItemFact {
 	out := in
+	out.HistoricalBehavior = cloneRuntimeHistoricalBehaviorCompletion(in.HistoricalBehavior)
+	out.HistoricalAcceptanceProofs = cloneRuntimeHistoricalAcceptanceProofs(in.HistoricalAcceptanceProofs)
 	out.EvidenceRefs = cloneRuntimeStateRawSlice(in.EvidenceRefs, func(item string) string { return item })
 	out.PrerequisiteCoverageWorkItemIDs = cloneRuntimeStateRawSlice(in.PrerequisiteCoverageWorkItemIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
 	out.ReopenDependencies = cloneRuntimeStateRawSlice(in.ReopenDependencies, func(item RuntimeCoverageReopenDependency) RuntimeCoverageReopenDependency {
@@ -1176,7 +1202,9 @@ func cloneRuntimeFactsRaw(in RuntimeFacts) RuntimeFacts {
 	out.Focus = cloneCoverageFocusRaw(in.Focus)
 	out.RemainingFocuses = cloneRuntimeStateRawSlice(in.RemainingFocuses, func(item CoverageFocus) CoverageFocus { return cloneCoverageFocusRaw(item) })
 	out.CompletedFocuses = cloneRuntimeStateRawSlice(in.CompletedFocuses, func(item CoverageFocus) CoverageFocus { return cloneCoverageFocusRaw(item) })
+	out.CWISuspensions = CloneRuntimeCWISuspensions(in.CWISuspensions)
 	out.Evidence = cloneEvidenceLedgerRaw(in.Evidence)
+	out.EvidenceApplicabilityObservations = CloneRuntimeEvidenceApplicabilityObservations(in.EvidenceApplicabilityObservations)
 	out.Assessments = cloneRuntimeStateRawSlice(in.Assessments, func(item RuntimeAssessmentFact) RuntimeAssessmentFact { return cloneRuntimeAssessmentFactRaw(item) })
 	out.Failure = cloneRuntimeStateRawPointer(in.Failure, func(item FailureFact) FailureFact { return cloneFailureFactRaw(item) })
 	out.Prerequisites = clonePrerequisiteStateRaw(in.Prerequisites)
@@ -1258,6 +1286,7 @@ func cloneRuntimeGovernanceRequestRecordRaw(in RuntimeGovernanceRequestRecord) R
 
 func cloneRuntimeGovernanceRequirementRaw(in RuntimeGovernanceRequirement) RuntimeGovernanceRequirement {
 	out := in
+	out.AuthorizationContext = cloneRuntimeAuthorizationContextRaw(in.AuthorizationContext)
 	return out
 }
 
@@ -1326,7 +1355,9 @@ func cloneRuntimeOperationAdmissibilityVariantRaw(in RuntimeOperationAdmissibili
 
 func cloneRuntimeOperationEvidenceRaw(in RuntimeOperationEvidence) RuntimeOperationEvidence {
 	out := in
+	out.OwnerSnapshot = cloneRuntimeStateRawPointer(in.OwnerSnapshot, func(item RuntimeOwnerSnapshotIdentity) RuntimeOwnerSnapshotIdentity { return item })
 	out.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(in.OwnerRevisionSet)
+	out.ApplicabilityDependencies = CloneRuntimeEvidenceApplicabilityDependencies(in.ApplicabilityDependencies)
 	out.ContentAddress = cloneRuntimeStateRawPointer(in.ContentAddress, func(item RuntimeEvidenceContentAddress) RuntimeEvidenceContentAddress {
 		return cloneRuntimeEvidenceContentAddressRaw(item)
 	})
@@ -1913,9 +1944,11 @@ func cloneRuntimeSemanticProofFeasibilityRaw(in RuntimeSemanticProofFeasibility)
 
 func cloneRuntimeSemanticProofObligationRaw(in RuntimeSemanticProofObligation) RuntimeSemanticProofObligation {
 	out := in
+	out.HistoricalAcceptance = cloneRuntimeHistoricalAcceptanceSource(in.HistoricalAcceptance)
 	out.LineageAssertions = cloneRuntimeStateRawSlice(in.LineageAssertions, func(rule RuntimeLineageAssertionRule) RuntimeLineageAssertionRule { return rule })
 	out.VerificationPolicy = cloneRuntimeVerificationPolicy(in.VerificationPolicy)
 	out.ValidationProofRequirement = cloneRuntimeStateRawPointer(in.ValidationProofRequirement, func(item RuntimeValidationProofRequirement) RuntimeValidationProofRequirement {
+		item.LineageAssertions = cloneRuntimeStateRawSlice(item.LineageAssertions, func(value RuntimeLineageAssertion) RuntimeLineageAssertion { return value })
 		item.RequiredCheckRefs = cloneRuntimeStateRawSlice(item.RequiredCheckRefs, func(value string) string { return value })
 		item.SourceObligationChecks = CloneRuntimeSourceObligationChecks(item.SourceObligationChecks)
 		return item
@@ -2177,6 +2210,7 @@ func cloneRuntimeValidationSurfaceRaw(in RuntimeValidationSurface) RuntimeValida
 	out := in
 	out.InputTargetRefs = cloneRuntimeStateRawSlice(in.InputTargetRefs, func(item string) string { return item })
 	out.ProofRequirementUnavailabilities = cloneRuntimeStateRawSlice(in.ProofRequirementUnavailabilities, func(item RuntimeValidationProofUnavailability) RuntimeValidationProofUnavailability {
+		item.Requirement.LineageAssertions = cloneRuntimeStateRawSlice(item.Requirement.LineageAssertions, func(value RuntimeLineageAssertion) RuntimeLineageAssertion { return value })
 		item.Requirement.RequiredCheckRefs = cloneRuntimeStateRawSlice(item.Requirement.RequiredCheckRefs, func(value string) string { return value })
 		item.Requirement.SourceObligationChecks = CloneRuntimeSourceObligationChecks(item.Requirement.SourceObligationChecks)
 		item.OriginalDiagnostic = item.OriginalDiagnostic.CloneOriginal()

@@ -21,6 +21,17 @@ func (r runtimeStateRepository) Load(ctx context.Context, workspaceID common.Wor
 	return r.loadRuntimeStateRecord(ctx, workspaceID, runID, "", 0)
 }
 
+// LoadOwnerStateOriginal is only used by the Orchestrator's lexical private
+// event or query compiler. It performs a real Run-owner query; it supplies no success
+// credential. Ordinary Load and recovery keep both independent complete gates.
+func (r runtimeStateRepository) LoadOwnerStateOriginal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (runtimecontract.RuntimeStateRecord, runtime.RuntimeAggregate, error) {
+	record, err := r.readRuntimeStateOriginal(ctx, workspaceID, runID, "", 0)
+	if err != nil {
+		return runtimecontract.RuntimeStateRecord{}, runtime.RuntimeAggregate{}, err
+	}
+	return record, runtimeAggregateFromRecord(record), nil
+}
+
 // LoadRuntimeRecoveryRecord binds startup recovery to the opaque Run-owner
 // identity returned by its inventory. The Run owner still does not interpret
 // aggregate meaning; it only proves that the exact persisted record remains
@@ -33,15 +44,50 @@ func (r runtimeStateRepository) LoadRuntimeRecoveryRecord(ctx context.Context, i
 }
 
 func (r runtimeStateRepository) loadRuntimeStateRecord(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, expectedRef string, expectedRevision uint64) (runtime.RuntimeAggregate, error) {
+	aggregate, err := r.loadRuntimeStateOriginal(ctx, workspaceID, runID, expectedRef, expectedRevision)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, err
+	}
+	if err := aggregate.Validate(); err != nil {
+		return runtime.RuntimeAggregate{}, err
+	}
+	return aggregate, nil
+}
+
+// LoadTransitionPreimage still performs a real owner read and the complete
+// raw DTO gate. The joint compiler shares only exact-raw pure subresults with
+// the following complete aggregate gate; ordinary Load/recovery never borrow it.
+func (r runtimeStateRepository) LoadTransitionPreimage(ctx context.Context, request runtime.RuntimeTransitionPreimageRequest) (runtime.RuntimeTransitionPreimage, error) {
+	workspaceID, runID, _ := request.Scope()
+	record, err := r.readRuntimeStateOriginal(ctx, workspaceID, runID, "", 0)
+	if err != nil {
+		return runtime.RuntimeTransitionPreimage{}, err
+	}
+	return request.CompileOwnerRecord(record, runtimeAggregateFromRecord(record))
+}
+
+func (r runtimeStateRepository) loadRuntimeStateOriginal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, expectedRef string, expectedRevision uint64) (runtime.RuntimeAggregate, error) {
+	record, err := r.readRuntimeStateOriginal(ctx, workspaceID, runID, expectedRef, expectedRevision)
+	if err != nil {
+		return runtime.RuntimeAggregate{}, err
+	}
+	// Ordinary Load/recovery retain their independent complete DTO gate.
+	if err := record.Validate(); err != nil {
+		return runtime.RuntimeAggregate{}, fmt.Errorf("load Runtime state: %w", err)
+	}
+	return runtimeAggregateFromRecord(record), nil
+}
+
+func (r runtimeStateRepository) readRuntimeStateOriginal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, expectedRef string, expectedRevision uint64) (runtimecontract.RuntimeStateRecord, error) {
 	if r.hub == nil || workspaceID == "" || runID == "" {
-		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
+		return runtimecontract.RuntimeStateRecord{}, common.ErrInvalidArgument
 	}
 	command := runevents.QueryRuntimeStateRecordCommand{
 		WorkspaceID: workspaceID, RunID: runID,
 		ExpectedRuntimeStateRef: expectedRef, ExpectedRuntimeStateRevision: expectedRevision,
 	}
 	if err := command.Validate(); err != nil {
-		return runtime.RuntimeAggregate{}, err
+		return runtimecontract.RuntimeStateRecord{}, err
 	}
 	event := magicevent.NewEventWithContext(
 		runevents.TopicRunCommandRuntimeStateRecord,
@@ -54,30 +100,22 @@ func (r runtimeStateRepository) loadRuntimeStateRecord(ctx context.Context, work
 	bindOwnerCommandLane(event, runevents.Contracts(), runevents.TopicRunCommandRuntimeStateRecord, "run", string(runID), workspaceID, runID)
 	result := r.hub.Send(event)
 	if result == nil {
-		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
+		return runtimecontract.RuntimeStateRecord{}, common.ErrInvalidArgument
 	}
 	data, resultErr := result.Get()
 	if resultErr != nil {
-		return runtime.RuntimeAggregate{}, resultErr
+		return runtimecontract.RuntimeStateRecord{}, resultErr
 	}
 	response, ok := data.(runevents.QueryRuntimeStateRecordResult)
 	if !ok || response.Validate() != nil || response.WorkspaceID != workspaceID || response.RunID != runID {
-		return runtime.RuntimeAggregate{}, common.ErrInvalidArgument
+		return runtimecontract.RuntimeStateRecord{}, common.ErrInvalidArgument
 	}
 	if !response.StatePresent || response.RuntimeState == nil {
-		return runtime.RuntimeAggregate{}, common.ErrNotFound
+		return runtimecontract.RuntimeStateRecord{}, common.ErrNotFound
 	}
-	// Validate the exact owner-returned DTO before Clone/Normalized can erase a
-	// missing or malformed current-schema authority field.
-	if err := response.RuntimeState.Validate(); err != nil {
-		return runtime.RuntimeAggregate{}, fmt.Errorf("load Runtime state: %w", err)
-	}
-	record := response.RuntimeState.Clone()
-	aggregate := runtimeAggregateFromRecord(record)
-	if err := aggregate.Validate(); err != nil {
-		return runtime.RuntimeAggregate{}, err
-	}
-	return aggregate, nil
+	// Preserve the exact owner DTO, never Normalized: both complete-load paths
+	// validate it before accepting any independently detached converted aggregate.
+	return *response.RuntimeState, nil
 }
 
 func (r runtimeStateRepository) Save(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
@@ -160,13 +198,14 @@ func (r runtimeStateRepository) SaveValidated(ctx context.Context, aggregate run
 }
 
 func runtimeStateRecordFromAggregate(aggregate runtime.RuntimeAggregate) runtimecontract.RuntimeStateRecord {
+	semantic := (runtimecontract.RuntimeStateRecord{SemanticPlanning: aggregate.SemanticPlanning}).Clone().SemanticPlanning
 	ret := runtimecontract.RuntimeStateRecord{
 		ResultFeedbackVersion:           aggregate.ResultFeedbackVersion,
 		StateRevision:                   aggregate.StateRevision,
 		EvidenceSequence:                aggregate.EvidenceSequence,
 		Definition:                      aggregate.Definition,
 		Facts:                           aggregate.Facts,
-		SemanticPlanning:                aggregate.SemanticPlanning.Clone(),
+		SemanticPlanning:                semantic.Clone(),
 		ImplementationWork:              aggregate.ImplementationWork.Clone(),
 		Reconciliation:                  aggregate.Reconciliation.Clone(),
 		CoverageProofLineage:            runtimecontract.NormalizeRuntimeCoverageProofLineage(aggregate.CoverageProofLineage),
@@ -210,29 +249,54 @@ func runtimeStateRecordFromAggregate(aggregate runtime.RuntimeAggregate) runtime
 		ret.CompletedDispatches[idx] = runtimeDispatchRecordFromAggregate(aggregate.CompletedDispatches[idx])
 	}
 	ret.Diagnostics = append([]runtimecontract.RuntimeDiagnosticRecord(nil), aggregate.Diagnostics...)
-	return ret.Clone()
+	detachRuntimeStateConversionRawFields(&ret)
+	return ret
+}
+
+// Other fields were already detached by their original projection helpers.
+// Copy only the still-raw graph here, avoiding a second whole-record clone.
+// The partial record's raw Clone preserves original nil/empty and bytes; this
+// helper does not validate or normalize any authority.
+func detachRuntimeStateConversionRawFields(ret *runtimecontract.RuntimeStateRecord) {
+	raw := (runtimecontract.RuntimeStateRecord{
+		Definition: ret.Definition, Facts: ret.Facts, Decision: ret.Decision,
+		CandidateAttempts: ret.CandidateAttempts, GovernanceRequests: ret.GovernanceRequests, Diagnostics: ret.Diagnostics,
+	}).Clone()
+	ret.Definition, ret.Facts, ret.Decision = raw.Definition, raw.Facts, raw.Decision
+	ret.CandidateAttempts, ret.GovernanceRequests, ret.Diagnostics = raw.CandidateAttempts, raw.GovernanceRequests, raw.Diagnostics
 }
 
 func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runtime.RuntimeAggregate {
+	raw := runtimecontract.RuntimeStateRecord{
+		Definition: record.Definition, Facts: record.Facts, Decision: record.Decision,
+		CandidateAttempts:  append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), record.CandidateAttempts...),
+		GovernanceRequests: append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), record.GovernanceRequests...),
+		Diagnostics:        append([]runtimecontract.RuntimeDiagnosticRecord(nil), record.Diagnostics...),
+	}
+	detachRuntimeStateConversionRawFields(&raw)
+	// The existing semantic Clone preserves raw diagnostics in its return, but
+	// its comparison normalization writes into the rejection/gap backing slices.
+	// Keep that normalization confined to an independent input graph as before.
+	raw.SemanticPlanning = (runtimecontract.RuntimeStateRecord{SemanticPlanning: record.SemanticPlanning}).Clone().SemanticPlanning
 	ret := runtime.RuntimeAggregate{
 		ResultFeedbackVersion:           record.ResultFeedbackVersion,
 		StateRevision:                   record.StateRevision,
 		EvidenceSequence:                record.EvidenceSequence,
-		Definition:                      record.Definition,
-		Facts:                           record.Facts,
-		SemanticPlanning:                record.SemanticPlanning.Clone(),
+		Definition:                      raw.Definition,
+		Facts:                           raw.Facts,
+		SemanticPlanning:                raw.SemanticPlanning.Clone(),
 		ImplementationWork:              record.ImplementationWork.Clone(),
 		Reconciliation:                  record.Reconciliation.Clone(),
 		CoverageProofLineage:            runtimecontract.NormalizeRuntimeCoverageProofLineage(record.CoverageProofLineage),
-		Decision:                        record.Decision,
+		Decision:                        raw.Decision,
 		ProcessedEventIDs:               append([]string(nil), record.ProcessedEventIDs...),
 		RepairSurfaceConfirmations:      cloneRuntimeRepairSurfaceConfirmations(record.RepairSurfaceConfirmations),
 		CandidateRequestSessions:        cloneRuntimeCandidateRequestSessions(record.CandidateRequestSessions),
-		CandidateAttempts:               append([]runtimecontract.RuntimeCandidateAttemptRecord(nil), record.CandidateAttempts...),
+		CandidateAttempts:               raw.CandidateAttempts,
 		ExecutionBudget:                 record.ExecutionBudget.Clone(),
 		RecoverableWaits:                cloneRuntimeRecoverableWaits(record.RecoverableWaits),
 		OperationRecoveryAuthorizations: cloneRuntimeOperationRecoveryAuthorizations(record.OperationRecoveryAuthorizations),
-		GovernanceRequests:              append([]runtimecontract.RuntimeGovernanceRequestRecord(nil), record.GovernanceRequests...),
+		GovernanceRequests:              raw.GovernanceRequests,
 		GovernanceResolutions:           runtimecontract.CloneRuntimeGovernanceResolutionRecords(record.GovernanceResolutions),
 		OperationGovernanceBindings:     cloneRuntimeOperationGovernanceBindings(record.OperationGovernanceBindings),
 		OperationReceipts:               runtimecontract.NormalizeRuntimeOperationReceipts(record.OperationReceipts),
@@ -263,7 +327,7 @@ func runtimeAggregateFromRecord(record runtimecontract.RuntimeStateRecord) runti
 	for idx := range record.CompletedDispatches {
 		ret.CompletedDispatches[idx] = runtimeDispatchFromRecord(record.CompletedDispatches[idx])
 	}
-	ret.Diagnostics = append([]runtimecontract.RuntimeDiagnosticRecord(nil), record.Diagnostics...)
+	ret.Diagnostics = raw.Diagnostics
 	return ret
 }
 
@@ -348,7 +412,7 @@ func cloneRuntimeCandidateRequestSessions(values []runtimecontract.RuntimeCandid
 func runtimeDispatchRecordFromAggregate(dispatch runtime.SealedDispatch) runtimecontract.RuntimeDispatchRecord {
 	return runtimecontract.RuntimeDispatchRecord{
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
-		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
+		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate.CloneRaw(),
 		CandidateManifestHash:              dispatch.CandidateManifestHash,
 		ImplementationWorkCommitment:       cloneRuntimeImplementationWorkCommitmentRecord(dispatch.ImplementationWorkCommitment),
 		CoverageBindingHash:                dispatch.CoverageBindingHash,
@@ -374,7 +438,7 @@ func runtimeDispatchRecordFromAggregate(dispatch runtime.SealedDispatch) runtime
 func runtimeDispatchFromRecord(dispatch runtimecontract.RuntimeDispatchRecord) runtime.SealedDispatch {
 	return runtime.SealedDispatch{
 		ID: dispatch.ID, WorkspaceID: dispatch.WorkspaceID, RunID: dispatch.RunID,
-		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate,
+		Transaction: dispatch.Transaction, CandidateHash: dispatch.CandidateHash, Candidate: dispatch.Candidate.CloneRaw(),
 		CandidateManifestHash:              dispatch.CandidateManifestHash,
 		ImplementationWorkCommitment:       cloneRuntimeImplementationWorkCommitmentRecord(dispatch.ImplementationWorkCommitment),
 		CoverageBindingHash:                dispatch.CoverageBindingHash,

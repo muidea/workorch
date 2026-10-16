@@ -142,6 +142,9 @@ func runtimeEvidenceBindingForCoverageWithLineage(facts runtimecontract.RuntimeF
 	if focus.ID == "" || focus.ID != currentFocus.ID {
 		return runtimecontract.CoverageEvidenceBinding{}, false
 	}
+	if !runtimecontract.RuntimeEvidenceHasProofApplicabilityAtRevision(evidence, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision) {
+		return runtimecontract.CoverageEvidenceBinding{}, false
+	}
 	if !runtimeEvidenceAppliesToCoverageWorkItemWithLineage(facts, evidence, coverageID, proofLineage) {
 		return runtimecontract.CoverageEvidenceBinding{}, false
 	}

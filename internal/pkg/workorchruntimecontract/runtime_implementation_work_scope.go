@@ -75,16 +75,17 @@ func (o RuntimeImplementationWorkScopeObservation) ValidateForSources(s RuntimeI
 func CompileRuntimeImplementationWorkScopeRequest(workspaceID common.WorkspaceID, runID common.RunID, authoritySnapshotID string,
 	seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus, profiles []RuntimeProfileContract, coverageID common.CoverageWorkItemID, manifest RuntimeWorkspaceManifestBinding,
 ) (RuntimeImplementationWorkScopeRequest, error) {
+	return compileRuntimeWorkScopeRequestInSession(workspaceID, runID, authoritySnapshotID, seed, focuses, profiles, coverageID, manifest, nil)
+}
+
+func compileRuntimeWorkScopeRequestInSession(workspaceID common.WorkspaceID, runID common.RunID, authoritySnapshotID string,
+	seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus, profiles []RuntimeProfileContract, coverageID common.CoverageWorkItemID, manifest RuntimeWorkspaceManifestBinding,
+	session *runtimeSemanticValidationSession,
+) (RuntimeImplementationWorkScopeRequest, error) {
 	if err := manifest.Validate(); err != nil {
 		return RuntimeImplementationWorkScopeRequest{}, err
 	}
-	if err := seed.Validate(); err != nil {
-		return RuntimeImplementationWorkScopeRequest{}, err
-	}
-	if err := ValidateRuntimeDefinitionFocuses(seed, focuses); err != nil {
-		return RuntimeImplementationWorkScopeRequest{}, err
-	}
-	if err := ValidateRuntimeDefinitionImplementationWorkPolicies(focuses, profiles); err != nil {
+	if err := validateRuntimeWorkDefinitionSourcesInSession(seed, focuses, profiles, session); err != nil {
 		return RuntimeImplementationWorkScopeRequest{}, err
 	}
 	var selected *RuntimeImplementationWorkPolicy

@@ -61,6 +61,13 @@ func applyAcceptedEvidenceCoverageCredit(aggregate *RuntimeAggregate, fact runti
 	if aggregate.Facts.Focus.RequireAssessment {
 		return nil
 	}
+	for _, binding := range aggregate.Facts.Focus.CoverageEvidenceBindings {
+		if binding.HistoricalAcceptance != nil {
+			// Exact behavioral evidence is not the separately mapped current
+			// ordinary acceptance proof, including when local assessment is off.
+			return nil
+		}
+	}
 	if retainIntermediateProofOpen {
 		// A validation-failure repair receipt proves only the current semantic
 		// generation's state-change operation. It is never terminal Definition

@@ -21,6 +21,16 @@ func ValidateRuntimeFileReadDependenciesResult(command QueryRuntimeFileReadDepen
 	if err := command.OriginalDependencies.Validate(); err != nil {
 		return nil, false, err
 	}
+	if err := runtimecontract.ValidateRuntimeEvidenceDependencyPair(&command.OriginalDependencies, command.ApplicabilitySource, command.Transaction.DefinitionRevision); err != nil {
+		return nil, false, err
+	}
+	expected := command.OriginalDependencies
+	if command.ApplicabilitySource != nil {
+		expected = command.ApplicabilitySource.OwnerRevisionSet
+		if len(expected.Entries) != 1 {
+			return nil, false, fmt.Errorf("File applicability source requires one exact resource")
+		}
+	}
 	if result.RequestID != command.RequestID || result.IssuedAtStateRevision != command.IssuedAtStateRevision || result.SourceReceiptHash != command.SourceReceiptHash {
 		return nil, false, fmt.Errorf("File read dependency observation identity mismatch")
 	}
@@ -44,7 +54,7 @@ func ValidateRuntimeFileReadDependenciesResult(command QueryRuntimeFileReadDepen
 		if len(command.OriginalDependencies.Entries) != 1 {
 			return nil, false, fmt.Errorf("File read dependency source requires one resource")
 		}
-		original, current := command.OriginalDependencies.Entries[0], set.Entries[0]
+		original, current := expected.Entries[0], set.Entries[0]
 		original.Revision, current.Revision = "", ""
 		original.DependencyHash, current.DependencyHash = "", ""
 		if !reflect.DeepEqual(original, current) {

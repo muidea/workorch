@@ -8,6 +8,12 @@ Last Verified: 2026-09-10
 
 ## 功能范围与边界
 
+生产 HTTP/Web 入口按 [`local-operator-access.md`](../../../../docs/50-product-interface/local-operator-access.md) 的
+`workorch-local-operator/v1` 限定为本机操作者。listener/peer 必须回环；Host、Origin 和 fetch-site 门禁先于业务
+路由，代理来源头不授信。私有 transport identity 不从 caller actor/header 创建，也不代替 Workspace 的精确确认、
+授权 grant 或 Decision 批准。它不隔离同机进程，不支持远端代理曝光；Runtime SM-1～SM-4 与 owner 权限不变。
+`service/server/local_operator_boundary_test.go` 验证生产 wrapper、零业务副作用拒绝、原输入保全与身份来源。
+
 `application/workorchd` 组合 HTTP/Web、CLI/TUI facade、typed bootstrap、application use case、read model、projection、
 SSE 和 runtime session 生命周期。它负责把用户入口转换成接收 owner 定义的 concrete command，并把 owner fact 转换成
 detached public DTO；不拥有 Workspace、Run、Result、Decision、Approval、Memory、Skill、Soul、MCP Registry、

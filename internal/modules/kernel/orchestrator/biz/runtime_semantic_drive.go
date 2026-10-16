@@ -126,7 +126,11 @@ func (m *Biz) driveRuntimeSemanticRequired(ctx context.Context, aggregate runtim
 	stablePrefixHash := runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract)
 	// This seals request intent, not a provider session. The shared semantic
 	// request path must pass rendered preflight before creating that session.
-	logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, stablePrefixHash, manifest.Hash, "")
+	requestIdentityHash, identityErr := runtime.SemanticRequestIdentityHash(aggregate.SemanticPlanning)
+	if identityErr != nil {
+		return runtime.RuntimeAggregate{}, identityErr
+	}
+	logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, stablePrefixHash, manifest.Hash, requestIdentityHash)
 	started, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind: runtime.RuntimeInternalEventSemanticPlanRequestStarted, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{SemanticManifest: &manifest, StablePrefixHash: stablePrefixHash, LogicalRequestID: logicalRequestID},
 	})
@@ -171,7 +175,7 @@ func (m *Biz) driveRuntimeSemanticOrderAccepted(ctx context.Context, aggregate r
 		return m.prepareRuntimeSemanticPrerequisites(ctx, aggregate)
 	}
 	batchRequestKey := fmt.Sprintf("semantic-proof-batch-%d", ledger.NextBatchSequence)
-	logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, batchRequestKey)
+	logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, runtime.SemanticRequestIdentityHashForKey(ledger, batchRequestKey))
 	return m.compileRuntimeSemanticPlanBatch(ctx, aggregate, logicalRequestID, 4)
 }
 
@@ -659,7 +663,7 @@ func (m *Biz) handleRuntimeSemanticDocumentDiagnostic(ctx context.Context, aggre
 	if deriveErr != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "runtime_contract_defect", deriveErr.Error(), &diagnostic)
 	}
-	logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, directive.Hash)
+	logicalRequestID := runtimeSemanticLogicalRequestID(aggregate, ledger.StablePrefixHash, ledger.Manifest.Hash, runtime.SemanticRequestIdentityHashForKey(ledger, directive.Hash))
 	updated, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind: runtime.RuntimeInternalEventSemanticPlanCorrectionRequired, Scope: runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Transaction: &runtime.RuntimeInternalTransactionPayload{StablePrefixHash: ledger.StablePrefixHash, LogicalRequestID: logicalRequestID,
 			ExpectedDocument: &expected, SemanticDiagnostic: &diagnostic},

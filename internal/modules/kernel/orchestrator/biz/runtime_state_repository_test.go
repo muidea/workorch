@@ -1053,6 +1053,13 @@ func TestRuntimeStateRepositoryRejectsInvalidDuplicateCWILedgerWithoutRewriting(
 	if err == nil {
 		t.Fatal("duplicate CWI record was accepted")
 	}
+	coordinator, err := runtime.NewRuntimeTransitionCoordinator(runtimeStateRepository{hub: hub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.Commit(ctx, runtimeAggregate(t, 10), 9); err == nil {
+		t.Fatal("single-commit load accepted duplicate raw CWI record")
+	}
 	stored, err := runs.GetByWorkspaceID(ctx, run.WorkspaceID, run.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -1110,6 +1117,13 @@ func TestRuntimeStateRepositoryRejectsAmbiguousRawActivationEvidencePoliciesWith
 			_, err := (runtimeStateRepository{hub: hub}).Load(ctx, run.WorkspaceID, run.ID)
 			if err == nil || !strings.Contains(err.Error(), "evidence polic") {
 				t.Fatalf("ambiguous raw evidence policies were accepted: %v", err)
+			}
+			coordinator, err := runtime.NewRuntimeTransitionCoordinator(runtimeStateRepository{hub: hub})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := coordinator.Commit(ctx, runtimeAggregate(t, 10), 9); err == nil || !strings.Contains(err.Error(), "evidence polic") {
+				t.Fatalf("single-commit load accepted ambiguous raw policy: %v", err)
 			}
 			stored, err := runs.GetByWorkspaceID(ctx, run.WorkspaceID, run.ID)
 			if err != nil {

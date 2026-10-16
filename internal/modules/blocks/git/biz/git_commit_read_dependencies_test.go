@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,20 +35,14 @@ func TestGitCommitDependenciesUseActualImmutableObjectBytes(t *testing.T) {
 	}
 	scope := runtimecontract.RuntimeOperationExecutionContext{WorkspaceID: "ws-objects", Transaction: runtimecontract.AuthorityTransaction{DefinitionRevision: "definition-objects"}}
 	dependencies, err := adapter.commitOwnerDependencies(ctx, scope, output)
-	if err != nil || dependencies == nil || len(dependencies.Entries) != 2 {
-		t.Fatalf("缺完整 commit/tree 实际读取: %+v %v", dependencies, err)
+	if err != nil || dependencies == nil || len(dependencies.Entries) != 4 {
+		t.Fatalf("缺完整 commit/tree/blob 实际读取: %+v %v", dependencies, err)
 	}
 	if err := dependencies.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	tree := gitOutputForTest(t, repo, "rev-parse", output.CommitHash+"^{tree}")
 	for _, entry := range dependencies.Entries {
-		kind := "tree"
-		if entry.ResourceID == output.CommitHash {
-			kind = "commit"
-		} else if entry.ResourceID != tree {
-			t.Fatal("依赖不是实际 commit/tree")
-		}
+		kind := gitOutputForTest(t, repo, "cat-file", "-t", entry.ResourceID)
 		body, err := adapter.gitOutput(ctx, repo, adapter.timeout, "--no-replace-objects", "cat-file", kind, entry.ResourceID)
 		if err != nil {
 			t.Fatal(err)
@@ -97,7 +92,7 @@ func TestGitCommitDependenciesReadSHA256ObjectRepository(t *testing.T) {
 	}
 	scope := runtimecontract.RuntimeOperationExecutionContext{WorkspaceID: "ws-sha256", Transaction: runtimecontract.AuthorityTransaction{DefinitionRevision: "definition-sha256"}}
 	dependencies, err := adapter.commitOwnerDependencies(ctx, scope, output)
-	if err != nil || dependencies == nil || len(dependencies.Entries) != 2 {
+	if err != nil || dependencies == nil || len(dependencies.Entries) != 3 {
 		t.Fatalf("SHA256 实际对象未读取: %+v %v", dependencies, err)
 	}
 	for _, entry := range dependencies.Entries {
@@ -185,8 +180,12 @@ func TestGitOwnerCommitReceiptPreservesObjectDependenciesAcrossRecreation(t *tes
 	testGitOwnerCommitDependencies(t, "replay")
 }
 
+func TestGitOwnerCommitSnapshotLostReceiptReplyReplaysOriginalArchive(t *testing.T) {
+	testGitOwnerCommitDependencies(t, "receipt-response-loss")
+}
+
 func TestGitOwnerCommitDependencyFailureDoesNotForgeReceipt(t *testing.T) {
-	for _, mode := range []string{"invalid-scope", "oversized-commit"} {
+	for _, mode := range []string{"invalid-scope", "oversized-commit", "oversized-blob"} {
 		t.Run(mode, func(t *testing.T) { testGitOwnerCommitDependencies(t, mode) })
 	}
 }
@@ -197,6 +196,7 @@ func testGitOwnerCommitDependencies(t *testing.T, mode string) {
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
 	receipts := map[string][]byte{}
+	lostResponse := false
 	observer := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
 	observer.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(orchestratorevents.QueryRuntimeOperationReceiptCommand)
@@ -218,6 +218,11 @@ func testGitOwnerCommitDependencies(t *testing.T, mode string) {
 			t.Error(err)
 		}
 		receipts[command.Receipt.ExecutionKey] = encoded
+		if mode == "receipt-response-loss" && !lostResponse {
+			lostResponse = true
+			setCapabilityError(result, fmt.Errorf("test: lost reply after original receipt persistence"))
+			return
+		}
 		result.Set(orchestratorevents.CommitRuntimeOperationReceiptResult{Receipt: command.Receipt}, nil)
 	})
 	t.Cleanup(func() {
@@ -231,6 +236,10 @@ func testGitOwnerCommitDependencies(t *testing.T, mode string) {
 	if mode == "oversized-commit" {
 		message = strings.Repeat("文", maxOutputBytes/2)
 	}
+	if mode == "oversized-blob" {
+		writeFile(t, filepath.Join(repo, "delivered.txt"), strings.Repeat("x", maxOutputBytes+1))
+		runGitForTest(t, repo, "add", "delivered.txt")
+	}
 	operation := runtimecontract.RuntimeOperation{ID: "git-commit", Kind: runtimecontract.StepKindGitWrite, TargetRefs: []string{gitWorkspaceRepositorySelector}, Parameters: []runtimecontract.OperationParameter{{Name: "operation", String: &operationName}, {Name: "message", String: &message}}}
 	sealed, err := gitevents.SealRuntimeOperation(operation)
 	if err != nil {
@@ -242,6 +251,10 @@ func testGitOwnerCommitDependencies(t *testing.T, mode string) {
 		Execution:    gitTestExecutionEnvelope(operation, runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: "exec/ws-git/run-git/dispatch-git/git-commit", Fence: 1, ExpectedEffectScope: runtimecontract.RuntimeEffectWorkspaceDurable}),
 		EvidenceKind: runtimecontract.EvidenceKindStateChange, WorkspaceDeliverableDirectory: repo, TargetRefs: operation.TargetRefs,
 	}, SealedOperation: sealed}
+	replayMode := mode == "replay" || mode == "receipt-response-loss"
+	if replayMode {
+		command.WorkspaceInternalDirectory = t.TempDir()
+	}
 	if mode == "invalid-scope" {
 		command.Transaction.DefinitionRevision = " definition-git "
 	}
@@ -251,7 +264,7 @@ func testGitOwnerCommitDependencies(t *testing.T, mode string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = owner.Teardown(ctx) })
-	if mode != "replay" {
+	if !replayMode {
 		result := hub.Send(magicevent.NewEventWithContext(gitevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command))
 		_, err := result.Get()
 		if err == nil || len(receipts) != 0 {
@@ -261,16 +274,39 @@ func testGitOwnerCommitDependencies(t *testing.T, mode string) {
 		if mode == "invalid-scope" && afterHead != beforeHead {
 			t.Fatal("非 exact scope 已发生 commit")
 		}
-		if mode == "oversized-commit" && (afterHead == beforeHead || !strings.Contains(err.Error(), "not completely retained")) {
+		if (mode == "oversized-commit" || mode == "oversized-blob") && (afterHead == beforeHead || !strings.Contains(err.Error(), "not completely retained")) {
 			t.Fatalf("已发生 effect 的不完整依赖未明确报告: %v", err)
 		}
 		return
 	}
+	if mode == "receipt-response-loss" {
+		result := hub.Send(magicevent.NewEventWithContext(gitevents.TopicExecuteOperation, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, command))
+		if _, err := result.Get(); err == nil || len(receipts) != 1 || !lostResponse {
+			t.Fatal("receipt response-loss cut did not preserve one exact committed receipt")
+		}
+		// Rebuild the owner before retrying: no adapter cache or initial
+		// return value may substitute for the persisted original receipt.
+		if err := owner.Teardown(ctx); err != nil {
+			t.Fatal(err)
+		}
+		owner = &Biz{Base: basebiz.New(ModuleID, hub, nil), runtimeAdapter: NewRuntimeAdapter()}
+		if err := owner.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = owner.Teardown(ctx) })
+	}
 	first := sendGitStateChangingReceiptCommand(t, ctx, hub, command)
-	if first.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || !first.Receipt.Changed || first.Receipt.Evidence.OwnerRevisionSet == nil || len(first.Receipt.Evidence.OwnerRevisionSet.Entries) != 2 {
+	if first.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || !first.Receipt.Changed || first.Receipt.Evidence.OwnerRevisionSet == nil || len(first.Receipt.Evidence.OwnerRevisionSet.Entries) != 4 {
 		t.Fatalf("真实 Git owner receipt 缺依赖: %+v", first.Receipt)
 	}
 	head := gitOutputForTest(t, repo, "rev-parse", "HEAD")
+	if first.Receipt.Evidence.ContentAddress == nil {
+		t.Fatal("真实 owner 回执未引用保全的完整快照原 bytes")
+	}
+	original, err := readGitCommitSnapshot(ctx, command.WorkspaceInternalDirectory, gitCommitSnapshotScopeForExecution(command.RuntimeOperationExecutionContext), *first.Receipt.Evidence.ContentAddress)
+	if err != nil || original.Head != head {
+		t.Fatalf("不能按原 scope/content address 读回快照: %v", err)
+	}
 	if err := owner.BeginShutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -292,6 +328,10 @@ func testGitOwnerCommitDependencies(t *testing.T, mode string) {
 	}
 	if got := gitOutputForTest(t, repo, "rev-parse", "HEAD"); got != head {
 		t.Fatal("receipt 重放再次创建 commit")
+	}
+	restored, err := readGitCommitSnapshot(ctx, command.WorkspaceInternalDirectory, original.Scope, *first.Receipt.Evidence.ContentAddress)
+	if err != nil || !reflect.DeepEqual(original, restored) {
+		t.Fatal("owner 重建改变原始快照 bytes 或 execution identity")
 	}
 	if _, err := os.Stat(filepath.Join(repo, "delivered.txt")); err != nil {
 		t.Fatal(err)

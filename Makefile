@@ -139,14 +139,14 @@ $(CONSOLE_DEPS_STAMP): $(CONSOLE_PACKAGE_JSON) $(CONSOLE_PACKAGE_LOCK)
 	@touch $(CONSOLE_DEPS_STAMP)
 
 fmt: go-deps
-	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './.workorch-data/*' -not -path './.workorch-workspaces/*' -not -path './.claude/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
+	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './.workorch-data/*' -not -path './.workorch-workspaces/*' -not -path './.validation-tmp-*/*' -not -path './.claude/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
 	if [[ -n "$$files" ]]; then \
 		$(GOFMT) -w $$files; \
 	fi
 	$(GO) fmt $(PKGS)
 
 fmt-check:
-	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './.workorch-data/*' -not -path './.workorch-workspaces/*' -not -path './.claude/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
+	@files="$$(find . -type f -name '*.go' -not -path './.git/*' -not -path './.workorch-data/*' -not -path './.workorch-workspaces/*' -not -path './.validation-tmp-*/*' -not -path './.claude/*' -not -path './vendor/*' -not -path './web/workorch-console/node_modules/*')"; \
 	if [[ -z "$$files" ]]; then \
 		exit 0; \
 	fi; \
@@ -385,7 +385,14 @@ verify-e2e-template-contract:
 
 # readiness 必须包含公开完整正例；scope/private driver 通过不代表可执行发布支持。
 verify-runtime-implementation-work-readiness:
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/pkg/workorchruntimecontract ./internal/modules/kernel/workspace/pkg/models ./internal/modules/kernel/workspace/pkg/definitionadmission -run '^TestGoalExecution' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/application/workorchd/biz/appservice/activationcore -run '^TestBootstrapGoalExecution' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/kernel/orchestrator/biz -run '^TestDriveRuntimeGoalExecutionSourceRealRepairAcrossRestart$$' -count=1 -timeout=$(GOTEST_TIMEOUT)
 	bash scripts/lib/go-test-must-run.sh --each-package ./internal/pkg/workorchruntimecontract ./internal/modules/kernel/orchestrator/biz/runtime ./internal/modules/kernel/orchestrator/biz -run 'Test(RuntimeImplementationWork|ImplementationWork|RuntimeSemantic.*Implementation|RuntimeSemantic.*Purpose)' -count=1 -timeout=$(GOTEST_TIMEOUT)
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/pkg/workorchruntimecontract ./internal/modules/kernel/workspace/pkg/models ./internal/modules/kernel/workspace/pkg/definitionadmission -run 'Test.*Profile.*EvidencePurpose' -count=1 -timeout=$(GOTEST_TIMEOUT)
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/kernel/orchestrator/biz -run '^TestDriveRuntimeProfileDeliverableHistoricalAcceptance(OwnerCASRecovery|ProcessRecovery)$$' -count=1 -timeout=$(GOTEST_TIMEOUT)
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/kernel/orchestrator/biz/runtime -run '^TestCWISuspension' -count=1 -timeout=3m
+	bash scripts/lib/go-test-must-run.sh --each-package ./internal/modules/kernel/orchestrator/biz -run '^TestDriveRuntime(CWISuspension(RevalidatesOrdinaryPredecessorWithinOriginalBudget|ProcessRecovery)|DurableDispatchBudgetRejectsUndeclaredPredecessorRevalidation|AssertionFeedbackCannotInventPredecessorRevalidationAcrossRestart)$$' -count=1 -timeout=$(GOTEST_TIMEOUT)
 	bash scripts/lib/go-test-must-run.sh --each-package ./internal/pkg/workorchruntimecontract -run '^Test(CoverageEvidenceBindingCannotConjoinIndependentValidationRecipes|ValidationObservationCannotBorrowPassedChecksAcrossRecipes)$$' -count=1 -timeout=3m
 	bash scripts/lib/go-test-must-run.sh --each-package ./internal/integration -run '^TestImplementationWork(PublicAuthoringFullFlow|FullflowUnsupportedCombinationStaysClosed|CommitEvidence.*)$$' -count=1 -timeout=$(GOTEST_TIMEOUT)
 

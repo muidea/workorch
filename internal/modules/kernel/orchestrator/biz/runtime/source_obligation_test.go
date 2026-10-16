@@ -121,7 +121,8 @@ func TestSourceObligationTerminalSealRejectsCoordinatedInventoryDeletion(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed, err := controller.executeActiveDispatch(ctx, sealed.Facts.WorkspaceID, sealed.Facts.RunID, &qualityOperationExecutor{owner: controller, evidence: runtimecontract.RuntimeOperationEvidence{Validation: &observation}})
+	reads := runtimeSourceObligationFixtureReads(sealed)
+	completed, err := controller.executeActiveDispatch(ctx, sealed.Facts.WorkspaceID, sealed.Facts.RunID, &qualityOperationExecutor{owner: controller, evidence: runtimecontract.RuntimeOperationEvidence{Validation: &observation, OwnerRevisionSet: &reads}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +220,8 @@ func TestRuntimeSharedSourceObligationReceiptCannotCompleteOnlyA(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			executor := &qualityOperationExecutor{owner: controller, evidence: runtimecontract.RuntimeOperationEvidence{Summary: "独立 owner 检查观察", Validation: &observation}}
+			reads := runtimeSourceObligationFixtureReads(sealed)
+			executor := &qualityOperationExecutor{owner: controller, evidence: runtimecontract.RuntimeOperationEvidence{Summary: "独立 owner 检查观察", Validation: &observation, OwnerRevisionSet: &reads}}
 			completed, err := controller.executeActiveDispatch(ctx, sealed.Facts.WorkspaceID, sealed.Facts.RunID, executor)
 			if err != nil {
 				t.Fatal(err)
@@ -262,4 +264,10 @@ func TestRuntimeSharedSourceObligationReceiptCannotCompleteOnlyA(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Explicit technical mock read basis. Real byte sampling is verified by the
+// File/Shell owner mainline, not by this private reducer fixture.
+func runtimeSourceObligationFixtureReads(aggregate RuntimeAggregate) runtimecontract.RuntimeOwnerRevisionSet {
+	return (runtimecontract.RuntimeOwnerRevisionSet{DefinitionRevision: aggregate.Facts.DefinitionRevision, Entries: []runtimecontract.RuntimeOwnerRevisionRef{{OwnerKind: "capability", OwnerInstanceID: runtimecontract.RuntimeModuleShell + "/" + string(aggregate.Facts.WorkspaceID), ResourceKind: string(runtimecontract.RuntimeResourceWorkspaceTarget), ResourceID: "target.txt", Revision: "fixture-input-bytes", DependencyHash: "fixture-native-selector"}}}).WithHash()
 }

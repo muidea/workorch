@@ -45,6 +45,8 @@ type shellProjectStageFact struct {
 	KnownFailure                 bool
 	FailureCode                  string
 	SourceBefore, SourceAfter    string
+	DiagnosticSourceRef          string   `json:",omitempty"`
+	BehaviorTargetRefs           []string `json:",omitempty"`
 }
 
 type shellProjectRawFact struct {
@@ -320,16 +322,21 @@ func sealShellProjectConjunction(stages []shellProjectStageFact, expected []shel
 	}
 	fact.Complete = fact.FailureCode == ""
 	// Raw 不进入可公开 commitment，身份 bytes/hash 与 completeness 全部保留。
+	fact.CommitmentHash = shellProjectConjunctionCommitmentHash(fact)
+	return fact
+}
+
+func shellProjectConjunctionCommitmentHash(fact shellProjectConjunctionFact) string {
 	preimage := fact
-	preimage.Stages = append([]shellProjectStageFact(nil), stages...)
+	preimage.CommitmentHash = ""
+	preimage.Stages = append([]shellProjectStageFact(nil), fact.Stages...)
 	for index := range preimage.Stages {
 		preimage.Stages[index].Stdout.Raw = nil
 		preimage.Stages[index].Stderr.Raw = nil
 	}
 	body, _ := json.Marshal(preimage)
 	digest := sha256.Sum256(body)
-	fact.CommitmentHash = hex.EncodeToString(digest[:])
-	return fact
+	return hex.EncodeToString(digest[:])
 }
 
 func shellProjectRawFactValid(fact shellProjectRawFact) bool {

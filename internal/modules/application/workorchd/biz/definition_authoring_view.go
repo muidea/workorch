@@ -44,7 +44,7 @@ func (b *Biz) ReadDefinitionAuthoringView(ctx context.Context, id common.Workspa
 // 展示只复用纯声明检查，不生成确认身份、binding 或 credit；owner 仍独立校验。
 func authoringViewVerificationApplicable(derivation workspace.DefinitionDerivationRequest, specification workspace.GoalSpecification, items []workspace.DefinitionCandidateItem) bool {
 	bindings, err := definitionconfiguration.Compile(&workspace.Workspace{}, &derivation.Template)
-	return err == nil && definitionadmission.ValidateAuthoringVerificationApplicability(specification, items, bindings.ProfileContracts) == nil
+	return err == nil && definitionadmission.ValidateAuthoringVerificationApplicability(specification, items, bindings.ProfileContracts, workspace.DefinitionCandidateItem{CandidateItemRef: specification.GoalItemRef, Text: derivation.Input.GoalText}) == nil
 }
 
 func authoringDiagnosticMetadata(d *workspace.DefinitionAuthoringDiagnostic) *workorchmanagementcontract.DefinitionAuthoringDiagnosticMetadata {
@@ -147,6 +147,12 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 			}
 			if spec != nil {
 				proposal.ProposalHash = spec.ContentHash()
+				for _, mapping := range spec.EvidencePurposeMappings {
+					proposal.EvidencePurposeMappings = append(proposal.EvidencePurposeMappings, workorchmanagementcontract.DefinitionAuthoringEvidencePurposeMapping{ContractRef: mapping.ContractRef, HistoricalItemRef: mapping.HistoricalItemRef, AcceptanceItemRef: mapping.AcceptanceItemRef, HistoricalProfileID: mapping.HistoricalProfileID, HistoricalDeliverableID: mapping.HistoricalDeliverableID, HistoricalProfileHash: mapping.HistoricalProfileHash, HistoricalText: mapping.HistoricalText})
+				}
+				for _, mapping := range spec.ExecutionProofMappings {
+					proposal.ExecutionProofMappings = append(proposal.ExecutionProofMappings, workorchmanagementcontract.DefinitionAuthoringExecutionProofMapping{ContractRef: mapping.ContractRef, ConsumerItemRef: mapping.ConsumerItemRef, RuleRef: mapping.RuleRef, SourceItemRef: mapping.SourceItemRef, ConsumerGoalText: mapping.ConsumerGoalText})
+				}
 				for _, resource := range spec.Resources {
 					proposal.Resources = append(proposal.Resources, workorchmanagementcontract.DefinitionAuthoringResource{ID: resource.ID, Ref: resource.Ref, SnapshotHash: resource.SnapshotHash})
 				}

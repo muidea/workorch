@@ -443,6 +443,18 @@ func writeRuntimeRawContent(w http.ResponseWriter, item content.RuntimeRawConten
 	if item.ContentSHA256 != "" {
 		w.Header().Set("X-Workorch-Content-SHA256", item.ContentSHA256)
 	}
+	if identity := item.OutputIdentity; identity != nil {
+		w.Header().Set("X-Workorch-Output-Bytes", fmt.Sprint(identity.Bytes))
+		w.Header().Set("X-Workorch-Output-SHA256", identity.SHA256)
+		w.Header().Set("X-Workorch-Output-Saved-Bytes", fmt.Sprint(identity.SavedBytes))
+		w.Header().Set("X-Workorch-Output-Complete", fmt.Sprint(identity.Complete))
+		if identity.OmittedReason != "" {
+			w.Header().Set("X-Workorch-Output-Omitted-Reason", identity.OmittedReason)
+		}
+		if identity.Storage != nil && identity.Storage.OmittedReason != "" {
+			w.Header().Set("X-Workorch-Output-Storage-Omitted-Reason", identity.Storage.OmittedReason)
+		}
+	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(item.Content)
 }

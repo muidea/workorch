@@ -2,6 +2,10 @@
 
 Status: active
 
+v3 composition 的 versioned terminal-material rule/body/source selector 仍只按 exact subject 投影到 C3。
+instruction 区分未来义务映射与真实 owner facts，明确普通 operation receipt 不证明最终 repository HEAD/tree/blob bytes。
+`runtime_proof_composition_test.go` 固定完整声明／版本、输入漂移时 C0～C2 与 stable-prefix 不变及删声明拒绝。
+
 Type: capability-block-contract
 
 Last Verified: 2026-09-10
@@ -106,8 +110,19 @@ Runtime 的原始 body／stream 禁止跨 owner 规则不变，此文档诊断�
   非空白文本（包括连接词）；这只是防止漏报的来源约束，不是语义证明。每 check 最多 16 项，单报告 JSON 不超过
   32 KiB。schema 与本地 decoder 同源，缺项、未知字段或相互矛盾的结论仍是文档准入错误，不是事实 ticket。
   V1 不出现新字段；协议-specific schema/instruction、输入和信息均在 C3，同一 activation 的 C0～C2 不因评审变动。
+  v3 组合评审额外完整投影同 CWI 的 `LineageAssertions`，逐义务 `proofConsumerRefs` 只允许
+  `validation_input` 和该 subject 原 rule refs。模型须解释 ordinary assertions 与 typed consumer 的合取覆盖，
+  不能以规则名、README 自述、未来 ACK 或一致结论替代实际证明；旧协议禁止该扩展。
+  `biz/runtime_proof_composition_test.go` 固定 C3 完整声明/schema/instruction、删改拒绝及输入变化时
+  C0～C2/StablePrefixHash 不变。来源与边界遵守
+  [Validation Proof Composition](../../../../docs/00-core/runtime/validation-proof-composition.md)。
   subject 可声明有界 `ScopeContractRef + ScopeRequirements`，描述 owner 实际执行/观测范围；它随 subject hash 封存并
   完整放入 C3，不能由 recipe 名推测更广的验证范围。缺省保持旧请求；范围变动不能复用旧报告。
+  显式 `validation/diagnostic-source-review/v1` 在 v3 subject 的 C3 额外完整投影逐 native source identity 与输入来源；
+  provider 必须对每个 `sourceRef` 独立报告结论、reason/input refs。它是与原准则一致的附加项目约束评审，
+  不是另一个 CWI 的普通检查覆盖、failure-to-target 猜测、执行 credit 或 repair 权。缺项、未知、duplicate、
+  来源/hash 漂移及完整输入/报告超界均 fail-closed；schema 和 local decoder 共同验收，不影响 C0-C2。
+  具体有限 envelope、共享原 CWI 信息预算及 owner 边界见组合证明合同；旧 subject/wire 不引入该扩展。
 - create-only validation preparation 的可选 `ContentContractRef + ContentRequirements` 由 capability owner 提供并进入
   catalog hash；semantic requirement/acquisition 与 operations 的 C3 必须随 exact target/native mapping 原样投影。
   LLM 不按文件名补规则，不把生成输入视为一致性结论或执行 credit；空扩展不改变历史 request JSON/hash。

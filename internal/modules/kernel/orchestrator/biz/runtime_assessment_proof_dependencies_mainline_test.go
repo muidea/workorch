@@ -12,6 +12,36 @@ import (
 // 真实 Shell producer 的既有 mainline；仅检查选中 proof 来源，不把复制集合称为全部 assessment 依赖。
 func assertActualShellAssessmentProofDependencies(t *testing.T, record runtimecontract.RuntimeStateRecord) {
 	t.Helper()
+	material, err := runtimecontract.DeriveRuntimeTerminalResultMaterialFromState(record)
+	if err != nil {
+		t.Logf("terminal currentness fence: evidenceRevision=%s generation=%s observations=%+v", record.Facts.EvidenceRevision, record.Reconciliation.RequestHash, record.Facts.EvidenceApplicabilityObservations)
+		t.Fatalf("actual owner terminal material: %v", err)
+	}
+	terminalMembers := 0
+	for _, outcome := range material.RuntimeCloseout.RequirementOutcomes {
+		for _, item := range outcome.EvidenceItems {
+			for _, ledger := range [][]runtimecontract.EvidenceFact{record.Facts.Evidence.Accepted, record.Facts.Evidence.Rejected} {
+				for _, fact := range ledger {
+					if string(fact.ID) != item.EvidenceRef {
+						continue
+					}
+					if !reflect.DeepEqual(item.OwnerRevisionSet, fact.OwnerRevisionSet) {
+						t.Fatal("terminal material changed actual owner receipt/fact read snapshot")
+					}
+					if fact.OwnerRevisionSet != nil {
+						terminalMembers++
+					}
+				}
+			}
+		}
+	}
+	if terminalMembers == 0 {
+		t.Fatal("terminal material has no actual owner read dependency")
+	}
+	if record.TerminalMaterialSeal != nil &&
+		!reflect.DeepEqual(record.TerminalMaterialSeal.Material.RuntimeCloseout.RequirementOutcomes, material.RuntimeCloseout.RequirementOutcomes) {
+		t.Fatal("terminal seal changed original per-evidence read snapshots")
+	}
 	fileMembers := 0
 	originalFile := sha256.Sum256([]byte("package fixture\nfunc DeliveredValue() int { return 2 }\n"))
 	for _, fact := range record.Facts.Evidence.Accepted {

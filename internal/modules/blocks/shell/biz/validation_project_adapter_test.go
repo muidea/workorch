@@ -130,10 +130,17 @@ func TestProjectAdapterPreparationAndReviewCapacityRemainExact(t *testing.T) {
 	}
 }
 
-func projectAdapterOwnerCommand(t *testing.T, adapter *RuntimeAdapter, failed bool) shellevents.ExecuteOperationCommand {
+func projectAdapterOwnerCommand(t *testing.T, adapter *RuntimeAdapter, failed bool, adapters ...string) shellevents.ExecuteOperationCommand {
 	t.Helper()
-	request, execution := projectExecutionFixture(t, failed)
+	diagnostic := len(adapters) != 0 && adapters[0] == modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic
+	request, execution := projectExecutionFixture(t, failed && !diagnostic, adapters...)
 	recipe := runtimecontract.RuntimeValidationRecipe{ID: request.ValidationRecipeID, AdapterRef: modulecommon.ValidationRecipeAdapterProjectConjunction, InputReviewProtocolRef: runtimecontract.RuntimeValidationInputReviewProtocolV2, Command: "go", Args: []string{"test", "-v", "./..."}, TimeoutMillis: 60000}
+	if diagnostic {
+		recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic
+		if failed {
+			writeNativeStructureSource(t, request.WorkspaceDeliverableDirectory, "delivery/value.go", "package delivery\nfunc Value() int{return 3}\n")
+		}
+	}
 	requirement := shellValidationProofRequirementForTest(t, recipe.ID, "execution-cwi")
 	checks, ok := shellValidationCheckAttestations(recipe, requirement)
 	if !ok {
@@ -173,8 +180,10 @@ func projectAdapterOwnerCommand(t *testing.T, adapter *RuntimeAdapter, failed bo
 
 // 实际公开 Shell seal/handler/runner；receipt authority 为 typed fixture，完整 Runtime 装配另行验收。
 func TestProjectAdapterPublicOwnerPreservesFailureAndReplaysOriginalReceipt(t *testing.T) {
-	for _, failed := range []bool{false, true} {
-		t.Run(map[bool]string{false: "complete", true: "existing-project-failure"}[failed], func(t *testing.T) {
+	for _, scenario := range []string{"complete", "existing-project-failure", "v7-complete", "v7-exact-failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			failed := scenario == "existing-project-failure" || scenario == "v7-exact-failure"
+			diagnostic := strings.HasPrefix(scenario, "v7-")
 			ctx := context.Background()
 			hub := magicevent.NewHub(16)
 			t.Cleanup(func() { hub.Terminate(ctx) })
@@ -187,7 +196,11 @@ func TestProjectAdapterPublicOwnerPreservesFailureAndReplaysOriginalReceipt(t *t
 					t.Error(err)
 				}
 			})
-			command := projectAdapterOwnerCommand(t, owner.runtimeAdapter, failed)
+			var adapters []string
+			if diagnostic {
+				adapters = []string{modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic}
+			}
+			command := projectAdapterOwnerCommand(t, owner.runtimeAdapter, failed, adapters...)
 			var saved *runtimecontract.RuntimeOperationReceipt
 			commits := 0
 			receipts := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
@@ -231,8 +244,15 @@ func TestProjectAdapterPublicOwnerPreservesFailureAndReplaysOriginalReceipt(t *t
 			}
 			conjunction := first.Receipt.Evidence.Validation.ExecutionConjunction
 			if failed {
-				if first.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || conjunction.Complete || len(conjunction.Stages) != 2 || !conjunction.Stages[1].KnownFailure {
+				stages := 2
+				if diagnostic {
+					stages = 3
+				}
+				if first.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected || conjunction.Complete || len(conjunction.Stages) != stages || !conjunction.Stages[1].KnownFailure {
 					t.Fatal("old project failure disappeared")
+				}
+				if diagnostic && (first.Receipt.Feedback == nil || first.Receipt.Feedback.OriginalDiagnostic == nil || first.Receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic == nil || first.Receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic.OwnerCode != modulecommon.ValidationDiagnosticCodeTestFailed) {
+					t.Fatalf("public v7 lost exact typed diagnostic: %+v", first.Receipt.Feedback)
 				}
 			} else if first.Receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted || !conjunction.Complete || len(conjunction.Stages) != 4 {
 				t.Fatal("public project success incomplete")

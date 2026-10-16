@@ -12,11 +12,15 @@ import (
 // target and no-credit constraints. Aggregate validation additionally replays the
 // earlier semantic and request-session sources; this check is not admission.
 func ValidateRuntimeImplementationWorkDispatchCommitment(d RuntimeDispatchRecord) error {
+	return validateRuntimeImplementationWorkDispatchCommitmentInSession(d, nil)
+}
+
+func validateRuntimeImplementationWorkDispatchCommitmentInSession(d RuntimeDispatchRecord, session *runtimeSemanticValidationSession) error {
 	round := d.ImplementationWorkCommitment
 	if round == nil {
 		return nil
 	}
-	if err := round.Validate(); err != nil {
+	if err := round.validateInSemanticSession(session); err != nil {
 		return err
 	}
 	if round.WorkspaceID != d.WorkspaceID || round.RunID != d.RunID || round.WorkingBinding == nil || round.DispatchID != "" || round.DispatchAuthorityHash != "" || round.CompletedReceiptSetHash != "" || round.FailedReceiptHash != "" ||

@@ -290,7 +290,7 @@ func (c *planningTransactionComponent) coordinateProviderRequestTerminal(ctx con
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {

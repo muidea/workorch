@@ -41,6 +41,18 @@ func (k *runtimeMutationKernel) commit(ctx context.Context, aggregate RuntimeAgg
 	return k.transitions.Commit(ctx, aggregate, expectedRevision)
 }
 
+// validateAggregate preserves each handler's original full invariant gate and
+// error position. Only an event-local kernel may share exact-raw pure results;
+// direct callers and standalone compilers always use independent Validate.
+func (k *runtimeMutationKernel) validateAggregate(aggregate RuntimeAggregate) error {
+	if k != nil && k.transitions != nil {
+		if transaction := k.transitions.ownerTransaction; transaction != nil && transaction.loaded && transaction.validate != nil {
+			return transaction.validate(nil, aggregate)
+		}
+	}
+	return aggregate.Validate()
+}
+
 // The following components are deliberately private and stay in this Go
 // package.  They share the kernel but never hold one another, an aggregate, a
 // lifecycle handle, or an EventHub.  A handler is therefore owned by exactly

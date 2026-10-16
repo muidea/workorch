@@ -12,7 +12,7 @@ func validateRuntimeCloseoutSourceObligations(closeout RuntimeResultCloseout) er
 		}
 		return nil
 	}
-	inventory := *closeout.SourceObligations
+	inventory := closeout.SourceObligations.Clone()
 	if err := inventory.Validate(); err != nil {
 		return err
 	}
@@ -23,13 +23,13 @@ func validateRuntimeCloseoutSourceObligations(closeout RuntimeResultCloseout) er
 	for _, outcome := range closeout.RequirementOutcomes {
 		var item RuntimeCoverageItem
 		item.ID = outcome.CoverageWorkItemID
-		for _, source := range inventory.Sources {
+		for _, source := range RuntimeEvidencePurposeSources(inventory) {
 			if outcome.RequirementRef == source.SourceScope+"/"+source.SourceID {
 				item.SourceScope, item.SourceID, item.TargetText = source.SourceScope, source.SourceID, source.Text
 			}
 		}
 		item = item.Normalized()
-		checks, err := CompileRuntimeSourceObligationChecks(inventory, item)
+		checks, err := compileRuntimeSourceObligationChecksValidated(inventory, item)
 		if err != nil {
 			return err
 		}
@@ -69,21 +69,36 @@ func runtimeTerminalSourceObligationOutcomes(source RuntimeStateRecord, coverage
 		return nil
 	}
 	binding, _ := runtimeTerminalCurrentCoverageBinding(source.Facts, coverage)
-	proof, hasProof := CoverageEvidenceProofForKind(binding, EvidenceKindValidation)
+	proofBinding := binding
+	if coverage.HistoricalBehavior != nil {
+		if _, ordinary, valid := runtimeTerminalHistoricalAcceptance(source, coverage); valid {
+			proofBinding = ordinary
+		}
+	}
+	proof, hasProof := CoverageEvidenceProofForKind(proofBinding, EvidenceKindValidation)
 	var ret []RuntimeSourceObligationOutcome
 	for _, check := range checks {
+		consumerCheck, mapped := check, true
+		if coverage.HistoricalBehavior != nil {
+			consumerCheck, mapped = runtimeTerminalHistoricalSourceCheck(source, coverage, check)
+		}
 		value := RuntimeSourceObligationOutcome{Check: check, CoverageState: RuntimeRequirementUncovered, AssessmentState: RuntimeRequirementUnassessed}
 		if coverage.CurrentBindingRef != nil {
 			ref := coverage.CurrentBindingRef.Clone()
+			if coverage.HistoricalBehavior != nil {
+				if historical, _, valid := runtimeTerminalHistoricalAcceptance(source, coverage); valid {
+					ref = historical.AcceptanceBindingRef.Clone()
+				}
+			}
 			value.CurrentBindingRef = &ref
 		}
 		if outcome.AssessmentState == RuntimeRequirementUnsatisfied {
 			value.AssessmentState = RuntimeRequirementUnsatisfied
 			value.AssessmentReasonCode = outcome.AssessmentReasonCode
 		}
-		if outcome.CoverageState == RuntimeRequirementCovered && outcome.AssessmentState == RuntimeRequirementSatisfied && hasProof && containsString(proof.RequiredCheckRefs, check.CheckRef) {
+		if outcome.CoverageState == RuntimeRequirementCovered && outcome.AssessmentState == RuntimeRequirementSatisfied && mapped && hasProof && containsString(proof.RequiredCheckRefs, consumerCheck.CheckRef) {
 			for _, evidence := range source.Facts.Evidence.Accepted {
-				if evidence.Kind != EvidenceKindValidation || evidence.Validation == nil || assessmentEvidenceWeak(evidence) || !containsString(outcome.AcceptedEvidenceRefs, string(evidence.ID)) || !runtimeTerminalEvidenceMatchesCurrentProof(source, evidence, binding) {
+				if evidence.Kind != EvidenceKindValidation || evidence.Validation == nil || assessmentEvidenceWeak(evidence) || !containsString(outcome.AcceptedEvidenceRefs, string(evidence.ID)) || !runtimeTerminalEvidenceMatchesCoverageProof(source, evidence, coverage, binding) {
 					continue
 				}
 				if RuntimeValidationObservationSatisfiesCoverageProof(proof, *evidence.Validation) {

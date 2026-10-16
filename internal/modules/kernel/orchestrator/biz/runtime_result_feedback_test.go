@@ -84,7 +84,7 @@ func TestRuntimeTerminalFeedbackPreservesOwnerCauseAndUnassessedRequirements(t *
 }
 
 func TestRuntimeTerminalFeedbackRejectsNoncurrentVersionWithoutMutation(t *testing.T) {
-	for _, version := range []uint32{0, 1, 2, runtimecontract.RuntimeResultFeedbackVersionCurrent + 1} {
+	for _, version := range []uint32{0, 1, 2, 3, 4, runtimecontract.RuntimeResultFeedbackVersionCurrent + 1} {
 		aggregate := runtimeTerminalAggregate(t)
 		aggregate.ResultFeedbackVersion = version
 		record := runtimeStateRecordFromAggregate(aggregate)

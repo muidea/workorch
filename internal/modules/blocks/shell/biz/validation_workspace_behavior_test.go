@@ -135,6 +135,28 @@ func TestWorkspaceBehaviorInstrumentationPreservesLegacyAndRejectsOverrides(t *t
 	}
 }
 
+func TestWorkspaceBehaviorAtomicCountsKeepExactOwnerScope(t *testing.T) {
+	workspace := newGoValidationWorkspace(t, "package fixture")
+	writeNativeStructureSource(t, workspace, "fixture.go", "package fixture\nfunc compute() int { return 1 }")
+	for _, mode := range []string{"count", "atomic"} {
+		t.Run(mode, func(t *testing.T) {
+			profile := filepath.Join(t.TempDir(), "observed.cover")
+			body := "mode: " + mode + "\nexample.com/workorch-validation-fixture/fixture.go:1.1,2.1 1 2\nexternal.invalid/other.go:1.1,2.1 1 99\nexample.com/workorch-validation-fixture/fixture_test.go:1.1,2.1 1 99\nexample.com/workorch-validation-fixture/workorch_validation/helper.go:1.1,2.1 1 99\n"
+			if err := os.WriteFile(profile, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			targets, err := shellWorkspaceBehaviorTargets(workspace, profile, []string{"fixture.go", "fixture_test.go", "workorch_validation/helper.go"})
+			if err != nil || !reflect.DeepEqual(targets, []string{"fixture.go"}) {
+				t.Fatalf("count mode changed exact owner scope: %v / %v", targets, err)
+			}
+		})
+	}
+	env := strings.Join(shellProcessBehaviorEnvironment([]string{"GOFLAGS=-covermode=count", "GOCOVERDIR=old", "PATH=/bin"}, "/owner/scratch", []string{"test", "-coverpkg=fixture/delivery"}), "\n")
+	if !strings.Contains(env, "GOFLAGS=-cover -covermode=atomic -coverpkg=fixture/delivery") || strings.Count(env, "GOFLAGS=") != 1 || strings.Contains(env, "GOCOVERDIR=old") {
+		t.Fatal("owner child instrumentation does not preserve atomic mode and exact packages")
+	}
+}
+
 func TestWorkspaceBehaviorProtocolIsOwnedByProjectNativeAdapter(t *testing.T) {
 	requirement := runtimecontract.RuntimeValidationProofRequirement{RequiredCheckRefs: []string{"workorch-cwi-check-a", "workorch-cwi-check-b"}}
 	for _, test := range []struct{ adapter, protocol string }{

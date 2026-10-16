@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -10,6 +11,28 @@ import (
 	"strings"
 	"testing"
 )
+
+// The lifecycle exception must never grow into a second Runtime mutation,
+// read, I/O, reducer, callback or authority surface.
+func TestOwnerHistoricalCompilerReleaseHasOnlyPureDiscardBody(t *testing.T) {
+	for _, file := range parseRuntimeProductionSources(t) {
+		for _, declaration := range file.Decls {
+			fn, ok := declaration.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || fn.Name.Name != "ReleaseHistoricalCompilation" {
+				continue
+			}
+			var body strings.Builder
+			if err := format.Node(&body, token.NewFileSet(), fn.Body); err != nil {
+				t.Fatal(err)
+			}
+			if body.String() != "{\n\tif c != nil {\n\t\tc.historicalCompiler.Close()\n\t}\n}" {
+				t.Fatalf("pure lifecycle discard expanded: %s", body.String())
+			}
+			return
+		}
+	}
+	t.Fatal("pure historical compiler discard method missing")
+}
 
 // TestRuntimeMutationOwnerStructureIsUnique freezes the O0 owner boundary.
 // SM-2/SM-3/SM-4 may add private handlers, but they must continue to share one
@@ -90,6 +113,7 @@ func TestRuntimeMutationOwnerStructureIsUnique(t *testing.T) {
 		"ApplyInternalEvent",
 		"Load",
 		"QueryOperationReceipt",
+		"ReleaseHistoricalCompilation", // lifecycle-only, statically checked below
 	})
 	assertRuntimeExportedMethods(t, methods, "RuntimeTransitionCoordinator", []string{"Commit"})
 
@@ -760,8 +784,9 @@ func TestO7RuntimeFilesKeepOneFacetPerTransitionFile(t *testing.T) {
 	t.Parallel()
 	want := map[string]map[string]bool{
 		"controller.go": {
-			"RuntimeController.initialize": true,
-			"RuntimeController.Load":       true,
+			"RuntimeController.initialize":                   true,
+			"RuntimeController.Load":                         true,
+			"RuntimeController.ReleaseHistoricalCompilation": true,
 		},
 		"authority_transition.go": {
 			"authorityComponent.reconcileAuthorityBeforeCandidate": true,

@@ -272,6 +272,11 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Runt
 	}
 	items := make(map[common.CoverageWorkItemID]RuntimeCoverageItem, len(seed.CoverageItems))
 	for _, item := range seed.CoverageItems {
+		if item.HistoricalAcceptance != nil && (seed.SourceObligations == nil ||
+			ValidateRuntimeEvidencePurposeMappingCoverage(*seed.SourceObligations, seed.CoverageItems) != nil ||
+			ValidateRuntimeSourceObligationSeed(seed) != nil) {
+			return fmt.Errorf("runtime definition focus historical checks require original confirmed source mapping")
+		}
 		items[item.ID] = item
 	}
 	seenIDs := make(map[string]struct{}, len(focuses))
@@ -296,7 +301,10 @@ func ValidateRuntimeDefinitionFocuses(seed RuntimeDefinitionSeed, focuses []Runt
 		if focus.AssessmentScope != item.SourceScope || focus.AssessmentID != item.SourceID || focus.AssessmentText != item.TargetText {
 			return fmt.Errorf("runtime definition focus %q assessment source does not exactly match definition seed coverage %q", focus.ID, coverageID)
 		}
-		if len(item.SourceObligationChecks) != 0 &&
+		// A confirmed mapped historical endpoint retains its original checks
+		// as provenance only. The independently validated consumer seed owns
+		// their ordinary all-of execution; no local validation is fabricated.
+		if len(item.SourceObligationChecks) != 0 && item.HistoricalAcceptance == nil &&
 			(!containsString(focus.RequiredEvidenceKinds, EvidenceKindValidation) ||
 				!runtimeOperationKindsContain(focus.AcceptedStepKinds, RuntimeBlockKindManagedValidationSession)) {
 			return fmt.Errorf("runtime definition focus %q source obligations require exact owner-attested validation checks", focus.ID)

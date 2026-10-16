@@ -921,7 +921,7 @@ func CompileRuntimeSourceEvidencePolicy(scope, sourceID string, profiles []Runti
 		return RuntimeSourceEvidencePolicy{}, fmt.Errorf("source evidence policy requires exact scope and source identity")
 	}
 	candidates := make([]RuntimeProfileEvidenceRequirement, 0)
-	for _, profile := range NormalizeRuntimeProfileContracts(profiles) {
+	for _, profile := range runtimeSourcePolicyProfileProjection(scope, sourceID, profiles) {
 		for _, requirement := range profile.EvidenceRequirements {
 			if !RuntimeEvidenceDeclarationMatchesSource(requirement, scope, sourceID) {
 				continue
@@ -961,6 +961,26 @@ func CompileRuntimeSourceEvidencePolicy(scope, sourceID string, profiles []Runti
 	}
 	policy.SemanticProofDeclarationRef = CanonicalRuntimeDefinitionEvidenceDeclarationRef(scope, sourceID)
 	return policy, nil
+}
+
+// The source compiler reads only profile ID and exact/wildcard requirements.
+// Select those by the same raw-trim predicate before normalization so unrelated
+// declaration graphs are not repeatedly copied. Stable profile/requirement
+// order, duplicates, full matching requirements and all merge gates remain the
+// original ones. This is not profile admission or a validation-success cache.
+func runtimeSourcePolicyProfileProjection(scope, sourceID string, profiles []RuntimeProfileContract) []RuntimeProfileContract {
+	ret := make([]RuntimeProfileContract, 0, len(profiles))
+	for _, profile := range profiles {
+		var matched []RuntimeProfileEvidenceRequirement
+		for _, requirement := range profile.EvidenceRequirements {
+			if RuntimeEvidenceDeclarationMatchesSource(requirement, scope, sourceID) {
+				matched = append(matched, requirement)
+			}
+		}
+		ret = append(ret, RuntimeProfileContract{ID: strings.TrimSpace(profile.ID), EvidenceRequirements: normalizeRuntimeProfileEvidenceRequirements(matched)})
+	}
+	sort.SliceStable(ret, func(i, j int) bool { return ret[i].ID < ret[j].ID })
+	return nilIfEmpty(ret)
 }
 
 func runtimeSourceWildcardQualityRequirements(values []RuntimeProfileEvidenceRequirement) []RuntimeProfileEvidenceRequirement {

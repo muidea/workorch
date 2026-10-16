@@ -692,6 +692,7 @@ func RuntimeValidationSurfaceDeclaringProofRequirement(values []RuntimeValidatio
 			if binding.RequirementHash == requirement.Hash && binding.DefinitionRevision == requirement.DefinitionRevision &&
 				binding.CoverageWorkItemID == requirement.CoverageWorkItemID && binding.DeclarationRef == requirement.DeclarationRef &&
 				binding.ValidationRecipeID == surface.ID &&
+				runtimeValidationCompositionMatchesRequirement(binding.InputReview, requirement) &&
 				(requirement.ValidationRecipeID == "" || binding.ValidationRecipeID == requirement.ValidationRecipeID) &&
 				sameStrings(binding.RequiredCheckRefs, requirement.RequiredCheckRefs) {
 				return surface.Clone(), binding.Clone(), true

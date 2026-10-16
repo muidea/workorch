@@ -125,9 +125,32 @@ func RuntimeImplementationWorkReceiptMembers(dispatch RuntimeDispatchRecord, rec
 // aggregate load/CAS boundary. Historical scope is not compared to today's
 // resources; the immutable dispatch and earlier semantic transaction retain it.
 func ValidateRuntimeImplementationWorkState(definition RuntimeDefinitionContext, facts RuntimeFacts, ledger RuntimeImplementationWorkLedger, semantic RuntimeSemanticPlanningLedger, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, receipts []RuntimeOperationReceipt, governance []RuntimeOperationGovernanceBinding, budget RuntimeExecutionBudgetLedger) error {
+	return validateRuntimeImplementationWorkStateComplete(definition, facts, ledger, semantic, active, completed, receipts, governance, budget, newRuntimeSemanticValidationSession())
+}
+
+func validateRuntimeImplementationWorkStateInSession(definition RuntimeDefinitionContext, facts RuntimeFacts, ledger RuntimeImplementationWorkLedger, semantic RuntimeSemanticPlanningLedger, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, receipts []RuntimeOperationReceipt, governance []RuntimeOperationGovernanceBinding, budget RuntimeExecutionBudgetLedger, semanticSession *runtimeSemanticValidationSession) error {
+	if semanticSession == nil {
+		return ValidateRuntimeImplementationWorkState(definition, facts, ledger, semantic, active, completed, receipts, governance, budget)
+	}
+	raw := RuntimeStateRecord{Definition: definition, Facts: facts, ImplementationWork: ledger, SemanticPlanning: semantic, ActiveDispatch: active, CompletedDispatches: completed, OperationReceipts: receipts, OperationGovernanceBindings: governance, ExecutionBudget: budget}
+	for _, prior := range semanticSession.workStates {
+		if reflect.DeepEqual(prior, raw) {
+			return nil
+		}
+	}
+	if err := validateRuntimeImplementationWorkStateComplete(definition, facts, ledger, semantic, active, completed, receipts, governance, budget, semanticSession); err != nil {
+		return err
+	}
+	semanticSession.workStates = append(semanticSession.workStates, raw.Clone())
+	return nil
+}
+
+// The complete original gate runs before any successful raw preimage is saved.
+// A public independent consumer always executes this gate afresh.
+func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinitionContext, facts RuntimeFacts, ledger RuntimeImplementationWorkLedger, semantic RuntimeSemanticPlanningLedger, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, receipts []RuntimeOperationReceipt, governance []RuntimeOperationGovernanceBinding, budget RuntimeExecutionBudgetLedger, semanticSession *runtimeSemanticValidationSession) error {
 	if preview := ledger.ScopePreview; preview != nil {
 		previewSources := RuntimeImplementationWorkScopeSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: preview.Request.AuthoritySnapshotID, Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: preview.Request.CoverageWorkItemID, ManifestBinding: preview.Request.ManifestBinding}
-		if err := preview.Request.ValidateForSources(previewSources); err != nil {
+		if err := validateRuntimeWorkScopeInSession(preview.Request, previewSources, semanticSession); err != nil {
 			return err
 		}
 		if preview.Observation != nil {
@@ -165,7 +188,7 @@ func ValidateRuntimeImplementationWorkState(definition RuntimeDefinitionContext,
 				}
 			}
 			previewSource := RuntimeImplementationWorkScopePreview{Request: work.Scope.Request, Observation: &work.Scope}
-			expectedManifest, compileErr := CompileRuntimeSemanticImplementationPurposeManifest(facts.WorkspaceID, facts.RunID, definition, facts.DefinitionSeed, facts.DefinitionFocuses, facts.Activation.ExecutionContract, work.MutationInputCatalogs, previewSource, prefixRounds)
+			expectedManifest, compileErr := compileRuntimeWorkPurposeInSession(facts.WorkspaceID, facts.RunID, definition, facts.DefinitionSeed, facts.DefinitionFocuses, facts.Activation.ExecutionContract, work.MutationInputCatalogs, previewSource, prefixRounds, semanticSession)
 			if compileErr != nil {
 				return compileErr
 			}
@@ -178,7 +201,7 @@ func ValidateRuntimeImplementationWorkState(definition RuntimeDefinitionContext,
 				return fmt.Errorf("implementation purpose choice differs from original vocabulary")
 			}
 			choiceScopeSources := RuntimeImplementationWorkScopeSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: work.Scope.Request.AuthoritySnapshotID, Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: work.Scope.Request.CoverageWorkItemID, ManifestBinding: work.Scope.Request.ManifestBinding}
-			if err := work.Scope.Request.ValidateForSources(choiceScopeSources); err != nil {
+			if err := validateRuntimeWorkScopeInSession(work.Scope.Request, choiceScopeSources, semanticSession); err != nil {
 				return err
 			}
 			matches++
@@ -275,7 +298,7 @@ func ValidateRuntimeImplementationWorkState(definition RuntimeDefinitionContext,
 				continue
 			}
 			matches++
-			if err := ValidateRuntimeImplementationWorkDispatchCommitment(dispatch); err != nil {
+			if err := validateRuntimeImplementationWorkDispatchCommitmentInSession(dispatch, semanticSession); err != nil {
 				return err
 			}
 			preDispatch := round.Clone()
@@ -433,7 +456,7 @@ func ValidateRuntimeImplementationWorkState(definition RuntimeDefinitionContext,
 			return fmt.Errorf("implementation dispatch is not joined to private round ledger")
 		}
 	}
-	return ledger.ValidateForSources(sources)
+	return ledger.validateForSourcesInSemanticSession(sources, semanticSession)
 }
 
 // 原无 receipt claim 的 unknown 消费是关闭事实；迟到 receipt 不得确认或释放它。

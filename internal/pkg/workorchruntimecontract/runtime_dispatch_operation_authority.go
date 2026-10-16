@@ -68,6 +68,10 @@ func StableRuntimeDispatchOperationAuthorityHash(dispatch RuntimeDispatchRecord)
 // catalog, its exact fallback policy, or the static operation contract. No
 // mutable current Runtime facts participate in this check.
 func ValidateRuntimeDispatchOperationAuthority(dispatch RuntimeDispatchRecord) error {
+	return validateRuntimeDispatchOperationAuthorityInIndex(dispatch, nil)
+}
+
+func validateRuntimeDispatchOperationAuthorityInIndex(dispatch RuntimeDispatchRecord, index *runtimeOwnerLineageIndex) error {
 	catalogs := NormalizeRuntimeOperationAdmissibilities(dispatch.OperationAdmissibilities)
 	observations := NormalizeRuntimePrerequisiteObservations(dispatch.OperationAdmissibilityObservations)
 	policies := NormalizeRuntimeOperationPolicyFacts(dispatch.OperationPolicies)
@@ -89,7 +93,7 @@ func ValidateRuntimeDispatchOperationAuthority(dispatch RuntimeDispatchRecord) e
 		observationByPrerequisite[observation.PrerequisiteID] = observation
 	}
 	for _, catalog := range catalogs {
-		if err := catalog.Validate(); err != nil {
+		if err := index.catalog(catalog); err != nil {
 			return fmt.Errorf("runtime dispatch owner catalog: %w", err)
 		}
 		if _, duplicate := catalogBySnapshot[catalog.SnapshotID]; duplicate {

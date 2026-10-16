@@ -67,6 +67,10 @@ make test
 make build
 ```
 
+`fmt` / `fmt-check` only format product sources. Root `.validation-tmp-*` runtime material,
+like `.workorch-data` and `.workorch-workspaces`, is excluded to preserve original validation bytes;
+`python3 scripts/test_go_format_source_boundary.py` verifies both read and write boundaries.
+
 Useful aggregate checks:
 
 ```bash
@@ -114,6 +118,10 @@ The Web console is available at `http://127.0.0.1:8080/console/`. The stable exe
 `POST /api/v1/workorch/workspaces/:workspaceId/execution-activations` with `intent=resume|restart`; run-ID-addressed
 create/start/resume mutation endpoints are intentionally not part of the current API. See
 [Service API entry](docs/50-product-interface/service-api.md) for command and read contracts.
+
+The first live release supports local-machine operators only. HTTP/Web binds loopback and rejects non-loopback listeners,
+proxy-provided identity and cross-origin browser requests; see [Local Operator Access](docs/50-product-interface/local-operator-access.md).
+Opening the console does not grant automatic execution or waive exact confirmation/approval.
 
 ## Configuration
 

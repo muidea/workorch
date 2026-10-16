@@ -209,3 +209,72 @@ func TestSemanticRequestOwnerExactReplayAfterRestartDoesNotAllocate(t *testing.T
 		}
 	}
 }
+
+func TestSemanticRequestIdentityChangesAfterGenerationRetirement(t *testing.T) {
+	ledger := runtimecontract.RuntimeSemanticPlanningLedger{}
+	if got := SemanticRequestIdentityHashForKey(ledger, ""); got != "" {
+		t.Fatalf("first coverage-order identity = %q", got)
+	}
+	if got := SemanticRequestIdentityHashForKey(ledger, "semantic-proof-batch-0"); got != "semantic-proof-batch-0" {
+		t.Fatalf("first proof-batch identity = %q", got)
+	}
+
+	ledger.History = []runtimecontract.RuntimeSemanticPlanningGeneration{{
+		RetiredAtStateRevision: 17,
+		Reason:                 runtimecontract.RuntimeSemanticPlanningRetirementEligibleClosureChanged,
+		Snapshot: runtimecontract.RuntimeSemanticPlanningLedger{
+			LogicalRequestID: "retired-request",
+			Manifest:         &runtimecontract.RuntimeSemanticPlanManifest{Hash: "retired-manifest"},
+		},
+	}}
+	order := SemanticRequestIdentityHashForKey(ledger, "")
+	batch := SemanticRequestIdentityHashForKey(ledger, "semantic-proof-batch-0")
+	if order == "" || batch == "semantic-proof-batch-0" || order == batch {
+		t.Fatalf("retired generation did not create distinct request identities: order=%q batch=%q", order, batch)
+	}
+	if replay := SemanticRequestIdentityHashForKey(ledger, ""); replay != order {
+		t.Fatalf("retired generation identity is not deterministic: first=%q replay=%q", order, replay)
+	}
+	encoded, err := json.Marshal(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restarted runtimecontract.RuntimeSemanticPlanningLedger
+	if err := json.Unmarshal(encoded, &restarted); err != nil {
+		t.Fatal(err)
+	}
+	if SemanticRequestIdentityHashForKey(restarted, "") != order || SemanticRequestIdentityHashForKey(restarted, "semantic-proof-batch-0") != batch {
+		t.Fatal("fresh process changed generation or batch request identity")
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*runtimecontract.RuntimeSemanticPlanningLedger)
+	}{
+		{"retirement revision", func(value *runtimecontract.RuntimeSemanticPlanningLedger) { value.History[0].RetiredAtStateRevision++ }},
+		{"reason", func(value *runtimecontract.RuntimeSemanticPlanningLedger) {
+			value.History[0].Reason = runtimecontract.RuntimeSemanticPlanningRetirementResourceInvalidated
+		}},
+		{"manifest", func(value *runtimecontract.RuntimeSemanticPlanningLedger) {
+			value.History[0].Snapshot.Manifest.Hash = "other-manifest"
+		}},
+		{"logical lineage", func(value *runtimecontract.RuntimeSemanticPlanningLedger) {
+			value.History[0].Snapshot.LogicalRequestID = "other-request"
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var altered runtimecontract.RuntimeSemanticPlanningLedger
+			if err := json.Unmarshal(encoded, &altered); err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(&altered)
+			if SemanticRequestIdentityHashForKey(altered, "") == order {
+				t.Fatal("altered retirement lineage reused the original request identity")
+			}
+		})
+	}
+
+	ledger.History[0].RetiredAtStateRevision++
+	if next := SemanticRequestIdentityHashForKey(ledger, ""); next == order {
+		t.Fatalf("next retired generation reused identity %q", next)
+	}
+}

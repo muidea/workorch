@@ -947,6 +947,7 @@ func TestValidationFailureRepairProductionReceiptReopensFreshValidationAndProfil
 	sealedSecondValidation := sealCandidateForTest(t, repository, secondValidationCandidate)
 	secondRejection := runtimeRejectedValidationEvidenceForTest(t, sealedSecondValidation, "event-validation-repair-cycle-2", runtimecontract.ValidationDiagnosticBuildFailed)
 	attachRuntimeTestOwnerReceipt(t, &repository.aggregate, &secondRejection)
+	testSemanticRepairReceiptConsumption(t, repository.aggregate, secondRejection)
 	historyCount := len(repository.aggregate.SemanticPlanning.History)
 	sessionCount := len(repository.aggregate.CandidateRequestSessions)
 	receiptCount := len(repository.aggregate.OperationReceipts)

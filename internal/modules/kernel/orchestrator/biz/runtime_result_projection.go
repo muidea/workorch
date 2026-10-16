@@ -24,10 +24,14 @@ func (m *Biz) deliverRuntimeTerminal(ctx context.Context, aggregate runtime.Runt
 	if err := aggregate.Validate(); err != nil {
 		return fmt.Errorf("persisted Runtime terminal aggregate is invalid: %w", err)
 	}
+	proofs, err := m.observeRuntimeTerminalSnapshotProofs(ctx, aggregate)
+	if err != nil {
+		return err
+	}
 	sealed, err := m.submitRuntimeInternalEvent(ctx, runtime.RuntimeInternalEvent{
 		Kind:     runtime.RuntimeInternalEventTerminalMaterialSealRequired,
 		Scope:    runtime.RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
-		Delivery: &runtime.RuntimeInternalDeliveryPayload{},
+		Delivery: &runtime.RuntimeInternalDeliveryPayload{TerminalSnapshotProofs: proofs},
 	})
 	if err != nil {
 		return err

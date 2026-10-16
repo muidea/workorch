@@ -31,6 +31,7 @@ type RuntimeCommandRequest struct {
 	// carried with a sealed managed-validation dispatch.
 	ValidationRecipes           []runtimecontract.RuntimeValidationRecipe
 	ValidationCheckAttestations []runtimecontract.RuntimeValidationCheckAttestationBinding
+	validationProofBinding      runtimecontract.RuntimeValidationProofRequirementBinding
 	// 本次复制到执行 scratch 的原始字节事实，不从 catalog 或 TargetRefs 重建。
 	validationCopiedInputs []shellValidationCopiedInput
 }
@@ -85,7 +86,8 @@ type RuntimeCommandResult struct {
 	validationSourcesUnchanged         bool
 	validationCopiedInputs             []shellValidationCopiedInput
 	// 新合取 runner 在实际执行前编译的 owner-local 精确阶段规格，不跨 owner。
-	projectStageSpecs []shellProjectStageSpec
+	projectStageSpecs           []shellProjectStageSpec
+	projectDiagnosticStageSpecs []shellProjectStageSpec
 	// validationFailureTargetCandidatesInvalid records that the owner-private
 	// structured-output parser observed more candidates than the bounded
 	// validation-failure protocol permits. An empty TargetRefs slice alone cannot

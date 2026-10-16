@@ -24,6 +24,10 @@ func cloneRuntimeAssessmentOwnerFactSources(values []RuntimeAssessmentOwnerFactS
 }
 
 func deriveRuntimeAssessmentOwnerFactSources(definition string, workspace string, authority RuntimeAssessmentAuthorityInput) ([]RuntimeAssessmentOwnerFactSource, error) {
+	return deriveRuntimeAssessmentOwnerFactSourcesInSession(definition, workspace, authority, nil)
+}
+
+func deriveRuntimeAssessmentOwnerFactSourcesInSession(definition string, workspace string, authority RuntimeAssessmentAuthorityInput, session *runtimeSemanticValidationSession) ([]RuntimeAssessmentOwnerFactSource, error) {
 	if len(authority.Focus.RequiredOwnerFacts) == 0 {
 		return nil, nil
 	}
@@ -42,7 +46,15 @@ func deriveRuntimeAssessmentOwnerFactSources(definition string, workspace string
 		if !reflect.DeepEqual(catalog, catalog.Normalized()) {
 			return nil, fmt.Errorf("assessment owner-fact source catalog must be raw canonical")
 		}
-		if err := catalog.Validate(); err != nil {
+		// Reuse the same complete catalog compiler as semantic sources, not a
+		// second retained copy in the lineage index. Collection joins remain here.
+		var err error
+		if session == nil {
+			err = catalog.Validate()
+		} else {
+			_, err = validateRuntimeAdmissibilityInSemanticSession(catalog, session)
+		}
+		if err != nil {
 			return nil, err
 		}
 		if _, duplicate := seenOwners[catalog.OwnerModuleID]; duplicate {

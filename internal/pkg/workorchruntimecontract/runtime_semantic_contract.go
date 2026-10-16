@@ -3,9 +3,11 @@ package workorchruntimecontract
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -115,12 +117,21 @@ func (s RuntimeDefinitionSeed) Validate() error {
 		return fmt.Errorf("runtime definition seed requires current schema, definition, policy, coverage and slices")
 	}
 	if s.SourceObligations != nil {
+		if err := ValidateRuntimeEvidencePurposeMappingAvailability(s.SourceObligations); err != nil {
+			return err
+		}
 		if err := ValidateRuntimeSourceObligationSeed(s); err != nil {
+			return err
+		}
+		if err := ValidateRuntimeExecutionProofMappingCoverage(*s.SourceObligations, s.CoverageItems); err != nil {
+			return err
+		}
+		if err := ValidateRuntimeEvidencePurposeMappingCoverage(*s.SourceObligations, s.CoverageItems); err != nil {
 			return err
 		}
 	} else {
 		for _, item := range s.CoverageItems {
-			if len(item.SourceObligationChecks) != 0 {
+			if len(item.SourceObligationChecks) != 0 || item.HistoricalAcceptance != nil || len(item.GoalExecutionAssertions) != 0 {
 				return fmt.Errorf("runtime definition seed source checks require sealed inventory")
 			}
 		}
@@ -230,6 +241,33 @@ func validateRuntimeSemanticOwnerCatalogCollection(catalogs []RuntimeOperationAd
 	return nil
 }
 
+// Preserve the work compiler's original first-error order: all individual and
+// prerequisite gates finish before the collection-wide duplicate-owner gate.
+// The manifest validator has a different historical order and is not reused
+// for this collection gate.
+func validateRuntimeWorkCompilerCatalogsInSession(catalogs []RuntimeOperationAdmissibility, session *runtimeSemanticValidationSession) error {
+	seenPrerequisites := make(map[string]struct{}, len(catalogs))
+	for _, raw := range catalogs {
+		value, err := validateRuntimeAdmissibilityInSemanticSession(raw, session)
+		if err != nil {
+			return fmt.Errorf("runtime semantic owner catalogs: %w", err)
+		}
+		if _, duplicate := seenPrerequisites[value.PrerequisiteID]; duplicate {
+			return fmt.Errorf("runtime semantic owner catalogs: runtime operation admissibility duplicates prerequisite %q", value.PrerequisiteID)
+		}
+		seenPrerequisites[value.PrerequisiteID] = struct{}{}
+	}
+	seenOwners := make(map[string]struct{}, len(catalogs))
+	for _, raw := range catalogs {
+		owner := strings.TrimSpace(raw.OwnerModuleID)
+		if _, duplicate := seenOwners[owner]; duplicate {
+			return fmt.Errorf("runtime semantic owner catalogs duplicate owner %q", owner)
+		}
+		seenOwners[owner] = struct{}{}
+	}
+	return nil
+}
+
 // CompileRuntimeSemanticPlanManifest compiles the provider-visible semantic
 // vocabulary exclusively from activation-sealed definition capabilities. It
 // is deliberately pure: owner resource availability is established later by
@@ -263,6 +301,9 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 	if err := ValidateRuntimeSourceObligationApplicability(seed.SourceObligations, execution.ProfileContracts); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
+	if err := ValidateRuntimeGoalExecutionAssertionSeed(seed, execution.ProfileContracts); err != nil {
+		return RuntimeSemanticPlanManifest{}, err
+	}
 	if err := ValidateRuntimeDefinitionFocuses(seed, definitionFocuses); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
@@ -270,6 +311,9 @@ func CompileRuntimeSemanticPlanManifestForCoverage(workspaceID common.WorkspaceI
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	if err := ValidateRuntimeDefinitionLineageAssertions(definitionFocuses, execution.ProfileContracts); err != nil {
+		return RuntimeSemanticPlanManifest{}, err
+	}
+	if err := ValidateRuntimeTerminalProofDeclarationSources(seed.CoverageItems, execution.ProfileContracts); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	if err := ValidateRuntimeDefinitionVerificationPolicies(definitionFocuses, execution.ProfileContracts); err != nil {
@@ -678,6 +722,9 @@ func (c RuntimeSemanticPlanRequestContext) Validate(manifest RuntimeSemanticPlan
 	if err := ValidateRuntimeSourceObligationApplicability(c.DefinitionSeed.SourceObligations, c.Activation.ExecutionContract.ProfileContracts); err != nil {
 		return err
 	}
+	if err := ValidateRuntimeGoalExecutionAssertionSeed(c.DefinitionSeed, c.Activation.ExecutionContract.ProfileContracts); err != nil {
+		return err
+	}
 	if err := c.Activation.ProviderSelection.Target.Validate(); err != nil {
 		return err
 	}
@@ -800,8 +847,17 @@ type runtimeSemanticCatalogValidationEntry struct {
 // call. Exact raw equality is required before a prior result can be reused;
 // matching a caller-supplied hash is never sufficient.
 type runtimeSemanticValidationSession struct {
-	manifests map[string][]runtimeSemanticManifestValidationEntry
-	catalogs  map[string][]runtimeSemanticCatalogValidationEntry
+	manifests         map[string][]runtimeSemanticManifestValidationEntry
+	catalogs          map[string][]runtimeSemanticCatalogValidationEntry
+	workScopes        []runtimeWorkScopeValidationEntry
+	workDefinitions   []runtimeWorkDefinitionValidationEntry
+	seeds             []RuntimeDefinitionSeed
+	workRounds        []RuntimeImplementationWorkRound
+	workStates        []RuntimeStateRecord
+	definitionSources []runtimeSemanticDefinitionSourceEntry
+	// Only the owner-private cross-event compiler enables retired-generation
+	// results. Public validators always retain their complete independent path.
+	ownerHistory *runtimeOwnerHistoricalSemanticCompiler
 }
 
 func newRuntimeSemanticValidationSession() *runtimeSemanticValidationSession {
@@ -832,6 +888,22 @@ func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest,
 	}
 	seenCoverage := make(map[common.CoverageWorkItemID]struct{}, len(m.CoverageItems))
 	for _, raw := range m.CoverageItems {
+		if err := ValidateRuntimeSourceObligationChecks(m.DefinitionRevision, raw.ID, raw.SourceObligationChecks); err != nil {
+			return runtimeValidatedSemanticManifest{}, err
+		}
+		if raw.HistoricalAcceptance != nil {
+			if err := raw.HistoricalAcceptance.Validate(raw.ID); err != nil {
+				return runtimeValidatedSemanticManifest{}, err
+			}
+			if len(raw.SourceObligationChecks) == 0 {
+				return runtimeValidatedSemanticManifest{}, fmt.Errorf("historical acceptance source requires complete original obligation checks")
+			}
+			for _, check := range raw.SourceObligationChecks {
+				if check.InventoryHash != raw.HistoricalAcceptance.InventoryHash {
+					return runtimeValidatedSemanticManifest{}, fmt.Errorf("historical acceptance source checks differ from original inventory")
+				}
+			}
+		}
 		id := common.CoverageWorkItemID(strings.TrimSpace(string(raw.ID)))
 		if id == "" {
 			return runtimeValidatedSemanticManifest{}, fmt.Errorf("runtime semantic manifest has a coverage item without identity")
@@ -842,7 +914,7 @@ func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest,
 		seenCoverage[id] = struct{}{}
 	}
 	for _, obligation := range m.ProofObligations {
-		if err := obligation.Validate(); err != nil {
+		if err := obligation.validateInSemanticSession(session); err != nil {
 			return runtimeValidatedSemanticManifest{}, err
 		}
 	}
@@ -891,15 +963,24 @@ func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest,
 			return runtimeValidatedSemanticManifest{}, fmt.Errorf("runtime semantic manifest duplicates obligation coverage %q", obligation.CoverageWorkItemID)
 		}
 		item := coverage[obligation.CoverageWorkItemID]
-		if len(item.SourceObligationChecks) != 0 && (obligation.ValidationProofRequirement == nil ||
+		if !sameRuntimeHistoricalAcceptanceSource(item.HistoricalAcceptance, obligation.HistoricalAcceptance) {
+			return runtimeValidatedSemanticManifest{}, fmt.Errorf("runtime semantic obligation coverage %q changes historical acceptance source", item.ID)
+		}
+		if requirement := obligation.ValidationProofRequirement; requirement != nil {
+			assertions, err := CompileRuntimeCWILineageAssertions(obligation.LineageAssertions, obligation.DeclarationRef, item)
+			if err != nil || !slices.Equal(assertions, requirement.LineageAssertions) {
+				return runtimeValidatedSemanticManifest{}, fmt.Errorf("validation composition differs from original semantic obligation %q", item.ID)
+			}
+		}
+		if len(item.SourceObligationChecks) != 0 && obligation.HistoricalAcceptance == nil && (obligation.ValidationProofRequirement == nil ||
 			!sameRuntimeSourceObligationChecks(item.SourceObligationChecks, obligation.ValidationProofRequirement.SourceObligationChecks)) {
 			return runtimeValidatedSemanticManifest{}, fmt.Errorf("runtime semantic obligation coverage %q omits exact source obligations", item.ID)
 		}
 		if obligation.ImplementationWork != nil {
 			work := obligation.ImplementationWork
-			if err := work.Validate(); err != nil {
-				return runtimeValidatedSemanticManifest{}, err
-			}
+			// Every raw obligation above already ran the complete work gate.
+			// Obligation normalization only raw-clones this value, so keep the
+			// cross-manifest checks here without rehashing unchanged catalogs.
 			request := work.Scope.Request
 			catalog, found := ownerCatalogs[request.Policy.OwnerModuleID]
 			if request.WorkspaceID != m.WorkspaceID || request.RunID != m.RunID || request.DefinitionSeedHash != m.DefinitionSeedHash || request.CoverageWorkItemID != obligation.CoverageWorkItemID || !found || catalog.ObservedRevision != work.Scope.Selection.ObservedRevision {
@@ -1024,7 +1105,7 @@ func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest,
 		ownerCatalogByOwner: ownerCatalogs, dependencyCatalogByOwner: dependencyCatalogs,
 		documents: &runtimeSemanticDocumentValidationSession{},
 	}
-	session.manifests[manifestKey] = append(session.manifests[manifestKey], runtimeSemanticManifestValidationEntry{raw: rawManifest, validated: validated})
+	session.manifests[manifestKey] = append(session.manifests[manifestKey], runtimeSemanticManifestValidationEntry{raw: cloneRuntimeSemanticPlanManifestRaw(rawManifest), validated: validated})
 	return validated, nil
 }
 
@@ -1033,22 +1114,9 @@ func validateRuntimeSemanticOwnerCatalogCollectionInSession(catalogs []RuntimeOp
 	seenPrerequisites := make(map[string]struct{}, len(catalogs))
 	seenOwners := make(map[string]struct{}, len(catalogs))
 	for _, raw := range catalogs {
-		key := strings.TrimSpace(raw.SnapshotID)
-		var value RuntimeOperationAdmissibility
-		found := false
-		for _, entry := range session.catalogs[key] {
-			if reflect.DeepEqual(entry.raw, raw) {
-				value, found = entry.normalized, true
-				break
-			}
-		}
-		if !found {
-			var err error
-			value, err = validateAndNormalizeRuntimeOperationAdmissibility(raw)
-			if err != nil {
-				return nil, fmt.Errorf("runtime semantic owner catalogs: %w", err)
-			}
-			session.catalogs[key] = append(session.catalogs[key], runtimeSemanticCatalogValidationEntry{raw: raw, normalized: value})
+		value, err := validateRuntimeAdmissibilityInSemanticSession(raw, session)
+		if err != nil {
+			return nil, fmt.Errorf("runtime semantic owner catalogs: %w", err)
 		}
 		if _, duplicate := seenPrerequisites[value.PrerequisiteID]; duplicate {
 			return nil, fmt.Errorf("runtime semantic owner catalogs: runtime operation admissibility duplicates prerequisite %q", value.PrerequisiteID)
@@ -1067,6 +1135,21 @@ func validateRuntimeSemanticOwnerCatalogCollectionInSession(catalogs []RuntimeOp
 		return normalized[i].OwnerModuleID < normalized[j].OwnerModuleID
 	})
 	return nilIfEmpty(normalized), nil
+}
+
+func validateRuntimeAdmissibilityInSemanticSession(raw RuntimeOperationAdmissibility, session *runtimeSemanticValidationSession) (RuntimeOperationAdmissibility, error) {
+	key := strings.TrimSpace(raw.SnapshotID)
+	for _, entry := range session.catalogs[key] {
+		if reflect.DeepEqual(entry.raw, raw) {
+			return entry.normalized, nil
+		}
+	}
+	value, err := validateAndNormalizeRuntimeOperationAdmissibility(raw)
+	if err != nil {
+		return RuntimeOperationAdmissibility{}, err
+	}
+	session.catalogs[key] = append(session.catalogs[key], runtimeSemanticCatalogValidationEntry{raw: cloneRuntimeOperationAdmissibilityRaw(raw), normalized: value})
+	return value, nil
 }
 
 func validateRuntimeSemanticOwnerFactAcquisitionAgainstCatalogs(coverageID common.CoverageWorkItemID, acquisition RuntimeSemanticOwnerFactAcquisition, catalogs map[string]RuntimeOperationAdmissibility) error {
@@ -1177,6 +1260,7 @@ func runtimeValidationSurfacesDeclareNormalizedProofRequirement(values []Runtime
 			if binding.RequirementHash == requirement.Hash && binding.DefinitionRevision == requirement.DefinitionRevision &&
 				binding.CoverageWorkItemID == requirement.CoverageWorkItemID && binding.DeclarationRef == requirement.DeclarationRef &&
 				binding.ValidationRecipeID == surface.ID &&
+				runtimeValidationCompositionMatchesRequirement(binding.InputReview, requirement) &&
 				(requirement.ValidationRecipeID == "" || binding.ValidationRecipeID == requirement.ValidationRecipeID) &&
 				sameRuntimeSemanticNormalizedStrings(binding.RequiredCheckRefs, requirement.RequiredCheckRefs) {
 				return true
@@ -1205,6 +1289,7 @@ func runtimeValidationSurfaceProofRequirementBindingNormalized(surface RuntimeVa
 		if binding.RequirementHash == requirement.Hash && binding.DefinitionRevision == requirement.DefinitionRevision &&
 			binding.CoverageWorkItemID == requirement.CoverageWorkItemID && binding.DeclarationRef == requirement.DeclarationRef &&
 			binding.ValidationRecipeID == surface.ID &&
+			runtimeValidationCompositionMatchesRequirement(binding.InputReview, requirement) &&
 			(requirement.ValidationRecipeID == "" || binding.ValidationRecipeID == requirement.ValidationRecipeID) &&
 			sameRuntimeSemanticNormalizedStrings(binding.RequiredCheckRefs, requirement.RequiredCheckRefs) {
 			return binding, true
@@ -1367,11 +1452,15 @@ func sameRuntimeSemanticNormalizedStrings(left, right []string) bool {
 // activation-owned DefinitionFocuses, never with source facts reconstructed
 // from the manifest itself.
 func ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest RuntimeSemanticPlanManifest, seed RuntimeDefinitionSeed, definitionFocuses []RuntimeDefinitionFocus) error {
-	validated, err := validateRuntimeSemanticPlanManifest(manifest)
+	return validateRuntimeSemanticManifestDefinitionInSession(manifest, seed, definitionFocuses, newRuntimeSemanticValidationSession())
+}
+
+func validateRuntimeSemanticManifestDefinitionInSession(manifest RuntimeSemanticPlanManifest, seed RuntimeDefinitionSeed, definitionFocuses []RuntimeDefinitionFocus, session *runtimeSemanticValidationSession) error {
+	validated, err := validateRuntimeSemanticPlanManifestInSession(manifest, session)
 	if err != nil {
 		return err
 	}
-	if err := seed.Validate(); err != nil {
+	if err := validateRuntimeSemanticSeedInSession(seed, session); err != nil {
 		return fmt.Errorf("runtime semantic manifest authoritative Definition seed: %w", err)
 	}
 	manifest = validated.manifest
@@ -1403,10 +1492,7 @@ func ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest RuntimeSemant
 			return fmt.Errorf("runtime semantic manifest coverage %q does not match authoritative Definition seed body", actual.ID)
 		}
 	}
-	if err := ValidateRuntimeDefinitionFocuses(seed, definitionFocuses); err != nil {
-		return fmt.Errorf("runtime semantic manifest Definition focuses: %w", err)
-	}
-	sourceByCoverage, err := runtimeSemanticBindingSourceFocuses(definitionFocuses)
+	sourceByCoverage, err := validateRuntimeSemanticDefinitionSourcesInSession(seed, definitionFocuses, session)
 	if err != nil {
 		return fmt.Errorf("runtime semantic manifest Definition focuses: %w", err)
 	}
@@ -1447,7 +1533,7 @@ func ValidateRuntimeSemanticPlanManifestAgainstDefinition(manifest RuntimeSemant
 		if actual.ValidationFailureRepair == nil {
 			// 同一 manifest 的各 CWI 共用本次完整 raw 门禁后的目录，不保存成功状态。
 			if proofCatalogs == nil {
-				validated, err := validateRuntimeSemanticProofCatalogs(catalogs)
+				validated, err := validateRuntimeSemanticProofCatalogsInSession(catalogs, session)
 				if err != nil {
 					return fmt.Errorf("runtime semantic manifest Definition proof obligation coverage %q: %w", actual.CoverageWorkItemID, err)
 				}
@@ -2482,6 +2568,25 @@ func (g RuntimeSemanticPlanningGeneration) Validate() error {
 }
 
 func validateRuntimeSemanticPlanningGenerationNormalized(raw, g RuntimeSemanticPlanningGeneration, session *runtimeSemanticValidationSession) error {
+	if session.ownerHistory != nil {
+		for _, entry := range session.ownerHistory.generations {
+			if reflect.DeepEqual(entry.raw, raw) && reflect.DeepEqual(entry.normalized, g) {
+				return nil
+			}
+		}
+	}
+	if err := validateRuntimeSemanticPlanningGenerationComplete(raw, g, session); err != nil {
+		return err
+	}
+	if session.ownerHistory != nil {
+		session.ownerHistory.generations = append(session.ownerHistory.generations, runtimeOwnerHistoricalGeneration{
+			raw: cloneRuntimeSemanticPlanningGenerationRaw(raw), normalized: cloneRuntimeSemanticPlanningGenerationRaw(g),
+		})
+	}
+	return nil
+}
+
+func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPlanningGeneration, session *runtimeSemanticValidationSession) error {
 	if len(raw.InvalidationSignatures) != len(g.InvalidationSignatures) || len(raw.PrerequisiteIDs) != len(g.PrerequisiteIDs) ||
 		len(raw.ReopenedCoverageIDs) != len(g.ReopenedCoverageIDs) || len(raw.ReopenTriggerRefs) != len(g.ReopenTriggerRefs) ||
 		len(raw.ChangedCoverageIDs) != len(g.ChangedCoverageIDs) || len(raw.ClosureChangeTriggerRefs) != len(g.ClosureChangeTriggerRefs) {
@@ -2765,8 +2870,12 @@ func (l RuntimeSemanticPlanningLedger) Validate() error {
 }
 
 func validateRuntimeSemanticPlanningLedger(l RuntimeSemanticPlanningLedger) error {
+	return validateRuntimeSemanticPlanningLedgerInSession(l, newRuntimeSemanticValidationSession())
+}
+
+func validateRuntimeSemanticPlanningLedgerInSession(l RuntimeSemanticPlanningLedger, session *runtimeSemanticValidationSession) error {
 	raw := l
-	return validateRuntimeSemanticPlanningLedgerNormalized(raw, l.Normalized(), newRuntimeSemanticValidationSession())
+	return validateRuntimeSemanticPlanningLedgerNormalized(raw, l.Normalized(), session)
 }
 
 func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlanningLedger, session *runtimeSemanticValidationSession) error {
@@ -2835,7 +2944,7 @@ func validateRuntimeSemanticPlanningLedgerNormalized(raw, l RuntimeSemanticPlann
 			return fmt.Errorf("runtime semantic planning batch %d contains duplicate or empty identity values", idx)
 		}
 	}
-	if err := l.DefinitionSeed.Validate(); err != nil {
+	if err := validateRuntimeSemanticSeedInSession(l.DefinitionSeed, session); err != nil {
 		return err
 	}
 	var validatedManifest *runtimeValidatedSemanticManifest
@@ -3939,9 +4048,15 @@ func writeRuntimeSemanticCoverageItemsHash(h hashStringWriter, items []RuntimeCo
 		writeHashString(h, item.SourceScope)
 		writeHashString(h, item.SourceID)
 		writeHashString(h, item.TargetText)
+		if len(item.GoalExecutionAssertions) != 0 {
+			payload, _ := json.Marshal(item.GoalExecutionAssertions)
+			writeHashString(h, RuntimeGoalSourceExecutionProofV2)
+			writeHashString(h, string(payload))
+		}
 		if len(item.SourceObligationChecks) != 0 {
 			writeRuntimeSourceObligationChecksHash(h, item.SourceObligationChecks)
 		}
+		writeRuntimeHistoricalAcceptanceSourceHash(h, item.HistoricalAcceptance)
 		writeHashString(h, fmt.Sprintf("%d", item.Order))
 		for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
 			writeHashString(h, "prerequisite:"+string(prerequisiteID))

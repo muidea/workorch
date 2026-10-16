@@ -59,5 +59,6 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[QueryRuntimeCWIReconciliationCommand, QueryRuntimeCWIReconciliationResult]("git", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryRuntimeCWIReconciliation),
 		eventcontract.CommandTopic[AcquireCapabilityStateCommand, AcquireCapabilityStateResult]("git", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireCapabilityState),
 		eventcontract.CommandTopic[ExecuteOperationCommand, ExecuteOperationResult]("git", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicExecuteOperation),
+		eventcontract.CommandTopic[QueryRuntimeCommitSnapshotCommand, QueryRuntimeCommitSnapshotResult]("git", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryRuntimeCommitSnapshot),
 	)
 }

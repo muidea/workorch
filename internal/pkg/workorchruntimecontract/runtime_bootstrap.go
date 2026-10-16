@@ -2,6 +2,7 @@ package workorchruntimecontract
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -48,6 +49,9 @@ func (b RuntimeBootstrap) Validate() error {
 	if err := b.Definition.Validate(); err != nil {
 		return err
 	}
+	if err := ValidateRuntimeEvidencePurposeMappingAvailability(b.Definition.SourceObligations); err != nil {
+		return err
+	}
 	if err := b.Activation.Validate(); err != nil {
 		return err
 	}
@@ -60,6 +64,9 @@ func (b RuntimeBootstrap) Validate() error {
 	}
 	if err := ValidateRuntimeSourceObligationApplicability(b.DefinitionSeed.SourceObligations, b.Activation.ExecutionContract.ProfileContracts); err != nil {
 		return fmt.Errorf("runtime bootstrap source applicability: %w", err)
+	}
+	if err := ValidateRuntimeGoalExecutionAssertionSeed(b.DefinitionSeed, b.Activation.ExecutionContract.ProfileContracts); err != nil {
+		return err
 	}
 	if b.DefinitionSeed.DefinitionRevision != b.Definition.Revision {
 		return fmt.Errorf("runtime bootstrap definition seed revision mismatch")
@@ -140,6 +147,9 @@ func (b RuntimeBootstrap) Validate() error {
 		return fmt.Errorf("runtime bootstrap definition focuses: %w", err)
 	}
 	if err := ValidateRuntimeDefinitionLineageAssertions(b.DefinitionFocuses, b.Activation.ExecutionContract.ProfileContracts); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeTerminalProofDeclarationSources(b.CoverageItems, b.Activation.ExecutionContract.ProfileContracts); err != nil {
 		return err
 	}
 	if err := ValidateRuntimeDefinitionVerificationPolicies(b.DefinitionFocuses, b.Activation.ExecutionContract.ProfileContracts); err != nil {
@@ -324,11 +334,15 @@ func SameRuntimeBootstrap(left RuntimeBootstrap, right RuntimeBootstrap) bool {
 }
 
 func sameRuntimeCoverageItem(left, right RuntimeCoverageItem) bool {
+	if !slices.Equal(left.GoalExecutionAssertions, right.GoalExecutionAssertions) {
+		return false
+	}
 	left = left.Normalized()
 	right = right.Normalized()
 	if left.ID != right.ID || left.SliceID != right.SliceID || left.SourceScope != right.SourceScope ||
 		left.SourceID != right.SourceID || left.TargetText != right.TargetText || left.Order != right.Order ||
 		!sameRuntimeSourceObligationChecks(left.SourceObligationChecks, right.SourceObligationChecks) ||
+		!sameRuntimeHistoricalAcceptanceSource(left.HistoricalAcceptance, right.HistoricalAcceptance) ||
 		!sameCoverageWorkItemIDs(left.PrerequisiteCoverageWorkItemIDs, right.PrerequisiteCoverageWorkItemIDs) ||
 		len(left.ReopenDependencies) != len(right.ReopenDependencies) {
 		return false

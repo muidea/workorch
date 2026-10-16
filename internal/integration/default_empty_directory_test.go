@@ -564,9 +564,10 @@ func startProductionOwners(t *testing.T, ctx context.Context, hub magicevent.Hub
 }
 
 type emptyDirectoryProvider struct {
-	mu    sync.Mutex
-	calls []string
-	repos workorchrepo.WorkspaceScopedFileRepositorySet
+	mu              sync.Mutex
+	calls           []string
+	repos           workorchrepo.WorkspaceScopedFileRepositorySet
+	mappingProposal func(*workspace.DefinitionAuthoringRecord) (workspace.DefinitionAuthoringMapping, error)
 }
 
 func (p *emptyDirectoryProvider) snapshot() []string {
@@ -614,6 +615,9 @@ func (p *emptyDirectoryProvider) serveHTTP(w http.ResponseWriter, r *http.Reques
 			if pending.ReviewKind == "" {
 				kind = "proposal"
 				mapping, buildErr := productionMapping(record)
+				if p.mappingProposal != nil {
+					mapping, buildErr = p.mappingProposal(record)
+				}
 				if buildErr != nil {
 					err = buildErr
 					break

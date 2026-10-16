@@ -783,6 +783,19 @@ func appendRetainedRuntimeCWIFocuses(facts runtimecontract.RuntimeFacts, focuses
 		source = source.Normalized()
 		for _, coverageID := range source.CoverageWorkItemIDs {
 			item := facts.Coverage[byID[coverageID]]
+			if item.HistoricalBehavior != nil {
+				behaviorExited := false
+				for _, completed := range facts.CompletedFocuses {
+					if completed.ID == source.ID && runtimeFocusContainsCoverage(completed, coverageID) {
+						behaviorExited = true
+					}
+				}
+				if behaviorExited {
+					// The original bound/open row remains in CompletedFocuses;
+					// sealing its successor must not requeue the create-only effect.
+					continue
+				}
+			}
 			if item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound || item.CurrentBindingRef == nil {
 				continue
 			}
@@ -866,6 +879,9 @@ func advanceRuntimeCWIFocus(facts runtimecontract.RuntimeFacts, proofLineages ..
 	if err := requireCurrentRuntimeCWILedger(facts); err != nil {
 		return runtimecontract.RuntimeFacts{}, err
 	}
+	if runtimeApplicabilityRevisionPending(facts, runtimeCoverageProofLineageArgument(proofLineages)) {
+		return facts, nil
+	}
 	if len(missingEvidenceKinds(facts, proofLineages...)) != 0 || !currentFocusCoverageSatisfied(facts, proofLineages...) {
 		return facts, nil
 	}
@@ -875,6 +891,11 @@ func advanceRuntimeCWIFocus(facts runtimecontract.RuntimeFacts, proofLineages ..
 	}
 	if err := runtimecontract.ValidateRuntimeCWILedger(settled); err != nil {
 		return runtimecontract.RuntimeFacts{}, err
+	}
+	if restored, resumed, err := resumeRuntimeSuspendedSuccessor(settled); err != nil {
+		return runtimecontract.RuntimeFacts{}, err
+	} else if resumed {
+		return restored, nil
 	}
 	advanced, advanceErr := advanceSatisfiedCoverageFocus(settled, proofLineages...)
 	if advanceErr != nil {
@@ -1094,7 +1115,7 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 			}
 			aggregate.Facts, aggregate.Decision = facts, decision
 			aggregate.StateRevision++
-			if err := aggregate.Validate(); err != nil {
+			if err := c.validateAggregate(aggregate); err != nil {
 				return RuntimeAggregate{}, err
 			}
 			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -1137,7 +1158,7 @@ func (c *authorityComponent) projectEligibleRuntimeFocus(ctx context.Context, wo
 	}
 	aggregate.Facts, aggregate.Decision = facts, decision
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -1184,6 +1205,21 @@ func currentRuntimeCWIOrderFromSemanticLineage(facts runtimecontract.RuntimeFact
 			continue
 		}
 		item, found := coverage[id]
+		if found && item.HistoricalBehavior != nil && item.CurrentBindingRef != nil &&
+			item.CurrentBindingRef.SemanticManifestHash == semanticManifestHash &&
+			runtimecontract.RuntimeCWIPrerequisiteReadyForConsumer(facts, item, item.HistoricalBehavior.Source.AcceptanceCoverageWorkItemID) {
+			// This generation's original complete effect left execution only.
+			// It is omitted from future planning, not treated as settled credit.
+			completed := false
+			for _, focus := range facts.CompletedFocuses {
+				if focus.ID == item.FocusID && len(focus.CoverageWorkItemIDs) == 1 && focus.CoverageWorkItemIDs[0] == item.ID {
+					completed = true
+				}
+			}
+			if completed {
+				continue
+			}
+		}
 		if found && runtimeCWIBoundBySemanticLineage(facts, item, semanticManifestHash, coverage) {
 			ret = append(ret, id)
 			continue
@@ -1205,32 +1241,43 @@ func currentRuntimeCWIOrderFromSemanticLineage(facts runtimecontract.RuntimeFact
 // runtimeSemanticGenerationEligibleClosure is the single owner-local scope
 // derivation used when an immutable semantic order is compared with current
 // SM-2 eligibility. Normal Definition generations own the complete currently
-// eligible closure, so a newly unlocked CWI retires their order. A validation
-// failure repair generation is deliberately one-CWI authority: unrelated
-// Definition CWIs may be eligible concurrently, but they cannot invalidate or
-// be absorbed into that repair generation.
+// eligible closure, so a newly unlocked CWI retires their order. Validation
+// failure repair and implementation-work generations are deliberately one-CWI
+// authority: unrelated Definition CWIs may be eligible concurrently, but they
+// cannot invalidate or be absorbed into either scoped generation.
 func runtimeSemanticGenerationEligibleClosure(facts runtimecontract.RuntimeFacts, manifest runtimecontract.RuntimeSemanticPlanManifest) ([]common.CoverageWorkItemID, error) {
 	manifest = manifest.Normalized()
 	eligible := runtimecontract.RuntimeCWIsEligibleForPlanning(facts)
-	var repairCoverageID common.CoverageWorkItemID
+	var scopedCoverageID common.CoverageWorkItemID
+	scopedKind := ""
 	for _, obligation := range manifest.ProofObligations {
-		if obligation.ValidationFailureRepair == nil {
+		kind := ""
+		if obligation.ValidationFailureRepair != nil {
+			kind = "validation failure repair"
+		}
+		if obligation.ImplementationWork != nil {
+			if kind != "" {
+				return nil, fmt.Errorf("%w: semantic generation mixes validation repair and implementation work", common.ErrConflict)
+			}
+			kind = "implementation work"
+		}
+		if kind == "" {
 			continue
 		}
-		if repairCoverageID != "" && repairCoverageID != obligation.CoverageWorkItemID {
-			return nil, fmt.Errorf("%w: validation failure repair semantic generation spans multiple CWI", common.ErrConflict)
+		if scopedCoverageID != "" && (scopedCoverageID != obligation.CoverageWorkItemID || scopedKind != kind) {
+			return nil, fmt.Errorf("%w: %s semantic generation spans multiple CWI or purposes", common.ErrConflict, kind)
 		}
-		repairCoverageID = obligation.CoverageWorkItemID
+		scopedCoverageID, scopedKind = obligation.CoverageWorkItemID, kind
 	}
-	if repairCoverageID == "" {
+	if scopedCoverageID == "" {
 		return eligible, nil
 	}
-	if len(manifest.CoverageItems) != 1 || manifest.CoverageItems[0].ID != repairCoverageID || len(manifest.ProofObligations) != 1 {
-		return nil, fmt.Errorf("%w: validation failure repair semantic generation is not scoped to exactly one CWI", common.ErrConflict)
+	if len(manifest.CoverageItems) != 1 || manifest.CoverageItems[0].ID != scopedCoverageID || len(manifest.ProofObligations) != 1 {
+		return nil, fmt.Errorf("%w: %s semantic generation is not scoped to exactly one CWI", common.ErrConflict, scopedKind)
 	}
 	for _, coverageID := range eligible {
-		if coverageID == repairCoverageID {
-			return []common.CoverageWorkItemID{repairCoverageID}, nil
+		if coverageID == scopedCoverageID {
+			return []common.CoverageWorkItemID{scopedCoverageID}, nil
 		}
 	}
 	return nil, nil
@@ -1253,8 +1300,7 @@ func runtimeCWIBoundBySemanticLineage(
 	}
 	for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
 		prerequisite, found := coverage[prerequisiteID]
-		if !found || prerequisite.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled ||
-			prerequisite.State != runtimecontract.RuntimeCoverageItemStateSatisfied || prerequisite.CurrentBindingRef == nil {
+		if !found || !runtimecontract.RuntimeCWIPrerequisiteReadyForConsumer(facts, prerequisite, item.ID) {
 			return false
 		}
 	}
@@ -1393,10 +1439,20 @@ func applyRuntimeCWIReopen(aggregate *RuntimeAggregate, triggers []runtimeCWIReo
 	if aggregate == nil {
 		return nil, common.ErrInvalidArgument
 	}
+	// A mapped predecessor has already executed its original effect. Any
+	// request to revisit its acceptance must target the confirmed ordinary
+	// consumer; reopening the create-only binding would repeat real behavior.
+	rows := runtimeCoverageByID(aggregate.Facts.Coverage)
+	for index := range triggers {
+		if completion := rows[triggers[index].CoverageWorkItemID].HistoricalBehavior; completion != nil {
+			triggers[index].CoverageWorkItemID = completion.Source.AcceptanceCoverageWorkItemID
+		}
+	}
 	updated, reopened, err := reopenRuntimeCWIs(aggregate.Facts, triggers)
 	if err != nil || len(reopened) == 0 {
 		return reopened, err
 	}
+	revokeHistoricalAcceptanceCredit(&updated)
 	contract, err := canonicalRuntimeCWIReconciliationContract(updated)
 	if err != nil {
 		return nil, err
@@ -1438,7 +1494,7 @@ func (c *authorityComponent) retireRuntimeCWIBinding(ctx context.Context, worksp
 	}
 	expectedRevision := aggregate.StateRevision
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {

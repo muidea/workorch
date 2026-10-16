@@ -78,6 +78,43 @@ type implementationWorkDetachedRepository struct {
 	failAfter  bool
 }
 
+func TestImplementationWorkNextScopeWaitsForPlanningEligibility(t *testing.T) {
+	_, _, base := implementationWorkPurposeController(t)
+	request, err := NextRuntimeImplementationWorkScopeRequest(base)
+	if err != nil || request == nil {
+		t.Fatalf("eligible original scope missing: %v", err)
+	}
+	for _, state := range []runtimecontract.RuntimeCWIConvergenceState{runtimecontract.RuntimeCWIConvergenceStateBound, runtimecontract.RuntimeCWIConvergenceStateSettled} {
+		t.Run(string(state), func(t *testing.T) {
+			blocked := base.CloneRaw()
+			blocked.Facts.Coverage[0].CWIConvergenceState = state
+			before := blocked.CloneRaw()
+			for range 2 {
+				request, err := NextRuntimeImplementationWorkScopeRequest(blocked)
+				if err != nil || request != nil {
+					t.Fatalf("ineligible focus became scope demand/failure: request=%+v err=%v", request, err)
+				}
+				if _, err := RuntimeImplementationWorkScopeForCurrentSources(blocked, blocked.Facts.Focus.CoverageWorkItemIDs[0]); !errors.Is(err, common.ErrConflict) {
+					t.Fatalf("explicit scope bypassed planning eligibility: %v", err)
+				}
+			}
+			if !reflect.DeepEqual(blocked, before) {
+				t.Fatal("scope query changed authority, rounds or budget")
+			}
+		})
+	}
+	blocked := base.CloneRaw()
+	blocked.Facts.Coverage[0].PrerequisiteCoverageWorkItemIDs = []common.CoverageWorkItemID{"reopened-predecessor"}
+	blocked.Facts.Coverage = append(blocked.Facts.Coverage, runtimecontract.RuntimeCoverageItemFact{ID: "reopened-predecessor", State: runtimecontract.RuntimeCoverageItemStateOpen, CWIConvergenceState: runtimecontract.RuntimeCWIConvergenceStateReopened})
+	before := blocked.CloneRaw()
+	if request, err := NextRuntimeImplementationWorkScopeRequest(blocked); err != nil || request != nil {
+		t.Fatalf("reopened predecessor granted successor work scope: request=%+v err=%v", request, err)
+	}
+	if !reflect.DeepEqual(blocked, before) {
+		t.Fatal("pending scope query changed prerequisite settlement or work budget")
+	}
+}
+
 func (r *implementationWorkDetachedRepository) Save(ctx context.Context, aggregate RuntimeAggregate, revision uint64) error {
 	if r.failBefore {
 		r.failBefore = false

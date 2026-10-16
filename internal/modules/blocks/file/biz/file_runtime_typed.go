@@ -126,19 +126,20 @@ type PatchApplyRequest struct {
 }
 
 type RuntimeFileOperationResult struct {
-	Stage          string
-	Summary        string
-	BeforeHash     string
-	ContentHash    string
-	AfterHash      string
-	DiffHash       string
-	AddedLines     int64
-	DeletedLines   int64
-	EvidenceRefs   []string
-	TargetRefs     []string
-	FailureCode    string
-	FailureMessage string
-	patchRead      *filePatchReadObservation
+	Stage              string
+	Summary            string
+	BeforeHash         string
+	ContentHash        string
+	AfterHash          string
+	DiffHash           string
+	AddedLines         int64
+	DeletedLines       int64
+	EvidenceRefs       []string
+	TargetRefs         []string
+	FailureCode        string
+	FailureMessage     string
+	patchRead          *filePatchReadObservation
+	patchPostcondition *filePatchReadObservation
 }
 
 func (a *RuntimeAdapter) ListFiles(request FileListRequest) (FileListResult, error) {
@@ -401,12 +402,36 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func (a *RuntimeAdapter) ApplyPatch(request PatchApplyRequest) (RuntimeFileOperationResult, error) {
+func (a *RuntimeAdapter) ApplyPatch(request PatchApplyRequest) (ret RuntimeFileOperationResult, executeErr error) {
 	if a == nil || strings.TrimSpace(request.WorkspaceDirectory) == "" || strings.TrimSpace(request.TargetRef) == "" || strings.TrimSpace(request.PatchType) == "" || request.Occurrence < 0 {
 		return runtimeFileFailure("patch_invalid_input", common.ErrInvalidArgument, request.TargetRef), common.ErrInvalidArgument
 	}
 	unlock := a.lockWorkspaceEffect(request.WorkspaceDirectory)
 	defer unlock()
+	// Observe real bytes after success, including recovery confirmation. Never
+	// use the proposed content/AfterHash as a substitute for this read. A read
+	// failure or concurrent drift keeps the operation rejected with its known
+	// diagnostic; no applicability proof can be emitted in that case.
+	defer func() {
+		if executeErr != nil {
+			return
+		}
+		_, target, rel, err := guardedWorkspacePath(request.WorkspaceDirectory, request.TargetRef, false)
+		var content []byte
+		var exists bool
+		if err == nil {
+			content, exists, err = readPatchTarget(target)
+		}
+		if err == nil && (!exists || sha256Hex(content) != ret.AfterHash) {
+			err = fmt.Errorf("%w: mutation postcondition differs from actual target bytes", common.ErrConflict)
+		}
+		if err != nil {
+			ret.FailureCode, ret.FailureMessage = "patch_postcondition_read_failed", err.Error()
+			executeErr = err
+			return
+		}
+		ret.patchPostcondition = observedFilePatchRead(filepath.ToSlash(rel), content, "mutation_postcondition")
+	}()
 	patchRequest := patchExecutionRequest{
 		Operation: "apply", PatchType: request.PatchType, TargetRef: request.TargetRef, Summary: request.Summary,
 		Content: request.Content, Diff: request.Diff, OldText: request.OldText, NewText: request.NewText,

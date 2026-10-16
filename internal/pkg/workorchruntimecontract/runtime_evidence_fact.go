@@ -37,6 +37,10 @@ func StableRuntimeEvidenceFactHash(fact EvidenceFact) string {
 		writeHashString(h, "owner-read-dependencies/v1")
 		writeHashString(h, stableFormalValueHash("runtime-owner-read-dependencies", *fact.OwnerRevisionSet))
 	}
+	if fact.ApplicabilityDependencies != nil {
+		writeHashString(h, "owner-applicability-dependencies/v1")
+		writeHashString(h, stableFormalValueHash("runtime-owner-applicability-dependencies", *fact.ApplicabilityDependencies))
+	}
 	if fact.ContentAddress == nil {
 		writeHashString(h, "content-address:nil")
 	} else {

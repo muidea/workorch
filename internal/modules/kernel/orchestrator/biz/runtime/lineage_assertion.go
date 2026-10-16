@@ -8,15 +8,20 @@ func runtimeLineageAssertionSources(aggregate RuntimeAggregate) runtimecontract.
 		value := sealedDispatchToRuntimeRecord(*aggregate.ActiveDispatch)
 		active = &value
 	}
+	return runtimeLineageAssertionSourcesWithDispatches(aggregate, active, sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches))
+}
+
+func runtimeLineageAssertionSourcesWithDispatches(aggregate RuntimeAggregate, active *runtimecontract.RuntimeDispatchRecord, completed []runtimecontract.RuntimeDispatchRecord) runtimecontract.RuntimeLineageAssertionSources {
 	return runtimecontract.RuntimeLineageAssertionSources{
 		Definition: aggregate.Definition, Facts: aggregate.Facts, Work: aggregate.ImplementationWork,
 		Semantic: aggregate.SemanticPlanning, Active: active,
-		Completed: sealedDispatchesToRuntimeRecords(aggregate.CompletedDispatches),
+		Completed: completed,
 		Receipts:  aggregate.OperationReceipts, Governance: aggregate.OperationGovernanceBindings,
 		Budget: aggregate.ExecutionBudget, EvidenceSequence: aggregate.EvidenceSequence,
 		Resolutions: aggregate.GovernanceResolutions, Attempts: aggregate.CandidateAttempts,
 		Sessions: aggregate.CandidateRequestSessions, ProcessedEventIDs: aggregate.ProcessedEventIDs,
 		ProofLineage: aggregate.CoverageProofLineage, Confirmations: aggregate.RepairSurfaceConfirmations,
+		Reconciliation: aggregate.Reconciliation,
 	}
 }
 

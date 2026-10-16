@@ -80,7 +80,8 @@ func (m *Biz) validateRuntimeInternalEventWorkspaceRetirementAdmission(ctx conte
 	switch event.Kind {
 	case runtime.RuntimeInternalEventTerminalMaterialSealRequired:
 		// draining 只允许为已封存终态首次固定材料，不接受 caller 材料或其它写集。
-		if !reflect.DeepEqual(*delivery, runtime.RuntimeInternalDeliveryPayload{}) {
+		onlyObservations := runtime.RuntimeInternalDeliveryPayload{TerminalSnapshotProofs: delivery.TerminalSnapshotProofs}
+		if !reflect.DeepEqual(*delivery, onlyObservations) {
 			return common.ErrConflict
 		}
 		return nil

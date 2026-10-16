@@ -43,6 +43,23 @@ Prospective satisfaction 是 Shell-owner 的纯 factual query：它只校验一�
 
 ### 实际复制输入依赖
 
+非空实际复制集合另以 `evidence-applicability-dependencies/v1` 保留独立快照，不是 currentness certificate。
+`QueryRuntimeValidationReadDependenciesCommand/Result` 只重读原复制文件 selector 的完整 bytes、size 与 mode；
+接收端反查原 persisted receipt 与完整 `ReadSource`（transaction、operation hash、execution key/fence），再由
+Workspace typed read 取得目录，不使用 caller directory。读取以原文件数／总字节边界执行，拒绝 symlink、特殊
+对象和越界 selector；实际 missing 与读取错误分开，部分集合不能冒完整观察。返回 exact request/state revision/
+receipt hash 与完整 raw-canonical set，零进程、session、effect、receipt 或预算消费。
+Orchestrator 的 SM-4 adapter 只提交 owner 事实；SM-2 私有事务判断当前性、stale 与 exact reopen。
+新 query 在 BeginShutdown 后拒绝，在途 nested reads 持票直到真实返回。nil/历史协议不升级。
+本合同不枚举新文件、不是跨文件原子快照，也不证明子进程所有读取已被追踪。
+Unix current-dependency read 逐层以 pinned directory descriptor、`openat/O_NOFOLLOW` 打开原 canonical selector，
+避免检查后 parent/final symlink 替换重定向；`O_NONBLOCK` 防止 racing FIFO 在 regular-file gate 前阻塞。
+非 Unix 尚无对应安全实现，明确拒绝 current query，不返回完整观察；历史 receipt 的读取不受此查询限制。
+这是一次有界逐文件观察，不保证读取后资源持续不变，也不构成跨文件原子快照。
+`biz/validation_read_dependencies_test.go` 覆盖实际 bytes/mode、错误来源、missing/error 与零 commit；
+`biz/validation_dependency_open_unix_test.go` 固定 parent/final symlink、非规范 selector、FIFO、取消及 binary hash/mode。
+`pkg/events/read_dependencies_test.go` 覆盖完整 fence/set、资源身份和返回隔离。
+
 managed validation 的 scratch 复制同时记录每个实际复制文件的全流 bytes SHA-256、字节数、目标和复制权限；
 同一次 `io.Copy` 将原字节写入副本并计算 hash，不从先前 catalog、sealed `TargetRefs` 或执行后的 newer 文件猜前像。
 文件数与累计实际复制字节受既有 8192 files／256 MiB 边界约束；复制中超限或任何错误均拒绝返回完整依赖集合。
@@ -50,8 +67,11 @@ managed validation 的 scratch 复制同时记录每个实际复制文件的全�
 
 新 managed execute 必须在物理执行前具有 exact transaction `DefinitionRevision`。Shell 将实际复制集合转为
 `RuntimeOperationEvidence.OwnerRevisionSet`，资源身份为 `capability / blocks/shell/<WorkspaceID> / workspace_target /
-<TargetRef>`，`Revision` 为复制流 hash；`DependencyHash` 绑定 Workspace、文件 bytes/size/mode、resolved recipe、
-command/args、exact check attestations 与 validation scope。typed receipt 保存原集合，后续 exact replay 不重新复制。
+<TargetRef>`，`Revision` 为复制流 hash。新读取使用 `shell-validation-copied-input/v2`：`DependencyHash` 绑定
+Workspace、文件 bytes/size/mode 与 actual full-copy 协议、排除目录、文件/字节上界；recipe、command/args、check
+attestations 与 validation scope 不选择复制输入，仍由原 sealed operation、receipt 和 validation observation 完整绑定，
+不混入实际读取选择器。相同 bytes/mode 与复制策略的多 CWI 读取可幂等合并，版本或读取选择器冲突仍拒绝。
+旧 v1 原集合不升级、不重算；typed receipt 保存原集合，后续 exact replay 不重新复制。
 执行失败但已完成复制时同样保留该读取来源；未完成复制不补造完整集合。receipt-to-fact/hash/reload 的接收合同由
 Orchestrator 的原事务负责，不增加 SM-1～SM-4 transition、availability 或 credit。
 
@@ -66,7 +86,7 @@ Orchestrator 的原事务负责，不增加 SM-1～SM-4 transition、availabilit
 - `shell/command` 不得伪装成 `effect=none` validation；managed validation 不能退化为任意命令字符串。
 - execute 前必须验证 producer、同步 Result、sealed payload、owner catalog、target scope、execution key/fence 和 receipt authority。
 - managed validation 必须在隔离副本中运行；临时 effect 不得写回 deliverable，scratch 和进程组必须按策略释放。
-- activation-declared recipe 可以是固定 transport 或版本化的 `shell/project-native-validation/v1|v2|v3|v4|v5|v6` owner-adapter ref；模板不得携带
+- activation-declared recipe 可以是固定 transport 或版本化的 `shell/project-native-validation/v1|v2|v3|v4|v5|v6|v7` owner-adapter ref；模板不得携带
   语言 command/args/env。Shell 只依据同一 request 绑定的 File-owner manifest 解析具体 recipe，且该解析只产生 owner fact，
   不触发 Runtime 状态。Shell 只有在 Orchestrator request 携带 exact Definition-owned
   `RuntimeValidationProofRequirement` 时，才可对 matching recipe 发布逐 CWI applicability binding；recipe ID、进程 exit 0、
@@ -261,12 +281,56 @@ Shell-private `runShellProjectConjunction` 复用 `validation_project_conjunctio
 `validation_project_conjunction_runner_test.go` 使用真实 Go 和真实 managed copy 验证完整四阶段正例、
 旧输入失败、相邻编译失败、跳过、race、前三阶段成功而最后行为失败、source 变化、缺映射及准确期限。
 显式新 activation 可声明 `shell/project-native-validation/v6` 和 `validation/input-consistency/v2`。
+同一 v6 adapter 还支持显式 `validation/input-consistency/v3` 组合评审：Shell 从原 compiled requirement
+复制完整 typed lineage declarations 到实际输入 subject，重新绑定完整 subject hash；不裁决规则是否满足，
+不提供 Runtime/Git/未来 ACK 事实，不授 credit。其它现有 adapter 不能选择 v3，旧 activation 不升级。
+`biz/validation_proof_composition_test.go` 固定实际 publication、原声明隔离与 unsupported adapter fail-closed；
+组合语义见 [Validation Proof Composition](../../../../docs/00-core/runtime/validation-proof-composition.md)。
 它使用 `shell/go-test-json/project-conjunction-behavior/v1`、`_InputV6` native identity 及
 `workorch_validation/v6/<canonical-requirement-digest>/`，每个原／源义务检查完整映射同一 requirement package。
 每项 attestation 封存有序四阶段的 `ExecutionStagesHash`；content/review 合同分别为
 `shell/go-test-input/project-conjunction/v1` 与 `shell/go-test-input/project-conjunction-review/v1`，
 仍要求完整当前 package/helpers/fixtures 与根定义、16 files / 64 KiB，并且不替相邻 harness 补造评审。
 旧 v1～v5 recipe/native/scope 不升级；内置默认仍为 v5，implementation-work availability 不因此开放。
+
+显式 `shell/project-native-validation/v7` 使用独立 observation
+`shell/go-test-json/project-conjunction-behavior/v2`，四项 mandatory stages/hash、完整原准则、native namespace、
+输入评审上界与单 operation deadline 均不变。仅在 root test/race 的完整原生 transcript 证明失败仅来自当前
+exact reviewed checks、无相邻/未知/编译失败或 test skip、source 不变且原期限未到时，Shell 可追加一个
+`reviewed-cwi-failure-diagnostic` 实际阶段，用既有 instrumented exact-package 执行独立诊断。
+原项目失败、exit/code、每阶段原始 stdout/stderr 都完整保全；合取仍 incomplete、quality invalid、零 credit。
+只有失败 package/case 与每项 assertion detail 完全复现、实际 implementation 行为观测齐全且 source 未漂移，
+才能发布原 typed failure→repair candidate。诊断通过、失败集合/断言漂移、unknown、skip、输出/存储缺失、
+cleanup 或超时均不能授修复归因。v6 原失败语义不升级；默认和公开 availability 不由此开启。
+`validation_project_failure_diagnostic_test.go` 使用真实 Go/managed copy/raw store 覆盖精确正例、相邻失败、
+skip、独立诊断漂移与旧协议；这不代替公开 fullflow、真实 provider 或 live。
+
+显式 `shell/project-native-validation/v8` + `validation/input-consistency/v3` 使用独立 observation
+`shell/go-test-json/project-conjunction-behavior/v3`，不升级 v6/v7，也不发布默认工作权限。
+owner 从准确输入 bytes 编译完整项目测试来源（opaque source ref、package-qualified native case、input target），
+以 `validation/diagnostic-source-review/v1` 封存到 subject 并要求每个来源独立一致性评审。
+有界 corpus 包含全部 project `_test.go`、validation namespace helpers、普通非 Go fixture/documentation 和根定义；
+非 test/non-harness Go 文件仍为可修复的交付实现，不成为不可变验证输入。依赖未提供的外部 harness/fixture
+不能猜作 consistent。新 envelope 为 64 files/256 KiB、64 sources、64 KiB report；超界明确不可用，不裁剪。
+普通 mutation 排除全部原 project test 与 validation namespace；来源评审不开放输入维护授权。
+
+root test/race 完整失败后，只有全部 failed package/case 能唯一匹配封存来源、没有 skip/build/unknown/source drift，
+才可在原单 operation deadline 内分别重跑至多五个 top-level native 来源（总 stage 仍不超过八项）。每源独立
+coverage file 和 child-process instrumentation，精确保留 race 模式，不能借另一失败源的 aggregate coverage 归属。
+owner 新生成的计数使用 atomic 模式，允许原输入中继承 instrumentation 的真实嵌套 `go test -race`；不能因 owner
+注入 count 模式使原工程命令失败。完整 count/atomic owner profiles 都按原 exact manifest scope、正计数、非
+test/harness 和原容量门禁读取；set/未知格式、缺失/截断仍拒绝，旧 count 原事实不改写。
+所有原失败 case/subcase 与 assertion details 必须完整复现，且每源实际触达有限 scope 内非 test/non-harness
+实现；source/输出/cleanup/deadline/storage 任一不完整均不发布修复诊断。阶段保全 `DiagnosticSourceRef` 与
+独立 `BehaviorTargetRefs`、实际 argv、原 raw identity/store refs；普通 receipt/hash/reload/duplicate 链仍绑定完整正文。
+若实际归属后原文发布失败，已发生的逐源行为、全部原输出 bytes/hash 身份、已保存流和明确 omission 原因仍保全为
+rejected history；不抹除历史，也不发布 structured repair。`TestProjectDiagnosticPublicationFailureKeepsActualSourceHistory`
+使用真实 runner/raw store 的发布失败与取消边界核验完整原文及零授权；不是公开 fullflow 或 live。
+原工程失败与全部测试不改写，四阶段 conjunction 仍 incomplete、quality invalid、零 CWI credit。
+`TestProjectMultiFailureDiagnosticActualSourcesAndBehavior/disjoint` 用两个实际失败来源分别触达不同实现文件，
+固定每源独立的精确行为 target 及最终完整 union；不得借另一来源的 coverage 为本来源归属。
+只有完整来源归属后才沿既有 typed diagnostic→resource-owner confirmation→exact repair→fresh all-of 路线；
+SM-2/3/4 没有新 transition、counter 或预算，SM-1 不变。真实 owner producer 回归不代表 live 或公开默认准入。
 
 公开 Shell owner 在原 seal、scope、receipt miss、生命周期票与 catalog revision 核验之后选择该私有 runner；
 无原 execution 的 direct adapter 调用拒绝降级执行。reconciliation 使用 completed dispatch 的原 scope、recipe 和

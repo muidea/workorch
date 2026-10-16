@@ -162,14 +162,17 @@ func runtimeSemanticSourceObligationChecksForProvider(values []runtimecontract.R
 }
 
 type runtimeSemanticInputReviewProjection struct {
-	OwnerModuleID      string                                                    `json:"ownerModuleId"`
-	ValidationRecipeID string                                                    `json:"validationRecipeId"`
-	SubjectHash        string                                                    `json:"subjectHash"`
-	ProtocolRef        string                                                    `json:"protocolRef"`
-	ScopeContractRef   string                                                    `json:"scopeContractRef,omitempty"`
-	ScopeRequirements  string                                                    `json:"scopeRequirements,omitempty"`
-	Files              []runtimecontract.RuntimeValidationInputReviewFile        `json:"files"`
-	Information        []runtimecontract.RuntimeValidationInputReviewInformation `json:"information,omitempty"`
+	OwnerModuleID               string                                                    `json:"ownerModuleId"`
+	ValidationRecipeID          string                                                    `json:"validationRecipeId"`
+	SubjectHash                 string                                                    `json:"subjectHash"`
+	ProtocolRef                 string                                                    `json:"protocolRef"`
+	ScopeContractRef            string                                                    `json:"scopeContractRef,omitempty"`
+	ScopeRequirements           string                                                    `json:"scopeRequirements,omitempty"`
+	Files                       []runtimecontract.RuntimeValidationInputReviewFile        `json:"files"`
+	Information                 []runtimecontract.RuntimeValidationInputReviewInformation `json:"information,omitempty"`
+	LineageAssertions           []runtimecontract.RuntimeLineageAssertion                 `json:"lineageAssertions,omitempty"`
+	DiagnosticSourceContractRef string                                                    `json:"diagnosticSourceContractRef,omitempty"`
+	DiagnosticSources           []runtimecontract.RuntimeValidationDiagnosticSource       `json:"diagnosticSources,omitempty"`
 }
 
 type runtimeSemanticNativeCheckAttestationProjection struct {

@@ -26,6 +26,7 @@ import (
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
@@ -1382,7 +1383,8 @@ func reacquireObservedFilePrerequisites(t *testing.T, ctx context.Context, hub m
 	t.Helper()
 	for step := 0; step < 8 && aggregate.Decision.State == runtimecontract.ConvergenceStateNeedPrerequisite; step++ {
 		if len(aggregate.Facts.Prerequisites.Pending) == 0 {
-			t.Fatal("acquire prerequisite authority has no pending requirement")
+			aggregate = testObserveActualFileMutationApplicability(t, ctx, hub, controller, aggregate, workspaceDirectory)
+			continue
 		}
 		prerequisite := aggregate.Facts.Prerequisites.Pending[0]
 		var result PrerequisiteResult
@@ -1409,6 +1411,75 @@ func reacquireObservedFilePrerequisites(t *testing.T, ctx context.Context, hub m
 		t.Fatalf("File prerequisite refresh did not converge: pending=%+v", aggregate.Facts.Prerequisites.Pending)
 	}
 	return aggregate
+}
+
+// Generic File refresh and decision-only current-read debt are different
+// transactions. This fixture uses the actual File owner and source compiler;
+// it never copies the original postcondition into a supposed current result.
+func testObserveActualFileMutationApplicability(t *testing.T, ctx context.Context, hub magicevent.Hub, controller *RuntimeController, aggregate RuntimeAggregate, directory string) RuntimeAggregate {
+	t.Helper()
+	request, required, err := NextRuntimeEvidenceApplicabilityRequest(aggregate)
+	if err != nil || !required {
+		t.Fatalf("prerequisite authority has no original current-read debt: required=%v err=%v", required, err)
+	}
+	source, err := CompileRuntimeOperationReadSource(aggregate, request.DispatchID, request.OperationID, request.SourceReceiptHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealedOperation, err := fileevents.SealRuntimeOperation(source.Operation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
+	if err := observer.Subscribe(workspaceevents.TopicWorkspaceCommandGet, func(event magicevent.Event, result magicevent.Result) {
+		command := event.Data().(workspaceevents.GetWorkspaceCommand)
+		result.Set(workspaceevents.WorkspaceResult{Workspace: &workspaceevents.Workspace{ID: command.WorkspaceID, DeliverableDirectory: directory}}, nil)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := observer.Unsubscribe(workspaceevents.TopicWorkspaceCommandGet); err != nil {
+			t.Error(err)
+		}
+	}()
+	command := fileevents.QueryRuntimeFileReadDependenciesCommand{RuntimeOperationExecutionContext: source.Context, SealedOperation: sealedOperation, RequestID: request.RequestID, IssuedAtStateRevision: request.IssuedAtStateRevision, SourceReceiptHash: request.SourceReceiptHash, OriginalDependencies: source.OriginalDependencies, ApplicabilitySource: source.ApplicabilitySource}
+	workspaceResponse := hub.Send(magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandGet, runtimecontract.RuntimeModuleOrchestrator, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.GetWorkspaceCommand{WorkspaceID: aggregate.Facts.WorkspaceID}))
+	if workspaceResponse == nil {
+		t.Fatal("Workspace directory query returned no response")
+	}
+	workspaceData, workspaceErr := workspaceResponse.Get()
+	workspaceValue, workspaceOK := workspaceData.(workspaceevents.WorkspaceResult)
+	if workspaceErr != nil || !workspaceOK || workspaceValue.Workspace == nil {
+		t.Fatalf("Workspace directory query failed: %v", workspaceErr)
+	}
+	command.WorkspaceDeliverableDirectory = workspaceValue.Workspace.DeliverableDirectory
+	command.WorkspaceInternalDirectory = workspaceValue.Workspace.InternalDirectory
+	response := hub.Send(magicevent.NewEventWithContext(fileevents.TopicQueryRuntimeFileReadDependencies, runtimecontract.RuntimeModuleOrchestrator, runtimecontract.RuntimeModuleFile, magicevent.NewHeader(), ctx, command))
+	if response == nil {
+		t.Fatal("actual File current query returned no response")
+	}
+	data, queryErr := response.Get()
+	if queryErr != nil {
+		t.Fatal(queryErr)
+	}
+	value, ok := data.(fileevents.QueryRuntimeFileReadDependenciesResult)
+	if !ok {
+		t.Fatalf("invalid actual File current response %T", data)
+	}
+	current, observed, err := fileevents.ValidateRuntimeFileReadDependenciesResult(command, value)
+	if err != nil || !observed {
+		t.Fatalf("actual File postcondition unavailable: %v", err)
+	}
+	observation := runtimecontract.RuntimeEvidenceApplicabilityObservation{Request: request, RecordedAtStateRevision: request.IssuedAtStateRevision + 1, CurrentDependencies: current}
+	committed, err := controller.ApplyInternalEvent(ctx, applicabilityInternalEventForScope(aggregate, observation))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return committed.Aggregate
+}
+
+func applicabilityInternalEventForScope(aggregate RuntimeAggregate, observation runtimecontract.RuntimeEvidenceApplicabilityObservation) RuntimeInternalEvent {
+	return RuntimeInternalEvent{Kind: RuntimeInternalEventEvidenceApplicabilityObserved, Scope: RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID}, Authority: &RuntimeInternalAuthorityPayload{EvidenceApplicability: &observation}}
 }
 
 func sendObservedManifest(t *testing.T, ctx context.Context, hub magicevent.Hub, aggregate RuntimeAggregate, prerequisite runtimecontract.RuntimePrerequisite, directory string) fileevents.AcquireWorkspaceManifestResult {

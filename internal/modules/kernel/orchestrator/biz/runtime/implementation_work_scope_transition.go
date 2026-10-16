@@ -155,6 +155,13 @@ func NextRuntimeImplementationWorkScopeRequest(a RuntimeAggregate) (*runtimecont
 		return nil, nil
 	}
 	cwi := a.Facts.Focus.CoverageWorkItemIDs[0]
+	// A retained focus can temporarily lose planning eligibility when an exact
+	// prerequisite is reopened. That is absence of a work-scope demand, not an
+	// internal semantic failure. Explicit scope reservation still rechecks the
+	// eligibility gate below and cannot bypass prerequisite settlement.
+	if !slices.Contains(runtimecontract.RuntimeCWIsEligibleForPlanning(a.Facts), cwi) {
+		return nil, nil
+	}
 	declared := false
 	for _, focus := range a.Facts.DefinitionFocuses {
 		if len(focus.CoverageWorkItemIDs) == 1 && focus.CoverageWorkItemIDs[0] == cwi && focus.ImplementationWorkPolicy != nil {

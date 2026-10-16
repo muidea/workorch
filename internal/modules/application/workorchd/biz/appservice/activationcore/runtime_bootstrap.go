@@ -15,6 +15,9 @@ func RuntimeBootstrap(goal *workspacemodel.Goal, dod *workspacemodel.DoD, defini
 }
 
 func RuntimeBootstrapWithSourceObligations(goal *workspacemodel.Goal, dod *workspacemodel.DoD, definitionRevision string, startupInputHash string, changeImpact *runtimecontract.RuntimeDefinitionChangeImpact, activation runtimecontract.RuntimeActivationContext, inventory *runtimecontract.RuntimeSourceObligationInventory) (*runtimecontract.RuntimeBootstrap, error) {
+	if err := runtimecontract.ValidateRuntimeEvidencePurposeMappingAvailability(inventory); err != nil {
+		return nil, err
+	}
 	definitionRevision = strings.TrimSpace(definitionRevision)
 	startupInputHash = strings.TrimSpace(startupInputHash)
 	if goal == nil || dod == nil || goal.ID == "" || dod.ID == "" || goal.WorkspaceID == "" || goal.WorkspaceID != dod.WorkspaceID ||
@@ -40,6 +43,14 @@ func RuntimeBootstrapWithSourceObligations(goal *workspacemodel.Goal, dod *works
 		if inventory.DefinitionRevision != definitionRevision || inventory.StartupInputHash != startupInputHash {
 			return nil, fmt.Errorf("runtime source obligations do not bind sealed Definition")
 		}
+		compiled.CoverageItems, err = runtimecontract.CompileRuntimeExecutionProofMappingCoverage(*inventory, compiled.CoverageItems)
+		if err != nil {
+			return nil, err
+		}
+		compiled.CoverageItems, err = runtimecontract.CompileRuntimeEvidencePurposeMappingCoverage(*inventory, compiled.CoverageItems)
+		if err != nil {
+			return nil, err
+		}
 		for n := range compiled.CoverageItems {
 			item := &compiled.CoverageItems[n]
 			checks, err := runtimecontract.CompileRuntimeSourceObligationChecks(*inventory, *item)
@@ -47,6 +58,10 @@ func RuntimeBootstrapWithSourceObligations(goal *workspacemodel.Goal, dod *works
 				return nil, err
 			}
 			item.SourceObligationChecks = checks
+			item.GoalExecutionAssertions, err = runtimecontract.CompileRuntimeGoalExecutionAssertions(inventory, *item, activation.ExecutionContract.ProfileContracts)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	definition := runtimecontract.RuntimeDefinitionContext{

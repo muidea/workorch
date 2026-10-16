@@ -78,6 +78,7 @@ func runtimeInternalTransitionContract(kind RuntimeInternalEventKind) (runtimeIn
 		return runtimeInternalTransitionDescriptor{Primary: eventcontract.StateMachineSM2, WriteSet: runtimeInternalWriteSM2 | runtimeInternalWriteSM3 | runtimeInternalWriteSM4}, true
 
 	case RuntimeInternalEventSemanticCatalogInvalidated,
+		RuntimeInternalEventEvidenceApplicabilityObserved,
 		RuntimeInternalEventEligibleFocusProjected,
 		RuntimeInternalEventSemanticFeasibilityRequired,
 		RuntimeInternalEventSemanticFeasibilityObserved,

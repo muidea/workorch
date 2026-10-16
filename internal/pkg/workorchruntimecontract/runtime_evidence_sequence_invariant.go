@@ -50,6 +50,12 @@ func ValidateRuntimeEvidenceLedgerSequence(
 		"rejected": facts.Evidence.Rejected,
 	} {
 		for _, fact := range values {
+			if err := ValidateRuntimeEvidencePurposeKind(fact.ApplicabilityDependencies, fact.Kind); err != nil {
+				return err
+			}
+			if err := ValidateRuntimeEvidenceDependencyPair(fact.OwnerRevisionSet, fact.ApplicabilityDependencies, facts.DefinitionRevision); err != nil {
+				return fmt.Errorf("runtime %s evidence dependency pair: %w", ledger, err)
+			}
 			if err := validateRuntimeOwnerRevisionSetRaw(fact.OwnerRevisionSet); err != nil {
 				return fmt.Errorf("runtime %s evidence owner dependencies: %w", ledger, err)
 			}

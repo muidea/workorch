@@ -2,6 +2,10 @@
 
 Status: normative
 
+HTTP/Web access uses the versioned [Local Operator Access](local-operator-access.md) boundary: loopback listener and peer,
+local Host, same-origin browser requests and no proxy-provided identity. It does not substitute for exact confirmation,
+bounded grants or Decision approval; non-loopback deployment requires a separately approved identity contract.
+
 Type: product-interface
 
 Last Verified: 2026-08-26

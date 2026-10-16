@@ -18,6 +18,12 @@ validation verdict。它不解释 Goal/DoD，不调用其它 capability owner，
 
 ## 组件交互及合同
 
+`file/mutation-historical-effect/v1` 是 File edit/write/patch-apply 的显式用途合同。只有原 sealed all-of
+effect+validation binding 派生的 execution context 声明该用途时，owner 才输出 dependency pair v2；否则保持 v1。
+actual input reads 与真实 postcondition 均保全，用途不改变 effect 授权、replay proof 或 receipt 身份反查。
+后续修改使旧后像 stale 时，历史 receipt 仅证明行为；终验须独立当前普通证明，不提升旧 bytes 为 current。
+Core 边界与 current union 门禁见 [Evidence Proof Purpose](../../../../docs/00-core/runtime/evidence-proof-purpose.md)。
+
 | 交互方 | 方向 | typed EventHub 合同 | 调用/授权语义 |
 | --- | --- | --- | --- |
 | `kernel/orchestrator` | Orchestrator → File | 11 个 Runtime read/conformance/feasibility command/result；6 个 sealed execute command，统一 `ExecuteOperationResult` | 接受 exact `kernel/orchestrator` source |
@@ -50,14 +56,18 @@ optional missing read、list/preview、validation、assessment 和正式 artifac
 现行 Runtime 路径检查与读取仍不是跨文件原子快照，该依赖字段不证明所有 filesystem TOCTOU 已被防住。
 独立 producer 回归见 [`biz/file_read_dependencies_test.go`](biz/file_read_dependencies_test.go)。
 
-`QueryRuntimeFileReadDependenciesCommand/Result` 仅对原 `file/read` 提供当前重新观察：必须有 exact sealed operation、
+`QueryRuntimeFileReadDependenciesCommand/Result` 对原 `file/read` 提供当前重新观察：必须有 exact sealed operation、
 transaction Definition、原完整 dependency set、source receipt hash 与 request/state-revision echo。File 经 typed
 Orchestrator receipt query 的 `ReadSource` 反查原 persisted dispatch/operation/transaction/execution；错 source、
 receipt miss/hash/set 漂移均在新读取前拒绝。然后用原 range/MaxBytes 参数读取 current bytes，重新生成完整集合，
 不能只回显旧 selector hash。`missing` 显式返回 nil set；目录、工作区缺失、读取错误不伪装为完整观察或 absence proof。
 调用端从 Workspace typed read 获取当前目录，不使用自由调用方目录；原 receipt 保持不变，查询不生成新 receipt。
 新 query 在 BeginShutdown 后拒绝，已接纳 query 与 nested receipt 查询持票至真实返回。它不提供跨时刻保证或
-SM-2 stale/reopen 裁决，不覆盖 mutation、Shell copy、owner postcondition、assessment 或 artifact current dependencies。
+SM-2 stale/reopen 裁决。非空 `ApplicabilitySource` 显式选择新 mutation 双集合协议：只接受原
+`file/edit|file/write|patch/apply` receipt 的完整历史集合与实际后像快照，原 `ReadSource` 反证两侧正文；
+重新读取完整实际流并以 `workspace_target_content` selector 返回当前集合，失败不返回观察。
+Orchestrator adapter 将事实提交到 SM-2 私有 `EvidenceApplicabilityObserved`，File 不选择 stale/reopen。
+旧 nil 协议不升级；owner postcondition、assessment 和 artifact 的完整 current dependencies 不由此补造。
 独立 bytes/range oracle、无关/相交变化、missing/error、重启和零额外 commit 见
 [`biz/file_read_dependency_query_test.go`](biz/file_read_dependency_query_test.go)；返回端 full raw/hash/identity gate 见
 [`pkg/events/read_dependencies_test.go`](pkg/events/read_dependencies_test.go)。
@@ -65,12 +75,15 @@ SM-2 stale/reopen 裁决，不覆盖 mutation、Shell copy、owner postcondition
 `file/edit`、`file/write` 与 `patch/apply` 在 exact Definition 门禁后保留最终 patch 执行读取的 existing 输入：
 owner-private observation 直接取自 `readPatchTarget` 返回的原 bytes，绑定目标、全内容 SHA-256、字节数及
 `patch_input` purpose。成功、no-op 和完整读取后发生的 binary/baseHash/replace/write 等失败均保留该事实；
-未实际读取现存 bytes、缺失目标或读取失败不补造依赖。`DependencyHash` 绑定 Workspace、完整 sealed operation hash
+`readPatchTarget` 成功确认目标不存在时，保存 `patch_absence` purpose，资源种类为
+`workspace_target_existence`，revision 为 `SHA256("file-target-existence/v1\x00absent")`；它与空文件的内容
+revision 分域，字节数为零，不声称读到原 bytes。读取错误不伪装为 absence。`DependencyHash` 绑定 Workspace、完整 sealed operation hash
 和 observation；typed receipt 与原 evidence transaction 保全集合，不把 `ResourceChanges` 当 actual-read 来源。
+producer 还独立核对 observation 目标与 sealed operation 的唯一目标完全相同；缺失、多目标或错目标不生成依赖。
 
 lost-receipt recovery 若确认 sealed 后像，只保留本次实际读取的 `replay_postcondition` hash，不把 receipt 的历史
 `BeforeHash` 或 replay proof 值伪装为本次读取。已保存 receipt 的 duplicate 仍重放原集合，不重读 newer 文件。
-该事实不表示所有 preview/feasibility/manifest/metadata 读取已枚举，也不提供 absence、原始未保存回执的读前像恢复、
+该事实不表示所有 preview/feasibility/manifest/metadata 读取已枚举，也不提供原始未保存回执的读前像恢复、
 跨文件快照、formal artifact 或 current freshness 证明；既有 effect/unknown/权限/fence 和 SM-1～SM-4 transition 不变。
 独立原字节 oracle 和三种 variant 的读取/恢复/失败见 [`biz/file_patch_read_dependencies_test.go`](biz/file_patch_read_dependencies_test.go)；
 真实 receipt CAS loss/replay 及 edit/rejected-write 的配对回归见 `biz/file_runtime_adapter_test.go` 和 `module_test.go`。

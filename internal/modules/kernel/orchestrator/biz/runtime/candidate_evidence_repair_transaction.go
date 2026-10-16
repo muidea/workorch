@@ -702,6 +702,7 @@ func confirmedRepairSourceRejection(
 	}
 	if fact.Summary != receiptEvidence.Summary || fact.ContentHash != receiptEvidence.ContentHash ||
 		!reflect.DeepEqual(fact.OwnerRevisionSet, receiptEvidence.OwnerRevisionSet) ||
+		!reflect.DeepEqual(fact.ApplicabilityDependencies, receiptEvidence.ApplicabilityDependencies) ||
 		!reflect.DeepEqual(fact.ContentAddress, receiptEvidence.ContentAddress) ||
 		!reflect.DeepEqual(fact.ExitCode, receiptEvidence.ExitCode) || !sameRuntimeTargetRefs(fact.EvidenceRefs, receiptEvidence.EvidenceRefs) ||
 		fact.Quality != receiptEvidence.Quality || fact.ZeroWork != receiptEvidence.ZeroWork ||
@@ -1128,6 +1129,7 @@ func validateConfirmedRepairAcceptedEvidenceLineage(
 		!sameRuntimeStringSet(evidence.BindingRefs, operation.BindingRefs) || evidence.Summary != receiptEvidence.Summary ||
 		evidence.ContentHash != receiptEvidence.ContentHash || !reflect.DeepEqual(evidence.ContentAddress, receiptEvidence.ContentAddress) ||
 		!reflect.DeepEqual(evidence.OwnerRevisionSet, receiptEvidence.OwnerRevisionSet) ||
+		!reflect.DeepEqual(evidence.ApplicabilityDependencies, receiptEvidence.ApplicabilityDependencies) ||
 		!reflect.DeepEqual(evidence.ExitCode, receiptEvidence.ExitCode) ||
 		!sameRuntimeTargetRefs(evidence.EvidenceRefs, receiptEvidence.EvidenceRefs) || evidence.Quality != receiptEvidence.Quality ||
 		evidence.ZeroWork != receiptEvidence.ZeroWork || evidence.EvidenceReason != receiptEvidence.EvidenceReason ||
@@ -1502,7 +1504,7 @@ func validateConfirmedRepairFreshValidationContinuation(aggregate RuntimeAggrega
 		}
 		applicable++
 		expected := transaction.freshValidationDirective(facts, completed.finalEvidenceRevision)
-		if repairDirectiveEvidenceSatisfied(facts, expected, aggregate.CoverageProofLineage) {
+		if confirmedRepairFreshValidationConsumed(aggregate, expected) {
 			if facts.RepairDirective != nil && runtimecontract.SameRuntimeRepairClosure(facts.RepairDirective.Closure, expected.Closure) {
 				return fmt.Errorf("runtime aggregate settled confirmed owner repair retained a satisfied fresh-validation directive")
 			}
@@ -1536,6 +1538,33 @@ func validateConfirmedRepairFreshValidationContinuation(aggregate RuntimeAggrega
 		return fmt.Errorf("runtime aggregate confirmed owner repair fresh-validation directive has no exact completed transaction (completed=%d applicable=%d)", len(transactions), applicable)
 	}
 	return nil
+}
+
+// Consumption is an immutable causal fact, not current validation credit.
+// Advancing assessment or Resume creates fresh sampling debt, but cannot
+// resurrect an already consumed repair continuation. Re-evaluate the exact
+// original observation prefix and binding; later stale observations still
+// revoke current proof through the ordinary applicability/reopen gates.
+func confirmedRepairFreshValidationConsumed(aggregate RuntimeAggregate, directive runtimecontract.RuntimeRepairDirective) bool {
+	facts := aggregate.Facts.Normalized()
+	if repairDirectiveEvidenceSatisfied(facts, directive, aggregate.CoverageProofLineage) {
+		return true
+	}
+	for index, observation := range facts.EvidenceApplicabilityObservations {
+		if observation.Missing || observation.CurrentDependencies == nil {
+			continue
+		}
+		if err := runtimecontract.ValidateRuntimeEvidenceApplicabilityObservationSource(observation, facts, aggregate.OperationReceipts); err != nil {
+			continue
+		}
+		original := facts
+		original.EvidenceRevision = observation.Request.EvidenceRevision
+		original.EvidenceApplicabilityObservations = facts.EvidenceApplicabilityObservations[:index+1]
+		if repairDirectiveEvidenceSatisfied(original, directive, aggregate.CoverageProofLineage) {
+			return true
+		}
+	}
+	return false
 }
 
 // History proves consumption of a specific fresh-validation handoff, not new

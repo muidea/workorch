@@ -2,11 +2,31 @@ package runtime
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestPresemanticTargetSnapshotOwnerFactFencesSemanticRequest(t *testing.T) {
+	aggregate := presemanticTargetSelectionGateAggregate(t, runtimecontract.RuntimeTargetSelectionSelected, []string{"allowed.go"})
+	aggregate.Facts.Prerequisites.Pending = []runtimecontract.RuntimePrerequisite{{
+		ID: "snapshot-current-focus", Kind: runtimecontract.PrerequisiteKindTargetSnapshot,
+		Scope: runtimecontract.RuntimePrerequisiteScopeFocus, FocusID: aggregate.Facts.Focus.ID,
+		OwnerModuleID: runtimecontract.RuntimeModuleFile, SubjectRef: "allowed.go",
+	}}
+	before := aggregate.CloneRaw()
+	if !RuntimeSemanticPrerequisitesPendingForAggregate(aggregate) {
+		t.Fatal("existing target snapshot debt did not fence semantic planning")
+	}
+	if err := candidateRequestSessionActionAllowed(aggregate, runtimecontract.RuntimeProviderDocumentSemanticPlan); err == nil {
+		t.Fatal("selected historical target bypassed pending current owner snapshot")
+	}
+	if !reflect.DeepEqual(before, aggregate) {
+		t.Fatal("read-only semantic gate changed authority or budget")
+	}
+}
 
 func TestPresemanticDefinitionTargetSelectionRequirementUsesImmutableDeclaration(t *testing.T) {
 	facts := validationFacts()

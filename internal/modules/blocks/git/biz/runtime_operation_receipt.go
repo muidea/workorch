@@ -16,6 +16,10 @@ import (
 // queryRuntimeOperationReceipt is owned by the capability Biz: it performs the
 // typed EventHub read required before an operation can be safely replayed.
 func (m *Biz) queryRuntimeOperationReceipt(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID string, execution runtimecontract.RuntimeOperationExecutionEnvelope) (runtimecontract.RuntimeOperationReceipt, bool, error) {
+	return m.queryRuntimeOperationReceiptWithSource(ctx, workspaceID, runID, dispatchID, operationID, execution, nil)
+}
+
+func (m *Biz) queryRuntimeOperationReceiptWithSource(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, dispatchID, operationID string, execution runtimecontract.RuntimeOperationExecutionEnvelope, source *runtimecontract.RuntimeOperationExecutionContext) (runtimecontract.RuntimeOperationReceipt, bool, error) {
 	if m == nil || m.EventHub() == nil || workspaceID == "" || runID == "" || strings.TrimSpace(dispatchID) == "" || strings.TrimSpace(operationID) == "" {
 		return runtimecontract.RuntimeOperationReceipt{}, false, common.ErrInvalidArgument
 	}
@@ -27,7 +31,7 @@ func (m *Biz) queryRuntimeOperationReceipt(ctx context.Context, workspaceID comm
 	}
 	event := magicevent.NewEventWithContext(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, ModuleID, orchestratorevents.CommandDestination, magicevent.NewHeader(), ctx, orchestratorevents.QueryRuntimeOperationReceiptCommand{
 		WorkspaceID: workspaceID, RunID: runID, DispatchID: dispatchID, OperationID: operationID, ExecutionKey: execution.ExecutionKey, Fence: execution.Fence,
-		GovernanceGrant: execution.GovernanceGrant,
+		GovernanceGrant: execution.GovernanceGrant, ReadSource: source,
 	})
 	event.BindLaneKey(eventcontract.QueryLaneKey(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, eventcontract.LaneScope{
 		WorkspaceID: string(workspaceID), RunID: string(runID), SubjectID: execution.ExecutionKey,

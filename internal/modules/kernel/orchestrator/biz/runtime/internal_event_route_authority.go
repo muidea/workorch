@@ -11,6 +11,9 @@ import (
 // share the controller kernel and cannot be called as mutation entries.
 func (c *RuntimeController) applyAuthorityInternalEvent(ctx context.Context, event RuntimeInternalEvent) (RuntimeInternalEventResult, error) {
 	switch event.Kind {
+	case RuntimeInternalEventEvidenceApplicabilityObserved:
+		aggregate, err := c.authority.recordEvidenceApplicability(ctx, event.Scope.WorkspaceID, event.Scope.RunID, *event.Authority.EvidenceApplicability)
+		return RuntimeInternalEventResult{Aggregate: aggregate}, err
 	case RuntimeInternalEventImplementationWorkScopeRequired:
 		if event.Authority.ImplementationWorkScopeRequest == nil || event.Authority.ImplementationWorkScopeObservation != nil {
 			return RuntimeInternalEventResult{}, common.ErrInvalidArgument

@@ -191,10 +191,17 @@ func (a *RuntimeAdapter) executeCommit(ctx context.Context, request RuntimeOpera
 	if err != nil {
 		return a.commandFailureResult(request, repo, gitcommon.OperationCommit, cmd, classifyGitError(cmd, err), err)
 	}
-	nextHead, _ := a.gitOutput(ctx, repo.RepoRoot, timeout, "rev-parse", "HEAD")
+	nextHead, err := a.gitOutput(ctx, repo.RepoRoot, timeout, "--no-replace-objects", "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return RuntimeOperationResult{}, fmt.Errorf("Git commit effect completed but HEAD readback failed: %w", err)
+	}
+	if !gitDependencyObjectID(strings.TrimSuffix(nextHead, "\n")) || strings.TrimSuffix(nextHead, "\n") == repo.HeadCommit {
+		return RuntimeOperationResult{}, fmt.Errorf("Git commit effect completed without a distinct exact HEAD readback")
+	}
 	output := a.baseOutput(request, repo, gitcommon.OperationCommit, cmd, "completed")
 	output.HeadCommitBefore = repo.HeadCommit
 	output.HeadCommitAfter = strings.TrimSpace(nextHead)
+	output.BeforeHash, output.AfterHash = output.HeadCommitBefore, output.HeadCommitAfter
 	output.Message = message
 	output.StagedFiles = staged
 	output.CommittedFiles = staged

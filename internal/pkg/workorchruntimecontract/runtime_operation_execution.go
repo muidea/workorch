@@ -29,18 +29,19 @@ type RuntimeOperationExecutionEnvelope struct {
 // It carries no topic, destination owner, reducer instruction or state
 // transition authority.
 type RuntimeOperationExecutionContext struct {
-	Execution                     RuntimeOperationExecutionEnvelope
-	WorkspaceID                   common.WorkspaceID
-	RunID                         common.RunID
-	DispatchID                    string
-	Transaction                   AuthorityTransaction
-	OperationID                   string
-	CoverageWorkItemIDs           []common.CoverageWorkItemID
-	TargetRefs                    []string
-	EvidenceKind                  string
-	EvidencePolicies              []RuntimeEvidencePolicy
-	WorkspaceDeliverableDirectory string
-	WorkspaceInternalDirectory    string
+	Execution                        RuntimeOperationExecutionEnvelope
+	WorkspaceID                      common.WorkspaceID
+	RunID                            common.RunID
+	DispatchID                       string
+	Transaction                      AuthorityTransaction
+	OperationID                      string
+	CoverageWorkItemIDs              []common.CoverageWorkItemID
+	TargetRefs                       []string
+	EvidenceKind                     string
+	HistoricalEffectProofContractRef string `json:",omitempty"`
+	EvidencePolicies                 []RuntimeEvidencePolicy
+	WorkspaceDeliverableDirectory    string
+	WorkspaceInternalDirectory       string
 }
 
 // ValidateRuntimeOperationExecutionContextScope binds the owner-neutral

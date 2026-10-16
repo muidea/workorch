@@ -79,6 +79,7 @@ func compileRuntimeOperationContractRevision() string {
 		// together with parameter rules so an already-persisted Run never changes
 		// its create/effect semantics after a binary replacement.
 		writeHashString(h, descriptor.OwnerModuleID)
+		writeHashString(h, descriptor.HistoricalEffectProofContractRef)
 		writeHashString(h, string(descriptor.DefaultEffectScope))
 		writeHashString(h, string(descriptor.CapabilityClass))
 		writeHashString(h, string(descriptor.IdempotencyClass))
@@ -111,6 +112,7 @@ func compileRuntimeOperationContractRevision() string {
 		writeHashString(h, runtimeOperationValidationPolicy(contract.Kind))
 		for _, v := range contract.Variants {
 			writeHashString(h, v.ID)
+			writeHashString(h, v.TerminalSnapshotProtocolRef)
 			for _, d := range v.Discriminators {
 				writeHashString(h, d.Name)
 				writeHashString(h, d.EqualsString)
@@ -175,16 +177,17 @@ type RuntimeOperationParameterPair struct {
 // discriminated sub-operation. Provider schema rendering, candidate validation,
 // dispatch seal and concrete owner preflight must derive from this descriptor.
 type RuntimeOperationVariantContract struct {
-	ID                     string
-	Discriminators         []RuntimeOperationParameterPredicate
-	RequiredParameters     []string
-	RequiredNonEmpty       []string
-	ForbiddenParameters    []string
-	DistinctParameterPairs []RuntimeOperationParameterPair
-	ValueRules             []RuntimeOperationValueRule
-	CandidateConstraints   []RuntimeOperationCandidateConstraint
-	EffectScope            RuntimeEffectScope
-	IdempotencyClass       RuntimeOperationIdempotencyClass
+	TerminalSnapshotProtocolRef string `json:",omitempty"`
+	ID                          string
+	Discriminators              []RuntimeOperationParameterPredicate
+	RequiredParameters          []string
+	RequiredNonEmpty            []string
+	ForbiddenParameters         []string
+	DistinctParameterPairs      []RuntimeOperationParameterPair
+	ValueRules                  []RuntimeOperationValueRule
+	CandidateConstraints        []RuntimeOperationCandidateConstraint
+	EffectScope                 RuntimeEffectScope
+	IdempotencyClass            RuntimeOperationIdempotencyClass
 }
 
 // RuntimeOperationVariantRef is the typed identity used by focus and required
@@ -460,7 +463,7 @@ func RuntimeOperationContractForKind(kind string) (RuntimeOperationContract, boo
 			contract.Variants = []RuntimeOperationVariantContract{
 				{ID: "init", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "init"}}, ForbiddenParameters: []string{"pathspecs", "message", "ref", "baseRef", "limit", "expectedHead"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyOwnerManaged},
 				{ID: "add", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "add"}}, RequiredParameters: []string{"pathspecs"}, ValueRules: []RuntimeOperationValueRule{runtimeNonEmptyValueRule(contract.Kind, "add", "pathspecs")}, ForbiddenParameters: []string{"message", "ref", "baseRef", "limit", "expectedHead"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencySafeToReplay},
-				{ID: "commit", Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "commit"}}, RequiredParameters: []string{"message"}, ValueRules: []RuntimeOperationValueRule{runtimeNonEmptyValueRule(contract.Kind, "commit", "message")}, ForbiddenParameters: []string{"pathspecs", "ref", "baseRef", "limit"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce},
+				{ID: "commit", TerminalSnapshotProtocolRef: RuntimeTerminalOwnerSnapshotProtocol, Discriminators: []RuntimeOperationParameterPredicate{{Name: "operation", EqualsString: "commit"}}, RequiredParameters: []string{"message"}, ValueRules: []RuntimeOperationValueRule{runtimeNonEmptyValueRule(contract.Kind, "commit", "message")}, ForbiddenParameters: []string{"pathspecs", "ref", "baseRef", "limit"}, EffectScope: RuntimeEffectWorkspaceDurable, IdempotencyClass: RuntimeOperationIdempotencyAtMostOnce},
 			}
 		}
 		return contract, true

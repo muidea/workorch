@@ -155,3 +155,126 @@ func TestRuntimeValidationExecutionConjunctionBindsReceiptFactAndClone(t *testin
 		}
 	}
 }
+
+func diagnosticExecutionFixture() RuntimeValidationObservation {
+	observation, _ := validationExecutionConjunctionFixture()
+	c := observation.ExecutionConjunction
+	c.Complete = false
+	observation.PassedChecks = nil
+	for index := range c.Stages {
+		stage := &c.Stages[index]
+		stage.ExitCode, stage.KnownFailure, stage.PassedTests = 1, true, 0
+		stage.Stdout.Storage = &RuntimeValidationOutputStorage{Reference: "owner-output"}
+		stage.Stderr.Storage = &RuntimeValidationOutputStorage{Reference: "owner-error"}
+	}
+	c.Stages[1].DiagnosticSourceRef = "source-1"
+	c.Stages[1].BehaviorTargetRefs = []string{"implementation"}
+	return observation
+}
+
+func TestRuntimeValidationExecutionDiagnosticFactsRemainRejectedAndExact(t *testing.T) {
+	original := diagnosticExecutionFixture()
+	if err := original.ValidateFailureDetails(); err != nil {
+		t.Fatal(err)
+	}
+	for _, scenario := range []string{"credit", "source-missing", "behavior-missing", "unstarted", "pass", "unknown", "timeout", "cleanup", "unfinished", "raw-incomplete", "source-drift", "time-invalid", "time-reversed", "time-overlap", "orphan", "duplicate-source", "noncanonical-behavior"} {
+		t.Run(scenario, func(t *testing.T) {
+			changed := original.Clone()
+			c, stage := changed.ExecutionConjunction, &changed.ExecutionConjunction.Stages[1]
+			switch scenario {
+			case "credit":
+				c.Complete = true
+			case "source-missing":
+				stage.DiagnosticSourceRef = ""
+			case "behavior-missing":
+				stage.BehaviorTargetRefs = nil
+			case "unstarted":
+				stage.Started = false
+			case "pass":
+				stage.ExitCode = 0
+			case "unknown":
+				stage.KnownFailure = false
+			case "timeout":
+				stage.TimedOut = true
+			case "cleanup":
+				stage.CleanupFailed = true
+			case "unfinished":
+				stage.TerminalComplete = false
+			case "raw-incomplete":
+				stage.Stdout.Complete, stage.Stdout.OmittedReason = false, "capacity"
+			case "source-drift":
+				stage.SourceBefore, stage.SourceAfter = StableRuntimeValidationExecutionStagesHash(nil), StableRuntimeValidationExecutionStagesHash(nil)
+			case "time-invalid":
+				stage.StartedAt = "unknown"
+			case "time-reversed":
+				stage.FinishedAt = c.Stages[0].StartedAt
+			case "time-overlap":
+				stage.StartedAt = c.Stages[0].StartedAt
+			case "orphan":
+				c.Stages = c.Stages[1:]
+			case "duplicate-source":
+				duplicate := *stage
+				duplicate.Identity.ID = "another-stage"
+				duplicate.StartedAt, duplicate.FinishedAt = stage.FinishedAt, stage.FinishedAt
+				c.Stages = append(c.Stages, duplicate)
+			case "noncanonical-behavior":
+				stage.BehaviorTargetRefs = []string{"implementation", "implementation"}
+			}
+			if err := changed.ValidateFailureDetails(); err == nil {
+				t.Fatal("incomplete or forged source-specific diagnostic admitted")
+			}
+			if !reflect.DeepEqual(changed, changed.Normalized()) {
+				t.Fatal("invalid original diagnostic was normalized away")
+			}
+		})
+	}
+	history := original.Clone()
+	history.ExecutionConjunction.Stages[1].Stdout.Storage = &RuntimeValidationOutputStorage{OmittedReason: "storage unavailable"}
+	if err := history.ValidateFailureDetails(); err != nil {
+		t.Fatal("publication failure erased actual rejected source history", err)
+	}
+	// Storage completeness is enforced independently by the original-binding
+	// failure-authority consumer, never inferred from this historical shape.
+	// The new gate is opt-in on source-specific facts; ordinary rejected stage
+	// history remains preservable even when its timestamps are incomplete.
+	legacy := original.Clone()
+	legacy.ExecutionConjunction.Stages[1].DiagnosticSourceRef = ""
+	legacy.ExecutionConjunction.Stages[1].BehaviorTargetRefs = nil
+	legacy.ExecutionConjunction.Stages[1].StartedAt = ""
+	if err := legacy.ValidateFailureDetails(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeValidationExecutionDiagnosticHashCloneAndReload(t *testing.T) {
+	original := diagnosticExecutionFixture()
+	receipt := runtimeOperationReceiptLineageFixture("exec/ws/run/dispatch/op-1", 1, "op-1")
+	receipt.Evidence.Validation = &original
+	fact := EvidenceFact{ID: "evidence", Validation: &original}
+	for _, mutate := range []func(*RuntimeValidationExecutionStage){
+		func(s *RuntimeValidationExecutionStage) { s.DiagnosticSourceRef = "other-source" },
+		func(s *RuntimeValidationExecutionStage) { s.BehaviorTargetRefs[0] = "other-target" },
+	} {
+		changed := original.Clone()
+		mutate(&changed.ExecutionConjunction.Stages[1])
+		otherReceipt, otherFact := receipt.Clone(), fact
+		otherReceipt.Evidence.Validation, otherFact.Validation = &changed, &changed
+		if StableRuntimeOperationReceiptHash(otherReceipt) == StableRuntimeOperationReceiptHash(receipt) || StableRuntimeEvidenceFactHash(otherFact) == StableRuntimeEvidenceFactHash(fact) {
+			t.Fatal("source-specific fact missing from identity")
+		}
+	}
+	body, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reloaded RuntimeOperationReceipt
+	if err := json.Unmarshal(body, &reloaded); err != nil || !SameRuntimeOperationReceipt(receipt, reloaded) {
+		t.Fatalf("source diagnostic reload: %v", err)
+	}
+	for _, copy := range []RuntimeOperationReceipt{receipt.Clone(), receipt.Normalized(), cloneRuntimeOperationReceiptRaw(receipt), reloaded} {
+		copy.Evidence.Validation.ExecutionConjunction.Stages[1].BehaviorTargetRefs[0] = "caller"
+		if original.ExecutionConjunction.Stages[1].BehaviorTargetRefs[0] != "implementation" {
+			t.Fatal("diagnostic clone aliases original target set")
+		}
+	}
+}

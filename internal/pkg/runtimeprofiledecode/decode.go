@@ -87,7 +87,9 @@ func Decode(value any) []runtimecontract.RuntimeProfileContract {
 			}
 			var lineageAssertions []runtimecontract.RuntimeLineageAssertionRule
 			for _, rule := range MapSlice(item["lineageAssertions"]) {
-				lineageAssertions = append(lineageAssertions, runtimecontract.RuntimeLineageAssertionRule{Ref: String(rule["ref"]), Kind: runtimecontract.RuntimeLineageAssertionKind(String(rule["kind"])), ConsumptionPoint: runtimecontract.RuntimeProofPhase(String(rule["consumptionPoint"])), MinCompletedRounds: Int(rule["minCompletedRounds"]), OwnerModuleID: String(rule["ownerModuleId"]), OperationKind: String(rule["operationKind"]), OperationVariantID: String(rule["operationVariantId"]), RequiredEffectScope: runtimecontract.RuntimeEffectScope(String(rule["requiredEffectScope"]))})
+				lineageAssertions = append(lineageAssertions, runtimecontract.RuntimeLineageAssertionRule{Ref: String(rule["ref"]), Kind: runtimecontract.RuntimeLineageAssertionKind(String(rule["kind"])), ConsumptionPoint: runtimecontract.RuntimeProofPhase(String(rule["consumptionPoint"])), MinCompletedRounds: Int(rule["minCompletedRounds"]), OwnerModuleID: String(rule["ownerModuleId"]), OperationKind: String(rule["operationKind"]), OperationVariantID: String(rule["operationVariantId"]), RequiredEffectScope: runtimecontract.RuntimeEffectScope(String(rule["requiredEffectScope"])), TerminalContractRef: String(rule["terminalContractRef"]), ReceiptSourceScope: String(rule["receiptSourceScope"]), ReceiptSourceID: String(rule["receiptSourceId"]), ValidationSourceScope: String(rule["validationSourceScope"]), ValidationSourceID: String(rule["validationSourceId"])})
+				lineageAssertions[len(lineageAssertions)-1].ExecutionSourceContractRef = String(rule["executionSourceContractRef"])
+				lineageAssertions[len(lineageAssertions)-1].RepairHistoryContractRef = String(rule["repairHistoryContractRef"])
 			}
 			repair := ValidationFailureRepairConvergence(item)
 			implementation := ImplementationWorkPolicy(item)

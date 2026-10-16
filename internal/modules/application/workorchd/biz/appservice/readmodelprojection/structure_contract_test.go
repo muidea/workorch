@@ -241,19 +241,7 @@ func TestWD5ProductionProjectionUsesSemanticFacades(t *testing.T) {
 		"readmodelprojection.NormalizeWorkspaceGovernanceProjection(",
 		"readmodelprojection.WorkspacePromptMode(",
 	}
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == ".claude" || entry.Name() == "node_modules" || strings.Contains(path, string(filepath.Separator)+"readmodelprojection") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
-			return nil
-		}
+	err := walkProjectionProductionSources(root, func(path string) error {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
@@ -267,6 +255,62 @@ func TestWD5ProductionProjectionUsesSemanticFacades(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Scan this repository's Go source roots, not vendor or transient native-build
+// workspaces that other tests may create and remove concurrently.
+func walkProjectionProductionSources(root string, visit func(string) error) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if filepath.Dir(path) == root && entry.Name() != "application" && entry.Name() != "internal" && entry.Name() != "scripts" && entry.Name() != "web" {
+				return filepath.SkipDir
+			}
+			if entry.Name() == "node_modules" || entry.Name() == "readmodelprojection" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
+		return visit(path)
+	})
+}
+
+func TestProjectionProductionSourceScanExcludesTransientWorkspacesNotProduction(t *testing.T) {
+	root := t.TempDir()
+	files := []string{"root.go", "application/main.go", "internal/owner/owner.go", "scripts/probe/main.go", "web/embed.go", "internal/owner/owner_test.go", "internal/readmodelprojection/private.go", "web/node_modules/generated.go", "vendor/generated.go", ".validation-tmp-test/go-build/native.go"}
+	for _, file := range files {
+		path := filepath.Join(root, file)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("package fixture\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []string
+	if err := walkProjectionProductionSources(root, func(path string) error {
+		rel, err := filepath.Rel(root, path)
+		got = append(got, filepath.ToSlash(rel))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"application/main.go", "internal/owner/owner.go", "root.go", "scripts/probe/main.go", "web/embed.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("scan=%v want=%v", got, want)
+	}
+	if err := walkProjectionProductionSources(filepath.Join(root, "missing"), func(string) error { return nil }); err == nil {
+		t.Fatal("production walk error swallowed")
+	}
+	sentinel := fmt.Errorf("production read failed")
+	if err := walkProjectionProductionSources(root, func(string) error { return sentinel }); err != sentinel {
+		t.Fatal("production visitor error swallowed")
 	}
 }
 

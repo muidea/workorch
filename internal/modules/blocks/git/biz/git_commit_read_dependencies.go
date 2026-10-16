@@ -14,7 +14,7 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
-// 只记录 owner 实际完整读取的 immutable commit/tree，不代表工作树或子模块内容。
+// 只记录 owner 实际完整读取的 immutable commit/递归 tree/blob，不代表当前工作树。
 func (a *RuntimeAdapter) commitOwnerDependencies(ctx context.Context, scope runtimecontract.RuntimeOperationExecutionContext, output RuntimeOperationResult) (*runtimecontract.RuntimeOwnerRevisionSet, error) {
 	if output.Operation != gitcommon.OperationCommit || output.Status != "completed" || output.ZeroWork {
 		return nil, nil
@@ -26,26 +26,17 @@ func (a *RuntimeAdapter) commitOwnerDependencies(ctx context.Context, scope runt
 	if output.RepoRoot == "" || !gitDependencyObjectID(output.CommitHash) {
 		return nil, fmt.Errorf("Git commit dependencies require actual repository and commit identity")
 	}
-	commit, err := a.readDependencyObject(ctx, output.RepoRoot, "commit", output.CommitHash)
+	objects, err := a.readCommitObjectGraph(ctx, output.RepoRoot, output.CommitHash)
 	if err != nil {
 		return nil, err
 	}
-	first, _, found := strings.Cut(commit, "\n")
-	tree, foundTree := strings.CutPrefix(first, "tree ")
-	if !found || !foundTree || !gitDependencyObjectID(tree) {
-		return nil, fmt.Errorf("Git commit dependency has no exact tree identity")
-	}
-	treeBody, err := a.readDependencyObject(ctx, output.RepoRoot, "tree", tree)
-	if err != nil {
-		return nil, err
-	}
+	return gitCommitObjectDependencies(definition, workspace, objects)
+}
+
+func gitCommitObjectDependencies(definition, workspace string, objects []gitSnapshotObject) (*runtimecontract.RuntimeOwnerRevisionSet, error) {
 	set := runtimecontract.RuntimeOwnerRevisionSet{DefinitionRevision: definition}
-	for _, object := range []struct {
-		Kind string
-		ID   string
-		Body string
-	}{{"commit", output.CommitHash, commit}, {"tree", tree, treeBody}} {
-		digest := sha256.Sum256([]byte(object.Body))
+	for _, object := range objects {
+		digest := sha256.Sum256(object.Body)
 		revision := hex.EncodeToString(digest[:])
 		preimage := struct {
 			WorkspaceID string
@@ -74,8 +65,8 @@ func (a *RuntimeAdapter) commitOwnerDependencies(ctx context.Context, scope runt
 
 func (a *RuntimeAdapter) readDependencyObject(ctx context.Context, repo, kind, id string) (string, error) {
 	// 不读取 replace ref 指向的替代正文；bounded runner 必须证明完整输出。
-	if !gitDependencyObjectID(id) || (kind != "commit" && kind != "tree") {
-		return "", fmt.Errorf("Git dependency requires an exact commit/tree object")
+	if !gitDependencyObjectID(id) || (kind != "commit" && kind != "tree" && kind != "blob") {
+		return "", fmt.Errorf("Git dependency requires an exact commit/tree/blob object")
 	}
 	result, err := a.runGit(ctx, repo, a.timeout, maxOutputBytes, "--no-replace-objects", "cat-file", kind, id)
 	if err != nil {
@@ -84,16 +75,27 @@ func (a *RuntimeAdapter) readDependencyObject(ctx context.Context, repo, kind, i
 	if result.Truncated {
 		return "", fmt.Errorf("Git dependency object %s/%s was not completely retained: stdout=%d stderr=%d limit=%d", kind, id, result.StdoutBytes, result.StderrBytes, maxOutputBytes)
 	}
+	if err := validateGitSnapshotObject(gitSnapshotObject{Kind: kind, ID: id, Body: []byte(result.Stdout)}); err != nil {
+		return "", err
+	}
+	return result.Stdout, nil
+}
+
+func validateGitSnapshotObject(object gitSnapshotObject) error {
+	kind, id := object.Kind, object.ID
+	if !gitDependencyObjectID(id) || (kind != "commit" && kind != "tree" && kind != "blob") || len(object.Body) > maxOutputBytes {
+		return fmt.Errorf("Git snapshot requires complete bounded commit/tree/blob bytes")
+	}
 	var objectHash hash.Hash = sha1.New()
 	if len(id) == 64 {
 		objectHash = sha256.New()
 	}
-	_, _ = fmt.Fprintf(objectHash, "%s %d\x00", kind, len(result.Stdout))
-	_, _ = objectHash.Write([]byte(result.Stdout))
+	_, _ = fmt.Fprintf(objectHash, "%s %d\x00", kind, len(object.Body))
+	_, _ = objectHash.Write(object.Body)
 	if hex.EncodeToString(objectHash.Sum(nil)) != id {
-		return "", fmt.Errorf("Git dependency object %s/%s body does not match its identity", kind, id)
+		return fmt.Errorf("Git dependency object %s/%s body does not match its identity", kind, id)
 	}
-	return result.Stdout, nil
+	return nil
 }
 
 func validateGitCommitDependencyScope(scope runtimecontract.RuntimeOperationExecutionContext) error {

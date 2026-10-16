@@ -91,9 +91,9 @@ func TestDriveRuntimeDurableDispatchBudgetBoundsAdditionAndRepairAcrossRestart(t
 	}
 }
 
-func TestDriveRuntimeDurableDispatchBudgetAllowsAdditionAndRepairWithinLimit(t *testing.T) {
+func TestDriveRuntimeDurableDispatchBudgetRejectsUndeclaredPredecessorRevalidation(t *testing.T) {
 	runValidationInputAdditionMainline(t, "uninterrupted", validationInputMainlineOptions{
-		Entrypoint: true, BehaviorRepair: true,
+		Entrypoint: true, BehaviorRepair: true, RevalidationUnavailable: true,
 		ExecutionLimits: &runtimecontract.RuntimeExecutionLimits{
 			ProtocolRef: runtimecontract.RuntimeExecutionLimitsV1, MaxProviderCalls: 64, MaxCapabilityOperations: 32, MaxDurableDispatchesPerCWI: 2,
 		},
@@ -115,15 +115,19 @@ func TestDriveRuntimeInvalidSupplementClosesBeforeAnotherAcquisition(t *testing.
 }
 
 type validationInputMainlineOptions struct {
-	ExecutionLimits         *runtimecontract.RuntimeExecutionLimits
-	ProofBudgetExhaustion   bool
-	DurableBudgetExhaustion bool
-	InvalidSupplement       bool
-	Entrypoint              bool
-	CompileRepair           bool
-	BehaviorRepair          bool
-	InputProtection         bool
-	RepeatInputBypass       bool
+	RevalidationUnavailable  bool
+	ExecutionLimits          *runtimecontract.RuntimeExecutionLimits
+	ProofBudgetExhaustion    bool
+	DurableBudgetExhaustion  bool
+	InvalidSupplement        bool
+	Entrypoint               bool
+	CompileRepair            bool
+	BehaviorRepair           bool
+	InputProtection          bool
+	RepeatInputBypass        bool
+	HistoricalPurposeMapping bool
+	GoalExecutionSource      bool
+	WideValidationScope      bool
 }
 
 func TestDriveRuntimeOrdinaryMutationCannotWeakenValidationInputAcrossRestart(t *testing.T) {
@@ -154,15 +158,29 @@ func TestDriveRuntimeRepeatedInputWeakeningClosesWithoutEffectOrTicket(t *testin
 	}
 }
 
-func TestDriveRuntimeAssertionFeedbackRepairsBehaviorAcrossRestart(t *testing.T) {
+func TestDriveRuntimeAssertionFeedbackCannotInventPredecessorRevalidationAcrossRestart(t *testing.T) {
 	var baseline int64
-	for _, cut := range []string{"uninterrupted", "before_behavior_failure", "after_behavior_failure", "after_fresh_validation"} {
+	for _, cut := range []string{"uninterrupted", "before_behavior_failure", "after_behavior_failure", "before_revalidation_terminal", "after_revalidation_terminal"} {
 		t.Run(cut, func(t *testing.T) {
-			calls := runValidationInputAdditionMainline(t, cut, validationInputMainlineOptions{Entrypoint: true, BehaviorRepair: true})
+			calls := runValidationInputAdditionMainline(t, cut, validationInputMainlineOptions{Entrypoint: true, BehaviorRepair: true, RevalidationUnavailable: true})
 			if cut == "uninterrupted" {
 				baseline = calls
 			} else if calls != baseline {
 				t.Fatalf("failure feedback restart consumed another provider call: %d != %d", calls, baseline)
+			}
+		})
+	}
+}
+
+func TestDriveRuntimeMappedHistoricalBehaviorRepairsAcceptanceAcrossRestart(t *testing.T) {
+	var baseline int64
+	for _, cut := range []string{"uninterrupted", "before_behavior_failure", "after_behavior_failure", "after_fresh_validation"} {
+		t.Run(cut, func(t *testing.T) {
+			calls := runValidationInputAdditionMainline(t, cut, validationInputMainlineOptions{Entrypoint: true, BehaviorRepair: true, HistoricalPurposeMapping: true})
+			if cut == "uninterrupted" {
+				baseline = calls
+			} else if calls != baseline {
+				t.Fatalf("mapped consumer recovery repeated provider calls: %d != %d", calls, baseline)
 			}
 		})
 	}
@@ -216,6 +234,10 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 	if mode.Entrypoint {
 		bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = shellcommon.ValidationRecipeAdapterProjectEntrypoint
 	}
+	if mode.GoalExecutionSource {
+		bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint
+		bootstrap.Activation.EvidencePolicies[0].RecipeInputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV2
+	}
 	if mode.BehaviorRepair {
 		convergence := bootstrap.DefinitionFocuses[1].ValidationFailureRepairConvergence.Clone()
 		convergence.MaxAttempts = 2 // one input acquisition, one implementation repair
@@ -259,7 +281,44 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 		}
 		bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
 	}
-	runtimeTestPrepareNativeValidationThroughOwners(t, bootstrap, deliverable)
+	if mode.WideValidationScope {
+		if !mode.GoalExecutionSource {
+			t.Fatal("wide-scope regression requires the actual Goal repair consumer")
+		}
+		bootstrap.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[1].TargetRefs = []string{"cmd/delivery/main.go", "subject.go"}
+		bootstrap = runtimeTestBootstrapWithBindings(bootstrap)
+	}
+	if mode.HistoricalPurposeMapping {
+		bootstrap = runtimeTestWithHistoricalPurposeMapping(t, bootstrap, "cwi-1", "cwi-2")
+	}
+	if mode.GoalExecutionSource {
+		bootstrap = runtimeTestWithGoalRepairSource(t, bootstrap)
+	}
+	if mode.HistoricalPurposeMapping {
+		runtimeTestPrepareNativeValidationThroughOwners(t, bootstrap, deliverable, func(preparation runtimecontract.RuntimeValidationProofPreparation) string {
+			var source strings.Builder
+			source.WriteString(`package workorch_validation
+import ("testing"; "os/exec"; "path/filepath"; "strings")
+const expected = "4"
+func assertDelivery(t *testing.T) {
+ t.Helper(); bin:=filepath.Join(t.TempDir(),"delivery")
+ build:=exec.Command("go","build","-buildvcs=false","-o",bin,"./cmd/delivery"); build.Dir=".."
+ if output,err:=build.CombinedOutput(); err!=nil { t.Fatalf("build: %v %s",err,output) }
+ output,err:=exec.Command(bin).Output()
+ if err!=nil || strings.TrimSpace(string(output))!=expected { t.Fatal("WORKORCH_ASSERTION_V1 code=value_mismatch expected=equal observed=different") }
+}
+`)
+			for _, check := range preparation.CheckAttestations {
+				fmt.Fprintf(&source, "func %s(t *testing.T) { assertDelivery(t) }\n", check.NativeCheckRef)
+			}
+			if mode.GoalExecutionSource {
+				return strings.ReplaceAll(source.String(), `build.Dir=".."`, `build.Dir="../../.."`)
+			}
+			return source.String()
+		})
+	} else {
+		runtimeTestPrepareNativeValidationThroughOwners(t, bootstrap, deliverable)
+	}
 	if err := os.WriteFile(filepath.Join(deliverable, "subject.go"), []byte("package fixture\nfunc DeliveredValue() int { return 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -277,12 +336,29 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
+		if mode.GoalExecutionSource && entry.IsDir() {
+			continue // The versioned adapter owns isolated packages, collected below.
+		}
 		path := filepath.Join(deliverable, "workorch_validation", entry.Name())
 		content, readErr := os.ReadFile(path)
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
 		weakInputs[path] = content
+	}
+	if mode.GoalExecutionSource {
+		if err := filepath.WalkDir(filepath.Join(deliverable, "workorch_validation"), func(path string, entry os.DirEntry, err error) error {
+			if err != nil || entry.IsDir() {
+				return err
+			}
+			content, err := os.ReadFile(path)
+			if err == nil {
+				weakInputs[path] = content
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var protectedInput string
 	var sourceTargets []string
@@ -464,7 +540,17 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 					}
 				}
 			}
-			response, err := validationInputAdditionMainlineSemanticResult(command, sourceTargets...)
+			var response llmevents.RequestRuntimeCandidateResult
+			var err error
+			if mode.GoalExecutionSource {
+				var validationScope []string
+				if mode.WideValidationScope {
+					validationScope = []string{"cmd/delivery/main.go", "subject.go"}
+				}
+				response, err = runtimeGoalReviewedRepairSemanticResultForScope(command, validationScope, sourceTargets...)
+			} else {
+				response, err = validationInputAdditionMainlineSemanticResult(command, sourceTargets...)
+			}
 			if err != nil {
 				t.Errorf("semantic provider fixture: %v", err)
 				result.Set(nil, cd.NewError(cd.Unexpected, err.Error()))
@@ -520,7 +606,7 @@ func runValidationInputAdditionMainline(t *testing.T, cut string, options ...val
 					}
 					detail := fact.Validation.CheckFailures[0]
 					seen = fact.Validation.FailureDetailProtocolRef == runtimecontract.RuntimeValidationFailureDetailProtocolV2 &&
-						detail.CheckRef == addition.NativeCheckRef && detail.TargetRef == addition.TargetRef && detail.ComparisonHash != "" &&
+						(mode.HistoricalPurposeMapping || detail.CheckRef == addition.NativeCheckRef && detail.TargetRef == addition.TargetRef) && detail.ComparisonHash != "" &&
 						detail.ReportedAssertion.Code == "value_mismatch" && len(fact.CoverageWorkItemIDs) == 0
 				}
 				if !seen {
@@ -595,7 +681,10 @@ func %s(t *testing.T) { assertDelivery(t) }
 	module := newRuntimeDriveTestModule(t, hub)
 	command := orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}
 	if cut != "uninterrupted" {
-		crash := &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: cut != "before_repair_seal" && cut != "before_input_repair_seal" && cut != "before_behavior_failure", marker: cut, match: func(aggregate runtime.RuntimeAggregate) bool {
+		crash := &runtimeSaveCrashRepository{delegate: runtimeStateRepository{hub: hub}, after: !strings.HasPrefix(cut, "before_"), marker: cut, match: func(aggregate runtime.RuntimeAggregate) bool {
+			if cut == "before_revalidation_terminal" || cut == "after_revalidation_terminal" {
+				return aggregate.Decision.Terminal != nil && aggregate.Decision.Terminal.Code == "cwi_revalidation_source_unavailable"
+			}
 			if cut == "after_input_exclusion_terminal" {
 				return aggregate.Decision.Terminal != nil && aggregate.Decision.Terminal.Code == "candidate_retry_exhausted"
 			}
@@ -623,7 +712,7 @@ func %s(t *testing.T) { assertDelivery(t) }
 				return addition.TargetRef != "" && aggregate.ActiveDispatch == nil && aggregate.Facts.Focus.ID == "semantic-pending/cwi-2" && aggregate.Facts.RepairDirective != nil && aggregate.Facts.RepairDirective.RequiredState == runtimecontract.ConvergenceStateNeedValidation
 			}
 			if cut == "after_fresh_validation" {
-				return addition.TargetRef != "" && aggregate.ActiveDispatch == nil && aggregate.Decision.State == runtimecontract.ConvergenceStateNeedAssessment
+				return (addition.TargetRef != "" || mode.HistoricalPurposeMapping) && aggregate.ActiveDispatch == nil && aggregate.Decision.State == runtimecontract.ConvergenceStateNeedAssessment
 			}
 			if aggregate.SemanticPlanning.Manifest == nil || aggregate.SemanticPlanning.Phase != runtimecontract.RuntimeSemanticPlanningSealed {
 				return false
@@ -728,8 +817,19 @@ func %s(t *testing.T) { assertDelivery(t) }
 	if mode.RepeatInputBypass {
 		wantState, wantRun, wantResult, wantSatisfied = runtimecontract.ConvergenceStateFailed, common.RunStateFailed, common.ResultStateRejected, 0
 	}
+	if mode.RevalidationUnavailable {
+		wantState, wantRun, wantResult, wantSatisfied = runtimecontract.ConvergenceStateFailed, common.RunStateFailed, common.ResultStateRejected, 0
+	}
 	if err != nil || completed.State != wantState {
 		persisted, _ := module.loadRuntime(ctx, "ws-v2", "run-v2")
+		if mode.GoalExecutionSource {
+			for _, receipt := range persisted.OperationReceipts {
+				if receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
+					payload, _ := json.Marshal(receipt)
+					t.Logf("Goal owner rejection: %s", payload)
+				}
+			}
+		}
 		t.Fatalf("input addition did not complete: result=%+v err=%v failure=%+v semantic=%s focusTargets=%v repair=%+v", completed, err, persisted.Facts.Failure, persisted.SemanticPlanning.Phase, persisted.Facts.Focus.TargetRefs, persisted.Facts.Repair)
 	}
 	if err := module.driveAndProjectRuntimeLockedWithCommand(ctx, command); err != nil {
@@ -745,8 +845,45 @@ func %s(t *testing.T) { assertDelivery(t) }
 	if err := aggregate.Validate(); err != nil {
 		t.Fatalf("completed aggregate invariant: %v", err)
 	}
+	if mode.GoalExecutionSource {
+		runtimeGoalAssertOriginalRepairConsumer(t, runtimeStateRecordFromAggregate(aggregate))
+	}
 	if persisted.State != wantRun || !runtimeTerminalDeliveryFullyAcknowledged(aggregate) || !reflect.DeepEqual(persisted.RuntimeBootstrap, initialRun.RuntimeBootstrap) {
 		t.Fatalf("terminal delivery incomplete or immutable startup changed: run=%s acknowledged=%t bootstrapUnchanged=%t", persisted.State, runtimeTerminalDeliveryFullyAcknowledged(aggregate), reflect.DeepEqual(persisted.RuntimeBootstrap, initialRun.RuntimeBootstrap))
+	}
+	if mode.RevalidationUnavailable {
+		if aggregate.Decision.Terminal == nil || aggregate.Decision.Terminal.Code != "cwi_revalidation_source_unavailable" || len(aggregate.Facts.CWISuspensions) != 0 {
+			t.Fatal("undeclared ordinary source was guessed or hidden as budget exhaustion")
+		}
+		if mode.ExecutionLimits != nil {
+			if err := runtimecontract.ValidateRuntimeExecutionLimitsBinding(aggregate.ExecutionBudget.Policy, mode.ExecutionLimits); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// The exact authorized successor repair precedes the stale observation.
+		// Fail-closed must preserve that real history, not pretend it never ran.
+		if behaviorRepairs != 1 {
+			t.Fatal("stale predecessor replayed or lost the original successor repair")
+		}
+		content, err := os.ReadFile(filepath.Join(deliverable, "subject.go"))
+		if err != nil || !strings.Contains(string(content), "return 4") {
+			t.Fatal("fail-closed replayed source effect or lost the real successor repair")
+		}
+		calls, original := providerCalls.Load(), aggregate.CloneRaw()
+		if _, err := newRuntimeDriveTestModule(t, hub).driveRuntime(ctx, command); err != nil {
+			t.Fatal(err)
+		}
+		reloaded, err := newRuntimeDriveTestModule(t, hub).loadRuntime(ctx, "ws-v2", "run-v2")
+		if err != nil || calls != providerCalls.Load() || !reflect.DeepEqual(original, reloaded) {
+			t.Fatal("fail-closed replay added provider/effect/budget")
+		}
+		for path, before := range weakInputs {
+			after, err := os.ReadFile(path)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatal("fail-closed rewrote original input")
+			}
+		}
+		return calls
 	}
 	if mode.ExecutionLimits != nil {
 		if !runtimecontract.SameRuntimeExecutionLimits(aggregate.Facts.Activation.ExecutionContract.ExecutionLimits, mode.ExecutionLimits) {
@@ -827,11 +964,21 @@ func %s(t *testing.T) { assertDelivery(t) }
 		if item.State != runtimecontract.RuntimeCoverageItemStateSatisfied {
 			t.Fatalf("CWI not settled by exact evidence: %+v", item)
 		}
+		if mode.HistoricalPurposeMapping && item.ID == "cwi-1" {
+			if item.HistoricalBehavior == nil || len(item.HistoricalAcceptanceProofs) != 1 ||
+				item.HistoricalAcceptanceProofs[0].Source.AcceptanceCoverageWorkItemID != "cwi-2" {
+				t.Fatal("repair did not preserve historical behavior and independently settle ordinary acceptance")
+			}
+		}
 	}
 	acceptedValidation, rejectedValidation, createdInputs := 0, 0, 0
 	for _, receipt := range aggregate.OperationReceipts {
 		if receipt.Evidence.Validation != nil {
-			if mode.Entrypoint && receipt.Evidence.Validation.ObservationProtocolRef != "shell/go-test-json/workspace-behavior/v4" {
+			wantProtocol := "shell/go-test-json/workspace-behavior/v4"
+			if mode.GoalExecutionSource {
+				wantProtocol = "shell/go-test-json/workspace-behavior/v6"
+			}
+			if mode.Entrypoint && receipt.Evidence.Validation.ObservationProtocolRef != wantProtocol {
 				t.Fatal("entrypoint receipt lost its sealed owner protocol")
 			}
 			if receipt.Outcome == runtimecontract.RuntimeOperationOutcomeAccepted {
@@ -854,11 +1001,14 @@ func %s(t *testing.T) { assertDelivery(t) }
 	}
 	if mode.BehaviorRepair {
 		wantRejected = 2
+		if mode.HistoricalPurposeMapping {
+			wantRejected, wantChanges = 1, 0
+		}
 		if behaviorRepairs != 1 {
 			t.Fatal("feedback did not produce exactly one implementation repair")
 		}
 	}
-	if acceptedValidation != wantAccepted || rejectedValidation != wantRejected || createdInputs != wantChanges || addition.TargetRef == "" {
+	if acceptedValidation != wantAccepted || rejectedValidation != wantRejected || createdInputs != wantChanges || (addition.TargetRef == "" && !mode.HistoricalPurposeMapping) {
 		t.Fatalf("unexpected effect/validation counts: accepted=%d rejected=%d input=%d addition=%+v", acceptedValidation, rejectedValidation, createdInputs, addition)
 	}
 	if mode.InputProtection {
@@ -895,6 +1045,22 @@ func %s(t *testing.T) { assertDelivery(t) }
 		if err != nil || !reflect.DeepEqual(before, after) {
 			t.Fatalf("old native input was rewritten: %s err=%v", path, err)
 		}
+	}
+	if mode.HistoricalPurposeMapping {
+		if addition.TargetRef != "" || behaviorRepairs != 1 {
+			t.Fatal("mapped repair rewrote acceptance inputs or bypassed original behavior failure")
+		}
+		calls, before := providerCalls.Load(), persisted.RuntimeState.Clone()
+		for range 2 {
+			if replayed, err := newRuntimeDriveTestModule(t, hub).driveRuntime(ctx, command); err != nil || replayed.StateRevision != completed.StateRevision || providerCalls.Load() != calls {
+				t.Fatal("mapped repair terminal replay added execution or credit")
+			}
+		}
+		readback, err := runs.GetByWorkspaceID(ctx, "ws-v2", "run-v2")
+		if err != nil || !reflect.DeepEqual(readback.RuntimeState, &before) {
+			t.Fatal("mapped repair duplicate changed original material, receipt or budget")
+		}
+		return calls
 	}
 	preimage, err := runtimecontract.ResolveRuntimeAssessmentPurposePreimage(aggregate.SemanticPlanning, historicalAssessment.Bindings)
 	if err != nil || preimage.SemanticManifestHash != historicalAssessment.AssessmentPurposeManifestHash {

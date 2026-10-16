@@ -116,6 +116,16 @@ func completeEvidenceDispatch(
 	}
 	aggregate.CompletedDispatches = append(aggregate.CompletedDispatches, dispatch)
 	aggregate.ActiveDispatch = nil
+	if !invalidated {
+		if err := consumeSemanticRepairFreshValidationReceipt(aggregate, dispatch, fact); err != nil {
+			return err
+		}
+	}
+	if !invalidated && admission.Evidence.Status == ExecutionEvidenceStatusAccepted {
+		if err := recordHistoricalBehaviorCompletion(aggregate, dispatch); err != nil {
+			return err
+		}
+	}
 	repairRejected, err := closeRejectedValidationRepairExecution(aggregate, dispatch, admission, fact)
 	if err != nil {
 		return err
@@ -183,9 +193,13 @@ func completeEvidenceDispatch(
 
 	// A completed transaction remains durable audit evidence, but SM-2 must
 	// reacquire changed owner facts before advancing its focus.
+	historicalHandoff, err := handoffHistoricalBehaviorFocus(aggregate)
+	if err != nil {
+		return err
+	}
 	canAdvanceFocus := !invalidated && len(aggregate.Facts.Prerequisites.Pending) == 0
 	previousFocusID := aggregate.Facts.Focus.ID
-	if canAdvanceFocus {
+	if canAdvanceFocus && !historicalHandoff {
 		advanced, err := advanceRuntimeCWIFocus(aggregate.Facts, aggregate.CoverageProofLineage)
 		if err != nil {
 			return err

@@ -1,7 +1,6 @@
 package workorchruntimecontract
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"slices"
@@ -28,7 +27,7 @@ func CloneRuntimeSourceObligationChecks(values []RuntimeSourceObligationCheck) [
 }
 
 func StableRuntimeSourceObligationCheckRef(definitionRevision string, coverageID common.CoverageWorkItemID, value RuntimeSourceObligationCheck) string {
-	h := sha256.New()
+	h := newRuntimeHashWriter()
 	writeHashString(h, "runtime-source-obligation-check/v1")
 	writeHashString(h, definitionRevision)
 	writeHashString(h, string(coverageID))
@@ -63,11 +62,18 @@ func ValidateRuntimeSourceObligationChecks(definitionRevision string, coverageID
 
 // CompileRuntimeSourceObligationChecks 只沿已封存来源边映射，不从 DoD 文本猜测义务。
 func CompileRuntimeSourceObligationChecks(inventory RuntimeSourceObligationInventory, item RuntimeCoverageItem) ([]RuntimeSourceObligationCheck, error) {
+	inventory = inventory.Clone()
 	if err := inventory.Validate(); err != nil {
 		return nil, err
 	}
+	return compileRuntimeSourceObligationChecksValidated(inventory, item)
+}
+
+// Invocation-local use only after the caller has fully validated this exact
+// detached inventory. Public calls never trust a supplied hash or cached proof.
+func compileRuntimeSourceObligationChecksValidated(inventory RuntimeSourceObligationInventory, item RuntimeCoverageItem) ([]RuntimeSourceObligationCheck, error) {
 	var sourceRef string
-	for _, source := range inventory.Sources {
+	for _, source := range RuntimeEvidencePurposeSources(inventory) {
 		if source.SourceScope == item.SourceScope && source.SourceID == item.SourceID {
 			if strings.TrimSpace(source.Text) != item.TargetText {
 				return nil, fmt.Errorf("runtime source obligations coverage %q source text drift", item.ID)
@@ -81,9 +87,25 @@ func CompileRuntimeSourceObligationChecks(inventory RuntimeSourceObligationInven
 		}
 		return nil, nil
 	}
+	// An explicitly mapped ordinary acceptance source must prove its own
+	// obligations AND every original obligation of each mapped historical
+	// source. Keep the historical row unchanged; only the receiving check
+	// identity is compiled for this exact consumer CWI. The inventory hash
+	// binds the mapping and original source graph, so runtime text or order
+	// cannot select an additional source.
+	sourceRefs := map[string]bool{sourceRef: true}
+	for _, mapping := range inventory.EvidencePurposeMappings {
+		if mapping.AcceptanceItemRef == sourceRef {
+			sourceRefs[mapping.HistoricalItemRef] = true
+		}
+	}
 	var ret []RuntimeSourceObligationCheck
 	for _, obligation := range inventory.Obligations {
-		if !slices.Contains(obligation.DoDItemRefs, sourceRef) {
+		contributes := false
+		for _, ref := range obligation.DoDItemRefs {
+			contributes = contributes || sourceRefs[ref]
+		}
+		if !contributes {
 			continue
 		}
 		for _, verification := range inventory.Verifications {
@@ -97,6 +119,14 @@ func CompileRuntimeSourceObligationChecks(inventory RuntimeSourceObligationInven
 			check.CheckRef = StableRuntimeSourceObligationCheckRef(inventory.DefinitionRevision, item.ID, check)
 			ret = append(ret, check)
 		}
+	}
+	for _, mapping := range inventory.EvidencePurposeMappings {
+		if mapping.ContractRef == RuntimeProfileDeliverableEvidencePurposeV2 && sourceRefs[mapping.HistoricalItemRef] {
+			ret = append(ret, runtimeProfileEvidencePurposeCheck(inventory, mapping, item))
+		}
+	}
+	if check := runtimeGoalExecutionCheck(inventory, item); check != nil {
+		ret = append(ret, *check)
 	}
 	sort.Slice(ret, func(a, b int) bool { return ret[a].VerificationID < ret[b].VerificationID })
 	if err := ValidateRuntimeSourceObligationChecks(inventory.DefinitionRevision, item.ID, ret); err != nil {
@@ -118,12 +148,18 @@ func ValidateRuntimeSourceObligationSeed(seed RuntimeDefinitionSeed) error {
 	if err := inventory.Validate(); err != nil {
 		return err
 	}
+	if err := validateRuntimeGoalExecutionProjection(inventory, seed.CoverageItems); err != nil {
+		return err
+	}
 	if inventory.DefinitionRevision != seed.DefinitionRevision {
 		return fmt.Errorf("runtime source obligation seed definition revision mismatch")
 	}
+	if err := validateRuntimeEvidencePurposeMappingCoverageValidated(inventory, seed.CoverageItems); err != nil {
+		return err
+	}
 	seenSources := make(map[string]bool)
 	for _, item := range seed.CoverageItems {
-		checks, err := CompileRuntimeSourceObligationChecks(inventory, item)
+		checks, err := compileRuntimeSourceObligationChecksValidated(inventory, item)
 		if err != nil {
 			return err
 		}

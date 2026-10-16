@@ -84,7 +84,7 @@ func (m *Biz) verifyConfirmedAuthoringAdmission(ctx context.Context, current *wo
 	if err != nil {
 		return fmt.Errorf("%w: current Workspace and Template configuration is invalid: %v", common.ErrConflict, err)
 	}
-	if err := definitionadmission.ValidateAuthoringVerificationApplicability(spec, dod, bindings.ProfileContracts); err != nil {
+	if err := definitionadmission.ValidateAuthoringVerificationApplicability(spec, dod, bindings.ProfileContracts, goal); err != nil {
 		return fmt.Errorf("%w: confirmed verification is not applicable to current profiles: %v", common.ErrConflict, err)
 	}
 	fromOwner := workspacemodel.DefinitionAdmissionCandidate{

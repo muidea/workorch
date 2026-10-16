@@ -21,7 +21,11 @@ func (c RuntimeResultCloseout) CloneRaw() RuntimeResultCloseout {
 	c.SourceObligations = cloneRuntimeStateRawPointer(c.SourceObligations, func(value RuntimeSourceObligationInventory) RuntimeSourceObligationInventory { return value.Clone() })
 	c.RequirementOutcomes = cloneRuntimeStateRawSlice(c.RequirementOutcomes, func(value RuntimeRequirementOutcome) RuntimeRequirementOutcome {
 		value.MissingEvidenceKinds = cloneRuntimeStateRawSlice(value.MissingEvidenceKinds, func(item string) string { return item })
-		value.EvidenceItems = cloneRuntimeStateRawSlice(value.EvidenceItems, func(item RuntimeRequirementEvidenceItem) RuntimeRequirementEvidenceItem { return item })
+		value.EvidenceItems = cloneRuntimeStateRawSlice(value.EvidenceItems, func(item RuntimeRequirementEvidenceItem) RuntimeRequirementEvidenceItem {
+			item.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(item.OwnerRevisionSet)
+			item.ApplicabilityDependencies = CloneRuntimeEvidenceApplicabilityDependencies(item.ApplicabilityDependencies)
+			return item
+		})
 		value.AcceptedEvidenceRefs = cloneRuntimeStateRawSlice(value.AcceptedEvidenceRefs, func(item string) string { return item })
 		value.SourceObligations = cloneRuntimeStateRawSlice(value.SourceObligations, func(item RuntimeSourceObligationOutcome) RuntimeSourceObligationOutcome {
 			item.AcceptedEvidenceRefs = cloneRuntimeStateRawSlice(item.AcceptedEvidenceRefs, func(ref string) string { return ref })
@@ -33,6 +37,7 @@ func (c RuntimeResultCloseout) CloneRaw() RuntimeResultCloseout {
 	c.AcceptedEvidenceRefs = cloneRuntimeStateRawSlice(c.AcceptedEvidenceRefs, func(item string) string { return item })
 	c.DeliverableRefs = cloneRuntimeStateRawSlice(c.DeliverableRefs, func(item string) string { return item })
 	c.OwnerRevisionSet.Entries = cloneRuntimeStateRawSlice(c.OwnerRevisionSet.Entries, func(item RuntimeOwnerRevisionRef) RuntimeOwnerRevisionRef { return item })
+	c.TerminalSnapshotProofs = cloneRuntimeStateRawSlice(c.TerminalSnapshotProofs, func(p RuntimeTerminalSnapshotProof) RuntimeTerminalSnapshotProof { return p.CloneRaw() })
 	c.KnownLimitations = cloneRuntimeStateRawSlice(c.KnownLimitations, func(item string) string { return item })
 	c.SatisfiedCoverageWorkItemIDs = cloneRuntimeStateRawSlice(c.SatisfiedCoverageWorkItemIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })
 	c.UnsatisfiedCoverageWorkItemIDs = cloneRuntimeStateRawSlice(c.UnsatisfiedCoverageWorkItemIDs, func(item common.CoverageWorkItemID) common.CoverageWorkItemID { return item })

@@ -67,7 +67,7 @@ func (c *authorityComponent) bindGovernanceRequest(ctx context.Context, workspac
 	}
 	aggregate.GovernanceRequests = append(aggregate.GovernanceRequests, request)
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -167,7 +167,7 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 	if err != nil {
 		return EvidenceCommitResult{}, err
 	}
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return EvidenceCommitResult{}, err
 	}
 	eventID := resolution.EventID()
@@ -390,7 +390,7 @@ func (c *authorityComponent) commitGovernanceResolutionWithContinuationLease(
 		lease.State = runtimecontract.RuntimeDriveLeaseScheduled
 		aggregate.DriveLease = &lease
 	}
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return EvidenceCommitResult{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {

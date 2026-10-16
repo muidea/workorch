@@ -20,6 +20,27 @@ const shellProjectReviewScopeRequirements = "供应完整当前 requirement pack
 
 var shellProjectNativeIdentity = regexp.MustCompile(`^TestWorkOrchCWI_([A-F0-9]{64})_Check_[A-Z0-9_]+_InputV6$`)
 
+const shellProjectFailureDiagnosticProtocolRef = "shell/go-test-json/project-conjunction-behavior/v2"
+const shellProjectMultiFailureDiagnosticProtocolRef = "shell/go-test-json/project-conjunction-behavior/v3"
+
+func shellProjectAdapter(adapter string) bool {
+	return adapter == modulecommon.ValidationRecipeAdapterProjectConjunction || adapter == modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic || adapter == modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic
+}
+
+func shellProjectObservationProtocol(protocol string) bool {
+	return protocol == shellProjectConjunctionProtocolRef || protocol == shellProjectFailureDiagnosticProtocolRef || protocol == shellProjectMultiFailureDiagnosticProtocolRef
+}
+
+func shellProjectAdapterProtocol(adapter string) string {
+	if adapter == modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
+		return shellProjectMultiFailureDiagnosticProtocolRef
+	}
+	if adapter == modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic {
+		return shellProjectFailureDiagnosticProtocolRef
+	}
+	return shellProjectConjunctionProtocolRef
+}
+
 func shellProjectNativePackage(native string) string {
 	match := shellProjectNativeIdentity.FindStringSubmatch(strings.TrimSuffix(native, "_Behavior"))
 	if len(match) != 2 {
@@ -44,8 +65,11 @@ func shellProjectExecutionStageIdentities(pkg string) []runtimecontract.RuntimeV
 }
 
 func shellProjectRecipeDeclared(recipe runtimecontract.RuntimeValidationRecipe) bool {
-	return recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectConjunction &&
-		recipe.InputReviewProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocolV2 &&
+	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic && recipe.InputReviewProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV3 {
+		return false
+	}
+	return shellProjectAdapter(recipe.AdapterRef) &&
+		(recipe.InputReviewProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocolV2 || recipe.InputReviewProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocolV3) &&
 		(recipe.Command == "" && len(recipe.Args) == 0 || recipe.Command == "go" && strings.Join(recipe.Args, "\x00") == "test\x00-v\x00./...") &&
 		recipe.TimeoutMillis >= 0 && recipe.TimeoutMillis <= DefaultCommandTimeout.Milliseconds()
 }
@@ -71,10 +95,10 @@ func shellProjectReconciliationRawScope(command shellevents.QueryRuntimeCWIRecon
 // 只消费 sealed recipe 与 proof mapping，禁止依照当前默认值升级旧执行。
 func shellProjectRequestSelected(request RuntimeCommandRequest) (bool, error) {
 	recipe, found := runtimecontract.RuntimeValidationRecipeForID(request.ValidationRecipes, request.ValidationRecipeID)
-	selected := found && recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectConjunction
+	selected := found && shellProjectAdapter(recipe.AdapterRef)
 	projectChecks := false
 	for _, check := range request.ValidationCheckAttestations {
-		projectChecks = projectChecks || check.ObservationProtocolRef == shellProjectConjunctionProtocolRef
+		projectChecks = projectChecks || shellProjectObservationProtocol(check.ObservationProtocolRef)
 	}
 	if !selected && !projectChecks {
 		return false, nil
@@ -88,7 +112,7 @@ func shellProjectRequestSelected(request RuntimeCommandRequest) (bool, error) {
 	}
 	hash := runtimecontract.StableRuntimeValidationExecutionStagesHash(shellProjectExecutionStageIdentities(pkg))
 	for _, check := range request.ValidationCheckAttestations {
-		if check.ObservationProtocolRef != shellProjectConjunctionProtocolRef || check.ExecutionStagesHash != hash {
+		if check.ObservationProtocolRef != shellProjectAdapterProtocol(recipe.AdapterRef) || check.ExecutionStagesHash != hash {
 			return false, fmt.Errorf("project conjunction execution stages do not match sealed mappings")
 		}
 	}

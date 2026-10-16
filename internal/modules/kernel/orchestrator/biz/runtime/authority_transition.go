@@ -19,7 +19,7 @@ func (c *authorityComponent) reconcileAuthorityBeforeCandidate(ctx context.Conte
 	if err != nil {
 		return RuntimeAggregate{}, err
 	}
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, fmt.Errorf("runtime authority reconciliation preimage invariant: %w", err)
 	}
 	if aggregate.ActiveDispatch != nil || isTerminalConvergenceState(aggregate.Decision.State) {
@@ -53,7 +53,7 @@ func (c *authorityComponent) reconcileAuthorityBeforeCandidate(ctx context.Conte
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -101,7 +101,7 @@ func (c *authorityComponent) recordFeasibilityFact(ctx context.Context, workspac
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -148,7 +148,7 @@ func (c *authorityComponent) commitFailureFact(ctx context.Context, workspaceID 
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -255,7 +255,7 @@ func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID
 		}
 		if expired {
 			aggregate.StateRevision++
-			if err := aggregate.Validate(); err != nil {
+			if err := c.validateAggregate(aggregate); err != nil {
 				return RuntimeAggregate{}, err
 			}
 			if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -324,7 +324,7 @@ func (c *authorityComponent) commitPrerequisite(ctx context.Context, workspaceID
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {

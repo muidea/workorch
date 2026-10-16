@@ -1582,6 +1582,7 @@ python3 scripts/verify_runtime_candidate_wire_scripts.py --self-test
 python3 -m unittest discover -s scripts -p 'test_verify_mcp_stdio_mock.py'
 python3 -m unittest discover -s scripts -p 'test_verify_execution_activation.py'
 python3 -m unittest discover -s scripts -p 'test_observe_runtime_progress.py'
+python3 -m unittest discover -s scripts -p 'test_go_format_source_boundary.py'
 
 # SM-3 owns the persisted candidate correction disposition/terminal state.
 # The LLM owner receives only a detached, manifest-bound witness needed to
@@ -2456,7 +2457,10 @@ fi
 matches="$(
   find internal/modules/kernel/orchestrator/biz -maxdepth 1 -type f -name '*.go' ! -name '*_test.go' -print0 |
     xargs -0 -r grep -n -E -- '\.runtimeController\.[A-Z][A-Za-z0-9_]*\(' |
-    grep -v -E -- '\.runtimeController\.(ApplyInternalEvent|Load|QueryOperationReceipt)\(' || true
+    grep -v -E -- '\.runtimeController\.(ApplyInternalEvent|Load|QueryOperationReceipt)\(' |
+    # Only the drained owner's lifecycle shell may discard pure compilation
+    # inputs. This is not a reducer/transition facade; adapters remain forbidden.
+    grep -v -E -- '^internal/modules/kernel/orchestrator/biz/owner.go:[0-9]+:[[:space:]]*m\.runtimeController\.ReleaseHistoricalCompilation\(\)$' || true
 )"
 if [[ -n "$matches" ]]; then
   cat >&2 <<EOF
@@ -2518,10 +2522,13 @@ EOF
 fi
 
 # R3-F4: ApplyInternalEvent plus scoped reads are the complete controller
-# export surface. All reducer/CAS mutation handlers are package-private.
+# state export surface. The sole additional lifecycle method discards only
+# optional pure compilation inputs after drain, never aggregate state.
+# All reducer/CAS mutation handlers are package-private.
 runtime_controller_unreviewed_exports="$(
   grep -R -n -E --include='*.go' --exclude='*_test.go' -- '^func \(c \*RuntimeController\) [A-Z][A-Za-z0-9_]*\(' "$runtime_transition_root" |
-    grep -v -E -- ' (ApplyInternalEvent|Load|QueryOperationReceipt)\(' || true
+    grep -v -E -- ' (ApplyInternalEvent|Load|QueryOperationReceipt)\(' |
+    grep -v -E -- '^internal/modules/kernel/orchestrator/biz/runtime/controller.go:[0-9]+:func \(c \*RuntimeController\) ReleaseHistoricalCompilation\(\) \{$' || true
 )"
 if [[ -n "$runtime_controller_unreviewed_exports" ]]; then
   cat >&2 <<EOF
@@ -2532,7 +2539,8 @@ $runtime_controller_unreviewed_exports
 
 Add owner mutation as a concrete RuntimeInternalEvent and package-private
 handler. The only exported methods are ApplyInternalEvent, Load and
-QueryOperationReceipt.
+QueryOperationReceipt; the only non-state lifecycle exception is
+ReleaseHistoricalCompilation after owner drain.
 EOF
   exit 1
 fi
@@ -5024,9 +5032,11 @@ if grep -q -E -- 'binding\.(TargetRefs|ProspectiveTargetRefs)' <<<"$receipt_targ
 	exit 1
 fi
 dispatch_manifest_target_seal="$(sed -n '/^func SealDispatchWithManifestAndPreSealAuthority(/,/^}/p' internal/modules/kernel/orchestrator/biz/runtime/dispatch_commit.go)"
-dispatch_fresh_load_target_validation="$(sed -n '/^func (d RuntimeDispatchRecord) ValidateIntrinsic(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_state.go)"
+dispatch_intrinsic_cold_entry="$(sed -n '/^func (d RuntimeDispatchRecord) ValidateIntrinsic(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_state.go)"
+dispatch_fresh_load_target_validation="$(sed -n '/^func (d RuntimeDispatchRecord) validateIntrinsicInLineageIndex(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_state.go)"
 dispatch_authority_hash="$(sed -n '/^func StableRuntimeDispatchAuthorityHash(/,/^}/p' internal/pkg/workorchruntimecontract/runtime_state.go)"
 if [[ "$(grep -c -F -- 'RuntimeDispatchOperationTargetAuthorizationsFromManifest(manifest, candidate)' <<<"$dispatch_manifest_target_seal" || true)" -ne 1 ]] ||
+	! grep -q -F -- 'return d.validateIntrinsicInLineageIndex(nil)' <<<"$dispatch_intrinsic_cold_entry" ||
 	! grep -q -F -- 'ValidateRuntimeDispatchOperationTargetAuthorizations' <<<"$dispatch_fresh_load_target_validation" ||
 	! grep -q -F -- 'StableRuntimeDispatchOperationTargetAuthorizationsHash(dispatch.OperationTargetAuthorizations)' <<<"$dispatch_authority_hash"; then
 	echo "boundary contract violation: final dispatch seal, fresh-load or authority hash lost sealed target authorization" >&2
@@ -5847,7 +5857,10 @@ for marker in \
 		exit 1
 	fi
 done
-if ! grep -q -F 'ValidateRuntimeSemanticPlanManifestAgainstDefinition' internal/modules/kernel/orchestrator/biz/runtime/aggregate_invariant.go ||
+if ! grep -q -F 'ValidateRuntimeSemanticLedgerDefinitionSources(a.SemanticPlanning, a.Facts.DefinitionSeed, a.Facts.DefinitionFocuses)' internal/modules/kernel/orchestrator/biz/runtime/aggregate_invariant.go ||
+	! grep -q -F 'validateRuntimeSemanticManifestDefinitionInSession(*ledger.Manifest, seed, focuses, session)' internal/pkg/workorchruntimecontract/runtime_semantic_definition_session.go ||
+	! grep -q -F 'validateRuntimeSemanticManifestDefinitionInSession(*generation.Snapshot.Manifest, seed, focuses, session)' internal/pkg/workorchruntimecontract/runtime_semantic_definition_session.go ||
+	! grep -q -F 'func ValidateRuntimeSemanticPlanManifestAgainstDefinition' internal/pkg/workorchruntimecontract/runtime_semantic_contract.go ||
 	! grep -q -F 'ValidationProofRequirementHash' internal/pkg/workorchruntimecontract/runtime_coverage_evidence_binding.go ||
 	! grep -q -F 'len(rawRequiredCheckRefs) != 0' internal/pkg/workorchruntimecontract/runtime_semantic_contract.go; then
 	echo "boundary contract violation: managed validation proof lost aggregate reverse proof or provider check-field rejection" >&2

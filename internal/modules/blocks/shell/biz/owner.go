@@ -81,6 +81,7 @@ func (m *Biz) Start() error {
 		{shellevents.TopicProbeRuntimeOwnerFactProspectiveSatisfaction, m.handleRuntimeOwnerFactProspectiveSatisfaction},
 		{shellevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery},
 		{shellevents.TopicQueryRuntimeValidationRawOutput, m.handleRuntimeValidationRawOutput},
+		{shellevents.TopicQueryRuntimeValidationReadDependencies, m.handleRuntimeValidationReadDependencies},
 		{shellevents.TopicExecuteOperation, m.handleShellOperation},
 	}
 	// A failed Start keeps every completed subscription reachable. Retrying
@@ -397,6 +398,7 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 		EvidencePolicies:            authorization.EvidencePolicies,
 		ValidationRecipes:           authorization.ValidationRecipes,
 		ValidationCheckAttestations: runtimecontract.CloneRuntimeValidationCheckAttestationBindings(authorization.ValidationProofBinding.CheckAttestations),
+		validationProofBinding:      authorization.ValidationProofBinding.Clone(),
 	}
 	operationResult := RuntimeCommandResult{}
 	var executeErr error
@@ -419,6 +421,12 @@ func (m *Biz) handleShellOperation(event magicevent.Event, result magicevent.Res
 			return
 		}
 		evidence.OwnerRevisionSet = &dependencies
+		if len(dependencies.Entries) != 0 {
+			evidence.ApplicabilityDependencies = &runtimecontract.RuntimeEvidenceApplicabilityDependencies{
+				ProtocolRef:      runtimecontract.RuntimeEvidenceApplicabilityDependenciesV1,
+				OwnerRevisionSet: *runtimecontract.CloneRuntimeOwnerRevisionSet(&dependencies),
+			}
+		}
 	}
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {

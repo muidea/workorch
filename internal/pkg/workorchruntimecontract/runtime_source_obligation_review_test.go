@@ -7,13 +7,21 @@ import (
 )
 
 func semanticSourceObligationReviewFixture(t *testing.T) (RuntimeSemanticPlanManifest, RuntimeSemanticPlanDocument) {
+	return semanticSourceObligationReviewWithChecks(t, nil)
+}
+
+func semanticSourceObligationReviewWithChecks(t *testing.T, compileChecks func(string, RuntimeCoverageItem) []RuntimeSourceObligationCheck) (RuntimeSemanticPlanManifest, RuntimeSemanticPlanDocument) {
 	t.Helper()
 	manifest, document, oldBinding := semanticInputReviewV2Fixture(t)
 	item := &manifest.CoverageItems[0]
-	for _, id := range []string{"A", "B"} {
-		check := RuntimeSourceObligationCheck{InventoryHash: "inventory", ObligationID: id, RequirementID: "requirement", VerificationID: "verify-" + id, Criterion: " " + id + " 独立原判据\n ", Declaration: "验证 " + id}
-		check.CheckRef = StableRuntimeSourceObligationCheckRef(manifest.DefinitionRevision, item.ID, check)
-		item.SourceObligationChecks = append(item.SourceObligationChecks, check)
+	if compileChecks != nil {
+		item.SourceObligationChecks = compileChecks(manifest.DefinitionRevision, *item)
+	} else {
+		for _, id := range []string{"A", "B"} {
+			check := RuntimeSourceObligationCheck{InventoryHash: "inventory", ObligationID: id, RequirementID: "requirement", VerificationID: "verify-" + id, Criterion: " " + id + " 独立原判据\n ", Declaration: "验证 " + id}
+			check.CheckRef = StableRuntimeSourceObligationCheckRef(manifest.DefinitionRevision, item.ID, check)
+			item.SourceObligationChecks = append(item.SourceObligationChecks, check)
+		}
 	}
 	requirement := runtimeValidationProofRequirementForTest(t, manifest.DefinitionRevision, *item, "", oldBinding.ValidationRecipeID, nil)
 	binding, err := RuntimeValidationProofRequirementBindingForRecipe(requirement, oldBinding.ValidationRecipeID, runtimeValidationCheckAttestationsForTest(requirement.RequiredCheckRefs)...)

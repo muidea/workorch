@@ -435,8 +435,7 @@ func retireSemanticPlanningGenerationForEligibilityChange(aggregate *RuntimeAggr
 		}
 		for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
 			prerequisite, prerequisiteFound := coverage[prerequisiteID]
-			if !prerequisiteFound || prerequisite.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled ||
-				prerequisite.State != runtimecontract.RuntimeCoverageItemStateSatisfied || prerequisite.CurrentBindingRef == nil {
+			if !prerequisiteFound || !runtimecontract.RuntimeCWIPrerequisiteReadyForConsumer(aggregate.Facts, prerequisite, item.ID) {
 				return fmt.Errorf("%w: semantic closure change %q has no settled prerequisite binding", common.ErrConflict, id)
 			}
 			triggerRefs = append(triggerRefs, prerequisite.CurrentBindingRef.BindingID)
@@ -594,6 +593,9 @@ func (c *planningTransactionComponent) compileSemanticPlanBatch(ctx context.Cont
 		if ledger.Manifest == nil || ledger.CoverageOrderDocument == nil || ledger.Document == nil || ledger.Document.PlanStep != runtimecontract.RuntimeSemanticPlanStepCoverageOrder || ledger.ActiveBatchID != "" {
 			return false, fmt.Errorf("%w: semantic batch requires an accepted coverage order", common.ErrConflict)
 		}
+		if RuntimeSemanticPrerequisitesPendingForAggregate(aggregate) {
+			return false, fmt.Errorf("%w: semantic batch requires settled owner prerequisites", common.ErrConflict)
+		}
 		if ledger.NextBatchSequence != len(ledger.Batches) || batch.Sequence != ledger.NextBatchSequence {
 			return false, fmt.Errorf("%w: semantic batch sequence is not the next contiguous sequence", common.ErrConflict)
 		}
@@ -718,14 +720,17 @@ func SemanticOperationAuthorityReady(aggregate RuntimeAggregate) bool {
 // SemanticPlanningPrerequisitesPending is the single typed pre-provider gate
 // for mutable owner facts consumed by a semantic generation. TargetSelection
 // is included so a fresh Definition selector is resolved by its owner before
-// any provider document may propose a target.
+// any provider document may propose a target. An existing target projected by
+// a reopened proof likewise requires its fresh owner snapshot before deriving
+// the proof-batch request identity; a historical binding is not that snapshot.
 func SemanticPlanningPrerequisitesPending(values []runtimecontract.RuntimePrerequisite) bool {
 	for _, value := range values {
 		switch value.Kind {
 		case runtimecontract.PrerequisiteKindProviderCeiling,
 			runtimecontract.PrerequisiteKindCapabilityState,
 			runtimecontract.PrerequisiteKindOperationAdmissibility,
-			runtimecontract.PrerequisiteKindTargetSelection:
+			runtimecontract.PrerequisiteKindTargetSelection,
+			runtimecontract.PrerequisiteKindTargetSnapshot:
 			return true
 		}
 	}

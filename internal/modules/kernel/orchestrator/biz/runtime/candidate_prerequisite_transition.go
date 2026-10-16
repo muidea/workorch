@@ -36,7 +36,7 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForPrerequisiteSt
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -140,7 +140,7 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForFeasibilityPre
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -210,7 +210,7 @@ func (c *candidateDispatchComponent) invalidateCandidateAttemptForOwnerInfeasibi
 		return RuntimeAggregate{}, err
 	}
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -542,7 +542,7 @@ func (c *candidateDispatchComponent) invalidateActiveDispatchForPrerequisiteStal
 	aggregate.Facts = facts
 	aggregate.Decision = decision
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {

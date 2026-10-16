@@ -25,7 +25,7 @@ func runtimeVerificationPolicySatisfied(aggregate RuntimeAggregate, binding runt
 	owners := make(map[string]struct{})
 	maxLevel := -1
 	for _, fact := range evidence {
-		if weakRuntimeEvidence(fact) || !runtimeEvidenceAppliesToCoverageWorkItemWithLineage(aggregate.Facts, fact, coverageID, aggregate.CoverageProofLineage) {
+		if weakRuntimeEvidence(fact) || !runtimecontract.RuntimeEvidenceHasFreshProofApplicability(fact, aggregate.Facts.EvidenceApplicabilityObservations, aggregate.Facts.EvidenceRevision, aggregate.Reconciliation.RequestHash) || !runtimeEvidenceAppliesToCoverageWorkItemWithLineage(aggregate.Facts, fact, coverageID, aggregate.CoverageProofLineage) {
 			continue
 		}
 		operation, found := runtimeOperationForEvidence(aggregate, fact)
@@ -53,6 +53,7 @@ func runtimeVerificationPolicySatisfied(aggregate RuntimeAggregate, binding runt
 					if receipt.ExecutionKey == execution.ExecutionKey && receipt.Fence == execution.Fence &&
 						receipt.OperationID == operation.ID && receipt.Outcome == runtimecontract.RuntimeOperationOutcomeAccepted &&
 						reflect.DeepEqual(receipt.Evidence.OwnerRevisionSet, fact.OwnerRevisionSet) &&
+						reflect.DeepEqual(receipt.Evidence.ApplicabilityDependencies, fact.ApplicabilityDependencies) &&
 						((receipt.Evidence.Validation == nil && fact.Validation == nil) ||
 							(receipt.Evidence.Validation != nil && fact.Validation != nil &&
 								receipt.Evidence.Validation.ObservationProtocolRef == fact.Validation.ObservationProtocolRef &&

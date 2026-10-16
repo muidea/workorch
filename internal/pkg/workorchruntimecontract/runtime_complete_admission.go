@@ -29,6 +29,8 @@ const (
 // already-persisted canonical records. It is not persisted and deliberately
 // introduces no second CWI, binding, request, dispatch, or receipt model.
 type RuntimeCompleteAdmissionInput struct {
+	Definition          RuntimeDefinitionContext
+	ProcessedEventIDs   []string
 	Facts               RuntimeFacts
 	Decision            RuntimeDecision
 	SemanticPlanning    RuntimeSemanticPlanningLedger
@@ -40,9 +42,21 @@ type RuntimeCompleteAdmissionInput struct {
 	ActiveDispatch      *RuntimeDispatchRecord
 	CompletedDispatches []RuntimeDispatchRecord
 	OperationReceipts   []RuntimeOperationReceipt
+	// Original read-only source ledgers required to replay historical ordinary
+	// settlements after rebind. These are not reconstructed from current status.
+	ProofLineage     []RuntimeCoverageProofLineage
+	Governance       []RuntimeOperationGovernanceBinding
+	Budget           RuntimeExecutionBudgetLedger
+	EvidenceSequence uint64
+	Resolutions      []RuntimeGovernanceResolutionRecord
+	Attempts         []RuntimeCandidateAttemptRecord
+	Sessions         []RuntimeCandidateRequestSession
+	Confirmations    []RuntimeRepairSurfaceConfirmationRecord
 }
 
 func (i RuntimeCompleteAdmissionInput) Clone() RuntimeCompleteAdmissionInput {
+	i.Definition = i.Definition.Normalized()
+	i.ProcessedEventIDs = append([]string(nil), i.ProcessedEventIDs...)
 	i.Facts = i.Facts.Normalized()
 	i.Decision = cloneRuntimeDecision(i.Decision)
 	i.SemanticPlanning = i.SemanticPlanning.Clone()
@@ -51,6 +65,31 @@ func (i RuntimeCompleteAdmissionInput) Clone() RuntimeCompleteAdmissionInput {
 	i.Manifest = i.Manifest.Clone()
 	i.Candidate = cloneRuntimeCandidate(i.Candidate)
 	i.Attempt = cloneRuntimeCompleteAdmissionAttempt(i.Attempt)
+	i.Budget = i.Budget.Clone()
+	i.ProofLineage = append([]RuntimeCoverageProofLineage(nil), i.ProofLineage...)
+	for n := range i.ProofLineage {
+		i.ProofLineage[n] = i.ProofLineage[n].Clone()
+	}
+	i.Governance = append([]RuntimeOperationGovernanceBinding(nil), i.Governance...)
+	for n := range i.Governance {
+		i.Governance[n] = i.Governance[n].Clone()
+	}
+	i.Resolutions = append([]RuntimeGovernanceResolutionRecord(nil), i.Resolutions...)
+	for n := range i.Resolutions {
+		i.Resolutions[n] = i.Resolutions[n].Clone()
+	}
+	i.Attempts = append([]RuntimeCandidateAttemptRecord(nil), i.Attempts...)
+	for n := range i.Attempts {
+		i.Attempts[n] = i.Attempts[n].Clone()
+	}
+	i.Sessions = append([]RuntimeCandidateRequestSession(nil), i.Sessions...)
+	for n := range i.Sessions {
+		i.Sessions[n] = i.Sessions[n].Clone()
+	}
+	i.Confirmations = append([]RuntimeRepairSurfaceConfirmationRecord(nil), i.Confirmations...)
+	for n := range i.Confirmations {
+		i.Confirmations[n] = i.Confirmations[n].Clone()
+	}
 	return i.cloneExecutionFacts()
 }
 
@@ -121,6 +160,15 @@ func EvaluateRuntimeCompleteAdmission(raw RuntimeCompleteAdmissionInput) Runtime
 	}
 	if err := ValidateRuntimeCWILedger(input.Facts); err != nil {
 		return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "cwi_ledger_invalid", err)
+	}
+	if err := ValidateRuntimeHistoricalBehaviorCompletions(RuntimeLineageAssertionSources{
+		Definition: input.Definition, Facts: input.Facts, Semantic: input.SemanticPlanning, Completed: input.CompletedDispatches,
+		Receipts: input.OperationReceipts, ProcessedEventIDs: input.ProcessedEventIDs, Reconciliation: input.Reconciliation,
+		ProofLineage: input.ProofLineage, Work: input.ImplementationWork, Active: input.ActiveDispatch,
+		Governance: input.Governance, Budget: input.Budget, EvidenceSequence: input.EvidenceSequence,
+		Resolutions: input.Resolutions, Attempts: input.Attempts, Sessions: input.Sessions, Confirmations: input.Confirmations,
+	}); err != nil {
+		return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "historical_behavior_lineage_invalid", err)
 	}
 	if err := ValidateRuntimeCWIFocusBindings(input.Facts); err != nil {
 		return completeAdmissionFailure(RuntimeCompleteAdmissionTerminalContractFailure, "cwi_binding_invalid", err)
@@ -242,8 +290,7 @@ func runtimeCurrentFocusBlockedPrerequisites(facts RuntimeFacts) []string {
 		}
 		for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
 			prerequisite, found := byID[string(prerequisiteID)]
-			if !found || prerequisite.CWIConvergenceState != RuntimeCWIConvergenceStateSettled ||
-				prerequisite.State != RuntimeCoverageItemStateSatisfied || prerequisite.CurrentBindingRef == nil {
+			if !found || !RuntimeCWIPrerequisiteReadyForConsumer(facts, prerequisite, coverageID) {
 				blocked = append(blocked, string(prerequisiteID))
 			}
 		}

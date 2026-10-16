@@ -335,6 +335,11 @@ func (m *Biz) handleFileEditOperation(event magicevent.Event, result magicevent.
 		return
 	}
 	evidence.OwnerRevisionSet = dependencies
+	evidence.ApplicabilityDependencies, dependencyErr = filePatchApplicabilityDependencies(command.RuntimeOperationExecutionContext, operation, operationResult.patchPostcondition)
+	if dependencyErr != nil {
+		setPrerequisiteError(result, dependencyErr)
+		return
+	}
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileEdit, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
@@ -414,6 +419,11 @@ func (m *Biz) handleFileWriteOperation(event magicevent.Event, result magicevent
 		return
 	}
 	evidence.OwnerRevisionSet = dependencies
+	evidence.ApplicabilityDependencies, dependencyErr = filePatchApplicabilityDependencies(command.RuntimeOperationExecutionContext, operation, operationResult.patchPostcondition)
+	if dependencyErr != nil {
+		setPrerequisiteError(result, dependencyErr)
+		return
+	}
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.StepKindFileWrite, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)
@@ -495,6 +505,11 @@ func (m *Biz) handlePatchApplyOperation(event magicevent.Event, result magiceven
 		return
 	}
 	evidence.OwnerRevisionSet = dependencies
+	evidence.ApplicabilityDependencies, dependencyErr = filePatchApplicabilityDependencies(command.RuntimeOperationExecutionContext, operation, operationResult.patchPostcondition)
+	if dependencyErr != nil {
+		setPrerequisiteError(result, dependencyErr)
+		return
+	}
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {
 		failure = orchestratorevents.RuntimeOperationFailure(command.Transaction, runtimecontract.RuntimeBlockKindPatchApply, operationResult.FailureCode, operationResult.FailureMessage, operationResult.TargetRefs)

@@ -56,6 +56,11 @@ func runtimeInputReviewDependency(a RuntimeAggregate, ledger runtimecontract.Run
 				fmt.Fprintf(&question, "\nCWI %s; original check %s; input %s; question: %s", proposal.CoverageWorkItemID, check.RequiredCheckRef, strings.Join(check.InputTargetRefs, ", "), check.Reason)
 			}
 		}
+		for _, source := range proposal.ValidationInputReview.DiagnosticSources {
+			if source.Conclusion == runtimecontract.RuntimeValidationInputInconclusive {
+				fmt.Fprintf(&question, "\nCWI %s; diagnostic source %s; input %s; question: %s", proposal.CoverageWorkItemID, source.SourceRef, strings.Join(source.InputTargetRefs, ", "), source.Reason)
+			}
+		}
 	}
 	return runtimecontract.ExternalDependency{
 		Kind: string(runtimecontract.GovernanceDecision), SubjectRef: runtimeInputReviewRef(a, ledger, d),
@@ -207,7 +212,7 @@ func runtimeInputReviewInformationFailureForLedger(ledger runtimecontract.Runtim
 	}
 	for _, current := range document.Proposals {
 		binding, found := runtimecontract.RuntimeSemanticValidationInputReviewBinding(current, ledger.Manifest.OwnerCatalogs)
-		if !found || binding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV2 || current.ValidationInputReview == nil {
+		if !found || binding.InputReview.ProtocolRef == runtimecontract.RuntimeValidationInputReviewProtocol || current.ValidationInputReview == nil {
 			continue
 		}
 		for _, history := range ledger.History {
@@ -221,6 +226,18 @@ func runtimeInputReviewInformationFailureForLedger(ledger runtimecontract.Runtim
 			for _, prior := range previous.Proposals {
 				if prior.CoverageWorkItemID != current.CoverageWorkItemID || prior.ValidationInputReview == nil {
 					continue
+				}
+				// The explicit diagnostic-source extension shares a single original
+				// CWI information opportunity. Renaming sources or changing their
+				// input/native/catalog identity cannot create a fresh budget.
+				if runtimecontract.RuntimeValidationInputReviewConclusion(*current.ValidationInputReview) == runtimecontract.RuntimeValidationInputInconclusive && runtimecontract.RuntimeValidationInputReviewConclusion(*prior.ValidationInputReview) == runtimecontract.RuntimeValidationInputInconclusive {
+					for _, report := range []*runtimecontract.RuntimeValidationInputReview{current.ValidationInputReview, prior.ValidationInputReview} {
+						for _, source := range report.DiagnosticSources {
+							if source.Conclusion == runtimecontract.RuntimeValidationInputInconclusive {
+								return "validation_input_review_information_exhausted"
+							}
+						}
+					}
 				}
 				for _, check := range current.ValidationInputReview.Checks {
 					if check.Conclusion != runtimecontract.RuntimeValidationInputInconclusive {

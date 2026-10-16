@@ -45,6 +45,12 @@ func CompileRuntimeSourceObligationInventory(candidate workspacemodel.Definition
 			SourceScope: "goal", SourceID: spec.GoalItemRef, Text: candidate.GoalInput.Text,
 		}},
 	}
+	for _, mapping := range spec.ExecutionProofMappings {
+		inventory.ExecutionProofMappings = append(inventory.ExecutionProofMappings, runtimecontract.RuntimeExecutionProofMapping(mapping))
+	}
+	for _, mapping := range spec.EvidencePurposeMappings {
+		inventory.EvidencePurposeMappings = append(inventory.EvidencePurposeMappings, runtimecontract.RuntimeEvidencePurposeMapping(mapping))
+	}
 	for _, item := range candidate.DoDInputs {
 		inventory.Sources = append(inventory.Sources, runtimecontract.RuntimeDefinitionSource{
 			CandidateItemRef: item.CandidateItemRef, ItemRef: mappings[item.CandidateItemRef],

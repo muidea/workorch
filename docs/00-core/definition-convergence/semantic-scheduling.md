@@ -68,6 +68,8 @@ completeness 只覆盖 Definition/Profile 已声明的 ref、relation 和 mappin
 - authority 是 dependency DAG + scheduling policy，不是 LLM 生成的完整线性序列。
 - 只有当前 ready 节点可参与下一 focus 选择。
 - bound、active dispatch、accepted effect 或 evidence lineage 的 current focus 必须保持 fenced。
+- 唯一版本化例外是 [CWI Suspension](../runtime/cwi-suspension.md)：SM-2 仅在安全窗口封存原 bound 后继，
+  精确重验已声明的唯一 ordinary 前驱后恢复原后继；不退休其 binding、不复活旧 credit、不重发 effect。
 - reopen 只影响其语义后继闭包；不重排无关 settled branch，不重新发送全部 Goal/DoD。
 - Definition 关系变化必须使用新 definition revision 和 fresh activation/restart；active Run 不原地修改 graph。
 

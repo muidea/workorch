@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -40,7 +41,13 @@ func checkSchemaDTO(t *testing.T, schema map[string]any, typ reflect.Type) {
 		}
 		props := schema["properties"].(map[string]any)
 		required := schema["required"].([]any)
-		if len(props) != typ.NumField() || len(required) != typ.NumField() {
+		requiredCount := 0
+		for i := 0; i < typ.NumField(); i++ {
+			if !strings.Contains(typ.Field(i).Tag.Get("json"), "omitempty") {
+				requiredCount++
+			}
+		}
+		if len(props) != typ.NumField() || len(required) != requiredCount {
 			t.Fatalf("%s field drift", typ)
 		}
 		for i := 0; i < typ.NumField(); i++ {
@@ -53,7 +60,7 @@ func checkSchemaDTO(t *testing.T, schema map[string]any, typ reflect.Type) {
 			for _, r := range required {
 				found = found || r == f.Name
 			}
-			if !found {
+			if found == strings.Contains(f.Tag.Get("json"), "omitempty") {
 				t.Fatal("field not required", f.Name)
 			}
 			checkSchemaDTO(t, child, f.Type)

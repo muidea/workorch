@@ -134,8 +134,8 @@ func executeFileWritePatch(root string, target string, req patchExecutionRequest
 		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_parent_conflict"), err
 	}
 	before, exists, err := readPatchTarget(target)
-	if err == nil && exists {
-		observation := observedFilePatchRead(req.TargetRef, before, "patch_input")
+	if err == nil {
+		observation := observedFilePatchTargetRead(req.TargetRef, before, exists)
 		defer func() { ret.patchRead = observation }()
 	}
 	if err != nil {
@@ -173,8 +173,8 @@ func executeFileWritePatch(root string, target string, req patchExecutionRequest
 func executeTextReplacePatch(root string, target string, req patchExecutionRequest, apply bool) (ret patchExecutionResult, executeErr error) {
 	_ = root
 	before, exists, err := readPatchTarget(target)
-	if err == nil && exists {
-		observation := observedFilePatchRead(req.TargetRef, before, "patch_input")
+	if err == nil {
+		observation := observedFilePatchTargetRead(req.TargetRef, before, exists)
 		defer func() { ret.patchRead = observation }()
 	}
 	if err != nil || !exists {
@@ -219,8 +219,8 @@ func executeUnifiedDiffPatch(root string, target string, req patchExecutionReque
 		return patchErrorResult(patchStage(req.Operation), req.Operation, req.PatchType, req.TargetRef, err, "patch_parent_conflict"), err
 	}
 	before, exists, err := readPatchTarget(target)
-	if err == nil && exists {
-		observation := observedFilePatchRead(req.TargetRef, before, "patch_input")
+	if err == nil {
+		observation := observedFilePatchTargetRead(req.TargetRef, before, exists)
 		defer func() { ret.patchRead = observation }()
 	}
 	if err != nil {

@@ -23,7 +23,40 @@ func DeriveRuntimeTerminalResultMaterialFromState(source RuntimeStateRecord) (Ru
 	if !terminal {
 		return RuntimeTerminalResultMaterial{}, fmt.Errorf("%w: result material requires a sealed terminal aggregate", common.ErrConflict)
 	}
+	for _, ledger := range [][]EvidenceFact{source.Facts.Evidence.Accepted, source.Facts.Evidence.Rejected} {
+		for _, evidence := range ledger {
+			if err := ValidateRuntimeEvidencePurposeKind(evidence.ApplicabilityDependencies, evidence.Kind); err != nil {
+				return RuntimeTerminalResultMaterial{}, err
+			}
+			if err := ValidateRuntimeEvidenceDependencyPair(evidence.OwnerRevisionSet, evidence.ApplicabilityDependencies, source.Facts.DefinitionRevision); err != nil {
+				return RuntimeTerminalResultMaterial{}, fmt.Errorf("terminal evidence %q read dependencies: %w", evidence.ID, err)
+			}
+			if evidence.OwnerRevisionSet != nil && evidence.OwnerRevisionSet.DefinitionRevision != source.Facts.DefinitionRevision {
+				return RuntimeTerminalResultMaterial{}, fmt.Errorf("terminal evidence %q read dependency definition mismatch", evidence.ID)
+			}
+		}
+	}
+	// Normalize authority projections without replacing the original diagnostic.
+	// In particular semantic-violation normalization can allocate an empty ID
+	// slice (omitted by persistence), and trim producer bytes. Neither belongs in
+	// immutable delivery material or its independent fresh-load reconstruction.
+	var originalFailureDiagnostic *RuntimeOriginalDiagnostic
+	if source.Facts.Failure != nil {
+		originalFailureDiagnostic = source.Facts.Failure.OriginalDiagnostic.CloneOriginal()
+	}
 	source.Facts = source.Facts.Normalized()
+	if source.Facts.Failure != nil {
+		source.Facts.Failure.OriginalDiagnostic = originalFailureDiagnostic
+	}
+	if outcome.Kind == TerminalOutcomeKindCompleted {
+		if err := validateRuntimeTerminalEvidenceApplicability(source); err != nil {
+			return RuntimeTerminalResultMaterial{}, err
+		}
+	}
+	ownerSet, err := CompileRuntimeTerminalOwnerReadDependencies(source)
+	if err != nil {
+		return RuntimeTerminalResultMaterial{}, err
+	}
 	accepted := outcome.Kind == TerminalOutcomeKindCompleted
 	terminalSummary := outcome.Summary
 	assessment := workorchresultcontract.DoDAssessment{Satisfied: accepted, Summary: terminalSummary}
@@ -67,12 +100,12 @@ func DeriveRuntimeTerminalResultMaterialFromState(source RuntimeStateRecord) (Ru
 		EvidenceRefs: evidenceRefs, ArtifactRefs: artifactRefs, DoDAssessment: assessment,
 		SummaryDetail: workorchresultcontract.ResultSummary{GoalOutcome: terminalSummary, EvidenceRefs: append([]string(nil), evidenceRefs...), ArtifactRefs: append([]common.ArtifactID(nil), artifactRefs...)},
 	}
-	item.RuntimeCloseout = runtimeResultCloseout(source, outcome, accepted, evidenceRefs)
+	item.RuntimeCloseout = runtimeResultCloseout(source, outcome, accepted, evidenceRefs, ownerSet)
 	runtimeCompleteResultFeedback(&item, source)
 	return item.Normalized(), nil
 }
 
-func runtimeResultCloseout(source RuntimeStateRecord, outcome TerminalOutcome, accepted bool, evidenceRefs []string) *RuntimeResultCloseout {
+func runtimeResultCloseout(source RuntimeStateRecord, outcome TerminalOutcome, accepted bool, evidenceRefs []string, ownerSet RuntimeOwnerRevisionSet) *RuntimeResultCloseout {
 	closeout := RuntimeResultCloseout{
 		SchemaVersion:        RuntimeResultCloseoutSchemaVersionCurrent,
 		CloseoutID:           runtimeCloseoutID(source),
@@ -100,7 +133,7 @@ func runtimeResultCloseout(source RuntimeStateRecord, outcome TerminalOutcome, a
 	if !accepted {
 		accumulator.applyTerminalFailure(&closeout, source)
 	}
-	closeout.OwnerRevisionSet = runtimeCloseoutOwnerRevisionSet(source)
+	closeout.OwnerRevisionSet = ownerSet
 	closeout.RequirementOutcomes = DeriveRuntimeTerminalRequirementOutcomesFromState(source, closeout.OwnerRevisionSet)
 	if source.Facts.DefinitionSeed.SourceObligations != nil {
 		inventory := source.Facts.DefinitionSeed.SourceObligations.Clone()
@@ -116,22 +149,6 @@ func runtimeResultCloseout(source RuntimeStateRecord, outcome TerminalOutcome, a
 
 func runtimeCloseoutID(source RuntimeStateRecord) string {
 	return "runtime-closeout/" + string(source.Facts.WorkspaceID) + "/" + string(source.Facts.RunID) + "/" + source.Decision.AuthoritySnapshot.ID
-}
-
-func runtimeCloseoutOwnerRevisionSet(source RuntimeStateRecord) RuntimeOwnerRevisionSet {
-	set := RuntimeOwnerRevisionSet{DefinitionRevision: source.Facts.DefinitionRevision}
-	for _, evidence := range source.Facts.Evidence.Accepted {
-		dependencyHash := strings.TrimSpace(evidence.ContentHash)
-		if dependencyHash == "" {
-			dependencyHash = "runtime-evidence-dependency/" + string(evidence.ID) + "/" + evidence.Revision
-		}
-		set.Entries = append(set.Entries, RuntimeOwnerRevisionRef{
-			OwnerKind: "runtime_authority", OwnerInstanceID: RuntimeModuleOrchestrator,
-			ResourceKind: "accepted_evidence", ResourceID: string(evidence.ID), SnapshotID: evidence.AuthoritySnapshotID,
-			Revision: evidence.Revision, DependencyHash: dependencyHash,
-		})
-	}
-	return set.WithHash()
 }
 
 // DeriveRuntimeTerminalRequirementOutcomesFromState 只投影当前 coverage 与历史评估的适用性。
@@ -177,6 +194,16 @@ func DeriveRuntimeTerminalRequirementOutcomesFromState(source RuntimeStateRecord
 			outcome.CoverageState = RuntimeRequirementUncovered
 		}
 		assessment, hasAssessment := assessmentByCWI[coverage.ID]
+		if coverage.HistoricalBehavior != nil && coverage.State == RuntimeCoverageItemStateSatisfied && len(coverage.HistoricalAcceptanceProofs) != 0 {
+			proof := coverage.HistoricalAcceptanceProofs[len(coverage.HistoricalAcceptanceProofs)-1]
+			if proof.AssessmentDispatchID == coverage.LastAssessmentID {
+				for _, fact := range source.Facts.Assessments {
+					if fact.ID == proof.AssessmentDispatchID {
+						assessment, hasAssessment = fact, true
+					}
+				}
+			}
+		}
 		if !hasAssessment && !requiredAssessment[coverage.ID] && coverage.State == RuntimeCoverageItemStateSatisfied {
 			outcome.AssessmentState = RuntimeRequirementSatisfied
 		} else if !hasAssessment {
@@ -234,9 +261,11 @@ func runtimeRequirementEvidenceItems(source RuntimeStateRecord, coverage Runtime
 			if len(evidence.BindingRefs) != 0 {
 				bindingRef = evidence.BindingRefs[0]
 			}
-			item := RuntimeRequirementEvidenceItem{EvidenceRef: string(evidence.ID), BindingRef: bindingRef, State: state, ReasonCode: evidence.FailureCode}
+			item := RuntimeRequirementEvidenceItem{EvidenceRef: string(evidence.ID), BindingRef: bindingRef, State: state, ReasonCode: evidence.FailureCode,
+				OwnerRevisionSet:          CloneRuntimeOwnerRevisionSet(evidence.OwnerRevisionSet),
+				ApplicabilityDependencies: CloneRuntimeEvidenceApplicabilityDependencies(evidence.ApplicabilityDependencies)}
 			if state == RuntimeRequirementEvidenceAccepted {
-				if hasBinding && runtimeTerminalEvidenceMatchesCurrentProof(source, evidence, binding) {
+				if hasBinding && runtimeTerminalEvidenceMatchesCoverageProof(source, evidence, coverage, binding) {
 					item.OwnerRevisionSetHash = ownerSetHash
 				} else {
 					item.State = RuntimeRequirementEvidenceStaleOrSuperseded
@@ -260,6 +289,11 @@ func runtimeEvidenceAppliesToCoverage(evidence EvidenceFact, coverage RuntimeCov
 	for _, ref := range coverage.EvidenceRefs {
 		if ref == string(evidence.ID) || ref == evidence.SourceRef {
 			return true
+		}
+	}
+	for _, proof := range coverage.HistoricalAcceptanceProofs {
+		if containsString(proof.AcceptanceEvidenceRefs, string(evidence.ID)) {
+			return true // Immutable audit association, not current credit.
 		}
 	}
 	return false

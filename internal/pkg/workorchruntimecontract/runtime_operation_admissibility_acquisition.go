@@ -152,13 +152,25 @@ func (a RuntimeOperationAdmissibilityAcquisition) ValidateForRequest(request Run
 // authority. Other typed validation owners remain outside this Shell proof
 // protocol.
 func ValidateRuntimeValidationProofRequirementCatalogApplicability(requirements []RuntimeValidationProofRequirement, catalogs []RuntimeOperationAdmissibility) error {
-	if err := ValidateRuntimeValidationProofRequirements(requirements); err != nil {
-		return fmt.Errorf("runtime validation proof requirements: %w", err)
+	return validateRuntimeValidationProofRequirementCatalogApplicability(requirements, catalogs, nil)
+}
+
+func validateRuntimeValidationProofRequirementCatalogApplicability(requirements []RuntimeValidationProofRequirement, catalogs []RuntimeOperationAdmissibility, prior *runtimeValidationCatalogRequirementPreimage) error {
+	matched := prior != nil && reflect.DeepEqual(prior.raw, requirements)
+	if !matched {
+		if err := ValidateRuntimeValidationProofRequirements(requirements); err != nil {
+			return fmt.Errorf("runtime validation proof requirements: %w", err)
+		}
 	}
 	if err := ValidateRuntimeOperationAdmissibilities(catalogs); err != nil {
 		return fmt.Errorf("runtime validation proof owner catalogs: %w", err)
 	}
-	requested := NormalizeRuntimeValidationProofRequirements(requirements)
+	var requested []RuntimeValidationProofRequirement
+	if matched {
+		requested = prior.requested
+	} else {
+		requested = NormalizeRuntimeValidationProofRequirements(requirements)
+	}
 	for _, rawCatalog := range catalogs {
 		catalog := rawCatalog.Normalized()
 		if catalog.OwnerModuleID != RuntimeModuleShell || !runtimeOperationAdmissibilityKindsContain(catalog.OperationKinds, RuntimeBlockKindManagedValidationSession) {

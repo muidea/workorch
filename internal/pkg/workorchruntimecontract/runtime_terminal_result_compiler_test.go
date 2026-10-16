@@ -53,7 +53,7 @@ func TestRuntimeTerminalResultCompilerTerminalKindsAndVersionGuard(t *testing.T)
 			}
 		})
 	}
-	for _, version := range []uint32{0, 1, 2, RuntimeResultFeedbackVersionCurrent + 1} {
+	for _, version := range []uint32{0, 1, 2, 3, 4, RuntimeResultFeedbackVersionCurrent + 1} {
 		source := terminalResultCompilerSource()
 		source.ResultFeedbackVersion = version
 		before := source.Clone()
@@ -133,6 +133,47 @@ func TestRuntimeTerminalResultCompilerCurrentCoverageAndChineseFeedback(t *testi
 	outcomes := DeriveRuntimeTerminalRequirementOutcomesFromState(source, RuntimeOwnerRevisionSet{})
 	if len(outcomes) != 1 || outcomes[0].AssessmentState != RuntimeRequirementIndeterminate || outcomes[0].AssessmentReasonCode != "current_coverage_not_satisfied" {
 		t.Fatal("historical assessment restored current coverage credit")
+	}
+}
+
+func TestRuntimeTerminalResultCompilerPreservesFailureDiagnosticAcrossReload(t *testing.T) {
+	source := terminalResultCompilerSource()
+	diagnostic := &RuntimeOriginalDiagnostic{
+		SchemaVersion: RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: RuntimeModuleOrchestrator,
+		OriginalClass: "semantic_plan_rejection", OriginalCode: "semantic_plan_invalid",
+		OriginalMessage: "  完整原始失败\n不得规范化  ", Signature: "semantic-plan/invalid-document",
+		SemanticViolations: []RuntimeSemanticContractViolation{{
+			Kind: RuntimeSemanticContractViolationProposalConstraint, Path: "$.proposals[0].target.prospectiveTargetRefs",
+			CoverageWorkItemID: "cwi-1", Rule: RuntimeSemanticConstraintRelational, Actual: " target ", Required: []string{"every target absent from sealed existing target set"},
+		}},
+	}
+	source.Facts.Failure = &FailureFact{Class: FailureClassCandidateExhausted, Code: "semantic_contract_failed", Signature: diagnostic.Signature, Message: diagnostic.OriginalMessage, OriginalDiagnostic: diagnostic}
+	before := source.Clone()
+	material, err := DeriveRuntimeTerminalResultMaterialFromState(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(material.RuntimeCloseout.OriginalDiagnostic, diagnostic) {
+		t.Fatal("facts normalization replaced original diagnostic bytes or nil collection")
+	}
+	wire, err := json.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reloaded RuntimeStateRecord
+	if err := json.Unmarshal(wire, &reloaded); err != nil {
+		t.Fatal(err)
+	}
+	repeated, err := DeriveRuntimeTerminalResultMaterialFromState(reloaded)
+	if err != nil || !reflect.DeepEqual(material, repeated) {
+		t.Fatalf("same original authority changed delivery material after reload: %v", err)
+	}
+	if !reflect.DeepEqual(source, before) {
+		t.Fatal("terminal compiler mutated original authority")
+	}
+	material.RuntimeCloseout.OriginalDiagnostic.SemanticViolations[0].Required[0] = "changed"
+	if !reflect.DeepEqual(source, before) {
+		t.Fatal("terminal diagnostic aliases original failure")
 	}
 }
 

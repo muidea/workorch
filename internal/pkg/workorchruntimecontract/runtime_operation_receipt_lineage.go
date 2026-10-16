@@ -12,7 +12,11 @@ func ValidateRuntimeOperationReceiptExecutionLineage(
 	completed []RuntimeDispatchRecord,
 	receipts []RuntimeOperationReceipt,
 ) error {
-	if err := ValidateRuntimeOperationReceipts(receipts); err != nil {
+	return validateRuntimeOperationReceiptExecutionLineageInIndex(active, completed, receipts, nil)
+}
+
+func validateRuntimeOperationReceiptExecutionLineageInIndex(active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, receipts []RuntimeOperationReceipt, index *runtimeOwnerLineageIndex) error {
+	if err := validateRuntimeOperationReceiptsInIndex(receipts, index); err != nil {
 		return fmt.Errorf("runtime operation receipt ledger: %w", err)
 	}
 
@@ -42,14 +46,27 @@ func ValidateRuntimeOperationReceiptExecutionLineage(
 			if receipt.Evidence.OwnerRevisionSet != nil && receipt.Evidence.OwnerRevisionSet.DefinitionRevision != dispatch.Transaction.DefinitionRevision {
 				return fmt.Errorf("%s dispatch %q owner dependencies definition mismatch", label, dispatch.ID)
 			}
+			if err := ValidateRuntimeEvidenceDependencyPair(receipt.Evidence.OwnerRevisionSet, receipt.Evidence.ApplicabilityDependencies, dispatch.Transaction.DefinitionRevision); err != nil {
+				return fmt.Errorf("%s dispatch %q dependency pair: %w", label, dispatch.ID, err)
+			}
 			if receipt.OperationID != execution.OperationID {
 				return fmt.Errorf("%s dispatch %q operation %q owner receipt operation mismatch", label, dispatch.ID, execution.OperationID)
+			}
+			for _, operation := range runtimeCandidateAdmissionOperations(dispatch.Candidate) {
+				if operation.ID == execution.OperationID {
+					if err := ValidateRuntimeHistoricalEffectReceiptPurpose(dispatch, operation, receipt.Evidence.ApplicabilityDependencies); err != nil {
+						return err
+					}
+					if err := ValidateRuntimeEvidencePurposeForOperation(receipt.Evidence.ApplicabilityDependencies, operation.Kind, evidenceKindForConvergenceState(dispatch.Transaction.State)); err != nil {
+						return err
+					}
+				}
 			}
 			expectedRef := "runtime-receipt/" + execution.ExecutionKey
 			if execution.OwnerReceiptRef != expectedRef {
 				return fmt.Errorf("%s dispatch %q operation %q owner receipt ref mismatch", label, dispatch.ID, execution.OperationID)
 			}
-			if execution.OwnerReceiptHash != StableRuntimeOperationReceiptHash(receipt) {
+			if execution.OwnerReceiptHash != index.receiptHash(receipt) {
 				return fmt.Errorf("%s dispatch %q operation %q owner receipt hash mismatch", label, dispatch.ID, execution.OperationID)
 			}
 			matchedReceipt[identity] = true

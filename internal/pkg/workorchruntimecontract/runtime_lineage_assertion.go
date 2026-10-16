@@ -23,6 +23,14 @@ const (
 	RuntimeLineageRepairThenFreshValidation RuntimeLineageAssertionKind = "repair_then_fresh_validation"
 	RuntimeLineageOwnerOperationReceipt     RuntimeLineageAssertionKind = "owner_operation_receipt"
 	RuntimeLineageDeliveryAcknowledgements  RuntimeLineageAssertionKind = "delivery_acknowledgements"
+	RuntimeLineageTerminalOwnerReceipt      RuntimeLineageAssertionKind = "terminal_owner_operation_receipt"
+	RuntimeLineageTerminalResultIndex       RuntimeLineageAssertionKind = "terminal_result_evidence_index"
+	RuntimeLineageTerminalOwnerSnapshot     RuntimeLineageAssertionKind = "terminal_owner_snapshot"
+	RuntimeTerminalProofContractV1                                      = "runtime/terminal-material-proof/v1"
+	RuntimeTerminalProofContractV2                                      = "runtime/terminal-material-proof/v2"
+	RuntimeCrossSourceExecutionProofV1                                  = "runtime/cross-source-execution-proof/v1"
+	RuntimeGoalSourceExecutionProofV2                                   = "runtime/goal-source-execution-proof/v2"
+	RuntimeConfirmedBindingRepairProofV1                                = "runtime/confirmed-binding-repair-proof/v1"
 	RuntimeProofPhaseExecution              RuntimeProofPhase           = "execution"
 	RuntimeProofPhasePostTerminalDelivery   RuntimeProofPhase           = "post_terminal_delivery"
 	MaxRuntimeLineageAssertions                                         = 16
@@ -38,6 +46,16 @@ type RuntimeLineageAssertionRule struct {
 	OperationKind       string             `json:",omitempty"`
 	OperationVariantID  string             `json:",omitempty"`
 	RequiredEffectScope RuntimeEffectScope `json:",omitempty"`
+	// Terminal extensions are opt-in; absence preserves every original rule's encoding/hash.
+	TerminalContractRef   string `json:",omitempty"`
+	ReceiptSourceScope    string `json:",omitempty"`
+	ReceiptSourceID       string `json:",omitempty"`
+	ValidationSourceScope string `json:",omitempty"`
+	ValidationSourceID    string `json:",omitempty"`
+	// Nonempty requires an exact user-confirmed candidate-item mapping. It is
+	// never a runtime-selected source selector or a substitute for ordinary proof.
+	ExecutionSourceContractRef string `json:",omitempty"`
+	RepairHistoryContractRef   string `json:",omitempty"`
 }
 
 type RuntimeLineageAssertion struct {
@@ -51,11 +69,32 @@ type RuntimeLineageAssertion struct {
 }
 
 func (r RuntimeLineageAssertionRule) Validate() error {
+	if r.RepairHistoryContractRef != "" && (r.RepairHistoryContractRef != RuntimeConfirmedBindingRepairProofV1 || r.Kind != RuntimeLineageRepairThenFreshValidation || r.ConsumptionPoint != RuntimeProofPhaseExecution) {
+		return fmt.Errorf("confirmed-binding repair assertion requires supported execution repair consumer")
+	}
+	if r.ExecutionSourceContractRef != "" && ((r.ExecutionSourceContractRef != RuntimeCrossSourceExecutionProofV1 && r.ExecutionSourceContractRef != RuntimeGoalSourceExecutionProofV2) || r.ConsumptionPoint != RuntimeProofPhaseExecution || (r.Kind != RuntimeLineageCompletedWorkRounds && r.Kind != RuntimeLineageRepairThenFreshValidation)) {
+		return fmt.Errorf("cross-source execution assertion requires supported version and work/repair consumer")
+	}
 	if r.Ref == "" || strings.TrimSpace(r.Ref) != r.Ref || len(r.Ref) > 512 {
 		return fmt.Errorf("lineage assertion requires exact bounded rule ref")
 	}
 	if r.ConsumptionPoint != RuntimeProofPhaseExecution && r.ConsumptionPoint != RuntimeProofPhasePostTerminalDelivery {
 		return fmt.Errorf("lineage assertion has unsupported consumption point %q", r.ConsumptionPoint)
+	}
+	terminalMaterial := r.Kind == RuntimeLineageTerminalOwnerReceipt || r.Kind == RuntimeLineageTerminalResultIndex || r.Kind == RuntimeLineageTerminalOwnerSnapshot
+	if terminalMaterial {
+		version := RuntimeTerminalProofContractV1
+		if r.Kind == RuntimeLineageTerminalOwnerSnapshot {
+			version = RuntimeTerminalProofContractV2
+		}
+		if r.TerminalContractRef != version || r.ConsumptionPoint != RuntimeProofPhasePostTerminalDelivery {
+			return fmt.Errorf("terminal material assertion requires exact versioned contract and post-terminal consumption")
+		}
+	} else if r.TerminalContractRef != "" || r.ReceiptSourceScope != "" || r.ReceiptSourceID != "" {
+		return fmt.Errorf("non-terminal-material assertion cannot carry terminal extensions")
+	}
+	if r.Kind != RuntimeLineageTerminalOwnerSnapshot && (r.ValidationSourceScope != "" || r.ValidationSourceID != "") {
+		return fmt.Errorf("only terminal snapshot assertions can carry validation source selectors")
 	}
 	switch r.Kind {
 	case RuntimeLineageCompletedWorkRounds:
@@ -70,6 +109,25 @@ func (r RuntimeLineageAssertionRule) Validate() error {
 		descriptor, known := RuntimeOperationDescriptorForKind(r.OperationKind)
 		if r.ConsumptionPoint != RuntimeProofPhaseExecution || r.MinCompletedRounds != 0 || !known || descriptor.OwnerModuleID != r.OwnerModuleID || !descriptor.RequiresOwnerReceipt || CanonicalRuntimeBlockKind(r.OperationKind) != r.OperationKind || !validSealedRuntimeEffectScope(r.RequiredEffectScope) || !runtimeLineageReceiptInventoryMatches(r, descriptor) {
 			return fmt.Errorf("owner receipt assertion requires original canonical owner/kind/variant/effect inventory")
+		}
+	case RuntimeLineageTerminalOwnerReceipt:
+		descriptor, known := RuntimeOperationDescriptorForKind(r.OperationKind)
+		if r.MinCompletedRounds != 0 || !known || descriptor.OwnerModuleID != r.OwnerModuleID || !descriptor.RequiresOwnerReceipt || CanonicalRuntimeBlockKind(r.OperationKind) != r.OperationKind || !validSealedRuntimeEffectScope(r.RequiredEffectScope) || !runtimeLineageReceiptInventoryMatches(r, descriptor) || !runtimeTerminalReceiptSourceValid(r.ReceiptSourceScope, r.ReceiptSourceID) {
+			return fmt.Errorf("terminal owner receipt requires exact original source and canonical owner/kind/variant/effect inventory")
+		}
+	case RuntimeLineageTerminalResultIndex:
+		if r.MinCompletedRounds != 0 || r.OwnerModuleID != "" || r.OperationKind != "" || r.OperationVariantID != "" || r.RequiredEffectScope != "" || r.ReceiptSourceScope != "" || r.ReceiptSourceID != "" {
+			return fmt.Errorf("terminal Result index assertion cannot carry operation selectors")
+		}
+	case RuntimeLineageTerminalOwnerSnapshot:
+		descriptor, known := RuntimeOperationDescriptorForKind(r.OperationKind)
+		contract, found := RuntimeOperationContractForKind(r.OperationKind)
+		supported := false
+		for _, variant := range contract.Variants {
+			supported = supported || (variant.ID == r.OperationVariantID && variant.TerminalSnapshotProtocolRef == RuntimeTerminalOwnerSnapshotProtocol)
+		}
+		if r.MinCompletedRounds != 0 || !known || !found || !supported || descriptor.OwnerModuleID != r.OwnerModuleID || !descriptor.RequiresOwnerReceipt || CanonicalRuntimeBlockKind(r.OperationKind) != r.OperationKind || !runtimeLineageReceiptInventoryMatches(r, descriptor) || !runtimeTerminalReceiptSourceValid(r.ReceiptSourceScope, r.ReceiptSourceID) || !runtimeTerminalReceiptSourceValid(r.ValidationSourceScope, r.ValidationSourceID) {
+			return fmt.Errorf("terminal snapshot requires supported owner protocol and exact original receipt/validation sources")
 		}
 	case RuntimeLineageDeliveryAcknowledgements:
 		if r.ConsumptionPoint != RuntimeProofPhasePostTerminalDelivery || r.MinCompletedRounds != 0 || r.OwnerModuleID != "" || r.OperationKind != "" || r.OperationVariantID != "" || r.RequiredEffectScope != "" {
@@ -158,6 +216,20 @@ func CompileRuntimeLineageAssertions(rules []RuntimeLineageAssertionRule, declar
 	ret := make([]RuntimeLineageAssertion, 0, len(rules))
 	for _, rule := range rules {
 		ret = append(ret, RuntimeLineageAssertion{Rule: rule, RuleHash: StableRuntimeLineageAssertionRuleHash(rule), DeclarationRef: declarationRef, CoverageWorkItemID: item.ID, SourceScope: item.SourceScope, SourceID: item.SourceID, SourceTextHash: RuntimeLineageSourceTextHash(item.TargetText)})
+	}
+	return ret, nil
+}
+
+// CompileRuntimeCWILineageAssertions retains primary source declarations AND
+// the independently sealed Goal consumers anchored at this exact original CWI.
+func CompileRuntimeCWILineageAssertions(rules []RuntimeLineageAssertionRule, declarationRef string, item RuntimeCoverageItem) ([]RuntimeLineageAssertion, error) {
+	ret, err := CompileRuntimeLineageAssertions(rules, declarationRef, item)
+	if err != nil {
+		return nil, err
+	}
+	ret = append(ret, item.GoalExecutionAssertions...)
+	if err := ValidateRuntimeLineageAssertions(ret, item.ID, declarationRef); err != nil {
+		return nil, err
 	}
 	return ret, nil
 }

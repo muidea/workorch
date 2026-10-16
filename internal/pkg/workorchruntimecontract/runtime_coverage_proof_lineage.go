@@ -39,7 +39,8 @@ type CoverageEvidenceProofIdentity struct {
 	ValidationCheckAttestations    []RuntimeValidationCheckAttestationBinding
 	MetricConstraints              []string
 	ArtifactRefs                   []string
-	VerificationPolicy             *RuntimeVerificationPolicy `json:",omitempty"`
+	VerificationPolicy             *RuntimeVerificationPolicy         `json:",omitempty"`
+	HistoricalAcceptance           *RuntimeHistoricalAcceptanceSource `json:",omitempty"`
 	Hash                           string
 }
 
@@ -54,6 +55,7 @@ const (
 )
 
 func (i CoverageEvidenceProofIdentity) Normalized() CoverageEvidenceProofIdentity {
+	i.HistoricalAcceptance = cloneRuntimeHistoricalAcceptanceSource(i.HistoricalAcceptance)
 	i.DefinitionRevision = strings.TrimSpace(i.DefinitionRevision)
 	i.CoverageWorkItemID = common.CoverageWorkItemID(strings.TrimSpace(string(i.CoverageWorkItemID)))
 	i.EvidenceKind = strings.TrimSpace(i.EvidenceKind)
@@ -98,6 +100,14 @@ func (i CoverageEvidenceProofIdentity) Clone() CoverageEvidenceProofIdentity {
 }
 
 func (i CoverageEvidenceProofIdentity) Validate() error {
+	if i.HistoricalAcceptance != nil {
+		if err := i.HistoricalAcceptance.Validate(i.CoverageWorkItemID); err != nil {
+			return err
+		}
+		if i.EvidenceKind != EvidenceKindStateChange {
+			return fmt.Errorf("historical acceptance identity cannot substitute ordinary current proof")
+		}
+	}
 	if duplicate := duplicateRuntimeValidationProofCheckRef(i.RequiredCheckRefs); duplicate != "" {
 		return fmt.Errorf("coverage evidence proof identity duplicates check %q", duplicate)
 	}
@@ -115,6 +125,9 @@ func (i CoverageEvidenceProofIdentity) Validate() error {
 		descriptor, found := RuntimeOperationDescriptorForKind(kind)
 		if !found || descriptor.OwnerModuleID != i.OwnerModuleID {
 			return fmt.Errorf("coverage evidence proof identity operation %q is not owned by %q", kind, i.OwnerModuleID)
+		}
+		if i.HistoricalAcceptance != nil && descriptor.HistoricalEffectProofContractRef == "" {
+			return fmt.Errorf("historical acceptance identity lacks published owner purpose operation")
 		}
 	}
 	for _, variant := range i.AllowedOperationVariants {
@@ -217,6 +230,7 @@ func DeriveCoverageEvidenceProofIdentity(binding CoverageEvidenceBinding, eviden
 		MetricConstraints:              append([]string(nil), proof.MetricConstraints...),
 		ArtifactRefs:                   append([]string(nil), proof.ArtifactRefs...),
 		VerificationPolicy:             cloneRuntimeVerificationPolicy(binding.VerificationPolicy),
+		HistoricalAcceptance:           cloneRuntimeHistoricalAcceptanceSource(binding.HistoricalAcceptance),
 	}.Normalized()
 	identity.Hash = StableCoverageEvidenceProofIdentityHash(identity)
 	if err := identity.Validate(); err != nil {
@@ -250,6 +264,7 @@ func StableCoverageEvidenceProofIdentityHash(identity CoverageEvidenceProofIdent
 	identity.Hash = ""
 	h := sha256.New()
 	writeHashString(h, identity.DefinitionRevision)
+	writeRuntimeHistoricalAcceptanceSourceHash(h, identity.HistoricalAcceptance)
 	writeHashString(h, string(identity.CoverageWorkItemID))
 	writeHashString(h, identity.EvidenceKind)
 	writeHashString(h, identity.OwnerModuleID)
@@ -302,6 +317,8 @@ func FirstCoverageEvidenceProofIdentityDifference(left, right CoverageEvidencePr
 		return "definition_revision"
 	case left.CoverageWorkItemID != right.CoverageWorkItemID:
 		return "coverage_work_item"
+	case !sameRuntimeHistoricalAcceptanceSource(left.HistoricalAcceptance, right.HistoricalAcceptance):
+		return "historical_acceptance_source"
 	case left.EvidenceKind != right.EvidenceKind:
 		return "evidence_kind"
 	case left.OwnerModuleID != right.OwnerModuleID:

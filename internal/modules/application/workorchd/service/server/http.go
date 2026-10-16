@@ -16,7 +16,7 @@ const (
 	configServerIdleTimeout       = "server.idleTimeout"
 	configServerShutdownTimeout   = "server.shutdownTimeout"
 
-	defaultServerAddr           = ":8080"
+	defaultServerAddr           = "127.0.0.1:8080"
 	defaultReadHeaderTimeout    = 5 * time.Second
 	defaultReadTimeout          = 15 * time.Second
 	defaultWriteTimeout         = 180 * time.Second

@@ -15,6 +15,8 @@ type RuntimeOperationReadSource struct {
 	Operation            runtimecontract.RuntimeOperation
 	SourceReceiptHash    string
 	OriginalDependencies runtimecontract.RuntimeOwnerRevisionSet
+	SourceContentAddress *runtimecontract.RuntimeEvidenceContentAddress
+	ApplicabilitySource  *runtimecontract.RuntimeEvidenceApplicabilityDependencies
 }
 
 // CompileRuntimeOperationReadSource 只从完整有效 aggregate 重编原 sealed 来源；不使用当前 decision 或目录投影。
@@ -61,6 +63,7 @@ func CompileRuntimeOperationReadSource(aggregate RuntimeAggregate, dispatchID, o
 		Transaction: dispatch.Transaction, OperationID: operation.ID,
 		TargetRefs: operation.TargetRefs, CoverageWorkItemIDs: operation.CoverageWorkItemIDs,
 		EvidenceKind: evidenceKind, EvidencePolicies: aggregate.Facts.Activation.EvidencePolicies,
+		HistoricalEffectProofContractRef: runtimeHistoricalEffectProofContractForDispatch(dispatch, operation),
 		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{
 			ExecutionKey: execution.ExecutionKey, Fence: execution.Fence, OperationHash: execution.OperationHash,
 			ExpectedEffectScope: execution.ExpectedEffectScope, IdempotencyClass: execution.IdempotencyClass,
@@ -77,8 +80,15 @@ func CompileRuntimeOperationReadSource(aggregate RuntimeAggregate, dispatchID, o
 	if err := runtimecontract.ValidateRuntimeOperationExecutionAuthority(operation, source.Execution, policies); err != nil {
 		return RuntimeOperationReadSource{}, err
 	}
+	var address *runtimecontract.RuntimeEvidenceContentAddress
+	if receipt.Evidence.ContentAddress != nil {
+		value := *receipt.Evidence.ContentAddress
+		address = &value
+	}
 	return RuntimeOperationReadSource{
 		Context: source, Operation: operation.Clone(), SourceReceiptHash: receiptHash,
 		OriginalDependencies: *runtimecontract.CloneRuntimeOwnerRevisionSet(receipt.Evidence.OwnerRevisionSet),
+		SourceContentAddress: address,
+		ApplicabilitySource:  runtimecontract.CloneRuntimeEvidenceApplicabilityDependencies(receipt.Evidence.ApplicabilityDependencies),
 	}, nil
 }

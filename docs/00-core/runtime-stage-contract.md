@@ -162,6 +162,16 @@ fresh-load 反查同一声明，SM-2 exhaustion 与 SM-4 recovery/delivery 继�
 
 ## Definition And LLM Boundary
 
+The opt-in composite validation-review protocol is specified in
+[Validation Proof Composition](runtime/validation-proof-composition.md). It preserves ordinary proof AND typed lineage guards;
+review never grants execution credit or supplies future delivery acknowledgements.
+Confirmed original DoD source mappings for opted-in execution guards are specified in
+[Cross-Source Execution Proof](runtime/cross-source-execution-proof.md); ordinary consumer proof remains independent AND.
+Versioned deferred material consumers are specified in [Terminal Material Proof](runtime/terminal-material-proof.md).
+Historical effect / current acceptance separation is specified in [Evidence Proof Purpose](runtime/evidence-proof-purpose.md).
+They verify original source-bound receipts and formal Result indexes, without interpreting an operation receipt as a final
+repository snapshot or changing sealed acceptance authority.
+
 - 原 Goal/DoD 是验收基准。Template、Profile、执行期验证输入和补充检查只能细化或增加与该基准一致的约束，不能
   删除、替换、放宽或通过冲突约束改变原验收语义；所有新增义务与原义务合取。审批、外部参考实现通过、版本升级、
   测试自通过及覆盖率均不是违反该规则的豁免。原准则与具体测试实现是不同对象：旧测试不能仅因存在而取得准则权威，

@@ -28,19 +28,21 @@ func shellValidationOwnerDependencies(definition string, request RuntimeCommandR
 			return runtimecontract.RuntimeOwnerRevisionSet{}, fmt.Errorf("Shell validation dependencies require actual copied input")
 		}
 		preimage := struct {
-			WorkspaceID  string
-			Input        shellValidationCopiedInput
-			RecipeID     string
-			Command      string
-			Args         []string
-			Checks       []runtimecontract.RuntimeValidationCheckAttestationBinding
-			ScopeTargets []string
-		}{string(request.WorkspaceID), input, request.ValidationRecipeID, request.Command, request.Args, request.ValidationCheckAttestations, request.ValidationScopeTargetRefs}
+			WorkspaceID         string
+			Input               shellValidationCopiedInput
+			CopyProtocol        string
+			ExcludedDirectories []string
+			MaxFiles            int
+			MaxBytes            int64
+		}{string(request.WorkspaceID), input, "shell-managed-workspace-copy/v1", managedValidationSandboxExcludedDirectories(), maxObservedWorkspaceFiles, maxObservedWorkspaceBytes}
 		encoded, err := json.Marshal(preimage)
 		if err != nil {
 			return runtimecontract.RuntimeOwnerRevisionSet{}, err
 		}
-		digest := sha256.Sum256(append([]byte("shell-validation-copied-input/v1\x00"), encoded...))
+		// Copy reads the same full file regardless of recipe/check/argv. Those
+		// execution identities remain independently bound by the original receipt.
+		// Historical v1 observations remain immutable; only new copies use v2.
+		digest := sha256.Sum256(append([]byte("shell-validation-copied-input/v2\x00"), encoded...))
 		set.Entries = append(set.Entries, runtimecontract.RuntimeOwnerRevisionRef{
 			OwnerKind: "capability", OwnerInstanceID: ModuleID + "/" + string(request.WorkspaceID),
 			ResourceKind: string(runtimecontract.RuntimeResourceWorkspaceTarget), ResourceID: input.TargetRef,

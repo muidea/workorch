@@ -143,14 +143,15 @@ type EvidenceFact struct {
 	TargetRefs []string
 	// BindingRefs are copied only from the sealed operation authorization. CWI
 	// credit remains a reducer-derived field below, never candidate input.
-	BindingRefs         []string
-	CoverageWorkItemIDs []common.CoverageWorkItemID
-	Quality             common.EvidenceQuality
-	ZeroWork            bool
-	EvidenceReason      string
-	EvidenceTags        []string
-	Validation          *RuntimeValidationObservation
-	OwnerRevisionSet    *RuntimeOwnerRevisionSet `json:",omitempty"`
+	BindingRefs               []string
+	CoverageWorkItemIDs       []common.CoverageWorkItemID
+	Quality                   common.EvidenceQuality
+	ZeroWork                  bool
+	EvidenceReason            string
+	EvidenceTags              []string
+	Validation                *RuntimeValidationObservation
+	OwnerRevisionSet          *RuntimeOwnerRevisionSet                  `json:",omitempty"`
+	ApplicabilityDependencies *RuntimeEvidenceApplicabilityDependencies `json:",omitempty"`
 }
 
 type RuntimeOperationEvidence struct {
@@ -165,7 +166,10 @@ type RuntimeOperationEvidence struct {
 	EvidenceTags   []string
 	Validation     *RuntimeValidationObservation
 	// 实际读取依赖由 capability owner 产生，不从 ResourceChanges 或 current catalog 补造。
-	OwnerRevisionSet *RuntimeOwnerRevisionSet `json:",omitempty"`
+	OwnerRevisionSet          *RuntimeOwnerRevisionSet                  `json:",omitempty"`
+	ApplicabilityDependencies *RuntimeEvidenceApplicabilityDependencies `json:",omitempty"`
+	// Immutable owner-produced identity; terminal observations must retain it.
+	OwnerSnapshot *RuntimeOwnerSnapshotIdentity `json:",omitempty"`
 }
 
 type RuntimeEvidenceDigestAlgorithm string
@@ -686,13 +690,17 @@ type RuntimeFacts struct {
 	// required to deterministically requeue a profile-declared dependent focus
 	// when later accepted source evidence invalidates its prior closure.
 	CompletedFocuses []CoverageFocus
+	CWISuspensions   []RuntimeCWISuspension `json:",omitempty"`
 	Evidence         EvidenceLedger
-	Assessments      []RuntimeAssessmentFact
-	Failure          *FailureFact
-	Prerequisites    PrerequisiteState
-	Capabilities     RuntimeCapabilities
-	Resources        RuntimeResourceFacts
-	Activation       RuntimeActivationContext
+	// SM-2 owner-current observations retain original receipt/fact identities;
+	// they never rewrite either immutable dependency collection.
+	EvidenceApplicabilityObservations []RuntimeEvidenceApplicabilityObservation `json:",omitempty"`
+	Assessments                       []RuntimeAssessmentFact
+	Failure                           *FailureFact
+	Prerequisites                     PrerequisiteState
+	Capabilities                      RuntimeCapabilities
+	Resources                         RuntimeResourceFacts
+	Activation                        RuntimeActivationContext
 	// ReconciliationContract is the SM-2-sealed generation-specific CWI proof contract.
 	// It is persisted as part of the Orchestrator aggregate facts so a resume
 	// never reconstructs reconciliation authority from mutable profile text.
@@ -1070,7 +1078,7 @@ func (a RuntimeOperationAdmissibility) Normalized() RuntimeOperationAdmissibilit
 	if len(a.MCPCapabilities) > 0 {
 		caps := make([]RuntimeMCPCapabilityContext, 0, len(a.MCPCapabilities))
 		for _, capability := range a.MCPCapabilities {
-			caps = append(caps, SealMCPCapabilityEffect(capability))
+			caps = append(caps, SealMCPCapabilityEffect(cloneRuntimeMCPCapabilityContextRaw(capability)))
 		}
 		sort.Slice(caps, func(i, j int) bool {
 			if caps[i].ServerID != caps[j].ServerID {
@@ -1129,8 +1137,8 @@ func validateAndNormalizeRuntimeOperationAdmissibility(a RuntimeOperationAdmissi
 			if recipe.InputReviewProtocolRef != "" && (binding.InputReview == nil || binding.InputReview.ProtocolRef != recipe.InputReviewProtocolRef) {
 				return RuntimeOperationAdmissibility{}, fmt.Errorf("runtime owner catalog downgraded the sealed input review protocol")
 			}
-			if binding.InputReview != nil && binding.InputReview.ProtocolRef == RuntimeValidationInputReviewProtocolV2 && recipe.InputReviewProtocolRef != RuntimeValidationInputReviewProtocolV2 {
-				return RuntimeOperationAdmissibility{}, fmt.Errorf("runtime owner catalog introduced an undeclared v2 input review protocol")
+			if binding.InputReview != nil && binding.InputReview.ProtocolRef != RuntimeValidationInputReviewProtocol && recipe.InputReviewProtocolRef != binding.InputReview.ProtocolRef {
+				return RuntimeOperationAdmissibility{}, fmt.Errorf("runtime owner catalog introduced an undeclared versioned input review protocol")
 			}
 			if binding.InputReview == nil {
 				continue
@@ -1770,8 +1778,10 @@ func (f RuntimeFacts) Normalized() RuntimeFacts {
 	f.Focus = f.Focus.Normalized()
 	f.RemainingFocuses = normalizeCoverageFocusQueue(f.RemainingFocuses)
 	f.CompletedFocuses = normalizeCoverageFocusQueue(f.CompletedFocuses)
+	f.CWISuspensions = CloneRuntimeCWISuspensions(f.CWISuspensions)
 	f.Evidence.Accepted = normalizeEvidenceFacts(f.Evidence.Accepted)
 	f.Evidence.Rejected = normalizeEvidenceFacts(f.Evidence.Rejected)
+	f.EvidenceApplicabilityObservations = CloneRuntimeEvidenceApplicabilityObservations(f.EvidenceApplicabilityObservations)
 	f.Assessments = normalizeRuntimeAssessmentFacts(f.Assessments)
 	f.Prerequisites.Pending = normalizeRuntimePrerequisites(f.Prerequisites.Pending)
 	f.Prerequisites.Satisfied = normalizeRuntimePrerequisites(f.Prerequisites.Satisfied)
@@ -1870,6 +1880,9 @@ func (f RuntimeFacts) Validate() error {
 		if err := ValidateRuntimeSourceObligationApplicability(f.DefinitionSeed.SourceObligations, f.Activation.ExecutionContract.ProfileContracts); err != nil {
 			return fmt.Errorf("runtime facts source applicability: %w", err)
 		}
+		if err := ValidateRuntimeGoalExecutionAssertionSeed(f.DefinitionSeed, f.Activation.ExecutionContract.ProfileContracts); err != nil {
+			return err
+		}
 		if f.DefinitionSeed.DefinitionRevision != f.DefinitionRevision {
 			return fmt.Errorf("runtime facts definition seed revision mismatch")
 		}
@@ -1887,6 +1900,9 @@ func (f RuntimeFacts) Validate() error {
 				return fmt.Errorf("runtime facts definition verification policies: %w", err)
 			}
 		}
+	}
+	if err := ValidateRuntimeTerminalProofDeclarationSources(f.DefinitionSeed.CoverageItems, f.Activation.ExecutionContract.ProfileContracts); err != nil {
+		return err
 	}
 	if f.Focus.ID == "" {
 		return fmt.Errorf("runtime facts require a coverage focus")
@@ -2288,11 +2304,14 @@ func ValidateRuntimeOperationAdmissibilities(values []RuntimeOperationAdmissibil
 		if err := raw.Validate(); err != nil {
 			return err
 		}
-		value := raw.Normalized()
-		if _, duplicate := seenPrerequisites[value.PrerequisiteID]; duplicate {
-			return fmt.Errorf("runtime operation admissibility duplicates prerequisite %q", value.PrerequisiteID)
+		// The full catalog gate above already validated every raw member.
+		// This collection check reads only Normalized's scalar prerequisite ID,
+		// not another copy of all recipes, proof bindings and input bytes.
+		prerequisiteID := strings.TrimSpace(raw.PrerequisiteID)
+		if _, duplicate := seenPrerequisites[prerequisiteID]; duplicate {
+			return fmt.Errorf("runtime operation admissibility duplicates prerequisite %q", prerequisiteID)
 		}
-		seenPrerequisites[value.PrerequisiteID] = struct{}{}
+		seenPrerequisites[prerequisiteID] = struct{}{}
 	}
 	return nil
 }
@@ -2755,14 +2774,15 @@ func runtimeEquivalentAuthorityInput(facts RuntimeFacts) RuntimeEquivalentAuthor
 		writeHashString(observationHash, observation.ContentHash)
 	}
 	return RuntimeEquivalentAuthorityInputIdentity{
-		DefinitionRevision:        facts.DefinitionRevision,
-		FocusHash:                 StableRuntimeAuthorityFocusHash(facts.Focus),
-		BindingSetHash:            facts.ReconciliationContract.BindingSetHash,
-		EvidenceRevision:          facts.EvidenceRevision,
-		CapabilityStateHash:       StableRuntimeCapabilityStateHash(facts.Resources.CapabilityStates),
-		CatalogRevisionHash:       StableRuntimeOperationAdmissibilityCatalogRevisionHash(facts.Resources.OperationAdmissibilities),
-		PrerequisiteFreshnessHash: StableRuntimePrerequisiteFreshnessHash(facts.Resources.PrerequisiteObservations),
-		OwnerObservationHash:      "owner-observation-" + hex.EncodeToString(observationHash.Sum(nil))[:20],
+		DefinitionRevision:           facts.DefinitionRevision,
+		FocusHash:                    StableRuntimeAuthorityFocusHash(facts.Focus),
+		BindingSetHash:               facts.ReconciliationContract.BindingSetHash,
+		EvidenceRevision:             facts.EvidenceRevision,
+		CapabilityStateHash:          StableRuntimeCapabilityStateHash(facts.Resources.CapabilityStates),
+		CatalogRevisionHash:          StableRuntimeOperationAdmissibilityCatalogRevisionHash(facts.Resources.OperationAdmissibilities),
+		PrerequisiteFreshnessHash:    StableRuntimePrerequisiteFreshnessHash(facts.Resources.PrerequisiteObservations),
+		OwnerObservationHash:         "owner-observation-" + hex.EncodeToString(observationHash.Sum(nil))[:20],
+		ApplicabilityObservationHash: StableRuntimeEvidenceApplicabilitySemanticHash(facts.EvidenceApplicabilityObservations),
 	}.Normalized()
 }
 
@@ -3027,6 +3047,7 @@ func normalizeEvidenceFacts(values []EvidenceFact) []EvidenceFact {
 		value.Summary = strings.TrimSpace(value.Summary)
 		value.ContentHash = strings.TrimSpace(value.ContentHash)
 		value.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(value.OwnerRevisionSet)
+		value.ApplicabilityDependencies = CloneRuntimeEvidenceApplicabilityDependencies(value.ApplicabilityDependencies)
 		if value.ContentAddress != nil {
 			address := value.ContentAddress.Clone()
 			value.ContentAddress = &address

@@ -47,6 +47,7 @@ func MessageContracts() []eventcontract.MessageContract {
 		eventcontract.CommandTopic[ProbeRuntimeOwnerFactProspectiveSatisfactionCommand, ProbeRuntimeOwnerFactProspectiveSatisfactionResult]("shell", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicProbeRuntimeOwnerFactProspectiveSatisfaction),
 		eventcontract.CommandTopic[QueryRuntimeCWIReconciliationCommand, QueryRuntimeCWIReconciliationResult]("shell", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryRuntimeCWIReconciliation),
 		eventcontract.CommandTopic[QueryRuntimeValidationRawOutputCommand, QueryRuntimeValidationRawOutputResult]("shell", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryRuntimeValidationRawOutput),
+		eventcontract.CommandTopic[QueryRuntimeValidationReadDependenciesCommand, QueryRuntimeValidationReadDependenciesResult]("shell", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryRuntimeValidationReadDependencies),
 		eventcontract.CommandTopic[ExecuteOperationCommand, ExecuteOperationResult]("shell", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicExecuteOperation),
 	)
 }

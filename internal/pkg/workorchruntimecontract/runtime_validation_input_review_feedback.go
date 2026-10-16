@@ -65,6 +65,9 @@ func ProjectRuntimeValidationInputReviewFeedback(ref string, binding RuntimeVali
 			for k := range obligation.InputTargetRefs {
 				obligation.InputTargetRefs[k] = safe(obligation.InputTargetRefs[k])
 			}
+			for k := range obligation.ProofConsumerRefs {
+				obligation.ProofConsumerRefs[k] = safe(obligation.ProofConsumerRefs[k])
+			}
 		}
 	}
 	return f, f.Validate()
@@ -78,6 +81,26 @@ func (f RuntimeValidationInputReviewFeedback) Validate() error {
 	}
 	if !f.Redacted && f.ReportHash != StableRuntimeValidationInputReviewHash(f.Report) {
 		return fmt.Errorf("input review feedback lost exact original report content")
+	}
+	if len(f.Report.DiagnosticSources) > RuntimeValidationDiagnosticSourceLimit || f.ProtocolRef != RuntimeValidationInputReviewProtocolV3 && f.Report.DiagnosticSources != nil {
+		return fmt.Errorf("invalid diagnostic source feedback extension")
+	}
+	seenSources := map[string]bool{}
+	for _, source := range f.Report.DiagnosticSources {
+		if source.SourceRef == "" || seenSources[source.SourceRef] || source.Reason == "" || len(source.Reason) > RuntimeValidationInputReviewMaxReasonBytes || len(source.InputTargetRefs) == 0 {
+			return fmt.Errorf("diagnostic source feedback lost independent finding")
+		}
+		seenSources[source.SourceRef] = true
+		switch source.Conclusion {
+		case RuntimeValidationInputConsistent, RuntimeValidationInputConflict, RuntimeValidationInputInconclusive:
+		default:
+			return fmt.Errorf("invalid diagnostic source feedback conclusion")
+		}
+		for _, value := range append([]string{source.SourceRef, source.Reason}, source.InputTargetRefs...) {
+			if value == "" || !utf8.ValidString(value) || len(value) > RuntimeValidationInputReviewMaxScopeBytes {
+				return fmt.Errorf("diagnostic source feedback text invalid")
+			}
+		}
 	}
 	for _, check := range f.Report.Checks {
 		if f.ProtocolRef == RuntimeValidationInputReviewProtocol && check.Obligations != nil {
@@ -95,6 +118,13 @@ func (f RuntimeValidationInputReviewFeedback) Validate() error {
 		for _, obligation := range check.Obligations {
 			texts = append(texts, obligation.CriterionText, obligation.Reason)
 			texts = append(texts, obligation.InputTargetRefs...)
+			texts = append(texts, obligation.ProofConsumerRefs...)
+			if f.ProtocolRef != RuntimeValidationInputReviewProtocolV3 && obligation.ProofConsumerRefs != nil {
+				return fmt.Errorf("legacy feedback cannot introduce composite proof mappings")
+			}
+			if f.ProtocolRef == RuntimeValidationInputReviewProtocolV3 && len(obligation.ProofConsumerRefs) == 0 {
+				return fmt.Errorf("composite feedback lost proof consumer mapping")
+			}
 		}
 		for _, value := range texts {
 			if value == "" || !utf8.ValidString(value) || len(value) > RuntimeValidationInputReviewMaxScopeBytes {
@@ -104,7 +134,7 @@ func (f RuntimeValidationInputReviewFeedback) Validate() error {
 				return err
 			}
 		}
-		if f.ProtocolRef == RuntimeValidationInputReviewProtocolV2 {
+		if f.ProtocolRef != RuntimeValidationInputReviewProtocol {
 			if err := validateRuntimeValidationInputObligationShape(check, !f.Redacted); err != nil {
 				return err
 			}

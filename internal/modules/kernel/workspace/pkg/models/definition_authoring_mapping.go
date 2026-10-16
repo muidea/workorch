@@ -14,14 +14,16 @@ const DefinitionAuthoringMappingProtocol = "workorch.authoring.sealed-ref-mappin
 
 // DefinitionAuthoringMapping 是唯一当前创作提案 wire；provider 仅提出分组与声明，不能改写封存来源事实。
 type DefinitionAuthoringMapping struct {
-	Protocol             string
-	InputHash            string
-	TemplateSnapshotHash string
-	ResourceSnapshotHash string
-	GoalRequirement      DefinitionAuthoringGoalMapping
-	Dimensions           []DefinitionAuthoringDimensionMapping
-	Requirements         []DefinitionAuthoringRequirementMapping
-	Obligations          []DefinitionAuthoringObligationMapping
+	Protocol                string
+	InputHash               string
+	TemplateSnapshotHash    string
+	ResourceSnapshotHash    string
+	GoalRequirement         DefinitionAuthoringGoalMapping
+	Dimensions              []DefinitionAuthoringDimensionMapping
+	Requirements            []DefinitionAuthoringRequirementMapping
+	Obligations             []DefinitionAuthoringObligationMapping
+	ExecutionProofMappings  []GoalExecutionProofMapping  `json:",omitempty"`
+	EvidencePurposeMappings []GoalEvidencePurposeMapping `json:",omitempty"`
 }
 type DefinitionAuthoringGoalMapping struct {
 	DimensionRef string
@@ -52,6 +54,8 @@ type DefinitionAuthoringVerificationMapping struct {
 }
 
 func (m DefinitionAuthoringMapping) Clone() DefinitionAuthoringMapping {
+	m.EvidencePurposeMappings = slices.Clone(m.EvidencePurposeMappings)
+	m.ExecutionProofMappings = slices.Clone(m.ExecutionProofMappings)
 	m.GoalRequirement.ResourceIDs = slices.Clone(m.GoalRequirement.ResourceIDs)
 	m.Dimensions = slices.Clone(m.Dimensions)
 	for i := range m.Dimensions {
@@ -156,6 +160,8 @@ func CompileDefinitionAuthoringMapping(d DefinitionDerivationRequest, m Definiti
 		dimIDs[ref] = mappingCanonicalID("dimension", fields...)
 	}
 	spec := GoalSpecification{Version: GoalSpecificationVersionCurrent, GoalItemRef: DefinitionAuthoringGoalItemRef, GoalTextHash: StableDefinitionTextHash(c.goal.Text), Resources: c.resources, Dimensions: []GoalSpecificationDimension{}, Requirements: []GoalSpecificationRequirement{}, Obligations: []GoalSpecificationObligation{}, Verifications: []GoalSpecificationVerification{}, Reviews: []GoalSpecificationCompletenessReview{}}
+	spec.ExecutionProofMappings = slices.Clone(m.ExecutionProofMappings)
+	spec.EvidencePurposeMappings = slices.Clone(m.EvidencePurposeMappings)
 	for ref, dim := range dims {
 		spec.Dimensions = append(spec.Dimensions, GoalSpecificationDimension{ID: dimIDs[ref], Required: true, Activated: true, ResourceIDs: slices.Clone(dim.ResourceIDs)})
 	}

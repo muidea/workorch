@@ -24,5 +24,5 @@ func validateAuthoringVerificationAgainstSealedTemplate(sealedTemplateHash strin
 	if err != nil {
 		return err
 	}
-	return definitionadmission.ValidateAuthoringVerificationApplicability(specification, items, bindings.ProfileContracts)
+	return definitionadmission.ValidateAuthoringVerificationApplicability(specification, items, bindings.ProfileContracts, workspacemodel.DefinitionCandidateItem{CandidateItemRef: specification.GoalItemRef, Text: derivation.Input.GoalText})
 }

@@ -27,7 +27,7 @@ func (c *RuntimeController) applyDeliveryInternalEvent(ctx context.Context, even
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventTerminalMaterialSealRequired:
-		aggregate, err := c.driveDelivery.sealTerminalMaterial(ctx, event.Scope.WorkspaceID, event.Scope.RunID)
+		aggregate, err := c.driveDelivery.sealTerminalMaterial(ctx, event.Scope.WorkspaceID, event.Scope.RunID, event.Delivery.TerminalSnapshotProofs)
 		result.Aggregate = aggregate
 		return result, err
 	case RuntimeInternalEventTerminalDeliveryAcknowledged:

@@ -131,7 +131,7 @@ func newHTTPServerWithApplicationPorts(config Config, ports ApplicationPorts, ba
 
 func newHTTPServerWithState(config Config, state *serverState) *HTTPServer {
 	handler := newMuxWithStateNoStart(state)
-	return newHTTPServerWithHandler(config, state, handler)
+	return newHTTPServerWithHandler(config, state, localOperatorHTTPBoundary(handler))
 }
 
 func newHTTPServerWithHandler(config Config, state *serverState, handler http.Handler) *HTTPServer {
@@ -162,9 +162,9 @@ func (s *HTTPServer) Start() error {
 	if stopping {
 		return nil
 	}
-	addr := s.http.Addr
-	if addr == "" {
-		addr = ":http"
+	addr, err := localOperatorListenerAddress(s.http.Addr)
+	if err != nil {
+		return err
 	}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -174,6 +174,12 @@ func (s *HTTPServer) Start() error {
 }
 
 func (s *HTTPServer) serve(listener net.Listener) error {
+	if listener == nil {
+		return errors.New("http listener is missing")
+	}
+	if _, err := localOperatorListenerAddress(listener.Addr().String()); err != nil {
+		return errors.Join(err, listener.Close())
+	}
 	tracked := &shutdownListener{Listener: listener, server: s}
 	s.mu.Lock()
 	if s.stopping {
@@ -204,6 +210,9 @@ func (s *HTTPServer) serve(listener net.Listener) error {
 func (s *HTTPServer) Validate(ctx context.Context) error {
 	if s == nil {
 		return errors.New("http server is not configured")
+	}
+	if _, err := localOperatorListenerAddress(s.config.Addr); err != nil {
+		return err
 	}
 	return s.state.validate(ctx, s.config.Backend, s.config.DataRoot)
 }

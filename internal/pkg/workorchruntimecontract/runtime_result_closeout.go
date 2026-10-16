@@ -23,6 +23,7 @@ type RuntimeResultCloseout struct {
 	AcceptedEvidenceRefs           []string
 	DeliverableRefs                []string
 	OwnerRevisionSet               RuntimeOwnerRevisionSet
+	TerminalSnapshotProofs         []RuntimeTerminalSnapshotProof `json:",omitempty"`
 	KnownLimitations               []string
 	CloseoutHash                   string
 	SatisfiedCoverageWorkItemIDs   []common.CoverageWorkItemID
@@ -65,7 +66,7 @@ const RuntimeResultCloseoutSchemaVersionCurrent uint32 = 1
 // Only the current contract may drive or render a Result. Older archives are
 // rejected without mutation or fallback; same-version acknowledgement loss
 // must reproduce the identical material from the persisted aggregate.
-const RuntimeResultFeedbackVersionCurrent uint32 = 3
+const RuntimeResultFeedbackVersionCurrent uint32 = 5
 
 func ValidateRuntimeResultFeedbackVersion(version uint32) error {
 	if version != RuntimeResultFeedbackVersionCurrent {
@@ -94,6 +95,7 @@ func (c RuntimeResultCloseout) Normalized() RuntimeResultCloseout {
 	c.AcceptedEvidenceRefs = normalizeStrings(c.AcceptedEvidenceRefs)
 	c.DeliverableRefs = normalizeStrings(c.DeliverableRefs)
 	c.OwnerRevisionSet = c.OwnerRevisionSet.Normalized()
+	c.TerminalSnapshotProofs = cloneRuntimeStateRawSlice(c.TerminalSnapshotProofs, func(p RuntimeTerminalSnapshotProof) RuntimeTerminalSnapshotProof { return p.CloneRaw() })
 	c.KnownLimitations = normalizeStrings(c.KnownLimitations)
 	c.CloseoutHash = strings.TrimSpace(c.CloseoutHash)
 	c.SatisfiedCoverageWorkItemIDs = normalizeCoverageWorkItemIDs(c.SatisfiedCoverageWorkItemIDs)
@@ -211,6 +213,17 @@ func (c RuntimeResultCloseout) validateFormalCloseout() error {
 	}
 	if err := c.OwnerRevisionSet.Validate(); err != nil {
 		return err
+	}
+	if len(c.TerminalSnapshotProofs) > MaxRuntimeLineageAssertions {
+		return fmt.Errorf("terminal snapshot proof inventory exceeds bound")
+	}
+	for _, proof := range c.TerminalSnapshotProofs {
+		if err := proof.ValidateRaw(); err != nil {
+			return err
+		}
+		if c.TerminalOutcome.Kind != TerminalOutcomeKindCompleted || proof.CurrentDependencies.DefinitionRevision != c.DefinitionRevision || proof.ObservedAtStateRevision+1 != c.RuntimeStateRevision {
+			return fmt.Errorf("terminal snapshot proof differs from original material generation")
+		}
 	}
 	if c.OwnerRevisionSet.DefinitionRevision != c.DefinitionRevision {
 		return fmt.Errorf("formal runtime closeout owner revisions are stale")

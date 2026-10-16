@@ -78,7 +78,7 @@ func (c *planningTransactionComponent) ensureCandidateRequestSessionWithExpected
 	expectedRevision := aggregate.StateRevision
 	aggregate.CandidateRequestSessions = append(aggregate.CandidateRequestSessions, session)
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return candidateRequestSessionEnsureResult{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -162,7 +162,7 @@ func (c *planningTransactionComponent) markCandidateRequestSubmitted(ctx context
 	aggregate.CandidateRequestSessions[idx].ProviderSubmitted = true
 	aggregate.CandidateRequestSessions[idx].LastPhysicalCallID = physicalCallID
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -214,7 +214,7 @@ func (c *planningTransactionComponent) completeCandidateRequestDocument(ctx cont
 	updated.LastDocumentFraming = nil
 	updated.ProviderSubmitted = true
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -277,6 +277,9 @@ func candidateRequestSessionActionAllowed(aggregate RuntimeAggregate, documentKi
 	}
 	if aggregate.ActiveDispatch != nil {
 		return fmt.Errorf("%w: current runtime authority does not accept a candidate request", common.ErrConflict)
+	}
+	if !runtimeApplicabilityHasUnsettledProvider(aggregate) && runtimeApplicabilityGenerationPending(aggregate.Facts, aggregate.CoverageProofLineage, aggregate.Reconciliation.RequestHash) {
+		return fmt.Errorf("%w: provider request awaits original-owner current-read obligations", common.ErrConflict)
 	}
 	if documentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 		if RuntimeSemanticPrerequisitesPendingForAggregate(aggregate) {

@@ -32,6 +32,15 @@ const EditorInputForm = memo(function EditorInputForm({ form, templateOptions, d
 const EditorProposal = memo(function EditorProposal({ proposal }: { proposal: NonNullable<DefinitionAuthoringView['proposal']> }) {
   return <>
     <List dataSource={proposal.verifications || []} renderItem={item => <List.Item>{item.id} · {item.status} · {item.declaration}</List.Item>} />
+    {proposal.executionProofMappings?.length ? <>
+      <Typography.Paragraph>跨源执行证明映射随本规格一并确认；它不代替原准则和普通工程验证。</Typography.Paragraph>
+      <List aria-label="跨源执行证明映射" dataSource={proposal.executionProofMappings} renderItem={item => <List.Item><div>{item.consumerItemRef} · {item.ruleRef} → 原来源 {item.sourceItemRef} · {item.contractRef}{item.consumerGoalText !== undefined ? <pre aria-label="映射的完整 Goal 原文" style={{ whiteSpace: 'pre-wrap' }}>{item.consumerGoalText}</pre> : null}</div></List.Item>} />
+    </> : null}
+    {proposal.evidencePurposeMappings?.length ? <>
+      <Typography.Paragraph>跨 CWI 用途映射随本规格一并确认：前驱历史行为仅解锁精确后继，终验仍须全部原准则与真实当前普通证明。</Typography.Paragraph>
+      <List aria-label="跨 CWI 证据用途映射" dataSource={proposal.evidencePurposeMappings} renderItem={item => <List.Item><div>历史行为 {item.historicalItemRef} → 当前验收 {item.acceptanceItemRef} · {item.contractRef}
+        {item.historicalProfileId ? <><div>Profile {item.historicalProfileId} · deliverable {item.historicalDeliverableId} · 快照 {item.historicalProfileHash}</div><div style={{ whiteSpace: 'pre-wrap' }}>{item.historicalText}</div></> : null}</div></List.Item>} />
+    </> : null}
     <List dataSource={proposal.items} renderItem={item => <List.Item><Space><Tag>{authoringSourceLabel(item.sourceKind)}</Tag>{item.text}</Space></List.Item>} />
     <List dataSource={proposal.reviews || []} renderItem={item => <List.Item><Space><Tag color={item.status === 'PASS' ? 'green' : 'orange'}>{item.status}</Tag>{item.kind}：{item.reason}</Space></List.Item>} />
   </>;

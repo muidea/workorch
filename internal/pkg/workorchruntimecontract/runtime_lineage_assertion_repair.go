@@ -10,6 +10,10 @@ import (
 // RuntimeRepairHistoryEvidenceRevision 反证已退休 repair 的历史完成链。
 // 它不读取当前 focus/coverage 满足位；handoff 被消费或后续再失败均不抹掉历史。
 func RuntimeRepairHistoryEvidenceRevision(sources RuntimeLineageAssertionSources, coverageID common.CoverageWorkItemID, lineage RuntimeCWIReopenLineage, closure RuntimeRepairClosure, cutoff string) (string, error) {
+	return runtimeRepairHistoryEvidenceRevisionInSession(sources, coverageID, lineage, closure, cutoff, nil)
+}
+
+func runtimeRepairHistoryEvidenceRevisionInSession(sources RuntimeLineageAssertionSources, coverageID common.CoverageWorkItemID, lineage RuntimeCWIReopenLineage, closure RuntimeRepairClosure, cutoff string, session *runtimeHistoricalPreimageSession) (string, error) {
 	invalid := func(detail string) (string, error) { return "", fmt.Errorf("runtime repair history: %s", detail) }
 	if lineage.Validate() != nil || lineage.Reason != "validation_failure_repair_settled" || closure.Validate() != nil || !runtimeCanonicalLineageCutoff(cutoff) {
 		return invalid("invalid retired binding, closure or cutoff")
@@ -17,10 +21,10 @@ func RuntimeRepairHistoryEvidenceRevision(sources RuntimeLineageAssertionSources
 	if err := ValidateRuntimeEvidenceLedgerSequence(sources.EvidenceSequence, sources.Facts, sources.Active, sources.Completed, sources.Resolutions); err != nil {
 		return "", err
 	}
-	if err := runtimeValidateLineageOperations(sources); err != nil {
+	if err := runtimeValidateLineageOperationsInSession(sources, session); err != nil {
 		return "", err
 	}
-	entries, err := runtimeAssessmentPurposePreimagesFromSemanticLedger(sources.Semantic, false)
+	entries, err := session.preimages(sources.Semantic)
 	if err != nil {
 		return "", err
 	}
@@ -47,7 +51,8 @@ func RuntimeRepairHistoryEvidenceRevision(sources RuntimeLineageAssertionSources
 	if matched.obligation.CoverageWorkItemID != coverageID || binding.Validate() != nil {
 		return invalid("retired binding differs from exact CWI")
 	}
-	if !slices.Equal(binding.ProspectiveTargetRefs, closure.GroundedTargetRefs) {
+	repairTargets, err := runtimeRepairHistoryBindingTargets(binding, repair)
+	if err != nil || !slices.Equal(repairTargets, closure.GroundedTargetRefs) {
 		return invalid("retired binding targets differ from closure")
 	}
 	var trigger EvidenceFact
@@ -88,7 +93,7 @@ func RuntimeRepairHistoryEvidenceRevision(sources RuntimeLineageAssertionSources
 	matches = 0
 	for _, sourceDispatch := range sources.Completed {
 		for _, operation := range runtimeCandidateAdmissionOperations(sourceDispatch.Candidate) {
-			fact, receipt, valid := runtimeLineageOperationFact(sourceDispatch, operation, sources, false)
+			fact, receipt, valid := runtimeLineageOperationFactFromLedgersInIndex(sourceDispatch, operation, sources, false, false, false, session.lineageIndex())
 			if !valid || fact.Kind != EvidenceKindValidation || fact.Revision != closure.BaselineEvidenceRevision || fact.FocusID != repair.FailedFocusID || fact.FailureSignature != repair.FailureSignature || !slices.Contains(fact.CoverageWorkItemIDs, coverageID) {
 				continue
 			}
@@ -122,7 +127,7 @@ func RuntimeRepairHistoryEvidenceRevision(sources RuntimeLineageAssertionSources
 			return invalid("confirmed repair omitted commitment")
 		}
 		commitment := *dispatch.RepairCommitment
-		if ValidateRuntimeDispatchRepairCommitmentProjection(dispatch.RepairCommitmentHash, dispatch.RepairCommitment) != nil || commitment.Closure.ID != closure.ID || commitment.SourceEvidenceFactID != rejected.ID || commitment.SourceEvidenceFactHash != StableRuntimeEvidenceFactHash(rejected) || commitment.SourceDispatchID != rejected.DispatchID || commitment.SourceAuthoritySnapshotID != rejected.AuthoritySnapshotID || commitment.SourceOperationID != rejectedOperation.ID || commitment.SourceOperationHash != StableRuntimeOperationHash(rejectedOperation) || commitment.SourceReceiptExecutionKey != rejectedReceipt.ExecutionKey || commitment.SourceReceiptFence != rejectedReceipt.Fence || commitment.SourceReceiptHash != StableRuntimeOperationReceiptHash(rejectedReceipt) || commitment.RepairOwnerModuleID != repair.RepairOwnerModuleID {
+		if ValidateRuntimeDispatchRepairCommitmentProjection(dispatch.RepairCommitmentHash, dispatch.RepairCommitment) != nil || commitment.Closure.ID != closure.ID || commitment.SourceEvidenceFactID != rejected.ID || commitment.SourceEvidenceFactHash != StableRuntimeEvidenceFactHash(rejected) || commitment.SourceDispatchID != rejected.DispatchID || commitment.SourceAuthoritySnapshotID != rejected.AuthoritySnapshotID || commitment.SourceOperationID != rejectedOperation.ID || commitment.SourceOperationHash != StableRuntimeOperationHash(rejectedOperation) || commitment.SourceReceiptExecutionKey != rejectedReceipt.ExecutionKey || commitment.SourceReceiptFence != rejectedReceipt.Fence || commitment.SourceReceiptHash != session.lineageIndex().receiptHash(rejectedReceipt) || commitment.RepairOwnerModuleID != repair.RepairOwnerModuleID {
 			return invalid("repair commitment source mismatch")
 		}
 		confirmations := 0
@@ -132,7 +137,7 @@ func RuntimeRepairHistoryEvidenceRevision(sources RuntimeLineageAssertionSources
 			}
 			confirmation := record.Confirmation
 			observation := confirmation.Observation
-			if record.Validate() != nil || confirmation.Disposition != RuntimeRepairSurfaceConfirmed || confirmation.OwnerModuleID != repair.RepairOwnerModuleID || !slices.Equal(confirmation.ConfirmedTargetRefs, closure.GroundedTargetRefs) || observation.WorkspaceID != sources.Facts.WorkspaceID || observation.RunID != sources.Facts.RunID || observation.DispatchID != rejected.DispatchID || observation.OperationID != rejected.OperationID || observation.AuthoritySnapshotID != rejected.AuthoritySnapshotID || observation.FailureSignature != rejected.FailureSignature || observation.DiagnosticClass != diagnostic.Class || observation.DiagnosticHash != StableRuntimeValidationFailureObservationDiagnosticHash(diagnostic, observation.ValidationScopeTargetRefs) {
+			if session.lineageIndex().confirmation(record) != nil || confirmation.Disposition != RuntimeRepairSurfaceConfirmed || confirmation.OwnerModuleID != repair.RepairOwnerModuleID || !slices.Equal(confirmation.ConfirmedTargetRefs, closure.GroundedTargetRefs) || observation.WorkspaceID != sources.Facts.WorkspaceID || observation.RunID != sources.Facts.RunID || observation.DispatchID != rejected.DispatchID || observation.OperationID != rejected.OperationID || observation.AuthoritySnapshotID != rejected.AuthoritySnapshotID || observation.FailureSignature != rejected.FailureSignature || observation.DiagnosticClass != diagnostic.Class || observation.DiagnosticHash != StableRuntimeValidationFailureObservationDiagnosticHash(diagnostic, observation.ValidationScopeTargetRefs) {
 				return invalid("confirmation differs from source diagnostic")
 			}
 			confirmations++
@@ -145,7 +150,7 @@ func RuntimeRepairHistoryEvidenceRevision(sources RuntimeLineageAssertionSources
 	finalRevision := ""
 	for _, operation := range runtimeCandidateAdmissionOperations(dispatch.Candidate) {
 		descriptor, known := RuntimeOperationDescriptorForKind(operation.Kind)
-		fact, receipt, valid := runtimeLineageOperationFact(dispatch, operation, sources, true)
+		fact, receipt, valid := runtimeLineageOperationFactFromLedgersInIndex(dispatch, operation, sources, true, false, false, session.lineageIndex())
 		if !known || MatchCoverageEvidenceBindingReceipt(binding, EvidenceKindStateChange, operation, receipt) != nil || descriptor.OwnerModuleID != repair.RepairOwnerModuleID || !slices.Contains(repair.RepairOperationKinds, operation.Kind) || !valid || !receipt.Changed || !RuntimeEffectIsDurable(receipt.ObservedEffectScope) || fact.Kind != EvidenceKindStateChange || !slices.Equal(fact.BindingRefs, operation.BindingRefs) || !slices.Contains(fact.BindingRefs, binding.ID) || !slices.Equal(fact.CoverageWorkItemIDs, closure.CoverageWorkItemIDs) || !EvidenceRevisionAfter(fact.Revision, rejected.Revision) || EvidenceRevisionAfter(fact.Revision, cutoff) {
 			return invalid("repair lacks complete changed receipt set")
 		}
@@ -154,15 +159,44 @@ func RuntimeRepairHistoryEvidenceRevision(sources RuntimeLineageAssertionSources
 			finalRevision = fact.Revision
 		}
 	}
-	if !sameRuntimeStringSet(targets, binding.ProspectiveTargetRefs) || finalRevision != trigger.Revision {
+	if !sameRuntimeStringSet(targets, repairTargets) || finalRevision != trigger.Revision {
 		return invalid("repair final trigger differs from all-of receipts")
 	}
 	return finalRevision, nil
 }
 
+// The original sealed policy determines the target field. Existing-file repair
+// cannot be reinterpreted as prospective input creation (or vice versa), and
+// neither kind may borrow a second target set from another binding surface.
+func runtimeRepairHistoryBindingTargets(binding CoverageEvidenceBinding, repair RuntimeSemanticValidationFailureRepair) ([]string, error) {
+	var targets []string
+	switch repair.RepairTargetPolicy {
+	case RuntimeOperationTargetPolicyExactTarget, RuntimeOperationTargetPolicyExistingOwnerScope:
+		if len(binding.ProspectiveTargetRefs) != 0 {
+			return nil, fmt.Errorf("existing repair carries prospective targets")
+		}
+		targets = binding.TargetRefs
+	case RuntimeOperationTargetPolicyProspectiveOwnerTarget:
+		if len(binding.TargetRefs) != 0 {
+			return nil, fmt.Errorf("prospective repair carries existing targets")
+		}
+		targets = binding.ProspectiveTargetRefs
+	default:
+		return nil, fmt.Errorf("repair history requires original target policy")
+	}
+	if len(targets) == 0 || !slices.Equal(targets, normalizeStrings(targets)) {
+		return nil, fmt.Errorf("repair history requires exact finite canonical target set")
+	}
+	return slices.Clone(targets), nil
+}
+
 // runtimeRepairThenFreshValidationSatisfied 只接受原完整 CWI 的新普通 proof，不能借 repair credit。
 func runtimeRepairThenFreshValidationSatisfied(binding CoverageEvidenceBinding, sources RuntimeLineageAssertionSources, cutoff string) bool {
-	entries, err := runtimeAssessmentPurposePreimagesFromSemanticLedger(sources.Semantic, false)
+	return runtimeRepairThenFreshValidationInSession(binding, sources, cutoff, &runtimeHistoricalPreimageSession{})
+}
+
+func runtimeRepairThenFreshValidationInSession(binding CoverageEvidenceBinding, sources RuntimeLineageAssertionSources, cutoff string, session *runtimeHistoricalPreimageSession) bool {
+	entries, err := session.preimages(sources.Semantic)
 	if err != nil {
 		return false
 	}
@@ -171,7 +205,7 @@ func runtimeRepairThenFreshValidationSatisfied(binding CoverageEvidenceBinding, 
 		if !RuntimeCoverageEvidenceBindingProjectionsEqual(entry.bindings, []CoverageEvidenceBinding{binding}) {
 			continue
 		}
-		purpose, err := ResolveRuntimeSemanticEvidenceObligation(entry.obligation)
+		purpose, err := resolveRuntimeSemanticEvidenceObligationInSession(entry.obligation, session.semanticSession())
 		if err == nil && purpose.Purpose == RuntimeSemanticEvidenceObligationDefinitionProof {
 			ordinary++
 		}
@@ -204,18 +238,18 @@ func runtimeRepairThenFreshValidationSatisfied(binding CoverageEvidenceBinding, 
 				if freshManifestMatches != 1 {
 					continue
 				}
-				repairRevision, err := RuntimeRepairHistoryEvidenceRevision(sources, binding.CoverageWorkItemID, lineage, closure, cutoff)
+				repairRevision, err := runtimeRepairHistoryEvidenceRevisionInSession(sources, binding.CoverageWorkItemID, lineage, closure, cutoff, session)
 				if err != nil {
 					continue
 				}
 				proof, found := CoverageEvidenceProofForKind(binding, EvidenceKindValidation)
-				if !found || !runtimeFreshBindingInputReview(binding, sources.Semantic) {
+				if !found || !runtimeFreshBindingInputReviewInSession(binding, sources.Semantic, session) {
 					continue
 				}
 				var accepted []EvidenceFact
 				complete := true
 				for _, operation := range runtimeCandidateAdmissionOperations(dispatch.Candidate) {
-					fact, receipt, valid := runtimeLineageOperationFact(dispatch, operation, sources, true)
+					fact, receipt, valid := runtimeLineageOperationFactFromLedgersInIndex(dispatch, operation, sources, true, false, false, session.lineageIndex())
 					if !valid || MatchCoverageEvidenceBindingReceipt(binding, EvidenceKindValidation, operation, receipt) != nil || fact.Kind != EvidenceKindValidation || !slices.Contains(fact.BindingRefs, binding.ID) || !slices.Equal(fact.CoverageWorkItemIDs, []common.CoverageWorkItemID{binding.CoverageWorkItemID}) || !EvidenceRevisionAfter(fact.Revision, repairRevision) || EvidenceRevisionAfter(fact.Revision, cutoff) || fact.Validation == nil || !RuntimeValidationObservationSatisfiesCoverageProof(proof, *fact.Validation) {
 						complete = false
 						break
@@ -303,13 +337,17 @@ func runtimeRepairClosureForLineage(sources RuntimeLineageAssertionSources, cove
 		return closure, closure.ID == closureID && closure.Validate() == nil
 	}
 	repair := matched.obligation.ValidationFailureRepair
+	targets, err := runtimeRepairHistoryBindingTargets(binding, *repair)
+	if err != nil {
+		return RuntimeRepairClosure{}, false
+	}
 	var closure RuntimeRepairClosure
 	matches = 0
 	for _, fact := range sources.Facts.Evidence.Rejected {
 		if fact.Kind != EvidenceKindValidation || fact.FocusID != repair.FailedFocusID || fact.FailureSignature != repair.FailureSignature || !slices.Equal(fact.CoverageWorkItemIDs, []common.CoverageWorkItemID{coverageID}) {
 			continue
 		}
-		candidate := RuntimeRepairClosure{GapSignature: repair.FailureSignature, BaselineEvidenceRevision: fact.Revision, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, RequiredEvidenceKinds: []string{EvidenceKindStateChange, EvidenceKindValidation}, GroundedTargetRefs: slices.Clone(binding.ProspectiveTargetRefs), RequireValidationAfterStateChange: true}.Normalized()
+		candidate := RuntimeRepairClosure{GapSignature: repair.FailureSignature, BaselineEvidenceRevision: fact.Revision, CoverageWorkItemIDs: []common.CoverageWorkItemID{coverageID}, RequiredEvidenceKinds: []string{EvidenceKindStateChange, EvidenceKindValidation}, GroundedTargetRefs: targets, RequireValidationAfterStateChange: true}.Normalized()
 		candidate.ID = StableRuntimeRepairClosureID(candidate)
 		if candidate.ID == closureID {
 			closure, matches = candidate, matches+1
@@ -320,9 +358,26 @@ func runtimeRepairClosureForLineage(sources RuntimeLineageAssertionSources, cove
 
 // runtimeFreshBindingInputReview 仅消费产生 exact binding 的 accepted batch；其它历史报告不能补证。
 func runtimeFreshBindingInputReview(binding CoverageEvidenceBinding, ledger RuntimeSemanticPlanningLedger) bool {
-	entries, err := runtimeAssessmentPurposePreimagesFromSemanticLedger(ledger, false)
+	return runtimeFreshBindingInputReviewInSession(binding, ledger, nil)
+}
+
+func runtimeFreshBindingInputReviewInSession(binding CoverageEvidenceBinding, ledger RuntimeSemanticPlanningLedger, session *runtimeHistoricalPreimageSession) bool {
+	_, err := compileRuntimeBindingValidationInputReviewInSession(binding, ledger, session)
+	return err == nil
+}
+
+// CompileRuntimeBindingValidationInputReview returns only the original owner
+// subject from the unique accepted semantic batch that produced this exact
+// binding. A consistent report from another generation cannot certify it.
+// Callers must independently validate the enclosing aggregate/current proof.
+func CompileRuntimeBindingValidationInputReview(binding CoverageEvidenceBinding, ledger RuntimeSemanticPlanningLedger) (RuntimeValidationProofRequirementBinding, error) {
+	return compileRuntimeBindingValidationInputReviewInSession(binding, ledger, nil)
+}
+
+func compileRuntimeBindingValidationInputReviewInSession(binding CoverageEvidenceBinding, ledger RuntimeSemanticPlanningLedger, session *runtimeHistoricalPreimageSession) (RuntimeValidationProofRequirementBinding, error) {
+	entries, err := session.preimages(ledger)
 	if err != nil {
-		return false
+		return RuntimeValidationProofRequirementBinding{}, err
 	}
 	var matched runtimeAssessmentPurposeBindingPreimage
 	matches := 0
@@ -334,31 +389,36 @@ func runtimeFreshBindingInputReview(binding CoverageEvidenceBinding, ledger Runt
 		}
 	}
 	if matches != 1 {
-		return false
+		return RuntimeValidationProofRequirementBinding{}, fmt.Errorf("input review requires unique exact accepted binding source")
 	}
-	purpose, err := ResolveRuntimeSemanticEvidenceObligation(matched.obligation)
+	purpose, err := resolveRuntimeSemanticEvidenceObligationInSession(matched.obligation, session.semanticSession())
 	if err != nil || purpose.Purpose != RuntimeSemanticEvidenceObligationDefinitionProof {
-		return false
+		return RuntimeValidationProofRequirementBinding{}, fmt.Errorf("input review requires original Definition proof purpose")
 	}
 	proof, found := CoverageEvidenceProofForKind(binding, EvidenceKindValidation)
 	if !found {
-		return false
+		return RuntimeValidationProofRequirementBinding{}, fmt.Errorf("input review requires validation proof")
 	}
 	reviews := 0
+	var result RuntimeValidationProofRequirementBinding
 	for _, proposal := range matched.acceptedDocument.Proposals {
 		if proposal.CoverageWorkItemID != binding.CoverageWorkItemID || proposal.DeclarationRef != binding.DeclarationRef || !slices.Contains(proposal.RequiredEvidenceKinds, EvidenceKindValidation) {
 			continue
 		}
 		if !slices.Contains(proof.AllowedOperationKinds, proposal.OperationKind) || proposal.ValidationRecipeID != proof.ValidationRecipeID || proposal.ValidationInputReview == nil {
-			return false
+			return RuntimeValidationProofRequirementBinding{}, fmt.Errorf("input review proposal differs from sealed validation proof")
 		}
 		requirement, found := RuntimeSemanticValidationInputReviewBinding(proposal, matched.ownerCatalogs)
 		if !found || requirement.InputReview == nil || requirement.DefinitionRevision != binding.DefinitionRevision || requirement.RequirementHash != proof.ValidationProofRequirementHash || !slices.Equal(requirement.RequiredCheckRefs, proof.RequiredCheckRefs) || !slices.Equal(requirement.CheckAttestations, proof.ValidationCheckAttestations) || requirement.InputReview.ValidateAgainstBinding(requirement) != nil || proposal.ValidationInputReview.ValidateAgainstBinding(requirement) != nil || RuntimeValidationInputReviewConclusion(*proposal.ValidationInputReview) != RuntimeValidationInputConsistent {
-			return false
+			return RuntimeValidationProofRequirementBinding{}, fmt.Errorf("input review has no complete original consistent subject/report")
 		}
+		result = requirement.Clone()
 		reviews++
 	}
-	return reviews == 1
+	if reviews != 1 {
+		return RuntimeValidationProofRequirementBinding{}, fmt.Errorf("input review requires unique original consistent report")
+	}
+	return result, nil
 }
 
 // runtimeLineageBindingMatches 精确反查同一原 CWI/BindingID/Hash，不使用首项或集合交集。

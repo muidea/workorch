@@ -35,7 +35,7 @@ func runtimeCompleteResultFeedback(item *RuntimeTerminalResultMaterial, source R
 			for _, obligation := range outcome.SourceObligations {
 				assessmentItems = append(assessmentItems, workorchresultcontract.DoDAssessmentItem{
 					Item: obligation.Check.Criterion, State: string(obligation.AssessmentState),
-					SourceNote:   "obligation/" + obligation.Check.ObligationID + "/verification/" + obligation.Check.VerificationID,
+					SourceNote:   runtimeTerminalSourceObligationNote(closeout.SourceObligations, obligation.Check),
 					EvidenceRefs: append([]string(nil), obligation.AcceptedEvidenceRefs...), FailureReason: obligation.AssessmentReasonCode,
 				})
 			}
@@ -81,4 +81,14 @@ func runtimeCompleteResultFeedback(item *RuntimeTerminalResultMaterial, source R
 			}
 		}
 	}
+}
+
+func runtimeTerminalSourceObligationNote(inventory *RuntimeSourceObligationInventory, check RuntimeSourceObligationCheck) string {
+	if inventory != nil && len(inventory.EvidencePurposeMappings) != 0 {
+		// The same original verification is materialized for both endpoints.
+		// Its independently derived source-CWI check prevents ambiguous public
+		// index rows without changing either original criterion or declaration.
+		return "source-check/" + check.CheckRef
+	}
+	return "obligation/" + check.ObligationID + "/verification/" + check.VerificationID
 }

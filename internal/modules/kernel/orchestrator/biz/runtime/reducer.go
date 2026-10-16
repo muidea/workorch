@@ -63,7 +63,7 @@ func reduceAndSealRuntimeState(
 			}
 		}
 		if !eventHandled {
-			decision, err = reduce(facts, proofLineage, confirmationPending)
+			decision, err = reduce(facts, proofLineage, confirmationPending, lineage)
 			if err != nil {
 				return runtimecontract.RuntimeDecision{}, false, err
 			}
@@ -402,7 +402,7 @@ func retireNonCurrentFocusScopedPrerequisites(facts runtimecontract.RuntimeFacts
 	return facts.Normalized()
 }
 
-func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.RuntimeCoverageProofLineage, confirmationPending bool) (runtimecontract.RuntimeDecision, error) {
+func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.RuntimeCoverageProofLineage, confirmationPending bool, lineage *RuntimeAggregate) (runtimecontract.RuntimeDecision, error) {
 	base := runtimecontract.RuntimeDecision{Focus: facts.Focus}
 	// A failure whose persisted budget/disposition already determines governance
 	// or terminal authority must win before mutable prerequisite bookkeeping.
@@ -425,6 +425,9 @@ func reduce(facts runtimecontract.RuntimeFacts, proofLineage []runtimecontract.R
 			PrerequisiteIDs: ids,
 		}
 		return base, nil
+	}
+	if decision, pending, err := runtimeApplicabilityPrerequisiteDecision(base, facts, lineage, proofLineage); err != nil || pending {
+		return decision, err
 	}
 	if confirmationPending {
 		// This is a read-only confirmation handoff, not an executable validation
@@ -588,6 +591,9 @@ func reduceDeterminedFailure(base runtimecontract.RuntimeDecision, facts runtime
 		return runtimecontract.RuntimeDecision{}, false, nil
 	}
 	failure := facts.Failure
+	if failure.Code == runtimeCWIRevalidationSourceUnavailable {
+		return terminalDecision(base, runtimecontract.ConvergenceStateFailed, runtimeCWIRevalidationSourceUnavailable, failure.Message), true, nil
+	}
 	// failSemanticContract is the only producer of this code. It has already
 	// exhausted (or deliberately declined) the bounded semantic transaction;
 	// keep the producer's typed class for audit while preventing generic owner

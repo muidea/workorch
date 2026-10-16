@@ -9,6 +9,7 @@
 /.workorch-data
 /.workorch-workspaces
 /.ci-artifacts
+/.validation-tmp-*/
 
 # Runtime/test data must not live under source packages.
 internal/modules/application/**/.workorch-data/

@@ -33,7 +33,10 @@ func resolveRuntimeValidationRecipeDeclarations(recipes []runtimemodel.RuntimeVa
 	manifest.TargetRefs = normalizeShellStrings(manifest.TargetRefs)
 	resolved := make([]runtimemodel.RuntimeValidationRecipe, 0, len(recipes))
 	for _, declaration := range runtimemodel.NormalizeRuntimeValidationRecipeDeclarations(recipes) {
-		if declaration.AdapterRef == modulecommon.ValidationRecipeAdapterProjectConjunction && !shellProjectRecipeDeclared(declaration) {
+		if declaration.InputReviewProtocolRef == runtimemodel.RuntimeValidationInputReviewProtocolV3 && !shellProjectAdapter(declaration.AdapterRef) {
+			continue
+		}
+		if shellProjectAdapter(declaration.AdapterRef) && !shellProjectRecipeDeclared(declaration) {
 			continue
 		}
 		if declaration.AdapterRef == modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint && declaration.InputReviewProtocolRef != runtimemodel.RuntimeValidationInputReviewProtocolV2 {
@@ -47,7 +50,7 @@ func resolveRuntimeValidationRecipeDeclarations(recipes []runtimemodel.RuntimeVa
 			continue
 		}
 		switch declaration.AdapterRef {
-		case modulecommon.ValidationRecipeAdapterProjectNative, modulecommon.ValidationRecipeAdapterProjectEntrypoint, modulecommon.ValidationRecipeAdapterVersionedEntrypoint, modulecommon.ValidationRecipeAdapterIsolatedEntrypoint, modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint, modulecommon.ValidationRecipeAdapterProjectConjunction:
+		case modulecommon.ValidationRecipeAdapterProjectNative, modulecommon.ValidationRecipeAdapterProjectEntrypoint, modulecommon.ValidationRecipeAdapterVersionedEntrypoint, modulecommon.ValidationRecipeAdapterIsolatedEntrypoint, modulecommon.ValidationRecipeAdapterConjunctiveEntrypoint, modulecommon.ValidationRecipeAdapterProjectConjunction, modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic, modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic:
 			// An empty workspace has no competing project fact. The currently
 			// registered owner implementation may therefore publish its bounded
 			// prerequisite contract; once any project files exist, resolution is
@@ -87,7 +90,7 @@ func (a *RuntimeAdapter) PreflightRuntimeValidationRecipes(workspaceDirectory st
 	}
 	confirmed := make([]runtimemodel.RuntimeValidationRecipe, 0, len(recipes))
 	for _, recipe := range runtimemodel.NormalizeRuntimeValidationRecipes(recipes) {
-		if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectConjunction && !shellProjectRecipeDeclared(recipe) {
+		if shellProjectAdapter(recipe.AdapterRef) && !shellProjectRecipeDeclared(recipe) {
 			continue
 		}
 		command, args, specErr := shellCommandSpec(recipe.Command, recipe.Args)
@@ -193,6 +196,13 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 				attestations = shellValidationSupplementAttestations(attestations, binding.Manifest.TargetRefs)
 				inspection := inspectShellNativeValidationChecks(workspaceDirectory, binding.Manifest.TargetRefs, attestations)
 				inputTargets = append(inputTargets, inspection.InputTargetRefs...)
+				if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
+					for _, ref := range binding.Manifest.TargetRefs {
+						if strings.HasSuffix(ref, "_test.go") || strings.HasPrefix(ref, "workorch_validation/") {
+							inputTargets = append(inputTargets, ref)
+						}
+					}
+				}
 				if !shellNativeCheckInspectionPreparable(inspection, requirement, binding.Manifest.TargetRefs, attestations) {
 					unavailabilities = append(unavailabilities, runtimemodel.RuntimeValidationProofUnavailability{
 						Requirement: requirement, ValidationRecipeID: recipe.ID,
@@ -219,7 +229,13 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 					ownerBinding.InputReview, code = shellVersionedInputReview(workspaceDirectory, binding.Manifest.TargetRefs, ownerBinding)
 					if code == "" && recipe.InputReviewProtocolRef != "" {
 						ownerBinding.InputReview.ProtocolRef = recipe.InputReviewProtocolRef
+						if recipe.InputReviewProtocolRef == runtimemodel.RuntimeValidationInputReviewProtocolV3 {
+							ownerBinding.InputReview.LineageAssertions = append([]runtimemodel.RuntimeLineageAssertion(nil), requirement.LineageAssertions...)
+						}
 						ownerBinding.InputReview.Hash = runtimemodel.StableRuntimeValidationInputReviewSubjectHash(*ownerBinding.InputReview, ownerBinding)
+						if err := ownerBinding.InputReview.ValidateAgainstBinding(ownerBinding); err != nil {
+							code = "validation_input_review_mapping_unsupported"
+						}
 					}
 					if code != "" {
 						inspection.Code = code
@@ -279,7 +295,7 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 // without a structured native observation protocol remain executable owner
 // tools, but cannot become direct per-CWI proof surfaces.
 func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecipe, requirement runtimemodel.RuntimeValidationProofRequirement) ([]runtimemodel.RuntimeValidationCheckAttestationBinding, bool) {
-	project := recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectConjunction
+	project := shellProjectAdapter(recipe.AdapterRef)
 	if project && (!shellProjectRecipeDeclared(recipe) || requirement.Validate() != nil) {
 		return nil, false
 	}
@@ -316,7 +332,7 @@ func shellValidationCheckAttestations(recipe runtimemodel.RuntimeValidationRecip
 			protocol = shellGoConjunctiveEntrypointObservationProtocolRef
 		}
 		if project {
-			protocol = shellProjectConjunctionProtocolRef
+			protocol = shellProjectAdapterProtocol(recipe.AdapterRef)
 		}
 		if len(requirement.RequiredCheckRefs) == 0 || len(requirement.RequiredCheckRefs) > maxShellBehaviorNativeChecks || validateShellBehaviorRecipeArgs(args) != nil {
 			return nil, false
@@ -443,7 +459,7 @@ func shellValidationProofPreparationFromInspection(inspection shellNativeCheckIn
 		preparation.ContentContractRef = shellConjunctiveInputContentContractRef
 		preparation.ContentRequirements = shellConjunctiveInputContentRequirements + shellAssertionFeedbackRequirements
 	}
-	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterProjectConjunction && targetRef != "" {
+	if shellProjectAdapter(recipe.AdapterRef) && targetRef != "" {
 		preparation.ContentContractRef = shellProjectInputContentContractRef
 		preparation.ContentRequirements = shellProjectInputContentRequirements + shellAssertionFeedbackRequirements
 	}

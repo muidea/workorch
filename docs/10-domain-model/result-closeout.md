@@ -54,6 +54,40 @@ raw canonical 正文并通过完整 set/hash 校验，Definition exact-match；c
 不匹配，非法／冲突集合返回错误。它不证明 owner 观察的来源或 freshness，不发起查询，不选择 stale/reopen transition，
 也不能使没有 actual producer 来源的集合获得 evidence credit。
 
+## Historical Reads And Applicability Dependencies
+
+The opt-in `evidence-applicability-dependencies/v1` value separates two immutable collections on the same operation
+receipt and EvidenceFact. `OwnerRevisionSet` retains the complete original actual reads, including mutation inputs and
+observed absence. `ApplicabilityDependencies` contains an exact `ProtocolRef` and a nonempty, raw-canonical
+`OwnerRevisionSet` produced from separate actual owner observations of the postcondition. Both collections must bind the
+same Definition; missing historical reads, unknown protocol, invalid raw identity, conflicting resources or wrong hashes
+are rejected. Clone, normalization and reload preserve both original bodies; receipt and fact identities seal both bodies.
+
+The second collection is the dependency snapshot to be tested, not a currentness certificate. It cannot be populated from
+proposed content, `AfterHash`, current catalogs, receipt chronology or a later operation's reads. A source consumer must
+independently reverse-prove the exact receipt, dispatch, execution key/fence and fact payload, even after coordinated
+rehashing. Nil does not mean no dependencies, and an old receipt is never backfilled with a postcondition observation.
+
+File mutations observe complete actual bytes after success under the owner effect lock, including recovery confirmation.
+The applicability resource selector identifies the workspace, exact target and observed complete byte identity rather than
+the execution ID. Equal observations can agree across executions without weakening strict version conflicts; a failed read,
+missing target or drift from the sealed postcondition emits no applicability proof. Original mutation input observations
+remain separate, and recovery records only the observations actually made during recovery.
+
+SM-2 must compare applicability snapshots with authenticated, revision-fenced current owner observations before relying on
+them for acceptance. An intersecting change invalidates only the affected evidence/binding/assessment and reopens the exact
+CWI under its existing budget and effect responsibility; unrelated changes do not. Historical receipts and reads remain
+immutable. SM-3 cannot dispatch from stale authority; SM-4 cannot bypass the SM-2 adjudication or choose a newest resource
+version to make a conflicting union succeed. The terminal top-level current collection and historical per-evidence reads
+remain distinct, and immutable terminal material is replayed without recertifying its old acceptance against mutable owners.
+
+Managed Shell validation preserves the actual copied-input set independently as its applicability snapshot. Its concrete
+query rereads only those original complete file selectors (bytes, size and mode), reverse-proves the persisted receipt and
+execution source, and obtains the directory from Workspace. Missing is a factual observation; errors do not produce a set.
+This does not enumerate newly added files or trace every subprocess read. For versioned proof, the terminal current union
+uses the actual SM-2 observation rather than historical mutation inputs; per-evidence and per-assessment historical reads
+remain intact. Equal current resources may merge; conflicting versions are rejected, never resolved by selecting newest.
+
 ## Three-Axis Requirement Projection
 
 ```text
@@ -76,6 +110,7 @@ RuntimeRequirementEvidenceItem
   State
   ReasonCode
   OwnerRevisionSetHash
+  OwnerRevisionSet           optional original evidence read snapshot
 ```
 
 允许值固定为：
@@ -106,6 +141,17 @@ validation all-of、metric/artifact 和同 Workspace/Run 的来源。无 rollove
 `stale_or_superseded`，不进入 current `AcceptedEvidenceRefs`。此只读 compiler 不回写 coverage/assessment，
 terminal seal 与 fresh-load 仍从独立持久前像反证材料；receipt/dispatch 完整来源门禁不因投影而省略。
 
+逐 evidence 的可选 `OwnerRevisionSet` 保全原 receipt/fact 的完整读取快照，包括 rejected/stale 项，
+独立校验 raw canonical、hash 与 exact Definition，并纳入 closeout/material seal。它不是 top-level
+`OwnerRevisionSetHash` 的另一份值，不证明当前性，也不参与 credit 重新裁决。不同 evidence 的历史读版本分别保存，
+不能从 evidence chronology 任取最新版或把等价 proof lineage 当作 owner freshness。未采样时保持 nil；
+没有 current owner observation 和完整 assessment/artifact 来源前，逐项保全不等于完整 terminal union 已实现。
+反馈 v5 的 top-level set 由原 current-proof evidence reads 与仍适用的 accepted assessment adjudication reads 作 exact
+canonical union，不再生成 `runtime_authority/accepted_evidence` 伪 owner 依赖。相同资源的冲突原读取必须失败，不能选
+最新版；stale/rejected evidence 保留逐项原读取，但不进入当前 union。未采样的 nil 不补造空 observation；这份 observed
+union 不冒未接线的 artifact 读取来源或全 owner currentness。历史 patch input 不是新的 postcondition observation。
+旧版 aggregate 直接拒绝且保持原归档，不自动升级或填充依赖；新版本只进入新 activation。
+
 ## 逐源义务终态投影
 
 Workspace 的 eligible exact candidate 编译不可变 `RuntimeSourceObligationInventory`，保留 Requirement、
@@ -122,6 +168,10 @@ Result 与 workorchd detached 透传已裁决材料；UI 不从共同 DoD 猜来
 由 accepted evidence 满足，源检查才投影 covered+satisfied。仅 A、旧 binding、reopened CWI 或历史 assessment
 不能恢复任一源义务的当前 credit；投影不提供 A 部分通过的独立 credit ledger。
 原 Criterion/Declaration 文本不 trim、不摘要；review、creation、exit 0 与单项 native PASS 均不能替代整体证明。
+显式跨 CWI 用途映射的逐源索引使用 `source-check/<原 CWI checkRef>`，保留历史来源与验收来源的独立条目；
+未映射库存保持原索引身份。历史条目的原 Criterion/Declaration/check identity 不变，但普通验收 binding 与
+evidence 必须来自确认的唯一 consumer。该索引只标识原来源，不增加或恢复独立 credit；行为与当前证明的
+合取及 stale 撤销遵守 [Evidence Proof Purpose](../00-core/runtime/evidence-proof-purpose.md)。
 requirement 与逐源 evidence 投影共用 exact current binding/proof 适用性检查：无 rollover 时反查同 Workspace/Run 的
 原 completed dispatch binding；有来源 lineage 时匹配原 dispatch/operation、binding hash 及 current proof identity。
 同 ID 新 hash 只能通过该 scope 内 exact equivalent resolution 重新获得适用性；incompatible、跨 Run/Workspace、

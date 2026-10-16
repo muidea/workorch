@@ -12,6 +12,7 @@ import (
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/content"
 	runmodule "github.com/muidea/workorch/internal/modules/blocks/run"
 	shellbiz "github.com/muidea/workorch/internal/modules/blocks/shell/biz"
 	shellevents "github.com/muidea/workorch/internal/modules/blocks/shell/pkg/events"
@@ -216,8 +217,34 @@ func TestRuntimeShellRawOutputQueryPairsPersistedReceiptAuthority(t *testing.T) 
 		}
 	})
 	command := shellevents.QueryRuntimeValidationRawOutputCommand{WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: request.DispatchID, OperationID: request.Operation.ID, ExecutionKey: request.Execution.ExecutionKey, Fence: request.Execution.Fence, SourceReceiptHash: runtimecontract.StableRuntimeOperationReceiptHash(receipt), StageID: stageID, Stream: "stdout"}
-	send := func(c shellevents.QueryRuntimeValidationRawOutputCommand) magicevent.Result {
-		return hub.Send(magicevent.NewEventWithContext(shellevents.TopicQueryRuntimeValidationRawOutput, ModuleID, runtimecontract.RuntimeModuleShell, magicevent.NewHeader(), ctx, c))
+	if err := receipts.Subscribe(orchestratorevents.TopicOrchestratorQueryRuntimeValidationOutput, owner.handleRuntimeValidationOutput); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := receipts.Unsubscribe(orchestratorevents.TopicOrchestratorQueryRuntimeValidationOutput); err != nil {
+			t.Error(err)
+		}
+	})
+	read := func(c shellevents.QueryRuntimeValidationRawOutputCommand) (shellevents.QueryRuntimeValidationRawOutputResult, error) {
+		selector := orchestratorevents.QueryRuntimeValidationOutputCommand{
+			WorkspaceID: c.WorkspaceID, RunID: c.RunID, DispatchID: c.DispatchID, OperationID: c.OperationID,
+			ExecutionKey: c.ExecutionKey, Fence: c.Fence, SourceReceiptHash: c.SourceReceiptHash, StageID: c.StageID, Stream: c.Stream,
+		}
+		ref, err := selector.ContentRef()
+		if err != nil {
+			return shellevents.QueryRuntimeValidationRawOutputResult{}, err
+		}
+		value, err := content.NewReader(hub).ReadRuntimeRaw(ctx, ref)
+		if err != nil {
+			return shellevents.QueryRuntimeValidationRawOutputResult{}, err
+		}
+		if value.OutputIdentity == nil {
+			t.Fatal("application read lost original output identity")
+		}
+		return shellevents.QueryRuntimeValidationRawOutputResult{
+			SourceReceiptHash: c.SourceReceiptHash, StageID: c.StageID, Stream: c.Stream,
+			Identity: value.OutputIdentity.Clone(), SavedSHA256: value.ContentSHA256, Raw: value.Content,
+		}, nil
 	}
 	before, err := controller.Load(ctx, request.WorkspaceID, request.RunID)
 	if err != nil || before.Validate() != nil {
@@ -225,14 +252,9 @@ func TestRuntimeShellRawOutputQueryPairsPersistedReceiptAuthority(t *testing.T) 
 	}
 	assertRead := func() {
 		t.Helper()
-		response := send(command)
-		if response == nil {
-			t.Fatal("missing raw response")
-		}
-		data, err := response.Get()
-		value, ok := data.(shellevents.QueryRuntimeValidationRawOutputResult)
-		if err != nil || !ok || value.ValidateFor(command) != nil || !reflect.DeepEqual(value.Raw, raw) {
-			t.Fatalf("raw read: %+v err=%v", data, err)
+		value, err := read(command)
+		if err != nil || value.ValidateFor(command) != nil || !reflect.DeepEqual(value.Raw, raw) {
+			t.Fatalf("raw read: %+v err=%v", value, err)
 		}
 		value.Raw[0]++
 		value.Identity.Storage.Reference = "caller"
@@ -256,7 +278,7 @@ func TestRuntimeShellRawOutputQueryPairsPersistedReceiptAuthority(t *testing.T) 
 				changed.Stream = "stderr"
 			}
 			calls := workspaceCalls
-			if response := send(changed); response == nil || response.Error() == nil || workspaceCalls != calls {
+			if _, err := read(changed); err == nil || workspaceCalls != calls {
 				t.Fatal("invalid identity reached raw directory")
 			}
 		})
@@ -310,7 +332,7 @@ func TestRuntimeShellRawOutputQueryPairsPersistedReceiptAuthority(t *testing.T) 
 		t.Fatal(err)
 	}
 	calls := workspaceCalls
-	if response := send(command); response == nil || response.Error() == nil || workspaceCalls != calls {
+	if _, err := read(command); err == nil || workspaceCalls != calls {
 		t.Fatal("retired receipt access reached raw directory")
 	}
 }

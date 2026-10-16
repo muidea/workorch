@@ -93,10 +93,25 @@ func TestAssessmentPurposePreimageRejectsMissingDuplicateAndDriftedProofs(t *tes
 	}
 }
 
+func TestAssessmentPurposeIndexExcludesImplementationWorkBatch(t *testing.T) {
+	workID := common.CoverageWorkItemID("cwi-work")
+	validated := runtimeValidatedSemanticManifest{obligationByCoverage: map[common.CoverageWorkItemID]RuntimeSemanticProofObligation{
+		workID: {CoverageWorkItemID: workID, ImplementationWork: &RuntimeSemanticImplementationWork{}},
+	}}
+	batch := RuntimeSemanticPlanBatch{CoverageWorkItemIDs: []common.CoverageWorkItemID{workID}}
+	if !runtimeAssessmentPurposeBatchIsImplementationWork(validated, batch) {
+		t.Fatal("implementation-work batch entered the assessment-purpose index")
+	}
+	validated.obligationByCoverage[workID] = RuntimeSemanticProofObligation{CoverageWorkItemID: workID}
+	if runtimeAssessmentPurposeBatchIsImplementationWork(validated, batch) {
+		t.Fatal("ordinary Definition batch was excluded from the assessment-purpose index")
+	}
+}
+
 // Builds persisted-shape semantic fixtures with the production pure compiler.
 // It is not a transition fixture; the Orchestrator mainline tests exercise the
 // owner-private events and opaque CAS that produce these records in production.
-func assessmentPurposeGenerationForTest(t testing.TB, coverageID common.CoverageWorkItemID, requestID string, repair bool) (RuntimeSemanticPlanningLedger, []CoverageEvidenceBinding) {
+func assessmentPurposeGenerationForTest(t testing.TB, coverageID common.CoverageWorkItemID, requestID string, repair bool, sourceScopeOverride ...string) (RuntimeSemanticPlanningLedger, []CoverageEvidenceBinding) {
 	t.Helper()
 	definition := RuntimeDefinitionContext{
 		StartupInputHash: "startup-purpose", Revision: "definition-purpose", GoalID: "goal-purpose", GoalDefinition: "deliver behavior",
@@ -106,6 +121,10 @@ func assessmentPurposeGenerationForTest(t testing.TB, coverageID common.Coverage
 	items := []RuntimeCoverageItem{
 		{ID: "cwi-source", SliceID: "slice-source", SourceScope: "deliverable", SourceID: "source", TargetText: "deliver behavior", Order: 1},
 		{ID: "cwi-repair", SliceID: "slice-repair", SourceScope: "dodItem", SourceID: "behavior", TargetText: "behavior verified", Order: 2},
+	}
+	if len(sourceScopeOverride) != 0 {
+		items[0].SourceScope = sourceScopeOverride[0]
+		items[0].SourceID = "dod-001"
 	}
 	slices := []RuntimeAcceptanceSlice{{ID: "slice-source", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-source"}}, {ID: "slice-repair", CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-repair"}}}
 	seed, err := CompileRuntimeDefinitionSeed(definition, RuntimeActivationContext{ExecutionContract: execution}, items, slices)

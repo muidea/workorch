@@ -178,6 +178,8 @@ func normalizeRuntimeCWIBindingRetirementLineage(values []RuntimeCWIBindingRetir
 }
 
 func normalizeRuntimeCoverageItemFact(value RuntimeCoverageItemFact) RuntimeCoverageItemFact {
+	value.HistoricalBehavior = cloneRuntimeHistoricalBehaviorCompletion(value.HistoricalBehavior)
+	value.HistoricalAcceptanceProofs = cloneRuntimeHistoricalAcceptanceProofs(value.HistoricalAcceptanceProofs)
 	value.CWIConvergenceState = RuntimeCWIConvergenceState(strings.TrimSpace(string(value.CWIConvergenceState)))
 	value.FocusID = strings.TrimSpace(value.FocusID)
 	if value.CurrentBindingRef != nil {
@@ -637,6 +639,15 @@ func runtimeCWIFocusQueue(facts RuntimeFacts) []CoverageFocus {
 // settled credit. Definition order remains authoritative; slice priority and
 // lexical CWI identity cannot bypass admission.
 func RuntimeCWIsEligibleForPlanning(facts RuntimeFacts) []common.CoverageWorkItemID {
+	var suspendedPredecessor common.CoverageWorkItemID
+	for _, pause := range facts.CWISuspensions {
+		if pause.ResumeBinding == nil {
+			if suspendedPredecessor != "" {
+				return nil
+			} // nested/ambiguous state never selects a source
+			suspendedPredecessor = pause.PredecessorID
+		}
+	}
 	byID := make(map[common.CoverageWorkItemID]RuntimeCoverageItemFact, len(facts.Coverage))
 	for _, item := range facts.Coverage {
 		item.ID = common.CoverageWorkItemID(strings.TrimSpace(string(item.ID)))
@@ -649,6 +660,9 @@ func RuntimeCWIsEligibleForPlanning(facts RuntimeFacts) []common.CoverageWorkIte
 		item.ID = common.CoverageWorkItemID(strings.TrimSpace(string(item.ID)))
 		item.State = RuntimeCoverageItemState(strings.TrimSpace(string(item.State)))
 		item = normalizeRuntimeCoverageItemFact(item)
+		if suspendedPredecessor != "" && item.ID != suspendedPredecessor {
+			continue
+		}
 		switch item.CWIConvergenceState {
 		case RuntimeCWIConvergenceStateUnbound, RuntimeCWIConvergenceStatePlanning, RuntimeCWIConvergenceStateReopened:
 		default:
@@ -657,8 +671,7 @@ func RuntimeCWIsEligibleForPlanning(facts RuntimeFacts) []common.CoverageWorkIte
 		prerequisitesSettled := true
 		for _, prerequisiteID := range item.PrerequisiteCoverageWorkItemIDs {
 			prerequisite, found := byID[prerequisiteID]
-			if !found || prerequisite.CWIConvergenceState != RuntimeCWIConvergenceStateSettled ||
-				prerequisite.State != RuntimeCoverageItemStateSatisfied || prerequisite.CurrentBindingRef == nil {
+			if !found || !RuntimeCWIPrerequisiteReadyForConsumer(facts, prerequisite, item.ID) {
 				prerequisitesSettled = false
 				break
 			}

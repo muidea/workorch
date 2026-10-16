@@ -7,5 +7,7 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("git", eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicExecuteOperation)...)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM2, eventcontract.ScopePolicyWorkspaceRun, eventcontract.IdentityPolicyRuntimeAuthority, true), TopicAcquireRuntimeCapabilities, TopicAcquireRuntimeOperationAdmissibility, TopicProbeRuntimeOperationFeasibility, TopicProbeRuntimeSemanticProofFeasibility, TopicQueryRuntimeCWIReconciliation, TopicAcquireCapabilityState)
 	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassExecute, eventcontract.StateMachineSM3, eventcontract.ScopePolicyWorkspaceRunStep, eventcontract.IdentityPolicyRuntimeOperation, true), TopicExecuteOperation)
+	ret = append(ret, eventcontract.Build("git", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryRuntimeCommitSnapshot)...)
+	ret = eventcontract.Annotate(ret, eventcontract.RuntimeMetadata(eventcontract.CommandClassRead, eventcontract.StateMachineSM4, eventcontract.ScopePolicyWorkspaceRunStep, eventcontract.IdentityPolicyRuntimeOperation, false), TopicQueryRuntimeCommitSnapshot)
 	return ret
 }

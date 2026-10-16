@@ -8,6 +8,32 @@ import (
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
+func TestRuntimeProfileConfirmedBindingRepairVersionDecoder(t *testing.T) {
+	rule := map[string]any{"ref": "original-repair", "kind": "repair_then_fresh_validation", "consumptionPoint": "execution", "repairHistoryContractRef": runtimecontract.RuntimeConfirmedBindingRepairProofV1}
+	profiles := map[string]any{"profile": map[string]any{"evidenceRequirements": []any{map[string]any{"id": "dod-1", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{runtimecontract.RuntimeBlockKindManagedValidationSession}, "lineageAssertions": []any{rule}}}}}
+	if err := ValidateInputShape(map[string]any{"profileContracts": profiles}); err != nil {
+		t.Fatal(err)
+	}
+	decoded := Decode(profiles)
+	if runtimecontract.ValidateRuntimeProfileContracts(decoded) != nil || decoded[0].EvidenceRequirements[0].LineageAssertions[0].RepairHistoryContractRef != runtimecontract.RuntimeConfirmedBindingRepairProofV1 {
+		t.Fatal("decoder lost confirmed repair identity")
+	}
+	for _, value := range []any{nil, 42, []any{}, map[string]any{}} {
+		rule["repairHistoryContractRef"] = value
+		if ValidateInputShape(map[string]any{"profileContracts": profiles}) == nil {
+			t.Fatal("invalid repair contract type accepted")
+		}
+	}
+	rule["repairHistoryContractRef"] = "runtime/confirmed-binding-repair-proof/v0"
+	if runtimecontract.ValidateRuntimeProfileContracts(Decode(profiles)) == nil {
+		t.Fatal("unknown repair version accepted")
+	}
+	delete(rule, "repairHistoryContractRef")
+	if runtimecontract.ValidateRuntimeProfileContracts(Decode(profiles)) != nil || Decode(profiles)[0].EvidenceRequirements[0].LineageAssertions[0].RepairHistoryContractRef != "" {
+		t.Fatal("legacy implicitly opted in")
+	}
+}
+
 func TestRuntimeProfileLineageAssertionShapeAndTypedDecoder(t *testing.T) {
 	rule := map[string]any{"ref": "receipt", "kind": "owner_operation_receipt", "consumptionPoint": "execution", "ownerModuleId": "blocks/file", "operationKind": runtimecontract.RuntimeBlockKindPatchApply, "operationVariantId": "file_write", "requiredEffectScope": string(runtimecontract.RuntimeEffectWorkspaceDurable)}
 	requirement := map[string]any{"id": "requirement-1", "scope": "dodItem", "requiredEvidenceKinds": []any{"state_change"}, "acceptedStepKinds": []any{runtimecontract.StepKindFileWrite}, "lineageAssertions": []any{rule}}
@@ -66,5 +92,97 @@ func TestRuntimeProfileWithoutLineageRulesPreservesExactPersistenceIdentity(t *t
 	}
 	if !reflect.DeepEqual(decoded, reloaded) || runtimecontract.StableRuntimeProfileContractsHash(decoded) != runtimecontract.StableRuntimeProfileContractsHash(reloaded) {
 		t.Fatal("未 opt-in Profile 在 file reopen 后漂移，exact owner replay 不能改用弱对等")
+	}
+}
+
+func TestRuntimeProfileTerminalProofVersionAndExactSourceDecoder(t *testing.T) {
+	rule := map[string]any{"ref": "original-receipt", "kind": "terminal_owner_operation_receipt", "consumptionPoint": "post_terminal_delivery", "terminalContractRef": runtimecontract.RuntimeTerminalProofContractV1, "receiptSourceScope": "deliverable", "receiptSourceId": "final-material", "ownerModuleId": "blocks/file", "operationKind": runtimecontract.RuntimeBlockKindPatchApply, "operationVariantId": "file_write", "requiredEffectScope": string(runtimecontract.RuntimeEffectWorkspaceDurable)}
+	requirement := map[string]any{"id": "original-dod", "scope": "dodItem", "requiredEvidenceKinds": []any{"state_change"}, "acceptedStepKinds": []any{runtimecontract.StepKindFileWrite}, "lineageAssertions": []any{rule}}
+	profiles := map[string]any{"profile": map[string]any{"evidenceRequirements": []any{requirement}}}
+	if err := ValidateInputShape(map[string]any{"profileContracts": profiles}); err != nil {
+		t.Fatal(err)
+	}
+	decoded := Decode(profiles)
+	if err := runtimecontract.ValidateRuntimeProfileContracts(decoded); err != nil {
+		t.Fatal(err)
+	}
+	got := decoded[0].EvidenceRequirements[0].LineageAssertions[0]
+	if got.TerminalContractRef != runtimecontract.RuntimeTerminalProofContractV1 || got.ReceiptSourceScope != "deliverable" || got.ReceiptSourceID != "final-material" {
+		t.Fatal("typed decoder lost version/source identity")
+	}
+	for _, field := range []string{"terminalContractRef", "receiptSourceScope", "receiptSourceId"} {
+		prior := rule[field]
+		for _, invalid := range []any{nil, 42, []any{}, map[string]any{}} {
+			rule[field] = invalid
+			if ValidateInputShape(map[string]any{"profileContracts": profiles}) == nil {
+				t.Fatalf("terminal extension type accepted: %s=%v", field, invalid)
+			}
+		}
+		delete(rule, field)
+		if runtimecontract.ValidateRuntimeProfileContracts(Decode(profiles)) == nil {
+			t.Fatalf("missing terminal identity accepted: %s", field)
+		}
+		rule[field] = prior
+	}
+}
+
+func TestRuntimeProfileTerminalSnapshotExactDualSourceDecoder(t *testing.T) {
+	rule := map[string]any{"ref": "original-snapshot", "kind": "terminal_owner_snapshot", "consumptionPoint": "post_terminal_delivery", "terminalContractRef": runtimecontract.RuntimeTerminalProofContractV2, "receiptSourceScope": "deliverable", "receiptSourceId": "repository", "validationSourceScope": "dodItem", "validationSourceId": "behavior", "ownerModuleId": "blocks/git", "operationKind": runtimecontract.StepKindGitWrite, "operationVariantId": "commit", "requiredEffectScope": string(runtimecontract.RuntimeEffectWorkspaceDurable)}
+	requirement := map[string]any{"id": "original-dod", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{runtimecontract.RuntimeBlockKindManagedValidationSession}, "lineageAssertions": []any{rule}}
+	profiles := map[string]any{"profile": map[string]any{"evidenceRequirements": []any{requirement}}}
+	if err := ValidateInputShape(map[string]any{"profileContracts": profiles}); err != nil {
+		t.Fatal(err)
+	}
+	decoded := Decode(profiles)
+	if err := runtimecontract.ValidateRuntimeProfileContracts(decoded); err != nil {
+		t.Fatal(err)
+	}
+	got := decoded[0].EvidenceRequirements[0].LineageAssertions[0]
+	if got.ValidationSourceScope != "dodItem" || got.ValidationSourceID != "behavior" || got.TerminalContractRef != runtimecontract.RuntimeTerminalProofContractV2 {
+		t.Fatal("dual exact source lost")
+	}
+	for _, field := range []string{"validationSourceScope", "validationSourceId"} {
+		original := rule[field]
+		for _, invalid := range []any{nil, 42, []any{}, map[string]any{}} {
+			rule[field] = invalid
+			if ValidateInputShape(map[string]any{"profileContracts": profiles}) == nil {
+				t.Fatal("snapshot null/type extension accepted")
+			}
+		}
+		delete(rule, field)
+		if runtimecontract.ValidateRuntimeProfileContracts(Decode(profiles)) == nil {
+			t.Fatal("snapshot missing source accepted")
+		}
+		rule[field] = original
+	}
+}
+
+func TestRuntimeProfileCrossSourceExecutionVersionDecoder(t *testing.T) {
+	rule := map[string]any{"ref": "original-work", "kind": "completed_work_rounds", "consumptionPoint": "execution", "minCompletedRounds": 2, "executionSourceContractRef": runtimecontract.RuntimeCrossSourceExecutionProofV1}
+	profiles := map[string]any{"profile": map[string]any{"evidenceRequirements": []any{map[string]any{"id": "dod-001", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{runtimecontract.RuntimeBlockKindManagedValidationSession}, "lineageAssertions": []any{rule}}}}}
+	if err := ValidateInputShape(map[string]any{"profileContracts": profiles}); err != nil {
+		t.Fatal(err)
+	}
+	decoded := Decode(profiles)
+	if err := runtimecontract.ValidateRuntimeProfileContracts(decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded[0].EvidenceRequirements[0].LineageAssertions[0].ExecutionSourceContractRef != runtimecontract.RuntimeCrossSourceExecutionProofV1 {
+		t.Fatal("decoder lost opt-in source contract")
+	}
+	for _, value := range []any{nil, 1, []any{}, map[string]any{}} {
+		rule["executionSourceContractRef"] = value
+		if ValidateInputShape(map[string]any{"profileContracts": profiles}) == nil {
+			t.Fatal("invalid opt-in field type accepted")
+		}
+	}
+	rule["executionSourceContractRef"] = "runtime/cross-source-execution-proof/v0"
+	if runtimecontract.ValidateRuntimeProfileContracts(Decode(profiles)) == nil {
+		t.Fatal("unsupported source contract version accepted")
+	}
+	rule["executionSourceContractRef"] = runtimecontract.RuntimeCrossSourceExecutionProofV1
+	rule["consumptionPoint"] = "post_terminal_delivery"
+	if runtimecontract.ValidateRuntimeProfileContracts(Decode(profiles)) == nil {
+		t.Fatal("execution mapping escaped consumption phase")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -39,23 +40,25 @@ type RuntimeValidationOutputIdentity struct {
 }
 
 type RuntimeValidationExecutionStage struct {
-	Identity         RuntimeValidationExecutionStageIdentity
-	Argv             []string
-	StartedAt        string
-	FinishedAt       string
-	ExitCode         int64
-	Started          bool
-	TimedOut         bool
-	CleanupFailed    bool
-	Stdout           RuntimeValidationOutputIdentity
-	Stderr           RuntimeValidationOutputIdentity
-	SourceBefore     string
-	SourceAfter      string
-	Tests            int
-	PassedTests      int
-	TerminalComplete bool
-	KnownFailure     bool
-	FailureCode      string
+	Identity            RuntimeValidationExecutionStageIdentity
+	Argv                []string
+	StartedAt           string
+	FinishedAt          string
+	ExitCode            int64
+	Started             bool
+	TimedOut            bool
+	CleanupFailed       bool
+	Stdout              RuntimeValidationOutputIdentity
+	Stderr              RuntimeValidationOutputIdentity
+	SourceBefore        string
+	SourceAfter         string
+	Tests               int
+	PassedTests         int
+	TerminalComplete    bool
+	KnownFailure        bool
+	FailureCode         string
+	DiagnosticSourceRef string   `json:",omitempty"`
+	BehaviorTargetRefs  []string `json:",omitempty"`
 }
 
 // 仅传有界实际执行事实和原输出身份，不传原诊断、句柄或第二份 credit。
@@ -96,6 +99,7 @@ func (c RuntimeValidationExecutionConjunction) Clone() RuntimeValidationExecutio
 	if c.Stages != nil {
 		c.Stages = append(make([]RuntimeValidationExecutionStage, 0, len(c.Stages)), c.Stages...)
 		for index := range c.Stages {
+			c.Stages[index].BehaviorTargetRefs = slices.Clone(c.Stages[index].BehaviorTargetRefs)
 			if c.Stages[index].Argv != nil {
 				c.Stages[index].Argv = append(make([]string, 0, len(c.Stages[index].Argv)), c.Stages[index].Argv...)
 			}
@@ -149,9 +153,34 @@ func (c RuntimeValidationExecutionConjunction) Validate() error {
 		storageDeclared = storageDeclared || stage.Stdout.Storage != nil || stage.Stderr.Storage != nil
 	}
 	seen := make(map[string]bool)
+	diagnosticSources := make(map[string]bool)
 	var identities []RuntimeValidationExecutionStageIdentity
 	var previousEnd time.Time
 	for index, stage := range c.Stages {
+		if stage.DiagnosticSourceRef != "" || stage.BehaviorTargetRefs != nil {
+			if c.Complete || !stage.Started || stage.ExitCode == 0 || !stage.KnownFailure || stage.TimedOut || stage.CleanupFailed || !stage.TerminalComplete || !stage.Stdout.Complete || !stage.Stderr.Complete || stage.SourceBefore == "" || stage.SourceBefore != stage.SourceAfter || !boundedValidationExecutionRef(stage.DiagnosticSourceRef, 512) || len(stage.BehaviorTargetRefs) == 0 || len(stage.BehaviorTargetRefs) > 64 || !reflect.DeepEqual(stage.BehaviorTargetRefs, normalizeStrings(stage.BehaviorTargetRefs)) {
+				return fmt.Errorf("diagnostic execution requires bounded source-specific behavior, never complete proof")
+			}
+			for _, ref := range stage.BehaviorTargetRefs {
+				if !boundedValidationExecutionRef(ref, 1024) {
+					return fmt.Errorf("invalid diagnostic behavior target")
+				}
+			}
+			start, startErr := time.Parse(time.RFC3339Nano, stage.StartedAt)
+			end, endErr := time.Parse(time.RFC3339Nano, stage.FinishedAt)
+			if diagnosticSources[stage.DiagnosticSourceRef] || startErr != nil || endErr != nil || end.Before(start) || index == 0 {
+				return fmt.Errorf("diagnostic execution lacks unique source or ordered original failure")
+			}
+			prior := c.Stages[index-1]
+			priorEnd, priorErr := time.Parse(time.RFC3339Nano, prior.FinishedAt)
+			if priorErr != nil || start.Before(priorEnd) || stage.SourceBefore != prior.SourceAfter {
+				return fmt.Errorf("diagnostic execution changed original source or stage order")
+			}
+			// Publication may fail after real attribution. Preserve that history
+			// with explicit output omission; the failure-authority consumer below
+			// independently requires every original stream to be durably stored.
+			diagnosticSources[stage.DiagnosticSourceRef] = true
+		}
 		argvBytes := 0
 		for _, arg := range stage.Argv {
 			argvBytes += len(arg)

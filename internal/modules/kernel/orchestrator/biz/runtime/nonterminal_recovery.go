@@ -173,7 +173,7 @@ func (c *driveDeliveryComponent) scheduleNonTerminalRecovery(
 	}.Normalized()
 	aggregate.Facts.Recovery.NonTerminalRecovery = record
 	aggregate.DriveLease = &lease
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, runtimecontract.RuntimeNonTerminalRecoveryRecord{}, runtimecontract.RuntimeDriveLease{}, false, false,
 			fmt.Errorf("schedule runtime nonterminal recovery: %w", err)
 	}

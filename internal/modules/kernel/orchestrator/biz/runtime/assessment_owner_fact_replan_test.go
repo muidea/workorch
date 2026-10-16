@@ -388,6 +388,16 @@ func prepareOwnerFactAssessmentWithDiagnostic(t *testing.T, ownerFactReady bool,
 
 func prepareOwnerFactAssessmentWithOwnerDependencies(t *testing.T, ownerFactReady bool, diagnostic *runtimecontract.RuntimeOriginalDiagnostic, dependencies *runtimecontract.RuntimeOwnerRevisionSet, operationKinds ...string) (*RuntimeController, *controllerRepository, runtimecontract.RuntimeFacts) {
 	t.Helper()
+	return prepareOwnerFactAssessmentWithDependencyPair(t, ownerFactReady, diagnostic, dependencies, nil, operationKinds...)
+}
+
+func prepareOwnerFactAssessmentWithDependencyPair(t *testing.T, ownerFactReady bool, diagnostic *runtimecontract.RuntimeOriginalDiagnostic, dependencies *runtimecontract.RuntimeOwnerRevisionSet, applicability *runtimecontract.RuntimeEvidenceApplicabilityDependencies, operationKinds ...string) (*RuntimeController, *controllerRepository, runtimecontract.RuntimeFacts) {
+	t.Helper()
+	return prepareOwnerFactAssessmentDependencyBoundary(t, ownerFactReady, diagnostic, dependencies, applicability, true, operationKinds...)
+}
+
+func prepareOwnerFactAssessmentDependencyBoundary(t *testing.T, ownerFactReady bool, diagnostic *runtimecontract.RuntimeOriginalDiagnostic, dependencies *runtimecontract.RuntimeOwnerRevisionSet, applicability *runtimecontract.RuntimeEvidenceApplicabilityDependencies, sealAssessment bool, operationKinds ...string) (*RuntimeController, *controllerRepository, runtimecontract.RuntimeFacts) {
+	t.Helper()
 	repository := &controllerRepository{}
 	controller, err := NewRuntimeController(repository)
 	if err != nil {
@@ -531,9 +541,17 @@ func prepareOwnerFactAssessmentWithOwnerDependencies(t *testing.T, ownerFactRead
 		}
 	}
 	evidence.Evidence.OwnerRevisionSet = runtimecontract.CloneRuntimeOwnerRevisionSet(dependencies)
+	evidence.Evidence.ApplicabilityDependencies = runtimecontract.CloneRuntimeEvidenceApplicabilityDependencies(applicability)
 	attachRuntimeTestOwnerReceipt(t, repository.aggregate, &evidence)
+	if applicability != nil {
+		evidence.EventID = "runtime-receipt|" + evidence.OwnerReceiptHash
+	}
 	committed, err := controller.commitEvidence(context.Background(), evidence)
-	if err != nil || committed.Aggregate.Decision.State != runtimecontract.ConvergenceStateNeedAssessment {
+	expectedState := runtimecontract.ConvergenceStateNeedAssessment
+	if applicability != nil {
+		expectedState = runtimecontract.ConvergenceStateNeedPrerequisite // read-only owner observation still required, not another validation
+	}
+	if err != nil || committed.Aggregate.Decision.State != expectedState {
 		t.Fatalf("owner-fact fixture did not reach assessment: decision=%+v failure=%+v err=%v", committed.Aggregate.Decision, committed.Aggregate.Facts.Failure, err)
 	}
 	if ownerFactBecomesMissingAfterProof {
@@ -565,12 +583,25 @@ func prepareOwnerFactAssessmentWithOwnerDependencies(t *testing.T, ownerFactRead
 			t.Fatalf("owner-fact loss assessment fixture is invalid: %v", err)
 		}
 	}
+	if !sealAssessment {
+		return controller, repository, bootstrapFacts
+	}
+	if applicability != nil {
+		request, err := CompileRuntimeEvidenceApplicabilityRequest(*repository.aggregate, common.EvidenceRecordID(evidence.EventID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		observation := runtimecontract.RuntimeEvidenceApplicabilityObservation{Request: request, RecordedAtStateRevision: request.IssuedAtStateRevision + 1, CurrentDependencies: runtimecontract.CloneRuntimeOwnerRevisionSet(&applicability.OwnerRevisionSet)}
+		if _, err := controller.ApplyInternalEvent(context.Background(), applicabilityInternalEvent(observation)); err != nil {
+			t.Fatalf("explicit fixture owner observation: %v", err)
+		}
+	}
 	if _, err := controller.BeginCandidateAttemptForTest(context.Background(), "ws-v2", "run-v2", 0, "owner-fact-assessment-prefix"); err != nil {
 		t.Fatalf("begin owner-fact assessment attempt: %v", err)
 	}
 	assessment := runtimecontract.RuntimeCandidate{Assessment: &runtimecontract.AssessmentCandidate{
 		FocusID: committed.Aggregate.Facts.Focus.ID, CoverageWorkItemIDs: []common.CoverageWorkItemID{"cwi-v2"},
-		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "producer claims the preparation is complete", EvidenceRefs: []string{"event-owner-fact"},
+		Disposition: runtimecontract.AssessmentDispositionSatisfied, Summary: "producer claims the preparation is complete", EvidenceRefs: []string{evidence.EventID},
 	}}
 	if _, err := controller.AcceptCandidateAttempt(context.Background(), "ws-v2", "run-v2", 0, assessment); err != nil {
 		t.Fatalf("accept owner-fact assessment candidate: %v", err)

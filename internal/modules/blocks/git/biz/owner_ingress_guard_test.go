@@ -53,6 +53,7 @@ func TestGitRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls(t *testing.
 		{"capability-state", gitevents.TopicAcquireCapabilityState, owner.handleGitCapabilityState},
 		{"cwi-reconciliation", gitevents.TopicQueryRuntimeCWIReconciliation, owner.handleRuntimeCWIReconciliationQuery},
 		{"execute", gitevents.TopicExecuteOperation, owner.handleGitOperation},
+		{"commit-snapshot", gitevents.TopicQueryRuntimeCommitSnapshot, owner.handleRuntimeCommitSnapshotQuery},
 	}
 	for _, item := range topics {
 		t.Run(item.name, func(t *testing.T) {
@@ -91,6 +92,7 @@ func TestGitOwnerLifecycleCoversEveryRuntimeTopic(t *testing.T) {
 		gitevents.TopicAcquireCapabilityState,
 		gitevents.TopicQueryRuntimeCWIReconciliation,
 		gitevents.TopicExecuteOperation,
+		gitevents.TopicQueryRuntimeCommitSnapshot,
 	}
 	for _, topic := range topics {
 		event := &gitCountingDataEvent{Event: magicevent.NewEventWithContext(topic, runtimecontract.RuntimeModuleOrchestrator, ModuleID, magicevent.NewHeader(), ctx, nil)}

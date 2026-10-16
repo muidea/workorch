@@ -62,6 +62,9 @@ func TestInputReviewV2InformationBudgetCannotResetWithInputSubject(t *testing.T)
 	}{
 		{name: "new content", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV2, subject: "new-content", check: "original-check", coverage: "cwi-original", want: "validation_input_review_information_exhausted"},
 		{name: "new path and native", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV2, subject: "new-path-native-and-catalog", check: "original-check", coverage: "cwi-original", want: "validation_input_review_information_exhausted"},
+		{name: "v3 changed subject retains original budget", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV3, subject: "new-composite-subject", check: "original-check", coverage: "cwi-original", want: "validation_input_review_information_exhausted"},
+		{name: "v3 different CWI", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV3, subject: "other", check: "original-check", coverage: "cwi-other"},
+		{name: "v3 different original check", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV3, subject: "other", check: "other-check", coverage: "cwi-original"},
 		{name: "different CWI", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV2, subject: "other", check: "original-check", coverage: "cwi-other"},
 		{name: "different original check", protocol: runtimecontract.RuntimeValidationInputReviewProtocolV2, subject: "other", check: "other-check", coverage: "cwi-original"},
 		{name: "legacy subject budget unchanged", protocol: runtimecontract.RuntimeValidationInputReviewProtocol, subject: "new-content", check: "original-check", coverage: "cwi-original"},

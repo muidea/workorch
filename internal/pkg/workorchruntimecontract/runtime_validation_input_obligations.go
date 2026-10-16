@@ -9,7 +9,7 @@ import (
 )
 
 func RuntimeValidationInputReviewProtocolSupported(ref string) bool {
-	return ref == RuntimeValidationInputReviewProtocol || ref == RuntimeValidationInputReviewProtocolV2
+	return ref == RuntimeValidationInputReviewProtocol || ref == RuntimeValidationInputReviewProtocolV2 || ref == RuntimeValidationInputReviewProtocolV3
 }
 
 func validateRuntimeValidationInputObligations(check RuntimeValidationInputCheckReview) error {
@@ -122,6 +122,11 @@ func (r RuntimeValidationInputReview) ValidateCoverageCriteria(item RuntimeCover
 // the additive-only classification, even when another obligation is missing.
 func RuntimeValidationInputReviewOnlyCoverageOmissions(r RuntimeValidationInputReview) bool {
 	missing := false
+	for _, source := range r.DiagnosticSources {
+		if source.Conclusion != RuntimeValidationInputConsistent {
+			return false
+		}
+	}
 	if len(r.Checks) == 0 {
 		return false
 	}

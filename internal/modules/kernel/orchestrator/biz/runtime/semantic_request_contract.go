@@ -1,7 +1,10 @@
 package runtime
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -58,17 +61,45 @@ func SemanticExpectedDocument(aggregate RuntimeAggregate) (runtimecontract.Runti
 // it does not create or advance the semantic planning ledger.
 func SemanticRequestIdentityHash(ledger runtimecontract.RuntimeSemanticPlanningLedger) (string, error) {
 	if ledger.CorrectionDirective != nil {
-		return ledger.CorrectionDirective.Hash, nil
+		return SemanticRequestIdentityHashForKey(ledger, ledger.CorrectionDirective.Hash), nil
 	}
 	if ledger.ActiveBatchID == "" {
-		return "", nil
+		return SemanticRequestIdentityHashForKey(ledger, ""), nil
 	}
 	for _, batch := range ledger.Batches {
 		if batch.BatchID == ledger.ActiveBatchID {
-			return fmt.Sprintf("semantic-proof-batch-%d", batch.Sequence), nil
+			return SemanticRequestIdentityHashForKey(ledger, fmt.Sprintf("semantic-proof-batch-%d", batch.Sequence)), nil
 		}
 	}
 	return "", fmt.Errorf("%w: semantic request identity has no persisted active batch", common.ErrConflict)
+}
+
+// SemanticRequestIdentityHashForKey binds a provider request to the current
+// semantic generation as well as its order/batch/correction slot. The first
+// generation intentionally keeps the historical empty/order and readable
+// batch keys. Once a generation has been retired, its immutable retirement
+// revision prevents a later generation with the same authority transaction,
+// manifest and prefix from reusing a terminal prerequisite-stale SM-3 session.
+func SemanticRequestIdentityHashForKey(ledger runtimecontract.RuntimeSemanticPlanningLedger, requestKey string) string {
+	requestKey = strings.TrimSpace(requestKey)
+	if len(ledger.History) == 0 {
+		return requestKey
+	}
+	retired := ledger.History[len(ledger.History)-1].Normalized()
+	h := sha256.New()
+	_, _ = h.Write([]byte("runtime-semantic-request-generation\x00"))
+	_, _ = h.Write([]byte(fmt.Sprintf("%d", retired.RetiredAtStateRevision)))
+	_, _ = h.Write([]byte{'\x00'})
+	_, _ = h.Write([]byte(retired.Reason))
+	_, _ = h.Write([]byte{'\x00'})
+	if retired.Snapshot.Manifest != nil {
+		_, _ = h.Write([]byte(retired.Snapshot.Manifest.Hash))
+	}
+	_, _ = h.Write([]byte{'\x00'})
+	_, _ = h.Write([]byte(retired.Snapshot.LogicalRequestID))
+	_, _ = h.Write([]byte{'\x00'})
+	_, _ = h.Write([]byte(requestKey))
+	return "semantic-request-identity-" + hex.EncodeToString(h.Sum(nil))[:20]
 }
 
 func validateSemanticRequestIntent(aggregate RuntimeAggregate, session runtimecontract.RuntimeCandidateRequestSession) error {

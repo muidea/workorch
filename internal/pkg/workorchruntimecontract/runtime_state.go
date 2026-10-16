@@ -202,6 +202,10 @@ type RuntimeCandidateAttemptRecord struct {
 	// PrerequisiteRequest records why this unsealed attempt was invalidated for
 	// owner fact acquisition, making duplicate delivery/restart deterministic.
 	PrerequisiteRequest *RuntimeOperationPrerequisiteRequest
+	// Exact owner observation that retired an unsealed candidate. It is neither
+	// a candidate failure nor permission for attempt 1; the original document
+	// session remains audit lineage.
+	ApplicabilityInvalidationRequest *RuntimeEvidenceApplicabilityRequest `json:",omitempty"`
 }
 
 // Normalized returns the canonical scalar identity and accepted admission
@@ -287,6 +291,10 @@ func (r RuntimeCandidateAttemptRecord) Clone() RuntimeCandidateAttemptRecord {
 		identity := r.BindingContradiction.Normalized()
 		r.BindingContradiction = &identity
 	}
+	if r.ApplicabilityInvalidationRequest != nil {
+		request := *r.ApplicabilityInvalidationRequest
+		r.ApplicabilityInvalidationRequest = &request
+	}
 	return r
 }
 
@@ -359,6 +367,14 @@ type RuntimeStateRecord struct {
 }
 
 func (r RuntimeStateRecord) Validate() error {
+	// One read-only call owns these exact-raw, detached success preimages.
+	// Public consumers and subsequent Validate calls always start empty.
+	semanticSession := newRuntimeSemanticValidationSession()
+	historicalSession := &runtimeHistoricalPreimageSession{semantic: semanticSession}
+	return r.validateInSourceSession(semanticSession, historicalSession)
+}
+
+func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSemanticValidationSession, historicalSession *runtimeHistoricalPreimageSession) error {
 	if err := ValidateRuntimeResultFeedbackVersion(r.ResultFeedbackVersion); err != nil {
 		return err
 	}
@@ -376,19 +392,31 @@ func (r RuntimeStateRecord) Validate() error {
 			return fmt.Errorf("runtime state working output has no unique live original semantic work commitment")
 		}
 	}
-	if err := ValidateRuntimeImplementationWorkState(r.Definition, r.Facts, r.ImplementationWork, r.SemanticPlanning, r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts, r.OperationGovernanceBindings, r.ExecutionBudget); err != nil {
+	if err := validateRuntimeImplementationWorkStateInSession(r.Definition, r.Facts, r.ImplementationWork, r.SemanticPlanning, r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts, r.OperationGovernanceBindings, r.ExecutionBudget, semanticSession); err != nil {
 		return fmt.Errorf("runtime state implementation work: %w", err)
 	}
-	if err := ValidateRuntimeDispatchHistoryShape(r.Facts.WorkspaceID, r.Facts.RunID, r.ActiveDispatch, r.CompletedDispatches); err != nil {
+	if err := validateRuntimeDispatchHistoryShapeInIndex(r.Facts.WorkspaceID, r.Facts.RunID, r.ActiveDispatch, r.CompletedDispatches, runtimeOwnerLineageIndexFor(semanticSession)); err != nil {
 		return fmt.Errorf("runtime state dispatch history: %w", err)
 	}
 	if err := ValidateRuntimeEvidenceLedgerSequence(r.EvidenceSequence, r.Facts, r.ActiveDispatch, r.CompletedDispatches, r.GovernanceResolutions); err != nil {
 		return fmt.Errorf("runtime state evidence ledger: %w", err)
 	}
+	if err := ValidateRuntimeEvidenceApplicabilityObservations(r.Facts, r.OperationReceipts, r.StateRevision, r.Reconciliation); err != nil {
+		return fmt.Errorf("runtime state evidence applicability: %w", err)
+	}
+	if err := ValidateRuntimeCWISuspensionSources(r.Facts, r.CompletedDispatches, r.StateRevision); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeApplicabilityCandidateInvalidations(r.Facts.EvidenceApplicabilityObservations, r.CandidateAttempts, r.CandidateRequestSessions); err != nil {
+		return err
+	}
 	if err := ValidateRuntimeAssessmentAuthoritySources(r.Facts, r.ActiveDispatch, r.CompletedDispatches); err != nil {
 		return fmt.Errorf("runtime state assessment authority: %w", err)
 	}
-	if err := ValidateRuntimeAssessmentAdjudications(r.Facts, r.CompletedDispatches, r.CoverageProofLineage, RuntimeLineageAssertionSources{Definition: r.Definition, Facts: r.Facts, Work: r.ImplementationWork, Semantic: r.SemanticPlanning, Active: r.ActiveDispatch, Completed: r.CompletedDispatches, Receipts: r.OperationReceipts, Governance: r.OperationGovernanceBindings, Budget: r.ExecutionBudget, EvidenceSequence: r.EvidenceSequence, Resolutions: r.GovernanceResolutions, Attempts: r.CandidateAttempts, Sessions: r.CandidateRequestSessions, ProcessedEventIDs: r.ProcessedEventIDs, ProofLineage: r.CoverageProofLineage, Confirmations: r.RepairSurfaceConfirmations}); err != nil {
+	if err := ValidateRuntimeAssessmentApplicabilityGenerations(r.Reconciliation, r.ActiveDispatch, r.CompletedDispatches); err != nil {
+		return fmt.Errorf("runtime state assessment applicability generation: %w", err)
+	}
+	if err := validateRuntimeAssessmentAdjudicationsInSession(r.Facts, r.CompletedDispatches, r.CoverageProofLineage, RuntimeLineageAssertionSources{Definition: r.Definition, Facts: r.Facts, Work: r.ImplementationWork, Semantic: r.SemanticPlanning, Active: r.ActiveDispatch, Completed: r.CompletedDispatches, Receipts: r.OperationReceipts, Governance: r.OperationGovernanceBindings, Budget: r.ExecutionBudget, EvidenceSequence: r.EvidenceSequence, Resolutions: r.GovernanceResolutions, Attempts: r.CandidateAttempts, Sessions: r.CandidateRequestSessions, ProcessedEventIDs: r.ProcessedEventIDs, ProofLineage: r.CoverageProofLineage, Confirmations: r.RepairSurfaceConfirmations}, historicalSession); err != nil {
 		return fmt.Errorf("runtime state assessment adjudication: %w", err)
 	}
 	if err := ValidateRuntimeDefinitionFocuses(r.Facts.DefinitionSeed, r.Facts.DefinitionFocuses); err != nil {
@@ -403,7 +431,7 @@ func (r RuntimeStateRecord) Validate() error {
 	if err := r.Facts.Validate(); err != nil {
 		return err
 	}
-	if err := r.SemanticPlanning.Validate(); err != nil {
+	if err := validateRuntimeSemanticPlanningLedgerInSession(r.SemanticPlanning, semanticSession); err != nil {
 		return fmt.Errorf("runtime semantic planning ledger: %w", err)
 	}
 	if err := ValidateRuntimeSemanticProofBatchLimits(r.SemanticPlanning, r.Facts.Activation.ExecutionContract.ExecutionLimits); err != nil {
@@ -523,13 +551,23 @@ func (r RuntimeStateRecord) Validate() error {
 	if err := ValidateRuntimeDurableDispatchLimits(r.Facts.Activation.ExecutionContract.ExecutionLimits, r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts); err != nil {
 		return err
 	}
-	if err := ValidateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedger(r.SemanticPlanning, r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, r.CandidateRequestSessions); err != nil {
+	if err := validateRuntimeAcceptedAssessmentPurposePreimagesInSession(r.SemanticPlanning, r.ActiveDispatch, r.CompletedDispatches, r.CandidateAttempts, r.CandidateRequestSessions, semanticSession); err != nil {
 		return err
 	}
-	if err := ValidateRuntimeOperationReceipts(r.OperationReceipts); err != nil {
+	if err := validateRuntimeOperationReceiptsInIndex(r.OperationReceipts, runtimeOwnerLineageIndexFor(semanticSession)); err != nil {
 		return err
 	}
-	if err := ValidateRuntimeOperationReceiptExecutionLineage(r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts); err != nil {
+	if err := validateRuntimeOperationReceiptExecutionLineageInIndex(r.ActiveDispatch, r.CompletedDispatches, r.OperationReceipts, runtimeOwnerLineageIndexFor(semanticSession)); err != nil {
+		return err
+	}
+	if err := validateRuntimeHistoricalBehaviorCompletionsInSession(RuntimeLineageAssertionSources{
+		Definition: r.Definition, Facts: r.Facts, Semantic: r.SemanticPlanning, Completed: r.CompletedDispatches,
+		Receipts: r.OperationReceipts, ProcessedEventIDs: r.ProcessedEventIDs, Reconciliation: r.Reconciliation,
+		Work: r.ImplementationWork, Active: r.ActiveDispatch, Governance: r.OperationGovernanceBindings,
+		Budget: r.ExecutionBudget, EvidenceSequence: r.EvidenceSequence, Resolutions: r.GovernanceResolutions,
+		Attempts: r.CandidateAttempts, Sessions: r.CandidateRequestSessions,
+		ProofLineage: r.CoverageProofLineage, Confirmations: r.RepairSurfaceConfirmations,
+	}, historicalSession); err != nil {
 		return err
 	}
 	for _, invalidation := range r.PrerequisiteInvalidations {
@@ -537,7 +575,7 @@ func (r RuntimeStateRecord) Validate() error {
 			return fmt.Errorf("runtime prerequisite invalidation: %w", err)
 		}
 	}
-	if err := ValidateRuntimeRepairSurfaceConfirmationRecords(r.RepairSurfaceConfirmations); err != nil {
+	if err := validateRuntimeRepairSurfaceConfirmationRecordsInIndex(r.RepairSurfaceConfirmations, runtimeOwnerLineageIndexFor(semanticSession)); err != nil {
 		return fmt.Errorf("runtime repair surface confirmations: %w", err)
 	}
 	for _, confirmation := range r.RepairSurfaceConfirmations {
@@ -886,7 +924,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 		bySnapshot[value.Transaction.AuthoritySnapshotID] = append(bySnapshot[value.Transaction.AuthoritySnapshotID], value)
 		switch value.State {
 		case RuntimeCandidateAttemptStatePending, RuntimeCandidateAttemptStateAccepted:
-			if value.Failure != nil || value.Correction != nil || value.Stale != nil || value.PrerequisiteRequest != nil || value.OwnerFeasibility != nil {
+			if value.Failure != nil || value.Correction != nil || value.Stale != nil || value.PrerequisiteRequest != nil || value.OwnerFeasibility != nil || value.ApplicabilityInvalidationRequest != nil {
 				return fmt.Errorf("runtime candidate attempt %s state %s cannot carry failure", key, value.State)
 			}
 			if value.State == RuntimeCandidateAttemptStateAccepted && value.Proposal != nil {
@@ -955,7 +993,7 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			if value.Failure == nil || value.Failure.Class == "" || strings.TrimSpace(value.Failure.Reason) == "" || value.Correction == nil {
 				return fmt.Errorf("failed runtime candidate attempt %s requires typed failure and total correction disposition", key)
 			}
-			if value.Stale != nil || value.PrerequisiteRequest != nil || value.OwnerFeasibility != nil {
+			if value.Stale != nil || value.PrerequisiteRequest != nil || value.OwnerFeasibility != nil || value.ApplicabilityInvalidationRequest != nil {
 				return fmt.Errorf("failed runtime candidate attempt %s cannot carry freshness stale", key)
 			}
 			if value.CandidateHash != "" || value.DispatchID != "" || value.TargetAuthorizationHash != "" || len(value.AdmissionTargetAuthorizations) != 0 || value.AdmissionCoverageBindingHash != "" || len(value.AdmissionCoverageBindings) != 0 || value.ValidationRecipeHash != "" || len(value.AdmissionValidationRecipes) != 0 || value.RepairCommitmentHash != "" || value.AdmissionRepairCommitment != nil || value.AdmissionImplementationWorkCommitment != nil || value.DispatchAuthorityHash != "" {
@@ -1000,6 +1038,12 @@ func ValidateRuntimeCandidateAttemptRecords(values []RuntimeCandidateAttemptReco
 			}
 			if value.OwnerFeasibility != nil {
 				reasonCount++
+			}
+			if value.ApplicabilityInvalidationRequest != nil {
+				reasonCount++
+				if err := value.ApplicabilityInvalidationRequest.ValidateRaw(); err != nil {
+					return err
+				}
 			}
 			if value.Failure != nil || value.Correction != nil || value.Proposal != nil || len(value.Conformances) != 0 || len(value.Feasibilities) != 0 || reasonCount != 1 {
 				return fmt.Errorf("invalidated runtime candidate attempt %s requires exactly one typed invalidation reason", key)
@@ -1275,6 +1319,10 @@ func (d RuntimeDispatchRecord) ValidateWithActivation(decision RuntimeDecision, 
 // current; it deliberately does not attempt to rebuild that authority from
 // present facts.
 func (d RuntimeDispatchRecord) ValidateIntrinsic() error {
+	return d.validateIntrinsicInLineageIndex(nil)
+}
+
+func (d RuntimeDispatchRecord) validateIntrinsicInLineageIndex(index *runtimeOwnerLineageIndex) error {
 	if strings.TrimSpace(d.ID) == "" || d.WorkspaceID == "" || d.RunID == "" || strings.TrimSpace(d.CandidateHash) == "" ||
 		strings.TrimSpace(d.CandidateManifestHash) == "" ||
 		strings.TrimSpace(d.Transaction.AuthoritySnapshotID) == "" || strings.TrimSpace(d.Transaction.FocusID) == "" ||
@@ -1409,7 +1457,7 @@ func (d RuntimeDispatchRecord) ValidateIntrinsic() error {
 			}
 		}
 	}
-	if err := ValidateRuntimeDispatchOperationAuthority(d); err != nil {
+	if err := validateRuntimeDispatchOperationAuthorityInIndex(d, index); err != nil {
 		return err
 	}
 	if strings.TrimSpace(d.DispatchAuthorityHash) == "" || d.DispatchAuthorityHash != StableRuntimeDispatchAuthorityHash(d) {
@@ -1619,6 +1667,10 @@ func (d RuntimeDispatchRecord) Clone() RuntimeDispatchRecord {
 // the current sealed transaction; completed contains only closed transactions,
 // and identities cannot overlap or repeat.
 func ValidateRuntimeDispatchHistoryShape(workspaceID common.WorkspaceID, runID common.RunID, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord) error {
+	return validateRuntimeDispatchHistoryShapeInIndex(workspaceID, runID, active, completed, nil)
+}
+
+func validateRuntimeDispatchHistoryShapeInIndex(workspaceID common.WorkspaceID, runID common.RunID, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, index *runtimeOwnerLineageIndex) error {
 	seen := make(map[string]struct{}, len(completed)+1)
 	if active != nil {
 		if active.WorkspaceID != workspaceID || active.RunID != runID {
@@ -1627,7 +1679,7 @@ func ValidateRuntimeDispatchHistoryShape(workspaceID common.WorkspaceID, runID c
 		if active.State != RuntimeDispatchStateSealed {
 			return fmt.Errorf("active runtime dispatch must be sealed")
 		}
-		if err := active.ValidateIntrinsic(); err != nil {
+		if err := index.dispatch(*active); err != nil {
 			return fmt.Errorf("active runtime dispatch: %w", err)
 		}
 		seen[active.ID] = struct{}{}
@@ -1643,7 +1695,7 @@ func ValidateRuntimeDispatchHistoryShape(workspaceID common.WorkspaceID, runID c
 		if _, duplicate := seen[dispatch.ID]; duplicate {
 			return fmt.Errorf("runtime dispatch id %q is duplicated across active/completed history", dispatch.ID)
 		}
-		if err := dispatch.ValidateIntrinsic(); err != nil {
+		if err := index.dispatch(dispatch); err != nil {
 			return fmt.Errorf("completed runtime dispatch[%d]: %w", idx, err)
 		}
 		seen[dispatch.ID] = struct{}{}

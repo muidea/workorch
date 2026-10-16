@@ -28,6 +28,7 @@ func (x *activeDispatchExecution) operationExecutionCallHandoff(operation runtim
 		Transaction: x.dispatch.Transaction, Operation: operation, Execution: prepared.execution,
 		GovernanceGrant:                    prepared.governanceGrant,
 		EvidenceKind:                       evidenceKindForDecision(x.aggregate.Decision),
+		HistoricalEffectProofContractRef:   runtimeHistoricalEffectProofContractForDispatch(x.dispatch, operation),
 		TargetRole:                         x.dispatch.FocusTargetRole,
 		EvidencePolicies:                   x.aggregate.Facts.Activation.EvidencePolicies,
 		ValidationRecipes:                  runtimecontract.NormalizeRuntimeValidationRecipes(x.dispatch.ValidationRecipes),
@@ -47,6 +48,20 @@ func (x *activeDispatchExecution) operationExecutionCallHandoff(operation runtim
 		return nil, err
 	}
 	return handoff, nil
+}
+
+// Detached value projection of the purpose fields only. The enclosing
+// aggregate/dispatch gate independently validates the complete authority.
+func runtimeHistoricalEffectProofContractForDispatch(dispatch SealedDispatch, operation runtimecontract.RuntimeOperation) string {
+	return runtimecontract.RuntimeHistoricalEffectProofContractForDispatch(runtimeHistoricalEffectPurposeDispatch(dispatch), operation)
+}
+
+func runtimeHistoricalEffectPurposeDispatch(dispatch SealedDispatch) runtimecontract.RuntimeDispatchRecord {
+	return runtimecontract.RuntimeDispatchRecord{
+		Transaction: dispatch.Transaction, CoverageBindings: dispatch.CoverageBindings,
+		RepairCommitment: dispatch.RepairCommitment, RepairCommitmentHash: dispatch.RepairCommitmentHash,
+		ImplementationWorkCommitment: dispatch.ImplementationWorkCommitment,
+	}
 }
 
 // runtimeValidationProofBindingForOperation selects the immutable Shell proof

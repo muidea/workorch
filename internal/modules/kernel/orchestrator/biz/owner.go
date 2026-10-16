@@ -309,6 +309,9 @@ func (m *Biz) subscribeRuntimeIngress() error {
 	if err := m.subscribeOwner(orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt, m.handleRuntimeOperationReceipt, false); err != nil {
 		return err
 	}
+	if err := m.subscribeOwner(orchestratorevents.TopicOrchestratorQueryRuntimeValidationOutput, m.handleRuntimeValidationOutput, false); err != nil {
+		return err
+	}
 	if err := m.subscribeOwner(orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt, m.handleRuntimeOperationReceipt, false); err != nil {
 		return err
 	}
@@ -1122,6 +1125,7 @@ func (m *Biz) Stop(ctx context.Context) error {
 		return err
 	}
 	m.started = false
+	m.runtimeController.ReleaseHistoricalCompilation()
 	m.runtimeController = nil
 	m.evidence = RuntimeEvidenceRepositories{}
 	m.evidenceRecords = nil

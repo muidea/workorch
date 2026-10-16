@@ -74,7 +74,7 @@ func (c *driveDeliveryComponent) openRecoverableWait(ctx context.Context, record
 	expectedRevision := aggregate.StateRevision
 	aggregate.RecoverableWaits = append(aggregate.RecoverableWaits, record)
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -117,7 +117,7 @@ func (c *driveDeliveryComponent) claimRecoverableWaitProbe(ctx context.Context, 
 	expectedRevision := aggregate.StateRevision
 	aggregate.RecoverableWaits[idx].Status = runtimecontract.RuntimeRecoverableWaitProbeClaimed
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, false, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -158,7 +158,7 @@ func (c *driveDeliveryComponent) deferRecoverableWaitProbe(ctx context.Context, 
 	aggregate.RecoverableWaits[idx].Status = runtimecontract.RuntimeRecoverableWaitWaiting
 	aggregate.RecoverableWaits[idx].NextEligibleAt = next.UTC().Format(time.RFC3339Nano)
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -200,7 +200,7 @@ func (c *driveDeliveryComponent) exhaustRecoverableWait(ctx context.Context, wor
 	}
 	aggregate.Facts, aggregate.Decision = facts, decision
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -221,7 +221,7 @@ func (c *driveDeliveryComponent) retireRecoverableWait(ctx context.Context, work
 	expectedRevision := aggregate.StateRevision
 	aggregate.RecoverableWaits[idx].Status = runtimecontract.RuntimeRecoverableWaitRetired
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {
@@ -257,7 +257,7 @@ func (c *driveDeliveryComponent) expireRecoverableWait(ctx context.Context, aggr
 	}
 	aggregate.Facts, aggregate.Decision = facts, decision
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, false, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expectedRevision); err != nil {

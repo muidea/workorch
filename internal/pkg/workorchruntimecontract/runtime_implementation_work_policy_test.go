@@ -174,6 +174,19 @@ func TestRuntimeImplementationWorkPolicyCanonicalAndRawRoundTrips(t *testing.T) 
 	}
 }
 
+func supportedImplementationWorkProfilesFixture() []RuntimeProfileContract {
+	profiles := implementationWorkProfilesFixture()
+	policy := profiles[0].EvidenceRequirements[0].ImplementationWorkPolicy
+	policy.AllowedOperations = []RuntimeOperationVariantRef{{Kind: StepKindFileWrite}, {Kind: StepKindFileEdit}}
+	policy.TargetSelectorRef = RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef
+	policy.TargetSelectorCandidateRefs = nil
+	policy.ProspectiveTargetAllOfConstraintRefs = []string{
+		RuntimeImplementationWorkConstraintWorkspaceRelativePath,
+		RuntimeImplementationWorkConstraintNewTargetOwnerSelector,
+	}
+	return profiles
+}
+
 func TestRuntimeImplementationWorkPolicyCannotEnableAnIncompleteProtocol(t *testing.T) {
 	profiles := implementationWorkProfilesFixture()
 	if err := ValidateRuntimeProfileContracts(profiles); err != nil {
@@ -186,7 +199,7 @@ func TestRuntimeImplementationWorkPolicyCannotEnableAnIncompleteProtocol(t *test
 	if report.Available || len(report.Blockers) != 1 || report.Blockers[0].ProfileID != profiles[0].ID {
 		t.Fatalf("unexpected readiness report: %#v", report)
 	}
-	if report.Blockers[0].Reason != ErrRuntimeImplementationWorkUnavailable.Error() {
+	if !strings.HasPrefix(report.Blockers[0].Reason, ErrRuntimeImplementationWorkUnavailable.Error()) {
 		t.Fatalf("unexpected valid-policy blocker: %#v", report.Blockers[0])
 	}
 	invalid := CloneRuntimeProfileContracts(profiles)
@@ -201,6 +214,27 @@ func TestRuntimeImplementationWorkPolicyCannotEnableAnIncompleteProtocol(t *test
 	}
 	if err := execution.ValidateExecutableAdmission(); !errors.Is(err, ErrRuntimeImplementationWorkUnavailable) {
 		t.Fatalf("executable ingress bypassed readiness: %v", err)
+	}
+	supported := supportedImplementationWorkProfilesFixture()
+	if err := ValidateRuntimeProfileContracts(supported); err != nil {
+		t.Fatal(err)
+	}
+	if report := ExplainRuntimeImplementationWorkAvailability(supported); report.Available || len(report.Blockers) != 1 || !strings.Contains(report.Blockers[0].Reason, "terminal proof consumers") {
+		t.Fatalf("work execution alone opened incomplete terminal protocol: %#v", report)
+	}
+	if err := ValidateRuntimeImplementationWorkAvailability(supported); !errors.Is(err, ErrRuntimeImplementationWorkUnavailable) {
+		t.Fatalf("incomplete terminal protocol became executable: %v", err)
+	}
+	if err := (RuntimeExecutionContract{StateChangePolicy: RuntimeStateChangeAllowedButNotRequired, ProfileContracts: supported}).ValidateExecutableAdmission(); !errors.Is(err, ErrRuntimeImplementationWorkUnavailable) {
+		t.Fatalf("incomplete public closure bypassed executable gate: %v", err)
+	}
+	unsupported := CloneRuntimeProfileContracts(supported)
+	unsupported[0].EvidenceRequirements[0].ImplementationWorkPolicy.TargetSelectorRef = "file/not-integrated"
+	if err := unsupported[0].EvidenceRequirements[0].ImplementationWorkPolicy.Validate(); err != nil {
+		t.Fatalf("unsupported fixture must remain syntactically valid: %v", err)
+	}
+	if err := ValidateRuntimeImplementationWorkAvailability(unsupported); !errors.Is(err, ErrRuntimeImplementationWorkUnavailable) {
+		t.Fatalf("unintegrated selector became executable: %v", err)
 	}
 	profiles[0].EvidenceRequirements[0].ImplementationWorkPolicy = nil
 	if report := ExplainRuntimeImplementationWorkAvailability(profiles); !report.Available || len(report.Blockers) != 0 {

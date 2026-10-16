@@ -3,6 +3,7 @@ package readmodelprojection
 import (
 	"sort"
 
+	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -29,7 +30,7 @@ func mapRuntimeAudit(runtimeState *runtimecontract.RuntimeStateRecord) *projecti
 		AcceptedEvidence: runtimeAuditEvidence(facts.Evidence.Accepted), RejectedEvidence: runtimeAuditEvidence(facts.Evidence.Rejected),
 		Grounding: runtimeAuditGrounding(facts.Prerequisites, facts.Resources), Authority: runtimeAuditAuthority(state.Decision.AuthoritySnapshot),
 		CandidateAttempts: runtimeAuditCandidateAttempts(state.CandidateAttempts), Dispatches: runtimeAuditDispatches(state),
-		OperationReceipts: runtimeAuditOperationReceipts(state.OperationReceipts),
+		OperationReceipts: runtimeAuditOperationReceipts(state.OperationReceipts, facts.WorkspaceID, facts.RunID),
 		Repair:            runtimeAuditRepair(facts), Assessments: runtimeAuditAssessments(facts.Assessments),
 		RepairDirective: runtimeRepairDirectiveProjection(facts.RepairDirective),
 	}
@@ -321,7 +322,7 @@ func runtimeAuditAuthority(value runtimecontract.AuthoritySnapshot) projectionco
 	}
 }
 
-func runtimeAuditOperationReceipts(values []runtimecontract.RuntimeOperationReceipt) []projectioncontract.RuntimeAuditOperationReceipt {
+func runtimeAuditOperationReceipts(values []runtimecontract.RuntimeOperationReceipt, workspaceID common.WorkspaceID, runID common.RunID) []projectioncontract.RuntimeAuditOperationReceipt {
 	ret := make([]projectioncontract.RuntimeAuditOperationReceipt, 0, len(values))
 	for _, raw := range values {
 		value := raw.Normalized()
@@ -345,6 +346,31 @@ func runtimeAuditOperationReceipts(values []runtimecontract.RuntimeOperationRece
 			item.CheckFailures = append([]runtimecontract.RuntimeValidationCheckFailure(nil), observation.CheckFailures...)
 			item.FailureDetailsTruncated = observation.FailureDetailsTruncated
 			item.OutputTruncated = observation.OutputTruncated
+			if conjunction := observation.ExecutionConjunction; conjunction != nil {
+				for _, stage := range conjunction.Stages {
+					for _, stream := range []struct {
+						name     string
+						identity runtimecontract.RuntimeValidationOutputIdentity
+					}{{"stdout", stage.Stdout}, {"stderr", stage.Stderr}} {
+						identity := stream.identity
+						output := projectioncontract.RuntimeAuditValidationOutput{StageID: stage.Identity.ID, Stream: stream.name, Bytes: identity.Bytes, SHA256: identity.SHA256, SavedBytes: identity.SavedBytes, Complete: identity.Complete, OmittedReason: identity.OmittedReason}
+						if identity.Storage != nil {
+							output.StorageOmittedReason = identity.Storage.OmittedReason
+							if identity.Storage.Reference != "" {
+								dispatchID, err := runtimecontract.RuntimeOperationExecutionKeyOrigin(workspaceID, runID, value.ExecutionKey, value.OperationID)
+								if err == nil {
+									command := orchestratorevents.QueryRuntimeValidationOutputCommand{WorkspaceID: workspaceID, RunID: runID, DispatchID: dispatchID, OperationID: value.OperationID, ExecutionKey: value.ExecutionKey, Fence: value.Fence, SourceReceiptHash: runtimecontract.StableRuntimeOperationReceiptHash(value), StageID: stage.Identity.ID, Stream: stream.name}
+									output.Ref, err = command.ContentRef()
+								}
+								if err != nil {
+									output.StorageOmittedReason = "read_selector_invalid"
+								}
+							}
+						}
+						item.ValidationOutputs = append(item.ValidationOutputs, output)
+					}
+				}
+			}
 		}
 		if value.Feedback != nil {
 			feedback := value.Feedback.CloneOriginal()

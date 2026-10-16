@@ -25,6 +25,7 @@ func referenceRuntimeOperationContractRevision() string {
 		// together with parameter rules so an already-persisted Run never changes
 		// its create/effect semantics after a binary replacement.
 		writeHashString(h, descriptor.OwnerModuleID)
+		writeHashString(h, descriptor.HistoricalEffectProofContractRef)
 		writeHashString(h, string(descriptor.DefaultEffectScope))
 		writeHashString(h, string(descriptor.CapabilityClass))
 		writeHashString(h, string(descriptor.IdempotencyClass))
@@ -57,6 +58,7 @@ func referenceRuntimeOperationContractRevision() string {
 		writeHashString(h, runtimeOperationValidationPolicy(contract.Kind))
 		for _, v := range contract.Variants {
 			writeHashString(h, v.ID)
+			writeHashString(h, v.TerminalSnapshotProtocolRef)
 			for _, d := range v.Discriminators {
 				writeHashString(h, d.Name)
 				writeHashString(h, d.EqualsString)

@@ -80,7 +80,14 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// File 增加原 sealed file/read 回执的只读依赖重观察，零 receipt/CAS/credit；不授 SM-2 transition。
 	// Decision 增加只登记版本材料的合同变更写入口；无批准、应用或 Runtime transition。
 	// Workspace 增加独立待审输入准备与查询；原定义及 journal 不变，无应用/启动权。
-	const expectedProductionTopicCount = 306
+	// Shell restricted validation raw-output reads now have both the owner
+	// receiver and the Orchestrator production sender.
+	// Orchestrator exposes one read-only diagnostic relay consumed by workorchd.
+	// Git adds one original-receipt scoped read-only snapshot observation;
+	// it does not execute or confer a transition on the capability owner.
+	// Shell adds an original copied-selector scoped read-only current query;
+	// only Orchestrator's private SM-2 event may judge stale/reopen.
+	const expectedProductionTopicCount = 310
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}
@@ -156,6 +163,20 @@ func TestFileReadDependencyQueryRemainsOwnerObservationOnly(t *testing.T) {
 		contract.Metadata.TransitionTarget != eventcontract.TransitionTargetReceiverOwnerPrivate || contract.Metadata.ScopePolicy != eventcontract.ScopePolicyWorkspaceRunStep ||
 		contract.Metadata.IdentityPolicy != eventcontract.IdentityPolicyRuntimeOperation {
 		t.Fatalf("File 原读取依赖 query 被扩大为 execution 或 transition 权威: contract=%+v message=%+v", contract, message)
+	}
+}
+
+func TestGitCommitSnapshotQueryRemainsReadOnlySM4Participant(t *testing.T) {
+	contracts, messages := testContractCatalog(t)
+	topic := gitevents.TopicQueryRuntimeCommitSnapshot
+	contract, found := contracts[topic]
+	message, declared := messages[topic]
+	if !found || !declared || contract.Owner != "git" || message.Owner != "git" || !slices.Equal(contract.ReceiverOwners, []string{"git"}) ||
+		contract.CommandClass != eventcontract.CommandClassRead || contract.LanePolicy != eventcontract.LanePolicyQuery ||
+		contract.Metadata.StateMachine != eventcontract.StateMachineSM4 || contract.Metadata.ReducerOwner != "orchestrator" ||
+		contract.Metadata.MachineRole != eventcontract.StateMachineRoleParticipant || contract.Metadata.EffectClass != eventcontract.EffectClassReadOnly ||
+		contract.Metadata.ScopePolicy != eventcontract.ScopePolicyWorkspaceRunStep || contract.Metadata.IdentityPolicy != eventcontract.IdentityPolicyRuntimeOperation {
+		t.Fatalf("Git snapshot read expanded to execution/transition authority: contract=%+v message=%+v", contract, message)
 	}
 }
 

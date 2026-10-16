@@ -211,7 +211,7 @@ func (c *authorityComponent) recordRepairSurfaceConfirmation(ctx context.Context
 		return RuntimeAggregate{}, fmt.Errorf("%w: repair surface confirmation record revision does not match its owner transition", common.ErrConflict)
 	}
 	aggregate.RepairSurfaceConfirmations = append(aggregate.RepairSurfaceConfirmations, record)
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expected); err != nil {

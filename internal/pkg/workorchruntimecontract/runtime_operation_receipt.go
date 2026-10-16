@@ -534,6 +534,10 @@ func SameRuntimeOperationExecutionRecords(left []RuntimeOperationExecutionRecord
 }
 
 func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
+	if r.Evidence.OwnerSnapshot != nil {
+		identity := *r.Evidence.OwnerSnapshot
+		r.Evidence.OwnerSnapshot = &identity
+	}
 	r.ExecutionKey = strings.TrimSpace(r.ExecutionKey)
 	r.OperationID = strings.TrimSpace(r.OperationID)
 	r.Outcome = r.Outcome.Normalized()
@@ -556,6 +560,7 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 		r.Evidence.Validation = &observation
 	}
 	r.Evidence.OwnerRevisionSet = CloneRuntimeOwnerRevisionSet(r.Evidence.OwnerRevisionSet)
+	r.Evidence.ApplicabilityDependencies = CloneRuntimeEvidenceApplicabilityDependencies(r.Evidence.ApplicabilityDependencies)
 	r.ResourceChanges = NormalizeRuntimeResourceChanges(r.ResourceChanges)
 	if r.Feedback != nil {
 		feedback := r.Feedback.CloneOriginal()
@@ -574,6 +579,14 @@ func (r RuntimeOperationReceipt) Normalized() RuntimeOperationReceipt {
 }
 
 func (r RuntimeOperationReceipt) Validate() error {
+	if err := ValidateRuntimeEvidenceDependencyPair(r.Evidence.OwnerRevisionSet, r.Evidence.ApplicabilityDependencies, ""); err != nil {
+		return fmt.Errorf("operation receipt dependency pair: %w", err)
+	}
+	if value := r.Evidence.ApplicabilityDependencies; value != nil {
+		if value.ProtocolRef == RuntimeEvidenceApplicabilityDependenciesV2 && (!RuntimeEffectIsDurable(r.ObservedEffectScope) || r.Evidence.Validation != nil) {
+			return fmt.Errorf("historical effect purpose requires durable non-validation receipt")
+		}
+	}
 	if err := validateRuntimeOwnerRevisionSetRaw(r.Evidence.OwnerRevisionSet); err != nil {
 		return fmt.Errorf("operation receipt owner dependencies: %w", err)
 	}
@@ -598,6 +611,14 @@ func (r RuntimeOperationReceipt) Validate() error {
 		}
 		if r.Evidence.ContentHash != r.Evidence.ContentAddress.Digest || !containsString(r.Evidence.EvidenceRefs, r.Evidence.ContentAddress.Ref) {
 			return fmt.Errorf("operation receipt evidence content address does not match content hash and evidence refs")
+		}
+	}
+	if r.Evidence.OwnerSnapshot != nil {
+		if err := r.Evidence.OwnerSnapshot.Validate(); err != nil {
+			return err
+		}
+		if r.Outcome != RuntimeOperationOutcomeAccepted || r.Evidence.ContentAddress == nil || r.Evidence.OwnerRevisionSet == nil {
+			return fmt.Errorf("owner snapshot requires original accepted archived read dependencies")
 		}
 	}
 	if r.Outcome != RuntimeOperationOutcomeRejected && r.Feedback != nil {
@@ -722,10 +743,14 @@ func NormalizeRuntimeOperationReceipts(values []RuntimeOperationReceipt) []Runti
 }
 
 func ValidateRuntimeOperationReceipts(values []RuntimeOperationReceipt) error {
+	return validateRuntimeOperationReceiptsInIndex(values, nil)
+}
+
+func validateRuntimeOperationReceiptsInIndex(values []RuntimeOperationReceipt, index *runtimeOwnerLineageIndex) error {
 	seen := map[string]struct{}{}
 	for _, value := range values {
 		value = value.Normalized()
-		if err := value.Validate(); err != nil {
+		if err := index.receipt(value); err != nil {
 			return err
 		}
 		key := runtimeOperationReceiptIdentity(value.ExecutionKey, value.Fence)
@@ -769,9 +794,17 @@ func StableRuntimeOperationReceiptHash(receipt RuntimeOperationReceipt) string {
 	writeHashString(h, receipt.AfterHash)
 	writeHashString(h, receipt.Evidence.Summary)
 	writeHashString(h, receipt.Evidence.ContentHash)
+	if receipt.Evidence.OwnerSnapshot != nil {
+		writeHashString(h, "owner-snapshot-identity/v1")
+		writeHashString(h, stableFormalValueHash("runtime-owner-snapshot-identity", *receipt.Evidence.OwnerSnapshot))
+	}
 	if receipt.Evidence.OwnerRevisionSet != nil {
 		writeHashString(h, "owner-read-dependencies/v1")
 		writeHashString(h, stableFormalValueHash("runtime-owner-read-dependencies", *receipt.Evidence.OwnerRevisionSet))
+	}
+	if receipt.Evidence.ApplicabilityDependencies != nil {
+		writeHashString(h, "owner-applicability-dependencies/v1")
+		writeHashString(h, stableFormalValueHash("runtime-owner-applicability-dependencies", *receipt.Evidence.ApplicabilityDependencies))
 	}
 	if receipt.Evidence.ContentAddress == nil {
 		writeHashString(h, "content-address:nil")

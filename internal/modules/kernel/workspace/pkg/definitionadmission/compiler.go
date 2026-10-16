@@ -38,6 +38,18 @@ func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemo
 		if refs := specificationAdmissionViolations(candidate); len(refs) > 0 {
 			return clarification(candidate, workspacemodel.DefinitionAdmissionSpecificationIncomplete, refs, "goal_specification_incomplete"), nil
 		}
+	} else {
+		// An opted-in cross-source Profile needs a reviewed/confirmed graph;
+		// ordinary legacy all_of candidates must not invent one at activation.
+		for _, profile := range candidate.RuntimeProfileContracts {
+			for _, requirement := range profile.EvidenceRequirements {
+				for _, rule := range requirement.LineageAssertions {
+					if rule.ExecutionSourceContractRef != "" {
+						return clarification(candidate, workspacemodel.DefinitionAdmissionSpecificationIncomplete, []string{"execution-proof-mapping/missing-specification"}, "goal_specification_incomplete"), nil
+					}
+				}
+			}
+		}
 	}
 	for _, relation := range candidate.ProposedRelationInputs {
 		kind := strings.ToLower(strings.TrimSpace(relation.RelationKind))
@@ -82,6 +94,9 @@ func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemo
 func specificationAdmissionViolations(candidate workspacemodel.DefinitionAdmissionCandidate) []string {
 	spec := candidate.Specification.Normalized()
 	violations := make([]string, 0)
+	if err := ValidateSpecificationExecutionProofMappings(spec, candidate.DoDInputs, candidate.RuntimeProfileContracts, candidate.GoalInput); err != nil {
+		violations = append(violations, "execution-proof-mapping/incomplete")
+	}
 	if len(spec.Dimensions) == 0 {
 		violations = append(violations, "dimension/missing")
 	}

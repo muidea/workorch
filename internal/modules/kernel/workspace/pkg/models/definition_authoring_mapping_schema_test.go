@@ -21,7 +21,13 @@ func TestSealedMappingDecoderShapeMatchesProviderSchemaAtEveryField(t *testing.T
 		case 'o':
 			properties, ok := schema["properties"].(map[string]any)
 			required, requiredOK := schema["required"].([]any)
-			if !ok || !requiredOK || schema["type"] != "object" || schema["additionalProperties"] != false || len(properties) != len(shape.fields) || len(required) != len(shape.fields) {
+			count := 0
+			for _, child := range shape.fields {
+				if !child.optional {
+					count++
+				}
+			}
+			if !ok || !requiredOK || schema["type"] != "object" || schema["additionalProperties"] != false || len(properties) != len(shape.fields) || len(required) != count {
 				t.Fatalf("%s：decoder/schema 对象合同漂移", path)
 			}
 			seen := map[string]bool{}
@@ -34,7 +40,7 @@ func TestSealedMappingDecoderShapeMatchesProviderSchemaAtEveryField(t *testing.T
 			}
 			for name, child := range shape.fields {
 				nested, ok := properties[name].(map[string]any)
-				if !ok || !seen[name] {
+				if !ok || seen[name] == child.optional {
 					t.Fatalf("%s.%s：缺失必填字段", path, name)
 				}
 				check(child, nested, path+"."+name)
@@ -58,6 +64,8 @@ func TestSealedMappingDecoderShapeMatchesProviderSchemaAtEveryField(t *testing.T
 
 func TestSealedMappingDecoderRejectsEachMissingNullCaseAndWrongTypeField(t *testing.T) {
 	_, mapping, _ := fullSizeMappingFixture(t)
+	mapping.ExecutionProofMappings = []GoalExecutionProofMapping{{ContractRef: "runtime/cross-source-execution-proof/v1", ConsumerItemRef: "consumer", RuleRef: "rule", SourceItemRef: "source"}}
+	mapping.EvidencePurposeMappings = []GoalEvidencePurposeMapping{{ContractRef: "runtime/cross-cwi-evidence-purpose/v1", HistoricalItemRef: "history", AcceptanceItemRef: "current"}}
 	mapping.GoalRequirement.ResourceIDs = []string{"resource"}
 	mapping.Dimensions[0].ResourceIDs = []string{"resource"}
 	for index := range mapping.Requirements {
@@ -96,9 +104,12 @@ func TestSealedMappingDecoderRejectsEachMissingNullCaseAndWrongTypeField(t *test
 			}
 			sort.Strings(keys)
 			for _, key := range keys {
-				child, original := shape.fields[key], object[key]
+				child := shape.fields[key]
+				original, existed := object[key]
 				delete(object, key)
-				reject(path + "." + key + ".missing")
+				if !child.optional {
+					reject(path + "." + key + ".missing")
+				}
 				object[key] = nil
 				reject(path + "." + key + ".null")
 				object[key] = false
@@ -113,6 +124,9 @@ func TestSealedMappingDecoderRejectsEachMissingNullCaseAndWrongTypeField(t *test
 				delete(object, wrongCase)
 				object[key] = original
 				walk(child, original, path+"."+key)
+				if !existed {
+					delete(object, key)
+				}
 			}
 		case 'a':
 			values := value.([]any)

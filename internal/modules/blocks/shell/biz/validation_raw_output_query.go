@@ -54,7 +54,7 @@ func (m *Biz) handleRuntimeValidationRawOutput(event magicevent.Event, result ma
 		(receipt.ObservedEffectScope != runtimecontract.RuntimeEffectEphemeralSession &&
 			!(receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected && receipt.ObservedEffectScope == runtimecontract.RuntimeEffectUnknown)) ||
 		(receipt.Outcome != runtimecontract.RuntimeOperationOutcomeAccepted && receipt.Outcome != runtimecontract.RuntimeOperationOutcomeRejected) ||
-		receipt.Evidence.Validation.ObservationProtocolRef != shellProjectConjunctionProtocolRef || receipt.Evidence.Validation.ExecutionConjunction == nil {
+		!shellProjectObservationProtocol(receipt.Evidence.Validation.ObservationProtocolRef) || receipt.Evidence.Validation.ExecutionConjunction == nil {
 		setCapabilityError(result, fmt.Errorf("%w: raw output requires exact persisted project validation receipt", common.ErrConflict))
 		return
 	}

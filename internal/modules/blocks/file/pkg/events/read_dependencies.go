@@ -10,6 +10,9 @@ type QueryRuntimeFileReadDependenciesCommand struct {
 	SealedOperation       SealedRuntimeOperation
 	SourceReceiptHash     string
 	OriginalDependencies  runtimecontract.RuntimeOwnerRevisionSet
+	// Non-nil explicitly selects the versioned mutation postcondition reader;
+	// original historical reads are still required and reverse-proven.
+	ApplicabilitySource *runtimecontract.RuntimeEvidenceApplicabilityDependencies `json:",omitempty"`
 }
 
 type RuntimeFileReadDependencyObservationStatus string

@@ -8,5 +8,6 @@ const (
 	TopicProbeRuntimeOwnerFactProspectiveSatisfaction = "/shell/runtime-owner-fact/probe-prospective-satisfaction"
 	TopicQueryRuntimeCWIReconciliation                = "/shell/reconciliation/query-cwi"
 	TopicQueryRuntimeValidationRawOutput              = "/shell/validation/query-raw-output"
+	TopicQueryRuntimeValidationReadDependencies       = "/shell/validation/query-read-dependencies"
 	TopicExecuteOperation                             = "/shell/runtime-operation/execute"
 )

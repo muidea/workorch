@@ -133,15 +133,106 @@ func TestFilePatchReadDependenciesUseActualInputAndRecoveryPostcondition(t *test
 	t.Run("absence and unread failure", func(t *testing.T) {
 		workspace := t.TempDir()
 		created, err := NewRuntimeAdapter().ApplyPatch(PatchApplyRequest{WorkspaceDirectory: workspace, TargetRef: "new.txt", PatchType: patchTypeFileWrite, Content: "new", ContentPresent: true, CreateOnly: true})
-		if err != nil || created.patchRead != nil {
-			t.Fatalf("creation manufactured an existing read: %v", err)
+		if err != nil || created.patchRead == nil || created.patchRead.Purpose != "patch_absence" {
+			t.Fatalf("creation lost observed absence: %v", err)
 		}
 		failed, err := NewRuntimeAdapter().ApplyPatch(PatchApplyRequest{WorkspaceDirectory: workspace, TargetRef: "missing.txt", PatchType: patchTypeTextReplace, OldText: "old", NewText: "new", NewTextPresent: true})
-		if err == nil || failed.patchRead != nil {
-			t.Fatal("missing target manufactured read bytes")
+		if err == nil || failed.patchRead == nil || failed.patchRead.Purpose != "patch_absence" {
+			t.Fatal("missing target lost observed absence")
+		}
+		if err := os.Mkdir(filepath.Join(workspace, "directory"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		unread, err := NewRuntimeAdapter().ApplyPatch(PatchApplyRequest{WorkspaceDirectory: workspace, TargetRef: "directory", PatchType: patchTypeFileWrite, Content: "new", ContentPresent: true})
+		if err == nil || unread.patchRead != nil {
+			t.Fatal("read error manufactured absence or content proof")
 		}
 		if set, err := filePatchOwnerDependencies(runtimecontract.RuntimeOperationExecutionContext{}, runtimecontract.RuntimeOperation{}, nil); err != nil || set != nil {
 			t.Fatal("missing observation manufactured empty dependency proof")
 		}
 	})
+}
+
+func TestFileCreationDependenciesDistinguishAbsenceEmptyBytesAndRecovery(t *testing.T) {
+	for _, variant := range []string{patchTypeFileWrite, patchTypeUnifiedDiff} {
+		t.Run(variant, func(t *testing.T) {
+			workspace := t.TempDir()
+			request := PatchApplyRequest{WorkspaceDirectory: workspace, TargetRef: "new.txt", PatchType: variant, Content: "new\n", ContentPresent: true, CreateOnly: true,
+				Diff: "--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+new\n"}
+			result, err := NewRuntimeAdapter().ApplyPatch(request)
+			if err != nil || result.patchRead == nil || result.BeforeHash != "" {
+				t.Fatalf("create: %v %+v", err, result)
+			}
+			absenceDigest := sha256.Sum256([]byte("file-target-existence/v1\x00absent"))
+			absenceHash := hex.EncodeToString(absenceDigest[:])
+			if *result.patchRead != (filePatchReadObservation{TargetRef: "new.txt", ContentHash: absenceHash, Purpose: "patch_absence"}) {
+				t.Fatalf("absence identity: %+v", result.patchRead)
+			}
+			scope := runtimecontract.RuntimeOperationExecutionContext{WorkspaceID: "ws", Transaction: runtimecontract.AuthorityTransaction{DefinitionRevision: "definition"}}
+			operation := runtimecontract.RuntimeOperation{ID: "create", Kind: runtimecontract.RuntimeBlockKindPatchApply, TargetRefs: []string{"new.txt"}}
+			dependencies, err := filePatchOwnerDependencies(scope, operation, result.patchRead)
+			if err != nil || len(dependencies.Entries) != 1 || dependencies.Entries[0].ResourceKind != "workspace_target_existence" || dependencies.Entries[0].Revision != absenceHash {
+				t.Fatalf("absence source: %v %+v", err, dependencies)
+			}
+			preimage, err := json.Marshal(struct {
+				WorkspaceID   string
+				OperationHash string
+				Observation   struct {
+					TargetRef, ContentHash string
+					Size                   int64
+					Purpose                string
+				}
+			}{"ws", runtimecontract.StableRuntimeOperationHash(operation), struct {
+				TargetRef, ContentHash string
+				Size                   int64
+				Purpose                string
+			}{"new.txt", absenceHash, 0, "patch_absence"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			selector := sha256.Sum256(append([]byte("file-patch-read-dependency/v1\x00"), preimage...))
+			if dependencies.Entries[0].DependencyHash != hex.EncodeToString(selector[:]) {
+				t.Fatal("absence selector differs from independent oracle")
+			}
+			for _, targets := range [][]string{nil, {"other.txt"}, {"new.txt", "other.txt"}} {
+				changed := operation.Clone()
+				changed.TargetRefs = targets
+				if set, err := filePatchOwnerDependencies(scope, changed, result.patchRead); err == nil || set != nil {
+					t.Fatalf("absence attached to wrong sealed target: %v", targets)
+				}
+			}
+			empty, err := filePatchOwnerDependencies(scope, operation, observedFilePatchRead("new.txt", nil, "patch_input"))
+			if err != nil || empty.SetHash == dependencies.SetHash || empty.Entries[0].ResourceKind == dependencies.Entries[0].ResourceKind {
+				t.Fatal("absence confused with empty content")
+			}
+			request.ReplayProof = &runtimecontract.RuntimeOperationReplayProof{OwnerModuleID: ModuleID, OperationID: "create", TargetRefs: []string{"new.txt"}, AfterHash: result.AfterHash, AdmissibilitySnapshotID: "snapshot"}
+			replayed, err := NewRuntimeAdapter().ApplyPatch(request)
+			if err != nil || replayed.patchRead == nil || replayed.patchRead.Purpose != "replay_postcondition" {
+				t.Fatalf("recovery: %v %+v", err, replayed)
+			}
+			recovery, err := filePatchOwnerDependencies(scope, operation, replayed.patchRead)
+			if err != nil || recovery.SetHash == dependencies.SetHash || recovery.Entries[0].Revision != result.AfterHash {
+				t.Fatal("recovery fabricated original absence")
+			}
+			for _, field := range []string{"hash", "size"} {
+				changed := *result.patchRead
+				if field == "hash" {
+					changed.ContentHash = result.AfterHash
+				} else {
+					changed.Size = 1
+				}
+				if set, err := filePatchOwnerDependencies(scope, operation, &changed); err == nil || set != nil {
+					t.Fatalf("invalid absence %s accepted", field)
+				}
+			}
+			encoded, err := json.Marshal(dependencies)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reloaded runtimecontract.RuntimeOwnerRevisionSet
+			if err := json.Unmarshal(encoded, &reloaded); err != nil || !reflect.DeepEqual(dependencies, &reloaded) {
+				t.Fatalf("absence reload: %v", err)
+			}
+		})
+	}
 }

@@ -101,6 +101,7 @@ func (m *Biz) Start() error {
 		{gitevents.TopicAcquireCapabilityState, m.handleGitCapabilityState},
 		{gitevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery},
 		{gitevents.TopicExecuteOperation, m.handleGitOperation},
+		{gitevents.TopicQueryRuntimeCommitSnapshot, m.handleRuntimeCommitSnapshotQuery},
 	}
 	// A failed Start keeps every completed subscription reachable. Retrying
 	// resumes at the first unfinished topic rather than registering duplicates.
@@ -729,6 +730,12 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 			setCapabilityError(result, err)
 			return
 		}
+		if command.WorkspaceInternalDirectory != "" {
+			if err := gitCommitSnapshotScopeForExecution(command.RuntimeOperationExecutionContext).Validate(); err != nil {
+				setCapabilityError(result, err)
+				return
+			}
+		}
 	}
 	operationResult, executeErr := m.runtimeAdapter.ExecuteOperation(event.Context(), RuntimeOperationRequest{
 		WorkspaceID: command.WorkspaceID, RunID: command.RunID, StepID: common.StepID(command.DispatchID + "/" + command.OperationID),
@@ -741,13 +748,13 @@ func (m *Biz) handleGitOperation(event magicevent.Event, result magicevent.Resul
 	status := runtimecontract.RuntimeOperationExecutionStatusAccepted
 	evidence := operationResult.Evidence
 	if executeErr == nil {
-		dependencies, dependencyErr := m.runtimeAdapter.commitOwnerDependencies(event.Context(), command.RuntimeOperationExecutionContext, operationResult)
+		ownerEvidence, dependencyErr := m.runtimeAdapter.commitOwnerEvidence(event.Context(), command.RuntimeOperationExecutionContext, operationResult)
 		if dependencyErr != nil {
 			// effect 可能已经完成；不伪造 rejected/no-op receipt，交由原 unknown 对账路径处理。
 			setCapabilityError(result, dependencyErr)
 			return
 		}
-		evidence.OwnerRevisionSet = dependencies
+		evidence = ownerEvidence
 	}
 	var failure *runtimecontract.FailureFact
 	if executeErr != nil {

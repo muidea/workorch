@@ -25,7 +25,11 @@ func CompileRuntimeSemanticBindings(manifest RuntimeSemanticPlanManifest, logica
 // CompileRuntimeSemanticAcceptedBatchBindings 从精确 accepted batch 编译 binding；
 // manifest 的完整校验产物只在本次调用内部复用，不授予调用者校验凭据。
 func CompileRuntimeSemanticAcceptedBatchBindings(manifest RuntimeSemanticPlanManifest, batch RuntimeSemanticPlanBatch, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
-	validated, err := validateRuntimeSemanticPlanManifest(manifest)
+	return compileRuntimeSemanticAcceptedBatchBindingsInSession(manifest, batch, document, feasibilities, newRuntimeSemanticValidationSession())
+}
+
+func compileRuntimeSemanticAcceptedBatchBindingsInSession(manifest RuntimeSemanticPlanManifest, batch RuntimeSemanticPlanBatch, document RuntimeSemanticPlanDocument, feasibilities []RuntimeSemanticProofFeasibility, session *runtimeSemanticValidationSession) ([]CoverageFocus, RuntimeCWIReconciliationContract, error) {
+	validated, err := validateRuntimeSemanticPlanManifestInSession(manifest, session)
 	if err != nil {
 		return nil, RuntimeCWIReconciliationContract{}, fmt.Errorf("runtime semantic binding batch: %w", err)
 	}
@@ -134,10 +138,14 @@ func validateRuntimeSemanticPlanProofObligationsWithValidatedManifest(document R
 	manifest := validated.manifest
 	// 嵌套 acquisition 路径不假定幂等，保留原义务集合的规范化次数。
 	manifest.ProofObligations = normalizeRuntimeSemanticProofObligations(manifest.ProofObligations)
-	return validateRuntimeSemanticPlanProofObligationsNormalized(document.Normalized(), manifest)
+	return validateRuntimeSemanticPlanProofObligationsWithValidatedWork(document.Normalized(), manifest, true)
 }
 
 func validateRuntimeSemanticPlanProofObligationsNormalized(document RuntimeSemanticPlanDocument, manifest RuntimeSemanticPlanManifest) error {
+	return validateRuntimeSemanticPlanProofObligationsWithValidatedWork(document, manifest, false)
+}
+
+func validateRuntimeSemanticPlanProofObligationsWithValidatedWork(document RuntimeSemanticPlanDocument, manifest RuntimeSemanticPlanManifest, workValidated bool) error {
 	obligations := make(map[common.CoverageWorkItemID]RuntimeSemanticProofObligation, len(manifest.ProofObligations))
 	for _, obligation := range manifest.ProofObligations {
 		obligations[obligation.CoverageWorkItemID] = obligation
@@ -155,7 +163,13 @@ func validateRuntimeSemanticPlanProofObligationsNormalized(document RuntimeSeman
 		sourceValue := runtimeSemanticProofObligationSourceFocus(obligation)
 		source := &sourceValue
 		if obligation.ImplementationWork != nil {
-			if err := validateRuntimeSemanticImplementationWorkProofSet(proofSet, obligation.ImplementationWork); err != nil {
+			var err error
+			if workValidated {
+				err = validateRuntimeSemanticImplementationWorkProofSetAgainstValidatedWork(proofSet, obligation.ImplementationWork)
+			} else {
+				err = validateRuntimeSemanticImplementationWorkProofSet(proofSet, obligation.ImplementationWork)
+			}
+			if err != nil {
 				return err
 			}
 		} else if err := validateRuntimeSemanticProofSetSourceWithEvidenceKinds(proofSet, source, evidenceObligation.CurrentRequiredEvidenceKinds); err != nil {
@@ -594,8 +608,9 @@ func compileRuntimeSemanticFocus(validated runtimeValidatedSemanticManifest, gen
 			if obligation.CoverageWorkItemID != item.ID {
 				continue
 			}
+			binding.HistoricalAcceptance = cloneRuntimeHistoricalAcceptanceSource(obligation.HistoricalAcceptance)
 			var err error
-			binding.LineageAssertions, err = CompileRuntimeLineageAssertions(obligation.LineageAssertions, declarationRef, item)
+			binding.LineageAssertions, err = CompileRuntimeCWILineageAssertions(obligation.LineageAssertions, declarationRef, item)
 			if err != nil {
 				return CoverageFocus{}, err
 			}

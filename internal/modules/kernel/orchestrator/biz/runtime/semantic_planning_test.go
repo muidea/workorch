@@ -15,7 +15,11 @@ import (
 
 func startSemanticRequestForTest(t *testing.T, controller *RuntimeController, aggregate RuntimeAggregate, manifest runtimecontract.RuntimeSemanticPlanManifest, prefix string) (RuntimeAggregate, runtimecontract.RuntimeExpectedDocumentContract) {
 	t.Helper()
-	logicalID := runtimecontract.StableRuntimeCandidateRequestSessionID(runtimecontract.RuntimeProviderDocumentSemanticPlan, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction(), prefix, manifest.Hash, "")
+	identityHash, err := SemanticRequestIdentityHash(aggregate.SemanticPlanning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logicalID := runtimecontract.StableRuntimeCandidateRequestSessionID(runtimecontract.RuntimeProviderDocumentSemanticPlan, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, aggregate.Decision.AuthorityTransaction(), prefix, manifest.Hash, identityHash)
 	result, err := controller.ApplyInternalEvent(context.Background(), RuntimeInternalEvent{
 		Kind:        RuntimeInternalEventSemanticPlanRequestStarted,
 		Scope:       RuntimeInternalEventScope{WorkspaceID: aggregate.Facts.WorkspaceID, RunID: aggregate.Facts.RunID},
@@ -1026,7 +1030,11 @@ func TestRuntimeSemanticStaleFactPrecedesBoundedCatalogRefreshAndSurvivesReload(
 		t.Fatal("new catalog revision did not change semantic manifest identity")
 	}
 	aggregate, newExpected := startSemanticRequestForTest(t, controller, aggregate, newManifest, "semantic-prefix-1")
-	withNewSession, newSession, err := controller.ensureCandidateRequestSessionWithExpected(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, "semantic-prefix-1", newManifest.Hash, "", &newExpected)
+	newIdentityHash, err := SemanticRequestIdentityHash(aggregate.SemanticPlanning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withNewSession, newSession, err := controller.ensureCandidateRequestSessionWithExpected(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, runtimecontract.RuntimeProviderDocumentSemanticPlan, "semantic-prefix-1", newManifest.Hash, newIdentityHash, &newExpected)
 	if err != nil {
 		t.Fatal(err)
 	}

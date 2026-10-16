@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -16,6 +17,8 @@ import (
 const (
 	RuntimeValidationInputReviewProtocol          = "validation/input-consistency/v1"
 	RuntimeValidationInputReviewProtocolV2        = "validation/input-consistency/v2"
+	RuntimeValidationInputReviewProtocolV3        = "validation/input-consistency/v3"
+	RuntimeValidationInputConsumer                = "validation_input"
 	RuntimeValidationInputReviewMaxFiles          = 16
 	RuntimeValidationInputReviewMaxBytes          = 64 * 1024
 	RuntimeValidationInputReviewMaxReasonBytes    = 2048
@@ -47,8 +50,11 @@ type RuntimeValidationInputReviewSubject struct {
 	Files       []RuntimeValidationInputReviewFile
 	// Optional owner-authored limits on what these inputs execute/observe. A
 	// reviewer must not infer a wider proof scope from recipe names or paths.
-	ScopeContractRef  string `json:",omitempty"`
-	ScopeRequirements string `json:",omitempty"`
+	ScopeContractRef            string                              `json:",omitempty"`
+	ScopeRequirements           string                              `json:",omitempty"`
+	LineageAssertions           []RuntimeLineageAssertion           `json:",omitempty"`
+	DiagnosticSourceContractRef string                              `json:",omitempty"`
+	DiagnosticSources           []RuntimeValidationDiagnosticSource `json:",omitempty"`
 }
 
 type RuntimeValidationInputReviewFile struct {
@@ -60,8 +66,9 @@ type RuntimeValidationInputReviewFile struct {
 // RuntimeValidationInputReview is deliberately a closed per-check report.
 // There is no overall approval bit, alternative criterion or replacement DoD.
 type RuntimeValidationInputReview struct {
-	SubjectHash string                              `json:"subjectHash"`
-	Checks      []RuntimeValidationInputCheckReview `json:"checks"`
+	SubjectHash       string                                    `json:"subjectHash"`
+	Checks            []RuntimeValidationInputCheckReview       `json:"checks"`
+	DiagnosticSources []RuntimeValidationDiagnosticSourceReview `json:"diagnosticSources,omitempty"`
 }
 
 type RuntimeValidationInputCheckReview struct {
@@ -76,10 +83,11 @@ type RuntimeValidationInputCheckReview struct {
 }
 
 type RuntimeValidationInputObligationReview struct {
-	CriterionText   string   `json:"criterionText"`
-	Finding         string   `json:"finding"`
-	Reason          string   `json:"reason"`
-	InputTargetRefs []string `json:"inputTargetRefs"`
+	CriterionText     string   `json:"criterionText"`
+	Finding           string   `json:"finding"`
+	Reason            string   `json:"reason"`
+	InputTargetRefs   []string `json:"inputTargetRefs"`
+	ProofConsumerRefs []string `json:"proofConsumerRefs,omitempty"`
 }
 
 // Information is a Decision-owner resolution fact, not a criterion, a
@@ -158,10 +166,16 @@ func writeRuntimeSemanticInputReviewInformationHash(h interface{ Write([]byte) (
 
 func (s RuntimeValidationInputReviewSubject) Clone() RuntimeValidationInputReviewSubject {
 	s.Files = append([]RuntimeValidationInputReviewFile(nil), s.Files...)
+	s.LineageAssertions = slices.Clone(s.LineageAssertions)
+	s.DiagnosticSources = slices.Clone(s.DiagnosticSources)
 	return s
 }
 
 func (r RuntimeValidationInputReview) Clone() RuntimeValidationInputReview {
+	r.DiagnosticSources = slices.Clone(r.DiagnosticSources)
+	for i := range r.DiagnosticSources {
+		r.DiagnosticSources[i].InputTargetRefs = slices.Clone(r.DiagnosticSources[i].InputTargetRefs)
+	}
 	r.Checks = cloneRuntimeStateRawSlice(r.Checks, func(check RuntimeValidationInputCheckReview) RuntimeValidationInputCheckReview { return check })
 	for i := range r.Checks {
 		r.Checks[i].InputTargetRefs = cloneRuntimeStateRawSlice(r.Checks[i].InputTargetRefs, func(value string) string { return value })
@@ -169,6 +183,7 @@ func (r RuntimeValidationInputReview) Clone() RuntimeValidationInputReview {
 			return value
 		})
 		for j := range r.Checks[i].Obligations {
+			r.Checks[i].Obligations[j].ProofConsumerRefs = slices.Clone(r.Checks[i].Obligations[j].ProofConsumerRefs)
 			r.Checks[i].Obligations[j].InputTargetRefs = cloneRuntimeStateRawSlice(r.Checks[i].Obligations[j].InputTargetRefs, func(value string) string { return value })
 		}
 	}
@@ -207,11 +222,24 @@ func StableRuntimeValidationInputReviewSubjectHash(s RuntimeValidationInputRevie
 		writeHashString(h, "validation-input-review-scope/v1")
 		writeHashStrings(h, []string{s.ScopeContractRef, s.ScopeRequirements})
 	}
+	if len(s.LineageAssertions) != 0 {
+		payload, _ := json.Marshal(s.LineageAssertions)
+		writeHashString(h, "validation-proof-composition/v1")
+		writeHashString(h, string(payload))
+	}
+	writeRuntimeDiagnosticSourceSubjectHash(h, s)
 	return "runtime-input-review-" + hex.EncodeToString(h.Sum(nil))
 }
 
 func (s RuntimeValidationInputReviewSubject) ValidateAgainstBinding(b RuntimeValidationProofRequirementBinding) error {
-	if !RuntimeValidationInputReviewProtocolSupported(s.ProtocolRef) || len(s.Files) == 0 || len(s.Files) > RuntimeValidationInputReviewMaxFiles {
+	if err := validateRuntimeDiagnosticSourceSubject(s); err != nil {
+		return err
+	}
+	if err := validateRuntimeValidationCompositionSubject(s, b); err != nil {
+		return err
+	}
+	maxFiles, maxBytes, _ := RuntimeValidationInputReviewBounds(s)
+	if !RuntimeValidationInputReviewProtocolSupported(s.ProtocolRef) || len(s.Files) == 0 || len(s.Files) > maxFiles {
 		return fmt.Errorf("validation input review requires a supported protocol and complete bounded inputs")
 	}
 	if (s.ScopeContractRef == "") != (s.ScopeRequirements == "") || len(s.ScopeContractRef) > 512 || len(s.ScopeRequirements) > RuntimeValidationInputReviewMaxScopeBytes ||
@@ -227,7 +255,7 @@ func (s RuntimeValidationInputReviewSubject) ValidateAgainstBinding(b RuntimeVal
 			return fmt.Errorf("validation input review requires canonical unique targets and exact complete content")
 		}
 		bytes += len(file.Content)
-		if bytes > RuntimeValidationInputReviewMaxBytes {
+		if bytes > maxBytes {
 			return fmt.Errorf("validation input review input capacity exceeded")
 		}
 		previous = file.TargetRef
@@ -243,6 +271,9 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 		return fmt.Errorf("validation input review has no exact owner subject")
 	}
 	if err := b.InputReview.ValidateAgainstBinding(b); err != nil {
+		return err
+	}
+	if err := validateRuntimeDiagnosticSourceReview(r, *b.InputReview); err != nil {
 		return err
 	}
 	if len(r.Checks) != len(b.RequiredCheckRefs) {
@@ -280,11 +311,15 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 				return err
 			}
 		}
+		if err := validateRuntimeValidationCompositionCheck(check, *b.InputReview); err != nil {
+			return err
+		}
 	}
 	// Do not retroactively impose a new capacity limit on archived v1 reports.
-	if b.InputReview.ProtocolRef == RuntimeValidationInputReviewProtocolV2 {
+	if b.InputReview.ProtocolRef != RuntimeValidationInputReviewProtocol {
 		encoded, err := json.Marshal(r)
-		if err != nil || len(encoded) > RuntimeValidationInputReviewMaxReportBytes {
+		_, _, maxReport := RuntimeValidationInputReviewBounds(*b.InputReview)
+		if err != nil || len(encoded) > maxReport {
 			return fmt.Errorf("validation input review report capacity exceeded")
 		}
 	}
@@ -295,6 +330,14 @@ func (r RuntimeValidationInputReview) ValidateAgainstBinding(b RuntimeValidation
 // facts. A conflict cannot be hidden by another check being inconclusive.
 func RuntimeValidationInputReviewConclusion(r RuntimeValidationInputReview) string {
 	ret := RuntimeValidationInputConsistent
+	for _, source := range r.DiagnosticSources {
+		if source.Conclusion == RuntimeValidationInputConflict {
+			return RuntimeValidationInputConflict
+		}
+		if source.Conclusion != RuntimeValidationInputConsistent {
+			ret = RuntimeValidationInputInconclusive
+		}
+	}
 	for _, check := range r.Checks {
 		if check.Conclusion == RuntimeValidationInputConflict {
 			return RuntimeValidationInputConflict
@@ -315,6 +358,7 @@ func writeRuntimeValidationInputReviewHash(h interface{ Write([]byte) (int, erro
 	}
 	writeHashString(h, RuntimeValidationInputReviewProtocol)
 	writeHashString(h, r.SubjectHash)
+	writeRuntimeDiagnosticSourceReviewHash(h, r.DiagnosticSources)
 	for _, check := range r.Checks {
 		writeHashString(h, check.RequiredCheckRef)
 		writeHashString(h, check.Conclusion)
@@ -327,6 +371,10 @@ func writeRuntimeValidationInputReviewHash(h interface{ Write([]byte) (int, erro
 				writeHashString(h, obligation.Finding)
 				writeHashString(h, obligation.Reason)
 				writeHashStrings(h, obligation.InputTargetRefs)
+				if len(obligation.ProofConsumerRefs) != 0 {
+					writeHashString(h, RuntimeValidationInputReviewProtocolV3)
+					writeHashStrings(h, obligation.ProofConsumerRefs)
+				}
 			}
 		}
 	}

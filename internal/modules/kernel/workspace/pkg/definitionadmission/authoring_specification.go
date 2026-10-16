@@ -9,7 +9,7 @@ import (
 
 // ValidateAuthoringVerificationApplicability 只检查声明适用性，不生成准入、owner fact、binding、proof 或 credit。
 // 无绑定 UNVERIFIED 可以表达缺口；确认和正式准入仍须独立阻断该缺口。
-func ValidateAuthoringVerificationApplicability(spec workspacemodel.GoalSpecification, dodItems []workspacemodel.DefinitionCandidateItem, profiles []runtimecontract.RuntimeProfileContract) error {
+func ValidateAuthoringVerificationApplicability(spec workspacemodel.GoalSpecification, dodItems []workspacemodel.DefinitionCandidateItem, profiles []runtimecontract.RuntimeProfileContract, goals ...workspacemodel.DefinitionCandidateItem) error {
 	for _, verification := range spec.Verifications {
 		switch verification.Status {
 		case workspacemodel.GoalVerificationUnverified:
@@ -24,7 +24,38 @@ func ValidateAuthoringVerificationApplicability(spec workspacemodel.GoalSpecific
 			return fmt.Errorf("verification/%s: unknown verification status", verification.ID)
 		}
 	}
-	return nil
+	return ValidateSpecificationExecutionProofMappings(spec, dodItems, profiles, goals...)
+}
+
+// Check the source graph before confirmation/admission, using the same exact
+// post-confirmation DoD order resolver. No Runtime CWI IDs are accepted here.
+func ValidateSpecificationExecutionProofMappings(spec workspacemodel.GoalSpecification, dodItems []workspacemodel.DefinitionCandidateItem, profiles []runtimecontract.RuntimeProfileContract, goals ...workspacemodel.DefinitionCandidateItem) error {
+	resolved, ok := specificationDoDSources(dodItems)
+	if !ok {
+		return fmt.Errorf("execution proof mapping requires exact DoD source order")
+	}
+	inventory := runtimecontract.RuntimeSourceObligationInventory{Sources: []runtimecontract.RuntimeDefinitionSource{{CandidateItemRef: spec.GoalItemRef, SourceScope: "goal", SourceID: spec.GoalItemRef}}}
+	if len(goals) == 1 {
+		if goals[0].CandidateItemRef != spec.GoalItemRef || workspacemodel.StableDefinitionTextHash(goals[0].Text) != spec.GoalTextHash {
+			return fmt.Errorf("execution source mapping Goal preimage mismatch")
+		}
+		inventory.Sources[0].Text = goals[0].Text
+	} else if len(goals) > 1 {
+		return fmt.Errorf("ambiguous Goal source preimage")
+	}
+	for _, item := range dodItems {
+		inventory.Sources = append(inventory.Sources, runtimecontract.RuntimeDefinitionSource{CandidateItemRef: item.CandidateItemRef, SourceScope: "dodItem", SourceID: resolved[item.CandidateItemRef], Text: item.Text})
+	}
+	for _, mapping := range spec.ExecutionProofMappings {
+		inventory.ExecutionProofMappings = append(inventory.ExecutionProofMappings, runtimecontract.RuntimeExecutionProofMapping(mapping))
+	}
+	for _, mapping := range spec.EvidencePurposeMappings {
+		inventory.EvidencePurposeMappings = append(inventory.EvidencePurposeMappings, runtimecontract.RuntimeEvidencePurposeMapping(mapping))
+	}
+	if err := runtimecontract.ValidateRuntimeEvidencePurposeMappings(inventory, profiles); err != nil {
+		return err
+	}
+	return runtimecontract.ValidateRuntimeExecutionProofMappings(inventory, profiles)
 }
 
 // SpecificationVerificationApplies 复用 Workspace 的确认后来源映射与中立 Profile matcher。

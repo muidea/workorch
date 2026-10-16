@@ -36,6 +36,10 @@ func StableRuntimeSemanticImplementationWorkHash(w RuntimeSemanticImplementation
 }
 
 func (w RuntimeSemanticImplementationWork) Validate() error {
+	return w.validateInSemanticSession(newRuntimeSemanticValidationSession())
+}
+
+func (w RuntimeSemanticImplementationWork) validateInSemanticSession(session *runtimeSemanticValidationSession) error {
 	maxOrdinal := w.Scope.Request.Policy.MaxRoundsPerCWI
 	if w.PurposeChoiceOnly {
 		maxOrdinal++
@@ -54,11 +58,21 @@ func (w RuntimeSemanticImplementationWork) Validate() error {
 	if w.Scope.Selection.Disposition != RuntimeTargetSelectionSelected && w.Scope.Selection.Disposition != RuntimeTargetSelectionScope {
 		return fmt.Errorf("semantic implementation work requires an owner-selected or prospective work scope")
 	}
-	if err := ValidateRuntimeOperationAdmissibilities(w.MutationInputCatalogs); err != nil {
-		return err
+	normalized := make([]RuntimeOperationAdmissibility, 0, len(w.MutationInputCatalogs))
+	seen := make(map[string]bool, len(w.MutationInputCatalogs))
+	for _, raw := range w.MutationInputCatalogs {
+		catalog, err := validateRuntimeAdmissibilityInSemanticSession(raw, session)
+		if err != nil {
+			return err
+		}
+		if seen[catalog.PrerequisiteID] {
+			return fmt.Errorf("runtime operation admissibility duplicates prerequisite %q", catalog.PrerequisiteID)
+		}
+		seen[catalog.PrerequisiteID] = true
+		normalized = append(normalized, catalog)
 	}
-	for _, catalog := range w.MutationInputCatalogs {
-		if !reflect.DeepEqual(catalog, catalog.Normalized()) {
+	for i, catalog := range w.MutationInputCatalogs {
+		if !reflect.DeepEqual(catalog, normalized[i]) {
 			return fmt.Errorf("semantic work input protection catalogs must retain canonical owner preimages")
 		}
 	}
@@ -73,14 +87,21 @@ func (w RuntimeSemanticImplementationWork) Validate() error {
 // current work vocabulary from immutable Definition plus a privately persisted
 // scope reservation. It does not select a next round or grant a dispatch.
 func CompileRuntimeSemanticPlanManifestForImplementationWork(workspace common.WorkspaceID, run common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus, execution RuntimeExecutionContract, catalogs []RuntimeOperationAdmissibility, round RuntimeImplementationWorkRound) (RuntimeSemanticPlanManifest, error) {
-	if err := round.Validate(); err != nil {
+	return compileRuntimeWorkManifestInSession(workspace, run, definition, seed, focuses, execution, catalogs, round, newRuntimeSemanticValidationSession())
+}
+
+// The session lives only within one complete compiler/state validation call.
+// All source gates remain independent; only exact raw successful catalog and
+// manifest preimages can reuse their detached validation products.
+func compileRuntimeWorkManifestInSession(workspace common.WorkspaceID, run common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus, execution RuntimeExecutionContract, catalogs []RuntimeOperationAdmissibility, round RuntimeImplementationWorkRound, session *runtimeSemanticValidationSession) (RuntimeSemanticPlanManifest, error) {
+	if err := round.validateInSemanticSession(session); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	if round.WorkingBinding != nil || round.DispatchID != "" || round.ScopeObservation == nil || round.WorkspaceID != workspace || round.RunID != run || round.StartupInputHash != definition.StartupInputHash || round.DefinitionSeedHash != seed.Hash {
 		return RuntimeSemanticPlanManifest{}, fmt.Errorf("semantic work compiler requires an unbound same-startup scope reservation")
 	}
 	sources := RuntimeImplementationWorkScopeSources{WorkspaceID: workspace, RunID: run, AuthoritySnapshotID: round.ScopeRequest.AuthoritySnapshotID, Seed: seed, Focuses: focuses, Profiles: execution.ProfileContracts, CoverageWorkItemID: round.CoverageWorkItemID, ManifestBinding: round.ScopeRequest.ManifestBinding}
-	if err := round.ScopeRequest.ValidateForSources(sources); err != nil {
+	if err := validateRuntimeWorkScopeInSession(round.ScopeRequest, sources, session); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	if err := definition.Validate(); err != nil {
@@ -103,7 +124,7 @@ func CompileRuntimeSemanticPlanManifestForImplementationWork(workspace common.Wo
 	if err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
-	if err := validateRuntimeSemanticOwnerCatalogCollection(catalogs); err != nil {
+	if err := validateRuntimeWorkCompilerCatalogsInSession(catalogs, session); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	policy := round.ScopeRequest.Policy
@@ -135,7 +156,7 @@ func CompileRuntimeSemanticPlanManifestForImplementationWork(workspace common.Wo
 		AllowedTargetPolicies: append([]RuntimeOperationTargetPolicy(nil), policy.AllowedTargetPolicies...), ProofObligations: []RuntimeSemanticProofObligation{obligation}, OwnerCatalogs: []RuntimeOperationAdmissibility{ownerCatalog.Clone()}}
 	manifest = manifest.Normalized()
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
-	if err := manifest.Validate(); err != nil {
+	if _, err := validateRuntimeSemanticPlanManifestInSession(manifest, session); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	return manifest, nil
@@ -144,6 +165,10 @@ func CompileRuntimeSemanticPlanManifestForImplementationWork(workspace common.Wo
 // CompileRuntimeSemanticImplementationPurposeManifest 复用原 semantic 请求合同与预算。
 // Preview 不是 effect round；达到工作轮次上限仍可选择原 terminal proof。
 func CompileRuntimeSemanticImplementationPurposeManifest(workspace common.WorkspaceID, run common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus, execution RuntimeExecutionContract, catalogs []RuntimeOperationAdmissibility, preview RuntimeImplementationWorkScopePreview, rounds []RuntimeImplementationWorkRound) (RuntimeSemanticPlanManifest, error) {
+	return compileRuntimeWorkPurposeInSession(workspace, run, definition, seed, focuses, execution, catalogs, preview, rounds, newRuntimeSemanticValidationSession())
+}
+
+func compileRuntimeWorkPurposeInSession(workspace common.WorkspaceID, run common.RunID, definition RuntimeDefinitionContext, seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus, execution RuntimeExecutionContract, catalogs []RuntimeOperationAdmissibility, preview RuntimeImplementationWorkScopePreview, rounds []RuntimeImplementationWorkRound, session *runtimeSemanticValidationSession) (RuntimeSemanticPlanManifest, error) {
 	if preview.Observation == nil {
 		return RuntimeSemanticPlanManifest{}, fmt.Errorf("implementation purpose requires complete fresh scope preview")
 	}
@@ -160,7 +185,7 @@ func CompileRuntimeSemanticImplementationPurposeManifest(workspace common.Worksp
 	// 复用词汇编译器的来源校验；这个局部 value 从不入账、从不授 dispatch。
 	vocabularySource := RuntimeImplementationWorkRound{WorkspaceID: workspace, RunID: run, StartupInputHash: definition.StartupInputHash, DefinitionSeedHash: seed.Hash, CoverageWorkItemID: preview.Request.CoverageWorkItemID, PolicyHash: StableRuntimeImplementationWorkPolicyHash(preview.Request.Policy), Ordinal: 1, ScopeRequest: preview.Request.Clone(), ScopeObservation: preview.Observation}
 	vocabularySource.Hash = StableRuntimeImplementationWorkRoundHash(vocabularySource)
-	manifest, err := CompileRuntimeSemanticPlanManifestForImplementationWork(workspace, run, definition, seed, focuses, execution, catalogs, vocabularySource)
+	manifest, err := compileRuntimeWorkManifestInSession(workspace, run, definition, seed, focuses, execution, catalogs, vocabularySource, session)
 	if err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
@@ -169,7 +194,7 @@ func CompileRuntimeSemanticImplementationPurposeManifest(workspace common.Worksp
 	work.Ordinal, work.PrecedingReceiptSetHash = ordinal, preceding
 	work.RoundHash = implementationWorkRawHash("implementation-purpose-preview:", preview)
 	manifest.Hash = StableRuntimeSemanticPlanManifestHash(manifest)
-	if err := manifest.Validate(); err != nil {
+	if _, err := validateRuntimeSemanticPlanManifestInSession(manifest, session); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
 	return manifest, nil
@@ -181,6 +206,16 @@ func validateRuntimeSemanticImplementationWorkProofSet(set RuntimeSemanticCWIPro
 	}
 	if err := work.Validate(); err != nil {
 		return err
+	}
+	return validateRuntimeSemanticImplementationWorkProofSetAgainstValidatedWork(set, work)
+}
+
+// Only called after the exact work body has passed the complete manifest/work
+// validator in this same call. It still checks every proposal and target; it
+// never grants authority and cannot be used by an unvalidated public ingress.
+func validateRuntimeSemanticImplementationWorkProofSetAgainstValidatedWork(set RuntimeSemanticCWIProofSet, work *RuntimeSemanticImplementationWork) error {
+	if work == nil {
+		return nil
 	}
 	if set.CoverageWorkItemID != work.Scope.Request.CoverageWorkItemID || len(set.Proposals) == 0 || len(set.Proposals) > work.Scope.Request.Policy.MaxTargetsPerRound {
 		return fmt.Errorf("semantic work requires bounded proposals for its exact CWI")

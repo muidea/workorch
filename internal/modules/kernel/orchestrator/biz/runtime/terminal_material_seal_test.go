@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -76,6 +77,51 @@ func TestTerminalMaterialSealImmutableAcrossRecovery(t *testing.T) {
 	next.TerminalMaterialSeal = nil
 	if err := validateTerminalMaterialSealTransition(previous, next); !errors.Is(err, common.ErrConflict) {
 		t.Fatalf("删除 seal 未拒绝: %v", err)
+	}
+}
+
+func TestTerminalMaterialSealSemanticDiagnosticSurvivesJSONReload(t *testing.T) {
+	previous := materialSealTerminalAggregate(t)
+	previous.Termination = nil
+	previous.Facts.Failure = &runtimecontract.FailureFact{
+		Class: runtimecontract.FailureClassCandidateExhausted, Code: "semantic_contract_failed", Signature: "semantic-plan/invalid-document", Message: "原语义候选拒绝",
+		OriginalDiagnostic: &runtimecontract.RuntimeOriginalDiagnostic{
+			SchemaVersion: runtimecontract.RuntimeOriginalDiagnosticSchemaCurrent, OwnerModuleID: "kernel/orchestrator", OriginalClass: "semantic_plan_rejection", OriginalCode: "semantic_plan_invalid", OriginalMessage: "原语义候选拒绝", Signature: "semantic-plan/invalid-document",
+			SemanticViolations: []runtimecontract.RuntimeSemanticContractViolation{{Kind: runtimecontract.RuntimeSemanticContractViolationProposalConstraint, Path: "$.proposals[0].target.prospectiveTargetRefs", CoverageWorkItemID: previous.Facts.Coverage[0].ID, Rule: runtimecontract.RuntimeSemanticConstraintRelational, Actual: "existing-target", Required: []string{"every target absent from sealed existing target set"}}},
+		},
+	}
+	var err error
+	previous.Facts, previous.Decision, err = reduceRuntimeAggregateWithDirective(previous, previous.Facts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seal, err := terminalMaterialSealFromAggregate(previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := previous
+	next.StateRevision++
+	next.TerminalMaterialSeal = &seal
+	if err := validateTerminalMaterialSealTransition(previous, next); err != nil {
+		t.Fatal(err)
+	}
+	wire, err := json.Marshal(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reloaded RuntimeAggregate
+	if err := json.Unmarshal(wire, &reloaded); err != nil {
+		t.Fatal(err)
+	}
+	if err := reloaded.Validate(); err != nil {
+		t.Fatalf("original terminal seal failed independent JSON reload: %v", err)
+	}
+	// A later delivery retry must consume the frozen recovery preimage; it must
+	// neither regenerate material nor normalize the source diagnostic differently.
+	reloaded.StateRevision++
+	reloaded.Facts.Recovery.TerminalDeliveryAttempts++
+	if err := reloaded.Validate(); err != nil {
+		t.Fatalf("delivery retry changed original material proof: %v", err)
 	}
 }
 

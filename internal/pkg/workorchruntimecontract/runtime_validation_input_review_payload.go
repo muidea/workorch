@@ -10,8 +10,25 @@ func validateRuntimeValidationInputReviewPayload(path string, raw json.RawMessag
 	if err := json.Unmarshal(raw, &review); err != nil || review == nil {
 		return &RuntimeCandidatePayloadDiagnostic{Path: path, Actual: "non_object", Required: []string{"object"}}
 	}
-	if err := validateRuntimeSemanticObjectFields(path, review, []string{"subjectHash", "checks"}, []string{"subjectHash", "checks"}); err != nil {
+	if err := validateRuntimeSemanticObjectFields(path, review, []string{"subjectHash", "checks", "diagnosticSources"}, []string{"subjectHash", "checks"}); err != nil {
 		return err
+	}
+	if raw, exists := review["diagnosticSources"]; exists {
+		var sources []json.RawMessage
+		if json.Unmarshal(raw, &sources) != nil || len(sources) == 0 || len(sources) > RuntimeValidationDiagnosticSourceLimit {
+			return &RuntimeCandidatePayloadDiagnostic{Path: path + ".diagnosticSources", Actual: "empty_or_unbounded_mapping", Required: []string{"complete bounded diagnostic source array"}}
+		}
+		for index, raw := range sources {
+			var source map[string]json.RawMessage
+			p := fmt.Sprintf("%s.diagnosticSources[%d]", path, index)
+			if json.Unmarshal(raw, &source) != nil || source == nil {
+				return &RuntimeCandidatePayloadDiagnostic{Path: p, Actual: "non_object", Required: []string{"object"}}
+			}
+			fields := []string{"sourceRef", "conclusion", "reason", "inputTargetRefs"}
+			if err := validateRuntimeSemanticObjectFields(p, source, fields, fields); err != nil {
+				return err
+			}
+		}
 	}
 	var checks []json.RawMessage
 	if err := json.Unmarshal(review["checks"], &checks); err != nil || len(checks) == 0 {
@@ -39,8 +56,14 @@ func validateRuntimeValidationInputReviewPayload(path string, raw json.RawMessag
 					return &RuntimeCandidatePayloadDiagnostic{Path: path, Actual: "non_object", Required: []string{"object"}}
 				}
 				fields := []string{"criterionText", "finding", "reason", "inputTargetRefs"}
-				if err := validateRuntimeSemanticObjectFields(path, obligation, fields, fields); err != nil {
+				if err := validateRuntimeSemanticObjectFields(path, obligation, append(append([]string(nil), fields...), "proofConsumerRefs"), fields); err != nil {
 					return err
+				}
+				if raw, exists := obligation["proofConsumerRefs"]; exists {
+					var refs []string
+					if err := json.Unmarshal(raw, &refs); err != nil || len(refs) == 0 || len(refs) > MaxRuntimeLineageAssertions+1 {
+						return &RuntimeCandidatePayloadDiagnostic{Path: path + ".proofConsumerRefs", Actual: "empty_or_unbounded_mapping", Required: []string{"complete bounded consumer array"}}
+					}
 				}
 			}
 		}
@@ -82,7 +105,7 @@ func addRuntimeSemanticInputReviewSchema(proposal map[string]any, manifest Runti
 						"inputTargetRefs":  stringEnumArraySchemaWithMaximum(refs, len(refs), 1),
 					},
 				}
-				if binding.InputReview.ProtocolRef == RuntimeValidationInputReviewProtocolV2 {
+				if binding.InputReview.ProtocolRef != RuntimeValidationInputReviewProtocol {
 					checkSchema["required"] = append(checkSchema["required"].([]string), "obligations")
 					checkSchema["properties"].(map[string]any)["obligations"] = map[string]any{
 						"type": "array", "minItems": 1, "maxItems": RuntimeValidationInputReviewMaxObligations,
@@ -97,6 +120,12 @@ func addRuntimeSemanticInputReviewSchema(proposal map[string]any, manifest Runti
 							},
 						},
 					}
+					if binding.InputReview.ProtocolRef == RuntimeValidationInputReviewProtocolV3 {
+						item := checkSchema["properties"].(map[string]any)["obligations"].(map[string]any)["items"].(map[string]any)
+						item["required"] = append(item["required"].([]string), "proofConsumerRefs")
+						refs := RuntimeValidationProofConsumerRefs(*binding.InputReview)
+						item["properties"].(map[string]any)["proofConsumerRefs"] = stringEnumArraySchemaWithMaximum(refs, len(refs), 1)
+					}
 				}
 				var allChecks []any
 				for _, check := range binding.RequiredCheckRefs {
@@ -108,6 +137,16 @@ func addRuntimeSemanticInputReviewSchema(proposal map[string]any, manifest Runti
 						"subjectHash": map[string]any{"const": binding.InputReview.Hash},
 						"checks":      map[string]any{"type": "array", "minItems": len(binding.RequiredCheckRefs), "maxItems": len(binding.RequiredCheckRefs), "items": checkSchema, "allOf": allChecks},
 					},
+				}
+				if len(binding.InputReview.DiagnosticSources) != 0 {
+					var sourceRefs []string
+					var sourceRules []any
+					for _, source := range binding.InputReview.DiagnosticSources {
+						sourceRefs = append(sourceRefs, source.SourceRef)
+						sourceRules = append(sourceRules, map[string]any{"contains": map[string]any{"required": []string{"sourceRef"}, "properties": map[string]any{"sourceRef": map[string]any{"const": source.SourceRef}}}})
+					}
+					reviewSchema["required"] = append(reviewSchema["required"].([]string), "diagnosticSources")
+					reviewSchema["properties"].(map[string]any)["diagnosticSources"] = map[string]any{"type": "array", "minItems": len(sourceRefs), "maxItems": len(sourceRefs), "allOf": sourceRules, "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"sourceRef", "conclusion", "reason", "inputTargetRefs"}, "properties": map[string]any{"sourceRef": stringEnumSchema(sourceRefs), "conclusion": stringEnumSchema([]string{RuntimeValidationInputConsistent, RuntimeValidationInputConflict, RuntimeValidationInputInconclusive}), "reason": map[string]any{"type": "string", "minLength": 1, "maxLength": RuntimeValidationInputReviewMaxReasonBytes}, "inputTargetRefs": stringEnumArraySchemaWithMaximum(refs, len(refs), 1)}}}
 				}
 				rules = append(rules, map[string]any{"if": condition, "then": map[string]any{"required": []string{"validationInputReview"}, "properties": map[string]any{"validationInputReview": reviewSchema}}})
 			}

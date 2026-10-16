@@ -16,6 +16,10 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 	attempts []RuntimeCandidateAttemptRecord,
 	sessions []RuntimeCandidateRequestSession,
 ) error {
+	return validateRuntimeAcceptedCandidateManifestLineageInSession(active, completed, attempts, sessions, nil)
+}
+
+func validateRuntimeAcceptedCandidateManifestLineageInSession(active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, attempts []RuntimeCandidateAttemptRecord, sessions []RuntimeCandidateRequestSession, semantic *runtimeSemanticValidationSession) error {
 	dispatches := make([]RuntimeDispatchRecord, 0, len(completed)+1)
 	dispatches = append(dispatches, completed...)
 	if active != nil {
@@ -98,7 +102,7 @@ func ValidateRuntimeAcceptedCandidateManifestLineage(
 				!reflect.DeepEqual(manifest.ImplementationWorkingBinding, dispatch.ImplementationWorkCommitment.WorkingBinding) {
 				return fmt.Errorf("accepted implementation dispatch differs from original pre-seal working manifest")
 			}
-			if err := ValidateRuntimeImplementationWorkDispatchCommitment(dispatch); err != nil {
+			if err := validateRuntimeImplementationWorkDispatchCommitmentInSession(dispatch, semantic); err != nil {
 				return err
 			}
 		} else if attempt.AdmissionImplementationWorkCommitment != nil || dispatch.ImplementationWorkCommitment != nil {
@@ -203,6 +207,17 @@ func validateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedge
 	attempts []RuntimeCandidateAttemptRecord,
 	sessions []RuntimeCandidateRequestSession,
 ) error {
+	return validateRuntimeAcceptedAssessmentPurposePreimagesInSession(ledger, active, completed, attempts, sessions, newRuntimeSemanticValidationSession())
+}
+
+func validateRuntimeAcceptedAssessmentPurposePreimagesInSession(
+	ledger RuntimeSemanticPlanningLedger,
+	active *RuntimeDispatchRecord,
+	completed []RuntimeDispatchRecord,
+	attempts []RuntimeCandidateAttemptRecord,
+	sessions []RuntimeCandidateRequestSession,
+	semanticSession *runtimeSemanticValidationSession,
+) error {
 	dispatches := make([]RuntimeDispatchRecord, 0, len(completed)+1)
 	dispatches = append(dispatches, completed...)
 	if active != nil {
@@ -254,12 +269,12 @@ func validateRuntimeAcceptedAssessmentPurposePreimagesWithValidatedSemanticLedge
 	// otherwise healthy Runtime from reaching its next owner transition. This
 	// is only a local validation acceleration: exact binding projection
 	// equality and the unique-preimage requirement remain unchanged.
-	preimages, err := runtimeAssessmentPurposePreimagesFromSemanticLedger(ledger, true)
+	preimages, err := runtimeAssessmentPurposePreimagesFromSemanticLedgerInSession(ledger, true, semanticSession)
 	if err != nil {
 		return fmt.Errorf("accepted runtime assessment attempt purpose preimage: %w", err)
 	}
 	for _, accepted := range acceptedAssessments {
-		preimage, err := resolveRuntimeAssessmentPurposePreimage(preimages, accepted.manifest.Bindings)
+		preimage, err := resolveRuntimeAssessmentPurposePreimageInSession(preimages, accepted.manifest.Bindings, semanticSession)
 		if err != nil {
 			return fmt.Errorf("accepted runtime assessment attempt purpose preimage: %w", err)
 		}

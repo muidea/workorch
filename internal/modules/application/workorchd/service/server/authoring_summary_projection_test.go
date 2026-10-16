@@ -47,7 +47,7 @@ func TestAuthoringSummaryEventRecordRefreshesHTTPListAndDetail(t *testing.T) {
 	readDetail := func() workspaceResponse {
 		t.Helper()
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+created.ID, nil))
+		handler.ServeHTTP(recorder, newLocalOperatorTestRequest(http.MethodGet, "/api/v1/workorch/workspaces/"+created.ID, nil))
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("detail status %d: %s", recorder.Code, recorder.Body.String())
 		}
@@ -90,7 +90,7 @@ func TestAuthoringSummaryEventRecordRefreshesHTTPListAndDetail(t *testing.T) {
 		return summary != nil && summary.State == "failed" && summary.FailurePhase == "derivation" && summary.FailureCode == "invalid_proposal"
 	})
 	listRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/workorch/workspaces", nil))
+	handler.ServeHTTP(listRecorder, newLocalOperatorTestRequest(http.MethodGet, "/api/v1/workorch/workspaces", nil))
 	if listRecorder.Code != http.StatusOK {
 		t.Fatalf("list status %d: %s", listRecorder.Code, listRecorder.Body.String())
 	}

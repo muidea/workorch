@@ -81,6 +81,9 @@ func evidenceAppliesToCoverageWorkItemWithNormalizedFacts(
 	coverageID common.CoverageWorkItemID,
 	lineage []runtimecontract.RuntimeCoverageProofLineage,
 ) bool {
+	if !runtimecontract.RuntimeEvidenceIsHistoricalEffect(evidence) && runtimecontract.RuntimeEvidenceHasStaleApplicability(evidence, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision) {
+		return false
+	}
 	item, bound := currentCWIBindingForNormalizedFacts(facts, coverageID)
 	if !bound || (item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateBound &&
 		item.CWIConvergenceState != runtimecontract.RuntimeCWIConvergenceStateSettled) {
@@ -136,6 +139,9 @@ func EvidenceAppliesToCurrentCoverageWithLineage(facts runtimecontract.RuntimeFa
 // reducer-derived CWI credit remains diagnostic lineage only and cannot
 // satisfy a required kind, stale an assessment, or close a repair directive.
 func AcceptedEvidenceCreditsCurrentFocusWithLineage(facts runtimecontract.RuntimeFacts, evidence runtimecontract.EvidenceFact, lineage []runtimecontract.RuntimeCoverageProofLineage) bool {
+	if !runtimecontract.RuntimeEvidenceHasProofApplicabilityAtRevision(evidence, facts.EvidenceApplicabilityObservations, facts.EvidenceRevision) {
+		return false
+	}
 	return EvidenceAppliesToCurrentCoverageWithLineage(facts, evidence, lineage)
 }
 

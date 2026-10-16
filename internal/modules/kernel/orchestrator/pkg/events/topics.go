@@ -18,6 +18,7 @@ const (
 
 	TopicOrchestratorDriveRuntime                    = "/orchestrator/runtime/drive"
 	TopicOrchestratorQueryRuntimeOperationReceipt    = "/orchestrator/runtime-operation/receipt/query"
+	TopicOrchestratorQueryRuntimeValidationOutput    = "/orchestrator/runtime-validation/output/query"
 	TopicOrchestratorCommitRuntimeOperationReceipt   = "/orchestrator/runtime-operation/receipt/commit"
 	TopicOrchestratorCommitRuntimeGovernanceApproval = "/orchestrator/runtime-governance/commit-approval"
 	TopicOrchestratorCommitRuntimeGovernanceTicket   = "/orchestrator/runtime-governance/commit-ticket-resolution"

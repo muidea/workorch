@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -26,6 +27,12 @@ func TestRuntimeOperationReadSourceCompilerRequiresPersistedDependencies(t *test
 					}},
 				}).WithHash()
 				receipt.Evidence.OwnerRevisionSet = &dependencies
+				digest := strings.Repeat("a", 64)
+				receipt.Evidence.ContentHash = digest
+				receipt.Evidence.ContentAddress = &runtimecontract.RuntimeEvidenceContentAddress{
+					Algorithm: runtimecontract.RuntimeEvidenceDigestSHA256, Digest: digest, Ref: "owner-original/" + digest,
+				}
+				receipt.Evidence.EvidenceRefs = append(receipt.Evidence.EvidenceRefs, receipt.Evidence.ContentAddress.Ref)
 			}
 			committed := lineageReceiptObserve(t, controller, claimed, receipt)
 			before := committed.CloneRaw()
@@ -40,12 +47,16 @@ func TestRuntimeOperationReadSourceCompilerRequiresPersistedDependencies(t *test
 				}
 				if err != nil || source.Context.Transaction != committed.ActiveDispatch.Transaction || source.Context.Execution.Fence != receipt.Fence ||
 					source.Context.EvidenceKind != runtimecontract.EvidenceKindStateChange || source.Context.WorkspaceDeliverableDirectory != "" ||
-					!reflect.DeepEqual(&source.OriginalDependencies, receipt.Evidence.OwnerRevisionSet) {
+					!reflect.DeepEqual(&source.OriginalDependencies, receipt.Evidence.OwnerRevisionSet) || !reflect.DeepEqual(source.SourceContentAddress, receipt.Evidence.ContentAddress) {
 					t.Fatalf("原 owner-committed 来源无法重编: err=%v", err)
 				}
 				queried, err := controller.queryOperationReceiptWithReadSource(t.Context(), source.Context, runtimecontract.RuntimeModuleFile)
 				if err != nil || !runtimecontract.SameRuntimeOperationReceipt(queried, committed.OperationReceipts[0]) {
 					t.Fatalf("重编来源不能通过原 receipt 独立反证: err=%v", err)
+				}
+				source.SourceContentAddress.Ref = "caller-mutated"
+				if receipt.Evidence.ContentAddress.Ref == source.SourceContentAddress.Ref || committed.OperationReceipts[0].Evidence.ContentAddress.Ref == source.SourceContentAddress.Ref {
+					t.Fatal("source content address shared original receipt storage")
 				}
 			}
 			if repository.saves != saves || !reflect.DeepEqual(committed, before) {

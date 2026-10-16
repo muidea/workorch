@@ -45,7 +45,7 @@ func (c *driveDeliveryComponent) recordDeliveryAcknowledgement(ctx context.Conte
 	expected := aggregate.StateRevision
 	aggregate.DeliveryAcknowledgements = append(aggregate.DeliveryAcknowledgements, acknowledgement)
 	aggregate.StateRevision++
-	if err := aggregate.Validate(); err != nil {
+	if err := c.validateAggregate(aggregate); err != nil {
 		return RuntimeAggregate{}, false, err
 	}
 	if err := c.transitions.Commit(ctx, aggregate, expected); err != nil {
@@ -163,7 +163,10 @@ func TerminalDeliveryFullyAcknowledged(aggregate RuntimeAggregate) bool {
 	}
 	for _, binding := range bindings {
 		state, err := EvaluateRuntimeDeliveryLineageAssertion(aggregate, binding)
-		if err != nil || state != runtimecontract.RuntimeDeliveryLineageSatisfied {
+		// A faithfully delivered failure is complete delivery, never fulfilled
+		// success-material obligations. Do not re-drive an impossible proof.
+		failedMaterial := outcome.Kind != runtimecontract.TerminalOutcomeKindCompleted && state == runtimecontract.RuntimeDeliveryLineageUnsatisfied
+		if err != nil || (state != runtimecontract.RuntimeDeliveryLineageSatisfied && !failedMaterial) {
 			return false
 		}
 	}

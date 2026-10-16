@@ -76,6 +76,7 @@ func (m *Biz) subscribeOwner(topic string, handler magicevent.ObserverFunc, matc
 		orchestratorevents.TopicOrchestratorCommandListCoverageWorkItemsByRun,
 		orchestratorevents.TopicOrchestratorCommandListArtifactContinuationsByRun,
 		orchestratorevents.TopicOrchestratorQueryRuntimeOperationReceipt,
+		orchestratorevents.TopicOrchestratorQueryRuntimeValidationOutput,
 		orchestratorevents.TopicOrchestratorCommitRuntimeOperationReceipt,
 		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceTicket,
 		orchestratorevents.TopicOrchestratorCommitRuntimeGovernanceApproval,
