@@ -54,6 +54,7 @@ func Contracts() []eventcontract.Contract {
 		TopicWorkspacePreparationDiagnosticRecord,
 		TopicWorkspaceDefinitionChangePrepare,
 		TopicWorkspaceDefinitionAuthoringCreate,
+		TopicWorkspaceAuthoringDirectoryPrepared,
 		TopicWorkspaceDefinitionAuthoringSave,
 		TopicWorkspaceAuthoringConfirm,
 		TopicWorkspaceAuthoringAdmit,

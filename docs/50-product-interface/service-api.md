@@ -96,6 +96,14 @@ LLM configuration save does not mutate the running LLM owner snapshot or any sea
 `.workorch-workspaces/<workspace-id>`。正式 Goal／DoD 仅在精确确认事务中物化，随后由 owner 准入；创建、编译、确认均不启动 Run。
 普通 setup 不要求 raw context/evidence/target/recipe/check/metric/artifact JSON。
 
+Web 的独立“保存草稿”仅调用创建接口，停在 `authoring.state=draft`、`inputRevision=1`；不调用修订、编译、确认或激活。
+201 表示 owner 已保存、允许的目录准备已完成并经过独立读回；`Workspace.state=active` 不代表合同或执行就绪。
+authoring GET 公开 `title`、`description`、`deliverableDirectory` 与 `creation`（`requestId`、`inputHash`、`directoryPrepared`）。
+后者是原创建阶段历史事实，不是当前目录／资源 readiness。未确认完成时 GET 不补目录；仅当 owner 能精确重建原创建 hash
+时提供 `creation.replay`，可显式重放相同 POST；否则保持待核对，不能用新 requestId 盲目创建。
+目录准备失败仍可能已保存；503 的 `creationRecovery` 保留原身份、`persisted|unknown` 和失败阶段，不表示从未保存。
+刷新／关闭后从服务端列表发现草稿，不依赖浏览器持久化；列表投影暂未收敛时显示其真实状态，再刷新核对 owner。
+
 解析失败诊断随原规格请求由 Workspace owner 持久记录。普通 authoring GET 仅返回错误分类及诊断元信息；
 `GET /workspaces/:workspaceId/authoring/diagnostics/:permitId` 按精确 Workspace/permit scope 返回单条原始错误与响应的可逆编码、
 字节数和 SHA256。读取不调用 provider、不推进确认、不启动 Run。诊断不脱敏、不替换、不静默截断；原文超限时明确

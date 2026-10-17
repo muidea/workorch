@@ -85,6 +85,9 @@ type QueryDefinitionAuthoringCommand struct {
 }
 
 type QueryDefinitionAuthoringResult struct {
+	Title                       string
+	Description                 string
+	Creation                    *DefinitionAuthoringCreationStatus
 	WorkspaceID                 common.WorkspaceID
 	WorkspaceRevision           uint64
 	Record                      *DefinitionAuthoringRecord
@@ -108,6 +111,18 @@ func (r QueryDefinitionAuthoringResult) ValidateFor(c QueryDefinitionAuthoringCo
 	}
 	if r.Record != nil && r.Record.Input.WorkspaceID != c.WorkspaceID {
 		return fmt.Errorf("authoring query record scope mismatch")
+	}
+	if r.Creation != nil {
+		creation := r.Creation
+		if (workspace.DefinitionAuthoringCreation{RequestID: creation.RequestID, InputHash: creation.InputHash}).Validate(c.WorkspaceID) != nil {
+			return common.ErrConflict
+		}
+		if replay := creation.Replay; replay != nil && (replay.Validate() != nil || replay.WorkspaceID != c.WorkspaceID || replay.RequestID != creation.RequestID || replay.CreationInputHash() != creation.InputHash || replay.Title != r.Title || replay.Description != r.Description || replay.DeliverableDirectory != r.DeliverableDirectory) {
+			return common.ErrConflict
+		}
+		if replay := creation.Replay; replay != nil && (r.Record == nil || r.Record.Input.Revision != 1 || replay.Input.InputHash() != r.Record.InputHash) {
+			return common.ErrConflict
+		}
 	}
 	var record *workspace.DefinitionAuthoringRecord
 	if r.Record != nil {

@@ -44,6 +44,7 @@ const (
 	TopicWorkspaceDefinitionAuthoringQuery    = "/workspace/definition-authoring/query"
 	TopicWorkspaceAuthoringResourceScopeQuery = "/workspace/definition-authoring/resource-scope/query"
 	TopicWorkspaceDefinitionAuthoringCreate   = "/workspace/definition-authoring/create"
+	TopicWorkspaceAuthoringDirectoryPrepared  = "/workspace/definition-authoring/directory-prepared"
 	TopicWorkspaceDefinitionAuthoringSave     = "/workspace/definition-authoring/save"
 	TopicWorkspaceSpecificationBegin          = "/workspace/definition-specification/begin"
 	TopicWorkspaceSpecificationReserve        = "/workspace/definition-specification/reserve"

@@ -21,7 +21,13 @@ type CreateDefinitionAuthoringCommand struct {
 }
 
 func (c CreateDefinitionAuthoringCommand) Validate() error {
-	if (workspace.DefinitionAuthoringCreation{RequestID: c.RequestID, InputHash: c.CreationInputHash()}).Validate(c.WorkspaceID) != nil || c.Input.Validate() != nil || c.Input.WorkspaceID != c.WorkspaceID || c.Input.Revision != 1 || strings.TrimSpace(c.Title) == "" || len(c.Title) > 1024 || len(c.Description) > 32*1024 || c.DeliverableDirectory == "" || c.InternalDirectory == "" {
+	if err := c.Input.Validate(); err != nil {
+		return err
+	}
+	if (workspace.DefinitionAuthoringCreation{RequestID: c.RequestID, InputHash: c.CreationInputHash()}).Validate(c.WorkspaceID) != nil || c.Input.WorkspaceID != c.WorkspaceID || c.Input.Revision != 1 {
+		return fmt.Errorf("invalid authoring creation request identity")
+	}
+	if strings.TrimSpace(c.Title) == "" || len(c.Title) > 1024 || len(c.Description) > 32*1024 || c.DeliverableDirectory == "" || c.InternalDirectory == "" {
 		return fmt.Errorf("invalid authoring creation command")
 	}
 	for _, value := range []string{c.Title, c.Description, c.DeliverableDirectory, c.InternalDirectory} {
@@ -44,6 +50,30 @@ type CreateDefinitionAuthoringResult struct {
 	WorkspaceID common.WorkspaceID
 	RequestID   string
 	InputHash   string
+}
+
+// RecordAuthoringDirectoryPreparedCommand records only the original creation's
+// directory preparation. It cannot change input, seal a contract or activate a Run.
+type RecordAuthoringDirectoryPreparedCommand struct {
+	Creation CreateDefinitionAuthoringCommand
+}
+
+type RecordAuthoringDirectoryPreparedResult struct {
+	WorkspaceID common.WorkspaceID
+	RequestID   string
+	InputHash   string
+}
+
+func (r RecordAuthoringDirectoryPreparedResult) ValidateFor(c RecordAuthoringDirectoryPreparedCommand) error {
+	return (CreateDefinitionAuthoringResult{WorkspaceID: r.WorkspaceID, RequestID: r.RequestID, InputHash: r.InputHash}).ValidateFor(c.Creation)
+}
+
+type DefinitionAuthoringCreationStatus struct {
+	RequestID         string
+	InputHash         string
+	DirectoryPrepared bool
+	// Replay is present only when the owner can reproduce the exact creation hash.
+	Replay *CreateDefinitionAuthoringCommand
 }
 
 func (r CreateDefinitionAuthoringResult) ValidateFor(c CreateDefinitionAuthoringCommand) error {

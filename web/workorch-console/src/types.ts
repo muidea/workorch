@@ -80,6 +80,10 @@ export type AuthoringDiagnostic = AuthoringDiagnosticMetadata & {
 };
 
 export type DefinitionAuthoringView = {
+  title?: string;
+  description?: string;
+  deliverableDirectory?: string;
+  creation?: { requestId: string; inputHash: string; directoryPrepared: boolean; replay?: DefinitionAuthoringCreate };
   workspaceId: string;
   workspaceRevision: number;
   state: string;

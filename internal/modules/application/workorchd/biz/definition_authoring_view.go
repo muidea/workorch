@@ -59,6 +59,13 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 		return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrConflict
 	}
 	result := workorchmanagementcontract.DefinitionAuthoringView{WorkspaceID: string(view.WorkspaceID), WorkspaceRevision: view.WorkspaceRevision, State: "workspace_created", TemplateCurrent: view.CurrentTemplateAvailable}
+	result.Title, result.Description, result.DeliverableDirectory = view.Title, view.Description, view.DeliverableDirectory
+	if c := view.Creation; c != nil {
+		result.Creation = &workorchmanagementcontract.DefinitionAuthoringCreationStatus{RequestID: c.RequestID, InputHash: c.InputHash, DirectoryPrepared: c.DirectoryPrepared}
+		if r := c.Replay; r != nil {
+			result.Creation.Replay = &workorchmanagementcontract.DefinitionAuthoringCreate{RequestID: r.RequestID, Title: r.Title, Description: r.Description, TemplateID: r.Input.TemplateID, DeliverableDirectory: r.DeliverableDirectory, Input: workorchmanagementcontract.DefinitionAuthoringInput{GoalText: r.Input.GoalText, AcceptanceRequirements: slices.Clone(r.Input.AcceptanceRequirements), ResourceRefs: slices.Clone(r.Input.ResourceRefs)}}
+		}
+	}
 	if view.Record == nil {
 		return result, nil
 	}

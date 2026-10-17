@@ -16,7 +16,7 @@ import (
 const definitionSpecificationCommandSource = definitionAdmissionCommandSource
 
 func definitionSpecificationTopics() []string {
-	return []string{workspaceevents.TopicWorkspaceDefinitionChangePrepare, workspaceevents.TopicWorkspaceDefinitionChangeQuery, workspaceevents.TopicWorkspaceDerivationReserve, workspaceevents.TopicWorkspaceDerivationComplete, workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, workspaceevents.TopicWorkspaceAuthoringSpecificationComplete, workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringSuccessAuditQuery, workspaceevents.TopicWorkspacePreparationDiagnosticRecord, workspaceevents.TopicWorkspacePreparationDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery, workspaceevents.TopicWorkspaceDefinitionAuthoringCreate, workspaceevents.TopicWorkspaceDefinitionAuthoringSave, workspaceevents.TopicWorkspaceAuthoringConfirm, workspaceevents.TopicWorkspaceAuthoringAdmit, workspaceevents.TopicWorkspaceSpecificationBegin, workspaceevents.TopicWorkspaceSpecificationReserve, workspaceevents.TopicWorkspaceSpecificationComplete}
+	return []string{workspaceevents.TopicWorkspaceDefinitionChangePrepare, workspaceevents.TopicWorkspaceDefinitionChangeQuery, workspaceevents.TopicWorkspaceDerivationReserve, workspaceevents.TopicWorkspaceDerivationComplete, workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, workspaceevents.TopicWorkspaceAuthoringSpecificationComplete, workspaceevents.TopicWorkspaceDefinitionAuthoringQuery, workspaceevents.TopicWorkspaceAuthoringDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringSuccessAuditQuery, workspaceevents.TopicWorkspacePreparationDiagnosticRecord, workspaceevents.TopicWorkspacePreparationDiagnosticQuery, workspaceevents.TopicWorkspaceAuthoringResourceScopeQuery, workspaceevents.TopicWorkspaceDefinitionAuthoringCreate, workspaceevents.TopicWorkspaceAuthoringDirectoryPrepared, workspaceevents.TopicWorkspaceDefinitionAuthoringSave, workspaceevents.TopicWorkspaceAuthoringConfirm, workspaceevents.TopicWorkspaceAuthoringAdmit, workspaceevents.TopicWorkspaceSpecificationBegin, workspaceevents.TopicWorkspaceSpecificationReserve, workspaceevents.TopicWorkspaceSpecificationComplete}
 }
 
 func (m *Biz) handleDefinitionSpecificationCommand(ev magicevent.Event, result magicevent.Result) {
@@ -191,6 +191,13 @@ func (m *Biz) handleDefinitionSpecificationCommand(ev magicevent.Event, result m
 			err = common.ErrInvalidArgument
 		} else {
 			reply, err = m.createDefinitionAuthoring(ev.Context(), cmd)
+		}
+	case workspaceevents.TopicWorkspaceAuthoringDirectoryPrepared:
+		cmd, ok := ev.Data().(workspaceevents.RecordAuthoringDirectoryPreparedCommand)
+		if !ok {
+			err = common.ErrInvalidArgument
+		} else {
+			reply, err = m.recordAuthoringDirectoryPrepared(ev.Context(), cmd)
 		}
 	case workspaceevents.TopicWorkspaceDefinitionAuthoringSave:
 		cmd, ok := ev.Data().(workspaceevents.SaveDefinitionAuthoringCommand)

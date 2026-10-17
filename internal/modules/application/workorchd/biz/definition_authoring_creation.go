@@ -3,6 +3,7 @@ package biz
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -30,7 +31,7 @@ func (b *Biz) CreateDefinitionAuthoringView(ctx context.Context, backend, dataDi
 		Input: workspace.DefinitionAuthoringInput{Version: workspace.DefinitionAuthoringInputVersionCurrent, WorkspaceID: id, Revision: 1, TemplateID: request.TemplateID, GoalText: request.Input.GoalText, AcceptanceRequirements: request.Input.AcceptanceRequirements, ResourceRefs: request.Input.ResourceRefs}.Normalized(),
 	}
 	if err := cmd.Validate(); err != nil {
-		return workorchmanagementcontract.DefinitionAuthoringView{}, err
+		return workorchmanagementcontract.DefinitionAuthoringView{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
 	}
 	if err := ctx.Err(); err != nil {
 		return workorchmanagementcontract.DefinitionAuthoringView{}, err
@@ -67,9 +68,33 @@ func (b *Biz) CreateDefinitionAuthoringView(ctx context.Context, backend, dataDi
 	if err := workspacecore.EnsureDirectoryLayout(layout); err != nil {
 		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(err, "persisted", "directory_preparation")
 	}
+	prepared := workspaceevents.RecordAuthoringDirectoryPreparedCommand{Creation: cmd}
+	preparedEvent := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceAuthoringDirectoryPrepared, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, prepared)
+	preparedEvent.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceAuthoringDirectoryPrepared, eventcontract.LaneScope{WorkspaceID: string(id)}))
+	preparedResult := b.SendEvent(preparedEvent)
+	if preparedResult == nil {
+		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(common.ErrConflict, "persisted", "directory_preparation")
+	}
+	if err := preparedResult.Error(); err != nil {
+		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(err, "persisted", "directory_preparation")
+	}
+	preparedValue, preparedErr := preparedResult.Get()
+	if preparedErr != nil {
+		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(preparedErr, "persisted", "directory_preparation")
+	}
+	preparedReceipt, ok := preparedValue.(workspaceevents.RecordAuthoringDirectoryPreparedResult)
+	if !ok || preparedReceipt.ValidateFor(prepared) != nil {
+		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(common.ErrConflict, "persisted", "directory_preparation")
+	}
 	view, err := b.ReadDefinitionAuthoringView(ctx, id)
 	if err != nil {
 		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(err, "persisted", "authoring_read")
+	}
+	if view.WorkspaceID != string(id) || view.Creation == nil || view.Creation.RequestID != cmd.RequestID || view.Creation.InputHash != cmd.CreationInputHash() || !view.Creation.DirectoryPrepared || view.Input == nil || view.InputRevision == 0 || view.InputHash == "" {
+		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(common.ErrConflict, "persisted", "authoring_read")
+	}
+	if view.InputRevision == 1 && (view.InputHash != cmd.Input.InputHash() || view.TemplateID != cmd.Input.TemplateID || view.Title != cmd.Title || view.Description != cmd.Description || view.DeliverableDirectory != cmd.DeliverableDirectory) {
+		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(common.ErrConflict, "persisted", "authoring_read")
 	}
 	return view, nil
 }

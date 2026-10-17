@@ -191,6 +191,10 @@ type DefinitionAuthoringRequestState struct {
 // DefinitionAuthoringView is a bounded management read model, not a submitted
 // owner record. In particular, File snapshot content never crosses this API.
 type DefinitionAuthoringView struct {
+	Title                  string                                             `json:"title,omitempty"`
+	Description            string                                             `json:"description,omitempty"`
+	DeliverableDirectory   string                                             `json:"deliverableDirectory,omitempty"`
+	Creation               *DefinitionAuthoringCreationStatus                 `json:"creation,omitempty"`
 	CompilationAccepted    bool                                               `json:"compilationAccepted,omitempty"`
 	WorkspaceID            string                                             `json:"workspaceId"`
 	WorkspaceRevision      uint64                                             `json:"workspaceRevision"`
@@ -214,4 +218,12 @@ type DefinitionAuthoringView struct {
 	BlockingTicketID       string                                             `json:"blockingTicketId,omitempty"`
 	StartupInputHash       string                                             `json:"startupInputHash,omitempty"`
 	ActivationState        string                                             `json:"activationState,omitempty"`
+}
+
+// Creation status is an owner-backed historical fact, never execution readiness.
+type DefinitionAuthoringCreationStatus struct {
+	RequestID         string                     `json:"requestId"`
+	InputHash         string                     `json:"inputHash"`
+	DirectoryPrepared bool                       `json:"directoryPrepared"`
+	Replay            *DefinitionAuthoringCreate `json:"replay,omitempty"`
 }

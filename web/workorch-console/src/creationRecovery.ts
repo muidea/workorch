@@ -8,10 +8,12 @@ export type CreationRecovery = {
 
 export class WorkorchRequestError extends Error {
   readonly creationRecovery?: CreationRecovery;
+  readonly status?: number;
 
-  constructor(message: string, creationRecovery?: CreationRecovery) {
+  constructor(message: string, creationRecovery?: CreationRecovery, status?: number) {
     super(message);
     this.creationRecovery = creationRecovery;
+    this.status = status;
   }
 }
 

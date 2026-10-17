@@ -33,7 +33,19 @@ func (m *Biz) queryDefinitionAuthoring(ctx context.Context, cmd workspaceevents.
 	if err := validateWorkspaceAuthoringMappingOutcomes(w); err != nil {
 		return workspaceevents.QueryDefinitionAuthoringResult{}, err
 	}
-	result := workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: cmd.WorkspaceID, WorkspaceRevision: w.Revision, DeliverableDirectory: w.DeliverableDirectory}
+	result := workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: cmd.WorkspaceID, WorkspaceRevision: w.Revision, Title: w.Title, Description: w.Description, DeliverableDirectory: w.DeliverableDirectory}
+	if c := w.DefinitionAuthoringCreation; c != nil {
+		if c.Validate(w.ID) != nil || c.PendingPersistence != nil {
+			return workspaceevents.QueryDefinitionAuthoringResult{}, common.ErrConflict
+		}
+		result.Creation = &workspaceevents.DefinitionAuthoringCreationStatus{RequestID: c.RequestID, InputHash: c.InputHash, DirectoryPrepared: c.DirectoryPrepared}
+		if w.DefinitionAuthoring != nil && w.DefinitionAuthoring.Input.Revision == 1 {
+			replay := workspaceevents.CreateDefinitionAuthoringCommand{RequestID: c.RequestID, WorkspaceID: w.ID, Title: w.Title, Description: w.Description, DeliverableDirectory: w.DeliverableDirectory, InternalDirectory: w.InternalDirectory, Input: w.DefinitionAuthoring.Input.Normalized()}
+			if replay.Validate() == nil && replay.CreationInputHash() == c.InputHash {
+				result.Creation.Replay = &replay
+			}
+		}
+	}
 	if template, templateErr := m.resolvedTemplate(bound, w.TemplateID); templateErr == nil {
 		result.CurrentTemplateSnapshotHash = workspacemodel.WorkspaceTemplateSnapshotHash(template)
 		result.CurrentTemplateAvailable = true
@@ -46,6 +58,7 @@ func (m *Biz) queryDefinitionAuthoring(ctx context.Context, cmd workspaceevents.
 		result.Record = &record
 	}
 	if cmd.InputHash != "" {
+		result.Creation = nil // A selected revision is not an initial-creation replay source.
 		var selected *workspacemodel.DefinitionAuthoringRecord
 		if w.DefinitionAuthoring != nil && w.DefinitionAuthoring.InputHash == cmd.InputHash {
 			selected = w.DefinitionAuthoring
@@ -99,6 +112,7 @@ func withAuthoringActivation(result workspaceevents.QueryDefinitionAuthoringResu
 	if admission != nil {
 		activation := admission.Normalized()
 		return workspaceevents.QueryDefinitionAuthoringResult{
+			Title: result.Title, Description: result.Description, Creation: result.Creation,
 			WorkspaceID: result.WorkspaceID, WorkspaceRevision: result.WorkspaceRevision,
 			Record: result.Record, History: result.History, Confirmation: result.Confirmation, PriorClarification: result.PriorClarification, AdmissionCandidate: result.AdmissionCandidate,
 			AdmissionResult: result.AdmissionResult, ActivationAdmission: &activation,

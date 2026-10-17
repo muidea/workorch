@@ -55,10 +55,12 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
   const recoveryRef = useRef<AuthoringRecovery | undefined>(undefined);
   const setRecoveryMemory = (next: AuthoringRecovery | undefined) => { recoveryRef.current = next; setRecovery(next); };
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
   const [edited, setEdited] = useState(false);
   const onValuesChange = useCallback(() => { setEdited(true); }, []);
   const [failure, setFailure] = useState('');
   const [creationFailure, setCreationFailure] = useState<CreationRecovery>();
+  const [creationRejected, setCreationRejected] = useState(false);
   const session = useRef(new AuthoringSessionFence());
   const queries = useRef(new AuthoringQueryFence());
   const acceptedPreparationObservation = useRef(new AuthoringAcceptedPreparationObservation());
@@ -83,11 +85,13 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     setRecovery(undefined);
     setView(undefined);
     setCreationFailure(undefined);
+    setCreationRejected(false);
     setEdited(false);
     setAcceptedPreparationObservationActive(false);
     setAcceptedPreparationObservationTimedOut(false);
     acceptedPreparationObservation.current = new AuthoringAcceptedPreparationObservation();
     setBusy(false);
+    submitting.current = false;
     form.resetFields();
     formOpened.current = false;
     onClose();
@@ -110,6 +114,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     const token = session.current.begin();
     queries.current.invalidate();
     setBusy(false);
+    submitting.current = false;
     let disposed = false;
     setFailure('');
     setAcceptedPreparationObservationTimedOut(false);
@@ -118,6 +123,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     setRecoveryMemory(undefined);
     setView(undefined);
     setCreationFailure(undefined);
+    setCreationRejected(false);
     setEdited(false);
     // 首次或已在关闭时清空的表单无需重挂；外部重开仍清空字段与校验状态。
     if (formOpened.current) form.resetFields();
@@ -167,7 +173,47 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     return () => { disposed = true; window.clearTimeout(timer); };
   }, [open, busy, view?.workspaceId, view?.state, view?.compilationAccepted, acceptedPreparationObservationActive, acceptedPreparationObservationGeneration]);
 
+  // STEP01 only: create/replay the original payload, never PUT or compile.
+  const saveDraft = async () => {
+    if (submitting.current || view || recoveryRef.current?.pendingSave || recoveryRef.current?.pendingConfirmation) return;
+    submitting.current = true;
+    const token = session.current.current();
+    const hadPriorRequest = Boolean(recoveryRef.current);
+    queries.current.invalidate();
+    setBusy(true); setFailure(''); setCreationRejected(false);
+    try {
+      let saved = recoveryRef.current;
+      if (!saved) {
+        const values = await form.validateFields();
+        if (!session.current.matches(token)) return;
+        saved = { request: { requestId: crypto.randomUUID(), title: values.title, templateId: values.templateId, deliverableDirectory: values.deliverableDirectory, input: { goalText: values.goalText, acceptanceRequirements: lines(values.requirements), resourceRefs: lines(values.resources) } } };
+        persist(saved);
+      }
+      const next = await workorchApi.createDefinitionAuthoring(saved.request);
+      if (!session.current.matches(token)) return;
+      if (next.state !== 'draft' || next.inputRevision !== 1 || !next.inputHash || next.creation?.requestId !== saved.request.requestId || !next.creation.directoryPrepared) throw new Error('创建返回尚不能证明本步草稿完整保存，请保留原身份核对服务端');
+      persist({ request: saved.request, workspaceId: next.workspaceId });
+      setCreationFailure(undefined);
+      observe(next);
+      const values = form.getFieldsValue();
+      setEdited(authoringNeedsSave(next, { goalText: values.goalText, acceptanceRequirements: lines(values.requirements), resourceRefs: lines(values.resources) }, values.templateId));
+      message.success('草稿已保存；未生成合同，未启动执行');
+    } catch (error) {
+      if (session.current.matches(token)) {
+        setFailure(errorMessage(error));
+        if (error instanceof WorkorchRequestError && error.creationRecovery?.requestId === recoveryRef.current?.request.requestId) setCreationFailure(error.creationRecovery);
+        // Only a first attempt's explicit pre-write rejection releases its identity.
+        // An earlier unknown is never erased by a later error response.
+        if (!hadPriorRequest && error instanceof WorkorchRequestError && !error.creationRecovery && [400, 404].includes(error.status || 0)) {
+          setRecoveryMemory(undefined); setCreationRejected(true);
+        }
+      }
+    } finally { if (session.current.matches(token)) { submitting.current = false; setBusy(false); } }
+  };
+
   const generate = async () => {
+    if (submitting.current) return;
+    submitting.current = true;
     const token = session.current.current();
     queries.current.invalidate();
     acceptedPreparationObservation.current = new AuthoringAcceptedPreparationObservation();
@@ -186,7 +232,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
         // 发送前保存原创建 payload；响应丢失后必须以原身份重放。
         saved = saved || { request: { requestId: crypto.randomUUID(), title: values.title, templateId: values.templateId, deliverableDirectory: values.deliverableDirectory, input } };
         persist(saved);
-        current = saved.workspaceId ? await queries.current.read(() => workorchApi.readDefinitionAuthoring(saved!.workspaceId!), () => session.current.matches(token)) : await workorchApi.createDefinitionAuthoring(saved.request);
+        current = await workorchApi.createDefinitionAuthoring(saved.request);
         if (!session.current.matches(token)) return;
         saved = { ...saved, workspaceId: current.workspaceId };
         setCreationFailure(undefined);
@@ -228,7 +274,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
         if (error instanceof WorkorchRequestError && error.creationRecovery?.requestId === recoveryRef.current?.request.requestId) setCreationFailure(error.creationRecovery);
       }
     } finally {
-      if (session.current.matches(token)) setBusy(false);
+      if (session.current.matches(token)) { submitting.current = false; setBusy(false); }
     }
   };
 
@@ -295,15 +341,29 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
     finally { if (session.current.matches(token)) setBusy(false); }
   };
 
+  const enterDraft = async () => {
+    if (busy || edited || !view) return;
+    const token = session.current.current();
+    setBusy(true); setFailure('');
+    try {
+      await onCreated(view.workspaceId, () => session.current.matches(token));
+      if (session.current.matches(token)) close(true);
+    } catch (error) { if (session.current.matches(token)) setFailure(errorMessage(error)); }
+    finally { if (session.current.matches(token)) setBusy(false); }
+  };
+
   return <Modal open={open} title="新建工作空间 · 规格创作" width={850} onCancel={() => close()} footer={<Space>
     <Button onClick={() => close()}>关闭</Button>
+    <Button loading={busy} disabled={busy || Boolean(view) || Boolean(recovery?.pendingSave) || Boolean(recovery?.pendingConfirmation)} onClick={saveDraft}>{recovery && !view ? '按原请求恢复草稿保存' : '保存草稿'}</Button>
+    {view?.state === 'draft' && <Button disabled={busy || edited} onClick={enterDraft}>查看已保存草稿</Button>}
     {authoringCanEnterAdmitted(view, recovery?.workspaceId) && <Button type="primary" disabled={busy} onClick={enterAdmitted}>进入已准入工作空间</Button>}
     <Button loading={busy} onClick={generate} disabled={busy || Boolean(recovery?.pendingConfirmation) || ['confirming', 'admitting', 'admitted'].includes(view?.state || '')}>保存并生成／恢复审查</Button>
     <Button type="primary" loading={busy} onClick={confirm} disabled={busy || !canConfirm}>{recovery?.pendingConfirmation ? '恢复原确认并准入' : '确认规格并准入'}</Button>
   </Space>}>
     <Space direction="vertical" style={{ width: '100%' }}>
-      <Alert type="info" showIcon message="输入目标即可，验收清单由模板与目标派生。六类审查通过后才可确认；此操作不会启动 Run。" />
+      <Alert type="info" showIcon message="保存草稿仅持久化输入，不生成或确认合同，不启动 Run。保存并生成会另行发起规格审查。未保存输入与重放身份仅在当前页面内存中，刷新或关闭后丢失；已保存草稿可从服务端列表找回。" />
       {creationFailure && <Alert type="warning" showIcon message={creationFailure.persistence === 'persisted' ? 'Workspace 身份已持久，创建准备待恢复' : '创建结果未知，请先核对原请求'} description={`Workspace：${creationFailure.workspaceId}；requestId：${creationFailure.requestId}；阶段：${creationFailure.phase}。重试沿用原 payload，补齐准备后才继续；请勿更换请求重复创建。`} />}
+      {creationRejected && <Alert type="warning" message="输入在保存前被拒绝，草稿未保存。请更正输入后重新提交。" />}
       {failure && <Alert type="error" showIcon message={failure} description={recovery ? '创建身份已保留。重试将恢复原草稿，不会重新创建工作空间。' : undefined} />}
       {view?.preparationDiagnostics?.map(diagnostic => <AuthoringPreparationFailure key={diagnostic.diagnosticId} diagnostic={diagnostic} />)}
       {acceptedPreparationObservationActive && <Alert type="info" showIcon message="本次任务已受理，正在观察 owner 状态；页面观察是临时的，不会恢复或取消服务端事务。" />}
@@ -312,10 +372,11 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
       {recovery?.pendingSave && <Alert type="warning" message="保存响应尚未确认。重试将先恢复原保存请求，再处理当前编辑；不会用新身份覆盖未决修订。" action={<Button disabled={busy} onClick={refreshSaveBaseline}>冲突后读取当前草稿</Button>} />}
       {edited && view?.input && <Alert type="info" message="owner 当前目标（本地编辑尚未覆盖）" description={view.input.goalText} />}
       {edited && <Alert type="info" message="本地编辑尚未保存到服务端，关闭将丢弃。" />}
-      {recovery && !view && <Alert type="warning" message="存在未完成的创建请求。将先以原 payload 恢复，再保存当前修改。" />}
-      <SetupInputForm form={form} templateOptions={templateOptions} onValuesChange={onValuesChange} created={Boolean(recovery?.workspaceId)} disabled={busy || Boolean(recovery?.pendingConfirmation) || ['confirming', 'admitting', 'admitted'].includes(view?.state || '')} />
+      {recovery && !view && <Alert type="warning" message="原创建结果待核对。重试只使用原身份与原 payload；请勿盲目新建。当前修改不会覆盖原请求，关闭后先从服务端列表核对。" />}
+      <SetupInputForm form={form} templateOptions={templateOptions} onValuesChange={onValuesChange} created={Boolean(recovery)} disabled={busy || Boolean(recovery?.pendingConfirmation) || ['confirming', 'admitting', 'admitted'].includes(view?.state || '')} />
       {view && <>
         <Typography.Text>草稿：{view.workspaceId} · revision {view.inputRevision} · {view.state}</Typography.Text>
+        {view.state === 'draft' && <Alert type="success" message="草稿已持久保存（M1），尚未形成正式合同或执行准入。" description={`创建 requestId：${view.creation?.requestId || '未公开'}；目录准备：${view.creation?.directoryPrepared ? '原创建阶段已完成，不代表当前资源就绪' : '待核对'}。`} />}
         {recovery?.pendingConfirmation && !authoringCanReplayConfirmation(view, recovery) && view.state !== 'admitted' && <Alert type="warning" message="原确认请求与当前草稿不一致，不能用旧凭据确认新规格。保留原请求，先核对并恢复确认；不能自动生成替代确认。" />}
         {edited && <Alert type="warning" message="输入已修改，旧规格不可确认。请保存并重新审查。" />}
         {!view.templateCurrent && <Alert type="warning" message="模板已变化或不可用，请保存新的创作 revision。" />}

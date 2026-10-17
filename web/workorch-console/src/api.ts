@@ -62,7 +62,7 @@ async function doRequest<T>(url: string, init?: RequestInit): Promise<T> {
     } catch {
       // Keep the HTTP status as the error message when the response is not JSON.
     }
-    throw new WorkorchRequestError(message, recovery);
+    throw new WorkorchRequestError(message, recovery, response.status);
   }
 
   const text = await response.text();
@@ -179,7 +179,7 @@ export const workorchApi = {
     return body.workspace;
   },
   createDefinitionAuthoring: async (input: DefinitionAuthoringCreate) => {
-    const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspace-authoring`, { method: 'POST', body: JSON.stringify(input) });
+    const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspace-authoring`, { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(30_000) });
     return body.authoring;
   },
   readDefinitionAuthoring: async (id: string) => {

@@ -53,6 +53,11 @@ Last Verified: 2026-08-30
 
 ## 不变量与非职责
 
+- 草稿创建的 `DefinitionAuthoringCreation.DirectoryPrepared` 默认为 false（包括旧数据），不从目录存在或 GET draft 推断。
+  只有 Application 源的精确原创建目录完成事实可由 owner CAS 记录；重复事实不增 revision，原身份、路径或 hash 漂移拒绝。
+  Query 返回创建身份与历史阶段，仅当当前 revision 1 的完整输入、标题及目录能重组原 creation hash 时提供 replay；
+  GET 不创建目录、不编译、不确认、不激活。该历史阶段不改变 Workspace lifecycle 或 SM-1～SM-4，也不是当前 readiness。
+
 - 正式创作创建入口接受稳定 RequestID，Workspace ID 由该身份确定。初始草稿与不可变创建身份在同一次 owner repository Create 中保存。file backend 在 metadata 内封存待提交绑定 after-image，核对／补齐 Soul 绑定和共享索引后，CAS 清除待完成标记；Get/List 在 owner 自有持久化层恢复缺件，未完成或冲突时不暴露完整对象。相同文件路径的创建、恢复、普通更新及删除串行；待完成窗口禁止普通写入和删除，版本／绑定／索引／删除冲突不覆盖，重开可继续。完成后的响应丢失／file reopen 重放不增写，后续修订也不会被初始创建重放覆盖；同身份不同内容拒绝。创建通知只是刷新提示，重放可重复补发当前事实，列表／详情恢复不依赖通知送达；Post 不是持久完成回执。目录初始化由 Application 在身份持久后执行，失败可用同一请求重试；创建不物化正式 Goal／DoD、不准入、不创建 Run。模板与目录修改通过创作保存事件随新 input revision 一次 CAS 更新，不以普通配置修改替代创作输入。
 - confirmation、正式 candidate inputs 与 admission ref 从同一次完整 ledger 校验派生。内部上下文仅在本次调用中复用派生项、资源与 proposal hash，不持久缓存、不接受调用方校验标记。确认必须绑定 record 的 exact Workspace scope，当前 formal sequence 必须等于历史长度加一；不能用其他 Workspace ledger 或虚构前序身份建立准入。每个公开 model／query 入口均验证完整历史和当前来源；未选中的坏请求、重复 review、FAIL／UNKNOWN 与确认来源篡改仍 fail closed。
 - startup input 一经 promotion 不可被 Runtime LLM 修改；candidate/admission lineage、definition revision 与 `StartupInputHash` 必须 exact 绑定。

@@ -14,6 +14,9 @@ import (
 type DefinitionAuthoringCreation struct {
 	RequestID string
 	InputHash string
+	// DirectoryPrepared records completion of application-owned directory preparation.
+	// It is a historical creation fact, not current resource readiness or admission.
+	DirectoryPrepared bool
 	// PendingPersistence 在 metadata 可见前封存，全部绑定／索引提交后清除。
 	// 仅由 Workspace 自有持久化层使用，不作为运行或准入权威。
 	PendingPersistence *DefinitionAuthoringCreationPersistence

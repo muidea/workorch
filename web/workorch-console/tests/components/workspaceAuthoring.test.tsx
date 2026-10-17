@@ -18,6 +18,7 @@ import { workorchApi } from '../../src/api';
 import { WorkorchRequestError } from '../../src/creationRecovery';
 import { WorkspaceAuthoringEditor } from '../../src/pages/components/WorkspaceAuthoringEditor';
 import { WorkspaceSetupModal } from '../../src/pages/components/WorkspaceSetupModal';
+import { WorkspaceDraftDetails } from '../../src/pages/components/WorkspaceDraftDetails';
 import { AuthoringDiagnosticDetails } from '../../src/pages/components/AuthoringDiagnosticDetails';
 import { AuthoringPreparationDiagnosticDetails } from '../../src/pages/components/AuthoringPreparationDiagnosticDetails';
 import type { DefinitionAuthoringPreparationDiagnostic, DefinitionAuthoringView } from '../../src/types';
@@ -120,6 +121,110 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   expect((workorchApi as unknown as { submitWorkspaceExecution: ReturnType<typeof vi.fn> }).submitWorkspaceExecution).not.toHaveBeenCalled();
+});
+
+describe('STEP01 草稿纯保存与服务端找回', () => {
+  const savedDraft = (requestId = 'original-request', prepared = true): DefinitionAuthoringView => ({
+    workspaceId: 'draft-ws', workspaceRevision: prepared ? 3 : 2, inputRevision: 1,
+    inputHash: 'original-input-hash', state: 'draft', templateId: 't', templateCurrent: true,
+    title: '测试工作空间', deliverableDirectory: '/managed/project', input: { goalText: '原目标' },
+    creation: { requestId, inputHash: 'creation-hash', directoryPrepared: prepared, replay: { requestId, title: '测试工作空间', templateId: 't', deliverableDirectory: '/managed/project', input: { goalText: '原目标' } } },
+  });
+  afterEach(() => {
+    expect(workorchApi.saveDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(workorchApi.compileDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
+  });
+
+  it('独立保存草稿不生成合同、不修订、不执行，重复点击只发送一次', async () => {
+    const pending = deferred<DefinitionAuthoringView>();
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockReturnValue(pending.promise);
+    render(<App><WorkspaceSetupModal open onClose={vi.fn()} onCreated={vi.fn()} /></App>);
+    await fillSetup();
+    await act(async () => { fireEvent.click(button('保存草稿')); fireEvent.click(button('保存草稿')); });
+    expect(workorchApi.createDefinitionAuthoring).toHaveBeenCalledTimes(1);
+    const request = vi.mocked(workorchApi.createDefinitionAuthoring).mock.calls[0][0];
+    expect(request.input.goalText).toBe('原目标');
+    expect(request.requestId).toBeTruthy();
+    await act(async () => pending.resolve(savedDraft(request.requestId)));
+    expect(screen.getByText('草稿已持久保存（M1），尚未形成正式合同或执行准入。')).toBeTruthy();
+    expect(disabled('保存草稿')).toBe(true);
+  });
+
+  for (const errorKind of ['directory', 'response_lost']) it(`原 payload 恢复 ${errorKind}，不以 GET draft 代替目录准备`, async () => {
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockImplementationOnce(async request => {
+      if (errorKind === 'response_lost') throw new Error('响应丢失，结果未知');
+      throw new WorkorchRequestError('目录准备失败', { workspaceId: 'draft-ws', requestId: request.requestId, persistence: 'persisted', phase: 'directory_preparation', retrySameRequest: true });
+    }).mockImplementation(async request => savedDraft(request.requestId));
+    render(<App><WorkspaceSetupModal open onClose={vi.fn()} onCreated={vi.fn()} /></App>);
+    await fillSetup();
+    await act(async () => { fireEvent.click(button('保存草稿')); });
+    expect(screen.queryByText('草稿已持久保存（M1），尚未形成正式合同或执行准入。')).toBeNull();
+    const original = structuredClone(vi.mocked(workorchApi.createDefinitionAuthoring).mock.calls[0][0]);
+    expect((screen.getByLabelText('名称') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText('工作目录（可留空，自动解析）') as HTMLInputElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('目标'), { target: { value: '不能混入原重放的新编辑' } });
+    await act(async () => { fireEvent.click(button('按原请求恢复草稿保存')); });
+    expect(vi.mocked(workorchApi.createDefinitionAuthoring).mock.calls[1][0]).toEqual(original);
+    expect(workorchApi.readDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(screen.getByText('本地编辑尚未保存到服务端，关闭将丢弃。')).toBeTruthy();
+    expect((screen.getByLabelText('目标') as HTMLTextAreaElement).value).toBe('不能混入原重放的新编辑');
+  });
+
+  it('首次明确输入拒绝显示未保存，允许更正；旧 unknown 不因后续 400 丢失身份', async () => {
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockRejectedValueOnce(new WorkorchRequestError('目标超长', undefined, 400));
+    render(<App><WorkspaceSetupModal open onClose={vi.fn()} onCreated={vi.fn()} /></App>);
+    await fillSetup();
+    await act(async () => { fireEvent.click(button('保存草稿')); });
+    expect(screen.getByText('输入在保存前被拒绝，草稿未保存。请更正输入后重新提交。')).toBeTruthy();
+    expect((screen.getByLabelText('名称') as HTMLInputElement).disabled).toBe(false);
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockRejectedValueOnce(new Error('网络结果未知'));
+    await act(async () => { fireEvent.click(button('保存草稿')); });
+    const original = structuredClone(vi.mocked(workorchApi.createDefinitionAuthoring).mock.calls[1][0]);
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockRejectedValueOnce(new WorkorchRequestError('后续拒绝不能抹掉历史未知', undefined, 400));
+    await act(async () => { fireEvent.click(button('按原请求恢复草稿保存')); });
+    expect(screen.queryByText('输入在保存前被拒绝，草稿未保存。请更正输入后重新提交。')).toBeNull();
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockImplementation(async request => savedDraft(request.requestId));
+    await act(async () => { fireEvent.click(button('按原请求恢复草稿保存')); });
+    expect(vi.mocked(workorchApi.createDefinitionAuthoring).mock.calls.slice(2).map(call => call[0])).toEqual([original, original]);
+  });
+
+  it('关闭重挂后只从服务端读取；原创建可核对时显式恢复同一草稿', async () => {
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(savedDraft('owner-request', false));
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockResolvedValue(savedDraft('owner-request'));
+    const page = render(<WorkspaceDraftDetails workspaceId="draft-ws" onClose={vi.fn()} />);
+    await act(async () => {});
+    expect(workorchApi.createDefinitionAuthoring).not.toHaveBeenCalled();
+    expect(screen.getByText(/草稿已保存，但原创建的目录准备未确认完成/)).toBeTruthy();
+    page.unmount();
+    render(<WorkspaceDraftDetails workspaceId="draft-ws" onClose={vi.fn()} />);
+    await act(async () => {});
+    await act(async () => { fireEvent.click(button('按原身份恢复目录准备')); });
+    expect(workorchApi.createDefinitionAuthoring).toHaveBeenCalledExactlyOnceWith(savedDraft('owner-request', false).creation!.replay);
+    expect(screen.getByText(/原创建的目录准备已完成/)).toBeTruthy();
+    expect(screen.getByText('原目标', { selector: 'pre' })).toBeTruthy();
+  });
+
+  it('无法重建原 payload 时安全待核对，不生成替代身份或隐式 POST', async () => {
+    const view = savedDraft('owner-request', false);
+    delete view.creation!.replay;
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(view);
+    render(<WorkspaceDraftDetails workspaceId="draft-ws" onClose={vi.fn()} />);
+    await act(async () => {});
+    expect(disabled('按原身份恢复目录准备')).toBe(true);
+    expect(workorchApi.createDefinitionAuthoring).not.toHaveBeenCalled();
+  });
+
+  it('旧详情读取迟到不覆盖新页面会话', async () => {
+    const pending = deferred<DefinitionAuthoringView>();
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockReturnValueOnce(pending.promise).mockResolvedValue({ ...savedDraft(), workspaceId: 'new-ws', input: { goalText: '新页面目标' } });
+    const page = render(<WorkspaceDraftDetails workspaceId="draft-ws" onClose={vi.fn()} />);
+    page.rerender(<WorkspaceDraftDetails workspaceId="new-ws" onClose={vi.fn()} />);
+    await act(async () => {});
+    await act(async () => pending.resolve(savedDraft()));
+    expect(screen.getByText('新页面目标', { selector: 'pre' })).toBeTruthy();
+    expect(screen.queryByText('原目标', { selector: 'pre' })).toBeNull();
+  });
 });
 
 describe('持久规格编辑实际挂载', () => {
