@@ -94,3 +94,7 @@ CI-safe baseline 分离。验证正文与被验证专题同目录；本表只提
 历史正文从工作树删除并不丢失：Git 保留完整内容、作者和时间线。需要恢复时使用 `git log -- docs/`、
 `git show <revision>:<path>` 或对应提交。单次验收证据、截图、原始输出和有保留期限的记录一律存放在 `docs/` 之外；
 专题 verification/acceptance 只维护可重复执行的规范性断言，具体命令以 Makefile、package tests 和 scripts 为执行 SoT。
+
+本次用户明确要求归档的 STEP01 历史验收摘要作为上述维护规则的特例，存放于
+[历史验收归档](archive/README.md)。该目录不属于当前规范树或设计权威；原始证据仍在仓库外，
+其临时路径与保留限制在记录中单独说明。本特例不扩展其他实施日记、候选方案或原始诊断的归档范围。
