@@ -70,6 +70,20 @@ func TestResolveEmbeddingTargetDerivesByteCapacityWithoutOutputCeiling(t *testin
 	}
 }
 
+func TestResolveEmbeddingTargetRejectsInvalidInputCapacityEvenIfMarkedReady(t *testing.T) {
+	for _, capacity := range []int{0, -1} {
+		cfg := testCatalogOutputCeilingConfig("chat-model")
+		target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "embedding-model"}
+		catalog := &llmmodels.ProviderModelCatalog{ProviderID: "ai-proxy", Models: []llmmodels.ProviderModelDescriptor{{
+			Target: target, ContextWindowTokens: capacity, CapabilityReady: true,
+			Operations: []string{workorchconfig.LLMOperationEmbeddings},
+		}}}
+		if _, err := ResolveProviderModelTarget(cfg, catalog, target, workorchconfig.LLMOperationEmbeddings); err == nil {
+			t.Fatalf("invalid embedding input capacity %d must fail closed", capacity)
+		}
+	}
+}
+
 func testCatalogOutputCeilingConfig(modelID string) workorchconfig.LLMConfig {
 	cfg := workorchconfig.DefaultLLMConfig()
 	cfg.AIProxy.BaseURL = "http://provider.example.test"

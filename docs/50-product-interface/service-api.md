@@ -102,6 +102,10 @@ authoring GET 公开 `title`、`description`、`deliverableDirectory` 与 `creat
 后者是原创建阶段历史事实，不是当前目录／资源 readiness。未确认完成时 GET 不补目录；仅当 owner 能精确重建原创建 hash
 时提供 `creation.replay`，可显式重放相同 POST；否则保持待核对，不能用新 requestId 盲目创建。
 目录准备失败仍可能已保存；503 的 `creationRecovery` 保留原身份、`persisted|unknown` 和失败阶段，不表示从未保存。
+创建 command 一旦投递 owner，`ErrInvalidArgument`／`ErrNotFound` 也可能来自持久化后的 bindings/index 处理，
+不能据错误类别声明未保存。只有创建入口在投递前拒绝且返回 `workspace_creation_rejected_before_dispatch` 才表示
+本次未提交 owner；Web 仅在首次请求收到该明确 400 标记时释放创建身份。普通 400/404、缺失恢复字段或先前已 unknown
+均保留原 requestId 与 payload，等待核对／原身份恢复，不生成替代身份。
 刷新／关闭后从服务端列表发现草稿，不依赖浏览器持久化；列表投影暂未收敛时显示其真实状态，再刷新核对 owner。
 
 解析失败诊断随原规格请求由 Workspace owner 持久记录。普通 authoring GET 仅返回错误分类及诊断元信息；
@@ -229,6 +233,10 @@ Workspace owner 在同一 CAS 中持久有界保存回执（最多 128 条，不
 - created=`201`、accepted execution=`202`、successful update=`200`、empty delete=`204`；
 - invalid=`400`、not found=`404`、blocked/stale/conflict=`409`、admission wait canceled=`408`、unexpected dependency=`500`；
 - credentials、raw prompt/provider body、unsafe diagnostic 和 internal aggregate 不进入 response。
+
+本机服务停机先关闭新 HTTP 准入及 listener，并取消只读 SSE 的等待和历史回放；不能依赖浏览器先关闭标签页。
+取消不是回放读取或 handler 的完成回执：必须等待真实返回及连接排空后才能释放传输依赖。
+普通已接纳 mutation 不受 SSE 取消影响；超时仍保留依赖并按原停机合同重试，不强制关闭或假报成功。
 
 ## Verification
 

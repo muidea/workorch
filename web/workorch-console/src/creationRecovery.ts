@@ -9,12 +9,20 @@ export type CreationRecovery = {
 export class WorkorchRequestError extends Error {
   readonly creationRecovery?: CreationRecovery;
   readonly status?: number;
+  readonly creationRejectedBeforeDispatch: boolean;
 
-  constructor(message: string, creationRecovery?: CreationRecovery, status?: number) {
+  constructor(message: string, creationRecovery?: CreationRecovery, status?: number, creationRejectedBeforeDispatch = false) {
     super(message);
     this.creationRecovery = creationRecovery;
     this.status = status;
+    this.creationRejectedBeforeDispatch = creationRejectedBeforeDispatch;
   }
+}
+
+export function creationRejectedBeforeDispatchFromResponse(body: unknown): boolean {
+  if (!body || typeof body !== 'object') return false;
+  const response = body as { code?: unknown; creationRecovery?: unknown };
+  return response.code === 'workspace_creation_rejected_before_dispatch' && response.creationRecovery === undefined;
 }
 
 // 恢复提示不能替代创建成功响应；页面仍须重放原请求，补齐目录准备。

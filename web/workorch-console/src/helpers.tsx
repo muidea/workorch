@@ -2715,6 +2715,39 @@ export function llmModelOptions(
     value: item.modelId
   }));
   const unique = new Map(options.map((item) => [item.value, item]));
+  // Configuration shows discovery separately from call eligibility. Execution
+  // selectors must continue to use readyCatalogTargetOptions, not this list.
+  for (const item of configuration?.llm.catalog?.models ?? []) {
+    const providerId = item.providerId?.trim() || configuration?.llm.catalog?.providerId?.trim() || 'ai-proxy';
+    const modelId = item.modelId?.trim();
+    if (providerId !== 'ai-proxy' || !modelId || item.capabilityReady || !item.operations?.includes(operation) || unique.has(modelId)) {
+      continue;
+    }
+    let reason = item.unavailableReason || '能力未就绪';
+    if (item.unavailableReason === 'capability_incomplete') {
+      // Explain the owner-projected metadata; never infer a capacity or ready
+      // state from the model name or the existence of an endpoint.
+      if (!(typeof item.contextWindowTokens === 'number' && item.contextWindowTokens > 0)) {
+        reason = operation === 'embeddings'
+          ? '缺少有效 contextWindowTokens（单条输入 token 上限）'
+          : '缺少有效 contextWindowTokens';
+      } else if (item.operations.includes('responses') &&
+        !(typeof item.maxOutputTokens === 'number' && item.maxOutputTokens > 0 && item.maxOutputTokens < item.contextWindowTokens)) {
+        reason = '缺少有效 maxOutputTokens（须大于 0 且小于 contextWindowTokens）';
+      } else {
+        reason = '能力信息不完整';
+      }
+    }
+    unique.set(modelId, {
+      value: modelId,
+      label: `${modelId}（不可选：${reason}）`,
+      providerId,
+      modelId,
+      source: 'catalog',
+      ready: false,
+      disabled: true
+    });
+  }
   const modelId = configuredModelId?.trim();
   if (modelId && !unique.has(modelId)) {
     unique.set(modelId, {

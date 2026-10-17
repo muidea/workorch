@@ -181,8 +181,11 @@ export type LLMContextBudgetPolicyView = {
 export type ProviderModelDescriptorView = {
   providerId: string;
   modelId: string;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
   operations?: string[];
   capabilityReady: boolean;
+  unavailableReason?: string;
   reasoning?: {
     supported: boolean;
     valid: boolean;

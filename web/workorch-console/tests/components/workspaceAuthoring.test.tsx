@@ -171,8 +171,21 @@ describe('STEP01 草稿纯保存与服务端找回', () => {
     expect((screen.getByLabelText('目标') as HTMLTextAreaElement).value).toBe('不能混入原重放的新编辑');
   });
 
+  it.each([400, 404])('首次无明确投递前拒绝标记的 %i 也保留原创建身份', async status => {
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockRejectedValueOnce(new WorkorchRequestError('可能已部分持久', undefined, status));
+    render(<App><WorkspaceSetupModal open onClose={vi.fn()} onCreated={vi.fn()} /></App>);
+    await fillSetup();
+    await act(async () => { fireEvent.click(button('保存草稿')); });
+    const original = structuredClone(vi.mocked(workorchApi.createDefinitionAuthoring).mock.calls[0][0]);
+    expect(screen.queryByText('输入在保存前被拒绝，草稿未保存。请更正输入后重新提交。')).toBeNull();
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockImplementation(async request => savedDraft(request.requestId));
+    await act(async () => { fireEvent.click(button('按原请求恢复草稿保存')); });
+    expect(vi.mocked(workorchApi.createDefinitionAuthoring).mock.calls[1][0]).toEqual(original);
+    expect(workorchApi.compileDefinitionAuthoring).not.toHaveBeenCalled();
+  });
+
   it('首次明确输入拒绝显示未保存，允许更正；旧 unknown 不因后续 400 丢失身份', async () => {
-    vi.mocked(workorchApi.createDefinitionAuthoring).mockRejectedValueOnce(new WorkorchRequestError('目标超长', undefined, 400));
+    vi.mocked(workorchApi.createDefinitionAuthoring).mockRejectedValueOnce(new WorkorchRequestError('目标超长', undefined, 400, true));
     render(<App><WorkspaceSetupModal open onClose={vi.fn()} onCreated={vi.fn()} /></App>);
     await fillSetup();
     await act(async () => { fireEvent.click(button('保存草稿')); });

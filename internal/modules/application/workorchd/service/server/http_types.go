@@ -236,6 +236,12 @@ func (s *HTTPServer) BeginShutdown(_ context.Context) error {
 	listener := s.listener
 	s.notifyLocked()
 	s.mu.Unlock()
+	// SSE is a read-only, unbounded transport subscription. End its wait/replay
+	// before draining HTTP; Shutdown alone never cancels active handlers.
+	// Do not cancel mutation handlers or release their shared dependencies here.
+	if s.state != nil && s.state.streamCancel != nil {
+		s.state.streamCancel()
+	}
 	s.http.SetKeepAlivesEnabled(false)
 	if listener != nil {
 		return listener.Close()

@@ -27,6 +27,10 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 		})
 	})
 	router.AddHandler("/api/v1/workorch/events/stream", http.MethodGet, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		stop := context.AfterFunc(state.streamCtx, cancel)
+		defer stop()
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "streaming unsupported"})
@@ -58,7 +62,7 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 		if lastEventID == "" {
 			lastEventID = strings.TrimSpace(r.URL.Query().Get("lastEventId"))
 		}
-		if !state.replayEventStream(r.Context(), lastEventID, workspaceID, runID, streamView, filterEnvelope, func(envelope streamEvent) bool {
+		if !state.replayEventStream(ctx, lastEventID, workspaceID, runID, streamView, filterEnvelope, func(envelope streamEvent) bool {
 			return writeSSEEnvelope(w, flusher, envelope)
 		}) {
 			return
@@ -67,7 +71,7 @@ func registerEventReadRoutes(router engine.RouteRegistry, state *serverState) {
 		defer heartbeat.Stop()
 		for {
 			select {
-			case <-r.Context().Done():
+			case <-ctx.Done():
 				return
 			case <-heartbeat.C:
 				if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {

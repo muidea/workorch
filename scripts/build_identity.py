@@ -35,6 +35,7 @@ SOURCE_DIRS = ("application", "internal", "vendor", "web/workorch-console", "web
 SOURCE_FILES = (
     "Makefile", "Dockerfile", "go.mod", "go.sum", "go.work", "go.work.sum",
     "scripts/build_identity.py",
+    "scripts/verify-workspace-draft-step01.py",
 )
 GENERATED_EXACT = ("web/consoleassets/dist",)
 EXCLUDED_DIR_NAMES = {

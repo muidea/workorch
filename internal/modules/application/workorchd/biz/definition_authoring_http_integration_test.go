@@ -46,7 +46,7 @@ func TestAuthoringHTTPFileBackedCompilationConfirmationAndRecovery(t *testing.T)
 }
 
 func TestAuthoringHTTPCreationCutpointRecovery(t *testing.T) {
-	for _, scenario := range []string{"creation_binding", "creation_index", "creation_directory"} {
+	for _, scenario := range []string{"creation_binding", "creation_binding_empty", "creation_index", "creation_directory"} {
 		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
 	}
 }
@@ -341,6 +341,9 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	if strings.HasPrefix(scenario, "creation_") {
 		id := workspace.DefinitionAuthoringWorkspaceID(request.RequestID)
 		obstacle := filepath.Join(storage, "internal", "workspaces", string(id), "config")
+		if scenario == "creation_binding_empty" {
+			obstacle = filepath.Join(obstacle, "soul_bindings.json")
+		}
 		if scenario == "creation_index" {
 			obstacle = filepath.Join(storage, "system", "workspace_index.json")
 		}
@@ -356,7 +359,11 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			if err := os.MkdirAll(filepath.Dir(obstacle), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(obstacle, []byte("创建恢复测试障碍"), 0o600); err != nil {
+			content := []byte("创建恢复测试障碍")
+			if scenario == "creation_binding_empty" {
+				content = nil // The real repository returns ErrInvalidArgument after metadata is saved.
+			}
+			if err := os.WriteFile(obstacle, content, 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -383,6 +390,12 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		}
 		if recovery.Recovery.Persistence != expectedPersistence || recovery.Recovery.Phase != expectedPhase {
 			t.Fatalf("fabricated committed stage: %+v", recovery.Recovery)
+		}
+		if scenario == "creation_binding_empty" {
+			raw, err := os.ReadFile(filepath.Join(storage, "internal", "workspaces", string(id), "workspace.json"))
+			if err != nil || !bytes.Contains(raw, []byte(request.RequestID)) {
+				t.Fatalf("regression must reach durable metadata before invalid bindings: %s %v", raw, err)
+			}
 		}
 		assertNoRuns()
 		closeOwners()

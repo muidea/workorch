@@ -12,7 +12,28 @@ import (
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestCatalogProjectionPreservesIncompleteEmbeddingDiscovery(t *testing.T) {
+	input := llmmodels.ProviderModelCatalog{ProviderID: "ai-proxy", Models: []llmmodels.ProviderModelDescriptor{{
+		Target:             runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "embedding-model"},
+		SupportedEndpoints: []string{"/v1/embeddings"}, Operations: []string{"embeddings"},
+		CapabilityReady: false, UnavailableReason: "capability_incomplete",
+	}}}
+	view := catalogSummaryFromModel(input)
+	if len(view.Models) != 1 {
+		t.Fatalf("incomplete model was hidden: %+v", view)
+	}
+	model := view.Models[0]
+	if model.ModelID != "embedding-model" || model.CapabilityReady || model.ContextWindowTokens != 0 || model.MaxOutputTokens != 0 || model.UnavailableReason != "capability_incomplete" || len(model.Operations) != 1 || model.Operations[0] != "embeddings" {
+		t.Fatalf("discovery/diagnostic projection drifted: %+v", model)
+	}
+	view.Models[0].Operations[0] = "responses"
+	if input.Models[0].Operations[0] != "embeddings" {
+		t.Fatal("projection aliases owner operation data")
+	}
+}
 
 func TestLLMCatalogCommandsRequireTopicSpecificResult(t *testing.T) {
 	tests := []struct {

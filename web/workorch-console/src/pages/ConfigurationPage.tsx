@@ -336,6 +336,7 @@ export function ConfigurationPage() {
                       <Form.Item
                         name="defaultEmbeddingModelId"
                         label="默认 Embedding 模型"
+                        extra="已枚举不等于可调用；能力不完整的模型显示为禁用项。Embedding 需网关提供有效 contextWindowTokens（单条输入 token 上限），不要求 maxOutputTokens；系统不猜测容量或自动选择默认模型。"
                         rules={[
                           {
                             validator: (_, value?: string) => !value || value === configuration?.llm.defaultEmbedding?.modelId || embeddingModelOptions.some((item) => item.ready && item.value === value)
@@ -347,7 +348,7 @@ export function ConfigurationPage() {
                         <Select
                           allowClear
                           showSearch
-                          placeholder="可选，仅展示 embeddings 能力模型"
+                          placeholder="可选；不可用模型会标明原因"
                           options={embeddingModelOptions}
                         />
                       </Form.Item>

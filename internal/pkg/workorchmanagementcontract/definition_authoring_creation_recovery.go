@@ -22,3 +22,13 @@ func (e *DefinitionAuthoringCreationError) Error() string {
 }
 
 func (e *DefinitionAuthoringCreationError) Unwrap() error { return e.Cause }
+
+// DefinitionAuthoringCreationRejectedBeforeDispatchError is emitted only before
+// sending the creation command to the owner. HTTP status alone is not proof
+// that persistence has not started.
+type DefinitionAuthoringCreationRejectedBeforeDispatchError struct{ Cause error }
+
+func (e *DefinitionAuthoringCreationRejectedBeforeDispatchError) Error() string {
+	return e.Cause.Error()
+}
+func (e *DefinitionAuthoringCreationRejectedBeforeDispatchError) Unwrap() error { return e.Cause }

@@ -339,14 +339,44 @@ func TestBuildCatalogFromWireDerivesResponsesAndEmbeddingOperations(t *testing.T
 	if len(catalog.Models) != 2 || len(catalog.Models[0].SupportedEndpoints) == 0 {
 		t.Fatalf("catalog = %+v", catalog.Models)
 	}
-	var responsesReady bool
+	var responsesReady, embeddingsReady bool
 	for _, model := range catalog.Models {
 		if model.Target.ModelID == "gpt-5.5" {
 			responsesReady = model.CapabilityReady && containsOperation(model.Operations, workorchconfig.LLMOperationResponses)
 		}
+		if model.Target.ModelID == "intfloat/multilingual-e5-small" {
+			embeddingsReady = model.CapabilityReady && model.MaxOutputTokens == 0 && containsOperation(model.Operations, workorchconfig.LLMOperationEmbeddings)
+		}
 	}
 	if !responsesReady {
 		t.Fatalf("responses model not ready: %+v", catalog.Models)
+	}
+	if !embeddingsReady {
+		t.Fatalf("embedding-only model must be ready without output capacity: %+v", catalog.Models)
+	}
+}
+
+func TestBuildCatalogKeepsEmbeddingDiscoveryWithoutInputCapacity(t *testing.T) {
+	// Endpoint-only model records are valid discovery, not usable capacity facts.
+	var wire aiProxyModelsResponse
+	if err := json.Unmarshal([]byte(`{"object":"list","data":[
+		{"id":"intfloat/multilingual-e5-small","object":"model","supported_endpoints":["/v1/embeddings"]},
+		{"id":"jina-embeddings-v2-base-code","object":"model","supported_endpoints":["/v1/embeddings"]}
+	]}`), &wire); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testCatalogOutputCeilingConfig("chat-model")
+	catalog, err := buildCatalogFromWire(wire, cfg, time.Now())
+	if err != nil || len(catalog.Models) != 2 {
+		t.Fatalf("catalog = %+v, err = %v", catalog, err)
+	}
+	for _, model := range catalog.Models {
+		if !containsOperation(model.Operations, workorchconfig.LLMOperationEmbeddings) || model.CapabilityReady || model.ContextWindowTokens != 0 || model.UnavailableReason != string(llmmodels.ProviderModelFailureCapabilityIncomplete) {
+			t.Fatalf("endpoint-only model discovery/readiness = %+v", model)
+		}
+		if _, err := ResolveProviderModelTarget(cfg, &catalog, model.Target, workorchconfig.LLMOperationEmbeddings); err == nil {
+			t.Fatalf("endpoint-only model must not resolve a callable profile: %+v", model)
+		}
 	}
 }
 

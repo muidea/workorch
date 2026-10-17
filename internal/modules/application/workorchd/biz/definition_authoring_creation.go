@@ -23,7 +23,7 @@ func (b *Biz) CreateDefinitionAuthoringView(ctx context.Context, backend, dataDi
 	id := workspace.DefinitionAuthoringWorkspaceID(request.RequestID)
 	layout, err := workspacecore.ResolveDirectoryLayout(backend, dataDir, string(id), request.DeliverableDirectory)
 	if err != nil {
-		return workorchmanagementcontract.DefinitionAuthoringView{}, err
+		return workorchmanagementcontract.DefinitionAuthoringView{}, &workorchmanagementcontract.DefinitionAuthoringCreationRejectedBeforeDispatchError{Cause: err}
 	}
 	cmd := workspaceevents.CreateDefinitionAuthoringCommand{
 		RequestID: request.RequestID, WorkspaceID: id, Title: strings.TrimSpace(request.Title), Description: strings.TrimSpace(request.Description),
@@ -31,7 +31,7 @@ func (b *Biz) CreateDefinitionAuthoringView(ctx context.Context, backend, dataDi
 		Input: workspace.DefinitionAuthoringInput{Version: workspace.DefinitionAuthoringInputVersionCurrent, WorkspaceID: id, Revision: 1, TemplateID: request.TemplateID, GoalText: request.Input.GoalText, AcceptanceRequirements: request.Input.AcceptanceRequirements, ResourceRefs: request.Input.ResourceRefs}.Normalized(),
 	}
 	if err := cmd.Validate(); err != nil {
-		return workorchmanagementcontract.DefinitionAuthoringView{}, fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)
+		return workorchmanagementcontract.DefinitionAuthoringView{}, &workorchmanagementcontract.DefinitionAuthoringCreationRejectedBeforeDispatchError{Cause: fmt.Errorf("%w: %v", common.ErrInvalidArgument, err)}
 	}
 	if err := ctx.Err(); err != nil {
 		return workorchmanagementcontract.DefinitionAuthoringView{}, err
@@ -50,8 +50,10 @@ func (b *Biz) CreateDefinitionAuthoringView(ctx context.Context, backend, dataDi
 		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(common.ErrConflict, "unknown", "owner_persistence")
 	}
 	if err := result.Error(); err != nil {
-		// 明确的输入／身份拒绝不提供可能泄露既有对象的恢复描述。
-		if errors.Is(err, common.ErrInvalidArgument) || errors.Is(err, common.ErrConflict) || errors.Is(err, common.ErrNotFound) {
+		// A conflict retains its identity and must not expose an existing object's
+		// recovery data. Other error classes cannot prove a pre-write rejection:
+		// repository bindings/index failures may follow a durable metadata write.
+		if errors.Is(err, common.ErrConflict) {
 			return workorchmanagementcontract.DefinitionAuthoringView{}, err
 		}
 		return workorchmanagementcontract.DefinitionAuthoringView{}, recoveryError(err, "unknown", "owner_persistence")

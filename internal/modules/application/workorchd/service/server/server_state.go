@@ -20,6 +20,8 @@ type serverState struct {
 	streamSubscribersMu         sync.Mutex
 	streamSubscribers           map[uint64]chan streamEvent
 	streamSubscriberSequence    uint64
+	streamCtx                   context.Context
+	streamCancel                context.CancelFunc
 	metrics                     *serverMetrics
 	applicationOperations
 	backgroundRoutine         task.BackgroundRoutine

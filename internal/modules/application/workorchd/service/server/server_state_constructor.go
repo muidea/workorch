@@ -10,11 +10,14 @@ import (
 // application dependency set. It has no owner transition logic.
 func newServerStateBase(config Config, backgroundRoutine task.BackgroundRoutine, operations applicationOperations) *serverState {
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
+	streamCtx, streamCancel := context.WithCancel(context.Background())
 	executionMetrics := newExecutionAdmissionMetrics()
 	state := &serverState{
 		config:                config,
 		eventReplay:           newSSEReplayBuffer(defaultSSEReplayLimit),
 		streamSubscribers:     make(map[uint64]chan streamEvent),
+		streamCtx:             streamCtx,
+		streamCancel:          streamCancel,
 		metrics:               &serverMetrics{executionAdmissionMetrics: executionMetrics, observedTerminalStates: make(map[string]struct{}), observedRuntimeDrives: make(map[string]runtimeDriveMetric)},
 		applicationOperations: operations,
 		backgroundRoutine:     backgroundRoutine,

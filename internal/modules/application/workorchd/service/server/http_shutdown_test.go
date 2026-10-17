@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
@@ -14,7 +15,122 @@ import (
 	"time"
 
 	workorchdevents "github.com/muidea/workorch/internal/modules/application/workorchd/pkg/events"
+	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
+	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
+
+func TestHTTPServerStreamReplayCancellationStillWaitsForRealReaderExit(t *testing.T) {
+	started, canceled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	state := newServerStateBase(Config{}, nil, applicationOperations{runOperations: runOperations{
+		listEventRecords: func(ctx context.Context, _, _ string, _ workorchquerycontract.EventRecordQuery) ([]projectioncontract.EventRecord, error) {
+			close(started)
+			<-ctx.Done()
+			close(canceled)
+			<-release
+			return nil, ctx.Err()
+		},
+	}})
+	srv := newHTTPServerWithState(Config{}, state)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- srv.serve(listener) }()
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get("http://" + listener.Addr().String() + "/api/v1/workorch/events/stream?view=full&lastEventId=event-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("replay never entered reader")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := srv.CloseTransportState(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("cancellation is not reader completion: %v", err)
+	}
+	select {
+	case <-canceled:
+	default:
+		t.Fatal("shutdown did not cancel stream replay")
+	}
+	select {
+	case <-state.backgroundCtx.Done():
+		t.Fatal("canceled replay released shared dependencies before reader exit")
+	default:
+	}
+	close(release)
+	ctx, retryCancel := context.WithTimeout(context.Background(), time.Second)
+	defer retryCancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-serveDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHTTPServerDrainEndsOpenEventStreamsBeforeReleasingState(t *testing.T) {
+	state := newServerStateBase(Config{}, nil, applicationOperations{})
+	srv := newHTTPServerWithState(Config{}, state)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- srv.serve(listener) }()
+	client := &http.Client{Timeout: 3 * time.Second}
+	for range 2 {
+		response, err := client.Get("http://" + listener.Addr().String() + "/api/v1/workorch/events/stream")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		line, err := bufio.NewReader(response.Body).ReadString('\n')
+		if err != nil || line != ": connected\n" {
+			t.Fatalf("stream handshake: %q %v", line, err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := srv.Quiesce(ctx); err != nil {
+		t.Fatalf("open browser streams prevented quiescence: %v", err)
+	}
+	if err := <-serveDone; err != nil {
+		t.Fatal(err)
+	}
+	state.streamSubscribersMu.Lock()
+	subscribers := len(state.streamSubscribers)
+	state.streamSubscribersMu.Unlock()
+	if subscribers != 0 {
+		t.Fatalf("stream handlers have not unsubscribed: %d", subscribers)
+	}
+	select {
+	case <-state.backgroundCtx.Done():
+		t.Fatal("quiescence prematurely released transport dependencies")
+	default:
+	}
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestHTTPServerDrainWaitsForHandlerAfterHijackedConnectionCloses(t *testing.T) {
 	started := make(chan struct{})

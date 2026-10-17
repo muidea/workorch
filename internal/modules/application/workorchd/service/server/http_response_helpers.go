@@ -376,12 +376,15 @@ func writeMethodNotAllowed(w http.ResponseWriter) {
 func writeBusinessError(w http.ResponseWriter, err error) {
 	var actionConflict *decisioncommon.ResolutionActionConflictError
 	var creationFailure *workorchmanagementcontract.DefinitionAuthoringCreationError
+	var creationRejected *workorchmanagementcontract.DefinitionAuthoringCreationRejectedBeforeDispatchError
 	switch {
 	case errors.As(err, &creationFailure):
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{
 			Error: creationFailure.Error(), Code: "workspace_creation_incomplete", CreationRecovery: &creationFailure.Recovery,
 			Remediation: "保留原 requestId 和创建内容；先查询服务端状态，再以同一请求恢复，勿新建重复容器",
 		})
+	case errors.As(err, &creationRejected):
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: creationRejected.Error(), Code: "workspace_creation_rejected_before_dispatch"})
 	case errors.As(err, &actionConflict):
 		writeJSON(w, http.StatusConflict, errorResponse{
 			Error:                   actionConflict.Error(),

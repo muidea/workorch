@@ -515,6 +515,48 @@ func TestGenericProviderCompletionStreamingCompletedEmptyReturnsErrorAndPublishe
 	}
 }
 
+func TestEmbeddingCommandRejectsEndpointOnlyCatalogBeforePhysicalCall(t *testing.T) {
+	ctx := context.Background()
+	var embeddingCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"embedding-model","supported_endpoints":["/v1/embeddings"]}]}`))
+			return
+		}
+		embeddingCalls.Add(1)
+		http.Error(w, "unexpected provider execution", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	cfg := testCatalogOutputCeilingConfig("chat-model")
+	cfg.AIProxy.BaseURL = server.URL
+	hub := magicevent.NewHub(16)
+	t.Cleanup(func() { hub.Terminate(ctx) })
+	owner, err := New(hub, nil, Dependencies{LoadLLMConfig: func() (workorchconfig.LLMConfig, error) { return cfg, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Teardown(ctx) })
+	result := hub.Send(magicevent.NewEventWithContext(
+		llmevents.TopicLLMCommandGenerateEmbedding, llmApplicationOwnerSource, llmevents.CommandDestination,
+		magicevent.NewHeader(), ctx, llmevents.GenerateEmbeddingCommand{
+			Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "embedding-model"}, Input: "input",
+		},
+	))
+	if result == nil || result.Error() == nil {
+		t.Fatalf("endpoint-only embedding command must fail: %+v", result)
+	}
+	var failure llmmodels.ProviderModelFailure
+	if !errors.As(result.Error().Cause, &failure) || failure.Code != llmmodels.ProviderModelFailureCapabilityIncomplete {
+		t.Fatalf("expected incomplete capability failure, got %+v", result.Error())
+	}
+	if embeddingCalls.Load() != 0 {
+		t.Fatalf("incomplete capacity caused %d physical calls", embeddingCalls.Load())
+	}
+}
+
 func TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall(t *testing.T) {
 	ctx := context.Background()
 	var embeddingCalls atomic.Int32

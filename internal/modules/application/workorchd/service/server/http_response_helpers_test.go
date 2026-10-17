@@ -9,8 +9,27 @@ import (
 	"testing"
 
 	decisioncommon "github.com/muidea/workorch/internal/modules/blocks/decision/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
+
+func TestWriteBusinessErrorMarksOnlyExplicitPreDispatchCreationRejection(t *testing.T) {
+	for _, marked := range []bool{false, true} {
+		var failure error = common.ErrInvalidArgument
+		if marked {
+			failure = &workorchmanagementcontract.DefinitionAuthoringCreationRejectedBeforeDispatchError{Cause: failure}
+		}
+		recorder := httptest.NewRecorder()
+		writeBusinessError(recorder, failure)
+		var response errorResponse
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusBadRequest || (response.Code == "workspace_creation_rejected_before_dispatch") != marked {
+			t.Fatalf("status must not imply no persistence: %d %+v", recorder.Code, response)
+		}
+	}
+}
 
 func TestWriteBusinessErrorPreservesCreationRecoveryWithoutPublishingCause(t *testing.T) {
 	cause := errors.New("原始诊断 sk_test_do_not_publish\r\n")

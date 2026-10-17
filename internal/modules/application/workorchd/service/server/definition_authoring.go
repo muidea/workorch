@@ -33,7 +33,7 @@ func registerDefinitionAuthoringRoutes(router engine.RouteRegistry, state *serve
 		}
 		var request workorchmanagementcontract.DefinitionAuthoringCreate
 		if err := decodeJSON(r, &request); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error(), Code: "workspace_creation_rejected_before_dispatch"})
 			return
 		}
 		view, err := state.authoring.Create(r.Context(), state.config.Backend, state.config.DataRoot, request)

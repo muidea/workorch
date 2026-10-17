@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { creationRecoveryFromResponse, WorkorchRequestError } from '../src/creationRecovery.ts';
+import { creationRecoveryFromResponse, creationRejectedBeforeDispatchFromResponse, WorkorchRequestError } from '../src/creationRecovery.ts';
+
+test('只有明确投递前拒绝标记可证明本次没有提交 owner，普通 400 不作此承诺', () => {
+  assert.equal(creationRejectedBeforeDispatchFromResponse({ error: 'invalid argument' }), false);
+  assert.equal(creationRejectedBeforeDispatchFromResponse({ code: 'workspace_creation_rejected_before_dispatch' }), true);
+  assert.equal(creationRejectedBeforeDispatchFromResponse({ code: 'workspace_creation_rejected_before_dispatch', creationRecovery: {} }), false);
+});
 
 test('创建恢复提示区分已持久与未知，并要求原请求重放', () => {
   for (const persistence of ['unknown', 'persisted']) {

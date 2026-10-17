@@ -156,6 +156,12 @@ operation；具体执行仍由sealed dispatch进入`blocks/mcp` owner。
 页面展示的 runtime/git/LLM-output 配置摘要不等于它支持修改全部 runtime 字段。LLM save 只更新 persisted
 configuration；active owner snapshot 仍需进程重启才变化。
 
+默认模型下拉框区分目录发现与调用资格：已声明对应 operation 但 `capabilityReady=false` 的模型保留为禁用项，
+说明 owner 投影的不可用原因及缺失容量；不得因此成为执行／激活候选。目录缺失时保留已配置模型身份，允许
+保留原选择进行密钥修复，但不得自动选择其他默认模型。Embedding 的 `contextWindowTokens` 表示单条输入 token
+上限，是 WorkOrch 当前调用预算所需元数据，不是所有模型列表 API 的通用必填字段；Embedding-only 模型不要求
+`maxOutputTokens`。只有 endpoint 声明而没有有效输入容量时，可枚举但不可启用；不按模型名猜值或绕过 owner 门禁。
+
 ### Service Status
 
 `ServicePage` 只读取 `/healthz`、`/readyz` 与 `/metrics`。它不把 process readiness 推导为某个 Run 已完成。

@@ -65,6 +65,12 @@ Do not reintroduce tests for `POST .../runs`, `POST .../runs/:runId/start`, `POS
 
 正式创建链路为 `POST /api/v1/workorch/workspace-authoring` → workspace-scoped `authoring` 查询／修订 → `authoring/compile` → `authoring/confirm`。创建 RequestID 与原 payload 在当前 Web 页面内存中保留以便精确重试，不保存到浏览器持久存储；服务端 owner 持久创建身份与业务状态。编译接受的 202 只表示 BackgroundRoutine 接受任务，不代表 owner 已完成规格或准入。查询始终以 Workspace 持久 ledger 为准，结果未决不得自动重发 provider。确认绑定原 input／permit／proposal／specification hashes；确认和准入不自动启动 Run。
 
+STEP01 的生产 HTTP／真实进程重启验证入口为 `python3 scripts/verify-workspace-draft-step01.py`。
+该入口必须自行在新隔离目录构建生产控制台及 Go 二进制，不接受调用者指定旧 `--binary`；保留实际构建命令／日志、
+构建前后源码与内嵌控制台字节身份、二进制哈希，并核验运行进程 executable。dirty candidate 显式记录基准 SHA 与
+源码树身份，不能冒称基准提交已通过；构建或验证期间源码漂移即失败。HTTP／进程证据不替代生产 Web 的保存、
+刷新、关闭重开等交互证据；验收记录须引用同一候选产物及隔离数据根，不以组件测试数量充当本机验收通过。
+
 浏览器交互验收必须证明：旧浏览器记录不再被读取或写入；新建向导重开为空，关闭有未保存输入或未决事务时明确提示；取消关闭保留页面内存原身份，确认关闭后迟到回执不能污染新会话。刷新后通过列表／详情读取 owner 已保存草稿，不自动创建、保存或确认。已开始的确认通过 owner 校验的 `confirmationRecovery` 参数由用户显式重放，不能从页面旧提案猜造；当前 revision 不改变既有 journal 的精确身份，首次准备仍受 CAS 约束。
 
 前置准备失败验收须使用本地 mock／file-backed owners，证明资源不存在／路径拒绝／大小边界、配置／请求构造及确定预算拒绝在 reserve 前被准确保存；原始 bytes、SHA256、非 UTF-8 和超限未保存说明往返一致。相同失败重复 compile 不增加诊断数或 revision，迟到新失败不得跨 input／template／目标写入；修复资源后同输入显式 compile 可以继续，已有 reserve 未决仍不重发 provider。独立诊断 GET 不调用 provider、不推进确认或创建 Run，包含当前和归档诊断的文件均为 0600；诊断保存失败和集合满必须明确报告，不能假称 owner 已有可查原文。Web 组件验收还须证明受理后 15 秒观察的截止不依赖 GET 成功：连续查询失败或挂起也会结束该观察，仅展示最后一次已知 owner 状态，不猜测后台完成／停止，不自动重发，迟到与跨会话回执仍被隔离；文本解码须保留 UTF-8 BOM（`ignoreBOM: true`），bytes／SHA256 与下载原字节不变；无效 UTF-8 不得替换字符伪装为文本，但已校验原始字节仍可下载。Authoring 失败诊断可分别携带`providerDocument`、`providerWire`与`providerCause`观测事实：providerCause表示transport leaf原始错误bytes，不是parseError安全分类；请求URL包装不保存、不清洗leaf，只能通过受限diagnostic原文读取。三个观测字段各自具有observed/complete/saved/observedBytes/sha256/reason事实；原始内容只在独立读取时带`contentBase64`。UI必须区分未观察、部分观察与未保存，不得把旧 payload（包括空 payload）视为 provider 输出；只对确实观察到并保存的 bytes 核对字节数、SHA-256，使用 fatal UTF-8 解码并保留 BOM，无效文本仍允许下载已校验原字节。parseError安全类别与provider document/wire/cause原始观测是分离数据，不得互相代替或合并hash。

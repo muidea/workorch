@@ -19,6 +19,33 @@ import time
 import urllib.error
 import urllib.request
 
+import build_identity
+
+
+def build_candidate(source, root):
+    """Build fresh output ourselves; an arbitrary pre-existing binary is not evidence."""
+    binary = root / "workorch"
+    require(not binary.exists(), "refuse a pre-existing verification binary")
+    console = source / "web/consoleassets/dist"
+    before_console = build_identity.capture(source, console)
+    environment = {**os.environ, "GOFLAGS": "", "GOWORK": "off"}
+    commands = [(["npm", "run", "build"], source / "web/workorch-console", "console-build.log"),
+                (["go", "build", "-buildvcs=true", "-o", str(binary), "./application/workorch"], source, "go-build.log")]
+    command_records = []
+    for command, cwd, log_name in commands:
+        with (root / log_name).open("xb") as log:
+            completed = subprocess.run(command, cwd=cwd, env=environment, stdout=log, stderr=subprocess.STDOUT)
+        command_records.append({"command": command, "cwd": str(cwd), "returnCode": completed.returncode, "log": log_name})
+        (root / "build-commands.json").write_text(json.dumps(command_records, indent=2), encoding="utf-8")
+        require(completed.returncode == 0, f"fresh build failed; see {root / log_name}")
+        current = build_identity.capture(source, console)
+        require(all(current[key] == before_console[key] for key in ("sourceCommit", "buildInputSha256")), "source changed during controlled build")
+        if log_name == "console-build.log":
+            snapshot = {"schemaVersion": build_identity.SCHEMA_VERSION, **current}
+            (root / "pre-go-build.json").write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+    identity = build_identity.produce(source, console, binary, root / "build-identity.json", root, root / "pre-go-build.json")
+    return binary, identity
+
 
 def require(condition, message):
     if not condition:
@@ -30,8 +57,10 @@ def workspace_id(request_id):
 
 
 class Verification:
-    def __init__(self, binary, root):
+    def __init__(self, binary, root, identity):
         self.binary, self.root = binary, root
+        self.identity = identity
+        self.source = Path(__file__).resolve().parent.parent
         self.data = root / "data"
         self.process = None
         self.pids, self.trace, self.checked = [], [], []
@@ -50,6 +79,9 @@ class Verification:
         self.client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def start(self):
+        build_identity.verify(self.source, self.source / "web/consoleassets/dist", self.binary,
+                              self.root / "build-identity.json",
+                              {key: self.identity[key] for key in build_identity.IDENTITY_FIELDS}, self.root)
         log = open(self.root / f"process-{len(self.pids)+1}.log", "wb")
         try:
             self.process = subprocess.Popen([str(self.binary), "--server", "-config-dir", str(self.config)], cwd=self.root, stdout=log, stderr=subprocess.STDOUT)
@@ -62,6 +94,8 @@ class Verification:
             try:
                 with self.client.open(self.base + "/readyz", timeout=1) as response:
                     if response.status == 200:
+                        actual = Path(f"/proc/{self.process.pid}/exe").read_bytes()
+                        require(hashlib.sha256(actual).hexdigest() == self.identity["binarySha256"], "running executable is not the freshly built candidate")
                         return
             except (OSError, urllib.error.URLError):
                 pass
@@ -148,6 +182,19 @@ class Verification:
         obstacle.rename(obstacle.with_name("prewrite-obstacle-preserved"))
         self.assert_draft(self.create(failed)["authoring"], failed)
 
+        # A08/F08: metadata is durable before an empty bindings file returns
+        # ErrInvalidArgument. This must never be a bare pre-write HTTP 400.
+        invalid_bindings = {**payload, "requestId": "step01-empty-bindings"}
+        bindings_root = self.data / "internal/workspaces" / workspace_id(invalid_bindings["requestId"])
+        empty_bindings = bindings_root / "config/soul_bindings.json"
+        empty_bindings.parent.mkdir(parents=True)
+        empty_bindings.write_bytes(b"")
+        failure = self.create(invalid_bindings, 503)
+        require(failure["code"] == "workspace_creation_incomplete" and failure["creationRecovery"]["requestId"] == invalid_bindings["requestId"], "partial metadata failure lost original identity")
+        require((bindings_root / "workspace.json").is_file(), "invalid-bindings regression did not reach durable metadata")
+        empty_bindings.rename(empty_bindings.with_name("empty-bindings-preserved"))
+        self.assert_draft(self.create(invalid_bindings)["authoring"], invalid_bindings)
+
         # A09: persist first, directory fails. GET/list cannot prepare it.
         blocked = self.root / "directory-obstacle"
         blocked.write_bytes(b"test-owned obstacle; preserve")
@@ -156,7 +203,17 @@ class Verification:
         require(failure["creationRecovery"]["persistence"] == "persisted", "directory failure lost saved fact")
         observed = self.read(workspace_id(partial["requestId"]))
         require(observed["state"] == "draft" and not observed["creation"]["directoryPrepared"], "GET marked directory complete")
+        # An open production Web tab holds SSE. Shutdown must end this read-only
+        # subscription, not require the user to close every tab before restart.
+        stream_connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
+        stream_connection.request("GET", "/api/v1/workorch/events/stream")
+        stream_response = stream_connection.getresponse()
+        require(stream_response.status == 200, "production SSE did not connect")
+        handshake = stream_response.readline()
+        require(handshake == b": connected\n", "production SSE handshake missing")
         self.stop()
+        (self.root / "restart-open-sse.bin").write_bytes(handshake + stream_response.read())
+        stream_connection.close()
         self.start()
         restored = self.read(first["workspaceId"])
         require(restored == first and self.pids[-1] != self.pids[-2], "real process restart changed draft")
@@ -203,27 +260,27 @@ class Verification:
         self.stop()
 
     def save_evidence(self, failure=None):
-        source = Path(__file__).resolve().parent.parent
-        head = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
-        diff = subprocess.check_output(["git", "-C", str(source), "diff", "--binary", "HEAD"])
-        (self.root / "candidate.patch").write_bytes(diff)
-        paths = subprocess.check_output(["git", "-C", str(source), "diff", "--name-only", "HEAD", "-z"]).split(b"\x00") + subprocess.check_output(["git", "-C", str(source), "ls-files", "--others", "--exclude-standard", "-z"]).split(b"\x00")
-        manifest = {os.fsdecode(path): hashlib.sha256((source / os.fsdecode(path)).read_bytes()).hexdigest() for path in set(paths) if path and (source / os.fsdecode(path)).is_file()}
-        (self.root / "candidate-files.json").write_text(json.dumps({"baseSHA": head, "dirtyCandidate": bool(diff or manifest), "patchSHA256": hashlib.sha256(diff).hexdigest(), "files": manifest}, ensure_ascii=False, indent=2), encoding="utf-8")
         (self.root / "http-trace.json").write_text(json.dumps(self.trace, ensure_ascii=False, indent=2), encoding="utf-8")
-        (self.root / "result.json").write_text(json.dumps({"binary": str(self.binary), "binarySHA256": hashlib.sha256(self.binary.read_bytes()).hexdigest(), "processIDs": self.pids, "workspaceIDs": sorted(set(self.checked)), "failure": failure, "scope": "STEP01 production HTTP/process only; browser cases require separate evidence"}, ensure_ascii=False, indent=2), encoding="utf-8")
+        (self.root / "result.json").write_text(json.dumps({"buildIdentity": self.identity, "binary": str(self.binary), "binarySHA256": hashlib.sha256(self.binary.read_bytes()).hexdigest(), "configSHA256": hashlib.sha256((self.config / "application.toml").read_bytes()).hexdigest(), "backend": "file", "dataRoot": str(self.data), "processIDs": self.pids, "workspaceIDs": sorted(set(self.checked)), "failure": failure, "scope": "STEP01 production HTTP/process only; browser cases require separate evidence"}, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", type=Path, required=True)
     args = parser.parse_args()
-    require(args.binary.resolve().is_file(), "build a production binary first")
+    del args  # No --binary override: old output must not be relabelled as current source.
     os.umask(0o077)
     root = Path(tempfile.mkdtemp(prefix="workorch-step01-"))
-    verification = Verification(args.binary.resolve(), root)
+    print(f"STEP01 controlled build/evidence: {root}", flush=True)
+    source = Path(__file__).resolve().parent.parent
+    binary, identity = build_candidate(source, root)
+    diff = subprocess.check_output(["git", "-C", str(source), "diff", "--binary", "HEAD"])
+    (root / "candidate.patch").write_bytes(diff)
+    (root / "candidate.json").write_text(json.dumps({"baseSHA": identity["sourceCommit"], "candidateBuildIdentity": identity, "dirtyCandidate": bool(subprocess.check_output(["git", "-C", str(source), "status", "--porcelain"])), "patchSHA256": hashlib.sha256(diff).hexdigest()}, indent=2), encoding="utf-8")
+    verification = Verification(binary, root, identity)
     try:
         verification.run()
+        build_identity.verify(source, source / "web/consoleassets/dist", binary, root / "build-identity.json",
+                              {key: identity[key] for key in build_identity.IDENTITY_FIELDS}, root)
     except Exception as error:
         verification.save_evidence(str(error))
         raise

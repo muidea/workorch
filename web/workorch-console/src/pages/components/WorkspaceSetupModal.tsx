@@ -204,7 +204,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
         if (error instanceof WorkorchRequestError && error.creationRecovery?.requestId === recoveryRef.current?.request.requestId) setCreationFailure(error.creationRecovery);
         // Only a first attempt's explicit pre-write rejection releases its identity.
         // An earlier unknown is never erased by a later error response.
-        if (!hadPriorRequest && error instanceof WorkorchRequestError && !error.creationRecovery && [400, 404].includes(error.status || 0)) {
+        if (!hadPriorRequest && error instanceof WorkorchRequestError && error.creationRejectedBeforeDispatch && !error.creationRecovery && error.status === 400) {
           setRecoveryMemory(undefined); setCreationRejected(true);
         }
       }
