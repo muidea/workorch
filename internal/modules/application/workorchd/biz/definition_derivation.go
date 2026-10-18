@@ -13,6 +13,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 // DeriveDefinitionAcceptance 仅处理派生阶段；结果仍需规格审查与用户确认。
@@ -21,6 +22,10 @@ func (b *Biz) DeriveDefinitionAcceptance(ctx context.Context, id common.Workspac
 }
 
 func (b *Biz) deriveDefinitionAcceptance(ctx context.Context, id common.WorkspaceID, inputHash string) (workspace.DefinitionDerivedAcceptance, error) {
+	return b.deriveDefinitionAcceptanceBound(ctx, id, inputHash, nil)
+}
+
+func (b *Biz) deriveDefinitionAcceptanceBound(ctx context.Context, id common.WorkspaceID, inputHash string, expected *workorchmanagementcontract.DefinitionAuthoringCompile) (workspace.DefinitionDerivedAcceptance, error) {
 	ctx, release, err := b.authoringTasks.accept(ctx)
 	if err != nil {
 		return workspace.DefinitionDerivedAcceptance{}, err
@@ -31,6 +36,9 @@ func (b *Biz) deriveDefinitionAcceptance(ctx context.Context, id common.Workspac
 		return workspace.DefinitionDerivedAcceptance{}, err
 	}
 	if view.Record == nil {
+		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
+	}
+	if expected != nil && (view.Record.InputHash != expected.ExpectedInputHash || view.Record.TemplateSnapshotHash != expected.ExpectedTemplateSnapshotHash || !view.CurrentTemplateAvailable || view.CurrentTemplateSnapshotHash != expected.ExpectedTemplateSnapshotHash) {
 		return workspace.DefinitionDerivedAcceptance{}, common.ErrConflict
 	}
 	if err := view.Record.Validate(); err != nil {

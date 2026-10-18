@@ -20,8 +20,8 @@ func (c *Client) SaveDefinitionAuthoring(ctx context.Context, workspaceID string
 }
 
 // CompileDefinitionAuthoring 的接受回执不是持久编译成功状态。
-func (c *Client) CompileDefinitionAuthoring(ctx context.Context, workspaceID string) (*workorchmanagementcontract.DefinitionAuthoringView, error) {
-	return c.definitionAuthoringRequest(ctx, "POST", authoringPath(workspaceID)+"/compile", nil)
+func (c *Client) CompileDefinitionAuthoring(ctx context.Context, workspaceID string, request workorchmanagementcontract.DefinitionAuthoringCompile) (*workorchmanagementcontract.DefinitionAuthoringView, error) {
+	return c.definitionAuthoringRequest(ctx, "POST", authoringPath(workspaceID)+"/compile", request)
 }
 
 func (c *Client) ConfirmDefinitionAuthoring(ctx context.Context, workspaceID string, request workorchmanagementcontract.DefinitionAuthoringConfirm) (*workorchmanagementcontract.DefinitionAuthoringView, error) {

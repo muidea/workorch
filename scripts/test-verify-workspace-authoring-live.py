@@ -21,7 +21,7 @@ def owner_selection(selection):
 
 
 def ready_view():
-    return {"state": "ready_to_confirm", "templateCurrent": True, "inputHash": "input", "derivationPermitId": "permit",
+    return {"state": "ready_to_confirm", "templateCurrent": True, "templateSnapshotHash": "template-snapshot", "inputHash": "input", "derivationPermitId": "permit",
             "proposal": {"derivationPermitId": "permit", "proposalHash": "proposal", "specificationHash": "spec",
                          "items": [{"ref": "item"}], "reviews": [{"kind": kind, "status": "PASS", "specificationHash": "proposal"}
                          for kind in ("dimension_coverage", "negative_path", "regression", "resource_environment", "traceability", "verifier_feasibility")]}}
@@ -64,6 +64,7 @@ class AuthoringLiveContractTest(unittest.TestCase):
                 confirmed = True
                 return {'authoring': {**ready, 'state': 'admitted', 'activationState': 'eligible', 'startupInputHash': 'startup'}}
             if route.endswith('/authoring/compile'):
+                self.assertEqual(body, {'expectedInputHash': 'input', 'expectedTemplateSnapshotHash': 'template-snapshot'})
                 self.assertEqual(workspace.get('defaultLLMSelection'), owner_selection(selection))
                 return {'authoring': ready}
             return {'authoring': {**ready, 'state': 'draft'}}
@@ -351,7 +352,7 @@ class AuthoringLiveContractTest(unittest.TestCase):
             if route.endswith('/authoring'):
                 reads += 1
                 state = 'draft' if reads == 1 else 'preparation_failed'
-                return {'authoring': {'workspaceId': 'ws', 'state': state}}
+                return {'authoring': {'workspaceId': 'ws', 'state': state, 'inputHash': 'input', 'templateSnapshotHash': 'template-snapshot'}}
             if route.endswith('/runs'):
                 return {'runs': []}
             if route.endswith('/compile'):

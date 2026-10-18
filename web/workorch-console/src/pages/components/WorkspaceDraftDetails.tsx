@@ -6,7 +6,7 @@ import { errorMessage } from '../../utils/errorMessage';
 import type { DefinitionAuthoringView } from '../../types';
 
 // Read-only STEP01 discovery. Recovery is an explicit replay, never editing or compilation.
-export function WorkspaceDraftDetails({ workspaceId, onClose }: { workspaceId?: string; onClose: () => void }) {
+export function WorkspaceDraftDetails({ workspaceId, onClose, onOpenCandidate }: { workspaceId?: string; onClose: () => void; onOpenCandidate?: (id: string) => void }) {
   const [view, setView] = useState<DefinitionAuthoringView>();
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
@@ -45,6 +45,7 @@ export function WorkspaceDraftDetails({ workspaceId, onClose }: { workspaceId?: 
   return <Modal open={Boolean(workspaceId)} title="服务端草稿详情" onCancel={onClose} width={760} footer={<Space>
     <Button onClick={onClose}>关闭</Button>
     <Button disabled={busy} onClick={() => void readOrRecover(false)}>重新核对服务端</Button>
+    {onOpenCandidate && view?.input && <Button disabled={busy} onClick={() => { onOpenCandidate(view.workspaceId); onClose(); }}>进入合同候选与审查</Button>}
     {view?.creation && !view.creation.directoryPrepared && <Button disabled={busy || !view.creation.replay} onClick={() => void readOrRecover(true)}>按原身份恢复目录准备</Button>}
   </Space>}>
     {failure && <Alert type="warning" message="结果待核对" description={failure} />}

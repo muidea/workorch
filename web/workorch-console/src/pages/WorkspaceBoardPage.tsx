@@ -12,6 +12,7 @@ import { enterAuthoringWorkspace } from '../workspaceAuthoring';
 import { WorkspaceSetupModal } from './components/WorkspaceSetupModal';
 import { AuthoringSummary } from './components/AuthoringSummary';
 import { WorkspaceDraftDetails } from './components/WorkspaceDraftDetails';
+import { WorkspaceAuthoringCandidate } from './components/WorkspaceAuthoringCandidate';
 
 type WorkspaceBoardCardItem = {
   workspace: Workspace;
@@ -28,6 +29,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
   const [loading, setLoading] = useState(false);
   const [workspaceSetupOpen, setWorkspaceSetupOpen] = useState(false);
   const [draftWorkspaceId, setDraftWorkspaceId] = useState<string>();
+  const [candidateWorkspaceId, setCandidateWorkspaceId] = useState<string>();
   const boardRequest = useRef(0);
   const mounted = useRef(true);
 
@@ -184,7 +186,8 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
         onClose={() => setWorkspaceSetupOpen(false)}
         onCreated={handleWorkspaceCreated}
       />
-      <WorkspaceDraftDetails workspaceId={draftWorkspaceId} onClose={() => setDraftWorkspaceId(undefined)} />
+      <WorkspaceDraftDetails workspaceId={draftWorkspaceId} onClose={() => setDraftWorkspaceId(undefined)} onOpenCandidate={setCandidateWorkspaceId} />
+      <WorkspaceAuthoringCandidate workspaceId={candidateWorkspaceId} onClose={() => setCandidateWorkspaceId(undefined)} />
     </PageContainer>
   );
 }

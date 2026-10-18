@@ -67,6 +67,14 @@ Workspace 创建使用共享的 `WorkspaceSetupModal`，用户提交 Template、
 
 ### Workspace Detail
 
+STEP02 的合同候选页从正式草稿详情或 Workspace 规格摘要进入，只查询 owner 已保存的精确输入。
+打开、刷新、关闭重开不生成；显式生成只提交该输入和模板快照前置身份，不隐式 create／PUT／confirm／准入或启动 Run。
+过期冲突后只回读并展示新版本，不能自动重编；新版本须另行显式生成。页面展示完整维度、required 要求、all_of 义务、
+源承诺、逐义务声明及六审的理由／覆盖／引用／hash，不以 DECLARED 或任务受理宣称执行成功。
+`ready_to_confirm` 仅表示候选可审阅，本步无确认按钮；既有可写澄清入口与此只读候选入口分离。
+失败、审查阻塞、准备失败和 reserve 未决分别呈现，不提供“统一重试”。只读轮询串行且受会话／revision 门禁保护；
+准备恢复的 15 秒观察窗结束不是事务取消或重发授权，仍须核对 owner 事实。
+
 `WorkspaceDetailPage` 先读取 Workspace list/detail projection，再按当前选择加载：
 
 - Workspace snapshot、Soul bindings、服务配置、Soul、Skill、MCP catalog 与 Memory list；

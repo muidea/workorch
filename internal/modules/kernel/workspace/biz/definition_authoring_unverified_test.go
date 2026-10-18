@@ -82,4 +82,8 @@ func TestDeclaredEmptyVerificationCannotConfirm(t *testing.T) {
 			t.Fatal("反例不应依赖 UNVERIFIED 状态")
 		}
 	}
+	stored, err := owners.repositories.Workspaces.Get(context.Background(), cmd.WorkspaceID)
+	if err != nil || !reflect.DeepEqual(current, stored) {
+		t.Fatalf("负例校验改写原候选：%v", err)
+	}
 }

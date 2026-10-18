@@ -67,7 +67,7 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 	path := baseURL + "/api/v1/workorch/workspaces/" + created.Authoring.WorkspaceID
 	assertNoRun(t, repos)
 	assertEmptyDeliverable(t, directory)
-	productionJSON(t, client, http.MethodPost, path+"/authoring/compile", nil, nil)
+	productionJSON(t, client, http.MethodPost, path+"/authoring/compile", management.DefinitionAuthoringCompile{ExpectedInputHash: created.Authoring.InputHash, ExpectedTemplateSnapshotHash: created.Authoring.TemplateSnapshotHash}, nil)
 	var reviewed management.DefinitionAuthoringView
 	for deadline := time.Now().Add(2 * time.Minute); time.Now().Before(deadline); {
 		var envelope struct {

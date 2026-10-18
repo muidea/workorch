@@ -143,7 +143,16 @@ func registerDefinitionAuthoringRoutes(router engine.RouteRegistry, state *serve
 			writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "规格创作服务未配置"})
 			return
 		}
-		view, err := state.authoring.Compile(r.Context(), id)
+		var request workorchmanagementcontract.DefinitionAuthoringCompile
+		if err := decodeJSON(r, &request); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+			return
+		}
+		if request.ExpectedInputHash == "" || request.ExpectedTemplateSnapshotHash == "" {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "生成必须提供已查看的输入与模板快照身份"})
+			return
+		}
+		view, err := state.authoring.Compile(r.Context(), id, request)
 		if err != nil {
 			writeBusinessError(w, err)
 			return

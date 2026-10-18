@@ -194,7 +194,7 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 	}
 	created := authoringHTTPRequest(t, baseURL, http.MethodPost, "/api/v1/workorch/workspace-authoring", management.DefinitionAuthoringCreate{RequestID: "full-size-authoring", Title: "完整规格创作", TemplateID: "software-dev", DeliverableDirectory: filepath.Join(t.TempDir(), "project"), Input: management.DefinitionAuthoringInput{GoalText: goal, AcceptanceRequirements: criteria}}, http.StatusCreated)
 	path := "/api/v1/workorch/workspaces/" + created.WorkspaceID + "/authoring"
-	ready := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusOK)
+	ready := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", management.DefinitionAuthoringCompile{ExpectedInputHash: created.InputHash, ExpectedTemplateSnapshotHash: created.TemplateSnapshotHash}, http.StatusOK)
 	if ready.State != "ready_to_confirm" || ready.Proposal == nil || len(ready.Proposal.Reviews) != 6 || calls != 8 {
 		t.Fatalf("完整规格未审查: %+v calls=%d", ready, calls)
 	}

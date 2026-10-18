@@ -43,12 +43,25 @@ func (p *runtimeApplicationPorts) configureAuthoringPorts() {
 			})
 			return
 		},
-		Compile: func(ctx context.Context, id string) (view workorchmanagementcontract.DefinitionAuthoringView, err error) {
+		Compile: func(ctx context.Context, id string, request workorchmanagementcontract.DefinitionAuthoringCompile) (view workorchmanagementcontract.DefinitionAuthoringView, err error) {
 			err = withAuthoring(ctx, func(b *Biz, _ *runtimecore.Session) error {
-				if _, err = b.DeriveDefinitionAuthoringView(ctx, common.WorkspaceID(id)); err != nil {
+				current, readErr := b.ReadDefinitionAuthoringView(ctx, common.WorkspaceID(id))
+				if readErr != nil {
+					return readErr
+				}
+				if request.ExpectedInputHash == "" || request.ExpectedTemplateSnapshotHash == "" {
+					return common.ErrInvalidArgument
+				}
+				if !authoringCompileMatches(current, request) {
+					return common.ErrConflict
+				}
+				if _, err = b.deriveDefinitionAcceptanceBound(ctx, common.WorkspaceID(id), "", &request); err != nil {
 					return err
 				}
-				view, err = b.CompileDefinitionAuthoringView(ctx, common.WorkspaceID(id))
+				if _, err = b.compileAuthoringSpecificationBound(ctx, common.WorkspaceID(id), "", &request); err != nil {
+					return err
+				}
+				view, err = b.ReadDefinitionAuthoringView(ctx, common.WorkspaceID(id))
 				return err
 			})
 			return

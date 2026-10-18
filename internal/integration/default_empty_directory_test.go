@@ -276,7 +276,7 @@ operations = ["responses"]
 	assertNoRun(t, repos)
 	assertEmptyDeliverable(t, directory)
 	path := baseURL + "/api/v1/workorch/workspaces/" + created.Authoring.WorkspaceID
-	productionJSON(t, client, http.MethodPost, path+"/authoring/compile", nil, nil)
+	productionJSON(t, client, http.MethodPost, path+"/authoring/compile", management.DefinitionAuthoringCompile{ExpectedInputHash: created.Authoring.InputHash, ExpectedTemplateSnapshotHash: created.Authoring.TemplateSnapshotHash}, nil)
 	var reviewed management.DefinitionAuthoringView
 	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {

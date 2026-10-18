@@ -32,7 +32,7 @@ vi.mock('../../src/api', () => ({ workorchApi: {
 
 const ready = (workspaceId = 'ws'): DefinitionAuthoringView => ({
   workspaceId, workspaceRevision: 8, inputRevision: 1, state: 'ready_to_confirm',
-  templateId: 't', templateCurrent: true, input: { goalText: '原目标' },
+  templateId: 't', templateCurrent: true, templateSnapshotHash: 'template-exact', input: { goalText: '原目标' },
   inputHash: 'input', derivationPermitId: 'permit',
   proposal: {
     goalText: '原目标', items: [{ ref: 'item', text: '验收', sourceKind: 'DERIVED' }],
@@ -320,7 +320,7 @@ describe('持久规格编辑实际挂载', () => {
     await screen.findByDisplayValue('原目标');
     vi.useFakeTimers();
     await act(async () => { fireEvent.click(button('保存修订并审查')); });
-    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledWith('ws');
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledWith('ws', { expectedInputHash: 'input', expectedTemplateSnapshotHash: 'template-exact' });
     expect(screen.getByText(/本次任务已受理，正在观察 owner 状态/)).toBeTruthy();
     expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(1);
 
@@ -811,7 +811,7 @@ describe('持久规格编辑实际挂载', () => {
     await act(async () => { fireEvent.click(button('保存修订并审查')); });
     expect(saveMock).toHaveBeenCalledTimes(2);
     expect(saveMock.mock.calls[1]).toEqual(original);
-    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledExactlyOnceWith('ws');
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledExactlyOnceWith('ws', { expectedInputHash: 'new', expectedTemplateSnapshotHash: 'template-exact' });
     expect(workorchApi.createDefinitionAuthoring).not.toHaveBeenCalled();
     expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled();
   });

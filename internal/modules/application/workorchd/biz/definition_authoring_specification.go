@@ -14,6 +14,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
 // CompileAuthoringSpecification returns a candidate for user confirmation, not
@@ -23,6 +24,10 @@ func (b *Biz) CompileAuthoringSpecification(ctx context.Context, id common.Works
 }
 
 func (b *Biz) compileAuthoringSpecification(ctx context.Context, id common.WorkspaceID, inputHash string) (workspace.GoalSpecification, error) {
+	return b.compileAuthoringSpecificationBound(ctx, id, inputHash, nil)
+}
+
+func (b *Biz) compileAuthoringSpecificationBound(ctx context.Context, id common.WorkspaceID, inputHash string, expected *workorchmanagementcontract.DefinitionAuthoringCompile) (workspace.GoalSpecification, error) {
 	ctx, release, err := b.authoringTasks.accept(ctx)
 	if err != nil {
 		return workspace.GoalSpecification{}, err
@@ -33,6 +38,9 @@ func (b *Biz) compileAuthoringSpecification(ctx context.Context, id common.Works
 		return workspace.GoalSpecification{}, err
 	}
 	if view.Record == nil {
+		return workspace.GoalSpecification{}, common.ErrConflict
+	}
+	if expected != nil && (view.Record.InputHash != expected.ExpectedInputHash || view.Record.TemplateSnapshotHash != expected.ExpectedTemplateSnapshotHash || !view.CurrentTemplateAvailable || view.CurrentTemplateSnapshotHash != expected.ExpectedTemplateSnapshotHash) {
 		return workspace.GoalSpecification{}, common.ErrConflict
 	}
 	record, err := view.Record.Model()

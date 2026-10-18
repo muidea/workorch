@@ -5,6 +5,43 @@ import (
 	"sort"
 )
 
+// ReviewEvidenceRefs projects the exact review-provenance namespace from an
+// unreviewed, structurally valid proposal. Hashes and Profile declarations are
+// request context, not additional evidence IDs or execution evidence.
+func (s GoalSpecification) ReviewEvidenceRefs(goal DefinitionCandidateItem, dod []DefinitionCandidateItem) ([]string, error) {
+	if len(s.Reviews) != 0 {
+		return nil, fmt.Errorf("review evidence refs require an unreviewed proposal")
+	}
+	checked := s.Clone()
+	for _, kind := range goalReviewKinds {
+		checked.Reviews = append(checked.Reviews, GoalSpecificationCompletenessReview{Kind: kind, Status: GoalReviewUnknown, SpecificationHash: s.ContentHash()})
+	}
+	if err := checked.Validate(goal, dod); err != nil {
+		return nil, err
+	}
+	refs := []string{goal.CandidateItemRef}
+	for _, item := range dod {
+		refs = append(refs, item.CandidateItemRef)
+	}
+	for _, resource := range s.Resources {
+		refs = append(refs, resource.ID)
+	}
+	for _, dimension := range s.Dimensions {
+		refs = append(refs, dimension.ID)
+	}
+	for _, requirement := range s.Requirements {
+		refs = append(refs, requirement.ID)
+	}
+	for _, obligation := range s.Obligations {
+		refs = append(refs, obligation.ID)
+	}
+	for _, verification := range s.Verifications {
+		refs = append(refs, verification.ID)
+	}
+	sort.Strings(refs)
+	return refs, nil
+}
+
 // 应审范围只从 owner 编译的要求派生；缺少资源或风险声明不证明不适用。
 func (s GoalSpecification) RequiredReviewRequirementIDs(kind string) ([]string, error) {
 	if !GoalSpecificationReviewKind(kind) {

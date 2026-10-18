@@ -6,6 +6,7 @@ import { DownOutlined } from '@ant-design/icons';
 import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBundle, Decision, DoD, EventRecord, Goal, MCPServer, MemoryItem, Patch, PatchPage, ProjectionStatus, Result, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpoint, RuntimeCheckpointPage, RuntimeTimelineItem, ServiceConfiguration, Skill, Soul, StepPage, StepView, ToolCall, ToolCallPage, ValidationResult, ValidationResultPage, Workspace, WorkspaceExecutionActivationRequest, WorkspaceSnapshot, WorkspaceSoulBindings } from '../types';
 import { workorchApi } from '../api';
 import { WorkspaceAuthoringEditor } from './components/WorkspaceAuthoringEditor';
+import { WorkspaceAuthoringCandidate } from './components/WorkspaceAuthoringCandidate';
 import { AuthoringSummary } from './components/AuthoringSummary';
 import { useSSE } from '../hooks';
 import { modelLabels } from '../utils/constants';
@@ -100,6 +101,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [runArtifactLoading, setRunArtifactLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [authoringOpen, setAuthoringOpen] = useState(false);
+  const [candidateOpen, setCandidateOpen] = useState(false);
   const [activationOpen, setActivationOpen] = useState(false);
   const [activationLoading, setActivationLoading] = useState(false);
   const [activationIntent, setActivationIntent] = useState<'resume' | 'restart'>('resume');
@@ -1109,7 +1111,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               )}
             />
           ) : null}
-          <AuthoringSummary summary={snapshot.workspace.authoringSummary} onOpenSpecification={openDefinitionRevision} />
+          <AuthoringSummary summary={snapshot.workspace.authoringSummary} onOpenSpecification={() => setCandidateOpen(true)} />
           <ProCard loading={loading} title={snapshot.workspace.title || snapshot.workspace.id} extra={stateTag(snapshot.workspace.state)}>
             <Descriptions
               column={2}
@@ -2154,6 +2156,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         </Form>
       </Modal>
       <WorkspaceAuthoringEditor open={authoringOpen} workspaceId={workspaceId} onClose={() => setAuthoringOpen(false)} onAdmitted={async () => { if (workspaceId) await loadWorkspaceContext(workspaceId); }} />
+      <WorkspaceAuthoringCandidate workspaceId={candidateOpen ? workspaceId : undefined} onClose={() => setCandidateOpen(false)} />
       <Modal
         title={activationIntent === 'restart' ? '创建新的工作空间执行' : '恢复当前工作空间执行'}
         open={activationOpen}

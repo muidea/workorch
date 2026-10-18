@@ -224,17 +224,20 @@ func (t *authoringBackgroundTask) Run() {
 }
 
 func (b *Biz) configureAuthoringBackgroundPorts(ports *server.ApplicationPorts) {
-	ports.Definition.CompileDefinitionAuthoring = func(ctx context.Context, id string) (workorchmanagementcontract.DefinitionAuthoringView, error) {
-		return b.StartDefinitionAuthoringCompilation(ctx, common.WorkspaceID(id))
+	ports.Definition.CompileDefinitionAuthoring = func(ctx context.Context, id string, request workorchmanagementcontract.DefinitionAuthoringCompile) (workorchmanagementcontract.DefinitionAuthoringView, error) {
+		return b.StartDefinitionAuthoringCompilation(ctx, common.WorkspaceID(id), request)
 	}
 }
 
-func (b *Biz) StartDefinitionAuthoringCompilation(ctx context.Context, id common.WorkspaceID) (workorchmanagementcontract.DefinitionAuthoringView, error) {
+func (b *Biz) StartDefinitionAuthoringCompilation(ctx context.Context, id common.WorkspaceID, request workorchmanagementcontract.DefinitionAuthoringCompile) (workorchmanagementcontract.DefinitionAuthoringView, error) {
+	if request.ExpectedInputHash == "" || request.ExpectedTemplateSnapshotHash == "" {
+		return workorchmanagementcontract.DefinitionAuthoringView{}, common.ErrInvalidArgument
+	}
 	view, err := b.ReadDefinitionAuthoringView(ctx, id)
 	if err != nil {
 		return view, err
 	}
-	if view.InputHash == "" || !view.TemplateCurrent {
+	if !authoringCompileMatches(view, request) {
 		return view, common.ErrConflict
 	}
 	switch view.State {
@@ -244,18 +247,18 @@ func (b *Biz) StartDefinitionAuthoringCompilation(ctx context.Context, id common
 	hash := view.InputHash
 	if err := b.authoringTasks.schedule(ctx, b.BackgroundRoutine(), func(taskCtx context.Context) {
 		current, err := b.ReadDefinitionAuthoringView(taskCtx, id)
-		if err != nil || current.InputHash != hash {
+		if err != nil || !authoringCompileMatches(current, request) {
 			return
 		}
-		if _, err := b.DeriveDefinitionAuthoringView(taskCtx, id); err != nil {
+		if _, err := b.deriveDefinitionAcceptanceBound(taskCtx, id, "", &request); err != nil {
 			b.logAuthoringCompilationFailure(taskCtx, id, hash, "derivation", err)
 			return
 		}
 		current, err = b.ReadDefinitionAuthoringView(taskCtx, id)
-		if err != nil || current.InputHash != hash {
+		if err != nil || !authoringCompileMatches(current, request) {
 			return
 		}
-		if _, err := b.CompileDefinitionAuthoringView(taskCtx, id); err != nil {
+		if _, err := b.compileAuthoringSpecificationBound(taskCtx, id, "", &request); err != nil {
 			b.logAuthoringCompilationFailure(taskCtx, id, hash, "specification", err)
 		}
 	}); err != nil {
@@ -264,6 +267,10 @@ func (b *Biz) StartDefinitionAuthoringCompilation(ctx context.Context, id common
 	// 仅表示托管任务已接受；不伪造 owner 的 compiling／成功状态。
 	view.CompilationAccepted = true
 	return view, nil
+}
+
+func authoringCompileMatches(view workorchmanagementcontract.DefinitionAuthoringView, request workorchmanagementcontract.DefinitionAuthoringCompile) bool {
+	return view.InputHash != "" && view.TemplateCurrent && view.InputHash == request.ExpectedInputHash && view.TemplateSnapshotHash == request.ExpectedTemplateSnapshotHash
 }
 
 func (b *Biz) logAuthoringCompilationFailure(ctx context.Context, id common.WorkspaceID, hash, phase string, err error) {

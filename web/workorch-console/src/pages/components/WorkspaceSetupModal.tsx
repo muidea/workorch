@@ -258,7 +258,7 @@ export function WorkspaceSetupModal({ open, onClose, onCreated }: Props) {
         persist(saved);
       }
       applyView(current);
-      const next = await workorchApi.compileDefinitionAuthoring(current.workspaceId);
+      const next = await workorchApi.compileDefinitionAuthoring(current.workspaceId, { expectedInputHash: current.inputHash || '', expectedTemplateSnapshotHash: current.templateSnapshotHash || '' });
       if (!session.current.matches(token)) return;
       if (next.compilationAccepted) {
         acceptedPreparationObservation.current.begin(current);

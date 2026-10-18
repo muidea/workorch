@@ -79,6 +79,7 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 	result.InputHash = record.InputHash
 	result.InputRevision = input.Revision
 	result.TemplateID = input.TemplateID
+	result.TemplateSnapshotHash = record.TemplateSnapshotHash
 	result.TemplateCurrent = view.CurrentTemplateAvailable && view.CurrentTemplateSnapshotHash == record.TemplateSnapshotHash
 	result.State = "draft"
 	var derivation *workspace.DefinitionDerivationRequest
@@ -103,6 +104,7 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 	}
 	if derivation != nil {
 		result.DerivationPermitID = derivation.PermitID
+		result.DerivationRequestID, result.ProviderBindingHash, result.ResourceSnapshotHash = derivation.RequestID, derivation.ProviderBindingHash, derivation.ResourceSnapshotHash
 		result.State = "deriving"
 		for _, resource := range derivation.Resources {
 			result.Resources = append(result.Resources, workorchmanagementcontract.DefinitionAuthoringResource{Ref: resource.Ref, SnapshotHash: resource.ContentHash})
@@ -137,6 +139,7 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 				}
 				requestState := workorchmanagementcontract.DefinitionAuthoringRequestState{PermitID: request.PermitID, Phase: string(request.Phase), ReviewKind: request.ReviewKind, State: state, FailureCode: request.FailureCode}
 				requestState.Diagnostic = authoringDiagnosticMetadata(request.Diagnostic)
+				requestState.RequestID, requestState.ProviderBindingHash, requestState.ProposalHash = request.RequestID, request.ProviderBindingHash, request.ProposalHash
 				result.Requests = append(result.Requests, requestState)
 				if request.Proposal != nil {
 					copy := request.Proposal.Clone()
@@ -153,6 +156,16 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 				}
 			}
 			if spec != nil {
+				proposal.Version, proposal.GoalItemRef, proposal.GoalTextHash = spec.Version, spec.GoalItemRef, spec.GoalTextHash
+				for _, dimension := range spec.Dimensions {
+					proposal.Dimensions = append(proposal.Dimensions, workorchmanagementcontract.DefinitionAuthoringDimension{ID: dimension.ID, Required: dimension.Required, Activated: dimension.Activated, ResourceIDs: slices.Clone(dimension.ResourceIDs)})
+				}
+				for _, requirement := range spec.Requirements {
+					proposal.Requirements = append(proposal.Requirements, workorchmanagementcontract.DefinitionAuthoringRequirement{ID: requirement.ID, DimensionID: requirement.DimensionID, Required: requirement.Required, SourceKind: requirement.SourceKind, SourceItemRefs: slices.Clone(requirement.SourceItemRefs), ResourceIDs: slices.Clone(requirement.ResourceIDs), Text: requirement.Text})
+				}
+				for _, obligation := range spec.Obligations {
+					proposal.Obligations = append(proposal.Obligations, workorchmanagementcontract.DefinitionAuthoringObligation{ID: obligation.ID, RequirementID: obligation.RequirementID, DoDItemRefs: slices.Clone(obligation.DoDItemRefs), Text: obligation.Text})
+				}
 				proposal.ProposalHash = spec.ContentHash()
 				for _, mapping := range spec.EvidencePurposeMappings {
 					proposal.EvidencePurposeMappings = append(proposal.EvidencePurposeMappings, workorchmanagementcontract.DefinitionAuthoringEvidencePurposeMapping{ContractRef: mapping.ContractRef, HistoricalItemRef: mapping.HistoricalItemRef, AcceptanceItemRef: mapping.AcceptanceItemRef, HistoricalProfileID: mapping.HistoricalProfileID, HistoricalDeliverableID: mapping.HistoricalDeliverableID, HistoricalProfileHash: mapping.HistoricalProfileHash, HistoricalText: mapping.HistoricalText})
@@ -161,7 +174,7 @@ func definitionAuthoringView(view workspaceevents.QueryDefinitionAuthoringResult
 					proposal.ExecutionProofMappings = append(proposal.ExecutionProofMappings, workorchmanagementcontract.DefinitionAuthoringExecutionProofMapping{ContractRef: mapping.ContractRef, ConsumerItemRef: mapping.ConsumerItemRef, RuleRef: mapping.RuleRef, SourceItemRef: mapping.SourceItemRef, ConsumerGoalText: mapping.ConsumerGoalText})
 				}
 				for _, resource := range spec.Resources {
-					proposal.Resources = append(proposal.Resources, workorchmanagementcontract.DefinitionAuthoringResource{ID: resource.ID, Ref: resource.Ref, SnapshotHash: resource.SnapshotHash})
+					proposal.Resources = append(proposal.Resources, workorchmanagementcontract.DefinitionAuthoringResource{ID: resource.ID, Ref: resource.Ref, SnapshotHash: resource.SnapshotHash, Required: resource.Required, Available: resource.Available})
 				}
 				for _, verification := range spec.Verifications {
 					proposal.Verifications = append(proposal.Verifications, workorchmanagementcontract.DefinitionAuthoringVerification{ID: verification.ID, ObligationID: verification.ObligationID, Declaration: verification.Declaration, Status: verification.Status, ProfileID: verification.ProfileID, EvidenceRequirementID: verification.EvidenceRequirementID, Scope: verification.Scope})

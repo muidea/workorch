@@ -84,7 +84,7 @@ LLM configuration save does not mutate the running LLM owner snapshot or any sea
 | --- | --- | --- |
 | `POST` | `/workspace-authoring` | 持久创建 Goal-only 创作草稿，按 RequestID 与原 payload 重放 |
 | `PUT` | `/workspaces/:workspaceId/authoring` | 保存创建期输入修订，绑定 expected revision／inputHash |
-| `POST` | `/workspaces/:workspaceId/authoring/compile` | 托管派生与六类独立审查；202 仅为任务接受回执 |
+| `POST` | `/workspaces/:workspaceId/authoring/compile` | 必填 `expectedInputHash`、`expectedTemplateSnapshotHash`；托管派生与六类独立审查；202 仅为任务接受回执 |
 | `POST` | `/workspaces/:workspaceId/authoring/confirm` | 精确确认 input／permit／proposal／specification hashes，物化并准入 |
 | `DELETE` | `/workspaces/:workspaceId` | submit one Workspace-owner delete intent; optional typed purge mode |
 | `PUT` / `DELETE` | `/workspaces/:workspaceId/llm-selection` | owner-CAS update/clear selection |
@@ -97,6 +97,23 @@ LLM configuration save does not mutate the running LLM owner snapshot or any sea
 普通 setup 不要求 raw context/evidence/target/recipe/check/metric/artifact JSON。
 
 Web 的独立“保存草稿”仅调用创建接口，停在 `authoring.state=draft`、`inputRevision=1`；不调用修订、编译、确认或激活。
+compile 前置身份来自同一 authoring GET 的 `inputHash` 与 `templateSnapshotHash`，不是会因 ledger 写入而变化的 Workspace revision。
+缺字段返回 400，不允许降级为读取最新输入；输入／模板快照过期返回 409，必须在任务受理、reserve／provider 前拒绝。
+延迟后台任务仍反查相同输入及模板，后续 reserve 受 owner CAS 与精确绑定保护；冲突后只读回读，不能隐式生成另一版本。
+查询的 `proposal` 返回 canonical `version`、`goalItemRef`、`goalTextHash`、完整 `dimensions`／`requirements`／`obligations`，
+保留 required、来源、资源引用与逐义务 all_of 关系；`verifications` 是声明而非执行证据，review 的 `specificationHash` 仍绑定 proposalHash。
+生成提示与 provider schema 要求每项 `Verification.Declaration` 有非空、非纯空白的具体说明（至多4096 UTF-8 bytes）。
+`DECLARED` 精确引用适用且合并后仍有贡献的 Profile 能力，并说明对原义务的验证方式；未执行不等于能力缺失。
+无适用能力或依据不足时保留 `UNVERIFIED`，说明具体缺口且三个 Profile 绑定字段为空；六审 PASS 也不能消除该阻塞。
+schema 是生成侧约束，不改变既有 decoder／owner 的历史失败重判语义及首错顺序；空声明不得取得可确认资格。
+decoder／owner 不自动补写说明、制造绑定或改写原始模型材料。
+独立审查请求的 `reviewEvidenceRefs` 由 owner 从同一合法、未评审候选投影，仅含原 Goal／候选 ref 和规格对象 ID。
+审查 `EvidenceRefs` 只能逐字引用该集合；输入、模板、资源及 proposal 的 hash、Profile 身份不因此成为新的审查引用。
+`requiredRequirementIDs` 仍独立规定每类必审范围；提供引用集合不代替语义审查，不授予运行证据或确认资格。
+六审请求同时明确既有独立 exact Goal requirement 结构：Goal 不是候选 DoD，不补造其 DoD obligation 或逐义务验证；
+每类仍审完整 Goal 的语义是否被候选义务及适用声明承接，保留原文不等于覆盖充分，实际遗漏／弱化／依据不足仍阻塞。
+派生与规格请求同时公开原 request／permit、provider binding 和资源快照 hash；这些是只读来源，不产生确认或执行权威。
+
 201 表示 owner 已保存、允许的目录准备已完成并经过独立读回；`Workspace.state=active` 不代表合同或执行就绪。
 authoring GET 公开 `title`、`description`、`deliverableDirectory` 与 `creation`（`requestId`、`inputHash`、`directoryPrepared`）。
 后者是原创建阶段历史事实，不是当前目录／资源 readiness。未确认完成时 GET 不补目录；仅当 owner 能精确重建原创建 hash

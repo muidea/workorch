@@ -34,7 +34,7 @@ type DefinitionPorts struct {
 	CreateDefinitionAuthoring                    CreateDefinitionAuthoringFunc
 	ReadDefinitionAuthoring                      ReadDefinitionAuthoringFunc
 	SaveDefinitionAuthoring                      SaveDefinitionAuthoringFunc
-	CompileDefinitionAuthoring                   ReadDefinitionAuthoringFunc
+	CompileDefinitionAuthoring                   CompileDefinitionAuthoringFunc
 	ConfirmDefinitionAuthoring                   ConfirmDefinitionAuthoringFunc
 	ReadDefinitionAuthoringSuccessAudit          ReadDefinitionAuthoringSuccessAuditFunc
 	ReadDefinitionAuthoringDiagnostic            ReadDefinitionAuthoringDiagnosticFunc

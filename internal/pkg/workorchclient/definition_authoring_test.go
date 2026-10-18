@@ -33,6 +33,10 @@ func TestDefinitionAuthoringClientPreservesExactTransactions(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == authoringPath("ws")+"/compile" {
+			var got management.DefinitionAuthoringCompile
+			if err := json.NewDecoder(r.Body).Decode(&got); err != nil || got.ExpectedInputHash != "input" || got.ExpectedTemplateSnapshotHash != "template-snapshot" {
+				t.Errorf("compile input precondition changed: %+v %v", got, err)
+			}
 			w.WriteHeader(http.StatusAccepted)
 		}
 		_ = json.NewEncoder(w).Encode(struct {
@@ -51,7 +55,7 @@ func TestDefinitionAuthoringClientPreservesExactTransactions(t *testing.T) {
 			return client.SaveDefinitionAuthoring(ctx, "ws", save)
 		},
 		func() (*management.DefinitionAuthoringView, error) {
-			return client.CompileDefinitionAuthoring(ctx, "ws")
+			return client.CompileDefinitionAuthoring(ctx, "ws", management.DefinitionAuthoringCompile{ExpectedInputHash: "input", ExpectedTemplateSnapshotHash: "template-snapshot"})
 		},
 		func() (*management.DefinitionAuthoringView, error) {
 			return client.ConfirmDefinitionAuthoring(ctx, "ws", confirmation)

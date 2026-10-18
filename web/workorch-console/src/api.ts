@@ -202,8 +202,8 @@ export const workorchApi = {
     });
     return body.authoring;
   },
-  compileDefinitionAuthoring: async (id: string) => {
-    const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspaces/${encodeURIComponent(id)}/authoring/compile`, { method: 'POST' });
+  compileDefinitionAuthoring: async (id: string, expected: { expectedInputHash: string; expectedTemplateSnapshotHash: string }) => {
+    const body = await request<{ authoring: DefinitionAuthoringView }>(`${apiBase}/workspaces/${encodeURIComponent(id)}/authoring/compile`, { method: 'POST', body: JSON.stringify(expected) });
     return body.authoring;
   },
   confirmDefinitionAuthoring: async (view: DefinitionAuthoringView, exact?: { inputHash: string; derivationPermitId: string; proposalHash: string; specificationHash: string; expectedWorkspaceRevision: number }) => {

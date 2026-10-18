@@ -36,6 +36,7 @@ SOURCE_FILES = (
     "Makefile", "Dockerfile", "go.mod", "go.sum", "go.work", "go.work.sum",
     "scripts/build_identity.py",
     "scripts/verify-workspace-draft-step01.py",
+    "scripts/verify-workspace-candidate-step02.py",
 )
 GENERATED_EXACT = ("web/consoleassets/dist",)
 EXCLUDED_DIR_NAMES = {

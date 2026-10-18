@@ -66,6 +66,11 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 	}
 	stable := proposalCommand.Request.PromptContext.Sections[0]
 	volatile := proposalCommand.Request.PromptContext.Sections[1]
+	for _, rule := range []string{"每项 Declaration 在两种状态下都必须是非空、非纯空白的具体说明", "尚未执行不是单独判为 UNVERIFIED 的理由", "Declaration 具体说明缺少何种能力或适用性依据", "不得为达到可确认状态伪造绑定", "最终合并仍有贡献"} {
+		if !strings.Contains(stable.Content, rule) {
+			t.Fatalf("proposal omitted declaration contract: %s", rule)
+		}
+	}
 	if !stable.Protected || stable.Cacheability != "stable" || !strings.HasPrefix(stable.ID, "C0.") || !volatile.Protected || volatile.Cacheability != "volatile" || !strings.HasPrefix(volatile.ID, "C3.") {
 		t.Fatalf("proposal cache boundaries changed: %+v", proposalCommand.Request.PromptContext.Sections)
 	}
@@ -109,6 +114,7 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 	}
 	var reviewPayload struct {
 		RequiredRequirementIDs []string                                 `json:"requiredRequirementIDs"`
+		ReviewEvidenceRefs     []string                                 `json:"reviewEvidenceRefs"`
 		Kind                   string                                   `json:"kind"`
 		ProposalHash           string                                   `json:"proposalHash"`
 		Goal                   workspace.DefinitionCandidateItem        `json:"goal"`
@@ -119,12 +125,36 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 	if err := json.Unmarshal([]byte(command.Request.PromptContext.Sections[1].Content), &reviewPayload); err != nil {
 		t.Fatal(err)
 	}
+	expectedRefs, err := spec.ReviewEvidenceRefs(proposalPayload.Goal, proposalPayload.CandidateAcceptance)
+	if err != nil || strings.Join(expectedRefs, "\n") != strings.Join(reviewPayload.ReviewEvidenceRefs, "\n") || !strings.Contains(command.Request.PromptContext.Sections[0].Content, "EvidenceRefs 每项必须逐字引用输入 reviewEvidenceRefs") {
+		t.Fatalf("critic lacks owner-validated exact provenance refs: %v", err)
+	}
 	if reviewPayload.Kind != workspace.GoalReviewTraceability || reviewPayload.ProposalHash != spec.ContentHash() || reviewPayload.Goal.Text != input.GoalText || len(reviewPayload.CandidateAcceptance) != 3 || len(reviewPayload.Specification.Reviews) != 0 {
 		t.Fatalf("critic received wrong or contaminated proposal: %+v", reviewPayload)
 	}
 	requiredIDs, err := spec.RequiredReviewRequirementIDs(workspace.GoalReviewTraceability)
 	if err != nil || strings.Join(reviewPayload.RequiredRequirementIDs, "\n") != strings.Join(requiredIDs, "\n") || len(requiredIDs) != 4 {
 		t.Fatalf("critic 未取得全部 required 要求: got=%v want=%v err=%v", reviewPayload.RequiredRequirementIDs, requiredIDs, err)
+	}
+	for _, kind := range ReviewKinds() {
+		critic, err := AuthoringReviewCommand(derivation, spec, kind, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contract := critic.Request.PromptContext.Sections[0].Content
+		for _, rule := range []string{"它不是候选 DoD，不要求借用或补造", "保留 Goal 文本本身不证明语义覆盖", "实际缺失、弱化或依据不足仍返回 FAIL／UNKNOWN", "不能免审 Goal、减少 requiredRequirementIDs"} {
+			if !strings.Contains(contract, rule) {
+				t.Fatalf("%s 缺失既有独立 Goal 审查合同：%s", kind, rule)
+			}
+		}
+		if contract != command.Request.PromptContext.Sections[0].Content {
+			t.Fatal("独立 Goal 结构合同因 critic 类别而漂移")
+		}
+	}
+	for _, obligation := range reviewPayload.Specification.Obligations {
+		if obligation.RequirementID == "requirement-a" {
+			t.Fatal("独立 Goal fixture 不得借用 DoD obligation")
+		}
 	}
 	if runtimecontract.StableRuntimeProfileContractsHash(reviewPayload.Profiles) != runtimecontract.StableRuntimeProfileContractsHash(proposalPayload.Profiles) || strings.Contains(command.Request.PromptContext.Sections[0].Content, "sealed-profile") {
 		t.Fatal("独立审查读取了不同 Profile 声明或改变了稳定前缀")
@@ -272,10 +302,10 @@ func authoringCommandFixture(t *testing.T, input workspace.DefinitionAuthoringIn
 		}
 		id := "requirement-" + string(rune('a'+n))
 		spec.Requirements = append(spec.Requirements, workspace.GoalSpecificationRequirement{ID: id, DimensionID: "dimension", Required: true, SourceKind: kind, SourceItemRefs: []string{item.CandidateItemRef}, Text: item.Text})
-		dodRef := item.CandidateItemRef
 		if n == 0 {
-			dodRef = items[0].CandidateItemRef
+			continue // exact Goal 独立 required，不补造候选 DoD obligation。
 		}
+		dodRef := item.CandidateItemRef
 		spec.Obligations = append(spec.Obligations, workspace.GoalSpecificationObligation{ID: "obligation-" + id, RequirementID: id, DoDItemRefs: []string{dodRef}, Text: item.Text})
 		spec.Verifications = append(spec.Verifications, workspace.GoalSpecificationVerification{ID: "verification-" + id, ObligationID: "obligation-" + id, Status: workspace.GoalVerificationUnverified, Declaration: "待评估"})
 	}

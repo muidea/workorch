@@ -237,7 +237,12 @@ def verify(request, journal, timeout, confirm):
             raise RuntimeError('创作准备已知失败 preparation_failed；保留原诊断，不自动重新编译')
         if view['state'] in ('draft', 'derived'):
             # 恢复 drive 仍由 owner reserve 授权；已未决的 permit 不会重发。
-            view = request('POST', path + '/authoring/compile')['authoring']
+            if not view.get('inputHash') or not view.get('templateSnapshotHash'):
+                raise RuntimeError('创作输入或模板快照身份缺失，禁止生成')
+            view = request('POST', path + '/authoring/compile', {
+                'expectedInputHash': view['inputHash'],
+                'expectedTemplateSnapshotHash': view['templateSnapshotHash'],
+            })['authoring']
         deadline = time.monotonic() + timeout
         while view['state'] not in ('ready_to_confirm', 'review_blocked', 'failed', 'preparation_failed', 'clarification_required', 'admitted', 'confirming', 'admitting'):
             if time.monotonic() >= deadline:

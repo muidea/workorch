@@ -79,6 +79,16 @@ func TestAuthoringHTTPCompileTasksCompeteForFreshPermit(t *testing.T) {
 	testAuthoringHTTPFileBackedScenario(t, "reserve_compete")
 }
 
+func TestAuthoringHTTPStep02ExactInputBeforeReserve(t *testing.T) {
+	for _, scenario := range []string{"step02_input_guard", "step02_template_guard"} {
+		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
+	}
+}
+
+func TestAuthoringHTTPStep02CandidateReadbackWithoutConfirmation(t *testing.T) {
+	testAuthoringHTTPFileBackedScenario(t, "step02_candidate")
+}
+
 func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	ctx := context.Background()
 	storage, directory := t.TempDir(), t.TempDir()
@@ -470,9 +480,48 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			t.Fatal(err)
 		}
 	}
-	accepted := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusAccepted)
+	compileRequest := management.DefinitionAuthoringCompile{ExpectedInputHash: updated.InputHash, ExpectedTemplateSnapshotHash: updated.TemplateSnapshotHash}
+	if strings.HasPrefix(scenario, "step02_") {
+		// Missing/partial conditions never reach a task, reserve or provider.
+		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusBadRequest)
+		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", management.DefinitionAuthoringCompile{ExpectedInputHash: updated.InputHash}, http.StatusBadRequest)
+		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", management.DefinitionAuthoringCompile{ExpectedInputHash: "stale", ExpectedTemplateSnapshotHash: updated.TemplateSnapshotHash}, http.StatusConflict)
+		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", management.DefinitionAuthoringCompile{ExpectedInputHash: updated.InputHash, ExpectedTemplateSnapshotHash: "stale"}, http.StatusConflict)
+		if physicalCalls.Load() != 0 {
+			t.Fatal("rejected compile performed a provider call")
+		}
+	}
+	accepted := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusAccepted)
 	if !accepted.CompilationAccepted || accepted.State != "draft" || (!realWorker && physicalCalls.Load() != 0) {
 		t.Fatal("acceptance fabricated owner progress")
+	}
+	if scenario == "step02_input_guard" || scenario == "step02_template_guard" {
+		if scenario == "step02_input_guard" {
+			// A -> B -> A keeps the exact original text but must not reuse identity.
+			current := updated
+			for index, goal := range []string{"其他会话的新目标", updated.Input.GoalText} {
+				input := *updated.Input
+				input.GoalText = goal
+				current = authoringHTTPRequest(t, baseURL, http.MethodPut, path, management.DefinitionAuthoringSave{RequestID: fmt.Sprintf("step02-revise-%d", index), TemplateID: current.TemplateID, Input: input, ExpectedWorkspaceRevision: current.WorkspaceRevision, ExpectedInputHash: current.InputHash}, http.StatusOK)
+			}
+			if current.InputHash == updated.InputHash || current.InputRevision != updated.InputRevision+2 {
+				t.Fatal("A-B-A reused old input identity")
+			}
+		} else {
+			changed := template.Clone()
+			changed.DoDItems = append(changed.DoDItems, "新增模板必需承诺")
+			if err := repositories.WorkspaceTemplates.Update(ctx, &changed); err != nil {
+				t.Fatal(err)
+			}
+		}
+		routine.queued.Run() // Delayed accepted task must not select the new input.
+		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusConflict)
+		stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+		if err != nil || physicalCalls.Load() != 0 || len(stored.DefinitionAuthoring.DerivationRequests) != 0 || len(stored.DefinitionAuthoring.SpecificationRequests) != 0 {
+			t.Fatalf("stale task reached reserve/provider: %v calls=%d", err, physicalCalls.Load())
+		}
+		assertNoRuns()
+		return
 	}
 	if scenario == "concurrent_compile" {
 		select {
@@ -482,13 +531,13 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		}
 		// 派生物理调用仍在途时，重复请求只能复用 owner permit。
 		for range 4 {
-			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusOK)
+			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusOK)
 		}
 		releaseOnce.Do(func() { close(releaseDerive) })
 	}
 	if scenario == "reserve_compete" {
 		for range 3 {
-			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusAccepted)
+			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusAccepted)
 		}
 		if len(concurrentRoutine.queued) != 4 {
 			t.Fatalf("竞争夹具任务数=%d，want 4", len(concurrentRoutine.queued))
@@ -564,7 +613,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		assertNoRuns()
 		// 相同显式失败幂等，但仍可接受任务；诊断身份不含
 		// 已推进到当前值的 observed revision。
-		again := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusAccepted)
+		again := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusAccepted)
 		if !again.CompilationAccepted || again.State != "preparation_failed" {
 			t.Fatal("explicit preparation retry was not accepted")
 		}
@@ -588,7 +637,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			}
 		}
 		preparationRepaired.Store(true)
-		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusAccepted)
+		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusAccepted)
 		routine.queued.Run()
 		ready := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
 		wantState := "ready_to_confirm"
@@ -601,7 +650,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		if wantState == "review_blocked" {
 			confirmation := management.DefinitionAuthoringConfirm{InputHash: ready.InputHash, DerivationPermitID: ready.DerivationPermitID, ProposalHash: ready.Proposal.ProposalHash, SpecificationHash: ready.Proposal.SpecificationHash, ExpectedWorkspaceRevision: ready.WorkspaceRevision}
 			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", confirmation, http.StatusConflict)
-			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusOK)
+			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusOK)
 			if physicalCalls.Load() != 8 {
 				t.Fatal("完整阻塞审查重复编译重发了旧 critics")
 			}
@@ -656,14 +705,14 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			t.Fatalf("raw diagnostic changed: %+v", envelope.Diagnostic)
 		}
 		before := physicalCalls.Load()
-		replayed := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusOK)
+		replayed := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusOK)
 		if physicalCalls.Load() != before || replayed.CompilationAccepted || replayed.WorkspaceRevision != failed.WorkspaceRevision {
 			t.Fatal("known failure automatically retried provider or changed its receipt")
 		}
 		assertNoRuns()
 		closeOwners()
 		baseURL, routine, closeOwners = open()
-		recovered := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusOK)
+		recovered := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusOK)
 		if recovered.State != "failed" || recovered.CompilationAccepted || recovered.WorkspaceRevision != failed.WorkspaceRevision || len(recovered.Requests) != len(failed.Requests) || physicalCalls.Load() != before {
 			t.Fatalf("重启后失败请求身份被替换或重新调用 provider: %+v", recovered)
 		}
@@ -787,6 +836,52 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		assertNoRuns()
 	}
 	assertSuccessAudit()
+	if scenario == "step02_candidate" {
+		stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		canonical := stored.DefinitionAuthoring.SpecificationRequests[0].Proposal
+		p := ready.Proposal
+		if p.Version != canonical.Version || p.GoalItemRef != canonical.GoalItemRef || p.GoalTextHash != canonical.GoalTextHash || len(p.Dimensions) != len(canonical.Dimensions) || len(p.Requirements) != len(canonical.Requirements) || len(p.Obligations) != len(canonical.Obligations) {
+			t.Fatal("candidate structure projection lost canonical fields")
+		}
+		for index, requirement := range canonical.Requirements {
+			got := p.Requirements[index]
+			if got.ID != requirement.ID || got.DimensionID != requirement.DimensionID || got.Text != requirement.Text || got.Required != requirement.Required || got.SourceKind != requirement.SourceKind || !reflect.DeepEqual(got.SourceItemRefs, requirement.SourceItemRefs) || !reflect.DeepEqual(got.ResourceIDs, requirement.ResourceIDs) {
+				t.Fatal("requirement source or original text changed")
+			}
+		}
+		for index, obligation := range canonical.Obligations {
+			got := p.Obligations[index]
+			if got.ID != obligation.ID || got.RequirementID != obligation.RequirementID || got.Text != obligation.Text || !reflect.DeepEqual(got.DoDItemRefs, obligation.DoDItemRefs) {
+				t.Fatal("all_of obligation mapping changed")
+			}
+		}
+		for range 2 {
+			replayed := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusOK)
+			if !reflect.DeepEqual(replayed, ready) || physicalCalls.Load() != 8 {
+				t.Fatal("completed replay changed candidate or called provider")
+			}
+		}
+		closeOwners()
+		baseURL, routine, closeOwners = open()
+		recovered := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+		if !reflect.DeepEqual(recovered, ready) || physicalCalls.Load() != 8 {
+			t.Fatal("file-backed candidate/reviews not recovered")
+		}
+		stored, err = repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+		if err != nil || stored.DefinitionAuthoringConfirmation != nil || stored.StartupInput != nil || stored.ActivationAdmission != nil {
+			t.Fatal("STEP02 created confirmation/admission")
+		}
+		goals, goalErr := repositories.Goals.ListByWorkspaceID(ctx, common.WorkspaceID(created.WorkspaceID))
+		dods, dodErr := repositories.DoDs.ListByWorkspaceID(ctx, common.WorkspaceID(created.WorkspaceID))
+		if goalErr != nil || dodErr != nil || len(goals) != 0 || len(dods) != 0 {
+			t.Fatal("STEP02 materialized formal Goal/DoD")
+		}
+		assertNoRuns()
+		return
+	}
 	confirmation := management.DefinitionAuthoringConfirm{InputHash: ready.InputHash, DerivationPermitID: ready.DerivationPermitID, ProposalHash: ready.Proposal.ProposalHash, SpecificationHash: ready.Proposal.SpecificationHash, ExpectedWorkspaceRevision: ready.WorkspaceRevision}
 	if wantState == "review_blocked" {
 		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", confirmation, http.StatusConflict)
@@ -797,7 +892,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		if recovered.State != "review_blocked" || recovered.WorkspaceRevision != ready.WorkspaceRevision {
 			t.Fatalf("阻塞审查重启后丢失: %+v", recovered)
 		}
-		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusOK)
+		authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusOK)
 		stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
 		if err != nil || stored.StartupInput != nil || stored.ActivationAdmission != nil || stored.DefinitionAuthoringConfirmation != nil || physicalCalls.Load() != 8 {
 			t.Fatalf("阻塞审查获得准入或重发 provider: %+v %v", stored, err)
@@ -846,7 +941,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	if recovered.WorkspaceRevision != admitted.WorkspaceRevision || recovered.StartupInputHash != admitted.StartupInputHash {
 		t.Fatal("exact confirmation replay changed persisted admission")
 	}
-	authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", nil, http.StatusOK)
+	authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/compile", compileRequest, http.StatusOK)
 	if physicalCalls.Load() != 8 {
 		t.Fatal("restart repeated provider calls")
 	}

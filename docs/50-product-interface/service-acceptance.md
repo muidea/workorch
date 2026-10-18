@@ -73,6 +73,14 @@ STEP01 的生产 HTTP／真实进程重启验证入口为 `python3 scripts/verif
 
 浏览器交互验收必须证明：旧浏览器记录不再被读取或写入；新建向导重开为空，关闭有未保存输入或未决事务时明确提示；取消关闭保留页面内存原身份，确认关闭后迟到回执不能污染新会话。刷新后通过列表／详情读取 owner 已保存草稿，不自动创建、保存或确认。已开始的确认通过 owner 校验的 `confirmationRecovery` 参数由用户显式重放，不能从页面旧提案猜造；当前 revision 不改变既有 journal 的精确身份，首次准备仍受 CAS 约束。
 
+STEP02 只验收到持久候选和六审。`scripts/verify-workspace-candidate-step02.py` 必须自行构建并绑定源码／生产控制台／二进制，
+使用持久受限证据目录（非 `/tmp`），fixture 仅替换 provider HTTP 出站响应；live 需显式授权、配置及有界观察期限。
+精确输入门禁覆盖缺字段、延迟任务、A→B→A、模板漂移，均在 reserve 前阻塞；合法纵向链须达到 `ready_to_confirm`，
+完整源承诺与合法 DECLARED、恰好六审、完成重放零额外物理调用、独立文件仓及真实进程重启回读一致。
+负例仍须覆盖独立审查缺项、FAIL／UNKNOWN、UNVERIFIED、provider／持久切点及预算；正确阻塞不替代成功链。
+生产 Web 的正式入口、显式生成、完整候选展示、刷新／重开仍需独立交互证据；真实 provider 和人工源承诺语义复核另列，
+不能以 fixture 或组件数量代替。本步所有路径均不得产生确认、正式 Goal/DoD、准入或 Run 副作用。
+
 前置准备失败验收须使用本地 mock／file-backed owners，证明资源不存在／路径拒绝／大小边界、配置／请求构造及确定预算拒绝在 reserve 前被准确保存；原始 bytes、SHA256、非 UTF-8 和超限未保存说明往返一致。相同失败重复 compile 不增加诊断数或 revision，迟到新失败不得跨 input／template／目标写入；修复资源后同输入显式 compile 可以继续，已有 reserve 未决仍不重发 provider。独立诊断 GET 不调用 provider、不推进确认或创建 Run，包含当前和归档诊断的文件均为 0600；诊断保存失败和集合满必须明确报告，不能假称 owner 已有可查原文。Web 组件验收还须证明受理后 15 秒观察的截止不依赖 GET 成功：连续查询失败或挂起也会结束该观察，仅展示最后一次已知 owner 状态，不猜测后台完成／停止，不自动重发，迟到与跨会话回执仍被隔离；文本解码须保留 UTF-8 BOM（`ignoreBOM: true`），bytes／SHA256 与下载原字节不变；无效 UTF-8 不得替换字符伪装为文本，但已校验原始字节仍可下载。Authoring 失败诊断可分别携带`providerDocument`、`providerWire`与`providerCause`观测事实：providerCause表示transport leaf原始错误bytes，不是parseError安全分类；请求URL包装不保存、不清洗leaf，只能通过受限diagnostic原文读取。三个观测字段各自具有observed/complete/saved/observedBytes/sha256/reason事实；原始内容只在独立读取时带`contentBase64`。UI必须区分未观察、部分观察与未保存，不得把旧 payload（包括空 payload）视为 provider 输出；只对确实观察到并保存的 bytes 核对字节数、SHA-256，使用 fatal UTF-8 解码并保留 BOM，无效文本仍允许下载已校验原字节。parseError安全类别与provider document/wire/cause原始观测是分离数据，不得互相代替或合并hash。
 
 只读进度验收须证明 active 空 Workspace 和已准入无 Run 不显示正式结果完成；旧 accepted Result 不完成 successor，draft／rejected／superseded／accepted slice 或仅 Artifact 也不得完成。成功必须匹配当前适用 Run 的 exact terminal Result 与 startup seal；Runtime overlay、TaskProgress 和 compressed context 使用同一最终事实，不从 terminal 状态或结果数量补造完成。

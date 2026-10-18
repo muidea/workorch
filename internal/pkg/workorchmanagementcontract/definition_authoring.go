@@ -117,10 +117,20 @@ type DefinitionAuthoringConfirm struct {
 	ExpectedWorkspaceRevision uint64 `json:"expectedWorkspaceRevision"`
 }
 
+// DefinitionAuthoringCompile binds an explicit generation intent to the input
+// and immutable template snapshot actually displayed to the operator. Workspace
+// revision is intentionally absent: ledger writes do not revise authoring input.
+type DefinitionAuthoringCompile struct {
+	ExpectedInputHash            string `json:"expectedInputHash"`
+	ExpectedTemplateSnapshotHash string `json:"expectedTemplateSnapshotHash"`
+}
+
 type DefinitionAuthoringResource struct {
 	ID           string `json:"id"`
 	Ref          string `json:"ref"`
 	SnapshotHash string `json:"snapshotHash"`
+	Required     bool   `json:"required"`
+	Available    bool   `json:"available"`
 }
 
 type DefinitionAuthoringItem struct {
@@ -150,6 +160,12 @@ type DefinitionAuthoringReview struct {
 
 type DefinitionAuthoringProposal struct {
 	GoalText                string                                      `json:"goalText"`
+	Version                 uint32                                      `json:"version"`
+	GoalItemRef             string                                      `json:"goalItemRef"`
+	GoalTextHash            string                                      `json:"goalTextHash"`
+	Dimensions              []DefinitionAuthoringDimension              `json:"dimensions"`
+	Requirements            []DefinitionAuthoringRequirement            `json:"requirements"`
+	Obligations             []DefinitionAuthoringObligation             `json:"obligations"`
 	Items                   []DefinitionAuthoringItem                   `json:"items"`
 	Resources               []DefinitionAuthoringResource               `json:"resources,omitempty"`
 	Verifications           []DefinitionAuthoringVerification           `json:"verifications,omitempty"`
@@ -159,6 +175,30 @@ type DefinitionAuthoringProposal struct {
 	ProposalHash            string                                      `json:"proposalHash"`
 	SpecificationHash       string                                      `json:"specificationHash,omitempty"`
 	DerivationPermitID      string                                      `json:"derivationPermitId"`
+}
+
+type DefinitionAuthoringDimension struct {
+	ID          string   `json:"id"`
+	Required    bool     `json:"required"`
+	Activated   bool     `json:"activated"`
+	ResourceIDs []string `json:"resourceIds"`
+}
+
+type DefinitionAuthoringRequirement struct {
+	ID             string   `json:"id"`
+	DimensionID    string   `json:"dimensionId"`
+	Required       bool     `json:"required"`
+	SourceKind     string   `json:"sourceKind"`
+	SourceItemRefs []string `json:"sourceItemRefs"`
+	ResourceIDs    []string `json:"resourceIds"`
+	Text           string   `json:"text"`
+}
+
+type DefinitionAuthoringObligation struct {
+	ID            string   `json:"id"`
+	RequirementID string   `json:"requirementId"`
+	DoDItemRefs   []string `json:"dodItemRefs"`
+	Text          string   `json:"text"`
 }
 
 type DefinitionAuthoringExecutionProofMapping struct {
@@ -180,12 +220,15 @@ type DefinitionAuthoringEvidencePurposeMapping struct {
 }
 
 type DefinitionAuthoringRequestState struct {
-	PermitID    string                                 `json:"permitId"`
-	Phase       string                                 `json:"phase"`
-	ReviewKind  string                                 `json:"reviewKind,omitempty"`
-	State       string                                 `json:"state"`
-	FailureCode string                                 `json:"failureCode,omitempty"`
-	Diagnostic  *DefinitionAuthoringDiagnosticMetadata `json:"diagnostic,omitempty"`
+	RequestID           string                                 `json:"requestId"`
+	ProviderBindingHash string                                 `json:"providerBindingHash"`
+	ProposalHash        string                                 `json:"proposalHash,omitempty"`
+	PermitID            string                                 `json:"permitId"`
+	Phase               string                                 `json:"phase"`
+	ReviewKind          string                                 `json:"reviewKind,omitempty"`
+	State               string                                 `json:"state"`
+	FailureCode         string                                 `json:"failureCode,omitempty"`
+	Diagnostic          *DefinitionAuthoringDiagnosticMetadata `json:"diagnostic,omitempty"`
 }
 
 // DefinitionAuthoringView is a bounded management read model, not a submitted
@@ -203,9 +246,13 @@ type DefinitionAuthoringView struct {
 	InputRevision          uint64                                             `json:"inputRevision,omitempty"`
 	InputHash              string                                             `json:"inputHash,omitempty"`
 	TemplateID             string                                             `json:"templateId,omitempty"`
+	TemplateSnapshotHash   string                                             `json:"templateSnapshotHash,omitempty"`
 	TemplateCurrent        bool                                               `json:"templateCurrent"`
 	Resources              []DefinitionAuthoringResource                      `json:"resources,omitempty"`
 	DerivationPermitID     string                                             `json:"derivationPermitId,omitempty"`
+	DerivationRequestID    string                                             `json:"derivationRequestId,omitempty"`
+	ProviderBindingHash    string                                             `json:"providerBindingHash,omitempty"`
+	ResourceSnapshotHash   string                                             `json:"resourceSnapshotHash,omitempty"`
 	Requests               []DefinitionAuthoringRequestState                  `json:"requests,omitempty"`
 	PreparationDiagnostics []DefinitionAuthoringPreparationDiagnosticMetadata `json:"preparationDiagnostics,omitempty"`
 	Proposal               *DefinitionAuthoringProposal                       `json:"proposal,omitempty"`
