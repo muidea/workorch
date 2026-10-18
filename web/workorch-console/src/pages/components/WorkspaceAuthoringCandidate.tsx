@@ -23,10 +23,13 @@ export function WorkspaceAuthoringCandidate({ workspaceId, onClose }: { workspac
   const inFlight = useRef(false);
   const preparation = useRef(new AuthoringAcceptedPreparationObservation());
   const acceptedInput = useRef('');
+  const acceptedFromPreparationFailure = useRef(false);
   const observe = (next: DefinitionAuthoringView, id: string) => {
     if (next.workspaceId !== id) throw new Error('候选查询身份不匹配，保持待核对');
     const status = preparation.current.observe(next);
-    if (status.freshLedger || acceptedInput.current && acceptedInput.current !== next.inputHash || !['draft', 'preparation_failed'].includes(next.state)) setAccepted(false);
+    // 首次生成的新准备失败已是 owner 结果；只有从旧失败显式恢复时才等待新诊断。
+    const firstPreparationFailure = next.state === 'preparation_failed' && !acceptedFromPreparationFailure.current;
+    if (status.freshLedger || firstPreparationFailure || acceptedInput.current && acceptedInput.current !== next.inputHash || !['draft', 'preparation_failed'].includes(next.state)) setAccepted(false);
     setObservingPreparation(status.active);
     setObservationExpired(status.exhausted);
     setView(current => mergeAuthoringObservation(current, next));
@@ -36,6 +39,7 @@ export function WorkspaceAuthoringCandidate({ workspaceId, onClose }: { workspac
     queries.current.invalidate();
     preparation.current = new AuthoringAcceptedPreparationObservation();
     acceptedInput.current = '';
+    acceptedFromPreparationFailure.current = false;
     inFlight.current = false;
     setView(undefined); setFailure(''); setAccepted(false); setBusy(false);
     setObservingPreparation(false); setObservationExpired(false);
@@ -100,6 +104,7 @@ export function WorkspaceAuthoringCandidate({ workspaceId, onClose }: { workspac
       if (next.inputHash !== baseline.inputHash || next.templateSnapshotHash !== baseline.templateSnapshotHash) throw new Error('生成回执与已查看输入不匹配，请只读核对服务端；不会自动生成新版本');
       setAccepted(Boolean(next.compilationAccepted));
       acceptedInput.current = baseline.inputHash || '';
+      acceptedFromPreparationFailure.current = baseline.state === 'preparation_failed';
       if (next.compilationAccepted) preparation.current.begin(baseline);
       observe(next, workspaceId);
     } catch (error) {

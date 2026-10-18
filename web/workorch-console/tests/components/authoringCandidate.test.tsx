@@ -17,10 +17,15 @@ const ready = (): DefinitionAuthoringView => ({ ...draft(), workspaceRevision: 2
 const wrap = (id?: string) => <StyleProvider container={document.createElement('div')}><ConfigProvider theme={{ hashed: false, token: { motion: false } }}><App><WorkspaceAuthoringCandidate workspaceId={id} onClose={vi.fn()} /></App></ConfigProvider></StyleProvider>;
 const forbidden = () => { expect(workorchApi.createDefinitionAuthoring).not.toHaveBeenCalled(); expect(workorchApi.saveDefinitionAuthoring).not.toHaveBeenCalled(); expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled(); expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled(); };
 const generateButton = () => screen.getByRole('button', { name: '生成已保存输入的合同候选' });
+const recoveryButton = () => screen.getByRole('button', { name: '显式恢复前置准备' }) as HTMLButtonElement;
+const preparationFailed = (revision = 2): DefinitionAuthoringView => ({ ...draft(), workspaceRevision: revision, state: 'preparation_failed', preparationDiagnostics: [{
+  diagnosticId: `preparation-${revision}`, workspaceId: 'ws', inputHash: 'input-1', templateSnapshotHash: 'template-exact', observedWorkspaceRevision: revision,
+  stage: 'derivation', targetRequestId: 'derive-request', phaseCode: 'provider_unavailable', causeSHA256: 'cause-hash', causeBytes: 0, causeSaved: false, current: true,
+}] });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { resolve, promise }; }
 
 describe('STEP02 只读候选正式入口', () => {
-  beforeEach(() => { vi.clearAllMocks(); vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(draft()); });
+  beforeEach(() => { vi.resetAllMocks(); vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(draft()); });
   afterEach(() => { cleanup(); vi.useRealTimers(); });
   it('开页和刷新只读；显式生成提交精确前置身份，双击不重复', async () => {
     const pending = deferred<DefinitionAuthoringView>();
@@ -50,6 +55,59 @@ describe('STEP02 只读候选正式入口', () => {
     expect(screen.queryByText(/候选已达到 ready_to_confirm/)).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
     expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(2);
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1); forbidden();
+  });
+  it('首次受理后轮询读到准备失败，解除受理锁；仅显式恢复且保留精确输入身份', async () => {
+    vi.useFakeTimers();
+    const failed = preparationFailed();
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValueOnce(draft()).mockResolvedValue(failed);
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValueOnce({ ...draft(), compilationAccepted: true }).mockResolvedValueOnce({ ...failed, compilationAccepted: true });
+    render(wrap('ws')); await act(async () => {});
+    await act(async () => { fireEvent.click(generateButton()); });
+    expect((generateButton() as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(recoveryButton().disabled).toBe(false);
+    expect(screen.queryByText(/任务已受理，不等于生成成功/)).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(2);
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1);
+    await act(async () => { fireEvent.click(recoveryButton()); fireEvent.click(recoveryButton()); });
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(2);
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenLastCalledWith('ws', { expectedInputHash: 'input-1', expectedTemplateSnapshotHash: 'template-exact' });
+    expect(recoveryButton().disabled).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(recoveryButton().disabled).toBe(true); // 同一旧诊断不解除新受理锁。
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(preparationFailed(3));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(recoveryButton().disabled).toBe(false);
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(2); forbidden();
+  });
+  it.each([false, true])('首次compile直接返回准备失败（accepted=%s）仍允许显式恢复', async compilationAccepted => {
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValue({ ...preparationFailed(), compilationAccepted });
+    render(wrap('ws')); await act(async () => {});
+    await act(async () => { fireEvent.click(generateButton()); });
+    expect(recoveryButton().disabled).toBe(false);
+    expect(screen.queryByText(/任务已受理，不等于生成成功/)).toBeNull();
+    expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1); forbidden();
+  });
+  it('已从准备失败显式恢复时，观察窗到期及旧诊断刷新不授予再次受理', async () => {
+    vi.useFakeTimers();
+    const failed = preparationFailed();
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(failed);
+    vi.mocked(workorchApi.compileDefinitionAuthoring).mockResolvedValue({ ...failed, compilationAccepted: true });
+    render(wrap('ws')); await act(async () => {});
+    expect(recoveryButton().disabled).toBe(false);
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockRejectedValue(new Error('owner读取失败'));
+    await act(async () => { fireEvent.click(recoveryButton()); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(screen.getByText(/前置准备观察窗结束/)).toBeTruthy();
+    expect(recoveryButton().disabled).toBe(true);
+    const reads = vi.mocked(workorchApi.readDefinitionAuthoring).mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledTimes(reads);
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(failed);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '只读刷新' })); });
+    expect(recoveryButton().disabled).toBe(true);
     expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1); forbidden();
   });
   it('过期409只回读新版本，不自动重编或保存', async () => {
