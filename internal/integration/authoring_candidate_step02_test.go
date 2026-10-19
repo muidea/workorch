@@ -20,6 +20,14 @@ import (
 // LLM adapter, EventHub, Workspace/File owners and file persistence are real.
 // STEP02 stops at readback; no confirmation or Runtime activation is submitted.
 func TestAuthoringCandidateStep02ProductionOwners(t *testing.T) {
+	testAuthoringProductionOwners(t, false)
+}
+
+func TestAuthoringConfirmationStep03ProductionOwners(t *testing.T) {
+	testAuthoringProductionOwners(t, true)
+}
+
+func testAuthoringProductionOwners(t *testing.T, confirm bool) {
 	ctx := context.Background()
 	storage, directory := t.TempDir(), t.TempDir()
 	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(storage)
@@ -121,6 +129,30 @@ func TestAuthoringCandidateStep02ProductionOwners(t *testing.T) {
 	}
 	assertNoRun(t, repos)
 	assertEmptyDeliverable(t, directory)
+	if confirm {
+		exact := management.DefinitionAuthoringConfirm{InputHash: ready.Authoring.InputHash, DerivationPermitID: ready.Authoring.DerivationPermitID, ProposalHash: p.ProposalHash, SpecificationHash: p.SpecificationHash, ExpectedWorkspaceRevision: ready.Authoring.WorkspaceRevision}
+		var admitted, observed, repeated response
+		productionJSON(t, client, http.MethodPost, path+"/confirm", exact, &admitted)
+		productionJSON(t, client, http.MethodGet, path, nil, &observed)
+		productionJSON(t, client, http.MethodPost, path+"/confirm", exact, &repeated)
+		if admitted.Authoring.State != "admitted" || admitted.Authoring.ActivationState != "eligible" || admitted.Authoring.StartupInputHash == "" || !reflect.DeepEqual(admitted, observed) || !reflect.DeepEqual(admitted, repeated) {
+			t.Fatalf("STEP03 exact eligible/readback/replay mismatch: %+v", admitted.Authoring)
+		}
+		stored, err = workorchrepo.NewWorkspaceScopedFileRepositorySet(storage).Workspaces.Get(ctx, common.WorkspaceID(ready.Authoring.WorkspaceID))
+		if err != nil || stored.DefinitionAuthoringConfirmation == nil || stored.StartupInput == nil || stored.ActivationAdmission == nil || len(stored.DefinitionAdmissionCandidates) != 1 {
+			t.Fatalf("STEP03 durable facts missing: %v", err)
+		}
+		journal := stored.DefinitionAuthoringConfirmation
+		candidate := stored.DefinitionAdmissionCandidates[0]
+		if journal.Phase != workspace.DefinitionAuthoringConfirmationMaterialized || journal.InputHash != exact.InputHash || journal.ProposalHash != exact.ProposalHash || journal.SpecificationHash != exact.SpecificationHash || candidate.AuthoringRef == nil || candidate.AuthoringRef.SpecificationHash != journal.SpecificationHash || candidate.CandidateHash != admitted.Authoring.CandidateHash || stored.StartupInput.StartupInputHash != admitted.Authoring.StartupInputHash || stored.ActivationAdmission.StartupInputHash != stored.StartupInput.StartupInputHash || stored.ActivationAdmission.DefinitionRevision != stored.StartupInput.DefinitionRevision {
+			t.Fatal("STEP03 journal/candidate/startup lineage mismatch")
+		}
+		if !reflect.DeepEqual(beforeCalls, provider.snapshot()) {
+			t.Fatal("STEP03 confirmation/replay called provider")
+		}
+		assertNoRun(t, repos)
+		assertEmptyDeliverable(t, directory)
+	}
 	t.Logf("STEP02 input=%s template=%s proposal=%s specification=%s slots=%v", ready.Authoring.InputHash, ready.Authoring.TemplateSnapshotHash, p.ProposalHash, p.SpecificationHash, beforeCalls)
 }
 

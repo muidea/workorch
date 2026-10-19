@@ -13,6 +13,7 @@ import { WorkspaceSetupModal } from './components/WorkspaceSetupModal';
 import { AuthoringSummary } from './components/AuthoringSummary';
 import { WorkspaceDraftDetails } from './components/WorkspaceDraftDetails';
 import { WorkspaceAuthoringCandidate } from './components/WorkspaceAuthoringCandidate';
+import { WorkspaceAuthoringConfirmation } from './components/WorkspaceAuthoringConfirmation';
 
 type WorkspaceBoardCardItem = {
   workspace: Workspace;
@@ -30,6 +31,7 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
   const [workspaceSetupOpen, setWorkspaceSetupOpen] = useState(false);
   const [draftWorkspaceId, setDraftWorkspaceId] = useState<string>();
   const [candidateWorkspaceId, setCandidateWorkspaceId] = useState<string>();
+  const [confirmationWorkspaceId, setConfirmationWorkspaceId] = useState<string>();
   const boardRequest = useRef(0);
   const mounted = useRef(true);
 
@@ -187,7 +189,8 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
         onCreated={handleWorkspaceCreated}
       />
       <WorkspaceDraftDetails workspaceId={draftWorkspaceId} onClose={() => setDraftWorkspaceId(undefined)} onOpenCandidate={setCandidateWorkspaceId} />
-      <WorkspaceAuthoringCandidate workspaceId={candidateWorkspaceId} onClose={() => setCandidateWorkspaceId(undefined)} />
+      <WorkspaceAuthoringCandidate workspaceId={candidateWorkspaceId} onClose={() => setCandidateWorkspaceId(undefined)} onOpenConfirmation={setConfirmationWorkspaceId} />
+      <WorkspaceAuthoringConfirmation workspaceId={confirmationWorkspaceId} onClose={() => setConfirmationWorkspaceId(undefined)} />
     </PageContainer>
   );
 }

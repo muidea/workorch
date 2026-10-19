@@ -100,6 +100,8 @@ export type DefinitionAuthoringView = {
   providerBindingHash?: string;
   resourceSnapshotHash?: string;
   confirmationPhase?: string;
+  candidateHash?: string;
+  admissionDisposition?: string;
   activationState?: string;
   blockingTicketId?: string;
   admissionViolationCode?: string;

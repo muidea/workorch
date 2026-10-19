@@ -34,11 +34,22 @@ func (b *Biz) ReadDefinitionAuthoringView(ctx context.Context, id common.Workspa
 		if err != nil {
 			return result, nil // Workspace candidate remains queryable while Decision is unavailable.
 		}
-		if ticket != nil && ticket.ID == identity.TicketID && ticket.WorkspaceID == id && ticket.RunID == "" && ticket.DefinitionClarification != nil && ticket.DefinitionClarification.Class == decisionmodel.DefinitionClarificationWorkspacePreSeal && ticket.DefinitionClarification.OpenBindingHash == identity.BindingHash() && ticket.DefinitionClarification.CandidateID == identity.CandidateID && ticket.DefinitionClarification.CandidateRevision == identity.CandidateRevision && ticket.DefinitionClarification.CandidateHash == identity.CandidateHash && ticket.DefinitionClarification.ViolationOrGapCode == string(identity.ViolationCode) && ticket.DefinitionClarification.CanonicalSignatureVersion == identity.CanonicalSignatureVersion && ticket.DefinitionClarification.CanonicalSignature == identity.CanonicalSignature && ticket.DefinitionClarification.CanonicalSignatureHash == identity.CanonicalSignatureHash && ticket.DefinitionClarification.RequiredActionKind == identity.RequiredActionKind && slices.Equal(ticket.DefinitionClarification.OffendingRefs, identity.OffendingRefs) {
+		if authoringTicketDeliveryComplete(ticket) && ticket.ID == identity.TicketID && ticket.WorkspaceID == id && ticket.RunID == "" && ticket.DefinitionClarification.Class == decisionmodel.DefinitionClarificationWorkspacePreSeal && ticket.DefinitionClarification.OpenBindingHash == identity.BindingHash() && ticket.DefinitionClarification.CandidateID == identity.CandidateID && ticket.DefinitionClarification.CandidateRevision == identity.CandidateRevision && ticket.DefinitionClarification.CandidateHash == identity.CandidateHash && ticket.DefinitionClarification.ViolationOrGapCode == string(identity.ViolationCode) && ticket.DefinitionClarification.CanonicalSignatureVersion == identity.CanonicalSignatureVersion && ticket.DefinitionClarification.CanonicalSignature == identity.CanonicalSignature && ticket.DefinitionClarification.CanonicalSignatureHash == identity.CanonicalSignatureHash && ticket.DefinitionClarification.RequiredActionKind == identity.RequiredActionKind && slices.Equal(ticket.DefinitionClarification.OffendingRefs, identity.OffendingRefs) {
 			result.BlockingTicketID = string(identity.TicketID)
 		}
 	}
 	return result, nil
+}
+
+// A persisted ticket without its owner delivery marker is still a recoverable
+// cut, not completed delivery. GET never repairs that cut. Retired or partially
+// resolved tickets cannot be advertised as the current open blocker either.
+func authoringTicketDeliveryComplete(ticket *decisionmodel.Ticket) bool {
+	if ticket == nil || ticket.DefinitionClarification == nil || ticket.CreatedNotificationPublishedAt == "" || ticket.State != common.DecisionTicketStateOpen || ticket.StepID != "" || ticket.ResolvedAt != "" || ticket.ResolvedBy != "" || ticket.ResolutionNotificationPublishedAt != "" {
+		return false
+	}
+	binding := ticket.DefinitionClarification
+	return binding.ResolutionID == "" && binding.ResolutionBindingHash == "" && binding.ResolutionCandidateID == "" && binding.ResolutionCandidateRevision == 0 && binding.ResolutionCandidateHash == "" && binding.AdmissionResultHash == "" && binding.DefinitionRevision == "" && binding.StartupInputHash == "" && binding.ReplacementIntentID == "" && binding.ReplacementIntentHash == "" && binding.SuccessorDefinitionRevision == "" && binding.SuccessorStartupInputHash == ""
 }
 
 // 展示只复用纯声明检查，不生成确认身份、binding 或 credit；owner 仍独立校验。

@@ -68,6 +68,7 @@ def prompt_payload(text):
 class Fixture:
     def __init__(self, root):
         self.root, self.calls, self.reviews = root, [], {}
+        self.post_paths = []  # Include rejected endpoints, e.g. unintended embedding.
         fixture = self
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_):
@@ -83,6 +84,7 @@ class Fixture:
                 (fixture.root / "provider-models-response.bin").write_bytes(wire)
                 self.wfile.write(wire)
             def do_POST(self):
+                fixture.post_paths.append(self.path)
                 if self.path != "/v1/responses":
                     self.send_error(404)
                     return

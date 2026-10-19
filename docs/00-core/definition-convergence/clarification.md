@@ -81,6 +81,21 @@ setup/activation 整体 fail-closed，仍不得创建 Run。已成功 promotion 
 资格变为 eligible 后仍由用户
 再次显式 Start/Restart，不得因 promotion 或 ticket closure 自动启动。
 
+### 已确认 authoring 的票据交付恢复
+
+已确认 authoring 的 journal 为 `materialized`，且 Workspace owner 查询已核验当前 admission candidate
+与 journal 的完整 authoring ref 一致时，若原 blocking ticket 缺失或交付尚未验证，Web 可以提供显式的
+“恢复原确认／票据交付”。仅复用既有 confirm 的五字段及原 Workspace；重开只消费 owner 投影的
+`confirmationRecovery`，不得从客户端拼造或自动选择新候选。内存中的未决原意图不得被回读的新 revision 替换。
+
+GET 只查询：Decision 不可用、原票据缺失、创建通知标记未持久化或开放生命周期不匹配时，均不得宣称票据交付完成。
+显式恢复仍由 Workspace 独立重验原 journal、candidate、当前绑定与必要栅栏，再由 Decision 创建同一确定性票据，
+或逐字段验证已持久原票据并补交创建通知。不得换 candidate、改规格、解决票据、调用模型或创建 Run。
+恢复完成仍是 `clarification_required`，不授予 eligible；其余恢复信息缺失／漂移保持只读阻塞。
+
+HTTP 409、网络中断与异常响应不证明无写入，可能发生在正式物化之后。页面必须保留原意图并 GET 对账，
+只允许显式精确重放；关闭仅停止观察，不取消后台事实。上述交付恢复不是通用修订／澄清重试入口。
+
 ## Related Contracts
 
 - execution-time implicit semantic gap：[Runtime Definition Clarification](runtime-clarification.md)

@@ -89,6 +89,12 @@ func TestAuthoringHTTPStep02CandidateReadbackWithoutConfirmation(t *testing.T) {
 	testAuthoringHTTPFileBackedScenario(t, "step02_candidate")
 }
 
+func TestAuthoringHTTPStep03TicketDeliveryRecovery(t *testing.T) {
+	for _, scenario := range []string{"step03_decision_unavailable", "step03_ticket_notification"} {
+		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
+	}
+}
+
 func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	ctx := context.Background()
 	storage, directory := t.TempDir(), t.TempDir()
@@ -112,6 +118,14 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		t.Fatal(err)
 	}
 	template := workspace.WorkspaceTemplate{ID: "http-template", Name: "模板", DoDItems: []string{"模板验收"}, ContextHints: hints}
+	if strings.HasPrefix(scenario, "step03_") {
+		values := hints.Map()
+		values["profileContracts"].(map[string]any)["generic"].(map[string]any)["deliverableExpectations"] = []any{map[string]any{"id": "required-delivery", "required": true}}
+		template.ContextHints, err = workorcheventpayload.FromMap(values)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	if scenario == "render_failure" {
 		template.DoDItems = append(template.DoDItems, strings.Repeat("模板原文", 20*1024))
 	}
@@ -119,6 +133,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		t.Fatal(err)
 	}
 	var preparationRepaired atomic.Bool
+	var decisionRestored atomic.Bool
 	configurationCause := def.NewError(def.Unexpected, "mock 配置读取失败\r\n原文 sk_test_marker\n")
 	var physicalCalls atomic.Int32
 	var missingReviewPayload []byte
@@ -145,8 +160,10 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := decision.Start(); err != nil {
-			t.Fatal(err)
+		if scenario != "step03_decision_unavailable" || decisionRestored.Load() {
+			if err := decision.Start(); err != nil {
+				t.Fatal(err)
+			}
 		}
 		file, err := fileowner.New(hub, nil)
 		if err != nil {
@@ -896,6 +913,67 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
 		if err != nil || stored.StartupInput != nil || stored.ActivationAdmission != nil || stored.DefinitionAuthoringConfirmation != nil || physicalCalls.Load() != 8 {
 			t.Fatalf("阻塞审查获得准入或重发 provider: %+v %v", stored, err)
+		}
+		assertNoRuns()
+		return
+	}
+	if strings.HasPrefix(scenario, "step03_") {
+		id := common.WorkspaceID(created.WorkspaceID)
+		bound := common.ContextWithRuntimeWorkspaceID(ctx, id)
+		if scenario == "step03_decision_unavailable" {
+			authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", confirmation, http.StatusInternalServerError)
+		} else {
+			blocked := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", confirmation, http.StatusOK)
+			if blocked.BlockingTicketID == "" {
+				t.Fatal("missing initial ticket")
+			}
+			// Reconstruct the durable ticket-created / notification-not-marked cut.
+			// Actual process-kill coverage for this cut is owned by Decision tests.
+			ticket, err := repositories.Tickets.Get(bound, common.TicketID(blocked.BlockingTicketID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ticket.CreatedNotificationPublishedAt = ""
+			if err := repositories.Tickets.Update(bound, ticket); err != nil {
+				t.Fatal(err)
+			}
+		}
+		before, err := repositories.Workspaces.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range 2 {
+			observed := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+			if observed.State != "clarification_required" || observed.ConfirmationPhase != "materialized" || observed.BlockingTicketID != "" || observed.ConfirmationRecovery == nil || observed.CandidateHash == "" {
+				t.Fatalf("missing exact blocked recovery: %+v", observed)
+			}
+		}
+		after, err := repositories.Workspaces.Get(ctx, id)
+		if err != nil || !reflect.DeepEqual(before, after) {
+			t.Fatal("GET changed blocked Workspace")
+		}
+		closeOwners()
+		decisionRestored.Store(true)
+		baseURL, routine, closeOwners = open()
+		observed := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
+		if observed.BlockingTicketID != "" {
+			t.Fatal("reopen GET repaired ticket delivery")
+		}
+		recovered := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", observed.ConfirmationRecovery, http.StatusOK)
+		if recovered.State != "clarification_required" || recovered.BlockingTicketID == "" || recovered.StartupInputHash != "" || recovered.WorkspaceRevision != before.Revision {
+			t.Fatalf("ticket recovery changed authority: %+v", recovered)
+		}
+		again := authoringHTTPRequest(t, baseURL, http.MethodPost, path+"/confirm", confirmation, http.StatusOK)
+		if !reflect.DeepEqual(recovered, again) {
+			t.Fatal("original confirmation replay changed ticket")
+		}
+		tickets, err := repositories.Tickets.ListByWorkspaceID(bound, id)
+		if err != nil || len(tickets) != 1 || string(tickets[0].ID) != recovered.BlockingTicketID || tickets[0].CreatedNotificationPublishedAt == "" || tickets[0].RunID != "" {
+			t.Fatalf("ticket delivery not unique/durable: %v", err)
+		}
+		after, err = repositories.Workspaces.Get(ctx, id)
+		if err != nil || !reflect.DeepEqual(before, after) || after.StartupInput != nil || physicalCalls.Load() != 8 {
+			t.Fatal("delivery changed Workspace/provider facts")
 		}
 		assertNoRuns()
 		return

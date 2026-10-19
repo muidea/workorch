@@ -11,7 +11,7 @@ import { AuthoringPreparationFailure } from './AuthoringPreparationFailure';
 
 // STEP02: only persisted-input queries and explicit, identity-bound compilation.
 // No local input editor, create/PUT/confirm/admission/execution path lives here.
-export function WorkspaceAuthoringCandidate({ workspaceId, onClose }: { workspaceId?: string; onClose: () => void }) {
+export function WorkspaceAuthoringCandidate({ workspaceId, onClose, onOpenConfirmation }: { workspaceId?: string; onClose: () => void; onOpenConfirmation?: (workspaceId: string) => void }) {
   const [view, setView] = useState<DefinitionAuthoringView>();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState('');
@@ -123,6 +123,7 @@ export function WorkspaceAuthoringCandidate({ workspaceId, onClose }: { workspac
   return <Modal open={Boolean(workspaceId)} title="合同候选生成与审查（STEP02）" width={960} onCancel={close} footer={<Space>
     <Button onClick={close}>关闭</Button>
     <Button disabled={busy} onClick={() => void refresh()}>只读刷新</Button>
+    {onOpenConfirmation && <Button disabled={!view || busy} onClick={() => { if (workspaceId) { close(); onOpenConfirmation(workspaceId); } }}>进入精确确认与封存</Button>}
     <Button type="primary" disabled={!canGenerate} loading={busy} onClick={() => void generate()}>{view?.state === 'preparation_failed' ? '显式恢复前置准备' : '生成已保存输入的合同候选'}</Button>
   </Space>}>
     <Space direction="vertical" style={{ width: '100%' }}>

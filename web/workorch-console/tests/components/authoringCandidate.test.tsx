@@ -108,6 +108,10 @@ describe('STEP02 只读候选正式入口', () => {
     vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(failed);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '只读刷新' })); });
     expect(recoveryButton().disabled).toBe(true);
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(preparationFailed(3));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '只读刷新' })); });
+    expect(recoveryButton().disabled).toBe(false);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(workorchApi.compileDefinitionAuthoring).toHaveBeenCalledTimes(1); forbidden();
   });
   it('过期409只回读新版本，不自动重编或保存', async () => {

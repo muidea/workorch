@@ -37,6 +37,7 @@ SOURCE_FILES = (
     "scripts/build_identity.py",
     "scripts/verify-workspace-draft-step01.py",
     "scripts/verify-workspace-candidate-step02.py",
+    "scripts/verify-workspace-confirmation-step03.py",
 )
 GENERATED_EXACT = ("web/consoleassets/dist",)
 EXCLUDED_DIR_NAMES = {

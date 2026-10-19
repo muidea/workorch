@@ -1,7 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { enterAuthoringWorkspace, AuthoringAcceptedPreparationObservation, AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringConfirmationRecovery, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling } from '../src/workspaceAuthoring.ts';
+import { enterAuthoringWorkspace, AuthoringAcceptedPreparationObservation, AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS, AuthoringQueryFence, mergeAuthoringObservation, AuthoringSessionFence, authoringCanEnterAdmitted, authoringCanConfirm, authoringCanReplayConfirmation, authoringConfirmationRecovery, authoringTicketDeliveryRecovery, authoringCanRecoverExact, authoringRequireNoPendingConfirmation, authoringNeedsSave, authoringNeedsPolling } from '../src/workspaceAuthoring.ts';
 import type { DefinitionAuthoringView } from '../src/types.ts';
+
+test('STEP03 materialized 缺票据的窄恢复不扩大通用澄清重试', () => {
+  const exact = { inputHash: 'input', derivationPermitId: 'permit', proposalHash: 'proposal', specificationHash: 'spec', expectedWorkspaceRevision: 10 };
+  const view = { ...ready(), workspaceRevision: 10, state: 'clarification_required', confirmationPhase: 'materialized', candidateHash: 'candidate', admissionDisposition: 'clarification_required', admissionViolationCode: 'profile_gap', confirmationRecovery: exact };
+  assert.equal(authoringConfirmationRecovery(view, 'ws'), undefined);
+  assert.deepEqual(authoringTicketDeliveryRecovery(view, 'ws'), exact);
+  assert.equal(authoringCanRecoverExact(view, 'ws', { ...exact, expectedWorkspaceRevision: 8 }), true);
+  for (const patch of [{ confirmationPhase: 'prepared' }, { candidateHash: '' }, { admissionDisposition: 'admitted_all_of' }, { admissionViolationCode: '' }, { templateCurrent: false }, { blockingTicketId: 'verified-ticket' }, { confirmationRecovery: { ...exact, expectedWorkspaceRevision: 11 } }, { confirmationRecovery: { ...exact, proposalHash: 'forged' } }]) {
+    assert.equal(authoringTicketDeliveryRecovery({ ...view, ...patch }, 'ws'), undefined);
+  }
+  assert.equal(authoringTicketDeliveryRecovery(view, 'other'), undefined);
+  assert.equal(authoringCanRecoverExact(view, 'ws', { ...exact, expectedWorkspaceRevision: NaN }), false);
+});
 
 test('父级刷新期间关闭或重开创作会话不得迟到导航', async () => {
   const session = new AuthoringSessionFence();
@@ -134,6 +147,8 @@ test('准备观察独立截止幂等，重复 begin 只重置页面期限而不�
   assert.equal(observation.expire(5000 + AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS), true);
   assert.equal(observation.expire(5000 + AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS), false);
   assert.equal(observation.observe(failed, 30_000).active, false);
+  assert.equal(observation.observe(failed, 30_001).freshLedger, false);
+  assert.equal(observation.observe({ ...failed, state: 'reviewing' }, 30_002).freshLedger, true);
   assert.equal(authoringNeedsPolling(failed), false);
   observation.begin(failed, 40_000);
   assert.equal(observation.observe({ ...failed, state: 'reviewing' }, 40_001).freshLedger, true);

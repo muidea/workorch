@@ -7,6 +7,7 @@ import type { Approval, Artifact, ArtifactContinuation, ArtifactPage, ContextBun
 import { workorchApi } from '../api';
 import { WorkspaceAuthoringEditor } from './components/WorkspaceAuthoringEditor';
 import { WorkspaceAuthoringCandidate } from './components/WorkspaceAuthoringCandidate';
+import { WorkspaceAuthoringConfirmation } from './components/WorkspaceAuthoringConfirmation';
 import { AuthoringSummary } from './components/AuthoringSummary';
 import { useSSE } from '../hooks';
 import { modelLabels } from '../utils/constants';
@@ -102,6 +103,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [loading, setLoading] = useState(false);
   const [authoringOpen, setAuthoringOpen] = useState(false);
   const [candidateOpen, setCandidateOpen] = useState(false);
+  const [confirmationWorkspaceId, setConfirmationWorkspaceId] = useState<string>();
   const [activationOpen, setActivationOpen] = useState(false);
   const [activationLoading, setActivationLoading] = useState(false);
   const [activationIntent, setActivationIntent] = useState<'resume' | 'restart'>('resume');
@@ -2156,7 +2158,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
         </Form>
       </Modal>
       <WorkspaceAuthoringEditor open={authoringOpen} workspaceId={workspaceId} onClose={() => setAuthoringOpen(false)} onAdmitted={async () => { if (workspaceId) await loadWorkspaceContext(workspaceId); }} />
-      <WorkspaceAuthoringCandidate workspaceId={candidateOpen ? workspaceId : undefined} onClose={() => setCandidateOpen(false)} />
+      <WorkspaceAuthoringCandidate workspaceId={candidateOpen ? workspaceId : undefined} onClose={() => setCandidateOpen(false)} onOpenConfirmation={setConfirmationWorkspaceId} />
+      <WorkspaceAuthoringConfirmation workspaceId={confirmationWorkspaceId} onClose={() => setConfirmationWorkspaceId(undefined)} />
       <Modal
         title={activationIntent === 'restart' ? '创建新的工作空间执行' : '恢复当前工作空间执行'}
         open={activationOpen}

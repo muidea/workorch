@@ -69,6 +69,19 @@ export function authoringConfirmationRecovery(view?: DefinitionAuthoringView, wo
   return { ...exact };
 }
 
+// Only the owner-validated materialized authoring candidate can redeliver its
+// original deterministic ticket. This is not a generic clarification retry.
+export function authoringTicketDeliveryRecovery(view?: DefinitionAuthoringView, workspaceId?: string): AuthoringConfirmation | undefined {
+  const exact = view?.confirmationRecovery;
+  if (!view || !workspaceId || view.workspaceId !== workspaceId || view.state !== 'clarification_required' || view.confirmationPhase !== 'materialized' || !view.candidateHash || view.admissionDisposition !== 'clarification_required' || !view.admissionViolationCode || view.blockingTicketId || !view.templateCurrent || !exact || !Number.isSafeInteger(exact.expectedWorkspaceRevision) || exact.expectedWorkspaceRevision <= 0 || exact.expectedWorkspaceRevision !== view.workspaceRevision) return undefined;
+  if (!exact.inputHash || !exact.derivationPermitId || !exact.proposalHash || !exact.specificationHash || exact.inputHash !== view.inputHash || exact.derivationPermitId !== view.derivationPermitId || exact.proposalHash !== view.proposal?.proposalHash || exact.specificationHash !== view.proposal?.specificationHash) return undefined;
+  return { ...exact };
+}
+
+export function authoringCanRecoverExact(view: DefinitionAuthoringView, workspaceId: string, exact: AuthoringConfirmation): boolean {
+  return Boolean(Number.isSafeInteger(view.workspaceRevision) && Number.isSafeInteger(exact.expectedWorkspaceRevision) && exact.expectedWorkspaceRevision > 0 && exact.expectedWorkspaceRevision <= view.workspaceRevision && (authoringCanReplayConfirmation(view, { workspaceId, pendingConfirmation: exact }) || authoringTicketDeliveryRecovery(view, workspaceId) && exact.inputHash === view.inputHash && exact.derivationPermitId === view.derivationPermitId && exact.proposalHash === view.proposal?.proposalHash && exact.specificationHash === view.proposal?.specificationHash));
+}
+
 export function authoringCanReplayConfirmation(view?: DefinitionAuthoringView, recovery?: AuthoringTransactionRecovery): boolean {
   const exact = recovery?.pendingConfirmation;
   return Boolean(view && exact && recovery?.workspaceId === view.workspaceId && ['ready_to_confirm', 'confirming', 'admitting'].includes(view.state) && view.templateCurrent && exact.inputHash === view.inputHash && exact.derivationPermitId === view.derivationPermitId && exact.proposalHash === view.proposal?.proposalHash && exact.specificationHash === view.proposal?.specificationHash && (view.state !== 'ready_to_confirm' || authoringCanConfirm(view)));
@@ -108,11 +121,13 @@ export class AuthoringAcceptedPreparationObservation {
   }
 
   observe(view: DefinitionAuthoringView, now = Date.now()): { active: boolean; freshLedger: boolean; exhausted: boolean } {
-    if (!this.active || view.workspaceId !== this.workspaceId || (view.inputHash || '') !== this.inputHash) return { active: false, freshLedger: false, exhausted: false };
+    // 截止只停止主动观察；保留原诊断基线供后续显式 GET 核对，不凭截止解除受理锁。
+    if (this.baselineState !== 'preparation_failed' || view.workspaceId !== this.workspaceId || (view.inputHash || '') !== this.inputHash) return { active: false, freshLedger: false, exhausted: false };
     const diagnosticIds = currentPreparationLedgerSignature(view);
     const freshLedger = view.state !== this.baselineState || diagnosticIds !== this.baselineDiagnosticIds;
     if (freshLedger) {
       this.active = false;
+      this.baselineState = '';
       return { active: false, freshLedger: true, exhausted: false };
     }
     const exhausted = now >= this.deadline;
