@@ -24,6 +24,17 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 describe('STEP03 独立精确确认', () => {
   beforeEach(() => { vi.resetAllMocks(); vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(ready()); });
   afterEach(cleanup);
+  it('eligible重开仅说明确认操作不启动Run，不推断当前是否已有Run', async () => {
+    // Authoring/admission can stay eligible after a separate execution intent.
+    // This read model has no Run inventory; reopening must not claim it is empty.
+    vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue(admitted());
+    render(wrap('ws')); await act(async () => {});
+    expect(screen.getByText('合同已确认、封存且 eligible；确认操作不会启动 Run。本阶段不表示当前运行资源检查或完整 M3 已完成。')).toBeTruthy();
+    expect(screen.queryByText(/尚无 Run|当前无 Run/)).toBeNull();
+    expect(confirmButton().disabled).toBe(true);
+    expect(workorchApi.readDefinitionAuthoring).toHaveBeenCalledExactlyOnceWith('ws');
+    expect(workorchApi.confirmDefinitionAuthoring).not.toHaveBeenCalled(); forbidden();
+  });
   it('开页刷新只读；审阅后仅五字段确认，双击单飞，成功独立回读', async () => {
     const post = deferred<DefinitionAuthoringView>();
     vi.mocked(workorchApi.confirmDefinitionAuthoring).mockReturnValue(post.promise);

@@ -103,7 +103,7 @@ export function WorkspaceAuthoringConfirmation({ workspaceId, onClose }: { works
         ]} />
         <pre style={{ whiteSpace: 'pre-wrap' }} aria-label="已保存 Goal 原文">{view.input?.goalText}</pre>
         {view.proposal && <AuthoringCandidateProposal proposal={view.proposal} />}
-        {admitted && <Alert type="success" message="合同已确认、封存且 eligible；尚无 Run。本阶段不表示当前运行资源检查或完整 M3 已完成。" />}
+        {admitted && <Alert type="success" message="合同已确认、封存且 eligible；确认操作不会启动 Run。本阶段不表示当前运行资源检查或完整 M3 已完成。" />}
         {['confirming', 'admitting'].includes(view.state) && <Alert type="info" message="确认／准入尚在进行或等待恢复；可只读刷新，恢复必须显式使用原意图。" />}
         {view.activationState === 'pending_clarification_resolution' && <Alert type="warning" message="已有封存事实，但仍等待精确澄清 resolution；不是 eligible。" />}
         {view.state === 'clarification_required' && <Alert type="warning" message={`准入阻塞：${view.admissionViolationCode || '未提供原因'}`} description={<><div>offending refs：{view.admissionOffendingRefs?.join('、') || '-'}</div><div>{view.blockingTicketId ? `已验证 ticket：${view.blockingTicketId}` : '票据交付未完成／尚未验证；只读查询不会补交。'}</div><div>已完成物化不会回滚；恢复票据不改约束、不解决票据，也不授予 eligible。</div></>} />}

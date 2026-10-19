@@ -26,6 +26,28 @@ def confirmation(view):
     return {"inputHash": view["inputHash"], "derivationPermitId": view["derivationPermitId"], "proposalHash": view["proposal"]["proposalHash"], "specificationHash": view["proposal"]["specificationHash"], "expectedWorkspaceRevision": view["workspaceRevision"]}
 
 
+def validate_materialized_dod(view, journal, candidate, dod):
+    # Formal order is the reviewed source order; candidate inputs are separately
+    # normalized by ref. Compare both without sorting or rewriting formal text.
+    items = view["proposal"]["items"]
+    expected = [item["text"] for item in items]
+    require(expected and dod["items"] == journal["DoD"]["Items"] == expected, "formal DoD changed reviewed item text/order")
+    require(dod["workspaceId"] == journal["DoD"]["WorkspaceID"] == view["workspaceId"] and dod["id"] == journal["DoD"]["ID"] and dod["definitionRevision"] == journal["DoD"]["DefinitionRevision"], "formal DoD identity differs from journal")
+    reviewed = [(item["ref"], item["text"]) for item in items]
+    admitted = [(item["CandidateItemRef"], item["Text"]) for item in candidate["DoDInputs"]]
+    require(len({ref for ref, _ in reviewed}) == len(reviewed) and sorted(admitted) == sorted(reviewed), "candidate DoD lost exact reviewed source mapping")
+
+
+def validate_sealed_activation(view, original, candidate, startup, activation):
+    require(candidate["WorkspaceID"] == startup["WorkspaceID"] == activation["WorkspaceID"] == view["workspaceId"], "sealed activation scope mismatch")
+    for field in ("CandidateID", "CandidateRevision", "CandidateHash"):
+        require(activation[field] == candidate[field], "activation does not bind selected candidate: " + field)
+    require(activation["State"] == "eligible", "persisted activation not eligible")
+    require(startup["SpecificationHash"] == original["specificationHash"], "startup specification differs from confirmed specification")
+    require(startup["StartupInputHash"] == activation["StartupInputHash"] == view["startupInputHash"], "startup identity mismatch")
+    require(startup["DefinitionRevision"] == activation["DefinitionRevision"], "definition revision mismatch")
+
+
 def inspect(verification, view, original, blocked):
     workspace_id = view["workspaceId"]
     record = step02.workspace_record(json.loads((verification.data / "internal/workspaces" / workspace_id / "workspace.json").read_bytes()), workspace_id)
@@ -44,6 +66,7 @@ def inspect(verification, view, original, blocked):
     dods = verification.request("GET", path + "/dods")["dods"]
     require(len(goals) == 1 and len(dods) == 1, "formal materialization duplicated/missing")
     require(goals[0]["text"] == step02.GOAL and journal["Goal"]["Text"] == step02.GOAL, "original Goal changed")
+    validate_materialized_dod(view, journal, candidate, dods[0])
     require(verification.request("GET", path + "/runs")["runs"] == [] and not record.get("ActiveRunID"), "STEP03 created a Run")
     directory = Path(record["DeliverableDirectory"])
     require(directory.is_dir() and not any(directory.iterdir()), "STEP03 dispatched a deliverable effect")
@@ -52,8 +75,7 @@ def inspect(verification, view, original, blocked):
     else:
         startup, activation = record["StartupInput"], record["ActivationAdmission"]
         require(view["state"] == "admitted" and view["activationState"] == "eligible" and view["startupInputHash"], "not eligible")
-        require(startup["StartupInputHash"] == activation["StartupInputHash"] == view["startupInputHash"], "startup identity mismatch")
-        require(startup["DefinitionRevision"] == activation["DefinitionRevision"], "definition revision mismatch")
+        validate_sealed_activation(view, original, candidate, startup, activation)
     return {"journal": journal, "candidate": candidate, "startup": record.get("StartupInput"), "activation": record.get("ActivationAdmission"), "goals": goals, "dods": dods}
 
 
