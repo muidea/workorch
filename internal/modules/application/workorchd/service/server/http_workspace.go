@@ -20,6 +20,7 @@ import (
 )
 
 func registerWorkspaceReadRoutes(router engine.RouteRegistry, state *serverState) {
+	registerStartupPreparationReadRoutes(router, state)
 	registerWorkspaceResourceReadRoutes(router, state)
 	registerWorkspaceProjectionReadRoutes(router, state)
 	registerWorkspaceContextReadRoutes(router, state)

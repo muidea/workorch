@@ -60,6 +60,9 @@ type Workspace struct {
 	DefinitionSpecificationLedger   *DefinitionSpecificationRequestLedger
 	StartupInput                    *WorkspaceStartupInputContract
 	ActivationAdmission             *WorkspaceActivationAdmission
+	// StartupPreparation is separate from admission and Run lifecycle. Reads
+	// only project existing attempts; no positive M3 exists in its v1 shape.
+	StartupPreparation *WorkspacePreparationRecord
 	// TerminalDelivery is the Workspace owner's persisted release fence. It is
 	// written only by the lifecycle reducer and never by generic metadata update.
 	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity

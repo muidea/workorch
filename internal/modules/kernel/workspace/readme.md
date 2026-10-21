@@ -29,6 +29,28 @@ Last Verified: 2026-08-30
 
 公开 EventHub 合同均位于 `pkg/events`，每个 topic 使用具体 command/result；创作 record、派生 request 与历史回执使用 concrete DTO，嵌套 Template 的 Soul binding 为有序 typed slice；转换到同 owner model 前拒绝空／重复 binding，不允许 map 覆盖隐藏原 cardinality。显式转换不更改持久 schema 或 hash，也不授予已校验身份；查询、确认与准入仍完整反证 ledger。派生 reserve／complete、authoring 保存／查询／规格 reserve／complete／确认／准入均登记 delivery 与 typed message 合同。既有 pre-seal 规格 ledger 保留 begin／reserve／complete 三个受控写入口；无生产调用方的单请求 query 不注册 EventHub，owner-private 查询 helper 只作内部校验与测试。跨 owner 不暴露 repository/service。`biz.New` 只接收 backend factory 生成的 `WorkspaceOwnerRepositories` aggregate；Workspace、Goal、DoD、Template repository 与 deletion cleaner 必须携带同一个 opaque owner binding，独立构造、跨 backend 或跨 factory 混装在 owner 启动前拒绝。
 
+### 激活前准备只读与纯编译边界
+
+`QueryExactConfirmedStartupSnapshotCommand/Result`（`/workspace/activation-preparation/exact-startup/query`）
+只接受 exact `application/workorchd`，使用 Workspace query lane 并参与只读 drain。请求必须携带
+Workspace 与非零 expected revision。owner 反查完整持久 authoring/六审/确认/准入链和实际正式 Goal、DoD 行，
+再读 revision 排除混合观察；缺失或漂移拒绝，不 fallback admission、不生成 ticket，也不物化资源。
+返回有界 detached snapshot，保留正式 DoD 原顺序与逐项来源。snapshot hash 是内容身份，不是 readiness。
+内部目录含无效 UTF-8 或 NUL 时明确拒绝，不借 JSON 替换字符、路径清洗或截断修复原输入。
+
+`QueryWorkspacePreparationStateCommand/Result`（`/workspace/activation-preparation/state/query`）
+同样只接受 Application source、使用 query lane。只读取本 owner 已有准备操作账本，
+无记录返回 `not_checked`，不为读取创建记录。`State` 与 `CurrentValidity` 分离：时间、配置、
+当前 owner revision、封存身份或检查/编译版本的已知漂移可投影 `stale`，但不覆盖原
+`accepted/blocked/failed/unknown` 或清除原请求身份。查询不检查远端资源、不对账或恢复未知操作。
+`ActiveRunID` 只是独立已有投影，不以空值或记录缺失证明没有历史 Run。
+
+`pkg/startuppreparation` 只从 exact snapshot 纯编译有界、稳定的 required 检查清单；
+选择项要求的是原合同实际选中集合的完整性事实，不要求安装未使用能力。清单无 PASS 字段，
+不将 DECLARED、空列表、配置存在或 membership 当成 owner 可用性事实。
+当前持久记录仅表达有界操作身份与阻塞/未知状态，不含正 readiness、M3 或激活权限，
+没有公开准备写命令；首次完成与 no-Run 并发协议不由上述查询实现。
+
 ### 合同变更待审输入
 
 `PrepareDefinitionChangeCommand/Result` 只接受 Application source；`QueryDefinitionChangeCommand/Result` 另允许 exact `blocks/decision` 只读反证最终材料。准备命令仅传 Ticket/version/hash 与 Workspace CAS 身份；Workspace 在自身 mutation lock 外读取 Decision 原持久最新版本和 Run inventory，再在原规格 private dispatcher 内核对输入、模板和定义基线并 CAS。读取是原版本观察，不保证与并发 Decision 修订或启动构成跨 owner 原子事务，不能用于批准或激活。

@@ -16,6 +16,7 @@ func applicationOperationsFromPorts(ports ApplicationPorts) applicationOperation
 			updateWorkspaceSoulBindings:     ports.Workspace.UpdateWorkspaceSoulBindings,
 			updateWorkspaceLLMSelectionPort: ports.Workspace.UpdateWorkspaceLLMSelection,
 			listWorkspaces:                  ports.Workspace.ListWorkspaces,
+			readStartupPreparation:          ports.Workspace.ReadStartupPreparation,
 		},
 		definitionOperations: definitionOperations{
 			authoring: DefinitionAuthoringPorts{

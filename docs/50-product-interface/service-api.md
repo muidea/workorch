@@ -242,6 +242,19 @@ Workspace owner 在同一 CAS 中持久有界保存回执（最多 128 条，不
 该操作只读取，不自动保存或覆盖。用户核对 owner 当前目标后，另行提交修订并重新审查。
 详情页的页面内存请求绑定 exact Workspace，不能跨工作空间复用保存或确认凭据。创作查询可返回 `confirmationRecovery`：仅从 owner 已验证的确认 journal 投影四项确认身份与当前 Workspace revision。revision 只约束首次准备，既有 journal 的恢复仍要求 exact hashes。无页面内存原确认时，用户可显式使用该参数恢复已开始的确认；读取本身不确认、不调用 provider，也不启动 Run。原页面 pendingConfirmation 不得被查询结果静默替换。
 
+### 激活前准备状态读取
+
+`GET /workspaces/:workspaceId/activation-preparation` 返回 `{preparation: ...}`：
+`workspaceId`、`workspaceRevision`、可选 `activeRunId`、`operationState`、`currentValidity`、可选 `record`。
+它仅投影 Workspace owner 已有准备操作；无记录时两个状态均为 `not_checked`，不创建账本或启动检查。
+记录保存 schema version、有界 attempts、原 request/payload 身份、预期/提交 revision、精确确认与封存 binding、
+操作时点和状态。已知时间/版本/配置/封存漂移可以使 `currentValidity=stale`，
+但不把原 `accepted/unknown` 改成已完成，也不因此允许重新提交或恢复未知效果。
+
+该读取不编译 bootstrap、不查询外部资源、不刷新模型目录、不调用推理/embedding、不写配置、不创建 Run。
+`activeRunId` 是独立已有事实，缺省不能证明没有历史或在途 Run；`eligible`、结构校验和准备操作状态均不是 M3。
+响应禁止缓存，owner 原始错误不进入公共 payload。此接口不提供检查 POST、M3/权限字段或 Start/Restart 回执消费承诺。
+
 ## Command Scope And Responses
 
 - path scope wins over body scope；unknown JSON fields or cross-workspace redirect are rejected；

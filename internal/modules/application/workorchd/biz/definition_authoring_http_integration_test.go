@@ -45,6 +45,10 @@ func TestAuthoringHTTPFileBackedCompilationConfirmationAndRecovery(t *testing.T)
 	}
 }
 
+func TestStartupPreparationHTTPFileOwnersReadOnlyAndReopen(t *testing.T) {
+	testAuthoringHTTPFileBackedScenario(t, "step04_read_only")
+}
+
 func TestAuthoringHTTPCreationCutpointRecovery(t *testing.T) {
 	for _, scenario := range []string{"creation_binding", "creation_binding_empty", "creation_index", "creation_directory"} {
 		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
@@ -444,6 +448,65 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	}
 	created := authoringHTTPRequest(t, baseURL, http.MethodPost, "/api/v1/workorch/workspace-authoring", request, http.StatusCreated)
 	assertNoRuns()
+	if scenario == "step04_read_only" {
+		// Authoring creation is fixture setup, not a preparation effect. Take
+		// all baselines only after its owner receipts have returned.
+		snapshotFiles := func() map[string][32]byte {
+			t.Helper()
+			files := make(map[string][32]byte)
+			for _, root := range []string{storage, directory} {
+				if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+					if err != nil {
+						return err
+					}
+					if entry.IsDir() {
+						return nil
+					}
+					data, err := os.ReadFile(path)
+					if err != nil {
+						return err
+					}
+					files[path] = sha256.Sum256(data)
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return files
+		}
+		for reopen := 0; reopen < 2; reopen++ {
+			before := snapshotFiles()
+			stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			baselineCalls := physicalCalls.Load()
+			for read := 0; read < 3; read++ {
+				client := &http.Client{Timeout: 2 * time.Second}
+				response, err := client.Get(baseURL + "/api/v1/workorch/workspaces/" + created.WorkspaceID + "/activation-preparation")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var body struct {
+					Preparation management.StartupPreparationView `json:"preparation"`
+				}
+				decodeErr := json.NewDecoder(response.Body).Decode(&body)
+				response.Body.Close()
+				if decodeErr != nil || response.StatusCode != http.StatusOK || response.Header.Get("Cache-Control") != "no-store" || body.Preparation.ValidateFor(created.WorkspaceID) != nil || body.Preparation.WorkspaceRevision != stored.Revision || body.Preparation.Record != nil || body.Preparation.OperationState != "not_checked" {
+					t.Fatalf("real HTTP projection: %+v status=%d err=%v", body, response.StatusCode, decodeErr)
+				}
+			}
+			if !reflect.DeepEqual(before, snapshotFiles()) || physicalCalls.Load() != baselineCalls {
+				t.Fatal("GET wrote resource/owner state or called provider")
+			}
+			assertNoRuns()
+			if reopen == 0 {
+				closeOwners()
+				baseURL, routine, closeOwners = open()
+			}
+		}
+		return
+	}
 	path := "/api/v1/workorch/workspaces/" + created.WorkspaceID + "/authoring"
 	replay := authoringHTTPRequest(t, baseURL, http.MethodPost, "/api/v1/workorch/workspace-authoring", request, http.StatusCreated)
 	if replay.InputHash != created.InputHash || replay.WorkspaceRevision != created.WorkspaceRevision {

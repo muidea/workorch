@@ -41,6 +41,10 @@ internal/modules/kernel/workspace/pkg/models/workspace.go|AuthoringSummary.Failu
 internal/modules/kernel/workspace/pkg/models/goal_specification.go|GoalSpecificationCompletenessReview.Status|immutable_outcome|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/models/goal_specification.go|GoalSpecificationVerification.Status|immutable_outcome|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/models/definition_authoring_mapping.go|DefinitionAuthoringVerificationMapping.Status|immutable_outcome|internal/modules/kernel/workspace|-
+# Preparation increment one exposes persisted trace snapshots only, with no
+# writer/reducer or positive readiness/M3 transition. Adjudicate a transition
+# family when an actual owner-local preparation reducer is introduced.
+internal/modules/kernel/workspace/pkg/models/activation_preparation.go|WorkspacePreparationAttemptState|immutable_trace|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/events/messages.go|DefinitionAdmissionCandidateDisposition|immutable_outcome|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/events/messages.go|DefinitionAdmissionIntentDisposition|immutable_outcome|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/events/messages.go|DeleteWorkspaceDisposition|immutable_outcome|internal/modules/kernel/workspace|-

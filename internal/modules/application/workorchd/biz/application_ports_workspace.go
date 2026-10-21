@@ -7,12 +7,27 @@ import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
 func (p *runtimeApplicationPorts) configureWorkspacePorts() {
 	ports := &p.ports
+	ports.Workspace.ReadStartupPreparation = func(ctx context.Context, workspaceID string) (workorchmanagementcontract.StartupPreparationView, error) {
+		var view workorchmanagementcontract.StartupPreparationView
+		err := p.withSession(ctx, func(session *runtimecore.Session) error {
+			hub, err := session.RequiredCommandHub()
+			if err != nil {
+				return err
+			}
+			b := &Biz{Base: basebiz.New(ModuleID, hub, nil)}
+			view, err = b.ReadStartupPreparationView(ctx, common.WorkspaceID(workspaceID))
+			return err
+		})
+		return view, err
+	}
 	ports.Workspace.DeleteWorkspace = func(ctx context.Context, _, _, workspaceID string, cmd appmodelcore.DeleteWorkspaceCommand) error {
 		return p.withSession(ctx, func(session *runtimecore.Session) error {
 			return appservice.DeleteWorkspaceWithSession(ctx, session, workspaceID, cmd)

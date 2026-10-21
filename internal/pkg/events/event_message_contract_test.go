@@ -87,7 +87,13 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// it does not execute or confer a transition on the capability owner.
 	// Shell adds an original copied-selector scoped read-only current query;
 	// only Orchestrator's private SM-2 event may judge stale/reopen.
-	const expectedProductionTopicCount = 310
+	// STEP01 added the original-creation scoped directory-prepared fact in
+	// 304d4b8d. Both delivery and concrete message contracts, the Workspace
+	// receiver, application sender and owner README already describe this
+	// owner-state write; it is not Runtime readiness or activation authority.
+	// STEP04 adds exact-confirmed-startup and persisted preparation-state reads;
+	// neither falls back to admission, observes resources or confers Runtime authority.
+	const expectedProductionTopicCount = 313
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}

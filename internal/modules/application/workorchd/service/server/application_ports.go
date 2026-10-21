@@ -28,6 +28,7 @@ type WorkspacePorts struct {
 	UpdateWorkspaceSoulBindings UpdateWorkspaceSoulBindingsFunc
 	UpdateWorkspaceLLMSelection UpdateWorkspaceLLMSelectionFunc
 	ListWorkspaces              ListWorkspacesFunc
+	ReadStartupPreparation      ReadStartupPreparationFunc
 }
 
 type DefinitionPorts struct {

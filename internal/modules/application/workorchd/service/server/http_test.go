@@ -1273,6 +1273,7 @@ func acceptedAPINativeRouteSpecs() []routeSpec {
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId"},
 		{method: http.MethodDelete, pattern: "/api/v1/workorch/workspaces/:workspaceId"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/snapshot"},
+		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/activation-preparation"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/memory-recalls"},
 		{method: http.MethodGet, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},
 		{method: http.MethodPut, pattern: "/api/v1/workorch/workspaces/:workspaceId/soul-bindings"},

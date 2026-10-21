@@ -118,6 +118,12 @@ func (m *Biz) Start() error {
 			return err
 		}
 	}
+	if err := m.subscribeOwner(workspaceevents.TopicWorkspaceExactConfirmedStartupQuery, m.handleExactConfirmedStartupQuery, false); err != nil {
+		return err
+	}
+	if err := m.subscribeOwner(workspaceevents.TopicWorkspacePreparationStateQuery, m.handlePreparationStateQuery, false); err != nil {
+		return err
+	}
 	if err := m.subscribeOwner(workspaceevents.TopicWorkspaceCommandExecutionIntent, m.handleExecutionIntentCommand, false); err != nil {
 		return err
 	}

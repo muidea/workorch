@@ -33,6 +33,9 @@ func validateWorkspaceApplicationPorts(ports WorkspacePorts) error {
 	if ports.ListWorkspaces == nil {
 		return fmt.Errorf("missing Workspace.ListWorkspaces application port")
 	}
+	if ports.ReadStartupPreparation == nil {
+		return fmt.Errorf("missing Workspace.ReadStartupPreparation application port")
+	}
 	return nil
 }
 

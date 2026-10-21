@@ -25,6 +25,7 @@ type workspaceOperations struct {
 	updateWorkspaceSoulBindings     UpdateWorkspaceSoulBindingsFunc
 	updateWorkspaceLLMSelectionPort UpdateWorkspaceLLMSelectionFunc
 	listWorkspaces                  ListWorkspacesFunc
+	readStartupPreparation          ReadStartupPreparationFunc
 }
 
 type definitionOperations struct {

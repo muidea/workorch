@@ -177,6 +177,19 @@ EventHub DTO 互不复用；response 在跨层前校验 workspace/run/item ident
 
 无适用 Run 时，进度摘要独立显示持久 `authoringSummary`、执行未启动与 Result 未验收，不把 Workspace `active` 或零 blocker 当作执行正常；RunState 只来自同 Workspace 的实际 Run owner 对象。用量摘要的 `availability` 区分 `not_loaded`、`partial` 与 `complete`，并携带查询 `scope`、单次 `recordLimit` 和 `observedRecords`。`complete` 仅表示当前有界查询没有触及上限且返回记录全部可解析，不代表完整历史；上限命中、缺失／无效 payload 或仅有 Run 补充数据时不得冒充完整 Workspace 用量。detail／summary 保持不增加 Workspace usage payload 查询，未加载不显示零调用或零 Token。显示、clone 与 projection diff 保留这些范围信息，不从普通 event topic 推算调用或 Token。
 
+### 激活前准备的只读入口
+
+`GET /workspaces/:workspaceId/activation-preparation` 经 Application 的窄只读端口发送
+Workspace-owned `QueryWorkspacePreparationStateCommand`；HTTP 不接 EventHub 或 owner repository。
+仅投影持久操作、当前已知有效性和独立 ActiveRunID，缺记录为待检查，原未知操作不会因 GET 解锁。
+响应 `no-store`，错误按安全类别返回，不输出 owner 原始诊断；本入口不接收 caller PASS 或恢复指令。
+
+`activationcore.CompilePreparedBootstrap` 接受 detached exact snapshot、稳定 manifest 和 typed activation input，
+校验精确 Profile 并从原 candidate 编译 source obligations；无 Hub/client/repository/callback，
+不调用 InitialFacts、Runtime initialize/drive 或既有含资源写入的 activation port。
+其结果只证明结构编译，不替代资源/配置来源的 owner 观察、required 检查或 no-Run 排序证明。
+当前不开放准备 POST、M3 签发或恢复执行；既有 Start/Restart 不被宣称已消费准备回执。
+
 ## 不变量与非职责
 
 - Application 不写任何 sibling owner repository/service，不拥有 SM-1～SM-4 reducer、delivery phase 或 deletion phase。
