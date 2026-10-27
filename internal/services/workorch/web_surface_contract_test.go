@@ -22,6 +22,8 @@ func TestWebConsoleMutatingEndpointsStayWithinProductSurfaceContract(t *testing.
 		`/workspaces/${encodeURIComponent(workspaceId)}${suffix}`, // delete workspace only.
 		`/workspaces/${encodeURIComponent(workspaceId)}/llm-selection`,
 		`/workspaces/${encodeURIComponent(workspaceId)}/soul-bindings`,
+		"`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation/check`",
+		"`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation/recover`",
 		`/workspaces/${encodeURIComponent(workspaceId)}/execution-activations`,
 		`${apiBase}/souls`,
 		`${apiBase}/souls/${encodeURIComponent(soulId)}`,
