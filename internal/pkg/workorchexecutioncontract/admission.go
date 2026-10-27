@@ -14,6 +14,7 @@ import (
 const (
 	AdmissionDisplayAccepted = "accepted"
 	AdmissionDisplayRejected = "rejected"
+	AdmissionDisplayPending  = "pending"
 )
 
 // AdmissionPresentation is the only classification of an immutable owner
@@ -40,6 +41,9 @@ func PresentAdmission(admission runtimecontract.RuntimeExecutionIntentAdmission)
 		runtimecontract.RuntimeExecutionIntentFreshActivationRequired,
 		runtimecontract.RuntimeExecutionIntentDefinitionChanged,
 		runtimecontract.RuntimeExecutionIntentGovernanceRequired:
+	case runtimecontract.RuntimeExecutionIntentFreshUnresolved:
+		return AdmissionPresentation{HTTPStatusCode: http.StatusConflict, Display: AdmissionDisplayPending,
+			Diagnostic: runtimecontract.RuntimeExecutionIntentReasonSummary(admission.Reason)}, nil
 	default:
 		return AdmissionPresentation{}, fmt.Errorf("unsupported workspace execution admission outcome %q", admission.Outcome)
 	}
@@ -62,22 +66,25 @@ func PresentAdmission(admission runtimecontract.RuntimeExecutionIntentAdmission)
 // identity, outcome and reason while adding one derived transport/display
 // classification. RequestReason remains separate from owner Reason.
 type WorkspaceExecutionAdmissionResponse struct {
-	Service       string                                        `json:"service"`
-	Backend       string                                        `json:"backend,omitempty"`
-	DataRoot      string                                        `json:"dataRoot,omitempty"`
-	Action        string                                        `json:"action,omitempty"`
-	Accepted      bool                                          `json:"accepted"`
-	State         string                                        `json:"state"`
-	WorkspaceID   common.WorkspaceID                            `json:"workspaceId"`
-	RunID         common.RunID                                  `json:"runId,omitempty"`
-	RequestID     string                                        `json:"requestId"`
-	Intent        runtimecontract.RuntimeExecutionIntentKind    `json:"intent"`
-	Outcome       runtimecontract.RuntimeExecutionIntentOutcome `json:"outcome"`
-	Reason        runtimecontract.RuntimeExecutionIntentReason  `json:"reason"`
-	RequestReason string                                        `json:"requestReason,omitempty"`
-	Source        string                                        `json:"source,omitempty"`
-	Diagnostic    string                                        `json:"diagnostic,omitempty"`
-	Error         string                                        `json:"error,omitempty"`
+	Service                 string                                        `json:"service"`
+	Backend                 string                                        `json:"backend,omitempty"`
+	DataRoot                string                                        `json:"dataRoot,omitempty"`
+	Action                  string                                        `json:"action,omitempty"`
+	Accepted                bool                                          `json:"accepted"`
+	State                   string                                        `json:"state"`
+	WorkspaceID             common.WorkspaceID                            `json:"workspaceId"`
+	RunID                   common.RunID                                  `json:"runId,omitempty"`
+	RequestID               string                                        `json:"requestId"`
+	Intent                  runtimecontract.RuntimeExecutionIntentKind    `json:"intent"`
+	Outcome                 runtimecontract.RuntimeExecutionIntentOutcome `json:"outcome"`
+	Reason                  runtimecontract.RuntimeExecutionIntentReason  `json:"reason"`
+	RequestReason           string                                        `json:"requestReason,omitempty"`
+	Source                  string                                        `json:"source,omitempty"`
+	Diagnostic              string                                        `json:"diagnostic,omitempty"`
+	Error                   string                                        `json:"error,omitempty"`
+	PendingRequestID        string                                        `json:"pendingRequestId,omitempty"`
+	PendingStartupInputHash string                                        `json:"pendingStartupInputHash,omitempty"`
+	PendingPayloadHash      string                                        `json:"pendingPayloadHash,omitempty"`
 }
 
 func NewWorkspaceExecutionAdmissionResponse(service, backend, dataRoot, action, requestReason, source string, admission runtimecontract.RuntimeExecutionIntentAdmission) (WorkspaceExecutionAdmissionResponse, int, error) {
@@ -87,21 +94,24 @@ func NewWorkspaceExecutionAdmissionResponse(service, backend, dataRoot, action, 
 		return WorkspaceExecutionAdmissionResponse{}, 0, err
 	}
 	response := WorkspaceExecutionAdmissionResponse{
-		Service:       strings.TrimSpace(service),
-		Backend:       strings.TrimSpace(backend),
-		DataRoot:      strings.TrimSpace(dataRoot),
-		Action:        strings.TrimSpace(action),
-		Accepted:      presentation.Accepted,
-		State:         presentation.Display,
-		WorkspaceID:   admission.WorkspaceID,
-		RunID:         admission.RunID,
-		RequestID:     admission.RequestID,
-		Intent:        admission.Kind,
-		Outcome:       admission.Outcome,
-		Reason:        admission.Reason,
-		RequestReason: strings.TrimSpace(requestReason),
-		Source:        strings.TrimSpace(source),
-		Diagnostic:    presentation.Diagnostic,
+		Service:                 strings.TrimSpace(service),
+		Backend:                 strings.TrimSpace(backend),
+		DataRoot:                strings.TrimSpace(dataRoot),
+		Action:                  strings.TrimSpace(action),
+		Accepted:                presentation.Accepted,
+		State:                   presentation.Display,
+		WorkspaceID:             admission.WorkspaceID,
+		RunID:                   admission.RunID,
+		RequestID:               admission.RequestID,
+		Intent:                  admission.Kind,
+		Outcome:                 admission.Outcome,
+		Reason:                  admission.Reason,
+		PendingRequestID:        admission.PendingRequestID,
+		PendingStartupInputHash: admission.PendingStartupInputHash,
+		PendingPayloadHash:      admission.PendingPayloadHash,
+		RequestReason:           strings.TrimSpace(requestReason),
+		Source:                  strings.TrimSpace(source),
+		Diagnostic:              presentation.Diagnostic,
 	}
 	if !presentation.Accepted {
 		response.Error = presentation.Diagnostic
@@ -114,12 +124,15 @@ func NewWorkspaceExecutionAdmissionResponse(service, backend, dataRoot, action, 
 
 func (r WorkspaceExecutionAdmissionResponse) Admission() (runtimecontract.RuntimeExecutionIntentAdmission, error) {
 	admission := runtimecontract.RuntimeExecutionIntentAdmission{
-		WorkspaceID: r.WorkspaceID,
-		RunID:       r.RunID,
-		RequestID:   r.RequestID,
-		Kind:        r.Intent,
-		Outcome:     r.Outcome,
-		Reason:      r.Reason,
+		WorkspaceID:             r.WorkspaceID,
+		RunID:                   r.RunID,
+		RequestID:               r.RequestID,
+		Kind:                    r.Intent,
+		Outcome:                 r.Outcome,
+		Reason:                  r.Reason,
+		PendingRequestID:        r.PendingRequestID,
+		PendingStartupInputHash: r.PendingStartupInputHash,
+		PendingPayloadHash:      r.PendingPayloadHash,
 	}.Normalized()
 	presentation, err := PresentAdmission(admission)
 	if err != nil {

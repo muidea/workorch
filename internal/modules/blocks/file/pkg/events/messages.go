@@ -169,6 +169,11 @@ type ExecuteOperationResult struct {
 
 func MessageContracts() []eventcontract.MessageContract {
 	return eventcontract.MessageContracts(
+		eventcontract.CommandTopic[ReobservePreparationFilesCommand, ReobservePreparationFilesResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicReobservePreparationFiles),
+		eventcontract.CommandTopic[QueryPreparationEpochCommand, QueryPreparationEpochResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryPreparationEpoch),
+		eventcontract.CommandTopic[ObservePreparationDirectoriesCommand, ObservePreparationDirectoriesResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicObservePreparationDirectories),
+		eventcontract.CommandTopic[ObservePreparationResourcesCommand, ObservePreparationResourcesResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicObservePreparationResources),
+		eventcontract.CommandTopic[ObservePreparationManagedConfigsCommand, ObservePreparationManagedConfigsResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicObservePreparationManagedConfigs),
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireRuntimeCapabilities),
 		eventcontract.CommandTopic[AcquireRuntimeOperationAdmissibilityCommand, AcquireRuntimeOperationAdmissibilityResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireRuntimeOperationAdmissibility),
 		eventcontract.CommandTopic[ValidateRuntimeOperationCandidateConformanceCommand, ValidateRuntimeOperationCandidateConformanceResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicValidateRuntimeOperationCandidateConformance),

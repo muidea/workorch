@@ -35,7 +35,7 @@ func (m *Biz) enterOwner(drain bool) (func(), error) {
 
 // 准入票覆盖真实 handler 返回；Send 取消不能代替完成回执。
 func (m *Biz) subscribeOwner(topic string, handler magicevent.ObserverFunc) error {
-	drain := topic == skillevents.TopicSkillCommandGet || topic == skillevents.TopicSkillCommandList
+	drain := topic == skillevents.TopicSkillCommandGet || topic == skillevents.TopicSkillCommandList || topic == skillevents.TopicObserveRegistryCatalog
 	err := m.SubscribeFuncChecked(topic, func(ev magicevent.Event, result magicevent.Result) {
 		if ev == nil || result == nil {
 			return

@@ -154,6 +154,16 @@ semantic recall 的对象层规则当前应至少保持：
 
 ## Boundary
 
+### Pre-activation preparation
+
+STEP04 的只读准备不写 `MemoryRecallTrace`、不创建 Run，也不调用 embedding。完整库存与原操作绑定后，
+`workorch-preparation-memory-selection/v1` 通过前后 active LLM owner 的 provider/revision/defaultEmbedding
+及精确封存双读确定原模式；配置读取失败不等同于未配置 embedding。无 embedding 时复用 activation 的
+`activation-memory-selection/v1` 纯选择算法与原候选上限、quota、byte/token budget，完整候选、选中、排除与理由
+保存在 Workspace 受限历史中，读回从完整原材料重编。非空 semantic 库存仍阻塞，不以 list-only 代替；
+真实空库沿用既有 activation fast path，但保留实际模式。准备单项通过只表达原时点事实，不证明持续 currentness、
+全 required 合取、M3 或执行授权；GET/replay/recover 不重新观察或升级旧无来源记录。
+
 Memory 层负责表达当前被召回的高价值记忆与其可追溯选择过程。
 
 它不直接表达：

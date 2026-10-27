@@ -185,6 +185,37 @@ class BuildIdentityTests(unittest.TestCase):
         with self.assertRaisesRegex(build_identity.IdentityError, "只能包含sourceCommit"):
             build_identity._read_expected_identity(path)
 
+    def test_cli_verify_preserves_complete_external_pin_and_rejects_drift(self) -> None:
+        self._capture_to()
+        payload = self._produce()
+        expected = self._expected(payload)
+        path = self.artifacts / "expected-cli-identity.json"
+        path.write_text(json.dumps(expected), encoding="utf-8")
+        self.assertEqual(build_identity._read_expected_identity(path), expected)
+        command = [
+            "python3", str(SCRIPT), "verify", "--root", str(self.root),
+            "--console-root", str(self.console), "--binary", str(self.binary),
+            "--manifest", str(self.manifest), "--artifact-root", str(self.artifacts),
+            "--expected-identity-json", str(path),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), payload)
+        for field in sorted(build_identity.IDENTITY_FIELDS):
+            with self.subTest(field=field):
+                wrong = dict(expected)
+                wrong[field] = "0" * len(wrong[field])
+                path.write_text(json.dumps(wrong), encoding="utf-8")
+                result = subprocess.run(command, capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("外部固定的完整身份不一致", result.stderr)
+        path.write_text(json.dumps(expected), encoding="utf-8")
+        self.binary.write_bytes(b"changed after identity was pinned")
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("binarySha256与当前二进制字节不一致", result.stderr)
+
     def test_snapshot_and_manifest_json_parse_the_same_stable_bytes(self) -> None:
         self._capture_to()
         with mock.patch.object(Path, "read_text", side_effect=AssertionError("不得二次读取元数据")), \

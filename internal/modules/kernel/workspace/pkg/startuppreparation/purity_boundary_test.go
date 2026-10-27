@@ -26,14 +26,17 @@ func TestPreparationPureCompilationBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	paths = append(paths, filepath.Join(root, "internal/modules/application/workorchd/biz/appservice/activationcore/prepared_bootstrap.go"), filepath.Join(root, "internal/modules/application/workorchd/biz/appservice/activationcore/runtime_bootstrap.go"))
+	paths = append(paths, filepath.Join(root, "internal/modules/application/workorchd/biz/appservice/activationports/prepared_execution_policy.go"))
+	paths = append(paths, filepath.Join(root, "internal/modules/application/workorchd/biz/appservice/activationports/prepared_bootstrap.go"))
 	allowed := map[string]bool{
 		"crypto/sha256": true, "encoding/hex": true, "encoding/json": true, "fmt": true, "reflect": true, "slices": true, "sort": true, "strings": true, "unicode/utf8": true,
-		"github.com/muidea/workorch/internal/pkg/common":                                       true,
-		"github.com/muidea/workorch/internal/pkg/workorchruntimecontract":                      true,
-		"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts":           true,
-		"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models":              true,
-		"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission": true,
-		"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/startuppreparation":  true,
+		"github.com/muidea/workorch/internal/pkg/common":                                                  true,
+		"github.com/muidea/workorch/internal/pkg/workorchruntimecontract":                                 true,
+		"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts":                      true,
+		"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models":                         true,
+		"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission":            true,
+		"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/startuppreparation":             true,
+		"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore": true,
 	}
 	for _, path := range paths {
 		if strings.HasSuffix(path, "_test.go") {

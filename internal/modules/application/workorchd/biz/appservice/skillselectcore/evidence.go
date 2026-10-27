@@ -1,6 +1,8 @@
 package skillselectcore
 
-func ExplicitEvidence(items []Candidate) Evidence {
+import "github.com/muidea/workorch/internal/pkg/skillselection"
+
+func ExplicitEvidence(items []skillselection.Candidate) Evidence {
 	ids := make([]string, 0, len(items))
 	matches := make([]map[string]any, 0, len(items))
 	for _, item := range items {

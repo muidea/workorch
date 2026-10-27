@@ -3,12 +3,8 @@
 package startuppreparation
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"reflect"
-	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -24,21 +20,7 @@ const SchemaVersion = "workorch-startup-preparation/v1"
 // hash binds content, not resource availability, no-Run, M3 or permission.
 // The owner verifies the original complete authoring ledger before emitting it;
 // the bounded snapshot does not export provider diagnostics or resource bytes.
-type ExactConfirmedStartupSnapshot struct {
-	SchemaVersion              string
-	WorkspaceID                common.WorkspaceID
-	WorkspaceRevision          uint64
-	AuthoringRef               workspace.DefinitionAuthoringAdmissionRef
-	AuthoringConfigurationHash string
-	InternalDirectory          string
-	Candidate                  workspace.DefinitionAdmissionCandidate
-	StartupInput               workspace.WorkspaceStartupInputContract
-	ActivationAdmission        workspace.WorkspaceActivationAdmission
-	Goal                       workspace.Goal
-	DoD                        workspace.DoD
-	FormalDoDItemRefs          []string
-	SnapshotHash               string
-}
+type ExactConfirmedStartupSnapshot workspace.PreparationSealSnapshot
 
 // FromOwnerPersistence must be called with the owner's actual formal rows,
 // not the journal's expected after-images. It never materializes missing rows.
@@ -79,11 +61,7 @@ func FromOwnerPersistence(w *workspace.Workspace, goal *workspace.Goal, dod *wor
 }
 
 func (s ExactConfirmedStartupSnapshot) Clone() ExactConfirmedStartupSnapshot {
-	s.Candidate = s.Candidate.Clone()
-	s.StartupInput = s.StartupInput.Clone()
-	s.DoD = *workspace.CloneDoD(&s.DoD)
-	s.FormalDoDItemRefs = slices.Clone(s.FormalDoDItemRefs)
-	return s
+	return ExactConfirmedStartupSnapshot(workspace.PreparationSealSnapshot(s).Clone())
 }
 
 func (s ExactConfirmedStartupSnapshot) Validate() error {
@@ -144,11 +122,5 @@ func (s ExactConfirmedStartupSnapshot) Validate() error {
 }
 
 func (s ExactConfirmedStartupSnapshot) contentHash() string {
-	s.SnapshotHash = ""
-	encoded, err := json.Marshal(s)
-	if err != nil || len(encoded) > 2*1024*1024 {
-		return ""
-	}
-	digest := sha256.Sum256(encoded)
-	return "startup-snapshot-sha256:" + hex.EncodeToString(digest[:])
+	return workspace.PreparationSealSnapshot(s).Hash()
 }

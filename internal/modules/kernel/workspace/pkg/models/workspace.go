@@ -63,6 +63,22 @@ type Workspace struct {
 	// StartupPreparation is separate from admission and Run lifecycle. Reads
 	// only project existing attempts; no positive M3 exists in its v1 shape.
 	StartupPreparation *WorkspacePreparationRecord
+	// Owner-private historical material. Public serialization never exports raw
+	// paths/diagnostics; file repository has an explicit restricted wire field.
+	PreparationDirectoryEvidence       []WorkspacePreparationDirectoryEvidence       `json:"-"`
+	PreparationSealEvidence            []WorkspacePreparationSealEvidence            `json:"-"`
+	PreparationResourceEvidence        []WorkspacePreparationResourceEvidence        `json:"-"`
+	PreparationManagedConfigEvidence   []WorkspacePreparationManagedConfigEvidence   `json:"-"`
+	PreparationSoulEvidence            []WorkspacePreparationSoulEvidence            `json:"-"`
+	PreparationSkillRegistryEvidence   []WorkspacePreparationSkillRegistryEvidence   `json:"-"`
+	PreparationProviderCacheEvidence   []WorkspacePreparationProviderCacheEvidence   `json:"-"`
+	PreparationRunHistoryEvidence      []WorkspacePreparationRunHistoryEvidence      `json:"-"`
+	PreparationMemoryInventoryEvidence []WorkspacePreparationMemoryInventoryEvidence `json:"-"`
+	PreparationMCPRegistryEvidence     []WorkspacePreparationMCPRegistryEvidence     `json:"-"`
+	PreparationSkillHubEffects         []WorkspacePreparationSkillHubEffects         `json:"-"`
+	// PreparationFence is owner-private coordination, not execution authority.
+	// A nil fence is legacy; ordinary updates must never invent a creation epoch.
+	PreparationFence *WorkspacePreparationFence
 	// TerminalDelivery is the Workspace owner's persisted release fence. It is
 	// written only by the lifecycle reducer and never by generic metadata update.
 	TerminalDelivery *runtimecontract.RuntimeTerminalDeliveryIdentity

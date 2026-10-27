@@ -500,6 +500,7 @@ func memoryTypeQuotaMap(input []workorchmemorycontract.TypeQuotaEntry) map[strin
 
 func MessageContracts() []eventcontract.MessageContract {
 	ret := []eventcontract.MessageContract{
+		eventcontract.CommandTopic[ObservePreparationInventoryCommand, ObservePreparationInventoryResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicObservePreparationInventory).MessageContract(),
 		eventcontract.CommandTopic[CreateMemoryCommand, CreateMemoryResult]("memory", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicMemoryCommandCreate).MessageContract(),
 		eventcontract.CommandTopic[GetMemoryCommand, GetMemoryResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryCommandGet).MessageContract(),
 		eventcontract.CommandTopic[ListMemoryByWorkspaceCommand, ListMemoryByWorkspaceResult]("memory", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicMemoryCommandListByWorkspace).MessageContract(),

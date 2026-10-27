@@ -23,7 +23,7 @@ type workspaceCommandGateway struct {
 }
 
 func (g *workspaceCommandGateway) submit(ctx context.Context, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
-	if g == nil || g.hub == nil || !g.runtime.ready() {
+	if g == nil || g.hub == nil {
 		return workorchdevents.WorkspaceRunRequestedResult{}, errRuntimeComponentUnavailable
 	}
 	workspaceID := common.WorkspaceID(command.WorkspaceID)
@@ -37,9 +37,22 @@ func (g *workspaceCommandGateway) submit(ctx context.Context, command workorchde
 	intent := workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: workspaceID, RequestID: command.RequestID}
 	switch command.Intent {
 	case "resume":
+		if !g.runtime.ready() {
+			return workorchdevents.WorkspaceRunRequestedResult{}, errRuntimeComponentUnavailable
+		}
 		intent.Kind = runtimecontract.RuntimeExecutionIntentResume
 	case "restart":
 		intent.Kind = runtimecontract.RuntimeExecutionIntentRestart
+		original, err := g.recoverOriginal(ctx, workspaceevents.RecoverWorkspaceExecutionIntentCommand{WorkspaceID: workspaceID, RequestID: command.RequestID, Kind: intent.Kind})
+		if err != nil {
+			return workorchdevents.WorkspaceRunRequestedResult{}, err
+		}
+		if original.Admission != nil {
+			return workorchdevents.WorkspaceRunRequestedResult(*original.Admission), nil
+		}
+		if !g.runtime.ready() {
+			return workorchdevents.WorkspaceRunRequestedResult{}, errRuntimeComponentUnavailable
+		}
 		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, g.runtime.borrow(), string(workspaceID))
 		if err != nil {
 			return workorchdevents.WorkspaceRunRequestedResult{}, err
@@ -72,4 +85,31 @@ func (g *workspaceCommandGateway) submit(ctx context.Context, command workorchde
 		return workorchdevents.WorkspaceRunRequestedResult{}, fmt.Errorf("%w: Workspace execution intent result: %v", common.ErrConflict, err)
 	}
 	return workorchdevents.WorkspaceRunRequestedResult(runtimecontract.RuntimeExecutionIntentAdmission(result)), nil
+}
+
+func (g *workspaceCommandGateway) recoverOriginal(ctx context.Context, c workspaceevents.RecoverWorkspaceExecutionIntentCommand) (workspaceevents.RecoverWorkspaceExecutionIntentResult, error) {
+	if err := c.Validate(); err != nil {
+		return workspaceevents.RecoverWorkspaceExecutionIntentResult{}, err
+	}
+	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandRecoverExecutionIntent, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, c)
+	ev.BindLaneKey(events.EventHubLaneKeyFor(workspaceevents.Contracts(), ev.ID(), eventcontract.LaneScope{SubjectType: "workspace", SubjectID: string(c.WorkspaceID), WorkspaceID: string(c.WorkspaceID)}))
+	response := g.hub.Send(ev)
+	if response == nil {
+		return workspaceevents.RecoverWorkspaceExecutionIntentResult{}, common.ErrConflict
+	}
+	if err := response.Error(); err != nil {
+		if err.Cause != nil {
+			return workspaceevents.RecoverWorkspaceExecutionIntentResult{}, err.Cause
+		}
+		return workspaceevents.RecoverWorkspaceExecutionIntentResult{}, err
+	}
+	data, err := response.Get()
+	if err != nil {
+		return workspaceevents.RecoverWorkspaceExecutionIntentResult{}, err
+	}
+	r, ok := data.(workspaceevents.RecoverWorkspaceExecutionIntentResult)
+	if !ok || r.ValidateFor(c) != nil {
+		return workspaceevents.RecoverWorkspaceExecutionIntentResult{}, common.ErrConflict
+	}
+	return r, nil
 }

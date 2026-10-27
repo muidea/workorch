@@ -18,6 +18,8 @@ func Contracts() []eventcontract.Contract {
 		TopicRunRuntimeCommandsReady,
 	)...)
 	ret = append(ret, eventcontract.Build("run", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
+		TopicObserveWorkspacePreparationHistory,
+		TopicQueryWorkspaceExecutionIntentReceipt,
 		TopicRunCommandGet,
 		TopicRunCommandList,
 		TopicRunCommandListByWorkspace,

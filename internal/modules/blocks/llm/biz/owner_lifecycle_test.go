@@ -264,7 +264,7 @@ func TestOwnerLifecycleWaitsForActualCatalogTransportExit(t *testing.T) {
 	if err := b.Teardown(short); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("actual transport drain = %v", err)
 	}
-	if b.catalogService == nil || !b.activeLLMConfigurationInitialized || len(b.subscriptions) != 11 {
+	if b.catalogService == nil || !b.activeLLMConfigurationInitialized || len(b.subscriptions) != 12 {
 		t.Fatal("timeout released live transport dependencies")
 	}
 	query := magicevent.NewEventWithContext(events.TopicLLMCommandGetActiveConfiguration, llmApplicationOwnerSource, events.CommandDestination, nil, ctx, events.GetActiveConfigurationCommand{})

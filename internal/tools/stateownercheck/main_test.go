@@ -337,6 +337,92 @@ func TestPreparationDiagnosticStageIsObservationButTargetStateStaysForbidden(t *
 	}
 }
 
+func TestPreparationProviderCatalogObservationDoesNotAllowSiblingAuthority(t *testing.T) {
+	for _, fields := range []string{"State string", "State string; TargetState string", "State string; DesiredState string", "State string; Stage string"} {
+		t.Run(fields, func(t *testing.T) {
+			root := newEmptyVerificationRepository(t)
+			for path, source := range map[string]string{
+				"internal/modules/blocks/llm/pkg/models/catalog.go":        "package models\ntype ProviderModelCatalog struct { " + fields + " }\n",
+				"internal/modules/kernel/workspace/pkg/events/messages.go": "package events\nimport models \"github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models\"\ntype SettleWorkspacePreparationBlockedCommand struct { Observation models.ProviderModelCatalog }\n",
+			} {
+				file := filepath.Join(root, path)
+				if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(file, []byte(source), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := verifyCrossOwnerCommandContracts(root)
+			if fields == "State string" {
+				if err != nil {
+					t.Fatal("cache observation rejected", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "SettleWorkspacePreparationBlockedCommand") {
+				t.Fatal("catalog sibling authority bypassed gate", err)
+			}
+		})
+	}
+}
+
+func TestPreparationRunHistoryRetirementPhaseIsExactObservationOnly(t *testing.T) {
+	for _, command := range []string{"SettleWorkspacePreparationBlockedCommand", "ChangeRetirementCommand"} {
+		for _, fields := range []string{"Phase string", "Phase string; State string", "Phase string; TargetPhase string", "Phase string; DesiredState string"} {
+			t.Run(command+"/"+fields, func(t *testing.T) {
+				root := newEmptyVerificationRepository(t)
+				for path, source := range map[string]string{
+					"internal/modules/blocks/run/pkg/models/retirement.go":     "package models\ntype WorkspaceRetirementFence struct { " + fields + " }\n",
+					"internal/modules/kernel/workspace/pkg/events/messages.go": "package events\nimport models \"github.com/muidea/workorch/internal/modules/blocks/run/pkg/models\"\ntype " + command + " struct { Observation models.WorkspaceRetirementFence }\n",
+				} {
+					file := filepath.Join(root, path)
+					if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(file, []byte(source), 0644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				err := verifyCrossOwnerCommandContracts(root)
+				if command == "SettleWorkspacePreparationBlockedCommand" && fields == "Phase string" {
+					if err != nil {
+						t.Fatal("original retirement observation rejected", err)
+					}
+				} else if err == nil || !strings.Contains(err.Error(), command) {
+					t.Fatal("foreign command or sibling authority bypassed gate", err)
+				}
+			})
+		}
+	}
+}
+
+func TestPreparationSoulRouteStageDoesNotAllowSiblingTargetState(t *testing.T) {
+	for _, fields := range []string{"Stage string", "Stage string; State string", "Stage string; TargetStage string", "Stage string; DesiredState string"} {
+		t.Run(fields, func(t *testing.T) {
+			root := newEmptyVerificationRepository(t)
+			for path, source := range map[string]string{
+				"internal/modules/kernel/workspace/pkg/models/soul.go":     "package models\ntype PreparationSoulSelection struct { " + fields + " }\n",
+				"internal/modules/kernel/workspace/pkg/events/messages.go": "package events\nimport models \"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models\"\ntype SettlePreparationCommand struct { Selections []models.PreparationSoulSelection }\n",
+			} {
+				file := filepath.Join(root, path)
+				if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(file, []byte(source), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := verifyCrossOwnerCommandContracts(root)
+			if fields == "Stage string" {
+				if err != nil {
+					t.Fatal("observed route rejected", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "SettlePreparationCommand") {
+				t.Fatal("sibling authority bypassed gate", err)
+			}
+		})
+	}
+}
+
 func TestRuntimeStateRecordObservedStateIsAllowedOnlyAtRunOwnerStoreEdge(t *testing.T) {
 	writeFixture := func(t *testing.T, commandName, fields string) string {
 		t.Helper()

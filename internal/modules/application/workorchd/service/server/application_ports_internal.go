@@ -17,6 +17,8 @@ func applicationOperationsFromPorts(ports ApplicationPorts) applicationOperation
 			updateWorkspaceLLMSelectionPort: ports.Workspace.UpdateWorkspaceLLMSelection,
 			listWorkspaces:                  ports.Workspace.ListWorkspaces,
 			readStartupPreparation:          ports.Workspace.ReadStartupPreparation,
+			checkStartupPreparation:         ports.Workspace.CheckStartupPreparation,
+			recoverStartupPreparation:       ports.Workspace.RecoverStartupPreparation,
 		},
 		definitionOperations: definitionOperations{
 			authoring: DefinitionAuthoringPorts{

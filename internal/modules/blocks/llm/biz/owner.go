@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -43,6 +44,7 @@ type Biz struct {
 	activeLLMConfig                   workorchconfig.LLMConfig
 	activeLLMConfigurationRevision    string
 	activeLLMConfigurationInitialized bool
+	preparationConfigurationEpoch     string
 	physicalSubmissionGuard           *runtimePhysicalSubmissionGuard
 	subscriptions                     []ownerSubscription
 	started                           bool
@@ -134,6 +136,7 @@ func (m *Biz) Start() error {
 		llmevents.TopicLLMCommandGetProviderModelCatalog,
 		llmevents.TopicLLMCommandRefreshProviderModelCatalog,
 		llmevents.TopicLLMCommandValidateInferenceSelection,
+		llmevents.TopicObserveProviderCatalogCache,
 	}
 	for _, topic := range topics {
 		if err := m.subscribeOwner(topic, m.handleCommand, false); err != nil {
@@ -180,6 +183,7 @@ func (m *Biz) captureActiveLLMConfiguration() error {
 	}
 	m.activeLLMConfig = workorchconfig.CloneLLMConfig(configured)
 	m.activeLLMConfigurationRevision = revision
+	m.preparationConfigurationEpoch = "llm-preparation-epoch:" + rand.Text()
 	m.activeLLMConfigurationInitialized = true
 	return nil
 }
@@ -273,6 +277,7 @@ func (m *Biz) Teardown(ctx context.Context) error {
 	m.candidateProvider = nil
 	m.activeLLMConfig = workorchconfig.LLMConfig{}
 	m.activeLLMConfigurationRevision = ""
+	m.preparationConfigurationEpoch = ""
 	m.activeLLMConfigurationInitialized = false
 	m.physicalSubmissionGuard.clear()
 	m.started = false
@@ -931,6 +936,20 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 		return
 	}
 	switch ev.ID() {
+	case llmevents.TopicObserveProviderCatalogCache:
+		command, ok := ev.Data().(llmevents.ObserveProviderCatalogCacheCommand)
+		if !ok || command.Validate() != nil {
+			setLLMMagicError(result, common.ErrInvalidArgument)
+			return
+		}
+		value, err := m.observeProviderCatalogCache(ev.Context(), command)
+		if err != nil {
+			// This path intentionally returns no wrapped owner/config diagnostic.
+			setLLMMagicError(result, common.ErrConflict)
+			return
+		}
+		result.Set(value, nil)
+		return
 	case llmevents.TopicLLMCommandCompleteProviderDocument:
 		m.handleProviderDocument(ev, result)
 		return

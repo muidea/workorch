@@ -70,7 +70,8 @@ func (h *runLifecycleHub) Unsubscribe(topic string, observer magicevent.Observer
 func TestRunLifecyclePartialSubscriptionsRemainReachableAndReleaseInReverse(t *testing.T) {
 	// Every setup/start acquisition cut, including the first command and final
 	// execution ingress, must retain precisely the successful release prefix.
-	for failAt := 1; failAt <= 22; failAt++ {
+	// Complete history and exact original-receipt queries add two to 22.
+	for failAt := 1; failAt <= 24; failAt++ {
 		t.Run(string(rune('A'+failAt-1)), func(t *testing.T) {
 			hub := &runLifecycleHub{Hub: newRunModuleTestHub(t), failSubscribe: failAt}
 			module := New()
@@ -138,13 +139,13 @@ func TestRunLifecycleFailedUnsubscribeKeepsOwnerAndResumesLedger(t *testing.T) {
 		}
 		seen[topic] = true
 	}
-	if len(seen) != 22 || hub.unsubscribeCalls != 23 {
+	if len(seen) != 24 || !seen[runevents.TopicObserveWorkspacePreparationHistory] || !seen[runevents.TopicQueryWorkspaceExecutionIntentReceipt] || hub.unsubscribeCalls != 25 {
 		t.Fatalf("release ledger: topics=%d calls=%d", len(seen), hub.unsubscribeCalls)
 	}
 	if err := manager.TeardownChecked(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if hub.unsubscribeCalls != 23 {
+	if hub.unsubscribeCalls != 25 {
 		t.Fatal("duplicate manager teardown repeated release")
 	}
 }

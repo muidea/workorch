@@ -60,6 +60,7 @@ func (r ListSkillsResult) Clone() ListSkillsResult {
 
 func MessageContracts() []eventcontract.MessageContract {
 	return []eventcontract.MessageContract{
+		eventcontract.CommandTopic[ObserveRegistryCatalogCommand, ObserveRegistryCatalogResult]("skill", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicObserveRegistryCatalog).MessageContract(),
 		eventcontract.CommandTopic[CreateSkillCommand, CreateSkillResult]("skill", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyState, TopicSkillCommandCreate).MessageContract(),
 		eventcontract.CommandTopic[GetSkillCommand, GetSkillResult]("skill", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicSkillCommandGet).MessageContract(),
 		eventcontract.CommandTopic[ListSkillsCommand, ListSkillsResult]("skill", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicSkillCommandList).MessageContract(),

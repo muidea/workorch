@@ -35,6 +35,8 @@ func (m *Biz) enterOwner(drain bool) (func(), error) {
 func (m *Biz) subscribeOwner(topic string, handler magicevent.ObserverFunc) error {
 	drain := false
 	switch topic {
+	case memoryevents.TopicObservePreparationInventory:
+		drain = true
 	case memoryevents.TopicMemoryCommandGet, memoryevents.TopicMemoryCommandListByWorkspace, memoryevents.TopicMemoryCommandSearch, memoryevents.TopicMemoryRecallTraceCommandList, memoryevents.TopicMemoryRecallTraceCommandUpsert:
 		drain = true
 	}

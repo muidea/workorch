@@ -81,6 +81,24 @@ func TestPreparedBootstrapPureCompilationIsNotReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	definition, err := startuppreparation.CompilePreparedDefinition(snapshot, manifest)
+	if err != nil || definition.CompilerVersion != "workorch-preparation-definition-compiler/v1" || definition.SnapshotHash != snapshot.SnapshotHash || definition.ManifestHash != manifest.ManifestHash || definition.SourceCount != len(snapshot.Candidate.DoDInputs)+1 || definition.SourceInventoryHash == "" || definition.ProfileContractsHash != snapshot.StartupInput.RuntimeProfileContractsHash || definition.ObligationCount != len(snapshot.Candidate.Specification.Obligations) {
+		t.Fatal("provider-independent original source compilation", definition, err)
+	}
+	for _, mutate := range []func(*startuppreparation.ExactConfirmedStartupSnapshot){
+		func(s *startuppreparation.ExactConfirmedStartupSnapshot) { s.Goal.Text += "changed" },
+		func(s *startuppreparation.ExactConfirmedStartupSnapshot) { s.DoD.Items[0] += "changed" },
+		func(s *startuppreparation.ExactConfirmedStartupSnapshot) { s.Candidate.RuntimeProfileContracts = nil },
+	} {
+		changed := snapshot.Clone()
+		mutate(&changed)
+		if _, err := startuppreparation.CompilePreparedDefinition(changed, manifest); err == nil {
+			t.Fatal("substituted original source compiled")
+		}
+	}
+	if _, err := startuppreparation.CompilePreparedDefinition(snapshot, startuppreparation.Manifest{}); err == nil {
+		t.Fatal("definition compiled without original required manifest")
+	}
 	activation := runtimecontract.RuntimeActivationContext{
 		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "fixture"}},
 		ExecutionContract: runtimecontract.RuntimeExecutionContract{

@@ -11,8 +11,8 @@ import (
 
 func TestContractsDeclareFileAsQueryAndExecutionReceiver(t *testing.T) {
 	contracts := Contracts()
-	if len(contracts) != 19 {
-		t.Fatalf("contract count = %d, want 19", len(contracts))
+	if len(contracts) != 24 {
+		t.Fatalf("contract count = %d, want 24 (19 existing + 3 STEP04 observations + revalidation/epoch)", len(contracts))
 	}
 	queryTopics := map[string]struct{}{
 		TopicAcquireRuntimeCapabilities:                   {},
@@ -25,6 +25,8 @@ func TestContractsDeclareFileAsQueryAndExecutionReceiver(t *testing.T) {
 		TopicAcquireTargetSnapshot:                        {}, TopicAcquireRuntimeTargetSelection: {},
 		TopicAcquireWorkspaceManifest: {}, TopicConfirmRuntimeRepairSurface: {},
 		TopicAcquireAuthoringResources: {}, TopicVerifyAuthoringResource: {},
+		TopicObservePreparationDirectories: {}, TopicObservePreparationResources: {}, TopicObservePreparationManagedConfigs: {},
+		TopicReobservePreparationFiles: {}, TopicQueryPreparationEpoch: {},
 	}
 	for _, contract := range contracts {
 		if contract.Owner != "file" || !slices.Equal(contract.ReceiverOwners, []string{"file"}) {

@@ -21,6 +21,7 @@ func memoryCommandTopics() []string {
 	return []string{
 		memoryevents.TopicMemoryCommandCreate,
 		memoryevents.TopicMemoryCommandGet,
+		memoryevents.TopicObservePreparationInventory,
 		memoryevents.TopicMemoryCommandListByWorkspace,
 		memoryevents.TopicMemoryCommandSearch,
 		memoryevents.TopicMemoryCommandUpdate,
@@ -35,6 +36,7 @@ func memoryCommandTopics() []string {
 func memoryCommandFamilyForTopic(topic string) (memoryCommandFamily, bool) {
 	switch topic {
 	case memoryevents.TopicMemoryCommandCreate,
+		memoryevents.TopicObservePreparationInventory,
 		memoryevents.TopicMemoryCommandGet,
 		memoryevents.TopicMemoryCommandListByWorkspace,
 		memoryevents.TopicMemoryCommandSearch,
@@ -116,6 +118,8 @@ func memoryCommandWorkspaceID(data any) common.WorkspaceID {
 	case memoryevents.CreateMemoryCommand:
 		return cmd.WorkspaceID
 	case memoryevents.GetMemoryCommand:
+		return cmd.WorkspaceID
+	case memoryevents.ObservePreparationInventoryCommand:
 		return cmd.WorkspaceID
 	case memoryevents.ListMemoryByWorkspaceCommand:
 		return cmd.WorkspaceID

@@ -66,6 +66,10 @@ func TestRunLifecycleCanceledQueuedRecoveryIsNotCompletedUntilCallbackReturns(t 
 		t.Fatalf("queued callbacks=%d", len(background.tasks))
 	}
 	key := replacementRecoveryTaskKey(predecessor.WorkspaceID, predecessor.ID)
+	acquiredTopics := append([]string(nil), owner.topics...)
+	if len(acquiredTopics) != 24 { // Complete history and exact original-receipt queries.
+		t.Fatalf("unexpected acquired topic inventory: %v", acquiredTopics)
+	}
 	owner.BeginShutdown()
 	for attempt := 0; attempt < 2; attempt++ {
 		budget, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
@@ -74,7 +78,7 @@ func TestRunLifecycleCanceledQueuedRecoveryIsNotCompletedUntilCallbackReturns(t 
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("Stop treated queued callback as done: %v", err)
 		}
-		if owner.runs == nil || owner.replacementRecoveryCancel == nil || owner.replacementRecoveryCtx == nil || owner.replacementRecoveryTasks[key] == 0 || len(owner.topics) != 22 || owner.stopping {
+		if owner.runs == nil || owner.replacementRecoveryCancel == nil || owner.replacementRecoveryCtx == nil || owner.replacementRecoveryTasks[key] == 0 || !reflect.DeepEqual(owner.topics, acquiredTopics) || owner.stopping {
 			t.Fatal("timeout discarded dependencies/handles/ledger or disabled drain")
 		}
 	}

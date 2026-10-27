@@ -108,7 +108,7 @@ func TestFileOwnerStartIsIdempotentAndTeardownClearsLifecycle(t *testing.T) {
 	}
 }
 
-func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllNineteenTopics(t *testing.T) {
+func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllTopics(t *testing.T) {
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -133,6 +133,11 @@ func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllNineteenTopics(t *testing.T
 		{fileevents.TopicAcquireTargetSnapshot, fileevents.PrerequisiteCommandDestination},
 		{fileevents.TopicAcquireAuthoringResources, ModuleID},
 		{fileevents.TopicVerifyAuthoringResource, ModuleID},
+		{fileevents.TopicObservePreparationDirectories, ModuleID},
+		{fileevents.TopicObservePreparationResources, ModuleID},
+		{fileevents.TopicObservePreparationManagedConfigs, ModuleID},
+		{fileevents.TopicReobservePreparationFiles, ModuleID},
+		{fileevents.TopicQueryPreparationEpoch, ModuleID},
 		{fileevents.TopicAcquireRuntimeTargetSelection, fileevents.PrerequisiteCommandDestination},
 		{fileevents.TopicAcquireWorkspaceManifest, fileevents.PrerequisiteCommandDestination},
 		{fileevents.TopicConfirmRuntimeRepairSurface, fileevents.PrerequisiteCommandDestination},
@@ -151,7 +156,7 @@ func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllNineteenTopics(t *testing.T
 		if item.topic == fileevents.TopicAcquireAuthoringResources {
 			source = authoringApplicationSource
 		}
-		if item.topic == fileevents.TopicVerifyAuthoringResource {
+		if item.topic == fileevents.TopicVerifyAuthoringResource || item.topic == fileevents.TopicObservePreparationDirectories || item.topic == fileevents.TopicObservePreparationResources || item.topic == fileevents.TopicObservePreparationManagedConfigs || item.topic == fileevents.TopicReobservePreparationFiles || item.topic == fileevents.TopicQueryPreparationEpoch {
 			source = "blocks/workspace"
 		}
 		event := &fileCountingDataEvent{Event: magicevent.NewEventWithContext(
@@ -171,7 +176,7 @@ func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllNineteenTopics(t *testing.T
 		if item.topic == fileevents.TopicAcquireAuthoringResources {
 			source = authoringApplicationSource
 		}
-		if item.topic == fileevents.TopicVerifyAuthoringResource {
+		if item.topic == fileevents.TopicVerifyAuthoringResource || item.topic == fileevents.TopicObservePreparationDirectories || item.topic == fileevents.TopicObservePreparationResources || item.topic == fileevents.TopicObservePreparationManagedConfigs || item.topic == fileevents.TopicReobservePreparationFiles || item.topic == fileevents.TopicQueryPreparationEpoch {
 			source = "blocks/workspace"
 		}
 		event := &fileCountingDataEvent{Event: magicevent.NewEventWithContext(

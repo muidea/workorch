@@ -1,6 +1,7 @@
 package skillselectcore
 
 import (
+	"github.com/muidea/workorch/internal/pkg/skillselection"
 	"strings"
 
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
@@ -36,16 +37,16 @@ func AllowedSkillRefs(soul *soulmodel.Soul) []string {
 	return ret
 }
 
-func CandidatesFromSkills(items []workorchmanagementcontract.Skill) []Candidate {
-	ret := make([]Candidate, 0, len(items))
+func CandidatesFromSkills(items []workorchmanagementcontract.Skill) []skillselection.Candidate {
+	ret := make([]skillselection.Candidate, 0, len(items))
 	for _, item := range items {
 		ret = append(ret, CandidateFromSkill(item))
 	}
 	return ret
 }
 
-func CandidateFromSkill(item workorchmanagementcontract.Skill) Candidate {
-	return Candidate{
+func CandidateFromSkill(item workorchmanagementcontract.Skill) skillselection.Candidate {
+	return skillselection.Candidate{
 		ID:            item.ID,
 		Name:          item.Name,
 		TriggerRules:  append([]string(nil), item.TriggerRules...),
@@ -55,7 +56,7 @@ func CandidateFromSkill(item workorchmanagementcontract.Skill) Candidate {
 	}
 }
 
-func SkillsBySelectedCandidates(source []workorchmanagementcontract.Skill, selected []Candidate) []workorchmanagementcontract.Skill {
+func SkillsBySelectedCandidates(source []workorchmanagementcontract.Skill, selected []skillselection.Candidate) []workorchmanagementcontract.Skill {
 	if len(selected) == 0 {
 		return nil
 	}

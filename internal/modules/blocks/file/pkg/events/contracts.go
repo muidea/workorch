@@ -15,6 +15,11 @@ func Contracts() []eventcontract.Contract {
 		TopicConfirmRuntimeRepairSurface,
 		TopicAcquireAuthoringResources,
 		TopicVerifyAuthoringResource,
+		TopicObservePreparationDirectories,
+		TopicObservePreparationResources,
+		TopicObservePreparationManagedConfigs,
+		TopicReobservePreparationFiles,
+		TopicQueryPreparationEpoch,
 	)
 	ret = append(ret, eventcontract.Build("file", eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute,
 		TopicExecuteFileListOperation,

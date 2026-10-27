@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"crypto/rand"
 	"sync"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -19,6 +20,7 @@ const ModuleID = modulecommon.ModuleID
 const (
 	applicationContextRegistrySource = "application/workorchd/context-registry"
 	applicationOwnerReadSource       = "application/workorchd/appservice"
+	applicationPreparationSource     = "application/workorchd"
 )
 
 type Dependencies struct {
@@ -29,13 +31,14 @@ type Dependencies struct {
 
 type Biz struct {
 	basebiz.Base
-	service    *service
-	topics     []string
-	started    bool
-	lifecycle  basebiz.Lifecycle
-	shutdownMu sync.Mutex
-	releasing  bool
-	released   bool
+	service          *service
+	preparationEpoch string
+	topics           []string
+	started          bool
+	lifecycle        basebiz.Lifecycle
+	shutdownMu       sync.Mutex
+	releasing        bool
+	released         bool
 }
 
 func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine, deps Dependencies) (*Biz, error) {
@@ -45,7 +48,7 @@ func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine, deps
 	if eventHub == nil {
 		return nil, common.ErrInvalidArgument
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine), service: newService(deps.Skills)}, nil
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine), service: newService(deps.Skills), preparationEpoch: "skill-preparation-epoch:" + rand.Text()}, nil
 }
 
 func (m *Biz) Start() error {
@@ -67,6 +70,7 @@ func (m *Biz) Start() error {
 		skillevents.TopicSkillCommandCreate,
 		skillevents.TopicSkillCommandGet,
 		skillevents.TopicSkillCommandList,
+		skillevents.TopicObserveRegistryCatalog,
 	}
 	for _, topic := range topics {
 		if err := m.subscribeOwner(topic, m.handleSkillCommand); err != nil {
@@ -130,6 +134,14 @@ func (m *Biz) handleSkillCommand(ev magicevent.Event, result magicevent.Result) 
 	}
 	ctx := ev.Context()
 	switch ev.ID() {
+	case skillevents.TopicObserveRegistryCatalog:
+		cmd, ok := ev.Data().(skillevents.ObserveRegistryCatalogCommand)
+		if !ok {
+			setMagicResult(result, skillevents.ObserveRegistryCatalogResult{}, common.ErrInvalidArgument)
+			return
+		}
+		value, err := m.observeRegistryCatalog(ctx, cmd)
+		setMagicResult(result, value.Clone(), err)
 	case skillevents.TopicSkillCommandCreate:
 		cmd, ok := ev.Data().(skillevents.CreateSkillCommand)
 		if !ok {
@@ -173,6 +185,8 @@ func (m *Biz) handleSkillCommand(ev magicevent.Event, result magicevent.Result) 
 
 func skillCommandSourceAllowed(topic, source string) bool {
 	switch topic {
+	case skillevents.TopicObserveRegistryCatalog:
+		return source == applicationPreparationSource
 	case skillevents.TopicSkillCommandCreate:
 		return source == applicationContextRegistrySource
 	case skillevents.TopicSkillCommandGet, skillevents.TopicSkillCommandList:
@@ -188,6 +202,8 @@ func setSkillCommandInvalidResult(ev magicevent.Event, result magicevent.Result)
 		topic = ev.ID()
 	}
 	switch topic {
+	case skillevents.TopicObserveRegistryCatalog:
+		setMagicResult(result, skillevents.ObserveRegistryCatalogResult{}, common.ErrInvalidArgument)
 	case skillevents.TopicSkillCommandCreate:
 		setMagicResult(result, skillevents.CreateSkillResult{}, common.ErrInvalidArgument)
 	case skillevents.TopicSkillCommandGet:

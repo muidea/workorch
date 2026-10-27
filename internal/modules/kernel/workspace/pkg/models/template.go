@@ -73,6 +73,7 @@ func WorkspaceForCurrentTemplate(workspace *Workspace, template *WorkspaceTempla
 		return nil, common.ErrInvalidArgument
 	}
 	next := *workspace
+	next.PreparationFence = workspace.PreparationFence.Clone()
 	boundHash := workspace.TemplateBindingHash
 	if boundHash == "" && workspace.StartupInput != nil {
 		boundHash = workspace.StartupInput.TemplateSnapshotHash
@@ -102,15 +103,54 @@ func WorkspaceConfigurationHash(workspace *Workspace) string {
 	if workspace == nil {
 		return ""
 	}
-	configuration := struct {
-		Directory, InternalDirectory, TemplateID, ProfileID string
-		DefaultLLMSelection                                 *runtimecontract.ProviderInferenceSelection
-		DefaultSoulID                                       common.SoulID
-		SoulBindings                                        map[string]common.SoulID
-		ContextHints                                        workorcheventpayload.Payload
-		EvidencePolicies                                    []workorcheventpayload.Payload
-	}{Directory: workspace.DeliverableDirectory, InternalDirectory: workspace.InternalDirectory, TemplateID: workspace.TemplateID, ProfileID: workspace.ProfileID,
-		DefaultLLMSelection: workspace.DefaultLLMSelection, DefaultSoulID: workspace.DefaultSoulID, SoulBindings: workspace.SoulBindings, ContextHints: workspace.ContextHints, EvidencePolicies: workspace.EvidencePolicies}
+	return workspaceConfigurationView(workspace).Hash()
+}
+
+// Complete non-secret preimage of the existing configuration hash. Keep field
+// names/order and nil normalization identical to the historical hash shape.
+// This is a declaration snapshot, not provider permission or resource state.
+type WorkspaceConfigurationSnapshot struct {
+	Directory, InternalDirectory, TemplateID, ProfileID string
+	DefaultLLMSelection                                 *runtimecontract.ProviderInferenceSelection
+	DefaultSoulID                                       common.SoulID
+	SoulBindings                                        map[string]common.SoulID
+	ContextHints                                        workorcheventpayload.Payload
+	EvidencePolicies                                    []workorcheventpayload.Payload
+}
+
+func CaptureWorkspaceConfiguration(w *Workspace) WorkspaceConfigurationSnapshot {
+	return workspaceConfigurationView(w).Clone()
+}
+
+func workspaceConfigurationView(w *Workspace) WorkspaceConfigurationSnapshot {
+	if w == nil {
+		return WorkspaceConfigurationSnapshot{}
+	}
+	return WorkspaceConfigurationSnapshot{Directory: w.DeliverableDirectory, InternalDirectory: w.InternalDirectory, TemplateID: w.TemplateID, ProfileID: w.ProfileID, DefaultLLMSelection: w.DefaultLLMSelection, DefaultSoulID: w.DefaultSoulID, SoulBindings: w.SoulBindings, ContextHints: w.ContextHints, EvidencePolicies: w.EvidencePolicies}
+}
+
+func (c WorkspaceConfigurationSnapshot) Clone() WorkspaceConfigurationSnapshot {
+	if c.DefaultLLMSelection != nil {
+		value := *c.DefaultLLMSelection
+		c.DefaultLLMSelection = &value
+	}
+	if c.SoulBindings != nil {
+		bindings := make(map[string]common.SoulID, len(c.SoulBindings))
+		for stage, id := range c.SoulBindings {
+			bindings[stage] = id
+		}
+		c.SoulBindings = bindings
+	}
+	c.ContextHints = c.ContextHints.Clone()
+	if c.EvidencePolicies != nil && len(c.EvidencePolicies) == 0 {
+		c.EvidencePolicies = []workorcheventpayload.Payload{}
+	} else {
+		c.EvidencePolicies = workorcheventpayload.CloneSlice(c.EvidencePolicies)
+	}
+	return c
+}
+
+func (configuration WorkspaceConfigurationSnapshot) Hash() string {
 	// Empty bindings may be represented as nil across EventHub. Do not turn
 	// that transport detail into configuration drift on a duplicate request.
 	if len(configuration.SoulBindings) == 0 {

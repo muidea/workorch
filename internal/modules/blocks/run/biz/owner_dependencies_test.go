@@ -20,6 +20,14 @@ func (r runBizTestBoundRuns) RunOwnerRepositoryBinding() repository.RunOwnerRepo
 	return r.binding
 }
 
+func (r runBizTestBoundRuns) ReadWorkspaceExecutionIntentReceipt(ctx context.Context, workspaceID common.WorkspaceID, requestID string) (*runmodel.WorkspaceExecutionIntentReceipt, error) {
+	reader, ok := r.RunRepository.(repository.RunExecutionIntentReceiptReader)
+	if !ok {
+		return nil, common.ErrConflict
+	}
+	return reader.ReadWorkspaceExecutionIntentReceipt(ctx, workspaceID, requestID)
+}
+
 type runBizTestBoundSteps struct {
 	repository.StepRepository
 	binding repository.RunOwnerRepositoryBinding

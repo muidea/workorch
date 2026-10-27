@@ -15,6 +15,10 @@ import (
 
 func (m *Biz) executeRunQueryCommand(ctx context.Context, ev magicevent.Event) (any, error) {
 	switch ev.ID() {
+	case runevents.TopicQueryWorkspaceExecutionIntentReceipt:
+		return m.queryWorkspaceExecutionIntentReceipt(ctx, ev)
+	case runevents.TopicObserveWorkspacePreparationHistory:
+		return m.observeWorkspacePreparationHistory(ctx, ev)
 	case runevents.TopicRunCommandGet:
 		cmd, ok := ev.Data().(runevents.GetRunCommand)
 		if !ok || cmd.RunID == "" {

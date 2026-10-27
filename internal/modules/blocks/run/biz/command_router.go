@@ -26,6 +26,8 @@ func runCommandTopics() []string {
 		runevents.TopicRunCommandList,
 		runevents.TopicRunCommandListByWorkspace,
 		runevents.TopicRunCommandLifecycleFactInventory,
+		runevents.TopicObserveWorkspacePreparationHistory,
+		runevents.TopicQueryWorkspaceExecutionIntentReceipt,
 		runevents.TopicRunCommandGetStep,
 		runevents.TopicRunCommandListStepsByRun,
 		runevents.TopicRunCommandListStepSummariesByRun,
@@ -44,7 +46,9 @@ func runCommandFamilyForTopic(topic string) (runCommandFamily, bool) {
 	case runevents.TopicRunCommandGet,
 		runevents.TopicRunCommandList,
 		runevents.TopicRunCommandListByWorkspace,
-		runevents.TopicRunCommandLifecycleFactInventory:
+		runevents.TopicRunCommandLifecycleFactInventory,
+		runevents.TopicObserveWorkspacePreparationHistory,
+		runevents.TopicQueryWorkspaceExecutionIntentReceipt:
 		return runCommandFamilyRunQuery, true
 	case runevents.TopicRunCommandGetStep,
 		runevents.TopicRunCommandListStepsByRun,
@@ -113,6 +117,10 @@ func (m *Biz) executeCommand(ev magicevent.Event) (any, error) {
 
 func workspaceScopeFromRunCommand(data any) common.WorkspaceID {
 	switch cmd := data.(type) {
+	case runevents.QueryWorkspaceExecutionIntentReceiptCommand:
+		return cmd.WorkspaceID
+	case runevents.ObserveWorkspacePreparationHistoryCommand:
+		return cmd.WorkspaceID
 	case runevents.GetRunCommand:
 		return cmd.WorkspaceID
 	case runevents.ListRunsByWorkspaceCommand:
@@ -185,6 +193,10 @@ func setRunMagicResult(result magicevent.Result, data any, err error) {
 func cloneRunCommandResult(data any) (any, bool) {
 	switch value := data.(type) {
 	case runevents.GetRunResult:
+		return value.Clone(), true
+	case runevents.ObserveWorkspacePreparationHistoryResult:
+		return value.Clone(), true
+	case runevents.QueryWorkspaceExecutionIntentReceiptResult:
 		return value.Clone(), true
 	case runevents.ListRunsResult:
 		return value.Clone(), true

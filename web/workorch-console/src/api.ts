@@ -1,6 +1,7 @@
 import type { Approval, ApprovalPage, ArtifactPage, ContextBundle, Decision, DecisionPage, DoD, EventRecord, Goal, MCPCapability, MCPCapabilityMutation, MCPPrompt, MCPResource, MCPServer, MCPTool, MemoryItem, MemoryRecallTrace, PatchPage, ProviderInferenceSelection, ResultPage, Run, RunObservability, RunSnapshot, RuntimeCheckpointPage, ServiceConfiguration, ServiceStatus, Skill, Soul, StepPage, TaskDecomposition, TaskProgress, ToolCallPage, UpdateLLMConfigurationRequest, UpdateServerConfigurationRequest, UpdateWebSearchConfigurationRequest, ValidationResultPage, Workspace, WorkspaceExecutionIntentRequest, WorkspaceListProjection, WorkspaceSnapshotProjection, WorkspaceSoulBindings, WorkspaceTemplate } from './types';
 import type { DefinitionAuthoringCreate, DefinitionAuthoringInput, DefinitionAuthoringView, AuthoringDiagnostic, DefinitionAuthoringPreparationDiagnostic } from './types';
 import { parseWorkspaceExecutionAdmission } from './workspaceExecutionAdmission';
+import type { PreparationCheckRequest, PreparationOperation, StartupPreparationView } from './startupPreparation';
 import { creationRecoveryFromResponse, creationRejectedBeforeDispatchFromResponse, WorkorchRequestError } from './creationRecovery';
 
 const apiBase = '/api/v1/workorch';
@@ -155,6 +156,12 @@ export const workorchApi = {
     const body = await workorchApi.listWorkspaceProjection();
     return body.workspaces;
   },
+  readStartupPreparation: async (workspaceId: string) => {
+    const body = await request<{ preparation: StartupPreparationView }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation`);
+    return body.preparation;
+  },
+  checkStartupPreparation: (workspaceId: string, intent: PreparationCheckRequest) => request<PreparationOperation>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation/check`, { method: 'POST', body: JSON.stringify(intent) }),
+  recoverStartupPreparation: (workspaceId: string, intent: PreparationCheckRequest) => request<PreparationOperation>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation/recover`, { method: 'POST', body: JSON.stringify(intent) }),
   readWorkspaceSnapshotProjection: async (workspaceId: string) => {
     return request<WorkspaceSnapshotProjection>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/snapshot?view=detail`);
   },

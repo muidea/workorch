@@ -17,12 +17,12 @@ func TestConcreteSkillResultsCloneDetachedOwnerState(t *testing.T) {
 	}
 }
 
-func TestSkillContractInventoryKeepsOnlyCreateGetAndBoundedList(t *testing.T) {
+func TestSkillContractInventoryIncludesBoundedPreparationObservation(t *testing.T) {
 	contracts := Contracts()
-	if len(contracts) != 3 || len(MessageContracts()) != 3 {
-		t.Fatalf("Skill contracts = %d/%d, want three concrete topics", len(contracts), len(MessageContracts()))
+	if len(contracts) != 4 || len(MessageContracts()) != 4 {
+		t.Fatalf("Skill contracts = %d/%d, want four concrete topics", len(contracts), len(MessageContracts()))
 	}
-	want := map[string]bool{TopicSkillCommandCreate: true, TopicSkillCommandGet: true, TopicSkillCommandList: true}
+	want := map[string]bool{TopicSkillCommandCreate: true, TopicSkillCommandGet: true, TopicSkillCommandList: true, TopicObserveRegistryCatalog: true}
 	for _, contract := range contracts {
 		if !want[contract.Topic] {
 			t.Fatalf("unexpected Skill topic %q", contract.Topic)

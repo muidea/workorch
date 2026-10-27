@@ -8,6 +8,7 @@ import { workorchApi } from '../api';
 import { WorkspaceAuthoringEditor } from './components/WorkspaceAuthoringEditor';
 import { WorkspaceAuthoringCandidate } from './components/WorkspaceAuthoringCandidate';
 import { WorkspaceAuthoringConfirmation } from './components/WorkspaceAuthoringConfirmation';
+import { WorkspacePreparation } from './components/WorkspacePreparation';
 import { AuthoringSummary } from './components/AuthoringSummary';
 import { useSSE } from '../hooks';
 import { modelLabels } from '../utils/constants';
@@ -52,6 +53,7 @@ function providerModelTargetLabel(selection?: { target?: { providerId?: string; 
 }
 
 export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlaneProps, 'selectedWorkspaceId'>) {
+	const [preparationWorkspaceId, setPreparationWorkspaceId] = useState<string>();
   const { message } = AntApp.useApp();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string | undefined>(undefined);
@@ -61,7 +63,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [dods, setDoDs] = useState<DoD[]>([]);
   const [souls, setSouls] = useState<Soul[]>([]);
   const [soulBindings, setSoulBindings] = useState<WorkspaceSoulBindings | undefined>(undefined);
-  const [skills, setSkills] = useState<Skill[]>([]);
+  const [skills, setSkills] = useState<Skill[] | undefined>();
+  const [skillInventoryLoading, setSkillInventoryLoading] = useState(false);
   const [mcpServers, setMCPServers] = useState<MCPServer[]>([]);
   const [memoryItems, setMemoryItems] = useState<MemoryItem[]>([]);
   const [configuration, setConfiguration] = useState<ServiceConfiguration | undefined>(undefined);
@@ -106,6 +109,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [confirmationWorkspaceId, setConfirmationWorkspaceId] = useState<string>();
   const [activationOpen, setActivationOpen] = useState(false);
   const [activationLoading, setActivationLoading] = useState(false);
+  const [activationConfigurationLoading, setActivationConfigurationLoading] = useState(false);
   const [activationIntent, setActivationIntent] = useState<'resume' | 'restart'>('resume');
   const [soulBindingEditorOpen, setSoulBindingEditorOpen] = useState(false);
   const [workspaceDeleteOpen, setWorkspaceDeleteOpen] = useState(false);
@@ -115,6 +119,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   const [workspaceListReady, setWorkspaceListReady] = useState(false);
   const workspaceListRequestSeq = useRef(0);
   const workspaceContextRequestSeq = useRef(0);
+  const activationConfigurationRequestSeq = useRef(0);
+  const skillInventoryRequestSeq = useRef(0);
   const currentWorkspaceIdRef = useRef<string | undefined>(undefined);
   const lastEventRevisionRef = useRef(0);
   const workspaceEventRefreshTimerRef = useRef<number | undefined>(undefined);
@@ -126,6 +132,15 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
   useEffect(() => {
     currentWorkspaceIdRef.current = workspaceId;
     lastEventRevisionRef.current = 0;
+    setSkills(undefined);
+    setSkillInventoryLoading(false);
+    setConfiguration(undefined);
+    setActivationOpen(false);
+    setActivationConfigurationLoading(false);
+    return () => {
+      activationConfigurationRequestSeq.current++;
+      skillInventoryRequestSeq.current++;
+    };
   }, [workspaceId]);
 
   useEffect(() => {
@@ -229,7 +244,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
     setGoals([]);
     setDoDs([]);
     setSoulBindings(undefined);
-    setSkills([]);
+    setSkills(undefined);
     setMCPServers([]);
     setMemoryItems([]);
     setRunSnapshot(undefined);
@@ -708,14 +723,12 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
 
   async function loadWorkspaceContext(targetWorkspaceId: string) {
     const requestSeq = ++workspaceContextRequestSeq.current;
-    const [nextSnapshotProjection, nextSouls, nextSoulBindings, nextSkills, nextMCPServers, nextMemoryItems, nextConfiguration] = await Promise.all([
+    const [nextSnapshotProjection, nextSouls, nextSoulBindings, nextMCPServers, nextMemoryItems] = await Promise.all([
       workorchApi.readWorkspaceSnapshotProjection(targetWorkspaceId),
       workorchApi.listSouls(),
       workorchApi.readWorkspaceSoulBindings(targetWorkspaceId),
-      workorchApi.listSkills(targetWorkspaceId),
       workorchApi.listMCPServers(),
-      workorchApi.listMemory(targetWorkspaceId),
-      workorchApi.readConfiguration()
+      workorchApi.listMemory(targetWorkspaceId)
     ]);
     if (requestSeq !== workspaceContextRequestSeq.current) {
       return;
@@ -732,10 +745,8 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       defaultSoulId: nextSoulBindings.defaultSoulId,
       bindings: nextSoulBindings.bindings ?? {}
     });
-    setSkills(nextSkills);
     setMCPServers(nextMCPServers);
     setMemoryItems(nextMemoryItems);
-    setConfiguration(nextConfiguration);
     const keepRunProcessView = runSnapshot
       && runSnapshot.workspace.id === targetWorkspaceId
       && (nextSnapshot.runs ?? []).some((item) => item.id === runSnapshot.run.id);
@@ -864,7 +875,11 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       .then(async (admission) => {
         if (!admission.accepted) {
           await loadWorkspaceContext(targetWorkspaceId);
-          message.error(`Workspace owner 拒绝执行意图：${admission.diagnostic || admission.reason}`);
+          if (admission.state === 'pending') {
+            message.warning(`原执行请求 ${admission.pendingRequestId} 结果未决；请保留原请求身份，不要换请求号重试。`);
+          } else {
+            message.error(`Workspace owner 拒绝执行意图：${admission.diagnostic || admission.reason}`);
+          }
           return;
         }
         setWorkspaceProjection(undefined);
@@ -907,7 +922,29 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       });
   };
 
-  const requestWorkspaceActivation = (intent: 'resume' | 'restart' = 'resume') => {
+  const closeWorkspaceActivation = () => {
+    activationConfigurationRequestSeq.current++;
+    setActivationConfigurationLoading(false);
+    setActivationOpen(false);
+    setConfiguration(undefined);
+  };
+
+  const querySkillInventory = async () => {
+    const targetWorkspaceId = workspaceId;
+    if (!targetWorkspaceId || skillInventoryLoading) return;
+    const token = ++skillInventoryRequestSeq.current;
+    setSkillInventoryLoading(true);
+    try {
+      const next = await workorchApi.listSkills(targetWorkspaceId);
+      if (token === skillInventoryRequestSeq.current && currentWorkspaceIdRef.current === targetWorkspaceId) setSkills(next);
+    } catch (error) {
+      if (token === skillInventoryRequestSeq.current && currentWorkspaceIdRef.current === targetWorkspaceId) message.error(errorMessage(error));
+    } finally {
+      if (token === skillInventoryRequestSeq.current && currentWorkspaceIdRef.current === targetWorkspaceId) setSkillInventoryLoading(false);
+    }
+  };
+
+  const requestWorkspaceActivation = async (intent: 'resume' | 'restart' = 'resume') => {
     if (!workspaceExecutionIntentAllowed(snapshot, intent)) {
       message.warning(workspaceDefinitionClarification(snapshot)
         ? intent === 'resume'
@@ -917,13 +954,36 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       return;
     }
     setActivationIntent(intent);
+    const token = ++activationConfigurationRequestSeq.current;
+    const targetWorkspaceId = workspaceId;
+    setConfiguration(undefined);
     activationForm.resetFields();
+    activationForm.setFieldsValue({ intent });
+    setActivationOpen(true);
+    setActivationConfigurationLoading(intent === 'restart');
     if (intent === 'restart') {
+      // Ordinary detail/preparation navigation and SSE must never warm an
+      // external model catalog. Only this explicit execution-editor action
+      // loads its configuration; it does not submit an execution intent.
+      let nextConfiguration: ServiceConfiguration;
+      try {
+        nextConfiguration = await workorchApi.readConfiguration();
+      } catch (error) {
+        if (token === activationConfigurationRequestSeq.current && currentWorkspaceIdRef.current === targetWorkspaceId) {
+          setActivationConfigurationLoading(false);
+          message.error(errorMessage(error));
+        }
+        return;
+      }
+      if (token !== activationConfigurationRequestSeq.current || currentWorkspaceIdRef.current !== targetWorkspaceId) return;
+      setConfiguration(nextConfiguration);
+      setActivationConfigurationLoading(false);
+      const readyOptions = helpers.chatTargetOptions(nextConfiguration);
       const defaultSelection = snapshot?.workspace.defaultLLMSelection;
-      const readyDefault = activationLLMTargetOptions.find(
+      const readyDefault = readyOptions.find(
         (item) => item.providerId === defaultSelection?.target.providerId && item.modelId === defaultSelection?.target.modelId
       );
-      const target = readyDefault ? defaultSelection?.target : activationReadyTarget;
+      const target = readyDefault ? defaultSelection?.target : helpers.activationReadyChatTarget(nextConfiguration);
       const reasoningEffort = readyDefault && defaultSelection?.reasoningEffort && (readyDefault.reasoningEfforts ?? []).includes(defaultSelection.reasoningEffort)
         ? defaultSelection.reasoningEffort
         : undefined;
@@ -935,10 +995,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
 		soulBindings: { ...(soulBindings?.bindings ?? {}) },
 		intent
 	  });
-	} else {
-	  activationForm.setFieldsValue({ intent });
     }
-    setActivationOpen(true);
   };
 
   const openDefinitionRevision = () => {
@@ -1025,6 +1082,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             {activationTracking ? <Tag color="processing">后台跟踪中</Tag> : null}
           </div>
           <div className="workspace-header-actions-main">
+            <Button disabled={!workspaceId} onClick={() => setPreparationWorkspaceId(workspaceId)}>激活前准备</Button>
             <Button
               type="primary"
               disabled={!workspaceId || (activeRunGovernanceBlocked && !definitionClarification)}
@@ -1060,9 +1118,11 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             <Dropdown
               menu={{
                 items: [
+                  { key: 'skills', label: '查询技能库存（SkillHub status，可能保存状态／访问已配服务）', disabled: !workspaceId || skillInventoryLoading },
                   { key: 'delete', label: '删除工作空间', danger: true, disabled: !workspaceId }
                 ],
                 onClick: ({ key }) => {
+                  if (key === 'skills') void querySkillInventory();
                   if (key === 'delete') {
                     openWorkspaceDelete();
                   }
@@ -1149,7 +1209,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
               { key: 'decision', label: modelLabels.decision, value: snapshot.decisions?.length ?? 0 },
               { key: 'approval', label: modelLabels.approval, value: snapshot.approvals?.length ?? 0 },
               { key: 'soul', label: modelLabels.soul, value: souls.length },
-              { key: 'skill', label: modelLabels.skill, value: skills.length },
+              { key: 'skill', label: `${modelLabels.skill}（显式库存查询）`, value: skills ? skills.length : '未加载' },
               { key: 'mcp', label: modelLabels.mcpServer, value: mcpServers.length },
               { key: 'memory', label: modelLabels.memory, value: memoryItems.length },
               { key: 'step', label: modelLabels.step, value: runSnapshot?.steps?.length ?? 0 },
@@ -2160,14 +2220,15 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
       <WorkspaceAuthoringEditor open={authoringOpen} workspaceId={workspaceId} onClose={() => setAuthoringOpen(false)} onAdmitted={async () => { if (workspaceId) await loadWorkspaceContext(workspaceId); }} />
       <WorkspaceAuthoringCandidate workspaceId={candidateOpen ? workspaceId : undefined} onClose={() => setCandidateOpen(false)} onOpenConfirmation={setConfirmationWorkspaceId} />
       <WorkspaceAuthoringConfirmation workspaceId={confirmationWorkspaceId} onClose={() => setConfirmationWorkspaceId(undefined)} />
+      <WorkspacePreparation workspaceId={preparationWorkspaceId} onClose={() => setPreparationWorkspaceId(undefined)} />
       <Modal
         title={activationIntent === 'restart' ? '创建新的工作空间执行' : '恢复当前工作空间执行'}
         open={activationOpen}
         confirmLoading={activationLoading}
-        onCancel={() => setActivationOpen(false)}
+        onCancel={closeWorkspaceActivation}
         onOk={() => activationForm.submit()}
         okText={activationIntent === 'restart' ? '创建新的后台执行' : '恢复当前执行'}
-        okButtonProps={{ disabled: goals.length === 0 || readyDoDs.length === 0 || (activationIntent === 'restart' && !activationLLMReady) }}
+        okButtonProps={{ disabled: activationConfigurationLoading || goals.length === 0 || readyDoDs.length === 0 || (activationIntent === 'restart' && !activationLLMReady) }}
       >
         <Form
           form={activationForm}
@@ -2194,6 +2255,7 @@ export function WorkspaceDetailPage({ selectedWorkspaceId }: Pick<ControlPlanePr
             </Space>
           ) : (
             <>
+              {activationConfigurationLoading ? <Alert type="info" message="正在读取新执行配置；尚未提交执行意图" /> : null}
               <Typography.Text type="warning">
                 该操作会从 Workspace 当前定义与配置创建 fresh activation；不会继续或迁移旧 Run 的持久化状态。
               </Typography.Text>

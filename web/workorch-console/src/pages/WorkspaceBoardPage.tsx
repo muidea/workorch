@@ -81,6 +81,8 @@ export function WorkspaceBoardPage({ onOpenWorkspace }: ControlPlaneProps) {
       .then((admission) => {
         if (admission.accepted) {
           message.success(request.intent === 'restart' ? 'Workspace owner 已受理新执行请求' : 'Workspace owner 已受理恢复请求');
+        } else if (admission.state === 'pending') {
+          message.warning(`原执行请求 ${admission.pendingRequestId} 结果未决；请保留原请求身份，不要换请求号重试。`);
         } else {
           message.error(`Workspace owner 拒绝执行请求：${admission.diagnostic || admission.reason}`);
         }

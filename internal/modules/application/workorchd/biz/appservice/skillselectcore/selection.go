@@ -1,8 +1,10 @@
 package skillselectcore
 
+import "github.com/muidea/workorch/internal/pkg/skillselection"
+
 const DefaultMaxAutoSelectedSkills = 5
 
-func AutoSelect(candidates []Candidate, goalText string, dodItems []string, allowedRefs []string, workspaceScope string, maxSelected int) Selection {
+func AutoSelect(candidates []skillselection.Candidate, goalText string, dodItems []string, allowedRefs []string, workspaceScope string, maxSelected int) Selection {
 	if maxSelected <= 0 {
 		maxSelected = DefaultMaxAutoSelectedSkills
 	}

@@ -3,6 +3,7 @@ package skill
 import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
+	"slices"
 )
 
 type Skill struct {
@@ -38,12 +39,12 @@ func CloneSkill(item *Skill) *Skill {
 		return nil
 	}
 	cloned := *item
-	cloned.TriggerRules = append([]string(nil), item.TriggerRules...)
-	cloned.ReferenceRefs = append([]string(nil), item.ReferenceRefs...)
-	cloned.RequiredToolKinds = append([]string(nil), item.RequiredToolKinds...)
-	cloned.RequiredMCPServerRefs = append([]string(nil), item.RequiredMCPServerRefs...)
-	cloned.RequiredCapabilityRefs = append([]string(nil), item.RequiredCapabilityRefs...)
-	cloned.Constraints = append([]string(nil), item.Constraints...)
+	cloned.TriggerRules = slices.Clone(item.TriggerRules)
+	cloned.ReferenceRefs = slices.Clone(item.ReferenceRefs)
+	cloned.RequiredToolKinds = slices.Clone(item.RequiredToolKinds)
+	cloned.RequiredMCPServerRefs = slices.Clone(item.RequiredMCPServerRefs)
+	cloned.RequiredCapabilityRefs = slices.Clone(item.RequiredCapabilityRefs)
+	cloned.Constraints = slices.Clone(item.Constraints)
 	return &cloned
 }
 

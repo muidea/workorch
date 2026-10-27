@@ -34,13 +34,18 @@ func rehashPreparationSnapshot(t *testing.T, snapshot *startuppreparation.ExactC
 
 type preparationRevisionReadRepository struct {
 	repository.WorkspaceRepository
-	reads int
+	reads   int
+	driftAt int
 }
 
 func (r *preparationRevisionReadRepository) Get(ctx context.Context, id common.WorkspaceID) (*workspace.Workspace, error) {
 	w, err := r.WorkspaceRepository.Get(ctx, id)
 	r.reads++
-	if err == nil && r.reads == 2 {
+	driftAt := r.driftAt
+	if driftAt == 0 {
+		driftAt = 2
+	}
+	if err == nil && r.reads == driftAt {
 		// Simulate a metadata CAS between the first read and the final fence.
 		// Do not write any repository fixture as part of this query.
 		w.Revision++
@@ -115,6 +120,14 @@ func TestExactConfirmedStartupSnapshotRejectsUnrepresentableDirectoryAndByteOver
 }
 
 func seedPreparationEligible(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID) *workspace.Workspace {
+	return seedPreparationEligibleInDirectory(t, owners, id, "delivery")
+}
+
+func seedPreparationEligibleInDirectory(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID, directory string) *workspace.Workspace {
+	return seedPreparationEligibleWithConfiguration(t, owners, id, directory, nil)
+}
+
+func seedPreparationEligibleWithConfiguration(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID, directory string, configure func(*workspace.Workspace), configureTemplate ...func(*workspace.WorkspaceTemplate)) *workspace.Workspace {
 	t.Helper()
 	ctx := context.Background()
 	confirmation := seedReviewedAuthoringConfirmationWithTemplate(t, owners, id, true, true, "*", "dodItem", func(template *workspace.WorkspaceTemplate) {
@@ -127,6 +140,9 @@ func seedPreparationEligible(t *testing.T, owners *fileDefinitionAdmissionOwners
 		if err != nil {
 			t.Fatal(err)
 		}
+		for _, apply := range configureTemplate {
+			apply(template)
+		}
 	})
 	// The historical confirmation fixture omits an internal directory. Supply
 	// it before confirmation, not by mutating the sealed configuration later.
@@ -135,6 +151,10 @@ func seedPreparationEligible(t *testing.T, owners *fileDefinitionAdmissionOwners
 		t.Fatal(err)
 	}
 	draft.InternalDirectory = "internal"
+	draft.DeliverableDirectory = directory
+	if configure != nil {
+		configure(draft)
+	}
 	if err := owners.repositories.Workspaces.CompareAndSwap(ctx, draft, draft.Revision); err != nil {
 		t.Fatal(err)
 	}

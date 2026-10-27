@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
@@ -91,7 +92,14 @@ func CompilePreparationManifest(snapshot ExactConfirmedStartupSnapshot) (Manifes
 		return Manifest{}, fmt.Errorf("%w: preparation manifest exceeds check limit", common.ErrInvalidArgument)
 	}
 	sort.Slice(checks, func(i, j int) bool { return checks[i].ID < checks[j].ID })
+	requirements, err := workspace.PreparationCheckRequirements(snapshot.Candidate)
+	if err != nil || len(checks) != len(requirements) {
+		return Manifest{}, common.ErrConflict
+	}
 	for index, check := range checks {
+		if string(check.ID) != requirements[index].ID || check.Owner != requirements[index].Owner || check.Required != requirements[index].Required {
+			return Manifest{}, common.ErrConflict
+		}
 		if check.SubjectRef == "" || index > 0 && check.ID == checks[index-1].ID {
 			return Manifest{}, common.ErrConflict
 		}

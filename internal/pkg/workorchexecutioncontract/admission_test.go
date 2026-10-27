@@ -2,6 +2,7 @@ package workorchexecutioncontract
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -36,5 +37,23 @@ func TestPresentAdmissionClassifiesAllCanonicalOutcomes(t *testing.T) {
 				t.Fatalf("presentation = %+v, want accepted=%t status=%d display=%q", got, test.accepted, test.status, test.display)
 			}
 		})
+	}
+}
+
+func TestUnresolvedAdmissionRoundTripPreservesBothRequestIdentities(t *testing.T) {
+	a := runtimecontract.RuntimeExecutionIntentAdmission{WorkspaceID: "ws", RequestID: "current", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		Outcome: runtimecontract.RuntimeExecutionIntentFreshUnresolved, Reason: runtimecontract.RuntimeExecutionIntentReasonFreshResultUnknown,
+		PendingRequestID: "original", PendingStartupInputHash: "startup", PendingPayloadHash: strings.Repeat("a", 64)}
+	r, status, err := NewWorkspaceExecutionAdmissionResponse("workorch", "memory", "", "execution-activation", "", "", a)
+	if err != nil || status != http.StatusConflict || r.Accepted || r.State != AdmissionDisplayPending || r.RunID != "" {
+		t.Fatalf("unresolved was misclassified: %+v %d %v", r, status, err)
+	}
+	got, err := r.Admission()
+	if err != nil || got != a {
+		t.Fatalf("lost original identity: %+v %v", got, err)
+	}
+	r.State = AdmissionDisplayRejected
+	if _, err := r.Admission(); err == nil {
+		t.Fatal("pending was relabeled rejected")
 	}
 }

@@ -1,14 +1,17 @@
 package skillselectcore
 
-import "sort"
+import (
+	"github.com/muidea/workorch/internal/pkg/skillselection"
+	"sort"
+)
 
 type candidateScore struct {
-	Candidate Candidate
+	Candidate skillselection.Candidate
 	Score     int
 	Reasons   []string
 }
 
-func collectAutoCandidateScores(candidates []Candidate, searchText string, allowedRefs []string, workspaceScope string) ([]candidateScore, map[string]int) {
+func collectAutoCandidateScores(candidates []skillselection.Candidate, searchText string, allowedRefs []string, workspaceScope string) ([]candidateScore, map[string]int) {
 	allowed := allowedRefSet(allowedRefs)
 	scores := make([]candidateScore, 0, len(candidates))
 	scopeCounts := map[string]int{}
@@ -46,7 +49,7 @@ func collectAutoCandidateScores(candidates []Candidate, searchText string, allow
 }
 
 func autoSelectionFromScores(scores []candidateScore, scopeCounts map[string]int) Selection {
-	items := make([]Candidate, 0, len(scores))
+	items := make([]skillselection.Candidate, 0, len(scores))
 	ids := make([]string, 0, len(scores))
 	matches := make([]map[string]any, 0, len(scores))
 	for _, item := range scores {

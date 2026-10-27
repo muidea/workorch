@@ -440,6 +440,7 @@ verify-deployed-convergence-manifest-tests: verify-build-identity-tests verify-l
 verify-build-identity-tests:
 	python3 ./scripts/test_build_identity.py
 	python3 ./scripts/test_verify_workspace_draft_step01.py
+	python3 ./scripts/test_verify_workspace_preparation_step04.py
 
 # synthetic 校准只验证拒绝/保真合同，不构建 live 证据或授予验收。
 verify-lsp-bridge-prd-evidence-tests:

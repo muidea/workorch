@@ -69,9 +69,13 @@ Module 在 Setup 前保存 Biz，部分 Setup/Run 失败不丢 owner 或提前�
 
 Workspace list/detail 的 `authoringSummary` 沿 owner Get/List → typed mapping → public projection 传递，不逐卡查询完整创作 ledger。创作 CAS 后既有 Workspace 通知经 Eventstream record 触发 projection 失效及 owner 重读；Store 同步更新列表条目和详情。摘要仅显示持久阶段与计数，`reviewed` 不等于当前可确认；原始诊断、恢复参数和权限仍由完整 authoring view 及 owner guard 管理。
 
-`resume` 是既有 Run 的 continuation，不携带 fresh bootstrap；`restart` 使用当前 eligible Workspace definition 编译 fresh
-bootstrap。两者都进入 Workspace owner 的 workspace-scoped execution admission，Application 不直达 Run mutation，也不创建
-replacement successor。
+`resume` 是既有 Run 的 continuation，不携带 fresh bootstrap；`restart` 先发送 Workspace-owned
+`/workspace/command/recover-execution-intent`，在当前编译前查询原操作。该 POST-only 命令可精确结算原回执，但不登记/转发；
+已完成或 pending 直接保留 owner 原结果，没有原登记和阻塞项才从当前 eligible definition 编译 fresh bootstrap。
+absence 不是转发许可，完整 intent 仍须由 Workspace reserve-before-forward。公开执行语义输入为 Workspace/request/intent，
+reason/source 是传输审计元数据，不修改已封存 payload；Application 不让调用者提交 bootstrap。
+两者均进入 Workspace owner 的 workspace-scoped execution admission，Application 不直达 Run mutation，也不创建 replacement successor。
+未知原结果按 `409/pending/accepted=false` 传递原 pending 三字段；不误报 owner 拒绝、受理或“没有 Run”。
 
 ## 组件交互及合同
 
@@ -188,7 +192,135 @@ Workspace-owned `QueryWorkspacePreparationStateCommand`；HTTP 不接 EventHub �
 校验精确 Profile 并从原 candidate 编译 source obligations；无 Hub/client/repository/callback，
 不调用 InitialFacts、Runtime initialize/drive 或既有含资源写入的 activation port。
 其结果只证明结构编译，不替代资源/配置来源的 owner 观察、required 检查或 no-Run 排序证明。
-当前不开放准备 POST、M3 签发或恢复执行；既有 Start/Restart 不被宣称已消费准备回执。
+`activationports.CompileOriginalPreparedExecutionPolicy` 只消费完整原封存与原 `ExecutionInputs`
+私有材料，反查真实持久 attempt、完整来源、模板和配置前像；复用既有纯策略 decoder，
+编译 execution contract、Workspace evidence policies 及按原配置/locale 优先级确定的对话语言。
+该 helper 无 context、Hub、loader 或环境读取；缺原材料、来源漂移或无效策略均拒绝，
+不借新配置、默认模型或占位资源构造 activation。其输出只是策略部分。
+`activationports.CompileOriginalPreparedBootstrap` 在显式 check/recover 回复中消费同一原操作的
+完整私有归档，组合原 Soul、Skill context、Memory 原模式、MCP 选择、Provider 声明和执行策略，
+再经 `CompilePreparedBootstrap` 完整结构编译。Workspace concrete result 的 `CompilationSource`
+只传无 map 的具体 detached DTO 原材料，显式转换后独立完整重验，禁止 JSON 输出；
+不额外查询当前 Workspace，不从普通读模型恢复私有材料或以 metadata 代替原始诊断 bytes。
+缺来源、非空 semantic Memory 缺证明或原模板策略无效均明确拒绝；不把缺失转为空选择。
+HTTP 只返回有限失败码或绑定原 snapshot/manifest 的 bootstrap hash，不输出原材料/诊断/完整 bootstrap。
+GET 不执行该编译；恢复和重启后的显式 recover 从完整原材料重编，不以历史 hash 授信。
+这不是准备检查的正向结算、currentness、M3 或 Start/Restart 的回执消费入口。
+当前开放准备 check/recover 的阻塞主体流程，不开放 M3 签发或恢复执行；既有 Start/Restart 不被宣称已消费准备回执。
+
+`CheckStartupPreparation` 将原 request/revision 映射为 Workspace concrete check/recover 命令。
+仅初始接纳 CAS 明确成功的响应触发一次 cache-only/完整 Run 历史观察，再向 Workspace
+`settle-blocked` 发 concrete negative-only command；不绕过 owner 写库，也不把延续提示当成凭据。
+settlement 内 Workspace 独立向 File 验证原绑定目录，原始材料由 Workspace 受限保存；Application 不提交路径、
+File PASS 或 caller-authored 证据。管理 DTO 仅投影 `directoryEvidenceHash` 历史引用和具体负向分类；
+Web 展示引用不授予当前资源成功，GET/重开/恢复不触发目录观察。
+最终 File 重观察和 epoch/年龄判定由 Workspace/File 原 owner 完成，Application 不接收 caller token；
+GET 与原 check/recover 在 File 重启或年龄到期时一致展示 stale，原结论和身份不变。
+验证 scope、原 payload 和完整结果后转为公开读模型；普通重放、恢复与 GET 不执行这些观察。
+HTTP 的显式 POST 拒绝未知字段、尾随文档和超过 4KiB 的请求；200 blocked 不是 ready，
+202 accepted/unknown 不是检查完成，错误响应不证明无写入。GET 始终只读。
+详情页独立准备面仅在用户打开时 GET，显式按钮发 check/recover，单飞并隔离 Workspace 与迟到响应；
+POST 后 GET 对账，保留原意图及原 revision，未见原请求不自动解锁新键，不使用浏览器持久存储。
+资源事实尚未完整组合，v2 总体仍阻塞；已接通消费者可保存原时点逐项结论，未接通项保持
+明确阻塞，不借框架闭环授予 M3 或执行权。
+
+Application 另有 `ObservePreparationProviderCatalog` 和 `ObservePreparationRunHistory` 两个
+准备子用例，分别只向 LLM cache-only 和 Run 完整历史 topic 发 concrete typed query，
+保留父 scope/context，每次 2 秒预算，无 retry/fallback；发布前后核对完整 DTO、scope 和观察身份，
+错误只向上返回安全分类，不透传 owner 配置诊断。它们接入首次显式检查（整体观察预算 5 秒），
+未接入持久状态 GET、恢复或 M3。原请求取消时不借后台 context 偷交结果，accepted 由显式恢复阻塞结算。
+负向分类不是 owner 原始结果的替代归档。Provider 的同一次 cache-only 完整结果经
+`PreparationProviderCacheFacts` detached 传入原 settlement，由 Workspace 独立验证并与原 binding
+在同一 blocked CAS 保存私有历史，公开仅有随机 `providerCacheEvidenceRef`。
+不增加查询、refresh 或 provider 请求；单点原值不是持续 freshness、连通性、授权或精确 selection。
+Run 历史当前仍仅保存负向分类，不以原因码反建完整观察或 readiness。
+`ObservePreparationMemoryInventory` 只向 Memory 专用库存 query 发一次 scoped typed 请求，
+2 秒预算、完整 DTO/scope/观察区间校验，不进入 activation 的 semantic recall 或 list fallback。
+仅首次明确接纳的检查调用，沿原整体观察预算与 settlement 保存完整私有历史；
+公开随机 `memoryInventoryEvidenceRef` 不含内容或向量。完整/空库存仍为选择待核验阻塞；
+不能据此证明原模式已验证、semantic 可用、持续 freshness 或 M3，GET/恢复不重查。
+
+`ObservePreparationSkillHub` 是显式外部检查子用例，不是严格只读 query：观察前后经 Workspace typed query
+读取同 revision 的精确封存快照，在封存目录执行 SkillHub `status --json`，全局执行
+`status --json --global`（当前 CLI 无 `--agent` 参数）。沿用 `skillhub-status-effects/v1`：
+SkillHub 可优先联系其配置服务端、保存项目检查状态；不修改 SkillHub 项目，不宣称零联网/零写盘。
+整体 5 秒、每次 status 2 秒，不 retry、sync、use、apply、install 或 repair。
+普通准备 GET/刷新/导航/重启读取不调用该用例；`CommandStarted` 保留真实启动事实，超时不代表外部
+未写入/未执行，不自动重发，不将本次检查当成跨 owner 原子或幂等外部事务。
+不复用允许部分列表的展示/执行选择路径；缺命令、缺目录、失败、歧义、超限不得伪装空库。
+项目原 scope `project` 保留；global 按 skill＋agent 判唯一，skill_count 按不同技能数校验；
+全部 agent/orphaned/原状态、reason、时间和 hash 保留。Codex 指令仅取独立解析安装根中的正式文件，
+不读其他 agent 或 orphan 的指令，不回退 SourcePath/RepoPath；目录逃逸、链接、非普通文件、
+超限/非法内容/读取前后漂移均拒绝。每个文件最多 64 KiB、首轮最多 8 MiB 原 bytes，逐项真实重读；
+首份事实及至多一份 64 KiB 的失败重读原值保留。这里只是诊断，不放宽 activation 的 8 KiB/24 KiB 指令预算。
+原 stdout/stderr 分流各保留至 1 MiB，超限显式标记不完整并保留已读字节计数与所存前缀 SHA256；
+原诊断仅限受限内部返回，不进入 public GET、SSE 或通用日志，尚未接入持久准备检查账本。
+`InventoryComplete` 仅指观察到一份完整无歧义的 status inventory，不将其 status/hash/version
+提升为精确选择、freshness 或可用性证明；`InstructionsReobserved` 只证明本机安装文件两次观察完整一致，
+不证明 status 服务端观察与本机目录一致、目录附属文件或 metadata 语义已验证。`BindingCurrent` 只确认该次
+观察结束时封存快照未漂移，不是资源当前性、final CAS、ready 或 M3。
+
+`ObservePreparationSouls` 经现有 Workspace 与 Soul typed query 只读观察实际选中记录：
+先核对精确 seal，再读取同 revision 的 Workspace 配置并反查配置 hash。服务默认 Soul
+必须来自 Application 已注入的配置 loader，缺 loader/读取失败不伪装默认为空，不回退全局配置。
+阶段绑定、Workspace 默认、服务默认的优先级与现有激活路由一致，无 Run override；
+全部阶段及 unbound 显式返回，未使用的默认不会仅因其存在被强制读取。整体 context 预算 3 秒，
+不安装/更新默认资源、不编译完整 activation、不调用 Memory/provider。完整保留所选 Soul 原内容、
+revision、content hash 和 provenance，独立 clone 后逐项真实重读全记录，最后再次核对服务默认与 seal。
+缺失/非法/漂移均阻塞并保留已观察原值；该结果是有界只读事实，不是跨 owner 原子快照、
+长期 freshness、所列 Skill/MCP 可用性、准备 PASS 或 M3。
+首次明确受理的生产准备调用经真实 process config accessor 运行上述观察，将完整前后 records、
+前后 system default 和 seal hash 作为 concrete `PreparationSoulFacts` 交 Workspace 独立核验原请求绑定。
+完整事实只随原 blocked 结算 CAS 保存到 0600 私有历史；公开 GET/Web 仅显示随机 `soulEvidenceRef`。
+不把 helper 的 `Reobserved`/`SealBindingCurrent` bool 带回 owner 作为成功凭据；失败/不完整明确为
+`soul_observation_unavailable_not_saved`，不将部分事实标为完整 archive。
+完整相等也仅为 `souls_observed_remaining_checks`；GET、完成重放、恢复与 owner 重开不重新观察。
+
+`ObservePreparationSkillRegistry` 只通过 Skill owner 新的完整有界 typed query 观察正式库，
+整体预算 3 秒。先读取精确 seal，再真实查询两次完整库，校验完整 DTO、scope、观察时间、
+1024 项/8 MiB 上限、canonical 原内容与 provenance、排序/唯一 ID、内容 hash 和 owner epoch，
+逐项比较全部独立记录（不凭 hash 命中授信），最后再次核对精确 seal。未知/损坏/超限/漂移均拒绝，
+已成功取得的事实保留用于受限诊断，不丢弃为无操作；该独立 helper 不重试、不写账本，
+不调用 SkillHub 或 provider。该结果只证明两次正式库观察及封存绑定，不是完整 Registry+SkillHub
+目录、精确选择、原子跨 owner 快照、长期 freshness、准备 PASS 或 M3；这些仍由后续显式检查裁决。
+首次明确受理的原准备检查将两轮完整 registry 值和前后 seal 交 Workspace 独立核验与结算，
+不发送 helper 成功 bool。完整材料随原 blocked 结算同 CAS 存入受限私有历史，
+GET/Web 仅显示随机 `skillRegistryEvidenceRef`；完整空库也不授精确选择 credit。
+失败或不完整明确为 `skill_registry_observation_unavailable_not_saved`；GET、完成重放、
+恢复和 owner 重开不再查询，不将未保存的材料称完整。Registry 持久观察本身不调用 SkillHub status；
+显式检查现已把 SkillHub status 的两个目标放入 Workspace 首次 accepted CAS；只有无歧义首次延续
+执行 global 后 project，各最多两秒且共享原五秒观察预算。执行前重新读取同 accepted revision 的
+exact seal，核对原确认、candidate、配置、startup 与目录；不满足时封存真实 not_started。
+默认生产 adapter 沿用当前 SkillHub 的服务访问和状态保存行为；测试仅注入 Application 私有外部替身。
+原 bytes/计数/完整性/退出/诊断随原 blocked CAS 私有保存，不消费 inventory/PASS bool。
+GET、普通重放、恢复、重开均不调用 status；丢失回执按 unresolved 封存，不接受迟到补写，后端禁止
+换 request 绕过未决效果。公开仅随机 ref 和 reserved/recorded/unresolved，不授 ready/M3。
+成功 status 后接入无 runner 的安装观察入口：独立重解析该次 raw 回执（清空调用方 parsed 字段），
+只在独立确定的根下双读对应 SKILL.md，不再次执行 status。两轮实际读值和严格 metadata 解析失败
+随原 effects archive 同 CAS 私有封存，Workspace 独立反查原 inventory/path、双读字节、metadata 与
+时间/界限；保留失败和部分材料，不把调用方 reobserved bool 当证明。公开只给
+`skillHubInstalledState=incomplete|observed_selection_pending`，不泄露原文、不表示选择成功。
+安装文件后续变化不导致 GET/replay/recovery/reopen 补读或覆盖历史。原 Workspace 私有结算将
+本次 Registry、Soul、SkillHub 原材料纯编译为组合选择，随同一 Registry archive/blocked CAS 保存，
+不再次调用独立选择 helper。公开 `skillSelectionState=sources_incomplete|conflict|compiled_checks_pending`
+只呈现历史编译状态，缺来源不冒充空目录；Workspace 独立重算完整依赖、allowlist、分数、理由和
+选中原内容，不接受调用者成功凭据。历史原 status 保留，不授当前 freshness、资源 PASS 或 M3。
+Workspace 在该次结算内复用既有纯 context 预算合同生成独立预览，保存投影、预算计数、裁剪标记
+或原拒绝诊断；完整源材料仍原样保留。公开 `skillContextState` 为
+`compiled_checks_pending|bounded_checks_pending|rejected`，必须绑定已编译的原选择及来源引用。
+Application 只映射 owner 结果；不重新编译、裁剪、恢复缺失预算或向执行入口提供预览作为凭据。
+
+`ObservePreparationSkillSelection` 在单次五秒预算内组合精确 seal、Soul 和正式 Skill owner 的 typed
+观察，并显式调用每个 SkillHub scope 的一次 status 和已安装文件双读。使用封存 Goal/DoD 原文及
+execution Soul 的 allowlist，不接受 caller 提供的“已验证目录”、宽松管理列表或 source/repo 文件
+fallback。准备专用 YAML AST 解析保留原文，重复／别名冲突、错误需求类型、不完整或超界明确失败；
+YAML 依赖固定为 vendored `gopkg.in/yaml.v3 v3.0.1`，不增加新运行单元或 EventHub topic。
+选取沿用现有评分与排序策略，返回有界 typed matches 和独立克隆的完整 Skill；原 status、目录 hash、
+其他 agent、orphan 和失败原文均不改写。初始 stale 不执行 status；后续失败保留已读来源，不隐式重试。
+`SelectionCompiled` 只表示已生成选择材料，`SealBindingCurrent` 仅表示本次末次 Workspace seal 核对；
+二者都不是 ready、PASS、M3、跨 owner 原子观察或长期 freshness。辅助文件、实际状态／freshness、
+daemon/local 一致性、context 预算与资源 readiness 持久裁决仍须后续接线；该独立 helper 不进入 GET、SSE、Start/Restart 或
+Runtime drive，不改变 SM-1～SM-4。
 
 ## 不变量与非职责
 

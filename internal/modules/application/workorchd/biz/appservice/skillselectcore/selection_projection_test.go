@@ -1,6 +1,7 @@
 package skillselectcore
 
 import (
+	"github.com/muidea/workorch/internal/pkg/skillselection"
 	"reflect"
 	"testing"
 
@@ -46,7 +47,7 @@ func TestSkillsBySelectedCandidatesPreservesSelectionOrder(t *testing.T) {
 		{ID: "skill-b", Name: "B"},
 		{ID: "skill-c", Name: "C"},
 	}
-	selected := []Candidate{{ID: "skill-c"}, {ID: "missing"}, {ID: "skill-a"}}
+	selected := []skillselection.Candidate{{ID: "skill-c"}, {ID: "missing"}, {ID: "skill-a"}}
 
 	got := SkillsBySelectedCandidates(source, selected)
 	if gotIDs := []string{got[0].ID, got[1].ID}; !reflect.DeepEqual(gotIDs, []string{"skill-c", "skill-a"}) {

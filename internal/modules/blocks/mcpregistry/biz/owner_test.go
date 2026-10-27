@@ -66,11 +66,12 @@ func TestMCPRegistryCommandSourceAuthorizationMatrix(t *testing.T) {
 		{mcpevents.TopicMCPCommandGetCapability, []string{applicationContextRegistrySource, applicationOwnerReadSource}},
 		{mcpevents.TopicMCPCommandListCapabilities, []string{applicationContextRegistrySource, applicationReadModelSource}},
 		{mcpevents.TopicMCPCommandUpdateCapability, []string{applicationContextRegistrySource}},
-		{mcpevents.TopicMCPCommandReadRegistrySnapshot, []string{mcpExecutionSource}},
+		{mcpevents.TopicMCPCommandReadRegistrySnapshot, []string{mcpExecutionSource, "application/workorchd"}},
 		{mcpevents.TopicMCPCommandReadSelectionSnapshot, []string{applicationOwnerReadSource}},
 		{mcpevents.TopicMCPCommandEnsureDefaults, []string{systemCommandSource}},
 	}
 	allSources := []string{
+		"application/workorchd", " application/workorchd ",
 		applicationContextRegistrySource, applicationOwnerReadSource, applicationReadModelSource,
 		mcpExecutionSource, systemCommandSource, "untrusted/module", " application/workorchd/context-registry ",
 	}

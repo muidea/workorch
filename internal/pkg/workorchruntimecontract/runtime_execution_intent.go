@@ -1,8 +1,10 @@
 package workorchruntimecontract
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -28,6 +30,7 @@ const (
 	RuntimeExecutionIntentFreshActivationRequired RuntimeExecutionIntentOutcome = "fresh_activation_required"
 	RuntimeExecutionIntentDefinitionChanged       RuntimeExecutionIntentOutcome = "definition_changed_requires_restart"
 	RuntimeExecutionIntentGovernanceRequired      RuntimeExecutionIntentOutcome = "governance_required"
+	RuntimeExecutionIntentFreshUnresolved         RuntimeExecutionIntentOutcome = "fresh_intent_unresolved"
 )
 
 // RuntimeExecutionIntentReason preserves the exact owner-authored factual
@@ -51,6 +54,8 @@ const (
 	RuntimeExecutionIntentReasonDefinitionAdmissionMissing            RuntimeExecutionIntentReason = "definition_admission_missing"
 	RuntimeExecutionIntentReasonDefinitionAdmissionMismatch           RuntimeExecutionIntentReason = "definition_admission_mismatch"
 	RuntimeExecutionIntentReasonDefinitionClarificationPending        RuntimeExecutionIntentReason = "definition_clarification_pending"
+	RuntimeExecutionIntentReasonFreshResultUnknown                    RuntimeExecutionIntentReason = "fresh_intent_result_unknown"
+	RuntimeExecutionIntentReasonCreationFenceMissing                  RuntimeExecutionIntentReason = "preparation_creation_fence_missing"
 )
 
 // RuntimeExecutionIntentAdmission is the immutable, owner-neutral admission
@@ -64,6 +69,12 @@ type RuntimeExecutionIntentAdmission struct {
 	Kind        RuntimeExecutionIntentKind
 	Outcome     RuntimeExecutionIntentOutcome
 	Reason      RuntimeExecutionIntentReason
+	// An unresolved original is not an accepted replacement or a rejection.
+	// RequestID remains the current caller identity; these fields preserve the
+	// blocking original even when a different fresh request was submitted.
+	PendingRequestID        string
+	PendingStartupInputHash string
+	PendingPayloadHash      string
 }
 
 func (a RuntimeExecutionIntentAdmission) Normalized() RuntimeExecutionIntentAdmission {
@@ -81,6 +92,14 @@ func (a RuntimeExecutionIntentAdmission) Validate() error {
 	}
 	if a.Kind != RuntimeExecutionIntentResume && a.Kind != RuntimeExecutionIntentRestart {
 		return fmt.Errorf("runtime execution intent admission has invalid kind %q", a.Kind)
+	}
+	if a.Outcome == RuntimeExecutionIntentFreshUnresolved {
+		decoded, err := hex.DecodeString(a.PendingPayloadHash)
+		if a.Kind != RuntimeExecutionIntentRestart || a.RunID != "" || a.PendingRequestID == "" || !utf8.ValidString(a.PendingRequestID) || len(a.PendingRequestID) > 256 || strings.TrimSpace(a.PendingRequestID) != a.PendingRequestID || strings.ContainsAny(a.PendingRequestID, "\x00\r\n") || a.PendingStartupInputHash == "" || !utf8.ValidString(a.PendingStartupInputHash) || len(a.PendingStartupInputHash) > 256 || strings.TrimSpace(a.PendingStartupInputHash) != a.PendingStartupInputHash || err != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != a.PendingPayloadHash {
+			return fmt.Errorf("unresolved fresh intent requires exact pending identity and no asserted Run")
+		}
+	} else if a.PendingRequestID != "" || a.PendingStartupInputHash != "" || a.PendingPayloadHash != "" {
+		return fmt.Errorf("resolved execution outcome cannot carry an unresolved identity")
 	}
 	return ValidateRuntimeExecutionIntentAdmission(a.Outcome, a.Reason)
 }
@@ -108,7 +127,9 @@ func ValidateRuntimeExecutionIntentAdmission(outcome RuntimeExecutionIntentOutco
 			valid = true
 		}
 	case RuntimeExecutionIntentFreshActivationRequired:
-		valid = reason == RuntimeExecutionIntentReasonRuntimeBootstrapMissing || reason == RuntimeExecutionIntentReasonDefinitionAdmissionMissing || reason == RuntimeExecutionIntentReasonDefinitionAdmissionMismatch
+		valid = reason == RuntimeExecutionIntentReasonRuntimeBootstrapMissing || reason == RuntimeExecutionIntentReasonDefinitionAdmissionMissing || reason == RuntimeExecutionIntentReasonDefinitionAdmissionMismatch || reason == RuntimeExecutionIntentReasonCreationFenceMissing
+	case RuntimeExecutionIntentFreshUnresolved:
+		valid = reason == RuntimeExecutionIntentReasonFreshResultUnknown
 	case RuntimeExecutionIntentDefinitionChanged:
 		valid = reason == RuntimeExecutionIntentReasonDefinitionChanged
 	case RuntimeExecutionIntentGovernanceRequired:
@@ -156,6 +177,10 @@ func RuntimeExecutionIntentReasonSummary(reason RuntimeExecutionIntentReason) st
 		return "restart bootstrap does not match the admitted Workspace startup input"
 	case RuntimeExecutionIntentReasonDefinitionClarificationPending:
 		return "revise Goal/DoD to produce a newly admitted startup input before restarting"
+	case RuntimeExecutionIntentReasonFreshResultUnknown:
+		return "original fresh intent result remains unresolved; no new execution was forwarded"
+	case RuntimeExecutionIntentReasonCreationFenceMissing:
+		return "Workspace has no preparation creation identity; fresh execution is blocked"
 	default:
 		return ""
 	}

@@ -1,6 +1,7 @@
 package workorchruntimecontract
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -63,6 +64,8 @@ func TestRuntimeExecutionIntentAdmissionIsExhaustiveAndPreservesReason(t *testin
 		{RuntimeExecutionIntentDefinitionChanged, RuntimeExecutionIntentReasonDefinitionChanged},
 		{RuntimeExecutionIntentGovernanceRequired, RuntimeExecutionIntentReasonGovernancePending},
 		{RuntimeExecutionIntentGovernanceRequired, RuntimeExecutionIntentReasonDefinitionClarificationPending},
+		{RuntimeExecutionIntentFreshUnresolved, RuntimeExecutionIntentReasonFreshResultUnknown},
+		{RuntimeExecutionIntentFreshActivationRequired, RuntimeExecutionIntentReasonCreationFenceMissing},
 	}
 	for _, testCase := range cases {
 		if err := ValidateRuntimeExecutionIntentAdmission(testCase.outcome, testCase.reason); err != nil {
@@ -77,5 +80,35 @@ func TestRuntimeExecutionIntentAdmissionIsExhaustiveAndPreservesReason(t *testin
 	}
 	if summary := RuntimeExecutionIntentReasonSummary("unknown"); summary != "" {
 		t.Fatalf("unknown reason summary = %q", summary)
+	}
+}
+
+func TestRuntimeExecutionIntentUnresolvedIdentityCannotAssertAcceptanceOrRun(t *testing.T) {
+	a := RuntimeExecutionIntentAdmission{WorkspaceID: "ws", RequestID: "current", Kind: RuntimeExecutionIntentRestart,
+		Outcome: RuntimeExecutionIntentFreshUnresolved, Reason: RuntimeExecutionIntentReasonFreshResultUnknown,
+		PendingRequestID: "original", PendingStartupInputHash: "startup", PendingPayloadHash: strings.Repeat("a", 64)}
+	if err := a.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*RuntimeExecutionIntentAdmission){
+		"run":             func(v *RuntimeExecutionIntentAdmission) { v.RunID = "asserted-run" },
+		"resume":          func(v *RuntimeExecutionIntentAdmission) { v.Kind = RuntimeExecutionIntentResume },
+		"missing_request": func(v *RuntimeExecutionIntentAdmission) { v.PendingRequestID = "" },
+		"control":         func(v *RuntimeExecutionIntentAdmission) { v.PendingRequestID = "old\nrequest" },
+		"missing_startup": func(v *RuntimeExecutionIntentAdmission) { v.PendingStartupInputHash = "" },
+		"missing_hash":    func(v *RuntimeExecutionIntentAdmission) { v.PendingPayloadHash = "" },
+		"upper_hash":      func(v *RuntimeExecutionIntentAdmission) { v.PendingPayloadHash = strings.Repeat("A", 64) },
+		"acceptance": func(v *RuntimeExecutionIntentAdmission) {
+			v.Outcome = RuntimeExecutionIntentReconciliationRequested
+			v.Reason = RuntimeExecutionIntentReasonNewRunActivated
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := a
+			mutate(&invalid)
+			if invalid.Validate() == nil {
+				t.Fatal("invalid unresolved admission was accepted")
+			}
+		})
 	}
 }

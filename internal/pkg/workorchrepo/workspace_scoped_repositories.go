@@ -1604,6 +1604,24 @@ func (r *workspaceScopedWorkspaceRepository) CompareAndSwap(ctx context.Context,
 	if err := r.checkCreationPersistenceMutation(ctx, path, item); err != nil {
 		return err
 	}
+	// Validate new preparation execution inputs against the complete actual
+	// configuration, including sidecars, before passing detached metadata down.
+	// Existing history needs no new resource read and is never backfilled.
+	if len(item.PreparationSealEvidence) > 0 && item.PreparationSealEvidence[len(item.PreparationSealEvidence)-1].ExecutionInputs != nil {
+		current, err := r.store.workspaceRepo(path).Get(ctx, item.ID)
+		if err != nil {
+			return err
+		}
+		if len(current.PreparationSealEvidence) < len(item.PreparationSealEvidence) {
+			current, err = r.store.attachWorkspaceSoulBindings(current)
+			if err != nil {
+				return err
+			}
+			if err := workspacemodel.ValidatePreparationExecutionInputsPreimage(current, item); err != nil {
+				return err
+			}
+		}
+	}
 	if err := r.store.workspaceRepo(path).CompareAndSwap(ctx, workspaceMetadata(item), expectedRevision); err != nil {
 		return err
 	}

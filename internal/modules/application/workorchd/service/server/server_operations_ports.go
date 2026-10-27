@@ -26,6 +26,8 @@ type workspaceOperations struct {
 	updateWorkspaceLLMSelectionPort UpdateWorkspaceLLMSelectionFunc
 	listWorkspaces                  ListWorkspacesFunc
 	readStartupPreparation          ReadStartupPreparationFunc
+	checkStartupPreparation         CheckStartupPreparationFunc
+	recoverStartupPreparation       CheckStartupPreparationFunc
 }
 
 type definitionOperations struct {

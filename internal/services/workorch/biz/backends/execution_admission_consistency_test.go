@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -28,12 +29,19 @@ func TestLocalAndRemoteRunBackendsReturnTheSameOwnerAdmission(t *testing.T) {
 		{runtimecontract.RuntimeExecutionIntentDefinitionChanged, runtimecontract.RuntimeExecutionIntentReasonDefinitionChanged},
 		{runtimecontract.RuntimeExecutionIntentGovernanceRequired, runtimecontract.RuntimeExecutionIntentReasonGovernancePending},
 		{runtimecontract.RuntimeExecutionIntentGovernanceRequired, runtimecontract.RuntimeExecutionIntentReasonDefinitionClarificationPending},
+		{runtimecontract.RuntimeExecutionIntentFreshUnresolved, runtimecontract.RuntimeExecutionIntentReasonFreshResultUnknown},
 	}
 	for _, test := range tests {
 		t.Run(string(test.outcome), func(t *testing.T) {
 			admission := runtimecontract.RuntimeExecutionIntentAdmission{
 				WorkspaceID: "ws-consistency", RunID: "run-consistency", RequestID: "request-consistency",
 				Kind: runtimecontract.RuntimeExecutionIntentResume, Outcome: test.outcome, Reason: test.reason,
+			}
+			if test.outcome == runtimecontract.RuntimeExecutionIntentFreshUnresolved {
+				admission.Kind, admission.RunID = runtimecontract.RuntimeExecutionIntentRestart, ""
+				admission.PendingRequestID = "original-request"
+				admission.PendingStartupInputHash = "original-startup"
+				admission.PendingPayloadHash = strings.Repeat("a", 64)
 			}
 			var remoteCalls atomic.Int64
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -59,7 +67,7 @@ func TestLocalAndRemoteRunBackendsReturnTheSameOwnerAdmission(t *testing.T) {
 			defer observer.Unsubscribe(workorchdevents.TopicWorkorchDCommandWorkspaceRunRequested)
 
 			request := port.WorkspaceRunCommand{
-				WorkspaceID: admission.WorkspaceID, Intent: port.RunCommandIntentResume,
+				WorkspaceID: admission.WorkspaceID, Intent: port.RunCommandIntent(admission.Kind),
 				RequestID: admission.RequestID, Reason: "test", Source: "test",
 			}
 			local, localErr := NewEventHub(hub).Run().Command(context.Background(), request)

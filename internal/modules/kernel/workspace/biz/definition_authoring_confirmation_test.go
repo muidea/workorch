@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -115,7 +116,9 @@ func seedReviewedAuthoringConfirmationWithTemplate(t *testing.T, owners *fileDef
 			t.Fatal(err)
 		}
 	}
-	if err := owners.repositories.Workspaces.Create(ctx, &workspace.Workspace{ID: id, TemplateID: input.TemplateID, DeliverableDirectory: "delivery", DefinitionAuthoring: &record}); err != nil {
+	if err := owners.repositories.Workspaces.Create(ctx, &workspace.Workspace{ID: id, TemplateID: input.TemplateID, DeliverableDirectory: "delivery", DefinitionAuthoring: &record,
+		PreparationFence: &workspace.WorkspacePreparationFence{Version: workspace.WorkspacePreparationFenceVersion, WorkspaceID: id, CreationEpoch: strings.Repeat("a", 32)},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	w, err := owners.repositories.Workspaces.Get(ctx, id)

@@ -38,15 +38,17 @@ const (
 	// workspace execution request. Workspace owns active-run slot selection and
 	// turns this immutable intent into a Run-owner command; callers cannot name
 	// a lifecycle target or mutate the slot themselves.
-	TopicWorkspaceCommandExecutionIntent      = "/workspace/command/execution-intent"
-	TopicWorkspaceFactTerminalDelivery        = "/workspace/fact/terminal-delivery"
-	TopicWorkspaceDefinitionAdmissionIntent   = "/workspace/definition-admission/intent"
-	TopicWorkspaceDefinitionAuthoringQuery    = "/workspace/definition-authoring/query"
-	TopicWorkspaceAuthoringResourceScopeQuery = "/workspace/definition-authoring/resource-scope/query"
-	TopicWorkspaceDefinitionAuthoringCreate   = "/workspace/definition-authoring/create"
-	TopicWorkspaceAuthoringDirectoryPrepared  = "/workspace/definition-authoring/directory-prepared"
-	TopicWorkspaceDefinitionAuthoringSave     = "/workspace/definition-authoring/save"
-	TopicWorkspaceSpecificationBegin          = "/workspace/definition-specification/begin"
-	TopicWorkspaceSpecificationReserve        = "/workspace/definition-specification/reserve"
-	TopicWorkspaceSpecificationComplete       = "/workspace/definition-specification/complete"
+	TopicWorkspaceCommandExecutionIntent = "/workspace/command/execution-intent"
+	// Recovery cannot forward, reserve, compile or change the original input.
+	TopicWorkspaceCommandRecoverExecutionIntent = "/workspace/command/recover-execution-intent"
+	TopicWorkspaceFactTerminalDelivery          = "/workspace/fact/terminal-delivery"
+	TopicWorkspaceDefinitionAdmissionIntent     = "/workspace/definition-admission/intent"
+	TopicWorkspaceDefinitionAuthoringQuery      = "/workspace/definition-authoring/query"
+	TopicWorkspaceAuthoringResourceScopeQuery   = "/workspace/definition-authoring/resource-scope/query"
+	TopicWorkspaceDefinitionAuthoringCreate     = "/workspace/definition-authoring/create"
+	TopicWorkspaceAuthoringDirectoryPrepared    = "/workspace/definition-authoring/directory-prepared"
+	TopicWorkspaceDefinitionAuthoringSave       = "/workspace/definition-authoring/save"
+	TopicWorkspaceSpecificationBegin            = "/workspace/definition-specification/begin"
+	TopicWorkspaceSpecificationReserve          = "/workspace/definition-specification/reserve"
+	TopicWorkspaceSpecificationComplete         = "/workspace/definition-specification/complete"
 )

@@ -93,7 +93,23 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// owner-state write; it is not Runtime readiness or activation authority.
 	// STEP04 adds exact-confirmed-startup and persisted preparation-state reads;
 	// neither falls back to admission, observes resources or confers Runtime authority.
-	const expectedProductionTopicCount = 313
+	// STEP04 adds one cache-only LLM observation, never a refresh or model call.
+	// It also adds the Run-owner complete preparation history observation;
+	// ordinary visibility-filtered lists cannot prove first-activation history.
+	// Run adds an exact persisted original execution-response query; absence
+	// stays unknown and the read cannot replay activation or replacement.
+	// Workspace adds POST-only original recovery before current bootstrap compilation.
+	// It may settle the exact receipt but never reserves or forwards execution.
+	// Skill adds one complete bounded registry observation. It neither merges
+	// SkillHub nor selects resources or confers preparation/Runtime authority.
+	// STEP04 check/recover add two Workspace state-lane commands. Neither
+	// accepts caller PASS or confers readiness/M3. One internal negative-only
+	// settlement returns application-coordinated cache/history classifications.
+	// File adds one Workspace-only exact directory observation. It performs
+	// no writes and cannot confer preparation readiness or M3.
+	// Memory adds a complete bounded local inventory observation, not semantic
+	// recall or readiness. It shares the existing Workspace deletion fence.
+	const expectedProductionTopicCount = 327
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}

@@ -47,10 +47,45 @@ Runtime 的原始 body／stream 禁止跨 owner 规则不变，此文档诊断�
 ### 生命周期合同
 
 - 普通及 matched 订阅按每次成功获取登记；部分 Start 失败保留冻结配置、provider 和订阅账本，未清理前不能重复注册。退订成功才移除对应项。
-- BeginShutdown 非等待式关闭新请求；只有冻结 active configuration 查询允许只读 drain。catalog、selection、ceiling 可能触发 refresh，不能因名字为查询就放行；candidate/preflight 和新 provider 请求同样拒绝。
+- BeginShutdown 非等待式关闭新请求；冻结 active configuration 与独立 cache-only 准备观察允许只读 drain。普通 catalog、selection、ceiling 可能触发 refresh，不能因名字为查询就放行；candidate/preflight 和新 provider 请求同样拒绝。
 - handler 票覆盖真实 provider/catalog 返回及同一 handler 的审计发布，不以调用方取消或 HTTP 关闭证明远端未执行。Quiesce 超时保留配置、physical submission guard 和依赖，可用新预算重试。
 - 最终 Stop 封全部入站并再次排空，逆序 checked 退订全部成功后才清 owner/Module 引用。未知 panic 保留原因并释放清理 claim；调用方串行 Configure/Start/Stop，不能覆盖未释放 owner。
 - 本地排空不替代共享任务与 Hub 屏障，不更改 SM-1～SM-4、提交身份、预算/unknown、原始诊断或 C0～C2/cache 合同。`biz/owner_lifecycle_test.go` 和 `module_lifecycle_test.go` 覆盖订阅切点、失败重试、真实 mock transport 返回及 framework guard。
+
+### 激活前 catalog cache-only 观察
+
+`/llm/startup-preparation/catalog-cache/query` 使用 `ObserveProviderCatalogCacheCommand/Result`，
+仅接受 exact `application/workorchd` source。它读取本 owner 已有缓存，不调用普通 catalog、
+selection 或 ceiling，不等待 inflight refresh，不联网、不重试、不 fallback、不淘汰或改写缓存。
+miss 返回 `unavailable/cache_miss`；精确过期点及超出 LKG 的已有条目返回
+`stale/cache_expired`，保留完整模型声明、revision、原获取/过期时间。fresh 仅指观察时缓存未过期，
+不是连通性、授权、provider ceiling 或 Workspace ready。
+
+结果绑定 Workspace、观察时点和配置冻结生命周期内随机 `OwnerEpoch`；epoch 在 owner 释放后清除，
+新 owner 不复用，也不由凭据派生。私有 endpoint、credential、cache key 和 credential-derived
+configuration revision 不出此合同。完整结果最多 4096 个模型、1 MiB，字段与嵌套列表有界；
+新 owner 结果另附可选的 `workorch-preparation-provider-configuration/v1`：本生命周期冻结的
+DefaultChat 和完整排序的 exact model override 声明（仅模型 ID、容量与 operation，不含配置密钥、
+endpoint 或其派生 hash）。override 最多 4096 项、每项最多 64 个 operation，且仍受完整结果 1 MiB 限制。
+旧无该字段的历史仍可读；不会在 GET、恢复或重新解码时补出默认模型。结果 clone 深拷贝嵌套声明，
+loader 后续变化和返回值修改不能改变 frozen source。该声明不证明预算、远端授权或连通性。
+超限/损坏整体拒绝，不裁剪后声明完整。缓存里异常的 observation/诊断字段同样拒绝，不清洗后授信。
+原 catalog/provider 诊断路径不变。embedding 的零 context/output 元数据可原值观察，不因此判 ready。
+Application 可把同一次完整观察传给 Workspace 原准备操作作为私有历史归档；该消费不改变
+本 owner 的查询合同，也不增加 refresh/selection。归档后的 epoch 和 freshness 仅代表原观察时点，
+不能在恢复、重启或 GET 时冒充当前 owner 事实，公开随机引用不授予 readiness。
+
+同一 cache-only command 可带可选 exact `Target` 意图；缺省使用冻结 DefaultChat，不猜 catalog 首项。
+fresh 结果另附可选 `workorch-preparation-provider-budget-observation/v1`，由本 owner 复用现有
+`ResolveProviderModelTarget`，仅输入本次已观察缓存及冻结配置，计算 Responses 容量预览。
+保留精确 target、context/output/input/byte 容量、tokens-per-byte 与 capability revision；
+不输出 credential-derived configuration revision，也不生成 Runtime ProviderCeiling、请求 allocation 或 client。
+解析不可用只返回无容量值的 `capacity_unavailable`，miss/expired 不补预算；结果仍受完整 1 MiB 边界。
+结果与 command target（或冻结默认项）严格相等，clone 隔离。它不是远端授权、可调用性、实际 request
+装配预算或 Run 物理额度的证明，不联网、不新增资源写入。旧无预算历史不在读取时补算。
+
+验证入口：`biz/catalog_cache_observation_test.go`、`pkg/events/catalog_cache_test.go`、`pkg/events/preparation_provider_configuration_test.go`；覆盖
+miss/fresh/TTL/LKG、未完 refresh、配置轮换、完整性/隔离、生命周期及零 HTTP，不替代真实模型验收。
 
 ## 不变量与非职责
 

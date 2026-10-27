@@ -11,6 +11,7 @@ import (
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspaceviewcore"
 	executionusecase "github.com/muidea/workorch/internal/modules/application/workorchd/biz/execution"
 	projectioncomponent "github.com/muidea/workorch/internal/modules/application/workorchd/biz/projection"
@@ -36,16 +37,17 @@ const ModuleID = modulecommon.ModuleID
 // module root only delegates framework callbacks to it.
 type Biz struct {
 	basebiz.Base
-	service        *server.Service
-	runtime        *runtimeComponent
-	workspaceGate  *workspaceCommandGateway
-	cliDispatcher  *appservice.CLICommandDispatcher
-	execution      *executionusecase.UseCase
-	admissions     *executionAdmissionLifecycle
-	projection     *projectioncomponent.Component
-	authoringTasks *authoringTaskLifecycle
-	subscriptions  []func() error
-	shutdownErr    error
+	service                   *server.Service
+	runtime                   *runtimeComponent
+	workspaceGate             *workspaceCommandGateway
+	cliDispatcher             *appservice.CLICommandDispatcher
+	execution                 *executionusecase.UseCase
+	admissions                *executionAdmissionLifecycle
+	projection                *projectioncomponent.Component
+	authoringTasks            *authoringTaskLifecycle
+	subscriptions             []func() error
+	shutdownErr               error
+	preparationSkillHubRunner contextregistryports.SkillHubPreparationRunner
 }
 
 func New() *Biz { return &Biz{} }

@@ -30,6 +30,7 @@ type UpdateWorkspaceSoulBindingsFunc func(context.Context, string, string, strin
 type UpdateWorkspaceLLMSelectionFunc func(context.Context, string, *runtimecontract.ProviderInferenceSelection, uint64) (appmodelcore.Workspace, error)
 type ListWorkspacesFunc func(context.Context, string, string) ([]appmodelcore.Workspace, error)
 type ReadStartupPreparationFunc func(context.Context, string) (workorchmanagementcontract.StartupPreparationView, error)
+type CheckStartupPreparationFunc func(context.Context, string, workorchmanagementcontract.PreparationCheckRequest) (workorchmanagementcontract.PreparationOperationView, error)
 type DefineGoalFunc func(context.Context, string, string, string, string) (workorchmanagementcontract.Goal, error)
 type UpdateGoalFunc func(context.Context, string, string, string, string, string) (workorchmanagementcontract.Goal, error)
 type ReadGoalFunc func(context.Context, string, string, string, string) (workorchmanagementcontract.Goal, error)

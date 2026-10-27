@@ -550,6 +550,7 @@ export type WorkspaceExecutionIntent = 'resume' | 'restart';
 export type RuntimeExecutionIntentOutcome =
   | 'reconciliation_requested'
   | 'replacement_pending'
+  | 'fresh_intent_unresolved'
   | 'restart_required'
   | 'fresh_activation_required'
   | 'definition_changed_requires_restart'
@@ -568,9 +569,13 @@ export type RuntimeExecutionIntentReason =
   | 'duplicate_restart'
   | 'new_run_activated'
   | 'predecessor_supersede_requested'
+  | 'terminal_predecessor_successor_requested'
   | 'definition_admission_missing'
   | 'definition_admission_mismatch'
-  | 'definition_clarification_pending';
+  | 'definition_clarification_pending'
+  | 'fresh_intent_result_unknown'
+  | 'preparation_creation_fence_missing';
+// The unresolved identity is an owner fact, not permission to retry execution.
 
 export type WorkspaceExecutionAdmission = {
   service: string;
@@ -578,10 +583,13 @@ export type WorkspaceExecutionAdmission = {
   dataRoot?: string;
   action?: string;
   accepted: boolean;
-  state: 'accepted' | 'rejected';
+  state: 'accepted' | 'rejected' | 'pending';
   workspaceId: string;
   runId?: string;
   requestId: string;
+  pendingRequestId?: string;
+  pendingStartupInputHash?: string;
+  pendingPayloadHash?: string;
   intent: WorkspaceExecutionIntent;
   outcome: RuntimeExecutionIntentOutcome;
   reason: RuntimeExecutionIntentReason;

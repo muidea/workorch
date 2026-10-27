@@ -1,13 +1,6 @@
 package skillselectcore
 
-type Candidate struct {
-	ID            string
-	Name          string
-	TriggerRules  []string
-	SourceSkillID string
-	Scope         string
-	Source        string
-}
+import "github.com/muidea/workorch/internal/pkg/skillselection"
 
 type Evidence struct {
 	Policy           string              `json:"policy"`
@@ -20,7 +13,7 @@ type Evidence struct {
 }
 
 type Selection struct {
-	Candidates []Candidate
+	Candidates []skillselection.Candidate
 	IDs        []string
 	Evidence   Evidence
 }

@@ -9,6 +9,7 @@ const canonicalCases = [
   ['reconciliation_requested', 'new_run_activated', true, 'accepted', 202],
   ['replacement_pending', 'duplicate_restart', true, 'accepted', 202],
   ['replacement_pending', 'predecessor_supersede_requested', true, 'accepted', 202],
+  ['replacement_pending', 'terminal_predecessor_successor_requested', true, 'accepted', 202],
   ['restart_required', 'workspace_active_run_absent', false, 'rejected', 409],
   ['restart_required', 'selected_run_absent', false, 'rejected', 409],
   ['restart_required', 'selected_run_terminal', false, 'rejected', 409],
@@ -16,6 +17,7 @@ const canonicalCases = [
   ['fresh_activation_required', 'runtime_bootstrap_missing', false, 'rejected', 409],
   ['fresh_activation_required', 'definition_admission_missing', false, 'rejected', 409],
   ['fresh_activation_required', 'definition_admission_mismatch', false, 'rejected', 409],
+  ['fresh_activation_required', 'preparation_creation_fence_missing', false, 'rejected', 409],
   ['definition_changed_requires_restart', 'definition_changed', false, 'rejected', 409],
   ['governance_required', 'governance_pending', false, 'rejected', 409],
   ['governance_required', 'definition_clarification_pending', false, 'rejected', 409]
@@ -46,11 +48,31 @@ function admission(outcome: string, reason: string, accepted: boolean, state: st
   };
 }
 
-test('accepts all seven canonical owner admission classifications', () => {
+test('accepts canonical resolved owner admission classifications', () => {
   for (const [outcome, reason, accepted, state, httpStatus] of canonicalCases) {
     const body = admission(outcome, reason, accepted, state);
     assert.equal(parseWorkspaceExecutionAdmission(body, expectation(httpStatus)), body);
   }
+});
+
+test('preserves unresolved original identity without asserting acceptance or a Run', () => {
+  const body = {
+    ...admission('fresh_intent_unresolved', 'fresh_intent_result_unknown', false, 'pending'),
+    intent: 'restart', runId: '', pendingRequestId: 'original',
+    pendingStartupInputHash: 'startup', pendingPayloadHash: 'a'.repeat(64)
+  };
+  const expected = { ...expectation(409), intent: 'restart' as const };
+  assert.equal(parseWorkspaceExecutionAdmission(body, expected), body);
+  for (const patch of [
+    { state: 'rejected' }, { accepted: true }, { runId: 'asserted' },
+    { pendingRequestId: '' }, { pendingRequestId: 'old\nrequest' },
+    { pendingStartupInputHash: '' }, { pendingPayloadHash: 'A'.repeat(64) }
+  ]) {
+    assert.throws(() => parseWorkspaceExecutionAdmission({ ...body, ...patch }, expected));
+  }
+  assert.throws(() => parseWorkspaceExecutionAdmission(body, { ...expected, httpStatus: 202 }));
+  const resolved = admission('reconciliation_requested', 'new_run_activated', true, 'accepted');
+  assert.throws(() => parseWorkspaceExecutionAdmission({ ...resolved, pendingRequestId: 'original' }, expectation(202)));
 });
 
 test('treats an ordinary JSON 409 error as a transport/contract error', () => {

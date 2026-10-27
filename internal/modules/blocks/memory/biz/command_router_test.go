@@ -8,6 +8,7 @@ import (
 
 func TestMemoryCommandTopicsHaveOneSemanticFamily(t *testing.T) {
 	expected := map[string]memoryCommandFamily{
+		memoryevents.TopicObservePreparationInventory:        memoryCommandFamilyItem,
 		memoryevents.TopicMemoryCommandCreate:                memoryCommandFamilyItem,
 		memoryevents.TopicMemoryCommandGet:                   memoryCommandFamilyItem,
 		memoryevents.TopicMemoryCommandListByWorkspace:       memoryCommandFamilyItem,

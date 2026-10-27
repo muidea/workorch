@@ -3,10 +3,14 @@ package workspace
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -22,6 +26,8 @@ type workspaceExecutionIntentFixture struct {
 	goals      *memoryrepo.GoalRepository
 	dods       *memoryrepo.DoDRepository
 	received   int
+	receipts   map[string]runmodel.WorkspaceExecutionIntentReceipt
+	receiptMu  sync.Mutex
 }
 
 func newWorkspaceExecutionIntentFixture(t *testing.T, respond func(runevents.WorkspaceExecutionIntentCommand) runevents.WorkspaceExecutionIntentResult) *workspaceExecutionIntentFixture {
@@ -29,6 +35,7 @@ func newWorkspaceExecutionIntentFixture(t *testing.T, respond func(runevents.Wor
 	hub := magicevent.NewHub(16)
 	fixture := &workspaceExecutionIntentFixture{
 		hub: hub, workspaces: memoryrepo.NewWorkspaceRepository(), goals: memoryrepo.NewGoalRepository(), dods: memoryrepo.NewDoDRepository(),
+		receipts: map[string]runmodel.WorkspaceExecutionIntentReceipt{},
 	}
 	biz, err := New(hub, nil, workspaceOwnerTestDependencies(
 		hub, nil, fixture.workspaces, fixture.workspaces, fixture.goals, fixture.dods, memoryrepo.NewWorkspaceTemplateRepository(),
@@ -46,10 +53,30 @@ func newWorkspaceExecutionIntentFixture(t *testing.T, respond func(runevents.Wor
 			return
 		}
 		fixture.received++
-		result.Set(respond(command), nil)
+		response := respond(command)
+		if hash, err := runevents.WorkspaceExecutionIntentPayloadHash(command); err == nil {
+			receipt := runmodel.WorkspaceExecutionIntentReceipt{Version: runmodel.WorkspaceExecutionIntentReceiptVersion, PayloadHash: hash, RecordedAt: time.Now().UTC(), Admission: response.RuntimeExecutionIntentAdmission}
+			if receipt.Validate() == nil {
+				fixture.receiptMu.Lock()
+				fixture.receipts[command.RequestID] = receipt
+				fixture.receiptMu.Unlock()
+			}
+		}
+		result.Set(response, nil)
+	})
+	observer.Subscribe(runevents.TopicQueryWorkspaceExecutionIntentReceipt, func(ev magicevent.Event, result magicevent.Result) {
+		q := ev.Data().(runevents.QueryWorkspaceExecutionIntentReceiptCommand)
+		r := runevents.QueryWorkspaceExecutionIntentReceiptResult{WorkspaceID: q.WorkspaceID, RequestID: q.RequestID, PayloadHash: q.PayloadHash, ObservedAt: time.Now().UTC()}
+		fixture.receiptMu.Lock()
+		if receipt, present := fixture.receipts[q.RequestID]; present {
+			r.Receipt = &receipt
+		}
+		fixture.receiptMu.Unlock()
+		result.Set(r, nil)
 	})
 	t.Cleanup(func() {
 		observer.Unsubscribe(runevents.TopicRunCommandWorkspaceExecutionIntent)
+		observer.Unsubscribe(runevents.TopicQueryWorkspaceExecutionIntentReceipt)
 		hub.Terminate(context.Background())
 	})
 	return fixture
@@ -97,6 +124,7 @@ func (f *workspaceExecutionIntentFixture) seedWorkspace(t *testing.T, workspaceI
 		ID: workspaceID, State: common.WorkspaceStateActive, ActiveRunID: activeRunID,
 		DeliverableDirectory: startup.ResolvedProjectWorkspaceDirectory, StartupInput: &startup, ActivationAdmission: &admission,
 		DefinitionAdmissionCandidates: []workspacemodel.DefinitionAdmissionCandidate{candidate},
+		PreparationFence:              &workspacemodel.WorkspacePreparationFence{Version: workspacemodel.WorkspacePreparationFenceVersion, WorkspaceID: workspaceID, CreationEpoch: strings.Repeat("a", 32)},
 	}
 	if err := f.workspaces.Create(context.Background(), workspace); err != nil {
 		t.Fatal(err)
@@ -241,7 +269,7 @@ func TestWorkspaceRestartMaterializesDefaultSelectionByPrivateEventBeforeRunOwne
 
 	firstRevision := stored.Revision
 	_, err = fixture.execute(context.Background(), workspaceevents.WorkspaceExecutionIntentCommand{
-		WorkspaceID: "workspace-default", RequestID: "restart-default-duplicate", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap,
+		WorkspaceID: "workspace-default", RequestID: "restart-default", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap,
 	})
 	if err != nil {
 		t.Fatal(err)

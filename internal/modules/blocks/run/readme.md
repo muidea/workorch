@@ -25,6 +25,26 @@ Last Verified: 2026-08-30
 
 `TopicRunCommandRuntimeRecoveryInventory`、Runtime state readiness/read 和 retirement inventory/fact 在 setup 阶段提供给 Orchestrator；常规 query/mutation 在 owner start 后提供。每个 topic 使用 `pkg/events` 中的具体 result，不存在联合 envelope。
 
+### 激活前完整历史只读观察
+
+`/run/startup-preparation/history/query` 使用 `ObserveWorkspacePreparationHistoryCommand/Result`，
+仅接受 exact `blocks/workspace` 或 `application/workorchd`。RequestID 是本次观察身份，
+不是执行请求。查询在 `workspaceExecutionMu` 内与 fresh restart 同序，锁内只读本 owner；
+不激活 pending Run、不恢复 replacement、不补发通知或创建任何 Run/Runtime。
+
+repository 的窄 `RunPreparationHistoryReader` 在单一持久化读取边界内取得 generation head、
+全部 Workspace Run（包括 terminal/retired）、pending/replacement 数与 retirement fence。
+删除 Run 后 watermark 仍保留。memory、file 和 workspace-scoped file 均实现；未实现、
+scope 冲突、损坏或部分库存都拒绝，不能 fallback 为普通列表。scoped file 使用精确、错误可见的
+物理目录读取，不使用可能吞错的 Glob；不跟随观察坐标符号链接，不为查询创建目录或修复文件。
+
+有历史 generation、任意 Run 或 retirement 均不能被解释为首次无历史。
+即使完整观察在当时为空，它也只是时点事实，不替代 Workspace reservation/epoch、原请求结果
+核对或 M3 final CAS，不授予执行权限。本查询不改变 SM-1～SM-4 transition、预算或恢复依据。
+验证入口：`biz/preparation_history_test.go`、`pkg/models/preparation_history_test.go`、
+`pkg/events/preparation_history_test.go`、`internal/pkg/repository/run_preparation_history_test.go`、
+`internal/pkg/workorchrepo/run_preparation_history_test.go`。
+
 ## 不变量与非职责
 
 - SM-1 只能由 Run-private lifecycle event/reducer 转换；外部事实不得携带 caller-selected target state。
@@ -51,6 +71,34 @@ Run 使用共享 `basebiz.Lifecycle` 跟踪真实 handler、恢复扫描、提�
 影响边界是 SM-1 的进程内 admission/完成跟踪和 SM-4 依赖的 Run read/CAS/receipt 保活；不新增或改变 SM-1～SM-4 的业务 transition、authority、private transaction、预算或重启依据。
 
 ## 能力验收
+
+### STEP04 精确原执行响应的只读对账
+
+`/run/workspace-execution/receipt/query` 只接受 `blocks/workspace` 的具体
+`QueryWorkspaceExecutionIntentReceiptCommand/Result`，以 Workspace、原 RequestID 和完整规范化
+Run intent payload 的身份查询。query lane 中仍参加 `workspaceExecutionMu` 排序；repository
+在与完整历史观察相同的锁下读取包含 terminal/retired 的完整库存、持久 generation head 和 retirement，
+不能以普通可见列表代替。返回 detached 原回执；缺失明确为 `Receipt=nil`（unknown），不是拒绝或可重试许可。
+该查询不 activate、不 publish continuation、不调度 replacement、不写回或补造回执，drain 仍允许只读完成。
+
+Run-private `executionReceiptObserved` 仅在首次真正的新 Run activation 或 replacement 接纳后，
+以单独 CAS 追加 `workorch-execution-intent-receipt/v1` 原响应。原 scope/request、完整 payload hash、
+记录时间和 admission 不可改写；每 Run 上限 128，不淘汰历史。普通 Update 不得新增或删除；opaque Runtime CAS
+仍不得改变任何非 opaque 字段。reducer 和原始持久化读取均反查 immutable activation／replacement 来源，
+重新编译完整 typed payload 身份；跨 Run 同 RequestID 歧义失败，不能任选一份。已退休的 clarification
+replacement 原来源保留参与核对，但不因此重新驱动。既有 explicit Restart replay 的副作用语义保持独立，
+其后来的 continuation/duplicate 投影不得替代第一次响应；legacy/replay/governance 路径不补历史回执。
+
+此变更属于 SM-1 owner 内的历史事实持久化，不选择或改变 SM-2～SM-4 authority、dispatch、预算或交付。
+activation／replacement 接纳和回执 CAS 不是跨文件原子事务：前者完成而后者未提交时保持 unknown；
+回执写后丢回复可以只读恢复原响应，不能把错误当作“未接纳”。查询能力尚未接入 Workspace reservation
+结算及所有 fresh ingress 的 reserve-before-forward，不能据此宣称 no-Run 协议、M3 或完整 STEP04 已完成。
+
+`biz/execution_intent_receipt_test.go` 覆盖真实 owner 的首次接纳、CAS 前失败／写后丢回复、独立子进程
+只读重载（逐 bytes 核对持久化未变）、legacy unknown、显式 replay 不回填、错身份、排序、drain、retired
+历史及返回隔离。`biz/workspace_execution_intent_test.go` 另覆盖 replacement 完成后仍返回原 predecessor
+响应且零写入；models/events/repository 测试覆盖原来源反证、完整输入身份、immutable prefix、三 backend
+持久保全、容量、歧义和冷路径原始文件损坏拒绝。这些是确定性 owner/进程测试，不是生产 Web 或完整服务 live 验收。
 
 | 能力/维度 | 测试证据 | 结论 |
 | --- | --- | --- |

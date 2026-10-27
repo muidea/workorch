@@ -72,6 +72,7 @@ func TestLLMGenericCommandMatrixRequiresExactApplicationSourceBeforePayload(t *t
 		{llmevents.TopicLLMCommandGetProviderModelCatalog, llmApplicationOwnerSource},
 		{llmevents.TopicLLMCommandRefreshProviderModelCatalog, llmApplicationOwnerSource},
 		{llmevents.TopicLLMCommandValidateInferenceSelection, llmApplicationOwnerSource},
+		{llmevents.TopicObserveProviderCatalogCache, llmApplicationOwnerSource},
 	}
 	for _, item := range topics {
 		t.Run(item.topic, func(t *testing.T) {

@@ -205,6 +205,7 @@ func skillLifecycleTopics() []string {
 		skillevents.TopicSkillCommandCreate,
 		skillevents.TopicSkillCommandGet,
 		skillevents.TopicSkillCommandList,
+		skillevents.TopicObserveRegistryCatalog,
 	}
 }
 

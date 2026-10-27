@@ -137,25 +137,7 @@ func skillContentFromCommand(cmd skillevents.CreateSkillCommand) workorchskillco
 }
 
 func validateSkillContent(content workorchskillcontract.Content) error {
-	if content.ID == "" || content.Name == "" || content.Version == "" || content.Instruction == "" ||
-		!utf8.ValidString(content.ID) || !utf8.ValidString(content.Name) || !utf8.ValidString(content.Version) ||
-		!utf8.ValidString(content.Description) || !utf8.ValidString(content.Instruction) ||
-		len(content.ID) > modulecommon.SkillIDMaxBytes || len(content.Name) > modulecommon.SkillNameMaxBytes ||
-		len(content.Version) > modulecommon.SkillVersionMaxBytes || len(content.Description) > modulecommon.SkillDescriptionMaxBytes ||
-		len(content.Instruction) > modulecommon.SkillInstructionMaxBytes || content.ByteSize() > modulecommon.SkillContentMaxBytes {
-		return common.ErrInvalidArgument
-	}
-	for _, values := range [][]string{content.TriggerRules, content.ReferenceRefs, content.RequiredToolKinds, content.RequiredMCPServerRefs, content.RequiredCapabilityRefs, content.Constraints} {
-		if len(values) > modulecommon.SkillListValueMaxCount {
-			return common.ErrInvalidArgument
-		}
-		for _, value := range values {
-			if value == "" || !utf8.ValidString(value) || len(value) > modulecommon.SkillListValueMaxBytes {
-				return common.ErrInvalidArgument
-			}
-		}
-	}
-	return nil
+	return skillmodel.ValidateContent(content)
 }
 
 func validatedRegistrySkill(item *skillmodel.Skill) (*skillmodel.Skill, error) {

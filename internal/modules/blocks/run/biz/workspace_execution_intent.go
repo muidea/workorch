@@ -127,6 +127,9 @@ func (m *Biz) resumeWorkspaceExecutionIntent(ctx context.Context, cmd runevents.
 func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents.WorkspaceExecutionIntentCommand) (runevents.WorkspaceExecutionIntentResult, error) {
 	m.workspaceExecutionMu.Lock()
 	defer m.workspaceExecutionMu.Unlock()
+	if _, err := runevents.WorkspaceExecutionIntentPayloadHash(cmd); err != nil {
+		return runevents.WorkspaceExecutionIntentResult{}, err
+	}
 	requestedIntent := replacementIntentFromCommand(cmd)
 	items, err := m.runs.ListByWorkspaceID(ctx, cmd.WorkspaceID)
 	if err != nil {
@@ -242,6 +245,9 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 		predecessor = terminalPredecessor
 	}
 	if predecessor == nil {
+		if err := m.requireFreshExecutionReceiptSink(ctx, cmd); err != nil {
+			return runevents.WorkspaceExecutionIntentResult{}, err
+		}
 		created, err := m.createWorkspaceExecutionReplacement(ctx, requestedIntent, "")
 		if err != nil {
 			return runevents.WorkspaceExecutionIntentResult{}, err
@@ -249,11 +255,18 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 		if err := m.activateWorkspaceExecutionReplacement(ctx, created, cmd.RequestID); err != nil {
 			return runevents.WorkspaceExecutionIntentResult{}, err
 		}
-		return runExecutionIntentResult(cmd, created.ID, runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonNewRunActivated), nil
+		response := runExecutionIntentResult(cmd, created.ID, runtimecontract.RuntimeExecutionIntentReconciliationRequested, runtimecontract.RuntimeExecutionIntentReasonNewRunActivated)
+		if err := m.recordExecutionIntentResponse(ctx, cmd, response); err != nil {
+			return runevents.WorkspaceExecutionIntentResult{}, err
+		}
+		return response, nil
 	}
 	requestedIntent = replacementIntentForPredecessor(requestedIntent, predecessor)
 	if runtimeDefinitionClarificationInputNotRevised(predecessor, requestedIntent) {
 		return runExecutionIntentResult(cmd, predecessor.ID, runtimecontract.RuntimeExecutionIntentGovernanceRequired, runtimecontract.RuntimeExecutionIntentReasonDefinitionClarificationPending), nil
+	}
+	if err := m.requireFreshExecutionReceiptSink(ctx, cmd); err != nil {
+		return runevents.WorkspaceExecutionIntentResult{}, err
 	}
 	if err := m.persistReplacementIntent(ctx, predecessor, requestedIntent); err != nil {
 		return runevents.WorkspaceExecutionIntentResult{}, err
@@ -267,7 +280,11 @@ func (m *Biz) restartWorkspaceExecutionIntent(ctx context.Context, cmd runevents
 	if runStateIsTerminal(predecessor.State) {
 		reason = runtimecontract.RuntimeExecutionIntentReasonTerminalPredecessorSuccessorRequested
 	}
-	return runExecutionIntentResult(cmd, predecessor.ID, runtimecontract.RuntimeExecutionIntentReplacementPending, reason), nil
+	response := runExecutionIntentResult(cmd, predecessor.ID, runtimecontract.RuntimeExecutionIntentReplacementPending, reason)
+	if err := m.recordExecutionIntentResponse(ctx, cmd, response); err != nil {
+		return runevents.WorkspaceExecutionIntentResult{}, err
+	}
+	return response, nil
 }
 
 // replacementIntentForPredecessor derives the immutable clarification

@@ -42,8 +42,8 @@ func (m *Biz) enterOwner(drain bool) (func(), error) {
 }
 
 func (m *Biz) subscribeOwner(topic string, handler magicevent.ObserverFunc, matched bool) error {
-	// catalog/selection/ceiling 可触发 refresh；只有冻结配置查询是纯读 drain。
-	drain := topic == llmevents.TopicLLMCommandGetActiveConfiguration
+	// 普通 catalog/selection/ceiling 可触发 refresh；cache-only 观察不加入该路径。
+	drain := topic == llmevents.TopicLLMCommandGetActiveConfiguration || topic == llmevents.TopicObserveProviderCatalogCache
 	wrapped := func(ev magicevent.Event, result magicevent.Result) {
 		if ev == nil || result == nil {
 			return

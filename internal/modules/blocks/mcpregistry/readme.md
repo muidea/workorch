@@ -21,11 +21,20 @@ secret reference、不执行 operation，也不修改 Runtime aggregate。
 | --- | --- | --- | --- |
 | `application/workorchd` | Application → Registry | Server/Capability create/get/list/update、`ReadSelectionSnapshotCommand/Result` | 按 topic 接受 exact context-registry、appservice 或 readmodel publisher identity |
 | `blocks/mcp` | MCP execution → Registry | `GetServerCommand/Result`、`ReadRegistrySnapshotCommand/Result` | 仅对应 query 接受 exact `blocks/mcp` source |
+| `application/workorchd` | 激活前准备 → Registry | `ReadRegistrySnapshotCommand/Result` | exact Application source；完整只读、有界观察，不扩大 mutation/defaults 权限 |
 | `kernel/system` | System → Registry | `EnsureDefaultsCommand/Result` | 仅接受 exact source `kernel/system` |
 | repository backend | Registry → repository | `Load`、`Commit(expectedRevision, snapshot)` | owner-private aggregate CAS |
 
 [`pkg/events`](pkg/events) 为 11 个 topic 定义 11 组 concrete command/result。Server 环境只保存受校验的 reference，
 不保存明文 credential。selection snapshot 在一个 revision 内验证 enabled Server、Capability、binding 与 allowlist 关系。
+
+准备观察复用完整 snapshot query，不新增 topic。只向 exact `application/workorchd` 的准备响应施加
+`PreparationSnapshotMaxBytes`（1 MiB）完整 JSON 边界；超限明确报错，不截断、不筛选或返回空集。
+响应保留 owner 既有规范化快照的全部 Server/Capability、环境引用和 schema；`ValidatePreparation()`
+独立核验数量、身份顺序/重复、关联和完整内容 revision，环境引用转换不得 trim/reorder 掩盖原值。
+Application 在原操作预算内双读并精确比较，Workspace 随原结算保存私有历史。内容 revision 不是
+连接 epoch、持续 currentness 或 readiness 凭据，空 registry 也不授予 PASS/N/A。此 query 不 EnsureDefaults、
+不 refresh、不打开连接或执行工具；既有 Runtime 查询边界不变。
 
 ## 不变量与非职责
 
@@ -61,6 +70,7 @@ secret reference、不执行 operation，也不修改 Runtime aggregate。
 | atomic failure / no partial write | `TestServiceCommitFailureLeavesNoPartialAggregate` | 覆盖通用 commit failure |
 | defaults / idempotency | [`biz/defaults_test.go`](biz/defaults_test.go) | memory/file 覆盖 |
 | System exact source | `TestMCPRegistryEnsureDefaultsRequiresExactSystemSource` | 覆盖 |
+| preparation complete snapshot | `TestPreparationMCPRegistryReadIsCompleteBoundedAndReadOnly` | 完整/空值、clone、子集/重复/替换/非法编码/超限拒绝，读取零写入；不证明连接就绪 |
 | Post effect guard | `TestModulePostCannotMutateRegistry` | 覆盖 |
 | aggregate CAS / memory/file persistence | `TestMCPRegistryRepositoryContract_Memory`、`TestMCPRegistryRepositoryContract_File` in [`internal/pkg/repository/repository_contract_test.go`](../../../pkg/repository/repository_contract_test.go) | 覆盖 repository fence |
 | duplicate / CAS conflict | `TestMCPRegistryRepositoryContract_Memory`、`TestMCPRegistryRepositoryContract_File`、`TestServiceRetriesCASConflictAndStopsAtBound` | 覆盖 repository fence，以及 service 在其他 writer 推进 revision/content 后 reload/rebase 并保留并发内容、八次 conflict exhaustion 与零部分写入 |

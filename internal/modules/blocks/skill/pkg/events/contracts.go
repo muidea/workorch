@@ -7,6 +7,7 @@ func Contracts() []eventcontract.Contract {
 	ret = append(ret, eventcontract.Build("skill", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
 		TopicSkillCommandGet,
 		TopicSkillCommandList,
+		TopicObserveRegistryCatalog,
 	)...)
 	ret = append(ret, eventcontract.Build("skill", eventcontract.CommandClassWrite, eventcontract.LanePolicyState,
 		TopicSkillCommandCreate,

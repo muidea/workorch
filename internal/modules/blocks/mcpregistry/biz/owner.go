@@ -218,6 +218,13 @@ func (m *Biz) handleCommand(ev magicevent.Event, result magicevent.Result) {
 			return
 		}
 		snapshot, revision, err := m.service.registrySnapshot(ctx)
+		if err == nil && ev.Source() == "application/workorchd" {
+			servers, viewErr := mcpevents.MCPServersFromModels(snapshot.Servers)
+			if viewErr != nil || (mcpevents.RegistrySnapshotResult{Servers: servers, Capabilities: snapshot.Capabilities, RegistryRevision: revision}).ValidatePreparation() != nil {
+				setMagicResult(result, mcpevents.RegistrySnapshotResult{}, common.ErrConflict)
+				return
+			}
+		}
 		setRegistrySnapshotResult(result, snapshot, revision, err)
 	case mcpevents.TopicMCPCommandReadSelectionSnapshot:
 		cmd, ok := ev.Data().(mcpevents.ReadSelectionSnapshotCommand)
@@ -255,7 +262,7 @@ func mcpRegistryCommandSourceAllowed(topic, source string) bool {
 	case mcpevents.TopicMCPCommandGetCapability:
 		return source == applicationContextRegistrySource || source == applicationOwnerReadSource
 	case mcpevents.TopicMCPCommandReadRegistrySnapshot:
-		return source == mcpExecutionSource
+		return source == mcpExecutionSource || source == "application/workorchd"
 	case mcpevents.TopicMCPCommandReadSelectionSnapshot:
 		return source == applicationOwnerReadSource
 	case mcpevents.TopicMCPCommandEnsureDefaults:

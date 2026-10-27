@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -57,6 +58,9 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 	if err != nil {
 		return workspaceevents.WorkspaceExecutionIntentResult{}, err
 	}
+	if response, handled, err := m.resolveOriginalFreshExecutionIntent(prepared); handled || err != nil {
+		return response, err
+	}
 	if result, admitted := prepared.ownerAdmission(); admitted {
 		return result, nil
 	}
@@ -72,6 +76,27 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 			return workspaceevents.WorkspaceExecutionIntentResult{}, err
 		}
 		prepared.workspace = workspace
+		fact, err := workspaceFreshIntentReservationFact(prepared.command, workspace.Revision)
+		if err != nil {
+			return workspaceevents.WorkspaceExecutionIntentResult{}, err
+		}
+		reserved, first, err := m.submitWorkspaceFreshIntentReserved(prepared.ctx, fact)
+		if err != nil {
+			if errors.Is(err, common.ErrConflict) {
+				if current, readErr := m.workspaces.Get(prepared.ctx, prepared.workspace.ID); readErr == nil {
+					prepared.workspace = current
+					if response, handled, resolveErr := m.resolveOriginalFreshExecutionIntent(prepared); handled || resolveErr != nil {
+						return response, resolveErr
+					}
+				}
+			}
+			return workspaceevents.WorkspaceExecutionIntentResult{}, err
+		}
+		prepared.workspace = reserved
+		if !first { // CAS loser/replay never forwards, including response loss.
+			response, _, err := m.resolveOriginalFreshExecutionIntent(prepared)
+			return response, err
+		}
 	}
 	forward := prepared.runCommand()
 	runResult, err := m.sendRunExecutionIntent(prepared.ctx, prepared.workspace.ID, forward)
@@ -80,6 +105,11 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 	}
 	if err := validateRunExecutionIntentResult(runResult, prepared.workspace.ID, prepared.command.RequestID, forward.Kind, forward.RunID); err != nil {
 		return workspaceevents.WorkspaceExecutionIntentResult{}, err
+	}
+	if forward.Kind == runtimecontract.RuntimeExecutionIntentRestart {
+		// A normal success response is not the durable original-receipt proof.
+		response, _, err := m.resolveOriginalFreshExecutionIntent(prepared)
+		return response, err
 	}
 	return workspaceevents.WorkspaceExecutionIntentResult(runResult.RuntimeExecutionIntentAdmission), nil
 }
@@ -96,6 +126,11 @@ func (m *Biz) prepareWorkspaceExecutionIntent(ev magicevent.Event) (preparedWork
 		return preparedWorkspaceExecutionIntent{}, err
 	}
 	cmd = cmd.Normalized()
+	if cmd.Kind == runtimecontract.RuntimeExecutionIntentRestart {
+		if _, _, err := freshIntentReceiptIdentity(cmd); err != nil {
+			return preparedWorkspaceExecutionIntent{}, err
+		}
+	}
 	ctx, err := common.BindRuntimeWorkspaceContext(ev.Context(), cmd.WorkspaceID)
 	if err != nil {
 		return preparedWorkspaceExecutionIntent{}, err
@@ -108,7 +143,36 @@ func (m *Biz) prepareWorkspaceExecutionIntent(ev magicevent.Event) (preparedWork
 		return preparedWorkspaceExecutionIntent{}, err
 	}
 	if cmd.Kind == runtimecontract.RuntimeExecutionIntentResume {
+		if fence := workspace.PreparationFence; fence != nil {
+			if fence.Validate(workspace.ID) != nil {
+				return preparedWorkspaceExecutionIntent{}, common.ErrConflict
+			}
+			if fence.Pending != nil && fence.Pending.RequestID == cmd.RequestID {
+				return preparedWorkspaceExecutionIntent{}, common.ErrConflict
+			}
+			for _, settled := range fence.Settled {
+				if settled.Reservation.RequestID == cmd.RequestID {
+					return preparedWorkspaceExecutionIntent{}, common.ErrConflict
+				}
+			}
+		}
 		return preparedWorkspaceExecutionIntent{ctx: ctx, command: cmd, workspace: workspace}, nil
+	}
+	// Resolve original requests before mutable definitions/admission. Pending
+	// also blocks a different fresh identity without reading/recompiling inputs.
+	if workspace.PreparationFence == nil {
+		return preparedWorkspaceExecutionIntent{ctx: ctx, command: cmd, workspace: workspace}, nil
+	}
+	if err := workspace.PreparationFence.Validate(workspace.ID); err != nil {
+		return preparedWorkspaceExecutionIntent{}, err
+	}
+	if workspace.PreparationFence.Pending != nil {
+		return preparedWorkspaceExecutionIntent{ctx: ctx, command: cmd, workspace: workspace}, nil
+	}
+	for _, settled := range workspace.PreparationFence.Settled {
+		if settled.Reservation.RequestID == cmd.RequestID {
+			return preparedWorkspaceExecutionIntent{ctx: ctx, command: cmd, workspace: workspace}, nil
+		}
 	}
 	goal, dod, err := m.currentExecutionDefinitions(ctx, workspace.ID)
 	if err != nil {
@@ -150,6 +214,10 @@ func validateRestartExecutionDefinition(cmd workspaceevents.WorkspaceExecutionIn
 
 func (p preparedWorkspaceExecutionIntent) ownerAdmission() (workspaceevents.WorkspaceExecutionIntentResult, bool) {
 	if p.command.Kind == runtimecontract.RuntimeExecutionIntentRestart {
+		if p.workspace.PreparationFence == nil {
+			return workspaceevents.WorkspaceExecutionIntentResult{WorkspaceID: p.workspace.ID, RequestID: p.command.RequestID, Kind: p.command.Kind,
+				Outcome: runtimecontract.RuntimeExecutionIntentFreshActivationRequired, Reason: runtimecontract.RuntimeExecutionIntentReasonCreationFenceMissing}, true
+		}
 		if p.workspace.StartupInput == nil || p.workspace.ActivationAdmission == nil {
 			return workspaceevents.WorkspaceExecutionIntentResult{
 				WorkspaceID: p.workspace.ID, RequestID: p.command.RequestID, Kind: p.command.Kind,

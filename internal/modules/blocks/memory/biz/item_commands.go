@@ -10,6 +10,15 @@ import (
 
 func (m *Biz) executeMemoryItemCommand(ctx context.Context, ev magicevent.Event, result magicevent.Result) error {
 	switch ev.ID() {
+	case memoryevents.TopicObservePreparationInventory:
+		c, ok := ev.Data().(memoryevents.ObservePreparationInventoryCommand)
+		if !ok || ev.Source() != "application/workorchd" || c.Validate() != nil {
+			setMemoryMagicResult(result, memoryevents.ObservePreparationInventoryResult{}, common.ErrInvalidArgument)
+			return common.ErrInvalidArgument
+		}
+		value, err := m.observePreparationInventory(ctx, c)
+		setMemoryMagicResult(result, value, err)
+		return err
 	case memoryevents.TopicMemoryCommandCreate:
 		cmd, ok := ev.Data().(memoryevents.CreateMemoryCommand)
 		if !ok {

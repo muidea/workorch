@@ -11,6 +11,7 @@ func Contracts() []eventcontract.Contract {
 		TopicMemoryRecallRecorded,
 	)...)
 	ret = append(ret, eventcontract.Build("memory", eventcontract.CommandClassRead, eventcontract.LanePolicyQuery,
+		TopicObservePreparationInventory,
 		TopicMemoryCommandGet,
 		TopicMemoryCommandListByWorkspace,
 		TopicMemoryCommandSearch,

@@ -209,6 +209,9 @@ func StableReplacementIntentHash(i ReplacementIntent) string {
 }
 
 type Run struct {
+	// ExecutionIntentReceipts preserve original owner responses, never inferred
+	// from later lifecycle state. Legacy Runs have no such historical evidence.
+	ExecutionIntentReceipts []WorkspaceExecutionIntentReceipt `json:",omitempty"`
 	// Revision is the owner-local persistence revision. Lifecycle and Runtime
 	// aggregate writes compare it before replacing the record.
 	Revision uint64
@@ -296,6 +299,7 @@ func CloneRun(item *Run) *Run {
 		return nil
 	}
 	cloned := *item
+	cloned.ExecutionIntentReceipts = append([]WorkspaceExecutionIntentReceipt(nil), item.ExecutionIntentReceipts...)
 	if item.RuntimeBootstrap != nil {
 		bootstrap := item.RuntimeBootstrap.Clone()
 		cloned.RuntimeBootstrap = &bootstrap
@@ -346,12 +350,16 @@ func CloneRuns(items []*Run) []*Run {
 }
 
 // ValidateRunRuntimeBootstrapsRaw is the Run aggregate persistence guard for
-// immutable bootstrap authority. Repositories call it before cloning a write
+// immutable bootstrap authority and original execution-response sources.
+// Repositories call it before cloning a write
 // and before cloning a read so malformed current data cannot be normalized
 // into an admissible aggregate by a storage adapter.
 func ValidateRunRuntimeBootstrapsRaw(item *Run) error {
 	if item == nil {
 		return common.ErrInvalidArgument
+	}
+	if err := ValidateExecutionIntentReceipts(item); err != nil {
+		return err
 	}
 	validate := func(label string, bootstrap *runtimecontract.RuntimeBootstrap) error {
 		if bootstrap == nil {

@@ -23,19 +23,39 @@ import (
 	"github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/magicCommon/task"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistrycore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/bootstrap"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	decisionowner "github.com/muidea/workorch/internal/modules/blocks/decision/biz"
 	fileowner "github.com/muidea/workorch/internal/modules/blocks/file/biz"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	llmmodel "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	mcpowner "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/biz"
+	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
+	memoryowner "github.com/muidea/workorch/internal/modules/blocks/memory/biz"
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	runowner "github.com/muidea/workorch/internal/modules/blocks/run/biz"
+	skillowner "github.com/muidea/workorch/internal/modules/blocks/skill/biz"
+	skillmodel "github.com/muidea/workorch/internal/modules/blocks/skill/pkg/models"
+	soulowner "github.com/muidea/workorch/internal/modules/blocks/soul/biz"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	workspaceowner "github.com/muidea/workorch/internal/modules/kernel/workspace/biz"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/startuppreparation"
 	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/testkit"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/repository"
+	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
+	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
 	management "github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
+	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 // 使用正式 HTTP ports 和真实持久 owners；仅 provider 与任务排队由测试控制。
@@ -47,6 +67,42 @@ func TestAuthoringHTTPFileBackedCompilationConfirmationAndRecovery(t *testing.T)
 
 func TestStartupPreparationHTTPFileOwnersReadOnlyAndReopen(t *testing.T) {
 	testAuthoringHTTPFileBackedScenario(t, "step04_read_only")
+}
+
+func TestPreparationWorkflowHTTPFileOwnersBlockedAndReopen(t *testing.T) {
+	for _, scenario := range []string{"step04_workflow", "step04_workflow_empty_selection", "step04_workflow_mcp_selected", "step04_workflow_mcp_missing", "step04_workflow_mcp_disabled", "step04_workflow_skill_refs_missing"} {
+		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
+	}
+}
+
+type preparationHTTPSoulRepository struct {
+	repository.SoulRepository
+	reads *atomic.Int32
+}
+
+type preparationHTTPSkillRepository struct {
+	repository.SkillRepository
+	reads *atomic.Int32
+}
+
+type preparationHTTPMCPRepository struct {
+	repository.MCPRegistryRepository
+	reads *atomic.Int32
+}
+
+func (r *preparationHTTPMCPRepository) Load(ctx context.Context) (*mcpmodel.RegistrySnapshot, error) {
+	r.reads.Add(1)
+	return r.MCPRegistryRepository.Load(ctx)
+}
+
+func (r *preparationHTTPSkillRepository) List(ctx context.Context) ([]*skillmodel.Skill, error) {
+	r.reads.Add(1)
+	return r.SkillRepository.List(ctx)
+}
+
+func (r *preparationHTTPSoulRepository) Get(ctx context.Context, id common.SoulID) (*soulmodel.Soul, error) {
+	r.reads.Add(1)
+	return r.SoulRepository.Get(ctx, id)
 }
 
 func TestAuthoringHTTPCreationCutpointRecovery(t *testing.T) {
@@ -101,6 +157,31 @@ func TestAuthoringHTTPStep03TicketDeliveryRecovery(t *testing.T) {
 
 func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	ctx := context.Background()
+	preparationWorkflow := strings.HasPrefix(scenario, "step04_workflow")
+	emptySelection := scenario == "step04_workflow_empty_selection"
+	missingSkillRef := scenario == "step04_workflow_skill_refs_missing"
+	referenceState := "observed_checks_pending"
+	if missingSkillRef {
+		referenceState = "unavailable"
+	}
+	skillStatusState := "status_blocked"
+	if missingSkillRef || emptySelection {
+		skillStatusState = "observed_freshness_pending"
+	} else if scenario == "step04_workflow_mcp_selected" {
+		skillStatusState = "version_conflict"
+	}
+	mcpFixture := strings.HasPrefix(scenario, "step04_workflow_mcp_")
+	mcpFailure := map[string]string{"step04_workflow_mcp_missing": "capability_missing", "step04_workflow_mcp_disabled": "server_disabled"}[scenario]
+	mcpReason := "mcp_selection_empty_policy_pending"
+	if mcpFixture {
+		mcpReason = "mcp_selection_compiled_connection_pending"
+	}
+	if mcpFailure != "" {
+		mcpReason = "mcp_selection_" + mcpFailure
+	}
+	if emptySelection {
+		mcpReason = workspace.PreparationEmptyMCPReason
+	}
 	storage, directory := t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "requirements.txt"), []byte("可验证的资源\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -122,6 +203,68 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		t.Fatal(err)
 	}
 	template := workspace.WorkspaceTemplate{ID: "http-template", Name: "模板", DoDItems: []string{"模板验收"}, ContextHints: hints}
+	if emptySelection {
+		// Explicit, reviewed fixture policy, never production defaults or a
+		// post-confirmation repair of an incomplete original template.
+		values := template.ContextHints.Map()
+		values["acceptanceSlicePolicy"] = map[string]any{"schemaVersion": "workorch.acceptance_slice_policy", "maxWorkItems": 4, "maxFocuses": 64, "maxCandidateContextItems": 4, "completionPolicy": "all_required_items_accepted", "resultPolicy": "slice_result_allowed"}
+		declaration := values["profileContracts"].(map[string]any)["generic"].(map[string]any)["evidenceRequirements"].([]any)[0].(map[string]any)
+		fact := map[string]any{"ownerModuleId": runtimecontract.RuntimeModuleShell, "factKind": string(runtimecontract.RuntimeOwnerFactSelectableValidationSurface), "operationKind": runtimecontract.RuntimeBlockKindManagedValidationSession}
+		declaration["requiredOwnerFacts"] = []any{fact}
+		declaration["ownerFactConvergences"] = []any{map[string]any{"ownerModuleId": fact["ownerModuleId"], "factKind": fact["factKind"], "operationKind": fact["operationKind"], "requirePreexisting": true}}
+		template.ContextHints, err = workorcheventpayload.FromMap(values)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	preparationInstalledRoot := ""
+	installedRaw := []byte("---\r\nname: HTTP 原始安装材料\r\nversion: http-installed-v1\r\ntriggers: [交付目标]\r\nrequired_tools: [shell]\r\nreference_refs: [references/exact.bin]\r\n---\r\n指令正文\x00\r\n")
+	if preparationWorkflow {
+		preparationInstalledRoot = t.TempDir()
+		t.Setenv("CODEX_SKILLS_DIR", preparationInstalledRoot)
+		template.DefaultSoulID = "http-soul"
+		skill := &skillmodel.Skill{ID: "http-skill", Name: "HTTP Skill", Version: "v1", Instruction: "HTTP Skill 原文", TriggerRules: []string{"http"}}
+		skill.Provenance = workorchskillcontract.Provenance{Source: workorchskillcontract.SourceWorkOrchRegistry, Scope: workorchskillcontract.ScopeGlobal, ContentHash: workorchskillcontract.StableContentHash(skill.Content())}
+		if err := filerepository.NewSkillRepository(filepath.Join(storage, "system", "skills.json")).Create(ctx, skill); err != nil {
+			t.Fatal(err)
+		}
+		s := &soulmodel.Soul{ID: "http-soul", Revision: 1, Name: "HTTP Soul", SoulMD: "HTTP Soul 原文\n", SourceProvenance: soulmodel.SoulSourceUserManaged}
+		if emptySelection {
+			// A real, exact Soul policy selects no matching skills, while the
+			// entire nonempty registry and installed catalog are still observed.
+			s.AllowedSkillRefs = []string{"not-selected-by-this-bounded-profile"}
+		}
+		s.ContentHash = soulmodel.StableSoulContentHash(s)
+		if err := filerepository.NewSoulRepository(filepath.Join(storage, "system", "souls.json")).Create(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+		configs, err := workorcheventpayload.FromMap(map[string]any{"managedWorkspaceConfigs": []any{map[string]any{"path": "mcp/config.json", "content": map[string]any{"fixture": "original-managed-config"}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		template.ContextHints = template.ContextHints.Merge(configs)
+		if mcpFixture {
+			installedRaw = []byte("---\r\nname: HTTP 原始安装材料\r\nversion: http-installed-v1\r\ntriggers: [交付目标]\r\nrequired_tools: [shell]\r\nrequired_mcp_server_refs: [http-mcp]\r\nrequired_capability_refs: [http-capability]\r\nreference_refs: [references/exact.bin]\r\n---\r\n指令正文\x00\r\n")
+			// Fixture metadata only: the production owner derives the complete
+			// content revision. No MCP transport or executable is started.
+			snapshot := &mcpmodel.RegistrySnapshot{Revision: 1,
+				Servers:      []*mcpmodel.Server{{ID: "http-mcp", Name: "HTTP MCP", Transport: "stdio", Command: "never-start", Enabled: true, AllowedTools: []string{"http-tool"}}},
+				Capabilities: []*mcpmodel.Capability{{ID: "http-capability", ServerID: "http-mcp", Kind: "tool", Name: "http-tool", DisplayName: "HTTP tool", Description: "MCP 原文\r\n第二行", Enabled: true, Revision: 1, Source: "user", SourceRef: "user:http-capability"}},
+			}
+			if mcpFailure == "capability_missing" {
+				snapshot.Capabilities = nil
+			}
+			if mcpFailure == "server_disabled" {
+				snapshot.Servers[0].Enabled = false
+				// Match the Registry owner's existing metadata invariant: an
+				// enabled capability cannot belong to a disabled server.
+				snapshot.Capabilities[0].Enabled = false
+			}
+			if err := filerepository.NewMCPRegistryRepository(filepath.Join(storage, "system", "mcp-registry.json")).Commit(ctx, 0, snapshot); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	if strings.HasPrefix(scenario, "step03_") {
 		values := hints.Map()
 		values["profileContracts"].(map[string]any)["generic"].(map[string]any)["deliverableExpectations"] = []any{map[string]any{"id": "required-delivery", "required": true}}
@@ -140,6 +283,13 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	var decisionRestored atomic.Bool
 	configurationCause := def.NewError(def.Unexpected, "mock 配置读取失败\r\n原文 sk_test_marker\n")
 	var physicalCalls atomic.Int32
+	var preparationCacheReads atomic.Int32
+	var preparationMemoryModeReads atomic.Int32
+	var preparationMemoryModeEnabled atomic.Bool
+	var preparationSoulReads atomic.Int32
+	var preparationSkillReads atomic.Int32
+	var preparationMCPReads atomic.Int32
+	var preparationStatusCalls atomic.Int32
 	var missingReviewPayload []byte
 	var missingRequirementID string
 	realWorker := scenario == "real_background" || scenario == "concurrent_compile"
@@ -177,8 +327,38 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			t.Fatal(err)
 		}
 		provider := magicevent.NewSimpleObserver(llmevents.CommandDestination, hub)
+		var preparationRuns *runowner.Biz
+		if preparationWorkflow {
+			preparationRuns = runowner.New()
+			if err := preparationRuns.Configure(runowner.Dependencies{OwnerRepositories: owners.RunOwner, EventHub: hub}); err != nil {
+				t.Fatal(err)
+			}
+			if err := preparationRuns.Start(); err != nil {
+				t.Fatal(err)
+			}
+			if err := provider.Subscribe(llmevents.TopicObserveProviderCatalogCache, func(ev magicevent.Event, result magicevent.Result) {
+				preparationCacheReads.Add(1)
+				c, ok := ev.Data().(llmevents.ObserveProviderCatalogCacheCommand)
+				if !ok {
+					t.Error("wrong cache-only DTO")
+					return
+				}
+				observed := llmevents.ObserveProviderCatalogCacheResult{WorkspaceID: c.WorkspaceID, OwnerEpoch: "llm-preparation-epoch:ABCDEFGHIJKLMNOPQRSTUVWXYZ", ObservedAt: time.Now().UTC(), Catalog: llmmodel.ProviderModelCatalog{ProviderID: "ai-proxy", Source: "ai_proxy", State: llmmodel.ProviderCatalogStateUnavailable, ErrorCode: "cache_miss"}}
+				if emptySelection {
+					observed.Configuration = &llmevents.PreparationProviderConfiguration{Version: llmevents.PreparationProviderConfigurationVersion, DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: runtimecontract.BuiltinAIProxyProviderID, ModelID: "chat"}}
+				}
+				result.Set(observed, nil)
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
 		target := runtimecontract.ProviderModelTarget{ProviderID: "mock", ModelID: "mock"}
 		if err := provider.Subscribe(llmevents.TopicLLMCommandGetActiveConfiguration, func(_ magicevent.Event, result magicevent.Result) {
+			if preparationWorkflow && preparationMemoryModeEnabled.Load() {
+				preparationMemoryModeReads.Add(1)
+				result.Set(llmevents.GetActiveConfigurationResult{ProviderID: runtimecontract.BuiltinAIProxyProviderID, ConfigurationRevision: "http-memory-mode", DefaultChat: runtimecontract.ProviderModelTarget{ProviderID: runtimecontract.BuiltinAIProxyProviderID, ModelID: "chat"}}, nil)
+				return
+			}
 			fail := !preparationRepaired.Load() && (scenario == "config_failure" || scenario == "proposal_config_failure" && physicalCalls.Load() >= 1 || (scenario == "review_preparation_failure" || scenario == "review_fail_preparation_failure" || scenario == "review_unknown_preparation_failure") && physicalCalls.Load() >= 3)
 			if fail {
 				result.Set(nil, configurationCause)
@@ -298,11 +478,92 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			background = task.NewBackgroundRoutine(2)
 		}
 		application := &Biz{Base: basebiz.New(ModuleID, hub, background), authoringTasks: newAuthoringTaskLifecycle()}
-		component, err := newRuntimeComponentFromCommandHub(hub, background)
-		if err != nil {
-			t.Fatal(err)
+		var component *runtimeComponent
+		var preparationSouls *soulowner.Biz
+		var preparationSkills *skillowner.Biz
+		var preparationMemory *memoryowner.Biz
+		var preparationMCP *mcpowner.Biz
+		if preparationWorkflow {
+			preparationMCP, err = mcpowner.New(hub, nil, mcpowner.Dependencies{Registry: &preparationHTTPMCPRepository{MCPRegistryRepository: filerepository.NewMCPRegistryRepository(filepath.Join(storage, "system", "mcp-registry.json")), reads: &preparationMCPReads}, EventHub: hub})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := preparationMCP.Start(); err != nil {
+				t.Fatal(err)
+			}
+			preparationMemory, err = memoryowner.New(hub, nil, memoryowner.Dependencies{EventHub: hub, OwnerRepositories: repositories.MemoryOwner})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := preparationMemory.Start(); err != nil {
+				t.Fatal(err)
+			}
+			preparationSkills, err = skillowner.New(hub, nil, skillowner.Dependencies{Skills: &preparationHTTPSkillRepository{SkillRepository: filerepository.NewSkillRepository(filepath.Join(storage, "system", "skills.json")), reads: &preparationSkillReads}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := preparationSkills.Start(); err != nil {
+				t.Fatal(err)
+			}
+			preparationSouls, err = soulowner.New(hub, nil, soulowner.Dependencies{Souls: &preparationHTTPSoulRepository{SoulRepository: filerepository.NewSoulRepository(filepath.Join(storage, "system", "souls.json")), reads: &preparationSoulReads}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := preparationSouls.Start(); err != nil {
+				t.Fatal(err)
+			}
+			// Same production port adapter; only its process configuration and
+			// provider are local fixtures, never the user's live configuration.
+			session, err := runtimecore.NewSessionFromExports(bootstrap.Exports{Infrastructure: bootstrap.InfrastructureExports{CommandHub: hub, BackgroundRoutine: background, LoadConfig: func() (workorchconfig.Config, error) {
+				cfg := workorchconfig.Config{Runtime: workorchconfig.RuntimeConfig{DefaultSoulID: "unused-system-soul"}}
+				if emptySelection {
+					cfg.Runtime.MaxRuntimeRepairAttempts = 10
+					cfg.Runtime.LLMOutput.MaxDocumentRecoveryAttempts = 3
+				}
+				return cfg, nil
+			}}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			component = newRuntimeComponent(session)
+		} else {
+			component, err = newRuntimeComponentFromCommandHub(hub, background)
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 		component.session.SetRepositoryConfig("file", storage)
+		// No test may invoke the machine's configured SkillHub/service.
+		component.ports = newApplicationPortsWithPreparationRunner(component.withSession, nil, component.authoringTasks)
+		if preparationWorkflow {
+			runner := preparationStatusRunnerFunc(func(callCtx context.Context, directory string, global bool) (contextregistryports.SkillHubPreparationOutput, error) {
+				items, err := repositories.Workspaces.List(callCtx)
+				if err != nil || len(items) != 1 || len(items[0].PreparationSkillHubEffects) != 1 || items[0].PreparationSkillHubEffects[0].Summary() != workspace.PreparationSkillHubReserved {
+					t.Error("status preceded durable reservation")
+					return contextregistryports.SkillHubPreparationOutput{}, common.ErrConflict
+				}
+				plan := items[0].PreparationSkillHubEffects[0]
+				call := preparationStatusCalls.Add(1)
+				if call > 2 || global != (call == 1) || (!global && directory != plan.ProjectDirectory) || (global && directory != "") {
+					t.Error("wrong/repeated status target")
+					return contextregistryports.SkillHubPreparationOutput{}, common.ErrConflict
+				}
+				status := contextregistrycore.SkillHubStatus{Scope: "global", SkillCount: 1, Items: []contextregistrycore.SkillHubStatusItem{{SkillID: "http-installed", Agent: "codex", TargetPath: filepath.Join(preparationInstalledRoot, "http-installed")}}}
+				if !global {
+					status = contextregistrycore.SkillHubStatus{Scope: "project", ProjectPath: directory, SkillCount: 1, Items: []contextregistrycore.SkillHubStatusItem{{SkillID: "http-installed", LocalPath: filepath.Join(directory, ".agents", "skills", "http-installed", "SKILL.md")}}}
+				}
+				status.Items[0].Status, status.Items[0].LocalVersion = "modified", "http-installed-v1"
+				if skillStatusState == "observed_freshness_pending" || skillStatusState == "version_conflict" {
+					status.Items[0].Status = "synced"
+				}
+				if skillStatusState == "version_conflict" {
+					status.Items[0].LocalVersion = "http-status-other-v1"
+				}
+				raw, _ := json.Marshal(status)
+				return contextregistryports.SkillHubPreparationOutput{Bytes: raw, TotalBytes: uint64(len(raw)), CommandStarted: true, ExitCodeKnown: true}, nil
+			})
+			component.ports = newApplicationPortsWithPreparationRunner(component.withSession, runner, component.authoringTasks)
+		}
 		ports := component.applicationPorts()
 		application.configureAuthoringBackgroundPorts(&ports)
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -348,6 +609,22 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			}
 			provider.Unsubscribe(llmevents.TopicLLMCommandCompleteProviderDocument)
 			provider.Unsubscribe(llmevents.TopicLLMCommandGetActiveConfiguration)
+			if preparationRuns != nil {
+				provider.Unsubscribe(llmevents.TopicObserveProviderCatalogCache)
+				preparationRuns.Stop(ctx)
+			}
+			if preparationSouls != nil {
+				preparationSouls.Teardown(ctx)
+			}
+			if preparationSkills != nil {
+				preparationSkills.Teardown(ctx)
+			}
+			if preparationMemory != nil {
+				preparationMemory.Teardown(ctx)
+			}
+			if preparationMCP != nil {
+				preparationMCP.Teardown(ctx)
+			}
 			file.Teardown(ctx)
 			decision.Teardown(ctx)
 			owner.Teardown(ctx)
@@ -1065,6 +1342,517 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	assertNoRuns()
 	closeOwners()
 	baseURL, routine, closeOwners = open()
+	if preparationWorkflow {
+		baselineCalls := physicalCalls.Load()
+		current, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		declarations, err := workorchmanagedconfig.CompilePreparationDeclarations(current.DefinitionAuthoring.TemplateSnapshot.ContextHints, current.ContextHints)
+		if err != nil || len(declarations) == 0 {
+			t.Fatal("missing managed fixture declarations", err)
+		}
+		var configPaths []string
+		configRaw := []byte("{\r\n\"fixture\":\"original-managed-config\"}\n")
+		for _, d := range declarations {
+			root := current.InternalDirectory
+			if d.Scope == workorchmanagedconfig.ScopeSystem {
+				root = workorchmanagedconfig.SystemDirectory(root)
+			}
+			configPath := filepath.Join(root, d.Path)
+			if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(configPath, configRaw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			configPaths = append(configPaths, configPath)
+		}
+		intent := management.PreparationCheckRequest{RequestID: "http-preparation-original", ExpectedWorkspaceRevision: admitted.WorkspaceRevision}
+		if err := os.MkdirAll(filepath.Join(current.StartupInput.ResolvedProjectWorkspaceDirectory, ".agents", "skills"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		installedPaths := []string{filepath.Join(preparationInstalledRoot, "http-installed", "SKILL.md"), filepath.Join(current.StartupInput.ResolvedProjectWorkspaceDirectory, ".agents", "skills", "http-installed", "SKILL.md")}
+		for _, path := range installedPaths {
+			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, installedRaw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			refPath := filepath.Join(filepath.Dir(path), "references", "exact.bin")
+			if err := os.MkdirAll(filepath.Dir(refPath), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if !missingSkillRef {
+				if err := os.WriteFile(refPath, []byte("HTTP 原始辅助文件\xff\x00\r\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		preparationPath := "/api/v1/workorch/workspaces/" + created.WorkspaceID + "/activation-preparation"
+		memoryOriginal := &memorymodel.MemoryItem{ID: "http-memory", WorkspaceID: common.WorkspaceID(created.WorkspaceID), SourceType: "user", MemoryType: "project_context", Summary: "HTTP 原库存摘要", Content: "HTTP 私有库存正文\r\n", Tags: []string{"original"}, Vector: []float64{0.125, 0.25}}
+		if err := repositories.MemoryItems.Create(ctx, memoryOriginal); err != nil {
+			t.Fatal(err)
+		}
+		preparationMemoryModeEnabled.Store(true)
+		first := preparationHTTPWorkflowRequest(t, baseURL, http.MethodPost, preparationPath+"/check", intent)
+		if first.ValidateFor(created.WorkspaceID, intent) != nil || first.Preparation.OperationState != "blocked" || len(first.Preparation.Record.Attempts[0].Checks) < 10 {
+			t.Fatalf("public preparation did not persist full blocked checklist: %+v", first)
+		}
+		assessment := first.Preparation.Record.Attempts[0].Assessment
+		definitionCompilation := first.Preparation.Record.Attempts[0].DefinitionCompilation
+		if definitionCompilation == nil || definitionCompilation.ValidateFor(first.Preparation.Record.Attempts[0]) != nil || definitionCompilation.SourceInventoryHash == "" {
+			t.Fatal("HTTP lost provider-independent original sealed-source compilation", definitionCompilation)
+		}
+		if assessment == nil || assessment.Outcome != "blocked" || assessment.ValidateFor(first.Preparation.Record.Attempts[0].Binding.ManifestHash, first.Preparation.Record.Attempts[0].Checks) != nil {
+			t.Fatal("HTTP lost complete original all-of assessment", assessment)
+		}
+		if emptySelection && (len(assessment.Outstanding) != 1 || assessment.Outstanding[0].ID != "provider_cache" || assessment.PassedRequiredCount != assessment.RequiredCount-1) {
+			t.Fatalf("bounded non-provider main path did not converge: %+v", assessment)
+		}
+		if emptySelection {
+			if first.Compilation == nil || first.Compilation.FailureCode != "" || first.Compilation.BootstrapHash == "" {
+				t.Fatalf("original full structure did not compile from cold-cache declaration: %+v", first.Compilation)
+			}
+			t.Logf("STEP04 bounded checklist: required=%d passed=%d outstanding=%s; M3 not issued", assessment.RequiredCount, assessment.PassedRequiredCount, assessment.Outstanding[0].ID)
+			for _, change := range []string{"hash", "count", "snapshot", "profile", "version", "erase_seal"} {
+				bad, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				c := bad.StartupPreparation.Attempts[0].DefinitionCompilation
+				switch change {
+				case "hash":
+					c.SourceInventoryHash = "caller"
+				case "count":
+					c.ObligationCount++
+				case "snapshot":
+					c.SnapshotHash = "other"
+				case "profile":
+					c.ProfileContractsHash = "other"
+				case "version":
+					c.CompilerVersion = "other"
+				case "erase_seal":
+					bad.PreparationSealEvidence = nil
+				}
+				if startuppreparation.ValidatePreparedDefinitionPersistence(bad) == nil || repositories.Workspaces.CompareAndSwap(ctx, bad, bad.Revision) == nil {
+					t.Fatal("forged pure compilation accepted", change)
+				}
+			}
+			original, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			clone := original.StartupPreparation.Clone()
+			clone.Attempts[0].DefinitionCompilation.ObligationCount++
+			if clone.Attempts[0].DefinitionCompilation.ObligationCount == original.StartupPreparation.Attempts[0].DefinitionCompilation.ObligationCount {
+				t.Fatal("compilation clone aliases original")
+			}
+		}
+		if emptySelection {
+			for _, mutate := range []func(*workspace.Workspace){
+				func(w *workspace.Workspace) { w.PreparationSkillRegistryEvidence = nil },
+				func(w *workspace.Workspace) { w.PreparationMCPRegistryEvidence = nil },
+				func(w *workspace.Workspace) { w.StartupPreparation.Attempts[0].EmptySelectionEvaluationVersion = "" },
+				func(w *workspace.Workspace) { w.StartupPreparation.Attempts[0].Assessment.PassedRequiredCount++ },
+				func(w *workspace.Workspace) {
+					a := &w.StartupPreparation.Attempts[0]
+					for i, c := range a.Checks {
+						if c.ID == "provider_cache" {
+							a.Checks = append(a.Checks[:i], a.Checks[i+1:]...)
+							break
+						}
+					}
+					requirements := make([]workspace.PreparationCheckRequirement, len(a.Checks))
+					for i, c := range a.Checks {
+						requirements[i] = workspace.PreparationCheckRequirement{ID: c.ID, Owner: c.Owner, Required: c.Required}
+					}
+					s, err := workspace.AssessPreparationChecks(a.Binding.ManifestHash, requirements, a.Checks)
+					if err != nil {
+						t.Fatal(err)
+					}
+					a.Assessment = &s
+				},
+			} {
+				bad, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				mutate(bad)
+				if workspace.ValidatePreparationEvidencePersistence(bad) == nil {
+					t.Fatal("forged aggregate or incomplete owner material accepted")
+				}
+			}
+		}
+		if first.Preparation.Record.Attempts[0].DirectoryEvidenceHash == "" {
+			t.Fatal("HTTP explicit check lost actual File material reference")
+		}
+		if first.Preparation.Record.Attempts[0].RunHistoryEvidenceRef == "" {
+			t.Fatal("HTTP explicit check lost original complete Run history reference")
+		}
+		if first.Preparation.Record.Attempts[0].SkillHubInstalledState != "observed_selection_pending" {
+			t.Fatal("HTTP lost complete installed materials or claimed readiness")
+		}
+		if first.Preparation.Record.Attempts[0].SkillSelectionState != "compiled_checks_pending" {
+			t.Fatal("HTTP lost sealed combination compilation")
+		}
+		if first.Preparation.Record.Attempts[0].SkillContextState != "compiled_checks_pending" {
+			t.Fatal("HTTP lost pure context budget compilation")
+		}
+		if first.Preparation.Record.Attempts[0].SkillReferenceState != referenceState {
+			t.Fatal("HTTP lost original auxiliary observation")
+		}
+		if first.Preparation.Record.Attempts[0].SkillStatusState != skillStatusState {
+			t.Fatal("HTTP lost original selected status diagnosis")
+		}
+		public, _ := json.Marshal(first)
+		if first.Preparation.Record.Attempts[0].MemoryInventoryEvidenceRef == "" || bytes.Contains(public, []byte("HTTP 私有库存正文")) || bytes.Contains(public, []byte("memory-preparation-epoch:")) {
+			t.Fatalf("HTTP lost inventory reference or leaked private material: ref=%q checks=%+v", first.Preparation.Record.Attempts[0].MemoryInventoryEvidenceRef, first.Preparation.Record.Attempts[0].Checks)
+		}
+		if err := repositories.MemoryItems.Delete(ctx, memoryOriginal.ID); err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(public, []byte("HTTP 原始安装材料")) || bytes.Contains(public, []byte("指令正文")) {
+			t.Fatal("private installed bytes leaked")
+		}
+		if bytes.Contains(public, []byte("HTTP 原始辅助文件")) || bytes.Contains(public, []byte("references/exact.bin")) {
+			t.Fatal("private auxiliary material leaked")
+		}
+		if first.Preparation.Record.Attempts[0].ResourceEvidenceHash == "" {
+			t.Fatal("HTTP explicit check lost reviewed resource evidence reference")
+		}
+		if first.Preparation.Record.Attempts[0].ManagedConfigEvidenceRef == "" {
+			t.Fatal("HTTP explicit check lost private managed config ref")
+		}
+		if first.Preparation.Record.Attempts[0].SoulEvidenceRef == "" || preparationSoulReads.Load() != 2 {
+			t.Fatal("HTTP did not archive exact Soul before/after records")
+		}
+		if first.Preparation.Record.Attempts[0].SkillRegistryEvidenceRef == "" || preparationSkillReads.Load() != 2 {
+			t.Fatal("HTTP did not archive complete registry reads")
+		}
+		for _, check := range first.Preparation.Record.Attempts[0].Checks {
+			if check.ID == "mcp_selection" && check.Reason != mcpReason {
+				t.Fatal("HTTP lost full registry observation or granted connection proof", check)
+			}
+			skillReason := "skill_selection_compiled_checks_pending"
+			if emptySelection {
+				skillReason = workspace.PreparationEmptySkillReason
+			}
+			if check.ID == "skill_selection" && check.Reason != skillReason {
+				t.Fatal("HTTP lost registry classification")
+			}
+			if check.ID == "soul_selection" && check.Reason != "souls_observed_remaining_checks" {
+				t.Fatal("HTTP lost complete Soul classification")
+			}
+			wantState := "blocked"
+			if emptySelection && (check.ID == "skill_selection" || check.ID == "mcp_selection") {
+				wantState = "passed"
+			}
+			if check.ID == "exact_seal" || check.ID == "persistence_integrity" || check.ID == "first_activation_no_run" || check.ID == "directory_boundary" || check.ID == "managed_configuration" || check.ID == "soul_selection" || check.ID == "memory_selection" || strings.HasPrefix(check.ID, "resource/") {
+				wantState = "passed"
+			}
+			if check.ID == "exact_seal" && (check.Reason != "seal_observed_remaining_checks" || first.Preparation.Record.Attempts[0].SealEvidenceRef == "") || check.ID == "persistence_integrity" && (check.Reason != "persistence_binding_observed_remaining_checks" || first.Preparation.Record.Attempts[0].SealEvidenceRef == "") {
+				t.Fatal("HTTP lost exact owner seal observation", check)
+			}
+			if check.State != wantState || check.ID == "provider_cache" && check.Reason != "provider_cache_miss" || check.ID == "first_activation_no_run" && (check.Reason != "run_history_empty_final_fence_observed" || first.Preparation.Record.Attempts[0].NoRunEvaluationVersion != "workorch-preparation-no-run-final-fence/v1") {
+				t.Fatalf("HTTP lost actual observation blockers: %+v", check)
+			}
+			if check.ID == "directory_boundary" && check.Reason != "directory_observed_remaining_checks" {
+				t.Fatalf("HTTP did not observe existing prepared directories: %+v", check)
+			}
+			if strings.HasPrefix(check.ID, "resource/") && check.Reason != "resource_observed_remaining_checks" {
+				t.Fatalf("HTTP did not compare reviewed current resource bytes: %+v", check)
+			}
+			if check.ID == "managed_configuration" && check.Reason != "managed_configs_observed_remaining_checks" {
+				t.Fatal("HTTP did not observe exact managed content", check.Reason)
+			}
+		}
+		// Changing/removing an external file cannot cause GET/replay/recovery to
+		// fabricate a fresh check or replace the immutable original evidence.
+		for _, path := range installedPaths {
+			if err := os.Rename(path, path+".preserved"); err != nil {
+				t.Fatal(err)
+			}
+			refPath := filepath.Join(filepath.Dir(path), "references", "exact.bin")
+			if !missingSkillRef {
+				if err := os.Rename(refPath, refPath+".preserved"); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if err := filerepository.NewSoulRepository(filepath.Join(storage, "system", "souls.json")).Delete(ctx, "http-soul"); err != nil {
+			t.Fatal(err)
+		}
+		// Only remove this isolated test fixture; a completed check must retain its
+		// original history and must not requery the changed external registry.
+		skillPath := filepath.Join(storage, "system", "skills.json")
+		if err := os.Rename(skillPath, skillPath+".preserved"); err != nil {
+			t.Fatal(err)
+		}
+		for _, configPath := range configPaths {
+			if err := os.Remove(configPath); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for reopen := 0; reopen < 2; reopen++ {
+			for _, action := range []string{"", "/check", "/recover"} {
+				method := http.MethodPost
+				if action == "" {
+					method = http.MethodGet
+				}
+				again := preparationHTTPWorkflowRequest(t, baseURL, method, preparationPath+action, intent)
+				expected := first.Preparation
+				if reopen > 0 {
+					// Reopened File owner has a different process epoch. History is
+					// immutable, but the independent current-validity axis must stale.
+					expected.CurrentValidity = "stale"
+				}
+				if !reflect.DeepEqual(expected, again.Preparation) {
+					t.Fatal("HTTP GET/replay/recovery/reopen rewrote original preparation")
+				}
+				if action == "" && again.Compilation != nil || emptySelection && action != "" && !reflect.DeepEqual(first.Compilation, again.Compilation) {
+					t.Fatal("GET compiled or explicit original recovery changed complete compilation")
+				}
+			}
+			if reopen == 0 {
+				closeOwners()
+				baseURL, routine, closeOwners = open()
+			}
+		}
+		stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+		if err != nil || preparationStatusCalls.Load() != 2 || len(stored.PreparationSkillHubEffects) != 1 || stored.PreparationSkillHubEffects[0].Summary() != workspace.PreparationSkillHubRecorded || first.Preparation.Record.Attempts[0].SkillHubEffectState != "recorded" {
+			t.Fatal("status history lost/replayed or falsely unresolved", err)
+		}
+		if len(stored.PreparationProviderCacheEvidence) != 1 || stored.PreparationProviderCacheEvidence[0].Ref != first.Preparation.Record.Attempts[0].ProviderCacheEvidenceRef || stored.PreparationProviderCacheEvidence[0].Facts.Observation.Catalog.ErrorCode != "cache_miss" || stored.PreparationProviderCacheEvidence[0].Facts.WorkspaceRevision != admitted.WorkspaceRevision+1 || preparationCacheReads.Load() != 1 {
+			t.Fatal("HTTP/recovery/reopen lost cache-only owner history or repeated observation")
+		}
+		if len(stored.PreparationRunHistoryEvidence) != 1 || stored.PreparationRunHistoryEvidence[0].Ref != first.Preparation.Record.Attempts[0].RunHistoryEvidenceRef || stored.PreparationRunHistoryEvidence[0].Facts.Observation.RequestID != intent.RequestID || stored.PreparationRunHistoryEvidence[0].Facts.WorkspaceRevision != admitted.WorkspaceRevision+1 || stored.PreparationRunHistoryEvidence[0].Facts.BlockedReason() != "run_history_empty_fence_not_final" || stored.PreparationRunHistoryEvidence[0].Validate() != nil {
+			t.Fatal("HTTP/recovery/reopen lost original complete Run history or granted no-Run credit")
+		}
+		if len(stored.PreparationMemoryInventoryEvidence) != 1 || stored.PreparationMemoryInventoryEvidence[0].Ref != first.Preparation.Record.Attempts[0].MemoryInventoryEvidenceRef || !reflect.DeepEqual(stored.PreparationMemoryInventoryEvidence[0].Facts.Observation.Items, []*memorymodel.MemoryItem{memoryOriginal}) {
+			t.Fatal("HTTP/recovery/reopen lost original complete inventory")
+		}
+		memoryEvidence := stored.PreparationMemoryInventoryEvidence[0]
+		if len(stored.PreparationMCPRegistryEvidence) != 1 || stored.PreparationMCPRegistryEvidence[0].Ref != first.Preparation.Record.Attempts[0].MCPRegistryEvidenceRef || stored.PreparationMCPRegistryEvidence[0].Facts.SnapshotHash != stored.StartupPreparation.Attempts[0].ObservationSnapshotHash || stored.PreparationMCPRegistryEvidence[0].Validate() != nil || preparationMCPReads.Load() != 2 {
+			t.Fatal("HTTP/reopen lost complete original MCP registry history")
+		}
+		mcpSelection := stored.PreparationMCPRegistryEvidence[0].Selection
+		mcpArchiveReason := mcpReason
+		if emptySelection {
+			mcpArchiveReason = "mcp_selection_empty_policy_pending"
+		}
+		if mcpSelection == nil || mcpSelection.FailureCode != mcpFailure || stored.PreparationMCPRegistryEvidence[0].SelectionEvaluationVersion != workspace.PreparationMCPSelectionEvaluationVersion || stored.PreparationMCPRegistryEvidence[0].BlockedReason() != mcpArchiveReason || mcpSelection.Version != workspace.PreparationMCPSelectionVersion || mcpSelection.SkillRegistryRef != stored.PreparationSkillRegistryEvidence[0].Ref || mcpSelection.SkillRegistryContentHash != stored.PreparationSkillRegistryEvidence[0].ContentHash || !reflect.DeepEqual(mcpSelection.Definition, workspace.PreparationMCPDefinition(stored)) {
+			t.Fatal("HTTP/reopen lost owner-derived exact MCP selection")
+		}
+		if scenario == "step04_workflow_mcp_selected" {
+			if !reflect.DeepEqual(mcpSelection.SelectedServerIDs, []string{"http-mcp"}) || !reflect.DeepEqual(mcpSelection.SelectedCapabilityIDs, []string{"http-capability"}) || len(mcpSelection.Selected.Servers) != 1 || mcpSelection.Selected.Servers[0].Command != "never-start" || len(mcpSelection.Selected.Capabilities) != 1 || mcpSelection.Selected.Capabilities[0].Description != "MCP 原文\r\n第二行" || !reflect.DeepEqual(mcpSelection.Selected.Servers, stored.PreparationMCPRegistryEvidence[0].Facts.Before.Servers) || !reflect.DeepEqual(mcpSelection.Selected.Capabilities, stored.PreparationMCPRegistryEvidence[0].Facts.Before.Capabilities) {
+				t.Fatal("HTTP/reopen lost nonempty selection or exact owner values")
+			}
+		} else if !mcpFixture && (len(mcpSelection.Selected.Servers) != 0 || len(mcpSelection.Selected.Capabilities) != 0) {
+			t.Fatal("empty registry invented MCP resources")
+		}
+		for _, mutation := range []string{"reason", "consumer", "source", "erase"} {
+			bad, err := repositories.Workspaces.Get(ctx, stored.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := &bad.PreparationMCPRegistryEvidence[0]
+			switch mutation {
+			case "reason":
+				for n := range bad.StartupPreparation.Attempts[0].Checks {
+					if bad.StartupPreparation.Attempts[0].Checks[n].ID == "mcp_selection" {
+						bad.StartupPreparation.Attempts[0].Checks[n].Reason = "mcp_selection_source_binding_conflict"
+					}
+				}
+			case "consumer":
+				e.SelectionEvaluationVersion = ""
+			case "source":
+				e.Selection.SkillRegistryContentHash = "replacement"
+			case "erase":
+				bad.PreparationMCPRegistryEvidence = nil
+				bad.StartupPreparation.Attempts[0].MCPRegistryEvidenceRef = ""
+			}
+			if len(bad.PreparationMCPRegistryEvidence) != 0 {
+				e.ContentHash = e.Hash()
+			}
+			if workspace.ValidatePreparationEvidencePersistence(bad) == nil || repositories.Workspaces.CompareAndSwap(ctx, bad, bad.Revision) == nil {
+				t.Fatal("HTTP history accepted a rehashed selection consumer replacement", mutation)
+			}
+		}
+		if memoryEvidence.Selection == nil || memoryEvidence.Selection.Mode != "list_only" || memoryEvidence.Selection.FailureCode != "" || memoryEvidence.Selection.Selection == nil || !reflect.DeepEqual(memoryEvidence.Selection.Selection.Selected, []*memorymodel.MemoryItem{memoryOriginal}) || memoryEvidence.Facts.SelectionSource == nil || memoryEvidence.Facts.SelectionSource.SnapshotHash != stored.StartupPreparation.Attempts[0].ObservationSnapshotHash || memoryEvidence.Facts.SelectionSource.Before.ConfigurationRevision != "http-memory-mode" {
+			t.Fatal("HTTP/recovery/reopen lost original mode, selected bytes or exact accepted snapshot")
+		}
+		for _, change := range []string{"erase_provider", "provider_ref", "provider_epoch", "provider_binding"} {
+			bad, _ := repositories.Workspaces.Get(ctx, stored.ID)
+			switch change {
+			case "erase_provider":
+				bad.PreparationProviderCacheEvidence = nil
+				bad.StartupPreparation.Attempts[0].ProviderCacheEvidenceRef = ""
+			case "provider_ref":
+				bad.StartupPreparation.Attempts[0].ProviderCacheEvidenceRef = ""
+			case "provider_epoch":
+				bad.PreparationProviderCacheEvidence[0].Facts.Observation.OwnerEpoch = "llm-preparation-epoch:BBBBBBBBBBBBBBBBBBBBBBBBBB"
+			case "provider_binding":
+				bad.PreparationProviderCacheEvidence[0].Binding.StartupInputHash = "replacement"
+			}
+			if len(bad.PreparationProviderCacheEvidence) != 0 {
+				bad.PreparationProviderCacheEvidence[0].ContentHash = bad.PreparationProviderCacheEvidence[0].Hash()
+			}
+			if err := repositories.Workspaces.CompareAndSwap(ctx, bad, bad.Revision); err == nil {
+				t.Fatal("HTTP history rewritten after rehash", change)
+			}
+		}
+		if stored.PreparationSkillHubEffects[0].InstalledSummary() != "observed_selection_pending" {
+			t.Fatal("reopen lost installed history")
+		}
+		for _, facts := range []*workspace.PreparationSkillHubStatusFacts{stored.PreparationSkillHubEffects[0].Global, stored.PreparationSkillHubEffects[0].Project} {
+			if facts.Installed == nil || len(facts.Installed.First) != 1 || len(facts.Installed.Second) != 1 || !bytes.Equal(facts.Installed.First[0].Raw, installedRaw) || !bytes.Equal(facts.Installed.Second[0].Raw, installedRaw) {
+				t.Fatal("recovery reread missing files or lost original rounds")
+			}
+			aux := facts.Installed.References
+			if aux == nil || len(aux.First) != 1 || missingSkillRef && (aux.FailureCode == "" || aux.First[0].File.Complete) || !missingSkillRef && (!aux.CompleteFor(*facts.Installed) || !bytes.Equal(aux.Second[0].File.Raw, []byte("HTTP 原始辅助文件\xff\x00\r\n"))) {
+				t.Fatal("reopen lost original reference reads or failure")
+			}
+		}
+		if err != nil || len(stored.PreparationSoulEvidence) != 1 || preparationSoulReads.Load() != 2 || stored.PreparationSoulEvidence[0].Ref != first.Preparation.Record.Attempts[0].SoulEvidenceRef || stored.PreparationSoulEvidence[0].Facts.Souls[0].SoulMD != "HTTP Soul 原文\n" || !reflect.DeepEqual(stored.PreparationSoulEvidence[0].Facts.Souls, stored.PreparationSoulEvidence[0].Facts.ReobservedSouls) {
+			t.Fatal("HTTP/reopen lost original Soul values or repeated observation", err)
+		}
+		if len(stored.PreparationSkillRegistryEvidence) != 1 || preparationSkillReads.Load() != 2 || stored.PreparationSkillRegistryEvidence[0].Ref != first.Preparation.Record.Attempts[0].SkillRegistryEvidenceRef || len(stored.PreparationSkillRegistryEvidence[0].Facts.Catalog.Skills) != 1 || stored.PreparationSkillRegistryEvidence[0].Facts.Catalog.Skills[0].Instruction != "HTTP Skill 原文" || !reflect.DeepEqual(stored.PreparationSkillRegistryEvidence[0].Facts.Catalog.Skills, stored.PreparationSkillRegistryEvidence[0].Facts.ReobservedCatalog.Skills) {
+			t.Fatal("HTTP/reopen lost registry history or reobserved")
+		}
+		selection := stored.PreparationSkillRegistryEvidence[0].Selection
+		if selection == nil || selection.References == nil || selection.References.State != referenceState {
+			t.Fatal("reopen lost reference compilation")
+		}
+		selectedCount := 2
+		if emptySelection {
+			selectedCount = 0
+		}
+		if selection.Status == nil || selection.Status.State != skillStatusState || len(selection.Status.Entries) != selectedCount {
+			t.Fatal("reopen lost original selected status diagnosis")
+		}
+		if selection == nil || selection.Summary() != "compiled_checks_pending" || len(selection.Catalog) != 3 || len(selection.Selected) != selectedCount || !emptySelection && (selection.Selected[0].Content.ID != "skillhub:workspace:"+created.WorkspaceID+":http-installed" || selection.Selected[0].Content.Instruction != string(installedRaw)) || selection.SoulRef != stored.PreparationSoulEvidence[0].Ref || selection.SkillHubEffectRef != stored.PreparationSkillHubEffects[0].Ref || selection.Definition.GoalText != stored.DefinitionAuthoringConfirmation.Goal.Text || !reflect.DeepEqual(selection.Definition.DoDItems, stored.DefinitionAuthoringConfirmation.DoD.Items) {
+			t.Fatal("reopen lost complete selection, exact order, source material or owner identities")
+		}
+		// Rehashing a changed derived selection cannot replace exact source
+		// recomputation; dropping it consistently still cannot rewrite history.
+		if selection.Context == nil || !emptySelection && selection.Context.Budget == nil || len(selection.Context.Projection) != selectedCount {
+			t.Fatal("reopen lost independently compiled context budget")
+		}
+		changes := []string{"score", "content", "allowlist", "source_ref", "context_projection", "context_budget", "context_diagnostic", "context_summary_missing", "context_erase", "references_path", "references_erase", "references_state", "status_raw", "status_reason", "status_state", "status_erase", "erase"}
+		if emptySelection {
+			changes = []string{"allowlist", "source_ref", "context_diagnostic", "context_summary_missing", "references_erase", "references_state", "status_state", "status_erase", "erase"}
+		}
+		for _, change := range changes {
+			bad, _ := repositories.Workspaces.Get(ctx, stored.ID)
+			e := &bad.PreparationSkillRegistryEvidence[0]
+			switch change {
+			case "status_raw":
+				e.Selection.Status.Entries[0].ObservedStatus = "caller"
+			case "status_reason":
+				e.Selection.Status.Entries[0].Reason = "synced_observed_freshness_pending"
+				if skillStatusState == "observed_freshness_pending" {
+					e.Selection.Status.Entries[0].Reason = "status_not_synced"
+				}
+			case "status_state":
+				bad.StartupPreparation.Attempts[0].SkillStatusState = "ready"
+			case "status_erase":
+				e.Selection.Status = nil
+				bad.StartupPreparation.Attempts[0].SkillStatusState = ""
+			case "references_path":
+				e.Selection.References.Entries[0].Path = "/unrelated/identical-bytes"
+			case "references_erase":
+				e.Selection.References = nil
+				bad.StartupPreparation.Attempts[0].SkillReferenceState = ""
+			case "references_state":
+				bad.StartupPreparation.Attempts[0].SkillReferenceState = "ready"
+			case "erase":
+				e.Selection = nil
+				bad.StartupPreparation.Attempts[0].SkillSelectionState = ""
+				bad.StartupPreparation.Attempts[0].SkillContextState = ""
+				for n := range bad.StartupPreparation.Attempts[0].Checks {
+					if bad.StartupPreparation.Attempts[0].Checks[n].ID == "skill_selection" {
+						bad.StartupPreparation.Attempts[0].Checks[n].Reason = "skill_registry_observed_selection_pending"
+					}
+				}
+			case "score":
+				e.Selection.Selection.Matches[0].Score++
+			case "content":
+				e.Selection.Selected[0].Content.Instruction = "changed original instruction"
+			case "allowlist":
+				e.Selection.AllowedSkillRefs = []string{"unconfirmed"}
+			case "source_ref":
+				e.Selection.SoulRef = "other"
+			case "context_projection":
+				e.Selection.Context.Projection[0].Instruction = "changed projection"
+			case "context_budget":
+				e.Selection.Context.Budget.IncludedInstructionBytes++
+			case "context_diagnostic":
+				e.Selection.Context.Diagnostic = []byte("invented diagnostic")
+			case "context_summary_missing":
+				bad.StartupPreparation.Attempts[0].SkillContextState = ""
+			case "context_erase":
+				bad.StartupPreparation.Attempts[0].DefinitionCompilation = nil
+				bad.StartupPreparation.Attempts[0].Assessment = nil
+				bad.StartupPreparation.Attempts[0].EmptySelectionEvaluationVersion = ""
+				e.Selection.Context = nil
+				bad.StartupPreparation.Attempts[0].SkillContextState = ""
+				// A historical snapshot predating context compilation also
+				// predates its dependent MCP compilation. It remains readable,
+				// but may never replace the completed current history by CAS.
+				bad.PreparationMCPRegistryEvidence[0].Selection = nil
+				bad.PreparationMCPRegistryEvidence[0].SelectionEvaluationVersion = ""
+				bad.PreparationMCPRegistryEvidence[0].ContentHash = bad.PreparationMCPRegistryEvidence[0].Hash()
+				for n := range bad.StartupPreparation.Attempts[0].Checks {
+					if bad.StartupPreparation.Attempts[0].Checks[n].ID == "mcp_selection" {
+						bad.StartupPreparation.Attempts[0].Checks[n].Reason = "mcp_registry_observed_connection_pending"
+					}
+				}
+			}
+			e.ContentHash = e.Hash()
+			if change == "context_erase" && workspace.ValidatePreparationEvidencePersistence(bad) != nil {
+				t.Fatal("legacy history without context projection no longer loads")
+			}
+			if change != "erase" && change != "context_erase" && workspace.ValidatePreparationEvidencePersistence(bad) == nil {
+				t.Fatal("changed selection trusted after rehash")
+			}
+			if err := repositories.Workspaces.CompareAndSwap(ctx, bad, bad.Revision); err == nil {
+				t.Fatal("completed selection rewritten")
+			}
+		}
+		callerCopy, err := repositories.Workspaces.Get(ctx, stored.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		callerCopy.StartupPreparation.Attempts[0].Assessment.Outstanding[0].Reason = "caller-mutated"
+		if !emptySelection {
+			callerCopy.PreparationSkillRegistryEvidence[0].Selection.Selected[0].Content.TriggerRules[0] = "caller-mutated"
+		}
+		fresh, err := repositories.Workspaces.Get(ctx, stored.ID)
+		if err != nil || fresh.StartupPreparation.Attempts[0].Assessment.Outstanding[0].Reason == "caller-mutated" || !emptySelection && fresh.PreparationSkillRegistryEvidence[0].Selection.Selected[0].Content.TriggerRules[0] != "交付目标" {
+			t.Fatal("persisted selection aliases caller")
+		}
+		if err != nil || stored.Revision != admitted.WorkspaceRevision+2 || physicalCalls.Load() != baselineCalls || preparationCacheReads.Load() != 1 || preparationMemoryModeReads.Load() != 2 || len(stored.StartupPreparation.Attempts) != 1 || stored.StartupInput.StartupInputHash != admitted.StartupInputHash {
+			t.Fatalf("preparation changed sealed/provider facts: %v", err)
+		}
+		if len(stored.PreparationDirectoryEvidence) != 1 || workspace.ValidatePreparationEvidencePersistence(stored) != nil || stored.PreparationDirectoryEvidence[0].ContentHash != first.Preparation.Record.Attempts[0].DirectoryEvidenceHash || !stored.PreparationDirectoryEvidence[0].Internal.Complete || !stored.PreparationDirectoryEvidence[0].Deliverable.Complete {
+			t.Fatal("HTTP/reopen did not retain File owner original material")
+		}
+		if len(stored.PreparationResourceEvidence) != 1 || len(stored.PreparationResourceEvidence[0].Resources) != 1 || stored.PreparationResourceEvidence[0].ContentHash != first.Preparation.Record.Attempts[0].ResourceEvidenceHash || !bytes.Equal(stored.PreparationResourceEvidence[0].Resources[0].Observation.Content, []byte("可验证的资源\n")) {
+			t.Fatal("HTTP/reopen lost exact reviewed resource original bytes")
+		}
+		if len(stored.PreparationManagedConfigEvidence) != 1 || len(stored.PreparationManagedConfigEvidence[0].Files) != len(declarations) || stored.PreparationManagedConfigEvidence[0].Ref != first.Preparation.Record.Attempts[0].ManagedConfigEvidenceRef {
+			t.Fatal("HTTP/reopen lost original managed config evidence")
+		}
+		for i, file := range stored.PreparationManagedConfigEvidence[0].Files {
+			if file.Scope != declarations[i].Scope || file.Path != declarations[i].Path || !bytes.Equal(file.Observation.Content, configRaw) {
+				t.Fatal("HTTP/reopen changed original config scope/bytes")
+			}
+		}
+		assertNoRuns()
+		return
+	}
 	assertSuccessAudit()
 	observed := authoringHTTPRequest(t, baseURL, http.MethodGet, path, nil, http.StatusOK)
 	if observed.ConfirmationRecovery == nil || observed.ConfirmationRecovery.InputHash != confirmation.InputHash || observed.ConfirmationRecovery.DerivationPermitID != confirmation.DerivationPermitID || observed.ConfirmationRecovery.ProposalHash != confirmation.ProposalHash || observed.ConfirmationRecovery.SpecificationHash != confirmation.SpecificationHash || observed.ConfirmationRecovery.ExpectedWorkspaceRevision != observed.WorkspaceRevision {

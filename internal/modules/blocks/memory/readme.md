@@ -22,11 +22,24 @@ Memory purge 不是分页算法。owner-private sink 每一 pass 直接读取该
 | `blocks/workspace` | `SealWorkspaceMemoryDeletionCommand/Result`、`PurgeWorkspaceMemoryCommand/Result` | 唯一 deletion producer；source必须为 Workspace。 |
 | Eventstream/projection consumers | `MemoryChangedData`、`MemoryRecallRecordedData` | 提交后audit/display通知；repository记录仍是authority。 |
 
-10 个 command topics分别使用具体 result：item Create/Get/List/Search/Update/Delete、trace Upsert/List、Workspace Seal/Purge。生产构造只接受同一 backend binding 的 canonical `MemoryOwnerRepositories` 与 EventHub，不提供独立 repository fallback。
+11 个 command topics分别使用具体 result：item Create/Get/List/Search/Update/Delete、trace Upsert/List、Workspace Seal/Purge，以及准备库存观察。生产构造只接受同一 backend binding 的 canonical `MemoryOwnerRepositories` 与 EventHub，不提供独立 repository fallback。
+
+### 激活前完整库存观察
+
+`/memory/startup-preparation/inventory/query` 使用 `ObservePreparationInventoryCommand/Result`，
+只接受 exact `application/workorchd` source。沿既有 Workspace 锁和 active-deletion fence 一次读取
+完整 `ListByWorkspaceID`，不使用分页/search、过滤异常行、模式 fallback、embedding 或 recall trace 写入。
+完整空库存显式为空数组；nil/跨 scope/重复 ID/非法 UTF-8/非有限向量或超限整体拒绝，不返回部分材料。
+最多 256 项、完整编码 1 MiB，Tags/向量有界；仅按 ID 排序，不改内容、来源、分数或已有向量。
+完整 typed 值绑定 Workspace、观察时点和 owner 重建后变化的随机 epoch；epoch 不是持久 revision，
+库存不是精确选择、语义召回、持续 freshness、ready 或 M3。没有把 required semantic 改成 list-only。
+Application 可将同一次观察经 Workspace 原准备操作私有 archive 与 blocked CAS 封存；
+GET/重放/恢复/重开不重查，公开仅给随机历史引用，不输出 Memory 原文、向量或 epoch。
+普通分页/search/CRUD/删除/召回合同不变；`biz/preparation_inventory_test.go` 覆盖完整性、来源、取消和 drain。
 
 ### 生命周期合同
 
-- 10 项订阅逐成功登记；部分启动失败保留 service、删除 fence 和锁账本，未清理前不能重复注册。退订成功才移除对应项。
+- 11 项订阅逐成功登记；部分启动失败保留 service、删除 fence 和锁账本，未清理前不能重复注册。退订成功才移除对应项。
 - BeginShutdown 关闭新 item 修改及新删除操作；纯查询与 Run 已接纳的 RecallTrace 交付保留 drain。原 exact Run source、scope、immutable duplicate/conflict 和 tombstone 校验不变，不按 Source 泛放行其他写入。
 - handler 票覆盖真实 repository 操作、锁等待及提交后通知。Quiesce 超时保留依赖；最终 Stop 封全部入站并再次排空，逆序 checked 退订全部成功后才清 owner/Module 引用，未知 panic 不吞且释放清理 claim。
 - 调用方串行 Configure/Start/Stop，不能覆盖未释放 owner。本地 Quiesce 不替代共享任务/Hub 屏障，不更改 SM-1～SM-4 或召回 credit；`biz/owner_lifecycle_test.go`、`module_lifecycle_test.go` 覆盖订阅切点、超时重试和真实 framework guard。

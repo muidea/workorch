@@ -80,10 +80,14 @@ func TestResourceBoundSpecificationReservationUsesSealedDerivation(t *testing.T)
 
 func seedResourceBoundAuthoringConfirmation(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID, directory, content string, declared ...bool) workspaceevents.ConfirmDefinitionAuthoringCommand {
 	t.Helper()
+	return seedResourceBoundAuthoringConfirmationConfigured(t, owners, id, directory, content, len(declared) > 0 && declared[0], nil)
+}
+
+func seedResourceBoundAuthoringConfirmationConfigured(t *testing.T, owners *fileDefinitionAdmissionOwners, id common.WorkspaceID, directory, content string, eligible bool, configure func(*workspace.Workspace)) workspaceevents.ConfirmDefinitionAuthoringCommand {
+	t.Helper()
 	ctx := context.Background()
 	input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: id, Revision: 1, GoalText: "交付目标", TemplateID: "resource-template", AcceptanceRequirements: []string{"用户验收"}, ResourceRefs: []string{"requirements.txt"}}
 	template := workspace.WorkspaceTemplate{ID: input.TemplateID, Name: "模板", DoDItems: []string{"模板验收"}}
-	eligible := len(declared) > 0 && declared[0]
 	hints, hintErr := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"generic": map[string]any{"evidenceRequirements": []any{map[string]any{"id": "*", "scope": "dodItem", "requiredEvidenceKinds": []any{"validation"}, "acceptedStepKinds": []any{"validation/managed_session"}}}}}})
 	if hintErr != nil {
 		t.Fatal(hintErr)
@@ -148,7 +152,11 @@ func seedResourceBoundAuthoringConfirmation(t *testing.T, owners *fileDefinition
 			t.Fatal(err)
 		}
 	}
-	if err := owners.repositories.Workspaces.Create(ctx, &workspace.Workspace{ID: id, TemplateID: input.TemplateID, DeliverableDirectory: directory, DefinitionAuthoring: &record}); err != nil {
+	draft := &workspace.Workspace{ID: id, TemplateID: input.TemplateID, DeliverableDirectory: directory, DefinitionAuthoring: &record}
+	if configure != nil {
+		configure(draft)
+	}
+	if err := owners.repositories.Workspaces.Create(ctx, draft); err != nil {
 		t.Fatal(err)
 	}
 	current, err := owners.repositories.Workspaces.Get(ctx, id)

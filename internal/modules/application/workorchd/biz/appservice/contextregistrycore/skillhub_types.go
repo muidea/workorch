@@ -20,12 +20,25 @@ type SkillHubStatus struct {
 	ProjectPath string               `json:"project_path"`
 	SkillCount  int                  `json:"skill_count"`
 	Items       []SkillHubStatusItem `json:"items"`
+	Agents      []SkillHubAgentInfo  `json:"agents,omitempty"`
+	Orphaned    []SkillHubStatusItem `json:"orphaned,omitempty"`
+	GeneratedAt string               `json:"generated_at,omitempty"`
+}
+
+type SkillHubAgentInfo struct {
+	Name       string `json:"name"`
+	SkillsDir  string `json:"skills_dir"`
+	Detected   bool   `json:"detected"`
+	Configured bool   `json:"configured"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 type SkillHubStatusItem struct {
 	SkillID          string `json:"skill_id"`
 	Agent            string `json:"agent,omitempty"`
 	Status           string `json:"status,omitempty"`
+	LegacyStatus     string `json:"legacy_status,omitempty"`
+	Reason           string `json:"reason,omitempty"`
 	Message          string `json:"message,omitempty"`
 	SourceRepository string `json:"source_repository,omitempty"`
 	Version          string `json:"version,omitempty"`

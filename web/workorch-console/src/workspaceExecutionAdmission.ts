@@ -21,8 +21,10 @@ const canonicalReasons: Record<RuntimeExecutionIntentOutcome, readonly RuntimeEx
   ],
   replacement_pending: [
     'duplicate_restart',
-    'predecessor_supersede_requested'
+    'predecessor_supersede_requested',
+    'terminal_predecessor_successor_requested'
   ],
+  fresh_intent_unresolved: ['fresh_intent_result_unknown'],
   restart_required: [
     'workspace_active_run_absent',
     'selected_run_absent',
@@ -32,7 +34,8 @@ const canonicalReasons: Record<RuntimeExecutionIntentOutcome, readonly RuntimeEx
   fresh_activation_required: [
     'runtime_bootstrap_missing',
     'definition_admission_missing',
-    'definition_admission_mismatch'
+    'definition_admission_mismatch',
+    'preparation_creation_fence_missing'
   ],
   definition_changed_requires_restart: ['definition_changed'],
   governance_required: [
@@ -61,7 +64,7 @@ function canonicalClassification(outcome: RuntimeExecutionIntentOutcome) {
   const accepted = outcome === 'reconciliation_requested' || outcome === 'replacement_pending';
   return {
     accepted,
-    state: accepted ? 'accepted' : 'rejected',
+    state: accepted ? 'accepted' : outcome === 'fresh_intent_unresolved' ? 'pending' : 'rejected',
     httpStatus: accepted ? 202 : 409
   } as const;
 }
@@ -94,6 +97,21 @@ export function parseWorkspaceExecutionAdmission(
     throw responseError(body, expectation, 'outcome/reason pairing is not canonical');
   }
   const classification = canonicalClassification(outcome);
+  if (outcome === 'fresh_intent_unresolved') {
+    if (body.intent !== 'restart' || body.runId !== undefined && body.runId !== '' ||
+        typeof body.pendingRequestId !== 'string' || !body.pendingRequestId.trim() ||
+        body.pendingRequestId !== body.pendingRequestId.trim() || new TextEncoder().encode(body.pendingRequestId).length > 256 ||
+        /[\u0000\r\n]/.test(body.pendingRequestId) ||
+        typeof body.pendingStartupInputHash !== 'string' || !body.pendingStartupInputHash.trim() ||
+        body.pendingStartupInputHash !== body.pendingStartupInputHash.trim() || new TextEncoder().encode(body.pendingStartupInputHash).length > 256 ||
+        typeof body.pendingPayloadHash !== 'string' || !/^[a-f0-9]{64}$/.test(body.pendingPayloadHash)) {
+      throw responseError(body, expectation, 'unresolved original identity is invalid');
+    }
+  } else if (body.pendingRequestId !== undefined && body.pendingRequestId !== '' ||
+             body.pendingStartupInputHash !== undefined && body.pendingStartupInputHash !== '' ||
+             body.pendingPayloadHash !== undefined && body.pendingPayloadHash !== '') {
+    throw responseError(body, expectation, 'resolved outcome carries an unresolved identity');
+  }
   if (body.accepted !== classification.accepted || body.state !== classification.state) {
     throw responseError(body, expectation, 'accepted/state classification does not match the owner outcome');
   }

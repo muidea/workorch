@@ -34,6 +34,10 @@ type runReplacementCrashRepository struct {
 	marker string
 }
 
+func (r *runReplacementCrashRepository) ReadWorkspaceExecutionIntentReceipt(ctx context.Context, workspaceID common.WorkspaceID, requestID string) (*runmodel.WorkspaceExecutionIntentReceipt, error) {
+	return r.RunRepository.(repository.RunExecutionIntentReceiptReader).ReadWorkspaceExecutionIntentReceipt(ctx, workspaceID, requestID)
+}
+
 func (r *runReplacementCrashRepository) CreateNextWorkspaceRun(ctx context.Context, item *runmodel.Run) error {
 	err := r.RunRepository.CreateNextWorkspaceRun(ctx, item)
 	if err == nil && r.cut == "successor_created" && item.Lineage.PredecessorRunID != "" {

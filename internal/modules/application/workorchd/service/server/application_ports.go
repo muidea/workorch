@@ -29,6 +29,8 @@ type WorkspacePorts struct {
 	UpdateWorkspaceLLMSelection UpdateWorkspaceLLMSelectionFunc
 	ListWorkspaces              ListWorkspacesFunc
 	ReadStartupPreparation      ReadStartupPreparationFunc
+	CheckStartupPreparation     CheckStartupPreparationFunc
+	RecoverStartupPreparation   CheckStartupPreparationFunc
 }
 
 type DefinitionPorts struct {

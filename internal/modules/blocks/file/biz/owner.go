@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,13 +32,14 @@ const StepKindPatchRevert = modulecommon.StepKindPatchRevert
 
 type Biz struct {
 	basebiz.Base
-	runtimeAdapter *RuntimeAdapter
-	started        bool
-	subscriptions  []ownerSubscription
-	lifecycle      basebiz.Lifecycle
-	shutdownMu     sync.Mutex
-	releasing      bool
-	released       bool
+	runtimeAdapter   *RuntimeAdapter
+	started          bool
+	subscriptions    []ownerSubscription
+	lifecycle        basebiz.Lifecycle
+	shutdownMu       sync.Mutex
+	releasing        bool
+	released         bool
+	preparationEpoch string
 }
 
 type Dependencies struct {
@@ -50,8 +52,9 @@ func New(eventHub magicevent.Hub, backgroundRoutine task.BackgroundRoutine) (*Bi
 		return nil, common.ErrInvalidArgument
 	}
 	return &Biz{
-		Base:           basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine),
-		runtimeAdapter: NewRuntimeAdapter(),
+		Base:             basebiz.New(modulecommon.ModuleID, eventHub, backgroundRoutine),
+		runtimeAdapter:   NewRuntimeAdapter(),
+		preparationEpoch: "file-preparation-epoch:" + rand.Text(),
 	}, nil
 }
 
@@ -85,6 +88,11 @@ func (m *Biz) Start() error {
 		{fileevents.TopicConfirmRuntimeRepairSurface, m.handleConfirmRuntimeRepairSurface, true},
 		{fileevents.TopicAcquireAuthoringResources, m.handleAcquireAuthoringResource, false},
 		{fileevents.TopicVerifyAuthoringResource, m.handleVerifyAuthoringResource, false},
+		{fileevents.TopicObservePreparationDirectories, m.handleObservePreparationDirectories, false},
+		{fileevents.TopicObservePreparationResources, m.handleObservePreparationResources, false},
+		{fileevents.TopicObservePreparationManagedConfigs, m.handleObservePreparationManagedConfigs, false},
+		{fileevents.TopicReobservePreparationFiles, m.handleReobservePreparationFiles, false},
+		{fileevents.TopicQueryPreparationEpoch, m.handleQueryPreparationEpoch, false},
 		{fileevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities, false},
 		{fileevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility, false},
 		{fileevents.TopicValidateRuntimeOperationCandidateConformance, m.handleRuntimeOperationCandidateConformance, false},

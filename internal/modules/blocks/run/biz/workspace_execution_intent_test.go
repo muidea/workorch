@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -26,6 +27,10 @@ type blockingNextWorkspaceRunRepository struct {
 	entered chan struct{}
 	release chan struct{}
 	once    sync.Once
+}
+
+func (r *blockingNextWorkspaceRunRepository) ReadWorkspaceExecutionIntentReceipt(ctx context.Context, workspaceID common.WorkspaceID, requestID string) (*runmodel.WorkspaceExecutionIntentReceipt, error) {
+	return r.RunRepository.(repository.RunExecutionIntentReceiptReader).ReadWorkspaceExecutionIntentReceipt(ctx, workspaceID, requestID)
 }
 
 type fixedRunInventoryRepository struct {
@@ -174,6 +179,21 @@ func TestWorkspaceExecutionRestartContinuesLatestTerminalLineage(t *testing.T) {
 	if err != nil || stored.Lineage.LineageState != runmodel.RunLineageStateSuperseded || stored.Lineage.SuccessorRunID != successor.ID ||
 		successor.Lineage.PredecessorRunID != predecessor.ID || successor.Lineage.PredecessorResultID != predecessor.TerminalResultID || successor.State != common.RunStateActive {
 		t.Fatalf("terminal restart lineage predecessor=%+v successor=%+v err=%v", stored, successor, err)
+	}
+	// A completed replacement must not move its original admission to the
+	// successor or turn a read into the side-effecting exact Restart replay.
+	before, err := runs.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := receiptQueryCommand(t, command)
+	value, err := biz.queryWorkspaceExecutionIntentReceipt(ctx, magicevent.NewEventWithContext(runevents.TopicQueryWorkspaceExecutionIntentReceipt, "blocks/workspace", runevents.CommandDestination, nil, ctx, query))
+	if err != nil || value.ValidateFor(query) != nil || value.Receipt == nil || value.Receipt.Admission != admission.RuntimeExecutionIntentAdmission || len(successor.ExecutionIntentReceipts) != 0 {
+		t.Fatalf("replacement lost original predecessor response: %+v %v", value, err)
+	}
+	after, err := runs.ListByWorkspaceID(ctx, workspaceID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("completed replacement receipt query wrote state")
 	}
 }
 

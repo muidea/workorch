@@ -138,6 +138,13 @@ var observedCommandStateFields = map[string]bool{
 	"internal/modules/kernel/orchestrator/pkg/events:CommitRuntimeGovernanceTicketResolutionCommand|Outcome":   true,
 }
 
+// An observed field in a shared owner model is allowed only for this exact
+// command/model/field triple, never as a model-wide grant. The settlement stores
+// the original Run retirement observation and cannot choose a retirement phase.
+var observedCommandCarrierFields = map[string]bool{
+	"internal/modules/kernel/workspace/pkg/events:SettleWorkspacePreparationBlockedCommand|internal/modules/blocks/run/pkg/models:WorkspaceRetirementFence|Phase": true,
+}
+
 // observedStateCarrierFields is narrower than a carrier-type grant. Use it
 // when only one immutable observation inside a shared DTO is state-like; a
 // newly added sibling State field then fails closed until separately audited.
@@ -145,6 +152,12 @@ var observedStateCarrierFields = map[string]bool{
 	"internal/modules/kernel/workspace/pkg/models:DefinitionSpecificationRequestIdentity|Phase": true,
 	// 前置诊断只记录 reserve 前的失败位置，Stage 不选择 owner transition。
 	"internal/modules/kernel/workspace/pkg/models:DefinitionAuthoringPreparationDiagnostic|Stage": true,
+	// Fixed workflow route observed from the exact Workspace configuration;
+	// not a requested preparation/Runtime transition or an owner target state.
+	"internal/modules/kernel/workspace/pkg/models:PreparationSoulSelection|Stage": true,
+	// LLM-owned cache classification at one observation point, never a requested
+	// Workspace transition. Only this field is observed; sibling authority fails.
+	"internal/modules/blocks/llm/pkg/models:ProviderModelCatalog|State": true,
 	// Specification critiques and declaration matches are immutable authoring
 	// facts. Workspace Compile, not either Status field, selects admission.
 	"internal/modules/kernel/workspace/pkg/models:GoalSpecificationCompletenessReview|Status": true,
@@ -688,7 +701,7 @@ func isExplicitObservedStateField(commandKey string, context repositoryTypeDecla
 		return true
 	}
 	contextKey := repositoryTypeKey(context.PackageDir, context.Spec.Name.Name)
-	return observedStateCarrierFields[contextKey+"|"+fieldName]
+	return observedStateCarrierFields[contextKey+"|"+fieldName] || observedCommandCarrierFields[commandKey+"|"+contextKey+"|"+fieldName]
 }
 
 func namedTypeName(expression ast.Expr) string {

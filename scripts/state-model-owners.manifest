@@ -41,10 +41,24 @@ internal/modules/kernel/workspace/pkg/models/workspace.go|AuthoringSummary.Failu
 internal/modules/kernel/workspace/pkg/models/goal_specification.go|GoalSpecificationCompletenessReview.Status|immutable_outcome|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/models/goal_specification.go|GoalSpecificationVerification.Status|immutable_outcome|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/models/definition_authoring_mapping.go|DefinitionAuthoringVerificationMapping.Status|immutable_outcome|internal/modules/kernel/workspace|-
-# Preparation increment one exposes persisted trace snapshots only, with no
-# writer/reducer or positive readiness/M3 transition. Adjudicate a transition
-# family when an actual owner-local preparation reducer is introduced.
-internal/modules/kernel/workspace/pkg/models/activation_preparation.go|WorkspacePreparationAttemptState|immutable_trace|internal/modules/kernel/workspace|-
+# Explicit v2 preparation operations remain owner-private, not Runtime or M3.
+internal/modules/kernel/workspace/pkg/models/activation_preparation.go|WorkspacePreparationAttemptState|owner_private_state|internal/modules/kernel/workspace|workspace.preparation,workspace.preparation_settlement
+internal/modules/kernel/workspace/pkg/models/activation_preparation.go|WorkspacePreparationAttempt.SkillHubInstalledState|derived_projection|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/activation_preparation.go|WorkspacePreparationAttempt.SkillSelectionState|derived_projection|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/activation_preparation.go|WorkspacePreparationAttempt.SkillContextState|derived_projection|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/activation_preparation.go|WorkspacePreparationAttempt.SkillReferenceState|derived_projection|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/activation_preparation.go|WorkspacePreparationAttempt.SkillStatusState|derived_projection|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/preparation_assessment.go|PreparationAssessment.Outcome|derived_projection|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/preparation_assessment.go|PreparationOutstandingCheck.State|derived_projection|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/preparation_skill_status.go|PreparationSkillStatusCompilation.State|derived_projection|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/preparation_skill_status.go|PreparationSelectedSkillStatus.ObservedStatus|immutable_trace|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/preparation_skill_references.go|PreparationSelectedSkillReference.State|derived_projection|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/preparation_skill_references.go|PreparationSkillReferences.State|derived_projection|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/preparation_memory_selection.go|PreparationMemorySelectionCompilation.Mode|derived_projection|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/preparation_skill_selection.go|PreparationSelectedSkill.ObservedStatus|immutable_trace|internal/modules/kernel/workspace|-
+internal/modules/kernel/workspace/pkg/models/activation_preparation.go|WorkspacePreparationCheckState|owner_private_state|internal/modules/kernel/workspace|workspace.preparation,workspace.preparation_settlement
+internal/modules/kernel/workspace/pkg/models/preparation_skillhub_effects.go|PreparationSkillHubEffectState|owner_private_state|internal/modules/kernel/workspace|workspace.preparation,workspace.preparation_settlement
+internal/modules/kernel/workspace/pkg/models/preparation_soul_evidence.go|PreparationSoulSelection.Stage|immutable_trace|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/events/messages.go|DefinitionAdmissionCandidateDisposition|immutable_outcome|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/events/messages.go|DefinitionAdmissionIntentDisposition|immutable_outcome|internal/modules/kernel/workspace|-
 internal/modules/kernel/workspace/pkg/events/messages.go|DeleteWorkspaceDisposition|immutable_outcome|internal/modules/kernel/workspace|-

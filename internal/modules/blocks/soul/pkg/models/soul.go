@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -60,12 +61,12 @@ func CloneSoul(item *Soul) *Soul {
 		return nil
 	}
 	cloned := *item
-	cloned.BusinessDomains = append([]string(nil), item.BusinessDomains...)
-	cloned.AllowedSkillRefs = append([]string(nil), item.AllowedSkillRefs...)
-	cloned.AllowedMCPServerRefs = append([]string(nil), item.AllowedMCPServerRefs...)
-	cloned.AllowedCapabilityRefs = append([]string(nil), item.AllowedCapabilityRefs...)
-	cloned.AllowedCapabilityCategories = append([]string(nil), item.AllowedCapabilityCategories...)
-	cloned.AllowedToolKinds = append([]string(nil), item.AllowedToolKinds...)
+	cloned.BusinessDomains = slices.Clone(item.BusinessDomains)
+	cloned.AllowedSkillRefs = slices.Clone(item.AllowedSkillRefs)
+	cloned.AllowedMCPServerRefs = slices.Clone(item.AllowedMCPServerRefs)
+	cloned.AllowedCapabilityRefs = slices.Clone(item.AllowedCapabilityRefs)
+	cloned.AllowedCapabilityCategories = slices.Clone(item.AllowedCapabilityCategories)
+	cloned.AllowedToolKinds = slices.Clone(item.AllowedToolKinds)
 	return &cloned
 }
 

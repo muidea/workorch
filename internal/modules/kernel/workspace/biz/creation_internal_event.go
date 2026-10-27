@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"strings"
 
@@ -85,6 +87,16 @@ func (m *goalDoDManager) submitWorkspaceCreationInternalEvent(ctx context.Contex
 		}
 		workspace.DefinitionAuthoring = &record
 		workspace.DefinitionAuthoringCreation = &workspacemodel.DefinitionAuthoringCreation{RequestID: cmd.RequestID, InputHash: cmd.CreationInputHash()}
+	}
+	// Only the creation dispatcher may mint this marker. Existing authoring
+	// replays returned above retain their original identity (including legacy).
+	var creationEpoch [16]byte
+	if _, err := rand.Read(creationEpoch[:]); err != nil {
+		return nil, err
+	}
+	workspace.PreparationFence = &workspacemodel.WorkspacePreparationFence{
+		Version: workspacemodel.WorkspacePreparationFenceVersion, WorkspaceID: workspace.ID,
+		CreationEpoch: hex.EncodeToString(creationEpoch[:]),
 	}
 	if err := m.workspaces.Create(bound, workspace); err != nil {
 		return nil, err

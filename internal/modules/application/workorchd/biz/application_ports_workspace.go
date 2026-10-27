@@ -5,6 +5,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/readmodelcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
@@ -15,6 +16,30 @@ import (
 
 func (p *runtimeApplicationPorts) configureWorkspacePorts() {
 	ports := &p.ports
+	preparationCommand := func(recoverOriginal bool) func(context.Context, string, workorchmanagementcontract.PreparationCheckRequest) (workorchmanagementcontract.PreparationOperationView, error) {
+		return func(ctx context.Context, workspaceID string, request workorchmanagementcontract.PreparationCheckRequest) (workorchmanagementcontract.PreparationOperationView, error) {
+			var view workorchmanagementcontract.PreparationOperationView
+			err := p.withSession(ctx, func(session *runtimecore.Session) error {
+				hub, err := session.RequiredCommandHub()
+				if err != nil {
+					return err
+				}
+				b := &Biz{Base: basebiz.New(ModuleID, hub, nil), preparationSkillHubRunner: p.preparationSkillHubRunner}
+				// Use the real process accessor, not ConfigLoader's empty-config
+				// compatibility fallback. Absence remains an unobserved config.
+				exports, exportErr := session.Exports()
+				if exportErr != nil {
+					return exportErr
+				}
+				observationCtx := configcore.ContextWithLoader(ctx, exports.Infrastructure.LoadConfig)
+				view, err = b.CheckStartupPreparation(observationCtx, common.WorkspaceID(workspaceID), request, recoverOriginal)
+				return err
+			})
+			return view, err
+		}
+	}
+	ports.Workspace.CheckStartupPreparation = preparationCommand(false)
+	ports.Workspace.RecoverStartupPreparation = preparationCommand(true)
 	ports.Workspace.ReadStartupPreparation = func(ctx context.Context, workspaceID string) (workorchmanagementcontract.StartupPreparationView, error) {
 		var view workorchmanagementcontract.StartupPreparationView
 		err := p.withSession(ctx, func(session *runtimecore.Session) error {

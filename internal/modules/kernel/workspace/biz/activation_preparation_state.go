@@ -50,7 +50,28 @@ func (m *Biz) queryWorkspacePreparationState(ctx context.Context, command worksp
 	if workspaceDeletionRejectsMutation(w) != nil {
 		return workspaceevents.QueryWorkspacePreparationStateResult{}, common.ErrConflict
 	}
-	return preparationStateFromPersistence(w, time.Now())
+	return m.preparationState(ctx, w)
+}
+
+// Query and command readback share the same known-currentness projection.
+// The only live File query is its in-memory process epoch: no filesystem read,
+// new observation, deadline extension or settlement is performed here.
+func (m *Biz) preparationState(ctx context.Context, w *workspace.Workspace) (workspaceevents.QueryWorkspacePreparationStateResult, error) {
+	now := time.Now().UTC()
+	state, err := preparationStateFromPersistence(w, now)
+	if err != nil {
+		return state, err
+	}
+	if workspace.PreparationFileObservationEpoch(w) != "" {
+		stale, err := workspace.PreparationFileRevalidationStale(w, now, m.preparationFileEpoch(ctx))
+		if err != nil {
+			return state, err
+		}
+		if stale {
+			state.CurrentValidity = "stale"
+		}
+	}
+	return state, nil
 }
 
 // A read may project known drift, but cannot compile a new manifest/bootstrap,
@@ -71,7 +92,31 @@ func preparationStateFromPersistence(w *workspace.Workspace, now time.Time) (wor
 		result.Record = &record
 		last := record.Attempts[len(record.Attempts)-1]
 		result.State, result.CurrentValidity = string(last.State), "not_evaluated"
+		fileStale, err := workspace.PreparationFileRevalidationStale(w, now, workspace.PreparationFileObservationEpoch(w))
+		if err != nil {
+			return workspaceevents.QueryWorkspacePreparationStateResult{}, err
+		}
+		if fileStale {
+			result.CurrentValidity = "stale"
+		}
+		cacheExpired, err := workspace.PreparationProviderCacheExpired(w, now)
+		if err != nil {
+			return workspaceevents.QueryWorkspacePreparationStateResult{}, err
+		}
+		if cacheExpired {
+			result.CurrentValidity = "stale"
+		}
 		binding := last.Binding
+		if record.Version == workspace.WorkspacePreparationWorkflowVersion {
+			if w.PreparationFence == nil || w.PreparationFence.Validate(w.ID) != nil || last.CreationEpoch != w.PreparationFence.CreationEpoch || last.PreparationEpoch != w.PreparationFence.PreparationEpoch {
+				result.CurrentValidity = "stale"
+			}
+			for _, check := range last.Checks {
+				if check.Reason == "binding_changed" {
+					result.CurrentValidity = "stale"
+				}
+			}
+		}
 		journal := w.DefinitionAuthoringConfirmation
 		if last.CommittedWorkspaceRevision != w.Revision ||
 			!last.ExpiresAt.IsZero() && !now.Before(last.ExpiresAt) ||

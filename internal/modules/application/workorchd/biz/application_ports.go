@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/contextregistryports"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/runtimecore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/service/server"
 )
@@ -13,17 +14,23 @@ import (
 // crosses into service/server; each call borrows a short-lived session and
 // closes it before returning.
 type runtimeApplicationPorts struct {
-	withSessionFn  func(context.Context, func(*runtimecore.Session) error) error
-	ports          server.ApplicationPorts
-	authoringTasks *authoringTaskLifecycle
+	withSessionFn             func(context.Context, func(*runtimecore.Session) error) error
+	ports                     server.ApplicationPorts
+	authoringTasks            *authoringTaskLifecycle
+	preparationSkillHubRunner contextregistryports.SkillHubPreparationRunner
 }
 
 func newApplicationPorts(withSession func(context.Context, func(*runtimecore.Session) error) error, lifecycle ...*authoringTaskLifecycle) server.ApplicationPorts {
+	return newApplicationPortsWithPreparationRunner(withSession, contextregistryports.SkillHubPreparationExecRunner{}, lifecycle...)
+}
+
+// Application-private external adapter seam, never a cross-owner service.
+func newApplicationPortsWithPreparationRunner(withSession func(context.Context, func(*runtimecore.Session) error) error, runner contextregistryports.SkillHubPreparationRunner, lifecycle ...*authoringTaskLifecycle) server.ApplicationPorts {
 	authoring := newAuthoringTaskLifecycle()
 	if len(lifecycle) == 1 && lifecycle[0] != nil {
 		authoring = lifecycle[0]
 	}
-	p := &runtimeApplicationPorts{withSessionFn: withSession, authoringTasks: authoring}
+	p := &runtimeApplicationPorts{withSessionFn: withSession, authoringTasks: authoring, preparationSkillHubRunner: runner}
 	p.configureConfigurationPorts()
 	p.configureWorkspacePorts()
 	p.configureDefinitionPorts()

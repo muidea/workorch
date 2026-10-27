@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"crypto/rand"
 	"sync"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -26,6 +27,7 @@ type Biz struct {
 	workspaceDeletions repository.MemoryWorkspaceDeletionRepository
 	topics             []string
 	started            bool
+	preparationEpoch   string
 	lifecycle          basebiz.Lifecycle
 	shutdownMu         sync.Mutex
 	releasing          bool
@@ -41,7 +43,7 @@ func New(h magicevent.Hub, b task.BackgroundRoutine, deps Dependencies) (*Biz, e
 	if err := deps.OwnerRepositories.Validate(); err != nil {
 		return nil, err
 	}
-	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: newServiceWithRecallTraces(deps.OwnerRepositories.Items(), deps.OwnerRepositories.RecallTraces()), workspaceDeletions: deps.OwnerRepositories.WorkspaceDeletions(), workspaceLocks: map[common.WorkspaceID]*sync.Mutex{}}, nil
+	return &Biz{Base: basebiz.New(modulecommon.ModuleID, h, b), service: newServiceWithRecallTraces(deps.OwnerRepositories.Items(), deps.OwnerRepositories.RecallTraces()), workspaceDeletions: deps.OwnerRepositories.WorkspaceDeletions(), workspaceLocks: map[common.WorkspaceID]*sync.Mutex{}, preparationEpoch: "memory-preparation-epoch:" + rand.Text()}, nil
 }
 
 func (m *Biz) Start() error {
@@ -98,6 +100,7 @@ func (m *Biz) Teardown(ctx context.Context) error {
 		m.topics = m.topics[:last]
 	}
 	m.service = nil
+	m.preparationEpoch = ""
 	m.workspaceDeletions = nil
 	m.workspaceLocks = nil
 	m.started = false

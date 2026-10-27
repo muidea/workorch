@@ -124,7 +124,19 @@ func (m *Biz) Start() error {
 	if err := m.subscribeOwner(workspaceevents.TopicWorkspacePreparationStateQuery, m.handlePreparationStateQuery, false); err != nil {
 		return err
 	}
+	if err := m.subscribeOwner(workspaceevents.TopicWorkspacePreparationCheck, m.handlePreparationCheck, false); err != nil {
+		return err
+	}
+	if err := m.subscribeOwner(workspaceevents.TopicWorkspacePreparationRecover, m.handlePreparationCheck, false); err != nil {
+		return err
+	}
+	if err := m.subscribeOwner(workspaceevents.TopicWorkspacePreparationSettleBlocked, m.handlePreparationBlockedSettlement, false); err != nil {
+		return err
+	}
 	if err := m.subscribeOwner(workspaceevents.TopicWorkspaceCommandExecutionIntent, m.handleExecutionIntentCommand, false); err != nil {
+		return err
+	}
+	if err := m.subscribeOwner(workspaceevents.TopicWorkspaceCommandRecoverExecutionIntent, m.handleRecoverExecutionIntentCommand, false); err != nil {
 		return err
 	}
 	// Run 事实仅供原 owner 投影合同，不从通知重建执行权威。

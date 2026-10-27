@@ -11,6 +11,7 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	filerepo "github.com/muidea/workorch/internal/pkg/repository/file"
 )
 
 func TestDefinitionAuthoringCreationFileCutpointReplayPreservesLaterDraft(t *testing.T) {
@@ -49,6 +50,15 @@ func TestDefinitionAuthoringCreationFileCutpointReplayPreservesLaterDraft(t *tes
 				owners.close()
 				t.Fatal("partial create reported success")
 			}
+			// Read the already persisted metadata without repairing the failed
+			// sidecars; reopening must retain this exact creation marker.
+			metadata := filerepo.NewWorkspaceRepository(filepath.Join(root, "internal", "workspaces", string(id), "workspace.json"))
+			partial, err := metadata.Get(ctx, id)
+			if err != nil || partial.PreparationFence == nil || partial.PreparationFence.Validate(id) != nil {
+				owners.close()
+				t.Fatalf("partial create lost creation fence: %+v %v", partial, err)
+			}
+			creationEpoch := partial.PreparationFence.CreationEpoch
 			owners.close()
 			if err := os.Remove(obstacle); err != nil {
 				t.Fatal(err)
@@ -61,6 +71,9 @@ func TestDefinitionAuthoringCreationFileCutpointReplayPreservesLaterDraft(t *tes
 			current, err := owners.repositories.Workspaces.Get(ctx, id)
 			if err != nil || current.DefaultSoulID != "soul-default" || current.SoulBindings["implementation"] != "soul-worker" || current.DefinitionAuthoringCreation.PendingPersistence != nil {
 				t.Fatalf("recovery missing binding: %+v %v", current, err)
+			}
+			if current.PreparationFence == nil || current.PreparationFence.CreationEpoch != creationEpoch {
+				t.Fatal("creation recovery minted another preparation epoch")
 			}
 			items, err := owners.repositories.Workspaces.List(ctx)
 			if err != nil || len(items) != 1 {
@@ -113,6 +126,11 @@ func TestDefinitionAuthoringCreationFileReplayAndConflict(t *testing.T) {
 		t.Fatalf("initial draft missing or promoted: %+v %v", stored, err)
 	}
 	initialRevision := stored.Revision
+	if stored.PreparationFence == nil || stored.PreparationFence.Validate(id) != nil {
+		owners.close()
+		t.Fatal("authoring creation lacks preparation marker")
+	}
+	creationEpoch := stored.PreparationFence.CreationEpoch
 	stored.DefinitionAuthoringCreation.RequestID = "external-change"
 	again, err := owners.repositories.Workspaces.Get(ctx, id)
 	if err != nil || again.DefinitionAuthoringCreation.RequestID != cmd.RequestID {
@@ -143,6 +161,9 @@ func TestDefinitionAuthoringCreationFileReplayAndConflict(t *testing.T) {
 	last, err := owners.repositories.Workspaces.Get(ctx, id)
 	if err != nil || last.Revision != initialRevision || last.DefinitionAuthoring.Input.GoalText != "用户目标" {
 		t.Fatalf("replay rewrote draft: %+v %v", last, err)
+	}
+	if last.PreparationFence == nil || last.PreparationFence.CreationEpoch != creationEpoch {
+		t.Fatal("concurrent creation replay changed preparation marker")
 	}
 	items, err := owners.repositories.Workspaces.List(ctx)
 	if err != nil || len(items) != 1 {

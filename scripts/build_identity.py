@@ -38,6 +38,8 @@ SOURCE_FILES = (
     "scripts/verify-workspace-draft-step01.py",
     "scripts/verify-workspace-candidate-step02.py",
     "scripts/verify-workspace-confirmation-step03.py",
+    "scripts/verify-workspace-preparation-step04.py",
+    "scripts/fixtures/step04-skill-hub.py",
 )
 GENERATED_EXACT = ("web/consoleassets/dist",)
 EXCLUDED_DIR_NAMES = {
@@ -389,7 +391,11 @@ def _reject_constant(value: str) -> None:
 def _expected_identity(value: Any) -> dict[str, str]:
     if not isinstance(value, dict) or set(value) != IDENTITY_FIELDS:
         raise IdentityError("外部固定身份必须且只能包含sourceCommit及三个SHA-256摘要")
-    return _validate({"schemaVersion": SCHEMA_VERSION, **value})
+    _validate({"schemaVersion": SCHEMA_VERSION, **value})
+    # Keep the external pin in its four-field form. The CLI reader and verify()
+    # independently validate it; adding schemaVersion here made that legitimate
+    # second validation reject every correctly formed CLI input.
+    return dict(value)
 
 
 def _read_expected_identity(path: Path) -> dict[str, str]:

@@ -28,6 +28,11 @@ type fixedWorkspaceExecutionAdmission struct {
 
 func (a *fixedWorkspaceExecutionAdmission) AdmitWorkspaceExecution(_ context.Context, _ string, command workorchdevents.WorkspaceRunRequestedCommand) (workorchdevents.WorkspaceRunRequestedResult, error) {
 	a.calls = append(a.calls, command)
+	if a.outcome == runtimecontract.RuntimeExecutionIntentFreshUnresolved {
+		return workorchdevents.WorkspaceRunRequestedResult{WorkspaceID: command.WorkspaceID, RequestID: command.RequestID,
+			Kind: runtimecontract.RuntimeExecutionIntentRestart, Outcome: a.outcome, Reason: a.reason,
+			PendingRequestID: "original-request", PendingStartupInputHash: "startup", PendingPayloadHash: strings.Repeat("a", 64)}, nil
+	}
 	return workorchdevents.WorkspaceRunRequestedResult{
 		WorkspaceID: command.WorkspaceID,
 		RunID:       "run-typed-http",
@@ -36,6 +41,26 @@ func (a *fixedWorkspaceExecutionAdmission) AdmitWorkspaceExecution(_ context.Con
 		Outcome:     a.outcome,
 		Reason:      a.reason,
 	}, nil
+}
+
+func TestWorkspaceExecutionHTTPUnresolvedIsNotAcceptedOrRejected(t *testing.T) {
+	state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
+	port := &fixedWorkspaceExecutionAdmission{outcome: runtimecontract.RuntimeExecutionIntentFreshUnresolved, reason: runtimecontract.RuntimeExecutionIntentReasonFreshResultUnknown}
+	state.workspaceExecutionAdmission = port
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workorch/workspaces/ws-pending/execution-activations", strings.NewReader(`{"intent":"restart","requestId":"current-request"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	newMuxWithState(state).ServeHTTP(rec, req)
+	var response executioncontract.WorkspaceExecutionAdmissionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusConflict || response.Accepted || response.State != executioncontract.AdmissionDisplayPending || response.RequestID != "current-request" || response.PendingRequestID != "original-request" || response.RunID != "" || len(port.calls) != 1 {
+		t.Fatalf("lost pending facts: status=%d response=%+v calls=%d", rec.Code, response, len(port.calls))
+	}
+	if _, err := response.Admission(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestWorkspaceExecutionHTTPClassifiesAllOwnerOutcomesWithoutLosingIdentity(t *testing.T) {

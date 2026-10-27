@@ -57,15 +57,17 @@ def workspace_id(request_id):
 
 
 class Verification:
-    def __init__(self, binary, root, identity):
+    def __init__(self, binary, root, identity, process_environment=None, port=None):
         self.binary, self.root = binary, root
         self.identity = identity
+        self.process_environment = process_environment
         self.source = Path(__file__).resolve().parent.parent
         self.data = root / "data"
         self.process = None
         self.pids, self.trace, self.checked = [], [], []
+        require(port is None or isinstance(port, int) and not isinstance(port, bool) and 0 < port <= 65535, "invalid isolated listener port")
         with socket.socket() as listener:
-            listener.bind(("127.0.0.1", 0))
+            listener.bind(("127.0.0.1", port or 0))
             self.port = listener.getsockname()[1]
         self.base = f"http://127.0.0.1:{self.port}"
         self.config = root / "config"
@@ -84,7 +86,7 @@ class Verification:
                               {key: self.identity[key] for key in build_identity.IDENTITY_FIELDS}, self.root)
         log = open(self.root / f"process-{len(self.pids)+1}.log", "wb")
         try:
-            self.process = subprocess.Popen([str(self.binary), "--server", "-config-dir", str(self.config)], cwd=self.root, stdout=log, stderr=subprocess.STDOUT)
+            self.process = subprocess.Popen([str(self.binary), "--server", "-config-dir", str(self.config)], cwd=self.root, stdout=log, stderr=subprocess.STDOUT, env=self.process_environment)
         finally:
             log.close()
         self.pids.append(self.process.pid)
