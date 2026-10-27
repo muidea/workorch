@@ -38,9 +38,16 @@ type LLMConfiguration struct {
 	AIProxy          AIProxyConfigurationView                          `json:"aiProxy"`
 	DefaultChat      runtimecontract.ProviderModelTarget               `json:"defaultChat"`
 	DefaultEmbedding *runtimecontract.ProviderModelTarget              `json:"defaultEmbedding,omitempty"`
+	Active           *LLMActiveConfiguration                           `json:"active,omitempty"`
 	Budget           workorchconfig.LLMContextBudgetPolicyConfig       `json:"budget"`
 	Catalog          workorchmanagementcontract.ProviderCatalogSummary `json:"catalog"`
 	RestartRequired  bool                                              `json:"restartRequired"`
+}
+
+// A missing observation is unknown, not proof that the saved selection is active.
+type LLMActiveConfiguration struct {
+	DefaultChat      runtimecontract.ProviderModelTarget  `json:"defaultChat"`
+	DefaultEmbedding *runtimecontract.ProviderModelTarget `json:"defaultEmbedding,omitempty"`
 }
 
 type AIProxyConfigurationView struct {

@@ -308,15 +308,16 @@ func buildCatalogFromWire(wire aiProxyModelsResponse, cfg workorchconfig.LLMConf
 		}
 		hasResponses := containsOperation(ops, workorchconfig.LLMOperationResponses)
 		hasEmbeddings := containsOperation(ops, workorchconfig.LLMOperationEmbeddings)
+		desc.EmbeddingReady = hasEmbeddings && item.ContextWindowTokens >= 0 && item.MaxOutputTokens >= 0
 		switch {
 		case len(ops) == 0:
 			// No supported endpoint for a WorkOrch adapter: displayable, but not ready.
 			desc.CapabilityReady = false
 			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
-		case item.ContextWindowTokens <= 0:
+		case item.ContextWindowTokens < 0 || item.MaxOutputTokens < 0:
 			desc.CapabilityReady = false
 			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
-		case hasResponses && (item.MaxOutputTokens <= 0 || item.MaxOutputTokens >= item.ContextWindowTokens):
+		case hasResponses && (item.ContextWindowTokens <= 0 || item.MaxOutputTokens <= 0 || item.MaxOutputTokens >= item.ContextWindowTokens):
 			desc.CapabilityReady = false
 			desc.UnavailableReason = string(llmmodels.ProviderModelFailureCapabilityIncomplete)
 		case !hasResponses && !hasEmbeddings:
@@ -378,6 +379,10 @@ func catalogRevision(providerID string, models []llmmodels.ProviderModelDescript
 	for _, model := range models {
 		writeLenPrefixed(h, model.Target.ModelID)
 		writeLenPrefixed(h, model.RouteOwner)
+		if containsOperation(model.Operations, workorchconfig.LLMOperationEmbeddings) {
+			writeLenPrefixed(h, embeddingTransportPolicyVersion)
+			writeLenPrefixed(h, fmt.Sprintf("embedding-ready=%t", model.EmbeddingReady))
+		}
 		_ = binary.Write(h, binary.BigEndian, int64(model.ContextWindowTokens))
 		_ = binary.Write(h, binary.BigEndian, int64(model.MaxOutputTokens))
 		ops := append([]string(nil), model.Operations...)
@@ -416,6 +421,9 @@ func catalogRevision(providerID string, models []llmmodels.ProviderModelDescript
 
 func descriptorCapabilityRevisionInput(desc llmmodels.ProviderModelDescriptor) string {
 	parts := append([]string(nil), desc.Operations...)
+	if containsOperation(desc.Operations, workorchconfig.LLMOperationEmbeddings) {
+		parts = append(parts, embeddingTransportPolicyVersion)
+	}
 	reasoning := desc.Reasoning.Normalized()
 	parts = append(parts, fmt.Sprintf("reasoning:supported=%t", reasoning.Supported))
 	parts = append(parts, fmt.Sprintf("reasoning:valid=%t", reasoning.Valid))

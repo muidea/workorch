@@ -1184,6 +1184,7 @@ func providerEmbeddingAudit(command llmevents.GenerateEmbeddingCommand, metadata
 	budget := providerContextBudgetFromProfile(metadata.Profile)
 	if budget != nil {
 		budget.ProviderSubmitted = metadata.Submitted
+		budget.ActualBytes = len(command.Input)
 	}
 	return &llmmodels.ProviderRequestAudit{
 		RequestID:             newProviderCommandRequestID(workorchconfig.LLMOperationEmbeddings, startedAt),
@@ -1221,13 +1222,19 @@ func providerContextBudgetFromProfile(profile llmmodels.ResolvedProviderModelPro
 	if profile.Target.ProviderID == "" || profile.Target.ModelID == "" {
 		return nil
 	}
+	mode := "owner_active_configuration"
+	maxRequestBytes := profile.MaxRequestBytes
+	if profile.Operation == workorchconfig.LLMOperationEmbeddings {
+		mode = embeddingTransportPolicyVersion
+		maxRequestBytes = embeddingMaxRequestBytes
+	}
 	return &llmmodels.ProviderContextBudget{
 		ProviderID: profile.Target.ProviderID, ModelID: profile.Target.ModelID,
 		CapabilityRevision: profile.CapabilityRevision, ConfigurationRevision: profile.ConfigurationRevision,
 		ContextWindowTokens: profile.ContextWindowTokens, ProviderMaxOutputTokens: profile.ProviderMaxOutputTokens,
 		EffectiveMaxOutputTokens: profile.EffectiveMaxOutputTokens, MaxBytes: profile.MaxRequestBytes,
-		MaxTokens: profile.MaxInputTokens, MaxRequestBytes: profile.MaxRequestBytes,
-		ProfileMode: "owner_active_configuration", CapabilitySource: profile.CapabilitySource,
+		MaxTokens: profile.MaxInputTokens, MaxRequestBytes: maxRequestBytes,
+		ProfileMode: mode, CapabilitySource: profile.CapabilitySource,
 	}
 }
 
@@ -1400,8 +1407,7 @@ func (m *Biz) completeProviderWithSealedCeiling(ctx context.Context, ceiling run
 func (m *Biz) generateEmbedding(ctx context.Context, target runtimecontract.ProviderModelTarget, input string) (llmmodels.ProviderEmbeddingResult, providerExecutionMetadata, error) {
 	target = target.Normalized()
 	metadata := providerExecutionMetadata{Target: target, PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming}
-	input = strings.TrimSpace(input)
-	if err := target.Validate(); err != nil || input == "" {
+	if err := target.Validate(); err != nil || strings.TrimSpace(input) == "" {
 		return llmmodels.ProviderEmbeddingResult{}, metadata, common.ErrInvalidArgument
 	}
 	if m == nil {

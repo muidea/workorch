@@ -89,7 +89,7 @@ provider format unsupported/failure 本身不产生 correction authority。
 
 ## Mode-Specific Provider Response Guard
 
-response guard 只从已封存的 effective output-token ceiling 与 selected provider context profile 派生；它不是第二份
+completion response guard 只从已封存的 effective output-token ceiling 与 selected provider context profile 派生；它不是第二份
 output-token authority，也不能由 adapter、Runtime mode 或 retry 放宽。completion 的模型内容上限保持一致，但 wire
 envelope 必须按协议模式分别限界：
 
@@ -97,7 +97,17 @@ envelope 必须按协议模式分别限界：
 | --- | --- | --- |
 | non-stream completion | `application/json` 或 `+json` | JSON body ceiling = escaped content allowance + fixed response envelope |
 | streaming completion | `text/event-stream` | SSE wire ceiling；同时独立限制 accumulated delta content、data-event count 与 single-line bytes |
-| embedding | `application/json` 或 `+json` | 从 selected embedding input/profile byte capacity 派生的独立 JSON response ceiling |
+| embedding | `application/json` 或 `+json` | `workorch.embedding-transport/v1` 的独立 4 MiB JSON response ceiling，不从输入 token/byte 数推导向量大小 |
+
+Embedding 的精确模型必须由 catalog 声明 `/v1/embeddings`；`contextWindowTokens`、`maxOutputTokens` 缺失或 0
+表示未知／不适用，不妨碍使用有界 Embedding 传输，负值仍无效。`workorch.embedding-transport/v1` 限制原始 UTF-8
+输入至 64 KiB、完整编码后的 JSON 请求至 512 KiB、响应至 4 MiB。已知正 context 容量按原 token/byte 估算策略
+进一步收紧输入；未知容量在 profile/audit 中仍为 0，不以字节限额冒充 token 证明。该策略身份进入 capability revision
+及 Embedding audit 的 profile mode。原文空白与输入内容完整保留，不裁剪后重发、换模型或改变 recall 模式；非法
+UTF-8 和超限在提交前拒绝。上游拒绝保留现有 typed HTTP status 失败，不自动重试。
+
+目录 `capabilityReady` 继续要求声明的 Responses 有完整容量；独立 `embeddingReady` 表示 Embedding 操作资格。
+混合模型可仅 Embedding ready，不能据此成为 Responses 候选；两种资格均不证明远端权限或真实调用成功。
 
 SSE 不能复用 non-stream body ceiling：合法流可能同时包含增量输出和 terminal response 中的完整输出，并含有每个 event
 的 envelope 与非 data framing。SSE ceiling 必须对这些有界开销显式计数，但 accumulated model content 仍受同一

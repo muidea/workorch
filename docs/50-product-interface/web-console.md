@@ -163,12 +163,15 @@ operation；具体执行仍由sealed dispatch进入`blocks/mcp` owner。
 
 页面展示的 runtime/git/LLM-output 配置摘要不等于它支持修改全部 runtime 字段。LLM save 只更新 persisted
 configuration；active owner snapshot 仍需进程重启才变化。
+页面分别展示保存的选择与 `llm.active` 观察的当前进程模型；观察缺失明确为未知，不能回填保存选择。
+`restartRequired` 时提示需重启，保存本身不证明下一次候选会使用新模型；页面不自动重启进程。
 
-默认模型下拉框区分目录发现与调用资格：已声明对应 operation 但 `capabilityReady=false` 的模型保留为禁用项，
-说明 owner 投影的不可用原因及缺失容量；不得因此成为执行／激活候选。目录缺失时保留已配置模型身份，允许
-保留原选择进行密钥修复，但不得自动选择其他默认模型。Embedding 的 `contextWindowTokens` 表示单条输入 token
-上限，是 WorkOrch 当前调用预算所需元数据，不是所有模型列表 API 的通用必填字段；Embedding-only 模型不要求
-`maxOutputTokens`。只有 endpoint 声明而没有有效输入容量时，可枚举但不可启用；不按模型名猜值或绕过 owner 门禁。
+默认模型下拉框区分目录发现与操作资格：Responses 消费 `capabilityReady`，Embedding 消费 owner 投影的
+`embeddingReady`；不具备对应资格的模型保留为禁用项，说明不可用原因，不得因此成为执行／激活候选。
+目录缺失时保留已配置模型身份，允许保留原选择进行密钥修复，但不得自动选择其他默认模型。
+Embedding 的 `contextWindowTokens`、`maxOutputTokens` 允许缺失或 0，容量未知时使用
+`workorch.embedding-transport/v1` 本地字节限制，已知容量进一步收紧输入；不按模型名猜容量。
+混合模型仅 Embedding ready 不得提升对话资格。可选择仅表示本地协议与预算可解析，不证明远端权限或真实调用成功。
 
 ### Service Status
 

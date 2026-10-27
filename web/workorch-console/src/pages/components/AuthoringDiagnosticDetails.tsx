@@ -108,7 +108,9 @@ function providerMetadataMatches(actual?: ProviderObservedContentMetadata, expec
 }
 
 function matchesMetadata(actual: AuthoringDiagnosticMetadata, expected: AuthoringDiagnosticMetadata): boolean {
-  return actual.parseError === expected.parseError
+  // Normal list responses contain only metadata. Raw text, if explicitly
+  // supplied by an older caller, remains an additional equality constraint.
+  return (expected.parseError === undefined || actual.parseError === expected.parseError)
     && actual.parseErrorSHA256 === expected.parseErrorSHA256
     && actual.parseErrorBytes === expected.parseErrorBytes
     && actual.parseErrorSaved === expected.parseErrorSaved
@@ -163,7 +165,7 @@ export function AuthoringDiagnosticDetails({ workspaceId, permitId, phase, failu
     setLoadError('');
     setDisplayError('');
     const check = ++displayCheck.current;
-    if (diagnostic?.parseErrorSaved) {
+    if (diagnostic?.parseErrorSaved && diagnostic.parseError !== undefined) {
       void verifyDiagnosticIntegrity(diagnostic).catch(error => {
         if (displayCheck.current === check && currentScope.current === scopeKey) setDisplayError(error instanceof Error ? error.message : String(error));
       });
@@ -229,7 +231,7 @@ export function AuthoringDiagnosticDetails({ workspaceId, permitId, phase, failu
     downloadBytes(record.bytes, `authoring-${permitId}-parser-payload.bin`);
   };
 
-  const canLoad = Boolean(diagnostic?.payloadSaved
+  const canLoad = Boolean((diagnostic?.parseErrorSaved && diagnostic.parseError === undefined) || diagnostic?.payloadSaved
     || (diagnostic?.providerDocument?.observed && diagnostic.providerDocument.saved)
     || (diagnostic?.providerWire?.observed && diagnostic.providerWire.saved)
     || (diagnostic?.providerCause?.observed && diagnostic.providerCause.saved));
@@ -243,7 +245,9 @@ export function AuthoringDiagnosticDetails({ workspaceId, permitId, phase, failu
     {diagnostic ? <>
       {displayError && <Alert type="error" showIcon message="解析错误诊断完整性校验失败；下方保留服务端返回的原文，但不能视为已校验记录。" description={displayError} />}
       {diagnostic.parseErrorSaved
-        ? <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: 0 }}>{diagnostic.parseError ?? ''}</pre>
+        ? diagnostic.parseError !== undefined
+          ? <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: 0 }}>{diagnostic.parseError}</pre>
+          : <Typography.Text>原始解析错误已保存；按需读取并校验后展示。</Typography.Text>
         : <Typography.Text>原始解析错误未保存（{diagnostic.parseErrorBytes} 字节）；{diagnostic.notSavedReason || '原因未提供'}。</Typography.Text>}
       <Typography.Text type="secondary">
         解析错误 SHA-256 {diagnostic.parseErrorSHA256} · {diagnostic.parseErrorBytes} 字节；解析器输入 payload SHA-256 {diagnostic.payloadSHA256} · {diagnostic.payloadBytes} 字节。
@@ -258,6 +262,7 @@ export function AuthoringDiagnosticDetails({ workspaceId, permitId, phase, failu
         {showRecord ? '收起诊断原文' : '按需加载并校验诊断原文'}
       </Button>}
       {loadError && <Alert type="error" showIcon message="诊断原文不可用或完整性校验失败" description={loadError} />}
+      {showRecord && record?.parseErrorSaved && diagnostic.parseError === undefined && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: 0 }}>{record.parseError}</pre>}
       {showRecord && record && rawText === undefined && record.bytes && <Alert type="warning" showIcon message="解析器输入 payload不是有效 UTF-8 文本；已验证原字节可下载，界面不进行字符替换。" />}
       {showRecord && record && !record.bytes && <Alert type="warning" showIcon message="解析器输入 payload 未保存；Provider 内容仅依据各自观测记录展示。" description={diagnostic.notSavedReason} />}
       {showRecord && record && rawText !== undefined && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 320, overflow: 'auto', margin: 0 }}>{rawText}</pre>}

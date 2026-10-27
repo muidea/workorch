@@ -24,7 +24,7 @@ func GenerateEmbedding(ctx context.Context, hub magicevent.Hub, workspaceID comm
 	command := llmevents.GenerateEmbeddingCommand{
 		WorkspaceID: workspaceID,
 		Target:      target,
-		Input:       strings.TrimSpace(input),
+		Input:       input,
 	}
 	ev := magicevent.NewEventWithContext(llmevents.TopicLLMCommandGenerateEmbedding, modulecommon.ModuleID, llmevents.CommandDestination, magicevent.NewHeader(), ctx, command)
 	ev.BindLaneKey(events.EventHubLaneKeyFor(llmevents.Contracts(), llmevents.TopicLLMCommandGenerateEmbedding, eventcontract.LaneScope{SubjectType: "llm_embedding", SubjectID: target.ProviderID + "/" + target.ModelID, WorkspaceID: string(workspaceID)}))

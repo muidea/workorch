@@ -119,6 +119,7 @@ Do not commit generated runtime data: `.workorch-data`, `.workorch-workspaces`, 
 - Runtime, LLM request assembly, event projection, TUI, and presenter changes need contract regression tests.
 - Run targeted `go test ./path -count=1` first, then `make test` or the relevant `make verify-*`.
 - CI (`.github/workflows/ci.yml`): `verify-boundary-contract` + managed `verify-ci-mvp-file` with mock providers — real LLM/weather credentials are out of CI.
+- 临时验证目录、日志和构建产物统一置于 `/tmp/workorch-validation/`，不得在项目根目录新增 `.validation-tmp-*` 等目录。需长期保留的受限原始证据放入 Git 忽略的 `.workorch-data/validation/`；`validation-reports/` 只归档可提交的验证报告与证据索引，不存放临时运行数据、原始诊断或凭据。历史证据目录迁移前须同步核对引用，不能直接删除导致索引失效。
 
 ## Agent-Specific Runtime Constraints
 

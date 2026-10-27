@@ -60,6 +60,16 @@ func TestConcreteProviderResultsValidateExactCommandFacts(t *testing.T) {
 	if err := embedding.ValidateFor(embeddingCommand); err != nil {
 		t.Fatalf("valid embedding: %v", err)
 	}
+	spacedCommand := embeddingCommand
+	spacedCommand.Input = "  input\n"
+	if err := embedding.ValidateFor(spacedCommand); err == nil {
+		t.Fatal("trimmed input must not match original command")
+	}
+	spacedResult := embedding
+	spacedResult.Embedding.Input = spacedCommand.Input
+	if err := spacedResult.ValidateFor(spacedCommand); err != nil {
+		t.Fatal(err)
+	}
 	nonFinite := embedding
 	nonFinite.Embedding.Vector = []float64{math.Inf(1)}
 	if err := nonFinite.ValidateFor(embeddingCommand); !errors.Is(err, common.ErrInvalidArgument) {

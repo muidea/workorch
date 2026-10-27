@@ -321,6 +321,7 @@ type ProviderModelDescriptorView struct {
 	Operations          []string                        `json:"operations,omitempty"`
 	Reasoning           ProviderReasoningCapabilityView `json:"reasoning"`
 	CapabilityReady     bool                            `json:"capabilityReady"`
+	EmbeddingReady      bool                            `json:"embeddingReady"`
 	UnavailableReason   string                          `json:"unavailableReason,omitempty"`
 	CapabilityRevision  string                          `json:"capabilityRevision,omitempty"`
 }

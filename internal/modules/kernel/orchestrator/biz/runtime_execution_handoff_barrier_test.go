@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -70,6 +71,9 @@ func TestWorkspaceExecutionRestartRetainsBarrierAfterTerminalHandoff(t *testing.
 	workspace := &workspacemodel.Workspace{
 		ID: "ws-v2", State: common.WorkspaceStateActive, DeliverableDirectory: root, StartupInput: &startup, ActivationAdmission: &admission,
 		DefinitionAdmissionCandidates: []workspacemodel.DefinitionAdmissionCandidate{candidate},
+		// This is a current creation fixture, not a legacy Workspace. Supply
+		// its creation identity before Create; ordinary updates cannot add one.
+		PreparationFence: &workspacemodel.WorkspacePreparationFence{Version: workspacemodel.WorkspacePreparationFenceVersion, WorkspaceID: "ws-v2", CreationEpoch: strings.Repeat("a", 32)},
 	}
 	if _, eligible, err := workspace.ValidateActivationAdmissionPersistence(); err != nil || !eligible {
 		t.Fatalf("屏障请求缺少独立 eligible startup 前像: %v", err)
@@ -119,8 +123,11 @@ func TestWorkspaceExecutionRestartRetainsBarrierAfterTerminalHandoff(t *testing.
 	}
 	execute := func(hub magicevent.Hub, request workspaceevents.WorkspaceExecutionIntentCommand) workspaceevents.WorkspaceExecutionIntentResult {
 		response := hub.Send(magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandExecutionIntent, "application/workorchd", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, request))
-		if response == nil || response.Error() != nil {
-			t.Fatalf("合法执行请求在 owner admission 前失败: %+v", response)
+		if response == nil {
+			t.Fatal("合法执行请求没有 owner 回执")
+		}
+		if response.Error() != nil {
+			t.Fatalf("合法执行请求在 owner admission 前失败: %v", response.Error())
 		}
 		value, err := response.Get()
 		result, ok := value.(workspaceevents.WorkspaceExecutionIntentResult)
@@ -167,6 +174,7 @@ func TestWorkspaceExecutionRestartRetainsBarrierAfterTerminalHandoff(t *testing.
 	}
 	stopFirst()
 
+	var competingReservation *workspacemodel.WorkspaceFreshIntentReservation
 	for attempt := range 2 {
 		hub := magicevent.NewHub(32)
 		stop := startOwners(hub, workspaces, nil)
@@ -196,9 +204,29 @@ func TestWorkspaceExecutionRestartRetainsBarrierAfterTerminalHandoff(t *testing.
 		}
 		competing := command
 		competing.RequestID = "another-restart-during-handoff"
-		response := hub.Send(magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandExecutionIntent, "application/workorchd", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, competing))
-		if response == nil || response.Error() == nil || !errors.Is(response.Error(), common.ErrConflict) {
-			t.Fatalf("另一合法执行身份绕过未完成交接: %+v", response)
+		if attempt == 0 {
+			response := hub.Send(magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandExecutionIntent, "application/workorchd", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, competing))
+			if response == nil || response.Error() == nil || !errors.Is(response.Error(), common.ErrConflict) {
+				t.Fatalf("另一合法执行身份绕过未完成交接: %+v", response)
+			}
+		} else {
+			// The first rejected forward left a durable reservation without a
+			// Run-owner receipt. After restart, report that exact unknown; do
+			// not forward again or infer a durable rejection from the old error.
+			replay := execute(hub, competing)
+			if competingReservation == nil || replay.Outcome != runtimecontract.RuntimeExecutionIntentFreshUnresolved || replay.Reason != runtimecontract.RuntimeExecutionIntentReasonFreshResultUnknown || replay.RunID != "" || replay.PendingRequestID != competingReservation.RequestID || replay.PendingStartupInputHash != competingReservation.StartupInputHash || replay.PendingPayloadHash != competingReservation.PayloadHash {
+				t.Fatalf("竞争身份重放未保留原 unknown: %+v", replay)
+			}
+		}
+		reservedWorkspace, err := workspaces.Get(ctx, command.WorkspaceID)
+		if err != nil || reservedWorkspace.PreparationFence == nil || reservedWorkspace.PreparationFence.PreparationEpoch != 2 || len(reservedWorkspace.PreparationFence.Settled) != 1 || reservedWorkspace.PreparationFence.Pending == nil || reservedWorkspace.PreparationFence.Pending.RequestID != competing.RequestID || reservedWorkspace.PreparationFence.Pending.Validate() != nil {
+			t.Fatalf("竞争请求原登记丢失或凭错误结算: %+v %v", reservedWorkspace, err)
+		}
+		if attempt == 0 {
+			reservation := *reservedWorkspace.PreparationFence.Pending
+			competingReservation = &reservation
+		} else if !reflect.DeepEqual(competingReservation, reservedWorkspace.PreparationFence.Pending) {
+			t.Fatal("重启后竞争请求更换了原登记身份")
 		}
 		unchanged, err := runs.ListByWorkspaceID(ctx, "ws-v2")
 		if err != nil || !reflect.DeepEqual(inventory, unchanged) {

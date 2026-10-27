@@ -10,6 +10,8 @@ Web 创建输入包含名称、Template、Goal、本地资源引用、可选工�
 
 Workspace owner 持久保存创作输入与请求身份；派生验收要求后生成结构化规格提案，并进行六类独立审查。只有当前 input、derivation permit、proposal/specification hash 和 revision 精确匹配且审查通过，用户才可确认并准入。创建、编译、确认均不创建 Run；执行是后续独立 intent。
 
+派生先核对 Goal 及资源中明确列出的功能、约束与验收主项；未被用户／模板条目具体承接的主项须进入候选补充项，保留完整条件、例外、阈值和范围，再补充边界。通用模板或 Goal 全文不能替代逐项覆盖；提取项仍是待审、待确认的派生提案。超出既有项数／字节边界明确失败，不摘要、截断或删难项。
+
 旧 process-local setup draft session、直接 Goal/DoD 写入及手工绕过审查的创建入口已退休。本文保留原路径作为文档链接，不表示旧入口仍可使用。
 
 ## 结构化输出合同
@@ -25,6 +27,8 @@ Workspace owner 持久保存创作输入与请求身份；派生验收要求后�
 六类审查的应审集合由 Workspace owner 从 canonical proposal 的全部 Required requirements 派生，包含独立 exact Goal。每个 critic 请求以 `requiredRequirementIDs` 明确提供同一候选的完整集合；PASS 的 `RequirementIDs` 必须覆盖该集合，允许额外审查合法 optional 项，但不能替代缺失 required 项。没有资源引用、负面路径或回归声明不能据此免审，仍须检查相应约束是否遗漏；不接受 provider 自行声明 N/A 或空范围豁免。FAIL／UNKNOWN 可以保留实际未完成的审查范围，但不能确认。模型、持久 ledger、provider 本地解析和确认准入执行同一覆盖规则，漏审诊断保留 review kind 与缺失 Requirement IDs，不补写原结果。此门禁仅证明记录范围齐备，不证明自然语言语义充分性、不授予运行 credit，也不表示 M3 创建完成。
 
 无绑定 `UNVERIFIED` 可以保存在草稿中，但即使六类审查全部 PASS，也必须显示为 `review_blocked`，不得确认或物化正式 Goal／DoD。确认要求所有 Verification 为 `DECLARED` 且声明非空，每个 Obligation 至少有一份声明。Workspace owner 在提案 completion、确认准备及 prepared 恢复时独立核对封存 Template 实际编译的 Profile，正式准入再核对当前 Workspace／Template 实际合同。列表摘要与详情也须核对该封存 Profile，不能因六审查 PASS 把不适用的自报声明显示为已审查或可确认。声明适用性必须覆盖该义务的全部确认后 DoD source，并在最终合并策略中保留贡献；声明通过不代表当前 capability／owner fact 已就绪，也不授予执行 proof 或终验 credit。
+
+proposal 与 review 的动态输入提供 `sourceApplicableVerificationDeclarations`，按候选列出封存 Profile 的来源适用声明身份；由同一确认后来源解析与合并保留规则纯计算。该集合仅辅助精确引用，不能证明自然语言语义可验、替代 Profile 全文或自动提升为 `DECLARED`。文档性质本身不等于不可验证，存在普通 validation 也不证明任意文档属性可验；state_change、Git 与终态交付义务仍须按各自合同合取核验。
 
 provider 原生 structured output 仅在能力明确支持时启用；不支持时仍提供完整提示合同并执行相同本地严格校验，不自动 fallback 或重发。显式 schema 构造错误必须明确失败，不能静默省略约束。JSON Schema 只约束结构，不替代原文保真、严格解析、来源／资源／Profile 校验、六类审查、用户确认或 owner 准入。
 
@@ -43,6 +47,8 @@ provider 原生 structured output 仅在能力明确支持时启用；不支持�
 原始响应单条保存上限为 256 KiB，原始错误单条保存上限为 64 KiB；沿用既有 112 条规格请求总量上限，每条仅保留一个诊断结果。超限必须明确标记对应内容未保存，并保留原始字节数、hash 和未保存原因；不得保存片段冒充完整原文，也不得把已知解析失败降为未决。旧失败记录没有诊断时明确显示未记录，不伪造历史原因。
 
 常规创作查询返回错误分类与诊断元信息，不把原始错误、响应或 provider 观察混入周期轮询。单条原文仅通过 Workspace 与 permit 精确限定的只读管理查询按需取得；Web 以纯文本展示并支持原字节读取，不执行 provider 返回的 HTML 或指令。诊断查看不调用 provider，不启动 Run，不恢复或更改确认身份。
+
+列表元信息不含 `parseError` 原文属于正常响应。Web 按需读取后核对 Workspace／permit／phase／failureCode 及全部 hash、bytes、保存和 provider 观测 metadata，再校验真实原文的字节数与 SHA256；身份切换或迟到响应不得显示旧原文。只有解析错误已保存也可读取，不依赖 payload 或 wire 已保存。
 
 包含诊断的 Workspace 文件通过原子发布使用 0600 权限。原始内容留在 owner 运行存储，不提交 Git，不额外附加配置密钥，不复制到通用日志；权限保护不能替代管理接口的部署访问边界。
 

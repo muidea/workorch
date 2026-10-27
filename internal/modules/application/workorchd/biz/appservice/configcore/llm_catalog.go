@@ -157,6 +157,7 @@ func catalogSummaryFromModel(catalog llmmodels.ProviderModelCatalog) workorchman
 				InvalidReason: reasoning.InvalidReason,
 			},
 			CapabilityReady:    model.CapabilityReady,
+			EmbeddingReady:     model.EmbeddingReady,
 			UnavailableReason:  model.UnavailableReason,
 			CapabilityRevision: model.CapabilityRevision,
 		})
@@ -207,6 +208,11 @@ func ReadServiceConfigurationWithCatalog(ctx context.Context, hub magicevent.Hub
 		item.LLM.RestartRequired = true
 	} else {
 		item.LLM.RestartRequired = active.ConfigurationRevision != persistedRevision
+		item.LLM.Active = &workorchconfigurationcontract.LLMActiveConfiguration{DefaultChat: active.DefaultChat}
+		if active.DefaultEmbedding != nil {
+			embedding := *active.DefaultEmbedding
+			item.LLM.Active.DefaultEmbedding = &embedding
+		}
 	}
 	catalog, catalogErr := GetLLMModelCatalog(ctx, hub)
 	if catalogErr != nil {

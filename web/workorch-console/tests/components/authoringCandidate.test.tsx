@@ -148,6 +148,8 @@ describe('STEP02 只读候选正式入口', () => {
     vi.mocked(workorchApi.readDefinitionAuthoring).mockResolvedValue({ ...ready(), state });
     render(wrap('ws')); await act(async () => {});
     expect((generateButton() as HTMLButtonElement).disabled).toBe(true);
+    if (state === 'failed') expect(screen.getByText('原请求已失败；再次编译不会重发该请求')).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '只读刷新' })); });
     expect(workorchApi.compileDefinitionAuthoring).not.toHaveBeenCalled(); forbidden();
   });
 });

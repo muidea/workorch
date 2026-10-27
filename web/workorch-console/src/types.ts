@@ -198,6 +198,7 @@ export type ProviderModelDescriptorView = {
   maxOutputTokens?: number;
   operations?: string[];
   capabilityReady: boolean;
+  embeddingReady?: boolean;
   unavailableReason?: string;
   reasoning?: {
     supported: boolean;
@@ -224,6 +225,7 @@ export type ProviderCatalogSummary = {
 export type LLMConfiguration = {
   defaultChat: ProviderModelTarget;
   defaultEmbedding?: ProviderModelTarget;
+  active?: { defaultChat: ProviderModelTarget; defaultEmbedding?: ProviderModelTarget };
   budget: LLMContextBudgetPolicyView;
   catalog?: ProviderCatalogSummary;
   restartRequired: boolean;

@@ -20,6 +20,16 @@ func (r orchestratorTestBoundRuns) RunOwnerRepositoryBinding() repository.RunOwn
 	return r.binding
 }
 
+// Preserve the real repository's complete original-receipt read through the
+// test binding wrapper. Never reconstruct receipts from ordinary Run lists.
+func (r orchestratorTestBoundRuns) ReadWorkspaceExecutionIntentReceipt(ctx context.Context, workspaceID common.WorkspaceID, requestID string) (*runmodel.WorkspaceExecutionIntentReceipt, error) {
+	reader, ok := r.RunRepository.(repository.RunExecutionIntentReceiptReader)
+	if !ok {
+		return nil, common.ErrConflict
+	}
+	return reader.ReadWorkspaceExecutionIntentReceipt(ctx, workspaceID, requestID)
+}
+
 type orchestratorTestBoundSteps struct {
 	repository.StepRepository
 	binding repository.RunOwnerRepositoryBinding

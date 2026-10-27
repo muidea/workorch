@@ -357,7 +357,7 @@ func TestBuildCatalogFromWireDerivesResponsesAndEmbeddingOperations(t *testing.T
 }
 
 func TestBuildCatalogKeepsEmbeddingDiscoveryWithoutInputCapacity(t *testing.T) {
-	// Endpoint-only model records are valid discovery, not usable capacity facts.
+	// Endpoint support permits bounded embeddings without inventing token capacity.
 	var wire aiProxyModelsResponse
 	if err := json.Unmarshal([]byte(`{"object":"list","data":[
 		{"id":"intfloat/multilingual-e5-small","object":"model","supported_endpoints":["/v1/embeddings"]},
@@ -371,11 +371,44 @@ func TestBuildCatalogKeepsEmbeddingDiscoveryWithoutInputCapacity(t *testing.T) {
 		t.Fatalf("catalog = %+v, err = %v", catalog, err)
 	}
 	for _, model := range catalog.Models {
-		if !containsOperation(model.Operations, workorchconfig.LLMOperationEmbeddings) || model.CapabilityReady || model.ContextWindowTokens != 0 || model.UnavailableReason != string(llmmodels.ProviderModelFailureCapabilityIncomplete) {
+		if !containsOperation(model.Operations, workorchconfig.LLMOperationEmbeddings) || !model.CapabilityReady || !model.EmbeddingReady || model.ContextWindowTokens != 0 || model.MaxOutputTokens != 0 || model.UnavailableReason != "" {
 			t.Fatalf("endpoint-only model discovery/readiness = %+v", model)
 		}
-		if _, err := ResolveProviderModelTarget(cfg, &catalog, model.Target, workorchconfig.LLMOperationEmbeddings); err == nil {
-			t.Fatalf("endpoint-only model must not resolve a callable profile: %+v", model)
+		profile, err := ResolveProviderModelTarget(cfg, &catalog, model.Target, workorchconfig.LLMOperationEmbeddings)
+		if err != nil || profile.ContextWindowTokens != 0 || profile.MaxInputTokens != 0 || profile.MaxRequestBytes != embeddingMaxInputBytes {
+			t.Fatalf("endpoint-only model bounded profile: %+v, err=%v", profile, err)
+		}
+	}
+}
+
+func TestCatalogSeparatesMixedModelEmbeddingReadinessFromResponses(t *testing.T) {
+	var wire aiProxyModelsResponse
+	if err := json.Unmarshal([]byte(`{"data":[
+		{"id":"mixed","supported_endpoints":["/v1/responses","/v1/embeddings"]},
+		{"id":"negative-context","supported_endpoints":["/v1/embeddings"],"contextWindowTokens":-1},
+		{"id":"negative-output","supported_endpoints":["/v1/embeddings"],"maxOutputTokens":-1}
+	]}`), &wire); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testCatalogOutputCeilingConfig("chat-model")
+	catalog, err := buildCatalogFromWire(wire, cfg, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range catalog.Models {
+		if model.CapabilityReady {
+			t.Fatalf("invalid Responses/capacity marked globally ready: %+v", model)
+		}
+		_, embeddingErr := ResolveProviderModelTarget(cfg, &catalog, model.Target, workorchconfig.LLMOperationEmbeddings)
+		if model.Target.ModelID == "mixed" {
+			if !model.EmbeddingReady || embeddingErr != nil {
+				t.Fatalf("mixed embedding: %+v %v", model, embeddingErr)
+			}
+			if _, err := ResolveProviderModelTarget(cfg, &catalog, model.Target, workorchconfig.LLMOperationResponses); err == nil {
+				t.Fatal("embedding readiness leaked to Responses")
+			}
+		} else if model.EmbeddingReady || embeddingErr == nil {
+			t.Fatalf("negative capacity accepted: %+v %v", model, embeddingErr)
 		}
 	}
 }

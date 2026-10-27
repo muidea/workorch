@@ -335,13 +335,23 @@ func createWorkspaceWithIDWithSession(ctx context.Context, session *runtimecore.
 	if err != nil {
 		return appmodelcore.Workspace{}, fmt.Errorf("apply Runtime test acceptance template: %w", err)
 	}
-	// File-backed fixtures can use the test-only repository seed surface without
-	// introducing a second runtimecore.Session. Memory-only tests using this helper
-	// do not create Runs and retain their intentionally bare setup.
+	// The read DTO deliberately omits owner-private preparation fields. Seed
+	// this file-backed test fixture from the complete persisted record, never
+	// write the projection back as a complete record (erasing its creation fence).
+	// No second runtimecore.Session is introduced. Memory-only tests using this
+	// helper retain their intentionally bare setup.
 	if session.RepositoryBackend() == "file" {
 		repositories := testkit.OpenRepositories(session.RepositoryBackend(), session.RepositoryDataDir())
 		if repositories.Workspaces == nil {
 			return appmodelcore.Workspace{}, fmt.Errorf("load Runtime test workspace fixture repository: %w", common.ErrInvalidArgument)
+		}
+		item, err = repositories.Workspaces.Get(ctx, id)
+		if err != nil {
+			return appmodelcore.Workspace{}, err
+		}
+		item, err = workspacecore.ApplyTemplateToWorkspace(item, template)
+		if err != nil {
+			return appmodelcore.Workspace{}, fmt.Errorf("apply Runtime test acceptance template: %w", err)
 		}
 		if err := repositories.Workspaces.Update(ctx, item); err != nil {
 			return appmodelcore.Workspace{}, fmt.Errorf("bind Runtime test acceptance template: %w", err)

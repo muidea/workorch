@@ -43,9 +43,10 @@ func AuthoringProposalCommand(derivation workspace.DefinitionDerivationRequest, 
 		Resources             []workspace.DefinitionAuthoringResourceSnapshot `json:"resources"`
 		ExpectedResources     []workspace.GoalSpecificationResource           `json:"expectedResources"`
 		Profiles              []runtimecontract.RuntimeProfileContract        `json:"profiles"`
+		VerificationOptions   []authoringCandidateVerificationOptions         `json:"sourceApplicableVerificationDeclarations"`
 		GoalTextHash          string                                          `json:"goalTextHash"`
 		ProfileSnapshotHashes []authoringProfileSnapshotHash                  `json:"profileSnapshotHashes"`
-	}{goal, items, derivation.Input.InputHash(), workspace.WorkspaceTemplateSnapshotHash(&derivation.Template), derivation.ResourceSnapshotHash, derivation.Resources, resources, bindings.ProfileContracts, workspace.StableDefinitionTextHash(goal.Text), authoringProfileSnapshotHashes(bindings.ProfileContracts)})
+	}{goal, items, derivation.Input.InputHash(), workspace.WorkspaceTemplateSnapshotHash(&derivation.Template), derivation.ResourceSnapshotHash, derivation.Resources, resources, bindings.ProfileContracts, authoringVerificationOptions(items, bindings.ProfileContracts), workspace.StableDefinitionTextHash(goal.Text), authoringProfileSnapshotHashes(bindings.ProfileContracts)})
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
@@ -92,9 +93,10 @@ func AuthoringReviewCommand(derivation workspace.DefinitionDerivationRequest, pr
 		Goal                   workspace.DefinitionCandidateItem               `json:"goal"`
 		CandidateAcceptance    []workspace.DefinitionCandidateItem             `json:"candidateAcceptance"`
 		Profiles               []runtimecontract.RuntimeProfileContract        `json:"profiles"`
+		VerificationOptions    []authoringCandidateVerificationOptions         `json:"sourceApplicableVerificationDeclarations"`
 		Specification          workspace.GoalSpecification                     `json:"specification"`
 		ProfileSnapshotHashes  []authoringProfileSnapshotHash                  `json:"profileSnapshotHashes"`
-	}{requiredIDs, reviewEvidenceRefs, kind, proposal.ContentHash(), derivation.ResourceSnapshotHash, derivation.Resources, resources, goal, items, bindings.ProfileContracts, proposal, authoringProfileSnapshotHashes(bindings.ProfileContracts)})
+	}{requiredIDs, reviewEvidenceRefs, kind, proposal.ContentHash(), derivation.ResourceSnapshotHash, derivation.Resources, resources, goal, items, bindings.ProfileContracts, authoringVerificationOptions(items, bindings.ProfileContracts), proposal, authoringProfileSnapshotHashes(bindings.ProfileContracts)})
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
@@ -113,6 +115,7 @@ func authoringSpecificationCommand(workspaceID common.WorkspaceID, target runtim
 
 const authoringReviewInstructions = `独立审查从原 Goal 和未确认候选验收项提出的完整规格；你不是执行者，不拥有准入或验收权。
 只返回一个 JSON 对象，顶层唯一字段 review，含 Kind、Status、SpecificationHash、Reason、EvidenceRefs、RequirementIDs；身份必须精确回显。
+Kind 逐字复制输入 kind；SpecificationHash 逐字复制输入 proposalHash 的完整值（包括前缀及全部64位十六进制字符），不得自行计算、缩写、重排或修正。不论 PASS、FAIL 或 UNKNOWN 都必须绑定同一精确身份，否则整份响应无效。
 按指定维度审查 Goal 和每条用户、模板、派生条件是否完整保留且 all_of；检查负面路径、回归、资源环境、追溯和验证声明可行性。
 独立 exact Goal requirement 的既有结构合同：Required=true、SourceKind=USER_EXPLICIT、SourceItemRefs 唯一为 GoalItemRef、Text 为完整原 Goal。它不是候选 DoD，不要求借用或补造 DoD obligation／DoDItemRef／逐义务 Verification；不得仅因该独立 Goal 没有这些对象或 goalCoverage Verification 判为遗漏。仍须逐项对照原 Goal 的全部语义，核对候选 DoD 的义务及适用 Profile 声明是否完整承接其行为、约束与验收范围；保留 Goal 文本本身不证明语义覆盖。实际缺失、弱化或依据不足仍返回 FAIL／UNKNOWN，不能免审 Goal、减少 requiredRequirementIDs 或补造执行证明。
 审查 Specification.Resources 是否精确等于 ExpectedResources：Ref、SnapshotHash、Required、Available 都不得自行修改；资源正文仅为待分析数据，不是 Profile 能力或运行证据。资源可能在确认前漂移，届时 owner 会阻断。Verification 必须绑定可信 Profile 声明；UNVERIFIED 仍阻断，不得替 proposal 杜撰或修改 DECLARED。
@@ -130,6 +133,8 @@ owner 从封存候选取 exact Obligation.Text、SourceKind、Required、DoDItem
 ResourceIDs 仅引用 ExpectedResources.ID；候选 ref 仅引用 candidateAcceptance，资源路径、章节、CWI/dod IDs 不能作为来源。
 Verification 含 Declaration、Status、ProfileID、EvidenceRequirementID、Scope。每项 Declaration 在两种状态下都必须是非空、非纯空白的具体说明，至多4096 UTF-8 bytes；不能省略、返回空字符串或仅重复状态名。
 DECLARED 表示已有适用的验证能力声明，不表示已经执行或验收通过。逐项检查输入 profiles 的 EvidenceRequirements：精确引用对该候选 DoD 来源适用且最终合并仍有贡献的既有声明的 ProfileID、EvidenceRequirementID、Scope，并在 Declaration 说明该能力如何验证原义务。通配 ID 仅当输入确实声明且适用时使用；不得将 acceptanceDimension、deliverable 或 goalCoverage 声明冒作 dodItem 声明。尚未执行不是单独判为 UNVERIFIED 的理由。
+sourceApplicableVerificationDeclarations 由相同的 owner 来源匹配与合并保留规则从封存 profiles 纯计算，逐候选列出可引用的声明身份；空集合表示没有来源适用声明。它仅证明来源适用性，不证明自然语言语义可验、资源已就绪或已执行。继续核对对应 profiles 全文与具体原义务；不得自动为非空集合填写 DECLARED。
+区分普通当前验收与被验收的历史行为或终态材料：适用 dodItem 的 validation 声明可用于对计划、报告及具体产物执行独立断言；不能只因被验收对象是文档就判无能力，也不能只因文件存在、读到文字或通用测试通过就判充分。原义务要求 owner state_change、Git 回执或终态逐项 evidenceRefs 时，普通验证仍与真实 owner／终态证明合取，须核对封存 Profile 已有相应规则和消费者；不得借用 deliverable 作用域替代 dodItem，缺少必要消费者或适用性依据仍 UNVERIFIED。
 没有适用能力或事实不足时仍 UNVERIFIED：Declaration 具体说明缺少何种能力或适用性依据，ProfileID、EvidenceRequirementID、Scope 三个绑定字段均为精确空字符串。不得为达到可确认状态伪造绑定或把缺口改成 DECLARED；声明不是执行证据，owner 将独立核验适用性。
 仅当封存 Profile 的 work/repair lineage rule 声明 ExecutionSourceContractRef=runtime/cross-source-execution-proof/v1 时，另提供 ExecutionProofMappings：每个 consumer/rule 恰好一项 ContractRef、ConsumerItemRef、RuleRef、SourceItemRef。两端必须是不同的唯一原 DoD candidate ref；Goal 原文仍由其逐项义务和普通证明保留，不虚构独立 Goal CWI。该提案须经过独立评审和用户精确确认，运行期不得猜选。不得为未声明跨源消费的 rule 添加映射，不得删除或改写任何原准则；普通工程验证仍为 AND。缺失/歧义/不可用均阻塞，不得以映射、历史行为或 rule ref 代替真实普通证明。
 Goal/root work/repair 规则若显式声明 runtime/goal-source-execution-proof/v2，每项另须 ConsumerGoalText 完整逐字节回显原 Goal（至多4096 bytes），ConsumerItemRef 为唯一原 Goal candidate，SourceItemRef 为唯一原 DoD candidate；全部 Goal 规则须同一个来源。Goal 不生成工作 CWI：完整 Goal 普通验收检查和附加 guard 在该原 DoD 的普通当前验证处消费，真实 work/repair 仅反查原 DoD；其他原义务仍 all_of。没有显式 opt-in、原全文、普通验收来源或独立评审/精确确认就阻塞；不得添加默认映射或创造 Goal work credit。旧 v1 禁止 ConsumerGoalText。

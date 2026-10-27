@@ -46,3 +46,29 @@ func TestReviewPASSRequiresAllRequiredRequirements(t *testing.T) {
 		})
 	}
 }
+
+// A malformed identity remains invalid even when the model reports a failure.
+func TestReviewRejectsTruncatedHashForEveryOutcome(t *testing.T) {
+	spec := workspace.GoalSpecification{Version: 1, Requirements: []workspace.GoalSpecificationRequirement{{ID: "goal", Required: true}}}
+	for _, status := range []string{workspace.GoalReviewPass, workspace.GoalReviewFail, workspace.GoalReviewUnknown} {
+		t.Run(status, func(t *testing.T) {
+			review := workspace.GoalSpecificationCompletenessReview{Kind: workspace.GoalReviewDimensionCoverage, Status: status, SpecificationHash: spec.ContentHash(), Reason: "independent assessment", EvidenceRefs: []string{"goal"}, RequirementIDs: []string{"goal"}}
+			encode := func() []byte {
+				payload, err := json.Marshal(struct {
+					Review workspace.GoalSpecificationCompletenessReview `json:"review"`
+				}{review})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return payload
+			}
+			if _, err := ParseReview(encode(), review.Kind, spec); err != nil {
+				t.Fatalf("valid review rejected: %v", err)
+			}
+			review.SpecificationHash = review.SpecificationHash[:len(review.SpecificationHash)-1]
+			if _, err := ParseReview(encode(), review.Kind, spec); err == nil {
+				t.Fatal("63-digit hash accepted or repaired")
+			}
+		})
+	}
+}

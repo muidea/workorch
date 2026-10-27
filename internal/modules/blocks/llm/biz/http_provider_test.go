@@ -1308,7 +1308,7 @@ func TestHTTPProviderStreamWireLimitPrecedesPartialEventJSON(t *testing.T) {
 	}
 }
 
-func TestHTTPProviderEmbeddingResponseIsBoundedByModelInputProfile(t *testing.T) {
+func TestHTTPProviderEmbeddingResponseHasIndependentLocalBound(t *testing.T) {
 	config := testAIProxyProviderConfig("")
 	config.ContextProfile.MaxRequestBytes = 1
 	limit, err := providerEmbeddingResponseLimit(config, "x")

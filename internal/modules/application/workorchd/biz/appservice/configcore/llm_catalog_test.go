@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -32,6 +33,18 @@ func TestCatalogProjectionPreservesIncompleteEmbeddingDiscovery(t *testing.T) {
 	view.Models[0].Operations[0] = "responses"
 	if input.Models[0].Operations[0] != "embeddings" {
 		t.Fatal("projection aliases owner operation data")
+	}
+}
+
+func TestCatalogProjectionPreservesOperationSpecificEmbeddingReadiness(t *testing.T) {
+	input := llmmodels.ProviderModelCatalog{Models: []llmmodels.ProviderModelDescriptor{{
+		Target:     runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "mixed-model"},
+		Operations: []string{"responses", "embeddings"}, EmbeddingReady: true,
+		UnavailableReason: "capability_incomplete",
+	}}}
+	view := catalogSummaryFromModel(input)
+	if len(view.Models) != 1 || !view.Models[0].EmbeddingReady || view.Models[0].CapabilityReady || view.Models[0].ContextWindowTokens != 0 {
+		t.Fatalf("embedding support must not invent Responses capacity: %+v", view)
 	}
 }
 
@@ -163,5 +176,75 @@ estimatedTokensPerByte = 0.25
 	t.Cleanup(func() { _ = workorchconfig.Close() })
 	if _, err := workorchconfig.Current(); err != nil {
 		t.Fatalf("load config: %v", err)
+	}
+}
+
+func TestConfigurationReadSeparatesSavedAndObservedLLMTargets(t *testing.T) {
+	for _, name := range []string{"same revision", "saved change", "owner unavailable"} {
+		t.Run(name, func(t *testing.T) {
+			useLLMCatalogTestConfig(t)
+			persisted, err := workorchconfig.Persisted()
+			if err != nil {
+				t.Fatal(err)
+			}
+			revision, err := workorchconfig.LLMConfigurationRevision(persisted.LLM)
+			if err != nil {
+				t.Fatal(err)
+			}
+			embedding := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "active-embedding"}
+			active := llmevents.GetActiveConfigurationResult{ProviderID: "ai-proxy", ConfigurationRevision: revision, DefaultChat: persisted.LLM.DefaultChat.ToRuntimeTarget()}
+			if name == "saved change" {
+				active.ConfigurationRevision = "older-revision"
+				active.DefaultChat.ModelID = "active-chat"
+				active.DefaultEmbedding = &embedding
+			}
+			ctx := context.Background()
+			hub := magicevent.NewHub(8)
+			t.Cleanup(func() { hub.Terminate(ctx) })
+			observer := magicevent.NewSimpleObserver(llmevents.CommandDestination, hub)
+			observer.Subscribe(llmevents.TopicLLMCommandGetActiveConfiguration, func(_ magicevent.Event, result magicevent.Result) {
+				if name == "owner unavailable" {
+					result.Set(nil, &cd.Error{Code: cd.Unexpected, Message: "owner unavailable", Cause: common.ErrInvalidArgument})
+					return
+				}
+				result.Set(active, nil)
+			})
+			observer.Subscribe(llmevents.TopicLLMCommandGetProviderModelCatalog, func(_ magicevent.Event, result magicevent.Result) {
+				result.Set(llmevents.GetProviderModelCatalogResult{}, nil)
+			})
+			t.Cleanup(func() {
+				observer.Unsubscribe(llmevents.TopicLLMCommandGetActiveConfiguration)
+				observer.Unsubscribe(llmevents.TopicLLMCommandGetProviderModelCatalog)
+			})
+			view, err := ReadServiceConfigurationWithCatalog(ctx, hub)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if view.LLM.DefaultChat != persisted.LLM.DefaultChat.ToRuntimeTarget() || view.LLM.RestartRequired != (name != "same revision") {
+				t.Fatalf("saved target or restart state changed: %+v", view.LLM)
+			}
+			if name == "owner unavailable" {
+				if view.LLM.Active != nil {
+					t.Fatal("unknown active model fell back to saved selection")
+				}
+				return
+			}
+			if view.LLM.Active == nil || view.LLM.Active.DefaultChat != active.DefaultChat {
+				t.Fatalf("owner observation lost: %+v", view.LLM.Active)
+			}
+			if name == "same revision" {
+				if view.LLM.Active.DefaultEmbedding != nil {
+					t.Fatal("unconfigured active embedding invented")
+				}
+				return
+			}
+			if view.LLM.Active.DefaultEmbedding == nil || *view.LLM.Active.DefaultEmbedding != embedding {
+				t.Fatal("observed active embedding lost")
+			}
+			view.LLM.Active.DefaultEmbedding.ModelID = "changed-view"
+			if embedding.ModelID != "active-embedding" {
+				t.Fatal("active projection aliases owner target")
+			}
+		})
 	}
 }

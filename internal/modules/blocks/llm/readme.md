@@ -70,7 +70,11 @@ endpoint 或其派生 hash）。override 最多 4096 项、每项最多 64 个 o
 旧无该字段的历史仍可读；不会在 GET、恢复或重新解码时补出默认模型。结果 clone 深拷贝嵌套声明，
 loader 后续变化和返回值修改不能改变 frozen source。该声明不证明预算、远端授权或连通性。
 超限/损坏整体拒绝，不裁剪后声明完整。缓存里异常的 observation/诊断字段同样拒绝，不清洗后授信。
-原 catalog/provider 诊断路径不变。embedding 的零 context/output 元数据可原值观察，不因此判 ready。
+原 catalog/provider 诊断路径不变。embedding 的零 context/output 元数据原值保留为未知；精确 endpoint 与非负元数据
+允许 `embeddingReady`，并消费 `workorch.embedding-transport/v1` 的独立 64 KiB 输入、512 KiB JSON 请求、4 MiB
+响应限制，已知 context 估算只可收紧输入。该策略身份进入 capability revision 与 audit profile mode；它不证明模型
+token 容量、远端授权或连通性。混合模型缺少 Responses 容量时全局 `capabilityReady` 仍为 false，不能借 Embedding
+资格授予对话预算。原始输入不 trim、不截断，结果按原 command input 精确绑定。
 Application 可把同一次完整观察传给 Workspace 原准备操作作为私有历史归档；该消费不改变
 本 owner 的查询合同，也不增加 refresh/selection。归档后的 epoch 和 freshness 仅代表原观察时点，
 不能在恢复、重启或 GET 时冒充当前 owner 事实，公开随机引用不授予 readiness。
@@ -192,7 +196,8 @@ miss/fresh/TTL/LKG、未完 refresh、配置轮换、完整性/隔离、生命�
   明确授权例外。
 - operation variant schema/instruction 必须按 kind 投影 manifest 已编译的 allowlist；exact required-sequence variant 与普通
   accepted variant 已由 Runtime 取并集。某 accepted kind 没有 variant restriction 时，不能因另一 kind 有 allowlist 而被删除。
-- generic completion、embedding 与 Runtime I/O 均有 token/byte/wire/SSE/event/line 上限；成功 result 不能是同类型空值或漂移
+- generic completion 与 Runtime I/O 按协议模式限制 token/byte/wire/SSE/event/line；embedding 独立限制 input/request/response
+  bytes，未知 token 容量不虚构上限。成功 result 不能是同类型空值或漂移
   target。raw request、response、credential、
   endpoint 和未脱敏 diagnostic 不得进入 aggregate 或 audit notification。
 - provider-facing cache 分区以 [Runtime request/cache contract](../../../../docs/00-core/runtime-request-cache-note.md) 为准：

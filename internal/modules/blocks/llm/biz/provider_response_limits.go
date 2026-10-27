@@ -9,6 +9,13 @@ import (
 )
 
 const (
+	// workorch.embedding-transport/v1 limits resources, not model token capacity.
+	// The wire allowance covers JSON escaping of the entire input plus envelope.
+	embeddingTransportPolicyVersion = "workorch.embedding-transport/v1"
+	embeddingMaxInputBytes          = 64 * 1024
+	embeddingMaxRequestBytes        = 512 * 1024
+	embeddingMaxResponseBytes       = 4 * 1024 * 1024
+
 	providerResponseEnvelopeOverheadBytes = 64 * 1024
 	providerResponseWireExpansion         = 6
 	providerStreamEventsPerOutputToken    = 4
@@ -91,22 +98,17 @@ func providerCompletionResponseLimits(config llmmodels.ProviderConfig, request l
 }
 
 func providerEmbeddingResponseLimit(config llmmodels.ProviderConfig, input string) (int, error) {
-	maxRequestBytes := config.ContextProfile.MaxRequestBytes
-	if maxRequestBytes <= 0 {
-		return 0, fmt.Errorf("%w: embedding model byte capacity is incomplete", common.ErrInvalidArgument)
+	if config.ContextProfile.MaxRequestBytes < 0 || config.ContextProfile.ContextWindowTokens < 0 {
+		return 0, fmt.Errorf("%w: embedding capacity is invalid", common.ErrInvalidArgument)
 	}
-	if len(input) > maxRequestBytes {
-		return 0, fmt.Errorf("%w: embedding input exceeds selected model byte capacity", common.ErrInvalidArgument)
+	maxInputBytes := embeddingMaxInputBytes
+	if config.ContextProfile.MaxRequestBytes > 0 {
+		maxInputBytes = min(maxInputBytes, config.ContextProfile.MaxRequestBytes)
 	}
-	limit, ok := safeProviderLimitMultiply(maxRequestBytes, providerStreamEventsPerOutputToken)
-	if !ok {
-		return 0, fmt.Errorf("%w: embedding response capacity overflows wire limits", common.ErrInvalidArgument)
+	if len(input) > maxInputBytes {
+		return 0, fmt.Errorf("%w: embedding input exceeds local byte budget", common.ErrInvalidArgument)
 	}
-	limit, ok = safeProviderLimitAdd(limit, providerResponseEnvelopeOverheadBytes)
-	if !ok {
-		return 0, fmt.Errorf("%w: embedding response capacity overflows wire limits", common.ErrInvalidArgument)
-	}
-	return limit, nil
+	return embeddingMaxResponseBytes, nil
 }
 
 func safeProviderLimitMultiply(value, multiplier int) (int, bool) {

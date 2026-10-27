@@ -15,7 +15,8 @@ import (
 )
 
 // ResolveProviderModelTarget resolves an exact target into a complete profile.
-// No pattern matching, no conservative defaults, no map fallback.
+// No pattern matching or map fallback. Embeddings use a versioned local byte
+// policy independently of optional model token metadata.
 // operation must be responses or embeddings; empty defaults to responses.
 func ResolveProviderModelTarget(cfg workorchconfig.LLMConfig, catalog *llmmodels.ProviderModelCatalog, target runtimecontract.ProviderModelTarget, operation string) (llmmodels.ResolvedProviderModelProfile, error) {
 	cfg, err := workorchconfig.NormalizeLLMConfig(cfg)
@@ -50,8 +51,8 @@ func resolveAIProxyTarget(cfg workorchconfig.LLMConfig, catalog *llmmodels.Provi
 			if !containsOperation(model.Operations, workorchconfig.LLMOperationEmbeddings) {
 				return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{Code: llmmodels.ProviderModelFailureOperationUnsupported, Message: fmt.Sprintf("model %q does not support operation %q", target.ModelID, operation), Target: target}
 			}
-			if !model.CapabilityReady {
-				return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{Code: llmmodels.ProviderModelFailureCapabilityIncomplete, Message: firstNonEmpty(model.UnavailableReason, "embedding model capacity is incomplete"), Target: target}
+			if (!model.EmbeddingReady && !model.CapabilityReady) || model.MaxOutputTokens < 0 {
+				return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{Code: llmmodels.ProviderModelFailureCapabilityIncomplete, Message: firstNonEmpty(model.UnavailableReason, "embedding capability is incomplete"), Target: target}
 			}
 			return deriveEmbeddingBudgetProfile(target, operation, llmcommon.ProviderSurfaceOpenAICompatibleHTTP, model.ContextWindowTokens, cfg.Budget, llmmodels.CapabilitySourceAIProxyCatalog, configRevision, model.CapabilityRevision)
 		}
@@ -136,26 +137,37 @@ func deriveEmbeddingBudgetProfile(
 	configurationRevision string,
 	existingCapabilityRevision string,
 ) (llmmodels.ResolvedProviderModelProfile, error) {
-	if contextWindowTokens <= 0 || budget.ContextUtilizationRatio <= 0 || budget.ContextUtilizationRatio > 1 || budget.EstimatedTokensPerByte <= 0 {
+	if contextWindowTokens < 0 || budget.ContextUtilizationRatio <= 0 || budget.ContextUtilizationRatio > 1 || math.IsNaN(budget.ContextUtilizationRatio) || budget.EstimatedTokensPerByte <= 0 || math.IsNaN(budget.EstimatedTokensPerByte) || math.IsInf(budget.EstimatedTokensPerByte, 0) {
 		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
 			Code: llmmodels.ProviderModelFailureCapabilityIncomplete, Message: "embedding context capacity is incomplete", Target: target,
 		}
 	}
-	maxInputTokens := int(math.Floor(float64(contextWindowTokens) * budget.ContextUtilizationRatio))
-	maxBytesFloat := math.Floor(float64(maxInputTokens) / budget.EstimatedTokensPerByte)
-	if maxInputTokens <= 0 || maxBytesFloat <= 0 || maxBytesFloat > float64(math.MaxInt) {
-		return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{
-			Code: llmmodels.ProviderModelFailureCapabilityIncomplete, Message: "embedding byte capacity is invalid", Target: target,
+	maxInputTokens, maxInputBytes := 0, embeddingMaxInputBytes
+	if contextWindowTokens > 0 {
+		tokens := math.Floor(float64(contextWindowTokens) * budget.ContextUtilizationRatio)
+		if tokens <= 0 || tokens >= float64(math.MaxInt) {
+			return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{Code: llmmodels.ProviderModelFailureCapabilityIncomplete, Message: "embedding token capacity is invalid", Target: target}
+		}
+		maxInputTokens = int(tokens)
+		maxBytesFloat := math.Floor(tokens / budget.EstimatedTokensPerByte)
+		if maxBytesFloat <= 0 {
+			return llmmodels.ResolvedProviderModelProfile{}, llmmodels.ProviderModelFailure{Code: llmmodels.ProviderModelFailureCapabilityIncomplete, Message: "embedding byte capacity is invalid", Target: target}
+		}
+		if maxBytesFloat < float64(maxInputBytes) {
+			maxInputBytes = int(maxBytesFloat)
 		}
 	}
 	capabilityRev := existingCapabilityRevision
 	if capabilityRev == "" {
 		capabilityRev = capabilityRevision(target, contextWindowTokens, 0, capabilitySource+"|"+operation)
 	}
+	// Include the local transport contract even when the catalog supplies a
+	// revision. Unknown token metadata stays zero; bytes do not prove tokens.
+	capabilityRev = capabilityRevision(target, contextWindowTokens, 0, capabilityRev+"|"+embeddingTransportPolicyVersion)
 	return llmmodels.ResolvedProviderModelProfile{
 		Target: target, Operation: operation, APISurface: apiSurface,
 		ContextWindowTokens: contextWindowTokens, MaxInputTokens: maxInputTokens,
-		EstimatedTokensPerByte: budget.EstimatedTokensPerByte, MaxRequestBytes: int(maxBytesFloat),
+		EstimatedTokensPerByte: budget.EstimatedTokensPerByte, MaxRequestBytes: maxInputBytes,
 		CapabilitySource: capabilitySource, CapabilityRevision: capabilityRev, ConfigurationRevision: configurationRevision,
 	}, nil
 }

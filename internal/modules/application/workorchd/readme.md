@@ -58,6 +58,14 @@ Web 只在页面内存保留原 payload 和恢复提示；未收到完整创建�
 文档、wire 和 transport leaf 由 Workspace 受限诊断查询保留原 bytes／SHA256／观察完整性；原文不进入通用日志或 Runtime。
 三类 closed schema 全部计入请求预算，稳定合同放 C0，动态输入放 C3；native／prompt 共用严格本地校验且零 fallback。
 
+派生先展开 Goal／资源中未被具体承接的原验收主项，再补边界条件。proposal／review 共享由封存 Profile
+纯计算的逐候选 `sourceApplicableVerificationDeclarations`，复用 Workspace admission 的来源匹配和合并保留规则；
+这些身份选项不产生 `DECLARED`、语义可验结论或运行 credit。独立审查必须原样回显完整 proposal hash，
+任何结果的身份错配仍拒绝，不修复模型输出或重发原 permit。
+
+系统配置读模型保留 persisted 默认选择，并通过既有 LLM typed active-configuration query 单独投影当前进程
+`llm.active` 目标。owner 观察不可用时留空并保持 restart-pending，不以 persisted 值冒充生效模型，不输出密钥。
+
 reserve 只表示调用权已消费，LLM typed fact 可能仍在内存，诊断可读也不替代 completion；只有 Workspace completion CAS
 成功才是阶段持久结果。可信结果返回后，parser／completion／exact owner readback 共用一个最多 5 秒的 settlement scope，
 不因原 caller 取消丢弃已知结果，不重调 provider、不建立 Application 恢复队列。completion reply 丢失只在同一期限内

@@ -35,6 +35,9 @@ type ProviderModelDescriptor struct {
 	Operations         []string
 	Reasoning          ProviderReasoningCapability
 	CapabilityReady    bool
+	// EmbeddingReady is operation-specific: a mixed model may support bounded
+	// embeddings while its Responses capacity remains incomplete.
+	EmbeddingReady     bool
 	UnavailableReason  string
 	CapabilityRevision string
 }

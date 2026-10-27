@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -768,9 +769,12 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 	if p == nil || p.client == nil {
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
 	}
-	input := strings.TrimSpace(request.Input)
-	if input == "" {
+	input := request.Input
+	if strings.TrimSpace(input) == "" {
 		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: embedding input is required", common.ErrInvalidArgument)
+	}
+	if !utf8.ValidString(input) {
+		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: embedding input must be valid UTF-8", common.ErrInvalidArgument)
 	}
 	model := strings.TrimSpace(request.Model)
 	if model == "" {
@@ -790,6 +794,9 @@ func (p *HTTPProvider) Embed(ctx context.Context, request llmmodels.ProviderEmbe
 	})
 	if err != nil {
 		return llmmodels.ProviderEmbeddingResult{}, err
+	}
+	if len(payload) > embeddingMaxRequestBytes {
+		return llmmodels.ProviderEmbeddingResult{}, fmt.Errorf("%w: embedding JSON request exceeds local wire budget", common.ErrInvalidArgument)
 	}
 	result = llmmodels.ProviderEmbeddingResult{
 		ProviderID: p.config.ID, Model: model, Input: input, RequestBytes: len(payload),

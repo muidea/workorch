@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -83,6 +84,7 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 		InputHash           string                                   `json:"inputHash"`
 		TemplateHash        string                                   `json:"templateHash"`
 		Profiles            []runtimecontract.RuntimeProfileContract `json:"profiles"`
+		VerificationOptions []authoringCandidateVerificationOptions  `json:"sourceApplicableVerificationDeclarations"`
 	}
 	if err := json.Unmarshal([]byte(volatile.Content), &proposalPayload); err != nil {
 		t.Fatal(err)
@@ -92,6 +94,9 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 	}
 	if len(proposalPayload.Profiles) != 1 || proposalPayload.Profiles[0].ID != "sealed-profile" || len(proposalPayload.Profiles[0].EvidenceRequirements) != 1 || proposalPayload.Profiles[0].EvidenceRequirements[0].ID != "*" || strings.Contains(stable.Content, "sealed-profile") {
 		t.Fatal("封存 Profile 声明未精确进入 C3 或污染了 C0")
+	}
+	if len(proposalPayload.VerificationOptions) != len(proposalPayload.CandidateAcceptance) || !reflect.DeepEqual(proposalPayload.VerificationOptions, authoringVerificationOptions(proposalPayload.CandidateAcceptance, proposalPayload.Profiles)) {
+		t.Fatal("proposal did not receive exact owner-derived declaration options")
 	}
 	if !strings.Contains(volatile.Content, `"resourceSnapshotHash":"`+derivation.ResourceSnapshotHash+`"`) {
 		t.Fatal("proposal omitted the sealed resource snapshot hash")
@@ -121,6 +126,7 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 		CandidateAcceptance    []workspace.DefinitionCandidateItem      `json:"candidateAcceptance"`
 		Specification          workspace.GoalSpecification              `json:"specification"`
 		Profiles               []runtimecontract.RuntimeProfileContract `json:"profiles"`
+		VerificationOptions    []authoringCandidateVerificationOptions  `json:"sourceApplicableVerificationDeclarations"`
 	}
 	if err := json.Unmarshal([]byte(command.Request.PromptContext.Sections[1].Content), &reviewPayload); err != nil {
 		t.Fatal(err)
@@ -155,6 +161,9 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 		if obligation.RequirementID == "requirement-a" {
 			t.Fatal("独立 Goal fixture 不得借用 DoD obligation")
 		}
+	}
+	if !reflect.DeepEqual(reviewPayload.VerificationOptions, proposalPayload.VerificationOptions) {
+		t.Fatal("critic received different source declaration options")
 	}
 	if runtimecontract.StableRuntimeProfileContractsHash(reviewPayload.Profiles) != runtimecontract.StableRuntimeProfileContractsHash(proposalPayload.Profiles) || strings.Contains(command.Request.PromptContext.Sections[0].Content, "sealed-profile") {
 		t.Fatal("独立审查读取了不同 Profile 声明或改变了稳定前缀")
@@ -321,7 +330,8 @@ func TestSpecificationRequestBoundIncludesStableContract(t *testing.T) {
 	if _, err := authoringSpecificationCommand("ws", target, "proposal", authoringProposalInstructions, payload); err == nil {
 		t.Fatal("schema bytes omitted from bounded context")
 	}
-	if _, err := completionCommand(workspace.DefinitionAdmissionCandidate{}, "proposal", proposalInstructions, payload); err == nil {
+	legacyPayload := []byte(strings.Repeat("x", maxDocumentBytes-len(proposalInstructions)))
+	if _, err := completionCommand(workspace.DefinitionAdmissionCandidate{}, "proposal", proposalInstructions, legacyPayload); err == nil {
 		t.Fatal("legacy builder omitted schema bytes from bounded context")
 	}
 }

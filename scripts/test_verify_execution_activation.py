@@ -130,6 +130,51 @@ class ActivationContractTest(unittest.TestCase):
             self.assertEqual(len(logs), 1)
             self.assertEqual(logs[0].read_text().count("snapshot line\n"), 500)
 
+    def test_managed_failure_indexes_go_errors_between_head_and_tail(self):
+        lines = (["head"] + ["unrelated fixture output"] * 500 + [
+            "    --- FAIL: TestPublicFullflow (3.86s)",
+            "        fullflow_test.go:155: missing sealed implementation work policy",
+            "FAIL\tgithub.com/example/integration\t3.873s",
+            "panic: test timed out after 15m0s",
+            "\trunning tests:",
+            "\t\tTestOwnerRepair/after_receipt (7s)",
+            "fatal error: concurrent map writes",
+            "# github.com/example/build [github.com/example/build.test]",
+            "build_test.go:12: undefined: missingContract",
+        ] + ["ok github.com/example/other"] * 500 + ["tail"])
+        raw = "\n".join(lines) + "\n"
+        with tempfile.TemporaryDirectory(prefix="workorch-failure-index-") as directory:
+            env = dict(os.environ, STEP_LOG_DIR=directory, STEP_LOG_INDEX="0", VERBOSE_LOGS="0",
+                       FAILURE_LOG_HEAD_LINES="1", FAILURE_LOG_TAIL_LINES="1")
+            payload = "import sys; sys.stdout.write(" + repr(raw) + "); raise SystemExit(23)"
+            command = ('set -Eeuo pipefail\n' + shell_function("verify-workorch-managed-full.sh", "run_step")
+                       + "run_step python3 -c " + shlex.quote(payload))
+            result = subprocess.run(["bash", "-c", command], env=env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 23, result.stderr)
+            self.assertIn("--- command failure index (complete log line numbers) ---", result.stderr)
+            for index in range(501, 510):
+                self.assertIn(f"{index + 1}:{lines[index]}\n", result.stderr)
+            self.assertNotIn("unrelated fixture output\n", result.stderr)
+            logs = list(Path(directory).glob("*.log"))
+            self.assertEqual(len(logs), 1)
+            self.assertEqual(logs[0].read_text(), raw)
+
+    def test_managed_failure_index_is_bounded_without_truncating_log(self):
+        raw = "head\n" + "".join(f"--- FAIL: TestFailure{i} (0.00s)\n" for i in range(100)) + "tail\n"
+        with tempfile.TemporaryDirectory(prefix="workorch-failure-index-bound-") as directory:
+            env = dict(os.environ, STEP_LOG_DIR=directory, STEP_LOG_INDEX="0", VERBOSE_LOGS="0",
+                       FAILURE_LOG_HEAD_LINES="1", FAILURE_LOG_TAIL_LINES="1")
+            payload = "import sys; sys.stdout.write(" + repr(raw) + "); raise SystemExit(19)"
+            command = ('set -Eeuo pipefail\n' + shell_function("verify-workorch-managed-full.sh", "run_step")
+                       + "run_step python3 -c " + shlex.quote(payload))
+            result = subprocess.run(["bash", "-c", command], env=env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 19, result.stderr)
+            self.assertEqual(result.stderr.count(":--- FAIL:"), 80)
+            self.assertIn("20 additional failure markers; see complete command log", result.stderr)
+            logs = list(Path(directory).glob("*.log"))
+            self.assertEqual(len(logs), 1)
+            self.assertEqual(logs[0].read_text(), raw)
+
     def test_failed_verifiers_keep_evidence_without_json_console_dump(self):
         for script in ("verify-llm-workspace-execution.sh", "verify-mcp-stdio-workspace-execution.sh"):
             with self.subTest(script=script), tempfile.TemporaryDirectory(prefix="workorch-evidence-test-") as directory:

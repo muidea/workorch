@@ -66,6 +66,7 @@ func TestGenerateEmbeddingRejectsInvalidConcreteResult(t *testing.T) {
 }
 
 func TestGenerateEmbeddingReturnsDetachedVectorAndUsage(t *testing.T) {
+	const input = "  input\n"
 	ctx := context.Background()
 	hub := magicevent.NewHub(16)
 	t.Cleanup(func() { hub.Terminate(ctx) })
@@ -73,17 +74,20 @@ func TestGenerateEmbeddingReturnsDetachedVectorAndUsage(t *testing.T) {
 	sharedVector := []float64{0.25, 0.75}
 	sharedUsage := &llmaudit.ProviderUsage{InputTokens: 3, TotalTokens: 3}
 	response := llmevents.GenerateEmbeddingResult{Target: target, Embedding: llmmodels.ProviderEmbeddingResult{
-		ProviderID: target.ProviderID, Model: target.ModelID, Input: "input", Vector: sharedVector, Usage: sharedUsage,
+		ProviderID: target.ProviderID, Model: target.ModelID, Input: input, Vector: sharedVector, Usage: sharedUsage,
 		PhysicalResponseMode: llmaudit.PhysicalResponseModeNonStreaming, ProviderSubmitted: true, RequestBytes: 8, ResponseBytes: 16,
 	}}
 	observer := magicevent.NewSimpleObserver(llmevents.CommandDestination, hub)
-	observer.Subscribe(llmevents.TopicLLMCommandGenerateEmbedding, func(_ magicevent.Event, result magicevent.Result) {
+	observer.Subscribe(llmevents.TopicLLMCommandGenerateEmbedding, func(ev magicevent.Event, result magicevent.Result) {
+		if command, ok := ev.Data().(llmevents.GenerateEmbeddingCommand); !ok || command.Input != input {
+			t.Errorf("original input was changed: %#v", ev.Data())
+		}
 		result.Set(response, nil)
 	})
 	t.Cleanup(func() { observer.Unsubscribe(llmevents.TopicLLMCommandGenerateEmbedding) })
 	time.Sleep(10 * time.Millisecond)
 
-	embedding, err := GenerateEmbedding(ctx, hub, "workspace-1", target, "input")
+	embedding, err := GenerateEmbedding(ctx, hub, "workspace-1", target, input)
 	if err != nil {
 		t.Fatal(err)
 	}

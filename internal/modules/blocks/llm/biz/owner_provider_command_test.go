@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -515,7 +516,7 @@ func TestGenericProviderCompletionStreamingCompletedEmptyReturnsErrorAndPublishe
 	}
 }
 
-func TestEmbeddingCommandRejectsEndpointOnlyCatalogBeforePhysicalCall(t *testing.T) {
+func TestEmbeddingCommandRejectsUnknownCapacityOverBudgetBeforePhysicalCall(t *testing.T) {
 	ctx := context.Background()
 	var embeddingCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -542,18 +543,17 @@ func TestEmbeddingCommandRejectsEndpointOnlyCatalogBeforePhysicalCall(t *testing
 	result := hub.Send(magicevent.NewEventWithContext(
 		llmevents.TopicLLMCommandGenerateEmbedding, llmApplicationOwnerSource, llmevents.CommandDestination,
 		magicevent.NewHeader(), ctx, llmevents.GenerateEmbeddingCommand{
-			Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "embedding-model"}, Input: "input",
+			Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "embedding-model"}, Input: strings.Repeat("x", embeddingMaxInputBytes+1),
 		},
 	))
 	if result == nil || result.Error() == nil {
-		t.Fatalf("endpoint-only embedding command must fail: %+v", result)
+		t.Fatalf("over-budget embedding command must fail: %+v", result)
 	}
-	var failure llmmodels.ProviderModelFailure
-	if !errors.As(result.Error().Cause, &failure) || failure.Code != llmmodels.ProviderModelFailureCapabilityIncomplete {
-		t.Fatalf("expected incomplete capability failure, got %+v", result.Error())
+	if !errors.Is(result.Error().Cause, common.ErrInvalidArgument) {
+		t.Fatalf("expected local budget failure, got %+v", result.Error())
 	}
 	if embeddingCalls.Load() != 0 {
-		t.Fatalf("incomplete capacity caused %d physical calls", embeddingCalls.Load())
+		t.Fatalf("over-budget input caused %d physical calls", embeddingCalls.Load())
 	}
 }
 
@@ -570,11 +570,15 @@ func TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall(t *testing.
 				"object": "list",
 				"data": []map[string]any{
 					{"id": "chat-model", "supported_endpoints": []string{"/v1/responses"}, "contextWindowTokens": 8192, "maxOutputTokens": 1024},
-					{"id": "embedding-model", "supported_endpoints": []string{"/v1/embeddings"}, "contextWindowTokens": 512},
+					{"id": "embedding-model", "supported_endpoints": []string{"/v1/embeddings"}},
 				},
 			})
 		case "/v1/embeddings":
 			embeddingCalls.Add(1)
+			var request embeddingRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Input != "  workspace goal\n" || request.Model != "embedding-model" {
+				t.Errorf("embedding input/model changed: %+v err=%v", request, err)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2,0.3]}],"usage":{"prompt_tokens":7,"total_tokens":7}}`))
 		case "/v1/responses":
@@ -616,9 +620,10 @@ func TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall(t *testing.
 	t.Cleanup(func() { auditObserver.Unsubscribe(llmevents.TopicLLMUsageRecorded) })
 
 	embeddingTarget := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "embedding-model"}
+	embeddingCommand := llmevents.GenerateEmbeddingCommand{WorkspaceID: "workspace-1", Target: embeddingTarget, Input: "  workspace goal\n"}
 	result := hub.Send(magicevent.NewEventWithContext(
 		llmevents.TopicLLMCommandGenerateEmbedding, llmApplicationOwnerSource, llmevents.CommandDestination,
-		magicevent.NewHeader(), ctx, llmevents.GenerateEmbeddingCommand{WorkspaceID: "workspace-1", Target: embeddingTarget, Input: "workspace goal"},
+		magicevent.NewHeader(), ctx, embeddingCommand,
 	))
 	if result == nil || result.Error() != nil {
 		t.Fatalf("embedding result = %+v", result)
@@ -628,8 +633,14 @@ func TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall(t *testing.
 	if resultErr != nil || !ok || !embeddingResult.Target.Same(embeddingTarget) || len(embeddingResult.Embedding.Vector) != 3 {
 		t.Fatalf("embedding concrete result = %#v err=%v", resultData, resultErr)
 	}
+	if err := embeddingResult.ValidateFor(embeddingCommand); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case audit := <-audits:
+		if audit.ContextBudget.ContextWindowTokens != 0 || audit.ContextBudget.MaxTokens != 0 || audit.ContextBudget.MaxBytes != embeddingMaxInputBytes || audit.ContextBudget.MaxRequestBytes != embeddingMaxRequestBytes || audit.ContextBudget.ActualBytes != len(embeddingCommand.Input) || audit.ContextBudget.ProfileMode != embeddingTransportPolicyVersion {
+			t.Fatalf("unknown capacity must remain unknown in bounded audit: %+v", audit.ContextBudget)
+		}
 		if audit.Operation != workorchconfig.LLMOperationEmbeddings || audit.WorkspaceID != "workspace-1" || audit.RunID != "" || !audit.ProviderSubmitted || audit.RequestBytes == 0 || audit.ResponseBytes == 0 || audit.InputTokens != 7 || audit.TotalTokens != 7 || audit.ContextBudget.ActualTokens != 7 || audit.PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming {
 			t.Fatalf("embedding audit = %+v", audit)
 		}

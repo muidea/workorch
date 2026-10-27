@@ -42,8 +42,7 @@ func NewProviderFromConfig(config llmmodels.ProviderConfig) Provider {
 
 func GenerateEmbedding(ctx context.Context, providerID string, config llmmodels.ProviderConfig, input string) (llmmodels.ProviderEmbeddingResult, error) {
 	providerID = strings.TrimSpace(providerID)
-	input = strings.TrimSpace(input)
-	if providerID == "" || input == "" || config.Unavailable {
+	if providerID == "" || strings.TrimSpace(input) == "" || config.Unavailable {
 		return llmmodels.ProviderEmbeddingResult{}, common.ErrInvalidArgument
 	}
 	if !providerSupportsNonChatOperation(config.Capabilities, "embeddings") {

@@ -120,6 +120,27 @@ run_step() {
     if [[ -f "$log_file" ]]; then
       echo "--- command output head ---" >&2
       head -n "$FAILURE_LOG_HEAD_LINES" "$log_file" >&2 || true
+      # Go package failures can be buried between a large route/fixture dump
+      # and many successful packages. Keep the complete log untouched and
+      # print bounded markers and following diagnostic context independently
+      # of the head/tail excerpt (including timeout running-test durations).
+      echo "--- command failure index (complete log line numbers) ---" >&2
+      awk '
+        /^[[:space:]]*--- FAIL:|^FAIL([[:space:]]|$)|^panic:|^fatal error:|^# / {
+          matches++
+          remaining = 0
+          if (matches <= 80) {
+            printf "%d:%s\n", NR, $0
+            remaining = 8
+          }
+          next
+        }
+        remaining > 0 { printf "%d:%s\n", NR, $0; remaining-- }
+        END {
+          if (matches > 80) printf "%d additional failure markers; see complete command log\n", matches - 80
+          if (matches == 0) print "No recognized failure markers; inspect the complete command log"
+        }
+      ' "$log_file" >&2 || true
       echo "--- command output tail ---" >&2
       tail -n "$FAILURE_LOG_TAIL_LINES" "$log_file" >&2 || true
     fi

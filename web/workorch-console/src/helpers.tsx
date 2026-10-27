@@ -2667,7 +2667,8 @@ export function readyCatalogModels(configuration?: ServiceConfiguration, operati
     if (providerId !== 'ai-proxy') {
       return false;
     }
-    if (!item.capabilityReady) {
+    const ready = operation === 'embeddings' ? (item.embeddingReady ?? item.capabilityReady) : item.capabilityReady;
+    if (!ready) {
       return false;
     }
     const ops = item.operations ?? [];
@@ -2720,17 +2721,17 @@ export function llmModelOptions(
   for (const item of configuration?.llm.catalog?.models ?? []) {
     const providerId = item.providerId?.trim() || configuration?.llm.catalog?.providerId?.trim() || 'ai-proxy';
     const modelId = item.modelId?.trim();
-    if (providerId !== 'ai-proxy' || !modelId || item.capabilityReady || !item.operations?.includes(operation) || unique.has(modelId)) {
+    if (providerId !== 'ai-proxy' || !modelId || !item.operations?.includes(operation) || unique.has(modelId)) {
       continue;
     }
     let reason = item.unavailableReason || '能力未就绪';
     if (item.unavailableReason === 'capability_incomplete') {
       // Explain the owner-projected metadata; never infer a capacity or ready
       // state from the model name or the existence of an endpoint.
-      if (!(typeof item.contextWindowTokens === 'number' && item.contextWindowTokens > 0)) {
-        reason = operation === 'embeddings'
-          ? '缺少有效 contextWindowTokens（单条输入 token 上限）'
-          : '缺少有效 contextWindowTokens';
+      if (operation === 'embeddings') {
+        reason = 'Embedding 能力未就绪或容量元数据无效';
+      } else if (!(typeof item.contextWindowTokens === 'number' && item.contextWindowTokens > 0)) {
+        reason = '缺少有效 contextWindowTokens';
       } else if (item.operations.includes('responses') &&
         !(typeof item.maxOutputTokens === 'number' && item.maxOutputTokens > 0 && item.maxOutputTokens < item.contextWindowTokens)) {
         reason = '缺少有效 maxOutputTokens（须大于 0 且小于 contextWindowTokens）';

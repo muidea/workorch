@@ -562,8 +562,7 @@ func (r GenerateEmbeddingResult) ValidateFor(command GenerateEmbeddingCommand) e
 	if err := requested.Validate(); err != nil || !target.Same(requested) {
 		return fmt.Errorf("%w: embedding result target does not match command", common.ErrInvalidArgument)
 	}
-	input := strings.TrimSpace(command.Input)
-	if input == "" || r.Embedding.ProviderID != target.ProviderID || r.Embedding.Model != target.ModelID || r.Embedding.Input != input {
+	if strings.TrimSpace(command.Input) == "" || r.Embedding.ProviderID != target.ProviderID || r.Embedding.Model != target.ModelID || r.Embedding.Input != command.Input {
 		return fmt.Errorf("%w: embedding result provider, model, or input binding mismatch", common.ErrInvalidArgument)
 	}
 	if len(r.Embedding.Vector) == 0 {

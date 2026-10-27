@@ -8,6 +8,7 @@ import { AUTHORING_PREPARATION_ACCEPTED_OBSERVATION_TIMEOUT_MS, AuthoringAccepte
 import { AuthoringCandidateProposal } from './AuthoringCandidateProposal';
 import { AuthoringDiagnosticDetails } from './AuthoringDiagnosticDetails';
 import { AuthoringPreparationFailure } from './AuthoringPreparationFailure';
+import { AuthoringFailedRecoveryNotice } from './AuthoringFailedRecoveryNotice';
 
 // STEP02: only persisted-input queries and explicit, identity-bound compilation.
 // No local input editor, create/PUT/confirm/admission/execution path lives here.
@@ -149,6 +150,7 @@ export function WorkspaceAuthoringCandidate({ workspaceId, onClose, onOpenConfir
         {view.state === 'ready_to_confirm' && <Alert type="success" message="候选已达到 ready_to_confirm，仅供审阅；本步不会确认或形成正式合同。" />}
         {view.state === 'review_blocked' && <Alert type="warning" message="候选审查或验证声明存在阻塞，请逐项核对理由与绑定；结构完整不等于通过。" />}
         {view.state === 'failed' && <Alert type="error" message="请求已明确失败，同输入不会自动重试；保留原失败与诊断。" />}
+        {view.state === 'failed' && <AuthoringFailedRecoveryNotice />}
         {view.state === 'outcome_unresolved' && <Alert type="warning" message="已 reserve 请求结果未决，只能查询原事实；不会再次物理调用 provider。" />}
         {view.preparationDiagnostics?.map(item => <AuthoringPreparationFailure key={item.diagnosticId} diagnostic={item} />)}
         {view.requests?.map(item => <div key={item.permitId}>{item.phase} · {item.reviewKind} · {item.state} · request {item.requestId} · permit {item.permitId}<div>配置绑定：{item.providerBindingHash}；proposal：{item.proposalHash || '非审查阶段'}</div>

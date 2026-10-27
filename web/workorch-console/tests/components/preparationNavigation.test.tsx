@@ -1,4 +1,5 @@
 import { App, ConfigProvider } from 'antd';
+import { StyleProvider } from '@ant-design/cssinjs';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
@@ -32,7 +33,10 @@ function configuration(modelId = 'fresh-model'): ServiceConfiguration {
   return { llm: { defaultChat: { providerId: 'ai-proxy', modelId }, catalog: { providerId: 'ai-proxy', models: [{ providerId: 'ai-proxy', modelId, capabilityReady: true, operations: ['responses'] }] } } } as unknown as ServiceConfiguration;
 }
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
-const page = (id = 'ws') => <ConfigProvider theme={{ token: { motion: false } }}><App><WorkspaceDetailPage selectedWorkspaceId={id} /></App></ConfigProvider>;
+// These assertions concern requests and session fences, not CSS layout. Keep
+// style generation outside jsdom's document without changing test deadlines.
+const styleContainer = document.createElement('div');
+const page = (id = 'ws') => <StyleProvider container={styleContainer}><ConfigProvider theme={{ hashed: false, token: { motion: false } }} wave={{ disabled: true }}><App><WorkspaceDetailPage selectedWorkspaceId={id} /></App></ConfigProvider></StyleProvider>;
 // The full page contains many tables. Scope queries to button text instead of
 // calculating accessible names for every hidden table cell in jsdom.
 const button = (text: string) => screen.getByText(text, { selector: 'button span' }).closest('button')!;

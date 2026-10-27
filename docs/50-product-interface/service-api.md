@@ -84,7 +84,9 @@ POST /api/v1/workorch/workspaces/:workspaceId/execution-activations
 | `PUT` | `/configuration/web-search` | update Web-search provider configuration |
 
 LLM configuration save does not mutate the running LLM owner snapshot or any sealed Run selection；read side exposes
-`restartRequired` when persisted and active revisions differ。
+`restartRequired` when persisted and active revisions differ or the active observation is unavailable。
+`llm.defaultChat/defaultEmbedding` 是保存的选择，`llm.active.defaultChat/defaultEmbedding` 仅来自 LLM owner 当前进程观察，
+不携带 API key。`active` 缺失表示未知，不得回填保存值；存在且无 `defaultEmbedding` 表示当前未配置。
 
 ### Workspace And Definition
 
@@ -121,6 +123,9 @@ decoder／owner 不自动补写说明、制造绑定或改写原始模型材料�
 六审请求同时明确既有独立 exact Goal requirement 结构：Goal 不是候选 DoD，不补造其 DoD obligation 或逐义务验证；
 每类仍审完整 Goal 的语义是否被候选义务及适用声明承接，保留原文不等于覆盖充分，实际遗漏／弱化／依据不足仍阻塞。
 派生与规格请求同时公开原 request／permit、provider binding 和资源快照 hash；这些是只读来源，不产生确认或执行权威。
+派生须先从 Goal／资源提取尚未被具体承接的原验收主项，再补充边界条件；完整 Goal 和通用模板不能替代逐项覆盖。
+proposal／review 动态输入的 `sourceApplicableVerificationDeclarations` 从封存 Profile 经相同来源匹配及合并保留规则纯计算，
+逐候选给出声明身份选项。它不证明语义可验、资源就绪或运行成功，不自动填写 `DECLARED`；六审及 owner 校验保持独立。
 
 201 表示 owner 已保存、允许的目录准备已完成并经过独立读回；`Workspace.state=active` 不代表合同或执行就绪。
 authoring GET 公开 `title`、`description`、`deliverableDirectory` 与 `creation`（`requestId`、`inputHash`、`directoryPrepared`）。
@@ -136,7 +141,8 @@ authoring GET 公开 `title`、`description`、`deliverableDirectory` 与 `creat
 解析失败诊断随原规格请求由 Workspace owner 持久记录。普通 authoring GET 仅返回错误分类及诊断元信息；
 `GET /workspaces/:workspaceId/authoring/diagnostics/:permitId` 按精确 Workspace/permit scope 返回单条原始错误与响应的可逆编码、
 字节数和 SHA256。读取不调用 provider、不推进确认、不启动 Run。诊断不脱敏、不替换、不静默截断；原文超限时明确
-标记未保存，已知失败仍为 failed。旧失败无诊断时不得回填猜测内容。文件私有权限和部署访问边界保护原始材料，
+标记未保存，已知失败仍为 failed。旧失败无诊断时不得回填猜测内容。文件私有权限和部署访问边界保护原始材料。
+Web 不因元数据未含原文而报完整性错误；按需读取后核对精确 scope、阶段、失败码、全部保存／观测元数据及真实 bytes／SHA256。
 Web 只作纯文本展示，原文永不作为准入或执行权威。详细边界见
 [Workspace 规格创作](../40-profiles-capabilities/workspace/setup-draft-session.md)。
 

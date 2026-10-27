@@ -65,13 +65,13 @@ func TestResolveEmbeddingTargetDerivesByteCapacityWithoutOutputCeiling(t *testin
 	if err != nil {
 		t.Fatalf("ResolveProviderModelTarget: %v", err)
 	}
-	if profile.ProviderMaxOutputTokens != 0 || profile.ContextWindowTokens != 512 || profile.MaxRequestBytes <= 0 {
+	if profile.ProviderMaxOutputTokens != 0 || profile.ContextWindowTokens != 512 || profile.MaxInputTokens != 384 || profile.MaxRequestBytes != 1536 {
 		t.Fatalf("embedding profile capacity = %+v", profile)
 	}
 }
 
 func TestResolveEmbeddingTargetRejectsInvalidInputCapacityEvenIfMarkedReady(t *testing.T) {
-	for _, capacity := range []int{0, -1} {
+	for _, capacity := range []int{-1} {
 		cfg := testCatalogOutputCeilingConfig("chat-model")
 		target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "embedding-model"}
 		catalog := &llmmodels.ProviderModelCatalog{ProviderID: "ai-proxy", Models: []llmmodels.ProviderModelDescriptor{{
@@ -80,6 +80,28 @@ func TestResolveEmbeddingTargetRejectsInvalidInputCapacityEvenIfMarkedReady(t *t
 		}}}
 		if _, err := ResolveProviderModelTarget(cfg, catalog, target, workorchconfig.LLMOperationEmbeddings); err == nil {
 			t.Fatalf("invalid embedding input capacity %d must fail closed", capacity)
+		}
+	}
+}
+
+func TestEmbeddingLocalBudgetBoundsUnknownAndLargeKnownCapacity(t *testing.T) {
+	cfg := testCatalogOutputCeilingConfig("chat-model")
+	target := runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "embedding-model"}
+	for _, capacity := range []int{0, 1_000_000} {
+		catalog := &llmmodels.ProviderModelCatalog{ProviderID: "ai-proxy", Models: []llmmodels.ProviderModelDescriptor{{
+			Target: target, ContextWindowTokens: capacity, EmbeddingReady: true,
+			Operations: []string{workorchconfig.LLMOperationEmbeddings}, CapabilityRevision: "catalog-original",
+		}}}
+		profile, err := ResolveProviderModelTarget(cfg, catalog, target, workorchconfig.LLMOperationEmbeddings)
+		if err != nil || profile.MaxRequestBytes != embeddingMaxInputBytes || profile.ContextWindowTokens != capacity || profile.ProviderMaxOutputTokens != 0 || profile.CapabilityRevision == "catalog-original" {
+			t.Fatalf("capacity %d profile=%+v err=%v", capacity, profile, err)
+		}
+		if capacity == 0 && profile.MaxInputTokens != 0 {
+			t.Fatal("unknown token capacity invented")
+		}
+		client, err := ResolveProviderClient(cfg, target, profile)
+		if err != nil || client.ContextProfile.MaxRequestBytes != profile.MaxRequestBytes || client.ContextProfile.ContextWindowTokens != capacity {
+			t.Fatalf("embedding client mapping=%+v err=%v", client.ContextProfile, err)
 		}
 	}
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { App as AntApp, Button, Descriptions, Empty, Form, Input, InputNumber, Select, Space, Tabs, Tag, Typography } from 'antd';
+import { Alert, App as AntApp, Button, Descriptions, Empty, Form, Input, InputNumber, Select, Space, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, PageContainer, ProCard } from '../components/proCompat';
 import type {
   ServiceConfiguration,
@@ -310,6 +310,11 @@ export function ConfigurationPage() {
                 extra={<Button type="primary" onClick={() => void llmForm.validateFields().then((values) => saveLLMConfiguration(values))} loading={saving}>保存 LLM 配置</Button>}
               >
                 <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                  {configuration?.llm.restartRequired && <Alert type="warning" showIcon message="保存的 LLM 配置尚未确认生效，需要重启 WorkOrch。" description="生成候选使用当前运行进程的配置；保存选择不能作为实际调用模型的证明。" />}
+                  <Descriptions column={1} items={[
+                    { key: 'activeChat', label: '当前进程对话模型', children: configuration?.llm.active ? `${configuration.llm.active.defaultChat.providerId}/${configuration.llm.active.defaultChat.modelId}` : '未取得运行配置，当前模型未知' },
+                    { key: 'activeEmbedding', label: '当前进程 Embedding 模型', children: configuration?.llm.active ? configuration.llm.active.defaultEmbedding ? `${configuration.llm.active.defaultEmbedding.providerId}/${configuration.llm.active.defaultEmbedding.modelId}` : '未配置' : '未知' },
+                  ]} />
                   <ProCard title="模型与预算">
                     <Form form={llmForm} layout="vertical" onFinish={(values) => void saveLLMConfiguration(values)}>
                       <Form.Item name="apiKey" label="API 密钥">
@@ -336,7 +341,7 @@ export function ConfigurationPage() {
                       <Form.Item
                         name="defaultEmbeddingModelId"
                         label="默认 Embedding 模型"
-                        extra="已枚举不等于可调用；能力不完整的模型显示为禁用项。Embedding 需网关提供有效 contextWindowTokens（单条输入 token 上限），不要求 maxOutputTokens；系统不猜测容量或自动选择默认模型。"
+                        extra="已枚举不等于可调用；模型资格由服务端按操作判定。Embedding 不要求网关提供 contextWindowTokens 或 maxOutputTokens；容量未知时使用本地有界字节策略，已知容量进一步收紧输入。可选择不代表远端授权或调用已验证；系统不猜测容量或自动选择默认模型。"
                         rules={[
                           {
                             validator: (_, value?: string) => !value || value === configuration?.llm.defaultEmbedding?.modelId || embeddingModelOptions.some((item) => item.ready && item.value === value)
