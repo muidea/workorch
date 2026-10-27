@@ -102,3 +102,30 @@ func TestPreparationNegativeSettlementCannotConveyPositiveOrForeignCheckReason(t
 		t.Fatal("explicit unarchived registry failure rejected")
 	}
 }
+
+func TestPreparationFinalOwnersSettlementBindsOriginalAndRetainsMissingFacts(t *testing.T) {
+	original := CheckWorkspacePreparationCommand{WorkspaceID: "ws", RequestID: "original", ExpectedWorkspaceRevision: 1}
+	at := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
+	c := SettleWorkspacePreparationBlockedCommand{Original: original, ProviderCacheReason: "provider_cache_unavailable", RunHistoryReason: "run_history_unavailable",
+		FinalOwners: &workspace.PreparationOwnerRevalidation{Version: workspace.PreparationOwnerRevalidationVersion, WorkspaceID: original.WorkspaceID, RequestID: original.RequestID, PayloadHash: original.PayloadHash(), WorkspaceRevision: 2, StartedAt: at, CompletedAt: at.Add(time.Second)},
+	}
+	if c.Validate() != nil {
+		t.Fatal("missing final owner facts must remain an explicit negative observation")
+	}
+	for _, mutate := range []func(*workspace.PreparationOwnerRevalidation){
+		func(r *workspace.PreparationOwnerRevalidation) { r.Version = "future" },
+		func(r *workspace.PreparationOwnerRevalidation) { r.WorkspaceID = "foreign" },
+		func(r *workspace.PreparationOwnerRevalidation) { r.RequestID = "foreign" },
+		func(r *workspace.PreparationOwnerRevalidation) { r.PayloadHash = "foreign" },
+		func(r *workspace.PreparationOwnerRevalidation) { r.WorkspaceRevision++ },
+		func(r *workspace.PreparationOwnerRevalidation) { r.CompletedAt = r.StartedAt.Add(-time.Second) },
+	} {
+		bad := c
+		r := c.FinalOwners.Clone()
+		mutate(&r)
+		bad.FinalOwners = &r
+		if bad.Validate() == nil {
+			t.Fatal("foreign or invalid final owner observations accepted")
+		}
+	}
+}

@@ -106,8 +106,19 @@ MCP 单项可为 `passed/mcp_empty_selection_observed_remaining_checks`。不是
 原 bytes、失败及检查结论不覆盖。完整 scope 与原 resource/config archive 的数量、顺序、根路径和时间反查，
 仅重算 hash 不能删除目标。File 后像变化、30 秒观察年龄上限到期或当前内存 epoch 不符均投影 stale；
 缺当前 epoch 也 fail closed。GET、重复 check 与 recover 使用同一只读投影，只查询 File 内存 epoch，
-不重新探测文件、不续期、不写历史；旧记录不补发 token。当前性仅覆盖 File 的已知漂移和观察年龄，
-不是文件租约、全资源有效性、ready 或 M3，未来 use-time 仍须真实重核。
+不重新探测文件、不续期、不写历史；旧记录不补发 token。该 File 投影不是文件租约，
+未来 use-time 仍须真实重核。
+
+新原操作在 accepted CAS 固定 `OwnerRevalidationVersion=workorch-preparation-owner-revalidation/v1`，
+settlement/recovery 不可更换或为旧操作补挂版本。原 Soul/Skill Registry/Memory（含原模式）/MCP Registry
+四类来源完整时，Application 在同一原请求 deadline 内复用既有只读 typed query 取得最终完整原值；
+不重发 SkillHub status、不刷新 catalog、不连接 MCP、不推理或 embedding。
+`SettleWorkspacePreparationBlockedCommand.FinalOwners` 不含调用方判词，Workspace 精确核验
+Workspace/request/payload/revision 与时间窗，随原 seal 在同一 blocked CAS 保存，clone 隔离且终态不可覆写。
+最终值只忽略观察时间差异，与唯一原 archive 的完整值逐项比较，保留 epoch、revision、顺序、nil/empty、
+内容及配置/选择来源。原 archive 完整但最终值缺失、漂移、时钟回退或最终观察开始满 30 秒均投影 stale。
+原来源不齐仍阻塞，不为凑结构重复查询；GET/replay/recover 不重读这些 owner，不续期、不改历史逐项结果，
+旧操作不补造观察。该材料仍是时点事实，不是全资源有效性、ready、M3 或执行授权；公开投影不含原文和内部版本。
 owner 反查 exact snapshot 并纯编译完整 manifest 后，私有 `workspacePreparationAccepted` reducer
 经 CAS 保存 v2 原意图 hash、封存绑定、creation/preparation epoch 和逐项 pending 清单；
 只有初始 CAS 明确成功的调用获得一次非持久延续提示；Application 释放 Workspace 事件调用后，

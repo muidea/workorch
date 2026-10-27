@@ -70,7 +70,7 @@ func TestStartupPreparationHTTPFileOwnersReadOnlyAndReopen(t *testing.T) {
 }
 
 func TestPreparationWorkflowHTTPFileOwnersBlockedAndReopen(t *testing.T) {
-	for _, scenario := range []string{"step04_workflow", "step04_workflow_empty_selection", "step04_workflow_mcp_selected", "step04_workflow_mcp_missing", "step04_workflow_mcp_disabled", "step04_workflow_skill_refs_missing"} {
+	for _, scenario := range []string{"step04_workflow", "step04_workflow_empty_selection", "step04_workflow_mcp_selected", "step04_workflow_mcp_missing", "step04_workflow_mcp_disabled", "step04_workflow_skill_refs_missing", "step04_workflow_final_skill_drift", "step04_workflow_final_skill_unavailable"} {
 		t.Run(scenario, func(t *testing.T) { testAuthoringHTTPFileBackedScenario(t, scenario) })
 	}
 }
@@ -82,7 +82,8 @@ type preparationHTTPSoulRepository struct {
 
 type preparationHTTPSkillRepository struct {
 	repository.SkillRepository
-	reads *atomic.Int32
+	reads       *atomic.Int32
+	finalChange string
 }
 
 type preparationHTTPMCPRepository struct {
@@ -96,7 +97,22 @@ func (r *preparationHTTPMCPRepository) Load(ctx context.Context) (*mcpmodel.Regi
 }
 
 func (r *preparationHTTPSkillRepository) List(ctx context.Context) ([]*skillmodel.Skill, error) {
-	r.reads.Add(1)
+	if r.reads.Add(1) >= 3 {
+		if r.finalChange == "step04_workflow_final_skill_unavailable" {
+			return nil, common.ErrNotFound
+		}
+		if r.finalChange == "step04_workflow_final_skill_drift" {
+			skills, err := r.SkillRepository.List(ctx)
+			if err != nil || len(skills) != 1 {
+				return nil, common.ErrConflict
+			}
+			skills[0].Instruction = "真实最终指令变化"
+			skills[0].Provenance.ContentHash = workorchskillcontract.StableContentHash(skills[0].Content())
+			if err := r.SkillRepository.Update(ctx, skills[0]); err != nil {
+				return nil, err
+			}
+		}
+	}
 	return r.SkillRepository.List(ctx)
 }
 
@@ -159,6 +175,12 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 	ctx := context.Background()
 	preparationWorkflow := strings.HasPrefix(scenario, "step04_workflow")
 	emptySelection := scenario == "step04_workflow_empty_selection"
+	finalSkillUnavailable := scenario == "step04_workflow_final_skill_unavailable"
+	finalSkillChanged := scenario == "step04_workflow_final_skill_drift" || finalSkillUnavailable
+	wantSkillReads := int32(4)
+	if finalSkillUnavailable {
+		wantSkillReads = 3
+	}
 	missingSkillRef := scenario == "step04_workflow_skill_refs_missing"
 	referenceState := "observed_checks_pending"
 	if missingSkillRef {
@@ -498,7 +520,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			if err := preparationMemory.Start(); err != nil {
 				t.Fatal(err)
 			}
-			preparationSkills, err = skillowner.New(hub, nil, skillowner.Dependencies{Skills: &preparationHTTPSkillRepository{SkillRepository: filerepository.NewSkillRepository(filepath.Join(storage, "system", "skills.json")), reads: &preparationSkillReads}})
+			preparationSkills, err = skillowner.New(hub, nil, skillowner.Dependencies{Skills: &preparationHTTPSkillRepository{SkillRepository: filerepository.NewSkillRepository(filepath.Join(storage, "system", "skills.json")), reads: &preparationSkillReads, finalChange: scenario}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1397,6 +1419,9 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		}
 		preparationMemoryModeEnabled.Store(true)
 		first := preparationHTTPWorkflowRequest(t, baseURL, http.MethodPost, preparationPath+"/check", intent)
+		if finalSkillChanged && first.Preparation.CurrentValidity != "stale" {
+			t.Fatal("real final owner drift/unavailability did not stale current validity")
+		}
 		if first.ValidateFor(created.WorkspaceID, intent) != nil || first.Preparation.OperationState != "blocked" || len(first.Preparation.Record.Attempts[0].Checks) < 10 {
 			t.Fatalf("public preparation did not persist full blocked checklist: %+v", first)
 		}
@@ -1525,11 +1550,11 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		if first.Preparation.Record.Attempts[0].ManagedConfigEvidenceRef == "" {
 			t.Fatal("HTTP explicit check lost private managed config ref")
 		}
-		if first.Preparation.Record.Attempts[0].SoulEvidenceRef == "" || preparationSoulReads.Load() != 2 {
+		if first.Preparation.Record.Attempts[0].SoulEvidenceRef == "" || preparationSoulReads.Load() != 4 {
 			t.Fatal("HTTP did not archive exact Soul before/after records")
 		}
-		if first.Preparation.Record.Attempts[0].SkillRegistryEvidenceRef == "" || preparationSkillReads.Load() != 2 {
-			t.Fatal("HTTP did not archive complete registry reads")
+		if first.Preparation.Record.Attempts[0].SkillRegistryEvidenceRef == "" || preparationSkillReads.Load() != wantSkillReads {
+			t.Fatalf("HTTP did not archive complete registry reads: reads=%d want=%d", preparationSkillReads.Load(), wantSkillReads)
 		}
 		for _, check := range first.Preparation.Record.Attempts[0].Checks {
 			if check.ID == "mcp_selection" && check.Reason != mcpReason {
@@ -1621,6 +1646,36 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			}
 		}
 		stored, err := repositories.Workspaces.Get(ctx, common.WorkspaceID(created.WorkspaceID))
+		if err != nil || len(stored.PreparationSealEvidence) != 1 || stored.PreparationSealEvidence[0].FinalOwners == nil || stored.PreparationSealEvidence[0].FinalOwners.MatchesOriginal(stored, stored.StartupPreparation.Attempts[0]) == finalSkillChanged {
+			t.Fatal("HTTP/replay/reopen lost complete exact final owner observations", err)
+		}
+		finalSkills := stored.PreparationSealEvidence[0].FinalOwners.Skills
+		if finalSkillUnavailable && finalSkills != nil || scenario == "step04_workflow_final_skill_drift" && (finalSkills == nil || finalSkills.Catalog.Skills[0].Instruction != "真实最终指令变化") {
+			t.Fatal("final owner failure/drift was replaced with original material")
+		}
+		if bytes.Contains(public, []byte("FinalOwners")) || bytes.Contains(public, []byte("skill-preparation-epoch:")) || bytes.Contains(public, []byte("HTTP Soul 原文")) || bytes.Contains(public, []byte("HTTP Skill 原文")) {
+			t.Fatal("HTTP leaked private final owner observations")
+		}
+		for _, change := range []string{"remove_final", "rewrite_final", "remove_contract"} {
+			bad, err := repositories.Workspaces.Get(ctx, stored.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := &bad.PreparationSealEvidence[0]
+			switch change {
+			case "remove_final":
+				e.FinalOwners = nil
+			case "rewrite_final":
+				e.FinalOwners.Souls.Souls[0].SoulMD += " changed"
+			case "remove_contract":
+				bad.StartupPreparation.Attempts[0].OwnerRevalidationVersion = ""
+				e.FinalOwners = nil
+			}
+			e.ContentHash = e.Hash()
+			if err := repositories.Workspaces.CompareAndSwap(ctx, bad, bad.Revision); err == nil {
+				t.Fatal("completed final owner history rewritten after rehash", change)
+			}
+		}
 		if err != nil || preparationStatusCalls.Load() != 2 || len(stored.PreparationSkillHubEffects) != 1 || stored.PreparationSkillHubEffects[0].Summary() != workspace.PreparationSkillHubRecorded || first.Preparation.Record.Attempts[0].SkillHubEffectState != "recorded" {
 			t.Fatal("status history lost/replayed or falsely unresolved", err)
 		}
@@ -1634,7 +1689,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			t.Fatal("HTTP/recovery/reopen lost original complete inventory")
 		}
 		memoryEvidence := stored.PreparationMemoryInventoryEvidence[0]
-		if len(stored.PreparationMCPRegistryEvidence) != 1 || stored.PreparationMCPRegistryEvidence[0].Ref != first.Preparation.Record.Attempts[0].MCPRegistryEvidenceRef || stored.PreparationMCPRegistryEvidence[0].Facts.SnapshotHash != stored.StartupPreparation.Attempts[0].ObservationSnapshotHash || stored.PreparationMCPRegistryEvidence[0].Validate() != nil || preparationMCPReads.Load() != 2 {
+		if len(stored.PreparationMCPRegistryEvidence) != 1 || stored.PreparationMCPRegistryEvidence[0].Ref != first.Preparation.Record.Attempts[0].MCPRegistryEvidenceRef || stored.PreparationMCPRegistryEvidence[0].Facts.SnapshotHash != stored.StartupPreparation.Attempts[0].ObservationSnapshotHash || stored.PreparationMCPRegistryEvidence[0].Validate() != nil || preparationMCPReads.Load() != 4 {
 			t.Fatal("HTTP/reopen lost complete original MCP registry history")
 		}
 		mcpSelection := stored.PreparationMCPRegistryEvidence[0].Selection
@@ -1715,10 +1770,10 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 				t.Fatal("reopen lost original reference reads or failure")
 			}
 		}
-		if err != nil || len(stored.PreparationSoulEvidence) != 1 || preparationSoulReads.Load() != 2 || stored.PreparationSoulEvidence[0].Ref != first.Preparation.Record.Attempts[0].SoulEvidenceRef || stored.PreparationSoulEvidence[0].Facts.Souls[0].SoulMD != "HTTP Soul 原文\n" || !reflect.DeepEqual(stored.PreparationSoulEvidence[0].Facts.Souls, stored.PreparationSoulEvidence[0].Facts.ReobservedSouls) {
+		if err != nil || len(stored.PreparationSoulEvidence) != 1 || preparationSoulReads.Load() != 4 || stored.PreparationSoulEvidence[0].Ref != first.Preparation.Record.Attempts[0].SoulEvidenceRef || stored.PreparationSoulEvidence[0].Facts.Souls[0].SoulMD != "HTTP Soul 原文\n" || !reflect.DeepEqual(stored.PreparationSoulEvidence[0].Facts.Souls, stored.PreparationSoulEvidence[0].Facts.ReobservedSouls) {
 			t.Fatal("HTTP/reopen lost original Soul values or repeated observation", err)
 		}
-		if len(stored.PreparationSkillRegistryEvidence) != 1 || preparationSkillReads.Load() != 2 || stored.PreparationSkillRegistryEvidence[0].Ref != first.Preparation.Record.Attempts[0].SkillRegistryEvidenceRef || len(stored.PreparationSkillRegistryEvidence[0].Facts.Catalog.Skills) != 1 || stored.PreparationSkillRegistryEvidence[0].Facts.Catalog.Skills[0].Instruction != "HTTP Skill 原文" || !reflect.DeepEqual(stored.PreparationSkillRegistryEvidence[0].Facts.Catalog.Skills, stored.PreparationSkillRegistryEvidence[0].Facts.ReobservedCatalog.Skills) {
+		if len(stored.PreparationSkillRegistryEvidence) != 1 || preparationSkillReads.Load() != wantSkillReads || stored.PreparationSkillRegistryEvidence[0].Ref != first.Preparation.Record.Attempts[0].SkillRegistryEvidenceRef || len(stored.PreparationSkillRegistryEvidence[0].Facts.Catalog.Skills) != 1 || stored.PreparationSkillRegistryEvidence[0].Facts.Catalog.Skills[0].Instruction != "HTTP Skill 原文" || !reflect.DeepEqual(stored.PreparationSkillRegistryEvidence[0].Facts.Catalog.Skills, stored.PreparationSkillRegistryEvidence[0].Facts.ReobservedCatalog.Skills) {
 			t.Fatal("HTTP/reopen lost registry history or reobserved")
 		}
 		selection := stored.PreparationSkillRegistryEvidence[0].Selection
@@ -1826,14 +1881,15 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			t.Fatal(err)
 		}
 		callerCopy.StartupPreparation.Attempts[0].Assessment.Outstanding[0].Reason = "caller-mutated"
+		callerCopy.PreparationSealEvidence[0].FinalOwners.Souls.Souls[0].SoulMD = "caller-mutated"
 		if !emptySelection {
 			callerCopy.PreparationSkillRegistryEvidence[0].Selection.Selected[0].Content.TriggerRules[0] = "caller-mutated"
 		}
 		fresh, err := repositories.Workspaces.Get(ctx, stored.ID)
-		if err != nil || fresh.StartupPreparation.Attempts[0].Assessment.Outstanding[0].Reason == "caller-mutated" || !emptySelection && fresh.PreparationSkillRegistryEvidence[0].Selection.Selected[0].Content.TriggerRules[0] != "交付目标" {
+		if err != nil || fresh.StartupPreparation.Attempts[0].Assessment.Outstanding[0].Reason == "caller-mutated" || fresh.PreparationSealEvidence[0].FinalOwners.Souls.Souls[0].SoulMD == "caller-mutated" || !emptySelection && fresh.PreparationSkillRegistryEvidence[0].Selection.Selected[0].Content.TriggerRules[0] != "交付目标" {
 			t.Fatal("persisted selection aliases caller")
 		}
-		if err != nil || stored.Revision != admitted.WorkspaceRevision+2 || physicalCalls.Load() != baselineCalls || preparationCacheReads.Load() != 1 || preparationMemoryModeReads.Load() != 2 || len(stored.StartupPreparation.Attempts) != 1 || stored.StartupInput.StartupInputHash != admitted.StartupInputHash {
+		if err != nil || stored.Revision != admitted.WorkspaceRevision+2 || physicalCalls.Load() != baselineCalls || preparationCacheReads.Load() != 1 || preparationMemoryModeReads.Load() != 4 || len(stored.StartupPreparation.Attempts) != 1 || stored.StartupInput.StartupInputHash != admitted.StartupInputHash {
 			t.Fatalf("preparation changed sealed/provider facts: %v", err)
 		}
 		if len(stored.PreparationDirectoryEvidence) != 1 || workspace.ValidatePreparationEvidencePersistence(stored) != nil || stored.PreparationDirectoryEvidence[0].ContentHash != first.Preparation.Record.Attempts[0].DirectoryEvidenceHash || !stored.PreparationDirectoryEvidence[0].Internal.Complete || !stored.PreparationDirectoryEvidence[0].Deliverable.Complete {

@@ -45,6 +45,7 @@ type PreparationCompilationHistory struct {
 }
 
 type PreparationCompilationSeal struct {
+	FinalOwners                          *workspace.PreparationOwnerRevalidation
 	Version, Ref, RequestID, PayloadHash string
 	Binding                              workspace.WorkspacePreparationBinding
 	StartedAt, CompletedAt               time.Time
@@ -152,6 +153,10 @@ func (s *PreparationCompilationSource) Model() (*workspace.Workspace, error) {
 	}
 	for i, e := range s.Seals {
 		v := workspace.WorkspacePreparationSealEvidence{Version: e.Version, Ref: e.Ref, RequestID: e.RequestID, PayloadHash: e.PayloadHash, Binding: e.Binding, StartedAt: e.StartedAt, CompletedAt: e.CompletedAt, Before: e.Before.Clone(), After: e.After.Clone(), ContentHash: e.ContentHash}
+		if e.FinalOwners != nil {
+			f := e.FinalOwners.Clone()
+			v.FinalOwners = &f
+		}
 		if e.Inputs != nil {
 			x := e.Inputs
 			c := x.Configuration

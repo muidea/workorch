@@ -106,6 +106,13 @@ func preparationStateFromPersistence(w *workspace.Workspace, now time.Time) (wor
 		if cacheExpired {
 			result.CurrentValidity = "stale"
 		}
+		ownersStale, err := workspace.PreparationOwnerRevalidationStale(w, now)
+		if err != nil {
+			return workspaceevents.QueryWorkspacePreparationStateResult{}, err
+		}
+		if ownersStale {
+			result.CurrentValidity = "stale"
+		}
 		binding := last.Binding
 		if record.Version == workspace.WorkspacePreparationWorkflowVersion {
 			if w.PreparationFence == nil || w.PreparationFence.Validate(w.ID) != nil || last.CreationEpoch != w.PreparationFence.CreationEpoch || last.PreparationEpoch != w.PreparationFence.PreparationEpoch {

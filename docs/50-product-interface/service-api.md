@@ -268,6 +268,16 @@ File 重启或当前 epoch 不可读均使当前有效性 stale。GET/重复 che
 旧操作到期不绑定到没有新观察的后继操作；缺材料历史不补造期限，原材料绑定冲突拒绝读取。
 未到期仍是 `not_evaluated`，不是当前 owner epoch、授权或 readiness 证明；不据此填充全 required 的最早期限。
 
+新显式操作在首次接纳时固定 `workorch-preparation-owner-revalidation/v1`。
+原 Soul、Skill Registry、含原模式的 Memory 库存和 MCP Registry 材料完整时，Application 在同一原请求预算内，
+通过既有 typed query 再读这四类 owner；不重复 SkillHub status、不刷新目录、不执行 MCP 连接或模型调用。
+最终完整原值与原观察一起在 Workspace 原结算 CAS 中受限保存；只排除观察时间差异，
+epoch、revision、完整内容、选择及配置来源均精确反查。缺少最终材料、原值漂移、时钟回退或从最终观察开始
+达到 30 秒时，GET/原操作重放/恢复投影 `currentValidity=stale`，不改历史逐项结论。
+原材料不齐仍按其原阻塞处理，不为填充结构重复失败查询。旧操作不补挂该版本或补发观察。
+这只是已知漂移与观察年龄的投影，不保证观察后资源不变，也不签发 readiness、M3 或执行许可；
+最终原值和该内部合同标记不加入公共 HTTP 参数或原文投影。
+
 该读取不编译 bootstrap、不查询外部资源、不刷新模型目录、不调用推理/embedding、不写配置、不创建 Run。
 `activeRunId` 是独立已有事实，缺省不能证明没有历史或在途 Run；`eligible`、结构校验和准备操作状态均不是 M3。
 响应禁止缓存，owner 原始错误不进入公共 payload。GET 不提供 M3/权限字段或 Start/Restart 回执消费承诺。

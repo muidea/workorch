@@ -77,6 +77,11 @@ func (b *Biz) observeAndSettleBlockedPreparation(ctx context.Context, original w
 	if facts, err := observePreparationProcessPolicy(bounded, original); err == nil {
 		settlement.ProcessPolicyFacts = facts
 	}
+	// Missing original sources already block this attempt. Do not repeat known
+	// failed reads or collect a second unrelated inventory just to fill a shape.
+	if settlement.SoulFacts != nil && settlement.SkillRegistryFacts != nil && settlement.MemoryInventoryFacts != nil && settlement.MemoryInventoryFacts.SelectionSource != nil && settlement.MCPRegistryFacts != nil {
+		settlement.FinalOwners = b.observePreparationFinalOwners(bounded, original)
+	}
 	// Use the original request context, not a detached background context. If
 	// cancelled before settlement, the durable accepted cut remains recoverable;
 	// explicit recovery closes interrupted work without redoing either query.

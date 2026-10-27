@@ -51,6 +51,7 @@ func PreparationCompilationSource(w *workspace.Workspace) *workspaceevents.Prepa
 	for i, source := range w.PreparationSealEvidence {
 		e := source.Clone()
 		v := workspaceevents.PreparationCompilationSeal{Version: e.Version, Ref: e.Ref, RequestID: e.RequestID, PayloadHash: e.PayloadHash, Binding: e.Binding, StartedAt: e.StartedAt, CompletedAt: e.CompletedAt, Before: e.Before, After: e.After, ContentHash: e.ContentHash}
+		v.FinalOwners = e.FinalOwners
 		if x := e.ExecutionInputs; x != nil {
 			c := x.Configuration
 			v.Inputs = &workspaceevents.PreparationCompilationExecutionInputs{Version: x.Version, Process: x.Process, Template: *TemplateDTO(&x.Template), Configuration: workspaceevents.PreparationCompilationConfiguration{Directory: c.Directory, InternalDirectory: c.InternalDirectory, TemplateID: c.TemplateID, ProfileID: c.ProfileID, DefaultLLMSelection: c.DefaultLLMSelection, DefaultSoulID: c.DefaultSoulID, SoulBindings: soulbinding.FromSoulIDMap(c.SoulBindings), ContextHints: c.ContextHints, EvidencePolicies: c.EvidencePolicies}}

@@ -52,7 +52,8 @@ func (s PreparationSealSnapshot) Hash() string {
 }
 
 type WorkspacePreparationSealEvidence struct {
-	ExecutionInputs        *PreparationExecutionInputs `json:",omitempty"`
+	FinalOwners            *PreparationOwnerRevalidation `json:",omitempty"`
+	ExecutionInputs        *PreparationExecutionInputs   `json:",omitempty"`
 	Version, Ref           string
 	RequestID, PayloadHash string
 	Binding                WorkspacePreparationBinding
@@ -66,6 +67,10 @@ func ValidPreparationSealRef(ref string) bool {
 }
 
 func (e WorkspacePreparationSealEvidence) Clone() WorkspacePreparationSealEvidence {
+	if e.FinalOwners != nil {
+		v := e.FinalOwners.Clone()
+		e.FinalOwners = &v
+	}
 	e.Before, e.After = e.Before.Clone(), e.After.Clone()
 	if e.ExecutionInputs != nil {
 		inputs := e.ExecutionInputs.Clone()
@@ -98,6 +103,9 @@ func (e WorkspacePreparationSealEvidence) Hash() string {
 // A later definition may retire these formal rows; the immutable historical
 // observation remains tied to the exact original confirmed source.
 func (e WorkspacePreparationSealEvidence) validateFor(w *Workspace, a WorkspacePreparationAttempt) error {
+	if r := e.FinalOwners; r != nil && (w == nil || a.OwnerRevalidationVersion != PreparationOwnerRevalidationVersion || r.Validate() != nil || r.WorkspaceID != w.ID || r.RequestID != a.RequestID || r.PayloadHash != a.PayloadHash || a.ExpectedWorkspaceRevision == ^uint64(0) || r.WorkspaceRevision != a.ExpectedWorkspaceRevision+1 || r.StartedAt.Before(a.StartedAt) || r.CompletedAt.After(e.CompletedAt)) {
+		return common.ErrConflict
+	}
 	s := e.Before
 	if w == nil || e.Version != PreparationSealEvidenceVersion || !ValidPreparationSealRef(e.Ref) || e.Ref != a.SealEvidenceRef || e.RequestID != a.RequestID || e.PayloadHash != a.PayloadHash || e.Binding != a.Binding || e.StartedAt.Before(a.StartedAt) || e.StartedAt.IsZero() || e.CompletedAt.Before(e.StartedAt) || e.CompletedAt.After(a.CompletedAt) || a.State != WorkspacePreparationBlocked || a.EvaluationVersion != PreparationCheckEvaluationVersion || !reflect.DeepEqual(s, e.After) || e.ContentHash == "" || e.ContentHash != e.Hash() || s.SchemaVersion != "workorch-startup-preparation/v1" || s.WorkspaceID != w.ID || s.WorkspaceRevision != a.ExpectedWorkspaceRevision+1 || s.SnapshotHash == "" || s.SnapshotHash != s.Hash() || s.SnapshotHash != a.ObservationSnapshotHash || s.AuthoringRef != a.Binding.AuthoringRef || s.AuthoringConfigurationHash != a.Binding.AuthoringConfigurationHash || s.Candidate.CandidateID != a.Binding.CandidateID || s.Candidate.CandidateRevision != a.Binding.CandidateRevision || s.Candidate.CandidateHash != a.Binding.CandidateHash || s.StartupInput.StartupInputHash != a.Binding.StartupInputHash || s.StartupInput.DefinitionRevision != a.Binding.DefinitionRevision || s.ActivationAdmission.State != WorkspaceActivationEligible || s.InternalDirectory == "" {
 		return common.ErrConflict

@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 
+	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/soulbinding"
@@ -33,6 +35,10 @@ func compilationMappingFixture(t *testing.T) *workspace.Workspace {
 
 func TestPreparationCompilationSourcePreservesRawAndDetachedInputs(t *testing.T) {
 	w := compilationMappingFixture(t)
+	w.PreparationSealEvidence[0].FinalOwners = &workspace.PreparationOwnerRevalidation{
+		Souls:  &workspace.PreparationSoulFacts{Souls: []*soulmodel.Soul{{SoulMD: "原文\r\n", AllowedSkillRefs: []string{}}}},
+		Memory: &workspace.PreparationMemoryInventoryFacts{Observation: memorymodel.PreparationInventory{Items: []*memorymodel.MemoryItem{{Content: "原始库存\x00\r\n"}}}},
+	}
 	s := PreparationCompilationSource(w)
 	model, err := s.Model()
 	if err != nil || !reflect.DeepEqual(model.DefinitionAuthoring, w.DefinitionAuthoring) || !reflect.DeepEqual(model.DefinitionAuthoringHistory, w.DefinitionAuthoringHistory) || !reflect.DeepEqual(model.PreparationSealEvidence, w.PreparationSealEvidence) {
@@ -46,13 +52,19 @@ func TestPreparationCompilationSourcePreservesRawAndDetachedInputs(t *testing.T)
 	s.Authoring.Record.SpecificationRequests[0].Diagnostic.Payload[0] = 'x'
 	s.History[0].Authoring.Diagnostics[0].Cause[0] = 'x'
 	s.Seals[0].Inputs.Configuration.EvidencePolicies[0].Fields[0].Value.Array[0].String = "changed"
+	s.Seals[0].FinalOwners.Souls.Souls[0].SoulMD = "source-changed"
+	s.Seals[0].FinalOwners.Memory.Observation.Items[0].Content = "source-changed"
 	if !reflect.DeepEqual(model.DefinitionAuthoring, w.DefinitionAuthoring) || !reflect.DeepEqual(model.PreparationSealEvidence, w.PreparationSealEvidence) || !reflect.DeepEqual(model.DefinitionAuthoringHistory, w.DefinitionAuthoringHistory) {
 		t.Fatal("source aliases owner or converted model")
 	}
 	model.DefinitionAuthoring.PreparationDiagnostics[0].Cause[0] = 'y'
 	model.PreparationSealEvidence[0].ExecutionInputs.Template.SoulBindings["planning"] = "changed"
+	model.PreparationSealEvidence[0].FinalOwners.Memory.Observation.Items[0].Content = "model-changed"
 	if w.DefinitionAuthoring.PreparationDiagnostics[0].Cause[0] != 0xfe || w.PreparationSealEvidence[0].ExecutionInputs.Template.SoulBindings["planning"] != "planner" {
 		t.Fatal("converted model aliases original owner input")
+	}
+	if w.PreparationSealEvidence[0].FinalOwners.Memory.Observation.Items[0].Content != "原始库存\x00\r\n" {
+		t.Fatal("final owner observations alias converted model")
 	}
 }
 

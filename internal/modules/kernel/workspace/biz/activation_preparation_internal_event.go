@@ -165,6 +165,12 @@ func (m *Biz) handlePreparationBlockedSettlement(ev magicevent.Event, result mag
 	resources := m.observeOriginalPreparationResources(ctx, c.Original)
 	configs, configReason := m.observeOriginalPreparationManagedConfigs(ctx, c.Original)
 	seal := m.observeOriginalPreparationSeal(ctx, c.Original)
+	if seal != nil && c.FinalOwners != nil {
+		f := c.FinalOwners.Clone()
+		seal.FinalOwners = &f
+		seal.CompletedAt = time.Now().UTC()
+		seal.ContentHash = seal.Hash()
+	}
 	m.reobservePreparationFiles(ctx, evidence, resources, configs)
 	value, err := m.finishBlockedPreparation(ctx, workspacePreparationBlocked{ProcessPolicyFacts: c.ProcessPolicyFacts, Command: c.Original, Reason: "check_pipeline_incomplete", SealEvidence: seal, MCPRegistryEvidence: mcpRegistry, MCPRegistryReason: mcpReason, ProviderCacheReason: c.ProviderCacheReason, ProviderCacheEvidence: provider, MemoryInventoryEvidence: memoryInventory, MemoryInventoryReason: memoryReason, RunHistoryReason: c.RunHistoryReason, RunHistoryEvidence: runHistory, DirectoryEvidence: evidence, DirectoryReason: directoryReason, ResourceEvidence: resources, ManagedConfigEvidence: configs, ManagedConfigReason: configReason, SoulEvidence: souls, SoulReason: soulReason, SkillRegistryEvidence: registry, SkillRegistryReason: registryReason, SkillHubEffectRef: c.SkillHubEffectRef, SkillHubGlobal: c.SkillHubGlobal, SkillHubProject: c.SkillHubProject, At: time.Now().UTC()})
 	if err != nil {
@@ -286,7 +292,8 @@ func reduceWorkspacePreparationAccepted(current *workspace.Workspace, fact works
 		return workspaceExecutionTransition{}, err
 	}
 	attempt := workspace.WorkspacePreparationAttempt{
-		RequestID: fact.Command.RequestID, PayloadHash: fact.Command.PayloadHash(), ExpectedWorkspaceRevision: current.Revision, CommittedWorkspaceRevision: current.Revision + 1,
+		OwnerRevalidationVersion: workspace.PreparationOwnerRevalidationVersion,
+		RequestID:                fact.Command.RequestID, PayloadHash: fact.Command.PayloadHash(), ExpectedWorkspaceRevision: current.Revision, CommittedWorkspaceRevision: current.Revision + 1,
 		Binding: workspace.WorkspacePreparationBinding{
 			AuthoringRef: s.AuthoringRef, CandidateID: s.Candidate.CandidateID, CandidateRevision: s.Candidate.CandidateRevision, CandidateHash: s.Candidate.CandidateHash,
 			DefinitionRevision: s.StartupInput.DefinitionRevision, StartupInputHash: s.StartupInput.StartupInputHash, AuthoringConfigurationHash: s.AuthoringConfigurationHash,

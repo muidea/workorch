@@ -216,6 +216,12 @@ File PASS 或 caller-authored 证据。管理 DTO 仅投影 `directoryEvidenceHa
 Web 展示引用不授予当前资源成功，GET/重开/恢复不触发目录观察。
 最终 File 重观察和 epoch/年龄判定由 Workspace/File 原 owner 完成，Application 不接收 caller token；
 GET 与原 check/recover 在 File 重启或年龄到期时一致展示 stale，原结论和身份不变。
+原 Soul、Skill Registry、含原模式的 Memory 库存与 MCP Registry 来源齐全时，Application 在同一请求
+deadline 内通过既有 typed query 取得最终完整观察，放入内部 settlement 的 `FinalOwners`；
+不重复 SkillHub status，不刷新目录、联网、连接 MCP 或调用模型。Workspace 在首次 accepted 时固定
+`workorch-preparation-owner-revalidation/v1`，最终观察随原 blocked CAS 受限保存，完整原值反查后仅用于
+已知漂移/缺失和 30 秒观察年龄的 stale 投影。GET/replay/recover 不重发观察，最终材料不进入公开 DTO；
+这是时点事实，不是全资源 readiness、M3 或执行授权。
 验证 scope、原 payload 和完整结果后转为公开读模型；普通重放、恢复与 GET 不执行这些观察。
 HTTP 的显式 POST 拒绝未知字段、尾随文档和超过 4KiB 的请求；200 blocked 不是 ready，
 202 accepted/unknown 不是检查完成，错误响应不证明无写入。GET 始终只读。

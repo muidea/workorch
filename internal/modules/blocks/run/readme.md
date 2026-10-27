@@ -91,8 +91,10 @@ replacement 原来源保留参与核对，但不因此重新驱动。既有 expl
 
 此变更属于 SM-1 owner 内的历史事实持久化，不选择或改变 SM-2～SM-4 authority、dispatch、预算或交付。
 activation／replacement 接纳和回执 CAS 不是跨文件原子事务：前者完成而后者未提交时保持 unknown；
-回执写后丢回复可以只读恢复原响应，不能把错误当作“未接纳”。查询能力尚未接入 Workspace reservation
-结算及所有 fresh ingress 的 reserve-before-forward，不能据此宣称 no-Run 协议、M3 或完整 STEP04 已完成。
+回执写后丢回复可以只读恢复原响应，不能把错误当作“未接纳”。生产 Workspace fresh Restart 入口已接入
+reserve-before-forward；Workspace 使用本查询反查原回执，再经私有 reducer/CAS 结算精确 reservation。
+重复、CAS 竞争失败及 unknown 不重新 forward，恢复从原 reservation 取身份，不用今日 bootstrap 补造原输入。
+该接线不代表准备成功合取、历史 M3 或完整 STEP04 已完成，亦不授予新的执行权限。
 
 `biz/execution_intent_receipt_test.go` 覆盖真实 owner 的首次接纳、CAS 前失败／写后丢回复、独立子进程
 只读重载（逐 bytes 核对持久化未变）、legacy unknown、显式 replay 不回填、错身份、排序、drain、retired

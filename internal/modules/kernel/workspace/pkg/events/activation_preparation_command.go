@@ -27,6 +27,7 @@ const TopicWorkspacePreparationSettleBlocked = "/workspace/activation-preparatio
 // settings. Workspace captures its own confirmed template/configuration input;
 // this command cannot submit those policies or a compiled-success credential.
 type SettleWorkspacePreparationBlockedCommand struct {
+	FinalOwners                     *workspace.PreparationOwnerRevalidation
 	ProcessPolicyFacts              *workspace.PreparationProcessPolicyFacts
 	MCPRegistryFacts                *workspace.PreparationMCPObservationFacts
 	MCPRegistryReason               string
@@ -46,6 +47,9 @@ type SettleWorkspacePreparationBlockedCommand struct {
 }
 
 func (c SettleWorkspacePreparationBlockedCommand) Validate() error {
+	if r := c.FinalOwners; r != nil && (r.Validate() != nil || r.WorkspaceID != c.Original.WorkspaceID || r.RequestID != c.Original.RequestID || r.PayloadHash != c.Original.PayloadHash() || c.Original.ExpectedWorkspaceRevision == ^uint64(0) || r.WorkspaceRevision != c.Original.ExpectedWorkspaceRevision+1) {
+		return common.ErrInvalidArgument
+	}
 	if f := c.ProcessPolicyFacts; f != nil && (f.Validate() != nil || f.WorkspaceID != c.Original.WorkspaceID || c.Original.ExpectedWorkspaceRevision == ^uint64(0) || f.WorkspaceRevision != c.Original.ExpectedWorkspaceRevision+1) {
 		return common.ErrInvalidArgument
 	}

@@ -62,6 +62,8 @@ type WorkspacePreparationAttempt struct {
 	EvaluationVersion               string
 	NoRunEvaluationVersion          string `json:",omitempty"`
 	EmptySelectionEvaluationVersion string `json:",omitempty"`
+	// Fixed at acceptance; recovery cannot opt an old operation into final reads.
+	OwnerRevalidationVersion string `json:",omitempty"`
 	// Exact snapshot identity after the original acceptance revision increment.
 	// It is not the earlier manifest snapshot and never inferred on recovery.
 	ObservationSnapshotHash string
@@ -132,7 +134,7 @@ func (r WorkspacePreparationRecord) Validate(workspaceID common.WorkspaceID) err
 	seen := make(map[string]struct{}, len(r.Attempts))
 	lastRevision := uint64(0)
 	for _, attempt := range r.Attempts {
-		if r.Version == WorkspacePreparationRecordVersion && (attempt.ExecutionInputVersion != "" || attempt.DefinitionCompilation != nil || attempt.Assessment != nil || attempt.EmptySelectionEvaluationVersion != "") {
+		if r.Version == WorkspacePreparationRecordVersion && (attempt.ExecutionInputVersion != "" || attempt.DefinitionCompilation != nil || attempt.Assessment != nil || attempt.EmptySelectionEvaluationVersion != "" || attempt.OwnerRevalidationVersion != "") {
 			return common.ErrConflict
 		}
 		if _, present := seen[attempt.RequestID]; present || attempt.Validate() != nil || attempt.CommittedWorkspaceRevision <= lastRevision {
@@ -229,6 +231,9 @@ func ValidPreparationBlockedReason(checkID, reason string) bool {
 }
 
 func (a WorkspacePreparationAttempt) Validate() error {
+	if a.OwnerRevalidationVersion != "" && (a.OwnerRevalidationVersion != PreparationOwnerRevalidationVersion || a.EvaluationVersion != PreparationCheckEvaluationVersion) {
+		return common.ErrConflict
+	}
 	if a.ExecutionInputVersion != "" && (a.ExecutionInputVersion != PreparationExecutionInputsVersion || a.SealEvidenceRef == "" || a.State != WorkspacePreparationBlocked || a.EvaluationVersion != PreparationCheckEvaluationVersion) {
 		return common.ErrConflict
 	}
