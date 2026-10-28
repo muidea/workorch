@@ -28,7 +28,15 @@ func TestPreparationPureCompilationBoundary(t *testing.T) {
 	paths = append(paths, filepath.Join(root, "internal/modules/application/workorchd/biz/appservice/activationcore/prepared_bootstrap.go"), filepath.Join(root, "internal/modules/application/workorchd/biz/appservice/activationcore/runtime_bootstrap.go"))
 	paths = append(paths, filepath.Join(root, "internal/modules/application/workorchd/biz/appservice/activationports/prepared_execution_policy.go"))
 	paths = append(paths, filepath.Join(root, "internal/modules/application/workorchd/biz/appservice/activationports/prepared_bootstrap.go"))
+	configurationPaths, err := filepath.Glob(filepath.Join(root, "internal/pkg/definitionconfiguration/*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths = append(paths, configurationPaths...)
 	allowed := map[string]bool{
+		"github.com/muidea/workorch/internal/pkg/definitionconfiguration": true,
+		"github.com/muidea/workorch/internal/pkg/runtimeprofiledecode":    true,
+		"github.com/muidea/workorch/internal/pkg/workorcheventpayload":    true,
 		"crypto/sha256": true, "encoding/hex": true, "encoding/json": true, "fmt": true, "reflect": true, "slices": true, "sort": true, "strings": true, "unicode/utf8": true,
 		"github.com/muidea/workorch/internal/pkg/common":                                                  true,
 		"github.com/muidea/workorch/internal/pkg/workorchruntimecontract":                                 true,

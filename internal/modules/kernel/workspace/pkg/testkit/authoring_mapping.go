@@ -44,6 +44,12 @@ func Proposal(d workspace.DefinitionDerivationRequest, v workspace.DefinitionAut
 		return m, workspace.DefinitionAuthoringSuccessByteAudit{}, workspace.GoalSpecification{}, err
 	}
 	a, err := Audit(m)
+	if err == nil && d.WireContractRef == workspace.DefinitionAuthoringOwnerBoundV2 {
+		raw := OwnerBoundFixtureDocument(a.Document.Content)
+		sum := sha256.Sum256(raw)
+		o := workspace.DefinitionProviderObservation{Content: raw, ObservedBytes: uint64(len(raw)), SHA256: hex.EncodeToString(sum[:]), Observed: true, Complete: true, Saved: true}
+		a = workspace.DefinitionAuthoringSuccessByteAudit{Document: o, Wire: o.Clone()}
+	}
 	if err != nil {
 		return m, a, workspace.GoalSpecification{}, err
 	}

@@ -181,11 +181,17 @@ def authoring_response(prompt):
             raise AuthoringMockError('创作输入必须为对象')
         if section == 'C3.derivation-input':
             shape = request['outputShape']
+            if request.get('wireContractRef') == 'workorch.authoring.owner-bound/v2':
+                return {'AdditionalItems': []}
             return {'AuthoringInputHash': _text(shape['AuthoringInputHash']),
                     'TemplateSnapshotHash': _text(shape['TemplateSnapshotHash']),
                     'AdditionalItems': []}
         if 'kind' in request:
-            return _review(request)
+            review = _review(request)
+            if request.get('wireContractRef') == 'workorch.authoring.owner-bound/v2':
+                review['review'].pop('Kind')
+                review['review'].pop('SpecificationHash')
+            return review
         items = _candidates(request)
         _text(request['goal']['CandidateItemRef'])
         _text(request['goal']['Text'])
@@ -212,6 +218,9 @@ def authoring_response(prompt):
                 verification.update(ProfileID=binding[0], EvidenceRequirementID=binding[1], Scope=binding[2])
             mapping['Obligations'].append({'CandidateItemRef': ref, 'RequirementRef': requirement,
                                           'Verification': verification})
+        if request.get('wireContractRef') == 'workorch.authoring.owner-bound/v2':
+            for field in ('Protocol', 'InputHash', 'TemplateSnapshotHash', 'ResourceSnapshotHash'):
+                del mapping[field]
         return {'mapping': mapping}
     except (KeyError, TypeError, json.JSONDecodeError) as error:
         raise AuthoringMockError('创作 mock 输入合同无效') from error

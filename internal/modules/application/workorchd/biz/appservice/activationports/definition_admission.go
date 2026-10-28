@@ -307,10 +307,6 @@ func definitionAdmissionCandidateForIdentity(workspace *workspacemodel.Workspace
 		return workspacemodel.DefinitionAdmissionCandidate{}, common.ErrInvalidArgument
 	}
 	templateHash := workspaceTemplateSnapshotHash(template)
-	policyBindings, profileContracts, requiredOwnerFacts, ownerFactConvergences, profileContractsHash, err := definitionAdmissionProfileBindings(workspace, template)
-	if err != nil {
-		return workspacemodel.DefinitionAdmissionCandidate{}, err
-	}
 	dodInputs := make([]workspacemodel.DefinitionCandidateItem, 0, len(dod.Items))
 	dodRefs := make([]string, 0, len(dod.Items))
 	for idx, item := range dod.Items {
@@ -318,6 +314,12 @@ func definitionAdmissionCandidateForIdentity(workspace *workspacemodel.Workspace
 		dodRefs = append(dodRefs, ref)
 		dodInputs = append(dodInputs, workspacemodel.DefinitionCandidateItem{CandidateItemRef: ref, Text: item, SourceIdentity: "dod:" + string(dod.ID) + "@" + dod.DefinitionRevision})
 	}
+	compiled, err := definitionconfiguration.CompileForItems(workspace, template, dodInputs)
+	if err != nil {
+		return workspacemodel.DefinitionAdmissionCandidate{}, err
+	}
+	policyBindings, profileContracts := compiled.PolicyBindings, compiled.ProfileContracts
+	requiredOwnerFacts, ownerFactConvergences, profileContractsHash := compiled.RequiredOwnerFacts, compiled.OwnerFactConvergences, compiled.ProfileContractsHash
 	candidate := workspacemodel.DefinitionAdmissionCandidate{SchemaVersion: workspacemodel.DefinitionAdmissionCandidateSchemaVersionCurrent, WorkspaceID: workspace.ID, CandidateID: strings.TrimSpace(candidateID), CandidateRevision: revision, BaseDefinitionRevision: baseRevision, BaseStartupInputHash: baseHash,
 		GoalInput: workspacemodel.DefinitionCandidateItem{CandidateItemRef: "goal:" + string(goal.ID), Text: goal.Text, SourceIdentity: "goal:" + string(goal.ID) + "@" + goal.DefinitionRevision}, DoDInputs: dodInputs,
 		WorkspaceTemplateSnapshot: workspacemodel.DefinitionTemplateSnapshot{TemplateRef: template.ID, Revision: "template:" + templateHash, SnapshotHash: templateHash}, AdmissionCompilerVersion: workspacemodel.DefinitionAdmissionCompilerVersionCurrent, ResolvedProjectWorkspaceDirectory: workspace.DeliverableDirectory,

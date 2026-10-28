@@ -24,8 +24,8 @@ func TestAuthoringVerificationOptionsRespectAfterImageOrderScopeAndMergedPolicy(
 	before := runtimecontract.CloneRuntimeProfileContracts(profiles)
 	got := authoringVerificationOptions(items, profiles)
 	want := []authoringCandidateVerificationOptions{
-		{items[0].CandidateItemRef, []authoringVerificationDeclaration{{"all", "*", "dodItem"}}},
-		{items[1].CandidateItemRef, []authoringVerificationDeclaration{{"exact", "dod-001", "dodItem"}, {"all", "*", "dodItem"}}},
+		{items[0].CandidateItemRef, []authoringVerificationDeclaration{{"all", "*", "dodItem", []runtimecontract.RuntimeLineageAssertionRule{}}}},
+		{items[1].CandidateItemRef, []authoringVerificationDeclaration{{"exact", "dod-001", "dodItem", []runtimecontract.RuntimeLineageAssertionRule{}}, {"all", "*", "dodItem", []runtimecontract.RuntimeLineageAssertionRule{}}}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("options = %#v, want %#v", got, want)
@@ -81,6 +81,15 @@ func TestDefaultSoftwareTemplateProvidesSourceOptionsWithoutBorrowingDeliverable
 				t.Fatalf("default DoD source has no applicable declaration: %s", item.CandidateItemRef)
 			}
 			for _, declaration := range item.Declarations {
+				wantConsumer := item.CandidateItemRef == "derived-dod:template:000003" || item.CandidateItemRef == "derived-dod:template:000004" || item.CandidateItemRef == "derived-dod:template:000013"
+				if wantConsumer != (len(declaration.Consumers) != 0) {
+					t.Fatalf("consumer source mismatch: %+v", item)
+				}
+				for _, consumer := range declaration.Consumers {
+					if consumer.ConsumptionPoint != "post_terminal_delivery" || consumer.TerminalContractRef == "" {
+						t.Fatal("missing actual consumer phase/version")
+					}
+				}
 				if declaration.Scope != "dodItem" {
 					t.Fatalf("borrowed another source domain: %+v", declaration)
 				}

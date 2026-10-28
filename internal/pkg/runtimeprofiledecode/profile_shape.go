@@ -79,7 +79,7 @@ func Fields(kind string) InputFields {
 			Arrays:     map[string]string{"lineageAssertions": "lineageAssertion", "acceptedOperationVariants": "variant", "capabilityStateRequirements": "capability", "requiredOwnerFacts": "ownerFact", "ownerFactConvergences": "convergence"},
 		}
 	case "lineageAssertion":
-		return InputFields{Text: "ref kind consumptionPoint ownerModuleId operationKind operationVariantId requiredEffectScope terminalContractRef receiptSourceScope receiptSourceId validationSourceScope validationSourceId executionSourceContractRef repairHistoryContractRef", Integer: "minCompletedRounds"}
+		return InputFields{Text: "ref kind consumptionPoint ownerModuleId operationKind operationVariantId requiredEffectScope terminalContractRef receiptSourceScope receiptSourceId validationSourceScope validationSourceId executionSourceContractRef repairHistoryContractRef receiptChoiceContractRef", Integer: "minCompletedRounds", Arrays: map[string]string{"receiptOperationChoices": "variant"}}
 	case "variant":
 		return InputFields{Text: "kind variantId"}
 	case "implementationWork":
@@ -117,6 +117,9 @@ func ValidateObject(object map[string]any, kind, subject string) error {
 		path := subject + "." + key
 		if child, found := fields.Arrays[key]; found {
 			items, exact := ObjectSliceExact(raw)
+			if kind == "lineageAssertion" && key == "receiptOperationChoices" && (len(items) < 2 || len(items) > 4) {
+				return fmt.Errorf("%w: receipt choices require two to four exact alternatives", common.ErrInvalidArgument)
+			}
 			if !exact {
 				return fmt.Errorf("%w: %s must be an object array", common.ErrInvalidArgument, path)
 			}

@@ -659,6 +659,9 @@ func (p *emptyDirectoryProvider) serveHTTP(w http.ResponseWriter, r *http.Reques
 		http.Error(w, err.Error(), 500)
 		return
 	}
+	if (kind == "derive" || kind == "proposal" || strings.HasPrefix(kind, "review/")) && len(record.DerivationRequests) == 1 && record.DerivationRequests[0].WireContractRef == workspace.DefinitionAuthoringOwnerBoundV2 {
+		payload = testkit.OwnerBoundFixtureDocument(payload)
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	event, _ := json.Marshal(map[string]any{"type": "response.completed", "response": map[string]any{"status": "completed", "output_text": string(payload), "usage": map[string]any{"input_tokens": 128, "output_tokens": 128, "total_tokens": 256}}})
 	_, _ = fmt.Fprintf(w, "data: %s\n\n", event)

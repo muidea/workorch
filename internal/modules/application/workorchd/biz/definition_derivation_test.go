@@ -159,7 +159,7 @@ func TestDerivationApplicationCallsProviderOnceAndReplays(t *testing.T) {
 				copy := record.Clone()
 				result.Set(workspaceevents.QueryDefinitionAuthoringResult{WorkspaceID: input.WorkspaceID, WorkspaceRevision: 1, Record: authoringTestRecord(copy), CurrentTemplateSnapshotHash: record.TemplateSnapshotHash, CurrentTemplateAvailable: true}, nil)
 			case workspaceevents.ReserveDefinitionDerivationCommand:
-				next, request, fresh, err := record.ReserveDerivation(cmd.RequestID, cmd.ProviderBindingHash, cmd.Resources)
+				next, request, fresh, err := record.ReserveDerivation(cmd.RequestID, cmd.ProviderBindingHash, cmd.Resources, cmd.WireContractRef)
 				if err != nil {
 					t.Error(err)
 					return
@@ -171,7 +171,7 @@ func TestDerivationApplicationCallsProviderOnceAndReplays(t *testing.T) {
 				}
 				result.Set(reply, nil)
 			case workspaceevents.CompleteDefinitionDerivationCommand:
-				next, err := record.CompleteDerivation(cmd.PermitID, cmd.Proposal, cmd.FailureCode, cmd.Diagnostic)
+				next, err := record.CompleteDerivationDocument(cmd.PermitID, cmd.Proposal, cmd.FailureCode, cmd.SuccessAudit, cmd.Diagnostic)
 				if err != nil {
 					t.Error(err)
 					return

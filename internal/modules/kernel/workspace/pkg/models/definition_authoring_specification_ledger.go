@@ -146,6 +146,9 @@ func (d DefinitionAuthoringDiagnostic) Validate() error {
 // A specification request records a single possible physical call. Neither a
 // reserved request nor a completed review grants admission.
 type DefinitionAuthoringSpecificationRequest struct {
+	WireContractRef     string                               `json:",omitempty"`
+	WireContractHash    string                               `json:",omitempty"`
+	ReviewAudit         *DefinitionAuthoringSuccessByteAudit `json:",omitempty"`
 	RequestID           string
 	DerivationPermitID  string
 	Phase               DefinitionSpecificationPhase
@@ -163,6 +166,10 @@ type DefinitionAuthoringSpecificationRequest struct {
 }
 
 func (r DefinitionAuthoringSpecificationRequest) Clone() DefinitionAuthoringSpecificationRequest {
+	if r.ReviewAudit != nil {
+		a := r.ReviewAudit.Clone()
+		r.ReviewAudit = &a
+	}
 	if r.Mapping != nil {
 		m := r.Mapping.Clone()
 		r.Mapping = &m
@@ -191,6 +198,9 @@ func (r DefinitionAuthoringSpecificationRequest) Clone() DefinitionAuthoringSpec
 func (r DefinitionAuthoringSpecificationRequest) ExpectedPermitID() string {
 	h := sha256.New()
 	writeDefinitionHash(h, "workspace-authoring-specification-permit-v1", r.RequestID, r.DerivationPermitID, string(r.Phase), r.ReviewKind, r.ProposalHash, r.ProviderBindingHash)
+	if r.WireContractRef != "" || r.WireContractHash != "" {
+		writeDefinitionHash(h, r.WireContractRef, r.WireContractHash)
+	}
 	return "authoring-spec-permit-sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
@@ -199,6 +209,34 @@ func (r DefinitionAuthoringSpecificationRequest) Validate() error { return r.val
 // ValidateView checks a detached metadata/canonical observation, not raw identity.
 func (r DefinitionAuthoringSpecificationRequest) ValidateView() error { return r.validate(true) }
 func (r DefinitionAuthoringSpecificationRequest) validate(view bool) error {
+	phase := "proposal"
+	if r.ReviewKind != "" {
+		phase = r.ReviewKind
+	}
+	if err := validateAuthoringWire(r.WireContractRef, r.WireContractHash, phase); err != nil {
+		return err
+	}
+	if r.Review != nil && r.WireContractRef != "" {
+		if r.ReviewAudit == nil {
+			return fmt.Errorf("owner-bound review lacks original document")
+		}
+		if view {
+			if err := r.ReviewAudit.ValidateMetadata(); err != nil {
+				return err
+			}
+		} else {
+			if err := r.ReviewAudit.Validate(); err != nil {
+				return err
+			}
+			v, err := DecodeOwnerBoundReview(r, r.ReviewAudit.Document.Content)
+			if err != nil || !reflect.DeepEqual(v, *r.Review) {
+				return fmt.Errorf("review differs from original semantic document")
+			}
+		}
+	} else if r.ReviewAudit != nil {
+		return fmt.Errorf("unexpected authoring review audit")
+	}
+
 	if r.Proposal != nil {
 		if r.Mapping == nil || r.SuccessAudit == nil {
 			return fmt.Errorf("authoring proposal lacks current mapping/success audit")
@@ -287,11 +325,14 @@ func validateAuthoringSpecificationRequestsMode(record DefinitionAuthoringRecord
 		if err != nil {
 			return err
 		}
+		if request.WireContractRef != derivation.WireContractRef {
+			return fmt.Errorf("authoring wire differs from derivation")
+		}
 		if request.ProviderBindingHash != derivation.ProviderBindingHash {
 			return fmt.Errorf("authoring specification provider binding differs from derivation")
 		}
 		if request.CompletionIdentity != "" && request.FailureCode != "" && !view {
-			if _, _, err := ReparseMappingFailure(request); err != nil {
+			if _, _, err := ReparseMappingFailure(request, derivation); err != nil {
 				return err
 			}
 		}
@@ -405,6 +446,9 @@ func (r DefinitionAuthoringRecord) ReserveSpecification(request DefinitionAuthor
 	if derivation.Input.InputHash() != r.InputHash || WorkspaceTemplateSnapshotHash(&derivation.Template) != r.TemplateSnapshotHash {
 		return DefinitionAuthoringRecord{}, request, false, fmt.Errorf("authoring specification input became stale")
 	}
+	if request.WireContractRef != derivation.WireContractRef {
+		return DefinitionAuthoringRecord{}, request, false, fmt.Errorf("authoring wire differs from derivation")
+	}
 	if request.ProviderBindingHash != derivation.ProviderBindingHash {
 		return DefinitionAuthoringRecord{}, request, false, fmt.Errorf("authoring specification provider binding changed after derivation")
 	}
@@ -443,10 +487,7 @@ func (r DefinitionAuthoringRecord) CompleteSpecificationMapping(permitID string,
 	if audit.Validate() != nil {
 		return DefinitionAuthoringRecord{}, fmt.Errorf("authoring mapping completion audit invalid")
 	}
-	decoded, err := DecodeDefinitionAuthoringMapping(audit.Document.Content)
-	if err != nil || !reflect.DeepEqual(decoded, mapping) {
-		return DefinitionAuthoringRecord{}, fmt.Errorf("authoring mapping completion raw mismatch")
-	}
+	var err error
 	var derivation DefinitionDerivationRequest
 	for _, request := range r.SpecificationRequests {
 		if request.PermitID == permitID {
@@ -456,6 +497,10 @@ func (r DefinitionAuthoringRecord) CompleteSpecificationMapping(permitID string,
 	}
 	if err != nil || derivation.Proposal == nil {
 		return DefinitionAuthoringRecord{}, fmt.Errorf("authoring mapping completion derivation missing")
+	}
+	decoded, err := DecodeAuthoringMappingFor(derivation, audit.Document.Content)
+	if err != nil || !reflect.DeepEqual(decoded, mapping) {
+		return DefinitionAuthoringRecord{}, fmt.Errorf("authoring mapping completion raw mismatch")
 	}
 	proposal, err := CompileDefinitionAuthoringMapping(derivation, mapping)
 	if err != nil {
@@ -481,6 +526,10 @@ func (r DefinitionAuthoringRecord) completeSpecification(permitID string, propos
 		completed := previous.Clone()
 		completed.Proposal, completed.Review, completed.FailureCode = proposal, review, failureCode
 		completed.Mapping, completed.SuccessAudit, completed.CompletionIdentity = mapping, audit, completionIdentity
+		if review != nil {
+			completed.ReviewAudit = audit
+			completed.SuccessAudit = nil
+		}
 		if diagnostic != nil {
 			d := diagnostic.Clone()
 			completed.Diagnostic = &d
@@ -516,4 +565,8 @@ func (r DefinitionAuthoringRecord) completeSpecification(permitID string, propos
 		return next, nil
 	}
 	return DefinitionAuthoringRecord{}, fmt.Errorf("authoring specification permit not found")
+}
+
+func (r DefinitionAuthoringRecord) CompleteReviewDocument(permit string, review GoalSpecificationCompletenessReview, audit DefinitionAuthoringSuccessByteAudit) (DefinitionAuthoringRecord, error) {
+	return r.completeSpecification(permit, nil, &review, "", nil, nil, &audit, "")
 }

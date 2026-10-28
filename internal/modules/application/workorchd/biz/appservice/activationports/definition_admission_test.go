@@ -17,7 +17,7 @@ import (
 )
 
 func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.T) {
-	builtin := builtinSoftwareDevTemplateForTest(t)
+	builtin := softwareDevProfileTemplateForTest(t)
 	workspace := &workspacemodel.Workspace{
 		ID: "workspace-builtin-software-dev", DeliverableDirectory: "/workspace", TemplateID: builtin.ID,
 		EvidencePolicies: workorcheventpayload.CloneSlice(builtin.EvidencePolicies),
@@ -31,7 +31,10 @@ func TestBuiltinSoftwareDevProfilePassesDefinitionAdmissionBeforeRun(t *testing.
 	assertBuiltinSoftwareDevCandidateAndBootstrap(t, builtin, workspace, goal, dod, candidate)
 }
 
-func builtinSoftwareDevTemplateForTest(t *testing.T) *workspacemodel.WorkspaceTemplate {
+// This fixture exercises the Profile with synthetic formal sources. Template-source
+// proof bindings require the real reviewed authoring inventory, covered by the
+// production-owner HTTP/full-size tests; they cannot be guessed from these rows.
+func softwareDevProfileTemplateForTest(t *testing.T) *workspacemodel.WorkspaceTemplate {
 	t.Helper()
 	templates, err := workorchdefaults.BuiltinWorkspaceTemplateDefaults()
 	if err != nil {
@@ -42,6 +45,7 @@ func builtinSoftwareDevTemplateForTest(t *testing.T) *workspacemodel.WorkspaceTe
 		if item.ID != "software-dev" {
 			continue
 		}
+		delete(item.ContextHints, "templateProofBindings")
 		hints, err := workorcheventpayload.FromMap(item.ContextHints)
 		if err != nil {
 			t.Fatalf("software-dev context hints: %v", err)
@@ -213,7 +217,7 @@ func containsActivationString(values []string, wanted string) bool {
 }
 
 func TestBuiltinSoftwareDevBootstrapBindsEveryCompiledManagedCWI(t *testing.T) {
-	builtin := builtinSoftwareDevTemplateForTest(t)
+	builtin := softwareDevProfileTemplateForTest(t)
 	workspace := &workspacemodel.Workspace{
 		ID: "workspace-builtin-proof-set", DeliverableDirectory: "/workspace", TemplateID: builtin.ID,
 		EvidencePolicies: workorcheventpayload.CloneSlice(builtin.EvidencePolicies),
@@ -297,7 +301,7 @@ func TestBuiltinSoftwareDevBootstrapBindsEveryCompiledManagedCWI(t *testing.T) {
 }
 
 func TestBuiltinSoftwareDevExplicitAcceptanceDimensionGetsExactProofClosure(t *testing.T) {
-	builtin := builtinSoftwareDevTemplateForTest(t)
+	builtin := softwareDevProfileTemplateForTest(t)
 	workspace := &workspacemodel.Workspace{ID: "workspace-builtin-dimension", DeliverableDirectory: "/workspace", TemplateID: builtin.ID}
 	goal := &workspacemodel.Goal{ID: "goal-builtin-dimension", WorkspaceID: workspace.ID, Text: "deliver an executable entrypoint", DefinitionRevision: "goal-dimension-r1"}
 	dod := &workspacemodel.DoD{ID: "dod-builtin-dimension", WorkspaceID: workspace.ID, Items: []string{"entrypoint is validated"}, DefinitionRevision: "dod-dimension-r1"}
@@ -1029,7 +1033,7 @@ func startupInputForActivationPortTest(candidate workspacemodel.DefinitionAdmiss
 }
 
 func TestBuiltinSoftwareDevSpecificationWildcardRemainsApplicableToProductionBootstrap(t *testing.T) {
-	template := builtinSoftwareDevTemplateForTest(t)
+	template := softwareDevProfileTemplateForTest(t)
 	w := &workspacemodel.Workspace{ID: "ws-default-spec", TemplateID: template.ID, DeliverableDirectory: t.TempDir(), EvidencePolicies: workorcheventpayload.CloneSlice(template.EvidencePolicies)}
 	goal := &workspacemodel.Goal{ID: "goal-default", WorkspaceID: w.ID, Text: "implement requested behavior", DefinitionRevision: "goal-r1"}
 	dod := &workspacemodel.DoD{ID: "dod-default", WorkspaceID: w.ID, Items: append([]string{"user criterion"}, template.DoDItems...), DefinitionRevision: "dod-r1"}

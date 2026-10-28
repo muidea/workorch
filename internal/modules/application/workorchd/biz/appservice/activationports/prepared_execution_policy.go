@@ -7,6 +7,7 @@ import (
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/startuppreparation"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -78,6 +79,11 @@ func CompilePreparedExecutionPolicy(snapshot startuppreparation.ExactConfirmedSt
 		return PreparedExecutionPolicy{}, err
 	}
 	execution := runtimeExecutionContract(contract)
+	compiled, err := definitionconfiguration.CompileForItems(w, &inputs.Template, snapshot.Candidate.DoDInputs)
+	if err != nil {
+		return PreparedExecutionPolicy{}, err
+	}
+	execution.ProfileContracts = compiled.ProfileContracts
 	if execution.Validate() != nil || runtimecontract.StableRuntimeProfileContractsHash(execution.ProfileContracts) != snapshot.StartupInput.RuntimeProfileContractsHash {
 		return PreparedExecutionPolicy{}, common.ErrConflict
 	}

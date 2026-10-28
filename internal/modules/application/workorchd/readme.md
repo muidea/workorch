@@ -60,8 +60,10 @@ Web 只在页面内存保留原 payload 和恢复提示；未收到完整创建�
 
 派生先展开 Goal／资源中未被具体承接的原验收主项，再补边界条件。proposal／review 共享由封存 Profile
 纯计算的逐候选 `sourceApplicableVerificationDeclarations`，复用 Workspace admission 的来源匹配和合并保留规则；
-这些身份选项不产生 `DECLARED`、语义可验结论或运行 credit。独立审查必须原样回显完整 proposal hash，
-任何结果的身份错配仍拒绝，不修复模型输出或重发原 permit。
+这些选项包含最终合并策略的 consumer refs／合同版本／消费时点，不产生 `DECLARED`、语义可验结论或运行 credit。
+新事务封存 `workorch.authoring.owner-bound/v2` 与阶段 schema hash；模型仅返回闭合语义结果，owner 从原 permit
+绑定 input/template/resource 及 critic kind/proposal 身份。原始 document/wire 独立保留，不补写 hash。旧 v1 账本
+仍精确核对身份回显；版本、阶段或 scope 漂移拒绝，不 fallback、不重发原 permit。
 
 系统配置读模型保留 persisted 默认选择，并通过既有 LLM typed active-configuration query 单独投影当前进程
 `llm.active` 目标。owner 观察不可用时留空并保持 restart-pending，不以 persisted 值冒充生效模型，不输出密钥。

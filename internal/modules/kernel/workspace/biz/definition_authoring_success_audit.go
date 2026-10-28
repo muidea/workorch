@@ -39,7 +39,7 @@ func (m *Biz) queryAuthoringSuccessAudit(ctx context.Context, c workspaceevents.
 		records = append(records, &w.DefinitionChangeCandidate.Record)
 	}
 	for _, record := range records {
-		for _, request := range record.SpecificationRequests {
+		for _, request := range record.DerivationRequests {
 			if request.PermitID != c.PermitID {
 				continue
 			}
@@ -47,6 +47,27 @@ func (m *Biz) queryAuthoringSuccessAudit(ctx context.Context, c workspaceevents.
 				return workspaceevents.QueryAuthoringSuccessAuditResult{}, common.ErrNotFound
 			}
 			r := workspaceevents.QueryAuthoringSuccessAuditResult{WorkspaceID: c.WorkspaceID, PermitID: c.PermitID, CanonicalHash: request.Proposal.ContentHash(), Audit: request.SuccessAudit.Clone()}
+			if r.ValidateFor(c) != nil {
+				return workspaceevents.QueryAuthoringSuccessAuditResult{}, common.ErrConflict
+			}
+			return r, nil
+		}
+		for _, request := range record.SpecificationRequests {
+			if request.PermitID != c.PermitID {
+				continue
+			}
+			var audit *workspace.DefinitionAuthoringSuccessByteAudit
+			hash := ""
+			if request.Proposal != nil && request.SuccessAudit != nil {
+				audit, hash = request.SuccessAudit, request.Proposal.ContentHash()
+			}
+			if request.Review != nil && request.ReviewAudit != nil {
+				audit, hash = request.ReviewAudit, request.ProposalHash
+			}
+			if audit == nil {
+				return workspaceevents.QueryAuthoringSuccessAuditResult{}, common.ErrNotFound
+			}
+			r := workspaceevents.QueryAuthoringSuccessAuditResult{WorkspaceID: c.WorkspaceID, PermitID: c.PermitID, CanonicalHash: hash, Audit: audit.Clone()}
 			if r.ValidateFor(c) != nil {
 				return workspaceevents.QueryAuthoringSuccessAuditResult{}, common.ErrConflict
 			}

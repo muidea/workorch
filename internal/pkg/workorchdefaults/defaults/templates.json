@@ -1122,7 +1122,9 @@
                     "triggerOwnerDiagnosticCode": "validation_input_symbol_case_mismatch",
                     "repairEvidenceKind": "state_change",
                     "repairOwnerModuleId": "blocks/file",
-                    "repairOperationKinds": ["patch/apply"],
+                    "repairOperationKinds": [
+                      "patch/apply"
+                    ],
                     "repairTargetPolicy": "existing_owner_scope",
                     "repairTargetRole": "validation_input_maintenance",
                     "repairDeclarationTargetSelectorRef": "file/workspace_deliverable",
@@ -1230,6 +1232,81 @@
             }
           ]
         }
+      },
+      "templateProofBindings": {
+        "protocolRef": "workorch.template-source-proof/v1",
+        "bindings": [
+          {
+            "candidateItemRef": "derived-dod:template:000003",
+            "text": "代码和配置变更保持最小且与目标直接相关，并提供 capability-owner receipt 可追溯的 state_change 证据",
+            "profileId": "software-dev",
+            "lineageAssertions": [
+              {
+                "ref": "template-minimal-change-owner-receipt",
+                "kind": "terminal_owner_operation_receipt",
+                "consumptionPoint": "post_terminal_delivery",
+                "terminalContractRef": "runtime/terminal-material-proof/v1",
+                "receiptSourceScope": "deliverable",
+                "receiptSourceId": "source_change",
+                "ownerModuleId": "blocks/file",
+                "requiredEffectScope": "workspace_durable",
+                "receiptChoiceContractRef": "runtime/terminal-receipt-choice/v1",
+                "receiptOperationChoices": [
+                  {
+                    "kind": "file/write",
+                    "variantId": ""
+                  },
+                  {
+                    "kind": "patch/apply",
+                    "variantId": "file_write"
+                  },
+                  {
+                    "kind": "patch/apply",
+                    "variantId": "text_replace"
+                  },
+                  {
+                    "kind": "patch/apply",
+                    "variantId": "unified_diff"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "candidateItemRef": "derived-dod:template:000004",
+            "text": "若 workspace 输出发生有意义变更，必须通过 git/write add/commit 形成本地版本控制快照，并在证据中引用 commit",
+            "profileId": "software-dev",
+            "lineageAssertions": [
+              {
+                "ref": "template-final-git-snapshot",
+                "kind": "terminal_owner_snapshot",
+                "consumptionPoint": "post_terminal_delivery",
+                "terminalContractRef": "runtime/terminal-material-proof/v2",
+                "receiptSourceScope": "deliverable",
+                "receiptSourceId": "version_control_snapshot",
+                "validationSourceScope": "deliverable",
+                "validationSourceId": "validation_report",
+                "ownerModuleId": "blocks/git",
+                "operationKind": "git/write",
+                "operationVariantId": "commit",
+                "requiredEffectScope": "workspace_durable"
+              }
+            ]
+          },
+          {
+            "candidateItemRef": "derived-dod:template:000013",
+            "text": "DoD 验收评估逐项给出 evidenceRefs，并在交付物索引中可追溯",
+            "profileId": "software-dev",
+            "lineageAssertions": [
+              {
+                "ref": "template-final-result-evidence-index",
+                "kind": "terminal_result_evidence_index",
+                "consumptionPoint": "post_terminal_delivery",
+                "terminalContractRef": "runtime/terminal-material-proof/v1"
+              }
+            ]
+          }
+        ]
       }
     },
     "evidencePolicies": [

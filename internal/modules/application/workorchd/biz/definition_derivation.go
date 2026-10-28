@@ -89,7 +89,7 @@ func (b *Biz) deriveDefinitionAcceptanceBound(ctx context.Context, id common.Wor
 	}
 	providerBindingHash := definitionProviderBindingHash(configuration)
 	identity.ProviderBindingHash = providerBindingHash
-	pending := workspace.DefinitionDerivationRequest{RequestID: requestID, Input: record.Input.Clone(), Template: record.TemplateSnapshot.Clone(), Resources: resources, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(resources), ProviderBindingHash: providerBindingHash}
+	pending := workspace.DefinitionDerivationRequest{WireContractRef: workspace.DefinitionAuthoringOwnerBoundV2, WireContractHash: workspace.AuthoringWireHash(workspace.DefinitionAuthoringOwnerBoundV2, "derive"), RequestID: requestID, Input: record.Input.Clone(), Template: record.TemplateSnapshot.Clone(), Resources: resources, ResourceSnapshotHash: workspace.DefinitionAuthoringResourcesHash(resources), ProviderBindingHash: providerBindingHash}
 	pending.PermitID = pending.ExpectedPermitID()
 	command, err := specifications.DerivationCommand(pending, configuration.DefaultChat)
 	if err != nil {
@@ -99,7 +99,7 @@ func (b *Biz) deriveDefinitionAcceptanceBound(ctx context.Context, id common.Wor
 	if err := ctx.Err(); err != nil {
 		return workspace.DefinitionDerivedAcceptance{}, err
 	}
-	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WorkspaceID: id, WorkspaceRevision: view.WorkspaceRevision, InputHash: record.InputHash, RequestID: requestID, Resources: resources, ResourceSnapshotHash: pending.ResourceSnapshotHash, ProviderBindingHash: providerBindingHash}
+	reserve := workspaceevents.ReserveDefinitionDerivationCommand{WireContractRef: pending.WireContractRef, WireContractHash: pending.WireContractHash, WorkspaceID: id, WorkspaceRevision: view.WorkspaceRevision, InputHash: record.InputHash, RequestID: requestID, Resources: resources, ResourceSnapshotHash: pending.ResourceSnapshotHash, ProviderBindingHash: providerBindingHash}
 	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceDerivationReserve, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, reserve)
 	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceDerivationReserve, eventcontract.LaneScope{WorkspaceID: string(id)}))
 	result := b.SendEvent(ev)
@@ -143,13 +143,16 @@ func (b *Biz) deriveDefinitionAcceptanceBound(ctx context.Context, id common.Wor
 		if payloadErr != nil {
 			return workspace.DefinitionDerivedAcceptance{}, payloadErr
 		}
-		proposal, parseErr := specifications.ParseDerivedAcceptance(payload, reservedRequest.Input, &reservedRequest.Template)
+		proposal, parseErr := specifications.ParseDerivedAcceptanceFor(payload, reservedRequest)
 		if parseErr != nil {
 			completion.FailureCode = "invalid_proposal"
 			diagnostic := authoringParserDiagnostic(parseErr, payload, response)
 			completion.Diagnostic = &diagnostic
 		} else {
 			completion.Proposal = &proposal
+			if pending.WireContractRef != "" {
+				completion.SuccessAudit = &workspace.DefinitionAuthoringSuccessByteAudit{Document: authoringProviderObservation(response.ObservedDocument), Wire: authoringProviderObservation(response.Wire)}
+			}
 		}
 	}
 	completed, settlementErr := b.settleDerivation(ctx, completion)
@@ -176,7 +179,7 @@ func sameAuthoringResourceRevisions(facts []fileevents.AcquireAuthoringResourceR
 }
 
 func derivationOutcome(request workspace.DefinitionDerivationRequest) (workspace.DefinitionDerivedAcceptance, error) {
-	if err := request.Validate(); err != nil {
+	if err := request.ValidateView(); err != nil {
 		return workspace.DefinitionDerivedAcceptance{}, err
 	}
 	if request.Proposal != nil {

@@ -3,6 +3,7 @@ package specifications
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -29,10 +30,30 @@ func DerivationCommand(derivation workspace.DefinitionDerivationRequest, target 
 		return llmevents.CompleteProviderCommand{}, err
 	}
 	contract := derivationOutputContract()
+	schema := derivationOutputSchema
+	promptVersion := "workorch.derivation_prompt.v1"
+	if derivation.WireContractRef != "" {
+		promptVersion = derivation.WireContractRef
+		var err error
+		schema, err = workspace.AuthoringWireSchema(derivation.WireContractRef, "derive")
+		if err != nil {
+			return llmevents.CompleteProviderCommand{}, err
+		}
+		var envelope map[string]json.RawMessage
+		if err = json.Unmarshal(payload, &envelope); err != nil {
+			return llmevents.CompleteProviderCommand{}, err
+		}
+		envelope["wireContractRef"], _ = json.Marshal(derivation.WireContractRef)
+		envelope["wireContractHash"], _ = json.Marshal(derivation.WireContractHash)
+		envelope["outputShape"] = json.RawMessage(`{"AdditionalItems":[]}`)
+		payload, _ = json.Marshal(envelope)
+		instructions := strings.Replace(derivationInstructions, "字段严格为 AuthoringInputHash、TemplateSnapshotHash、AdditionalItems；两个 hash 精确回显 OutputShape。", "唯一字段 AdditionalItems；禁止输出 AuthoringInputHash、TemplateSnapshotHash。机器身份由 owner 绑定。", 1)
+		contract = instructions + "\n输出合同 " + derivation.WireContractRef + "；禁止未知、重复、null字段。\nJSON Schema:\n" + schema
+	}
 	if len(payload)+len(contract) > maxDocumentBytes {
 		return llmevents.CompleteProviderCommand{}, fmt.Errorf("derivation input exceeds byte budget")
 	}
-	return llmevents.CompleteProviderCommand{Target: target, Request: llmevents.ProviderRequest{WorkspaceID: string(derivation.Input.WorkspaceID), Model: target.ModelID, Kind: "workspace/specification/derive", Schema: derivationOutputSchema, SchemaFormat: llmmodels.ProviderSchemaFormatJSONSchema, DialogLanguage: "zh-CN", PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.derivation_prompt.v1", Sections: []llmmodels.PromptSection{
+	return llmevents.CompleteProviderCommand{Target: target, Request: llmevents.ProviderRequest{WorkspaceID: string(derivation.Input.WorkspaceID), Model: target.ModelID, Kind: "workspace/specification/derive", Schema: schema, SchemaFormat: llmmodels.ProviderSchemaFormatJSONSchema, DialogLanguage: "zh-CN", PromptContext: &llmmodels.PromptContext{SchemaVersion: promptVersion, Sections: []llmmodels.PromptSection{
 		{ID: "C0.derivation-contract", Name: "验收派生合同", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: contract},
 		{ID: "C3.derivation-input", Name: "创作输入", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: string(payload)},
 	}}}}, nil

@@ -90,6 +90,12 @@ func Decode(value any) []runtimecontract.RuntimeProfileContract {
 				lineageAssertions = append(lineageAssertions, runtimecontract.RuntimeLineageAssertionRule{Ref: String(rule["ref"]), Kind: runtimecontract.RuntimeLineageAssertionKind(String(rule["kind"])), ConsumptionPoint: runtimecontract.RuntimeProofPhase(String(rule["consumptionPoint"])), MinCompletedRounds: Int(rule["minCompletedRounds"]), OwnerModuleID: String(rule["ownerModuleId"]), OperationKind: String(rule["operationKind"]), OperationVariantID: String(rule["operationVariantId"]), RequiredEffectScope: runtimecontract.RuntimeEffectScope(String(rule["requiredEffectScope"])), TerminalContractRef: String(rule["terminalContractRef"]), ReceiptSourceScope: String(rule["receiptSourceScope"]), ReceiptSourceID: String(rule["receiptSourceId"]), ValidationSourceScope: String(rule["validationSourceScope"]), ValidationSourceID: String(rule["validationSourceId"])})
 				lineageAssertions[len(lineageAssertions)-1].ExecutionSourceContractRef = String(rule["executionSourceContractRef"])
 				lineageAssertions[len(lineageAssertions)-1].RepairHistoryContractRef = String(rule["repairHistoryContractRef"])
+				lineageAssertions[len(lineageAssertions)-1].ReceiptChoiceContractRef = String(rule["receiptChoiceContractRef"])
+				for i, choice := range MapSlice(rule["receiptOperationChoices"]) {
+					if i < 4 {
+						lineageAssertions[len(lineageAssertions)-1].ReceiptOperationChoices[i] = runtimecontract.RuntimeOperationVariantRef{Kind: String(choice["kind"]), VariantID: String(choice["variantId"])}
+					}
+				}
 			}
 			repair := ValidationFailureRepairConvergence(item)
 			implementation := ImplementationWorkPolicy(item)

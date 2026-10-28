@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/testkit"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -115,6 +116,9 @@ func TestAuthoringProviderDocumentFaultsPersistAcrossFileReopen(t *testing.T) {
 					if err != nil {
 						t.Error(err)
 						return
+					}
+					if len(record.DerivationRequests) > 0 && record.DerivationRequests[0].WireContractRef == workspace.DefinitionAuthoringOwnerBoundV2 {
+						payload = testkit.OwnerBoundFixtureDocument(payload)
 					}
 					if call == failureCall {
 						payload = []byte(invalidDocument)

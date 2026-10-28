@@ -31,6 +31,14 @@ type Bindings struct {
 // effective profile contracts and policy snapshot bindings. It is pure: neither
 // source model is mutated and it performs no I/O.
 func Compile(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate) (Bindings, error) {
+	items, err := configurationDoDItems(workspace, template)
+	if err != nil {
+		return Bindings{}, err
+	}
+	return CompileForItems(workspace, template, items)
+}
+
+func CompileForItems(workspace *workspacemodel.Workspace, template *workspacemodel.WorkspaceTemplate, items []workspacemodel.DefinitionCandidateItem) (Bindings, error) {
 	if workspace == nil || template == nil {
 		return Bindings{}, common.ErrInvalidArgument
 	}
@@ -52,6 +60,11 @@ func Compile(workspace *workspacemodel.Workspace, template *workspacemodel.Works
 
 	effective := runtimeprofiledecode.MergeTemplateWorkspaceContextHintsForExecutionContract(templateHints, workspaceHints)
 	rawProfiles := runtimeprofiledecode.Map(effective["profileContracts"])
+	var err error
+	rawProfiles, err = compileTemplateProofBindings(template, workspaceHints, rawProfiles, items)
+	if err != nil {
+		return Bindings{}, err
+	}
 	profiles := runtimeprofiledecode.Decode(rawProfiles)
 	policies := make([]workspacemodel.DefinitionAdmissionPolicyBinding, 0, len(profiles)+len(template.EvidencePolicies)+len(workspace.EvidencePolicies)+1)
 	for _, profile := range profiles {

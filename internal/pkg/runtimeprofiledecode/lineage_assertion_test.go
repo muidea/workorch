@@ -186,3 +186,17 @@ func TestRuntimeProfileCrossSourceExecutionVersionDecoder(t *testing.T) {
 		t.Fatal("execution mapping escaped consumption phase")
 	}
 }
+
+func TestRuntimeProfileReceiptChoicesRejectTruncationAndShapeDrift(t *testing.T) {
+	choices := []any{map[string]any{"kind": "file/write"}, map[string]any{"kind": "patch/apply", "variantId": "text_replace"}}
+	rule := map[string]any{"receiptChoiceContractRef": runtimecontract.RuntimeTerminalReceiptChoiceV1, "receiptOperationChoices": choices}
+	if err := ValidateObject(rule, "lineageAssertion", "rule"); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []any{nil, []any{}, choices[:1], append(append([]any{}, choices...), choices[0], choices[1], choices[0]), []any{choices[0], map[string]any{"kind": "file/write", "unknown": "field"}}} {
+		rule["receiptOperationChoices"] = invalid
+		if ValidateObject(rule, "lineageAssertion", "rule") == nil {
+			t.Fatal("invalid raw operation list accepted", invalid)
+		}
+	}
+}

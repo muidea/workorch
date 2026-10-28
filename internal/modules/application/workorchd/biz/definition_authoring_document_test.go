@@ -2,6 +2,7 @@ package biz
 
 import (
 	"errors"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/testkit"
 	"testing"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
@@ -45,6 +46,9 @@ func TestAuthoringParserDiagnosticRetainsWireWithoutProviderFailure(t *testing.T
 
 func authoringTestDocumentResult(t *testing.T, command llmevents.CompleteProviderDocumentCommand, payload []byte) llmevents.CompleteProviderDocumentResult {
 	t.Helper()
+	if command.Request.PromptContext != nil && command.Request.PromptContext.SchemaVersion == workspace.DefinitionAuthoringOwnerBoundV2 {
+		payload = testkit.OwnerBoundFixtureDocument(payload)
+	}
 	hash, err := command.RequestHash()
 	if err != nil {
 		t.Fatal(err)

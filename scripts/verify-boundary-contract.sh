@@ -4390,10 +4390,13 @@ done
 # Workspace owner independently seal the same current source facts.
 definition_configuration_source="$({
 	sed -n '/^func Compile(/,/^}/p' internal/pkg/definitionconfiguration/definition_configuration.go
+	sed -n '/^func CompileForItems(/,/^}/p' internal/pkg/definitionconfiguration/definition_configuration.go
 	sed -n '/^func validateEvidencePolicies(/,/^}/p' internal/pkg/definitionconfiguration/definition_configuration.go
 	sed -n '/^func evidencePolicyBindings(/,/^}/p' internal/pkg/definitionconfiguration/definition_configuration.go
 })"
 for marker in \
+	'return CompileForItems(workspace, template, items)' \
+	'compileTemplateProofBindings(template, workspaceHints, rawProfiles, items)' \
 	'validateEvidencePolicies("Template ' \
 	'validateEvidencePolicies("Workspace ' \
 	'payloadContainsField(item.Fields, "prospectiveTargetRef")' \

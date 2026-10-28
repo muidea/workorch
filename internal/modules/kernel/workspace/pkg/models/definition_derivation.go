@@ -13,6 +13,9 @@ const DefinitionDerivationAttemptLimit = 2
 // DefinitionDerivationRequest 记录一次派生调用，nil 结果表示已记账但结果未决。
 // Input/Template 为调用时快照，编辑当前草稿不能覆盖历史预算。
 type DefinitionDerivationRequest struct {
+	WireContractRef      string                               `json:",omitempty"`
+	WireContractHash     string                               `json:",omitempty"`
+	SuccessAudit         *DefinitionAuthoringSuccessByteAudit `json:",omitempty"`
 	RequestID            string
 	Input                DefinitionAuthoringInput
 	Template             WorkspaceTemplate
@@ -26,6 +29,10 @@ type DefinitionDerivationRequest struct {
 }
 
 func (r DefinitionDerivationRequest) Clone() DefinitionDerivationRequest {
+	if r.SuccessAudit != nil {
+		a := r.SuccessAudit.Clone()
+		r.SuccessAudit = &a
+	}
 	r.Input = r.Input.Clone()
 	r.Template = r.Template.Clone()
 	r.Resources = CloneDefinitionAuthoringResources(r.Resources)
@@ -46,12 +53,21 @@ func (r DefinitionDerivationRequest) Clone() DefinitionDerivationRequest {
 func (r DefinitionDerivationRequest) ExpectedPermitID() string {
 	h := sha256.New()
 	writeDefinitionHash(h, "workspace-derivation-permit-v2", r.RequestID, r.Input.InputHash(), WorkspaceTemplateSnapshotHash(&r.Template), r.ResourceSnapshotHash, r.ProviderBindingHash)
+	if r.WireContractRef != "" || r.WireContractHash != "" {
+		writeDefinitionHash(h, r.WireContractRef, r.WireContractHash)
+	}
 	return "derivation-permit-sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
 func (r DefinitionDerivationRequest) Validate() error     { return r.validate(false) }
 func (r DefinitionDerivationRequest) ValidateView() error { return r.validate(true) }
 func (r DefinitionDerivationRequest) validate(view bool) error {
+	if err := validateAuthoringWire(r.WireContractRef, r.WireContractHash, "derive"); err != nil {
+		return err
+	}
+	if err := validateOwnerBoundDerivationAudit(r, view); err != nil {
+		return err
+	}
 	if r.Diagnostic != nil {
 		if view {
 			if r.Diagnostic.ValidateMetadata() != nil {
@@ -108,7 +124,7 @@ func validateDerivationRequestsMode(records []DefinitionDerivationRequest, input
 }
 
 // ReserveDerivation 仅计算下一份记录；调用方必须 CAS 成功后才能使用 fresh=true。
-func (r DefinitionAuthoringRecord) ReserveDerivation(requestID, providerBindingHash string, resources []DefinitionAuthoringResourceSnapshot) (next DefinitionAuthoringRecord, request DefinitionDerivationRequest, fresh bool, err error) {
+func (r DefinitionAuthoringRecord) ReserveDerivation(requestID, providerBindingHash string, resources []DefinitionAuthoringResourceSnapshot, wireRefs ...string) (next DefinitionAuthoringRecord, request DefinitionDerivationRequest, fresh bool, err error) {
 	if err = r.Validate(); err != nil {
 		return
 	}
@@ -116,6 +132,14 @@ func (r DefinitionAuthoringRecord) ReserveDerivation(requestID, providerBindingH
 		return
 	}
 	request = DefinitionDerivationRequest{RequestID: requestID, Input: r.Input.Clone(), Template: r.TemplateSnapshot.Clone(), Resources: CloneDefinitionAuthoringResources(resources), ResourceSnapshotHash: DefinitionAuthoringResourcesHash(resources), ProviderBindingHash: providerBindingHash}
+	if len(wireRefs) > 1 {
+		err = fmt.Errorf("multiple authoring wire contracts")
+		return
+	}
+	if len(wireRefs) == 1 {
+		request.WireContractRef = wireRefs[0]
+		request.WireContractHash = AuthoringWireHash(wireRefs[0], "derive")
+	}
 	request.PermitID = request.ExpectedPermitID()
 	if err = request.Validate(); err != nil {
 		return
@@ -151,6 +175,12 @@ func (r DefinitionAuthoringRecord) ReserveDerivation(requestID, providerBindingH
 }
 
 func (r DefinitionAuthoringRecord) CompleteDerivation(permitID string, proposal *DefinitionDerivedAcceptance, failureCode string, diagnostics ...*DefinitionAuthoringDiagnostic) (DefinitionAuthoringRecord, error) {
+	return r.completeDerivationDocument(permitID, proposal, failureCode, nil, diagnostics...)
+}
+func (r DefinitionAuthoringRecord) CompleteDerivationDocument(permitID string, proposal *DefinitionDerivedAcceptance, failureCode string, audit *DefinitionAuthoringSuccessByteAudit, diagnostic *DefinitionAuthoringDiagnostic) (DefinitionAuthoringRecord, error) {
+	return r.completeDerivationDocument(permitID, proposal, failureCode, audit, diagnostic)
+}
+func (r DefinitionAuthoringRecord) completeDerivationDocument(permitID string, proposal *DefinitionDerivedAcceptance, failureCode string, audit *DefinitionAuthoringSuccessByteAudit, diagnostics ...*DefinitionAuthoringDiagnostic) (DefinitionAuthoringRecord, error) {
 	if err := r.Validate(); err != nil {
 		return DefinitionAuthoringRecord{}, err
 	}
@@ -167,6 +197,7 @@ func (r DefinitionAuthoringRecord) CompleteDerivation(permitID string, proposal 
 		}
 		completed := previous.Clone()
 		completed.Proposal, completed.FailureCode, completed.Diagnostic = proposal, failureCode, diagnostic
+		completed.SuccessAudit = audit
 		completed = completed.Clone()
 		if proposal == nil && failureCode == "" {
 			return DefinitionAuthoringRecord{}, fmt.Errorf("derivation completion requires outcome")
@@ -186,4 +217,19 @@ func (r DefinitionAuthoringRecord) CompleteDerivation(permitID string, proposal 
 		return next, nil
 	}
 	return DefinitionAuthoringRecord{}, fmt.Errorf("derivation permit not found")
+}
+
+// Metadata projects the typed context for pure compilers. It is never accepted
+// by full persistence validation in place of the original byte audit.
+func (r DefinitionDerivationRequest) Metadata() DefinitionDerivationRequest {
+	r = r.Clone()
+	if r.SuccessAudit != nil {
+		a := r.SuccessAudit.Metadata()
+		r.SuccessAudit = &a
+	}
+	if r.Diagnostic != nil {
+		d := r.Diagnostic.Metadata()
+		r.Diagnostic = &d
+	}
+	return r
 }

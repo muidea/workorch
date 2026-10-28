@@ -38,12 +38,12 @@ func reduceDefinitionDerivation(o definitionSpecificationObservation, e definiti
 		if cmd.Validate() != nil || cmd.InputHash != record.InputHash || cmd.WorkspaceID != w.ID || o.template == nil || workspace.WorkspaceTemplateSnapshotHash(o.template) != record.TemplateSnapshotHash || workspace.ValidateDefinitionAuthoringResources(record.Input, cmd.Resources) != nil || (len(cmd.Resources) > 0 && (!e.VerifiedResources || cmd.WorkspaceRevision != w.Revision)) {
 			return definitionSpecificationTransition{}, common.ErrConflict
 		}
-		next, request, fresh, err = record.ReserveDerivation(cmd.RequestID, cmd.ProviderBindingHash, cmd.Resources)
+		next, request, fresh, err = record.ReserveDerivation(cmd.RequestID, cmd.ProviderBindingHash, cmd.Resources, cmd.WireContractRef)
 	} else if cmd := e.DeriveComplete; cmd != nil {
 		if cmd.Validate() != nil || cmd.WorkspaceID != w.ID {
 			return definitionSpecificationTransition{}, common.ErrInvalidArgument
 		}
-		next, err = record.CompleteDerivation(cmd.PermitID, cmd.Proposal, cmd.FailureCode, cmd.Diagnostic)
+		next, err = record.CompleteDerivationDocument(cmd.PermitID, cmd.Proposal, cmd.FailureCode, cmd.SuccessAudit, cmd.Diagnostic)
 		if err == nil {
 			for _, item := range next.DerivationRequests {
 				if item.PermitID == cmd.PermitID {

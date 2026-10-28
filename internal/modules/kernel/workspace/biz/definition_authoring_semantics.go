@@ -16,7 +16,7 @@ func validateAuthoringVerificationAgainstSealedTemplate(sealedTemplateHash strin
 	if err := workspacemodel.ValidateAuthoringSpecification(derivation.Input, &derivation.Template, *derivation.Proposal, derivation.Resources, specification); err != nil {
 		return err
 	}
-	bindings, err := definitionconfiguration.Compile(&workspacemodel.Workspace{}, &derivation.Template)
+	bindings, err := definitionconfiguration.CompileAuthoring(derivation)
 	if err != nil {
 		return fmt.Errorf("compile sealed Template profiles: %w", err)
 	}

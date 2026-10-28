@@ -299,3 +299,19 @@ already-judged closeout and does not recompute coverage.
 - `make verify-runtime-profile-software-dev` checks persisted/profile projection compatibility;
 - `make verify-software-dev-goal-dod-e2e` and the SRD wrapper execute current bootstrap, CWI binding, focus advancement,
   evidence-credit and file-backed restart tests. Their historical target names do not add a second Runtime contract.
+
+## Template source proof bindings
+
+The default template seals `workorch.template-source-proof/v1` in `templateProofBindings`. Each binding includes the exact
+`derived-dod:template:NNNNNN` source, original text, Profile ID and typed lineage consumers. The pure configuration compiler
+resolves the confirmed source inventory to formal DoD IDs; user acceptance items may shift those IDs. Missing, duplicate,
+changed or ambiguous sources fail closed. Workspace configuration cannot replace the template contract. Proposal, critic,
+owner completion, confirmation/admission and activation compile the same effective Profile; activation verifies its sealed hash.
+
+Template item 3 adds a File receipt from `deliverable/source_change`, allowing only `file/write` or `patch/apply` variants
+`file_write`, `text_replace`, `unified_diff`. Item 4 adds the final Git snapshot consumer bound to
+`deliverable/version_control_snapshot` and `deliverable/validation_report`. Item 13 adds the formal Result evidence index.
+Each item still requires ordinary validation. These guards consume only at `post_terminal_delivery`; ordinary DoD validation
+never waits for the later Git/Result artifacts and no future receipt is fabricated. Options expose actual merged consumers,
+not observed evidence or a promise that arbitrary natural-language criteria are executable. Existing sealed Workspace input
+is not rewritten when the builtin template is explicitly upgraded.

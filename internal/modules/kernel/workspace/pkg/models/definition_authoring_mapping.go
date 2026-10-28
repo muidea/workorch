@@ -72,7 +72,7 @@ func (m DefinitionAuthoringMapping) Clone() DefinitionAuthoringMapping {
 
 // CompileDefinitionAuthoringMapping 是 owner 纯编译；Profile 适用性仍由 receiving owner 独立校验，不授予证据 credit。
 func CompileDefinitionAuthoringMapping(d DefinitionDerivationRequest, m DefinitionAuthoringMapping) (GoalSpecification, error) {
-	if d.Validate() != nil || d.Proposal == nil {
+	if d.Metadata().ValidateView() != nil || d.Proposal == nil {
 		return GoalSpecification{}, fmt.Errorf("authoring mapping requires complete sealed derivation")
 	}
 	c, err := newAuthoringSpecificationContext(d.Input, &d.Template, *d.Proposal, d.Resources)
@@ -235,7 +235,7 @@ func RecompileDefinitionAuthoringProposal(d DefinitionDerivationRequest, r Defin
 	if r.Mapping == nil || r.SuccessAudit == nil || r.SuccessAudit.Validate() != nil {
 		return GoalSpecification{}, fmt.Errorf("authoring proposal lacks current mapping and complete success byte audit")
 	}
-	decoded, err := DecodeDefinitionAuthoringMapping(r.SuccessAudit.Document.Content)
+	decoded, err := DecodeAuthoringMappingFor(d, r.SuccessAudit.Document.Content)
 	if err != nil {
 		return GoalSpecification{}, err
 	}

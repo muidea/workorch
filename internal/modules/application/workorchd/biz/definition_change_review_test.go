@@ -115,7 +115,7 @@ func testDefinitionChangeCandidateReview(t *testing.T, scenario string) {
 			verification := workspace.DefinitionAuthoringVerificationMapping{Status: workspace.GoalVerificationDeclared, Declaration: "已封存模板的逐义务证明"}
 			for _, profile := range bindings.ProfileContracts {
 				for _, requirement := range profile.EvidenceRequirements {
-					if requirement.Scope == "dodItem" {
+					if requirement.Scope == "dodItem" && requirement.ID == "*" {
 						verification.ProfileID, verification.EvidenceRequirementID, verification.Scope = profile.ID, requirement.ID, requirement.Scope
 					}
 				}

@@ -63,7 +63,7 @@ func reduceAuthoringSpecification(o definitionSpecificationObservation, e defini
 			if derivation == nil {
 				return definitionSpecificationTransition{}, common.ErrConflict
 			}
-			decoded, decodeErr := workspace.DecodeDefinitionAuthoringMapping(cmd.SuccessAudit.Document.Content)
+			decoded, decodeErr := workspace.DecodeAuthoringMappingFor(*derivation, cmd.SuccessAudit.Document.Content)
 			if decodeErr != nil || !reflect.DeepEqual(decoded, *cmd.Mapping) {
 				return definitionSpecificationTransition{}, common.ErrConflict
 			}
@@ -80,6 +80,8 @@ func reduceAuthoringSpecification(o definitionSpecificationObservation, e defini
 			} else {
 				next, err = record.CompleteSpecificationMapping(cmd.PermitID, decoded, *cmd.SuccessAudit)
 			}
+		} else if cmd.Review != nil && cmd.SuccessAudit != nil {
+			next, err = record.CompleteReviewDocument(cmd.PermitID, *cmd.Review, *cmd.SuccessAudit)
 		} else {
 			next, err = record.CompleteSpecification(cmd.PermitID, cmd.Proposal, cmd.Review, cmd.FailureCode, cmd.Diagnostic)
 		}

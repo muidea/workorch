@@ -13,7 +13,7 @@ func ParseAuthoringMapping(payload []byte) (workspace.DefinitionAuthoringMapping
 }
 
 func ParseAuthoringProposal(payload []byte, derivation workspace.DefinitionDerivationRequest) (workspace.GoalSpecification, error) {
-	mapping, err := ParseAuthoringMapping(payload)
+	mapping, err := workspace.DecodeAuthoringMappingFor(derivation, payload)
 	if err != nil {
 		return workspace.GoalSpecification{}, err
 	}
@@ -25,7 +25,7 @@ func ParseAuthoringProposal(payload []byte, derivation workspace.DefinitionDeriv
 	if err != nil {
 		return workspace.GoalSpecification{}, err
 	}
-	bindings, err := definitionconfiguration.Compile(&workspace.Workspace{}, &derivation.Template)
+	bindings, err := definitionconfiguration.CompileAuthoring(derivation)
 	if err != nil {
 		return workspace.GoalSpecification{}, fmt.Errorf("compile sealed template profiles: %w", err)
 	}
@@ -36,10 +36,16 @@ func ParseAuthoringProposal(payload []byte, derivation workspace.DefinitionDeriv
 }
 
 func ParseAuthoringReview(payload []byte, kind string, proposal workspace.GoalSpecification, derivation workspace.DefinitionDerivationRequest) (workspace.GoalSpecificationCompletenessReview, error) {
-	if derivation.Validate() != nil || derivation.Proposal == nil {
+	if derivation.Metadata().ValidateView() != nil || derivation.Proposal == nil {
 		return workspace.GoalSpecificationCompletenessReview{}, fmt.Errorf("authoring review requires completed derivation")
 	}
-	review, err := ParseReview(payload, kind, proposal)
+	var review workspace.GoalSpecificationCompletenessReview
+	var err error
+	if derivation.WireContractRef == "" {
+		review, err = ParseReview(payload, kind, proposal)
+	} else {
+		review, err = workspace.DecodeOwnerBoundReview(workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: derivation.WireContractRef, WireContractHash: workspace.AuthoringWireHash(derivation.WireContractRef, kind), ReviewKind: kind, ProposalHash: proposal.ContentHash()}, payload)
+	}
 	if err != nil {
 		return workspace.GoalSpecificationCompletenessReview{}, err
 	}

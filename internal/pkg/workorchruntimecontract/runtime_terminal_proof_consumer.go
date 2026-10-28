@@ -174,7 +174,7 @@ func runtimeTerminalMaterialAssertion(source RuntimeStateRecord, material Runtim
 				continue
 			}
 			for _, operation := range runtimeCandidateAdmissionOperations(dispatch.Candidate) {
-				if operation.Kind != rule.OperationKind {
+				if rule.ReceiptChoiceContractRef == "" && operation.Kind != rule.OperationKind {
 					continue
 				}
 				contract, found := RuntimeOperationContractForKind(operation.Kind)
@@ -190,7 +190,7 @@ func runtimeTerminalMaterialAssertion(source RuntimeStateRecord, material Runtim
 					variantID = variant.ID
 				}
 				fact, receipt, valid := runtimeLineageOperationFact(dispatch, operation, sources, true)
-				if variantID != rule.OperationVariantID || !valid || receipt.ObservedEffectScope != rule.RequiredEffectScope || !slices.Contains(refs, string(fact.ID)) || !slices.Contains(fact.CoverageWorkItemIDs, id) || EvidenceRevisionAfter(fact.Revision, source.Facts.EvidenceRevision) {
+				if !runtimeTerminalReceiptOperationMatches(rule, operation.Kind, variantID) || !valid || receipt.ObservedEffectScope != rule.RequiredEffectScope || !slices.Contains(refs, string(fact.ID)) || !slices.Contains(fact.CoverageWorkItemIDs, id) || EvidenceRevisionAfter(fact.Revision, source.Facts.EvidenceRevision) {
 					continue
 				}
 				for _, binding := range dispatch.CoverageBindings {

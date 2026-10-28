@@ -280,7 +280,7 @@ func implementationWorkFullflowAuthoringMapping(record *workspace.DefinitionAuth
 		return m, err
 	}
 	d := record.DerivationRequests[0]
-	b, err := definitionconfiguration.Compile(&workspace.Workspace{}, &d.Template)
+	b, err := definitionconfiguration.CompileAuthoring(d)
 	if err != nil {
 		return m, err
 	}

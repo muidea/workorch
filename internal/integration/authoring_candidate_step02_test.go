@@ -109,7 +109,7 @@ func testAuthoringProductionOwners(t *testing.T, confirm bool) {
 	// Independently check each source against the actual default Profile, not
 	// merely the fixture's self-reported DECLARED status or the Web projection.
 	record := stored.DefinitionAuthoring
-	bindings, err := definitionconfiguration.Compile(&workspace.Workspace{}, &record.TemplateSnapshot)
+	bindings, err := definitionconfiguration.CompileAuthoring(record.DerivationRequests[0])
 	if err != nil {
 		t.Fatal(err)
 	}

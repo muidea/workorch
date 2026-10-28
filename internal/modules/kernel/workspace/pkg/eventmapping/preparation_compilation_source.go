@@ -15,6 +15,7 @@ func compilationAuthoring(r workspace.DefinitionAuthoringRecord) workspaceevents
 	dto.SpecificationRequests = r.SpecificationRequests
 	for i, request := range r.DerivationRequests {
 		dto.DerivationRequests[i].Diagnostic = request.Diagnostic
+		dto.DerivationRequests[i].SuccessAudit = request.SuccessAudit
 	}
 	return workspaceevents.PreparationCompilationAuthoring{Record: dto, Diagnostics: r.PreparationDiagnostics}
 }

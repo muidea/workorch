@@ -7,11 +7,16 @@ import (
 
 func DefinitionDerivationRequestDTO(r workspace.DefinitionDerivationRequest) workspaceevents.DefinitionDerivationRequest {
 	r = r.Clone()
+	if r.SuccessAudit != nil {
+		a := r.SuccessAudit.Metadata()
+		r.SuccessAudit = &a
+	}
 	if r.Diagnostic != nil {
 		d := r.Diagnostic.Metadata()
 		r.Diagnostic = &d
 	}
 	return workspaceevents.DefinitionDerivationRequest{
+		WireContractRef: r.WireContractRef, WireContractHash: r.WireContractHash, SuccessAudit: r.SuccessAudit,
 		RequestID: r.RequestID, Input: r.Input, Template: *TemplateDTO(&r.Template),
 		Resources: r.Resources, ResourceSnapshotHash: r.ResourceSnapshotHash,
 		ProviderBindingHash: r.ProviderBindingHash, PermitID: r.PermitID,

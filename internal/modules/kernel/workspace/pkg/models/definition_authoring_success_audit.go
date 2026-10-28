@@ -116,6 +116,10 @@ func (d DefinitionAuthoringDiagnostic) ValidateMetadata() error {
 }
 func (r DefinitionAuthoringSpecificationRequest) Metadata() DefinitionAuthoringSpecificationRequest {
 	r = r.Clone()
+	if r.ReviewAudit != nil {
+		a := r.ReviewAudit.Metadata()
+		r.ReviewAudit = &a
+	}
 	if r.SuccessAudit != nil {
 		a := r.SuccessAudit.Metadata()
 		r.SuccessAudit = &a

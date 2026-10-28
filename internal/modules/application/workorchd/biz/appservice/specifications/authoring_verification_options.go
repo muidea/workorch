@@ -7,9 +7,10 @@ import (
 )
 
 type authoringVerificationDeclaration struct {
-	ProfileID             string `json:"profileId"`
-	EvidenceRequirementID string `json:"evidenceRequirementId"`
-	Scope                 string `json:"scope"`
+	ProfileID             string                                        `json:"profileId"`
+	EvidenceRequirementID string                                        `json:"evidenceRequirementId"`
+	Scope                 string                                        `json:"scope"`
+	Consumers             []runtimecontract.RuntimeLineageAssertionRule `json:"consumers"`
 }
 
 type authoringCandidateVerificationOptions struct {
@@ -21,6 +22,10 @@ type authoringCandidateVerificationOptions struct {
 // Reuse the receiving owner's after-image source resolver and merged-policy gate.
 func authoringVerificationOptions(items []workspace.DefinitionCandidateItem, profiles []runtimecontract.RuntimeProfileContract) []authoringCandidateVerificationOptions {
 	result := make([]authoringCandidateVerificationOptions, 0, len(items))
+	sources, valid := definitionadmission.SpecificationDoDSources(items)
+	if !valid {
+		return result
+	}
 	for _, item := range items {
 		options := authoringCandidateVerificationOptions{CandidateItemRef: item.CandidateItemRef, Declarations: []authoringVerificationDeclaration{}}
 		spec := workspace.GoalSpecification{Obligations: []workspace.GoalSpecificationObligation{{ID: "source", DoDItemRefs: []string{item.CandidateItemRef}}}}
@@ -28,7 +33,11 @@ func authoringVerificationOptions(items []workspace.DefinitionCandidateItem, pro
 			for _, declaration := range profile.EvidenceRequirements {
 				verification := workspace.GoalSpecificationVerification{ObligationID: "source", ProfileID: profile.ID, EvidenceRequirementID: declaration.ID, Scope: declaration.Scope}
 				if definitionadmission.SpecificationVerificationApplies(spec, verification, items, profiles) {
-					options.Declarations = append(options.Declarations, authoringVerificationDeclaration{profile.ID, declaration.ID, declaration.Scope})
+					policy, err := runtimecontract.CompileRuntimeSourceEvidencePolicy("dodItem", sources[item.CandidateItemRef], profiles, nil)
+					if err != nil {
+						continue
+					}
+					options.Declarations = append(options.Declarations, authoringVerificationDeclaration{ProfileID: profile.ID, EvidenceRequirementID: declaration.ID, Scope: declaration.Scope, Consumers: append([]runtimecontract.RuntimeLineageAssertionRule{}, policy.LineageAssertions...)})
 				}
 			}
 		}

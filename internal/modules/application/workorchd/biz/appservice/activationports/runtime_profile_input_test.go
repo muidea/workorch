@@ -34,7 +34,7 @@ func TestRuntimeProfileInputAcceptsEveryBuiltinTemplate(t *testing.T) {
 }
 
 func TestBuiltinValidationGuidanceSurvivesTypedActivationAndReload(t *testing.T) {
-	template := builtinSoftwareDevTemplateForTest(t)
+	template := softwareDevProfileTemplateForTest(t)
 	raw := template.ContextHints.Map()
 	if err := validateRuntimePresealTargetDeclarations(raw, nil); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestRuntimeProfileInputRejectsBeforeMergeAndFinalActivation(t *testing.T) {
 	for _, field := range []string{"required", "unknown"} {
 		for _, source := range []string{"template", "workspace"} {
 			t.Run(field+"/"+source, func(t *testing.T) {
-				builtin := builtinSoftwareDevTemplateForTest(t)
+				builtin := softwareDevProfileTemplateForTest(t)
 				valid := map[string]any{"id": "required-source", "required": true}
 				invalid := map[string]any{"id": "required-source", "required": "true"}
 				if field == "unknown" {
@@ -196,7 +196,7 @@ func TestRuntimeProfileInputRejectsBeforeMergeAndFinalActivation(t *testing.T) {
 func TestDefinitionAdmissionRejectsDuplicateProfileObligationsBeforeCoverage(t *testing.T) {
 	for _, source := range []string{"template", "workspace"} {
 		t.Run(source, func(t *testing.T) {
-			builtin := builtinSoftwareDevTemplateForTest(t)
+			builtin := softwareDevProfileTemplateForTest(t)
 			workspace := &workspacemodel.Workspace{ID: "workspace-profile", DeliverableDirectory: "/workspace", TemplateID: builtin.ID}
 			hints := map[string]any{"profileContracts": map[string]any{"software-dev": map[string]any{"deliverableExpectations": []any{map[string]any{"id": "extra", "required": true}, map[string]any{"id": "extra", "required": false}}}}}
 			payload, err := workorcheventpayload.FromMap(hints)
@@ -241,7 +241,7 @@ func TestDefinitionAdmissionRejectsDuplicateProfileObligationsBeforeCoverage(t *
 func TestDefinitionProfileShapeIsCheckedBeforeConfigurationMerge(t *testing.T) {
 	for _, source := range []string{"template", "workspace"} {
 		t.Run(source, func(t *testing.T) {
-			builtin := builtinSoftwareDevTemplateForTest(t)
+			builtin := softwareDevProfileTemplateForTest(t)
 			workspace := &workspacemodel.Workspace{ID: "workspace-profile", TemplateID: builtin.ID}
 			bad, err := workorcheventpayload.FromMap(map[string]any{"profileContracts": map[string]any{"software-dev": map[string]any{"deliverableExpectations": []any{false}}}})
 			if err != nil {

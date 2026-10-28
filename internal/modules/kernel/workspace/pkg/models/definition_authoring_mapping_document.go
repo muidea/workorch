@@ -14,6 +14,10 @@ import (
 // Decoder 由 Workspace owner 管理，供 Application 预检和 owner 重解析共同使用。
 // schema 或 transport-native 格式不能放宽此合同。
 func DecodeDefinitionAuthoringMapping(payload []byte) (DefinitionAuthoringMapping, error) {
+	return decodeDefinitionAuthoringMappingShape(payload, authoringMappingShape)
+}
+
+func decodeDefinitionAuthoringMappingShape(payload []byte, shape mappingShape) (DefinitionAuthoringMapping, error) {
 	if len(payload) == 0 || len(payload) > DefinitionAuthoringDiagnosticDocumentLimit || !utf8.Valid(payload) {
 		return DefinitionAuthoringMapping{}, fmt.Errorf("authoring mapping requires bounded complete UTF-8 document")
 	}
@@ -35,7 +39,7 @@ func DecodeDefinitionAuthoringMapping(payload []byte) (DefinitionAuthoringMappin
 			return DefinitionAuthoringMapping{}, fmt.Errorf("authoring mapping contains trailing data")
 		}
 	}
-	if err := authoringMappingShape.validate(payload, "$"); err != nil {
+	if err := shape.validate(payload, "$"); err != nil {
 		return DefinitionAuthoringMapping{}, err
 	}
 	var wire struct {

@@ -17,6 +17,7 @@ func compilationMappingFixture(t *testing.T) *workspace.Workspace {
 	r := authoringMappingFixture(t)
 	d := workspace.NewDefinitionAuthoringDiagnostic("原错误\r\n", []byte{0xff, 0, '\r', '\n'})
 	r.DerivationRequests[0].Diagnostic = &d
+	r.DerivationRequests[0].SuccessAudit = &workspace.DefinitionAuthoringSuccessByteAudit{Document: workspace.DefinitionProviderObservation{Content: []byte("derive original\r\n")}, Wire: workspace.DefinitionProviderObservation{Content: []byte("derive wire\r\n")}}
 	d = d.Clone()
 	r.SpecificationRequests[0].Diagnostic = &d
 	r.PreparationDiagnostics = []workspace.DefinitionAuthoringPreparationDiagnostic{
@@ -49,6 +50,8 @@ func TestPreparationCompilationSourcePreservesRawAndDetachedInputs(t *testing.T)
 	}
 	s.Authoring.Diagnostics[0].Cause[0] = 'x'
 	s.Authoring.Record.DerivationRequests[0].Diagnostic.Payload[0] = 'x'
+	s.Authoring.Record.DerivationRequests[0].SuccessAudit.Document.Content[0] = 'x'
+	s.History[0].Authoring.Record.DerivationRequests[0].SuccessAudit.Wire.Content[0] = 'x'
 	s.Authoring.Record.SpecificationRequests[0].Diagnostic.Payload[0] = 'x'
 	s.History[0].Authoring.Diagnostics[0].Cause[0] = 'x'
 	s.Seals[0].Inputs.Configuration.EvidencePolicies[0].Fields[0].Value.Array[0].String = "changed"

@@ -112,7 +112,7 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 			profileID, evidenceID := "", ""
 			for _, profile := range bindings.ProfileContracts {
 				for _, requirement := range profile.EvidenceRequirements {
-					if requirement.Scope == "dodItem" {
+					if requirement.Scope == "dodItem" && requirement.ID == "*" {
 						profileID, evidenceID = profile.ID, requirement.ID
 					}
 				}

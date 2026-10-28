@@ -85,7 +85,7 @@ func (m *Biz) verifyCurrentAuthoringResources(ctx context.Context, id common.Wor
 	if view.Confirmation != nil && view.Confirmation.DerivationPermitID != permitID {
 		return verifiedAuthoringResources{}, common.ErrConflict
 	}
-	if derivation == nil || derivation.Validate() != nil || derivation.Proposal == nil || derivation.Input.InputHash() != view.Record.InputHash || workspacemodel.WorkspaceTemplateSnapshotHash(&derivation.Template) != view.Record.TemplateSnapshotHash {
+	if derivation == nil || derivation.ValidateView() != nil || derivation.Proposal == nil || derivation.Input.InputHash() != view.Record.InputHash || workspacemodel.WorkspaceTemplateSnapshotHash(&derivation.Template) != view.Record.TemplateSnapshotHash {
 		return verifiedAuthoringResources{}, common.ErrConflict
 	}
 	if view.Confirmation != nil && view.Confirmation.ResourceSnapshotHash != derivation.ResourceSnapshotHash {

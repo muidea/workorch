@@ -16,12 +16,22 @@ func validateAuthoringMappingOutcomes(record workspacemodel.DefinitionAuthoringR
 		if r.Proposal == nil && r.FailureCode != "invalid_proposal" {
 			continue
 		}
+		var d *workspacemodel.DefinitionDerivationRequest
+		for i := range record.DerivationRequests {
+			if record.DerivationRequests[i].PermitID == r.DerivationPermitID {
+				d = &record.DerivationRequests[i]
+				break
+			}
+		}
+		if d == nil {
+			return fmt.Errorf("mapping outcome has no sealed derivation")
+		}
 		if r.FailureCode == "invalid_proposal" {
 			diagnostic := r.Diagnostic
 			if diagnostic == nil || diagnostic.ProviderCode != "" || diagnostic.ProviderCause != nil || diagnostic.ProviderDocument == nil || diagnostic.ProviderWire == nil || !diagnostic.ProviderDocument.Observed || !diagnostic.ProviderDocument.Complete || !diagnostic.ProviderDocument.Saved || !reflect.DeepEqual(diagnostic.Payload, diagnostic.ProviderDocument.Content) {
 				return fmt.Errorf("invalid proposal lacks complete original parser document")
 			}
-			_, parseErr := workspacemodel.DecodeDefinitionAuthoringMapping(diagnostic.ProviderDocument.Content)
+			_, parseErr := workspacemodel.DecodeAuthoringMappingFor(*d, diagnostic.ProviderDocument.Content)
 			if parseErr != nil {
 				if r.CompletionIdentity != "" {
 					return fmt.Errorf("parser failure claims semantic mapping completion identity")
@@ -38,23 +48,13 @@ func validateAuthoringMappingOutcomes(record workspacemodel.DefinitionAuthoringR
 				return fmt.Errorf("decoded current mapping failure lacks semantic completion identity")
 			}
 		}
-		var d *workspacemodel.DefinitionDerivationRequest
-		for i := range record.DerivationRequests {
-			if record.DerivationRequests[i].PermitID == r.DerivationPermitID {
-				d = &record.DerivationRequests[i]
-				break
-			}
-		}
-		if d == nil {
-			return fmt.Errorf("mapping outcome has no sealed derivation")
-		}
 		if r.Proposal != nil {
 			if err := validateAuthoringVerificationAgainstSealedTemplate(workspacemodel.WorkspaceTemplateSnapshotHash(&d.Template), *d, *r.Proposal); err != nil {
 				return err
 			}
 			continue
 		}
-		m, a, err := workspacemodel.ReparseMappingFailure(r)
+		m, a, err := workspacemodel.ReparseMappingFailure(r, *d)
 		if err != nil {
 			return err
 		}

@@ -279,3 +279,42 @@ func TestBuiltinTemplateUpgradeSerializesWithOrdinaryEdit(t *testing.T) {
 		t.Fatalf("upgrade overwrote concurrent edit: %+v %v", got, err)
 	}
 }
+
+// Frozen immediately preceding release; never generated from mutable defaults.
+//
+//go:embed testdata/software-dev-template-c76a4c57.json
+var preOwnerBoundSoftwareTemplateJSON []byte
+
+func TestPreOwnerBoundSoftwareTemplateReviewedUpgrade(t *testing.T) {
+	var raw workorchmanagementcontract.WorkspaceTemplate
+	if err := json.Unmarshal(preOwnerBoundSoftwareTemplateJSON, &raw); err != nil {
+		t.Fatal(err)
+	}
+	old, err := builtinWorkspaceTemplate(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := workspacemodel.StableWorkspaceTemplateContentHash(old)
+	if workorchdefaults.KnownBuiltinContentRevision("workspace_template", old.ID, hash) == "" {
+		t.Fatalf("unregistered preceding template: %s", hash)
+	}
+	defaults, err := workorchdefaults.BuiltinWorkspaceTemplateDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range defaults {
+		if value.ID != old.ID {
+			continue
+		}
+		current, err := builtinWorkspaceTemplate(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observation, err := builtinTemplateDefaultObservation(old, current)
+		if err != nil || !observation.UpgradeAvailable || observation.CurrentContentHash != hash {
+			t.Fatalf("explicit upgrade unavailable: %+v %v", observation, err)
+		}
+		return
+	}
+	t.Fatal("missing current template")
+}

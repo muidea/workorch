@@ -14,6 +14,8 @@ const TopicWorkspaceAuthoringSpecificationComplete = "/workspace/definition-auth
 type ReserveAuthoringSpecificationCommand struct {
 	WorkspaceID         common.WorkspaceID
 	InputHash           string
+	WireContractRef     string `json:",omitempty"`
+	WireContractHash    string `json:",omitempty"`
 	RequestID           string
 	DerivationPermitID  string
 	ReviewKind          string
@@ -26,7 +28,7 @@ func (c ReserveAuthoringSpecificationCommand) Request() workspace.DefinitionAuth
 	if c.ReviewKind != "" {
 		phase = workspace.DefinitionSpecificationCritic
 	}
-	return workspace.DefinitionAuthoringSpecificationRequest{RequestID: c.RequestID, DerivationPermitID: c.DerivationPermitID, Phase: phase, ReviewKind: c.ReviewKind, ProposalHash: c.ProposalHash, ProviderBindingHash: c.ProviderBindingHash}
+	return workspace.DefinitionAuthoringSpecificationRequest{WireContractRef: c.WireContractRef, WireContractHash: c.WireContractHash, RequestID: c.RequestID, DerivationPermitID: c.DerivationPermitID, Phase: phase, ReviewKind: c.ReviewKind, ProposalHash: c.ProposalHash, ProviderBindingHash: c.ProviderBindingHash}
 }
 
 func (c ReserveAuthoringSpecificationCommand) Validate() error {
@@ -59,10 +61,13 @@ func (c CompleteAuthoringSpecificationCommand) Validate() error {
 		if c.SuccessAudit == nil || c.SuccessAudit.Validate() != nil {
 			return common.ErrInvalidArgument
 		}
-	} else if c.Proposal != nil || c.SuccessAudit != nil {
+	} else if c.Proposal != nil || c.SuccessAudit != nil && c.Review == nil {
 		return common.ErrInvalidArgument
 	}
 	if c.Review != nil {
+		if c.SuccessAudit != nil && c.SuccessAudit.Validate() != nil {
+			return common.ErrInvalidArgument
+		}
 		outcomes++
 	}
 	if c.FailureCode != "" {
@@ -139,6 +144,12 @@ func (r AuthoringSpecificationRequestResult) ValidateCompletion(c CompleteAuthor
 			return common.ErrConflict
 		}
 		return nil
+	}
+	if c.Review != nil && c.SuccessAudit != nil {
+		a := c.SuccessAudit.Metadata()
+		if r.Request.ReviewAudit == nil || !reflect.DeepEqual(*r.Request.ReviewAudit, a) {
+			return common.ErrConflict
+		}
 	}
 	var diagnostic *workspace.DefinitionAuthoringDiagnostic
 	if c.Diagnostic != nil {

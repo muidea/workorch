@@ -54,8 +54,10 @@ type RuntimeLineageAssertionRule struct {
 	ValidationSourceID    string `json:",omitempty"`
 	// Nonempty requires an exact user-confirmed candidate-item mapping. It is
 	// never a runtime-selected source selector or a substitute for ordinary proof.
-	ExecutionSourceContractRef string `json:",omitempty"`
-	RepairHistoryContractRef   string `json:",omitempty"`
+	ExecutionSourceContractRef string                        `json:",omitempty"`
+	RepairHistoryContractRef   string                        `json:",omitempty"`
+	ReceiptChoiceContractRef   string                        `json:",omitempty"`
+	ReceiptOperationChoices    [4]RuntimeOperationVariantRef `json:",omitzero"`
 }
 
 type RuntimeLineageAssertion struct {
@@ -68,7 +70,45 @@ type RuntimeLineageAssertion struct {
 	SourceTextHash     string
 }
 
+const RuntimeTerminalReceiptChoiceV1 = "runtime/terminal-receipt-choice/v1"
+
 func (r RuntimeLineageAssertionRule) Validate() error {
+	choices := r.ReceiptOperationChoices
+	if r.ReceiptChoiceContractRef != "" || choices != ([4]RuntimeOperationVariantRef{}) {
+		if r.ReceiptChoiceContractRef != RuntimeTerminalReceiptChoiceV1 || r.Kind != RuntimeLineageTerminalOwnerReceipt || r.OperationKind != "" || r.OperationVariantID != "" {
+			return fmt.Errorf("unsupported terminal receipt choice contract")
+		}
+		count := 0
+		seen := map[RuntimeOperationVariantRef]bool{}
+		empty := false
+		for _, choice := range choices {
+			if choice.Kind == "" {
+				if choice.VariantID != "" {
+					return fmt.Errorf("receipt choice has variant without kind")
+				}
+				empty = true
+				continue
+			}
+			if empty || seen[choice] {
+				return fmt.Errorf("receipt choice inventory is ambiguous")
+			}
+			seen[choice] = true
+			count++
+			exact := r
+			exact.ReceiptChoiceContractRef = ""
+			exact.ReceiptOperationChoices = [4]RuntimeOperationVariantRef{}
+			exact.OperationKind = choice.Kind
+			exact.OperationVariantID = choice.VariantID
+			if err := exact.Validate(); err != nil {
+				return err
+			}
+		}
+		if count < 2 {
+			return fmt.Errorf("receipt choice requires two to four exact alternatives")
+		}
+		return nil
+	}
+
 	if r.RepairHistoryContractRef != "" && (r.RepairHistoryContractRef != RuntimeConfirmedBindingRepairProofV1 || r.Kind != RuntimeLineageRepairThenFreshValidation || r.ConsumptionPoint != RuntimeProofPhaseExecution) {
 		return fmt.Errorf("confirmed-binding repair assertion requires supported execution repair consumer")
 	}
@@ -302,4 +342,19 @@ func ValidateRuntimeDefinitionLineageAssertions(focuses []RuntimeDefinitionFocus
 		}
 	}
 	return nil
+}
+
+func runtimeTerminalReceiptOperationMatches(rule RuntimeLineageAssertionRule, kind, variant string) bool {
+	if rule.ReceiptChoiceContractRef == "" {
+		return kind == rule.OperationKind && variant == rule.OperationVariantID
+	}
+	if rule.ReceiptChoiceContractRef != RuntimeTerminalReceiptChoiceV1 {
+		return false
+	}
+	for _, choice := range rule.ReceiptOperationChoices {
+		if choice.Kind == kind && choice.VariantID == variant && kind != "" {
+			return true
+		}
+	}
+	return false
 }

@@ -112,3 +112,14 @@ it is not another validation receipt or new CWI credit. Private scripted startup
 `TestRuntimeReviewedGitTerminalSnapshotMultipleConsumerMainlineAndRestart` independently counts original Definition
 consumers and checks each CWI's material obligation against the same actual snapshot, with independent rule/proof identities.
 It repeats the material CAS-before/CAS-after and Result response-loss cuts; one consumer cannot stand in for another.
+
+## Closed receipt operation choice
+
+`runtime/terminal-receipt-choice/v1` optionally replaces the single exact operation selector on
+`terminal_owner_operation_receipt`. It declares 2–4 distinct, contiguous exact kind/variant alternatives, all with the same
+owner and durable effect scope. One matching original accepted receipt is required; alternatives are OR, while ordinary
+validation and the other lineage rules remain AND. It cannot coexist with the primary operation selector, apply to another
+rule kind or consume at execution phase. Unknown versions, variants, owners, duplicates and holes are rejected.
+The typed four-slot array omits its zero value from legacy JSON, preserving legacy rule hashes. Raw Profile input rejects
+lists larger than four before decoding. This changes only SM-4 proof selection; source binding, chronology, receipt fence,
+current terminal material and all existing rejection checks remain mandatory. It grants no dispatch or early proof credit.

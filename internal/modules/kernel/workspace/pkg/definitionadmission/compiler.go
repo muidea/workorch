@@ -538,3 +538,9 @@ func normalizeStrings(values []string) []string {
 	sort.Strings(ret)
 	return ret
 }
+
+// SpecificationDoDSources is the canonical after-image order resolver. It does
+// not validate semantic proof or create formal identities in owner storage.
+func SpecificationDoDSources(items []workspacemodel.DefinitionCandidateItem) (map[string]string, bool) {
+	return specificationDoDSources(items)
+}

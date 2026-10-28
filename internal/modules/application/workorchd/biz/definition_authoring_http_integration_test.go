@@ -475,7 +475,7 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 					Review workspace.GoalSpecificationCompletenessReview `json:"review"`
 				}{review})
 				if scenario == "review_missing_required" && kind == workspace.GoalReviewVerifierFeasibility {
-					missingReviewPayload = append([]byte(nil), payload...)
+					missingReviewPayload = testkit.OwnerBoundFixtureDocument(payload)
 				}
 				if scenario == "invalid_review" {
 					payload = []byte("  {\"未知审查字段\":\"sk_test_marker\"}\r\n")
@@ -1169,6 +1169,24 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 		if request.SuccessAudit == nil || request.Proposal == nil {
 			t.Fatal("已完成提案缺少 owner 原文审计")
 		}
+		type expectedAudit struct {
+			permit, hash string
+			raw          *workspace.DefinitionAuthoringSuccessByteAudit
+		}
+		expectedAudits := []expectedAudit{{request.PermitID, request.Proposal.ContentHash(), request.SuccessAudit}}
+		for _, d := range stored.DefinitionAuthoring.DerivationRequests {
+			if d.SuccessAudit != nil {
+				expectedAudits = append(expectedAudits, expectedAudit{d.PermitID, d.Proposal.ContentHash(), d.SuccessAudit})
+			}
+		}
+		for _, r := range stored.DefinitionAuthoring.SpecificationRequests {
+			if r.ReviewAudit != nil {
+				expectedAudits = append(expectedAudits, expectedAudit{r.PermitID, r.ProposalHash, r.ReviewAudit})
+			}
+		}
+		if len(expectedAudits) != 8 {
+			t.Fatal("missing v2 success audit")
+		}
 		before := stored
 		readAudit := func(workspaceID, permit string, status int) management.DefinitionAuthoringSuccessAuditView {
 			t.Helper()
@@ -1191,18 +1209,20 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 			}
 			return envelope.Audit
 		}
-		for range 2 {
-			audit := readAudit(created.WorkspaceID, request.PermitID, http.StatusOK)
-			if audit.WorkspaceID != created.WorkspaceID || audit.PermitID != request.PermitID || audit.CanonicalHash != request.Proposal.ContentHash() {
-				t.Fatal("受限审计身份变化")
-			}
-			for _, pair := range []struct {
-				view management.DefinitionProviderObservationView
-				raw  workspace.DefinitionProviderObservation
-			}{{audit.Document, request.SuccessAudit.Document}, {audit.Wire, request.SuccessAudit.Wire}} {
-				content, err := base64.StdEncoding.DecodeString(pair.view.ContentBase64)
-				if err != nil || !bytes.Equal(content, pair.raw.Content) || !reflect.DeepEqual(pair.view.DefinitionProviderObservationMetadata, *authoringProviderObservationMetadata(&pair.raw)) {
-					t.Fatal("受限审计未保全原 bytes 与 metadata")
+		for _, expected := range expectedAudits {
+			for range 2 {
+				audit := readAudit(created.WorkspaceID, expected.permit, http.StatusOK)
+				if audit.WorkspaceID != created.WorkspaceID || audit.PermitID != expected.permit || audit.CanonicalHash != expected.hash {
+					t.Fatal("受限审计身份变化")
+				}
+				for _, pair := range []struct {
+					view management.DefinitionProviderObservationView
+					raw  workspace.DefinitionProviderObservation
+				}{{audit.Document, expected.raw.Document}, {audit.Wire, expected.raw.Wire}} {
+					content, err := base64.StdEncoding.DecodeString(pair.view.ContentBase64)
+					if err != nil || !bytes.Equal(content, pair.raw.Content) || !reflect.DeepEqual(pair.view.DefinitionProviderObservationMetadata, *authoringProviderObservationMetadata(&pair.raw)) {
+						t.Fatal("受限审计未保全原 bytes 与 metadata")
+					}
 				}
 			}
 		}

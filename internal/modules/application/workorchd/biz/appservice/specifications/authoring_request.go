@@ -3,6 +3,7 @@ package specifications
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
@@ -15,7 +16,7 @@ import (
 // AuthoringProposalCommand only renders already persisted Goal/DoD candidate
 // identities. Neither a provider echo nor this request creates a formal DoD.
 func AuthoringProposalCommand(derivation workspace.DefinitionDerivationRequest, target runtimecontract.ProviderModelTarget) (llmevents.CompleteProviderCommand, error) {
-	if err := derivation.Validate(); err != nil || derivation.Proposal == nil {
+	if err := derivation.Metadata().ValidateView(); err != nil || derivation.Proposal == nil {
 		return llmevents.CompleteProviderCommand{}, fmt.Errorf("authoring proposal requires completed derivation")
 	}
 	if target.Validate() != nil {
@@ -29,7 +30,7 @@ func AuthoringProposalCommand(derivation workspace.DefinitionDerivationRequest, 
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
-	bindings, err := definitionconfiguration.Compile(&workspace.Workspace{}, &derivation.Template)
+	bindings, err := definitionconfiguration.CompileAuthoring(derivation)
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
@@ -50,11 +51,11 @@ func AuthoringProposalCommand(derivation workspace.DefinitionDerivationRequest, 
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
-	return authoringSpecificationCommand(derivation.Input.WorkspaceID, target, "proposal", authoringProposalInstructions, payload)
+	return authoringSpecificationCommandFor(derivation.WireContractRef, derivation.Input.WorkspaceID, target, "proposal", authoringProposalInstructions, payload)
 }
 
 func AuthoringReviewCommand(derivation workspace.DefinitionDerivationRequest, proposal workspace.GoalSpecification, kind string, target runtimecontract.ProviderModelTarget) (llmevents.CompleteProviderCommand, error) {
-	if derivation.Validate() != nil || derivation.Proposal == nil || !workspace.GoalSpecificationReviewKind(kind) || len(proposal.Reviews) != 0 || workspace.ValidateAuthoringSpecification(derivation.Input, &derivation.Template, *derivation.Proposal, derivation.Resources, proposal) != nil {
+	if derivation.Metadata().ValidateView() != nil || derivation.Proposal == nil || !workspace.GoalSpecificationReviewKind(kind) || len(proposal.Reviews) != 0 || workspace.ValidateAuthoringSpecification(derivation.Input, &derivation.Template, *derivation.Proposal, derivation.Resources, proposal) != nil {
 		return llmevents.CompleteProviderCommand{}, fmt.Errorf("authoring review requires exact completed proposal")
 	}
 	if target.Validate() != nil {
@@ -64,7 +65,7 @@ func AuthoringReviewCommand(derivation workspace.DefinitionDerivationRequest, pr
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
-	bindings, err := definitionconfiguration.Compile(&workspace.Workspace{}, &derivation.Template)
+	bindings, err := definitionconfiguration.CompileAuthoring(derivation)
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
@@ -100,7 +101,7 @@ func AuthoringReviewCommand(derivation workspace.DefinitionDerivationRequest, pr
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
-	return authoringSpecificationCommand(derivation.Input.WorkspaceID, target, "review/"+kind, authoringReviewInstructions, payload)
+	return authoringSpecificationCommandFor(derivation.WireContractRef, derivation.Input.WorkspaceID, target, "review/"+kind, authoringReviewInstructions, payload)
 }
 
 func authoringSpecificationCommand(workspaceID common.WorkspaceID, target runtimecontract.ProviderModelTarget, kind, instructions string, payload []byte) (llmevents.CompleteProviderCommand, error) {
@@ -153,4 +154,45 @@ func authoringProfileSnapshotHashes(profiles []runtimecontract.RuntimeProfileCon
 		ret = append(ret, authoringProfileSnapshotHash{ProfileID: p.ID, Hash: runtimecontract.StableRuntimeProfileContractsHash([]runtimecontract.RuntimeProfileContract{p})})
 	}
 	return ret
+}
+
+func authoringSpecificationCommandFor(ref string, id common.WorkspaceID, target runtimecontract.ProviderModelTarget, kind, instructions string, payload []byte) (llmevents.CompleteProviderCommand, error) {
+	if ref == "" {
+		return authoringSpecificationCommand(id, target, kind, instructions, payload)
+	}
+	phase := kind
+	if strings.HasPrefix(kind, "review/") {
+		phase = strings.TrimPrefix(kind, "review/")
+		instructions = strings.Replace(instructions, "含 Kind、Status、SpecificationHash、Reason、EvidenceRefs、RequirementIDs；身份必须精确回显。", "仅含 Status、Reason、EvidenceRefs、RequirementIDs。Kind 和 SpecificationHash 由 owner 绑定，不得输出。", 1)
+		start := strings.Index(instructions, "Kind 逐字复制")
+		end := strings.Index(instructions, "按指定维度")
+		if start >= 0 && end > start {
+			instructions = instructions[:start] + instructions[end:]
+		}
+	} else {
+		instructions = strings.Replace(instructions, "Protocol 精确为 workorch.authoring.sealed-ref-mapping/v1，InputHash/TemplateSnapshotHash/ResourceSnapshotHash 精确回显当前输入。", "仅含语义分组与验证声明；禁止输出 Protocol、InputHash、TemplateSnapshotHash、ResourceSnapshotHash，机器身份由 owner 的封存请求绑定。", 1)
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return llmevents.CompleteProviderCommand{}, err
+	}
+	envelope["wireContractRef"], _ = json.Marshal(ref)
+	envelope["wireContractHash"], _ = json.Marshal(workspace.AuthoringWireHash(ref, phase))
+	payload, _ = json.Marshal(envelope)
+	schema, err := workspace.AuthoringWireSchema(ref, phase)
+	if err != nil {
+		return llmevents.CompleteProviderCommand{}, err
+	}
+	command, err := authoringSpecificationCommand(id, target, kind, instructions, payload)
+	if err != nil {
+		return command, err
+	}
+	contract := instructions + "\n输出合同 " + ref + "；禁止未知、重复、null 字段，禁止旧协议回显；原文独立归档，local owner decoder 是最终门禁。\nJSON Schema:\n" + schema
+	if len(payload)+len(contract) > maxDocumentBytes {
+		return llmevents.CompleteProviderCommand{}, fmt.Errorf("authoring request exceeds bounded context")
+	}
+	command.Request.Schema = schema
+	command.Request.PromptContext.SchemaVersion = ref
+	command.Request.PromptContext.Sections[0].Content = contract
+	return command, nil
 }

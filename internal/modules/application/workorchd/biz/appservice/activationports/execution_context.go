@@ -11,6 +11,7 @@ import (
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
 
@@ -126,6 +127,14 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 		return workspaceRuntimeActivationBuild{}, err
 	}
 
+	profiles, err := definitionconfiguration.Compile(workspace, template)
+	if err != nil {
+		return workspaceRuntimeActivationBuild{}, err
+	}
+	if workspace.StartupInput != nil && profiles.ProfileContractsHash != workspace.StartupInput.RuntimeProfileContractsHash {
+		return workspaceRuntimeActivationBuild{}, common.ErrConflict
+	}
+	runtimeActivation.ExecutionContract.ProfileContracts = profiles.ProfileContracts
 	return workspaceRuntimeActivationBuild{
 		EffectiveGoal: effectiveGoal,
 		EffectiveDoD:  effectiveDoD,

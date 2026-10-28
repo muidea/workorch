@@ -53,6 +53,21 @@ class AuthoringMockTest(unittest.TestCase):
                                           **mapping['Obligations'][index]['Verification']})
         return {**value, 'kind': 'verifier_feasibility', 'proposalHash': 'exact', 'specification': spec}
 
+    def test_owner_bound_v2_only_returns_semantic_fields(self):
+        wire = 'workorch.authoring.owner-bound/v2'
+        self.assertEqual(authoring_response(prompt({'wireContractRef': wire, 'outputShape': {'AdditionalItems': []}}, 'C3.derivation-input')), {'AdditionalItems': []})
+        value = self.candidate()
+        value['wireContractRef'] = wire
+        mapping = authoring_response(prompt(value))['mapping']
+        for field in ('Protocol', 'InputHash', 'TemplateSnapshotHash', 'ResourceSnapshotHash'):
+            self.assertNotIn(field, mapping)
+        # Build a separate legacy-shaped critic input; only its response changes.
+        review_input = self.canonical_review_fixture(self.candidate())
+        legacy_review = authoring_response(prompt(review_input))['review']
+        review_input['wireContractRef'] = wire
+        semantic_review = authoring_response(prompt(review_input))['review']
+        self.assertEqual(semantic_review, {key: value for key, value in legacy_review.items() if key not in ('Kind', 'SpecificationHash')})
+
     def test_non_authoring_is_not_intercepted(self):
         self.assertIsNone(authoring_response('### C3.semantic-authority\n{}'))
 

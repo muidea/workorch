@@ -26,7 +26,7 @@ func MappingCompletionIdentity(permit string, mapping DefinitionAuthoringMapping
 }
 
 // ReparseMappingFailure 从 owner 原文重新证明失败 completion 的身份，不信持久自报 hash。
-func ReparseMappingFailure(r DefinitionAuthoringSpecificationRequest) (DefinitionAuthoringMapping, DefinitionAuthoringSuccessByteAudit, error) {
+func ReparseMappingFailure(r DefinitionAuthoringSpecificationRequest, derivations ...DefinitionDerivationRequest) (DefinitionAuthoringMapping, DefinitionAuthoringSuccessByteAudit, error) {
 	d := r.Diagnostic
 	if r.Phase != DefinitionSpecificationProposal || r.FailureCode != "invalid_proposal" || r.Proposal != nil || r.Review != nil || r.Mapping != nil || r.SuccessAudit != nil || d == nil || d.Validate() != nil || d.ProviderCode != "" || d.ProviderDocument == nil || d.ProviderWire == nil {
 		return DefinitionAuthoringMapping{}, DefinitionAuthoringSuccessByteAudit{}, fmt.Errorf("mapping failure lacks exact owner diagnostic")
@@ -35,7 +35,14 @@ func ReparseMappingFailure(r DefinitionAuthoringSpecificationRequest) (Definitio
 	if a.Validate() != nil || !reflect.DeepEqual(a.Document.Content, d.Payload) {
 		return DefinitionAuthoringMapping{}, a, fmt.Errorf("mapping failure document differs from payload")
 	}
-	m, err := DecodeDefinitionAuthoringMapping(a.Document.Content)
+	var derivation DefinitionDerivationRequest
+	if len(derivations) == 1 {
+		derivation = derivations[0]
+	}
+	if r.WireContractRef != "" && (derivation.WireContractRef != r.WireContractRef || derivation.PermitID != r.DerivationPermitID) {
+		return DefinitionAuthoringMapping{}, a, fmt.Errorf("mapping failure missing exact wire derivation")
+	}
+	m, err := DecodeAuthoringMappingFor(derivation, a.Document.Content)
 	if err != nil || r.CompletionIdentity != MappingCompletionIdentity(r.PermitID, m, a) {
 		return m, a, fmt.Errorf("mapping failure completion identity differs from raw reparse")
 	}
@@ -54,7 +61,18 @@ func (r DefinitionAuthoringRecord) CompleteMappingFailure(permit string, mapping
 	if audit.Validate() != nil || diagnostic.Validate() != nil {
 		return DefinitionAuthoringRecord{}, fmt.Errorf("mapping failure observation invalid")
 	}
-	decoded, err := DecodeDefinitionAuthoringMapping(audit.Document.Content)
+	var d DefinitionDerivationRequest
+	for _, req := range r.SpecificationRequests {
+		if req.PermitID == permit {
+			var err error
+			d, err = r.derivationForSpecification(req.DerivationPermitID)
+			if err != nil {
+				return DefinitionAuthoringRecord{}, err
+			}
+			break
+		}
+	}
+	decoded, err := DecodeAuthoringMappingFor(d, audit.Document.Content)
 	if err != nil || !reflect.DeepEqual(decoded, mapping) || diagnostic.ProviderDocument == nil || diagnostic.ProviderWire == nil || !reflect.DeepEqual(*diagnostic.ProviderDocument, audit.Document) || !reflect.DeepEqual(*diagnostic.ProviderWire, audit.Wire) {
 		return DefinitionAuthoringRecord{}, fmt.Errorf("mapping failure raw identity mismatch")
 	}

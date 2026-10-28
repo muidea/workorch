@@ -6,6 +6,7 @@ live requires explicit opt-in and uses the selected existing configuration.
 Evidence must be stored in a new, durable, restricted directory, never /tmp.
 """
 import argparse
+import base64
 import copy
 import hashlib
 import importlib.util
@@ -101,6 +102,7 @@ class Fixture:
                     elif "kind" not in payload:
                         kind = "proposal"
                         items = payload["candidateAcceptance"]
+                        validate_source_consumers(payload)
                         declaration = {"Declaration": "绑定已发布的 software-dev 逐条验收能力声明，尚未执行。", "Status": "DECLARED", "ProfileID": "software-dev", "EvidenceRequirementID": "*", "Scope": "dodItem"}
                         result = {"mapping": {
                             "Protocol": "workorch.authoring.sealed-ref-mapping/v1", "InputHash": payload["inputHash"], "TemplateSnapshotHash": payload["templateHash"], "ResourceSnapshotHash": payload["resourceSnapshotHash"],
@@ -115,6 +117,15 @@ class Fixture:
                         previous = fixture.reviews.setdefault(payload["proposalHash"], proposal)
                         require(proposal == previous, "critics received different proposals")
                         result = {"review": {"Kind": payload["kind"], "Status": "PASS", "SpecificationHash": payload["proposalHash"], "Reason": "逐条对照固定源承诺，exact Goal、required 与 all_of 原文及声明绑定保留；这是确定性 fixture，不代替人工语义评审。", "EvidenceRefs": [payload["goal"]["CandidateItemRef"]], "RequirementIDs": payload["requiredRequirementIDs"]}}
+                    if payload.get("wireContractRef") == "workorch.authoring.owner-bound/v2":
+                        if kind == "derive":
+                            result = {"AdditionalItems": result["AdditionalItems"]}
+                        elif kind == "proposal":
+                            for field in ("Protocol", "InputHash", "TemplateSnapshotHash", "ResourceSnapshotHash"):
+                                del result["mapping"][field]
+                        else:
+                            del result["review"]["Kind"]
+                            del result["review"]["SpecificationHash"]
                     fixture.calls.append(kind)
                     wire = ("data: " + json.dumps({"type": "response.completed", "response": {"status": "completed", "output_text": json.dumps(result, ensure_ascii=False), "usage": {"input_tokens": 128, "output_tokens": 128, "total_tokens": 256}}}, ensure_ascii=False) + "\n\n").encode()
                     (fixture.root / f"provider-{number:02d}-response.bin").write_bytes(wire)
@@ -132,6 +143,48 @@ class Fixture:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join()
+
+
+def validate_source_consumers(payload):
+    options = payload['sourceApplicableVerificationDeclarations']
+    expected = {'derived-dod:template:000003': 'terminal_owner_operation_receipt',
+                'derived-dod:template:000004': 'terminal_owner_snapshot',
+                'derived-dod:template:000013': 'terminal_result_evidence_index'}
+    observed = set()
+    for option in options:
+        ref = option['candidateItemRef']
+        for declaration in option['declarations']:
+            consumers = declaration['consumers']
+            if ref not in expected:
+                require(not consumers, 'guard leaked to unrelated source')
+                continue
+            require(len(consumers) == 1 and consumers[0]['Kind'] == expected[ref] and
+                    consumers[0]['ConsumptionPoint'] == 'post_terminal_delivery' and
+                    consumers[0]['TerminalContractRef'], 'missing exact terminal consumer')
+            observed.add(ref)
+    require(observed == set(expected), 'template consumer source missing')
+
+
+def validate_owner_bound_ledger(record):
+    ledger = record['DefinitionAuthoring']
+    derives, requests = ledger['DerivationRequests'], ledger['SpecificationRequests']
+    require(len(derives) == 1 and len(requests) == 7, 'unexpected provider ledger cardinality')
+    for request in [*derives, *requests]:
+        require(request['WireContractRef'] == 'workorch.authoring.owner-bound/v2' and
+                request['WireContractHash'].startswith('authoring-wire-sha256:'), 'wire identity not sealed')
+        audit = request.get('ReviewAudit') or request.get('SuccessAudit')
+        require(audit is not None, 'successful transaction lost original document')
+        document = audit['Document']
+        raw = base64.b64decode(document['Content'], validate=True)
+        require(document['Complete'] and document['Saved'] and len(raw) == document['ObservedBytes'] and
+                hashlib.sha256(raw).hexdigest() == document['SHA256'], 'original bytes mismatch')
+        value = json.loads(raw)
+        if 'AdditionalItems' in value:
+            require(set(value) == {'AdditionalItems'}, 'derive echoed owner identity')
+        elif 'mapping' in value:
+            require(not {'Protocol', 'InputHash', 'TemplateSnapshotHash', 'ResourceSnapshotHash'} & set(value['mapping']), 'mapping echoed owner identity')
+        else:
+            require(set(value['review']) == {'Status', 'Reason', 'EvidenceRefs', 'RequirementIDs'}, 'review echoed owner identity')
 
 
 def compilation_settled(view):
@@ -231,7 +284,7 @@ def main():
         save(root, "candidate-result.json", view)
         result.update(workspaceId=workspace_id, state=view["state"], inputHash=view["inputHash"], templateSnapshotHash=view["templateSnapshotHash"])
         require(compilation_settled(view), "bounded observation ended before compilation settled; retain facts, do not retry")
-        assert_no_transition(verification, workspace_id)
+        validate_owner_bound_ledger(assert_no_transition(verification, workspace_id))
         for request in view.get("requests", []):
             if request.get("diagnostic"):
                 diagnostic = verification.request("GET", path + "/diagnostics/" + request["permitId"])
@@ -252,7 +305,7 @@ def main():
         recovered = verification.read(workspace_id)
         require(recovered == view, "real process restart lost candidate or independent reviews")
         save(root, "restarted-candidate.json", recovered)
-        assert_no_transition(verification, workspace_id)
+        validate_owner_bound_ledger(assert_no_transition(verification, workspace_id))
         result["restartReadbackPassed"] = True
         build_identity.verify(source, source / "web/consoleassets/dist", binary, root / "build-identity.json", {key: identity[key] for key in build_identity.IDENTITY_FIELDS}, root)
         validate_candidate(view, payload)
@@ -265,6 +318,8 @@ def main():
         if fixture:
             fixture.close()
             result["physicalCalls"] = fixture.calls
+            result["postPaths"] = fixture.post_paths
+            require(fixture.post_paths == ["/v1/responses"] * len(fixture.calls), "unexpected provider POST path")
         save(root, "result.json", result)
     print(json.dumps(result, ensure_ascii=False), flush=True)
 

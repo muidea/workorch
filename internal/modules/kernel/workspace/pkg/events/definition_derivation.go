@@ -14,6 +14,8 @@ type ReserveDefinitionDerivationCommand struct {
 	WorkspaceID          common.WorkspaceID
 	WorkspaceRevision    uint64
 	InputHash            string
+	WireContractRef      string `json:",omitempty"`
+	WireContractHash     string `json:",omitempty"`
 	RequestID            string
 	Resources            []workspace.DefinitionAuthoringResourceSnapshot
 	ResourceSnapshotHash string
@@ -21,6 +23,9 @@ type ReserveDefinitionDerivationCommand struct {
 }
 
 func (c ReserveDefinitionDerivationCommand) Validate() error {
+	if c.WireContractRef != "" && (c.WireContractHash == "" || c.WireContractHash != workspace.AuthoringWireHash(c.WireContractRef, "derive")) || c.WireContractRef == "" && c.WireContractHash != "" {
+		return common.ErrInvalidArgument
+	}
 	if c.WorkspaceID == "" || c.InputHash == "" || len(c.InputHash) > 256 || c.RequestID == "" || len(c.RequestID) > 128 || c.ProviderBindingHash == "" || len(c.ProviderBindingHash) > 256 || len(c.Resources) > workspace.DefinitionAuthoringResourceLimit || c.ResourceSnapshotHash != workspace.DefinitionAuthoringResourcesHash(c.Resources) || (len(c.Resources) > 0 && c.WorkspaceRevision == 0) {
 		return common.ErrInvalidArgument
 	}
@@ -28,14 +33,18 @@ func (c ReserveDefinitionDerivationCommand) Validate() error {
 }
 
 type CompleteDefinitionDerivationCommand struct {
-	WorkspaceID common.WorkspaceID
-	PermitID    string
-	Proposal    *workspace.DefinitionDerivedAcceptance
-	FailureCode string
-	Diagnostic  *workspace.DefinitionAuthoringDiagnostic
+	WorkspaceID  common.WorkspaceID
+	PermitID     string
+	SuccessAudit *workspace.DefinitionAuthoringSuccessByteAudit `json:",omitempty"`
+	Proposal     *workspace.DefinitionDerivedAcceptance
+	FailureCode  string
+	Diagnostic   *workspace.DefinitionAuthoringDiagnostic
 }
 
 func (c CompleteDefinitionDerivationCommand) Validate() error {
+	if c.SuccessAudit != nil && (c.Proposal == nil || c.SuccessAudit.Validate() != nil) {
+		return common.ErrInvalidArgument
+	}
 	if c.WorkspaceID == "" || c.PermitID == "" || len(c.PermitID) > 256 || (c.Proposal == nil) == (c.FailureCode == "") {
 		return common.ErrInvalidArgument
 	}
@@ -76,7 +85,7 @@ func (r DefinitionDerivationRequestResult) ValidateReserve(c ReserveDefinitionDe
 	if err := r.validate(); err != nil {
 		return err
 	}
-	if r.Request.Input.WorkspaceID != c.WorkspaceID || r.Request.Input.InputHash() != c.InputHash || r.Request.RequestID != c.RequestID || r.Request.ProviderBindingHash != c.ProviderBindingHash || r.Request.ResourceSnapshotHash != c.ResourceSnapshotHash || !reflect.DeepEqual(r.Request.Resources, c.Resources) {
+	if r.Request.WireContractRef != c.WireContractRef || r.Request.WireContractHash != c.WireContractHash || r.Request.Input.WorkspaceID != c.WorkspaceID || r.Request.Input.InputHash() != c.InputHash || r.Request.RequestID != c.RequestID || r.Request.ProviderBindingHash != c.ProviderBindingHash || r.Request.ResourceSnapshotHash != c.ResourceSnapshotHash || !reflect.DeepEqual(r.Request.Resources, c.Resources) {
 		return common.ErrConflict
 	}
 	return nil
@@ -93,6 +102,14 @@ func (r DefinitionDerivationRequestResult) ValidateCompletion(c CompleteDefiniti
 	if c.Diagnostic != nil {
 		d := c.Diagnostic.Metadata()
 		diagnostic = &d
+	}
+	var audit *workspace.DefinitionAuthoringSuccessByteAudit
+	if c.SuccessAudit != nil {
+		a := c.SuccessAudit.Metadata()
+		audit = &a
+	}
+	if !reflect.DeepEqual(r.Request.SuccessAudit, audit) {
+		return common.ErrConflict
 	}
 	if r.FreshPermitID != "" || r.Request.Input.WorkspaceID != c.WorkspaceID || r.Request.PermitID != c.PermitID || r.Request.FailureCode != c.FailureCode || !reflect.DeepEqual(r.Request.Proposal, c.Proposal) || !reflect.DeepEqual(r.Request.Diagnostic, diagnostic) {
 		return common.ErrConflict

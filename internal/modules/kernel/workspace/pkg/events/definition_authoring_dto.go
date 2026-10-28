@@ -9,12 +9,15 @@ import (
 
 // 创作回执使用 concrete Template DTO，不把持久模型中的 map 带入 EventHub。
 type DefinitionDerivationRequest struct {
+	WireContractRef      string `json:",omitempty"`
+	WireContractHash     string `json:",omitempty"`
 	RequestID            string
 	Input                workspace.DefinitionAuthoringInput
 	Template             WorkspaceTemplate
 	Resources            []workspace.DefinitionAuthoringResourceSnapshot
 	ResourceSnapshotHash string
 	ProviderBindingHash  string
+	SuccessAudit         *workspace.DefinitionAuthoringSuccessByteAudit `json:",omitempty"`
 	PermitID             string
 	Proposal             *workspace.DefinitionDerivedAcceptance
 	FailureCode          string
@@ -63,6 +66,10 @@ func authoringTemplateModel(t WorkspaceTemplate) (workspace.WorkspaceTemplate, e
 }
 
 func (r DefinitionDerivationRequest) Clone() DefinitionDerivationRequest {
+	if r.SuccessAudit != nil {
+		a := r.SuccessAudit.Clone()
+		r.SuccessAudit = &a
+	}
 	r.Input = r.Input.Clone()
 	r.Template = cloneAuthoringTemplate(r.Template)
 	r.Resources = workspace.CloneDefinitionAuthoringResources(r.Resources)
@@ -87,6 +94,7 @@ func (r DefinitionDerivationRequest) Model() (workspace.DefinitionDerivationRequ
 		return workspace.DefinitionDerivationRequest{}, err
 	}
 	return workspace.DefinitionDerivationRequest{
+		WireContractRef: r.WireContractRef, WireContractHash: r.WireContractHash, SuccessAudit: r.SuccessAudit,
 		RequestID: r.RequestID, Input: r.Input, Template: template, Resources: r.Resources,
 		ResourceSnapshotHash: r.ResourceSnapshotHash, ProviderBindingHash: r.ProviderBindingHash,
 		PermitID: r.PermitID, Proposal: r.Proposal, FailureCode: r.FailureCode, Diagnostic: r.Diagnostic,

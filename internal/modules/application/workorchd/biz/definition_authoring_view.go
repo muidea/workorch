@@ -54,7 +54,7 @@ func authoringTicketDeliveryComplete(ticket *decisionmodel.Ticket) bool {
 
 // 展示只复用纯声明检查，不生成确认身份、binding 或 credit；owner 仍独立校验。
 func authoringViewVerificationApplicable(derivation workspace.DefinitionDerivationRequest, specification workspace.GoalSpecification, items []workspace.DefinitionCandidateItem) bool {
-	bindings, err := definitionconfiguration.Compile(&workspace.Workspace{}, &derivation.Template)
+	bindings, err := definitionconfiguration.CompileAuthoring(derivation)
 	return err == nil && definitionadmission.ValidateAuthoringVerificationApplicability(specification, items, bindings.ProfileContracts, workspace.DefinitionCandidateItem{CandidateItemRef: specification.GoalItemRef, Text: derivation.Input.GoalText}) == nil
 }
 

@@ -17,7 +17,7 @@ import (
 )
 
 func TestRuntimeBootstrapStartupSealRejectsCoordinatedSourceOmission(t *testing.T) {
-	template := builtinSoftwareDevTemplateForTest(t)
+	template := softwareDevProfileTemplateForTest(t)
 	workspace := &workspacemodel.Workspace{ID: "ws-source-seal", TemplateID: template.ID, DeliverableDirectory: t.TempDir(), EvidencePolicies: workorcheventpayload.CloneSlice(template.EvidencePolicies)}
 	goal := &workspacemodel.Goal{ID: "goal-source", WorkspaceID: workspace.ID, Text: "完整目标", DefinitionRevision: "goal-r1"}
 	dod := &workspacemodel.DoD{ID: "dod-source", WorkspaceID: workspace.ID, Items: append([]string{"共同判据"}, template.DoDItems...), DefinitionRevision: "dod-r1"}

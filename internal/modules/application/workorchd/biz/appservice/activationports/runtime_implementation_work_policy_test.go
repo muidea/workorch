@@ -143,7 +143,7 @@ func TestRuntimeImplementationWorkPolicyMalformedInputCannotDisappear(t *testing
 func TestRuntimeImplementationWorkPolicyRejectsMalformedSourcesBeforeMerge(t *testing.T) {
 	for _, source := range []string{"workspace", "template"} {
 		t.Run(source, func(t *testing.T) {
-			builtin := builtinSoftwareDevTemplateForTest(t)
+			builtin := softwareDevProfileTemplateForTest(t)
 			good, err := workorcheventpayload.FromMap(implementationWorkProfileInput(implementationWorkInputFixture()))
 			if err != nil {
 				t.Fatal(err)

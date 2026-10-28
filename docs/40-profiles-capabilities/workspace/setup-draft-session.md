@@ -16,7 +16,9 @@ Workspace owner 持久保存创作输入与请求身份；派生验收要求后�
 
 ## 结构化输出合同
 
-提案与独立审查使用不同的版本化输出合同：提案顶层仅为 `mapping`，其 `Protocol` 必须是 `workorch.authoring.sealed-ref-mapping/v1`；审查顶层仅为 `review`。请求提供完整 JSON Schema，根对象及所有嵌套对象均禁止未知字段。provider 仅提出维度／分组引用、候选来源分组、资源 ID 引用及验证声明；Workspace owner 从封存 input／derivation 编译 canonical 规格，保留完整原 Goal、各候选原文与来源，并生成 Required、资源事实和 canonical IDs。provider 不返回 canonical `specification`、资源事实、义务原文或 `Reviews`，也不接受旧提案 wire fallback。审查结论只能来自独立审查事务。`all_of` 是现有条件的合取语义，不授权模型添加 `ConditionMode` 或其他合同之外的字段。
+新事务在 reserve 时选择并持久绑定 `workorch.authoring.owner-bound/v2` 及阶段 schema hash。派生仅返回 `AdditionalItems`；提案顶层仅为 `mapping`，保留维度／分组引用、候选来源分组、资源 ID 引用及验证声明；审查顶层仅为 `review`，包含 `Status`、`Reason`、`EvidenceRefs` 与 `RequirementIDs`。provider 不回显 protocol、input/template/resource hash、review kind 或 proposal hash。Workspace owner 从原 permit、封存 input／derivation 与阶段构造独立 typed 结果，生成 Required、资源事实及 canonical IDs，保留完整原 Goal、各候选原文与来源。原 provider bytes 不补字段、不重写；typed 结果不能冒充 provider 原文。
+
+旧账本空 wire 身份继续按原 v1 解释：mapping 必须携带 `workorch.authoring.sealed-ref-mapping/v1` 及原三个 hash，审查必须携带原 kind/proposal hash。新旧合同不互相 fallback；已有失败、未决或已消费 permit 不因升级获得第二次调用许可。请求提供完整闭合 JSON Schema，独立审查仍绑定同一原 proposal，不能读取其他审查结论。`all_of` 不授权模型添加 `ConditionMode` 或其他合同之外的字段。
 
 稳定 schema 与精确字段说明放入 C0，当前 Goal、候选验收项、资源和身份放入动态请求。派生、提案和审查均使用当前 DTO 的闭合字段形状：所有必填字段必须出现，字段名大小写精确，数组、对象和标量均不得为 `null`；布尔值与整数不得使用字符串、浮点数或指数表示替代。解析在 256 KiB、32 层的边界内拒绝未知／重复字段、多 root、尾随内容、非法 UTF-8 和孤立 UTF-16 surrogate，不提取 fenced JSON，不修复或改写 provider 原文。
 
@@ -34,9 +36,9 @@ provider 原生 structured output 仅在能力明确支持时启用；不支持�
 
 ## 成功提案原文审计
 
-成功提案 completion 同时保存完整 provider document 和独立 wire 观察；owner 重开时从原 document 严格解码 current mapping，与 typed mapping 精确比较并重新编译 canonical proposal。原文 byte count／SHA256 与 permit、mapping 共同绑定 completion 身份，但不是准入或执行权威。document 必须完整且已保存，wire 可未观察、部分观察或超限未保存，必须明确标记 observed／complete／saved／reason；不得用 wire 缺口覆盖已知成功文档。
+v2 派生、提案及审查的成功 completion 均保存完整 provider document 和独立 wire 观察；owner 重开时按封存 wire 版本重解码原 document，与独立 typed 派生／mapping／审查精确比较；mapping 还重新编译 canonical proposal。原文 byte count／SHA256 与 permit、mapping 共同绑定 completion 身份，但不是准入或执行权威。document 必须完整且已保存，wire 可未观察、部分观察或超限未保存，必须明确标记 observed／complete／saved／reason；不得用 wire 缺口覆盖已知成功文档。
 
-普通创作记录及 DTO 只携带审计 metadata。显式 `GET /workspaces/:workspaceId/authoring/success-byte-audits/:permitId` 经 Application 的 concrete typed EventHub command/result 向 Workspace owner 读取当前记录中该已完成提案的原文；不复用失败诊断，不接受跨 Workspace 或未知 permit。响应以 Base64 可逆编码返回 document／wire 与完整性 metadata，使用 `Cache-Control: no-store`，沿用管理接口部署访问边界与 owner 0600 存储保护；未保存内容不伪装为完整原文。重复读取及进程重开后的读取不写 Workspace、不增加预算、不调用 provider、不创建 Run。
+普通创作记录及 DTO 只携带审计 metadata。显式 `GET /workspaces/:workspaceId/authoring/success-byte-audits/:permitId` 经 Application 的 concrete typed EventHub command/result 向 Workspace owner 读取当前记录中该已完成派生、提案或 v2 审查的原文（也支持待确认 change candidate）。CanonicalHash 对派生指向派生内容，对提案及审查指向原 proposal；permit 区分每份独立审查；不复用失败诊断，不接受跨 Workspace 或未知 permit。响应以 Base64 可逆编码返回 document／wire 与完整性 metadata，使用 `Cache-Control: no-store`，沿用管理接口部署访问边界与 owner 0600 存储保护；未保存内容不伪装为完整原文。重复读取及进程重开后的读取不写 Workspace、不增加预算、不调用 provider、不创建 Run。
 
 ## 原始失败诊断与数据保真
 

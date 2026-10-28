@@ -20,8 +20,9 @@ func (c QueryAuthoringSuccessAuditCommand) Validate() error {
 }
 
 type QueryAuthoringSuccessAuditResult struct {
-	WorkspaceID   common.WorkspaceID
-	PermitID      string
+	WorkspaceID common.WorkspaceID
+	PermitID    string
+	// Derivation content hash, or the proposal hash targeted by proposal/review.
 	CanonicalHash string
 	Audit         workspace.DefinitionAuthoringSuccessByteAudit
 }

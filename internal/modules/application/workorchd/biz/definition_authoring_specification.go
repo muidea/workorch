@@ -222,6 +222,12 @@ func (b *Biz) prepareAuthoringSpecification(ctx context.Context, id common.Works
 		}
 	}
 	request.ProviderBindingHash = bindingHash
+	request.WireContractRef = derivation.WireContractRef
+	phase := "proposal"
+	if request.ReviewKind != "" {
+		phase = request.ReviewKind
+	}
+	request.WireContractHash = workspace.AuthoringWireHash(request.WireContractRef, phase)
 	var command llmevents.CompleteProviderCommand
 	if proposal == nil {
 		command, err = specifications.AuthoringProposalCommand(derivation, configuration.DefaultChat)
@@ -241,7 +247,7 @@ func (b *Biz) completeAuthoringSpecification(ctx context.Context, id common.Work
 	if err := ctx.Err(); err != nil {
 		return request, err
 	}
-	reserve := workspaceevents.ReserveAuthoringSpecificationCommand{WorkspaceID: id, InputHash: inputHash, RequestID: request.RequestID, DerivationPermitID: request.DerivationPermitID, ReviewKind: request.ReviewKind, ProposalHash: request.ProposalHash, ProviderBindingHash: request.ProviderBindingHash}
+	reserve := workspaceevents.ReserveAuthoringSpecificationCommand{WireContractRef: request.WireContractRef, WireContractHash: request.WireContractHash, WorkspaceID: id, InputHash: inputHash, RequestID: request.RequestID, DerivationPermitID: request.DerivationPermitID, ReviewKind: request.ReviewKind, ProposalHash: request.ProposalHash, ProviderBindingHash: request.ProviderBindingHash}
 	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, reserve)
 	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), workspaceevents.TopicWorkspaceAuthoringSpecificationReserve, eventcontract.LaneScope{WorkspaceID: string(id)}))
 	result := b.SendEvent(ev)
@@ -282,7 +288,7 @@ func (b *Biz) completeAuthoringSpecification(ctx context.Context, id common.Work
 	if completion.Diagnostic != nil {
 		completion.FailureCode = "provider_failed"
 	} else if request.Phase == workspace.DefinitionSpecificationProposal {
-		parsed, parseErr := specifications.ParseAuthoringMapping(payload)
+		parsed, parseErr := workspace.DecodeAuthoringMappingFor(derivation, payload)
 		if parseErr != nil {
 			completion.FailureCode = "invalid_proposal"
 			diagnostic := authoringParserDiagnostic(parseErr, payload, response)
@@ -299,6 +305,9 @@ func (b *Biz) completeAuthoringSpecification(ctx context.Context, id common.Work
 			completion.Diagnostic = &diagnostic
 		} else {
 			completion.Review = &parsed
+			if request.WireContractRef != "" {
+				completion.SuccessAudit = &workspace.DefinitionAuthoringSuccessByteAudit{Document: authoringProviderObservation(response.ObservedDocument), Wire: authoringProviderObservation(response.Wire)}
+			}
 		}
 	}
 	completed, settlementErr := b.settleAuthoringSpecification(ctx, completion)
