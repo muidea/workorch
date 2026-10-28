@@ -2,12 +2,53 @@ package workspace
 
 import (
 	"bytes"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/muidea/workorch/internal/pkg/fileobservation"
 )
+
+func TestPreparationSkillHubProjectIssuePreservesUnresolvedHistory(t *testing.T) {
+	r := preparationRecordFixture()
+	r.Version = WorkspacePreparationWorkflowVersion
+	a := &r.Attempts[0]
+	a.State, a.CompletedAt, a.CommittedWorkspaceRevision = WorkspacePreparationBlocked, a.StartedAt.Add(time.Second), 3
+	a.CreationEpoch = strings.Repeat("e", 32)
+	a.SkillHubEffectRef, a.SkillHubEffectState = PreparationSkillHubRefPrefix+strings.Repeat("a", 32), PreparationSkillHubUnresolved
+	p := skillHubStatusFactsFixture()
+	p.Scope, p.Directory, p.StartedAt, p.CompletedAt = "workspace", "/project", a.StartedAt, a.CompletedAt
+	p.RawOutput = []byte(`{"command_error":{"code":"PROJECT_NOT_FOUND","message":"original path"}}`)
+	p.RawSHA256, p.TotalOutputBytes = fileobservation.Digest(p.RawOutput), uint64(len(p.RawOutput))
+	p.ExitCode, p.FailureCode = 1, "project_not_registered"
+	e := WorkspacePreparationSkillHubEffects{Version: PreparationSkillHubEffectsVersion, Ref: a.SkillHubEffectRef, WorkspaceID: "ws", RequestID: a.RequestID, PayloadHash: a.PayloadHash, ExpectedWorkspaceRevision: 1, Binding: a.Binding, ProjectDirectory: p.Directory, ReservedAt: a.StartedAt, CompletedAt: a.CompletedAt, Project: &p}
+	e.ContentHash = e.Hash()
+	w := &Workspace{ID: "ws", Revision: 3, StartupPreparation: &r, PreparationSkillHubEffects: []WorkspacePreparationSkillHubEffects{e}}
+	before := e.Clone()
+	if issue, err := PreparationSkillHubProjectIssue(w); err != nil || issue != "project_registration_required" || !reflect.DeepEqual(before, w.PreparationSkillHubEffects[0]) || e.Summary() != PreparationSkillHubUnresolved {
+		t.Fatal("diagnostic changed original unresolved history", issue, err)
+	}
+	for _, mutate := range []func(*PreparationSkillHubStatusFacts){
+		func(f *PreparationSkillHubStatusFacts) { f.ExitCode = 0 },
+		func(f *PreparationSkillHubStatusFacts) { f.OutputComplete = false },
+		func(f *PreparationSkillHubStatusFacts) { f.StderrComplete = false },
+		func(f *PreparationSkillHubStatusFacts) { f.FailureCode = "command_incomplete" },
+		func(f *PreparationSkillHubStatusFacts) {
+			f.RawOutput = []byte(`{"command_error":{"code":"OTHER","message":"PROJECT_NOT_FOUND"}}`)
+		},
+	} {
+		changed := before.Clone()
+		mutate(changed.Project)
+		changed.Project.RawSHA256 = fileobservation.Digest(changed.Project.RawOutput)
+		changed.Project.TotalOutputBytes = uint64(len(changed.Project.RawOutput))
+		changed.ContentHash = changed.Hash()
+		w.PreparationSkillHubEffects[0] = changed
+		if issue, err := PreparationSkillHubProjectIssue(w); err != nil || issue != "" {
+			t.Fatal("incomplete or different failure was classified as registration", issue, err)
+		}
+	}
+}
 
 func skillHubStatusFactsFixture() PreparationSkillHubStatusFacts {
 	now := time.Now().UTC()

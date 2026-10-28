@@ -48,9 +48,10 @@ export type PreparationAttempt = {
  skillReferenceState?: 'observed_checks_pending' | 'sources_incomplete' | 'source_unresolved' | 'unavailable';
  skillStatusState?: 'observed_freshness_pending' | 'sources_incomplete' | 'status_blocked' | 'version_conflict';
 };
-export type PreparationResourceInitialization = { requestId: string; expectedWorkspaceRevision: number; committedWorkspaceRevision: number; state: 'pending' | 'blocked' | 'completed'; attempts: number };
+export type PreparationResourceInitialization = { requestId: string; expectedWorkspaceRevision: number; committedWorkspaceRevision: number; state: 'pending' | 'blocked' | 'completed'; attempts: number; registrationState?: 'waiting_for_files' | 'not_started' | 'pending' | 'unresolved' | 'running' | 'unknown' | 'failed' | 'succeeded'; registrationAttempts?: number };
 export type PreparationResourceInitializationOperation = { requestId: string; preparation: StartupPreparationView };
 export type StartupPreparationView = {
+  skillHubProjectIssue?: 'project_registration_required';
  resourceInitializations?: PreparationResourceInitialization[];
   workspaceId: string;
   workspaceRevision: number;
@@ -191,11 +192,18 @@ function validateAssessment(a: PreparationAttempt): void {
 
 export function validatePreparationView(view: StartupPreparationView, workspaceId: string): void {
   if (!view || view.workspaceId !== workspaceId || !Number.isSafeInteger(view.workspaceRevision) || view.workspaceRevision <= 0) throw new Error('准备结果作用域或版本不匹配');
+  if (view.skillHubProjectIssue !== undefined) {
+    const last = view.record?.attempts.at(-1);
+    if (view.skillHubProjectIssue !== 'project_registration_required' || view.record?.version !== 'workorch-preparation-record/v2' || last?.state !== 'blocked' || last.skillHubEffectState !== 'unresolved') throw new Error('SkillHub 项目诊断未绑定原阻塞操作');
+  }
   if (view.resourceInitializations !== undefined) {
     if (!Array.isArray(view.resourceInitializations) || view.resourceInitializations.length > 16) throw new Error('资源初始化记录无效');
     const seen = new Set<string>();
     for (const r of view.resourceInitializations) {
       if (!r || typeof r.requestId !== 'string' || !r.requestId.trim() || seen.has(r.requestId) || !Number.isSafeInteger(r.expectedWorkspaceRevision) || r.expectedWorkspaceRevision <= 0 || !Number.isSafeInteger(r.committedWorkspaceRevision) || r.committedWorkspaceRevision <= r.expectedWorkspaceRevision || r.committedWorkspaceRevision > view.workspaceRevision || !['pending', 'blocked', 'completed'].includes(r.state) || !Number.isSafeInteger(r.attempts) || r.attempts < 1 || r.attempts > 4) throw new Error('资源初始化身份或状态无效');
+      const registrationStates = ['waiting_for_files', 'not_started', 'pending', 'unresolved', 'running', 'unknown', 'failed', 'succeeded'];
+      const n = r.registrationAttempts ?? 0;
+      if (!Number.isSafeInteger(n) || n < 0 || n > 4 || (r.registrationState === undefined ? n !== 0 : !registrationStates.includes(r.registrationState) || (['waiting_for_files', 'not_started'].includes(r.registrationState) ? n !== 0 : n < 1)) || r.state === 'completed' && r.registrationState !== undefined && r.registrationState !== 'succeeded' || r.registrationState === 'succeeded' && r.state !== 'completed' || ['not_started', 'pending'].includes(r.registrationState ?? '') && r.state !== 'pending' || ['failed', 'unresolved', 'unknown', 'running'].includes(r.registrationState ?? '') && r.state !== 'blocked') throw new Error('SkillHub 登记回执状态无效');
       seen.add(r.requestId);
     }
   }

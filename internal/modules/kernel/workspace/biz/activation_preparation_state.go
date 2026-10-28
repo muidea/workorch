@@ -88,9 +88,22 @@ func preparationStateFromPersistence(w *workspace.Workspace, now time.Time) (wor
 		return result, common.ErrConflict
 	}
 	for _, r := range w.PreparationResourceInitializations {
-		result.ResourceInitializations = append(result.ResourceInitializations, workspaceevents.PreparationInitializationView{RequestID: r.Plan.RequestID, ExpectedWorkspaceRevision: r.ExpectedWorkspaceRevision, CommittedWorkspaceRevision: r.CommittedWorkspaceRevision, State: r.State(), Attempts: len(r.Attempts)})
+		v := workspaceevents.PreparationInitializationView{RequestID: r.Plan.RequestID, ExpectedWorkspaceRevision: r.ExpectedWorkspaceRevision, CommittedWorkspaceRevision: r.CommittedWorkspaceRevision, State: r.State(), Attempts: len(r.Attempts)}
+		if r.Registration != nil {
+			v.RegistrationState = r.Registration.Status()
+			if !r.FileObserved() {
+				v.RegistrationState = "waiting_for_files"
+			}
+			v.RegistrationAttempts = len(r.Registration.Attempts)
+		}
+		result.ResourceInitializations = append(result.ResourceInitializations, v)
 	}
 	if w.StartupPreparation != nil {
+		issue, err := workspace.PreparationSkillHubProjectIssue(w)
+		if err != nil {
+			return result, err
+		}
+		result.SkillHubProjectIssue = issue
 		if w.StartupPreparation.Validate(w.ID) != nil {
 			return workspaceevents.QueryWorkspacePreparationStateResult{}, common.ErrConflict
 		}

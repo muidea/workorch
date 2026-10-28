@@ -2,6 +2,7 @@ package biz
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 )
 
 func TestStartupPreparationApplicationExactReadAndDetachedProjection(t *testing.T) {
-	for _, scenario := range []string{"unchecked", "unknown", "scope", "invalid_state", "wrong_type", "cancelled"} {
+	for _, scenario := range []string{"unchecked", "unknown", "unregistered", "unbound_diagnostic", "scope", "invalid_state", "wrong_type", "cancelled"} {
 		t.Run(scenario, func(t *testing.T) {
 			hub := magicevent.NewHub(32)
 			defer hub.Terminate(context.Background())
@@ -20,12 +21,23 @@ func TestStartupPreparationApplicationExactReadAndDetachedProjection(t *testing.
 			owner := magicevent.NewSimpleObserver(workspaceevents.CommandDestination, hub)
 			calls := 0
 			reply := workspaceevents.QueryWorkspacePreparationStateResult{WorkspaceID: "ws", WorkspaceRevision: 2, ActiveRunID: "actual-run", State: "not_checked", CurrentValidity: "not_checked"}
-			if scenario == "unknown" {
+			if scenario == "unknown" || scenario == "unregistered" || scenario == "unbound_diagnostic" {
 				reply.State, reply.CurrentValidity = "unknown", "stale"
 				reply.Record = &workspace.WorkspacePreparationRecord{Version: workspace.WorkspacePreparationRecordVersion, WorkspaceID: "ws", Attempts: []workspace.WorkspacePreparationAttempt{{
 					RequestID: "original-request", PayloadHash: "payload", ExpectedWorkspaceRevision: 1, CommittedWorkspaceRevision: 2, State: workspace.WorkspacePreparationUnknown, StartedAt: time.Now().UTC(),
 					Binding: workspace.WorkspacePreparationBinding{AuthoringRef: workspace.DefinitionAuthoringAdmissionRef{InputHash: "input", DerivationPermitID: "permit", ProposalHash: "proposal", SpecificationHash: "spec"}, CandidateID: "candidate", CandidateRevision: 1, CandidateHash: "candidate-hash", DefinitionRevision: "definition", StartupInputHash: "startup", AuthoringConfigurationHash: "config", SnapshotHash: "snapshot", ManifestHash: "manifest", CheckPolicyVersion: "policy", CompilerVersion: "compiler"},
 				}}}
+			}
+			if scenario == "unregistered" || scenario == "unbound_diagnostic" {
+				reply.SkillHubProjectIssue = "project_registration_required"
+			}
+			if scenario == "unregistered" {
+				reply.Record.Version, reply.State = workspace.WorkspacePreparationWorkflowVersion, "blocked"
+				a := &reply.Record.Attempts[0]
+				a.State, a.CompletedAt = workspace.WorkspacePreparationBlocked, a.StartedAt.Add(time.Second)
+				a.CreationEpoch = strings.Repeat("a", 32)
+				a.SkillHubEffectRef, a.SkillHubEffectState = "skillhub-status:"+strings.Repeat("b", 32), workspace.PreparationSkillHubUnresolved
+				a.Checks = []workspace.WorkspacePreparationCheckResult{{ID: "exact_seal", Owner: "workspace", Required: true, State: "blocked", Reason: "check_pipeline_incomplete"}}
 			}
 			if scenario == "scope" {
 				reply.WorkspaceID = "other"
@@ -54,7 +66,7 @@ func TestStartupPreparationApplicationExactReadAndDetachedProjection(t *testing.
 				cancel()
 			}
 			view, err := b.ReadStartupPreparationView(ctx, "ws")
-			valid := scenario == "unchecked" || scenario == "unknown"
+			valid := scenario == "unchecked" || scenario == "unknown" || scenario == "unregistered"
 			if (err == nil) != valid {
 				t.Fatalf("view=%+v err=%v", view, err)
 			}
@@ -72,6 +84,9 @@ func TestStartupPreparationApplicationExactReadAndDetachedProjection(t *testing.
 			}
 			if view.ValidateFor("ws") != nil || view.ActiveRunID != "actual-run" {
 				t.Fatal("projection lost independent owner facts")
+			}
+			if scenario == "unregistered" && (view.SkillHubProjectIssue != "project_registration_required" || view.Record.Attempts[0].SkillHubEffectState != "unresolved") {
+				t.Fatal("negative projection lost original diagnostic/fence")
 			}
 			if scenario == "unknown" {
 				if view.OperationState != "unknown" || view.CurrentValidity != "stale" || view.Record.Attempts[0].Binding.InputHash != "input" {

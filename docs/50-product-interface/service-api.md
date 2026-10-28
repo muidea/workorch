@@ -327,6 +327,20 @@ committed revision、`pending/blocked/completed` 及已消耗派发次数；配�
 实际资源，不授予 ready/M3。原失败检查不改写。页面只读刷新及关闭重开不自动提交；POST 响应丢失后从 GET
 找回原身份，错误或 GET 尚未见到原记录时不换身份重发。所有这些响应均为 `no-store`。
 
+当前生产初始化使用 `workorch-preparation-resource-initialization/v2`：File 阶段完成后，另行先 CAS
+保存 SkillHub 登记派发，再由 Application 调用 SkillHub v0.13.7 的
+`project register <精确交付目录> --request-id <稳定原身份> --json`。身份由 Workspace＋初始化 requestId
+确定，并绑定服务端原 Hub home；HTTP 不接受 home、路径或外部回执。登记不扫描/导入/安装技能。
+普通重放及 GET 均不执行 CLI；显式恢复在登记已派发后只用 `project register --query --request-id ... --json`
+查询原回执，绝不重发登记。首次登记及后续查询共用独立的 4 次持久预算，不重置 File 的 4 次预算。
+只有原 request、项目路径、完整终态、executed/finished 与成功 registered 结果全部匹配时，才能完成 v2
+初始化；该回执仅证明历史登记，不能替代随后真实 status 或授予 readiness。failed、running、unknown、缺回执、
+截断/无效输出或 scope 漂移均保持阻塞，不把 REQUEST_NOT_FOUND 当作从未执行。已确定失败不重复查询。
+`resourceInitializations` 另含可选 `registrationState`（waiting_for_files/not_started/pending/unresolved/running/unknown/failed/succeeded）
+和 `registrationAttempts`；不包含 Hub home、CLI 原文或结果正文。旧 v1 记录仍只代表原 File 操作，不会在
+重放时升级或补执行登记。新登记回执不能补证历史无 request-id 的 status，既有未决 fence 保持不变。
+
+
 显式 `POST /workspaces/:workspaceId/activation-preparation/check` 与
 `POST /workspaces/:workspaceId/activation-preparation/recover` 只接受
 `{requestId, expectedWorkspaceRevision}`；恢复必须携带原请求及原 revision，不能替换为查询得到的新 revision。
@@ -510,6 +524,11 @@ accepted/unknown 对应 reserved；blocked 对应 recorded 或 unresolved。reco
 原 stdout/stderr/错误 bytes、完整性、总字节数、时间与退出事实仅保存在 Workspace 0600 私有历史；
 每流最多保存 1 MiB 捕获前缀并显式标记 incomplete，错误超 64 KiB 时不保存前缀，明确原因及原总大小/full SHA256。
 这些材料不进入普通 Workspace JSON/HTTP，迟到回执不覆盖已结算历史。
+准备视图可有 `skillHubProjectIssue=project_registration_required`，仅由 Workspace owner 从最近
+blocked 原操作的 project 完整双流、真实 exit 1 和唯一 `command_error.code=PROJECT_NOT_FOUND`
+文档反查生成。它是有限历史诊断，不输出原 message/路径，不把错误当作空库存，不修改原
+attempt、效果 unresolved 或 currentValidity。SkillHub v0.13.6 的 JSON status 不隐式登记新项目；
+仅创建 `.agents/skills` 目录不等于已登记。GET、刷新和恢复不登记、不重跑 status，也不清除旧效果栅栏。
 相对或非规范交付目录保留原值，派发前记录 directory_invalid_not_started；不猜选其他目录。
 成功 status 后仅使用该次原始回执观察已安装指令，不再次执行 status；两轮真实文件读取及严格
 metadata 核验的材料随原操作私有封存。公开可有 `skillHubInstalledState`：

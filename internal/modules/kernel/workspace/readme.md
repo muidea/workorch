@@ -53,6 +53,21 @@ fresh execution reservation，不能从中取得 readiness、M3 或执行权限�
 明确未保存原因，保留已知失败。GET 只投影 request/revision、pending/blocked/completed 及已消耗次数，不重试初始化，
 不将创建完成当作资源可用性。初始化不会改写旧检查；随后须显式发起新检查，由 File、SkillHub、Skill、MCP 等重新观察。
 
+生产入口使用私有初始化 journal v2，包含不可变 SkillHub 登记计划（精确交付目录、原 Hub home、由 Workspace＋
+初始化身份确定的 request-id），该计划计入原 BindingHash。File 完成后先通过 CAS 保存登记 attempt，才返回
+一次 Application 私有延续。Application 执行 v0.13.7 `project register`，随后通过 Workspace state lane 的
+`/workspace/activation-preparation/resources/registration-settle`（`SettlePreparationRegistrationCommand`，
+唯一 source 为 application/workorchd）回传完整捕获事实。settle 再核对原请求、当前 revision、计划、attempt、
+时间和完整前像，CAS 追加不可变结果；原始 stdout/stderr 分别保全 bytes/长度/hash/完整性，不进入公开 DTO。
+该私有事件不接受调用者 PASS，不修改旧 status 账本或 SM-1～SM-4。
+
+登记/查询总预算独立为 4，首次派发后所有显式恢复仅查询同一 Hub home 的原回执，不能重发登记。
+已派发但尚无结果的 attempt 也消耗预算；查询缺失不证明从未执行。scope 漂移、未知/运行中、无效/部分输出
+均阻塞，确定失败不再查询。只有完整原成功回执可将 v2 初始化标记 completed；File 完成不能提前解锁准备/执行。
+GET、普通重放、已完成恢复、旧 v1 重放均无外部效果；v1 不自动迁移到 v2。Clone/reopen 保留原计划、全部
+历史和字节隔离。公开仅增加有限 registrationState/registrationAttempts；旧 status 未决不能用新登记回执清除。
+
+
 ### 激活前准备只读与纯编译边界
 
 `QueryExactConfirmedStartupSnapshotCommand/Result`（`/workspace/activation-preparation/exact-startup/query`）
@@ -347,6 +362,10 @@ backstop 保持。每流最多保存 1 MiB 已捕获前缀，超界明确 incomp
 已保存历史（可含真实未启动），不是 Skill readiness。命令失败、退出未知、不完整或回执缺失为
 `unresolved`，仍保留已知失败/非零退出；恢复不重发，迟到回执不覆盖已结算历史。
 新检查不能绕过任何 reserved/unresolved；当前没有凭超时、空库存或换 request 清除效果 fence 的入口。
+只读视图的 `SkillHubProjectIssue=project_registration_required` 从最近 blocked 原 effect 的
+project 完整双流、真实 exit 1 与唯一 `PROJECT_NOT_FOUND` JSON 错误派生；不输出原 message，
+不改变原失败、归档 hash、unresolved 或检查通过数。v0.13.6 JSON status 不隐式登记；目录存在
+不证明已登记。此诊断不是对账回执，不授予重发、登记或准备就绪权限。
 相对/非规范交付目录保留原值，但不执行 status，明确记录 directory_invalid_not_started。
 成功 status 后仅消费该次原回执，不再执行 status：Application 重解析 raw inventory，在独立确定的
 Codex 全局／原交付目录 `.agents/skills` 根下真实双读已安装 SKILL.md，保留两轮原 bytes、路径、

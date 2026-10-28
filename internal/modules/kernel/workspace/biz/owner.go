@@ -129,6 +129,9 @@ func (m *Biz) Start() error {
 			return err
 		}
 	}
+	if err := m.subscribeOwner(workspaceevents.TopicWorkspacePreparationRegistrationSettle, m.handlePreparationRegistrationSettle, false); err != nil {
+		return err
+	}
 	if err := m.subscribeOwner(workspaceevents.TopicWorkspacePreparationCheck, m.handlePreparationCheck, false); err != nil {
 		return err
 	}

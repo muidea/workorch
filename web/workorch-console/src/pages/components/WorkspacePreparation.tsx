@@ -137,18 +137,21 @@ function PreparationPanel({ workspaceId }: { workspaceId: string }) {
   };
   const last = view?.record?.attempts.at(-1);
   const lastInitialization = view?.resourceInitializations?.at(-1);
+  const registrationStage = Boolean(lastInitialization?.registrationState && lastInitialization.registrationState !== 'waiting_for_files');
+  const initializationBudget = registrationStage ? (lastInitialization?.registrationAttempts ?? 0) : (lastInitialization?.attempts ?? 0);
   return <Space direction="vertical" style={{ width: '100%' }}>
     <Alert type="info" showIcon message="准备检查仍保持阻塞，不授予 ready、M3 或执行权限。" description="开页和刷新仅读已有记录；显式新检查会在服务端先封存 SkillHub status 目标，再按 global／project 执行，可能保存 SkillHub 状态或访问其已配置服务，不执行 install、sync、use、apply 或 repair。不调用模型、不创建 Run。status 历史记录不等于 Skill 就绪；效果未决时禁止新请求绕过，恢复不重跑观察。原始材料由服务端受限保存，仅公开随机历史引用。未保存的页面交互在关闭或刷新后丢失，已受理操作由服务端保存。" />
     {error ? <Alert type="error" message={error} /> : null}
+    {view?.skillHubProjectIssue === 'project_registration_required' ? <Alert type="warning" showIcon message="SkillHub 项目尚未登记" description="原检查收到 PROJECT_NOT_FOUND，不能将其视为空技能库。仅创建 .agents/skills 目录不足以完成 SkillHub 登记；需通过受支持的显式项目登记流程处理。原效果未决记录仍保留，刷新或升级不会解除，也不会自动重跑 status。" /> : null}
     <Space wrap>
       <Button disabled={busy || !view || Boolean(pending) || Boolean(pendingInitialization) || view.record?.attempts.some(a => a.skillHubEffectState === 'reserved' || a.skillHubEffectState === 'unresolved')} onClick={() => void initialize(false)}>显式初始化准备资源</Button>
-      <Button disabled={busy || Boolean(pending) || !pendingInitialization || (lastInitialization?.attempts ?? 0) >= 4} onClick={() => void initialize(true)}>显式恢复资源初始化</Button>
+      <Button disabled={busy || Boolean(pending) || !pendingInitialization || initializationBudget >= 4 || lastInitialization?.registrationState === 'failed'} onClick={() => void initialize(true)}>显式恢复资源初始化</Button>
       <Button disabled={busy} onClick={() => void refresh()}>只读刷新准备结果</Button>
       <Button disabled={busy || !view || Boolean(pending) || Boolean(pendingInitialization) || view.record?.attempts.some(a => a.skillHubEffectState === 'reserved' || a.skillHubEffectState === 'unresolved')} onClick={() => void submit(false)}>显式检查准备</Button>
       <Button disabled={busy || !pending} onClick={() => void submit(true)}>显式恢复原准备操作</Button>
     </Space>
-    <Alert type="info" message="资源初始化仅创建缺失的托管配置和项目 .agents/skills 目录，保留已有内容及冲突，不安装或同步 Skill。完成后请显式检查准备；初始化不授予 ready、M3 或执行权限。" />
-    {lastInitialization ? <Typography.Paragraph>最近资源初始化：{lastInitialization.requestId}；{lastInitialization.state}；已消耗 {lastInitialization.attempts} 次派发预算。{lastInitialization.state === 'completed' ? '基础设施创建完成，资源就绪仍须检查。' : lastInitialization.attempts >= 4 ? '已达派发次数上限，请核对服务端原始材料。' : '原操作未完成，请保留原身份并显式恢复；已有冲突不会被覆盖。'}</Typography.Paragraph> : null}
+    <Alert type="info" message="资源初始化创建缺失的托管配置和项目 .agents/skills 目录，并显式登记 SkillHub 空项目，保留已有内容及技能。登记回复丢失后，恢复仅查询原请求回执，不重新登记；不安装或同步 Skill。完成后请显式检查准备；初始化不授予 ready、M3 或执行权限。" />
+    {lastInitialization ? <Typography.Paragraph>最近资源初始化：{lastInitialization.requestId}；{lastInitialization.state}；File 已消耗 {lastInitialization.attempts} 次派发预算。{lastInitialization.registrationState ? `SkillHub 登记：${lastInitialization.registrationState}；已消耗 ${lastInitialization.registrationAttempts ?? 0} 次登记／查询预算。` : ''}{lastInitialization.state === 'completed' ? '基础设施创建完成，资源就绪仍须检查。' : lastInitialization.registrationState === 'failed' ? '登记已确定失败，请核对服务端原始材料；不会重发登记。' : initializationBudget >= 4 ? '已达派发次数上限，请核对服务端原始材料。' : '原操作未完成，请保留原身份并显式恢复；已有冲突不会被覆盖。'}</Typography.Paragraph> : null}
     {pendingInitialization ? <Typography.Paragraph>待对账初始化请求：{pendingInitialization.requestId}；原 revision：{pendingInitialization.expectedWorkspaceRevision}</Typography.Paragraph> : null}
     {pending ? <Typography.Paragraph>待对账原请求：{pending.requestId}；原 revision：{pending.expectedWorkspaceRevision}</Typography.Paragraph> : null}
     {compilation ? <Alert type="info" message={compilation.value.failureCode ? `完整结构编译受阻：${compilation.value.failureCode}` : '完整 PreparedBootstrap 结构编译已复现；不是 ready、M3 或执行授权'} description={`原请求 ${compilation.requestId}；${compilation.value.bootstrapHash || '未产生 bootstrap'}。仅本次显式检查／恢复从服务端原归档编译；刷新页面不补造该结果，当前资源有效性仍须独立核验。`} /> : null}

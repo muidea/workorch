@@ -48,6 +48,7 @@ type QueryWorkspacePreparationStateResult struct {
 	CurrentValidity         string
 	ResourceInitializations []PreparationInitializationView
 	Record                  *workspace.WorkspacePreparationRecord
+	SkillHubProjectIssue    string
 }
 
 func (r QueryWorkspacePreparationStateResult) ValidateFor(c QueryWorkspacePreparationStateCommand) error {
@@ -65,7 +66,7 @@ func (r QueryWorkspacePreparationStateResult) ValidateFor(c QueryWorkspacePrepar
 		seen[v.RequestID] = true
 	}
 	if r.Record == nil {
-		if r.State != "not_checked" || r.CurrentValidity != "not_checked" {
+		if r.State != "not_checked" || r.CurrentValidity != "not_checked" || r.SkillHubProjectIssue != "" {
 			return common.ErrConflict
 		}
 		return nil
@@ -74,6 +75,9 @@ func (r QueryWorkspacePreparationStateResult) ValidateFor(c QueryWorkspacePrepar
 		return common.ErrConflict
 	}
 	last := r.Record.Attempts[len(r.Record.Attempts)-1]
+	if r.SkillHubProjectIssue != "" && (r.SkillHubProjectIssue != "project_registration_required" || last.State != workspace.WorkspacePreparationBlocked || last.SkillHubEffectState != workspace.PreparationSkillHubUnresolved) {
+		return common.ErrConflict
+	}
 	if last.CommittedWorkspaceRevision > r.WorkspaceRevision {
 		return common.ErrConflict
 	}

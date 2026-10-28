@@ -98,6 +98,28 @@ func (f PreparationSkillHubStatusFacts) EffectsUnresolved() bool {
 	return f.CommandStarted && (f.FailureCode != "" || !f.ExitCodeKnown || f.ExitCode != 0 || !f.OutputComplete || !f.StderrComplete)
 }
 
+// A finite historical diagnostic only. The original unresolved fence and raw
+// receipt remain unchanged; a missing project is not an empty Skill inventory.
+func PreparationSkillHubProjectIssue(w *Workspace) (string, error) {
+	if ValidatePreparationSkillHubEffectsPersistence(w) != nil {
+		return "", common.ErrConflict
+	}
+	if w.StartupPreparation == nil || len(w.StartupPreparation.Attempts) == 0 {
+		return "", nil
+	}
+	a := w.StartupPreparation.Attempts[len(w.StartupPreparation.Attempts)-1]
+	for _, e := range w.PreparationSkillHubEffects {
+		if e.Ref != a.SkillHubEffectRef || e.Project == nil || a.State != WorkspacePreparationBlocked {
+			continue
+		}
+		f := e.Project
+		if f.CommandStarted && f.ExitCodeKnown && f.ExitCode == 1 && f.OutputComplete && f.StderrComplete && (f.FailureCode == "command_failed" || f.FailureCode == "project_not_registered") && skillhubpreparation.ProjectNotFound(f.RawOutput) {
+			return "project_registration_required", nil
+		}
+	}
+	return "", nil
+}
+
 // The two exact targets are sealed in the initial accepted CAS, before either
 // command. Only its unambiguous first continuation may dispatch them once.
 type WorkspacePreparationSkillHubEffects struct {

@@ -20,6 +20,7 @@ type StartupPreparationView struct {
 	CurrentValidity         string                                  `json:"currentValidity"`
 	ResourceInitializations []PreparationResourceInitializationView `json:"resourceInitializations,omitempty"`
 	Record                  *PreparationRecordView                  `json:"record,omitempty"`
+	SkillHubProjectIssue    string                                  `json:"skillHubProjectIssue,omitempty"`
 }
 
 type PreparationRecordView struct {
@@ -163,6 +164,15 @@ type PreparationBindingView struct {
 func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 	if workspaceID == "" || v.WorkspaceID != workspaceID || v.WorkspaceRevision == 0 {
 		return common.ErrConflict
+	}
+	if v.SkillHubProjectIssue != "" {
+		if v.SkillHubProjectIssue != "project_registration_required" || v.Record == nil || v.Record.Version != "workorch-preparation-record/v2" || len(v.Record.Attempts) == 0 {
+			return common.ErrConflict
+		}
+		a := v.Record.Attempts[len(v.Record.Attempts)-1]
+		if a.State != "blocked" || a.SkillHubEffectState != "unresolved" {
+			return common.ErrConflict
+		}
 	}
 	if len(v.ResourceInitializations) > 16 {
 		return common.ErrConflict

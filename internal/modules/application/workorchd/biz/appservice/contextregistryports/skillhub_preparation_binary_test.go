@@ -14,6 +14,50 @@ import (
 
 // Explicit opt-in, no machine SkillHub configuration or project is used. This
 // checks a real installed CLI, separately from deterministic shell fixtures.
+func TestPreparationSkillHubInstalledBinaryUnregisteredProject(t *testing.T) {
+	binary := os.Getenv("WORKORCH_TEST_SKILLHUB_BINARY")
+	if binary == "" {
+		t.Skip("set WORKORCH_TEST_SKILLHUB_BINARY for isolated real CLI verification")
+	}
+	if !filepath.IsAbs(binary) {
+		t.Fatal("test binary must be absolute")
+	}
+	root := t.TempDir()
+	directory, hubRoot, bin := filepath.Join(root, "project"), filepath.Join(root, "hub"), filepath.Join(root, "bin")
+	for _, p := range []string{bin, filepath.Join(directory, ".agents", "skills"), filepath.Join(hubRoot, "repositories", "main", "skills")} {
+		if err := os.MkdirAll(p, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(binary, filepath.Join(bin, "skill-hub")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv("SKILL_HUB_HOME", hubRoot)
+	t.Setenv("SKILL_HUB_DISABLE_SERVICE_BRIDGE", "true")
+	if err := os.WriteFile(filepath.Join(hubRoot, "config.yaml"), []byte("multi_repo:\n  enabled: true\n  default_repo: main\n  repositories:\n    main:\n      name: main\n      enabled: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(hubRoot, "state.json")
+	if err := os.WriteFile(state, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		value, err := ObserveSkillHubPreparation(context.Background(), SkillHubPreparationExecRunner{}, "isolated-ws", directory, false)
+		if err == nil || value.FailureCode != "project_not_registered" || !value.CommandStarted || !value.ExitCodeKnown || value.ExitCode != 1 || !value.OutputComplete || !value.StderrComplete || value.InventoryComplete || !json.Valid(value.RawOutput) {
+			t.Fatalf("unregistered project was hidden or auto-created: %+v %v", value, err)
+		}
+		after, readErr := os.ReadFile(state)
+		if readErr != nil || !bytes.Equal(before, after) {
+			t.Fatal("machine status changed unregistered project state", readErr)
+		}
+	}
+}
+
 func TestPreparationSkillHubInstalledBinaryProjectStatusEffects(t *testing.T) {
 	binary := os.Getenv("WORKORCH_TEST_SKILLHUB_BINARY")
 	if binary == "" {

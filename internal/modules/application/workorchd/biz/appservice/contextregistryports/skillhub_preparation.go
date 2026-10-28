@@ -198,6 +198,9 @@ func ObserveSkillHubPreparation(ctx context.Context, runner SkillHubPreparationR
 		return fail("output_incomplete", errors.Join(err, common.ErrConflict))
 	}
 	if err != nil || (output.ExitCodeKnown && output.ExitCode != 0) {
+		if !global && output.CommandStarted && output.ExitCodeKnown && output.ExitCode == 1 && skillhubpreparation.ProjectNotFound(output.Bytes) {
+			return fail("project_not_registered", errors.Join(err, common.ErrConflict))
+		}
 		return fail("command_failed", errors.Join(err, common.ErrConflict))
 	}
 	if err := bounded.Err(); err != nil {

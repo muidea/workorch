@@ -15,6 +15,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
+	"github.com/muidea/workorch/internal/pkg/skillhubpreparation"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
 )
 
@@ -74,6 +75,12 @@ func (m *Biz) initializePreparationResources(ctx context.Context, c workspaceeve
 	if index >= 0 && (!recoverOriginal || current.PreparationResourceInitializations[index].InfrastructureObserved()) {
 		return preparationInitializationResult(current, c)
 	}
+	if index >= 0 && current.PreparationResourceInitializations[index].Registration != nil && current.PreparationResourceInitializations[index].Registration.Plan.Home != c.RegistrationHome {
+		return empty, common.ErrConflict
+	}
+	if index >= 0 && recoverOriginal && current.PreparationResourceInitializations[index].FileObserved() {
+		return m.reservePreparationRegistration(bound, current, index, c)
+	}
 	if index < 0 && recoverOriginal {
 		return empty, common.ErrNotFound
 	}
@@ -110,6 +117,10 @@ func (m *Biz) initializePreparationResources(ctx context.Context, c workspaceeve
 				return empty, e
 			}
 			r.Plan.Declarations = append(r.Plan.Declarations, fileevents.PreparationInitializationDeclaration{Scope: d.Scope, Path: d.Path, Policy: d.Policy, DefaultsJSON: raw})
+		}
+		if c.RegistrationHome != "" {
+			r.Version = workspace.PreparationInitializationRegistrationVersion
+			r.Registration = &workspace.PreparationRegistration{Plan: skillhubpreparation.RegistrationPlan{Version: skillhubpreparation.RegistrationVersion, Home: c.RegistrationHome, Directory: r.Plan.DeliverableDirectory, RequestID: skillhubpreparation.RegistrationRequestID(string(c.WorkspaceID), c.RequestID)}}
 		}
 		r.Attempts = []workspace.PreparationResourceInitializationAttempt{{PreparedAt: r.PreparedAt}}
 		r.DefaultSoulID = current.DefaultSoulID
@@ -185,6 +196,9 @@ func (m *Biz) initializePreparationResources(ctx context.Context, c workspaceeve
 	updated.CommittedWorkspaceRevision = after.Revision + 1
 	if err = m.workspaces.CompareAndSwap(bound, &next, after.Revision); err != nil {
 		return empty, err
+	}
+	if updated.FileObserved() && updated.Registration != nil {
+		return m.reservePreparationRegistration(bound, &next, index, c)
 	}
 	return preparationInitializationResult(&next, c)
 }

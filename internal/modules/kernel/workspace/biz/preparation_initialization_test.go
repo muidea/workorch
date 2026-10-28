@@ -141,6 +141,7 @@ func TestPreparationInitializationPreservesNestedEmptyHistoryAcrossCASAndReopen(
 }
 
 func TestPreparationInitializationProductionCreatesMissingPreservesExistingAndReopens(t *testing.T) {
+	setupPreparationRegistrationCLI(t)
 	for _, scenario := range []string{"missing", "preserve", "conflict", "symlink"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
@@ -189,7 +190,11 @@ func TestPreparationInitializationProductionCreatesMissingPreservesExistingAndRe
 				want = "blocked"
 			}
 			last := operation.Preparation.ResourceInitializations[0]
-			if last.State != want || last.Attempts != 1 || operation.Preparation.WorkspaceRevision != w.Revision+2 || !reflect.DeepEqual(old.State.Record, operationToOwnerRecord(t, owners, w.ID)) {
+			expectedRevision := w.Revision + 4
+			if scenario == "conflict" || scenario == "symlink" {
+				expectedRevision = w.Revision + 2
+			}
+			if last.State != want || last.Attempts != 1 || operation.Preparation.WorkspaceRevision != expectedRevision || !reflect.DeepEqual(old.State.Record, operationToOwnerRecord(t, owners, w.ID)) {
 				t.Fatalf("incorrect initialization/history: %+v", operation)
 			}
 			if _, err := os.Stat(filepath.Join(w.DeliverableDirectory, ".agents", "skills")); err != nil {
@@ -398,5 +403,21 @@ func TestPreparationInitializationRejectsSelfConsistentUndeclaredPlan(t *testing
 		if workspace.ValidatePreparationInitializationPreimage(saved, &next) == nil {
 			t.Fatal("hash authorized an undeclared target/body")
 		}
+	}
+}
+
+// Tests using the production Application entry isolate the external CLI and
+// Hub identity. Owner-only v1 fixtures intentionally retain their old contract.
+func setupPreparationRegistrationCLI(t *testing.T) {
+	t.Helper()
+	bin := t.TempDir()
+	t.Setenv("SKILL_HUB_HOME", t.TempDir())
+	t.Setenv("PATH", bin)
+	script := `#!/bin/sh
+if [ "$1" != project ] || [ "$2" != register ] || [ "$4" != --request-id ]; then exit 90; fi
+printf '{"request_id":"%s","project_path":"%s","status":"succeeded","executed":true,"finished":true,"started_at":"2026-01-01T00:00:00Z","completed_at":"2026-01-01T00:00:01Z","result":{"registered":true,"project_created":true,"created_directories":[],"skill_count":0}}' "$5" "$3"
+`
+	if err := os.WriteFile(filepath.Join(bin, "skill-hub"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
 	}
 }

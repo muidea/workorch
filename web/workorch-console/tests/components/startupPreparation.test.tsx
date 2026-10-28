@@ -19,6 +19,24 @@ const recoverButton = () => screen.getByRole('button', { name: '显式恢复原�
 function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 
 describe('STEP04 准备主体流程', () => {
+  it('未登记诊断绑定原未决操作且不会自动登记或换身份重试', async () => {
+    const view = observed({ requestId: 'unregistered-original', expectedWorkspaceRevision: 10 });
+    const a = view.record!.attempts[0];
+    a.skillHubEffectRef = `skillhub-status:${'b'.repeat(32)}`;
+    a.skillHubEffectState = 'unresolved';
+    view.skillHubProjectIssue = 'project_registration_required';
+    vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(view);
+    expect(() => validatePreparationView(view, 'ws')).not.toThrow();
+    render(wrap()); await act(async () => {});
+    expect(screen.getByText('SkillHub 项目尚未登记')).toBeTruthy();
+    expect(checkButton().disabled).toBe(true);
+    expect(recoverButton().disabled).toBe(true);
+    expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
+    expect(workorchApi.initializeStartupPreparationResources).not.toHaveBeenCalled();
+    const bad = structuredClone(view);
+    bad.record!.attempts[0].skillHubEffectState = 'recorded';
+    expect(() => validatePreparationView(bad, 'ws')).toThrow();
+  });
   it('完整结构编译仅展示原显式操作产物，不修改持久检查或授权', async () => {
     const request = { requestId: 'compile-original', expectedWorkspaceRevision: 10 };
     const view = observed(request);
@@ -924,6 +942,36 @@ describe('准备资源显式初始化', () => {
     fireEvent.click(screen.getByText('显式恢复资源初始化')); await act(async () => {});
     expect(workorchApi.recoverStartupPreparationResources).toHaveBeenCalledWith('ws', request);
     expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
+  });
+  it('File 预算已用完时，仍可按独立登记预算显式查询原回执', async () => {
+    const request = { requestId: 'registration-original', expectedWorkspaceRevision: 10 };
+    const next = initialized(request, 'blocked');
+    next.resourceInitializations![0] = { ...next.resourceInitializations![0], attempts: 4, registrationState: 'unresolved', registrationAttempts: 1 };
+    vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(next);
+    vi.mocked(workorchApi.recoverStartupPreparationResources).mockImplementation(async (_, c) => {
+      expect(c).toEqual(request);
+      const done = initialized(c); done.resourceInitializations![0] = { ...done.resourceInitializations![0], registrationState: 'succeeded', registrationAttempts: 2 };
+      vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(done);
+      return { requestId: c.requestId, preparation: done };
+    });
+    render(wrap()); await act(async () => {});
+    expect(workorchApi.recoverStartupPreparationResources).not.toHaveBeenCalled();
+    const recover = screen.getByText('显式恢复资源初始化').closest('button') as HTMLButtonElement;
+    expect(recover.disabled).toBe(false);
+    fireEvent.click(recover); await act(async () => {});
+    expect(workorchApi.recoverStartupPreparationResources).toHaveBeenCalledWith('ws', request);
+    expect(workorchApi.initializeStartupPreparationResources).not.toHaveBeenCalled();
+    expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
+    expect(screen.getByText(/SkillHub 登记：succeeded/)).toBeTruthy();
+  });
+  it('登记查询预算耗尽不会解锁新初始化或自动重新登记', async () => {
+    const next = initialized({ requestId: 'exhausted', expectedWorkspaceRevision: 10 }, 'blocked');
+    next.resourceInitializations![0] = { ...next.resourceInitializations![0], registrationState: 'unknown', registrationAttempts: 4 };
+    vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(next);
+    render(wrap()); await act(async () => {});
+    expect((screen.getByText('显式恢复资源初始化').closest('button') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText('显式初始化准备资源').closest('button') as HTMLButtonElement).disabled).toBe(true);
+    expect(workorchApi.recoverStartupPreparationResources).not.toHaveBeenCalled();
   });
   it('拒绝其他 Workspace 的迟到初始化结果，不跨会话恢复', async () => {
     let resolve!: (value: { requestId: string; preparation: StartupPreparationView }) => void;

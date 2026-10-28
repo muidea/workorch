@@ -93,6 +93,59 @@ func TestPreparationSkillHubReservationRecoveryFencesNewIntent(t *testing.T) {
 	}
 }
 
+func TestPreparationUnregisteredProjectDiagnosticSurvivesReopenWithoutEffects(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	owners := openFileDefinitionAdmissionOwners(t, root)
+	defer func() { owners.close() }()
+	w := seedPreparationEligibleInDirectory(t, owners, "ws-project-unregistered", t.TempDir())
+	c := workspaceevents.CheckWorkspacePreparationCommand{WorkspaceID: w.ID, RequestID: "unregistered-original", ExpectedWorkspaceRevision: w.Revision}
+	first, err := owners.workspace.beginWorkspacePreparation(ctx, c, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	gRaw := []byte(`{"scope":"global","items":[]}`)
+	g := workspace.PreparationSkillHubStatusFacts{Version: "workorch-skillhub-preparation-observation/v2", EffectContract: "skillhub-status-effects/v1", Scope: "global", StartedAt: now, CompletedAt: now, RawOutput: gRaw, TotalOutputBytes: uint64(len(gRaw)), RawSHA256: fileobservation.Digest(gRaw), StderrSHA256: fileobservation.Digest(nil), OutputComplete: true, StderrComplete: true, CommandStarted: true, ExitCodeKnown: true}
+	p := g.Clone()
+	p.Scope, p.Directory = "workspace", first.SkillHubPlan.ProjectDirectory
+	p.RawOutput = []byte(`{"command_error":{"code":"PROJECT_NOT_FOUND","message":"private original path"}}`)
+	p.RawSHA256, p.TotalOutputBytes = fileobservation.Digest(p.RawOutput), uint64(len(p.RawOutput))
+	p.FailureCode, p.ExitCode = "project_not_registered", 1
+	_, err = owners.workspace.finishBlockedPreparation(ctx, workspacePreparationBlocked{Command: c, Reason: "check_pipeline_incomplete", SkillHubEffectRef: first.SkillHubPlan.Ref, SkillHubGlobal: &g, SkillHubProject: &p, At: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := owners.repositories.Workspaces.Get(ctx, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owners.close()
+	owners = openFileDefinitionAdmissionOwners(t, root)
+	for range 2 {
+		view, err := owners.workspace.queryWorkspacePreparationState(ctx, workspaceevents.QueryWorkspacePreparationStateCommand{WorkspaceID: w.ID})
+		if err != nil || view.SkillHubProjectIssue != "project_registration_required" || view.Record.Attempts[0].SkillHubEffectState != workspace.PreparationSkillHubUnresolved {
+			t.Fatal("reopen/GET lost exact negative diagnostic", err)
+		}
+		raw, _ := json.Marshal(view)
+		if bytes.Contains(raw, p.RawOutput) || bytes.Contains(raw, []byte("private original path")) {
+			t.Fatal("query leaked raw command diagnostic")
+		}
+	}
+	if _, err := owners.workspace.beginWorkspacePreparation(ctx, c, true, true); err != nil {
+		t.Fatal(err)
+	}
+	newIntent := c
+	newIntent.RequestID, newIntent.ExpectedWorkspaceRevision = "bypass", before.Revision
+	if _, err := owners.workspace.beginWorkspacePreparation(ctx, newIntent, false, true); err == nil {
+		t.Fatal("diagnostic cleared original unresolved fence")
+	}
+	after, err := owners.repositories.Workspaces.Get(ctx, w.ID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("read/recover rewrote original owner state", err)
+	}
+}
+
 func TestPreparationSkillHubReceiptSettlementImmutableAndCutRecovery(t *testing.T) {
 	for _, scenario := range []string{"recorded", "known_failure", "write_failed", "reply_lost", "installed", "installed_write_failed", "installed_reply_lost", "installed_context_bounded", "installed_context_bounded_write_failed", "installed_context_bounded_reply_lost", "installed_context_rejected", "installed_context_rejected_write_failed", "installed_context_rejected_reply_lost"} {
 		t.Run(scenario, func(t *testing.T) {

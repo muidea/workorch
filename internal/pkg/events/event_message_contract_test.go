@@ -111,7 +111,9 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// recall or readiness. It shares the existing Workspace deletion fence.
 	// Resource initialization adds two Workspace state commands (initialize/recover)
 	// and one File no-overwrite write command. These do not grant readiness or Run authority.
-	const expectedProductionTopicCount = 330
+	// Workspace adds one private registration-result settlement; initialization
+	// reserves first, Application executes CLI, recovery queries the same receipt.
+	const expectedProductionTopicCount = 331
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}

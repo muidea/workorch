@@ -14,6 +14,37 @@ func preparationViewFixture() StartupPreparationView {
 	}}}}
 }
 
+func TestPreparationProjectIssueIsFiniteAndBoundToUnresolvedOperation(t *testing.T) {
+	v := preparationViewFixture()
+	v.Record.Version, v.OperationState = "workorch-preparation-record/v2", "blocked"
+	a := &v.Record.Attempts[0]
+	a.State, a.CreationEpoch = "blocked", strings.Repeat("a", 32)
+	at := a.StartedAt.Add(time.Second)
+	a.CompletedAt = &at
+	a.SkillHubEffectRef, a.SkillHubEffectState = "skillhub-status:"+strings.Repeat("b", 32), "unresolved"
+	a.Checks = []PreparationCheckView{{ID: "exact_seal", Owner: "workspace", Required: true, State: "blocked", Reason: "check_pipeline_incomplete"}}
+	v.SkillHubProjectIssue = "project_registration_required"
+	if v.ValidateFor("ws") != nil {
+		t.Fatal("exact negative diagnostic rejected")
+	}
+	for _, mutate := range []func(*StartupPreparationView){
+		func(v *StartupPreparationView) { v.SkillHubProjectIssue = "ready" },
+		func(v *StartupPreparationView) { v.Record.Attempts[0].SkillHubEffectState = "recorded" },
+		func(v *StartupPreparationView) { v.Record = nil },
+	} {
+		bad := v
+		if v.Record != nil {
+			r := *v.Record
+			r.Attempts = append([]PreparationAttemptView(nil), v.Record.Attempts...)
+			bad.Record = &r
+		}
+		mutate(&bad)
+		if bad.ValidateFor("ws") == nil {
+			t.Fatal("unbound diagnostic accepted")
+		}
+	}
+}
+
 func TestPreparationBootstrapCompilationSummaryIsNotReadiness(t *testing.T) {
 	a := preparationViewFixture().Record.Attempts[0]
 	a.ExecutionInputVersion = "workorch-preparation-execution-inputs/v1"

@@ -10,6 +10,7 @@ import (
 	fileevents "github.com/muidea/workorch/internal/modules/blocks/file/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/fileobservation"
+	"github.com/muidea/workorch/internal/pkg/skillhubpreparation"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
 )
 
@@ -29,6 +30,7 @@ type PreparationResourceInitialization struct {
 	PreparedAt                                            time.Time
 	Plan                                                  fileevents.InitializePreparationResourcesCommand
 	Attempts                                              []PreparationResourceInitializationAttempt
+	Registration                                          *PreparationRegistration
 }
 
 type PreparationResourceInitializationAttempt struct {
@@ -37,6 +39,7 @@ type PreparationResourceInitializationAttempt struct {
 }
 
 func (r PreparationResourceInitialization) Clone() PreparationResourceInitialization {
+	r.Registration = r.Registration.Clone()
 	r.Plan = r.Plan.Clone()
 	r.SoulBindings = maps.Clone(r.SoulBindings)
 	r.Attempts = append([]PreparationResourceInitializationAttempt(nil), r.Attempts...)
@@ -68,16 +71,33 @@ func (r PreparationResourceInitialization) BindingHash() string {
 		Soul                   common.SoulID
 		Bindings               map[string]common.SoulID
 		Plan                   fileevents.InitializePreparationResourcesCommand
-	}{r.StartupInputHash, r.ConfigurationHash, r.CreationEpoch, r.PreparationEpoch, r.DefaultSoulID, r.SoulBindings, plan})
+		Registration           *skillhubpreparation.RegistrationPlan `json:",omitempty"`
+	}{r.StartupInputHash, r.ConfigurationHash, r.CreationEpoch, r.PreparationEpoch, r.DefaultSoulID, r.SoulBindings, plan, r.registrationPlan()})
 	return fileobservation.Digest(raw)
 }
 
+func (r PreparationResourceInitialization) registrationPlan() *skillhubpreparation.RegistrationPlan {
+	if r.Registration == nil {
+		return nil
+	}
+	p := r.Registration.Plan
+	return &p
+}
 func (r PreparationResourceInitialization) InfrastructureObserved() bool {
+	return r.FileObserved() && (r.Registration == nil || r.Registration.Succeeded())
+}
+func (r PreparationResourceInitialization) FileObserved() bool {
 	return len(r.Attempts) > 0 && r.Attempts[len(r.Attempts)-1].Result != nil && r.Attempts[len(r.Attempts)-1].Result.InfrastructureObserved()
 }
 func (r PreparationResourceInitialization) State() string {
 	if r.InfrastructureObserved() {
 		return "completed"
+	}
+	if r.FileObserved() && r.Registration != nil {
+		if len(r.Registration.Attempts) == 0 || r.Registration.Status() == "pending" {
+			return "pending"
+		}
+		return "blocked"
 	}
 	if len(r.Attempts) > 0 && r.Attempts[len(r.Attempts)-1].Result != nil {
 		return "blocked"
@@ -88,7 +108,7 @@ func (r PreparationResourceInitialization) Matches(w *Workspace) bool {
 	return w != nil && w.StartupInput != nil && w.PreparationFence != nil && w.ActiveRunID == "" && w.PreparationFence.Pending == nil && w.PreparationFence.CreationEpoch == r.CreationEpoch && w.PreparationFence.PreparationEpoch == r.PreparationEpoch && len(w.PreparationFence.Settled) == 0 && w.StartupInput.StartupInputHash == r.StartupInputHash && WorkspaceConfigurationHash(w) == r.ConfigurationHash && w.InternalDirectory == r.Plan.InternalDirectory && w.DeliverableDirectory == r.Plan.DeliverableDirectory && r.matchesDeclarations(w)
 }
 func (r PreparationResourceInitialization) Validate(id common.WorkspaceID) error {
-	if r.Version != PreparationInitializationVersion || r.Plan.WorkspaceID != id || r.Plan.Validate() != nil || r.Plan.BindingHash != r.BindingHash() || r.StartupInputHash == "" || r.ConfigurationHash == "" || r.CreationEpoch == "" || r.PreparedAt.IsZero() || r.ExpectedWorkspaceRevision == 0 || r.CommittedWorkspaceRevision < r.ExpectedWorkspaceRevision+1 || len(r.Attempts) == 0 || len(r.Attempts) > PreparationInitializationResultLimit || !r.Attempts[0].PreparedAt.Equal(r.PreparedAt) {
+	if r.validateRegistration() != nil || r.Plan.WorkspaceID != id || r.Plan.Validate() != nil || r.Plan.BindingHash != r.BindingHash() || r.StartupInputHash == "" || r.ConfigurationHash == "" || r.CreationEpoch == "" || r.PreparedAt.IsZero() || r.ExpectedWorkspaceRevision == 0 || r.CommittedWorkspaceRevision < r.ExpectedWorkspaceRevision+1 || len(r.Attempts) == 0 || len(r.Attempts) > PreparationInitializationResultLimit || !r.Attempts[0].PreparedAt.Equal(r.PreparedAt) {
 		return common.ErrConflict
 	}
 	at := r.PreparedAt
@@ -152,7 +172,7 @@ func validatePreparationInitializationTransition(current, next *Workspace, cas b
 	}
 	if len(b) == len(a)+1 && len(b) <= PreparationInitializationLimit {
 		r := b[len(a)]
-		if PreparationInitializationPending(current) || !reflect.DeepEqual(a, b[:len(a)]) && len(a) > 0 || r.Validate(next.ID) != nil || !r.matchesMetadata(current) || r.ExpectedWorkspaceRevision != current.Revision || r.CommittedWorkspaceRevision != current.Revision+1 || len(r.Attempts) != 1 || r.Attempts[0].Result != nil {
+		if PreparationInitializationPending(current) || !reflect.DeepEqual(a, b[:len(a)]) && len(a) > 0 || r.Validate(next.ID) != nil || !r.matchesMetadata(current) || r.ExpectedWorkspaceRevision != current.Revision || r.CommittedWorkspaceRevision != current.Revision+1 || len(r.Attempts) != 1 || r.Attempts[0].Result != nil || r.Registration != nil && len(r.Registration.Attempts) != 0 {
 			return common.ErrConflict
 		}
 		return nil
@@ -164,7 +184,13 @@ func validatePreparationInitializationTransition(current, next *Workspace, cas b
 	if old.InfrastructureObserved() || !old.matchesMetadata(current) || updated.Validate(next.ID) != nil || updated.CommittedWorkspaceRevision != current.Revision+1 {
 		return common.ErrConflict
 	}
-	if len(updated.Attempts) == len(old.Attempts)+1 {
+	if !reflect.DeepEqual(old.Registration, updated.Registration) {
+		if validateRegistrationProgress(old, updated) != nil {
+			return common.ErrConflict
+		}
+	} else if old.FileObserved() {
+		return common.ErrConflict
+	} else if len(updated.Attempts) == len(old.Attempts)+1 {
 		if !reflect.DeepEqual(old.Attempts, updated.Attempts[:len(old.Attempts)]) || updated.Attempts[len(old.Attempts)].Result != nil {
 			return common.ErrConflict
 		}
@@ -176,6 +202,7 @@ func validatePreparationInitializationTransition(current, next *Workspace, cas b
 	} else {
 		return common.ErrConflict
 	}
+	updated.Registration = old.Registration
 	updated.Attempts = old.Attempts
 	updated.CommittedWorkspaceRevision = old.CommittedWorkspaceRevision
 	if !reflect.DeepEqual(old, updated) {
