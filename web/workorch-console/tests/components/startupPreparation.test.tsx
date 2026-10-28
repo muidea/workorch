@@ -6,7 +6,7 @@ import { WorkspacePreparation } from '../../src/pages/components/WorkspacePrepar
 import type { PreparationCheckRequest, StartupPreparationView } from '../../src/startupPreparation';
 import { validatePreparationCompilation, validatePreparationView } from '../../src/startupPreparation';
 
-vi.mock('../../src/api', () => ({ workorchApi: { readStartupPreparation: vi.fn(), checkStartupPreparation: vi.fn(), recoverStartupPreparation: vi.fn(), submitWorkspaceExecution: vi.fn() } }));
+vi.mock('../../src/api', () => ({ workorchApi: { readStartupPreparation: vi.fn(), checkStartupPreparation: vi.fn(), recoverStartupPreparation: vi.fn(), initializeStartupPreparationResources: vi.fn(), recoverStartupPreparationResources: vi.fn(), submitWorkspaceExecution: vi.fn() } }));
 const empty = (id = 'ws'): StartupPreparationView => ({ workspaceId: id, workspaceRevision: 10, operationState: 'not_checked', currentValidity: 'not_checked' });
 const observed = (request: PreparationCheckRequest, state: 'accepted' | 'blocked' | 'unknown' = 'blocked', id = 'ws'): StartupPreparationView => ({
   workspaceId: id, workspaceRevision: request.expectedWorkspaceRevision + (state === 'blocked' ? 2 : 1), operationState: state, currentValidity: 'not_evaluated',
@@ -888,5 +888,52 @@ describe('STEP04 准备主体流程', () => {
     expect(workorchApi.readStartupPreparation).toHaveBeenCalledTimes(2);
     expect(screen.queryByText('check_pipeline_incomplete')).toBeNull();
     expect(checkButton().disabled).toBe(false);
+  });
+});
+
+describe('准备资源显式初始化', () => {
+  const initialized = (request: PreparationCheckRequest, state: 'pending' | 'blocked' | 'completed' = 'completed'): StartupPreparationView => ({ ...empty(), workspaceRevision: request.expectedWorkspaceRevision + 2, resourceInitializations: [{ requestId: request.requestId, expectedWorkspaceRevision: request.expectedWorkspaceRevision, committedWorkspaceRevision: request.expectedWorkspaceRevision + 2, state, attempts: 1 }] });
+  it('开页只读，初始化后对账且不自动检查或执行', async () => {
+    vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(empty());
+    vi.mocked(workorchApi.initializeStartupPreparationResources).mockImplementation(async (_, request) => {
+      const next = initialized(request); vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(next);
+      return { requestId: request.requestId, preparation: next };
+    });
+    render(wrap()); await act(async () => {});
+    expect(workorchApi.initializeStartupPreparationResources).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('显式初始化准备资源')); await act(async () => {});
+    expect(workorchApi.initializeStartupPreparationResources).toHaveBeenCalledOnce();
+    expect(screen.getByText(/基础设施创建完成，资源就绪仍须检查/)).toBeTruthy();
+    expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
+    expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
+  });
+  it('丢失响应从服务端原身份恢复，关闭重开不自动重发', async () => {
+    let request: PreparationCheckRequest | undefined;
+    vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(empty());
+    vi.mocked(workorchApi.initializeStartupPreparationResources).mockImplementation(async (_, c) => {
+      request = c; vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(initialized(c, 'pending')); throw new Error('response lost');
+    });
+    const panel = render(wrap()); await act(async () => {});
+    fireEvent.click(screen.getByText('显式初始化准备资源')); await act(async () => {});
+    expect((screen.getByText('显式检查准备').closest('button') as HTMLButtonElement).disabled).toBe(true);
+    panel.unmount(); render(wrap()); await act(async () => {});
+    expect(workorchApi.initializeStartupPreparationResources).toHaveBeenCalledOnce();
+    vi.mocked(workorchApi.recoverStartupPreparationResources).mockImplementation(async (_, c) => {
+      expect(c).toEqual(request); const next = initialized(c); vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(next); return { requestId: c.requestId, preparation: next };
+    });
+    fireEvent.click(screen.getByText('显式恢复资源初始化')); await act(async () => {});
+    expect(workorchApi.recoverStartupPreparationResources).toHaveBeenCalledWith('ws', request);
+    expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
+  });
+  it('拒绝其他 Workspace 的迟到初始化结果，不跨会话恢复', async () => {
+    let resolve!: (value: { requestId: string; preparation: StartupPreparationView }) => void;
+    vi.mocked(workorchApi.readStartupPreparation).mockImplementation(async id => empty(id));
+    vi.mocked(workorchApi.initializeStartupPreparationResources).mockImplementation(() => new Promise(r => { resolve = r; }));
+    const panel = render(wrap()); await act(async () => {});
+    fireEvent.click(screen.getByText('显式初始化准备资源')); await act(async () => {});
+    panel.rerender(<ConfigProvider><WorkspacePreparation workspaceId="other" onClose={() => {}} /></ConfigProvider>); await act(async () => {});
+    resolve({ requestId: 'old', preparation: initialized({ requestId: 'old', expectedWorkspaceRevision: 10 }) }); await act(async () => {});
+    expect(screen.queryByText(/最近资源初始化：/)).toBeNull();
+    expect(workorchApi.recoverStartupPreparationResources).not.toHaveBeenCalled();
   });
 });

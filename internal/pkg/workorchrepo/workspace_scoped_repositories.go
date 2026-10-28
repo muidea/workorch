@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -1603,6 +1604,17 @@ func (r *workspaceScopedWorkspaceRepository) CompareAndSwap(ctx context.Context,
 	defer lock.Unlock()
 	if err := r.checkCreationPersistenceMutation(ctx, path, item); err != nil {
 		return err
+	}
+	if current, err := r.store.workspaceRepo(path).Get(ctx, item.ID); err != nil {
+		return err
+	} else if !reflect.DeepEqual(current.PreparationResourceInitializations, item.PreparationResourceInitializations) {
+		complete, err := r.store.attachWorkspaceSoulBindings(current)
+		if err != nil {
+			return err
+		}
+		if err = workspacemodel.ValidatePreparationInitializationPreimage(complete, item); err != nil {
+			return err
+		}
 	}
 	// Validate new preparation execution inputs against the complete actual
 	// configuration, including sidecars, before passing detached metadata down.

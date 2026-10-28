@@ -29,6 +29,28 @@ Last Verified: 2026-08-30
 
 公开 EventHub 合同均位于 `pkg/events`，每个 topic 使用具体 command/result；创作 record、派生 request 与历史回执使用 concrete DTO，嵌套 Template 的 Soul binding 为有序 typed slice；转换到同 owner model 前拒绝空／重复 binding，不允许 map 覆盖隐藏原 cardinality。显式转换不更改持久 schema 或 hash，也不授予已校验身份；查询、确认与准入仍完整反证 ledger。派生 reserve／complete、authoring 保存／查询／规格 reserve／complete／确认／准入均登记 delivery 与 typed message 合同。既有 pre-seal 规格 ledger 保留 begin／reserve／complete 三个受控写入口；无生产调用方的单请求 query 不注册 EventHub，owner-private 查询 helper 只作内部校验与测试。跨 owner 不暴露 repository/service。`biz.New` 只接收 backend factory 生成的 `WorkspaceOwnerRepositories` aggregate；Workspace、Goal、DoD、Template repository 与 deletion cleaner 必须携带同一个 opaque owner binding，独立构造、跨 backend 或跨 factory 混装在 owner 启动前拒绝。
 
+### 显式准备资源初始化
+
+`/workspace/activation-preparation/resources/initialize` 与 `/workspace/activation-preparation/resources/recover`
+仅接受 Application 的 `InitializeWorkspacePreparationCommand`（Workspace、requestId、原 expected revision），使用
+Workspace state lane。新请求先精确反查正式封存链，再从原模板及 Workspace 声明编译计划；不接受调用者路径、
+配置正文或 PASS。`workorch-preparation-resource-initialization/v1` 私有 journal 先 CAS 保存完整计划、配置/Soul
+前像和 creation/preparation epoch，再通过 File owner 执行缺失资源创建。配置按完整 JSON bytes 保全，禁止经浮点
+解码改变大整数。scoped repository 在锁内重新附加实际 Soul sidecar 并核对完整配置前像；下层 metadata CAS
+仅允许既有 Soul 字段拆存差异，仍核对完整 metadata、原 revision 和不可变计划。
+
+初始化只创建缺失的 system/workspace 托管配置及项目 `.agents/skills` 目录，既有文件、用户覆盖、mergeMissing
+缺键及无效/冲突内容均保留，绝不借本入口覆盖或合并已有文件。不调用 SkillHub init/install/sync/use/apply，不调用
+provider，不创建 Run。它是 Workspace 私有资源事务，不改变 SM-1～SM-4；未完成（pending/blocked）的初始化阻止新的准备检查和
+fresh execution reservation，不能从中取得 readiness、M3 或执行权限。
+
+每个操作至多 4 次派发，至多保留 16 个初始化操作。每次派发前 CAS 持久保存独立 attempt；超时或丢失回执仍消耗
+该次数。普通同身份重放只读回，不重新执行。只有显式恢复可保留原 request/revision/计划，先扣减下一次预算，再
+重复收敛式的“缺失才创建”。已完成操作不可修改；stale 输入、未决 SkillHub 效果、在途准备、删除或预算耗尽均阻塞，
+不能换 requestId 绕过。所有已知 File 错误及真实前后像只进受限 journal；错误超过原文边界时保存原字节数/hash 与
+明确未保存原因，保留已知失败。GET 只投影 request/revision、pending/blocked/completed 及已消耗次数，不重试初始化，
+不将创建完成当作资源可用性。初始化不会改写旧检查；随后须显式发起新检查，由 File、SkillHub、Skill、MCP 等重新观察。
+
 ### 激活前准备只读与纯编译边界
 
 `QueryExactConfirmedStartupSnapshotCommand/Result`（`/workspace/activation-preparation/exact-startup/query`）

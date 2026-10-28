@@ -170,6 +170,7 @@ type ExecuteOperationResult struct {
 func MessageContracts() []eventcontract.MessageContract {
 	return eventcontract.MessageContracts(
 		eventcontract.CommandTopic[ReobservePreparationFilesCommand, ReobservePreparationFilesResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicReobservePreparationFiles),
+		eventcontract.CommandTopic[InitializePreparationResourcesCommand, InitializePreparationResourcesResult]("file", definitionPackage, eventcontract.CommandClassWrite, eventcontract.LanePolicyExecute, TopicInitializePreparationResources),
 		eventcontract.CommandTopic[QueryPreparationEpochCommand, QueryPreparationEpochResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryPreparationEpoch),
 		eventcontract.CommandTopic[ObservePreparationDirectoriesCommand, ObservePreparationDirectoriesResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicObservePreparationDirectories),
 		eventcontract.CommandTopic[ObservePreparationResourcesCommand, ObservePreparationResourcesResult]("file", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicObservePreparationResources),

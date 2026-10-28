@@ -75,6 +75,7 @@ type Workspace struct {
 	PreparationRunHistoryEvidence      []WorkspacePreparationRunHistoryEvidence      `json:"-"`
 	PreparationMemoryInventoryEvidence []WorkspacePreparationMemoryInventoryEvidence `json:"-"`
 	PreparationMCPRegistryEvidence     []WorkspacePreparationMCPRegistryEvidence     `json:"-"`
+	PreparationResourceInitializations []PreparationResourceInitialization           `json:"-"`
 	PreparationSkillHubEffects         []WorkspacePreparationSkillHubEffects         `json:"-"`
 	// PreparationFence is owner-private coordination, not execution authority.
 	// A nil fence is legacy; ordinary updates must never invent a creation epoch.

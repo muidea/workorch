@@ -41,17 +41,28 @@ type QueryWorkspacePreparationStateCommand struct {
 // This is only a persisted-operation projection. No current no-Run or
 // external-resource claim is inferred from ActiveRunID or absence of records.
 type QueryWorkspacePreparationStateResult struct {
-	WorkspaceID       common.WorkspaceID
-	WorkspaceRevision uint64
-	ActiveRunID       common.RunID
-	State             string
-	CurrentValidity   string
-	Record            *workspace.WorkspacePreparationRecord
+	WorkspaceID             common.WorkspaceID
+	WorkspaceRevision       uint64
+	ActiveRunID             common.RunID
+	State                   string
+	CurrentValidity         string
+	ResourceInitializations []PreparationInitializationView
+	Record                  *workspace.WorkspacePreparationRecord
 }
 
 func (r QueryWorkspacePreparationStateResult) ValidateFor(c QueryWorkspacePreparationStateCommand) error {
 	if c.WorkspaceID == "" || r.WorkspaceID != c.WorkspaceID || r.WorkspaceRevision == 0 {
 		return common.ErrConflict
+	}
+	if len(r.ResourceInitializations) > workspace.PreparationInitializationLimit {
+		return common.ErrConflict
+	}
+	seen := map[string]bool{}
+	for _, v := range r.ResourceInitializations {
+		if v.Validate(r.WorkspaceRevision) != nil || seen[v.RequestID] {
+			return common.ErrConflict
+		}
+		seen[v.RequestID] = true
 	}
 	if r.Record == nil {
 		if r.State != "not_checked" || r.CurrentValidity != "not_checked" {

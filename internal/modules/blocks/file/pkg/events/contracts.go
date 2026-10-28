@@ -21,6 +21,7 @@ func Contracts() []eventcontract.Contract {
 		TopicReobservePreparationFiles,
 		TopicQueryPreparationEpoch,
 	)
+	ret = append(ret, eventcontract.Build("file", eventcontract.CommandClassWrite, eventcontract.LanePolicyExecute, TopicInitializePreparationResources)...)
 	ret = append(ret, eventcontract.Build("file", eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute,
 		TopicExecuteFileListOperation,
 		TopicExecuteFileReadOperation,

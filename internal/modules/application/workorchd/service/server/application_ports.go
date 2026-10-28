@@ -18,19 +18,21 @@ type ApplicationPorts struct {
 }
 
 type WorkspacePorts struct {
-	Validate                    ValidateFunc
-	DeleteWorkspace             DeleteWorkspaceFunc
-	ReadWorkspace               ReadWorkspaceFunc
-	ReadWorkspaceSnapshot       ReadWorkspaceSnapshotFunc
-	ReadWorkspaceDetailSnapshot ReadWorkspaceSnapshotFunc
-	ReadProjectionSnapshot      ReadProjectionSnapshotFunc
-	ReadWorkspaceSoulBindings   ReadWorkspaceSoulBindingsFunc
-	UpdateWorkspaceSoulBindings UpdateWorkspaceSoulBindingsFunc
-	UpdateWorkspaceLLMSelection UpdateWorkspaceLLMSelectionFunc
-	ListWorkspaces              ListWorkspacesFunc
-	ReadStartupPreparation      ReadStartupPreparationFunc
-	CheckStartupPreparation     CheckStartupPreparationFunc
-	RecoverStartupPreparation   CheckStartupPreparationFunc
+	Validate                              ValidateFunc
+	DeleteWorkspace                       DeleteWorkspaceFunc
+	ReadWorkspace                         ReadWorkspaceFunc
+	ReadWorkspaceSnapshot                 ReadWorkspaceSnapshotFunc
+	ReadWorkspaceDetailSnapshot           ReadWorkspaceSnapshotFunc
+	ReadProjectionSnapshot                ReadProjectionSnapshotFunc
+	ReadWorkspaceSoulBindings             ReadWorkspaceSoulBindingsFunc
+	UpdateWorkspaceSoulBindings           UpdateWorkspaceSoulBindingsFunc
+	UpdateWorkspaceLLMSelection           UpdateWorkspaceLLMSelectionFunc
+	ListWorkspaces                        ListWorkspacesFunc
+	ReadStartupPreparation                ReadStartupPreparationFunc
+	CheckStartupPreparation               CheckStartupPreparationFunc
+	InitializeStartupPreparationResources InitializeStartupPreparationResourcesFunc
+	RecoverStartupPreparationResources    InitializeStartupPreparationResourcesFunc
+	RecoverStartupPreparation             CheckStartupPreparationFunc
 }
 
 type DefinitionPorts struct {

@@ -84,6 +84,12 @@ func preparationStateFromPersistence(w *workspace.Workspace, now time.Time) (wor
 		WorkspaceID: w.ID, WorkspaceRevision: w.Revision, ActiveRunID: w.ActiveRunID,
 		State: "not_checked", CurrentValidity: "not_checked",
 	}
+	if workspace.ValidatePreparationInitializations(w) != nil {
+		return result, common.ErrConflict
+	}
+	for _, r := range w.PreparationResourceInitializations {
+		result.ResourceInitializations = append(result.ResourceInitializations, workspaceevents.PreparationInitializationView{RequestID: r.Plan.RequestID, ExpectedWorkspaceRevision: r.ExpectedWorkspaceRevision, CommittedWorkspaceRevision: r.CommittedWorkspaceRevision, State: r.State(), Attempts: len(r.Attempts)})
+	}
 	if w.StartupPreparation != nil {
 		if w.StartupPreparation.Validate(w.ID) != nil {
 			return workspaceevents.QueryWorkspacePreparationStateResult{}, common.ErrConflict

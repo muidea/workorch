@@ -13,12 +13,13 @@ import (
 // no-Run final fence is not a claim about current Run inventory.
 // ActiveRunID is an independent Workspace fact, not an inventory proof.
 type StartupPreparationView struct {
-	WorkspaceID       string                 `json:"workspaceId"`
-	WorkspaceRevision uint64                 `json:"workspaceRevision"`
-	ActiveRunID       string                 `json:"activeRunId,omitempty"`
-	OperationState    string                 `json:"operationState"`
-	CurrentValidity   string                 `json:"currentValidity"`
-	Record            *PreparationRecordView `json:"record,omitempty"`
+	WorkspaceID             string                                  `json:"workspaceId"`
+	WorkspaceRevision       uint64                                  `json:"workspaceRevision"`
+	ActiveRunID             string                                  `json:"activeRunId,omitempty"`
+	OperationState          string                                  `json:"operationState"`
+	CurrentValidity         string                                  `json:"currentValidity"`
+	ResourceInitializations []PreparationResourceInitializationView `json:"resourceInitializations,omitempty"`
+	Record                  *PreparationRecordView                  `json:"record,omitempty"`
 }
 
 type PreparationRecordView struct {
@@ -162,6 +163,16 @@ type PreparationBindingView struct {
 func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 	if workspaceID == "" || v.WorkspaceID != workspaceID || v.WorkspaceRevision == 0 {
 		return common.ErrConflict
+	}
+	if len(v.ResourceInitializations) > 16 {
+		return common.ErrConflict
+	}
+	seenInit := map[string]bool{}
+	for _, r := range v.ResourceInitializations {
+		if r.Validate(v.WorkspaceRevision) != nil || seenInit[r.RequestID] {
+			return common.ErrConflict
+		}
+		seenInit[r.RequestID] = true
 	}
 	if v.Record == nil {
 		if v.OperationState != "not_checked" || v.CurrentValidity != "not_checked" {

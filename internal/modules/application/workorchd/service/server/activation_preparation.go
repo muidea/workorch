@@ -17,6 +17,7 @@ type startupPreparationResponse struct {
 }
 
 func registerStartupPreparationWriteRoutes(router engine.RouteRegistry, state *serverState) {
+	registerPreparationInitializationRoutes(router, state)
 	for _, action := range []string{"check", "recover"} {
 		router.AddHandler("/api/v1/workorch/workspaces/:workspaceId/activation-preparation/"+action, http.MethodPost, func(_ context.Context, w http.ResponseWriter, r *http.Request) {
 			id, selected, ok := workspaceResourceIDFromPath(r.URL.Path, "activation-preparation")

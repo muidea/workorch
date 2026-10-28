@@ -11,8 +11,8 @@ import (
 
 func TestContractsDeclareFileAsQueryAndExecutionReceiver(t *testing.T) {
 	contracts := Contracts()
-	if len(contracts) != 24 {
-		t.Fatalf("contract count = %d, want 24 (19 existing + 3 STEP04 observations + revalidation/epoch)", len(contracts))
+	if len(contracts) != 25 {
+		t.Fatalf("contract count = %d, want 25 (24 existing + explicit preparation resource initialization)", len(contracts))
 	}
 	queryTopics := map[string]struct{}{
 		TopicAcquireRuntimeCapabilities:                   {},

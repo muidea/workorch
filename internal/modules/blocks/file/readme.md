@@ -52,6 +52,15 @@ Linux 使用无软链接目录描述符、有效凭据 ACL 权限观察和路径
 Workspace 私有 CAS 归档后只投影历史引用及阻塞码；目录成功、当前内容相等均不代替完整 required 合取或 M3。
 GET、完成重放、显式恢复、owner 重开不重跑此读取。此接口不读取或修改 managed config。
 
+`/file/startup-preparation/resources/initialize` 是独立 Workspace-only、write/execute-lane 合同，
+不是上述 query 的隐式修复。`InitializePreparationResourcesCommand` 携带精确 Workspace/request、原计划绑定、
+两个 owner 派生绝对目录，以及有序 scope/path/policy/完整 defaults JSON bytes。File 只创建缺失的基础目录、配置
+和项目 `.agents/skills`；不覆盖任何既有对象，不安装技能。Linux 通过 pinned/no-symlink 目录与 confined、
+no-cross-mount 子路径创建，0600 文件先写完并 fsync，再以原子 no-replace rename 发布及 fsync 目录；并发赢家保留。
+结果包含真实配置前后像、项目目录观察与原写错误，不包含 readiness 或 M3 裁决。已知错误超过 4096-byte 原文
+边界时明确记录未保存原因、原字节数/hash，不截断或改成 unknown。File 重复创建可收敛，但是否恢复和派发预算
+只由 Workspace 的已持久原事务决定；GET 与普通检查绝不调用该写合同。
+
 `/file/startup-preparation/managed-configs/query` 为独立 Workspace-only 只读合同，绑定原 request/payload/revision、
 内部目录及有序 `{Scope, Path}`。system 根由既有 `SystemDirectory` 纯路径规则确定，workspace 根为原内部目录；
 不使用 workspace-first fallback，不接收 defaults 或 caller verdict。canonical 相对路径不得逃逸，重复同域目标拒绝。

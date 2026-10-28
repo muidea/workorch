@@ -76,6 +76,9 @@ func (m *Biz) beginWorkspacePreparation(ctx context.Context, command workspaceev
 	if recoverOriginal {
 		return workspaceevents.CheckWorkspacePreparationResult{}, common.ErrNotFound
 	}
+	if workspace.PreparationInitializationPending(current) {
+		return workspaceevents.CheckWorkspacePreparationResult{}, common.ErrConflict
+	}
 	if workspace.ValidatePreparationSkillHubEffectsPersistence(current) != nil {
 		return workspaceevents.CheckWorkspacePreparationResult{}, common.ErrConflict
 	}

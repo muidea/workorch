@@ -80,6 +80,9 @@ func ClonePreparationDirectoryEvidence(items []WorkspacePreparationDirectoryEvid
 }
 
 func ValidatePreparationEvidencePersistence(w *Workspace) error {
+	if err := ValidatePreparationInitializations(w); err != nil {
+		return err
+	}
 	if err := validatePreparationAssessmentPersistence(w); err != nil {
 		return err
 	}

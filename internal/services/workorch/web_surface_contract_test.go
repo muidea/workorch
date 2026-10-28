@@ -23,6 +23,8 @@ func TestWebConsoleMutatingEndpointsStayWithinProductSurfaceContract(t *testing.
 		`/workspaces/${encodeURIComponent(workspaceId)}/llm-selection`,
 		`/workspaces/${encodeURIComponent(workspaceId)}/soul-bindings`,
 		"`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation/check`",
+		"`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation/initialize-resources`",
+		"`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation/recover-resources`",
 		"`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation/recover`",
 		`/workspaces/${encodeURIComponent(workspaceId)}/execution-activations`,
 		`${apiBase}/souls`,

@@ -38,6 +38,23 @@ func (p *runtimeApplicationPorts) configureWorkspacePorts() {
 			return view, err
 		}
 	}
+	initializationCommand := func(recoverOriginal bool) func(context.Context, string, workorchmanagementcontract.PreparationCheckRequest) (workorchmanagementcontract.PreparationResourceInitializationOperation, error) {
+		return func(ctx context.Context, id string, request workorchmanagementcontract.PreparationCheckRequest) (workorchmanagementcontract.PreparationResourceInitializationOperation, error) {
+			var view workorchmanagementcontract.PreparationResourceInitializationOperation
+			err := p.withSession(ctx, func(session *runtimecore.Session) error {
+				hub, err := session.RequiredCommandHub()
+				if err != nil {
+					return err
+				}
+				b := &Biz{Base: basebiz.New(ModuleID, hub, nil)}
+				view, err = b.InitializeStartupPreparationResources(ctx, common.WorkspaceID(id), request, recoverOriginal)
+				return err
+			})
+			return view, err
+		}
+	}
+	ports.Workspace.InitializeStartupPreparationResources = initializationCommand(false)
+	ports.Workspace.RecoverStartupPreparationResources = initializationCommand(true)
 	ports.Workspace.CheckStartupPreparation = preparationCommand(false)
 	ports.Workspace.RecoverStartupPreparation = preparationCommand(true)
 	ports.Workspace.ReadStartupPreparation = func(ctx context.Context, workspaceID string) (workorchmanagementcontract.StartupPreparationView, error) {

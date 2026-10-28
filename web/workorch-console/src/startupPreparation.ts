@@ -48,7 +48,10 @@ export type PreparationAttempt = {
  skillReferenceState?: 'observed_checks_pending' | 'sources_incomplete' | 'source_unresolved' | 'unavailable';
  skillStatusState?: 'observed_freshness_pending' | 'sources_incomplete' | 'status_blocked' | 'version_conflict';
 };
+export type PreparationResourceInitialization = { requestId: string; expectedWorkspaceRevision: number; committedWorkspaceRevision: number; state: 'pending' | 'blocked' | 'completed'; attempts: number };
+export type PreparationResourceInitializationOperation = { requestId: string; preparation: StartupPreparationView };
 export type StartupPreparationView = {
+ resourceInitializations?: PreparationResourceInitialization[];
   workspaceId: string;
   workspaceRevision: number;
   activeRunId?: string;
@@ -188,6 +191,14 @@ function validateAssessment(a: PreparationAttempt): void {
 
 export function validatePreparationView(view: StartupPreparationView, workspaceId: string): void {
   if (!view || view.workspaceId !== workspaceId || !Number.isSafeInteger(view.workspaceRevision) || view.workspaceRevision <= 0) throw new Error('准备结果作用域或版本不匹配');
+  if (view.resourceInitializations !== undefined) {
+    if (!Array.isArray(view.resourceInitializations) || view.resourceInitializations.length > 16) throw new Error('资源初始化记录无效');
+    const seen = new Set<string>();
+    for (const r of view.resourceInitializations) {
+      if (!r || typeof r.requestId !== 'string' || !r.requestId.trim() || seen.has(r.requestId) || !Number.isSafeInteger(r.expectedWorkspaceRevision) || r.expectedWorkspaceRevision <= 0 || !Number.isSafeInteger(r.committedWorkspaceRevision) || r.committedWorkspaceRevision <= r.expectedWorkspaceRevision || r.committedWorkspaceRevision > view.workspaceRevision || !['pending', 'blocked', 'completed'].includes(r.state) || !Number.isSafeInteger(r.attempts) || r.attempts < 1 || r.attempts > 4) throw new Error('资源初始化身份或状态无效');
+      seen.add(r.requestId);
+    }
+  }
   if (!view.record) {
     if (view.operationState !== 'not_checked' || view.currentValidity !== 'not_checked') throw new Error('准备结果状态不完整');
     return;

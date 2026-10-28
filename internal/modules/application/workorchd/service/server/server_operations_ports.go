@@ -14,20 +14,22 @@ type applicationOperations struct {
 }
 
 type workspaceOperations struct {
-	validate                        ValidateFunc
-	createWorkspace                 CreateWorkspaceFunc
-	deleteWorkspace                 DeleteWorkspaceFunc
-	readWorkspace                   ReadWorkspaceFunc
-	readWorkspaceSnapshot           ReadWorkspaceSnapshotFunc
-	readWorkspaceDetailSnapshot     ReadWorkspaceSnapshotFunc
-	readProjectionSnapshot          ReadProjectionSnapshotFunc
-	readWorkspaceSoulBindings       ReadWorkspaceSoulBindingsFunc
-	updateWorkspaceSoulBindings     UpdateWorkspaceSoulBindingsFunc
-	updateWorkspaceLLMSelectionPort UpdateWorkspaceLLMSelectionFunc
-	listWorkspaces                  ListWorkspacesFunc
-	readStartupPreparation          ReadStartupPreparationFunc
-	checkStartupPreparation         CheckStartupPreparationFunc
-	recoverStartupPreparation       CheckStartupPreparationFunc
+	validate                              ValidateFunc
+	createWorkspace                       CreateWorkspaceFunc
+	deleteWorkspace                       DeleteWorkspaceFunc
+	readWorkspace                         ReadWorkspaceFunc
+	readWorkspaceSnapshot                 ReadWorkspaceSnapshotFunc
+	readWorkspaceDetailSnapshot           ReadWorkspaceSnapshotFunc
+	readProjectionSnapshot                ReadProjectionSnapshotFunc
+	readWorkspaceSoulBindings             ReadWorkspaceSoulBindingsFunc
+	updateWorkspaceSoulBindings           UpdateWorkspaceSoulBindingsFunc
+	updateWorkspaceLLMSelectionPort       UpdateWorkspaceLLMSelectionFunc
+	listWorkspaces                        ListWorkspacesFunc
+	readStartupPreparation                ReadStartupPreparationFunc
+	checkStartupPreparation               CheckStartupPreparationFunc
+	initializeStartupPreparationResources InitializeStartupPreparationResourcesFunc
+	recoverStartupPreparationResources    InitializeStartupPreparationResourcesFunc
+	recoverStartupPreparation             CheckStartupPreparationFunc
 }
 
 type definitionOperations struct {

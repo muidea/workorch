@@ -160,6 +160,8 @@ export const workorchApi = {
     const body = await request<{ preparation: StartupPreparationView }>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation`);
     return body.preparation;
   },
+  initializeStartupPreparationResources: (workspaceId: string, intent: PreparationCheckRequest) => request<import('./startupPreparation').PreparationResourceInitializationOperation>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation/initialize-resources`, { method: 'POST', body: JSON.stringify(intent) }),
+  recoverStartupPreparationResources: (workspaceId: string, intent: PreparationCheckRequest) => request<import('./startupPreparation').PreparationResourceInitializationOperation>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation/recover-resources`, { method: 'POST', body: JSON.stringify(intent) }),
   checkStartupPreparation: (workspaceId: string, intent: PreparationCheckRequest) => request<PreparationOperation>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation/check`, { method: 'POST', body: JSON.stringify(intent) }),
   recoverStartupPreparation: (workspaceId: string, intent: PreparationCheckRequest) => request<PreparationOperation>(`${apiBase}/workspaces/${encodeURIComponent(workspaceId)}/activation-preparation/recover`, { method: 'POST', body: JSON.stringify(intent) }),
   readWorkspaceSnapshotProjection: async (workspaceId: string) => {

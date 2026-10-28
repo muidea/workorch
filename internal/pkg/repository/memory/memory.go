@@ -1919,6 +1919,9 @@ func (r *WorkspaceRepository) CompareAndSwap(_ context.Context, item *workspace.
 	if current.Revision != expectedRevision {
 		return common.ErrConflict
 	}
+	if err := workspace.ValidatePreparationInitializationPreimage(current, item); err != nil {
+		return err
+	}
 	if err := workspace.ValidatePreparationExecutionInputsPreimage(current, item); err != nil {
 		return err
 	}
@@ -1998,6 +2001,7 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 	cloned.PreparationSealEvidence = workspace.ClonePreparationSealEvidence(item.PreparationSealEvidence)
 	cloned.PreparationMemoryInventoryEvidence = workspace.ClonePreparationMemoryInventoryEvidence(item.PreparationMemoryInventoryEvidence)
 	cloned.PreparationMCPRegistryEvidence = workspace.ClonePreparationMCPRegistryEvidence(item.PreparationMCPRegistryEvidence)
+	cloned.PreparationResourceInitializations = workspace.ClonePreparationInitializations(item.PreparationResourceInitializations)
 	cloned.PreparationSkillHubEffects = workspace.ClonePreparationSkillHubEffects(item.PreparationSkillHubEffects)
 	if item.DefinitionAuthoring != nil {
 		record := item.DefinitionAuthoring.Clone()

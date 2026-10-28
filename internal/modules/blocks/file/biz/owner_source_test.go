@@ -138,6 +138,7 @@ func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllTopics(t *testing.T) {
 		{fileevents.TopicObservePreparationManagedConfigs, ModuleID},
 		{fileevents.TopicReobservePreparationFiles, ModuleID},
 		{fileevents.TopicQueryPreparationEpoch, ModuleID},
+		{fileevents.TopicInitializePreparationResources, ModuleID},
 		{fileevents.TopicAcquireRuntimeTargetSelection, fileevents.PrerequisiteCommandDestination},
 		{fileevents.TopicAcquireWorkspaceManifest, fileevents.PrerequisiteCommandDestination},
 		{fileevents.TopicConfirmRuntimeRepairSurface, fileevents.PrerequisiteCommandDestination},
@@ -156,7 +157,7 @@ func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllTopics(t *testing.T) {
 		if item.topic == fileevents.TopicAcquireAuthoringResources {
 			source = authoringApplicationSource
 		}
-		if item.topic == fileevents.TopicVerifyAuthoringResource || item.topic == fileevents.TopicObservePreparationDirectories || item.topic == fileevents.TopicObservePreparationResources || item.topic == fileevents.TopicObservePreparationManagedConfigs || item.topic == fileevents.TopicReobservePreparationFiles || item.topic == fileevents.TopicQueryPreparationEpoch {
+		if item.topic == fileevents.TopicInitializePreparationResources || item.topic == fileevents.TopicVerifyAuthoringResource || item.topic == fileevents.TopicObservePreparationDirectories || item.topic == fileevents.TopicObservePreparationResources || item.topic == fileevents.TopicObservePreparationManagedConfigs || item.topic == fileevents.TopicReobservePreparationFiles || item.topic == fileevents.TopicQueryPreparationEpoch {
 			source = "blocks/workspace"
 		}
 		event := &fileCountingDataEvent{Event: magicevent.NewEventWithContext(
@@ -176,7 +177,7 @@ func TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllTopics(t *testing.T) {
 		if item.topic == fileevents.TopicAcquireAuthoringResources {
 			source = authoringApplicationSource
 		}
-		if item.topic == fileevents.TopicVerifyAuthoringResource || item.topic == fileevents.TopicObservePreparationDirectories || item.topic == fileevents.TopicObservePreparationResources || item.topic == fileevents.TopicObservePreparationManagedConfigs || item.topic == fileevents.TopicReobservePreparationFiles || item.topic == fileevents.TopicQueryPreparationEpoch {
+		if item.topic == fileevents.TopicInitializePreparationResources || item.topic == fileevents.TopicVerifyAuthoringResource || item.topic == fileevents.TopicObservePreparationDirectories || item.topic == fileevents.TopicObservePreparationResources || item.topic == fileevents.TopicObservePreparationManagedConfigs || item.topic == fileevents.TopicReobservePreparationFiles || item.topic == fileevents.TopicQueryPreparationEpoch {
 			source = "blocks/workspace"
 		}
 		event := &fileCountingDataEvent{Event: magicevent.NewEventWithContext(

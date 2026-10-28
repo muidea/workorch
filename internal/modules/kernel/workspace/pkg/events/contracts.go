@@ -55,6 +55,8 @@ func Contracts() []eventcontract.Contract {
 		TopicWorkspaceAuthoringSpecificationReserve,
 		TopicWorkspaceAuthoringSpecificationComplete,
 		TopicWorkspacePreparationDiagnosticRecord,
+		TopicWorkspacePreparationInitializeResources,
+		TopicWorkspacePreparationRecoverResources,
 		TopicWorkspacePreparationCheck,
 		TopicWorkspacePreparationRecover,
 		TopicWorkspacePreparationSettleBlocked,

@@ -10,6 +10,9 @@ import (
 // cannot be upgraded into a production operation. All v2 mutations require
 // CAS, immutable original identities and append-only completed history.
 func ValidatePreparationRecordTransition(current, next *Workspace, cas bool) error {
+	if err := validatePreparationInitializationTransition(current, next, cas); err != nil {
+		return err
+	}
 	if next == nil {
 		return common.ErrInvalidArgument
 	}

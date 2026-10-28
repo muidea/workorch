@@ -109,7 +109,9 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// no writes and cannot confer preparation readiness or M3.
 	// Memory adds a complete bounded local inventory observation, not semantic
 	// recall or readiness. It shares the existing Workspace deletion fence.
-	const expectedProductionTopicCount = 327
+	// Resource initialization adds two Workspace state commands (initialize/recover)
+	// and one File no-overwrite write command. These do not grant readiness or Run authority.
+	const expectedProductionTopicCount = 330
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}

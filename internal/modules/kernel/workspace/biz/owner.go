@@ -124,6 +124,11 @@ func (m *Biz) Start() error {
 	if err := m.subscribeOwner(workspaceevents.TopicWorkspacePreparationStateQuery, m.handlePreparationStateQuery, false); err != nil {
 		return err
 	}
+	for _, topic := range []string{workspaceevents.TopicWorkspacePreparationInitializeResources, workspaceevents.TopicWorkspacePreparationRecoverResources} {
+		if err := m.subscribeOwner(topic, m.handlePreparationInitialize, false); err != nil {
+			return err
+		}
+	}
 	if err := m.subscribeOwner(workspaceevents.TopicWorkspacePreparationCheck, m.handlePreparationCheck, false); err != nil {
 		return err
 	}

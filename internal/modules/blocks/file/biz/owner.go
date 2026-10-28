@@ -31,6 +31,7 @@ const StepKindPatchPreview = modulecommon.StepKindPatchPreview
 const StepKindPatchRevert = modulecommon.StepKindPatchRevert
 
 type Biz struct {
+	preparationInitializationMu sync.Mutex
 	basebiz.Base
 	runtimeAdapter   *RuntimeAdapter
 	started          bool
@@ -92,6 +93,7 @@ func (m *Biz) Start() error {
 		{fileevents.TopicObservePreparationResources, m.handleObservePreparationResources, false},
 		{fileevents.TopicObservePreparationManagedConfigs, m.handleObservePreparationManagedConfigs, false},
 		{fileevents.TopicReobservePreparationFiles, m.handleReobservePreparationFiles, false},
+		{fileevents.TopicInitializePreparationResources, m.handleInitializePreparationResources, false},
 		{fileevents.TopicQueryPreparationEpoch, m.handleQueryPreparationEpoch, false},
 		{fileevents.TopicAcquireRuntimeCapabilities, m.handleRuntimeCapabilities, false},
 		{fileevents.TopicAcquireRuntimeOperationAdmissibility, m.handleRuntimeOperationAdmissibility, false},

@@ -2036,6 +2036,7 @@ type workspacePersistenceWire struct {
 	PreparationProviderCacheEvidence   []workspace.WorkspacePreparationProviderCacheEvidence   `json:"PreparationProviderCacheEvidence,omitempty"`
 	PreparationMemoryInventoryEvidence []workspace.WorkspacePreparationMemoryInventoryEvidence `json:"PreparationMemoryInventoryEvidence,omitempty"`
 	PreparationMCPRegistryEvidence     []workspace.WorkspacePreparationMCPRegistryEvidence     `json:"PreparationMCPRegistryEvidence,omitempty"`
+	PreparationResourceInitializations []workspace.PreparationResourceInitialization           `json:"PreparationResourceInitializations,omitempty"`
 	PreparationSkillHubEffects         []workspace.WorkspacePreparationSkillHubEffects         `json:"PreparationSkillHubEffects,omitempty"`
 }
 
@@ -2053,9 +2054,10 @@ func (item workspacePersistenceValue) MarshalJSON() ([]byte, error) {
 		PreparationProviderCacheEvidence   []workspace.WorkspacePreparationProviderCacheEvidence   `json:"PreparationProviderCacheEvidence,omitempty"`
 		PreparationMemoryInventoryEvidence []workspace.WorkspacePreparationMemoryInventoryEvidence `json:"PreparationMemoryInventoryEvidence,omitempty"`
 		PreparationMCPRegistryEvidence     []workspace.WorkspacePreparationMCPRegistryEvidence     `json:"PreparationMCPRegistryEvidence,omitempty"`
+		PreparationResourceInitializations []workspace.PreparationResourceInitialization           `json:"PreparationResourceInitializations,omitempty"`
 		PreparationSkillHubEffects         []workspace.WorkspacePreparationSkillHubEffects         `json:"PreparationSkillHubEffects,omitempty"`
 	}
-	return json.Marshal(wire{workspacePersistenceAlias: workspacePersistenceAlias(item), PreparationRunHistoryEvidence: item.PreparationRunHistoryEvidence, PreparationSealEvidence: item.PreparationSealEvidence, PreparationDirectoryEvidence: item.PreparationDirectoryEvidence, PreparationResourceEvidence: item.PreparationResourceEvidence, PreparationManagedConfigEvidence: item.PreparationManagedConfigEvidence, PreparationSoulEvidence: item.PreparationSoulEvidence, PreparationSkillRegistryEvidence: item.PreparationSkillRegistryEvidence, PreparationProviderCacheEvidence: item.PreparationProviderCacheEvidence, PreparationMemoryInventoryEvidence: item.PreparationMemoryInventoryEvidence, PreparationMCPRegistryEvidence: item.PreparationMCPRegistryEvidence, PreparationSkillHubEffects: item.PreparationSkillHubEffects})
+	return json.Marshal(wire{workspacePersistenceAlias: workspacePersistenceAlias(item), PreparationResourceInitializations: item.PreparationResourceInitializations, PreparationRunHistoryEvidence: item.PreparationRunHistoryEvidence, PreparationSealEvidence: item.PreparationSealEvidence, PreparationDirectoryEvidence: item.PreparationDirectoryEvidence, PreparationResourceEvidence: item.PreparationResourceEvidence, PreparationManagedConfigEvidence: item.PreparationManagedConfigEvidence, PreparationSoulEvidence: item.PreparationSoulEvidence, PreparationSkillRegistryEvidence: item.PreparationSkillRegistryEvidence, PreparationProviderCacheEvidence: item.PreparationProviderCacheEvidence, PreparationMemoryInventoryEvidence: item.PreparationMemoryInventoryEvidence, PreparationMCPRegistryEvidence: item.PreparationMCPRegistryEvidence, PreparationSkillHubEffects: item.PreparationSkillHubEffects})
 }
 
 func (item *workspacePersistenceValue) UnmarshalJSON(data []byte) error {
@@ -2077,6 +2079,7 @@ func (item *workspacePersistenceValue) UnmarshalJSON(data []byte) error {
 	decoded.PreparationProviderCacheEvidence = wire.PreparationProviderCacheEvidence
 	decoded.PreparationMemoryInventoryEvidence = wire.PreparationMemoryInventoryEvidence
 	decoded.PreparationMCPRegistryEvidence = wire.PreparationMCPRegistryEvidence
+	decoded.PreparationResourceInitializations = wire.PreparationResourceInitializations
 	decoded.PreparationSkillHubEffects = wire.PreparationSkillHubEffects
 	if err := workspace.ValidatePreparationEvidencePersistence(&decoded); err != nil {
 		return err
@@ -2102,7 +2105,7 @@ func loadWorkspacePersistenceMap(path string) (map[common.WorkspaceID]workspace.
 	items := make(map[common.WorkspaceID]workspace.Workspace, len(persisted))
 	private := false
 	for id, item := range persisted {
-		if len(item.PreparationRunHistoryEvidence) != 0 || len(item.PreparationSealEvidence) != 0 || len(item.PreparationMCPRegistryEvidence) != 0 || len(item.PreparationDirectoryEvidence) != 0 || len(item.PreparationResourceEvidence) != 0 || len(item.PreparationManagedConfigEvidence) != 0 || len(item.PreparationSoulEvidence) != 0 || len(item.PreparationSkillRegistryEvidence) != 0 || len(item.PreparationProviderCacheEvidence) != 0 || len(item.PreparationMemoryInventoryEvidence) != 0 || len(item.PreparationSkillHubEffects) != 0 {
+		if len(item.PreparationResourceInitializations) != 0 || len(item.PreparationRunHistoryEvidence) != 0 || len(item.PreparationSealEvidence) != 0 || len(item.PreparationMCPRegistryEvidence) != 0 || len(item.PreparationDirectoryEvidence) != 0 || len(item.PreparationResourceEvidence) != 0 || len(item.PreparationManagedConfigEvidence) != 0 || len(item.PreparationSoulEvidence) != 0 || len(item.PreparationSkillRegistryEvidence) != 0 || len(item.PreparationProviderCacheEvidence) != 0 || len(item.PreparationMemoryInventoryEvidence) != 0 || len(item.PreparationSkillHubEffects) != 0 {
 			private = true
 		}
 		if item.PreparationFence != nil && item.PreparationFence.WorkspaceID != id {
@@ -2138,7 +2141,7 @@ func saveWorkspacePersistenceMap(path string, items map[common.WorkspaceID]works
 	perm := os.FileMode(0o644)
 	for id, item := range items {
 		persisted[id] = workspacePersistenceValue(item)
-		if len(item.PreparationRunHistoryEvidence) != 0 || len(item.PreparationSealEvidence) != 0 || len(item.PreparationMCPRegistryEvidence) != 0 || len(item.PreparationDirectoryEvidence) != 0 || len(item.PreparationResourceEvidence) != 0 || len(item.PreparationManagedConfigEvidence) != 0 || len(item.PreparationSoulEvidence) != 0 || len(item.PreparationSkillRegistryEvidence) != 0 || len(item.PreparationProviderCacheEvidence) != 0 || len(item.PreparationMemoryInventoryEvidence) != 0 || len(item.PreparationSkillHubEffects) != 0 {
+		if len(item.PreparationResourceInitializations) != 0 || len(item.PreparationRunHistoryEvidence) != 0 || len(item.PreparationSealEvidence) != 0 || len(item.PreparationMCPRegistryEvidence) != 0 || len(item.PreparationDirectoryEvidence) != 0 || len(item.PreparationResourceEvidence) != 0 || len(item.PreparationManagedConfigEvidence) != 0 || len(item.PreparationSoulEvidence) != 0 || len(item.PreparationSkillRegistryEvidence) != 0 || len(item.PreparationProviderCacheEvidence) != 0 || len(item.PreparationMemoryInventoryEvidence) != 0 || len(item.PreparationSkillHubEffects) != 0 {
 			perm = 0o600
 		}
 		if item.DefinitionChangeCandidate != nil && authoringContainsDiagnostic(item.DefinitionChangeCandidate.Record) {
@@ -4796,6 +4799,7 @@ func cloneWorkspace(item *workspace.Workspace) *workspace.Workspace {
 	cloned.PreparationSealEvidence = workspace.ClonePreparationSealEvidence(item.PreparationSealEvidence)
 	cloned.PreparationMemoryInventoryEvidence = workspace.ClonePreparationMemoryInventoryEvidence(item.PreparationMemoryInventoryEvidence)
 	cloned.PreparationMCPRegistryEvidence = workspace.ClonePreparationMCPRegistryEvidence(item.PreparationMCPRegistryEvidence)
+	cloned.PreparationResourceInitializations = workspace.ClonePreparationInitializations(item.PreparationResourceInitializations)
 	cloned.PreparationSkillHubEffects = workspace.ClonePreparationSkillHubEffects(item.PreparationSkillHubEffects)
 	if item.DefinitionAuthoring != nil {
 		record := item.DefinitionAuthoring.Clone()

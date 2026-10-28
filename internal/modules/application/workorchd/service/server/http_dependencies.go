@@ -111,3 +111,5 @@ type UpdateWebSearchConfigurationFunc func(configcore.UpdateWebSearchConfigurati
 type GetLLMModelCatalogFunc func(context.Context) (workorchmanagementcontract.ProviderCatalogSummary, error)
 type RefreshLLMModelCatalogFunc func(context.Context) (workorchmanagementcontract.ProviderCatalogSummary, error)
 type ReadConfigurationWithCatalogFunc func(context.Context) (workorchconfigurationcontract.ServiceConfiguration, error)
+
+type InitializeStartupPreparationResourcesFunc func(context.Context, string, workorchmanagementcontract.PreparationCheckRequest) (workorchmanagementcontract.PreparationResourceInitializationOperation, error)

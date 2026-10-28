@@ -39,7 +39,6 @@ TEMPLATE = {"id": "step04-bounded", "name": "STEP04 有界检查（非 readiness
                                  "requiredOwnerFacts": [{"ownerModuleId": "blocks/shell", "factKind": "selectable_validation_surface", "operationKind": "validation/managed_session"}],
                                  "ownerFactConvergences": [{"ownerModuleId": "blocks/shell", "factKind": "selectable_validation_surface", "operationKind": "validation/managed_session", "requirePreexisting": True}]}]}}}}
 RESOURCE = "STEP04 精确资源\r\n保持原始 bytes。\n".encode()
-MANAGED = b'{\r\n"fixture":"step04"}\n'
 
 
 class Fixture(step02.Fixture):
@@ -363,12 +362,24 @@ def main():
         internal = Path(record["InternalDirectory"])
         require(internal.is_relative_to(verification.data), "fixture escaped isolated repository")
         config_paths = [internal / "mcp/config.json", verification.data / "system/managed-configs/mcp/config.json"]
-        for path in config_paths:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(MANAGED)
-        (project / ".agents/skills").mkdir(parents=True)
-        resources_before = file_snapshot(project)
         path = f"/api/v1/workorch/workspaces/{workspace_id}/activation-preparation"
+        require(all(not file.exists() for file in config_paths) and not (project / ".agents/skills").exists(),
+                "fresh fixture already contains preparation infrastructure")
+        initialization_intent = {"requestId": "step04-initialize-original", "expectedWorkspaceRevision": admitted["workspaceRevision"]}
+        initialization = verification.request("POST", path + "/initialize-resources", initialization_intent)
+        initialized = preparation(initialization)
+        require(initialization["requestId"] == initialization_intent["requestId"] and initialized["operationState"] == "not_checked" and
+                initialized["resourceInitializations"] == [{"requestId": initialization_intent["requestId"],
+                    "expectedWorkspaceRevision": initialization_intent["expectedWorkspaceRevision"],
+                    "committedWorkspaceRevision": initialization_intent["expectedWorkspaceRevision"] + 2,
+                    "state": "completed", "attempts": 1}], "resource initialization did not preserve exact owner identity")
+        require(all(file.is_file() for file in config_paths) and (project / ".agents/skills").is_dir(), "production initialization lost infrastructure")
+        before_initialization_replay = workspace_file.read_bytes()
+        require(verification.request("POST", path + "/initialize-resources", initialization_intent) == initialization and
+                verification.request("POST", path + "/recover-resources", initialization_intent) == initialization and
+                workspace_file.read_bytes() == before_initialization_replay, "completed initialization replay changed history")
+        save(root, "resource-initialization.json", initialization)
+        resources_before = file_snapshot(project)
         provider_before = copy.deepcopy(fixture.http_paths)
         status_baseline = skillhub_calls(root)
         status_baseline_count = len(status_baseline)
@@ -376,10 +387,10 @@ def main():
         not_checked = preparation(verification.request("GET", path))
         require(not_checked["operationState"] == "not_checked" and not not_checked.get("record"), "GET ran a check")
         require(skillhub_calls(root) == status_baseline, "not_checked GET invoked SkillHub")
-        intent = {"requestId": "step04-check-original", "expectedWorkspaceRevision": admitted["workspaceRevision"]}
+        intent = {"requestId": "step04-check-original", "expectedWorkspaceRevision": initialized["workspaceRevision"]}
         if args.browser_hold_seconds:
             session = {"baseURL": verification.base, "workspaceId": workspace_id, "preparationPath": path,
-                       "expectedWorkspaceRevision": admitted["workspaceRevision"], "pid": verification.process.pid,
+                       "expectedWorkspaceRevision": initialized["workspaceRevision"], "pid": verification.process.pid,
                        "instruction": "Open preparation, explicitly run exactly one check, inspect blocked result; close/reopen/refresh must not append attempts. No execution intent. Save actual DOM/screenshots, then navigate the isolated test tab to about:blank before browser-done so whole-page reconnects cannot contaminate the following process-only restart checks."}
             save(root, "browser-session.json", session)
             print(json.dumps({"browserURL": verification.base + "/console/", **session}), flush=True)

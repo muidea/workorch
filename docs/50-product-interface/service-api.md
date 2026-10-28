@@ -314,6 +314,19 @@ Workspace 从原 candidate/startup/admission 纯编译完整来源义务图，�
 缺来源、未知、漂移与非空连接待证仍阻塞；不把空列表直接当 N/A，不删除原编译诊断，不补做外部 probe。
 该消费不证明持续有效或授予 M3；`operationState/currentValidity/activeRunId` 各轴语义不变。
 
+显式 `POST /workspaces/:workspaceId/activation-preparation/initialize-resources` 与
+`POST /workspaces/:workspaceId/activation-preparation/recover-resources` 只接受
+`{requestId, expectedWorkspaceRevision}`。它们分别初始化缺失的准备基础设施、恢复服务端已受理的原初始化身份；
+不接受路径、配置正文或检查结论。Workspace 独立保存原计划及每次派发预算后，由 File 创建缺失的托管配置和
+项目 `.agents/skills`，保留已有文件与冲突，不安装或同步 Skill，不调用 provider，不创建 Run。
+
+响应为 `{requestId, preparation}`。准备 GET 的可选 `resourceInitializations` 仅含原 request/revision、
+committed revision、`pending/blocked/completed` 及已消耗派发次数；配置原文与错误只保留在受限 owner 存储。
+同身份普通重复请求只读回；显式恢复保留原 expected revision，最多合计 4 次派发，丢失回执也不恢复预算。
+未完成（pending/blocked）的初始化阻止新检查和 fresh execution reservation；completed 仅代表基础设施创建完成，仍须显式检查
+实际资源，不授予 ready/M3。原失败检查不改写。页面只读刷新及关闭重开不自动提交；POST 响应丢失后从 GET
+找回原身份，错误或 GET 尚未见到原记录时不换身份重发。所有这些响应均为 `no-store`。
+
 显式 `POST /workspaces/:workspaceId/activation-preparation/check` 与
 `POST /workspaces/:workspaceId/activation-preparation/recover` 只接受
 `{requestId, expectedWorkspaceRevision}`；恢复必须携带原请求及原 revision，不能替换为查询得到的新 revision。
