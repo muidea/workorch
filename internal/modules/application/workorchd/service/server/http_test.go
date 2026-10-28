@@ -2419,7 +2419,7 @@ func TestWorkspaceListAndGetEndpointsReturnPersistedWorkspaces(t *testing.T) {
 	if err := json.Unmarshal(getRec.Body.Bytes(), &fetched); err != nil {
 		t.Fatalf("unmarshal fetched workspace: %v", err)
 	}
-	if fetched.Workspace.ID != workspace.ID || fetched.Workspace.Title != "http workspace" || fetched.Workspace.DeliverableDirectory != "workspaces/ws-http" {
+	if fetched.Workspace.ID != workspace.ID || fetched.Workspace.Title != "http workspace" || fetched.Workspace.DeliverableDirectory != workspace.DeliverableDirectory {
 		t.Fatalf("fetched workspace = %+v, want %s/http workspace/workspaces/ws-http", fetched.Workspace, workspace.ID)
 	}
 }
@@ -5115,8 +5115,15 @@ func createWorkspaceForHTTP(t *testing.T, handler http.Handler, title string, de
 	if err := json.Unmarshal([]byte(getAndExpect(t, handler, "/api/v1/workorch/workspaces/"+created.Authoring.WorkspaceID, http.StatusOK)), &body); err != nil {
 		t.Fatalf("unmarshal workspace read response: %v", err)
 	}
-	if body.Workspace.ID == "" || body.Workspace.Title != title || deliverableDirectory != "" && body.Workspace.DeliverableDirectory != deliverableDirectory || body.Workspace.State != "active" {
-		t.Fatalf("workspace = %+v, want generated/%s/%s/active", body.Workspace, title, deliverableDirectory)
+	wantDirectory := deliverableDirectory
+	if wantDirectory != "" {
+		wantDirectory, err = filepath.Abs(strings.TrimSpace(wantDirectory))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if body.Workspace.ID == "" || body.Workspace.Title != title || !filepath.IsAbs(body.Workspace.DeliverableDirectory) || wantDirectory != "" && body.Workspace.DeliverableDirectory != wantDirectory || body.Workspace.State != "active" {
+		t.Fatalf("workspace = %+v, want generated/%s/%s/active", body.Workspace, title, wantDirectory)
 	}
 	return body.Workspace
 }

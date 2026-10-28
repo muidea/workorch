@@ -102,7 +102,7 @@ class Fixture:
                     elif "kind" not in payload:
                         kind = "proposal"
                         items = payload["candidateAcceptance"]
-                        validate_source_consumers(payload)
+                        fixture.validate_source_consumers(payload)
                         declaration = {"Declaration": "绑定已发布的 software-dev 逐条验收能力声明，尚未执行。", "Status": "DECLARED", "ProfileID": "software-dev", "EvidenceRequirementID": "*", "Scope": "dodItem"}
                         result = {"mapping": {
                             "Protocol": "workorch.authoring.sealed-ref-mapping/v1", "InputHash": payload["inputHash"], "TemplateSnapshotHash": payload["templateHash"], "ResourceSnapshotHash": payload["resourceSnapshotHash"],
@@ -139,6 +139,9 @@ class Fixture:
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
+    def validate_source_consumers(self, payload):
+        validate_source_consumers(payload)
+
     def close(self):
         self.server.shutdown()
         self.server.server_close()

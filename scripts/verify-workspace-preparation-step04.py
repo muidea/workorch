@@ -43,6 +43,14 @@ MANAGED = b'{\r\n"fixture":"step04"}\n'
 
 
 class Fixture(step02.Fixture):
+    def validate_source_consumers(self, payload):
+        # This bounded template declares ordinary validation only. The default
+        # software template's terminal consumers remain mandatory in STEP02.
+        options = payload["sourceApplicableVerificationDeclarations"]
+        require(options and all(option["declarations"] for option in options), "bounded template lost ordinary declarations")
+        require(all(not declaration["consumers"] for option in options for declaration in option["declarations"]),
+                "bounded template acquired undeclared terminal consumers")
+
     def __init__(self, root):
         self.http_paths = []
         super().__init__(root)
@@ -258,6 +266,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evidence-dir", type=Path, required=True)
     parser.add_argument("--port", type=int, help="unused loopback port; checked before launching, never replaces a service")
+    parser.add_argument("--directory-mode", choices=("absolute", "relative", "default"), default="absolute",
+                        help="relative/default use a relative repository root; default omits the project directory")
     parser.add_argument("--browser-hold-seconds", type=int, default=0, help="bounded window for explicit first check in production Web; marker is not browser proof")
     args = parser.parse_args()
     require(0 <= args.browser_hold_seconds <= 1800, "browser window must be bounded")
@@ -268,7 +278,7 @@ def main():
     source = Path(__file__).resolve().parent.parent
     verification, fixture = None, None
     result = {"pass": False, "mode": "isolated-loopback-fixtures", "realModelCalls": 0, "browserVerified": False,
-              "ready": False, "M3Issued": False}
+              "ready": False, "M3Issued": False, "directoryMode": args.directory_mode}
     try:
         shim_dir, installed = root / "fixture-bin", root / "installed-skills"
         shim_dir.mkdir()
@@ -282,7 +292,9 @@ def main():
         result["buildIdentity"] = identity
         verification = step01.Verification(binary, root, identity, process_environment=environment, port=args.port)
         fixture = Fixture(root)
-        config = {"server": {"addr": f"127.0.0.1:{verification.port}"}, "repository": {"backend": "file", "dataDir": str(verification.data)},
+        # Verification.start fixes cwd to this isolated root, including restart.
+        data_dir = str(verification.data) if args.directory_mode == "absolute" else "state/../data"
+        config = {"server": {"addr": f"127.0.0.1:{verification.port}"}, "repository": {"backend": "file", "dataDir": data_dir},
                   "llm": {"aiProxy": {"baseURL": f"http://127.0.0.1:{fixture.server.server_port}", "apiKey": "", "timeout": "30s",
                                       "modelOverrides": {"step02-fixture": {"contextWindowTokens": 128000, "maxOutputTokens": 16384, "operations": ["responses"]}}},
                           "defaultChat": {"providerID": "ai-proxy", "modelID": "step02-fixture"},
@@ -292,13 +304,19 @@ def main():
         verification.request("POST", "/api/v1/workorch/souls", {"id": "step04-soul", "name": "STEP04 fixture Soul", "soulMd": "保留原始输入与 required all_of。\n",
                                                                "allowedSkillRefs": ["not-selected-by-this-bounded-profile"]}, 201)
         verification.request("POST", "/api/v1/workorch/workspace-templates", TEMPLATE, 201)
-        project = root / "project"
-        project.mkdir()
-        (project / "requirements.txt").write_bytes(RESOURCE)
-        payload = {"requestId": "step04-process-original", "title": "STEP04 独立进程阻塞验收", "templateId": TEMPLATE["id"], "deliverableDirectory": str(project),
+        payload = {"requestId": "step04-process-original", "title": "STEP04 独立进程阻塞验收", "templateId": TEMPLATE["id"],
                    "input": {"goalText": step02.GOAL, "acceptanceRequirements": step02.REQUIREMENTS, "resourceRefs": ["requirements.txt"]}}
+        project = root / "project"
+        if args.directory_mode == "default":
+            project = root / ".workorch-workspaces" / step01.workspace_id(payload["requestId"])
+        else:
+            payload["deliverableDirectory"] = str(project) if args.directory_mode == "absolute" else "projects/../project"
         created = verification.create(payload)["authoring"]
         workspace_id = created["workspaceId"]
+        require(created["deliverableDirectory"] == str(project) and project.is_dir(), "creation did not prepare the exact absolute project path")
+        replay = verification.create(payload)["authoring"]
+        require(replay == created, "relative/default creation replay changed the original identity")
+        (project / "requirements.txt").write_bytes(RESOURCE)
         authoring_path = f"/api/v1/workorch/workspaces/{workspace_id}/authoring"
         verification.request("POST", authoring_path + "/compile", {"expectedInputHash": created["inputHash"], "expectedTemplateSnapshotHash": created["templateSnapshotHash"]}, 202)
         deadline = time.monotonic() + 90
@@ -337,6 +355,9 @@ def main():
             return preparation(observed) == expected
 
         record = step02.workspace_record(json.loads(workspace_file.read_bytes()), workspace_id)
+        require(record["DeliverableDirectory"] == record["StartupInput"]["ResolvedProjectWorkspaceDirectory"] == str(project) and
+                record["InternalDirectory"] == str(verification.data / "internal/workspaces" / workspace_id),
+                "confirmation sealed an unresolved or reinterpreted directory")
         require(len(record["DefinitionAdmissionCandidates"]) == 1, "unexpected candidate count")
         step03.validate_sealed_activation(admitted, exact, record["DefinitionAdmissionCandidates"][0], record["StartupInput"], record["ActivationAdmission"])
         internal = Path(record["InternalDirectory"])

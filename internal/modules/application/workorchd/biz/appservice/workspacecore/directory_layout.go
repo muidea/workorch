@@ -31,7 +31,10 @@ func ResolveDirectoryLayout(repositoryBackend string, repositoryDataDir string, 
 		return DirectoryLayout{}, err
 	}
 	if strings.EqualFold(repositoryBackend, "file") && strings.TrimSpace(repositoryDataDir) != "" {
-		repositoryDataDir = filepath.Clean(strings.TrimSpace(repositoryDataDir))
+		repositoryDataDir, err = filepath.Abs(strings.TrimSpace(repositoryDataDir))
+		if err != nil {
+			return DirectoryLayout{}, err
+		}
 		if deliverableDirectory != "" {
 			return DirectoryLayout{
 				DeliverableDirectory: deliverableDirectory,
@@ -66,7 +69,11 @@ func ResolveInternalDirectory(repositoryBackend string, repositoryDataDir string
 		return "", err
 	}
 	if strings.EqualFold(repositoryBackend, "file") && strings.TrimSpace(repositoryDataDir) != "" {
-		return filepath.Join(filepath.Clean(strings.TrimSpace(repositoryDataDir)), "internal", "workspaces", workspaceID), nil
+		root, err := filepath.Abs(strings.TrimSpace(repositoryDataDir))
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(root, "internal", "workspaces", workspaceID), nil
 	}
 	wd, err := os.Getwd()
 	if err != nil {
@@ -96,5 +103,7 @@ func normalizeExplicitWorkspaceDirectory(value string) (string, error) {
 	if !filepath.IsAbs(clean) && (clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator))) {
 		return "", common.ErrInvalidArgument
 	}
-	return clean, nil
+	// Resolve against the creation process, before paths enter owner hashes and
+	// sealed startup input. Consumers must never reinterpret sealed relative paths.
+	return filepath.Abs(clean)
 }

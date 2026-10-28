@@ -174,11 +174,15 @@ func TestCreateWorkspaceWithTemplateCopiesTemplateStagePolicies(t *testing.T) {
 }
 
 func TestCreateWorkspaceWithBackendReturnsCreatedWorkspace(t *testing.T) {
+	wantDirectory, err := filepath.Abs("workspaces/appservice created workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
 	item, err := CreateWorkspaceWithBackend(context.Background(), "file", t.TempDir(), "appservice created workspace", "appservice description", "workspaces/appservice created workspace")
 	if err != nil {
 		t.Fatalf("CreateWorkspaceWithBackend: %v", err)
 	}
-	if item.ID == "" || item.Title != "appservice created workspace" || item.Description != "appservice description" || item.DeliverableDirectory != "workspaces/appservice created workspace" {
+	if item.ID == "" || item.Title != "appservice created workspace" || item.Description != "appservice description" || item.DeliverableDirectory != wantDirectory {
 		t.Fatalf("workspace = %+v, want created workspace", item)
 	}
 	if !strings.HasPrefix(item.ID, "ws-") {
@@ -338,7 +342,7 @@ func TestReadWorkspaceWithBackendReturnsPersistedWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadWorkspaceWithBackend: %v", err)
 	}
-	if item.ID != created.ID || item.Title != "appservice read workspace" || item.Description != "read description" || item.DeliverableDirectory != "workspaces/appservice read workspace" {
+	if item.ID != created.ID || item.Title != "appservice read workspace" || item.Description != "read description" || item.DeliverableDirectory != created.DeliverableDirectory || !filepath.IsAbs(item.DeliverableDirectory) {
 		t.Fatalf("workspace = %+v, want persisted workspace", item)
 	}
 }

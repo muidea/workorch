@@ -17,6 +17,20 @@ spec.loader.exec_module(step04)
 
 
 class PreparationVerifierTest(unittest.TestCase):
+    def test_bounded_fixture_keeps_default_template_consumer_checks_separate(self):
+        fixture = object.__new__(step04.Fixture)
+        payload = {"sourceApplicableVerificationDeclarations": [
+            {"candidateItemRef": "derived-dod:user:000001", "declarations": [{"consumers": []}]}]}
+        fixture.validate_source_consumers(payload)
+        # The default STEP02 template must still reject missing terminal sources.
+        with self.assertRaisesRegex(RuntimeError, "template consumer source missing"):
+            step04.step02.validate_source_consumers(payload)
+        payload["sourceApplicableVerificationDeclarations"][0]["declarations"][0]["consumers"] = [{"Kind": "terminal_owner_snapshot"}]
+        with self.assertRaisesRegex(RuntimeError, "undeclared terminal consumers"):
+            fixture.validate_source_consumers(payload)
+        with self.assertRaisesRegex(RuntimeError, "lost ordinary declarations"):
+            fixture.validate_source_consumers({"sourceApplicableVerificationDeclarations": []})
+
     def test_file_window_uses_complete_original_images_and_current_process_epoch(self):
         epoch = "file-preparation-epoch:" + "A" * 26
         started, observed, expires = "2026-10-27T00:00:00Z", "2026-10-27T00:00:01Z", "2026-10-27T00:00:30Z"

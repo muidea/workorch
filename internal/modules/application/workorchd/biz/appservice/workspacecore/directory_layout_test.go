@@ -2,6 +2,7 @@ package workspacecore
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -16,7 +17,7 @@ func TestResolveDirectoryLayoutNormalizesExplicitPathsAndRejectsEscape(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if relative.DeliverableDirectory != "project-a" || relative.InternalDirectory != filepath.Join(root, ".workorch-data", "internal", "workspaces", "workspace-a") {
+	if relative.DeliverableDirectory != filepath.Join(root, "project-a") || relative.InternalDirectory != filepath.Join(root, ".workorch-data", "internal", "workspaces", "workspace-a") {
 		t.Fatalf("relative layout=%+v", relative)
 	}
 
@@ -69,7 +70,44 @@ func TestResolveDirectoryLayoutCleansFileBackendDataRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !layout.Managed || layout.DeliverableRoot != ".workorch-workspaces" || layout.DeliverableDirectory != filepath.Join(".workorch-workspaces", "workspace-a") || layout.InternalDirectory != filepath.Join("data", "internal", "workspaces", "workspace-a") {
+	if !layout.Managed || layout.DeliverableRoot != filepath.Join(root, ".workorch-workspaces") || layout.DeliverableDirectory != filepath.Join(root, ".workorch-workspaces", "workspace-a") || layout.InternalDirectory != filepath.Join(root, "data", "internal", "workspaces", "workspace-a") {
 		t.Fatalf("file layout=%+v", layout)
+	}
+}
+
+func TestResolvedDirectoryLayoutDoesNotFollowLaterWorkingDirectory(t *testing.T) {
+	creationRoot := t.TempDir()
+	laterRoot := t.TempDir()
+	for _, backend := range []string{"file", "memory"} {
+		for _, explicit := range []string{"", "projects/../project-a", filepath.Join(creationRoot, "absolute-project")} {
+			t.Run(backend+"/"+explicit, func(t *testing.T) {
+				t.Chdir(creationRoot)
+				layout, err := ResolveDirectoryLayout(backend, "state/../data", "workspace-a", explicit)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, path := range []string{layout.DeliverableDirectory, layout.InternalDirectory} {
+					if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+						t.Fatalf("unresolved owner path %q", path)
+					}
+				}
+				// Directory preparation consumes the resolved value, even if the
+				// process changes cwd after the creation identity was formed.
+				t.Chdir(laterRoot)
+				if err := EnsureDirectoryLayout(layout); err != nil {
+					t.Fatal(err)
+				}
+				for _, path := range []string{layout.DeliverableDirectory, layout.InternalDirectory} {
+					info, err := os.Stat(path)
+					if err != nil || !info.IsDir() {
+						t.Fatalf("resolved directory %q was not prepared: %v", path, err)
+					}
+				}
+				entries, err := os.ReadDir(laterRoot)
+				if err != nil || len(entries) != 0 {
+					t.Fatalf("preparation reinterpreted the path under later cwd: %v %v", entries, err)
+				}
+			})
+		}
 	}
 }

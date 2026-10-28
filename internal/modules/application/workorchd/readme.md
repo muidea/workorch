@@ -32,6 +32,11 @@ Goal-only 创作用例先保存 Workspace owner 的版本化草稿，以持久 r
 
 ### 草稿保存与找回
 
+Application 在创建身份持久化前将目录解析为 clean absolute path：file backend 的相对 dataDir 与用户显式相对项目目录
+以创建进程工作目录为基准；默认项目目录位于绝对数据根的同级 `.workorch-workspaces/<workspace-id>`。
+空目录输入仍使用默认值，显式相对目录不得向上逃逸。草稿、创建 hash、确认与 StartupInput 沿用同一解析结果；
+File/SkillHub 等消费者继续严格拒绝相对路径，不在读取或准备阶段重新解析、迁移既有封存路径。
+
 草稿创建提供独立“保存草稿”动作，只调用创建／原请求重放，不调用 PUT、compile、confirm 或 activation。
 Application 在 Workspace owner 持久化后准备允许的目录，再发送 `RecordAuthoringDirectoryPreparedCommand`，
 核对 owner 回执并独立读回后才返回 201。`creation.directoryPrepared` 只证明原创建阶段完成，不证明当前资源就绪。
