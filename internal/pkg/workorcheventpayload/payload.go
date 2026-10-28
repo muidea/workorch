@@ -185,12 +185,14 @@ func (payload Payload) Object(name string) (Payload, bool) {
 	return Payload{Fields: cloneFields(value.Object)}, true
 }
 
+// Clone detaches the complete typed value, preserving nil versus non-nil
+// empty collections for persistence preimage comparisons.
 func (payload Payload) Clone() Payload {
 	return Payload{Fields: cloneFields(payload.Fields)}
 }
 
 func CloneSlice(input []Payload) []Payload {
-	if len(input) == 0 {
+	if input == nil {
 		return nil
 	}
 	ret := make([]Payload, 0, len(input))
@@ -483,7 +485,7 @@ func fromAny(input any) (Value, error) {
 }
 
 func cloneFields(fields []Field) []Field {
-	if len(fields) == 0 {
+	if fields == nil {
 		return nil
 	}
 	ret := make([]Field, 0, len(fields))
@@ -501,7 +503,7 @@ func cloneField(field Field) Field {
 }
 
 func cloneValues(values []Value) []Value {
-	if len(values) == 0 {
+	if values == nil {
 		return nil
 	}
 	ret := make([]Value, 0, len(values))

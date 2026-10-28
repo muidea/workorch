@@ -7,17 +7,138 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync/atomic"
 	"testing"
 
 	applicationbiz "github.com/muidea/workorch/internal/modules/application/workorchd/biz"
+	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
 	basebiz "github.com/muidea/workorch/internal/modules/base/biz"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
+	fileRepository "github.com/muidea/workorch/internal/pkg/repository/file"
+	"github.com/muidea/workorch/internal/pkg/workorchconfig"
+	payload "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagedconfig"
 	management "github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
+
+func TestPreparationInitializationPreservesNestedEmptyHistoryAcrossCASAndReopen(t *testing.T) {
+	ctx, storage := context.Background(), t.TempDir()
+	owners := openFileDefinitionAdmissionOwners(t, storage)
+	defer func() { owners.close() }()
+	internal := filepath.Join(t.TempDir(), "internal", "workspaces", "ws")
+	if err := os.MkdirAll(internal, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// JSON persistence decodes these empty collections as non-nil slices.
+	// They occur in real reviewed schemas/managed defaults and must survive
+	// repository Get/Clone without tripping the full metadata preimage gate.
+	const originalJSON = `{"schema":{"properties":{},"required":[],"branches":[{"enum":[]},{"items":{}}]},"nested":[[],{},"原文"]}`
+	var original payload.Payload
+	if err := json.Unmarshal([]byte(originalJSON), &original); err != nil {
+		t.Fatal(err)
+	}
+	w := seedPreparationEligibleWithConfiguration(t, owners, "ws-empty-history", t.TempDir(), func(w *workspace.Workspace) {
+		w.InternalDirectory = internal
+		w.ContextHints = w.ContextHints.Merge(preparationManagedHints(false))
+	}, func(template *workspace.WorkspaceTemplate) {
+		template.ContextHints = template.ContextHints.Merge(preparationManagedHints(false)).Merge(payload.New(payload.ObjectField("originalSchema", original)))
+		// Match the production JSON template ingress before confirming its
+		// hash; the older typed fixture includes numeric kinds that do not
+		// represent a JSON-decoded provider/template input.
+		raw, err := json.Marshal(template)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(raw, template); err != nil {
+			t.Fatal(err)
+		}
+	})
+	startManagedPreparationOwners(t, owners)
+	var calls atomic.Int32
+	installPreparationReadFixtures(t, owners, w.ID, "miss", &calls, nil)
+	ctx = configcore.ContextWithLoader(ctx, func() (workorchconfig.Config, error) {
+		cfg := workorchconfig.Config{}
+		cfg.Server.DefaultDialogLanguage = "zh-CN"
+		cfg.Runtime.MaxRuntimeRepairAttempts = 2
+		cfg.Runtime.LLMOutput.MaxDocumentRecoveryAttempts = 2
+		return cfg, nil
+	})
+	application := &applicationbiz.Biz{Base: basebiz.New("application/workorchd", owners.hub, nil)}
+	_, err := application.CheckStartupPreparation(ctx, w.ID, management.PreparationCheckRequest{RequestID: "original-observation", ExpectedWorkspaceRevision: w.Revision}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ownerPath := filepath.Join(storage, "internal", "workspaces", string(w.ID), "workspace.json")
+	owners.close()
+	// Owner reopen alone shares the process-wide decoded file cache. Evict
+	// this isolated fixture path to exercise the real JSON cold-load preimage.
+	fileRepository.EvictMapFileCache(ownerPath)
+	owners = openFileDefinitionAdmissionOwners(t, storage)
+	startManagedPreparationOwners(t, owners)
+	before, err := owners.repositories.Workspaces.Get(ctx, w.ID)
+	if err != nil || len(before.PreparationSealEvidence) != 1 || before.PreparationSealEvidence[0].ExecutionInputs == nil {
+		t.Fatal("missing original preparation execution inputs", err)
+	}
+	command := workspaceevents.InitializeWorkspacePreparationCommand{WorkspaceID: w.ID, RequestID: "initialize-empty-history", ExpectedWorkspaceRevision: before.Revision}
+	first, err := owners.workspace.initializePreparationResources(ctx, command, false)
+	if err != nil {
+		t.Fatalf("initialization rejected unchanged JSON-decoded history: %v", err)
+	}
+	if len(first.State.ResourceInitializations) != 1 || first.State.ResourceInitializations[0].State != "completed" {
+		t.Fatal("resource initialization did not complete", first.State.ResourceInitializations)
+	}
+	stored, err := owners.repositories.Workspaces.Get(ctx, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Revision != before.Revision+2 || len(stored.PreparationResourceInitializations[0].Attempts) != 1 || !reflect.DeepEqual(before.StartupPreparation, stored.StartupPreparation) || !reflect.DeepEqual(before.PreparationSealEvidence, stored.PreparationSealEvidence) || !reflect.DeepEqual(before.DefinitionAuthoring, stored.DefinitionAuthoring) || !reflect.DeepEqual(before.StartupInput, stored.StartupInput) || !reflect.DeepEqual(before.ActivationAdmission, stored.ActivationAdmission) || stored.ActiveRunID != "" {
+		t.Fatal("initialization changed old history/seal, budget or Run boundary")
+	}
+	// Inspect the exact persisted JSON, rather than comparing two cloned
+	// values that might share the same lossy transformation.
+	ownerBytes, err := os.ReadFile(ownerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(ownerBytes, &values); err != nil {
+		t.Fatal(err)
+	}
+	var raw struct {
+		DefinitionAuthoring     workspace.DefinitionAuthoringRecord
+		PreparationSealEvidence []workspace.WorkspacePreparationSealEvidence
+	}
+	if err := json.Unmarshal(values[string(w.ID)], &raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, hints := range []payload.Payload{raw.DefinitionAuthoring.TemplateSnapshot.ContextHints, raw.PreparationSealEvidence[0].ExecutionInputs.Template.ContextHints} {
+		field, ok := hints.Field("originalSchema")
+		if !ok || !reflect.DeepEqual(field.Object, original.Fields) {
+			t.Fatal("persisted original schema changed its exact nested empty collections")
+		}
+	}
+	for _, recoverOriginal := range []bool{false, true} {
+		replay, err := owners.workspace.initializePreparationResources(ctx, command, recoverOriginal)
+		if err != nil || !reflect.DeepEqual(first, replay) {
+			t.Fatal("completed original identity did not replay read-only", err)
+		}
+		current, err := os.ReadFile(ownerPath)
+		if err != nil || !bytes.Equal(ownerBytes, current) {
+			t.Fatal("completed replay rewrote owner history", err)
+		}
+	}
+	owners.close()
+	fileRepository.EvictMapFileCache(ownerPath)
+	owners = openFileDefinitionAdmissionOwners(t, storage)
+	reopened, err := owners.workspace.initializePreparationResources(ctx, command, true)
+	if err != nil || !reflect.DeepEqual(first, reopened) {
+		t.Fatal("reopen lost original completion", err)
+	}
+}
 
 func TestPreparationInitializationProductionCreatesMissingPreservesExistingAndReopens(t *testing.T) {
 	for _, scenario := range []string{"missing", "preserve", "conflict", "symlink"} {

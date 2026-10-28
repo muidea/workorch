@@ -38,6 +38,8 @@ Workspace state lane。新请求先精确反查正式封存链，再从原模板
 前像和 creation/preparation epoch，再通过 File owner 执行缺失资源创建。配置按完整 JSON bytes 保全，禁止经浮点
 解码改变大整数。scoped repository 在锁内重新附加实际 Soul sidecar 并核对完整配置前像；下层 metadata CAS
 仅允许既有 Soul 字段拆存差异，仍核对完整 metadata、原 revision 和不可变计划。
+typed payload 的 detached Clone 必须保留嵌套集合的 nil/非 nil 空值表示；不能把克隆产生的前像差异当成
+历史变更，也不能为避开该差异而放宽完整 metadata 比较或改写持久历史。
 
 初始化只创建缺失的 system/workspace 托管配置及项目 `.agents/skills` 目录，既有文件、用户覆盖、mergeMissing
 缺键及无效/冲突内容均保留，绝不借本入口覆盖或合并已有文件。不调用 SkillHub init/install/sync/use/apply，不调用

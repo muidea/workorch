@@ -32,7 +32,7 @@ CHECK_OWNERS = {"exact_seal": "workspace", "directory_boundary": "file", "manage
                 "memory_selection": "memory", "provider_cache": "llm", "persistence_integrity": "workspace",
                 "first_activation_no_run": "run"}
 TEMPLATE = {"id": "step04-bounded", "name": "STEP04 有界检查（非 readiness）", "defaultSoulId": "step04-soul",
-            "contextHints": {"managedWorkspaceConfigs": [{"path": "mcp/config.json", "content": {"fixture": "step04"}}],
+            "contextHints": {"managedWorkspaceConfigs": [{"path": "mcp/config.json", "content": {"fixture": "step04", "schema": {"properties": {}, "required": [], "branches": [{"enum": []}]}}}],
                              "acceptanceSlicePolicy": {"schemaVersion": "workorch.acceptance_slice_policy", "maxWorkItems": 4, "maxFocuses": 64,
                                                        "maxCandidateContextItems": 4, "completionPolicy": "all_required_items_accepted", "resultPolicy": "slice_result_allowed"},
                              "profileContracts": {"software-dev": {"evidenceRequirements": [{"id": "*", "scope": "dodItem", "requiredEvidenceKinds": ["validation"], "acceptedStepKinds": ["validation/managed_session"],
@@ -494,6 +494,39 @@ def main():
                 "lost-response restart/recovery changed durable history")
         require((root / "skillhub-calls.jsonl").read_bytes() == repaired_status and fixture.http_paths == provider_before,
                 "completed multi-attempt recovery repeated owner effects or provider I/O")
+        # A fresh process reads JSON-decoded empty arrays in the original
+        # Template and archived execution inputs. A lossy Clone used to make
+        # the full metadata preimage unequal before the File reservation CAS.
+        # Exercise a new explicit initialization against this real old history;
+        # it must preserve all sources, prior judgments and existing files.
+        cold_before = step02.workspace_record(json.loads(workspace_file.read_bytes()), workspace_id)
+        cold_intent = {"requestId": "step04-initialize-after-history-restart", "expectedWorkspaceRevision": cold_before["Revision"]}
+        cold_initialization = verification.request("POST", path + "/initialize-resources", cold_intent)
+        cold_view = preparation(cold_initialization)
+        require(cold_view["workspaceRevision"] == cold_before["Revision"] + 2 and
+                cold_view["resourceInitializations"][-1] == {"requestId": cold_intent["requestId"],
+                    "expectedWorkspaceRevision": cold_intent["expectedWorkspaceRevision"],
+                    "committedWorkspaceRevision": cold_before["Revision"] + 2, "state": "completed", "attempts": 1},
+                "cold initialization rejected exact historical empty collections or lost original identity")
+        repaired_owner = workspace_file.read_bytes()
+        cold_after = step02.workspace_record(json.loads(repaired_owner), workspace_id)
+        expected_owner = copy.deepcopy(cold_before)
+        expected_owner["Revision"] = cold_after["Revision"]
+        expected_owner["PreparationResourceInitializations"] = cold_after["PreparationResourceInitializations"]
+        require(cold_after == expected_owner and len(cold_after["PreparationResourceInitializations"]) == 2 and
+                cold_after["PreparationResourceInitializations"][:-1] == cold_before["PreparationResourceInitializations"],
+                "initialization changed immutable history or unrelated owner fields")
+        validate_execution_inputs(cold_after, json.loads((workspace_file.parent / "config/soul_bindings.json").read_bytes()))
+        defaults = TEMPLATE["contextHints"]["managedWorkspaceConfigs"][0]["content"]
+        require(all(json.loads(file.read_bytes()) == defaults for file in config_paths), "initialization lost nested empty defaults")
+        save(root, "cold-history-resource-initialization.json", cold_initialization)
+        verification.stop()
+        verification.start()
+        for action in ("/initialize-resources", "/recover-resources"):
+            require(verification.request("POST", path + action, cold_intent) == cold_initialization and workspace_file.read_bytes() == repaired_owner,
+                    "restart/replay changed exact cold initialization history")
+        require((root / "skillhub-calls.jsonl").read_bytes() == repaired_status and fixture.http_paths == provider_before,
+                "resource initialization repeated SkillHub or provider effects")
         require(file_snapshot(project) == resources_before, "STEP04 changed business files")
         require(verification.request("GET", "/api/v1/workorch/runs")["runs"] == [] and
                 verification.request("GET", f"/api/v1/workorch/workspaces/{workspace_id}/runs")["runs"] == [], "STEP04 created Run")
@@ -503,6 +536,7 @@ def main():
         result.update({"pass": True, "workspaceId": workspace_id, "request": intent, "restartReadbackPassed": True,
                        "originalBootstrapCompilations": compilations, "bootstrapCompilationRestartPassed": True,
                        "manualResourceRepairRecheckPassed": True, "lostResponseReconciliationPassed": True, "attemptCount": 3,
+                       "coldHistoryResourceInitializationPassed": True,
                        "providerPreparationCalls": 8, "step04ProviderHTTPRequests": 0, "embeddingCalls": 0, "runCount": 0,
                        "requiredCount": saved["record"]["attempts"][0]["assessment"]["requiredCount"],
                        "passedRequiredCount": saved["record"]["attempts"][0]["assessment"]["passedRequiredCount"],
