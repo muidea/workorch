@@ -57,3 +57,41 @@ func TestPreparationProviderSelectionWireRequiresOriginalBoundBlockedEvidence(t 
 		}
 	}
 }
+
+func TestPreparationProviderConfigurationWireRequiresOriginalEvidence(t *testing.T) {
+	fixture := func() StartupPreparationView {
+		v := preparationViewFixture()
+		v.Record.Version, v.OperationState = "workorch-preparation-record/v2", "blocked"
+		a := &v.Record.Attempts[0]
+		a.State, a.CreationEpoch, a.EvaluationVersion = "blocked", strings.Repeat("a", 32), "workorch-preparation-check-evaluation/v1"
+		a.ProviderCacheEvidenceRef = "provider-cache-observation:" + strings.Repeat("b", 32)
+		at := a.StartedAt.Add(time.Second)
+		a.CompletedAt = &at
+		a.Checks = []PreparationCheckView{{ID: "provider_cache", Owner: "llm", Required: true, State: "passed", Reason: workspace.PreparationProviderConfigurationReason}}
+		return v
+	}
+	if fixture().ValidateFor("ws") != nil {
+		t.Fatal("bound configuration observation rejected")
+	}
+	for _, change := range []string{"ref", "version", "owner", "required", "blocked", "legacy"} {
+		v := fixture()
+		a := &v.Record.Attempts[0]
+		switch change {
+		case "ref":
+			a.ProviderCacheEvidenceRef = ""
+		case "version":
+			a.EvaluationVersion = ""
+		case "owner":
+			a.Checks[0].Owner = "caller"
+		case "required":
+			a.Checks[0].Required = false
+		case "blocked":
+			a.Checks[0].State = "blocked"
+		case "legacy":
+			v.Record.Version = "workorch-preparation-record/v1"
+		}
+		if v.ValidateFor("ws") == nil {
+			t.Fatal("unbound configuration observation accepted", change)
+		}
+	}
+}

@@ -361,22 +361,22 @@ request/revision 对应 attempt 的 `snapshotHash`、`manifestHash`。成功只�
 当前 v2 主体流程先 CAS 保存原身份、完整稳定清单、creation/preparation epoch 及封存绑定，
 只有首次 CAS 明确成功的 Application 调用继续执行有界 LLM cache-only 与 Run 完整历史 query，
 再经内部 `settle-blocked` 合同由 Workspace 私有 reducer/CAS 记为 blocked。
-provider 项分别记录 `provider_cache_miss/expired/unavailable` 或 `provider_declaration_only`；
-新原非 stale 操作在同次冻结的 provider 默认项/override 声明和原 Workspace 选择完整时，
-由 Workspace 私有编译精确模型来源，仍始终 blocked。旧无容量观察的成功编译为
-`provider_selection_authorization_pending`，只代表目标及能力声明已绑定。
-新首次受理 continuation 携带原精确目标，由 LLM owner 从同一次已有 fresh cache 与冻结配置
-调用既有纯 resolver，给出版本化容量观察；Workspace 封存并核验原目标及原容量值。
-`provider_selection_budget_observed_authorization_pending` 只表示容量预览已观察，
-不是 Runtime ceiling、请求 allocation、Run 物理预算、远端授权或持续有效性证明；仍不授 PASS。
-容量不可用或目标冲突分别为 `provider_selection_budget_unavailable`、
-`provider_selection_budget_source_conflict`，不以默认值或相邻模型代替。
-有限失败码为 `provider_selection_source_binding_conflict`、`provider_selection_configuration_source_unavailable`、
-`provider_selection_invalid`、`provider_selection_model_missing`、`provider_selection_capability_incomplete`、
-`provider_selection_operation_unsupported`、`provider_selection_reasoning_unsupported`；cache miss/expired 保留原分类。
-新原因只允许原 evaluation v1、required/llm/blocked 检查与 blocked attempt，并必须有
-`providerCacheEvidenceRef`；Web 保留原 code 并显示有限说明，不接收 caller PASS、任意后缀或原始配置。
-原配置声明与选择只存私有材料，不增加公共字段；旧无来源历史不在 GET/replay/recover 时升级。
+Provider 的稳定 wire 检查 ID 仍为 `provider_cache`（owner 为 llm），页面展示“LLM 配置”。
+新原非 stale 操作从 LLM owner 冻结的配置 v2 和原 Workspace 模型偏好编译精确模型来源；
+Workspace 显式选择优先，否则使用 Workorch 配置的 DefaultChat，不需要用户另填 Workspace LLM 配置。
+合法配置单项为 `passed/provider_configuration_observed_remaining_checks`，必须绑定原 evaluation v1、
+required/llm、blocked attempt 和 `providerCacheEvidenceRef`。冷缓存、catalog 过期和缺少独立网关授权
+回执不再阻塞本地配置检查；catalog 完整原值仍作为诊断保存，GET 不刷新也不升级原历史。
+已有容量预览按原目标和原值保存；它不是配置检查前提，不替代 Runtime ceiling、请求 allocation 或 Run 预算。
+配置来源缺失、绑定冲突、选择无效、精确 override 明确不支持 Responses 或容量预览目标冲突仍阻塞；
+不自动换模型，不用缓存首项、默认容量或相邻模型补齐。有限失败码沿用 `provider_selection_*`。
+旧 v1 选择与 cache-only 历史保留原 miss/expired/declaration_only/authorization_pending 分类，
+不在 GET/replay/recover 时改写。新配置检查不依赖诊断 catalog 的 ExpiresAt；原配置 owner epoch 的来源绑定、
+Workspace revision 与其它资源门禁保持。原 epoch 只绑定历史来源，读取不会重新观察当前 LLM 配置，
+不证明当前相同；已知漂移只保留历史并标 stale。
+启动执行时由 LLM owner 活动配置解析模型选择，封入 Runtime activation，后续 loop 消费该运行上下文；
+凭据和 endpoint 留在 LLM owner。实际调用的配置 revision、ProviderCeiling、预算及错误处理不变。
+这只完成配置检查；即使 all-of 为 checks_passed，整体持久操作仍 blocked，不产生 ready、M3 或 Run。
 no-Run 项分别记录 `run_history_unavailable/retired/present` 或 `run_history_empty_fence_not_final`。
 新原非中断操作的完整 Run owner query 结果以 `workorch-preparation-run-history-evidence/v1`
 随原结算 CAS 私有保存，保留原 request、观察时间、scope、generation head、完整计数和 retirement fence，
@@ -414,7 +414,7 @@ passed 原因仍为各自 `*_observed_remaining_checks`，failed 保留目录权
 Provider 同一次 cache-only 完整点时观察可与原 accepted binding、request/payload、revision
 在同一 blocked CAS 保存为 Workspace 0600 私有历史，不增加查询/refresh。
 公共 v2 blocked attempt 仅增加 `providerCacheEvidenceRef`（`provider-cache-observation:` 加 32 位随机小写 hex）；
-仅允许 required `provider_cache`/`llm` 检查及 miss/expired/declaration_only/binding_changed 原因。
+允许 required `provider_cache`/`llm` 的历史阻塞分类及 v2 配置检查 passed；必须与原版本、引用及完整私有材料一致。
 引用不输出目录原值或配置，不是持续 freshness、连通性、授权、selection 或 M3 证明；
 缺引用不证明缓存为空，旧记录不补造历史。GET、重放、恢复及 owner 重开不重查；
 revision/epoch 漂移只保留历史并标 `binding_changed/stale`，不能把历史 epoch 当当前。

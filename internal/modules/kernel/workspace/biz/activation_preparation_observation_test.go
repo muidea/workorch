@@ -59,7 +59,7 @@ func TestPreparationObservationWholeApplicationUsesActualResourceOwners(t *testi
 		if check.State != expectedPreparationCheckState(check.ID, check.Reason) {
 			t.Fatal("incorrect per-check judgment", check)
 		}
-		if check.ID == "provider_cache" && check.Reason != "provider_cache_miss" {
+		if check.ID == "provider_cache" && check.Reason != "provider_configuration_observed_remaining_checks" {
 			t.Fatal("real LLM owner not consumed")
 		}
 		if check.ID == "first_activation_no_run" && check.Reason != "run_history_empty_final_fence_observed" {

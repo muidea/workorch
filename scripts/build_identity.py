@@ -524,11 +524,58 @@ def verify(root: Path, console_root: Path, binary: Path, manifest: Path,
     return payload
 
 
+def verify_running(root: Path, console_root: Path, binary: Path, manifest: Path,
+                   expected_identity: dict[str, str], artifact_root: Path, pid: int) -> dict:
+    """Bind verified local inputs/bytes to a live Linux process, read-only.
+
+    This is a point-in-time observation, not a build attestation or health check.
+    Never infer the expected identity from HEAD, the process, or its manifest.
+    """
+    if type(pid) is not int or pid <= 0:
+        raise IdentityError("运行进程 PID 必须为正整数")
+    identity = verify(root, console_root, binary, manifest, expected_identity, artifact_root)
+    proc = Path("/proc") / str(pid)
+
+    def process_start():
+        # comm can contain spaces and ')'; fields following its last ') ' start
+        # at state (field 3), so starttime (field 22) is index 19.
+        raw = (proc / "stat").read_text(encoding="utf-8")
+        _, separator, fields = raw.rpartition(") ")
+        tokens = fields.split()
+        if not separator or len(tokens) < 20 or not tokens[19].isdigit() or tokens[0] in ("Z", "X", "x"):
+            raise IdentityError("运行进程身份不可完整观察")
+        return tokens[19]
+
+    before = process_start()
+    # /proc/<pid>/exe is intentionally followed here, unlike artifact inputs.
+    # The observed executable bytes must match the separately verified artifact.
+    executable = proc / "exe"
+    def executable_identity(info):
+        if not stat.S_ISREG(info.st_mode):
+            raise IdentityError("运行进程可执行文件类型无效")
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    original_executable = executable_identity(executable.stat())
+    with executable.open("rb") as stream:
+        if executable_identity(os.fstat(stream.fileno())) != original_executable:
+            raise IdentityError("观察期间运行进程可执行文件改变")
+        observed = hashlib.file_digest(stream, "sha256").hexdigest()
+        if executable_identity(os.fstat(stream.fileno())) != original_executable:
+            raise IdentityError("观察期间运行进程可执行文件改变")
+    if executable_identity(executable.stat()) != original_executable:
+        raise IdentityError("观察期间运行进程可执行文件改变")
+    if process_start() != before:
+        raise IdentityError("观察期间运行进程身份改变")
+    if observed != identity["binarySha256"]:
+        raise IdentityError("运行进程二进制与固定构建身份不一致")
+    return {"schemaVersion": "workorch.running-build-identity/v1", "buildIdentity": identity,
+            "pid": pid, "processStartTicks": before, "observedBinarySha256": observed}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for command in ("capture", "produce", "verify"):
-        item = sub.add_parser(command, help={"capture": "捕获构建前源码与内嵌控制台字节身份", "produce": "校验构建前后输入并写入新身份清单", "verify": "按外部固定的完整身份校验本地字节"}[command])
+    for command in ("capture", "produce", "verify", "verify-running"):
+        item = sub.add_parser(command, help={"capture": "捕获构建前源码与内嵌控制台字节身份", "produce": "校验构建前后输入并写入新身份清单", "verify": "按外部固定的完整身份校验本地字节", "verify-running": "只读核对固定产物与实际运行进程字节"}[command])
         item.add_argument("--root", type=Path, required=True, help="源码仓库固定根目录")
         item.add_argument("--console-root", type=Path, required=True, help="Go实际嵌入的控制台产物目录")
         if command != "capture":
@@ -540,9 +587,11 @@ def main(argv: list[str] | None = None) -> int:
         if command == "produce":
             item.add_argument("--pre-build-snapshot", type=Path, required=True, help="构建前保存的源码/内嵌控制台快照")
             item.add_argument("--vite-output-root", type=Path, help="与Go实际嵌入dist比较；此目录本身不声明为二进制嵌入来源")
-        if command == "verify":
+        if command in ("verify", "verify-running"):
             item.add_argument("--expected-identity-json", type=Path, required=True,
                               help="外部固定的完整 source/build-input/console/binary 身份 JSON；不从当前检出推断")
+        if command == "verify-running":
+            item.add_argument("--pid", type=int, required=True, help="待核对的实际 Linux 服务进程 PID")
     args = parser.parse_args(argv)
     try:
         if args.command == "capture":
@@ -551,7 +600,10 @@ def main(argv: list[str] | None = None) -> int:
             result = produce(args.root, args.console_root, args.binary, args.manifest, args.artifact_root, args.pre_build_snapshot, args.vite_output_root)
         else:
             expected = _read_expected_identity(args.expected_identity_json)
-            result = verify(args.root, args.console_root, args.binary, args.manifest, expected, args.artifact_root)
+            if args.command == "verify-running":
+                result = verify_running(args.root, args.console_root, args.binary, args.manifest, expected, args.artifact_root, args.pid)
+            else:
+                result = verify(args.root, args.console_root, args.binary, args.manifest, expected, args.artifact_root)
     except IdentityError as exc:
         print(f"构建身份{args.command}失败：{exc}", file=sys.stderr)
         return 2

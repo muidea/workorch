@@ -58,7 +58,7 @@ func TestPreparationProviderCacheArchiveWithActualLLMOwnerDoesNotFetch(t *testin
 		t.Fatal("actual owner observation missing or refreshed provider", err)
 	}
 	compiled := stored.PreparationProviderCacheEvidence[0].Selection
-	if compiled == nil || compiled.Source != "llm_owner_default" || compiled.Selection.Target.ModelID != "fixture" || compiled.FailureCode != "cache_miss" || compiled.OwnerEpoch != stored.PreparationProviderCacheEvidence[0].Facts.Observation.OwnerEpoch {
+	if compiled == nil || compiled.Source != "llm_owner_default" || compiled.Selection.Target.ModelID != "fixture" || compiled.FailureCode != "" || compiled.Version != workspace.PreparationProviderConfigurationSelectionVersion || compiled.OwnerEpoch != stored.PreparationProviderCacheEvidence[0].Facts.Observation.OwnerEpoch {
 		t.Fatal("real frozen owner default/cache facts were not compiled exactly")
 	}
 	if err := llm.Teardown(ctx); err != nil {
@@ -134,16 +134,19 @@ func TestPreparationProviderSelectionWarmActualOwnerPreservesSourceAndZeroInfere
 			if workspaceTarget {
 				wantSource = "workspace_default"
 			}
-			if e.Selection == nil || e.Selection.FailureCode != "" || e.Selection.Source != wantSource || e.Selection.Selection.Target.ModelID != "fixture" || e.Selection.Descriptor == nil || e.Selection.Descriptor.CapabilityRevision != e.Facts.Observation.Catalog.Models[0].CapabilityRevision || first.Preparation.OperationState != "blocked" {
+			if e.Selection == nil || e.Selection.FailureCode != "" || e.Selection.Source != wantSource || e.Selection.Selection.Target.ModelID != "fixture" || e.Selection.Version != workspace.PreparationProviderConfigurationSelectionVersion || first.Preparation.OperationState != "blocked" {
 				t.Fatal("exact warm selection lost or promoted to readiness")
 			}
-			if e.Selection.Budget == nil || !reflect.DeepEqual(e.Selection.Budget, e.Facts.Observation.Budget) || e.Selection.Budget.Target != e.Selection.Selection.Target || e.BlockedReason() != "provider_selection_budget_observed_authorization_pending" {
+			if e.Selection.Budget == nil || !reflect.DeepEqual(e.Selection.Budget, e.Facts.Observation.Budget) || e.Selection.Budget.Target != e.Selection.Selection.Target || e.BlockedReason() != workspace.PreparationProviderConfigurationReason {
 				t.Fatal("exact owner capacity not consumed or borrowed from default")
 			}
 			for _, check := range first.Preparation.Record.Attempts[0].Checks {
-				if check.ID == "provider_cache" && (check.State != "blocked" || check.Reason != e.BlockedReason()) {
+				if check.ID == "provider_cache" && (check.State != "passed" || check.Reason != workspace.PreparationProviderConfigurationReason) {
 					t.Fatal("owner capacity conferred readiness", check)
 				}
+			}
+			if expired, err := workspace.PreparationProviderCacheExpired(stored, e.Facts.Observation.Catalog.ExpiresAt.Add(time.Hour)); err != nil || expired {
+				t.Fatal("catalog expiry invalidated a frozen configuration check", err)
 			}
 			bad, err := owners.repositories.Workspaces.Get(ctx, w.ID)
 			if err != nil {

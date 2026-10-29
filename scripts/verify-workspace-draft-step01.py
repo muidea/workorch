@@ -44,6 +44,10 @@ def build_candidate(source, root):
             snapshot = {"schemaVersion": build_identity.SCHEMA_VERSION, **current}
             (root / "pre-go-build.json").write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
     identity = build_identity.produce(source, console, binary, root / "build-identity.json", root, root / "pre-go-build.json")
+    # Freeze a separate expected identity for the deployment readback CLI. It is
+    # produced here from the completed controlled build, never from a live PID.
+    with (root / "expected-build-identity.json").open("x", encoding="utf-8") as stream:
+        json.dump({key: identity[key] for key in build_identity.IDENTITY_FIELDS}, stream, indent=2)
     return binary, identity
 
 
@@ -96,8 +100,10 @@ class Verification:
             try:
                 with self.client.open(self.base + "/readyz", timeout=1) as response:
                     if response.status == 200:
-                        actual = Path(f"/proc/{self.process.pid}/exe").read_bytes()
-                        require(hashlib.sha256(actual).hexdigest() == self.identity["binarySha256"], "running executable is not the freshly built candidate")
+                        observed = build_identity.verify_running(self.source, self.source / "web/consoleassets/dist", self.binary,
+                                                                 self.root / "build-identity.json",
+                                                                 {key: self.identity[key] for key in build_identity.IDENTITY_FIELDS}, self.root, self.process.pid)
+                        (self.root / f"process-{len(self.pids)}-identity.json").write_text(json.dumps(observed, indent=2), encoding="utf-8")
                         return
             except (OSError, urllib.error.URLError):
                 pass

@@ -6,11 +6,13 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 SCRIPT = Path(__file__).with_name("build_identity.py")
@@ -21,6 +23,48 @@ spec.loader.exec_module(build_identity)
 
 
 class BuildIdentityTests(unittest.TestCase):
+    def test_running_identity_binds_verified_artifact_to_actual_process(self):
+        with Path("/proc/self/exe").open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        identity = {"schemaVersion": build_identity.SCHEMA_VERSION, "binarySha256": digest}
+        expected = {"externally": "pinned"}
+        with mock.patch.object(build_identity, "verify", return_value=identity) as verify:
+            observed = build_identity.verify_running(self.root, self.console, self.binary, self.manifest, expected, self.artifacts, os.getpid())
+            verify.assert_called_once_with(self.root, self.console, self.binary, self.manifest, expected, self.artifacts)
+        self.assertEqual(observed["observedBinarySha256"], digest)
+        self.assertEqual(observed["pid"], os.getpid())
+        self.assertTrue(observed["processStartTicks"].isdigit())
+        with mock.patch.object(build_identity, "verify", return_value={**identity, "binarySha256": "0" * 64}):
+            with self.assertRaisesRegex(build_identity.IdentityError, "运行进程二进制"):
+                build_identity.verify_running(self.root, self.console, self.binary, self.manifest, expected, self.artifacts, os.getpid())
+
+    def test_running_identity_rejects_pid_and_local_validation_failures(self):
+        for pid in (True, False, 0, -1, "1", 1.5):
+            with self.subTest(pid=pid), mock.patch.object(build_identity, "verify") as verify:
+                with self.assertRaises(build_identity.IdentityError):
+                    build_identity.verify_running(self.root, self.console, self.binary, self.manifest, {}, self.artifacts, pid)
+                verify.assert_not_called()
+        with mock.patch.object(build_identity, "verify", side_effect=build_identity.IdentityError("local source mismatch")):
+            with self.assertRaisesRegex(build_identity.IdentityError, "local source mismatch"):
+                build_identity.verify_running(self.root, self.console, self.binary, self.manifest, {}, self.artifacts, os.getpid())
+
+    def test_running_identity_rejects_pid_reuse_during_observation(self):
+        def proc_stat(ticks):
+            return "123 (process ) with spaces) " + " ".join(["S"] + ["0"] * 18 + [ticks])
+        with mock.patch.object(build_identity, "verify", return_value={"binarySha256": "0" * 64}), \
+                mock.patch.object(Path, "read_text", side_effect=[proc_stat("1"), proc_stat("2")]):
+            with self.assertRaisesRegex(build_identity.IdentityError, "观察期间"):
+                build_identity.verify_running(self.root, self.console, self.binary, self.manifest, {}, self.artifacts, os.getpid())
+
+    def test_running_identity_rejects_same_pid_exec_replacement(self):
+        info = Path('/proc/self/exe').stat()
+        changed = SimpleNamespace(**{name: getattr(info, name) for name in ('st_mode', 'st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns')})
+        changed.st_ino += 1
+        with mock.patch.object(build_identity, 'verify', return_value={'binarySha256': '0' * 64}), \
+                mock.patch.object(Path, 'stat', side_effect=[info, changed]):
+            with self.assertRaisesRegex(build_identity.IdentityError, '可执行文件改变'):
+                build_identity.verify_running(self.root, self.console, self.binary, self.manifest, {}, self.artifacts, os.getpid())
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="workorch-build-identity-test-")
         self.addCleanup(self.temp.cleanup)

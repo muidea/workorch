@@ -49,6 +49,9 @@ func ValidPreparationEvaluatedCheck(a WorkspacePreparationAttempt, c WorkspacePr
 	if c.ID == "soul_selection" {
 		return c.Owner == "soul" && c.Required && a.SoulEvidenceRef != "" && c.State == "passed" && c.Reason == "souls_observed_remaining_checks"
 	}
+	if c.ID == "provider_cache" {
+		return c.Owner == "llm" && c.Required && a.ProviderCacheEvidenceRef != "" && c.State == "passed" && c.Reason == PreparationProviderConfigurationReason
+	}
 	if c.ID == "skill_selection" {
 		return c.Owner == "skill" && c.Required && c.State == "passed" && c.Reason == PreparationEmptySkillReason && a.EmptySelectionEvaluationVersion == PreparationEmptySelectionEvaluationVersion && a.SkillRegistryEvidenceRef != "" && a.SoulEvidenceRef != "" && a.SkillHubEffectState == PreparationSkillHubRecorded && a.SkillSelectionState == "compiled_checks_pending" && a.SkillContextState == "compiled_checks_pending" && a.SkillReferenceState == "observed_checks_pending" && a.SkillStatusState == "observed_freshness_pending"
 	}

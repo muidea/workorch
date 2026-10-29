@@ -11,6 +11,8 @@ import (
 )
 
 const PreparationProviderSelectionVersion = "workorch-preparation-provider-selection/v1"
+const PreparationProviderConfigurationSelectionVersion = "workorch-preparation-provider-selection/v2"
+const PreparationProviderConfigurationReason = "provider_configuration_observed_remaining_checks"
 
 func IsPreparationProviderSelectionReason(reason string) bool {
 	switch reason {
@@ -21,11 +23,14 @@ func IsPreparationProviderSelectionReason(reason string) bool {
 }
 
 func (c PreparationProviderSelectionCompilation) BlockedReason() string {
-	if c.Version != PreparationProviderSelectionVersion {
+	if c.Version != PreparationProviderSelectionVersion && c.Version != PreparationProviderConfigurationSelectionVersion {
 		return ""
 	}
 	switch c.FailureCode {
 	case "":
+		if c.Version == PreparationProviderConfigurationSelectionVersion {
+			return PreparationProviderConfigurationReason
+		}
 		if c.Budget != nil {
 			return "provider_selection_budget_observed_authorization_pending"
 		}
@@ -124,6 +129,30 @@ func CompilePreparationProviderSelection(d PreparationProviderSelectionDefinitio
 	if c.Selection.Validate() != nil || c.Selection.Target.ProviderID != runtimecontract.BuiltinAIProxyProviderID {
 		return fail("selection_invalid")
 	}
+	if o.Configuration.Version == llmevents.PreparationProviderConfigurationSnapshotVersion {
+		// Activation consumes the configured target, never the first catalog
+		// model. A cold/expired catalog is diagnostic data, not a second grant.
+		// Runtime independently resolves its exact ceiling before any call.
+		c.Version = PreparationProviderConfigurationSelectionVersion
+		for _, override := range o.Configuration.Overrides {
+			if override.ModelID == c.Selection.Target.ModelID {
+				c.OverrideModelID = override.ModelID
+				if !slices.Contains(override.Operations, "responses") {
+					return fail("operation_unsupported")
+				}
+			}
+		}
+		if o.Budget != nil {
+			if o.Budget.Target != c.Selection.Target {
+				return fail("budget_source_conflict")
+			}
+			if o.Budget.FailureCode == "" {
+				b := *o.Budget
+				c.Budget = &b
+			}
+		}
+		return c.Clone()
+	}
 	switch o.Catalog.State {
 	case llmmodel.ProviderCatalogStateUnavailable:
 		return fail("cache_miss")
@@ -182,7 +211,7 @@ func validatePreparationProviderSelection(e WorkspacePreparationProviderCacheEvi
 	if e.Selection == nil {
 		return nil // historical cache-only observation; never upgraded on reads
 	}
-	if e.Selection.Version != PreparationProviderSelectionVersion || !reflect.DeepEqual(*e.Selection, CompilePreparationProviderSelection(e.Selection.Definition, e)) {
+	if (e.Selection.Version != PreparationProviderSelectionVersion && e.Selection.Version != PreparationProviderConfigurationSelectionVersion) || !reflect.DeepEqual(*e.Selection, CompilePreparationProviderSelection(e.Selection.Definition, e)) {
 		return common.ErrConflict
 	}
 	return nil

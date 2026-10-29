@@ -203,3 +203,55 @@ func TestPreparationProviderSelectionFiniteReasonsAndOriginalRecordShape(t *test
 		}
 	}
 }
+
+func TestPreparationProviderConfigurationUsesFrozenSelectionWithoutCatalogGrant(t *testing.T) {
+	for _, scenario := range []string{"cold", "expired", "workspace", "override", "unsupported_override", "binding_conflict", "invalid_selection"} {
+		t.Run(scenario, func(t *testing.T) {
+			d, e := preparationProviderSelectionFixture()
+			e.Facts.Observation.Configuration.Version = llmevents.PreparationProviderConfigurationSnapshotVersion
+			e.Facts.Observation.Catalog = llmmodel.ProviderModelCatalog{ProviderID: "ai-proxy", Source: "ai_proxy", State: llmmodel.ProviderCatalogStateUnavailable, ErrorCode: "cache_miss"}
+			want := ""
+			switch scenario {
+			case "expired":
+				_, fresh := preparationProviderSelectionFixture()
+				e.Facts.Observation.Catalog = fresh.Facts.Observation.Catalog
+				e.Facts.Observation.ObservedAt = e.Facts.Observation.Catalog.ExpiresAt
+				e.Facts.Observation.Catalog.State, e.Facts.Observation.Catalog.Stale, e.Facts.Observation.Catalog.ErrorCode = llmmodel.ProviderCatalogStateStale, true, "cache_expired"
+			case "workspace":
+				d.WorkspaceDefault = &runtimecontract.ProviderInferenceSelection{Target: e.Facts.Observation.Configuration.DefaultChat, ReasoningEffort: "high"}
+				e.Facts.Observation.Configuration.DefaultChat.ModelID = "unselected-owner-default"
+			case "override", "unsupported_override":
+				e.Facts.Observation.Configuration.Overrides = []llmevents.PreparationProviderModelOverride{{ModelID: "exact-model", ContextWindowTokens: 64000, MaxOutputTokens: 8000, Operations: []string{"responses"}}}
+				if scenario == "unsupported_override" {
+					e.Facts.Observation.Configuration.Overrides[0].Operations = []string{"embeddings"}
+					want = "operation_unsupported"
+				}
+			case "binding_conflict":
+				d.ConfigurationHash = "different"
+				want = "source_binding_conflict"
+			case "invalid_selection":
+				d.WorkspaceDefault = &runtimecontract.ProviderInferenceSelection{}
+				want = "selection_invalid"
+			}
+			beforeD, beforeE := d.Clone(), e.Clone()
+			c := CompilePreparationProviderSelection(d, e)
+			if c.FailureCode != want || !reflect.DeepEqual(d, beforeD) || !reflect.DeepEqual(e, beforeE) {
+				t.Fatal("configuration selection mismatch or source rewritten", c)
+			}
+			if want == "" && (c.Version != PreparationProviderConfigurationSelectionVersion || c.BlockedReason() != PreparationProviderConfigurationReason || c.Selection.Target.ModelID != "exact-model" || c.Descriptor != nil) {
+				t.Fatal("configuration check required a catalog/permission or selected another model", c)
+			}
+			e.Selection = &c
+			e.ContentHash = e.Hash()
+			if e.Validate() != nil {
+				t.Fatal("configuration result cannot be independently reproduced")
+			}
+			bad := e.Clone()
+			bad.Selection.Selection.Target.ModelID = "neighbor"
+			bad.ContentHash = bad.Hash()
+			if bad.Validate() == nil {
+				t.Fatal("self-rehashed selection substitution accepted")
+			}
+		})
+	}
+}

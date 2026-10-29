@@ -125,6 +125,12 @@ func PreparationProviderCacheExpired(w *Workspace, now time.Time) (bool, error) 
 	}
 	for _, e := range w.PreparationProviderCacheEvidence {
 		if e.Ref == a.ProviderCacheEvidenceRef {
+			// v2 checks the frozen configuration, not catalog freshness.
+			// This historical result never proves the owner is still current;
+			// activation independently consumes the active owner configuration.
+			if e.Selection != nil && e.Selection.Version == PreparationProviderConfigurationSelectionVersion {
+				return false, nil
+			}
 			expires := e.Facts.Observation.Catalog.ExpiresAt
 			return !expires.IsZero() && !now.Before(expires), nil
 		}
@@ -159,7 +165,9 @@ func validatePreparationProviderCacheEvidencePersistence(w *Workspace) error {
 		found := false
 		for _, c := range a.Checks {
 			if c.ID == "provider_cache" {
-				if c.Owner != "llm" || !c.Required || c.State != "blocked" || c.Reason != "binding_changed" && c.Reason != e.BlockedReason() {
+				configured := e.Selection != nil && e.Selection.Version == PreparationProviderConfigurationSelectionVersion && e.Selection.FailureCode == ""
+				validState := c.State == "blocked" && c.Reason != PreparationProviderConfigurationReason || configured && c.State == "passed" && c.Reason == PreparationProviderConfigurationReason && ValidPreparationEvaluatedCheck(a, c)
+				if c.Owner != "llm" || !c.Required || !validState || c.Reason != "binding_changed" && c.Reason != e.BlockedReason() {
 					return common.ErrConflict
 				}
 				if f.Observation.Configuration != nil && c.Reason != "binding_changed" && e.Selection == nil {

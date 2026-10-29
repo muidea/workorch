@@ -84,7 +84,7 @@ func (m *Biz) observeProviderCatalogCache(ctx context.Context, command llmevents
 	if len(cfg.AIProxy.ModelOverrides) > llmevents.CatalogCacheObservationModelLimit {
 		return llmevents.ObserveProviderCatalogCacheResult{}, common.ErrConflict
 	}
-	configuration := llmevents.PreparationProviderConfiguration{Version: llmevents.PreparationProviderConfigurationVersion, DefaultChat: cfg.DefaultChat.ToRuntimeTarget()}
+	configuration := llmevents.PreparationProviderConfiguration{Version: llmevents.PreparationProviderConfigurationSnapshotVersion, DefaultChat: cfg.DefaultChat.ToRuntimeTarget()}
 	for modelID, override := range cfg.AIProxy.ModelOverrides {
 		if len(override.Operations) > 64 {
 			return llmevents.ObserveProviderCatalogCacheResult{}, common.ErrConflict

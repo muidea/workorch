@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """No-charge STEP04 blocked mainline: production HTTP and OS process restart.
 
-Only authoring responses and empty SkillHub status use isolated fixtures.
+Only authoring responses and SkillHub register/query/status use isolated fixtures.
 STEP04 itself must issue zero provider HTTP requests (including catalog GET).
 No live configuration is read; no Run, MCP, readiness or M3 is created.
 Evidence stays in a new restricted durable directory, not in Git.
 """
 import argparse
+import base64
 import copy
 from datetime import datetime, timezone
 import hashlib
@@ -79,7 +80,7 @@ def validate_bootstrap_compilation(view, intent):
             c["snapshotHash"] == a["binding"]["snapshotHash"] and c["manifestHash"] == a["binding"]["manifestHash"] and
             re.fullmatch(r"prepared-bootstrap-sha256:[0-9a-f]{64}", c["bootstrapHash"]),
             "original full bootstrap compilation unavailable or substituted: " + str(c))
-    require(preparation(view)["operationState"] == "blocked" and a["assessment"]["outcome"] == "blocked",
+    require(preparation(view)["operationState"] == "blocked" and a["assessment"]["outcome"] == ("blocked" if any(c["required"] and c["state"] != "passed" for c in a["checks"]) else "checks_passed"),
             "structural compilation promoted readiness")
     return copy.deepcopy(c)
 
@@ -137,13 +138,15 @@ def archived_validity(record, now, current_file_epoch=None):
     else:
         require(expires, "fixture lost original cache deadline")
         cache_stale = now >= datetime.fromisoformat(expires.replace("Z", "+00:00"))
+    if matches[0].get("Selection", {}).get("Version") == "workorch-preparation-provider-selection/v2":
+        cache_stale = False  # v2 consumes configuration; catalog is original diagnostic only.
     # Legacy verifier unit inputs have no File archive. The production fixture
     # separately requires the new version on every original explicit check.
     file_stale = archived_file_stale(record, now, current_file_epoch) if record.get("PreparationDirectoryEvidence") else False
     return "stale" if cache_stale or file_stale else "not_evaluated"
 
 
-def validate_blocked(view, workspace_id, intent, admitted, expected_outstanding=("provider_cache",), previous_attempts=(), expected_validity="not_evaluated"):
+def validate_blocked(view, workspace_id, intent, admitted, expected_outstanding=(), previous_attempts=(), expected_validity="not_evaluated"):
     require(view["requestId"] == intent["requestId"], "lost original operation identity")
     state = preparation(view)
     require(expected_validity in ("not_evaluated", "stale") and state["workspaceId"] == workspace_id and state["operationState"] == "blocked" and
@@ -176,9 +179,12 @@ def validate_blocked(view, workspace_id, intent, admitted, expected_outstanding=
             outstanding.append({k: check[k] for k in ("id", "owner", "state", "reason")})
         else:
             require(check["state"] == "passed" and check["reason"], "non-provider fixture did not close: " + check["id"])
+    provider = next(c for c in checks if c["id"] == "provider_cache")
+    if "provider_cache" not in expected_outstanding:
+        require(provider["reason"] == "provider_configuration_observed_remaining_checks", "provider configuration not consumed")
     summary = attempt["assessment"]
     require(summary["version"] == "workorch-preparation-all-of-assessment/v1" and summary["manifestHash"] == binding["manifestHash"] and
-            summary["outcome"] == "blocked" and summary["requiredCount"] == len(expected) and
+            summary["outcome"] == ("blocked" if expected_outstanding else "checks_passed") and summary["requiredCount"] == len(expected) and
             summary["passedRequiredCount"] == len(expected) - len(expected_outstanding) and summary["outstanding"] == outstanding,
             "all-of summary differs from exact checks")
     compiled = attempt["definitionCompilation"]
@@ -211,6 +217,17 @@ def validate_execution_inputs(record, soul_bindings):
         inputs = matches[0].get("ExecutionInputs")
         require(inputs and inputs["Version"] == attempt["ExecutionInputVersion"] == "workorch-preparation-execution-inputs/v1",
                 "execution input archive absent or wrong version")
+        providers = [e for e in record["PreparationProviderCacheEvidence"] if e["Ref"] == attempt["ProviderCacheEvidenceRef"]]
+        require(len(providers) == 1, "original LLM source missing or ambiguous")
+        provider = providers[0]
+        configuration, selection = provider["Facts"]["Observation"]["Configuration"], provider["Selection"]
+        target = {"providerId": "ai-proxy", "modelId": "step02-fixture"}
+        require(configuration["Version"] == "workorch-preparation-provider-configuration/v2" and
+                configuration["DefaultChat"] == target and selection["Version"] == "workorch-preparation-provider-selection/v2" and
+                selection["Source"] == "llm_owner_default" and selection["Selection"] == {"target": target} and not selection["FailureCode"] and
+                selection["OwnerEpoch"] == provider["Facts"]["Observation"]["OwnerEpoch"] and
+                provider["Facts"]["Observation"]["Catalog"]["ErrorCode"] == "cache_miss",
+                "cold owner configuration was not independently bound and compiled")
         process = inputs["Process"]
         require(process["Version"] == inputs["Version"] and process["WorkspaceID"] == record["ID"] and
                 process["WorkspaceRevision"] == attempt["ExpectedWorkspaceRevision"] + 1 and
@@ -235,6 +252,51 @@ def file_snapshot(directory):
 def skillhub_calls(root):
     path = root / "skillhub-calls.jsonl"
     return [json.loads(line) for line in path.read_bytes().splitlines()] if path.exists() else []
+
+
+def validate_initialization(view, record, workspace_id, intent, project, home, queries=(False,), unresolved=False):
+    """Consume v2 File + registration stages; do not replace check's +2 rule."""
+    state = preparation(view)
+    expected_external = "workorch-" + hashlib.sha256((workspace_id + "\x00" + intent["requestId"]).encode()).hexdigest()
+    revision = intent["expectedWorkspaceRevision"] + 2 + 2 * len(queries)
+    row = {**intent, "committedWorkspaceRevision": revision, "state": "blocked" if unresolved else "completed",
+           "attempts": 1, "registrationState": "unresolved" if unresolved else "succeeded", "registrationAttempts": len(queries)}
+    require(view["requestId"] == intent["requestId"] and state["workspaceId"] == workspace_id and
+            state["workspaceRevision"] == record["Revision"] == revision and state["resourceInitializations"][-1] == row,
+            "v2 initialization lost exact identity, stages or budgets")
+    r = record["PreparationResourceInitializations"][-1]
+    plan = r["Plan"]
+    require(r["Version"] == "workorch-preparation-resource-initialization/v2" and
+            r["ExpectedWorkspaceRevision"] == intent["expectedWorkspaceRevision"] and r["CommittedWorkspaceRevision"] == revision and
+            plan["WorkspaceID"] == workspace_id and plan["RequestID"] == intent["requestId"] and plan["DeliverableDirectory"] == str(project) and
+            plan["InternalDirectory"] == record["InternalDirectory"] and r["StartupInputHash"] == record["StartupInput"]["StartupInputHash"] and
+            len(r["Attempts"]) == 1 and r["Attempts"][0]["Result"]["Command"] == plan,
+            "v2 initialization replaced original File/seal sources")
+    g = r["Registration"]
+    require(g["Plan"] == {"Version": "skillhub-project-registration/v1", "RequestID": expected_external, "Directory": str(project), "Home": str(home)} and
+            len(g["Attempts"]) == len(queries) and [a["Query"] for a in g["Attempts"]] == list(queries),
+            "registration plan or dispatch/query lineage changed")
+    for index, a in enumerate(g["Attempts"]):
+        o = a["Result"]
+        require(o["CommandStarted"] and o["ExitCodeKnown"] and o["ExitCode"] == 0 and o["Complete"] and o["ErrorComplete"] and o["TotalErrorBytes"] == 0,
+                "registration transport incomplete or failed")
+        streams = {}
+        for field, total in (("Stdout", "TotalStdoutBytes"), ("Stderr", "TotalStderrBytes"), ("RawError", "TotalErrorBytes")):
+            raw = base64.b64decode(o[field] or "", validate=True)
+            digest = "ErrorSHA256" if field == "RawError" else field + "SHA256"
+            require(len(raw) == o[total] and hashlib.sha256(raw).hexdigest() == o[digest], "registration raw stream changed")
+            streams[field] = raw
+        require(not streams["Stderr"], "unexpected fixture registration stderr")
+        if index == 0 and (unresolved or len(queries) > 1):
+            require(streams["Stdout"] == b"", "lost original reply was not injected")
+        else:
+            receipt = json.loads(streams["Stdout"])
+            require(set(receipt) == {"request_id", "project_path", "status", "executed", "finished", "started_at", "completed_at", "result"} and
+                    receipt["request_id"] == expected_external and receipt["project_path"] == str(project) and receipt["status"] == "succeeded" and
+                    receipt["executed"] is True and receipt["finished"] is True and
+                    receipt["result"] == {"registered": True, "project_created": False, "created_directories": [], "skill_count": 0},
+                    "registration receipt lost exact original success")
+    return copy.deepcopy(r)
 
 
 def browser_status_inventory_pairs(before, after, root, project):
@@ -282,11 +344,15 @@ def main():
         shim_dir, installed = root / "fixture-bin", root / "installed-skills"
         shim_dir.mkdir()
         installed.mkdir()
+        home = root / "skillhub-home"
+        home.mkdir()
         shim = shim_dir / "skill-hub"
         shutil.copyfile(source / "scripts/fixtures/step04-skill-hub.py", shim)
         shim.chmod(0o700)
         environment = {**os.environ, "PATH": str(shim_dir) + os.pathsep + os.environ["PATH"],
-                       "CODEX_SKILLS_DIR": str(installed), "WORKORCH_STEP04_FIXTURE_ROOT": str(root)}
+                       "CODEX_SKILLS_DIR": str(installed), "CLAUDE_SKILLS_DIR": str(installed), "OPENCODE_SKILLS_DIR": str(installed),
+                       "SKILL_HUB_HOME": str(home), "SKILL_HUB_DISABLE_SERVICE_BRIDGE": "true",
+                       "WORKORCH_STEP04_DROP_REGISTRATION_REPLY": "1", "WORKORCH_STEP04_FIXTURE_ROOT": str(root)}
         binary, identity = step01.build_candidate(source, root)
         result["buildIdentity"] = identity
         verification = step01.Verification(binary, root, identity, process_environment=environment, port=args.port)
@@ -368,16 +434,43 @@ def main():
         initialization_intent = {"requestId": "step04-initialize-original", "expectedWorkspaceRevision": admitted["workspaceRevision"]}
         initialization = verification.request("POST", path + "/initialize-resources", initialization_intent)
         initialized = preparation(initialization)
-        require(initialization["requestId"] == initialization_intent["requestId"] and initialized["operationState"] == "not_checked" and
-                initialized["resourceInitializations"] == [{"requestId": initialization_intent["requestId"],
-                    "expectedWorkspaceRevision": initialization_intent["expectedWorkspaceRevision"],
-                    "committedWorkspaceRevision": initialization_intent["expectedWorkspaceRevision"] + 2,
-                    "state": "completed", "attempts": 1}], "resource initialization did not preserve exact owner identity")
+        require(initialized["operationState"] == "not_checked", "initialization started preparation")
+        lost_registration = validate_initialization(initialization, step02.workspace_record(json.loads(workspace_file.read_bytes()), workspace_id),
+                                                    workspace_id, initialization_intent, project, home, unresolved=True)
         require(all(file.is_file() for file in config_paths) and (project / ".agents/skills").is_dir(), "production initialization lost infrastructure")
+        before_initialization_replay = workspace_file.read_bytes()
+        calls_before_recovery = skillhub_calls(root)
+        require(len(calls_before_recovery) == 1 and calls_before_recovery[0]["args"] ==
+                ["project", "register", str(project), "--request-id", lost_registration["Registration"]["Plan"]["RequestID"], "--json"],
+                "initial registration was repeated or not dispatched")
+        require(verification.request("POST", path + "/initialize-resources", initialization_intent) == initialization,
+                "unresolved duplicate repeated registration")
+        verification.request("GET", path)
+        verification.request("POST", path + "/check", {"requestId": "cannot-bypass-registration", "expectedWorkspaceRevision": initialized["workspaceRevision"]}, 409)
+        require(workspace_file.read_bytes() == before_initialization_replay and skillhub_calls(root) == calls_before_recovery,
+                "read/replay/new check bypassed original registration")
+        original_receipt_path = home / "project-registrations" / (lost_registration["Registration"]["Plan"]["RequestID"] + ".json")
+        original_receipt = original_receipt_path.read_bytes()
+        require(original_receipt == (root / "dropped-registration-reply.bin").read_bytes(), "lost response raw bytes not preserved")
+        verification.stop()
+        verification.start()
+        initialization = verification.request("POST", path + "/recover-resources", initialization_intent)
+        initialized = preparation(initialization)
+        recovered = validate_initialization(initialization, step02.workspace_record(json.loads(workspace_file.read_bytes()), workspace_id),
+                                             workspace_id, initialization_intent, project, home, queries=(False, True))
+        calls_after_recovery = skillhub_calls(root)
+        require(calls_after_recovery == calls_before_recovery + [{"args": ["project", "register", "--query", "--request-id",
+                    lost_registration["Registration"]["Plan"]["RequestID"], "--json"], "cwd": str(root)}] and
+                recovered["Attempts"] == lost_registration["Attempts"] and
+                recovered["Registration"]["Attempts"][:-1] == lost_registration["Registration"]["Attempts"] and
+                original_receipt_path.read_bytes() == original_receipt,
+                "restart recovery changed original File/registration history or repeated registration")
         before_initialization_replay = workspace_file.read_bytes()
         require(verification.request("POST", path + "/initialize-resources", initialization_intent) == initialization and
                 verification.request("POST", path + "/recover-resources", initialization_intent) == initialization and
-                workspace_file.read_bytes() == before_initialization_replay, "completed initialization replay changed history")
+                workspace_file.read_bytes() == before_initialization_replay and skillhub_calls(root) == calls_after_recovery,
+                "completed initialization replay changed history or repeated effects")
+        result["registrationLostReplyRestartQueryPassed"] = True
         save(root, "resource-initialization.json", initialization)
         resources_before = file_snapshot(project)
         provider_before = copy.deepcopy(fixture.http_paths)
@@ -452,7 +545,7 @@ def main():
         capture_original_file_epoch(missing_intent)
         compilations[missing_intent["requestId"]] = validate_bootstrap_compilation(missing, missing_intent)
         missing_saved = validate_blocked(missing, workspace_id, missing_intent, admitted,
-                                        ("managed_configuration", "provider_cache"), saved["record"]["attempts"], current_validity())
+                                        ("managed_configuration",), saved["record"]["attempts"], current_validity())
         save(root, "missing-config-preparation.json", missing)
         require(not config_paths[0].exists(), "check repaired resource without authority")
         config_paths[0].with_suffix(".preserved").rename(config_paths[0])
@@ -503,13 +596,13 @@ def main():
         cold_intent = {"requestId": "step04-initialize-after-history-restart", "expectedWorkspaceRevision": cold_before["Revision"]}
         cold_initialization = verification.request("POST", path + "/initialize-resources", cold_intent)
         cold_view = preparation(cold_initialization)
-        require(cold_view["workspaceRevision"] == cold_before["Revision"] + 2 and
-                cold_view["resourceInitializations"][-1] == {"requestId": cold_intent["requestId"],
-                    "expectedWorkspaceRevision": cold_intent["expectedWorkspaceRevision"],
-                    "committedWorkspaceRevision": cold_before["Revision"] + 2, "state": "completed", "attempts": 1},
-                "cold initialization rejected exact historical empty collections or lost original identity")
         repaired_owner = workspace_file.read_bytes()
         cold_after = step02.workspace_record(json.loads(repaired_owner), workspace_id)
+        cold_record = validate_initialization(cold_initialization, cold_after, workspace_id, cold_intent, project, home)
+        require(skillhub_calls(root) == [json.loads(line) for line in repaired_status.splitlines()] +
+                [{"args": ["project", "register", str(project), "--request-id", cold_record["Registration"]["Plan"]["RequestID"], "--json"], "cwd": str(root)}],
+                "fresh initialization did not issue exactly one new registration")
+        repaired_status = (root / "skillhub-calls.jsonl").read_bytes()
         expected_owner = copy.deepcopy(cold_before)
         expected_owner["Revision"] = cold_after["Revision"]
         expected_owner["PreparationResourceInitializations"] = cold_after["PreparationResourceInitializations"]
@@ -540,7 +633,7 @@ def main():
                        "providerPreparationCalls": 8, "step04ProviderHTTPRequests": 0, "embeddingCalls": 0, "runCount": 0,
                        "requiredCount": saved["record"]["attempts"][0]["assessment"]["requiredCount"],
                        "passedRequiredCount": saved["record"]["attempts"][0]["assessment"]["passedRequiredCount"],
-                       "outstanding": ["provider_cache"]})
+                       "outstanding": []})
     finally:
         if verification:
             verification.stop()

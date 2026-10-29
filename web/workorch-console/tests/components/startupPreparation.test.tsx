@@ -309,6 +309,30 @@ describe('STEP04 准备主体流程', () => {
       (v: StartupPreparationView) => { v.record!.version = 'workorch-preparation-record/v1'; },
     ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
   });
+  it('LLM 配置检查通过不要求热缓存或独立授权，且不自动启动执行', async () => {
+    const view = observed({ requestId: 'configured-provider', expectedWorkspaceRevision: 10 });
+    const a = view.record!.attempts[0];
+    a.evaluationVersion = 'workorch-preparation-check-evaluation/v1';
+    a.providerCacheEvidenceRef = `provider-cache-observation:${'b'.repeat(32)}`;
+    a.checks = [{ id: 'provider_cache', owner: 'llm', required: true, state: 'passed', reason: 'provider_configuration_observed_remaining_checks' }];
+    expect(() => validatePreparationView(view, 'ws')).not.toThrow();
+    vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(view);
+    render(wrap()); await act(async () => {});
+    expect(screen.getByText('LLM 配置')).toBeTruthy();
+    expect(screen.getByText('已读取 Workorch 的 LLM 配置；启动执行时封存模型选择，后续 loop 使用运行上下文')).toBeTruthy();
+    expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
+    expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
+    for (const change of [
+      (v: StartupPreparationView) => { delete v.record!.attempts[0].providerCacheEvidenceRef; },
+      (v: StartupPreparationView) => { delete v.record!.attempts[0].evaluationVersion; },
+      (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].owner = 'caller'; },
+      (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].required = false; },
+      (v: StartupPreparationView) => { v.record!.attempts[0].checks![0].state = 'blocked'; },
+    ]) {
+      const bad = structuredClone(view); change(bad);
+      expect(() => validatePreparationView(bad, 'ws')).toThrow();
+    }
+  });
   it.each([
     ['provider_selection_authorization_pending', '精确模型与能力声明已绑定；尚缺授权、预算及持续有效性证明，不代表就绪'],
     ['provider_selection_budget_observed_authorization_pending', '精确模型容量预算已由 LLM owner 观察；尚缺授权及持续有效性证明，不代表就绪或执行额度'],

@@ -623,6 +623,9 @@ func reduceWorkspacePreparationBlocked(current *workspace.Workspace, fact worksp
 			for n := range a.Checks {
 				if a.Checks[n].ID == "provider_cache" {
 					a.Checks[n].Reason = provider.BlockedReason()
+					if compiled.Version == workspace.PreparationProviderConfigurationSelectionVersion && compiled.FailureCode == "" {
+						a.Checks[n].State = "passed"
+					}
 				}
 			}
 			record.Attempts[i] = a

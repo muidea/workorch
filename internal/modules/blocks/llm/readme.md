@@ -64,11 +64,15 @@ miss 返回 `unavailable/cache_miss`；精确过期点及超出 LKG 的已有条
 结果绑定 Workspace、观察时点和配置冻结生命周期内随机 `OwnerEpoch`；epoch 在 owner 释放后清除，
 新 owner 不复用，也不由凭据派生。私有 endpoint、credential、cache key 和 credential-derived
 configuration revision 不出此合同。完整结果最多 4096 个模型、1 MiB，字段与嵌套列表有界；
-新 owner 结果另附可选的 `workorch-preparation-provider-configuration/v1`：本生命周期冻结的
+新 owner 结果另附可选的 `workorch-preparation-provider-configuration/v2`：本生命周期冻结的
 DefaultChat 和完整排序的 exact model override 声明（仅模型 ID、容量与 operation，不含配置密钥、
 endpoint 或其派生 hash）。override 最多 4096 项、每项最多 64 个 operation，且仍受完整结果 1 MiB 限制。
 旧无该字段的历史仍可读；不会在 GET、恢复或重新解码时补出默认模型。结果 clone 深拷贝嵌套声明，
 loader 后续变化和返回值修改不能改变 frozen source。该声明不证明预算、远端授权或连通性。
+v2 的准备检查消费已冻结的本地配置，不要求 catalog 预热、独立网关授权回执或探测调用。
+启动执行仍通过 LLM owner 校验精确模型选择并封存到 Runtime activation；后续 loop 消费该封存选择，
+实际请求继续遵守原 ProviderCeiling、配置 revision、预算和失败记录合同。凭据与 endpoint 留在 LLM owner，
+不复制到 Workspace 或运行上下文。v1 及无配置历史按原语义保留，不在读取时升级。
 超限/损坏整体拒绝，不裁剪后声明完整。缓存里异常的 observation/诊断字段同样拒绝，不清洗后授信。
 原 catalog/provider 诊断路径不变。embedding 的零 context/output 元数据原值保留为未知；精确 endpoint 与非负元数据
 允许 `embeddingReady`，并消费 `workorch.embedding-transport/v1` 的独立 64 KiB 输入、512 KiB JSON 请求、4 MiB

@@ -53,12 +53,14 @@ class ControlledBuildTests(unittest.TestCase):
             self.assertEqual(run.call_count, 1)
 
     def test_only_fresh_build_runs_fixed_commands_and_binds_preimage(self):
+        produced = {**self.identity, "binarySha256": "d" * 64}
         with mock.patch.object(step01.build_identity, "capture", return_value=self.identity), \
              mock.patch.object(step01.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run, \
-             mock.patch.object(step01.build_identity, "produce", return_value=self.identity) as produce:
+             mock.patch.object(step01.build_identity, "produce", return_value=produced) as produce:
             binary, identity = step01.build_candidate(self.source, self.artifacts)
             self.assertEqual(binary, self.artifacts / "workorch")
-            self.assertEqual(identity, self.identity)
+            self.assertEqual(identity, produced)
+            self.assertEqual(json.loads((self.artifacts / "expected-build-identity.json").read_bytes()), produced)
             self.assertEqual(run.call_args_list[0].args[0], ["npm", "run", "build"])
             self.assertEqual(run.call_args_list[1].args[0], ["go", "build", "-buildvcs=true", "-o", str(binary), "./application/workorch"])
             self.assertEqual(json.loads((self.artifacts / "pre-go-build.json").read_text())["buildInputSha256"], self.identity["buildInputSha256"])

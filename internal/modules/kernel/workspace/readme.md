@@ -207,31 +207,29 @@ LLM owner 的目录、capability 列表、revision、获取/过期/观察时间�
 原原因码和引用一一对应，完成历史 append-only。公开仅投影 `providerCacheEvidenceRef`
 （`provider-cache-observation:` 加 32 位随机小写 hex），不是内容摘要或成功凭据。
 旧 cache-only 历史的完整 miss/expired/fresh 仍为 miss/expired/declaration_only 阻塞；观察无效或未保存不补造历史。
-新原非 stale 结算从完整冻结 provider configuration 声明和本次 Workspace.DefaultLLMSelection 编译
-`workorch-preparation-provider-selection/v1`，在同一私有 archive 保存来源、精确选择、原 descriptor、
-override 身份和失败码。显式 Workspace 选择优先；nil 才使用同次 LLM owner 的 DefaultChat，不按目录顺序猜模型。
-独立读回复算全部选择；首次 CAS 逐项反查真实 Workspace 原声明，完整配置身份绑定原 accepted binding，
-不以缺少另存 Soul 的 scoped metadata 重算完整配置 hash。新非 stale configuration 归档不得省略 Selection；
-旧无 configuration 来源不补编，stale 不产生新编译。完成历史不可覆盖、删除或降级。
-miss/expired 仍分别 blocked；其余公开有限 `provider_selection_*` 原因。旧无容量观察的成功编译仍为
-`provider_selection_authorization_pending`。新首次 CAS 成功回执仅向原 Application continuation 返回
-detached 原 Workspace provider 声明，绑定受理配置 hash；重放及恢复不返回新观察意图。
-Application 将原精确 target（nil 才用冻结 owner 默认）交给同一次 cache-only query；LLM owner
-仅从已有 fresh cache 和冻结配置调用既有纯 resolver，返回
-`workorch-preparation-provider-budget-observation/v1` 的容量预览，不访问网络或刷新 catalog。
-Workspace 将完整观察及编译后的容量原值随原结算保存并反查目标；新有限原因为
-`provider_selection_budget_observed_authorization_pending`、`provider_selection_budget_unavailable` 和
-`provider_selection_budget_source_conflict`，全部仍 blocked。不输出 credential-derived 配置 revision，
-也不生成 Runtime ProviderCeiling、请求 allocation、Run 物理预算或远端授权证明。
-原历史缺容量不补算；容量原值和独立重编译结果受同一 clone、hash、append-only 与恢复门禁保护。
-新原因必须绑定原逐项 evaluation version、required/llm/blocked 和完整历史 ref；任意后缀、raw-config、
-caller PASS 与相邻模型替代均拒绝。不授予 PASS，不改原 activation 选择路径。
-单点观察及选择编译不证明 epoch 仍存活、持续 freshness、连通性、授权或 M3；
-GET、重放、恢复及 owner 重开均不重新查询 LLM，revision/epoch 漂移只保留历史并标 stale。
-状态读取另从最新操作的完整原 Provider 材料核对既有 catalog `ExpiresAt`：到期边界（含等于）
-仅投影 `CurrentValidity=stale`，保留原 catalog state、逐项原因、操作状态、引用及请求身份。
-不把过期历史归给没有观察的新操作，不从无材料历史补造期限；完整材料缺失/重复或原绑定冲突拒绝读取。
-它不写 attempt 的全 required 最早 `ExpiresAt`，未过期也仍为 `not_evaluated`，不代表当前 epoch、授权或 readiness。
+新原非 stale 结算从 LLM owner 冻结的 `workorch-preparation-provider-configuration/v2` 和
+原 Workspace.DefaultLLMSelection 编译 `workorch-preparation-provider-selection/v2`。
+显式 Workspace 选择优先；nil 才使用同次 LLM owner 的 DefaultChat，不按 catalog 顺序猜模型。
+私有 archive 保存原完整配置声明、catalog 诊断、owner epoch、来源、精确选择与有限失败码；
+公开沿用稳定检查 ID `provider_cache` 和随机 `providerCacheEvidenceRef`，页面显示“LLM 配置”。
+配置来源绑定、目标及声明合法时，该项为 `passed/provider_configuration_observed_remaining_checks`；
+冷缓存、catalog 过期或缺少独立网关授权回执不再阻塞本地配置检查。精确 override 若明确不支持
+Responses、配置缺失、选择无效或绑定冲突仍阻塞，不自动换模型或重写来源。
+已有 fresh cache 的容量预览按原值归档；它不是准备通过前提，也不生成 Runtime ProviderCeiling、
+请求 allocation、Run 物理预算或远端授权。预览目标与原选择冲突仍拒绝，不借用相邻模型。
+完整原材料仍独立复编、clone、hash、append-only 校验；首次 CAS 反查真实 Workspace 原声明。
+新非 stale configuration 归档不得省略 Selection，stale 不产生新编译，完成历史不可覆盖、删除或降级。
+旧 selection v1、无 configuration 或仅 cache-only 历史保留原 miss/expired/declaration_only、
+authorization_pending 等阻塞分类；GET、重放、恢复和 owner 重开不补编或升级原结果。
+当前 v2 配置检查不使用诊断 catalog 的 ExpiresAt 使配置失效；原 owner epoch 的绑定及 revision 与其余
+资源当前性门禁照常生效，已知漂移保留历史并投影 stale。此处不重新查询当前 LLM epoch，
+原 epoch 仅绑定历史来源，不证明当前配置仍相同；启动必须独立读取活动 owner 配置。
+旧 v1 继续按原 catalog 到期点投影 stale。
+启动执行由 Application 从 LLM owner 的活动配置读取默认模型（显式 Workspace 选择优先），
+验证后封入 RuntimeActivationContext.ProviderSelection；后续 loop 使用该封存选择，
+实际调用仍由 LLM owner 执行原配置 revision、ProviderCeiling 和预算校验并如实保存失败。
+不把 API key/endpoint 复制进 Workspace；不增加独立配置系统或额外网关授权前置条件。
+单项 passed 或 all-of checks_passed 不代表整体 ready/M3，也不会启动 Run；完整启动门禁保持。
 Memory 完整单点库存以 `PreparationMemoryInventoryFacts` 进入同一原操作；Workspace 独立反查
 accepted 身份和 exact seal，保存原 binding/request/payload/revision/时间与完整 typed 库存。
 `workorch-preparation-memory-inventory-evidence/v1` 私有材料以 0600 保存，公开仅有

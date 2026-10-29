@@ -152,6 +152,9 @@ func expectedPreparationCheckState(id, reason string) string {
 	if id == "exact_seal" && reason == "seal_observed_remaining_checks" || id == "persistence_integrity" && reason == "persistence_binding_observed_remaining_checks" {
 		return "passed"
 	}
+	if id == "provider_cache" && reason == "provider_configuration_observed_remaining_checks" {
+		return "passed"
+	}
 	if id == "soul_selection" && reason == "souls_observed_remaining_checks" {
 		return "passed"
 	}

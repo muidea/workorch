@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """STEP04 verifier rejection tests; no service, model, network or M3."""
 import copy
+import base64
+import hashlib
 from datetime import datetime, timezone
 import importlib.util
 import json
@@ -90,10 +92,10 @@ class PreparationVerifierTest(unittest.TestCase):
                     "proposal": {"proposalHash": "proposal", "specificationHash": "specification", "items": [1, 2], "requirements": [1, 2, 3], "obligations": [1, 2, 3], "verifications": [1, 2, 3]}}
         binding = {key: admitted[key] for key in ("inputHash", "derivationPermitId", "candidateHash", "startupInputHash")}
         binding.update(proposalHash="proposal", specificationHash="specification", manifestHash="manifest", snapshotHash="snapshot")
-        checks = [{"id": key, "owner": owner, "required": True, "state": "blocked" if key == "provider_cache" else "passed", "reason": "actual_observation"}
+        checks = [{"id": key, "owner": owner, "required": True, "state": "passed", "reason": "provider_configuration_observed_remaining_checks" if key == "provider_cache" else "actual_observation"}
                   for key, owner in sorted({**step04.CHECK_OWNERS, "resource/exact-original": "file"}.items())]
         attempt = {**intent, "committedWorkspaceRevision": 7, "state": "blocked", "completedAt": "2026-10-27T00:00:00Z", "binding": binding, "checks": checks,
-                   "assessment": {"version": "workorch-preparation-all-of-assessment/v1", "manifestHash": "manifest", "outcome": "blocked", "requiredCount": 11, "passedRequiredCount": 10,
+                   "assessment": {"version": "workorch-preparation-all-of-assessment/v1", "manifestHash": "manifest", "outcome": "checks_passed", "requiredCount": 11, "passedRequiredCount": 11,
                                   "outstanding": [{k: c[k] for k in ("id", "owner", "state", "reason")} for c in checks if c["state"] != "passed"]},
                    "definitionCompilation": {"compilerVersion": "workorch-preparation-definition-compiler/v1", "snapshotHash": "snapshot", "manifestHash": "manifest", "sourceInventoryHash": "inventory", "profileContractsHash": "profile", "sourceCount": 3, "requirementCount": 3, "obligationCount": 3, "verificationCount": 3},
                    "noRunEvaluationVersion": "workorch-preparation-no-run-final-fence/v1", "creationEpoch": "creation", "preparationEpoch": 0}
@@ -147,11 +149,11 @@ class PreparationVerifierTest(unittest.TestCase):
             "owner": lambda a: a["checks"][0].update(owner="application"),
             "optional": lambda a: a["checks"][0].update(required=False),
             "non-provider blocker": lambda a: a["checks"][0].update(state="blocked"),
-            "invented provider pass": lambda a: next(c for c in a["checks"] if c["id"] == "provider_cache").update(state="passed"),
-            "summary count": lambda a: a["assessment"].update(passedRequiredCount=11),
-            "summary hides blocker": lambda a: a["assessment"].update(outstanding=[]),
+            "unconsumed provider": lambda a: next(c for c in a["checks"] if c["id"] == "provider_cache").update(reason="provider_declaration_only"),
+            "summary count": lambda a: a["assessment"].update(passedRequiredCount=10),
+            "summary fabricates blocker": lambda a: a["assessment"].update(outstanding=[{"id": "provider_cache"}]),
             "summary manifest": lambda a: a["assessment"].update(manifestHash="other"),
-            "summary outcome": lambda a: a["assessment"].update(outcome="checks_passed"),
+            "summary outcome": lambda a: a["assessment"].update(outcome="blocked"),
             "execution input version": lambda a: a.update(executionInputVersion="other"),
             "missing execution inputs": lambda a: a.pop("executionInputVersion"),
         }
@@ -233,9 +235,19 @@ class PreparationVerifierTest(unittest.TestCase):
         script = Path(__file__).parent / "fixtures/step04-skill-hub.py"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            environment = {**os.environ, "WORKORCH_STEP04_FIXTURE_ROOT": directory}
+            home = root / "hub"
+            home.mkdir()
+            environment = {**os.environ, "WORKORCH_STEP04_FIXTURE_ROOT": directory, "SKILL_HUB_HOME": str(home)}
+            registered = subprocess.run([sys.executable, str(script.resolve()), "project", "register", str(root / "project"), "--request-id", "original", "--json"],
+                                        cwd=root, env=environment, capture_output=True)
+            self.assertNotEqual(registered.returncode, 0)  # directory is absent
+            project = root / "project"
+            project.mkdir()
+            registered = subprocess.run([sys.executable, str(script.resolve()), "project", "register", str(project), "--request-id", "original", "--json"],
+                                        cwd=root, env=environment, capture_output=True)
+            self.assertEqual(registered.returncode, 0, registered.stderr)
             for args in (["status", "--json"], ["status", "--json", "--global"]):
-                completed = subprocess.run([sys.executable, str(script.resolve()), *args], cwd=root, env=environment, capture_output=True)
+                completed = subprocess.run([sys.executable, str(script.resolve()), *args], cwd=project, env=environment, capture_output=True)
                 self.assertEqual(completed.returncode, 0, completed.stderr)
                 self.assertEqual(json.loads(completed.stdout)["items"], [])
             before = (root / "skillhub-calls.jsonl").read_bytes()
@@ -246,6 +258,80 @@ class PreparationVerifierTest(unittest.TestCase):
             outside = subprocess.run([sys.executable, str(script.resolve()), "status", "--json"], cwd=root.parent, env=environment, capture_output=True)
             self.assertNotEqual(outside.returncode, 0)
 
+    def test_registration_fixture_retains_original_reply_and_queries_without_registering(self):
+        script = (Path(__file__).parent / "fixtures/step04-skill-hub.py").resolve()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home, project, other = root / "hub", root / "project", root / "other"
+            for p in (home, project, other):
+                p.mkdir()
+            env = {**os.environ, "WORKORCH_STEP04_FIXTURE_ROOT": str(root), "SKILL_HUB_HOME": str(home),
+                   "WORKORCH_STEP04_DROP_REGISTRATION_REPLY": "1"}
+            def call(*args, cwd=root, environment=env):
+                return subprocess.run([sys.executable, str(script), *args], cwd=cwd, env=environment, capture_output=True)
+            self.assertEqual(call("status", "--json", cwd=project).returncode, 1)
+            self.assertEqual(call("project", "register", "--query", "--request-id", "missing", "--json").returncode, 1)
+            self.assertFalse((home / "project-registrations/missing.json").exists())
+            first = call("project", "register", str(project), "--request-id", "original", "--json")
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(first.stdout, b"")
+            raw = (home / "project-registrations/original.json").read_bytes()
+            self.assertEqual(raw, (root / "dropped-registration-reply.bin").read_bytes())
+            for args in (["project", "register", "--query", "--request-id", "original", "--json"],
+                         ["project", "register", str(project), "--request-id", "original", "--json"]):
+                replay = call(*args)
+                self.assertEqual(replay.returncode, 0, replay.stderr)
+                self.assertEqual(replay.stdout, raw)
+                self.assertEqual((home / "project-registrations/original.json").read_bytes(), raw)
+            self.assertEqual(call("project", "register", str(other), "--request-id", "original", "--json").returncode, 1)
+            self.assertEqual(call("status", "--json", cwd=other).returncode, 1)
+            self.assertEqual(call("status", "--json", cwd=project).returncode, 0)
+            self.assertNotEqual(call("project", "register", str(root.parent), "--request-id", "escape", "--json").returncode, 0)
+            self.assertNotEqual(call("status", "--json", environment={**env, "SKILL_HUB_HOME": str(root.parent)}).returncode, 0)
+
+    def registration_fixture(self):
+        intent = {"requestId": "original", "expectedWorkspaceRevision": 5}
+        project, home = Path("/isolated/project"), Path("/isolated/hub")
+        external = "workorch-" + hashlib.sha256(b"ws\x00original").hexdigest()
+        raw = json.dumps({"request_id": external, "project_path": str(project), "status": "succeeded", "executed": True, "finished": True,
+                          "started_at": "2026-10-28T00:00:00Z", "completed_at": "2026-10-28T00:00:01Z",
+                          "result": {"registered": True, "project_created": False, "created_directories": [], "skill_count": 0}}).encode()
+        observation = {"CommandStarted": True, "ExitCodeKnown": True, "ExitCode": 0, "Complete": True, "ErrorComplete": True}
+        for field, total, digest, data in (("Stdout", "TotalStdoutBytes", "StdoutSHA256", raw),
+                                          ("Stderr", "TotalStderrBytes", "StderrSHA256", b""), ("RawError", "TotalErrorBytes", "ErrorSHA256", b"")):
+            observation.update({field: base64.b64encode(data).decode(), total: len(data), digest: hashlib.sha256(data).hexdigest()})
+        plan = {"WorkspaceID": "ws", "RequestID": "original", "DeliverableDirectory": str(project), "InternalDirectory": "/isolated/internal"}
+        record = {"Revision": 9, "InternalDirectory": "/isolated/internal", "StartupInput": {"StartupInputHash": "startup"},
+                  "PreparationResourceInitializations": [{"Version": "workorch-preparation-resource-initialization/v2", "ExpectedWorkspaceRevision": 5,
+                    "CommittedWorkspaceRevision": 9, "StartupInputHash": "startup", "Plan": plan,
+                    "Attempts": [{"Result": {"Command": copy.deepcopy(plan)}}],
+                    "Registration": {"Plan": {"Version": "skillhub-project-registration/v1", "RequestID": external, "Directory": str(project), "Home": str(home)},
+                                     "Attempts": [{"Query": False, "Result": observation}]}}]}
+        view = {"requestId": "original", "preparation": {"workspaceId": "ws", "workspaceRevision": 9,
+                "resourceInitializations": [{**intent, "committedWorkspaceRevision": 9, "state": "completed", "attempts": 1,
+                                             "registrationState": "succeeded", "registrationAttempts": 1}]}}
+        return view, record, "ws", intent, project, home
+
+    def test_v2_initialization_rejects_old_contract_and_wrong_receipt_sources(self):
+        step04.validate_initialization(*self.registration_fixture())
+        mutations = [
+            lambda v, r: v["preparation"].update(workspaceRevision=7),
+            lambda v, r: v["preparation"]["resourceInitializations"][0].pop("registrationState"),
+            lambda v, r: v["preparation"]["resourceInitializations"][0].update(registrationAttempts=0),
+            lambda v, r: r["PreparationResourceInitializations"][0].update(Version="workorch-preparation-resource-initialization/v1"),
+            lambda v, r: r["PreparationResourceInitializations"][0]["Registration"]["Plan"].update(Home="/other"),
+            lambda v, r: r["PreparationResourceInitializations"][0]["Registration"]["Plan"].update(RequestID="other"),
+            lambda v, r: r["PreparationResourceInitializations"][0]["Registration"]["Attempts"][0].update(Query=True),
+            lambda v, r: r["PreparationResourceInitializations"][0]["Registration"]["Attempts"][0]["Result"].update(Complete=False),
+            lambda v, r: r["PreparationResourceInitializations"][0]["Registration"]["Attempts"][0]["Result"].update(StdoutSHA256="wrong"),
+            lambda v, r: r["PreparationResourceInitializations"][0]["Attempts"][0]["Result"]["Command"].update(RequestID="other"),
+        ]
+        for mutation in mutations:
+            data = self.registration_fixture()
+            mutation(*data[:2])
+            with self.assertRaises(RuntimeError):
+                step04.validate_initialization(*data)
+
 
     def test_private_execution_inputs_require_full_template_process_and_sidecar_source(self):
         version = "workorch-preparation-execution-inputs/v1"
@@ -254,7 +340,12 @@ class PreparationVerifierTest(unittest.TestCase):
         record = {"ID": "ws", "TemplateID": "confirmed", "DeliverableDirectory": "project", "InternalDirectory": "internal", "ProfileID": "profile",
                   "ContextHints": {}, "EvidencePolicies": None, "DefaultLLMSelection": None,
                   "DefinitionAuthoring": {"TemplateSnapshot": template},
-                  "StartupPreparation": {"Attempts": [{"SealEvidenceRef": "original", "ExecutionInputVersion": version, "ExpectedWorkspaceRevision": 5}]}}
+                  "StartupPreparation": {"Attempts": [{"SealEvidenceRef": "original", "ExecutionInputVersion": version, "ExpectedWorkspaceRevision": 5, "ProviderCacheEvidenceRef": "provider"}]}}
+        target = {"providerId": "ai-proxy", "modelId": "step02-fixture"}
+        record["PreparationProviderCacheEvidence"] = [{"Ref": "provider", "Facts": {"Observation": {
+            "Configuration": {"Version": "workorch-preparation-provider-configuration/v2", "DefaultChat": target},
+            "OwnerEpoch": "frozen-owner", "Catalog": {"ErrorCode": "cache_miss"}}},
+            "Selection": {"Version": "workorch-preparation-provider-selection/v2", "Source": "llm_owner_default", "Selection": {"target": target}, "OwnerEpoch": "frozen-owner", "FailureCode": ""}}]
         inputs = {"Version": version, "Template": copy.deepcopy(template),
                   "Process": {"Version": version, "WorkspaceID": "ws", "WorkspaceRevision": 6, "Before": policy, "After": copy.deepcopy(policy)},
                   "Configuration": {"Directory": "project", "InternalDirectory": "internal", "TemplateID": "confirmed", "ProfileID": "profile", "ContextHints": {}, "EvidencePolicies": None, "DefaultLLMSelection": None, "DefaultSoulID": "selected", "SoulBindings": None}}
@@ -269,6 +360,9 @@ class PreparationVerifierTest(unittest.TestCase):
             lambda r, b: r["PreparationSealEvidence"][0]["ExecutionInputs"]["Template"].update(id="live"),
             lambda r, b: r["PreparationSealEvidence"][0]["ExecutionInputs"]["Configuration"].update(ContextHints={"changed": True}),
             lambda r, b: b.update(defaultSoulId="other"),
+            lambda r, b: r["PreparationProviderCacheEvidence"][0]["Selection"]["Selection"]["target"].update(modelId="neighbor"),
+            lambda r, b: r["PreparationProviderCacheEvidence"][0]["Selection"].update(Version="workorch-preparation-provider-selection/v1"),
+            lambda r, b: r["PreparationProviderCacheEvidence"][0]["Selection"].update(OwnerEpoch="other"),
         ):
             bad_record, bad_bindings = copy.deepcopy(record), copy.deepcopy(bindings)
             with self.assertRaises((RuntimeError, KeyError)):

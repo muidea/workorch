@@ -107,8 +107,8 @@ func CompileOriginalPreparedBootstrap(w *workspace.Workspace, a workspace.Worksp
 	}
 	// Do not let a missing Provider mask missing non-Provider source material.
 	// This is not an authorization check and does not upgrade the blocked record.
-	// A cold/expired cache or unavailable capacity must still block the
-	// Provider checklist, but is not missing configuration. This structural
+	// Catalog availability is independent of the frozen local configuration.
+	// The configuration-only preparation result is not a Runtime ceiling. This structural
 	// compiler consumes only the exact declaration already independently
 	// reproduced by evidence validation; it never consumes capability, budget
 	// or authorization success and does not alter those judgments.

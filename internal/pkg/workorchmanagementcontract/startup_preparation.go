@@ -248,7 +248,7 @@ func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 		if a.ProviderCacheEvidenceRef != "" {
 			found := false
 			for _, check := range a.Checks {
-				if check.ID == "provider_cache" && check.Owner == "llm" && check.Required && (check.Reason == "provider_cache_miss" || check.Reason == "provider_cache_expired" || check.Reason == "provider_declaration_only" || check.Reason == "binding_changed" || isPreparationProviderSelectionReason(check.Reason)) {
+				if check.ID == "provider_cache" && check.Owner == "llm" && check.Required && (check.Reason == "provider_cache_miss" || check.Reason == "provider_cache_expired" || check.Reason == "provider_declaration_only" || check.Reason == "binding_changed" || check.Reason == "provider_configuration_observed_remaining_checks" || isPreparationProviderSelectionReason(check.Reason)) {
 					found = true
 				}
 			}
@@ -416,6 +416,9 @@ func validPreparationEvaluatedCheck(a PreparationAttemptView, c PreparationCheck
 	}
 	if c.ID == "soul_selection" {
 		return c.Owner == "soul" && c.Required && a.SoulEvidenceRef != "" && c.State == "passed" && c.Reason == "souls_observed_remaining_checks"
+	}
+	if c.ID == "provider_cache" {
+		return c.Owner == "llm" && c.Required && a.ProviderCacheEvidenceRef != "" && c.State == "passed" && c.Reason == "provider_configuration_observed_remaining_checks"
 	}
 	if c.ID == "skill_selection" {
 		return c.Owner == "skill" && c.Required && c.State == "passed" && c.Reason == "skill_empty_selection_observed_remaining_checks" && a.EmptySelectionEvaluationVersion == "workorch-preparation-empty-selection-evaluation/v1" && a.SkillRegistryEvidenceRef != "" && a.SoulEvidenceRef != "" && a.SkillHubEffectState == "recorded" && a.SkillSelectionState == "compiled_checks_pending" && a.SkillContextState == "compiled_checks_pending" && a.SkillReferenceState == "observed_checks_pending" && a.SkillStatusState == "observed_freshness_pending"
