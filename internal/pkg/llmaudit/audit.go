@@ -6,14 +6,16 @@ import "github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 // provider adapters, typed EventHub results and Runtime request audit. It is an
 // observation only and carries no provider or Runtime state transition.
 type ProviderUsage struct {
-	InputTokens             int `json:"inputTokens,omitempty"`
-	OutputTokens            int `json:"outputTokens,omitempty"`
-	TotalTokens             int `json:"totalTokens,omitempty"`
-	CacheReadTokens         int `json:"cacheReadTokens,omitempty"`
-	CacheWriteTokens        int `json:"cacheWriteTokens,omitempty"`
-	CacheCreationTokens     int `json:"cacheCreationTokens,omitempty"`
-	CacheableInputTokens    int `json:"cacheableInputTokens,omitempty"`
-	NonCacheableInputTokens int `json:"nonCacheableInputTokens,omitempty"`
+	InputTokens             int  `json:"inputTokens,omitempty"`
+	OutputTokens            int  `json:"outputTokens,omitempty"`
+	TotalTokens             int  `json:"totalTokens,omitempty"`
+	CacheReadTokensKnown    bool `json:"cacheReadTokensKnown,omitempty"`
+	CacheWriteTokensKnown   bool `json:"cacheWriteTokensKnown,omitempty"`
+	CacheReadTokens         int  `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens        int  `json:"cacheWriteTokens,omitempty"`
+	CacheCreationTokens     int  `json:"cacheCreationTokens,omitempty"`
+	CacheableInputTokens    int  `json:"cacheableInputTokens,omitempty"`
+	NonCacheableInputTokens int  `json:"nonCacheableInputTokens,omitempty"`
 }
 
 // ContextBudget is the concrete cross-owner audit DTO for a sealed provider
@@ -133,6 +135,8 @@ func (v ContextBudget) Payload() workorcheventpayload.Payload {
 // CacheUsage is the concrete cross-owner representation of provider cache
 // usage. Native and estimated values remain explicit in the contract.
 type CacheUsage struct {
+	CacheReadTokensKnown    bool
+	CacheWriteTokensKnown   bool
 	CacheReadTokens         int
 	CacheWriteTokens        int
 	CacheCreationTokens     int
@@ -145,13 +149,20 @@ type CacheUsage struct {
 func (v CacheUsage) Empty() bool { return v == CacheUsage{} }
 
 func (v CacheUsage) Payload() workorcheventpayload.Payload {
-	return workorcheventpayload.New(
-		workorcheventpayload.IntField("cacheReadTokens", int64(v.CacheReadTokens)),
-		workorcheventpayload.IntField("cacheWriteTokens", int64(v.CacheWriteTokens)),
+	fields := []workorcheventpayload.Field{
+		workorcheventpayload.BoolField("cacheReadTokensKnown", v.CacheReadTokensKnown || v.CacheReadTokens != 0),
+		workorcheventpayload.BoolField("cacheWriteTokensKnown", v.CacheWriteTokensKnown || v.CacheWriteTokens != 0),
 		workorcheventpayload.IntField("cacheCreationTokens", int64(v.CacheCreationTokens)),
 		workorcheventpayload.IntField("cacheableInputTokens", int64(v.CacheableInputTokens)),
 		workorcheventpayload.IntField("nonCacheableInputTokens", int64(v.NonCacheableInputTokens)),
 		workorcheventpayload.BoolField("estimated", v.Estimated),
 		workorcheventpayload.StringField("source", v.Source),
-	)
+	}
+	if v.CacheReadTokensKnown || v.CacheReadTokens != 0 {
+		fields = append(fields, workorcheventpayload.IntField("cacheReadTokens", int64(v.CacheReadTokens)))
+	}
+	if v.CacheWriteTokensKnown || v.CacheWriteTokens != 0 {
+		fields = append(fields, workorcheventpayload.IntField("cacheWriteTokens", int64(v.CacheWriteTokens)))
+	}
+	return workorcheventpayload.New(fields...)
 }

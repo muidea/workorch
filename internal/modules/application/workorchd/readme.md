@@ -30,6 +30,15 @@ clarification，不能创建 Run。启动输入封存后，执行期 LLM 处理�
 
 Goal-only 创作用例先保存 Workspace owner 的版本化草稿，以持久 reserve permit 调用派生和六类独立审查，确认 exact proposal/specification hash 后才物化正式定义并准入。阻塞后继沿同一候选 lineage 重新审查；Application 只协调 Decision ticket 的替换或 resolution，Workspace 验证其持久来源并独占 pending → eligible 转换。刷新投影以 owner 查询为准；pending startup 显示 `admitting`，不能显示已准入或启动 Run。当前正式创作已接稳定 management ports 和 HTTP 创建／查询／修订／编译／确认 route，创建 RequestID 由 Workspace owner 持久验证；Web 创建向导已改为单一创作／审查／确认入口，发送前保存创建身份，重新打开按 owner 查询恢复。生产 HTTP 编译由 Application 的 BackgroundRoutine 托管，接受回执返回 202，任务使用独立于 HTTP 请求的生命周期 context，Stop 取消并排空已接受任务；任务数有界，结果与预算仍只在 Workspace ledger。已 reserve 但结果未决不重发 provider。旧 public Workspace／Goal／DoD 写 REST 和 Goal-first CLI 不参与创作；正式定义只由确认事务物化。保存请求使用原 RequestID、expected revision/hash 与目标输入，owner 在同一 Workspace CAS 中持久回执；精确重放不重复写入，历史回执不能将后续替代的输入冒充当前成功。验收证据按 HTTP／owner、独立进程、Web 组件与 deployed provider 分层，局部 helper 测试或构建不能替代端到端恢复与显式启动合同。
 
+### 创作请求的共享快照与缓存
+
+规格层只提供完整 typed 输入与 `section_messages/v1` 布局，不计算 provider key、维护成功缓存或推导命中。
+独立六审把同一未确认 proposal 的完整原 Goal/候选/资源/规格放在 C1，把原 Profile/验证声明放在 C2，
+本次 kind、required IDs 和 wire 身份放在 C3。C1/C2 仍为 user 待审数据，不能因共享而升级为正式 Definition 或系统指令。
+六审不读取其他 critic 结论；全部来源/字段保全、严格本地解码、reserve/settlement 与人工精确确认保持原合同。
+LLM owner 及 HTTP adapter 独占实际 cache plan/key/断点和用量解释，参见 [LLM 合同](../../blocks/llm/readme.md#authoring-section-message-缓存边界)。
+不同 Workspace 的目标与实现可完全不同；缓存身份按 Workspace 和完整共享内容隔离，不跨 Workspace 复用业务前缀或答案。
+
 ### 草稿保存与找回
 
 Application 在创建身份持久化前将目录解析为 clean absolute path：file backend 的相对 dataDir 与用户显式相对项目目录

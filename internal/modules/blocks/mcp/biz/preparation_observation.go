@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	workspacecommon "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/common"
 	"io"
 	"os"
@@ -19,6 +20,7 @@ import (
 	cd "github.com/muidea/magicCommon/def"
 	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/protocol"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -38,7 +40,7 @@ func (m *Biz) handlePreparationObservation(ev magicevent.Event, result magiceven
 		return
 	}
 	c, ok := ev.Data().(mcpevents.ObservePreparationCommand)
-	if !ok || c.Validate() != nil || !filepath.IsAbs(c.InternalDirectory) || !filepath.IsAbs(c.DeliverableDirectory) {
+	if !ok || c.Version != mcpevents.PreparationObservationVersion || c.Validate() != nil || !filepath.IsAbs(c.InternalDirectory) || !filepath.IsAbs(c.DeliverableDirectory) {
 		result.Set(nil, cd.WrapError(cd.IllegalParam, common.ErrInvalidArgument, "invalid preparation observation"))
 		return
 	}
@@ -225,17 +227,42 @@ func observePreparationStdio(ctx context.Context, c mcpevents.ObservePreparation
 		frame.Response = raw
 		o.Frames = append(o.Frames, frame)
 		var reply struct {
-			ID    int             `json:"id"`
-			Error json.RawMessage `json:"error"`
+			JSONRPC string          `json:"jsonrpc"`
+			Method  string          `json:"method"`
+			ID      int             `json:"id"`
+			Error   json.RawMessage `json:"error"`
 		}
-		if err != nil || json.Unmarshal(raw, &reply) != nil || reply.ID != id || (len(reply.Error) > 0 && string(reply.Error) != "null") {
+		if err != nil || json.Unmarshal(raw, &reply) != nil || reply.JSONRPC != "2.0" || reply.Method != "" || reply.ID != id || (len(reply.Error) > 0 && string(reply.Error) != "null") {
 			o.FailureCode = "protocol_failed"
 			return false
 		}
 		return true
 	}
-	init := json.RawMessage(`{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"workorch-preparation","version":"1"}}`)
+	init, _ := json.Marshal(struct {
+		ProtocolVersion string   `json:"protocolVersion"`
+		Capabilities    struct{} `json:"capabilities"`
+		ClientInfo      struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		} `json:"clientInfo"`
+	}{ProtocolVersion: protocol.PreferredVersion, ClientInfo: struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}{Name: "workorch-preparation", Version: "1"}})
 	good := exchange("initialize", init)
+	if good {
+		var response struct {
+			Result json.RawMessage `json:"result"`
+		}
+		_ = json.Unmarshal(o.Frames[0].Response, &response)
+		if _, versionErr := protocol.NegotiatedVersion(response.Result); versionErr != nil {
+			good = false
+			o.FailureCode = "protocol_failed"
+			if errors.Is(versionErr, protocol.ErrUnsupportedVersion) {
+				o.FailureCode = "protocol_version_unsupported"
+			}
+		}
+	}
 	if good {
 		_, err = input.Write([]byte("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}\n"))
 		good = err == nil

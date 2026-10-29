@@ -29,6 +29,8 @@ func (m *Biz) handleProviderDocument(ev magicevent.Event, result magicevent.Resu
 		setLLMMagicError(result, err)
 		return
 	}
+	request.ContextBudget = cloneProviderContextBudget(request.ContextBudget)
+	attachProviderCachePlan(&request)
 	request.CaptureDocumentObservation = true
 	started := time.Now().UTC()
 	completion, metadata, callErr := m.completeProvider(ev.Context(), command.Target, request, command.ExpectedConfigurationRevision)

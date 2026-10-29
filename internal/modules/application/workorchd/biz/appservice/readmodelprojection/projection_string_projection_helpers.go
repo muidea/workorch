@@ -46,6 +46,12 @@ func newLLMUsageProviderModelBreakdown(item projectioncontract.LLMUsageTrace) *p
 
 func addLLMUsageProviderModelBreakdown(entry *projectioncontract.LLMUsageProviderModelBreakdown, item projectioncontract.LLMUsageTrace, cacheReadTokens int, cacheWriteTokens int) {
 	entry.EntryTotal++
+	if llmUsageCacheMeasurementKnown(item.CacheUsage, "cacheReadTokens") {
+		entry.CacheReadKnownEntries++
+	}
+	if llmUsageCacheMeasurementKnown(item.CacheUsage, "cacheWriteTokens") {
+		entry.CacheWriteKnownEntries++
+	}
 	entry.InputTokens += item.InputTokens
 	entry.OutputTokens += item.OutputTokens
 	entry.TotalTokens += item.TotalTokens

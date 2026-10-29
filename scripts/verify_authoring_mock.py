@@ -169,16 +169,45 @@ def _review(request):
                        'EvidenceRefs': [goal_ref], 'RequirementIDs': requirement_ids}}
 
 
+def responses_prompt_text(value):
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, list) or not value:
+        raise AuthoringMockError('Responses input 必须为文本或消息列表')
+    parts = []
+    for message in value:
+        if not isinstance(message, dict) or message.get('role') not in ('developer', 'user', 'assistant'):
+            raise AuthoringMockError('Responses 消息角色无效')
+        content = message.get('content')
+        if not isinstance(content, list) or not content:
+            raise AuthoringMockError('Responses 消息正文无效')
+        for block in content:
+            if not isinstance(block, dict) or block.get('type') != 'input_text' or not isinstance(block.get('text'), str):
+                raise AuthoringMockError('Responses 消息必须保留文本')
+            parts.append(block['text'])
+    return '\n\n'.join(parts)
+
+
+def authoring_prompt_payloads(prompt):
+    sections = dict(re.findall(r'(?ms)^###\s+([^\n]+)\n(.*?)(?=^###\s+|\Z)', responses_prompt_text(prompt)))
+    keys = [key for key in ('C1.specification-snapshot', 'C2.specification-profiles', 'C3.derivation-input', 'C3.specification-request') if key in sections]
+    if not keys:
+        return None, None
+    request = {}
+    for key in keys:
+        value, _ = json.JSONDecoder().raw_decode(sections[key].lstrip())
+        if not isinstance(value, dict) or request.keys() & value.keys():
+            raise AuthoringMockError('创作输入必须为无重复字段对象')
+        request.update(value)
+    return request, 'C3.derivation-input' if 'C3.derivation-input' in keys else 'C3.specification-request'
+
+
 def authoring_response(prompt):
     """非 authoring 请求返回 None；识别后的损坏请求明确拒绝。"""
-    sections = dict(re.findall(r'(?ms)^###\s+([^\n]+)\n(.*?)(?=^###\s+|\Z)', prompt))
-    section = next((key for key in ('C3.derivation-input', 'C3.specification-request') if key in sections), None)
-    if section is None:
-        return None
     try:
-        request, _ = json.JSONDecoder().raw_decode(sections[section].lstrip())
-        if not isinstance(request, dict):
-            raise AuthoringMockError('创作输入必须为对象')
+        request, section = authoring_prompt_payloads(prompt)
+        if section is None:
+            return None
         if section == 'C3.derivation-input':
             shape = request['outputShape']
             if request.get('wireContractRef') == 'workorch.authoring.owner-bound/v2':

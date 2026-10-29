@@ -58,6 +58,8 @@ func llmContextBudgetTraceFromStep(step projectioncontract.StepView, budget work
 // source: llm_usage_cache_metrics.go
 
 type llmUsageCacheMetrics struct {
+	cacheReadKnown           bool
+	cacheWriteKnown          bool
 	cacheReadTokens          int
 	cacheWriteTokens         int
 	cacheCreationTokens      int
@@ -79,6 +81,8 @@ func llmUsagePayloadBool(payload workorcheventpayload.Payload, key string) bool 
 
 func llmUsageCacheMetricsFromTrace(item projectioncontract.LLMUsageTrace) llmUsageCacheMetrics {
 	ret := llmUsageCacheMetrics{
+		cacheReadKnown:          llmUsageCacheMeasurementKnown(item.CacheUsage, "cacheReadTokens"),
+		cacheWriteKnown:         llmUsageCacheMeasurementKnown(item.CacheUsage, "cacheWriteTokens"),
 		cacheReadTokens:         llmUsagePayloadInt(item.CacheUsage, "cacheReadTokens"),
 		cacheWriteTokens:        llmUsagePayloadInt(item.CacheUsage, "cacheWriteTokens"),
 		cacheCreationTokens:     llmUsagePayloadInt(item.CacheUsage, "cacheCreationTokens"),
@@ -133,4 +137,14 @@ func payloadObjectMapSlice(payload workorcheventpayload.Payload, name string) []
 		}
 	}
 	return ret
+}
+
+// Historical positive measurements remain observable; a historical zero without
+// presence is ambiguous and must not become known merely by projection.
+func llmUsageCacheMeasurementKnown(payload workorcheventpayload.Payload, key string) bool {
+	if known, exists := payload.Bool(key + "Known"); exists {
+		return known
+	}
+	value, exists := payload.Int64(key)
+	return exists && value > 0
 }

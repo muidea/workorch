@@ -1226,6 +1226,8 @@ export type LLMUsageSummary = {
   estimatedEntries: number;
   providerNativeEntries: number;
   failedEntries: number;
+  cacheReadKnownEntries?: number;
+  cacheWriteKnownEntries?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   cacheCreationTokens?: number;
@@ -1247,6 +1249,8 @@ export type LLMUsageProviderModelBreakdown = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  cacheReadKnownEntries?: number;
+  cacheWriteKnownEntries?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   cacheReadInputRatio?: number;

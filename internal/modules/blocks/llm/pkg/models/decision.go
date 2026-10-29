@@ -34,10 +34,37 @@ type ProviderRequest struct {
 }
 
 type PromptContext struct {
-	SchemaVersion string                 `json:"schemaVersion,omitempty"`
+	SchemaVersion string `json:"schemaVersion,omitempty"`
+	// MessageLayout selects lossless section-to-message rendering. Empty keeps
+	// the historical wire layout; it is not a provider capability or authority.
+	MessageLayout string                 `json:"messageLayout,omitempty"`
 	Sections      []PromptSection        `json:"sections,omitempty"`
 	Turns         []PromptTurn           `json:"turns,omitempty"`
 	Normalization *NormalizationManifest `json:"normalization,omitempty"`
+}
+
+const PromptMessageLayoutSectionsV1 = "section_messages/v1"
+
+func (r ProviderRequest) ValidatePromptLayout() error {
+	if r.PromptContext == nil || r.PromptContext.MessageLayout == "" {
+		return nil
+	}
+	if r.PromptContext.MessageLayout != PromptMessageLayoutSectionsV1 || len(r.PromptContext.Sections) == 0 || len(r.PromptContext.Turns) != 0 {
+		return fmt.Errorf("invalid provider message layout")
+	}
+	seen := make(map[string]bool)
+	lastGroup, lastOrder := byte('0'), -1
+	for i, s := range r.PromptContext.Sections {
+		if len(s.ID) < 4 || s.ID[0] != 'C' || s.ID[1] < '0' || s.ID[1] > '5' || s.ID[2] != '.' || seen[s.ID] || s.Content == "" ||
+			s.ID[1] < lastGroup || s.DisplayOrder <= lastOrder || (i == 0 && s.ID[1] != '0') {
+			return fmt.Errorf("invalid provider message section order or content")
+		}
+		if s.Role != "system" && s.Role != "user" && s.Role != "assistant" {
+			return fmt.Errorf("invalid provider message role")
+		}
+		seen[s.ID], lastGroup, lastOrder = true, s.ID[1], s.DisplayOrder
+	}
+	return nil
 }
 
 type PromptSection struct {

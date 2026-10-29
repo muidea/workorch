@@ -50,7 +50,7 @@ func TestHTTPProviderCompleteUsesAIProxyResponses(t *testing.T) {
 	if got.Model != "test-model" || got.MaxOutputTokens != 8 || got.Reasoning == nil || got.Reasoning.Effort != "high" {
 		t.Fatalf("request = %+v", got)
 	}
-	if !strings.Contains(got.Input, "C0.runtime-candidate-contract") || !strings.Contains(got.Input, "C3.runtime-authority") {
+	if !strings.Contains(string(got.Input), "C0.runtime-candidate-contract") || !strings.Contains(string(got.Input), "C3.runtime-authority") {
 		t.Fatalf("Responses input = %q, want rendered Runtime prompt sections", got.Input)
 	}
 	if string(result.Payload) != `{"ok":true}` || result.Usage == nil || result.Usage.TotalTokens != 5 || !result.ProviderSubmitted || result.PhysicalResponseMode != llmaudit.PhysicalResponseModeNonStreaming {

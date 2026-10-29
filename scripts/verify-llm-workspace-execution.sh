@@ -1245,7 +1245,7 @@ class Handler(BaseHTTPRequestHandler):
         payload = json.loads(body)
         from verify_authoring_mock import AuthoringMockError, authoring_response
         try:
-            decision = authoring_response(str(payload.get("input", "")))
+            decision = authoring_response(payload.get("input", ""))
         except AuthoringMockError:
             encoded = json.dumps({"error": {"message": "authoring mock 合同无效"}}).encode("utf-8")
             self.send_response(422)

@@ -53,7 +53,7 @@ func DerivationCommand(derivation workspace.DefinitionDerivationRequest, target 
 	if len(payload)+len(contract) > maxDocumentBytes {
 		return llmevents.CompleteProviderCommand{}, fmt.Errorf("derivation input exceeds byte budget")
 	}
-	return llmevents.CompleteProviderCommand{Target: target, Request: llmevents.ProviderRequest{WorkspaceID: string(derivation.Input.WorkspaceID), Model: target.ModelID, Kind: "workspace/specification/derive", Schema: schema, SchemaFormat: llmmodels.ProviderSchemaFormatJSONSchema, DialogLanguage: "zh-CN", PromptContext: &llmmodels.PromptContext{SchemaVersion: promptVersion, Sections: []llmmodels.PromptSection{
+	return llmevents.CompleteProviderCommand{Target: target, Request: llmevents.ProviderRequest{WorkspaceID: string(derivation.Input.WorkspaceID), Model: target.ModelID, Kind: "workspace/specification/derive", Schema: schema, SchemaFormat: llmmodels.ProviderSchemaFormatJSONSchema, DialogLanguage: "zh-CN", PromptContext: &llmmodels.PromptContext{SchemaVersion: promptVersion, MessageLayout: llmmodels.PromptMessageLayoutSectionsV1, Sections: []llmmodels.PromptSection{
 		{ID: "C0.derivation-contract", Name: "验收派生合同", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: contract},
 		{ID: "C3.derivation-input", Name: "创作输入", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: string(payload)},
 	}}}}, nil

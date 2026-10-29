@@ -19,6 +19,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
+	"github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/protocol"
 	registryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -1157,7 +1158,7 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 				"jsonrpc": "2.0",
 				"id":      request.ID,
 				"result": map[string]any{
-					"protocolVersion": mcpProtocolVersion,
+					"protocolVersion": protocol.PreferredVersion,
 					"capabilities": map[string]any{
 						"tools": map[string]any{},
 					},

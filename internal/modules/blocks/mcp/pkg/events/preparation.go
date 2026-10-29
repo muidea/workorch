@@ -2,6 +2,7 @@ package events
 
 import (
 	"encoding/json"
+	"github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/protocol"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"reflect"
 	"slices"
@@ -11,7 +12,10 @@ import (
 )
 
 const TopicObservePreparation = "/mcp/preparation/observe"
-const PreparationObservationVersion = "workorch-mcp-preparation-observation/v1"
+
+// V1 retains its original exact-version evaluation for immutable old attempts.
+const PreparationObservationVersionV1 = "workorch-mcp-preparation-observation/v1"
+const PreparationObservationVersion = "workorch-mcp-preparation-observation/v2"
 const PreparationMaxServers = 8
 const PreparationRawLimit = 512 << 10
 
@@ -48,7 +52,7 @@ type ObservePreparationResult struct {
 }
 
 func (c ObservePreparationCommand) Validate() error {
-	if c.Version != PreparationObservationVersion || c.WorkspaceID == "" || c.WorkspaceRevision == 0 || c.RequestID == "" || c.PayloadHash == "" || c.SnapshotHash == "" || c.InternalDirectory == "" || c.DeliverableDirectory == "" || !utf8.ValidString(c.InternalDirectory) || !utf8.ValidString(c.DeliverableDirectory) || strings.ContainsRune(c.InternalDirectory, 0) || strings.ContainsRune(c.DeliverableDirectory, 0) || len(c.ServerIDs) == 0 || len(c.ServerIDs) > PreparationMaxServers || c.RegistryRevision == "" || len(c.Capabilities) > 4096 {
+	if (c.Version != PreparationObservationVersion && c.Version != PreparationObservationVersionV1) || c.WorkspaceID == "" || c.WorkspaceRevision == 0 || c.RequestID == "" || c.PayloadHash == "" || c.SnapshotHash == "" || c.InternalDirectory == "" || c.DeliverableDirectory == "" || !utf8.ValidString(c.InternalDirectory) || !utf8.ValidString(c.DeliverableDirectory) || strings.ContainsRune(c.InternalDirectory, 0) || strings.ContainsRune(c.DeliverableDirectory, 0) || len(c.ServerIDs) == 0 || len(c.ServerIDs) > PreparationMaxServers || c.RegistryRevision == "" || len(c.Capabilities) > 4096 {
 		return common.ErrInvalidArgument
 	}
 	seen := map[string]bool{}
@@ -106,7 +110,7 @@ func (r ObservePreparationResult) ValidateFor(c ObservePreparationCommand) error
 			return common.ErrConflict
 		}
 		switch o.FailureCode {
-		case "", "transport_unsupported", "launch_failed", "protocol_failed", "output_limit", "close_failed", "registry_changed":
+		case "", "transport_unsupported", "launch_failed", "protocol_failed", "output_limit", "close_failed", "registry_changed", "protocol_version_unsupported":
 		default:
 			return common.ErrConflict
 		}
@@ -126,9 +130,10 @@ func (r ObservePreparationResult) Satisfied() bool {
 		found := map[string][]string{}
 		for i, f := range o.Frames {
 			var q struct {
-				JSONRPC string `json:"jsonrpc"`
-				ID      int    `json:"id"`
-				Method  string `json:"method"`
+				JSONRPC string          `json:"jsonrpc"`
+				ID      int             `json:"id"`
+				Method  string          `json:"method"`
+				Params  json.RawMessage `json:"params"`
 			}
 			var p struct {
 				JSONRPC string          `json:"jsonrpc"`
@@ -152,8 +157,27 @@ func (r ObservePreparationResult) Satisfied() bool {
 				return false
 			}
 			if i == 0 {
-				if q.Method != "initialize" || p.Result.ProtocolVersion != "2025-11-25" {
+				if q.Method != "initialize" {
 					return false
+				}
+				if r.Command.Version == PreparationObservationVersionV1 {
+					if p.Result.ProtocolVersion != "2025-11-25" {
+						return false
+					}
+				} else {
+					var request struct {
+						ProtocolVersion string `json:"protocolVersion"`
+					}
+					var response struct {
+						Result json.RawMessage `json:"result"`
+						Method string          `json:"method"`
+					}
+					if json.Unmarshal(q.Params, &request) != nil || request.ProtocolVersion != protocol.PreferredVersion || json.Unmarshal(f.Response, &response) != nil || response.Method != "" {
+						return false
+					}
+					if _, err := protocol.NegotiatedVersion(response.Result); err != nil {
+						return false
+					}
 				}
 				continue
 			}
@@ -173,7 +197,7 @@ func (r ObservePreparationResult) Satisfied() bool {
 			default:
 				return false
 			}
-			// v1 supports complete unpaginated inventories only; never silently accept a partial list.
+			// Both versions require complete inventories; pagination stays unsupported.
 			if strings.TrimSpace(p.Result.NextCursor) != "" {
 				return false
 			}

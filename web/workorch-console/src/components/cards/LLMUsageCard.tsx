@@ -1,3 +1,4 @@
+import { llmCacheTokenValue, llmCacheReadRatio } from '../../llmUsagePresentation';
 import React from 'react';
 import { Space, Empty, Tag, Descriptions, Tabs, Alert } from 'antd';
 import { ProTable } from '../proCompat';
@@ -40,9 +41,9 @@ export const LLMUsageCard = React.memo(function LLMUsageCard({ summary, traces }
           { key: 'tokens', label: 'Token 总量', value: numberText(usageSummary.totalTokens), color: '#0958d9' },
           { key: 'input', label: '输入 Token', value: numberText(usageSummary.inputTokens) },
           { key: 'output', label: '输出 Token', value: numberText(usageSummary.outputTokens) },
-          { key: 'cacheRead', label: 'Cache Read Token', value: numberText(usageSummary.cacheReadTokens) },
-          { key: 'cacheWrite', label: 'Cache Write Token', value: numberText(usageSummary.cacheWriteTokens) },
-          { key: 'cacheReadRatio', label: 'Cache Read/Input', value: percentText(usageSummary.cacheReadInputRatio), color: usageSummary.cacheReadInputRatio ? '#389e0d' : undefined },
+          { key: 'cacheRead', label: 'Cache Read Token', value: llmCacheTokenValue(usageSummary, 'read') },
+          { key: 'cacheWrite', label: 'Cache Write Token', value: llmCacheTokenValue(usageSummary, 'write') },
+          { key: 'cacheReadRatio', label: 'Cache Read/Input', value: llmCacheReadRatio(usageSummary), color: usageSummary.cacheReadInputRatio ? '#389e0d' : undefined },
           { key: 'failed', label: '失败调用', value: numberText(usageSummary.failedEntries), color: usageSummary.failedEntries ? '#cf1322' : undefined }
         ]}
       />
@@ -76,8 +77,8 @@ export const LLMUsageCard = React.memo(function LLMUsageCard({ summary, traces }
                   { title: '调用', dataIndex: 'entryTotal', width: 90, render: (_, item) => numberText(item.entryTotal) },
                   { title: '输入/输出', width: 150, render: (_, item) => `${numberText(item.inputTokens)} / ${numberText(item.outputTokens)}` },
                   { title: 'Token', dataIndex: 'totalTokens', width: 120, render: (_, item) => numberText(item.totalTokens) },
-                  { title: 'Cache R/W', width: 130, render: (_, item) => `${numberText(item.cacheReadTokens)} / ${numberText(item.cacheWriteTokens)}` },
-                  { title: 'Cache Read/Input', width: 140, render: (_, item) => percentText(item.cacheReadInputRatio) },
+                  { title: 'Cache R/W', width: 130, render: (_, item) => `${llmCacheTokenValue(item, 'read')} / ${llmCacheTokenValue(item, 'write')}` },
+                  { title: 'Cache Read/Input', width: 140, render: (_, item) => llmCacheReadRatio(item) },
                   { title: '估算/失败', width: 120, render: (_, item) => `${numberText(item.estimatedEntries)} / ${numberText(item.failedEntries)}` }
                 ]}
                 dataSource={usageSummary.providerModelBreakdown ?? []}

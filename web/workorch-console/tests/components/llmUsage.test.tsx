@@ -32,4 +32,21 @@ describe('LLMUsageCard 查询范围', () => {
     expect(screen.getByText(/用量数据不完整/)).toBeTruthy();
     expect(screen.queryByText(/未记录/)).toBeNull();
   });
+  it('没有原生缓存用量时显示未知，明确零才显示零比例', () => {
+    const summary = { ...zero, entryTotal: 1, inputTokens: 100, availability: 'complete' as const, scope: 'workspace' as const, recordLimit: 200, observedRecords: 1 };
+    const view = render(<LLMUsageCard summary={summary} />);
+    expect(screen.getAllByText('未知').length).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByText('0.0%')).toBeNull();
+    view.rerender(<LLMUsageCard summary={{ ...summary, cacheReadKnownEntries: 1, cacheReadTokens: 0, cacheWriteKnownEntries: 1, cacheWriteTokens: 80 }} />);
+    expect(screen.getByText('0.0%')).toBeTruthy();
+    expect(screen.getByText('80')).toBeTruthy();
+    expect(screen.queryByText('未知')).toBeNull();
+  });
+
+  it('详情 helper 保留部分已知缓存计数，比例仍未知', () => {
+    render(llmUsageCard({ ...zero, entryTotal: 2, inputTokens: 200, availability: 'complete', scope: 'workspace', recordLimit: 200, observedRecords: 2, cacheReadKnownEntries: 1, cacheReadTokens: 100 }));
+    expect(screen.getByText('100（部分已知）')).toBeTruthy();
+    expect(screen.getAllByText('未知').length).toBeGreaterThanOrEqual(2);
+  });
+
 });

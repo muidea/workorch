@@ -17,6 +17,7 @@ import (
 	"time"
 
 	blockcommon "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/common"
+	"github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/protocol"
 	registryevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	mcpmodel "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -24,15 +25,18 @@ import (
 )
 
 type stdioSession struct {
-	serverID  string
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	reader    *bufio.Reader
-	stderr    *limitedBuffer
-	done      chan error
-	lastUsed  time.Time
-	mu        sync.Mutex
-	closeOnce sync.Once
+	// Immutable after initialization and private to this exact process session.
+	protocolVersion  string
+	initializeResult json.RawMessage
+	serverID         string
+	cmd              *exec.Cmd
+	stdin            io.WriteCloser
+	reader           *bufio.Reader
+	stderr           *limitedBuffer
+	done             chan error
+	lastUsed         time.Time
+	mu               sync.Mutex
+	closeOnce        sync.Once
 }
 
 type limitedBuffer struct {
@@ -99,7 +103,7 @@ func newInitializedStdioSession(ctx context.Context, request RuntimeOperationReq
 			Version string `json:"version"`
 		} `json:"clientInfo"`
 	}{
-		ProtocolVersion: mcpProtocolVersion,
+		ProtocolVersion: protocol.PreferredVersion,
 		ClientInfo: struct {
 			Name    string `json:"name"`
 			Version string `json:"version"`
@@ -114,10 +118,23 @@ func newInitializedStdioSession(ctx context.Context, request RuntimeOperationReq
 		session.Close()
 		return nil, err
 	}
-	if _, _, err := readJSONRPCResponseWithContext(initCtx, session.reader, 1, session); err != nil {
+	response, _, err := readJSONRPCResponseWithContext(initCtx, session.reader, 1, session)
+	if err != nil {
 		session.Close()
 		return nil, err
 	}
+	var responseID int
+	if response.JSONRPC != "2.0" || response.Method != "" || json.Unmarshal(response.ID, &responseID) != nil || responseID != 1 {
+		session.Close()
+		return nil, protocol.ErrInvalidInitialization
+	}
+	version, err := protocol.NegotiatedVersion(response.Result)
+	if err != nil {
+		session.Close()
+		return nil, err
+	}
+	session.protocolVersion = version
+	session.initializeResult = bytes.Clone(response.Result)
 	initializedParams := json.RawMessage("{}")
 	if err := writeJSONRPCLine(stdin, jsonRPCRequest{JSONRPC: "2.0", Method: "notifications/initialized", Params: initializedParams}); err != nil {
 		session.Close()

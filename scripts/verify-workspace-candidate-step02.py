@@ -19,6 +19,7 @@ import tomllib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import build_identity
+from verify_authoring_mock import authoring_prompt_payloads, responses_prompt_text
 
 spec = importlib.util.spec_from_file_location("step01", Path(__file__).with_name("verify-workspace-draft-step01.py"))
 step01 = importlib.util.module_from_spec(spec)
@@ -51,17 +52,22 @@ def toml_document(data):
 
 
 def prompt_payload(text):
-    decoder = json.JSONDecoder()
+    value, section = authoring_prompt_payloads(text)
+    if section is not None:
+        return value
+    # Keep historical scalar fixtures readable without accepting ambiguous JSON.
+    text = responses_prompt_text(text)
     matches = []
+    decoder = json.JSONDecoder()
     for index, char in enumerate(text):
-        if char != "{":
+        if char != '{':
             continue
         try:
-            value, _ = decoder.raw_decode(text[index:])
+            candidate, _ = decoder.raw_decode(text[index:])
         except ValueError:
             continue
-        if isinstance(value, dict) and ("outputShape" in value or "candidateAcceptance" in value):
-            matches.append(value)
+        if isinstance(candidate, dict) and ('outputShape' in candidate or 'candidateAcceptance' in candidate):
+            matches.append(candidate)
     require(len(matches) == 1, "fixture requires exactly one complete prompt payload")
     return matches[0]
 

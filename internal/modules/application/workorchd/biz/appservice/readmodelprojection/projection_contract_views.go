@@ -447,6 +447,12 @@ func llmContextBudgetUtilizationTrend(previous float64, recent float64) string {
 // source: llm_usage_cache_summary.go
 
 func addLLMUsageCacheTokenMetrics(summary *projectioncontract.LLMUsageSummary, metrics llmUsageCacheMetrics) {
+	if metrics.cacheReadKnown {
+		summary.CacheReadKnownEntries++
+	}
+	if metrics.cacheWriteKnown {
+		summary.CacheWriteKnownEntries++
+	}
 	summary.CacheReadTokens += metrics.cacheReadTokens
 	summary.CacheWriteTokens += metrics.cacheWriteTokens
 	summary.CacheCreationTokens += metrics.cacheCreationTokens

@@ -458,14 +458,14 @@ func (p *implementationWorkFullflowProvider) serveHTTP(w http.ResponseWriter, r 
 		return
 	}
 	var request struct {
-		Input string `json:"input"`
+		Input fixtureResponsesInput `json:"input"`
 	}
 	if err := json.Unmarshal(wire, &request); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	var authority map[string]json.RawMessage
-	for _, line := range strings.Split(request.Input, "\n") {
+	for _, line := range strings.Split(string(request.Input), "\n") {
 		var value map[string]json.RawMessage
 		if json.Unmarshal([]byte(line), &value) == nil && (value["planStep"] != nil || value["outputContract"] != nil) {
 			authority = value

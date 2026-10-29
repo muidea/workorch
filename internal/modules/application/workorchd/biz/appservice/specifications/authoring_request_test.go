@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -128,7 +129,7 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 		Profiles               []runtimecontract.RuntimeProfileContract `json:"profiles"`
 		VerificationOptions    []authoringCandidateVerificationOptions  `json:"sourceApplicableVerificationDeclarations"`
 	}
-	if err := json.Unmarshal([]byte(command.Request.PromptContext.Sections[1].Content), &reviewPayload); err != nil {
+	if err := json.Unmarshal(authoringTestPayload(t, command), &reviewPayload); err != nil {
 		t.Fatal(err)
 	}
 	expectedRefs, err := spec.ReviewEvidenceRefs(proposalPayload.Goal, proposalPayload.CandidateAcceptance)
@@ -257,7 +258,7 @@ func TestResourceBoundAuthoringCommandsBindSameSnapshotAndRejectProviderResource
 		ResourceSnapshotHash string                                          `json:"resourceSnapshotHash"`
 		Specification        workspace.GoalSpecification                     `json:"specification"`
 	}
-	if err := json.Unmarshal([]byte(reviewCommand.Request.PromptContext.Sections[1].Content), &reviewPayload); err != nil || reviewPayload.ResourceSnapshotHash != derivation.ResourceSnapshotHash || len(reviewPayload.Resources) != 1 || reviewPayload.Resources[0].Content != content || len(reviewPayload.Specification.Reviews) != 0 {
+	if err := json.Unmarshal(authoringTestPayload(t, reviewCommand), &reviewPayload); err != nil || reviewPayload.ResourceSnapshotHash != derivation.ResourceSnapshotHash || len(reviewPayload.Resources) != 1 || reviewPayload.Resources[0].Content != content || len(reviewPayload.Specification.Reviews) != 0 {
 		t.Fatalf("critic resource context changed: %+v %v", reviewPayload, err)
 	}
 	if len(reviewPayload.ExpectedResources) != len(proposalPayload.ExpectedResources) || len(reviewPayload.ExpectedResources) != 1 || reviewPayload.ExpectedResources[0] != proposalPayload.ExpectedResources[0] || reviewPayload.ExpectedResources[0] != reviewPayload.Specification.Resources[0] {
@@ -273,7 +274,7 @@ func TestResourceBoundAuthoringCommandsBindSameSnapshotAndRejectProviderResource
 			Specification     workspace.GoalSpecification           `json:"specification"`
 			ProposalHash      string                                `json:"proposalHash"`
 		}
-		if err := json.Unmarshal([]byte(critic.Request.PromptContext.Sections[1].Content), &input); err != nil {
+		if err := json.Unmarshal(authoringTestPayload(t, critic), &input); err != nil {
 			t.Fatal(err)
 		}
 		if len(input.ExpectedResources) != 1 || input.ExpectedResources[0] != proposalPayload.ExpectedResources[0] || len(input.Specification.Reviews) != 0 || input.ProposalHash != spec.ContentHash() {
@@ -334,4 +335,27 @@ func TestSpecificationRequestBoundIncludesStableContract(t *testing.T) {
 	if _, err := completionCommand(workspace.DefinitionAdmissionCandidate{}, "proposal", proposalInstructions, legacyPayload); err == nil {
 		t.Fatal("legacy builder omitted schema bytes from bounded context")
 	}
+}
+
+// Reconstruct only for assertions; production sends each partition separately.
+func authoringTestPayload(t *testing.T, command llmevents.CompleteProviderCommand) []byte {
+	t.Helper()
+	joined := map[string]json.RawMessage{}
+	for _, section := range command.Request.PromptContext.Sections[1:] {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(section.Content), &fields); err != nil {
+			t.Fatal(err)
+		}
+		for key, value := range fields {
+			if _, exists := joined[key]; exists {
+				t.Fatalf("duplicate field %s", key)
+			}
+			joined[key] = value
+		}
+	}
+	result, err := json.Marshal(joined)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
 }

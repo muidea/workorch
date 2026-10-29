@@ -84,7 +84,7 @@ func TestAuthoringChecklistPreserves42ExtractedItemsAndReviewsEntireGoal(t *test
 			RequiredRequirementIDs []string                          `json:"requiredRequirementIDs"`
 			Goal                   workspace.DefinitionCandidateItem `json:"goal"`
 		}
-		if err := json.Unmarshal([]byte(command.Request.PromptContext.Sections[1].Content), &reviewInput); err != nil || len(reviewInput.RequiredRequirementIDs) != 44 || reviewInput.Goal.Text != input.GoalText {
+		if err := json.Unmarshal(authoringTestPayload(t, command), &reviewInput); err != nil || len(reviewInput.RequiredRequirementIDs) != 44 || reviewInput.Goal.Text != input.GoalText {
 			t.Fatalf("%s lost original Goal or required scope: %v", kind, err)
 		}
 	}

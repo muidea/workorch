@@ -35,7 +35,7 @@ func TestPreparationProtocolProcess(t *testing.T) {
 		}
 		switch q.Method {
 		case "initialize":
-			fmt.Printf("{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{\"tools\":{}}}}\n", q.ID)
+			fmt.Printf("{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}}}}\n", q.ID)
 		case "notifications/initialized":
 		case "tools/list":
 			fmt.Printf("{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"tools\":[{\"name\":\"inspect\"}]}}\n", q.ID)
@@ -95,6 +95,11 @@ func TestPreparationMCPRealProtocolDuplicateAndBoundary(t *testing.T) {
 	}
 	if _, err = send("workorchd", c); err == nil {
 		t.Fatal("unaccepted application source allowed")
+	}
+	oldCommand := c
+	oldCommand.Version = mcpevents.PreparationObservationVersionV1
+	if _, err = send(workspacecommon.ModuleID, oldCommand); err == nil {
+		t.Fatal("historical protocol accepted as a fresh observation")
 	}
 	first, err := send(workspacecommon.ModuleID, c)
 	if err != nil || !first.Satisfied() {

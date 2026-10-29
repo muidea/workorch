@@ -523,6 +523,13 @@ func (p *HTTPProvider) Complete(ctx context.Context, request llmmodels.ProviderR
 }
 
 func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.ProviderRequest) (result llmmodels.ProviderCompletionResult, callErr error) {
+	if err := request.ValidatePromptLayout(); err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	if usesSectionMessages(request) {
+		request.Model = p.config.Model
+		request.Config.ID = p.config.ID
+	}
 	if err := request.ValidateSchemaFormat(); err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
@@ -535,18 +542,26 @@ func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.
 		return llmmodels.ProviderCompletionResult{}, err
 	}
 	requestPayload := responsesRequest{
-		Model:           p.config.Model,
-		Input:           responsesInputForRequest(&request),
-		Temperature:     providerTemperature(p.config),
-		MaxOutputTokens: maxOutputTokensForRequest(p.config, request),
-		Reasoning:       responsesReasoningForRequest(request),
-		Text:            responsesTextForRequest(p.config.Capabilities, request),
+		Model:              p.config.Model,
+		Input:              responsesWireInputForRequest(&request),
+		PromptCacheKey:     responsesPromptCacheKey(request),
+		PromptCacheOptions: responsesPromptCacheOptions(request),
+		Temperature:        providerTemperature(p.config),
+		MaxOutputTokens:    maxOutputTokensForRequest(p.config, request),
+		Reasoning:          responsesReasoningForRequest(request),
+		Text:               responsesTextForRequest(p.config.Capabilities, request),
 	}
 	payload, err := json.Marshal(requestPayload)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
 	result = llmmodels.ProviderCompletionResult{RequestBytes: len(payload)}
+	if usesSectionMessages(request) {
+		request.ContextBudget.ActualBytes = len(payload)
+	}
+	if usesSectionMessages(request) && p.config.ContextProfile.MaxRequestBytes > 0 && len(payload) > p.config.ContextProfile.MaxRequestBytes {
+		return result, fmt.Errorf("%w: section message request exceeds provider byte budget", common.ErrInvalidArgument)
+	}
 	requestCtx, cancel := p.requestContext(ctx)
 	defer cancel()
 	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
@@ -653,6 +668,13 @@ func (p *HTTPProvider) StreamComplete(ctx context.Context, request llmmodels.Pro
 }
 
 func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.ProviderRequest, emit func(llmmodels.ProviderStreamEvent) error) (result llmmodels.ProviderCompletionResult, callErr error) {
+	if err := request.ValidatePromptLayout(); err != nil {
+		return llmmodels.ProviderCompletionResult{}, err
+	}
+	if usesSectionMessages(request) {
+		request.Model = p.config.Model
+		request.Config.ID = p.config.ID
+	}
 	if err := request.ValidateSchemaFormat(); err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
@@ -665,19 +687,27 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 		return llmmodels.ProviderCompletionResult{}, err
 	}
 	requestPayload := responsesRequest{
-		Model:           p.config.Model,
-		Input:           responsesInputForRequest(&request),
-		Temperature:     providerTemperature(p.config),
-		MaxOutputTokens: maxOutputTokensForRequest(p.config, request),
-		Reasoning:       responsesReasoningForRequest(request),
-		Text:            responsesTextForRequest(p.config.Capabilities, request),
-		Stream:          true,
+		Model:              p.config.Model,
+		Input:              responsesWireInputForRequest(&request),
+		PromptCacheKey:     responsesPromptCacheKey(request),
+		PromptCacheOptions: responsesPromptCacheOptions(request),
+		Temperature:        providerTemperature(p.config),
+		MaxOutputTokens:    maxOutputTokensForRequest(p.config, request),
+		Reasoning:          responsesReasoningForRequest(request),
+		Text:               responsesTextForRequest(p.config.Capabilities, request),
+		Stream:             true,
 	}
 	payload, err := json.Marshal(requestPayload)
 	if err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
 	}
 	result = llmmodels.ProviderCompletionResult{RequestBytes: len(payload)}
+	if usesSectionMessages(request) {
+		request.ContextBudget.ActualBytes = len(payload)
+	}
+	if usesSectionMessages(request) && p.config.ContextProfile.MaxRequestBytes > 0 && len(payload) > p.config.ContextProfile.MaxRequestBytes {
+		return result, fmt.Errorf("%w: section message request exceeds provider byte budget", common.ErrInvalidArgument)
+	}
 	hardCtx, cancelHard := p.streamRequestContext(ctx)
 	defer cancelHard()
 	requestCtx, idleGuard := newProviderResponseIdleGuard(hardCtx, p.config.Timeout)
@@ -875,13 +905,15 @@ func setBearerAuthorization(header http.Header, apiKey string) {
 // It is deliberately kept local to the protocol adapter; runtime contracts do
 // not carry provider-specific JSON.
 type responsesRequest struct {
-	Model           string               `json:"model"`
-	Input           string               `json:"input"`
-	Temperature     float64              `json:"temperature,omitempty"`
-	MaxOutputTokens int64                `json:"max_output_tokens,omitempty"`
-	Reasoning       *responsesReasoning  `json:"reasoning,omitempty"`
-	Text            *responsesTextConfig `json:"text,omitempty"`
-	Stream          bool                 `json:"stream,omitempty"`
+	Model              string                 `json:"model"`
+	Input              json.RawMessage        `json:"input"`
+	PromptCacheKey     string                 `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions *responsesCacheOptions `json:"prompt_cache_options,omitempty"`
+	Temperature        float64                `json:"temperature,omitempty"`
+	MaxOutputTokens    int64                  `json:"max_output_tokens,omitempty"`
+	Reasoning          *responsesReasoning    `json:"reasoning,omitempty"`
+	Text               *responsesTextConfig   `json:"text,omitempty"`
+	Stream             bool                   `json:"stream,omitempty"`
 }
 
 type responsesReasoning struct {
@@ -972,7 +1004,29 @@ type responsesUsage struct {
 }
 
 type responsesInputTokenDetails struct {
-	CachedTokens int `json:"cached_tokens,omitempty"`
+	CachedTokens          int  `json:"cached_tokens,omitempty"`
+	CacheWriteTokens      int  `json:"cache_write_tokens,omitempty"`
+	CachedTokensKnown     bool `json:"-"`
+	CacheWriteTokensKnown bool `json:"-"`
+}
+
+// A missing or null measurement is unknown, never an observed zero.
+func (d *responsesInputTokenDetails) UnmarshalJSON(data []byte) error {
+	var value struct {
+		CachedTokens     *int `json:"cached_tokens"`
+		CacheWriteTokens *int `json:"cache_write_tokens"`
+	}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*d = responsesInputTokenDetails{}
+	if value.CachedTokens != nil {
+		d.CachedTokens, d.CachedTokensKnown = *value.CachedTokens, true
+	}
+	if value.CacheWriteTokens != nil {
+		d.CacheWriteTokens, d.CacheWriteTokensKnown = *value.CacheWriteTokens, true
+	}
+	return nil
 }
 
 type providerResponseError struct {
@@ -998,7 +1052,8 @@ func (r responsesResponse) Content() string {
 
 func (u responsesUsage) ProviderUsage() (*llmaudit.ProviderUsage, error) {
 	if u.InputTokens < 0 || u.OutputTokens < 0 || u.TotalTokens < 0 ||
-		u.InputTokensDetails.CachedTokens < 0 || u.InputTokensDetails.CachedTokens > u.InputTokens {
+		u.InputTokensDetails.CachedTokens < 0 || u.InputTokensDetails.CachedTokens > u.InputTokens || u.InputTokensDetails.CacheWriteTokens < 0 ||
+		u.InputTokensDetails.CacheWriteTokens > u.InputTokens-u.InputTokensDetails.CachedTokens {
 		return nil, providerProtocolError("invalid_response_usage", 0)
 	}
 	if u.InputTokens == 0 && u.OutputTokens == 0 && u.TotalTokens == 0 {
@@ -1012,10 +1067,13 @@ func (u responsesUsage) ProviderUsage() (*llmaudit.ProviderUsage, error) {
 		u.TotalTokens = totalTokens
 	}
 	return &llmaudit.ProviderUsage{
-		InputTokens:     u.InputTokens,
-		OutputTokens:    u.OutputTokens,
-		TotalTokens:     u.TotalTokens,
-		CacheReadTokens: u.InputTokensDetails.CachedTokens,
+		InputTokens:           u.InputTokens,
+		OutputTokens:          u.OutputTokens,
+		TotalTokens:           u.TotalTokens,
+		CacheReadTokens:       u.InputTokensDetails.CachedTokens,
+		CacheWriteTokens:      u.InputTokensDetails.CacheWriteTokens,
+		CacheReadTokensKnown:  u.InputTokensDetails.CachedTokensKnown || u.InputTokensDetails.CachedTokens != 0,
+		CacheWriteTokensKnown: u.InputTokensDetails.CacheWriteTokensKnown || u.InputTokensDetails.CacheWriteTokens != 0,
 	}, nil
 }
 

@@ -83,32 +83,24 @@ func AuthoringReviewCommand(derivation workspace.DefinitionDerivationRequest, pr
 		return llmevents.CompleteProviderCommand{}, err
 	}
 	// 每个 critic 只读取同一封存 proposal，不读取其他 critic 的结论。
-	payload, err := json.Marshal(struct {
-		RequiredRequirementIDs []string                                        `json:"requiredRequirementIDs"`
-		ReviewEvidenceRefs     []string                                        `json:"reviewEvidenceRefs"`
-		Kind                   string                                          `json:"kind"`
-		ProposalHash           string                                          `json:"proposalHash"`
-		ResourceSnapshotHash   string                                          `json:"resourceSnapshotHash"`
-		Resources              []workspace.DefinitionAuthoringResourceSnapshot `json:"resources"`
-		ExpectedResources      []workspace.GoalSpecificationResource           `json:"expectedResources"`
-		Goal                   workspace.DefinitionCandidateItem               `json:"goal"`
-		CandidateAcceptance    []workspace.DefinitionCandidateItem             `json:"candidateAcceptance"`
-		Profiles               []runtimecontract.RuntimeProfileContract        `json:"profiles"`
-		VerificationOptions    []authoringCandidateVerificationOptions         `json:"sourceApplicableVerificationDeclarations"`
-		Specification          workspace.GoalSpecification                     `json:"specification"`
-		ProfileSnapshotHashes  []authoringProfileSnapshotHash                  `json:"profileSnapshotHashes"`
-	}{requiredIDs, reviewEvidenceRefs, kind, proposal.ContentHash(), derivation.ResourceSnapshotHash, derivation.Resources, resources, goal, items, bindings.ProfileContracts, authoringVerificationOptions(items, bindings.ProfileContracts), proposal, authoringProfileSnapshotHashes(bindings.ProfileContracts)})
+	input := authoringReviewInput{requiredIDs, reviewEvidenceRefs, kind, proposal.ContentHash(), derivation.ResourceSnapshotHash, derivation.Resources, resources, goal, items, bindings.ProfileContracts, authoringVerificationOptions(items, bindings.ProfileContracts), proposal, authoringProfileSnapshotHashes(bindings.ProfileContracts)}
+	payload, err := json.Marshal(input)
 	if err != nil {
 		return llmevents.CompleteProviderCommand{}, err
 	}
-	return authoringSpecificationCommandFor(derivation.WireContractRef, derivation.Input.WorkspaceID, target, "review/"+kind, authoringReviewInstructions, payload)
+	command, err := authoringSpecificationCommandFor(derivation.WireContractRef, derivation.Input.WorkspaceID, target, "review/"+kind, authoringReviewInstructions, payload)
+	if err != nil {
+		return command, err
+	}
+	return partitionAuthoringReview(command, input, derivation.WireContractRef)
+
 }
 
 func authoringSpecificationCommand(workspaceID common.WorkspaceID, target runtimecontract.ProviderModelTarget, kind, instructions string, payload []byte) (llmevents.CompleteProviderCommand, error) {
 	if len(payload)+len(authoringSpecificationOutputContract(kind, instructions)) > maxDocumentBytes {
 		return llmevents.CompleteProviderCommand{}, fmt.Errorf("authoring specification request exceeds bounded context")
 	}
-	return llmevents.CompleteProviderCommand{Target: target, Request: llmevents.ProviderRequest{WorkspaceID: string(workspaceID), Model: target.ModelID, Kind: "workspace/specification/" + kind, Schema: authoringSpecificationOutputSchema(kind), SchemaFormat: llmmodels.ProviderSchemaFormatJSONSchema, DialogLanguage: "zh-CN", PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.authoring.sealed_ref_mapping_prompt.v1", Sections: []llmmodels.PromptSection{
+	return llmevents.CompleteProviderCommand{Target: target, Request: llmevents.ProviderRequest{WorkspaceID: string(workspaceID), Model: target.ModelID, Kind: "workspace/specification/" + kind, Schema: authoringSpecificationOutputSchema(kind), SchemaFormat: llmmodels.ProviderSchemaFormatJSONSchema, DialogLanguage: "zh-CN", PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.authoring.sealed_ref_mapping_prompt.v1", MessageLayout: llmmodels.PromptMessageLayoutSectionsV1, Sections: []llmmodels.PromptSection{
 		{ID: "C0.specification-contract", Name: "规格编译合同", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, Content: authoringSpecificationOutputContract(kind, instructions)},
 		{ID: "C3.specification-request", Name: "草稿与候选验收项", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, Content: string(payload)},
 	}}}}, nil
@@ -195,4 +187,20 @@ func authoringSpecificationCommandFor(ref string, id common.WorkspaceID, target 
 	command.Request.PromptContext.SchemaVersion = ref
 	command.Request.PromptContext.Sections[0].Content = contract
 	return command, nil
+}
+
+type authoringReviewInput struct {
+	RequiredRequirementIDs []string                                        `json:"requiredRequirementIDs"`
+	ReviewEvidenceRefs     []string                                        `json:"reviewEvidenceRefs"`
+	Kind                   string                                          `json:"kind"`
+	ProposalHash           string                                          `json:"proposalHash"`
+	ResourceSnapshotHash   string                                          `json:"resourceSnapshotHash"`
+	Resources              []workspace.DefinitionAuthoringResourceSnapshot `json:"resources"`
+	ExpectedResources      []workspace.GoalSpecificationResource           `json:"expectedResources"`
+	Goal                   workspace.DefinitionCandidateItem               `json:"goal"`
+	CandidateAcceptance    []workspace.DefinitionCandidateItem             `json:"candidateAcceptance"`
+	Profiles               []runtimecontract.RuntimeProfileContract        `json:"profiles"`
+	VerificationOptions    []authoringCandidateVerificationOptions         `json:"sourceApplicableVerificationDeclarations"`
+	Specification          workspace.GoalSpecification                     `json:"specification"`
+	ProfileSnapshotHashes  []authoringProfileSnapshotHash                  `json:"profileSnapshotHashes"`
 }

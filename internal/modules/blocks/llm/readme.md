@@ -226,6 +226,30 @@ miss/fresh/TTL/LKG、未完 refresh、配置轮换、完整性/隔离、生命�
 - catalog control-plane 允许实现内的有界 GET retry；completion、embedding 与 Runtime provider execution 不以 retry/fallback
   发起第二次 physical call。
 
+## Authoring section-message 缓存边界
+
+STEP02 的 derive/proposal/review 显式选择 `PromptContext.MessageLayout=section_messages/v1`。
+空布局保留既有 Runtime scalar wire；未知布局、重复 section、乱序、非法 role 或未渲染 turns 在物理调用前拒绝。
+这不是新的 Runtime authority 或 SM-1～SM-4 转换，也不改变独立六审、reserve/settlement、预算与人工确认。
+
+- 独立六审的 C0 为固定审查合同，C1 为完整原 Goal、候选、资源及未确认规格，C2 为原 Profile 与验证声明，
+  C3 为本类 required IDs、kind 和 wire 身份。C1/C2 是共享待审数据，不能成为已确认 Definition、事实证明或新指令。
+- Responses adapter 按 section 顺序保留真实消息边界；system 合同映射 developer，业务数据仍为 user。
+  正文保留 exact section bytes，仅添加 section heading；不把数据提升为 developer 来获得缓存。
+- LLM owner 编译计划并在 adapter 根据实际内容重算，不能接受调用方自报 hash/key 代替内容。
+  `renderedStablePrefixHash` 绑定 C0～C2 实际消息、role 与断点；section hash/size 绑定完整原内容。
+  稳定 key 绑定 Workspace、实际 provider/model、schema/格式、reasoning 与共享前缀；不包含时间、物理请求身份、
+  review kind、endpoint 或凭据。不同 Workspace 即使模板/文本相同也隔离；同 Workspace 内容变化重新生成 key。
+- 新布局声明 `prompt_cache_key`、`prompt_cache_options.mode=explicit`，仅在最后一个连续共享 section 的
+  input_text 上设置显式断点。C3 不产生缓存写入声明，不更改 TTL，不补齐最小 token 数、不重试 unsupported 请求。
+  这些是 Responses 缓存请求参数，不是上游支持、已写入或已命中的证明。网关可能剥离参数；实际路线和转发效果
+  必须另行核对，不能仅凭本地 wire 或公共前缀相等宣称真实命中。
+- 每次调用独立持有预算/计划，不共享全局会话、结果、可变缓存或用量；缓存不减少物理调用、独立审查或预算记账。
+  新布局的完整 wire（含缓存 metadata）继续受已配置 request byte limit 限制，超限零提交。
+- Responses 用量分别保留 `cached_tokens`/`cache_write_tokens` 与字段 presence；缺失/null 为 unknown，明确 0 为已知零。
+  读写均非负且合计不得超过 input tokens。公共事件保留 known 标记，未知计数不填零；查询投影分别报告读写已知记录数，
+  Web 对混合窗口标明“部分已知”，只有全部记录已知才显示窗口读取比例。历史正数仍可观察，历史无 presence 的零保持未知。
+
 ## 能力验收
 
 | 维度 | 可执行证据 | 覆盖结论 |
@@ -235,6 +259,7 @@ miss/fresh/TTL/LKG、未完 refresh、配置轮换、完整性/隔离、生命�
 | Runtime exact source / duplicate / concurrent | [`biz/runtime_owner_guard_test.go`](biz/runtime_owner_guard_test.go) | 覆盖 |
 | provider protocol、output bound、stream/non-stream、embedding | [`biz/http_provider_test.go`](biz/http_provider_test.go)、[`biz/http_provider_security_matrix_test.go`](biz/http_provider_security_matrix_test.go) | 本地覆盖 wire success/negative edges、stream idle/hard deadline、持续进展与 reasoning-only terminal；不证明真实 ai-proxy、credential 或 upstream 模型兼容性 |
 | candidate framing、schema、gap claim、correction、cache hash | `biz/runtime_candidate_*_test.go`（含 `TestRequestCandidateClassifiesNonObjectProviderOutputsAsNoDocument`、`TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext`、`TestRuntimeCandidateAuxiliarySingletonWireIsMinimalWithJSONSchemaResponseOnOrOff`、`TestRuntimeCandidateOutputProjectsExecutableValueRulesIntoC3AndSchema`、`TestRuntimeCandidateRetryProjectsOwnerConstraintOnlyInC4WithoutStablePrefixDrift`）、`biz/runtime_semantic_prompt_test.go`、`pkg/models/runtime_candidate_correction_test.go`（含 `TestRuntimeCandidateCorrectionInputAcceptsExactNullRequiredContainer`、`TestRuntimeCandidateCorrectionInputValidatesOperationValueRuleAgainstManifest`、`TestRuntimeCandidateManifestCorrectionProofUsesExactWireRuleAcrossOperationKinds`、owner constraint/operation-set manifest-binding matrix）、`biz/provider_prompt_projection_test.go` | 覆盖 no-candidate framing 零 content、required/auxiliary 最小 wire、multi-operation exact rule identity、typed undeclared-prerequisite claim instruction、JSONSchemaResponse on/off、missing/empty/null/wrong-type schema witness 与 semantic witness 分离、value-rule/owner constraint/operation-set C3 declaration与C4 bounded witness、failure/correction exact binding、manifest-scoped C3 与 C0～C5 identity |
+| authoring cache / concurrent Workspace isolation | `biz/provider_section_messages_test.go`、`biz/provider_section_owner_test.go`、Application `specifications/authoring_cache_test.go`、`readmodelprojection/llm_cache_presence_test.go`、Web `llmUsage` tests | 完整两版输入、六审稳定前缀/变化尾部、role/原文保真、scope/target/content 漂移、4 Workspace × 6 请求并发、stream/non-stream、真实 owner 审计与未知/零/读写用量；不证明 deployed cache hit |
 | active configuration freeze | `TestBizStartFreezesLLMConfigurationForCatalogAndStatus` | 覆盖 |
 | catalog cache/key/concurrent refresh | [`biz/catalog_cache_test.go`](biz/catalog_cache_test.go) | 覆盖 merge、key、auth rotation、capability mapping，以及本地 HTTP transport 的 network/5xx 有界 retry、4xx no-retry、oversize/malformed body、same/cross-origin redirect、fresh→stale→expired LKG |
 | lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestLLMOwnerStartIsIdempotentAndTeardownClearsLifecycle`、`TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall` | 覆盖重复 Start、Stop 清理，以及 Stop 后 completion/embedding/catalog 零 physical call |

@@ -32,8 +32,11 @@ func buildProviderCachePlan(request llmmodels.ProviderRequest) llmmodels.Provide
 			continue
 		}
 		hash := strings.TrimSpace(section.Hash)
-		if hash == "" {
+		if hash == "" || usesSectionMessages(request) {
 			hash = promptSectionHash(sectionID, section.Content)
+			if usesSectionMessages(request) {
+				hash = exactSectionMessageHash(sectionID, section.Content)
+			}
 		}
 		sectionOrder = append(sectionOrder, sectionID)
 		group := promptSectionGroup(sectionID)
@@ -45,7 +48,7 @@ func buildProviderCachePlan(request llmmodels.ProviderRequest) llmmodels.Provide
 			Name:               section.Name,
 			Cacheability:       section.Cacheability,
 			Hash:               hash,
-			SizeBytes:          len(strings.TrimSpace(section.Content)),
+			SizeBytes:          providerCacheSectionSize(request, section.Content),
 			SourceRefs:         append([]string(nil), section.SourceRefs...),
 			DefinitionRevision: section.DefinitionRevision,
 		})
@@ -89,6 +92,12 @@ func buildProviderCachePlan(request llmmodels.ProviderRequest) llmmodels.Provide
 	}
 	plan.AdapterHint = providerAdapterCacheHint(plan)
 	plan.RenderedStablePrefixHash = renderedStablePrefixHash(buildProviderFacingPrompt(request).StablePrefix)
+	if usesSectionMessages(request) {
+		plan.Strategy = "provider_section_messages/v1"
+		plan.RenderedStablePrefixHash = sectionMessagePrefixHash(request)
+		plan.CacheKey = responsesPromptCacheKey(request)
+		plan.ObservedRequestShape.ProviderFacingMode = llmmodels.PromptMessageLayoutSectionsV1
+	}
 	return plan
 }
 
@@ -201,4 +210,16 @@ func uniqueProviderCacheBreakers(items []llmmodels.ProviderCacheBreaker) []llmmo
 		out = append(out, item)
 	}
 	return out
+}
+
+func providerCacheSectionSize(request llmmodels.ProviderRequest, content string) int {
+	if usesSectionMessages(request) {
+		return len(content)
+	}
+	return len(strings.TrimSpace(content))
+}
+
+func exactSectionMessageHash(id, content string) string {
+	sum := sha256.Sum256([]byte(id + "\n" + content))
+	return "sha256:" + hex.EncodeToString(sum[:])
 }

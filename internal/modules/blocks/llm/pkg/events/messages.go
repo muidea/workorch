@@ -63,6 +63,9 @@ func ProviderRequestFromModel(input llmmodel.ProviderRequest) ProviderRequest {
 }
 
 func (r ProviderRequest) ToModel() (llmmodel.ProviderRequest, error) {
+	if err := (llmmodel.ProviderRequest{PromptContext: r.PromptContext}).ValidatePromptLayout(); err != nil {
+		return llmmodel.ProviderRequest{}, err
+	}
 	if err := (llmmodel.ProviderRequest{Schema: r.Schema, SchemaFormat: r.SchemaFormat, RawTextOutput: r.RawTextOutput}).ValidateSchemaFormat(); err != nil {
 		return llmmodel.ProviderRequest{}, err
 	}
@@ -736,7 +739,7 @@ func validateLLMContextBudgetMeasurements(budget llmaudit.ContextBudget) error {
 }
 
 func llmCacheUsageHasNoTokens(usage llmaudit.CacheUsage) bool {
-	return usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 && usage.CacheCreationTokens == 0 &&
+	return !usage.CacheReadTokensKnown && !usage.CacheWriteTokensKnown && usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 && usage.CacheCreationTokens == 0 &&
 		usage.CacheableInputTokens == 0 && usage.NonCacheableInputTokens == 0
 }
 

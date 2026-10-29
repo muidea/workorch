@@ -303,6 +303,8 @@ func llmUsageSummaryTotalsEqual(a, b projectioncontract.LLMUsageSummary) bool {
 		a.EstimatedEntries == b.EstimatedEntries &&
 		a.ProviderNativeEntries == b.ProviderNativeEntries &&
 		a.FailedEntries == b.FailedEntries &&
+		a.CacheReadKnownEntries == b.CacheReadKnownEntries &&
+		a.CacheWriteKnownEntries == b.CacheWriteKnownEntries &&
 		a.CacheReadTokens == b.CacheReadTokens &&
 		a.CacheWriteTokens == b.CacheWriteTokens &&
 		a.CacheCreationTokens == b.CacheCreationTokens &&
@@ -337,6 +339,8 @@ func llmUsageProviderModelBreakdownEqual(a, b projectioncontract.LLMUsageProvide
 		a.InputTokens == b.InputTokens &&
 		a.OutputTokens == b.OutputTokens &&
 		a.TotalTokens == b.TotalTokens &&
+		a.CacheReadKnownEntries == b.CacheReadKnownEntries &&
+		a.CacheWriteKnownEntries == b.CacheWriteKnownEntries &&
 		a.CacheReadTokens == b.CacheReadTokens &&
 		a.CacheWriteTokens == b.CacheWriteTokens &&
 		a.CacheCreationTokens == b.CacheCreationTokens &&

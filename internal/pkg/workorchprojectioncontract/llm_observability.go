@@ -151,6 +151,8 @@ type LLMUsageSummary struct {
 	EstimatedEntries        int                              `json:"estimatedEntries"`
 	ProviderNativeEntries   int                              `json:"providerNativeEntries"`
 	FailedEntries           int                              `json:"failedEntries"`
+	CacheReadKnownEntries   int                              `json:"cacheReadKnownEntries"`
+	CacheWriteKnownEntries  int                              `json:"cacheWriteKnownEntries"`
 	CacheReadTokens         int                              `json:"cacheReadTokens,omitempty"`
 	CacheWriteTokens        int                              `json:"cacheWriteTokens,omitempty"`
 	CacheCreationTokens     int                              `json:"cacheCreationTokens,omitempty"`
@@ -174,6 +176,8 @@ type LLMUsageProviderModelBreakdown struct {
 	InputTokens             int     `json:"inputTokens"`
 	OutputTokens            int     `json:"outputTokens"`
 	TotalTokens             int     `json:"totalTokens"`
+	CacheReadKnownEntries   int     `json:"cacheReadKnownEntries"`
+	CacheWriteKnownEntries  int     `json:"cacheWriteKnownEntries"`
 	CacheReadTokens         int     `json:"cacheReadTokens,omitempty"`
 	CacheWriteTokens        int     `json:"cacheWriteTokens,omitempty"`
 	CacheCreationTokens     int     `json:"cacheCreationTokens,omitempty"`

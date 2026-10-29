@@ -590,7 +590,7 @@ func (p *emptyDirectoryProvider) serveHTTP(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var request struct {
-		Input string `json:"input"`
+		Input fixtureResponsesInput `json:"input"`
 	}
 	if err := json.Unmarshal(wire, &request); err != nil {
 		http.Error(w, err.Error(), 500)
@@ -649,7 +649,7 @@ func (p *emptyDirectoryProvider) serveHTTP(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if kind == "" {
-		payload, kind, err = emptyDirectoryRuntimeDocument(request.Input)
+		payload, kind, err = emptyDirectoryRuntimeDocument(string(request.Input))
 
 	}
 	p.mu.Lock()

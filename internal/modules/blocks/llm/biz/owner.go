@@ -838,11 +838,12 @@ func boundedLLMAuditSections(values []llmmodels.ProviderCacheSectionHash) []llma
 
 func providerCacheUsageAudit(usage *llmaudit.ProviderUsage) llmaudit.CacheUsage {
 	if usage == nil || (usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 && usage.CacheCreationTokens == 0 &&
-		usage.CacheableInputTokens == 0 && usage.NonCacheableInputTokens == 0) {
+		usage.CacheableInputTokens == 0 && usage.NonCacheableInputTokens == 0 && !usage.CacheReadTokensKnown && !usage.CacheWriteTokensKnown) {
 		return llmaudit.CacheUsage{}
 	}
 	return llmaudit.CacheUsage{
 		CacheReadTokens: usage.CacheReadTokens, CacheWriteTokens: usage.CacheWriteTokens,
+		CacheReadTokensKnown: usage.CacheReadTokensKnown || usage.CacheReadTokens != 0, CacheWriteTokensKnown: usage.CacheWriteTokensKnown || usage.CacheWriteTokens != 0,
 		CacheCreationTokens: usage.CacheCreationTokens, CacheableInputTokens: usage.CacheableInputTokens,
 		NonCacheableInputTokens: usage.NonCacheableInputTokens, Estimated: false, Source: modulecommon.UsageSourceProviderNative,
 	}
@@ -1096,6 +1097,8 @@ func (m *Biz) executeCommand(ev magicevent.Event) (providerCommandExecution, err
 		if err != nil {
 			return providerCommandExecution{}, err
 		}
+		request.ContextBudget = cloneProviderContextBudget(request.ContextBudget)
+		attachProviderCachePlan(&request)
 		startedAt := time.Now().UTC()
 		completion, metadata, err := m.completeProvider(ctx, cmd.Target, request, cmd.ExpectedConfigurationRevision)
 		audit := providerCommandAudit(request, metadata, completion.RequestBytes, completion.ResponseBytes, startedAt, time.Now().UTC(), err)
@@ -1150,9 +1153,23 @@ func providerCommandAudit(request llmmodels.ProviderRequest, metadata providerEx
 	budget := cloneProviderContextBudget(request.ContextBudget)
 	if budget == nil {
 		budget = providerContextBudgetFromProfile(metadata.Profile)
+	} else if usesSectionMessages(request) {
+		resolved := providerContextBudgetFromProfile(metadata.Profile)
+		if resolved != nil {
+			resolved.ActualBytes = budget.ActualBytes
+			resolved.CachePlan = budget.CachePlan
+			resolved.PromptCaptured = budget.PromptCaptured
+			resolved.IncludedSections = budget.IncludedSections
+			resolved.NormalizedSections = budget.NormalizedSections
+			budget = resolved
+		}
 	}
 	if budget != nil {
 		budget.ProviderSubmitted = metadata.Submitted
+	}
+	stablePrefixHash := ""
+	if usesSectionMessages(request) && budget != nil && budget.CachePlan != nil {
+		stablePrefixHash = budget.CachePlan.StablePrefixHash
 	}
 	return &llmmodels.ProviderRequestAudit{
 		RequestID:             newProviderCommandRequestID(workorchconfig.LLMOperationResponses, startedAt),
@@ -1161,6 +1178,7 @@ func providerCommandAudit(request llmmodels.ProviderRequest, metadata providerEx
 		StepID:                strings.TrimSpace(request.StepID),
 		Target:                metadata.Target,
 		Operation:             workorchconfig.LLMOperationResponses,
+		StablePrefixHash:      stablePrefixHash,
 		CapabilityRevision:    metadata.Profile.CapabilityRevision,
 		ConfigurationRevision: metadata.Profile.ConfigurationRevision,
 		Kind:                  firstNonEmpty(strings.TrimSpace(request.Kind), "provider_completion"),

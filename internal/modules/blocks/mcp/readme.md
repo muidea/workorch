@@ -69,11 +69,23 @@ Callable capability 与 validation surface 是不同 fact：只有 owner 明确�
 `/mcp/preparation/observe` 只接收 Workspace owner 的已接纳原意图：Workspace/request/payload/snapshot/revision、
 目录、精确 Registry revision、选中 server 与最小 capability 身份。MCP 自行重读完整 Registry、解析自己的启动参数，
 不接受跨 owner endpoint/env/凭据，不授予 Runtime grant 或 CWI credit。
-`workorch-mcp-preparation-observation/v1` 只支持 stdio：initialize、notifications/initialized、所需类别的
+`workorch-mcp-preparation-observation/v2` 只支持 stdio：initialize、notifications/initialized、所需类别的
  tools/list、resources/list、prompts/list，然后关闭。零业务调用；必须正常退出、完整列出已选能力，分页未完不授成功。
 非 stdio 返回 transport_unsupported；总 10 秒、每进程 8 秒、最多 8 server、每 server 原始 frames/stderr 512 KiB。
 关闭等待 500ms 后 kill/wait，失败明确保留，超限明确不完整。原始 bytes 不清洗或摘要，受限 Workspace 证据保存。
 观察包含 owner epoch、session ID、真实 PID、时间及 Registry 前后精确身份。
+
+Runtime stdio 与 preparation v2 共用 `pkg/protocol` 的版本协商：客户端首选请求 `2025-11-25`；
+服务端可返回 `2024-11-05` 或 `2025-11-25`。这是本客户端所实现 operation 的明确支持集合，不按日期推断兼容，
+也不要求服务端回显请求版本。初始化 JSON-RPC envelope 与返回版本必须在 initialized、list 或业务 operation 前通过校验；
+Runtime 将选定版本和原始 result 保存在该进程私有 session，preparation 从原始 frame 重验相同规则。
+未知版本返回 `protocol_version_unsupported`，缺失/畸形初始化返回 `protocol_failed`；关闭进程并保留真实 preparation 回包，
+不能继续 list、调用工具或授予准备成功。正常关闭、完整能力集合、原 Registry、预算和幂等门禁仍分别核验。
+旧 v1 只用于原记录的校验/回放，冻结原 `2025-11-25` 精确判定；新观察入口拒绝 v1，不能把旧 blocked attempt
+升级成通过或改写其原始证据。新显式检查产生 v2 观察；恢复/查询绝不重启握手。
+
+协商只属于 MCP transport owner：Runtime 中参与 SM-3 已封存派发的能力执行及 SM-4 真实返回/排空，
+不新增任何 SM-1～SM-4 转换、credit、grant、重试额度或 Run；preparation 仍独立于 Runtime 执行。
 
 本进程最多保存 128 份原观察，精确重复返回 detached 原值，异 payload 拒绝；不逐出记录后重新执行。
 `/mcp/preparation/query-original` 只查原 Workspace/request/payload；未找到或 owner 重建后返回 unknown，

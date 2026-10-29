@@ -68,6 +68,20 @@ class AuthoringMockTest(unittest.TestCase):
         semantic_review = authoring_response(prompt(review_input))['review']
         self.assertEqual(semantic_review, {key: value for key, value in legacy_review.items() if key not in ('Kind', 'SpecificationHash')})
 
+    def test_section_messages_preserve_full_independent_review(self):
+        value = self.canonical_review_fixture(self.candidate())
+        parts = ({key: item for key, item in value.items() if key not in ('kind', 'requiredRequirementIDs')},
+                 {'kind': value['kind'], 'requiredRequirementIDs': []})
+        messages = [{'role': 'developer', 'content': [{'type': 'input_text', 'text': '### C0.specification-contract\n合同'}]}]
+        for section, part in zip(('C1.specification-snapshot', 'C3.specification-request'), parts):
+            messages.append({'role': 'user', 'content': [{'type': 'input_text', 'text': '### ' + section + '\n' + json.dumps(part, ensure_ascii=False)}]})
+        reconstructed, _ = mock.authoring_prompt_payloads(messages)
+        self.assertEqual(reconstructed, {**value, 'requiredRequirementIDs': []})
+        self.assertEqual(authoring_response(messages), authoring_response(prompt(reconstructed)))
+        messages[-1]['content'][0]['text'] = '### C3.specification-request\n' + json.dumps({'kind': value['kind'], 'goal': {'Text': 'overwritten'}})
+        with self.assertRaises(mock.AuthoringMockError):
+            authoring_response(messages)
+
     def test_non_authoring_is_not_intercepted(self):
         self.assertIsNone(authoring_response('### C3.semantic-authority\n{}'))
 

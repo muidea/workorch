@@ -27,7 +27,7 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(size))
             if not isinstance(payload, dict):
                 raise ValueError()
-            decision = authoring_response(str(payload.get('input', '')))
+            decision = authoring_response(payload.get('input', ''))
             if decision is None:
                 raise AuthoringMockError('仅支持创作请求')
         except (AuthoringMockError, ValueError, TypeError):

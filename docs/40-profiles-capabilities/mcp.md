@@ -138,3 +138,8 @@ Workspace 的显式准备可以使用 MCP owner 独立的版本化 stdio initial
 参数、预算、原操作重放/unknown 与非 stdio fail-closed 边界见
 [MCP owner contract](../../internal/modules/blocks/mcp/readme.md#激活前-preparation-协议观察)。
 Runtime 六入口及 execute 的完整授权链保持不变。
+
+stdio 客户端首选协议 `2025-11-25`，接受服务端协商选择 `2024-11-05` 或 `2025-11-25`，
+不以版本日期大小或请求/响应字符串相等推断兼容。Runtime 与 preparation v2 共用 MCP owner 的明确支持集合；
+不支持或无效初始化在 initialized/list/业务调用前拒绝并关闭。Runtime session 保存真实协商版本及原 result，
+preparation 使用原始 frame 独立反证。旧 preparation v1 的既有判定保持不变，不能升级历史验收；新检查产生 v2。

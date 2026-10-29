@@ -44,9 +44,8 @@ type registrySnapshotGetter interface {
 }
 
 const (
-	mcpProtocolVersion = "2025-11-25"
-	mcpClientName      = "workorch"
-	mcpClientVersion   = "mvp"
+	mcpClientName    = "workorch"
+	mcpClientVersion = "mvp"
 
 	sessionPolicyLongLived = "long_lived"
 
