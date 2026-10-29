@@ -187,7 +187,7 @@ credit. This is criterion-preserving input maintenance, not a general test-repai
 
 ### Versioned entrypoint observation and unchanged-input reuse
 
-新模板 activation 选择 `shell/project-native-validation/v5`，使用 Go behavior v6。
+显式封存 `shell/project-native-validation/v5` 的 activation 使用 Go behavior v6。
 完整 requirement 的 canonical SHA256 固定 `workorch_validation/v5/<requirement-digest>/input_test.go`；
 同一 CWI 的共同检查与每项源义务 verification 具有不同 `_Check_<check-identity>_InputV5`，
 全部同 package 评审并合取执行。每个 supplement 使用同 package 中独立 exact 文件。
@@ -208,7 +208,7 @@ package is not proof of `go test ./...` and does not waive historical failures. 
 contract, not just a filename. Consistent review permits the existing SM-2 feasibility/seal path; conflict fails, and complete
 inconclusive review opens the existing Decision ticket for bounded information and re-review. Review and creation grant zero credit.
 
-The default recipe separately seals `validation/input-consistency/v2`. Each required check reports a complete bounded mapping
+The v2 review protocol requires each check to report a complete bounded mapping
 of exact original-criterion excerpts to `covered`, `missing`, `conflicting` or `unknown` observations, with reasons and exact
 observed input refs. Textual coverage prevents silent omission of a conjunct but is not semantic or execution proof. A pure
 omission is classified as `validation_input_review_coverage_incomplete`, separately from a contradictory assertion; both block
@@ -265,7 +265,15 @@ repair authority. Duplicate trigger tuples or cross-owner operations fail pre-se
 capability set; it is not a Goal/DoD `one_of` terminal relation, and an accepted repair receipt cannot itself satisfy the DoD
 validation requirement.
 
-模板封存 `shell/project-native-validation/v5`，不封存语言 command、argument vector 或 environment。
+新 software-dev 模板封存 `shell/project-native-validation/v8` 与 `validation/input-consistency/v3`，
+不封存语言 command、argument vector 或 environment。该 adapter 保留项目构建、工程测试、精确检查构建与行为执行
+四阶段 all-of；多失败源归属仍须完整封存、独立审查并由 Shell 真实观察。未知或相邻未归属失败不能授权修复。
+v5 及旧 review 的原封存与输入不自动升级；普通创建仍 create-only，审查冲突不授予输入改写权限。
+
+普通开发策略只声明在软件开发 Profile 的原 DoD CWI：File write/edit、owner-backed workspace selector、
+每 CWI 最多 8 轮、每轮最多 4 个目标，并要求 fresh observation、fresh validation 和输入保护。
+Goal、综合交付与其他 Profile 不因此获得工作权限。默认不强制两轮、故意失败或某种语言栈；具体开发切片、
+两轮/修复/Git/交付等项目义务由项目 Profile 明示，并经创作、独立审查与用户精确确认封存。
 Shell alone resolves that declaration against the exact File-owner manifest and publishes the concrete executable recipe; the
 current Shell adapter can recognize Go project facts and keeps all Go grammar private to the owner. The managed-validation wire
 then contains only the sealed `recipeId`; it does not carry a caller-selected command or failure class. Unrecognized failures

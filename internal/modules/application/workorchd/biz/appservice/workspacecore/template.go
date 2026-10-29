@@ -18,7 +18,7 @@ func NormalizeWorkspaceTemplate(template workorchmanagementcontract.WorkspaceTem
 		Name:              strings.TrimSpace(template.Name),
 		Description:       strings.TrimSpace(template.Description),
 		GoalText:          strings.TrimSpace(template.GoalText),
-		DoDItems:          definitioncore.NormalizeDoDItems(template.DoDItems),
+		DoDItems:          normalizeTemplateDoDSourceItems(template),
 		DefaultSoulID:     strings.TrimSpace(template.DefaultSoulID),
 		ContextHints:      cloneContextMap(template.ContextHints),
 		EvidencePolicies:  cloneContextMapSlice(template.EvidencePolicies),
@@ -39,6 +39,16 @@ func NormalizeWorkspaceTemplate(template workorchmanagementcontract.WorkspaceTem
 	}
 	item.SoulBindings = appmodelcore.MapSoulBindingIDs(bindings)
 	return item, nil
+}
+
+func normalizeTemplateDoDSourceItems(template workorchmanagementcontract.WorkspaceTemplate) []string {
+	if _, bound := template.ContextHints["templateProofBindings"]; bound {
+		// Exact source-bound inventories cannot be parsed as free-form text:
+		// splitting semicolons/Markdown changes both criteria and source ordinals.
+		// Invalid declarations remain intact for the original admission gate.
+		return append([]string(nil), template.DoDItems...)
+	}
+	return definitioncore.NormalizeDoDItems(template.DoDItems)
 }
 
 func normalizeTemplateParentIDs(input []string) []string {

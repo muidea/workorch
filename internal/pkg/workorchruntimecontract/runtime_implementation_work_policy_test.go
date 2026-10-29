@@ -187,7 +187,7 @@ func supportedImplementationWorkProfilesFixture() []RuntimeProfileContract {
 	return profiles
 }
 
-func TestRuntimeImplementationWorkPolicyCannotEnableAnIncompleteProtocol(t *testing.T) {
+func TestRuntimeImplementationWorkAvailabilityRequiresIntegratedOwnerProtocol(t *testing.T) {
 	profiles := implementationWorkProfilesFixture()
 	if err := ValidateRuntimeProfileContracts(profiles); err != nil {
 		t.Fatal(err)
@@ -219,14 +219,14 @@ func TestRuntimeImplementationWorkPolicyCannotEnableAnIncompleteProtocol(t *test
 	if err := ValidateRuntimeProfileContracts(supported); err != nil {
 		t.Fatal(err)
 	}
-	if report := ExplainRuntimeImplementationWorkAvailability(supported); report.Available || len(report.Blockers) != 1 || !strings.Contains(report.Blockers[0].Reason, "terminal proof consumers") {
-		t.Fatalf("work execution alone opened incomplete terminal protocol: %#v", report)
+	if report := ExplainRuntimeImplementationWorkAvailability(supported); !report.Available || len(report.Blockers) != 0 {
+		t.Fatalf("integrated owner protocol unavailable: %#v", report)
 	}
-	if err := ValidateRuntimeImplementationWorkAvailability(supported); !errors.Is(err, ErrRuntimeImplementationWorkUnavailable) {
-		t.Fatalf("incomplete terminal protocol became executable: %v", err)
+	if err := ValidateRuntimeImplementationWorkAvailability(supported); err != nil {
+		t.Fatalf("integrated protocol: %v", err)
 	}
-	if err := (RuntimeExecutionContract{StateChangePolicy: RuntimeStateChangeAllowedButNotRequired, ProfileContracts: supported}).ValidateExecutableAdmission(); !errors.Is(err, ErrRuntimeImplementationWorkUnavailable) {
-		t.Fatalf("incomplete public closure bypassed executable gate: %v", err)
+	if err := (RuntimeExecutionContract{StateChangePolicy: RuntimeStateChangeAllowedButNotRequired, ProfileContracts: supported}).ValidateExecutableAdmission(); err != nil {
+		t.Fatalf("integrated executable admission: %v", err)
 	}
 	unsupported := CloneRuntimeProfileContracts(supported)
 	unsupported[0].EvidenceRequirements[0].ImplementationWorkPolicy.TargetSelectorRef = "file/not-integrated"
@@ -248,6 +248,39 @@ func TestRuntimeImplementationWorkPolicyCannotEnableAnIncompleteProtocol(t *test
 	}
 }
 
+func TestRuntimeImplementationWorkAvailabilityRejectsUnsupportedCombinations(t *testing.T) {
+	for name, change := range map[string]func(*RuntimeImplementationWorkPolicy){
+		"edit cannot create": func(p *RuntimeImplementationWorkPolicy) {
+			p.AllowedOperations = []RuntimeOperationVariantRef{{Kind: StepKindFileEdit}}
+		},
+		"write cannot replace": func(p *RuntimeImplementationWorkPolicy) {
+			p.AllowedOperations = []RuntimeOperationVariantRef{{Kind: StepKindFileWrite}}
+		},
+		"selector":         func(p *RuntimeImplementationWorkPolicy) { p.TargetSelectorRef = "file/not-integrated" },
+		"fixed candidates": func(p *RuntimeImplementationWorkPolicy) { p.TargetSelectorCandidateRefs = []string{"resource-a"} },
+		"additional constraint": func(p *RuntimeImplementationWorkPolicy) {
+			p.ProspectiveTargetAllOfConstraintRefs = append(p.ProspectiveTargetAllOfConstraintRefs, "undeclared-owner-contract")
+		},
+		"missing owner selector": func(p *RuntimeImplementationWorkPolicy) {
+			p.ProspectiveTargetAllOfConstraintRefs = []string{RuntimeImplementationWorkConstraintWorkspaceRelativePath}
+		},
+		"unintegrated variant": func(p *RuntimeImplementationWorkPolicy) {
+			p.AllowedOperations = []RuntimeOperationVariantRef{{Kind: RuntimeBlockKindPatchApply, VariantID: "text_replace"}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			profiles := supportedImplementationWorkProfilesFixture()
+			change(profiles[0].EvidenceRequirements[0].ImplementationWorkPolicy)
+			if err := ValidateRuntimeProfileContracts(profiles); err != nil {
+				t.Fatalf("negative must remain a valid declaration: %v", err)
+			}
+			if err := ValidateRuntimeImplementationWorkAvailability(profiles); !errors.Is(err, ErrRuntimeImplementationWorkUnavailable) {
+				t.Fatalf("unsupported combination admitted: %v", err)
+			}
+		})
+	}
+}
+
 func TestRuntimeImplementationWorkPolicyCannotWeakenTerminalProofOrConflict(t *testing.T) {
 	profiles := implementationWorkProfilesFixture()
 	profiles[0].EvidenceRequirements[0].RequiredEvidenceKinds = []string{EvidenceKindStateChange}
@@ -264,5 +297,25 @@ func TestRuntimeImplementationWorkPolicyCannotWeakenTerminalProofOrConflict(t *t
 	exact.ImplementationWorkPolicy.MaxRoundsPerCWI++
 	if err := ValidateRuntimeProfileContracts(profiles); err == nil {
 		t.Fatal("exact policy silently overrides wildcard boundary")
+	}
+}
+
+func TestRuntimeImplementationWorkAvailabilityAcceptsOnlyMatchingFileTargetPolicies(t *testing.T) {
+	for _, policy := range []RuntimeOperationTargetPolicy{RuntimeOperationTargetPolicyExactTarget, RuntimeOperationTargetPolicyExistingOwnerScope, RuntimeOperationTargetPolicyProspectiveOwnerTarget} {
+		profiles := supportedImplementationWorkProfilesFixture()
+		p := profiles[0].EvidenceRequirements[0].ImplementationWorkPolicy
+		p.AllowedTargetPolicies = []RuntimeOperationTargetPolicy{policy}
+		if policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+			p.AllowedOperations = []RuntimeOperationVariantRef{{Kind: StepKindFileWrite}}
+		} else {
+			p.AllowedOperations = []RuntimeOperationVariantRef{{Kind: StepKindFileEdit}}
+			p.ProspectiveTargetAllOfConstraintRefs = nil
+		}
+		if err := ValidateRuntimeProfileContracts(profiles); err != nil {
+			t.Fatal(err)
+		}
+		if err := ValidateRuntimeImplementationWorkAvailability(profiles); err != nil {
+			t.Fatalf("matching File policy %s: %v", policy, err)
+		}
 	}
 }

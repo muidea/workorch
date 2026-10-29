@@ -20,15 +20,22 @@ func (m *Biz) queryRuntimeShellApplicabilityFromAggregate(ctx context.Context, a
 	if err != nil {
 		return nil, false, err
 	}
+	return m.queryRuntimeShellApplicabilityFromSource(ctx, source, aggregate.StateRevision, requestID)
+}
+
+func (m *Biz) queryRuntimeShellApplicabilityFromSource(ctx context.Context, source runtime.RuntimeOperationReadSource, stateRevision uint64, requestID string) (*runtimecontract.RuntimeOwnerRevisionSet, bool, error) {
+	if m == nil || m.EventHub() == nil {
+		return nil, false, common.ErrInvalidArgument
+	}
 	command := shellevents.QueryRuntimeValidationReadDependenciesCommand{
 		RuntimeOperationExecutionContext: source.Context, Operation: source.Operation,
-		RequestID: requestID, IssuedAtStateRevision: aggregate.StateRevision,
-		SourceReceiptHash: receiptHash, OriginalDependencies: source.OriginalDependencies, ApplicabilitySource: source.ApplicabilitySource,
+		RequestID: requestID, IssuedAtStateRevision: stateRevision,
+		SourceReceiptHash: source.SourceReceiptHash, OriginalDependencies: source.OriginalDependencies, ApplicabilitySource: source.ApplicabilitySource,
 	}
 	if err := command.Validate(); err != nil {
 		return nil, false, err
 	}
-	ctx, err = common.BindRuntimeWorkspaceContext(ctx, command.WorkspaceID)
+	ctx, err := common.BindRuntimeWorkspaceContext(ctx, command.WorkspaceID)
 	if err != nil {
 		return nil, false, err
 	}

@@ -145,6 +145,13 @@ cache-control/key、request-log 文件布局、raw ref、model capability/config
 
 Runtime operations and semantic-plan renderers select the existing `section_messages/v1` transport. Responses preserves
 the C0-C5 section content and roles, with an explicit cache boundary after C2. The adapter recomputes the prefix key from
-actual rendered bytes and Workspace/provider/model/schema/reasoning scope; caller hashes do not grant trust. Volatile
+actual rendered bytes and Workspace/provider/model/schema-family/format/reasoning scope; caller hashes do not grant trust. Volatile
 authority, observations and execution feedback remain after that boundary. The sealed Runtime stable-prefix identity
 and the actual rendered wire-prefix hash remain distinct audit facts. This mapping does not promise provider cache hits.
+
+For the LLM owner's exact known Runtime C0 contract, `workorch.section-cache/v2` uses the stable operations or semantic-plan
+schema family rather than the current manifest/step/batch schema bytes. The adapter checks the actual C0 bytes and prompt
+layout/version; a claimed version or caller hash alone does not select a family. Unknown contracts retain exact schema
+isolation. The complete current schema still travels unchanged when strict provider output is enabled, and every response
+must pass the same local manifest/schema admission. Actual provider JSON-schema capability, explicit schema format and raw
+text mode remain separate cache scopes. A common cache key is neither response reuse nor a successful admission fact.

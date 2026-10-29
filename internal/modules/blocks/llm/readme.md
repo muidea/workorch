@@ -269,8 +269,16 @@ STEP02 的 derive/proposal/review 显式选择 `PromptContext.MessageLayout=sect
 ## Validation preparation context
 
 Runtime operations and semantic-plan use `section_messages/v1`. The actual Responses prefix is C0-C2; dynamic C3-C5
-does not enter the explicit prefix key. Provider/model/schema/reasoning and Workspace remain isolated. Runtime's sealed
+does not enter the explicit prefix key. Provider/model/schema-family/format/reasoning and Workspace remain isolated. Runtime's sealed
 stable-prefix identity is not replaced by the rendered wire hash; neither a cache key nor a hit is execution authority.
+
+`workorch.section-cache/v2` derives the operations or semantic-plan schema family only from the owner's exact known C0
+bytes and matching prompt version/layout. Unknown contracts keep full schema isolation. Current manifest/step/batch schema
+bytes remain exact in strict provider output and local response admission; they do not split an otherwise identical Runtime
+prefix. Actual provider JSON-schema capability, raw-text mode and explicit schema format remain isolated. No cache scope is
+persisted authority or a cross-Workspace result cache. `TestRuntimeCacheNamespacePreservesExactDynamicSchemaAndAdmission`
+and the streaming/non-streaming concurrent section-message fixtures cover this boundary; deployed cache hits require usage
+and actual gateway/upstream observations.
 
 Candidate preparation hints name the actual `context.validationProofPreparations` array and its per-member owner,
 CWI, requirement, semantic check and native check. There is no Go/Shell instruction in that generic rule. Owner-selected

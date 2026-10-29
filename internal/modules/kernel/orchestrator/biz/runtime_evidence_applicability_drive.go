@@ -11,13 +11,9 @@ import (
 // SM-4 only coordinates concrete owner reads. It cannot judge the response,
 // change receipt provenance, grant credit, or choose a reopen transition.
 func (m *Biz) driveRuntimeEvidenceApplicability(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, bool, error) {
-	request, required, err := runtime.NextRuntimeEvidenceApplicabilityRequest(aggregate)
+	request, source, required, err := runtime.CompileRuntimeEvidenceApplicabilityRead(aggregate)
 	if err != nil || !required {
 		return aggregate, false, err
-	}
-	source, err := runtime.CompileRuntimeOperationReadSource(aggregate, request.DispatchID, request.OperationID, request.SourceReceiptHash)
-	if err != nil {
-		return runtime.RuntimeAggregate{}, false, err
 	}
 	descriptor, found := runtimecontract.RuntimeOperationDescriptorForKind(source.Operation.Kind)
 	if !found {
@@ -27,9 +23,9 @@ func (m *Biz) driveRuntimeEvidenceApplicability(ctx context.Context, aggregate r
 	var observed bool
 	switch descriptor.OwnerModuleID {
 	case runtimecontract.RuntimeModuleFile:
-		current, observed, err = m.queryRuntimeFileMutationApplicabilityFromAggregate(ctx, aggregate, request.DispatchID, request.OperationID, request.SourceReceiptHash, request.RequestID)
+		current, observed, err = m.queryRuntimeFileMutationApplicabilityFromSource(ctx, source, aggregate.StateRevision, request.RequestID)
 	case runtimecontract.RuntimeModuleShell:
-		current, observed, err = m.queryRuntimeShellApplicabilityFromAggregate(ctx, aggregate, request.DispatchID, request.OperationID, request.SourceReceiptHash, request.RequestID)
+		current, observed, err = m.queryRuntimeShellApplicabilityFromSource(ctx, source, aggregate.StateRevision, request.RequestID)
 	default:
 		return runtime.RuntimeAggregate{}, false, fmt.Errorf("versioned evidence applicability has no concrete owner query for %q", source.Operation.Kind)
 	}

@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -529,7 +530,7 @@ func TestO6GovernanceComparisonsUseFocusedEntries(t *testing.T) {
 	for _, file := range parseRuntimeProductionSources(t) {
 		for _, declaration := range file.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
-			if ok && function.Name.Name == "CompileRuntimeOperationReadSource" {
+			if ok && function.Name.Name == "compileRuntimeOperationReadSource" {
 				ast.Inspect(function.Body, func(node ast.Node) bool {
 					call, ok := node.(*ast.CallExpr)
 					if !ok {
@@ -888,5 +889,50 @@ func assertRuntimeExportedMethods(t *testing.T, methods map[string][]string, rec
 	sort.Strings(expected)
 	if strings.Join(actual, "\x00") != strings.Join(expected, "\x00") {
 		t.Fatalf("%s exported methods = %v, want %v", receiver, actual, expected)
+	}
+}
+
+// Private continuation helpers may be used only by the complete read gates
+// above them. This is a lexical composition, never a caller's validated flag.
+func TestApplicabilityReadContinuationsStayBehindCompletePublicGates(t *testing.T) {
+	want := map[string]map[string]int{
+		"compileRuntimeOperationReadSource":          {"CompileRuntimeOperationReadSource": 1, "compileRuntimeEvidenceApplicabilityRequest": 1, "CompileRuntimeEvidenceApplicabilityRead": 1},
+		"compileRuntimeEvidenceApplicabilityRequest": {"CompileRuntimeEvidenceApplicabilityRequest": 1, "NextRuntimeEvidenceApplicabilityRequest": 1},
+	}
+	actual := map[string]map[string]int{}
+	gates := map[string]int{}
+	for _, file := range parseRuntimeProductionSources(t) {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if id, ok := call.Fun.(*ast.Ident); ok && want[id.Name] != nil {
+					if actual[id.Name] == nil {
+						actual[id.Name] = map[string]int{}
+					}
+					actual[id.Name][fn.Name.Name]++
+				}
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Validate" {
+					if id, ok := sel.X.(*ast.Ident); ok && id.Name == "aggregate" {
+						gates[fn.Name.Name]++
+					}
+				}
+				return true
+			})
+		}
+	}
+	if !reflect.DeepEqual(want, actual) {
+		t.Fatalf("unchecked read continuation callers: %v", actual)
+	}
+	for _, entry := range []string{"CompileRuntimeOperationReadSource", "CompileRuntimeEvidenceApplicabilityRequest", "NextRuntimeEvidenceApplicabilityRequest"} {
+		if gates[entry] != 1 {
+			t.Fatalf("%s must run its complete aggregate gate exactly once", entry)
+		}
 	}
 }

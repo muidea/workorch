@@ -21,7 +21,7 @@ const (
 
 	// RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef identifies
 	// the bounded owner-backed implementation-work scope. Its presence does not
-	// open executable admission before the public terminal closure is proven.
+	// grant a selected target, operation, dispatch or terminal credit.
 	// It is a capability identity, not software-development behavior: File owns
 	// the neutral bounded workspace scope and all concrete target decisions.
 	RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef = "file/workspace_deliverable"
@@ -31,8 +31,9 @@ const (
 
 // ErrRuntimeImplementationWorkUnavailable is a capability boundary, not an
 // invitation to borrow owner-fact acquisition or rejected-validation repair.
-// A syntactically valid policy is not an executable protocol. Admission stays
-// closed until owner adapters, terminal consumers and public closure are proven.
+// A syntactically valid policy is not an executable protocol. Only the exact
+// integrated owner/selector/operation combination passes this static gate.
+// Full runtime readiness is independently required by the public closure gate.
 var ErrRuntimeImplementationWorkUnavailable = errors.New("runtime implementation work protocol is not executable")
 
 // RuntimeImplementationWorkAvailability is a detached, deterministic report
@@ -50,7 +51,7 @@ type RuntimeImplementationWorkBlocker struct {
 }
 
 // ExplainRuntimeImplementationWorkAvailability exposes the exact reason an
-// execution gate remains closed without weakening the gate itself.
+// declared combination is unsupported; this is not a fullflow test result.
 func ExplainRuntimeImplementationWorkAvailability(profiles []RuntimeProfileContract) RuntimeImplementationWorkAvailability {
 	report := RuntimeImplementationWorkAvailability{Available: true}
 	for _, profile := range NormalizeRuntimeProfileContracts(profiles) {
@@ -59,9 +60,11 @@ func ExplainRuntimeImplementationWorkAvailability(profiles []RuntimeProfileContr
 				continue
 			}
 			policy := requirement.ImplementationWorkPolicy
-			reason := ErrRuntimeImplementationWorkUnavailable.Error() + ": terminal proof consumers and public full-flow closure remain unverified"
+			reason := ErrRuntimeImplementationWorkUnavailable.Error() + ": unsupported owner scope or operation combination"
 			if err := policy.Validate(); err != nil {
 				reason = fmt.Sprintf("invalid implementation work declaration: %v", err)
+			} else if implementationWorkProtocolSupported(*policy) {
+				continue
 			}
 			report.Available = false
 			report.Blockers = append(report.Blockers, RuntimeImplementationWorkBlocker{
@@ -71,6 +74,38 @@ func ExplainRuntimeImplementationWorkAvailability(profiles []RuntimeProfileContr
 		}
 	}
 	return report
+}
+
+// Only the integrated owner selector and operation inventory are executable.
+// This is not a target grant: every round still requires an exact owner scope,
+// independent feasibility, a working commitment and a fresh terminal proof.
+func implementationWorkProtocolSupported(policy RuntimeImplementationWorkPolicy) bool {
+	p := policy.Normalized()
+	if p.OwnerModuleID != RuntimeModuleFile || p.TargetSelectorRef != RuntimeImplementationWorkFileWorkspaceDeliverableSelectorRef || len(p.TargetSelectorCandidateRefs) != 0 {
+		return false
+	}
+	write, edit := false, false
+	for _, operation := range p.AllowedOperations {
+		if operation.VariantID != "" || (operation.Kind != StepKindFileWrite && operation.Kind != StepKindFileEdit) {
+			return false
+		}
+		write = write || operation.Kind == StepKindFileWrite
+		edit = edit || operation.Kind == StepKindFileEdit
+	}
+	prospective := slices.Contains(p.AllowedTargetPolicies, RuntimeOperationTargetPolicyProspectiveOwnerTarget)
+	existing := slices.Contains(p.AllowedTargetPolicies, RuntimeOperationTargetPolicyExactTarget) || slices.Contains(p.AllowedTargetPolicies, RuntimeOperationTargetPolicyExistingOwnerScope)
+	// File write is create-only; edit is revision-bound to an existing target.
+	// Do not advertise an impossible operation/policy pair as executable.
+	if write != prospective || edit != existing {
+		return false
+	}
+	if prospective {
+		return SameRuntimeProspectiveTargetAllOfConstraintRefs(p.ProspectiveTargetAllOfConstraintRefs, []string{
+			RuntimeImplementationWorkConstraintWorkspaceRelativePath,
+			RuntimeImplementationWorkConstraintNewTargetOwnerSelector,
+		})
+	}
+	return len(p.ProspectiveTargetAllOfConstraintRefs) == 0
 }
 
 // RuntimeImplementationWorkPolicy is an immutable Profile proposal boundary.

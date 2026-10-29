@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -337,6 +338,47 @@ func TestEvidenceApplicabilityStaleObservationReopensOnlyOriginalCredit(t *testi
 			}
 			if err := runtimeTestEvidenceAggregateRoundTrip(t, result.Aggregate).Validate(); err != nil {
 				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// Complete read compilation must match the independent public gates, including
+// first errors, while returning detached query data without any owner write.
+func TestEvidenceApplicabilityReadMatchesIndependentCompleteGates(t *testing.T) {
+	base, _ := applicabilityTransitionFixture(t)
+	for _, arm := range []string{"unchanged", "header", "receipt", "budget", "evidence", "scope"} {
+		t.Run(arm, func(t *testing.T) {
+			a := base.CloneRaw()
+			switch arm {
+			case "header":
+				a.ResultFeedbackVersion = 0
+			case "receipt":
+				a.OperationReceipts[0].AfterHash = "altered original receipt"
+			case "budget":
+				a.ExecutionBudget.Policy.PolicyRevision = "altered current policy"
+			case "evidence":
+				a.Facts.Evidence.Accepted[0].Summary += "altered original evidence"
+			case "scope":
+				a.Facts.WorkspaceID = "different-workspace"
+			}
+			before := a.CloneRaw()
+			want, required, wantErr := NextRuntimeEvidenceApplicabilityRequest(a)
+			got, source, gotRequired, gotErr := CompileRuntimeEvidenceApplicabilityRead(a)
+			if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) || required != gotRequired || !reflect.DeepEqual(got, want) {
+				t.Fatalf("complete read changed request/first error: %v / %v", gotErr, wantErr)
+			}
+			if gotErr == nil && gotRequired {
+				independent, err := CompileRuntimeOperationReadSource(a, want.DispatchID, want.OperationID, want.SourceReceiptHash)
+				if err != nil || !reflect.DeepEqual(independent, source) {
+					t.Fatalf("read source differs from independent exact compiler: %v", err)
+				}
+				source.OriginalDependencies.Entries[0].Revision = "caller mutation"
+				source.Operation.TargetRefs[0] = "caller mutation"
+				source.ApplicabilitySource.OwnerRevisionSet.Entries[0].Revision = "caller mutation"
+			}
+			if !reflect.DeepEqual(a, before) {
+				t.Fatal("read compile/result mutation changed original authority")
 			}
 		})
 	}

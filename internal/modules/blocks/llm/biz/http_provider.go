@@ -529,6 +529,7 @@ func (p *HTTPProvider) completeResponses(ctx context.Context, request llmmodels.
 	if usesSectionMessages(request) {
 		request.Model = p.config.Model
 		request.Config.ID = p.config.ID
+		request.Config.Capabilities.JSONSchemaResponse = p.config.Capabilities.JSONSchemaResponse
 	}
 	if err := request.ValidateSchemaFormat(); err != nil {
 		return llmmodels.ProviderCompletionResult{}, err
@@ -674,6 +675,7 @@ func (p *HTTPProvider) streamResponses(ctx context.Context, request llmmodels.Pr
 	if usesSectionMessages(request) {
 		request.Model = p.config.Model
 		request.Config.ID = p.config.ID
+		request.Config.Capabilities.JSONSchemaResponse = p.config.Capabilities.JSONSchemaResponse
 	}
 	if err := request.ValidateSchemaFormat(); err != nil {
 		return llmmodels.ProviderCompletionResult{}, err

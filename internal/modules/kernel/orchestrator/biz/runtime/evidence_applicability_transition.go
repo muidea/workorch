@@ -87,6 +87,12 @@ func CompileRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate, evid
 	if err := aggregate.Validate(); err != nil {
 		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, err
 	}
+	return compileRuntimeEvidenceApplicabilityRequest(aggregate, evidenceID)
+}
+
+// No validation credential escapes this call chain. Public entry points run
+// the complete aggregate gate once before these unchanged exact source joins.
+func compileRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate, evidenceID common.EvidenceRecordID) (runtimecontract.RuntimeEvidenceApplicabilityRequest, error) {
 	var fact runtimecontract.EvidenceFact
 	matches := 0
 	for _, value := range aggregate.Facts.Evidence.Accepted {
@@ -106,7 +112,7 @@ func CompileRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate, evid
 			receiptHash = runtimecontract.StableRuntimeOperationReceiptHash(receipt)
 		}
 	}
-	source, err := CompileRuntimeOperationReadSource(aggregate, fact.DispatchID, fact.OperationID, receiptHash)
+	source, err := compileRuntimeOperationReadSource(aggregate, fact.DispatchID, fact.OperationID, receiptHash)
 	if err != nil {
 		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, err
 	}
@@ -154,10 +160,26 @@ func NextRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate) (runtim
 		if observed {
 			continue
 		}
-		request, err := CompileRuntimeEvidenceApplicabilityRequest(aggregate, fact.ID)
+		request, err := compileRuntimeEvidenceApplicabilityRequest(aggregate, fact.ID)
 		return request, err == nil, err
 	}
 	return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, false, nil
+}
+
+// CompileRuntimeEvidenceApplicabilityRead keeps request and owner source in one
+// complete read compilation. These detached values are ordinary query data;
+// the owner and private observation writer still independently check provenance.
+// It retains nothing and grants no credit or execution authority.
+func CompileRuntimeEvidenceApplicabilityRead(aggregate RuntimeAggregate) (runtimecontract.RuntimeEvidenceApplicabilityRequest, RuntimeOperationReadSource, bool, error) {
+	request, required, err := NextRuntimeEvidenceApplicabilityRequest(aggregate)
+	if err != nil || !required {
+		return request, RuntimeOperationReadSource{}, false, err
+	}
+	source, err := compileRuntimeOperationReadSource(aggregate, request.DispatchID, request.OperationID, request.SourceReceiptHash)
+	if err != nil {
+		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, false, err
+	}
+	return request, source, true, nil
 }
 
 func runtimeApplicabilityEvidenceAttributable(facts runtimecontract.RuntimeFacts, fact runtimecontract.EvidenceFact, lineage []runtimecontract.RuntimeCoverageProofLineage) bool {

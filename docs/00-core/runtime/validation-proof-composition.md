@@ -39,7 +39,8 @@ C0-C2. Unsupported protocol/adapter combinations fail closed before owner execut
 The current Shell producer supports v3 only with the explicitly sealed
 `shell/project-native-validation/v6` or explicitly opted-in `/v7` or `/v8` project-conjunction adapter. Its four actual all-of stages, exact native mappings,
 source-integrity checks, output retention and single operation deadline are unchanged. Review does not substitute for any
-stage. The built-in template does not select v3 or authorize general implementation work merely because this producer exists.
+stage. New built-in software-dev activations select v3 with the /v8 adapter. This selection does not authorize input rewriting,
+work or repair by itself; those permissions require their separate sealed Profile and owner contracts. Existing seals remain unchanged.
 
 The optional `validation/diagnostic-source-review/v1` extension is declared by the validation owner on a v3 input subject,
 not inferred from recipe names or failure text. `DiagnosticSources` seals every bounded native source's opaque exact

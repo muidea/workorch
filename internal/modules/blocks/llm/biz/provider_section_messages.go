@@ -78,13 +78,40 @@ func responsesPromptCacheKey(request llmmodels.ProviderRequest) string {
 		Workspace    string
 		Provider     string
 		Model        string
-		Schema       string
+		SchemaScope  string
 		SchemaFormat string
+		JSONSchema   bool
+		RawText      bool
 		Reasoning    string
 		PrefixHash   string
-	}{"workorch.section-cache/v1", request.WorkspaceID, request.Config.ID, request.Model, request.Schema, request.SchemaFormat, request.ReasoningEffort, sectionMessagePrefixHash(request)})
+	}{"workorch.section-cache/v2", request.WorkspaceID, request.Config.ID, request.Model, responsesCacheSchemaScope(request), request.SchemaFormat, request.Config.Capabilities.JSONSchemaResponse, request.RawTextOutput, request.ReasoningEffort, sectionMessagePrefixHash(request)})
 	sum := sha256.Sum256(identity)
 	return "workorch:" + hex.EncodeToString(sum[:])
+}
+
+// Runtime schemas bind the current manifest, plan step and batch. Those are
+// independently checked on every response, but are volatile cache scope. Only
+// the LLM owner's exact known C0 contract selects its stable schema family;
+// neither a caller's hash nor a claimed prompt version is sufficient. Unknown
+// contracts retain full schema isolation. This is a routing hint, never proof
+// that a schema, response, manifest or operation has passed admission.
+func responsesCacheSchemaScope(request llmmodels.ProviderRequest) string {
+	if request.ValidatePromptLayout() == nil && usesSectionMessages(request) {
+		first := request.PromptContext.Sections[0]
+		if first.Role == "system" {
+			switch request.PromptContext.SchemaVersion {
+			case "workorch.runtime_candidate_prompt":
+				if first.ID == "C0.runtime-candidate-contract" && first.Content == runtimeCandidateContractCatalog() {
+					return "runtime/operations-schema/v1"
+				}
+			case "workorch.runtime_semantic_plan_prompt":
+				if first.ID == "C0.runtime-semantic-contract" && first.Content == runtimeSemanticPlanContractCatalog() {
+					return "runtime/semantic-plan-schema/v1"
+				}
+			}
+		}
+	}
+	return "exact-schema:" + request.Schema
 }
 
 func responsesWireInputForRequest(request *llmmodels.ProviderRequest) json.RawMessage {

@@ -997,6 +997,30 @@
             {
               "id": "*",
               "scope": "dodItem",
+              "implementationWorkPolicy": {
+                "protocolRef": "runtime-implementation-work/v1",
+                "ownerModuleId": "blocks/file",
+                "allowedOperations": [
+                  { "kind": "file/write" },
+                  { "kind": "file/edit" }
+                ],
+                "allowedTargetPolicies": [
+                  "existing_owner_scope",
+                  "prospective_owner_target"
+                ],
+                "targetSelectorRef": "file/workspace_deliverable",
+                "targetSelectorOwnerRef": "software-dev",
+                "targetSelectorSubjectRef": "dodItem_implementation",
+                "prospectiveTargetAllOfConstraintRefs": [
+                  "workspace-relative-path",
+                  "new-target-requires-owner-selector"
+                ],
+                "maxRoundsPerCWI": 8,
+                "maxTargetsPerRound": 4,
+                "requireFreshObservation": true,
+                "requireFreshValidation": true,
+                "protectValidationInputs": true
+              },
               "requiredEvidenceKinds": [
                 "validation"
               ],
@@ -1315,8 +1339,8 @@
         "profile": "software-dev",
         "rule": "software_dev_test_zero_work_is_inconclusive",
         "appliesTo": "shell/command",
-        "recipeAdapterRef": "shell/project-native-validation/v5",
-        "recipeInputReviewProtocolRef": "validation/input-consistency/v2",
+        "recipeAdapterRef": "shell/project-native-validation/v8",
+        "recipeInputReviewProtocolRef": "validation/input-consistency/v3",
         "recipeDeclared": true,
         "recipeTimeoutMillis": 60000,
         "zeroWorkMarkers": [

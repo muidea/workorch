@@ -133,10 +133,10 @@ func TestEmbeddedSoftwareDevTemplateDoDItemsCoverScopeEvidenceAndRisk(t *testing
 		t.Fatalf("software-dev evidencePolicies missing")
 	}
 	policy := item.EvidencePolicies[0]
-	if policy["recipeAdapterRef"] != "shell/project-native-validation/v5" {
+	if policy["recipeAdapterRef"] != "shell/project-native-validation/v8" {
 		t.Fatalf("software-dev evidence policy recipeAdapterRef = %v, want neutral Shell adapter", policy["recipeAdapterRef"])
 	}
-	if policy["recipeInputReviewProtocolRef"] != "validation/input-consistency/v2" {
+	if policy["recipeInputReviewProtocolRef"] != "validation/input-consistency/v3" {
 		t.Fatal("software-dev template must explicitly seal the obligation-review protocol")
 	}
 	for _, forbidden := range []string{"commandName", "recipeArgs", "requiredArgs", "argsContain", "workEvidenceMarkers"} {

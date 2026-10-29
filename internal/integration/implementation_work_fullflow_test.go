@@ -26,6 +26,7 @@ import (
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/definitionconfiguration"
+	"github.com/muidea/workorch/internal/pkg/runtimeprofiledecode"
 	"github.com/muidea/workorch/internal/pkg/workorchconfig"
 	management "github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchrepo"
@@ -33,9 +34,9 @@ import (
 )
 
 // 严格 fail-first 公共正例，不是 BootstrapOnly，也不接受 unavailable 为成功。
-// 只复用主最新 default_empty_directory_test.go 的 public helpers；本文件不改
-// template/availability，不直接创建 Run、bootstrap、authority、binding 或 receipt。
-// 当前默认 Profile 未声明 work policy、availability 仍 closed 时，本正例应失败。
+// 默认 Profile 必须先具备可执行普通工作策略。两轮/强制修复属于这个测试项目的
+// 额外原准则，通过公开模板接口声明并在正常创作/六审/确认链封存，不能强加给所有项目。
+// 不直接创建 Run、bootstrap、authority、binding 或 receipt，不改变默认模板。
 // synthetic provider 仅提议文档；所有交付文件、Git、证据与终态由 production owners 产生。
 func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 	ctx := context.Background()
@@ -49,6 +50,7 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	template = implementationWorkFullflowDeclareProject(t, client, baseURL, template)
 	assertEmptyDeliverable(t, directory)
 	var created struct {
 		Authoring management.DefinitionAuthoringView `json:"authoring"`
@@ -80,6 +82,23 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 			break
 		}
 		if reviewed.State == "failed" || reviewed.State == "preparation_failed" {
+			for _, request := range reviewed.Requests {
+				if request.State != "failed" {
+					continue
+				}
+				var original struct {
+					Diagnostic management.DefinitionAuthoringDiagnosticView `json:"diagnostic"`
+				}
+				productionJSON(t, client, http.MethodGet, path+"/authoring/diagnostics/"+request.PermitID, nil, &original)
+				t.Logf("synthetic authoring rejection: %s", original.Diagnostic.ParseError)
+			}
+			for _, diagnostic := range reviewed.PreparationDiagnostics {
+				var original struct {
+					Diagnostic management.DefinitionAuthoringPreparationDiagnosticView `json:"diagnostic"`
+				}
+				productionJSON(t, client, http.MethodGet, path+"/authoring/preparation-diagnostics/"+diagnostic.DiagnosticID, nil, &original)
+				t.Logf("synthetic preparation diagnostic: %+v", original.Diagnostic)
+			}
 			t.Fatalf("公共 authoring 失败，不能降格 bootstrap: %+v", reviewed)
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -138,6 +157,7 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 				t.Logf("Runtime revision=%d state=%s provider=%+v", first.Revision, first.State, provider.snapshot())
 			}
 			if first.State == common.RunStateBlockedOnDecision || first.State == common.RunStateBlockedOnApproval {
+				implementationWorkFullflowSaveFailureSnapshot(t, first)
 				t.Fatalf("公开正例被正式治理阻塞，不能当已完成: state=%s ticket=%s approval=%s provider=%+v", first.State, first.BlockingTicketID, first.BlockingApprovalID, provider.snapshot())
 			}
 			if first.RuntimeBootstrap != nil && len(initialBootstrap) == 0 {
@@ -246,6 +266,66 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 	}
 }
 
+// This is project configuration through the real HTTP/Workspace owner, before
+// authoring or confirmation. It retains every default obligation. The original
+// synthetic Goal requires Runtime facts which engineering tests cannot prove;
+// the default must not require two rounds or an intentional failure for every
+// unrelated software project merely to satisfy this fixture.
+func implementationWorkFullflowDeclareProject(t *testing.T, client *http.Client, baseURL string, base *workspace.WorkspaceTemplate) *workspace.WorkspaceTemplate {
+	t.Helper()
+	hints := base.ContextHints.Map()
+	profiles := hints["profileContracts"].(map[string]any)
+	profile := profiles["software-dev"].(map[string]any)
+	requirements := profile["evidenceRequirements"].([]any)
+	policy := false
+	for _, value := range requirements {
+		r := value.(map[string]any)
+		policy = policy || (r["scope"] == "dodItem" && r["implementationWorkPolicy"] != nil)
+	}
+	if !policy {
+		t.Fatal("正式默认 Profile 缺普通工作策略；项目配置不得补造或绕过该门禁")
+	}
+	rounds := func(ref, source string) map[string]any {
+		r := map[string]any{"ref": ref, "kind": "completed_work_rounds", "consumptionPoint": "execution", "minCompletedRounds": 2}
+		if source != "" {
+			r["executionSourceContractRef"] = source
+		}
+		return r
+	}
+	repair := func(ref, source string) map[string]any {
+		r := map[string]any{"ref": ref, "kind": "repair_then_fresh_validation", "consumptionPoint": "execution", "repairHistoryContractRef": runtimecontract.RuntimeConfirmedBindingRepairProofV1}
+		if source != "" {
+			r["executionSourceContractRef"] = source
+		}
+		return r
+	}
+	declaration := func(id, scope string, rules ...any) map[string]any {
+		return map[string]any{"id": id, "scope": scope, "requiredEvidenceKinds": []string{"validation"}, "acceptedStepKinds": []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, "lineageAssertions": rules}
+	}
+	requirements = append(requirements,
+		declaration("dod-001", "dodItem", rounds("project-two-rounds", ""), repair("project-repair", ""),
+			map[string]any{"ref": "project-delivery", "kind": "delivery_acknowledgements", "consumptionPoint": "post_terminal_delivery"},
+			map[string]any{"ref": "project-snapshot", "kind": "terminal_owner_snapshot", "consumptionPoint": "post_terminal_delivery", "terminalContractRef": runtimecontract.RuntimeTerminalProofContractV2, "receiptSourceScope": "deliverable", "receiptSourceId": "version_control_snapshot", "validationSourceScope": "deliverable", "validationSourceId": "validation_report", "ownerModuleId": runtimecontract.RuntimeModuleGit, "operationKind": "git/write", "operationVariantId": "commit", "requiredEffectScope": "workspace_durable"}),
+		declaration("dod-002", "dodItem", repair("project-source-repair", runtimecontract.RuntimeCrossSourceExecutionProofV1)),
+		declaration("*", "goal", rounds("project-goal-rounds", runtimecontract.RuntimeGoalSourceExecutionProofV2), repair("project-goal-repair", runtimecontract.RuntimeGoalSourceExecutionProofV2)),
+	)
+	profile["evidenceRequirements"] = requirements
+	if err := runtimeprofiledecode.ValidateInputShape(hints); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtimecontract.ValidateRuntimeProfileContracts(runtimeprofiledecode.Decode(profiles)); err != nil {
+		t.Fatal(err)
+	}
+	request := management.WorkspaceTemplate{ID: "software-dev-public-workload", Name: "公开两轮工程验收", Description: base.Description, GoalText: base.GoalText, DoDItems: slices.Clone(base.DoDItems), DefaultSoulID: base.DefaultSoulID, SoulBindings: base.SoulBindings, ContextHints: hints}
+	for _, p := range base.EvidencePolicies {
+		request.EvidencePolicies = append(request.EvidencePolicies, p.Map())
+	}
+	productionJSON(t, client, http.MethodPost, baseURL+"/api/v1/workorch/workspace-templates", request, nil)
+	// The next read still goes through the production owner in authoring. This
+	// return value supplies only the public template identity, never authority.
+	return &workspace.WorkspaceTemplate{ID: request.ID}
+}
+
 // Explicit proposal for this test's original first user DoD, not a runtime
 // source selector. The public owner still independently reviews, confirms and
 // seals the complete Profile snapshot and all original DoD obligations.
@@ -320,7 +400,8 @@ func implementationWorkFullflowAuthoringMapping(record *workspace.DefinitionAuth
 		return m, fmt.Errorf("public work proposal lacks unique Profile deliverable source")
 	}
 	// Only explicit test Profile declarations authorize these exact mappings.
-	// The default closed Profile has no such rules and is left unchanged.
+	// The default Profile has no forced two-round or repair guards; these rules
+	// belong only to the explicitly declared synthetic project.
 	for _, profile := range b.ProfileContracts {
 		for _, requirement := range profile.EvidenceRequirements {
 			for _, rule := range requirement.LineageAssertions {

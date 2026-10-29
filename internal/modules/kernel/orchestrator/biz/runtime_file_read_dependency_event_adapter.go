@@ -45,6 +45,15 @@ func (m *Biz) queryRuntimeFileMutationApplicabilityFromAggregate(ctx context.Con
 	if err != nil {
 		return nil, false, err
 	}
+	return m.queryRuntimeFileMutationApplicabilityFromSource(ctx, source, aggregate.StateRevision, requestID)
+}
+
+// Only same-call complete aggregate compilers supply this detached owner read.
+// The receiving File owner still verifies the exact original receipt and fence.
+func (m *Biz) queryRuntimeFileMutationApplicabilityFromSource(ctx context.Context, source runtime.RuntimeOperationReadSource, stateRevision uint64, requestID string) (*runtimecontract.RuntimeOwnerRevisionSet, bool, error) {
+	if requestID == "" || requestID != strings.TrimSpace(requestID) {
+		return nil, false, common.ErrInvalidArgument
+	}
 	if source.ApplicabilitySource == nil {
 		return nil, false, fmt.Errorf("File mutation has no original versioned applicability source")
 	}
@@ -59,7 +68,7 @@ func (m *Biz) queryRuntimeFileMutationApplicabilityFromAggregate(ctx context.Con
 	}
 	return m.queryRuntimeFileReadDependencies(ctx, fileevents.QueryRuntimeFileReadDependenciesCommand{
 		RuntimeOperationExecutionContext: source.Context, SealedOperation: sealed,
-		RequestID: requestID, IssuedAtStateRevision: aggregate.StateRevision,
+		RequestID: requestID, IssuedAtStateRevision: stateRevision,
 		SourceReceiptHash: source.SourceReceiptHash, OriginalDependencies: source.OriginalDependencies,
 		ApplicabilitySource: runtimecontract.CloneRuntimeEvidenceApplicabilityDependencies(source.ApplicabilitySource),
 	})

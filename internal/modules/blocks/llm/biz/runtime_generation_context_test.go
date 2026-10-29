@@ -121,6 +121,73 @@ func TestRuntimeSemanticUsesIsolatedSectionCacheWithoutMovingVolatileState(t *te
 	}
 }
 
+func TestRuntimeCacheNamespacePreservesExactDynamicSchemaAndAdmission(t *testing.T) {
+	batch := runtimeSemanticProviderTestRequest(t)
+	order := runtimeSemanticProviderTestRequest(t)
+	order.SemanticContext.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	order.SemanticContext.BatchID = ""
+	order.SemanticContext.BatchCoverageWorkItemIDs = nil
+	refreshSemanticProgressForTest(t, &order)
+	first, err := runtimeProviderRequest(batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := runtimeProviderRequest(order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Schema == second.Schema || first.PromptContext.Sections[3].Content == second.PromptContext.Sections[3].Content {
+		t.Fatal("test must exercise different exact schema and volatile authority")
+	}
+	if responsesPromptCacheKey(first) != responsesPromptCacheKey(second) {
+		t.Fatal("same owner contract and actual stable prefix split by dynamic schema")
+	}
+	for _, r := range []llmmodels.ProviderRequest{first, second} {
+		assertRuntimeSectionCacheWire(t, r)
+		for _, enabled := range []bool{false, true} {
+			format := responsesTextForRequest(llmmodels.ProviderCapabilities{JSONSchemaResponse: enabled}, r)
+			if enabled {
+				var expected any
+				if err := json.Unmarshal([]byte(r.Schema), &expected); err != nil {
+					t.Fatal(err)
+				}
+				if format == nil || format.Format == nil || !format.Format.Strict || !reflect.DeepEqual(format.Format.Schema, expected) {
+					t.Fatal("cache namespace changed exact provider schema")
+				}
+			} else if format != nil {
+				t.Fatal("cache namespace enabled undeclared provider format")
+			}
+		}
+	}
+	// Neither a stable cache family nor the unchanged prefix can authorize a
+	// stale manifest. The ordinary typed renderer still rejects it locally.
+	batch.SemanticManifest.DefinitionSeedHash = "foreign-seed"
+	if _, err := runtimeProviderRequest(batch); err == nil {
+		t.Fatal("stable cache family bypassed exact manifest gate")
+	}
+	for _, change := range []func(*llmmodels.ProviderRequest){
+		func(r *llmmodels.ProviderRequest) { r.WorkspaceID = "different-project" },
+		func(r *llmmodels.ProviderRequest) { r.Model = "other" },
+		func(r *llmmodels.ProviderRequest) { r.Config.ID = "other" },
+		func(r *llmmodels.ProviderRequest) { r.ReasoningEffort = "other" },
+		func(r *llmmodels.ProviderRequest) { r.SchemaFormat = "other" },
+		func(r *llmmodels.ProviderRequest) { r.Config.Capabilities.JSONSchemaResponse = true },
+		func(r *llmmodels.ProviderRequest) { r.RawTextOutput = true },
+		func(r *llmmodels.ProviderRequest) { r.PromptContext.SchemaVersion = "claimed-unknown-contract" },
+		func(r *llmmodels.ProviderRequest) { r.PromptContext.Sections[0].Content += " changed contract" },
+		func(r *llmmodels.ProviderRequest) { r.PromptContext.Sections[1].Content += " different requirements" },
+	} {
+		changed := first
+		prompt := *first.PromptContext
+		prompt.Sections = append([]llmmodels.PromptSection(nil), first.PromptContext.Sections...)
+		changed.PromptContext = &prompt
+		change(&changed)
+		if responsesPromptCacheKey(changed) == responsesPromptCacheKey(first) {
+			t.Fatal("different scope/format/contract reused key")
+		}
+	}
+}
+
 func TestRuntimeGenerationContextIntegrityRejectsLostForgedAndForeignSource(t *testing.T) {
 	semantic := runtimeSemanticProviderTestRequest(t)
 	provider, err := runtimeProviderRequest(semantic)

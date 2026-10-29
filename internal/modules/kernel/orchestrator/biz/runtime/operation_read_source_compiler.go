@@ -27,6 +27,15 @@ func CompileRuntimeOperationReadSource(aggregate RuntimeAggregate, dispatchID, o
 	if err := aggregate.Validate(); err != nil {
 		return RuntimeOperationReadSource{}, err
 	}
+	return compileRuntimeOperationReadSource(aggregate, dispatchID, operationID, receiptHash)
+}
+
+// Called only after the same lexical read has validated its complete aggregate.
+// The source joins, receipt identity and execution authority are always rebuilt.
+func compileRuntimeOperationReadSource(aggregate RuntimeAggregate, dispatchID, operationID, receiptHash string) (RuntimeOperationReadSource, error) {
+	if dispatchID == "" || dispatchID != strings.TrimSpace(dispatchID) || operationID == "" || operationID != strings.TrimSpace(operationID) || receiptHash == "" || receiptHash != strings.TrimSpace(receiptHash) {
+		return RuntimeOperationReadSource{}, common.ErrInvalidArgument
+	}
 	dispatch, _, found := operationReceiptDispatch(aggregate, dispatchID)
 	if !found {
 		return RuntimeOperationReadSource{}, fmt.Errorf("%w: read source dispatch is not persisted", common.ErrConflict)

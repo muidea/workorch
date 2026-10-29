@@ -87,8 +87,9 @@ func TestSectionMessageCacheKeepsExactPrefixRolesAndIsolatesScope(t *testing.T) 
 
 func TestSectionMessageCacheConcurrentWorkspacesPreserveRequestsAndUsage(t *testing.T) {
 	const workspaces, reviews = 4, 6
-	for _, streaming := range []bool{false, true} {
-		t.Run(fmt.Sprint(streaming), func(t *testing.T) {
+	for _, scenario := range []struct{ streaming, runtime bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		t.Run(fmt.Sprint(scenario), func(t *testing.T) {
+			streaming := scenario.streaming
 			var mu sync.Mutex
 			keys := map[string]string{}
 			prefixByWorkspace := map[string]string{}
@@ -104,6 +105,16 @@ func TestSectionMessageCacheConcurrentWorkspacesPreserveRequestsAndUsage(t *test
 				}
 				if len(messages) != 4 || wire.PromptCacheOptions == nil || wire.PromptCacheOptions.Mode != "explicit" || wire.Stream != streaming {
 					return nil, fmt.Errorf("incorrect physical request")
+				}
+				if scenario.runtime {
+					if wire.Text == nil || wire.Text.Format == nil || !wire.Text.Format.Strict {
+						return nil, fmt.Errorf("missing dynamic strict schema")
+					}
+					want := strings.TrimPrefix(messages[3].Content[0].Text, "### C3.review\n")
+					exact, _ := json.Marshal(wire.Text.Format.Schema)
+					if string(exact) != fmt.Sprintf(`{"const":%q,"type":"string"}`, want) {
+						return nil, fmt.Errorf("mixed physical schema and tail")
+					}
 				}
 				snapshot := messages[1].Content[0].Text
 				ws := ""
@@ -144,7 +155,9 @@ func TestSectionMessageCacheConcurrentWorkspacesPreserveRequestsAndUsage(t *test
 				}
 				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{media}}, Body: io.NopCloser(strings.NewReader(output))}, nil
 			})}
-			provider := NewHTTPProviderWithClient(testAIProxyProviderConfig("https://fixture.invalid/v1"), client)
+			config := testAIProxyProviderConfig("https://fixture.invalid/v1")
+			config.Capabilities.JSONSchemaResponse = scenario.runtime
+			provider := NewHTTPProviderWithClient(config, client)
 			var wg sync.WaitGroup
 			for ws := range workspaces {
 				for review := range reviews {
@@ -152,6 +165,12 @@ func TestSectionMessageCacheConcurrentWorkspacesPreserveRequestsAndUsage(t *test
 					go func(ws, review int) {
 						defer wg.Done()
 						request := sectionCacheRequest(fmt.Sprintf("ws-%d", ws), fmt.Sprintf("review-%d", review))
+						if scenario.runtime {
+							request.PromptContext.SchemaVersion = "workorch.runtime_semantic_plan_prompt"
+							request.PromptContext.Sections[0].ID = "C0.runtime-semantic-contract"
+							request.PromptContext.Sections[0].Content = runtimeSemanticPlanContractCatalog()
+							request.Schema = fmt.Sprintf(`{"type":"string","const":%q}`, request.PromptContext.Sections[3].Content)
+						}
 						var result llmmodels.ProviderCompletionResult
 						var err error
 						if streaming {

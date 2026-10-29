@@ -505,6 +505,10 @@ File adapter 在原 read 或显式 versioned mutation owner 边界封装 query�
 `biz/runtime/operation_read_source_compiler_test.go` 固定 claimed/missing/nil 来源拒绝、owner-committed 与重载等价；
 实际 File 组合回归对照原执行 request，覆盖 completed dispatch、来源篡改、返回隔离与 owner 重建后重编。
 source compiler 和 query 自身不写 CAS/credit/预算；只有 SM-2 private applicability event 可提交观察与裁决。
+`CompileRuntimeEvidenceApplicabilityRead` 在同次完整 aggregate 门禁内同时编译适用性 request 与 detached 原 receipt
+读取来源；公开独立 source/request 入口仍各自执行完整门禁。内部 continuation 不接收已验证标志，不缓存结果，
+只在同一原始 aggregate 上复用本次已执行的完整遍历。File/Shell typed query 仍核验原 receipt/key/fence，SM-2
+观察写入仍独立反查来源、当前版本及 CAS。SM-4 仅减少重复只读编译，不改变 SM-1/2/3、预算、credit 或恢复权威。
 `runtime_file_applicability_mainline_test.go` 配对真实 File mutation/query 与 SM-2；
 其中 matching/changed/missing × CAS 前中断/CAS 后响应丢失重建实际 File owner/controller，并原 JSON reload；
 before-CAS 仅重查保存一次、after-CAS 不重复观察，原 receipt/effect/预算不变。相同 Hub 和 Workspace/CAS fixture
@@ -1434,7 +1438,7 @@ SM-4 唯一终态材料 compiler 规范化权威投影时必须另外保留原 `
 
 ## 能力验收
 
-Profile 的独立 `RuntimeImplementationWorkPolicy`（`runtime-implementation-work/v1`）声明有界的 owner、operation、selector、轮次、fresh observation/validation 与输入保护，进入 Profile 身份和 exact CWI 的不可变 Definition 投影。声明本身不授予 effect；`RuntimeExecutionContract.ValidateExecutableAdmission` 与 Workspace promotion 仍通过 availability gate 拒绝尚未开放的协议执行。纯 `Validate` 保留合法声明供合同校验，不代表可执行准入。
+Profile 的独立 `RuntimeImplementationWorkPolicy`（`runtime-implementation-work/v1`）声明有界的 owner、operation、selector、轮次、fresh observation/validation 与输入保护，进入 Profile 身份和 exact CWI 的不可变 Definition 投影。声明本身不授予 effect；`RuntimeExecutionContract.ValidateExecutableAdmission` 与 Workspace promotion 的 availability gate 只接受已接线的 File `file/workspace_deliverable`、无固定 candidate refs 的 write/edit 组合及其 exact prospective 约束，其他组合拒绝。纯 `Validate` 不代表可执行准入，静态 availability 也不代表公开 fullflow/readiness 已通过。
 
 工作事务复用 SM-2/3/4 和同一个 Runtime aggregate，SM-1 不新增迁移。SM-2 私有 scope 事件先 CAS 封存只读 `ScopePreview` 需求，再接收真实 owner 观察；独立来源由 sealed Profile、Definition seed、exact CWI 与当前 manifest 前像重新编译，不能从待验证请求反向构造。File 适配层保留完整有界 inventory、unsupported 负事实和 typed stale；单轮目标上限不能裁剪观察。scope 不写入终验 `Resources.TargetSelection`，也不授 variant、dispatch 或 credit。
 

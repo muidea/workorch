@@ -58,8 +58,11 @@ Runtime JSON、recipe 或 check。
 可选 `RuntimeImplementationWorkPolicy` 只作为 exact CWI 的不可变 Profile 声明投影进入 Definition；
 wildcard/exact 冲突不能被覆盖，原 validation-only 终结义务不变。bootstrap、facts 与 semantic manifest 编译须
 独立核对该投影和封存 Profile 的精确 source，不能从当前配置补回缺失值。它不进入 mutable focus cursor、
-`CoverageFocusDeclaration` 的最终 proof 或现行三种 evidence purpose；当前执行支持门禁仍拒绝该协议，
-声明存在不表示已取得 owner scope/binding、工作轮次或 dispatch 权限。
+`CoverageFocusDeclaration` 的最终 proof 或现行三种 evidence purpose。执行组合门禁仅支持 File owner 的
+`file/workspace_deliverable` selector、无固定 candidate refs 的 `file/write` / `file/edit`，不支持 variant。
+prospective 范围须精确声明 `workspace-relative-path` 与 `new-target-requires-owner-selector` 两项约束；
+非 prospective 范围不能携带该约束集。其他组合 fail-closed。静态组合支持不能替代公开 fullflow/readiness 验收；
+声明存在不表示已取得 owner scope/binding、工作轮次、dispatch 权限或终验 credit。
 启动能力清单须包含已匹配 exact CWI 工作策略的 operation kinds，并分别声明对应 owner 的全局
 state-change capability 与 operation-admissibility prerequisite；未匹配的 Profile 工作策略不进入该清单。
 bootstrap 独立拒绝清单或 prerequisite 缺失、owner/class 不符。该清单仅用于取得 owner 事实，不能将
