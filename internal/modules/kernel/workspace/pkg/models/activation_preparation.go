@@ -106,12 +106,14 @@ type WorkspacePreparationCheckState string
 // resources, credentials, provider clients and diagnostic text cannot enter it.
 // Reads never create this record or resume an accepted/unknown attempt.
 type WorkspacePreparationRecord struct {
+	Completions []WorkspacePreparationCompletion `json:",omitempty"`
 	Version     string
 	WorkspaceID common.WorkspaceID
 	Attempts    []WorkspacePreparationAttempt
 }
 
 func (r WorkspacePreparationRecord) Clone() WorkspacePreparationRecord {
+	r.Completions = slices.Clone(r.Completions)
 	r.Attempts = slices.Clone(r.Attempts)
 	for i := range r.Attempts {
 		if r.Attempts[i].DefinitionCompilation != nil {
@@ -129,6 +131,9 @@ func (r WorkspacePreparationRecord) Clone() WorkspacePreparationRecord {
 
 func (r WorkspacePreparationRecord) Validate(workspaceID common.WorkspaceID) error {
 	if (r.Version != WorkspacePreparationRecordVersion && r.Version != WorkspacePreparationWorkflowVersion) || r.WorkspaceID != workspaceID || workspaceID == "" || len(r.Attempts) == 0 || len(r.Attempts) > WorkspacePreparationAttemptLimit {
+		return common.ErrConflict
+	}
+	if validatePreparationCompletions(r) != nil {
 		return common.ErrConflict
 	}
 	seen := make(map[string]struct{}, len(r.Attempts))

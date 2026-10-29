@@ -26,6 +26,7 @@ const StepKindResourceRead = modulecommon.StepKindResourceRead
 const StepKindPromptGet = modulecommon.StepKindPromptGet
 
 type Biz struct {
+	preparation preparationObservationCache
 	basebiz.Base
 	lifecycle        basebiz.Lifecycle
 	runtimeAdapter   *RuntimeAdapter
@@ -85,6 +86,8 @@ func (m *Biz) Start() error {
 		{mcpevents.TopicProbeRuntimeSemanticProofFeasibility, m.handleRuntimeSemanticProofFeasibility},
 		{mcpevents.TopicQueryRuntimeCWIReconciliation, m.handleRuntimeCWIReconciliationQuery},
 		{mcpevents.TopicExecuteOperation, m.handleMCPOperation},
+		{mcpevents.TopicObservePreparation, m.handlePreparationObservation},
+		{mcpevents.TopicQueryPreparation, m.handlePreparationQuery},
 	}
 	// A failed Start keeps every completed subscription reachable. Retrying
 	// resumes at the first unfinished topic rather than registering duplicates.
@@ -1004,7 +1007,7 @@ func (m *Biz) lifecycleHandler(handler magicevent.ObserverFunc, receiptDrain boo
 		if result == nil || ev == nil {
 			return
 		}
-		if ev.Source() != runtimecontract.RuntimeModuleOrchestrator {
+		if ev.ID() != mcpevents.TopicObservePreparation && ev.ID() != mcpevents.TopicQueryPreparation && ev.Source() != runtimecontract.RuntimeModuleOrchestrator {
 			setMCPRuntimeIngressInvalid(result, "runtime command source must be kernel/orchestrator")
 			return
 		}

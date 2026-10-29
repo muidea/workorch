@@ -1,6 +1,7 @@
 package activationcore
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -1090,4 +1091,27 @@ func bootstrapRequirementsContainOwner(requirements []runtimecontract.RuntimeReq
 		}
 	}
 	return false
+}
+
+// Capacity v1 increases the complete Definition bound only. Each CWI remains
+// independent and the per-request contextual window remains four in this case.
+func TestRuntimeBootstrapCapacity128RoundTripKeepsContextWindow(t *testing.T) {
+	items := make([]string, 128)
+	for i := range items {
+		items[i] = fmt.Sprintf("requirement-%03d", i)
+	}
+	policy := testAcceptanceSlicePolicy()
+	policy.MaxFocuses = 128
+	b, err := runtimeBootstrapWithTestProof(&workspacemodel.Goal{ID: "goal", WorkspaceID: "ws-1", Text: "deliver"}, &workspacemodel.DoD{ID: "dod", WorkspaceID: "ws-1", Items: items}, "definition-128", nil, runtimecontract.RuntimeActivationContext{ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "ai-proxy", ModelID: "fixture"}}, ExecutionContract: runtimecontract.RuntimeExecutionContract{AcceptanceSlicePolicy: policy}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(b)
+	if err != nil || len(raw) > 4<<20 {
+		t.Fatalf("bootstrap bytes=%d: %v", len(raw), err)
+	}
+	var restored runtimecontract.RuntimeBootstrap
+	if json.Unmarshal(raw, &restored) != nil || restored.Validate() != nil || len(restored.DefinitionFocuses) != 128 || len(restored.CoverageItems) != 128 || restored.Activation.ExecutionContract.AcceptanceSlicePolicy.MaxCandidateContextItems != 4 {
+		t.Fatal("capacity changed independent focuses/context or lost restart structure")
+	}
 }

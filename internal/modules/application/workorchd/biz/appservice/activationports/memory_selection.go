@@ -2,6 +2,7 @@ package activationports
 
 import (
 	"context"
+	"github.com/muidea/workorch/internal/pkg/runtimeprojection"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
@@ -31,7 +32,7 @@ type WorkspaceMemorySelectionRequest struct {
 	DefaultEmbeddingProviderLoader DefaultEmbeddingProviderLoader
 }
 
-func SelectedWorkspaceMemoryItems(ctx context.Context, request WorkspaceMemorySelectionRequest) ([]*memorymodel.MemoryItem, *MemorySelectionEvidence, error) {
+func SelectedWorkspaceMemoryItems(ctx context.Context, request WorkspaceMemorySelectionRequest) ([]*memorymodel.MemoryItem, *runtimeprojection.MemorySelectionEvidence, error) {
 	selection := MemorySelectionOptions{
 		WorkspaceID: request.WorkspaceID,
 		Hub:         request.Hub,
@@ -55,7 +56,7 @@ func SelectedWorkspaceMemoryItems(ctx context.Context, request WorkspaceMemorySe
 	return SelectedMemoryItems(ctx, selection)
 }
 
-func SelectedMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *MemorySelectionEvidence, error) {
+func SelectedMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *runtimeprojection.MemorySelectionEvidence, error) {
 	if opts.Hub == nil {
 		if len(opts.IDs) > 0 {
 			return nil, nil, common.ErrInvalidArgument
@@ -90,7 +91,7 @@ func SelectedMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*m
 		// Degraded semantic recall must fall back to workspace list baseline while
 		// preserving degraded evidence for audit.
 		if listEvidence == nil {
-			listEvidence = &MemorySelectionEvidence{Status: "selected"}
+			listEvidence = &runtimeprojection.MemorySelectionEvidence{Status: "selected"}
 		}
 		listEvidence.SemanticRecall = semanticEvidence
 		if listEvidence.Status == "" {

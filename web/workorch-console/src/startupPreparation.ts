@@ -1,3 +1,4 @@
+export type PreparationCompletion = { version: string; completionId: string; requestId: string; bootstrapHash: string; creationEpoch: string; completedAt: string; expiresAt: string; committedWorkspaceRevision: number };
 export type PreparationCheckRequest = { requestId: string; expectedWorkspaceRevision: number };
 export type PreparationCheck = { id: string; owner: string; required: boolean; state: 'pending' | 'blocked' | 'passed' | 'failed'; reason: string };
 export type PreparationAssessment = {
@@ -56,9 +57,9 @@ export type StartupPreparationView = {
   workspaceId: string;
   workspaceRevision: number;
   activeRunId?: string;
-  operationState: 'not_checked' | PreparationAttempt['state'];
-  currentValidity: 'not_checked' | 'not_evaluated' | 'stale';
-  record?: { version: string; attempts: PreparationAttempt[] };
+  operationState: 'not_checked' | 'completed' | PreparationAttempt['state'];
+  currentValidity: 'not_checked' | 'not_evaluated' | 'stale' | 'observed';
+  record?: { version: string; attempts: PreparationAttempt[]; completions?: PreparationCompletion[] };
 };
 export type PreparationBootstrapCompilation = {
   version: 'workorch-original-prepared-bootstrap/v1'; failureCode?: string;
@@ -158,7 +159,7 @@ function validEvaluatedCheck(a: PreparationAttempt, c: PreparationCheck): boolea
   if (c.id === 'soul_selection') return c.owner === 'soul' && c.required && !!a.soulEvidenceRef && c.state === 'passed' && c.reason === 'souls_observed_remaining_checks';
   if (c.id === 'provider_cache') return c.owner === 'llm' && c.required && !!a.providerCacheEvidenceRef && c.state === 'passed' && c.reason === 'provider_configuration_observed_remaining_checks';
   if (c.id === 'skill_selection') return c.owner === 'skill' && c.required && c.state === 'passed' && c.reason === 'skill_empty_selection_observed_remaining_checks' && a.emptySelectionEvaluationVersion === 'workorch-preparation-empty-selection-evaluation/v1' && !!a.skillRegistryEvidenceRef && !!a.soulEvidenceRef && a.skillHubEffectState === 'recorded' && a.skillSelectionState === 'compiled_checks_pending' && a.skillContextState === 'compiled_checks_pending' && a.skillReferenceState === 'observed_checks_pending' && a.skillStatusState === 'observed_freshness_pending';
-  if (c.id === 'mcp_selection') return c.owner === 'mcpregistry' && c.required && c.state === 'passed' && c.reason === 'mcp_empty_selection_observed_remaining_checks' && a.emptySelectionEvaluationVersion === 'workorch-preparation-empty-selection-evaluation/v1' && !!a.mcpRegistryEvidenceRef && !!a.skillRegistryEvidenceRef;
+  if (c.id === 'mcp_selection') return c.owner === 'mcpregistry' && c.required && c.state === 'passed' && ['mcp_empty_selection_observed_remaining_checks', 'mcp_connection_observed_remaining_checks'].includes(c.reason) && a.emptySelectionEvaluationVersion === 'workorch-preparation-empty-selection-evaluation/v1' && !!a.mcpRegistryEvidenceRef && !!a.skillRegistryEvidenceRef;
   if (c.id === 'memory_selection') return c.owner === 'memory' && c.required && !!a.memoryInventoryEvidenceRef && c.state === 'passed' && ['memory_list_selection_observed_remaining_checks', 'memory_empty_selection_observed_remaining_checks'].includes(c.reason);
   if (c.owner !== 'file') return false;
   if (c.id === 'directory_boundary') return c.required && !!a.directoryEvidenceHash && (c.state === 'passed' && c.reason === 'directory_observed_remaining_checks' || c.state === 'failed' && c.reason === 'directory_permissions_denied');
@@ -172,7 +173,7 @@ function validNoRunFinalShape(a: PreparationAttempt): boolean {
   return checks?.length === 3 && checks.every(c => c.state === 'passed' && validEvaluatedCheck(a, c));
 }
 
-// This view has no ready/M3/activation permission representation. Reject wrong
+// Completion is historical M3 metadata, never activation permission. Reject wrong
 // scope or invented success, rather than letting a late/malformed response
 // unlock a new operation. All identities remain in page memory or server state.
 function memoryReasonRequiresEvidence(reason: string): boolean {
@@ -214,7 +215,7 @@ export function validatePreparationView(view: StartupPreparationView, workspaceI
     return;
   }
   const attempts = view.record.attempts;
-  if (!['workorch-preparation-record/v1', 'workorch-preparation-record/v2'].includes(view.record.version) || !Array.isArray(attempts) || attempts.length === 0 || attempts.length > 64 || !['not_evaluated', 'stale'].includes(view.currentValidity)) throw new Error('准备记录无效');
+  if (!['workorch-preparation-record/v1', 'workorch-preparation-record/v2'].includes(view.record.version) || !Array.isArray(attempts) || attempts.length === 0 || attempts.length > 64 || !['not_evaluated', 'stale', 'observed'].includes(view.currentValidity)) throw new Error('准备记录无效');
   const seen = new Set<string>();
   let revision = 0;
   for (const a of attempts) {
@@ -274,5 +275,14 @@ export function validatePreparationView(view: StartupPreparationView, workspaceI
       }
     }
   }
-  if (view.operationState !== attempts[attempts.length - 1].state) throw new Error('准备操作投影不一致');
+  const completions = view.record.completions ?? [];
+  if (!Array.isArray(completions) || completions.length > attempts.length || completions.length > 0 && view.record.version !== 'workorch-preparation-record/v2') throw new Error('完成记录无效');
+  const completed = new Set<string>(); let completedRevision = 0;
+  for (const c of completions) {
+    const a = attempts.find(a => a.requestId === c.requestId);
+    if (!a || completed.has(c.requestId) || c.version !== 'workorch-preparation-completion/v1' || !/^preparation-completion-sha256:[0-9a-f]{64}$/.test(c.completionId) || !/^prepared-bootstrap-sha256:[0-9a-f]{64}$/.test(c.bootstrapHash) || c.creationEpoch !== a.creationEpoch || a.preparationEpoch !== 0 || a.assessment?.outcome !== 'checks_passed' || !a.definitionCompilation || a.noRunEvaluationVersion !== 'workorch-preparation-no-run-final-fence/v1' || c.completedAt !== a.completedAt || !Number.isFinite(Date.parse(c.completedAt)) || Date.parse(c.expiresAt) - Date.parse(c.completedAt) !== 30000 || c.committedWorkspaceRevision !== a.committedWorkspaceRevision || c.committedWorkspaceRevision <= completedRevision) throw new Error('准备完成身份无效');
+    completed.add(c.requestId); completedRevision = c.committedWorkspaceRevision;
+  }
+  const expected = completed.has(attempts[attempts.length - 1].requestId) ? 'completed' : attempts[attempts.length - 1].state;
+  if (view.operationState !== expected || view.currentValidity === 'observed' && expected !== 'completed') throw new Error('准备操作投影不一致');
 }

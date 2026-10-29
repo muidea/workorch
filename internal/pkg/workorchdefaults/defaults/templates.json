@@ -326,7 +326,7 @@
       "acceptanceSlicePolicy": {
         "schemaVersion": "workorch.acceptance_slice_policy",
         "maxWorkItems": 4,
-        "maxFocuses": 64,
+        "maxFocuses": 128,
         "maxCandidateContextItems": 4,
         "completionPolicy": "all_required_items_accepted",
         "resultPolicy": "slice_result_allowed",

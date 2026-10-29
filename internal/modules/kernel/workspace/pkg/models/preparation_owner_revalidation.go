@@ -136,6 +136,13 @@ func PreparationOwnerRevalidationStale(w *Workspace, now time.Time) (bool, error
 		return false, nil
 	}
 	a := w.StartupPreparation.Attempts[len(w.StartupPreparation.Attempts)-1]
+	return PreparationOwnerRevalidationStaleForAttempt(w, a, now)
+}
+func PreparationOwnerRevalidationStaleForAttempt(w *Workspace, a WorkspacePreparationAttempt, now time.Time) (bool, error) {
+	if w == nil || now.IsZero() {
+		return false, common.ErrInvalidArgument
+	}
+
 	if a.OwnerRevalidationVersion == "" {
 		return false, nil // reads cannot upgrade old histories
 	}

@@ -3,16 +3,17 @@ package activationports
 import (
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/runtimeprojection"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 )
 
-func applyRuntimeMemorySelectionBudget(candidates []*memorymodel.MemoryItem, evidence *MemorySelectionEvidence) ([]*memorymodel.MemoryItem, *MemorySelectionEvidence, error) {
+func applyRuntimeMemorySelectionBudget(candidates []*memorymodel.MemoryItem, evidence *runtimeprojection.MemorySelectionEvidence) ([]*memorymodel.MemoryItem, *runtimeprojection.MemorySelectionEvidence, error) {
 	selection, err := activationcore.SelectRuntimeMemoryContext(candidates)
 	if err != nil {
 		return nil, nil, err
 	}
 	if evidence == nil {
-		evidence = &MemorySelectionEvidence{}
+		evidence = &runtimeprojection.MemorySelectionEvidence{}
 	}
 	evidence.CandidateMemoryIDs = activationcore.MemoryItemIDs(selection.Candidates)
 	evidence.SelectedMemoryIDs = activationcore.MemoryItemIDs(selection.Selected)
@@ -22,9 +23,9 @@ func applyRuntimeMemorySelectionBudget(candidates []*memorymodel.MemoryItem, evi
 	evidence.SelectionScores = append([]workorchmemorycontract.RecallSelectionScore(nil), selection.SelectionScores...)
 	evidence.ContextBudget = selection.ContextBudget
 	evidence.SelectionPolicyVersion = activationcore.RuntimeMemorySelectionPolicyVersion
-	evidence.RetrievedMemoryHits = make([]MemorySelectionHit, 0, len(selection.RetrievedHits))
+	evidence.RetrievedMemoryHits = make([]runtimeprojection.MemorySelectionHit, 0, len(selection.RetrievedHits))
 	for _, hit := range selection.RetrievedHits {
-		evidence.RetrievedMemoryHits = append(evidence.RetrievedMemoryHits, MemorySelectionHit{
+		evidence.RetrievedMemoryHits = append(evidence.RetrievedMemoryHits, runtimeprojection.MemorySelectionHit{
 			ID: string(hit.ID), Summary: hit.Summary, Score: hit.VectorScore, VectorDimension: hit.VectorDimension,
 		})
 	}

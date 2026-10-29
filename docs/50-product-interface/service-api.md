@@ -258,6 +258,29 @@ Workspace owner 在同一 CAS 中持久有界保存回执（最多 128 条，不
 
 ### 激活前准备状态读取
 
+#### 完整结算的 completion 与历史 M3
+
+`record.completions` 是有界 append-only 列表，版本 `workorch-preparation-completion/v1`，公开字段仅为
+`completionId/requestId/bootstrapHash/creationEpoch/completedAt/expiresAt/committedWorkspaceRevision` 与 `version`。
+只有原 accepted 正常延续在同次 CAS 中通过完整 required 合取、原 owner/File 复核、完整 bootstrap 独立编译和
+no-Run final fence 才产生；引用、hash、汇总及空库存不能代替原始门禁。原 v2 observation attempt 的状态编码
+保留，最新 attempt 有对应 completion 才投影 `operationState=completed`。
+unknown、旧 blocked 和恢复不能补造 completion，GET/重放不驱动观察或编译。第一条 completion 表达该 creation epoch
+的历史 M3，后继正常新检查可追加，但不得替换原历史。
+
+`currentValidity=observed` 仅表示 completed 原结算仍在 30 秒观察窗口内且未发现失效；它不是持续资源租约、
+保持中的 MCP 会话或执行许可。时钟回退、到期、File/owner/配置/封存漂移或 fresh reservation 使它 stale，
+仍保留 completed 与历史 M3。`activeRunId` 独立显示真实已有值，历史 no-Run 不证明当前没有 Run。
+前端只展示 owner 事实，不自动 POST 或启动执行。
+
+原正常显式检查可对非空 MCP 选择发起独立 preparation 协议观察：仅 stdio initialize、initialized、已选类别的
+list 与 close，最多 8 server、总 10 秒、单进程 8 秒、每 server 原始材料 512 KiB。
+需要完整列表及正常关闭；非 stdio、分页不完整、超限、Registry 漂移或协议失败均阻塞，不执行 tools/call、
+resources/read、prompts/get。公开参数不接受 server command、env 或凭据。原始材料仅在 owner 受限存储中，
+公共单项成功原因为 `mcp_connection_observed_remaining_checks`；GET/重复/recover 不重发握手。
+
+
+
 `GET /workspaces/:workspaceId/activation-preparation` 返回 `{preparation: ...}`：
 `workspaceId`、`workspaceRevision`、可选 `activeRunId`、`operationState`、`currentValidity`、可选 `record`。
 它仅投影 Workspace owner 已有准备操作；无记录时两个状态均为 `not_checked`，不创建账本或启动检查。
@@ -272,7 +295,7 @@ File 重启或当前 epoch 不可读均使当前有效性 stale。GET/重复 che
 不续期、不补造新证据。该窗口不是文件状态租约，时点相等也不代表全部资源有效、ready 或 M3；
 响应不公开 token、原文或诊断，Start/Restart 回执消费仍不属于本步。
 旧操作到期不绑定到没有新观察的后继操作；缺材料历史不补造期限，原材料绑定冲突拒绝读取。
-未到期仍是 `not_evaluated`，不是当前 owner epoch、授权或 readiness 证明；不据此填充全 required 的最早期限。
+没有 completion 的原观察未到期仍是 `not_evaluated`，不是授权或 readiness 证明；完整结算的 observed 窗口见下述联合合同。
 
 新显式操作在首次接纳时固定 `workorch-preparation-owner-revalidation/v1`。
 原 Soul、Skill Registry、含原模式的 Memory 库存和 MCP Registry 材料完整时，Application 在同一原请求预算内，
@@ -286,7 +309,7 @@ epoch、revision、完整内容、选择及配置来源均精确反查。缺少�
 
 该读取不编译 bootstrap、不查询外部资源、不刷新模型目录、不调用推理/embedding、不写配置、不创建 Run。
 `activeRunId` 是独立已有事实，缺省不能证明没有历史或在途 Run；`eligible`、结构校验和准备操作状态均不是 M3。
-响应禁止缓存，owner 原始错误不进入公共 payload。GET 不提供 M3/权限字段或 Start/Restart 回执消费承诺。
+响应禁止缓存，owner 原始错误不进入公共 payload。GET 只投影已有历史 completion，不提供执行权限或 Start/Restart 回执消费承诺。
 
 生产 Web 的工作空间详情开页、SSE／重连刷新及准备弹窗开关不读取含模型目录的系统配置，
 也不查询 SkillHub 库存。库存指标未显式查询时显示“未加载”，不以零代替未知；
@@ -376,7 +399,7 @@ Workspace revision 与其它资源门禁保持。原 epoch 只绑定历史来源
 不证明当前相同；已知漂移只保留历史并标 stale。
 启动执行时由 LLM owner 活动配置解析模型选择，封入 Runtime activation，后续 loop 消费该运行上下文；
 凭据和 endpoint 留在 LLM owner。实际调用的配置 revision、ProviderCeiling、预算及错误处理不变。
-这只完成配置检查；即使 all-of 为 checks_passed，整体持久操作仍 blocked，不产生 ready、M3 或 Run。
+配置检查及 checks_passed 摘要本身不签发 M3；整体成功还须完整 bootstrap、最终 owner/File 重验和 no-Run CAS 通过，不创建 Run。
 no-Run 项分别记录 `run_history_unavailable/retired/present` 或 `run_history_empty_fence_not_final`。
 新原非中断操作的完整 Run owner query 结果以 `workorch-preparation-run-history-evidence/v1`
 随原结算 CAS 私有保存，保留原 request、观察时间、scope、generation head、完整计数和 retirement fence，
@@ -392,7 +415,7 @@ required/run 单项为 `passed/run_history_empty_final_fence_observed`：必须�
 Workspace 私有 archive 保全前像，Repository 独立反查实际 revision（expected+1→expected+2）、
 同 creation epoch、零 preparation epoch、无 pending/settled 与空 ActiveRunID；原操作及完整材料不匹配即拒绝。
 公共 DTO 只输出有限版本、原随机引用与逐项结果，不包含完整 fence。
-总体仍 blocked，无 M3 或执行授权；该 passed 只描述原结算时点，后续 reservation 可使 currentValidity stale，
+该 passed 只描述原结算时点，整体完成另需 completion；后续 reservation 可使 currentValidity stale，
 即使历史 passed 仍在，也不能显示“当前无 Run”。旧空历史不补算、不升级，恢复不补造正例。
 未接入的其余项为 `check_pipeline_incomplete`。
 新受理 attempt 可带 `evaluationVersion=workorch-preparation-check-evaluation/v1`：目录、托管配置和
@@ -401,7 +424,7 @@ passed 原因仍为各自 `*_observed_remaining_checks`，failed 保留目录权
 非 blocked 的单项必须有相应 File owner 历史引用及正确 owner/required 身份；公共校验不代替 Workspace 的完整原材料反证。
 原 manifest 对象身份只在 owner 侧封存；公共 DTO 不输出目录路径、原配置、资源全文或这些材料的通用诊断。
 无该版本的历史保持旧语义，不在 GET/replay/recover 时回填单项通过；binding_changed 和中断恢复不能授通过。
-单项 passed 不代表当前仍有效、整体 ready、首次 M3 或执行许可，整体操作仍 blocked；当前有效性仍单独投影。
+单项 passed 不代表当前仍有效、整体 ready、首次 M3 或执行许可；整体结算和当前有效性仍单独投影。
 同版 `exact_seal` 与 `persistence_integrity` 可在 Workspace owner 两次完整精确封存读取相等、
 且原创作/正式行/候选/StartupInput/admission 全部精确关联后显示 passed，原因分别为
 `seal_observed_remaining_checks`、`persistence_binding_observed_remaining_checks`；必须为 required/workspace，
@@ -512,7 +535,7 @@ v1 只读 trace 不升级成 v2 正例，缺 creation fence 的输入不能开�
 
 错误响应（包括 400/409/500）不证明之前没有部分持久化。Web 保留页面内存中的原意图，POST 后 GET 对账，
 未见原请求或仍 unknown 不解锁新身份；重开页只从服务端记录获取已受理原操作，GET 不代替显式恢复。
-当前没有正 readiness、历史 M3 签发或 STEP05 消费链；不能把框架阻塞闭环当成完整 STEP04 退出证据。
+历史 M3 仅由完整正常结算的 completion 表达；STEP05 回执消费及执行授权不由本接口提供，不能把单项或阻塞闭环当作成功证据。
 
 显式新检查的首次 CAS 还封存 SkillHub status 两个目标（global、原交付目录 project）与原 request/binding。
 仅无歧义首次延续可各执行一次，沿用现有 SkillHub 服务访问及状态保存行为，不执行 init/install/sync/use/apply/repair。

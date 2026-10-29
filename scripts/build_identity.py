@@ -40,6 +40,7 @@ SOURCE_FILES = (
     "scripts/verify-workspace-confirmation-step03.py",
     "scripts/verify-workspace-preparation-step04.py",
     "scripts/fixtures/step04-skill-hub.py",
+    "scripts/fixtures/step04-mcp-protocol.py",
 )
 GENERATED_EXACT = ("web/consoleassets/dist",)
 EXCLUDED_DIR_NAMES = {

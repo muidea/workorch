@@ -82,6 +82,7 @@ func TestOriginalPreparedBootstrapArchivedProductionSource(t *testing.T) {
 	if w.ActiveRunID != "" || w.StartupPreparation == nil {
 		t.Fatal("not the no-Run production fixture")
 	}
+	originalHistory := w.StartupPreparation.Clone()
 	for _, a := range w.StartupPreparation.Attempts {
 		compiled, err := activationports.CompileOriginalPreparedBootstrap(w, a)
 		if err != nil || compiled.FailureCode != "" || compiled.Compilation == nil || compiled.Compilation.Bootstrap.Validate() != nil {
@@ -140,7 +141,7 @@ func TestOriginalPreparedBootstrapArchivedProductionSource(t *testing.T) {
 				t.Fatal("missing/rehash-substituted original source accepted", mutation)
 			}
 		}
-		if a.State != workspace.WorkspacePreparationBlocked || a.Assessment.Outcome != "blocked" {
+		if a.State != workspace.WorkspacePreparationBlocked || !reflect.DeepEqual(*w.StartupPreparation, originalHistory) {
 			t.Fatal("compilation changed authority")
 		}
 	}

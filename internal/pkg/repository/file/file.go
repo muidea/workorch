@@ -26,7 +26,7 @@ import (
 	soul "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
-	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/startuppreparation"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/preparationcompiler"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	"github.com/muidea/workorch/internal/pkg/runtimepath"
@@ -2084,7 +2084,7 @@ func (item *workspacePersistenceValue) UnmarshalJSON(data []byte) error {
 	if err := workspace.ValidatePreparationEvidencePersistence(&decoded); err != nil {
 		return err
 	}
-	if err := startuppreparation.ValidatePreparedDefinitionPersistence(&decoded); err != nil {
+	if err := preparationcompiler.ValidatePreparedPersistence(&decoded); err != nil {
 		return err
 	}
 	if err := decoded.PreparationFence.Validate(decoded.ID); err != nil {
@@ -2178,7 +2178,7 @@ func NewWorkspaceRepository(path string) *WorkspaceRepository {
 func (r *WorkspaceRepository) Create(_ context.Context, item *workspace.Workspace) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := startuppreparation.ValidatePreparedDefinitionPersistence(item); err != nil {
+	if err := preparationcompiler.ValidatePreparedPersistence(item); err != nil {
 		return err
 	}
 	if err := workspace.ValidatePreparationFenceTransition(nil, item); err != nil {
@@ -2261,7 +2261,7 @@ func (r *WorkspaceRepository) Update(_ context.Context, item *workspace.Workspac
 	if err := workspace.ValidatePreparationRecordTransition(&current, item, false); err != nil {
 		return err
 	}
-	if err := startuppreparation.ValidatePreparedDefinitionPersistence(item); err != nil {
+	if err := preparationcompiler.ValidatePreparedPersistence(item); err != nil {
 		return err
 	}
 	items[item.ID] = *cloneWorkspace(item)
@@ -2291,7 +2291,7 @@ func (r *WorkspaceRepository) CompareAndSwap(_ context.Context, item *workspace.
 	if err := workspace.ValidatePreparationRecordTransition(&current, item, true); err != nil {
 		return err
 	}
-	if err := startuppreparation.ValidatePreparedDefinitionPersistence(item); err != nil {
+	if err := preparationcompiler.ValidatePreparedPersistence(item); err != nil {
 		return err
 	}
 	item.Revision = expectedRevision + 1

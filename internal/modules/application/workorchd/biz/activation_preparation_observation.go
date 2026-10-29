@@ -88,7 +88,7 @@ func (b *Biz) observeAndSettleBlockedPreparation(ctx context.Context, original w
 	if err := ctx.Err(); err != nil {
 		return workspaceevents.CheckWorkspacePreparationResult{}, err
 	}
-	settleCtx, stop := context.WithTimeout(ctx, 2*time.Second)
+	settleCtx, stop := context.WithTimeout(ctx, 15*time.Second)
 	defer stop()
 	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspacePreparationSettleBlocked, ModuleID, workspaceevents.CommandDestination, magicevent.NewHeader(), settleCtx, settlement)
 	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(workspaceevents.Contracts(), ev.ID(), eventcontract.LaneScope{WorkspaceID: string(original.WorkspaceID)}))

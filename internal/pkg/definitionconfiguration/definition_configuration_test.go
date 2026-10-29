@@ -92,3 +92,17 @@ func payload(t *testing.T, value map[string]any) workorcheventpayload.Payload {
 func limits(providerCalls, operations int) map[string]any {
 	return map[string]any{"protocolRef": runtimecontract.RuntimeExecutionLimitsV1, "maxProviderCalls": providerCalls, "maxCapabilityOperations": operations}
 }
+
+func TestCapacityPreflightHonorsSealedPolicyBeforeReview(t *testing.T) {
+	items := make([]workspacemodel.DefinitionCandidateItem, 67)
+	for i := range items {
+		items[i] = workspacemodel.DefinitionCandidateItem{Text: "independent required item"}
+	}
+	for _, limit := range []int{64, 128} {
+		template := &workspacemodel.WorkspaceTemplate{ID: "capacity", ContextHints: payload(t, map[string]any{"acceptanceSlicePolicy": map[string]any{"maxFocuses": limit}, "profileContracts": map[string]any{"p": map[string]any{"deliverableExpectations": []any{map[string]any{"id": "source_change", "required": true}, map[string]any{"id": "validation_report", "required": true}, map[string]any{"id": "version_control_snapshot", "required": true}}}}})}
+		_, err := CompileForItems(&workspacemodel.Workspace{ID: "ws"}, template, items)
+		if (err == nil) != (limit == 128) {
+			t.Fatalf("sealed limit %d: %v", limit, err)
+		}
+	}
+}

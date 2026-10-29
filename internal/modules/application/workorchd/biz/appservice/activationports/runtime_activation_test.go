@@ -1,6 +1,7 @@
 package activationports
 
 import (
+	"github.com/muidea/workorch/internal/pkg/runtimeprojection"
 	"strings"
 	"testing"
 
@@ -74,11 +75,11 @@ func TestRuntimeActivationContextUsesConcreteSelectionSnapshots(t *testing.T) {
 			EffectScope: "none", IdempotencyClass: "safe_to_replay",
 		}},
 		[]*memorymodel.MemoryItem{{ID: "memory-1", MemoryType: "fact", Summary: "memory summary", Content: "memory content"}},
-		&MemorySelectionEvidence{
+		&runtimeprojection.MemorySelectionEvidence{
 			Policy: "test_selection", Status: "selected", CandidateMemoryIDs: []string{"memory-1"},
 			SelectedMemoryIDs: []string{"memory-1"}, RetrievedMemoryIDs: []string{"memory-1"},
 			SelectionScores:     []workorchmemorycontract.RecallSelectionScore{{ID: "memory-1", Score: 1, Reason: "selected_within_context_budget"}},
-			RetrievedMemoryHits: []MemorySelectionHit{{ID: "memory-1", Summary: "memory summary"}},
+			RetrievedMemoryHits: []runtimeprojection.MemorySelectionHit{{ID: "memory-1", Summary: "memory summary"}},
 			ContextBudget:       workorchmemorycontract.RecallContextBudget{MaxItems: 8, MaxBytes: 16384, MaxEstimatedTokens: 4096, UsedItems: 1, UsedBytes: 32, EstimatedTokens: 8},
 		},
 		[]workorcheventpayload.Payload{workorcheventpayload.New(

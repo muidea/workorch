@@ -20,6 +20,7 @@ snapshot，执行 owner-private HTTP/stdio transport/session，并把结果规�
 | Orchestrator | Orchestrator → MCP | `AcquireRuntimeCapabilities`、`AcquireRuntimeOperationAdmissibility`、`ProbeRuntimeOperationFeasibility`、`ProbeRuntimeSemanticProofFeasibility`、`QueryRuntimeCWIReconciliation`、`ExecuteOperation` Command/Result |
 | Orchestrator | MCP → Orchestrator | exact receipt query/commit；execute 只消费 sealed operation、catalog identity 与 grant |
 | MCPRegistry owner | MCP → Registry | `ReadRegistrySnapshotCommand/Result` 一次读取同 revision Server/Capability aggregate；静态单 server probe 使用 `GetServerCommand/Result` |
+| Workspace | Workspace → MCP | `ObservePreparationCommand/Result` 与 `QueryPreparationCommand/Result`；独立于 Runtime 六入口，仅 Workspace producer |
 | MCP server | MCP-private | bounded HTTP/stdio tool/resource/prompt invocation、session、evidence 与 effect observation |
 
 Callable capability 与 validation surface 是不同 fact：只有 owner 明确声明、输入 binding 完整、non-durable 且 replay-safe 的
@@ -62,3 +63,19 @@ Callable capability 与 validation surface 是不同 fact：只有 owner 明确�
 | effect + receipt | non-durable/durable changed/no-op、failure target/evidence persistence、resource/prompt owner receipts、`TestMCPOwnerCommitsUnknownEffectReceiptForStdioObservationAndTimeoutFailures` | 覆盖主要 effect/receipt，以及 stdio durable observation 缺失和 transport timeout 的 rejected `effect=unknown` receipt |
 | boundary | capability EventHub、Registry admissibility bridge、`TestMCPRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls`、semantic proof、`TestMCPOwnerReconciliationPreservesDeclaredRecipeAsUnverifiableWithoutGrantingCredit` 与 seal/authority tests | 覆盖六 topic 映射；catalog 声明的 executable recipe 被保留为 target/check fact，但缺少 behavior probe 时 reconciliation 明确为 `unverifiable`，不授予 CWI credit |
 | deployed MCP interoperability | [Service Acceptance](../../../../docs/50-product-interface/service-acceptance.md)、[Deployed Convergence](../../../../docs/50-product-interface/deployed-convergence-scenarios.md) | 组件级未覆盖；真实 MCP server protocol/version、process environment、credential 与远端行为仅由显式 deployed/live gate 验收，不能计入本地组件单测完成度 |
+
+## 激活前 preparation 协议观察
+
+`/mcp/preparation/observe` 只接收 Workspace owner 的已接纳原意图：Workspace/request/payload/snapshot/revision、
+目录、精确 Registry revision、选中 server 与最小 capability 身份。MCP 自行重读完整 Registry、解析自己的启动参数，
+不接受跨 owner endpoint/env/凭据，不授予 Runtime grant 或 CWI credit。
+`workorch-mcp-preparation-observation/v1` 只支持 stdio：initialize、notifications/initialized、所需类别的
+ tools/list、resources/list、prompts/list，然后关闭。零业务调用；必须正常退出、完整列出已选能力，分页未完不授成功。
+非 stdio 返回 transport_unsupported；总 10 秒、每进程 8 秒、最多 8 server、每 server 原始 frames/stderr 512 KiB。
+关闭等待 500ms 后 kill/wait，失败明确保留，超限明确不完整。原始 bytes 不清洗或摘要，受限 Workspace 证据保存。
+观察包含 owner epoch、session ID、真实 PID、时间及 Registry 前后精确身份。
+
+本进程最多保存 128 份原观察，精确重复返回 detached 原值，异 payload 拒绝；不逐出记录后重新执行。
+`/mcp/preparation/query-original` 只查原 Workspace/request/payload；未找到或 owner 重建后返回 unknown，
+绝不启动进程或推断未执行。两个入口均 strong call、精确 Workspace producer、Lifecycle fresh 准入与真实排空；
+不放宽原六 Runtime ingress 的 Orchestrator producer、sealed operation 或 receipt 门禁。

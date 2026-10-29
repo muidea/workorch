@@ -19,7 +19,7 @@ const (
 	RuntimeAcceptanceSliceMaxWorkItemsMin     = 1
 	RuntimeAcceptanceSliceMaxWorkItemsMax     = 32
 	RuntimeAcceptanceSliceDefaultMaxItems     = 1
-	RuntimeAcceptanceFocusMaxCount            = 64
+	RuntimeAcceptanceFocusMaxCount            = 128
 	// RuntimeOwnerInventoryItemsMaxCount bounds a complete capability-owner
 	// feasibility inventory, including File target selection and operation
 	// admissibility. It is deliberately independent from

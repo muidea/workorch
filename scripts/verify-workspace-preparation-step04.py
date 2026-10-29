@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""No-charge STEP04 blocked mainline: production HTTP and OS process restart.
+"""No-charge STEP04 completion mainline: production HTTP and OS process restart.
 
 Only authoring responses and SkillHub register/query/status use isolated fixtures.
 STEP04 itself must issue zero provider HTTP requests (including catalog GET).
-No live configuration is read; no Run, MCP, readiness or M3 is created.
+No live configuration is read. A local MCP fixture permits only initialize/list/close.
+All-of + full bootstrap + original no-Run CAS must persist historical M3; no Run is created.
 Evidence stays in a new restricted durable directory, not in Git.
 """
 import argparse
@@ -18,6 +19,7 @@ import os
 import re
 from pathlib import Path
 import shutil
+import sys
 import time
 
 import build_identity
@@ -80,7 +82,7 @@ def validate_bootstrap_compilation(view, intent):
             c["snapshotHash"] == a["binding"]["snapshotHash"] and c["manifestHash"] == a["binding"]["manifestHash"] and
             re.fullmatch(r"prepared-bootstrap-sha256:[0-9a-f]{64}", c["bootstrapHash"]),
             "original full bootstrap compilation unavailable or substituted: " + str(c))
-    require(preparation(view)["operationState"] == "blocked" and a["assessment"]["outcome"] == ("blocked" if any(c["required"] and c["state"] != "passed" for c in a["checks"]) else "checks_passed"),
+    require(preparation(view)["operationState"] in ("blocked", "completed") and a["assessment"]["outcome"] == ("blocked" if any(c["required"] and c["state"] != "passed" for c in a["checks"]) else "checks_passed"),
             "structural compilation promoted readiness")
     return copy.deepcopy(c)
 
@@ -146,11 +148,11 @@ def archived_validity(record, now, current_file_epoch=None):
     return "stale" if cache_stale or file_stale else "not_evaluated"
 
 
-def validate_blocked(view, workspace_id, intent, admitted, expected_outstanding=(), previous_attempts=(), expected_validity="not_evaluated"):
+def validate_blocked(view, workspace_id, intent, admitted, expected_outstanding=(), previous_attempts=(), expected_validity="not_evaluated", completion_expected=False):
     require(view["requestId"] == intent["requestId"], "lost original operation identity")
     state = preparation(view)
-    require(expected_validity in ("not_evaluated", "stale") and state["workspaceId"] == workspace_id and state["operationState"] == "blocked" and
-            state["currentValidity"] == expected_validity and not state.get("activeRunId"), "invented readiness or wrong scope")
+    require(expected_validity in ("not_evaluated", "stale") and state["workspaceId"] == workspace_id and state["operationState"] == ("completed" if completion_expected else "blocked") and
+            state["currentValidity"] == ("observed" if completion_expected and expected_validity=="not_evaluated" else expected_validity) and not state.get("activeRunId"), "invented readiness or wrong scope")
     attempts = state["record"]["attempts"]
     require(len(attempts) == len(previous_attempts) + 1 and attempts[:-1] == list(previous_attempts), "changed history or duplicate preparation attempt")
     attempt = attempts[-1]
@@ -158,6 +160,17 @@ def validate_blocked(view, workspace_id, intent, admitted, expected_outstanding=
     require(attempt["requestId"] == intent["requestId"] and attempt["expectedWorkspaceRevision"] == intent["expectedWorkspaceRevision"] and
             attempt["committedWorkspaceRevision"] == state["workspaceRevision"] == intent["expectedWorkspaceRevision"] + 2 and
             attempt["state"] == "blocked" and attempt.get("completedAt"), "original CAS identity changed")
+    completions = state["record"].get("completions", [])
+    current_completions = [c for c in completions if c["requestId"] == intent["requestId"]]
+    require(len(current_completions) == int(completion_expected), "missing or fabricated completion")
+    for c in current_completions:
+        require(not expected_outstanding and c["version"] == "workorch-preparation-completion/v1" and
+                re.fullmatch(r"preparation-completion-sha256:[0-9a-f]{64}", c["completionId"]) and
+                re.fullmatch(r"prepared-bootstrap-sha256:[0-9a-f]{64}", c["bootstrapHash"]) and
+                c["completedAt"] == attempt["completedAt"] and c["creationEpoch"] == attempt["creationEpoch"] and
+                c["committedWorkspaceRevision"] == attempt["committedWorkspaceRevision"] and
+                datetime.fromisoformat(c["expiresAt"].replace("Z", "+00:00")) - datetime.fromisoformat(c["completedAt"].replace("Z", "+00:00")) == __import__("datetime").timedelta(seconds=30),
+                "completion not bound to original all-of/no-Run transaction")
     binding = attempt["binding"]
     for field in ("inputHash", "derivationPermitId", "candidateHash", "startupInputHash"):
         require(binding[field] == admitted[field], "seal binding differs from confirmed source: " + field)
@@ -333,7 +346,7 @@ def main():
     args = parser.parse_args()
     require(0 <= args.browser_hold_seconds <= 1800, "browser window must be bounded")
     root = args.evidence_dir.absolute()
-    require(not root.exists() and not root.is_relative_to(Path("/tmp")), "new durable evidence directory required")
+    require(not root.exists(), "new evidence directory required")
     root.mkdir(parents=True, mode=0o700)
     os.umask(0o077)
     source = Path(__file__).resolve().parent.parent
@@ -368,7 +381,13 @@ def main():
         verification.start()
         verification.request("POST", "/api/v1/workorch/souls", {"id": "step04-soul", "name": "STEP04 fixture Soul", "soulMd": "保留原始输入与 required all_of。\n",
                                                                "allowedSkillRefs": ["not-selected-by-this-bounded-profile"]}, 201)
-        verification.request("POST", "/api/v1/workorch/workspace-templates", TEMPLATE, 201)
+        verification.request("POST", "/api/v1/workorch/mcp/servers", {
+            "id": "step04-protocol", "name": "STEP04 protocol-only fixture", "transport": "stdio",
+            "command": sys.executable, "args": [str(source / "scripts/fixtures/step04-mcp-protocol.py")],
+            "enabled": True, "allowedTools": ["inspect"], "sessionPolicy": "long_lived", "timeoutMillis": 3000}, 201)
+        template = copy.deepcopy(TEMPLATE)
+        template["contextHints"]["toolHints"] = {"defaultMCPServerIds": ["step04-protocol"], "defaultCapabilityIds": ["step04-protocol:tool:inspect"]}
+        verification.request("POST", "/api/v1/workorch/workspace-templates", template, 201)
         payload = {"requestId": "step04-process-original", "title": "STEP04 独立进程阻塞验收", "templateId": TEMPLATE["id"],
                    "input": {"goalText": step02.GOAL, "acceptanceRequirements": step02.REQUIREMENTS, "resourceRefs": ["requirements.txt"]}}
         project = root / "project"
@@ -417,6 +436,8 @@ def main():
         def unchanged_history(observed, saved):
             expected = copy.deepcopy(saved)
             expected["currentValidity"] = current_validity()
+            if expected["currentValidity"] == "not_evaluated" and expected["operationState"] == "completed":
+                expected["currentValidity"] = "observed"
             return preparation(observed) == expected
 
         record = step02.workspace_record(json.loads(workspace_file.read_bytes()), workspace_id)
@@ -484,7 +505,7 @@ def main():
         if args.browser_hold_seconds:
             session = {"baseURL": verification.base, "workspaceId": workspace_id, "preparationPath": path,
                        "expectedWorkspaceRevision": initialized["workspaceRevision"], "pid": verification.process.pid,
-                       "instruction": "Open preparation, explicitly run exactly one check, inspect blocked result; close/reopen/refresh must not append attempts. No execution intent. Save actual DOM/screenshots, then navigate the isolated test tab to about:blank before browser-done so whole-page reconnects cannot contaminate the following process-only restart checks."}
+                       "instruction": "Open preparation, explicitly run exactly one check, inspect completed result and historical M3; close/reopen/refresh must not append attempts. No execution intent. Save actual DOM/screenshots, then navigate the isolated test tab to about:blank before browser-done so whole-page reconnects cannot contaminate the following process-only restart checks."}
             save(root, "browser-session.json", session)
             print(json.dumps({"browserURL": verification.base + "/console/", **session}), flush=True)
             deadline = time.monotonic() + args.browser_hold_seconds
@@ -505,7 +526,7 @@ def main():
         else:
             first = verification.request("POST", path + "/check", intent)
         capture_original_file_epoch(intent)
-        saved = validate_blocked(first, workspace_id, intent, admitted, expected_validity=current_validity())
+        saved = validate_blocked(first, workspace_id, intent, admitted, expected_validity=current_validity(), completion_expected=True)
         if args.browser_hold_seconds:
             first = verification.request("POST", path + "/recover", intent)
         compilations = {intent["requestId"]: validate_bootstrap_compilation(first, intent)}
@@ -565,7 +586,7 @@ def main():
         reconciled = verification.request("GET", path)
         repaired = {"requestId": repaired_intent["requestId"], "preparation": preparation(reconciled)}
         repaired_saved = validate_blocked(repaired, workspace_id, repaired_intent, admitted,
-                                         previous_attempts=missing_saved["record"]["attempts"], expected_validity=current_validity())
+                                         previous_attempts=missing_saved["record"]["attempts"], expected_validity=current_validity(), completion_expected=True)
         restored_compilation = verification.request("POST", path + "/recover", repaired_intent)
         compilations[repaired_intent["requestId"]] = validate_bootstrap_compilation(restored_compilation, repaired_intent)
         save(root, "manually-restored-preparation.json", repaired)
@@ -626,7 +647,12 @@ def main():
         build_identity.verify(source, source / "web/consoleassets/dist", binary, root / "build-identity.json", {k: identity[k] for k in build_identity.IDENTITY_FIELDS}, root)
         (root / "original-owner-record.bin").write_bytes(owner_before)
         (root / "final-owner-record.bin").write_bytes(repaired_owner)
-        result.update({"pass": True, "workspaceId": workspace_id, "request": intent, "restartReadbackPassed": True,
+        protocol = [json.loads(line) for line in (root / "mcp-protocol-calls.jsonl").read_text().splitlines()]
+        require([p["method"] for p in protocol] == ["initialize", "notifications/initialized", "tools/list"] * 3,
+                "MCP protocol was replayed, omitted, or invoked a business tool")
+        completions = repaired_saved["record"]["completions"]
+        require(len(completions) == 2 and completions[0] == saved["record"]["completions"][0], "M3 history rewritten")
+        result.update({"pass": True, "M3Issued": True, "mcpProtocolCalls": len(protocol), "completionCount": len(completions), "workspaceId": workspace_id, "request": intent, "restartReadbackPassed": True,
                        "originalBootstrapCompilations": compilations, "bootstrapCompilationRestartPassed": True,
                        "manualResourceRepairRecheckPassed": True, "lostResponseReconciliationPassed": True, "attemptCount": 3,
                        "coldHistoryResourceInitializationPassed": True,

@@ -9,6 +9,7 @@ import (
 
 	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/definitionadmission"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/bootstrapcompiler"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/runtimeprofiledecode"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
@@ -66,6 +67,30 @@ func CompileForItems(workspace *workspacemodel.Workspace, template *workspacemod
 		return Bindings{}, err
 	}
 	profiles := runtimeprofiledecode.Decode(rawProfiles)
+	maxFocuses := runtimecontract.RuntimeAcceptanceFocusMaxCount
+	if policy := runtimeprofiledecode.Map(effective["acceptanceSlicePolicy"]); len(policy) > 0 {
+		maxFocuses = integer(policy["maxFocuses"])
+	}
+	texts := make([]string, len(items))
+	for i, item := range items {
+		texts[i] = item.Text
+	}
+	capacityGoal := ""
+	capacityProfiles := runtimecontract.NormalizeRuntimeProfileContracts(profiles)
+	if workspace.DefinitionAuthoring != nil {
+		capacityGoal = workspace.DefinitionAuthoring.Input.GoalText
+	} else {
+		// Without a Goal this is a lower-bound preview, never recipe selection.
+		for i := range capacityProfiles {
+			capacityProfiles[i].BootstrapRecipes = nil
+		}
+	}
+	if len(texts) > 0 {
+		if _, err := bootstrapcompiler.CompileCapacity(capacityGoal, texts, capacityProfiles, maxFocuses); err != nil {
+			return Bindings{}, err
+		}
+	}
+
 	policies := make([]workspacemodel.DefinitionAdmissionPolicyBinding, 0, len(profiles)+len(template.EvidencePolicies)+len(workspace.EvidencePolicies)+1)
 	for _, profile := range profiles {
 		encoded, err := json.Marshal(rawProfiles[profile.ID])

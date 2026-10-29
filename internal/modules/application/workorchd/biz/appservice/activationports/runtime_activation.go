@@ -1,7 +1,7 @@
 package activationports
 
 import (
-	"fmt"
+	"github.com/muidea/workorch/internal/pkg/runtimeprojection"
 	"sort"
 	"strings"
 
@@ -10,12 +10,10 @@ import (
 	memorymodel "github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models"
 	soulmodel "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/runtimeprofiledecode"
 	"github.com/muidea/workorch/internal/pkg/workorcheventpayload"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 	"github.com/muidea/workorch/internal/pkg/workorchmemorycontract"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
-	"github.com/muidea/workorch/internal/pkg/workorchskillcontract"
 )
 
 func RuntimeActivationContext(
@@ -28,7 +26,7 @@ func RuntimeActivationContext(
 	mcpServerIDs []string,
 	capabilities []*mcpmodel.Capability,
 	memories []*memorymodel.MemoryItem,
-	memorySelection *MemorySelectionEvidence,
+	memorySelection *runtimeprojection.MemorySelectionEvidence,
 	evidencePolicies []workorcheventpayload.Payload,
 	executionContract map[string]any,
 	continuation runtimecontract.RuntimeContinuationContext,
@@ -83,621 +81,121 @@ func RuntimeActivationContext(
 // Startup may seal selector candidate bounds; the concrete prospective target
 // first appears in an SM-3 proposal and becomes authority only after SM-2
 // binding.
+
 func validateRuntimePresealTargetDeclarations(executionContract map[string]any, evidencePolicies []workorcheventpayload.Payload) error {
-	if err := validateRuntimeExecutionLimitsInput(executionContract); err != nil {
-		return err
-	}
-	if err := validateRuntimeProfileInputShape(executionContract); err != nil {
-		return err
-	}
-	if runtimeValueContainsField(executionContract, "prospectiveTargetRef") {
-		return fmt.Errorf("%w: pre-seal execution contract rejects prospectiveTargetRef; declare targetSelectorCandidateRefs instead", common.ErrInvalidArgument)
-	}
-	if runtimeExecutionContractContainsBootstrapArtifactField(executionContract, "targetRef") {
-		return fmt.Errorf("%w: pre-seal bootstrap artifact rejects targetRef; the semantic proposal must choose its target after activation", common.ErrInvalidArgument)
-	}
-	for _, policy := range evidencePolicies {
-		if runtimePayloadFieldsContainField(policy.Fields, "prospectiveTargetRef") {
-			return fmt.Errorf("%w: pre-seal evidence policy rejects prospectiveTargetRef; declare targetSelectorCandidateRefs instead", common.ErrInvalidArgument)
-		}
-	}
-	return nil
+	return runtimeprojection.ValidateRuntimePresealTargetDeclarations(executionContract, evidencePolicies)
 }
-
 func runtimeExecutionContractContainsBootstrapArtifactField(executionContract map[string]any, fieldName string) bool {
-	profiles := runtimeMap(executionContract["profileContracts"])
-	for _, rawProfile := range profiles {
-		profile := runtimeMap(rawProfile)
-		for _, recipe := range runtimeMapSlice(profile["bootstrapRecipes"]) {
-			for _, artifact := range runtimeMapSlice(recipe["artifacts"]) {
-				for key := range artifact {
-					if strings.EqualFold(strings.TrimSpace(key), fieldName) {
-						return true
-					}
-				}
-			}
-		}
-	}
-	return false
+	return runtimeprojection.RuntimeExecutionContractContainsBootstrapArtifactField(executionContract, fieldName)
 }
-
 func runtimeValueContainsField(value any, fieldName string) bool {
-	switch typed := value.(type) {
-	case map[string]any:
-		for key, child := range typed {
-			if strings.EqualFold(strings.TrimSpace(key), fieldName) || runtimeValueContainsField(child, fieldName) {
-				return true
-			}
-		}
-	case []any:
-		for _, child := range typed {
-			if runtimeValueContainsField(child, fieldName) {
-				return true
-			}
-		}
-	case []map[string]any:
-		for _, child := range typed {
-			if runtimeValueContainsField(child, fieldName) {
-				return true
-			}
-		}
-	}
-	return false
+	return runtimeprojection.RuntimeValueContainsField(value, fieldName)
 }
-
 func runtimePayloadFieldsContainField(fields []workorcheventpayload.Field, fieldName string) bool {
-	for _, field := range fields {
-		if strings.EqualFold(strings.TrimSpace(field.Name), fieldName) {
-			return true
-		}
-		if runtimePayloadValueContainsField(field.Value, fieldName) {
-			return true
-		}
-	}
-	return false
+	return runtimeprojection.RuntimePayloadFieldsContainField(fields, fieldName)
 }
-
 func runtimePayloadValueContainsField(value workorcheventpayload.Value, fieldName string) bool {
-	switch value.Kind {
-	case workorcheventpayload.ValueObject:
-		return runtimePayloadFieldsContainField(value.Object, fieldName)
-	case workorcheventpayload.ValueArray:
-		for _, item := range value.Array {
-			if runtimePayloadValueContainsField(item, fieldName) {
-				return true
-			}
-		}
-	}
-	return false
+	return runtimeprojection.RuntimePayloadValueContainsField(value, fieldName)
 }
-
-// validateRuntimeEvidencePolicyInputs keeps the raw owner snapshot lossless at
-// the admission boundary. Runtime normalization is intentionally ID-based; an
-// empty or duplicate ID would otherwise be silently dropped or overwritten
-// before the typed policy validator could observe it.
 func validateRuntimeEvidencePolicyInputs(owner string, items []workorcheventpayload.Payload) error {
-	owner = strings.TrimSpace(owner)
-	if owner == "" {
-		owner = "Runtime"
-	}
-	if err := validateRuntimePresealTargetDeclarations(nil, items); err != nil {
-		return fmt.Errorf("%s evidence policies: %w", owner, err)
-	}
-	seen := make(map[string]struct{}, len(items))
-	for idx, item := range items {
-		id, ok := item.String("id")
-		id = strings.TrimSpace(id)
-		if !ok || id == "" {
-			return fmt.Errorf("%w: %s evidence policy %d requires a non-empty string id", common.ErrInvalidArgument, owner, idx+1)
-		}
-		if _, duplicate := seen[id]; duplicate {
-			return fmt.Errorf("%w: %s evidence policies duplicate id %q", common.ErrInvalidArgument, owner, id)
-		}
-		seen[id] = struct{}{}
-		policy := runtimeEvidencePolicy(item)
-		if err := policy.Validate(); err != nil {
-			return fmt.Errorf("%w: %s evidence policy %q is invalid: %v", common.ErrInvalidArgument, owner, id, err)
-		}
-	}
-	return nil
+	return runtimeprojection.ValidateRuntimeEvidencePolicyInputs(owner, items)
 }
-
 func RuntimeDefinitionChangeImpact(input map[string]any) *runtimecontract.RuntimeDefinitionChangeImpact {
-	if len(input) == 0 {
-		return nil
-	}
-	goalChange := runtimeMap(input["goalChange"])
-	dodChange := runtimeMap(input["doDChange"])
-	ret := runtimecontract.RuntimeDefinitionChangeImpact{
-		Version: runtimeString(input["version"]), Changed: runtimeBool(input["changed"]), Policy: runtimeString(input["policy"]),
-		RequiredPreExecutionAssessment: runtimeBool(input["requiredPreExecutionAssessment"]),
-		GoalChange:                     runtimeDefinitionChangeSet(goalChange, "effectiveGoalId", "latestGoalId", "previousGoalIds", "allGoalIds", "allGoalsAreConstraints"),
-		DoDChange:                      runtimeDefinitionChangeSet(dodChange, "effectiveDoDId", "latestDoDId", "previousDoDIds", "allDoDIds", "allDoDItemsAreAcceptanceGates"),
-		StrategyRequirements:           runtimeStrings(input["strategyRequirements"]),
-	}
-	ret = ret.Normalized()
-	return &ret
+	return runtimeprojection.RuntimeDefinitionChangeImpact(input)
 }
-
 func runtimeDefinitionChangeSet(input map[string]any, effectiveKey, latestKey, previousKey, allKey, constrainKey string) runtimecontract.RuntimeDefinitionChangeSet {
-	ret := runtimecontract.RuntimeDefinitionChangeSet{
-		EffectiveDefinitionID: runtimeString(input[effectiveKey]), LatestDefinitionID: runtimeString(input[latestKey]),
-		PreviousDefinitionIDs: runtimeStrings(input[previousKey]), AllDefinitionIDs: runtimeStrings(input[allKey]),
-		ChangedInPlace: runtimeBool(input["changedInPlace"]), AllEntriesConstrain: runtimeBool(input[constrainKey]),
-	}
-	for _, revision := range runtimeMapSlice(input["definitionRevisions"]) {
-		ret.DefinitionRevisions = append(ret.DefinitionRevisions, runtimecontract.RuntimeDefinitionRevision{
-			ID: runtimeString(revision["id"]), RevisionCount: runtimeInt(revision["revisionCount"]), Source: runtimeString(revision["source"]),
-			DefinitionRevision: runtimeString(revision["definitionRevision"]), PreviousDefinitionHash: runtimeString(revision["previousDefinitionHash"]),
-			PreviousDefinitionID: runtimeString(revision["previousDefinitionId"]), LastEventID: runtimeString(revision["lastEventId"]),
-			LastOccurredAt: runtimeString(revision["lastOccurredAt"]),
-		})
-	}
-	return ret
+	return runtimeprojection.RuntimeDefinitionChangeSet(input, effectiveKey, latestKey, previousKey, allKey, constrainKey)
 }
-
 func runtimeExecutionContract(input map[string]any) runtimecontract.RuntimeExecutionContract {
-	ret := runtimecontract.RuntimeExecutionContract{
-		OperationContractRevision: runtimecontract.RuntimeOperationContractRevision(),
-		StateChangePolicy:         runtimecontract.RuntimeStateChangePolicy(runtimeString(input["stateChangePolicy"])),
-		MaxRepairAttemptsPerFocus: runtimeInt(input["maxRepairAttemptsPerFocus"]),
-		ExecutionLimits:           runtimeExecutionLimits(input),
-	}
-	if recovery := runtimeMap(input["candidateDocumentRecovery"]); len(recovery) > 0 {
-		ret.CandidateDocumentRecovery = runtimecontract.RuntimeCandidateDocumentRecoveryPolicy{
-			MaxAttempts: runtimeInt(recovery["maxAttempts"]),
-		}
-	}
-	for _, item := range runtimeMapSlice(input["capabilityUsagePolicies"]) {
-		ret.CapabilityUsagePolicies = append(ret.CapabilityUsagePolicies, runtimecontract.RuntimeCapabilityUsagePolicy{
-			ID: runtimeString(item["id"]), Scope: runtimeString(item["scope"]),
-			AppliesToCategory: runtimeString(item["appliesToCategory"]), EvidenceStrength: runtimeString(item["evidenceStrength"]),
-			UsageMode: runtimeString(item["usageMode"]), FallbackPolicy: runtimeString(item["fallbackPolicy"]),
-			TriggerStages: runtimeStrings(item["triggerStages"]), TriggerSignals: runtimeStrings(item["triggerSignals"]),
-			PreferredTools: runtimeStrings(item["preferredTools"]), RequiredAfterKinds: runtimeStrings(item["requiredAfterKinds"]),
-			Notes: runtimeStrings(item["notes"]),
-		})
-	}
-	for _, item := range runtimeMapSlice(input["validationPolicies"]) {
-		ret.ValidationPolicies = append(ret.ValidationPolicies, runtimecontract.RuntimeValidationPolicy{
-			ID: runtimeString(item["id"]), Scope: runtimeString(item["scope"]),
-			AppliesToEvidenceKinds: runtimeStrings(item["appliesToEvidenceKinds"]),
-			ValidationSafetyClass:  runtimeString(item["validationSafetyClass"]),
-			DiscoveryRequired:      runtimeBool(item["discoveryRequired"]), DiscoverySources: runtimeStrings(item["discoverySources"]),
-			AllowedExecutionModes:            runtimeStrings(item["allowedExecutionModes"]),
-			MaxValidationOnlyRetriesPerFocus: runtimeInt(item["maxValidationOnlyRetriesPerFocus"]),
-			ValidationScratchRequired:        runtimeBool(item["validationScratchRequired"]),
-			AllowedValidationModes:           runtimeStrings(item["allowedValidationModes"]), Notes: runtimeStrings(item["notes"]),
-		})
-	}
-	ret.ProfileContracts = runtimeprofiledecode.Decode(input["profileContracts"])
-	if policy := runtimeMap(input["acceptanceSlicePolicy"]); len(policy) > 0 {
-		slicePolicy := runtimecontract.RuntimeAcceptanceSlicePolicy{
-			SchemaVersion:            runtimeString(policy["schemaVersion"]),
-			MaxWorkItems:             runtimeInt(policy["maxWorkItems"]),
-			MaxFocuses:               runtimeInt(policy["maxFocuses"]),
-			MaxCandidateContextItems: runtimeInt(policy["maxCandidateContextItems"]),
-			CompletionPolicy:         runtimeString(policy["completionPolicy"]),
-			ResultPolicy:             runtimeString(policy["resultPolicy"]),
-		}
-		for _, item := range runtimeMapSlice(policy["groups"]) {
-			match := runtimeMap(item["match"])
-			slicePolicy.Groups = append(slicePolicy.Groups, runtimecontract.RuntimeAcceptanceSliceGroupPolicy{
-				ID: runtimeString(item["id"]), Title: runtimeString(item["title"]), Scope: runtimeString(item["scope"]),
-				Priority: runtimeInt(item["priority"]), MaxWorkItems: runtimeInt(item["maxWorkItems"]),
-				Match: runtimecontract.RuntimeAcceptanceSliceMatch{
-					EvidenceRoles:        runtimeStrings(match["evidenceRoles"]),
-					MissingEvidenceKinds: runtimeStrings(match["missingEvidenceKinds"]),
-					SourceRequirementIDs: runtimeStrings(match["sourceRequirementIds"]),
-					SourceScopes:         runtimeStrings(match["sourceScopes"]),
-					All:                  runtimeBool(match["all"]),
-				},
-			})
-		}
-		ret.AcceptanceSlicePolicy = &slicePolicy
-	}
-	if policy := runtimeMap(input["templateStagePolicies"]); len(policy) > 0 {
-		stagePolicy := runtimecontract.RuntimeTemplateStagePolicy{SchemaVersion: runtimeString(policy["schemaVersion"])}
-		for _, item := range runtimeMapSlice(policy["stages"]) {
-			completion := runtimeMap(item["completion"])
-			governance := runtimeMap(item["governance"])
-			policyRefs := runtimeMap(item["policyRefs"])
-			stage := runtimecontract.RuntimeTemplateStage{
-				ID: runtimeString(item["id"]), SoulBinding: runtimeString(item["soulBinding"]),
-				Completion: runtimecontract.RuntimeTemplateStageCompletion{Policy: runtimeString(completion["policy"])},
-				Governance: runtimecontract.RuntimeTemplateStageGovernance{
-					DecisionMode: runtimeString(governance["decisionMode"]), ApprovalMode: runtimeString(governance["approvalMode"]),
-				},
-				PolicyRefs: runtimecontract.RuntimeTemplateStagePolicyRefs{
-					EvidencePolicies: runtimeStrings(policyRefs["evidencePolicies"]), CapabilityUsagePolicies: runtimeStrings(policyRefs["capabilityUsagePolicies"]),
-				},
-			}
-			for _, output := range runtimeMapSlice(item["requiredOutputs"]) {
-				stage.RequiredOutputs = append(stage.RequiredOutputs, runtimecontract.RuntimeTemplateStageRequiredOutput{
-					Kind: runtimeString(output["kind"]), EvidenceKinds: runtimeStrings(output["evidenceKinds"]),
-				})
-			}
-			stagePolicy.Stages = append(stagePolicy.Stages, stage)
-		}
-		ret.TemplateStagePolicy = &stagePolicy
-	}
-	return ret.Normalized()
+	return runtimeprojection.RuntimeExecutionContract(input)
 }
-
 func runtimeValidationFailureRepairConvergence(input map[string]any) *runtimecontract.RuntimeValidationFailureRepairConvergence {
-	return runtimeprofiledecode.ValidationFailureRepairConvergence(input)
+	return runtimeprojection.RuntimeValidationFailureRepairConvergence(input)
 }
-
 func runtimeValidationFailureRepairConvergenceHasExactShape(raw map[string]any) bool {
-	return runtimeprofiledecode.ValidationFailureRepairConvergenceHasExactShape(raw)
+	return runtimeprojection.RuntimeValidationFailureRepairConvergenceHasExactShape(raw)
 }
-
 func runtimeValidationFailureRepairRouteHasExactShape(raw map[string]any) bool {
-	return runtimeprofiledecode.ValidationFailureRepairRouteHasExactShape(raw)
+	return runtimeprojection.RuntimeValidationFailureRepairRouteHasExactShape(raw)
 }
-
 func runtimeObjectSliceExact(value any) ([]map[string]any, bool) {
-	return runtimeprofiledecode.ObjectSliceExact(value)
+	return runtimeprojection.RuntimeObjectSliceExact(value)
 }
-
 func runtimeStringListHasExactShape(value any) bool {
-	return runtimeprofiledecode.StringListHasExactShape(value)
+	return runtimeprojection.RuntimeStringListHasExactShape(value)
 }
-
 func runtimeIntegerHasExactShape(value any) bool {
-	return runtimeprofiledecode.IntegerHasExactShape(value)
+	return runtimeprojection.RuntimeIntegerHasExactShape(value)
 }
-
 func compileRuntimeEvidencePolicies(owner string, items []workorcheventpayload.Payload) ([]runtimecontract.RuntimeEvidencePolicy, error) {
-	if err := validateRuntimeEvidencePolicyInputs(owner, items); err != nil {
-		return nil, err
-	}
-	ret := make([]runtimecontract.RuntimeEvidencePolicy, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, runtimeEvidencePolicy(item))
-	}
-	normalized := runtimecontract.NormalizeRuntimeEvidencePolicies(ret)
-	if len(normalized) != len(ret) {
-		return nil, fmt.Errorf("%w: %s evidence policy normalization changed policy cardinality", common.ErrInvalidArgument, strings.TrimSpace(owner))
-	}
-	return normalized, nil
+	return runtimeprojection.CompileRuntimeEvidencePolicies(owner, items)
 }
-
 func runtimeEvidencePolicy(item workorcheventpayload.Payload) runtimecontract.RuntimeEvidencePolicy {
-	return runtimecontract.RuntimeEvidencePolicy{
-		ID: payloadString(item, "id"), Profile: payloadString(item, "profile"), Rule: payloadString(item, "rule"),
-		AppliesTo: payloadString(item, "appliesTo"), CommandName: payloadString(item, "commandName"),
-		RecipeAdapterRef:             payloadString(item, "recipeAdapterRef"),
-		RecipeInputReviewProtocolRef: payloadString(item, "recipeInputReviewProtocolRef"),
-		ArgsContain:                  payloadStrings(item, "argsContain"), RecipeDeclared: payloadBool(item, "recipeDeclared"), RecipeArgs: payloadStrings(item, "recipeArgs"), RecipeTimeoutMillis: int64(payloadInt(item, "recipeTimeoutMillis")),
-		RequiredArgs: payloadStrings(item, "requiredArgs"), ZeroWorkMarkers: payloadStrings(item, "zeroWorkMarkers"),
-		WorkEvidenceMarkers: payloadStrings(item, "workEvidenceMarkers"), QualityOnZeroWork: payloadString(item, "qualityOnZeroWork"),
-		MarksZeroWork: payloadBool(item, "zeroWork"), EvidenceTags: payloadStrings(item, "evidenceTags"),
-		EvidenceReason: payloadString(item, "evidenceReason"), CoverageRequirements: payloadCoverageEvidenceRequirements(item, "coverageRequirements"),
-		Description: payloadString(item, "description"),
-	}
+	return runtimeprojection.RuntimeEvidencePolicy(item)
 }
-
 func payloadString(input workorcheventpayload.Payload, key string) string {
-	value, _ := input.String(key)
-	return value
+	return runtimeprojection.PayloadString(input, key)
 }
-
 func payloadBool(input workorcheventpayload.Payload, key string) bool {
-	value, _ := input.Bool(key)
-	return value
+	return runtimeprojection.PayloadBool(input, key)
 }
-
 func payloadInt(input workorcheventpayload.Payload, key string) int64 {
-	value, _ := input.Int64(key)
-	return value
+	return runtimeprojection.PayloadInt(input, key)
 }
-
 func payloadStrings(input workorcheventpayload.Payload, key string) []string {
-	value, _ := input.StringSlice(key)
-	return value
+	return runtimeprojection.PayloadStrings(input, key)
 }
-
 func payloadCoverageEvidenceRequirements(input workorcheventpayload.Payload, key string) []runtimecontract.RuntimeCoverageEvidenceRequirement {
-	value, ok := input.Field(key)
-	if !ok || value.Kind != workorcheventpayload.ValueArray {
-		return nil
-	}
-	ret := make([]runtimecontract.RuntimeCoverageEvidenceRequirement, 0, len(value.Array))
-	for _, item := range value.Array {
-		if item.Kind != workorcheventpayload.ValueObject {
-			continue
-		}
-		payload := workorcheventpayload.Payload{Fields: item.Object}
-		ret = append(ret, runtimecontract.RuntimeCoverageEvidenceRequirement{
-			ID: payloadString(payload, "id"), Scope: payloadString(payload, "scope"), EvidenceRole: payloadString(payload, "evidenceRole"),
-			TargetRole: payloadString(payload, "targetRole"), TargetRefs: payloadStrings(payload, "targetRefs"),
-			TargetDiscoverySources: payloadStrings(payload, "targetDiscoverySources"), TargetSelectorRef: payloadString(payload, "targetSelectorRef"),
-			TargetSelectorOwnerRef: payloadString(payload, "targetSelectorOwnerRef"), TargetSelectorSubjectRef: payloadString(payload, "targetSelectorSubjectRef"),
-			TargetSelectorCandidateRefs: payloadStrings(payload, "targetSelectorCandidateRefs"), ProspectiveTargetAllOfConstraintRefs: payloadStrings(payload, "prospectiveTargetAllOfConstraintRefs"), RequireTargetGrounding: payloadBool(payload, "requireTargetGrounding"),
-			RequiredEvidenceKinds: payloadStrings(payload, "requiredEvidenceKinds"),
-			RequireDirectEvidence: payloadBool(payload, "requireDirectEvidence"), RequireClaimEvidence: payloadBool(payload, "requireClaimEvidence"),
-			RequireExecutableBehaviorEvidence: payloadBool(payload, "requireExecutableBehaviorEvidence"), RequireCoverageTargets: payloadBool(payload, "requireCoverageTargets"),
-			AcceptedStepKinds: payloadStrings(payload, "acceptedStepKinds"), RejectedStepKinds: payloadStrings(payload, "rejectedStepKinds"),
-			AcceptedOperationVariants: runtimeOperationVariantsFromPayload(payload, "acceptedOperationVariants"),
-			ValidationRecipeID:        payloadString(payload, "validationRecipeId"), RequiredCheckRefs: payloadStrings(payload, "requiredCheckRefs"),
-			MetricConstraints: payloadStrings(payload, "metricConstraints"), ArtifactRefs: payloadStrings(payload, "artifactRefs"),
-			Description: payloadString(payload, "description"),
-		})
-	}
-	return ret
+	return runtimeprojection.PayloadCoverageEvidenceRequirements(input, key)
 }
-
 func runtimeOperationVariantsFromPayload(input workorcheventpayload.Payload, key string) []runtimecontract.RuntimeOperationVariantRef {
-	value, ok := input.Field(key)
-	if !ok || value.Kind != workorcheventpayload.ValueArray {
-		return nil
-	}
-	ret := make([]runtimecontract.RuntimeOperationVariantRef, 0, len(value.Array))
-	for _, item := range value.Array {
-		if item.Kind != workorcheventpayload.ValueObject {
-			continue
-		}
-		payload := workorcheventpayload.Payload{Fields: item.Object}
-		ret = append(ret, runtimecontract.RuntimeOperationVariantRef{Kind: payloadString(payload, "kind"), VariantID: payloadString(payload, "variantId")})
-	}
-	return runtimecontract.NormalizeRuntimeOperationVariantRefs(ret)
+	return runtimeprojection.RuntimeOperationVariantsFromPayload(input, key)
 }
-
 func runtimeCoverageEvidenceRequirements(value any) []runtimecontract.RuntimeCoverageEvidenceRequirement {
-	items := runtimeMapSlice(value)
-	ret := make([]runtimecontract.RuntimeCoverageEvidenceRequirement, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, runtimecontract.RuntimeCoverageEvidenceRequirement{
-			ID: runtimeString(item["id"]), Scope: runtimeString(item["scope"]), EvidenceRole: runtimeString(item["evidenceRole"]),
-			TargetRole: runtimeString(item["targetRole"]), TargetRefs: runtimeStrings(item["targetRefs"]),
-			TargetDiscoverySources: runtimeStrings(item["targetDiscoverySources"]), TargetSelectorRef: runtimeString(item["targetSelectorRef"]),
-			TargetSelectorOwnerRef: runtimeString(item["targetSelectorOwnerRef"]), TargetSelectorSubjectRef: runtimeString(item["targetSelectorSubjectRef"]),
-			TargetSelectorCandidateRefs: runtimeStrings(item["targetSelectorCandidateRefs"]), ProspectiveTargetAllOfConstraintRefs: runtimeStrings(item["prospectiveTargetAllOfConstraintRefs"]), RequireTargetGrounding: runtimeBool(item["requireTargetGrounding"]),
-			RequiredEvidenceKinds: runtimeStrings(item["requiredEvidenceKinds"]),
-			RequireDirectEvidence: runtimeBool(item["requireDirectEvidence"]), RequireClaimEvidence: runtimeBool(item["requireClaimEvidence"]),
-			RequireExecutableBehaviorEvidence: runtimeBool(item["requireExecutableBehaviorEvidence"]), RequireCoverageTargets: runtimeBool(item["requireCoverageTargets"]),
-			AcceptedStepKinds: runtimeStrings(item["acceptedStepKinds"]), RejectedStepKinds: runtimeStrings(item["rejectedStepKinds"]),
-			AcceptedOperationVariants: runtimeOperationVariants(item["acceptedOperationVariants"]),
-			ValidationRecipeID:        runtimeString(item["validationRecipeId"]), RequiredCheckRefs: runtimeStrings(item["requiredCheckRefs"]),
-			MetricConstraints: runtimeStrings(item["metricConstraints"]), ArtifactRefs: runtimeStrings(item["artifactRefs"]),
-			Description: runtimeString(item["description"]),
-		})
-	}
-	return ret
+	return runtimeprojection.RuntimeCoverageEvidenceRequirements(value)
 }
-
 func runtimeOperationVariants(value any) []runtimecontract.RuntimeOperationVariantRef {
-	ret := make([]runtimecontract.RuntimeOperationVariantRef, 0)
-	for _, item := range runtimeMapSlice(value) {
-		ret = append(ret, runtimecontract.RuntimeOperationVariantRef{Kind: runtimeString(item["kind"]), VariantID: runtimeString(item["variantId"])})
-	}
-	return runtimecontract.NormalizeRuntimeOperationVariantRefs(ret)
+	return runtimeprojection.RuntimeOperationVariants(value)
 }
-
-func runtimeMapSlice(value any) []map[string]any {
-	switch typed := value.(type) {
-	case []map[string]any:
-		return typed
-	case []any:
-		ret := make([]map[string]any, 0, len(typed))
-		for _, item := range typed {
-			if mapped, ok := item.(map[string]any); ok {
-				ret = append(ret, mapped)
-			}
-		}
-		return ret
-	default:
-		return nil
-	}
-}
-
-func runtimeMap(value any) map[string]any {
-	mapped, _ := value.(map[string]any)
-	return mapped
-}
-
-func runtimeStrings(value any) []string {
-	switch typed := value.(type) {
-	case []string:
-		return append([]string(nil), typed...)
-	case []any:
-		ret := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if text := runtimeString(item); text != "" {
-				ret = append(ret, text)
-			}
-		}
-		return ret
-	default:
-		return nil
-	}
-}
-
-func runtimeString(value any) string {
-	text, _ := value.(string)
-	return strings.TrimSpace(text)
-}
-
-func runtimeBool(value any) bool {
-	result, _ := value.(bool)
-	return result
-}
-
-func runtimeInt(value any) int {
-	switch typed := value.(type) {
-	case int:
-		return typed
-	case int64:
-		return int(typed)
-	case float64:
-		return int(typed)
-	default:
-		return 0
-	}
-}
-
+func runtimeMapSlice(value any) []map[string]any { return runtimeprojection.RuntimeMapSlice(value) }
+func runtimeMap(value any) map[string]any        { return runtimeprojection.RuntimeMap(value) }
+func runtimeStrings(value any) []string          { return runtimeprojection.RuntimeStrings(value) }
+func runtimeString(value any) string             { return runtimeprojection.RuntimeString(value) }
+func runtimeBool(value any) bool                 { return runtimeprojection.RuntimeBool(value) }
+func runtimeInt(value any) int                   { return runtimeprojection.RuntimeInt(value) }
 func runtimeSoulContext(item *soulmodel.Soul) *runtimecontract.RuntimeSoulContext {
-	if item == nil {
-		return nil
-	}
-	return &runtimecontract.RuntimeSoulContext{
-		ID: item.ID, Revision: item.Revision, ContentHash: item.ContentHash, SourceProvenance: item.SourceProvenance, Name: item.Name, Description: item.Description,
-		BusinessDomains: append([]string(nil), item.BusinessDomains...), Instructions: item.SoulMD,
-		AllowedSkillRefs:            append([]string(nil), item.AllowedSkillRefs...),
-		AllowedMCPServerRefs:        append([]string(nil), item.AllowedMCPServerRefs...),
-		AllowedCapabilityRefs:       append([]string(nil), item.AllowedCapabilityRefs...),
-		AllowedCapabilityCategories: append([]string(nil), item.AllowedCapabilityCategories...),
-		AllowedToolKinds:            append([]string(nil), item.AllowedToolKinds...),
-	}
+	return runtimeprojection.RuntimeSoulContext(item)
 }
-
 func runtimeSkillContexts(items []workorchmanagementcontract.Skill) ([]runtimecontract.RuntimeSkillContext, *runtimecontract.RuntimeSkillContextBudget, error) {
-	ret := make([]runtimecontract.RuntimeSkillContext, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, runtimecontract.RuntimeSkillContext{
-			ID: item.ID, Name: item.Name, Version: item.Version, Description: item.Description,
-			TriggerRules: append([]string(nil), item.TriggerRules...), Instruction: item.Instruction,
-			ReferenceRefs: append([]string(nil), item.ReferenceRefs...), RequiredToolKinds: append([]string(nil), item.RequiredToolKinds...),
-			RequiredMCPServerRefs: append([]string(nil), item.RequiredMCPServerRefs...), RequiredCapabilityRefs: append([]string(nil), item.RequiredCapabilityRefs...),
-			Constraints: append([]string(nil), item.Constraints...),
-			Provenance: workorchskillcontract.Provenance{
-				Source: item.Source, Scope: item.Scope, WorkspaceID: common.WorkspaceID(item.WorkspaceID), ContentHash: item.ContentHash,
-			},
-		})
-	}
-	return runtimecontract.SealRuntimeSkillContexts(ret)
+	return runtimeprojection.RuntimeSkillContexts(items)
 }
-
 func runtimeMCPServerIDs(values []string) []common.MCPServerID {
-	ret := make([]common.MCPServerID, 0, len(values))
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			ret = append(ret, common.MCPServerID(value))
-		}
-	}
-	return ret
+	return runtimeprojection.RuntimeMCPServerIDs(values)
 }
-
 func runtimeMCPCapabilityContexts(items []*mcpmodel.Capability) []runtimecontract.RuntimeMCPCapabilityContext {
-	ret := make([]runtimecontract.RuntimeMCPCapabilityContext, 0, len(items))
-	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		cap := runtimecontract.RuntimeMCPCapabilityContext{
-			ID: item.ID, ServerID: item.ServerID, Kind: item.Kind, Name: item.Name, DisplayName: item.DisplayName,
-			Description: item.Description, Category: item.Category, Tags: append([]string(nil), item.Tags...), UsageHint: item.UsageHint,
-			InputSummary: item.InputSummary, OutputSummary: item.OutputSummary, StageHints: append([]string(nil), item.StageHints...),
-			RiskLevel: item.RiskLevel, EffectScope: item.EffectScope, IdempotencyClass: item.IdempotencyClass,
-			URI: item.URI, Enabled: item.Enabled, ApprovalPolicy: item.ApprovalPolicy, Status: capabilityAvailability(item.Enabled),
-		}
-		// RVC-R8: registry Kind=tool is not a Runtime operation kind; seal OperationKind + EffectScope.
-		ret = append(ret, runtimecontract.SealMCPCapabilityEffect(cap))
-	}
-	return ret
+	return runtimeprojection.RuntimeMCPCapabilityContexts(items)
 }
-
 func capabilityAvailability(enabled bool) string {
-	if enabled {
-		return "enabled"
-	}
-	return "disabled"
+	return runtimeprojection.CapabilityAvailability(enabled)
 }
-
-// runtimeMCPOperationPolicies is the application-side adapter from the
-// MCP-registry owner's typed capability metadata to Runtime's owner-neutral
-// effect/replay fact. Runtime core never needs to understand server/tool
-// parameter names after this boundary.
 func runtimeMCPOperationPolicies(capabilities []runtimecontract.RuntimeMCPCapabilityContext) []runtimecontract.RuntimeOperationPolicyFact {
-	ret := make([]runtimecontract.RuntimeOperationPolicyFact, 0, len(capabilities))
-	for _, capability := range capabilities {
-		capability = runtimecontract.SealMCPCapabilityEffect(capability)
-		if !capability.Enabled || capability.OperationKind != runtimecontract.StepKindMCPToolCall || capability.ID == "" || capability.ServerID == "" || strings.TrimSpace(capability.Name) == "" {
-			continue
-		}
-		serverID := string(capability.ServerID)
-		tool := capability.Name
-		ret = append(ret, runtimecontract.RuntimeOperationPolicyFact{
-			ID:            "operation-policy/" + string(capability.ID),
-			OwnerModuleID: runtimecontract.RuntimeModuleMCP,
-			OperationKind: capability.OperationKind,
-			SubjectRef:    string(capability.ID),
-			ParameterMatches: []runtimecontract.RuntimeOperationParameterMatch{
-				{Name: "serverId", String: &serverID},
-				{Name: "tool", String: &tool},
-			},
-			EffectScope:      runtimecontract.RuntimeEffectScope(capability.EffectScope),
-			IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyClass(capability.IdempotencyClass),
-		})
-	}
-	return runtimecontract.NormalizeRuntimeOperationPolicyFacts(ret)
+	return runtimeprojection.RuntimeMCPOperationPolicies(capabilities)
 }
-
 func runtimeMemoryContexts(items []*memorymodel.MemoryItem) []runtimecontract.RuntimeMemoryContext {
-	ret := make([]runtimecontract.RuntimeMemoryContext, 0, len(items))
-	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		provenance := "workspace"
-		if item.RunID != "" {
-			provenance = "historical_run"
-		}
-		ret = append(ret, runtimecontract.RuntimeMemoryContext{
-			ID: item.ID, MemoryType: item.MemoryType, Summary: item.Summary, Content: item.Content,
-			Tags: append([]string(nil), item.Tags...), Importance: item.Importance, Confidence: item.Confidence,
-			Visibility: item.Visibility, Provenance: provenance, VectorScore: item.VectorScore,
-		})
-	}
-	return ret
+	return runtimeprojection.RuntimeMemoryContexts(items)
 }
-
-func runtimeMemorySelectionEvidence(input *MemorySelectionEvidence) *workorchmemorycontract.RecallSelectionEvidence {
-	return runtimeMemorySelectionEvidenceDepth(input, 0)
+func runtimeMemorySelectionEvidence(input *runtimeprojection.MemorySelectionEvidence) *workorchmemorycontract.RecallSelectionEvidence {
+	return runtimeprojection.RuntimeMemorySelectionEvidence(input)
 }
-
-func runtimeMemorySelectionEvidenceDepth(input *MemorySelectionEvidence, depth int) *workorchmemorycontract.RecallSelectionEvidence {
-	if input == nil {
-		return nil
-	}
-	if depth > 1 {
-		return nil
-	}
-	ret := workorchmemorycontract.RecallSelectionEvidence{
-		Policy: input.Policy, Status: input.Status, Reason: input.Reason,
-		ProviderID: input.ProviderID, ModelID: input.ModelID, Operation: input.Operation,
-		QueryTextPreview: input.QueryTextPreview, QueryTextSHA256: input.QueryTextSHA256,
-		MinScore: input.MinScore, Limit: input.Limit, EmbeddingModel: input.EmbeddingModel,
-		VectorDimension: input.VectorDimension, RefreshSource: input.RefreshSource,
-		SelectionPolicyVersion: input.SelectionPolicyVersion,
-		CandidateMemoryIDs:     runtimeMemoryIDs(input.CandidateMemoryIDs),
-		SelectedMemoryIDs:      runtimeMemoryIDs(input.SelectedMemoryIDs),
-		ExcludedMemoryIDs:      runtimeMemoryIDs(input.ExcludedMemoryIDs),
-		TypeQuota:              append([]workorchmemorycontract.TypeQuotaEntry(nil), input.TypeQuota...),
-		SelectionScores:        append([]workorchmemorycontract.RecallSelectionScore(nil), input.SelectionScores...),
-		RetrievedMemoryIDs:     runtimeMemoryIDs(input.RetrievedMemoryIDs),
-		ContextBudget:          input.ContextBudget,
-		FallbackFrom:           input.FallbackFrom,
-		SemanticRecall:         runtimeMemorySelectionEvidenceDepth(input.SemanticRecall, depth+1),
-	}
-	ret.RetrievedMemoryHits = make([]workorchmemorycontract.RecallHit, 0, len(input.RetrievedMemoryHits))
-	for _, hit := range input.RetrievedMemoryHits {
-		ret.RetrievedMemoryHits = append(ret.RetrievedMemoryHits, workorchmemorycontract.RecallHit{
-			ID: common.MemoryID(hit.ID), Summary: hit.Summary, VectorScore: hit.Score, VectorDimension: hit.VectorDimension,
-		})
-	}
-	value := ret.Normalized()
-	return &value
+func runtimeMemorySelectionEvidenceDepth(input *runtimeprojection.MemorySelectionEvidence, depth int) *workorchmemorycontract.RecallSelectionEvidence {
+	return runtimeprojection.RuntimeMemorySelectionEvidenceDepth(input, depth)
 }
-
 func runtimeMemoryIDs(values []string) []common.MemoryID {
-	if values == nil {
-		return nil
-	}
-	ret := make([]common.MemoryID, 0, len(values))
-	for _, value := range values {
-		ret = append(ret, common.MemoryID(strings.TrimSpace(value)))
-	}
-	return ret
+	return runtimeprojection.RuntimeMemoryIDs(values)
+}
+func runtimeExecutionLimits(input map[string]any) *runtimecontract.RuntimeExecutionLimits {
+	return runtimeprojection.RuntimeExecutionLimits(input)
+}
+func validateRuntimeExecutionLimitsInput(input map[string]any) error {
+	return runtimeprojection.ValidateRuntimeExecutionLimitsInput(input)
 }

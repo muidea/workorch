@@ -130,3 +130,11 @@ raw provider error、unbounded output或live client/session。
 - [Service Command API](../50-product-interface/service-api.md)
 - [Service Read API](../50-product-interface/service-read-api.md)
 - [Service Acceptance](../50-product-interface/service-acceptance.md)
+
+## Preparation observation
+
+Workspace 的显式准备可以使用 MCP owner 独立的版本化 stdio initialize/list/close 观察；
+它只证明原检查时点的协议及选中能力，不执行业务工具、授予 credit 或持有运行会话。
+参数、预算、原操作重放/unknown 与非 stdio fail-closed 边界见
+[MCP owner contract](../../internal/modules/blocks/mcp/readme.md#激活前-preparation-协议观察)。
+Runtime 六入口及 execute 的完整授权链保持不变。

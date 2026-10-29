@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/preparationcompiler"
 	"slices"
 	"strings"
 	"time"
@@ -220,6 +222,7 @@ type workspacePreparationAccepted struct {
 }
 
 type workspacePreparationBlocked struct {
+	MCPConnection                   *mcpevents.ObservePreparationResult
 	ProcessPolicyFacts              *workspace.PreparationProcessPolicyFacts
 	SealEvidence                    *workspace.WorkspacePreparationSealEvidence
 	MCPRegistryEvidence             *workspace.WorkspacePreparationMCPRegistryEvidence
@@ -359,6 +362,7 @@ func preparationOriginalIndex(w *workspace.Workspace, command workspaceevents.Ch
 
 func (m *Biz) finishBlockedPreparation(ctx context.Context, fact workspacePreparationBlocked) (workspaceevents.CheckWorkspacePreparationResult, error) {
 	command := fact.Command
+	observedMCP := false
 	m.deletionIngressMu.RLock()
 	defer m.deletionIngressMu.RUnlock()
 	for retry := 0; retry < 4; retry++ {
@@ -375,6 +379,15 @@ func (m *Biz) finishBlockedPreparation(ctx context.Context, fact workspacePrepar
 		}
 		if transition.Noop {
 			return m.preparationCommandReadback(ctx, current, command)
+		}
+		if !observedMCP && fact.Reason == "check_pipeline_incomplete" {
+			observedMCP = true
+			fact.MCPConnection = m.observeOriginalPreparationMCP(ctx, transition.Next, command)
+			fact.At = time.Now().UTC()
+			transition, err = reduceWorkspacePreparationBlocked(current, fact)
+			if err != nil {
+				return workspaceevents.CheckWorkspacePreparationResult{}, err
+			}
 		}
 		if err := m.workspaces.CompareAndSwap(ctx, transition.Next, current.Revision); err != nil {
 			if errors.Is(err, common.ErrConflict) {
@@ -679,6 +692,10 @@ func reduceWorkspacePreparationBlocked(current *workspace.Workspace, fact worksp
 		}
 		compiled := workspace.CompilePreparationMCPSelection(workspace.PreparationMCPDefinition(current), *registry, skills)
 		registry.Selection = &compiled
+		if fact.MCPConnection != nil && reason == "check_pipeline_incomplete" {
+			r := fact.MCPConnection.Clone()
+			registry.Connection = &r
+		}
 		registry.SelectionEvaluationVersion = workspace.PreparationMCPSelectionEvaluationVersion
 		registry.ContentHash = registry.Hash()
 		for n := range a.Checks {
@@ -737,6 +754,7 @@ func reduceWorkspacePreparationBlocked(current *workspace.Workspace, fact worksp
 		}
 		a.EmptySelectionEvaluationVersion = workspace.PreparationEmptySelectionEvaluationVersion
 		a.Checks = workspace.EvaluatePreparationEmptySelections(&next, a)
+		a.Checks = workspace.EvaluatePreparationMCPConnection(&next, a)
 		record.Attempts[i] = a
 		next.StartupPreparation = &record
 	}
@@ -762,6 +780,12 @@ func reduceWorkspacePreparationBlocked(current *workspace.Workspace, fact worksp
 		a.DefinitionCompilation = &compiled
 		record.Attempts[i] = a
 		next.StartupPreparation = &record
+	}
+	if reason == "check_pipeline_incomplete" && a.Assessment != nil && a.Assessment.Outcome == "checks_passed" {
+		if completion, err := preparationcompiler.CompileCompletion(&next, a); err == nil {
+			record.Completions = append(record.Completions, completion)
+			next.StartupPreparation = &record
+		}
 	}
 	if workspace.ValidatePreparationEvidencePersistence(&next) != nil {
 		return workspaceExecutionTransition{}, common.ErrConflict

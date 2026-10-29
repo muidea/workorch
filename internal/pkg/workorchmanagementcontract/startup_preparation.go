@@ -9,7 +9,7 @@ import (
 )
 
 // StartupPreparationView reports persisted operations and historical per-check
-// judgments only, never readiness, M3 or activation permission. A historical
+// judgments and historical completion metadata, never activation permission. A historical
 // no-Run final fence is not a claim about current Run inventory.
 // ActiveRunID is an independent Workspace fact, not an inventory proof.
 type StartupPreparationView struct {
@@ -24,8 +24,9 @@ type StartupPreparationView struct {
 }
 
 type PreparationRecordView struct {
-	Version  string                   `json:"version"`
-	Attempts []PreparationAttemptView `json:"attempts"`
+	Completions []PreparationCompletionView `json:"completions,omitempty"`
+	Version     string                      `json:"version"`
+	Attempts    []PreparationAttemptView    `json:"attempts"`
 }
 
 type PreparationAttemptView struct {
@@ -190,7 +191,7 @@ func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 		}
 		return nil
 	}
-	if (v.Record.Version != "workorch-preparation-record/v1" && v.Record.Version != "workorch-preparation-record/v2") || len(v.Record.Attempts) == 0 || len(v.Record.Attempts) > 64 || (v.CurrentValidity != "not_evaluated" && v.CurrentValidity != "stale") {
+	if (v.Record.Version != "workorch-preparation-record/v1" && v.Record.Version != "workorch-preparation-record/v2") || len(v.Record.Attempts) == 0 || len(v.Record.Attempts) > 64 || (v.CurrentValidity != "not_evaluated" && v.CurrentValidity != "stale" && v.CurrentValidity != "observed") {
 		return common.ErrConflict
 	}
 	lastRevision := uint64(0)
@@ -380,15 +381,24 @@ func (v StartupPreparationView) ValidateFor(workspaceID string) error {
 			return common.ErrConflict
 		}
 	}
-	if v.OperationState != v.Record.Attempts[len(v.Record.Attempts)-1].State {
+	if validatePreparationCompletionViews(v.Record) != nil {
+		return common.ErrConflict
+	}
+	expected := v.Record.Attempts[len(v.Record.Attempts)-1].State
+	for _, c := range v.Record.Completions {
+		if c.RequestID == v.Record.Attempts[len(v.Record.Attempts)-1].RequestID {
+			expected = "completed"
+		}
+	}
+	if v.OperationState != expected || v.CurrentValidity == "observed" && expected != "completed" {
 		return common.ErrConflict
 	}
 	return nil
 }
 
 // Public shape validation is not an owner proof validator. Positive file
-// judgments require the versioned original observation reference and remain
-// inside an overall blocked operation, never ready/M3/activation authority.
+// judgments require the versioned original observation reference. Only an
+// independent owner completion represents historical M3; neither grants execution.
 func preparationMemoryReasonRequiresEvidence(reason string) bool {
 	switch reason {
 	case "memory_inventory_observed_selection_pending", "memory_semantic_evidence_required", "memory_selection_candidate_limit", "memory_list_selection_observed_remaining_checks", "memory_empty_selection_observed_remaining_checks":
@@ -424,7 +434,7 @@ func validPreparationEvaluatedCheck(a PreparationAttemptView, c PreparationCheck
 		return c.Owner == "skill" && c.Required && c.State == "passed" && c.Reason == "skill_empty_selection_observed_remaining_checks" && a.EmptySelectionEvaluationVersion == "workorch-preparation-empty-selection-evaluation/v1" && a.SkillRegistryEvidenceRef != "" && a.SoulEvidenceRef != "" && a.SkillHubEffectState == "recorded" && a.SkillSelectionState == "compiled_checks_pending" && a.SkillContextState == "compiled_checks_pending" && a.SkillReferenceState == "observed_checks_pending" && a.SkillStatusState == "observed_freshness_pending"
 	}
 	if c.ID == "mcp_selection" {
-		return c.Owner == "mcpregistry" && c.Required && c.State == "passed" && c.Reason == "mcp_empty_selection_observed_remaining_checks" && a.EmptySelectionEvaluationVersion == "workorch-preparation-empty-selection-evaluation/v1" && a.MCPRegistryEvidenceRef != "" && a.SkillRegistryEvidenceRef != ""
+		return c.Owner == "mcpregistry" && c.Required && c.State == "passed" && (c.Reason == "mcp_empty_selection_observed_remaining_checks" || c.Reason == "mcp_connection_observed_remaining_checks") && a.EmptySelectionEvaluationVersion == "workorch-preparation-empty-selection-evaluation/v1" && a.MCPRegistryEvidenceRef != "" && a.SkillRegistryEvidenceRef != ""
 	}
 	if c.ID == "memory_selection" {
 		return c.Owner == "memory" && c.Required && a.MemoryInventoryEvidenceRef != "" && c.State == "passed" && (c.Reason == "memory_list_selection_observed_remaining_checks" || c.Reason == "memory_empty_selection_observed_remaining_checks")
@@ -507,4 +517,50 @@ func (b PreparationBindingView) validate() error {
 
 func preparationViewIdentity(value string) bool {
 	return value != "" && len(value) <= 512 && strings.TrimSpace(value) == value && !strings.ContainsRune(value, 0) && utf8.ValidString(value)
+}
+
+// Only non-sensitive historical completion metadata crosses HTTP.
+type PreparationCompletionView struct {
+	Version                    string    `json:"version"`
+	CompletionID               string    `json:"completionId"`
+	RequestID                  string    `json:"requestId"`
+	BootstrapHash              string    `json:"bootstrapHash"`
+	CreationEpoch              string    `json:"creationEpoch"`
+	CompletedAt                time.Time `json:"completedAt"`
+	ExpiresAt                  time.Time `json:"expiresAt"`
+	CommittedWorkspaceRevision uint64    `json:"committedWorkspaceRevision"`
+}
+
+func validatePreparationCompletionViews(r *PreparationRecordView) error {
+	if len(r.Completions) > len(r.Attempts) || len(r.Completions) > 0 && r.Version != "workorch-preparation-record/v2" {
+		return common.ErrConflict
+	}
+	seen := map[string]bool{}
+	last := uint64(0)
+	for _, c := range r.Completions {
+		found := false
+		for _, a := range r.Attempts {
+			if a.RequestID == c.RequestID {
+				found = a.State == "blocked" && a.NoRunEvaluationVersion == "workorch-preparation-no-run-final-fence/v1" && a.Assessment != nil && a.Assessment.Outcome == "checks_passed" && a.DefinitionCompilation != nil && a.CompletedAt != nil && c.CompletedAt.Equal(*a.CompletedAt) && c.CreationEpoch == a.CreationEpoch && a.PreparationEpoch == 0 && c.CommittedWorkspaceRevision == a.CommittedWorkspaceRevision
+			}
+		}
+		if !found || seen[c.RequestID] || c.Version != "workorch-preparation-completion/v1" || !preparationDigest(c.CompletionID, "preparation-completion-sha256:") || !preparationDigest(c.BootstrapHash, "prepared-bootstrap-sha256:") || c.ExpiresAt.Sub(c.CompletedAt) != 30*time.Second || c.CommittedWorkspaceRevision <= last {
+			return common.ErrConflict
+		}
+		seen[c.RequestID] = true
+		last = c.CommittedWorkspaceRevision
+	}
+	return nil
+}
+
+func preparationDigest(value, prefix string) bool {
+	if !strings.HasPrefix(value, prefix) || len(value) != len(prefix)+64 {
+		return false
+	}
+	for _, c := range value[len(prefix):] {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }

@@ -2,6 +2,7 @@ package activationports
 
 import (
 	"context"
+	"github.com/muidea/workorch/internal/pkg/runtimeprojection"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/ownerreadports"
@@ -10,9 +11,9 @@ import (
 	"github.com/muidea/workorch/internal/pkg/workorchquerycontract"
 )
 
-func semanticMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *MemorySelectionEvidence, bool) {
+func semanticMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *runtimeprojection.MemorySelectionEvidence, bool) {
 	if opts.EmbeddingProviderConfig != nil {
-		return nil, &MemorySelectionEvidence{
+		return nil, &runtimeprojection.MemorySelectionEvidence{
 			Policy: "semantic_vector_search",
 			Status: "degraded",
 			Reason: opts.EmbeddingProviderConfig.Error(),
@@ -23,7 +24,7 @@ func semanticMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*m
 		return nil, nil, false
 	}
 	queryText := activationcore.MemoryRetrievalQueryText(opts.Goal, opts.DoD)
-	evidence := &MemorySelectionEvidence{
+	evidence := &runtimeprojection.MemorySelectionEvidence{
 		Policy:              "semantic_vector_search",
 		ProviderID:          target.ProviderID,
 		ModelID:             target.ModelID,
@@ -34,7 +35,7 @@ func semanticMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*m
 		Limit:               100,
 		RefreshSource:       "semantic_vector_search",
 		RetrievedMemoryIDs:  []string{},
-		RetrievedMemoryHits: []MemorySelectionHit{},
+		RetrievedMemoryHits: []runtimeprojection.MemorySelectionHit{},
 	}
 	embedding, err := GenerateEmbedding(ctx, opts.Hub, opts.WorkspaceID, target, queryText)
 	if err != nil {

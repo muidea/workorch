@@ -19,6 +19,43 @@ const recoverButton = () => screen.getByRole('button', { name: '显式恢复原�
 function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 
 describe('STEP04 准备主体流程', () => {
+  it.each(['observed', 'stale'] as const)('完成结算与当前 %s、历史 M3 及后续 Run 独立展示，读取不提交', async validity => {
+    const view = observed({ requestId: 'completed-original', expectedWorkspaceRevision: 10 });
+    const a = view.record!.attempts[0];
+    a.completedAt = '2026-10-22T00:00:01Z';
+    a.evaluationVersion = 'workorch-preparation-check-evaluation/v1';
+    a.noRunEvaluationVersion = 'workorch-preparation-no-run-final-fence/v1';
+    a.sealEvidenceRef = `seal-observation:${'a'.repeat(32)}`;
+    a.runHistoryEvidenceRef = `run-history-observation:${'b'.repeat(32)}`;
+    a.checks = [
+      { id: 'exact_seal', owner: 'workspace', required: true, state: 'passed', reason: 'seal_observed_remaining_checks' },
+      { id: 'first_activation_no_run', owner: 'run', required: true, state: 'passed', reason: 'run_history_empty_final_fence_observed' },
+      { id: 'persistence_integrity', owner: 'workspace', required: true, state: 'passed', reason: 'persistence_binding_observed_remaining_checks' },
+    ];
+    a.assessment = { version: 'workorch-preparation-all-of-assessment/v1', manifestHash: a.binding.manifestHash, outcome: 'checks_passed', requiredCount: 3, passedRequiredCount: 3, outstanding: [] };
+    a.definitionCompilation = { compilerVersion: 'workorch-preparation-definition-compiler/v1', snapshotHash: a.binding.snapshotHash, manifestHash: a.binding.manifestHash, sourceInventoryHash: 'inventory', profileContractsHash: 'profile', sourceCount: 2, requirementCount: 2, obligationCount: 1, verificationCount: 1 };
+    view.record!.completions = [{ version: 'workorch-preparation-completion/v1', completionId: `preparation-completion-sha256:${'c'.repeat(64)}`, requestId: a.requestId, bootstrapHash: `prepared-bootstrap-sha256:${'d'.repeat(64)}`, creationEpoch: a.creationEpoch!, completedAt: a.completedAt, expiresAt: '2026-10-22T00:00:31Z', committedWorkspaceRevision: a.committedWorkspaceRevision }];
+    view.operationState = 'completed'; view.currentValidity = validity;
+    if (validity === 'stale') { view.activeRunId = 'later-run'; view.workspaceRevision++; }
+    expect(() => validatePreparationView(view, 'ws')).not.toThrow();
+    vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(view);
+    render(wrap()); await act(async () => {});
+    expect(screen.getByText(/创建准备已完成（历史 M3）/)).toBeTruthy();
+    expect(screen.getByText(validity)).toBeTruthy();
+    if (validity === 'stale') expect(screen.getByText('later-run')).toBeTruthy();
+    expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
+    expect(workorchApi.recoverStartupPreparation).not.toHaveBeenCalled();
+    expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
+    for (const mutate of [
+      (v: StartupPreparationView) => { v.record!.completions![0].bootstrapHash = `prepared-bootstrap-sha256:${'g'.repeat(64)}`; },
+      (v: StartupPreparationView) => { v.record!.completions![0].requestId = 'other'; },
+      (v: StartupPreparationView) => { v.record!.completions![0].expiresAt = '2026-10-22T00:00:32Z'; },
+      (v: StartupPreparationView) => { v.record!.completions!.push({ ...v.record!.completions![0] }); },
+      (v: StartupPreparationView) => { v.record!.completions = []; },
+      (v: StartupPreparationView) => { v.record!.attempts[0].assessment!.outcome = 'blocked'; },
+    ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
+  });
+
   it('未登记诊断绑定原未决操作且不会自动登记或换身份重试', async () => {
     const view = observed({ requestId: 'unregistered-original', expectedWorkspaceRevision: 10 });
     const a = view.record!.attempts[0];
@@ -161,7 +198,7 @@ describe('STEP04 准备主体流程', () => {
     render(wrap()); await act(async () => {});
     expect(screen.getByText('原检查通过 2/3；仍有 1 项未通过')).toBeTruthy();
     expect(screen.getByText('actual-run')).toBeTruthy();
-    expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
     expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
     const bad = structuredClone(view); delete bad.record!.attempts[0].emptySelectionEvaluationVersion;
     expect(() => validatePreparationView(bad, 'ws')).toThrow();
@@ -270,7 +307,7 @@ describe('STEP04 准备主体流程', () => {
     render(wrap()); await act(async () => {});
     expect(screen.getByText(a.runHistoryEvidenceRef)).toBeTruthy();
     expect(screen.getByText(reason)).toBeTruthy();
-    expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
     expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.recoverStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
@@ -295,7 +332,7 @@ describe('STEP04 准备主体流程', () => {
     render(wrap()); await act(async () => {});
     expect(screen.getByText(a.sealEvidenceRef)).toBeTruthy();
     expect(screen.getByText(a.checks[0].reason)).toBeTruthy();
-    expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
     expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.recoverStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
@@ -395,7 +432,7 @@ describe('STEP04 准备主体流程', () => {
     render(wrap()); await act(async () => {});
     expect(screen.getByText(reason)).toBeTruthy();
     expect(screen.getByText(label)).toBeTruthy();
-    expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
     expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.recoverStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
@@ -424,7 +461,7 @@ describe('STEP04 准备主体流程', () => {
     render(wrap()); await act(async () => {});
     expect(screen.getByText(a.mcpRegistryEvidenceRef)).toBeTruthy();
     expect(screen.getByText('mcp_registry_observed_connection_pending')).toBeTruthy();
-    expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
     expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.recoverStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
@@ -459,7 +496,7 @@ describe('STEP04 准备主体流程', () => {
       vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(current);
       render(wrap()); await act(async () => {});
       expect(screen.getByText(reason)).toBeTruthy();
-      expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+      expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
       cleanup();
       delete current.record!.attempts[0].memoryInventoryEvidenceRef;
       expect(() => validatePreparationView(current, 'ws')).toThrow();
@@ -487,7 +524,7 @@ describe('STEP04 准备主体流程', () => {
     vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(view);
     render(wrap()); await act(async () => {});
     expect(screen.getByText('passed')).toBeTruthy();
-    expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
     expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
     for (const mutate of [
@@ -511,7 +548,7 @@ describe('STEP04 准备主体流程', () => {
     render(wrap()); await act(async () => {});
     expect(screen.getByText('passed')).toBeTruthy();
     expect(screen.getByText('原检查时点的单项结论；passed 不代表当前仍有效、整体 ready 或 M3')).toBeTruthy();
-    expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
     expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
     for (const mutate of [
@@ -676,7 +713,7 @@ describe('STEP04 准备主体流程', () => {
     vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(view);
     render(wrap()); await act(async () => {});
     expect(screen.getByText(ref)).toBeTruthy();
-    expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
     expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
     const negative = structuredClone(view); delete negative.record!.attempts[0].soulEvidenceRef;
@@ -705,7 +742,7 @@ describe('STEP04 准备主体流程', () => {
     vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(view);
     render(wrap()); await act(async () => {});
     expect(screen.getByText(ref)).toBeTruthy();
-    expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
     expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
     const negative = structuredClone(view); delete negative.record!.attempts[0].skillRegistryEvidenceRef;
@@ -734,7 +771,7 @@ describe('STEP04 准备主体流程', () => {
     vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(view);
     render(wrap()); await act(async () => {});
     expect(screen.getByText(ref)).toBeTruthy();
-    expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
     expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
     for (const reason of ['managed_config_observation_unavailable', 'managed_config_observation_incomplete', 'managed_config_declaration_invalid', 'managed_config_content_invalid', 'managed_config_content_conflict']) {
@@ -762,7 +799,7 @@ describe('STEP04 准备主体流程', () => {
     render(wrap()); await act(async () => {});
     expect(screen.getByText('d'.repeat(64))).toBeTruthy();
     expect(screen.getByText('resource_observed_remaining_checks')).toBeTruthy();
-    expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
     expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
     for (const state of ['accepted', 'unknown']) {
@@ -789,7 +826,7 @@ describe('STEP04 准备主体流程', () => {
     render(wrap()); await act(async () => {});
     expect(screen.getByText('c'.repeat(64))).toBeTruthy();
     expect(screen.getByText('directory_observed_remaining_checks')).toBeTruthy();
-    expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
     expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
     for (const state of ['accepted', 'unknown']) {
@@ -810,7 +847,7 @@ describe('STEP04 准备主体流程', () => {
 	   render(wrap()); await act(async () => {});
 	   expect(screen.getByText('provider_declaration_only')).toBeTruthy();
 	   expect(screen.getByText('run_history_empty_fence_not_final')).toBeTruthy();
-	   expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+	   expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
 	   expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
 	   expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
 	   for (const reason of ['ready', 'pass', 'provider_cache_miss']) {
@@ -833,7 +870,7 @@ describe('STEP04 准备主体流程', () => {
     vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(observed(request));
     await act(async () => post.resolve({ requestId: request.requestId, preparation: observed(request) }));
     expect(screen.getByText('check_pipeline_incomplete')).toBeTruthy();
-    expect(screen.getByText('本流程不签发 M3 完成凭据')).toBeTruthy();
+    expect(screen.getByText('尚未取得创建准备完成凭据')).toBeTruthy();
     expect(workorchApi.readStartupPreparation).toHaveBeenCalledTimes(2);
     expect(recoverButton().disabled).toBe(true);
     expect(workorchApi.recoverStartupPreparation).not.toHaveBeenCalled();

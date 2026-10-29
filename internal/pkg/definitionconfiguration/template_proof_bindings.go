@@ -24,7 +24,7 @@ func CompileAuthoring(d workspace.DefinitionDerivationRequest) (Bindings, error)
 	if err != nil {
 		return Bindings{}, err
 	}
-	return CompileForItems(&workspace.Workspace{}, &d.Template, items)
+	return CompileForItems(&workspace.Workspace{DefinitionAuthoring: &workspace.DefinitionAuthoringRecord{Input: d.Input}}, &d.Template, items)
 }
 func configurationDoDItems(w *workspace.Workspace, t *workspace.WorkspaceTemplate) ([]workspace.DefinitionCandidateItem, error) {
 	if w == nil || t == nil {

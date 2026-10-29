@@ -68,6 +68,29 @@ GET、普通重放、已完成恢复、旧 v1 重放均无外部效果；v1 不�
 历史和字节隔离。公开仅增加有限 registrationState/registrationAttempts；旧 status 未决不能用新登记回执清除。
 
 
+### 完整准备结算与历史 M3
+
+`workorch-preparation-completion/v1` 是 `workorch-preparation-record/v2` 的 append-only 联合合同。
+保留原 observation attempt 的 `blocked` 编码与完整旧材料，不改写旧历史；只有原 accepted 的正常延续
+在同一次结算 CAS 中，所有 required 真正 passed、all-of 完整重算、原封存与 owner/File 最终反查通过、
+完整 PreparedBootstrap 从原归档独立编译、no-Run final fence 与真实 CAS 前像一致，才追加 completion。
+其绑定完整原 request/payload、creation/preparation epoch、binding、bootstrap hash、提交 revision 与时点。
+Repository 在每次读写中从完整原材料复编译；hash、计数或自报 PASS 均不能替代门禁。unknown、中断恢复、
+旧 blocked、缺材料或不完整编译均不能补造。恢复/查询不重发 MCP 或 SkillHub status。
+
+公开 `operationState=completed` 来自最新 attempt 对应的 completion，原 observation 保留；
+`currentValidity=observed` 仅表示 30 秒短观察窗口内且未发现失效，并非 MCP session 持有、持续就绪或执行权限。
+到期、File epoch/owner 漂移、版本或 reservation 变化使其 stale，历史 completion 不撤销或覆写。
+同 creation epoch 的第一条 completion 是历史 M3；后续正常新检查可追加自己的 completion，不替换第一条。
+Start/Restart 的回执消费及执行授权属于独立合同，此处不启动 Run。
+
+非空 MCP 选择只由原 accepted 延续发送 `/mcp/preparation/observe`。Workspace 从 detached 纯 reducer 的
+完整原选择构造具体 DTO；MCP owner 重新读取精确 Registry，在有界 stdio 会话执行 initialize、已选类别 list、
+close，独立反查完整原协议回复，零业务工具调用。原始 frames/stderr 随私有 MCP 证据保全，公开只保留引用。
+最多 8 server、总预算 10 秒、单进程 8 秒、每 server 原始材料 512 KiB；非 stdio、分页不完整、协议/关闭失败、
+超限或 Registry 漂移均阻塞。owner 内最多 128 个原观察，精确重复重放 detached 原值，异 payload 拒绝；
+只读 `/mcp/preparation/query-original` 不启动进程，owner 重建后无原记录为 unknown。
+
 ### 激活前准备只读与纯编译边界
 
 `QueryExactConfirmedStartupSnapshotCommand/Result`（`/workspace/activation-preparation/exact-startup/query`）
@@ -87,7 +110,7 @@ Workspace 与非零 expected revision。owner 反查完整持久 authoring/六�
 `pkg/startuppreparation` 只从 exact snapshot 纯编译有界、稳定的 required 检查清单；
 选择项要求的是原合同实际选中集合的完整性事实，不要求安装未使用能力。清单无 PASS 字段，
 不将 DECLARED、空列表、配置存在或 membership 当成 owner 可用性事实。
-当前持久记录不含正 readiness、M3 或激活权限；首次完成与 no-Run 并发协议不由上述查询实现。
+持久记录可包含独立版本的历史 completion；查询只投影原结算与当前有效性，不签发 completion 或激活权限。
 
 原结算保存 `Assessment`（`workorch-preparation-all-of-assessment/v1`）：绑定原 manifest，
 给出完整 required 数、通过数，以及按原清单顺序保留 ID/owner/state/reason 的全部未通过项。
@@ -123,7 +146,7 @@ GET、重放、恢复与重启不以当前配置/环境回填旧无输入记录�
 仅供 Application 从同一原操作归档完整结构编译；与原 state 的 scope、revision、attempts 及
 全部 evidence persistence 精确关联，消费者独立完整重验，`json:"-"` 不进入 HTTP。不提供 repository 或可变 owner 句柄，
 不接受调用方回传它作为成功凭据。GET 不附该源、不编译；原材料缺失不回填，
-编译产物不写入新的成功标记，也不改变逐项结果、有效性、M3 或执行授权。
+Application 的编译回复不写入成功标记。原正常结算的 Workspace 私有事务另用同一纯编译器独立复编译，只有完整门禁通过才追加下述 completion；查询与恢复不能补造。
 
 `emptySelectionEvaluationVersion=workorch-preparation-empty-selection-evaluation/v1` 只消费有界的
 精确空 Skill/MCP 选择。必须有原 Goal/DoD 与 seal 绑定、完整六阶段 Soul、完整 Registry/SkillHub
@@ -131,7 +154,7 @@ GET、重放、恢复与重启不以当前配置/环境回填旧无输入记录�
 Skill 单项可为 `passed/skill_empty_selection_observed_remaining_checks`。
 在此基础上，完整 MCP 双读、原配置及 Skill 依赖重编译均无失败且选中 server/capability 都为空时，
 MCP 单项可为 `passed/mcp_empty_selection_observed_remaining_checks`。不是把缺来源当空、跳过 required
-或声明通用 N/A；非空集合仍需既定资源事实与连接证明，不启动 MCP 或联网补证。
+或声明通用 N/A；非空集合由下述独立 MCP preparation 观察合同提供连接证明，空选择消费者本身不启动 MCP。
 原编译材料和其旧诊断原样保留，正向消费由独立版本描述，不改写原诊断。
 此处仅证明原检查时点的选择闭合，不产生持续有效性租约、Provider 授权、M3 或执行权限。
 
@@ -187,7 +210,7 @@ GET/replay/recover 不重取、不回填旧无材料历史，也不替代 reserv
 必须为同一原 accepted attempt、expected+1 前像与 expected+2 提交、creation 精确相等、epoch=0、
 无 pending/settled 且 ActiveRunID 为空。Repository 除完整持久反证外，独立比较实际 CAS 前像及原封存材料，
 拒绝仅重算 hash、自洽替换、unknown 恢复补造、并发 reservation、revision 漂移及同提交引入 Run。
-公共 DTO 只增加有限版本，不输出完整前像；总体仍 blocked，不签发 M3 或执行权。
+公共 DTO 只增加有限版本，不输出完整前像；单项通过不签发 M3 或执行权，整体成功另须下述 completion 合同。
 此单项是原结算时点的历史证明；之后 fresh reservation 使 currentValidity stale，原材料和 passed 不改写，
 不据其声称“当前没有 Run”。无 FinalFence 的旧空历史保持原阻塞，不自动升级。
 `exact_seal` / `persistence_integrity` 使用 `workorch-preparation-seal-evidence/v1`：
@@ -307,7 +330,7 @@ DefaultsJSON，不能用空集、子集或自洽重哈希替代原要求。scope
 原材料与逐项结果仍同一次 blocked CAS 保存；repository 读回从 archive 复算每个 File 判断，
 原对象 hash 不匹配不能授单项通过，完成材料/结果 append-only。GET 只复验已有事实，不重取资源或补写裁决。
 `binding_changed`、中断恢复和无裁决版本的历史均不得升级；单项 passed 只表达原观察时点的结论，
-不证明持续有效、跨 owner 原子快照或全 required 合取。操作仍 blocked、currentValidity 仍独立
+不证明持续有效、跨 owner 原子快照或全 required 合取。单项不改变操作结算、currentValidity 仍独立
 not_evaluated/stale；其他 owner、ready、M3 和执行授权不能从这些单项结果导出。
 同版裁决还消费完整 Soul 双读：accepted 时由同一 detached 正式 Goal/DoD 与原 owner 前像纯编译
 接纳 revision 增量后的 `ObservationSnapshotHash`，与原清单 snapshot 区分并保持不可变。

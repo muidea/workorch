@@ -13,7 +13,7 @@ import (
 
 func TestOwnerContractAndOperationMapper(t *testing.T) {
 	contracts := Contracts()
-	if len(contracts) != 6 || len(MessageContracts()) != 6 {
+	if len(contracts) != 8 || len(MessageContracts()) != 8 {
 		t.Fatalf("contracts=%+v", contracts)
 	}
 	for _, contract := range contracts {

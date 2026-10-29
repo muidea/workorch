@@ -81,6 +81,9 @@ func EvaluatePreparationEmptySelections(w *Workspace, a WorkspacePreparationAtte
 				checks[i].State, checks[i].Reason = "blocked", "check_pipeline_incomplete"
 			}
 		case "mcp_selection":
+			if c.Reason == PreparationMCPConnectionReason {
+				continue
+			}
 			if emptyMCP {
 				checks[i].State, checks[i].Reason = "passed", PreparationEmptyMCPReason
 			} else if c.State == "passed" {

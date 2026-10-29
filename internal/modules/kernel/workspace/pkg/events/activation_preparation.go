@@ -81,7 +81,13 @@ func (r QueryWorkspacePreparationStateResult) ValidateFor(c QueryWorkspacePrepar
 	if last.CommittedWorkspaceRevision > r.WorkspaceRevision {
 		return common.ErrConflict
 	}
-	if r.State != string(last.State) || r.CurrentValidity != "not_evaluated" && r.CurrentValidity != "stale" {
+	expected := string(last.State)
+	for _, c := range r.Record.Completions {
+		if c.RequestID == last.RequestID {
+			expected = "completed"
+		}
+	}
+	if r.State != expected || r.CurrentValidity != "not_evaluated" && r.CurrentValidity != "stale" && !(expected == "completed" && r.CurrentValidity == "observed") {
 		return common.ErrConflict
 	}
 	return nil

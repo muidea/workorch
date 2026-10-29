@@ -56,7 +56,7 @@ func ValidPreparationEvaluatedCheck(a WorkspacePreparationAttempt, c WorkspacePr
 		return c.Owner == "skill" && c.Required && c.State == "passed" && c.Reason == PreparationEmptySkillReason && a.EmptySelectionEvaluationVersion == PreparationEmptySelectionEvaluationVersion && a.SkillRegistryEvidenceRef != "" && a.SoulEvidenceRef != "" && a.SkillHubEffectState == PreparationSkillHubRecorded && a.SkillSelectionState == "compiled_checks_pending" && a.SkillContextState == "compiled_checks_pending" && a.SkillReferenceState == "observed_checks_pending" && a.SkillStatusState == "observed_freshness_pending"
 	}
 	if c.ID == "mcp_selection" {
-		return c.Owner == "mcpregistry" && c.Required && c.State == "passed" && c.Reason == PreparationEmptyMCPReason && a.EmptySelectionEvaluationVersion == PreparationEmptySelectionEvaluationVersion && a.MCPRegistryEvidenceRef != "" && a.SkillRegistryEvidenceRef != ""
+		return c.Owner == "mcpregistry" && c.Required && c.State == "passed" && (c.Reason == PreparationMCPConnectionReason || c.Reason == PreparationEmptyMCPReason) && a.EmptySelectionEvaluationVersion == PreparationEmptySelectionEvaluationVersion && a.MCPRegistryEvidenceRef != "" && a.SkillRegistryEvidenceRef != ""
 	}
 	if c.ID == "first_activation_no_run" {
 		return c.Owner == "run" && c.Required && a.NoRunEvaluationVersion == PreparationNoRunFinalVersion && a.PreparationEpoch == 0 && a.RunHistoryEvidenceRef != "" && a.SealEvidenceRef != "" && c.State == "passed" && c.Reason == PreparationNoRunFinalReason

@@ -140,7 +140,7 @@ function PreparationPanel({ workspaceId }: { workspaceId: string }) {
   const registrationStage = Boolean(lastInitialization?.registrationState && lastInitialization.registrationState !== 'waiting_for_files');
   const initializationBudget = registrationStage ? (lastInitialization?.registrationAttempts ?? 0) : (lastInitialization?.attempts ?? 0);
   return <Space direction="vertical" style={{ width: '100%' }}>
-    <Alert type="info" showIcon message="准备检查仍保持阻塞，不授予 ready、M3 或执行权限。" description="开页和刷新仅读已有记录；显式新检查会在服务端先封存 SkillHub status 目标，再按 global／project 执行，可能保存 SkillHub 状态或访问其已配置服务，不执行 install、sync、use、apply 或 repair。不调用模型、不创建 Run。status 历史记录不等于 Skill 就绪；效果未决时禁止新请求绕过，恢复不重跑观察。原始材料由服务端受限保存，仅公开随机历史引用。未保存的页面交互在关闭或刷新后丢失，已受理操作由服务端保存。" />
+    <Alert type="info" showIcon message="准备检查独立展示原操作结算、当前观察有效性和历史 M3；不会启动执行。" description="开页和刷新仅读已有记录；显式新检查会在服务端先封存 SkillHub status 目标，再按 global／project 执行，可能保存 SkillHub 状态或访问其已配置服务，不执行 install、sync、use、apply 或 repair。选中的 MCP 会执行有界协议握手、能力列表核对并关闭连接，不调用业务工具。不调用模型、不创建 Run。status 历史记录不等于 Skill 就绪；效果未决时禁止新请求绕过，恢复不重跑观察。原始材料由服务端受限保存，仅公开随机历史引用。未保存的页面交互在关闭或刷新后丢失，已受理操作由服务端保存。" />
     {error ? <Alert type="error" message={error} /> : null}
     {view?.skillHubProjectIssue === 'project_registration_required' ? <Alert type="warning" showIcon message="SkillHub 项目尚未登记" description="原检查收到 PROJECT_NOT_FOUND，不能将其视为空技能库。仅创建 .agents/skills 目录不足以完成 SkillHub 登记；需通过受支持的显式项目登记流程处理。原效果未决记录仍保留，刷新或升级不会解除，也不会自动重跑 status。" /> : null}
     <Space wrap>
@@ -160,9 +160,9 @@ function PreparationPanel({ workspaceId }: { workspaceId: string }) {
       { key: 'state', label: '操作状态', children: view.operationState },
       { key: 'validity', label: '当前有效性', children: view.currentValidity },
       { key: 'run', label: '独立 Run 投影', children: view.activeRunId || '未投影 ActiveRunID（不证明无历史或在途 Run）' },
-      { key: 'm3', label: 'M3', children: '本流程不签发 M3 完成凭据' },
+      { key: 'm3', label: 'M3', children: view.record?.completions?.length ? `创建准备已完成（历史 M3）：${view.record.completions[0].completionId}；执行仍需独立启动` : '尚未取得创建准备完成凭据' },
       { key: 'request', label: '最近检查请求', children: last?.requestId || '未检查' },
-      { key: 'all-of', label: '整体 required 检查', children: last?.assessment ? `原检查通过 ${last.assessment.passedRequiredCount}/${last.assessment.requiredCount}；${last.assessment.outcome === 'blocked' ? `仍有 ${last.assessment.outstanding.length} 项未通过` : '原 required 检查均通过；仍不等于当前 ready 或 M3'}` : '未保存整体裁决（不从旧单项记录补造）' },
+      { key: 'all-of', label: '整体 required 检查', children: last?.assessment ? `原检查通过 ${last.assessment.passedRequiredCount}/${last.assessment.requiredCount}；${last.assessment.outcome === 'blocked' ? `仍有 ${last.assessment.outstanding.length} 项未通过` : '原 required 检查均通过；完成结算仍需完整 bootstrap 和 no-Run CAS'}` : '未保存整体裁决（不从旧单项记录补造）' },
       { key: 'definition-compile', label: '封存来源纯编译', children: last?.definitionCompilation ? `已编译 ${last.definitionCompilation.sourceCount} 个来源、${last.definitionCompilation.obligationCount} 个义务；非完整 bootstrap，不代表 ready 或 M3` : '未保存编译摘要（不回填旧记录）' },
       { key: 'execution-inputs', label: '原执行策略输入', children: last?.executionInputVersion ? '已归档原模板、Workspace 策略、对话语言与修复上限；非完整 bootstrap，不代表 ready 或 M3' : '未保存原输入（不借用当前配置补造）' },
       { key: 'evaluation', label: '逐项裁决', children: last?.evaluationVersion ? '原检查时点的单项结论；passed 不代表当前仍有效、整体 ready 或 M3' : '原版阻塞记录（不回填单项通过）' },

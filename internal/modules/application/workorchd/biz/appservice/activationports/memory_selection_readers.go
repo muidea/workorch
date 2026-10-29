@@ -2,6 +2,7 @@ package activationports
 
 import (
 	"context"
+	"github.com/muidea/workorch/internal/pkg/runtimeprojection"
 	"sync"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
@@ -10,7 +11,7 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
-func selectedExplicitMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *MemorySelectionEvidence, error) {
+func selectedExplicitMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *runtimeprojection.MemorySelectionEvidence, error) {
 	if opts.WorkspaceID == "" || opts.Hub == nil || len(opts.IDs) > activationcore.RuntimeMemorySelectionCandidateLimit {
 		return nil, nil, common.ErrInvalidArgument
 	}
@@ -39,17 +40,17 @@ func selectedExplicitMemoryItems(ctx context.Context, opts MemorySelectionOption
 		}
 		ret = append(ret, r.item)
 	}
-	return applyRuntimeMemorySelectionBudget(ret, &MemorySelectionEvidence{
+	return applyRuntimeMemorySelectionBudget(ret, &runtimeprojection.MemorySelectionEvidence{
 		Policy: "explicit_memory_selection", RefreshSource: "explicit_ids",
 	})
 }
 
-func selectedWorkspaceListMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *MemorySelectionEvidence, error) {
+func selectedWorkspaceListMemoryItems(ctx context.Context, opts MemorySelectionOptions) ([]*memorymodel.MemoryItem, *runtimeprojection.MemorySelectionEvidence, error) {
 	items, err := ownerreadports.ListMemoryItemsByWorkspaceOwnerCommand(ctx, opts.Hub, opts.WorkspaceID)
 	if err != nil {
 		return nil, nil, err
 	}
-	return applyRuntimeMemorySelectionBudget(items, &MemorySelectionEvidence{
+	return applyRuntimeMemorySelectionBudget(items, &runtimeprojection.MemorySelectionEvidence{
 		Policy: "deterministic_workspace_list", RefreshSource: "workspace_inventory",
 	})
 }

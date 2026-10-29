@@ -1,6 +1,8 @@
 package definitionadmission
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
@@ -152,5 +154,19 @@ func TestCompileBlocksUnprovableRequiredProfileCWI(t *testing.T) {
 		result.ViolationCode != workspacemodel.DefinitionAdmissionProfileContractInvalid ||
 		len(result.OffendingRefs) != 1 || result.OffendingRefs[0] != "profile/software-dev/deliverable/coverage_map" {
 		t.Fatalf("unprovable Profile admission = %+v", result)
+	}
+}
+
+func TestAdmissionRejectsOverCapacityBeforeEligible(t *testing.T) {
+	candidate := candidateWithRelation("all_of")
+	for i := 1; i < 129; i++ {
+		item := candidate.DoDInputs[0]
+		item.CandidateItemRef = fmt.Sprintf("extra-%d", i)
+		candidate.DoDInputs = append(candidate.DoDInputs, item)
+	}
+	candidate = candidate.Normalized().WithHash()
+	result, err := Compile(candidate)
+	if err != nil || result.Disposition == workspacemodel.DefinitionAdmissionAdmittedAllOf || !strings.Contains(result.CanonicalViolation, "coverage_capacity_exceeded") {
+		t.Fatalf("over-capacity candidate admitted: %+v %v", result, err)
 	}
 }

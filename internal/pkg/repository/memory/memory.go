@@ -20,7 +20,7 @@ import (
 	soul "github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models"
 	runtimeevidencemodel "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/models"
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
-	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/startuppreparation"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/preparationcompiler"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/repository"
 	deletioncontract "github.com/muidea/workorch/internal/pkg/workorchdeletioncontract"
@@ -1832,7 +1832,7 @@ func newWorkspaceRepository(binding repository.OwnerRepositoryBinding) *Workspac
 func (r *WorkspaceRepository) Create(_ context.Context, item *workspace.Workspace) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := startuppreparation.ValidatePreparedDefinitionPersistence(item); err != nil {
+	if err := preparationcompiler.ValidatePreparedPersistence(item); err != nil {
 		return err
 	}
 	if err := workspace.ValidatePreparationFenceTransition(nil, item); err != nil {
@@ -1858,7 +1858,7 @@ func (r *WorkspaceRepository) Get(_ context.Context, id common.WorkspaceID) (*wo
 	if !ok {
 		return nil, common.ErrNotFound
 	}
-	if err := startuppreparation.ValidatePreparedDefinitionPersistence(item); err != nil {
+	if err := preparationcompiler.ValidatePreparedPersistence(item); err != nil {
 		return nil, err
 	}
 	return cloneWorkspace(item), nil
@@ -1876,7 +1876,7 @@ func (r *WorkspaceRepository) List(_ context.Context) ([]*workspace.Workspace, e
 
 	ret := make([]*workspace.Workspace, 0, len(ids))
 	for _, id := range ids {
-		if err := startuppreparation.ValidatePreparedDefinitionPersistence(r.items[common.WorkspaceID(id)]); err != nil {
+		if err := preparationcompiler.ValidatePreparedPersistence(r.items[common.WorkspaceID(id)]); err != nil {
 			return nil, err
 		}
 		ret = append(ret, cloneWorkspace(r.items[common.WorkspaceID(id)]))
@@ -1899,7 +1899,7 @@ func (r *WorkspaceRepository) Update(_ context.Context, item *workspace.Workspac
 	if err := workspace.ValidatePreparationRecordTransition(r.items[item.ID], item, false); err != nil {
 		return err
 	}
-	if err := startuppreparation.ValidatePreparedDefinitionPersistence(item); err != nil {
+	if err := preparationcompiler.ValidatePreparedPersistence(item); err != nil {
 		return err
 	}
 	r.items[item.ID] = cloneWorkspace(item)
@@ -1931,7 +1931,7 @@ func (r *WorkspaceRepository) CompareAndSwap(_ context.Context, item *workspace.
 	if err := workspace.ValidatePreparationRecordTransition(current, item, true); err != nil {
 		return err
 	}
-	if err := startuppreparation.ValidatePreparedDefinitionPersistence(item); err != nil {
+	if err := preparationcompiler.ValidatePreparedPersistence(item); err != nil {
 		return err
 	}
 	item.Revision = expectedRevision + 1

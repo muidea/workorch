@@ -60,6 +60,13 @@ func PreparationFileRevalidationStale(w *Workspace, now time.Time, epoch string)
 		return false, nil
 	}
 	a := w.StartupPreparation.Attempts[len(w.StartupPreparation.Attempts)-1]
+	return PreparationFileRevalidationStaleForAttempt(w, a, now, epoch)
+}
+func PreparationFileRevalidationStaleForAttempt(w *Workspace, a WorkspacePreparationAttempt, now time.Time, epoch string) (bool, error) {
+	if w == nil || now.IsZero() {
+		return false, common.ErrInvalidArgument
+	}
+
 	if a.DirectoryEvidenceHash == "" {
 		return false, nil
 	}

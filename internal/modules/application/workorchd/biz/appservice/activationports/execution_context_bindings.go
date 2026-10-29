@@ -2,6 +2,7 @@ package activationports
 
 import (
 	"context"
+	"github.com/muidea/workorch/internal/pkg/runtimeprojection"
 	"strings"
 
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/appmodelcore"
@@ -17,7 +18,7 @@ type workspaceRuntimeActivationBindings struct {
 	defaultSoul       *soulmodel.Soul
 	stageSouls        map[string]*soulmodel.Soul
 	memories          []*memorymodel.MemoryItem
-	memorySelection   *MemorySelectionEvidence
+	memorySelection   *runtimeprojection.MemorySelectionEvidence
 	governanceHistory []runtimecontract.RuntimeGovernanceHistoryEntry
 	soulRouting       appmodelcore.SoulRouting
 }

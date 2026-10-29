@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/muidea/workorch/internal/pkg/bootstrapcompiler"
 	"sort"
 	"strconv"
 	"strings"
@@ -81,6 +82,13 @@ func Compile(candidate workspacemodel.DefinitionAdmissionCandidate) (workspacemo
 	}
 	if err := runtimecontract.ValidateRuntimeImplementationWorkAvailability(candidate.RuntimeProfileContracts); err != nil {
 		return clarification(candidate, workspacemodel.DefinitionAdmissionProfileContractInvalid, runtimeProfileRefs(candidate.RuntimeProfileContracts), "implementation_work_protocol_unavailable"), nil
+	}
+	texts := make([]string, len(candidate.DoDInputs))
+	for i, item := range candidate.DoDInputs {
+		texts[i] = item.Text
+	}
+	if _, err := bootstrapcompiler.CompileCapacity(candidate.GoalInput.Text, texts, candidate.RuntimeProfileContracts, runtimecontract.RuntimeAcceptanceFocusMaxCount); err != nil {
+		return clarification(candidate, workspacemodel.DefinitionAdmissionProfileContractInvalid, []string{candidate.GoalInput.CandidateItemRef}, "coverage_capacity_exceeded"), nil
 	}
 	result := workspacemodel.DefinitionAdmissionResult{
 		WorkspaceID: candidate.WorkspaceID, CandidateID: candidate.CandidateID, CandidateRevision: candidate.CandidateRevision,

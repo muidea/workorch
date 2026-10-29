@@ -147,3 +147,13 @@ LLM 在执行期可编辑的草稿。Workspace owner 封存
 
 总 Definition 超过安全上限必须在 promotion/Run 创建前返回 `definition_capacity_exceeded`，不得静默截断。正常大 Definition 只限制
 partition、active window、provider batch 和 external context，不限制 canonical CWI ledger 的完整性。
+
+### Complete bootstrap capacity
+
+完整 acceptance focus 容量上限为 128；软件开发内置模板的显式 `maxFocuses` 默认同为 128。
+计数使用完整 bootstrap 的同一纯 work-unit 编译器，包含原 DoD 及 Profile/recipe 派生的全部工作项。
+authoring 配置编译按真实 Goal 与有效封存 policy 提前拒绝超限，admission 独立检查全局界，最终 bootstrap 再核验。
+无 Goal 的预览只提供 lower-bound，不猜 recipe；最终完整计数不能被预览或分组替代。
+旧封存 policy=64 保持原值，不自动升级既有 Workspace；显式模板升级后仍须正常新候选与人工精确确认。
+分组和 slice 只组织上下文，不减少 focus 数量；每次 context window 与字节/token 预算保持原上限。
+SM-2 保留完整 focus/coverage，SM-3 保留逐项绑定及上下文界，SM-4 持久恢复完整集合；SM-1 不获得动作选择权。

@@ -111,6 +111,15 @@ func preparationStateFromPersistence(w *workspace.Workspace, now time.Time) (wor
 		result.Record = &record
 		last := record.Attempts[len(record.Attempts)-1]
 		result.State, result.CurrentValidity = string(last.State), "not_evaluated"
+		for _, c := range record.Completions {
+			if c.RequestID == last.RequestID {
+				result.State = "completed"
+				result.CurrentValidity = "observed"
+				if now.Before(c.CompletedAt) || !now.Before(c.ExpiresAt) {
+					result.CurrentValidity = "stale"
+				}
+			}
+		}
 		fileStale, err := workspace.PreparationFileRevalidationStale(w, now, workspace.PreparationFileObservationEpoch(w))
 		if err != nil {
 			return workspaceevents.QueryWorkspacePreparationStateResult{}, err

@@ -33,10 +33,28 @@ func TestPreparationPureCompilationBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	paths = append(paths, configurationPaths...)
+	for _, folder := range []string{"internal/pkg/bootstrapcompiler", "internal/pkg/runtimeprojection", "internal/modules/kernel/workspace/pkg/preparationcompiler"} {
+		more, err := filepath.Glob(filepath.Join(root, folder, "*.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, more...)
+	}
 	allowed := map[string]bool{
-		"github.com/muidea/workorch/internal/pkg/definitionconfiguration": true,
-		"github.com/muidea/workorch/internal/pkg/runtimeprofiledecode":    true,
-		"github.com/muidea/workorch/internal/pkg/workorcheventpayload":    true,
+		"time": true,
+		"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract":                   true,
+		"github.com/muidea/workorch/internal/pkg/bootstrapcompiler":                            true,
+		"github.com/muidea/workorch/internal/pkg/runtimeprojection":                            true,
+		"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/preparationcompiler": true,
+		"github.com/muidea/workorch/internal/modules/blocks/soul/pkg/models":                   true,
+		"github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/models":            true,
+		"github.com/muidea/workorch/internal/modules/blocks/memory/pkg/models":                 true,
+		"github.com/muidea/workorch/internal/pkg/workorchskillcontract":                        true,
+		"github.com/muidea/workorch/internal/pkg/workorchmemorycontract":                       true,
+		"github.com/muidea/workorch/internal/pkg/memoryselection":                              true,
+		"github.com/muidea/workorch/internal/pkg/definitionconfiguration":                      true,
+		"github.com/muidea/workorch/internal/pkg/runtimeprofiledecode":                         true,
+		"github.com/muidea/workorch/internal/pkg/workorcheventpayload":                         true,
 		"crypto/sha256": true, "encoding/hex": true, "encoding/json": true, "fmt": true, "reflect": true, "slices": true, "sort": true, "strings": true, "unicode/utf8": true,
 		"github.com/muidea/workorch/internal/pkg/common":                                                  true,
 		"github.com/muidea/workorch/internal/pkg/workorchruntimecontract":                                 true,

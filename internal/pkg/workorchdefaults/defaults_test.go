@@ -1122,8 +1122,8 @@ func assertSoftwareDevAcceptanceSlicePolicy(t *testing.T, hints map[string]any) 
 	if got := testIntFromAny(policy["maxWorkItems"]); got != 4 {
 		t.Fatalf("acceptanceSlicePolicy maxWorkItems = %d, want 4", got)
 	}
-	if got := testIntFromAny(policy["maxFocuses"]); got != 64 {
-		t.Fatalf("acceptanceSlicePolicy maxFocuses = %d, want 64", got)
+	if got := testIntFromAny(policy["maxFocuses"]); got != 128 {
+		t.Fatalf("acceptanceSlicePolicy maxFocuses = %d, want 128", got)
 	}
 	if got := testIntFromAny(policy["maxCandidateContextItems"]); got != 4 {
 		t.Fatalf("acceptanceSlicePolicy maxCandidateContextItems = %d, want 4", got)

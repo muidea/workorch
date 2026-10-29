@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	connectionevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcpregistry/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/fileobservation"
@@ -37,6 +38,7 @@ func (f PreparationMCPObservationFacts) Validate() error {
 }
 
 type WorkspacePreparationMCPRegistryEvidence struct {
+	Connection                 *connectionevents.ObservePreparationResult `json:",omitempty"`
 	Version, Ref               string
 	RequestID, PayloadHash     string
 	Binding                    WorkspacePreparationBinding
@@ -51,6 +53,10 @@ func ValidPreparationMCPRegistryRef(ref string) bool {
 }
 func (e WorkspacePreparationMCPRegistryEvidence) Clone() WorkspacePreparationMCPRegistryEvidence {
 	e.Facts = e.Facts.Clone()
+	if e.Connection != nil {
+		c := e.Connection.Clone()
+		e.Connection = &c
+	}
 	if e.Selection != nil {
 		c := e.Selection.Clone()
 		e.Selection = &c
@@ -66,6 +72,9 @@ func (e WorkspacePreparationMCPRegistryEvidence) Hash() string {
 	return fileobservation.Digest(raw)
 }
 func (e WorkspacePreparationMCPRegistryEvidence) Validate() error {
+	if e.Connection != nil && !e.validConnectionBinding() {
+		return common.ErrConflict
+	}
 	if e.SelectionEvaluationVersion != "" && (e.SelectionEvaluationVersion != PreparationMCPSelectionEvaluationVersion || e.Selection == nil || e.BlockedReason() == "") {
 		return common.ErrConflict
 	}
@@ -119,7 +128,7 @@ func validatePreparationMCPRegistryEvidencePersistence(w *Workspace) error {
 		found := false
 		for _, c := range a.Checks {
 			if c.ID == "mcp_selection" {
-				if c.State == "passed" && c.Reason == PreparationEmptyMCPReason && ValidPreparationEvaluatedCheck(a, c) {
+				if c.State == "passed" && (c.Reason == PreparationEmptyMCPReason || c.Reason == PreparationMCPConnectionReason && e.Connection != nil && e.Connection.Satisfied()) && ValidPreparationEvaluatedCheck(a, c) {
 					found = true
 					continue
 				}
@@ -129,7 +138,13 @@ func validatePreparationMCPRegistryEvidencePersistence(w *Workspace) error {
 				found = true
 			}
 		}
+		if e.Connection != nil && (e.Connection.StartedAt.Before(a.StartedAt) || e.Connection.CompletedAt.After(a.CompletedAt)) {
+			return common.ErrConflict
+		}
 		if !found {
+			return common.ErrConflict
+		}
+		if !reflect.DeepEqual(a.Checks, EvaluatePreparationMCPConnection(w, a)) {
 			return common.ErrConflict
 		}
 		delete(refs, e.Ref)
@@ -174,4 +189,43 @@ func validatePreparationMCPRegistryEvidenceTransition(current, next *Workspace, 
 		}
 	}
 	return nil
+}
+
+const PreparationMCPConnectionReason = "mcp_connection_observed_remaining_checks"
+
+func (e WorkspacePreparationMCPRegistryEvidence) validConnectionBinding() bool {
+	r := e.Connection
+	if r == nil || r.ValidateFor(r.Command) != nil || e.Selection == nil || e.Selection.FailureCode != "" {
+		return false
+	}
+	c := r.Command
+	var caps []connectionevents.PreparationCapability
+	for _, cap := range e.Selection.Selected.Capabilities {
+		caps = append(caps, connectionevents.PreparationCapability{ID: string(cap.ID), ServerID: string(cap.ServerID), Kind: cap.Kind, Name: cap.Name, URI: cap.URI})
+	}
+	return c.WorkspaceID == e.Facts.WorkspaceID && c.WorkspaceRevision == e.Facts.WorkspaceRevision && c.RequestID == e.RequestID && c.PayloadHash == e.PayloadHash && c.SnapshotHash == e.Facts.SnapshotHash && c.RegistryRevision == e.Selection.Selected.RegistryRevision && reflect.DeepEqual(c.ServerIDs, e.Selection.SelectedServerIDs) && reflect.DeepEqual(c.Capabilities, caps)
+}
+func EvaluatePreparationMCPConnection(w *Workspace, a WorkspacePreparationAttempt) []WorkspacePreparationCheckResult {
+	checks := append([]WorkspacePreparationCheckResult(nil), a.Checks...)
+	for _, e := range w.PreparationMCPRegistryEvidence {
+		if e.Ref != a.MCPRegistryEvidenceRef || e.Connection == nil {
+			continue
+		}
+		exactDirectory := false
+		for _, d := range w.PreparationDirectoryEvidence {
+			if d.ContentHash == a.DirectoryEvidenceHash && e.Connection.Command.InternalDirectory == d.Internal.Path && e.Connection.Command.DeliverableDirectory == d.Deliverable.Path {
+				exactDirectory = true
+			}
+		}
+		if !exactDirectory || e.Validate() != nil || !e.Connection.Satisfied() {
+			continue
+		}
+		for i, c := range checks {
+			if c.ID == "mcp_selection" && c.Reason != "binding_changed" && c.Reason != "original_check_interrupted" {
+				checks[i].State = "passed"
+				checks[i].Reason = PreparationMCPConnectionReason
+			}
+		}
+	}
+	return checks
 }

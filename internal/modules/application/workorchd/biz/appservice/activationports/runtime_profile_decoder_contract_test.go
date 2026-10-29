@@ -12,13 +12,13 @@ import (
 
 // 保留调用端接线检查；完整字段/转换类型合同在 shared decoder 包逐对象验证。
 func TestRuntimeProfileShapeMatchesTypedDecoderFields(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "runtime_activation.go", nil, 0)
+	file, err := parser.ParseFile(token.NewFileSet(), "../../../../../../pkg/runtimeprojection/projection.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var decoder *ast.FuncDecl
 	for _, declaration := range file.Decls {
-		if function, ok := declaration.(*ast.FuncDecl); ok && function.Name.Name == "runtimeExecutionContract" {
+		if function, ok := declaration.(*ast.FuncDecl); ok && function.Name.Name == "RuntimeExecutionContract" {
 			decoder = function
 		}
 	}

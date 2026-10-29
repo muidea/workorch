@@ -82,6 +82,9 @@ func startupPreparationView(response workspaceevents.QueryWorkspacePreparationSt
 	}
 	if response.Record != nil {
 		view.Record = &workorchmanagementcontract.PreparationRecordView{Version: response.Record.Version, Attempts: make([]workorchmanagementcontract.PreparationAttemptView, 0, len(response.Record.Attempts))}
+		for _, c := range response.Record.Completions {
+			view.Record.Completions = append(view.Record.Completions, workorchmanagementcontract.PreparationCompletionView{Version: c.Version, CompletionID: c.CompletionID, RequestID: c.RequestID, BootstrapHash: c.BootstrapHash, CreationEpoch: c.CreationEpoch, CompletedAt: c.CompletedAt, ExpiresAt: c.ExpiresAt, CommittedWorkspaceRevision: c.CommittedWorkspaceRevision})
+		}
 		for _, a := range response.Record.Attempts {
 			binding := a.Binding
 			attempt := workorchmanagementcontract.PreparationAttemptView{

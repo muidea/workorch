@@ -26,6 +26,8 @@ type ExecuteOperationResult struct {
 
 func MessageContracts() []eventcontract.MessageContract {
 	return eventcontract.MessageContracts(
+		eventcontract.CommandTopic[QueryPreparationCommand, QueryPreparationResult]("mcp", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicQueryPreparation),
+		eventcontract.CommandTopic[ObservePreparationCommand, ObservePreparationResult]("mcp", definitionPackage, eventcontract.CommandClassExecute, eventcontract.LanePolicyExecute, TopicObservePreparation),
 		eventcontract.CommandTopic[AcquireRuntimeCapabilitiesCommand, AcquireRuntimeCapabilitiesResult]("mcp", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireRuntimeCapabilities),
 		eventcontract.CommandTopic[AcquireRuntimeOperationAdmissibilityCommand, AcquireRuntimeOperationAdmissibilityResult]("mcp", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicAcquireRuntimeOperationAdmissibility),
 		eventcontract.CommandTopic[ProbeRuntimeOperationFeasibilityCommand, ProbeRuntimeOperationFeasibilityResult]("mcp", definitionPackage, eventcontract.CommandClassRead, eventcontract.LanePolicyQuery, TopicProbeRuntimeOperationFeasibility),

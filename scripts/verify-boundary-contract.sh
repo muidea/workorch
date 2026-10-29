@@ -4233,8 +4233,10 @@ validation_repair_profile_parser="$({
 	sed -n '/^func ValidationFailureRepairConvergence(/,/^}/p' internal/pkg/runtimeprofiledecode/decode.go
 	sed -n '/^func validationFailureRepairConvergenceHasExactShape(/,/^}/p' internal/pkg/runtimeprofiledecode/decode.go
 })"
-if ! grep -q -F 'return runtimeprofiledecode.ValidationFailureRepairConvergence(input)' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go ||
-	! grep -q -F 'ret.ProfileContracts = runtimeprofiledecode.Decode(input["profileContracts"])' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go; then
+if ! grep -q -F 'return runtimeprofiledecode.ValidationFailureRepairConvergence(input)' internal/pkg/runtimeprojection/projection.go ||
+    ! grep -q -F 'ret.ProfileContracts = runtimeprofiledecode.Decode(input["profileContracts"])' internal/pkg/runtimeprojection/projection.go ||
+    ! grep -q -F 'return runtimeprojection.RuntimeExecutionContract(input)' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go ||
+    ! grep -q -F 'return runtimeprojection.RuntimeValidationFailureRepairConvergence(input)' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go; then
 	echo "boundary contract violation: activation bypasses shared Profile decoder" >&2
 	exit 1
 fi
@@ -4279,7 +4281,11 @@ if ! grep -q -F 'runtimecontract.RuntimeBootstrapArtifact{' <<<"$runtime_bootstr
 	echo "boundary contract violation: pre-seal profile parser regained an exact RuntimeBootstrapArtifact target" >&2
 	exit 1
 fi
-runtime_bootstrap_artifact_compiler="$(sed -n '/^func compileRuntimeBootstrapArtifactPolicy(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationcore/runtime_focus_compiler.go)"
+if ! grep -q -F 'return bootstrapcompiler.CompileCoverage(goal, dod, a)' internal/modules/application/workorchd/biz/appservice/activationcore/runtime_focus_compiler.go; then
+    echo "boundary contract violation: activation bypasses pure complete coverage compiler" >&2
+    exit 1
+fi
+runtime_bootstrap_artifact_compiler="$(sed -n '/^func compileRuntimeBootstrapArtifactPolicy(/,/^}/p' internal/pkg/bootstrapcompiler/runtime_focus_compiler.go)"
 if ! grep -q -F 'file/workspace_deliverable' <<<"$runtime_bootstrap_artifact_compiler" ||
 	grep -q -E -- 'file/profile_declared_candidates|TargetSelectorCandidateRefs:|ProspectiveTargetRef|artifact\.TargetRef' <<<"$runtime_bootstrap_artifact_compiler"; then
 	echo "boundary contract violation: bootstrap artifact compilation regained a pre-seal exact target or closed candidate selector" >&2
@@ -4350,20 +4356,31 @@ if ! grep -q -F 'requirement.ProspectiveTargetRef != ""' <<<"$runtime_bootstrap_
 	echo "boundary contract violation: Runtime bootstrap no longer rejects a pre-seal exact prospective target" >&2
 	exit 1
 fi
+# Pure implementation lives in runtimeprojection; the activation port must
+# delegate to it while the checks below still scan every recursive gate.
+for marker in \
+    'return runtimeprojection.ValidateRuntimePresealTargetDeclarations(executionContract, evidencePolicies)' \
+    'return runtimeprojection.ValidateRuntimeEvidencePolicyInputs(owner, items)' \
+    'return runtimeprojection.CompileRuntimeEvidencePolicies(owner, items)'; do
+    if ! grep -q -F "$marker" internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go; then
+        echo "boundary contract violation: activation bypasses pure projection ($marker)" >&2
+        exit 1
+    fi
+done
 runtime_preseal_input_guard="$({
-	sed -n '/^func validateRuntimePresealTargetDeclarations(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
-	sed -n '/^func runtimeExecutionContractContainsBootstrapArtifactField(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
-	sed -n '/^func runtimeValueContainsField(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
-	sed -n '/^func runtimePayloadFieldsContainField(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
-	sed -n '/^func runtimePayloadValueContainsField(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
+	sed -n '/^func ValidateRuntimePresealTargetDeclarations(/,/^}/p' internal/pkg/runtimeprojection/projection.go
+	sed -n '/^func RuntimeExecutionContractContainsBootstrapArtifactField(/,/^}/p' internal/pkg/runtimeprojection/projection.go
+	sed -n '/^func RuntimeValueContainsField(/,/^}/p' internal/pkg/runtimeprojection/projection.go
+	sed -n '/^func RuntimePayloadFieldsContainField(/,/^}/p' internal/pkg/runtimeprojection/projection.go
+	sed -n '/^func RuntimePayloadValueContainsField(/,/^}/p' internal/pkg/runtimeprojection/projection.go
 })"
 for marker in \
 	'prospectiveTargetRef' \
 	'targetRef' \
-	'runtimeExecutionContractContainsBootstrapArtifactField' \
-	'runtimeValueContainsField(child, fieldName)' \
-	'runtimePayloadValueContainsField(field.Value, fieldName)' \
-	'runtimePayloadValueContainsField(item, fieldName)' \
+	'RuntimeExecutionContractContainsBootstrapArtifactField' \
+	'RuntimeValueContainsField(child, fieldName)' \
+	'RuntimePayloadValueContainsField(field.Value, fieldName)' \
+	'RuntimePayloadValueContainsField(item, fieldName)' \
 	'strings.EqualFold'; do
 	if ! grep -q -F "$marker" <<<"$runtime_preseal_input_guard"; then
 		echo "boundary contract violation: recursive pre-seal exact-target rejection lost $marker" >&2
@@ -4371,11 +4388,11 @@ for marker in \
 	fi
 done
 runtime_evidence_policy_admission="$({
-	sed -n '/^func validateRuntimeEvidencePolicyInputs(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
-	sed -n '/^func compileRuntimeEvidencePolicies(/,/^}/p' internal/modules/application/workorchd/biz/appservice/activationports/runtime_activation.go
+	sed -n '/^func ValidateRuntimeEvidencePolicyInputs(/,/^}/p' internal/pkg/runtimeprojection/projection.go
+	sed -n '/^func CompileRuntimeEvidencePolicies(/,/^}/p' internal/pkg/runtimeprojection/projection.go
 })"
 for marker in \
-	'validateRuntimePresealTargetDeclarations(nil, items)' \
+	'ValidateRuntimePresealTargetDeclarations(nil, items)' \
 	'requires a non-empty string id' \
 	'evidence policies duplicate id' \
 	'policy.Validate()' \
@@ -5774,7 +5791,7 @@ fi
 # receipt check may recreate a second authority path.
 validation_requirement_callsites="$(grep -R -l -E --include='*.go' --exclude='*_test.go' -- 'CompileRuntimeValidationProofRequirements\(' internal | sort)"
 expected_validation_requirement_callsites="$(printf '%s\n' \
-	internal/modules/application/workorchd/biz/appservice/activationcore/runtime_bootstrap.go \
+	internal/pkg/bootstrapcompiler/runtime_bootstrap.go \
 	internal/modules/kernel/orchestrator/biz/runtime/aggregate_invariant.go \
 	internal/modules/kernel/orchestrator/biz/runtime_prerequisite_drive.go \
 	internal/pkg/workorchruntimecontract/runtime_semantic_obligation.go \
