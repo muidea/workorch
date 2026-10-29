@@ -2,6 +2,7 @@
 
 Status: normative
 
+
 Type: core-contract-part
 
 Last Verified: 2026-09-10
@@ -141,3 +142,9 @@ Core 保留 section 分层、stable/volatile boundary、canonical rendering 和 
 cache-control/key、request-log 文件布局、raw ref、model capability/config loader 与实际 wire mapping 只属于
 [LLM Block implementation contract](../../internal/modules/blocks/llm/readme.md)。adapter 不得以 provider 特性重排 C0～C5、
 改变 stable prefix 或覆盖 context-integrity gate。
+
+Runtime operations and semantic-plan renderers select the existing `section_messages/v1` transport. Responses preserves
+the C0-C5 section content and roles, with an explicit cache boundary after C2. The adapter recomputes the prefix key from
+actual rendered bytes and Workspace/provider/model/schema/reasoning scope; caller hashes do not grant trust. Volatile
+authority, observations and execution feedback remain after that boundary. The sealed Runtime stable-prefix identity
+and the actual rendered wire-prefix hash remain distinct audit facts. This mapping does not promise provider cache hits.

@@ -34,6 +34,27 @@ func testConfirmedRepairValidationConsumptionHistory(t *testing.T, original Runt
 	if err := validateConfirmedRepairFreshValidationContinuation(restored); err == nil {
 		t.Fatal("restored already consumed directive passed reverse proof")
 	}
+	retired, err := retireConsumedConfirmedRepairDirective(restored)
+	if err != nil || retired.RepairDirective != nil {
+		t.Fatalf("SM-2 did not retire the exact consumed handoff: %v", err)
+	}
+	if restored.Facts.RepairDirective == nil || !reflect.DeepEqual(retired.Evidence, restored.Facts.Evidence) ||
+		!reflect.DeepEqual(retired.Coverage, restored.Facts.Coverage) {
+		t.Fatal("retirement changed history, current proof, credit, or source aggregate")
+	}
+	reduced, _, err := reduceRuntimeAggregateWithDirective(restored, restored.Facts, &restored.Decision.AuthoritySnapshot)
+	if err != nil || reduced.RepairDirective != nil {
+		t.Fatalf("owner reduction resurrected the consumed handoff: %v", err)
+	}
+	if next, err := retireConsumedConfirmedRepairDirective(RuntimeAggregate{Facts: retired}); err != nil || next.RepairDirective != nil {
+		t.Fatalf("duplicate retirement changed the settled handoff: %v", err)
+	}
+	tampered := restored.CloneRaw()
+	tampered.Facts.RepairDirective.SupersedesEvidenceRevision = "evidence-0"
+	unchanged, err := retireConsumedConfirmedRepairDirective(tampered)
+	if err != nil || unchanged.RepairDirective == nil {
+		t.Fatalf("nonexact handoff was retired: %v", err)
+	}
 	for name, mutate := range map[string]func(*RuntimeAggregate){
 		"missing observations": func(a *RuntimeAggregate) { a.Facts.EvidenceApplicabilityObservations = nil },
 		"missing receipts":     func(a *RuntimeAggregate) { a.OperationReceipts = nil },
@@ -53,6 +74,10 @@ func testConfirmedRepairValidationConsumptionHistory(t *testing.T, original Runt
 			mutate(&a)
 			if confirmedRepairFreshValidationConsumed(a, directive) {
 				t.Fatal("invalid historical source consumed continuation")
+			}
+			a.Facts.RepairDirective = &value
+			if next, err := retireConsumedConfirmedRepairDirective(a); err == nil && next.RepairDirective == nil {
+				t.Fatal("invalid historical source retired the directive")
 			}
 		})
 	}

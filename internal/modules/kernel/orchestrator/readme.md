@@ -1026,6 +1026,25 @@ LLM 仅 C4 完整渲染/校验，无 action/credit/预算权限。`semantic_exec
 
 ### Validation-input consistency review boundary
 
+The SM-2 semantic fresh-validation guard requires the exact canonical
+`validation-failure-repair/<focus>/<attempt>/fresh-validation` identity. A settled semantic reopen lineage can remain
+after a later same-binding confirmed repair; it does not make that newer confirmed handoff a semantic continuation.
+SM-3 receipt consumption must use its own existing lineage proof, and SM-4 reload/replay retains that distinction.
+The checks do not add a transition, forgive a missing receipt, change the original criteria or grant credit; SM-1 is unchanged.
+
+On an aggregate-backed SM-2 reduction, an exact confirmed-repair fresh-validation directive is retired only after
+reverse-proving its completed repair transaction and the existing accepted-validation applicability consumption.
+This also applies while another prerequisite remains pending. SM-3 preserves the original dispatch/receipts, and
+SM-4 reload cannot resurrect the consumed handoff. A historical consumption does not settle fresh sampling debt,
+restore stale CWI credit, clear a different directive or forgive missing/tampered observations.
+
+SM-3 request context may carry the optional `runtime/validation-generation-context/v1` capability-owner observation and
+exact source-check mapping. The catalog snapshot covers all observed bytes, identity and completeness outcome; LLM C3 projects
+only current preparation/batch members, once per surface. Core does not select project languages or files. This is
+request context only: no new SM-1 transition, SM-2 credit/retry, SM-3 write surface or SM-4 recovery authority is introduced.
+In particular a conflict report still follows the failure boundary below; generation context does not authorize input
+replacement or turn a rejected review into a validation execution failure. Historical raw clones detach the new fields.
+
 验证输入的一致性允许交由 LLM 评审，不要求用户逐项预先确认，也不要求外部参考实现。原 Goal/DoD 仍是唯一基准；
 新增验收只能一致地补充、细化，并与原义务合取。LLM 必须评审原准则与准确输入内容，而不是仅复述候选自身的符合性声明。
 评审是语义判断，不是确定性等价证明，也不是验收通过事实。

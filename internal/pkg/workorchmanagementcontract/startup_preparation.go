@@ -44,7 +44,7 @@ type PreparationAttemptView struct {
 	ExpiresAt                       *time.Time                            `json:"expiresAt,omitempty"`
 	State                           string                                `json:"state"`
 	CreationEpoch                   string                                `json:"creationEpoch,omitempty"`
-	PreparationEpoch                uint64                                `json:"preparationEpoch,omitempty"`
+	PreparationEpoch                uint64                                `json:"preparationEpoch"` // Zero is the first preparation identity; keep it explicit on the wire.
 	Checks                          []PreparationCheckView                `json:"checks,omitempty"`
 	EvaluationVersion               string                                `json:"evaluationVersion,omitempty"`
 	NoRunEvaluationVersion          string                                `json:"noRunEvaluationVersion,omitempty"`

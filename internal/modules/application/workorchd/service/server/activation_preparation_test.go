@@ -1,12 +1,16 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -97,5 +101,80 @@ func TestStartupPreparationHTTPRejectsUnavailableWrongScopeAndDiagnosticLeak(t *
 				t.Fatalf("unsafe response: %d %s", recorder.Code, recorder.Body.String())
 			}
 		})
+	}
+}
+
+func TestStartupPreparationHTTPCompletionPreservesZeroEpoch(t *testing.T) {
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("test source path unavailable")
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(source), "../../../../../pkg/workorchmanagementcontract/testdata/startup_preparation_completed.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, validity := range []string{"observed", "stale"} {
+		for _, action := range []string{"read", "check", "recover"} {
+			t.Run(validity+"/"+action, func(t *testing.T) {
+				var view workorchmanagementcontract.StartupPreparationView
+				if err := json.Unmarshal(raw, &view); err != nil {
+					t.Fatal(err)
+				}
+				view.CurrentValidity = validity
+				if validity == "stale" {
+					view.ActiveRunID = "later-run"
+					view.WorkspaceRevision++
+				}
+				if err := view.ValidateFor("ws"); err != nil {
+					t.Fatal(err)
+				}
+				state := newTestServerState(t, normalizeConfig(Config{Backend: "memory"}))
+				state.applicationOperations = applicationOperations{}
+				calls := 0
+				state.readStartupPreparation = func(_ context.Context, id string) (workorchmanagementcontract.StartupPreparationView, error) {
+					calls++
+					if id != view.WorkspaceID {
+						t.Fatal("wrong query scope")
+					}
+					return view, nil
+				}
+				port := func(_ context.Context, id string, request workorchmanagementcontract.PreparationCheckRequest) (workorchmanagementcontract.PreparationOperationView, error) {
+					calls++
+					if id != view.WorkspaceID || request.RequestID != "original-request" || request.ExpectedWorkspaceRevision != 1 {
+						t.Fatal("changed original operation")
+					}
+					return workorchmanagementcontract.PreparationOperationView{RequestID: request.RequestID, Preparation: view}, nil
+				}
+				state.checkStartupPreparation, state.recoverStartupPreparation = port, port
+				method, url, body := http.MethodGet, "/api/v1/workorch/workspaces/ws/activation-preparation", ""
+				if action != "read" {
+					method, url, body = http.MethodPost, url+"/"+action, `{"requestId":"original-request","expectedWorkspaceRevision":1}`
+				}
+				recorder := httptest.NewRecorder()
+				newMuxWithStateNoStart(state).ServeHTTP(recorder, httptest.NewRequest(method, url, strings.NewReader(body)))
+				if recorder.Code != http.StatusOK || recorder.Header().Get("Cache-Control") != "no-store" || calls != 1 {
+					t.Fatalf("unexpected response: %d %s calls=%d", recorder.Code, recorder.Body, calls)
+				}
+				var response struct {
+					Preparation struct {
+						Record struct {
+							Attempts []struct {
+								Epoch json.RawMessage `json:"preparationEpoch"`
+							} `json:"attempts"`
+						} `json:"record"`
+					} `json:"preparation"`
+				}
+				if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				if len(response.Preparation.Record.Attempts) != 1 || !bytes.Equal(response.Preparation.Record.Attempts[0].Epoch, []byte("0")) {
+					t.Fatalf("zero epoch missing or changed: %s", recorder.Body)
+				}
+				var typed startupPreparationResponse
+				if err := json.Unmarshal(recorder.Body.Bytes(), &typed); err != nil || typed.Preparation.ValidateFor("ws") != nil {
+					t.Fatalf("completion wire rejected: %v", err)
+				}
+			})
+		}
 	}
 }

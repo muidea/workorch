@@ -472,7 +472,9 @@ func runtimeValidationFailureRepairOwnsSealedDirective(facts runtimecontract.Run
 // intentional: the repair closure audits the changed targets, while the new
 // Definition binding independently authorizes the validation surface. A
 // prerequisite interlude must not copy the closure targets back into this
-// action-scoped field.
+// action-scoped field. The canonical semantic identity is mandatory: this CWI
+// may retain its settled semantic reopen lineage after a later, same-binding
+// confirmed repair. That newer handoff belongs to the confirmed consumer.
 func runtimeValidationFailureRepairOwnsFreshValidationDirective(facts runtimecontract.RuntimeFacts) bool {
 	facts = facts.Normalized()
 	if facts.RepairDirective == nil || len(facts.Focus.CoverageWorkItemIDs) != 1 {
@@ -480,7 +482,8 @@ func runtimeValidationFailureRepairOwnsFreshValidationDirective(facts runtimecon
 	}
 	directive := facts.RepairDirective.Normalized()
 	coverageID := facts.Focus.CoverageWorkItemIDs[0]
-	if directive.FocusID != facts.Focus.ID || directive.Trigger != runtimecontract.RuntimeRepairTriggerRejectedValidation ||
+	if directive.ID != fmt.Sprintf("validation-failure-repair/%s/%d/fresh-validation", facts.Focus.ID, facts.Repair.RepairAttempts) ||
+		directive.FocusID != facts.Focus.ID || directive.Trigger != runtimecontract.RuntimeRepairTriggerRejectedValidation ||
 		directive.RequiredState != runtimecontract.ConvergenceStateNeedValidation || directive.Closure == nil ||
 		len(directive.TargetRefs) != 0 || len(directive.CoverageWorkItemIDs) != 1 || directive.CoverageWorkItemIDs[0] != coverageID {
 		return false

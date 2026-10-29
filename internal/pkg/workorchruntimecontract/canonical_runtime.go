@@ -1120,6 +1120,9 @@ func validateAndNormalizeRuntimeOperationAdmissibility(a RuntimeOperationAdmissi
 	validatedSurfaces := make([]RuntimeValidationSurface, 0, len(a.ValidationSurfaces))
 	reviewInputVersions := make(map[string]string)
 	for _, raw := range a.ValidationSurfaces {
+		if raw.GenerationContext != nil && raw.GenerationContext.ObservedRevision != a.ObservedRevision {
+			return RuntimeOperationAdmissibility{}, fmt.Errorf("validation generation context drifted from owner catalog revision")
+		}
 		if err := raw.Validate(); err != nil {
 			return RuntimeOperationAdmissibility{}, err
 		}
@@ -1258,6 +1261,17 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 	writeHashStrings(h, value.ConstraintRefs)
 	writeHashStrings(h, value.ValidationRecipeRefs)
 	for _, surface := range value.ValidationSurfaces {
+		if c := surface.GenerationContext; c != nil {
+			writeHashString(h, c.Version)
+			writeHashString(h, c.ContractRef)
+			writeHashString(h, c.ObservedRevision)
+			writeHashString(h, string(c.Outcome))
+			for _, file := range c.Files {
+				writeHashString(h, file.TargetRef)
+				writeHashString(h, file.Content)
+				writeHashString(h, file.ContentHash)
+			}
+		}
 		writeRuntimeValidationInputTargetsHash(h, surface)
 		writeHashString(h, surface.ID)
 		writeHashString(h, surface.OwnerModuleID)
@@ -1295,6 +1309,12 @@ func stableRuntimeOperationAdmissibilitySnapshotIDCanonical(value RuntimeOperati
 			}
 		}
 		for _, preparation := range surface.ProofRequirementPreparations {
+			if len(preparation.SourceObligationChecks) != 0 {
+				writeHashString(h, "proof-preparation-source-checks/v1")
+				for _, source := range preparation.SourceObligationChecks {
+					writeHashStrings(h, []string{source.InventoryHash, source.ObligationID, source.RequirementID, source.VerificationID, source.Criterion, source.Declaration, source.CheckRef})
+				}
+			}
 			writeHashString(h, preparation.RequirementHash)
 			writeHashString(h, preparation.DefinitionRevision)
 			writeHashString(h, string(preparation.CoverageWorkItemID))

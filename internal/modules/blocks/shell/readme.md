@@ -551,3 +551,15 @@ instrumentation override、skip、临时资源清理及现有 typed receipt/rest
 | lifecycle | `TestShellOwnerLifecycleFencesSubscriptionsAndCapabilityDelivery`、`TestShellOwnerLifecycleCoversEveryRuntimeTopic`、process-group 与 scratch cleanup tests | 覆盖全部七 topic 的重复 Start 单次投递、Stop 后零投递，以及独立 process/scratch cleanup |
 | effect + receipt | declared/undeclared workspace effects、managed-session observation、accepted/rejected receipt、diagnostic hash field-drift tests | 已覆盖主要 effect、receipt 分类及 route 字段哈希完整性 |
 | boundary | `TestShellOwnerAcquiresManagedValidationCapabilityThroughTypedEventHubContract`、`TestShellRuntimeIngressTopicMatrixEnforcesStrongOrchestratorCalls`、`TestShellOwnerFeasibilityAndSemanticProofHappyPathsUseTypedEventHub`、module execute、seal/authority tests | 覆盖七 topic 的 exact producer/strong-call/concrete payload，以及 owner adapter 的 typed EventHub admissibility、operation-feasibility 与 state-change semantic feasible 路径 |
+
+## Validation generation observations
+
+For isolated, conjunctive and project Go adapters that publish a content-bound missing-input preparation, the surface
+also publishes one `shell/go-validation-generation-context/v1` observation. It reads actual non-test `.go` source and
+present root `go.mod`/`go.sum`/`go.work`/`go.work.sum` from the declared workspace manifest, excluding `workorch_validation/`.
+Selection is adapter-specific, not Core policy. Up to 64 files / 256 KiB are supplied byte-for-byte with content hashes;
+missing/unreadable/non-UTF-8/symlink files or capacity overflow produce an explicit observation with no partial files.
+The context is shared across the surface's checks and bound to the owner catalog revision/snapshot. Original source
+obligation checks are preserved from the exact requested requirement. These observations supply implementation context
+for generation; they neither prove behavior nor change the independent review scope, native identity or create-only
+input rules. Existing input replacement and review-conflict retry remain unauthorized by this observation alone.

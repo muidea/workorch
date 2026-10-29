@@ -54,20 +54,21 @@ type runtimeCandidateActivationProjection struct {
 // correction intentionally live in C4 so they cannot pollute the stable
 // prefix or obscure the current focus.
 type runtimeCandidateAuthorityProjection struct {
-	WorkspaceID                 common.WorkspaceID                                `json:"workspaceId"`
-	RunID                       common.RunID                                      `json:"runId"`
-	DefinitionRevision          string                                            `json:"definitionRevision"`
-	EvidenceRevision            string                                            `json:"evidenceRevision"`
-	Focus                       runtimecontract.CoverageFocus                     `json:"focus"`
-	RequiredState               runtimecontract.ConvergenceState                  `json:"requiredState"`
-	RequiredEffectScopes        []runtimecontract.RuntimeEffectScope              `json:"requiredEffectScopes,omitempty"`
-	RequiredEvidenceKinds       []string                                          `json:"requiredEvidenceKinds,omitempty"`
-	RepairDirective             *runtimeCandidateRepairAuthorityProjection        `json:"repairDirective,omitempty"`
-	AllowedEvidenceRefs         []string                                          `json:"allowedAcceptedEvidenceRefs,omitempty"`
-	ValidationProofPreparations []runtimeSemanticNativeCheckAttestationProjection `json:"validationProofPreparations,omitempty"`
-	Resources                   runtimeCandidateAuthorityResourceProjection       `json:"resources"`
-	TargetSelectionInstruction  string                                            `json:"targetSelectionInstruction,omitempty"`
-	Activation                  runtimeCandidateActivationProjection              `json:"activation"`
+	ValidationGenerationContexts []runtimeValidationGenerationContextProjection    `json:"validationGenerationContexts,omitempty"`
+	WorkspaceID                  common.WorkspaceID                                `json:"workspaceId"`
+	RunID                        common.RunID                                      `json:"runId"`
+	DefinitionRevision           string                                            `json:"definitionRevision"`
+	EvidenceRevision             string                                            `json:"evidenceRevision"`
+	Focus                        runtimecontract.CoverageFocus                     `json:"focus"`
+	RequiredState                runtimecontract.ConvergenceState                  `json:"requiredState"`
+	RequiredEffectScopes         []runtimecontract.RuntimeEffectScope              `json:"requiredEffectScopes,omitempty"`
+	RequiredEvidenceKinds        []string                                          `json:"requiredEvidenceKinds,omitempty"`
+	RepairDirective              *runtimeCandidateRepairAuthorityProjection        `json:"repairDirective,omitempty"`
+	AllowedEvidenceRefs          []string                                          `json:"allowedAcceptedEvidenceRefs,omitempty"`
+	ValidationProofPreparations  []runtimeSemanticNativeCheckAttestationProjection `json:"validationProofPreparations,omitempty"`
+	Resources                    runtimeCandidateAuthorityResourceProjection       `json:"resources"`
+	TargetSelectionInstruction   string                                            `json:"targetSelectionInstruction,omitempty"`
+	Activation                   runtimeCandidateActivationProjection              `json:"activation"`
 }
 
 // runtimeCandidateExecutionTailProjection is C4: bounded current failure,
@@ -233,20 +234,21 @@ func runtimeCandidateAuthorityContextProjection(context runtimecontract.RuntimeC
 	// Continuation is retry/history information and belongs exclusively to C4.
 	activation.Continuation = nil
 	return runtimeCandidateAuthorityProjection{
-		WorkspaceID:                 context.WorkspaceID,
-		RunID:                       context.RunID,
-		DefinitionRevision:          context.DefinitionRevision,
-		EvidenceRevision:            context.EvidenceRevision,
-		Focus:                       context.Focus,
-		RequiredState:               context.RequiredState,
-		RequiredEffectScopes:        append([]runtimecontract.RuntimeEffectScope(nil), context.RequiredEffectScopes...),
-		RequiredEvidenceKinds:       append([]string(nil), context.RequiredEvidenceKinds...),
-		RepairDirective:             runtimeCandidateRepairAuthority(context.RepairDirective),
-		AllowedEvidenceRefs:         runtimecontract.AcceptedEvidenceRefsForFocus(facts),
-		ValidationProofPreparations: runtimeCandidateValidationProofPreparations(context.Focus, context.Resources.OperationAdmissibilities),
-		Resources:                   resources,
-		TargetSelectionInstruction:  runtimeTargetSelectionInstruction(resources.TargetSelection, manifest.State),
-		Activation:                  activation,
+		WorkspaceID:                  context.WorkspaceID,
+		RunID:                        context.RunID,
+		DefinitionRevision:           context.DefinitionRevision,
+		EvidenceRevision:             context.EvidenceRevision,
+		Focus:                        context.Focus,
+		RequiredState:                context.RequiredState,
+		RequiredEffectScopes:         append([]runtimecontract.RuntimeEffectScope(nil), context.RequiredEffectScopes...),
+		RequiredEvidenceKinds:        append([]string(nil), context.RequiredEvidenceKinds...),
+		RepairDirective:              runtimeCandidateRepairAuthority(context.RepairDirective),
+		AllowedEvidenceRefs:          runtimecontract.AcceptedEvidenceRefsForFocus(facts),
+		ValidationProofPreparations:  runtimeCandidateValidationProofPreparations(context.Focus, context.Resources.OperationAdmissibilities),
+		ValidationGenerationContexts: runtimeValidationGenerationContexts(context.Focus.CoverageWorkItemIDs, context.Focus.ProspectiveTargetRefs, context.Resources.OperationAdmissibilities),
+		Resources:                    resources,
+		TargetSelectionInstruction:   runtimeTargetSelectionInstruction(resources.TargetSelection, manifest.State),
+		Activation:                   activation,
 	}
 }
 
@@ -261,9 +263,6 @@ func runtimeCandidateValidationProofPreparations(focus runtimecontract.CoverageF
 	}
 	ret := make([]runtimeSemanticNativeCheckAttestationProjection, 0)
 	for _, catalog := range runtimecontract.NormalizeRuntimeOperationAdmissibilities(catalogs) {
-		if catalog.OwnerModuleID != runtimecontract.RuntimeModuleShell {
-			continue
-		}
 		for _, surface := range catalog.ValidationSurfaces {
 			for _, preparation := range surface.ProofRequirementPreparations {
 				preparation = preparation.Clone()
@@ -273,6 +272,8 @@ func runtimeCandidateValidationProofPreparations(focus runtimecontract.CoverageF
 				}
 				for _, attestation := range preparation.CheckAttestations {
 					ret = append(ret, runtimeSemanticNativeCheckAttestationProjection{
+						SourceObligation: runtimePreparationSourceObligation(preparation, attestation.RequiredCheckRef),
+						OwnerModuleID:    catalog.OwnerModuleID, CoverageWorkItemID: preparation.CoverageWorkItemID, RequirementHash: preparation.RequirementHash,
 						ValidationRecipeID: preparation.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
 						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
 						TargetRef: preparation.TargetRef, ContentContractRef: preparation.ContentContractRef, ContentRequirements: preparation.ContentRequirements,

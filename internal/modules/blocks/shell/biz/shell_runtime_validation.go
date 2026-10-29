@@ -258,6 +258,12 @@ func shellValidationSurfaces(declared, staticallyReady, ready []runtimemodel.Run
 			IdempotencyClass: runtimemodel.RuntimeOperationIdempotencyAtMostOnce,
 			InputSchemaHash:  schemaHash,
 		}
+		for _, preparation := range preparations {
+			if preparation.ContentContractRef != "" && preparation.TargetRef != "" {
+				surface.GenerationContext = shellValidationGenerationContext(workspaceDirectory, binding.Manifest, catalogObservedRevision)
+				break
+			}
+		}
 		if len(inputTargets) != 0 {
 			surface.InputTargetOwnerModuleID = runtimemodel.RuntimeModuleFile
 			surface.InputTargetRefs = normalizeShellStrings(inputTargets)
@@ -449,6 +455,7 @@ func shellValidationProofPreparationFromInspection(inspection shellNativeCheckIn
 		ValidationRecipeID: recipe.ID, TargetRef: targetRef,
 		OriginalDiagnostic:                      shellNativeCheckReadinessDiagnostic(inspection, requirement, manifest, catalogObservedRevision, targetRef),
 		CheckAttestations:                       runtimemodel.CloneRuntimeValidationCheckAttestationBindings(attestations),
+		SourceObligationChecks:                  runtimemodel.CloneRuntimeSourceObligationChecks(requirement.SourceObligationChecks),
 		ProspectiveTargetSatisfactionConstraint: constraint,
 	}.Normalized()
 	if recipe.AdapterRef == modulecommon.ValidationRecipeAdapterIsolatedEntrypoint && targetRef != "" {

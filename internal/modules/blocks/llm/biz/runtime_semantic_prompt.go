@@ -102,6 +102,7 @@ func newRuntimeSemanticProviderRequest(request llmmodels.RuntimeCandidateRequest
 		Schema:          prepared.schema,
 		PromptContext: &llmmodels.PromptContext{
 			SchemaVersion: "workorch.runtime_semantic_plan_prompt",
+			MessageLayout: llmmodels.PromptMessageLayoutSectionsV1,
 			Sections: []llmmodels.PromptSection{
 				{ID: "C0.runtime-semantic-contract", Name: "Runtime semantic plan contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, SourceRefs: []string{"runtime://semantic-plan-contract"}, Content: runtimeSemanticPlanContractCatalog()},
 				{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: context.Definition.Revision, SourceRefs: []string{"runtime://definition/" + context.Definition.Revision}, Content: prompt.definition},

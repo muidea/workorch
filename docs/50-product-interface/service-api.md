@@ -285,7 +285,9 @@ resources/read、prompts/get。公开参数不接受 server command、env 或凭
 `workspaceId`、`workspaceRevision`、可选 `activeRunId`、`operationState`、`currentValidity`、可选 `record`。
 它仅投影 Workspace owner 已有准备操作；无记录时两个状态均为 `not_checked`，不创建账本或启动检查。
 记录保存 schema version、有界 attempts、原 request/payload 身份、预期/提交 revision、精确确认与封存 binding、
-操作时点和状态。已知时间/版本/配置/封存漂移可以使 `currentValidity=stale`，
+操作时点和状态。attempt 的 `preparationEpoch` 始终显式输出；首次准备的合法身份值为 `0`，
+不得因零值省略字段，消费者也不得将缺失或 `null` 默认为零来接受 completion。
+已知时间/版本/配置/封存漂移可以使 `currentValidity=stale`，
 但不把原 `accepted/unknown` 改成已完成，也不因此允许重新提交或恢复未知效果。
 最新操作已保存的完整 Provider catalog 观察到达原 `ExpiresAt`（含等于）时，
 GET/原操作重放/恢复只投影 `currentValidity=stale`，不改原检查原因、状态、请求或引用，也不刷新目录。

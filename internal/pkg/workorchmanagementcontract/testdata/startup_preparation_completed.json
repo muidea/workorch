@@ -1,0 +1,96 @@
+{
+  "workspaceId": "ws",
+  "workspaceRevision": 3,
+  "operationState": "completed",
+  "currentValidity": "observed",
+  "record": {
+    "completions": [
+      {
+        "version": "workorch-preparation-completion/v1",
+        "completionId": "preparation-completion-sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "requestId": "original-request",
+        "bootstrapHash": "prepared-bootstrap-sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "creationEpoch": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "completedAt": "2026-10-21T00:00:01Z",
+        "expiresAt": "2026-10-21T00:00:31Z",
+        "committedWorkspaceRevision": 3
+      }
+    ],
+    "version": "workorch-preparation-record/v2",
+    "attempts": [
+      {
+        "definitionCompilation": {
+          "compilerVersion": "workorch-preparation-definition-compiler/v1",
+          "snapshotHash": "snapshot",
+          "manifestHash": "manifest",
+          "sourceInventoryHash": "inventory",
+          "profileContractsHash": "profiles",
+          "sourceCount": 2,
+          "requirementCount": 2,
+          "obligationCount": 1,
+          "verificationCount": 1
+        },
+        "assessment": {
+          "version": "workorch-preparation-all-of-assessment/v1",
+          "manifestHash": "manifest",
+          "outcome": "checks_passed",
+          "requiredCount": 3,
+          "passedRequiredCount": 3,
+          "outstanding": []
+        },
+        "requestId": "original-request",
+        "payloadHash": "payload",
+        "expectedWorkspaceRevision": 1,
+        "committedWorkspaceRevision": 3,
+        "binding": {
+          "inputHash": "input",
+          "derivationPermitId": "permit",
+          "proposalHash": "proposal",
+          "specificationHash": "spec",
+          "candidateId": "candidate",
+          "candidateRevision": 1,
+          "candidateHash": "candidate-hash",
+          "definitionRevision": "definition",
+          "startupInputHash": "startup",
+          "authoringConfigurationHash": "config",
+          "snapshotHash": "snapshot",
+          "manifestHash": "manifest",
+          "checkPolicyVersion": "policy",
+          "compilerVersion": "compiler"
+        },
+        "startedAt": "2026-10-21T00:00:00Z",
+        "completedAt": "2026-10-21T00:00:01Z",
+        "state": "blocked",
+        "creationEpoch": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "preparationEpoch": 0,
+        "checks": [
+          {
+            "id": "exact_seal",
+            "owner": "workspace",
+            "required": true,
+            "state": "passed",
+            "reason": "seal_observed_remaining_checks"
+          },
+          {
+            "id": "first_activation_no_run",
+            "owner": "run",
+            "required": true,
+            "state": "passed",
+            "reason": "run_history_empty_final_fence_observed"
+          },
+          {
+            "id": "persistence_integrity",
+            "owner": "workspace",
+            "required": true,
+            "state": "passed",
+            "reason": "persistence_binding_observed_remaining_checks"
+          }
+        ],
+        "evaluationVersion": "workorch-preparation-check-evaluation/v1",
+        "noRunEvaluationVersion": "workorch-preparation-no-run-final-fence/v1",
+        "sealEvidenceRef": "seal-observation:cccccccccccccccccccccccccccccccc",
+        "runHistoryEvidenceRef": "run-history-observation:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ]
+  }
+}

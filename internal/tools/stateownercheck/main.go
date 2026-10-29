@@ -149,6 +149,8 @@ var observedCommandCarrierFields = map[string]bool{
 // when only one immutable observation inside a shared DTO is state-like; a
 // newly added sibling State field then fails closed until separately audited.
 var observedStateCarrierFields = map[string]bool{
+	// Owner-selected source completeness is an immutable observation, never a requested Runtime transition.
+	"internal/pkg/workorchruntimecontract:RuntimeValidationGenerationContext|Outcome":           true,
 	"internal/modules/kernel/workspace/pkg/models:DefinitionSpecificationRequestIdentity|Phase": true,
 	// 前置诊断只记录 reserve 前的失败位置，Stage 不选择 owner transition。
 	"internal/modules/kernel/workspace/pkg/models:DefinitionAuthoringPreparationDiagnostic|Stage": true,

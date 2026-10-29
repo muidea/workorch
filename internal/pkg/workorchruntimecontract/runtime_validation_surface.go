@@ -38,6 +38,9 @@ const (
 // ready-and-direct set; this value preserves why another callable surface was
 // not exposed without leaking owner implementation or choosing a retry.
 type RuntimeValidationSurface struct {
+	// One bounded owner observation shared by this surface's preparations.
+	// It is generation context only, never an input review or mutation grant.
+	GenerationContext *RuntimeValidationGenerationContext `json:",omitempty"`
 	// Input targets are capability-owner observations, not writable delivery
 	// targets. The resource owner is explicit; Core does not infer it from a
 	// filename, language or validation adapter. Empty fields preserve archives.
@@ -79,6 +82,7 @@ type RuntimeValidationSurface struct {
 }
 
 func (s RuntimeValidationSurface) Normalized() RuntimeValidationSurface {
+	s.GenerationContext = s.GenerationContext.Clone()
 	s.InputTargetOwnerModuleID = strings.TrimSpace(s.InputTargetOwnerModuleID)
 	s.InputTargetRefs = normalizeStrings(s.InputTargetRefs)
 	s.ID = strings.TrimSpace(s.ID)
@@ -112,6 +116,14 @@ func (s RuntimeValidationSurface) Clone() RuntimeValidationSurface {
 
 func (s RuntimeValidationSurface) Validate() error {
 	raw := s
+	if s.GenerationContext != nil {
+		if len(s.ProofRequirementPreparations) == 0 {
+			return fmt.Errorf("generation context requires a validation preparation")
+		}
+		if err := s.GenerationContext.Validate(s.GenerationContext.ObservedRevision); err != nil {
+			return err
+		}
+	}
 	if err := validateRuntimeValidationInputTargets(raw); err != nil {
 		return err
 	}

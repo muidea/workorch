@@ -1,7 +1,9 @@
 package workorchmanagementcontract
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -542,22 +544,24 @@ func TestPreparationSkillRegistryReferenceIsHistoricalAndBlockedOnly(t *testing.
 	}
 }
 
+func preparationCompletionViewFixture() StartupPreparationView {
+	v := preparationViewFixture()
+	v.WorkspaceRevision, v.OperationState, v.CurrentValidity, v.Record.Version = 3, "completed", "observed", "workorch-preparation-record/v2"
+	a := &v.Record.Attempts[0]
+	a.State, a.CommittedWorkspaceRevision, a.CreationEpoch = "blocked", 3, strings.Repeat("a", 32)
+	at := a.StartedAt.Add(time.Second)
+	a.CompletedAt = &at
+	a.EvaluationVersion, a.NoRunEvaluationVersion = "workorch-preparation-check-evaluation/v1", "workorch-preparation-no-run-final-fence/v1"
+	a.RunHistoryEvidenceRef, a.SealEvidenceRef = "run-history-observation:"+strings.Repeat("b", 32), "seal-observation:"+strings.Repeat("c", 32)
+	a.Checks = []PreparationCheckView{{ID: "exact_seal", Owner: "workspace", Required: true, State: "passed", Reason: "seal_observed_remaining_checks"}, {ID: "first_activation_no_run", Owner: "run", Required: true, State: "passed", Reason: "run_history_empty_final_fence_observed"}, {ID: "persistence_integrity", Owner: "workspace", Required: true, State: "passed", Reason: "persistence_binding_observed_remaining_checks"}}
+	a.Assessment = &PreparationAssessmentView{Version: "workorch-preparation-all-of-assessment/v1", ManifestHash: a.Binding.ManifestHash, Outcome: "checks_passed", RequiredCount: 3, PassedRequiredCount: 3, Outstanding: []PreparationOutstandingCheckView{}}
+	a.DefinitionCompilation = &PreparationDefinitionCompilationView{CompilerVersion: "workorch-preparation-definition-compiler/v1", SnapshotHash: a.Binding.SnapshotHash, ManifestHash: a.Binding.ManifestHash, SourceInventoryHash: "inventory", ProfileContractsHash: "profiles", SourceCount: 2, RequirementCount: 2, ObligationCount: 1, VerificationCount: 1}
+	v.Record.Completions = []PreparationCompletionView{{Version: "workorch-preparation-completion/v1", CompletionID: "preparation-completion-sha256:" + strings.Repeat("d", 64), RequestID: a.RequestID, BootstrapHash: "prepared-bootstrap-sha256:" + strings.Repeat("e", 64), CreationEpoch: a.CreationEpoch, CompletedAt: at, ExpiresAt: at.Add(30 * time.Second), CommittedWorkspaceRevision: 3}}
+	return v
+}
+
 func TestPreparationCompletionViewKeepsHistoricalSuccessAndRejectsForgedMetadata(t *testing.T) {
-	fixture := func() StartupPreparationView {
-		v := preparationViewFixture()
-		v.WorkspaceRevision, v.OperationState, v.CurrentValidity, v.Record.Version = 3, "completed", "observed", "workorch-preparation-record/v2"
-		a := &v.Record.Attempts[0]
-		a.State, a.CommittedWorkspaceRevision, a.CreationEpoch = "blocked", 3, strings.Repeat("a", 32)
-		at := a.StartedAt.Add(time.Second)
-		a.CompletedAt = &at
-		a.EvaluationVersion, a.NoRunEvaluationVersion = "workorch-preparation-check-evaluation/v1", "workorch-preparation-no-run-final-fence/v1"
-		a.RunHistoryEvidenceRef, a.SealEvidenceRef = "run-history-observation:"+strings.Repeat("b", 32), "seal-observation:"+strings.Repeat("c", 32)
-		a.Checks = []PreparationCheckView{{ID: "exact_seal", Owner: "workspace", Required: true, State: "passed", Reason: "seal_observed_remaining_checks"}, {ID: "first_activation_no_run", Owner: "run", Required: true, State: "passed", Reason: "run_history_empty_final_fence_observed"}, {ID: "persistence_integrity", Owner: "workspace", Required: true, State: "passed", Reason: "persistence_binding_observed_remaining_checks"}}
-		a.Assessment = &PreparationAssessmentView{Version: "workorch-preparation-all-of-assessment/v1", ManifestHash: a.Binding.ManifestHash, Outcome: "checks_passed", RequiredCount: 3, PassedRequiredCount: 3, Outstanding: []PreparationOutstandingCheckView{}}
-		a.DefinitionCompilation = &PreparationDefinitionCompilationView{CompilerVersion: "workorch-preparation-definition-compiler/v1", SnapshotHash: a.Binding.SnapshotHash, ManifestHash: a.Binding.ManifestHash, SourceInventoryHash: "inventory", ProfileContractsHash: "profiles", SourceCount: 2, RequirementCount: 2, ObligationCount: 1, VerificationCount: 1}
-		v.Record.Completions = []PreparationCompletionView{{Version: "workorch-preparation-completion/v1", CompletionID: "preparation-completion-sha256:" + strings.Repeat("d", 64), RequestID: a.RequestID, BootstrapHash: "prepared-bootstrap-sha256:" + strings.Repeat("e", 64), CreationEpoch: a.CreationEpoch, CompletedAt: at, ExpiresAt: at.Add(30 * time.Second), CommittedWorkspaceRevision: 3}}
-		return v
-	}
+	fixture := preparationCompletionViewFixture
 	for _, validity := range []string{"observed", "stale"} {
 		v := fixture()
 		v.CurrentValidity = validity
@@ -595,5 +599,28 @@ func TestPreparationCompletionViewKeepsHistoricalSuccessAndRejectsForgedMetadata
 				t.Fatal("forged completion accepted")
 			}
 		})
+	}
+}
+
+// The same synthetic wire fixture is consumed by the HTTP and Web tests. Keep
+// this assertion on marshaled bytes: decoding into uint64 would hide omission.
+func TestPreparationCompletionJSONMatchesWebWireFixture(t *testing.T) {
+	v := preparationCompletionViewFixture()
+	if err := v.ValidateFor("ws"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile("testdata/startup_preparation_completed.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, bytes.TrimSpace(want)) {
+		t.Fatalf("completion wire fixture differs from Go JSON: %s", got)
+	}
+	if !bytes.Contains(got, []byte(`"preparationEpoch": 0`)) {
+		t.Fatal("first preparation identity omitted")
 	}
 }

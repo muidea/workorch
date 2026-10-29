@@ -265,3 +265,16 @@ STEP02 的 derive/proposal/review 显式选择 `PromptContext.MessageLayout=sect
 | lifecycle / dependency fail-fast | [`module_test.go`](module_test.go)、`TestLLMOwnerStartIsIdempotentAndTeardownClearsLifecycle`、`TestProviderCommandsPublishAuditAndRejectPostBeforePhysicalCall` | 覆盖重复 Start、Stop 清理，以及 Stop 后 completion/embedding/catalog 零 physical call |
 | generic caller authorization | `TestLLMGenericCommandMatrixRequiresExactApplicationSourceBeforePayload` | 覆盖 6 个 generic topic 的 exact Application source matrix，并证明拒绝发生在 payload 读取前 |
 | deployed real provider | [Service Acceptance](../../../../docs/50-product-interface/service-acceptance.md)、[Deployed Convergence DC-01/DC-02](../../../../docs/50-product-interface/deployed-convergence-scenarios.md) | 组件级未覆盖；真实 ai-proxy endpoint、credential、模型 catalog 与 provider behavior 仅由显式 real-provider deployed gate 验收，不能计入组件单测完成度 |
+
+## Validation preparation context
+
+Runtime operations and semantic-plan use `section_messages/v1`. The actual Responses prefix is C0-C2; dynamic C3-C5
+does not enter the explicit prefix key. Provider/model/schema/reasoning and Workspace remain isolated. Runtime's sealed
+stable-prefix identity is not replaced by the rendered wire hash; neither a cache key nor a hit is execution authority.
+
+Candidate preparation hints name the actual `context.validationProofPreparations` array and its per-member owner,
+CWI, requirement, semantic check and native check. There is no Go/Shell instruction in that generic rule. Owner-selected
+`validationGenerationContexts` project complete exact source observations once per matching surface, with explicit
+unavailable/over-capacity status, and only for current scope. Original source-check criterion/declaration accompanies
+the native mapping when declared. Both request integrity gates reject loss or modification of protected observations.
+Source observations never authorize writing another target, skipping review or claiming acceptance.

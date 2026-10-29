@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -117,7 +118,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		StepID: request.Transaction.AuthoritySnapshotID, Kind: "runtime_candidate",
 		ReasoningEffort: ceiling.Selection.ReasoningEffort,
 		Schema:          runtimeCandidateSchemaForManifest(manifest),
-		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt", Sections: []llmmodels.PromptSection{
+		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt", MessageLayout: llmmodels.PromptMessageLayoutSectionsV1, Sections: []llmmodels.PromptSection{
 			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, SourceRefs: []string{"runtime://candidate-contract"}, Content: runtimeCandidateContractCatalog()},
 			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: definitionContext.Revision, SourceRefs: []string{"runtime://definition/" + definitionContext.Revision}, Content: string(definitionJSON)},
 			{ID: "C2.capability-contract", Name: "Capability contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 2, SourceRefs: []string{"runtime://execution-contract/" + definitionContext.Revision}, Content: string(capabilityJSON)},
@@ -264,6 +265,16 @@ func validateRuntimeCandidateContextIntegrity(
 	}
 	definition = definition.Normalized()
 	context = context.Normalized()
+	expectedPreparations := runtimeCandidateValidationProofPreparations(context.Focus, context.Resources.OperationAdmissibilities)
+	expectedContexts := runtimeValidationGenerationContexts(context.Focus.CoverageWorkItemIDs, context.Focus.ProspectiveTargetRefs, context.Resources.OperationAdmissibilities)
+	{
+		var actual struct {
+			Context runtimeCandidateAuthorityProjection `json:"context"`
+		}
+		if json.Unmarshal([]byte(contents["C3"]), &actual) != nil || !reflect.DeepEqual(actual.Context.ValidationProofPreparations, expectedPreparations) || !reflect.DeepEqual(actual.Context.ValidationGenerationContexts, expectedContexts) {
+			missing = append(missing, "P4.validation_preparation_context")
+		}
+	}
 	if definition.GoalDefinition == "" || definition.DoDDefinition == "" || context.RequiredState == "" {
 		missing = append(missing, "P0.contract")
 	}

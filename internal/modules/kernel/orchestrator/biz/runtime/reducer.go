@@ -126,6 +126,15 @@ func reduceRuntimeStateWithLineage(
 	// path. Do not let a prior CWI's gap, budget, or directive choose this
 	// focus's next action.
 	facts = rebindRepairForCurrentFocus(facts)
+	if lineage != nil {
+		current := *lineage
+		current.Facts = facts
+		var err error
+		facts, err = retireConsumedConfirmedRepairDirective(current)
+		if err != nil {
+			return facts, runtimecontract.RuntimeDecision{}, err
+		}
+	}
 	// A delayed prerequisite result from a completed focus is never current
 	// authority. Retire it before ordinary preflight: otherwise the raw resource
 	// pointer makes RuntimeFacts invalid and a drive can surface a process error

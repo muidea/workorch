@@ -190,6 +190,9 @@ func validateRuntimeValidationProofRequirementCatalogApplicability(requirements 
 			}
 			for _, preparation := range surface.ProofRequirementPreparations {
 				requirement, found := RuntimeValidationProofRequirementForCoverage(requested, preparation.CoverageWorkItemID)
+				if len(preparation.SourceObligationChecks) != 0 && !reflect.DeepEqual(preparation.SourceObligationChecks, requirement.SourceObligationChecks) {
+					return fmt.Errorf("validation preparation source checks drifted from original requirement")
+				}
 				attestedChecks := make([]string, 0, len(preparation.CheckAttestations))
 				for _, attestation := range preparation.CheckAttestations {
 					attestedChecks = append(attestedChecks, attestation.RequiredCheckRef)

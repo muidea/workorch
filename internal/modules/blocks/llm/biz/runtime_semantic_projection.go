@@ -35,18 +35,19 @@ type runtimeSemanticDefinitionSeedProjection struct {
 }
 
 type runtimeSemanticManifestProjection struct {
-	SchemaVersion             string                                         `json:"schemaVersion"`
-	Hash                      string                                         `json:"hash"`
-	DefinitionRevision        string                                         `json:"definitionRevision"`
-	DefinitionSeedHash        string                                         `json:"definitionSeedHash"`
-	OperationContractRevision string                                         `json:"operationContractRevision"`
-	CoverageItems             []runtimecontract.RuntimeCoverageItem          `json:"coverageItems"`
-	AllowedOwnerModuleIDs     []string                                       `json:"allowedOwnerModuleIds,omitempty"`
-	AllowedOperationKinds     []string                                       `json:"allowedOperationKinds,omitempty"`
-	AllowedTargetPolicies     []runtimecontract.RuntimeOperationTargetPolicy `json:"allowedTargetPolicies,omitempty"`
-	ProofObligations          []runtimeSemanticProofObligationProjection     `json:"proofObligations,omitempty"`
-	OwnerCatalogs             []runtimeSemanticOwnerCatalogProjection        `json:"ownerCatalogs,omitempty"`
-	ImplementationPurpose     *runtimeSemanticImplementationWorkProjection   `json:"implementationPurpose,omitempty"`
+	ValidationGenerationContexts []runtimeValidationGenerationContextProjection `json:"validationGenerationContexts,omitempty"`
+	SchemaVersion                string                                         `json:"schemaVersion"`
+	Hash                         string                                         `json:"hash"`
+	DefinitionRevision           string                                         `json:"definitionRevision"`
+	DefinitionSeedHash           string                                         `json:"definitionSeedHash"`
+	OperationContractRevision    string                                         `json:"operationContractRevision"`
+	CoverageItems                []runtimecontract.RuntimeCoverageItem          `json:"coverageItems"`
+	AllowedOwnerModuleIDs        []string                                       `json:"allowedOwnerModuleIds,omitempty"`
+	AllowedOperationKinds        []string                                       `json:"allowedOperationKinds,omitempty"`
+	AllowedTargetPolicies        []runtimecontract.RuntimeOperationTargetPolicy `json:"allowedTargetPolicies,omitempty"`
+	ProofObligations             []runtimeSemanticProofObligationProjection     `json:"proofObligations,omitempty"`
+	OwnerCatalogs                []runtimeSemanticOwnerCatalogProjection        `json:"ownerCatalogs,omitempty"`
+	ImplementationPurpose        *runtimeSemanticImplementationWorkProjection   `json:"implementationPurpose,omitempty"`
 }
 
 // 工作 C3 只投影完整有界 vocabulary 与 exact owner scope；不携带 receipt、预算权限或原始诊断。
@@ -176,14 +177,18 @@ type runtimeSemanticInputReviewProjection struct {
 }
 
 type runtimeSemanticNativeCheckAttestationProjection struct {
-	ValidationRecipeID         string `json:"validationRecipeId"`
-	RequiredCheckRef           string `json:"requiredCheckRef"`
-	ObservationProtocolRef     string `json:"observationProtocolRef"`
-	SupplementalNativeCheckRef string `json:"supplementalNativeCheckRef,omitempty"`
-	NativeCheckRef             string `json:"nativeCheckRef"`
-	TargetRef                  string `json:"targetRef,omitempty"`
-	ContentContractRef         string `json:"contentContractRef,omitempty"`
-	ContentRequirements        string `json:"contentRequirements,omitempty"`
+	SourceObligation           *runtimeSemanticSourceObligationCheckProjection `json:"sourceObligation,omitempty"`
+	OwnerModuleID              string                                          `json:"ownerModuleId,omitempty"`
+	CoverageWorkItemID         common.CoverageWorkItemID                       `json:"coverageWorkItemId,omitempty"`
+	RequirementHash            string                                          `json:"requirementHash,omitempty"`
+	ValidationRecipeID         string                                          `json:"validationRecipeId"`
+	RequiredCheckRef           string                                          `json:"requiredCheckRef"`
+	ObservationProtocolRef     string                                          `json:"observationProtocolRef"`
+	SupplementalNativeCheckRef string                                          `json:"supplementalNativeCheckRef,omitempty"`
+	NativeCheckRef             string                                          `json:"nativeCheckRef"`
+	TargetRef                  string                                          `json:"targetRef,omitempty"`
+	ContentContractRef         string                                          `json:"contentContractRef,omitempty"`
+	ContentRequirements        string                                          `json:"contentRequirements,omitempty"`
 }
 
 // runtimeSemanticValidationFailureRepairProjection is the provider-safe C3
@@ -332,6 +337,7 @@ func runtimeSemanticManifestForProvider(manifest runtimecontract.RuntimeSemantic
 		}
 	}
 	if step != runtimecontract.RuntimeSemanticPlanStepCoverageOrder {
+		projection.ValidationGenerationContexts = runtimeValidationGenerationContexts(batchCoverageIDs, nil, append(append([]runtimecontract.RuntimeOperationAdmissibility(nil), manifest.OwnerCatalogs...), manifest.OwnerFactDependencyCatalogs...))
 		projection.AllowedOwnerModuleIDs = append([]string(nil), manifest.AllowedOwnerModuleIDs...)
 		projection.AllowedOperationKinds = append([]string(nil), manifest.AllowedOperationKinds...)
 		projection.AllowedTargetPolicies = append([]runtimecontract.RuntimeOperationTargetPolicy(nil), manifest.AllowedTargetPolicies...)
@@ -513,6 +519,8 @@ func runtimeSemanticProspectiveTargetConstraintForProvider(value *runtimecontrac
 		}
 		for _, attestation := range preparationValue.CheckAttestations {
 			projection.ValidationProofPreparations = append(projection.ValidationProofPreparations, runtimeSemanticNativeCheckAttestationProjection{
+				SourceObligation: runtimePreparationSourceObligation(preparationValue, attestation.RequiredCheckRef),
+				OwnerModuleID:    constraint.OwnerModuleID, CoverageWorkItemID: preparationValue.CoverageWorkItemID, RequirementHash: preparationValue.RequirementHash,
 				ValidationRecipeID: preparationValue.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
 				ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
 				TargetRef: preparationValue.TargetRef, ContentContractRef: preparationValue.ContentContractRef, ContentRequirements: preparationValue.ContentRequirements,
@@ -525,14 +533,12 @@ func runtimeSemanticProspectiveTargetConstraintForProvider(value *runtimecontrac
 func runtimeSemanticNativeCheckAttestationsForRequirement(catalogs []runtimecontract.RuntimeOperationAdmissibility, requirement runtimecontract.RuntimeValidationProofRequirement) []runtimeSemanticNativeCheckAttestationProjection {
 	ret := make([]runtimeSemanticNativeCheckAttestationProjection, 0)
 	for _, catalog := range runtimecontract.NormalizeRuntimeOperationAdmissibilities(catalogs) {
-		if catalog.OwnerModuleID != runtimecontract.RuntimeModuleShell {
-			continue
-		}
 		for _, surface := range catalog.ValidationSurfaces {
 			_, binding, found := runtimecontract.RuntimeValidationSurfaceDeclaringProofRequirement([]runtimecontract.RuntimeValidationSurface{surface}, requirement)
 			if found {
 				for _, attestation := range binding.CheckAttestations {
 					ret = append(ret, runtimeSemanticNativeCheckAttestationProjection{
+						OwnerModuleID: catalog.OwnerModuleID, CoverageWorkItemID: requirement.CoverageWorkItemID, RequirementHash: requirement.Hash,
 						ValidationRecipeID: binding.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
 						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
 					})
@@ -544,6 +550,8 @@ func runtimeSemanticNativeCheckAttestationsForRequirement(catalogs []runtimecont
 				}
 				for _, attestation := range preparation.CheckAttestations {
 					ret = append(ret, runtimeSemanticNativeCheckAttestationProjection{
+						SourceObligation: runtimePreparationSourceObligation(preparation, attestation.RequiredCheckRef),
+						OwnerModuleID:    catalog.OwnerModuleID, CoverageWorkItemID: preparation.CoverageWorkItemID, RequirementHash: preparation.RequirementHash,
 						ValidationRecipeID: preparation.ValidationRecipeID, RequiredCheckRef: attestation.RequiredCheckRef,
 						ObservationProtocolRef: attestation.ObservationProtocolRef, NativeCheckRef: attestation.NativeCheckRef, SupplementalNativeCheckRef: attestation.SupplementalNativeCheckRef,
 						TargetRef: preparation.TargetRef, ContentContractRef: preparation.ContentContractRef, ContentRequirements: preparation.ContentRequirements,

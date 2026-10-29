@@ -2,6 +2,7 @@
 
 Status: normative
 
+
 Type: runtime-flow
 
 Last Verified: 2026-08-31
@@ -293,3 +294,23 @@ state-changing candidate 的 requiredOutput。
 - `../00-core/runtime-stage-contract.md`
 - `../../internal/modules/kernel/orchestrator/readme.md`
 - `../../internal/pkg/workorchruntimecontract`（`runtime_candidate.go`、`runtime_activation.go`）
+
+## Validation preparation observations
+
+`runtime/validation-generation-context/v1` is an optional, capability-owner selected project observation on a
+`RuntimeValidationSurface`. Its opaque task-specific contract, owner catalog revision, immutable completeness outcome and exact UTF-8 files
+are preserved in the catalog snapshot identity. Core only checks scope, identity, content hashes and capacity; it does not
+select languages, project paths or assertions. The envelope is at most 64 files / 256 KiB. `unavailable` and `over_capacity`
+carry no partial file collection. `complete` describes the owner's declared selection, not all project resources or proof
+that implementation is correct; an empty selection never proves a requirement.
+
+The observation is shared by all matching preparations of one surface, rather than repeated for every native check. C3
+projects it only for the selected proof batch or current prospective preparation, together with exact owner, catalog,
+recipe and requirement identities. Per-check source obligation text/declaration comes from the original requirement;
+published preparation extensions must match that requirement. Task-specific content instructions remain owner-authored.
+Both semantic and operations integrity gates compare the projected context to the original typed facts before submission.
+
+These are generation inputs, not mutation grants, accepted evidence, input consistency verdicts or a second task graph.
+They do not turn mutable implementation into immutable review input, widen the sealed manifest, authorize replacing an
+existing validation file or enable a new work/repair policy. Independent review, owner feasibility, current execution
+dependencies and final all-of evidence remain mandatory. Context changes stay in C3; C0-C2 do not absorb project observations.

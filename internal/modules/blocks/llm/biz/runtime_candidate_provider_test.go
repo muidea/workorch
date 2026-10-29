@@ -1758,6 +1758,7 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertRuntimeSectionCacheWire(t, request)
 	if request.ContextBudget == nil || request.ContextBudget.CachePlan == nil || request.ContextBudget.CachePlan.StablePrefixHash != prefix ||
 		request.ContextBudget.CachePlan.RenderedStablePrefixHash == "" || len(request.PromptContext.Sections) != 6 {
 		t.Fatalf("provider request cache plan = %+v prompt=%+v", request.ContextBudget, request.PromptContext)
@@ -2460,7 +2461,7 @@ func TestValidateRuntimeCandidateManifestSupportingFactsRequiresCanonicalExactBi
 
 func TestRuntimeProviderContractRequiresCompleteCompactBoundedOutput(t *testing.T) {
 	contract := runtimeCandidateContractCatalog()
-	for _, required := range []string{"exactly one JSON object", "complete", "compact", "finished", "unknown fields", "unrequested operations", "preface", "suffix", "markdown fences", "Do not repeat", "operations field and every parameters field are JSON arrays", "independent object with name plus exactly one declared typed value field", "never encode parameters as an object/map", "validationProofPreparation", "real executable assertion", "ownerNativeCheckAttestation.nativeCheckRef", "diagnostic only", "can never attest"} {
+	for _, required := range []string{"exactly one JSON object", "complete", "compact", "finished", "unknown fields", "unrequested operations", "preface", "suffix", "markdown fences", "Do not repeat", "operations field and every parameters field are JSON arrays", "independent object with name plus exactly one declared typed value field", "never encode parameters as an object/map", "context.validationProofPreparations", "nativeCheckRef", "requirementHash", "Every original criterion and conjunction remains mandatory", "do not replace capability-specific assertions", "Input creation and consistency review do not prove execution or final acceptance"} {
 		if !strings.Contains(contract, required) {
 			t.Fatalf("runtime candidate contract lost %q: %s", required, contract)
 		}

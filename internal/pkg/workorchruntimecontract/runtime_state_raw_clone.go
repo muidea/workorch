@@ -1640,6 +1640,7 @@ func cloneRuntimeProspectiveTargetSatisfactionConstraintRaw(in RuntimeProspectiv
 
 func cloneRuntimeValidationProofPreparationRaw(in RuntimeValidationProofPreparation) RuntimeValidationProofPreparation {
 	out := in
+	out.SourceObligationChecks = CloneRuntimeSourceObligationChecks(in.SourceObligationChecks)
 	out.OriginalDiagnostic = in.OriginalDiagnostic.CloneOriginal()
 	out.CheckAttestations = cloneRuntimeStateRawSlice(in.CheckAttestations, func(value RuntimeValidationCheckAttestationBinding) RuntimeValidationCheckAttestationBinding {
 		return value
@@ -2208,6 +2209,7 @@ func cloneRuntimeValidationRecipeRaw(in RuntimeValidationRecipe) RuntimeValidati
 
 func cloneRuntimeValidationSurfaceRaw(in RuntimeValidationSurface) RuntimeValidationSurface {
 	out := in
+	out.GenerationContext = in.GenerationContext.Clone()
 	out.InputTargetRefs = cloneRuntimeStateRawSlice(in.InputTargetRefs, func(item string) string { return item })
 	out.ProofRequirementUnavailabilities = cloneRuntimeStateRawSlice(in.ProofRequirementUnavailabilities, func(item RuntimeValidationProofUnavailability) RuntimeValidationProofUnavailability {
 		item.Requirement.LineageAssertions = cloneRuntimeStateRawSlice(item.Requirement.LineageAssertions, func(value RuntimeLineageAssertion) RuntimeLineageAssertion { return value })

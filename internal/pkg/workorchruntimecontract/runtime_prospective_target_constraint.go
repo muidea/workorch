@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -184,13 +185,14 @@ type RuntimeProspectiveTargetSatisfactionConstraint struct {
 }
 
 type RuntimeValidationProofPreparation struct {
-	RequirementHash    string
-	DefinitionRevision string
-	CoverageWorkItemID common.CoverageWorkItemID
-	DeclarationRef     string
-	ValidationRecipeID string
-	TargetRef          string
-	CheckAttestations  []RuntimeValidationCheckAttestationBinding
+	RequirementHash        string
+	DefinitionRevision     string
+	CoverageWorkItemID     common.CoverageWorkItemID
+	DeclarationRef         string
+	ValidationRecipeID     string
+	TargetRef              string
+	CheckAttestations      []RuntimeValidationCheckAttestationBinding
+	SourceObligationChecks []RuntimeSourceObligationCheck `json:",omitempty"`
 	// Optional owner-authored content syntax. Core preserves it in the catalog
 	// and provider projection; it is neither mutation nor acceptance authority.
 	ContentContractRef  string `json:",omitempty"`
@@ -213,6 +215,7 @@ func (p RuntimeValidationProofPreparation) Normalized() RuntimeValidationProofPr
 	p.ValidationRecipeID = strings.TrimSpace(p.ValidationRecipeID)
 	p.TargetRef = strings.TrimSpace(p.TargetRef)
 	p.CheckAttestations = NormalizeRuntimeValidationCheckAttestationBindings(p.CheckAttestations)
+	p.SourceObligationChecks = CloneRuntimeSourceObligationChecks(p.SourceObligationChecks)
 	p.ContentContractRef = strings.TrimSpace(p.ContentContractRef)
 	p.ContentRequirements = strings.TrimSpace(p.ContentRequirements)
 	p.OriginalDiagnostic = p.OriginalDiagnostic.CloneOriginal()
@@ -251,6 +254,14 @@ func (p RuntimeValidationProofPreparation) Validate() error {
 	}
 	if err := ValidateRuntimeValidationCheckAttestationBindings(rawAttestations, required); err != nil {
 		return err
+	}
+	if err := ValidateRuntimeSourceObligationChecks(p.DefinitionRevision, p.CoverageWorkItemID, p.SourceObligationChecks); err != nil {
+		return err
+	}
+	for _, source := range p.SourceObligationChecks {
+		if !slices.Contains(required, source.CheckRef) {
+			return fmt.Errorf("preparation source obligation has no exact native check")
+		}
 	}
 	constraint := p.ProspectiveTargetSatisfactionConstraint
 	if err := constraint.Validate(); err != nil {

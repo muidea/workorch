@@ -124,7 +124,7 @@ func (a *RuntimeAdapter) runtimeAdmissibilityPolicyRevision() string {
 	_, _ = fmt.Fprintf(h, "project-conjunction=%s;protocol=%s;contract=%s;requirements=%s;scope=%s;scope-requirements=%s;stages=%s;", modulecommon.ValidationRecipeAdapterProjectConjunction, shellProjectConjunctionProtocolRef, shellProjectInputContentContractRef, shellProjectInputContentRequirements, shellProjectReviewScopeContractRef, shellProjectReviewScopeRequirements, runtimemodel.StableRuntimeValidationExecutionStagesHash(shellProjectExecutionStageIdentities("owner-exact-package")))
 	_, _ = fmt.Fprintf(h, "project-failure-diagnostic=%s;protocol=%s;requirements=%s;", modulecommon.ValidationRecipeAdapterProjectFailureDiagnostic, shellProjectFailureDiagnosticProtocolRef, shellProjectFailureDiagnosticRequirements)
 	_, _ = fmt.Fprintf(h, "project-multi-failure=%s;protocol=%s;scope=%s;requirements=%s;", modulecommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic, shellProjectMultiFailureDiagnosticProtocolRef, shellProjectMultiFailureReviewScopeRef, shellProjectMultiFailureRequirements)
-	_, _ = fmt.Fprint(h, "input-protection=shell/native-input-targets/v1;")
+	_, _ = fmt.Fprint(h, "input-protection=shell/native-input-targets/v1;generation-context=shell/go-validation-generation-context/v1;")
 	_, _ = fmt.Fprintf(h, "input-review=%s;files=%d;bytes=%d;", runtimemodel.RuntimeValidationInputReviewProtocol, runtimemodel.RuntimeValidationInputReviewMaxFiles, runtimemodel.RuntimeValidationInputReviewMaxBytes)
 	for _, key := range keys {
 		_, _ = fmt.Fprintf(h, "env=%s;", key)

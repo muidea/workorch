@@ -38,6 +38,17 @@ func testSemanticRepairReceiptConsumption(t *testing.T, original RuntimeAggregat
 		a.CompletedDispatches = append(a.CompletedDispatches, d)
 		a.ActiveDispatch = nil
 		before := a.CloneRaw()
+		t.Run("confirmed-handoff-is-not-semantic", func(t *testing.T) {
+			other := before.CloneRaw()
+			other.Facts.RepairDirective.ID = "confirmed-repair/" + other.Facts.Focus.ID + "/" + other.Facts.RepairDirective.Closure.ID + "/fresh-validation"
+			pre := other.CloneRaw()
+			if runtimeValidationFailureRepairOwnsFreshValidationDirective(other.Facts) {
+				t.Fatal("same CWI and old reopen lineage classified a confirmed handoff as semantic")
+			}
+			if err := consumeSemanticRepairFreshValidationReceipt(&other, d, fact); err != nil || !reflect.DeepEqual(other, pre) {
+				t.Fatalf("semantic consumer touched another continuation: %v", err)
+			}
+		})
 		if err := consumeSemanticRepairFreshValidationReceipt(&a, d, fact); err != nil {
 			t.Fatal(err)
 		}

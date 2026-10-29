@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { ConfigProvider } from 'antd';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,21 +21,11 @@ function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promi
 
 describe('STEP04 准备主体流程', () => {
   it.each(['observed', 'stale'] as const)('完成结算与当前 %s、历史 M3 及后续 Run 独立展示，读取不提交', async validity => {
-    const view = observed({ requestId: 'completed-original', expectedWorkspaceRevision: 10 });
-    const a = view.record!.attempts[0];
-    a.completedAt = '2026-10-22T00:00:01Z';
-    a.evaluationVersion = 'workorch-preparation-check-evaluation/v1';
-    a.noRunEvaluationVersion = 'workorch-preparation-no-run-final-fence/v1';
-    a.sealEvidenceRef = `seal-observation:${'a'.repeat(32)}`;
-    a.runHistoryEvidenceRef = `run-history-observation:${'b'.repeat(32)}`;
-    a.checks = [
-      { id: 'exact_seal', owner: 'workspace', required: true, state: 'passed', reason: 'seal_observed_remaining_checks' },
-      { id: 'first_activation_no_run', owner: 'run', required: true, state: 'passed', reason: 'run_history_empty_final_fence_observed' },
-      { id: 'persistence_integrity', owner: 'workspace', required: true, state: 'passed', reason: 'persistence_binding_observed_remaining_checks' },
-    ];
-    a.assessment = { version: 'workorch-preparation-all-of-assessment/v1', manifestHash: a.binding.manifestHash, outcome: 'checks_passed', requiredCount: 3, passedRequiredCount: 3, outstanding: [] };
-    a.definitionCompilation = { compilerVersion: 'workorch-preparation-definition-compiler/v1', snapshotHash: a.binding.snapshotHash, manifestHash: a.binding.manifestHash, sourceInventoryHash: 'inventory', profileContractsHash: 'profile', sourceCount: 2, requirementCount: 2, obligationCount: 1, verificationCount: 1 };
-    view.record!.completions = [{ version: 'workorch-preparation-completion/v1', completionId: `preparation-completion-sha256:${'c'.repeat(64)}`, requestId: a.requestId, bootstrapHash: `prepared-bootstrap-sha256:${'d'.repeat(64)}`, creationEpoch: a.creationEpoch!, completedAt: a.completedAt, expiresAt: '2026-10-22T00:00:31Z', committedWorkspaceRevision: a.committedWorkspaceRevision }];
+    // Actual encoding of the Go DTO, shared with its serialization and HTTP tests.
+    // Do not insert defaults: an omitted zero caused the production failure.
+    const view = JSON.parse(readFileSync('../../internal/pkg/workorchmanagementcontract/testdata/startup_preparation_completed.json', 'utf8')) as StartupPreparationView;
+    expect(Object.hasOwn(view.record!.attempts[0], 'preparationEpoch')).toBe(true);
+    expect(view.record!.attempts[0].preparationEpoch).toBe(0);
     view.operationState = 'completed'; view.currentValidity = validity;
     if (validity === 'stale') { view.activeRunId = 'later-run'; view.workspaceRevision++; }
     expect(() => validatePreparationView(view, 'ws')).not.toThrow();
@@ -47,9 +38,12 @@ describe('STEP04 准备主体流程', () => {
     expect(workorchApi.recoverStartupPreparation).not.toHaveBeenCalled();
     expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
     for (const mutate of [
+      (v: StartupPreparationView) => { delete v.record!.attempts[0].preparationEpoch; },
+      (v: StartupPreparationView) => { Object.assign(v.record!.attempts[0], { preparationEpoch: null }); },
+      (v: StartupPreparationView) => { v.record!.attempts[0].preparationEpoch = 1; },
       (v: StartupPreparationView) => { v.record!.completions![0].bootstrapHash = `prepared-bootstrap-sha256:${'g'.repeat(64)}`; },
       (v: StartupPreparationView) => { v.record!.completions![0].requestId = 'other'; },
-      (v: StartupPreparationView) => { v.record!.completions![0].expiresAt = '2026-10-22T00:00:32Z'; },
+      (v: StartupPreparationView) => { v.record!.completions![0].expiresAt = '2026-10-21T00:00:32Z'; },
       (v: StartupPreparationView) => { v.record!.completions!.push({ ...v.record!.completions![0] }); },
       (v: StartupPreparationView) => { v.record!.completions = []; },
       (v: StartupPreparationView) => { v.record!.attempts[0].assessment!.outcome = 'blocked'; },
