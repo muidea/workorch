@@ -461,6 +461,9 @@ func validateRuntimeAggregateSM3CandidateTransactionInGate(a RuntimeAggregate, a
 	if err := runtimecontract.ValidateRuntimeInputRevisionRequestSources(a.SemanticPlanning, a.CandidateRequestSessions); err != nil {
 		return err
 	}
+	if err := runtimecontract.ValidateRuntimeSemanticRequestRepairSources(a.SemanticPlanning, a.CandidateRequestSessions, a.ImplementationWork, a.Definition, a.StateRevision, a.DefinitionClarification); err != nil {
+		return err
+	}
 	if err := validateRuntimeDefinitionClarificationAggregate(a); err != nil {
 		return err
 	}

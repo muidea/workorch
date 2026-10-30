@@ -520,7 +520,7 @@ func implementationWorkFirstDifference(a, b reflect.Value, path string) string {
 	return path
 }
 
-func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.RuntimeImplementationWorkPurpose, targets []string, owner *implementationWorkRealFileFixture) RuntimeAggregate {
+func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.RuntimeImplementationWorkPurpose, targets []string, owner *implementationWorkRealFileFixture, stopAtProof ...bool) RuntimeAggregate {
 	t.Helper()
 	var rules []runtimecontract.RuntimeLineageAssertionRule
 	if owner != nil {
@@ -614,6 +614,9 @@ func implementationWorkPrivatePipeline(t *testing.T, purpose runtimecontract.Run
 			t.Fatal(err)
 		}
 		apply(RuntimeInternalEvent{Kind: RuntimeInternalEventSemanticPlanBatchCompiled, Transaction: &RuntimeInternalTransactionPayload{SemanticPlanBatch: &batch}})
+		if len(stopAtProof) > 0 && stopAtProof[0] {
+			return aggregate
+		}
 		proposal := runtimecontract.RuntimeSemanticProofProposal{CoverageWorkItemID: round.CoverageWorkItemID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileWrite, Target: runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: targets}, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, DeclarationRef: originalFocus.EvidenceDeclarationRef}
 		if owner != nil {
 			proposal.OperationKind = runtimecontract.StepKindFileEdit

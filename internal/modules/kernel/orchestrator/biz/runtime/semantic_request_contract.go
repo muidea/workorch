@@ -53,6 +53,19 @@ func SemanticExpectedDocument(aggregate RuntimeAggregate) (runtimecontract.Runti
 			return runtimecontract.RuntimeExpectedDocumentContract{}, fmt.Errorf("%w: semantic expected document has no persisted active batch", common.ErrConflict)
 		}
 	}
+	if expected.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
+		for _, obligation := range ledger.Manifest.ProofObligations {
+			if obligation.ImplementationWork != nil {
+				expected.SemanticRenderContractRef = runtimecontract.RuntimeSemanticRenderContractV2
+			}
+		}
+	}
+	// Reload never upgrades an already-sealed request in place.
+	for _, session := range aggregate.CandidateRequestSessions {
+		if session.LogicalRequestID == expected.LogicalRequestID && session.ExpectedDocument != nil {
+			expected.SemanticRenderContractRef = session.ExpectedDocument.SemanticRenderContractRef
+		}
+	}
 	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
 	return expected, nil
 }

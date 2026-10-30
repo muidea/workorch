@@ -330,6 +330,9 @@ func (m *Biz) requestRuntimeSemanticPlanDocument(ctx context.Context, aggregate 
 	}); contentErr != nil {
 		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_request_context_invalid", contentErr.Error(), nil)
 	}
+	if contractErr := runtimecontract.ValidateRuntimeSemanticRequestContract(manifest, expected.PlanStep, expected.BatchCoverageWorkItemIDs); contractErr != nil {
+		return m.failRuntimeSemanticContract(ctx, aggregate, "semantic_request_contract_conflict", contractErr.Error(), nil)
+	}
 	// All semantic ingresses seal only request intent. A persisted session is
 	// therefore proof of prior preflight; ensure below still checks its exact
 	// transaction, manifest, prefix, correction and expected-document identity.
@@ -593,6 +596,10 @@ func (m *Biz) admitRuntimeCompletedSemanticPlanDocument(ctx context.Context, agg
 		if gapErr == nil {
 			admission := runtimecontract.EvaluateRuntimeDefinitionGapAdmission(*ledger.Manifest, *session.ExpectedDocument, gap)
 			if !admission.Admitted() {
+				if admission.Code == "semantic_request_contract_conflict" {
+					diagnostic := runtimecontract.RuntimeOriginalDiagnosticFromDefinitionGap(gap)
+					return m.failRuntimeSemanticContract(ctx, aggregate, admission.Code, admission.Message, &diagnostic)
+				}
 				if admission.Code == runtimecontract.RuntimeDefinitionGapAdmissionValidationRepairForbidden {
 					diagnostic := runtimecontract.RuntimeOriginalDiagnosticFromDefinitionGap(gap)
 					return m.failRuntimeSemanticContract(ctx, aggregate, "repair_surface_unavailable", admission.Message, &diagnostic)

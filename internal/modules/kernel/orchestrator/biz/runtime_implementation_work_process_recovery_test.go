@@ -20,6 +20,7 @@ import (
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
+	"github.com/muidea/workorch/internal/pkg/llmaudit"
 	filerepository "github.com/muidea/workorch/internal/pkg/repository/file"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -265,9 +266,15 @@ func TestImplementationWorkReceiptProcessChild(t *testing.T) {
 	t.Fatal("工作 process 回归未在原 transition 上界内完成")
 }
 
-func installImplementationWorkProcessProvider(t *testing.T, hub magicevent.Hub, initialOperations int) *int {
+func installImplementationWorkProcessProvider(t *testing.T, hub magicevent.Hub, initialOperations int, knownUsage ...bool) *int {
 	t.Helper()
 	operations := initialOperations
+	audited := func(command llmevents.RequestRuntimeCandidateCommand, result llmevents.RequestRuntimeCandidateResult) llmevents.RequestRuntimeCandidateResult {
+		if len(knownUsage) > 0 && knownUsage[0] {
+			result.Usage = &llmaudit.ProviderUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15}
+		}
+		return runtimeProviderResultWithAuditForTest(command, result)
+	}
 	provider := magicevent.NewSimpleObserver(runtimecontract.RuntimeModuleLLM, hub)
 	if err := provider.Subscribe(llmevents.TopicRequestRuntimeCandidate, func(event magicevent.Event, result magicevent.Result) {
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
@@ -292,7 +299,7 @@ func installImplementationWorkProcessProvider(t *testing.T, hub magicevent.Hub, 
 				result.Set(nil, nil)
 				return
 			}
-			result.Set(runtimeProviderResultWithAuditForTest(command, llmevents.RequestRuntimeCandidateResult{DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload)}), nil)
+			result.Set(audited(command, llmevents.RequestRuntimeCandidateResult{DocumentOutcome: runtimeCompleteDocumentOutcome(command.ExpectedDocument, payload)}), nil)
 			return
 		}
 		operations++

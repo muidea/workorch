@@ -236,6 +236,30 @@ func runtimeGovernanceLifecycleHandoffFromState(state *runtimecontract.RuntimeSt
 		return runtimeGovernanceLifecycleHandoff{}, false, nil
 	}
 
+	// A request-contract repair supersedes only its original clarification wait.
+	// Later ordinary governance keeps priority once it has a persisted resolution.
+	if len(state.GovernanceResolutions) == 0 {
+		for i := len(state.SemanticPlanning.History) - 1; i >= 0; i-- {
+			g := state.SemanticPlanning.History[i]
+			if g.RequestContractRepair == nil {
+				continue
+			}
+			r := g.RequestContractRepair
+			if err := r.Validate(); err != nil {
+				return runtimeGovernanceLifecycleHandoff{}, false, err
+			}
+			handoff := base
+			handoff.Kind = runtimeGovernanceLifecycleContinuationDecision
+			handoff.AuthoritySnapshotID = r.Proof.Dispatch.AuthoritySnapshotID
+			handoff.DispatchID = r.Proof.Dispatch.DispatchID
+			handoff.TicketID = r.Resolution.TicketID
+			handoff.ResolutionID = r.Resolution.ResolutionID
+			if err := handoff.validate(); err != nil {
+				return runtimeGovernanceLifecycleHandoff{}, false, err
+			}
+			return handoff, true, nil
+		}
+	}
 	if count := len(state.GovernanceResolutions); count != 0 {
 		resolution := state.GovernanceResolutions[count-1]
 		if resolution.Outcome != runtimecontract.RuntimeGovernanceResolutionOutcomeContinue {

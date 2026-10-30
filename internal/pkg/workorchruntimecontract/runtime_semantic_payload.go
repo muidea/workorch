@@ -736,14 +736,43 @@ func attachRuntimeSemanticProofObligationSchema(items map[string]any, manifest R
 		if obligation.ImplementationWork != nil {
 			work := obligation.ImplementationWork
 			policy := work.Scope.Request.Policy
-			variants := make([]any, 0, len(policy.AllowedOperations))
-			operationKinds := make([]string, 0, len(policy.AllowedOperations))
-			for _, variant := range policy.AllowedOperations {
-				operationKinds = append(operationKinds, variant.Kind)
-				variantBranch := map[string]any{"properties": map[string]any{"operationKind": map[string]any{"const": variant.Kind}}}
-				if variant.VariantID != "" {
+			branches, err := compileRuntimeSemanticWorkProposalBranches(manifest, obligation)
+			if err != nil {
+				return err
+			}
+			variants := make([]any, 0, len(branches))
+			operationKinds := make([]string, 0, len(branches))
+			for _, branch := range branches {
+				operationKinds = append(operationKinds, branch.Operation.Kind)
+				properties := map[string]any{"operationKind": map[string]any{"const": branch.Operation.Kind}}
+				targetProperties := map[string]any{"policy": map[string]any{"const": string(branch.Policy)}}
+				targetRequired := []string{"policy"}
+				if branch.Policy == RuntimeOperationTargetPolicyProspectiveOwnerTarget {
+					targetRequired = append(targetRequired, "ownerSelectorRefs", "prospectiveTargetRefs", "prospectiveConstraintRefs")
+					targetProperties["ownerSelectorRefs"] = stringEnumArraySchemaWithMaximum(branch.SelectorRefs, 1, 1)
+					targetProperties["prospectiveConstraintRefs"] = exactStringArraySchema(policy.ProspectiveTargetAllOfConstraintRefs)
+					if len(branch.TargetRefs) != 0 {
+						targetProperties["prospectiveTargetRefs"] = stringEnumArraySchemaWithMaximum(branch.TargetRefs, policy.MaxTargetsPerRound, 1)
+					} else {
+						targetItem := map[string]any{"type": "string", "minLength": 1, "maxLength": 65536}
+						if len(branch.ExcludedTargetRefs) != 0 {
+							targetItem["not"] = stringEnumSchemaWithMinimum(branch.ExcludedTargetRefs, 1)
+						}
+						targetProperties["prospectiveTargetRefs"] = map[string]any{"type": "array", "minItems": 1, "maxItems": policy.MaxTargetsPerRound, "uniqueItems": true, "items": targetItem}
+					}
+				} else {
+					field := "ownerScopeTargetRefs"
+					if branch.Policy == RuntimeOperationTargetPolicyExactTarget {
+						field = "exactTargetRefs"
+					}
+					targetRequired = append(targetRequired, field)
+					targetProperties[field] = stringEnumArraySchemaWithMaximum(branch.TargetRefs, policy.MaxTargetsPerRound, 1)
+				}
+				properties["target"] = map[string]any{"required": targetRequired, "properties": targetProperties}
+				variantBranch := map[string]any{"properties": properties}
+				if branch.Operation.VariantID != "" {
 					variantBranch["required"] = []string{"operationVariantId"}
-					variantBranch["properties"].(map[string]any)["operationVariantId"] = map[string]any{"const": variant.VariantID}
+					properties["operationVariantId"] = map[string]any{"const": branch.Operation.VariantID}
 				} else {
 					variantBranch["not"] = map[string]any{"required": []string{"operationVariantId"}}
 				}
@@ -759,7 +788,6 @@ func attachRuntimeSemanticProofObligationSchema(items map[string]any, manifest R
 				"requiredEvidenceKinds": exactStringArraySchema([]string{EvidenceKindStateChange}),
 				"target": map[string]any{"properties": map[string]any{
 					"policy":                    stringEnumSchemaWithMinimum(targetPolicies, 1),
-					"ownerSelectorRefs":         exactStringArraySchema([]string{policy.TargetSelectorRef}),
 					"prospectiveConstraintRefs": exactStringArraySchema(policy.ProspectiveTargetAllOfConstraintRefs),
 				}},
 			}, "not": map[string]any{"anyOf": []any{

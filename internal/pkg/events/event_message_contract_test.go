@@ -113,7 +113,8 @@ func TestOwnerEventContractsAreCompleteAndUnique(t *testing.T) {
 	// and one File no-overwrite write command. These do not grant readiness or Run authority.
 	// Workspace adds one private registration-result settlement; initialization
 	// reserves first, Application executes CLI, recovery queries the same receipt.
-	const expectedProductionTopicCount = 333
+	// Decision adds exact legacy request-contract repair; no criteria approval, evidence or Run transition.
+	const expectedProductionTopicCount = 334
 	if len(contracts) != expectedProductionTopicCount {
 		t.Fatalf("production EventHub topic inventory = %d, want %d; adjudicate additions/removals in the owning component contracts and README", len(contracts), expectedProductionTopicCount)
 	}

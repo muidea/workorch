@@ -316,6 +316,9 @@ func EvaluateRuntimeDefinitionGapAdmission(manifest RuntimeSemanticPlanManifest,
 	if err := document.ValidateAgainst(normalizedManifest, normalizedExpected); err != nil {
 		return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "document_invalid", err)
 	}
+	if err := ValidateRuntimeSemanticRequestContract(normalizedManifest, normalizedExpected.PlanStep, normalizedExpected.BatchCoverageWorkItemIDs); err != nil {
+		return runtimeDefinitionGapAdmissionFailure(RuntimeDefinitionGapAdmissionRejected, "semantic_request_contract_conflict", err)
+	}
 	for _, obligation := range normalizedManifest.ProofObligations {
 		evidence, err := ResolveRuntimeSemanticEvidenceObligation(obligation)
 		if err != nil {
@@ -691,13 +694,18 @@ func (r RuntimeDefinitionClarificationRequestRecord) ValidateAgainst(dispatch Ru
 }
 
 type RuntimeDefinitionClarificationState struct {
-	Observation RuntimeDefinitionGapObservation
-	Dispatch    *RuntimeDefinitionClarificationDispatch
-	Request     *RuntimeDefinitionClarificationRequestRecord
+	Observation           RuntimeDefinitionGapObservation
+	RequestContractRepair *RuntimeSemanticRequestRepairProof `json:",omitempty"`
+	Dispatch              *RuntimeDefinitionClarificationDispatch
+	Request               *RuntimeDefinitionClarificationRequestRecord
 }
 
 func (s RuntimeDefinitionClarificationState) Clone() RuntimeDefinitionClarificationState {
 	ret := RuntimeDefinitionClarificationState{Observation: s.Observation.Clone()}
+	if s.RequestContractRepair != nil {
+		value := s.RequestContractRepair.Clone()
+		ret.RequestContractRepair = &value
+	}
 	if s.Dispatch != nil {
 		value := s.Dispatch.Clone()
 		ret.Dispatch = &value
@@ -715,13 +723,21 @@ func (s RuntimeDefinitionClarificationState) Validate() error {
 		return err
 	}
 	if s.Dispatch == nil {
-		if s.Request != nil {
+		if s.Request != nil || s.RequestContractRepair != nil {
 			return fmt.Errorf("runtime Definition clarification request cannot precede dispatch")
 		}
 		return nil
 	}
 	if err := s.Dispatch.ValidateAgainst(s.Observation); err != nil {
 		return err
+	}
+	if s.RequestContractRepair != nil {
+		if err := s.RequestContractRepair.Validate(); err != nil {
+			return err
+		}
+		if !s.RequestContractRepair.Matches(s) {
+			return fmt.Errorf("request contract repair differs from original clarification")
+		}
 	}
 	if s.Request != nil {
 		return s.Request.ValidateAgainst(*s.Dispatch)

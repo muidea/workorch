@@ -40,7 +40,7 @@ func TestDecisionCommandTopicsHaveOneSemanticFamily(t *testing.T) {
 	}
 }
 
-func TestDecisionOwnerCommandInventoryCoversAllSeventeenTypedTopics(t *testing.T) {
+func TestDecisionOwnerCommandInventoryCoversAllEighteenTypedTopics(t *testing.T) {
 	expected := map[string]struct{}{
 		decisionevents.TopicRegisterContractChangeProposal: {},
 		decisionevents.TopicDecisionCommandGetTicket:       {}, decisionevents.TopicDecisionCommandListTickets: {},
@@ -51,6 +51,7 @@ func TestDecisionOwnerCommandInventoryCoversAllSeventeenTypedTopics(t *testing.T
 		decisionevents.TopicOpenWorkspaceDefinitionClarification: {}, decisionevents.TopicReconcileWorkspaceDefinitionClarificationCandidate: {},
 		decisionevents.TopicResolveWorkspaceDefinitionClarificationByAdmission: {}, decisionevents.TopicQueryWorkspaceDefinitionClarificationFact: {},
 		decisionevents.TopicOpenRuntimeDefinitionClarification: {}, decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement: {},
+		decisionevents.TopicRepairRuntimeDefinitionClarificationRequestContract: {},
 	}
 	topics := append([]string(nil), decisionCommandTopics()...)
 	topics = append(topics, decisionevents.TopicOpenRuntimeGovernanceRequest, decisionevents.TopicRegisterContractChangeProposal)

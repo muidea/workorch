@@ -265,3 +265,42 @@ func TestRuntimeSemanticContractRequiresCompleteCompactOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeSemanticWorkRenderingRejectsLegacyAndSeparatesSelectorDomains(t *testing.T) {
+	request := runtimeSemanticWorkProviderRequestForTest(t, false)
+	// Unlike the old fixture, Profile observation and capability proposal selector
+	// domains deliberately have no common identity.
+	catalog := &request.SemanticManifest.OwnerCatalogs[0]
+	catalog.SelectorRefs = []string{"native-existing-target"}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
+	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	refreshSemanticProgressForTest(t, &request)
+	expected := runtimecontract.RuntimeExpectedDocumentContract{SchemaVersion: runtimecontract.RuntimeExpectedDocumentSchemaCurrent, DocumentKind: runtimecontract.RuntimeProviderDocumentSemanticPlan, PlanStep: request.SemanticContext.PlanStep, ManifestHash: request.SemanticManifest.Hash, DefinitionSeedHash: request.SemanticManifest.DefinitionSeedHash, LogicalRequestID: "work-render-version", StablePrefixHash: request.StablePrefixHash, MaxOutputTokens: 4096, MaxRecoveryAttempts: 1, BatchID: request.SemanticContext.BatchID, BatchSequence: request.SemanticContext.BatchSequence, BatchCoverageWorkItemIDs: request.SemanticContext.BatchCoverageWorkItemIDs}
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
+	request.ExpectedDocument = &expected
+	if _, err := runtimeSemanticPlanProviderRequest(request); err == nil {
+		t.Fatal("legacy sealed work request was silently re-rendered")
+	}
+	legacyHash := expected.Hash
+	expected.SemanticRenderContractRef = runtimecontract.RuntimeSemanticRenderContractV2
+	expected.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(expected)
+	if expected.Hash == legacyHash {
+		t.Fatal("renderer upgrade reused old expected-document identity")
+	}
+	before, _ := json.Marshal(request)
+	provider, err := runtimeSemanticPlanProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instruction := runtimeSemanticBaseOutputInstruction(request.SemanticContext, request.SemanticManifest)
+	if strings.Contains(instruction, "requiredEffectScopes") || !strings.Contains(instruction, "derived internally") || !strings.Contains(instruction, "Profile targetSelectorRef") {
+		t.Fatal("work instruction and wire contract diverged")
+	}
+	if strings.Contains(provider.Schema, `"enum":["work-scope"]`) {
+		t.Fatal("Profile selector was imposed on capability proposal")
+	}
+	after, _ := json.Marshal(request)
+	if string(before) != string(after) {
+		t.Fatal("rendering mutated workspace input")
+	}
+}

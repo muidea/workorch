@@ -6,8 +6,13 @@ import (
 )
 
 // RuntimeInternalAuthorityPayload contains only SM-2 authority/focus facts.
-// It cannot carry an executor, request transport state or delivery ledger.
+// It cannot carry an executor or request transport state. Request-contract repair
+// may carry only its exact SM-4 successor template, committed with SM-2/SM-3
+// retirement to close the owner-delivery crash cut.
 type RuntimeInternalAuthorityPayload struct {
+	RequestContractRepairProof         *runtimecontract.RuntimeSemanticRequestRepairProof
+	RequestContractRepairResolution    *runtimecontract.RuntimeSemanticRequestRepairResolution
+	RequestContractRepairDriveLease    *runtimecontract.RuntimeDriveLease
 	EvidenceApplicability              *runtimecontract.RuntimeEvidenceApplicabilityObservation
 	ReconciliationBatch                *runtimecontract.RuntimeCWIReconciliationBatch
 	ImplementationWorkScopeRequest     *runtimecontract.RuntimeImplementationWorkScopeRequest
@@ -74,3 +79,6 @@ const (
 	RuntimeInternalEventRepairSurfaceConfirmationObserved    RuntimeInternalEventKind = "repair_surface_confirmation_observed"
 	RuntimeInternalEventDefinitionGapObserved                RuntimeInternalEventKind = "runtime_definition_gap_observed"
 )
+
+const RuntimeInternalEventSemanticRequestRepairPrepared RuntimeInternalEventKind = "semantic_request_repair_prepared"
+const RuntimeInternalEventSemanticRequestRepairResolved RuntimeInternalEventKind = "semantic_request_repair_resolved"

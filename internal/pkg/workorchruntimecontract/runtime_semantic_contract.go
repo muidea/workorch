@@ -2423,6 +2423,7 @@ const (
 	RuntimeSemanticPlanningRetirementImplementationPurpose  RuntimeSemanticPlanningRetirementReason = "implementation_purpose_selected"
 	RuntimeSemanticPlanningRetirementInputReviewInformation RuntimeSemanticPlanningRetirementReason = "input_review_information"
 	RuntimeSemanticPlanningRetirementInputRevision          RuntimeSemanticPlanningRetirementReason = "input_review_revision"
+	RuntimeSemanticPlanningRetirementRequestContractRepair  RuntimeSemanticPlanningRetirementReason = "request_contract_repaired"
 )
 
 // RuntimeSemanticPlanningHistoryLimit bounds immutable semantic lineage kept
@@ -2524,7 +2525,8 @@ func (g RuntimeSemanticFeasibilityGap) Validate() error {
 // snapshot.  This keeps request-session identity and generation identity
 // separate without allowing retired authority to be reused.
 type RuntimeSemanticPlanningGeneration struct {
-	InputReviewResolutionID common.ResolutionID `json:",omitempty"`
+	RequestContractRepair   *RuntimeSemanticRequestRepairRecord `json:",omitempty"`
+	InputReviewResolutionID common.ResolutionID                 `json:",omitempty"`
 	RetiredAtStateRevision  uint64
 	Reason                  RuntimeSemanticPlanningRetirementReason
 	InvalidationSignatures  []string
@@ -2543,6 +2545,10 @@ type RuntimeSemanticPlanningGeneration struct {
 }
 
 func (g RuntimeSemanticPlanningGeneration) Normalized() RuntimeSemanticPlanningGeneration {
+	if g.RequestContractRepair != nil {
+		v := g.RequestContractRepair.Clone()
+		g.RequestContractRepair = &v
+	}
 	g.Reason = RuntimeSemanticPlanningRetirementReason(strings.TrimSpace(string(g.Reason)))
 	g.InvalidationSignatures = normalizeStrings(g.InvalidationSignatures)
 	g.PrerequisiteIDs = normalizeStrings(g.PrerequisiteIDs)
@@ -2599,7 +2605,20 @@ func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPla
 	if g.RetiredAtStateRevision == 0 || g.Reason == "" {
 		return fmt.Errorf("runtime semantic planning generation requires retirement identity and reason")
 	}
+	if g.Reason != RuntimeSemanticPlanningRetirementRequestContractRepair && g.RequestContractRepair != nil {
+		return fmt.Errorf("unrelated semantic generation carries request repair")
+	}
 	switch g.Reason {
+	case RuntimeSemanticPlanningRetirementRequestContractRepair:
+		if g.RequestContractRepair == nil || g.InputReviewResolutionID != "" || len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
+			return fmt.Errorf("request repair retirement requires only exact repair lineage")
+		}
+		if err := g.RequestContractRepair.Validate(); err != nil {
+			return err
+		}
+		if err := g.RequestContractRepair.Proof.ValidateRequestIntent(g.Snapshot); err != nil {
+			return fmt.Errorf("request repair retired a different semantic generation")
+		}
 	case RuntimeSemanticPlanningRetirementImplementationPurpose:
 		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 || g.Snapshot.Phase != RuntimeSemanticPlanningOrderAccepted || g.Snapshot.CoverageOrderDocument == nil || g.Snapshot.CoverageOrderDocument.ImplementationPurpose == "" {
 			return fmt.Errorf("implementation purpose retirement requires exact original accepted order only")

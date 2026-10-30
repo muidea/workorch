@@ -112,6 +112,8 @@ func (c *RuntimeController) ApplyInternalEvent(ctx context.Context, event Runtim
 		RuntimeInternalEventGovernanceRequestObserved,
 		RuntimeInternalEventValidationFailureObserved,
 		RuntimeInternalEventRepairSurfaceConfirmationObserved,
+		RuntimeInternalEventSemanticRequestRepairPrepared,
+		RuntimeInternalEventSemanticRequestRepairResolved,
 		RuntimeInternalEventDefinitionGapObserved:
 		return c.applyAuthorityInternalEvent(ctx, event)
 

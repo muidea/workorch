@@ -598,6 +598,8 @@ func (m *Biz) recoverRuntimeStartup(ctx context.Context) error {
 			// between the SM-4 CAS and the exact SM-1 continuation fact. Re-drive
 			// the persisted handoff before any execution transition.
 			source = "startup_recovery:governance_continuation_delivery"
+		case aggregate.DefinitionClarification != nil && runtimeRequestContractRepairStartupEligible(aggregate):
+			source = "startup_recovery:semantic_request_contract_repair"
 		case aggregate.Decision.State == runtimecontract.ConvergenceStateNeedGovernance:
 			// A crash can occur after the bound governance request and opaque
 			// lifecycle fence were committed but before Run owner accepted the
@@ -3765,4 +3767,9 @@ func classifyRuntimeDriveFailure(err error) runtimecontract.FailureFact {
 	default:
 		return runtimecontract.FailureFact{Class: runtimecontract.FailureClassRuntimeContractMisalignment, Code: "runtime_drive_failed", Signature: "runtime-drive-failed", Message: msg}
 	}
+}
+
+func runtimeRequestContractRepairStartupEligible(a runtime.RuntimeAggregate) bool {
+	_, err := runtime.CompileRuntimeSemanticRequestRepairProof(a)
+	return err == nil
 }

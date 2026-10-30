@@ -24,6 +24,13 @@ func prepareRuntimeSemanticPlanRequest(request llmmodels.RuntimeCandidateRequest
 	if err := runtimecontract.ValidateRuntimeEvidencePolicies(request.SemanticContext.Activation.EvidencePolicies); err != nil {
 		return runtimeSemanticPreparedRequest{}, fmt.Errorf("runtime semantic plan context activation evidence policies: %w", err)
 	}
+	if request.ExpectedDocument != nil && request.SemanticContext.PlanStep == runtimecontract.RuntimeSemanticPlanStepProofBatch {
+		for _, obligation := range request.SemanticManifest.ProofObligations {
+			if obligation.ImplementationWork != nil && request.ExpectedDocument.SemanticRenderContractRef != runtimecontract.RuntimeSemanticRenderContractV2 {
+				return runtimeSemanticPreparedRequest{}, &runtimecontract.RuntimeSemanticRequestContractError{Reason: "sealed work renderer is obsolete; exact owner retirement is required before a new physical call"}
+			}
+		}
+	}
 	context := request.SemanticContext.Clone()
 	manifest := request.SemanticManifest.Clone()
 	if err := context.Validate(manifest); err != nil {

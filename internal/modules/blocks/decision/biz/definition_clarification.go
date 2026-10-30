@@ -31,6 +31,7 @@ func definitionClarificationTopics() []string {
 		decisionevents.TopicQueryWorkspaceDefinitionClarificationFact,
 		decisionevents.TopicOpenRuntimeDefinitionClarification,
 		decisionevents.TopicResolveRuntimeDefinitionClarificationByReplacement,
+		decisionevents.TopicRepairRuntimeDefinitionClarificationRequestContract,
 	}
 }
 
@@ -452,6 +453,9 @@ func (m *Biz) validateResolvedDefinitionClarificationRecord(ctx context.Context,
 		return nil
 
 	case decisionmodel.DefinitionClarificationRuntime:
+		if binding.RequestContractRepairHash != "" {
+			return validateRequestContractRepairResolution(ticket, resolution)
+		}
 		command := decisionevents.ResolveRuntimeDefinitionClarificationByReplacementCommand{
 			TicketID: ticket.ID, WorkspaceID: ticket.WorkspaceID, PredecessorRunID: ticket.RunID,
 			ReplacementIntentID: binding.ReplacementIntentID, ReplacementIntentHash: binding.ReplacementIntentHash,
@@ -558,10 +562,13 @@ func runtimeDefinitionClarificationLifecycleBindingConsistent(ticket *decisionmo
 	}
 	switch ticket.State {
 	case common.DecisionTicketStateOpen:
-		return binding.ResolutionID == "" && binding.ResolutionBindingHash == "" &&
+		return binding.RequestContractRepairHash == "" && binding.ResolutionID == "" && binding.ResolutionBindingHash == "" &&
 			binding.ReplacementIntentID == "" && binding.ReplacementIntentHash == "" &&
 			binding.SuccessorDefinitionRevision == "" && binding.SuccessorStartupInputHash == ""
 	case common.DecisionTicketStateResolved:
+		if binding.RequestContractRepairHash != "" {
+			return binding.ResolutionID != "" && binding.ResolutionBindingHash != "" && binding.ReplacementIntentID == "" && binding.ReplacementIntentHash == "" && binding.SuccessorDefinitionRevision == "" && binding.SuccessorStartupInputHash == ""
+		}
 		return binding.ResolutionID != "" && binding.ResolutionBindingHash != "" &&
 			binding.ReplacementIntentID != "" && binding.ReplacementIntentHash != "" &&
 			binding.SuccessorDefinitionRevision != "" && binding.SuccessorStartupInputHash != ""
