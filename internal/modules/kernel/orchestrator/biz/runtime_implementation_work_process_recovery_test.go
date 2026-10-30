@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -149,14 +150,21 @@ func TestImplementationWorkReceiptProcessChild(t *testing.T) {
 	if root == "" && mode == "" {
 		return // 仅由父回归显式启用，普通 suite 不生成额外 fixture。
 	}
-	if !filepath.IsAbs(root) || mode != "cut" && mode != "resume" {
+	if !filepath.IsAbs(root) || mode != "cut" && mode != "resume" && mode != "chain-cut" && mode != "chain-resume" {
 		t.Fatal("非法 process fixture 输入")
+	}
+	chain := strings.HasPrefix(mode, "chain-")
+	cut, resume := mode == "cut" || mode == "chain-cut", mode == "resume" || mode == "chain-resume"
+	targets := []string{"resource-a"}
+	if chain {
+		targets = []string{"resource-a", "resource-b", "resource-c", "resource-d"}
 	}
 	ctx := context.Background()
 	directory := filepath.Join(root, "workspace")
 	repository := filerepository.NewRunRepository(filepath.Join(root, "runs.json"))
-	if mode == "cut" {
-		_, _, initial := implementationWorkPurposeDebtDriverFixtureWithDirectory(t, false, directory)
+	if cut {
+		fixture, _, initial := implementationWorkPurposeDebtDriverFixtureWithDirectory(t, false, directory)
+		configureImplementationWorkDriverTargets(t, &initial, fixture.EventHub(), false, targets)
 		bootstrap := runtimeBootstrap()
 		bootstrap.Definition, bootstrap.Activation, bootstrap.DefinitionSeed, bootstrap.DefinitionFocuses = initial.Definition, initial.Facts.Activation, initial.Facts.DefinitionSeed, initial.Facts.DefinitionFocuses
 		item := runtimeRunForTestBootstrap(common.RunStateActive, bootstrap)
@@ -217,7 +225,7 @@ func TestImplementationWorkReceiptProcessChild(t *testing.T) {
 		committed := magicevent.NewResult(event.ID(), event.Source(), event.Destination())
 		module.handleRuntimeOperationReceipt(event, committed)
 		data, err := committed.Get()
-		if mode == "cut" && err == nil {
+		if cut && err == nil {
 			response, ok := data.(orchestratorevents.CommitRuntimeOperationReceiptResult)
 			if !ok || response.StateRevision == 0 {
 				t.Error("未取得真实 receipt CAS 回执")
@@ -242,11 +250,11 @@ func TestImplementationWorkReceiptProcessChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	startOperations := 0
-	if mode == "resume" {
+	if resume {
 		startOperations = 1
 		assertImplementationWorkProcessDuplicate(t, module, hub, aggregate, directory)
 	}
-	operations := installImplementationWorkProcessProvider(t, hub, startOperations)
+	operations := installImplementationWorkProcessProviderForTargets(t, hub, startOperations, targets)
 	for transition := 0; transition < runtimeDriveTransitionLimit; transition++ {
 		outcome, err := module.driveOneRuntimeTransition(ctx, nil, aggregate, orchestratorevents.DriveRuntimeCommand{WorkspaceID: "ws-v2", RunID: "run-v2"}, runtimecontract.StableRuntimeCandidatePrefixHashWithExecutionContract(aggregate.Definition, aggregate.Facts.Activation.ExecutionContract))
 		if err != nil {
@@ -254,7 +262,7 @@ func TestImplementationWorkReceiptProcessChild(t *testing.T) {
 		}
 		aggregate = outcome.aggregate
 		if len(aggregate.ImplementationWork.Rounds) == 2 && aggregate.ImplementationWork.Rounds[1].CompletedReceiptSetHash != "" {
-			if mode != "resume" || *operations != 2 {
+			if !resume || *operations != 2 {
 				t.Fatal("新进程重新请求已完成工作候选")
 			}
 			return
@@ -267,6 +275,10 @@ func TestImplementationWorkReceiptProcessChild(t *testing.T) {
 }
 
 func installImplementationWorkProcessProvider(t *testing.T, hub magicevent.Hub, initialOperations int, knownUsage ...bool) *int {
+	return installImplementationWorkProcessProviderForTargets(t, hub, initialOperations, []string{"resource-a"}, knownUsage...)
+}
+
+func installImplementationWorkProcessProviderForTargets(t *testing.T, hub magicevent.Hub, initialOperations int, targets []string, knownUsage ...bool) *int {
 	t.Helper()
 	operations := initialOperations
 	audited := func(command llmevents.RequestRuntimeCandidateCommand, result llmevents.RequestRuntimeCandidateResult) llmevents.RequestRuntimeCandidateResult {
@@ -290,7 +302,7 @@ func installImplementationWorkProcessProvider(t *testing.T, hub magicevent.Hub, 
 				document.BatchID, document.BatchSequence = command.SemanticContext.BatchID, command.SemanticContext.BatchSequence
 				document.BatchCoverageWorkItemIDs = command.SemanticContext.BatchCoverageWorkItemIDs
 				document.Proposals = []runtimecontract.RuntimeSemanticProofProposal{{CoverageWorkItemID: manifest.CoverageItems[0].ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: runtimecontract.StepKindFileEdit,
-					Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{"resource-a"}},
+					Target:                runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: targets},
 					RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindStateChange}, RequiredEffectScopes: []runtimecontract.RuntimeEffectScope{runtimecontract.RuntimeEffectWorkspaceDurable}, DeclarationRef: runtimecontract.RuntimeSemanticCurrentDeclarationRef(manifest.ProofObligations[0])}}
 			}
 			payload, err := runtimecontract.EncodeRuntimeSemanticPlanPayloadWithManifest(manifest, document)
@@ -307,20 +319,28 @@ func installImplementationWorkProcessProvider(t *testing.T, hub magicevent.Hub, 
 		if operations > 1 {
 			oldText = fmt.Sprintf("实际工作内容-%d", operations-1)
 		}
-		manifest, baseHash := command.CandidateManifest, ""
-		for _, operation := range manifest.Operations {
-			for _, binding := range operation.TargetParameterBindings {
-				for _, value := range binding.Values {
-					if binding.Name == "baseHash" && value.TargetRef == "resource-a" {
-						baseHash = value.Value
+		manifest := command.CandidateManifest
+		edits := []runtimecontract.StateChangingOperation{}
+		for index, target := range targets {
+			baseHash := ""
+			for _, operation := range manifest.Operations {
+				for _, binding := range operation.TargetParameterBindings {
+					for _, value := range binding.Values {
+						if binding.Name == "baseHash" && value.TargetRef == target {
+							baseHash = value.Value
+						}
 					}
 				}
 			}
+			requirement := ""
+			for _, required := range manifest.RequiredOperationSequence {
+				if required.TargetRef == target {
+					requirement = required.RequirementID
+				}
+			}
+			edits = append(edits, runtimecontract.StateChangingOperation{Operation: runtimecontract.RuntimeOperation{ID: fmt.Sprintf("work-operation-%d-%d", operations, index), Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{target}, RequiredOperationRef: requirement, Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}, {Name: "baseHash", String: &baseHash}}}})
 		}
-		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-			ID: fmt.Sprintf("work-operation-%d", operations), Kind: runtimecontract.StepKindFileEdit, TargetRefs: []string{"resource-a"}, RequiredOperationRef: manifest.RequiredOperationSequence[0].RequirementID,
-			Parameters: []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}, {Name: "baseHash", String: &baseHash}},
-		}}}}}
+		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: edits}}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	}); err != nil {
 		t.Fatal(err)
@@ -335,11 +355,16 @@ func installImplementationWorkProcessProvider(t *testing.T, hub magicevent.Hub, 
 
 func assertImplementationWorkProcessDuplicate(t *testing.T, module *Biz, hub magicevent.Hub, aggregate runtime.RuntimeAggregate, directory string) {
 	t.Helper()
-	if len(aggregate.CompletedDispatches) != 1 || len(aggregate.OperationReceipts) != 1 {
+	if (len(aggregate.CompletedDispatches) != 1 && aggregate.ActiveDispatch == nil) || len(aggregate.OperationReceipts) != 1 {
 		t.Fatal("fresh owner 未读回原 completed dispatch/receipt")
 	}
-	dispatch := aggregate.CompletedDispatches[0]
-	if dispatch.Candidate.StateChange == nil || len(dispatch.Candidate.StateChange.Operations) != 1 || len(dispatch.OperationExecutions) != 1 {
+	var dispatch runtime.SealedDispatch
+	if aggregate.ActiveDispatch != nil {
+		dispatch = *aggregate.ActiveDispatch
+	} else {
+		dispatch = aggregate.CompletedDispatches[0]
+	}
+	if dispatch.Candidate.StateChange == nil || len(dispatch.Candidate.StateChange.Operations) == 0 || len(dispatch.OperationExecutions) == 0 {
 		t.Fatal("原 sealed operation 前像缺失")
 	}
 	request := runtime.RuntimeOperationExecutionRequest{

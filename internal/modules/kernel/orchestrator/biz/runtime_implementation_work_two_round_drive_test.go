@@ -11,6 +11,7 @@ import (
 
 	magicevent "github.com/muidea/magicCommon/event"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
+	runtime "github.com/muidea/workorch/internal/modules/kernel/orchestrator/biz/runtime"
 	orchestratorevents "github.com/muidea/workorch/internal/modules/kernel/orchestrator/pkg/events"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -30,10 +31,51 @@ func TestImplementationWorkProductionDriverSameCWIRealFileTwoRounds(t *testing.T
 	}
 }
 
+func TestImplementationWorkProductionDriverFourTargetsTwoRounds(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		t.Run(fmt.Sprintf("empty_%t", empty), func(t *testing.T) {
+			t.Parallel()
+			testImplementationWorkProductionDriverTargets(t, empty, []string{"resource-a", "resource-b", "resource-c", "resource-d"})
+		})
+	}
+}
+
 func testImplementationWorkProductionDriverSameCWIRealFileTwoRounds(t *testing.T, empty bool) {
+	testImplementationWorkProductionDriverTargets(t, empty, []string{"resource-a"})
+}
+
+func configureImplementationWorkDriverTargets(t *testing.T, aggregate *runtime.RuntimeAggregate, hub magicevent.Hub, empty bool, targets []string) {
+	t.Helper()
+	ctx := context.Background()
+	if len(targets) > 1 {
+		policy := aggregate.Facts.DefinitionFocuses[0].ImplementationWorkPolicy.Normalized()
+		policy.MaxTargetsPerRound = len(targets)
+		policy.TargetSelectorCandidateRefs = targets
+		aggregate.Facts.DefinitionFocuses[0].ImplementationWorkPolicy = &policy
+		aggregate.Facts.Activation.ExecutionContract.ProfileContracts[0].EvidenceRequirements[0].ImplementationWorkPolicy = &policy
+		if !empty {
+			workspace, err := (workspaceSnapshotReader{hub: hub}).Read(ctx, aggregate.Facts.WorkspaceID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, target := range targets[1:] {
+				if err := os.WriteFile(filepath.Join(workspace.DeliverableDirectory, target), []byte("original implementation"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if err := aggregate.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func testImplementationWorkProductionDriverTargets(t *testing.T, empty bool, targets []string) {
 	t.Helper()
 	ctx := context.Background()
 	module, repo, aggregate := implementationWorkPurposeDebtDriverFixtureWithEmptyDirectory(t, empty)
+	configureImplementationWorkDriverTargets(t, &aggregate, module.EventHub(), empty, targets)
+	repo.aggregate = aggregate
 	hub := module.EventHub()
 	receipts := magicevent.NewSimpleObserver(orchestratorevents.CommandDestination, hub)
 	committedReceipts := 0
@@ -68,12 +110,12 @@ func testImplementationWorkProductionDriverSameCWIRealFileTwoRounds(t *testing.T
 			} else {
 				document.BatchID, document.BatchSequence = command.SemanticContext.BatchID, command.SemanticContext.BatchSequence
 				document.BatchCoverageWorkItemIDs = command.SemanticContext.BatchCoverageWorkItemIDs
-				target := runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: []string{"resource-a"}}
+				target := runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope, OwnerScopeTargetRefs: targets}
 				kind := runtimecontract.StepKindFileEdit
 				if work := manifest.ProofObligations[0].ImplementationWork; empty && work != nil && work.Ordinal == 1 {
 					kind = runtimecontract.StepKindFileWrite
 					target = runtimecontract.RuntimeOperationTargetAuthorization{Policy: runtimecontract.RuntimeOperationTargetPolicyProspectiveOwnerTarget,
-						OwnerSelectorRefs: []string{"workspace-relative-new-file-target"}, ProspectiveTargetRefs: []string{"resource-a"},
+						OwnerSelectorRefs: []string{"workspace-relative-new-file-target"}, ProspectiveTargetRefs: targets,
 						ProspectiveConstraintRefs: work.Scope.Request.Policy.ProspectiveTargetAllOfConstraintRefs}
 				}
 				document.Proposals = []runtimecontract.RuntimeSemanticProofProposal{{CoverageWorkItemID: manifest.CoverageItems[0].ID, OwnerModuleID: runtimecontract.RuntimeModuleFile, OperationKind: kind,
@@ -97,28 +139,35 @@ func testImplementationWorkProductionDriverSameCWIRealFileTwoRounds(t *testing.T
 			oldText = fmt.Sprintf("实际工作内容-%d", ordinal-1)
 		}
 		newText := fmt.Sprintf("实际工作内容-%d", ordinal)
-		baseHash := ""
-		for _, operation := range manifest.Operations {
-			for _, binding := range operation.TargetParameterBindings {
-				if binding.Name == "baseHash" {
-					for _, value := range binding.Values {
-						if value.TargetRef == "resource-a" {
-							baseHash = value.Value
+		operations := []runtimecontract.StateChangingOperation{}
+		for targetIndex, target := range targets {
+			baseHash := ""
+			for _, operation := range manifest.Operations {
+				for _, binding := range operation.TargetParameterBindings {
+					if binding.Name == "baseHash" {
+						for _, value := range binding.Values {
+							if value.TargetRef == target {
+								baseHash = value.Value
+							}
 						}
 					}
 				}
 			}
+			kind := runtimecontract.StepKindFileEdit
+			parameters := []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}, {Name: "baseHash", String: &baseHash}}
+			if empty && ordinal == 1 {
+				kind = runtimecontract.StepKindFileWrite
+				parameters = []runtimecontract.OperationParameter{{Name: "content", String: &newText}}
+			}
+			requirement := ""
+			for _, required := range manifest.RequiredOperationSequence {
+				if required.TargetRef == target {
+					requirement = required.RequirementID
+				}
+			}
+			operations = append(operations, runtimecontract.StateChangingOperation{Operation: runtimecontract.RuntimeOperation{ID: fmt.Sprintf("work-operation-%d-%d", ordinal, targetIndex), Kind: kind, TargetRefs: []string{target}, RequiredOperationRef: requirement, Parameters: parameters}})
 		}
-		kind := runtimecontract.StepKindFileEdit
-		parameters := []runtimecontract.OperationParameter{{Name: "oldText", String: &oldText}, {Name: "newText", String: &newText}, {Name: "baseHash", String: &baseHash}}
-		if empty && ordinal == 1 {
-			kind = runtimecontract.StepKindFileWrite
-			parameters = []runtimecontract.OperationParameter{{Name: "content", String: &newText}}
-		}
-		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: []runtimecontract.StateChangingOperation{{Operation: runtimecontract.RuntimeOperation{
-			ID: fmt.Sprintf("work-operation-%d", ordinal), Kind: kind, TargetRefs: []string{"resource-a"}, RequiredOperationRef: manifest.RequiredOperationSequence[0].RequirementID,
-			Parameters: parameters,
-		}}}}}
+		candidate := runtimecontract.RuntimeCandidate{StateChange: &runtimecontract.StateChangeCandidate{Operations: operations}}
 		result.Set(runtimeCandidateResultForTest(t, command, candidate), nil)
 	})
 	t.Cleanup(func() { provider.Unsubscribe(llmevents.TopicRequestRuntimeCandidate) })
@@ -137,7 +186,7 @@ func testImplementationWorkProductionDriverSameCWIRealFileTwoRounds(t *testing.T
 			t.Fatalf("unexpected terminal before two real work receipts: %+v failure=%+v", outcome.result, aggregate.Facts.Failure)
 		}
 	}
-	if len(aggregate.ImplementationWork.Rounds) != 2 || aggregate.ImplementationWork.Rounds[0].CompletedReceiptSetHash == "" || aggregate.ImplementationWork.Rounds[1].CompletedReceiptSetHash == "" || operationCalls != 2 || semanticCalls != 6 || committedReceipts != 2 {
+	if len(aggregate.ImplementationWork.Rounds) != 2 || aggregate.ImplementationWork.Rounds[0].CompletedReceiptSetHash == "" || aggregate.ImplementationWork.Rounds[1].CompletedReceiptSetHash == "" || operationCalls != 2 || semanticCalls != 6 || committedReceipts != 2*len(targets) {
 		t.Fatalf("two-round production chain incomplete: rounds=%+v semantic=%d operations=%d failure=%+v", aggregate.ImplementationWork.Rounds, semanticCalls, operationCalls, aggregate.Facts.Failure)
 	}
 	first, second := aggregate.ImplementationWork.Rounds[0], aggregate.ImplementationWork.Rounds[1]
@@ -156,9 +205,11 @@ func testImplementationWorkProductionDriverSameCWIRealFileTwoRounds(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	content, err := os.ReadFile(filepath.Join(workspace.DeliverableDirectory, "resource-a"))
-	if err != nil || string(content) != "实际工作内容-2" {
-		t.Fatalf("real File final content: %q err=%v", content, err)
+	for _, target := range targets {
+		content, err := os.ReadFile(filepath.Join(workspace.DeliverableDirectory, target))
+		if err != nil || string(content) != "实际工作内容-2" {
+			t.Fatalf("real File final content: %q err=%v", content, err)
+		}
 	}
 	var dispatches []runtimecontract.RuntimeDispatchRecord
 	for _, value := range aggregate.CompletedDispatches {
@@ -206,6 +257,9 @@ func testImplementationWorkProductionDriverSameCWIRealFileTwoRounds(t *testing.T
 	}
 	if _, err := runtimecontract.RuntimeDurableDispatchUsage(nil, dispatches, altered); err == nil {
 		t.Fatal("work durable budget borrowed dispatch-self-asserted commitment without accepted source")
+	}
+	if len(targets) > 1 && !empty {
+		assertImplementationWorkChainGuards(t, runtimeStateRecordFromAggregate(aggregate))
 	}
 	fresh, err := module.runtimeController.Load(ctx, aggregate.Facts.WorkspaceID, aggregate.Facts.RunID)
 	if err != nil || fresh.StateRevision != repo.aggregate.StateRevision || len(fresh.ImplementationWork.Rounds) != 2 {

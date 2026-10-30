@@ -845,6 +845,9 @@ func implementationWorkReceiptMatrix(t *testing.T, sealed RuntimeAggregate) {
 				late.Outcome, late.ObservedEffectScope, late.Changed, late.Governance, late.Feedback, late.PrerequisiteStale = runtimecontract.RuntimeOperationOutcomeAccepted, runtimecontract.RuntimeEffectWorkspaceDurable, true, nil, nil, nil
 				late.BeforeHash, late.AfterHash, late.Evidence.Quality = "late-before", "late-after", common.EvidenceQualityValid
 				late.ResourceChanges = []runtimecontract.RuntimeResourceChange{{Domain: dependency.Domain, OwnerModuleID: dependency.OwnerModuleID, SubjectRef: dependency.SubjectRef, BeforeRevision: dependency.Revision, AfterRevision: "late-fresh-revision"}}
+				if mode == "accepted" {
+					late.ResourceChanges[0].BeforeRevision = receipt.ResourceChanges[0].AfterRevision
+				}
 				lateEvent := RuntimeInternalEvent{Kind: RuntimeInternalEventOperationReceiptObserved, Scope: scope, Transaction: &RuntimeInternalTransactionPayload{DispatchID: claimed.ActiveDispatch.ID, Fence: execution.Fence, OperationReceiptOwnerSource: runtimecontract.RuntimeModuleFile, OperationReceipt: &late}}
 				before = repository.saves
 				settled, err := reopened.ApplyInternalEvent(context.Background(), lateEvent)

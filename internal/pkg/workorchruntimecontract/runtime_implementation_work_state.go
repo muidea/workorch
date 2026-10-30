@@ -59,8 +59,15 @@ func ValidateRuntimeImplementationWorkingBindingSemanticSource(round RuntimeImpl
 // RuntimeImplementationWorkReceiptMembers projects only the original dispatch,
 // receipt and evidence ledgers. No round labels or provider prose create facts.
 func RuntimeImplementationWorkReceiptMembers(dispatch RuntimeDispatchRecord, receipts []RuntimeOperationReceipt, facts RuntimeFacts, governance []RuntimeOperationGovernanceBinding) ([]RuntimeImplementationWorkReceiptMember, error) {
+	return implementationWorkReceiptMembersBefore(dispatch, receipts, facts, governance, "")
+}
+
+func implementationWorkReceiptMembersBefore(dispatch RuntimeDispatchRecord, receipts []RuntimeOperationReceipt, facts RuntimeFacts, governance []RuntimeOperationGovernanceBinding, beforeOperationID string) ([]RuntimeImplementationWorkReceiptMember, error) {
 	members := []RuntimeImplementationWorkReceiptMember{}
 	for _, operation := range runtimeCandidateAdmissionOperations(dispatch.Candidate) {
+		if operation.ID == beforeOperationID {
+			break
+		}
 		var execution RuntimeOperationExecutionRecord
 		executionMatches := 0
 		for _, value := range dispatch.OperationExecutions {
@@ -313,6 +320,29 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 				return fmt.Errorf("implementation round differs from original pre-dispatch commitment")
 			}
 			joined[dispatch.ID] = true
+			if round.WorkingBinding.ReceiptProtocolRef == RuntimeImplementationWorkReceiptChainV1 {
+				for _, execution := range dispatch.OperationExecutions {
+					if execution.State != OperationExecutionEvidenceCommitted {
+						continue
+					}
+					for _, fact := range facts.Evidence.Accepted {
+						if fact.ID != execution.EvidenceFactID {
+							continue
+						}
+						receipt, found := RuntimeOperationReceiptForExecutionKeyFence(receipts, execution.ExecutionKey, execution.Fence)
+						if !found {
+							return fmt.Errorf("implementation work committed evidence lost its resource chain receipt")
+						}
+						disposition, err := RuntimeImplementationWorkDispositionForDispatchReceipt(round, dispatch, receipts, facts, governance, receipt)
+						if err != nil {
+							return err
+						}
+						if disposition != "" {
+							return fmt.Errorf("implementation work committed evidence has invalid resource chain")
+						}
+					}
+				}
+			}
 			if round.CompletedReceiptSetHash != "" {
 				if dispatch.State != RuntimeDispatchStateCommitted {
 					return fmt.Errorf("implementation completion requires committed original dispatch")
@@ -347,8 +377,14 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 					}
 					originalReceiptMatches := 0
 					for _, receipt := range receipts {
-						if receipt.ExecutionKey == execution.ExecutionKey && receipt.Fence == execution.Fence && receipt.OperationID == execution.OperationID && StableRuntimeOperationReceiptHash(receipt) == round.FailedReceiptHash && execution.OwnerReceiptRef == "runtime-receipt/"+receipt.ExecutionKey && RuntimeImplementationWorkDispositionForReceipt(*dispatch.ImplementationWorkCommitment, receipt) == round.ReceiptDisposition {
-							originalReceiptMatches++
+						if receipt.ExecutionKey == execution.ExecutionKey && receipt.Fence == execution.Fence && receipt.OperationID == execution.OperationID && StableRuntimeOperationReceiptHash(receipt) == round.FailedReceiptHash && execution.OwnerReceiptRef == "runtime-receipt/"+receipt.ExecutionKey {
+							disposition, err := RuntimeImplementationWorkDispositionForDispatchReceipt(round, dispatch, receipts, facts, governance, receipt)
+							if err != nil {
+								return err
+							}
+							if disposition == round.ReceiptDisposition {
+								originalReceiptMatches++
+							}
 						}
 					}
 					if originalReceiptMatches != 1 {

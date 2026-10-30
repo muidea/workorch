@@ -127,6 +127,7 @@ func (c *planningTransactionComponent) sealImplementationWorkingBinding(ctx cont
 	}
 	work := ledger.Manifest.ProofObligations[0].ImplementationWork
 	binding := runtimecontract.RuntimeImplementationWorkingBinding{
+		ReceiptProtocolRef:   runtimecontract.RuntimeImplementationWorkReceiptChainV1,
 		InputRevision:        round.ScopeRequest.InputRevision.Clone(),
 		SemanticManifestHash: ledger.Manifest.Hash, LogicalRequestID: batch.RequestLogicalID,
 		BindingGeneration: uint64(round.Ordinal), Proposals: ledger.Document.Proposals, Feasibilities: ledger.Feasibilities,

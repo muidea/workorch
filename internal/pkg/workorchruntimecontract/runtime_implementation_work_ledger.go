@@ -92,6 +92,8 @@ type RuntimeImplementationWorkRound struct {
 // consumer must seal it through the semantic proposal/owner feasibility private
 // transaction and copy its hash into the candidate manifest and dispatch.
 type RuntimeImplementationWorkingBinding struct {
+	// Empty retains the original single-receipt disposition for sealed history.
+	ReceiptProtocolRef   string                          `json:",omitempty"`
 	InputRevision        *RuntimeValidationInputRevision `json:",omitempty"`
 	SemanticGenerationID string
 	BindingGeneration    uint64
@@ -290,6 +292,9 @@ func (b RuntimeImplementationWorkingBinding) ValidateForRound(r RuntimeImplement
 }
 
 func (b RuntimeImplementationWorkingBinding) validateForRoundInSemanticSession(r RuntimeImplementationWorkRound, session *runtimeSemanticValidationSession) error {
+	if b.ReceiptProtocolRef != "" && b.ReceiptProtocolRef != RuntimeImplementationWorkReceiptChainV1 {
+		return fmt.Errorf("unknown implementation work receipt protocol")
+	}
 	for _, ref := range []string{b.SemanticGenerationID, b.SemanticManifestHash, b.LogicalRequestID} {
 		if !implementationWorkExactRef(ref) {
 			return fmt.Errorf("implementation working binding requires exact semantic request identity")
@@ -505,6 +510,10 @@ func ValidateRuntimeImplementationWorkReceiptSet(r RuntimeImplementationWorkRoun
 }
 
 func validateRuntimeImplementationWorkReceiptSetInSession(r RuntimeImplementationWorkRound, members []RuntimeImplementationWorkReceiptMember, session *runtimeSemanticValidationSession) (string, error) {
+	return validateImplementationWorkReceiptMembers(r, members, session, true)
+}
+
+func validateImplementationWorkReceiptMembers(r RuntimeImplementationWorkRound, members []RuntimeImplementationWorkReceiptMember, session *runtimeSemanticValidationSession, complete bool) (string, error) {
 	if err := r.validateInSemanticSession(session); err != nil {
 		return "", err
 	}
@@ -518,7 +527,7 @@ func validateRuntimeImplementationWorkReceiptSetInSession(r RuntimeImplementatio
 			want[target] = proposal
 		}
 	}
-	if len(members) != len(want) {
+	if len(members) > len(want) || complete && len(members) != len(want) {
 		return "", fmt.Errorf("implementation work cannot complete a partial collective receipt set")
 	}
 	type commitment struct {
@@ -597,6 +606,14 @@ func validateRuntimeImplementationWorkReceiptSetInSession(r RuntimeImplementatio
 		}
 		joined = append(joined, commitment{Target: target, DispatchID: effectDispatchID, OperationID: op.ID, ExecutionKey: execution.ExecutionKey, Fence: execution.Fence,
 			ReceiptRef: execution.OwnerReceiptRef, ReceiptHash: execution.OwnerReceiptHash, EvidenceHash: execution.EvidenceFactHash})
+	}
+	if b.ReceiptProtocolRef == RuntimeImplementationWorkReceiptChainV1 {
+		chain := newImplementationWorkResourceChain(b.CatalogObservation.Dependencies)
+		for _, member := range members {
+			if !chain.advance(member.Receipt) {
+				return "", fmt.Errorf("implementation work receipts lack an exact ordered resource revision chain")
+			}
+		}
 	}
 	slices.SortFunc(joined, func(a, b commitment) int { return strings.Compare(a.Target, b.Target) })
 	hash := implementationWorkRawHash("implementation-work-receipts:", struct {

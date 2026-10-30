@@ -2,10 +2,28 @@ package runtime
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func implementationWorkReceiptDisposition(a RuntimeAggregate, dispatch SealedDispatch, receipt runtimecontract.RuntimeOperationReceipt) (runtimecontract.RuntimeImplementationWorkReceiptDisposition, error) {
+	var round *runtimecontract.RuntimeImplementationWorkRound
+	for i := range a.ImplementationWork.Rounds {
+		if a.ImplementationWork.Rounds[i].DispatchID == dispatch.ID {
+			if round != nil {
+				return "", fmt.Errorf("implementation receipt has duplicate original rounds")
+			}
+			round = &a.ImplementationWork.Rounds[i]
+		}
+	}
+	if round == nil {
+		return "", fmt.Errorf("implementation receipt has no original round")
+	}
+	return runtimecontract.RuntimeImplementationWorkDispositionForDispatchReceipt(*round, sealedDispatchToRuntimeRecord(dispatch), a.OperationReceipts, a.Facts, a.OperationGovernanceBindings, receipt)
+}
 
 // settleImplementationWorkReceipt 仅在 OperationReceiptObserved 中、精确 owner receipt
 // 与预算 join 已应用到 detached aggregate 后调用。同一次 aggregate CAS 协调
@@ -15,7 +33,10 @@ func settleImplementationWorkReceipt(a *RuntimeAggregate, operation runtimecontr
 		return common.ErrInvalidArgument
 	}
 	dispatch := *a.ActiveDispatch
-	disposition := runtimecontract.RuntimeImplementationWorkDispositionForReceipt(*dispatch.ImplementationWorkCommitment, receipt)
+	disposition, err := implementationWorkReceiptDisposition(*a, dispatch, receipt)
+	if err != nil {
+		return err
+	}
 	if disposition == runtimecontract.RuntimeImplementationWorkReceiptStale || disposition == runtimecontract.RuntimeImplementationWorkReceiptGovernance || disposition == runtimecontract.RuntimeImplementationWorkReceiptUnknown || disposition == runtimecontract.RuntimeImplementationWorkReceiptInvalidationMissing {
 		// 独立 owner outcome 保留 owner_committed，无 ordinary rejected evidence。
 		return closeImplementationWorkReceiptDisposition(a, dispatch, operation.ID, receipt, disposition)
@@ -42,6 +63,9 @@ func settleImplementationWorkReceipt(a *RuntimeAggregate, operation runtimecontr
 	dispatch.CompletedOperationIDs = appendNormalizedString(dispatch.CompletedOperationIDs, operation.ID)
 	a.ActiveDispatch = &dispatch
 	a.Facts.Evidence.Accepted = append(a.Facts.Evidence.Accepted, fact)
+	// Collective batches persist between operations, before the reducer runs.
+	// Keep the ledger's canonical order without rewriting/deduplicating facts.
+	slices.SortFunc(a.Facts.Evidence.Accepted, func(a, b runtimecontract.EvidenceFact) int { return strings.Compare(string(a.ID), string(b.ID)) })
 	a.EvidenceSequence++
 	a.Facts.EvidenceRevision = nextEvidenceRevision(a.EvidenceSequence)
 	a.ProcessedEventIDs = appendNormalizedString(a.ProcessedEventIDs, evidence.EventID)
@@ -101,7 +125,10 @@ func settleImplementationWorkReceipt(a *RuntimeAggregate, operation runtimecontr
 // 非成功 receipt 原文入账并关闭本轮，不能换轮或借 exact repair 续权。
 // 原 owner Failure/Diagnostic 保真；单独的有界无进展 failure 负责 SM-2 交付。
 func settleImplementationWorkRejectedReceipt(a *RuntimeAggregate, dispatch SealedDispatch, admission executionEvidenceAdmission, receipt runtimecontract.RuntimeOperationReceipt) error {
-	disposition := runtimecontract.RuntimeImplementationWorkDispositionForReceipt(*dispatch.ImplementationWorkCommitment, receipt)
+	disposition, err := implementationWorkReceiptDisposition(*a, dispatch, receipt)
+	if err != nil {
+		return err
+	}
 	if disposition == "" {
 		return fmt.Errorf("rejected implementation work receipt lacks independent non-success disposition")
 	}
@@ -135,7 +162,11 @@ func settleImplementationWorkRejectedReceipt(a *RuntimeAggregate, dispatch Seale
 // closeImplementationWorkReceiptDisposition 保留已知 owner outcome，独立关闭工作权限。
 // 不把治理/stale/unknown 改写为 ordinary rejection，不生成继任 effect 权限。
 func closeImplementationWorkReceiptDisposition(a *RuntimeAggregate, dispatch SealedDispatch, operationID string, receipt runtimecontract.RuntimeOperationReceipt, disposition runtimecontract.RuntimeImplementationWorkReceiptDisposition) error {
-	if disposition == "" || disposition != runtimecontract.RuntimeImplementationWorkDispositionForReceipt(*dispatch.ImplementationWorkCommitment, receipt) {
+	want, err := implementationWorkReceiptDisposition(*a, dispatch, receipt)
+	if err != nil {
+		return err
+	}
+	if disposition == "" || disposition != want {
 		return fmt.Errorf("implementation receipt closure requires independently derived typed disposition")
 	}
 	found := false
@@ -213,7 +244,6 @@ func closeImplementationWorkReceiptDisposition(a *RuntimeAggregate, dispatch Sea
 	if err := replaceRuntimeFailureAuthority(&a.Facts, failure, failureMode, nil); err != nil {
 		return err
 	}
-	var err error
 	a.Facts, a.Decision, err = reduceRuntimeAggregateWithDirective(*a, a.Facts, nil)
 	return err
 }

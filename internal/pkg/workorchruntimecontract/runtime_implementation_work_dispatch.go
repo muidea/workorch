@@ -105,6 +105,22 @@ func runtimeImplementationWorkEffectQualityAcceptable(quality common.EvidenceQua
 // RuntimeImplementationWorkDispositionForReceipt 从原 owner fact 推导不续权处置。
 // 空值仅表示可进入 collective receipt 校验，不授 terminal credit。
 func RuntimeImplementationWorkDispositionForReceipt(round RuntimeImplementationWorkRound, receipt RuntimeOperationReceipt) RuntimeImplementationWorkReceiptDisposition {
+	if disposition := implementationWorkReceiptOutcomeDisposition(receipt); disposition != "" {
+		return disposition
+	}
+	if round.WorkingBinding != nil {
+		for _, dependency := range round.WorkingBinding.CatalogObservation.Dependencies {
+			for _, change := range receipt.ResourceChanges {
+				if RuntimeFreshnessDependencyIntersectsChange(dependency, change) && dependency.Revision == change.BeforeRevision && change.BeforeRevision != change.AfterRevision {
+					return ""
+				}
+			}
+		}
+	}
+	return RuntimeImplementationWorkReceiptInvalidationMissing
+}
+
+func implementationWorkReceiptOutcomeDisposition(receipt RuntimeOperationReceipt) RuntimeImplementationWorkReceiptDisposition {
 	if receipt.PrerequisiteStale != nil {
 		return RuntimeImplementationWorkReceiptStale
 	}
@@ -117,16 +133,7 @@ func RuntimeImplementationWorkDispositionForReceipt(round RuntimeImplementationW
 	if receipt.Outcome != RuntimeOperationOutcomeAccepted || receipt.ObservedEffectScope != RuntimeEffectWorkspaceDurable || !receipt.Changed || receipt.BeforeHash == receipt.AfterHash || receipt.AfterHash == "" || receipt.Evidence.Validation != nil || receipt.Evidence.ZeroWork || !runtimeImplementationWorkEffectQualityAcceptable(receipt.Evidence.Quality) {
 		return RuntimeImplementationWorkReceiptRejected
 	}
-	if round.WorkingBinding != nil {
-		for _, dependency := range round.WorkingBinding.CatalogObservation.Dependencies {
-			for _, change := range receipt.ResourceChanges {
-				if RuntimeFreshnessDependencyIntersectsChange(dependency, change) && dependency.Revision == change.BeforeRevision && change.BeforeRevision != change.AfterRevision {
-					return ""
-				}
-			}
-		}
-	}
-	return RuntimeImplementationWorkReceiptInvalidationMissing
+	return ""
 }
 
 func runtimeImplementationWorkCommitmentsEqual(a, b *RuntimeImplementationWorkRound) bool {
