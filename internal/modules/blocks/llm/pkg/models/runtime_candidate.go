@@ -104,6 +104,7 @@ type RuntimeCandidateGenerationResult struct {
 
 // ProviderRequestAudit is the sealed, secret-free audit surface for one provider request.
 type ProviderRequestAudit struct {
+	PromptStage           llmaudit.PromptStage                `json:"promptStage,omitempty"`
 	RequestID             string                              `json:"requestId,omitempty"`
 	LogicalRequestID      string                              `json:"logicalRequestId,omitempty"`
 	PhysicalCallID        string                              `json:"physicalCallId,omitempty"`

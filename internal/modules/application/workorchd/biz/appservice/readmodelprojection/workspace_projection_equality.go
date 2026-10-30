@@ -292,7 +292,7 @@ func llmUsageSummaryEqual(a, b projectioncontract.LLMUsageSummary) bool {
 }
 
 func llmUsageSummaryTotalsEqual(a, b projectioncontract.LLMUsageSummary) bool {
-	return a.Availability == b.Availability &&
+	return a.NativeCache == b.NativeCache && a.Availability == b.Availability &&
 		a.Scope == b.Scope &&
 		a.RecordLimit == b.RecordLimit &&
 		a.ObservedRecords == b.ObservedRecords &&

@@ -912,6 +912,11 @@ ordinary 前驱，state-change-only 不补造来源，明确 `cwi_revalidation_s
   preimage 声明封入 manifest/wire/hash，并在选定 singleton target 后纯派生 exact 参数；provider echo 必须拒绝，owner
   ingress 仍重验 catalog/freshness。Core 不解释参数的业务含义，不重新观察资源，也不新增 owner/correction authority；
   nil/empty 扩展保持旧 archive identity。动态声明只影响 C3。
+- SM-3 的 operations ExpectedDocument 另可封存 `OperationsRenderContractRef=operations-render/compact-contract/v2`。
+  fresh authority 默认使用 v2；同 authority/manifest 的已封存 session（含空引用 legacy）决定 reload/recovery/correction
+  版本，私有 writer 在 CAS 前拒绝版本切换或冲突。引用进入 expected-document hash，空值省略且不改变旧 hash/序列化。
+  该引用仅选择 LLM owner 的纯 rendering；manifest/wire、预算、attempt、dispatch 和全部 SM-2 门禁不变。
+  SM-1 生命周期与 SM-4 恢复/交付不新增迁移，也不能通过部署升级旧请求或恢复失败 Run。
 - operations ExpectedDocument 持久化 exact `WireContractHash`，request session 保留 manifest identity；任一 framing 为单一
   JSON object 的 completed document
   进入 accepted 或 rejected candidate attempt 时，都在关闭该 attempt 的同一个 owner-private CAS 中封存 exact

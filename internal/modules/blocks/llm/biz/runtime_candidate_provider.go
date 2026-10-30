@@ -313,8 +313,10 @@ func sealedAuditFromRequest(
 	responseBytes int,
 ) *llmmodels.ProviderRequestAudit {
 	kind := "runtime_candidate"
+	promptStage := llmaudit.PromptStage(request.Decision.State)
 	if request.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 		kind = "runtime_semantic_plan"
+		promptStage = llmaudit.PromptStage(request.SemanticContext.PlanStep)
 	}
 	ceiling := runtimeRequestProviderCeiling(request)
 	target := runtimecontract.ProviderModelTarget{}
@@ -376,6 +378,7 @@ func sealedAuditFromRequest(
 		requestID = physicalCallID
 	}
 	return &llmmodels.ProviderRequestAudit{
+		PromptStage:           promptStage,
 		RequestID:             requestID,
 		LogicalRequestID:      request.RequestIdentity.LogicalRequestID,
 		PhysicalCallID:        request.RequestIdentity.PhysicalCallID,

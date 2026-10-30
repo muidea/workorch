@@ -1,6 +1,7 @@
 package readmodelprojection
 
 import (
+	"fmt"
 	llmevents "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/events"
 	projectioncontract "github.com/muidea/workorch/internal/pkg/workorchprojectioncontract"
 )
@@ -481,6 +482,8 @@ func isLLMUsageEventRecordForRun(item projectioncontract.EventRecord, runID stri
 // source: llm_usage_ratios.go
 
 func applyLLMUsageSummaryRatios(summary *projectioncontract.LLMUsageSummary) {
+	summary.NativeCache.HitRequestRatio = readModelRatio(summary.NativeCache.HitCalls, summary.NativeCache.MeasuredCalls)
+	summary.NativeCache.CachedInputTokenRatio = readModelRatio(summary.NativeCache.CacheReadTokens, summary.NativeCache.MeasuredInputTokens)
 	summary.CacheReadInputRatio = readModelRatio(summary.CacheReadTokens, summary.InputTokens)
 	summary.CacheableInputRatio = readModelRatio(summary.CacheableInputTokens, summary.InputTokens)
 	summary.NonCacheableInputRatio = readModelRatio(summary.NonCacheableInputTokens, summary.InputTokens)
@@ -501,7 +504,15 @@ func readModelRatio(part, total int) float64 {
 func summarizeLLMUsage(items []projectioncontract.LLMUsageTrace) projectioncontract.LLMUsageSummary {
 	ret := projectioncontract.LLMUsageSummary{Availability: "partial", Scope: "run"}
 	breakdownByKey := map[string]*projectioncontract.LLMUsageProviderModelBreakdown{}
+	seen := map[string]struct{}{}
 	for _, item := range items {
+		if item.PhysicalCallID != "" || item.ID != "" {
+			key := llmUsageTraceMergeKey(item)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+		}
 		addLLMUsageTraceSummary(&ret, breakdownByKey, item)
 	}
 	ret.ProviderModelBreakdown = sortedLLMUsageProviderModelBreakdowns(breakdownByKey)
@@ -512,6 +523,11 @@ func summarizeLLMUsage(items []projectioncontract.LLMUsageTrace) projectioncontr
 // source: llm_usage_trace_merge_key.go
 
 func llmUsageTraceMergeKey(item projectioncontract.LLMUsageTrace) string {
+	if item.PhysicalCallID != "" {
+		// Notification IDs may change on redelivery. A physical invocation is
+		// counted once within its exact Workspace/Run/logical-request scope.
+		return fmt.Sprintf("physical:%q/%q/%q/%q/%t", item.WorkspaceID, item.RunID, item.LogicalRequestID, item.PhysicalCallID, item.ProviderSubmitted)
+	}
 	return firstNonEmptyTimelineString(item.ID, item.StepID+"|"+item.OccurredAt)
 }
 

@@ -23,6 +23,7 @@ type ProviderUsage struct {
 // carry prompt text, snapshot content, credentials, endpoints or owner-private
 // provider payloads.
 type ContextBudget struct {
+	CacheObservation         CacheObservation
 	ProviderID               string
 	ModelID                  string
 	CapabilityRevision       string
@@ -78,7 +79,7 @@ func (v ContextBudget) Empty() bool {
 		v.ContextGateAction == "" && v.ContextGateReason == "" && v.BudgetFailureClass == "" &&
 		len(v.IncludedSections) == 0 && len(v.NormalizedSections) == 0 && len(v.CompressedSections) == 0 &&
 		len(v.OmittedSections) == 0 && len(v.RedactedPaths) == 0 && len(v.ProtectedFields) == 0 &&
-		len(v.IntegrityWarnings) == 0 && len(v.SourceRefs) == 0 && len(v.SectionHashes) == 0
+		len(v.IntegrityWarnings) == 0 && len(v.SourceRefs) == 0 && len(v.SectionHashes) == 0 && v.CacheObservation == (CacheObservation{})
 }
 
 func (v ContextBudget) Payload() workorcheventpayload.Payload {
@@ -108,14 +109,20 @@ func (v ContextBudget) Payload() workorcheventpayload.Payload {
 		workorcheventpayload.StringField("contextGateAction", v.ContextGateAction),
 		workorcheventpayload.StringField("contextGateReason", v.ContextGateReason),
 		workorcheventpayload.StringField("budgetFailureClass", v.BudgetFailureClass),
-		workorcheventpayload.StringArrayField("includedSections", v.IncludedSections),
-		workorcheventpayload.StringArrayField("normalizedSections", v.NormalizedSections),
-		workorcheventpayload.StringArrayField("compressedSections", v.CompressedSections),
-		workorcheventpayload.StringArrayField("omittedSections", v.OmittedSections),
-		workorcheventpayload.StringArrayField("redactedPaths", v.RedactedPaths),
-		workorcheventpayload.StringArrayField("protectedFields", v.ProtectedFields),
-		workorcheventpayload.StringArrayField("integrityWarnings", v.IntegrityWarnings),
-		workorcheventpayload.StringArrayField("sourceRefs", v.SourceRefs),
+		// Versioned grouping keeps all metadata within Eventstream's 32-field
+		// guard. It does not increase that guard or truncate the provider prompt.
+		workorcheventpayload.StringField("schemaVersion", "workorch.context_budget_audit/v2"),
+		workorcheventpayload.ObjectField("processing", workorcheventpayload.New(
+			workorcheventpayload.StringArrayField("includedSections", v.IncludedSections),
+			workorcheventpayload.StringArrayField("normalizedSections", v.NormalizedSections),
+			workorcheventpayload.StringArrayField("compressedSections", v.CompressedSections),
+			workorcheventpayload.StringArrayField("omittedSections", v.OmittedSections),
+			workorcheventpayload.StringArrayField("redactedPaths", v.RedactedPaths),
+			workorcheventpayload.StringArrayField("protectedFields", v.ProtectedFields),
+			workorcheventpayload.StringArrayField("integrityWarnings", v.IntegrityWarnings),
+			workorcheventpayload.StringArrayField("sourceRefs", v.SourceRefs),
+		)),
+		workorcheventpayload.ObjectField("cacheObservation", v.CacheObservation.Payload()),
 	}
 	if len(v.SectionHashes) > 0 {
 		sections := make([]workorcheventpayload.Value, 0, len(v.SectionHashes))
@@ -165,4 +172,40 @@ func (v CacheUsage) Payload() workorcheventpayload.Payload {
 		fields = append(fields, workorcheventpayload.IntField("cacheWriteTokens", int64(v.CacheWriteTokens)))
 	}
 	return workorcheventpayload.New(fields...)
+}
+
+// PromptStage is an immutable observation of the owner-selected prompt purpose.
+// It never selects a Runtime transition or grants execution authority.
+type PromptStage string
+
+// CacheObservation describes the actual owner rendering, never cache support
+// inferred from a model name or endpoint. Empty metadata remains unavailable.
+type CacheObservation struct {
+	RenderContractRef    string
+	Stage                PromptStage
+	Renderer             string
+	MessageLayout        string
+	MetadataState        string
+	SourceSectionCount   int
+	RecordedSectionCount int
+	RequestedHints       string
+}
+
+func (v CacheObservation) Payload() workorcheventpayload.Payload {
+	state := v.MetadataState
+	if state == "" {
+		state = "unavailable"
+	}
+	return workorcheventpayload.New(
+		workorcheventpayload.StringField("schemaVersion", "workorch.cache_observation/v1"),
+		workorcheventpayload.StringField("stage", string(v.Stage)),
+		workorcheventpayload.StringField("renderer", v.Renderer),
+		workorcheventpayload.StringField("renderContractRef", v.RenderContractRef),
+		workorcheventpayload.StringField("messageLayout", v.MessageLayout),
+		workorcheventpayload.StringField("metadataState", state),
+		workorcheventpayload.IntField("sourceSectionCount", int64(v.SourceSectionCount)),
+		workorcheventpayload.IntField("recordedSectionCount", int64(v.RecordedSectionCount)),
+		workorcheventpayload.StringField("requestedHints", v.RequestedHints),
+		workorcheventpayload.StringField("effectiveHints", "unknown"),
+	)
 }

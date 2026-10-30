@@ -297,3 +297,51 @@ func TestSectionMessageWireEnvelopeRespectsConfiguredByteLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactRuntimeCacheScopeConcurrentWorkspaceProfileIsolation(t *testing.T) {
+	makeRequest := func(workspace, profile, schema string) llmmodels.ProviderRequest {
+		r := sectionCacheRequest(workspace, "operations")
+		r.PromptContext.SchemaVersion = "workorch.runtime_candidate_prompt/v2"
+		r.PromptContext.Sections[0].ID = "C0.runtime-candidate-contract"
+		r.PromptContext.Sections[0].Content = runtimeCandidateContractCatalogV2()
+		r.PromptContext.Sections[2].Content = profile
+		r.Schema = schema
+		return r
+	}
+	var wg sync.WaitGroup
+	keys := make(chan string, 12)
+	for w := 0; w < 3; w++ {
+		for p := 0; p < 2; p++ {
+			for _, strict := range []bool{false, true} {
+				wg.Add(1)
+				go func(w, p int, strict bool) {
+					defer wg.Done()
+					r := makeRequest(fmt.Sprintf("ws-%d", w), fmt.Sprintf("profile-%d", p), "manifest-schema-A")
+					r.RawTextOutput = !strict
+					r.Config.Capabilities.JSONSchemaResponse = strict
+					key := responsesPromptCacheKey(r)
+					r.Schema = "manifest-schema-B"
+					r.PromptContext.Sections[3].Content = "different current operation"
+					if responsesPromptCacheKey(r) != key {
+						t.Error("dynamic schema/tail changed exact known runtime family scope")
+					}
+					keys <- key
+				}(w, p, strict)
+			}
+		}
+	}
+	wg.Wait()
+	close(keys)
+	seen := map[string]bool{}
+	for key := range keys {
+		if seen[key] {
+			t.Error("different Workspace/Profile/transport reused cache scope")
+		}
+		seen[key] = true
+	}
+	forged := makeRequest("ws-0", "profile-0", "untrusted")
+	forged.PromptContext.Sections[0].Content += " unrecognized rule"
+	if responsesCacheSchemaScope(forged) != "exact-schema:untrusted" {
+		t.Fatal("claimed prompt version bypassed exact C0 recognition")
+	}
+}

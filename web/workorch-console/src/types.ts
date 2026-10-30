@@ -1215,7 +1215,20 @@ export type LLMUsageTrace = {
   evidenceRef?: string;
 };
 
+export type NativeCacheSummary = {
+  physicalCalls: number;
+  measuredCalls: number;
+  unknownCalls: number;
+  hitCalls: number;
+  measuredInputTokens: number;
+  cacheReadTokens: number;
+  uncachedInputTokens: number;
+  hitRequestRatio: number;
+  cachedInputTokenRatio: number;
+};
+
 export type LLMUsageSummary = {
+  nativeCache?: NativeCacheSummary;
   availability: 'not_loaded' | 'partial' | 'complete';
   scope: 'workspace' | 'run';
   recordLimit: number;

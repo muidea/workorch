@@ -104,6 +104,10 @@ func responsesCacheSchemaScope(request llmmodels.ProviderRequest) string {
 				if first.ID == "C0.runtime-candidate-contract" && first.Content == runtimeCandidateContractCatalog() {
 					return "runtime/operations-schema/v1"
 				}
+			case "workorch.runtime_candidate_prompt/v2":
+				if first.ID == "C0.runtime-candidate-contract" && first.Content == runtimeCandidateContractCatalogV2() {
+					return "runtime/operations-schema/v2"
+				}
 			case "workorch.runtime_semantic_plan_prompt":
 				if first.ID == "C0.runtime-semantic-contract" && first.Content == runtimeSemanticPlanContractCatalog() {
 					return "runtime/semantic-plan-schema/v1"

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1758,6 +1759,64 @@ func TestRuntimeProviderRequestPreservesStablePrefixAndTypedContext(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Run("sealed compact renderer preserves exact dynamic authority", func(t *testing.T) {
+		wire := runtimeCandidateWireForTest(t, manifest)
+		expected := &runtimecontract.RuntimeExpectedDocumentContract{WireContractHash: wire.Hash, OperationsRenderContractRef: runtimecontract.RuntimeOperationsRenderContractV2}
+		input := llmmodels.RuntimeCandidateRequest{DocumentKind: runtimecontract.RuntimeProviderDocumentOperations, Decision: decision, Transaction: decision.AuthorityTransaction(), StablePrefixHash: prefix, CandidateManifest: manifest, DefinitionContext: definition, CandidateContext: candidateContext, ExpectedDocument: expected}
+		compact, err := runtimeProviderRequest(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if compact.Schema != request.Schema {
+			t.Fatal("compact rendering changed acceptance grammar")
+		}
+		var legacy, modern map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(request.PromptContext.Sections[3].Content), &legacy); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(compact.PromptContext.Sections[3].Content), &modern); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"decision", "transaction", "context"} {
+			if !bytes.Equal(legacy[key], modern[key]) {
+				t.Fatalf("compact renderer changed %s", key)
+			}
+		}
+		for _, i := range []int{1, 2, 4, 5} {
+			if compact.PromptContext.Sections[i].Content != request.PromptContext.Sections[i].Content {
+				t.Fatalf("C%d lost original context", i)
+			}
+		}
+		for _, strict := range []bool{false, true} {
+			compact.Config.Capabilities.JSONSchemaResponse = strict
+			compact.RawTextOutput = !strict
+			if scope := responsesCacheSchemaScope(compact); scope != "runtime/operations-schema/v2" {
+				t.Fatalf("v2 exact contract scope = %s", scope)
+			}
+			first := responsesWireInputForRequest(&compact)
+			second := responsesWireInputForRequest(&compact)
+			if !bytes.Equal(first, second) {
+				t.Fatal("identical snapshot rendering drifted")
+			}
+			if compact.ContextBudget.PromptRenderer != "workorch.runtime_candidate_prompt/v2" {
+				t.Fatal("audit lost selected renderer")
+			}
+		}
+		expected.OperationsRenderContractRef = "unknown"
+		if _, err := runtimeProviderRequest(input); err == nil {
+			t.Fatal("unknown renderer accepted")
+		}
+		expected.OperationsRenderContractRef = ""
+		old, err := runtimeProviderRequest(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range old.PromptContext.Sections {
+			if old.PromptContext.Sections[i].Content != request.PromptContext.Sections[i].Content {
+				t.Fatalf("legacy renderer C%d was upgraded", i)
+			}
+		}
+	})
 	assertRuntimeSectionCacheWire(t, request)
 	if request.ContextBudget == nil || request.ContextBudget.CachePlan == nil || request.ContextBudget.CachePlan.StablePrefixHash != prefix ||
 		request.ContextBudget.CachePlan.RenderedStablePrefixHash == "" || len(request.PromptContext.Sections) != 6 {

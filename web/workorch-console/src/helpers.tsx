@@ -1,4 +1,4 @@
-import { llmCacheTokenValue, llmCacheReadRatio } from './llmUsagePresentation';
+import { llmCacheTokenValue, llmCacheReadRatio, nativeCacheSummaryItems } from './llmUsagePresentation';
 import React, { useState } from 'react';
 import { Alert, App as AntApp, Button, Descriptions, Empty, Form, Input, List, Select, Space, Steps, Tabs, Tag, Typography } from 'antd';
 import { CardGrid, ProCard, ProTable } from './components/proCompat';
@@ -1339,6 +1339,7 @@ export function llmUsageCard(summary?: LLMUsageSummary, traces?: LLMUsageTrace[]
           { key: 'cacheable', label: 'Cacheable/Non-cacheable 输入', children: `${numberText(usageSummary.cacheableInputTokens)} / ${numberText(usageSummary.nonCacheableInputTokens)}` },
           { key: 'cacheRatio', label: 'Cacheable/Non-cacheable 比例', children: `${percentText(usageSummary.cacheableInputRatio)} / ${percentText(usageSummary.nonCacheableInputRatio)}` },
           { key: 'cacheEntries', label: 'Cache 口径', children: `${numberText(usageSummary.cacheProviderEntries)} provider / ${numberText(usageSummary.cacheEstimatedEntries)} estimated` },
+          ...nativeCacheSummaryItems(usageSummary.nativeCache),
           { key: 'providerModels', label: 'Provider/Model', children: numberText(usageSummary.providerModelBreakdown?.length ?? 0) }
         ]}
       />

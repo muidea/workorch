@@ -25,6 +25,21 @@ func llmUsageCacheProviderNativeEntry(item projectioncontract.LLMUsageTrace) boo
 // source: llm_usage_trace_summary.go
 
 func addLLMUsageTraceSummary(summary *projectioncontract.LLMUsageSummary, breakdownByKey map[string]*projectioncontract.LLMUsageProviderModelBreakdown, item projectioncontract.LLMUsageTrace) {
+	if item.ProviderSubmitted {
+		summary.NativeCache.PhysicalCalls++
+		read := llmUsagePayloadInt(item.CacheUsage, "cacheReadTokens")
+		if item.Estimated || item.UsageSource != llmcommon.UsageSourceProviderNative || !llmUsageCacheMeasurementKnown(item.CacheUsage, "cacheReadTokens") || read < 0 || read > item.InputTokens {
+			summary.NativeCache.UnknownCalls++
+		} else {
+			summary.NativeCache.MeasuredCalls++
+			summary.NativeCache.MeasuredInputTokens += item.InputTokens
+			summary.NativeCache.CacheReadTokens += read
+			summary.NativeCache.UncachedInputTokens += item.InputTokens - read
+			if read > 0 {
+				summary.NativeCache.HitCalls++
+			}
+		}
+	}
 	summary.EntryTotal++
 	summary.InputTokens += item.InputTokens
 	summary.OutputTokens += item.OutputTokens

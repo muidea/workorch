@@ -96,6 +96,9 @@ type NormalizationManifest struct {
 }
 
 type ProviderContextBudget struct {
+	RenderContractRef string `json:"renderContractRef,omitempty"`
+	PromptRenderer    string `json:"promptRenderer,omitempty"`
+	MessageLayout     string `json:"messageLayout,omitempty"`
 	// Sealed provider/model identity and revisions for request audit.
 	ProviderID               string `json:"providerId,omitempty"`
 	ModelID                  string `json:"modelId,omitempty"`

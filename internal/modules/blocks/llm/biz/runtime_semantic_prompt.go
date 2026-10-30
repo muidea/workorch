@@ -94,6 +94,10 @@ func runtimeSemanticVisibleCoverageIDs(context runtimecontract.RuntimeSemanticPl
 func newRuntimeSemanticProviderRequest(request llmmodels.RuntimeCandidateRequest, prepared runtimeSemanticPreparedRequest, prompt runtimeSemanticPrompt) llmmodels.ProviderRequest {
 	context := prepared.context
 	ceiling := prepared.ceiling
+	renderContractRef := ""
+	if request.ExpectedDocument != nil {
+		renderContractRef = request.ExpectedDocument.SemanticRenderContractRef
+	}
 	return llmmodels.ProviderRequest{
 		WorkspaceID:     string(context.WorkspaceID),
 		RunID:           string(context.RunID),
@@ -113,6 +117,7 @@ func newRuntimeSemanticProviderRequest(request llmmodels.RuntimeCandidateRequest
 			},
 		},
 		ContextBudget: &llmmodels.ProviderContextBudget{
+			RenderContractRef:        renderContractRef,
 			ProviderID:               ceiling.Selection.Target.ProviderID,
 			ModelID:                  ceiling.Selection.Target.ModelID,
 			CapabilityRevision:       ceiling.CapabilityRevision,

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -669,7 +670,7 @@ func (m *Biz) publishLLMUsageRecorded(ctx context.Context, audit *llmmodels.Prov
 		DurationMs:            audit.DurationMs,
 		RequestBytes:          audit.RequestBytes,
 		ResponseBytes:         audit.ResponseBytes,
-		ContextBudget:         providerContextBudgetAudit(audit.ContextBudget),
+		ContextBudget:         providerRequestContextBudgetAudit(audit),
 		OccurredAt:            occurredAt,
 	}
 	if usage != nil {
@@ -730,7 +731,7 @@ func providerRequestAuditView(audit *llmmodels.ProviderRequestAudit) *runtimecon
 		APISurface:            audit.APISurface,
 		Provider:              audit.Provider,
 		PhysicalResponseMode:  audit.PhysicalResponseMode,
-		ContextBudget:         providerContextBudgetAudit(audit.ContextBudget),
+		ContextBudget:         providerRequestContextBudgetAudit(audit),
 		ProviderSubmitted:     audit.ProviderSubmitted,
 		Status:                audit.Status,
 		FailureClass:          audit.FailureClass,
@@ -742,12 +743,21 @@ func providerRequestAuditView(audit *llmmodels.ProviderRequestAudit) *runtimecon
 	}
 }
 
+// Stage is observed from the sealed Runtime request by this owner, never
+// accepted as a target-state parameter on generic completion commands.
+func providerRequestContextBudgetAudit(audit *llmmodels.ProviderRequestAudit) llmaudit.ContextBudget {
+	ret := providerContextBudgetAudit(audit.ContextBudget)
+	ret.CacheObservation.Stage = audit.PromptStage
+	return ret
+}
+
 func providerContextBudgetAudit(budget *llmmodels.ProviderContextBudget) llmaudit.ContextBudget {
 	if budget == nil {
 		return llmaudit.ContextBudget{}
 	}
 	ret := llmaudit.ContextBudget{
-		ProviderID: budget.ProviderID, ModelID: budget.ModelID,
+		CacheObservation: llmaudit.CacheObservation{RenderContractRef: budget.RenderContractRef, Renderer: budget.PromptRenderer, MessageLayout: budget.MessageLayout, MetadataState: "unavailable"},
+		ProviderID:       budget.ProviderID, ModelID: budget.ModelID,
 		CapabilityRevision: budget.CapabilityRevision, ConfigurationRevision: budget.ConfigurationRevision,
 		ContextWindowTokens: budget.ContextWindowTokens, ProviderMaxOutputTokens: budget.ProviderMaxOutputTokens,
 		EffectiveMaxOutputTokens: budget.EffectiveMaxOutputTokens, MaxBytes: budget.MaxBytes,
@@ -771,6 +781,27 @@ func providerContextBudgetAudit(budget *llmmodels.ProviderContextBudget) llmaudi
 		ret.RenderedStablePrefixHash = budget.CachePlan.RenderedStablePrefixHash
 		ret.CacheStrategy = budget.CachePlan.Strategy
 		ret.SectionHashes = boundedLLMAuditSections(budget.CachePlan.SectionHashes)
+		ret.CacheObservation.SourceSectionCount = len(budget.CachePlan.SectionHashes)
+		ret.CacheObservation.RecordedSectionCount = len(ret.SectionHashes)
+		if len(ret.SectionHashes) > 0 {
+			ret.CacheObservation.MetadataState = "complete"
+			if len(ret.SectionHashes) != len(budget.CachePlan.SectionHashes) {
+				ret.CacheObservation.MetadataState = "bounded"
+			}
+			for i, section := range ret.SectionHashes {
+				raw := budget.CachePlan.SectionHashes[i]
+				if section.Hash == "" && ret.CacheObservation.MetadataState == "complete" {
+					ret.CacheObservation.MetadataState = "incomplete"
+				}
+				if section.ID != raw.SectionID || section.Hash != raw.Hash || len(section.ID) > llmAuditStringByteLimit || len(section.Hash) > llmAuditStringByteLimit || !slices.Equal(section.SourceRefs, raw.SourceRefs) {
+					ret.CacheObservation.MetadataState = "bounded"
+				}
+			}
+		}
+		if budget.MessageLayout == llmmodels.PromptMessageLayoutSectionsV1 {
+			ret.CacheObservation.RequestedHints = "explicit_prefix_breakpoint"
+		}
+
 	}
 	return ret
 }

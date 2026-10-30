@@ -138,7 +138,23 @@ type LLMUsageTrace struct {
 	EvidenceRef          string                        `json:"evidenceRef,omitempty"`
 }
 
+// NativeCacheSummary counts physical submissions in the same bounded read
+// window. Unknown usage is excluded from both measured denominators. A known
+// zero is a measured miss, not an unknown. Preflights are never submissions.
+type NativeCacheSummary struct {
+	PhysicalCalls         int     `json:"physicalCalls"`
+	MeasuredCalls         int     `json:"measuredCalls"`
+	UnknownCalls          int     `json:"unknownCalls"`
+	HitCalls              int     `json:"hitCalls"`
+	MeasuredInputTokens   int     `json:"measuredInputTokens"`
+	CacheReadTokens       int     `json:"cacheReadTokens"`
+	UncachedInputTokens   int     `json:"uncachedInputTokens"`
+	HitRequestRatio       float64 `json:"hitRequestRatio"`
+	CachedInputTokenRatio float64 `json:"cachedInputTokenRatio"`
+}
+
 type LLMUsageSummary struct {
+	NativeCache NativeCacheSummary `json:"nativeCache"`
 	// Availability 仅描述当前有界查询窗口，不表示完整历史或真实调用总数。
 	Availability            string                           `json:"availability"`
 	Scope                   string                           `json:"scope"`

@@ -253,6 +253,25 @@ func sanitizeLLMContextBudgetAudit(input workorcheventpayload.Payload) workorche
 			fields = append(fields, workorcheventpayload.Field{Name: name, Value: value})
 		}
 	}
+	// Keep versioned groups closed as well: nested arbitrary payloads must
+	// never become a prompt-content transport through the read model.
+	for _, group := range []struct {
+		name   string
+		fields []string
+	}{
+		{"processing", []string{"includedSections", "normalizedSections", "compressedSections", "omittedSections", "redactedPaths", "protectedFields", "integrityWarnings", "sourceRefs"}},
+		{"cacheObservation", []string{"schemaVersion", "renderer", "renderContractRef", "messageLayout", "stage", "metadataState", "sourceSectionCount", "recordedSectionCount", "requestedHints", "effectiveHints"}},
+	} {
+		if object, ok := input.Object(group.name); ok {
+			var safe []workorcheventpayload.Field
+			for _, name := range group.fields {
+				if value, ok := object.Field(name); ok {
+					safe = append(safe, workorcheventpayload.Field{Name: name, Value: value})
+				}
+			}
+			fields = append(fields, workorcheventpayload.ObjectField(group.name, workorcheventpayload.New(safe...)))
+		}
+	}
 	if value, ok := input.Field("sectionHashes"); ok && value.Kind == workorcheventpayload.ValueArray {
 		sections := make([]workorcheventpayload.Value, 0, len(value.Array))
 		for _, item := range value.Array {
@@ -284,6 +303,7 @@ func sanitizeLLMContextBudgetAudit(input workorcheventpayload.Payload) workorche
 }
 
 var llmContextBudgetAuditFieldNames = []string{
+	"schemaVersion",
 	"providerId", "modelId", "capabilityRevision", "configurationRevision",
 	"contextWindowTokens", "providerMaxOutputTokens", "effectiveMaxOutputTokens",
 	"maxBytes", "actualBytes", "maxTokens", "estimatedInputTokens",

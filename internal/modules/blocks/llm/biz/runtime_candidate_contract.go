@@ -11,6 +11,7 @@ import (
 )
 
 type runtimeCandidateOutputContractProjection struct {
+	RequiredOperationSequence   []runtimeCandidateRequiredOperationProjection `json:"requiredOperationSequence,omitempty"`
 	State                       runtimecontract.ConvergenceState              `json:"state"`
 	EffectPolicy                runtimeCandidateEffectPolicyProjection        `json:"effectPolicy"`
 	ManifestHash                string                                        `json:"manifestHash,omitempty"`
@@ -23,6 +24,14 @@ type runtimeCandidateOutputContractProjection struct {
 	WireRules                   []runtimeCandidateWireRuleProjection          `json:"wireRules,omitempty"`
 	ForbiddenTopLevelFields     []string                                      `json:"forbiddenTopLevelFields"`
 	OperationContracts          []runtimeCandidateOperationContractProjection `json:"operationContracts,omitempty"`
+}
+
+type runtimeCandidateRequiredOperationProjection struct {
+	RequiredOperationRef    string   `json:"requiredOperationRef"`
+	CompiledKind            string   `json:"compiledKind"`
+	CompiledVariantID       string   `json:"compiledVariantId"`
+	TargetRef               string   `json:"targetRef,omitempty"`
+	DependsOnRequirementIDs []string `json:"dependsOnRequirementIds,omitempty"`
 }
 
 type runtimeCandidateOperationSetPolicyProjection struct {
@@ -826,4 +835,38 @@ func runtimeCandidateFailureIsOperationShapeReplay(code string) bool {
 	default:
 		return false
 	}
+}
+
+// V2 removes only the redundant per-manifest prose. Schema, wire rules,
+// operation constraints and canonical examples remain exact C3 values for
+// raw-text as well as structured-output transports. Legacy rendering is kept
+// byte-for-byte for sealed sessions without a render contract reference.
+const runtimeCandidateCompactOutputInstruction = "Apply operations-render/compact-contract/v2 in C0 to this exact outputContract; all request-specific values below remain mandatory."
+
+func runtimeCandidateContractCatalogV2() string {
+	var effects []string
+	for _, state := range []runtimecontract.ConvergenceState{runtimecontract.ConvergenceStateNeedStateChange, runtimecontract.ConvergenceStateNeedValidation, runtimecontract.ConvergenceStateNeedAssessment, runtimecontract.ConvergenceStateNeedGovernance} {
+		effects = append(effects, "When state="+string(state)+": "+runtimecontract.RuntimeConvergenceEffectInstruction(state))
+	}
+	return runtimeCandidateContractCatalog() + "\n" + strings.Join([]string{
+		"operations-render/compact-contract/v2: schema is the complete JSON grammar even when the transport does not enforce JSON Schema. Its required, type, enum, const, oneOf/anyOf, cardinality and additionalProperties constraints all apply. canonicalWireLayout illustrates encoding only; never copy placeholders as values or treat auxiliary examples as mandatory operations.",
+		"Match each operation to its wireRule by requiredOperationRef for required slots, or compiledKind for auxiliary operations. Emit each required slot exactly once; auxiliary kinds are optional. A required slot compiles its kind and variant locally. Emit only providerFields, satisfy requiredProviderFields, requiredProviderParameterNames and requiredNonEmptyParameterNames. Never emit locallyDerivedFields (including parameters[name=...] paths). The schema and operationContracts also close the allowed parameter names, typed values and requireOneOfParameters. Dynamic parameters require explicit allowsDynamicParameters and dynamicParameterPrefixes authorization.",
+		"operationContracts are keyed by kind; their bindingAuthorizations select the exact requiredOperationRef/variant. bindingRefs, only when a provider field, selects exactly one allowed value. targetRefs, only when a provider field, must satisfy targetCardinality, target policy and the exact/owner-scope allow lists; excludedTargetRefs are forbidden. Use only an allowed variant, and apply its constraints together with operation-level valueRules, candidateConstraints, rules and forbiddenParameters. A singleton binding, target or variant in locallyDerivedFields is not a provider choice.",
+		"state and effectPolicy are mandatory. maxOperationCount and operationSetPolicy bound the complete document: consolidate edits to the same owner target; overlap is allowed only for distinct required sequence slots when explicitly permitted. requiredOperationSequence binds each required slot to its exact target, kind, variant, order and dependencies through Runtime compilation; do not invent operation id, dependsOn or coverageWorkItemIds.",
+		"When validationRecipeIds is present, recipeId selects exactly one listed recipe; never propose command, args, timeoutMillis or a test-name filter. All inputRevision, inputRepair, source, target, preimage and evidence constraints remain exact; an admissible candidate is not execution or acceptance credit.",
+	}, "\n") + "\n" + strings.Join(effects, "\n")
+}
+
+func runtimeCandidateCompactOutputContract(manifest runtimecontract.RuntimeCandidateContractManifest, wire runtimecontract.RuntimeCandidateWireContract) runtimeCandidateOutputContractProjection {
+	output := runtimeCandidateOutputContractForManifest(manifest, wire)
+	output.StructuredOutputInstruction = runtimeCandidateCompactOutputInstruction
+	// Slot-to-target and dependency correspondence was previously expressed
+	// only in prose. Retain those exact values as a single typed sequence.
+	for _, requirement := range manifest.Normalized().RequiredOperationSequence {
+		output.RequiredOperationSequence = append(output.RequiredOperationSequence, runtimeCandidateRequiredOperationProjection{
+			RequiredOperationRef: requirement.RequirementID, CompiledKind: requirement.Kind, CompiledVariantID: requirement.VariantID, TargetRef: requirement.TargetRef,
+			DependsOnRequirementIDs: append([]string(nil), requirement.DependsOnRequirementIDs...),
+		})
+	}
+	return output
 }

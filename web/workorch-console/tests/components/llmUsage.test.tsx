@@ -49,4 +49,18 @@ describe('LLMUsageCard 查询范围', () => {
     expect(screen.getAllByText('未知').length).toBeGreaterThanOrEqual(2);
   });
 
+  for (const surface of ['card', 'detail'] as const) {
+    it(`${surface} 分开展示已测调用命中率、token 比例及未知调用`, () => {
+      const summary = { ...zero, entryTotal: 5, availability: 'partial' as const, scope: 'run' as const, recordLimit: 200, observedRecords: 5, nativeCache: {
+        physicalCalls: 4, measuredCalls: 2, unknownCalls: 2, hitCalls: 1, measuredInputTokens: 300, cacheReadTokens: 80, uncachedInputTokens: 220, hitRequestRatio: 0.5, cachedInputTokenRatio: 80 / 300
+      } };
+      const view = render(surface === 'card' ? <LLMUsageCard summary={summary} /> : llmUsageCard(summary));
+      expect(screen.getByText('4 次提交 / 2 次已测 / 2 次未知')).toBeTruthy();
+      expect(screen.getByText('50.0% / 26.7%')).toBeTruthy();
+      expect(screen.getByText('220')).toBeTruthy();
+      view.rerender(surface === 'card' ? <LLMUsageCard summary={{ ...summary, nativeCache: { ...summary.nativeCache, measuredCalls: 0 } }} /> : llmUsageCard({ ...summary, nativeCache: { ...summary.nativeCache, measuredCalls: 0 } }));
+      expect(screen.getByText('未取得')).toBeTruthy();
+    });
+  }
+
 });

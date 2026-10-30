@@ -55,6 +55,20 @@ func (c *planningTransactionComponent) ensureCandidateRequestSessionWithExpected
 		value.StablePrefixHash = session.StablePrefixHash
 		value.Hash = runtimecontract.StableRuntimeExpectedDocumentHash(value)
 	}
+	if documentKind == runtimecontract.RuntimeProviderDocumentOperations {
+		for _, previous := range aggregate.CandidateRequestSessions {
+			if previous.DocumentKind != documentKind || previous.Transaction != transaction || previous.ManifestHash != session.ManifestHash {
+				continue
+			}
+			previousRenderer := ""
+			if previous.ExpectedDocument != nil {
+				previousRenderer = previous.ExpectedDocument.OperationsRenderContractRef
+			}
+			if previousRenderer != value.OperationsRenderContractRef {
+				return candidateRequestSessionEnsureResult{}, fmt.Errorf("%w: operations correction changed sealed renderer", common.ErrConflict)
+			}
+		}
+	}
 	if err := value.Validate(); err != nil {
 		return candidateRequestSessionEnsureResult{}, fmt.Errorf("%w: invalid expected document contract", common.ErrInvalidArgument)
 	}

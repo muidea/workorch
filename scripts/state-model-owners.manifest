@@ -17,6 +17,7 @@ internal/modules/blocks/decision/pkg/models/runtime_governance_proposal.go|Runti
 internal/modules/blocks/llm/pkg/models/provider_model_catalog.go|ProviderCatalogState|derived_projection|internal/modules/blocks/llm|-
 internal/modules/blocks/llm/pkg/models/decision.go|ProviderAdapterCacheHint.Mode|derived_projection|internal/modules/blocks/llm|-
 internal/modules/blocks/llm/pkg/models/decision.go|ProviderContextBudget.ProfileMode|derived_projection|internal/modules/blocks/llm|-
+internal/pkg/llmaudit/audit.go|PromptStage|immutable_trace|internal/modules/blocks/llm|-
 internal/modules/blocks/llm/pkg/models/decision.go|ProviderContextProfile.ProfileMode|derived_projection|internal/modules/blocks/llm|-
 internal/modules/blocks/llm/pkg/models/decision.go|ProviderObservedRequestShape.ProviderFacingMode|derived_projection|internal/modules/blocks/llm|-
 internal/modules/blocks/llm/pkg/models/runtime_candidate.go|ProviderRequestAudit.Status|immutable_trace|internal/modules/blocks/llm|-

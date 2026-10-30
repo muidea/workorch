@@ -17,6 +17,8 @@ func attachProviderCachePlan(request *llmmodels.ProviderRequest) {
 	if request.ContextBudget == nil {
 		request.ContextBudget = &llmmodels.ProviderContextBudget{}
 	}
+	request.ContextBudget.PromptRenderer = request.PromptContext.SchemaVersion
+	request.ContextBudget.MessageLayout = request.PromptContext.MessageLayout
 	plan := buildProviderCachePlan(*request)
 	request.ContextBudget.CachePlan = &plan
 }

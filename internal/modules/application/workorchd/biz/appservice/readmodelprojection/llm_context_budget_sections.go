@@ -6,7 +6,12 @@ import (
 )
 
 func llmContextBudgetStrings(budget workorcheventpayload.Payload, key string) []string {
-	value, _ := budget.StringSlice(key)
+	value, ok := budget.StringSlice(key)
+	if !ok {
+		if processing, exists := budget.Object("processing"); exists {
+			value, _ = processing.StringSlice(key)
+		}
+	}
 	return value
 }
 

@@ -94,7 +94,11 @@ func llmUsageTraceProviderSubmitted(payload workorcheventpayload.Payload) (bool,
 
 func llmUsageTraceContextBudget(payload workorcheventpayload.Payload) workorcheventpayload.Payload {
 	value, _ := payload.Object(recordpayload.PayloadKeyContextBudget)
-	return sanitizeLLMContextBudgetAudit(value)
+	ret := sanitizeLLMContextBudgetAudit(value)
+	if truncated, _ := payload.Bool("auditPayloadTruncated"); truncated {
+		ret = ret.Merge(workorcheventpayload.New(workorcheventpayload.BoolField("auditPayloadTruncated", true)))
+	}
+	return ret
 }
 
 func llmUsageTraceCacheUsage(payload workorcheventpayload.Payload) workorcheventpayload.Payload {

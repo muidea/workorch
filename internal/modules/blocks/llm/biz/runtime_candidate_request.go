@@ -46,6 +46,21 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	if request.ExpectedDocument != nil && request.ExpectedDocument.Normalized().WireContractHash != wire.Hash {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate expected document wire contract mismatch")
 	}
+	renderer := ""
+	if request.ExpectedDocument != nil {
+		renderer = request.ExpectedDocument.Normalized().OperationsRenderContractRef
+	}
+	if renderer != "" && renderer != runtimecontract.RuntimeOperationsRenderContractV2 {
+		return llmmodels.ProviderRequest{}, fmt.Errorf("unsupported runtime operations renderer")
+	}
+	catalog := runtimeCandidateContractCatalog()
+	promptVersion := "workorch.runtime_candidate_prompt"
+	outputContract := runtimeCandidateOutputContractForManifest(manifest, wire)
+	if renderer == runtimecontract.RuntimeOperationsRenderContractV2 {
+		catalog = runtimeCandidateContractCatalogV2()
+		promptVersion = "workorch.runtime_candidate_prompt/v2"
+		outputContract = runtimeCandidateCompactOutputContract(manifest, wire)
+	}
 	if err := validateRuntimeCandidateManifestSupportingFacts(manifest, candidateContext.Resources); err != nil {
 		return llmmodels.ProviderRequest{}, fmt.Errorf("runtime candidate manifest supporting facts: %w", err)
 	}
@@ -99,7 +114,7 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 	}{
 		request.Decision,
 		request.Transaction,
-		runtimeCandidateOutputContractForManifest(manifest, wire),
+		outputContract,
 		runtimeCandidateAuthorityContextProjection(candidateContext, manifest),
 	})
 	if err != nil {
@@ -118,8 +133,8 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 		StepID: request.Transaction.AuthoritySnapshotID, Kind: "runtime_candidate",
 		ReasoningEffort: ceiling.Selection.ReasoningEffort,
 		Schema:          runtimeCandidateSchemaForManifest(manifest),
-		PromptContext: &llmmodels.PromptContext{SchemaVersion: "workorch.runtime_candidate_prompt", MessageLayout: llmmodels.PromptMessageLayoutSectionsV1, Sections: []llmmodels.PromptSection{
-			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, SourceRefs: []string{"runtime://candidate-contract"}, Content: runtimeCandidateContractCatalog()},
+		PromptContext: &llmmodels.PromptContext{SchemaVersion: promptVersion, MessageLayout: llmmodels.PromptMessageLayoutSectionsV1, Sections: []llmmodels.PromptSection{
+			{ID: "C0.runtime-candidate-contract", Name: "Runtime candidate contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 0, SourceRefs: []string{"runtime://candidate-contract"}, Content: catalog},
 			{ID: "C1.goal-dod", Name: "Goal and DoD", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 1, DefinitionRevision: definitionContext.Revision, SourceRefs: []string{"runtime://definition/" + definitionContext.Revision}, Content: string(definitionJSON)},
 			{ID: "C2.capability-contract", Name: "Capability contract", Role: "system", Cacheability: "stable", Protected: true, DisplayOrder: 2, SourceRefs: []string{"runtime://execution-contract/" + definitionContext.Revision}, Content: string(capabilityJSON)},
 			{ID: "C3.runtime-authority", Name: "Current runtime authority", Role: "user", Cacheability: "volatile", Protected: true, DisplayOrder: 3, SourceRefs: []string{"runtime://authority/" + request.Transaction.AuthoritySnapshotID}, Content: string(authorityJSON)},
@@ -127,7 +142,8 @@ func runtimeOperationsProviderRequest(request llmmodels.RuntimeCandidateRequest)
 			{ID: "C5.large-refs", Name: "Large and historical references", Role: "user", Cacheability: "volatile", DisplayOrder: 5, SourceRefs: []string{"runtime://remaining-focuses"}, Content: string(largeRefsJSON)},
 		}},
 		ContextBudget: &llmmodels.ProviderContextBudget{
-			ProviderID: ceiling.Selection.Target.ProviderID, ModelID: ceiling.Selection.Target.ModelID,
+			RenderContractRef: renderer,
+			ProviderID:        ceiling.Selection.Target.ProviderID, ModelID: ceiling.Selection.Target.ModelID,
 			CapabilityRevision: ceiling.CapabilityRevision, ConfigurationRevision: ceiling.ConfigurationRevision,
 			ContextWindowTokens: ceiling.ContextWindowTokens, ProviderMaxOutputTokens: ceiling.ProviderMaxOutputTokens,
 			EffectiveMaxOutputTokens: ceiling.EffectiveMaxOutputTokens,

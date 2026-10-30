@@ -290,3 +290,18 @@ CWI, requirement, semantic check and native check. There is no Go/Shell instruct
 unavailable/over-capacity status, and only for current scope. Original source-check criterion/declaration accompanies
 the native mapping when declared. Both request integrity gates reject loss or modification of protected observations.
 Source observations never authorize writing another target, skipping review or claiming acceptance.
+
+### Runtime 请求渲染与缓存观测
+
+- operations 新请求使用 `operations-render/compact-contract/v2`，由 Orchestrator 在 SM-3 ExpectedDocument 中封存。
+  空引用保留旧渲染；transport recovery、进程重载及同合同 correction 继承原引用。LLM 不自行升级，未知引用拒绝。
+- v2 的 C0 是通用结构说明和原 effect 指引；C3 保留完整原 schema、wireRules、operationContracts、例子以及精确
+  requiredOperationSequence 对应关系，只去除这些值的重复长篇说明。raw-text 与 strict-output 适用同一合同和本地 decoder。
+  C1/C2 与 C4/C5 不变；缓存 scope 只认可 owner 的精确 C0/version，继续隔离 Workspace、Profile 内容及模型/transport。
+- `workorch.context_budget_audit/v2` 将处理来源列表放入 `processing`，保留平铺的 measurements 与 sectionHashes，
+  在 Eventstream 原 32 字段/深度/字节限制内传递六分区身份。`cacheObservation` v1 记录实际 renderer/layout/stage、
+  元数据 complete/bounded/incomplete/unavailable 和数量；Eventstream 的 `auditPayloadTruncated` 在只读用量投影中保留。
+  requestedHints 只说明客户端请求，effectiveHints 无网关证明时始终 unknown。哈希不替代原输入或成为执行权威。
+- 只读 nativeCache 汇总按 Workspace/Run/logical/physical 身份去重，排除 preflight；已知零为 measured miss，
+  缺失、估算或不合法原生 cache usage 为 unknown。调用命中比例和 token 加权比例均只用已测分母，并保留未知计数。
+  当前查询窗口不代表全部历史；旧记录原文不回填。字节减少、缓存命中均不授予运行或验收 credit。

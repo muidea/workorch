@@ -9,6 +9,8 @@ import (
 	"github.com/muidea/workorch/internal/pkg/common"
 )
 
+const RuntimeOperationsRenderContractV2 = "operations-render/compact-contract/v2"
+
 const RuntimeSemanticRenderContractV2 = "semantic-render/owner-work-vocabulary/v2"
 
 const RuntimeExpectedDocumentSchemaCurrent = "workorch.runtime_expected_document"
@@ -30,16 +32,18 @@ type RuntimeExpectedDocumentContract struct {
 	// Empty denotes the legacy renderer; a legacy work proof requires exact owner
 	// retirement before resubmission. Other semantic request kinds keep their renderer.
 	SemanticRenderContractRef string `json:",omitempty"`
-	DefinitionSeedHash        string
-	LogicalRequestID          string
-	CorrectionAttempt         int
-	StablePrefixHash          string
-	BatchID                   string
-	BatchSequence             int
-	BatchCoverageWorkItemIDs  []common.CoverageWorkItemID
-	CoverageOrderHash         string
-	MaxOutputTokens           int
-	MaxRecoveryAttempts       int
+	// Empty preserves the original operations rendering, including recovery.
+	OperationsRenderContractRef string `json:",omitempty"`
+	DefinitionSeedHash          string
+	LogicalRequestID            string
+	CorrectionAttempt           int
+	StablePrefixHash            string
+	BatchID                     string
+	BatchSequence               int
+	BatchCoverageWorkItemIDs    []common.CoverageWorkItemID
+	CoverageOrderHash           string
+	MaxOutputTokens             int
+	MaxRecoveryAttempts         int
 }
 
 func (c RuntimeExpectedDocumentContract) Normalized() RuntimeExpectedDocumentContract {
@@ -50,6 +54,7 @@ func (c RuntimeExpectedDocumentContract) Normalized() RuntimeExpectedDocumentCon
 	c.ManifestHash = strings.TrimSpace(c.ManifestHash)
 	c.WireContractHash = strings.TrimSpace(c.WireContractHash)
 	c.SemanticRenderContractRef = strings.TrimSpace(c.SemanticRenderContractRef)
+	c.OperationsRenderContractRef = strings.TrimSpace(c.OperationsRenderContractRef)
 	c.DefinitionSeedHash = strings.TrimSpace(c.DefinitionSeedHash)
 	c.LogicalRequestID = strings.TrimSpace(c.LogicalRequestID)
 	c.StablePrefixHash = strings.TrimSpace(c.StablePrefixHash)
@@ -79,11 +84,11 @@ func (c RuntimeExpectedDocumentContract) Validate() error {
 	}
 	switch c.DocumentKind {
 	case RuntimeProviderDocumentOperations:
-		if c.SemanticRenderContractRef != "" || c.WireContractHash == "" || c.PlanStep != "" || c.DefinitionSeedHash != "" || c.BatchID != "" || c.BatchSequence != 0 || len(c.BatchCoverageWorkItemIDs) != 0 || c.CoverageOrderHash != "" {
+		if (c.OperationsRenderContractRef != "" && c.OperationsRenderContractRef != RuntimeOperationsRenderContractV2) || c.SemanticRenderContractRef != "" || c.WireContractHash == "" || c.PlanStep != "" || c.DefinitionSeedHash != "" || c.BatchID != "" || c.BatchSequence != 0 || len(c.BatchCoverageWorkItemIDs) != 0 || c.CoverageOrderHash != "" {
 			return common.ErrInvalidArgument
 		}
 	case RuntimeProviderDocumentSemanticPlan:
-		if (c.SemanticRenderContractRef != "" && c.SemanticRenderContractRef != RuntimeSemanticRenderContractV2) || c.WireContractHash != "" || c.DefinitionSeedHash == "" {
+		if c.OperationsRenderContractRef != "" || (c.SemanticRenderContractRef != "" && c.SemanticRenderContractRef != RuntimeSemanticRenderContractV2) || c.WireContractHash != "" || c.DefinitionSeedHash == "" {
 			return common.ErrInvalidArgument
 		}
 		switch c.PlanStep {
@@ -136,6 +141,9 @@ func StableRuntimeExpectedDocumentHash(contract RuntimeExpectedDocumentContract)
 	writeHashString(h, fmt.Sprintf("%d", contract.MaxRecoveryAttempts))
 	if contract.SemanticRenderContractRef != "" {
 		writeHashString(h, contract.SemanticRenderContractRef)
+	}
+	if contract.OperationsRenderContractRef != "" {
+		writeHashString(h, contract.OperationsRenderContractRef)
 	}
 	return "runtime-expected-document-" + hex.EncodeToString(h.Sum(nil))[:20]
 }

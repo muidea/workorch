@@ -23,10 +23,11 @@ func TestContextBudgetPayloadCarriesBoundedSectionIntegrityMetadata(t *testing.T
 	if submitted, ok := payload.Bool("providerSubmitted"); !ok || submitted {
 		t.Fatalf("providerSubmitted = %v, %v", submitted, ok)
 	}
-	if values, ok := payload.StringSlice("protectedFields"); !ok || len(values) != 2 || values[1] != "P4.targetSnapshots" {
+	processing, _ := payload.Object("processing")
+	if values, ok := processing.StringSlice("protectedFields"); !ok || len(values) != 2 || values[1] != "P4.targetSnapshots" {
 		t.Fatalf("protectedFields = %v, %v", values, ok)
 	}
-	if values, ok := payload.StringSlice("sourceRefs"); !ok || len(values) != 2 || values[0] != "runtime://definition/rev-1" {
+	if values, ok := processing.StringSlice("sourceRefs"); !ok || len(values) != 2 || values[0] != "runtime://definition/rev-1" {
 		t.Fatalf("sourceRefs = %v, %v", values, ok)
 	}
 	for _, forbidden := range []string{"prompt", "snapshotContent", "credential", "endpoint"} {

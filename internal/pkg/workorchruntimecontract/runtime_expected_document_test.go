@@ -1,6 +1,8 @@
 package workorchruntimecontract
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -122,5 +124,46 @@ func TestRuntimeProviderDocumentFramingIsOwnerNeutral(t *testing.T) {
 		if err := outcome.Validate(); err == nil {
 			t.Fatalf("invalid framing was accepted: %+v", outcome)
 		}
+	}
+}
+
+func TestExpectedOperationsRendererIsSealedAndLegacySerializationUnchanged(t *testing.T) {
+	legacy := RuntimeExpectedDocumentContract{SchemaVersion: RuntimeExpectedDocumentSchemaCurrent, DocumentKind: RuntimeProviderDocumentOperations, ManifestHash: "manifest", WireContractHash: "wire", LogicalRequestID: "logical", StablePrefixHash: "prefix", MaxOutputTokens: 4096, MaxRecoveryAttempts: 2}
+	legacy.Hash = StableRuntimeExpectedDocumentHash(legacy)
+	raw, _ := json.Marshal(legacy)
+	if strings.Contains(string(raw), "OperationsRenderContractRef") {
+		t.Fatal("legacy bytes gained an empty renderer field")
+	}
+	modern := legacy.Clone()
+	modern.OperationsRenderContractRef = RuntimeOperationsRenderContractV2
+	if err := modern.Validate(); err == nil {
+		t.Fatal("renderer changed without resealing identity")
+	}
+	modern.Hash = StableRuntimeExpectedDocumentHash(modern)
+	if err := modern.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	var reloaded RuntimeExpectedDocumentContract
+	raw, _ = json.Marshal(modern)
+	if err := json.Unmarshal(raw, &reloaded); err != nil {
+		t.Fatal(err)
+	}
+	if err := reloaded.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.OperationsRenderContractRef != RuntimeOperationsRenderContractV2 || reloaded.Hash == legacy.Hash {
+		t.Fatal("restart lost renderer identity")
+	}
+	unknown := modern
+	unknown.OperationsRenderContractRef = "operations-render/unknown"
+	unknown.Hash = StableRuntimeExpectedDocumentHash(unknown)
+	if err := unknown.Validate(); err == nil {
+		t.Fatal("unknown renderer accepted")
+	}
+	semantic := modern
+	semantic.DocumentKind = RuntimeProviderDocumentSemanticPlan
+	semantic.Hash = StableRuntimeExpectedDocumentHash(semantic)
+	if err := semantic.Validate(); err == nil {
+		t.Fatal("operations renderer accepted on semantic request")
 	}
 }
