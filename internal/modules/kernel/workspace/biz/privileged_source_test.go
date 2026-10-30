@@ -100,7 +100,7 @@ func TestWorkspaceTemplateDefaultsIngressAcceptsOnlySystemOwner(t *testing.T) {
 	if result.Error() != nil {
 		t.Fatalf("system defaults error = %v", result.Error())
 	}
-	items, err := templates.List(ctx)
+	items, err := owner.currentWorkspaceTemplates(ctx)
 	if err != nil || len(items) == 0 {
 		t.Fatalf("system defaults templates len=%d err=%v", len(items), err)
 	}

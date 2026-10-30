@@ -253,9 +253,22 @@ func TestWorkspacePublicManagementCRUDPositivePaths(t *testing.T) {
 		t.Fatalf("updated template = %+v", updatedTemplate.Template)
 	}
 	templateList := execute(workspaceevents.TopicWorkspaceTemplateCommandList, workspaceevents.ListWorkspaceTemplatesCommand{})
-	if len(templateList.Templates) != 1 || templateList.Templates[0].ID != createTemplate.TemplateID || templateList.Templates[0].Name != "updated template" {
-		t.Fatalf("listed templates = %+v", templateList.Templates)
+	foundCustom := false
+	builtinCount := 0
+	for _, item := range templateList.Templates {
+		if item.Builtin {
+			builtinCount++
+			continue
+		}
+		if item.ID != createTemplate.TemplateID || item.Name != "updated template" || foundCustom {
+			t.Fatal("unexpected custom template")
+		}
+		foundCustom = true
 	}
+	if !foundCustom || builtinCount == 0 {
+		t.Fatal("missing custom or builtin templates")
+	}
+
 	execute(workspaceevents.TopicWorkspaceTemplateCommandDelete, workspaceevents.DeleteWorkspaceTemplateCommand{TemplateID: createTemplate.TemplateID})
 	if _, err := templates.Get(ctx, createTemplate.TemplateID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("deleted template remains: %v", err)

@@ -67,6 +67,7 @@ type AuthoringSummary struct {
 }
 
 type WorkspaceTemplate struct {
+	Builtin           bool // Read-only catalog provenance; not part of a sealed template snapshot.
 	ID                string
 	ParentTemplateIDs []string
 	EffectiveSources  []workspacemodel.TemplateSource

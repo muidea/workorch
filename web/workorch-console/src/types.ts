@@ -642,6 +642,7 @@ export type WorkspaceSoulBindings = {
 };
 
 export type WorkspaceTemplate = {
+  builtin?: boolean;
   id: string;
   name: string;
   description?: string;

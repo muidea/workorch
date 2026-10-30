@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -14,13 +13,12 @@ import (
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
-	"github.com/muidea/workorch/internal/pkg/repository"
-	filerepo "github.com/muidea/workorch/internal/pkg/repository/file"
 	memoryrepo "github.com/muidea/workorch/internal/pkg/repository/memory"
-	"github.com/muidea/workorch/internal/pkg/workorchdefaults"
 	"github.com/muidea/workorch/internal/pkg/workorchmanagementcontract"
 )
 
+// Frozen historical bytes are for restart/snapshot preservation, not upgrade authority.
+//
 //go:embed testdata/software-dev-template-0317a3f6.json
 var previousSoftwareTemplateJSON []byte
 
@@ -31,36 +29,6 @@ func previousSoftwareTemplate(t *testing.T) workorchmanagementcontract.Workspace
 		t.Fatal(err)
 	}
 	return raw
-}
-
-func TestPreviousSoftwareTemplateReviewedFingerprint(t *testing.T) {
-	previous, err := builtinWorkspaceTemplate(previousSoftwareTemplate(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	hash := workspacemodel.StableWorkspaceTemplateContentHash(previous)
-	if got := workorchdefaults.KnownBuiltinContentRevision("workspace_template", previous.ID, hash); got != "0317a3f6" {
-		t.Fatalf("previous builtin is not reviewed: hash=%s revision=%s", hash, got)
-	}
-	defaults, err := workorchdefaults.BuiltinWorkspaceTemplateDefaults()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, raw := range defaults {
-		if raw.ID != previous.ID {
-			continue
-		}
-		current, err := builtinWorkspaceTemplate(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
-		observation, err := builtinTemplateDefaultObservation(previous, current)
-		if err != nil || !observation.UpgradeAvailable {
-			t.Fatalf("new input route unavailable to old builtin: %+v %v", observation, err)
-		}
-		return
-	}
-	t.Fatal("missing current software-dev template")
 }
 
 func historicalSoftwareTemplate(t *testing.T) *workspacemodel.WorkspaceTemplate {
@@ -93,149 +61,7 @@ func historicalSoftwareTemplate(t *testing.T) *workspacemodel.WorkspaceTemplate 
 	return nil
 }
 
-type lostTemplateUpgradeResponse struct {
-	repository.WorkspaceTemplateRepository
-	updates int
-}
-
-func (r *lostTemplateUpgradeResponse) Update(ctx context.Context, item *workspacemodel.WorkspaceTemplate) error {
-	r.updates++
-	if err := r.WorkspaceTemplateRepository.Update(ctx, item); err != nil {
-		return err
-	}
-	return errors.New("response lost after durable update")
-}
-
-func TestBuiltinTemplateUpgradeIsExplicitGuardedAndReplayable(t *testing.T) {
-	for _, backend := range []string{"memory", "file"} {
-		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
-			var repo repository.WorkspaceTemplateRepository = memoryrepo.NewWorkspaceTemplateRepository()
-			path := filepath.Join(t.TempDir(), "templates.json")
-			if backend == "file" {
-				repo = filerepo.NewWorkspaceTemplateRepository(path)
-			}
-			old := historicalSoftwareTemplate(t)
-			if err := repo.Create(ctx, old); err != nil {
-				t.Fatal(err)
-			}
-			old, err := repo.Get(ctx, old.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := ensureBuiltinWorkspaceTemplateDefaults(ctx, repo); err != nil {
-				t.Fatal(err)
-			}
-			unchanged, err := repo.Get(ctx, old.ID)
-			if err != nil || !reflect.DeepEqual(unchanged, old) {
-				t.Fatalf("startup upgraded template: %v", err)
-			}
-			owner := &Biz{templates: repo}
-			preview, err := owner.queryBuiltinTemplateDefaults(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var request workspaceTemplateUpgradeEvent
-			for _, item := range preview {
-				if item.TemplateID == old.ID {
-					if !item.UpgradeAvailable {
-						t.Fatalf("historical template not recognized: %+v", item)
-					}
-					request = workspaceTemplateUpgradeEvent{TemplateID: old.ID, ExpectedContentHash: item.CurrentContentHash, TargetContentHash: item.BuiltinContentHash}
-				}
-			}
-			lost := &lostTemplateUpgradeResponse{WorkspaceTemplateRepository: repo}
-			owner.templates = lost
-			if _, err := owner.submitBuiltinTemplateUpgrade(ctx, request); err == nil {
-				t.Fatal("expected lost response")
-			}
-			if lost.updates != 1 {
-				t.Fatalf("writes = %d", lost.updates)
-			}
-			if backend == "file" {
-				repo = filerepo.NewWorkspaceTemplateRepository(path)
-			}
-			owner = &Biz{templates: repo}
-			for attempt := 0; attempt < 2; attempt++ {
-				result, err := owner.submitBuiltinTemplateUpgrade(ctx, request)
-				if err != nil || result.Upgraded || result.Default.UpgradeAvailable || result.Default.CurrentContentHash != request.TargetContentHash {
-					t.Fatalf("replay after reload: %+v %v", result, err)
-				}
-			}
-			custom := historicalSoftwareTemplate(t)
-			custom.Description += " user customization"
-			cmd := workspaceevents.UpdateWorkspaceTemplateCommand{TemplateID: custom.ID, Name: custom.Name, Description: custom.Description, GoalText: custom.GoalText, DoDItems: custom.DoDItems, DefaultSoulID: custom.DefaultSoulID, ContextHints: custom.ContextHints, EvidencePolicies: custom.EvidencePolicies}
-			event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandUpdate, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, cmd)
-			if _, err := owner.executeWorkspaceTemplateCommand(ctx, event); err != nil {
-				t.Fatal(err)
-			}
-			before, err := repo.Get(ctx, old.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := owner.submitBuiltinTemplateUpgrade(ctx, request); !errors.Is(err, common.ErrConflict) {
-				t.Fatalf("customized template upgraded: %v", err)
-			}
-			after, err := repo.Get(ctx, old.ID)
-			if err != nil || !reflect.DeepEqual(before, after) {
-				t.Fatalf("customization overwritten: %v", err)
-			}
-		})
-	}
-}
-
-func TestBuiltinTemplateUpgradeRejectsUntrustedOrUnreviewedRequests(t *testing.T) {
-	ctx := context.Background()
-	repo := memoryrepo.NewWorkspaceTemplateRepository()
-	old := historicalSoftwareTemplate(t)
-	if err := repo.Create(ctx, old); err != nil {
-		t.Fatal(err)
-	}
-	owner := &Biz{templates: repo}
-	preview, err := owner.queryBuiltinTemplateDefaults(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var valid workspaceTemplateUpgradeEvent
-	for _, item := range preview {
-		if item.TemplateID == old.ID {
-			valid = workspaceTemplateUpgradeEvent{TemplateID: old.ID, ExpectedContentHash: item.CurrentContentHash, TargetContentHash: item.BuiltinContentHash}
-		}
-	}
-	for _, change := range []func(*workspaceTemplateUpgradeEvent){
-		func(e *workspaceTemplateUpgradeEvent) { e.ExpectedContentHash = "" },
-		func(e *workspaceTemplateUpgradeEvent) { e.ExpectedContentHash = "unknown" },
-		func(e *workspaceTemplateUpgradeEvent) { e.TargetContentHash = "different-release" },
-		func(e *workspaceTemplateUpgradeEvent) { e.TemplateID = "missing" },
-	} {
-		request := valid
-		change(&request)
-		if _, err := owner.submitBuiltinTemplateUpgrade(ctx, request); err == nil {
-			t.Fatalf("invalid upgrade accepted: %+v", request)
-		}
-	}
-	command := workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultCommand{TemplateID: valid.TemplateID, ExpectedContentHash: valid.ExpectedContentHash, TargetContentHash: valid.TargetContentHash}
-	for _, source := range []string{"untrusted/module", " application/workorchd/appservice "} {
-		event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandUpgradeBuiltinDefault, source, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-		result := magicevent.NewResult(event.ID(), source, workspaceevents.CommandDestination)
-		owner.handleBuiltinTemplateDefaultsCommand(event, result)
-		if _, err := result.Get(); err == nil {
-			t.Fatalf("unauthorized source accepted: %q", source)
-		}
-	}
-	event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandUpgradeBuiltinDefault, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command)
-	owner.handleBuiltinTemplateDefaultsCommand(event, nil)
-	got, err := repo.Get(ctx, old.ID)
-	if err != nil || !reflect.DeepEqual(got, old) {
-		t.Fatalf("rejected/Post requests wrote content: %v", err)
-	}
-	result, err := owner.submitBuiltinTemplateUpgrade(ctx, valid)
-	if err != nil || !result.Upgraded {
-		t.Fatalf("valid request: %+v %v", result, err)
-	}
-}
-
-func TestBuiltinTemplateUpgradeSerializesWithOrdinaryEdit(t *testing.T) {
+func TestBuiltinTemplateIngressIsReadOnlyAndRejectsStaleOrUntrustedRequests(t *testing.T) {
 	ctx := context.Background()
 	repo := memoryrepo.NewWorkspaceTemplateRepository()
 	old := historicalSoftwareTemplate(t)
@@ -247,74 +73,78 @@ func TestBuiltinTemplateUpgradeSerializesWithOrdinaryEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var request workspaceTemplateUpgradeEvent
+	var valid workspaceTemplateUpgradeEvent
 	for _, item := range items {
+		if !item.Present || item.UpgradeAvailable || item.CurrentContentHash != item.BuiltinContentHash {
+			t.Fatalf("not current: %+v", item)
+		}
 		if item.TemplateID == old.ID {
-			request = workspaceTemplateUpgradeEvent{TemplateID: old.ID, ExpectedContentHash: item.CurrentContentHash, TargetContentHash: item.BuiltinContentHash}
+			valid = workspaceTemplateUpgradeEvent{TemplateID: item.TemplateID, ExpectedContentHash: item.CurrentContentHash, TargetContentHash: item.BuiltinContentHash}
 		}
 	}
-	cmd := workspaceevents.UpdateWorkspaceTemplateCommand{TemplateID: old.ID, Name: old.Name, Description: "concurrent user edit", GoalText: old.GoalText, DoDItems: old.DoDItems, DefaultSoulID: old.DefaultSoulID, ContextHints: old.ContextHints, EvidencePolicies: old.EvidencePolicies}
-	start := make(chan struct{})
-	var wait sync.WaitGroup
-	wait.Add(2)
-	go func() {
-		defer wait.Done()
-		<-start
-		event := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandUpdate, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, cmd)
-		if _, err := owner.executeWorkspaceTemplateCommand(ctx, event); err != nil {
-			t.Error(err)
+	for _, change := range []func(*workspaceTemplateUpgradeEvent){
+		func(e *workspaceTemplateUpgradeEvent) { e.ExpectedContentHash = "" },
+		func(e *workspaceTemplateUpgradeEvent) {
+			e.ExpectedContentHash = workspacemodel.StableWorkspaceTemplateContentHash(old)
+		},
+		func(e *workspaceTemplateUpgradeEvent) { e.TargetContentHash = "other-release" },
+		func(e *workspaceTemplateUpgradeEvent) { e.TemplateID = "missing" },
+	} {
+		request := valid
+		change(&request)
+		if _, err := owner.submitBuiltinTemplateUpgrade(ctx, request); err == nil {
+			t.Fatalf("stale request accepted: %+v", request)
 		}
-	}()
-	go func() {
-		defer wait.Done()
-		<-start
-		if _, err := owner.submitBuiltinTemplateUpgrade(ctx, request); err != nil && !errors.Is(err, common.ErrConflict) {
-			t.Error(err)
+	}
+	cmd := workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultCommand{TemplateID: valid.TemplateID, ExpectedContentHash: valid.ExpectedContentHash, TargetContentHash: valid.TargetContentHash}
+	for _, source := range []string{"untrusted/module", " application/workorchd/appservice "} {
+		ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandUpgradeBuiltinDefault, source, workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, cmd)
+		result := magicevent.NewResult(ev.ID(), source, workspaceevents.CommandDestination)
+		owner.handleBuiltinTemplateDefaultsCommand(ev, result)
+		if _, err := result.Get(); err == nil {
+			t.Fatal("untrusted source accepted")
 		}
-	}()
-	close(start)
-	wait.Wait()
-	got, err := repo.Get(ctx, old.ID)
-	if err != nil || got.Description != cmd.Description {
-		t.Fatalf("upgrade overwrote concurrent edit: %+v %v", got, err)
+	}
+	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandUpgradeBuiltinDefault, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, cmd)
+	owner.handleBuiltinTemplateDefaultsCommand(ev, nil)
+	for i := 0; i < 2; i++ {
+		result, err := owner.submitBuiltinTemplateUpgrade(ctx, valid)
+		if err != nil || result.Upgraded || result.Default.CurrentContentHash != valid.TargetContentHash {
+			t.Fatalf("read-only replay: %+v %v", result, err)
+		}
+	}
+	after, err := repo.Get(ctx, old.ID)
+	if err != nil || !reflect.DeepEqual(after, old) {
+		t.Fatal("read/retired upgrade changed historical bytes", err)
 	}
 }
 
-// Frozen immediately preceding release; never generated from mutable defaults.
-//
-//go:embed testdata/software-dev-template-c76a4c57.json
-var preOwnerBoundSoftwareTemplateJSON []byte
-
-func TestPreOwnerBoundSoftwareTemplateReviewedUpgrade(t *testing.T) {
-	var raw workorchmanagementcontract.WorkspaceTemplate
-	if err := json.Unmarshal(preOwnerBoundSoftwareTemplateJSON, &raw); err != nil {
-		t.Fatal(err)
+func TestBuiltinTemplateCannotBeCreatedEditedOrDeletedConcurrently(t *testing.T) {
+	ctx := context.Background()
+	repo := memoryrepo.NewWorkspaceTemplateRepository()
+	owner := &Biz{templates: repo}
+	commands := []struct {
+		topic string
+		data  any
+	}{
+		{workspaceevents.TopicWorkspaceTemplateCommandCreate, workspaceevents.CreateWorkspaceTemplateCommand{TemplateID: "software-dev", Name: "override"}},
+		{workspaceevents.TopicWorkspaceTemplateCommandUpdate, workspaceevents.UpdateWorkspaceTemplateCommand{TemplateID: "software-dev", Name: "override"}},
+		{workspaceevents.TopicWorkspaceTemplateCommandDelete, workspaceevents.DeleteWorkspaceTemplateCommand{TemplateID: "software-dev"}},
 	}
-	old, err := builtinWorkspaceTemplate(raw)
-	if err != nil {
-		t.Fatal(err)
+	var wait sync.WaitGroup
+	for _, command := range commands {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			ev := magicevent.NewEventWithContext(command.topic, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, command.data)
+			if _, err := owner.executeWorkspaceTemplateCommand(ctx, ev); !errors.Is(err, common.ErrConflict) {
+				t.Errorf("builtin mutation: %v", err)
+			}
+		}()
 	}
-	hash := workspacemodel.StableWorkspaceTemplateContentHash(old)
-	if workorchdefaults.KnownBuiltinContentRevision("workspace_template", old.ID, hash) == "" {
-		t.Fatalf("unregistered preceding template: %s", hash)
+	wait.Wait()
+	stored, err := repo.List(ctx)
+	if err != nil || len(stored) != 0 {
+		t.Fatal("builtin persisted", err)
 	}
-	defaults, err := workorchdefaults.BuiltinWorkspaceTemplateDefaults()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, value := range defaults {
-		if value.ID != old.ID {
-			continue
-		}
-		current, err := builtinWorkspaceTemplate(value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		observation, err := builtinTemplateDefaultObservation(old, current)
-		if err != nil || !observation.UpgradeAvailable || observation.CurrentContentHash != hash {
-			t.Fatalf("explicit upgrade unavailable: %+v %v", observation, err)
-		}
-		return
-	}
-	t.Fatal("missing current template")
 }

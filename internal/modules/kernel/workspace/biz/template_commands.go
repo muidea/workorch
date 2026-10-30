@@ -25,6 +25,11 @@ func (m *Biz) executeWorkspaceTemplateCommand(ctx context.Context, ev magicevent
 		if err != nil {
 			return workspaceCommandResponse{}, err
 		}
+		if builtin, err := builtinWorkspaceTemplateByID(item.ID); err != nil {
+			return workspaceCommandResponse{}, err
+		} else if builtin != nil {
+			return workspaceCommandResponse{}, common.ErrConflict
+		}
 		if err := m.validateTemplateChain(ctx, item); err != nil {
 			return workspaceCommandResponse{}, err
 		}
@@ -44,12 +49,18 @@ func (m *Biz) executeWorkspaceTemplateCommand(ctx context.Context, ev magicevent
 		if err != nil {
 			return workspaceCommandResponse{}, err
 		}
-		return workspaceCommandResponse{Template: workspaceTemplateFromRepository(item)}, nil
+		dto := workspaceTemplateFromRepository(item)
+		builtin, err := builtinWorkspaceTemplateByID(item.ID)
+		if err != nil {
+			return workspaceCommandResponse{}, err
+		}
+		dto.Builtin = builtin != nil
+		return workspaceCommandResponse{Template: dto}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandList:
 		if _, ok := ev.Data().(workspaceevents.ListWorkspaceTemplatesCommand); !ok || m.templates == nil {
 			return workspaceCommandResponse{}, common.ErrInvalidArgument
 		}
-		items, err := m.templates.List(ctx)
+		items, err := m.currentWorkspaceTemplates(ctx)
 		if err != nil {
 			return workspaceCommandResponse{}, err
 		}
@@ -59,7 +70,13 @@ func (m *Biz) executeWorkspaceTemplateCommand(ctx context.Context, ev magicevent
 			if err != nil {
 				return workspaceCommandResponse{}, err
 			}
-			ret = append(ret, workspaceTemplateFromRepository(effective))
+			dto := workspaceTemplateFromRepository(effective)
+			builtin, err := builtinWorkspaceTemplateByID(item.ID)
+			if err != nil {
+				return workspaceCommandResponse{}, err
+			}
+			dto.Builtin = builtin != nil
+			ret = append(ret, dto)
 		}
 		return workspaceCommandResponse{Templates: ret}, nil
 	case workspaceevents.TopicWorkspaceTemplateCommandUpdate:
@@ -70,6 +87,11 @@ func (m *Biz) executeWorkspaceTemplateCommand(ctx context.Context, ev magicevent
 		item, err := workspaceTemplateFromCommand(workspaceevents.CreateWorkspaceTemplateCommand(cmd))
 		if err != nil {
 			return workspaceCommandResponse{}, err
+		}
+		if builtin, err := builtinWorkspaceTemplateByID(item.ID); err != nil {
+			return workspaceCommandResponse{}, err
+		} else if builtin != nil {
+			return workspaceCommandResponse{}, common.ErrConflict
 		}
 		if err := m.validateTemplateChain(ctx, item); err != nil {
 			return workspaceCommandResponse{}, err
@@ -89,7 +111,14 @@ func (m *Biz) executeWorkspaceTemplateCommand(ctx context.Context, ev magicevent
 		if !ok || cmd.TemplateID == "" || m.templates == nil {
 			return workspaceCommandResponse{}, common.ErrInvalidArgument
 		}
-		items, err := m.templates.List(ctx)
+		builtin, err := builtinWorkspaceTemplateByID(cmd.TemplateID)
+		if err != nil {
+			return workspaceCommandResponse{}, err
+		}
+		if builtin != nil {
+			return workspaceCommandResponse{}, common.ErrConflict
+		}
+		items, err := m.currentWorkspaceTemplates(ctx)
 		if err != nil {
 			return workspaceCommandResponse{}, err
 		}
@@ -166,7 +195,7 @@ func workspaceTemplatesFromRepository(items []*workspacemodel.WorkspaceTemplate)
 
 func (m *Biz) resolvedTemplate(ctx context.Context, id string) (*workspacemodel.WorkspaceTemplate, error) {
 	return workspacemodel.ResolveWorkspaceTemplate(id, func(current string) (*workspacemodel.WorkspaceTemplate, error) {
-		return m.templates.Get(ctx, current)
+		return m.currentWorkspaceTemplate(ctx, current)
 	})
 }
 
@@ -175,13 +204,13 @@ func (m *Biz) validateTemplateChain(ctx context.Context, proposed *workspacemode
 		if current == proposed.ID {
 			return proposed, nil
 		}
-		return m.templates.Get(ctx, current)
+		return m.currentWorkspaceTemplate(ctx, current)
 	})
 	return err
 }
 
 func (m *Biz) validateTemplateDescendants(ctx context.Context, proposed *workspacemodel.WorkspaceTemplate) error {
-	items, err := m.templates.List(ctx)
+	items, err := m.currentWorkspaceTemplates(ctx)
 	if err != nil {
 		return err
 	}
@@ -193,7 +222,7 @@ func (m *Biz) validateTemplateDescendants(ctx context.Context, proposed *workspa
 			if current == proposed.ID {
 				return proposed, nil
 			}
-			return m.templates.Get(ctx, current)
+			return m.currentWorkspaceTemplate(ctx, current)
 		})
 		if err != nil {
 			return err

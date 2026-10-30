@@ -35,6 +35,7 @@ func WorkspaceTemplateFromOwner(item *workspacemodel.WorkspaceTemplate) workorch
 		return workorchmanagementcontract.WorkspaceTemplate{}
 	}
 	return workorchmanagementcontract.WorkspaceTemplate{
+		Builtin:           item.Builtin,
 		ID:                item.ID,
 		ParentTemplateIDs: append([]string(nil), item.ParentTemplateIDs...),
 		EffectiveSources:  toManagementTemplateSources(item.EffectiveSources),

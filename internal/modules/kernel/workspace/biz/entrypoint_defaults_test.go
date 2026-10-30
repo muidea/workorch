@@ -87,9 +87,9 @@ func assertReviewedTemplateUpgrade(t *testing.T, previous []byte, revision strin
 				if err := owner.ensureCurrentBuiltinWorkspaceTemplateDefaults(ctx); err != nil {
 					t.Fatal(err)
 				}
-				current, err := repo.Get(ctx, old.ID)
+				current, err := owner.resolvedTemplate(ctx, old.ID)
 				if err != nil || workspacemodel.StableWorkspaceTemplateContentHash(current) == hash {
-					t.Fatalf("entrypoint template not loaded: %+v %v", current, err)
+					t.Fatalf("current program template not loaded: %v", err)
 				}
 				if attempt == 0 {
 					upgraded = current

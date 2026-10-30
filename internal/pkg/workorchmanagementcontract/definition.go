@@ -82,6 +82,7 @@ type TemplateSource struct {
 }
 
 type WorkspaceTemplate struct {
+	Builtin           bool              `json:"builtin,omitempty"`
 	ID                string            `json:"id"`
 	ParentTemplateIDs []string          `json:"parentTemplateIds,omitempty"`
 	EffectiveSources  []TemplateSource  `json:"effectiveSources,omitempty"`

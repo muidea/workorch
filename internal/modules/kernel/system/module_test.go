@@ -10,6 +10,8 @@ import (
 	soulbiz "github.com/muidea/workorch/internal/modules/blocks/soul/biz"
 	systembiz "github.com/muidea/workorch/internal/modules/kernel/system/biz"
 	workspacebiz "github.com/muidea/workorch/internal/modules/kernel/workspace/biz"
+	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	mcpmodule "github.com/muidea/workorch/internal/modules/blocks/mcpregistry"
@@ -104,9 +106,10 @@ func TestSystemModuleStartEnsuresBuiltinDefaultsThroughEventHubConsumers(t *test
 	if got, err := souls.List(ctx); err != nil || len(got) == 0 {
 		t.Fatalf("souls after Start len=%d err=%v", len(got), err)
 	}
-	if got, err := templates.List(ctx); err != nil || len(got) == 0 {
+	if got, err := templates.List(ctx); err != nil || len(got) != 0 {
 		t.Fatalf("templates after Start len=%d err=%v", len(got), err)
 	}
+	_ = readSystemTestTemplates(t, hub)
 	if got, err := mcpRegistry.Load(ctx); err != nil || len(got.Servers) == 0 || len(got.Capabilities) == 0 {
 		t.Fatalf("MCP registry after Start = %+v err=%v", got, err)
 	}
@@ -161,7 +164,8 @@ func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChan
 	if err != nil || len(seededSouls) == 0 {
 		t.Fatalf("souls after partial Start len=%d err=%v", len(seededSouls), err)
 	}
-	seededTemplates, err := templates.List(ctx)
+	seededTemplates := readSystemTestTemplates(t, hub)
+	_, err = templates.List(ctx)
 	if err != nil || len(seededTemplates) == 0 {
 		t.Fatalf("templates after partial Start len=%d err=%v", len(seededTemplates), err)
 	}
@@ -175,10 +179,9 @@ func TestSystemModuleStartConvergesAfterPartialFailureWithoutOverwritingUserChan
 	if err := souls.Update(ctx, customSoul); err != nil {
 		t.Fatalf("customize seeded soul: %v", err)
 	}
-	customTemplate := seededTemplates[0]
-	customTemplate.Name = "user-customized template"
+	customTemplate := &workspacemodel.WorkspaceTemplate{ID: "user-template", Name: "user-customized template"}
 	customTemplate.DoDItems = []string{"user-customized acceptance"}
-	if err := templates.Update(ctx, customTemplate); err != nil {
+	if err := templates.Create(ctx, customTemplate); err != nil {
 		t.Fatalf("customize seeded template: %v", err)
 	}
 
@@ -283,12 +286,11 @@ func TestSystemFreshProcessConvergesFileBackedPartialStartupWithoutOverwritingUs
 	}
 	freshTemplates := filerepo.NewWorkspaceTemplateRepository(templatePath)
 	seededTemplates, err := freshTemplates.List(ctx)
-	if err != nil || len(seededTemplates) == 0 {
+	if err != nil || len(seededTemplates) != 0 {
 		t.Fatalf("fresh Template repository after partial Start len=%d err=%v", len(seededTemplates), err)
 	}
-	customTemplate := seededTemplates[0]
-	customTemplate.Name = "fresh-process customized template"
-	if err := freshTemplates.Update(ctx, customTemplate); err != nil {
+	customTemplate := &workspacemodel.WorkspaceTemplate{ID: "user-template", Name: "fresh-process customized template"}
+	if err := freshTemplates.Create(ctx, customTemplate); err != nil {
 		t.Fatal(err)
 	}
 
@@ -347,4 +349,22 @@ func TestSystemFreshProcessConvergesFileBackedPartialStartupWithoutOverwritingUs
 
 func systemModuleContractDependencies() systembiz.Dependencies {
 	return systembiz.Dependencies{EventHub: magicevent.NewHub(16)}
+}
+
+func readSystemTestTemplates(t *testing.T, hub magicevent.Hub) []*workspaceevents.WorkspaceTemplate {
+	t.Helper()
+	ev := magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceTemplateCommandList, "application/workorchd/appservice", workspaceevents.CommandDestination, magicevent.NewHeader(), context.Background(), workspaceevents.ListWorkspaceTemplatesCommand{})
+	result := hub.Send(ev)
+	if result == nil {
+		t.Fatal("missing template result")
+	}
+	data, err := result.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	typed, ok := data.(workspaceevents.WorkspaceTemplateListResult)
+	if !ok || len(typed.Templates) == 0 {
+		t.Fatal("missing current builtins")
+	}
+	return typed.Templates
 }

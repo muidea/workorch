@@ -3064,6 +3064,7 @@ export function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }
       message.error('请填写模板 ID');
       return;
     }
+    if (editingTemplate?.builtin) return;
     setSaving(true);
     try {
       const payload = workspaceTemplatePayload(values, templateID);
@@ -3082,6 +3083,7 @@ export function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }
   };
 
   const deleteTemplate = (template: WorkspaceTemplate) => {
+    if (template.builtin) return;
     modal.confirm({
       title: '删除工作空间模板',
       content: `确认删除「${template.name || template.id}」？删除模板不会删除已创建的工作空间。`,
@@ -3111,7 +3113,7 @@ export function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }
     <ProCard title="工作空间模板（Workspace Template）" className="workorch-section">
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Typography.Text type="secondary">
-          模板用于复用新建工作空间时的目标（Goal）、验收标准（DoD）、默认执行人格（Soul）与阶段执行人格绑定。高级合同字段以 JSON 原样保存；它们只在下一次显式 restart 的 activation 编译时生效，不会修改已有 Run。
+          系统内置模板随服务版本自动更新，只读且不写入项目目录。自定义模板单独保存；模板用于新的规格创作，已确认的规格与执行快照保持封存。
         </Typography.Text>
         <CardGrid>
           <ProCard colSpan={{ xs: 24, lg: 8 }} ghost>
@@ -3121,8 +3123,8 @@ export function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }
               locale={{ emptyText: <Empty description="暂无工作空间模板" /> }}
               renderItem={(item) => (
                 <List.Item actions={[
-                  <Button key="edit" type="link" size="small" onClick={() => editTemplate(item)}>编辑</Button>,
-                  <Button key="delete" type="link" danger size="small" loading={deletingTemplateId === item.id} onClick={() => deleteTemplate(item)}>删除</Button>
+                  <Button key="edit" type="link" size="small" onClick={() => editTemplate(item)}>{item.builtin ? '查看' : '编辑'}</Button>,
+                  <Button key="delete" type="link" danger size="small" disabled={item.builtin} loading={deletingTemplateId === item.id} onClick={() => deleteTemplate(item)}>删除</Button>
                 ]}>
                   <List.Item.Meta
                     title={<Typography.Text strong>{item.name || item.id}</Typography.Text>}
@@ -3130,6 +3132,7 @@ export function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }
                       <Space direction="vertical" size={2}>
                         <Typography.Text type="secondary">{item.id}</Typography.Text>
                         <Space wrap size={[4, 4]}>
+                          {item.builtin ? <Tag>系统内置 · 随版本更新</Tag> : null}
                           {item.goalText ? <Tag color="blue">{modelLabels.goal}</Tag> : null}
                           {(item.doDItems?.length ?? 0) > 0 ? <Tag color="green">{modelLabels.dod} {item.doDItems?.length}</Tag> : null}
                           {item.defaultSoulId ? <Tag color="cyan">默认执行人格</Tag> : null}
@@ -3143,7 +3146,7 @@ export function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }
             <Button style={{ marginTop: 12 }} onClick={() => editTemplate(undefined)}>新增模板</Button>
           </ProCard>
           <ProCard colSpan={{ xs: 24, lg: 16 }} ghost>
-            <Form form={form} layout="vertical" onFinish={(values) => void saveTemplate(values)}>
+            <Form form={form} disabled={editingTemplate?.builtin} layout="vertical" onFinish={(values) => void saveTemplate(values)}>
               <Form.Item name="id" label="模板 ID" rules={[{ required: !editingTemplate, message: '请输入模板 ID' }]}>
                 <Input disabled={Boolean(editingTemplate)} placeholder="例如 workspace-template-delivery" />
               </Form.Item>
@@ -3181,7 +3184,7 @@ export function WorkspaceTemplateManager({ souls, templates, onTemplatesChange }
               </Form.Item>
               <Space>
                 <Button type="primary" htmlType="submit" loading={saving}>
-                  {editingTemplate ? '保存模板' : '创建模板'}
+                  {editingTemplate?.builtin ? '系统内置模板只读' : editingTemplate ? '保存模板' : '创建模板'}
                 </Button>
                 <Button onClick={() => editTemplate(undefined)}>清空</Button>
               </Space>

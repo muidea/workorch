@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -83,11 +82,7 @@ func (m *Biz) queryBuiltinTemplateDefaults(ctx context.Context) ([]workspaceeven
 		if err != nil {
 			return nil, err
 		}
-		current, err := m.templates.Get(ctx, target.ID)
-		if err != nil && !errors.Is(err, common.ErrNotFound) {
-			return nil, err
-		}
-		value, err := builtinTemplateDefaultObservation(current, target)
+		value, err := builtinTemplateDefaultObservation(target)
 		if err != nil {
 			return nil, err
 		}
@@ -96,29 +91,13 @@ func (m *Biz) queryBuiltinTemplateDefaults(ctx context.Context) ([]workspaceeven
 	return items, nil
 }
 
-func builtinTemplateDefaultObservation(current, target *workspacemodel.WorkspaceTemplate) (workspaceevents.BuiltinWorkspaceTemplateDefault, error) {
-	value := workspaceevents.BuiltinWorkspaceTemplateDefault{TemplateID: target.ID, BuiltinContentHash: workspacemodel.StableWorkspaceTemplateContentHash(target)}
-	if value.BuiltinContentHash == "" {
-		return value, common.ErrInvalidArgument
+// The effective builtin is always the declaration embedded in this program.
+func builtinTemplateDefaultObservation(target *workspacemodel.WorkspaceTemplate) (workspaceevents.BuiltinWorkspaceTemplateDefault, error) {
+	hash := workspacemodel.StableWorkspaceTemplateContentHash(target)
+	if hash == "" {
+		return workspaceevents.BuiltinWorkspaceTemplateDefault{}, common.ErrInvalidArgument
 	}
-	if current == nil {
-		return value, nil
-	}
-	if current.ID != target.ID {
-		return value, common.ErrConflict
-	}
-	value.Present = true
-	value.CurrentContentHash = workspacemodel.StableWorkspaceTemplateContentHash(current)
-	if value.CurrentContentHash == "" {
-		return value, common.ErrInvalidArgument
-	}
-	if value.CurrentContentHash == value.BuiltinContentHash {
-		value.CurrentBuiltinRevision = value.BuiltinContentHash
-		return value, nil
-	}
-	value.CurrentBuiltinRevision = workorchdefaults.KnownBuiltinContentRevision("workspace_template", current.ID, value.CurrentContentHash)
-	value.UpgradeAvailable = value.CurrentBuiltinRevision != ""
-	return value, nil
+	return workspaceevents.BuiltinWorkspaceTemplateDefault{TemplateID: target.ID, Present: true, CurrentContentHash: hash, CurrentBuiltinRevision: hash, BuiltinContentHash: hash}, nil
 }
 
 func (m *Biz) upgradeBuiltinTemplate(ctx context.Context, event workspaceTemplateUpgradeEvent) (workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultResult, error) {
@@ -134,29 +113,15 @@ func (m *Biz) upgradeBuiltinTemplate(ctx context.Context, event workspaceTemplat
 		if err != nil {
 			return workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultResult{}, err
 		}
-		current, err := m.templates.Get(ctx, event.TemplateID)
+		value, err := builtinTemplateDefaultObservation(target)
 		if err != nil {
 			return workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultResult{}, err
 		}
-		value, err := builtinTemplateDefaultObservation(current, target)
-		if err != nil {
-			return workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultResult{}, err
+		if event.TargetContentHash != value.BuiltinContentHash || event.ExpectedContentHash != value.CurrentContentHash {
+			return workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultResult{}, fmt.Errorf("%w: builtin template is supplied by the running program", common.ErrConflict)
 		}
-		if event.TargetContentHash != value.BuiltinContentHash {
-			return workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultResult{}, fmt.Errorf("%w: builtin template target changed", common.ErrConflict)
-		}
-		knownExpected := event.ExpectedContentHash == value.BuiltinContentHash || workorchdefaults.KnownBuiltinContentRevision("workspace_template", event.TemplateID, event.ExpectedContentHash) != ""
-		if !knownExpected || (value.CurrentContentHash != value.BuiltinContentHash && (!value.UpgradeAvailable || event.ExpectedContentHash != value.CurrentContentHash)) {
-			return workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultResult{}, fmt.Errorf("%w: template is customized, unknown, or changed since preview", common.ErrConflict)
-		}
-		if value.CurrentContentHash == value.BuiltinContentHash {
-			return workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultResult{Default: value}, nil
-		}
-		if err := m.templates.Update(ctx, target); err != nil {
-			return workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultResult{}, err
-		}
-		updated, err := builtinTemplateDefaultObservation(target, target)
-		return workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultResult{Default: updated, Upgraded: true}, err
+		// Retained ingress is an exact, read-only no-op for current clients.
+		return workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultResult{Default: value}, nil
 	}
 	return workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultResult{}, common.ErrNotFound
 }

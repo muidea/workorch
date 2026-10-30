@@ -16,6 +16,8 @@ import (
 // WorkspaceTemplate is the workspace owner's durable template DTO. Repository
 // representations are intentionally kept inside the workspace owner.
 type WorkspaceTemplate struct {
+	// Builtin is query provenance only. It is never persisted or hashed.
+	Builtin           bool     `json:"-"`
 	ID                string   `json:"id"`
 	ParentTemplateIDs []string `json:"parentTemplateIds,omitempty"`
 	// EffectiveSources is populated only on a resolved read, root first. Raw

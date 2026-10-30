@@ -157,7 +157,7 @@ func (m *Biz) updateWorkspace(ctx context.Context, ev magicevent.Event) (workspa
 		if m.templates == nil {
 			return workspaceCommandResponse{}, common.ErrInvalidArgument
 		}
-		template, err := m.templates.Get(ctx, cmd.TemplateID)
+		template, err := m.resolvedTemplate(ctx, cmd.TemplateID)
 		if err != nil {
 			return workspaceCommandResponse{}, err
 		}

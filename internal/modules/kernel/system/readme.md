@@ -12,8 +12,9 @@ Last Verified: 2026-08-30
 业务聚合或运行期状态机；部分成功后再次调用 `Start` 时，仍从第一项重发 exact ensure command，由各资源 owner 的幂等合同
 收敛。
 
-System 不解释 default 内容或版本、不自行写入/升级持久化对象，也不根据 Runtime 状态修复资源。Soul/Template owner 在
+System 不解释 default 内容或版本、不自行写入/升级持久化对象，也不根据 Runtime 状态修复资源。Soul owner 在
 自己的 ensure 内创建缺失资源并自动更新 exact reviewed 未定制版本；MCP Registry 保持 create-if-missing。
+Template owner 从当前程序直接提供内置定义，ensure 只校验，不 seed 或升级磁盘副本。
 
 ## 组件交互及合同
 
@@ -37,8 +38,9 @@ System 不解释 default 内容或版本、不自行写入/升级持久化对象
 
 - System 不取得 Soul、Workspace、MCP repository/service，也不定义通用 ensure envelope。
 - 默认值的 validation、dedupe、CAS、create-if-missing 与持久化完全属于接收 owner。
-- 用户定制、未知版本与用户新增 ID 必须保持不变；删除内置 ID 后，下次启动按当前嵌入值重新创建。
-- System 不提供 migration/upgrade 状态机；Template/Soul 的自动或显式更新均复用资源 owner 的私有 guarded upgrade，
+- Soul/MCP 的用户定制及未知版本保持原合同；Template 内置 ID 始终由程序提供，自定义模板使用独立 ID。
+  旧 Template 磁盘行与已封存 Workspace 历史保持原字节，但旧同 ID 行不再覆盖程序内置定义。
+- System 不提供 migration/upgrade 状态机；Soul 的自动或显式更新复用资源 owner 的私有 guarded upgrade；Template owner 只校验程序内置定义、不持久 seed/升级副本，
   System 不比较内容、不选择目标版本、不触碰 Workspace admission 或历史 Run。
 - System 不参与 Definition admission、Run lifecycle、Runtime drive、governance、projection 或 deletion。
 - 新增默认资源 owner 必须同时增加 owner-defined concrete contract、明确顺序和失败/重试验收。

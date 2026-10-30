@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -207,9 +208,15 @@ operations = ["responses"]
 		}
 	}
 
-	template, err := repos.WorkspaceTemplates.Get(ctx, "software-dev")
+	template, err := workspaceports.ReadWorkspaceTemplateRecord(ctx, hub, "software-dev")
 	if err != nil {
-		t.Fatalf("System 未物化正式默认模板: %v", err)
+		t.Fatalf("Workspace owner 未提供当前程序默认模板: %v", err)
+	}
+	if _, err := repos.WorkspaceTemplates.Get(ctx, "software-dev"); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("内置模板被持久化: %v", err)
+	}
+	if !template.Builtin {
+		t.Fatal("默认模板没有只读来源标记")
 	}
 	if len(template.DoDItems) == 0 {
 		t.Fatal("正式默认模板没有 DoD")
@@ -391,7 +398,7 @@ operations = ["responses"]
 		if err != nil || !reflect.DeepEqual(admission, replayed) {
 			t.Fatalf("file 重开改变阻塞判定：%v", err)
 		}
-		originalTemplate, err := reopened.WorkspaceTemplates.Get(ctx, template.ID)
+		originalTemplate, err := workspaceports.ReadWorkspaceTemplateRecord(ctx, hub, template.ID)
 		if err != nil || !reflect.DeepEqual(template, originalTemplate) {
 			t.Fatalf("负例改写默认模板：%v", err)
 		}

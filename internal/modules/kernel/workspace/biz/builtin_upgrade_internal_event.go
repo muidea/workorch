@@ -14,7 +14,7 @@ type workspaceTemplateUpgradeEvent struct {
 	TargetContentHash   string
 }
 
-// The template owner serializes comparison and replacement with ordinary CRUD.
+// The retained template ingress validates an exact read-only current-version replay.
 // This event cannot update a Workspace admission or a Run activation snapshot.
 func (m *Biz) submitBuiltinTemplateUpgrade(ctx context.Context, event workspaceTemplateUpgradeEvent) (workspaceevents.UpgradeBuiltinWorkspaceTemplateDefaultResult, error) {
 	if m == nil || event.TemplateID == "" || event.TemplateID != strings.TrimSpace(event.TemplateID) ||
