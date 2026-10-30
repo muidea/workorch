@@ -84,6 +84,23 @@ Repository 在每次读写中从完整原材料复编译；hash、计数或自�
 同 creation epoch 的第一条 completion 是历史 M3；后续正常新检查可追加自己的 completion，不替换第一条。
 Start/Restart 的回执消费及执行授权属于独立合同，此处不启动 Run。
 
+首次显式执行由生产 reservation dispatcher 消费 `workorch-first-execution-preparation/v1`。
+`pkg/preparationcompiler.CompileFirstExecutionPreparation` 只消费最新原 attempt 对应的唯一完整 completion，
+复编译完整原材料，核验真实正式 Goal/DoD、配置、creation/epoch、当前 revision、原 30 秒窗口与 owner 时效，
+并逐值比较完整 Bootstrap。dispatcher 另向 File owner 重读原 scope 的实际目录、资源与托管配置，
+`CompileObservedFirstExecutionPreparation` 在私有 reservation reducer 的真实 CAS 前像与当前时钟上再完整反查。
+File epoch 不替代原文观察；资源和配置的完整 bytes/hash/stat 必须一致。内部目录只允许由 owner 自身落盘产生的
+mtime/ctime 变化，其 path/device/inode/mode/UID/GID/访问能力及诊断仍完整相等；交付目录仍逐值比较。
+
+首次 reservation 将 completion ID、原 revision、消费时间及完整独立 File 观察，与 pending/epoch 和缺失的默认
+provider selection 一次 CAS 保存；失败零局部写入。受限 File 历史不进入普通 DTO/HTTP，repository 重载反查
+原 completion、完整 Bootstrap、Run payload 与消费观察谱系。新 blocked/unknown、缺来源、漂移或过期不能回退旧成功。
+原 request 的 pending/settled 重放先于当前状态核验，保留原消费事实，不续期、不重发、不重新授 forward。
+
+首次执行的判断不能由缺确认、已推进 epoch 或已拒绝 intent 绕过；没有真实已接纳 Run 历史就仍须首次门禁。
+已有 Run 或真实历史 `new_run_activated` 的 Restart 保留原替换协议，不消费首次 no-Run completion；
+Resume 保留原 Run seal。这一准备消费不替代 Run owner SM-1 接纳，不证明 Runtime fullflow 或终态交付通过。
+
 非空 MCP 选择只由原 accepted 延续发送 `/mcp/preparation/observe`。Workspace 从 detached 纯 reducer 的
 完整原选择构造具体 DTO；MCP owner 重新读取精确 Registry，在有界 stdio 会话执行 initialize、已选类别 list、
 close，独立反查完整原协议回复，零业务工具调用。原始 frames/stderr 随私有 MCP 证据保全，公开只保留引用。
@@ -440,6 +457,11 @@ memory/file/scoped persistence 保全该 owner-private 字段，拒绝错版本�
 
 私有 `workspaceFreshIntentReserved` 只接收已校验 fresh typed input 的完整规范化身份，
 绑定 scope、request、kind、StartupInputHash 和完整 bootstrap，不读取配置或凭据。
+生产入口把 bootstrap 的 ProviderSelection 一并交给该私有事实；仅在新 reservation 的完整当前前像门禁后，
+复用原纯 metadata reducer 物化缺失的 target-only 默认选择，并与 pending／epoch 一次 CAS 提交。
+已有 Workspace 默认选择保持不变，Run-scoped reasoning effort 不成为默认值。不得先用独立 metadata CAS
+推进 revision，再试图消费前一 revision 的准备记录；失败／拒绝零局部 metadata，写后丢回复仍不授 forward。
+首次执行在这同一次 reservation CAS 消费精确 STEP04 completion，详见上文；已有 Run 的 Restart 不复用首次 no-Run 准备，任何入口均不补造或续期 completion。
 相同 pending 身份先于可变 revision/admission 识别且不再 CAS；不同身份不能绕过未决项。
 只有 CAS 明确成功的本次调用返回新登记标记；写后丢回复、取消、冲突、重开或重复均不能取得第二个标记。
 该标记不是执行授权。reservation 推进持久 revision/epoch，已有准备记录只能投影 stale，不能清除原历史。

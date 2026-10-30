@@ -114,10 +114,10 @@ func TestDriveRuntimeIsolatedInputReviewMainline(t *testing.T) {
 			}
 		}
 	}
-	if adapter != shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint {
+	if adapter != shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
 		t.Fatal("default template does not enable reviewed conjunctive inputs")
 	}
-	if protocol != runtimecontract.RuntimeValidationInputReviewProtocolV2 {
+	if protocol != runtimecontract.RuntimeValidationInputReviewProtocolV3 {
 		t.Fatal("default template does not seal the obligation-review protocol")
 	}
 	options := validationInputReviewMainlineOptions{Adapter: adapter, ValidationCount: 1, ProtocolRef: protocol}
@@ -125,7 +125,13 @@ func TestDriveRuntimeIsolatedInputReviewMainline(t *testing.T) {
 		t.Run(mode, func(t *testing.T) { runValidationInputReviewMainline(t, mode, "", options) })
 	}
 	t.Run("multiple_cwi", func(t *testing.T) {
-		runValidationInputReviewMainline(t, "consistent", "", validationInputReviewMainlineOptions{Adapter: adapter, ValidationCount: 3, ProtocolRef: protocol})
+		multiple := validationInputReviewMainlineOptions{Adapter: adapter, ValidationCount: 3, ProtocolRef: protocol}
+		baseline := runValidationInputReviewMainline(t, "consistent", "", multiple)
+		t.Run("receipt-reply-loss", func(t *testing.T) {
+			if got := runValidationInputReviewMainline(t, "consistent", "after_project_receipt", multiple); got != baseline {
+				t.Fatalf("multiple CWI recovery repeated provider calls: %d != %d", got, baseline)
+			}
+		})
 	})
 	baseline := runValidationInputReviewMainline(t, "clarify", "", options)
 	for _, cut := range []string{"after_review_document", "after_review_classification", "after_ticket_binding", "after_information_commit", "after_review_binding"} {
@@ -225,7 +231,7 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 	}
 	projectExecutionCounter := filepath.Join(root, "project-executions")
 	// 成功合取的 ordinary/race 两阶段均执行原工程；已知 ordinary 失败则不进入 race。
-	projectExecutionCount := "executed\nexecuted\n"
+	projectExecutionCount := strings.Repeat("executed\n", 2*options.ValidationCount)
 	if mode == "project_history_failure" {
 		projectExecutionCount = "executed\n"
 		if options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
@@ -837,6 +843,9 @@ func %s(t *testing.T) {
 				receiptBeforeRecovery = &before
 				counter, err := os.ReadFile(projectExecutionCounter)
 				expectedCount := projectExecutionCount
+				if options.ValidationCount > 1 {
+					expectedCount = "executed\nexecuted\n" // first receipt, remaining CWIs are not dispatched yet
+				}
 				if projectBehaviorRepair {
 					expectedCount = "executed\nexecuted\n"
 				}
@@ -971,6 +980,15 @@ func %s(t *testing.T) {
 	if projectAdapter && (success || mode == "project_history_failure") {
 		if options.TerminalSnapshot && success {
 			projectExecutionCount = runtimeReviewedGitProjectExecutionCount(t, runtimeStateRecordFromAggregate(completed))
+		} else if options.ValidationCount > 1 && success {
+			// Each later CWI requires fresh currentness of the already settled
+			// predecessors. These owner observations do not create new receipts
+			// or credit; their exact per-CWI request identities remain unique.
+			wanted := make(map[common.CoverageWorkItemID]int)
+			for i := 2; i <= options.ValidationCount; i++ {
+				wanted[common.CoverageWorkItemID(fmt.Sprintf("cwi-%d", i))] = options.ValidationCount + 1 - i
+			}
+			projectExecutionCount = runtimeReviewedProjectExecutionCount(t, runtimeStateRecordFromAggregate(completed), options.ValidationCount, wanted)
 		}
 		// Replay/raw-read requires the original resource owners. Check before a
 		// delivery cut replaces those owners with a separate Hub.
@@ -986,7 +1004,7 @@ func %s(t *testing.T) {
 		if options.Adapter == shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic {
 			protocol = "shell/go-test-json/project-conjunction-behavior/v3"
 		}
-		expectation := projectConjunctionExpectation{ProtocolRef: protocol}
+		expectation := projectConjunctionExpectation{ProtocolRef: protocol, ValidationReceipts: options.ValidationCount}
 		if projectBehaviorRepair {
 			expectation.RepairSources = len(preparations[requirements[0].Hash].CheckAttestations) + 1
 		}
@@ -1006,7 +1024,11 @@ func %s(t *testing.T) {
 				}
 				assertProjectReceiptBudgetConsumption(t, runtimeAggregateFromRecord(*reopened.RuntimeState), current)
 			} else {
-				assertProjectReceiptPreservedAfterRecovery(t, *receiptBeforeRecovery, runtimeAggregateFromRecord(*reopened.RuntimeState), originalProjectReceipt)
+				additional := 0
+				if success {
+					additional = options.ValidationCount - 1 // only the remaining declared CWIs may produce new receipts
+				}
+				assertProjectReceiptPreservedAfterRecovery(t, *receiptBeforeRecovery, runtimeAggregateFromRecord(*reopened.RuntimeState), originalProjectReceipt, additional)
 			}
 		}
 	}

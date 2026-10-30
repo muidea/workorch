@@ -435,6 +435,7 @@ DEPLOYED_CONVERGENCE_PROFILE_ID ?=
 verify-deployed-convergence-manifest-tests: verify-build-identity-tests verify-lsp-bridge-prd-evidence-tests
 	python3 ./scripts/test_verify_deployed_convergence_manifest.py
 	python3 ./scripts/test_release_convergence_gate.py
+	python3 ./scripts/test_runtime_trace_summary.py
 
 .PHONY: verify-build-identity-tests verify-lsp-bridge-prd-evidence-tests verify-lsp-bridge-prd-evidence
 verify-build-identity-tests:

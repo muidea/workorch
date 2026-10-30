@@ -379,6 +379,16 @@ func compileRuntimeBindingValidationInputReviewInSession(binding CoverageEvidenc
 	if err != nil {
 		return RuntimeValidationProofRequirementBinding{}, err
 	}
+	// preimages has just compared the complete detached raw ledger. Within
+	// this call-local session only, the exact binding can reuse its pure review
+	// projection. Never retain this with cross-event historical products.
+	if session != nil {
+		for _, prior := range session.reviews {
+			if runtimeRawEqual(prior.binding, binding) {
+				return prior.result.Clone(), nil
+			}
+		}
+	}
 	var matched runtimeAssessmentPurposeBindingPreimage
 	matches := 0
 	for _, entry := range entries {
@@ -417,6 +427,9 @@ func compileRuntimeBindingValidationInputReviewInSession(binding CoverageEvidenc
 	}
 	if reviews != 1 {
 		return RuntimeValidationProofRequirementBinding{}, fmt.Errorf("input review requires unique original consistent report")
+	}
+	if session != nil {
+		session.reviews = append(session.reviews, runtimeHistoricalInputReviewPreimage{binding: cloneCoverageEvidenceBindingRaw(binding), result: result.Clone()})
 	}
 	return result, nil
 }

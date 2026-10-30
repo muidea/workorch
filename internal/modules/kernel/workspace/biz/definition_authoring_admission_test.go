@@ -286,7 +286,7 @@ func TestAuthoringVerificationApplicabilityBlocksWrongDeclarationBeforeRun(t *te
 }
 
 // Real static bootstrap and Workspace/Run Start; no SM-2/3/4 execution or credit.
-func TestAuthoringApplicableDeclarationsSurviveProductionBootstrapAndExplicitStart(t *testing.T) {
+func TestAuthoringApplicableDeclarationsSurviveBootstrapWithoutBypassingPreparation(t *testing.T) {
 	for _, mode := range []string{"wildcard", "exact"} {
 		t.Run(mode, func(t *testing.T) { testAuthoringApplicableBootstrapAndStart(t, mode) })
 	}
@@ -381,11 +381,11 @@ func testAuthoringApplicableBootstrapAndStart(t *testing.T, mode string) {
 	}
 	defer run.Stop(ctx)
 	result, err := owners.workspace.executeExecutionIntent(magicevent.NewEventWithContext(workspaceevents.TopicWorkspaceCommandExecutionIntent, "application/workorchd", workspaceevents.CommandDestination, magicevent.NewHeader(), ctx, workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: confirmation.WorkspaceID, RequestID: "explicit-start", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: bootstrap}))
-	if err != nil || result.RunID == "" {
-		t.Fatalf("explicit Start did not reach real Run owner: %+v %v", result, err)
+	if err == nil || result.RunID != "" {
+		t.Fatalf("unprepared first Start reached Run owner: %+v %v", result, err)
 	}
 	runs, err = owners.repositories.Runs.List(ctx)
-	if err != nil || len(runs) != 1 {
-		t.Fatalf("explicit Start cardinality: %d %v", len(runs), err)
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("unprepared Start changed Run cardinality: %d %v", len(runs), err)
 	}
 }

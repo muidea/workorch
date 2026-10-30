@@ -2,7 +2,6 @@ package workorchruntimecontract
 
 import (
 	"fmt"
-	"reflect"
 )
 
 func validateImplementationWorkingBindingSemanticSource(round RuntimeImplementationWorkRound, semantic RuntimeSemanticPlanningLedger) error {
@@ -16,7 +15,7 @@ func validateImplementationWorkingBindingSemanticSource(round RuntimeImplementat
 			batchMatches++
 		}
 	}
-	if batchMatches != 1 || !reflect.DeepEqual(binding.Proposals, semantic.Document.Proposals) || !reflect.DeepEqual(binding.Feasibilities, semantic.Feasibilities) {
+	if batchMatches != 1 || !runtimeRawEqual(binding.Proposals, semantic.Document.Proposals) || !runtimeRawEqual(binding.Feasibilities, semantic.Feasibilities) {
 		return fmt.Errorf("implementation working binding differs from original accepted document/owner feasibility")
 	}
 	for _, obligation := range semantic.Manifest.ProofObligations {
@@ -31,7 +30,7 @@ func validateImplementationWorkingBindingSemanticSource(round RuntimeImplementat
 		reservation.GovernanceReceiptHash, reservation.GovernanceDispatchIDs = "", nil
 		reservation.OutcomeUnknownExecutionKey, reservation.OutcomeUnknownFence = "", 0
 		reservation.Hash = StableRuntimeImplementationWorkRoundHash(reservation)
-		if work.RoundHash != reservation.Hash || work.Ordinal != round.Ordinal || work.PolicyHash != round.PolicyHash || work.PrecedingReceiptSetHash != round.PrecedingReceiptSetHash || round.ScopeObservation == nil || !reflect.DeepEqual(work.Scope, *round.ScopeObservation) || !reflect.DeepEqual(work.MutationInputCatalogs, binding.MutationInputCatalogs) || !reflect.DeepEqual(work.ExcludedTargetRefs, binding.ExcludedTargetRefs) {
+		if work.RoundHash != reservation.Hash || work.Ordinal != round.Ordinal || work.PolicyHash != round.PolicyHash || work.PrecedingReceiptSetHash != round.PrecedingReceiptSetHash || round.ScopeObservation == nil || !runtimeRawEqual(work.Scope, *round.ScopeObservation) || !runtimeRawEqual(work.MutationInputCatalogs, binding.MutationInputCatalogs) || !runtimeRawEqual(work.ExcludedTargetRefs, binding.ExcludedTargetRefs) {
 			return fmt.Errorf("implementation working binding does not retain exact manifest reservation/protection source")
 		}
 		return nil
@@ -134,7 +133,7 @@ func validateRuntimeImplementationWorkStateInSession(definition RuntimeDefinitio
 	}
 	raw := RuntimeStateRecord{Definition: definition, Facts: facts, ImplementationWork: ledger, SemanticPlanning: semantic, ActiveDispatch: active, CompletedDispatches: completed, OperationReceipts: receipts, OperationGovernanceBindings: governance, ExecutionBudget: budget}
 	for _, prior := range semanticSession.workStates {
-		if reflect.DeepEqual(prior, raw) {
+		if runtimeRawEqual(prior, raw) {
 			return nil
 		}
 	}
@@ -194,7 +193,7 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 			}
 			expectedManifest.InputReviewInformation = snapshot.Manifest.InputReviewInformation
 			expectedManifest.Hash = StableRuntimeSemanticPlanManifestHash(expectedManifest)
-			if !reflect.DeepEqual(expectedManifest, *snapshot.Manifest) {
+			if !runtimeRawEqual(expectedManifest, *snapshot.Manifest) {
 				return fmt.Errorf("implementation purpose vocabulary differs from independent prior collective receipts")
 			}
 			if !work.PurposeChoiceOnly || work.Scope.Request.RequestID != choice.ScopeRequestID || work.Scope.Request.CoverageWorkItemID != choice.CoverageWorkItemID || choice.Purpose == RuntimeImplementationWorkPurposeEffect && !work.EffectAvailable {
@@ -307,7 +306,7 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 			preDispatch.GovernanceReceiptHash, preDispatch.GovernanceDispatchIDs = "", nil
 			preDispatch.OutcomeUnknownExecutionKey, preDispatch.OutcomeUnknownFence = "", 0
 			preDispatch.Hash = StableRuntimeImplementationWorkRoundHash(preDispatch)
-			if !reflect.DeepEqual(dispatch.ImplementationWorkCommitment, &preDispatch) || round.DispatchAuthorityHash != dispatch.DispatchAuthorityHash || dispatch.DispatchAuthorityHash != StableRuntimeDispatchAuthorityHash(dispatch) {
+			if !runtimeRawEqual(dispatch.ImplementationWorkCommitment, &preDispatch) || round.DispatchAuthorityHash != dispatch.DispatchAuthorityHash || dispatch.DispatchAuthorityHash != StableRuntimeDispatchAuthorityHash(dispatch) {
 				return fmt.Errorf("implementation round differs from original pre-dispatch commitment")
 			}
 			joined[dispatch.ID] = true

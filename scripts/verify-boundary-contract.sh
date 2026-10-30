@@ -1961,8 +1961,8 @@ restart_compiler_file="internal/modules/application/workorchd/biz/appservice/act
 restart_admission_line="$(grep -n -m1 -F -- 'EnsureWorkspaceDefinitionAdmission(' "$restart_compiler_file" | cut -d: -f1)"
 restart_activation_line="$(grep -n -m1 -F -- 'workspaceRuntimeActivation(' "$restart_compiler_file" | cut -d: -f1)"
 if [[ -z "$restart_admission_line" || -z "$restart_activation_line" || "$restart_admission_line" -ge "$restart_activation_line" ]] ||
-	! grep -q -F -- 'workspacecore.EnsureManagedConfigs(' internal/modules/application/workorchd/biz/appservice/activationports/execution_context.go; then
-	echo "boundary contract violation: Restart must validate Definition admission before managed-config materialization" >&2
+	grep -q -F -- 'workspacecore.EnsureManagedConfigs(' internal/modules/application/workorchd/biz/appservice/activationports/execution_context.go; then
+	echo "boundary contract violation: Restart must validate Definition admission before read-only bootstrap compilation; managed writes belong to explicit preparation" >&2
 	exit 1
 fi
 
@@ -2457,7 +2457,7 @@ fi
 matches="$(
   find internal/modules/kernel/orchestrator/biz -maxdepth 1 -type f -name '*.go' ! -name '*_test.go' -print0 |
     xargs -0 -r grep -n -E -- '\.runtimeController\.[A-Z][A-Za-z0-9_]*\(' |
-    grep -v -E -- '\.runtimeController\.(ApplyInternalEvent|Load|QueryOperationReceipt)\(' |
+    grep -v -E -- '\.runtimeController\.(ApplyInternalEvent|Load|QueryOperationReceipt|CompileEvidenceApplicabilityRead)\(' |
     # Only the drained owner's lifecycle shell may discard pure compilation
     # inputs. This is not a reducer/transition facade; adapters remain forbidden.
     grep -v -E -- '^internal/modules/kernel/orchestrator/biz/owner.go:[0-9]+:[[:space:]]*m\.runtimeController\.ReleaseHistoricalCompilation\(\)$' || true
@@ -2527,7 +2527,7 @@ fi
 # All reducer/CAS mutation handlers are package-private.
 runtime_controller_unreviewed_exports="$(
   grep -R -n -E --include='*.go' --exclude='*_test.go' -- '^func \(c \*RuntimeController\) [A-Z][A-Za-z0-9_]*\(' "$runtime_transition_root" |
-    grep -v -E -- ' (ApplyInternalEvent|Load|QueryOperationReceipt)\(' |
+    grep -v -E -- ' (ApplyInternalEvent|Load|QueryOperationReceipt|CompileEvidenceApplicabilityRead)\(' |
     grep -v -E -- '^internal/modules/kernel/orchestrator/biz/runtime/controller.go:[0-9]+:func \(c \*RuntimeController\) ReleaseHistoricalCompilation\(\) \{$' || true
 )"
 if [[ -n "$runtime_controller_unreviewed_exports" ]]; then
@@ -2538,14 +2538,16 @@ unreviewed read surface.
 $runtime_controller_unreviewed_exports
 
 Add owner mutation as a concrete RuntimeInternalEvent and package-private
-handler. The only exported methods are ApplyInternalEvent, Load and
-QueryOperationReceipt; the only non-state lifecycle exception is
+handler. State mutation is only ApplyInternalEvent; reviewed reads are Load,
+QueryOperationReceipt and the complete pure CompileEvidenceApplicabilityRead
+compiler. The only non-state lifecycle exception is
 ReleaseHistoricalCompilation after owner drain.
 EOF
   exit 1
 fi
 if ! grep -q -E -- 'func \(c \*RuntimeController\) Load\(' "$runtime_transition_root/controller.go" ||
-   ! grep -q -E -- 'func \(c \*RuntimeController\) QueryOperationReceipt\(' "$runtime_transition_root/operation_receipt.go"; then
+   ! grep -q -E -- 'func \(c \*RuntimeController\) QueryOperationReceipt\(' "$runtime_transition_root/operation_receipt.go" ||
+   ! grep -q -E -- 'func \(c \*RuntimeController\) CompileEvidenceApplicabilityRead\(' "$runtime_transition_root/evidence_applicability_transition.go"; then
   echo "boundary contract violation: RuntimeController scoped read surface is incomplete" >&2
   exit 1
 fi
@@ -5856,8 +5858,8 @@ if ! grep -q -F 'ValidationRecipeAdapterProjectNative = "shell/project-native-va
 	echo "boundary contract violation: project-native validation recipe is not resolved solely inside the Shell owner from the bound File manifest" >&2
 	exit 1
 fi
-if ! grep -q -F 'shell/go-test-json/v1' docs/40-profiles-capabilities/software-dev/goal-coverage-and-dod.md; then
-	echo "boundary contract violation: Shell Go-native proof adapter contract is no longer documented at the capability boundary" >&2
+if ! grep -q -E '^[[:space:]]*shellGoTestObservationProtocolRef[[:space:]]*=[[:space:]]*"shell/go-test-json/v1"' internal/modules/blocks/shell/biz/shell_runtime_validation.go; then
+	echo "boundary contract violation: Shell Go-native proof adapter lost its owner-defined observation protocol" >&2
 	exit 1
 fi
 for marker in \

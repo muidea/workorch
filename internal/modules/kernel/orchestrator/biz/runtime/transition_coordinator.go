@@ -35,6 +35,8 @@ func NewRuntimeTransitionCoordinator(repository RuntimeStateRepository) (*Runtim
 // Commit validates the complete cross-SM invariant and advances exactly one
 // aggregate revision before delegating opaque CAS persistence to the Run owner.
 func (c *RuntimeTransitionCoordinator) Commit(ctx context.Context, aggregate RuntimeAggregate, expectedRevision uint64) error {
+	region := startRuntimeTraceRegion(ctx, "workorch.runtime.commit")
+	defer region.End()
 	if c == nil || c.repository == nil {
 		return common.ErrInvalidArgument
 	}
@@ -104,6 +106,8 @@ func (c *RuntimeTransitionCoordinator) Commit(ctx context.Context, aggregate Run
 }
 
 func (c *RuntimeTransitionCoordinator) loadTransitionPreimage(ctx context.Context, aggregate RuntimeAggregate, expectedRevision uint64) (RuntimeAggregate, error) {
+	region := startRuntimeTraceRegion(ctx, "workorch.runtime.commit_reread")
+	defer region.End()
 	if repository, ok := c.repository.(transitionPreimageRepository); ok {
 		request := RuntimeTransitionPreimageRequest{call: &runtimeTransitionPreimageCall{
 			workspaceID: aggregate.Facts.WorkspaceID, runID: aggregate.Facts.RunID, revision: expectedRevision,

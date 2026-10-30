@@ -183,13 +183,27 @@ func TestOwnerHistoricalCompilerAllowlistAndEviction(t *testing.T) {
 		t.Fatal("retained whole current state")
 	}
 	s.seeds = make([]RuntimeDefinitionSeed, runtimeOwnerHistoricalEntryLimit+1)
-	if retainRuntimeOwnerHistoricalSubtrees(s) != nil {
-		t.Fatal("entry limit did not evict whole optimization")
+	for i := range s.seeds {
+		s.seeds[i].Hash = fmt.Sprint(i)
+	}
+	retained = retainRuntimeOwnerHistoricalSubtrees(s)
+	if len(retained.seeds) != runtimeOwnerHistoricalEntryLimit || retained.seeds[0].Hash != "1" {
+		t.Fatal("bounded suffix eviction lost the complete entry limit")
+	}
+	s.seeds[1].Hash = "changed container"
+	if retained.seeds[0].Hash != "1" {
+		t.Fatal("retained slice aliases discarded container")
 	}
 	s.seeds = nil
-	s.manifests["same hash"] = []runtimeSemanticManifestValidationEntry{{validated: runtimeValidatedSemanticManifest{documents: &runtimeSemanticDocumentValidationSession{values: make([]RuntimeSemanticPlanDocument, runtimeOwnerHistoricalEntryLimit)}}}}
-	if retainRuntimeOwnerHistoricalSubtrees(s) != nil {
+	documents := &runtimeSemanticDocumentValidationSession{manifest: RuntimeSemanticPlanManifest{Hash: "raw manifest"}, values: make([]RuntimeSemanticPlanDocument, runtimeOwnerHistoricalEntryLimit)}
+	s.manifests["same hash"] = []runtimeSemanticManifestValidationEntry{{validated: runtimeValidatedSemanticManifest{documents: documents}}}
+	retained = retainRuntimeOwnerHistoricalSubtrees(s)
+	kept := retained.manifests["same hash"][0].validated.documents
+	if len(kept.values) != runtimeOwnerHistoricalEntryLimit-1 || !reflect.DeepEqual(kept.manifest, documents.manifest) {
 		t.Fatal("nested documents escaped retention limit")
+	}
+	if kept == documents || len(documents.values) != runtimeOwnerHistoricalEntryLimit {
+		t.Fatal("retention changed original document cache")
 	}
 }
 

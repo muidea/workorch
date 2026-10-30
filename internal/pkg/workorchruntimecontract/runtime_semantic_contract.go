@@ -882,7 +882,7 @@ func validateRuntimeSemanticPlanManifestInSession(m RuntimeSemanticPlanManifest,
 	}
 	manifestKey := strings.TrimSpace(m.Hash)
 	for _, entry := range session.manifests[manifestKey] {
-		if reflect.DeepEqual(entry.raw, m) {
+		if runtimeRawEqual(entry.raw, m) {
 			return entry.validated, nil
 		}
 	}
@@ -1140,7 +1140,7 @@ func validateRuntimeSemanticOwnerCatalogCollectionInSession(catalogs []RuntimeOp
 func validateRuntimeAdmissibilityInSemanticSession(raw RuntimeOperationAdmissibility, session *runtimeSemanticValidationSession) (RuntimeOperationAdmissibility, error) {
 	key := strings.TrimSpace(raw.SnapshotID)
 	for _, entry := range session.catalogs[key] {
-		if reflect.DeepEqual(entry.raw, raw) {
+		if runtimeRawEqual(entry.raw, raw) {
 			return entry.normalized, nil
 		}
 	}
@@ -1869,11 +1869,11 @@ func (d RuntimeSemanticPlanDocument) ValidateAgainstManifest(manifest RuntimeSem
 func validateRuntimeSemanticPlanDocumentAgainstValidatedManifest(d RuntimeSemanticPlanDocument, validated runtimeValidatedSemanticManifest) error {
 	// 只有同一完整 manifest 的 exact raw document 可复用；不能靠 Hash 或规范化后的正文命中。
 	session := validated.documents
-	if session == nil || len(session.values) != 0 && !reflect.DeepEqual(session.manifest, validated.manifest) {
+	if session == nil || len(session.values) != 0 && !runtimeRawEqual(session.manifest, validated.manifest) {
 		return validateRuntimeSemanticPlanDocumentAgainstValidatedManifestUncached(d, validated)
 	}
 	for _, previous := range session.values {
-		if reflect.DeepEqual(previous, d) {
+		if runtimeRawEqual(previous, d) {
 			return nil
 		}
 	}
@@ -2570,7 +2570,7 @@ func (g RuntimeSemanticPlanningGeneration) Validate() error {
 func validateRuntimeSemanticPlanningGenerationNormalized(raw, g RuntimeSemanticPlanningGeneration, session *runtimeSemanticValidationSession) error {
 	if session.ownerHistory != nil {
 		for _, entry := range session.ownerHistory.generations {
-			if reflect.DeepEqual(entry.raw, raw) && reflect.DeepEqual(entry.normalized, g) {
+			if runtimeRawEqual(entry.raw, raw) && runtimeRawEqual(entry.normalized, g) {
 				return nil
 			}
 		}

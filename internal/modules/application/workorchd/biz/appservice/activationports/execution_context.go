@@ -2,12 +2,12 @@ package activationports
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationcore"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/configcore"
-	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/workspacecore"
 	workspacecontracts "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/contracts"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -50,14 +50,14 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 		return workspaceRuntimeActivationBuild{}, err
 	}
 	toolHints := WorkspaceToolContextHintsFromTemplate(workspace, template)
-	if err := workspacecore.EnsureManagedConfigs(workspace.InternalDirectory, toolHints.Template, toolHints.Workspace); err != nil {
-		return workspaceRuntimeActivationBuild{}, err
-	}
+	// Managed configuration is installed by explicit preparation, not by this
+	// read-only bootstrap compiler. Even rewriting equal JSON changes file
+	// identity/timestamps and invalidates the File owner's exact observation.
 	defaultMCPServerIDs := activationcore.DefaultMCPServerIDsFromContextHints(toolHints.Effective)
 	defaultCapabilityIDs := activationcore.DefaultCapabilityIDsFromContextHints(toolHints.Effective)
 	bindings, err := loadWorkspaceRuntimeActivationBindings(ctx, request, effectiveGoal, effectiveDoD)
 	if err != nil {
-		return workspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, fmt.Errorf("activation owner bindings: %w", err)
 	}
 	defaultSoul := bindings.defaultSoul
 	executionSoul := workspaceExecutionSoul(defaultSoul, bindings.stageSouls)
@@ -74,7 +74,7 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 		SkillHubCatalog: request.SkillHubCatalog,
 	})
 	if err != nil {
-		return workspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, fmt.Errorf("activation Skill selection: %w", err)
 	}
 	skills := skillResult.Skills
 	skillIDs := skillResult.IDs
@@ -87,15 +87,15 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 		Skills:               skills,
 	})
 	if err != nil {
-		return workspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, fmt.Errorf("activation MCP selection: %w", err)
 	}
 
 	if err := validateSelectedMCPCapabilityOwnership(mcpSelection); err != nil {
-		return workspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, fmt.Errorf("activation MCP ownership: %w", err)
 	}
 	toolKinds := append(activationcore.RequiredToolKinds(skills), runtimeMCPCapabilityToolKinds(mcpSelection.Capabilities)...)
 	if err := ValidateSoulRoutingCapabilitySelection(ctx, request.Hub, soulRouting, skillIDs, mcpSelection.MCPServerIDs, mcpSelection.CapabilityIDs, activationcore.CapabilityCategories(mcpSelection.Capabilities), toolKinds); err != nil {
-		return workspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, fmt.Errorf("activation Soul capability routing: %w", err)
 	}
 
 	continuation, err := mergeWorkspaceExecutionContinuations(definitionChangeImpact, governanceHistory)
@@ -105,7 +105,7 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 
 	providerSelection, err := resolveActivationProviderSelection(ctx, request.Hub, workspace.DefaultLLMSelection)
 	if err != nil {
-		return workspaceRuntimeActivationBuild{}, err
+		return workspaceRuntimeActivationBuild{}, fmt.Errorf("activation Provider selection: %w", err)
 	}
 
 	runtimeActivation, err := RuntimeActivationContext(
@@ -132,7 +132,7 @@ func buildWorkspaceRuntimeActivation(ctx context.Context, request workspaceRunti
 		return workspaceRuntimeActivationBuild{}, err
 	}
 	if workspace.StartupInput != nil && profiles.ProfileContractsHash != workspace.StartupInput.RuntimeProfileContractsHash {
-		return workspaceRuntimeActivationBuild{}, common.ErrConflict
+		return workspaceRuntimeActivationBuild{}, fmt.Errorf("%w: activation Profile differs from sealed startup input", common.ErrConflict)
 	}
 	runtimeActivation.ExecutionContract.ProfileContracts = profiles.ProfileContracts
 	return workspaceRuntimeActivationBuild{

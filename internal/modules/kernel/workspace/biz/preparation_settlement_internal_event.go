@@ -49,14 +49,14 @@ func lookupFreshIntentOriginal(current *workspacemodel.Workspace, reservation wo
 	}
 	for _, settled := range current.PreparationFence.Settled {
 		if settled.Reservation.RequestID == reservation.RequestID {
-			if settled.Reservation != reservation || settled.Receipt.PayloadHash != query.PayloadHash {
+			if !sameWorkspaceFreshIntentInput(settled.Reservation, reservation) || settled.Receipt.PayloadHash != query.PayloadHash {
 				return nil, common.ErrConflict
 			}
 			receipt := settled.Receipt
 			return &receipt, nil
 		}
 	}
-	if current.PreparationFence.Pending == nil || *current.PreparationFence.Pending != reservation {
+	if current.PreparationFence.Pending == nil || !sameWorkspaceFreshIntentInput(*current.PreparationFence.Pending, reservation) {
 		return nil, common.ErrConflict
 	}
 	return nil, nil
@@ -89,7 +89,7 @@ func reduceWorkspaceFreshIntentSettlement(current *workspacemodel.Workspace, fac
 	next := *current
 	next.PreparationFence = current.PreparationFence.Clone()
 	next.PreparationFence.Settled = append(next.PreparationFence.Settled, workspacemodel.WorkspaceFreshIntentSettlement{
-		Reservation: reservation, Receipt: *fact.Observation.Receipt,
+		Reservation: *current.PreparationFence.Pending, Receipt: *fact.Observation.Receipt,
 	})
 	next.PreparationFence.Pending = nil
 	if err := workspacemodel.ValidatePreparationFenceTransition(current, &next); err != nil {

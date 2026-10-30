@@ -1,7 +1,5 @@
 package workorchruntimecontract
 
-import "reflect"
-
 // Complete pure consumer results live only in one owner-private transaction.
 // A detached full source superset, not a digest or normalized projection, is
 // compared at every gate. The two consumers cannot certify each other.
@@ -20,7 +18,7 @@ func (c *runtimeHistoricalSourceCompiler) validate(s RuntimeLineageAssertionSour
 	}
 	index := -1
 	for i := range c.images {
-		if reflect.DeepEqual(c.images[i].raw, s) {
+		if runtimeRawEqual(c.images[i].raw, s) {
 			index = i
 			if adjudications && c.images[i].adjudications || !adjudications && c.images[i].behavior {
 				return nil

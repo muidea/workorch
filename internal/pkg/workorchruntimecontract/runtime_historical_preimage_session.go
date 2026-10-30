@@ -1,13 +1,12 @@
 package workorchruntimecontract
 
-import "reflect"
-
 // A private, single consumer-call index. A successful full preimage traversal
 // is retained only with a detached exact raw ledger; never match on hash alone.
 type runtimeHistoricalPreimageSession struct {
 	semantic          *runtimeSemanticValidationSession
 	ledger            *RuntimeSemanticPlanningLedger
 	entries           []runtimeAssessmentPurposeBindingPreimage
+	reviews           []runtimeHistoricalInputReviewPreimage
 	lineageOperations []RuntimeStateRecord
 	// Only the owner-private transaction enables complete consumer subresults.
 	// Ordinary public consumers keep their independent full-validation path.
@@ -45,7 +44,7 @@ func runtimeValidateLineageOperationsInSession(sources RuntimeLineageAssertionSo
 	}
 	raw := runtimeLineageOperationSourceRecord(sources)
 	for _, prior := range session.lineageOperations {
-		if reflect.DeepEqual(prior, raw) {
+		if runtimeRawEqual(prior, raw) {
 			return nil
 		}
 	}
@@ -60,7 +59,7 @@ func (s *runtimeHistoricalPreimageSession) preimages(ledger RuntimeSemanticPlann
 	if s == nil {
 		return runtimeAssessmentPurposePreimagesFromSemanticLedger(ledger, false)
 	}
-	if s.ledger != nil && reflect.DeepEqual(*s.ledger, ledger) {
+	if s.ledger != nil && runtimeRawEqual(*s.ledger, ledger) {
 		return s.entries, nil
 	}
 	if s.semantic == nil {
@@ -72,5 +71,13 @@ func (s *runtimeHistoricalPreimageSession) preimages(ledger RuntimeSemanticPlann
 	}
 	raw := cloneRuntimeSemanticPlanningLedgerRaw(ledger)
 	s.ledger, s.entries = &raw, entries
+	// These products depend on the complete ledger admitted above. A new raw
+	// ledger invalidates them, even if its declared hash/IDs did not change.
+	s.reviews = nil
 	return entries, nil
+}
+
+type runtimeHistoricalInputReviewPreimage struct {
+	binding CoverageEvidenceBinding
+	result  RuntimeValidationProofRequirementBinding
 }

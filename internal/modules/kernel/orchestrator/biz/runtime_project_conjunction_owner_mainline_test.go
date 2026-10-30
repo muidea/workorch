@@ -48,8 +48,9 @@ func TestDriveRuntimeProjectConjunctionOwnerMainline(t *testing.T) {
 }
 
 type projectConjunctionExpectation struct {
-	ProtocolRef   string
-	RepairSources int
+	ProtocolRef        string
+	RepairSources      int
+	ValidationReceipts int
 }
 
 func assertProjectReceiptReplyLossBoundary(t *testing.T, aggregate runtime.RuntimeAggregate, success bool, selected ...projectConjunctionExpectation) runtimecontract.RuntimeOperationReceipt {
@@ -120,11 +121,26 @@ func assertProjectReceiptBudgetConsumption(t *testing.T, aggregate runtime.Runti
 	}
 }
 
-func assertProjectReceiptPreservedAfterRecovery(t *testing.T, before, after runtime.RuntimeAggregate, original runtimecontract.RuntimeOperationReceipt) {
+func assertProjectReceiptPreservedAfterRecovery(t *testing.T, before, after runtime.RuntimeAggregate, original runtimecontract.RuntimeOperationReceipt, expectedAdditional ...int) {
 	t.Helper()
+	additional := 0
+	if len(expectedAdditional) != 0 {
+		additional = expectedAdditional[0]
+	}
 	replayed, found := runtimecontract.RuntimeOperationReceiptForExecutionKeyFence(after.OperationReceipts, original.ExecutionKey, original.Fence)
-	if !found || !runtimecontract.SameRuntimeOperationReceipt(original, replayed) || len(before.OperationReceipts) != len(after.OperationReceipts) {
+	if !found || !runtimecontract.SameRuntimeOperationReceipt(original, replayed) || len(before.OperationReceipts)+additional != len(after.OperationReceipts) {
 		t.Fatal("恢复替换或重复生成原 owner receipt")
+	}
+	for _, prior := range before.OperationReceipts {
+		matches := 0
+		for _, current := range after.OperationReceipts {
+			if prior.ExecutionKey == current.ExecutionKey && prior.Fence == current.Fence && runtimecontract.SameRuntimeOperationReceipt(prior, current) {
+				matches++
+			}
+		}
+		if matches != 1 {
+			t.Fatal("recovery changed, lost or duplicated an existing owner receipt")
+		}
 	}
 	assertProjectReceiptBudgetConsumption(t, after, replayed)
 	if !reflect.DeepEqual(before.Facts.Recovery, after.Facts.Recovery) || !reflect.DeepEqual(before.OperationRecoveryAuthorizations, after.OperationRecoveryAuthorizations) {
@@ -146,9 +162,13 @@ func assertProjectReceiptPreservedAfterRecovery(t *testing.T, before, after runt
 func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Context, hub magicevent.Hub, module *Biz, record runtimecontract.RuntimeStateRecord, success bool, selected ...projectConjunctionExpectation) {
 	t.Helper()
 	protocol := "shell/go-test-json/project-conjunction-behavior/v1"
+	expectedReceipts := 1
 	repairSources := 0
 	if len(selected) != 0 {
 		protocol, repairSources = selected[0].ProtocolRef, selected[0].RepairSources
+		if selected[0].ValidationReceipts > 0 {
+			expectedReceipts = selected[0].ValidationReceipts
+		}
 	}
 	failureStages := 2
 	if protocol == "shell/go-test-json/project-conjunction-behavior/v3" {
@@ -299,8 +319,8 @@ func assertProjectConjunctionPersistedOwnerOutputs(t *testing.T, ctx context.Con
 		if count != 2 || acceptedCount != 1 || rejectedCount != 1 {
 			t.Fatalf("repair must retain one rejected original and one fresh accepted all-of receipt: %d/%d/%d", count, acceptedCount, rejectedCount)
 		}
-	} else if count != 1 {
-		t.Fatalf("expected one actual conjunction receipt, got %d", count)
+	} else if count != expectedReceipts || success && (acceptedCount != expectedReceipts || rejectedCount != 0) || !success && (acceptedCount != 0 || rejectedCount != expectedReceipts) {
+		t.Fatalf("expected %d exact conjunction receipts (success=%t), got total/accepted/rejected %d/%d/%d", expectedReceipts, success, count, acceptedCount, rejectedCount)
 	}
 	after, err := module.loadRuntime(ctx, record.Facts.WorkspaceID, record.Facts.RunID)
 	if err != nil || !reflect.DeepEqual(before, after) {

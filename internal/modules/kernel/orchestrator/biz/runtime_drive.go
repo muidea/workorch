@@ -355,6 +355,8 @@ func (m *Biz) initializeRuntimeDrive(ctx context.Context, command orchestratorev
 }
 
 func (m *Biz) driveOneRuntimeTransition(ctx context.Context, run *runmodel.Run, aggregate runtime.RuntimeAggregate, command orchestratorevents.DriveRuntimeCommand, stablePrefixHash string) (runtimeDriveTransitionOutcome, error) {
+	region := startRuntimeTraceRegion(ctx, "workorch.runtime.drive_transition")
+	defer region.End()
 	previousRevision := aggregate.StateRevision
 	previousConvergence := runtime.RuntimeConvergenceProgressSignature(aggregate)
 	// A catalog retirement can persist a fresh SM-3 semantic generation before

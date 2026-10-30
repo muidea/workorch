@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -37,11 +38,14 @@ type WorkspaceFreshIntentSettlement struct {
 // WorkspaceFreshIntentReservation stores only the identity of an already
 // validated, credential-free typed payload, never live configuration or keys.
 type WorkspaceFreshIntentReservation struct {
-	RequestID        string
-	Kind             runtimecontract.RuntimeExecutionIntentKind
-	StartupInputHash string
-	PayloadHash      string
-	RunPayloadHash   string
+	RequestID               string
+	Kind                    runtimecontract.RuntimeExecutionIntentKind
+	StartupInputHash        string
+	PayloadHash             string
+	RunPayloadHash          string
+	PreparationCompletionID string    `json:",omitempty"`
+	PreparationRevision     uint64    `json:",omitempty"`
+	PreparationConsumedAt   time.Time `json:",omitempty"`
 }
 
 func (f *WorkspacePreparationFence) Clone() *WorkspacePreparationFence {
@@ -60,6 +64,12 @@ func (f *WorkspacePreparationFence) Clone() *WorkspacePreparationFence {
 func (r WorkspaceFreshIntentReservation) Validate() error {
 	if !runmodel.ValidExecutionIntentIdentity(r.RequestID) || r.Kind != runtimecontract.RuntimeExecutionIntentRestart || r.StartupInputHash == "" || len(r.StartupInputHash) > 256 || strings.TrimSpace(r.StartupInputHash) != r.StartupInputHash || !preparationFenceHex(r.PayloadHash, 32) || !preparationFenceHex(r.RunPayloadHash, 32) {
 		return fmt.Errorf("%w: invalid fresh intent reservation", common.ErrInvalidArgument)
+	}
+	if r.PreparationCompletionID != "" && (!strings.HasPrefix(r.PreparationCompletionID, "preparation-completion-sha256:") || !preparationFenceHex(strings.TrimPrefix(r.PreparationCompletionID, "preparation-completion-sha256:"), 32)) {
+		return common.ErrInvalidArgument
+	}
+	if r.PreparationCompletionID == "" && (r.PreparationRevision != 0 || !r.PreparationConsumedAt.IsZero()) || r.PreparationCompletionID != "" && (r.PreparationRevision == 0 || r.PreparationConsumedAt.IsZero()) {
+		return common.ErrInvalidArgument
 	}
 	return nil
 }
@@ -113,6 +123,19 @@ func ValidatePreparationFenceTransition(current, next *Workspace) error {
 		return common.ErrConflict
 	}
 	before, after := current.PreparationFence, next.PreparationFence
+	// Raw consumption evidence is immutable and can first appear only with
+	// the matching first reservation. Complete source validation is performed
+	// by preparationcompiler at every repository boundary.
+	if current.FirstExecutionPreparationEvidence != nil {
+		if !reflect.DeepEqual(current.FirstExecutionPreparationEvidence, next.FirstExecutionPreparationEvidence) {
+			return common.ErrConflict
+		}
+	} else if e := next.FirstExecutionPreparationEvidence; e != nil {
+		if before == nil || before.PreparationEpoch != 0 || before.Pending != nil || after == nil || after.Pending == nil ||
+			after.Pending.RequestID != e.RequestID || after.Pending.PreparationCompletionID == "" {
+			return common.ErrConflict
+		}
+	}
 	if before == nil {
 		if after != nil { // cannot silently migrate legacy to first-M3 eligible
 			return common.ErrConflict

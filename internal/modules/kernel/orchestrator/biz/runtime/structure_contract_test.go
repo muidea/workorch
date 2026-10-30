@@ -112,6 +112,7 @@ func TestRuntimeMutationOwnerStructureIsUnique(t *testing.T) {
 
 	assertRuntimeExportedMethods(t, methods, "RuntimeController", []string{
 		"ApplyInternalEvent",
+		"CompileEvidenceApplicabilityRead",
 		"Load",
 		"QueryOperationReceipt",
 		"ReleaseHistoricalCompilation", // lifecycle-only, statically checked below
@@ -896,11 +897,14 @@ func assertRuntimeExportedMethods(t *testing.T, methods map[string][]string, rec
 // above them. This is a lexical composition, never a caller's validated flag.
 func TestApplicabilityReadContinuationsStayBehindCompletePublicGates(t *testing.T) {
 	want := map[string]map[string]int{
-		"compileRuntimeOperationReadSource":          {"CompileRuntimeOperationReadSource": 1, "compileRuntimeEvidenceApplicabilityRequest": 1, "CompileRuntimeEvidenceApplicabilityRead": 1},
-		"compileRuntimeEvidenceApplicabilityRequest": {"CompileRuntimeEvidenceApplicabilityRequest": 1, "NextRuntimeEvidenceApplicabilityRequest": 1},
+		"compileRuntimeOperationReadSource":          {"CompileRuntimeOperationReadSource": 1, "compileRuntimeEvidenceApplicabilityRequest": 1, "compileRuntimeEvidenceApplicabilityRead": 1},
+		"compileRuntimeEvidenceApplicabilityRequest": {"CompileRuntimeEvidenceApplicabilityRequest": 1, "nextRuntimeEvidenceApplicabilityRequest": 1},
+		"nextRuntimeEvidenceApplicabilityRequest":    {"NextRuntimeEvidenceApplicabilityRequest": 1, "compileRuntimeEvidenceApplicabilityRead": 1},
+		"compileRuntimeEvidenceApplicabilityRead":    {"CompileRuntimeEvidenceApplicabilityRead": 1, "CompileEvidenceApplicabilityRead": 1},
 	}
 	actual := map[string]map[string]int{}
 	gates := map[string]int{}
+	ownerCompiler, ownerGate, ownerImage := 0, 0, 0
 	for _, file := range parseRuntimeProductionSources(t) {
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
@@ -918,6 +922,21 @@ func TestApplicabilityReadContinuationsStayBehindCompletePublicGates(t *testing.
 					}
 					actual[id.Name][fn.Name.Name]++
 				}
+				if fn.Name.Name == "CompileEvidenceApplicabilityRead" {
+					if id, ok := call.Fun.(*ast.Ident); ok {
+						switch id.Name {
+						case "validate":
+							ownerGate++
+						case "ownerStateSourceImage":
+							ownerImage++
+						}
+					}
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Compile" {
+						if field, ok := sel.X.(*ast.SelectorExpr); ok && field.Sel.Name == "historicalCompiler" {
+							ownerCompiler++
+						}
+					}
+				}
 				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Validate" {
 					if id, ok := sel.X.(*ast.Ident); ok && id.Name == "aggregate" {
 						gates[fn.Name.Name]++
@@ -930,7 +949,10 @@ func TestApplicabilityReadContinuationsStayBehindCompletePublicGates(t *testing.
 	if !reflect.DeepEqual(want, actual) {
 		t.Fatalf("unchecked read continuation callers: %v", actual)
 	}
-	for _, entry := range []string{"CompileRuntimeOperationReadSource", "CompileRuntimeEvidenceApplicabilityRequest", "NextRuntimeEvidenceApplicabilityRequest"} {
+	if ownerCompiler != 1 || ownerGate != 1 || ownerImage != 1 {
+		t.Fatal("owner read must enter exactly one complete raw-image historical compiler gate")
+	}
+	for _, entry := range []string{"CompileRuntimeOperationReadSource", "CompileRuntimeEvidenceApplicabilityRequest", "NextRuntimeEvidenceApplicabilityRequest", "CompileRuntimeEvidenceApplicabilityRead"} {
 		if gates[entry] != 1 {
 			t.Fatalf("%s must run its complete aggregate gate exactly once", entry)
 		}

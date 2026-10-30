@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -22,19 +23,41 @@ var componentContractHeadings = []string{
 	"## 能力验收",
 }
 
+// The executable registration baseline must be available in a clean checkout.
+// Local design documents under docs/ are deliberately not versioned inputs.
+var componentContractInventory = []string{
+	"internal/initiators/workorchruntime",
+	"internal/modules/application/workorchd",
+	"internal/modules/blocks/approval",
+	"internal/modules/blocks/decision",
+	"internal/modules/blocks/eventstream",
+	"internal/modules/blocks/file",
+	"internal/modules/blocks/git",
+	"internal/modules/blocks/llm",
+	"internal/modules/blocks/mcp",
+	"internal/modules/blocks/mcpregistry",
+	"internal/modules/blocks/memory",
+	"internal/modules/blocks/result",
+	"internal/modules/blocks/run",
+	"internal/modules/blocks/shell",
+	"internal/modules/blocks/skill",
+	"internal/modules/blocks/soul",
+	"internal/modules/blocks/ssh",
+	"internal/modules/blocks/web",
+	"internal/modules/kernel/governance",
+	"internal/modules/kernel/orchestrator",
+	"internal/modules/kernel/system",
+	"internal/modules/kernel/workspace",
+}
+
 func TestComponentContractMatrixCoversRegisteredComponents(t *testing.T) {
 	root := findRepoRoot(t)
-	// The current component-alignment inventory documents the registered shape.
-	// Roadmap plans and archived closure records must not constrain it.
-	inventoryPath := filepath.Join(root, "docs", "01-overview", "component-documentation-alignment.md")
-	inventoryBytes, err := os.ReadFile(inventoryPath)
-	if err != nil {
-		t.Fatalf("read component inventory: %v", err)
-	}
-	inventory := string(inventoryBytes)
 	testSymbols := repositoryTestSymbols(t, root)
 
 	registered := registeredComponentDirs(t, root)
+	if !slices.Equal(registered, componentContractInventory) {
+		t.Fatalf("registered components = %q, want executable baseline %q", registered, componentContractInventory)
+	}
 	if len(registered) != 22 {
 		t.Fatalf("registered component count = %d, want current 22-unit baseline", len(registered))
 	}
@@ -53,9 +76,6 @@ func TestComponentContractMatrixCoversRegisteredComponents(t *testing.T) {
 		readmeBytes, err := os.ReadFile(readmePath)
 		if err != nil {
 			t.Fatalf("registered component %s has no readable contract: %v", rel, err)
-		}
-		if !strings.Contains(inventory, readmeRel) {
-			t.Fatalf("component inventory does not cover registered component %s", rel)
 		}
 		assertComponentContractShape(t, root, readmeRel, string(readmeBytes), testSymbols)
 	}
@@ -116,9 +136,41 @@ func assertComponentContractShape(t *testing.T, root, readmeRel, contract string
 			continue
 		}
 		resolved := filepath.Clean(filepath.Join(root, filepath.Dir(readmeRel), filepath.FromSlash(target)))
+		if componentContractLocalDocsUnavailable(root, resolved) {
+			continue // Local docs are optional; source/test links remain required.
+		}
 		if _, err := os.Stat(resolved); err != nil {
 			t.Errorf("component contract %s links missing local target %q: %v", readmeRel, target, err)
 		}
+	}
+}
+
+func componentContractLocalDocsUnavailable(root, resolved string) bool {
+	docs := filepath.Join(root, "docs")
+	relative, err := filepath.Rel(docs, resolved)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return false
+	}
+	_, err = os.Stat(docs)
+	return os.IsNotExist(err)
+}
+
+func TestComponentContractLocalDocsAreOptionalOnlyOutsideSource(t *testing.T) {
+	root := t.TempDir()
+	doc := filepath.Join(root, "docs", "design.md")
+	if !componentContractLocalDocsUnavailable(root, doc) {
+		t.Fatal("clean checkout without local docs must retain executable checks")
+	}
+	for _, path := range []string{filepath.Join(root, "internal", "owner.go"), filepath.Join(root, "docs-other", "design.md")} {
+		if componentContractLocalDocsUnavailable(root, path) {
+			t.Fatal("missing source or adjacent path was treated as optional documentation")
+		}
+	}
+	if err := os.Mkdir(filepath.Join(root, "docs"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if componentContractLocalDocsUnavailable(root, doc) {
+		t.Fatal("present local documentation must still have its links checked")
 	}
 }
 

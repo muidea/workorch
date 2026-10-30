@@ -2,7 +2,6 @@ package workorchruntimecontract
 
 import (
 	"fmt"
-	"reflect"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 )
@@ -17,7 +16,7 @@ type runtimeSemanticDefinitionSourceEntry struct {
 // gates succeed. It cannot be reused for a different raw seed/focus body.
 func validateRuntimeSemanticDefinitionSourcesInSession(seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus, session *runtimeSemanticValidationSession) (map[common.CoverageWorkItemID]RuntimeDefinitionFocus, error) {
 	for _, entry := range session.definitionSources {
-		if reflect.DeepEqual(entry.seed, seed) && reflect.DeepEqual(entry.focuses, focuses) {
+		if runtimeRawEqual(entry.seed, seed) && runtimeRawEqual(entry.focuses, focuses) {
 			return entry.byCoverage, nil
 		}
 	}

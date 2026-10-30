@@ -163,6 +163,8 @@ func runtimeSemanticSourceObligationChecksForProvider(values []runtimecontract.R
 }
 
 type runtimeSemanticInputReviewProjection struct {
+	// Pure requirement projection, not a model conclusion or proof receipt.
+	RequiredProofConsumerRefs   []string                                                  `json:"requiredProofConsumerRefs,omitempty"`
 	OwnerModuleID               string                                                    `json:"ownerModuleId"`
 	ValidationRecipeID          string                                                    `json:"validationRecipeId"`
 	SubjectHash                 string                                                    `json:"subjectHash"`

@@ -416,7 +416,7 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 	if err := ValidateRuntimeAssessmentApplicabilityGenerations(r.Reconciliation, r.ActiveDispatch, r.CompletedDispatches); err != nil {
 		return fmt.Errorf("runtime state assessment applicability generation: %w", err)
 	}
-	if err := validateRuntimeAssessmentAdjudicationsInSession(r.Facts, r.CompletedDispatches, r.CoverageProofLineage, RuntimeLineageAssertionSources{Definition: r.Definition, Facts: r.Facts, Work: r.ImplementationWork, Semantic: r.SemanticPlanning, Active: r.ActiveDispatch, Completed: r.CompletedDispatches, Receipts: r.OperationReceipts, Governance: r.OperationGovernanceBindings, Budget: r.ExecutionBudget, EvidenceSequence: r.EvidenceSequence, Resolutions: r.GovernanceResolutions, Attempts: r.CandidateAttempts, Sessions: r.CandidateRequestSessions, ProcessedEventIDs: r.ProcessedEventIDs, ProofLineage: r.CoverageProofLineage, Confirmations: r.RepairSurfaceConfirmations}, historicalSession); err != nil {
+	if err := validateRuntimeAssessmentAdjudicationsInSession(r.Facts, r.CompletedDispatches, r.CoverageProofLineage, runtimeLineageSourcesFromRecord(r), historicalSession); err != nil {
 		return fmt.Errorf("runtime state assessment adjudication: %w", err)
 	}
 	if err := ValidateRuntimeDefinitionFocuses(r.Facts.DefinitionSeed, r.Facts.DefinitionFocuses); err != nil {

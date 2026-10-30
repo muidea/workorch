@@ -3,7 +3,8 @@
 
 fixture replaces only the outgoing provider HTTP response with a loopback server.
 live requires explicit opt-in and uses the selected existing configuration.
-Evidence must be stored in a new, durable, restricted directory, never /tmp.
+Evidence must be stored in a new restricted validation directory; durable raw
+archives belong in the ignored owner-managed validation store.
 """
 import argparse
 import base64
@@ -154,23 +155,44 @@ class Fixture:
         self.thread.join()
 
 
-def validate_source_consumers(payload):
+def source_verification_options(payload):
+    """Check the owner projection, including mandatory merged contributions.
+
+    A declaration is one selectable applicability reference. Its source-level
+    merged requirements apply regardless of which reference the fixture picks.
+    """
     options = payload['sourceApplicableVerificationDeclarations']
+    sources = payload['candidateAcceptance']
+    require(len(options) == len(sources) and len({o['candidateItemRef'] for o in options}) == len(options),
+            'verification source projection missing or duplicated')
+    for option, source in zip(options, sources):
+        require(option['candidateItemRef'] == source['CandidateItemRef'] and
+                option['sourceScope'] == 'dodItem' and option['sourceId'] and
+                option['declarationBindingMode'] == 'one_applicable_reference' and
+                option['declarations'] and isinstance(option['mergedRequiredEvidenceKinds'], list) and
+                isinstance(option['mergedRequiredConsumers'], list), 'verification source binding differs')
+        require(all(set(d) == {'profileId', 'evidenceRequirementId', 'scope'} and
+                    d['profileId'] and d['evidenceRequirementId'] and d['scope'] == 'dodItem'
+                    for d in option['declarations']), 'verification declaration binding differs')
+    return options
+
+
+def validate_source_consumers(payload):
+    options = source_verification_options(payload)
     expected = {'derived-dod:template:000003': 'terminal_owner_operation_receipt',
                 'derived-dod:template:000004': 'terminal_owner_snapshot',
                 'derived-dod:template:000013': 'terminal_result_evidence_index'}
     observed = set()
     for option in options:
         ref = option['candidateItemRef']
-        for declaration in option['declarations']:
-            consumers = declaration['consumers']
-            if ref not in expected:
-                require(not consumers, 'guard leaked to unrelated source')
-                continue
-            require(len(consumers) == 1 and consumers[0]['Kind'] == expected[ref] and
-                    consumers[0]['ConsumptionPoint'] == 'post_terminal_delivery' and
-                    consumers[0]['TerminalContractRef'], 'missing exact terminal consumer')
-            observed.add(ref)
+        consumers = option['mergedRequiredConsumers']
+        if ref not in expected:
+            require(not consumers, 'guard leaked to unrelated source')
+            continue
+        require(len(consumers) == 1 and consumers[0]['Kind'] == expected[ref] and
+                consumers[0]['ConsumptionPoint'] == 'post_terminal_delivery' and
+                consumers[0]['TerminalContractRef'], 'missing exact terminal consumer')
+        observed.add(ref)
     require(observed == set(expected), 'template consumer source missing')
 
 

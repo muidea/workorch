@@ -1,7 +1,8 @@
 package workorchruntimecontract
 
 import (
-	"reflect"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -10,7 +11,7 @@ import (
 // RuntimeOwnerHistoricalCompiler is local to one Orchestrator controller. It
 // exposes a complete lexical gate, never a session, success credential or raw
 // product. It must not be passed through an owner port or serialized.
-// runtime-owner-historical-subtree-compiler/v1 retains only detached pure
+// runtime-owner-historical-subtree-compiler/v2 retains only detached pure
 // semantic subresults, not current facts, aggregate invariants or CAS authority.
 type RuntimeOwnerHistoricalCompiler struct {
 	mu        sync.Mutex
@@ -46,7 +47,7 @@ func runtimeHistoricalPurposeInOwnerCompiler(ledger RuntimeSemanticPlanningLedge
 	c := session.ownerHistory
 	if c != nil {
 		for _, entry := range c.purposes {
-			if reflect.DeepEqual(entry.raw, ledger) {
+			if runtimeRawEqual(entry.raw, ledger) {
 				return entry.entries, nil
 			}
 		}
@@ -119,32 +120,72 @@ func (c *RuntimeOwnerHistoricalCompiler) Close() {
 	c.workspace, c.run = "", ""
 }
 
+// v2 retains only complete entries from the existing whitelist under the same
+// global 128-entry bound. Overflow evicts optional pure products, never owner
+// facts or history. No retained product is permission to skip a current gate.
 func retainRuntimeOwnerHistoricalSubtrees(s *runtimeSemanticValidationSession) *runtimeSemanticValidationSession {
-	n := len(s.workScopes) + len(s.workDefinitions) + len(s.seeds) + len(s.workRounds) + len(s.definitionSources)
+	remaining := runtimeOwnerHistoricalEntryLimit
+	n := newRuntimeSemanticValidationSession()
+	n.seeds = retainRuntimeOwnerHistoricalSuffix(s.seeds, &remaining)
+	n.workDefinitions = retainRuntimeOwnerHistoricalSuffix(s.workDefinitions, &remaining)
+	n.workScopes = retainRuntimeOwnerHistoricalSuffix(s.workScopes, &remaining)
+	n.workRounds = retainRuntimeOwnerHistoricalSuffix(s.workRounds, &remaining)
+	n.definitionSources = retainRuntimeOwnerHistoricalSuffix(s.definitionSources, &remaining)
 	if s.ownerHistory != nil {
-		n += len(s.ownerHistory.generations) + len(s.ownerHistory.purposes) + s.ownerHistory.lineage.count()
-	}
-	for _, entries := range s.catalogs {
-		n += len(entries)
-	}
-	for _, entries := range s.manifests {
-		n += len(entries)
-		for _, entry := range entries {
-			if entry.validated.documents != nil {
-				n += len(entry.validated.documents.values)
+		n.ownerHistory = &runtimeOwnerHistoricalSemanticCompiler{
+			generations: retainRuntimeOwnerHistoricalSuffix(s.ownerHistory.generations, &remaining),
+			purposes:    retainRuntimeOwnerHistoricalSuffix(s.ownerHistory.purposes, &remaining),
+		}
+		if old := s.ownerHistory.lineage; old != nil {
+			n.ownerHistory.lineage = &runtimeOwnerLineageIndex{
+				dispatches:    retainRuntimeOwnerHistoricalMap(old.dispatches, &remaining),
+				catalogs:      retainRuntimeOwnerHistoricalMap(old.catalogs, &remaining),
+				receipts:      retainRuntimeOwnerHistoricalMap(old.receipts, &remaining),
+				confirmations: retainRuntimeOwnerHistoricalMap(old.confirmations, &remaining),
 			}
 		}
 	}
-	if n > runtimeOwnerHistoricalEntryLimit {
+	n.catalogs = retainRuntimeOwnerHistoricalMap(s.catalogs, &remaining)
+	n.manifests = retainRuntimeOwnerHistoricalMap(s.manifests, &remaining)
+	// Manifest validation and document validation are independent complete pure
+	// entries. Keep the complete manifest first; an evicted document is validated
+	// afresh against it, with the original error order. Copy the mutable cache
+	// container rather than modifying the completed transaction's session.
+	for _, key := range slices.Sorted(maps.Keys(n.manifests)) {
+		for i := range n.manifests[key] {
+			entry := &n.manifests[key][i]
+			if old := entry.validated.documents; old != nil {
+				entry.validated.documents = &runtimeSemanticDocumentValidationSession{
+					manifest: old.manifest,
+					values:   retainRuntimeOwnerHistoricalSuffix(old.values, &remaining),
+				}
+			}
+		}
+	}
+	// Explicit whitelist only. Never retain workStates/current Facts/budget,
+	// whole-source/owner-invariant/aggregate success or transaction products.
+	return n
+}
+
+func retainRuntimeOwnerHistoricalSuffix[T any](entries []T, remaining *int) []T {
+	count := min(len(entries), *remaining)
+	*remaining -= count
+	if count == 0 {
 		return nil
 	}
-	// Explicit allowlist: never retain workStates (which include current Facts
-	// and budget), the historical full-source compiler, owner continuations or
-	// transaction products. Each retained entry already owns exact raw copies.
-	return &runtimeSemanticValidationSession{
-		manifests: s.manifests, catalogs: s.catalogs,
-		workScopes: s.workScopes, workDefinitions: s.workDefinitions,
-		seeds: s.seeds, workRounds: s.workRounds, definitionSources: s.definitionSources,
-		ownerHistory: s.ownerHistory,
+	// Detach the container so evicted entries cannot remain reachable through
+	// its backing array; the selected raw entries already own detached inputs.
+	return slices.Clone(entries[len(entries)-count:])
+}
+
+func retainRuntimeOwnerHistoricalMap[T any](entries map[string][]T, remaining *int) map[string][]T {
+	result := make(map[string][]T)
+	// Deterministic eviction: keys order candidates only, never certify content.
+	// Every hit still requires complete exact raw equality in the original gate.
+	for _, key := range slices.Sorted(maps.Keys(entries)) {
+		if kept := retainRuntimeOwnerHistoricalSuffix(entries[key], remaining); len(kept) > 0 {
+			result[key] = kept
+		}
 	}
+	return result
 }

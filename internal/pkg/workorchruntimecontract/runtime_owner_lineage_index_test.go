@@ -203,8 +203,9 @@ func TestOwnerLineageIndexDoesNotRetainActiveOrFailedNodes(t *testing.T) {
 		t.Fatal("owner-private index not selected")
 	}
 	index.receipts = map[string][]runtimeOwnerLineageReceipt{"over limit": make([]runtimeOwnerLineageReceipt, runtimeOwnerHistoricalEntryLimit+1)}
-	if retainRuntimeOwnerHistoricalSubtrees(s) != nil {
-		t.Fatal("lineage nodes escaped whole-cache limit")
+	retained := retainRuntimeOwnerHistoricalSubtrees(s)
+	if runtimeOwnerRetainedCount(retained) != runtimeOwnerHistoricalEntryLimit || retained.ownerHistory.lineage.count() != runtimeOwnerHistoricalEntryLimit || len(index.receipts["over limit"]) != runtimeOwnerHistoricalEntryLimit+1 {
+		t.Fatal("lineage nodes escaped bounded subset limit or changed original input")
 	}
 }
 

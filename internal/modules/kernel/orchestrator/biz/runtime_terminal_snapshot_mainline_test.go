@@ -127,9 +127,16 @@ func TestRuntimeReviewedGitTerminalSnapshotMultipleConsumerMainlineAndRestart(t 
 
 func runtimeReviewedGitProjectExecutionCount(t *testing.T, source runtimecontract.RuntimeStateRecord) string {
 	t.Helper()
+	return runtimeReviewedProjectExecutionCount(t, source, 1, map[common.CoverageWorkItemID]int{"cwi-2": 1})
+}
+
+func runtimeReviewedProjectExecutionCount(t *testing.T, source runtimecontract.RuntimeStateRecord, expectedOrdinary int, expectedReconciliations map[common.CoverageWorkItemID]int) string {
+	t.Helper()
 	// The ordinary receipt and satisfied reconciliation are distinct owner
 	// calls. The latter never becomes another validation receipt/credit.
 	ordinary, reconciliation := 0, 0
+	reconciled := make(map[common.CoverageWorkItemID]int)
+	seen := make(map[string]bool)
 	for _, receipt := range source.OperationReceipts {
 		if receipt.Evidence.Validation != nil && receipt.Evidence.Validation.ExecutionConjunction != nil {
 			if !receipt.Evidence.Validation.ExecutionConjunction.Complete {
@@ -147,16 +154,31 @@ func runtimeReviewedGitProjectExecutionCount(t *testing.T, source runtimecontrac
 			continue
 		}
 		for _, observed := range batch.Observations {
-			if observed.OwnerModuleID == runtimecontract.RuntimeModuleShell && observed.CoverageWorkItemID == "cwi-2" && observed.Status == runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
+			if observed.OwnerModuleID == runtimecontract.RuntimeModuleShell && observed.Status == runtimecontract.RuntimeCWIReconciliationObservationSatisfied {
 				if len(observed.CheckRefs) != 1 {
 					t.Fatal("reconciliation omitted exact original check")
 				}
+				identity := runtimecontract.StableRuntimeCWIReconciliationObservationRef(observed)
+				if seen[identity] {
+					t.Fatal("duplicate original owner reconciliation")
+				}
+				seen[identity] = true
 				reconciliation++
+				reconciled[observed.CoverageWorkItemID]++
 			}
 		}
 	}
-	if ordinary != 1 || reconciliation != 1 || len(source.Reconciliation.Reopened) != 0 {
+	expectedTotal := 0
+	for _, count := range expectedReconciliations {
+		expectedTotal += count
+	}
+	if ordinary != expectedOrdinary || reconciliation != expectedTotal || len(source.Reconciliation.Reopened) != 0 {
 		t.Fatalf("unexpected project execution provenance: ordinary=%d reconciliation=%d", ordinary, reconciliation)
+	}
+	for id, count := range reconciled {
+		if count != expectedReconciliations[id] {
+			t.Fatalf("original CWI reconciliation count: %s got %d want %d", id, count, expectedReconciliations[id])
+		}
 	}
 	return strings.Repeat("executed\n", 2*(ordinary+reconciliation))
 }

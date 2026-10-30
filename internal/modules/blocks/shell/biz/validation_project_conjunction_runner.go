@@ -120,6 +120,16 @@ func runShellProjectConjunction(ctx context.Context, directory string, env []str
 				output.Status = "timeout"
 			}
 			output.FailureCode = stages[len(stages)-1].FailureCode
+			if index == len(specs)-1 {
+				// This stage uses only the exact reviewed checks. Preserve its
+				// native failure (including missing behavior) for the existing
+				// typed diagnostic routes; project-stage history stays unchanged.
+				diagnostic := output
+				diagnostic.FailureCode = output.FailureReason
+				attachShellValidationFailureDiagnostic(&diagnostic, request, "go", stage.ExitCode, stage.TimedOut, false, stageErr)
+				output.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
+				output.RuntimeDiagnostics.ValidationFailureDiagnostic = diagnostic.ValidationFailureDiagnostic
+			}
 			if protocol == shellProjectFailureDiagnosticProtocolRef && (spec.ID == "project-test" || spec.ID == "project-race") {
 				diagnosticEnv := shellProcessBehaviorEnvironment(shellBehaviorEnvironment(env), processPath, behaviorArgs)
 				diagnosticStage, diagnostic := runShellProjectFailureDiagnostic(ctx, directory, diagnosticEnv, request, stage, specs[3], coveragePath, processPath)

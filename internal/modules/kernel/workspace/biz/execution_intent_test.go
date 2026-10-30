@@ -93,6 +93,9 @@ func (f *workspaceExecutionIntentFixture) execute(ctx context.Context, command w
 	))
 }
 
+// These minimal protocol fixtures omit resource preparation. Positive fresh
+// intents therefore use an existing Run head; real first-start coverage uses
+// complete owner preparation sources and the production HTTP verifier.
 func (f *workspaceExecutionIntentFixture) seedWorkspace(t *testing.T, workspaceID common.WorkspaceID, activeRunID common.RunID, withDefinitions bool) runtimecontract.RuntimeBootstrap {
 	t.Helper()
 	goal := &workspacemodel.Goal{ID: "goal-1", WorkspaceID: workspaceID, Text: "goal", DefinitionRevision: "goal:00000000000000000001:hash", LineageState: "active"}
@@ -186,7 +189,7 @@ func TestWorkspaceExecutionIntentRejectsMissingDefinitionAndCrossScope(t *testin
 
 	t.Run("missing goal and DoD", func(t *testing.T) {
 		fixture := newWorkspaceExecutionIntentFixture(t, response)
-		bootstrap := fixture.seedWorkspace(t, "workspace-1", "", false)
+		bootstrap := fixture.seedWorkspace(t, "workspace-1", "prior-run", false)
 		_, err := fixture.execute(context.Background(), workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: "workspace-1", RequestID: "restart-1", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap})
 		if !errors.Is(err, common.ErrConflict) || fixture.received != 0 {
 			t.Fatalf("missing definition err=%v received=%d", err, fixture.received)
@@ -199,7 +202,7 @@ func TestWorkspaceExecutionIntentRejectsMissingDefinitionAndCrossScope(t *testin
 
 	t.Run("context scope mismatch", func(t *testing.T) {
 		fixture := newWorkspaceExecutionIntentFixture(t, response)
-		bootstrap := fixture.seedWorkspace(t, "workspace-1", "", true)
+		bootstrap := fixture.seedWorkspace(t, "workspace-1", "prior-run", true)
 		ctx := common.ContextWithRuntimeWorkspaceID(context.Background(), "workspace-other")
 		_, err := fixture.execute(ctx, workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: "workspace-1", RequestID: "restart-1", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap})
 		if !errors.Is(err, common.ErrConflict) || fixture.received != 0 {
@@ -251,7 +254,7 @@ func TestWorkspaceRestartMaterializesDefaultSelectionByPrivateEventBeforeRunOwne
 			Outcome: runtimecontract.RuntimeExecutionIntentReconciliationRequested, Reason: runtimecontract.RuntimeExecutionIntentReasonNewRunActivated,
 		}}
 	})
-	bootstrap := fixture.seedWorkspace(t, "workspace-default", "", true)
+	bootstrap := fixture.seedWorkspace(t, "workspace-default", "prior-run", true)
 	bootstrap.Activation.ProviderSelection.ReasoningEffort = "high"
 	result, err := fixture.execute(context.Background(), workspaceevents.WorkspaceExecutionIntentCommand{
 		WorkspaceID: "workspace-default", RequestID: "restart-default", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap,
@@ -284,7 +287,7 @@ func TestWorkspaceExecutionInternalEventRejectsStaleStartupWithoutMutation(t *te
 	fixture := newWorkspaceExecutionIntentFixture(t, func(command runevents.WorkspaceExecutionIntentCommand) runevents.WorkspaceExecutionIntentResult {
 		return runevents.WorkspaceExecutionIntentResult{}
 	})
-	bootstrap := fixture.seedWorkspace(t, "workspace-stale", "", true)
+	bootstrap := fixture.seedWorkspace(t, "workspace-stale", "prior-run", true)
 	before, err := fixture.workspaces.Get(context.Background(), "workspace-stale")
 	if err != nil {
 		t.Fatal(err)
@@ -308,7 +311,7 @@ func TestWorkspaceExecutionInternalEventRejectsStaleStartupWithExistingDefault(t
 	fixture := newWorkspaceExecutionIntentFixture(t, func(command runevents.WorkspaceExecutionIntentCommand) runevents.WorkspaceExecutionIntentResult {
 		return runevents.WorkspaceExecutionIntentResult{}
 	})
-	bootstrap := fixture.seedWorkspace(t, "workspace-stale-existing", "", true)
+	bootstrap := fixture.seedWorkspace(t, "workspace-stale-existing", "prior-run", true)
 	current, err := fixture.workspaces.Get(context.Background(), "workspace-stale-existing")
 	if err != nil {
 		t.Fatal(err)
@@ -341,7 +344,7 @@ func TestWorkspaceExecutionInternalEventPreservesExistingOwnerPreference(t *test
 	fixture := newWorkspaceExecutionIntentFixture(t, func(command runevents.WorkspaceExecutionIntentCommand) runevents.WorkspaceExecutionIntentResult {
 		return runevents.WorkspaceExecutionIntentResult{}
 	})
-	bootstrap := fixture.seedWorkspace(t, "workspace-preference", "", true)
+	bootstrap := fixture.seedWorkspace(t, "workspace-preference", "prior-run", true)
 	current, err := fixture.workspaces.Get(context.Background(), "workspace-preference")
 	if err != nil {
 		t.Fatal(err)
@@ -378,7 +381,7 @@ func TestWorkspaceExecutionRestartRequiresCurrentAdmissionCandidateBeforeRunOwne
 
 	t.Run("current exact candidate reaches Run owner", func(t *testing.T) {
 		fixture := newWorkspaceExecutionIntentFixture(t, response)
-		bootstrap := fixture.seedWorkspace(t, "workspace-current", "", true)
+		bootstrap := fixture.seedWorkspace(t, "workspace-current", "prior-run", true)
 		result, err := fixture.execute(context.Background(), workspaceevents.WorkspaceExecutionIntentCommand{
 			WorkspaceID: "workspace-current", RequestID: "restart-current", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &bootstrap,
 		})
@@ -389,7 +392,7 @@ func TestWorkspaceExecutionRestartRequiresCurrentAdmissionCandidateBeforeRunOwne
 
 	t.Run("non-current persisted candidate is rejected without owner mutation", func(t *testing.T) {
 		fixture := newWorkspaceExecutionIntentFixture(t, response)
-		bootstrap := fixture.seedWorkspace(t, "workspace-invalid", "", true)
+		bootstrap := fixture.seedWorkspace(t, "workspace-invalid", "prior-run", true)
 		workspace, err := fixture.workspaces.Get(context.Background(), "workspace-invalid")
 		if err != nil {
 			t.Fatal(err)

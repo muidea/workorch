@@ -40,7 +40,7 @@ func TestFreshIngressConcurrentDuplicatesReserveBeforeExactlyOneForward(t *testi
 		}
 		return freshAccepted(c)
 	})
-	b := f.seedWorkspace(t, "ingress-concurrent", "", true)
+	b := f.seedWorkspace(t, "ingress-concurrent", "prior-run", true)
 	c := workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: "ingress-concurrent", RequestID: "original", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &b}
 	var group sync.WaitGroup
 	for range 32 {
@@ -103,7 +103,7 @@ func TestFreshIngressForwardAndQueryCutsNeverResendOrReleaseUnknown(t *testing.T
 	for _, cut := range []string{"before", "after", "query_nil", "query_wrong_type", "query_error"} {
 		t.Run(cut, func(t *testing.T) {
 			f := newWorkspaceExecutionIntentFixture(t, freshAccepted)
-			b := f.seedWorkspace(t, "ingress-cut", "", true)
+			b := f.seedWorkspace(t, "ingress-cut", "prior-run", true)
 			c := workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: "ingress-cut", RequestID: "original", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &b}
 			h := &ingressFaultHub{Hub: f.hub}
 			if cut == "before" || cut == "after" {
@@ -185,7 +185,7 @@ func TestFreshIngressReservationAndSettlementCASReplyCuts(t *testing.T) {
 		for _, after := range []bool{false, true} {
 			t.Run(map[bool]string{false: "reservation", true: "settlement"}[settlement]+map[bool]string{false: "_before", true: "_after"}[after], func(t *testing.T) {
 				f := newWorkspaceExecutionIntentFixture(t, freshAccepted)
-				b := f.seedWorkspace(t, "ingress-cas", "", true)
+				b := f.seedWorkspace(t, "ingress-cas", "prior-run", true)
 				c := workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: "ingress-cas", RequestID: "original", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &b}
 				f.biz.workspaces = &ingressCASFault{WorkspaceRepository: f.workspaces, settlement: settlement, after: after}
 				if _, err := f.execute(context.Background(), c); !errors.Is(err, errReservationLostReply) {
@@ -214,7 +214,7 @@ func TestFreshIngressReservationAndSettlementCASReplyCuts(t *testing.T) {
 
 func TestFreshIngressRealRunOwnerOriginalRecoveryIsReadOnlyForRun(t *testing.T) {
 	f := newWorkspaceExecutionIntentFixture(t, freshAccepted)
-	b := f.seedWorkspace(t, "ingress-real", "", true)
+	b := f.seedWorkspace(t, "ingress-real", "prior-run", true)
 	ctx := context.Background()
 	hub := magicevent.NewHub(32)
 	defer hub.Terminate(ctx)
@@ -290,7 +290,7 @@ func TestFreshIngressMissingCreationFenceBlocksRestartWithoutChangingResume(t *t
 
 func TestExecutionRecoveryKeepsOriginalHistoryAheadOfNewPendingAndRejectsForeignScope(t *testing.T) {
 	f := newWorkspaceExecutionIntentFixture(t, freshAccepted)
-	b := f.seedWorkspace(t, "recovery-history", "", true)
+	b := f.seedWorkspace(t, "recovery-history", "prior-run", true)
 	c := workspaceevents.WorkspaceExecutionIntentCommand{WorkspaceID: "recovery-history", RequestID: "original", Kind: runtimecontract.RuntimeExecutionIntentRestart, Bootstrap: &b}
 	accepted, err := f.execute(context.Background(), c)
 	if err != nil {

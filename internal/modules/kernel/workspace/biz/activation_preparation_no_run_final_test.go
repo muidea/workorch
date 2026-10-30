@@ -103,12 +103,21 @@ func TestPreparationNoRunFinalFenceAllRepositoriesPreservePrivateValue(t *testin
 
 func reserveNoRunTestIntent(t *testing.T, w *workspace.Workspace) *workspace.Workspace {
 	t.Helper()
-	r, err := reduceWorkspaceFreshIntentReserved(w, workspaceFreshIntentReserved{WorkspaceID: w.ID, ExpectedRevision: w.Revision,
-		Reservation: workspace.WorkspaceFreshIntentReservation{RequestID: "later-fresh", Kind: runtimecontract.RuntimeExecutionIntentRestart, StartupInputHash: w.StartupInput.StartupInputHash, PayloadHash: strings.Repeat("b", 64), RunPayloadHash: strings.Repeat("c", 64)}})
-	if err != nil || r.Noop {
-		t.Fatal("reservation fixture", err)
+	// Inject only the lower-level fence transition to test the original no-Run
+	// final-CAS race. This partial fixture cannot satisfy first-start readiness;
+	// the execution ingress is tested separately and must reject it.
+	next := *w
+	next.PreparationFence = w.PreparationFence.Clone()
+	next.PreparationFence.PreparationEpoch++
+	next.PreparationFence.Pending = &workspace.WorkspaceFreshIntentReservation{
+		RequestID: "later-fresh", Kind: runtimecontract.RuntimeExecutionIntentRestart,
+		StartupInputHash: w.StartupInput.StartupInputHash,
+		PayloadHash:      strings.Repeat("b", 64), RunPayloadHash: strings.Repeat("c", 64),
 	}
-	return r.Next
+	if err := workspace.ValidatePreparationFenceTransition(w, &next); err != nil {
+		t.Fatal("lower-level reservation transition", err)
+	}
+	return &next
 }
 
 func TestPreparationNoRunFinalFenceRehashedTamperingRejected(t *testing.T) {

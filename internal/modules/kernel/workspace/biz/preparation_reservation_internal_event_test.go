@@ -11,6 +11,7 @@ import (
 	"time"
 
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
+	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
@@ -25,7 +26,7 @@ func reservationTestInput(t *testing.T) (*workspacemodel.Workspace, workspaceeve
 		t.Error("reservation forwarded an execution intent")
 		return runevents.WorkspaceExecutionIntentResult{}
 	})
-	bootstrap := f.seedWorkspace(t, "reservation-ws", "", true)
+	bootstrap := f.seedWorkspace(t, "reservation-ws", "prior-run", true)
 	current, err := f.workspaces.Get(context.Background(), "reservation-ws")
 	if err != nil {
 		t.Fatal(err)
@@ -166,6 +167,9 @@ func TestFreshReservationInvalidatesCurrentPreparationWithoutRewritingHistory(t 
 	// The historical fixture may be legacy. Seed a distinct test repository at
 	// creation rather than upgrading that persisted Workspace in place.
 	w.PreparationFence = &workspacemodel.WorkspacePreparationFence{Version: workspacemodel.WorkspacePreparationFenceVersion, WorkspaceID: w.ID, CreationEpoch: strings.Repeat("a", 32)}
+	// This case exercises invalidation by an existing-Run Restart. A first
+	// execution must reject an unknown preparation, covered separately below.
+	w.ActiveRunID = "existing-run"
 	seedPreparationRecord(t, w, workspacemodel.WorkspacePreparationUnknown)
 	w.Revision++
 	repo := memoryrepo.NewWorkspaceRepository()
@@ -176,9 +180,10 @@ func TestFreshReservationInvalidatesCurrentPreparationWithoutRewritingHistory(t 
 	if err != nil || before.CurrentValidity != "not_evaluated" {
 		t.Fatalf("fixture: %+v %v", before, err)
 	}
-	fact := workspaceFreshIntentReserved{WorkspaceID: w.ID, ExpectedRevision: w.Revision, Reservation: workspacemodel.WorkspaceFreshIntentReservation{
-		RequestID: "fresh", Kind: runtimecontract.RuntimeExecutionIntentRestart, StartupInputHash: w.StartupInput.StartupInputHash, PayloadHash: strings.Repeat("b", 64), RunPayloadHash: strings.Repeat("c", 64),
-	}}
+	fact := workspaceFreshIntentReserved{WorkspaceID: w.ID, ExpectedRevision: w.Revision,
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider-1", ModelID: "model-1"}}, Reservation: workspacemodel.WorkspaceFreshIntentReservation{
+			RequestID: "fresh", Kind: runtimecontract.RuntimeExecutionIntentRestart, StartupInputHash: w.StartupInput.StartupInputHash, PayloadHash: strings.Repeat("b", 64), RunPayloadHash: strings.Repeat("c", 64),
+		}}
 	owner := &Biz{workspaces: repo}
 	after, first, err := owner.submitWorkspaceFreshIntentReserved(context.Background(), fact)
 	if err != nil || !first {
@@ -187,6 +192,89 @@ func TestFreshReservationInvalidatesCurrentPreparationWithoutRewritingHistory(t 
 	state, err := preparationStateFromPersistence(after, time.Now())
 	if err != nil || state.CurrentValidity != "stale" || state.State != "unknown" || !reflect.DeepEqual(state.Record, before.Record) {
 		t.Fatalf("reservation rewrote preparation history or retained currentness: %+v %v", state, err)
+	}
+}
+
+func TestFirstExecutionRejectsUnknownPreparationWithoutWrites(t *testing.T) {
+	owners := openFileDefinitionAdmissionOwners(t, t.TempDir())
+	defer owners.close()
+	w := seedPreparationEligible(t, owners, "first-preparation-required")
+	w.PreparationFence = &workspacemodel.WorkspacePreparationFence{Version: workspacemodel.WorkspacePreparationFenceVersion, WorkspaceID: w.ID, CreationEpoch: strings.Repeat("a", 32)}
+	seedPreparationRecord(t, w, workspacemodel.WorkspacePreparationUnknown)
+	repo := memoryrepo.NewWorkspaceRepository()
+	if err := repo.Create(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	fact := workspaceFreshIntentReserved{WorkspaceID: w.ID, ExpectedRevision: w.Revision,
+		ProviderSelection: runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "provider-1", ModelID: "model-1"}},
+		Reservation:       workspacemodel.WorkspaceFreshIntentReservation{RequestID: "first", Kind: runtimecontract.RuntimeExecutionIntentRestart, StartupInputHash: w.StartupInput.StartupInputHash, PayloadHash: strings.Repeat("b", 64), RunPayloadHash: strings.Repeat("c", 64)}}
+	if _, first, err := (&Biz{workspaces: repo}).submitWorkspaceFreshIntentReserved(context.Background(), fact); err == nil || first {
+		t.Fatal("unknown preparation granted first execution")
+	}
+	after, err := repo.Get(context.Background(), w.ID)
+	if err != nil || !reflect.DeepEqual(w, after) {
+		t.Fatal("rejected first execution changed workspace", err)
+	}
+}
+
+func TestFreshReservationProviderMetadataSharesExactCASPreimage(t *testing.T) {
+	for _, arm := range []string{"success", "stale", "invalid_selection", "before_cas", "after_cas", "existing_default"} {
+		t.Run(arm, func(t *testing.T) {
+			current, command := reservationTestInput(t)
+			command.Bootstrap.Activation.ProviderSelection.ReasoningEffort = "high"
+			if arm == "existing_default" {
+				current.DefaultLLMSelection = &runtimecontract.ProviderInferenceSelection{Target: runtimecontract.ProviderModelTarget{ProviderID: "preferred", ModelID: "retained"}}
+			}
+			beforeSelection := current.DefaultLLMSelection
+			fact, err := workspaceFreshIntentReservationFact(command, current.Revision)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch arm {
+			case "stale":
+				fact.ExpectedRevision++
+			case "invalid_selection":
+				fact.ProviderSelection.Target.ModelID = ""
+			}
+			repo := memoryrepo.NewWorkspaceRepository()
+			if err := repo.Create(context.Background(), current); err != nil {
+				t.Fatal(err)
+			}
+			owner := &Biz{workspaces: repo}
+			if arm == "before_cas" || arm == "after_cas" {
+				owner.workspaces = &reservationFaultRepository{WorkspaceRepository: repo, afterCommit: arm == "after_cas"}
+			}
+			_, first, err := owner.submitWorkspaceFreshIntentReserved(context.Background(), fact)
+			stored, readErr := repo.Get(context.Background(), current.ID)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			committed := arm == "success" || arm == "existing_default" || arm == "after_cas"
+			if !committed {
+				if err == nil || first || !reflect.DeepEqual(current, stored) {
+					t.Fatal("rejected/failed reservation left partial provider metadata", err)
+				}
+				return
+			}
+			if stored.Revision != current.Revision+1 || stored.PreparationFence.Pending == nil || stored.DefaultLLMSelection == nil || stored.DefaultLLMSelection.ReasoningEffort != "" {
+				t.Fatal("metadata/reservation did not share one exact CAS preimage")
+			}
+			if arm == "existing_default" && !stored.DefaultLLMSelection.Same(*beforeSelection) {
+				t.Fatal("reservation replaced existing Workspace preference")
+			}
+			if arm == "after_cas" && (!errors.Is(err, errReservationLostReply) || first) {
+				t.Fatal("lost combined CAS reply granted forward permission")
+			}
+			if arm != "after_cas" && (err != nil || !first) {
+				t.Fatal("initial combined CAS did not grant exactly one forward", err)
+			}
+			// Original replay remains first even when current metadata/inputs differ.
+			fact.ProviderSelection = runtimecontract.ProviderInferenceSelection{}
+			restarted := &Biz{workspaces: repo}
+			if _, first, err := restarted.submitWorkspaceFreshIntentReserved(context.Background(), fact); err != nil || first {
+				t.Fatal("original replay revalidated mutable metadata or forwarded", err)
+			}
+		})
 	}
 }
 
@@ -295,5 +383,36 @@ func TestWorkspaceCreationMintsDistinctPreparationEpochsOnlyAtCreation(t *testin
 	b, _ := repo.Get(context.Background(), "b")
 	if a.PreparationFence.CreationEpoch == b.PreparationFence.CreationEpoch {
 		t.Fatal("creation epochs reused")
+	}
+}
+
+func TestFirstExecutionPreparationCannotBeBypassedByMissingConfirmationOrAdvancedEpoch(t *testing.T) {
+	w := &workspacemodel.Workspace{ID: "ws", PreparationFence: &workspacemodel.WorkspacePreparationFence{PreparationEpoch: 0}}
+	if !requiresFirstExecutionPreparation(w) {
+		t.Fatal("missing confirmation bypassed preparation")
+	}
+	w.PreparationFence.PreparationEpoch = 1
+	if !requiresFirstExecutionPreparation(w) {
+		t.Fatal("an earlier reservation proves no Run")
+	}
+	w.PreparationFence.Settled = []workspacemodel.WorkspaceFreshIntentSettlement{{Receipt: runmodel.WorkspaceExecutionIntentReceipt{Admission: runtimecontract.RuntimeExecutionIntentAdmission{Reason: runtimecontract.RuntimeExecutionIntentReasonDefinitionAdmissionMissing}}}}
+	if !requiresFirstExecutionPreparation(w) {
+		t.Fatal("rejection bypassed first preparation")
+	}
+	w.PreparationFence.Settled[0].Receipt.Admission.Reason = runtimecontract.RuntimeExecutionIntentReasonNewRunActivated
+	if !requiresFirstExecutionPreparation(w) {
+		t.Fatal("missing accepted Run identity bypassed preparation")
+	}
+	w.PreparationFence.Settled[0].Receipt.Admission.RunID = "original-run"
+	if requiresFirstExecutionPreparation(w) {
+		t.Fatal("Restart of an accepted original must not consume first no-Run completion")
+	}
+	w.PreparationFence = nil
+	if !requiresFirstExecutionPreparation(w) {
+		t.Fatal("legacy absence is not earlier execution")
+	}
+	w.ActiveRunID = "original-run"
+	if requiresFirstExecutionPreparation(w) {
+		t.Fatal("existing Run must retain Restart semantics")
 	}
 }

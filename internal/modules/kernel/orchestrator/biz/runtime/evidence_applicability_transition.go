@@ -138,6 +138,11 @@ func NextRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate) (runtim
 	if err := aggregate.Validate(); err != nil {
 		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, false, err
 	}
+	return nextRuntimeEvidenceApplicabilityRequest(aggregate)
+}
+
+// Only complete cold/owner-local gates may enter this pure continuation.
+func nextRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate) (runtimecontract.RuntimeEvidenceApplicabilityRequest, bool, error) {
 	if aggregate.ActiveDispatch != nil || aggregate.Termination != nil || aggregate.TerminalMaterialSeal != nil || isTerminalConvergenceState(aggregate.Decision.State) {
 		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, false, nil
 	}
@@ -171,7 +176,35 @@ func NextRuntimeEvidenceApplicabilityRequest(aggregate RuntimeAggregate) (runtim
 // the owner and private observation writer still independently check provenance.
 // It retains nothing and grants no credit or execution authority.
 func CompileRuntimeEvidenceApplicabilityRead(aggregate RuntimeAggregate) (runtimecontract.RuntimeEvidenceApplicabilityRequest, RuntimeOperationReadSource, bool, error) {
-	request, required, err := NextRuntimeEvidenceApplicabilityRequest(aggregate)
+	if err := aggregate.Validate(); err != nil {
+		return runtimecontract.RuntimeEvidenceApplicabilityRequest{}, RuntimeOperationReadSource{}, false, err
+	}
+	return compileRuntimeEvidenceApplicabilityRead(aggregate)
+}
+
+// CompileEvidenceApplicabilityRead is an Orchestrator-local read compiler. It
+// executes the complete aggregate gate on every supplied raw image, sharing
+// only the same bounded exact-raw historical pure products as Load/Commit.
+// This does not read an owner or cache a plan/current invariant success. The
+// caller still queries the actual resource owner; the observation event reloads
+// and independently admits its current source, revision and CAS fences.
+func (c *RuntimeController) CompileEvidenceApplicabilityRead(aggregate RuntimeAggregate) (request runtimecontract.RuntimeEvidenceApplicabilityRequest, source RuntimeOperationReadSource, required bool, err error) {
+	if c == nil {
+		return request, source, false, common.ErrInvalidArgument
+	}
+	err = c.historicalCompiler.Compile(aggregate.Facts.WorkspaceID, aggregate.Facts.RunID, func(validate func(runtimecontract.RuntimeOwnerStateSourceImage) error) error {
+		if err := validate(ownerStateSourceImage(nil, aggregate)); err != nil {
+			return err
+		}
+		var compileErr error
+		request, source, required, compileErr = compileRuntimeEvidenceApplicabilityRead(aggregate)
+		return compileErr
+	})
+	return
+}
+
+func compileRuntimeEvidenceApplicabilityRead(aggregate RuntimeAggregate) (runtimecontract.RuntimeEvidenceApplicabilityRequest, RuntimeOperationReadSource, bool, error) {
+	request, required, err := nextRuntimeEvidenceApplicabilityRequest(aggregate)
 	if err != nil || !required {
 		return request, RuntimeOperationReadSource{}, false, err
 	}

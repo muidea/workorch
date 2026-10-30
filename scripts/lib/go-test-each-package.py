@@ -15,7 +15,7 @@ def _unique_keys(rows: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def verify(stream: TextIO, output: TextIO, errors: TextIO) -> bool:
+def verify(stream: TextIO, output: TextIO, errors: TextIO, required_tests: set[tuple[str, str]] | None = None) -> bool:
     packages: dict[str, dict[str, object]] = {}
     invalid = False
     for line in stream:
@@ -77,6 +77,14 @@ def verify(stream: TextIO, output: TextIO, errors: TextIO) -> bool:
         assert isinstance(test_terminal, dict)
         if not state["started"] or state["terminal"] != "pass" or state["failed"] or not state["ran"] or not state["passed"] or set(test_terminal) != state["ran"]:
             errors.write(f"verification error: {package} 未实际运行通过测试（空选择、无测试、仅 skip 或失败）\n")
+            invalid = True
+        if required_tests is not None and any(terminal != "pass" for terminal in test_terminal.values()):
+            errors.write(f"verification error: {package} 必需验收中存在未通过测试\n")
+            invalid = True
+    if required_tests is not None:
+        passed = {(package, test) for package, state in packages.items() for test in state["passed"]}
+        if required_tests - passed:
+            errors.write("verification error: 未实际运行通过全部指定测试\n")
             invalid = True
     return not invalid
 

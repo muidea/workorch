@@ -38,14 +38,16 @@ import (
 // 额外原准则，通过公开模板接口声明并在正常创作/六审/确认链封存，不能强加给所有项目。
 // 不直接创建 Run、bootstrap、authority、binding 或 receipt，不改变默认模板。
 // synthetic provider 仅提议文档；所有交付文件、Git、证据与终态由 production owners 产生。
-func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
+func implementationWorkFullflowActivate(t *testing.T) (context.Context, workorchrepo.WorkspaceScopedFileRepositorySet, *implementationWorkFullflowProvider, common.WorkspaceID, *workspace.Workspace, []byte, string) {
+	t.Helper()
 	ctx := context.Background()
-	storage, directory := t.TempDir(), t.TempDir()
+	storage, directory, protocolFixture := implementationWorkFullflowPreparationEnvironment(t)
 	repos := workorchrepo.NewWorkspaceScopedFileRepositorySet(storage)
 	provider := &implementationWorkFullflowProvider{authoring: emptyDirectoryProvider{repos: repos, mappingProposal: implementationWorkFullflowAuthoringMapping}, reviewedInputs: map[string]string{}}
 	proxy := httptest.NewServer(http.HandlerFunc(provider.serveHTTP))
 	t.Cleanup(proxy.Close)
 	baseURL, client := implementationWorkFullflowStart(t, ctx, storage, proxy.URL, repos)
+	implementationWorkFullflowPreparationMCP(t, client, baseURL, protocolFixture)
 	template, err := repos.WorkspaceTemplates.Get(ctx, "software-dev")
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +136,14 @@ func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
 	}
 	assertNoRun(t, repos)
 	assertEmptyDeliverable(t, directory)
+	implementationWorkFullflowPrepare(t, ctx, client, path, repos, workspaceID)
 	productionJSON(t, client, http.MethodPost, path+"/execution-activations", management.WorkspaceExecutionCommandRequest{Intent: "restart", RequestID: "implementation-work-explicit-first-execution"}, nil)
+
+	return ctx, repos, provider, workspaceID, current, startupBytes, directory
+}
+
+func TestImplementationWorkPublicAuthoringFullFlow(t *testing.T) {
+	ctx, repos, provider, workspaceID, current, startupBytes, directory := implementationWorkFullflowActivate(t)
 
 	var first *runmodel.Run
 	var initialBootstrap []byte
@@ -495,7 +504,9 @@ operations = ["responses"]
 		defer cancel()
 		app.Teardown(shutdown)
 	})
-	client, base := &http.Client{Timeout: 10 * time.Second}, "http://"+address
+	// HTTP admission includes complete owner persistence validation. This is a
+	// transport ceiling only; the Runtime fullflow deadline remains ten minutes.
+	client, base := &http.Client{Timeout: 30 * time.Second}, "http://"+address
 	waitForHTTP(t, client, base)
 	return base, client
 }

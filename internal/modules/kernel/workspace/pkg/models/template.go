@@ -74,6 +74,7 @@ func WorkspaceForCurrentTemplate(workspace *Workspace, template *WorkspaceTempla
 	}
 	next := *workspace
 	next.PreparationFence = workspace.PreparationFence.Clone()
+	next.FirstExecutionPreparationEvidence = workspace.FirstExecutionPreparationEvidence.Clone()
 	boundHash := workspace.TemplateBindingHash
 	if boundHash == "" && workspace.StartupInput != nil {
 		boundHash = workspace.StartupInput.TemplateSnapshotHash

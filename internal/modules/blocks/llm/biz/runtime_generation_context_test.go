@@ -253,7 +253,7 @@ func TestRuntimeGenerationContextIntegrityRejectsLostForgedAndForeignSource(t *t
 			if scenario == "invented source" {
 				manifest.OwnerFactDependencyCatalogs = nil
 			}
-			data, err = json.Marshal(runtimeSemanticAuthorityProjection{Manifest: projection})
+			data, err = json.Marshal(runtimeSemanticAuthorityProjection{Manifest: projection, OutputInstruction: runtimeSemanticOutputInstruction(semantic.SemanticContext, manifest)})
 			if err != nil {
 				t.Fatal(err)
 			}

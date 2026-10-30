@@ -277,6 +277,9 @@ Shell-private `runShellProjectConjunction` 复用 `validation_project_conjunctio
 总字节数、SHA256、容量不足标记、实际 argv/scope、测试数、进程组清理及 source 前后身份。
 旧输入或相邻 harness 失败、skip、race、source 变化、缺检查映射或行为未观测均不能完成合取。
 已知工程失败保留真实 exit code，不能因当前 CWI 尚未执行而降成结果未决。
+最后的 exact-reviewed 阶段缺少真实行为或原生检查失败时，沿既有 typed diagnostic 合同报告；
+不将前三阶段或相邻测试的通过／失败借为本 CWI 的语义结论。缺行为的补充输入仍须匹配原检查，
+保留所有原输入，经过 fresh owner 观察与独立审查后才可再验证；诊断本身零 credit。
 
 `validation_project_conjunction_runner_test.go` 使用真实 Go 和真实 managed copy 验证完整四阶段正例、
 旧输入失败、相邻编译失败、跳过、race、前三阶段成功而最后行为失败、source 变化、缺映射及准确期限。
@@ -333,6 +336,9 @@ rejected history；不抹除历史，也不发布 structured repair。`TestProje
 SM-2/3/4 没有新 transition、counter 或预算，SM-1 不变。真实 owner producer 回归不代表 live 或公开默认准入。
 
 公开 Shell owner 在原 seal、scope、receipt miss、生命周期票与 catalog revision 核验之后选择该私有 runner；
+runner 的成功观察保持未分类；只有 owner completion 确认完整四阶段、准确 native checks、
+真实行为、原输出持久引用、清理及原 deadline 全部成立后，才署名 `behavioral` 模态。
+失败历史保留空模态；模态是 capability fact，不裁决 CWI credit。
 无原 execution 的 direct adapter 调用拒绝降级执行。reconciliation 使用 completed dispatch 的原 scope、recipe 和
 binding stage hash，经同一封套执行全部四阶段；它不产生 operation receipt 或 CWI credit。
 reconciliation 原文使用绑定 Workspace/Run、request/generation、Definition、binding-set/binding、baseline 与 recipe 的

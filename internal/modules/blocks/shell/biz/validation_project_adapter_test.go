@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -148,7 +149,10 @@ func projectAdapterOwnerCommand(t *testing.T, adapter *RuntimeAdapter, failed bo
 	}
 	target := shellValidationNativeCheckTargetRef(requirement, checks...)
 	writeNativeStructureSource(t, request.WorkspaceDeliverableDirectory, target, "package checks\nimport (\"testing\"; delivery \"fixture/delivery\")\nfunc "+checks[0].NativeCheckRef+"(t *testing.T){if delivery.Value()!=4{t.Fatal(\"wrong\")}}\n")
-	refs := append(append([]string(nil), request.ValidationScopeTargetRefs...), target)
+	refs := append([]string(nil), request.ValidationScopeTargetRefs...)
+	if !slices.Contains(refs, target) {
+		refs = append(refs, target)
+	}
 	manifest := shellTestWorkspaceManifestBinding("project-owner-fixture", refs)
 	catalog, err := adapter.AcquireRuntimeOperationAdmissibility(request.WorkspaceDeliverableDirectory, "project-owner-catalog", []string{runtimecontract.RuntimeBlockKindManagedValidationSession})
 	if err != nil {
@@ -395,7 +399,9 @@ func TestProjectAdapterExecutionProducesPersistableExactObservation(t *testing.T
 	target := shellValidationNativeCheckTargetRef(requirement, checks...)
 	writeNativeStructureSource(t, request.WorkspaceDeliverableDirectory, target, "package checks\nimport (\"testing\"; delivery \"fixture/delivery\")\nfunc "+checks[0].NativeCheckRef+"(t *testing.T){if delivery.Value()!=4{t.Fatal(\"wrong\")}}\n")
 	request.TargetRefs, request.ValidationCheckAttestations = []string{target}, checks
-	request.ValidationScopeTargetRefs = append(request.ValidationScopeTargetRefs, target)
+	if !slices.Contains(request.ValidationScopeTargetRefs, target) {
+		request.ValidationScopeTargetRefs = append(request.ValidationScopeTargetRefs, target)
+	}
 	request.ValidationRecipes = []runtimecontract.RuntimeValidationRecipe{declaration}
 	for _, scenario := range []string{"missing-recipe", "legacy-recipe", "missing-hash", "wrong-hash", "mixed-protocol", "missing-checks"} {
 		changed := request

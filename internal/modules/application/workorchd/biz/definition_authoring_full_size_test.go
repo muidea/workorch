@@ -232,7 +232,7 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 	}
 	found := false
 	for _, recipe := range runtimecontract.RuntimeValidationRecipeDeclarationsFromEvidencePolicies(first.Activation.EvidencePolicies) {
-		if recipe.AdapterRef != shellcommon.ValidationRecipeAdapterConjunctiveEntrypoint || recipe.InputReviewProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV2 {
+		if recipe.AdapterRef != shellcommon.ValidationRecipeAdapterProjectMultiFailureDiagnostic || recipe.InputReviewProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV3 {
 			t.Fatalf("未使用已审查 adapter/protocol: %+v", recipe)
 		}
 		found = true

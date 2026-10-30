@@ -65,20 +65,15 @@ func (m *Biz) executeExecutionIntent(ev magicevent.Event) (workspaceevents.Works
 		return result, nil
 	}
 	if prepared.command.Kind == runtimecontract.RuntimeExecutionIntentRestart {
-		definition := prepared.command.Bootstrap.Definition.Normalized()
-		workspace, err := m.submitWorkspaceExecutionInternalEvent(prepared.ctx, workspaceExecutionInternalEvent{
-			Kind:              workspaceExecutionInternalEventActivationProviderSelectionObserved,
-			WorkspaceID:       prepared.workspace.ID,
-			StartupInputHash:  definition.StartupInputHash,
-			ProviderSelection: prepared.command.Bootstrap.Activation.ProviderSelection,
-		})
+		fact, err := workspaceFreshIntentReservationFact(prepared.command, prepared.workspace.Revision)
 		if err != nil {
 			return workspaceevents.WorkspaceExecutionIntentResult{}, err
 		}
-		prepared.workspace = workspace
-		fact, err := workspaceFreshIntentReservationFact(prepared.command, workspace.Revision)
-		if err != nil {
-			return workspaceevents.WorkspaceExecutionIntentResult{}, err
+		if requiresFirstExecutionPreparation(prepared.workspace) {
+			fact.FirstPreparation, err = m.observeFirstExecutionPreparation(prepared)
+			if err != nil {
+				return workspaceevents.WorkspaceExecutionIntentResult{}, err
+			}
 		}
 		reserved, first, err := m.submitWorkspaceFreshIntentReserved(prepared.ctx, fact)
 		if err != nil {

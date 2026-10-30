@@ -27,6 +27,10 @@ func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request Acti
 	if err != nil {
 		return nil, err
 	}
+	// The general Workspace projection deliberately omits private preparation
+	// and execution-fence history. First-start preparation is independently
+	// recompiled by Workspace against the complete owner CAS preimage; this
+	// read-only Bootstrap compiler cannot infer readiness from that projection.
 	ctx, err = common.BindRuntimeWorkspaceContext(ctx, workspace.ID)
 	if err != nil {
 		return nil, err
@@ -37,7 +41,7 @@ func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request Acti
 	}
 	admissionSnapshot, err := EnsureWorkspaceDefinitionAdmission(ctx, request.Hub, workspace, goal, dod)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("activation exact definition admission: %w", err)
 	}
 	workspace = admissionSnapshot.Workspace
 	activationBuild, err := workspaceRuntimeActivation(ctx, request, workspace, admissionSnapshot.Template, goal, dod)
@@ -64,7 +68,7 @@ func CompileWorkspaceExecutionRestartBootstrap(ctx context.Context, request Acti
 		return nil, err
 	}
 	if err := validateRuntimeBootstrapStartupSeal(workspace, admissionSnapshot.Template, admissionSnapshot.Candidate, bootstrap); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("activation bootstrap seal: %w", err)
 	}
 	return bootstrap, nil
 }

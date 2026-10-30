@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
 	workspacemodel "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
+	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/preparationcompiler"
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -18,9 +20,11 @@ import (
 // This owner-private fact is not an EventHub command and cannot forward an
 // execution intent. Only its successful initial CAS can identify a new reserve.
 type workspaceFreshIntentReserved struct {
-	WorkspaceID      common.WorkspaceID
-	ExpectedRevision uint64
-	Reservation      workspacemodel.WorkspaceFreshIntentReservation
+	WorkspaceID       common.WorkspaceID
+	ExpectedRevision  uint64
+	Reservation       workspacemodel.WorkspaceFreshIntentReservation
+	ProviderSelection runtimecontract.ProviderInferenceSelection
+	FirstPreparation  *workspaceFirstExecutionPreparation
 }
 
 func workspaceFreshIntentReservationFact(cmd workspaceevents.WorkspaceExecutionIntentCommand, expectedRevision uint64) (workspaceFreshIntentReserved, error) {
@@ -47,6 +51,7 @@ func workspaceFreshIntentReservationFact(cmd workspaceevents.WorkspaceExecutionI
 	}
 	fact := workspaceFreshIntentReserved{
 		WorkspaceID: cmd.WorkspaceID, ExpectedRevision: expectedRevision,
+		ProviderSelection: cmd.Bootstrap.Activation.ProviderSelection,
 		Reservation: workspacemodel.WorkspaceFreshIntentReservation{
 			RequestID: cmd.RequestID, Kind: cmd.Kind,
 			StartupInputHash: cmd.Bootstrap.Definition.Normalized().StartupInputHash,
@@ -77,13 +82,13 @@ func reduceWorkspaceFreshIntentReserved(current *workspacemodel.Workspace, fact 
 		if settled.Reservation.RequestID != fact.Reservation.RequestID {
 			continue
 		}
-		if settled.Reservation == fact.Reservation {
+		if sameWorkspaceFreshIntentInput(settled.Reservation, fact.Reservation) {
 			return workspaceExecutionTransition{Next: current, Noop: true}, nil
 		}
 		return workspaceExecutionTransition{}, common.ErrConflict
 	}
 	if fence.Pending != nil {
-		if *fence.Pending == fact.Reservation {
+		if sameWorkspaceFreshIntentInput(*fence.Pending, fact.Reservation) {
 			return workspaceExecutionTransition{Next: current, Noop: true}, nil
 		}
 		return workspaceExecutionTransition{}, fmt.Errorf("%w: unresolved fresh intent %s", common.ErrConflict, fence.Pending.RequestID)
@@ -94,12 +99,65 @@ func reduceWorkspaceFreshIntentReserved(current *workspacemodel.Workspace, fact 
 	if current.Revision != fact.ExpectedRevision || validateWorkspaceExecutionAdmissionPersistence(current) != nil || current.StartupInput == nil || current.ActivationAdmission == nil || current.ActivationAdmission.State != workspacemodel.WorkspaceActivationEligible || current.StartupInput.StartupInputHash != fact.Reservation.StartupInputHash {
 		return workspaceExecutionTransition{}, common.ErrConflict
 	}
-	next := *current
+	var firstEvidence *workspacemodel.WorkspaceFirstExecutionPreparationEvidence
+	if requiresFirstExecutionPreparation(current) {
+		p := fact.FirstPreparation
+		if p == nil {
+			return workspaceExecutionTransition{}, common.ErrConflict
+		}
+		now := time.Now().UTC()
+		compiled, err := preparationcompiler.CompileObservedFirstExecutionPreparation(current, &p.Goal, &p.DoD, p.Bootstrap, now, p.Files)
+		if err != nil {
+			return workspaceExecutionTransition{}, err
+		}
+		// Reverse-prove the full Run payload, not just a self-reported bootstrap
+		// hash. The original request identity is still resolved before this gate.
+		runHash, err := runmodel.ExecutionIntentPayloadHash(current.ID, fact.Reservation.RequestID, p.Bootstrap)
+		if err != nil || runHash != fact.Reservation.RunPayloadHash || !fact.ProviderSelection.Same(p.Bootstrap.Activation.ProviderSelection) {
+			return workspaceExecutionTransition{}, common.ErrConflict
+		}
+		fact.Reservation.PreparationCompletionID = compiled.CompletionID
+		fact.Reservation.PreparationRevision = current.Revision
+		fact.Reservation.PreparationConsumedAt = now
+		firstEvidence = &workspacemodel.WorkspaceFirstExecutionPreparationEvidence{
+			Version: workspacemodel.FirstExecutionPreparationEvidenceVersion, WorkspaceID: current.ID,
+			RequestID: fact.Reservation.RequestID, Files: p.Files.Clone(),
+		}
+	}
+	// Compile metadata against the SAME reservation preimage. A separate
+	// provider-selection CAS would stale a freshly completed preparation before
+	// its reservation could consume that revision. No metadata write may survive
+	// a rejected/failed reservation. Original identities above remain first.
+	selection, err := normalizeWorkspaceExecutionInternalEvent(workspaceExecutionInternalEvent{
+		Kind:        workspaceExecutionInternalEventActivationProviderSelectionObserved,
+		WorkspaceID: current.ID, StartupInputHash: fact.Reservation.StartupInputHash,
+		ProviderSelection: fact.ProviderSelection,
+	})
+	if err != nil {
+		return workspaceExecutionTransition{}, err
+	}
+	metadata, err := reduceWorkspaceExecutionInternalEvent(current, selection)
+	if err != nil {
+		return workspaceExecutionTransition{}, err
+	}
+	next := *metadata.Next
+	if firstEvidence != nil {
+		next.FirstExecutionPreparationEvidence = firstEvidence
+	}
 	next.PreparationFence = fence.Clone()
 	next.PreparationFence.PreparationEpoch++
 	reservation := fact.Reservation
 	next.PreparationFence.Pending = &reservation
 	return workspaceExecutionTransition{Next: &next}, nil
+}
+
+// Consumption metadata is owner-derived, not part of the incoming request
+// identity. A replay never writes, rechecks or replaces the original metadata.
+func sameWorkspaceFreshIntentInput(original, incoming workspacemodel.WorkspaceFreshIntentReservation) bool {
+	incoming.PreparationCompletionID = original.PreparationCompletionID
+	incoming.PreparationRevision = original.PreparationRevision
+	incoming.PreparationConsumedAt = original.PreparationConsumedAt
+	return incoming == original
 }
 
 // newlyReserved is true ONLY for the caller whose CAS returned success. An

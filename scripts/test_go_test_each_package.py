@@ -22,6 +22,14 @@ def passing(package: str) -> str:
 
 
 class EachPackageTests(unittest.TestCase):
+    def test_required_tests_cannot_be_replaced_by_other_passes_or_skips(self) -> None:
+        for required in ({("one", "TestContract")}, {("one", "TestMissing")}, {("other", "TestContract")}):
+            output, errors = io.StringIO(), io.StringIO()
+            valid = helper.verify(io.StringIO(passing("one")), output, errors, required)
+            self.assertEqual(valid, required == {("one", "TestContract")})
+        raw = events("one", "start") + events("one", "run", "TestOptional") + events("one", "skip", "TestOptional") + passing("one").split("\n", 1)[1]
+        self.assertFalse(helper.verify(io.StringIO(raw), io.StringIO(), io.StringIO(), {("one", "TestContract")}))
+
     def check(self, raw: str) -> tuple[bool, str, str]:
         output, errors = io.StringIO(), io.StringIO()
         result = helper.verify(io.StringIO(raw), output, errors)

@@ -19,3 +19,6 @@ internal/modules/application/**/workspaces/
 .workorch-e2e/
 scripts/__pycache__/
 scripts/**/__pycache__/
+
+# Local design documents, plans, reviews and validation records.
+/docs/

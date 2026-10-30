@@ -85,6 +85,9 @@ func validateRuntimeSemanticContextIntegrity(context runtimecontract.RuntimeSema
 		if json.Unmarshal([]byte(contents["C3"]), &actual) != nil {
 			missing = append(missing, "P0.semantic_authority")
 		} else {
+			if actual.OutputInstruction != runtimeSemanticOutputInstruction(context, manifest) {
+				missing = append(missing, "P0.semantic_output_instruction")
+			}
 			if !reflect.DeepEqual(actual.Manifest.ValidationGenerationContexts, projection.ValidationGenerationContexts) {
 				missing = append(missing, "P4.validation_generation_context")
 			}

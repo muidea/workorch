@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -90,6 +91,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 	}
 
 	workspaceDirectory := t.TempDir()
+	workspaceInternalDirectory := t.TempDir()
 	manifestPrerequisite := runtimecontract.RuntimePrerequisite{
 		ID: "manifest:default-native-proof", Kind: runtimecontract.PrerequisiteKindManifest,
 		OwnerModuleID: runtimecontract.RuntimeModuleFile,
@@ -151,7 +153,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 		t.Fatalf("File module preparation did not attest Shell's exact module target: %+v", moduleReceipt)
 	}
 	// 夹具校准 owner 协议，不自证任意模板语义；实际交付入口独立于验证输入，
-	// 必须在默认 adapter v5 的完整合取 observation 合同下真实执行。
+	// 必须在当前默认 project-conjunction adapter 的完整四阶段合同下真实执行。
 	subject := "package fixture\nfunc DeliveredValue() int { return 4 }\n"
 	executeFileWrite(runtimecontract.RuntimeOperation{ID: "fixture-subject", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{"fixture.go"},
 		Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &subject}}}, "dispatch-fixture-subject")
@@ -200,13 +202,33 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 	var firstReceipt runtimecontract.RuntimeOperationReceipt
 	var firstBinding runtimecontract.CoverageEvidenceBinding
 	var firstOperation runtimecontract.RuntimeOperation
+	additionalInputRef := ""
 	for index, requirement := range requirements {
 		surface, ownerBinding, found := runtimecontract.RuntimeValidationSurfaceForProofRequirement(catalog.ValidationSurfaces, requirement)
 		if !found {
 			t.Fatalf("reobserved catalog has no exact ready binding for %q: %+v", requirement.Hash, catalog.ValidationSurfaces)
 		}
-		if len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].ObservationProtocolRef != "shell/go-test-json/workspace-behavior/v6" || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != "" || ownerBinding.InputReview == nil || ownerBinding.InputReview.ValidateAgainstBinding(ownerBinding) != nil || len(ownerBinding.InputReview.Files) != 2 {
-			t.Fatalf("default adapter did not publish an exact isolated review subject: %+v", ownerBinding)
+		if len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].ObservationProtocolRef != "shell/go-test-json/project-conjunction-behavior/v3" || ownerBinding.CheckAttestations[0].ExecutionStagesHash == "" || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != "" || ownerBinding.InputReview == nil || ownerBinding.InputReview.ProtocolRef != runtimecontract.RuntimeValidationInputReviewProtocolV3 || ownerBinding.InputReview.DiagnosticSourceContractRef != runtimecontract.RuntimeValidationDiagnosticSourceReviewV1 || ownerBinding.InputReview.ValidateAgainstBinding(ownerBinding) != nil {
+			t.Fatalf("default adapter did not publish an exact conjunctive review subject: %+v", ownerBinding)
+		}
+		// V8 reviews the complete current test corpus, including neighboring
+		// requirement packages, rather than only this one package plus go.mod.
+		wantInputs := []string{"go.mod"}
+		for _, target := range preparedTargets {
+			wantInputs = append(wantInputs, target)
+		}
+		wantSourceCount := len(requirements)
+		if additionalInputRef != "" {
+			wantInputs = append(wantInputs, additionalInputRef)
+			wantSourceCount++
+		}
+		slices.Sort(wantInputs)
+		var actualInputs []string
+		for _, file := range ownerBinding.InputReview.Files {
+			actualInputs = append(actualInputs, file.TargetRef)
+		}
+		if !slices.Equal(actualInputs, wantInputs) || len(ownerBinding.InputReview.DiagnosticSources) != wantSourceCount {
+			t.Fatalf("default review lost original input/source inventory: inputs=%v sources=%+v", actualInputs, ownerBinding.InputReview.DiagnosticSources)
 		}
 		focus, found := focusByCoverage[requirement.CoverageWorkItemID]
 		if !found {
@@ -240,6 +262,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 					Transaction: runtimecontract.AuthorityTransaction{AuthoritySnapshotID: aggregate.Decision.AuthoritySnapshot.ID, DefinitionRevision: aggregate.Facts.DefinitionRevision, RequiredOutputHash: "required-output-default-native-proof"},
 					OperationID: operation.ID, TargetRefs: append([]string(nil), operation.TargetRefs...), EvidenceKind: runtimecontract.EvidenceKindValidation,
 					WorkspaceDeliverableDirectory: workspaceDirectory,
+					WorkspaceInternalDirectory:    workspaceInternalDirectory,
 				},
 				SealedOperation: sealed,
 			})
@@ -251,7 +274,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 			}
 			diagnostic := response.Receipt.Feedback.OriginalDiagnostic.ValidationDiagnostic
 			addition := diagnostic.InputAddition
-			if addition.ContentContractRef != "shell/go-test-input/conjunctive-entrypoint/v1" {
+			if addition.ContentContractRef != "shell/go-test-input/project-conjunction/v1" {
 				t.Fatalf("default adapter did not publish the versioned entrypoint input contract: %+v", addition)
 			}
 			convergence := focus.ValidationFailureRepairConvergence
@@ -265,6 +288,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 			originalBinding := ownerBinding.Clone()
 			content := fmt.Sprintf("package workorch_validation\nimport (\"testing\"; subject \"example.com/workorch-default-native-proof\")\nfunc %s(t *testing.T) { if subject.DeliveredValue() != 4 { t.Fatal(\"delivery entry returned wrong value\") } }\n", addition.NativeCheckRef)
 			created := executeFileWrite(runtimecontract.RuntimeOperation{ID: "supplement-input", Kind: runtimecontract.StepKindFileWrite, TargetRefs: []string{addition.TargetRef}, Parameters: []runtimecontract.OperationParameter{{Name: "content", String: &content}}}, "dispatch-create-supplement")
+			additionalInputRef = addition.TargetRef
 			if _, credit, _ := coverageEvidenceCreditForReceipt([]runtimecontract.CoverageEvidenceBinding{coverageBinding}, operation, runtimecontract.EvidenceKindValidation, &created); len(credit) != 0 {
 				t.Fatal("input creation credited validation")
 			}
@@ -275,7 +299,7 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 			if !found || len(ownerBinding.CheckAttestations) != 1 || ownerBinding.CheckAttestations[0].NativeCheckRef != originalBinding.CheckAttestations[0].NativeCheckRef || ownerBinding.CheckAttestations[0].SupplementalNativeCheckRef != addition.NativeCheckRef || ownerBinding.CheckAttestations[0].ObservationProtocolRef != originalBinding.CheckAttestations[0].ObservationProtocolRef {
 				t.Fatalf("fresh owner binding replaced original instead of adding all-of: %+v", ownerBinding)
 			}
-			if ownerBinding.InputReview == nil || ownerBinding.InputReview.Hash == originalBinding.InputReview.Hash || len(ownerBinding.InputReview.Files) != 3 {
+			if ownerBinding.InputReview == nil || ownerBinding.InputReview.Hash == originalBinding.InputReview.Hash || len(ownerBinding.InputReview.Files) != len(wantInputs)+1 || len(ownerBinding.InputReview.DiagnosticSources) != len(requirements)+1 {
 				t.Fatal("supplement did not require a fresh complete input review")
 			}
 			coverageBinding, semanticFocus = defaultNativeProofCoverageBinding(t, focus, requirement, ownerBinding, preparedTarget)
@@ -287,6 +311,10 @@ func runDefaultNativeProofPipeline(t *testing.T, supplementFirst bool) {
 		}
 		if response.Receipt.Evidence.Validation.ProofClass != runtimecontract.RuntimeValidationProofBehavioral || response.Receipt.Evidence.Validation.ValidateFailureDetails() != nil {
 			t.Fatalf("real owner behavioral observation lost typed modality: %+v", response.Receipt.Evidence.Validation)
+		}
+		conjunction := response.Receipt.Evidence.Validation.ExecutionConjunction
+		if conjunction == nil || !conjunction.Complete || len(conjunction.Stages) != 4 || conjunction.RequiredStagesHash != ownerBinding.CheckAttestations[0].ExecutionStagesHash || len(conjunction.BehaviorTargetRefs) == 0 {
+			t.Fatalf("default proof did not actually complete all original stages: %+v", conjunction)
 		}
 		bindingRefs, coverageIDs, diagnostic := coverageEvidenceCreditForReceipt(
 			[]runtimecontract.CoverageEvidenceBinding{coverageBinding}, operation,

@@ -159,6 +159,10 @@ miss/fresh/TTL/LKG、未完 refresh、配置轮换、完整性/隔离、生命�
   `biz/runtime_proof_composition_test.go` 固定 C3 完整声明/schema/instruction、删改拒绝及输入变化时
   C0～C2/StablePrefixHash 不变。来源与边界遵守
   [Validation Proof Composition](../../../../docs/00-core/runtime/validation-proof-composition.md)。
+  每份 v3 subject 同时投影 owner 纯计算的 canonical `requiredProofConsumerRefs`，明确逐 check 必须完整合取的集合；
+  它不证明这些消费者已执行，也不代填模型结论。v1/v2 不出现该投影。批内存在多个可选 recipe 时，说明覆盖全部
+  实际可选协议、scope 与 diagnostic-source 扩展，每类只出现一次，按选中的 exact recipe/subject 使用；不得沿用
+  第一份 recipe 的协议解释其余候选。C3 的完整输入投影与阶段说明均经 context-integrity 重验，删改仍拒绝。
   subject 可声明有界 `ScopeContractRef + ScopeRequirements`，描述 owner 实际执行/观测范围；它随 subject hash 封存并
   完整放入 C3，不能由 recipe 名推测更广的验证范围。缺省保持旧请求；范围变动不能复用旧报告。
   显式 `validation/diagnostic-source-review/v1` 在 v3 subject 的 C3 额外完整投影逐 native source identity 与输入来源；

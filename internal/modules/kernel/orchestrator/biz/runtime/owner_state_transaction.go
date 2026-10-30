@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"runtime/trace"
 
 	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -23,6 +24,8 @@ type ownerStateOriginalRepository interface {
 // full ordered DTO/aggregate gates. Invariant products are never retained, and
 // no reducer, Commit, Save or successful validation credential is involved.
 func loadOwnerStateQuery(ctx context.Context, c *RuntimeController, original ownerStateOriginalRepository, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
+	region := startRuntimeTraceRegion(ctx, "workorch.runtime.query_reload")
+	defer region.End()
 	var aggregate RuntimeAggregate
 	err := c.historicalCompiler.Compile(workspaceID, runID, func(validate func(runtimecontract.RuntimeOwnerStateSourceImage) error) error {
 		record, loaded, err := original.LoadOwnerStateOriginal(ctx, workspaceID, runID)
@@ -58,6 +61,8 @@ type ownerStateTransactionRepository struct {
 }
 
 func (r ownerStateTransactionRepository) Load(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID) (RuntimeAggregate, error) {
+	region := startRuntimeTraceRegion(ctx, "workorch.runtime.event_load")
+	defer region.End()
 	t := r.transaction
 	if t.loaded || workspaceID != t.scope.WorkspaceID || runID != t.scope.RunID {
 		// Additional loads never inherit a previous successful Load assertion.
@@ -138,6 +143,8 @@ func ownerStateSourceImageInCompiler(record *runtimecontract.RuntimeStateRecord,
 }
 
 func (c *RuntimeController) applyOwnerStateTransaction(ctx context.Context, event RuntimeInternalEvent, original ownerStateOriginalRepository) (result RuntimeInternalEventResult, err error) {
+	region := startRuntimeTraceRegion(ctx, "workorch.runtime.event_transaction")
+	defer region.End()
 	err = c.historicalCompiler.Compile(event.Scope.WorkspaceID, event.Scope.RunID, func(validate func(runtimecontract.RuntimeOwnerStateSourceImage) error) error {
 		compiler := &ownerStateInvariantCompiler{}
 		transaction := &ownerStateTransaction{scope: event.Scope, validate: func(record *runtimecontract.RuntimeStateRecord, a RuntimeAggregate) error {
@@ -168,4 +175,13 @@ func (t *ownerStateTransaction) validateAfterImage(aggregate RuntimeAggregate) e
 	}
 	t.committed = true
 	return t.validate(nil, aggregate)
+}
+
+// Trace is diagnostic only; a nil business context must not become a new panic
+// when optional tracing is enabled. The original context is never replaced.
+func startRuntimeTraceRegion(ctx context.Context, name string) *trace.Region {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return trace.StartRegion(ctx, name)
 }

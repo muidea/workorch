@@ -11,7 +11,9 @@ import (
 // SM-4 only coordinates concrete owner reads. It cannot judge the response,
 // change receipt provenance, grant credit, or choose a reopen transition.
 func (m *Biz) driveRuntimeEvidenceApplicability(ctx context.Context, aggregate runtime.RuntimeAggregate) (runtime.RuntimeAggregate, bool, error) {
-	request, source, required, err := runtime.CompileRuntimeEvidenceApplicabilityRead(aggregate)
+	region := startRuntimeTraceRegion(ctx, "workorch.runtime.applicability")
+	defer region.End()
+	request, source, required, err := m.runtimeController.CompileEvidenceApplicabilityRead(aggregate)
 	if err != nil || !required {
 		return aggregate, false, err
 	}

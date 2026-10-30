@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	filepreparation "github.com/muidea/workorch/internal/modules/blocks/file/pkg/preparation"
+
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
@@ -50,7 +52,7 @@ func TestPreparationFenceRawValidationAndDetachedTemplateView(t *testing.T) {
 	baseline := fence.Clone()
 	template := &WorkspaceTemplate{ID: "template", Name: "template"}
 	for _, alreadyBound := range []bool{false, true} {
-		w := &Workspace{ID: "ws", TemplateID: template.ID, PreparationFence: fence}
+		w := &Workspace{ID: "ws", TemplateID: template.ID, PreparationFence: fence, FirstExecutionPreparationEvidence: &WorkspaceFirstExecutionPreparationEvidence{RequestID: "original", Files: filepreparation.Observation{Scope: filepreparation.Scope{RequestID: "original-file"}}}}
 		if alreadyBound {
 			w.TemplateBindingHash = WorkspaceTemplateSnapshotHash(template)
 		}
@@ -59,6 +61,10 @@ func TestPreparationFenceRawValidationAndDetachedTemplateView(t *testing.T) {
 			t.Fatal(err)
 		}
 		next.PreparationFence.Pending.RequestID = "changed-view"
+		next.FirstExecutionPreparationEvidence.Files.Scope.RequestID = "changed-file-view"
+		if w.FirstExecutionPreparationEvidence.Files.Scope.RequestID != "original-file" {
+			t.Fatal("authoring view aliases restricted consumption evidence")
+		}
 		if !reflect.DeepEqual(fence, baseline) {
 			t.Fatal("detached authoring view aliases owner fence")
 		}

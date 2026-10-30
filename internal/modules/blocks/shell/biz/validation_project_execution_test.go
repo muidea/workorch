@@ -20,6 +20,8 @@ func projectExecutionFixture(t *testing.T, failed bool, adapters ...string) (Run
 	t.Helper()
 	root, internal := t.TempDir(), t.TempDir()
 	recipe := isolatedInputRecipe()
+	recipe.AdapterRef = modulecommon.ValidationRecipeAdapterProjectConjunction
+	recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV2
 	if len(adapters) != 0 {
 		recipe.AdapterRef = adapters[0]
 		recipe.InputReviewProtocolRef = runtimecontract.RuntimeValidationInputReviewProtocolV2
@@ -55,6 +57,82 @@ func projectExecutionFixture(t *testing.T, failed bool, adapters ...string) (Run
 	execution := runtimecontract.RuntimeOperationExecutionContext{WorkspaceID: request.WorkspaceID, RunID: request.RunID, DispatchID: "dispatch", OperationID: "op", WorkspaceDeliverableDirectory: root, WorkspaceInternalDirectory: internal,
 		Execution: runtimecontract.RuntimeOperationExecutionEnvelope{ExecutionKey: runtimecontract.StableRuntimeOperationExecutionKey(request.WorkspaceID, request.RunID, "dispatch", "op"), Fence: 1, OperationHash: "private-fixture-hash", AuthorityHash: "private-fixture-authority", ExpectedEffectScope: runtimecontract.RuntimeEffectEphemeralSession, IdempotencyClass: runtimecontract.RuntimeOperationIdempotencyAtMostOnce}}
 	return request, execution
+}
+
+func TestProjectCompletionRequiresNativeObservationAfterRealExecution(t *testing.T) {
+	request, execution := projectExecutionFixture(t, false)
+	completed, err := NewRuntimeAdapter().executeShellProjectConjunction(context.Background(), request, execution)
+	if err != nil || completed.Result.ValidationObservation == nil || !completed.Conjunction.Complete {
+		t.Fatalf("real project execution did not complete: %v", err)
+	}
+	for _, scenario := range []string{"missing", "recipe", "protocol", "native", "failed-check", "tag", "truncated", "zero-work"} {
+		t.Run(scenario, func(t *testing.T) {
+			changed := completed
+			conjunction := completed.Conjunction.Clone()
+			observation := completed.Result.ValidationObservation.Clone()
+			observation.ProofClass = ""
+			changed.Conjunction, changed.Result.ValidationObservation = &conjunction, &observation
+			switch scenario {
+			case "missing":
+				changed.Result.ValidationObservation = nil
+			case "recipe":
+				observation.RecipeID = ""
+			case "protocol":
+				observation.ObservationProtocolRef = shellGoTestObservationProtocolRef
+			case "native":
+				observation.PassedChecks = nil
+			case "failed-check":
+				observation.FailedChecks = append([]string(nil), observation.ExecutedChecks...)
+			case "tag":
+				changed.Result.EvidenceTags = nil
+			case "truncated":
+				changed.Result.OutputTruncated = true
+			case "zero-work":
+				changed.Result.ZeroWork = true
+			}
+			if err := finishShellProjectExecution(&changed, nil, nil, nil); err == nil || changed.Conjunction.Complete || changed.Result.Evidence.Quality == common.EvidenceQualityValid || changed.Result.ValidationObservation != nil && changed.Result.ValidationObservation.ProofClass != "" {
+				t.Fatal("incomplete native observation acquired behavioral proof")
+			}
+		})
+	}
+	if !completed.Conjunction.Complete || completed.Result.ValidationObservation.ProofClass != runtimecontract.RuntimeValidationProofBehavioral {
+		t.Fatal("rejection changed original accepted history")
+	}
+}
+
+func TestProjectBehaviorDiagnosticRequiresOriginalStorageCleanupAndDeadline(t *testing.T) {
+	request, execution := projectExecutionFixture(t, false)
+	native := request.ValidationCheckAttestations[0].NativeCheckRef
+	writeNativeStructureSource(t, request.WorkspaceDeliverableDirectory, request.TargetRefs[0], "package checks\nimport \"testing\"\nfunc "+native+"(t *testing.T){if 2+2!=4{t.Fatal(\"wrong\")}}\n")
+	failed, originalErr := NewRuntimeAdapter().executeShellProjectConjunction(context.Background(), request, execution)
+	diagnostic := failed.Result.ValidationFailureDiagnostic
+	if originalErr == nil || diagnostic == nil || diagnostic.OwnerCode != "validation_workspace_behavior_unobserved" || diagnostic.InputAddition.TargetRef == "" || failed.Conjunction == nil || failed.Conjunction.Complete || len(failed.Conjunction.Stages) != 4 || failed.Result.Evidence.Validation.ProofClass != "" {
+		t.Fatalf("real reviewed behavior omission lost its exact typed diagnostic: %v / %+v", originalErr, diagnostic)
+	}
+	for _, scenario := range []string{"cleanup", "deadline", "raw-gap"} {
+		t.Run(scenario, func(t *testing.T) {
+			changed := failed
+			conjunction := failed.Conjunction.Clone()
+			observation := failed.Result.ValidationObservation.Clone()
+			changed.Conjunction, changed.Result.ValidationObservation = &conjunction, &observation
+			changed.Raw = append([]shellProjectStageRawReferences(nil), failed.Raw...)
+			var cleanupErr, contextErr error
+			switch scenario {
+			case "cleanup":
+				cleanupErr = errors.New("cleanup failed after actual execution")
+			case "deadline":
+				contextErr = context.DeadlineExceeded
+			case "raw-gap":
+				changed.Raw[len(changed.Raw)-1].Stderr = ""
+			}
+			if err := finishShellProjectExecution(&changed, originalErr, cleanupErr, contextErr); !errors.Is(err, originalErr) || changed.Result.ValidationFailureDiagnostic != nil || changed.Result.RuntimeDiagnostics.ValidationFailureDiagnostic != nil || changed.Result.Evidence.Validation.ProofClass != "" || changed.Conjunction.Complete {
+				t.Fatal("incomplete original storage/cleanup/deadline obtained input-addition authority or changed the known failure")
+			}
+		})
+	}
+	if failed.Result.ValidationFailureDiagnostic != diagnostic {
+		t.Fatal("rejection changed original diagnostic history")
+	}
 }
 
 func TestProjectDiagnosticPublicationFailureKeepsActualSourceHistory(t *testing.T) {
@@ -162,6 +240,9 @@ func TestProjectExecutionEnvelopePreservesFactsRawScopeAndCleanup(t *testing.T) 
 				}
 			} else if err != nil || result.Conjunction == nil || !result.Conjunction.Complete || len(result.Conjunction.Stages) != 4 || result.Result.Evidence.Quality != common.EvidenceQualityValid {
 				t.Fatalf("真实完整封套失败：%+v err=%v", result, err)
+			}
+			if result.Result.ValidationObservation == nil || failed && result.Result.ValidationObservation.ProofClass != "" || !failed && result.Result.ValidationObservation.ProofClass != runtimecontract.RuntimeValidationProofBehavioral {
+				t.Fatal("owner completion did not distinguish accepted behavioral proof from rejected history")
 			}
 			if result.Conjunction.Validate() != nil || !result.Result.ManagedValidation.ResourcesReleased || len(result.Raw) != len(result.Conjunction.Stages) || result.FinishedAt.After(result.Deadline) || result.Deadline.After(result.StartedAt.Add(DefaultCommandTimeout)) {
 				t.Fatal("合取事实、清理或原 deadline 不成立")

@@ -163,7 +163,7 @@ func runtimeTerminalSnapshotOperationSource(source RuntimeStateRecord, scope, id
 	var selectedReceipt RuntimeOperationReceipt
 	var selectedInput *RuntimeValidationProofRequirementBinding
 	count = 0
-	sources := runtimeTerminalProofSources(source)
+	sources := runtimeLineageSourcesFromRecord(source)
 	for _, dispatch := range source.CompletedDispatches {
 		if dispatch.State != RuntimeDispatchStateCommitted || dispatch.ImplementationWorkCommitment != nil {
 			continue

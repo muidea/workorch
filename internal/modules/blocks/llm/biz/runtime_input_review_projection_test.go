@@ -2,12 +2,86 @@ package llm
 
 import (
 	"encoding/json"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	llmmodels "github.com/muidea/workorch/internal/modules/blocks/llm/pkg/models"
+	"github.com/muidea/workorch/internal/pkg/common"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
 )
+
+func TestRuntimeInputReviewSelectableProtocolsHaveCompleteOrderIndependentInstructions(t *testing.T) {
+	request := runtimeInputReviewProviderFixture(t)
+	requirement := request.SemanticManifest.ProofObligations[0].ValidationProofRequirement
+	requirement.ValidationRecipeID = ""
+	requirement.Hash = runtimecontract.StableRuntimeValidationProofRequirementHash(*requirement)
+	catalog := &request.SemanticManifest.OwnerCatalogs[0]
+	original := catalog.ValidationSurfaces[0].Clone()
+	catalog.ValidationSurfaces = nil
+	catalog.ValidationRecipes = nil
+	catalog.ValidationRecipeRefs = nil
+	for i, protocol := range []string{runtimecontract.RuntimeValidationInputReviewProtocol, runtimecontract.RuntimeValidationInputReviewProtocolV2, runtimecontract.RuntimeValidationInputReviewProtocolV3} {
+		id := []string{"recipe-v1", "recipe-v2", "recipe-v3"}[i]
+		binding, err := runtimecontract.RuntimeValidationProofRequirementBindingForRecipe(*requirement, id, runtimeValidationCheckAttestationsForLLMTest(requirement.RequiredCheckRefs)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		subject := original.ProofRequirementBindings[0].InputReview.Clone()
+		subject.ProtocolRef = protocol
+		// A scope on the first choice must not suppress a later choice's
+		// diagnostic-source or protocol instructions.
+		if i == 0 {
+			subject.ScopeContractRef, subject.ScopeRequirements = "owner/scope/v1", "Only the supplied inputs are observed."
+		}
+		if i == 2 {
+			subject.DiagnosticSourceContractRef = runtimecontract.RuntimeValidationDiagnosticSourceReviewV1
+			subject.DiagnosticSources = []runtimecontract.RuntimeValidationDiagnosticSource{{SourceRef: "source-v3", NativeCaseRef: "owner/TestCase", InputTargetRef: subject.Files[0].TargetRef}}
+		}
+		binding.InputReview = &subject
+		binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(subject, binding)
+		surface := original.Clone()
+		surface.ID, surface.ProofRequirementBindings = id, []runtimecontract.RuntimeValidationProofRequirementBinding{binding}
+		catalog.ValidationSurfaces = append(catalog.ValidationSurfaces, surface)
+		catalog.ValidationRecipes = append(catalog.ValidationRecipes, runtimecontract.RuntimeValidationRecipe{ID: id, AdapterRef: "owner/review/v1", Command: "check", InputReviewProtocolRef: protocol})
+		catalog.ValidationRecipeRefs = append(catalog.ValidationRecipeRefs, id)
+	}
+	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(*catalog)
+	request.SemanticManifest.Hash = runtimecontract.StableRuntimeSemanticPlanManifestHash(request.SemanticManifest)
+	refreshSemanticProgressForTest(t, &request)
+	provider, err := runtimeProviderRequest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projection runtimeSemanticAuthorityProjection
+	if err := json.Unmarshal([]byte(provider.PromptContext.Sections[3].Content), &projection); err != nil {
+		t.Fatal(err)
+	}
+	instruction := projection.OutputInstruction
+	for _, required := range []string{"For validation/input-consistency/v2", "For validation/input-consistency/v3", "one independent report for EVERY exact sourceRef", "scopeContractRef/scopeRequirements", "V1 reports must omit obligations", "V1/V2 must omit proofConsumerRefs"} {
+		if strings.Count(instruction, required) != 1 {
+			t.Fatalf("missing or duplicated selected-contract explanation: %s", required)
+		}
+	}
+	reviews := projection.Manifest.ProofObligations[0].ValidationProofRequirement.InputReviews
+	if len(reviews) != 3 || reviews[0].RequiredProofConsumerRefs != nil || reviews[1].RequiredProofConsumerRefs != nil || !reflect.DeepEqual(reviews[2].RequiredProofConsumerRefs, []string{runtimecontract.RuntimeValidationInputConsumer}) {
+		t.Fatal("v3 required consumers missing or imposed on legacy protocol")
+	}
+	slices.Reverse(catalog.ValidationSurfaces)
+	if got := runtimeSemanticOutputInstruction(request.SemanticContext, request.SemanticManifest); got != instruction {
+		t.Fatal("selectable surface order changed review instructions")
+	}
+	context := request.SemanticContext.Clone()
+	context.BatchCoverageWorkItemIDs = []common.CoverageWorkItemID{"unrelated"}
+	if strings.Contains(runtimeSemanticOutputInstruction(context, request.SemanticManifest), "Independent input-consistency review") {
+		t.Fatal("another CWI's review contract leaked into current batch")
+	}
+	context.PlanStep = runtimecontract.RuntimeSemanticPlanStepCoverageOrder
+	if runtimeSemanticInputObligationsInstruction(context, request.SemanticManifest) != "" {
+		t.Fatal("coverage order received validation review instructions")
+	}
+}
 
 func runtimeInputReviewProviderFixture(t *testing.T) llmmodels.RuntimeCandidateRequest {
 	t.Helper()

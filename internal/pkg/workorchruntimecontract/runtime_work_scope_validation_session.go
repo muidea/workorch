@@ -2,7 +2,6 @@ package workorchruntimecontract
 
 import (
 	"fmt"
-	"reflect"
 	"slices"
 )
 
@@ -20,7 +19,7 @@ type runtimeWorkDefinitionValidationEntry struct {
 func validateRuntimeWorkDefinitionSourcesInSession(seed RuntimeDefinitionSeed, focuses []RuntimeDefinitionFocus, profiles []RuntimeProfileContract, session *runtimeSemanticValidationSession) error {
 	if session != nil {
 		for _, entry := range session.workDefinitions {
-			if reflect.DeepEqual(entry.seed, seed) && reflect.DeepEqual(entry.focuses, focuses) && reflect.DeepEqual(entry.profiles, profiles) {
+			if runtimeRawEqual(entry.seed, seed) && runtimeRawEqual(entry.focuses, focuses) && runtimeRawEqual(entry.profiles, profiles) {
 				return nil
 			}
 		}
@@ -52,8 +51,8 @@ func validateRuntimeWorkScopeInSession(r RuntimeImplementationWorkScopeRequest, 
 		return err
 	}
 	for _, entry := range session.workScopes {
-		if reflect.DeepEqual(entry.raw, sources) {
-			if !reflect.DeepEqual(r, entry.request) {
+		if runtimeRawEqual(entry.raw, sources) {
+			if !runtimeRawEqual(r, entry.request) {
 				return fmt.Errorf("implementation work scope request does not match current sealed sources")
 			}
 			return nil
@@ -71,7 +70,7 @@ func validateRuntimeWorkScopeInSession(r RuntimeImplementationWorkScopeRequest, 
 	raw.ManifestBinding.Manifest.TargetRefs = slices.Clone(sources.ManifestBinding.Manifest.TargetRefs)
 	raw.ManifestBinding.Observation.Dependencies = slices.Clone(sources.ManifestBinding.Observation.Dependencies)
 	session.workScopes = append(session.workScopes, runtimeWorkScopeValidationEntry{raw: raw, request: expected.Clone()})
-	if !reflect.DeepEqual(r, expected) {
+	if !runtimeRawEqual(r, expected) {
 		return fmt.Errorf("implementation work scope request does not match current sealed sources")
 	}
 	return nil

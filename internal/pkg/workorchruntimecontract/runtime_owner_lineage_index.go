@@ -1,7 +1,5 @@
 package workorchruntimecontract
 
-import "reflect"
-
 // runtime-owner-lineage-subgraph-compiler/v1. Only complete, detached raw
 // historical nodes are retained. Keys select candidates, never certify them;
 // every hit compares the entire node, including nil/empty and original bytes.
@@ -61,7 +59,7 @@ func (c *runtimeOwnerLineageIndex) dispatch(d RuntimeDispatchRecord) error {
 		return d.validateIntrinsicInLineageIndex(c)
 	}
 	for _, prior := range c.dispatches[d.ID] {
-		if reflect.DeepEqual(prior, d) {
+		if runtimeRawEqual(prior, d) {
 			return nil
 		}
 	}
@@ -80,7 +78,7 @@ func (c *runtimeOwnerLineageIndex) catalog(a RuntimeOperationAdmissibility) erro
 		return a.Validate()
 	}
 	for _, prior := range c.catalogs[a.SnapshotID] {
-		if reflect.DeepEqual(prior, a) {
+		if runtimeRawEqual(prior, a) {
 			return nil
 		}
 	}
@@ -99,7 +97,7 @@ func (c *runtimeOwnerLineageIndex) receipt(r RuntimeOperationReceipt) error {
 		return r.Validate()
 	}
 	for _, prior := range c.receipts[r.ExecutionKey] {
-		if reflect.DeepEqual(prior.raw, r) {
+		if runtimeRawEqual(prior.raw, r) {
 			return nil
 		}
 	}
@@ -120,7 +118,7 @@ func (c *runtimeOwnerLineageIndex) receiptHash(r RuntimeOperationReceipt) string
 	if c != nil {
 		for i := range c.receipts[r.ExecutionKey] {
 			entry := &c.receipts[r.ExecutionKey][i]
-			if reflect.DeepEqual(entry.raw, r) {
+			if runtimeRawEqual(entry.raw, r) {
 				if entry.hash == "" {
 					entry.hash = StableRuntimeOperationReceiptHash(r)
 				}
@@ -136,7 +134,7 @@ func (c *runtimeOwnerLineageIndex) confirmation(r RuntimeRepairSurfaceConfirmati
 		return r.Validate()
 	}
 	for _, prior := range c.confirmations[r.Signature] {
-		if reflect.DeepEqual(prior, r) {
+		if runtimeRawEqual(prior, r) {
 			return nil
 		}
 	}

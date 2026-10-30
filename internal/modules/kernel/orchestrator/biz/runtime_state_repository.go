@@ -5,6 +5,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"runtime/trace"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	runevents "github.com/muidea/workorch/internal/modules/blocks/run/pkg/events"
@@ -79,6 +80,8 @@ func (r runtimeStateRepository) loadRuntimeStateOriginal(ctx context.Context, wo
 }
 
 func (r runtimeStateRepository) readRuntimeStateOriginal(ctx context.Context, workspaceID common.WorkspaceID, runID common.RunID, expectedRef string, expectedRevision uint64) (runtimecontract.RuntimeStateRecord, error) {
+	region := startRuntimeTraceRegion(ctx, "workorch.runtime.run_query")
+	defer region.End()
 	if r.hub == nil || workspaceID == "" || runID == "" {
 		return runtimecontract.RuntimeStateRecord{}, common.ErrInvalidArgument
 	}
@@ -133,6 +136,8 @@ func (r runtimeStateRepository) Save(ctx context.Context, aggregate runtime.Runt
 // this separate from Save avoids repeating that expensive validation while
 // preserving Save as a safe repository trust boundary for direct callers.
 func (r runtimeStateRepository) SaveValidated(ctx context.Context, aggregate runtime.RuntimeAggregate, expectedRevision uint64) error {
+	region := startRuntimeTraceRegion(ctx, "workorch.runtime.run_cas")
+	defer region.End()
 	if r.hub == nil {
 		return common.ErrInvalidArgument
 	}
@@ -483,4 +488,13 @@ func cloneRuntimeAssessmentAdjudicationRecord(value *runtimecontract.RuntimeAsse
 	}
 	copy := value.Clone()
 	return &copy
+}
+
+// Trace is diagnostic only; a nil business context must not become a new panic
+// when optional tracing is enabled. The original context is never replaced.
+func startRuntimeTraceRegion(ctx context.Context, name string) *trace.Region {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return trace.StartRegion(ctx, name)
 }

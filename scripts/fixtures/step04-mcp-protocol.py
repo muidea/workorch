@@ -16,7 +16,12 @@ for line in sys.stdin:
     if method == "initialize":
         result = {"protocolVersion": "2025-11-25", "capabilities": {"tools": {}}, "serverInfo": {"name": "step04-fixture", "version": "1"}}
     elif method == "tools/list":
-        result = {"tools": [{"name": "inspect", "description": "protocol fixture", "inputSchema": {"type": "object"}}]}
+        # The integration fullflow uses the same protocol-only transport with
+        # its exact owner allowlist. No business operation is implemented.
+        names = json.loads(os.environ.get("WORKORCH_STEP04_FIXTURE_TOOLS", '["inspect"]'))
+        if not isinstance(names, list) or not names or len(names) != len(set(names)) or not all(isinstance(n, str) and n for n in names):
+            raise RuntimeError("invalid fixture tool inventory")
+        result = {"tools": [{"name": name, "description": "protocol fixture", "inputSchema": {"type": "object"}} for name in names]}
     else:
         raise RuntimeError("preparation invoked a business method: " + method)
     print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)

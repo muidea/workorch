@@ -13,6 +13,40 @@ spec.loader.exec_module(step02)
 
 
 class Step02VerifierTest(unittest.TestCase):
+    def source_payload(self):
+        expected = {'derived-dod:template:000003': 'terminal_owner_operation_receipt',
+                    'derived-dod:template:000004': 'terminal_owner_snapshot',
+                    'derived-dod:template:000013': 'terminal_result_evidence_index',
+                    'derived-dod:user:000001': None}
+        return {'candidateAcceptance': [{'CandidateItemRef': ref} for ref in expected],
+                'sourceApplicableVerificationDeclarations': [
+                    {'candidateItemRef': ref, 'sourceScope': 'dodItem', 'sourceId': f'source-{i}',
+                     'declarationBindingMode': 'one_applicable_reference',
+                     'declarations': [{'profileId': p, 'evidenceRequirementId': '*', 'scope': 'dodItem'} for p in ('first', 'second')],
+                     'mergedRequiredEvidenceKinds': ['validation'],
+                     'mergedRequiredConsumers': [] if kind is None else [{'Kind': kind, 'ConsumptionPoint': 'post_terminal_delivery', 'TerminalContractRef': 'terminal-v1'}]}
+                    for i, (ref, kind) in enumerate(expected.items())]}
+
+    def test_consumers_apply_to_source_even_with_multiple_declaration_choices(self):
+        payload = self.source_payload()
+        before = copy.deepcopy(payload)
+        step02.validate_source_consumers(payload)
+        self.assertEqual(payload, before)
+        mutations = (
+            lambda p: p['sourceApplicableVerificationDeclarations'][0].update(mergedRequiredConsumers=[]),
+            lambda p: p['sourceApplicableVerificationDeclarations'][-1].update(mergedRequiredConsumers=[{'Kind': 'terminal_owner_snapshot'}]),
+            lambda p: p['sourceApplicableVerificationDeclarations'][0].update(candidateItemRef='other'),
+            lambda p: p['sourceApplicableVerificationDeclarations'][0].update(declarationBindingMode='all_references'),
+            lambda p: p['sourceApplicableVerificationDeclarations'][0]['declarations'][0].update(consumers=[]),
+            lambda p: p['sourceApplicableVerificationDeclarations'].pop(),
+            lambda p: p['sourceApplicableVerificationDeclarations'].__setitem__(1, copy.deepcopy(p['sourceApplicableVerificationDeclarations'][0])),
+        )
+        for mutate in mutations:
+            bad = copy.deepcopy(payload)
+            mutate(bad)
+            with self.subTest(mutate=mutate), self.assertRaises(RuntimeError):
+                step02.validate_source_consumers(bad)
+
     def test_review_blocked_is_not_settled_until_all_six_critics_finish(self):
         view = {"state": "review_blocked", "proposal": {"reviews": []}}
         for kind in step02.KINDS:

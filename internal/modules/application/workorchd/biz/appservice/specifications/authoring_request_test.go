@@ -16,7 +16,7 @@ import (
 func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *testing.T) {
 	input := workspace.DefinitionAuthoringInput{Version: 1, WorkspaceID: "ws", Revision: 1, GoalText: "交付目标", TemplateID: "t", AcceptanceRequirements: []string{"用户验收"}}
 	template := workspace.WorkspaceTemplate{ID: "t", DoDItems: []string{"模板验收"}}
-	if err := json.Unmarshal([]byte(`{"profileContracts":{"sealed-profile":{"evidenceRequirements":[{"id":"*","scope":"dodItem","requiredEvidenceKinds":["validation"],"acceptedStepKinds":["shell/run"]}]}}}`), &template.ContextHints); err != nil {
+	if err := json.Unmarshal([]byte(`{"profileContracts":{"sealed-profile":{"evidenceRequirements":[{"id":"*","scope":"dodItem","requiredEvidenceKinds":["validation"],"acceptedStepKinds":["validation/managed_session"]}]}}}`), &template.ContextHints); err != nil {
 		t.Fatal(err)
 	}
 	derived := workspace.DefinitionDerivedAcceptance{AuthoringInputHash: input.InputHash(), TemplateSnapshotHash: workspace.WorkspaceTemplateSnapshotHash(&template), AdditionalItems: []string{"补充验收"}}
@@ -96,7 +96,7 @@ func TestAuthoringCommandsKeepSealedIdentitiesAndIndependentCriticContext(t *tes
 	if len(proposalPayload.Profiles) != 1 || proposalPayload.Profiles[0].ID != "sealed-profile" || len(proposalPayload.Profiles[0].EvidenceRequirements) != 1 || proposalPayload.Profiles[0].EvidenceRequirements[0].ID != "*" || strings.Contains(stable.Content, "sealed-profile") {
 		t.Fatal("封存 Profile 声明未精确进入 C3 或污染了 C0")
 	}
-	if len(proposalPayload.VerificationOptions) != len(proposalPayload.CandidateAcceptance) || !reflect.DeepEqual(proposalPayload.VerificationOptions, authoringVerificationOptions(proposalPayload.CandidateAcceptance, proposalPayload.Profiles)) {
+	if len(proposalPayload.VerificationOptions) != len(proposalPayload.CandidateAcceptance) || !reflect.DeepEqual(proposalPayload.VerificationOptions, mustAuthoringVerificationOptions(t, proposalPayload.CandidateAcceptance, proposalPayload.Profiles)) {
 		t.Fatal("proposal did not receive exact owner-derived declaration options")
 	}
 	if !strings.Contains(volatile.Content, `"resourceSnapshotHash":"`+derivation.ResourceSnapshotHash+`"`) {

@@ -13,7 +13,7 @@ func runtimeTerminalHistoricalAcceptance(source RuntimeStateRecord, coverage Run
 		return RuntimeHistoricalAcceptanceProof{}, CoverageEvidenceBinding{}, false
 	}
 	proof := coverage.HistoricalAcceptanceProofs[len(coverage.HistoricalAcceptanceProofs)-1]
-	sources := runtimeTerminalProofSources(source)
+	sources := runtimeLineageSourcesFromRecord(source)
 	if validateRuntimeHistoricalAcceptanceProofs(sources, coverage) != nil {
 		return RuntimeHistoricalAcceptanceProof{}, CoverageEvidenceBinding{}, false
 	}

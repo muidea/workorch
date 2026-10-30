@@ -61,7 +61,7 @@ func ValidateRuntimeTerminalProofDeclarationSources(items []RuntimeCoverageItem,
 	return nil
 }
 
-func runtimeTerminalProofSources(source RuntimeStateRecord) RuntimeLineageAssertionSources {
+func runtimeLineageSourcesFromRecord(source RuntimeStateRecord) RuntimeLineageAssertionSources {
 	return RuntimeLineageAssertionSources{
 		Definition: source.Definition, Facts: source.Facts, Work: source.ImplementationWork,
 		Semantic: source.SemanticPlanning, Active: source.ActiveDispatch, Completed: source.CompletedDispatches,
@@ -165,7 +165,7 @@ func runtimeTerminalMaterialAssertion(source RuntimeStateRecord, material Runtim
 		if err != nil {
 			return err
 		}
-		sources := runtimeTerminalProofSources(source)
+		sources := runtimeLineageSourcesFromRecord(source)
 		if !runtimeCanonicalLineageCutoff(source.Facts.EvidenceRevision) || ValidateRuntimeEvidenceLedgerSequence(source.EvidenceSequence, source.Facts, source.ActiveDispatch, source.CompletedDispatches, source.GovernanceResolutions) != nil || runtimeValidateLineageOperations(sources) != nil {
 			return fmt.Errorf("terminal receipt requires original operation/evidence chronology")
 		}

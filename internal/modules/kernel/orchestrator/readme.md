@@ -646,13 +646,16 @@ preimage CAS 回归继续覆盖提交前失败、提交后响应丢失和并发�
 精确原文相等才共享本次成功，变化、失败或另一组均不能命中；source／semantic／预算／迁移／CAS 门禁保留。
 退出、异常及 panic 均撤销 gate；禁止递归／并发使用，Commit 的一次性 request 原子清除 compiler 引用。
 上下文不进入共享 controller、context、EventHub、持久化、结果或下一事件，不凭 hash 授信，不增加执行权限。
-唯一跨事件纯子树例外是 `runtime-owner-historical-subtree-compiler/v1`：controller 私有
+唯一跨事件纯子树例外是 `runtime-owner-historical-subtree-compiler/v2`：controller 私有
 `RuntimeOwnerHistoricalCompiler` 仅保留同一 workspace/run 的 detached semantic manifest/document、catalog、
 Definition 与工作 scope/round 纯子产物，完整 raw 精确相等才可复用；所有当前状态门禁仍逐事件运行。
 已退休 semantic generation 的完整 raw／normalized 双参数门禁及其完整用途前像也在白名单内，
 enclosing ledger 的 current、append-order、duplicate 与 Definition join 每次执行，active 用途前像不缓存。
 完整 work-state／historical-source／owner invariant／Commit 产品不在跨事件白名单内。并发／递归走独立冷编译，
-事件失败／panic、scope 切换或超过 128 个完整条目整体淘汰；真实排空后 Close 释放，重启从冷状态重新读取。
+事件失败／panic、scope 切换整体淘汰；成功事件以确定性有界子集保留最多 128 个完整条目（包含嵌套 document），
+超限只淘汰纯子产物，不清空仍可保留的子集，不改原始 owner 数据。优先保留 seed／scope／round／历史来源和节点，
+再保留 catalog、完整 manifest 及剩余额度内的 document。map key 排序仅决定淘汰顺序，命中仍逐原值核验；
+淘汰后走原完整冷门禁。真实排空后 Close 释放，重启从冷状态重新读取。
 此例外只影响 SM-2/3/4 私有事件的纯编译成本，SM-1、全部 transition、预算、scope/revision、CAS 和 availability 不变。
 `runtime-owner-query-reload-compiler/v1` 另外允许 `RuntimeController.Load` 使用同一个私有历史纯编译器：
 每次通过 `LoadOwnerStateOriginal` 真实向 Run owner 读取并独立转换，完整执行 DTO→aggregate 原顺序门禁，
@@ -660,6 +663,23 @@ enclosing ledger 的 current、append-order、duplicate 与 Definition join 每�
 成功前像或导出凭据，错误返回零 aggregate；查询不运行 reducer、Save 或 CAS。普通 repository Load/recovery/Save、
 独立 Validate 与 Commit 合同不变，无 raw 接线时回退原 Load。查询与事件遵循同一 scope、失败／panic、并发冷路径、
 淘汰和真实排空后关闭规则；不增加四机转换、权限或预算，不改变十分钟 fullflow 与 availability。
+`runtime-owner-applicability-read-compiler/v1` 将 SM-4 的证据适用性读取投影接到同一私有历史纯编译器。
+`RuntimeController.CompileEvidenceApplicabilityRead` 对每次完整 aggregate raw 执行与独立 `Validate` 相同顺序的
+全部门禁，只有白名单内完整精确相等的历史子产物可复用；请求、source、当前 Facts／applicability／budget、
+owner invariant 或 aggregate 成功均不保留。该方法不读取 Run owner、不运行 reducer／CAS，输入来自原 drive
+重载／已提交迁移的 aggregate；它不是一次新的重载证明。随后仍真实查询 capability owner，并由原 private
+observation event 重新读取 Run owner、反查来源及 revision、执行全部迁移与 CAS。独立公开 compiler 保持冷门禁，
+不导出 unchecked continuation／成功凭据，不扩大 128 条上限；失败、scope 切换、并发冷路径、Close 与重启规则不变。
+`runtime/evidence_applicability_owner_compiler_test.go` 对照完整冷结果与首错，覆盖当前预算、receipt、scope、重复、
+返回隔离、关闭、重建与并发；只读公开归档 oracle／benchmark 同时包含真实历史子树，不冒充全链路通过。
+
+可选 Go execution trace 在 query reload、private event transaction／load、drive transition、applicability、
+Commit／reread 和 Run query／CAS 记录固定 `workorch.runtime.*` 区段。区段不携带 Workspace、Run、provider
+原文、配置或凭据，不进入持久账本、EventHub DTO 或 authority；关闭 trace 时不收集区域诊断。
+`scripts/lib/runtime-trace-summary.py` 流式读取完整 `go tool trace -d=parsed` 输出，按 goroutine 配对嵌套区段，
+分别统计 inclusive／self wall time；并发与嵌套不能相加为端到端耗时，wall time 不能称为 CPU time。
+缺区段、未结束、错配或非单调时序不能记完整通过。该诊断不改变 SM-1～SM-4、预算、恢复或十分钟判据。
+
 `runtime-owner-lineage-subgraph-compiler/v1` 追加 owner-private 历史纯节点索引：只保留完整原门禁通过的
 closed dispatch intrinsic、operation-admissibility catalog、owner receipt 与 repair-surface confirmation raw 副本。
 候选身份不授信，每次命中完整精确比较所有实际参数、嵌套原值及 nil／empty；active dispatch intrinsic 不缓存，
@@ -716,6 +736,19 @@ SM-1 与全部 transition、effect、原十分钟 fullflow、预算及 availabil
 普通独立 consumer 不启用此复用，失败不缓存。`runtime_historical_source_compiler_test.go` 用独立旧完整
 消费者对照首错、全字段漂移、嵌套 alias、JSON 重载和只读公开归档；raw clone 的全图隔离还必须覆盖
 receipt governance／external dependency 的授权上下文及其 nil／empty 嵌套集合，不通过规范化修复原值。
+
+DTO 与 aggregate 的完整 lineage 来源使用同一字段投影，包含原 `Reconciliation`；不得遗漏字段来制造
+事务内命中。`runtime_historical_input_review_compiler_test.go` 逐字段核对持久来源投影。原 accepted binding 的
+input-review 纯投影仅在本次 `runtimeHistoricalPreimageSession` 内复用：每次先核验完整 detached raw ledger，
+再比较完整 raw binding；返回值独立复制。ledger 原值变化即清除该 ledger 的投影容器，失败不缓存，
+该容器不进入跨事件 128 条历史白名单，不保存当前验收成功，也不授 credit 或修复权限。
+
+私有 `runtimeRawEqual` 对完整 raw 值保持 `reflect.DeepEqual` 语义，包括类型、nil／empty、指针／slice
+同址和 NaN；只缓存不含业务值的反射类型比较计划。普通 typed 树不分配逐节点图访问表；动态 map／interface、
+不透明值及深递归回退标准比较器。它不持有 Workspace、hash 或校验结论，不减少任何字段门禁。
+`runtime_raw_equal_test.go` 对照标准比较器覆盖完整 DTO 字段变更、循环图、并发类型计划及 fuzz。
+上述接线仅改变 SM-2/3/4 纯编译成本，SM-1、完整首错、真实重读、迁移、预算、适用性和 CAS 均不变；
+公开十分钟 fullflow 及实际三 owner ACK 必须单独通过，局部 benchmark 不构成收口证明。
 
 `TestDriveRuntimeCrossCWIHistoricalAcceptanceOwnerCASRecovery` 使用真实 File／Shell／Git／Run／Workspace／Result
 及脚本 provider 固定 create→edit→Git、延期零 credit、普通 all-of 后结算、receipt／assessment／material／delivery

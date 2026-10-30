@@ -74,7 +74,11 @@ Web 只在页面内存保留原 payload 和恢复提示；未收到完整创建�
 
 派生先展开 Goal／资源中未被具体承接的原验收主项，再补边界条件。proposal／review 共享由封存 Profile
 纯计算的逐候选 `sourceApplicableVerificationDeclarations`，复用 Workspace admission 的来源匹配和合并保留规则；
-这些选项包含最终合并策略的 consumer refs／合同版本／消费时点，不产生 `DECLARED`、语义可验结论或运行 credit。
+`workorch.authoring.verification-context/v1` 每行绑定原 candidate ref 与正式来源 scope/id，
+`declarations` 仅列单个 Verification 可引用的身份；`mergedRequiredEvidenceKinds` 与
+`mergedRequiredConsumers` 独立列出完整合取约束及 consumer refs／合同版本／消费时点，不能因选择通配或精确引用
+而丢失另一适用声明的贡献。空选项不自动填充，编译冲突在 provider 调用前拒绝；proposal 与六审使用同一投影和
+解释合同，不产生 `DECLARED`、语义可验结论或运行 credit，保留完整 Profile 供语义核对。
 新事务封存 `workorch.authoring.owner-bound/v2` 与阶段 schema hash；模型仅返回闭合语义结果，owner 从原 permit
 绑定 input/template/resource 及 critic kind/proposal 身份。原始 document/wire 独立保留，不补写 hash。旧 v1 账本
 仍精确核对身份回显；版本、阶段或 scope 漂移拒绝，不 fallback、不重发原 permit。
@@ -230,7 +234,10 @@ Workspace-owned `QueryWorkspacePreparationStateCommand`；HTTP 不接 EventHub �
 HTTP 只返回有限失败码或绑定原 snapshot/manifest 的 bootstrap hash，不输出原材料/诊断/完整 bootstrap。
 GET 不执行该编译；恢复和重启后的显式 recover 从完整原材料重编，不以历史 hash 授信。
 这不是准备检查的正向结算、currentness、M3 或 Start/Restart 的回执消费入口。
-当前开放准备 check/recover 的阻塞主体流程，不开放 M3 签发或恢复执行；既有 Start/Restart 不被宣称已消费准备回执。
+准备 check/recover 不启动执行。首次显式执行由 Workspace 私有 reservation CAS 独立消费最新精确 completion，
+反查完整原材料、当前正式规范与 Bootstrap、原有效期及实际 File 重读；Application 的 Bootstrap compiler 只读，
+不重写托管配置，也不从缺少私有准备历史的普通 Workspace 投影推断 readiness。托管配置物化归显式准备。
+已有 Run 的 Restart 不复用首次 no-Run completion；Resume 保留原 Run seal。该接线不证明 Runtime fullflow 已通过。
 
 `CheckStartupPreparation` 将原 request/revision 映射为 Workspace concrete check/recover 命令。
 仅初始接纳 CAS 明确成功的响应触发一次 cache-only/完整 Run 历史观察，再向 Workspace

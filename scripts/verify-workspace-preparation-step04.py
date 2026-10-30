@@ -19,6 +19,7 @@ import os
 import re
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import time
 
@@ -48,9 +49,9 @@ class Fixture(step02.Fixture):
     def validate_source_consumers(self, payload):
         # This bounded template declares ordinary validation only. The default
         # software template's terminal consumers remain mandatory in STEP02.
-        options = payload["sourceApplicableVerificationDeclarations"]
-        require(options and all(option["declarations"] for option in options), "bounded template lost ordinary declarations")
-        require(all(not declaration["consumers"] for option in options for declaration in option["declarations"]),
+        options = step02.source_verification_options(payload)
+        require(options, "bounded template lost ordinary declarations")
+        require(all(not option["mergedRequiredConsumers"] for option in options),
                 "bounded template acquired undeclared terminal consumers")
 
     def __init__(self, root):
@@ -69,6 +70,27 @@ def preparation(view):
     # GET and POST have different envelopes; do not infer operation identity
     # from the latest attempt when an original request is selected.
     return view["preparation"]
+
+
+def validate_first_execution_preimage_sources(source, root):
+    # This exercises a pure compiler against actual complete owner archives;
+    # it deliberately does not send an execution intent or use archived times
+    # as present-day execution permission.
+    command = ["go", "test", "-json", "-count=1", "./internal/pkg/repository/file",
+               "-run", "^TestFirstExecutionPreparation", "-timeout=2m"]
+    with (root / "first-execution-preimage-tests.jsonl").open("xb") as log:
+        completed = subprocess.run(command, cwd=source,
+                                   env={**os.environ, "WORKORCH_PREPARATION_VERIFIER_ROOT": str(root)},
+                                   stdout=log, stderr=subprocess.STDOUT)
+    save(root, "first-execution-preimage-command.json", {"command": command, "returnCode": completed.returncode})
+    require(completed.returncode == 0, "first execution pure preimage tests failed; inspect restricted log")
+    spec = importlib.util.spec_from_file_location("go_test_protocol", source / "scripts/lib/go-test-each-package.py")
+    protocol = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(protocol)
+    required = {("github.com/muidea/workorch/internal/pkg/repository/file", test) for test in
+                ("TestFirstExecutionPreparationArchivedSources", "TestFirstExecutionPreparationRejectsAbsentSources")}
+    with (root / "first-execution-preimage-tests.jsonl").open() as raw, (root / "first-execution-preimage-verification.log").open("x") as log:
+        require(protocol.verify(raw, log, log, required), "first execution archive checks did not execute completely")
 
 
 def validate_bootstrap_compilation(view, intent):
@@ -343,6 +365,7 @@ def main():
     parser.add_argument("--directory-mode", choices=("absolute", "relative", "default"), default="absolute",
                         help="relative/default use a relative repository root; default omits the project directory")
     parser.add_argument("--browser-hold-seconds", type=int, default=0, help="bounded window for explicit first check in production Web; marker is not browser proof")
+    parser.add_argument("--verify-first-execution", action="store_true", help="separate STEP05 fixture case: explicitly activate immediately after completion and verify original replay across an OS restart; not Runtime fullflow")
     args = parser.parse_args()
     require(0 <= args.browser_hold_seconds <= 1800, "browser window must be bounded")
     root = args.evidence_dir.absolute()
@@ -380,11 +403,20 @@ def main():
         (verification.config / "application.toml").write_text(step02.toml_document(config), encoding="utf-8")
         verification.start()
         verification.request("POST", "/api/v1/workorch/souls", {"id": "step04-soul", "name": "STEP04 fixture Soul", "soulMd": "保留原始输入与 required all_of。\n",
-                                                               "allowedSkillRefs": ["not-selected-by-this-bounded-profile"]}, 201)
+                                                               "allowedSkillRefs": ["not-selected-by-this-bounded-profile"],
+                                                               "allowedMCPServerRefs": ["step04-protocol"],
+                                                               "allowedCapabilityRefs": ["step04-protocol:tool:inspect"],
+                                                               "allowedCapabilityCategories": ["verification"],
+                                                               "allowedToolKinds": ["mcp/tool_call"]}, 201)
         verification.request("POST", "/api/v1/workorch/mcp/servers", {
             "id": "step04-protocol", "name": "STEP04 protocol-only fixture", "transport": "stdio",
             "command": sys.executable, "args": [str(source / "scripts/fixtures/step04-mcp-protocol.py")],
             "enabled": True, "allowedTools": ["inspect"], "sessionPolicy": "long_lived", "timeoutMillis": 3000}, 201)
+        # Server allowlists create conservative draft capabilities. Activation
+        # also requires explicit category metadata for Soul policy evaluation.
+        verification.request("PUT", "/api/v1/workorch/mcp/capabilities/step04-protocol:tool:inspect", {
+            "serverId": "step04-protocol", "kind": "tool", "name": "inspect", "category": "verification",
+            "enabled": True}, 200)
         template = copy.deepcopy(TEMPLATE)
         template["contextHints"]["toolHints"] = {"defaultMCPServerIds": ["step04-protocol"], "defaultCapabilityIds": ["step04-protocol:tool:inspect"]}
         verification.request("POST", "/api/v1/workorch/workspace-templates", template, 201)
@@ -536,6 +568,45 @@ def main():
         require(len(skillhub_calls(root)) == status_baseline_count + 2, "original check did not execute exactly two status observations")
         status_before = (root / "skillhub-calls.jsonl").read_bytes()
         require(fixture.http_paths == provider_before, "STEP04 refreshed catalog or called provider")
+        if args.verify_first_execution:
+            # This separate case explicitly authorizes a Run. The ordinary
+            # STEP04 case below still requires zero Run/provider calls.
+            execution = {"intent": "restart", "requestId": "step05-original-first-execution"}
+            activation_path = f"/api/v1/workorch/workspaces/{workspace_id}/execution-activations"
+            response = verification.request("POST", activation_path, execution, 202)
+            save(root, "first-execution-response.json", response)
+            record = step02.workspace_record(json.loads(workspace_file.read_bytes()), workspace_id)
+            fence = record["PreparationFence"]
+            identities = [s["Reservation"] for s in fence.get("Settled", [])]
+            if fence.get("Pending"):
+                identities.append(fence["Pending"])
+            require(len(identities) == 1 and identities[0]["RequestID"] == execution["requestId"] and
+                    identities[0]["PreparationCompletionID"] == saved["record"]["completions"][0]["completionId"],
+                    "first reservation did not consume the exact original completion")
+            evidence = record.get("FirstExecutionPreparationEvidence", {})
+            require(evidence.get("Version") == "workorch-first-execution-preparation-evidence/v1" and
+                    evidence.get("RequestID") == execution["requestId"] and evidence.get("WorkspaceID") == workspace_id,
+                    "first reservation lost complete actual File observation")
+            original_files = file_revalidation(record)[1]
+            require(evidence["Files"]["Scope"] == original_files["Scope"] and
+                    evidence["Files"]["Configs"] == original_files["Configs"] and
+                    evidence["Files"]["Resources"] == original_files["Resources"],
+                    "read-only activation compiler changed original managed configuration/resources")
+            runs = verification.request("GET", f"/api/v1/workorch/workspaces/{workspace_id}/runs")["runs"]
+            require(len(runs) == 1, "explicit first execution did not materialize exactly one Run")
+            (root / "first-execution-owner.bin").write_bytes(workspace_file.read_bytes())
+            replay = verification.request("POST", activation_path, execution, 202)
+            require(replay == response, "first execution replay changed original admission")
+            verification.stop()
+            verification.start()
+            require(verification.request("POST", activation_path, execution, 202) == response,
+                    "process restart lost original first-execution admission")
+            require(len(verification.request("GET", f"/api/v1/workorch/workspaces/{workspace_id}/runs")["runs"]) == 1,
+                    "original replay/restart created another Run")
+            result.update({"pass": True, "mode": "isolated-step05-first-execution-fixtures", "M3Issued": True, "firstExecutionConsumed": True,
+                           "originalFirstExecutionReplayPassed": True, "realProcessRestartPassed": True,
+                           "runCount": 1, "runtimeFullflowVerified": False})
+            return
         for action in ("", "/check", "/recover"):
             observed = verification.request("POST" if action else "GET", path + action, intent if action else None)
             require(unchanged_history(observed, saved), "original GET/replay/recovery changed history or deadline projection")
@@ -647,6 +718,7 @@ def main():
         build_identity.verify(source, source / "web/consoleassets/dist", binary, root / "build-identity.json", {k: identity[k] for k in build_identity.IDENTITY_FIELDS}, root)
         (root / "original-owner-record.bin").write_bytes(owner_before)
         (root / "final-owner-record.bin").write_bytes(repaired_owner)
+        validate_first_execution_preimage_sources(source, root)
         protocol = [json.loads(line) for line in (root / "mcp-protocol-calls.jsonl").read_text().splitlines()]
         require([p["method"] for p in protocol] == ["initialize", "notifications/initialized", "tools/list"] * 3,
                 "MCP protocol was replayed, omitted, or invoked a business tool")
@@ -655,7 +727,7 @@ def main():
         result.update({"pass": True, "M3Issued": True, "mcpProtocolCalls": len(protocol), "completionCount": len(completions), "workspaceId": workspace_id, "request": intent, "restartReadbackPassed": True,
                        "originalBootstrapCompilations": compilations, "bootstrapCompilationRestartPassed": True,
                        "manualResourceRepairRecheckPassed": True, "lostResponseReconciliationPassed": True, "attemptCount": 3,
-                       "coldHistoryResourceInitializationPassed": True,
+                       "coldHistoryResourceInitializationPassed": True, "firstExecutionPreimageCompilerVerified": True,
                        "providerPreparationCalls": 8, "step04ProviderHTTPRequests": 0, "embeddingCalls": 0, "runCount": 0,
                        "requiredCount": saved["record"]["attempts"][0]["assessment"]["requiredCount"],
                        "passedRequiredCount": saved["record"]["attempts"][0]["assessment"]["passedRequiredCount"],
@@ -669,7 +741,7 @@ def main():
             fixture.close()
             save(root, "provider-http-paths.json", fixture.http_paths)
         save(root, "result.json", result)
-    print(json.dumps(result, ensure_ascii=False), flush=True)
+        print(json.dumps(result, ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":
