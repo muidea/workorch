@@ -49,8 +49,13 @@ func implementationWorkScopeSources(a RuntimeAggregate, cwi common.CoverageWorkI
 	if matches != 1 || binding.Validate() != nil {
 		return runtimecontract.RuntimeImplementationWorkScopeSources{}, fmt.Errorf("%w: work scope requires unique current owner manifest observation", common.ErrConflict)
 	}
+	revision, err := runtimecontract.PendingRuntimeValidationInputRevision(a.SemanticPlanning, a.ImplementationWork, cwi)
+	if err != nil {
+		return runtimecontract.RuntimeImplementationWorkScopeSources{}, err
+	}
 	return runtimecontract.RuntimeImplementationWorkScopeSources{
-		WorkspaceID: a.Facts.WorkspaceID, RunID: a.Facts.RunID, AuthoritySnapshotID: a.Decision.AuthoritySnapshot.ID,
+		InputRevision: revision,
+		WorkspaceID:   a.Facts.WorkspaceID, RunID: a.Facts.RunID, AuthoritySnapshotID: a.Decision.AuthoritySnapshot.ID,
 		Seed: a.Facts.DefinitionSeed, Focuses: a.Facts.DefinitionFocuses, Profiles: a.Facts.Activation.ExecutionContract.ProfileContracts,
 		CoverageWorkItemID: cwi, ManifestBinding: binding,
 	}, nil
@@ -80,10 +85,8 @@ func RuntimeImplementationWorkPurposePending(a RuntimeAggregate) bool {
 		return false
 	}
 	cwi := a.Facts.Focus.CoverageWorkItemIDs[0]
-	for _, choice := range a.ImplementationWork.PurposeChoices {
-		if choice.CoverageWorkItemID == cwi && choice.Purpose == runtimecontract.RuntimeImplementationWorkPurposeTerminal {
-			return false
-		}
+	if runtimecontract.RuntimeImplementationWorkTerminalPurposeSelected(a.ImplementationWork, a.SemanticPlanning, cwi) {
+		return false
 	}
 	for _, round := range a.ImplementationWork.Rounds {
 		if round.CoverageWorkItemID == cwi && round.FailedReceiptHash != "" {
@@ -171,10 +174,8 @@ func NextRuntimeImplementationWorkScopeRequest(a RuntimeAggregate) (*runtimecont
 	if !declared {
 		return nil, nil
 	}
-	for _, choice := range a.ImplementationWork.PurposeChoices {
-		if choice.CoverageWorkItemID == cwi && choice.Purpose == runtimecontract.RuntimeImplementationWorkPurposeTerminal {
-			return nil, nil
-		}
+	if runtimecontract.RuntimeImplementationWorkTerminalPurposeSelected(a.ImplementationWork, a.SemanticPlanning, cwi) {
+		return nil, nil
 	}
 	if a.ImplementationWork.ScopePreview != nil {
 		return nil, nil

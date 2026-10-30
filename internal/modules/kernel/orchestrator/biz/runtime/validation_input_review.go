@@ -125,6 +125,16 @@ func classifyRuntimeInputReview(transaction *semanticPlanningMutationTransaction
 	}
 	a := transaction.aggregate
 	a.SemanticPlanning = ledger
+	if conclusion == runtimecontract.RuntimeValidationInputConflict {
+		revised, ok, revisionErr := retireRuntimeInputReviewForRevision(a)
+		if revisionErr != nil {
+			return true, false, revisionErr
+		}
+		if ok {
+			transaction.aggregate, transaction.ledger = revised, revised.SemanticPlanning
+			return true, true, nil
+		}
+	}
 	code := "validation_input_review_conflict"
 	if runtimeInputReviewOnlyCoverageOmissions(document) {
 		code = "validation_input_review_coverage_incomplete"

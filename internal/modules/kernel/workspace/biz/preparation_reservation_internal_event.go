@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/muidea/workorch/internal/pkg/preparationtrace"
 	"time"
 
 	runmodel "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models"
@@ -116,6 +117,15 @@ func reduceWorkspaceFreshIntentReserved(current *workspacemodel.Workspace, fact 
 		if err != nil || runHash != fact.Reservation.RunPayloadHash || !fact.ProviderSelection.Same(p.Bootstrap.Activation.ProviderSelection) {
 			return workspaceExecutionTransition{}, common.ErrConflict
 		}
+		// Compilation may be expensive. Never stamp consumption with the clock
+		// captured before it, or let CPU work renew the original observation.
+		now = time.Now().UTC()
+		if err := preparationcompiler.CheckFirstExecutionPreparationWindow(current, now, p.Files.OwnerEpoch); err != nil {
+			return workspaceExecutionTransition{}, err
+		}
+		if now.Before(p.Files.ObservedAt) || !now.Before(p.Files.ExpiresAt) {
+			return workspaceExecutionTransition{}, common.ErrConflict
+		}
 		fact.Reservation.PreparationCompletionID = compiled.CompletionID
 		fact.Reservation.PreparationRevision = current.Revision
 		fact.Reservation.PreparationConsumedAt = now
@@ -164,6 +174,7 @@ func sameWorkspaceFreshIntentInput(original, incoming workspacemodel.WorkspaceFr
 // error (even after persistence), duplicate or reload never grants a forward
 // permit. No cross-owner I/O is performed while reserving.
 func (m *Biz) submitWorkspaceFreshIntentReserved(ctx context.Context, fact workspaceFreshIntentReserved) (value *workspacemodel.Workspace, newlyReserved bool, err error) {
+	defer preparationtrace.Start(ctx, fact.WorkspaceID, fact.Reservation.RequestID, "first_execution_reservation", fact.ExpectedRevision)()
 	if m == nil || m.workspaces == nil {
 		return nil, false, common.ErrInvalidArgument
 	}

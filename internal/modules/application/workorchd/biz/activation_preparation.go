@@ -2,10 +2,13 @@ package biz
 
 import (
 	"context"
+	"github.com/muidea/workorch/internal/pkg/preparationtrace"
+	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice/activationports"
 	workspaceevents "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/events"
+	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/eventcontract"
 	workorchevents "github.com/muidea/workorch/internal/pkg/events"
@@ -75,7 +78,7 @@ func (b *Biz) ReadStartupPreparationView(ctx context.Context, workspaceID common
 func startupPreparationView(response workspaceevents.QueryWorkspacePreparationStateResult) (workorchmanagementcontract.StartupPreparationView, error) {
 	view := workorchmanagementcontract.StartupPreparationView{
 		WorkspaceID: string(response.WorkspaceID), WorkspaceRevision: response.WorkspaceRevision, ActiveRunID: string(response.ActiveRunID), OperationState: response.State, CurrentValidity: response.CurrentValidity,
-		SkillHubProjectIssue: response.SkillHubProjectIssue,
+		SkillHubProjectIssue: response.SkillHubProjectIssue, CurrentValidityReason: response.CurrentValidityReason,
 	}
 	for _, r := range response.ResourceInitializations {
 		view.ResourceInitializations = append(view.ResourceInitializations, workorchmanagementcontract.PreparationResourceInitializationView{RequestID: r.RequestID, ExpectedWorkspaceRevision: r.ExpectedWorkspaceRevision, CommittedWorkspaceRevision: r.CommittedWorkspaceRevision, State: r.State, Attempts: r.Attempts, RegistrationState: r.RegistrationState, RegistrationAttempts: r.RegistrationAttempts})
@@ -155,6 +158,8 @@ func (b *Biz) CheckStartupPreparation(ctx context.Context, workspaceID common.Wo
 	if b == nil || b.EventHub() == nil || ctx == nil || workspaceID == "" || request.Validate() != nil {
 		return workorchmanagementcontract.PreparationOperationView{}, common.ErrInvalidArgument
 	}
+	defer preparationtrace.Start(ctx, workspaceID, request.RequestID, "http_check", request.ExpectedWorkspaceRevision)()
+
 	if err := ctx.Err(); err != nil {
 		return workorchmanagementcontract.PreparationOperationView{}, err
 	}
@@ -190,6 +195,8 @@ func (b *Biz) CheckStartupPreparation(ctx context.Context, workspaceID common.Wo
 		}
 		response = settled
 	}
+	finishProjection := preparationtrace.Start(ctx, workspaceID, request.RequestID, "response_compilation", response.State.WorkspaceRevision)
+	defer finishProjection()
 	view, projectionErr := startupPreparationView(response.State)
 	if projectionErr != nil {
 		return workorchmanagementcontract.PreparationOperationView{}, projectionErr
@@ -219,5 +226,43 @@ func (b *Biz) CheckStartupPreparation(ctx context.Context, workspaceID common.Wo
 	if operation.Compilation == nil {
 		return workorchmanagementcontract.PreparationOperationView{}, common.ErrConflict
 	}
+	// Response compilation consumes real time. Downgrade newly expired original
+	// observations before returning; never upgrade the owner's epoch-unknown or
+	// stale projection and never acquire/renew any resource here.
+	if err := projectPreparationResponseExpiry(&operation.Preparation, w, time.Now().UTC()); err != nil {
+		return workorchmanagementcontract.PreparationOperationView{}, err
+	}
 	return operation, operation.ValidateFor(string(workspaceID), request)
+}
+
+func projectPreparationResponseExpiry(view *workorchmanagementcontract.StartupPreparationView, w *workspace.Workspace, now time.Time) error {
+	if view.CurrentValidity == "stale" || w.StartupPreparation == nil {
+		return nil
+	}
+	for _, c := range w.StartupPreparation.Completions {
+		if c.RequestID == w.StartupPreparation.Attempts[len(w.StartupPreparation.Attempts)-1].RequestID && (now.Before(c.CompletedAt) || !now.Before(c.ExpiresAt)) {
+			view.CurrentValidity, view.CurrentValidityReason = "stale", "completion_outside_window"
+			return nil
+		}
+	}
+	for _, check := range []struct {
+		reason string
+		stale  func() (bool, error)
+	}{
+		{"file_observation_stale", func() (bool, error) {
+			return workspace.PreparationFileRevalidationStale(w, now, workspace.PreparationFileObservationEpoch(w))
+		}},
+		{"provider_cache_expired", func() (bool, error) { return workspace.PreparationProviderCacheExpired(w, now) }},
+		{"owner_observation_stale", func() (bool, error) { return workspace.PreparationOwnerRevalidationStale(w, now) }},
+	} {
+		stale, err := check.stale()
+		if err != nil {
+			return err
+		}
+		if stale {
+			view.CurrentValidity, view.CurrentValidityReason = "stale", check.reason
+			return nil
+		}
+	}
+	return nil
 }

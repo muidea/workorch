@@ -1934,6 +1934,9 @@ func (r *WorkspaceRepository) CompareAndSwap(_ context.Context, item *workspace.
 	if err := preparationcompiler.ValidatePreparedPersistence(item); err != nil {
 		return err
 	}
+	if err := preparationcompiler.ValidateFirstExecutionPreparationCommitTime(current, item, time.Now().UTC()); err != nil {
+		return err
+	}
 	item.Revision = expectedRevision + 1
 	r.items[item.ID] = cloneWorkspace(item)
 	return nil

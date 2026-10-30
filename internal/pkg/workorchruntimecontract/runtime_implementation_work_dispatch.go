@@ -47,6 +47,17 @@ func validateRuntimeImplementationWorkDispatchCommitmentInSession(d RuntimeDispa
 			return fmt.Errorf("implementation dispatch target/kind differs from original semantic proposal")
 		}
 		seen[operation.TargetRefs[0]] = true
+		if v := round.ScopeRequest.InputRevision; v != nil {
+			matches := 0
+			for _, f := range d.OperationExecutions {
+				if f.OperationID == operation.ID && v.MatchesReplayProof(f.ReplayProof) {
+					matches++
+				}
+			}
+			if matches != 1 {
+				return fmt.Errorf("input revision dispatch lacks exact changed reviewed preimage")
+			}
+		}
 		contract, known := RuntimeOperationContractForKind(operation.Kind)
 		if !known {
 			return fmt.Errorf("implementation dispatch has no executable operation contract")

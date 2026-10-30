@@ -53,6 +53,7 @@ type runtimeSemanticManifestProjection struct {
 // 工作 C3 只投影完整有界 vocabulary 与 exact owner scope；不携带 receipt、预算权限或原始诊断。
 // policy 为 immutable Profile 声明，scope 只为提议约束，不是工作/终验 dispatch authority。
 type runtimeSemanticImplementationWorkProjection struct {
+	InputRevision           *runtimecontract.RuntimeValidationInputRevision `json:"inputRevision,omitempty"`
 	CoverageWorkItemID      common.CoverageWorkItemID                       `json:"coverageWorkItemId"`
 	PurposeChoiceOnly       bool                                            `json:"purposeChoiceOnly"`
 	EffectAvailable         bool                                            `json:"effectAvailable"`
@@ -93,6 +94,7 @@ func runtimeSemanticImplementationWorkForProvider(work *runtimecontract.RuntimeS
 	selection := work.Scope.Selection
 	return &runtimeSemanticImplementationWorkProjection{
 		CoverageWorkItemID: work.Scope.Request.CoverageWorkItemID,
+		InputRevision:      work.Scope.Request.InputRevision.Clone(),
 		PurposeChoiceOnly:  work.PurposeChoiceOnly, EffectAvailable: work.EffectAvailable,
 		RoundHash: work.RoundHash, Ordinal: work.Ordinal, PrecedingReceiptSetHash: work.PrecedingReceiptSetHash,
 		PolicyHash: work.PolicyHash, Policy: work.Scope.Request.Policy.Clone(),

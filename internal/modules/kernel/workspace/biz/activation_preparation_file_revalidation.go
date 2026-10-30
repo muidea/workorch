@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	"fmt"
+	"github.com/muidea/workorch/internal/pkg/common"
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -50,19 +52,34 @@ func (m *Biz) reobservePreparationFiles(ctx context.Context, d *workspace.Worksp
 	d.Revalidation = &o
 }
 
-func (m *Biz) preparationFileEpoch(ctx context.Context) string {
+func (m *Biz) preparationFileEpoch(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	bounded, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	ev := magicevent.NewEventWithContext(fileevents.TopicQueryPreparationEpoch, ModuleID, "blocks/file", magicevent.NewHeader(), bounded, fileevents.QueryPreparationEpochCommand{})
 	ev.BindLaneKey(workorchevents.EventHubLaneKeyFor(fileevents.Contracts(), ev.ID(), eventcontract.LaneScope{}))
 	r := m.SendEvent(ev)
-	if r == nil || r.Error() != nil {
-		return ""
+	if err := bounded.Err(); err != nil {
+		return "", err
+	}
+	if r == nil {
+		return "", common.ErrConflict
+	}
+	if err := r.Error(); err != nil {
+		return "", err
 	}
 	v, err := r.Get()
 	value, ok := v.(fileevents.QueryPreparationEpochResult)
-	if err != nil || !ok || !filepreparation.ValidEpoch(value.OwnerEpoch) {
-		return ""
+	if err != nil {
+		return "", err
 	}
-	return value.OwnerEpoch
+	if err := bounded.Err(); err != nil {
+		return "", err
+	}
+	if !ok || !filepreparation.ValidEpoch(value.OwnerEpoch) {
+		return "", fmt.Errorf("%w: invalid File epoch result", common.ErrConflict)
+	}
+	return value.OwnerEpoch, nil
 }

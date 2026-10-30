@@ -87,10 +87,12 @@ type RuntimeImplementationWorkRound struct {
 
 // RuntimeImplementationWorkingBinding is deliberately NOT a
 // CoverageEvidenceBinding. It cannot satisfy terminal evidence, replace the
-// immutable Definition or authorize input maintenance/confirmed repair. A
+// immutable Definition or authorize unscoped input maintenance/confirmed repair.
+// Its optional InputRevision is confined to the original rejected review. A
 // consumer must seal it through the semantic proposal/owner feasibility private
 // transaction and copy its hash into the candidate manifest and dispatch.
 type RuntimeImplementationWorkingBinding struct {
+	InputRevision        *RuntimeValidationInputRevision `json:",omitempty"`
 	SemanticGenerationID string
 	BindingGeneration    uint64
 	SemanticManifestHash string
@@ -154,6 +156,7 @@ func (r RuntimeImplementationWorkRound) Clone() RuntimeImplementationWorkRound {
 }
 
 func (b RuntimeImplementationWorkingBinding) Clone() RuntimeImplementationWorkingBinding {
+	b.InputRevision = b.InputRevision.Clone()
 	b.Proposals = cloneRuntimeStateRawSlice(b.Proposals, cloneRuntimeSemanticProofProposalRaw)
 	b.Feasibilities = cloneRuntimeStateRawSlice(b.Feasibilities, cloneRuntimeSemanticProofFeasibilityRaw)
 	b.OwnerCatalog = b.OwnerCatalog.Clone()
@@ -327,7 +330,10 @@ func (b RuntimeImplementationWorkingBinding) validateForRoundInSemanticSession(r
 			return fmt.Errorf("implementation work input protection must retain raw-canonical catalog")
 		}
 	}
-	excluded := runtimeValidationInputMutationExclusions(catalog.OwnerModuleID, RuntimeCandidateManifestOwnerFacts{OperationAdmissibilities: b.MutationInputCatalogs}, RequiredOutputContract{}, nil)
+	if !reflect.DeepEqual(b.InputRevision, r.ScopeRequest.InputRevision) {
+		return fmt.Errorf("working revision differs from original scope")
+	}
+	excluded := runtimeWorkInputExclusions(catalog.OwnerModuleID, b.MutationInputCatalogs, b.InputRevision)
 	if !reflect.DeepEqual(excluded, b.ExcludedTargetRefs) {
 		return fmt.Errorf("implementation work input exclusions do not match complete owner preimages")
 	}
@@ -349,6 +355,9 @@ func (b RuntimeImplementationWorkingBinding) validateForRoundInSemanticSession(r
 			return err
 		}
 		targets := RuntimeSemanticProposalTargetRefs(proposal)
+		if err := validateRuntimeInputRevisionTargets(b.InputRevision, proposal); err != nil {
+			return err
+		}
 		// The first value contract requires exact, non-overlapping targets; an
 		// owner selector is observation vocabulary, never effect authorization.
 		if len(targets) == 0 || len(targets) > r.ScopeRequest.Policy.MaxTargetsPerRound {
@@ -415,7 +424,7 @@ func (l RuntimeImplementationWorkLedger) validateForSourcesInSemanticSession(s R
 			return fmt.Errorf("implementation work ledger round escapes sealed startup")
 		}
 		scopeSources := RuntimeImplementationWorkScopeSources{WorkspaceID: s.WorkspaceID, RunID: s.RunID, AuthoritySnapshotID: r.ScopeRequest.AuthoritySnapshotID,
-			Seed: s.Seed, Focuses: s.Focuses, Profiles: s.Profiles, CoverageWorkItemID: r.CoverageWorkItemID, ManifestBinding: r.ScopeRequest.ManifestBinding}
+			Seed: s.Seed, Focuses: s.Focuses, Profiles: s.Profiles, CoverageWorkItemID: r.CoverageWorkItemID, ManifestBinding: r.ScopeRequest.ManifestBinding, InputRevision: r.ScopeRequest.InputRevision}
 		if err := validateRuntimeWorkScopeInSession(r.ScopeRequest, scopeSources, session); err != nil {
 			return err
 		}

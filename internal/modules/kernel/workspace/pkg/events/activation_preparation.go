@@ -45,6 +45,7 @@ type QueryWorkspacePreparationStateResult struct {
 	WorkspaceRevision       uint64
 	ActiveRunID             common.RunID
 	State                   string
+	CurrentValidityReason   string
 	CurrentValidity         string
 	ResourceInitializations []PreparationInitializationView
 	Record                  *workspace.WorkspacePreparationRecord
@@ -52,6 +53,9 @@ type QueryWorkspacePreparationStateResult struct {
 }
 
 func (r QueryWorkspacePreparationStateResult) ValidateFor(c QueryWorkspacePreparationStateCommand) error {
+	if !validPreparationValidityReason(r.CurrentValidity, r.CurrentValidityReason) {
+		return common.ErrConflict
+	}
 	if c.WorkspaceID == "" || r.WorkspaceID != c.WorkspaceID || r.WorkspaceRevision == 0 {
 		return common.ErrConflict
 	}
@@ -91,4 +95,18 @@ func (r QueryWorkspacePreparationStateResult) ValidateFor(c QueryWorkspacePrepar
 		return common.ErrConflict
 	}
 	return nil
+}
+
+// Reasons describe current readback only; they never modify historical checks.
+func validPreparationValidityReason(validity, reason string) bool {
+	switch reason {
+	case "":
+		return true // older read-only projections have no reason
+	case "file_epoch_unavailable", "file_epoch_timeout", "file_epoch_cancelled":
+		return validity == "not_evaluated"
+	case "binding_changed", "attempt_outside_window", "completion_outside_window", "file_observation_stale", "provider_cache_expired", "owner_observation_stale", "file_epoch_changed_or_expired":
+		return validity == "stale"
+	default:
+		return false
+	}
 }

@@ -1918,6 +1918,9 @@ func validateRuntimeSemanticPlanDocumentAgainstValidatedManifestUncached(d Runti
 		}
 	}
 	if purposeWork != nil {
+		if purposeWork.Scope.Request.InputRevision != nil && d.ImplementationPurpose != RuntimeImplementationWorkPurposeEffect {
+			return fmt.Errorf("rejected input requires a real bounded revision before fresh review")
+		}
 		if d.PlanStep != RuntimeSemanticPlanStepCoverageOrder || (d.ImplementationPurpose != RuntimeImplementationWorkPurposeTerminal && (d.ImplementationPurpose != RuntimeImplementationWorkPurposeEffect || !purposeWork.EffectAvailable)) {
 			return fmt.Errorf("implementation purpose document exceeds sealed purpose vocabulary")
 		}
@@ -2419,6 +2422,7 @@ const (
 	RuntimeSemanticPlanningRetirementEligibleClosureChanged RuntimeSemanticPlanningRetirementReason = "eligible_closure_changed"
 	RuntimeSemanticPlanningRetirementImplementationPurpose  RuntimeSemanticPlanningRetirementReason = "implementation_purpose_selected"
 	RuntimeSemanticPlanningRetirementInputReviewInformation RuntimeSemanticPlanningRetirementReason = "input_review_information"
+	RuntimeSemanticPlanningRetirementInputRevision          RuntimeSemanticPlanningRetirementReason = "input_review_revision"
 )
 
 // RuntimeSemanticPlanningHistoryLimit bounds immutable semantic lineage kept
@@ -2599,6 +2603,13 @@ func validateRuntimeSemanticPlanningGenerationComplete(raw, g RuntimeSemanticPla
 	case RuntimeSemanticPlanningRetirementImplementationPurpose:
 		if len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 || g.Snapshot.Phase != RuntimeSemanticPlanningOrderAccepted || g.Snapshot.CoverageOrderDocument == nil || g.Snapshot.CoverageOrderDocument.ImplementationPurpose == "" {
 			return fmt.Errorf("implementation purpose retirement requires exact original accepted order only")
+		}
+	case RuntimeSemanticPlanningRetirementInputRevision:
+		if g.InputReviewResolutionID != "" || len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {
+			return fmt.Errorf("input revision retirement cannot carry unrelated authority")
+		}
+		if _, err := CompileRuntimeValidationInputRevision(g.Snapshot); err != nil {
+			return err
 		}
 	case RuntimeSemanticPlanningRetirementInputReviewInformation:
 		if g.InputReviewResolutionID == "" || len(g.InvalidationSignatures) != 0 || len(g.PrerequisiteIDs) != 0 || len(g.ReopenedCoverageIDs) != 0 || len(g.ReopenTriggerRefs) != 0 || len(g.ChangedCoverageIDs) != 0 || len(g.ClosureChangeTriggerRefs) != 0 {

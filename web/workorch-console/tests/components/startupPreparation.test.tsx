@@ -50,6 +50,21 @@ describe('STEP04 准备主体流程', () => {
     ]) { const bad = structuredClone(view); mutate(bad); expect(() => validatePreparationView(bad, 'ws')).toThrow(); }
   });
 
+  it('File epoch 查询未取得独立展示，保留原状态且零自动写入', async () => {
+    const view = observed({ requestId: 'epoch-original', expectedWorkspaceRevision: 10 });
+    view.currentValidityReason = 'file_epoch_unavailable';
+    vi.mocked(workorchApi.readStartupPreparation).mockResolvedValue(view);
+    expect(() => validatePreparationView(view, 'ws')).not.toThrow();
+    render(wrap()); await act(async () => {});
+    expect(screen.getByText(/未取得 File 当前进程观察/)).toBeTruthy();
+    expect(workorchApi.checkStartupPreparation).not.toHaveBeenCalled();
+    expect(workorchApi.recoverStartupPreparation).not.toHaveBeenCalled();
+    expect(workorchApi.submitWorkspaceExecution).not.toHaveBeenCalled();
+    for (const [validity, reason] of [['observed', 'file_epoch_unavailable'], ['stale', 'file_epoch_unavailable'], ['not_evaluated', 'completion_outside_window'], ['stale', 'arbitrary']] as const) {
+      expect(() => validatePreparationView({ ...view, currentValidity: validity, currentValidityReason: reason }, 'ws')).toThrow();
+    }
+  });
+
   it('未登记诊断绑定原未决操作且不会自动登记或换身份重试', async () => {
     const view = observed({ requestId: 'unregistered-original', expectedWorkspaceRevision: 10 });
     const a = view.record!.attempts[0];

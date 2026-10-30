@@ -4,7 +4,6 @@ import (
 	"reflect"
 
 	workspace "github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/models"
-	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/startuppreparation"
 	"github.com/muidea/workorch/internal/pkg/common"
 	"github.com/muidea/workorch/internal/pkg/runtimeprojection"
 	runtimecontract "github.com/muidea/workorch/internal/pkg/workorchruntimecontract"
@@ -29,13 +28,20 @@ type OriginalPreparedBootstrap struct {
 // here is the archived local configuration declaration. This pure product by
 // itself never discharges the independent preparation checklist.
 func CompileOriginalPreparedBootstrap(w *workspace.Workspace, a workspace.WorkspacePreparationAttempt) (OriginalPreparedBootstrap, error) {
+	if w == nil || workspace.ValidatePreparationEvidencePersistence(w) != nil || w.StartupPreparation == nil {
+		return OriginalPreparedBootstrap{}, common.ErrConflict
+	}
+	return compileOriginalPreparedBootstrap(w, a)
+}
+
+// The caller completed the full evidence gate on these same immutable inputs
+// in this synchronous invocation. Independent public entry points never use
+// this continuation without their own gate.
+func compileOriginalPreparedBootstrap(w *workspace.Workspace, a workspace.WorkspacePreparationAttempt) (OriginalPreparedBootstrap, error) {
 	result := OriginalPreparedBootstrap{Version: OriginalPreparedBootstrapVersion}
 	fail := func(code string) (OriginalPreparedBootstrap, error) {
 		result.FailureCode = code
 		return result, nil
-	}
-	if w == nil || workspace.ValidatePreparationEvidencePersistence(w) != nil || w.StartupPreparation == nil {
-		return OriginalPreparedBootstrap{}, common.ErrConflict
 	}
 	found := false
 	for _, saved := range w.StartupPreparation.Attempts {
@@ -52,7 +58,18 @@ func CompileOriginalPreparedBootstrap(w *workspace.Workspace, a workspace.Worksp
 	if a.State != workspace.WorkspacePreparationBlocked || a.ExecutionInputVersion == "" {
 		return fail("original_inputs_unavailable")
 	}
-	policy, err := CompileOriginalPreparedExecutionPolicy(w, a)
+	source, err := compileOriginalPreparedSource(w, a)
+	if err != nil {
+		result.Diagnostic = []byte(err.Error())
+		return fail("original_policy_unavailable")
+	}
+	return source.bootstrap(w, a)
+}
+
+func (source originalPreparedSource) bootstrap(w *workspace.Workspace, a workspace.WorkspacePreparationAttempt) (OriginalPreparedBootstrap, error) {
+	result := OriginalPreparedBootstrap{Version: OriginalPreparedBootstrapVersion}
+	fail := func(code string) (OriginalPreparedBootstrap, error) { result.FailureCode = code; return result, nil }
+	policy, err := source.policy(w, a)
 	if err != nil {
 		result.Diagnostic = []byte(err.Error())
 		return fail("original_policy_unavailable")
@@ -153,16 +170,7 @@ func CompileOriginalPreparedBootstrap(w *workspace.Workspace, a workspace.Worksp
 		result.Diagnostic = []byte(err.Error())
 		return fail("activation_structure_rejected")
 	}
-	source, err := workspace.PreparationDefinitionCompilationSource(w, a)
-	if err != nil {
-		return OriginalPreparedBootstrap{}, err
-	}
-	snapshot := startuppreparation.ExactConfirmedStartupSnapshot(source)
-	manifest, err := startuppreparation.CompilePreparationManifest(snapshot)
-	if err != nil {
-		return OriginalPreparedBootstrap{}, err
-	}
-	compiled, err := CompilePreparedBootstrap(snapshot, manifest, activation)
+	compiled, err := CompilePreparedBootstrap(source.snapshot, source.manifest, activation)
 	if err != nil {
 		result.Diagnostic = []byte(err.Error())
 		return fail("bootstrap_structure_rejected")

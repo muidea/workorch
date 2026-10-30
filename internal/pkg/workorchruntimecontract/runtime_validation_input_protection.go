@@ -49,6 +49,17 @@ func validateRuntimeManifestInputProtection(manifest RuntimeCandidateContractMan
 		facts := RuntimeCandidateManifestOwnerFacts{OperationAdmissibilities: manifest.MutationInputCatalogs, InputRepair: operation.InputRepair}
 		required := RequiredOutputContract{RepairPurpose: manifest.RepairPurpose, RepairClosureID: manifest.RepairClosureID}
 		want := runtimeValidationInputMutationExclusions(operation.OwnerModuleID, facts, required, manifest.Bindings)
+		if v := operation.InputRevision; v != nil {
+			if err := v.Validate(); err != nil {
+				return err
+			}
+			if manifest.ImplementationWorkingBinding == nil || !runtimeRawEqual(v, manifest.ImplementationWorkingBinding.InputRevision) || operation.InputRepair != nil || v.OwnerModuleID != operation.OwnerModuleID {
+				return fmt.Errorf("input revision lacks exact ordinary working commitment")
+			}
+			want = runtimeTargetsWithoutExcluded(want, v.TargetRefs())
+		} else if manifest.ImplementationWorkingBinding != nil && manifest.ImplementationWorkingBinding.InputRevision != nil {
+			return fmt.Errorf("operation omitted working input revision")
+		}
 		if !sameStrings(want, operation.Target.ExcludedTargetRefs) {
 			return fmt.Errorf("mutation exclusions do not match exact owner input preimages")
 		}
@@ -93,7 +104,10 @@ func runtimeValidationInputMutationExclusions(owner string, facts RuntimeCandida
 		}
 	}
 	targets = normalizeStrings(targets)
-	// Only the existing exact, criterion-preserving transaction can open one
+	// This ordinary-binding arm only opens the confirmed repair input.
+	// The separate input-revision working arm is checked against its complete
+	// working commitment by validateRuntimeManifestInputProtection.
+	// Only the existing exact, criterion-preserving repair transaction can open one
 	// input target. A normal source-change candidate cannot borrow a diagnostic
 	// or another requirement's repair identity. Final seal also checks the
 	// receiving owner's before/after ReplayProof.

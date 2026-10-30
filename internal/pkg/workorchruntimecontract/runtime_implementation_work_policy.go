@@ -96,7 +96,7 @@ func implementationWorkProtocolSupported(policy RuntimeImplementationWorkPolicy)
 	existing := slices.Contains(p.AllowedTargetPolicies, RuntimeOperationTargetPolicyExactTarget) || slices.Contains(p.AllowedTargetPolicies, RuntimeOperationTargetPolicyExistingOwnerScope)
 	// File write is create-only; edit is revision-bound to an existing target.
 	// Do not advertise an impossible operation/policy pair as executable.
-	if write != prospective || edit != existing {
+	if write != prospective || edit != existing || p.InputRevisionProtocolRef != "" && !edit {
 		return false
 	}
 	if prospective {
@@ -112,8 +112,10 @@ func implementationWorkProtocolSupported(policy RuntimeImplementationWorkPolicy)
 // It never contains a selected target, owner observation, next action, credit
 // or retry state. Terminal proof remains on the original evidence requirement.
 // The first protocol bounds work to one declared resource owner and requires
-// fresh observation and validation, without permitting published-input edits.
+// fresh observation and validation. Only the optional versioned input-revision
+// route can open an exact reviewed input; ordinary work keeps it protected.
 type RuntimeImplementationWorkPolicy struct {
+	InputRevisionProtocolRef             string                         `json:"inputRevisionProtocolRef,omitempty"`
 	ProtocolRef                          string                         `json:"protocolRef"`
 	OwnerModuleID                        string                         `json:"ownerModuleId"`
 	AllowedOperations                    []RuntimeOperationVariantRef   `json:"allowedOperations"`
@@ -151,6 +153,7 @@ func cloneRuntimeImplementationWorkPolicy(p *RuntimeImplementationWorkPolicy) *R
 func (p RuntimeImplementationWorkPolicy) Normalized() RuntimeImplementationWorkPolicy {
 	p = p.Clone()
 	p.ProtocolRef = strings.TrimSpace(p.ProtocolRef)
+	p.InputRevisionProtocolRef = strings.TrimSpace(p.InputRevisionProtocolRef)
 	p.OwnerModuleID = strings.TrimSpace(p.OwnerModuleID)
 	p.TargetSelectorRef = strings.TrimSpace(p.TargetSelectorRef)
 	p.TargetSelectorOwnerRef = strings.TrimSpace(p.TargetSelectorOwnerRef)
@@ -185,6 +188,10 @@ func (p RuntimeImplementationWorkPolicy) Normalized() RuntimeImplementationWorkP
 
 func (p RuntimeImplementationWorkPolicy) Validate() error {
 	p = p.Normalized()
+	if p.InputRevisionProtocolRef != "" && p.InputRevisionProtocolRef != RuntimeValidationInputRevisionProtocolV1 {
+		return fmt.Errorf("unsupported input revision protocol")
+	}
+
 	if p.ProtocolRef != RuntimeImplementationWorkProtocolV1 {
 		return fmt.Errorf("implementation work requires protocol %q", RuntimeImplementationWorkProtocolV1)
 	}

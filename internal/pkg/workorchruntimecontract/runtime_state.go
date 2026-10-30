@@ -475,6 +475,9 @@ func (r RuntimeStateRecord) validateInSourceSession(semanticSession *runtimeSema
 	if err := ValidateRuntimeCandidateRequestSessions(r.CandidateRequestSessions); err != nil {
 		return err
 	}
+	if err := ValidateRuntimeInputRevisionRequestSources(r.SemanticPlanning, r.CandidateRequestSessions); err != nil {
+		return err
+	}
 	if err := r.ExecutionBudget.Validate(); err != nil {
 		return fmt.Errorf("runtime execution budget: %w", err)
 	}

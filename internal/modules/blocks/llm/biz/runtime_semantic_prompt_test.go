@@ -22,7 +22,7 @@ func TestCompactSemanticPlanPromptSchemaRemovesProseMetadata(t *testing.T) {
 	}
 }
 
-func runtimeSemanticWorkProviderRequestForTest(t *testing.T, purpose bool) llmmodels.RuntimeCandidateRequest {
+func runtimeSemanticWorkProviderRequestForTest(t *testing.T, purpose bool, revisions ...*runtimecontract.RuntimeValidationInputRevision) llmmodels.RuntimeCandidateRequest {
 	t.Helper()
 	request := runtimeSemanticProviderTestRequest(t)
 	ctx := &request.SemanticContext
@@ -30,11 +30,21 @@ func runtimeSemanticWorkProviderRequestForTest(t *testing.T, purpose bool) llmmo
 		AllowedOperations: []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileWrite}}, AllowedTargetPolicies: []runtimecontract.RuntimeOperationTargetPolicy{runtimecontract.RuntimeOperationTargetPolicyExistingOwnerScope},
 		TargetSelectorRef: "work-scope", TargetSelectorOwnerRef: "profile/work", TargetSelectorSubjectRef: "implementation", TargetSelectorCandidateRefs: []string{"main.go"},
 		MaxRoundsPerCWI: 2, MaxTargetsPerRound: 1, RequireFreshObservation: true, RequireFreshValidation: true, ProtectValidationInputs: true}
+	var revision *runtimecontract.RuntimeValidationInputRevision
+	if len(revisions) > 0 {
+		revision = revisions[0].Clone()
+		policy.InputRevisionProtocolRef = runtimecontract.RuntimeValidationInputRevisionProtocolV1
+		policy.AllowedOperations = []runtimecontract.RuntimeOperationVariantRef{{Kind: runtimecontract.StepKindFileEdit}}
+		ctx.Definition.CapabilityContract = []string{runtimecontract.StepKindFileEdit}
+	}
 	ctx.Activation.ExecutionContract.ProfileContracts = []runtimecontract.RuntimeProfileContract{{ID: "work", EvidenceRequirements: []runtimecontract.RuntimeProfileEvidenceRequirement{{ID: "*", Scope: "dodItem", RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ImplementationWorkPolicy: &policy}}}}
 	item := ctx.DefinitionSeed.CoverageItems[0]
 	focus := runtimecontract.RuntimeDefinitionFocus{ID: "focus-work", SliceID: item.SliceID, AssessmentScope: item.SourceScope, AssessmentID: item.SourceID, AssessmentText: item.TargetText,
 		CoverageWorkItemIDs: []common.CoverageWorkItemID{item.ID}, EvidenceDeclarationRef: "definition/dodItem/" + item.SourceID, RequiredEvidenceKinds: []string{runtimecontract.EvidenceKindValidation}, AcceptedStepKinds: []string{runtimecontract.RuntimeBlockKindManagedValidationSession}, ImplementationWorkPolicy: &policy}
 	catalog := request.SemanticManifest.OwnerCatalogs[0].Clone()
+	if revision != nil {
+		catalog.OperationKinds = []string{runtimecontract.StepKindFileEdit}
+	}
 	catalog.SelectorRefs = []string{"work-scope"}
 	catalog.SnapshotID = runtimecontract.StableRuntimeOperationAdmissibilitySnapshotID(catalog)
 	observation := runtimecontract.RuntimePrerequisiteObservation{PrerequisiteID: "manifest-work", Kind: runtimecontract.PrerequisiteKindManifest, OwnerModuleID: runtimecontract.RuntimeModuleFile, ContentHash: catalog.ObservedRevision,
@@ -44,6 +54,22 @@ func runtimeSemanticWorkProviderRequestForTest(t *testing.T, purpose bool) llmmo
 		runtimecontract.RuntimeWorkspaceManifestBinding{Manifest: runtimecontract.WorkspaceManifest{Revision: catalog.ObservedRevision, TargetRefs: []string{"main.go"}}, Observation: observation})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if revision != nil {
+		revision.WorkspaceID, revision.RunID, revision.DefinitionSeedHash = ctx.WorkspaceID, ctx.RunID, ctx.DefinitionSeed.Hash
+		revision.Binding.CoverageWorkItemID = item.ID
+		revision.Binding.InputReview.Files[0].TargetRef = "main.go"
+		revision.InputTargetRefs = []string{"main.go"}
+		for i := range revision.Report.Checks {
+			revision.Report.Checks[i].InputTargetRefs = []string{"main.go"}
+		}
+		revision.Binding.InputReview.Hash = runtimecontract.StableRuntimeValidationInputReviewSubjectHash(*revision.Binding.InputReview, revision.Binding)
+		revision.Report.SubjectHash = revision.Binding.InputReview.Hash
+		sources := runtimecontract.RuntimeImplementationWorkScopeSources{WorkspaceID: ctx.WorkspaceID, RunID: ctx.RunID, AuthoritySnapshotID: "authority-work", Seed: ctx.DefinitionSeed, Focuses: []runtimecontract.RuntimeDefinitionFocus{focus}, Profiles: ctx.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: item.ID, ManifestBinding: scopeRequest.ManifestBinding, InputRevision: revision}
+		scopeRequest, err = sources.Compile()
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	selection := runtimecontract.RuntimeTargetSelection{PrerequisiteID: scopeRequest.RequestID, OwnerModuleID: policy.OwnerModuleID, TargetRole: "implementation_work", SelectorRef: policy.TargetSelectorRef, SelectorOwnerRef: policy.TargetSelectorOwnerRef, SelectorSubjectRef: policy.TargetSelectorSubjectRef, SelectorCandidateRefs: policy.TargetSelectorCandidateRefs,
 		Disposition: runtimecontract.RuntimeTargetSelectionSelected, TargetRefs: []string{"main.go"}, CandidateTargetRefs: []string{"main.go"}, CandidateCount: 1, ObservedRevision: catalog.ObservedRevision}

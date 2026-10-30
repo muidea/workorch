@@ -718,9 +718,13 @@ func (m *Biz) handleRuntimeOperationFeasibility(event magicevent.Event, result m
 		return
 	}
 	operation := command.Operation.Normalized()
-	failure, stale, replayProof := m.runtimeAdapter.ProbeRuntimeOperationFeasibilityWithReplayProof(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation)
+	failure, stale, replayProof := m.runtimeAdapter.probeRuntimeOperationFeasibilityWithReplayProof(command.WorkspaceDeliverableDirectory, command.Admissibility, operation, command.Observation, command.OperationAuthorization.InputRevision != nil)
 	if repair := command.OperationAuthorization.InputRepair; repair != nil && failure == nil && stale == nil && !repair.MatchesReplayProof(replayProof) {
 		failure = fileOperationInfeasible(operation, "validation_input_postimage_mismatch", "candidate does not preserve the sealed validation input delta", operation.TargetRefs)
+		replayProof = nil
+	}
+	if revision := command.OperationAuthorization.InputRevision; revision != nil && failure == nil && stale == nil && !revision.MatchesReplayProof(replayProof) {
+		failure = fileOperationInfeasible(operation, "validation_input_revision_preimage_mismatch", "candidate does not change the exact reviewed input", operation.TargetRefs)
 		replayProof = nil
 	}
 	prerequisiteRequest := fileOperationSnapshotPrerequisiteRequest(operation, failure, command.CurrentTargetSnapshot)

@@ -366,7 +366,11 @@ def main():
                         help="relative/default use a relative repository root; default omits the project directory")
     parser.add_argument("--browser-hold-seconds", type=int, default=0, help="bounded window for explicit first check in production Web; marker is not browser proof")
     parser.add_argument("--verify-first-execution", action="store_true", help="separate STEP05 fixture case: explicitly activate immediately after completion and verify original replay across an OS restart; not Runtime fullflow")
+    parser.add_argument("--acceptance-items", type=int, default=2, help="number of explicit fixture requirements, including the two original requirements; no live model")
+    parser.add_argument("--preparation-history-count", type=int, default=1, help="explicit successful check count before first execution, not retries until success")
     args = parser.parse_args()
+    require(2 <= args.acceptance_items <= 100 and 1 <= args.preparation_history_count <= 4, "representative fixture size/history must be bounded")
+    require(args.preparation_history_count == 1 or args.verify_first_execution, "history growth case requires separate first-execution verification")
     require(0 <= args.browser_hold_seconds <= 1800, "browser window must be bounded")
     root = args.evidence_dir.absolute()
     require(not root.exists(), "new evidence directory required")
@@ -418,10 +422,16 @@ def main():
             "serverId": "step04-protocol", "kind": "tool", "name": "inspect", "category": "verification",
             "enabled": True}, 200)
         template = copy.deepcopy(TEMPLATE)
+        if args.acceptance_items > 2:
+            template["contextHints"]["acceptanceSlicePolicy"].update(maxFocuses=128)
         template["contextHints"]["toolHints"] = {"defaultMCPServerIds": ["step04-protocol"], "defaultCapabilityIds": ["step04-protocol:tool:inspect"]}
         verification.request("POST", "/api/v1/workorch/workspace-templates", template, 201)
         payload = {"requestId": "step04-process-original", "title": "STEP04 独立进程阻塞验收", "templateId": TEMPLATE["id"],
                    "input": {"goalText": step02.GOAL, "acceptanceRequirements": step02.REQUIREMENTS, "resourceRefs": ["requirements.txt"]}}
+        payload["input"]["acceptanceRequirements"] = [*step02.REQUIREMENTS, *(
+            f"独立验收要求 {index:03d}：保留该项原输入和输出次序，提供对应的正常与错误路径验证。"
+            for index in range(3, args.acceptance_items + 1))]
+        save(root, "fixed-source-commitments.json", payload)
         project = root / "project"
         if args.directory_mode == "default":
             project = root / ".workorch-workspaces" / step01.workspace_id(payload["requestId"])
@@ -470,7 +480,18 @@ def main():
             expected["currentValidity"] = current_validity()
             if expected["currentValidity"] == "not_evaluated" and expected["operationState"] == "completed":
                 expected["currentValidity"] = "observed"
-            return preparation(observed) == expected
+            actual = copy.deepcopy(preparation(observed))
+            # Diagnostic currentness reasons are read-time data, not part of
+            # immutable history. Validate their closed state contract, then
+            # compare all operation/history fields and independently computed
+            # current validity in full.
+            reason = actual.pop("currentValidityReason", "")
+            expected.pop("currentValidityReason", None)
+            require(not reason or
+                    reason in ("file_epoch_unavailable", "file_epoch_timeout", "file_epoch_cancelled") and actual["currentValidity"] == "not_evaluated" or
+                    reason in ("binding_changed", "attempt_outside_window", "completion_outside_window", "file_observation_stale", "provider_cache_expired", "owner_observation_stale", "file_epoch_changed_or_expired") and actual["currentValidity"] == "stale",
+                    "invalid currentness reason/state")
+            return actual == expected
 
         record = step02.workspace_record(json.loads(workspace_file.read_bytes()), workspace_id)
         require(record["DeliverableDirectory"] == record["StartupInput"]["ResolvedProjectWorkspaceDirectory"] == str(project) and
@@ -533,6 +554,16 @@ def main():
         not_checked = preparation(verification.request("GET", path))
         require(not_checked["operationState"] == "not_checked" and not not_checked.get("record"), "GET ran a check")
         require(skillhub_calls(root) == status_baseline, "not_checked GET invoked SkillHub")
+        previous_attempts = []
+        for index in range(args.preparation_history_count - 1):
+            prior_intent = {"requestId": f"step05-history-{index + 1}", "expectedWorkspaceRevision": initialized["workspaceRevision"]}
+            prior = verification.request("POST", path + "/check", prior_intent)
+            capture_original_file_epoch(prior_intent)
+            validated = validate_blocked(prior, workspace_id, prior_intent, admitted, previous_attempts=previous_attempts, expected_validity=current_validity(), completion_expected=True)
+            require(validated["currentValidity"] == "observed", "explicit history check already expired; do not retry")
+            previous_attempts = validated["record"]["attempts"]
+            initialized = validated
+            status_baseline_count += 2
         intent = {"requestId": "step04-check-original", "expectedWorkspaceRevision": initialized["workspaceRevision"]}
         if args.browser_hold_seconds:
             session = {"baseURL": verification.base, "workspaceId": workspace_id, "preparationPath": path,
@@ -558,7 +589,7 @@ def main():
         else:
             first = verification.request("POST", path + "/check", intent)
         capture_original_file_epoch(intent)
-        saved = validate_blocked(first, workspace_id, intent, admitted, expected_validity=current_validity(), completion_expected=True)
+        saved = validate_blocked(first, workspace_id, intent, admitted, previous_attempts=previous_attempts, expected_validity=current_validity(), completion_expected=True)
         if args.browser_hold_seconds:
             first = verification.request("POST", path + "/recover", intent)
         compilations = {intent["requestId"]: validate_bootstrap_compilation(first, intent)}
@@ -581,7 +612,7 @@ def main():
             if fence.get("Pending"):
                 identities.append(fence["Pending"])
             require(len(identities) == 1 and identities[0]["RequestID"] == execution["requestId"] and
-                    identities[0]["PreparationCompletionID"] == saved["record"]["completions"][0]["completionId"],
+                    identities[0]["PreparationCompletionID"] == saved["record"]["completions"][-1]["completionId"],
                     "first reservation did not consume the exact original completion")
             evidence = record.get("FirstExecutionPreparationEvidence", {})
             require(evidence.get("Version") == "workorch-first-execution-preparation-evidence/v1" and
@@ -592,6 +623,18 @@ def main():
                     evidence["Files"]["Configs"] == original_files["Configs"] and
                     evidence["Files"]["Resources"] == original_files["Resources"],
                     "read-only activation compiler changed original managed configuration/resources")
+            completion = saved["record"]["completions"][-1]
+            timestamp = lambda value: datetime.fromisoformat(value.replace("Z", "+00:00"))
+            consumed_at = timestamp(identities[0]["PreparationConsumedAt"])
+            require(consumed_at < timestamp(completion["expiresAt"]) and consumed_at < timestamp(original_files["ExpiresAt"]),
+                    "first execution consumed expired original completion/File evidence")
+            save(root, "first-execution-window.json", {
+                "dodCount": len(record["DefinitionAuthoringConfirmation"]["DoD"]["Items"]),
+                "completionCount": len(record["StartupPreparation"]["Completions"]),
+                "consumedAt": identities[0]["PreparationConsumedAt"],
+                "completionRemainingSeconds": (timestamp(completion["expiresAt"]) - consumed_at).total_seconds(),
+                "originalFileRemainingSeconds": (timestamp(original_files["ExpiresAt"]) - consumed_at).total_seconds(),
+            })
             runs = verification.request("GET", f"/api/v1/workorch/workspaces/{workspace_id}/runs")["runs"]
             require(len(runs) == 1, "explicit first execution did not materialize exactly one Run")
             (root / "first-execution-owner.bin").write_bytes(workspace_file.read_bytes())

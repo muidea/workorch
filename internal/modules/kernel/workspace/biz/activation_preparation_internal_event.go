@@ -7,6 +7,7 @@ import (
 	"errors"
 	mcpevents "github.com/muidea/workorch/internal/modules/blocks/mcp/pkg/events"
 	"github.com/muidea/workorch/internal/modules/kernel/workspace/pkg/preparationcompiler"
+	"github.com/muidea/workorch/internal/pkg/preparationtrace"
 	"slices"
 	"strings"
 	"time"
@@ -361,6 +362,7 @@ func preparationOriginalIndex(w *workspace.Workspace, command workspaceevents.Ch
 }
 
 func (m *Biz) finishBlockedPreparation(ctx context.Context, fact workspacePreparationBlocked) (workspaceevents.CheckWorkspacePreparationResult, error) {
+	defer preparationtrace.Start(ctx, fact.Command.WorkspaceID, fact.Command.RequestID, "owner_settlement", fact.Command.ExpectedWorkspaceRevision)()
 	command := fact.Command
 	observedMCP := false
 	m.deletionIngressMu.RLock()
@@ -369,11 +371,15 @@ func (m *Biz) finishBlockedPreparation(ctx context.Context, fact workspacePrepar
 		if err := ctx.Err(); err != nil {
 			return workspaceevents.CheckWorkspacePreparationResult{}, err
 		}
+		finishLoad := preparationtrace.Start(ctx, command.WorkspaceID, command.RequestID, "settlement_load", command.ExpectedWorkspaceRevision)
 		current, err := m.workspaces.Get(ctx, command.WorkspaceID)
+		finishLoad()
 		if err != nil {
 			return workspaceevents.CheckWorkspacePreparationResult{}, err
 		}
+		finishReduce := preparationtrace.Start(ctx, command.WorkspaceID, command.RequestID, "settlement_reduce", current.Revision)
 		transition, err := reduceWorkspacePreparationBlocked(current, fact)
+		finishReduce()
 		if err != nil {
 			return workspaceevents.CheckWorkspacePreparationResult{}, err
 		}
@@ -384,12 +390,17 @@ func (m *Biz) finishBlockedPreparation(ctx context.Context, fact workspacePrepar
 			observedMCP = true
 			fact.MCPConnection = m.observeOriginalPreparationMCP(ctx, transition.Next, command)
 			fact.At = time.Now().UTC()
+			finishReduce = preparationtrace.Start(ctx, command.WorkspaceID, command.RequestID, "settlement_final_reduce", current.Revision)
 			transition, err = reduceWorkspacePreparationBlocked(current, fact)
+			finishReduce()
 			if err != nil {
 				return workspaceevents.CheckWorkspacePreparationResult{}, err
 			}
 		}
-		if err := m.workspaces.CompareAndSwap(ctx, transition.Next, current.Revision); err != nil {
+		finishCAS := preparationtrace.Start(ctx, command.WorkspaceID, command.RequestID, "settlement_cas", current.Revision)
+		casErr := m.workspaces.CompareAndSwap(ctx, transition.Next, current.Revision)
+		finishCAS()
+		if err := casErr; err != nil {
 			if errors.Is(err, common.ErrConflict) {
 				continue
 			}

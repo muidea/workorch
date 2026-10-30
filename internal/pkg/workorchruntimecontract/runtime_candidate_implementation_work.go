@@ -27,6 +27,7 @@ func implementationWorkingOperationManifest(operation RuntimeCandidateOperationM
 		return RuntimeCandidateOperationManifest{}, fmt.Errorf("implementation work operation has no original semantic working proposal")
 	}
 	target.ExcludedTargetRefs = slices.Clone(binding.ExcludedTargetRefs)
+	operation.InputRevision = binding.InputRevision.Clone()
 	operation.Target = target.Normalized()
 	operation.TargetParameterBindings = runtimeCandidateTargetParameterBindings(operation.Kind, operation.Target, []RuntimeOperationAdmissibility{binding.OwnerCatalog}, binding.OwnerCatalog.OwnerModuleID)
 	operation.PrerequisiteSnapshotRefs = []string{binding.CatalogObservation.ObservationID}

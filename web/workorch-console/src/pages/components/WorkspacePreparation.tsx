@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Descriptions, List, Modal, Space, Tag, Typography } from 'antd';
 import { workorchApi } from '../../api';
-import { mcpPreparationReasonLabel, providerPreparationReasonLabel, validatePreparationView, validatePreparationCompilation } from '../../startupPreparation';
+import { mcpPreparationReasonLabel, providerPreparationReasonLabel, preparationValidityReasonLabel, validatePreparationView, validatePreparationCompilation } from '../../startupPreparation';
 import type { PreparationBootstrapCompilation, PreparationCheckRequest, StartupPreparationView } from '../../startupPreparation';
 
 export function WorkspacePreparation({ workspaceId, onClose }: { workspaceId?: string; onClose: () => void }) {
@@ -158,7 +158,7 @@ function PreparationPanel({ workspaceId }: { workspaceId: string }) {
     {view ? <Descriptions column={1} size="small" items={[
       { key: 'revision', label: 'Workspace revision', children: view.workspaceRevision },
       { key: 'state', label: '操作状态', children: view.operationState },
-      { key: 'validity', label: '当前有效性', children: view.currentValidity },
+      { key: 'validity', label: '当前有效性', children: `${view.currentValidity}${view.currentValidityReason ? `；${preparationValidityReasonLabel(view.currentValidityReason)}` : ''}` },
       { key: 'run', label: '独立 Run 投影', children: view.activeRunId || '未投影 ActiveRunID（不证明无历史或在途 Run）' },
       { key: 'm3', label: 'M3', children: view.record?.completions?.length ? `创建准备已完成（历史 M3）：${view.record.completions[0].completionId}；执行仍需独立启动` : '尚未取得创建准备完成凭据' },
       { key: 'request', label: '最近检查请求', children: last?.requestId || '未检查' },

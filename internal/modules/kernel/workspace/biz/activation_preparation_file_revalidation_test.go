@@ -46,6 +46,14 @@ func TestPreparationFileRevalidationProductionRestartReadbackAndNoRenewal(t *tes
 		t.Fatal("final observation not bound to original pipeline", original.Preparation.CurrentValidity)
 	}
 	record, archive := stored.StartupPreparation.Clone(), workspace.ClonePreparationDirectoryEvidence(stored.PreparationDirectoryEvidence)
+	// A cancelled epoch read is not evidence that File restarted or that a
+	// still-bounded original observation expired. Keep the historical record.
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	unavailable, unavailableErr := owners.workspace.preparationState(cancelled, stored)
+	if unavailableErr != nil || unavailable.CurrentValidity != "not_evaluated" || unavailable.CurrentValidityReason != "file_epoch_cancelled" || !reflect.DeepEqual(*unavailable.Record, record) {
+		t.Fatal("epoch query failure masqueraded as known stale or changed history", unavailableErr)
+	}
 	state, err := preparationStateFromPersistence(stored, d.Revalidation.ExpiresAt)
 	if err != nil || state.CurrentValidity != "stale" || !reflect.DeepEqual(*state.Record, record) {
 		t.Fatal("expiry renewed or changed history", err)

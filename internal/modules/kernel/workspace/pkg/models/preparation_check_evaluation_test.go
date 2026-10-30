@@ -103,6 +103,17 @@ func TestPreparationCheckEvaluationExactRawAndNoAggregateSuccess(t *testing.T) {
 		func(w *Workspace) { w.StartupPreparation.Attempts[0].Checks[0].Required = false },
 		func(w *Workspace) { w.StartupPreparation.Attempts[0].Checks[0].SubjectHash = strings.Repeat("a", 64) },
 		func(w *Workspace) { w.StartupPreparation.Attempts[0].Checks[1].State = "passed" },
+		func(w *Workspace) {
+			w.StartupPreparation.Attempts[0].SealEvidenceRef = PreparationSealRefPrefix + strings.Repeat("b", 32)
+		},
+		func(w *Workspace) {
+			a := &w.StartupPreparation.Attempts[0]
+			a.SealEvidenceRef = PreparationSealRefPrefix + strings.Repeat("b", 32)
+			a.Checks[1].State, a.Checks[1].Reason = "passed", "seal_observed_remaining_checks"
+			e := WorkspacePreparationSealEvidence{Version: PreparationSealEvidenceVersion, Ref: a.SealEvidenceRef, RequestID: a.RequestID, PayloadHash: a.PayloadHash, Binding: a.Binding}
+			e.ContentHash = e.Hash()
+			w.PreparationSealEvidence = []WorkspacePreparationSealEvidence{e}
+		},
 		func(w *Workspace) { w.StartupPreparation.Attempts[0].Checks[2].State = "not_applicable" },
 		func(w *Workspace) { w.StartupPreparation.Attempts[0].Checks[2].State = "failed" },
 		func(w *Workspace) { w.StartupPreparation.Attempts[0].State = "ready" },

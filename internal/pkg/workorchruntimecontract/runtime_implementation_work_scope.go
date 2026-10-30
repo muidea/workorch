@@ -19,6 +19,7 @@ var ErrRuntimeImplementationWorkScopeStale = errors.New("implementation work sco
 // not an EventHub command, working binding, or permission to execute. Its exact
 // CWI and sealed policy are independent of the terminal proof's target selector.
 type RuntimeImplementationWorkScopeRequest struct {
+	InputRevision       *RuntimeValidationInputRevision `json:",omitempty"`
 	WorkspaceID         common.WorkspaceID
 	RunID               common.RunID
 	AuthoritySnapshotID string
@@ -33,6 +34,7 @@ type RuntimeImplementationWorkScopeRequest struct {
 // sealed definition and authority, never from the request being checked. It is
 // compiler input, not another persisted authority or an execution permission.
 type RuntimeImplementationWorkScopeSources struct {
+	InputRevision       *RuntimeValidationInputRevision
 	WorkspaceID         common.WorkspaceID
 	RunID               common.RunID
 	AuthoritySnapshotID string
@@ -44,8 +46,12 @@ type RuntimeImplementationWorkScopeSources struct {
 }
 
 func (s RuntimeImplementationWorkScopeSources) Compile() (RuntimeImplementationWorkScopeRequest, error) {
-	return CompileRuntimeImplementationWorkScopeRequest(s.WorkspaceID, s.RunID, s.AuthoritySnapshotID,
+	r, err := CompileRuntimeImplementationWorkScopeRequest(s.WorkspaceID, s.RunID, s.AuthoritySnapshotID,
 		s.Seed, s.Focuses, s.Profiles, s.CoverageWorkItemID, s.ManifestBinding)
+	if err != nil {
+		return r, err
+	}
+	return attachRuntimeInputRevision(r, s.InputRevision)
 }
 
 // ValidateForSources independently recompiles the expected request. A valid
@@ -115,6 +121,7 @@ func compileRuntimeWorkScopeRequestInSession(workspaceID common.WorkspaceID, run
 }
 
 func (r RuntimeImplementationWorkScopeRequest) Clone() RuntimeImplementationWorkScopeRequest {
+	r.InputRevision = r.InputRevision.Clone()
 	r.Policy = r.Policy.Clone()
 	r.ManifestBinding.Manifest.TargetRefs = slices.Clone(r.ManifestBinding.Manifest.TargetRefs)
 	r.ManifestBinding.Observation.Dependencies = slices.Clone(r.ManifestBinding.Observation.Dependencies)
@@ -135,6 +142,14 @@ func (r RuntimeImplementationWorkScopeRequest) Validate() error {
 	}
 	if r.ManifestBinding.Observation.OwnerModuleID != r.Policy.OwnerModuleID {
 		return fmt.Errorf("implementation work scope requires its resource owner's manifest")
+	}
+	if v := r.InputRevision; v != nil {
+		if err := v.Validate(); err != nil {
+			return err
+		}
+		if r.Policy.InputRevisionProtocolRef != RuntimeValidationInputRevisionProtocolV1 || v.WorkspaceID != r.WorkspaceID || v.RunID != r.RunID || v.DefinitionSeedHash != r.DefinitionSeedHash || v.Binding.CoverageWorkItemID != r.CoverageWorkItemID || v.OwnerModuleID != r.Policy.OwnerModuleID {
+			return fmt.Errorf("input revision escapes sealed scope/policy")
+		}
 	}
 	if r.RequestID != implementationWorkScopeRequestID(r) {
 		return fmt.Errorf("implementation work scope request identity mismatch")

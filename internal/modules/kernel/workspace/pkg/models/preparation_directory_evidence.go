@@ -95,7 +95,7 @@ func ValidatePreparationEvidencePersistence(w *Workspace) error {
 	if err := validatePreparationMCPRegistryEvidencePersistence(w); err != nil {
 		return err
 	}
-	if err := validatePreparationCheckEvaluationPersistence(w); err != nil {
+	if err := validatePreparationCheckEvaluationAfterSealPersistence(w); err != nil {
 		return err
 	}
 	if err := validatePreparationMemoryInventoryEvidencePersistence(w); err != nil {

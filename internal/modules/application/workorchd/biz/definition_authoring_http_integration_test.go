@@ -1652,6 +1652,9 @@ func testAuthoringHTTPFileBackedScenario(t *testing.T, scenario string) {
 					// Reopened File owner has a different process epoch. History is
 					// immutable, but the independent current-validity axis must stale.
 					expected.CurrentValidity = "stale"
+					if first.Preparation.CurrentValidity != "stale" {
+						expected.CurrentValidityReason = "file_epoch_changed_or_expired"
+					}
 				}
 				if !reflect.DeepEqual(expected, again.Preparation) {
 					t.Fatal("HTTP GET/replay/recovery/reopen rewrote original preparation")

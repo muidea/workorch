@@ -15,6 +15,70 @@ import (
 
 const FirstExecutionPreparationVersion = "workorch-first-execution-preparation/v1"
 
+// CheckFirstExecutionPreparationWindow rejects expired/drifted inputs before
+// owner I/O. It intentionally does not validate historical provenance, formal
+// rows or the bootstrap and can never authorize a reservation. The private
+// reducer must still run CompileObservedFirstExecutionPreparation in full.
+func CheckFirstExecutionPreparationWindow(w *workspace.Workspace, now time.Time, fileEpoch string) error {
+	_, _, err := firstExecutionPreparationWindow(w, now, fileEpoch)
+	return err
+}
+
+// ValidateFirstExecutionPreparationCommitTime is a persistence-time backstop
+// after complete transition/after-image validation. It never authenticates
+// history by itself. Only newly introduced consumption is time-sensitive;
+// replay, settlement and archive reload retain the original consumption time.
+func ValidateFirstExecutionPreparationCommitTime(current, next *workspace.Workspace, now time.Time) error {
+	if current == nil || next == nil {
+		return common.ErrInvalidArgument
+	}
+	if current.FirstExecutionPreparationEvidence != nil || next.FirstExecutionPreparationEvidence == nil {
+		return nil
+	}
+	if next.PreparationFence == nil || next.PreparationFence.Pending == nil {
+		return common.ErrConflict
+	}
+	r := next.PreparationFence.Pending
+	f := next.FirstExecutionPreparationEvidence.Files
+	if now.IsZero() || now.Before(r.PreparationConsumedAt) || now.Before(f.ObservedAt) || !now.Before(f.ExpiresAt) {
+		return common.ErrConflict
+	}
+	return CheckFirstExecutionPreparationWindow(current, now, f.OwnerEpoch)
+}
+
+func firstExecutionPreparationWindow(w *workspace.Workspace, now time.Time, fileEpoch string) (workspace.WorkspacePreparationAttempt, *workspace.WorkspacePreparationCompletion, error) {
+	fail := func(stage string) (workspace.WorkspacePreparationAttempt, *workspace.WorkspacePreparationCompletion, error) {
+		return workspace.WorkspacePreparationAttempt{}, nil, fmt.Errorf("%w: first execution preparation %s", common.ErrConflict, stage)
+	}
+	if w == nil || now.IsZero() || fileEpoch == "" || w.Deletion != nil || w.ActiveRunID != "" || w.PreparationFence == nil || w.PreparationFence.Validate(w.ID) != nil || w.PreparationFence.PreparationEpoch != 0 || w.PreparationFence.Pending != nil || len(w.PreparationFence.Settled) != 0 || w.StartupPreparation == nil || len(w.StartupPreparation.Attempts) == 0 {
+		return fail("scope")
+	}
+	a := w.StartupPreparation.Attempts[len(w.StartupPreparation.Attempts)-1]
+	var completion *workspace.WorkspacePreparationCompletion
+	for i := range w.StartupPreparation.Completions {
+		c := &w.StartupPreparation.Completions[i]
+		if c.RequestID == a.RequestID {
+			if completion != nil {
+				return fail("duplicate_completion")
+			}
+			completion = c
+		}
+	}
+	if completion == nil || completion.ValidateFor(a) != nil || completion.CommittedWorkspaceRevision != w.Revision || completion.CreationEpoch != w.PreparationFence.CreationEpoch || now.Before(completion.CompletedAt) || !now.Before(completion.ExpiresAt) || a.Binding.CheckPolicyVersion != startuppreparation.CheckPolicyVersion || a.Binding.CompilerVersion != startuppreparation.BootstrapCompilerVersion {
+		return fail("completion")
+	}
+	if stale, err := workspace.PreparationOwnerRevalidationStaleForAttempt(w, a, now); err != nil || stale {
+		return fail("owners")
+	}
+	if stale, err := workspace.PreparationFileRevalidationStaleForAttempt(w, a, now, fileEpoch); err != nil || stale {
+		return fail("file")
+	}
+	if stale, err := workspace.PreparationProviderCacheExpired(w, now); err != nil || stale {
+		return fail("provider")
+	}
+	return a, completion, nil
+}
+
 // FirstExecutionPreparation is a detached compilation of complete owner inputs,
 // not a transferable validation credential or a Run activation permission. The
 // owner must recompile against its actual reservation CAS preimage. In
@@ -99,38 +163,23 @@ func CompileFirstExecutionPreparation(w *workspace.Workspace, goal *workspace.Go
 	if w == nil || now.IsZero() || fileEpoch == "" || w.Deletion != nil || w.ActiveRunID != "" || w.PreparationFence == nil || w.PreparationFence.Validate(w.ID) != nil || w.PreparationFence.PreparationEpoch != 0 || w.PreparationFence.Pending != nil || len(w.PreparationFence.Settled) != 0 || w.StartupPreparation == nil || len(w.StartupPreparation.Attempts) == 0 {
 		return fail("scope")
 	}
-	if w.StartupPreparation.Validate(w.ID) != nil || ValidatePreparedPersistence(w) != nil {
+	if w.StartupPreparation.Validate(w.ID) != nil {
 		return fail("history")
 	}
-	a := w.StartupPreparation.Attempts[len(w.StartupPreparation.Attempts)-1]
-	var completion *workspace.WorkspacePreparationCompletion
-	for i := range w.StartupPreparation.Completions {
-		c := &w.StartupPreparation.Completions[i]
-		if c.RequestID == a.RequestID {
-			if completion != nil {
-				return fail("duplicate_completion")
-			}
-			completion = c
-		}
+	products, err := validatePreparedPersistence(w)
+	if err != nil {
+		return fail("history")
 	}
-	if completion == nil || completion.ValidateFor(a) != nil || completion.CommittedWorkspaceRevision != w.Revision || completion.CreationEpoch != w.PreparationFence.CreationEpoch || now.Before(completion.CompletedAt) || !now.Before(completion.ExpiresAt) || a.Binding.CheckPolicyVersion != startuppreparation.CheckPolicyVersion || a.Binding.CompilerVersion != startuppreparation.BootstrapCompilerVersion {
-		return fail("completion")
-	}
-	if stale, err := workspace.PreparationOwnerRevalidationStaleForAttempt(w, a, now); err != nil || stale {
-		return fail("owners")
-	}
-	if stale, err := workspace.PreparationFileRevalidationStaleForAttempt(w, a, now, fileEpoch); err != nil || stale {
-		return fail("file")
-	}
-	if stale, err := workspace.PreparationProviderCacheExpired(w, now); err != nil || stale {
-		return fail("provider")
+	a, completion, err := firstExecutionPreparationWindow(w, now, fileEpoch)
+	if err != nil {
+		return FirstExecutionPreparation{}, err
 	}
 	current, err := startuppreparation.FromOwnerPersistence(w, goal, dod)
 	if err != nil || current.Candidate.CandidateID != a.Binding.CandidateID || current.Candidate.CandidateRevision != a.Binding.CandidateRevision || current.Candidate.CandidateHash != a.Binding.CandidateHash || current.StartupInput.DefinitionRevision != a.Binding.DefinitionRevision || current.StartupInput.StartupInputHash != a.Binding.StartupInputHash || current.AuthoringRef != a.Binding.AuthoringRef || current.AuthoringConfigurationHash != a.Binding.AuthoringConfigurationHash {
 		return fail("seal")
 	}
-	original, err := CompileOriginalPreparedBootstrap(w, a)
-	if err != nil || original.FailureCode != "" || original.Compilation == nil || original.Compilation.BootstrapHash != completion.BootstrapHash || runtimecontract.ValidateRuntimeBootstrapRaw(bootstrap) != nil || !reflect.DeepEqual(original.Compilation.Bootstrap, bootstrap) {
+	original, exists := products[a.RequestID]
+	if !exists || original.FailureCode != "" || original.Compilation == nil || original.Compilation.BootstrapHash != completion.BootstrapHash || runtimecontract.ValidateRuntimeBootstrapRaw(bootstrap) != nil || !reflect.DeepEqual(original.Compilation.Bootstrap, bootstrap) {
 		return fail("bootstrap")
 	}
 	compiled := *original.Compilation

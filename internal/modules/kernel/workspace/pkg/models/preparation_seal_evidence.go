@@ -171,15 +171,15 @@ func (e WorkspacePreparationSealEvidence) validateFor(w *Workspace, a WorkspaceP
 	source.DefinitionAuthoringHistory = w.DefinitionAuthoringHistory[:index]
 	source.DefinitionAdmissionCandidates = w.DefinitionAdmissionCandidates[:index+1]
 	source.StartupInput, source.ActivationAdmission = &s.StartupInput, &s.ActivationAdmission
-	if _, present, err := source.ValidateActivationAdmissionPersistence(); err != nil || !present {
+	_, present, compiledSource, err := source.compileActivationAdmissionPersistence(false)
+	if err != nil || !present {
 		return common.ErrConflict
 	}
-	_, items, _, ref, err := ConfirmedAuthoringAdmissionSource(record, *journal, w.ID)
-	if err != nil || ref != s.AuthoringRef || len(items) != len(s.FormalDoDItemRefs) {
+	if compiledSource == nil || compiledSource.ref != s.AuthoringRef || len(compiledSource.items) != len(s.FormalDoDItemRefs) {
 		return common.ErrConflict
 	}
-	for i := range items {
-		if items[i].CandidateItemRef != s.FormalDoDItemRefs[i] {
+	for i := range compiledSource.items {
+		if compiledSource.items[i].CandidateItemRef != s.FormalDoDItemRefs[i] {
 			return common.ErrConflict
 		}
 	}
@@ -200,6 +200,11 @@ func EvaluatePreparationSealChecks(w *Workspace, a WorkspacePreparationAttempt) 
 		}
 	}
 	complete := evidence != nil && evidence.validateFor(w, a) == nil
+	return evaluatePreparationSealChecks(a, complete)
+}
+
+func evaluatePreparationSealChecks(a WorkspacePreparationAttempt, complete bool) []WorkspacePreparationCheckResult {
+	checks := slices.Clone(a.Checks)
 	for i, c := range checks {
 		if c.ID != "exact_seal" && c.ID != "persistence_integrity" || c.Reason == "binding_changed" || c.Reason == "original_check_interrupted" {
 			continue
@@ -239,7 +244,7 @@ func validatePreparationSealEvidencePersistence(w *Workspace) error {
 	}
 	for _, e := range w.PreparationSealEvidence {
 		a, ok := refs[e.Ref]
-		if !ok || e.validateFor(w, a) != nil || !reflect.DeepEqual(a.Checks, EvaluatePreparationSealChecks(w, a)) {
+		if !ok || e.validateFor(w, a) != nil || !reflect.DeepEqual(a.Checks, evaluatePreparationSealChecks(a, true)) {
 			return common.ErrConflict
 		}
 		delete(refs, e.Ref)

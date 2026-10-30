@@ -3,6 +3,7 @@ package biz
 import (
 	"context"
 	"fmt"
+	"github.com/muidea/workorch/internal/pkg/preparationtrace"
 
 	magicevent "github.com/muidea/magicCommon/event"
 	"github.com/muidea/workorch/internal/modules/application/workorchd/biz/appservice"
@@ -30,6 +31,8 @@ func (g *workspaceCommandGateway) submit(ctx context.Context, command workorchde
 	if workspaceID == "" || command.RequestID == "" {
 		return workorchdevents.WorkspaceRunRequestedResult{}, common.ErrInvalidArgument
 	}
+	defer preparationtrace.Start(ctx, common.WorkspaceID(command.WorkspaceID), command.RequestID, "execution_http_gateway", 0)()
+
 	ctx, err := common.BindRuntimeWorkspaceContext(ctx, workspaceID)
 	if err != nil {
 		return workorchdevents.WorkspaceRunRequestedResult{}, err
@@ -53,7 +56,9 @@ func (g *workspaceCommandGateway) submit(ctx context.Context, command workorchde
 		if !g.runtime.ready() {
 			return workorchdevents.WorkspaceRunRequestedResult{}, errRuntimeComponentUnavailable
 		}
+		finishCompile := preparationtrace.Start(ctx, workspaceID, command.RequestID, "execution_bootstrap", 0)
 		bootstrap, err := appservice.CompileWorkspaceExecutionRestartBootstrapWithSession(ctx, g.runtime.borrow(), string(workspaceID))
+		finishCompile()
 		if err != nil {
 			return workorchdevents.WorkspaceRunRequestedResult{}, err
 		}

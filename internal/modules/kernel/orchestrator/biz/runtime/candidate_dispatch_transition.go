@@ -580,6 +580,9 @@ func duplicateCandidateFeasibilityDisposition(attempts []runtimecontract.Runtime
 
 func validateCandidateFeasibilityObservationBinding(catalogs []runtimecontract.RuntimeOperationAdmissibility, operation runtimecontract.RuntimeOperation, record runtimecontract.RuntimeCandidateFeasibilityRecord, manifest runtimecontract.RuntimeCandidateContractManifest) error {
 	for _, authorization := range manifest.Operations {
+		if authorization.Kind == operation.Kind && authorization.InputRevision != nil && record.Observation != nil && record.Observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible && !authorization.InputRevision.MatchesReplayProof(record.ReplayProof) {
+			return fmt.Errorf("%w: input revision feasibility lost exact reviewed preimage", common.ErrConflict)
+		}
 		if authorization.Kind == operation.Kind && authorization.InputRepair != nil && record.Observation != nil &&
 			record.Observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible && !authorization.InputRepair.MatchesReplayProof(record.ReplayProof) {
 			return fmt.Errorf("%w: input repair feasibility must prove the sealed exact content delta", common.ErrConflict)

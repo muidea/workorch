@@ -141,6 +141,7 @@ func (p RuntimeCandidateOperationSetPolicy) Validate(state ConvergenceState) err
 // parameter/variant contract, effect/coverage/dependency constraints, one
 // TargetPolicy, and snapshot/revision identity. It is not a second state object.
 type RuntimeCandidateOperationManifest struct {
+	InputRevision           *RuntimeValidationInputRevision `json:",omitempty"`
 	InputRepair             *RuntimeValidationInputRepair   `json:",omitempty"`
 	TargetParameterBindings []RuntimeTargetParameterBinding `json:",omitempty"`
 	Kind                    string
@@ -636,6 +637,7 @@ func (m RuntimeCandidateContractManifest) Normalized() RuntimeCandidateContractM
 }
 
 func (m RuntimeCandidateOperationManifest) Normalized() RuntimeCandidateOperationManifest {
+	m.InputRevision = m.InputRevision.Clone()
 	m.InputRepair = m.InputRepair.Clone()
 	m.Kind = CanonicalRuntimeBlockKind(m.Kind)
 	m.OwnerModuleID = strings.TrimSpace(m.OwnerModuleID)
@@ -938,6 +940,9 @@ func encodeRuntimeCandidateContractManifestHashNormalized(manifest RuntimeCandid
 		writeHashString(h, operation.Kind)
 		writeHashString(h, operation.OwnerModuleID)
 		writeRuntimeTargetParameterBindingsHash(h, operation.TargetParameterBindings)
+		if operation.InputRevision != nil {
+			writeHashString(h, implementationWorkRawHash("input-revision:", operation.InputRevision))
+		}
 		writeRuntimeValidationInputRepairHash(h, operation.InputRepair)
 		writeHashStrings(h, operation.AllowedOperationFields)
 		writeHashStrings(h, operation.RequiredOperationFields)

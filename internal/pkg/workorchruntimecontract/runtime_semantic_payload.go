@@ -611,7 +611,10 @@ func RuntimeSemanticPlanJSONSchemaForRequest(manifest RuntimeSemanticPlanManifes
 		properties["proposals"] = map[string]any{"type": "array", "maxItems": 0}
 		for _, obligation := range manifest.ProofObligations {
 			if work := obligation.ImplementationWork; work != nil && work.PurposeChoiceOnly {
-				purposes := []string{string(RuntimeImplementationWorkPurposeTerminal)}
+				purposes := []string{}
+				if work.Scope.Request.InputRevision == nil {
+					purposes = append(purposes, string(RuntimeImplementationWorkPurposeTerminal))
+				}
 				if work.EffectAvailable {
 					purposes = append(purposes, string(RuntimeImplementationWorkPurposeEffect))
 				}

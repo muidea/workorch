@@ -1557,3 +1557,19 @@ owner-fact declaration 不得被工程断言替代；该 provider 守卫不提�
 `biz/runtime_archive_readonly_test.go::TestRuntimeArchiveReadOnlyCompatibility`。
 该诊断只读取并验证原 bootstrap、record 和 aggregate，核对封存 feedback 版本及文件 hash；不启动 Hub、repository、
 Runtime drive 或 provider，也不改写归档。默认 CI 不读取本地运行数据；通过该检查不是重新执行或 workspace 验收。
+
+### 阶段内验证输入修订 v1
+
+封存 Profile 可用 `ImplementationWorkPolicy.InputRevisionProtocolRef=validation/input-revision/v1` 声明阶段修订。
+SM-2 的 exact complete input-review conflict 私有事件保留旧 generation，以 `input_review_revision` 回到 required；
+唯一原 CWI、同一 input resource owner、冲突 findings/owner protected targets/实际读取输入三者交集才可进入既有普通工作。
+新 `RuntimeValidationInputRevision` 保留完整原 binding/input/report，随 scope→semantic work→working binding→candidate manifest
+→dispatch 封存；fresh load 反查原拒绝 generation 与 request/session，历史消费不能前向引用。旧 terminal purpose 留存，
+待修订报告只允许真实 effect purpose，不允许 unchanged re-review 或借用 post-execution repair。未 opt-in 继续原 conflict 失败。
+
+File opt-in edit feasibility 预览同一 edit，核对原输入 before hash、变化后像；候选/最终 seal/dispatch reload 重核。
+仍使用原 MaxRoundsPerCWI、history/provider/capability budget，真实 accepted receipt 零 CWI/validation credit；
+资源失效后取得真实当前输入，再独立审查、执行全部原 validation 和终态交付。未知、stale、预算不足或混合/歧义来源不放行。
+Core 不解释语言/框架/项目语义；具体改法来自原 Profile/project 和完整审查反馈。SM-1/4 不获新决策权。
+验证：`TestInputRevision*`、`TestDriveRuntimeInputReviewRevision*`，后者用真实 File/Shell/Run/Result/Workspace owner，
+仅脚本化 provider，覆盖真实修改→fresh review→validation→ACK 与两处 restart；不等同收费 live 或十分钟公开 fullflow。

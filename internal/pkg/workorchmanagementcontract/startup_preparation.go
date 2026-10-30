@@ -17,6 +17,7 @@ type StartupPreparationView struct {
 	WorkspaceRevision       uint64                                  `json:"workspaceRevision"`
 	ActiveRunID             string                                  `json:"activeRunId,omitempty"`
 	OperationState          string                                  `json:"operationState"`
+	CurrentValidityReason   string                                  `json:"currentValidityReason,omitempty"`
 	CurrentValidity         string                                  `json:"currentValidity"`
 	ResourceInitializations []PreparationResourceInitializationView `json:"resourceInitializations,omitempty"`
 	Record                  *PreparationRecordView                  `json:"record,omitempty"`
@@ -163,6 +164,9 @@ type PreparationBindingView struct {
 }
 
 func (v StartupPreparationView) ValidateFor(workspaceID string) error {
+	if !validPreparationValidityReason(v.CurrentValidity, v.CurrentValidityReason) {
+		return common.ErrConflict
+	}
 	if workspaceID == "" || v.WorkspaceID != workspaceID || v.WorkspaceRevision == 0 {
 		return common.ErrConflict
 	}
@@ -563,4 +567,17 @@ func preparationDigest(value, prefix string) bool {
 		}
 	}
 	return true
+}
+
+func validPreparationValidityReason(validity, reason string) bool {
+	switch reason {
+	case "":
+		return true
+	case "file_epoch_unavailable", "file_epoch_timeout", "file_epoch_cancelled":
+		return validity == "not_evaluated"
+	case "binding_changed", "attempt_outside_window", "completion_outside_window", "file_observation_stale", "provider_cache_expired", "owner_observation_stale", "file_epoch_changed_or_expired":
+		return validity == "stale"
+	default:
+		return false
+	}
 }

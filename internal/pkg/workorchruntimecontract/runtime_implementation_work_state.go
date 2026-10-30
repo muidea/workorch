@@ -30,7 +30,7 @@ func validateImplementationWorkingBindingSemanticSource(round RuntimeImplementat
 		reservation.GovernanceReceiptHash, reservation.GovernanceDispatchIDs = "", nil
 		reservation.OutcomeUnknownExecutionKey, reservation.OutcomeUnknownFence = "", 0
 		reservation.Hash = StableRuntimeImplementationWorkRoundHash(reservation)
-		if work.RoundHash != reservation.Hash || work.Ordinal != round.Ordinal || work.PolicyHash != round.PolicyHash || work.PrecedingReceiptSetHash != round.PrecedingReceiptSetHash || round.ScopeObservation == nil || !runtimeRawEqual(work.Scope, *round.ScopeObservation) || !runtimeRawEqual(work.MutationInputCatalogs, binding.MutationInputCatalogs) || !runtimeRawEqual(work.ExcludedTargetRefs, binding.ExcludedTargetRefs) {
+		if work.RoundHash != reservation.Hash || work.Ordinal != round.Ordinal || work.PolicyHash != round.PolicyHash || work.PrecedingReceiptSetHash != round.PrecedingReceiptSetHash || round.ScopeObservation == nil || !runtimeRawEqual(work.Scope, *round.ScopeObservation) || !runtimeRawEqual(work.MutationInputCatalogs, binding.MutationInputCatalogs) || !runtimeRawEqual(work.ExcludedTargetRefs, binding.ExcludedTargetRefs) || !runtimeRawEqual(work.Scope.Request.InputRevision, binding.InputRevision) {
 			return fmt.Errorf("implementation working binding does not retain exact manifest reservation/protection source")
 		}
 		return nil
@@ -147,8 +147,11 @@ func validateRuntimeImplementationWorkStateInSession(definition RuntimeDefinitio
 // The complete original gate runs before any successful raw preimage is saved.
 // A public independent consumer always executes this gate afresh.
 func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinitionContext, facts RuntimeFacts, ledger RuntimeImplementationWorkLedger, semantic RuntimeSemanticPlanningLedger, active *RuntimeDispatchRecord, completed []RuntimeDispatchRecord, receipts []RuntimeOperationReceipt, governance []RuntimeOperationGovernanceBinding, budget RuntimeExecutionBudgetLedger, semanticSession *runtimeSemanticValidationSession) error {
+	if err := validateRuntimeInputRevisionState(definition, facts, ledger, semantic); err != nil {
+		return err
+	}
 	if preview := ledger.ScopePreview; preview != nil {
-		previewSources := RuntimeImplementationWorkScopeSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: preview.Request.AuthoritySnapshotID, Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: preview.Request.CoverageWorkItemID, ManifestBinding: preview.Request.ManifestBinding}
+		previewSources := RuntimeImplementationWorkScopeSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: preview.Request.AuthoritySnapshotID, Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: preview.Request.CoverageWorkItemID, ManifestBinding: preview.Request.ManifestBinding, InputRevision: preview.Request.InputRevision}
 		if err := validateRuntimeWorkScopeInSession(preview.Request, previewSources, semanticSession); err != nil {
 			return err
 		}
@@ -199,7 +202,7 @@ func validateRuntimeImplementationWorkStateComplete(definition RuntimeDefinition
 			if !work.PurposeChoiceOnly || work.Scope.Request.RequestID != choice.ScopeRequestID || work.Scope.Request.CoverageWorkItemID != choice.CoverageWorkItemID || choice.Purpose == RuntimeImplementationWorkPurposeEffect && !work.EffectAvailable {
 				return fmt.Errorf("implementation purpose choice differs from original vocabulary")
 			}
-			choiceScopeSources := RuntimeImplementationWorkScopeSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: work.Scope.Request.AuthoritySnapshotID, Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: work.Scope.Request.CoverageWorkItemID, ManifestBinding: work.Scope.Request.ManifestBinding}
+			choiceScopeSources := RuntimeImplementationWorkScopeSources{WorkspaceID: facts.WorkspaceID, RunID: facts.RunID, AuthoritySnapshotID: work.Scope.Request.AuthoritySnapshotID, Seed: facts.DefinitionSeed, Focuses: facts.DefinitionFocuses, Profiles: facts.Activation.ExecutionContract.ProfileContracts, CoverageWorkItemID: work.Scope.Request.CoverageWorkItemID, ManifestBinding: work.Scope.Request.ManifestBinding, InputRevision: work.Scope.Request.InputRevision}
 			if err := validateRuntimeWorkScopeInSession(work.Scope.Request, choiceScopeSources, semanticSession); err != nil {
 				return err
 			}

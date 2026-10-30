@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"github.com/muidea/workorch/internal/pkg/preparationtrace"
 	"time"
 
 	magicevent "github.com/muidea/magicCommon/event"
@@ -29,13 +30,15 @@ func requiresFirstExecutionPreparation(w *workspace.Workspace) bool {
 }
 
 func (m *Biz) observeFirstExecutionPreparation(p preparedWorkspaceExecutionIntent) (*workspaceFirstExecutionPreparation, error) {
+	defer preparationtrace.Start(p.ctx, p.workspace.ID, p.command.RequestID, "first_execution_file_observation", p.workspace.Revision)()
 	w := p.workspace
 	if p.command.Bootstrap == nil || p.goal == nil || p.dod == nil {
 		return nil, common.ErrConflict
 	}
-	// Cheap rejection precedes File I/O. This archived epoch is NOT a current
-	// observation: the actual reread below and the reducer repeat the full gate.
-	if _, err := preparationcompiler.CompileFirstExecutionPreparation(w, p.goal, p.dod, *p.command.Bootstrap, time.Now().UTC(), workspace.PreparationFileObservationEpoch(w)); err != nil {
+	// Necessary currentness conditions only, never an authorization. Provenance
+	// and bootstrap compilation belong to the reducer's complete gate below.
+	// This archived epoch is not a current observation; File is actually reread.
+	if err := preparationcompiler.CheckFirstExecutionPreparationWindow(w, time.Now().UTC(), workspace.PreparationFileObservationEpoch(w)); err != nil {
 		return nil, err
 	}
 	a := w.StartupPreparation.Attempts[len(w.StartupPreparation.Attempts)-1]

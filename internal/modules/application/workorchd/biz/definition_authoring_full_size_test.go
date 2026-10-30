@@ -404,20 +404,21 @@ func TestSoftwareDevRestartCompilesReviewedDefaultForFullSizeDefinition(t *testi
 	}
 	application.workspaceGate = &workspaceCommandGateway{hub: hub, runtime: component}
 	command := workorchdevents.WorkspaceRunRequestedCommand{WorkspaceID: common.WorkspaceID(created.WorkspaceID), Intent: "restart", RequestID: "explicit-full-size-activation"}
-	activated, err := application.SubmitWorkspaceRun(ctx, command)
-	if err != nil {
-		t.Fatal(err)
-	}
-	replayed, err := application.SubmitWorkspaceRun(ctx, command)
-	if err != nil || activated.RunID == "" || replayed.RunID != activated.RunID {
-		t.Fatalf("显式 activation 未精确重放: %+v %+v %v", activated, replayed, err)
+	// This fixture has confirmed input and full bootstrap compilation, but no
+	// preparation checks/completion. Neither may bypass the first-execution
+	// consumer added with the readiness contract. The process verifier covers
+	// successful consumption plus exact replay after real preparation.
+	for i := 0; i < 2; i++ {
+		if _, err := application.SubmitWorkspaceRun(ctx, command); !errors.Is(err, common.ErrConflict) {
+			t.Fatalf("未检查准备却允许完整规格启动: %v", err)
+		}
 	}
 	current, err = repositories.Workspaces.Get(ctx, stored.ID)
-	if err != nil || current.DefaultLLMSelection == nil || calls != 8 {
-		t.Fatalf("默认 selection 物化或 activation 重放重发 provider: calls=%d err=%v", calls, err)
+	if err != nil || current.Revision != beforeRevision || current.PreparationFence.Pending != nil || current.DefaultLLMSelection != nil || calls != 8 {
+		t.Fatalf("准备拒绝留下部分写入或重发 provider: calls=%d err=%v", calls, err)
 	}
 	runs, err = repositories.Runs.List(ctx)
-	if err != nil || len(runs) != 1 || runs[0].ActivationRequestID != command.RequestID || runs[0].StartupInputHash != admitted.StartupInputHash || runs[0].RuntimeBootstrap == nil || runs[0].RuntimeBootstrap.Definition.StartupInputHash != admitted.StartupInputHash {
-		t.Fatalf("显式启动未封存原确认输入或创建重复 Run: %v %v", runs, err)
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("未消费准备就创建了 Run: %v %v", runs, err)
 	}
 }

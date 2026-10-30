@@ -1602,12 +1602,17 @@ func (r *workspaceScopedWorkspaceRepository) CompareAndSwap(ctx context.Context,
 	lock := workspacePersistenceLock(path)
 	lock.Lock()
 	defer lock.Unlock()
-	if err := r.checkCreationPersistenceMutation(ctx, path, item); err != nil {
+	// A single real, fully validated load under this scoped lock supplies
+	// creation and sidecar preimage checks. The lower repository still rereads
+	// and independently validates the actual CAS preimage and after-image.
+	current, err := r.store.workspaceRepo(path).Get(ctx, item.ID)
+	if err != nil {
 		return err
 	}
-	if current, err := r.store.workspaceRepo(path).Get(ctx, item.ID); err != nil {
+	if err := checkWorkspaceCreationPersistenceMutation(current, item); err != nil {
 		return err
-	} else if !reflect.DeepEqual(current.PreparationResourceInitializations, item.PreparationResourceInitializations) {
+	}
+	if !reflect.DeepEqual(current.PreparationResourceInitializations, item.PreparationResourceInitializations) {
 		complete, err := r.store.attachWorkspaceSoulBindings(current)
 		if err != nil {
 			return err
@@ -1620,10 +1625,6 @@ func (r *workspaceScopedWorkspaceRepository) CompareAndSwap(ctx context.Context,
 	// configuration, including sidecars, before passing detached metadata down.
 	// Existing history needs no new resource read and is never backfilled.
 	if len(item.PreparationSealEvidence) > 0 && item.PreparationSealEvidence[len(item.PreparationSealEvidence)-1].ExecutionInputs != nil {
-		current, err := r.store.workspaceRepo(path).Get(ctx, item.ID)
-		if err != nil {
-			return err
-		}
 		if len(current.PreparationSealEvidence) < len(item.PreparationSealEvidence) {
 			current, err = r.store.attachWorkspaceSoulBindings(current)
 			if err != nil {
@@ -1649,6 +1650,10 @@ func (r *workspaceScopedWorkspaceRepository) checkCreationPersistenceMutation(ct
 	if err != nil {
 		return err
 	}
+	return checkWorkspaceCreationPersistenceMutation(current, item)
+}
+
+func checkWorkspaceCreationPersistenceMutation(current, item *workspacemodel.Workspace) error {
 	if current.DefinitionAuthoringCreation != nil && current.DefinitionAuthoringCreation.PendingPersistence != nil {
 		return common.ErrConflict
 	}

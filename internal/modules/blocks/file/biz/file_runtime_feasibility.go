@@ -21,8 +21,12 @@ func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibility(workspaceDirectory str
 // proven by previewing the exact sealed operation; all other kinds deliberately
 // return a nil proof and retain their normal recovery policy.
 func (a *RuntimeAdapter) ProbeRuntimeOperationFeasibilityWithReplayProof(workspaceDirectory string, inventory runtimemodel.RuntimeOperationAdmissibility, operation runtimemodel.RuntimeOperation, observation *runtimemodel.RuntimePrerequisiteObservation) (*runtimemodel.FailureFact, *runtimemodel.RuntimePrerequisiteStale, *runtimemodel.RuntimeOperationReplayProof) {
+	return a.probeRuntimeOperationFeasibilityWithReplayProof(workspaceDirectory, inventory, operation, observation, false)
+}
+
+func (a *RuntimeAdapter) probeRuntimeOperationFeasibilityWithReplayProof(workspaceDirectory string, inventory runtimemodel.RuntimeOperationAdmissibility, operation runtimemodel.RuntimeOperation, observation *runtimemodel.RuntimePrerequisiteObservation, reviewedEdit bool) (*runtimemodel.FailureFact, *runtimemodel.RuntimePrerequisiteStale, *runtimemodel.RuntimeOperationReplayProof) {
 	failure, stale := a.ProbeRuntimeOperationFeasibilityWithObservation(workspaceDirectory, inventory, operation, observation)
-	if failure != nil || stale != nil || operation.Normalized().Kind != runtimemodel.RuntimeBlockKindPatchApply {
+	if failure != nil || stale != nil || (operation.Normalized().Kind != runtimemodel.RuntimeBlockKindPatchApply && (!reviewedEdit || operation.Normalized().Kind != runtimemodel.StepKindFileEdit)) {
 		return failure, stale, nil
 	}
 	request, ok := patchApplyRequestFromRuntimeOperation(workspaceDirectory, operation)

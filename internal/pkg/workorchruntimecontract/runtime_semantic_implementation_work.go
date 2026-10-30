@@ -40,6 +40,9 @@ func (w RuntimeSemanticImplementationWork) Validate() error {
 }
 
 func (w RuntimeSemanticImplementationWork) validateInSemanticSession(session *runtimeSemanticValidationSession) error {
+	if w.Scope.Request.InputRevision != nil && w.PurposeChoiceOnly && !w.EffectAvailable {
+		return fmt.Errorf("input revision cannot bypass exhausted original effect rounds")
+	}
 	maxOrdinal := w.Scope.Request.Policy.MaxRoundsPerCWI
 	if w.PurposeChoiceOnly {
 		maxOrdinal++
@@ -76,7 +79,7 @@ func (w RuntimeSemanticImplementationWork) validateInSemanticSession(session *ru
 			return fmt.Errorf("semantic work input protection catalogs must retain canonical owner preimages")
 		}
 	}
-	excluded := runtimeValidationInputMutationExclusions(w.Scope.Request.Policy.OwnerModuleID, RuntimeCandidateManifestOwnerFacts{OperationAdmissibilities: w.MutationInputCatalogs}, RequiredOutputContract{}, nil)
+	excluded := runtimeWorkInputExclusions(w.Scope.Request.Policy.OwnerModuleID, w.MutationInputCatalogs, w.Scope.Request.InputRevision)
 	if !reflect.DeepEqual(excluded, w.ExcludedTargetRefs) {
 		return fmt.Errorf("semantic work exclusions do not match complete mutation input catalogs")
 	}
@@ -100,7 +103,7 @@ func compileRuntimeWorkManifestInSession(workspace common.WorkspaceID, run commo
 	if round.WorkingBinding != nil || round.DispatchID != "" || round.ScopeObservation == nil || round.WorkspaceID != workspace || round.RunID != run || round.StartupInputHash != definition.StartupInputHash || round.DefinitionSeedHash != seed.Hash {
 		return RuntimeSemanticPlanManifest{}, fmt.Errorf("semantic work compiler requires an unbound same-startup scope reservation")
 	}
-	sources := RuntimeImplementationWorkScopeSources{WorkspaceID: workspace, RunID: run, AuthoritySnapshotID: round.ScopeRequest.AuthoritySnapshotID, Seed: seed, Focuses: focuses, Profiles: execution.ProfileContracts, CoverageWorkItemID: round.CoverageWorkItemID, ManifestBinding: round.ScopeRequest.ManifestBinding}
+	sources := RuntimeImplementationWorkScopeSources{WorkspaceID: workspace, RunID: run, AuthoritySnapshotID: round.ScopeRequest.AuthoritySnapshotID, Seed: seed, Focuses: focuses, Profiles: execution.ProfileContracts, CoverageWorkItemID: round.CoverageWorkItemID, ManifestBinding: round.ScopeRequest.ManifestBinding, InputRevision: round.ScopeRequest.InputRevision}
 	if err := validateRuntimeWorkScopeInSession(round.ScopeRequest, sources, session); err != nil {
 		return RuntimeSemanticPlanManifest{}, err
 	}
@@ -146,7 +149,7 @@ func compileRuntimeWorkManifestInSession(workspace common.WorkspaceID, run commo
 	}
 	inputCatalogs := cloneRuntimeStateRawSlice(catalogs, cloneRuntimeOperationAdmissibilityRaw)
 	work := RuntimeSemanticImplementationWork{RoundHash: round.Hash, Ordinal: round.Ordinal, PrecedingReceiptSetHash: round.PrecedingReceiptSetHash, PolicyHash: round.PolicyHash, Scope: round.ScopeObservation.Clone(), MutationInputCatalogs: inputCatalogs}
-	work.ExcludedTargetRefs = runtimeValidationInputMutationExclusions(policy.OwnerModuleID, RuntimeCandidateManifestOwnerFacts{OperationAdmissibilities: inputCatalogs}, RequiredOutputContract{}, nil)
+	work.ExcludedTargetRefs = runtimeWorkInputExclusions(policy.OwnerModuleID, inputCatalogs, round.ScopeRequest.InputRevision)
 	obligation.ImplementationWork = &work
 	// Settled external prerequisite CWIs do not become provider ordering input.
 	item.PrerequisiteCoverageWorkItemIDs = nil
@@ -227,6 +230,9 @@ func validateRuntimeSemanticImplementationWorkProofSetAgainstValidatedWork(set R
 			return fmt.Errorf("semantic work proposal exceeds immutable work policy or borrows terminal/input-review proof")
 		}
 		targets := RuntimeSemanticProposalTargetRefs(proposal)
+		if err := validateRuntimeInputRevisionTargets(work.Scope.Request.InputRevision, proposal); err != nil {
+			return err
+		}
 		if len(targets) == 0 {
 			return fmt.Errorf("semantic work selector alone cannot authorize effects")
 		}

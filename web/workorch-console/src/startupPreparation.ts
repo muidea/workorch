@@ -58,6 +58,7 @@ export type StartupPreparationView = {
   workspaceRevision: number;
   activeRunId?: string;
   operationState: 'not_checked' | 'completed' | PreparationAttempt['state'];
+  currentValidityReason?: string;
   currentValidity: 'not_checked' | 'not_evaluated' | 'stale' | 'observed';
   record?: { version: string; attempts: PreparationAttempt[]; completions?: PreparationCompletion[] };
 };
@@ -195,6 +196,10 @@ function validateAssessment(a: PreparationAttempt): void {
 
 export function validatePreparationView(view: StartupPreparationView, workspaceId: string): void {
   if (!view || view.workspaceId !== workspaceId || !Number.isSafeInteger(view.workspaceRevision) || view.workspaceRevision <= 0) throw new Error('准备结果作用域或版本不匹配');
+  if (view.currentValidityReason && !(
+    ['file_epoch_unavailable', 'file_epoch_timeout', 'file_epoch_cancelled'].includes(view.currentValidityReason) && view.currentValidity === 'not_evaluated' ||
+    ['binding_changed', 'attempt_outside_window', 'completion_outside_window', 'file_observation_stale', 'provider_cache_expired', 'owner_observation_stale', 'file_epoch_changed_or_expired'].includes(view.currentValidityReason) && view.currentValidity === 'stale'
+  )) throw new Error('准备有效性原因不一致');
   if (view.skillHubProjectIssue !== undefined) {
     const last = view.record?.attempts.at(-1);
     if (view.skillHubProjectIssue !== 'project_registration_required' || view.record?.version !== 'workorch-preparation-record/v2' || last?.state !== 'blocked' || last.skillHubEffectState !== 'unresolved') throw new Error('SkillHub 项目诊断未绑定原阻塞操作');
@@ -285,4 +290,20 @@ export function validatePreparationView(view: StartupPreparationView, workspaceI
   }
   const expected = completed.has(attempts[attempts.length - 1].requestId) ? 'completed' : attempts[attempts.length - 1].state;
   if (view.operationState !== expected || view.currentValidity === 'observed' && expected !== 'completed') throw new Error('准备操作投影不一致');
+}
+
+export function preparationValidityReasonLabel(reason?: string): string {
+  const labels: Record<string, string> = {
+    file_epoch_timeout: 'File 当前进程观察查询超时；当前有效性未确认',
+    file_epoch_cancelled: 'File 当前进程观察查询已取消；当前有效性未确认',
+    attempt_outside_window: '原准备检查已超出有效时间窗口',
+    file_epoch_unavailable: '未取得 File 当前进程观察，当前有效性未确认；历史检查结果保留',
+    binding_changed: 'Workspace 版本或封存绑定已变化',
+    completion_outside_window: '准备完成记录已超出原有效时间窗口',
+    file_observation_stale: '原文件观察已失效',
+    provider_cache_expired: '原模型配置或缓存观察已失效',
+    owner_observation_stale: '原资源 owner 观察已失效',
+    file_epoch_changed_or_expired: 'File 进程已变化或原文件观察已到期',
+  };
+  return reason ? labels[reason] || reason : '';
 }

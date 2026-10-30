@@ -84,6 +84,22 @@ Repository 在每次读写中从完整原材料复编译；hash、计数或自�
 同 creation epoch 的第一条 completion 是历史 M3；后续正常新检查可追加自己的 completion，不替换第一条。
 Start/Restart 的回执消费及执行授权属于独立合同，此处不启动 Run。
 
+准备查询与原操作回读提供可选 `CurrentValidityReason`（HTTP 为 `currentValidityReason`）。
+`file_epoch_unavailable|file_epoch_timeout|file_epoch_cancelled` 只允许 `not_evaluated`，分别表示未取得、查询超时、
+查询取消；它们不伪造 File 重启或过期事实。独立已知 stale 优先保留。
+`binding_changed|attempt_outside_window|completion_outside_window|file_observation_stale|provider_cache_expired|owner_observation_stale|file_epoch_changed_or_expired`
+只允许 stale；字段不改变历史检查、completion、期限或执行权限。Application 在响应编译结束后再按真实时间降级已过期
+观察；GET 不重取资源或续期。File epoch 查询保留原 request context，失败不能借新 context 补成功。
+
+`workorch-preparation-call-local-compilation/v1` 仅在一次同步纯编译调用内复用同一完整原值编译的 source、manifest、
+Definition 与 Bootstrap。独立公开 compiler／repository 每次仍完整校验；原 Definition 校验优先，全部证据门禁与
+completion／消费反查继续执行。产物仅为私有局部变量，不导出已验证标志，不跨调用、事件、Workspace 或重启保留。
+同次 seal 来源核验直接消费完整 admission gate 派生的原始有序 DoD/ref 私有产物，不再次解码相同 authoring
+ledger；正式 DoD 顺序仍逐项核验。证据总门禁先完整核验 seal，再重建 File/Soul/Memory 检查；这些重建保持
+seal 检查及 binding_changed／original_check_interrupted 不变，因此不重复同一 seal 来源 gate。独立公开
+EvaluatePreparationSealChecks 仍完整验证输入；缺失／伪造 seal、重算 hash 或后续调用的原 ledger 改动均拒绝。
+scoped repository 同锁中的 creation／sidecar 前像核验共享一次真实完整 Load，底层 CAS 仍真实重读并完整验证。
+
 首次显式执行由生产 reservation dispatcher 消费 `workorch-first-execution-preparation/v1`。
 `pkg/preparationcompiler.CompileFirstExecutionPreparation` 只消费最新原 attempt 对应的唯一完整 completion，
 复编译完整原材料，核验真实正式 Goal/DoD、配置、creation/epoch、当前 revision、原 30 秒窗口与 owner 时效，
@@ -95,6 +111,10 @@ mtime/ctime 变化，其 path/device/inode/mode/UID/GID/访问能力及诊断仍
 首次 reservation 将 completion ID、原 revision、消费时间及完整独立 File 观察，与 pending/epoch 和缺失的默认
 provider selection 一次 CAS 保存；失败零局部写入。受限 File 历史不进入普通 DTO/HTTP，repository 重载反查
 原 completion、完整 Bootstrap、Run payload 与消费观察谱系。新 blocked/unknown、缺来源、漂移或过期不能回退旧成功。
+首次执行观察前只运行必要的窗口拒绝，不授予权限；私有 reducer 仍完整反查。重型编译结束后重新取真实时钟，
+file/memory repository 在新增消费的完整迁移和后像验证后、提交前再次核对原窗口；历史重放／结算／重载不按新时间
+撤销原合法消费。`preparation phase completed` 日志只包含 scope、request、revision、phase、时间和 context 状态，
+用于区分 load／reduce／CAS／epoch／响应编译／启动编译／reservation 成本，不含原文、配置或成功凭据。
 原 request 的 pending/settled 重放先于当前状态核验，保留原消费事实，不续期、不重发、不重新授 forward。
 
 首次执行的判断不能由缺确认、已推进 epoch 或已拒绝 intent 绕过；没有真实已接纳 Run 历史就仍须首次门禁。

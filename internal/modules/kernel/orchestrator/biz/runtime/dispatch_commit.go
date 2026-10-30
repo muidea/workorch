@@ -309,6 +309,25 @@ func SealDispatchWithManifestAndPreSealAuthority(
 		return SealedDispatch{}, fmt.Errorf("unexpected implementation work dispatch authority")
 	}
 	for _, authorization := range manifest.Operations {
+		if v := authorization.InputRevision; v != nil {
+			if candidate.StateChange == nil {
+				return SealedDispatch{}, fmt.Errorf("input revision requires an ordinary state-change candidate")
+			}
+			for _, op := range candidate.StateChange.Operations {
+				if op.Operation.Kind != authorization.Kind {
+					continue
+				}
+				matches := 0
+				for _, f := range feasibilities {
+					if f.OperationID == op.Operation.ID && f.Observation != nil && f.Observation.Outcome == runtimecontract.RuntimeOwnerFeasibilityFeasible && v.MatchesReplayProof(f.ReplayProof) {
+						matches++
+					}
+				}
+				if matches != 1 {
+					return SealedDispatch{}, fmt.Errorf("input revision seal lacks original owner before/after proof")
+				}
+			}
+		}
 		if authorization.InputRepair == nil {
 			continue
 		}

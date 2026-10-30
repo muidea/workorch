@@ -221,3 +221,9 @@ lost-receipt recovery 若确认 sealed 后像，只保留本次实际读取的 `
 | wrong DTO matrix | `TestFileOwnerWrongDTOAndLifecycleMatrixCoversAllTopics` | 覆盖全部 24 topic 的 wrong concrete command，并校验每次恰有一个 owner subscription |
 | creation-time resource facts | [`biz/authoring_resources_test.go`](biz/authoring_resources_test.go)、`workspace/biz/definition_derivation_persistence_test.go`、`application/workorchd/biz/definition_authoring_resources_test.go` | exact source、受限路径/字节/敏感内容拒绝、File 核验调用方内容与 Workspace revision、重启后派生 reserve 不重发 permit；正式资源 provider 路径尚未启用 |
 | provider / external network | 不适用 | 不适用 |
+
+阶段修订 `validation/input-revision/v1` 使用原 File owner feasibility/dispatch 入口，不增加资源 owner。
+仅在完整 candidate authorization 携带同一 ordinary working revision 时，File 的 file/edit 额外进行 side-effect-free PreviewPatch，
+返回现有 ReplayProof 并核对 exact reviewed before hash 与变化后像。错配为
+`validation_input_revision_preimage_mismatch / policy_disallowed`，零写入。普通未 opt-in file/edit 保留原 probe 行为。
+实际执行复用原 replay/fence 机制；新 effect 不产生 validation verdict 或 terminal credit，后续独立复审由 Orchestrator 收敛。

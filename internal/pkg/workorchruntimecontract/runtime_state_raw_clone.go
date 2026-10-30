@@ -600,6 +600,7 @@ func cloneRuntimeCandidateContractManifestRaw(in RuntimeCandidateContractManifes
 func cloneRuntimeCandidateOperationManifestRaw(in RuntimeCandidateOperationManifest) RuntimeCandidateOperationManifest {
 	out := in
 	out.InputRepair = in.InputRepair.Clone()
+	out.InputRevision = in.InputRevision.Clone()
 	out.TargetParameterBindings = cloneRuntimeTargetParameterBindings(in.TargetParameterBindings)
 	out.CandidateConstraints = cloneRuntimeStateRawSlice(in.CandidateConstraints, func(value RuntimeOperationCandidateConstraint) RuntimeOperationCandidateConstraint { return value })
 	out.ValueRules = cloneRuntimeStateRawSlice(in.ValueRules, func(value RuntimeOperationValueRule) RuntimeOperationValueRule {

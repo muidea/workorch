@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	"errors"
+	"github.com/muidea/workorch/internal/pkg/preparationtrace"
 	"time"
 
 	cd "github.com/muidea/magicCommon/def"
@@ -57,20 +59,50 @@ func (m *Biz) queryWorkspacePreparationState(ctx context.Context, command worksp
 // The only live File query is its in-memory process epoch: no filesystem read,
 // new observation, deadline extension or settlement is performed here.
 func (m *Biz) preparationState(ctx context.Context, w *workspace.Workspace) (workspaceevents.QueryWorkspacePreparationStateResult, error) {
-	now := time.Now().UTC()
-	state, err := preparationStateFromPersistence(w, now)
+	if ctx == nil || w == nil {
+		return workspaceevents.QueryWorkspacePreparationStateResult{}, common.ErrInvalidArgument
+	}
+	requestID := ""
+	if w != nil && w.StartupPreparation != nil && len(w.StartupPreparation.Attempts) > 0 {
+		requestID = w.StartupPreparation.Attempts[len(w.StartupPreparation.Attempts)-1].RequestID
+	}
+	defer preparationtrace.Start(ctx, w.ID, requestID, "owner_readback", w.Revision)()
+	// Query the epoch before evaluating currentness, so projection uses the
+	// clock after owner I/O rather than a timestamp captured before a slow read.
+	epoch, epochErr := "", error(nil)
+	if workspace.PreparationFileObservationEpoch(w) != "" {
+		finishEpoch := preparationtrace.Start(ctx, w.ID, requestID, "file_epoch_query", w.Revision)
+		epoch, epochErr = m.preparationFileEpoch(ctx)
+		finishEpoch()
+	}
+	state, err := preparationStateFromPersistence(w, time.Now().UTC())
 	if err != nil {
 		return state, err
 	}
 	if workspace.PreparationFileObservationEpoch(w) != "" {
-		stale, err := workspace.PreparationFileRevalidationStale(w, now, m.preparationFileEpoch(ctx))
-		if err != nil {
-			return state, err
-		}
-		if stale {
-			state.CurrentValidity = "stale"
+		if epochErr != nil {
+			// Missing observation is unknown, not proof of expiry or epoch change.
+			// An independently known stale reason above continues to take precedence.
+			if state.CurrentValidity != "stale" {
+				state.CurrentValidity, state.CurrentValidityReason = "not_evaluated", "file_epoch_unavailable"
+				if errors.Is(epochErr, context.DeadlineExceeded) {
+					state.CurrentValidityReason = "file_epoch_timeout"
+				}
+				if errors.Is(epochErr, context.Canceled) {
+					state.CurrentValidityReason = "file_epoch_cancelled"
+				}
+			}
+		} else {
+			stale, err := workspace.PreparationFileRevalidationStale(w, time.Now().UTC(), epoch)
+			if err != nil {
+				return state, err
+			}
+			if stale && state.CurrentValidity != "stale" {
+				state.CurrentValidity, state.CurrentValidityReason = "stale", "file_epoch_changed_or_expired"
+			}
 		}
 	}
+
 	return state, nil
 }
 
@@ -116,7 +148,7 @@ func preparationStateFromPersistence(w *workspace.Workspace, now time.Time) (wor
 				result.State = "completed"
 				result.CurrentValidity = "observed"
 				if now.Before(c.CompletedAt) || !now.Before(c.ExpiresAt) {
-					result.CurrentValidity = "stale"
+					result.CurrentValidity, result.CurrentValidityReason = "stale", "completion_outside_window"
 				}
 			}
 		}
@@ -125,36 +157,38 @@ func preparationStateFromPersistence(w *workspace.Workspace, now time.Time) (wor
 			return workspaceevents.QueryWorkspacePreparationStateResult{}, err
 		}
 		if fileStale {
-			result.CurrentValidity = "stale"
+			result.CurrentValidity, result.CurrentValidityReason = "stale", "file_observation_stale"
 		}
 		cacheExpired, err := workspace.PreparationProviderCacheExpired(w, now)
 		if err != nil {
 			return workspaceevents.QueryWorkspacePreparationStateResult{}, err
 		}
 		if cacheExpired {
-			result.CurrentValidity = "stale"
+			result.CurrentValidity, result.CurrentValidityReason = "stale", "provider_cache_expired"
 		}
 		ownersStale, err := workspace.PreparationOwnerRevalidationStale(w, now)
 		if err != nil {
 			return workspaceevents.QueryWorkspacePreparationStateResult{}, err
 		}
 		if ownersStale {
-			result.CurrentValidity = "stale"
+			result.CurrentValidity, result.CurrentValidityReason = "stale", "owner_observation_stale"
 		}
 		binding := last.Binding
 		if record.Version == workspace.WorkspacePreparationWorkflowVersion {
 			if w.PreparationFence == nil || w.PreparationFence.Validate(w.ID) != nil || last.CreationEpoch != w.PreparationFence.CreationEpoch || last.PreparationEpoch != w.PreparationFence.PreparationEpoch {
-				result.CurrentValidity = "stale"
+				result.CurrentValidity, result.CurrentValidityReason = "stale", "binding_changed"
 			}
 			for _, check := range last.Checks {
 				if check.Reason == "binding_changed" {
-					result.CurrentValidity = "stale"
+					result.CurrentValidity, result.CurrentValidityReason = "stale", "binding_changed"
 				}
 			}
 		}
 		journal := w.DefinitionAuthoringConfirmation
+		if !last.ExpiresAt.IsZero() && !now.Before(last.ExpiresAt) && result.CurrentValidity != "stale" {
+			result.CurrentValidity, result.CurrentValidityReason = "stale", "attempt_outside_window"
+		}
 		if last.CommittedWorkspaceRevision != w.Revision ||
-			!last.ExpiresAt.IsZero() && !now.Before(last.ExpiresAt) ||
 			binding.CheckPolicyVersion != startuppreparation.CheckPolicyVersion || binding.CompilerVersion != startuppreparation.BootstrapCompilerVersion ||
 			binding.AuthoringConfigurationHash != workspace.WorkspaceConfigurationHash(w) ||
 			w.StartupInput == nil || w.ActivationAdmission == nil ||
@@ -164,7 +198,7 @@ func preparationStateFromPersistence(w *workspace.Workspace, now time.Time) (wor
 			journal == nil || journal.Phase != workspace.DefinitionAuthoringConfirmationMaterialized ||
 			journal.InputHash != binding.AuthoringRef.InputHash || journal.DerivationPermitID != binding.AuthoringRef.DerivationPermitID ||
 			journal.ProposalHash != binding.AuthoringRef.ProposalHash || journal.SpecificationHash != binding.AuthoringRef.SpecificationHash {
-			result.CurrentValidity = "stale"
+			result.CurrentValidity, result.CurrentValidityReason = "stale", "binding_changed"
 		}
 	}
 	if err := result.ValidateFor(workspaceevents.QueryWorkspacePreparationStateCommand{WorkspaceID: w.ID}); err != nil {

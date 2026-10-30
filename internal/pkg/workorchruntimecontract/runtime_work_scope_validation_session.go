@@ -63,7 +63,12 @@ func validateRuntimeWorkScopeInSession(r RuntimeImplementationWorkScopeRequest, 
 	if err != nil {
 		return err
 	}
+	expected, err = attachRuntimeInputRevision(expected, sources.InputRevision)
+	if err != nil {
+		return err
+	}
 	raw := sources
+	raw.InputRevision = sources.InputRevision.Clone()
 	raw.Seed = cloneRuntimeDefinitionSeedRaw(sources.Seed)
 	raw.Focuses = cloneRuntimeStateRawSlice(sources.Focuses, cloneRuntimeDefinitionFocusRaw)
 	raw.Profiles = cloneRuntimeStateRawSlice(sources.Profiles, cloneRuntimeProfileContractRaw)

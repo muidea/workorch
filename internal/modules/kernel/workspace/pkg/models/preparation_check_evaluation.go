@@ -178,7 +178,15 @@ func EvaluatePreparationFileChecks(a WorkspacePreparationAttempt, directory *Wor
 	return checks
 }
 
-func validatePreparationCheckEvaluationPersistence(w *Workspace) error {
+// Private continuation of ValidatePreparationEvidencePersistence, immediately
+// after the complete seal persistence gate. That gate checks every referenced
+// seal against the original attempt, including its complete authoring ledger.
+// Reconstructing File/Soul/Memory judgments below changes neither seal checks
+// nor any binding_changed/original_check_interrupted reason: those evaluators
+// preserve these reasons and never introduce them. Consequently no input to
+// seal provenance validation has changed. Public evaluators still validate
+// their complete independent input; this continuation exports no success token.
+func validatePreparationCheckEvaluationAfterSealPersistence(w *Workspace) error {
 	if w == nil {
 		return common.ErrConflict
 	}
@@ -222,7 +230,7 @@ func validatePreparationCheckEvaluationPersistence(w *Workspace) error {
 		copy := a
 		copy.Checks = EvaluatePreparationChecks(a, d, r, c, s)
 		copy.Checks = EvaluatePreparationMemoryCheck(copy, m)
-		if !reflect.DeepEqual(a.Checks, EvaluatePreparationSealChecks(w, copy)) {
+		if !reflect.DeepEqual(a.Checks, evaluatePreparationSealChecks(copy, a.SealEvidenceRef != "")) {
 			return common.ErrConflict
 		}
 	}

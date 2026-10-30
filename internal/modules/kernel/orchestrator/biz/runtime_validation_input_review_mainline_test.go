@@ -165,6 +165,12 @@ func runValidationInputReviewMainline(t *testing.T, mode, cut string, requested 
 		}
 	}
 	bootstrap := validationInputAdditionMainlineBootstrap()
+	if strings.HasPrefix(mode, "input_revision") {
+		configureRuntimeInputRevisionMainline(&bootstrap)
+		if mode == "input_revision_exhausted" {
+			bootstrap.DefinitionFocuses[1].ImplementationWorkPolicy.MaxRoundsPerCWI = 1
+		}
+	}
 	bootstrap.Activation.EvidencePolicies[0].RecipeAdapterRef = options.Adapter
 	bootstrap.Activation.EvidencePolicies[0].RecipeInputReviewProtocolRef = options.ProtocolRef
 	if projectBehaviorRepair {
@@ -301,6 +307,11 @@ func %s(t *testing.T) {
 			initialFiles[inputTarget] = source.String()
 		}
 	}
+	if strings.HasPrefix(mode, "input_revision") {
+		for _, target := range inputTargets {
+			initialFiles[target] = strings.Replace(initialFiles[target], `!="4"`, `!="5"`, 1)
+		}
+	}
 	for ref, content := range initialFiles {
 		path := filepath.Join(directory, ref)
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -406,6 +417,9 @@ func %s(t *testing.T) {
 		command := event.Data().(llmevents.RequestRuntimeCandidateCommand)
 		if command.DocumentKind == runtimecontract.RuntimeProviderDocumentSemanticPlan {
 			document := validationInputAdditionMainlineSemanticDocument(command)
+			if strings.HasPrefix(mode, "input_revision") {
+				runtimeInputRevisionMainlineSemanticDocument(&document, command, inputTargets["cwi-2"])
+			}
 			if options.TerminalSnapshot {
 				runtimeReviewedGitSnapshotSemanticDocument(&document, command)
 			}
@@ -420,6 +434,13 @@ func %s(t *testing.T) {
 					firstReviewManifest = command.SemanticManifest.Hash
 				}
 				conclusion := runtimecontract.RuntimeValidationInputConsistent
+				if strings.HasPrefix(mode, "input_revision") {
+					for _, file := range binding.InputReview.Files {
+						if strings.Contains(file.Content, `!="5"`) || mode == "input_revision_exhausted" {
+							conclusion = runtimecontract.RuntimeValidationInputConflict
+						}
+					}
+				}
 				if mode == "conflict" || mode == "omission" {
 					conclusion = runtimecontract.RuntimeValidationInputConflict
 				}
@@ -519,6 +540,10 @@ func %s(t *testing.T) {
 				}
 				break
 			}
+			if strings.HasPrefix(mode, "input_revision") && command.CandidateManifest.ImplementationWorkingBinding != nil {
+				candidate = runtimeInputRevisionMainlineCandidate(command, inputTargets["cwi-2"])
+				break
+			}
 			oldText, newText := "return 2", "return 4"
 			if projectBehaviorRepair {
 				newText = "return 3"
@@ -576,6 +601,20 @@ func %s(t *testing.T) {
 			case "before_shell_applicability", "after_shell_applicability":
 				for _, value := range a.Facts.EvidenceApplicabilityObservations {
 					if value.CurrentDependencies != nil && len(value.CurrentDependencies.Entries) != 0 && strings.HasPrefix(value.CurrentDependencies.Entries[0].OwnerInstanceID, runtimecontract.RuntimeModuleShell+"/") {
+						return true
+					}
+				}
+				return false
+			case "after_input_revision_retirement":
+				for _, g := range a.SemanticPlanning.History {
+					if g.Reason == runtimecontract.RuntimeSemanticPlanningRetirementInputRevision {
+						return true
+					}
+				}
+				return false
+			case "after_input_revision_receipt":
+				for _, r := range a.ImplementationWork.Rounds {
+					if r.ScopeRequest.InputRevision != nil && r.CompletedReceiptSetHash != "" {
 						return true
 					}
 				}
@@ -875,7 +914,7 @@ func %s(t *testing.T) {
 		t.Fatal("review or ticket rewrote sealed startup definition")
 	}
 	submissionUnknown := cut == "after_assessment_submission"
-	success := (mode == "consistent" || mode == "clarify" || projectBehaviorRepair) && !submissionUnknown
+	success := (mode == "consistent" || mode == "clarify" || mode == "input_revision" || projectBehaviorRepair) && !submissionUnknown
 	if (completed.Decision.State == runtimecontract.ConvergenceStateComplete) != success {
 		for _, receipt := range completed.OperationReceipts {
 			if receipt.Outcome == runtimecontract.RuntimeOperationOutcomeRejected {
@@ -901,6 +940,7 @@ func %s(t *testing.T) {
 				}
 			}
 		}
+
 		t.Fatalf("mode=%s state=%s terminal=%+v failure=%+v", mode, completed.Decision.State, completed.Decision.Terminal, completed.Facts.Failure)
 	}
 	expectedValidations := options.ValidationCount
@@ -958,12 +998,19 @@ func %s(t *testing.T) {
 			continue
 		}
 		content, err := os.ReadFile(filepath.Join(directory, ref))
-		if err != nil || string(content) != initialFiles[ref] {
+		expectedInput := initialFiles[ref]
+		if strings.HasPrefix(mode, "input_revision") && ref == inputTargets["cwi-2"] {
+			expectedInput = strings.Replace(expectedInput, `!="5"`, `!="4"`, 1)
+		}
+		if err != nil || string(content) != expectedInput {
 			t.Fatal("review path rewrote existing input")
 		}
 	}
 	if cut != "" && !deliveryCut && !materialCut && !crash.fired {
 		t.Fatalf("restart cut not reached: %s", cut)
+	}
+	if strings.HasPrefix(mode, "input_revision") {
+		assertRuntimeInputRevisionMainline(t, completed, reviewCalls)
 	}
 	if projectBehaviorRepair && behaviorRepairs != 1 {
 		t.Fatal("same-binding implementation repair was missing or repeated")

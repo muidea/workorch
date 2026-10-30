@@ -74,7 +74,11 @@ func TestPreparationPureCompilationBoundary(t *testing.T) {
 		}
 		for _, spec := range unit.Imports {
 			name, err := strconv.Unquote(spec.Path.Value)
-			if err != nil || !allowed[name] {
+			// These exact files consume detached owner value types / payload hashing
+			// only. Do not grant blanket access to owner packages in all compilers.
+			valueImport := strings.Contains(filepath.ToSlash(path), "/pkg/preparationcompiler/") && (filepath.Base(path) == "completion.go" && name == "github.com/muidea/workorch/internal/modules/blocks/run/pkg/models" ||
+				filepath.Base(path) == "first_execution.go" && (name == "github.com/muidea/workorch/internal/modules/blocks/file/pkg/preparation" || name == "github.com/muidea/workorch/internal/pkg/fileobservation"))
+			if err != nil || !allowed[name] && !valueImport {
 				t.Errorf("pure compilation file %s imports %q", filepath.Base(path), spec.Path.Value)
 			}
 		}
